@@ -71,9 +71,11 @@ import AttachmentSummaryCards from "./AttachmentSummaryCards";
 import AttachmentTable from "./AttachmentTable";
 import { ResponsiveList } from "@/components/common/responsive-list";
 import type { KindShareDocRow } from "@/components/product-models/KindShareDocsSection";
+import type { ModelShareDocRow } from "@/components/product-models/ModelShareDocsSection";
 import { productModelKindOfWorkflowKind } from "@/lib/domain/product-model-kind";
 import { workflowKindOf } from "@/lib/domain/workflow-kind";
 import CaseKindShareDocsSection from "./CaseKindShareDocsSection";
+import CaseModelShareDocsSection from "./CaseModelShareDocsSection";
 import ContactFolderSection from "./ContactFolderSection";
 import DeleteAttachmentDialog from "./DeleteAttachmentDialog";
 import EditMetadataDialog from "./EditMetadataDialog";
@@ -125,6 +127,13 @@ export default function FilesScreen(props: {
    * 것이고, 한 줄도 없으면 구역이 아예 그려지지 않는다(CaseKindShareDocsSection).
    */
   kindShareDocs?: readonly KindShareDocRow[];
+  /**
+   * 🔴 **이 건의 제품 모델**이 가리켜 둔 공유폴더 서류들(2026-10-08). 위 종류 쪽과 **다른
+   * 것**이다 — 저쪽은 그 종류 전체가 함께 쓰고 이쪽은 이 모델 하나의 자리다. 서버가 DB 에서
+   * 읽어 **보이는 차례 그대로** 넘기고, 모델을 못 찾은 건(장비가 마스터에 안 묶였거나 모델이
+   * 휴지통)에는 **빈 목록**이 온다 — 구역이 스스로 사라진다(CaseModelShareDocsSection).
+   */
+  modelShareDocs?: readonly ModelShareDocRow[];
 }) {
   if (props.attachments) {
     return (
@@ -137,6 +146,7 @@ export default function FilesScreen(props: {
         canManage={props.canManage ?? false}
         contactFolderEnabled={props.contactFolderEnabled ?? false}
         kindShareDocs={props.kindShareDocs ?? []}
+        modelShareDocs={props.modelShareDocs ?? []}
       />
     );
   }
@@ -196,6 +206,7 @@ function DatabaseFilesScreen({
   canManage,
   contactFolderEnabled,
   kindShareDocs,
+  modelShareDocs,
 }: {
   resolved: ResolvedRepairCase;
   actingUser: ActingUser | null;
@@ -205,6 +216,7 @@ function DatabaseFilesScreen({
   canManage: boolean;
   contactFolderEnabled: boolean;
   kindShareDocs: readonly KindShareDocRow[];
+  modelShareDocs: readonly ModelShareDocRow[];
 }) {
   const router = useRouter();
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
@@ -1116,6 +1128,19 @@ function DatabaseFilesScreen({
         kind={productModelKindOfWorkflowKind(workflowKindOf(resolved.workflowType))}
         docs={kindShareDocs}
       />
+
+      {/*
+        🔴 **이 제품 모델**이 가리켜 둔 공유폴더 서류(2026-10-08) — 바로 위 구역과 **또 다른
+        것**이다. 공유폴더 쪽 구역이 이로써 셋이고 뜻이 전부 다르다: 맨 위는 **이 건 하나**의
+        연락서 폴더, 가운데는 **그 종류 전체**가 함께 쓰는 자리, 여기는 **이 제품 모델**의
+        자리다. 셋이 나란히 서므로 제목이 그 차이를 말한다(각 구역의 머리말).
+
+        🔴 담기 · 지우기는 여기 없다 — 한 건을 보던 사람이 그 모델 전체를 바꾸게 되고,
+        고치는 자리는 제품 모델 상세 화면이다. 🔴 어느 모델인가는 여기서 짓지 않는다 —
+        서버가 getProductModelIdForProduct 로 잇고(files/page.tsx), 못 찾으면 빈 목록이
+        와서 구역이 스스로 사라진다.
+      */}
+      <CaseModelShareDocsSection docs={modelShareDocs} />
 
       {trashedAttachments.length > 0 && (
         /*

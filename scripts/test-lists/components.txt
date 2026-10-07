@@ -194,6 +194,19 @@ src/components/repair-cases/files/contact-folder-data-save.test.ts
 # 글자로 읽는다 — 그 둘은 서버 액션 · server-only 사슬을 물고 있다.
 src/components/repair-cases/files/case-kind-share-docs-section.test.tsx
 
+# 파일 관리 탭의 **이 제품 모델 전용 서류(공유폴더 가리킴)** 구역 — 「해당 제품으로 등록된
+# 수리건 상세에서 파일을 열어볼 수 있도록」(2026-10-07 사용자 요구). 바로 위 종류 구역을
+# 본떴고 🔴 그 파일은 한 글자도 안 건드렸다(그 사실도 여기서 본다). 🔴 한 줄도 없으면 구역을
+# 아예 안 그린다 · 🔴 담기·지우기가 여기엔 없다(보고 여는 자리다 — 고치는 곳은 제품 모델
+# 상세) · 🔴 [열기]는 열 수 있는 확장자의 파일 줄에만이고 공유폴더 맨 위 칸에 바로 놓인
+# 파일에는 없다 · 🔴 그 판정도 줄 그리는 조각도 **그대로 가져다 쓴다** · 🔴 print:hidden ·
+# 🔴 **종류 구역과 제목이 다르다**(나란히 선 셋을 사람이 구별할 수 있어야 한다 — 두 구역을
+# 함께 그려 보고 잰다) · 🔴 서버는 **두 단계**다(getProductModelIdForProduct → 가리킴 조회)
+# 이고 모델을 못 찾으면 DB 를 더 안 읽는다 · 🔴 기존 세 조회의 Promise.all 을 안 쪼갰다.
+# 구역 자체는 상태를 넣어 그려 보고, 묶는 쪽(FilesScreen · [id]/files/page.tsx)만 원본을
+# 글자로 읽는다 — 그 둘은 서버 액션 · server-only 사슬을 물고 있다.
+src/components/repair-cases/files/case-model-share-docs-section.test.tsx
+
 src/components/print-grid/SheetPrintGridView.test.tsx
 src/components/quotes/quote-print-excel-preview.test.ts
 src/components/quotes/quote-print-excel-preview-screen.test.tsx

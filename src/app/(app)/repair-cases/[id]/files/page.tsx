@@ -9,6 +9,8 @@ import {
   listTrashedAttachmentsForRepairCase,
 } from "@/lib/db/queries/attachments";
 import { listShareDocsForProductModelKind } from "@/lib/db/queries/product-model-kind-share-docs";
+import { listShareDocsForProductModel } from "@/lib/db/queries/product-model-share-docs";
+import { getProductModelIdForProduct } from "@/lib/db/queries/repair-cases";
 import { productModelKindOfWorkflowKind } from "@/lib/domain/product-model-kind";
 import { workflowKindOf } from "@/lib/domain/workflow-kind";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
@@ -53,13 +55,33 @@ export default async function RepairCaseFilesPage({
   // 여기 베껴 적지 않는다 — 한쪽 축에 값이 느는 날 이 자리만 조용히 틀린다.
   const productModelKind = productModelKindOfWorkflowKind(workflowKindOf(resolved.workflowType));
 
-  const [attachments, trashedAttachments, kindShareDocs] = await Promise.all([
+  const [attachments, trashedAttachments, kindShareDocs, modelShareDocs] = await Promise.all([
     listAttachmentsForRepairCase(resolved.id),
     listTrashedAttachmentsForRepairCase(resolved.id),
     // 🔴 그 종류가 가리켜 둔 공유폴더 서류 — **DB 표 한 번**이다. 가리킨 자리에 실제로
     //    무엇이 있는지는 들여다보지 않으므로 아래 주석의 규율(공유폴더를 서버에서 읽지
     //    않는다)을 그대로 지킨다. 종류별 서류함 page.tsx 가 그은 선과 같다.
     listShareDocsForProductModelKind(productModelKind),
+    // 🔴 **이 제품 모델**이 가리켜 둔 공유폴더 서류(2026-10-08) — 위 종류 쪽과 달리
+    //    **두 단계**다. 수리 건은 모델 마스터의 id 를 들고 있지 않고(장비의 이름만 든다),
+    //    가리킴 표의 주인은 그 id 라 **먼저 id 를 알아내야** 조회할 수 있다. 그래서 두
+    //    조회를 한 묶음으로 싸서 `Promise.all` 의 **한 자리**에 넣는다 — 위 세 조회의
+    //    병렬성은 그대로 두고, 이 안에서만 순서가 생긴다.
+    //
+    //    🔴 **모델을 못 찾으면 거기서 멈춘다**(DB 를 더 읽지 않고 빈 목록이다). 그런 건이
+    //    실제로 있다: 장비가 모델 마스터에 안 묶였거나(products.product_model_id 는 NULL 을
+    //    허용한다), 묶인 모델이 휴지통에 있다. 그 둘을 한 자리에서 null 로 떨어뜨리는 함수가
+    //    이미 있어(queries/repair-cases.ts 의 getProductModelIdForProduct — 막다른 길을 막는
+    //    것이 그 함수의 일이다) 판정을 여기 베껴 적지 않는다. 화면은 빈 목록을 여느 0건과
+    //    똑같이 다뤄 구역을 아예 그리지 않는다.
+    //
+    //    🔴 여기서도 공유폴더(디스크)는 읽지 않는다 — DB 표뿐이다(위와 같은 선).
+    (async () => {
+      if (!resolved.productId) return [];
+      const productModelId = await getProductModelIdForProduct(resolved.productId);
+      if (!productModelId) return [];
+      return listShareDocsForProductModel(productModelId);
+    })(),
   ]);
 
   // 화면이 올리기 칸과 지우기·되살리기 버튼을 보일지 말지. 실제 판정은 업로드
@@ -88,6 +110,7 @@ export default async function RepairCaseFilesPage({
       canManage={canManageFiles}
       contactFolderEnabled={contactFolderEnabled}
       kindShareDocs={kindShareDocs}
+      modelShareDocs={modelShareDocs}
     />
   );
 }
