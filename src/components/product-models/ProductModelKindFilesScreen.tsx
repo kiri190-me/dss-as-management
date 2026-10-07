@@ -9,6 +9,8 @@ import { ResponsiveList } from "@/components/common/responsive-list";
 import AttachmentViewer from "@/components/repair-cases/files/AttachmentViewer";
 import DeleteAttachmentDialog from "@/components/repair-cases/files/DeleteAttachmentDialog";
 import RestoreAttachmentDialog from "@/components/repair-cases/files/RestoreAttachmentDialog";
+import KindShareDocsSection, { type KindShareDocRow } from "./KindShareDocsSection";
+import type { KindShareFolderAddRequest } from "./KindShareFolderPicker";
 import type {
   ProductModelKindAttachmentListItem,
   TrashedProductModelKindAttachmentListItem,
@@ -33,6 +35,10 @@ import {
   restoreAttachmentAction,
   softDeleteAttachmentAction,
 } from "@/lib/server/actions/attachments";
+import {
+  addProductModelKindShareDocAction,
+  removeProductModelKindShareDocAction,
+} from "@/lib/server/actions/product-model-kind-share-docs";
 
 /**
  * ============================================================================
@@ -76,6 +82,18 @@ import {
  * `canManageFiles`(productModels.files WRITE)가 없으면 올리기 칸도 지우기 단추도
  * **아예 그리지 않는다.** 판정은 서버 컴포넌트가 하고 여기로는 boolean 만
  * 내려온다 — 화면이 역할을 보고 스스로 판단하지 않는다.
+ *
+ * ── 🔴 **올린 서류**와 **가리킨 서류**는 다른 구역이다 (2026-10-07) ────────
+ * 같은 화면에 구역이 둘 선다. 위는 지금까지의 **올린 파일**(바이트가 우리 창고에
+ * 있다 — 내려받기 · 미리보기 · 휴지통), 아래는 **공유폴더를 가리켜 둔 줄**
+ * (바이트가 없다 — 내려받기도 미리보기도 휴지통도 없다). 🔴 **섞지 않는다**:
+ * 섞으면 사람이 「이건 왜 내려받기가 없지」에서 멈춘다(KindShareDocsSection 머리말).
+ * 🔴 올린 파일 쪽 동작(업로드 · 내려받기 · 미리보기 · 휴지통)은 **한 줄도 바뀌지
+ * 않았다** — 아래 구역은 그 옆에 선 형제다.
+ *
+ * 이 화면이 아래 구역을 위해 하는 일은 **서버 액션을 묶어 넘기는 것**뿐이다
+ * (add · remove). 그 두 조각은 서버 액션을 직접 물지 않는다 — 그래야
+ * test:components 에서 그려 볼 수 있다.
  * ============================================================================
  */
 
@@ -84,6 +102,11 @@ type ProductModelKindFilesScreenProps = {
   kind: ProductModelKind;
   attachments: ProductModelKindAttachmentListItem[];
   trashedAttachments: TrashedProductModelKindAttachmentListItem[];
+  /**
+   * 🔴 공유폴더를 **가리켜 둔** 줄들 — 올린 파일과 다른 목록이다(바이트가 없다).
+   * 차례는 서버가 정한다(display_order, created_at) — 화면이 다시 정렬하지 않는다.
+   */
+  shareDocs: KindShareDocRow[];
   /** productModels.files WRITE. 올리기·지우기·되살리기를 보일지 정한다. */
   canManageFiles: boolean;
 };
@@ -369,6 +392,7 @@ export default function ProductModelKindFilesScreen({
   kind,
   attachments,
   trashedAttachments,
+  shareDocs,
   canManageFiles,
 }: ProductModelKindFilesScreenProps) {
   const router = useRouter();
@@ -561,6 +585,27 @@ export default function ProductModelKindFilesScreen({
     } finally {
       setIsMutating(false);
     }
+  }
+
+  /**
+   * 🔴 가리킴 담기 — 서버 액션을 부르고 **그 답을 그대로** 돌려준다. 거절 문장은
+   * 서버가 짓고 고르는 창이 그대로 보인다(문장을 여기서 다시 쓰지 않는다).
+   * 성공하면 다시 그려 **담은 줄이 곧바로 목록에 보이게** 한다 — 목록은 서버
+   * 컴포넌트가 만든다(액션 쪽 revalidatePath 와 짝이다).
+   */
+  async function handleAddShareDoc(request: KindShareFolderAddRequest) {
+    const result = await addProductModelKindShareDocAction({ kind, ...request });
+    if (!result.ok) return { ok: false as const, message: result.message };
+    router.refresh();
+    return { ok: true as const };
+  }
+
+  /** 🔴 가리킴 지우기 — **휴지통이 없다.** 되돌릴 수 없다는 말은 확인 창이 한다. */
+  async function handleRemoveShareDoc(id: string) {
+    const result = await removeProductModelKindShareDocAction({ kind, id });
+    if (!result.ok) return { ok: false as const, message: result.message };
+    router.refresh();
+    return { ok: true as const };
   }
 
   const isBusy = isUploading || isMutating;
@@ -833,6 +878,18 @@ export default function ProductModelKindFilesScreen({
           onCancel={() => setPendingRestore(null)}
         />
       </section>
+
+      {/*
+        🔴 올린 파일 구역의 **밖**이다 — 바이트가 있는 것과 자리만 가리킨 것을 한
+        목록에 섞지 않는다(파일 머리말). 위 구역의 동작은 한 줄도 건드리지 않았다.
+      */}
+      <KindShareDocsSection
+        kind={kind}
+        docs={shareDocs}
+        canManageFiles={canManageFiles}
+        onAdd={handleAddShareDoc}
+        onRemove={handleRemoveShareDoc}
+      />
     </div>
   );
 }

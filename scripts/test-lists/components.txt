@@ -330,6 +330,20 @@ src/components/repair-cases/workflow/manual-step-set-reason-optional.test.ts
 # product-model-file-modified-date.test.ts 와 같은 방법으로 원본을 글자로 읽는다.
 src/components/product-models/product-model-kind-files-screen.test.ts
 
+# 그 서류함의 **공유폴더 가리킴** 구역(2026-10-07 사용자 요구 — 「업로드 되는게 아니라」).
+# 🔴 설정이 비면 고르는 창을 **아예 안 그린다** · 🔴 **폴더 줄에도 담기 단추가 있다**
+# (「파일 뿐 아니라 폴더도」) · 🔴 [열기]는 열 수 있는 확장자의 **파일 줄**에만이고 공유폴더
+# 맨 위 칸에서는 아무 줄에도 없다(도우미 주소가 `폴더/파일` 모양이라 앞에 붙일 폴더가 없다) ·
+# 🔴 가리킴 목록에 **내려받기·미리보기가 없다**(바이트가 없다) · 🔴 지우기 확인 창이
+# **되돌릴 수 없다**고 말하고 「15일 뒤 자동 삭제」는 말하지 않는다(이 표에는 휴지통이 없다) ·
+# 🔴 canManageFiles 가 거짓이면 담기·지우기 단추가 없다 · 🔴 print:hidden · 🔴 여는 단추 둘과
+# 설치 명령 복사 갈래를 **그대로 가져다 쓴다**(베끼지 않았다).
+# 🔴 이 둘은 서버 액션을 `onAdd` · `onRemove` 로 **받도록** 만들어 두어서 이웃
+# product-model-kind-files-screen.test.ts 와 달리 **상태를 직접 넣어 그려 본다**
+# (ContactFolderSection.test.tsx 와 같은 방식). 화면을 묶는 쪽(ProductModelKindFilesScreen ·
+# page.tsx)만 그쪽처럼 원본을 글자로 읽는다 — 그 둘은 여전히 서버 액션을 문다.
+src/components/product-models/product-model-kind-share-docs-screen.test.tsx
+
 # ── 전체 A/S 현황의 기본 차례 — 인수번호 내림차순 (2026-10-07 사용자 지시) ─────
 # 🔴 이 화면은 서버가 보낸 행을 제 손으로 다시 정렬한다 — 눈에 보이는 첫 차례를
 # 정하는 것은 서버 조회가 아니라 RepairCaseListPage 의 DEFAULT_SORT 다. 한쪽만

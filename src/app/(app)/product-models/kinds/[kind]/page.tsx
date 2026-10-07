@@ -11,6 +11,7 @@ import {
   listAttachmentsForProductModelKind,
   listTrashedAttachmentsForProductModelKind,
 } from "@/lib/db/queries/product-model-kind-attachments";
+import { listShareDocsForProductModelKind } from "@/lib/db/queries/product-model-kind-share-docs";
 import { isProductModelKind } from "@/lib/domain/product-model-kind";
 
 export const metadata: Metadata = {
@@ -86,10 +87,17 @@ export default async function ProductModelKindFilesPage({
   // 판정했다 — 좁히는 것은 바꾸는 쪽뿐이고, 모델 상세와 같은 규칙이다.
   const canManageFiles = await hasPermission(actingUser, "productModels.files", "WRITE");
 
-  // 서로 기다릴 이유가 없어 함께 띄운다. 둘 다 읽기 전용이다.
-  const [attachments, trashedAttachments] = await Promise.all([
+  // 서로 기다릴 이유가 없어 함께 띄운다. 셋 다 읽기 전용이고, 셋 다 **DB 만** 본다.
+  //
+  // 🔴 **공유폴더(디스크)를 여기서 읽지 않는다.** 가리킴 목록은 표에 적힌 경로 줄일
+  // 뿐이라 DB 한 번이고, 그 자리에 실제로 무엇이 있는지를 들여다보는 일은 화면이 뜬
+  // 뒤 클라이언트가 통로로 따로 묻는다(components/product-models/KindShareFolderPicker).
+  // NAS 가 느린 날 이 화면 자체가 안 뜨는 것을 막는 선이고, 수리 건 「파일 관리」 탭이
+  // 그은 선과 같다.
+  const [attachments, trashedAttachments, shareDocs] = await Promise.all([
     listAttachmentsForProductModelKind(kind),
     listTrashedAttachmentsForProductModelKind(kind),
+    listShareDocsForProductModelKind(kind),
   ]);
 
   return (
@@ -97,6 +105,7 @@ export default async function ProductModelKindFilesPage({
       kind={kind}
       attachments={attachments}
       trashedAttachments={trashedAttachments}
+      shareDocs={shareDocs}
       canManageFiles={canManageFiles}
     />
   );
