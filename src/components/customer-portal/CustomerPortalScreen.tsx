@@ -744,6 +744,43 @@ function Cell({ value }: { value: string | null }) {
   );
 }
 
+/**
+ * 견적서 번호 칸 — 🔴 **번호가 여럿일 수 있어 위아래 줄로 그린다**(2026-10-07).
+ *
+ *   견적서 No.
+ *   ──────────────
+ *    DSS 2026-100
+ *    DSS 2026-100-1
+ *    DSS 2026-104R1
+ *
+ * ── 🔴 왜 이 칸만 Cell 을 안 쓰는가 ─────────────────────────────────────
+ * 위 Cell 은 `string | null` 한 줄짜리이고, 그 값을 꺼내는 systemValueOf 는 **빠짐없는
+ * switch**(exhaustive)라 거기서 배열을 돌려주면 다른 칸까지 타입이 깨진다. 그래서 이 칸
+ * 하나만 갈라내 배열을 그대로 받는다 — 조회는 `quoteNumbers`(배열)와 `quoteNumber`(줄바꿈으로
+ * 이은 글자)를 **같은 값에서** 함께 내려 준다(db/queries/customer-portal.ts).
+ *
+ * ── 🔴 열이 넓어지면 안 된다 ────────────────────────────────────────────
+ * 이 표의 칸에 무언가 더했더니 그 열이 넓어지고 밀린 폭을 마지막 열이 뒤집어써 글자가
+ * 세로로 쪼개진 적이 있다(사용자 지적 2026-10-01 — 위 Cell 주석). 그래서 번호를 **옆으로**
+ * 늘리지 않고 아래로 쌓는다: 줄마다 `block` 이라 열 너비는 **가장 긴 번호 하나**만큼이고,
+ * 번호 하나가 중간에 꺾이지 않도록 `whitespace-nowrap` 도 그대로 둔다.
+ */
+function QuoteNumbersCell({ values }: { values: readonly string[] }) {
+  return (
+    <td className="px-3 py-2 whitespace-nowrap text-zinc-700">
+      {values.length === 0 ? (
+        <span className="text-zinc-400">-</span>
+      ) : (
+        values.map((value) => (
+          <span key={value} className="block">
+            {value}
+          </span>
+        ))
+      )}
+    </td>
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
  * 고객사 양식 표
  * ══════════════════════════════════════════════════════════════════════════
@@ -829,6 +866,9 @@ function systemValueOf(item: CustomerPortalItem, field: PortalSystemField): stri
       return item.serialNumber;
     case "receivedAt":
       return item.receivedAt;
+    // 🔴 화면은 이 값을 쓰지 않는다 — 번호가 여럿이라 QuoteNumbersCell 이 배열을 그대로
+    //    그린다(아래 SYSTEM 갈래). 여기 남겨 두는 까닭은 이 switch 가 빠짐없어야 하기
+    //    때문이고, 값 자체는 틀리지 않다(줄바꿈으로 이은 같은 번호들이다).
     case "quoteNumber":
       return item.quoteNumber;
     case "quoteIssuedDate":
@@ -885,7 +925,13 @@ function FormItemRow({
               </td>
             );
           case "SYSTEM":
-            return <Cell key={column.key} value={systemValueOf(item, column.field)} />;
+            // 🔴 견적서 번호만 전용 칸이다 — 한 건에 번호가 여럿일 수 있어 위아래 줄로
+            //    그린다(QuoteNumbersCell 주석).
+            return column.field === "quoteNumber" ? (
+              <QuoteNumbersCell key={column.key} values={item.quoteNumbers} />
+            ) : (
+              <Cell key={column.key} value={systemValueOf(item, column.field)} />
+            );
           case "DERIVED":
             // 지금 이 갈래의 칸은 ICD 의 「Parts 명」 하나다. 모르는 모델명은 빈칸.
             return <Cell key={column.key} value={partsNameFromModelName(item.modelName)} />;

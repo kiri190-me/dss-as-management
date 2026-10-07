@@ -297,6 +297,116 @@ function withHorizontalAlignment(xf: string, horizontal: string): string {
   return `${open}${inner}</xf>`;
 }
 
+// ── 「자동 줄 바꿈」을 켠 서식 사본 ──────────────────────────────────────
+
+/**
+ * 🔴 **한 칸 안에 줄바꿈을 적어도, 그 칸의 서식에 「자동 줄 바꿈」이 꺼져 있으면 엑셀은 한
+ * 줄로 보여 준다.** 값은 들어 있는데 사람 눈에는 번호 하나만 보이는 상태가 된다 — 그래서
+ * 줄바꿈이 든 칸은 **서식까지** 함께 켜 줘야 한다(2026-10-07, 고객 안내 현황의 견적서 번호).
+ *
+ * 쓰는 쪽이 「어느 서식 번호가 필요한지」를 **쓰면서** 알게 되므로(그 자리에 원래 있던 칸의
+ * 번호다) 미리 모아 두지 못한다. 그래서 위 addAlignedCellXfs 처럼 한 번에 받지 않고,
+ * **물어볼 때마다 하나씩 사본을 늘리는** 모양으로 둔다.
+ */
+export type WrapTextCellXfs = {
+  /**
+   * 그 서식에 「자동 줄 바꿈」을 켠 사본의 번호(글자). `null` 은 서식이 없는 칸이고, 그때는
+   * 0 번 서식의 사본을 쓴다. 🔴 **못 만들면 받은 값을 그대로 돌려준다** — 줄 바꿈 하나 때문에
+   * 파일 만들기가 통째로 실패하면 안 된다.
+   */
+  indexFor(style: string | null): string | null;
+  /** 사본을 하나라도 더했으면 손본 styles.xml, 아니면 null(그러면 바꿔 쓸 것이 없다). */
+  stylesXml(): string | null;
+};
+
+/**
+ * 🔴 **기존 `xf` 를 고치지 않고, 「자동 줄 바꿈」만 켠 사본을 맨 뒤에 더한다.**
+ * 까닭은 위 addAlignedCellXfs 와 같다 — `xf` 하나를 여러 칸이 함께 쓰므로 그것을 고치면
+ * 우리가 적지 않은 칸까지 따라 움직인다. 뒤에 더하는 것은 **기존 번호를 밀지 않아** 안전하다.
+ */
+export function createWrapTextCellXfs(stylesXml: string | null): WrapTextCellXfs {
+  const block = stylesXml === null ? null : /(<cellXfs\b[^>]*>)([\s\S]*?)(<\/cellXfs>)/.exec(stylesXml);
+  const xfs = block === null ? [] : [...block[2].matchAll(CELL_XF)].map((match) => match[0]);
+  const declared = block === null ? NaN : Number(/\scount="(\d+)"/.exec(block[1])?.[1]);
+  // 세는 방식이 양식과 다르면 **아무것도 하지 않는다.** 짐작해서 더하면 문서가 깨진다 —
+  // 줄 바꿈이 안 켜진 파일이 나가는 편이 열리지 않는 파일보다 낫다.
+  const usable = block !== null && Number.isInteger(declared) && declared === xfs.length && xfs.length > 0;
+
+  const indexBySource = new Map<number, number>();
+  const added: string[] = [];
+
+  return {
+    indexFor(style) {
+      if (!usable) return style;
+      // 서식이 없는 칸은 0 번 서식을 쓴다(OOXML 기본값).
+      const source = style === null ? 0 : Number(style);
+      if (!Number.isInteger(source) || source < 0 || source >= xfs.length) return style;
+
+      const known = indexBySource.get(source);
+      if (known !== undefined) return String(known);
+
+      const original = xfs[source];
+      if (readWrapText(original)) {
+        indexBySource.set(source, source);
+        return String(source);
+      }
+
+      const clone = withWrapText(original);
+      // 똑같은 서식이 이미 있으면 그것을 쓴다 — 같은 파일을 두 번 손봐도 안 늘어난다.
+      const existing = xfs.indexOf(clone);
+      if (existing !== -1) {
+        indexBySource.set(source, existing);
+        return String(existing);
+      }
+      const next = xfs.length;
+      indexBySource.set(source, next);
+      xfs.push(clone);
+      added.push(clone);
+      return String(next);
+    },
+    stylesXml() {
+      if (stylesXml === null || block === null || added.length === 0) return null;
+      // ⚠️ `count` 를 함께 고친다. 실제 개수와 다르면 Excel 이 파일을 거부한다.
+      const open = block[1].replace(/\scount="\d+"/, ` count="${xfs.length}"`);
+      const next = `${open}${block[2]}${added.join("")}${block[3]}`;
+      return stylesXml.slice(0, block.index) + next + stylesXml.slice(block.index + block[0].length);
+    },
+  };
+}
+
+function readWrapText(xf: string): boolean {
+  const alignment = /<alignment\b[^>]*\/>|<alignment\b[^>]*>[\s\S]*?<\/alignment>/.exec(xf)?.[0];
+  return alignment !== undefined && /\swrapText="(?:1|true)"/.test(alignment);
+}
+
+/**
+ * `xf` 사본에서 **「자동 줄 바꿈」만** 켠다. 나머지 속성과 자식은 손대지 않는다.
+ * `<alignment>` 를 여는 태그 바로 뒤에 넣는 까닭은 위 withHorizontalAlignment 와 같다 —
+ * OOXML 의 `CT_Xf` 는 `alignment` → `protection` 순서를 요구한다.
+ */
+function withWrapText(xf: string): string {
+  const selfClosing = !xf.includes("</xf>");
+  const openEnd = xf.indexOf(">") + 1;
+  let open = xf.slice(0, openEnd);
+  let inner = selfClosing ? "" : xf.slice(openEnd, xf.lastIndexOf("</xf>"));
+
+  if (selfClosing) open = open.replace(/\s*\/>$/, ">");
+  open = /\sapplyAlignment="[^"]*"/.test(open)
+    ? open.replace(/\sapplyAlignment="[^"]*"/, ' applyAlignment="1"')
+    : open.replace(/>$/, ' applyAlignment="1">');
+
+  const alignment = /<alignment\b[^>]*\/>|<alignment\b[^>]*>[\s\S]*?<\/alignment>/.exec(inner)?.[0];
+  if (alignment === undefined) {
+    inner = `<alignment wrapText="1"/>${inner}`;
+  } else {
+    const replaced = /\swrapText="[^"]*"/.test(alignment)
+      ? alignment.replace(/\swrapText="[^"]*"/, ' wrapText="1"')
+      : alignment.replace(/^<alignment/, '<alignment wrapText="1"');
+    inner = inner.replace(alignment, replaced);
+  }
+  return `${open}${inner}</xf>`;
+}
+
 export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

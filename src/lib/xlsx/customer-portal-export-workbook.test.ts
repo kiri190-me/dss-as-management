@@ -1022,3 +1022,73 @@ describe("망가진 파일", () => {
     );
   });
 });
+
+describe("🔴 한 칸 안에 여러 줄 — 값만으로는 모자라다 (2026-10-07)", () => {
+  /** ICD 표에서 「견적서 No.」 열의 칸 주소. */
+  const quoteColumn = columnAt(ICD_FORM.columns.findIndex((column) => column.key === "quoteNumber"));
+  const TWO_NUMBERS = "DSS 2026-100\nDSS 2026-100-1";
+
+  function buildWithQuoteNumber(quoteNumber: string): Buffer {
+    return buildCustomerPortalExportWorkbook({
+      previousBytes: icdWorkbook(),
+      form: ICD_FORM,
+      spec: ICD_SPEC,
+      rows: buildPortalExportRows(ICD_FORM, [item({ quoteNumber })]),
+      stamp: STAMP,
+      today: TODAY,
+    }).bytes;
+  }
+
+  /** 그 칸의 `s=` 값. 없으면 null. */
+  function styleOf(sheetXml: string, reference: string): string | null {
+    const cell = new RegExp(`<c r="${reference}"[^>]*`).exec(sheetXml)?.[0] ?? "";
+    return /\ss="([^"]*)"/.exec(cell)?.[1] ?? null;
+  }
+
+  function cellXfs(bytes: Buffer): string[] {
+    const stylesXml = ZipArchive.fromBuffer(bytes).readText(STYLES_PART_NAME);
+    const block = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(stylesXml);
+    assert.notEqual(block, null, "cellXfs 를 찾지 못했다");
+    return [...block![1].matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)].map((match) => match[0]);
+  }
+
+  test("번호가 둘이면 값도 두 줄로 들어간다", () => {
+    const { grid } = gridOf(buildWithQuoteNumber(TWO_NUMBERS), ICD_SHEET_NAME);
+    const cell = grid.cells(6).get(quoteColumn);
+    assert.equal(cell?.kind, "text");
+    assert.equal(cell?.kind === "text" ? cell.text : null, TWO_NUMBERS);
+  });
+
+  test("🔴 그 칸의 서식에 「자동 줄 바꿈」이 켜져 있다 — 안 켜면 엑셀이 한 줄로 보여 준다", () => {
+    const bytes = buildWithQuoteNumber(TWO_NUMBERS);
+    const { sheetXml } = gridOf(bytes, ICD_SHEET_NAME);
+    const style = styleOf(sheetXml, `${quoteColumn}6`);
+    assert.notEqual(style, null, "서식이 없는 칸이 되었다");
+    const xfs = cellXfs(bytes);
+    assert.ok(/\swrapText="1"/.test(xfs[Number(style)]), `자동 줄 바꿈이 꺼져 있다: ${xfs[Number(style)]}`);
+  });
+
+  test("🔴 서식 사본은 **맨 뒤에** 붙는다 — 양식이 쓰던 번호는 하나도 밀리지 않는다", () => {
+    const bytes = buildWithQuoteNumber(TWO_NUMBERS);
+    const before = [...STYLES_XML.matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)].map((match) => match[0]);
+    const after = cellXfs(bytes);
+    assert.deepEqual(after.slice(0, before.length), before, "있던 서식이 바뀌거나 밀렸다");
+    assert.equal(after.length, before.length + 1, "사본이 하나만 늘지 않았다");
+    // count 가 실제 개수와 다르면 엑셀이 파일을 거부한다.
+    const stylesXml = ZipArchive.fromBuffer(bytes).readText(STYLES_PART_NAME);
+    assert.equal(Number(/<cellXfs\b[^>]*\scount="(\d+)"/.exec(stylesXml)?.[1]), after.length);
+  });
+
+  test("한 줄짜리 칸은 서식이 그대로다 — 쓸데없이 사본을 늘리지 않는다", () => {
+    const bytes = buildWithQuoteNumber("DSS 2026-100");
+    const { sheetXml } = gridOf(bytes, ICD_SHEET_NAME);
+    assert.equal(styleOf(sheetXml, `${quoteColumn}6`), "0");
+    const before = [...STYLES_XML.matchAll(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g)];
+    assert.equal(cellXfs(bytes).length, before.length, "서식이 늘었다");
+  });
+
+  test("빈 칸이면 번호 열도 그대로 빈 칸이다", () => {
+    const { grid } = gridOf(buildWithQuoteNumber(""), ICD_SHEET_NAME);
+    assert.equal(grid.cells(6).get(quoteColumn), undefined);
+  });
+});

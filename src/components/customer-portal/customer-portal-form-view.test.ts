@@ -707,3 +707,74 @@ describe("표를 그리는 일은 양식 정의만 보고 한다", () => {
     );
   });
 });
+
+describe("🔴 11. 견적서 번호는 하나가 아니다 (2026-10-07)", () => {
+  const queryBody = flat(code(query));
+  const screenBody = flat(code(screen));
+  /**
+   * 🔴 역슬래시를 이 파일에 **직접 적지 않는다.** 셸 · 도구를 지나며 한 겹이 조용히
+   * 삼켜지는 자리라, 글자 코드로 만들어 쓴다(그러면 어느 길로 와도 같은 글자다).
+   */
+  const BACKSLASH = String.fromCharCode(92);
+
+  test("🔴 내자 정리에 번호가 있으면 **그것만**이다 — 공유폴더를 보지도 않는다", () => {
+    assert.ok(
+      queryBody.includes("const ordered = orderedQuoteNumber(quoteNumber); if (ordered !== null) return [ordered];"),
+      "내자 정리 값이 있어도 공유폴더 번호가 섞인다"
+    );
+    // 번호가 **없는** 건만 공유폴더를 보는 목록에 들어간다.
+    assert.ok(
+      queryBody.includes(
+        ".filter((row) => orderedQuoteNumber(quoteInfo.get(row.id)?.quoteNumber ?? null) === null)"
+      ),
+      "번호가 이미 있는 건까지 공유폴더를 본다 — NAS 왕복이 그만큼 는다"
+    );
+  });
+
+  test("🔴 화면 칸과 엑셀 칸이 **같은 값 하나**에서 나온다 — 따로 구하면 언젠가 갈라진다", () => {
+    assert.ok(queryBody.includes("quoteNumber: joinPortalQuoteNumbers(quoteNumbers), quoteNumbers,"));
+    assert.ok(
+      queryBody.includes(`numbers.length === 0 ? null : numbers.join("${BACKSLASH}n")`),
+      "줄바꿈으로 잇지 않는다 — 엑셀 한 칸에 여러 줄로 들어가야 한다"
+    );
+  });
+
+  test("🔴 공유폴더 훑기는 요청 하나에 **한 번**이다 — 양식이 셋이라 안 그러면 셋이 된다", () => {
+    assert.ok(code(query).includes('import { cache } from "react";'), "요청 수명 캐시를 쓰지 않는다");
+    assert.ok(queryBody.includes("const loadQuoteArchiveFolders = cache(async ()"), "훑기가 캐시 밖에 있다");
+    // 훑기가 꺼져 있거나 실패해도 던지지 않는다 — 그러면 내자 정리 값만 보인다.
+    assert.ok(queryBody.includes('return scanned.status === "found" ? scanned.folders : [];'));
+    assert.ok(queryBody.includes('return read.status === "found" ? read.numbersByProduct : new Map();'));
+  });
+
+  test("🔴 열쇠를 손으로 잇지 않는다 — 저장소 모듈의 함수로 만든다", () => {
+    assert.ok(queryBody.includes("quoteArchiveProductKey(lotNumber, serialNumber)"));
+    assert.ok(!queryBody.includes("${lotKey}|${serialKey}"), "조회가 열쇠 모양을 베꼈다");
+  });
+
+  test("🔴 화면은 번호를 위아래 줄로 그린다 — 열이 넓어지지 않게 `block` 이다", () => {
+    assert.ok(
+      screenBody.includes("<QuoteNumbersCell key={column.key} values={item.quoteNumbers} />"),
+      "견적서 번호 칸이 배열을 받지 않는다"
+    );
+    assert.ok(
+      screenBody.includes('<td className="px-3 py-2 whitespace-nowrap text-zinc-700"> {values.length === 0 ?'),
+      "번호 칸이 줄바꿈 없는 칸이 아니다 — 번호 하나가 중간에 꺾인다"
+    );
+    assert.ok(screenBody.includes('<span key={value} className="block">'), "번호가 옆으로 나열된다");
+  });
+
+  test("🔴 엑셀은 그 칸에 「자동 줄 바꿈」까지 켠다 — 안 켜면 값이 들어 있어도 한 줄로 보인다", () => {
+    const workbook = read("src/lib/xlsx/customer-portal-export-workbook.ts");
+    const body = flat(code(workbook));
+    assert.ok(body.includes("createWrapTextCellXfs(stylesXml)"), "줄 바꿈 서식을 만들지 않는다");
+    assert.ok(
+      body.includes("const cellStyle = isMultiLineText(content) ? params.wrapStyles.indexFor(style) : style;"),
+      "줄바꿈이 든 칸에 그 서식을 쓰지 않는다"
+    );
+    assert.ok(
+      body.includes("if (nextStylesXml !== null) replacements.set(STYLES_PART, Buffer.from(nextStylesXml,"),
+      "손본 styles.xml 을 파일에 넣지 않는다"
+    );
+  });
+});

@@ -281,6 +281,13 @@ export function normalizePortalExportHeader(text: string | null | undefined): st
  */
 export type PortalExportCell =
   | { kind: "empty" }
+  /**
+   * 🔴 **줄바꿈이 들어 있을 수 있다** — 견적서 번호가 한 건에 여럿이면 `\n` 으로 이어
+   * 한 칸에 들어온다(db/queries/customer-portal.ts 의 quoteNumber). 갈래를 따로 만들지
+   * 않는 까닭: 값으로 보면 그냥 글자이고, 「한 칸에 두 줄로 **보이게** 하는 일」은 값이
+   * 아니라 **서식**이다. 그 일은 통합문서 쪽이 한다(xlsx/customer-portal-export-workbook.ts
+   * 의 isMultiLineText → wrapText). 여기서 갈래를 늘리면 같은 판단이 두 곳에 생긴다.
+   */
   | { kind: "text"; text: string }
   | { kind: "number"; value: number }
   /** `YYYY-MM-DD`. 날짜 서식 칸이면 날짜로, 아니면 글자 그대로 적힌다. */
@@ -299,6 +306,10 @@ export type PortalExportItem = { [Field in PortalSystemField]: string | null } &
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * ⚠️ 다듬는 것은 **앞뒤**뿐이다(`trim`). 가운데 줄바꿈은 그대로 둔다 — 견적서 번호 여럿이
+ * 한 칸에 `\n` 으로 들어오는 자리가 있다(위 PortalExportCell 주석).
+ */
 function textOrEmpty(value: string | null | undefined): PortalExportCell {
   const text = typeof value === "string" ? value.trim() : "";
   if (text === "") return { kind: "empty" };

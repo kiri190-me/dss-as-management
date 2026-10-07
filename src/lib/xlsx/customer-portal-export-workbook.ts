@@ -23,7 +23,15 @@ import {
   writeSheetRows,
   type SheetRow,
 } from "./sheet-rows";
-import { CONTENT_TYPES_PART, SHARED_STRINGS_PART, STYLES_PART, WORKBOOK_PART, WORKBOOK_RELS_PART } from "./workbook-parts";
+import {
+  CONTENT_TYPES_PART,
+  SHARED_STRINGS_PART,
+  STYLES_PART,
+  WORKBOOK_PART,
+  WORKBOOK_RELS_PART,
+  createWrapTextCellXfs,
+  type WrapTextCellXfs,
+} from "./workbook-parts";
 import { decodeXmlCharacterData } from "./xml-entities";
 import { ZipArchive } from "./zip-reader";
 import { writeZip } from "./zip-writer";
@@ -77,6 +85,14 @@ import { writeZip } from "./zip-writer";
  *   · 날짜 값 + 날짜 서식 칸  → 날짜(일련번호). 그 칸의 서식이 그대로 먹는다.
  *   · 날짜 값 + 그 밖의 칸    → 글자 그대로(`2026-09-15`).
  *   · 그 밖에는 전부 **글자**(inlineStr).
+ *
+ * ── 🔴 한 칸 안에 여러 줄 — 값만으로는 모자라다 (2026-10-07) ──────────────
+ * 견적서 번호는 한 건에 여럿일 수 있어 **줄바꿈으로 이어** 한 칸에 들어온다
+ * (db/queries/customer-portal.ts 의 quoteNumber). 그런데 **칸의 서식에 「자동 줄 바꿈」이
+ * 꺼져 있으면 엑셀은 그것을 한 줄로 보여 준다** — 값은 멀쩡한데 사람 눈에는 번호 하나만
+ * 보인다. 그래서 줄바꿈이 든 칸은 그 자리에 있던 서식의 **사본에 wrapText 를 켜서** 쓴다
+ * (workbook-parts.ts 의 createWrapTextCellXfs). 사본은 styles.xml 맨 뒤에 붙으므로 기존
+ * 서식 번호가 하나도 밀리지 않는다 — 옛 탭과 다른 칸들은 그대로다.
  *
  * 🔴 숫자처럼 보이는 글자를 숫자로 바꾸지 않는다. S/N `0012345` 가 `12345` 가 되기
  * 때문이다 — 고객사 표에서 그것은 다른 물건이다. 엑셀이 「숫자가 글자로 있다」는
@@ -173,6 +189,8 @@ export function buildCustomerPortalExportWorkbook(
   const stylesXml = archive.readTextOrNull(STYLES_PART);
   const dateStyles = readDateStyleIndexes(stylesXml);
   const date1904 = readDate1904(workbookXml);
+  // 🔴 줄바꿈이 든 칸에 켜 줄 「자동 줄 바꿈」 서식(머리말 「한 칸 안에 여러 줄」).
+  const wrapStyles = createWrapTextCellXfs(stylesXml);
 
   const rebuilt = rebuildSheet({
     sheetXml: modelSheetXml,
@@ -183,6 +201,7 @@ export function buildCustomerPortalExportWorkbook(
     dateStyles,
     date1904,
     today: input.today,
+    wrapStyles,
   });
 
   const newSheetName = placementKind === "REPLACE" ? model.name : sheetNameFromStamp(input.stamp);
@@ -228,6 +247,10 @@ export function buildCustomerPortalExportWorkbook(
   }
 
   replacements.set(WORKBOOK_PART, Buffer.from(nextWorkbookXml, "utf8"));
+  // 🔴 서식 사본을 **맨 뒤에** 더했으므로 기존 번호는 하나도 밀리지 않는다 — 옛 탭들의
+  //    칸이 가리키던 서식은 그대로다(머리말 「옛 탭은 한 글자도 바뀌지 않는다」와 같은 규율).
+  const nextStylesXml = wrapStyles.stylesXml();
+  if (nextStylesXml !== null) replacements.set(STYLES_PART, Buffer.from(nextStylesXml, "utf8"));
   if (nextContentTypesXml !== contentTypesXml) {
     replacements.set(CONTENT_TYPES_PART, Buffer.from(nextContentTypesXml, "utf8"));
   }
@@ -521,6 +544,7 @@ function rebuildSheet(params: {
   dateStyles: ReadonlySet<number>;
   date1904: boolean;
   today: Date;
+  wrapStyles: WrapTextCellXfs;
 }): RebuiltSheet {
   const { spec, form } = params;
   const firstColumnNumber = columnLettersToNumber(spec.firstColumn);
@@ -553,6 +577,7 @@ function rebuildSheet(params: {
       values: params.rows[index],
       dateStyles: params.dateStyles,
       date1904: params.date1904,
+      wrapStyles: params.wrapStyles,
     });
   }
 
@@ -564,6 +589,7 @@ function rebuildSheet(params: {
       values: [{ kind: "date", iso: isoDateOf(params.today) }],
       dateStyles: params.dateStyles,
       date1904: params.date1904,
+      wrapStyles: params.wrapStyles,
     });
   }
 
@@ -654,6 +680,7 @@ function writeRowValues(
     values: readonly PortalExportCell[];
     dateStyles: ReadonlySet<number>;
     date1904: boolean;
+    wrapStyles: WrapTextCellXfs;
   }
 ): SheetRow[] {
   let found = false;
@@ -674,6 +701,7 @@ function writeCellsInRow(
     values: readonly PortalExportCell[];
     dateStyles: ReadonlySet<number>;
     date1904: boolean;
+    wrapStyles: WrapTextCellXfs;
   }
 ): SheetRow {
   const open = ROW_OPEN_TAG.exec(row.xml);
@@ -697,13 +725,24 @@ function writeCellsInRow(
     const columnNumber = params.firstColumnNumber + index;
     const style = existing.get(columnNumber)?.style ?? null;
     const content = toCellContent(value, style, params.dateStyles, params.date1904);
-    written.set(columnNumber, buildCellXml(columnNumber, row.rowNumber, style, content));
+    // 🔴 한 칸 안에 **여러 줄**이면 그 칸의 서식에 「자동 줄 바꿈」을 켠 사본을 쓴다 —
+    //    안 켜면 값은 들어 있는데 엑셀에서 한 줄로만 보인다(고객 안내 현황의 견적서 번호).
+    const cellStyle = isMultiLineText(content) ? params.wrapStyles.indexFor(style) : style;
+    written.set(columnNumber, buildCellXml(columnNumber, row.rowNumber, cellStyle, content));
   });
 
   const columns = [...new Set([...existing.keys(), ...written.keys()])].sort((a, b) => a - b);
   const body = columns.map((column) => written.get(column) ?? existing.get(column)?.raw ?? "").join("");
   const openTag = selfClosing ? open[0].replace(/\s*\/>$/, ">") : open[0];
   return { rowNumber: row.rowNumber, xml: `${openTag}${body}</row>` };
+}
+
+/**
+ * 그 칸이 **여러 줄**인가. 글자 칸만 그럴 수 있다(숫자 · 날짜 · 빈칸에는 줄바꿈이 없다).
+ * `\r\n` 도 센다 — 칸을 쓸 때 escapeXmlText 가 `\n` 으로 맞춰 `&#10;` 로 적는다.
+ */
+function isMultiLineText(content: CellContent): boolean {
+  return content.kind === "text" && /[\r\n]/.test(content.text);
 }
 
 /**
