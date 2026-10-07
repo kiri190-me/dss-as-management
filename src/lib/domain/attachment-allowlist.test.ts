@@ -6,6 +6,7 @@ import {
   ATTACHMENT_EXTENSION_RULES,
   CATEGORY_EXTENSION_ALLOWLIST,
   CONTENT_SNIFF_BYTES,
+  EXECUTABLE_EXTENSIONS,
   MAX_ATTACHMENT_SIZE_BYTES,
   canonicalMimeTypeForExtension,
   getAllowedMimeTypesForExtension,
@@ -16,6 +17,8 @@ import {
   isExtensionAllowedForCategory,
   isExtensionMimeCompatible,
   isPreviewCapableExtension,
+  isServerOriginContentCompatible,
+  isServerOriginExtension,
   isStorableExtension,
   isUploadContentCompatible,
   normalizeFileExtension,
@@ -173,8 +176,10 @@ test("🔴 모델 기본 자료 셋에 실행 파일은 못 올라간다 — 윈
     "py", "pyc", "rb", "pl", "php", "lua", "ahk",
     // 자바·안드로이드
     "jar", "apk", "class", "dex",
-    // 매크로가 들어가는 오피스 — 매크로는 코드다
-    "xlsm", "xlsb", "docm", "pptm", "xlam",
+    // 매크로가 들어가는 오피스 — 매크로는 코드다.
+    // 🔴 `xlsm` 은 여기 **없다**(2026-10-08 사용자 결정). 바로 아래 전용 시험이
+    // 「하나만 열었다」를 따로 못 박는다.
+    "xlsb", "xlam", "xla", "docm", "dotm", "pptm", "potm", "ppam", "sldm",
   ];
   for (const category of ANY_EXTENSION_CATEGORIES) {
     for (const extension of executables) {
@@ -192,6 +197,122 @@ test("🔴 모델 기본 자료 셋에 실행 파일은 못 올라간다 — 윈
   // 확장자가 없는 이름은 애초에 normalizeFileExtension 이 null 이지만, 이 함수만
   // 따로 불러도 열리지 않아야 한다.
   assert.equal(isExtensionAllowedForCategory("", "PARAMETER"), false);
+});
+
+/**
+ * ============================================================================
+ * 🔴 매크로 엑셀(.xlsm) — **하나만** 열었다 (2026-10-08 사용자 결정)
+ * ============================================================================
+ * 사내 점검표 양식 가운데 매크로가 든 엑셀이 실제로 있어, `EXECUTABLE_EXTENSIONS`
+ * 에서 `xlsm` **한 줄만** 뺐다. 악성코드 검사기가 아직 없다는 것(첨부가 전부
+ * `NOT_SCANNED` 이고 내려받기를 막지 않는다)을 알린 뒤의 결정이다.
+ *
+ * 이 시험 벌이 지키는 것은 **「하나만」**이다 — 매크로 오피스 나머지 아홉이
+ * 함께 풀리거나, 허용목록 14종이 늘거나, 사진 · 고객 서류 · 견적서 칸이 열리면
+ * 여기서 걸린다.
+ * ============================================================================
+ */
+test("🔴 .xlsm 은 실행 파일 목록에서 빠졌다 — 그리고 그것 하나뿐이다", () => {
+  assert.equal(isExecutableExtension("xlsm"), false, "xlsm 이 아직 실행 파일이다");
+  assert.equal(EXECUTABLE_EXTENSIONS.includes("xlsm"), false, "xlsm 이 아직 목록에 적혀 있다");
+
+  // 🔴 매크로 오피스 나머지 아홉은 하나씩 못 박는다. 「매크로는 코드다」라는
+  // 판단은 그대로 살아 있고, 요구된 것은 `.xlsm` 하나뿐이었다.
+  for (const extension of ["xlsb", "xlam", "xla", "docm", "dotm", "pptm", "potm", "ppam", "sldm"]) {
+    assert.equal(isExecutableExtension(extension), true, `매크로 오피스 .${extension} 이 함께 풀렸다`);
+    assert.ok(EXECUTABLE_EXTENSIONS.includes(extension), `.${extension} 이 목록에서 사라졌다`);
+    for (const category of ANY_EXTENSION_CATEGORIES) {
+      assert.equal(
+        isExtensionAllowedForCategory(extension, category),
+        false,
+        `${category} 에 매크로 오피스 .${extension} 이 통과했다`
+      );
+    }
+  }
+});
+
+test("🔴 .xlsm 은 점검표 · 파라미터 · 통전검사에서만 통과한다", () => {
+  // 열린 곳 — 형식을 가리지 않는 분류 셋뿐이다.
+  for (const category of ANY_EXTENSION_CATEGORIES) {
+    assert.equal(isExtensionAllowedForCategory("xlsm", category), true, `${category} 에서 .xlsm 이 막혔다`);
+  }
+  assert.deepEqual([...ANY_EXTENSION_CATEGORIES], ["PARAMETER", "POWER_TEST", "CHECKLIST"]);
+
+  // 🔴 여전히 닫힌 곳 — 사진 · 고객 서류 · 견적서 두 칸. 앞의 넷은 제한 목록이
+  // 없어 **허용목록 14종**을 보고, 뒤의 둘은 제한 목록이 PDF · 엑셀뿐이다.
+  for (const category of [
+    "INTAKE_PHOTO",
+    "EXTERNAL_CONDITION",
+    "CUSTOMER_DOCUMENT",
+    "OTHER",
+    "SIGNED_QUOTE_PDF",
+    "QUOTE_EXCEL",
+    "SCREENSHOT",
+    "CIRCUIT_DIAGRAM",
+    "FIRMWARE",
+  ] as const) {
+    assert.equal(
+      isExtensionAllowedForCategory("xlsm", category),
+      false,
+      `${category} 에 .xlsm 이 열렸다`
+    );
+  }
+
+  // 🔴 형식을 안 가리는 셋을 뺀 **모든** 분류에서 거절이다 — 위 목록에 적지
+  // 않은 분류가 조용히 열리는 일을 막는다.
+  for (const category of ATTACHMENT_CATEGORY_CODES) {
+    if (isCategoryOpenToAnyExtension(category)) continue;
+    assert.equal(isExtensionAllowedForCategory("xlsm", category), false, `${category} 에 .xlsm 이 열렸다`);
+  }
+});
+
+test("🔴 전체 허용목록(14종)은 안 늘었다 — xlsm 을 거기 넣지 않았다", () => {
+  assert.equal(ATTACHMENT_EXTENSION_RULES.length, 14);
+  assert.equal(isAllowedExtension("xlsm"), false, "xlsm 이 전체 허용목록에 들어갔다");
+  assert.deepEqual(
+    ATTACHMENT_EXTENSION_RULES.map((rule) => rule.extension),
+    ["jpg", "jpeg", "png", "pdf", "xls", "xlsx", "doc", "docx", "zip", "csv", "txt", "log", "bin", "hex"]
+  );
+  // 미리보기 가능 목록도 그대로다 — 매크로 엑셀을 브라우저에 펼치지 않는다.
+  assert.equal(isPreviewCapableExtension("xlsm"), false);
+  // 허용목록 밖이므로 정본 MIME 도 MIME 대조도 없다(서버 출처 길이 따로 쥔다).
+  assert.equal(canonicalMimeTypeForExtension("xlsm"), null);
+  assert.deepEqual(getAllowedMimeTypesForExtension("xlsm"), []);
+});
+
+test("🔴 .xlsm 의 앞머리 대조 — 사람 통로는 .hwp 와 같은 자리다", () => {
+  const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]);
+  const exe = new Uint8Array([0x4d, 0x5a, 0x90, 0x00]);
+  const elf = new Uint8Array([0x7f, 0x45, 0x4c, 0x46]);
+
+  for (const category of ANY_EXTENSION_CATEGORIES) {
+    assert.equal(isUploadContentCompatible("xlsm", category, zip), true);
+    // 🔴 이름을 .xlsm 으로 바꾼 실행 파일은 여기서 걸린다.
+    assert.equal(isUploadContentCompatible("xlsm", category, exe), false);
+    assert.equal(isUploadContentCompatible("xlsm", category, elf), false);
+    // 빈 파일은 어느 쪽에서도 통과하지 않는다.
+    assert.equal(isUploadContentCompatible("xlsm", category, new Uint8Array()), false);
+  }
+
+  // ⚠️ **ZIP 서명을 요구하지는 않는다.** `xlsm` 은 허용목록 14종 밖이라
+  // CONTENT_CHECK_BY_EXTENSION 표에 없고, 사람 통로는 목록 밖 확장자를
+  // 펌웨어(bin · hex)와 같은 자리에서 다룬다 — MZ · ELF 만 되돌려 보낸다.
+  // `.hwp` · `.dwg` 와 똑같은 취급이고, 2026-10-08 이 바꾼 것이 아니다.
+  const notZip = new Uint8Array([0x68, 0x65, 0x6c, 0x6c, 0x6f]); // "hello"
+  assert.equal(isUploadContentCompatible("xlsm", "CHECKLIST", notZip), true);
+  assert.equal(isUploadContentCompatible("hwp", "CHECKLIST", notZip), true);
+
+  // 허용목록만 보는 창구는 그대로 false 다 — 창구를 섞지 않는다.
+  assert.equal(isContentCompatibleWithExtension("xlsm", zip), false);
+
+  // 🔴 닫힌 분류에서는 내용이 진짜 ZIP 이어도 통과하지 않는다.
+  assert.equal(isUploadContentCompatible("xlsm", "CUSTOMER_DOCUMENT", zip), false);
+  assert.equal(isUploadContentCompatible("xlsm", "QUOTE_EXCEL", zip), false);
+
+  // 서버 출처 길(교상 연락서 원본)은 **지금도 ZIP 서명을 요구한다.**
+  assert.equal(isServerOriginExtension("xlsm"), true);
+  assert.equal(isServerOriginContentCompatible("xlsm", zip), true);
+  assert.equal(isServerOriginContentCompatible("xlsm", notZip), false);
 });
 
 test("펌웨어 확장자(bin · hex)는 실행 파일로 보지 않는다", () => {
@@ -222,9 +343,13 @@ test("🔴 저장 경로에 놓을 수 있는 확장자 — 모양과 실행 파
     assert.equal(isStorableExtension(extension), true, `.${extension} 이 막혔다`);
   }
   // 🔴 실행 파일은 여전히 안 된다 — 통로를 거치지 않고 이 함수만 불러도 그렇다.
-  for (const extension of ["exe", "bat", "ps1", "sh", "jar", "apk", "dll", "xlsm", "so"]) {
+  for (const extension of ["exe", "bat", "ps1", "sh", "jar", "apk", "dll", "xlsb", "docm", "so"]) {
     assert.equal(isStorableExtension(extension), false, `실행 파일 .${extension} 이 통과했다`);
   }
+  // 🔴 `xlsm` 은 2026-10-08 부터 **놓을 수 있다.** 점검표로 올라온 매크로 엑셀이
+  // 통로를 다 지나고 나서 **경로를 만들다 던지면** 임시 파일이 남은 채 500 이
+  // 나간다 — 위 `.hwp` 와 같은 자리다.
+  assert.equal(isStorableExtension("xlsm"), true);
   // 🔴 경로를 깨는 모양은 전부 거절 — 규칙 1·2(attachment-path.ts 머리말)를 지킨다.
   for (const extension of ["", "   ", "p/df", "p\\df", "..", "a.b", "JPG", "한글", "toolongextension17"]) {
     assert.equal(isStorableExtension(extension), false, `모양이 틀린 "${extension}" 이 통과했다`);

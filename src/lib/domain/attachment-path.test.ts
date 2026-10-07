@@ -125,7 +125,10 @@ test("실행 파일 확장자로는 경로를 만들 수 없다", () => {
   // 보는 것이 허용목록에서 **모양 + 실행 파일**(isStorableExtension)로 바뀌었다 —
   // 형식을 가리지 않는 분류가 생겨 목록 밖 확장자가 정상적으로 올라오기 때문이다.
   // 🔴 **거절하는 예시는 하나도 줄지 않았다** — exe 는 여전히 던진다.
-  for (const extension of ["exe", "bat", "ps1", "sh", "jar", "xlsm", "", "p/df", "타입"]) {
+  //
+  // ⚠️ `xlsm` 은 2026-10-08 에 이 줄에서 **빠졌다**(실행 파일이 아니게 됐다).
+  // 「빠졌다」가 아니라 「되어야 한다」를 재는 자리는 바로 아래 전용 시험이다.
+  for (const extension of ["exe", "bat", "ps1", "sh", "jar", "", "p/df", "타입"]) {
     assert.throws(
       () =>
         buildAttachmentStoredPath({
@@ -135,6 +138,50 @@ test("실행 파일 확장자로는 경로를 만들 수 없다", () => {
         }),
       AttachmentPathError,
       `"${extension}" 으로 경로가 만들어졌다`
+    );
+  }
+});
+
+test("🔴 .xlsm 으로는 경로가 **만들어져야** 한다 — 매크로 엑셀 점검표(2026-10-08)", () => {
+  // 🔴 이 시험은 「`xlsm` 이 위 거절 목록에서 빠졌다」가 아니라 **「만들어져야
+  // 한다」**를 잰다. 거절 목록에서 지우기만 하면 다음 사람이 되돌려도 아무도
+  // 모른다 — 되돌리는 순간 여기가 터져야 한다.
+  //
+  // 까닭은 선 둘이 만나는 자리다:
+  //   · 2026-09-30 — 경로 생성기는 허용목록(isAllowedExtension)을 **보지 않는다.**
+  //     보는 것은 모양 + 실행 파일(isStorableExtension)뿐이다(이 파일 머리말과
+  //     바로 아래 .hwp 시험). 형식을 가리지 않는 분류가 목록 밖 확장자를 받기
+  //     때문이다.
+  //   · 2026-10-08 — 사내 점검표 양식에 매크로가 든 엑셀이 실제로 있어
+  //     `xlsm` 을 EXECUTABLE_EXTENSIONS 에서 뺐다(매크로 오피스 나머지 아홉은
+  //     그대로 막힌다 — attachment-allowlist.ts 머리말).
+  //
+  // 그래서 점검표로 올라온 `.xlsm` 은 통로 검사를 전부 지난 뒤 **여기서 던지면
+  // 안 된다.** 던지면 임시 파일이 남은 채 500 이 나간다(.hwp 로 겪은 그 사고다).
+  assert.equal(
+    buildAttachmentStoredPath({ repairCaseId: CASE_ID, attachmentId: ATTACHMENT_ID, extension: "xlsm" }),
+    `repair-cases/${CASE_ID}/${ATTACHMENT_ID}.xlsm`
+  );
+  assert.equal(
+    buildProductModelAttachmentStoredPath({
+      productModelId: MODEL_ID,
+      attachmentId: ATTACHMENT_ID,
+      extension: "xlsm",
+    }),
+    `product-models/${MODEL_ID}/${ATTACHMENT_ID}.xlsm`
+  );
+  // 대문자로 들어와도 눕는다 — 규칙 2 는 그대로다(NAS 는 대소문자를 가린다).
+  assert.equal(
+    buildAttachmentStoredPath({ repairCaseId: CASE_ID, attachmentId: ATTACHMENT_ID, extension: "XLSM" }),
+    `repair-cases/${CASE_ID}/${ATTACHMENT_ID}.xlsm`
+  );
+  // 🔴 **함께 풀린 것은 없다.** 매크로 오피스 나머지 아홉은 여전히 던진다 —
+  // 「하나만 열었다」가 이 결정의 핵심이다.
+  for (const extension of ["xlsb", "xlam", "xla", "docm", "dotm", "pptm", "potm", "ppam", "sldm"]) {
+    assert.throws(
+      () => buildAttachmentStoredPath({ repairCaseId: CASE_ID, attachmentId: ATTACHMENT_ID, extension }),
+      AttachmentPathError,
+      `매크로 오피스 "${extension}" 으로 경로가 만들어졌다`
     );
   }
 });
@@ -370,7 +417,8 @@ test("UUID가 아닌 모델 ID·첨부 ID로는 모델 경로를 만들 수 없�
 });
 
 test("실행 파일 확장자로는 모델 경로도 만들 수 없다", () => {
-  for (const extension of ["exe", "bat", "sh", "jar", "xlsm", "", "p/df"]) {
+  // ⚠️ `xlsm` 은 2026-10-08 에 여기서 빠졌다 — 위 전용 시험이 그 자리를 잰다.
+  for (const extension of ["exe", "bat", "sh", "jar", "", "p/df"]) {
     assert.throws(
       () =>
         buildProductModelAttachmentStoredPath({
@@ -546,7 +594,10 @@ test("UUID가 아닌 견적서 ID·첨부 ID, 목록 밖 확장자로는 견적�
     () => buildQuoteAttachmentPreviewPath({ quoteId: "not-a-uuid", attachmentId: ATTACHMENT_ID }),
     AttachmentPathError
   );
-  for (const extension of ["exe", "xlsm", "", "p/df"]) {
+  // ⚠️ `xlsm` 은 2026-10-08 에 여기서 빠졌다 — 위 전용 시험이 그 자리를 잰다.
+  // 🔴 견적서 **분류**는 그래도 `.xlsm` 을 받지 않는다. 그것을 막는 것은 경로
+  // 생성기가 아니라 분류 허용목록이다(이 파일 머리말 · 견적서 벌의 머리말).
+  for (const extension of ["exe", "", "p/df"]) {
     assert.throws(
       () => buildQuoteAttachmentStoredPath({ quoteId: QUOTE_ID, attachmentId: ATTACHMENT_ID, extension }),
       AttachmentPathError,

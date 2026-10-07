@@ -110,21 +110,39 @@ const EXTENSION_RULE_MAP = new Map(ATTACHMENT_EXTENSION_RULES.map((rule) => [rul
  * 더하면 세 올리기 통로(`api/{repair-cases|product-models|quotes}/…/attachments`)가
  * 맨 먼저 보는 `isAllowedExtension` 이 통과하고, 그러면 **제한 목록이 없는 분류
  * 전부**(INTAKE_PHOTO · CUSTOMER_DOCUMENT · OTHER …)에 그 확장자가 함께 열린다.
- * `.xlsm` 은 매크로가 들어 있는 엑셀이라 그것은 열어 줄 수 없다.
+ * `.xlsm` 은 매크로가 들어 있는 엑셀이라 **제한 없는 분류 전부에 열어 줄 수는
+ * 없다.**
  *
  * 그래서 목록을 **따로** 둔다. 이 목록은 아래 두 함수로만 읽히고, 그 둘을 부르는
  * 곳은 서버가 **자기가 이미 손에 쥔 바이트**를 첨부로 남기는 자리뿐이다
  * (`server/services/kyosan-report-import.ts` — 판독기가 이미 통합문서로 열어 본
  * 파일이다). 사람이 올리는 통로는 이 목록을 **쳐다보지도 않는다**:
  *
- *   · `isAllowedExtension(...)`            — 그대로. `xlsm` 은 여전히 false.
- *   · `isExtensionAllowedForCategory(...)` — 그대로. 목록 자체가 안 바뀌었다.
+ *   · `isAllowedExtension(...)`            — 그대로. `xlsm` 은 여전히 false
+ *                                            (허용목록 14종에 넣지 않았다).
+ *   · `isExtensionAllowedForCategory(...)` — 🔴 **2026-10-08 에 한 자리가
+ *                                            갈라졌다.** 아래 '사람 통로가
+ *                                            조건부로 열렸다' 참조.
  *   · `isContentCompatibleWithExtension(...)` — 그대로. 허용목록 밖이면 false.
- *   · 화면의 `ALL_EXTENSIONS`(FilesScreen · ProductModelFilesSection)도 그대로.
+ *   · 화면의 `ALL_EXTENSIONS`(FilesScreen · ProductModelFilesSection)도 그대로
+ *     — 그 목록은 허용목록 14종에서 뽑는다.
  *
- * 🔴 **느슨해진 검사가 하나도 없다.** 새로 생긴 것은 「서버가 저 바이트를 저
- * 확장자로 적어도 되는가」를 묻는 창구 하나뿐이고, 그 창구는 내용 대조
+ * 🔴 **이 창구를 내면서 느슨해진 검사는 하나도 없다.** 새로 생긴 것은 「서버가 저
+ * 바이트를 저 확장자로 적어도 되는가」를 묻는 창구 하나뿐이고, 그 창구는 내용 대조
  * (`isServerOriginContentCompatible`)를 그대로 요구한다.
+ *
+ * ── 🔴 사람 통로가 조건부로 열렸다 (2026-10-08 사용자 결정) ───────────────
+ * 사내에서 쓰는 점검표 양식 가운데 **매크로가 든 엑셀(.xlsm)이 실제로 있다.**
+ * 그래서 아래 `EXECUTABLE_EXTENSIONS` 에서 `xlsm` **한 줄만** 뺐고, 그 결과
+ * 형식을 가리지 않는 분류 셋(파라미터 · 통전검사 · 점검표)에서만 `.xlsm` 이
+ * 통과한다. 까닭 · 그때 알고 있던 위험 · 나머지 아홉을 그대로 막는 이유는
+ * `EXECUTABLE_EXTENSIONS` 머리말에 적었다.
+ *
+ * 🔴 **위 「따로 둔 목록」의 뜻은 그대로다.** `xlsm` 은 여전히 허용목록 14종에
+ * 없고, 그래서 사진 · 고객 서류 · 견적서처럼 **제한 목록이 없거나 좁은 분류는
+ * 하나도 열리지 않았다.** 이 `SERVER_ORIGIN_EXTENSION_RULES` 창구도 그대로
+ * 쓰인다 — 교상 연락서 원본은 분류와 무관하게 서버가 적는 자리이고, 그 길은
+ * ZIP 서명 대조(`isServerOriginContentCompatible`)를 계속 요구한다.
  * ============================================================================
  */
 export type ServerOriginExtensionRule = {
@@ -264,15 +282,49 @@ export const ANY_EXTENSION_CATEGORIES: readonly AttachmentCategory[] = [
  *                         command pkg dmg deb rpm appimage
  *   · 해석기 스크립트      py pyc pyo pyw rb pl pm php lua ahk vb ws
  *   · 자바/안드로이드      jar apk class dex
- *   · 매크로 오피스        xlsm xlsb xlam xla docm dotm pptm potm ppam sldm
+ *   · 매크로 오피스        xlsb xlam xla docm dotm pptm potm ppam sldm
+ *                         (🔴 `xlsm` 은 2026-10-08 에 **빠졌다** — 아래 참조)
  *
  * ⚠️ **bin · hex 는 여기 없다.** 펌웨어·계측 덤프의 확장자이고(전체 허용목록에
  * 이미 있다), 윈도도 리눅스도 그 이름만으로 실행하지 않는다. 파라미터 파일이
  * .bin 으로 나오는 장비가 실제로 있어 막으면 이 기능의 뜻이 없어진다. 실행 파일
  * 서명(MZ · ELF)은 아래 내용 대조가 확장자와 무관하게 따로 막는다.
  *
- * ⚠️ 매크로 오피스를 넣은 것은 xlsm 을 사람 통로에서 막아 온 이 저장소의 결정과
- * 같은 줄이다(위 SERVER_ORIGIN_EXTENSION_RULES 머리말) — 매크로는 코드다.
+ * ⚠️ 매크로 오피스를 넣은 까닭은 **매크로는 코드**라서다. 그 판단은 지금도
+ * 살아 있다 — 아홉은 그대로 여기 있다.
+ *
+ * ── 🔴 `xlsm` 하나만 뺐다 (2026-10-08 사용자 결정) ───────────────────────
+ * 이 줄은 **2026-09-21 에 적힌 「xlsm 을 사람 통로에서 막아 온 이 저장소의 결정과
+ * 같은 줄이다」를 대신한다.** 그 문장은 더 이상 사실이 아니다. 지우지 않고 무엇이
+ * 바뀌었는지 남긴다:
+ *
+ *   · **왜 열었나** — 사내에서 쓰는 점검표 양식 가운데 매크로가 든 엑셀이 실제로
+ *     있고, 그것을 「종류별 공통서류」에 올려야 한다. 그 분류 셋(파라미터 ·
+ *     통전검사 · 점검표)은 2026-09-30 결정으로 **이미 형식을 안 가린다** —
+ *     `.hwp` · `.dwg` · `.bin` 이 들어가는 자리다. `xlsm` 만 이 거절 목록에
+ *     걸려 있었다.
+ *
+ *   · 🔴 **그때 알고 있던 위험** — 악성코드 검사기가 **아직 없다.** 첨부의
+ *     `malware_scan_status` 는 전부 `NOT_SCANNED` 이고, 내려받기를 막지 않는다.
+ *     앞머리 바이트 대조는 「형식을 속인 파일」까지만 막지 매크로 **안쪽 내용**은
+ *     보지 않는다. 사용자는 이것을 **듣고 나서** 열기로 정했다.
+ *
+ *   · 🔴 **왜 나머지 아홉은 그대로 막는가** — 요구된 것이 `.xlsm` 하나뿐이고,
+ *     「매크로는 코드다」라는 판단 자체는 바뀌지 않았다. 필요 없는 것까지 함께
+ *     열면 「무엇이 왜 열렸는가」에 답할 수 없게 된다. `xlsb` · `xlam` · `xla` ·
+ *     `docm` · `dotm` · `pptm` · `potm` · `ppam` · `sldm` 은 **전부 거절**이다.
+ *
+ *   · **열린 곳은 셋뿐이다** — `ANY_EXTENSION_CATEGORIES`(파라미터 · 통전검사 ·
+ *     점검표). `xlsm` 을 `ATTACHMENT_EXTENSION_RULES`(허용목록 14종)에는
+ *     **넣지 않았으므로** 사진 · 고객 서류 · 견적서 · 그 밖의 분류는 그대로
+ *     막혀 있다. 크기 상한(`MAX_ATTACHMENT_SIZE_BYTES`)도 손대지 않았다.
+ *
+ *   · ⚠️ **앞머리 대조는 ZIP 을 요구하지 않는다** — `xlsm` 은 허용목록 14종
+ *     밖이라 `CONTENT_CHECK_BY_EXTENSION` 표에 없고, 사람 통로의
+ *     `isUploadContentCompatible` 은 목록 밖 확장자를 펌웨어(bin · hex)와 같은
+ *     자리에서 다룬다 — **실행 파일 서명(MZ · ELF)만** 되돌려 보낸다. `.hwp` ·
+ *     `.dwg` 와 똑같은 취급이고, 이 조각이 바꾼 것이 아니다. ZIP 서명을 요구하는
+ *     것은 서버 출처 길(`isServerOriginContentCompatible`) 하나뿐이다.
  */
 export const EXECUTABLE_EXTENSIONS: readonly string[] = [
   // 윈도 실행체·설치본
@@ -290,8 +342,10 @@ export const EXECUTABLE_EXTENSIONS: readonly string[] = [
   "py", "pyc", "pyo", "pyw", "rb", "pl", "pm", "php", "lua", "ahk", "vb", "ws",
   // 자바·안드로이드
   "jar", "apk", "class", "dex",
-  // 매크로가 들어가는 오피스 형식 — 매크로는 코드다
-  "xlsm", "xlsb", "xlam", "xla", "docm", "dotm", "pptm", "potm", "ppam", "sldm",
+  // 매크로가 들어가는 오피스 형식 — 매크로는 코드다.
+  // 🔴 `xlsm` 은 여기 **없다**(2026-10-08 사용자 결정 — 위 머리말). 나머지 아홉은
+  // 그대로다. 한 줄 더하거나 빼기 전에 위 머리말을 읽을 것.
+  "xlsb", "xlam", "xla", "docm", "dotm", "pptm", "potm", "ppam", "sldm",
 ];
 
 const EXECUTABLE_EXTENSION_SET: ReadonlySet<string> = new Set(EXECUTABLE_EXTENSIONS);
@@ -324,9 +378,14 @@ const EXTENSION_SHAPE_PATTERN = /^[a-z0-9]{1,16}$/;
  * 전부 통과하고 **경로를 만들다 던진다.** 그러면 임시 파일이 남은 채 500 이
  * 나간다. 그 자리를 이 함수가 메운다.
  *
- * 🔴 **느슨해진 것이 없다.** 실행 파일(74종)은 여전히 거절이고, 모양 검사가
+ * 🔴 **느슨해진 것이 없다.** `EXECUTABLE_EXTENSIONS` 에 적힌 것은 여전히 전부
+ * 거절이고(숫자는 적지 않는다 — 적으면 목록이 바뀔 때 거짓이 된다), 모양 검사가
  * 경로를 깨는 글자를 전부 막는다. 어느 분류가 어느 확장자를 받는지는 통로가
  * 이미 `isExtensionAllowedForCategory` 로 판정한 뒤다.
+ *
+ * ⚠️ 2026-10-08 에 `xlsm` 이 그 목록에서 빠지면서 **이 함수가 `.xlsm` 에 true 를
+ * 돌려준다.** 그래야 점검표로 올라온 매크로 엑셀이 경로를 만들다 던지지 않는다
+ * (바로 위 `.hwp` 와 같은 자리다). 어느 분류가 받는지는 여기서 보지 않는다.
  */
 export function isStorableExtension(extension: string): boolean {
   return EXTENSION_SHAPE_PATTERN.test(extension) && !isExecutableExtension(extension);
