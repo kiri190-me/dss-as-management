@@ -69,6 +69,10 @@ import AttachmentFormDialog, { type AttachmentFormSubmitInput } from "./Attachme
 import AttachmentSummaryCards from "./AttachmentSummaryCards";
 import AttachmentTable from "./AttachmentTable";
 import { ResponsiveList } from "@/components/common/responsive-list";
+import type { KindShareDocRow } from "@/components/product-models/KindShareDocsSection";
+import { productModelKindOfWorkflowKind } from "@/lib/domain/product-model-kind";
+import { workflowKindOf } from "@/lib/domain/workflow-kind";
+import CaseKindShareDocsSection from "./CaseKindShareDocsSection";
 import ContactFolderSection from "./ContactFolderSection";
 import DeleteAttachmentDialog from "./DeleteAttachmentDialog";
 import EditMetadataDialog from "./EditMetadataDialog";
@@ -113,6 +117,12 @@ export default function FilesScreen(props: {
    * 정한다 — 꺼져 있으면 목록에 [DATA에 저장]이 **아예 그려지지 않는다.**
    */
   contactFolderEnabled?: boolean;
+  /**
+   * 🔴 **이 건의 종류**가 가리켜 둔 공유폴더 서류들(2026-10-07). 서버가 DB 에서 읽어
+   * **보이는 차례 그대로** 넘긴다 — 바이트가 아니라 경로 줄이라 첨부 목록과는 전혀 다른
+   * 것이고, 한 줄도 없으면 구역이 아예 그려지지 않는다(CaseKindShareDocsSection).
+   */
+  kindShareDocs?: readonly KindShareDocRow[];
 }) {
   if (props.attachments) {
     return (
@@ -124,6 +134,7 @@ export default function FilesScreen(props: {
         canUpload={props.canUpload ?? false}
         canManage={props.canManage ?? false}
         contactFolderEnabled={props.contactFolderEnabled ?? false}
+        kindShareDocs={props.kindShareDocs ?? []}
       />
     );
   }
@@ -182,6 +193,7 @@ function DatabaseFilesScreen({
   canUpload,
   canManage,
   contactFolderEnabled,
+  kindShareDocs,
 }: {
   resolved: ResolvedRepairCase;
   actingUser: ActingUser | null;
@@ -190,6 +202,7 @@ function DatabaseFilesScreen({
   canUpload: boolean;
   canManage: boolean;
   contactFolderEnabled: boolean;
+  kindShareDocs: readonly KindShareDocRow[];
 }) {
   const router = useRouter();
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
@@ -1052,6 +1065,22 @@ function DatabaseFilesScreen({
         (ContactFolderSection.tsx 머리말). 설정이 없는 환경에서는 스스로 사라진다.
       */}
       <ContactFolderSection repairCaseId={resolved.id} reloadToken={contactFolderReloadToken} />
+
+      {/*
+        🔴 **이 건의 종류**가 가리켜 둔 공유폴더 서류(2026-10-07) — 위 구역과 **다른 것**이다.
+        위는 이 건 하나의 연락서 폴더 안이고, 여기는 **그 종류의 모든 건이 함께 쓰는** 서류를
+        가리킨 줄들이다. 그래서 구역을 나눠 세운다. 🔴 담기 · 지우기는 여기 없다 — 한 건을
+        보던 사람이 그 종류 전체를 바꾸게 되고, 고치는 자리는 제품 모델 관리 화면이다.
+
+        🔴 **종류는 여기서 지어내지 않는다.** 수리 건에는 `product_model_kind` 칸이 없고,
+        접수할 때 사람이 고른 워크플로 종류를 제품 종류 축으로 옮기는 자리는 저장소에 하나뿐이다
+        (domain/product-model-kind.ts 의 productModelKindOfWorkflowKind — 접수의 공통 서류 복사도
+        같은 함수를 부른다). 🔴 한 줄도 없으면 구역이 스스로 사라진다.
+      */}
+      <CaseKindShareDocsSection
+        kind={productModelKindOfWorkflowKind(workflowKindOf(resolved.workflowType))}
+        docs={kindShareDocs}
+      />
 
       {trashedAttachments.length > 0 && (
         /*

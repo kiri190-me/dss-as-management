@@ -181,6 +181,19 @@ src/components/repair-cases/files/contact-folder-copy-notice.test.ts
 # 파일 이름을 보내지 않음 · 기능이 꺼져 있으면 단추가 없음 · 꽂은 뒤 공유폴더 구역 다시 읽기 ·
 # 🔴 내려받기는 한 글자도 안 바뀜.
 src/components/repair-cases/files/contact-folder-data-save.test.ts
+
+# 파일 관리 탭의 **이 종류 공통 서류(공유폴더 가리킴)** 구역 — 「수리건 상세에서도 바로
+# 파일을 열 수 있도록」(2026-10-07 사용자 요구). 🔴 한 줄도 없으면 구역을 아예 안 그린다 ·
+# 🔴 담기·지우기가 여기엔 없다(보고 여는 자리다 — 고치는 곳은 제품 모델 관리) · 🔴 [열기]는
+# 열 수 있는 확장자의 파일 줄에만이고 공유폴더 맨 위 칸에 바로 놓인 파일에는 없다(앞에 붙일
+# 폴더가 없다) · 🔴 그 판정도 줄 그리는 조각도 **그대로 가져다 쓴다**(베끼지 않았다) ·
+# 🔴 print:hidden(바로 위 공유폴더 구역과 같은 선) · 🔴 종류는 workflowType 에서
+# productModelKindOfWorkflowKind 로 옮긴다(규칙을 베껴 적지 않는다) · 🔴 서버는 DB 한 번만
+# 더 때린다(공유폴더 디스크를 읽지 않는다).
+# 구역 자체는 상태를 넣어 그려 보고, 묶는 쪽(FilesScreen · [id]/files/page.tsx)만 원본을
+# 글자로 읽는다 — 그 둘은 서버 액션 · server-only 사슬을 물고 있다.
+src/components/repair-cases/files/case-kind-share-docs-section.test.tsx
+
 src/components/print-grid/SheetPrintGridView.test.tsx
 src/components/quotes/quote-print-excel-preview.test.ts
 src/components/quotes/quote-print-excel-preview-screen.test.tsx

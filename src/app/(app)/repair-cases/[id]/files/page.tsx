@@ -8,6 +8,9 @@ import {
   listAttachmentsForRepairCase,
   listTrashedAttachmentsForRepairCase,
 } from "@/lib/db/queries/attachments";
+import { listShareDocsForProductModelKind } from "@/lib/db/queries/product-model-kind-share-docs";
+import { productModelKindOfWorkflowKind } from "@/lib/domain/product-model-kind";
+import { workflowKindOf } from "@/lib/domain/workflow-kind";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { resolveContactFolderArchiveRoot } from "@/lib/storage/contact-folder-archive";
 import FilesScreen from "@/components/repair-cases/files/FilesScreen";
@@ -44,9 +47,19 @@ export default async function RepairCaseFilesPage({
     notFound();
   }
 
-  const [attachments, trashedAttachments] = await Promise.all([
+  // 🔴 **이 건의 제품 종류** — 수리 건에는 그 칸이 없다. 접수할 때 사람이 고른 워크플로
+  // 종류를 제품 종류 축으로 옮기는 자리는 저장소에 하나뿐이고(domain/product-model-kind.ts 의
+  // productModelKindOfWorkflowKind), 접수의 공통 서류 복사도 같은 함수를 부른다. 🔴 규칙을
+  // 여기 베껴 적지 않는다 — 한쪽 축에 값이 느는 날 이 자리만 조용히 틀린다.
+  const productModelKind = productModelKindOfWorkflowKind(workflowKindOf(resolved.workflowType));
+
+  const [attachments, trashedAttachments, kindShareDocs] = await Promise.all([
     listAttachmentsForRepairCase(resolved.id),
     listTrashedAttachmentsForRepairCase(resolved.id),
+    // 🔴 그 종류가 가리켜 둔 공유폴더 서류 — **DB 표 한 번**이다. 가리킨 자리에 실제로
+    //    무엇이 있는지는 들여다보지 않으므로 아래 주석의 규율(공유폴더를 서버에서 읽지
+    //    않는다)을 그대로 지킨다. 종류별 서류함 page.tsx 가 그은 선과 같다.
+    listShareDocsForProductModelKind(productModelKind),
   ]);
 
   // 화면이 올리기 칸과 지우기·되살리기 버튼을 보일지 말지. 실제 판정은 업로드
@@ -74,6 +87,7 @@ export default async function RepairCaseFilesPage({
       canUpload={canManageFiles}
       canManage={canManageFiles}
       contactFolderEnabled={contactFolderEnabled}
+      kindShareDocs={kindShareDocs}
     />
   );
 }
