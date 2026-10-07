@@ -25,7 +25,7 @@ import { readFileSync } from "node:fs";
  * QuoteEditForm 은 **서버 액션을 직접 import 하는 클라이언트 컴포넌트**라, 그 사슬
  * 끝의 `server-only` 때문에 react-server 조건 없이 도는 test:components 에서는
  * import 자체가 던진다(react-server 조건으로 돌리면 이번에는 useState 가 없다).
- * 이웃 시험(QuoteListScreen.test.ts)과 같은 방법으로 원본을 글자로 읽는다.
+ * 이웃 시험(quote-list-screen-source.test.ts)과 같은 방법으로 원본을 글자로 읽는다.
  * ============================================================================
  */
 

@@ -43,7 +43,7 @@ import { QUOTE_KINDS, quoteKindLabels } from "@/lib/validation/quote-input";
  *  · 창의 그림(NewQuoteDialogView)은 훅이 없어 함수로 불러 **요소 나무**를 얻을 수 있다. 거기서
  *    단추 · 라디오 · 창 자신에 붙은 처리기를 찾아 직접 불러 본다 — 누르기 · Esc · 바깥 누름
  *    (이웃 시험 QuotePrintView.test.tsx 와 같은 방법).
- * 목록이 이 창을 제자리에서 여는지는 QuoteListScreen.test.ts 가, 덧붙이는 규칙은
+ * 목록이 이 창을 제자리에서 여는지는 quote-list-screen-source.test.ts 가, 덧붙이는 규칙은
  * lib/domain/quote-new-link.test.ts 가 본다.
  * ============================================================================
  */

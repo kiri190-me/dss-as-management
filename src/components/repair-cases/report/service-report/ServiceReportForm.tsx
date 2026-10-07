@@ -636,8 +636,8 @@ export default function ServiceReportForm({
    * 🔴 묻는 창은 **이 저장소의 표준 창**이다(`MasterDataDeleteDialog`). 예전에는
    * 브라우저가 그린 기본 팝업이었는데, 그러면 이 화면만 생김새가 다르다 — 지우는
    * 일의 모양이 화면마다 달라지면 사람은 화면마다 다른 규칙이 있다고 배운다(그
-   * 파일 머리말). 견적서가 한 건을 지울 때 하는 그대로 쓴다
-   * (`quotes/QuoteListScreen.tsx`).
+   * 파일 머리말). 견적서가 한 건을 지울 때 하는 그대로 쓴다 — ⚠️ 그 화면은 2026-10-07
+   * 부터 공용 묶음의 것이다(`vendor/dss-core/src/ui/quotes/QuoteListScreen.tsx`).
    *
    * 창은 자기 상태를 갖지 않는다 — 열림 여부·사유·전송 중·오류는 전부 여기가
    * 소유한다.

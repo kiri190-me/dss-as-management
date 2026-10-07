@@ -100,7 +100,14 @@ describe("㉡ 막는 자리 — 다섯 곳이 같은 판정 하나를 부른다"
   const issueService = flat(read("src/lib/server/services/quote-issue.ts"));
   const issueRoute = flat(read("src/app/api/quotes/[id]/issue/route.ts"));
   const printPage = flat(read("src/app/(app)/quotes/[id]/print/page.tsx"));
-  const listScreen = flat(read("src/components/quotes/QuoteListScreen.tsx"));
+  /**
+   * 🔴 목록의 「다섯째 자리」는 2026-10-07 부터 **슬롯 쪽**이다(설계서 G절 조각 4).
+   * 화면 자체는 공용 묶음의 한 벌이 되었고(vendor/dss-core — 두 사이트가 함께 쓴다),
+   * 그 화면은 이 판정을 모른다. 판정을 보는 두 조각(미리보기 · 곁말)은 A/S 의
+   * QuoteListSlots.tsx 에 있고, 화면은 그 한 자리를 표와 카드 두 곳에 건다.
+   */
+  const listScreen = flat(read("src/components/quotes/QuoteListSlots.tsx"));
+  const listRender = flat(read("vendor/dss-core/src/ui/quotes/QuoteListScreen.tsx"));
   const editForm = flat(read("src/components/quotes/QuoteEditForm.tsx"));
 
   test("🔴 GET 받기 통로 — 견적서를 읽은 **직후**, 채우기보다 앞에서 거절한다", () => {
@@ -150,9 +157,12 @@ describe("㉡ 막는 자리 — 다섯 곳이 같은 판정 하나를 부른다"
       listScreen.includes("function PreviewLink({ row, repairCaseId }: { row: QuoteListItem; repairCaseId: string | null }) { if (!canRenderQuoteDocument(row)) return null;"),
       "목록의 미리보기가 그대로 있다"
     );
-    // 표와 카드 두 곳 모두 같은 조각을 쓴다 — 폭에 따라 한쪽만 뚫리면 안 된다.
-    assert.equal(listScreen.split("<PreviewLink row={row} repairCaseId={quoteLinkRepairCaseId} />").length - 1, 2);
-    assert.equal(listScreen.split("<DocumentUnsupportedNote row={row} />").length - 1, 2);
+    // 🔴 두 조각을 **고르는 곳은 한 곳**(줄 단추 슬롯)이고, 화면이 그 한 자리를 표와 카드
+    //    두 곳에 건다 — 폭에 따라 한쪽만 뚫리는 고장이 애초에 생기지 않는다. 그래도 그
+    //    한 자리가 정말 두 곳에 걸리는지는 잰다(안 걸리면 둘 다 통째로 사라진다).
+    assert.equal(listScreen.split("<PreviewLink row={row} repairCaseId={quoteLinkRepairCaseId} />").length - 1, 1);
+    assert.equal(listScreen.split("<DocumentUnsupportedNote row={row} />").length - 1, 1);
+    assert.equal(listRender.split("{renderRowActions?.(row)}").length - 1, 2, "화면이 줄 단추 슬롯을 두 곳에 걸지 않는다");
   });
 
   test("🔴 편집 화면 — 화면도 같은 판정을 본다(엑셀 전용 케이블은 열려 있다)", () => {

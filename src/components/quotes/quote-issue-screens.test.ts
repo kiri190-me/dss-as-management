@@ -13,9 +13,9 @@ import { readFileSync } from "node:fs";
  * 갈래, 편집 화면 머리)에서 받기를 모두 걷어냈다.** 견적서 엑셀은 [저장]이 사내 공유폴더에
  * 넣고(server/actions/quotes.ts 의 archiveDocumentAfterSave), 받는 길은 그 폴더 하나다.
  *
- * QuoteListScreen · QuoteEditForm · QuoteAttachmentsSection 은 서버 액션을 부르는 클라이언트
+ * 견적서 목록 · QuoteEditForm · QuoteAttachmentsSection 은 서버 액션을 부르는 클라이언트
  * 컴포넌트라 이 시험 환경에서 그려 볼 수 없다(`server-only`). 그래서 이웃 시험
- * (quote-attachment-screens.test.ts · QuoteListScreen.test.ts)과 같은 방법으로 원본을 글자로
+ * (quote-attachment-screens.test.ts · quote-list-screen-source.test.ts)과 같은 방법으로 원본을 글자로
  * 읽는다. 인쇄 미리보기가 실제로 무엇을 그리는지는 QuoteIssueButton.test.tsx 가 값으로 본다.
  *
  * 불변식 넷:
@@ -45,7 +45,15 @@ const sliceBetween = (source: string, startMarker: string, endMarker: string) =>
 const withoutComments = (source: string) =>
   source.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 
-const list = read("src/components/quotes/QuoteListScreen.tsx");
+/**
+ * 🔴 **목록 쪽 원본이 둘로 갈렸다**(2026-10-07 · 설계서 G절 조각 4). 화면은 공용 묶음의
+ * 한 벌이 되었고(`vendor/dss-core`), 받기가 있던 자리를 포함해 A/S 에만 있는 조각은 전부
+ * 그 화면이 비워 둔 **슬롯**으로 옮겨 갔다(QuoteListSlots.tsx). 받기가 되살아날 수 있는
+ * 곳은 **슬롯 쪽**이므로 그것을 「목록」으로 읽는다 — 화면 쪽은 두 사이트가 함께 쓰는
+ * 한 벌이라 받기가 애초에 없다.
+ */
+const list = read("src/components/quotes/QuoteListSlots.tsx");
+const listScreen = read("vendor/dss-core/src/ui/quotes/QuoteListScreen.tsx");
 const form = flat(read("src/components/quotes/QuoteEditForm.tsx"));
 const printPage = flat(read("src/app/(app)/quotes/[id]/print/page.tsx"));
 const printView = flat(read("src/components/quotes/QuotePrintView.tsx"));
@@ -107,23 +115,29 @@ describe("🔴 네 화면 어디에도 받기 주소가 없다 — 되살아나�
 });
 
 describe("목록 — 표와 카드 두 곳 모두", () => {
-  const table = flat(sliceBetween(list, "function QuoteTable(", "function QuoteCardList("));
-  const cards = flat(sliceBetween(list, "function QuoteCardList(", "function PreviewLink("));
+  // 🔴 줄 단추를 **고르는 곳은 슬롯 한 곳**이고, 화면이 그 한 자리를 표와 카드 두 곳에
+  //    건다. 그래서 「표에만 받기가 되살아나는」 고장이 애초에 생기지 않는다 — 그래도
+  //    두 곳에 걸려 있는지는 그대로 잰다(걸리지 않으면 곁말이 통째로 사라진다).
+  const table = flat(sliceBetween(listScreen, "function QuoteTable(", "function QuoteCardList("));
+  const cards = flat(sliceBetween(listScreen, "function QuoteCardList(", "function SummaryLine("));
   const CALL = "<DocumentUnsupportedNote row={row} />";
 
-  test("🔴 받기를 부르던 조각이 없다 — 표에도 카드에도", () => {
-    for (const [name, source] of [["표", table], ["카드", cards]] as const) {
+  test("🔴 받기를 부르던 조각이 없다 — 슬롯에도 화면에도", () => {
+    for (const [name, source] of [
+      ["슬롯", flat(list)],
+      ["화면", flat(listScreen)],
+    ] as const) {
       assert.ok(!source.includes("<DownloadLink"), `${name} 에 받기 조각이 남았다`);
+      assert.ok(!source.includes("function DownloadLink("), `${name} 에 받기 조각 자체가 남았다`);
     }
-    assert.ok(!flat(list).includes("function DownloadLink("), "받기 조각 자체가 남았다");
   });
 
   test("🔴 못 하는 일을 말없이 감추지 않는다 — 표와 카드가 같은 곁말을 부른다", () => {
     // 앱 양식이 없는 종류는 [미리보기 · PDF]도 없어 칸이 통째로 빈다 — 까닭을 곁말로 적는다.
-    assert.ok(table.includes(CALL), "표의 곁말이 바뀌었다");
-    assert.ok(cards.includes(CALL), "카드의 곁말이 바뀌었다");
-    assert.equal(flat(list).split(CALL).length - 1, 2, "곁말을 부르는 곳이 둘이 아니다");
-    const note = flat(sliceBetween(list, "function DocumentUnsupportedNote(", "function IntakeLink("));
+    assert.ok(table.includes("{renderRowActions?.(row)}"), "표가 줄 단추 슬롯을 걸지 않는다");
+    assert.ok(cards.includes("{renderRowActions?.(row)}"), "카드가 줄 단추 슬롯을 걸지 않는다");
+    assert.equal(flat(list).split(CALL).length - 1, 1, "곁말을 부르는 곳이 하나가 아니다");
+    const note = flat(sliceBetween(list, "function DocumentUnsupportedNote(", "\n}\n"));
     assert.ok(note.includes("if (canRenderQuoteDocument(row)) return null;"), note);
     assert.ok(note.includes("title={QUOTE_DOCUMENT_UNSUPPORTED_MESSAGE}"), note);
     assert.ok(!note.includes("canEdit"), "권한 갈래가 남았다");

@@ -19,7 +19,7 @@ import { domesticOrderTrashLabel, UNLABELED_DOMESTIC_ORDER } from "./domestic-or
  * ── 왜 렌더하지 않고 원본을 읽는가 ──────────────────────────────────────
  * 목록 화면은 서버 액션을 import 하는 클라이언트 컴포넌트라, 그 사슬 끝의
  * `server-only` 때문에 react-server 조건 없이 도는 test:components 에서는
- * import 자체가 던진다. 이웃 시험(quotes/QuoteListScreen.test.ts)과 같은 방법으로
+ * import 자체가 던진다. 이웃 시험(quotes/quote-list-screen-source.test.ts)과 같은 방법으로
  * 원본을 글자로 읽는다.
  * ============================================================================
  */

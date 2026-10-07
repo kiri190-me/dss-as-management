@@ -292,7 +292,7 @@ describe("자리 — 「이 건의 견적서 폴더」 구역들 **아래**", ()
       quotesTabPage.slice(quotesTabPage.indexOf("hasQuoteArchiveProductKeys"))
     );
     // 🔴 견적서 목록보다도, 「이 건의 견적서 폴더」 구역들보다도 **뒤**다.
-    const list = quotesTabPage.indexOf("<QuoteListScreen");
+    const list = quotesTabPage.indexOf("<QuoteListSlots");
     const thisCase = quotesTabPage.indexOf("{archiveFolderGroups.map(");
     const product = quotesTabPage.indexOf("<QuoteArchiveProductFolderSection");
     assert.ok(list >= 0 && thisCase > list, "이 건의 폴더 구역이 목록보다 앞에 있다");

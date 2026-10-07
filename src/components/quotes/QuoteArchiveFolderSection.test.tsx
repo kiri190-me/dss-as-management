@@ -405,8 +405,8 @@ describe("통로를 부르는 길 — 던지지 않는다", () => {
  * 있다. 그래서 머리에 본 번호를 적어 가른다. 묶는 규칙 자체는
  * quote-archive-folder-groups.test.ts 가 본다.
  *
- * 🔴 목록 화면(QuoteListScreen)은 vendor/dss-core 에 쌍둥이가 있어 **건드리지 않는다** —
- * 그 화면 안이 아니라 페이지에서 그 아래에 붙였다.
+ * 🔴 목록 화면은 **서브모듈(vendor/dss-core)의 한 벌**이라 건드리지 않는다(2026-10-07 부터는
+ * 고칠 수도 없다) — 그 화면 안이 아니라 페이지에서 그 아래에 붙였다.
  * ============================================================================
  */
 describe("자리 — 수리 건 「견적서」 탭", () => {
@@ -424,7 +424,7 @@ describe("자리 — 수리 건 「견적서」 탭", () => {
       quotesTabPage.slice(quotesTabPage.indexOf("archiveFolderGroups.map"))
     );
     // 🔴 목록보다 **뒤**다.
-    const list = quotesTabPage.indexOf("<QuoteListScreen");
+    const list = quotesTabPage.indexOf("<QuoteListSlots");
     const section = quotesTabPage.indexOf("<QuoteArchiveFolderSection");
     assert.ok(list >= 0 && section > list, "구역이 견적서 목록보다 앞에 있다");
   });
@@ -456,10 +456,19 @@ describe("자리 — 수리 건 「견적서」 탭", () => {
     assert.equal(/archiveFolderGroups\.length/.test(quotesTabPage), false, "빈 묶음을 따로 분기한다");
   });
 
-  test("🔴 목록 화면(QuoteListScreen)을 건드리지 않는다 — vendor 에 쌍둥이가 있다", () => {
-    const listScreen = readFileSync(path.join(srcDir, "components", "quotes", "QuoteListScreen.tsx"), "utf8");
-    assert.equal(listScreen.includes("QuoteArchiveFolderSection"), false, "목록 화면에 구역을 넣었다");
-    assert.equal(listScreen.includes("archive-folder"), false, "목록 화면이 공유폴더 통로를 안다");
+  test("🔴 목록 화면을 건드리지 않는다 — 서브모듈의 한 벌이다", () => {
+    // 🔴 2026-10-07(설계서 G절 조각 4)부터 목록 화면은 **서브모듈의 것**이다 — 이 저장소의
+    //    복사본은 지웠다. 「건드리지 않는다」가 이제 「고칠 수 없다」가 되었고, 재는 것은
+    //    그대로다: 공유폴더 구역은 그 화면 안이 아니라 **페이지**에 붙는다.
+    const listScreen = readFileSync(
+      path.join(srcDir, "..", "vendor", "dss-core", "src", "ui", "quotes", "QuoteListScreen.tsx"),
+      "utf8"
+    );
+    const listSlots = readFileSync(path.join(srcDir, "components", "quotes", "QuoteListSlots.tsx"), "utf8");
+    for (const [name, source] of [["화면", listScreen], ["슬롯", listSlots]] as const) {
+      assert.equal(source.includes("QuoteArchiveFolderSection"), false, `목록 ${name} 에 구역을 넣었다`);
+      assert.equal(source.includes("archive-folder"), false, `목록 ${name} 이 공유폴더 통로를 안다`);
+    }
   });
 
   test("🔴 구역이 여럿 서도 머리로 가른다 — 같은 id 를 여러 번 쓰지 않는다", () => {

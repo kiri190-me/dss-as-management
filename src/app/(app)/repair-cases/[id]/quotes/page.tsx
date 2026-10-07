@@ -11,12 +11,17 @@ import { groupQuotesByArchiveBaseNumber } from "@/components/quotes/quote-archiv
  * from the server"). 까닭은 quote-archive-product-keys.ts 머리말에 적었다.
  */
 import { hasQuoteArchiveProductKeys } from "@/components/quotes/quote-archive-product-keys";
-import QuoteListScreen from "@/components/quotes/QuoteListScreen";
+import QuoteListSlots, { NewQuoteControl } from "@/components/quotes/QuoteListSlots";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { listQuotesForRepairCase } from "@/lib/db/queries/quotes";
 import { newQuoteHrefForRepairCase } from "@/lib/domain/quote-new-link";
+import {
+  deleteQuoteAction,
+  permanentlyDeleteQuoteAction,
+  restoreQuoteAction,
+} from "@/lib/server/actions/quotes";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 
 /**
@@ -36,10 +41,16 @@ import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
  * 그래서 여기서 `quotes` READ 를 **다시** 확인한다(`quotes/new/page.tsx` 가
  * 같은 이유로 같은 일을 한다).
  *
- * 목록 화면은 PO/내자와 **같은 것을 쓴다**(QuoteListScreen). 한 벌 더 만들면
- * 같은 견적서의 금액·요약 줄이 두 화면에서 갈라지는 날이 온다. 다른 것은 둘
+ * 목록 화면은 PO/내자와 **같은 것을 쓴다** — 🔴 **2026-10-07 부터는 말 그대로 한
+ * 벌**이다(`@dss/core/ui/quotes/QuoteListScreen` — vendor/dss-core 서브모듈). 그
+ * 전까지 이 저장소에 있던 복사본은 지웠다. 한 벌 더 만들면 같은 견적서의 금액·요약
+ * 줄이 두 화면에서 갈라지는 날이 온다(설계서 F절 5번 · G절 조각 4). 다른 것은 둘
  * 뿐이다: `새 견적서` 단추가 **이 건의 인수번호를 싣고** 가는 것과, 한 장도
  * 없을 때의 안내 문장.
+ *
+ * 🔴 화면을 곧바로 부르지 않고 얇은 클라이언트 조각(QuoteListSlots)을 거친다 —
+ * 이 파일은 서버 컴포넌트라 **함수 슬롯을 넘길 수 없다**(넘기면 화면이 통째로
+ * 죽고, tsc 도 lint 도 잡지 못한다. 까닭은 그 파일 머리말에 있다).
  *
  * 휴지통은 넘기지 않는다(`canDelete={false}`, `trashRows={[]}`). 지운 장을
  * 되살리는 자리는 PO/내자 목록 하나이고, 이 탭이 두 번째 자리가 되면 "어디서
@@ -49,8 +60,8 @@ import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
  * 목록 **바로 아래**에 그 견적서들의 사내 공유폴더 안을 보여 준다(줄마다 [열기]로
  * 그 파일을 PC 의 프로그램으로 연다). 자리가 여기인 까닭은 사용자가 그렇게 짚었기
  * 때문이다 — 「공유 폴더 목록이 견적서 목록 아래에 뜨도록」.
- *  · 🔴 목록 화면 **안**이 아니라 이 페이지에 붙인다. QuoteListScreen 은 PO/내자와
- *    함께 쓰는 한 벌이고 `vendor/dss-core` 에 쌍둥이가 있어 건드리지 않는다.
+ *  · 🔴 목록 화면 **안**이 아니라 이 페이지에 붙인다. 그 화면은 PO/내자와 함께 쓰는
+ *    한 벌이고 **서브모듈(`vendor/dss-core`)이라 한 글자도 고칠 수 없다.**
  *  · 🔴 구역 수는 **장 수가 아니라 폴더 수**다 — 아래 묶기 참고.
  * ============================================================================
  */
@@ -125,7 +136,7 @@ export default async function RepairCaseQuotesPage({
 
   return (
     <>
-      <QuoteListScreen
+      <QuoteListSlots
         rows={rows}
         trashRows={[]}
         canEdit={canEdit}
@@ -134,24 +145,44 @@ export default async function RepairCaseQuotesPage({
          * 🔴 인수번호를 실어 보낸다. 폼이 그것으로 **기존 「인수번호로 불러오기」
          * 길을 그대로 탄다** — 여기서 값을 따로 채우면 두 입구가 서로 다른 값을
          * 채우게 되고, 그 차이는 한참 뒤에 금액으로 드러난다.
+         *
+         * 🔴 단추와 그것이 여는 팝업은 클라이언트 조각이 든다(창을 여닫는 것은
+         * 상태다). 이 슬롯은 ReactNode 라 서버 경계를 넘고, **주소를 아는 곳은
+         * 여기**다. `key` 를 빼지 마라 — 까닭은 NewQuoteControl 머리말에 있다.
          */
-        newQuoteHref={newQuoteHrefForRepairCase({
-          repairCaseId: resolved.id,
-          intakeNumber: resolved.intakeNumber,
-        })}
+        newQuoteControl={
+          <NewQuoteControl
+            key="new-quote"
+            baseHref={newQuoteHrefForRepairCase({
+              repairCaseId: resolved.id,
+              intakeNumber: resolved.intakeNumber,
+            })}
+          />
+        }
         emptyMessage="이 접수 건에 등록된 견적서가 없습니다. 「새 견적서」로 만들면 이 건에 붙습니다."
         /**
          * 줄을 눌러 여는 수정 화면에 이 건의 id 를 싣는다 — [취소]가 PO/내자 목록이
          * 아니라 **이 탭으로** 돌아오게. 돌아갈지는 수정 화면이 그 견적서의 건과
          * 맞춰 보고 정한다(domain/quote-new-link.ts 의 returnHrefForEditQuote).
+         * [미리보기 · PDF] 도 같은 값을 싣는다(quotePrintHref).
          */
         quoteLinkRepairCaseId={resolved.id}
+        /**
+         * 🔴 휴지통 액션은 **넘기지만 쓰이지 않는다** — 공용 화면이 받아야 하는 값이고,
+         * 이 탭은 `canDelete={false}` 라 휴지통 탭도 줄의 [삭제]도 그리지 않는다.
+         * 되살리고 완전 삭제하는 자리는 견적서 목록 하나 그대로다(위 머리말).
+         */
+        trashActions={{
+          deleteQuote: deleteQuoteAction,
+          restoreQuote: restoreQuoteAction,
+          permanentlyDeleteQuote: permanentlyDeleteQuoteAction,
+        }}
       />
 
       {/*
         🔴 **공유폴더 구역은 목록 바로 아래**다(사용자 결정 2026-10-06 — 「공유 폴더 목록이
-        견적서 목록 아래에 뜨도록」). 목록 화면(QuoteListScreen)은 PO/내자와 함께 쓰는 한 벌이고
-        vendor/dss-core 에 쌍둥이가 있어 **건드리지 않는다** — 그래서 그 화면 안이 아니라 이
+        견적서 목록 아래에 뜨도록」). 목록 화면은 PO/내자와 함께 쓰는 한 벌이고
+        **서브모듈(vendor/dss-core)이라 고칠 수 없다** — 그래서 그 화면 안이 아니라 이
         페이지에서 그 아래에 붙인다.
 
         감싸는 상자를 따로 두지 않고 조각(fragment)으로 둔다 — 바깥 레이아웃이 이미

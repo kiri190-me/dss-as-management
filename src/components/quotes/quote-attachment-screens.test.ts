@@ -6,9 +6,9 @@ import { readFileSync } from "node:fs";
  * ============================================================================
  * 견적서 첨부 Q3 — 화면이 조각 · 도우미를 제자리에서 부르는가
  * ============================================================================
- * QuoteEditForm · QuoteListScreen · QuoteAttachmentsSection 은 서버 액션을 부르는 클라이언트
+ * QuoteEditForm · 견적서 목록 · QuoteAttachmentsSection 은 서버 액션을 부르는 클라이언트
  * 컴포넌트라 이 시험 환경에서 그려 볼 수 없다(`server-only`). 그래서 이웃 시험
- * (QuoteListScreen.test.ts · quote-edit-work-scope-suppression.test.ts)과 같은 방법으로
+ * (quote-list-screen-source.test.ts · quote-edit-work-scope-suppression.test.ts)과 같은 방법으로
  * 원본을 글자로 읽는다. 조각이 무엇을 그리는지는 QuoteAttachmentParts.test.tsx ·
  * quote-print-excel-only.test.tsx 가, 판정 값은 quote-attachment-files.test.ts 가 본다.
  * ============================================================================
@@ -32,7 +32,14 @@ const indexOrFail = (source: string, marker: string) => {
 };
 
 const form = flat(read("src/components/quotes/QuoteEditForm.tsx"));
-const list = read("src/components/quotes/QuoteListScreen.tsx");
+/**
+ * 🔴 목록은 2026-10-07 부터 **공용 묶음의 한 벌**이다(설계서 G절 조각 4). 이 저장소의
+ * 복사본은 지웠고, A/S 에만 있는 조각은 그 화면이 비워 둔 **슬롯**으로 들어간다
+ * (QuoteListSlots.tsx). 그래서 둘을 함께 읽는다 — 슬롯을 **채우는 쪽**과 그것을 **표와
+ * 카드 두 곳에 거는 쪽**이 갈렸다.
+ */
+const listScreen = read("vendor/dss-core/src/ui/quotes/QuoteListScreen.tsx");
+const listSlots = read("src/components/quotes/QuoteListSlots.tsx");
 const printPage = flat(read("src/app/(app)/quotes/[id]/print/page.tsx"));
 const editPage = flat(read("src/app/(app)/quotes/[id]/page.tsx"));
 
@@ -156,18 +163,24 @@ describe("엑셀 전용 스위치", () => {
 });
 
 describe("목록 — 표와 카드 두 곳 모두", () => {
-  const table = flat(sliceBetween(list, "function QuoteTable(", "function QuoteCardList("));
-  const cards = flat(sliceBetween(list, "function QuoteCardList(", "function PreviewLink("));
+  const table = flat(sliceBetween(listScreen, "function QuoteTable(", "function QuoteCardList("));
+  const cards = flat(sliceBetween(listScreen, "function QuoteCardList(", "function SummaryLine("));
 
   test("🔴 표시 조각을 표와 카드 모두 같은 줄 값으로 부른다 — 창 폭에 따라 달라지지 않게", () => {
-    assert.ok(table.includes("<QuoteFileBadges row={row} />"), "표에 표시가 없다");
-    assert.ok(cards.includes("<QuoteFileBadges row={row} />"), "카드에 표시가 없다");
+    // 🔴 조각을 **고르는 곳은 한 곳**(슬롯)이고, 화면이 그 한 자리를 두 곳에 건다.
+    //    그래서 「한쪽만 바뀌는」 고장이 애초에 생기지 않는다 — 그래도 둘 다 잰다.
+    assert.ok(
+      flat(listSlots).includes("renderFileBadges={(row) => <QuoteFileBadges row={row} />}"),
+      "목록이 표시 조각을 슬롯에 걸지 않는다"
+    );
+    assert.ok(table.includes("{renderFileBadges?.(row)}"), "표에 표시가 없다");
+    assert.ok(cards.includes("{renderFileBadges?.(row)}"), "카드에 표시가 없다");
   });
 
   test("금액 옆 괄호도 두 곳 모두 같은 도우미", () => {
     assert.ok(table.includes("({quoteListAmountNote(row)})"), table);
     assert.ok(cards.includes("({quoteListAmountNote(row)} · 부가세 별도)"), cards);
-    assert.ok(!list.includes("{row.itemCount}품목"), "옛 품목 괄호가 남았다");
+    assert.ok(!listScreen.includes("{row.itemCount}품목"), "옛 품목 괄호가 남았다");
   });
 });
 
