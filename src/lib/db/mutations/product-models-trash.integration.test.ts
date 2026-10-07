@@ -8,6 +8,7 @@ import { db, pgClient } from "../connection";
 import {
   auditLogs,
   customers,
+  productModelShareDocs,
   productModels,
   products,
   repairCaseIntakeSequences,
@@ -60,6 +61,12 @@ let customerId: string;
 const touchedProductModelIds: string[] = [];
 const touchedProductIds: string[] = [];
 const touchedRepairCaseIds: string[] = [];
+/**
+ * 공유폴더 가리킴(2026-10-07). 🔴 줄 자체는 모델이 지워질 때 cascade 가 함께 걷지만,
+ * **감사 기록은 줄이 사라진 뒤에도 남는다** — 그것이 이 표의 유일한 흔적이기 때문이다
+ * (schema/product-model-share-docs.ts). 그래서 본 적 있는 id 를 따로 쥔다.
+ */
+const touchedShareDocIds: string[] = [];
 
 before(async () => {
   const [engineer] = await db
@@ -89,6 +96,7 @@ after(async () => {
     { entity: "product_models", ids: touchedProductModelIds },
     { entity: "products", ids: touchedProductIds },
     { entity: "repair_cases", ids: touchedRepairCaseIds },
+    { entity: "product_model_share_docs", ids: touchedShareDocIds },
   ];
   const createdAuditIds: string[] = [];
   for (const scope of auditScopes) {
@@ -133,6 +141,24 @@ async function createTestUnit(model: { id: string; modelName: string }) {
     .returning();
   touchedProductIds.push(row.id);
   return row;
+}
+
+/**
+ * 이 모델이 가리키는 **공유폴더 자리** 하나(2026-10-07). 디스크는 건드리지 않는다 —
+ * 표에 적는 줄뿐이다(schema/product-model-share-docs.ts 머리말).
+ */
+async function createTestShareDoc(
+  model: { id: string },
+  relativePath: string,
+  entryKind: "FILE" | "FOLDER",
+  label: string | null
+) {
+  const [row] = await db
+    .insert(productModelShareDocs)
+    .values({ productModelId: model.id, entryKind, relativePath, label, createdBy: actorId })
+    .returning({ id: productModelShareDocs.id });
+  touchedShareDocIds.push(row.id);
+  return row.id;
 }
 
 async function createTestRepairCase(model: { id: string; modelName: string }) {
@@ -423,6 +449,118 @@ describe("purgeExpiredProductModel", () => {
       .where(and(eq(auditLogs.targetRecordId, model.id), eq(auditLogs.actionType, "PURGE")));
     assert.ok(log);
     assert.equal(log.actorUserId, null, "자동 정리는 사람이 한 일이 아니다");
+  });
+
+  test("🔴 공유폴더 가리킴이 함께 사라질 때 **감사에 남는다** — cascade 는 말이 없다", async () => {
+    const model = await createTestModel("PURGE-SHARE-DOCS");
+    const folderPath = `${TEST_MODEL_PREFIX}SHARE/1.  인수시 서류`;
+    const filePath = `${TEST_MODEL_PREFIX}SHARE/2. 회로도.pdf`;
+    const folderDocId = await createTestShareDoc(model, folderPath, "FOLDER", "인수시 서류");
+    const fileDocId = await createTestShareDoc(model, filePath, "FILE", null);
+
+    const deleted = await softDeleteProductModel({
+      productModelId: model.id,
+      expectedUpdatedAt: model.updatedAt.toISOString(),
+      actorUserId: actorId,
+      reason: null,
+    });
+    assert.equal(deleted.ok, true);
+    await backdateDeletion(model.id, MASTER_DATA_TRASH_RETENTION_DAYS + 1);
+
+    assert.equal(await purgeExpiredProductModel(model.id), "PURGED");
+    assert.equal(await readModel(model.id), undefined);
+
+    // 🔴 줄은 cascade 가 지운다 — 자동 정리가 손으로 지운 것이 아니다(그래도 사라져 있다).
+    const left = await db
+      .select({ id: productModelShareDocs.id })
+      .from(productModelShareDocs)
+      .where(inArray(productModelShareDocs.id, [folderDocId, fileDocId]));
+    assert.deepEqual(left, [], "모델이 지워졌는데 가리킴이 남았다");
+
+    // 🔴 줄마다 PURGE 감사 한 줄. 휴지통이 없는 표라 이것이 **유일한 흔적**이다.
+    const shareDocLogs = await db
+      .select({
+        targetRecordId: auditLogs.targetRecordId,
+        actionType: auditLogs.actionType,
+        actorUserId: auditLogs.actorUserId,
+        previousValue: auditLogs.previousValue,
+        newValue: auditLogs.newValue,
+      })
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.targetEntity, "product_model_share_docs"),
+          inArray(auditLogs.targetRecordId, [folderDocId, fileDocId])
+        )
+      );
+    assert.equal(shareDocLogs.length, 2, JSON.stringify(shareDocLogs));
+    for (const log of shareDocLogs) {
+      assert.equal(log.actionType, "PURGE");
+      assert.equal(log.actorUserId, null, "자동 정리는 사람이 한 일이 아니다");
+      assert.equal(log.newValue, null);
+    }
+
+    const folderLog = shareDocLogs.find((log) => log.targetRecordId === folderDocId);
+    assert.ok(folderLog);
+    const snapshot = folderLog.previousValue as Record<string, unknown>;
+    assert.deepEqual(Object.keys(snapshot).sort(), [
+      "createdAt",
+      "createdBy",
+      "displayOrder",
+      "entryKind",
+      "id",
+      "label",
+      "productModelId",
+      "relativePath",
+    ]);
+    assert.equal(snapshot.id, folderDocId);
+    assert.equal(snapshot.productModelId, model.id);
+    assert.equal(snapshot.entryKind, "FOLDER");
+    // 공백 두 칸이 그대로다 — 다듬은 이름으로는 **없는 폴더**가 된다.
+    assert.equal(snapshot.relativePath, folderPath);
+    assert.equal(snapshot.label, "인수시 서류");
+    assert.equal(snapshot.displayOrder, null);
+    assert.equal(snapshot.createdBy, actorId);
+    assert.equal(typeof snapshot.createdAt, "string");
+
+    // 🔴 **이 한 줄로 다시 적을 수 있는가** — 주인 모델만 산 것으로 바꿔 그대로 넣는다
+    //    (주인은 영구 삭제됐으므로 같은 id 로는 되살릴 수 없다. 되살릴 수 있어야 하는
+    //    것은 「어느 자리를 가리켰는가」다).
+    const reborn = await createTestModel("PURGE-SHARE-DOCS-REBORN");
+    const [reinserted] = await db
+      .insert(productModelShareDocs)
+      .values({
+        productModelId: reborn.id,
+        entryKind: snapshot.entryKind as "FILE" | "FOLDER",
+        relativePath: snapshot.relativePath as string,
+        label: snapshot.label as string | null,
+        createdBy: snapshot.createdBy as string,
+      })
+      .returning({
+        entryKind: productModelShareDocs.entryKind,
+        relativePath: productModelShareDocs.relativePath,
+        label: productModelShareDocs.label,
+        id: productModelShareDocs.id,
+      });
+    touchedShareDocIds.push(reinserted.id);
+    assert.equal(reinserted.entryKind, "FOLDER");
+    assert.equal(reinserted.relativePath, folderPath);
+    assert.equal(reinserted.label, "인수시 서류");
+
+    // 🔴 모델 자신의 감사 줄도 **몇이 함께 사라졌는지**를 적는다(purgedProductIds 와 같은 결).
+    const [modelLog] = await db
+      .select({ previousValue: auditLogs.previousValue })
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.targetEntity, "product_models"),
+          eq(auditLogs.targetRecordId, model.id),
+          eq(auditLogs.actionType, "PURGE")
+        )
+      );
+    assert.ok(modelLog);
+    const modelSnapshot = modelLog.previousValue as Record<string, unknown>;
+    assert.deepEqual((modelSnapshot.purgedShareDocIds as string[]).slice().sort(), [folderDocId, fileDocId].sort());
   });
 
   test("복원된 뒤라면 만료 목록에 들어 있었더라도 지우지 않는다", async () => {

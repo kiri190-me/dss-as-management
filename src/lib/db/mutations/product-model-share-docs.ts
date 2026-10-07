@@ -1,0 +1,237 @@
+import "server-only";
+
+import { and, eq, sql } from "drizzle-orm";
+import { db } from "../client";
+import { insertAuditLog } from "./audit-logs";
+import { productModelShareDocs } from "../schema";
+
+/**
+ * ============================================================================
+ * 제품 **모델별** 공유폴더 가리킴 담기 · 지우기 (2026-10-07)
+ * ============================================================================
+ * 한 줄은 「이 모델의 서류는 사내 공유폴더의 **저기** 있다」는 가리킴 하나다.
+ * **파일도 사본도 들어오지 않는다** — 그래서 여기에는 디스크를 만지는 코드가 한 줄도
+ * 없다(schema/product-model-share-docs.ts 머리말).
+ *
+ * 종류별 담기·지우기(mutations/product-model-kind-share-docs.ts)와 **주인만 다르다** —
+ * 저쪽 주인은 enum 값이고 이쪽 주인은 `product_models` 의 행이다. 아래 규율은 저쪽의
+ * 것을 그대로 가져왔고, 까닭도 저쪽에 적힌 그대로다. 🔴 **저쪽이 바뀌는 날 이 파일도
+ * 함께 본다**(스키마 머리말이 두 표에 같은 약속을 걸어 두었다).
+ *
+ * ── 🔴 이 파일은 **DB 만** 본다 ──────────────────────────────────────────
+ * 「그 자리에 실제로 있는가」를 보는 일은 서버 액션이 한다
+ * (server/actions/product-model-share-docs.ts → storage/repair-docs-entries.ts).
+ * 두 일을 한 파일에 섞으면 DB 시험이 공유폴더를 쥐어야 돌게 되고, 공유폴더가 꺼진
+ * 개발 PC 에서 아무것도 못 돌린다.
+ *
+ * ── 🔴 **주인이 살아 있는지도 보지 않는다** ──────────────────────────────
+ * 모델이 휴지통에 있는지는 액션이 본다(queries/product-model-share-docs.ts 의
+ * getShareDocProductModel). 여기서 한 번 더 보면 같은 판정이 두 벌이 되고, 한쪽만
+ * 고치는 날 조용히 갈라진다. 이 파일이 지키는 것은 **표의 약속**(중복 · 감사)뿐이다.
+ *
+ * ── 🔴 휴지통이 없다 — 감사 로그가 **유일한 흔적**이다 ────────────────────
+ * 이 표는 소프트 삭제 4칸을 일부러 두지 않았다(종류별 표 머리말의 네 까닭). 그래서
+ * 지우면 줄이 **정말로 사라진다**:
+ *  · 담기 → `CREATE`, `new_value` 에 담은 줄
+ *  · 지우기 → `PURGE`, 🔴 **`previous_value` 에 지워진 줄을 통째로** — 되살리는 일이
+ *    「경로 한 줄을 다시 적는 일」이므로, 그 한 줄이 여기 남아야 되살릴 수 있다.
+ * `PURGE` 를 고른 까닭: 이 저장소에서 `SOFT_DELETE` 는 휴지통으로 **보내는** 일이고,
+ * 되돌릴 수 없는 **완전 삭제**는 `PURGE` 다. `audit_logs.target_entity` 는 enum 이
+ * 아니라 text 라 새 표 이름을 적는 데 마이그레이션이 필요 없다.
+ *
+ * 🔴 **모델이 영구 삭제될 때도 같은 줄이 남는다** — 그쪽은 FK 의 `ON DELETE CASCADE` 가
+ * 지우므로 이 파일을 지나지 않는다. 그래서 `purgeExpiredProductModel` 이 지우기 **전에**
+ * 같은 모양의 `PURGE` 를 남긴다(mutations/master-data-purge.ts).
+ *
+ * ── 🔴 중복은 **사람이 읽는 말**로 거절한다 ──────────────────────────────
+ * 표에 유니크가 있다 — 같은 모델에 **접어서 같은** 경로는 두 번 담기지 않는다
+ * (`lower(regexp_replace(btrim(normalize(relative_path, NFC)), '\s+', ' ', 'g'))`).
+ * 그대로 두면 사람에게 `23505` 가 보인다. 그래서 **같은 식으로 먼저 찾아 보고**
+ * 사람 말로 막고, 그 사이에 끼어든 요청이 만든 충돌은 `23505` 를 잡아 **같은 말**로
+ * 바꾼다. 🔴 접는 식을 여기 **베껴 적지 않고** 한 상수에 두 번 쓴다 — 두 벌로 적으면
+ * 인덱스와 갈라지는 날 조회만 통과하고 INSERT 가 터진다.
+ *
+ * ── 🔴 값을 다듬어 담지 않는다 ───────────────────────────────────────────
+ * 경로는 **들어온 글자 그대로** 담는다. 공유폴더에는 공백이 두 칸인 폴더가 실제로
+ * 있고, 다듬은 이름으로 이으면 없는 폴더가 된다(domain/share-folder-naming.ts 의
+ * 「비교할 때만 다듬고, 이을 때는 디스크의 실제 이름을 쓴다」). 다듬기는 **견줄
+ * 때만** 하고, 그 자리가 위의 접는 식이다.
+ * ============================================================================
+ */
+
+/** 🔴 감사 로그의 `target_entity`. 표 이름 그대로다 — 시험이 이 상수로 줄을 찾는다. */
+export const PRODUCT_MODEL_SHARE_DOCS_AUDIT_ENTITY = "product_model_share_docs";
+
+const DUPLICATE_MESSAGE = "같은 자리를 이미 담아 두었습니다.";
+const NOT_FOUND_MESSAGE = "해당 가리킴을 찾을 수 없습니다.";
+
+export type ProductModelShareDocEntryKind = "FILE" | "FOLDER";
+
+export type ProductModelShareDocMutationResult =
+  | { ok: true; id: string }
+  | { ok: false; code: "DUPLICATE" | "NOT_FOUND"; message: string };
+
+/**
+ * 🔴 **유니크 인덱스와 같은 식**으로 경로를 접는다. 인덱스 정의는
+ * schema/product-model-share-docs.ts 에 있고, 이 함수가 그 식을 **한 자리에서만**
+ * 다시 쓴다. `\\s+` 의 겹수는 TS → SQL 로 가며 한 겹 줄어 `'\s+'` 가 된다 — 스키마
+ * 쪽도 똑같이 적혀 있다.
+ */
+function foldedPath(value: unknown) {
+  return sql`lower(regexp_replace(btrim(normalize(${value}, NFC)), '\\s+', ' ', 'g'))`;
+}
+
+function hasPgCode(err: unknown, code: string): boolean {
+  return typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === code;
+}
+
+/** drizzle-orm 이 감싼 PostgresError 는 원본이 `.cause` 에 있다 — 둘 다 본다(이 저장소의 관례). */
+function isUniqueViolation(err: unknown): boolean {
+  if (hasPgCode(err, "23505")) return true;
+  const cause = err instanceof Error ? err.cause : undefined;
+  return hasPgCode(cause, "23505");
+}
+
+export type AddProductModelShareDocInput = {
+  productModelId: string;
+  entryKind: ProductModelShareDocEntryKind;
+  /** 🔴 루트 기준 상대 경로. **들어온 글자 그대로** 담는다(머리말). */
+  relativePath: string;
+  /** 비면(NULL) 화면이 경로의 마지막 마디를 쓴다. 🔴 빈 문자열은 DB CHECK 가 막는다. */
+  label: string | null;
+  actorUserId: string;
+};
+
+/**
+ * 가리킴 한 줄을 담는다. 줄과 감사 로그가 **한 트랜잭션**이다 — 담겼는데 기록이 없는
+ * 상태가 생기지 않는다.
+ */
+export async function addProductModelShareDoc(
+  input: AddProductModelShareDocInput
+): Promise<ProductModelShareDocMutationResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      // 유니크가 DB 에서도 막지만, 오류 문구를 사람이 읽을 수 있게 여기서 먼저 본다.
+      const [duplicate] = await tx
+        .select({ id: productModelShareDocs.id })
+        .from(productModelShareDocs)
+        .where(
+          and(
+            eq(productModelShareDocs.productModelId, input.productModelId),
+            sql`${foldedPath(productModelShareDocs.relativePath)} = ${foldedPath(input.relativePath)}`
+          )
+        );
+      if (duplicate) {
+        return { ok: false as const, code: "DUPLICATE" as const, message: DUPLICATE_MESSAGE };
+      }
+
+      const [created] = await tx
+        .insert(productModelShareDocs)
+        .values({
+          productModelId: input.productModelId,
+          entryKind: input.entryKind,
+          relativePath: input.relativePath,
+          label: input.label,
+          createdBy: input.actorUserId,
+        })
+        .returning({ id: productModelShareDocs.id });
+
+      await insertAuditLog(tx, {
+        actorUserId: input.actorUserId,
+        actionType: "CREATE",
+        targetEntity: PRODUCT_MODEL_SHARE_DOCS_AUDIT_ENTITY,
+        targetRecordId: created.id,
+        newValue: {
+          productModelId: input.productModelId,
+          entryKind: input.entryKind,
+          relativePath: input.relativePath,
+          label: input.label,
+        },
+      });
+
+      return { ok: true as const, id: created.id };
+    });
+  } catch (error) {
+    // 먼저 본 뒤에 끼어든 요청이 같은 자리를 담았다 — 사람에게는 같은 말이어야 한다.
+    if (isUniqueViolation(error)) {
+      return { ok: false, code: "DUPLICATE", message: DUPLICATE_MESSAGE };
+    }
+    throw error;
+  }
+}
+
+export type RemoveProductModelShareDocInput = {
+  id: string;
+  /**
+   * 🔴 **그 모델의 줄인지 함께 본다.** 권한은 모델마다 다르지 않지만, 화면이 보낸
+   * 모델과 줄의 모델이 어긋나면 그것은 「다른 칸을 지우고 있다」는 뜻이다 — 지우고
+   * 엉뚱한 화면을 다시 그리느니 **없는 것과 같이** 답한다.
+   */
+  productModelId: string;
+  actorUserId: string;
+};
+
+/**
+ * 가리킴 한 줄을 **정말로** 지운다(휴지통이 없다 — 머리말).
+ *
+ * 🔴 지우기 전에 줄을 통째로 읽어 `previous_value` 에 담는다. 그것이 유일한 흔적이다.
+ */
+export async function removeProductModelShareDoc(
+  input: RemoveProductModelShareDocInput
+): Promise<ProductModelShareDocMutationResult> {
+  return db.transaction(async (tx) => {
+    // 🔴 칸을 **이름으로 적어** 읽는다 — `select()` 전체 조회는 표에 칸이 느는 날
+    //    적용 전까지 조용히 깨진다(이 저장소에서 겪었다).
+    const [current] = await tx
+      .select({
+        id: productModelShareDocs.id,
+        productModelId: productModelShareDocs.productModelId,
+        entryKind: productModelShareDocs.entryKind,
+        relativePath: productModelShareDocs.relativePath,
+        label: productModelShareDocs.label,
+        displayOrder: productModelShareDocs.displayOrder,
+        createdBy: productModelShareDocs.createdBy,
+        createdAt: productModelShareDocs.createdAt,
+      })
+      .from(productModelShareDocs)
+      .where(
+        and(
+          eq(productModelShareDocs.id, input.id),
+          eq(productModelShareDocs.productModelId, input.productModelId)
+        )
+      );
+    if (!current) {
+      return { ok: false as const, code: "NOT_FOUND" as const, message: NOT_FOUND_MESSAGE };
+    }
+
+    const deleted = await tx
+      .delete(productModelShareDocs)
+      .where(eq(productModelShareDocs.id, input.id))
+      .returning({ id: productModelShareDocs.id });
+    if (deleted.length === 0) {
+      // 읽은 뒤 누군가 먼저 지웠다 — 감사 로그를 두 번 남기지 않는다.
+      return { ok: false as const, code: "NOT_FOUND" as const, message: NOT_FOUND_MESSAGE };
+    }
+
+    await insertAuditLog(tx, {
+      actorUserId: input.actorUserId,
+      actionType: "PURGE",
+      targetEntity: PRODUCT_MODEL_SHARE_DOCS_AUDIT_ENTITY,
+      targetRecordId: input.id,
+      // 🔴 **지워진 줄을 통째로.** 되살리는 일은 이 값으로 한 줄을 다시 적는 일이다.
+      previousValue: {
+        id: current.id,
+        productModelId: current.productModelId,
+        entryKind: current.entryKind,
+        relativePath: current.relativePath,
+        label: current.label,
+        displayOrder: current.displayOrder,
+        createdBy: current.createdBy,
+        createdAt: current.createdAt.toISOString(),
+      },
+      newValue: null,
+    });
+
+    return { ok: true as const, id: input.id };
+  });
+}

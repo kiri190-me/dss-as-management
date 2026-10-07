@@ -22,6 +22,7 @@ import {
   procedureTemplates,
   procedureTroubleshootingEntries,
   procedureValidationResolutionHistory,
+  productModelShareDocs,
   productModels,
   products,
   quoteItems,
@@ -210,6 +211,20 @@ export type PurgeProductModelOutcome = PurgeCustomerOutcome;
  * 순서·결과 종류가 같고, 다른 것은 딸려 가는 자식뿐이다: 등록 장비
  * (products) → 모델. products를 참조하는 것은 repair_cases뿐이므로 장비
  * 아래로는 더 내려갈 것이 없다.
+ *
+ * ── 🔴 공유폴더 가리킴은 **적기만** 한다 (2026-10-07) ────────────────────
+ * `product_model_share_docs` 는 `product_model_id` 를 **ON DELETE CASCADE** 로
+ * 가리킨다(schema/product-model-share-docs.ts). 그래서 아래 `tx.delete(productModels)`
+ * 한 줄이 그 모델의 가리킴을 **함께** 지운다 — 🔴 **여기서 손으로 DELETE 하지
+ * 않는다.** `restrict` 가 아니라 `cascade` 를 고른 까닭이 바로 「가리킴 한 줄이 남아
+ * 있다는 이유로 밤에 도는 이 자동 삭제가 조용히 실패하면 안 된다」였다
+ * (scripts/run-nightly-purge.ps1 이 매일 밤 부른다).
+ *
+ * 🔴 그런데 그 표에는 **휴지통이 없다** — 지워진 줄의 유일한 흔적이 감사 로그다
+ * (mutations/product-model-share-docs.ts). cascade 는 감사를 남기지 않으므로, 모델이
+ * 사라지기 전에 그 줄들을 읽어 두고 **같은 모양의 PURGE 를 여기서 적는다.** 딸린
+ * 장비(products)를 다루는 방식과 같다. 스키마 머리말이 「다음 조각의 숙제」로 적어 둔
+ * 바로 그 보강이다.
  */
 export async function purgeExpiredProductModel(
   id: string,
@@ -266,7 +281,49 @@ export async function purgeExpiredProductModel(
       }
     }
 
+    // 🔴 cascade 가 지우기 **전에** 통째로 읽어 둔다 — 지운 뒤에는 읽을 자료가 없다.
+    //    칸을 이름으로 적는 것은 이 저장소의 규칙이다(select() 전체 조회는 표에 칸이
+    //    느는 날 적용 전까지 조용히 깨진다). 행을 잠그는 것도 장비 쪽과 같다.
+    const ownShareDocs = await tx
+      .select({
+        id: productModelShareDocs.id,
+        productModelId: productModelShareDocs.productModelId,
+        entryKind: productModelShareDocs.entryKind,
+        relativePath: productModelShareDocs.relativePath,
+        label: productModelShareDocs.label,
+        displayOrder: productModelShareDocs.displayOrder,
+        createdBy: productModelShareDocs.createdBy,
+        createdAt: productModelShareDocs.createdAt,
+      })
+      .from(productModelShareDocs)
+      .where(eq(productModelShareDocs.productModelId, id))
+      .for("update");
+    const shareDocIds = ownShareDocs.map((shareDoc) => shareDoc.id);
+
+    // 🔴 가리킴은 이 한 줄이 cascade 로 함께 지운다 — 위에서 손으로 지우지 않았다.
     await tx.delete(productModels).where(eq(productModels.id, id));
+
+    // 🔴 지워진 줄을 **통째로** 남긴다 — 되살리는 일은 이 값으로 경로 한 줄을 다시
+    //    적는 일이다(mutations/product-model-share-docs.ts 의 지우기와 같은 모양이다).
+    for (const shareDoc of ownShareDocs) {
+      await insertAuditLog(tx, {
+        actorUserId: null,
+        actionType: "PURGE",
+        targetEntity: "product_model_share_docs",
+        targetRecordId: shareDoc.id,
+        previousValue: {
+          id: shareDoc.id,
+          productModelId: shareDoc.productModelId,
+          entryKind: shareDoc.entryKind,
+          relativePath: shareDoc.relativePath,
+          label: shareDoc.label,
+          displayOrder: shareDoc.displayOrder,
+          createdBy: shareDoc.createdBy,
+          createdAt: shareDoc.createdAt.toISOString(),
+        },
+        newValue: null,
+      });
+    }
 
     await insertAuditLog(tx, {
       actorUserId: null,
@@ -283,6 +340,9 @@ export async function purgeExpiredProductModel(
         deletedBy: current.deletedBy,
         deleteReason: current.deleteReason,
         purgedProductIds: productIds,
+        // 몇 개가 함께 사라졌는가 — purgedProductIds 와 같은 결이다. 줄의 내용은
+        // 위의 줄별 PURGE 에 통째로 들어 있다.
+        purgedShareDocIds: shareDocIds,
       },
       newValue: null,
     });

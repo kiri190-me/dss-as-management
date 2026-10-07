@@ -223,6 +223,14 @@ src/lib/db/queries/repair-cases-list-order.integration.test.ts
 # 건드리지 않는다 — 「그 자리에 있는가」는 서버 액션의 몫이다.
 # 🔴 격리 이름: 경로 앞머리 "AS-TEST-SHARE-DOC-<실행마다 다른 uuid>/".
 src/lib/db/mutations/product-model-kind-share-docs.integration.test.ts
+# 같은 것을 **모델 하나하나**에 두는 표(2026-10-07). 위와 같은 것을 못 박고, 주인이
+# enum 이 아니라 **행**이라 생기는 셋을 더 본다: 🔴 휴지통에 있는 모델은 **없는 것과
+# 같다**(담고 지우는 문을 여는 조회 getShareDocProductModel 이 거기서 닫는다) ·
+# 🔴 모델이 지워지면 가리킴도 함께 사라진다(FK 의 ON DELETE CASCADE) · 🔴 PURGE 감사
+# 한 줄의 값만으로 **같은 줄을 다시 세워 본다**. 디스크는 한 번도 건드리지 않는다.
+# 🔴 격리 이름: 모델 "AS-TEST-SHARE-MODEL-<실행마다 다른 uuid>-", 경로 앞머리
+# "AS-TEST-MODEL-SHARE-DOC-<같은 uuid>/".
+src/lib/db/mutations/product-model-share-docs.integration.test.ts
 
 # ── 첨부 영구 삭제 — 행도 파일도 진짜 사라지는가 (2026-10-07 사용자 승인) ────
 # 이웃 attachment-trash 가 「지워도 실물은 남는다」를 붙잡는다면 이쪽은 정반대다.
