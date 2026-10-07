@@ -160,8 +160,14 @@ test("고객 안내 현황은 목록 화면이라 팝업만 띄우고 머문다"
   // 걷혔다(고객이 의뢰를 넣을 길이 없어졌다) — 그 화면의 단언도 함께 사라졌다.
   const portal = readFileSync("src/components/customer-portal/CustomerPortalScreen.tsx", "utf8");
   assert.deepEqual(popupCalls("src/components/customer-portal/CustomerPortalScreen.tsx"), [["result.message", "null"]]);
-  // 거절 이유만 화면에 남는다.
-  assert.match(portal, /if \(!result\.ok\) \{\s*setMessage\(\{ ok: false, text: result\.message \}\);\s*return;\s*\}/);
+  // 🔴 거절은 **사람이 닫는 팝업**으로 간다(2026-10-07, 한 번에 저장으로 바뀌면서).
+  // 저장이 여러 줄을 한꺼번에 다루게 되어 거절 글이 「어느 줄이 왜 막혔는가」로
+  // 길어졌다 — 0.5초 뒤 사라지는 저장 팝업으로는 읽을 수 없다(NoticePopup.tsx 머리말).
+  assert.match(
+    portal,
+    /if \(!result\.ok\) \{[\s\S]{0,400}?setFailure\(\{[\s\S]{0,200}?lines: buildFailureLines\(result, editedRows\),[\s\S]{0,40}?\}\);\s*return;\s*\}/
+  );
+  assert.match(portal, /<NoticePopup/);
 });
 
 test("진단 Flowchart·초안을 만들면 그릴 차례라 편집 화면으로 넘어간다 — 팝업이 넘긴다", () => {

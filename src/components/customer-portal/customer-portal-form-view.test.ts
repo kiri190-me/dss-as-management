@@ -33,6 +33,13 @@ import {
  *  9. 🔴 **`전체 / RFG / MB` 고르개**(2026-10-07) — 낱말과 판정을 주간보고에서
  *     그대로 가져오고, 기본은 `전체` 이며, 걸렀으면 그 사실을 화면에 적고, 종류를
  *     알 수 없는 줄은 어느 보기에서도 감추지 않는다.
+ * 10. 🔴 **한 번에 저장**(2026-10-07 사용자 지시) — 줄마다의 [저장] 열이 없어지고
+ *     화면에 붙어 다니는 [저장] 하나가 되었다. 여기서 못 박는 것: **고친 줄만**
+ *     보낸다 · 줄마다 `expectedVersion` 이 그대로 간다 · **한 트랜잭션**이고 한
+ *     줄이라도 어긋나면 던져서 통째로 되돌린다 · 어긋난 줄을 **전부** 모아
+ *     사람이 닫는 팝업으로 짚어 준다 · 보기에서 빠진 줄도 저장하되 그 수를 미리
+ *     적는다 · **저장하지 않고 떠나면 한 번 묻는다**(줄마다 저장일 때는 없던
+ *     위험이다) · 줄이 제 상태를 갖지 않는다([저장] 하나가 값을 모아야 한다).
  *
  * ── 왜 렌더하지 않고 원본을 읽는가 ──────────────────────────────────────
  * CustomerPortalScreen 은 서버 액션(actions/customer-portal)을 직접 import 하는
@@ -88,8 +95,11 @@ describe("🔴 1. 밖으로 내보내던 길이 통째로 없어졌다 (2026-10-
 
   test("남은 액션은 상태 저장과 상태 목록 셋뿐이다", () => {
     const exported = [...code(action).matchAll(/export async function (\w+)/g)].map((m) => m[1]);
+    // 🔴 저장은 **하나**다. 2026-10-07 에 줄마다 부르던 setCustomerStatusAction 을
+    // 줄 묶음을 받는 saveCustomerStatusesAction 으로 바꾸면서, 줄 하나짜리 통로는
+    // 남기지 않았다 — 쓰는 데가 한 곳도 없는 쓰기 통로는 아무 시험도 지나지 않는다.
     assert.deepEqual(exported, [
-      "setCustomerStatusAction",
+      "saveCustomerStatusesAction",
       "createStatusOptionAction",
       "updateStatusOptionAction",
     ]);
@@ -170,16 +180,21 @@ describe("🔴 2. 기본 9열 표와 보기 전환이 없어졌다", () => {
 });
 
 describe("🔴 3. 낙관적 잠금이 그대로다", () => {
-  test("양식 표의 저장이 expectedVersion 을 싣는다", () => {
-    const calls = [...code(screen).matchAll(/setCustomerStatusAction\(\{([\s\S]*?)\}\)/g)];
-    // 2026-10-04 에 기본 9열 표가 없어지면서 저장하는 자리가 둘에서 하나로 줄었다.
+  test("양식 표의 저장이 줄마다 expectedVersion 을 싣는다", () => {
+    const body = flat(code(screen));
+    // 2026-10-04 에 기본 9열 표가 없어지면서 저장하는 자리가 둘에서 하나로 줄었고,
+    // 2026-10-07 에 줄마다의 [저장]이 화면 하나로 합쳐지면서 그 자리가
+    // toSavePayload 하나가 되었다. 🔴 **합쳐도 version 은 줄마다 그대로 간다.**
+    const calls = [...code(screen).matchAll(/saveCustomerStatusesAction\(\{([\s\S]*?)\}\)/g)];
     assert.equal(calls.length, 1, "저장하는 자리가 하나가 아니다");
-    for (const call of calls) {
-      assert.ok(
-        /expectedVersion: item\.statusVersion/.test(call[1]),
-        "expectedVersion 을 안 싣는 저장이 있다"
-      );
-    }
+    assert.ok(
+      body.includes("expectedVersion: item.statusVersion,"),
+      "expectedVersion 을 안 싣는다 — 한 번에 저장한다고 낙관적 잠금을 놓으면 남의 값을 덮는다"
+    );
+    assert.ok(
+      body.includes("function toSavePayload(editedRows: PortalRowView[]): CustomerStatusInputRow[]"),
+      "고친 줄을 서버 꼴로 옮기는 자리가 사라졌다"
+    );
   });
 
   test("mutation 이 version 을 조건으로 걸고 올린다", () => {
@@ -225,23 +240,25 @@ describe("🔴 4. 안 보낸 formValues 는 있던 값을 지우지 않는다", 
 describe("🔴 5. 저장할 때 양식은 서버가 고른다", () => {
   const body = flat(code(action));
 
-  test("접수에서 거슬러 올라가 고객사 이름을 읽는다", () => {
+  test("접수에서 거슬러 올라가 고객사 이름을 읽는다 — 🔴 줄마다 한 번씩", () => {
     assert.ok(
-      body.includes("getCustomerNameForRepairCase(input.repairCaseId)"),
+      body.includes("getCustomerNameForRepairCase(row.repairCaseId)"),
       "화면이 보낸 이름을 믿으면 남의 양식 칸을 적을 수 있다"
     );
-    assert.ok(body.includes("findPortalFormForCustomerName(customerName)"));
+    assert.ok(body.includes("findPortalFormForCustomerName(customerNames[index])"));
   });
 
   test("걸러 내는 문을 반드시 지난다", () => {
-    assert.ok(body.includes("sanitizeManualValues(form, input.formValues)"));
+    assert.ok(body.includes("sanitizeManualValues(form, row.formValues)"));
   });
 
   test("🔴 화면이 보낸 값이 그대로 mutation 으로 흘러가지 않는다", () => {
-    assert.ok(
-      !body.includes("formValues: input.formValues"),
-      "거르지 않은 값이 그대로 저장되면 양식이 아무 뜻이 없다"
-    );
+    for (const forbidden of ["formValues: input.formValues", "formValues: row.formValues"]) {
+      assert.ok(
+        !body.includes(forbidden),
+        `거르지 않은 값이 그대로 저장되면 양식이 아무 뜻이 없다: ${forbidden}`
+      );
+    }
   });
 
   test("양식 이름이나 id 를 입력으로 받지 않는다", () => {
@@ -423,7 +440,13 @@ describe("🔴 9. 전체 / RFG / MB 고르개", () => {
   test("표가 거른 줄을 그리고, 거르기 전의 수는 따로 들고 있다", () => {
     assert.ok(body.includes("const allItems = form ? (itemsByForm[form.id] ?? []) : [];"));
     assert.ok(body.includes("const items = filterPortalItemsByKind(allItems, kindFilter);"));
-    assert.ok(body.includes("<CustomerFormTable form={form} items={items}"));
+    // 표가 받는 것은 **보이는 줄만**이다. 고친 줄을 모으는 쪽은 거르기 전의 전부를
+    // 본다(아래 「10.」 묶음) — 보기를 좁혔다고 적은 것이 사라지면 안 된다.
+    assert.ok(body.includes("<CustomerFormTable form={form} views={visibleViews}"));
+    assert.ok(
+      body.includes("const visibleViews = rowViews.filter((view) => visibleKeys.has(view.rowKey));"),
+      "표에 넘길 줄을 거르는 자리가 사라졌다"
+    );
   });
 
   test("🔴 종류를 알 수 없는 줄은 어느 보기에서도 빠지지 않는다", () => {
@@ -469,6 +492,183 @@ describe("🔴 9. 전체 / RFG / MB 고르개", () => {
       body.includes("aria-pressed={filter === current}"),
       "눌린 단추를 색으로만 말한다"
     );
+  });
+});
+
+describe("🔴 10. 줄마다 [저장]이 아니라 화면에 [저장] 하나 (2026-10-07)", () => {
+  const body = flat(code(screen));
+  const rawScreen = flat(screen);
+  const actionBody = flat(code(action));
+  const mutationBody = flat(code(mutation));
+
+  test("🔴 표의 마지막 [저장] 열이 없어졌다 — 열이 엑셀 양식과 같아졌다", () => {
+    assert.ok(
+      !rawScreen.includes('<th scope="col" className="w-20 px-3 py-2 whitespace-nowrap"> 저장 </th>'),
+      "줄마다의 [저장] 머리글이 남았다"
+    );
+    assert.ok(
+      !body.includes("setCustomerStatusAction"),
+      "줄 하나짜리 저장 통로를 아직 부른다"
+    );
+  });
+
+  test("🔴 저장 단추는 하나이고, 표가 길어도 손이 닿는 자리에 붙어 있다", () => {
+    assert.ok(body.includes("<PortalSaveBar"), "저장 줄이 사라졌다");
+    assert.equal(
+      (body.match(/<PortalSaveBar/g) ?? []).length,
+      1,
+      "저장 줄이 하나가 아니다"
+    );
+    assert.ok(
+      flat(code(screen)).includes('className="sticky bottom-0'),
+      "저장 줄이 붙어 다니지 않는다 — 표가 길면 아래로 굴러 내려가 단추를 찾아야 한다"
+    );
+    // 고칠 수 없는 사람에게는 그리지 않는다 — 눌러도 아무 일이 없다.
+    assert.ok(body.includes("{canEdit ? ( <PortalSaveBar"));
+  });
+
+  test("🔴 고치지 않았으면 눌리지 않는다", () => {
+    const bar = body.slice(body.indexOf("function PortalSaveBar("));
+    assert.ok(bar.includes("const nothingToSave = editedCount === 0;"));
+    assert.ok(
+      bar.includes("disabled={nothingToSave || saving}"),
+      "고친 줄이 없어도 눌린다 — 누르면 아무 일이 없는 단추는 「저장이 안 된다」로 읽힌다"
+    );
+    assert.ok(
+      bar.includes("고친 줄이 없습니다"),
+      "왜 할 일이 없는지 글자로 말하지 않는다"
+    );
+  });
+
+  test("🔴 보내는 것은 **고친 줄뿐**이다 — 안 고친 줄을 보내면 남이 고친 값을 덮는다", () => {
+    assert.ok(
+      body.includes("function collectEditedRows(views: PortalRowView[]): PortalRowView[] { return views.filter((view) => view.dirty); }"),
+      "고친 줄만 거르는 자리가 사라졌다"
+    );
+    assert.ok(
+      body.includes("const rows = toSavePayload(editedRows);"),
+      "저장이 고친 줄 말고 다른 것을 싣는다"
+    );
+  });
+
+  test("🔴 고친 줄은 지금 보기에서 빠져 있어도 저장한다 — 대신 그 수를 적는다", () => {
+    assert.ok(
+      body.includes("buildRowViews({ form, items: allItems, statusOptions, drafts, passSlipResults })"),
+      "고친 줄을 거르기 **전**의 전부에서 찾지 않는다 — 고르개를 움직이면 적은 것이 사라진다"
+    );
+    assert.ok(
+      body.includes("const hiddenEditedCount = editedRows.filter((view) => !visibleKeys.has(view.rowKey)).length;"),
+      "안 보이는 줄이 몇 개나 함께 저장되는지 세지 않는다"
+    );
+    assert.ok(
+      body.includes("지금 보이지 않는 줄"),
+      "안 보이는 줄이 함께 저장된다는 사실을 누르기 전에 말하지 않는다"
+    );
+  });
+
+  test("🔴 줄은 자기 상태를 갖지 않는다 — 안 그러면 [저장] 하나가 그 값을 모을 수 없다", () => {
+    const row = code(screen).slice(code(screen).indexOf("function FormItemRow("));
+    assert.ok(!row.includes("useState"), "줄이 아직 제 상태를 들고 있다");
+    assert.ok(
+      body.includes("const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});"),
+      "고친 값을 화면이 한곳에 모으지 않는다"
+    );
+  });
+
+  test("🔴 저장은 한 트랜잭션이고, 한 줄이라도 어긋나면 던져서 통째로 되돌린다", () => {
+    assert.equal(
+      (mutationBody.match(/db\.transaction\(/g) ?? []).length,
+      1,
+      "트랜잭션이 하나가 아니다 — 줄마다 열면 반만 저장된다"
+    );
+    assert.ok(
+      mutationBody.includes("if (failures.length > 0) throw new CustomerStatusRollback(failures);"),
+      "실패를 값으로 돌려주면 그대로 commit 된다"
+    );
+    assert.ok(
+      mutationBody.includes("const result = await applyCustomerStatusRow(tx, row, actorUserId);"),
+      "줄마다의 기록이 같은 트랜잭션(tx)을 쓰지 않는다"
+    );
+  });
+
+  test("🔴 어긋난 줄을 **전부** 모아 화면까지 나른다", () => {
+    assert.ok(
+      mutationBody.includes("failures.push({ repairCaseId: row.repairCaseId, code: result.code, message: result.message, });"),
+      "어느 줄이 어긋났는지 모으지 않는다"
+    );
+    assert.ok(
+      actionBody.includes("failedRows: result.failures.map((failure) => ({"),
+      "어긋난 줄이 화면까지 가지 않는다 — 사람이 무엇을 고쳐야 할지 모른다"
+    );
+    assert.ok(
+      body.includes("lines: buildFailureLines(result, editedRows),"),
+      "화면이 어긋난 줄을 글자로 만들지 않는다"
+    );
+    assert.ok(
+      body.includes("describeRow(item)"),
+      "어긋난 줄을 접수번호로 짚어 주지 않는다 — id 만으로는 표에서 찾을 수 없다"
+    );
+  });
+
+  test("🔴 읽어야 하는 알림은 저절로 닫히지 않는다 — 실패는 NoticePopup, 성공만 SavePopup", () => {
+    assert.ok(body.includes("<NoticePopup"), "실패를 알리는 팝업이 없다");
+    assert.ok(
+      body.includes("setFailure({ title: \"저장하지 못했습니다\","),
+      "실패가 저절로 닫히는 팝업으로 간다"
+    );
+    // 성공은 예전 그대로 0.5초짜리 저장 팝업이다 — 읽을 것이 없다.
+    assert.ok(body.includes("showSavePopup({ message: result.message, redirectTo: null });"));
+    const save = body.slice(body.indexOf("function save() {"), body.indexOf("return ( <div className=\"flex flex-col gap-6 p-6\">"));
+    assert.ok(
+      !save.includes("showSavePopup") || save.indexOf("showSavePopup") > save.indexOf("if (!result.ok)"),
+      "실패한 저장이 성공 팝업을 띄운다"
+    );
+  });
+
+  test("🔴 저장하지 않고 떠나면 한 번 묻는다 — 줄마다 저장일 때는 없던 위험이다", () => {
+    assert.ok(
+      body.includes('window.addEventListener("beforeunload", handleBeforeUnload);'),
+      "떠날 때 경고가 없다 — 여러 줄을 고치다 다른 데로 가면 전부 잃는다"
+    );
+    assert.ok(
+      body.includes("if (editedRows.length === 0) return;"),
+      "고친 줄이 없어도 떠날 때 붙잡는다"
+    );
+    assert.ok(
+      body.includes("return () => window.removeEventListener(\"beforeunload\", handleBeforeUnload);"),
+      "떠날 때 경고를 걷지 않는다"
+    );
+  });
+
+  test("🔴 같은 접수가 두 번 들어오면 서버가 막는다 — 고치지도 않은 줄이 충돌로 잡힌다", () => {
+    assert.ok(
+      mutationBody.includes("if (seen.has(row.repairCaseId)) {"),
+      "같은 건이 두 번 들어오는 것을 막지 않는다"
+    );
+  });
+
+  test("🔴 앞뒤 공백만 다른 값은 「고친 줄」로 남지 않는다 — 저장해도 안 지워지는 셈이 된다", () => {
+    // 서버가 저장할 때 공백을 뗀다(액션의 note trim · sanitizeManualValues).
+    // 화면이 그대로 견주면 저장한 뒤에도 수가 0 이 되지 않고, 떠날 때마다 경고가 뜬다.
+    assert.ok(body.includes("draft.note.trim() !== baseline.note.trim()"));
+    assert.ok(
+      body.includes('(before[column.key] ?? "").trim() !== (after[column.key] ?? "").trim()'),
+      "손으로 적는 칸을 공백까지 넣어 견준다"
+    );
+  });
+
+  test("🔴 한 번에 보낼 수 있는 줄에 상한이 있다", () => {
+    assert.ok(actionBody.includes("const MAX_ROWS_PER_SAVE = 500;"));
+    assert.ok(actionBody.includes("if (rows.length > MAX_ROWS_PER_SAVE) {"));
+  });
+
+  test("🔴 거짓이 된 글이 남지 않았다 — 「줄마다 [저장]」", () => {
+    for (const source of [screen, action, mutation]) {
+      assert.ok(
+        !/줄마다 \[저장\]/.test(source.replace(/줄마다의 \[저장\]/g, "")),
+        "「줄마다 [저장]」이 아직 참인 것처럼 적혀 있다"
+      );
+    }
   });
 });
 

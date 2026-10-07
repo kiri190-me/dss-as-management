@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import NoticePopup from "@/components/common/NoticePopup";
 import { showSavePopup } from "@/components/common/SavePopup";
 import type { CustomerPortalItem } from "@/lib/db/queries/customer-portal";
 import {
@@ -29,7 +30,11 @@ import {
   type WeeklyReportKindFilter,
 } from "@/lib/domain/weekly-report-kind-filter";
 import { WEEKLY_REPORT_KINDS } from "@/lib/domain/weekly-report";
-import { setCustomerStatusAction } from "@/lib/server/actions/customer-portal";
+import {
+  saveCustomerStatusesAction,
+  type CustomerStatusInputRow,
+  type SaveCustomerStatusesResult,
+} from "@/lib/server/actions/customer-portal";
 
 /**
  * 고객 안내 현황 — 담당자가 실제로 일하는 화면.
@@ -61,6 +66,30 @@ import { setCustomerStatusAction } from "@/lib/server/actions/customer-portal";
  * 때마다 자동으로 나가게 하면, 여러 건을 고치는 동안 **반쯤 고친 표가 파일로
  * 계속 쌓인다.** 다 고치고 한 번 누르게 한다.
  *
+ * ■ 🔴 **[저장]은 화면에 하나다** (사용자 지시 2026-10-07)
+ *
+ * 전에는 표의 마지막 열이 줄마다의 [저장] 단추였다. 「각 줄을 각각 저장하는 것이
+ * 아니라 한번에 저장하는 거로」 바꾸면서 그 열을 없애고 표 아래 **붙어 다니는
+ * 저장 줄**(PortalSaveBar)을 하나 두었다. 표가 길어도 닿아야 하므로 `sticky
+ * bottom-0` 이다 — 밑으로 굴러 내려가 버리면 열 줄을 고친 사람이 단추를 찾아
+ * 다시 올라와야 한다.
+ *
+ * 그러면서 세 가지가 함께 따라온다:
+ *
+ *  1. 🔴 **고친 줄만 보낸다**(collectEditedRows). 안 고친 줄까지 실어 보내면 내
+ *     화면의 옛 값이 **그사이 남이 고친 값을 덮는다** — 아무 오류도 없이.
+ *  2. 🔴 **한 줄이라도 충돌하면 아무것도 저장하지 않는다**(서버가 한 트랜잭션).
+ *     반만 저장되면 사람은 「저장됐다」고 믿고 그대로 엑셀을 만들어 고객사에
+ *     보낸다. 어느 줄이 어긋났는지는 **사람이 닫는 팝업**으로 알린다.
+ *  3. 🔴 **저장하지 않고 떠나면 다 잃는다.** 줄마다 저장일 때는 한 줄 고치고
+ *     누르면 끝이었지만, 이제는 여러 줄을 한참 고치다 다른 데로 가면 전부
+ *     사라진다. 떠나기 전 경고(beforeunload)를 건다 — 이 저장소가 이미 세
+ *     화면에서 쓰는 방식 그대로다(ProcedureTemplateEditorScreen ·
+ *     CaseFlowchartEditorScreen · KyosanIntakeImportScreen). 🔴 그 셋과 똑같은
+ *     한계도 함께 온다: **앱 안에서 메뉴를 눌러 옮기는 길은 막지 못한다.**
+ *     그래서 저장 줄이 늘 떠 있으면서 「고친 줄 N개가 아직 저장되지 않았습니다」를
+ *     글자로 들고 있는다.
+ *
  * ■ `전체 / RFG / MB` 고르개 — 엑셀의 필터처럼 (2026-10-07 사용자 요청)
  *
  * 양식 단추 아래에 단추 셋이 더 선다(KindFilterTabs). 🔴 **낱말은 주간보고에서
@@ -86,6 +115,10 @@ import { setCustomerStatusAction } from "@/lib/server/actions/customer-portal";
  * 🔴 **종류를 알 수 없는 줄은 어느 보기에서도 감추지 않는다**(아래
  * filterPortalItemsByKind). 감추면 「있던 줄이 없어졌다」가 되고, 그 줄이야말로
  * 사람이 손봐야 할 줄이다.
+ *
+ * 🔴 **고친 줄은 지금 안 보이더라도 저장한다.** 고르개는 보기일 뿐이고, 고친
+ * 값을 보기에서 뺐다는 이유로 버리면 그 사람은 적은 것을 잃는다. 다만 자기가 보지
+ * 않는 줄이 함께 저장되는 것을 모르면 안 되므로, **저장 줄이 그 수를 적는다.**
  */
 export default function CustomerPortalScreen({
   formIds,
@@ -109,8 +142,22 @@ export default function CustomerPortalScreen({
    * 하는 일이지 그 양식의 성질이 아니다.
    */
   const [kindFilter, setKindFilter] = useState<WeeklyReportKindFilter>("ALL");
-  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
-  const [, startTransition] = useTransition();
+  /**
+   * 사람이 손댄 줄들(줄 열쇠 → 고친 값). 🔴 **손댄 줄만 들어온다** — 표 전체를
+   * 복사해 두면 「고쳤는가」를 물을 자리가 없어지고, 안 고친 줄까지 서버로 가서
+   * 남이 고친 값을 덮는다.
+   *
+   * 🔴 양식을 바꾸거나 고르개를 움직여도 **지우지 않는다.** 보기를 바꾼 것이지
+   * 적은 것을 버린 것이 아니다.
+   */
+  const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
+  /**
+   * 저장이 막혔을 때 뜨는 팝업. 🔴 `SavePopup` 이 아니다 — 그것은 0.5초 뒤 저절로
+   * 닫히는 **성공 전용**이고, 「어느 줄이 왜 막혔는가」는 읽는 데 그보다 오래
+   * 걸린다(common/NoticePopup.tsx 머리말).
+   */
+  const [failure, setFailure] = useState<{ title: string; lines: string[] } | null>(null);
+  const [saving, startTransition] = useTransition();
   const router = useRouter();
 
   /**
@@ -132,8 +179,8 @@ export default function CustomerPortalScreen({
   /**
    * [통문증에서 읽기]가 내놓은 결과(줄 열쇠 → 칸 키 → 색과 글자).
    *
-   * 🔴 **저장된 값이 아니다.** 읽은 값을 칸에 채워 보여 줄 뿐이고, 저장은 예전
-   * 그대로 줄마다 [저장] 단추가 한다. 그래서 여기 머물고 새로고침하면 사라진다.
+   * 🔴 **저장된 값이 아니다.** 읽은 값을 칸에 채워 보여 줄 뿐이고, 저장은 사람이
+   * 화면 아래 [저장]을 눌러야 일어난다. 그래서 여기 머물고 새로고침하면 사라진다.
    */
   const [passSlipResults, setPassSlipResults] = useState<Record<string, PassSlipRowOutcome>>({});
   /**
@@ -142,15 +189,64 @@ export default function CustomerPortalScreen({
    */
   const passSlipColumns = form ? passSlipColumnsOf(form) : [];
 
-  function run(action: () => Promise<{ ok: boolean; message: string }>) {
+  /**
+   * 🔴 **거르기 전의 줄 전부**를 본다. 고친 값이 지금 보기에서 빠져 있어도 저장
+   * 대상이기 때문이다(파일 머리말).
+   */
+  const rowViews = form
+    ? buildRowViews({ form, items: allItems, statusOptions, drafts, passSlipResults })
+    : [];
+  const viewByKey = new Map(rowViews.map((view) => [view.rowKey, view]));
+  const editedRows = collectEditedRows(rowViews);
+  const visibleKeys = new Set(items.map(portalRowKey));
+  const visibleViews = rowViews.filter((view) => visibleKeys.has(view.rowKey));
+  /** 고쳤는데 지금 보기에서 빠진 줄. 0 이 아니면 저장 줄이 그 수를 적는다. */
+  const hiddenEditedCount = editedRows.filter((view) => !visibleKeys.has(view.rowKey)).length;
+
+  /**
+   * 🔴 **저장하지 않고 떠나려 할 때 한 번 묻는다.** 줄마다 저장이던 때는 없던
+   * 위험이다(파일 머리말 3번). 이 저장소가 이미 쓰는 방식 그대로이고, 같은
+   * 한계도 그대로다 — 브라우저를 닫거나 새로고침하는 길만 막고 **앱 안에서 메뉴를
+   * 눌러 옮기는 길은 막지 못한다.**
+   */
+  useEffect(() => {
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      if (editedRows.length === 0) return;
+      event.preventDefault();
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [editedRows.length]);
+
+  /** 줄 하나의 칸을 고친다. 아직 손대지 않은 줄이면 처음 값에서 떠서 담는다. */
+  function editRow(rowKey: string, patch: (draft: RowDraft) => RowDraft) {
+    const view = viewByKey.get(rowKey);
+    if (!view) return;
+    setDrafts((previous) => ({
+      ...previous,
+      [rowKey]: patch(previous[rowKey] ?? view.baseline),
+    }));
+  }
+
+  function save() {
+    // 할 일이 없을 때는 단추가 눌리지 않지만, 통로가 열려 있으면 언젠가 불린다.
+    if (editedRows.length === 0 || saving) return;
+    const rows = toSavePayload(editedRows);
     startTransition(async () => {
-      const result = await action();
+      const result = await saveCustomerStatusesAction({ rows });
       if (!result.ok) {
-        setMessage({ ok: false, text: result.message });
+        // 🔴 저절로 닫히지 않는 팝업이다 — 어느 줄이 왜 막혔는지를 읽어야 한다.
+        setFailure({
+          title: "저장하지 못했습니다",
+          lines: buildFailureLines(result, editedRows),
+        });
         return;
       }
-      // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx) — 이 화면이 곧 목록이라 머문다.
-      setMessage(null);
+      /*
+       * 🔴 고친 값(drafts)을 여기서 지우지 않는다. 지우면 다시 읽어 온 줄이
+       * 화면에 들어오기 전까지 **옛 값이 잠깐 보인다.** 다시 읽고 나면 처음 값이
+       * 저장한 값과 같아져 「고친 줄」에서 저절로 빠진다(buildRowViews).
+       */
       router.refresh();
       showSavePopup({ message: result.message, redirectTo: null });
     });
@@ -170,17 +266,12 @@ export default function CustomerPortalScreen({
         </div>
       </header>
 
-      {message ? (
-        <p
-          role="alert"
-          className={`rounded-lg border px-4 py-3 text-sm ${
-            message.ok
-              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-              : "border-red-200 bg-red-50 text-red-700"
-          }`}
-        >
-          {message.text}
-        </p>
+      {failure ? (
+        <NoticePopup
+          title={failure.title}
+          lines={failure.lines}
+          onClose={() => setFailure(null)}
+        />
       ) : null}
 
       {/* ───── 양식 고르기 ─────
@@ -266,17 +357,260 @@ export default function CustomerPortalScreen({
                 : `진행 중인 ${allItems.length}건이 있지만 ${weeklyReportKindFilterLabels[kindFilter]} 에 드는 건은 없습니다 — 위에서 「${weeklyReportKindFilterLabels.ALL}」를 누르면 모두 보입니다.`}
             </p>
           ) : (
-            <CustomerFormTable
-              form={form}
-              items={items}
-              statusOptions={statusOptions}
-              canEdit={canEdit}
-              onSave={run}
-              passSlipResults={passSlipResults}
-            />
+            <CustomerFormTable form={form} views={visibleViews} statusOptions={statusOptions} canEdit={canEdit} onEdit={editRow} />
           )}
+
+          {/* ───── 🔴 한 번에 저장 ─────
+              표 아래에 붙어 다닌다. 표가 비어 있어도 그린다 — 고르개로 걸러 지금
+              표가 비었을 뿐 **다른 보기에 고친 줄이 남아 있을 수 있고**, 그때
+              저장 단추가 함께 사라지면 적은 것을 저장할 길이 없어진다. */}
+          {canEdit ? (
+            <PortalSaveBar
+              editedCount={editedRows.length}
+              hiddenEditedCount={hiddenEditedCount}
+              saving={saving}
+              onSave={save}
+            />
+          ) : null}
         </>
       ) : null}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 고친 줄 모으기 — 화면이 서버로 무엇을 보내는가
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** 줄 하나에서 사람이 고칠 수 있는 것 전부. 처음 값도 고친 값도 이 꼴이다. */
+export type RowDraft = {
+  /** 고른 상태의 id. 「정하지 않음」은 빈 글자다. */
+  optionId: string;
+  note: string;
+  /** 손으로 적는 칸들. 🔴 **빈 칸은 키가 없다**(readManualValues 와 같은 규약). */
+  values: Record<string, string>;
+};
+
+/** 표의 한 줄을 그리는 데 필요한 것 전부. 처음 값과 지금 값을 함께 들고 있다. */
+export type PortalRowView = {
+  item: CustomerPortalItem;
+  rowKey: string;
+  /** 🔴 서버에서 온 값. 「고쳤는가」를 재는 자이고, 아직 손대지 않은 줄의 지금 값이다. */
+  baseline: RowDraft;
+  optionId: string;
+  note: string;
+  /** 통문증이 읽어 얹은 값까지 포함한 지금 값. */
+  values: Record<string, string>;
+  /** 통문증에서 읽은 이 줄의 결과(칸 밑에 붙는 알림). 안 읽었으면 null. */
+  passSlipOutcome: PassSlipRowOutcome | null;
+  /** 접수 전 의뢰 — 값을 붙일 자리가 없어 칸을 그리지 않는다. */
+  pending: boolean;
+  dirty: boolean;
+};
+
+/**
+ * 서버에서 온 값 그대로의 줄. 🔴 손으로 적은 값은 **지금 양식으로 걸러** 담는다 —
+ * 양식에서 열이 빠진 뒤에 남아 있던 옛 값이 그대로 들어오면, 어느 칸에도 안 보이는
+ * 값을 다음 저장이 그대로 다시 써 넣는다.
+ */
+function baselineRowDraft(
+  form: CustomerPortalForm,
+  item: CustomerPortalItem,
+  statusOptions: { id: string; label: string }[]
+): RowDraft {
+  const currentOption = statusOptions.find((option) => option.label === item.statusLabel);
+  return {
+    optionId: currentOption?.id ?? "",
+    note: item.statusNote ?? "",
+    values: readManualValues(form, item.formValues),
+  };
+}
+
+/**
+ * 줄마다 「처음 값 · 지금 값 · 고쳤는가」를 한 번에 센다.
+ *
+ * 🔴 **통문증이 읽은 값은 상태로 옮겨 담지 않고 여기서 얹는다.** 읽은 값은 화면에
+ * 잠시 떠 있는 **제안**이다. 상태에 넣는 순간 「사람이 적은 값」과 구별할 수
+ * 없어진다. 얹히면 그 줄이 고친 줄로 잡혀 아래 저장 줄의 수가 하나 는다.
+ *
+ * 🔴 **아직 손대지 않은 칸에만 얹는다**(applyPassSlipSuggestions). 「비었는가」가
+ * 아니라 「그 키가 있는가」로 가리는 까닭 둘 — 저장된 값이 있으면 키가 있으므로
+ * 덮지 않고, 사람이 적었다가 **지운** 칸도 키가 남으므로 다시 채워 넣지 않는다
+ * (지운 값이 되살아나면 지운 사람은 영문을 모른다).
+ *
+ * 🔴 **서류의 S/N 이 이 건과 다른 줄은 애초에 값이 오지 않는다**(읽기 쪽이
+ * 걸러 낸다 — pass-slip-suggestions.ts). 그래서 여기서 막을 것이 없다.
+ */
+function buildRowViews({
+  form,
+  items,
+  statusOptions,
+  drafts,
+  passSlipResults,
+}: {
+  form: CustomerPortalForm;
+  items: CustomerPortalItem[];
+  statusOptions: { id: string; label: string }[];
+  drafts: Record<string, RowDraft>;
+  passSlipResults: Record<string, PassSlipRowOutcome>;
+}): PortalRowView[] {
+  return items.map((item) => {
+    const rowKey = portalRowKey(item);
+    const baseline = baselineRowDraft(form, item, statusOptions);
+    const draft = drafts[rowKey] ?? baseline;
+    const passSlipOutcome = passSlipResults[rowKey] ?? null;
+    const values = applyPassSlipSuggestions(draft.values, passSlipOutcome);
+    // 접수 전 의뢰는 아직 접수가 아니라 값을 붙일 자리가 없다. 🔴 2026-10-04 부터
+    // 조회가 그 줄을 내지 않지만, 갈래 자체는 서버에 남아 있어 막음을 그대로 둔다.
+    const pending = item.sourceKind === "REQUEST";
+    /*
+     * 🔴 **앞뒤 공백은 빼고 견준다.** 서버가 저장할 때 공백을 떼므로(액션의 note
+     * trim · domain 의 sanitizeManualValues), 그대로 견주면 「P-1 」을 적은 줄이
+     * 저장한 뒤에도 영영 「고친 줄」로 남는다 — 저장 줄의 수가 0 이 되지 않고
+     * 떠날 때마다 경고가 뜬다. 줄마다 저장이던 때는 그 줄의 [저장] 단추가 하나
+     * 더 보일 뿐이었지만, 지금은 화면 전체의 셈이 틀어진다.
+     */
+    const dirty =
+      !pending &&
+      (draft.optionId !== baseline.optionId ||
+        draft.note.trim() !== baseline.note.trim() ||
+        manualValuesDiffer(form, baseline.values, values));
+    return {
+      item,
+      rowKey,
+      baseline,
+      optionId: draft.optionId,
+      note: draft.note,
+      values,
+      passSlipOutcome,
+      pending,
+      dirty,
+    };
+  });
+}
+
+/** 🔴 서버로 갈 줄은 **고친 줄뿐이다.** 까닭은 파일 머리말 1번. */
+function collectEditedRows(views: PortalRowView[]): PortalRowView[] {
+  return views.filter((view) => view.dirty);
+}
+
+/**
+ * 서버가 받는 꼴로 옮긴다.
+ *
+ * 🔴 **줄마다 자기 `expectedVersion` 을 그대로 싣는다.** 한 번에 저장한다고 해서
+ * 낙관적 잠금이 느슨해지지 않는다 — 줄 하나하나가 「내가 읽은 그 판본인가」를
+ * 묻고, 하나라도 아니면 서버가 통째로 되돌린다.
+ */
+function toSavePayload(editedRows: PortalRowView[]): CustomerStatusInputRow[] {
+  return editedRows.map(({ item, optionId, note, values }) => ({
+    repairCaseId: item.sourceId,
+    statusOptionId: optionId || null,
+    note: note || null,
+    // 🔴 상태·비고와 **한 번에** 보낸다. 나눠 보내면 저장이 둘이 되고, 첫 저장이
+    //    올린 version 때문에 둘째가 충돌로 막힌다.
+    formValues: values,
+    expectedVersion: item.statusVersion,
+  }));
+}
+
+/** 팝업에 몇 줄까지 이름을 적는가. 넘치면 「그 밖에 N줄」로 접는다. */
+const FAILURE_ROW_LINE_LIMIT = 10;
+
+/** 사람이 표에서 그 줄을 찾을 수 있는 이름. 접수번호가 없으면 모델명으로 짚는다. */
+function describeRow(item: CustomerPortalItem): string {
+  const parts = [item.intakeNumber, item.modelName].filter(
+    (part): part is string => typeof part === "string" && part.length > 0
+  );
+  return parts.length > 0 ? parts.join(" · ") : "접수번호를 알 수 없는 줄";
+}
+
+/**
+ * 🔴 **어느 줄이 왜 막혔는지**를 글자로 만든다. 「저장하지 못했습니다」만 띄우면
+ * 사람은 무엇을 어떻게 해야 할지 모른 채 같은 단추를 다시 누른다.
+ *
+ * 마지막 줄의 경고가 중요하다 — 충돌을 푸는 길은 **새로고침**인데, 새로고침하면
+ * 지금 화면에 적어 둔 값이 함께 사라진다. 그 사실을 모르고 누르면 한 번 더 잃는다.
+ */
+function buildFailureLines(
+  result: Extract<SaveCustomerStatusesResult, { ok: false }>,
+  editedRows: PortalRowView[]
+): string[] {
+  const lines = [result.message];
+  const itemById = new Map(editedRows.map((view) => [view.item.sourceId, view.item]));
+  result.failedRows.slice(0, FAILURE_ROW_LINE_LIMIT).forEach((failed, index) => {
+    const item = itemById.get(failed.repairCaseId);
+    lines.push(`${index + 1}. ${item ? describeRow(item) : failed.repairCaseId} — ${failed.message}`);
+  });
+  if (result.failedRows.length > FAILURE_ROW_LINE_LIMIT) {
+    lines.push(`그 밖에 ${result.failedRows.length - FAILURE_ROW_LINE_LIMIT}줄이 더 있습니다.`);
+  }
+  if (result.failedRows.length > 0) {
+    lines.push(
+      "화면을 새로고침하면 그 줄의 최신 값을 다시 읽습니다. 🔴 다만 새로고침하면 지금 적어 둔 값도 함께 사라지니, 먼저 옮겨 적어 두세요."
+    );
+  }
+  return lines;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * 🔴 저장 줄 — 화면에 하나뿐인 [저장]
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * 표 아래에 **붙어 다니는** 저장 줄.
+ *
+ * 🔴 `sticky bottom-0` 인 까닭: 표가 스무 줄을 넘으면 아래로 굴러 내려가 버리고,
+ * 열 줄을 고친 사람이 단추를 찾아 다시 내려와야 한다. 붙어 있으면 어디서 고치든
+ * 손이 닿는 자리에 있다. `-mx-6` 는 바깥 상자의 `p-6` 을 되돌려 화면 끝까지
+ * 깔리게 한다 — 가운데만 뜬 띠는 「표의 일부」로 읽힌다.
+ *
+ * 🔴 **고친 줄이 없으면 눌리지 않는다**(disabled). 눌러도 아무 일이 없는 단추는
+ * 「저장이 안 된다」로 읽히므로, 그 자리에 **왜 할 일이 없는지**를 글자로 적는다.
+ *
+ * 🔴 **지금 안 보이는 줄이 함께 저장되는 것을 미리 적는다.** 고르개로 걸러 놓고
+ * 다른 보기에서 고친 값이 있으면, 누르기 **전에** 그 수가 보여야 한다 — 누른
+ * 뒤에 알려 주면 이미 저장된 다음이다.
+ */
+function PortalSaveBar({
+  editedCount,
+  hiddenEditedCount,
+  saving,
+  onSave,
+}: {
+  editedCount: number;
+  hiddenEditedCount: number;
+  saving: boolean;
+  onSave: () => void;
+}) {
+  const nothingToSave = editedCount === 0;
+  return (
+    <div className="sticky bottom-0 z-20 -mx-6 -mb-6 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 bg-white px-6 py-3 shadow-[0_-2px_8px_rgba(0,0,0,0.08)]">
+      <p className="text-xs leading-relaxed text-zinc-600">
+        {nothingToSave ? (
+          "고친 줄이 없습니다 — 표에서 상태 · 비고 · 손으로 적는 칸을 고치면 여기서 한 번에 저장합니다."
+        ) : (
+          <>
+            <strong className="text-zinc-900">
+              고친 줄 <span className="tabular-nums">{editedCount}</span>개
+            </strong>
+            가 아직 저장되지 않았습니다.
+            {hiddenEditedCount > 0 ? (
+              <span className="ml-1 font-semibold text-amber-700">
+                지금 보이지 않는 줄 <span className="tabular-nums">{hiddenEditedCount}</span>개도
+                함께 저장됩니다.
+              </span>
+            ) : null}
+          </>
+        )}
+      </p>
+      <button
+        type="button"
+        disabled={nothingToSave || saving}
+        onClick={onSave}
+        className="rounded-lg bg-primary-900 px-5 py-2 text-sm font-semibold whitespace-nowrap text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {saving ? "저장 중…" : "저장"}
+      </button>
     </div>
   );
 }
@@ -399,7 +733,7 @@ function KindFilterBanner({
 
 /**
  * 시스템이 아는 값 한 칸. 🔴 **여기에는 통문증 알림을 붙이지 않는다** — 붙였더니
- * 그 열이 넓어지고 밀린 폭을 마지막 열([저장])이 뒤집어써 글자가 세로로 쪼개졌다
+ * 그 열이 넓어지고 밀린 폭을 마지막 열이 뒤집어써 글자가 세로로 쪼개졌다
  * (사용자 지적 2026-10-01). 통문증 알림은 **값이 들어가는 입력 칸 밑**에만 붙는다.
  */
 function Cell({ value }: { value: string | null }) {
@@ -416,6 +750,10 @@ function Cell({ value }: { value: string | null }) {
  * 열 구성은 여기 적지 않는다 — domain/customer-portal-forms.ts 가 갖는다. 이
  * 표가 하는 일은 그 목록을 차례대로 그리는 것뿐이라, 열이 늘거나 이름이 바뀔 때
  * 고칠 곳이 한 군데다.
+ *
+ * 🔴 **마지막의 [저장] 열이 없어졌다**(사용자 지시 2026-10-07). 저장은 표 아래
+ * 저장 줄 하나가 한다(PortalSaveBar). 그래서 이 표의 열은 **엑셀 양식의 열과
+ * 정확히 같다** — 전에는 엑셀에 없는 칸이 하나 더 서 있었다.
  *
  * ⚠️ 가로 스크롤은 **표를 감싼 상자가 소유한다**(아래 overflow 상자). 표 자체에
  * 넘침을 맡기면 넘친 폭이 페이지로 퍼져 화면 전체가 옆으로 밀린다 — 이 저장소에
@@ -434,19 +772,17 @@ const EMPTY_SLASH_STYLE = {
 
 function CustomerFormTable({
   form,
-  items,
+  views,
   statusOptions,
   canEdit,
-  onSave,
-  passSlipResults,
+  onEdit,
 }: {
   form: CustomerPortalForm;
-  items: CustomerPortalItem[];
+  /** 🔴 **지금 보이는 줄만**. 거르기는 부르는 쪽이 이미 끝냈다. */
+  views: PortalRowView[];
   statusOptions: { id: string; label: string }[];
   canEdit: boolean;
-  onSave: (action: () => Promise<{ ok: boolean; message: string }>) => void;
-  /** 통문증에서 읽은 줄별 결과. 아무것도 안 읽었으면 빈 객체다. */
-  passSlipResults: Record<string, PassSlipRowOutcome>;
+  onEdit: (rowKey: string, patch: (draft: RowDraft) => RowDraft) => void;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -458,29 +794,18 @@ function CustomerFormTable({
                 {column.label}
               </th>
             ))}
-            {/* 엑셀에는 없는 칸이다. 적은 것을 저장하는 단추 자리 — 열이 열 개를
-                넘어 비고 옆에 끼워 넣으면 어느 줄의 단추인지 알기 어렵다.
-                🔴 **줄어들지 않는 열이다.** 다른 열이 넓어질 때 표가 희생시키는 것은
-                언제나 마지막 열이라, 여기가 눌리면 「저장」 두 글자가 세로로 쪼개진다
-                (사용자 지적 2026-10-01). 폭을 못 박고 줄바꿈을 막는다. */}
-            {canEdit ? (
-              <th scope="col" className="w-20 px-3 py-2 whitespace-nowrap">
-                저장
-              </th>
-            ) : null}
           </tr>
         </thead>
         <tbody>
-          {items.map((item, index) => (
+          {views.map((view, index) => (
             <FormItemRow
-              key={`${item.sourceKind}:${item.sourceId}`}
+              key={view.rowKey}
               form={form}
-              item={item}
+              view={view}
               rowNumber={index + 1}
               statusOptions={statusOptions}
               canEdit={canEdit}
-              onSave={onSave}
-              passSlipOutcome={passSlipResults[portalRowKey(item)] ?? null}
+              onEdit={onEdit}
             />
           ))}
         </tbody>
@@ -515,70 +840,39 @@ function systemValueOf(item: CustomerPortalItem, field: PortalSystemField): stri
   }
 }
 
+/**
+ * 표의 한 줄.
+ *
+ * 🔴 **자기 상태를 갖지 않는다.** 고친 값은 화면(CustomerPortalScreen)이 한곳에
+ * 모아 두고, 이 줄은 받은 것을 그리고 고친 것을 위로 올린다. 줄마다 상태를 들고
+ * 있으면 화면 하나짜리 [저장]이 그 값을 모을 길이 없다 — 「한 번에 저장」으로
+ * 바꾸면서 가장 크게 달라진 곳이 여기다.
+ *
+ * 🔴 통문증이 읽어 얹은 값도 이미 `view.values` 에 들어 있다(buildRowViews).
+ */
 function FormItemRow({
   form,
-  item,
+  view,
   rowNumber,
   statusOptions,
   canEdit,
-  onSave,
-  passSlipOutcome,
+  onEdit,
 }: {
   form: CustomerPortalForm;
-  item: CustomerPortalItem;
+  view: PortalRowView;
   rowNumber: number;
   statusOptions: { id: string; label: string }[];
   canEdit: boolean;
-  onSave: (action: () => Promise<{ ok: boolean; message: string }>) => void;
-  /** 통문증에서 읽은 이 줄의 결과. 안 읽었으면 null. */
-  passSlipOutcome: PassSlipRowOutcome | null;
+  onEdit: (rowKey: string, patch: (draft: RowDraft) => RowDraft) => void;
 }) {
-  const currentOption = statusOptions.find((o) => o.label === item.statusLabel);
-  const [optionId, setOptionId] = useState(currentOption?.id ?? "");
-  const [note, setNote] = useState(item.statusNote ?? "");
-  /**
-   * 손으로 적은 값들. 🔴 저장된 것을 **지금 양식으로 걸러** 담는다 — 양식에서
-   * 열이 빠진 뒤에 남아 있던 옛 값이 그대로 들어오면, 어느 칸에도 안 보이는
-   * 값을 다음 저장이 그대로 다시 써 넣는다.
-   */
-  const initialValues = readManualValues(form, item.formValues);
-  const [typedValues, setTypedValues] = useState<Record<string, string>>(initialValues);
-
-  /**
-   * 통문증에서 읽은 값들을 칸에 **얹는다**(저장하지 않는다 · 상태로 옮겨 담지도 않는다).
-   *
-   * 🔴 **아직 손대지 않은 칸에만 얹는다.** 「비었는가」가 아니라 「그 키가 있는가」로
-   * 가리는 까닭 둘 — 저장된 값이 있으면 키가 있으므로 덮지 않고, 사람이 적었다가
-   * **지운** 칸도 키가 남으므로 다시 채워 넣지 않는다(지운 값이 되살아나면
-   * 지운 사람은 영문을 모른다). 🔴 **칸마다 따로** 본다 — 통문번호는 적혀 있고
-   * PRV 는 비었으면 PRV 만 얹힌다.
-   *
-   * 상태로 옮겨 담지 않고 그릴 때마다 얹는 까닭: 읽은 값은 화면에 잠시 떠 있는
-   * **제안**이다. 상태에 넣으면 그 순간 「사람이 적은 값」과 구별할 수 없어진다.
-   * 얹히면 아래 dirty 가 참이 되어 그 줄의 [저장] 단추가 저절로 나타나고,
-   * 저장 방식은 예전 그대로다(줄마다 한 번 · expectedVersion).
-   *
-   * 🔴 **서류의 S/N 이 이 건과 다른 줄은 애초에 값이 오지 않는다**(읽기 쪽이
-   * 걸러 낸다 — pass-slip-suggestions.ts). 그래서 여기서 막을 것이 없다.
-   */
-  const values = applyPassSlipSuggestions(typedValues, passSlipOutcome);
-
-  // 접수 전 의뢰는 아직 접수가 아니라 값을 붙일 자리가 없다. 🔴 2026-10-04 부터
-  // 조회가 그 줄을 내지 않지만, 갈래 자체는 서버에 남아 있어 막음을 그대로 둔다.
-  const pending = item.sourceKind === "REQUEST";
-  const valuesChanged = manualValuesDiffer(form, initialValues, values);
-  const dirty =
-    !pending &&
-    (optionId !== (currentOption?.id ?? "") ||
-      note !== (item.statusNote ?? "") ||
-      valuesChanged);
-
-  function setValue(key: string, next: string) {
-    setTypedValues((previous) => ({ ...previous, [key]: next }));
-  }
+  const { item, rowKey, pending, values, passSlipOutcome } = view;
 
   return (
-    <tr className="border-b border-zinc-200 align-top">
+    <tr
+      className={`border-b border-zinc-200 align-top ${
+        view.dirty ? "bg-amber-50" : ""
+      }`}
+    >
       {form.columns.map((column) => {
         switch (column.kind) {
           case "ROW_NUMBER":
@@ -602,10 +896,13 @@ function FormItemRow({
                   <span className="text-zinc-400">-</span>
                 ) : (
                   <select
-                    value={optionId}
+                    value={view.optionId}
                     disabled={!canEdit}
                     aria-label={column.label}
-                    onChange={(e) => setOptionId(e.target.value)}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      onEdit(rowKey, (draft) => ({ ...draft, optionId: next }));
+                    }}
                     className="h-9 w-32 rounded border border-zinc-300 px-2 text-sm disabled:bg-zinc-100"
                   >
                     <option value="">- 정하지 않음</option>
@@ -625,11 +922,14 @@ function FormItemRow({
                   <span className="text-zinc-400">-</span>
                 ) : (
                   <input
-                    value={note}
+                    value={view.note}
                     disabled={!canEdit}
                     maxLength={1000}
                     aria-label={column.label}
-                    onChange={(e) => setNote(e.target.value)}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      onEdit(rowKey, (draft) => ({ ...draft, note: next }));
+                    }}
                     className="h-9 w-48 rounded border border-zinc-300 px-2 text-sm disabled:bg-zinc-100"
                   />
                 )}
@@ -654,7 +954,13 @@ function FormItemRow({
                       maxLength={PORTAL_MANUAL_VALUE_MAX_LENGTH}
                       aria-label={column.label}
                       style={slashWhenEmpty ? EMPTY_SLASH_STYLE : undefined}
-                      onChange={(e) => setValue(column.key, e.target.value)}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        onEdit(rowKey, (draft) => ({
+                          ...draft,
+                          values: { ...draft.values, [column.key]: next },
+                        }));
+                      }}
                       className="h-9 w-32 rounded border border-zinc-300 px-2 text-sm disabled:bg-zinc-100"
                     />
                     {notice ? <PassSlipRowNotice outcome={notice} /> : null}
@@ -665,34 +971,6 @@ function FormItemRow({
           }
         }
       })}
-      {canEdit ? (
-        // 🔴 머리글과 같은 폭·같은 줄바꿈 금지(까닭은 그 주석에).
-        <td className="w-20 px-3 py-2 whitespace-nowrap">
-          {dirty ? (
-            <button
-              type="button"
-              onClick={() =>
-                onSave(() =>
-                  setCustomerStatusAction({
-                    repairCaseId: item.sourceId,
-                    statusOptionId: optionId || null,
-                    note: note || null,
-                    // 🔴 상태·비고와 **한 번에** 보낸다. 나눠 보내면 저장이 둘이
-                    //    되고, 첫 저장이 올린 version 때문에 둘째가 충돌로 막힌다.
-                    formValues: values,
-                    expectedVersion: item.statusVersion,
-                  })
-                )
-              }
-              className="rounded bg-primary-900 px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-white disabled:opacity-50"
-            >
-              저장
-            </button>
-          ) : (
-            <span className="text-xs text-zinc-400">—</span>
-          )}
-        </td>
-      ) : null}
     </tr>
   );
 }
@@ -700,6 +978,9 @@ function FormItemRow({
 /**
  * 손으로 적은 값이 처음과 달라졌는가. 🔴 **그 양식의 칸만** 견준다 — 양식에
  * 없는 키가 양쪽에 남아 있어도 "고쳤다"가 되지 않게.
+ *
+ * 🔴 **앞뒤 공백은 빼고 견준다** — 저장하는 쪽이 공백을 떼므로(domain 의
+ * sanitizeManualValues), 그대로 견주면 저장한 뒤에도 영영 「고친 줄」로 남는다.
  */
 function manualValuesDiffer(
   form: CustomerPortalForm,
@@ -707,6 +988,6 @@ function manualValuesDiffer(
   after: Record<string, string>
 ): boolean {
   return manualColumnsOf(form).some(
-    (column) => (before[column.key] ?? "") !== (after[column.key] ?? "")
+    (column) => (before[column.key] ?? "").trim() !== (after[column.key] ?? "").trim()
   );
 }

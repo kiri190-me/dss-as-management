@@ -217,9 +217,11 @@ describe("🔴 5. 저장하지 않는다 · 6. 이미 적힌 값을 덮지 않�
       ),
       "읽은 값이 사람이 적어 둔 값(또는 지운 칸)을 덮어쓴다"
     );
+    // 🔴 2026-10-07 에 줄마다의 상태(typedValues)가 화면 한곳의 drafts 로 올라갔다
+    //    ([저장]이 화면에 하나가 되면서). 얹는 규칙은 그대로 이 함수 하나다.
     assert.ok(
       flat(code(screen)).includes(
-        "const values = applyPassSlipSuggestions(typedValues, passSlipOutcome);"
+        "const values = applyPassSlipSuggestions(draft.values, passSlipOutcome);"
       ),
       "화면이 그 함수를 쓰지 않는다 — 규칙이 둘로 갈렸다"
     );
@@ -242,8 +244,14 @@ describe("🔴 5. 저장하지 않는다 · 6. 이미 적힌 값을 덮지 않�
     );
   });
 
-  test("저장은 예전 그대로 줄마다 [저장] 단추이고 expectedVersion 을 싣는다", () => {
+  test("🔴 저장은 화면의 [저장] 하나가 하고, 줄마다 expectedVersion 을 싣는다", () => {
+    // 2026-10-07 에 줄마다의 [저장] 단추가 화면 하나로 합쳐졌다. 읽은 값이 얹힌
+    // 줄은 「고친 줄」로 잡혀 그 저장에 함께 실린다 — 낙관적 잠금은 줄마다 그대로다.
     assert.ok(flat(code(screen)).includes("expectedVersion: item.statusVersion,"));
+    assert.ok(
+      flat(code(screen)).includes("saveCustomerStatusesAction({ rows })"),
+      "화면에 하나뿐인 저장 통로를 부르지 않는다"
+    );
   });
 });
 

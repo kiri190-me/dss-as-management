@@ -5,7 +5,10 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { setCustomerStatus } from "@/lib/db/mutations/customer-portal";
+import {
+  setCustomerStatuses,
+  type CustomerStatusRow,
+} from "@/lib/db/mutations/customer-portal";
 import { getCustomerNameForRepairCase } from "@/lib/db/queries/customer-portal";
 import {
   findPortalFormForCustomerName,
@@ -32,8 +35,15 @@ import {
  * 고객사 전용 주소를 발급·회수하고 밖으로 내보내던 액션 넷
  * (issueCustomerLinkAction · revealCustomerLinkUrlAction ·
  * revokeCustomerLinkAction · syncNowAction)을 걷어냈다. 그 기능은 운영에서 한
- * 번도 돌지 않았고 화면 쪽은 앞 조각에서 이미 없어졌다. 남은 것은 줄마다
- * [저장]이 쓰는 setCustomerStatusAction 과 설정 화면의 상태 목록 둘이다.
+ * 번도 돌지 않았고 화면 쪽은 앞 조각에서 이미 없어졌다. 남은 것은 화면의
+ * [저장] 하나가 쓰는 saveCustomerStatusesAction 과 설정 화면의 상태 목록 둘이다.
+ *
+ * ── 🔴 저장은 **여러 줄을 한 번에**다 (사용자 지시 2026-10-07) ──────────────
+ * 표의 줄마다 있던 [저장]이 화면에 하나가 되면서, 줄 하나를 받던
+ * `setCustomerStatusAction` 을 줄 묶음을 받는 `saveCustomerStatusesAction` 으로
+ * 바꿨다. 줄 하나짜리 통로는 **남기지 않았다** — 부르는 데가 한 곳도 없었고,
+ * 쓰이지 않는 쓰기 통로를 열어 두면 아무 시험도 지나지 않는 채 남는다. 줄이
+ * 하나인 저장은 이 통로에 줄 하나를 넘기는 것과 정확히 같다.
  * ============================================================================
  */
 
@@ -58,40 +68,76 @@ async function requireActor() {
   return { ok: true as const, actingUser };
 }
 
+/** 화면이 보내는 줄 하나. 표의 한 줄이 그대로 이 꼴이 된다. */
+export type CustomerStatusInputRow = {
+  repairCaseId: string;
+  statusOptionId: string | null;
+  note: string | null;
+  formValues?: Record<string, string>;
+  expectedVersion: number | null;
+};
+
+/** 어긋난 줄 하나 — **어느 줄인지**와 **왜인지**를 화면이 사람에게 그대로 보인다. */
+export type CustomerStatusFailedRow = { repairCaseId: string; message: string };
+
+export type SaveCustomerStatusesResult =
+  | { ok: true; message: string }
+  | { ok: false; message: string; failedRows: CustomerStatusFailedRow[] };
+
 /**
- * 고객에게 보이는 상태·비고를 정한다.
+ * 한 번에 보낼 수 있는 줄 수. 화면의 표가 이보다 길어질 수는 있어도, 사람이 그
+ * 많은 줄을 **손으로 고친 뒤** 한 번에 저장하는 일은 없다. 쓰기 통로에 상한이
+ * 없으면 몸통 하나로 트랜잭션을 한없이 길게 잡을 수 있다.
+ */
+const MAX_ROWS_PER_SAVE = 500;
+
+/**
+ * 고객에게 보이는 상태·비고를 **여러 줄 한 번에** 정한다.
+ *
+ * ■ 🔴 고친 줄만 온다 · 전부 아니면 아무것도
+ *
+ * 화면이 고치지 않은 줄까지 실어 보내면, 내 화면의 옛 값으로 **그사이 남이 고친
+ * 값을 덮는다.** 그래서 화면은 고친 줄만 모아 보내고(CustomerPortalScreen 의
+ * collectEditedRows), 이 통로는 그 줄들을 **한 트랜잭션**으로 넘긴다. 한 줄이라도
+ * 어긋나면 아무것도 저장되지 않고, 어긋난 줄이 어느 줄인지 전부 돌려준다.
  *
  * ■ 고객사 양식의 손으로 적는 칸도 **같은 저장 한 번**으로 간다
  *
  * `formValues` 를 따로 저장하는 액션으로 나누지 않았다. 나누면 한 줄을 고치는
  * 데 저장이 둘이 되고, 그 둘이 각각 version 을 올린다 — 첫 저장이 올린 version
  * 때문에 둘째 저장이 "다른 사람이 먼저 고쳤습니다"로 막힌다. 한 번에 보내면
- * 낙관적 잠금은 예전과 똑같이 한 번만 돈다.
+ * 낙관적 잠금은 줄마다 한 번씩만 돈다.
  *
  * 🔴 `formValues` 를 **안 보내면 있던 값을 그대로 둔다**(mutation 주석 참조).
- * 기본 9열 표의 저장은 이 값을 모르는 채로 온다.
  */
-export async function setCustomerStatusAction(input: {
-  repairCaseId: string;
-  statusOptionId: string | null;
-  note: string | null;
-  formValues?: Record<string, string>;
-  expectedVersion: number | null;
-}): Promise<ActionResult> {
+export async function saveCustomerStatusesAction(input: {
+  rows: CustomerStatusInputRow[];
+}): Promise<SaveCustomerStatusesResult> {
   const gate = await requireActor();
-  if (!gate.ok) return gate;
+  if (!gate.ok) return { ok: false, message: gate.message, failedRows: [] };
   if (!(await hasPermission(gate.actingUser, "customerPortal", "WRITE"))) {
-    return { ok: false, message: "고객 안내 상태를 정할 권한이 없습니다." };
+    return {
+      ok: false,
+      message: "고객 안내 상태를 정할 권한이 없습니다.",
+      failedRows: [],
+    };
   }
 
-  if (typeof input.repairCaseId !== "string" || !input.repairCaseId) {
-    return { ok: false, message: "접수 건을 확인할 수 없습니다." };
+  const rows = Array.isArray(input?.rows) ? input.rows : [];
+  if (rows.length === 0) {
+    return { ok: false, message: "저장할 변경이 없습니다.", failedRows: [] };
   }
-  // 비고는 고객 화면에 그대로 나간다. 길이를 막지 않으면 한 번의 저장으로
-  // 고객 화면이 글로 뒤덮인다.
-  const note = input.note?.trim() || null;
-  if (note && note.length > 1000) {
-    return { ok: false, message: "비고는 1000자까지 적을 수 있습니다." };
+  if (rows.length > MAX_ROWS_PER_SAVE) {
+    return {
+      ok: false,
+      message: `한 번에 ${MAX_ROWS_PER_SAVE}줄까지 저장할 수 있습니다.`,
+      failedRows: [],
+    };
+  }
+  for (const row of rows) {
+    if (typeof row?.repairCaseId !== "string" || !row.repairCaseId) {
+      return { ok: false, message: "접수 건을 확인할 수 없습니다.", failedRows: [] };
+    }
   }
 
   /*
@@ -100,34 +146,82 @@ export async function setCustomerStatusAction(input: {
    * 🔴 양식은 **서버가 접수에서 거슬러 올라가 찾은 고객사 이름**으로 고른다.
    * 화면이 "나는 ICD 양식이다"라고 말하게 두면 그 말이 곧 허가가 된다.
    *
-   * 양식이 없는 고객사면 적을 칸 자체가 없으므로 `undefined` 로 둔다 — `{}` 로
-   * 두면 "다 지워라"가 되어, 양식이 잠깐 빠진 사이의 저장 한 번이 그 고객사의
-   * 적어 둔 값을 전부 날린다.
+   * 🔴 줄마다 한 번씩 묻되 **함께 쏜다.** 차례로 기다리면 줄 수만큼 왕복이
+   * 쌓이고, 그 시간 동안 사람은 저장이 멈춘 줄 안다. `formValues` 를 안 보낸
+   * 줄은 양식을 알 필요가 없으므로 묻지도 않는다.
    */
-  let formValues: Record<string, string> | undefined;
-  if (input.formValues !== undefined) {
-    const customerName = await getCustomerNameForRepairCase(input.repairCaseId);
-    const form = findPortalFormForCustomerName(customerName);
-    if (form) {
-      const sanitized = sanitizeManualValues(form, input.formValues);
-      if (!sanitized.ok) return { ok: false, message: sanitized.message };
-      formValues = sanitized.values;
+  const customerNames = await Promise.all(
+    rows.map((row) =>
+      row.formValues === undefined
+        ? Promise.resolve(null)
+        : getCustomerNameForRepairCase(row.repairCaseId)
+    )
+  );
+
+  const prepared: CustomerStatusRow[] = [];
+  for (const [index, row] of rows.entries()) {
+    // 비고는 고객 화면에 그대로 나간다. 길이를 막지 않으면 한 번의 저장으로
+    // 고객 화면이 글로 뒤덮인다.
+    const note = row.note?.trim() || null;
+    if (note && note.length > 1000) {
+      return {
+        ok: false,
+        message: "비고는 1000자까지 적을 수 있습니다.",
+        failedRows: [{ repairCaseId: row.repairCaseId, message: "비고가 1000자를 넘습니다." }],
+      };
     }
+
+    /*
+     * 양식이 없는 고객사면 적을 칸 자체가 없으므로 `undefined` 로 둔다 — `{}` 로
+     * 두면 "다 지워라"가 되어, 양식이 잠깐 빠진 사이의 저장 한 번이 그 고객사의
+     * 적어 둔 값을 전부 날린다.
+     */
+    let formValues: Record<string, string> | undefined;
+    if (row.formValues !== undefined) {
+      const form = findPortalFormForCustomerName(customerNames[index]);
+      if (form) {
+        const sanitized = sanitizeManualValues(form, row.formValues);
+        if (!sanitized.ok) {
+          return {
+            ok: false,
+            message: sanitized.message,
+            failedRows: [{ repairCaseId: row.repairCaseId, message: sanitized.message }],
+          };
+        }
+        formValues = sanitized.values;
+      }
+    }
+
+    prepared.push({
+      repairCaseId: row.repairCaseId,
+      statusOptionId: row.statusOptionId || null,
+      note,
+      formValues,
+      expectedVersion: row.expectedVersion,
+    });
   }
 
-  const result = await setCustomerStatus({
-    repairCaseId: input.repairCaseId,
-    statusOptionId: input.statusOptionId || null,
-    note,
-    formValues,
-    expectedVersion: input.expectedVersion,
+  const result = await setCustomerStatuses({
+    rows: prepared,
     actorUserId: gate.actingUser.id,
   });
 
-  if (!result.ok) return { ok: false, message: result.message };
+  if (!result.ok) {
+    return {
+      ok: false,
+      message: result.message,
+      failedRows: result.failures.map((failure) => ({
+        repairCaseId: failure.repairCaseId,
+        message: failure.message,
+      })),
+    };
+  }
 
   revalidatePath(PORTAL_PATH);
-  return { ok: true, message: "저장했습니다." };
+  return {
+    ok: true,
+    message: result.saved === 1 ? "저장했습니다." : `${result.saved}건을 저장했습니다.`,
+  };
 }
 
 // ───── 설정: 고객 안내 상태 목록 ─────

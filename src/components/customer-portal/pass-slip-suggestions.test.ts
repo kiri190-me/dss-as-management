@@ -283,18 +283,27 @@ describe("🔴 팝업은 **읽기가 끝난 뒤 한 번만** · 사람이 닫아
 describe("🔴 [저장] 단추가 짓눌리지 않는다", () => {
   const body = flat(code(screen));
 
-  test("저장 열은 폭이 못 박혀 있고 글자가 줄바꿈되지 않는다", () => {
-    // 🔴 표가 넓어질 때 희생되는 것은 언제나 마지막 열이다 — 「저장」이 세로로
-    //    쪼개져 보였다(사용자 지적 2026-10-01).
+  test("🔴 저장 단추가 표 밖으로 나왔다 — 짓눌릴 마지막 열 자체가 없다", () => {
+    /*
+     * 🔴 표가 넓어질 때 희생되는 것은 언제나 마지막 열이다 — 「저장」이 세로로
+     *    쪼개져 보였다(사용자 지적 2026-10-01). 그때는 그 열의 폭을 못 박아
+     *    막았는데, 2026-10-07 에 [저장]이 표 밖(PortalSaveBar)으로 나가면서
+     *    **눌릴 열 자체가 없어졌다.** 되돌아가면 같은 고장이 함께 돌아온다.
+     */
     assert.ok(
-      body.includes('<th scope="col" className="w-20 px-3 py-2 whitespace-nowrap">'),
-      "저장 머리글의 폭·줄바꿈 설정이 풀렸다"
+      !body.includes('<th scope="col" className="w-20 px-3 py-2 whitespace-nowrap"> 저장 </th>'),
+      "줄마다의 저장 열이 되살아났다 — 열이 열셋인 양식에서 글자가 세로로 쪼개진다"
     );
     assert.ok(
-      body.includes('<td className="w-20 px-3 py-2 whitespace-nowrap">'),
-      "저장 칸의 폭·줄바꿈 설정이 풀렸다"
+      !body.includes('<td className="w-20 px-3 py-2 whitespace-nowrap">'),
+      "줄마다의 저장 칸이 되살아났다"
     );
-    assert.ok(body.includes("text-xs font-semibold whitespace-nowrap text-white"), "단추 글자");
+    // 표 밖으로 나온 단추도 글자가 줄바꿈되지 않아야 한다.
+    const bar = body.slice(body.indexOf("function PortalSaveBar("));
+    assert.ok(
+      bar.includes("text-sm font-semibold whitespace-nowrap text-white"),
+      "단추 글자가 줄바꿈될 수 있다"
+    );
   });
 
   test("🔴 통문증 알림을 **시스템 칸**(탈착품 S/N 등) 밑에 붙이지 않는다 — 그 열이 넓어진다", () => {

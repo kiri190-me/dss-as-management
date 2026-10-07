@@ -36,9 +36,11 @@ export type { PassSlipFieldOutcome, PassSlipRowOutcome };
  * 없다 — 손 입력 그대로 둔다.
  *
  * ── 🔴 채우기만 한다. 저장하지 않는다 ───────────────────────────────────
- * 읽은 값을 그대로 DB 에 넣지 않는다. 칸이 채워지면 그 줄의 [저장] 단추가 저절로
- * 나타나고, **사람이 보고 누른다.** 글자 인식은 틀릴 수 있고, 틀린 값이 조용히
- * 저장되면 그 표는 고객사와 주고받는 자리에서 쓰인다.
+ * 읽은 값을 그대로 DB 에 넣지 않는다. 칸이 채워지면 그 줄이 화면 아래 저장 줄의
+ * 「고친 줄」 수에 들어가고, **사람이 보고 [저장]을 누른다**(2026-10-07 전에는 그
+ * 줄의 [저장] 단추가 저절로 나타났다 — 단추가 화면에 하나로 합쳐졌다). 글자
+ * 인식은 틀릴 수 있고, 틀린 값이 조용히 저장되면 그 표는 고객사와 주고받는
+ * 자리에서 쓰인다.
  *
  * ── 🔴 빈 칸만 채운다. **칸마다 따로** 판단한다 ─────────────────────────
  * 사람이 적어 둔 값이 기계가 읽은 값보다 믿을 만하다. 통문번호는 적혀 있고 PRV 는
@@ -317,7 +319,7 @@ export default function PassSlipOcrPanel({
               <strong className="text-zinc-900">{targets.length}줄</strong> 가운데 통문증 사진이
               있는 <strong className="text-zinc-900">{withPhoto.length}줄</strong>을 읽습니다
               (한 줄에 2초쯤). 이미 적힌 칸은 건드리지 않고,{" "}
-              <strong className="text-zinc-900">저장은 사람이</strong> 줄마다 [저장]을 눌러서
+              <strong className="text-zinc-900">저장은 사람이</strong> 화면 아래 [저장]을 눌러서
               합니다.
             </>
           )}
@@ -335,7 +337,7 @@ export default function PassSlipOcrPanel({
         ) : phase.kind === "DONE" ? (
           <>
             끝났습니다 — 채움 {phase.filled}칸 · 확인 필요 {phase.warned}칸 · 서류에 없음{" "}
-            {phase.absent}칸 · 못 읽음 {phase.missed}칸. 채워진 줄의 [저장]을 눌러 주세요.{" "}
+            {phase.absent}칸 · 못 읽음 {phase.missed}칸. 화면 아래 [저장]을 눌러 주세요.{" "}
             <span className="text-sky-700">「서류에 없음」은 빈칸으로 두시면 됩니다.</span>
             {/* 🔴 불러오지 않은 줄은 여기서도 한 번 더 말한다 — 팝업을 닫고 나면
                 무엇이 어떻게 됐는지 남는 글이 이것뿐이다. */}
