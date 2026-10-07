@@ -211,3 +211,15 @@ src/lib/db/mutations/customer-portal.integration.test.ts
 # 🔴 격리 이름: 인수 월 "9410" · 고객사 "AS-TEST-CUSTOMER-ORDER-" · 모델
 # "ORDER-TEST-MODEL-". legacyImportState 없이 부르므로 감사 로그·상태 이력은 안 생긴다.
 src/lib/db/queries/repair-cases-list-order.integration.test.ts
+
+# ── 종류별 공통 서류의 **가리킴** 담기·지우기 (2026-10-07) ────────────────────
+# 파일을 올리지 않고 사내 공유폴더의 자리만 적는 표. 🔴 휴지통이 없어 **감사 로그가
+# 유일한 흔적**이다 — 지우기는 PURGE 이고 previous_value 에 지워진 줄이 통째로 들어
+# 있는지 본다(그 값 하나로 다시 적을 수 있어야 한다) · 🔴 담기는 CREATE ·
+# 🔴 같은 종류에 **접어서 같은** 경로는 둘이 못 된다(대소문자·연속 공백·앞뒤 공백·
+# 한글 NFD 가 전부 한 자리로 접힌다)이고 그 거절이 23505 가 아니라 사람 말이다 ·
+# 🔴 종류가 다르면 같은 경로를 담을 수 있다 · 🔴 다른 종류의 id 로는 안 지워진다 ·
+# 🔴 DB CHECK 가 마지막 울타리다(역슬래시·절대경로·`..`·빈 이름). 디스크는 한 번도
+# 건드리지 않는다 — 「그 자리에 있는가」는 서버 액션의 몫이다.
+# 🔴 격리 이름: 경로 앞머리 "AS-TEST-SHARE-DOC-<실행마다 다른 uuid>/".
+src/lib/db/mutations/product-model-kind-share-docs.integration.test.ts

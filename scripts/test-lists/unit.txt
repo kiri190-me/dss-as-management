@@ -837,3 +837,28 @@ src/lib/domain/product-model-kind-attachment.test.ts
 # 🔴 분류 목록을 베껴 적지 않는다. `[kind]` 는 `*` 로 적는다 — 대괄호를 그대로 적으면
 # node 가 글롭 문자클래스로 읽어 tests 0 으로 조용히 지나간다.
 src/app/api/product-model-kinds/*/attachments/route-source.test.ts
+
+# ── 종류별 공통 서류를 **올리지 않고 자리만 가리킨다** — 서버 쪽 (2026-10-07) ────
+# 공유폴더를 한 칸씩 읽는 저장소 모듈. 🔴 원본을 글자로 보는 울타리와, 임시 폴더
+# (mkdtemp)에서 도는 동작 시험 둘이다. 못 박는 것: 🔴 쓰기·지우기·만들기가 한 글자도
+# 없다(사람이 수년째 쌓아 온 서류함이다) · 🔴 node:fs 를 직접 안 가져온다(공용 도우미
+# share-folder-fs 하나를 거친다) · 🔴 상한 셋을 쥔다(기다리기 3000 · 줄 수 200 · 깊이 6,
+# 연락서보다 큰 까닭은 모듈 머리말) · 🔴 던지지 않는다(전부 status) · 🔴 사유에 경로가
+# 없다(폴더 이름에 고객사명이 섞여 있다) · 🔴 바로가기·`..`·드라이브·UNC 가 같은 자리에서
+# 막힌다 · 🔴 루트가 곧 시작점이다(연락서처럼 폴더를 찾는 단계가 없다).
+src/lib/storage/repair-docs-entries-source.test.ts
+src/lib/storage/repair-docs-entries.test.ts
+# 그 서류함을 내는 목록 통로. 🔴 읽기뿐이다(쓰기 메서드·DB 쓰기·감사가 없다) ·
+# 🔴 파일 바이트를 중계하지 않는다 · 🔴 루트가 응답에 안 실린다 · 🔴 권한은
+# productModels.view READ 하나(새 권한을 만들지 않았다) · 🔴 앞머리 차례가 형제 통로
+# (attachments)와 같다 · 🔴 경로 검사도 상한도 제 손으로 짜지 않는다.
+# `[kind]` 는 `*` 로 적는다 — 대괄호를 그대로 적으면 node 가 글롭 문자클래스로 읽어
+# tests 0 으로 조용히 지나간다.
+src/app/api/product-model-kinds/*/share-folder/entries/route-source.test.ts
+# 그 가리킴을 담고 지우는 서버 액션. 디스크와 DB 를 잇는 자리라 동작 시험을 둘로
+# 갈랐고(디스크는 storage 쪽, DB·감사는 통합 시험), **차례와 울타리**를 여기서 본다.
+# 🔴 권한은 productModels.files WRITE 하나 · 🔴 18종 확장자 목록도 경로 규칙도 베껴
+# 적지 않는다 · 🔴 설정이 비면 **담지 않는다**(확인 못 한 자리를 표에 남기지 않는다) ·
+# 🔴 디스크 확인이 DB 보다 앞이다 · 🔴 공유폴더에 쓰지 않는다 · 🔴 담기·지우기 둘 다
+# 감사를 남기는 mutation 을 거친다(휴지통이 없어 그것이 유일한 흔적이다).
+src/lib/server/actions/product-model-kind-share-docs-source.test.ts
