@@ -10,7 +10,12 @@ import {
 import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
 import ContactFolderEntryOpenButton from "@/components/repair-cases/files/ContactFolderEntryOpenButton";
 import ContactFolderPlaceOpenButton from "@/components/repair-cases/files/ContactFolderPlaceOpenButton";
-import { CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT } from "@/components/repair-cases/files/contact-folder-file-open";
+import {
+  CONTACT_FOLDER_FILE_HELPER_DISMISS_TEXT,
+  CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT,
+  rememberContactFolderFileHelper,
+  shouldOfferContactFolderFileHelperInstall,
+} from "@/components/repair-cases/files/contact-folder-file-open";
 import type { ProductModelKind } from "@/lib/domain/product-model-kind";
 import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-link";
 import KindShareFolderPicker, { type KindShareFolderAdd } from "./KindShareFolderPicker";
@@ -43,13 +48,19 @@ import KindShareFolderPicker, { type KindShareFolderAdd } from "./KindShareFolde
  * (경로에 `/` 가 없는 줄)에는 단추를 그리지 않는다 — 앞에 붙일 폴더가 없어 도우미 주소를
  * 만들 수 없다. 그 줄은 경로만 보이고, 폴더로 담은 줄은 깊이에 상관없이 열린다.
  *
- * ── 🔴 도우미 안내를 곁에 둔다 ───────────────────────────────────────────
+ * ── 🔴 도우미 안내는 **모르는 PC 에만** (2026-10-07) ─────────────────────
  * **예전 도우미는 새 루트(`1. 수리 관련`)도 `openfile` 주소도 모른다.** 받으면 조용히
  * 끝나고 화면은 그것을 알 수 없다. 그래서 줄의 [열기]가 제 결과에 설치 안내를 내는 것과
- * **별개로**, 구역 아래에 [설치 명령 복사]를 늘 세워 둔다. 복사 갈래는 견적서 쪽 공용
- * 모듈을 **그대로** 쓰고(runQuoteFolderHelperInstallCommandCopy), 안내 문장도 연락서 쪽
- * 상수를 그대로 쓴다 — 말이 갈라지지 않게. 🔴 설치 명령을 받는 권한에
- * `productModels.view` 가 이미 들어 있다(server/quote-folder-helper.ts).
+ * **별개로** 구역 아래에 [설치 명령 복사]를 세워 둔다. 복사 갈래는 견적서 쪽 공용 모듈을
+ * **그대로** 쓰고(runQuoteFolderHelperInstallCommandCopy), 안내 문장도 연락서 쪽 상수를
+ * 그대로 쓴다 — 말이 갈라지지 않게. 🔴 설치 명령을 받는 권한에 `productModels.view` 가
+ * 이미 들어 있다(server/quote-folder-helper.ts).
+ *
+ * 🔴 **늘 세우지는 않는다.** 파일 열기가 되는 것이 확인된 PC(표시가 있는 PC)에는 줄도
+ * 단추도 그리지 않고, 사람이 [그만 보기]로 직접 끌 수도 있다. 판정은 연락서 쪽 한 자리에
+ * 있다(shouldOfferContactFolderFileHelperInstall).
+ * 🔴 그 값은 `localStorage` 라 **마운트 뒤에** 읽는다 — 서버 렌더에는 없는 값이라 바로 읽으면
+ * hydration 이 어긋난다. 기본은 「안 그림」이다(늦게 나타나는 쪽이 깜빡임보다 낫다).
  *
  * ── 권한 ────────────────────────────────────────────────────────────────
  * `canManageFiles`(= `productModels.files` WRITE)가 거짓이면 **고르는 창도 지우기 단추도
@@ -236,6 +247,12 @@ const subscribeToNothing = () => () => {};
 const isWindowsDesktopNow = () =>
   typeof navigator !== "undefined" && isWindowsDesktopClient(readQuoteFolderClientPlatform(navigator));
 const hiddenOnServer = () => false;
+/**
+ * 🔴 저장소의 표시를 보고 「안내를 그릴 것인가」를 답한다. 서버 렌더 · 첫 렌더에는
+ * `hiddenOnServer`(= 거짓 = 안 그림)가 쓰이고, 붙은 뒤에 이 쪽으로 바뀐다 — Windows 판단과
+ * **같은 방법**이라 hydration 이 어긋나지 않는다(설계 g: 기본은 안 그림, 읽는 것은 마운트 뒤).
+ */
+const shouldOfferHelperInstallNow = () => shouldOfferContactFolderFileHelperInstall();
 
 const NOTICE_TONE_CLASS: Record<QuoteIssueNoticeLine["tone"], string> = {
   normal: "text-zinc-700 dark:text-zinc-300",
@@ -243,8 +260,11 @@ const NOTICE_TONE_CLASS: Record<QuoteIssueNoticeLine["tone"], string> = {
   warning: "font-medium text-amber-700 dark:text-amber-400",
 };
 
-/** 단추와 결과 줄 — Windows 판단 없이. 화면에는 아래 KindShareDocsHelperNotice 를 쓴다. */
-export function KindShareDocsHelperNoticeControl() {
+/**
+ * 안내 줄과 단추 둘 — Windows 판단도 표시 판단도 없이 **그리기만** 한다.
+ * 화면에는 아래 KindShareDocsHelperNotice 를 쓴다.
+ */
+export function KindShareDocsHelperNoticeControl({ onDismiss }: { onDismiss: () => void }) {
   const [busy, setBusy] = useState(false);
   const [lines, setLines] = useState<QuoteIssueNoticeLine[]>([]);
 
@@ -261,7 +281,7 @@ export function KindShareDocsHelperNoticeControl() {
   return (
     <div className="print:hidden mt-3 flex flex-col gap-1">
       <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT}</p>
-      <div>
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => void handleCopy()}
@@ -271,6 +291,15 @@ export function KindShareDocsHelperNoticeControl() {
           className="rounded border border-zinc-300 px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
         >
           {busy ? "복사하는 중…" : KIND_SHARE_DOCS_HELPER_INSTALL_TEXT}
+        </button>
+        {/* 🔴 감지가 틀릴 수도 있으니 사람이 직접 끈다 — 누르면 표시가 적히고 안내가 사라진다. */}
+        <button
+          type="button"
+          onClick={onDismiss}
+          data-kind-share-docs-helper-dismiss=""
+          className="text-[11px] text-zinc-400 underline underline-offset-2 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+        >
+          {CONTACT_FOLDER_FILE_HELPER_DISMISS_TEXT}
         </button>
       </div>
       {lines.map((line, index) => (
@@ -282,11 +311,27 @@ export function KindShareDocsHelperNoticeControl() {
   );
 }
 
-/** 🔴 Windows PC 에서만 그린다 — 서버 렌더 · 첫 렌더는 감춘 채(이웃 단추들과 같은 방법). */
+/**
+ * 🔴 Windows PC 이고 **파일 열기 표시가 없을 때만** 그린다.
+ * 서버 렌더 · 첫 렌더는 감춘 채다 — Windows 판단은 이웃 단추들과 같은 방법이고(서버용
+ * 스냅샷), 표시는 `localStorage` 라 효과에서 읽는다(머리말 · 설계 g).
+ */
 export function KindShareDocsHelperNotice() {
   const isWindows = useSyncExternalStore(subscribeToNothing, isWindowsDesktopNow, hiddenOnServer);
-  if (!isWindows) return null;
-  return <KindShareDocsHelperNoticeControl />;
+  const offerInstall = useSyncExternalStore(subscribeToNothing, shouldOfferHelperInstallNow, hiddenOnServer);
+  // 🔴 [그만 보기]를 누른 **이 화면**에서 바로 사라지게 — 표시는 저장소에도 적지만,
+  //    저장소는 스스로 「바뀌었다」고 알려 주지 않는다(구독할 것이 없다).
+  const [dismissed, setDismissed] = useState(false);
+
+  if (!isWindows || !offerInstall || dismissed) return null;
+  return (
+    <KindShareDocsHelperNoticeControl
+      onDismiss={() => {
+        rememberContactFolderFileHelper();
+        setDismissed(true);
+      }}
+    />
+  );
 }
 
 // ── 구역 ─────────────────────────────────────────────────────────────────

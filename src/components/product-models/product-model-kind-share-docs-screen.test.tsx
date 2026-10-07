@@ -4,6 +4,12 @@ import { describe, test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import type { QuoteFolderHelperStorage } from "@/components/quotes/quote-folder-open";
+import {
+  CONTACT_FOLDER_FILE_HELPER_DISMISS_TEXT,
+  rememberContactFolderFileHelper,
+  shouldOfferContactFolderFileHelperInstall,
+} from "@/components/repair-cases/files/contact-folder-file-open";
 import KindShareDocsSection, {
   KIND_SHARE_DOCS_EMPTY_TEXT,
   KIND_SHARE_DOCS_TITLE,
@@ -113,6 +119,23 @@ const doc = (overrides: Partial<KindShareDocRow> = {}): KindShareDocRow => ({
   label: null,
   ...overrides,
 });
+
+/** 도우미 안내 조각만 그려 본다 — 끄는 길은 받아서 쓰는 조각이라 넣어 준다. */
+function helperMarkup(): string {
+  return renderToStaticMarkup(
+    createElement(KindShareDocsHelperNoticeControl, { onDismiss: () => undefined })
+  );
+}
+
+/** Map 하나를 localStorage 처럼 보이게 한다 — 「표시가 있으면」을 값으로 잴 때 쓴다. */
+function fakeStorage(store: Map<string, string>): QuoteFolderHelperStorage {
+  return {
+    getItem: (key) => store.get(key) ?? null,
+    setItem: (key, value) => {
+      store.set(key, value);
+    },
+  };
+}
 
 function sectionMarkup(docs: KindShareDocRow[], canManageFiles: boolean): string {
   return renderToStaticMarkup(
@@ -439,25 +462,46 @@ describe("⑦ 🔴 인쇄에 안 찍힌다", () => {
       createElement(KindShareDocList, { docs: [doc()], onRemove: () => undefined })
     );
     assert.ok(html.includes("print:hidden"), html);
-    const helper = renderToStaticMarkup(createElement(KindShareDocsHelperNoticeControl, {}));
-    assert.ok(helper.includes("print:hidden"), helper);
+    assert.ok(helperMarkup().includes("print:hidden"), helperMarkup());
   });
 });
 
-describe("⑧ 도우미 안내 — 예전 도우미는 새 루트도 파일 열기도 모른다", () => {
-  test("[설치 명령 복사]와 「열리지 않으면 다시 설치」가 함께 선다", () => {
-    const html = renderToStaticMarkup(createElement(KindShareDocsHelperNoticeControl, {}));
+/*
+ * ============================================================================
+ * ⑧ 도우미 안내 — **모르는 PC 에만** (2026-10-07 사용자 요구)
+ * ============================================================================
+ * 「파일 열기가 되는 도우미가 이미 깔린 PC 에서는 안내를 안 그린다. 사람이 끌 수도 있다.」
+ * 예전에는 이 구역이 **조건 없이 늘** 안내를 그렸고, 아래 단언도 「선다」만 재고 있었다.
+ * 지우지 않고 **둘 다 재는 모양**으로 바꾼다 — 표시가 없으면 서고, 있으면 안 선다.
+ *
+ * 🔴 표시는 `localStorage` 라 **마운트 뒤에** 읽는다. 여기(renderToStaticMarkup)에는 효과가
+ * 돌지 않으므로 「그려진 것」으로는 끝까지 잴 수 없다 — 그래서 **판정 자체를 값으로** 재고
+ * (shouldOfferContactFolderFileHelperInstall), 그려지는 몫은 안내 조각을 직접 그려서 잰다.
+ * ============================================================================
+ */
+describe("⑧ 도우미 안내 — 표시가 없으면 서고, 있으면 줄도 단추도 없다", () => {
+  test("[설치 명령 복사] · 「열리지 않으면 다시 설치」 · [그만 보기]가 함께 선다", () => {
+    const html = helperMarkup();
     assert.ok(html.includes("설치 명령 복사"), html);
     assert.ok(html.includes("다시 설치해 주세요"), html);
     assert.ok(html.includes("data-kind-share-docs-helper-install-command"), html);
+    // 🔴 사람이 직접 끌 수 있는 길 — 감지가 틀릴 수도 있다.
+    assert.ok(html.includes("data-kind-share-docs-helper-dismiss"), html);
+    assert.ok(html.includes(CONTACT_FOLDER_FILE_HELPER_DISMISS_TEXT), html);
   });
 
   test("🔴 복사 구현도 문장도 새로 만들지 않는다 — 공용 모듈과 상수를 그대로 쓴다", () => {
     assert.ok(sectionSource.includes("runQuoteFolderHelperInstallCommandCopy"));
     assert.ok(sectionSource.includes("CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT"));
+    // 끄기 글자도 판정도 연락서 쪽 한 자리에서 가져온다 — 말이 갈라지지 않게.
+    assert.ok(sectionSource.includes("CONTACT_FOLDER_FILE_HELPER_DISMISS_TEXT"));
+    assert.ok(sectionSource.includes("shouldOfferContactFolderFileHelperInstall"));
     for (const forbidden of ["execCommand", "navigator.clipboard.writeText", "console."]) {
       assert.equal(sectionSource.includes(forbidden), false, forbidden);
     }
+    // 🔴 열쇠 이름을 베껴 적지 않았다 — 세대 번호가 바뀌면 한 자리만 고치면 된다.
+    assert.equal(code(sectionSource).includes("dss.helper"), false, "열쇠를 직접 적는다");
+    assert.equal(code(sectionSource).includes("localStorage"), false, "저장소를 직접 만진다");
   });
 
   test("🔴 Windows 가 아니면(서버 렌더) 안내가 아예 안 그려진다 — 도우미는 Windows 것이다", () => {
@@ -465,6 +509,43 @@ describe("⑧ 도우미 안내 — 예전 도우미는 새 루트도 파일 열�
     assert.ok(sectionSource.includes("const hiddenOnServer = () => false;"));
     assert.ok(
       sectionSource.includes("useSyncExternalStore(subscribeToNothing, isWindowsDesktopNow, hiddenOnServer)")
+    );
+  });
+
+  test("🔴 표시가 없으면 「그린다」, 있으면 「안 그린다」 — 판정을 값으로 잰다", () => {
+    const store = new Map<string, string>();
+    const storage = () => fakeStorage(store);
+    assert.equal(shouldOfferContactFolderFileHelperInstall(storage), true);
+    rememberContactFolderFileHelper(storage);
+    assert.equal(shouldOfferContactFolderFileHelperInstall(storage), false);
+  });
+
+  test("🔴 [그만 보기]를 누르면 표시를 적고 그 자리에서 감춘다", () => {
+    // 그려 보는 것으로는 「눌렀다」를 잴 수 없다(효과도 이벤트도 없다) — 누르는 자리가
+    // 무엇을 하는지는 원본 한 줄로 못 박는다. 적힌 뒤의 결과는 위 시험이 값으로 잰다.
+    const body = flat(code(sectionSource));
+    assert.ok(body.includes("onDismiss={() => { rememberContactFolderFileHelper(); setDismissed(true); }}"), body);
+    assert.ok(body.includes("const [dismissed, setDismissed] = useState(false);"), body);
+    // 안내 조각은 스스로 끄지 않는다 — 받은 길을 부를 뿐이다(그려 볼 수 있게).
+    assert.ok(sectionSource.includes("onDismiss }: { onDismiss: () => void }"), sectionSource);
+  });
+
+  test("🔴 표시는 **마운트 뒤에** 읽는다 — 서버 렌더에 없는 값이라 hydration 이 어긋난다", () => {
+    const body = flat(code(sectionSource));
+    // 🔴 Windows 판단과 **같은 방법**이다 — 서버용 스냅샷은 「안 그림」(hiddenOnServer).
+    assert.ok(body.includes("const shouldOfferHelperInstallNow = () => shouldOfferContactFolderFileHelperInstall();"), body);
+    assert.ok(
+      body.includes(
+        "useSyncExternalStore(subscribeToNothing, shouldOfferHelperInstallNow, hiddenOnServer)"
+      ),
+      body
+    );
+    assert.ok(body.includes("if (!isWindows || !offerInstall || dismissed) return null;"), body);
+    // 🔴 렌더 중에 저장소를 직접 읽지 않는다 — 읽는 자리는 위 스냅샷 하나뿐이다.
+    assert.equal(
+      body.split("shouldOfferContactFolderFileHelperInstall()").length - 1,
+      1,
+      "표시를 읽는 자리가 둘 이상이다"
     );
   });
 

@@ -8,7 +8,13 @@ import {
   runQuoteFolderHelperInstallCommandCopy,
 } from "@/components/quotes/quote-folder-open";
 import type { QuoteIssueNoticeLine, QuoteIssueNoticeTone } from "@/components/quotes/quote-issue-messages";
-import { runContactFolderFileOpen, type ContactFolderFileOpenOutcome } from "./contact-folder-file-open";
+import {
+  CONTACT_FOLDER_FILE_HELPER_DISMISS_TEXT,
+  contactFolderFileOutcomeWithoutHelperOffer,
+  rememberContactFolderFileHelper,
+  runContactFolderFileOpen,
+  type ContactFolderFileOpenOutcome,
+} from "./contact-folder-file-open";
 
 /**
  * ============================================================================
@@ -32,11 +38,17 @@ import { runContactFolderFileOpen, type ContactFolderFileOpenOutcome } from "./c
  * ── 🔴 인쇄에 안 찍힌다 ─────────────────────────────────────────────────
  * 종이에 남을 이유가 없는 조작 단추라 바깥 틀에 `print:hidden` 을 건다.
  *
- * ── 🔴 늘 [설치 명령 복사]를 곁에 둔다 ──────────────────────────────────
+ * ── 🔴 [설치 명령 복사]는 **필요한 PC 에만** (2026-10-07) ─────────────────
  * 예전 도우미는 `openfile` 주소를 받으면 조용히 끝난다(exit 2). 화면은 그것을 알 수 없다 —
- * 그래서 한 번이라도 열어 본 결과에는 늘 설치로 가는 길을 함께 낸다
+ * 그래서 오랫동안 어떤 결과에든 설치로 가는 길을 함께 냈다. 이제는 흐름이 `offerHelperInstall`
+ * 하나로 알려 준다: **파일 열기 표시가 있는 PC 에서는 거짓**이라 줄도 단추도 그려지지 않는다
  * (contact-folder-file-open.ts 머리말). 복사 갈래는 견적서 쪽 것을 **그대로 가져다 쓴다** —
  * 설치되는 도우미가 똑같은 한 벌이고(PC 당 하나), 복사 갈래도 공용 모듈 하나다.
+ *
+ * ── 🔴 [그만 보기] ──────────────────────────────────────────────────────
+ * 감지가 틀릴 수도 있으니 사람이 직접 끌 수 있게 둔다. 누르면 표시를 적고
+ * (rememberContactFolderFileHelper) **그 자리에서** 안내가 사라진다 — 이미 들고 있는 결과에서
+ * 줄과 단추를 걷어내는 일은 순수 함수가 한다(contactFolderFileOutcomeWithoutHelperOffer).
  *
  * 서버 액션을 부르지 않는다 — `server-only` 사슬 없이 그려 볼 수 있다.
  * ============================================================================
@@ -79,6 +91,55 @@ function NoticeLines({ lines }: { lines: readonly QuoteIssueNoticeLine[] }) {
   );
 }
 
+/**
+ * 결과 줄 · [설치 명령 복사] · [그만 보기] — **상태를 받아 그리기만 한다.**
+ * 🔴 눌러 봐야 나오는 자리라 DOM 없이 재려면 결과를 넣어 그려 볼 수 있어야 한다 —
+ * 그래서 따로 내보낸다(contact-folder-file-open.test.ts 가 이 조각을 그려 본다).
+ */
+export function ContactFolderEntryOpenOutcomeNotice({
+  outcome,
+  copyLines,
+  copyBusy,
+  onCopy,
+  onDismiss,
+}: {
+  outcome: ContactFolderFileOpenOutcome;
+  copyLines: readonly QuoteIssueNoticeLine[];
+  copyBusy: boolean;
+  onCopy: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <span role="status" className="flex min-w-0 flex-col items-end gap-0.5 text-xs">
+      <NoticeLines lines={outcome.lines} />
+      {/* 🔴 표시가 있는 PC 에서는 이 묶음이 통째로 없다 — 줄도 단추 둘도. */}
+      {outcome.offerHelperInstall && (
+        <span className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCopy}
+            disabled={copyBusy}
+            aria-busy={copyBusy}
+            data-contact-folder-entry-helper-install-command=""
+            className={`${NOTICE_ACTION_CLASS} text-xs text-zinc-500 dark:text-zinc-400`}
+          >
+            {copyBusy ? "복사하는 중…" : "설치 명령 복사"}
+          </button>
+          <button
+            type="button"
+            onClick={onDismiss}
+            data-contact-folder-entry-helper-dismiss=""
+            className={`${NOTICE_ACTION_CLASS} text-xs text-zinc-400 dark:text-zinc-500`}
+          >
+            {CONTACT_FOLDER_FILE_HELPER_DISMISS_TEXT}
+          </button>
+        </span>
+      )}
+      <NoticeLines lines={copyLines} />
+    </span>
+  );
+}
+
 /** 단추와 결과 줄 — Windows 판단 없이. 화면에는 기본 내보내기를 쓴다. */
 export function ContactFolderEntryOpenControl({ folderName, fileName }: ContactFolderEntryOpenButtonProps) {
   const [busy, setBusy] = useState(false);
@@ -108,6 +169,12 @@ export function ContactFolderEntryOpenControl({ folderName, fileName }: ContactF
     }
   }
 
+  /** 🔴 표시를 적고, 들고 있는 결과에서도 안내를 걷어낸다 — 그 자리에서 사라진다. */
+  function handleDismiss() {
+    rememberContactFolderFileHelper();
+    setOutcome((current) => (current === null ? null : contactFolderFileOutcomeWithoutHelperOffer(current)));
+  }
+
   return (
     <span className="print:hidden flex min-w-0 flex-col items-end gap-0.5 text-right">
       <button
@@ -122,22 +189,13 @@ export function ContactFolderEntryOpenControl({ folderName, fileName }: ContactF
         {busy ? "여는 중…" : "열기"}
       </button>
       {outcome && (
-        <span role="status" className="flex min-w-0 flex-col items-end gap-0.5 text-xs">
-          <NoticeLines lines={outcome.lines} />
-          {outcome.offerHelperInstall && (
-            <button
-              type="button"
-              onClick={() => void handleCopy()}
-              disabled={copyBusy}
-              aria-busy={copyBusy}
-              data-contact-folder-entry-helper-install-command=""
-              className={`${NOTICE_ACTION_CLASS} text-xs text-zinc-500 dark:text-zinc-400`}
-            >
-              {copyBusy ? "복사하는 중…" : "설치 명령 복사"}
-            </button>
-          )}
-          <NoticeLines lines={copyLines} />
-        </span>
+        <ContactFolderEntryOpenOutcomeNotice
+          outcome={outcome}
+          copyLines={copyLines}
+          copyBusy={copyBusy}
+          onCopy={() => void handleCopy()}
+          onDismiss={handleDismiss}
+        />
       )}
     </span>
   );
