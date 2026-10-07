@@ -431,6 +431,12 @@ src/lib/domain/weekly-report-kind-filter.test.ts
 src/components/dashboard/weekly-report-kind-filter-screen.test.ts
 src/lib/domain/weekly-report-table-width.test.ts
 src/components/dashboard/weekly-report-width-frame-screen.test.ts
+# 주간보고 집계의 **자리** — 2026-10-07 에 셋이 옮겨졌다(머리줄이 `PO 발행 완료`,
+# 총 대수가 넷째 열을 두 줄 통째로, 총합·PO 발행 현황이 고객사 블록 앞). 자리는
+# 타입으로도 값으로도 드러나지 않아 바뀌어도 아무 시험이 빨개지지 않는다 — 실제로
+# 그 변경에서 기존 시험 111개가 전부 통과했다. 원본을 글자로 읽으므로 DB 도
+# 브라우저도 없다.
+src/components/dashboard/weekly-report-summary-layout.test.ts
 src/lib/domain/notification-bell-items.test.ts
 src/lib/domain/portal-notification-inbox.test.ts
 src/lib/server/integration/portal-inbox.test.ts

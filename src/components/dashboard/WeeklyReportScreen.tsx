@@ -148,19 +148,29 @@ import {
  * 빠졌는지. 그 줄은 **인쇄에도 나온다**(고르개 단추만 print:hidden 이다). 숫자만
  * 조용히 줄면 「지난주보다 줄었네」로 잘못 읽힌다.
  *
- * ── 집계 8칸의 자리도 엑셀 그대로다. 단, 합은 6칸이다 ────────────────────
- * 윗줄 점검 대기 · 수리 대기 · PO 대기 중 · PO 발행 완료,
- * 아랫줄 점검 중 · 수리 중 · 출하 대기 · 총 대수. 매주 같은 종이를 보던
- * 사람이 칸의 위치로 값을 찾으므로 순서를 바꾸지 않는다.
+ * ── 집계는 상태 6칸 + 두 줄을 통째로 쓰는 총 대수 한 칸이다 ───────────────
+ * 윗줄 점검 대기 · 수리 대기 · PO 대기 중,
+ * 아랫줄 점검 중 · 수리 중 · 출하 대기.
+ * 🔴 **상태 6칸의 차례는 엑셀 그대로이고 바꾸지 않는다** — 매주 같은 종이를 보던
+ * 사람이 칸의 위치로 값을 찾는다.
  *
- * **네 번째 칸(PO 발행 완료)만 성질이 다르다** — 나머지 여섯과 나란한 상태가
- * 아니라 그 위에 겹쳐 세는 값이고, 총 대수에 더해지지 않는다(도메인 파일 헤더).
+ * 넷째 열은 **총 대수 한 칸이 두 줄을 통째로** 차지하고(row-span-2), 그 숫자만
+ * 다른 칸보다 **크게** 적는다(2026-10-07 사용자 지시 — 블록에서 가장 먼저 눈에
+ * 들어와야 할 값이다). 그 크기도 주간보고 전용 변수에서 온다(아래 CountCell).
  *
- * 그 성질 때문에 한때 총합 블록에서는 이 칸을 빼고 네 번째 자리를 **빈 칸으로**
- * 남겼었다 — 원본 엑셀의 `RFG 총합` 에 그 칸이 없어서다. 지금은 **총합에도 둔다**:
- * 사용자가 넣기로 정했고, 고객사 블록과 총합이 같은 자리·같은 차례여야 두 곳을
- * 눈으로 견줄 수 있다. 빈 칸 처리는 그래서 없앴다. 칸이 하나 늘었을 뿐 셈은
- * 그대로다 — 총 대수는 여전히 상태 6칸의 합이고, 이 칸은 거기 더해지지 않는다.
+ * **`PO 발행 완료` 는 집계 칸이 아니라 블록 머리줄의 숫자다**(같은 지시). 그 값만
+ * 성질이 다르다 — 나머지 여섯과 나란한 상태가 아니라 그 위에 겹쳐 세는 값이고
+ * 총 대수에 더해지지 않는데(도메인 파일 헤더), 상태 칸들과 한 격자에 서 있으면
+ * 더해지는 값처럼 읽힌다. 머리줄로 올리면 성질이 다른 값임이 자리로 드러난다.
+ *
+ * 한때는 반대로 간 적이 있다 — 총합 블록에서만 이 칸을 빼고 네 번째 자리를 빈
+ * 칸으로 남겼다가(원본 엑셀의 `RFG 총합` 에 그 칸이 없어서), 고객사 블록과 총합이
+ * 같은 자리·같은 차례여야 두 곳을 눈으로 견줄 수 있다는 이유로 양쪽에 다 두었다.
+ * **그 이유는 지금도 그대로다**: 두 곳이 한 함수(CountsSummary · BlockHeading)를
+ * 그대로 쓰므로 한쪽만 달라질 자리가 없다.
+ *
+ * 🔴 **셈은 한 번도 바뀌지 않았다** — 총 대수는 여전히 상태 6칸의 합이고,
+ * PO 발행 완료는 거기 더해지지 않는다. 지금까지 옮긴 것은 자리뿐이다.
  *
  * ── 색: 고객사 색은 팔레트에서, 자리 색은 여기서 ────────────────────────
  * 고객사 블록의 소제목과 집계 칸은 **customers.row_color 에 정해 둔 그 고객사의
@@ -194,14 +204,16 @@ import {
  * 뷰포트가 아니라 이 화면이 실제로 차지한 폭으로 정한다(responsive-list.tsx 가
  * 같은 판단을 하는 이유 그대로 — 사이드바를 접었다 폈다 해도 알아서 맞는다).
  *
- * 72rem 인 근거는 집계 8칸이다. 한 칸이 라벨(최장 "PO 발행 완료")·숫자·좌우
+ * 72rem 인 근거는 집계 격자다. 상태 한 칸이 라벨(최장 "PO 대기 중")·숫자·좌우
  * 여백까지 약 120px 이라, 4열이 한 줄에 들어가려면 약 480px 이 필요하다.
- * 72rem(1152px)을 둘로 가르면 한 칸이 약 568px 이므로 4×2 배치가 **스크롤 없이**
- * 다 보인다. 한때는 "그보다 좁으면 집계가 2×4 로 접힌다"가 근거였는데 그 말은
- * 이제 맞지 않는다 — 집계는 어느 폭에서도 접히지 않고, 안 들어가면 그 줄만
- * 좌우로 스크롤된다(CountsSummary). 그래도 갈림길은 그대로 둔다: 그보다 좁은
- * 폭에서 좌우로 놓으면 좌우 두 칸이 **둘 다 밀어서 봐야 하는 상자**가 되어
- * 나란히 견준다는 뜻 자체가 사라지므로, 그때는 위아래로 쌓는 편이 원본에 가깝다.
+ * 72rem(1152px)을 둘로 가르면 한 칸이 약 568px 이므로 상태 3열 + 총 대수 열이
+ * **스크롤 없이** 다 보인다(넷째 열은 숫자가 큰 만큼 더 넓지만, 그 칸이 두 줄을
+ * 쓰므로 줄 수는 늘지 않는다). 한때는 "그보다 좁으면 집계가 2×4 로 접힌다"가
+ * 근거였는데 그 말은 이제 맞지 않는다 — 집계는 어느 폭에서도 접히지 않고, 안
+ * 들어가면 그 줄만 좌우로 스크롤된다(CountsSummary). 그래도 갈림길은 그대로
+ * 둔다: 그보다 좁은 폭에서 좌우로 놓으면 좌우 두 칸이 **둘 다 밀어서 봐야 하는
+ * 상자**가 되어 나란히 견준다는 뜻 자체가 사라지므로, 그때는 위아래로 쌓는 편이
+ * 원본에 가깝다.
  *
  * ── 좌우 두 칸의 높이는 격자가 맞춘다. 표 래퍼가 아니다 ────────────────
  * 한쪽만 길면 견주기 어렵다. 그런데 그 일은 **격자가 이미 하고 있다**: 격자 칸은
@@ -233,7 +245,7 @@ import {
  * min-width 는 auto 라, 이것이 없으면 표가 칸을 밀어 넓혀 화면 전체(body)가
  * 좌우로 밀린다).
  *
- * 표만 그런 것이 아니다 — 접지 않기로 한 줄(블록 소제목 · 집계 8칸)도 저마다
+ * 표만 그런 것이 아니다 — 접지 않기로 한 줄(블록 소제목 · 집계 격자)도 저마다
  * 같은 래퍼를 하나씩 갖는다. 넘치는 줄이 스스로 스크롤 상자를 갖지 않으면 그
  * 넘침이 바깥으로 새어 결국 화면 전체가 좌우로 밀린다. 다만 그 래퍼에 **확정
  * 높이를 함께 주지 말 것** — 바로 위 항목이 그 고장이다.
@@ -286,7 +298,7 @@ const TABLE_COLUMN_COUNT = 8;
 
 /**
  * 좌우 두 칸으로 갈리는 폭. 근거는 파일 헤더에 있다(집계 4열이 접히지 않는
- * 최소 폭). 고객사 줄과 아래 총합이 **같은 폭에서 같이** 갈려야 하므로 값을
+ * 최소 폭). 고객사 줄과 종류별 총합이 **같은 폭에서 같이** 갈려야 하므로 값을
  * 한 곳에 둔다 — 따로 적으면 한쪽만 고쳐져 두 배치가 어긋난다.
  */
 const SIDE_BY_SIDE_GRID = "grid grid-cols-1 gap-wr-block-gap @6xl:grid-cols-2";
@@ -340,11 +352,11 @@ const UNCLASSIFIED_BADGE_TONE =
 const LONG_PENDING_PO_LABEL = "장기 PO 미발행";
 
 /**
- * 아래쪽 구역의 이름. 바깥 h2 · 좌우 두 칸의 소제목 · 걸렀을 때의 안내문이 **같은
+ * 그 구역의 이름. 바깥 h2 · 좌우 두 칸의 소제목 · 걸렀을 때의 안내문이 **같은
  * 글자**를 쓴다.
  *
  * ⚠️ `WEEKLY_REPORT_PO_ISSUED_LABEL`(= `PO 발행 완료`)과 **다른 말이다.** 저쪽은
- * 집계 8칸 중 한 칸의 이름이고 이쪽은 구역의 이름이라, 안내문에서 저 상수를
+ * 블록 머리줄 오른쪽에 적는 숫자의 이름이고 이쪽은 구역의 이름이라, 저 상수를
  * 빌려 쓰면 화면에 없는 「PO 발행 완료 현황」이라는 구역이 생긴다(실제로 그렇게
  * 나갔다가 고쳤다).
  */
@@ -404,12 +416,38 @@ function StatusCell({ row, canEdit }: { row: WeeklyReportRow; canEdit: boolean }
 }
 
 /**
+ * 두 줄을 통째로 쓰는 칸(총 대수)의 숫자 크기 — **집계 숫자의 두 배**다.
+ *
+ * 🔴 글자 크기를 숫자로 박지 않고 `--text-wr-count` 를 곱해 쓴다. 이 화면의 크기는
+ * 전부 주간보고 전용 변수에서 오고(파일 헤더), 개발자 모드 [주간보고] 편집에서
+ * 집계 숫자를 키우면 이 칸도 같은 비율로 따라와야 한다 — 여기만 고정값으로 두면
+ * 설정을 아무리 움직여도 이 한 칸만 안 바뀐다.
+ *
+ * Tailwind 클래스가 아니라 인라인 스타일인 까닭: `text-[...]` 같은 임의값 클래스는
+ * 같은 요소의 `text-wr-count` 와 **같은 속성을 두고 다툰다**(어느 쪽이 이기는지는
+ * Tailwind 가 규칙을 늘어놓는 차례가 정한다 — weekly-report.test.ts 의 겹침 검사).
+ * 인라인은 늘 이기므로 그 다툼이 없고, 줄 높이는 `text-wr-count` 가 준 **비율**
+ * (calc(1 / 0.75))이라 커진 글자에 그대로 맞춰 늘어난다.
+ *
+ * 두 배인 근거는 높이다 — 두 줄 + 빈틈이 약 48px 인데, 이 숫자는 24px·줄 높이까지
+ * 약 32px 이라 칸을 넘기지 않는다. 즉 **블록이 세로로 길어지지 않는다.**
+ */
+const SPANNED_COUNT_FONT_SIZE = "calc(var(--text-wr-count) * 2)";
+
+/**
  * 집계 한 칸. 엑셀에서는 "점검 대기 0" 처럼 이름과 숫자가 나란히 있었다 —
  * 세로로 훑어 읽는 값이라 숫자는 tabular-nums 로 자릿수를 맞춘다.
  *
  * 배경은 부르는 쪽이 정한다(고객사 색 / 총합의 연두 / 색 없음). 분류 안 됨만
  * 예외로 빨간 옷을 스스로 입는다 — 그 칸은 자리의 색이 아니라 **경고**라서,
  * 고객사 색에 묻히면 안 된다.
+ *
+ * ── `spanTwoRows` — 넷째 열의 총 대수 한 칸만 쓴다 ───────────────────────
+ * 두 줄을 통째로 차지하고(row-span-2) 숫자가 두 배로 커진다(2026-10-07 사용자
+ * 지시 — 위 상수). 이름과 숫자의 **좌우 차례는 다른 칸과 똑같다**: 매주 같은
+ * 자리를 눈으로 찾는 문서라, 이 칸만 위아래로 쌓으면 읽는 법이 달라진다.
+ * 세로 정렬만 baseline 에서 center 로 바꾼다 — 두 줄짜리 상자에서 baseline 은
+ * 글자를 맨 위에 붙여 놓아 칸 아래가 비어 보인다.
  */
 function CountCell({
   label,
@@ -417,6 +455,7 @@ function CountCell({
   toneClass = PLAIN_TONE,
   toneStyle,
   alert = false,
+  spanTwoRows = false,
 }: {
   label: string;
   value: number;
@@ -427,26 +466,41 @@ function CountCell({
    */
   toneStyle?: CSSProperties;
   alert?: boolean;
+  /** 두 줄을 통째로 쓰고 숫자를 키울 것인가. 🔴 총 대수 칸에서만 참이다(위 주석). */
+  spanTwoRows?: boolean;
 }) {
   const boxClass = alert
     ? "border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950"
     : `border-zinc-200 dark:border-zinc-800 ${toneClass}`;
+  const layoutClass = spanTwoRows ? "row-span-2 items-center" : "items-baseline";
   const valueClass = alert ? "text-red-700 dark:text-red-300" : "text-zinc-900 dark:text-zinc-50";
   return (
     <div
-      className={`flex items-baseline justify-between gap-1.5 rounded border px-1.5 py-0.5 ${boxClass}`}
+      className={`flex ${layoutClass} justify-between gap-1.5 rounded border px-1.5 py-0.5 ${boxClass}`}
       style={alert ? undefined : toneStyle}
     >
       <span className="text-wr-label whitespace-nowrap text-zinc-600 dark:text-zinc-400">{label}</span>
-      <span className={`text-wr-count font-semibold tabular-nums ${valueClass}`}>{value}</span>
+      <span
+        className={`text-wr-count font-semibold tabular-nums ${valueClass}`}
+        style={spanTwoRows ? { fontSize: SPANNED_COUNT_FONT_SIZE } : undefined}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
 /**
  * 집계에서 상태 6칸이 놓이는 자리 — **엑셀 그대로**다(파일 헤더).
- * 네 번째 자리(PO 발행 완료)와 여덟 번째 자리(총 대수)는 상태가 아니라 이 표에
- * 없다.
+ * 4번 자리는 비어 있다: 넷째 열은 **총 대수 한 칸이 두 줄을 통째로** 쓰고
+ * (CountsSummary), 그 칸은 상태가 아니라 이 표에 없다. 8번 자리는 이제 아예
+ * 없다 — 거기 있던 총 대수가 4번 자리로 올라갔고, PO 발행 완료는 머리줄로
+ * 나갔다(2026-10-07 사용자 지시, 파일 헤더).
+ *
+ * 번호를 1~3 · 5~7 로 띄워 둔 채로 남긴 까닭: 이 표가 정하는 것은 **상태끼리의
+ * 차례와 윗줄·아랫줄 가르기** 둘뿐이고(아래 TOP/BOTTOM), 그 둘은 이번 변경으로
+ * 한 글자도 바뀌지 않았다. 번호를 1~6 으로 당기면 「4번 자리는 상태가 쓰지
+ * 않는다」는 사실이 코드에서 사라진다.
  *
  * Record 로 적은 것은 일부러다: 상태가 하나 늘면 이 표가 컴파일되지 않아서,
  * 화면에 칸 하나가 조용히 빠진 채로 나가는 일이 없다.
@@ -469,8 +523,13 @@ const TOP_ROW_STATUSES = SUMMARY_CELL_ORDER.filter((status) => SUMMARY_CELL_POSI
 const BOTTOM_ROW_STATUSES = SUMMARY_CELL_ORDER.filter((status) => SUMMARY_CELL_POSITION[status] > 4);
 
 /**
- * 집계 8칸 — 윗줄 네 칸, 아랫줄 네 칸(마지막이 총 대수).
- * 분류 안 된 건이 있을 때만 아홉 번째 칸이 붙는다.
+ * 집계 7칸 — 윗줄 상태 셋, 아랫줄 상태 셋, 그리고 **넷째 열을 두 줄 통째로 쓰는
+ * 총 대수 한 칸**. 분류 안 된 건이 있을 때만 셋째 줄 맨 왼쪽에 칸이 하나 더 붙는다.
+ *
+ * 🔴 **DOM 차례가 곧 화면의 자리다** — 윗줄 셋 → 총 대수 → 아랫줄 셋. 격자 자동
+ * 배치가 총 대수를 1행 4열에 놓고 두 줄을 먹으므로, 뒤따르는 아랫줄 셋이 2행
+ * 1~3열로 내려간다. 그 다음 칸(분류 안 됨)은 2행 4열이 막혀 있어 3행 1열로 간다 —
+ * 이 차례를 손대면 매주 눈으로 찾던 자리가 통째로 어긋난다.
  *
  * **폭은 위 소제목에 맞추고, 어느 폭에서도 접지 않는다(사용자 결정).** 예전에는
  * max-w-3xl 로 768px 에서 끊고, 자기 자신이 @container 가 되어 좁아지면 4열을
@@ -491,8 +550,9 @@ const BOTTOM_ROW_STATUSES = SUMMARY_CELL_ORDER.filter((status) => SUMMARY_CELL_P
  *
  * **고객사 블록과 총합 블록이 같은 칸을 쓴다.** 예전에는 총합에서 PO 발행 완료를
  * 빼려고 `showPoIssued` 를 받아 네 번째 자리를 빈 칸으로 남겼는데, 그 칸을 총합에도
- * 두기로 하면서 갈림길이 사라졌다(파일 헤더). 두 곳이 한 함수를 그대로 쓰므로
- * 칸의 차례가 어긋날 자리가 없다.
+ * 두기로 하면서 갈림길이 사라졌다(파일 헤더). 그 뒤 PO 발행 완료가 머리줄로
+ * 올라가면서 이 격자에서는 아예 빠졌지만, **두 곳이 여전히 이 한 함수를 그대로
+ * 쓰므로** 칸의 차례가 어긋날 자리는 지금도 없다.
  */
 function CountsSummary({
   counts,
@@ -518,10 +578,13 @@ function CountsSummary({
             toneClass={toneClass} toneStyle={toneStyle}
           />
         ))}
-        {/* 네 번째 자리 — 겹쳐 세는 값이라 총 대수에 더해지지 않는다(파일 헤더). */}
+        {/* 🔴 넷째 열 — 여기서 두 줄을 통째로 먹는다. **아랫줄 셋보다 먼저 와야
+            한다**: 격자 자동 배치는 DOM 차례대로 빈자리를 채우므로, 뒤로 보내면
+            이 칸이 2행 4열에서 시작해 셋째 줄이 하나 더 생긴다(위 주석). */}
         <CountCell
-          label={WEEKLY_REPORT_PO_ISSUED_LABEL}
-          value={counts.poIssued}
+          label={WEEKLY_REPORT_TOTAL_LABEL}
+          value={counts.total}
+          spanTwoRows
           toneClass={toneClass} toneStyle={toneStyle}
         />
         {BOTTOM_ROW_STATUSES.map((status) => (
@@ -532,7 +595,6 @@ function CountsSummary({
             toneClass={toneClass} toneStyle={toneStyle}
           />
         ))}
-        <CountCell label={WEEKLY_REPORT_TOTAL_LABEL} value={counts.total} toneClass={toneClass} toneStyle={toneStyle} />
         {counts.unclassified > 0 && (
           <CountCell label={UNCLASSIFIED_LABEL} value={counts.unclassified} alert />
         )}
@@ -542,9 +604,20 @@ function CountsSummary({
 }
 
 /**
- * 블록 소제목 — 엑셀의 "INVENIA(RFG)". 왼쪽에 이름·종류, 오른쪽에 총 대수다.
- * 고객사 블록과 아래 총합이 같은 줄 모양을 쓰므로, 좌우 두 칸의 첫 줄 높이가
- * 저절로 맞는다.
+ * 블록 소제목 — 엑셀의 "INVENIA(RFG)". 왼쪽에 이름·종류, 오른쪽에 **이름표가 붙은
+ * 숫자 하나**다. 고객사 블록과 종류별 총합이 같은 줄 모양을 쓰므로, 좌우 두 칸의
+ * 첫 줄 높이가 저절로 맞는다.
+ *
+ * ── 오른쪽 숫자는 부르는 쪽이 이름까지 정한다(`count`) ────────────────────
+ * 이름을 여기 박지 않는 까닭: 이 줄을 쓰는 세 자리가 **서로 다른 값**을 오른쪽에
+ * 적는다.
+ *   - 고객사 블록 · 종류별 총합 → `PO 발행 완료`(counts.poIssued).
+ *     2026-10-07 사용자 지시로 집계 격자에서 여기로 올라온 값이다 — 상태 6칸과 한
+ *     격자에 서 있으면 더해지는 값처럼 읽힌다(파일 헤더).
+ *   - PO 발행 현황 → `총 대수`(그 종류의 발행 완료 합계). **이 자리는 이번 지시의
+ *     대상이 아니라 그대로다.** 이름을 상수 하나로 박아 두면 여기까지 같이 바뀐다.
+ * 이름과 값을 **한 덩어리로 받는 것**도 일부러다 — 따로 받으면 언젠가 한쪽만
+ * 바뀌어 「PO 발행 완료」라고 적힌 자리에 총 대수가 선다.
  *
  * ── `actions` — 🔴 **고객사 블록에만 넘어오는 슬롯** ─────────────────────
  * 이 줄은 세 자리에서 쓰인다: 고객사 블록(ReportBlock) · PO 발행 현황
@@ -554,7 +627,7 @@ function CountsSummary({
  * 그려지지 않는다.
  *
  * 자리는 **왼쪽 묶음(`<h3>`)의 맨 끝**이다 — 고객사 이름 옆이어야 한다는 사용자
- * 지정이고(2026-10-05), 오른쪽 `총 대수` 와 겹치지 않는 자리다. `<button>` 은
+ * 지정이고(2026-10-05), 오른쪽 숫자와 겹치지 않는 자리다. `<button>` 은
  * phrasing content 라 `<h3>` 안에 들어가도 된다.
  *
  * ⚠️ 넘어오는 조각은 **스스로 `shrink-0` 을 입어야 한다.** 아래 `<h3>` 의
@@ -563,7 +636,7 @@ function CountsSummary({
 function BlockHeading({
   name,
   kind,
-  total,
+  count,
   actions,
   toneClass = PLAIN_TONE,
   toneStyle,
@@ -571,8 +644,8 @@ function BlockHeading({
   /** 왼쪽에 굵게 적는 이름 — 고객사명, 또는 "총합". */
   name: string;
   kind: WeeklyReportKind;
-  /** 오른쪽에 적는 숫자. 없으면 적지 않는다. */
-  total?: number;
+  /** 오른쪽에 적는 이름표 + 숫자. 없으면 적지 않는다(위 주석). */
+  count?: { label: string; value: number };
   /** 이름 묶음 맨 끝에 서는 조각. 🔴 고객사 블록에서만 넘어온다(위 주석). */
   actions?: ReactNode;
   toneClass?: string;
@@ -584,7 +657,7 @@ function BlockHeading({
     // 두 줄로 접히면 기준 자체가 흔들린다(사용자 결정: 줄바꿈 대신 좌우 스크롤).
     // h3 의 shrink-0 이 그 짝이다: flex 항목은 기본이 shrink 라, 두지 않으면
     // justify-between 이 좁아질 때 왼쪽 이름 묶음을 min-content 까지 눌러 **글자가
-    // 스스로 접힌다**(오른쪽 총 대수는 이미 whitespace-nowrap 이라 안 눌린다).
+    // 스스로 접힌다**(오른쪽 숫자는 이미 whitespace-nowrap 이라 안 눌린다).
     // shrink-0 이면 대신 넘치고, 넘친 만큼만 이 상자 안에서 좌우로 스크롤된다.
     <div
       className={`flex items-baseline justify-between gap-x-3 gap-y-0.5 overflow-x-auto rounded border border-zinc-200 px-2 py-1 dark:border-zinc-800 ${toneClass}`}
@@ -600,11 +673,11 @@ function BlockHeading({
         </span>
         {actions}
       </h3>
-      {total !== undefined && (
+      {count !== undefined && (
         <p className="text-wr-meta whitespace-nowrap text-zinc-600 dark:text-zinc-400">
-          {WEEKLY_REPORT_TOTAL_LABEL}{" "}
+          {count.label}{" "}
           <span className="text-wr-count font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
-            {total}
+            {count.value}
           </span>
         </p>
       )}
@@ -656,7 +729,7 @@ function IntakeNumberLink({ row }: { row: WeeklyReportRow }) {
 }
 
 /**
- * 블록 하나 — 소제목 · 집계 8칸 · 상세표 8칼럼. 엑셀의 한 덩어리 그대로다.
+ * 블록 하나 — 소제목 · 집계 7칸 · 상세표 8칼럼. 엑셀의 한 덩어리 그대로다.
  * 소제목과 집계 칸은 그 고객사의 색으로 칠한다(파일 헤더).
  *
  * min-w-0 은 장식이 아니다: 격자 칸의 기본 min-width 는 auto 라, 이것이 없으면
@@ -695,10 +768,13 @@ function ReportBlock({
   // 머리줄·집계·상세표가 지금까지와 똑같이 section 의 flex 항목으로 선다.
   const body = (
     <>
+      {/* 🔴 오른쪽 숫자는 **PO 발행 완료**다 — 총 대수는 아래 집계의 넷째 열이
+          두 줄 통째로 맡는다(2026-10-07 사용자 지시, 파일 헤더). 아래 종류별
+          총합도 같은 값을 같은 자리에 적는다. */}
       <BlockHeading
         name={block.customerName}
         kind={block.kind}
-        total={block.counts.total}
+        count={{ label: WEEKLY_REPORT_PO_ISSUED_LABEL, value: block.counts.poIssued }}
         actions={canEditStatus ? <WeeklyReportBlockStatusActions /> : undefined}
         toneClass={toneClass} toneStyle={toneStyle}
       />
@@ -805,7 +881,7 @@ function ReportBlock({
 /**
  * PO 발행 현황 한 줄 — 그 종류의 **고객사별 PO 발행 완료 건수**.
  *
- * 숫자는 블록의 `PO 발행 완료` 칸을 그대로 다시 읽은 것이다(도메인의
+ * 숫자는 블록 머리줄의 `PO 발행 완료` 를 그대로 다시 읽은 것이다(도메인의
  * summarizeWeeklyReportPoIssuance). 여기서 접수 건을 다시 세지 않는 이유가
  * 그것이다 — 두 곳이 따로 세면 언젠가 어긋난다.
  *
@@ -815,10 +891,12 @@ function ReportBlock({
 function PoIssuanceBlock({ issuance }: { issuance: WeeklyReportPoIssuance }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
+      {/* 🔴 이 줄의 오른쪽만 `총 대수` 그대로다 — 아래 이름표들의 합계이고,
+          2026-10-07 지시의 대상이 아니었다(BlockHeading 머리말). */}
       <BlockHeading
         name={PO_ISSUANCE_SECTION_LABEL}
         kind={issuance.kind}
-        total={issuance.total}
+        count={{ label: WEEKLY_REPORT_TOTAL_LABEL, value: issuance.total }}
         toneClass={SECTION_HEADING_TONE}
       />
       {issuance.customers.length === 0 ? (
@@ -1076,6 +1154,75 @@ export default function WeeklyReportScreen({
           </p>
         )}
 
+        {/* 🔴 아래 두 구역(종류별 총합 · PO 발행 현황)은 **머리말 바로 아래,
+            고객사 블록 앞**이다(2026-10-07 사용자 지시). 원본 엑셀도 이 화면의
+            예전 판도 둘을 맨 아래에 두었는데, 블록이 58개라 전체 규모를 보려면
+            매번 끝까지 내려가야 했다. 위로 올리면 종이로 뽑을 때도 첫 장에 규모가
+            먼저 찍힌다.
+
+            RFG 총합 · MB 총합 — 아래 고객사 블록과 같은 자리(왼쪽 RFG · 오른쪽 MB)
+            에 둔다. 집계 칸도 고객사 블록과 **같은 자리·같은 차례**이고 머리줄의
+            PO 발행 완료도 마찬가지다 — 두 곳을 눈으로 견주는 것이 이 구역의
+            쓸모라서다(파일 헤더). */}
+        <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-wr-section dark:border-zinc-800 dark:bg-zinc-900">
+          <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">종류별 총합</h2>
+          {/* 🔴 고르개는 이 구역에도 미친다 — `RFG 만` 이면 `MB 총합` 은 감춘다.
+              감춰도 남은 숫자의 뜻이 흔들리지 않는 까닭: 남은 블록의 소제목이
+              **`총합 RFG`** 라고 스스로 적고 있어, 그 숫자가 무엇의 합인지 블록
+              자신이 말한다. 감추지 않으면 그 반대가 문제다 — 고객사 블록에는 RFG 만
+              있는데 MB 총합이 남아, 두 줄을 더해 전체라고 읽게 된다. 빠진 대수는
+              머리말의 KindFilterBanner 가 대수까지 적어 둔다(파일 헤더). */}
+          <div className={gridClass}>
+            {view.totalsByKind.map(({ kind, counts }) => (
+              <div key={kind} className="flex min-w-0 flex-col gap-1">
+                <BlockHeading
+                  name="총합"
+                  kind={kind}
+                  count={{ label: WEEKLY_REPORT_PO_ISSUED_LABEL, value: counts.poIssued }}
+                  toneClass={SECTION_HEADING_TONE}
+                />
+                {/* 머리줄의 PO 발행 완료도 집계의 총 대수도 여기서 새로 세지 않는다 —
+                    도메인이 이미 센 totalsByKind 의 값이다. poIssued 는 그 종류
+                    블록들의 PO 발행 완료 합이고(도메인 시험이 못 박는다), 아래
+                    PO 발행 현황의 합계와도 같은 값이다. */}
+                <CountsSummary counts={counts} toneClass={TOTALS_CELL_TONE} />
+              </div>
+            ))}
+          </div>
+          {/* 6칸의 합과 총 대수가 다르면 분류 안 된 건이 있다는 뜻이다. 같을 때는
+              아무 말도 하지 않는다 — 늘 보이는 확인 문구는 읽히지 않는다.
+              🔴 걸렀으면 **보이는 종류의** 값끼리 견준다(위 분류 안 됨 경고와 같은
+              이유). 전체 값을 그대로 두면 RFG 만 보는 화면에서 MB 의 분류 안 됨
+              때문에 늘 어긋난 것으로 적힌다. */}
+          {sumWeeklyReportStatusCounts(view.counts) !== view.counts.total && (
+            <p className="text-xs text-red-700 dark:text-red-300">
+              전체 {view.counts.total}대 중 6칸에 들어간 것은{" "}
+              {sumWeeklyReportStatusCounts(view.counts)}대입니다.
+            </p>
+          )}
+        </section>
+
+        {/* PO 발행 현황 — 종류별로 고객사별 발행 완료 건수를 늘어놓는다. 숫자는
+            블록 머리줄의 PO 발행 완료와 같은 계산에서 나온다. 원본 엑셀에서는
+            아래쪽 구역이었고 이 화면도 그랬는데, 바로 위 종류별 총합과 한 덩어리로
+            머리말 아래로 올라왔다(2026-10-07 사용자 지시, 위 주석). */}
+        <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-wr-section dark:border-zinc-800 dark:bg-zinc-900">
+          {/* 원본은 좌우 두 칸에 각각 "PO 발행 현황"을 적어 둔다. 바깥 제목이 같은
+              글자인 것은 그래서다 — 두 칸의 소제목이 원본의 글자고, 이 h2 는 화면
+              낭독기가 이 구역을 하나로 집을 수 있게 하는 발판이다. */}
+          <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">{PO_ISSUANCE_SECTION_LABEL}</h2>
+          {/* 🔴 이 구역도 **종류로 갈려 있다** — 두 칸의 소제목이 `PO 발행 현황 RFG`
+              와 `PO 발행 현황 MB` 이고, 고객사별 숫자도 그 종류의 블록에서 온다
+              (summarizeWeeklyReportPoIssuance). 그러니 걸러도 뜻이 흐려지지 않고,
+              오히려 남겨 두면 `RFG 만` 화면에 MB 의 PO 발행 고객사가 늘어서서
+              상세표에 없는 건을 찾게 된다. */}
+          <div className={gridClass}>
+            {view.poIssuance.map((issuance) => (
+              <PoIssuanceBlock key={issuance.kind} issuance={issuance} />
+            ))}
+          </div>
+        </section>
+
         {customerRows.length === 0 ? (
           <div className="rounded-lg border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
             진행 중인 접수 건이 없습니다.
@@ -1099,7 +1246,7 @@ export default function WeeklyReportScreen({
               //
               // relative 는 좌표를 주지 않으면 아무것도 옮기지 않고 z-index:auto 라
               // 쌓임 맥락도 만들지 않는다 — 기준점만 준다. SIDE_BY_SIDE_GRID 상수에
-              // 넣지 않는 것은 그 값이 "어느 폭에서 좌우로 갈리는가"만 뜻하고 아래
+              // 넣지 않는 것은 그 값이 "어느 폭에서 좌우로 갈리는가"만 뜻하고 위
               // 종류별 총합·PO 발행 현황도 같이 쓰기 때문이다(그 둘의 h2 는 눈에
               // 보이는 글자라 이 문제가 없다).
               <section key={row.key} className={`${gridClass} relative`}>
@@ -1122,67 +1269,6 @@ export default function WeeklyReportScreen({
             ))}
           </div>
         )}
-
-        {/* RFG 총합 · MB 총합 — 엑셀에도 있는 줄이고, 위와 같은 자리(왼쪽 RFG ·
-            오른쪽 MB)에 둔다. 블록을 다 훑지 않고도 두 줄의 규모를 볼 수 있어야 한다.
-            집계 칸도 고객사 블록과 **같은 자리·같은 차례**다(PO 발행 완료 포함) —
-            두 곳을 눈으로 견주는 것이 이 줄의 쓸모라서다(파일 헤더). */}
-        <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-wr-section dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">종류별 총합</h2>
-          {/* 🔴 고르개는 이 구역에도 미친다 — `RFG 만` 이면 `MB 총합` 은 감춘다.
-              감춰도 남은 숫자의 뜻이 흔들리지 않는 까닭: 남은 블록의 소제목이
-              **`총합 RFG`** 라고 스스로 적고 있어, 그 숫자가 무엇의 합인지 블록
-              자신이 말한다. 감추지 않으면 그 반대가 문제다 — 고객사 블록에는 RFG 만
-              있는데 아래에 MB 총합이 남아, 두 줄을 더해 전체라고 읽게 된다. 빠진
-              대수는 머리말의 KindFilterBanner 가 대수까지 적어 둔다(파일 헤더). */}
-          <div className={gridClass}>
-            {view.totalsByKind.map(({ kind, counts }) => (
-              <div key={kind} className="flex min-w-0 flex-col gap-1">
-                <BlockHeading
-                  name="총합"
-                  kind={kind}
-                  total={counts.total}
-                  toneClass={SECTION_HEADING_TONE}
-                />
-                {/* PO 발행 완료 칸의 숫자는 여기서 새로 세지 않는다 — 도메인이 이미
-                    센 totalsByKind 의 poIssued 다. 그 값은 그 종류 블록들의 PO 발행
-                    완료 합이고(도메인 시험이 못 박는다), 아래 PO 발행 현황의 합계와도
-                    같은 값이다. */}
-                <CountsSummary counts={counts} toneClass={TOTALS_CELL_TONE} />
-              </div>
-            ))}
-          </div>
-          {/* 6칸의 합과 총 대수가 다르면 분류 안 된 건이 있다는 뜻이다. 같을 때는
-              아무 말도 하지 않는다 — 늘 보이는 확인 문구는 읽히지 않는다.
-              🔴 걸렀으면 **보이는 종류의** 값끼리 견준다(위 분류 안 됨 경고와 같은
-              이유). 전체 값을 그대로 두면 RFG 만 보는 화면에서 MB 의 분류 안 됨
-              때문에 늘 어긋난 것으로 적힌다. */}
-          {sumWeeklyReportStatusCounts(view.counts) !== view.counts.total && (
-            <p className="text-xs text-red-700 dark:text-red-300">
-              전체 {view.counts.total}대 중 6칸에 들어간 것은{" "}
-              {sumWeeklyReportStatusCounts(view.counts)}대입니다.
-            </p>
-          )}
-        </section>
-
-        {/* PO 발행 현황 — 원본 아래쪽의 구역. 종류별로 고객사별 발행 완료 건수를
-            늘어놓는다. 숫자는 위 블록의 PO 발행 완료 칸과 같은 계산에서 나온다. */}
-        <section className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-wr-section dark:border-zinc-800 dark:bg-zinc-900">
-          {/* 원본은 좌우 두 칸에 각각 "PO 발행 현황"을 적어 둔다. 바깥 제목이 같은
-              글자인 것은 그래서다 — 두 칸의 소제목이 원본의 글자고, 이 h2 는 화면
-              낭독기가 이 구역을 하나로 집을 수 있게 하는 발판이다. */}
-          <h2 className="text-wr-section font-semibold text-zinc-900 dark:text-zinc-50">{PO_ISSUANCE_SECTION_LABEL}</h2>
-          {/* 🔴 이 구역도 **종류로 갈려 있다** — 두 칸의 소제목이 `PO 발행 현황 RFG`
-              와 `PO 발행 현황 MB` 이고, 고객사별 숫자도 그 종류의 블록에서 온다
-              (summarizeWeeklyReportPoIssuance). 그러니 걸러도 뜻이 흐려지지 않고,
-              오히려 남겨 두면 `RFG 만` 화면에 MB 의 PO 발행 고객사가 늘어서서
-              상세표에 없는 건을 찾게 된다. */}
-          <div className={gridClass}>
-            {view.poIssuance.map((issuance) => (
-              <PoIssuanceBlock key={issuance.kind} issuance={issuance} />
-            ))}
-          </div>
-        </section>
 
         {/* 금주 목표 — 화면의 **맨 아래**다. 원본 엑셀은 이 상자를 집계 위에 두었지만
             사용자가 아래로 내리기로 정했다: 매주 넘겨 보는 문서라 위쪽은 "지금 어디까지

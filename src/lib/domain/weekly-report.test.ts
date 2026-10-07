@@ -1147,8 +1147,11 @@ const EXPECTED_WEEKLY_REPORT_CLASS_COUNTS: Record<WeeklyReportComponentFile, Rec
       "text-wr-body": 1, // 상세표
       "text-wr-table-head": 1, // 상세표 머리 줄
       "text-wr-label": 3, // 집계 칸 이름 · 종류 배지 · PO 현황 고객사명
-      "text-wr-count": 3, // 집계 숫자 · 소제목 총 대수 · PO 현황 건수
-      "text-wr-meta": 4, // 종류 설명 · 소제목 총 대수 줄 · 상세표 해당 없음 · PO 현황 해당 없음
+      // 소제목 숫자는 2026-10-07 부터 고객사 블록·종류별 총합에서 `PO 발행 완료`,
+      // PO 발행 현황에서 `총 대수` 다 — 자리와 옷은 그대로라 수가 달라지지 않는다
+      // (weekly-report-summary-layout.test.ts 가 어느 자리에 무엇이 적히는지 본다).
+      "text-wr-count": 3, // 집계 숫자 · 소제목 숫자 · PO 현황 건수
+      "text-wr-meta": 4, // 종류 설명 · 소제목 숫자 줄 · 상세표 해당 없음 · PO 현황 해당 없음
       "p-wr-block": 1, // 고객사 블록
       "p-wr-section": 2, // 종류별 총합 · PO 발행 현황 구역
       // SIDE_BY_SIDE_GRID · SINGLE_COLUMN_GRID · 고객사 줄 목록.

@@ -217,7 +217,9 @@ describe("🔴 머리줄 버튼", () => {
   test("🔴 안 넘기면 아무것도 그려지지 않는다 — 선택적 슬롯이다", () => {
     const heading = functionBody(screen, "function BlockHeading(");
     assert.match(heading, /actions\?: ReactNode;/);
-    // 왼쪽 이름 묶음(h3)의 맨 끝이다 — 오른쪽 `총 대수` 와 겹치지 않는 자리.
+    // 왼쪽 이름 묶음(h3)의 맨 끝이다 — 오른쪽 숫자(`PO 발행 완료`)와 겹치지 않는
+    // 자리다. 그 숫자가 2026-10-07 에 `총 대수` 에서 바뀌었고, 자리는 그대로다
+    // (weekly-report-summary-layout.test.ts).
     assert.ok(heading.indexOf("<h3") < heading.indexOf("{actions}"), heading);
     assert.ok(heading.indexOf("{actions}") < heading.indexOf("</h3>"), heading);
     // 이 줄은 접지 않는다 — 아래 집계와 상세표가 이 줄의 폭에 맞춘다.
