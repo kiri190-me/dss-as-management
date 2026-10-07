@@ -357,6 +357,22 @@ src/components/product-models/product-model-kind-files-screen.test.ts
 # page.tsx)만 그쪽처럼 원본을 글자로 읽는다 — 그 둘은 여전히 서버 액션을 문다.
 src/components/product-models/product-model-kind-share-docs-screen.test.tsx
 
+# **제품 모델 하나하나**의 같은 구역(2026-10-07 사용자 요구 — 「제품 모델 상세에도」).
+# 위 종류별 한 벌을 **본떴고 그 두 파일은 한 글자도 고치지 않았다**(⑩의 마지막 시험이
+# 그것을 지킨다). 다른 것은 주인 하나뿐이다 — 주소의 마디가 enum 코드가 아니라 **모델의
+# id(UUID)** 이고, 모델은 휴지통에 들어갈 수 있어 통로가 404 를 낸다.
+# 🔴 담을 수 있는 사람에게만 고르는 창이 선다 · 🔴 0건이면 지정 목록을 안 그리고, 담을 수도
+# 없는 사람에게는 **구역 자체가** 없다 · 🔴 설정이 비면(disabled) 고르는 창이 통째로 안
+# 그려진다(가리킴 목록은 DB 라 그대로 선다) · 🔴 공유폴더 맨 위 칸에 바로 놓인 **파일**에는
+# [열기]가 없다(도우미 주소가 `폴더/파일` 모양이라 앞에 붙일 폴더가 없다) · 🔴 구역 전체에
+# print:hidden(적히는 것은 경로지 이 모델의 사실이 아니다) · 🔴 지우기 확인 창이 **되돌릴 수
+# 없다**고 말하고 「15일 뒤 자동 삭제」는 말하지 않는다 · 🔴 도우미 안내는 **베끼지 않고**
+# 종류별 쪽 공용 조각을 가져다 쓴다 · 🔴 서버는 DB 한 번만 더 때린다(공유폴더 디스크를
+# 안 읽는다).
+# 두 조각은 서버 액션을 `onAdd` · `onRemove` 로 받도록 만들어 **상태를 넣어 그려 보고**,
+# 묶는 쪽(ProductModelDetailScreen · [id]/page.tsx)만 원본을 글자로 읽는다.
+src/components/product-models/product-model-share-docs-screen.test.tsx
+
 # ── 전체 A/S 현황의 기본 차례 — 인수번호 내림차순 (2026-10-07 사용자 지시) ─────
 # 🔴 이 화면은 서버가 보낸 행을 제 손으로 다시 정렬한다 — 눈에 보이는 첫 차례를
 # 정하는 것은 서버 조회가 아니라 RepairCaseListPage 의 DEFAULT_SORT 다. 한쪽만

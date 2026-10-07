@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type {
   ProductModelAttachmentListItem,
   TrashedProductModelAttachmentListItem,
@@ -12,6 +13,12 @@ import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case
 import type { RequestedPartRow } from "@/lib/domain/product-model-breakdown";
 import { mergeProductModelCustomers } from "@/lib/domain/product-model-customer-merge";
 import { productModelKindLabel } from "@/lib/domain/product-model-kind";
+import {
+  addProductModelShareDocAction,
+  removeProductModelShareDocAction,
+} from "@/lib/server/actions/product-model-share-docs";
+import ModelShareDocsSection, { type ModelShareDocRow } from "./ModelShareDocsSection";
+import type { ModelShareFolderAddRequest } from "./ModelShareFolderPicker";
 import ProductModelEditForm from "./ProductModelEditForm";
 import ProductModelFilesSection from "./ProductModelFilesSection";
 import ProductModelHistoryBreakdown from "./ProductModelHistoryBreakdown";
@@ -156,6 +163,7 @@ export default function ProductModelDetailScreen({
   customerOptions,
   attachments,
   trashedAttachments,
+  shareDocs,
   canManageFiles,
 }: {
   detail: ProductModelDetail;
@@ -168,10 +176,36 @@ export default function ProductModelDetailScreen({
   customerOptions: ProductModelCustomerOption[];
   attachments: ProductModelAttachmentListItem[];
   trashedAttachments: TrashedProductModelAttachmentListItem[];
+  /**
+   * 🔴 공유폴더를 **가리켜 둔** 줄들 — 사진·도면과 다른 목록이다(바이트가 없다).
+   * 차례는 서버가 정한다(display_order, created_at) — 화면이 다시 정렬하지 않는다.
+   */
+  shareDocs: ModelShareDocRow[];
   /** productModels.files WRITE. 서버 컴포넌트가 판정해 내려보낸 값이다. */
   canManageFiles: boolean;
 }) {
+  const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
+
+  /**
+   * 🔴 가리킴 담기 — 서버 액션을 부르고 **그 답을 그대로** 돌려준다. 거절 문장은 서버가
+   * 짓고 고르는 창이 그대로 보인다(문장을 여기서 다시 쓰지 않는다). 성공하면 다시 그려
+   * **담은 줄이 곧바로 목록에 보이게** 한다 — 목록은 서버 컴포넌트가 만든다.
+   */
+  async function handleAddShareDoc(request: ModelShareFolderAddRequest) {
+    const result = await addProductModelShareDocAction({ productModelId: detail.id, ...request });
+    if (!result.ok) return { ok: false as const, message: result.message };
+    router.refresh();
+    return { ok: true as const };
+  }
+
+  /** 🔴 가리킴 지우기 — **휴지통이 없다.** 되돌릴 수 없다는 말은 확인 창이 한다. */
+  async function handleRemoveShareDoc(id: string) {
+    const result = await removeProductModelShareDocAction({ productModelId: detail.id, id });
+    if (!result.ok) return { ok: false as const, message: result.message };
+    router.refresh();
+    return { ok: true as const };
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -238,6 +272,18 @@ export default function ProductModelDetailScreen({
         attachments={attachments}
         trashedAttachments={trashedAttachments}
         canManageFiles={canManageFiles}
+      />
+
+      {/*
+        🔴 사진·도면 구역의 **밖**이다 — 바이트가 있는 것과 자리만 가리킨 것을 한 목록에
+        섞지 않는다(ModelShareDocsSection 머리말). 위 구역의 동작은 한 줄도 건드리지 않았다.
+      */}
+      <ModelShareDocsSection
+        productModelId={detail.id}
+        docs={shareDocs}
+        canManageFiles={canManageFiles}
+        onAdd={handleAddShareDoc}
+        onRemove={handleRemoveShareDoc}
       />
 
       <section className="flex flex-col gap-3">

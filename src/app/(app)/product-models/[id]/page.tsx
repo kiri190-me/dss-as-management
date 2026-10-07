@@ -16,6 +16,7 @@ import {
   listRequestedPartsByProductModelId,
   toProductModelDetailForScreen,
 } from "@/lib/db/queries/product-models";
+import { listShareDocsForProductModel } from "@/lib/db/queries/product-model-share-docs";
 import { listRepairCasesByProductModelId } from "@/lib/db/queries/repair-cases";
 
 export const metadata: Metadata = {
@@ -93,13 +94,20 @@ export default async function ProductModelDetailPage({
   // 보낼 이유가 없다(이 파일이 units 를 덜어 낸 것과 같은 판단이다). 권한 자체를
   // 새로 만들지는 않았다: productModels.edit 하나로 폼도 후보 목록도 함께
   // 열린다. 최종 차단은 언제나처럼 updateProductModelAction 이 다시 한다.
-  const [repairCases, requestedParts, attachments, trashedAttachments, customerOptions] =
+  //
+  // 🔴 **공유폴더(디스크)를 여기서 읽지 않는다.** 가리킴 목록(shareDocs)은 표에 적힌
+  // 경로 줄일 뿐이라 DB 한 번이고, 그 자리에 실제로 무엇이 있는지를 들여다보는 일은
+  // 화면이 뜬 뒤 클라이언트가 통로로 따로 묻는다
+  // (components/product-models/ModelShareFolderPicker). NAS 가 느린 날 이 화면 자체가
+  // 안 뜨는 것을 막는 선이고, 종류별 서류함 page.tsx 가 그은 선과 같다.
+  const [repairCases, requestedParts, attachments, trashedAttachments, customerOptions, shareDocs] =
     await Promise.all([
       listRepairCasesByProductModelId(detail.id),
       listRequestedPartsByProductModelId(detail.id),
       listAttachmentsForProductModel(detail.id),
       listTrashedAttachmentsForProductModel(detail.id),
       canEdit ? listCustomerOptions() : Promise.resolve([]),
+      listShareDocsForProductModel(detail.id),
     ]);
 
   // `등록 장비` 표가 사라져 units 를 읽는 화면이 없다. 상세 화면은 "use client"
@@ -115,6 +123,7 @@ export default async function ProductModelDetailPage({
       customerOptions={customerOptions}
       attachments={attachments}
       trashedAttachments={trashedAttachments}
+      shareDocs={shareDocs}
       canManageFiles={canManageFiles}
     />
   );
