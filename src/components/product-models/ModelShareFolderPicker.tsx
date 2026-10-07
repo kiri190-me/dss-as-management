@@ -2,6 +2,10 @@
 
 import { useEffect, useState } from "react";
 
+import ShareFolderEntryFilterInput, {
+  SHARE_FOLDER_ENTRY_FILTER_EMPTY_TEXT,
+  shareFolderEntryFilteredTruncatedText,
+} from "@/components/common/ShareFolderEntryFilterInput";
 import ContactFolderEntryOpenButton from "@/components/repair-cases/files/ContactFolderEntryOpenButton";
 import {
   contactFolderParentPath,
@@ -10,15 +14,22 @@ import {
 import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
 import { formatBytes } from "@/lib/domain/image-shrink";
 import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-link";
+import {
+  SHARE_FOLDER_ENTRY_PLACE_ROOT,
+  filterShareFolderEntriesByQuery,
+  isShareFolderEntryQueryActive,
+  shareFolderEntryPlaceAt,
+} from "@/lib/domain/share-folder-entry-filter";
 
 /**
  * ============================================================================
  * 제품 **모델별** 공유폴더 가리킴 — **고르는 창** (2026-10-07)
  * ============================================================================
  * 「제품 모델 하나하나도 같은 것을 갖게 해 달라」(사용자 요구 2026-10-07)의 **고르는
- * 쪽**이다. 종류별 창(KindShareFolderPicker.tsx)을 **본떴고**, 🔴 그 파일은 한 글자도
- * 건드리지 않았다. 다른 것은 **주인 하나**다: 저쪽은 enum 코드(`GENERATOR`)를 주소에
- * 싣고 이쪽은 **모델의 id(UUID)** 를 싣는다. 🔴 **저쪽이 바뀌는 날 이 파일도 함께 본다.**
+ * 쪽**이다. 종류별 창(KindShareFolderPicker.tsx)을 **본떴다.** 다른 것은 **주인 하나**다:
+ * 저쪽은 enum 코드(`GENERATOR`)를 주소에 싣고 이쪽은 **모델의 id(UUID)** 를 싣는다.
+ * 🔴 **저쪽이 바뀌는 날 이 파일도 함께 본다** — 2026-10-08 「이름으로 거르기」가 그랬고,
+ * 그때 둘이 같은 공용 조각을 가져다 쓰도록 **둘 다** 고쳤다(사용자가 「동일하게」를 요구).
  *
  * ── 🔴 폴더 줄에도 [담기]가 있다 ─────────────────────────────────────────
  * 파일 줄은 `FILE`, 폴더 줄은 `FOLDER` 로 담기고, 그 둘의 차이는 **여는 쪽의 동작**이다
@@ -52,6 +63,17 @@ import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-li
  *  · `disabled` → 🔴 **창 자체를 그리지 않는다**(설정이 없는 환경 = 지금 개발 PC)
  *  · 불러오는 중 → 「불러오는 중…」 / 빈 폴더 → 「이 폴더가 비어 있습니다」
  *  · `failed`   → 「공유폴더를 읽지 못했습니다」 + 짧은 사유
+ *
+ * ── 🔴 이름으로 거르기 — 공용 조각을 쓴다 (2026-10-08) ────────────────────
+ * 길 표시 아래에 칸이 하나 서고, **지금 보고 있는 칸의** 폴더·파일을 이름 부분 일치로
+ * 거른다(하위 폴더 안까지 뒤지지 않는다 — 사용자 결정). 거르는 함수도 칸도 종류별 창과
+ * **한 벌로 쓴다**: lib/domain/share-folder-entry-filter.ts ·
+ * components/common/ShareFolderEntryFilterInput.tsx. 🔴 Picker 자체는 합치지 않는다 —
+ * 통로도 권한도 주인도 다르다. 공용으로 뽑은 것은 **거르기만**이다.
+ * 🔴 자리를 옮기면(폴더로 들어가기 · [위로] · 길 표시) 칸이 **비워진다** —
+ * 안 비우면 새 자리가 텅 비어 보여 「이 폴더가 비었나」로 헷갈린다.
+ * 🔴 상한에 걸려 잘린 목록을 거를 때는 「더 있습니다」 곁말을 **없애지 않고 말만 바꿔**
+ * 계속 보인다 — 상한 뒤에 있는 것을 「없네」로 잘못 결론 내지 않게.
  *
  * ── 🔴 인쇄에 안 찍힌다 · 바꿔 끼울 수 있다 ───────────────────────────────
  * 바깥 틀에 `print:hidden`. fetch 는 부르는 쪽이 바꿔 끼울 수 있고, 그려지는 것은 상태를
@@ -423,20 +445,31 @@ function PathTrail({
 export function ModelShareFolderPickerView({
   state,
   insidePath = "",
+  filterQuery = "",
   busy = false,
   notice = null,
   onNavigate,
+  onFilterQueryChange,
   onAdd,
 }: {
   state: ModelShareFolderPickerState;
   insidePath?: string;
+  /** 🔴 거르기 칸의 **날것** 글자. 다듬기는 견줄 때만 한다(domain 의 순수 함수). */
+  filterQuery?: string;
   busy?: boolean;
   /** 담기의 결과 한 줄. 🔴 거절이면 **서버 문장 그대로**다. */
   notice?: QuoteIssueNoticeLine | null;
   onNavigate?: (insidePath: string) => void;
+  /** 🔴 주지 않으면 거르기 칸이 그려지지 않는다(보여 주기만 하는 자리 · 시험). */
+  onFilterQueryChange?: (filterQuery: string) => void;
   onAdd?: (request: ModelShareFolderAddRequest) => void;
 }) {
   if (state.kind === "disabled") return null;
+
+  // 🔴 **이미 받아 둔 줄**만 거른다 — 서버를 다시 부르지 않는다.
+  const filtering = isShareFolderEntryQueryActive(filterQuery);
+  const visibleEntries =
+    state.kind === "listed" ? filterShareFolderEntriesByQuery(state.entries, filterQuery) : [];
 
   return (
     <div
@@ -476,18 +509,30 @@ export function ModelShareFolderPickerView({
           <p className={MUTED_CLASS}>{MODEL_SHARE_FOLDER_EMPTY_TEXT}</p>
         ) : (
           <div className="flex flex-col gap-1">
-            <EntryList
-              entries={state.entries}
-              insidePath={insidePath}
-              busy={busy}
-              {...(onNavigate === undefined
-                ? {}
-                : { onEnter: (name: string) => onNavigate(modelShareFolderEntryPath(insidePath, name)) })}
-              {...(onAdd === undefined ? {} : { onAdd })}
-            />
+            {/* 🔴 길 표시 아래 · 목록 위. 빈 폴더에는 거를 것이 없어 서지 않는다. */}
+            {onFilterQueryChange !== undefined && (
+              <ShareFolderEntryFilterInput value={filterQuery} onChange={onFilterQueryChange} />
+            )}
+            {visibleEntries.length === 0 ? (
+              // 🔴 목록을 그냥 비워 두지 않는다 — 왜 아무것도 없는지 말해 준다.
+              <p className={MUTED_CLASS}>{SHARE_FOLDER_ENTRY_FILTER_EMPTY_TEXT}</p>
+            ) : (
+              <EntryList
+                entries={visibleEntries}
+                insidePath={insidePath}
+                busy={busy}
+                {...(onNavigate === undefined
+                  ? {}
+                  : { onEnter: (name: string) => onNavigate(modelShareFolderEntryPath(insidePath, name)) })}
+                {...(onAdd === undefined ? {} : { onAdd })}
+              />
+            )}
+            {/* 🔴 거르는 중에도 **없애지 않는다** — 말만 바꿔 「더 있습니다」를 계속 보인다. */}
             {state.truncated && (
               <p className="text-xs text-amber-700 dark:text-amber-400">
-                {modelShareFolderTruncatedText(state.entries.length, state.totalCount)}
+                {filtering
+                  ? shareFolderEntryFilteredTruncatedText(state.entries.length, state.totalCount)
+                  : modelShareFolderTruncatedText(state.entries.length, state.totalCount)}
               </p>
             )}
           </div>
@@ -510,10 +555,12 @@ export default function ModelShareFolderPicker({
   /** 🔴 주지 않으면 담기 단추가 하나도 안 그려진다 — 권한 판정은 부르는 쪽이 한다. */
   onAdd?: ModelShareFolderAdd;
 }) {
-  const [insidePath, setInsidePath] = useState("");
+  // 🔴 자리와 거르기 칸을 **한 값으로** 쥔다 — 자리를 옮기는 길이 칸을 비우는 길이다.
+  const [place, setPlace] = useState(SHARE_FOLDER_ENTRY_PLACE_ROOT);
   const [answer, setAnswer] = useState<{ path: string; state: ModelShareFolderPickerState } | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<QuoteIssueNoticeLine | null>(null);
+  const insidePath = place.insidePath;
 
   useEffect(() => {
     let cancelled = false;
@@ -549,12 +596,15 @@ export default function ModelShareFolderPicker({
     <ModelShareFolderPickerView
       state={state}
       insidePath={insidePath}
+      filterQuery={place.filterQuery}
       busy={busy}
       notice={notice}
       onNavigate={(next) => {
         setNotice(null);
-        setInsidePath(next);
+        // 🔴 자리를 옮기면 거르기 칸이 함께 비워진다 — 그 규칙은 저 함수 하나가 쥔다.
+        setPlace(shareFolderEntryPlaceAt(next));
       }}
+      onFilterQueryChange={(filterQuery) => setPlace((previous) => ({ ...previous, filterQuery }))}
       {...(onAdd === undefined ? {} : { onAdd: (request: ModelShareFolderAddRequest) => void handleAdd(request) })}
     />
   );

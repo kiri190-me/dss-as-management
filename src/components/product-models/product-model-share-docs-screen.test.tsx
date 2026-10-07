@@ -16,6 +16,12 @@ import ModelShareDocsSection, {
   modelShareDocParentPath,
   type ModelShareDocRow,
 } from "./ModelShareDocsSection";
+import {
+  SHARE_FOLDER_ENTRY_FILTER_EMPTY_TEXT,
+  SHARE_FOLDER_ENTRY_FILTER_LABEL,
+  shareFolderEntryFilteredTruncatedText,
+} from "@/components/common/ShareFolderEntryFilterInput";
+import { shareFolderEntryPlaceAt } from "@/lib/domain/share-folder-entry-filter";
 import ModelShareFolderPicker, {
   MODEL_SHARE_FOLDER_ADD_FILE_TEXT,
   MODEL_SHARE_FOLDER_ADD_FOLDER_TEXT,
@@ -27,6 +33,7 @@ import ModelShareFolderPicker, {
   loadModelShareFolderEntries,
   modelShareFolderEntriesUrl,
   modelShareFolderEntryPath,
+  modelShareFolderTruncatedText,
   readModelShareFolderEntriesAnswer,
   type ModelShareFolderEntryView,
   type ModelShareFolderPickerState,
@@ -46,9 +53,12 @@ import ModelShareFolderPicker, {
  * 매칭이 아니라 **상태를 넣어 실제로 그려** 본다. 화면을 묶는 쪽
  * (ProductModelDetailScreen · [id]/page.tsx)만 원본을 글자로 읽는다(그쪽은 서버 액션을 문다).
  *
- * 🔴 본보기 두 벌(KindShareDocsSection · KindShareFolderPicker)은 **한 글자도 고치지
- * 않았다.** 이쪽이 그쪽에서 **가져다 쓰는** 것은 도우미 안내 하나뿐이고, 그것도 아래
- * ⑧에서 「베끼지 않았는가」로 못 박는다.
+ * 🔴 본보기 두 벌(KindShareDocsSection · KindShareFolderPicker)은 **제 주인 그대로**다 —
+ * 아래 ⑩의 마지막 시험이 그것을 지킨다. 이쪽이 그쪽에서 **가져다 쓰는** 것은 도우미
+ * 안내 하나뿐이고, 그것도 ⑧에서 「베끼지 않았는가」로 못 박는다.
+ * 🔴 다만 2026-10-08 「이름으로 거르기」만은 사용자가 「[공유폴더에서 고르기]창을 가진
+ * 모든 곳에 동일하게」를 요구해 **두 창을 함께** 고쳤다 — 공용 조각 둘을 뽑아 둘이
+ * 가져다 쓴다(⑪). Picker 자체는 합치지 않았다.
  * ============================================================================
  */
 
@@ -89,18 +99,37 @@ function pickerMarkup(
   state: ModelShareFolderPickerState,
   {
     insidePath = INSIDE,
+    filterQuery = "",
     withAdd = true,
     withNavigate = true,
-  }: { insidePath?: string; withAdd?: boolean; withNavigate?: boolean } = {}
+    withFilter = true,
+  }: {
+    insidePath?: string;
+    filterQuery?: string;
+    withAdd?: boolean;
+    withNavigate?: boolean;
+    withFilter?: boolean;
+  } = {}
 ): string {
   return renderToStaticMarkup(
     createElement(ModelShareFolderPickerView, {
       state,
       insidePath,
+      filterQuery,
       ...(withNavigate ? { onNavigate: () => undefined } : {}),
+      ...(withFilter ? { onFilterQueryChange: () => undefined } : {}),
       ...(withAdd ? { onAdd: () => undefined } : {}),
     })
   );
+}
+
+/** 그려진 거르기 칸에 **실제로 들어 있는 값**. 칸 자체가 없으면 null. */
+function filterInputValue(html: string): string | null {
+  const at = html.indexOf("<input");
+  if (at < 0) return null;
+  const tag = html.slice(at, html.indexOf(">", at) + 1);
+  if (!tag.includes("data-share-folder-entry-filter-input")) return null;
+  return /value="([^"]*)"/.exec(tag)?.[1] ?? "";
 }
 
 const doc = (overrides: Partial<ModelShareDocRow> = {}): ModelShareDocRow => ({
@@ -646,7 +675,9 @@ describe("⑩ 화면과 page 를 묶는 쪽 — 사진·도면 쪽을 건드리�
     assert.equal(code(screen).includes("hasPermission("), false, "화면이 권한을 직접 판정한다");
   });
 
-  test("🔴 본보기 두 벌을 고치지 않았다 — 종류별 구역은 제 이름 그대로다", () => {
+  // 🔴 2026-10-08 「이름으로 거르기」로 종류별 창도 함께 고쳤지만(⑪), **주인은 그대로**다 —
+  // 모델 쪽 낱말이 저 두 파일로 번지지 않았는가를 여기서 계속 지킨다.
+  test("🔴 본보기 두 벌이 제 주인 그대로다 — 모델 쪽 낱말이 번지지 않았다", () => {
     const kindSection = read("src/components/product-models/KindShareDocsSection.tsx");
     const kindPicker = read("src/components/product-models/KindShareFolderPicker.tsx");
     assert.ok(kindSection.includes("export default function KindShareDocsSection({"));
@@ -658,6 +689,174 @@ describe("⑩ 화면과 page 를 묶는 쪽 — 사진·도면 쪽을 건드리�
       assert.equal(source.includes("productModelId"), false, "본보기가 모델 쪽으로 번졌다");
       assert.equal(source.includes("ModelShareDocsSection"), false);
       assert.equal(source.includes("ModelShareFolderPicker"), false);
+    }
+  });
+});
+
+/*
+ * ============================================================================
+ * ⑪ 이름으로 거르기 — 「[공유폴더에서 고르기]창을 가진 모든 곳에 동일하게」 (2026-10-08)
+ * ============================================================================
+ * 🔴 이번 요구는 **두 창 모두**다. 그래서 이 조각만은 종류별 창도 함께 고쳤다 —
+ * 지금까지의 「본보기를 건드리지 마라」와 다른 점이고, 사용자가 그렇게 지시했다.
+ * 거르는 **함수**와 **입력 칸**을 공용으로 뽑아 둘이 가져다 쓴다(Picker 자체는 합치지
+ * 않는다 — 통로도 권한도 주인도 다르다).
+ *
+ * 🔴 **지금 보고 있는 칸만** 거른다 — 하위 폴더 안까지 뒤지지 않는다. 그래서 서버도
+ * 통로도 상한 셋도 건드리지 않았다. 거르는 규칙 자체는 unit 목록의
+ * share-folder-entry-filter.test.ts 가 보고, 여기서는 **이 창이 그것을 어떻게 쓰는가**를
+ * 상태를 넣어 그려 보고 결과로 잰다.
+ * ============================================================================
+ */
+describe("⑪ 🔴 이름으로 거르기 — 두 창이 같은 조각을 쓴다", () => {
+  const rows = [
+    entry("2. 인수시 서류", true),
+    entry("MB 인수시 체크시트.xlsx"),
+    entry("1. 수리 관련", true),
+    entry("회로도.pdf"),
+  ];
+  const shownEntries = (html: string) => html.match(/data-model-share-folder-entry=""/g)?.length ?? 0;
+
+  test("거르기 칸은 **길 표시 아래 · 목록 위**에 선다", () => {
+    const html = pickerMarkup(listed(rows));
+    const trailAt = html.indexOf("data-model-share-folder-trail");
+    const filterAt = html.indexOf("data-share-folder-entry-filter");
+    const firstEntryAt = html.indexOf('data-model-share-folder-entry=""');
+    assert.ok(trailAt >= 0, html);
+    assert.ok(filterAt > trailAt, "거르기 칸이 길 표시보다 위에 있다");
+    assert.ok(firstEntryAt > filterAt, "거르기 칸이 목록보다 아래에 있다");
+    assert.ok(html.includes(SHARE_FOLDER_ENTRY_FILTER_LABEL), html);
+  });
+
+  test("🔴 폴더와 파일이 **둘 다** 걸린다 — 거른 결과만 그려진다", () => {
+    const html = pickerMarkup(listed(rows), { filterQuery: "인수" });
+    assert.equal(shownEntries(html), 2, html);
+    assert.ok(html.includes("2. 인수시 서류"), "폴더가 안 걸렸다");
+    assert.ok(html.includes("MB 인수시 체크시트.xlsx"), "파일이 안 걸렸다");
+    assert.equal(html.includes("1. 수리 관련"), false, "안 걸려야 할 폴더가 남았다");
+    assert.equal(html.includes("회로도.pdf"), false, "안 걸려야 할 파일이 남았다");
+    // 걸린 폴더 줄은 여전히 눌러 들어갈 수 있고, 두 줄 다 담을 수 있다.
+    assert.equal(html.match(/data-model-share-folder-enter/g)?.length, 1, html);
+    assert.equal(html.match(/data-model-share-folder-add/g)?.length, 2, html);
+  });
+
+  test("대소문자가 달라도 · 연속 공백이 달라도 걸린다", () => {
+    for (const query of ["mb", "MB", "mB"]) {
+      const html = pickerMarkup(listed(rows), { filterQuery: query });
+      assert.equal(shownEntries(html), 1, `${query}: ${html}`);
+      assert.ok(html.includes("MB 인수시 체크시트.xlsx"), query);
+    }
+    const spaced = pickerMarkup(listed([entry("2.  인수시   서류", true), entry("회로도.pdf")]), {
+      filterQuery: "  인수시 서류 ",
+    });
+    assert.equal(shownEntries(spaced), 1, spaced);
+  });
+
+  test("🔴 거른 결과가 0건이면 **말이 나온다** — 목록을 그냥 비워 두지 않는다", () => {
+    const html = pickerMarkup(listed(rows), { filterQuery: "없는이름" });
+    assert.equal(shownEntries(html), 0, html);
+    assert.ok(html.includes(SHARE_FOLDER_ENTRY_FILTER_EMPTY_TEXT), html);
+    // 🔴 「이 폴더가 비어 있습니다」와 다른 말이다 — 폴더가 빈 것이 아니다.
+    assert.equal(html.includes(MODEL_SHARE_FOLDER_EMPTY_TEXT), false, html);
+    // 칸은 그대로 서 있다 — 지우거나 고칠 길이 사라지면 갇힌다.
+    assert.equal(filterInputValue(html), "없는이름", html);
+  });
+
+  test("🔴 **잘린 목록을 거를 때도** 「더 있습니다」가 계속 보인다 — 없애지 않고 말만 바꾼다", () => {
+    const truncated = listed(rows, { totalCount: 240, truncated: true });
+
+    const plain = pickerMarkup(truncated);
+    assert.ok(plain.includes(modelShareFolderTruncatedText(rows.length, 240)), plain);
+
+    const filtered = pickerMarkup(truncated, { filterQuery: "인수" });
+    assert.ok(filtered.includes("더 있습니다"), filtered);
+    assert.ok(filtered.includes("240"), filtered);
+    assert.ok(filtered.includes(shareFolderEntryFilteredTruncatedText(rows.length, 240)), filtered);
+    // 🔴 세는 N 은 **받아 둔 줄 수**다 — 거른 뒤의 2 가 아니다.
+    assert.ok(filtered.includes(`앞의 ${rows.length}개`), filtered);
+
+    // 🔴 한 줄도 안 걸려도 경고는 그대로다 — 「없네」로 잘못 결론 내지 않게.
+    const none = pickerMarkup(truncated, { filterQuery: "없는이름" });
+    assert.ok(none.includes("더 있습니다"), none);
+    assert.ok(none.includes(SHARE_FOLDER_ENTRY_FILTER_EMPTY_TEXT), none);
+
+    // 잘리지 않았으면 전처럼 아무 경고도 없다.
+    assert.equal(pickerMarkup(listed(rows), { filterQuery: "인수" }).includes("더 있습니다"), false);
+  });
+
+  test("🔴 폴더로 들어가거나 [위로] 하면 칸이 **비워진다** — 값으로 재고 그려 본다", () => {
+    assert.equal(filterInputValue(pickerMarkup(listed(rows), { filterQuery: "인수" })), "인수");
+    // 🔴 자리를 옮기는 길은 이 함수 하나뿐이고, 그 결과의 칸은 늘 비어 있다.
+    const moved = shareFolderEntryPlaceAt(`${INSIDE}/MB`);
+    assert.equal(moved.filterQuery, "");
+    assert.equal(
+      filterInputValue(pickerMarkup(listed(rows), { insidePath: moved.insidePath, filterQuery: moved.filterQuery })),
+      ""
+    );
+    assert.equal(shownEntries(pickerMarkup(listed(rows), { filterQuery: moved.filterQuery })), rows.length);
+
+    // 🔴 들어가기 · [위로] · 길 표시가 **모두** 그 한 길(onNavigate)을 지난다.
+    const body = flat(code(pickerSource));
+    assert.ok(body.includes("setPlace(shareFolderEntryPlaceAt(next));"), body);
+    assert.equal(body.includes("setInsidePath("), false, "자리를 거르기 칸과 따로 바꾼다");
+    assert.ok(body.includes("onEnter: (name: string) => onNavigate("), body);
+    assert.ok(body.includes("onClick={() => onNavigate(contactFolderParentPath(insidePath))}"), body);
+  });
+
+  test("🔴 길(onFilterQueryChange)을 주지 않으면 칸이 아예 안 그려진다", () => {
+    const html = pickerMarkup(listed(rows), { withFilter: false });
+    assert.equal(html.includes("data-share-folder-entry-filter"), false, html);
+    assert.equal(filterInputValue(html), null, html);
+    // 빈 폴더에도 거를 것이 없어 칸을 두지 않는다.
+    assert.equal(pickerMarkup(listed([])).includes("data-share-folder-entry-filter"), false);
+  });
+
+  test("🔴 **두 창이 같은 조각을 쓴다** — 한쪽에만 있지 않다", () => {
+    const otherPicker = read("src/components/product-models/KindShareFolderPicker.tsx");
+    for (const [label, body] of [
+      ["제품 상세", pickerSource],
+      ["종류별", otherPicker],
+    ] as const) {
+      assert.ok(
+        body.includes('from "@/components/common/ShareFolderEntryFilterInput"'),
+        `${label}: 공용 거르기 칸을 가져오지 않는다`
+      );
+      assert.ok(
+        body.includes('from "@/lib/domain/share-folder-entry-filter"'),
+        `${label}: 공용 거르기 함수를 가져오지 않는다`
+      );
+      assert.ok(body.includes("<ShareFolderEntryFilterInput"), `${label}: 공용 칸을 안 그린다`);
+      assert.ok(body.includes("filterShareFolderEntriesByQuery("), `${label}: 제 손으로 거른다`);
+      assert.ok(body.includes("shareFolderEntryPlaceAt("), `${label}: 자리를 제 손으로 옮긴다`);
+      assert.ok(
+        body.includes("shareFolderEntryFilteredTruncatedText("),
+        `${label}: 거를 때의 곁말을 제 손으로 짓는다`
+      );
+      assert.ok(
+        body.includes("SHARE_FOLDER_ENTRY_FILTER_EMPTY_TEXT"),
+        `${label}: 0건 안내를 제 손으로 짓는다`
+      );
+      // 🔴 견주기를 베껴 적지 않았다 — 다듬기는 domain 한 자리뿐이다.
+      for (const forbidden of [
+        "normalizeShareFolderNameForCompare",
+        "toLocaleUpperCase",
+        "toLowerCase()",
+        'normalize("NFC")',
+      ]) {
+        assert.equal(code(body).includes(forbidden), false, `${label}: 견주기를 베꼈다 — ${forbidden}`);
+      }
+    }
+  });
+
+  test("🔴 거르기가 서버를 다시 부르지 않는다 — 상한 셋에 손대지 않았다", () => {
+    const body = code(pickerSource);
+    // 통로를 부르는 자리는 전과 같이 하나뿐이다.
+    assert.equal(body.match(/\/share-folder\/entries/g)?.length, 1, body);
+    assert.equal(body.includes("filterQuery"), true);
+    // 🔴 친 글자가 주소에 실리지 않는다 — 서버는 거르기를 모른다.
+    assert.equal(/fetchImpl\([^)]*filterQuery/.test(flat(body)), false, "거르는 글자를 서버로 보낸다");
+    for (const forbidden of ["REPAIR_DOCS_ENTRIES_LIMIT", "@/lib/storage/", "repair-docs-entries"]) {
+      assert.equal(body.includes(forbidden), false, `상한에 손을 댄다: ${forbidden}`);
     }
   });
 });
