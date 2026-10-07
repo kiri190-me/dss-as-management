@@ -28,3 +28,8 @@ delete process.env.QUOTE_ARCHIVE_DIR;
 // 무조건 사내 서류함에 쓰고, 같은 이름이 있으면 ` (2)` 로 비켜 가지 않고 **덮어쓴다.**
 // load-env.ts 의 같은 줄과 한 쌍이다(까닭은 그쪽 주석).
 delete process.env.CUSTOMER_PORTAL_ARCHIVE_DIR;
+
+// 🔴 「수리 관련」 서류 공유폴더(2026-10-07)도 같다 — 제품 종류마다 같은 서류를 돌려 쓰는
+// 사내 서류함이라, 시험이 한 번 잘못 닿으면 사람이 수년째 쌓아 온 것을 건드린다. 읽는 길이
+// 생기기 **전에** 막아 둔다. load-env.ts 의 같은 줄과 한 쌍이다(까닭은 그쪽 주석).
+delete process.env.REPAIR_DOCS_ARCHIVE_DIR;

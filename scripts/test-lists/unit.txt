@@ -390,6 +390,11 @@ src/lib/domain/quote-folder-link.test.ts
 # 같은 목록이 PowerShell 도우미 안에도 글자 그대로 박히는지는 바로 아래 줄이 본다.
 src/lib/domain/quote-folder-file-link.test.ts
 src/lib/server/quote-folder-helper.test.ts
+# 「수리 관련」 서류 공유폴더에서 **서버가 읽을** 루트(2026-10-07) — 도우미 설치본에 심는
+# UNC 루트(바로 위 줄이 본다)와 **짝이면서 다른 값**이다. 비었거나 공백이면 null(기능만 꺼짐) ·
+# 🔴 부르는 시점에 읽는가(모듈 로드 때 굳으면 시험이 환경을 갈아 끼워도 첫 값이 산다).
+# 디스크를 건드리지 않는다 — 실제 공유폴더에 닿지 않는다.
+src/lib/storage/repair-docs-archive.test.ts
 src/app/api/quotes/*/archive-folder/route-source.test.ts
 # 그 폴더 **안**을 내는 통로(2026-10-06). 위 패턴은 한 칸만 덮으므로 따로 적는다.
 # 🔴 문지기 토막이 바로 위 통로와 **글자 그대로 같은지**를 두 원본을 견주어 본다(권한도 같은

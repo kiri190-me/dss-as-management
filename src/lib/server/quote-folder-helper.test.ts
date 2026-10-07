@@ -1012,10 +1012,14 @@ describe("설치에 심을 루트 모으기(resolveQuoteFolderHelperInstallRoots
     "QUOTE_ARCHIVE_UNC_ROOT_ALT",
     "CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT",
     "CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT_ALT",
+    "CONTACT_FOLDER_ARCHIVE_UNC_ROOT",
+    "REPAIR_DOCS_ARCHIVE_UNC_ROOT",
   ] as const;
   const PORTAL_UNC = "\\\\TESTNAS\\현황표";
+  const CONTACT_UNC = "\\\\TESTNAS\\연락서";
+  const REPAIR_DOCS_UNC = "\\\\TESTNAS\\수리 관련";
 
-  /** 네 칸을 그대로 세워 두고 돌린 뒤 되돌린다 — 다른 시험의 환경을 건드리지 않게. */
+  /** 여섯 칸을 그대로 세워 두고 돌린 뒤 되돌린다 — 다른 시험의 환경을 건드리지 않게. */
   function withEnv(values: Partial<Record<(typeof KEYS)[number], string>>, body: () => void): void {
     const original = KEYS.map((key) => [key, process.env[key]] as const);
     try {
@@ -1063,6 +1067,82 @@ describe("설치에 심을 루트 모으기(resolveQuoteFolderHelperInstallRoots
         });
       }
     );
+  });
+
+  /**
+   * ============================================================================
+   * 🔴 2026-10-07 — 「수리 관련」 서류 루트는 **맨 뒤**다
+   * ============================================================================
+   * 차례가 뜻을 가진다. 루트 목록은 **설치할 때 그 PC 의 스크립트에 글자 그대로 박히고**,
+   * 이미 설치된 PC 는 새 설정을 모른다. 그래서 새 루트를 앞에 끼워 넣으면 **이미 깔린 PC 의
+   * 차례와 새로 까는 PC 의 차례가 어긋난다** — 같은 상대 경로가 PC 마다 다른 폴더로 풀릴 수
+   * 있다. 더하는 자리는 언제나 맨 뒤다.
+   * ============================================================================
+   */
+  test("🔴 수리 관련 서류 루트는 맨 뒤에 붙는다 — 앞의 다섯 차례가 한 칸도 밀리지 않는다", () => {
+    withEnv(
+      {
+        QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC,
+        QUOTE_ARCHIVE_UNC_ROOT_ALT: "\\\\10.0.0.9\\archive",
+        CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT: PORTAL_UNC,
+        CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT_ALT: "\\\\10.0.0.9\\현황표",
+        CONTACT_FOLDER_ARCHIVE_UNC_ROOT: CONTACT_UNC,
+        REPAIR_DOCS_ARCHIVE_UNC_ROOT: REPAIR_DOCS_UNC,
+      },
+      () => {
+        const resolution = resolveQuoteFolderHelperInstallRoots();
+        assert.deepEqual(resolution, {
+          status: "ok",
+          roots: [
+            FAKE_UNC,
+            "\\\\10.0.0.9\\archive",
+            PORTAL_UNC,
+            "\\\\10.0.0.9\\현황표",
+            CONTACT_UNC,
+            REPAIR_DOCS_UNC,
+          ],
+        });
+        // 🔴 그 차례 그대로 스크립트에 박힌다 — 맨 뒤가 맨 뒤다.
+        if (resolution.status !== "ok") throw new Error("루트를 모으지 못했다");
+        assert.ok(
+          buildQuoteFolderHelperScript(quoteFolderHelperRootsInput(resolution.roots)).includes(
+            `$Roots = @('${FAKE_UNC}', '\\\\10.0.0.9\\archive', '${PORTAL_UNC}', ` +
+              `'\\\\10.0.0.9\\현황표', '${CONTACT_UNC}', '${REPAIR_DOCS_UNC}')\r\n`
+          )
+        );
+      }
+    );
+  });
+
+  test("🔴 수리 관련 서류 루트만 늘어도 앞은 그대로다 — 설정이 예전인 PC 와 차례가 같다", () => {
+    withEnv({ QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC, CONTACT_FOLDER_ARCHIVE_UNC_ROOT: CONTACT_UNC }, () => {
+      assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), {
+        status: "ok",
+        roots: [FAKE_UNC, CONTACT_UNC],
+      });
+    });
+    withEnv(
+      {
+        QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC,
+        CONTACT_FOLDER_ARCHIVE_UNC_ROOT: CONTACT_UNC,
+        REPAIR_DOCS_ARCHIVE_UNC_ROOT: REPAIR_DOCS_UNC,
+      },
+      () => {
+        assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), {
+          status: "ok",
+          roots: [FAKE_UNC, CONTACT_UNC, REPAIR_DOCS_UNC],
+        });
+      }
+    );
+  });
+
+  test("🔴 수리 관련 서류 루트가 틀리면 없는 셈 친다 — 견적서 [폴더 열기]가 죽지 않는다", () => {
+    withEnv({ QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC, REPAIR_DOCS_ARCHIVE_UNC_ROOT: "/mnt/repair-docs" }, () => {
+      assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), { status: "ok", roots: [FAKE_UNC] });
+    });
+    withEnv({ QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC, REPAIR_DOCS_ARCHIVE_UNC_ROOT: "\\\\TESTNAS\\it's" }, () => {
+      assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), { status: "ok", roots: [FAKE_UNC] });
+    });
   });
 
   test("🔴 현황표 루트가 틀리면 없는 셈 친다 — 견적서 [폴더 열기]가 죽지 않는다", () => {
@@ -1116,18 +1196,24 @@ describe("설치에 심을 루트 모으기(resolveQuoteFolderHelperInstallRoots
 
 /**
  * ============================================================================
- * 🔴 누가 설치 파일 · 설치 명령을 받을 수 있는가 (2026-09-30 사용자 결정)
+ * 🔴 누가 설치 파일 · 설치 명령을 받을 수 있는가 (2026-09-30 · 2026-10-07 사용자 결정)
  * ============================================================================
  * [폴더 열기]가 있는 화면이 둘이 되어(견적서 편집 화면 · 고객사 현황표 패널) 설치 통로가
- * `quotes` READ **하나**에서 「`quotes` 또는 `customerPortal` READ」로 넓어졌다.
- * 여기서 값으로 못 박는 것은 셋이다:
+ * `quotes` READ **하나**에서 「`quotes` 또는 `customerPortal` READ」로 넓어졌고(2026-09-30),
+ * 제품 모델 화면이 셋째가 되어 `productModels.view` 가 더해졌다(2026-10-07).
+ * 여기서 값으로 못 박는 것은 다섯이다:
  *  1. `quotes` 만 있는 사람이 받는다 — **지금까지와 같다**(견적서만 쓰는 사람이 막히면 안 된다).
- *  2. `customerPortal` 만 있는 사람도 받는다 — 이번에 막은 구멍이다.
- *  3. 🔴 **둘 다 없는 사람은 못 받는다** — 넓혔지 「누구나」로 열지 않았다.
+ *  2. `customerPortal` 만 있는 사람도 받는다 — 2026-09-30 에 막은 구멍이다.
+ *  3. `productModels.view` 만 있는 사람도 받는다 — 2026-10-07 에 막은 구멍이다.
+ *  4. 🔴 **하나도 없는 사람은 못 받는다** — 넓혔지 「누구나」로 열지 않았다.
+ *  5. 🔴 묻는 열쇠는 **조회(`productModels.view`)**다 — 파일 관리(`productModels.files`)로도,
+ *     메뉴 열쇠(`productModels`)로도 통과하지 않는다. 그 둘로 열면 「화면은 보이는데 설치는
+ *     못 하는 사람」이 남거나(파일 관리), 「화면을 못 보는 사람이 받는」(메뉴 열쇠) 쪽으로
+ *     어긋난다 — 까닭은 server/quote-folder-helper.ts 의 머리말.
  * 통로가 이 함수를 그 자리에서 부르는지는 두 route-source 시험이 본다.
  * ============================================================================
  */
-describe("🔴 설치 권한 — 견적서 · 현황표 가운데 하나라도 READ", () => {
+describe("🔴 설치 권한 — 견적서 · 현황표 · 제품 모델 조회 가운데 하나라도 READ", () => {
   /** 이 영역들만 READ 인 사람. 물어본 영역을 그대로 적어 두어 **무엇을 물었는지**까지 본다. */
   function actorWith(...areas: string[]): { canRead: (areaKey: string) => Promise<boolean>; asked: string[] } {
     const asked: string[] = [];
@@ -1140,8 +1226,11 @@ describe("🔴 설치 권한 — 견적서 · 현황표 가운데 하나라도 R
     };
   }
 
-  test("물어보는 영역은 견적서와 현황표 둘뿐이다", () => {
-    assert.deepEqual([...QUOTE_FOLDER_HELPER_INSTALL_AREA_KEYS], ["quotes", "customerPortal"]);
+  test("물어보는 영역은 견적서 · 현황표 · 제품 모델 조회 셋뿐이다", () => {
+    assert.deepEqual(
+      [...QUOTE_FOLDER_HELPER_INSTALL_AREA_KEYS],
+      ["quotes", "customerPortal", "productModels.view"]
+    );
   });
 
   test("견적서만 볼 수 있는 사람이 받는다 — 지금까지와 같다", async () => {
@@ -1161,15 +1250,35 @@ describe("🔴 설치 권한 — 견적서 · 현황표 가운데 하나라도 R
     assert.equal(await mayInstallQuoteFolderHelper(actorWith("quotes", "customerPortal").canRead), true);
   });
 
-  test("🔴 둘 다 없는 사람은 못 받는다 — 「누구나」가 아니다", async () => {
+  test("🔴 제품 모델 조회만 있는 사람도 받는다 — 2026-10-07 에 막은 구멍", async () => {
+    const actor = actorWith("productModels.view");
+    assert.equal(await mayInstallQuoteFolderHelper(actor.canRead), true);
+    assert.deepEqual(actor.asked, ["quotes", "customerPortal", "productModels.view"]);
+  });
+
+  test("🔴 하나도 없는 사람은 못 받는다 — 「누구나」가 아니다", async () => {
     const actor = actorWith();
     assert.equal(await mayInstallQuoteFolderHelper(actor.canRead), false);
-    assert.deepEqual(actor.asked, ["quotes", "customerPortal"], "묻지 않고 통과시킨 영역이 있다");
+    assert.deepEqual(
+      actor.asked,
+      ["quotes", "customerPortal", "productModels.view"],
+      "묻지 않고 통과시킨 영역이 있다"
+    );
   });
 
   test("🔴 다른 영역을 아무리 많이 가져도 받지 못한다", async () => {
+    // 🔴 `productModels` 는 **메뉴 열쇠**다 — 잎 `productModels.view` 가 아니므로 통과하지
+    // 못한다. 메뉴 열쇠는 잎들의 최대값이라, 그것으로 열면 보기가 NONE 이고 삭제·복원만
+    // 열린 역할(화면 자체를 못 보는 사람)까지 들어온다.
     const actor = actorWith("repairCases", "inventory", "users", "settings", "productModels");
     assert.equal(await mayInstallQuoteFolderHelper(actor.canRead), false);
+  });
+
+  test("🔴 사진·도면(파일 관리)만으로는 받지 못한다 — 묻는 것은 조회다", async () => {
+    // 이 문은 「그 화면을 볼 수 있는 사람」의 문이다. 파일 관리 잎(`productModels.files`)은
+    // 읽기가 없는 노드라, 그것으로 물으면 묻는 말과 뜻하는 말이 어긋난다.
+    assert.equal(await mayInstallQuoteFolderHelper(actorWith("productModels.files").canRead), false);
+    assert.equal(await mayInstallQuoteFolderHelper(actorWith("productModels.edit").canRead), false);
   });
 
   test("🔴 참이 아닌 값은 참으로 치지 않는다", async () => {

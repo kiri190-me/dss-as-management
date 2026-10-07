@@ -54,4 +54,11 @@ if (process.env.DSS_DB_TEST_MODE === "1" || isIntegrationTestProcess) {
   //      저장 뒤에는 날짜가 다른 옛 파일을 `OLD` 로 옮기기까지 한다.
   // 지금은 이 길을 지나는 DB 시험이 하나도 없다. 하나만 생겨도 늦으므로 미리 막아 둔다.
   delete process.env.CUSTOMER_PORTAL_ARCHIVE_DIR;
+
+  // 🔴 「수리 관련」 서류 공유폴더(2026-10-07). 앞의 셋과 같은 까닭이고, **앞질러** 막는다 —
+  // 지금은 이 설정을 읽는 길이 resolveRepairDocsArchiveRoot 하나뿐이고 그것을 부르는 곳이
+  // 아직 없지만, 다음 조각이 그 자리에서 폴더를 읽는다. 제품 종류마다 **같은 서류를 돌려
+  // 쓰는** 사내 서류함이라 시험이 한 번 잘못 닿으면 사람이 수년째 쌓아 온 것을 건드린다.
+  // 앱은 이 폴더를 읽기만 하지만, 「읽기만」은 설정이 사라지는 쪽으로 틀려도 손해가 없다.
+  delete process.env.REPAIR_DOCS_ARCHIVE_DIR;
 }

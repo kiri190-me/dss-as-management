@@ -68,7 +68,7 @@ import {
  *       **정확히 하나**가 아니면(따옴표를 깨고 인자를 늘린 주소) 끝낸다. 주소의 몸통은 base64url 이다.
  *   (c) 루트(UNC)는 저장소 · 빌드 결과에 남지 않는다 — 설치 파일 · 설치 명령 본문에만 들어가고,
  *       그 본문은 요청마다 환경변수(QUOTE_ARCHIVE_UNC_ROOT · CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT 와
- *       각각의 _ALT, 그리고 CONTACT_FOLDER_ARCHIVE_UNC_ROOT —
+ *       각각의 _ALT, 그리고 CONTACT_FOLDER_ARCHIVE_UNC_ROOT · REPAIR_DOCS_ARCHIVE_UNC_ROOT —
  *       resolveQuoteFolderHelperInstallRoots)로 만든다. 로그에도 찍지 않는다.
  *       (견적서 폴더의 전체 주소를 사람에게 복사해 주는 통로는 아래 「전체 주소」 절.)
  *   (d) 공유폴더 저장 동작은 이 모듈과 무관하다(storage/quote-archive.ts).
@@ -161,6 +161,19 @@ export const CUSTOMER_PORTAL_FOLDER_HELPER_ROOT_ALT_ENV = "CUSTOMER_PORTAL_ARCHI
  * 없어도 된다 — 없으면 지금까지와 같다. 불변식 (a) 는 루트마다 그대로 산다.
  */
 export const CONTACT_FOLDER_HELPER_ROOT_ENV = "CONTACT_FOLDER_ARCHIVE_UNC_ROOT";
+/**
+ * 🔴 또 하나의 **다른 폴더** — 사내 「수리 관련」 서류 공유폴더(견적서 루트 아래가 아니다).
+ * 제품 종류마다 **같은 서류를 돌려 쓰는** 곳이다(인수시 체크시트 · 작업 수순 · 통전 체크시트 …).
+ * 그 서류를 앱에 올리는 대신 **공유폴더의 자리만 가리킬** 것이므로(2026-10-07 사용자 결정) 도우미가
+ * 그 아래를 열 수 있어야 한다. 까닭은 바로 위 연락서 · 현황표 루트와 같다: 도우미는 PC 마다
+ * 한 벌뿐이라(레지스트리 `dss-folder`) 따로 설치하면 그 PC 의 견적서 [폴더 열기]가 죽는다.
+ * 그래서 한 벌에 함께 심고, 🔴 **목록 맨 뒤**에 둔다(resolveQuoteFolderHelperInstallRoots) —
+ * 앞에 끼워 넣으면 이미 설치된 PC 의 루트 차례가 통째로 밀린다.
+ * 없어도 된다 — 없으면 지금까지와 같다. 불변식 (a) 는 루트마다 그대로 산다.
+ * 🔴 **이 루트 아래 전부가 열린다** — 될 수 있는 대로 좁게 적는다(공유 뿌리가 아니라
+ * 수리 관련 서류가 모여 있는 바로 그 폴더까지).
+ */
+export const REPAIR_DOCS_FOLDER_HELPER_ROOT_ENV = "REPAIR_DOCS_ARCHIVE_UNC_ROOT";
 export const QUOTE_FOLDER_HELPER_SCRIPT_FILE_NAME = "open-dss-folder.ps1";
 export const QUOTE_FOLDER_HELPER_INSTALLER_FILE_NAME = "install-dss-folder-helper.cmd";
 /** 이 값이 "1" 이면 스크립트가 탐색기를 여는 대신 결과를 표준출력에 적고 끝낸다(시험용). */
@@ -302,16 +315,20 @@ export type QuoteFolderHelperInstallRootsResolution =
  * ============================================================================
  * 설치 파일 · 설치 명령에 심을 **루트 전부** — 부르는 시점에 읽는다
  * ============================================================================
- * 차례: 견적서 루트 → 견적서 다른 주소 → 현황표 루트 → 현황표 다른 주소 → 연락서 루트.
+ * 차례: 견적서 루트 → 견적서 다른 주소 → 현황표 루트 → 현황표 다른 주소 → 연락서 루트 →
+ * 수리 관련 서류 루트.
  * 견적서를 먼저 두는 것은 **지금까지 설치된 것과 같은 차례**를 지키기 위해서다 — 설정이 예전
- * 그대로인 PC 에서는 목록이 예전과 글자 하나 다르지 않다. 연락서를 **맨 뒤에** 더하는 것도
- * 같은 까닭이다(먼저 끼워 넣으면 이미 설치된 PC 의 목록 차례가 통째로 밀린다).
+ * 그대로인 PC 에서는 목록이 예전과 글자 하나 다르지 않다. 연락서 · 수리 관련 서류를 **맨 뒤에**
+ * 더하는 것도 같은 까닭이다(먼저 끼워 넣으면 이미 설치된 PC 의 목록 차례가 통째로 밀린다).
+ * 🔴 **앞으로 더할 루트도 반드시 맨 뒤다.**
  *
  * ── 일부만 설정됐을 때 ────────────────────────────────────────────────────
  *  · 견적서 루트가 **틀리면** invalid — 지금까지와 같다. 첫째 루트의 오타는 크게 울어야 한다.
- *  · 나머지(견적서 _ALT · 현황표 · 현황표 _ALT · 연락서)가 틀리면 **없는 셈** 친다. 곁다리 설정
- *    하나 때문에 [폴더 열기]가 통째로 죽으면 안 된다(견적서 _ALT 가 이미 그렇게 정해져 있다).
- *    🔴 특히 현황표 · 연락서 루트의 오타로 **견적서 [폴더 열기]가 죽는 일이 없어야 한다.**
+ *  · 나머지(견적서 _ALT · 현황표 · 현황표 _ALT · 연락서 · 수리 관련 서류)가 틀리면 **없는 셈**
+ *    친다. 곁다리 설정 하나 때문에 [폴더 열기]가 통째로 죽으면 안 된다(견적서 _ALT 가 이미
+ *    그렇게 정해져 있다).
+ *    🔴 특히 현황표 · 연락서 · 수리 관련 서류 루트의 오타로 **견적서 [폴더 열기]가 죽는 일이
+ *    없어야 한다.**
  *  · 하나도 설정되지 않으면 unset — 설치 파일을 받을 수 없다(지금까지와 같다).
  *  · 견적서 루트가 비고 현황표 루트만 있으면 현황표 루트 하나로 만든다. 도우미는 자기 루트
  *    아래만 여는 물건이라, 루트가 하나든 둘이든 규칙은 같다.
@@ -329,10 +346,13 @@ export function resolveQuoteFolderHelperInstallRoots(): QuoteFolderHelperInstall
     if (quote.alt !== undefined) roots.push(quote.alt);
   }
   // 곁다리 루트 — 비었거나 규칙 밖이면 없는 셈 친다(위 머리말).
+  // 🔴 **새 루트는 이 배열의 맨 뒤에만** 더한다(위 머리말) — 앞에 끼우면 이미 설치된 PC 의
+  // 루트 차례가 통째로 밀린다.
   for (const configured of [
     process.env.CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT,
     process.env.CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT_ALT,
     process.env.CONTACT_FOLDER_ARCHIVE_UNC_ROOT,
+    process.env.REPAIR_DOCS_ARCHIVE_UNC_ROOT,
   ]) {
     if (!configured || configured.trim().length === 0) continue;
     const normalized = normalizeQuoteFolderHelperRoot(configured);
@@ -355,11 +375,12 @@ export function quoteFolderHelperRootsInput(roots: readonly [string, ...string[]
 
 /**
  * ============================================================================
- * 🔴 설치 파일 · 설치 명령을 **받을 수 있는 사람** (2026-09-30 사용자 결정)
+ * 🔴 설치 파일 · 설치 명령을 **받을 수 있는 사람** (2026-09-30 · 2026-10-07 사용자 결정)
  * ============================================================================
  * [폴더 열기]가 있는 화면이 둘이 되었다 — 견적서 편집 화면과 고객사 현황표 패널
  * (components/customer-portal/CustomerFormExportPanel.tsx). 사용자가 「[폴더 열기] 버튼이 있는
- * 곳 어디서든 설치할 수 있도록」이라고 정했으므로, 설치 통로는 **둘 중 하나의 READ** 로 연다.
+ * 곳 어디서든 설치할 수 있도록」이라고 정했으므로, 설치 통로는 **이 목록 가운데 하나의 READ**
+ * 로 연다(2026-09-30 에는 둘이었고, 2026-10-07 에 셋이 되었다 — 아래).
  *
  * ── 왜 넓혀야 했나 ───────────────────────────────────────────────────────
  * 기본 정책에서는 `quotes` 를 볼 수 있는 역할과 `customerPortal` 을 볼 수 있는 역할이 같은
@@ -368,14 +389,39 @@ export function quoteFolderHelperRootsInput(roots: readonly [string, ...string[]
  * `customerPortal` 은 READ 로 두면, 그 역할은 **현황표를 보면서도 설치 파일을 못 받는다.**
  * 그 구멍을 막는 것이 이 함수다.
  *
+ * ── 🔴 2026-10-07 — 제품 모델 화면이 셋째가 되었다 ────────────────────────
+ * 제품 종류마다 **같은 서류를 돌려 쓰는** 「수리 관련」 공유폴더를 가리키는 기능이 제품 모델
+ * 화면에 들어온다(위 REPAIR_DOCS_FOLDER_HELPER_ROOT_ENV). 그 화면에서도 [폴더 열기]를 누르므로
+ * 거기서도 설치 명령을 받을 수 있어야 한다 — **2026-09-30 과 같은 결정의 같은 까닭**이다.
+ *
+ * 🔴 **고른 열쇠는 `productModels.view`(제품 모델 조회)다 — `productModels.files`(사진·도면)가
+ * 아니다.** 까닭 셋:
+ *  · 이 문은 「**그 화면을 볼 수 있는 사람**」의 문이다. 앞의 둘도 그렇다(견적서 보기 · 현황표
+ *    보기). 파일 관리(WRITE)로 잠그면 **버튼은 보이는데 설치 파일은 못 받는 사람**이 생긴다 —
+ *    그것이 2026-09-30 에 막은 바로 그 구멍이다.
+ *  · 묻는 수준은 **READ 그대로**다(통로가 WRITE 로 올리지 않는다). `productModels.files` 는
+ *    읽기가 없는 노드라(auth/permission-baseline.ts 의 `read: false`) READ 로 물으면 「파일을
+ *    관리할 수 있는가」를 에둘러 묻는 꼴이 된다 — 묻는 말과 뜻하는 말이 어긋난다.
+ *  · 메뉴 열쇠 `productModels` 가 아니라 **잎** `productModels.view` 인 까닭: 메뉴 열쇠는 잎들의
+ *    최대값이라(auth/permission-resolver.ts) 보기가 NONE 이고 삭제·복원만 열린 역할도 통과한다 —
+ *    화면 자체를 못 보는 사람이다.
+ *
  * ── 🔴 무엇이 넓어지고 무엇이 안 넓어지는가 ───────────────────────────────
  * 넓어지는 것은 **누가 설치 파일 · 설치 명령을 받을 수 있나**뿐이다.
  * 🔴 도우미가 **열 수 있는 폴더는 한 뼘도 넓어지지 않는다** — 루트는 설치할 때 본문에 박히고
  * (resolveQuoteFolderHelperInstallRoots), 도우미는 그 루트 아래의 폴더만 연다(머리말 불변식 (a)).
  * 설치 파일을 더 많은 사람이 받아도 그 사람의 PC 가 열 수 있는 폴더 목록은 똑같다.
+ * 🔴 2026-10-07 에 루트가 하나 늘어난 것(수리 관련 서류)은 **이 상수와 무관하다** — 그 루트는
+ * 환경변수를 채우는 순간 늘어나고, 이 목록에 제품 모델을 더하지 않아도 똑같이 늘어난다. 두
+ * 변화는 한 조각에 함께 들어왔을 뿐 서로를 키우지 않는다.
+ * 🔴 **기본 정책에서는 받을 수 있는 사람이 한 명도 늘지 않는다** — `productModels.view` 가 READ
+ * 인 네 역할(SUPER_ADMIN · ADMIN · AS_ENGINEER · SALES)은 `quotes` READ 로 이미 받을 수 있다
+ * (auth/permission-baseline.ts). 달라지는 경우는 관리자가 [역할별 접근 권한]에서 `quotes` 와
+ * `customerPortal` 을 NONE 으로 낮추고 제품 모델 조회만 남겨 둔 역할이 있을 때뿐이다 — 실제로
+ * 무엇이 달라지는지는 **저장된 값**이 정한다(코드가 아니다).
  *
  * ── 🔴 「누구나」가 되지 않는다 ───────────────────────────────────────────
- * 둘 **다** NONE 인 사람은 여전히 거절이다(403). 이 함수는 목록을 돌며 하나라도 통과하면
+ * 셋 **다** NONE 인 사람은 여전히 거절이다(403). 이 함수는 목록을 돌며 하나라도 통과하면
  * 참이고, 하나도 통과하지 못하면 거짓이다 — 빈 목록이 될 수 없게 상수를 튜플로 못 박는다.
  * 저장 모드 · 세션 · 살아 있는 계정 · 승인은 이 앞에서 이미 걸렀다(통로의 순서).
  * ============================================================================
@@ -383,6 +429,8 @@ export function quoteFolderHelperRootsInput(roots: readonly [string, ...string[]
 export const QUOTE_FOLDER_HELPER_INSTALL_AREA_KEYS: readonly [string, ...string[]] = [
   "quotes",
   "customerPortal",
+  // 🔴 보기(READ)다 — 파일 관리(WRITE)가 아니다. 까닭은 위 머리말 「2026-10-07」.
+  "productModels.view",
 ];
 
 /**
