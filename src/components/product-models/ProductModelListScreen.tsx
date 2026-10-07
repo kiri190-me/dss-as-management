@@ -31,7 +31,7 @@ import type { ProductModelKindAttachmentCounts } from "@/lib/db/queries/product-
 import { PRODUCT_MODEL_KIND_CODES, productModelKindLabel } from "@/lib/domain/product-model-kind";
 import {
   DEFAULT_PRODUCT_MODEL_SORT,
-  PRODUCT_MODEL_SORT_KEYS,
+  PRODUCT_MODEL_LIST_SORT_KEYS,
   PRODUCT_MODEL_SORT_LABELS,
   sortProductModels,
   type ProductModelSortKey,
@@ -46,15 +46,22 @@ import {
 const kindLabel = productModelKindLabel;
 
 /**
- * 이 모델의 고객사를 한 줄로. 사람이 골라 둔 것과 **접수 기록에서 나온 것**을
- * 합쳐 보여 준다 — 합치는 규칙은 도메인 함수 하나가 정하고(상세 화면도 같은
- * 것을 쓴다), 이 화면은 갈래를 따로 표시하지 않는다(칸 하나짜리 목록이다).
- * 하나도 없으면 `-` — 다른 칸들과 같은 규칙이다.
+ * 이 모델의 고객사 — 사람이 골라 둔 것과 **접수 기록에서 나온 것**을 합친 목록.
+ * 합치는 규칙은 도메인 함수 하나가 정한다(상세 화면도 같은 것을 쓴다).
+ *
+ * 보여 주는 자리(표·카드)와 **줄 세우는 자리**(「고객사 오름차순」)가 같은 값을
+ * 봐야 한다 — 그래서 합치는 호출을 이 한 줄로 모은다.
+ */
+function mergedCustomersOf(row: ProductModelListRow) {
+  return mergeProductModelCustomers(row.customers, row.derivedCustomers);
+}
+
+/**
+ * 이 모델의 고객사를 한 줄로. 이 화면은 갈래를 따로 표시하지 않는다(칸 하나짜리
+ * 목록이다). 하나도 없으면 `-` — 다른 칸들과 같은 규칙이다.
  */
 function customerNames(row: ProductModelListRow): string {
-  return mergedProductModelCustomerNames(
-    mergeProductModelCustomers(row.customers, row.derivedCustomers)
-  );
+  return mergedProductModelCustomerNames(mergedCustomersOf(row));
 }
 
 /**
@@ -73,7 +80,7 @@ function customerNames(row: ProductModelListRow): string {
  * 아니다 — 그쪽에서 고객사로 가려면 모델 상세를 거친다(거기는 두 갈래 모두 링크다).
  */
 function CustomerCell({ row, linked }: { row: ProductModelListRow; linked: boolean }) {
-  const merged = mergeProductModelCustomers(row.customers, row.derivedCustomers);
+  const merged = mergedCustomersOf(row);
   // 하나도 없을 때의 글자는 한 자리에서 나온다 — 카드와 달라지면 안 된다.
   if (merged.length === 0 || !linked) return <>{mergedProductModelCustomerNames(merged)}</>;
   return (
@@ -206,7 +213,13 @@ export default function ProductModelListScreen({
    * 차례"를 그대로 받아야 한다. 걸러내기만 반영하고 차례를 빠뜨리면, 종류별로
    * 보는 중에 Shift 로 고른 범위가 화면에 보이는 줄과 다르게 잡힌다.
    */
-  const filteredRows = useMemo(() => sortProductModels(matchedRows, sortKey), [matchedRows, sortKey]);
+  const filteredRows = useMemo(
+    // 「고객사 오름차순」이 비교하는 값은 **표에 보이는 그 이름들**이다 — 수기와
+    // 접수 기록을 합친 목록을 그대로 넘긴다(합치는 규칙을 정렬 쪽에 베껴 적지
+    // 않는다). 고객사가 없는 모델은 도메인 규칙이 뒤로 보낸다.
+    () => sortProductModels(matchedRows, sortKey, mergedCustomersOf),
+    [matchedRows, sortKey]
+  );
 
   function leaveDeleteMode() {
     setIsDeleteMode(false);
@@ -356,7 +369,10 @@ export default function ProductModelListScreen({
 
             {/* 고를 수 있는 값도 보이는 글자도 도메인 한 자리에서 온다
                 (domain/product-model-sort.ts) — 고객사 상세의 같은 고르개와
-                글자가 갈라지면 안 된다. 🔴 여기에 글자를 직접 적지 말 것. */}
+                글자가 갈라지면 안 된다. 🔴 여기에 글자를 직접 적지 말 것.
+                **어느 화면이 어떤 키를 쓰는지도** 그쪽이 정한다 — 이 화면은
+                전부 쓰고(PRODUCT_MODEL_LIST_SORT_KEYS), 고객사 상세는 제 몫의
+                목록을 쓴다. 여기서 키를 걸러 내지 말 것. */}
             <label className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
               정렬
               <select
@@ -364,7 +380,7 @@ export default function ProductModelListScreen({
                 onChange={(e) => setSortKey(e.target.value as ProductModelSortKey)}
                 className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
               >
-                {PRODUCT_MODEL_SORT_KEYS.map((key) => (
+                {PRODUCT_MODEL_LIST_SORT_KEYS.map((key) => (
                   <option key={key} value={key}>
                     {PRODUCT_MODEL_SORT_LABELS[key]}
                   </option>

@@ -216,6 +216,16 @@ src/components/common/copy-text.test.ts
 src/components/repair-labor/base-cost-display.test.ts
 src/components/repair-labor/repair-labor-screen-source.test.ts
 src/components/product-models/product-model-customer-source.test.ts
+# 그 거울상 — 고객사 상세의 [연결된 제품 모델] 에 **접수 기록에서 온 모델**도 뜬다
+# (2026-10-08). 실측으로 접수 건이 있는 고객사 32곳 중 27곳이 이 자리에서 「없습니다」를
+# 보고 있었다. 🔴 재는 것: 두 갈래에 딱지가 있는가(색만 쓰지 않는가) · 양쪽에서 이어진
+# 모델이 한 줄에 딱지 둘인가 · 딱지가 링크 밖인가 · 반대 방향 화면의 알약과 생김새·글자가
+# 같은가 · 빈 문구가 두 길을 말하는가 · 구역이 여전히 보기 전용인가.
+# 화면이 서버 액션 사슬로 server-only 에 닿아 **그려 볼 수 없다** — 바로 위 이웃과 같은
+# 방법으로 원본을 글자로 읽는다(그 까닭은 파일 머리말에 적었다). 값으로 볼 수 있는 것
+# (고르개의 키 · 「고객사 오름차순」의 비교 규칙)은 unit 목록의 product-model-sort.test.ts 가
+# 값으로 보고, 조회가 실제로 두 갈래를 돌려주는지는 db 목록의 product-models.integration 이 본다.
+src/components/customers/customer-detail-product-models.test.ts
 src/components/repair-cases/detail/product-info-history-disclosure.test.ts
 src/components/repair-cases/detail/used-parts-section.test.ts
 src/components/inventory/part-picker.test.tsx

@@ -9,6 +9,7 @@ import type {
   EndUserContactRow,
 } from "@/lib/db/queries/customers";
 import type { CustomerProductModelRow } from "@/lib/db/queries/product-model-customers";
+import type { ProductModelCustomerSource } from "@/lib/domain/product-model-customer-merge";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import {
   NO_CUSTOMER_ROW_COLOR_LABEL,
@@ -16,8 +17,8 @@ import {
 } from "@/lib/domain/customer-row-color";
 import { productModelKindLabel } from "@/lib/domain/product-model-kind";
 import {
+  CUSTOMER_DETAIL_PRODUCT_MODEL_SORT_KEYS,
   DEFAULT_PRODUCT_MODEL_SORT,
-  PRODUCT_MODEL_SORT_KEYS,
   PRODUCT_MODEL_SORT_LABELS,
   sortProductModels,
   type ProductModelSortKey,
@@ -60,6 +61,47 @@ function InfoField({ label, value }: { label: string; value: string }) {
  * 않는다. **보이는 글자는 한 글자도 바뀌지 않았다.**
  */
 const kindLabel = productModelKindLabel;
+
+/**
+ * 「연결된 제품 모델」 한 줄이 **어디에서 이어졌는지** 알려 주는 딱지 (2026-10-08).
+ *
+ * 🔴 생김새도 말도 **반대 방향 화면에 이미 있는 것**을 그대로 쓴다 — 제품 모델
+ * 상세의 `고객사` 칸이 접수 기록에서 나온 고객사에 붙이는 하늘색 알약과 같은 꼴·같은
+ * 글자다(ProductModelDetailScreen 의 CustomerField). 같은 사실을 두 화면이 다르게
+ * 보이면, 보는 사람은 그것이 다른 사실이라고 읽는다.
+ *
+ * 🔴 색만으로 구분하지 않고 **글자를 함께 적는다** — UI_GUIDELINE 7.
+ *
+ * 수기 쪽에도 딱지를 붙이는 것은 이 화면에서는 **둘 다 섞여 나오기** 때문이다.
+ * 모델 상세의 고객사 칸은 수기가 기본이라 기록 쪽에만 딱지가 필요했지만, 여기서는
+ * 딱지가 없는 줄이 "무엇인지 모르는 줄"이 된다.
+ */
+const PRODUCT_MODEL_SOURCE_BADGES: Record<
+  ProductModelCustomerSource,
+  { label: string; title: string; className: string }
+> = {
+  MANUAL: {
+    label: "직접 연결",
+    title: "제품 모델 상세의 모델 기본정보에서 직접 걸어 둔 연결입니다.",
+    className:
+      "rounded-full border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] leading-none text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+  },
+  REPAIR_CASE: {
+    label: "접수 기록",
+    title: "A/S 접수 기록에서 자동으로 나온 모델입니다. 수정 화면에서 지울 수 없습니다.",
+    className:
+      "rounded-full border border-sky-200 bg-sky-50 px-1.5 py-0.5 text-[10px] leading-none text-sky-700 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300",
+  },
+};
+
+function ProductModelSourceBadge({ source }: { source: ProductModelCustomerSource }) {
+  const badge = PRODUCT_MODEL_SOURCE_BADGES[source];
+  return (
+    <span title={badge.title} className={badge.className}>
+      {badge.label}
+    </span>
+  );
+}
 
 /**
  * Customer Management detail screen. Four sections, in the approved
@@ -230,6 +272,11 @@ export default function CustomerDetailScreen({
           사실을 고치는 자리가 둘이 되고, 그 둘의 권한·검증·동시성 판정을 각각
           맞춰 두어야 한다. 여기에 편집을 더하지 말 것.
 
+          🔴 **두 갈래가 섞여 나온다**(2026-10-08) — 위의 수기 연결과, 이 고객사의
+          A/S 접수 건에서 유도한 모델이다. 뒤쪽은 표에 저장되는 값이 아니라 조회가
+          읽을 때 계산한 것이라(queries/product-model-customers.ts) 수정 화면에서
+          지울 수 없다. 그 사실을 줄마다 딱지로 알린다.
+
           구역 껍데기는 위 `관련 End-User 목록` 과 같은 `rounded-lg border ... p-4`
           짜임을 쓴다. 한 화면에서 구역 모양이 두 가지가 되면 안 된다. */}
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
@@ -241,6 +288,12 @@ export default function CustomerDetailScreen({
           {productModels.length > 0 && (
             // 🔴 보이는 글자를 여기 적지 말 것 — [제품 모델 관리] 목록과 같은
             // 한 벌을 쓴다(domain/product-model-sort.ts).
+            //
+            // 🔴 **고를 수 있는 값은 그 목록과 다르다** — 여기 모델은 전부 같은
+            // 고객사의 것이라 「고객사」로 줄을 세울 뜻이 없다. 그 사실을 이 화면이
+            // 손으로 거르지 않고 도메인이 내준 제 몫의 목록을 쓴다
+            // (CUSTOMER_DETAIL_PRODUCT_MODEL_SORT_KEYS) — 걸러내기가 화면에 적히면
+            // 키가 하나 더 늘 때 한쪽만 고쳐지고, 그때 아무 오류도 나지 않는다.
             <label className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
               정렬
               <select
@@ -248,7 +301,7 @@ export default function CustomerDetailScreen({
                 onChange={(e) => setModelSortKey(e.target.value as ProductModelSortKey)}
                 className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
               >
-                {PRODUCT_MODEL_SORT_KEYS.map((key) => (
+                {CUSTOMER_DETAIL_PRODUCT_MODEL_SORT_KEYS.map((key) => (
                   <option key={key} value={key}>
                     {PRODUCT_MODEL_SORT_LABELS[key]}
                   </option>
@@ -259,17 +312,23 @@ export default function CustomerDetailScreen({
         </div>
         {productModels.length === 0 ? (
           // A/S 이력이 0건일 때 CustomerRepairCaseHistory 가 쓰는 안내와 같은 모양.
-          // 연결을 어디서 만드는지 덧붙인다 — 이 화면이 아니라 제품 모델 상세다.
+          // 🔴 이 목록은 2026-10-08 부터 **접수 기록으로도** 채워진다 — 예전 문구는
+          // 「연결은 제품 모델 상세에서 만듭니다」 한 길만 알려 주어, 접수 건이 한 건도
+          // 없다는 사실(여기까지 비어 있으려면 그래야 한다)을 숨기고 있었다.
           <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">
-            이 고객사와 연결된 제품 모델이 없습니다. 연결은 제품 모델 상세의 모델 기본정보에서
-            만듭니다.
+            이 고객사와 연결된 제품 모델이 없습니다. A/S 접수 건이 생기면 그 제품의 모델이
+            여기에 저절로 나타나고, 접수 건과 상관없이 직접 걸어 두려면 제품 모델 상세의 모델
+            기본정보에서 만듭니다.
           </p>
         ) : (
           <ul className="mt-3 flex flex-col gap-2">
             {sortedProductModels.map((model) => (
               <li
                 key={model.id}
-                className="rounded-md border border-zinc-200 px-3 py-2 dark:border-zinc-800"
+                // 🔴 딱지는 링크 **밖**이다 — 딱지까지 눌리면 "접수 기록"이라는 설명이
+                // 누를 수 있는 것처럼 보이고, 거기 달린 title 설명도 링크의 것으로
+                // 읽힌다(제품 모델 상세의 고객사 칸과 같은 규칙).
+                className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-zinc-200 px-3 py-2 dark:border-zinc-800"
               >
                 <Link
                   href={`/product-models/${model.id}`}
@@ -280,6 +339,11 @@ export default function CustomerDetailScreen({
                     {kindLabel(model.kind)}
                   </span>
                 </Link>
+                {/* 🔴 양쪽에서 이어진 모델은 **한 줄**이고 딱지가 둘이다 — 조회가
+                    이미 한 줄로 접어 두 갈래를 모두 담아 준다. */}
+                {model.sources.map((source) => (
+                  <ProductModelSourceBadge key={source} source={source} />
+                ))}
               </li>
             ))}
           </ul>

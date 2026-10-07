@@ -594,6 +594,13 @@ describe("updateProductModel — 고객사 연결", () => {
  *
  * 🔴 정방향이 customers.is_deleted 를 거르는 것처럼 이쪽은 product_models.is_deleted
  * 를 걸러야 한다. 아래 "휴지통에 든 모델은 빠진다" 가 그 규칙을 지키는 시험이다.
+ *
+ * ── 🔴 두 갈래가 됐다 (2026-10-08) ──────────────────────────────────────────
+ * 이 조회는 오래 **수기 연결(product_model_customers)만** 읽었다. 실측에서 그 표의
+ * 줄은 6건(고객사 5곳 · 모델 3개)뿐인데 접수 건으로 이어지는 짝은 132쌍이었고, 접수
+ * 건이 있는 고객사 32곳 가운데 27곳이 화면에서 「없습니다」를 보고 있었다. 이제
+ * **접수 기록(repair_cases → products → product_models)에서 나오는 모델도** 함께
+ * 돌려주고, 줄마다 출처(`sources`)를 단다. 아래 describe 둘째 묶음이 그쪽을 본다.
  * ============================================================================
  */
 describe("listProductModelsForCustomer", () => {
@@ -642,8 +649,8 @@ describe("listProductModelsForCustomer", () => {
     assert.deepEqual(
       rows,
       [
-        { id: first.id, modelName: first.modelName, kind: null },
-        { id: second.id, modelName: second.modelName, kind: null },
+        { id: first.id, modelName: first.modelName, kind: null, sources: ["MANUAL"] },
+        { id: second.id, modelName: second.modelName, kind: null, sources: ["MANUAL"] },
       ],
       "연결된 모델 둘이 모델명 오름차순으로 나와야 한다"
     );
@@ -675,7 +682,7 @@ describe("listProductModelsForCustomer", () => {
 
     assert.deepEqual(
       await listProductModelsForCustomer(customer.id),
-      [{ id: kept.id, modelName: kept.modelName, kind: null }],
+      [{ id: kept.id, modelName: kept.modelName, kind: null, sources: ["MANUAL"] }],
       "휴지통에 든 모델은 고객사 상세에 보이면 안 된다"
     );
   });
@@ -690,10 +697,10 @@ describe("listProductModelsForCustomer", () => {
     await linkModelToCustomers(otherModel, [other.id]);
 
     assert.deepEqual(await listProductModelsForCustomer(mine.id), [
-      { id: myModel.id, modelName: myModel.modelName, kind: null },
+      { id: myModel.id, modelName: myModel.modelName, kind: null, sources: ["MANUAL"] },
     ]);
     assert.deepEqual(await listProductModelsForCustomer(other.id), [
-      { id: otherModel.id, modelName: otherModel.modelName, kind: null },
+      { id: otherModel.id, modelName: otherModel.modelName, kind: null, sources: ["MANUAL"] },
     ]);
   });
 
@@ -719,7 +726,169 @@ describe("listProductModelsForCustomer", () => {
     const rows = await listProductModelsForCustomer(customer.id);
     const byId = new Map(rows.map((r) => [r.id, r]));
     assert.equal(rows.length, 2, "kind 가 null 이라고 빠지면 안 된다");
-    assert.deepEqual(byId.get(unset.id), { id: unset.id, modelName: unset.modelName, kind: null });
-    assert.deepEqual(byId.get(typed.id), { id: typed.id, modelName: typed.modelName, kind: "MATCHER" });
+    assert.deepEqual(byId.get(unset.id), {
+      id: unset.id,
+      modelName: unset.modelName,
+      kind: null,
+      sources: ["MANUAL"],
+    });
+    assert.deepEqual(byId.get(typed.id), {
+      id: typed.id,
+      modelName: typed.modelName,
+      kind: "MATCHER",
+      sources: ["MANUAL"],
+    });
+  });
+
+  /**
+   * ── 🔴 접수 기록에서 나오는 모델 (2026-10-08) ─────────────────────────────
+   * 경로는 repair_cases → products → product_models 다. 접수 흐름(resolveProduct)은
+   * 아직 products.product_model_id 를 채우지 않으므로, 위 "renaming ..." 시험과 같은
+   * 방법으로 장비를 모델 마스터에 손으로 잇는다 — 마이그레이션 0030 의 백필이 한 일과
+   * 같은 모양이다.
+   */
+  describe("접수 기록에서 나오는 모델", () => {
+    /** 이 고객사 이름으로 접수 건 한 건을 만들고, 그 장비를 모델 마스터에 잇는다. */
+    async function intakeLinkedTo(customerRow: { id: string }, master: { id: string }) {
+      const unitModelName = `${TEST_PRODUCT_MODEL_NAME_PREFIX}CASE-${randomUUID().slice(0, 8)}`;
+      const created = await createRepairCase(
+        baseCreateInput({ customerId: customerRow.id, modelName: unitModelName })
+      );
+      assert.equal(created.ok, true, `setup create failed: ${JSON.stringify(created)}`);
+
+      const [productRow] = await db
+        .select({ id: products.id })
+        .from(products)
+        .where(eq(products.modelName, unitModelName));
+      assert.ok(productRow, "접수가 장비 줄을 만들지 않았다");
+
+      await db
+        .update(products)
+        .set({ productModelId: master.id })
+        .where(eq(products.id, productRow.id));
+      return productRow;
+    }
+
+    test("🔴 수기 연결이 하나도 없어도 접수 건으로 이어진 모델이 나온다", async () => {
+      const customer = await createTestCustomer("DERIVED-ONLY");
+      const master = await createTestMaster("DERIVED-ONLY-MODEL");
+      await intakeLinkedTo(customer, master);
+
+      // product_model_customers 에는 줄이 없다 — 그래도 보여야 한다는 것이 이 조각의
+      // 요지다(실측에서 고객사 32곳 중 27곳이 여기서 「없습니다」를 보고 있었다).
+      const linkRows = await db
+        .select({ id: productModelCustomers.id })
+        .from(productModelCustomers)
+        .where(eq(productModelCustomers.productModelId, master.id));
+      assert.deepEqual(linkRows, [], "수기 연결이 없는 상태를 만들려는 것이다");
+
+      assert.deepEqual(await listProductModelsForCustomer(customer.id), [
+        { id: master.id, modelName: master.modelName, kind: null, sources: ["REPAIR_CASE"] },
+      ]);
+    });
+
+    test("🔴 같은 모델이 양쪽에 있으면 한 줄이고 출처가 둘이다", async () => {
+      const customer = await createTestCustomer("BOTH");
+      const master = await createTestMaster("BOTH-MODEL");
+      await linkModelToCustomers(master, [customer.id]);
+      // 접수 건을 **둘** 만든다 — 줄이 접수 건 수만큼 늘어나면 안 된다.
+      await intakeLinkedTo(customer, master);
+      await intakeLinkedTo(customer, master);
+
+      assert.deepEqual(await listProductModelsForCustomer(customer.id), [
+        {
+          id: master.id,
+          modelName: master.modelName,
+          kind: null,
+          sources: ["MANUAL", "REPAIR_CASE"],
+        },
+      ]);
+    });
+
+    test("🔴 지운 접수 건은 모델을 만들어 내지 않는다", async () => {
+      const customer = await createTestCustomer("CASE-TRASH");
+      const master = await createTestMaster("CASE-TRASH-MODEL");
+      const product = await intakeLinkedTo(customer, master);
+      assert.equal(
+        (await listProductModelsForCustomer(customer.id)).length,
+        1,
+        "지우기 전엔 보인다"
+      );
+
+      await db
+        .update(repairCases)
+        .set({ isDeleted: true, deletedAt: new Date() })
+        .where(eq(repairCases.productId, product.id));
+
+      assert.deepEqual(
+        await listProductModelsForCustomer(customer.id),
+        [],
+        "휴지통에 든 접수 건으로 모델을 만들어 내면 안 된다"
+      );
+    });
+
+    test("🔴 휴지통에 든 장비도 모델을 만들어 내지 않는다", async () => {
+      const customer = await createTestCustomer("UNIT-TRASH");
+      const master = await createTestMaster("UNIT-TRASH-MODEL");
+      const product = await intakeLinkedTo(customer, master);
+
+      await db
+        .update(products)
+        .set({ isDeleted: true, deletedAt: new Date() })
+        .where(eq(products.id, product.id));
+
+      assert.deepEqual(await listProductModelsForCustomer(customer.id), []);
+    });
+
+    test("🔴 휴지통에 든 모델은 접수 건으로 이어져 있어도 빠진다", async () => {
+      const customer = await createTestCustomer("DERIVED-MODEL-TRASH");
+      const kept = await createTestMaster("DERIVED-KEPT");
+      const trashed = await createTestMaster("DERIVED-GONE");
+      await intakeLinkedTo(customer, kept);
+      await intakeLinkedTo(customer, trashed);
+      assert.equal((await listProductModelsForCustomer(customer.id)).length, 2);
+
+      await trashModel(trashed.id);
+
+      assert.deepEqual(await listProductModelsForCustomer(customer.id), [
+        { id: kept.id, modelName: kept.modelName, kind: null, sources: ["REPAIR_CASE"] },
+      ]);
+    });
+
+    test("다른 고객사의 접수 건은 섞여 나오지 않는다", async () => {
+      const mine = await createTestCustomer("DERIVED-MINE");
+      const other = await createTestCustomer("DERIVED-OTHER");
+      const myModel = await createTestMaster("DERIVED-MINE-MODEL");
+      const otherModel = await createTestMaster("DERIVED-OTHER-MODEL");
+      await intakeLinkedTo(mine, myModel);
+      await intakeLinkedTo(other, otherModel);
+
+      assert.deepEqual(await listProductModelsForCustomer(mine.id), [
+        { id: myModel.id, modelName: myModel.modelName, kind: null, sources: ["REPAIR_CASE"] },
+      ]);
+      assert.deepEqual(await listProductModelsForCustomer(other.id), [
+        { id: otherModel.id, modelName: otherModel.modelName, kind: null, sources: ["REPAIR_CASE"] },
+      ]);
+    });
+
+    test("🔴 기본 차례는 그대로다 — 두 갈래가 섞여도 모델명 오름차순 한 줄이다", async () => {
+      const customer = await createTestCustomer("DERIVED-ORDER");
+      // 이름이 뒤인 쪽을 수기로, 앞인 쪽을 접수 기록으로 둔다 — 갈래별로 묶어
+      // 내보내면 이 차례가 뒤집힌다.
+      const manualLast = await createTestMaster("ORDER-ZZZ");
+      const derivedFirst = await createTestMaster("ORDER-AAA");
+      await linkModelToCustomers(manualLast, [customer.id]);
+      await intakeLinkedTo(customer, derivedFirst);
+
+      assert.deepEqual(await listProductModelsForCustomer(customer.id), [
+        {
+          id: derivedFirst.id,
+          modelName: derivedFirst.modelName,
+          kind: null,
+          sources: ["REPAIR_CASE"],
+        },
+        { id: manualLast.id, modelName: manualLast.modelName, kind: null, sources: ["MANUAL"] },
+      ]);
+    });
   });
 });

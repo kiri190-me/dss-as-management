@@ -1,7 +1,8 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, exists, inArray, or, sql } from "drizzle-orm";
 import { db } from "../client";
 import { customers, productModelCustomers, productModels, products, repairCases } from "../schema";
+import type { ProductModelCustomerSource } from "@/lib/domain/product-model-customer-merge";
 import type { ProductModelKind } from "@/lib/validation/product-model-input";
 
 /**
@@ -174,31 +175,53 @@ export async function listRepairCaseCustomersForProductModel(
 /**
  * ── 반대 방향 — 고객사 하나에 붙은 제품 모델 ────────────────────────────────
  *
- * 고객사 상세의 `연결된 제품 모델` 구역이 쓴다. 위 두 함수의 거울상이라 같은
+ * 고객사 상세의 `연결된 제품 모델` 구역이 쓴다. 위 네 함수의 거울상이라 같은
  * 파일에 둔다 — 거르는 규칙이 하나뿐인데 파일이 둘이면 한쪽만 고쳐지는 날이 온다.
+ *
+ * 🔴 **여기도 두 갈래다**(2026-10-08). 모델 → 고객사 방향이 수기 설정과 접수 기록을
+ * 함께 보여 주는 것과 같은 까닭이고, 실측이 그 까닭 자체다 — 개발 DB 에서 수기 연결은
+ * 6건(고객사 5곳)뿐인데 접수 건으로 이어지는 짝은 132쌍이고, 접수 건이 있는 고객사
+ * 32곳 중 27곳이 이 구역에서 「없습니다」를 보고 있었다.
  */
 
 /** 화면이 받는 모양. 고객사 상세는 `"use client"` 라 여기 담기는 칸이 그대로
- * 브라우저까지 실려 간다 — 목록을 그리고 링크를 거는 데 필요한 세 칸만 둔다.
+ * 브라우저까지 실려 간다 — 목록을 그리고 링크를 거는 데 필요한 칸만 둔다.
  *
  * `kind` 가 `ProductModelKind | null` 인 것은 queries/product-models.ts 의
  * 다른 조회들과 같다. `null` 은 **미지정**이라는 뜻이지 "아직 못 읽었다"가
  * 아니다 — schema/product-models.ts 머리말이 적어 둔 대로 이 저장소는 kind 를
- * workflow_type 에서 유도하지 않기로 했으므로, 읽는 쪽이 추측으로 채우면 안 된다. */
+ * workflow_type 에서 유도하지 않기로 했으므로, 읽는 쪽이 추측으로 채우면 안 된다.
+ *
+ * `sources` 는 **어디에서 이어졌는가**다. 갈래 이름은 모델 → 고객사 방향이 쓰는
+ * 것과 같은 한 벌이다(domain/product-model-customer-merge.ts 의
+ * ProductModelCustomerSource) — 같은 사실을 두 방향에서 다른 말로 부르면 안 된다.
+ * 🔴 **양쪽에 다 있으면 둘 다 들어 있다.** 한 줄로 합치되 출처는 둘 다 보인다. */
 export type CustomerProductModelRow = {
   id: string;
   modelName: string;
   kind: ProductModelKind | null;
+  sources: ProductModelCustomerSource[];
 };
 
 /**
  * 고객사 하나에 붙은 모델 전부를 **한 번의 조회**로. 결과 수에 비례해 조회가
- * 늘어나면 안 된다(위 두 함수와 같은 규칙).
+ * 늘어나면 안 된다(위 함수들과 같은 규칙). 두 갈래를 각각 한 번씩 물어보고 JS 에서
+ * 접는 길도 있었지만, 그러면 차례(모델명 → id)를 JS 로 다시 세워야 하고 그 비교가
+ * postgres 와 미세하게 달라진다 — 기본 차례는 조회가 정한 그대로여야 한다.
  *
- * 🔴 `product_models.is_deleted = false` 로 거른다. 정방향이 customers 를 거르는
- * 것과 정확히 같은 이유다 — 휴지통에 든 모델은 product_models 에 행이 그대로 남고
- * FK CASCADE 는 완전삭제 때만 움직이므로 연결 줄도 남는다. 안 거르면 지운 모델이
- * 고객사 상세에 계속 보인다.
+ * 그래서 **product_models 를 한 번 훑으면서 두 갈래를 `exists` 로 묻는다.** 모델마다
+ * 한 줄이 나오므로 양쪽에 다 있어도 저절로 한 줄이고, 두 `exists` 의 참/거짓이 그대로
+ * 출처가 된다. 묶음(group by)이나 distinct 로 접을 필요가 없다.
+ *
+ * 🔴 `product_models.is_deleted = false` 로 거른다 — **두 갈래 모두에** 걸린다(바깥
+ * where 에 있다). 정방향이 customers 를 거르는 것과 정확히 같은 이유다: 휴지통에 든
+ * 모델은 product_models 에 행이 그대로 남고 FK CASCADE 는 완전삭제 때만 움직이므로
+ * 연결 줄도 남는다. 안 거르면 지운 모델이 고객사 상세에 계속 보인다.
+ *
+ * 🔴 접수 기록 쪽은 `repair_cases.is_deleted = false` 와 `products.is_deleted = false`
+ * 도 본다 — 휴지통에 든 기록으로 모델을 만들어 내지 않기 위해서다(모델 → 고객사
+ * 방향이 접수 건·장비·고객사 셋을 거르는 것과 같은 규칙). 고객사 자신은 여기서
+ * 거르지 않는다: 보고 있는 화면이 그 고객사의 상세다.
  */
 export async function listProductModelsForCustomer(
   customerId: string
@@ -207,19 +230,53 @@ export async function listProductModelsForCustomer(
   // 조용히 빈 목록을 돌려준다.
   if (!UUID_PATTERN.test(customerId)) return [];
 
-  return db
+  // 사람이 손으로 걸어 둔 연결(product_model_customers). 바깥 줄의 모델을 가리키는
+  // 상관 하위질의라 `product_models` 를 제 from 절에 넣지 않는다.
+  const hasManualLink = exists(
+    db
+      .select({ one: sql`1` })
+      .from(productModelCustomers)
+      .where(
+        and(
+          eq(productModelCustomers.customerId, customerId),
+          eq(productModelCustomers.productModelId, productModels.id)
+        )
+      )
+  );
+
+  // 접수 기록에서 나오는 연결. 경로는 repair_cases → products → product_models 로,
+  // 모델 → 고객사 방향(listRepairCaseCustomersForProductModels)과 같은 길을 거꾸로
+  // 탄다.
+  const hasRepairCaseLink = exists(
+    db
+      .select({ one: sql`1` })
+      .from(repairCases)
+      .innerJoin(products, eq(repairCases.productId, products.id))
+      .where(
+        and(
+          eq(repairCases.customerId, customerId),
+          eq(products.productModelId, productModels.id),
+          // 🔴 둘 다 걸어야 한다. 위 머리말 참조.
+          eq(repairCases.isDeleted, false),
+          eq(products.isDeleted, false)
+        )
+      )
+  );
+
+  const rows = await db
     .select({
       id: productModels.id,
       modelName: productModels.modelName,
       kind: productModels.kind,
+      manual: hasManualLink.mapWith(Boolean),
+      fromRepairCase: hasRepairCaseLink.mapWith(Boolean),
     })
-    .from(productModelCustomers)
-    .innerJoin(productModels, eq(productModelCustomers.productModelId, productModels.id))
+    .from(productModels)
     .where(
       and(
-        eq(productModelCustomers.customerId, customerId),
         // 🔴 휴지통에 든 모델을 빼는 자리. 위 머리말 참조.
-        eq(productModels.isDeleted, false)
+        eq(productModels.isDeleted, false),
+        or(hasManualLink, hasRepairCaseLink)
       )
     )
     // 이름순. id 까지 얹는 것은 정방향과 같은 이유다 — 표시 이름이 같은 두 행이
@@ -230,4 +287,16 @@ export async function listProductModelsForCustomer(
     // 순서가 그대로 남는다(domain/product-model-sort.ts) — 이 줄을 지우면
     // 두 차례가 다 깨진다.
     .orderBy(productModels.modelName, productModels.id);
+
+  return rows.map((row) => ({
+    id: row.id,
+    modelName: row.modelName,
+    kind: row.kind,
+    // 차례는 수기 먼저, 그다음 접수 기록 — 합치는 도메인 함수가 고객사를 늘어놓는
+    // 차례와 같다(mergeProductModelCustomers).
+    sources: [
+      ...(row.manual ? (["MANUAL"] as const) : []),
+      ...(row.fromRepairCase ? (["REPAIR_CASE"] as const) : []),
+    ],
+  }));
 }
