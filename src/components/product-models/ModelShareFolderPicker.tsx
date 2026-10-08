@@ -12,7 +12,6 @@ import {
   contactFolderPathSegments,
 } from "@/components/repair-cases/files/ContactFolderSection";
 import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
-import { formatBytes } from "@/lib/domain/image-shrink";
 import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-link";
 import {
   SHARE_FOLDER_ENTRY_PLACE_ROOT,
@@ -20,6 +19,15 @@ import {
   isShareFolderEntryQueryActive,
   shareFolderEntryPlaceAt,
 } from "@/lib/domain/share-folder-entry-filter";
+import {
+  SHARE_FOLDER_ENTRY_ACTIONS_CLASS,
+  SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS,
+  SHARE_FOLDER_ENTRY_META_SIZE_CLASS,
+  SHARE_FOLDER_ENTRY_NAME_GROW_CLASS,
+  SHARE_FOLDER_ENTRY_ROW_CLASS,
+  shareFolderEntryMeta,
+  type ShareFolderEntryMeta,
+} from "@/lib/domain/share-folder-entry-meta";
 
 /**
  * ============================================================================
@@ -74,6 +82,15 @@ import {
  * 안 비우면 새 자리가 텅 비어 보여 「이 폴더가 비었나」로 헷갈린다.
  * 🔴 상한에 걸려 잘린 목록을 거를 때는 「더 있습니다」 곁말을 **없애지 않고 말만 바꿔**
  * 계속 보인다 — 상한 뒤에 있는 것을 「없네」로 잘못 결론 내지 않게.
+ *
+ * ── 🔴 줄은 **표**다 — 공용 조각을 쓴다 (2026-10-08) ─────────────────────
+ * 「수정 날짜를 **별도의 열**로」 → 화면을 보고 다시 「**표 중앙에 수정날짜 열을 따로**」
+ * (사용자 요구). 열 차례는 윈도우 탐색기와 같게 `[이름] [수정날짜] [크기] [동작]` 이고,
+ * 1fr 은 이름 하나뿐이라 **줄에 단추가 있든 없든 세 칸의 자리가 같다.**
+ * 🔴 수정날짜가 없는 줄도 · 단추가 없는 줄도 **칸은 남는다.** 🔴 [열기]의 결과 안내는
+ * 동작 칸 **안에서** 자라 줄 높이만 늘고 열은 밀리지 않는다. 좁은 화면에서는 예전처럼
+ * 접힌다. 날짜 모양도 열 폭도 **네 창이 한 벌로** 쓴다
+ * (lib/domain/share-folder-entry-meta.ts).
  *
  * ── 🔴 인쇄에 안 찍힌다 · 바꿔 끼울 수 있다 ───────────────────────────────
  * 바깥 틀에 `print:hidden`. fetch 는 부르는 쪽이 바꿔 끼울 수 있고, 그려지는 것은 상태를
@@ -251,17 +268,14 @@ export async function loadModelShareFolderEntries(
 
 // ── 그리기 ───────────────────────────────────────────────────────────────
 
-function formatTimestamp(iso: string): string {
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return iso;
-  return parsed.toLocaleString("ko-KR", { dateStyle: "medium", timeStyle: "short" });
-}
-
-/** 한 줄의 곁말 — 폴더는 크기 대신 「폴더」, 파일은 크기. 수정 시각은 있을 때만. */
-export function modelShareFolderEntryMetaText(entry: ModelShareFolderEntryView): string {
-  const pieces = [entry.isDirectory ? MODEL_SHARE_FOLDER_FOLDER_LABEL : formatBytes(entry.sizeBytes)];
-  if (entry.modifiedAt !== undefined) pieces.push(formatTimestamp(entry.modifiedAt));
-  return pieces.join(" · ");
+/**
+ * 한 줄의 곁말 **두 조각** — 폴더는 크기 대신 「폴더」, 파일은 크기. 수정시각은 **따로**다
+ * (2026-10-08 사용자 요구 「수정 날짜를 별도의 열로」).
+ * 🔴 날짜 모양도 칸 생김새도 **공유폴더를 보여 주는 네 창이 같은 한 벌**을 쓴다
+ * (lib/domain/share-folder-entry-meta.ts). 여기 남는 것은 **이 창의 「폴더」 글자**뿐이다.
+ */
+export function modelShareFolderEntryMeta(entry: ModelShareFolderEntryView): ShareFolderEntryMeta {
+  return shareFolderEntryMeta(entry, MODEL_SHARE_FOLDER_FOLDER_LABEL);
 }
 
 /**
@@ -275,7 +289,7 @@ export function canOpenModelShareFolderEntry(entry: ModelShareFolderEntryView, i
   return !entry.isDirectory && isOpenableQuoteFolderFileName(entry.name);
 }
 
-const ENTRY_NAME_CLASS = "min-w-0 break-all text-left text-sm text-zinc-700 dark:text-zinc-300";
+const ENTRY_NAME_CLASS = `min-w-0 ${SHARE_FOLDER_ENTRY_NAME_GROW_CLASS} break-all text-left text-sm text-zinc-700 dark:text-zinc-300`;
 const SMALL_BUTTON_CLASS =
   "shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800";
 
@@ -338,18 +352,23 @@ function EntryList({
     <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
       {entries.map((entry) => {
         const openable = canOpenModelShareFolderEntry(entry, insidePath);
+        const meta = modelShareFolderEntryMeta(entry);
         return (
           <li
             key={`${entry.isDirectory ? "d" : "f"}:${entry.name}`}
             data-model-share-folder-entry=""
             data-model-share-folder-entry-openable={openable ? "" : undefined}
-            className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-1.5"
+            className={SHARE_FOLDER_ENTRY_ROW_CLASS}
           >
             <EntryName entry={entry} onEnter={onEnter} />
-            <span className="flex shrink-0 items-baseline gap-2">
-              <span className="text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
-                {modelShareFolderEntryMetaText(entry)}
-              </span>
+            {/* 🔴 수정시각이 없어도 **칸은 그대로** 그린다 — 빼면 그 줄만 열이 어긋난다. */}
+            <span className={SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS}>{meta.modifiedText}</span>
+            <span className={SHARE_FOLDER_ENTRY_META_SIZE_CLASS}>{meta.sizeText}</span>
+            {/*
+              🔴 동작 칸은 **비어도 그린다** — 단추가 하나도 없는 줄(보기만 하는 사람이 본
+              폴더 줄)에서 칸까지 빼면 그 줄만 날짜·크기가 어긋난다(2026-10-08).
+            */}
+            <span className={SHARE_FOLDER_ENTRY_ACTIONS_CLASS}>
               {/* 🔴 폴더 줄 · 허용 목록 밖 줄 · 맨 위 칸에는 아무것도 두지 않는다. */}
               {openable && <ContactFolderEntryOpenButton folderName={insidePath} fileName={entry.name} />}
               {/* 🔴 **폴더 줄에도 있다** — 사용자가 「파일 뿐 아니라 폴더도」라고 했다. */}

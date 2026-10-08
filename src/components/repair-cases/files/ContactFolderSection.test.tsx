@@ -1,16 +1,30 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { buildQuoteFolderFileLink, parseQuoteFolderFileLink } from "@/lib/domain/quote-folder-file-link";
-import ContactFolderEntryOpenButton, { ContactFolderEntryOpenControl } from "./ContactFolderEntryOpenButton";
+import {
+  SHARE_FOLDER_ENTRY_ACTIONS_CLASS,
+  SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS,
+  SHARE_FOLDER_ENTRY_META_SIZE_CLASS,
+  SHARE_FOLDER_ENTRY_ROW_CLASS,
+} from "@/lib/domain/share-folder-entry-meta";
+import ContactFolderEntryOpenButton, {
+  ContactFolderEntryOpenControl,
+  ContactFolderEntryOpenOutcomeNotice,
+} from "./ContactFolderEntryOpenButton";
 import ContactFolderPlaceOpenButton, { ContactFolderPlaceOpenControl } from "./ContactFolderPlaceOpenButton";
-import { contactFolderFileRelativePath } from "./contact-folder-file-open";
+import {
+  CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT,
+  contactFolderFileRelativePath,
+  type ContactFolderFileOpenOutcome,
+} from "./contact-folder-file-open";
 import ContactFolderSection, {
   CONTACT_FOLDER_SECTION_EMPTY_TEXT,
   CONTACT_FOLDER_SECTION_FAILED_TEXT,
+  CONTACT_FOLDER_SECTION_FOLDER_LABEL,
   CONTACT_FOLDER_SECTION_INSIDE_EMPTY_TEXT,
   CONTACT_FOLDER_SECTION_LOADING_TEXT,
   CONTACT_FOLDER_SECTION_MULTIPLE_TEXT,
@@ -18,6 +32,7 @@ import ContactFolderSection, {
   ContactFolderSectionView,
   canOpenContactFolderEntry,
   contactFolderEntriesUrl,
+  contactFolderEntryMeta,
   contactFolderParentPath,
   contactFolderPathSegments,
   contactFolderPlacePath,
@@ -55,6 +70,30 @@ function markup(state: ContactFolderSectionState): string {
 }
 
 const FOLDER = "D260908 INVENIA T2RCONT-AD2 WN3947 1802034 점검요청";
+
+/** 수정시각 한 자리 — 꾸민 글자는 돌리는 PC 의 시간대를 따르므로 **같은 식으로 계산해** 견준다. */
+const META_ISO = "2026-09-08T02:00:00.000Z";
+const META_LOCAL_TIME = new Date(META_ISO).toLocaleString("ko-KR", { dateStyle: "medium", timeStyle: "short" });
+
+/**
+ * 🔴 그려진 결과에서 **그 칸에 실제로 들어 있는 글자**를 줄 차례대로 뽑는다. 글자 매칭이
+ * 아니라 「칸이 섰는가 · 그 안이 비었는가」를 재려고 칸을 열쇠로 쓴다 — 빈 칸은 `""` 로
+ * 잡힌다(칸이 아예 없으면 배열 길이가 줄어 바로 드러난다).
+ */
+function metaCells(html: string, className: string): string[] {
+  const pattern = new RegExp(`<span class="${className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">([^<]*)</span>`, "g");
+  return [...html.matchAll(pattern)].map((match) => match[1] ?? "");
+}
+
+/** 그려진 줄들의 **틀**(li 의 class). 줄마다 다르면 열이 어긋난다. */
+function liClasses(html: string): string[] {
+  return [...html.matchAll(/<li[^>]*\sclass="([^"]*)"/g)].map((match) => match[1] ?? "");
+}
+
+/** 그 칸이 **몇 번** 그려졌는가 — 비어 있어도 센다(동작 칸이 줄마다 서는지 본다). */
+function cellCount(html: string, className: string): number {
+  return html.split(`class="${className}"`).length - 1;
+}
 
 const foundState = (overrides: Partial<Extract<ContactFolderSectionState, { kind: "found" }>> = {}) =>
   ({
@@ -787,3 +826,212 @@ describe("🔴 올린 뒤 바로 보인다 — 다시 읽기", () => {
     assert.deepEqual(urls, ["/api/repair-cases/case-1/contact-folder/entries?path=%EC%82%AC%EC%A7%84"]);
   });
 });
+
+/*
+ * ============================================================================
+ * 🔴 줄은 **표**다 — [이름] [수정날짜] [크기] [동작] (2026-10-08)
+ * ============================================================================
+ * 「공유폴더 창에서 수정 날짜가 … **별도의 열**로」 → 화면을 보고 다시 「**표 중앙에
+ * 수정날짜 열을 따로** 만들어줘」(사용자 요구 2026-10-08).
+ *
+ * 🔴 예전 짜임의 결함: 곁말과 단추를 오른쪽 끝에 몰아 두어 **줄마다 구성이 다르면 자리가
+ * 어긋났다** — [열기]가 있는 파일 줄은 단추 너비만큼 왼쪽으로 밀렸다. 이제 1fr 은 이름
+ * 하나뿐이고 수정날짜·크기·동작은 고정 길이라 **모든 줄에서 자리가 같다.**
+ *
+ * 🔴 **공유폴더를 보여 주는 네 창이 같은 한 벌을 쓴다**
+ * (lib/domain/share-folder-entry-meta.ts) — 그 한 벌의 규칙과 「넷이 다 쓰는가」는 unit
+ * 목록의 share-folder-entry-meta.test.ts 가 본다. 여기서는 **이 구역이 실제로 그렇게
+ * 그리는가**를 상태를 넣어 그려 보고 잰다.
+ * ============================================================================
+ */
+describe("🔴 표 네 칸 — 이름 · 수정날짜 · 크기 · 동작", () => {
+  test("수정날짜와 크기가 **따로** 나온다 — 한 글자로 이어 붙지 않는다", () => {
+    const html = markup(
+      foundState({
+        entries: [{ name: "연락서.xlsx", isDirectory: false, sizeBytes: 2048, modifiedAt: META_ISO }],
+        totalCount: 1,
+      })
+    );
+    assert.deepEqual(metaCells(html, SHARE_FOLDER_ENTRY_META_SIZE_CLASS), ["2.0 KB"]);
+    assert.deepEqual(metaCells(html, SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS), [META_LOCAL_TIME]);
+    // 🔴 가운뎃점으로 이어 붙이던 자리가 없다.
+    assert.equal(html.includes(`2.0 KB · ${META_LOCAL_TIME}`), false, html);
+    assert.equal(html.includes("·"), false, html);
+  });
+
+  test("🔴 열 차례가 **이름 → 수정날짜 → 크기 → 동작**이다(윈도우 탐색기와 같게)", () => {
+    const html = markup(
+      foundState({
+        entries: [{ name: "연락서.xlsx", isDirectory: false, sizeBytes: 2048, modifiedAt: META_ISO }],
+        totalCount: 1,
+      })
+    );
+    const nameAt = html.indexOf("연락서.xlsx");
+    const modifiedAt = html.indexOf(`class="${SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS}"`);
+    const sizeAt = html.indexOf(`class="${SHARE_FOLDER_ENTRY_META_SIZE_CLASS}"`);
+    const actionsAt = html.indexOf(`class="${SHARE_FOLDER_ENTRY_ACTIONS_CLASS}"`);
+    assert.ok(nameAt > 0 && modifiedAt > 0 && sizeAt > 0 && actionsAt > 0, html);
+    assert.ok(nameAt < modifiedAt, "이름이 수정날짜보다 뒤에 있다");
+    assert.ok(modifiedAt < sizeAt, "수정날짜가 크기보다 뒤에 있다");
+    assert.ok(sizeAt < actionsAt, "크기가 동작보다 뒤에 있다");
+  });
+
+  /**
+   * 🔴 **이번 요구의 알맹이.** 폴더 줄 · 열 수 없는 파일 줄 · 열 수 있는 파일 줄을 섞어
+   * 그려 놓고, **모든 줄이 같은 표 틀과 같은 네 칸**을 갖는지 결과로 잰다. 줄마다 틀이
+   * 같고 1fr 이 이름 하나뿐이면 날짜·크기·동작 칸의 자리는 줄이 달라도 같다.
+   */
+  test("🔴 단추가 있는 줄과 없는 줄이 **같은 표 틀**을 쓴다 — 동작 칸은 비어도 남는다", () => {
+    const html = markup(
+      foundState({
+        entries: [
+          { name: "사진", isDirectory: true, sizeBytes: 0, modifiedAt: META_ISO },
+          { name: "메모", isDirectory: false, sizeBytes: 11 },
+          { name: "연락서.xlsx", isDirectory: false, sizeBytes: 2048, modifiedAt: META_ISO },
+        ],
+        totalCount: 3,
+      })
+    );
+    const rows = liClasses(html);
+    assert.equal(rows.length, 3, html);
+    // 🔴 세 줄의 틀이 **글자 하나까지 같다** — 줄마다 다른 틀이면 열이 어긋난다.
+    assert.equal(new Set(rows).size, 1, rows.join(" | "));
+    assert.ok(rows[0]?.includes("sm:grid-cols-[minmax(0,1fr)_10rem_5rem_9rem]"), rows[0]);
+    // 🔴 네 칸이 줄마다 하나씩 — 동작 칸은 [열기]가 없는 줄에도 선다.
+    assert.equal(metaCells(html, SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS).length, 3, html);
+    assert.equal(metaCells(html, SHARE_FOLDER_ENTRY_META_SIZE_CLASS).length, 3, html);
+    assert.equal(cellCount(html, SHARE_FOLDER_ENTRY_ACTIONS_CLASS), 3, html);
+  });
+
+  test("🔴 수정날짜가 없는 줄도 **칸은 남고 글자만 빈다**", () => {
+    const html = markup(
+      foundState({
+        entries: [
+          { name: "사진", isDirectory: true, sizeBytes: 0, modifiedAt: META_ISO },
+          { name: "시각없음.pdf", isDirectory: false, sizeBytes: 512 },
+          { name: "연락서.xlsx", isDirectory: false, sizeBytes: 2048, modifiedAt: META_ISO },
+        ],
+        totalCount: 3,
+      })
+    );
+    assert.deepEqual(metaCells(html, SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS), [META_LOCAL_TIME, "", META_LOCAL_TIME]);
+    assert.deepEqual(metaCells(html, SHARE_FOLDER_ENTRY_META_SIZE_CLASS), ["폴더", "512 B", "2.0 KB"]);
+  });
+
+  test("🔴 폴더 줄의 크기 자리는 **이 창의 제 글자**다 — 낱말을 공용으로 모으지 않았다", () => {
+    const html = markup(foundState({ entries: [{ name: "사진", isDirectory: true, sizeBytes: 0 }], totalCount: 1 }));
+    assert.deepEqual(metaCells(html, SHARE_FOLDER_ENTRY_META_SIZE_CLASS), [CONTACT_FOLDER_SECTION_FOLDER_LABEL]);
+    assert.equal(contactFolderEntryMeta({ name: "사진", isDirectory: true, sizeBytes: 0 }).sizeText, "폴더");
+  });
+
+  test("🔴 좁은 화면 배치가 남아 있다 — 표는 sm 이상에서만 선다", () => {
+    const html = markup(
+      foundState({ entries: [{ name: "연락서.xlsx", isDirectory: false, sizeBytes: 1 }], totalCount: 1 })
+    );
+    const row = liClasses(html)[0] ?? "";
+    assert.ok(row.includes("flex flex-wrap"), row);
+    assert.ok(row.includes("sm:grid"), row);
+    assert.equal(/(^|\s)grid(\s|$)/.test(row), false, row);
+  });
+
+  test("🔴 네 창이 같은 조각을 쓴다 — 이 구역도 공용 생김새를 그대로 쓴다", () => {
+    assert.ok(sectionSource.includes('from "@/lib/domain/share-folder-entry-meta"'), "공용 조각을 안 쓴다");
+    // 🔴 열 길이를 제 손으로 적지 않는다 — 한 창만 넓어지는 일이 없게.
+    const body = sectionSource.replace(/\/\*[\s\S]*?\*\//g, " ");
+    assert.equal(body.includes("grid-cols-"), false, "열 길이를 제 손으로 적는다");
+    assert.equal(body.includes("toLocaleString"), false, "날짜를 제 손으로 꾸민다");
+  });
+
+  test("🔴 날짜 글자 모양이 **안 바뀌었다** · 못 읽는 값은 **원본 그대로**", () => {
+    const good = markup(
+      foundState({
+        entries: [{ name: "연락서.xlsx", isDirectory: false, sizeBytes: 1, modifiedAt: META_ISO }],
+        totalCount: 1,
+      })
+    );
+    assert.deepEqual(metaCells(good, SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS), [
+      new Date(META_ISO).toLocaleString("ko-KR", { dateStyle: "medium", timeStyle: "short" }),
+    ]);
+    assert.equal(good.includes(META_ISO), false, good);
+
+    const bad = markup(
+      foundState({
+        entries: [{ name: "연락서.xlsx", isDirectory: false, sizeBytes: 1, modifiedAt: "날짜아님" }],
+        totalCount: 1,
+      })
+    );
+    assert.deepEqual(metaCells(bad, SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS), ["날짜아님"]);
+  });
+});
+
+/*
+ * ============================================================================
+ * 🔴 [열기]의 **결과 안내**가 떠도 열이 밀리지 않는다 (2026-10-08)
+ * ============================================================================
+ * 누른 뒤의 안내는 긴 한 줄이다(「열리지 않으면 [설치 명령 복사]로 …」). 그것이 동작 칸을
+ * 밀어 넓히면 앞의 수정날짜·크기 칸이 왼쪽으로 밀린다.
+ *
+ * 🔴 서버 렌더에서는 단추가 스스로 사라지므로(Windows PC 에만 설치되는 도우미) **단추와
+ * 안내를 직접 끼운 줄**을 만들어 그려 본다 — 쓰는 조각은 화면이 쓰는 바로 그 한 벌
+ * (ContactFolderEntryOpenControl · ContactFolderEntryOpenOutcomeNotice)이고, 줄 틀과 칸
+ * 생김새도 화면이 쓰는 공용 값 그대로다.
+ * ============================================================================
+ */
+describe("🔴 [열기] 결과 안내 — 줄 높이만 늘고 열은 안 밀린다", () => {
+  const outcome: ContactFolderFileOpenOutcome = {
+    kind: "NO_RESPONSE",
+    lines: [{ text: CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT, tone: "warning" }],
+    offerHelperInstall: true,
+  };
+
+  /** 화면이 그리는 것과 **같은 틀 · 같은 칸**에 단추와 안내를 끼운 줄. */
+  function rowWithActions(children: ReactNode): string {
+    return renderToStaticMarkup(
+      createElement(
+        "li",
+        { className: SHARE_FOLDER_ENTRY_ROW_CLASS },
+        createElement("span", { key: "n" }, "연락서.xlsx"),
+        createElement("span", { key: "m", className: SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS }, META_LOCAL_TIME),
+        createElement("span", { key: "s", className: SHARE_FOLDER_ENTRY_META_SIZE_CLASS }, "2.0 KB"),
+        createElement("span", { key: "a", className: SHARE_FOLDER_ENTRY_ACTIONS_CLASS }, children)
+      )
+    );
+  }
+
+  const noticeElement = () =>
+    createElement(ContactFolderEntryOpenOutcomeNotice, {
+      outcome,
+      copyLines: [],
+      copyBusy: false,
+      onCopy: () => undefined,
+      onDismiss: () => undefined,
+    });
+
+  test("🔴 안내가 **통째로** 그려진다 — 잘리지 않는다", () => {
+    const html = rowWithActions(noticeElement());
+    assert.ok(html.includes(CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT), html);
+    // 잘라 내는 장치를 쓰지 않는다 — 길면 칸 안에서 접혀 아래로 자란다.
+    assert.equal(html.includes("truncate"), false, html);
+    assert.equal(html.includes("text-ellipsis"), false, html);
+  });
+
+  test("🔴 단추만 있을 때도 · 안내까지 있을 때도 **줄 틀이 똑같다**", () => {
+    const withButton = rowWithActions(
+      createElement(ContactFolderEntryOpenControl, { folderName: FOLDER, fileName: "연락서.xlsx" })
+    );
+    const withNotice = rowWithActions(noticeElement());
+    const empty = rowWithActions(null);
+    // 실제 화면이 그린 줄 — 끼워 만든 줄이 그것과 **같은 틀**인지 견준다.
+    const drawn =
+      liClasses(
+        markup(foundState({ entries: [{ name: "연락서.xlsx", isDirectory: false, sizeBytes: 1 }], totalCount: 1 }))
+      )[0] ?? "";
+    assert.ok(withButton.includes("열기"), withButton);
+    for (const html of [withButton, withNotice, empty]) {
+      assert.deepEqual(liClasses(html), [drawn], html);
+      // 🔴 동작 칸 자체도 셋 다 같은 생김새다 — 안내가 떠도 칸 폭이 바뀌지 않는다.
+      assert.equal(cellCount(html, SHARE_FOLDER_ENTRY_ACTIONS_CLASS), 1, html);
+    }
+  });
+});
+

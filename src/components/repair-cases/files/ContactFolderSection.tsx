@@ -4,7 +4,15 @@ import { useEffect, useState } from "react";
 
 import ContactFolderOpenButton from "@/components/repair-cases/detail/ContactFolderOpenButton";
 import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-link";
-import { formatBytes } from "@/lib/domain/image-shrink";
+import {
+  SHARE_FOLDER_ENTRY_ACTIONS_CLASS,
+  SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS,
+  SHARE_FOLDER_ENTRY_META_SIZE_CLASS,
+  SHARE_FOLDER_ENTRY_NAME_GROW_CLASS,
+  SHARE_FOLDER_ENTRY_ROW_CLASS,
+  shareFolderEntryMeta,
+  type ShareFolderEntryMeta,
+} from "@/lib/domain/share-folder-entry-meta";
 import ContactFolderEntryOpenButton from "./ContactFolderEntryOpenButton";
 import ContactFolderPlaceOpenButton from "./ContactFolderPlaceOpenButton";
 
@@ -51,7 +59,12 @@ import ContactFolderPlaceOpenButton from "./ContactFolderPlaceOpenButton";
  *  · 불러오는 중 → 「불러오는 중…」
  *  · `not-found` → 「아직 이 건의 폴더가 없습니다」(muted)
  *  · `found` + 빈 폴더 → 「폴더가 비어 있습니다」
- *  · `found` + 목록 → 줄마다 이름 · 크기 · 수정시각, 폴더는 폴더 표시
+ *  · `found` + 목록 → 🔴 **표**다(2026-10-08): `[이름] [수정날짜] [크기] [동작]` — 윈도우
+ *                     탐색기와 같은 차례. 1fr 은 이름 하나뿐이고 나머지 세 칸은 고정
+ *                     길이라 **단추가 있는 줄과 없는 줄의 날짜·크기가 같은 자리에 선다.**
+ *                     수정날짜가 없는 줄도 · 단추가 없는 줄도 **칸은 남는다.** 좁은
+ *                     화면에서는 예전처럼 접힌다
+ *                     (lib/domain/share-folder-entry-meta.ts — 네 창이 한 벌을 쓴다).
  *  · `multiple`  → 🔴 「맞는 폴더가 여럿입니다」 — **목록을 내지 않는다**(어느 폴더인지
  *                   모르는데 내용을 보이면 남의 건 서류를 보일 수 있다)
  *  · `failed`    → 「공유폴더를 읽지 못했습니다」(warning)
@@ -247,17 +260,15 @@ export async function loadContactFolderEntries(
 
 // ── 그리기 ───────────────────────────────────────────────────────────────
 
-function formatTimestamp(iso: string): string {
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return iso;
-  return parsed.toLocaleString("ko-KR", { dateStyle: "medium", timeStyle: "short" });
-}
-
-/** 한 줄의 곁말 — 폴더는 크기 대신 「폴더」, 파일은 크기. 수정 시각은 있을 때만. */
-export function entryMetaText(entry: ContactFolderEntryView): string {
-  const pieces = [entry.isDirectory ? CONTACT_FOLDER_SECTION_FOLDER_LABEL : formatBytes(entry.sizeBytes)];
-  if (entry.modifiedAt !== undefined) pieces.push(formatTimestamp(entry.modifiedAt));
-  return pieces.join(" · ");
+/**
+ * 한 줄의 곁말 **두 조각** — 폴더는 크기 대신 「폴더」, 파일은 크기. 수정시각은 **따로**다
+ * (2026-10-08 사용자 요구 「수정 날짜를 별도의 열로」).
+ * 🔴 날짜 모양도 칸 생김새도 **공유폴더를 보여 주는 네 창이 같은 한 벌**을 쓴다
+ * (lib/domain/share-folder-entry-meta.ts). 여기 남는 것은 **이 창의 「폴더」 글자**뿐이다 —
+ * 창마다 말이 달라질 수 있어 낱말은 모으지 않는다.
+ */
+export function contactFolderEntryMeta(entry: ContactFolderEntryView): ShareFolderEntryMeta {
+  return shareFolderEntryMeta(entry, CONTACT_FOLDER_SECTION_FOLDER_LABEL);
 }
 
 /**
@@ -269,7 +280,7 @@ export function canOpenContactFolderEntry(entry: ContactFolderEntryView): boolea
   return !entry.isDirectory && isOpenableQuoteFolderFileName(entry.name);
 }
 
-const ENTRY_NAME_CLASS = "min-w-0 break-all text-left text-sm text-zinc-700 dark:text-zinc-300";
+const ENTRY_NAME_CLASS = `min-w-0 ${SHARE_FOLDER_ENTRY_NAME_GROW_CLASS} break-all text-left text-sm text-zinc-700 dark:text-zinc-300`;
 
 /**
  * 한 줄의 이름. 🔴 **폴더 줄은 들어갈 수 있을 때만 단추**가 된다 — 들어갈 길(onEnter)을 주지
@@ -311,16 +322,22 @@ function EntryList({
     <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
       {entries.map((entry) => {
         const openable = folderPath !== "" && canOpenContactFolderEntry(entry);
+        const meta = contactFolderEntryMeta(entry);
         return (
           <li
             key={`${entry.isDirectory ? "d" : "f"}:${entry.name}`}
             data-contact-folder-entry-openable={openable ? "" : undefined}
-            className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 py-1.5"
+            className={SHARE_FOLDER_ENTRY_ROW_CLASS}
           >
             <EntryName entry={entry} onEnter={onEnter} />
-            <span className="flex shrink-0 items-baseline gap-2">
-              <span className="text-xs tabular-nums text-zinc-500 dark:text-zinc-400">{entryMetaText(entry)}</span>
-              {/* 🔴 폴더 줄 · 허용 목록 밖 줄에는 아무것도 두지 않는다(단추 자리 자체가 없다). */}
+            {/* 🔴 수정시각이 없어도 **칸은 그대로** 그린다 — 빼면 그 줄만 열이 어긋난다. */}
+            <span className={SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS}>{meta.modifiedText}</span>
+            <span className={SHARE_FOLDER_ENTRY_META_SIZE_CLASS}>{meta.sizeText}</span>
+            {/*
+              🔴 동작 칸은 **비어도 그린다** — 폴더 줄 · 허용 목록 밖 줄에는 단추가 없지만
+              칸까지 빼면 그 줄만 날짜·크기가 어긋난다(2026-10-08).
+            */}
+            <span className={SHARE_FOLDER_ENTRY_ACTIONS_CLASS}>
               {openable && <ContactFolderEntryOpenButton folderName={folderPath} fileName={entry.name} />}
             </span>
           </li>

@@ -8,6 +8,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT } from "@/components/repair-cases/files/contact-folder-file-open";
 import { buildQuoteFolderFileLink, parseQuoteFolderFileLink } from "@/lib/domain/quote-folder-file-link";
+import {
+  SHARE_FOLDER_ENTRY_ACTIONS_CLASS,
+  SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS,
+  SHARE_FOLDER_ENTRY_META_SIZE_CLASS,
+} from "@/lib/domain/share-folder-entry-meta";
 import QuoteArchiveFolderSection, {
   QUOTE_ARCHIVE_FOLDER_SECTION_EMPTY_TEXT,
   QUOTE_ARCHIVE_FOLDER_SECTION_FAILED_TEXT,
@@ -18,7 +23,7 @@ import QuoteArchiveFolderSection, {
   canOpenQuoteArchiveFolderEntry,
   loadQuoteArchiveFolderEntries,
   quoteArchiveFolderEntriesUrl,
-  quoteArchiveFolderEntryMetaText,
+  quoteArchiveFolderEntryMeta,
   quoteArchiveFolderOpenPath,
   quoteArchiveFolderTruncatedText,
   readQuoteArchiveFolderEntriesAnswer,
@@ -75,6 +80,30 @@ const foundState = (
   }) satisfies QuoteArchiveFolderSectionState;
 
 const entry = (name: string, isDirectory = false) => ({ name, isDirectory, sizeBytes: 1024 });
+
+/** 수정시각 한 자리 — 꾸민 글자는 돌리는 PC 의 시간대를 따르므로 **같은 식으로 계산해** 견준다. */
+const ISO = "2026-09-08T02:00:00.000Z";
+const LOCAL_TIME = new Date(ISO).toLocaleString("ko-KR", { dateStyle: "medium", timeStyle: "short" });
+
+/**
+ * 🔴 그려진 결과에서 **그 칸에 실제로 들어 있는 글자**를 줄 차례대로 뽑는다. 글자 매칭이
+ * 아니라 「칸이 섰는가 · 그 안이 비었는가」를 재려고 칸을 열쇠로 쓴다 — 빈 칸은 `""` 로
+ * 잡힌다(칸이 아예 없으면 배열 길이가 줄어 바로 드러난다).
+ */
+function metaCells(html: string, className: string): string[] {
+  const pattern = new RegExp(`<span class="${className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">([^<]*)</span>`, "g");
+  return [...html.matchAll(pattern)].map((match) => match[1] ?? "");
+}
+
+/** 그려진 줄들의 **틀**(li 의 class). 줄마다 다르면 열이 어긋난다. */
+function liClasses(html: string): string[] {
+  return [...html.matchAll(/<li[^>]*\sclass="([^"]*)"/g)].map((match) => match[1] ?? "");
+}
+
+/** 그 칸이 **몇 번** 그려졌는가 — 비어 있어도 센다(동작 칸이 줄마다 서는지 본다). */
+function cellCount(html: string, className: string): number {
+  return html.split(`class="${className}"`).length - 1;
+}
 
 describe("상태 여섯 — 무엇을 보이는가", () => {
   test("🔴 disabled 면 구역을 **아예 안 그린다** — 설정이 없는 환경에서 빈 상자가 늘지 않게", () => {
@@ -392,8 +421,134 @@ describe("통로를 부르는 길 — 던지지 않는다", () => {
   });
 
   test("줄의 곁말 — 폴더는 「폴더」, 파일은 크기", () => {
-    assert.equal(quoteArchiveFolderEntryMetaText({ name: "사진", isDirectory: true, sizeBytes: 0 }), "폴더");
-    assert.ok(quoteArchiveFolderEntryMetaText({ name: "a.pdf", isDirectory: false, sizeBytes: 2048 }).startsWith("2.0 KB"));
+    assert.equal(quoteArchiveFolderEntryMeta({ name: "사진", isDirectory: true, sizeBytes: 0 }).sizeText, "폴더");
+    assert.equal(
+      quoteArchiveFolderEntryMeta({ name: "a.pdf", isDirectory: false, sizeBytes: 2048 }).sizeText,
+      "2.0 KB"
+    );
+  });
+});
+
+/*
+ * ============================================================================
+ * 🔴 줄은 **표**다 — [이름] [수정날짜] [크기] [동작] (2026-10-08)
+ * ============================================================================
+ * 「공유폴더 창에서 수정 날짜가 … **별도의 열**로」 → 화면을 보고 다시 「**표 중앙에
+ * 수정날짜 열을 따로** 만들어줘」(사용자 요구 2026-10-08).
+ * 🔴 1fr 은 이름 하나뿐이고 수정날짜·크기·동작은 고정 길이라 **줄에 단추가 있든 없든
+ * 세 칸의 자리가 같다**(예전에는 [열기]가 있는 줄만 왼쪽으로 밀렸다).
+ * 🔴 **공유폴더를 보여 주는 네 창이 같은 한 벌을 쓴다**
+ * (lib/domain/share-folder-entry-meta.ts) — 그 한 벌의 규칙과 「넷이 다 쓰는가」는 unit
+ * 목록의 share-folder-entry-meta.test.ts 가 본다. 여기서는 **이 구역이 실제로 그렇게
+ * 그리는가**를 상태를 넣어 그려 보고 잰다.
+ * ============================================================================
+ */
+describe("🔴 표 네 칸 — 이름 · 수정날짜 · 크기 · 동작", () => {
+  test("수정날짜와 크기가 **따로** 나온다 — 한 글자로 이어 붙지 않는다", () => {
+    const html = markup(
+      foundState({
+        entries: [{ name: "견적서.xlsx", isDirectory: false, sizeBytes: 2048, modifiedAt: ISO }],
+        totalCount: 1,
+      })
+    );
+    assert.deepEqual(metaCells(html, SHARE_FOLDER_ENTRY_META_SIZE_CLASS), ["2.0 KB"]);
+    assert.deepEqual(metaCells(html, SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS), [LOCAL_TIME]);
+    // 🔴 가운뎃점으로 이어 붙이던 자리가 없다.
+    assert.equal(html.includes(`2.0 KB · ${LOCAL_TIME}`), false, html);
+    assert.equal(html.includes("·"), false, html);
+  });
+
+  test("🔴 열 차례가 **이름 → 수정날짜 → 크기 → 동작**이다(윈도우 탐색기와 같게)", () => {
+    const html = markup(
+      foundState({
+        entries: [{ name: "견적서.xlsx", isDirectory: false, sizeBytes: 2048, modifiedAt: ISO }],
+        totalCount: 1,
+      })
+    );
+    const nameAt = html.indexOf("견적서.xlsx");
+    const modifiedAt = html.indexOf(`class="${SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS}"`);
+    const sizeAt = html.indexOf(`class="${SHARE_FOLDER_ENTRY_META_SIZE_CLASS}"`);
+    const actionsAt = html.indexOf(`class="${SHARE_FOLDER_ENTRY_ACTIONS_CLASS}"`);
+    assert.ok(nameAt > 0 && modifiedAt > 0 && sizeAt > 0 && actionsAt > 0, html);
+    assert.ok(nameAt < modifiedAt, "이름이 수정날짜보다 뒤에 있다");
+    assert.ok(modifiedAt < sizeAt, "수정날짜가 크기보다 뒤에 있다");
+    assert.ok(sizeAt < actionsAt, "크기가 동작보다 뒤에 있다");
+  });
+
+  test("🔴 단추가 있는 줄과 없는 줄이 **같은 표 틀**을 쓴다 — 동작 칸은 비어도 남는다", () => {
+    const html = markup(
+      foundState({
+        entries: [
+          { name: "사진", isDirectory: true, sizeBytes: 0, modifiedAt: ISO },
+          { name: "메모", isDirectory: false, sizeBytes: 11 },
+          { name: "견적서.xlsx", isDirectory: false, sizeBytes: 2048, modifiedAt: ISO },
+        ],
+        totalCount: 3,
+      })
+    );
+    const rows = liClasses(html);
+    assert.equal(rows.length, 3, html);
+    assert.equal(new Set(rows).size, 1, rows.join(" | "));
+    assert.ok(rows[0]?.includes("sm:grid-cols-[minmax(0,1fr)_10rem_5rem_9rem]"), rows[0]);
+    assert.equal(cellCount(html, SHARE_FOLDER_ENTRY_ACTIONS_CLASS), 3, html);
+  });
+
+  test("🔴 수정시각이 없는 줄도 **칸은 남고 글자만 빈다** — 안 그러면 그 줄만 열이 어긋난다", () => {
+    const html = markup(
+      foundState({
+        entries: [
+          { name: "사진", isDirectory: true, sizeBytes: 0, modifiedAt: ISO },
+          { name: "견적서.xlsx", isDirectory: false, sizeBytes: 2048 },
+          { name: "결재.pdf", isDirectory: false, sizeBytes: 512, modifiedAt: ISO },
+        ],
+        totalCount: 3,
+      })
+    );
+    // 세 줄 모두 두 칸을 그린다 — 가운데 줄만 수정시각 글자가 비어 있다.
+    assert.deepEqual(metaCells(html, SHARE_FOLDER_ENTRY_META_SIZE_CLASS), ["폴더", "2.0 KB", "512 B"]);
+    assert.deepEqual(metaCells(html, SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS), [LOCAL_TIME, "", LOCAL_TIME]);
+  });
+
+  test("🔴 좁은 화면 배치가 남아 있다 — 표는 sm 이상에서만 선다", () => {
+    const html = markup(
+      foundState({ entries: [{ name: "결재.pdf", isDirectory: false, sizeBytes: 1 }], totalCount: 1 })
+    );
+    const row = liClasses(html)[0] ?? "";
+    assert.ok(row.includes("flex flex-wrap"), row);
+    assert.ok(row.includes("sm:grid"), row);
+    assert.equal(/(^|\s)grid(\s|$)/.test(row), false, row);
+  });
+
+  test("🔴 네 창이 같은 조각을 쓴다 — 이 구역도 공용 생김새를 그대로 쓴다", () => {
+    const html = markup(
+      foundState({ entries: [{ name: "결재.pdf", isDirectory: false, sizeBytes: 1 }], totalCount: 1 })
+    );
+    assert.ok(html.includes(`class="${SHARE_FOLDER_ENTRY_ACTIONS_CLASS}"`), html);
+    assert.ok(sectionCode.includes('from "@/lib/domain/share-folder-entry-meta"'), "공용 조각을 안 쓴다");
+    // 🔴 날짜도 열 길이도 제 손으로 적지 않는다 — 창마다 갈리지 않게.
+    assert.equal(sectionCode.includes("toLocaleString"), false, sectionCode);
+    assert.equal(sectionCode.includes("grid-cols-"), false, "열 길이를 제 손으로 적는다");
+  });
+
+  test("🔴 날짜 글자 모양이 **안 바뀌었다** — 자리를 나눴을 뿐이다", () => {
+    const html = markup(
+      foundState({ entries: [{ name: "결재.pdf", isDirectory: false, sizeBytes: 1, modifiedAt: ISO }], totalCount: 1 })
+    );
+    assert.deepEqual(metaCells(html, SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS), [
+      new Date(ISO).toLocaleString("ko-KR", { dateStyle: "medium", timeStyle: "short" }),
+    ]);
+    // 날것(ISO)이 그대로 나가지 않는다.
+    assert.equal(html.includes(ISO), false, html);
+  });
+
+  test("🔴 못 읽는 값은 **원본 그대로** 보인다", () => {
+    const html = markup(
+      foundState({
+        entries: [{ name: "결재.pdf", isDirectory: false, sizeBytes: 1, modifiedAt: "날짜아님" }],
+        totalCount: 1,
+      })
+    );
+    assert.deepEqual(metaCells(html, SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS), ["날짜아님"]);
   });
 });
 
