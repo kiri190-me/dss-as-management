@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import QuoteEditTabs from "./QuoteEditTabs";
@@ -403,5 +404,120 @@ describe("결재 탭이 놓인 자리", () => {
   test("지정 관문 판정을 화면에 새로 적지 않는다 — 서버와 같은 함수를 부른다", () => {
     assert.match(panelSource, /mayDecideAssignedApproval/);
     assert.match(panelSource, /from "@\/lib\/auth\/approval-assignment"/);
+  });
+});
+
+/*
+ * ============================================================================
+ * 🔴 결재 칸의 두 덩이는 **key 를 갖는다** (2026-10-08)
+ * ============================================================================
+ * 공유폴더 구역이 붙으면서 결재 칸의 자식이 **둘**이 되었다. 둘 다 서버 컴포넌트가
+ * 만들어 넘긴 요소라, 한 상자에 나란히 놓이는 순간 React 가 그 자리를 목록으로 보고
+ * 「Each child in a list should have a unique "key" prop」 경고를 낸다 — 서버에서
+ * 건너온 요소에는 jsx 가 「확인했다」 표시를 남기지 못하기 때문이다(껍데기 머리말).
+ *
+ * 🔴 **경고 자체는 여기서 잴 수 없다.** 그 경고는 브라우저 쪽 조정기가 겉껍질을 벗겨
+ * 안의 요소를 볼 때 난다(react-dom 브라우저 묶음의 warnOnInvalidKey 는 lazy 를 풀어
+ * 본다). 서버 렌더러(renderToStaticMarkup)는 겉껍질을 풀지 않아 같은 자리에서 아무
+ * 말도 하지 않고, 이 저장소에는 브라우저도 DOM 흉내 도구도 없다.
+ *
+ * 그래서 **경고가 나는 조건을 그려진 결과에서 직접 잰다**: 그 칸의 자식들이 배열이
+ * 되는가, 되었다면 자식마다 서로 다른 key 가 붙어 있는가. 그 조건이 깨지는 순간이 곧
+ * 경고가 나는 순간이다.
+ *
+ * 🔴 key 는 HTML 에 찍히지 않으므로 **컴포넌트가 돌려준 요소 나무**를 본다. 같은
+ * props 로 그린 HTML 도 함께 재서 감싸개가 **DOM 을 늘리지 않았는지** 확인한다 —
+ * 보이는 모양이 바뀌면 안 된다.
+ * ============================================================================
+ */
+
+/**
+ * QuoteEditTabs 가 돌려준 요소 나무를 집는다.
+ *
+ * 🔴 컴포넌트를 함수로 직접 부르지만 훅 규칙을 어기지 않는다 — 부르는 자리가 진짜
+ * 렌더 중(Probe 의 렌더)이라 그 안의 useState 가 Probe 의 훅 자리로 들어간다.
+ */
+function tabsTree(props: Parameters<typeof QuoteEditTabs>[0]): ReactNode {
+  let captured: ReactNode = null;
+  function Probe() {
+    captured = QuoteEditTabs(props);
+    return null;
+  }
+  renderToStaticMarkup(<Probe />);
+  return captured;
+}
+
+/** 나무를 훑어 그 id 를 단 칸을 찾는다. */
+function findPanel(node: ReactNode, id: string): ReactElement | null {
+  if (Array.isArray(node)) {
+    for (const one of node as ReactNode[]) {
+      const hit = findPanel(one, id);
+      if (hit !== null) return hit;
+    }
+    return null;
+  }
+  if (!isValidElement(node)) return null;
+  const elementProps = node.props as { id?: string; children?: ReactNode };
+  if (elementProps.id === id) return node;
+  return findPanel(elementProps.children ?? null, id);
+}
+
+describe("🔴 결재 칸의 두 덩이는 key 를 갖는다 — 경고가 나는 조건을 잰다", () => {
+  const slots = {
+    editForm: <p>편집폼이있던자리</p>,
+    archiveFolderSection: <section>공유폴더구역이있던자리</section>,
+    approvalPanel: <p>결재화면이있던자리</p>,
+  };
+  const tree = tabsTree(slots);
+
+  test("두 덩이가 한 상자의 **배열**이고, 자식마다 서로 다른 key 가 붙어 있다", () => {
+    const panel = findPanel(tree, "quote-tab-panel-approval");
+    assert.ok(panel, "결재 칸을 찾지 못했다");
+    const box = (panel.props as { children?: ReactNode }).children;
+    assert.ok(isValidElement(box), "결재 칸 안의 띄우는 상자를 찾지 못했다");
+    if (!isValidElement(box)) throw new Error("unreachable");
+    const children = (box.props as { children?: ReactNode }).children;
+    assert.ok(Array.isArray(children), "두 덩이가 한 상자에 나란히 있지 않다");
+    if (!Array.isArray(children)) throw new Error("unreachable");
+    assert.equal(children.length, 2, `결재 칸의 덩이가 둘이 아니다: ${children.length}`);
+
+    const keys = (children as ReactNode[]).map((child) =>
+      isValidElement(child) ? child.key : null
+    );
+    assert.deepEqual(
+      keys.filter((key) => key === null),
+      [],
+      `key 가 없는 자식이 있다 — 브라우저에서 "unique key" 경고가 난다: ${JSON.stringify(keys)}`
+    );
+    assert.equal(new Set(keys).size, 2, `두 덩이의 key 가 같다: ${JSON.stringify(keys)}`);
+  });
+
+  test("🔴 key 를 얹느라 보이는 모양이 바뀌지 않았다 — 감싸개는 아무것도 그리지 않는다", () => {
+    const markup = renderToStaticMarkup(<QuoteEditTabs {...slots} />);
+    assert.ok(
+      markup.includes(
+        '<div id="quote-tab-panel-approval" hidden="" class="hidden">' +
+          '<div class="flex flex-col gap-4">' +
+          "<section>공유폴더구역이있던자리</section>" +
+          "<p>결재화면이있던자리</p>" +
+          "</div></div>"
+      ),
+      markup
+    );
+  });
+
+  test("🔴 [견적서 수정] 칸은 자식이 하나다 — 목록이 아니라 key 가 필요 없다", () => {
+    const panel = findPanel(tree, "quote-tab-panel-edit");
+    assert.ok(panel, "편집 칸을 찾지 못했다");
+    assert.equal(
+      Array.isArray((panel.props as { children?: ReactNode }).children),
+      false,
+      "편집 칸의 자식이 둘 이상이 되었다 — 여기도 key 를 얹어야 한다(껍데기 머리말)"
+    );
+  });
+
+  test("⚠️ 까닭이 껍데기에 적혀 있다 — 지우면 다음 사람이 감싸개를 걷어낸다", () => {
+    assert.match(tabsSource, /unique "key" prop/);
+    assert.match(tabsSource, /<Fragment key=/);
   });
 });

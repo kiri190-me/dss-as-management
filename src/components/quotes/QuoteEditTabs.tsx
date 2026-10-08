@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 
 /**
  * ============================================================================
@@ -52,6 +52,22 @@ import { useState, type ReactNode } from "react";
  * 🔴 감추는 class 를 **바깥 칸에 그대로 둔다** — 띄우는 상자(`flex`)를 안쪽에
  * 하나 더 두는 까닭이 이것이다. 배치용 class 를 감출 칸에 직접 붙이면 작성자
  * 스타일이 `hidden` 속성을 이겨 **안 보여야 할 칸이 그대로 보인다**(바로 위 규율).
+ *
+ * ── 🔴 한 칸에 서버 슬롯이 둘이면 **key 를 얹는다** (2026-10-08) ──────────
+ * 공유폴더 구역과 승인 패널은 둘 다 **서버 컴포넌트가 만들어 넘긴 요소**다. 그
+ * 둘을 한 상자에 나란히 놓으면 React 는 그 자리를 「목록」으로 보고 자식마다
+ * key 를 요구한다. 서버에서 건너온 요소에는 jsx 가 「확인했다」 표시를 남기지
+ * 못한다 — 전달 과정에서 한 겹 감싸여 오고, 표시는 그 겉껍질에만 찍히기
+ * 때문이다. 그래서 브라우저가 그릴 때
+ * 「Each child in a list should have a unique "key" prop」 경고가 뜬다.
+ *
+ * 동작은 멀쩡하다. 다만 콘솔이 더러워지면 진짜 오류가 묻히므로 두 덩이를
+ * `Fragment` 로 감싸고 거기에 key 를 얹었다. `Fragment` 는 **아무것도 그리지
+ * 않아서** DOM 도 간격(`gap-4`)도 그대로다.
+ *
+ * ⚠️ 슬롯을 하나 더 더하는 사람에게 — [견적서 수정] 칸이 지금 멀쩡한 것은 자식이
+ * `editForm` **하나뿐**이라 목록이 아니기 때문이다. 어느 칸이든 서버가 넘긴 것을
+ * 둘 이상 나란히 놓는 순간 같은 경고가 난다. 그때는 여기처럼 key 를 얹는다.
  * ============================================================================
  */
 
@@ -120,9 +136,18 @@ export default function QuoteEditTabs({
           승인하기 전에 그 폴더를 열어 확인한다). 사이를 띄우는 상자는 **안쪽**에 둔다 —
           배치용 class 를 바깥 칸에 붙이면 감추는 장치가 진다(위 머리말).
         */}
+        {/*
+          🔴 두 덩이에 key 를 얹는다 — 둘 다 서버가 그려 넘긴 요소라 여기서 나란히
+          놓이는 순간 React 가 목록으로 보고 key 를 요구한다(머리말의 마지막 절).
+          감싸개는 아무것도 그리지 않으므로 보이는 모양은 그대로다.
+        */}
         <div className="flex flex-col gap-4">
-          {archiveFolderSection}
-          {approvalPanel}
+          <Fragment key="archive-folder-section">
+            {archiveFolderSection}
+          </Fragment>
+          <Fragment key="approval-panel">
+            {approvalPanel}
+          </Fragment>
         </div>
       </div>
     </div>
