@@ -314,6 +314,26 @@ export async function readQuoteTemplateFor(templateKey: QuoteTemplateKey): Promi
   return readTemplateAt(resolveVariantPath(variant));
 }
 
+/**
+ * ============================================================================
+ * 🔴 그 양식이 **쓰는 시트의 이름** — 위 표를 읽기만 한다 (2026-10-08)
+ * ============================================================================
+ * 양식 파일 하나에 시트가 여럿이다(내자 양식은 `내자견적서` · `OH견적서` · `Sheet1`).
+ * 만든 파일을 PC 의 Excel 로 PDF 로 바꿀 때 **통합문서 전체**를 내보내면 인쇄 영역이
+ * 잡힌 다른 시트가 함께 딸려 나간다 — 내자 견적서에 OH 장이 붙어 고객사로 간다.
+ *
+ * 그래서 서버가 파일을 만들 때 **그 종류의 시트를 「활성」으로 둔다**(xlsx/active-sheet.ts).
+ * 어느 시트인지는 **이 모듈의 표가 이미 알고 있다** — 다른 자리에 또 적지 않고 여기서
+ * 꺼내 쓴다. 두 벌이 되면 한쪽만 고쳐지는 날이 오고, 그때 증상은 「어떤 종류의 견적서만
+ * 엉뚱한 탭이 PDF 로 나간다」라서 그 종류를 쓰는 사람이 말해 주기 전에는 아무도 모른다.
+ * ============================================================================
+ */
+export function quoteTemplateSheetName(templateKey: QuoteTemplateKey): string {
+  const variant = TEMPLATE_VARIANTS[templateKey];
+  if (!variant) throw new QuoteTemplateError(`알 수 없는 양식 구분입니다: ${templateKey}`);
+  return variant.sheetName;
+}
+
 async function readVariantHeader(variant: TemplateVariant): Promise<QuoteTemplateHeader> {
   const { ZipArchive } = await import("@/lib/xlsx/zip-reader");
   const { resolveSheetTextCells } = await import("@/lib/xlsx/sheet-text");

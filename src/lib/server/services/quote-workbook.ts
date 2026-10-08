@@ -1,9 +1,15 @@
 import "server-only";
 
 import type { QuoteEditData } from "@/lib/db/queries/quotes";
-import { quoteTemplateKey } from "@/lib/domain/quote-template-variant";
+import { quoteTemplateKey, type QuoteTemplateKey } from "@/lib/domain/quote-template-variant";
 import { isRepairSectionDropped } from "@/lib/domain/quote-work-scope-suppression";
-import { readOhQuoteTemplate, readQuoteTemplate, readQuoteTemplateFor } from "@/lib/storage/quote-template";
+import {
+  quoteTemplateSheetName,
+  readOhQuoteTemplate,
+  readQuoteTemplate,
+  readQuoteTemplateFor,
+} from "@/lib/storage/quote-template";
+import { setActiveSheet } from "@/lib/xlsx/active-sheet";
 import { fillQuoteWorkbook } from "@/lib/xlsx/quote-template";
 import { fillOhQuoteWorkbook } from "@/lib/xlsx/oh-quote-template";
 import { fillMatcherQuoteWorkbook, type MatcherWorkScope } from "@/lib/xlsx/matcher-quote-template";
@@ -35,6 +41,31 @@ export async function renderQuoteWorkbook(quote: QuoteEditData): Promise<Buffer>
   // 고른다 — 케이블만 장비가 없다(domain/quote-template-variant.ts).
   const templateKey = quoteTemplateKey(quote.laborEquipmentKind, quote.kind);
 
+  /**
+   * 🔴 **그 종류의 시트를 「활성」으로 두고 내보낸다** (2026-10-08 사용자 요구).
+   *
+   * 양식 파일 하나에 시트가 여럿이라(내자 양식은 `내자견적서` · `OH견적서` · `Sheet1`)
+   * PC 의 도우미가 통합문서 전체를 PDF 로 바꾸면 **인쇄 영역이 잡힌 다른 시트가 함께
+   * 딸려 나간다** — 내자 견적서를 저장했는데 PDF 에 OH 장이 붙어 고객사로 간다.
+   * 도우미는 활성 시트만 내보내고(server/quote-folder-helper.ts), 어느 시트가 활성인지는
+   * **여기서** 정한다.
+   *
+   * 🔴 다섯 종류가 **같은 길**을 쓴다 — 시트가 하나뿐인 매쳐 · 케이블도 똑같이 지난다.
+   * 종류마다 갈래를 만들면 한쪽만 고쳐지는 날이 온다. 시트 이름은 새로 정하지 않고
+   * 양식 표에서 꺼내 쓴다(storage/quote-template.ts 의 quoteTemplateSheetName).
+   * 🔴 활성 탭은 종류가 정하는 **고정값**이라 「같은 입력이면 같은 바이트」가 그대로다.
+   */
+  return setActiveSheet(await fillQuoteWorkbookFor(templateKey, quote), quoteTemplateSheetName(templateKey));
+}
+
+/**
+ * 값에 양식을 씌우는 **채우기까지**. 활성 탭은 위 renderQuoteWorkbook 이 한 자리에서 건다 —
+ * 여기서 갈래마다 걸면 다섯 벌이 되고, 새 양식이 생기는 날 한 벌이 빠진다.
+ */
+async function fillQuoteWorkbookFor(
+  templateKey: QuoteTemplateKey,
+  quote: QuoteEditData
+): Promise<Buffer> {
   /**
    * 🔴 케이블은 **여기서 갈라 나간다** — 아래 `common` 을 만들지도 않는다.
    *

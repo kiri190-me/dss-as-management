@@ -129,16 +129,24 @@ function markHelperConfirmed(storage: ContactFolderFileOpenEnvironment["storage"
  * 버전 개념이 아예 없고(설치 스크립트에 버전 문자열이 없다), 브라우저는 어느 판이 깔렸는지
  * 물어볼 길이 없으므로 — 세어 두는 쪽이 화면이다.
  *
- * **지금 세대 2 가 아는 것**: `dss-folder://open/`(폴더 열기) · `dss-folder://openfile/`
+ * **지금 세대 3 이 아는 것**: `dss-folder://open/`(폴더 열기) · `dss-folder://openfile/`
  * (파일 열기) · 🔴 `dss-folder://xlsx2pdf/`(.xlsx 를 Excel 로 PDF 변환 — 이 도우미가 **처음으로
- * 파일을 쓰는** 명령이다) · 설치 때 박히는 **루트 넷**(server/quote-folder-helper.ts).
+ * 파일을 쓰는** 명령이다) · 🔴 **그 탭만 내보낸다**(통합문서째가 아니라 활성 시트 하나만 PDF 로
+ * 바꾼다) · 설치 때 박히는 **루트 넷**(server/quote-folder-helper.ts).
  *
  * 🔴 **2026-10-08 에 1 → 2 로 올렸다.** 까닭은 셋째 명령(`xlsx2pdf/`)이 더해졌기 때문이다 —
  * 세대 1 도우미가 깔린 PC 는 그 주소를 받아도 접두어 검사에 걸려 조용히 끝난다(exit 2). 번호를
  * 올리면 열쇠 이름이 `dss.helper.gen2.openfile` 이 되어 **모든 PC 가 재설치 안내를 한 번 더
  * 받는다** — 2026-10-08 아침에 만든 이 장치가 정확히 이 경우를 위한 것이다.
+ *
+ * 🔴 **같은 날 2 → 3 으로 다시 올렸다.** 까닭은 도우미가 내보내는 범위가 바뀌었기 때문이다 —
+ * 세대 2 도우미는 **통합문서째** PDF 로 바꾼다. 양식 한 파일에 시트가 여럿이라(내자 양식은
+ * `내자견적서` · `OH견적서` · `Sheet1`) 인쇄 영역이 잡힌 다른 시트가 함께 딸려 나가고, 내자
+ * 견적서를 저장했는데 PDF 에 OH 장이 붙어 고객사로 간다. 세대 3 은 **활성 시트 하나**만
+ * 내보낸다. 🔴 세대 2 가 깔린 PC 는 조용히 끝나지 않고 **틀린 PDF 를 만들어 낸다** — 그래서
+ * 번호를 올려 그 PC 들이 재설치 안내를 한 번 더 받게 한다.
  */
-export const CONTACT_FOLDER_FILE_HELPER_GENERATION = 2;
+export const CONTACT_FOLDER_FILE_HELPER_GENERATION = 3;
 
 /**
  * 「이 PC 에 **파일 열기를 아는** 도우미가 있다」는 표시. 값은 "1".

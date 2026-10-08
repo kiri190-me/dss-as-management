@@ -813,9 +813,19 @@ describe("🔴 PDF 변환 — 스크립트 본문", () => {
    * 위 시험들은 상수를 양쪽에 똑같이 끼워 넣어 견주므로 **값이 함께 바뀌면 통과한다.**
    * 그래서 여기서는 **스크립트 전체의 바이트**를 옮기기 **직전**에 잰 값으로 못 박는다.
    *
-   * 🔴 재는 입력은 아래 세 루트로 고정이다(길이 16015 · sha256 은 2026-10-08 옮기기 직전 값).
+   * 🔴 재는 입력은 아래 세 루트로 고정이다.
    * 이 시험이 깨지면 스크립트가 **정말로** 바뀐 것이다 — 일부러 바꾼 조각이라면 그 조각이
    * 새 값을 적고 **무엇을 왜 바꿨는지**를 여기 주석에 남긴다.
+   *
+   * ── 값이 바뀐 자취 ─────────────────────────────────────────────────────────
+   *  · 길이 16015 · `22783ebc…` — 2026-10-08 오후, 세 상수를 domain 으로 옮기기 직전.
+   *  · 길이 16123 · `76f85922…` — 🔴 **2026-10-08, 「그 탭만 내보낸다」로 일부러 바꿨다.**
+   *    바꾼 줄은 **셋뿐**이다: `$book.ExportAsFixedFormat(0, $pdf)` →
+   *    `$book.ActiveSheet.ExportAsFixedFormat(0, $pdf)` 와 그 위 주석 두 줄.
+   *    양식 파일 하나에 시트가 여럿이라 통합문서 전체를 내보내면 인쇄 영역이 잡힌 다른
+   *    시트가 함께 딸려 나갔다(내자 견적서 PDF 에 OH 장이 붙어 나간다 — 사용자 요구).
+   *    🔴 울타리(검사 여덟~열하나 · 덮어쓰기 · 창 숨김 · `finally` 닫기)는 **한 글자도
+   *    바뀌지 않았다** — 바로 아래 시험들이 그 줄들을 글자 그대로 다시 센다.
    */
   test("🔴 상수를 domain 으로 옮겨도 스크립트 글자가 안 바뀐다 — 전체 sha256", () => {
     const fixed = buildQuoteFolderHelperScript({
@@ -823,10 +833,10 @@ describe("🔴 PDF 변환 — 스크립트 본문", () => {
       uncRootAlt: String.raw`\\10.0.0.9\견적서`,
       extraRoots: [String.raw`Z:\현황표`],
     });
-    assert.equal(fixed.length, 16015);
+    assert.equal(fixed.length, 16123);
     assert.equal(
       createHash("sha256").update(fixed, "utf8").digest("hex"),
-      "22783ebcf57a1be573accb1bd841255fcbf274d3e381dc713d030134086d4bf1"
+      "76f85922a93cd2abb92515c20f8c39ab4498585240edf7630761bef7403e8c55"
     );
   });
 
@@ -895,12 +905,77 @@ describe("🔴 PDF 변환 — 스크립트 본문", () => {
     assert.equal(script.match(/::Delete\(/g)?.length, 1);
     assert.ok(script.includes("if ([System.IO.File]::Exists($pdf)) { [System.IO.File]::Delete($pdf) }"));
     assert.equal(script.match(/ExportAsFixedFormat/g)?.length, 1);
-    assert.ok(script.includes("$book.ExportAsFixedFormat(0, $pdf)"));
+    assert.ok(script.includes("$book.ActiveSheet.ExportAsFixedFormat(0, $pdf)"));
     // 🔴 원본은 **읽기 전용**으로 열고 저장하지 않고 닫는다 — 원본 .xlsx 를 바꾸지 않는다.
     assert.ok(script.includes("$book = $excel.Workbooks.Open($full, 0, $true)"));
     assert.ok(script.includes("$book.Close($false)"));
     assert.equal(script.includes(".Save()"), false);
     assert.equal(script.includes("SaveAs"), false);
+  });
+
+  /**
+   * ============================================================================
+   * 🔴 2026-10-08 — **활성 시트 하나만** 내보낸다
+   * ============================================================================
+   * 견적서 양식은 **한 파일에 시트가 여럿**이다(내자 양식은 `내자견적서` · `OH견적서` ·
+   * `Sheet1`). 통합문서째 내보내면 인쇄 영역이 잡힌 다른 시트가 함께 딸려 나가서, 내자
+   * 견적서를 저장했는데 PDF 에 OH 장이 붙어 고객사로 간다(사용자 요구 2026-10-08).
+   *
+   * 🔴 **어느 시트가 활성인지는 도우미가 정하지 않는다** — 서버가 엑셀을 만들 때 그 종류의
+   * 시트를 활성으로 두고 보낸다(xlsx/active-sheet.ts). 도우미는 받은 파일이 말하는 대로
+   * 한 장만 내보낼 뿐이다. 그래서 여기서는 **「통합문서째 내보내는 자리가 없다」**를 센다.
+   * ============================================================================
+   */
+  test("🔴 활성 시트 하나만 내보낸다 — 통합문서째 내보내는 자리가 없다", () => {
+    assert.ok(script.includes("        $book.ActiveSheet.ExportAsFixedFormat(0, $pdf)\r\n"));
+    // 🔴 예전 줄(통합문서째)이 한 자리도 남아 있지 않다.
+    assert.equal(/\$book\.ExportAsFixedFormat/.test(script), false);
+    // 활성 시트를 집는 자리도 내보내는 자리도 **각각 하나**다.
+    assert.equal(script.match(/ActiveSheet/g)?.length, 1);
+    assert.equal(script.match(/ExportAsFixedFormat/g)?.length, 1);
+    // 🔴 「어느 탭인가」를 도우미가 정하지 않는다 — 시트를 이름 · 번호로 집거나 고르는
+    //    자리가 하나도 없다. 그 판단은 서버에만 있다(xlsx/active-sheet.ts).
+    for (const forbidden of ["Worksheets", "Sheets(", "SelectedSheets", ".Activate(", ".Select("]) {
+      assert.equal(script.includes(forbidden), false, `도우미가 시트를 고른다: ${forbidden}`);
+    }
+  });
+
+  /**
+   * 🔴 **그 한 줄 말고는 아무것도 안 바뀌었다**(2026-10-08). 변환 덩어리를 여는 곳부터
+   * `finally` 까지 **글자 그대로** 맞춘다 — 덮어쓰기 · 창 숨김 · 읽기 전용 열기 · 닫기가
+   * 예전 자리에 예전 모양으로 있고, 가운데 한 줄만 `ActiveSheet` 가 붙었다.
+   */
+  test("🔴 변환 덩어리의 다른 줄은 한 글자도 안 바뀌었다 — 덩어리를 그대로 맞춘다", () => {
+    assert.ok(
+      script.includes(
+        crlf([
+          "      try { $excel = New-Object -ComObject Excel.Application } catch { $excel = $null }",
+          "      if ($null -eq $excel) {",
+          "        $failed = 'no-excel'",
+          "      } else {",
+          "        $excel.Visible = $false",
+          "        $excel.DisplayAlerts = $false",
+          "        $book = $excel.Workbooks.Open($full, 0, $true)",
+          "        # 🔵 덮어씁니다 — 지우는 것은 위에서 정한 이 한 경로뿐입니다.",
+          "        if ([System.IO.File]::Exists($pdf)) { [System.IO.File]::Delete($pdf) }",
+        ])
+      ),
+      "변환 덩어리의 앞부분이 바뀌었다"
+    );
+    assert.ok(
+      script.includes(
+        crlf([
+          "        $book.ActiveSheet.ExportAsFixedFormat(0, $pdf)",
+          "      }",
+          "    } catch {",
+          "      $failed = 'convert'",
+          "    } finally {",
+          "      if ($null -ne $book) { try { $book.Close($false) } catch { } }",
+          "      if ($null -ne $excel) { try { $excel.Quit() } catch { } }",
+        ])
+      ),
+      "변환 덩어리의 뒷부분이 바뀌었다"
+    );
   });
 
   test("🔴 Excel 창을 숨기고 finally 로 닫는다 — 유령 프로세스가 쌓이지 않는다", () => {
@@ -1944,6 +2019,13 @@ describe("파일 없이 도는 설치 명령 본문", () => {
    * 🔴 그러므로 **도우미 스크립트에 한글 주석을 늘릴 때마다 이 시험이 먼저 운다.** 남은 자리가
    * 얼마 없다(아래 숫자). 다음에 또 막히면 주석을 줄이거나, HELPER payload 를 압축하는
    * 조각을 따로 잡아야 한다(설치 절차가 한 벌이므로 설치 파일 쪽과 함께 바꿔야 한다).
+   *
+   * ── 잰 값 ─────────────────────────────────────────────────────────────────
+   *  · 31,248 — 주석을 줄여 되돌린 직후(2026-10-08 오전).
+   *  · 31,436 — 세 상수를 domain 으로 옮긴 뒤(스크립트는 그대로, 설치 쪽 글자만 늘었다).
+   *  · 🔴 31,720 — 「그 탭만 내보낸다」(2026-10-08). 남은 자리는 **791 글자**뿐이다.
+   *    한글 한 글자가 base64 **네 글자**이므로, 스크립트에 더 쓸 수 있는 한글 주석은
+   *    **200 글자 남짓**이다. 다음 조각에서 막히면 고치려 들지 말고 압축을 잡아라.
    * ============================================================================
    */
   test("🔴 명령 한 줄이 Windows 명령줄 한도 안이다 — 넘으면 설치가 통째로 막힌다", () => {

@@ -85,6 +85,15 @@ import {
  *             Test-NoReparsePoint 는 **있는 것**만 볼 수 있어 「아직 없는 PDF」에 쓸 수 없다 —
  *             그래서 「없으면 괜찮다 · 보통 파일이면 괜찮다 · 그 밖은 전부 거절」로 따로 둔다.
  *             (바로 가기인 `연락서.pdf` 에 쓰면 그 바로 가기가 가리키는 **루트 밖**에 쓰인다.)
+ *       🔴 **활성 시트 하나만 내보낸다**(2026-10-08 오후 · 사용자 요구). 처음에는 통합문서
+ *          전체를 내보냈는데(`$book.ExportAsFixedFormat`), 견적서 양식은 **한 파일에 시트가
+ *          여럿**이고 인쇄 영역이 잡힌 다른 시트가 함께 딸려 나갔다 — 내자 견적서를 저장했는데
+ *          PDF 에 OH 장이 붙어 나간다. 그래서 `$book.ActiveSheet.ExportAsFixedFormat` 으로
+ *          바꿨다. 🔴 **어느 시트가 활성인지는 도우미가 정하지 않는다** — 서버가 엑셀을 만들 때
+ *          그 종류의 시트를 활성으로 두고 보낸다(xlsx/active-sheet.ts ·
+ *          storage/quote-template.ts 의 시트 이름 표). 도우미는 받은 파일이 말하는 대로 한다.
+ *          🔴 이 한 줄 말고 **다른 줄은 바뀌지 않았다** — 울타리 넷도, 창 숨김 · `finally` 닫기도
+ *          그대로다(quote-folder-helper.test.ts 가 스크립트 전체의 sha256 으로 못 박는다).
  *       🔵 **덮어쓴다**(사용자 결정 2026-10-08) — 같은 이름이 있으면 지우고 새로 쓴다. 지우는
  *          것은 **위에서 정한 그 한 경로**뿐이다(`[System.IO.File]::Delete($pdf)` 가 스크립트에
  *          딱 한 번 있고, 인자가 `$pdf` 다 — 시험이 센다).
@@ -933,8 +942,9 @@ try {
         $book = $excel.Workbooks.Open($full, 0, $true)
         # 🔵 덮어씁니다 — 지우는 것은 위에서 정한 이 한 경로뿐입니다.
         if ([System.IO.File]::Exists($pdf)) { [System.IO.File]::Delete($pdf) }
-        # 0 = xlTypePDF
-        $book.ExportAsFixedFormat(0, $pdf)
+        # 0 = xlTypePDF. 🔴 통합문서가 아니라 **활성 시트 하나**만 내보냅니다(서버가 그
+        # 종류의 시트를 활성으로 두고 보냅니다 — 내자 · OH 가 섞여 나가지 않게).
+        $book.ActiveSheet.ExportAsFixedFormat(0, $pdf)
       }
     } catch {
       $failed = 'convert'

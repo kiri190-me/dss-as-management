@@ -130,6 +130,7 @@ src/lib/xlsx/quote-template.test.ts
 src/lib/xlsx/oh-quote-template.test.ts
 src/lib/xlsx/matcher-quote-template.test.ts
 src/lib/xlsx/cable-quote-template.test.ts
+src/lib/xlsx/active-sheet.test.ts
 src/lib/xlsx/service-report-template.test.ts
 src/lib/db/test-database-safety.test.ts
 src/lib/db/test-cleanup-static-safety.test.ts
@@ -446,6 +447,7 @@ src/app/api/quote-folder-helper/install-command/route-source.test.ts
 src/lib/server/services/quote-excel-preview.test.ts
 src/app/api/quotes/*/excel-preview/route-source.test.ts
 src/lib/server/services/quote-workbook-cable.test.ts
+src/lib/server/services/quote-workbook-active-sheet.test.ts
 src/lib/domain/local/product-history-match.test.ts
 src/lib/domain/product-model-customer-merge.test.ts
 src/lib/domain/kyosan-intake-import/symptom-translation.test.ts
