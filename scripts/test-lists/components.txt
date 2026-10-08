@@ -430,3 +430,13 @@ src/components/repair-cases/repair-case-list-default-sort.test.ts
 # 창 자체는 아무것도 물지 않아 **그려 본다**. 세 화면은 서버 액션 사슬 때문에 원본을
 # 글자로 읽는다(이웃 product-model-kind-files-screen.test.ts 와 같은 방법).
 src/components/repair-cases/files/attachment-purge-ui.test.tsx
+
+# ── 견적서 목록의 결재 승인 체크(✔️) — 2026-10-08 사용자 요구 ─────────────────
+# 「지금 내용으로 결재 승인된 견적서에 체크 표시가 보이게」. 🔴 못 박는 것은
+# **APPROVED_OUTDATED 에는 안 그린다**(사용자 결정) — 승인을 받은 뒤 견적서를 고친
+# 장이라, 체크가 남으면 화면이 「승인 완료」라고 거짓말을 한다. 결재 상태 다섯을 실제
+# 결재 줄로 만들어 판정에 넣고, 그 답을 공용 목록 화면에 실어 **그려 본 HTML 로 잰다**
+# (글자 맞춰 보기가 아니다). 🔴 칸을 **안 넘기면 안 그려지는지**도 함께 본다 — PO/내자
+# 목록이 지금 그대로라는 뜻이다. 판정 자체(상태 → 참/거짓)는 unit 목록의
+# lib/domain/quote-list.test.ts 가 값으로 본다.
+src/components/quotes/quote-list-approved-check.test.tsx

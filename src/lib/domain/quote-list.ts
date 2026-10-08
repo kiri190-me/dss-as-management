@@ -25,6 +25,10 @@
  * ============================================================================
  */
 
+// 🔴 결재 상태 규칙은 **가져다 쓴다** — 아래 approvedQuoteIdsForCurrentContent 머리말.
+//    형제 파일이라 상대 경로다(domain/quote-approval-rules.ts 가 이웃을 부르는 방식과 같다).
+import { resolveQuoteApprovalState, type QuoteApprovalStatus } from "./quote-approval-rules";
+
 export type QuoteSummaryParts = {
   quoteNumber: string;
   customerName: string;
@@ -185,4 +189,69 @@ export function toAmount(value: string | null | undefined): number {
   if (value === null || value === undefined || value.trim() === "") return 0;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * ============================================================================
+ * 목록 줄의 결재 체크 — **여러 장을 한 번에** 가린다 (2026-10-08 사용자 요구)
+ * ============================================================================
+ * 「결재 승인된 견적서에 체크 표시가 보이게 해 달라」는 요구의 판정 자리다. 체크가
+ * 붙는 상태는 **`APPROVED` 하나**이고, 🔴 **`APPROVED_OUTDATED` 에는 붙지 않는다**
+ * (2026-10-08 사용자 결정) — 승인을 받은 **뒤에 견적서가 바뀐** 장이라, 체크를 붙이면
+ * 화면이 「승인 완료」라고 거짓말을 한다(domain/quote-approval-rules.ts 의 머리말).
+ *
+ * ── 🔴 규칙을 다시 적지 않는다 ─────────────────────────────────────────
+ * 상태를 정하는 일은 그대로 `resolveQuoteApprovalState` 가 한다. 이 함수가 더하는
+ * 것은 **여러 장을 한꺼번에** 가리는 일뿐이다 — 「가장 최근 행 하나」를 고르는 규칙도
+ * 「판 번호가 다르면 낡은 승인」이라는 규칙도 여기서 베끼지 않는다.
+ *
+ * ── 🔴 받는 것이 **질의 한 번의 결과**다 ────────────────────────────────
+ * 결재 행들을 장별로 나눠 받지 않고 **납작한 한 뭉치**로 받는다. 그래야 부르는 쪽이
+ * 「목록 장수만큼 질의」(N+1)를 만들 길 자체가 없다 — queries/quotes.ts 의 부품 줄 ·
+ * 첨부 칸이 같은 모양을 쓰는 이유와 같다.
+ *
+ * ── 끊긴 이력은 건너뛴다 ────────────────────────────────────────────────
+ * `quote_approvals.quote_id` 는 **ON DELETE SET NULL** 이다(schema/quote-approvals.ts) —
+ * 견적서를 완전 삭제해도 결재 이력은 남고, 그 줄의 견적서 연결만 풀린다. 목록은 살아
+ * 있는 장만 보므로 그런 줄은 애초에 어느 장의 것도 아니다.
+ * ============================================================================
+ */
+
+/** 결재 한 줄에서 이 판정이 실제로 보는 칸만. 조회가 더 많이 읽을 이유가 없다. */
+export type QuoteApprovalRowForList = {
+  /** 🔴 `null` 은 견적서가 완전 삭제돼 연결이 풀린 이력이다(위 머리말). */
+  quoteId: string | null;
+  status: QuoteApprovalStatus;
+  quoteVersionAtRequest: number;
+  requestedAt: Date;
+};
+
+/**
+ * 지금 내용 그대로 승인된 **견적서 id 들**.
+ *
+ * 🔴 **동점일 때는 먼저 온 줄이 이긴다.** 부르는 쪽이 `requested_at` 내림차순으로
+ * 읽어 넘기므로 먼저 온 줄이 곧 가장 최근 줄이고, 이것은 한 장을 묻는
+ * `getQuoteApprovalProgress`(같은 정렬 + limit 1)와 **같은 답**이 되게 하려는 것이다.
+ * 애초에 동점은 생기지 않는다 — 사슬을 잇는 저장 경로가 `requested_at` 을 물려받지
+ * 않는 이유가 그 조회를 정해지게 하기 위해서다(queries/quote-approvals.ts).
+ */
+export function approvedQuoteIdsForCurrentContent(
+  approvals: readonly QuoteApprovalRowForList[],
+  quotes: readonly { id: string; version: number }[]
+): Set<string> {
+  const latestByQuoteId = new Map<string, QuoteApprovalRowForList>();
+  for (const approval of approvals) {
+    if (approval.quoteId === null) continue;
+    const kept = latestByQuoteId.get(approval.quoteId);
+    if (kept === undefined || approval.requestedAt.getTime() > kept.requestedAt.getTime()) {
+      latestByQuoteId.set(approval.quoteId, approval);
+    }
+  }
+
+  const approved = new Set<string>();
+  for (const quote of quotes) {
+    const latest = latestByQuoteId.get(quote.id) ?? null;
+    if (resolveQuoteApprovalState(latest, quote.version) === "APPROVED") approved.add(quote.id);
+  }
+  return approved;
 }

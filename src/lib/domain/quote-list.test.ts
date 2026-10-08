@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { describe, test } from "node:test";
 
 import {
+  approvedQuoteIdsForCurrentContent,
   buildQuoteSummaryLine,
   formatQuoteSupplyAmount,
   isQuoteAmountItemLine,
@@ -9,6 +10,7 @@ import {
   sumQuoteSupplyAmount,
   toAmount,
   type QuoteAmountLine,
+  type QuoteApprovalRowForList,
 } from "./quote-list";
 
 const SAMPLE = {
@@ -192,4 +194,91 @@ test("감사 스냅숏 · 내자 정리 금액 칸의 모양 — 소수 둘째 �
   assert.equal(formatQuoteSupplyAmount(0), "0.00");
   assert.equal(formatQuoteSupplyAmount(3_456_789.5), "3456789.50");
   assert.equal(formatQuoteSupplyAmount(null), null);
+});
+
+/**
+ * ============================================================================
+ * 목록 줄의 결재 체크 — 🔴 **`APPROVED` 하나에만 붙는다** (2026-10-08)
+ * ============================================================================
+ * 사용자 요구는 「결재 승인된 견적서에 체크 표시」이고, 사용자 결정은
+ * 🔴 **`APPROVED_OUTDATED` 에는 붙이지 않는다** 이다 — 승인을 받은 **뒤에 견적서가
+ * 바뀐** 장이라 체크를 붙이면 화면이 「승인 완료」라고 거짓말을 한다.
+ *
+ * 그리는 쪽(공용 화면이 이 값을 받아 ✔️ 를 그리는가)은
+ * components/quotes/quote-list-approved-check.test.tsx 가 **실제로 그려 보고** 잰다.
+ * ============================================================================
+ */
+describe("목록 줄의 결재 체크 — approvedQuoteIdsForCurrentContent", () => {
+  const AT = (iso: string) => new Date(iso);
+  const QUOTE = { id: "q1", version: 3 };
+
+  /** 그 견적서의 결재 줄 하나. 안 적은 칸은 「지금 판에 대한 요청」이 기본이다. */
+  const approval = (over: Partial<QuoteApprovalRowForList> = {}): QuoteApprovalRowForList => ({
+    quoteId: "q1",
+    status: "APPROVED",
+    quoteVersionAtRequest: 3,
+    requestedAt: AT("2026-10-08T01:00:00.000Z"),
+    ...over,
+  });
+
+  test("🔴 지금 판에 대한 승인에만 체크가 붙는다", () => {
+    assert.deepEqual([...approvedQuoteIdsForCurrentContent([approval()], [QUOTE])], ["q1"]);
+  });
+
+  test("🔴 APPROVED_OUTDATED 에는 붙지 않는다 — 승인 뒤에 견적서가 바뀐 장이다", () => {
+    // 2판에 대한 승인인데 지금은 3판이다.
+    const outdated = approval({ quoteVersionAtRequest: 2 });
+    assert.deepEqual([...approvedQuoteIdsForCurrentContent([outdated], [QUOTE])], []);
+  });
+
+  test("🔴 PENDING · REJECTED · NOT_REQUESTED 에도 붙지 않는다", () => {
+    for (const status of ["REQUESTED", "REJECTED"] as const) {
+      assert.deepEqual(
+        [...approvedQuoteIdsForCurrentContent([approval({ status })], [QUOTE])],
+        [],
+        `${status} 인 장에 체크가 붙었다`
+      );
+    }
+    // 한 번도 올린 적이 없으면 결재 줄 자체가 없다 — 그것이 NOT_REQUESTED 다.
+    assert.deepEqual([...approvedQuoteIdsForCurrentContent([], [QUOTE])], []);
+  });
+
+  test("🔴 가장 최근 줄 하나가 답을 정한다 — 1단계 승인 + 2단계 대기는 아직 승인이 아니다", () => {
+    const rows = [
+      // 부르는 쪽이 requested_at 내림차순으로 넘긴다(queries/quotes.ts).
+      approval({ status: "REQUESTED", requestedAt: AT("2026-10-08T02:00:00.000Z") }),
+      approval({ status: "APPROVED", requestedAt: AT("2026-10-08T01:00:00.000Z") }),
+    ];
+    assert.deepEqual([...approvedQuoteIdsForCurrentContent(rows, [QUOTE])], []);
+    // 차례를 뒤집어 넘겨도 「가장 최근」의 답은 같다 — 시각으로 고르기 때문이다.
+    assert.deepEqual([...approvedQuoteIdsForCurrentContent([...rows].reverse(), [QUOTE])], []);
+  });
+
+  test("🔴 여러 장을 **한 뭉치**로 받아 한 번에 가린다 — 장수만큼 묻지 않는다", () => {
+    const quotes = [
+      { id: "approved", version: 1 },
+      { id: "outdated", version: 5 },
+      { id: "pending", version: 1 },
+      { id: "never", version: 1 },
+    ];
+    // 🔴 질의 한 번이 내놓는 그 모양 — 장별로 나뉘어 있지 않은 납작한 한 배열이다.
+    const flatResultSet: QuoteApprovalRowForList[] = [
+      approval({ quoteId: "pending", status: "REQUESTED", quoteVersionAtRequest: 1 }),
+      approval({ quoteId: "outdated", quoteVersionAtRequest: 4 }),
+      approval({ quoteId: "approved", quoteVersionAtRequest: 1 }),
+    ];
+    assert.deepEqual([...approvedQuoteIdsForCurrentContent(flatResultSet, quotes)], ["approved"]);
+  });
+
+  test("🔴 견적서가 완전 삭제돼 연결이 풀린 이력(quote_id IS NULL)은 건너뛴다", () => {
+    const orphan = approval({ quoteId: null });
+    assert.deepEqual([...approvedQuoteIdsForCurrentContent([orphan], [QUOTE])], []);
+    // 그 줄이 섞여 있어도 살아 있는 장의 판정은 그대로다.
+    assert.deepEqual([...approvedQuoteIdsForCurrentContent([orphan, approval()], [QUOTE])], ["q1"]);
+  });
+
+  test("목록에 없는 장의 결재 줄은 답에 끼어들지 않는다", () => {
+    const other = approval({ quoteId: "not-in-list" });
+    assert.deepEqual([...approvedQuoteIdsForCurrentContent([other], [QUOTE])], []);
+  });
 });
