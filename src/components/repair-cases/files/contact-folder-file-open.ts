@@ -60,10 +60,13 @@ import { buildQuoteFolderFileLink, isOpenableQuoteFolderFileName } from "@/lib/d
 
 /**
  * 🔴 **표시가 없는 PC 에만** 내는 줄 — 예전 도우미는 조용히 끝난다(머리말).
- * 문장 자체는 2026-10-07 에도 그대로다. 바뀐 것은 **낼지 말지**뿐이다.
+ * 2026-10-07 에는 **낼지 말지**만 바뀌었고 문장은 그대로였다.
+ * 🔴 2026-10-08 에 **문장을 사실에 맞게 늘렸다** — 도우미에 셋째 명령(`xlsx2pdf/` · PDF 변환)이
+ * 더해졌으므로 예전 도우미가 모르는 것이 하나 더 생겼다. 앞 문장은 한 글자도 바꾸지 않고 뒤에
+ * 한 마디만 붙인다(이 문장을 글자로 보는 다른 화면의 시험이 그대로 통과하게).
  */
 export const CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT =
-  "열리지 않으면 [설치 명령 복사]로 도우미를 다시 설치해 주세요 — 예전에 설치한 도우미는 파일 열기를 모릅니다";
+  "열리지 않으면 [설치 명령 복사]로 도우미를 다시 설치해 주세요 — 예전에 설치한 도우미는 파일 열기를 모릅니다. PDF 변환도 모릅니다";
 
 /** 사람이 직접 끌 수 있는 단추의 글자 — 누르면 아래 표시를 적는다. */
 export const CONTACT_FOLDER_FILE_HELPER_DISMISS_TEXT = "이 PC 는 최신입니다 — 그만 보기";
@@ -126,10 +129,16 @@ function markHelperConfirmed(storage: ContactFolderFileOpenEnvironment["storage"
  * 버전 개념이 아예 없고(설치 스크립트에 버전 문자열이 없다), 브라우저는 어느 판이 깔렸는지
  * 물어볼 길이 없으므로 — 세어 두는 쪽이 화면이다.
  *
- * **지금 세대 1 이 아는 것**: `dss-folder://open/`(폴더 열기) · `dss-folder://openfile/`
- * (파일 열기) · 설치 때 박히는 **루트 넷**(server/quote-folder-helper.ts).
+ * **지금 세대 2 가 아는 것**: `dss-folder://open/`(폴더 열기) · `dss-folder://openfile/`
+ * (파일 열기) · 🔴 `dss-folder://xlsx2pdf/`(.xlsx 를 Excel 로 PDF 변환 — 이 도우미가 **처음으로
+ * 파일을 쓰는** 명령이다) · 설치 때 박히는 **루트 넷**(server/quote-folder-helper.ts).
+ *
+ * 🔴 **2026-10-08 에 1 → 2 로 올렸다.** 까닭은 셋째 명령(`xlsx2pdf/`)이 더해졌기 때문이다 —
+ * 세대 1 도우미가 깔린 PC 는 그 주소를 받아도 접두어 검사에 걸려 조용히 끝난다(exit 2). 번호를
+ * 올리면 열쇠 이름이 `dss.helper.gen2.openfile` 이 되어 **모든 PC 가 재설치 안내를 한 번 더
+ * 받는다** — 2026-10-08 아침에 만든 이 장치가 정확히 이 경우를 위한 것이다.
  */
-export const CONTACT_FOLDER_FILE_HELPER_GENERATION = 1;
+export const CONTACT_FOLDER_FILE_HELPER_GENERATION = 2;
 
 /**
  * 「이 PC 에 **파일 열기를 아는** 도우미가 있다」는 표시. 값은 "1".

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -32,6 +32,9 @@ import {
   QUOTE_FOLDER_HELPER_ZONE_RANGES_PATH,
   QUOTE_FOLDER_HELPER_ZONE_REGISTERED_MESSAGE,
   QUOTE_FOLDER_HELPER_ZONE_REGISTER_PS,
+  QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX,
+  QUOTE_FOLDER_XLSX2PDF_OUTPUT_EXTENSION,
+  QUOTE_FOLDER_XLSX2PDF_SOURCE_EXTENSION,
   QuoteFolderHelperRootError,
   buildQuoteFolderHelperInlineInstallCommand,
   buildQuoteFolderHelperInstaller,
@@ -759,6 +762,391 @@ describe("🔴 파일 열기 — DSS_FOLDER_DRY_RUN=1 로 실제로 돌린다", 
     await assertOutcome([fileLinkOf(`${FOLDER}/함정.pdf`)], "REJECT not-a-file", 3);
     // 거꾸로, 폴더 주소에 파일 경로를 넣으면 「폴더가 없다」로 끝난다.
     await assertOutcome([linkOf(`${FOLDER}/연락서.xlsm`)], "NOT-FOUND", 4);
+  });
+});
+
+// ── 🔴 PDF 변환(xlsx2pdf) — 이 도우미가 **처음으로 파일을 쓴다** ─────────────
+
+/**
+ * ============================================================================
+ * 🔴 조각 — `dss-folder://xlsx2pdf/?p=…` 는 **쓰는** 명령이다 (2026-10-08)
+ * ============================================================================
+ * 앞의 두 명령은 읽기만 했다. 이것은 공유폴더에 PDF 를 **쓴다.** 그래서 이 블록은 두 가지를
+ * 본다:
+ *  1. 🔴 **쓸 수 있는 곳이 하나뿐인가** — 원본과 같은 폴더의, 원본과 같은 이름의 `.pdf`.
+ *     주소는 결과 자리를 고르지 못한다(경로를 하나만 받는다). 그리고 그 하나도 루트 안 ·
+ *     바로 가기 검사를 다시 지난다.
+ *  2. 🔴 **기존 두 명령이 한 글자도 안 바뀌었는가** — 글자 그대로의 덩어리를 맞춰 본다.
+ * 🔴 **시험은 Excel 을 부르지 않는다.** DSS_FOLDER_DRY_RUN=1 에서는 「어디에 쓸 것인가」까지만
+ * 적고 끝나므로, 디스크에 아무것도 쓰지 않고 결과 경로 규칙을 값으로 확인할 수 있다. Excel 을
+ * 숨기고 finally 로 닫는 것은 **본문**으로 본다(아래 「본문」 블록).
+ * ============================================================================
+ */
+
+/** 규칙을 거치지 않고 아무 문자열이나 **PDF 변환** 주소로 싼다 — 다른 사이트가 만든 주소 흉내. */
+function rawConvertLink(text: string): string {
+  return `${QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX}${Buffer.from(text, "utf8").toString("base64url")}`;
+}
+
+/** 여러 줄을 스크립트의 줄 끝(CRLF)으로 잇는다 — 「글자 그대로 같은가」를 보려고. */
+function crlf(lines: readonly string[]): string {
+  return lines.join("\r\n");
+}
+
+describe("🔴 PDF 변환 — 스크립트 본문", () => {
+  const script = buildQuoteFolderHelperScript({ uncRoot: FAKE_UNC });
+
+  test("셋째 접두어와 확장자가 서버 상수 그대로 박힌다", () => {
+    assert.equal(QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX, "dss-folder://xlsx2pdf/?p=");
+    assert.equal(QUOTE_FOLDER_XLSX2PDF_SOURCE_EXTENSION, "xlsx");
+    assert.equal(QUOTE_FOLDER_XLSX2PDF_OUTPUT_EXTENSION, "pdf");
+    assert.ok(script.includes(`$ConvertPrefix = '${QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX}'\r\n`));
+    assert.ok(script.includes(`$ConvertSourceSuffix = '.${QUOTE_FOLDER_XLSX2PDF_SOURCE_EXTENSION}'\r\n`));
+    assert.ok(script.includes(`$ConvertOutputSuffix = '.${QUOTE_FOLDER_XLSX2PDF_OUTPUT_EXTENSION}'\r\n`));
+  });
+
+  /**
+   * 🔴 **이 시험이 이 조각의 중심이다.** 설계가 금지한 것은 「결과 경로를 받는 것」이다 —
+   * 받으면 이 명령은 「아무 데나 쓰기」가 된다. 그래서 `$pdf` 가 **오직 `$full` 에서만** 나오고,
+   * `$relative`(주소가 나른 글자)에서는 나오지 않는 것을 본문으로 못 박는다.
+   */
+  test("🔴 결과 경로는 주소가 아니라 원본에서 나온다 — $pdf 를 만드는 자리가 하나뿐이다", () => {
+    const made = script.split("\r\n").filter((line) => /^\s*\$pdf = /.test(line));
+    assert.deepEqual(made, [
+      "  $pdf = ''",
+      "      $pdf = $full.Substring(0, $full.Length - $ConvertSourceSuffix.Length) + $ConvertOutputSuffix",
+    ]);
+    // 🔴 주소가 나른 글자에서 결과를 만들지 않는다 — $relative 는 $pdf 쪽에 한 번도 안 붙는다.
+    assert.equal(/\$pdf[^\r\n]*\$relative/.test(script), false);
+    assert.equal(/\$relative[^\r\n]*\$pdf = /.test(script), false);
+  });
+
+  test("🔴 검사 8~11 이 본문에 순서대로 있다 — 확장자 · 같은 폴더 · 같은 이름 · 루트 안 · 쓸 자리", () => {
+    const marks = [
+      // 8 — .xlsx 하나뿐
+      "function Test-XlsxFileName([string]$Name) {",
+      "  return ($Name.Substring($dot).ToLowerInvariant() -ceq $ConvertSourceSuffix)",
+      "    if (-not (Test-XlsxFileName $segments[$segments.Length - 1])) { Stop-Helper 'REJECT bad-extension' 3 }",
+      // 9 — 결과는 원본에서, 같은 폴더 · 같은 이름
+      "    if ($full.EndsWith($ConvertSourceSuffix, [System.StringComparison]::OrdinalIgnoreCase)) {",
+      "    if ($pdf.Length -eq 0) { Stop-Helper 'REJECT bad-output' 3 }",
+      "    if ([System.IO.Path]::GetDirectoryName($pdf) -cne [System.IO.Path]::GetDirectoryName($full)) { Stop-Helper 'REJECT bad-output' 3 }",
+      "    if ([System.IO.Path]::GetFileName($pdf) -cne ([System.IO.Path]::GetFileNameWithoutExtension($full) + $ConvertOutputSuffix)) { Stop-Helper 'REJECT bad-output' 3 }",
+      // 10 — 루트 담김 검사를 **결과에도**
+      "    if (-not $pdf.StartsWith($targetRoot + '\\', [System.StringComparison]::OrdinalIgnoreCase)) { Stop-Helper 'REJECT outside-root' 3 }",
+      // 11 — 쓸 자리가 바로 가기 · 폴더면 거절
+      "    if (-not (Test-WritableOutput $pdf)) { Stop-Helper 'REJECT bad-output' 3 }",
+    ];
+    let previous = -1;
+    for (const mark of marks) {
+      const at = script.indexOf(mark);
+      assert.ok(at >= 0, `없다: ${mark}`);
+      assert.ok(at > previous, `순서가 어긋났다: ${mark}`);
+      previous = at;
+    }
+    // 🔴 결과 쪽 담김 검사는 **원본이 실제로 걸린 그 루트**로 한다(아무 루트가 아니다).
+    assert.ok(script.includes("    $targetRoot = $rootFull\r\n"));
+  });
+
+  test("🔴 Test-WritableOutput — 없으면 참 · 바로 가기와 폴더는 거짓 · 확인 못 하면 거짓", () => {
+    const body = script.slice(
+      script.indexOf("function Test-WritableOutput([string]$Path) {"),
+      script.indexOf("# 상대 경로 규칙 — 서버의 domain/quote-folder-link.ts 와 같다.")
+    );
+    assert.ok(body.includes("  } catch [System.IO.FileNotFoundException] {\r\n    return $true"), body);
+    assert.ok(body.includes("if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }"));
+    assert.ok(body.includes("if (($attributes -band [System.IO.FileAttributes]::Directory) -ne 0) { return $false }"));
+    // 확인하지 못한 자리에는 쓰지 않는다 — 그 밖의 예외는 전부 거짓.
+    assert.ok(body.includes("  } catch {\r\n    return $false"), body);
+  });
+
+  /**
+   * 🔴 쓰는 자리를 **센다.** 머리말의 약속은 「이 스크립트가 파일을 쓰는 곳은 하나」다.
+   * 지우는 것(Delete)도 내보내는 것(ExportAsFixedFormat)도 **각각 한 번**이고, 둘 다 인자가
+   * `$pdf` 다. 그 밖의 쓰기 수단은 예전 금지 목록 그대로 하나도 없다(위 「탐색기와 연결
+   * 프로그램 말고는…」 시험).
+   */
+  test("🔴 파일을 쓰는 곳이 딱 하나다 — Delete 하나 · ExportAsFixedFormat 하나, 둘 다 $pdf", () => {
+    assert.equal(script.match(/::Delete\(/g)?.length, 1);
+    assert.ok(script.includes("if ([System.IO.File]::Exists($pdf)) { [System.IO.File]::Delete($pdf) }"));
+    assert.equal(script.match(/ExportAsFixedFormat/g)?.length, 1);
+    assert.ok(script.includes("$book.ExportAsFixedFormat(0, $pdf)"));
+    // 🔴 원본은 **읽기 전용**으로 열고 저장하지 않고 닫는다 — 원본 .xlsx 를 바꾸지 않는다.
+    assert.ok(script.includes("$book = $excel.Workbooks.Open($full, 0, $true)"));
+    assert.ok(script.includes("$book.Close($false)"));
+    assert.equal(script.includes(".Save()"), false);
+    assert.equal(script.includes("SaveAs"), false);
+  });
+
+  test("🔴 Excel 창을 숨기고 finally 로 닫는다 — 유령 프로세스가 쌓이지 않는다", () => {
+    const hidden = script.indexOf("        $excel.Visible = $false");
+    const open = script.indexOf("$book = $excel.Workbooks.Open($full, 0, $true)");
+    const finallyAt = script.indexOf("    } finally {");
+    const close = script.indexOf("if ($null -ne $book) { try { $book.Close($false) } catch { } }");
+    const quit = script.indexOf("if ($null -ne $excel) { try { $excel.Quit() } catch { } }");
+    const release = script.indexOf("ReleaseComObject($excel)");
+    assert.ok(hidden >= 0, "Visible = $false 가 없다");
+    // 🔴 창을 띄우지 않는다 — $true 로 되돌려 놓는 자리가 없다.
+    assert.equal(script.includes("$excel.Visible = $true"), false);
+    assert.ok(hidden < open, "여는 것보다 숨기는 것이 먼저다");
+    assert.ok(open < finallyAt, finallyAt.toString());
+    assert.ok(finallyAt < close && close < quit && quit < release, "finally 안에서 닫고 끝내고 놓는다");
+    // 🔴 끝내는 일은 전부 finally 안이다 — try 쪽에는 Quit 이 없다.
+    assert.equal(script.match(/\$excel\.Quit\(\)/g)?.length, 1);
+    assert.equal(script.match(/\$book\.Close\(/g)?.length, 1);
+    assert.ok(script.includes("[System.GC]::WaitForPendingFinalizers()"));
+    // Excel 이 없는 PC 는 조용히 끝난다 — 끝냄 5.
+    assert.ok(script.includes("if ($failed -ceq 'no-excel') { Stop-Helper 'REJECT no-excel' 5 }"));
+  });
+
+  /**
+   * 🔴 **이 조각의 약속 — 기존 두 명령은 한 글자도 바뀌지 않았다.**
+   * 가지를 하나 **끼워 넣기만** 했으므로, 예전 덩어리가 글자 그대로 남아 있어야 한다.
+   */
+  test("🔴 기존 두 명령(open/ · openfile/)이 한 글자도 안 바뀌었다 — 덩어리를 그대로 맞춘다", () => {
+    const untouched = [
+      // 주소를 가르는 자리 — 폴더 가지와 파일 가지, 그리고 그 뒤의 else.
+      crlf([
+        "  if ($link.StartsWith($Prefix, [System.StringComparison]::Ordinal)) {",
+        "    if ($link.Length -gt ($Prefix.Length + $MaxEncodedLength)) { Stop-Helper 'REJECT not-a-folder-link' 2 }",
+        "    $encoded = $link.Substring($Prefix.Length)",
+        "  } elseif ($link.StartsWith($FilePrefix, [System.StringComparison]::Ordinal)) {",
+        "    if ($link.Length -gt ($FilePrefix.Length + $MaxEncodedLength)) { Stop-Helper 'REJECT not-a-folder-link' 2 }",
+        "    $Mode = 'file'",
+        "    $encoded = $link.Substring($FilePrefix.Length)",
+      ]),
+      crlf(["  } else {", "    Stop-Helper 'REJECT not-a-folder-link' 2", "  }"]),
+      // 파일 쪽 확장자 검사 — 허용 목록 그대로.
+      crlf([
+        "  if ($Mode -ceq 'file') {",
+        "    $segments = $relative.Split([char]'/')",
+        "    if (-not (Test-OpenableFileName $segments[$segments.Length - 1])) { Stop-Helper 'REJECT bad-extension' 3 }",
+        "  }",
+      ]),
+      // 루트 고리 — 파일 가지와 폴더 가지.
+      crlf([
+        "      $state = Test-FileState $full",
+        "      if ($state -ceq 'directory') { $NotAFile = $true; break }",
+        "      if ($state -cne 'found') { continue }",
+      ]),
+      crlf(["    } else {", "      # (f) 폴더가 아니면(없음 · 파일 · 서버에 못 닿음) 다음 루트로.", "      if ((Test-FolderState $full) -ne 'found') { continue }", "    }"]),
+      // 여는 자리 — 파일(연결 프로그램)과 폴더(탐색기).
+      crlf([
+        "  if ($Mode -ceq 'file') {",
+        "    if ([System.IO.Directory]::Exists($full)) { Stop-Helper 'REJECT not-a-file' 3 }",
+        "    if (-not [System.IO.File]::Exists($full)) { Stop-Helper 'NOT-FOUND' 4 }",
+        "    Start-Process -FilePath $full",
+        "    exit 0",
+        "  }",
+      ]),
+      crlf([
+        "  if (-not [System.IO.Directory]::Exists($full)) { Stop-Helper 'NOT-FOUND' 4 }",
+        "  $start = New-Object System.Diagnostics.ProcessStartInfo",
+        "  $start.FileName = Join-Path $env:SystemRoot 'explorer.exe'",
+        `  $start.Arguments = '"' + $full + '\\"'`,
+        "  $start.UseShellExecute = $false",
+        "  [void][System.Diagnostics.Process]::Start($start)",
+        "  exit 0",
+      ]),
+      // 두 명령의 DRY_RUN 줄 — 글자 그대로.
+      "  if ($DryRun -and ($Mode -ceq 'file')) { Stop-Helper ('OPEN-FILE ' + $full) 0 }\r\n",
+      "  if ($DryRun) { Stop-Helper ('OPEN ' + $full) 0 }\r\n",
+    ];
+    for (const block of untouched) {
+      assert.ok(script.includes(block), `바뀌었다:\n${block}`);
+    }
+    // 🔴 가지는 셋뿐이다 — 접두어를 보는 자리가 늘지도 줄지도 않았다.
+    assert.equal(script.match(/\$link\.StartsWith\(/g)?.length, 3);
+  });
+});
+
+describe("🔴 PDF 변환 — DSS_FOLDER_DRY_RUN=1 로 실제로 돌린다", { skip: WINDOWS_ONLY, concurrency: 4 }, () => {
+  const FOLDER = "D260908 INVENIA T2RCONT-AD2 WN3947 1802034 점검요청";
+  let parent = "";
+  let root = "";
+  let outside = "";
+  let scriptPath = "";
+  let namesBefore: string[] = [];
+
+  before(async () => {
+    parent = await mkdtemp(path.join(os.tmpdir(), "dss-folder-xlsx2pdf-test-"));
+    root = path.join(parent, "연락서 공유폴더");
+    outside = path.join(parent, "바깥 폴더");
+    await mkdir(path.join(root, FOLDER), { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(outside, "바깥 장부.xlsx"), "x");
+
+    await writeFile(path.join(root, FOLDER, "D260908 연락서 (주)한국 & 제어 100%.xlsx"), "x");
+    await writeFile(path.join(root, FOLDER, "대문자.XLSX"), "x");
+    await writeFile(path.join(root, FOLDER, "점.둘.있는.xlsx"), "x");
+    // 🔴 결과 자리에 **보통 파일**이 이미 있다 — 덮어쓰기(사용자 결정)라 통과해야 한다.
+    await writeFile(path.join(root, FOLDER, "덮어쓰기.xlsx"), "x");
+    await writeFile(path.join(root, FOLDER, "덮어쓰기.pdf"), "낡은 PDF");
+    // 🔴 .xlsx 밖 — 디스크에 **실제로 있어도** 거절해야 한다.
+    for (const name of ["연락서.xlsm", "연락서.xls", "연락서.pdf", "설치.exe", "문서"]) {
+      await writeFile(path.join(root, FOLDER, name), "x");
+    }
+    // 🔴 폴더에 .xlsx 이름을 붙인 함정.
+    await mkdir(path.join(root, FOLDER, "함정.xlsx"), { recursive: true });
+    // 🔴 **결과 자리가 바로 가기**인 함정 — 원본은 멀쩡한 파일이지만 쓸 곳이 루트 밖을 가리킨다.
+    await writeFile(path.join(root, FOLDER, "출력함정.xlsx"), "x");
+    await symlink(outside, path.join(root, FOLDER, "출력함정.pdf"), "junction");
+    // 🔴 지나는 길이 바로 가기.
+    await symlink(outside, path.join(root, FOLDER, "바로가기"), "junction");
+
+    scriptPath = path.join(parent, "open-dss-folder.ps1");
+    await writeFile(scriptPath, quoteFolderHelperScriptBytes({ uncRoot: root }));
+    namesBefore = (await readdir(path.join(root, FOLDER))).sort();
+  });
+
+  after(async () => {
+    if (parent) await rm(parent, { recursive: true, force: true });
+  });
+
+  function runHelper(args: readonly string[]): Promise<RunResult> {
+    return runPowerShell(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath, ...args], {
+      env: { DSS_FOLDER_DRY_RUN: "1" },
+    });
+  }
+
+  async function assertOutcome(args: readonly string[], expected: string, code: number): Promise<void> {
+    const result = await runHelper(args);
+    assert.equal(result.stdout.trim(), expected, `stderr: ${result.stderr}`);
+    assert.equal(result.code, code);
+  }
+
+  /** 원본 이름 하나를 주면 `XLSX2PDF <원본> -> <결과>` 를 기대한다. */
+  function expectedLine(name: string, pdfName: string): string {
+    return `XLSX2PDF ${path.join(root, FOLDER, name)} -> ${path.join(root, FOLDER, pdfName)}`;
+  }
+
+  // ── 통과해야 하는 것 ─────────────────────────────────────────────────────
+
+  test("🔴 결과는 원본과 같은 폴더의 같은 이름 .pdf 다 — 다른 곳에 쓸 수 없다", async () => {
+    const name = "D260908 연락서 (주)한국 & 제어 100%.xlsx";
+    const result = await runHelper([rawConvertLink(`${FOLDER}/${name}`)]);
+    assert.equal(result.code, 0, result.stderr);
+    const [source, output] = result.stdout.trim().replace("XLSX2PDF ", "").split(" -> ");
+    // 🔴 폴더가 같다 · 이름이 확장자만 다르다 — 이 둘이 「아무 데나 쓰기」를 막는 규칙 전부다.
+    assert.equal(path.dirname(output), path.dirname(source));
+    assert.equal(path.basename(output), `${path.basename(source, ".xlsx")}.pdf`);
+    assert.equal(output, path.join(root, FOLDER, "D260908 연락서 (주)한국 & 제어 100%.pdf"));
+    // 🔴 결과도 루트 아래다.
+    assert.ok(output.toLowerCase().startsWith(`${root.toLowerCase()}\\`), output);
+  });
+
+  test("🔴 대문자 .XLSX 도 받고, 결과는 소문자 .pdf 다", async () => {
+    await assertOutcome([rawConvertLink(`${FOLDER}/대문자.XLSX`)], expectedLine("대문자.XLSX", "대문자.pdf"), 0);
+  });
+
+  test("🔴 이름에 점이 여럿이면 **맨 뒤 확장자만** 바뀐다", async () => {
+    await assertOutcome([rawConvertLink(`${FOLDER}/점.둘.있는.xlsx`)], expectedLine("점.둘.있는.xlsx", "점.둘.있는.pdf"), 0);
+  });
+
+  test("🔵 같은 이름의 PDF 가 이미 있어도 통과한다 — 덮어쓴다(사용자 결정)", async () => {
+    await assertOutcome([rawConvertLink(`${FOLDER}/덮어쓰기.xlsx`)], expectedLine("덮어쓰기.xlsx", "덮어쓰기.pdf"), 0);
+    // 🔴 DRY_RUN 이라 낡은 PDF 는 그대로다 — 시험이 디스크를 건드리지 않았다.
+    assert.equal(await readFile(path.join(root, FOLDER, "덮어쓰기.pdf"), "utf8"), "낡은 PDF");
+  });
+
+  test("레지스트리 명령과 같은 모양으로 불러도 돈다", async () => {
+    const link = rawConvertLink(`${FOLDER}/대문자.XLSX`);
+    const tail = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${scriptPath}" "${link}"`;
+    const result = await runPowerShell([tail], { env: { DSS_FOLDER_DRY_RUN: "1" }, verbatim: true });
+    assert.equal(result.stdout.trim(), expectedLine("대문자.XLSX", "대문자.pdf"), result.stderr);
+    assert.equal(result.code, 0);
+  });
+
+  // ── 🔴 거절 ─────────────────────────────────────────────────────────────
+
+  test("🔴 .xlsx 가 아니면 거절한다 — .xlsm · .xls · .pdf 까지(읽기 허용 목록보다 좁다)", async () => {
+    for (const name of ["연락서.xlsm", "연락서.xls", "연락서.pdf", "설치.exe", "문서", ".xlsx", "연락서.xlsxx"]) {
+      await assertOutcome([rawConvertLink(`${FOLDER}/${name}`)], "REJECT bad-extension", 3);
+    }
+    // 읽기 쪽 허용 목록에는 .xlsm 이 들어 있다 — 🔴 **두 목록은 일부러 다르다.**
+    assert.ok(QUOTE_FOLDER_OPENABLE_EXTENSIONS.includes("xlsm"));
+    assert.notEqual(QUOTE_FOLDER_XLSX2PDF_SOURCE_EXTENSION, "xlsm");
+  });
+
+  test("🔴 폴더를 가리키면 거절 — 루트 자체 · 중간 폴더 · .xlsx 이름을 붙인 폴더", async () => {
+    await assertOutcome([rawConvertLink(FOLDER)], "REJECT bad-extension", 3);
+    await assertOutcome([rawConvertLink(`${FOLDER}/함정.xlsx`)], "REJECT not-a-file", 3);
+  });
+
+  test("🔴 루트 밖은 거절 — .. · 절대 경로 · 다른 드라이브 · 다른 UNC", async () => {
+    for (const relative of [
+      "../바깥 폴더/바깥 장부.xlsx",
+      `${FOLDER}/../../바깥 폴더/바깥 장부.xlsx`,
+      "C:/Windows/장부.xlsx",
+      "/Windows/장부.xlsx",
+      "\\\\OTHERNAS\\share\\장부.xlsx",
+      "//OTHERNAS/share/장부.xlsx",
+      `${FOLDER}\\연락서.xlsx`,
+      `${FOLDER}/연락서.xlsx:stream`,
+      `${FOLDER}//연락서.xlsx`,
+      `${FOLDER}/연락서.xlsx.`,
+      `${FOLDER}/연락서.xlsx `,
+    ]) {
+      await assertOutcome([rawConvertLink(relative)], "REJECT bad-path", 3);
+    }
+    await assertOutcome([rawConvertLink(path.join(outside, "바깥 장부.xlsx").replace(/\\/g, "/"))], "REJECT bad-path", 3);
+  });
+
+  test("🔴 바로 가기(정션)를 지나는 경로는 거절 — 읽는 쪽과 같은 잣대다", async () => {
+    await assertOutcome([rawConvertLink(`${FOLDER}/바로가기/바깥 장부.xlsx`)], "REJECT reparse-point", 3);
+  });
+
+  /**
+   * 🔴 **쓰기에만 있는 함정.** 원본은 루트 안의 멀쩡한 `.xlsx` 이고 지나는 길에도 바로 가기가
+   * 없다 — 읽는 명령이었다면 통과했을 것이다. 그런데 **쓸 자리**(같은 이름의 `.pdf`)가 루트
+   * 밖을 가리키는 바로 가기다. 거기에 쓰면 사내 서류함 밖에 쓰인다.
+   */
+  test("🔴 결과 자리가 바로 가기면 거절 — 원본이 멀쩡해도 쓰지 않는다", async () => {
+    await assertOutcome([rawConvertLink(`${FOLDER}/출력함정.xlsx`)], "REJECT bad-output", 3);
+  });
+
+  test("없는 파일은 NOT-FOUND — 지어내지 않는다", async () => {
+    await assertOutcome([rawConvertLink(`${FOLDER}/없는 장부.xlsx`)], "NOT-FOUND", 4);
+  });
+
+  test("🔴 모양 아닌 주소는 거절 — 접두어가 조금만 달라도", async () => {
+    const body = rawConvertLink(`${FOLDER}/대문자.XLSX`).slice(QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX.length);
+    for (const link of [
+      `dss-folder://xlsx2pdf/?q=${body}`,
+      `DSS-FOLDER://xlsx2pdf/?p=${body}`,
+      `dss-folder://XLSX2PDF/?p=${body}`,
+      `dss-folder://xlsx2Pdf/?p=${body}`,
+      `dss-folder://xlsx-2-pdf/?p=${body}`,
+      `${QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX}${"A".repeat(QUOTE_FOLDER_LINK_MAX_ENCODED_LENGTH + 4)}`,
+    ]) {
+      await assertOutcome([link], "REJECT not-a-folder-link", 2);
+    }
+  });
+
+  test("🔴 인코딩이 표준이 아니면 거절 · 인자가 하나가 아니면 거절", async () => {
+    for (const encoded of ["", "A", "YR", Buffer.from([0xff]).toString("base64url")]) {
+      await assertOutcome([`${QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX}${encoded}`], "REJECT bad-encoding", 2);
+    }
+    const link = rawConvertLink(`${FOLDER}/대문자.XLSX`);
+    await assertOutcome([link, link], "REJECT argument-count", 2);
+  });
+
+  // ── 🔴 기존 두 명령은 그대로다 ──────────────────────────────────────────
+
+  test("🔴 같은 폴더에서 폴더 열기 · 파일 열기가 예전 그대로 돈다", async () => {
+    await assertOutcome([linkOf(FOLDER)], `OPEN ${path.join(root, FOLDER)}`, 0);
+    await assertOutcome([fileLinkOf(`${FOLDER}/연락서.xlsm`)], `OPEN-FILE ${path.join(root, FOLDER, "연락서.xlsm")}`, 0);
+    // 🔴 접두어가 동작을 가른다 — 같은 경로라도 명령이 다르면 결과가 다르다.
+    await assertOutcome([fileLinkOf(`${FOLDER}/대문자.XLSX`)], `OPEN-FILE ${path.join(root, FOLDER, "대문자.XLSX")}`, 0);
+    await assertOutcome([linkOf(`${FOLDER}/대문자.XLSX`)], "NOT-FOUND", 4);
+  });
+
+  /**
+   * 🔴 「시험이 사내 서류함을 건드릴 뻔했다」와 같은 잣대 — **쓰는 명령을 시험하면서 디스크에
+   * 아무것도 만들지 않았다**는 것을 숫자로 센다. DRY_RUN 이 Excel 앞에서 멈추기 때문이다.
+   */
+  test("🔴 이 블록이 돌아도 폴더 안이 그대로다 — 쓴 것이 하나도 없다", async () => {
+    assert.deepEqual((await readdir(path.join(root, FOLDER))).sort(), namesBefore);
   });
 });
 
@@ -1513,6 +1901,47 @@ describe("파일 없이 도는 설치 명령 본문", () => {
 
   test("붙여넣기 한 번으로 끝난다 — 줄바꿈이 없다", () => {
     assert.equal(/[\r\n]/.test(command), false);
+  });
+
+  /**
+   * ============================================================================
+   * 🔴 2026-10-08 에 **실제로 깨졌다가 고친 것** — 명령 한 줄의 길이 한도
+   * ============================================================================
+   * 설치 명령은 도우미 스크립트 전체를 base64 로 품는다. 스크립트의 한글 주석 한 글자는
+   * UTF-8 로 3바이트 → base64 **4글자**가 된다. 그래서 스크립트에 주석 몇 줄을 더하면 명령이
+   * 그 네 배 가까이 늘어난다.
+   *
+   * PDF 변환(xlsx2pdf)을 더하면서 명령이 **34,724 글자**가 되어 Windows 의 명령줄 한도
+   * (CreateProcess · 32,767)를 넘었고, 이 저장소의 시험 하나가 `spawn ENAMETOOLONG` 으로
+   * 깨졌다(아래 「설치 명령이 품은 ZONEHOSTS …」). 스크립트 안의 주석을 줄여 되돌렸다 —
+   * **까닭을 적는 자리는 이 서버 모듈의 머리말이지, PC 에 깔리는 .ps1 이 아니다.**
+   *
+   * 🔴 그러므로 **도우미 스크립트에 한글 주석을 늘릴 때마다 이 시험이 먼저 운다.** 남은 자리가
+   * 얼마 없다(아래 숫자). 다음에 또 막히면 주석을 줄이거나, HELPER payload 를 압축하는
+   * 조각을 따로 잡아야 한다(설치 절차가 한 벌이므로 설치 파일 쪽과 함께 바꿔야 한다).
+   * ============================================================================
+   */
+  test("🔴 명령 한 줄이 Windows 명령줄 한도 안이다 — 넘으면 설치가 통째로 막힌다", () => {
+    // Windows CreateProcess 의 lpCommandLine 한도. powershell.exe 전체 경로 · 깃발 ·
+    // 따옴표가 앞에 붙으므로 그만큼 뺀 자리에 들어가야 한다.
+    const WINDOWS_COMMAND_LINE_MAX = 32767;
+    const INVOCATION_OVERHEAD = 256;
+    // 루트를 가장 많이 심은 PC 가 가장 길다 — 설정이 꽉 찬 경우로 잰다.
+    const widest = buildQuoteFolderHelperInlineInstallCommand({
+      uncRoot: "\\\\10.77.88.99\\견적서 공유폴더\\하위",
+      uncRootAlt: "\\\\DSS-NAS-LONG-NAME\\견적서 공유폴더\\하위",
+      extraRoots: [
+        "\\\\10.77.88.99\\고객사 현황표",
+        "\\\\DSS-NAS-LONG-NAME\\고객사 현황표",
+        "\\\\10.77.88.99\\연락서 공유폴더",
+        "\\\\10.77.88.99\\수리 관련 서류",
+      ],
+    });
+    assert.ok(
+      widest.length + INVOCATION_OVERHEAD < WINDOWS_COMMAND_LINE_MAX,
+      `설치 명령이 ${widest.length} 글자다 — 한도 ${WINDOWS_COMMAND_LINE_MAX} 를 넘보고 있다. ` +
+        "도우미 스크립트의 한글 주석을 줄이거나 payload 압축 조각을 잡아라."
+    );
   });
 
   test("🔴 설치 절차가 설치 파일과 한 벌이다 — 매체가 달라서 다른 두 자리만 갈아 끼웠다", () => {

@@ -27,8 +27,10 @@ import {
  * ── 🔴 불변식 넷 ─────────────────────────────────────────────────────────
  * 이 도우미는 **다른 웹사이트도 부를 수 있는 입구**다.
  *   (a) 루트(들) 아래의 **폴더**를 탐색기로 열고, 루트(들) 아래의 **허용 목록에 든 확장자의
- *       파일 하나**를 그 PC 의 연결 프로그램으로 연다. 주소의 접두어가 어느 쪽인지를 가른다
- *       (`open/` → 폴더 · `openfile/` → 파일).
+ *       파일 하나**를 그 PC 의 연결 프로그램으로 연다. 그리고 2026-10-08 부터 루트(들) 아래의
+ *       **`.xlsx` 한 장**을 그 PC 의 Excel 로 **같은 폴더에 PDF 로 바꿔 쓴다**. 주소의 접두어가
+ *       어느 쪽인지를 가른다
+ *       (`open/` → 폴더 · `openfile/` → 파일 · `xlsx2pdf/` → PDF 변환).
  *
  *       ── 🔴 2026-10-05 에 **무엇이 · 왜 바뀌었나** ──────────────────────
  *       예전 이 자리에는 「**폴더만** 연다 — 파일 · 프로그램은 열거나 실행하지 않는다」가
@@ -60,6 +62,35 @@ import {
  *       **루트 밖 · 바로 가기를 지나는 경로**다. 막지 못한 것은 **허용 목록에 든 문서 형식 자체의
  *       위험**이다 — `.xlsm` 매크로, 문서 뷰어의 취약점은 이 도우미가 걸러 주지 않는다.
  *       (허용 목록에 `.xlsm` 을 일부러 넣은 까닭은 domain/quote-folder-file-link.ts 머리말.)
+ *
+ *       ── 🔴 2026-10-08 — 이 도우미가 **처음으로 파일을 쓴다**(`xlsx2pdf/`) ──
+ *       지금까지 두 명령(`open/` · `openfile/`)은 **읽기만** 했다. 셋째 명령은 성질이 다르다:
+ *       그 PC 의 Excel 로 `.xlsx` 한 장을 열어 **사내 서류함(공유폴더)에 PDF 를 쓴다.** 읽기의
+ *       최악은 「보면 안 될 문서가 열린다」였지만, 쓰기의 최악은 「있던 것이 사라진다」다.
+ *       그래서 울타리를 **좁혀서** 더한다 — 검사 일곱은 그대로 지나고, 그 위에 넷을 더 건다:
+ *         8.  🔴 **원본이 `.xlsx` 일 때만**(Test-XlsxFileName). 허용 목록(열여덟 개)보다 훨씬
+ *             좁다 — `.xlsm` · `.xls` 도 거절한다. 읽는 명령과 **다른 목록**이다(2026-10-08 결정).
+ *         9.  🔴 **결과 경로를 받지 않는다.** 주소가 나르는 것은 원본 하나뿐이고, 쓰는 곳은
+ *             **원본과 같은 폴더의 같은 이름 `.pdf` 하나**로 코드가 정한다(ChangeExtension 이
+ *             아니라 `.xlsx` 다섯 글자를 떼고 `.pdf` 를 붙인 뒤, 폴더와 이름을 **다시 맞춰 본다**).
+ *             결과 경로를 받는 순간 이 명령은 「아무 데나 쓰기」가 된다.
+ *         10. 🔴 **루트 안 검사를 결과에도 건다** — 원본과 **같은 잣대**로 한 번 더(`$targetRoot`
+ *             는 원본이 실제로 걸린 그 루트다). 같은 폴더이니 당연하지만, 당연한 것을 믿지 않는다.
+ *         11. 🔴 **결과 자리가 바로 가기 · 폴더면 쓰지 않는다**(Test-WritableOutput). 원본 쪽
+ *             Test-NoReparsePoint 는 **있는 것**만 볼 수 있어 「아직 없는 PDF」에 쓸 수 없다 —
+ *             그래서 「없으면 괜찮다 · 보통 파일이면 괜찮다 · 그 밖은 전부 거절」로 따로 둔다.
+ *             (바로 가기인 `연락서.pdf` 에 쓰면 그 바로 가기가 가리키는 **루트 밖**에 쓰인다.)
+ *       🔵 **덮어쓴다**(사용자 결정 2026-10-08) — 같은 이름이 있으면 지우고 새로 쓴다. 지우는
+ *          것은 **위에서 정한 그 한 경로**뿐이다(`[System.IO.File]::Delete($pdf)` 가 스크립트에
+ *          딱 한 번 있고, 인자가 `$pdf` 다 — 시험이 센다).
+ *       🔵 **Excel 창은 숨긴다**(사용자 결정) — `Visible = $false`. 🔴 **반드시 `finally` 로**
+ *          통합문서를 닫고 Excel 을 끝내고 COM 을 놓는다. 안 그러면 Excel 유령 프로세스가 쌓여
+ *          그 PC 가 느려지고, 다음 변환이 엉뚱한 창을 붙든다.
+ *       🔴 **원본 `.xlsx` 는 바꾸지 않는다** — 읽기 전용으로 연다(`Workbooks.Open(…, 0, $true)`)
+ *          고 닫을 때도 저장하지 않는다(`Close($false)`).
+ *       🔴 **Excel 이 없는 PC 에서는 조용히 끝낸다**(`REJECT no-excel`, 끝냄 5) — 지금 거절들과
+ *          같은 모양이다. **화면은 그것을 알 수 없다**(브라우저는 도우미가 무엇을 했는지 모른다).
+ *          그래서 다음 조각에서 **서버가 폴더를 다시 읽어** PDF 가 생겼는지 확인한다.
  *
  *       🔴 루트가 여럿이어도 이 검사들은 **루트마다 따로** 한다 — 어느 루트 아래도 아닌 경로는
  *       어느 루트로도 열리지 않는다(requireRoots · 스크립트의 (e~f) 고리).
@@ -174,6 +205,31 @@ export const CONTACT_FOLDER_HELPER_ROOT_ENV = "CONTACT_FOLDER_ARCHIVE_UNC_ROOT";
  * 수리 관련 서류가 모여 있는 바로 그 폴더까지).
  */
 export const REPAIR_DOCS_FOLDER_HELPER_ROOT_ENV = "REPAIR_DOCS_ARCHIVE_UNC_ROOT";
+/**
+ * ============================================================================
+ * 🔴 셋째 명령의 접두어 — `dss-folder://xlsx2pdf/?p=<base64url(상대 .xlsx 경로)>` (2026-10-08)
+ * ============================================================================
+ * 새 스킴을 만들지 않는다 — 레지스트리 자리가 `HKCU\Software\Classes\dss-folder` 하나뿐이라
+ * 스킴을 늘리면 설치가 한 벌 더 는다(domain/quote-folder-file-link.ts 머리말과 같은 까닭).
+ * 접두어만 더하면 **같은 스크립트 · 같은 설치 한 번**으로 끝난다.
+ *
+ * 🔴 **이 접두어가 여기(server)에 있는 까닭** — 이 조각은 **도우미 쪽만** 만든다. 주소를
+ * **만드는** 쪽(서버 통로 · 화면)은 다음 조각의 일이고, 그때 domain/ 에 폴더 · 파일 주소와
+ * 같은 모양의 모듈(규칙 검사 · base64url 싸기)이 생긴다. 지금 domain/ 에 반쪽을 만들어 두면
+ * 쓰는 곳 없는 코드가 남는다. 다음 조각이 domain/ 으로 옮기고 여기서는 그것을 읽어 쓰면 된다.
+ * ============================================================================
+ */
+export const QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX = "dss-folder://xlsx2pdf/?p=";
+
+/**
+ * 🔴 PDF 로 바꿀 수 있는 **원본 확장자 — 이것 하나뿐이다**(사용자 결정 2026-10-08).
+ * 읽기 허용 목록(QUOTE_FOLDER_OPENABLE_EXTENSIONS · 열여덟 개)과 **일부러 다르다** — 쓰는
+ * 명령이라 좁힌다. `.xlsm` 도 `.xls` 도 여기서는 거절이다.
+ */
+export const QUOTE_FOLDER_XLSX2PDF_SOURCE_EXTENSION = "xlsx";
+/** 🔴 결과 확장자. 결과 경로는 **받지 않는다** — 원본 이름의 확장자만 이것으로 바꾼다. */
+export const QUOTE_FOLDER_XLSX2PDF_OUTPUT_EXTENSION = "pdf";
+
 export const QUOTE_FOLDER_HELPER_SCRIPT_FILE_NAME = "open-dss-folder.ps1";
 export const QUOTE_FOLDER_HELPER_INSTALLER_FILE_NAME = "install-dss-folder-helper.cmd";
 /** 이 값이 "1" 이면 스크립트가 탐색기를 여는 대신 결과를 표준출력에 적고 끝낸다(시험용). */
@@ -540,8 +596,12 @@ export function quoteFolderHelperZoneHosts(input: QuoteFolderHelperRootsInput): 
  * open-dss-folder.ps1 의 본문(줄 끝 CRLF). 할 일과 거절 규칙은 머리말 (a) · (b).
  *
  * 표준출력 형식(DSS_FOLDER_DRY_RUN=1 일 때만): `OPEN <폴더 전체 경로>` ·
- * `OPEN-FILE <파일 전체 경로>` · `NOT-FOUND` · `REJECT <까닭>`. 끝남 코드: 0 열었음 ·
- * 2 주소 모양 · 3 경로 규칙 · 루트 밖 · 바로 가기 · 확장자 · 파일 아님 · 4 없음 · 9 그 밖의 오류.
+ * `OPEN-FILE <파일 전체 경로>` · `XLSX2PDF <원본 전체 경로> -> <결과 전체 경로>` · `NOT-FOUND` ·
+ * `REJECT <까닭>`. 끝남 코드: 0 열었음(바꿨음) · 2 주소 모양 · 3 경로 규칙 · 루트 밖 · 바로 가기 ·
+ * 확장자 · 파일 아님 · 쓸 곳이 규칙 밖 · 4 없음 · 🔴 5 이 PC 에 Excel 이 없음 · 9 그 밖의 오류.
+ *
+ * 🔴 DRY_RUN 에서는 **Excel 을 부르지 않고 쓰지도 않는다** — 「어디에 쓸 것인가」까지만 적고
+ * 끝낸다. 그래서 시험이 **쓰지 않고도** 결과 경로 규칙을 값으로 확인할 수 있다.
  */
 export function buildQuoteFolderHelperScript(input: QuoteFolderHelperRootsInput): string {
   const roots = requireRoots(input);
@@ -554,8 +614,10 @@ export function buildQuoteFolderHelperScript(input: QuoteFolderHelperRootsInput)
 # 브라우저의 dss-folder:// 주소를 받아, 아래 루트 아래의 것만 엽니다.
 #   dss-folder://open/?p=...     폴더를 Windows 탐색기로
 #   dss-folder://openfile/?p=... 파일 하나를 이 PC 의 연결 프로그램으로(아래 허용 목록의 확장자만)
+#   dss-folder://xlsx2pdf/?p=... .xlsx 한 장을 이 PC 의 Excel 로 PDF 로 바꿔 같은 폴더에 씁니다
 # 허용 목록 밖 확장자 · 확장자 없는 이름 · 폴더에 파일 이름을 붙인 것 · 바로 가기(정션 · 심볼릭)를
-# 지나는 경로 · 루트 밖은 열지 않습니다. 기록(로그) · 네트워크 · 다른 명령이 없습니다.
+# 지나는 경로 · 루트 밖은 열지 않습니다. 기록(로그) · 네트워크가 없습니다.
+# 🔴 쓰는 곳은 원본과 같은 폴더의 같은 이름 .pdf 하나뿐입니다(주소가 고르지 못합니다).
 #
 # 지우려면:
 #   reg delete "HKCU\Software\Classes\dss-folder" /f
@@ -573,6 +635,10 @@ Set-StrictMode -Version 2.0
 $Roots = @(${roots.map((r) => powerShellSingleQuoted(r)).join(", ")})
 $Prefix = '${QUOTE_FOLDER_LINK_PREFIX}'
 $FilePrefix = '${QUOTE_FOLDER_FILE_LINK_PREFIX}'
+# 🔴 셋째 — 쓰는 명령. 원본 확장자는 이것 하나뿐입니다.
+$ConvertPrefix = '${QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX}'
+$ConvertSourceSuffix = '.${QUOTE_FOLDER_XLSX2PDF_SOURCE_EXTENSION}'
+$ConvertOutputSuffix = '.${QUOTE_FOLDER_XLSX2PDF_OUTPUT_EXTENSION}'
 
 # 🔴 열 수 있는 확장자 — **허용 목록**입니다. 여기 없는 것은 전부 거절합니다(거절 목록이
 # 아닙니다). 서버의 domain/quote-folder-file-link.ts 와 글자 그대로 같은 한 벌입니다.
@@ -651,6 +717,30 @@ function Test-OpenableFileName([string]$Name) {
   return $false
 }
 
+# 🔴 (검사 8) .xlsx 하나뿐입니다 — 쓰는 명령이라 위 허용 목록보다 좁습니다.
+function Test-XlsxFileName([string]$Name) {
+  $dot = $Name.LastIndexOf([char]'.')
+  if ($dot -lt 1) { return $false }
+  if ($dot -ge ($Name.Length - 1)) { return $false }
+  return ($Name.Substring($dot).ToLowerInvariant() -ceq $ConvertSourceSuffix)
+}
+
+# 🔴 (검사 11) 결과 자리에 써도 되는가 — 없으면 참(아직 안 만든 PDF) · 보통 파일이면 참
+# (덮어씁니다) · 바로 가기면 거짓(루트 밖에 쓰입니다) · 폴더면 거짓 · 확인 못 해도 거짓.
+function Test-WritableOutput([string]$Path) {
+  $attributes = $null
+  try {
+    $attributes = [System.IO.File]::GetAttributes($Path)
+  } catch [System.IO.FileNotFoundException] {
+    return $true
+  } catch {
+    return $false
+  }
+  if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { return $false }
+  if (($attributes -band [System.IO.FileAttributes]::Directory) -ne 0) { return $false }
+  return $true
+}
+
 # 루트부터 그 폴더(또는 파일)까지 마디마다 바로 가기(정션 · 심볼릭 링크)가 없는가.
 # 읽다가 실패하면 $false — 확인하지 못한 것은 열지 않는다(안전한 쪽으로).
 function Test-NoReparsePoint([string]$RootFull, [string]$Relative) {
@@ -694,6 +784,7 @@ try {
 
   # (b) dss-folder://open/?p= (폴더) · dss-folder://openfile/?p= (파일) 모양이 아니면 끝.
   #     🔴 접두어가 **동작을 가릅니다.** 폴더 쪽은 예전과 한 글자도 다르지 않습니다.
+  #     xlsx2pdf/ (🔴 쓰는 명령)가 더해졌고 앞의 둘은 바뀌지 않았습니다.
   $Mode = 'folder'
   $NotAFile = $false
   if ($link.StartsWith($Prefix, [System.StringComparison]::Ordinal)) {
@@ -703,6 +794,10 @@ try {
     if ($link.Length -gt ($FilePrefix.Length + $MaxEncodedLength)) { Stop-Helper 'REJECT not-a-folder-link' 2 }
     $Mode = 'file'
     $encoded = $link.Substring($FilePrefix.Length)
+  } elseif ($link.StartsWith($ConvertPrefix, [System.StringComparison]::Ordinal)) {
+    if ($link.Length -gt ($ConvertPrefix.Length + $MaxEncodedLength)) { Stop-Helper 'REJECT not-a-folder-link' 2 }
+    $Mode = 'xlsx2pdf'
+    $encoded = $link.Substring($ConvertPrefix.Length)
   } else {
     Stop-Helper 'REJECT not-a-folder-link' 2
   }
@@ -728,10 +823,18 @@ try {
     if (-not (Test-OpenableFileName $segments[$segments.Length - 1])) { Stop-Helper 'REJECT bad-extension' 3 }
   }
 
+  # (d-3) 🔴 검사 8 — .xlsx 밖은 여기서 끝납니다.
+  if ($Mode -ceq 'xlsx2pdf') {
+    $segments = $relative.Split([char]'/')
+    if (-not (Test-XlsxFileName $segments[$segments.Length - 1])) { Stop-Helper 'REJECT bad-extension' 3 }
+  }
+
   # (e~f) 루트를 차례로 — 담김 검사는 **루트마다 따로** 하고, 처음으로 실제 있는 것을 고른다.
   $target = $null
   $contained = $false
   $reparse = $false
+  # 🔴 고른 것이 어느 루트 아래였나 — 결과 경로에도 같은 담김 검사를 겁니다.
+  $targetRoot = ''
   foreach ($candidateRoot in $Roots) {
     # (e) 🔴 검사 2 — 루트와 이어 편 뒤, 루트 + '\' 로 시작하는지(대소문자 무시).
     $rootFull = [System.IO.Path]::GetFullPath($candidateRoot).TrimEnd('\')
@@ -742,6 +845,11 @@ try {
     if ($Mode -ceq 'file') {
       # (f-2) 🔴 검사 5 — 파일인가. 폴더에 파일 이름을 붙여 둔 것이면 다음 루트로 넘기지 않고
       #       여기서 멈춘다(안전한 쪽) — 수상한 것을 봤으면 열지 않는다.
+      $state = Test-FileState $full
+      if ($state -ceq 'directory') { $NotAFile = $true; break }
+      if ($state -cne 'found') { continue }
+    } elseif ($Mode -ceq 'xlsx2pdf') {
+      # (f-3) 🔴 원본이 실제 파일일 때만 — (f-2) 와 같은 모양입니다.
       $state = Test-FileState $full
       if ($state -ceq 'directory') { $NotAFile = $true; break }
       if ($state -cne 'found') { continue }
@@ -757,12 +865,14 @@ try {
     if (-not (Test-NoReparsePoint $rootFull $relative)) { $reparse = $true; break }
 
     $target = $full
+    $targetRoot = $rootFull
     break
   }
 
   if ($reparse) {
     # 🔴 폴더 쪽 문구는 예전 그대로다 — 파일 쪽만 따로 적는다.
     if ($Mode -ceq 'file') { Show-Message '이 파일은 바로 가기라 열 수 없습니다.' }
+    elseif ($Mode -ceq 'xlsx2pdf') { Show-Message '이 파일은 바로 가기라 PDF 로 바꿀 수 없습니다.' }
     else { Show-Message '이 폴더는 바로 가기 폴더라 열 수 없습니다.' }
     Stop-Helper 'REJECT reparse-point' 3
   }
@@ -778,13 +888,67 @@ try {
   if ($null -eq $target) {
     # 🔴 폴더 쪽 문구는 예전 그대로다 — 파일 쪽만 따로 적는다.
     if ($Mode -ceq 'file') { Show-Message ('파일을 찾을 수 없습니다.' + [System.Environment]::NewLine + '공유폴더 연결을 확인하거나, 파일이 옮겨졌는지 확인해 주세요.') }
+    elseif ($Mode -ceq 'xlsx2pdf') { Show-Message ('파일을 찾을 수 없습니다.' + [System.Environment]::NewLine + '공유폴더 연결을 확인하거나, 파일이 옮겨졌는지 확인해 주세요.') }
     else { Show-Message ('폴더를 찾을 수 없습니다.' + [System.Environment]::NewLine + '공유폴더 연결을 확인하거나, 견적서 폴더가 옮겨졌는지 확인해 주세요.') }
     Stop-Helper 'NOT-FOUND' 4
   }
   $full = $target
 
+  # (g-3a) 🔴 검사 9 · 10 · 11 — 쓸 곳은 여기서 정합니다(주소가 고르지 못합니다): '.xlsx' 를
+  #        '.pdf' 로 바꾼 뒤, 같은 폴더 · 같은 이름인지 · 루트 안인지 · 써도 되는 자리인지.
+  $pdf = ''
+  if ($Mode -ceq 'xlsx2pdf') {
+    if ($full.EndsWith($ConvertSourceSuffix, [System.StringComparison]::OrdinalIgnoreCase)) {
+      $pdf = $full.Substring(0, $full.Length - $ConvertSourceSuffix.Length) + $ConvertOutputSuffix
+    }
+    if ($pdf.Length -eq 0) { Stop-Helper 'REJECT bad-output' 3 }
+    if ([System.IO.Path]::GetDirectoryName($pdf) -cne [System.IO.Path]::GetDirectoryName($full)) { Stop-Helper 'REJECT bad-output' 3 }
+    if ([System.IO.Path]::GetFileName($pdf) -cne ([System.IO.Path]::GetFileNameWithoutExtension($full) + $ConvertOutputSuffix)) { Stop-Helper 'REJECT bad-output' 3 }
+    if (-not $pdf.StartsWith($targetRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)) { Stop-Helper 'REJECT outside-root' 3 }
+    if (-not (Test-WritableOutput $pdf)) { Stop-Helper 'REJECT bad-output' 3 }
+  }
+
   if ($DryRun -and ($Mode -ceq 'file')) { Stop-Helper ('OPEN-FILE ' + $full) 0 }
+  if ($DryRun -and ($Mode -ceq 'xlsx2pdf')) { Stop-Helper ('XLSX2PDF ' + $full + ' -> ' + $pdf) 0 }
   if ($DryRun) { Stop-Helper ('OPEN ' + $full) 0 }
+
+  # (g-3) 🔴 파일을 쓰는 곳은 여기 하나뿐입니다. 창은 띄우지 않고 원본은 읽기 전용으로 엽니다.
+  #       🔴 성공이든 실패든 finally 에서 닫습니다. Excel 이 없으면 조용히 끝냅니다(5).
+  if ($Mode -ceq 'xlsx2pdf') {
+    if ([System.IO.Directory]::Exists($full)) { Stop-Helper 'REJECT not-a-file' 3 }
+    if (-not [System.IO.File]::Exists($full)) { Stop-Helper 'NOT-FOUND' 4 }
+    $excel = $null
+    $book = $null
+    $failed = ''
+    try {
+      try { $excel = New-Object -ComObject Excel.Application } catch { $excel = $null }
+      if ($null -eq $excel) {
+        $failed = 'no-excel'
+      } else {
+        $excel.Visible = $false
+        $excel.DisplayAlerts = $false
+        $book = $excel.Workbooks.Open($full, 0, $true)
+        # 🔵 덮어씁니다 — 지우는 것은 위에서 정한 이 한 경로뿐입니다.
+        if ([System.IO.File]::Exists($pdf)) { [System.IO.File]::Delete($pdf) }
+        # 0 = xlTypePDF
+        $book.ExportAsFixedFormat(0, $pdf)
+      }
+    } catch {
+      $failed = 'convert'
+    } finally {
+      if ($null -ne $book) { try { $book.Close($false) } catch { } }
+      if ($null -ne $excel) { try { $excel.Quit() } catch { } }
+      if ($null -ne $book) { try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($book) } catch { } }
+      if ($null -ne $excel) { try { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) } catch { } }
+      $book = $null
+      $excel = $null
+      [System.GC]::Collect()
+      [System.GC]::WaitForPendingFinalizers()
+    }
+    if ($failed -ceq 'no-excel') { Stop-Helper 'REJECT no-excel' 5 }
+    if ($failed -cne '') { Show-Message 'PDF 로 바꾸지 못했습니다.'; Stop-Helper 'REJECT convert-failed' 9 }
+    exit 0
+  }
 
   # (g-2) 🔴 검사 7 — 이 PC 의 연결 프로그램으로 **그 파일 하나**를 연다.
   #       인자는 그 전체 경로 하나뿐입니다 — 인자 목록을 따로 넘기지 않고, 명령줄을 문자열로
@@ -968,9 +1132,15 @@ export function buildQuoteFolderHelperInstaller(input: QuoteFolderHelperRootsInp
     "rem    - dss-folder://open/...     opens a folder in Windows Explorer",
     "rem    - dss-folder://openfile/... opens ONE file with its associated program,",
     "rem      and only when its extension is on the allow list inside the helper.",
+    "rem    - dss-folder://xlsx2pdf/... turns ONE .xlsx into a PDF with the Excel",
+    "rem      on this PC. This is the ONLY thing the helper ever writes, and the link",
+    "rem      cannot choose where it goes: the PDF is written next to the source,",
+    "rem      with the same name. An existing PDF of that name is replaced. The",
+    "rem      source .xlsx is opened read-only and is never changed. Excel stays",
+    "rem      hidden and is always closed again.",
     "rem  It never runs programs, scripts or shortcuts.",
     "rem  Run this file again to repair the helper or to apply a new share root.",
-    "rem  Older helpers do not know openfile - run this again to add it.",
+    "rem  Older helpers do not know openfile or xlsx2pdf - run this again to add them.",
     "rem",
     "rem  Uninstall (Command Prompt):",
     'rem    reg delete "HKCU\\Software\\Classes\\dss-folder" /f',

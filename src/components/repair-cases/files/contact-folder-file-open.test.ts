@@ -322,12 +322,27 @@ describe("🔴 설치 안내는 모르는 PC 에만 — 표시가 없으면 나�
     assert.ok(CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT.includes("설치 명령 복사"));
     assert.ok(CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT.includes("예전"));
   });
+
+  test("🔴 2026-10-08 — 예전 도우미가 모르는 것이 둘이라고 적는다(파일 열기 · PDF 변환)", () => {
+    assert.ok(CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT.includes("파일 열기를 모릅니다"));
+    assert.ok(CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT.includes("PDF 변환도 모릅니다"));
+    // 🔴 앞 문장은 한 글자도 바꾸지 않았다 — 이 글자를 보는 다른 화면의 시험이 있다
+    //    (quotes/QuoteArchiveFolderSection.test.tsx).
+    assert.ok(
+      CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT.startsWith(
+        "열리지 않으면 [설치 명령 복사]로 도우미를 다시 설치해 주세요 — 예전에 설치한 도우미는 파일 열기를 모릅니다"
+      ),
+      CONTACT_FOLDER_FILE_HELPER_REINSTALL_TEXT
+    );
+  });
 });
 
 describe("🔴 능력별·세대별 표시 — 번호를 올리면 모든 PC 가 다시 묻는다", () => {
   test("세대 번호가 열쇠 이름에 들어간다 · 폴더 열기 표시와 다른 열쇠다", () => {
-    assert.equal(CONTACT_FOLDER_FILE_HELPER_GENERATION, 1);
-    assert.equal(CONTACT_FOLDER_FILE_HELPER_KEY, "dss.helper.gen1.openfile");
+    // 🔴 2026-10-08 — 셋째 명령(xlsx2pdf)이 더해져 1 → 2 로 올렸다. 열쇠 이름이 달라지므로
+    //    모든 PC 가 재설치 안내를 한 번 더 받는다(세대 1 의 표시는 읽히지 않는다).
+    assert.equal(CONTACT_FOLDER_FILE_HELPER_GENERATION, 2);
+    assert.equal(CONTACT_FOLDER_FILE_HELPER_KEY, "dss.helper.gen2.openfile");
     assert.ok(
       CONTACT_FOLDER_FILE_HELPER_KEY.includes(String(CONTACT_FOLDER_FILE_HELPER_GENERATION)),
       CONTACT_FOLDER_FILE_HELPER_KEY
@@ -335,6 +350,15 @@ describe("🔴 능력별·세대별 표시 — 번호를 올리면 모든 PC 가
     // 🔴 옛 열쇠를 **그대로 두었다** — 폴더 열기용이고 성질이 다르다.
     assert.notEqual(CONTACT_FOLDER_FILE_HELPER_KEY, QUOTE_FOLDER_HELPER_CONFIRMED_KEY);
     assert.equal(QUOTE_FOLDER_HELPER_CONFIRMED_KEY, "dss.quoteFolderHelper.confirmed");
+  });
+
+  test("🔴 세대 1 의 표시는 읽히지 않는다 — 번호를 올린 뜻이 바로 이것이다", () => {
+    const store = new Map<string, string>([["dss.helper.gen1.openfile", "1"]]);
+    const storage = () => fakeStorage(store);
+    assert.equal(readContactFolderFileHelperKnown(storage), false);
+    assert.equal(shouldOfferContactFolderFileHelperInstall(storage), true);
+    // 🔴 옛 표시를 지우지도 않는다 — 읽지 않을 뿐이다.
+    assert.equal(store.get("dss.helper.gen1.openfile"), "1");
   });
 
   test("🔴 폴더만 열어 본 PC 는 「파일 열기를 안다」가 아니다 — 옛 표시로는 끄지 못한다", () => {
