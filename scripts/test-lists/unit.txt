@@ -395,6 +395,20 @@ src/lib/server/quote-folder-helper.test.ts
 # 🔴 부르는 시점에 읽는가(모듈 로드 때 굳으면 시험이 환경을 갈아 끼워도 첫 값이 산다).
 # 디스크를 건드리지 않는다 — 실제 공유폴더에 닿지 않는다.
 src/lib/storage/repair-docs-archive.test.ts
+# 같은 모듈에 2026-10-08 에 생긴 **바이트 읽기**(가리킨 서류를 이 건의 연락서 폴더로
+# 가져오기). 이웃 repair-docs-entries.ts 는 내용 읽기를 일부러 두지 않았고, 그 규율을 한 칸
+# 넓힌 자리라 원본과 동작을 둘 다 본다. 🔴 20MB 를 넘으면 **읽기 전에**(stat 이 먼저) 거절 ·
+# 🔴 실행 파일 거절(그리고 .xlsm 통과) · 🔴 경로 규칙 밖과 바로가기 거절 · 🔴 폴더는 안
+# 가져온다 · 🔴 거절 사유에 경로가 한 글자도 없다 · 🔴 쓰기·내보내기(스트림·내려받기)가
+# 한 글자도 없다(운영에서 그 볼륨은 읽기 전용이다). 임시 폴더에서만 돈다.
+src/lib/storage/repair-docs-archive-source.test.ts
+src/lib/storage/repair-docs-file-read.test.ts
+# 그 바이트를 받아 **연락서 폴더 `공통` 에 꽂는** 통로(2026-10-08). 🔴 「1. 수리 관련」에
+# 쓰지 않음 · 🔴 바이트를 브라우저로 안 내보냄 · 🔴 접수 자동 복사와 **같은 함수**로 `공통`
+# 에만 꽂음 · 연락서 폴더를 만들지 않음 · 🔴 권한은 repairCases.files WRITE 하나(새 권한
+# 없음) · 설정이 하나라도 비면 DB·디스크를 안 봄 · 상한과 실행 파일 규칙을 통로가 다시 짜지
+# 않음 · 감사는 새로 꽂았을 때만. `[id]` 는 `*` 로 적는다(대괄호는 글롭 문자클래스가 된다).
+src/app/api/repair-cases/*/share-docs/contact-folder/route-source.test.ts
 src/app/api/quotes/*/archive-folder/route-source.test.ts
 # 그 폴더 **안**을 내는 통로(2026-10-06). 위 패턴은 한 칸만 덮으므로 따로 적는다.
 # 🔴 문지기 토막이 바로 위 통로와 **글자 그대로 같은지**를 두 원본을 견주어 본다(권한도 같은

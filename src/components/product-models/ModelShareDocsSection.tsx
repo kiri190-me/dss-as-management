@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
 import ContactFolderEntryOpenButton from "@/components/repair-cases/files/ContactFolderEntryOpenButton";
 import ContactFolderPlaceOpenButton from "@/components/repair-cases/files/ContactFolderPlaceOpenButton";
@@ -242,15 +242,27 @@ function EntryKindBadge({ entryKind }: { entryKind: ModelShareDocRow["entryKind"
 /**
  * 가리킴 목록만 그린다 — 자기 상태를 갖지 않는다. 🔴 `onRemove` 를 주지 않으면 지우기
  * 단추가 **한 줄에도** 그려지지 않는다.
+ *
+ * ── 🔴 `rowAction` — 줄 오른쪽에 **더 그릴 것** (2026-10-08) ──────────────
+ * 형제 목록(KindShareDocList)과 **같은 자리**다. 이 목록도 두 화면이 함께 쓰고(이 화면과
+ * 수리 건 상세의 파일 관리 탭), 줄마다 붙는 단추가 서로 다르다. 줄의 생김새를 저쪽에
+ * 베껴 두 벌로 만들지 않으려고 자리 하나를 열어 둔다.
+ *
+ * 🔴 **안 넘기면 한 글자도 달라지지 않는다** — `undefined` 면 React 가 아무것도 그리지
+ * 않는다. 이 화면은 넘기지 않으므로 예전 그대로다.
+ * 🔴 **어느 줄에 그릴지도 부르는 쪽의 일**이다 — 여기서 판정하지 않는다.
  */
 export function ModelShareDocList({
   docs,
   isBusy = false,
   onRemove,
+  rowAction,
 }: {
   docs: readonly ModelShareDocRow[];
   isBusy?: boolean;
   onRemove?: (doc: ModelShareDocRow) => void;
+  /** 줄 오른쪽에 더 그릴 것. 주지 않거나 `null` 을 돌려주면 아무것도 늘지 않는다. */
+  rowAction?: (doc: ModelShareDocRow) => ReactNode;
 }) {
   return (
     <ul className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -284,6 +296,8 @@ export function ModelShareDocList({
                     fileName={modelShareDocFileName(doc.relativePath)}
                   />
                 ))}
+              {/* 🔴 [열기] 옆자리 — 안 넘기면 아무것도 그려지지 않는다(머리말). */}
+              {rowAction?.(doc)}
               {onRemove !== undefined && (
                 <button
                   type="button"

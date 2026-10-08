@@ -7,6 +7,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  ModelShareDocList,
   canOpenModelShareDoc,
   modelShareDocDisplayName,
   type ModelShareDocRow,
@@ -78,6 +79,25 @@ const folderDoc = doc({
 
 function markup(docs: ModelShareDocRow[]): string {
   return renderToStaticMarkup(createElement(CaseModelShareDocsSection, { docs }));
+}
+
+const CASE_ID = "99999999-9999-4999-8999-999999999999";
+
+/** 🔴 「가져올 수 있는」 상태를 **넣어 그려 본다** — 글자를 찾지 않고 결과로 잰다. */
+function markupWithCopy(docs: ModelShareDocRow[], overrides: { repairCaseId?: string } = {}): string {
+  return renderToStaticMarkup(
+    createElement(CaseModelShareDocsSection, {
+      docs,
+      repairCaseId: CASE_ID,
+      canCopyToContactFolder: true,
+      ...overrides,
+    })
+  );
+}
+
+/** 그려진 [연락서 폴더에 저장] 단추의 수. */
+function copyButtonCount(html: string): number {
+  return html.match(/data-share-doc-contact-folder-save/g)?.length ?? 0;
 }
 
 describe("① 🔴 한 줄도 없으면 구역을 **아예 그리지 않는다**", () => {
@@ -333,7 +353,9 @@ describe("⑧ 구역이 서는 자리 — 이웃들은 한 글자도 안 바뀌�
     const modelAt = filesScreen.indexOf("<CaseModelShareDocsSection");
     assert.ok(contactAt > 0 && kindAt > contactAt, "공유폴더 구역보다 앞에 섰다");
     assert.ok(modelAt > kindAt, "종류 구역보다 앞에 섰다");
-    assert.ok(flat(filesScreen).includes("<CaseModelShareDocsSection docs={modelShareDocs} />"), "줄들을 안 건넨다");
+    // 🔴 2026-10-08 에 [연락서 폴더에 저장]이 붙으며 칸이 둘 늘었다 — **줄들은 그대로** 건넨다.
+    assert.ok(flat(filesScreen).includes("<CaseModelShareDocsSection docs={modelShareDocs}"), "줄들을 안 건넨다");
+    assert.ok(flat(filesScreen).includes("<CaseModelShareDocsSection docs={modelShareDocs} repairCaseId={resolved.id} canCopyToContactFolder={shareDocCopyEnabled} />"), filesScreen);
   });
 
   test("🔴 본보기(종류 구역)를 고치지 않았다 — 제 자리의 글자가 그대로다", () => {
@@ -368,5 +390,110 @@ describe("⑧ 구역이 서는 자리 — 이웃들은 한 글자도 안 바뀌�
   test("🔴 데모 화면은 이 구역을 받지 않는다 — DB 건에서만 선다", () => {
     assert.ok(flat(filesScreen).includes("<DemoFilesScreen resolved={props.resolved} actingUser={props.actingUser} />"));
     assert.ok(flat(filesScreen).includes("modelShareDocs={props.modelShareDocs ?? []}"));
+  });
+});
+
+describe("⑨ 🔴 더한 것 하나 — [연락서 폴더에 저장] (2026-10-08)", () => {
+  test("🔴 설정 · 권한이 거짓이면 단추가 **아예 안 그려진다** — 기본값이 거짓이다", () => {
+    assert.equal(copyButtonCount(markup([doc(), folderDoc])), 0);
+    // 참이라도 **어느 건인지 모르면** 그리지 않는다 — 보낼 자리가 없다.
+    assert.equal(copyButtonCount(markupWithCopy([doc()], { repairCaseId: "" })), 0);
+  });
+
+  test("🔴 **파일 줄에만** 그린다 — 폴더 줄에는 없다", () => {
+    const html = markupWithCopy([doc(), folderDoc]);
+    assert.equal(html.match(/data-model-share-doc-row/g)?.length, 2, html);
+    assert.equal(copyButtonCount(html), 1, html);
+
+    const three = markupWithCopy([
+      doc({ id: "a" }),
+      doc({ id: "b", relativePath: `${INSIDE}/MBK200 파라미터.xlsx` }),
+      doc({ id: "c", relativePath: `${INSIDE}/MBK200 점검표.xlsm` }),
+    ]);
+    assert.equal(copyButtonCount(three), 3, three);
+    assert.equal(copyButtonCount(markupWithCopy([folderDoc, doc({ id: "d", entryKind: "FOLDER" })])), 0);
+  });
+
+  test("🔴 [열기]를 못 그리는 줄에도 단추는 선다 — 두 판정은 다른 물건이다", () => {
+    const top = doc({ relativePath: "회로도.pdf" });
+    assert.equal(canOpenModelShareDoc(top), false);
+    assert.equal(copyButtonCount(markupWithCopy([top])), 1);
+  });
+
+  test("🔴 담기 · 지우기는 여전히 없다 — 더한 것은 가져오기 하나뿐이다", () => {
+    const html = markupWithCopy([doc(), folderDoc]);
+    for (const forbidden of [
+      "data-model-share-doc-remove",
+      "data-model-share-doc-remove-dialog",
+      "data-model-share-folder-add",
+      "data-model-share-folder-picker",
+      "<dialog",
+      ">내려받기<",
+      ">미리보기<",
+      "href=",
+      "/api/attachments",
+    ]) {
+      assert.equal(html.includes(forbidden), false, `${forbidden} 가 있다`);
+    }
+    assert.equal(html.includes("지우기"), false, html);
+  });
+
+  test("🔴 실행 파일 줄에는 단추를 그리지 않는다 — 그리고 `.xlsm` 은 그린다", () => {
+    for (const name of ["설치.exe", "명령.bat", "모듈.dll", "매크로.docm", "쉘.sh"]) {
+      assert.equal(copyButtonCount(markupWithCopy([doc({ relativePath: `${INSIDE}/${name}` })])), 0, name);
+    }
+    // 🔵 매크로 엑셀은 2026-10-08 부터 실행 파일 목록 밖이다 — 단추가 **선다**.
+    for (const name of ["점검표.xlsm", "회로도.pdf", "파라미터.xlsx", "읽어주세요"]) {
+      assert.equal(copyButtonCount(markupWithCopy([doc({ relativePath: `${INSIDE}/${name}` })])), 1, name);
+    }
+    // 🔴 화면이 확장자를 **따로 세지 않는다** — 목록을 베낀 자리가 없다.
+    for (const forbidden of ["xlsm", "\\.exe", "EXECUTABLE_EXTENSIONS"]) {
+      assert.equal(new RegExp(forbidden).test(code(sectionSource)), false, `목록을 베꼈다: ${forbidden}`);
+    }
+  });
+
+  test("🔴 줄을 그리는 공용 조각이 **여전히 줄을 그린다** — 목록을 쪼개지 않았다", () => {
+    // 🔴 구역에 `<ul` 은 **하나**다(형제 구역과 같은 규율).
+    const many = markupWithCopy([
+      doc({ id: "a" }),
+      folderDoc,
+      doc({ id: "c", relativePath: `${INSIDE}/MBK200 파라미터.xlsx` }),
+    ]);
+    assert.equal(many.match(/<ul/g)?.length, 1, many);
+    assert.equal(many.match(/data-model-share-doc-row/g)?.length, 3, many);
+    assert.equal(markup([doc(), folderDoc]).match(/<ul/g)?.length, 1);
+
+    assert.ok(sectionSource.includes("ModelShareDocList"), sectionSource);
+    assert.equal(sharedListSource.includes("ShareDocContactFolderButton"), false, "공용 조각에 단추를 넣었다");
+    assert.ok(
+      sectionSource.includes(
+        'import ShareDocContactFolderButton, { canSaveShareDocToContactFolder } from "./ShareDocContactFolderButton"'
+      )
+    );
+    const body = code(sectionSource);
+    for (const forbidden of ["useState", "/api/", "fetch(", 'method: "POST"', "saveShareDocToContactFolder"]) {
+      assert.equal(body.includes(forbidden), false, `구역이 누르는 흐름을 들고 있다: ${forbidden}`);
+    }
+  });
+
+  test("🔴 줄 조각에 **자리 하나를 열었을 뿐**이다 — 안 넘기면 한 글자도 다르지 않다", () => {
+    const rows = [doc(), folderDoc];
+    const before = renderToStaticMarkup(createElement(ModelShareDocList, { docs: rows }));
+    assert.equal(renderToStaticMarkup(createElement(ModelShareDocList, { docs: rows, rowAction: () => null })), before);
+    const withAction = renderToStaticMarkup(
+      createElement(ModelShareDocList, { docs: rows, rowAction: () => createElement("i", { "data-here": "" }) })
+    );
+    assert.equal(withAction.match(/<ul/g)?.length, 1, withAction);
+    assert.equal(withAction.match(/data-here/g)?.length, 2, withAction);
+  });
+
+  test("🔴 형제 구역과 **같은 칸 · 같은 판정**을 쓴다 — 둘이 갈라지지 않는다", () => {
+    for (const source of [sectionSource, kindSectionSource]) {
+      assert.ok(source.includes("canCopyToContactFolder = false"), "기본값이 거짓이 아니다");
+      // 🔴 어느 줄에 그릴지를 두 구역이 **같은 함수 하나**로 묻는다(둘에 따로 적지 않았다).
+      assert.ok(source.includes("canSaveShareDocToContactFolder("), "줄 판정이 공용 함수가 아니다");
+      assert.ok(source.includes("rowAction={"), "줄 조각이 열어 둔 자리를 안 쓴다");
+    }
+    assert.ok(flat(filesScreen).includes("canCopyToContactFolder={shareDocCopyEnabled}"), filesScreen);
   });
 });

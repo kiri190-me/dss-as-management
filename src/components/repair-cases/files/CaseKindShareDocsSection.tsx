@@ -4,9 +4,11 @@ import {
   KIND_SHARE_DOCS_HINT,
   KindShareDocList,
   KindShareDocsHelperNotice,
+  kindShareDocFileName,
   type KindShareDocRow,
 } from "@/components/product-models/KindShareDocsSection";
 import { PRODUCT_MODEL_KIND_LABELS, type ProductModelKind } from "@/lib/domain/product-model-kind";
+import ShareDocContactFolderButton, { canSaveShareDocToContactFolder } from "./ShareDocContactFolderButton";
 
 /**
  * ============================================================================
@@ -42,6 +44,21 @@ import { PRODUCT_MODEL_KIND_LABELS, type ProductModelKind } from "@/lib/domain/p
  * 받아서 쓸 뿐이다. 수리 건에는 `product_model_kind` 칸이 없고, 워크플로 종류에서 옮기는
  * 자리는 저장소에 하나뿐이다(domain/product-model-kind.ts 의 productModelKindOfWorkflowKind).
  * 부르는 쪽(FilesScreen)이 그 함수를 부른다.
+ *
+ * ── 🔴 **더한 것은 하나뿐**이다 — 「이 건 폴더로 가져오기」 (2026-10-08) ──
+ * 줄의 [열기] 옆에 [연락서 폴더에 저장]이 선다. 누르면 그 서류의 사본이 **이 건의
+ * 연락서 폴더 `공통` 폴더**로 들어간다(접수 자동 복사와 같은 자리). 🔴 담기 · 지우기는
+ * 여전히 없다 — 이 구역이 할 수 있는 일은 **보기 · 열기 · 가져오기** 셋이다.
+ *  · 🔴 **누를 수 있는 줄에만** 그린다 — 폴더 줄(폴더째 복사는 범위가 다르다)과 **실행
+ *    파일 줄**에는 없다. 판정은 단추 조각의 canSaveShareDocToContactFolder 한 자리이고,
+ *    확장자 목록은 서버가 거절에 쓰는 함수 그대로다(이 파일에 한 글자도 없다).
+ *  · 🔴 두 공유폴더 설정과 파일 권한을 서버가 보고 참/거짓 하나로 내려 준다
+ *    (files/page.tsx). **거짓이면 단추를 아예 그리지 않는다** — 눌러도 막히는 단추를
+ *    내밀지 않는다. 기본값이 거짓이라 값을 안 주면 예전 화면 그대로다.
+ *  · 🔴 줄은 **여전히 저 조각이 그린다** — 목록을 쪼개지 않는다. 줄 조각이 열어 둔
+ *    자리(`rowAction`)에 단추만 얹으므로 구역에 `<ul>` 은 하나뿐이고, 줄의 생김새 ·
+ *    [열기] 판정은 한 글자도 베끼지 않았다. 누르는 흐름 · 결과 문장은 전부
+ *    ShareDocContactFolderButton 안에 있다(이 파일에 fetch 가 없다).
  * ============================================================================
  */
 
@@ -57,13 +74,26 @@ export const CASE_KIND_SHARE_DOCS_MANAGE_HINT =
 export default function CaseKindShareDocsSection({
   kind,
   docs,
+  repairCaseId,
+  canCopyToContactFolder = false,
 }: {
   kind: ProductModelKind;
   /** 🔴 서버가 DB 에서 읽어 **보이는 차례 그대로** 넘긴 줄들. 여기서 다시 정렬하지 않는다. */
   docs: readonly KindShareDocRow[];
+  /** 가져올 자리를 정하는 수리 건. 🔴 단추를 그릴 때만 쓴다. */
+  repairCaseId?: string;
+  /**
+   * 🔴 두 공유폴더(수리 관련 · 연락서 폴더)가 **둘 다** 설정됐고 파일 권한이 있는가.
+   * 서버 컴포넌트가 구해 둔 참/거짓 하나다 — 화면이 직접 판정하지 않는다.
+   */
+  canCopyToContactFolder?: boolean;
 }) {
   // 🔴 한 줄도 없으면 구역 자체가 없다(머리말).
   if (docs.length === 0) return null;
+
+  // 🔴 꺼져 있거나 건을 모르면 **null** — 아래에서 단추가 한 줄에도 그려지지 않는다.
+  const copyIntoCaseId =
+    canCopyToContactFolder && typeof repairCaseId === "string" && repairCaseId.length > 0 ? repairCaseId : null;
 
   return (
     <section
@@ -81,8 +111,22 @@ export default function CaseKindShareDocsSection({
 
       <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{CASE_KIND_SHARE_DOCS_MANAGE_HINT}</p>
 
-      {/* 🔴 `onRemove` 를 주지 않는다 — 지우기 단추가 한 줄에도 그려지지 않는다. */}
-      <KindShareDocList docs={docs} />
+      {/*
+        🔴 `onRemove` 를 주지 않는다 — 지우기 단추가 한 줄에도 그려지지 않는다.
+        🔴 줄은 **저 조각이 그대로 그린다** — 목록도 줄도 하나뿐이고, 우리는 그 조각이 열어
+        둔 자리(rowAction)에 단추만 얹는다. 🔴 꺼져 있으면 `null` 이라 예전 화면과 한 글자도
+        다르지 않다.
+      */}
+      <KindShareDocList
+        docs={docs}
+        rowAction={(doc) =>
+          copyIntoCaseId !== null &&
+          // 🔴 폴더 줄 · 실행 파일 줄에는 안 그린다 — 판정은 단추 조각 한 자리다.
+          canSaveShareDocToContactFolder(doc.entryKind, kindShareDocFileName(doc.relativePath)) ? (
+            <ShareDocContactFolderButton repairCaseId={copyIntoCaseId} relativePath={doc.relativePath} />
+          ) : null
+        }
+      />
 
       {/* 예전 도우미는 새 루트도 `openfile` 주소도 모른다 — 받으면 조용히 끝난다. */}
       <KindShareDocsHelperNotice />

@@ -3,9 +3,11 @@
 import {
   MODEL_SHARE_DOCS_HINT,
   ModelShareDocList,
+  modelShareDocFileName,
   type ModelShareDocRow,
 } from "@/components/product-models/ModelShareDocsSection";
 import { KindShareDocsHelperNotice } from "@/components/product-models/KindShareDocsSection";
+import ShareDocContactFolderButton, { canSaveShareDocToContactFolder } from "./ShareDocContactFolderButton";
 
 /**
  * ============================================================================
@@ -55,6 +57,13 @@ import { KindShareDocsHelperNotice } from "@/components/product-models/KindShare
  * 받아서 쓸 뿐이다. 수리 건 → 장비 → 모델 마스터를 잇는 자리는 저장소에 하나뿐이고
  * (db/queries/repair-cases.ts 의 getProductModelIdForProduct), 서버 컴포넌트가 그 함수를
  * 부른다.
+ *
+ * ── 🔴 **더한 것은 하나뿐**이다 — 「이 건 폴더로 가져오기」 (2026-10-08) ──
+ * 줄의 [열기] 옆에 [연락서 폴더에 저장]이 선다. 규율도 생김새도 **형제 구역
+ * (CaseKindShareDocsSection)과 한 글자도 다르지 않다** — 폴더 줄 · 실행 파일 줄에는 안
+ * 그림 · 설정과 권한이 거짓이면 아예 안 그림 · 줄은 저 조각이 그대로 그리고 그것이 열어
+ * 둔 자리에 얹기만 함(구역에 `<ul>` 은 하나다) · 누르는 흐름과 결과 문장은
+ * ShareDocContactFolderButton 안. 🔴 담기 · 지우기는 여전히 없다.
  * ============================================================================
  */
 
@@ -69,12 +78,25 @@ export const CASE_MODEL_SHARE_DOCS_MANAGE_HINT =
 
 export default function CaseModelShareDocsSection({
   docs,
+  repairCaseId,
+  canCopyToContactFolder = false,
 }: {
   /** 🔴 서버가 DB 에서 읽어 **보이는 차례 그대로** 넘긴 줄들. 여기서 다시 정렬하지 않는다. */
   docs: readonly ModelShareDocRow[];
+  /** 가져올 자리를 정하는 수리 건. 🔴 단추를 그릴 때만 쓴다. */
+  repairCaseId?: string;
+  /**
+   * 🔴 두 공유폴더(수리 관련 · 연락서 폴더)가 **둘 다** 설정됐고 파일 권한이 있는가.
+   * 서버 컴포넌트가 구해 둔 참/거짓 하나다 — 화면이 직접 판정하지 않는다.
+   */
+  canCopyToContactFolder?: boolean;
 }) {
   // 🔴 한 줄도 없으면 구역 자체가 없다(머리말). 모델을 못 찾은 경우도 여기로 들어온다.
   if (docs.length === 0) return null;
+
+  // 🔴 꺼져 있거나 건을 모르면 **null** — 아래에서 단추가 한 줄에도 그려지지 않는다.
+  const copyIntoCaseId =
+    canCopyToContactFolder && typeof repairCaseId === "string" && repairCaseId.length > 0 ? repairCaseId : null;
 
   return (
     <section
@@ -92,8 +114,22 @@ export default function CaseModelShareDocsSection({
 
       <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{CASE_MODEL_SHARE_DOCS_MANAGE_HINT}</p>
 
-      {/* 🔴 `onRemove` 를 주지 않는다 — 지우기 단추가 한 줄에도 그려지지 않는다. */}
-      <ModelShareDocList docs={docs} />
+      {/*
+        🔴 `onRemove` 를 주지 않는다 — 지우기 단추가 한 줄에도 그려지지 않는다.
+        🔴 줄은 **저 조각이 그대로 그린다** — 형제 구역(CaseKindShareDocsSection)과 같은
+        방법으로, 그 조각이 열어 둔 자리(rowAction)에 단추만 얹는다. 꺼져 있으면 `null` 이라
+        예전 화면과 한 글자도 다르지 않다.
+      */}
+      <ModelShareDocList
+        docs={docs}
+        rowAction={(doc) =>
+          copyIntoCaseId !== null &&
+          // 🔴 폴더 줄 · 실행 파일 줄에는 안 그린다 — 판정은 단추 조각 한 자리다.
+          canSaveShareDocToContactFolder(doc.entryKind, modelShareDocFileName(doc.relativePath)) ? (
+            <ShareDocContactFolderButton repairCaseId={copyIntoCaseId} relativePath={doc.relativePath} />
+          ) : null
+        }
+      />
 
       {/* 예전 도우미는 새 루트도 `openfile` 주소도 모른다 — 받으면 조용히 끝난다. */}
       <KindShareDocsHelperNotice />

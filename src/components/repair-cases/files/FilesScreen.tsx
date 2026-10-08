@@ -122,6 +122,13 @@ export default function FilesScreen(props: {
    */
   contactFolderEnabled?: boolean;
   /**
+   * 🔴 가리킨 공유폴더 서류를 **이 건의 연락서 폴더로 가져올 수 있는가**(2026-10-08).
+   * 읽을 곳(수리 관련)과 쓸 곳(연락서 폴더)이 **둘 다** 설정됐고 파일 권한이 있을 때만
+   * 참이다 — 서버가 정한다. 거짓이면 아래 두 구역이 [연락서 폴더에 저장]을 **아예
+   * 그리지 않는다.**
+   */
+  shareDocCopyEnabled?: boolean;
+  /**
    * 🔴 **이 건의 종류**가 가리켜 둔 공유폴더 서류들(2026-10-07). 서버가 DB 에서 읽어
    * **보이는 차례 그대로** 넘긴다 — 바이트가 아니라 경로 줄이라 첨부 목록과는 전혀 다른
    * 것이고, 한 줄도 없으면 구역이 아예 그려지지 않는다(CaseKindShareDocsSection).
@@ -145,6 +152,7 @@ export default function FilesScreen(props: {
         canUpload={props.canUpload ?? false}
         canManage={props.canManage ?? false}
         contactFolderEnabled={props.contactFolderEnabled ?? false}
+        shareDocCopyEnabled={props.shareDocCopyEnabled ?? false}
         kindShareDocs={props.kindShareDocs ?? []}
         modelShareDocs={props.modelShareDocs ?? []}
       />
@@ -205,6 +213,7 @@ function DatabaseFilesScreen({
   canUpload,
   canManage,
   contactFolderEnabled,
+  shareDocCopyEnabled,
   kindShareDocs,
   modelShareDocs,
 }: {
@@ -215,6 +224,7 @@ function DatabaseFilesScreen({
   canUpload: boolean;
   canManage: boolean;
   contactFolderEnabled: boolean;
+  shareDocCopyEnabled: boolean;
   kindShareDocs: readonly KindShareDocRow[];
   modelShareDocs: readonly ModelShareDocRow[];
 }) {
@@ -1123,10 +1133,16 @@ function DatabaseFilesScreen({
         접수할 때 사람이 고른 워크플로 종류를 제품 종류 축으로 옮기는 자리는 저장소에 하나뿐이다
         (domain/product-model-kind.ts 의 productModelKindOfWorkflowKind — 접수의 공통 서류 복사도
         같은 함수를 부른다). 🔴 한 줄도 없으면 구역이 스스로 사라진다.
+
+        🔴 **더한 것은 하나뿐**이다(2026-10-08) — 줄의 [열기] 옆에 [연락서 폴더에 저장]이
+        선다. 두 공유폴더가 둘 다 설정됐고 파일 권한이 있을 때만(shareDocCopyEnabled) 그려지고,
+        꽂는 자리는 접수 자동 복사와 같은 `공통` 폴더다. 담기 · 지우기는 여전히 없다.
       */}
       <CaseKindShareDocsSection
         kind={productModelKindOfWorkflowKind(workflowKindOf(resolved.workflowType))}
         docs={kindShareDocs}
+        repairCaseId={resolved.id}
+        canCopyToContactFolder={shareDocCopyEnabled}
       />
 
       {/*
@@ -1139,8 +1155,14 @@ function DatabaseFilesScreen({
         고치는 자리는 제품 모델 상세 화면이다. 🔴 어느 모델인가는 여기서 짓지 않는다 —
         서버가 getProductModelIdForProduct 로 잇고(files/page.tsx), 못 찾으면 빈 목록이
         와서 구역이 스스로 사라진다.
+
+        🔴 [연락서 폴더에 저장]도 **바로 위 구역과 똑같이** 받는다(2026-10-08).
       */}
-      <CaseModelShareDocsSection docs={modelShareDocs} />
+      <CaseModelShareDocsSection
+        docs={modelShareDocs}
+        repairCaseId={resolved.id}
+        canCopyToContactFolder={shareDocCopyEnabled}
+      />
 
       {trashedAttachments.length > 0 && (
         /*

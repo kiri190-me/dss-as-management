@@ -7,6 +7,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  KindShareDocList,
   canOpenKindShareDoc,
   kindShareDocDisplayName,
   type KindShareDocRow,
@@ -56,6 +57,7 @@ const sectionSource = read("CaseKindShareDocsSection.tsx");
 const filesScreen = read("FilesScreen.tsx");
 const filesPage = read("..", "..", "..", "app", "(app)", "repair-cases", "[id]", "files", "page.tsx");
 const sharedListSource = read("..", "..", "product-models", "KindShareDocsSection.tsx");
+const buttonSource = read("ShareDocContactFolderButton.tsx");
 
 const INSIDE = "2. 인수시 서류";
 const KIND = "GENERATOR" as const;
@@ -77,6 +79,26 @@ const folderDoc = doc({
 
 function markup(docs: KindShareDocRow[]): string {
   return renderToStaticMarkup(createElement(CaseKindShareDocsSection, { kind: KIND, docs }));
+}
+
+const CASE_ID = "99999999-9999-4999-8999-999999999999";
+
+/** 🔴 「가져올 수 있는」 상태를 **넣어 그려 본다** — 글자를 찾지 않고 결과로 잰다. */
+function markupWithCopy(docs: KindShareDocRow[], overrides: { repairCaseId?: string } = {}): string {
+  return renderToStaticMarkup(
+    createElement(CaseKindShareDocsSection, {
+      kind: KIND,
+      docs,
+      repairCaseId: CASE_ID,
+      canCopyToContactFolder: true,
+      ...overrides,
+    })
+  );
+}
+
+/** 그려진 [연락서 폴더에 저장] 단추의 수. */
+function copyButtonCount(html: string): number {
+  return html.match(/data-share-doc-contact-folder-save/g)?.length ?? 0;
 }
 
 describe("① 🔴 한 줄도 없으면 구역을 **아예 그리지 않는다**", () => {
@@ -287,5 +309,137 @@ describe("⑦ 구역이 서는 자리 — 첨부 목록 쪽은 한 글자도 안
   test("🔴 데모 화면은 이 구역을 받지 않는다 — DB 건에서만 선다", () => {
     assert.ok(flat(filesScreen).includes("<DemoFilesScreen resolved={props.resolved} actingUser={props.actingUser} />"));
     assert.ok(flat(filesScreen).includes("kindShareDocs={props.kindShareDocs ?? []}"));
+  });
+});
+
+describe("⑧ 🔴 더한 것 하나 — [연락서 폴더에 저장] (2026-10-08)", () => {
+  test("🔴 설정 · 권한이 거짓이면 단추가 **아예 안 그려진다** — 기본값이 거짓이다", () => {
+    // 값을 안 주면 예전 화면 그대로다(이웃 시험들이 그 모양으로 그려 보고 있다).
+    assert.equal(copyButtonCount(markup([doc(), folderDoc])), 0, markup([doc()]));
+    // 참이라도 **어느 건인지 모르면** 그리지 않는다 — 보낼 자리가 없다.
+    assert.equal(copyButtonCount(markupWithCopy([doc()], { repairCaseId: "" })), 0);
+  });
+
+  test("🔴 **파일 줄에만** 그린다 — 폴더 줄에는 없다", () => {
+    // 파일 하나 · 폴더 하나를 함께 세워도 단추는 하나다.
+    const html = markupWithCopy([doc(), folderDoc]);
+    assert.equal(html.match(/data-kind-share-doc-row/g)?.length, 2, html);
+    assert.equal(copyButtonCount(html), 1, html);
+
+    // 파일만 셋이면 셋이다.
+    const three = markupWithCopy([
+      doc({ id: "a" }),
+      doc({ id: "b", relativePath: `${INSIDE}/작업 수순.pdf` }),
+      doc({ id: "c", relativePath: `${INSIDE}/통전 체크시트.xlsm` }),
+    ]);
+    assert.equal(copyButtonCount(three), 3, three);
+
+    // 폴더만 둘이면 하나도 없다.
+    assert.equal(copyButtonCount(markupWithCopy([folderDoc, doc({ id: "d", entryKind: "FOLDER" })])), 0);
+  });
+
+  test("🔴 [열기]를 못 그리는 줄에도 단추는 선다 — 두 판정은 다른 물건이다", () => {
+    // 맨 위 칸의 파일은 도우미 주소를 만들 수 없어 [열기]가 없다 — 그래도 가져올 수는 있다.
+    const top = doc({ relativePath: "체크시트.xlsx" });
+    assert.equal(canOpenKindShareDoc(top), false);
+    assert.equal(copyButtonCount(markupWithCopy([top])), 1);
+  });
+
+  test("🔴 담기 · 지우기는 여전히 없다 — 더한 것은 가져오기 하나뿐이다", () => {
+    const html = markupWithCopy([doc(), folderDoc]);
+    for (const forbidden of [
+      "data-kind-share-doc-remove",
+      "data-kind-share-doc-remove-dialog",
+      "data-kind-share-folder-add",
+      "data-kind-share-folder-picker",
+      "<dialog",
+    ]) {
+      assert.equal(html.includes(forbidden), false, `${forbidden} 가 있다`);
+    }
+    assert.equal(html.includes("지우기"), false, html);
+    // 🔴 내려받기 · 미리보기도 여전히 없다 — 가져오기는 **서버가 서버 폴더로** 하는 일이다.
+    for (const forbidden of [">내려받기<", ">미리보기<", "href=", "/api/attachments"]) {
+      assert.equal(html.includes(forbidden), false, `${forbidden} 가 있다`);
+    }
+  });
+
+  test("🔴 실행 파일 줄에는 단추를 그리지 않는다 — 그리고 `.xlsm` 은 그린다", () => {
+    for (const name of ["설치.exe", "명령.bat", "모듈.dll", "매크로.docm", "쉘.sh"]) {
+      assert.equal(copyButtonCount(markupWithCopy([doc({ relativePath: `${INSIDE}/${name}` })])), 0, name);
+    }
+    // 🔵 매크로 엑셀은 2026-10-08 부터 실행 파일 목록 밖이다 — 단추가 **선다**.
+    for (const name of ["점검표.xlsm", "체크시트.xlsx", "회로도.pdf", "읽어주세요"]) {
+      assert.equal(copyButtonCount(markupWithCopy([doc({ relativePath: `${INSIDE}/${name}` })])), 1, name);
+    }
+    // 🔴 화면이 확장자를 **따로 세지 않는다** — 서버가 거절에 쓰는 그 함수 둘을 그대로 부른다.
+    assert.ok(buttonSource.includes('from "@/lib/domain/attachment-allowlist"'), buttonSource);
+    assert.ok(buttonSource.includes("isExecutableExtension(extension)"), buttonSource);
+    assert.ok(buttonSource.includes("normalizeFileExtension(fileName)"), buttonSource);
+    for (const forbidden of ["xlsm", "\\.exe", "EXECUTABLE_EXTENSIONS"]) {
+      for (const [label, source] of [["구역", sectionSource], ["단추", buttonSource]] as const) {
+        assert.equal(new RegExp(forbidden).test(code(source)), false, `${label}: 목록을 베꼈다 — ${forbidden}`);
+      }
+    }
+  });
+
+  test("🔴 줄을 그리는 공용 조각이 **여전히 줄을 그린다** — 목록을 쪼개지 않았다", () => {
+    // 🔴 구역에 `<ul` 은 **하나**다. 줄마다 목록을 세우면 화면낭독기가 「목록 1개 항목」을
+    //    줄 수만큼 읽는다.
+    const many = markupWithCopy([
+      doc({ id: "a" }),
+      folderDoc,
+      doc({ id: "c", relativePath: `${INSIDE}/작업 수순.pdf` }),
+    ]);
+    assert.equal(many.match(/<ul/g)?.length, 1, many);
+    assert.equal(many.match(/data-kind-share-doc-row/g)?.length, 3, many);
+    // 꺼져 있을 때도 하나다(예전과 같은 모양이다).
+    assert.equal(markup([doc(), folderDoc]).match(/<ul/g)?.length, 1);
+
+    assert.ok(sectionSource.includes("KindShareDocList"), sectionSource);
+    assert.equal(sharedListSource.includes("ShareDocContactFolderButton"), false, "공용 조각에 단추를 넣었다");
+    assert.equal(sharedListSource.includes("contact-folder-save"), false, "공용 조각이 가져오기를 안다");
+    // 구역은 단추 조각을 **그대로 가져다 쓴다** — 누르는 흐름을 여기 적지 않았다.
+    assert.ok(
+      sectionSource.includes(
+        'import ShareDocContactFolderButton, { canSaveShareDocToContactFolder } from "./ShareDocContactFolderButton"'
+      )
+    );
+    const body = code(sectionSource);
+    for (const forbidden of ["useState", "/api/", "fetch(", 'method: "POST"', "saveShareDocToContactFolder"]) {
+      assert.equal(body.includes(forbidden), false, `구역이 누르는 흐름을 들고 있다: ${forbidden}`);
+    }
+  });
+
+  test("🔴 줄 조각에 **자리 하나를 열었을 뿐**이다 — 안 넘기면 한 글자도 다르지 않다", () => {
+    const rows = [doc(), folderDoc];
+    const before = renderToStaticMarkup(createElement(KindShareDocList, { docs: rows }));
+    // `rowAction` 이 null 을 돌려주면 안 넘긴 것과 결과가 같아야 한다(제품 모델 쪽 화면이
+    // 이 조각을 그대로 쓰고 있다 — 그쪽이 안 깨졌다는 뜻이다).
+    assert.equal(renderToStaticMarkup(createElement(KindShareDocList, { docs: rows, rowAction: () => null })), before);
+    // 넘기면 그 줄 안에 선다 — 목록이 하나 더 생기지 않는다.
+    const withAction = renderToStaticMarkup(
+      createElement(KindShareDocList, { docs: rows, rowAction: () => createElement("i", { "data-here": "" }) })
+    );
+    assert.equal(withAction.match(/<ul/g)?.length, 1, withAction);
+    assert.equal(withAction.match(/data-here/g)?.length, 2, withAction);
+  });
+
+  test("🔴 탭이 서버가 정한 참/거짓 하나를 그대로 건넨다 — 화면이 판정하지 않는다", () => {
+    assert.ok(flat(filesScreen).includes("canCopyToContactFolder={shareDocCopyEnabled}"), filesScreen);
+    assert.ok(flat(filesScreen).includes("repairCaseId={resolved.id}"), filesScreen);
+    assert.ok(flat(filesScreen).includes("shareDocCopyEnabled={props.shareDocCopyEnabled ?? false}"), filesScreen);
+    // 🔴 서버가 **두 루트와 권한 셋**을 함께 본다 — 하나라도 비면 거짓이다.
+    assert.ok(
+      flat(filesPage).includes(
+        "const shareDocCopyEnabled = canManageFiles && contactFolderEnabled && resolveRepairDocsArchiveRoot() !== null;"
+      ),
+      filesPage
+    );
+    assert.ok(filesPage.includes("shareDocCopyEnabled={shareDocCopyEnabled}"), "탭에 안 건넨다");
+    // 🔴 루트 **값**은 화면으로 가지 않는다 — 참/거짓 하나뿐이다.
+    const body = code(filesPage);
+    for (const forbidden of ["REPAIR_DOCS_ARCHIVE_DIR", "CONTACT_FOLDER_ARCHIVE_DIR", "readRepairDocsFile"]) {
+      assert.equal(body.includes(forbidden), false, `서버 컴포넌트가 루트를 흘린다: ${forbidden}`);
+    }
   });
 });

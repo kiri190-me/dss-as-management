@@ -116,3 +116,58 @@ export async function recordContactFolderFileSaved(input: {
     });
   });
 }
+
+/**
+ * ============================================================================
+ * 🔴 **가리킨 공유폴더 서류**를 이 건의 `공통` 폴더로 가져왔다는 기록 (2026-10-08)
+ * ============================================================================
+ * 수리 건 상세 「파일 관리」의 두 구역(그 종류의 공통 서류 · 이 제품 모델 전용 서류)에서
+ * [연락서 폴더에 저장]을 누르면, 서버가 「1. 수리 관련」 서류함의 그 파일을 읽어 이 건의
+ * 연락서 폴더 `공통` 에 사본을 꽂는다. **접수 자동 복사와 같은 자리**이고, 이 길은 그것을
+ * 사람이 나중에 손으로도 하게 한 것이다.
+ *
+ * ── 바로 위 [DATA에 저장] 기록과 **다른 것 둘** ─────────────────────────
+ *  · 🔴 `actionType` 이 **`CREATE`** 다. [DATA에 저장]이 `FILE_DOWNLOAD` 인 까닭은 **우리
+ *    창고(권한 · 휴지통이 걸린 자리)의 파일이 꺼내져 나간 일**이기 때문이다. 이 길에서는
+ *    창고의 파일이 움직이지 않는다 — 사내 서류함에서 사내 폴더로 **없던 사본이 하나
+ *    생기는** 일이라 폴더 만들기 기록(바로 위 recordContactFolderCreated)과 같은 `CREATE`
+ *    가 맞다. 내려받기만 훑는 점검에 이 줄이 섞이면 「누가 파일을 꺼내 갔는가」가 흐려진다.
+ *  · 🔴 첨부 id 가 없다(창고의 파일이 아니다). 대신 **어느 가리킴에서 왔는지**를 적는다.
+ *
+ *  · `target_record_id` — 🔴 **수리 건 id**(이웃 둘과 같다).
+ *  · `new_value` — 공유폴더 루트 **기준 상대 경로**(= 가리킴 한 줄 그대로) · 실제로 쓴
+ *    파일 이름 · 바이트 수. 🔴 **루트 · 절대 경로는 적지 않는다**(마운트 위치가 바뀌면
+ *    거짓이 되고, 서버 구조를 알려 준다). 상대 경로는 그 가리킴을 가리키는 유일한
+ *    이름이라 이것이 빠지면 「어디서 가져온 것인가」를 영영 알 수 없다.
+ *  · `previous_value` — 없다(없던 파일이 생긴 것이다).
+ *
+ * 🔴 **이번에 새로 꽂았을 때만 부른다**(`copied`). 같은 내용이 이미 있어 쓰지 않은
+ * 경우에는 공유폴더에 새로 생긴 것이 없다 — 이웃 둘과 같은 규율이다.
+ *
+ * **스키마 변경 0** — 기존 enum 값(`CREATE`)과 기존 `target_entity` 글자를 쓴다.
+ * ============================================================================
+ */
+export async function recordContactFolderShareDocSaved(input: {
+  /** 누른 사람. 🔴 이 길에도 시스템이 혼자 하는 경우가 없다. */
+  actorUserId: string;
+  repairCaseId: string;
+  /** 🔴 「1. 수리 관련」 루트 **기준 상대 경로** — 어느 가리킴에서 왔는가. */
+  sourceRelativePath: string;
+  /** 연락서 폴더에 **실제로 쓴** 파일 이름(번호가 붙었을 수 있다). */
+  fileName: string;
+  fileSize: number;
+}): Promise<void> {
+  await db.transaction(async (tx) => {
+    await insertAuditLog(tx, {
+      actorUserId: input.actorUserId,
+      actionType: "CREATE",
+      targetEntity: CONTACT_FOLDER_AUDIT_ENTITY,
+      targetRecordId: input.repairCaseId,
+      newValue: {
+        sourceRelativePath: input.sourceRelativePath,
+        fileName: input.fileName,
+        fileSize: input.fileSize,
+      },
+    });
+  });
+}

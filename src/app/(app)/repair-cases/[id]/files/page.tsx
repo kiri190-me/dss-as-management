@@ -15,6 +15,7 @@ import { productModelKindOfWorkflowKind } from "@/lib/domain/product-model-kind"
 import { workflowKindOf } from "@/lib/domain/workflow-kind";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { resolveContactFolderArchiveRoot } from "@/lib/storage/contact-folder-archive";
+import { resolveRepairDocsArchiveRoot } from "@/lib/storage/repair-docs-archive";
 import FilesScreen from "@/components/repair-cases/files/FilesScreen";
 
 export const metadata: Metadata = {
@@ -100,6 +101,15 @@ export default async function RepairCaseFilesPage({
   // 한 줄이라 디스크를 건드리지 않는다.
   const contactFolderEnabled = resolveContactFolderArchiveRoot() !== null;
 
+  // 🔴 가리킨 공유폴더 서류를 **이 건 폴더로 가져올 수 있는가**(2026-10-08).
+  // 셋이 모두 참이어야 한다 — **읽을 곳**(수리 관련)과 **쓸 곳**(연락서 폴더)이 둘 다
+  // 있어야 성립하는 일이고, 파일을 하나 늘리는 일이라 이 탭의 쓰기 권한이 필요하다.
+  // 🔴 하나라도 거짓이면 두 구역이 단추를 **아예 그리지 않는다** — 눌러도 막히는 단추를
+  // 내밀지 않는다. 🔴 나가는 것은 참/거짓 하나뿐이고 루트 값(.env)은 화면으로 가지 않는다.
+  // 🔴 여기서도 공유폴더(디스크)는 읽지 않는다 — 설정을 보는 것은 `process.env` 한 줄이다.
+  const shareDocCopyEnabled =
+    canManageFiles && contactFolderEnabled && resolveRepairDocsArchiveRoot() !== null;
+
   return (
     <FilesScreen
       resolved={resolved}
@@ -109,6 +119,7 @@ export default async function RepairCaseFilesPage({
       canUpload={canManageFiles}
       canManage={canManageFiles}
       contactFolderEnabled={contactFolderEnabled}
+      shareDocCopyEnabled={shareDocCopyEnabled}
       kindShareDocs={kindShareDocs}
       modelShareDocs={modelShareDocs}
     />

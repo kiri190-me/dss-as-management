@@ -181,6 +181,11 @@ src/components/repair-cases/files/contact-folder-copy-notice.test.ts
 # 파일 이름을 보내지 않음 · 기능이 꺼져 있으면 단추가 없음 · 꽂은 뒤 공유폴더 구역 다시 읽기 ·
 # 🔴 내려받기는 한 글자도 안 바뀜.
 src/components/repair-cases/files/contact-folder-data-save.test.ts
+# [연락서 폴더에 저장](2026-10-08) — 가리킨 공유폴더 서류를 이 건의 `공통` 폴더로 가져오는
+# 화면 쪽 흐름. 🔴 가리킨 자리는 `?path=` 로 싸여 가고 · 🔴 몸통을 보내지 않으며(바이트는
+# 브라우저를 지나지 않는다) · 🔴 던지지 않고 · 🔴 모르는 모양은 「넣었습니다」가 되지 않는다 ·
+# 결과 문장이 [DATA에 저장] · 올리기와 **갈라져 있다**(어느 폴더를 열어야 하는지 알게).
+src/components/repair-cases/files/share-doc-contact-folder-save.test.ts
 
 # 파일 관리 탭의 **이 종류 공통 서류(공유폴더 가리킴)** 구역 — 「수리건 상세에서도 바로
 # 파일을 열 수 있도록」(2026-10-07 사용자 요구). 🔴 한 줄도 없으면 구역을 아예 안 그린다 ·

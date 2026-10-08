@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import {
   isWindowsDesktopClient,
@@ -354,15 +354,29 @@ function EntryKindBadge({ entryKind }: { entryKind: KindShareDocRow["entryKind"]
 /**
  * 가리킴 목록만 그린다 — 자기 상태를 갖지 않는다. 🔴 `onRemove` 를 주지 않으면 지우기
  * 단추가 **한 줄에도** 그려지지 않는다.
+ *
+ * ── 🔴 `rowAction` — 줄 오른쪽에 **더 그릴 것** (2026-10-08) ──────────────
+ * 이 목록은 두 자리가 함께 쓴다(이 화면과 수리 건 상세의 파일 관리 탭). 그 두 자리에
+ * 줄마다 붙는 단추가 **서로 다르다** — 여기는 지우기뿐이고, 저쪽에는 그 서류를 이 건의
+ * 연락서 폴더로 가져오는 단추가 하나 더 있다. 줄의 생김새를 저쪽에 베껴 두 벌로 만들지
+ * 않으려고 **자리 하나를 열어** 둔다.
+ *
+ * 🔴 **안 넘기면 한 글자도 달라지지 않는다** — `undefined` 면 React 가 아무것도 그리지
+ * 않는다. 이 화면은 넘기지 않으므로 예전 그대로다.
+ * 🔴 **무엇을 그릴지 이 조각이 정하지 않는다** — 어느 줄에 그릴지(파일인가 · 실행
+ * 파일인가)도 부르는 쪽의 일이다. 여기서 판정하면 두 자리의 규칙이 이 파일로 모인다.
  */
 export function KindShareDocList({
   docs,
   isBusy = false,
   onRemove,
+  rowAction,
 }: {
   docs: readonly KindShareDocRow[];
   isBusy?: boolean;
   onRemove?: (doc: KindShareDocRow) => void;
+  /** 줄 오른쪽에 더 그릴 것. 주지 않거나 `null` 을 돌려주면 아무것도 늘지 않는다. */
+  rowAction?: (doc: KindShareDocRow) => ReactNode;
 }) {
   return (
     <ul className="flex flex-col divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -396,6 +410,8 @@ export function KindShareDocList({
                     fileName={kindShareDocFileName(doc.relativePath)}
                   />
                 ))}
+              {/* 🔴 [열기] 옆자리 — 안 넘기면 아무것도 그려지지 않는다(머리말). */}
+              {rowAction?.(doc)}
               {onRemove !== undefined && (
                 <button
                   type="button"
