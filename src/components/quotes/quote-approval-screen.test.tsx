@@ -230,10 +230,15 @@ describe("🔴 발행은 결재 상태에 잠기지 않는다", () => {
   });
 
   test("페이지가 편집 폼에 결재 값을 넘기지 않는다", () => {
-    const editFormProps = flat(editPageSource).slice(
-      flat(editPageSource).indexOf("<QuoteEditForm"),
-      flat(editPageSource).indexOf("/> } approvalPanel=")
-    );
+    const flatPage = flat(editPageSource);
+    const start = flatPage.indexOf("<QuoteEditForm");
+    // 🔴 끝은 **편집 폼 자리를 닫는 괄호**다. 예전에는 「다음에 오는 슬롯 이름」으로 끊었는데,
+    //    2026-10-08 에 그 사이로 공유폴더 구역 슬롯이 하나 들어오면서 마디가 사라졌다 —
+    //    그러면 indexOf 가 -1 이 되어 결재 슬롯까지 통째로 딸려 온다(시험이 제 자리를 잃는다).
+    const end = flatPage.indexOf("/> }", start);
+    assert.ok(start >= 0, "페이지에서 편집 폼 자리를 찾지 못했다");
+    assert.ok(end > start, "편집 폼 자리가 어디서 끝나는지 찾지 못했다");
+    const editFormProps = flatPage.slice(start, end);
     assert.ok(editFormProps.length > 0, "페이지에서 편집 폼 자리를 찾지 못했다");
     assert.doesNotMatch(editFormProps, /approval/i);
   });

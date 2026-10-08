@@ -38,6 +38,20 @@ import { useState, type ReactNode } from "react";
  *    붙으면 **작성자 스타일이 이겨서 그대로 보인다.**
  *  · `hidden` class(Tailwind 의 `display:none`) — 작성자 스타일이라 그 싸움에서
  *    진 적이 없다. 실제로 감추는 것은 이쪽이다.
+ *
+ * ── 🔴 [견적서 결재] 칸에는 **두 구역**이 선다 (2026-10-08) ───────────────
+ * 결재하는 사람이 **승인을 누르기 전에 그 견적서 폴더를 열어 확인**할 수 있어야
+ * 한다(사용자 요구). 그래서 이 칸은 위에서부터 **공유폴더 구역 → 「견적서 승인」**
+ * 두 덩이다.
+ *
+ * 🔴 **승인 패널 안에 끼워 넣지 않는다.** 뜻이 다른 둘이다 — 하나는 폴더를 보는
+ * 곳, 하나는 결재하는 곳이다. 한 상자로 보이면 안 되므로 **슬롯을 하나 더 두고**
+ * (`archiveFolderSection`) 사이를 띄우는 상자에 나란히 담는다. 둘 다 서버가 그려
+ * 넘긴다 — 이 껍데기는 여전히 어느 쪽도 import 하지 않는다(위 머리말).
+ *
+ * 🔴 감추는 class 를 **바깥 칸에 그대로 둔다** — 띄우는 상자(`flex`)를 안쪽에
+ * 하나 더 두는 까닭이 이것이다. 배치용 class 를 감출 칸에 직접 붙이면 작성자
+ * 스타일이 `hidden` 속성을 이겨 **안 보여야 할 칸이 그대로 보인다**(바로 위 규율).
  * ============================================================================
  */
 
@@ -45,10 +59,20 @@ export type QuoteEditTab = "edit" | "approval";
 
 export default function QuoteEditTabs({
   editForm,
+  archiveFolderSection = null,
   approvalPanel,
 }: {
   /** [견적서 수정] — 지금까지의 편집 폼 그대로다. 서버가 그려 넘긴다. */
   editForm: ReactNode;
+  /**
+   * [견적서 결재] 칸의 **첫 덩이** — 그 견적서의 공유폴더를 보는 구역(2026-10-08).
+   * 「견적서 승인」 **바로 위**에 선다. 결재하기 전에 폴더를 열어 보라고 둔 자리다.
+   *
+   * 🔴 비워 둘 수 있다 — 주지 않으면 이 칸은 예전처럼 승인 구역 하나다. 설정이
+   * 꺼져 있거나 폴더가 없을 때 아무것도 그리지 않는 일은 **그 구역이 스스로** 한다.
+   * 이 껍데기는 그 판단을 다시 쓰지 않는다.
+   */
+  archiveFolderSection?: ReactNode;
   /**
    * [견적서 결재] — 결재를 올리고 처리하고 되짚는 자리.
    *
@@ -91,7 +115,15 @@ export default function QuoteEditTabs({
         hidden={tab !== "approval"}
         className={tab === "approval" ? undefined : "hidden"}
       >
-        {approvalPanel}
+        {/*
+          🔴 공유폴더 구역이 **위**, 「견적서 승인」이 아래다(2026-10-08 사용자 요구 —
+          승인하기 전에 그 폴더를 열어 확인한다). 사이를 띄우는 상자는 **안쪽**에 둔다 —
+          배치용 class 를 바깥 칸에 붙이면 감추는 장치가 진다(위 머리말).
+        */}
+        <div className="flex flex-col gap-4">
+          {archiveFolderSection}
+          {approvalPanel}
+        </div>
       </div>
     </div>
   );

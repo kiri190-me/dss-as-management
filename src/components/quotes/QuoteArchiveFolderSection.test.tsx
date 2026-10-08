@@ -29,6 +29,7 @@ import QuoteArchiveFolderSection, {
   readQuoteArchiveFolderEntriesAnswer,
   type QuoteArchiveFolderSectionState,
 } from "./QuoteArchiveFolderSection";
+import QuoteEditTabs from "./QuoteEditTabs";
 
 /**
  * ============================================================================
@@ -57,6 +58,16 @@ const quotesTabPage = readFileSync(
   path.join(srcDir, "app", "(app)", "repair-cases", "[id]", "quotes", "page.tsx"),
   "utf8"
 ).replace(/\r\n/g, "\n");
+/** 견적서 상세(`/quotes/[id]`) — 결재 탭의 「견적서 승인」 위에 세운 자리(사용자 요구 2026-10-08). */
+const quoteDetailPage = readFileSync(
+  path.join(srcDir, "app", "(app)", "quotes", "[id]", "page.tsx"),
+  "utf8"
+).replace(/\r\n/g, "\n");
+/** 승인 패널 — 🔴 그 상자 **안**에 구역을 끼워 넣지 않았는지만 글자로 본다(그릴 수 없는 조각이다). */
+const approvalPanelSource = readFileSync(new URL("./QuoteApprovalPanel.tsx", import.meta.url), "utf8").replace(
+  /\r\n/g,
+  "\n"
+);
 
 /** 🔴 가짜 이름이다 — 모양만 실제와 같다. */
 const RELATIVE_PATH = "21. 2026 내자견적서/DSS 2026-089 가나상사 MODEL-X1 L123 S456 수리 견적서";
@@ -642,6 +653,123 @@ describe("자리 — 수리 건 「견적서」 탭", () => {
     const html = markup({ kind: "loading" });
     assert.ok(html.includes(">공유폴더<"), html);
     assert.equal(html.includes("—"), false, html);
+  });
+});
+
+/*
+ * ============================================================================
+ * 🔴 자리 — **견적서 상세의 [견적서 결재] 탭, 「견적서 승인」 바로 위** (2026-10-08)
+ * ============================================================================
+ * 결재하는 사람이 **승인을 누르기 전에** 그 견적서 폴더를 열어 확인할 수 있어야 한다는
+ * 사용자 요구다. 자리는 결재 칸의 **첫 덩이**이고, 「견적서 승인」 상자와는 **따로 선다** —
+ * 뜻이 다른 둘이라(하나는 폴더를 보는 곳, 하나는 결재하는 곳) 한 상자로 보이면 안 된다.
+ *
+ * 🔴 [견적서 수정] 탭은 **예전 그대로**다 — 거기에는 구역이 없다(바로 아래 describe 가 그
+ * 울타리를 지킨다. 사용자 결정 2026-10-06 「견적서 수정에서는 공유폴더가 보이지 않아도 돼」).
+ *
+ * 🔴 차례는 **그려진 결과**로 잰다. 승인 패널 자체는 서버 액션을 물고 있어 이 환경에서
+ * 그릴 수 없으므로(그 파일 머리말), 그 자리에 표 하나를 세우고 껍데기를 그려 본다.
+ * ============================================================================
+ */
+describe("자리 — 견적서 상세 [견적서 결재] 탭의 「견적서 승인」 위", () => {
+  /** 🔴 승인 구역이 설 자리를 대신하는 표. */
+  const APPROVAL_STAND_IN = "견적서승인이있던자리";
+  const EDIT_STAND_IN = "편집폼이있던자리";
+
+  const tabsMarkup = (): string =>
+    renderToStaticMarkup(
+      createElement(QuoteEditTabs, {
+        editForm: createElement("p", null, EDIT_STAND_IN),
+        archiveFolderSection: createElement(QuoteArchiveFolderSectionView, {
+          state: foundState({ entries: [entry("DSS 2026-089 견적서.xlsx")], totalCount: 1 }),
+        }),
+        approvalPanel: createElement("p", null, APPROVAL_STAND_IN),
+      })
+    );
+
+  test("🔴 그려진 차례 — 공유폴더 구역이 승인 구역보다 **앞**이다", () => {
+    const html = tabsMarkup();
+    const section = html.indexOf("data-quote-archive-folder-section");
+    const approval = html.indexOf(APPROVAL_STAND_IN);
+    assert.ok(section >= 0, `공유폴더 구역이 그려지지 않았다: ${html}`);
+    assert.ok(approval >= 0, `승인 구역이 그려지지 않았다: ${html}`);
+    assert.ok(section < approval, "공유폴더 구역이 승인 구역보다 뒤에 그려졌다");
+  });
+
+  test("🔴 결재 칸 **안**이다 — 편집 칸에는 들어가지 않는다", () => {
+    const html = tabsMarkup();
+    const editPanelAt = html.indexOf('id="quote-tab-panel-edit"');
+    const approvalPanelAt = html.indexOf('id="quote-tab-panel-approval"');
+    assert.ok(editPanelAt >= 0 && approvalPanelAt > editPanelAt, html);
+    assert.ok(
+      html.indexOf("data-quote-archive-folder-section") > approvalPanelAt,
+      "구역이 결재 칸 밖(편집 칸)에 그려졌다"
+    );
+    // 편집 칸은 예전 그대로 — 넘긴 것 하나뿐이다.
+    const editPanel = html.slice(editPanelAt, approvalPanelAt);
+    assert.ok(editPanel.includes(EDIT_STAND_IN), editPanel);
+    assert.equal(editPanel.includes("data-quote-archive-folder-section"), false, editPanel);
+  });
+
+  test("🔴 한 상자로 보이지 않는다 — 승인 패널 안이 아니라 그 곁이고, 사이가 떠 있다", () => {
+    // 승인 패널이 구역을 제 상자 안에 품으면 테두리 하나짜리 한 덩이가 된다.
+    assert.equal(
+      approvalPanelSource.includes("QuoteArchiveFolderSection"),
+      false,
+      "승인 패널이 공유폴더 구역을 제 상자 안에 품었다"
+    );
+    // 두 덩이를 담는 상자가 **사이를 띄운다** — 붙여 두면 테두리 둘이 맞닿아 한 상자로 읽힌다.
+    const wrapper = /id="quote-tab-panel-approval"[^>]*><div class="([^"]*)"><section/.exec(tabsMarkup());
+    assert.ok(wrapper, "결재 칸의 첫 덩이가 공유폴더 구역이 아니다");
+    assert.ok(wrapper[1]?.includes("gap-"), `두 구역 사이가 붙어 있다: ${wrapper[1]}`);
+  });
+
+  test("🔴 감출 칸에는 배치용 class 를 붙이지 않았다 — 붙이면 감추는 장치가 진다", () => {
+    // 처음 열리는 탭은 [견적서 수정] 이라 결재 칸이 감춰져 있다. 그 칸에 `flex` 가 붙으면
+    // 작성자 스타일이 `hidden` 속성을 이겨 **안 보여야 할 칸이 그대로 보인다**(껍데기 머리말).
+    const outer = /<div id="quote-tab-panel-approval"[^>]*>/.exec(tabsMarkup())?.[0] ?? "";
+    assert.ok(outer.includes("hidden"), outer);
+    assert.equal(/class="[^"]*flex/.test(outer), false, `감출 칸에 배치용 class 가 붙었다: ${outer}`);
+  });
+
+  test("🔴 `label` 을 주지 않는다 — 이 화면은 그 견적서 하나뿐이다", () => {
+    assert.ok(
+      quoteDetailPage.includes(
+        'import QuoteArchiveFolderSection from "@/components/quotes/QuoteArchiveFolderSection";'
+      ),
+      "상세 화면이 이 구역을 가져오지 않는다"
+    );
+    assert.ok(
+      quoteDetailPage.includes("archiveFolderSection={<QuoteArchiveFolderSection quoteId={quote.id} />}"),
+      quoteDetailPage.slice(quoteDetailPage.indexOf("archiveFolderSection"))
+    );
+    assert.equal(
+      /<QuoteArchiveFolderSection[^>]*label=/.test(quoteDetailPage),
+      false,
+      "상세 화면이 본 번호를 넘긴다 — 한 장뿐이라 머리는 그냥 「공유폴더」다"
+    );
+    // 안 주면 머리가 무엇이 되는지는 바로 위 describe 가 이미 못 박았다. 여기서는 그 결과만 한 번 더.
+    assert.ok(markup({ kind: "loading" }).includes(">공유폴더<"));
+  });
+
+  test("🔴 상세 화면이 서버에서 공유폴더를 읽지 않는다 — NAS 가 느린 날에도 화면은 뜬다", () => {
+    for (const forbidden of [
+      "listQuoteArchiveEntries",
+      "resolveQuoteArchiveRoot",
+      "findQuoteArchiveFolder",
+      "node:fs",
+    ]) {
+      assert.equal(quoteDetailPage.includes(forbidden), false, `상세 화면이 공유폴더를 읽는다: ${forbidden}`);
+    }
+  });
+
+  test("🔴 수리 건 「견적서」 탭은 그대로다 — 거기서는 본 번호를 머리에 적는다", () => {
+    assert.ok(
+      quotesTabPage.includes(
+        "<QuoteArchiveFolderSection key={group.baseNumber} quoteId={group.quoteId} label={group.baseNumber} />"
+      ),
+      "수리 건 쪽 자리가 바뀌었다"
+    );
   });
 });
 

@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import QuoteEditForm from "@/components/quotes/QuoteEditForm";
 import QuoteEditTabs from "@/components/quotes/QuoteEditTabs";
 import QuoteApprovalPanel from "@/components/quotes/QuoteApprovalPanel";
+import QuoteArchiveFolderSection from "@/components/quotes/QuoteArchiveFolderSection";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
 import { getPartPickerList, getPartPickerUnitPrices } from "@/lib/db/queries/inventory";
 import {
@@ -176,6 +177,24 @@ export default async function QuoteDetailPage({
           attachmentSlots={attachmentSlots}
         />
       }
+      /*
+        🔴 **「견적서 승인」 바로 위**의 공유폴더 구역(2026-10-08 사용자 요구) — 결재하는
+        사람이 승인을 누르기 전에 그 견적서 폴더를 열어 확인하는 자리다. 수리 건의
+        「견적서」 탭이 쓰는 그 구역 **그대로**이고, 표(이름 · 수정날짜 · 크기 · 동작)도
+        그대로 따라온다.
+
+        🔴 `label`(본 번호)을 **주지 않는다** — 그 탭은 한 화면에 구역을 여럿 그려 가를
+        이름이 필요하지만, 이 화면은 그 견적서 하나뿐이라 머리가 그냥 「공유폴더」다
+        (QuoteArchiveFolderSection 의 `label` 머리말).
+
+        🔴 설정이 꺼져 있거나 폴더가 없거나 여럿일 때 무엇을 보일지는 **그 구역이 스스로**
+        정한다(disabled · not-found · multiple 갈래가 그 안에 있다). 이 화면은 판단하지
+        않는다 — 두 곳에서 정하면 한쪽만 고쳐지는 날이 온다.
+
+        🔴 **서버에서 공유폴더를 읽지 않는다.** 그 구역이 화면이 뜬 뒤 스스로 통로를
+        부르므로, NAS 가 느리거나 꺼져 있는 날에도 이 화면은 그대로 뜬다.
+      */
+      archiveFolderSection={<QuoteArchiveFolderSection quoteId={quote.id} />}
       approvalPanel={
         <QuoteApprovalPanel
           quoteId={quote.id}
