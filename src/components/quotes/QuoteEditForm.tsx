@@ -101,6 +101,9 @@ import {
 import type { QuoteAttachmentSlots } from "@/lib/db/queries/attachments";
 import QuoteFolderOpenButton, { QuoteFolderOpenNotice } from "@/components/quotes/QuoteFolderOpenButton";
 import type { QuoteFolderOpenOutcome } from "@/components/quotes/quote-folder-open";
+import QuoteSavePdfNotice, { QUOTE_SAVE_PDF_RUNNING_TEXT } from "@/components/quotes/QuoteSavePdfNotice";
+import { runQuoteSavePdfConvert } from "@/components/quotes/quote-save-pdf-convert";
+import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
 
 /**
  * ============================================================================
@@ -910,6 +913,12 @@ export default function QuoteEditForm({
   const [createdQuote, setCreatedQuote] = useState<{ id: string; version: number } | null>(null);
   /** 새 견적서 저장 뒤 파일 올리기의 진행 · 실패 안내. */
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
+  /**
+   * 🔴 [저장] 뒤 **엑셀 → PDF** 변환의 진행 · 결과 줄(2026-10-08 · quote-save-pdf-convert.ts).
+   * 비어 있으면 아무것도 그리지 않는다. `pdfConverting` 이 참이면 「도는 중」 꼴이다.
+   */
+  const [pdfNoticeLines, setPdfNoticeLines] = useState<QuoteIssueNoticeLine[]>([]);
+  const [pdfConverting, setPdfConverting] = useState(false);
   /** [폴더 열기](견적서 ④b)의 결과 — 머리의 단추들 아래에 보인다. 누르는 동안은 비운다(null). */
   const [folderOpenOutcome, setFolderOpenOutcome] = useState<QuoteFolderOpenOutcome | null>(null);
   /**
@@ -1871,6 +1880,43 @@ export default function QuoteEditForm({
     };
   }
 
+  /**
+   * ============================================================================
+   * 🔴 [저장]이 끝난 **뒤** 엑셀을 PDF 로 바꾼다 (2026-10-08)
+   * ============================================================================
+   * 사용자 요구: 「[저장]을 누르면 그 엑셀을 PDF 로 변환해서 폴더에 저장되는 기능.」 운영은
+   * 리눅스 컨테이너라 서버가 Excel 로 바꿀 수 없어 **쓰는 분 PC 의 Excel** 이 한다 — 화면이
+   * `dss-folder://xlsx2pdf/?p=…` 를 열고, **서버가 폴더를 다시 읽어** 확인한다. 흐름과 상한은
+   * components/quotes/quote-save-pdf-convert.ts 한 자리에 있다.
+   *
+   *  · 🔴 **저장을 막지 않는다** — 저장 액션이 이미 돌아온 **뒤에** 부른다. 저장 응답이 이것을
+   *    기다리지 않는다.
+   *  · 🔴 **저장은 되돌아가지 않는다** — 무슨 일이 나도 `return` 하는 값은 「넘어가도 되는가」
+   *    뿐이고, 던져도 여기서 삼킨다(밖의 catch 가 「저장 실패」라고 거짓말하지 않게).
+   *  · 넘어가도 되는 결과는 셋이다: 할 일이 없었다(엑셀 전용 등) · 설정이 꺼져 있다 ·
+   *    **PDF 를 만들었다**. 그 밖은 사람이 읽을 것이 있어 이 화면에 남는다 — 첫 줄이
+   *    「견적서는 저장되었습니다.」이고 곁에 [목록으로]가 선다(못 올린 첨부와 같은 모양).
+   * ============================================================================
+   */
+  async function convertSavedQuoteToPdf(quoteId: string): Promise<boolean> {
+    setPdfConverting(true);
+    setPdfNoticeLines([{ text: QUOTE_SAVE_PDF_RUNNING_TEXT, tone: "normal" }]);
+    try {
+      const outcome = await runQuoteSavePdfConvert({ quoteId, subject: { kind, isExcelOnly } });
+      setPdfNoticeLines(outcome.lines);
+      return outcome.kind === "SKIPPED" || outcome.kind === "DISABLED" || outcome.kind === "CREATED";
+    } catch (pdfError) {
+      // 🔴 오류의 message 를 적지 않는다 — 폴더 이름 · 경로가 섞인다(저장 쪽과 같은 규율).
+      console.error("견적서 PDF 변환에서 예상치 못한 오류", {
+        name: pdfError instanceof Error ? pdfError.name : typeof pdfError,
+      });
+      setPdfNoticeLines([]);
+      return true;
+    } finally {
+      setPdfConverting(false);
+    }
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (isSubmitting || isConflict) return;
@@ -1902,6 +1948,9 @@ export default function QuoteEditForm({
       }
 
       if (savedQuote) {
+        // 🔴 저장이 끝난 **뒤** 엑셀을 PDF 로 바꾼다(2026-10-08). 사람이 읽을 것이 남으면
+        //    넘어가지 않는다 — 견적서는 이미 저장됐고, 안내 곁에 [목록으로]가 있다.
+        if (!(await convertSavedQuoteToPdf(savedQuote.id))) return;
         // 고친 뒤에도 저장 팝업을 0.5초 띄우고 왔던 목록으로 넘어간다(2026-09-15
         // 사용자 요청). 떠날 화면이라 다시 읽지 않고, 넘어갈 때까지 단추를 잠가 둔다.
         leaving = true;
@@ -1954,6 +2003,9 @@ export default function QuoteEditForm({
        * 옮기는 것은 저장 팝업이 0.5초 뒤에 한다(common/SavePopup.tsx) — 그쪽도
        * push 하나뿐이고 뒤에 refresh 를 붙이지 않는다.
        */
+      // 🔴 새로 만든 장도 마찬가지다 — 저장 · 파일 올리기가 끝난 **뒤** PDF 로 바꾼다.
+      if (!(await convertSavedQuoteToPdf(result.id))) return;
+
       leaving = true;
       showSavePopup({ message: "견적서를 등록했습니다.", redirectTo: returnHref ?? "/quotes" });
     } catch (err) {
@@ -2248,6 +2300,14 @@ export default function QuoteEditForm({
           )}
         </div>
       )}
+
+      {/* 🔴 [저장] 뒤 엑셀 → PDF 변환 — 도는 중, 또는 그 결과(견적서는 이미 저장됐다). */}
+      <QuoteSavePdfNotice
+        lines={pdfNoticeLines}
+        busy={pdfConverting}
+        onLeave={() => router.push(returnHref ?? "/quotes")}
+      />
+
 
       {/* ── 인수번호로 불러오기 ───────────────────────────────────────────
           🔴 **케이블 견적서에는 없다**(2026-09-16 케이블 ③). 이 구역이 하는 일은 수리 건

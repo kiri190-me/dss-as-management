@@ -10,6 +10,11 @@ import {
   QUOTE_FOLDER_RELATIVE_PATH_MAX_LENGTH,
   isQuoteFolderRelativePath,
 } from "@/lib/domain/quote-folder-link";
+import {
+  QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX,
+  QUOTE_FOLDER_XLSX2PDF_OUTPUT_EXTENSION,
+  QUOTE_FOLDER_XLSX2PDF_SOURCE_EXTENSION,
+} from "@/lib/domain/quote-folder-xlsx2pdf-link";
 
 /**
  * ============================================================================
@@ -213,22 +218,20 @@ export const REPAIR_DOCS_FOLDER_HELPER_ROOT_ENV = "REPAIR_DOCS_ARCHIVE_UNC_ROOT"
  * 스킴을 늘리면 설치가 한 벌 더 는다(domain/quote-folder-file-link.ts 머리말과 같은 까닭).
  * 접두어만 더하면 **같은 스크립트 · 같은 설치 한 번**으로 끝난다.
  *
- * 🔴 **이 접두어가 여기(server)에 있는 까닭** — 이 조각은 **도우미 쪽만** 만든다. 주소를
- * **만드는** 쪽(서버 통로 · 화면)은 다음 조각의 일이고, 그때 domain/ 에 폴더 · 파일 주소와
- * 같은 모양의 모듈(규칙 검사 · base64url 싸기)이 생긴다. 지금 domain/ 에 반쪽을 만들어 두면
- * 쓰는 곳 없는 코드가 남는다. 다음 조각이 domain/ 으로 옮기고 여기서는 그것을 읽어 쓰면 된다.
+ * 🔴 **2026-10-08 오후 — 세 상수가 domain/quote-folder-xlsx2pdf-link.ts 로 옮겨 갔다.**
+ * 아침의 이 자리에는 「주소를 만드는 쪽은 다음 조각의 일이라 지금 domain 에 두면 쓰는 곳 없는
+ * 코드가 남는다」고 적혀 있었다. 그 다음 조각이 왔다 — **화면이 주소를 만든다.** 이 파일은
+ * `import "server-only"` 라 화면이 읽을 수 없으므로, 폴더 · 파일 주소와 **같은 모양**으로
+ * domain 에 두고 여기서는 **읽어 쓴다**(아래는 다시 내보내기일 뿐이다).
+ * 🔴 **스크립트 본문은 한 글자도 바뀌지 않았다** — 값이 그대로이기 때문이고, 그 사실은
+ * quote-folder-helper.test.ts 가 스크립트 전체의 sha256 으로 못 박는다.
  * ============================================================================
  */
-export const QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX = "dss-folder://xlsx2pdf/?p=";
-
-/**
- * 🔴 PDF 로 바꿀 수 있는 **원본 확장자 — 이것 하나뿐이다**(사용자 결정 2026-10-08).
- * 읽기 허용 목록(QUOTE_FOLDER_OPENABLE_EXTENSIONS · 열여덟 개)과 **일부러 다르다** — 쓰는
- * 명령이라 좁힌다. `.xlsm` 도 `.xls` 도 여기서는 거절이다.
- */
-export const QUOTE_FOLDER_XLSX2PDF_SOURCE_EXTENSION = "xlsx";
-/** 🔴 결과 확장자. 결과 경로는 **받지 않는다** — 원본 이름의 확장자만 이것으로 바꾼다. */
-export const QUOTE_FOLDER_XLSX2PDF_OUTPUT_EXTENSION = "pdf";
+export {
+  QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX,
+  QUOTE_FOLDER_XLSX2PDF_OUTPUT_EXTENSION,
+  QUOTE_FOLDER_XLSX2PDF_SOURCE_EXTENSION,
+} from "@/lib/domain/quote-folder-xlsx2pdf-link";
 
 export const QUOTE_FOLDER_HELPER_SCRIPT_FILE_NAME = "open-dss-folder.ps1";
 export const QUOTE_FOLDER_HELPER_INSTALLER_FILE_NAME = "install-dss-folder-helper.cmd";

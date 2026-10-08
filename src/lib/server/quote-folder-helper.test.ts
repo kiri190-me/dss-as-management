@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -803,6 +803,31 @@ describe("🔴 PDF 변환 — 스크립트 본문", () => {
     assert.ok(script.includes(`$ConvertPrefix = '${QUOTE_FOLDER_XLSX2PDF_LINK_PREFIX}'\r\n`));
     assert.ok(script.includes(`$ConvertSourceSuffix = '.${QUOTE_FOLDER_XLSX2PDF_SOURCE_EXTENSION}'\r\n`));
     assert.ok(script.includes(`$ConvertOutputSuffix = '.${QUOTE_FOLDER_XLSX2PDF_OUTPUT_EXTENSION}'\r\n`));
+  });
+
+  /**
+   * 🔴 **상수가 domain 으로 옮겨 가도 스크립트는 한 글자도 바뀌지 않는다**(2026-10-08 오후).
+   * 세 상수(접두어 · 원본 확장자 · 결과 확장자)는 화면이 읽을 수 있어야 해서
+   * domain/quote-folder-xlsx2pdf-link.ts 로 옮겼고, server 쪽은 그것을 다시 내보낸다.
+   * 값이 한 글자라도 달라지면 **이미 설치된 도우미가 새 주소를 못 알아듣는다** — 그런데
+   * 위 시험들은 상수를 양쪽에 똑같이 끼워 넣어 견주므로 **값이 함께 바뀌면 통과한다.**
+   * 그래서 여기서는 **스크립트 전체의 바이트**를 옮기기 **직전**에 잰 값으로 못 박는다.
+   *
+   * 🔴 재는 입력은 아래 세 루트로 고정이다(길이 16015 · sha256 은 2026-10-08 옮기기 직전 값).
+   * 이 시험이 깨지면 스크립트가 **정말로** 바뀐 것이다 — 일부러 바꾼 조각이라면 그 조각이
+   * 새 값을 적고 **무엇을 왜 바꿨는지**를 여기 주석에 남긴다.
+   */
+  test("🔴 상수를 domain 으로 옮겨도 스크립트 글자가 안 바뀐다 — 전체 sha256", () => {
+    const fixed = buildQuoteFolderHelperScript({
+      uncRoot: String.raw`\\NAS\견적서`,
+      uncRootAlt: String.raw`\\10.0.0.9\견적서`,
+      extraRoots: [String.raw`Z:\현황표`],
+    });
+    assert.equal(fixed.length, 16015);
+    assert.equal(
+      createHash("sha256").update(fixed, "utf8").digest("hex"),
+      "22783ebcf57a1be573accb1bd841255fcbf274d3e381dc713d030134086d4bf1"
+    );
   });
 
   /**

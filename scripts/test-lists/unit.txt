@@ -389,6 +389,13 @@ src/lib/domain/quote-folder-link.test.ts
 # 허용 목록 밖 · 확장자 없는 이름 · 끝에 점 · 공백이 붙은 이름 · 폴더 주소와 섞이지 않는가.
 # 같은 목록이 PowerShell 도우미 안에도 글자 그대로 박히는지는 바로 아래 줄이 본다.
 src/lib/domain/quote-folder-file-link.test.ts
+# 「엑셀 → PDF」 주소 `dss-folder://xlsx2pdf/?p=…`(2026-10-08) — 접두어 · 확장자 상수가
+# server/quote-folder-helper.ts 에서 domain 으로 옮겨 온 자리다(화면이 읽어야 한다).
+# 🔴 `.xlsx` 밖은 주소를 만들지 않는다(읽기 허용 목록보다 좁다 — `.xlsm` · `.xls` 도 거절) ·
+# 🔴 결과 이름은 **규칙이 정한다**(주소가 결과 경로를 고르지 못한다) · 상대 경로 규칙은
+# 폴더 주소 한 벌을 그대로 거친다 · 되읽기가 엄격하다. 도우미 쪽 짝(PowerShell 을 실제로
+# 돌려 보는 것)은 바로 아래 줄이 보고, **스크립트 글자가 안 바뀌었다**는 것도 거기서 sha256 으로 본다.
+src/lib/domain/quote-folder-xlsx2pdf-link.test.ts
 src/lib/server/quote-folder-helper.test.ts
 # 「수리 관련」 서류 공유폴더에서 **서버가 읽을** 루트(2026-10-07) — 도우미 설치본에 심는
 # UNC 루트(바로 위 줄이 본다)와 **짝이면서 다른 값**이다. 비었거나 공백이면 null(기능만 꺼짐) ·
@@ -415,6 +422,13 @@ src/app/api/quotes/*/archive-folder/route-source.test.ts
 # 글자 `quotes` READ 다) · 쓰기 메서드 · mkdir · 파일 중계가 없다 · 응답에 컨테이너 안 경로도
 # 전체 공유폴더 주소(uncPath)도 없다 · 여럿이면 목록도 경로도 내지 않는다 · 하위 폴더 칸이 없다.
 src/app/api/quotes/*/archive-folder/entries/route-source.test.ts
+# 그 폴더에 **그 PDF 가 있는가**를 서버가 다시 읽어 답하는 통로(2026-10-08) — 도우미는 답을
+# 주지 않으므로 서버가 눈이 된다. 🔴 문지기가 바로 위 목록 통로와 **글자 그대로 같다** ·
+# 🔴 읽기 하나뿐이고 변환을 시키지 않는다(도우미 주소도, 주소를 만드는 함수도 없다) ·
+# 🔴 바꿀 엑셀은 **저장이 쓴 그 이름 규칙**으로 찾는다(「엑셀처럼 보이는 것」을 고르지 않는다) ·
+# 🔴 「전에도 있었다」를 가를 수정 시각을 함께 낸다(못 읽으면 칸이 빠진다) · 응답에 경로가 없다 ·
+# 폴더가 여럿이면 아무것도 내지 않는다.
+src/app/api/quotes/*/archive-folder/pdf/route-source.test.ts
 # 견적서를 **새로 만들 때** 폴더를 세우는 자리(2026-10-06) — 🔴 트랜잭션 바깥 · 저장이
 # 성공한 뒤 · 폴더를 못 만들어도 저장은 성공 · 고치기에는 안 붙음 · 로그에 폴더 이름과
 # 경로 없음을 **원본 글자로** 본다. 실제 동작은 위 quote-archive-create-folder.test.ts 가 본다.

@@ -106,6 +106,23 @@ src/components/quotes/quote-excel-autofill-screens.test.tsx
 src/components/quotes/quote-folder-open.test.ts
 src/components/quotes/QuoteFolderOpenButton.test.tsx
 src/components/quotes/quote-folder-open-screens.test.ts
+# 🔴 [저장]을 누르면 그 엑셀이 **그 PC 의 Excel 로** PDF 가 된다(2026-10-08 사용자 요구) —
+# 운영이 리눅스 컨테이너라 서버가 변환할 수 없다. 화면이 `dss-folder://xlsx2pdf/?p=…` 를 열고
+# **서버가 폴더를 다시 읽어** 확인한다. 🔴 건너뛰는 장(엑셀 전용 · 앱 양식 없는 종류)은 통로를
+# 부르지도 주소를 열지도 않는다(저장 쪽과 **같은 판정**을 가져다 쓴다) · 🔴 설정이 비면 아무것도
+# 안 한다 · 🔴 「전에도 있었다」와 「방금 생겼다」를 수정 시각으로 가른다(잴 수 없으면 단언하지
+# 않는다) · 🔴 확인은 네 번 보고 10 초에서 멈춘다 · 🔴 줄에 경로가 한 글자도 없다 · 🔴 저장을
+# 막지 않는다(이 모듈에 저장 액션이 없다) · 🔴 숨은 iframe 을 베끼지 않고 가져다 쓴다.
+src/components/quotes/quote-save-pdf-convert.test.ts
+# 그 결과를 그리는 칸 — **상태를 넣어 실제로 그려 보고 결과로 잰다**(도는 중 흐릿 · 끝나면
+# 노랑 + [목록으로] · 줄이 없으면 아무것도 안 그림 · 그려진 글자에 폴더 · 파일 이름 없음).
+src/components/quotes/QuoteSavePdfNotice.test.tsx
+# 폼이 그 흐름을 **제자리에서** 부르는가 — QuoteEditForm 은 서버 액션을 부르는 클라이언트
+# 컴포넌트라 그려 볼 수 없어 이웃(quote-attachment-screens.test.ts)과 같이 원본을 글자로 읽는다.
+# 🔴 저장 액션이 돌아온 **뒤**에 부른다(저장을 막지 않는다) · 만들기는 파일 올리기까지 끝난 뒤 ·
+# 고치기는 그 가지 안 · 둘 다 저장 팝업 **앞** · 읽을 것이 남으면 넘어가지 않는다 · 폼이 주소를
+# 제 손으로 만들지 않는다 · 흐름이 던져도 저장은 되돌아가지 않는다.
+src/components/quotes/quote-save-pdf-screens.test.ts
 # [새 견적서]의 발행번호 칸에 **다음 번호를 미리 적어 둔다**(2026-10-06) — 🔴 제안이지
 # 채번이 아니다(승인된 결정): 새 견적서에서만 · 한 번만 묻고 · 빈 칸일 때만 채우고 ·
 # 못 받으면 조용히 빈 칸이다(오류 상자 없음) · 칸은 여전히 자유 입력이고 저장 쪽은 이 값을
