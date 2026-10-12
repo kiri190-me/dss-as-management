@@ -26,9 +26,10 @@ import {
  * 값이 저장소 · 이미지에 남는다. 그래서 부를 때마다 환경변수로 만든다. 값은 로그 · 오류 응답에
  * 싣지 않는다(설정이 비었거나 틀렸다는 사실만 알린다).
  *
- * ── 루트는 여럿일 수 있다 (2026-09-30 · 2026-10-07) ───────────────────────
+ * ── 루트는 여럿일 수 있다 (2026-09-30 · 2026-10-07 · 2026-10-12) ───────────
  * 견적서 루트(QUOTE_ARCHIVE_UNC_ROOT) · 고객사 현황표 루트(CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT) ·
- * 연락서 루트(CONTACT_FOLDER_ARCHIVE_UNC_ROOT) · 수리 관련 서류 루트(REPAIR_DOCS_ARCHIVE_UNC_ROOT),
+ * 연락서 루트(CONTACT_FOLDER_ARCHIVE_UNC_ROOT) · 수리 관련 서류 루트(REPAIR_DOCS_ARCHIVE_UNC_ROOT) ·
+ * 발주서 루트(PURCHASE_ORDER_ARCHIVE_UNC_ROOT),
  * 그리고 견적서 · 현황표의 다른 주소(_ALT)를 **한 벌에 함께** 심는다 — 도우미는 PC 당 한 벌이라
  * 따로 설치할 수 없다(server/quote-folder-helper.ts 의 requireRoots). 어느 것이 설정됐는지는
  * resolveQuoteFolderHelperInstallRoots 가 가리고, 이 통로는 그 목록을 그대로 넘긴다.

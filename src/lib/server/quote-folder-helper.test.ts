@@ -826,6 +826,11 @@ describe("🔴 PDF 변환 — 스크립트 본문", () => {
    *    시트가 함께 딸려 나갔다(내자 견적서 PDF 에 OH 장이 붙어 나간다 — 사용자 요구).
    *    🔴 울타리(검사 여덟~열하나 · 덮어쓰기 · 창 숨김 · `finally` 닫기)는 **한 글자도
    *    바뀌지 않았다** — 바로 아래 시험들이 그 줄들을 글자 그대로 다시 센다.
+   *  · 길이 16123 · `76f85922…` — 🔴 **2026-10-12 에 루트를 하나 더했는데(발주서) 값이
+   *    그대로다.** 루트는 스크립트에 **값으로** 들어가고(`$Roots = @(…)`), 재는 입력은
+   *    아래 세 루트로 고정이라 새 환경변수가 이 글자를 건드리지 않는다. 바뀐 것은
+   *    resolveQuoteFolderHelperInstallRoots 가 **모으는 목록**뿐이다 — 그래서 PO 저장소의
+   *    같은 시험과 지문이 계속 같다(두 사이트가 같은 도우미를 내야 한다).
    */
   test("🔴 상수를 domain 으로 옮겨도 스크립트 글자가 안 바뀐다 — 전체 sha256", () => {
     const fixed = buildQuoteFolderHelperScript({
@@ -1502,12 +1507,14 @@ describe("설치에 심을 루트 모으기(resolveQuoteFolderHelperInstallRoots
     "CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT_ALT",
     "CONTACT_FOLDER_ARCHIVE_UNC_ROOT",
     "REPAIR_DOCS_ARCHIVE_UNC_ROOT",
+    "PURCHASE_ORDER_ARCHIVE_UNC_ROOT",
   ] as const;
   const PORTAL_UNC = "\\\\TESTNAS\\현황표";
   const CONTACT_UNC = "\\\\TESTNAS\\연락서";
   const REPAIR_DOCS_UNC = "\\\\TESTNAS\\수리 관련";
+  const PURCHASE_ORDER_UNC = "\\\\TESTNAS\\발주서";
 
-  /** 여섯 칸을 그대로 세워 두고 돌린 뒤 되돌린다 — 다른 시험의 환경을 건드리지 않게. */
+  /** 일곱 칸을 그대로 세워 두고 돌린 뒤 되돌린다 — 다른 시험의 환경을 건드리지 않게. */
   function withEnv(values: Partial<Record<(typeof KEYS)[number], string>>, body: () => void): void {
     const original = KEYS.map((key) => [key, process.env[key]] as const);
     try {
@@ -1631,6 +1638,83 @@ describe("설치에 심을 루트 모으기(resolveQuoteFolderHelperInstallRoots
     withEnv({ QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC, REPAIR_DOCS_ARCHIVE_UNC_ROOT: "\\\\TESTNAS\\it's" }, () => {
       assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), { status: "ok", roots: [FAKE_UNC] });
     });
+  });
+
+  /**
+   * ============================================================================
+   * 🔴 2026-10-12 — **발주서** 루트도 맨 뒤다(위 2026-10-07 과 같은 까닭)
+   * ============================================================================
+   * 루트 목록은 **설치할 때 그 PC 의 스크립트에 글자 그대로 박히고**, 이미 설치된 PC 는 새
+   * 설정을 모른다. 그래서 새 루트는 언제나 맨 뒤다 — 앞에 끼워 넣으면 이미 깔린 PC 와 새로
+   * 까는 PC 의 차례가 어긋나 같은 상대 경로가 다른 폴더로 풀릴 수 있다.
+   * ============================================================================
+   */
+  test("🔴 발주서 루트는 맨 뒤에 붙는다 — 앞의 여섯 차례가 한 칸도 밀리지 않는다", () => {
+    withEnv(
+      {
+        QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC,
+        QUOTE_ARCHIVE_UNC_ROOT_ALT: "\\\\10.0.0.9\\archive",
+        CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT: PORTAL_UNC,
+        CUSTOMER_PORTAL_ARCHIVE_UNC_ROOT_ALT: "\\\\10.0.0.9\\현황표",
+        CONTACT_FOLDER_ARCHIVE_UNC_ROOT: CONTACT_UNC,
+        REPAIR_DOCS_ARCHIVE_UNC_ROOT: REPAIR_DOCS_UNC,
+        PURCHASE_ORDER_ARCHIVE_UNC_ROOT: PURCHASE_ORDER_UNC,
+      },
+      () => {
+        const resolution = resolveQuoteFolderHelperInstallRoots();
+        assert.deepEqual(resolution, {
+          status: "ok",
+          roots: [
+            FAKE_UNC,
+            "\\\\10.0.0.9\\archive",
+            PORTAL_UNC,
+            "\\\\10.0.0.9\\현황표",
+            CONTACT_UNC,
+            REPAIR_DOCS_UNC,
+            PURCHASE_ORDER_UNC,
+          ],
+        });
+        // 🔴 그 차례 그대로 스크립트에 박힌다 — 맨 뒤가 맨 뒤다.
+        if (resolution.status !== "ok") throw new Error("루트를 모으지 못했다");
+        assert.ok(
+          buildQuoteFolderHelperScript(quoteFolderHelperRootsInput(resolution.roots)).includes(
+            `$Roots = @('${FAKE_UNC}', '\\\\10.0.0.9\\archive', '${PORTAL_UNC}', ` +
+              `'\\\\10.0.0.9\\현황표', '${CONTACT_UNC}', '${REPAIR_DOCS_UNC}', '${PURCHASE_ORDER_UNC}')\r\n`
+          )
+        );
+      }
+    );
+  });
+
+  test("🔴 발주서 루트만 늘어도 앞은 그대로다 — 설정이 예전인 PC 와 차례가 같다", () => {
+    withEnv(
+      {
+        QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC,
+        REPAIR_DOCS_ARCHIVE_UNC_ROOT: REPAIR_DOCS_UNC,
+        PURCHASE_ORDER_ARCHIVE_UNC_ROOT: PURCHASE_ORDER_UNC,
+      },
+      () => {
+        assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), {
+          status: "ok",
+          roots: [FAKE_UNC, REPAIR_DOCS_UNC, PURCHASE_ORDER_UNC],
+        });
+      }
+    );
+  });
+
+  test("🔴 발주서 루트가 틀리면 없는 셈 친다 — 견적서 [폴더 열기]가 죽지 않는다", () => {
+    withEnv(
+      { QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC, PURCHASE_ORDER_ARCHIVE_UNC_ROOT: "/mnt/purchase-orders" },
+      () => {
+        assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), { status: "ok", roots: [FAKE_UNC] });
+      }
+    );
+    withEnv(
+      { QUOTE_ARCHIVE_UNC_ROOT: FAKE_UNC, PURCHASE_ORDER_ARCHIVE_UNC_ROOT: "\\\\TESTNAS\\it's" },
+      () => {
+        assert.deepEqual(resolveQuoteFolderHelperInstallRoots(), { status: "ok", roots: [FAKE_UNC] });
+      }
+    );
   });
 
   test("🔴 현황표 루트가 틀리면 없는 셈 친다 — 견적서 [폴더 열기]가 죽지 않는다", () => {
@@ -2023,9 +2107,12 @@ describe("파일 없이 도는 설치 명령 본문", () => {
    * ── 잰 값 ─────────────────────────────────────────────────────────────────
    *  · 31,248 — 주석을 줄여 되돌린 직후(2026-10-08 오전).
    *  · 31,436 — 세 상수를 domain 으로 옮긴 뒤(스크립트는 그대로, 설치 쪽 글자만 늘었다).
-   *  · 🔴 31,720 — 「그 탭만 내보낸다」(2026-10-08). 남은 자리는 **791 글자**뿐이다.
+   *  · 🔴 31,720 — 「그 탭만 내보낸다」(2026-10-08). 남은 자리는 **791 글자**뿐이었다.
+   *  · 🔴 32,000 — 발주서 루트를 더한 뒤(2026-10-12). 남은 자리는 **511 글자**다.
+   *    🔴 **스크립트는 한 글자도 안 바뀌었다**(루트는 값으로 들어간다) — 늘어난 280 글자는
+   *    루트 한 줄이 `$Roots` 에 박히고 그것이 base64 로 부풀어 난 것뿐이다.
    *    한글 한 글자가 base64 **네 글자**이므로, 스크립트에 더 쓸 수 있는 한글 주석은
-   *    **200 글자 남짓**이다. 다음 조각에서 막히면 고치려 들지 말고 압축을 잡아라.
+   *    **120 글자 남짓**이다. 다음 조각에서 막히면 고치려 들지 말고 압축을 잡아라.
    * ============================================================================
    */
   test("🔴 명령 한 줄이 Windows 명령줄 한도 안이다 — 넘으면 설치가 통째로 막힌다", () => {
@@ -2034,6 +2121,8 @@ describe("파일 없이 도는 설치 명령 본문", () => {
     const WINDOWS_COMMAND_LINE_MAX = 32767;
     const INVOCATION_OVERHEAD = 256;
     // 루트를 가장 많이 심은 PC 가 가장 길다 — 설정이 꽉 찬 경우로 잰다.
+    // 🔴 발주서 루트는 운영 값이 **깊고 길다**(마디 넷). 실제 주소를 저장소에 남기지 않으면서도
+    //    그만큼 긴 가짜 값으로 재야 이 시험이 느슨해지지 않는다.
     const widest = buildQuoteFolderHelperInlineInstallCommand({
       uncRoot: "\\\\10.77.88.99\\견적서 공유폴더\\하위",
       uncRootAlt: "\\\\DSS-NAS-LONG-NAME\\견적서 공유폴더\\하위",
@@ -2042,6 +2131,7 @@ describe("파일 없이 도는 설치 명령 본문", () => {
         "\\\\DSS-NAS-LONG-NAME\\고객사 현황표",
         "\\\\10.77.88.99\\연락서 공유폴더",
         "\\\\10.77.88.99\\수리 관련 서류",
+        "\\\\10.77.88.99\\발주서 공유폴더 이름이 꽤 긴 경우\\고객 발주서 관련 최종자료 모음 폴더\\열람 범위가 제한되어 있는 상위 폴더\\발주서 및 해당 정보 파일 모음",
       ],
     });
     assert.ok(
