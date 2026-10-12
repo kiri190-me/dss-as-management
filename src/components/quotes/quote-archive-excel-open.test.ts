@@ -198,6 +198,49 @@ describe("① 🔴 번호가 맞는 파일만 — 남의 견적서를 열지 않
     const one = [entry({ name: "DSS 2026-099 가나상사 FWD DROP.xlsx", modifiedAt: "2026-04-01T07:18:00.000Z" })];
     assert.equal(pickQuoteArchiveExcelEntry(one, "DSS-2026-099")?.name, "DSS 2026-099 가나상사 FWD DROP.xlsx");
   });
+
+  /*
+   * 🔴 **운영에서 틀리게 돌던 그 폴더다** (2026-10-12, 사용자가 찾음). `DSS 2026-095-1R1` 은
+   * 가지(`-1`) 위에 개정(`R1`) 이 얹힌 모양이라 번호 뽑기가 `null` 을 냈고, [Excel 보기]는
+   * 그 견적서에서 **아무 파일도 못 골랐다**(「저장된 파일이 없습니다.」만 떴다).
+   * 🔴 고객사명 · 모델 · L/N · S/N 은 가짜다 — 번호 · 파일 수 · 확장자는 실물과 같다.
+   */
+  describe("🔴 가지 + 개정 — 운영의 그 폴더", () => {
+    const real = [
+      entry({ name: "DSS 2026-095 가나상사 MODEL-X1 AB1234 1234567 수리 견적서.xls", modifiedAt: "2026-09-01T01:00:00.000Z" }),
+      entry({ name: "DSS 2026-095 가나상사 MODEL-X1 AB1234 1234567 수리 견적서 - 有印.pdf", modifiedAt: "2026-09-02T01:00:00.000Z" }),
+      entry({ name: "DSS 2026-095-1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).xls", modifiedAt: "2026-09-03T01:00:00.000Z" }),
+      entry({ name: "DSS 2026-095-1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).pdf", modifiedAt: "2026-09-04T01:00:00.000Z" }),
+      entry({ name: "DSS 2026-095-1R1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).xls", modifiedAt: "2026-09-05T01:00:00.000Z" }),
+      entry({ name: "DSS 2026-095-1R1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).pdf", modifiedAt: "2026-09-06T01:00:00.000Z" }),
+    ];
+
+    test("🔴 `DSS 2026-095-1R1` 줄이 **그 장의 엑셀**을 연다 — 그전에는 null 이었다", () => {
+      assert.equal(
+        pickQuoteArchiveExcelEntry(real, "DSS 2026-095-1R1")?.name,
+        "DSS 2026-095-1R1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).xls"
+      );
+    });
+
+    test("🔴 가지 줄은 개정본을 열지 않는다 — 더 최근이어도 제 번호의 것이다", () => {
+      assert.equal(
+        pickQuoteArchiveExcelEntry(real, "DSS 2026-095-1")?.name,
+        "DSS 2026-095-1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).xls"
+      );
+    });
+
+    test("본 번호 줄도 제 것만 — 가지도 개정도 아니다", () => {
+      assert.equal(
+        pickQuoteArchiveExcelEntry(real, "DSS 2026-095")?.name,
+        "DSS 2026-095 가나상사 MODEL-X1 AB1234 1234567 수리 견적서.xls"
+      );
+    });
+
+    test("키 쪽도 넷째 모양을 받는다 — 소문자로 적혀도 같다", () => {
+      assert.equal(quoteArchiveExcelNumberKey("DSS 2026-095-1R1"), "2026-095-1R1");
+      assert.equal(quoteArchiveExcelNumberKey("dss 2026-095-1r1"), "2026-095-1R1");
+    });
+  });
 });
 
 describe("② 같은 번호로 여럿이면 가장 최근 것", () => {

@@ -122,6 +122,44 @@ describe("🔴 실측 변종 — 하이픈 · 소문자 · 개정본", () => {
     assert.equal(atOriginal.hiddenCount, 1);
   });
 
+  /*
+   * 🔴 **운영에서 틀리게 돌던 그 폴더다** (2026-10-12, 사용자가 찾음). `DSS 2026-095-1R1` 은
+   * 가지(`-1`) 위에 개정(`R1`) 이 얹힌 모양이라 번호 뽑기가 `null` 을 냈다 — 그 견적서를 열면
+   * **그 장의 파일이 하나도 안 보이고 숨긴 개수만 여섯으로** 올랐다.
+   */
+  test("🔴 가지 + 개정 `DSS 2026-095-1R1` — 그 장의 두 파일이 보인다 (그전에는 0 개였다)", () => {
+    const folder = [
+      row("DSS 2026-095 가나상사 MODEL-X1 AB1234 1234567 수리 견적서.xls"),
+      row("DSS 2026-095 가나상사 MODEL-X1 AB1234 1234567 수리 견적서 - 有印.pdf"),
+      row("DSS 2026-095-1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).xls"),
+      row("DSS 2026-095-1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).pdf"),
+      row("DSS 2026-095-1R1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).xls"),
+      row("DSS 2026-095-1R1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).pdf"),
+    ];
+
+    const atBranchRevision = filterQuoteArchiveEntriesByQuoteNumber(folder, "DSS 2026-095-1R1");
+    assert.deepEqual(names(atBranchRevision.entries), [
+      "DSS 2026-095-1R1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).xls",
+      "DSS 2026-095-1R1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).pdf",
+    ]);
+    assert.equal(atBranchRevision.hiddenCount, 4);
+
+    // 🔴 가지 원본 · 본 번호도 각각 제 것만 — 개정본이 따라오지 않는다.
+    const atBranch = filterQuoteArchiveEntriesByQuoteNumber(folder, "DSS 2026-095-1");
+    assert.deepEqual(names(atBranch.entries), [
+      "DSS 2026-095-1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).xls",
+      "DSS 2026-095-1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).pdf",
+    ]);
+    assert.equal(atBranch.hiddenCount, 4);
+
+    const atBase = filterQuoteArchiveEntriesByQuoteNumber(folder, "DSS 2026-095");
+    assert.deepEqual(names(atBase.entries), [
+      "DSS 2026-095 가나상사 MODEL-X1 AB1234 1234567 수리 견적서.xls",
+      "DSS 2026-095 가나상사 MODEL-X1 AB1234 1234567 수리 견적서 - 有印.pdf",
+    ]);
+    assert.equal(atBase.hiddenCount, 4);
+  });
+
   test("개정본의 대소문자도 접힌다 — `dss 2026-004r1 …` 이 `DSS 2026-004R1` 에서 보인다", () => {
     const result = filterQuoteArchiveEntriesByQuoteNumber(
       [row("dss 2026-004r1 가나상사 MODEL-X1.pdf")],

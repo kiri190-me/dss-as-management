@@ -26,6 +26,34 @@ describe("한 이름에서 번호 뽑기", () => {
     assert.equal(quoteNumberFromArchiveFileName("DSS 2026-004R1 가나상사 MODEL-X1 - 有印.pdf"), "2026-004R1");
   });
 
+  test("🔴 넷째 모양 — 가지 + 개정이 함께 온다 (2026-10-12 운영에서 사용자가 찾았다)", () => {
+    // 운영 공유폴더에 있는 이름의 **모양 그대로**다 — 🔴 머리말대로 고객사명 · 모델 · L/N ·
+    // S/N 만 가짜로 바꿨고(저장소가 공개다), 번호와 마디 수 · 확장자는 실물과 같다.
+    // 2026-10-06 실측 342 개에는 이 꼴이 하나도 없어 옛 규칙이 `null` 을 냈다.
+    assert.equal(
+      quoteNumberFromArchiveFileName("DSS 2026-095-1R1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서.xls"),
+      "2026-095-1R1"
+    );
+    // 옛 규칙이 깨진 자리 — `-1` 을 먹은 뒤 `R` 앞에서 공백 검사에 걸려 통째로 null 이었다.
+    assert.notEqual(
+      quoteNumberFromArchiveFileName("DSS 2026-095-1R1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서.xls"),
+      null
+    );
+    // 두 자리 가지 · 두 자리 개정도 같은 모양이다.
+    assert.equal(quoteNumberFromArchiveFileName("DSS 2026-095-12R10 가나상사.xls"), "2026-095-12R10");
+    // 소문자로 적혀도 한 번호다.
+    assert.equal(quoteNumberFromArchiveFileName("dss 2026-095-1r1 가나상사.pdf"), "2026-095-1R1");
+  });
+
+  test("🔴 개정이 가지보다 앞에 오는 꼴은 받지 않는다 — 실물을 본 적이 없다", () => {
+    // 지금 아는 차례는 **가지 → 개정** 하나뿐이다. 모르는 차례를 미리 받아 두면
+    // 그 이름이 처음 들어오는 날 사람이 뜻한 것과 다른 번호를 지어낸다.
+    assert.equal(quoteNumberFromArchiveFileName("DSS 2026-095R1-1 가나상사.xls"), null);
+    // 겹이 더 붙는 꼴도 마찬가지다.
+    assert.equal(quoteNumberFromArchiveFileName("DSS 2026-095-1-2 가나상사.xls"), null);
+    assert.equal(quoteNumberFromArchiveFileName("DSS 2026-095R1R2 가나상사.xls"), null);
+  });
+
   test("🔴 `DSS` 뒤가 공백이 아니어도 받는다 — 번호가 자유 입력이라 하이픈이 온다", () => {
     assert.equal(quoteNumberFromArchiveFileName("DSS-2026-099 가나상사 MODEL-X1 수리 견적서.xlsx"), "2026-099");
     assert.equal(quoteNumberFromArchiveFileName("DSS-2026-099-2 가나상사 MODEL-X1.xls"), "2026-099-2");
@@ -194,6 +222,27 @@ describe("개정본이 원본을 가린다", () => {
     assert.deepEqual(hideSupersededArchiveFileNumbers(["2026-100"]), ["2026-100"]);
     assert.deepEqual(hideSupersededArchiveFileNumbers([]), []);
   });
+
+  /*
+   * 🔴 **운영에서 틀리게 돌던 그 폴더 그대로다** (2026-10-12, 사용자가 [고객 안내 현황]에서 찾음).
+   * 화면에 `DSS 2026-095` · `DSS 2026-095-1` 이 떴다 — `-1R1` 이 안 뽑혀 옆의 `-1` 파일에서
+   * 온 번호가 보였고, 그래서 개정본 가리기도 안 걸렸다. 나와야 하는 것은 아래 둘이다.
+   * 🔴 머리말대로 고객사명 · 모델 · L/N · S/N 만 가짜다 — 번호 · 파일 수 · 확장자는 실물과 같다.
+   */
+  test("🔴 운영의 그 폴더 — 여섯 파일 → 번호 셋 → 가린 뒤 `2026-095` · `2026-095-1R1`", () => {
+    const numbers = quoteNumbersFromArchiveFileNames([
+      "DSS 2026-095 가나상사 MODEL-X1 AB1234 1234567 수리 견적서.xls",
+      "DSS 2026-095 가나상사 MODEL-X1 AB1234 1234567 수리 견적서 - 有印.pdf",
+      "DSS 2026-095-1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).xls",
+      "DSS 2026-095-1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).pdf",
+      "DSS 2026-095-1R1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).xls",
+      "DSS 2026-095-1R1 가나상사 MODEL-X1 AB1234 1234567 수리 견적서(OH포함).pdf",
+    ]);
+    assert.deepEqual(numbers, ["2026-095", "2026-095-1", "2026-095-1R1"]);
+    assert.deepEqual(hideSupersededArchiveFileNumbers(numbers), ["2026-095", "2026-095-1R1"]);
+    // 🔴 최신 하나를 고르는 쪽도 그 폴더에서 `-1R1` 을 집는다.
+    assert.equal(latestArchiveFileNumber(numbers), "2026-095-1R1");
+  });
 });
 
 /*
@@ -212,6 +261,9 @@ describe("발행번호에서 키 뽑기", () => {
     assert.equal(quoteArchiveNumberKey("DSS 2026-078"), "2026-078");
     assert.equal(quoteArchiveNumberKey("DSS 2026-078-3"), "2026-078-3");
     assert.equal(quoteArchiveNumberKey("DSS 2026-004R1"), "2026-004R1");
+    // 🔴 넷째 모양 — 가지 + 개정 (2026-10-12). 이것이 null 이면 [Excel 보기]가 아무 파일도
+    // 못 고르고 결재 탭 · 보고서 탭의 공유폴더 거르기가 그 장의 파일을 하나도 안 보여 준다.
+    assert.equal(quoteArchiveNumberKey("DSS 2026-095-1R1"), "2026-095-1R1");
   });
 
   test("🔴 파일 이름 쪽과 **같은 키**가 나온다 — 두 쪽이 갈라지면 여기서 깨진다", () => {
@@ -220,6 +272,7 @@ describe("발행번호에서 키 뽑기", () => {
       ["DSS-2026-099", "DSS-2026-099 가나상사 MODEL-X1.xls"],
       ["dss 2026-001", "dss 2026-001 가나상사 MODEL-X1.pdf"],
       ["DSS 2026-004r1", "DSS 2026-004R1 가나상사 MODEL-X1 - 有印.pdf"],
+      ["DSS 2026-095-1r1", "DSS 2026-095-1R1 가나상사 MODEL-X1(OH포함).xls"],
       ["DSS  2026-007  ", "DSS  2026-007  가나상사.xlsx"],
     ] as const) {
       const key = quoteArchiveNumberKey(number);
