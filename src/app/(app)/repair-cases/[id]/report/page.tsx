@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
 import ReportKindChoice from "@/components/repair-cases/report/ReportKindChoice";
+import ServiceReportFolderSection from "@/components/repair-cases/report/ServiceReportFolderSection";
 import ServiceReportList, {
   type ServiceReportListRow,
 } from "@/components/repair-cases/report/ServiceReportList";
@@ -144,7 +145,14 @@ export default async function RepairCaseReportPage({
    */
   const xlsxHref = `/api/repair-cases/${resolved.id}/service-report/xlsx`;
 
-  const rows: ServiceReportListRow[] = canViewServiceReports(level)
+  /**
+   * 🔴 공유폴더 구역도 **목록과 같은 문턱**이다 — 거기 보이는 줄이 바로 이 건의 검사 ·
+   * 수리 보고서다. 문턱을 따로 만들지 않는다(`service-report-authorization.ts` 의
+   * '자기 영역을 새로 만들지 않는다'와 같은 판단).
+   */
+  const canView = canViewServiceReports(level);
+
+  const rows: ServiceReportListRow[] = canView
     ? (await listServiceReportsForRepairCase(resolved.id)).map((item) => ({
         id: item.id,
         href: `${serviceReportHref}?id=${item.id}`,
@@ -212,6 +220,16 @@ export default async function RepairCaseReportPage({
       ) : (
         savedList
       )}
+
+      {/*
+        🔴 **공유폴더에 들어간 보고서** — 저장이 그 건의 연락서 폴더 안 분류 폴더에 꽂은
+        엑셀·PDF 만 보인다. 🔴 **서버가 공유폴더를 읽지 않는다** — 이 조각이 화면이 뜬 뒤
+        스스로 통로를 부른다. NAS 가 느리거나 꺼진 날에도 위 목록과 아래 갈림길은 그대로
+        뜬다(견적서 탭의 같은 구역과 같은 판단).
+        자리는 **목록 바로 아래**다 — 「무엇이 있는가」를 위에 모으고 「새로 만들기」는
+        그대로 맨 아래에 남긴다.
+      */}
+      {canView && <ServiceReportFolderSection repairCaseId={resolved.id} />}
 
       <ReportKindChoice
         options={[

@@ -490,3 +490,14 @@ src/components/repair-cases/files/attachment-purge-ui.test.tsx
 # 목록이 지금 그대로라는 뜻이다. 판정 자체(상태 → 참/거짓)는 unit 목록의
 # lib/domain/quote-list.test.ts 가 값으로 본다.
 src/components/quotes/quote-list-approved-check.test.tsx
+
+# 「보고서」 탭의 **공유폴더 구역** — 그 건의 연락서 폴더에 저장된 보고서만(2026-10-12 사용자
+# 요구). 🔴 보고서 분류 폴더 **둘만** 묻는다(인수 사진 · 견적서 · DATA · 공통 과 폴더 바로
+# 아래 파일은 읽으러 가지도 보이지도 않는다) · 🔴 검사 · 수리가 **한 창에** 모이고 어느
+# 보고서인지는 **묶음 머리**가 가른다(표의 열 넷은 공용 한 벌 그대로다) · 🔴 분류 폴더가
+# 아직 없으면 **더 묻지 않고** 「아직 저장된 보고서가 없습니다」(없는 자리를 읽으러 가면
+# 아무 일도 없는 건이 빨개진다) · `… (2).xlsx` 도 보인다 · 꺼져 있으면 구역이 아예 안 서고
+# 못 읽어도 보고서 탭은 그대로 뜬다 · 🔴 만들기 · 쓰기 · 지우기가 원본에 한 글자도 없고
+# 폴더 이름을 글자로 적지 않는다(도메인 함수가 정한다) · 절대 경로가 화면으로 안 나간다 ·
+# 페이지(서버 컴포넌트)는 공유폴더를 읽지 않고 문턱은 목록과 같다.
+src/components/repair-cases/report/ServiceReportFolderSection.test.tsx
