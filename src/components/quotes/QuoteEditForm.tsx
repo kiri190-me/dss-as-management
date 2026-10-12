@@ -2,7 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { showSavePopup } from "@/components/common/SavePopup";
+import {
+  cancelSavePopupProgress,
+  finishSavePopupProgress,
+  showSavePopup,
+  showSavePopupProgress,
+} from "@/components/common/SavePopup";
 import AmountInput from "@/components/common/AmountInput";
 import {
   editErrorClass,
@@ -101,8 +106,12 @@ import {
 import type { QuoteAttachmentSlots } from "@/lib/db/queries/attachments";
 import QuoteFolderOpenButton, { QuoteFolderOpenNotice } from "@/components/quotes/QuoteFolderOpenButton";
 import type { QuoteFolderOpenOutcome } from "@/components/quotes/quote-folder-open";
-import QuoteSavePdfNotice, { QUOTE_SAVE_PDF_RUNNING_TEXT } from "@/components/quotes/QuoteSavePdfNotice";
-import { runQuoteSavePdfConvert } from "@/components/quotes/quote-save-pdf-convert";
+import QuoteSavePdfNotice from "@/components/quotes/QuoteSavePdfNotice";
+import {
+  QUOTE_SAVE_PDF_DONE_POPUP_TEXT,
+  QUOTE_SAVE_PDF_RUNNING_POPUP_TEXT,
+  runQuoteSavePdfConvert,
+} from "@/components/quotes/quote-save-pdf-convert";
 import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
 
 /**
@@ -515,6 +524,16 @@ function todayInSeoul(): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul" }).format(new Date());
 }
 
+/**
+ * 🔴 [저장] 뒤 엑셀 → PDF 변환이 끝난 **다음에 할 일** (2026-10-12).
+ *
+ *  · `"STAY"`  — 사람이 읽을 것이 남았다. 이 화면에 머문다(노란 칸 + [목록으로]).
+ *  · `"POPUP"` — **진행 중 팝업**이 「완료되었습니다」로 바뀌어 그 팝업이 목록으로 넘긴다.
+ *                🔴 저장 팝업을 또 띄우면 그 글자를 덮으므로 띄우지 않는다.
+ *  · `"SAVED"` — 변환이 시작된 적이 없다(엑셀 전용 등). 지금까지 그대로 저장 팝업이다.
+ */
+type QuoteSavePdfNext = "STAY" | "POPUP" | "SAVED";
+
 export default function QuoteEditForm({
   quote,
   defaultQuoteDate,
@@ -914,8 +933,14 @@ export default function QuoteEditForm({
   /** 새 견적서 저장 뒤 파일 올리기의 진행 · 실패 안내. */
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   /**
-   * 🔴 [저장] 뒤 **엑셀 → PDF** 변환의 진행 · 결과 줄(2026-10-08 · quote-save-pdf-convert.ts).
-   * 비어 있으면 아무것도 그리지 않는다. `pdfConverting` 이 참이면 「도는 중」 꼴이다.
+   * 🔴 [저장] 뒤 **엑셀 → PDF** 변환의 결과 줄(2026-10-08 · quote-save-pdf-convert.ts).
+   * 비어 있으면 아무것도 그리지 않는다.
+   *
+   * 🔴 2026-10-12 부터 **도는 중에는 비어 있다** — 「바꾸는 중입니다…」가 팝업으로 옮겨 갔다
+   * (common/SavePopup.tsx 의 showSavePopupProgress). 그래서 여기 줄이 차는 때는 **끝난 뒤**뿐이고,
+   * 남는 것은 사람이 읽어야 하는 **실패**뿐이다(성공이면 팝업이 0.5초 뒤 목록으로 넘긴다).
+   * `pdfConverting` 은 그 사이를 가리키는 표시로 남아 있다 — 줄이 비어 있어 「도는 중」 꼴은
+   * 그려지지 않는다(QuoteSavePdfNotice.tsx 머리말).
    */
   const [pdfNoticeLines, setPdfNoticeLines] = useState<QuoteIssueNoticeLine[]>([]);
   const [pdfConverting, setPdfConverting] = useState(false);
@@ -1896,22 +1921,54 @@ export default function QuoteEditForm({
    *  · 넘어가도 되는 결과는 셋이다: 할 일이 없었다(엑셀 전용 등) · 설정이 꺼져 있다 ·
    *    **PDF 를 만들었다**. 그 밖은 사람이 읽을 것이 있어 이 화면에 남는다 — 첫 줄이
    *    「견적서는 저장되었습니다.」이고 곁에 [목록으로]가 선다(못 올린 첨부와 같은 모양).
+   *
+   * ── 🔴 도는 동안은 **팝업**이다 (2026-10-12 사용자 요구) ─────────────────
+   * 「저장된 엑셀을 PDF 로 바꾸는 중입니다…」를 화면 안 흐릿한 칸이 아니라 **팝업**으로 띄운다.
+   * 그 팝업은 저절로 닫히지 않고(변환이 10초까지 걸린다), 끝나면 **같은 팝업**이
+   * 「완료되었습니다」로 바뀐 뒤 0.5초 뒤 목록으로 넘어간다. 규칙은 lib/domain/save-popup.ts.
+   *
+   *  · 🔴 팝업은 **변환이 진짜 시작될 때만** 뜬다 — 흐름이 도우미 주소를 연 그때
+   *    (`onConvertStart`). 엑셀 전용처럼 할 일이 없는 장은 팝업 없이 지금 그대로다.
+   *  · 🔴 **실패하면 팝업을 닫는다**(`cancel`) — 그다음은 지금과 같다. 노란 칸 + [목록으로]가
+   *    이 화면에 남는다. 「Excel 이 없는 PC 」 따위는 사람이 **읽어야 하는** 알림이라 0.5초 뒤
+   *    사라지는 팝업으로는 전할 수 없다.
    * ============================================================================
    */
-  async function convertSavedQuoteToPdf(quoteId: string): Promise<boolean> {
+  async function convertSavedQuoteToPdf(quoteId: string): Promise<QuoteSavePdfNext> {
     setPdfConverting(true);
-    setPdfNoticeLines([{ text: QUOTE_SAVE_PDF_RUNNING_TEXT, tone: "normal" }]);
+    // 변환이 **시작됐는가** — 팝업을 띄웠는가와 같은 말이다(흐름이 주소를 연 뒤에만 참).
+    let converting = false;
     try {
-      const outcome = await runQuoteSavePdfConvert({ quoteId, subject: { kind, isExcelOnly } });
+      const outcome = await runQuoteSavePdfConvert({
+        quoteId,
+        subject: { kind, isExcelOnly },
+        onConvertStart: () => {
+          converting = true;
+          showSavePopupProgress({
+            message: QUOTE_SAVE_PDF_RUNNING_POPUP_TEXT,
+            redirectTo: returnHref ?? "/quotes",
+          });
+        },
+      });
       setPdfNoticeLines(outcome.lines);
-      return outcome.kind === "SKIPPED" || outcome.kind === "DISABLED" || outcome.kind === "CREATED";
+      const canLeave = outcome.kind === "SKIPPED" || outcome.kind === "DISABLED" || outcome.kind === "CREATED";
+      // 팝업을 띄운 적이 없으면 지금까지와 똑같다 — 저장 팝업을 띄우거나, 화면에 남는다.
+      if (!converting) return canLeave ? "SAVED" : "STAY";
+      if (!canLeave) {
+        cancelSavePopupProgress();
+        return "STAY";
+      }
+      finishSavePopupProgress(QUOTE_SAVE_PDF_DONE_POPUP_TEXT);
+      return "POPUP";
     } catch (pdfError) {
       // 🔴 오류의 message 를 적지 않는다 — 폴더 이름 · 경로가 섞인다(저장 쪽과 같은 규율).
       console.error("견적서 PDF 변환에서 예상치 못한 오류", {
         name: pdfError instanceof Error ? pdfError.name : typeof pdfError,
       });
       setPdfNoticeLines([]);
-      return true;
+      // 🔴 떠 있는 진행 팝업을 걷는다 — 안 그러면 아무 말 없이 떠 있는 채로 사람이 갇힌다.
+      if (converting) cancelSavePopupProgress();
+      return "SAVED";
     } finally {
       setPdfConverting(false);
     }
@@ -1950,7 +2007,14 @@ export default function QuoteEditForm({
       if (savedQuote) {
         // 🔴 저장이 끝난 **뒤** 엑셀을 PDF 로 바꾼다(2026-10-08). 사람이 읽을 것이 남으면
         //    넘어가지 않는다 — 견적서는 이미 저장됐고, 안내 곁에 [목록으로]가 있다.
-        if (!(await convertSavedQuoteToPdf(savedQuote.id))) return;
+        const afterPdf = await convertSavedQuoteToPdf(savedQuote.id);
+        if (afterPdf === "STAY") return;
+        // 🔴 바꾼 장은 **진행 중 팝업**이 「완료되었습니다」로 바뀌어 그 팝업이 넘긴다
+        //    (2026-10-12). 넘어가는 동안 단추를 잠가 두는 것은 아래와 같다.
+        if (afterPdf === "POPUP") {
+          leaving = true;
+          return;
+        }
         // 고친 뒤에도 저장 팝업을 0.5초 띄우고 왔던 목록으로 넘어간다(2026-09-15
         // 사용자 요청). 떠날 화면이라 다시 읽지 않고, 넘어갈 때까지 단추를 잠가 둔다.
         leaving = true;
@@ -2004,7 +2068,13 @@ export default function QuoteEditForm({
        * push 하나뿐이고 뒤에 refresh 를 붙이지 않는다.
        */
       // 🔴 새로 만든 장도 마찬가지다 — 저장 · 파일 올리기가 끝난 **뒤** PDF 로 바꾼다.
-      if (!(await convertSavedQuoteToPdf(result.id))) return;
+      const afterPdfOnCreate = await convertSavedQuoteToPdf(result.id);
+      if (afterPdfOnCreate === "STAY") return;
+      // 🔴 **등록**도 같다 — 바꾼 장은 진행 중 팝업이 「완료되었습니다」로 끝내고 넘긴다.
+      if (afterPdfOnCreate === "POPUP") {
+        leaving = true;
+        return;
+      }
 
       leaving = true;
       showSavePopup({ message: "견적서를 등록했습니다.", redirectTo: returnHref ?? "/quotes" });
@@ -2301,7 +2371,7 @@ export default function QuoteEditForm({
         </div>
       )}
 
-      {/* 🔴 [저장] 뒤 엑셀 → PDF 변환 — 도는 중, 또는 그 결과(견적서는 이미 저장됐다). */}
+      {/* 🔴 [저장] 뒤 엑셀 → PDF 변환의 **결과**(견적서는 이미 저장됐다). 도는 중은 팝업이 맡는다(2026-10-12). */}
       <QuoteSavePdfNotice
         lines={pdfNoticeLines}
         busy={pdfConverting}

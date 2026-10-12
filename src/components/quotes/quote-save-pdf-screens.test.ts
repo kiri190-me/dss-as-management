@@ -17,6 +17,8 @@ import { describe, test } from "node:test";
  *  · 🔴 사람이 읽을 것이 남으면 **넘어가지 않는다**(저장 팝업 두 개는 그대로)
  *  · 🔴 폼이 **주소를 제 손으로 만들지 않는다** — 흐름 하나에 맡긴다
  *  · 🔴 건너뛰는 판정도 폼이 다시 적지 않는다 — 흐름에 `{ kind, isExcelOnly }` 를 넘긴다
+ *  · 🔴 **도는 중은 팝업이다**(2026-10-12) — 변환이 시작될 때만 뜨고, 끝나면 「완료되었습니다」로
+ *    바뀌며, 실패하면 팝업을 닫고 이 화면에 남는다
  * ============================================================================
  */
 
@@ -65,17 +67,19 @@ describe("🔴 저장이 끝난 뒤에 부른다 — 저장을 막지 않는다"
 
   test("🔴 고치기 — 그 가지 안, 팝업 앞. 읽을 것이 남으면 넘어가지 않는다", () => {
     const branch = indexOrFail(submit, "if (savedQuote) {");
-    const convert = indexOrFail(submit, "if (!(await convertSavedQuoteToPdf(savedQuote.id))) return;");
+    const convert = indexOrFail(submit, "const afterPdf = await convertSavedQuoteToPdf(savedQuote.id);");
     const popup = indexOrFail(submit, 'showSavePopup({ message: "견적서를 저장했습니다."');
     assert.ok(branch < convert && convert < popup, "차례가 틀렸다");
+    assert.ok(submit.includes('if (afterPdf === "STAY") return;'), submit.slice(convert, convert + 200));
   });
 
   test("🔴 만들기 — 파일 올리기까지 끝난 뒤, 팝업 앞", () => {
     const upload = indexOrFail(submit, "await attachments.uploadQueuedAfterCreate(result.id,");
     const failed = indexOrFail(submit, "if (upload.failures.length > 0) {");
-    const convert = indexOrFail(submit, "if (!(await convertSavedQuoteToPdf(result.id))) return;");
+    const convert = indexOrFail(submit, "const afterPdfOnCreate = await convertSavedQuoteToPdf(result.id);");
     const popup = indexOrFail(submit, 'showSavePopup({ message: "견적서를 등록했습니다."');
     assert.ok(upload < failed && failed < convert && convert < popup, "차례가 틀렸다");
+    assert.ok(submit.includes('if (afterPdfOnCreate === "STAY") return;'), submit.slice(convert, convert + 200));
   });
 
   test("🔴 저장 팝업 두 개는 그대로다 — 넘기기 직전에 단추를 되살리지 않는다", () => {
@@ -90,13 +94,12 @@ describe("🔴 폼은 주소를 만들지 않는다 — 흐름 하나에 맡긴�
 
   test("흐름을 부르고, 건너뛰는 판정에 쓸 값만 넘긴다", () => {
     assert.ok(
-      form.includes('import { runQuoteSavePdfConvert } from "@/components/quotes/quote-save-pdf-convert";'),
+      form.includes(
+        'import { QUOTE_SAVE_PDF_DONE_POPUP_TEXT, QUOTE_SAVE_PDF_RUNNING_POPUP_TEXT, runQuoteSavePdfConvert, } from "@/components/quotes/quote-save-pdf-convert";'
+      ),
       "흐름을 가져오지 않는다"
     );
-    assert.ok(
-      helper.includes("await runQuoteSavePdfConvert({ quoteId, subject: { kind, isExcelOnly } });"),
-      helper
-    );
+    assert.ok(helper.includes("await runQuoteSavePdfConvert({ quoteId, subject: { kind, isExcelOnly },"), helper);
   });
 
   test("🔴 도우미 주소 · iframe · 통로 주소가 폼에 없다", () => {
@@ -108,7 +111,7 @@ describe("🔴 폼은 주소를 만들지 않는다 — 흐름 하나에 맡긴�
   test("🔴 넘어가도 되는 결과는 셋뿐이다 — 건너뜀 · 꺼짐 · 만들어짐", () => {
     assert.ok(
       helper.includes(
-        'return outcome.kind === "SKIPPED" || outcome.kind === "DISABLED" || outcome.kind === "CREATED";'
+        'const canLeave = outcome.kind === "SKIPPED" || outcome.kind === "DISABLED" || outcome.kind === "CREATED";'
       ),
       helper
     );
@@ -116,15 +119,76 @@ describe("🔴 폼은 주소를 만들지 않는다 — 흐름 하나에 맡긴�
 
   test("🔴 흐름이 던져도 저장은 되돌아가지 않는다 — 삼키고 넘어간다", () => {
     assert.ok(helper.includes("} catch (pdfError) {"), helper);
-    assert.ok(helper.includes("return true;"), "던지면 사람을 이 화면에 가둔다");
+    assert.ok(helper.includes('return "SAVED";'), "던지면 사람을 이 화면에 가둔다");
     // 🔴 오류 message 를 적지 않는다 — 폴더 이름 · 경로가 섞인다(저장 쪽과 같은 규율).
     assert.equal(/pdfError instanceof Error \? pdfError\.message/.test(helper), false, helper);
     assert.ok(helper.includes("name: pdfError instanceof Error ? pdfError.name : typeof pdfError,"), helper);
     assert.ok(helper.includes("setPdfConverting(false);"), "도는 중 표시가 안 풀린다");
+    // 🔴 던져서 끝난 자리에 진행 팝업이 떠 있으면 사람이 갇힌다 — 걷고 나간다.
+    assert.ok(helper.includes("if (converting) cancelSavePopupProgress();"), helper);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 도는 중은 **팝업**이다 (2026-10-12 사용자 요구)
+ * ============================================================================
+ * 「[저장] → 팝업 "저장된 엑셀을 PDF 로 바꾸는 중입니다…"(안 닫힌다) → 끝나면 같은 팝업이
+ * "완료되었습니다"로 바뀌고 → 0.5초 뒤 목록으로」. 팝업 쪽 규칙은 값으로
+ * lib/domain/save-popup.test.ts 가, 띄우는 때는 quote-save-pdf-convert.test.ts 가 본다 —
+ * 여기서 보는 것은 **폼이 그 둘을 어떻게 잇는가**다.
+ * ============================================================================
+ */
+describe("🔴 도는 중은 팝업이다", () => {
+  const helper = sliceBetween(form, "async function convertSavedQuoteToPdf(", "async function handleSubmit(");
+
+  test("🔴 팝업은 **변환이 시작될 때만** 뜬다 — 흐름이 알려 주는 그 자리에서", () => {
+    assert.ok(
+      helper.includes(
+        'onConvertStart: () => { converting = true; showSavePopupProgress({ message: QUOTE_SAVE_PDF_RUNNING_POPUP_TEXT, redirectTo: returnHref ?? "/quotes", }); },'
+      ),
+      helper
+    );
+    // 🔴 띄우는 자리는 하나뿐이다 — 흐름을 부르기 전에 미리 띄우면 엑셀 전용 견적서에도 뜬다.
+    assert.equal(form.split("showSavePopupProgress(").length - 1, 1);
   });
 
-  test("도는 중에는 「저장은 끝났다」를 먼저 적는다", () => {
-    assert.ok(helper.includes("setPdfNoticeLines([{ text: QUOTE_SAVE_PDF_RUNNING_TEXT, tone: \"normal\" }]);"), helper);
+  test("🔴 문구는 사용자가 적어 준 그대로다", () => {
+    const texts = read("src/components/quotes/quote-save-pdf-convert.ts");
+    assert.ok(
+      texts.includes('export const QUOTE_SAVE_PDF_RUNNING_POPUP_TEXT = "저장된 엑셀을 PDF 로 바꾸는 중입니다…";'),
+      "도는 중 문구가 바뀌었다"
+    );
+    assert.ok(
+      texts.includes('export const QUOTE_SAVE_PDF_DONE_POPUP_TEXT = "완료되었습니다";'),
+      "완료 문구가 바뀌었다"
+    );
+  });
+
+  test("🔴 끝나면 「완료되었습니다」로 바꾸고, 저장 팝업을 **또 띄우지 않는다**", () => {
+    assert.ok(helper.includes("finishSavePopupProgress(QUOTE_SAVE_PDF_DONE_POPUP_TEXT); return \"POPUP\";"), helper);
+    // 두 가지(고치기 · 등록)가 다 같다 — 팝업이 넘기는 동안 단추만 잠가 둔다.
+    assert.ok(submit.includes('if (afterPdf === "POPUP") { leaving = true; return; }'), submit);
+    assert.ok(submit.includes('if (afterPdfOnCreate === "POPUP") { leaving = true; return; }'), submit);
+  });
+
+  test("🔴 실패하면 팝업을 닫고 이 화면에 남는다 — 노란 칸은 읽을 시간이 있다", () => {
+    assert.ok(helper.includes('if (!canLeave) { cancelSavePopupProgress(); return "STAY"; }'), helper);
+    // 🔴 실패에 완료 문구가 붙으면 안 된다 — 끝남은 넘어가도 되는 결과에서만 나간다.
+    const fail = helper.indexOf("if (!canLeave) {");
+    assert.ok(fail >= 0 && fail < helper.indexOf("finishSavePopupProgress("), helper);
+  });
+
+  test("🔴 팝업을 띄운 적이 없으면 지금까지 그대로다 — 엑셀 전용 견적서의 길", () => {
+    assert.ok(helper.includes('if (!converting) return canLeave ? "SAVED" : "STAY";'), helper);
+    // 저장 팝업 두 개는 그 길로만 간다(위 「저장 팝업 두 개는 그대로다」가 글자를 지킨다).
+  });
+
+  test("🔴 「도는 중」 칸은 더 이상 쓰지 않는다 — 줄은 끝난 뒤에만 찬다", () => {
+    assert.equal(raw.includes("QUOTE_SAVE_PDF_RUNNING_TEXT"), false, "흐릿한 칸의 글이 폼에 남아 있다");
+    assert.equal(/setPdfNoticeLines\(\[\{ text:/.test(form), false, form.slice(0, 0));
+    // 결과 줄은 흐름이 낸 그대로 한 번만 담는다.
+    assert.ok(helper.includes("setPdfNoticeLines(outcome.lines);"), helper);
   });
 });
 

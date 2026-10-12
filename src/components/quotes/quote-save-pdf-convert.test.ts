@@ -214,6 +214,90 @@ describe("주소를 연다 — 규칙이 만든 그 주소", () => {
   });
 });
 
+/**
+ * 🔴 「시작했다」를 **언제** 알리나 (2026-10-12).
+ *
+ * 부르는 화면은 이 신호를 받아 「저장된 엑셀을 PDF 로 바꾸는 중입니다…」 팝업을 띄운다.
+ * 그래서 **기다림이 실제로 시작되는 그 지점**에서만 불려야 한다 — 통로 한 번으로 끝나는
+ * 길에서 불리면 팝업이 떴다 지는 깜빡임이 된다. 🔴 그 가운데 하나가 **엑셀 전용 견적서**다.
+ */
+describe("🔴 onConvertStart — 주소를 연 뒤 한 번", () => {
+  test("주소를 열고 기다리기 시작할 때 **한 번** 불린다", async () => {
+    const h = harness([found(), found({ pdfExists: true, pdfModifiedAt: new Date().toISOString() })]);
+    const calls: number[] = [];
+    const outcome = await runQuoteSavePdfConvert({
+      quoteId: QUOTE_ID,
+      subject: SUBJECT,
+      // 불린 그때까지 열린 주소 수를 적어 둔다 — 1 이면 **연 뒤**다.
+      onConvertStart: () => calls.push(h.opened.length),
+      env: h.env,
+    });
+    assert.equal(outcome.kind, "CREATED");
+    assert.deepEqual(calls, [1]);
+  });
+
+  test("🔴 엑셀 전용 견적서는 **부르지 않는다** — 변환 팝업 없이 바로 저장 팝업이다", async () => {
+    const h = harness([found()]);
+    let started = 0;
+    const outcome = await runQuoteSavePdfConvert({
+      quoteId: QUOTE_ID,
+      subject: { kind: "DOMESTIC", isExcelOnly: true },
+      onConvertStart: () => (started += 1),
+      env: h.env,
+    });
+    assert.equal(outcome.kind, "SKIPPED");
+    assert.equal(started, 0);
+    assert.deepEqual(h.urls, []);
+  });
+
+  test("🔴 주소를 열기 전에 끝나는 길에서는 부르지 않는다 — 깜빡임이 없다", async () => {
+    for (const answer of [
+      { status: "disabled" },
+      { status: "not-found" },
+      { status: "multiple" },
+      { status: "no-source" },
+      { status: "failed", reason: "공유폴더를 읽지 못했습니다" },
+      found({ sourceName: "손으로 만든 견적서.xlsm" }),
+    ]) {
+      const h = harness([answer]);
+      let started = 0;
+      await runQuoteSavePdfConvert({
+        quoteId: QUOTE_ID,
+        subject: SUBJECT,
+        onConvertStart: () => (started += 1),
+        env: h.env,
+      });
+      assert.equal(started, 0, JSON.stringify(answer));
+      assert.deepEqual(h.opened, [], JSON.stringify(answer));
+    }
+  });
+
+  test("🔴 브라우저가 주소를 못 열면 부르지 않는다", async () => {
+    const { fetchImpl } = fakeFetch([found()]);
+    let started = 0;
+    const outcome = await runQuoteSavePdfConvert({
+      quoteId: QUOTE_ID,
+      subject: SUBJECT,
+      onConvertStart: () => (started += 1),
+      env: {
+        fetchImpl,
+        openLink: () => {
+          throw new Error("막혔다");
+        },
+        delay: async () => {},
+      },
+    });
+    assert.equal(outcome.kind, "OPEN_FAILED");
+    assert.equal(started, 0);
+  });
+
+  test("알리는 이가 없어도 지금까지와 똑같이 돈다", async () => {
+    const h = harness([found(), found({ pdfExists: true, pdfModifiedAt: new Date().toISOString() })]);
+    const outcome = await runQuoteSavePdfConvert({ quoteId: QUOTE_ID, subject: SUBJECT, env: h.env });
+    assert.equal(outcome.kind, "CREATED");
+  });
+});
+
 describe("🔴 「전에도 있었다」와 「방금 생겼다」를 가른다", () => {
   test("순수 판정 — 네 가지 경우", () => {
     // 전에 없었다 → 생겼다.

@@ -22,6 +22,12 @@
 /** 폼이 팝업을 부르는 신호. 이름을 두 파일에 따로 적으면 한쪽만 고쳐졌을 때 조용히 끊기므로 여기 한 번만 적는다. */
 export const SAVE_POPUP_EVENT = "dss:save-popup";
 
+/**
+ * 🔴 **진행 중** 팝업의 신호 (2026-10-12). 위와 **다른 이름**이라, `showSavePopup` 을 부르던
+ * 화면들은 이 길이 생겨도 한 글자도 달라지지 않는다(save-popup-screens.test.ts 가 못 박는다).
+ */
+export const SAVE_POPUP_PROGRESS_EVENT = "dss:save-popup-progress";
+
 /** 팝업이 떠 있는 시간. 사용자가 「0.5초쯤」으로 정했다(2026-09-15). 읽기에 너무 짧으면 여기만 고친다. */
 export const SAVE_POPUP_VISIBLE_MS = 500;
 
@@ -90,4 +96,100 @@ export function isAlreadyAtSavePopupTarget(currentPathname: string, redirectTo: 
 
 function trimTrailingSlash(pathname: string): string {
   return pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+}
+
+/**
+ * ============================================================================
+ * 🔴 진행 중 팝업 — 끝났다는 신호를 기다린다 (2026-10-12)
+ * ============================================================================
+ * 사용자 요구: 「[저장] → 팝업 "저장된 엑셀을 PDF 로 바꾸는 중입니다…"(안 닫힌다) →
+ * 끝나면 같은 팝업이 "완료되었습니다"로 바뀌고 → 0.5초 뒤 목록으로」.
+ *
+ * 평범한 저장 팝업과 **다른 점은 하나**다 — 🔴 **저절로 닫히지 않는다.** 엑셀 → PDF 변환은
+ * 10초까지 걸리는데(quote-save-pdf-convert.ts) 팝업이 0.5초 만에 사라지면 사람은 끝난 줄
+ * 안다. 그래서 진행 중 팝업은 신호를 **기다린다**:
+ *
+ *  · `start`  — 띄운다. 🔴 0.5초 시계를 **걸지 않는다**(savePopupCountsDownToLeave).
+ *  · `finish` — **같은 팝업**의 글자를 바꾸고, **그때부터** 0.5초를 세어 넘긴다.
+ *               넘어갈 곳은 `start` 가 준 것을 그대로 쓴다 — 끝났을 때 주소를 다시 받으면
+ *               그 한 번을 또 걸러야 하고, 어차피 떠날 곳은 띄울 때 이미 정해져 있다.
+ *  · `cancel` — 닫는다. 🔴 **아무 데도 가지 않는다.** 실패는 사람이 읽어야 하는 알림이라
+ *               0.5초 팝업으로 전할 수 없다 — 부르는 화면이 제 자리에 적는다(이 저장소가
+ *               이미 그렇게 나눠 쓴다: NoticePopup.tsx 머리말).
+ *
+ * 🔴 `finish` · `cancel` 은 **진행 중 팝업에만** 닿는다. 떠 있는 것이 평범한 저장 팝업이거나
+ * 아무것도 없으면 아무 일도 일어나지 않는다 — 늦게 온 신호가 남의 팝업을 닫지 않게.
+ * ============================================================================
+ */
+
+/** 진행 중 팝업에 보내는 신호 한 장. */
+export type SavePopupProgressSignal =
+  /** 띄운다. 넘어갈 곳은 여기서 정해져 끝까지 그대로다. */
+  | { phase: "start"; message: string; redirectTo: string | null }
+  /** 끝났다 — 글자를 이것으로 바꾸고 그때부터 0.5초를 센다. */
+  | { phase: "finish"; message: string }
+  /** 그만둔다 — 닫고 아무 데도 가지 않는다. */
+  | { phase: "cancel" };
+
+/** 떠 있는 팝업 한 장이 들고 있는 것. */
+export type SavePopupProgressState = {
+  message: string;
+  redirectTo: string | null;
+  /** 🔴 끝났다는 신호를 기다리는 중인가. 참인 동안은 0.5초 시계를 걸지 않는다. */
+  awaitingFinish: boolean;
+};
+
+/**
+ * 받은 신호를 믿을 수 있는 모양으로 다듬는다. 쓸 수 없으면 null.
+ *
+ * `start` 의 문구 · 주소는 **평범한 저장 팝업과 같은 자**로 잰다(normalizeSavePopupRequest) —
+ * 앱 밖으로 튀는 주소를 거르는 규칙이 두 벌이 되면 한쪽만 고쳐진다.
+ */
+export function normalizeSavePopupProgressSignal(value: unknown): SavePopupProgressSignal | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { phase, message } = value as Record<string, unknown>;
+  if (phase === "cancel") return { phase: "cancel" };
+  if (phase === "start") {
+    const request = normalizeSavePopupRequest(value);
+    return request === null ? null : { phase: "start", message: request.message, redirectTo: request.redirectTo };
+  }
+  if (phase === "finish") {
+    if (typeof message !== "string" || message.trim() === "") return null;
+    return { phase: "finish", message: message.trim() };
+  }
+  return null;
+}
+
+/**
+ * 신호 하나를 받아 **다음 팝업**을 낸다. 돌려주는 값이 셋이라는 것이 이 함수의 전부다:
+ *
+ *  · 팝업       — 그것을 띄운다(글자만 바뀌었으면 **같은 팝업**의 글자만 바뀐다)
+ *  · `null`     — 닫는다
+ *  · `undefined`— 🔴 **아무것도 하지 않는다**(닫지도 않는다) — 진행 중이 아닌데 온 신호다
+ */
+export function nextSavePopupOnProgress(
+  current: SavePopupProgressState | null,
+  signal: SavePopupProgressSignal
+): SavePopupProgressState | null | undefined {
+  // 띄우는 것은 떠 있던 것과 무관하다 — showSavePopup 도 늘 새로 띄운다.
+  if (signal.phase === "start") {
+    return { message: signal.message, redirectTo: signal.redirectTo, awaitingFinish: true };
+  }
+  // 🔴 끝남 · 그만둠은 **기다리는 팝업**에만 닿는다.
+  if (current === null || !current.awaitingFinish) return undefined;
+  if (signal.phase === "cancel") return null;
+  return { message: signal.message, redirectTo: current.redirectTo, awaitingFinish: false };
+}
+
+/**
+ * 🔴 지금 **0.5초를 세어도 되는가.**
+ *
+ * 기다리는 중(`awaitingFinish`)이면 세지 않는다 — 그래서 진행 중 팝업은 **뜨자마자 사라지지
+ * 않는다.** 팝업이 즉시 닫히는 결함은 이 저장소에서 실제로 겪은 일이라 값으로 못 박는다.
+ * 이미 넘기기 시작했으면(`navigating`) 다시 셀 일이 없다.
+ *
+ * 평범한 저장 팝업은 `awaitingFinish` 가 거짓이라 지금까지와 똑같이 0.5초를 센다.
+ */
+export function savePopupCountsDownToLeave(popup: { awaitingFinish: boolean; navigating: boolean }): boolean {
+  return !popup.awaitingFinish && !popup.navigating;
 }

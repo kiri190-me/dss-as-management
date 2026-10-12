@@ -48,6 +48,16 @@ import type { QuoteIssueNoticeLine } from "./quote-issue-messages";
  *     생기지 않으므로, 상한을 넘기면 「아직 안 보인다」고 사실대로 말하고 끝낸다. 변환이 늦게
  *     끝나면 PDF 는 **나중에** 폴더에 나타난다(그 사실도 문장에 담는다).
  *
+ * ── 🔴 언제가 「시작」인가 — onConvertStart (2026-10-12) ──────────────────
+ * 사용자 요구(2026-10-12): 바꾸는 동안 **팝업**으로 알리고, 끝나면 그 팝업이 「완료되었습니다」로
+ * 바뀐 뒤 목록으로 넘어간다. 그 팝업을 **언제** 띄우느냐가 이 콜백이 불리는 자리다 —
+ * 🔴 **도우미 주소를 연 바로 뒤**, 곧 위 4)의 기다림이 시작되는 그 지점이다.
+ *   · 그 앞에서 끝나는 길(건너뛴 장 · 설정 꺼짐 · 폴더 없음 · 원본 없음 · 주소 못 만듦 ·
+ *     못 엶)은 통로 한 번이면 끝나므로, 팝업이 떴다 지는 **깜빡임**이 생기지 않게 **부르지
+ *     않는다.** 🔴 그래서 엑셀 전용 견적서는 지금과 한 글자도 다르지 않다.
+ *   · 이 모듈은 팝업을 모른다 — 부르는 화면이 무엇을 할지 정한다(이 파일에 `showSavePopup`
+ *     이 한 글자도 없는지 quote-save-pdf-convert.test.ts 가 본다).
+ *
  * ── 🔴 저장을 막지 않는다 ────────────────────────────────────────────────
  * 이 모듈은 **저장이 끝난 뒤에** 불린다. 저장 액션을 부르지도, 기다리게 하지도 않는다 —
  * 가져오는 것에 서버 액션이 하나도 없다(quote-save-pdf-convert.test.ts 가 못 박는다).
@@ -79,6 +89,18 @@ export const QUOTE_SAVE_PDF_TOTAL_WAIT_MS = 10_000;
 
 /** 🔴 **모든 결과의 첫 줄** — PDF 가 안 돼도 견적서는 저장됐다는 것이 분명해야 한다. */
 export const QUOTE_SAVE_PDF_SAVED_TEXT = "견적서는 저장되었습니다.";
+
+/**
+ * 🔴 **진행 중 팝업**의 한 줄 (2026-10-12). 사용자가 적어 준 글자 **그대로**다.
+ * 이 팝업은 저절로 닫히지 않는다 — 아래 완료 문구로 바뀌어야 0.5초를 센다(common/SavePopup.tsx).
+ */
+export const QUOTE_SAVE_PDF_RUNNING_POPUP_TEXT = "저장된 엑셀을 PDF 로 바꾸는 중입니다…";
+
+/**
+ * 🔴 끝났을 때 **같은 팝업**이 바뀌는 글자 (2026-10-12, 사용자가 적어 준 그대로).
+ * 변환을 한 장에서는 이것이 「견적서를 저장했습니다.」/「…등록했습니다.」의 자리를 대신한다.
+ */
+export const QUOTE_SAVE_PDF_DONE_POPUP_TEXT = "완료되었습니다";
 
 export const QUOTE_SAVE_PDF_CREATED_TEXT = "엑셀을 PDF 로 바꿔 같은 폴더에 넣었습니다.";
 
@@ -274,11 +296,17 @@ export function isFreshQuoteSavePdf(
 export async function runQuoteSavePdfConvert({
   quoteId,
   subject,
+  onConvertStart,
   env: overrides = {},
 }: {
   quoteId: string;
   /** 🔴 저장 쪽과 **같은 판정**에 쓰는 값(종류 · 엑셀 전용). */
   subject: QuoteDocumentSubject;
+  /**
+   * 🔴 **변환이 진짜 시작된 그때** 한 번 불린다 — 도우미 주소를 연 뒤다(머리말 「언제 시작인가」).
+   * 부르는 화면이 「바꾸는 중입니다…」를 띄우는 자리다. 없으면 아무 일도 없다.
+   */
+  onConvertStart?: () => void;
   env?: Partial<QuoteSavePdfEnvironment>;
 }): Promise<QuoteSavePdfOutcome> {
   // 🔴 1) 건너뛰는 장 — 저장 쪽(archiveQuoteDocumentOnSave)과 **같은 차례 · 같은 판정**이다.
@@ -322,6 +350,9 @@ export async function runQuoteSavePdfConvert({
   } catch {
     return notice("OPEN_FAILED", savedFirst({ text: QUOTE_SAVE_PDF_OPEN_FAILED_TEXT, tone: "warning" }));
   }
+
+  // 🔴 여기부터가 **기다리는 시간**이다 — 사람에게 「도는 중」을 보일 자리(머리말 「언제 시작인가」).
+  onConvertStart?.();
 
   // 🔴 4) 서버가 폴더를 다시 읽어 확인한다 — 몇 번 보고 **상한에서 멈춘다.**
   let checks = 0;

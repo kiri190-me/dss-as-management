@@ -14,11 +14,21 @@ import type { QuoteIssueNoticeLine } from "./quote-issue-messages";
  *  · **끝남** — 노란 칸. 🔴 **저장은 이미 끝났다**는 것이 첫 줄에 있고(흐름이 넣는다),
  *    곁에 [목록으로]를 둔다 — 못 올린 첨부를 알릴 때와 **같은 모양**이다(QuoteEditForm).
  *
+ * 🔴 **지금 [저장] 흐름은 「도는 중」 꼴을 쓰지 않는다** (2026-10-12). 사용자 요구로 「바꾸는
+ * 중입니다…」가 **팝업**으로 옮겨 갔다(common/SavePopup.tsx 의 showSavePopupProgress) — 도는
+ * 동안 QuoteEditForm 의 줄은 **비어 있어** 이 조각이 아무것도 그리지 않는다. 이 조각이 실제로
+ * 보이는 때는 **실패했을 때의 노란 칸**뿐이다. `busy` 와 아래 한 줄은 그대로 남겨 둔다 —
+ * 그려 보는 시험(QuoteSavePdfNotice.test.tsx)이 두 꼴을 다 본다.
+ *
  * 🔴 줄에는 경로도 파일 이름도 없다 — 넣는 쪽(흐름)이 지키고, 그 시험이 글자로 못 박는다.
  * ============================================================================
  */
 
-/** 도는 중에 보이는 한 줄. 🔴 **저장은 끝났다**가 먼저다. */
+/**
+ * 도는 중에 보이는 한 줄. 🔴 **저장은 끝났다**가 먼저다.
+ * 🔴 2026-10-12 부터 [저장] 흐름은 이 줄을 쓰지 않는다(머리말) — 팝업 쪽 문구는
+ * quote-save-pdf-convert.ts 의 QUOTE_SAVE_PDF_RUNNING_POPUP_TEXT 다.
+ */
 export const QUOTE_SAVE_PDF_RUNNING_TEXT = "견적서는 저장되었습니다 — 엑셀을 PDF 로 바꾸는 중입니다…";
 
 export default function QuoteSavePdfNotice({

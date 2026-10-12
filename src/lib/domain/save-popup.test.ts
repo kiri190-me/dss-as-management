@@ -1,10 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  SAVE_POPUP_EVENT,
   SAVE_POPUP_NAVIGATION_TIMEOUT_MS,
+  SAVE_POPUP_PROGRESS_EVENT,
   SAVE_POPUP_VISIBLE_MS,
   isAlreadyAtSavePopupTarget,
+  nextSavePopupOnProgress,
+  normalizeSavePopupProgressSignal,
   normalizeSavePopupRequest,
+  savePopupCountsDownToLeave,
   savePopupTargetPathname,
 } from "./save-popup";
 
@@ -66,4 +71,93 @@ test("이미 그 화면인지 — 검색어와 끝의 / 는 가리지 않는다"
   assert.equal(isAlreadyAtSavePopupTarget("/repair-cases/", "/repair-cases"), true);
   assert.equal(isAlreadyAtSavePopupTarget("/repair-cases/new", "/repair-cases"), false);
   assert.equal(isAlreadyAtSavePopupTarget("/", "/"), true);
+});
+
+/**
+ * ============================================================================
+ * 🔴 진행 중 팝업 (2026-10-12)
+ * ============================================================================
+ * 까닭은 save-popup.ts 머리말. 여기서 못 박는 것:
+ *  · 🔴 띄우면 **저절로 닫히지 않는다**(뜨자마자 사라지지 않는다)
+ *  · 🔴 끝났다고 알리면 글자가 바뀌고 **그때부터** 0.5초를 센다
+ *  · 🔴 그만두면 닫히고 **아무 데도 가지 않는다**
+ *  · 🔴 기존 저장 팝업은 한 글자도 달라지지 않는다 — 신호 이름도 셈도 따로다
+ * ============================================================================
+ */
+
+const RUNNING = { phase: "start", message: "저장된 엑셀을 PDF 로 바꾸는 중입니다…", redirectTo: "/quotes" } as const;
+
+test("🔴 진행 중 팝업은 **저절로 닫히지 않는다** — 뜨자마자 0.5초를 세지 않는다", () => {
+  const popup = nextSavePopupOnProgress(null, RUNNING);
+  assert.deepEqual(popup, {
+    message: "저장된 엑셀을 PDF 로 바꾸는 중입니다…",
+    redirectTo: "/quotes",
+    awaitingFinish: true,
+  });
+  // 이 한 줄이 「뜨자마자 사라진다」를 막는다 — 호스트가 이 값으로 시계를 건다.
+  assert.equal(savePopupCountsDownToLeave({ ...popup!, navigating: false }), false);
+});
+
+test("🔴 끝났다고 알리면 글자가 바뀌고 **그때부터** 0.5초를 센다 — 넘어갈 곳은 그대로", () => {
+  const running = nextSavePopupOnProgress(null, RUNNING)!;
+  const done = nextSavePopupOnProgress(running, { phase: "finish", message: "완료되었습니다" });
+  assert.deepEqual(done, { message: "완료되었습니다", redirectTo: "/quotes", awaitingFinish: false });
+  assert.equal(savePopupCountsDownToLeave({ ...done!, navigating: false }), true);
+  assert.equal(SAVE_POPUP_VISIBLE_MS, 500);
+});
+
+test("🔴 그만두면 닫히고 — 아무 데도 가지 않는다", () => {
+  const running = nextSavePopupOnProgress(null, RUNNING)!;
+  assert.equal(nextSavePopupOnProgress(running, { phase: "cancel" }), null);
+});
+
+test("🔴 끝남 · 그만둠은 진행 중이 아닌 팝업에 닿지 않는다 — undefined(아무것도 하지 않는다)", () => {
+  const plain = { message: "견적서를 저장했습니다.", redirectTo: "/quotes", awaitingFinish: false };
+  for (const signal of [{ phase: "finish", message: "완료되었습니다" } as const, { phase: "cancel" } as const]) {
+    assert.equal(nextSavePopupOnProgress(plain, signal), undefined, signal.phase);
+    assert.equal(nextSavePopupOnProgress(null, signal), undefined, signal.phase);
+  }
+});
+
+test("🔴 평범한 저장 팝업은 지금까지 그대로 0.5초를 센다 — 넘기는 중에만 멈춘다", () => {
+  assert.equal(savePopupCountsDownToLeave({ awaitingFinish: false, navigating: false }), true);
+  assert.equal(savePopupCountsDownToLeave({ awaitingFinish: false, navigating: true }), false);
+});
+
+test("진행 신호도 앱 밖으로 튀는 주소는 걸러 낸다 — 저장 팝업과 같은 자", () => {
+  assert.deepEqual(normalizeSavePopupProgressSignal({ phase: "start", message: " 바꾸는 중… ", redirectTo: "/quotes" }), {
+    phase: "start",
+    message: "바꾸는 중…",
+    redirectTo: "/quotes",
+  });
+  assert.deepEqual(
+    normalizeSavePopupProgressSignal({ phase: "start", message: "바꾸는 중…", redirectTo: "https://evil.example" }),
+    { phase: "start", message: "바꾸는 중…", redirectTo: null }
+  );
+  assert.deepEqual(normalizeSavePopupProgressSignal({ phase: "finish", message: " 완료되었습니다 " }), {
+    phase: "finish",
+    message: "완료되었습니다",
+  });
+  assert.deepEqual(normalizeSavePopupProgressSignal({ phase: "cancel" }), { phase: "cancel" });
+});
+
+test("모양이 아닌 신호는 받지 않는다", () => {
+  for (const value of [
+    null,
+    "start",
+    { phase: "start", redirectTo: "/quotes" },
+    { phase: "start", message: "   ", redirectTo: "/quotes" },
+    { phase: "finish" },
+    { phase: "finish", message: "  " },
+    { phase: "거의-cancel" },
+    {},
+  ]) {
+    assert.equal(normalizeSavePopupProgressSignal(value), null, JSON.stringify(value));
+  }
+});
+
+test("🔴 신호 이름이 저장 팝업과 다르다 — 기존 길에 끼어들지 않는다", () => {
+  assert.equal(SAVE_POPUP_EVENT, "dss:save-popup");
+  assert.equal(SAVE_POPUP_PROGRESS_EVENT, "dss:save-popup-progress");
+  assert.notEqual(SAVE_POPUP_EVENT, SAVE_POPUP_PROGRESS_EVENT);
 });
