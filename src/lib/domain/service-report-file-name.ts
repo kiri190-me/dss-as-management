@@ -101,6 +101,29 @@ export function formatServiceReportNumber(reportNumber: {
 }
 
 /**
+ * **이미 만들어진 목록 한 줄의 이름**(`buildServiceReportListName` 의 결과)에서
+ * 파일 이름을 짓는다.
+ *
+ * 🔴 **왜 이 입구가 따로 있는가** — 목록 조회(`db/queries/service-reports.ts`)는
+ * 장비 셋을 그대로 내지 않고 **다 이어진 이름 하나**를 낸다. 보고서 목록 줄에서
+ * 「그 보고서의 엑셀이 공유폴더에 어떤 이름으로 들어갔는가」를 알아야 하는 자리가
+ * 2026-10-12 에 생겼는데(보고서 탭의 [Excel 보기]), 그 자리에서 장비 셋을 다시
+ * 받아 잇게 하면 **같은 규칙이 두 곳에 살게 된다.** 그래서 이은 뒤의 절반만
+ * 떼어 내보인다 — 아래 `buildServiceReportFileName` 도 이 함수를 부른다.
+ */
+export function serviceReportFileNameFromListName(kind: ServiceReportKind, listName: string): string {
+  const label = REPORT_LABELS[kind] ?? "보고서";
+
+  /**
+   * 🔴 「이름 없음」은 **목록의 빈 줄을 가리키는 말**이지 파일 이름이 아니다 —
+   * `수리보고서_이름 없음.xlsx` 보다 `수리보고서.xlsx` 가 낫다. 못 쓰는 글자만
+   * 남은 값도(`///`) 다듬고 나면 빈 글자라 같은 갈래로 떨어진다.
+   */
+  const part = listName === SERVICE_REPORT_LIST_NAME_FALLBACK ? "" : sanitize(listName);
+  return part === "" ? `${label}.xlsx` : `${label}_${part}.xlsx`;
+}
+
+/**
  * `[종류]_[모델명]_[L/N]_[S/N].xlsx`.
  *
  * 장비 셋이 다 비면 문서번호로 되돌아가고(그 순서는
@@ -121,20 +144,13 @@ export function buildServiceReportFileName(input: {
   /** `formatServiceReportNumber` 가 이어 준 문서번호. 장비 셋이 다 빌 때만 쓰인다. */
   reportNumber: string;
 }): string {
-  const label = REPORT_LABELS[input.kind] ?? "보고서";
-
-  const name = buildServiceReportListName({
-    modelName: input.modelName ?? null,
-    lotNumber: input.lotNumber ?? null,
-    serialNumber: input.serialNumber ?? null,
-    reportNumber: input.reportNumber,
-  });
-
-  /**
-   * 🔴 「이름 없음」은 **목록의 빈 줄을 가리키는 말**이지 파일 이름이 아니다 —
-   * `수리보고서_이름 없음.xlsx` 보다 `수리보고서.xlsx` 가 낫다. 못 쓰는 글자만
-   * 남은 값도(`///`) 다듬고 나면 빈 글자라 같은 갈래로 떨어진다.
-   */
-  const part = name === SERVICE_REPORT_LIST_NAME_FALLBACK ? "" : sanitize(name);
-  return part === "" ? `${label}.xlsx` : `${label}_${part}.xlsx`;
+  return serviceReportFileNameFromListName(
+    input.kind,
+    buildServiceReportListName({
+      modelName: input.modelName ?? null,
+      lotNumber: input.lotNumber ?? null,
+      serialNumber: input.serialNumber ?? null,
+      reportNumber: input.reportNumber,
+    })
+  );
 }

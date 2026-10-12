@@ -1,5 +1,8 @@
 import Link from "next/link";
 
+import ServiceReportExcelOpenButton from "./ServiceReportExcelOpenButton";
+import type { ServiceReportKind } from "@/lib/xlsx/service-report-template";
+
 /**
  * ============================================================================
  * 「보고서」 탭 — 이 접수 건으로 저장해 둔 보고서들
@@ -29,10 +32,10 @@ import Link from "next/link";
  * 없습니다"라는 빈 상자는, 바로 아래에 만들기 갈림길이 있는 화면에서 아무것도
  * 알려 주지 않는다.
  *
- * ── 🔴 한 줄에 링크가 여럿인데 `<a>` 는 겹치지 않는다 ──────────────────
+ * ── 🔴 한 줄에 누를 것이 여럿인데 `<a>` 는 겹치지 않는다 ────────────────
  * 줄 전체를 누르면 **고치기**로 가고, 오른쪽의 `미리보기 · PDF` 는 인쇄 화면으로,
- * `엑셀 받기` 는 내려받기 라우트로 간다. 그런데 줄 전체를 `<Link>` 로 감싸고 그 안에
- * 다른 링크를 넣으면 **중첩 링크**가 되어 잘못된 HTML 이다 — 브라우저마다 다르게
+ * `Excel 보기` 는 공유폴더의 그 엑셀을 연다. 그런데 줄 전체를 `<Link>` 로 감싸고 그
+ * 안에 다른 링크를 넣으면 **중첩 링크**가 되어 잘못된 HTML 이다 — 브라우저마다 다르게
  * 고쳐 그리고, 보조기술은 무엇을 읽어야 할지 모른다.
  *
  * 그래서 줄(`<li>`)을 `relative` 로 두고, 고치기 링크에 `after:absolute
@@ -46,10 +49,11 @@ import Link from "next/link";
  *
  * ── 생김새는 견적서 목록에서 가져왔다 ──────────────────────────────────
  * 외곽선 단추 둘 — 견적서 목록 줄의 `PreviewLink`·`DownloadLink` 와 **같은 클래스,
- * 같은 말투**다. ⚠️ 그 둘은 자리가 바뀌었다: 받기는 2026-10-06 에 화면에서 걷어냈고,
- * 미리보기는 2026-10-07 부터 `quotes/QuoteListSlots.tsx` 에 있다(목록 화면이 공용
- * 묶음의 한 벌이 되면서 A/S 조각이 슬롯으로 옮겨 갔다). 두 화면은 하는 일이 같다: 고객사로 나가는
- * 문서 한 장을 미리 보고, 파일로 받는다. 그런데 여기만 밑줄 친 파란 글자였다.
+ * 같은 말투**다. ⚠️ 그 둘은 자리가 바뀌었다: 받기는 2026-10-06 에 화면에서 걷어내고
+ * [Excel 보기]로 바뀌었고, 미리보기는 2026-10-07 부터 `quotes/QuoteListSlots.tsx` 에
+ * 있다(목록 화면이 공용 묶음의 한 벌이 되면서 A/S 조각이 슬롯으로 옮겨 갔다). 두 화면은
+ * 하는 일이 같다: 고객사로 나가는 문서 한 장을 미리 보고, 그 엑셀을 연다. 그런데 여기만
+ * 밑줄 친 파란 글자였다.
  *
  * 그 글자에는 두 가지 문제가 있었다.
  *   1. 같은 줄에 회색 잔글씨가 이미 셋이다(발행일·문서번호·마지막 수정). 크기가
@@ -65,12 +69,19 @@ import Link from "next/link";
  * **가리키는 동안 아무 반응도 없는 것처럼 보인다.** 그래서 배경을 흰색으로 붙들고
  * 단추의 hover 는 한 칸 더 진한 `zinc-100` 으로 둔다.
  *
- * ── 🔴 「엑셀 받기」는 `<a>` 다 — `<Link>` 가 아니다 ───────────────────
- * 그 주소는 화면이 아니라 **파일을 흘려보내는 API** 다(`Content-Disposition:
- * attachment`). `<Link>` 로 두면 Next 가 화면 전환으로 여겨 미리 가져오려 든다.
- * 파일 이름도 서버가 정한다 — `download` 를 붙여 화면이 이름을 정하면 목록과
- * 편집 화면이 같은 장을 다른 이름으로 저장하는 날이 온다(견적서 목록의
- * `DownloadLink` 와 같은 판단).
+ * ── 🔴 「엑셀 받기」가 **「Excel 보기」가 됐다**(2026-10-12 사용자 요구) ─────
+ * 예전 단추는 내려받기 통로(`…/service-report/xlsx?id=`)로 가는 `<a href>` 였다. 이제는
+ * **사내 공유폴더에 이미 들어가 있는 그 엑셀**을 그 PC 의 Excel 로 연다 — 보고서를
+ * [저장]하면 그 건의 연락서 폴더 분류 폴더에 엑셀이 들어가므로(2026-10-12 앞 조각),
+ * 받아서 또 한 벌을 만들 까닭이 없어졌다. 견적서 목록이 2026-10-06 에 한 것과 같다.
+ * 🔴 **내려받기 통로는 그대로 살아 있다** — 화면에서 부르는 길만 바뀌었다.
+ *
+ * ── 🔵 **Windows 가 아니면 이 줄에서 엑셀을 볼 길이 없다** ──────────────
+ * 여는 일은 그 PC 에 깔린 폴더 열기 도우미가 하고, 도우미는 **Windows 전용**이다. 그
+ * 밖의 기기(태블릿 · 맥)에서는 [Excel 보기]가 **아예 그려지지 않는다** — 받기 링크가
+ * 사라졌으니 그 기기에서는 보고서 엑셀에 닿을 길이 없다. 🔵 **알고 하는 일이다**:
+ * 견적서 목록도 2026-10-06 부터 같은 상태이고, 같은 화면의 [미리보기 · PDF]는 기기를
+ * 가리지 않으므로 문서 내용 자체는 어디서나 볼 수 있다.
  * ============================================================================
  */
 
@@ -84,14 +95,21 @@ export type ServiceReportListRow = {
    */
   printHref: string;
   /**
-   * 이 장을 xlsx 로 받는 주소. **페이지가 만든다**
-   * (`/api/repair-cases/{건}/service-report/xlsx?id={보고서}`) — `href` 와 같은 원칙.
-   *
-   * 🔴 **권한이 없으면 `null` 이고, 그때는 단추를 그리지 않는다.** 판단은
-   * 페이지가 한다(`canEditServiceReports`) — 눌러도 403 이 나는 단추를 두지
-   * 않는다. 라우트는 화면이 감추든 말든 스스로 세션·권한을 다시 확인한다.
+   * 🔴 [Excel 보기]가 **어느 분류 폴더**를 열 것인가를 가르는 값 — 검사는 「검사 보고서」,
+   * 수리는 「수리 보고서」다(`domain/service-report-contact-folder.ts` 의 표). 이름표가
+   * 아니라 **종류 그 자체**를 넘기는 까닭은 폴더 이름을 화면이 짓지 않기 때문이다.
    */
-  xlsxHref: string | null;
+  reportKind: ServiceReportKind;
+  /**
+   * 이 장의 엑셀이 **연락서 폴더에 들어간 이름**. **페이지가 만든다** — 이름 규칙
+   * (`serviceReportFileNameFromListName` → `contactFolderCopyFileName`)이 화면에 두 벌로
+   * 살지 않게 한다(`href` 와 같은 원칙).
+   *
+   * 🔴 **권한이 없거나 쓸 수 있는 이름이 안 나오면 `null` 이고, 그때는 단추를 그리지
+   * 않는다.** 권한 판단은 페이지가 한다(`canEditServiceReports` — 예전 [엑셀 받기]와
+   * **같은 문턱**이다. 이 조각이 문턱을 넓히지 않는다).
+   */
+  excelFileName: string | null;
   /** 「검사보고서」·「수리보고서」 — 양식의 제목에서 온다. */
   kindLabel: string;
   /**
@@ -114,7 +132,17 @@ export type ServiceReportListRow = {
   updatedAtLabel: string | null;
 };
 
-export default function ServiceReportList({ rows }: { rows: readonly ServiceReportListRow[] }) {
+export default function ServiceReportList({
+  rows,
+  repairCaseId,
+}: {
+  rows: readonly ServiceReportListRow[];
+  /**
+   * 🔴 [Excel 보기]가 공유폴더 목록 통로를 부를 때 쓰는 건 id. 줄마다 같은 값이라
+   * **줄에 담지 않고 목록이 받는다**(줄 타입이 같은 값을 n 번 나르지 않게).
+   */
+  repairCaseId: string;
+}) {
   return (
     <section className="flex flex-col gap-3">
       <div>
@@ -163,8 +191,18 @@ export default function ServiceReportList({ rows }: { rows: readonly ServiceRepo
             <span className="relative z-10 flex shrink-0 flex-wrap items-center gap-1">
               <PreviewLink row={row} />
 
-              {/* 권한이 없으면 아예 그리지 않는다 — 위 `xlsxHref` 의 주석. */}
-              {row.xlsxHref !== null && <DownloadLink row={row} href={row.xlsxHref} />}
+              {/* 권한이 없거나 이름을 못 지었으면 아예 그리지 않는다 — 위 `excelFileName`. */}
+              {row.excelFileName !== null && (
+                <ServiceReportExcelOpenButton
+                  repairCaseId={repairCaseId}
+                  reportKind={row.reportKind}
+                  fileName={row.excelFileName}
+                  // 🔴 생김새는 옆 단추와 **한 벌**이다 — 한쪽만 바뀌면 그 자리에서
+                  //    어긋나 보인다(아래 `ACTION_LINK_CLASS` 의 주석).
+                  className={ACTION_LINK_CLASS}
+                  ariaLabel={`${row.kindLabel} ${row.name} Excel 보기`}
+                />
+              )}
             </span>
           </li>
         ))}
@@ -179,6 +217,10 @@ export default function ServiceReportList({ rows }: { rows: readonly ServiceRepo
  *
  * 🔴 `bg-white dark:bg-zinc-900` 와 `hover:bg-zinc-100` 이 견적서 쪽과 다른 유일한
  * 두 곳이다 — 까닭은 머리말의 '단추는 자기 배경을 갖는다'.
+ *
+ * 🔴 [Excel 보기]는 **이 값을 props 로 받아 간다.** 그 조각은 "use client" 라, 거기에
+ * 상수를 두고 이 파일이 가져오면 서버 컴포넌트가 글자 대신 클라이언트 참조를 받는다 —
+ * 그래서 한 벌을 **여기** 두고 내려보낸다.
  */
 const ACTION_LINK_CLASS =
   "inline-block rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800";
@@ -202,18 +244,8 @@ function PreviewLink({ row }: { row: ServiceReportListRow }) {
 }
 
 /**
- * xlsx 를 받는 링크. 글자가 견적서의 「견적서 받기」와 다른 까닭은, 이 줄에는
- * **받는 길이 둘**이기 때문이다 — 옆 단추도 (PDF 로) 문서를 받는다. 「보고서
- * 받기」라고 적으면 둘 중 무엇이 무엇인지 글자가 말해 주지 못한다.
+ * 🔴 **[Excel 보기]는 이 파일에 없다** — `ServiceReportExcelOpenButton` 이다(클라이언트
+ * 조각이다: 누를 때 공유폴더 목록을 받아 그 장을 고르고 도우미에게 넘긴다). 이 파일은
+ * 서버 컴포넌트라 그 일을 할 수 없다. 글자(「Excel 보기」·「여는 중…」)와 결과 줄도
+ * 전부 그쪽에 있고, 여기서 넘기는 것은 **생김새 한 벌과 보조기술용 이름**뿐이다.
  */
-function DownloadLink({ row, href }: { row: ServiceReportListRow; href: string }) {
-  return (
-    <a
-      href={href}
-      aria-label={`${row.kindLabel} ${row.name} 엑셀 내려받기`}
-      className={ACTION_LINK_CLASS}
-    >
-      엑셀 받기
-    </a>
-  );
-}

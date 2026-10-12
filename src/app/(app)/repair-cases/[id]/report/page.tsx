@@ -22,8 +22,10 @@ import {
   listDeletedServiceReportsForRepairCase,
   listServiceReportsForRepairCase,
 } from "@/lib/db/queries/service-reports";
+import { contactFolderCopyFileName } from "@/lib/domain/contact-folder-naming";
 import { repairCaseDetailHrefs } from "@/lib/domain/repair-case-detail-tabs";
 import { formatServiceReportKstDateTime } from "@/lib/domain/service-report-draft";
+import { serviceReportFileNameFromListName } from "@/lib/domain/service-report-file-name";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { SERVICE_REPORT_TITLES } from "@/lib/xlsx/service-report-template";
 
@@ -132,18 +134,14 @@ export default async function RepairCaseReportPage({
   if (!resolved) notFound();
 
   /**
-   * 🔴 **내려받기는 고치기와 같은 문턱이다**(`SERVICE_REPORT_REQUIRED_LEVELS.edit`
-   * — 그 파일의 '만들기·고치기가 WRITE 인 근거'). 그 판단을 화면이 여기서 한 번
-   * 하고, 못 받는 사람에게는 **단추를 아예 그리지 않는다** — 눌러도 403 이 나는
-   * 단추를 두지 않는다. 라우트는 화면이 감추든 말든 스스로 다시 확인한다.
+   * 🔴 **[Excel 보기]는 고치기와 같은 문턱이다** — 2026-10-12 에 [엑셀 받기]가
+   * [Excel 보기]로 바뀌면서도 **문턱을 그대로 두었다**(`SERVICE_REPORT_REQUIRED_LEVELS.edit`
+   * — 그 파일의 '만들기·고치기가 WRITE 인 근거'). 새 단추는 내려받기 라우트를 부르지
+   * 않고 공유폴더만 읽지만, 이 조각에서 **볼 수 있는 사람을 넓히지 않는다.**
+   * 🔴 내려받기 라우트는 **그대로 살아 있다** — 화면이 부르지 않을 뿐이고, 그 라우트는
+   * 화면이 감추든 말든 스스로 세션·권한을 다시 확인한다.
    */
-  const canDownload = canEditServiceReports(level);
-  /**
-   * 내려받기 라우트의 주소. 🔴 **여기서만 조립한다** — 목록 조각이 만들면 같은
-   * 규칙이 두 곳에 산다(`href`·`printHref` 와 같은 판단). 보고서는 형제 화면들과
-   * 같은 자리에 `?id=` 로 싣는다(그 라우트의 GET 머리말).
-   */
-  const xlsxHref = `/api/repair-cases/${resolved.id}/service-report/xlsx`;
+  const canOpenExcel = canEditServiceReports(level);
 
   /**
    * 🔴 공유폴더 구역도 **목록과 같은 문턱**이다 — 거기 보이는 줄이 바로 이 건의 검사 ·
@@ -160,8 +158,21 @@ export default async function RepairCaseReportPage({
         //    곳에 살고, 한쪽만 고쳐지는 날이 온다(`href` 와 같은 판단).
         //    형제 화면과 같은 자리에 `?id=` 를 싣는다(print/page.tsx 머리말).
         printHref: `${serviceReportHref}/print?id=${item.id}`,
-        // 🔴 못 받는 사람에게는 주소를 아예 내려보내지 않는다 — 위 `canDownload`.
-        xlsxHref: canDownload ? `${xlsxHref}?id=${item.id}` : null,
+        // 🔴 [Excel 보기]가 **어느 분류 폴더**를 여는지를 가르는 값이다 — 폴더 이름은
+        //    화면이 짓지 않는다(`domain/service-report-contact-folder.ts` 의 표).
+        reportKind: item.kind,
+        /**
+         * 🔴 그 엑셀이 **연락서 폴더에 들어간 이름**. 쓰는 길(`…/service-report/
+         * contact-folder` 통로)이 쓴 그 두 함수로 **똑같이** 짓는다:
+         *   내려받기 이름(`serviceReportFileNameFromListName`)
+         *   → 연락서 폴더의 이름 규칙(`contactFolderCopyFileName` — 다듬기·길이 맞추기)
+         * ⚠️ 번호 꼬리(` (2)`)는 여기서 붙이지 않는다 — 디스크에 무엇이 있는지는
+         * 눌러 보기 전에 알 수 없어서, 흐름이 그 폴더를 읽고 고른다.
+         * 🔴 못 받는 사람에게는 **이름을 아예 내려보내지 않는다** — 위 `canOpenExcel`.
+         */
+        excelFileName: canOpenExcel
+          ? contactFolderCopyFileName(serviceReportFileNameFromListName(item.kind, item.name))
+          : null,
         kindLabel: KIND_LABELS[item.kind],
         // 🔴 이름은 **조회가 만들어** 온다(`domain/service-report-list.ts`).
         //    여기서 잇지 않는 까닭은 휴지통 쪽과 규칙이 갈라지지 않게 하려는
@@ -200,7 +211,8 @@ export default async function RepairCaseReportPage({
     : [];
 
   // 한 장도 없으면 목록을 그리지 않는다 — 빈 상자를 억지로 그리지 않는다.
-  const savedList = rows.length > 0 ? <ServiceReportList rows={rows} /> : null;
+  const savedList =
+    rows.length > 0 ? <ServiceReportList rows={rows} repairCaseId={resolved.id} /> : null;
 
   /**
    * 탭 막대는 **지울 권한이 있고, 보여 줄 것이 하나라도 있을 때만** 그린다.
