@@ -55,8 +55,12 @@ describe("수리 건 견적서 번호 — 원본으로 지킨다", () => {
     for (const forbidden of ["drizzle", "db/client", "../client", "domesticOrders", "db.select"]) {
       assert.equal(code.includes(forbidden), false, `조회가 내려왔다: ${forbidden}`);
     }
-    // 번호는 **받아서** 쓴다 — 그 값의 모양만 인자로 선언한다.
-    assert.ok(flat.includes("quoteInfo: Map<string, { quoteNumber: string | null }>"));
+    // 번호도 발행일도 **받아서** 쓴다 — 그 값의 모양만 인자로 선언한다.
+    assert.ok(flat.includes("quoteInfo: Map<string, QuoteNumberInfo>"));
+    assert.ok(
+      flat.includes("export type QuoteNumberInfo = { quoteNumber: string | null; quoteIssuedDate: string | null; };"),
+      "내자 정리에서 받는 값의 모양이 바뀌었다"
+    );
   });
 
   test("🔴 파일시스템을 직접 만지지 않는다 — 읽기는 storage 모듈 하나를 거친다", () => {
@@ -75,17 +79,62 @@ describe("수리 건 견적서 번호 — 원본으로 지킨다", () => {
 
   test("🔴 내자 정리에 번호가 있으면 **그것만**이다 — 공유폴더를 보지도 않는다", () => {
     assert.ok(
-      flat.includes("const ordered = orderedQuoteNumber(quoteNumber); if (ordered !== null) return [ordered];"),
+      flat.includes("const ordered = filledText(info?.quoteNumber); if (ordered !== null) return [ordered];"),
       "내자 정리 값이 있어도 공유폴더 번호가 섞인다"
     );
     assert.ok(
-      flat.includes(
-        ".filter((row) => orderedQuoteNumber(quoteInfo.get(row.id)?.quoteNumber ?? null) === null)"
-      ),
-      "번호가 이미 있는 건까지 공유폴더를 본다 — NAS 왕복이 그만큼 는다"
+      flat.includes(".filter((row) => readsArchive(quoteInfo.get(row.id)))"),
+      "공유폴더를 볼 건을 고르는 자리가 바뀌었다 — NAS 왕복이 그만큼 는다"
     );
-    // 공백만 적힌 칸은 없는 것으로 본다.
+    // 공백만 적힌 칸은 없는 것으로 본다 — 번호도 발행일도 같은 잣대다.
     assert.ok(flat.includes('return text === "" ? null : text;'));
+  });
+
+  /**
+   * 🔴 2026-10-12 사용자 요구 — 「견적발행일이 **적혀 있을 때만**」 공유폴더를 본다.
+   *
+   * 🔴 **판정은 한 함수(readsArchive)이고, 그것을 두 자리에서 부른다** — 훑는 목록을 고를 때와
+   * 줄마다 번호를 꺼낼 때다. 둘째가 필요한 까닭은 결과 표의 열쇠가 **건이 아니라 장비**라서,
+   * 같은 L/N·S/N 을 쓰는 옆 건이 읽어 온 번호를 발행일 없는 건이 그 열쇠로 꺼내 갈 수 있기
+   * 때문이다(실측 2026-10-12). 🔴 **조건을 베껴 적으면** 언젠가 한쪽만 고쳐지고, 그때 증상은
+   * 「목록에는 번호가 뜨는데 훑지는 않는다」(또는 그 반대)라 아무도 못 찾는다.
+   */
+  test("🔴 번호가 없고 **발행일이 적혀 있을 때만** 공유폴더를 본다 (2026-10-12)", () => {
+    assert.ok(
+      flat.includes(
+        "function readsArchive(info: QuoteNumberInfo | undefined): boolean { return filledText(info?.quoteNumber) === null && filledText(info?.quoteIssuedDate) !== null; }"
+      ),
+      "발행일 조건이 사라졌거나 번호 조건과 짝이 어긋났다"
+    );
+    // 🔴 발행일을 **글자로** 보는 자리는 그 함수와 그 값의 모양 선언뿐이다 — 조건을 베껴 적으면
+    //    이 셈이 늘어 여기서 드러난다.
+    assert.equal(flat.match(/quoteIssuedDate/g)?.length, 2, "발행일 조건을 베껴 적은 자리가 생겼다");
+    // 🔴 판정을 **부르는** 자리는 둘이다 — 훑는 목록 고르기 · 줄마다 번호 꺼내기.
+    assert.equal(flat.match(/readsArchive\(/g)?.length, 3, "판정을 부르는 자리가 늘거나 줄었다");
+  });
+
+  /**
+   * 🔴 줄마다 번호를 꺼낼 때도 **같은 판정**을 지난다 (2026-10-12).
+   *
+   * `archiveNumbers` 의 열쇠는 건이 아니라 **장비**(L/N + S/N)다. 훑는 목록에서 뺀 건이라도
+   * 같은 장비의 옆 건이 읽어 둔 번호가 그 열쇠에 들어 있으면 꺼내 가게 된다 — 그 샘을
+   * 여기서 막는다.
+   *
+   * 🔴 **부르는 차례가 규칙이다.** 적어 둔 번호가 **먼저**다. readsArchive 를 앞에 두면 번호가
+   * 적힌 건이 거기서 걸러져(그 함수는 번호가 있으면 false) 2026-10-07 규칙이 깨진다.
+   */
+  test("🔴 줄마다도 같은 함수로 묻는다 — 적어 둔 번호가 **먼저**다 (2026-10-12)", () => {
+    assert.ok(
+      flat.includes(
+        "const ordered = filledText(info?.quoteNumber); if (ordered !== null) return [ordered]; if (!readsArchive(info)) return [];"
+      ),
+      "줄마다의 판정이 사라졌거나, 적어 둔 번호보다 앞에 섰다"
+    );
+    // 🔴 번호와 발행일을 **값 하나**로 받는다 — 인자 둘로 가르면 다른 줄의 값이 짝지어질 수 있다.
+    assert.ok(
+      flat.includes("repairCaseQuoteNumbers( info: QuoteNumberInfo | undefined, archiveNumbers"),
+      "번호와 발행일이 갈려 들어온다"
+    );
   });
 
   test("🔴 열쇠를 손으로 잇지 않는다 — 저장소 모듈의 함수로 만든다", () => {

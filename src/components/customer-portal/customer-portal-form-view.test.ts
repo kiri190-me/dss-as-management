@@ -729,22 +729,52 @@ describe("🔴 11. 견적서 번호는 하나가 아니다 (2026-10-07)", () => 
 
   test("🔴 내자 정리에 번호가 있으면 **그것만**이다 — 공유폴더를 보지도 않는다", () => {
     assert.ok(
-      sharedBody.includes("const ordered = orderedQuoteNumber(quoteNumber); if (ordered !== null) return [ordered];"),
+      sharedBody.includes("const ordered = filledText(info?.quoteNumber); if (ordered !== null) return [ordered];"),
       "내자 정리 값이 있어도 공유폴더 번호가 섞인다"
     );
-    // 번호가 **없는** 건만 공유폴더를 보는 목록에 들어간다.
+    // 공유폴더를 볼 건을 고르는 자리는 **하나**다.
     assert.ok(
-      sharedBody.includes(
-        ".filter((row) => orderedQuoteNumber(quoteInfo.get(row.id)?.quoteNumber ?? null) === null)"
-      ),
+      sharedBody.includes(".filter((row) => readsArchive(quoteInfo.get(row.id)))"),
       "번호가 이미 있는 건까지 공유폴더를 본다 — NAS 왕복이 그만큼 는다"
     );
     // 🔴 고객 안내 현황이 그 규칙을 **스스로 다시 적지 않는다** — 함수를 부를 뿐이다.
+    // 🔴 내자 견적 정보를 **값 하나로** 넘긴다(번호 + 견적발행일) — 갈라 넘기면 서로 다른
+    //    줄의 번호와 발행일이 짝지어질 수 있다.
     assert.ok(
-      queryBody.includes("repairCaseQuoteNumbers( quote?.quoteNumber, archiveNumbers, row.lotNumber, row.serialNumber )"),
+      queryBody.includes("repairCaseQuoteNumbers( quote, archiveNumbers, row.lotNumber, row.serialNumber )"),
       "조회가 규칙 함수를 부르지 않는다"
     );
-    assert.ok(!queryBody.includes("orderedQuoteNumber("), "조회가 규칙을 베껴 적었다");
+    assert.ok(!queryBody.includes("quote?.quoteNumber,"), "번호와 발행일이 갈려 넘어간다");
+    assert.ok(!queryBody.includes("filledText("), "조회가 규칙을 베껴 적었다");
+    assert.ok(!queryBody.includes("readsArchive("), "조회가 규칙을 베껴 적었다");
+  });
+
+  /**
+   * 🔴 2026-10-12 사용자 요구 — 「견적서 번호를 **견적발행일이 적혀 있을 때만** 공유폴더에서
+   * 찾아 줘.」 조건은 공유폴더를 **볼 건을 고르는 자리 하나**에 있고, 고객 안내 현황은 그
+   * 함수를 부를 뿐이다.
+   *
+   * 🔴 여기서 보는 발행일이 **화면의 그 칸과 같은 값**이라는 것이 이 규칙의 전제다 — 번호도
+   * 발행일도 listQuoteInfoForRepairCases 가 내는 **같은 줄**의 값이고, 화면의 견적발행일 칸도
+   * 그 값을 그린다(아래 둘째 단언).
+   */
+  test("🔴 발행일이 적혀 있을 때만 공유폴더를 본다 — 번호와 **짝이 맞는** 발행일이다 (2026-10-12)", () => {
+    assert.ok(
+      sharedBody.includes(
+        "return filledText(info?.quoteNumber) === null && filledText(info?.quoteIssuedDate) !== null;"
+      ),
+      "발행일 조건이 사라졌거나 번호 조건과 짝이 어긋났다"
+    );
+    // 화면의 견적발행일 칸도 **같은 줄**의 값이다 — 사람이 보는 값으로 가른다는 뜻이다.
+    assert.ok(
+      queryBody.includes("quoteIssuedDate: quote?.quoteIssuedDate ?? null,"),
+      "화면이 다른 발행일을 그린다 — 가르는 값과 보이는 값이 갈렸다"
+    );
+    // 🔴 판정은 **한 함수**이고 두 자리에서 부른다 — 훑는 목록 고르기 · 줄마다 번호 꺼내기.
+    //    조건을 베껴 적으면 아래 셈이 늘어 드러난다(같은 L/N·S/N 건이 둘일 때의 샘을 막는
+    //    둘째 자리는 repair-case-quote-numbers-source.test.ts 가 글자로 지킨다).
+    assert.equal(sharedBody.match(/quoteIssuedDate/g)?.length, 2, "발행일 조건을 베껴 적었다");
+    assert.equal(sharedBody.match(/readsArchive\(/g)?.length, 3, "판정을 부르는 자리가 늘거나 줄었다");
   });
 
   test("🔴 화면 칸과 엑셀 칸이 **같은 값 하나**에서 나온다 — 따로 구하면 언젠가 갈라진다", () => {

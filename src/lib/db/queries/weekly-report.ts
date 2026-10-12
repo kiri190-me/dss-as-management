@@ -73,6 +73,12 @@ import {
  * 묻는 질문이 서로 다르기 때문이고(언제 견적이 처음 나갔나 / 지금 유효한 견적서가
  * 무엇인가), 번호 쪽을 날짜에 맞추면 이번에는 고객 안내 현황과 갈라진다.
  *
+ * 🔴 그 규칙은 2026-10-12 에도 **그대로**다. 그날 「견적발행일이 적혀 있을 때만 공유폴더에서
+ * 번호를 찾는다」가 들어오면서 내자 견적 정보를 **값 하나로** 넘기게 됐는데(그 안에
+ * 견적발행일이 들어 있다), 그 날짜는 **번호를 고르는 데만** 쓰인다. 상세표의 `견적서 발행일`
+ * 칸은 여전히 orderDatesByCaseId 의 값이다 — 두 자리를 아래 map 에서 눈으로 가를 수 있고,
+ * components/dashboard/weekly-report-quote-numbers.test.ts 가 그것을 글자로 못 박는다.
+ *
  * 🔴 공유폴더가 꺼져 있거나 못 읽어도 **던지지 않는다** — 그때 번호는 내자 정리 값만
  * 이거나 빈 배열이고, 화면은 지금까지처럼 날짜만 보인다(그 모듈의 머리말).
  *
@@ -160,8 +166,11 @@ export async function listWeeklyReportCases(): Promise<WeeklyReportCase[]> {
   return rows.map((row) => ({
     ...row,
     ...(orderDatesByCaseId.get(row.id) ?? { quoteIssuedDate: null, orderIssuedDate: null }),
+    // 🔴 **값 하나를 통째로** 넘긴다(번호 + 견적발행일). 그 발행일은 **번호를 고르는 데만**
+    //    쓰이고, 바로 위 줄의 **날짜 칸**에는 닿지 않는다 — 날짜는 여전히
+    //    pickWeeklyReportOrderDates 가 고른 줄의 값이다(파일 헤더의 '날짜 규칙').
     quoteNumbers: repairCaseQuoteNumbers(
-      quoteInfo.get(row.id)?.quoteNumber,
+      quoteInfo.get(row.id),
       archiveNumbers,
       row.lotNumber,
       row.serialNumber

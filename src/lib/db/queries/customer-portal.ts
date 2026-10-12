@@ -362,8 +362,10 @@ export async function listPortalItemsForCustomer(
   const caseItems: CustomerPortalItem[] = cases.map((row) => {
     const status = statusByCase.get(row.id);
     const quote = quoteInfo.get(row.id);
+    // 🔴 **값 하나를 통째로** 넘긴다 — 번호와 발행일을 갈라 넘기면 서로 다른 줄의 값이
+    //    짝지어질 수 있다(repairCaseQuoteNumbers 의 주석).
     const quoteNumbers = repairCaseQuoteNumbers(
-      quote?.quoteNumber,
+      quote,
       archiveNumbers,
       row.lotNumber,
       row.serialNumber

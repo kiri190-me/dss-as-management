@@ -54,12 +54,15 @@ describe("① 두 화면이 같은 번호를 본다", () => {
     assert.ok(body.includes("await listArchiveQuoteNumbers(rows, quoteInfo)"));
     assert.ok(
       body.includes(
-        "quoteNumbers: repairCaseQuoteNumbers( quoteInfo.get(row.id)?.quoteNumber, archiveNumbers, row.lotNumber, row.serialNumber )"
+        "quoteNumbers: repairCaseQuoteNumbers( quoteInfo.get(row.id), archiveNumbers, row.lotNumber, row.serialNumber )"
       ),
       "줄마다 번호를 붙이는 자리가 공용 함수가 아니다"
     );
-    // 「내자에 있으면 그것만」을 이 파일이 다시 적지 않는다.
-    assert.ok(!body.includes("orderedQuoteNumber"), "조회가 규칙을 베껴 적었다");
+    // 「내자에 있으면 그것만」도 「발행일이 적혀 있을 때만」도 이 파일이 다시 적지 않는다.
+    // 🔴 이름은 공용 모듈의 것이다(filledText · readsArchive — 2026-10-12 에 orderedQuoteNumber
+    //    에서 바뀌었다). 이름이 또 바뀌면 여기도 함께 고쳐야 가드가 산다.
+    assert.ok(!body.includes("filledText"), "조회가 규칙을 베껴 적었다");
+    assert.ok(!body.includes("readsArchive"), "조회가 규칙을 베껴 적었다");
     assert.ok(!body.includes("quoteArchiveProductKey"), "조회가 열쇠를 스스로 만든다");
     assert.ok(!body.includes("cache("), "조회가 두 번째 훑기 캐시를 들였다");
   });
@@ -72,7 +75,16 @@ describe("① 두 화면이 같은 번호를 본다", () => {
     );
   });
 
-  test("🔴 날짜 규칙은 한 글자도 바뀌지 않았다 — 번호만 맞췄다", () => {
+  /**
+   * 🔴 **날짜 칸**을 지키는 단언이다 — 「언제 견적이 처음 나갔나」를 묻는 칸에 「지금 유효한
+   * 견적서의 날짜」가 섞이면 안 된다(queries/weekly-report.ts 69~74행의 설계).
+   *
+   * 🔴 2026-10-12 에 내자 견적 정보가 **값 하나로** 넘어가면서 그 안의 견적발행일이 이 조회를
+   * 지나게 됐다. 그래서 단언을 「그 날짜가 이 파일에 없다」가 아니라 **「그 날짜가 날짜 칸에
+   * 닿지 않는다」**로 고쳐 적었다 — 뜻이 다르기 때문이다. 쓰이는 자리는 아래 ①-3 이 따로
+   * 못 박는다.
+   */
+  test("🔴 날짜 **칸** 규칙은 한 글자도 바뀌지 않았다 — 번호 쪽 날짜가 칸에 섞이지 않는다", () => {
     // 두 날짜는 여전히 도메인이 고른 줄에서 온다.
     assert.ok(body.includes("pickWeeklyReportOrderDates(orderRows)"));
     assert.ok(
@@ -81,9 +93,35 @@ describe("① 두 화면이 같은 번호를 본다", () => {
       ),
       "날짜를 붙이는 자리가 바뀌었다"
     );
-    // 🔴 내자 견적 정보의 **날짜**를 줄에 싣지 않는다 — 그쪽은 고르는 줄이 다르다.
-    assert.ok(!body.includes("quoteInfo.get(row.id)?.quoteIssuedDate"), "번호 쪽 날짜가 섞였다");
-    assert.ok(!body.includes("quoteInfo.get(row.id)?.orderIssuedDate"), "번호 쪽 날짜가 섞였다");
+    // 🔴 내자 견적 정보의 **날짜를 꺼내 칸에 싣지 않는다** — 그쪽은 고르는 줄이 다르다.
+    assert.ok(!body.includes("quoteInfo.get(row.id)?.quoteIssuedDate"), "번호 쪽 날짜가 칸에 섞였다");
+    assert.ok(!body.includes("quoteInfo.get(row.id)?.orderIssuedDate"), "번호 쪽 날짜가 칸에 섞였다");
+    assert.ok(!body.includes("quoteIssuedDate: quoteInfo"), "번호 쪽 날짜가 칸에 섞였다");
+    assert.ok(!body.includes("orderIssuedDate: quoteInfo"), "번호 쪽 날짜가 칸에 섞였다");
+    // 🔴 날짜 칸 **다음에** 번호 칸이 온다 — 뒤의 spread 가 앞의 날짜를 덮어쓰지 않는 차례다.
+    assert.ok(
+      body.indexOf("orderDatesByCaseId.get(row.id) ??") < body.indexOf("quoteNumbers: repairCaseQuoteNumbers("),
+      "번호 쪽 값이 날짜 칸보다 뒤에 있지 않다 — 덮어쓸 수 있는 차례다"
+    );
+  });
+
+  /**
+   * 🔴 ①-3. **번호를 고르는 데**는 그 날짜를 쓴다 (2026-10-12 사용자 요구).
+   *
+   * 「견적서 번호는 **견적발행일이 적혀 있을 때만** 공유폴더에서 찾는다」가 들어오면서,
+   * 내자 견적 정보를 **값 하나로** 넘긴다(번호 + 발행일). 위 시험이 지키는 「날짜 칸에는 안
+   * 쓴다」와 **뜻이 다른** 일이라 따로 못 박는다.
+   */
+  test("🔴 번호를 **고르는 데**는 그 날짜를 쓴다 — 값 하나를 통째로 넘긴다 (2026-10-12)", () => {
+    // 🔴 내자 견적 정보가 줄에 닿는 길은 **그 한 자리**뿐이다 — 꺼내 쓰는 곳이 또 생기면
+    //    여기서 드러난다(날짜 칸으로 새는 길이 곧 그것이다).
+    assert.equal(body.match(/quoteInfo\.get\(/g)?.length, 1, "내자 견적 정보를 꺼내 쓰는 자리가 늘었다");
+    assert.ok(
+      body.includes("repairCaseQuoteNumbers( quoteInfo.get(row.id), archiveNumbers"),
+      "번호를 고르는 자리에 내자 견적 정보가 통째로 들어가지 않는다"
+    );
+    // 🔴 번호와 발행일을 **갈라서** 넘기지 않는다 — 갈리면 서로 다른 줄의 값이 짝지어진다.
+    assert.ok(!body.includes("quoteInfo.get(row.id)?.quoteNumber"), "번호와 발행일이 갈려 넘어간다");
   });
 
   test("줄 타입에 칸이 있다 — 없으면 화면이 컴파일되지 않는다", () => {
