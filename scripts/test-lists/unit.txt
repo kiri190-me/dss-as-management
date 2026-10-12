@@ -393,6 +393,25 @@ src/app/api/repair-cases/*/attachments/route-source.test.ts
 # `DATA` 에 꽂기 · 폴더를 만들지 않음 · ZIP 없음 · 지우기/덮어쓰기 없음 · 이름은 서버가 짓기.
 # `[id]` 는 위와 같은 까닭으로 `*` 다.
 src/app/api/attachments/*/contact-folder/route-source.test.ts
+# 🔴 보고서 [저장]이 연락서 폴더에 넣는 엑셀(2026-10-12 사용자 요구) — 종류가 분류를 정한다.
+# 값 쪽: 검사 → 「검사 보고서」 · 수리 → 「수리 보고서」 · 둘이 섞이지 않는다 · 폴더 이름을
+# 새로 짓지 않는다(이름표 한 자리) · 도우미가 못 받을 모양이면 상대 경로가 null.
+src/lib/domain/service-report-contact-folder.test.ts
+# 그 엑셀이 **실제로 그 분류 폴더에** 꽂히는가 — 역시 임시 폴더(mkdtemp)에서만 돈다.
+# 🔴 검사는 검사 폴더 · 수리는 수리 폴더 · 쓰는 분류만 그때그때 만든다 · 연락서 폴더는
+# 만들지 않는다(no-folder) · 꺼져 있으면 디스크를 안 본다 · 실패해도 던지지 않는다 ·
+# 덮어쓰지 않고 번호로 비켜 간다 · 분류 자리를 막은 파일을 지우지 않는다.
+src/lib/storage/contact-folder-report-copy.test.ts
+# 보고서 엑셀을 연락서 폴더에 꽂는 통로(2026-10-12) — 🔴 보고서 저장(DB)을 건드리지 않는다 ·
+# 새 쓰기 길이 없다(copyIntoContactFolder 하나) · 연락서 폴더를 만들지 않는다 · 분류는 저장된
+# 장의 종류가 정한다 · 양식 채우기를 다시 적지 않는다(`../xlsx` 와 같은 사슬) · 권한 문턱을
+# 손으로 적지 않는다 · 설정이 비면 엑셀을 만들지도 않는다 · 응답 · 로그에 경로가 없다 ·
+# 감사를 남기지 않는다(견적서 저장에 딸린 사본과 같은 판단). `[id]` 는 위와 같은 까닭으로 `*` 다.
+src/app/api/repair-cases/*/service-report/contact-folder/route-source.test.ts
+# 그 엑셀이 **PDF 가 되었는가**를 서버가 다시 읽어 답하는 통로(2026-10-12) — 🔴 읽기 하나다 ·
+# 변환을 시키지 않는다(도우미 주소가 없다) · 받은 자리 · 이름을 다시 본다 · 결과 이름을 손으로
+# 짓지 않는다 · 수정 시각을 함께 내고 못 읽으면 칸이 빠진다 · 폴더가 여럿이면 아무것도 안 낸다.
+src/app/api/repair-cases/*/service-report/contact-folder/pdf/route-source.test.ts
 # 접수 때 폴더를 만드는 자리(조각 7) — 🔴 EXCEL_IMPORT 제외 · 트랜잭션 바깥 ·
 # 접수를 뒤집지 않음 · 메일과 따로 · 로그에 경로 없음을 **원본 글자로** 본다.
 # 실제 동작(만들고 · 기록하고 · 인수번호가 같은 폴더가 있으면 멈춤)은 db 목록의 통합 시험이 본다.

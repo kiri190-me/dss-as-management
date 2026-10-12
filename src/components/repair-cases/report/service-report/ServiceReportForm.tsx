@@ -2,9 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { showSavePopup } from "@/components/common/SavePopup";
+import {
+  cancelSavePopupProgress,
+  finishSavePopupProgress,
+  showSavePopup,
+  showSavePopupProgress,
+} from "@/components/common/SavePopup";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { MasterDataDeleteDialog } from "@/components/common/master-data-trash-dialogs";
+import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
 import { fileNameFromContentDisposition } from "@/lib/domain/content-disposition-file-name";
 import { SERVICE_REPORT_DRAFT_LABELS, buildDraftText } from "@/lib/domain/edit-draft-text";
 import { formatServiceReportNumber } from "@/lib/domain/service-report-file-name";
@@ -41,6 +47,12 @@ import ServiceReportDraftNotice from "./ServiceReportDraftNotice";
 import ServiceReportDispositionFields from "./ServiceReportDispositionFields";
 import ServiceReportHeaderFields from "./ServiceReportHeaderFields";
 import { editInputClass, Field, ServiceReportSection } from "./ServiceReportField";
+import {
+  SERVICE_REPORT_SAVE_PDF_DONE_POPUP_TEXT,
+  SERVICE_REPORT_SAVE_PDF_RUNNING_POPUP_TEXT,
+  canLeaveAfterServiceReportSavePdf,
+  runServiceReportSavePdfConvert,
+} from "./service-report-save-pdf-convert";
 
 /**
  * ============================================================================
@@ -53,6 +65,9 @@ import { editInputClass, Field, ServiceReportSection } from "./ServiceReportFiel
  *   2. 사람이 고친 값을 서버 액션에 넘겨 **저장**하고,
  *   3. 요청 본문으로 바꿔(`buildServiceReportRequestBody`) 뽑은 xlsx 를 내려받고,
  *   4. 저장된 장을 지운다(휴지통으로).
+ *   5. 🔴 **저장이 끝나면** 그 건의 연락서 폴더 분류 폴더에 엑셀을 넣고 PDF 로 바꾼다
+ *      (2026-10-12 — 아래 `archiveReportToContactFolder`). 🔴 **2번을 한 글자도 건드리지
+ *      않는다** — 공유폴더가 꺼져 있든 느리든 실패하든 보고서는 저장된 채다.
  *
  * 셈은 전부 `domain/service-report-form.ts` 에 있다 — 여기 두면 시험이 붙지
  * 않고, 시험이 없으면 화면과 서버가 어긋난 것을 아무도 모른다.
@@ -281,6 +296,15 @@ export default function ServiceReportForm({
   const [formError, setFormError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string> | null>(null);
+
+  /**
+   * 🔴 [저장] 뒤 **연락서 폴더 · PDF** 결과 줄 (2026-10-12).
+   *
+   * 도는 동안은 **팝업**이 말하므로 여기는 비어 있고, 줄이 차는 때는 **끝난 뒤**뿐이다 —
+   * 그것도 사람이 읽어야 할 것이 남았을 때만이다(아래 `archiveReportToContactFolder`).
+   * 🔴 경로 · 파일 이름은 한 글자도 들어 있지 않다(흐름 모듈이 지킨다).
+   */
+  const [pdfNoticeLines, setPdfNoticeLines] = useState<QuoteIssueNoticeLine[]>([]);
 
   /**
    * 지우기 확인 창의 상태. 창은 자기 상태를 갖지 않으므로(그 파일의 원칙) 열림
@@ -534,6 +558,67 @@ export default function ServiceReportForm({
    *   · `VALIDATION_ERROR` 칸 오류를 해당 칸 옆에.
    *   · 그 밖               서버가 준 말을 그대로.
    */
+  /**
+   * ============================================================================
+   * 🔴 [저장]이 끝난 **뒤** 연락서 폴더에 엑셀을 넣고 PDF 로 바꾼다 (2026-10-12)
+   * ============================================================================
+   * 사용자 요구(2026-10-12): 「보고서 탭에서 [저장]을 누르면 그 건의 연락서 폴더 안 분류
+   * 폴더에 엑셀을 쓰고, 그 엑셀을 PDF 로 바꿔 같은 자리에 둔다.」 흐름과 상한은
+   * ./service-report-save-pdf-convert.ts 한 자리에 있다(견적서 쪽을 그대로 본떴다).
+   *
+   *  · 🔴 **저장을 막지 않는다** — 서버 액션이 이미 돌아온 **뒤에** 부른다.
+   *  · 🔴 **저장은 되돌아가지 않는다** — 돌려주는 값은 「넘어가도 되는가」뿐이고, 던져도
+   *    여기서 삼킨다(밖의 catch 가 「저장 실패」라고 거짓말하지 않게).
+   *  · 넘어가도 되는 결과는 둘이다: 공유폴더가 꺼져 있다 · **PDF 를 만들었다**. 그 밖은
+   *    사람이 읽을 것이 있어 이 화면에 남는다 — 첫 줄이 「보고서는 저장되었습니다.」다.
+   *
+   * ── 🔴 도는 동안은 **팝업**이다 ─────────────────────────────────────────
+   * 「저장된 엑셀을 PDF 로 바꾸는 중입니다…」가 팝업으로 뜨고, 끝나면 **같은 팝업**이
+   * 「완료되었습니다」로 바뀐 뒤 0.5초 뒤 「보고서」 탭으로 넘어간다. 🔴 팝업은 **변환이
+   * 진짜 시작될 때만** 뜬다(도우미 주소를 연 그때) — 그 앞에서 끝나는 길은 통로 한두 번이라
+   * 팝업이 떴다 지는 깜빡임이 생기지 않게 띄우지 않는다.
+   * 🔴 **실패하면 팝업을 닫는다** — 「Excel 이 없는 PC」 같은 말은 사람이 **읽어야 하는**
+   * 알림이라 0.5초 뒤 사라지는 팝업으로 전할 수 없다.
+   * ============================================================================
+   */
+  async function archiveReportToContactFolder(serviceReportId: string): Promise<"SAVED" | "POPUP" | "STAY"> {
+    // 변환이 **시작됐는가** — 팝업을 띄웠는가와 같은 말이다.
+    let converting = false;
+    try {
+      const outcome = await runServiceReportSavePdfConvert({
+        repairCaseId,
+        serviceReportId,
+        onConvertStart: () => {
+          converting = true;
+          showSavePopupProgress({
+            message: SERVICE_REPORT_SAVE_PDF_RUNNING_POPUP_TEXT,
+            redirectTo: reportHref,
+          });
+        },
+      });
+      const canLeave = canLeaveAfterServiceReportSavePdf(outcome.kind);
+      // 넘어가도 되는 결과면 줄을 남기지 않는다 — 떠날 화면에 알림을 쌓지 않는다.
+      setPdfNoticeLines(canLeave ? [] : outcome.lines);
+      // 팝업을 띄운 적이 없으면 지금까지와 똑같다 — 저장 팝업을 띄우거나, 화면에 남는다.
+      if (!converting) return canLeave ? "SAVED" : "STAY";
+      if (!canLeave) {
+        cancelSavePopupProgress();
+        return "STAY";
+      }
+      finishSavePopupProgress(SERVICE_REPORT_SAVE_PDF_DONE_POPUP_TEXT);
+      return "POPUP";
+    } catch (pdfError) {
+      // 🔴 오류의 message 를 적지 않는다 — 폴더 이름 · 경로가 섞인다.
+      console.error("보고서 연락서 폴더 · PDF 변환에서 예상치 못한 오류", {
+        name: pdfError instanceof Error ? pdfError.name : typeof pdfError,
+      });
+      setPdfNoticeLines([]);
+      // 🔴 떠 있는 진행 팝업을 걷는다 — 안 그러면 아무 말 없이 떠 있는 채로 사람이 갇힌다.
+      if (converting) cancelSavePopupProgress();
+      return "SAVED";
+    }
+  }
+
   async function handleSave() {
     if (!canSave) return;
 
@@ -541,6 +626,7 @@ export default function ServiceReportForm({
     setFormError(null);
     setStatusMessage(null);
     setFieldErrors(null);
+    setPdfNoticeLines([]);
 
     try {
       const result = saved
@@ -606,6 +692,14 @@ export default function ServiceReportForm({
       setSaved({ id: result.id, version: result.version });
       setSavedSnapshot(JSON.stringify(values));
       forgetDraft();
+
+      /**
+       * 🔴 **여기서부터는 저장이 끝난 뒤의 일이다** (2026-10-12). 연락서 폴더에 엑셀을
+       * 넣고 PDF 로 바꾼다 — 무슨 일이 나도 위의 저장은 그대로다(위 함수의 머리말).
+       */
+      const next = await archiveReportToContactFolder(result.id);
+      if (next !== "SAVED") return;
+
       /*
        * 저장 팝업을 0.5초 띄운 뒤 「보고서」 탭(보고서 목록)으로 넘어간다 —
        * 2026-09-15 사용자 요청. 그 전에는 이 화면에 머물며 「저장했습니다」를
@@ -842,6 +936,11 @@ export default function ServiceReportForm({
         </p>
       )}
 
+      {/* 🔴 [저장] 뒤 연락서 폴더 · PDF 결과(2026-10-12). 도는 동안은 팝업이 말하므로
+          여기 줄이 차는 때는 **끝난 뒤 · 사람이 읽을 것이 남았을 때**뿐이다. 첫 줄이
+          「보고서는 저장되었습니다.」라 저장이 끝났다는 것이 먼저 읽힌다. */}
+      <ServiceReportSavePdfNotice lines={pdfNoticeLines} onLeave={() => router.push(reportHref)} />
+
       <ServiceReportSection
         title="보고서 종류"
         description="수리를 고르면 「정리」와 「조치 완료」 칸이 나타납니다. 검사에는 그 둘이 없습니다."
@@ -962,6 +1061,56 @@ export default function ServiceReportForm({
         onConfirm={() => void confirmDelete()}
         onCancel={() => setDeleteOpen(false)}
       />
+    </div>
+  );
+}
+
+/** 줄의 결 — 견적서의 결과 줄(QuoteIssueNoticeLines)과 **같은 색표**다. */
+const PDF_LINE_TONE_CLASS: Record<QuoteIssueNoticeLine["tone"], string> = {
+  normal: "text-zinc-700 dark:text-zinc-300",
+  muted: "text-zinc-400 dark:text-zinc-500",
+  warning: "font-medium text-amber-700 dark:text-amber-400",
+};
+
+/**
+ * [저장] 뒤 연락서 폴더 · PDF 결과 한 칸 (2026-10-12).
+ *
+ * 🔴 **견적서의 QuoteSavePdfNotice 와 같은 결**이다 — 노란 칸, 첫 줄이 「보고서는
+ * 저장되었습니다.」, 곁에 떠날 단추 하나. 줄 자체는 흐름 모듈이 값으로 정하고 이 조각은
+ * **그리기만** 한다(경로 · 파일 이름이 한 글자도 없다는 것은 그쪽이 지킨다).
+ *
+ * 🔴 **도는 동안은 그리지 않는다** — 그때는 팝업이 말한다(common/SavePopup.tsx 의
+ * showSavePopupProgress). 줄이 비면 이 조각은 아무것도 그리지 않는다.
+ */
+export function ServiceReportSavePdfNotice({
+  lines,
+  onLeave,
+  leaveLabel = "보고서 탭으로",
+}: {
+  lines: readonly QuoteIssueNoticeLine[];
+  /** 있으면 곁에 단추를 그린다. 없으면 줄만 그린다. */
+  onLeave?: () => void;
+  leaveLabel?: string;
+}) {
+  if (lines.length === 0) return null;
+  return (
+    <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+      <ul role="status" className="flex flex-col gap-0.5 text-xs">
+        {lines.map((line, index) => (
+          <li key={`${index}-${line.text}`} className={`break-all ${PDF_LINE_TONE_CLASS[line.tone]}`}>
+            {line.text}
+          </li>
+        ))}
+      </ul>
+      {onLeave && (
+        <button
+          type="button"
+          onClick={onLeave}
+          className="mt-2 rounded-md border border-amber-400 px-2 py-1 text-xs dark:border-amber-700"
+        >
+          {leaveLabel}
+        </button>
+      )}
     </div>
   );
 }
