@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
+  hideSupersededArchiveFileNumbers,
+  latestArchiveFileNumber,
   quoteArchiveNumberKey,
   quoteNumberFromArchiveFileName,
   quoteNumbersFromArchiveFileNames,
@@ -88,6 +90,109 @@ describe("폴더 하나의 번호들", () => {
       ]),
       ["2024-027", "2024-027-1", "2026-009", "2026-010"]
     );
+  });
+});
+
+/*
+ * ============================================================================
+ * 🔴 **최신 폴더 하나** · **개정본이 원본을 가린다** (사용자 요구 2026-10-12)
+ * ============================================================================
+ * [고객 안내 현황]과 [주간보고]의 견적서 번호 칸이 쓴다. 그전에는 그 장비에 맞는 폴더를
+ * **전부** 열어 번호를 합쳐서, 몇 해 전 번호까지 한 칸에 쌓였다.
+ * 공유폴더를 읽는 쪽(storage/quote-archive-case-numbers.ts)이 이 둘을 부른다 — 셈 자체는
+ * 디스크를 모르는 순수한 일이라 번호를 다루는 이 모듈에 있다.
+ * ============================================================================
+ */
+describe("번호 여럿 가운데 최신 하나", () => {
+  test("가장 큰 번호 — 연도가 달라도 일련번호가 달라도", () => {
+    assert.equal(latestArchiveFileNumber(["2026-100", "2026-104", "2026-009"]), "2026-104");
+    assert.equal(latestArchiveFileNumber(["2023-018", "2026-100", "2024-027"]), "2026-100");
+    assert.equal(latestArchiveFileNumber(["2026-100"]), "2026-100");
+  });
+
+  test("🔴 개정본이 원본보다 뒤다 — 같은 번호면 꼬리가 붙은 쪽이 크다", () => {
+    assert.equal(latestArchiveFileNumber(["2026-104", "2026-104R1"]), "2026-104R1");
+    assert.equal(latestArchiveFileNumber(["2026-104R1", "2026-104R2"]), "2026-104R2");
+    assert.equal(latestArchiveFileNumber(["2026-104", "2026-104-1"]), "2026-104-1");
+  });
+
+  test("🔴 못 뽑은 자리(null)는 빼고 본다 — 섞여 있어도 뽑힌 것들 가운데서 고른다", () => {
+    assert.equal(latestArchiveFileNumber([null, "2026-100", null, "2026-104"]), "2026-104");
+    assert.equal(latestArchiveFileNumber(["2026-100", null]), "2026-100");
+  });
+
+  test("🔴 하나도 못 뽑으면 null — 부르는 쪽이 「전부 읽는다」로 갈라설 수 있게", () => {
+    assert.equal(latestArchiveFileNumber([null, null]), null);
+    assert.equal(latestArchiveFileNumber([]), null);
+  });
+
+  test("차례는 폴더 하나의 번호 차례와 **같은 규칙**이다 — 두 쪽이 갈라지면 여기서 깨진다", () => {
+    const numbers = quoteNumbersFromArchiveFileNames([
+      "DSS 2024-027 가나상사.xlsx",
+      "DSS 2026-010 가나상사.xlsx",
+      "DSS 2026-009 가나상사.xlsx",
+    ]);
+    assert.equal(latestArchiveFileNumber(numbers), numbers[numbers.length - 1]);
+  });
+});
+
+describe("개정본이 원본을 가린다", () => {
+  test("🔴 원본은 개정 0 이다 — R1 이 있으면 원본이 사라진다", () => {
+    assert.deepEqual(hideSupersededArchiveFileNumbers(["2026-104", "2026-104R1"]), ["2026-104R1"]);
+  });
+
+  test("🔴 개정끼리는 큰 쪽만 — R1 과 R2 면 R2", () => {
+    assert.deepEqual(hideSupersededArchiveFileNumbers(["2026-104R1", "2026-104R2"]), ["2026-104R2"]);
+    assert.deepEqual(hideSupersededArchiveFileNumbers(["2026-104", "2026-104R1", "2026-104R2"]), [
+      "2026-104R2",
+    ]);
+    // 두 자리 개정도 숫자로 센다 — 글자로 견주면 `R10` 이 `R9` 보다 작아진다.
+    assert.deepEqual(hideSupersededArchiveFileNumbers(["2026-104R9", "2026-104R10"]), ["2026-104R10"]);
+  });
+
+  test("🔴 가지 번호(`-1`)는 가려지지 않는다 — 별도로 나간 견적서다 (사용자 결정 2026-10-12)", () => {
+    assert.deepEqual(hideSupersededArchiveFileNumbers(["2026-104", "2026-104-1"]), [
+      "2026-104",
+      "2026-104-1",
+    ]);
+    assert.deepEqual(hideSupersededArchiveFileNumbers(["2026-104R1", "2026-104-1"]), [
+      "2026-104R1",
+      "2026-104-1",
+    ]);
+    // 가지의 원본은 가지 자신이다 — 본 번호의 개정본이 가지를 지우지 않는다.
+    assert.deepEqual(
+      hideSupersededArchiveFileNumbers(["2026-104", "2026-104R1", "2026-104-1", "2026-104-2"]),
+      ["2026-104R1", "2026-104-1", "2026-104-2"]
+    );
+  });
+
+  test("줄기가 다르면 서로를 가리지 않는다", () => {
+    assert.deepEqual(hideSupersededArchiveFileNumbers(["2026-100", "2026-104R1"]), [
+      "2026-100",
+      "2026-104R1",
+    ]);
+    // 해가 다른 같은 일련번호도 남이다.
+    assert.deepEqual(hideSupersededArchiveFileNumbers(["2024-104", "2026-104R1"]), [
+      "2024-104",
+      "2026-104R1",
+    ]);
+  });
+
+  test("들어온 차례를 지킨다 · 가릴 것이 없으면 그대로", () => {
+    const numbers = quoteNumbersFromArchiveFileNames([
+      "DSS 2026-104R1 가나상사.pdf",
+      "DSS 2026-100 가나상사.xls",
+      "DSS 2026-104 가나상사.xls",
+      "DSS 2026-100-1 가나상사.xls",
+    ]);
+    assert.deepEqual(numbers, ["2026-100", "2026-100-1", "2026-104", "2026-104R1"]);
+    assert.deepEqual(hideSupersededArchiveFileNumbers(numbers), [
+      "2026-100",
+      "2026-100-1",
+      "2026-104R1",
+    ]);
+    assert.deepEqual(hideSupersededArchiveFileNumbers(["2026-100"]), ["2026-100"]);
+    assert.deepEqual(hideSupersededArchiveFileNumbers([]), []);
   });
 });
 

@@ -36,6 +36,12 @@ import {
  * 🔴 이 모듈은 **읽기만** 한다. 그래서 디스크를 보는 시험이 「무엇도 만들거나 지우지
  * 않았다」를 함께 본다(snapshot). 원본에 쓰기 · 지우기 낱말이 한 글자도 없다는 것은 이웃
  * quote-archive-case-numbers-source.test.ts 가 글자로 본다.
+ *
+ * ── 🔴 2026-10-12 에 규칙 둘이 들어왔다 ──────────────────────────────────
+ * 사용자 요구로 번호를 두 번 추린다 — **그 장비의 최신 견적서 폴더 하나만** 읽고, 거기서
+ * 나온 번호 가운데 **개정본이 원본을 가린다**. 셈 자체는 순수 함수가 쥐고
+ * (domain/quote-archive-file-number.ts · 거기 시험이 표를 전부 본다), 여기서는 **디스크를
+ * 놓고** 폴더가 실제로 좁혀지는지 · 못 뽑을 때 어느 갈래로 가는지를 본다.
  * ============================================================================
  */
 
@@ -240,15 +246,113 @@ test("🔴 폴더 **안 파일 이름**에서 번호를 뽑는다 — 한 건에
   assert.deepEqual(await snapshot(root), before, "읽기가 무엇인가를 만들거나 지웠다");
 });
 
-test("🔴 연도를 추측하지 않는다 — 다른 해 폴더에 든 번호도 함께 나온다", async () => {
+test("🔴 연도를 추측하지 않는다 — **다른 해 폴더**에 든 폴더도 최신으로 뽑힌다", async () => {
   const root = await makeRoot();
   // 실측(2026-10-06): `DSS 2023-018` 폴더가 **2024 연도 폴더** 안에 있었다.
+  // 🔴 그 폴더가 이 장비의 최신이다 — 번호로 연도 폴더를 추측했다면 영영 못 찾는다.
   await makeFolder(root, YEAR_2024, folderName("2023-018"), [`${folderName("2023-018")}.xls`]);
-  await makeFolder(root, YEAR_2026, folderName("2026-100"), [`${folderName("2026-100")}.xlsx`]);
   await makeFolder(root, YEAR_2023, folderName("2023-001"), [`${folderName("2023-001")}.xls`]);
 
   const numbers = await numbersFor(root, [{ lotNumber: LOT, serialNumber: SERIAL }]);
-  assert.deepEqual(numbers.get(keyOf(LOT, SERIAL)), ["DSS 2023-001", "DSS 2023-018", "DSS 2026-100"]);
+  assert.deepEqual(numbers.get(keyOf(LOT, SERIAL)), ["DSS 2023-018"]);
+});
+
+// ── 🔴 최신 폴더 하나만 (사용자 요구 2026-10-12) ─────────────────────────
+//
+// 그전에는 맞는 폴더를 **전부** 열어 번호를 합쳤다 — 그러면 몇 해 전 견적서 번호까지 한
+// 칸에 쌓인다. 이제 **폴더 이름의 견적서 번호가 가장 큰 폴더 하나**만 읽는다.
+
+test("🔴 맞는 폴더가 둘이면 **번호가 큰 폴더만** 읽는다 — 지난 해 번호가 쌓이지 않게", async () => {
+  const root = await makeRoot();
+  await makeFolder(root, YEAR_2023, folderName("2023-001"), [`${folderName("2023-001")}.xls`]);
+  await makeFolder(root, YEAR_2026, folderName("2026-100"), [`${folderName("2026-100")}.xls`]);
+  await makeFolder(root, YEAR_2026, folderName("2026-104"), [
+    `${folderName("2026-104")}.xls`,
+    // 최신 폴더 안의 가지 번호는 함께 나온다 — 폴더를 좁히는 일과 번호를 고르는 일은 다르다.
+    `${folderName("2026-104-1")}(OH포함).xls`,
+  ]);
+
+  const numbers = await numbersFor(root, [{ lotNumber: LOT, serialNumber: SERIAL }]);
+  assert.deepEqual(numbers.get(keyOf(LOT, SERIAL)), ["DSS 2026-104", "DSS 2026-104-1"]);
+});
+
+test("🔴 폴더 이름에서 번호를 **못 뽑는 폴더가 섞여도** 뽑힌 것들 가운데 최신을 고른다", async () => {
+  const root = await makeRoot();
+  // 사람이 `DSS` 없이 적어 둔 폴더 — 번호를 못 뽑는다. 그렇다고 최신이 되지는 않는다.
+  await makeFolder(root, YEAR_2026, `가나상사 MODEL-X1 ${LOT} ${SERIAL} 재점검`, [
+    "DSS 2026-999 가나상사 MODEL-X1 수리 견적서.xls",
+  ]);
+  await makeFolder(root, YEAR_2026, folderName("2026-100"), [`${folderName("2026-100")}.xls`]);
+  await makeFolder(root, YEAR_2026, folderName("2026-104"), [`${folderName("2026-104")}.xls`]);
+
+  const numbers = await numbersFor(root, [{ lotNumber: LOT, serialNumber: SERIAL }]);
+  assert.deepEqual(numbers.get(keyOf(LOT, SERIAL)), ["DSS 2026-104"]);
+});
+
+test("🔴 폴더 이름에서 **하나도** 못 뽑으면 전부 읽는다 — 번호가 통째로 비는 것보다 낫다", async () => {
+  const root = await makeRoot();
+  await makeFolder(root, YEAR_2026, `가나상사 MODEL-X1 ${LOT} ${SERIAL} 1차`, [
+    "DSS 2026-100 가나상사 MODEL-X1 수리 견적서.xls",
+  ]);
+  await makeFolder(root, YEAR_2026, `가나상사 MODEL-X1 ${LOT} ${SERIAL} 2차`, [
+    "DSS 2026-104 가나상사 MODEL-X1 수리 견적서.xls",
+  ]);
+
+  const numbers = await numbersFor(root, [{ lotNumber: LOT, serialNumber: SERIAL }]);
+  assert.deepEqual(numbers.get(keyOf(LOT, SERIAL)), ["DSS 2026-100", "DSS 2026-104"]);
+});
+
+test("🔴 폴더 하나가 장비 둘에 걸리면 **장비마다 따로** 고른다", async () => {
+  const root = await makeRoot();
+  const OTHER_LOT = "CD5678";
+  const OTHER_SERIAL = "7654321";
+  // 장비 둘이 한 폴더에 든 이름 — 이 폴더는 옆 장비에게는 **유일한 폴더**라 최신이다.
+  await makeFolder(
+    root,
+    YEAR_2026,
+    `DSS 2026-100 가나상사 MODEL-X1 ${LOT} ${SERIAL} ${OTHER_LOT} ${OTHER_SERIAL} 전원 불량`,
+    ["DSS 2026-100 가나상사 MODEL-X1 수리 견적서.xls"]
+  );
+  // 이 장비에게만 있는 더 새 폴더.
+  await makeFolder(root, YEAR_2026, folderName("2026-200"), [`${folderName("2026-200")}.xls`]);
+
+  const numbers = await numbersFor(root, [
+    { lotNumber: LOT, serialNumber: SERIAL },
+    { lotNumber: OTHER_LOT, serialNumber: OTHER_SERIAL },
+  ]);
+  assert.deepEqual(numbers.get(keyOf(LOT, SERIAL)), ["DSS 2026-200"]);
+  assert.deepEqual(numbers.get(keyOf(OTHER_LOT, OTHER_SERIAL)), ["DSS 2026-100"]);
+});
+
+// ── 🔴 개정본이 원본을 가린다 (사용자 요구 2026-10-12) ───────────────────
+//
+// 규칙 자체는 순수 함수(domain/quote-archive-file-number.ts 의
+// hideSupersededArchiveFileNumbers)가 쥔다 — 여기서는 그 함수를 **머리말을 붙이기 전에**
+// 지나는지를 본다.
+
+test("🔴 원본과 개정본이 같이 있으면 **개정본만** 보인다", async () => {
+  const root = await makeRoot();
+  await makeFolder(root, YEAR_2026, folderName("2026-104"), [
+    `${folderName("2026-104")}.xls`,
+    `${folderName("2026-104R1")} - 有印.pdf`,
+    // 🔴 가지 번호는 「같은 장의 새 판」이 아니라 별도로 나간 견적서다 — 가려지지 않는다.
+    `${folderName("2026-104-1")}(OH포함).xls`,
+  ]);
+
+  const numbers = await numbersFor(root, [{ lotNumber: LOT, serialNumber: SERIAL }]);
+  assert.deepEqual(numbers.get(keyOf(LOT, SERIAL)), ["DSS 2026-104-1", "DSS 2026-104R1"]);
+});
+
+test("🔴 개정이 거듭되면 **가장 큰 개정만** — R1 과 R2 면 R2", async () => {
+  const root = await makeRoot();
+  await makeFolder(root, YEAR_2026, folderName("2026-104"), [
+    `${folderName("2026-104")}.xls`,
+    `${folderName("2026-104R1")} - 有印.pdf`,
+    `${folderName("2026-104R2")} - 有印.pdf`,
+  ]);
+
+  const numbers = await numbersFor(root, [{ lotNumber: LOT, serialNumber: SERIAL }]);
+  assert.deepEqual(numbers.get(keyOf(LOT, SERIAL)), ["DSS 2026-104R2"]);
 });
 
 test("🔴 L/N 과 S/N 이 **둘 다** 맞아야 한다 — 남의 장비 번호가 섞이지 않게", async () => {
@@ -334,27 +438,38 @@ test("폴더가 비어 있으면 그 장비는 결과에 없다 — 빈 배열�
   assert.equal(numbers.size, 0);
 });
 
-test("🔴 폴더 수 상한이 없다 — 폴더가 많아도 **전부** 읽는다 (2026-10-07)", async () => {
+test("🔴 폴더 수 상한이 없다 — 줄이 많아도 **뒤쪽 줄까지 전부** 읽는다 (2026-10-07)", async () => {
   const root = await makeRoot();
   // 🔴 **210 개다 — 없앤 상한(200)보다 많다.** 운영 공유폴더에 견적서 폴더가 658 개이고 그
   //    가운데 L/N · S/N 이 든 것이 342 개다. 상한이 남아 있으면 뒤쪽 줄의 번호가 조용히 빠진다.
-  const quoteNumbers = Array.from(
-    { length: 210 },
-    (_unused, index) => `2026-${String(index + 1).padStart(3, "0")}`
-  );
+  //
+  // 🔴 **장비 210 대**다(2026-10-12 에 이렇게 바뀌었다). 그전에는 장비 **한 대**에 폴더
+  //    210 개였는데, 이제 한 장비는 최신 폴더 하나만 읽으므로 그 모양으로는 상한을 못 잰다.
+  //    상한이 막던 것은 애초에 「**줄이 많을 때** 뒤쪽 줄」이다 — 주간보고가 ~250 줄을
+  //    한 번에 묻는다. 장비마다 폴더 하나씩이면 열어야 할 폴더도 그대로 210 개다.
+  const products = Array.from({ length: 210 }, (_unused, index) => ({
+    lotNumber: `AB${String(index + 1).padStart(4, "0")}`,
+    serialNumber: String(1000000 + index + 1),
+  }));
   // 연도 폴더를 먼저 만들어 두고 견적서 폴더들은 한꺼번에 만든다(시험 준비 시간을 줄인다).
   await mkdir(path.join(root, YEAR_2026), { recursive: true });
   await Promise.all(
-    quoteNumbers.map((number) =>
-      makeFolder(root, YEAR_2026, folderName(number), [`${folderName(number)}.xls`])
-    )
+    products.map((product, index) => {
+      const number = `2026-${String(index + 1).padStart(3, "0")}`;
+      const name = folderName(number, product.lotNumber, product.serialNumber);
+      return makeFolder(root, YEAR_2026, name, [`${name}.xls`]);
+    })
   );
 
-  const numbers = await numbersFor(root, [{ lotNumber: LOT, serialNumber: SERIAL }]);
-  assert.deepEqual(
-    numbers.get(keyOf(LOT, SERIAL)),
-    quoteNumbers.map((number) => `DSS ${number}`)
-  );
+  const numbers = await numbersFor(root, products);
+  assert.equal(numbers.size, products.length);
+  products.forEach((product, index) => {
+    assert.deepEqual(
+      numbers.get(keyOf(product.lotNumber, product.serialNumber)),
+      [`DSS 2026-${String(index + 1).padStart(3, "0")}`],
+      product.lotNumber
+    );
+  });
 });
 
 test("🔴 결과에 「일부만 읽었다」를 담는 칸이 없다 — 반쪽 결과를 내는 길 자체가 없다", async () => {

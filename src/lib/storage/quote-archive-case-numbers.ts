@@ -2,7 +2,12 @@ import "server-only";
 
 import path from "node:path";
 
-import { quoteNumbersFromArchiveFileNames } from "@/lib/domain/quote-archive-file-number";
+import {
+  hideSupersededArchiveFileNumbers,
+  latestArchiveFileNumber,
+  quoteNumberFromArchiveFileName,
+  quoteNumbersFromArchiveFileNames,
+} from "@/lib/domain/quote-archive-file-number";
 import { isQuoteArchiveYearFolder } from "@/lib/domain/quote-archive-naming";
 import {
   isIgnoredShareFolderEntryName,
@@ -48,12 +53,23 @@ import {
  * **2024 연도 폴더**에 들어 있었다 — 사람이 그 해에 정리하면서 그리 넣은 것이다. 연도 폴더를
  * 가르는 일은 **이미 있는 판정**(domain/quote-archive-naming.ts)을 그대로 쓴다.
  *
- * ── 🔴 폴더 **이름**에서 번호를 뽑지 않는다 ──────────────────────────────
+ * ── 🔴 보여 줄 번호는 폴더 **이름**이 아니라 폴더 **안 파일**에서 나온다 ──
  * 폴더 이름에는 본 번호 하나뿐이지만, 그 안의 파일에는 가지 번호(`2026-001-1`)와
  * 개정본(`2026-004R1`)까지 들어 있다(실측 2026-10-06). 사용자가 요구한 것이 「**파일들의**
  * 견적서 번호」라, 맞은 폴더만 열어 파일 이름에서 뽑는다(quoteNumbersFromArchiveFileNames).
  * 🔴 전체 폴더(실측 658 개)를 다 열지 않는 까닭은 그것이 곧 NAS 왕복 658 번이기 때문이다 —
  * 들어온 장비에 **맞은 폴더만** 연다.
+ *
+ * ── 🔴 **최신 폴더 하나**만 연다 · **개정본이 원본을 가린다** (2026-10-12) ──
+ * 사용자 요구로 번호를 두 번 추린다. 둘 다 **셈 자체는 도메인 모듈**이 한다
+ * (domain/quote-archive-file-number.ts) — 여기는 폴더를 고르고 넘길 뿐이다.
+ *   1. 맞은 폴더가 여럿이면 **폴더 이름의 견적서 번호가 가장 큰 폴더 하나**만 읽는다
+ *      (matchFolders). 🔴 폴더 이름에서 번호를 뽑는 일도 파일 이름과 **같은 함수**다.
+ *      🔴 하나도 못 뽑으면 **전부** 읽는다 — 번호가 통째로 안 나오는 것보다 낫다.
+ *      🔵 덤: 읽기 **전에** 좁히므로 NAS 왕복도 그만큼 준다.
+ *   2. 남은 번호들 가운데 줄기가 같은 것끼리 **개정 번호가 가장 큰 것만** 남긴다
+ *      (readNumbers). 🔴 가지 번호(`-1`)는 「같은 장의 새 판」이 아니라 별도로 나간
+ *      견적서라 **가려지지 않는다**(사용자 결정 2026-10-12).
  *
  * ── 🔴 L/N 과 S/N 이 **둘 다** 맞아야 한다 ───────────────────────────────
  * S/N 하나로는 장비가 확정되지 않는다 — 이 시스템에는 같은 S/N 에 모델이 셋인 사례가 있다.
@@ -340,7 +356,25 @@ type MatchedFolders = {
  * 훑어 둔 이름들 가운데 **그 장비들의 폴더**를 고른다. 디스크를 보지 않는 순수한 일이라
  * 기다리기 상한 **밖**에 둔다 — 상한은 NAS 를 기다리는 시간에만 걸려야 한다.
  *
- * 🔴 **걸린 폴더는 하나도 빼지 않는다**(위 「폴더 수에는 상한을 두지 않는다」).
+ * 🔴 **장비 하나에 폴더 하나다 — 그 장비의 「최신 견적서 폴더」만 연다** (사용자 요구
+ * 2026-10-12). 그전에는 걸린 폴더를 **전부** 열어 번호를 합쳤는데, 그러면 몇 해 전 견적서
+ * 번호까지 한 칸에 쌓였다. 최신은 **폴더 이름의 견적서 번호가 가장 큰 폴더**이고, 번호를
+ * 뽑는 일 · 견주는 일 모두 도메인 모듈의 함수를 그대로 쓴다(여기서 다시 짜면 차례 규칙이
+ * 두 벌이 된다).
+ *
+ * 🔴 **갈래가 둘이다.**
+ *   · 번호를 못 뽑는 폴더가 **섞여** 있으면 — 뽑힌 폴더들 가운데서만 최신을 고른다.
+ *   · **하나도** 못 뽑으면 — 지금까지처럼 **전부** 읽는다. 번호가 통째로 안 나오는 것보다
+ *     여럿이 함께 보이는 쪽이 낫다.
+ * 번호가 같은 폴더가 둘이면 둘 다 남는다 — 어느 쪽이 더 새것인지 이름만으로는 알 수 없고,
+ * 하나를 임의로 버리면 그 폴더의 번호가 조용히 사라진다.
+ *
+ * 🔴 **고르기는 장비 열쇠마다 따로** 한다. 폴더 하나가 장비 여럿에 걸릴 수 있어서
+ * (`keysByFolder`), 한 장비의 최신이 아닌 폴더가 옆 장비에게는 최신일 수 있다.
+ *
+ * 🔴 **폴더 수에는 여전히 상한이 없다**(위 「폴더 수에는 상한을 두지 않는다」). 여기서
+ * 줄어드는 것은 「한 장비의 지난 폴더들」이지 「뒤쪽 줄」이 아니다 — 장비가 250 대면 폴더도
+ * 250 개를 연다.
  */
 function matchFolders(
   folders: readonly QuoteArchiveFolderRef[],
@@ -352,9 +386,8 @@ function matchFolders(
     return { key, lotKey, serialKey };
   });
 
-  const picked: QuoteArchiveFolderRef[] = [];
-  const keysByFolder: string[][] = [];
-
+  /** 이름이 걸린 폴더 전부. 폴더 이름의 번호를 여기서 한 번만 뽑아 둔다. */
+  const candidates: { folder: QuoteArchiveFolderRef; number: string | null; keys: string[] }[] = [];
   for (const folder of folders) {
     const nameKeys = archiveFolderNameKeys(folder.folderName);
     const hit: string[] = [];
@@ -363,9 +396,37 @@ function matchFolders(
       if (nameKeys.has(product.lotKey) && nameKeys.has(product.serialKey)) hit.push(product.key);
     }
     if (hit.length === 0) continue;
-    picked.push(folder);
-    keysByFolder.push(hit);
+    // 폴더 이름도 `DSS <번호> <고객사> …` 꼴이라 파일 이름과 **같은 함수**가 번호를 준다.
+    candidates.push({ folder, number: quoteNumberFromArchiveFileName(folder.folderName), keys: hit });
   }
+
+  /** 장비 열쇠 → 그 장비가 걸린 폴더들의 자리번호. */
+  const indexesByKey = new Map<string, number[]>();
+  candidates.forEach((candidate, index) => {
+    for (const key of candidate.keys) {
+      const found = indexesByKey.get(key);
+      if (found) found.push(index);
+      else indexesByKey.set(key, [index]);
+    }
+  });
+
+  /** 좁히고 난 뒤 폴더마다 남는 열쇠들 — 비면 그 폴더는 열지 않는다. */
+  const keptByCandidate: string[][] = candidates.map(() => []);
+  for (const [key, indexes] of indexesByKey) {
+    const latest = latestArchiveFileNumber(indexes.map((index) => candidates[index].number));
+    for (const index of indexes) {
+      // latest 가 null 이면 이 장비는 번호를 하나도 못 뽑은 것이다 — 전부 읽는다.
+      if (latest === null || candidates[index].number === latest) keptByCandidate[index].push(key);
+    }
+  }
+
+  const picked: QuoteArchiveFolderRef[] = [];
+  const keysByFolder: string[][] = [];
+  candidates.forEach((candidate, index) => {
+    if (keptByCandidate[index].length === 0) return;
+    picked.push(candidate.folder);
+    keysByFolder.push(keptByCandidate[index]);
+  });
 
   return { folders: picked, keysByFolder };
 }
@@ -401,7 +462,9 @@ async function readNumbers(rawRoot: string, matched: MatchedFolders): Promise<Qu
   for (const [key, fileNames] of fileNamesByKey) {
     // 🔴 폴더가 여럿이어도 **한 번에** 뽑는다 — 그래야 중복 없애기와 차례가 그 함수 하나의
     //    규칙으로 끝난다(여러 번 뽑아 이으면 차례를 여기서 다시 정하게 된다).
-    const numbers = quoteNumbersFromArchiveFileNames(fileNames);
+    // 🔴 **개정본이 원본을 가린다**(사용자 요구 2026-10-12). 🔴 머리말을 붙이기 **전**에
+    //    지난다 — 붙인 뒤에 가리면 글자 다루기가 두 겹이 된다. 가지 번호(`-1`)는 그대로다.
+    const numbers = hideSupersededArchiveFileNumbers(quoteNumbersFromArchiveFileNames(fileNames));
     if (numbers.length > 0) {
       numbersByProduct.set(
         key,

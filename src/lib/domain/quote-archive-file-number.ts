@@ -30,6 +30,13 @@ import { normalizeShareFolderNameForCompare } from "./share-folder-naming";
  * ── 왜 이름 **앞**에서만 보는가 ──────────────────────────────────────────
  * 사내 파일은 전부 번호로 시작한다. 이름 가운데를 뒤지면 모델명 · S/N 안의 숫자 뭉치가
  * 번호로 둔갑한다(`RFK300FH-AD1_WN3769_1802083` 같은 이름이 실제로 있다).
+ *
+ * ── 뽑은 **번호들을 고르는 일**도 여기다 (2026-10-12) ─────────────────────
+ * 「고객 안내 현황」과 「주간보고」의 견적서 번호 칸이 번호를 두 번 추린다 —
+ * `latestArchiveFileNumber` 로 **그 장비의 최신 견적서 폴더**를 고르고,
+ * `hideSupersededArchiveFileNumbers` 로 **개정본이 원본을 가린다**. 둘 다 디스크를 모르는
+ * 순수한 셈이라 번호를 다루는 이 모듈에 둔다 — 🔴 공유폴더를 읽는 쪽
+ * (storage/quote-archive-case-numbers.ts)에 적으면 차례 규칙과 번호 모양이 두 벌이 된다.
  * ============================================================================
  */
 
@@ -102,4 +109,67 @@ export function quoteNumbersFromArchiveFileNames(fileNames: readonly string[]): 
     if (number !== null) found.add(number);
   }
   return [...found].sort(compareArchiveFileNumbers);
+}
+
+/**
+ * 번호 여럿 가운데 **가장 큰 것**. 못 뽑은 자리(`null`)는 빼고 보고, 하나도 없으면 `null`.
+ *
+ * 🔴 차례는 바로 위 `compareArchiveFileNumbers` 그대로다 — **글자 그대로** 견준다. 쓰는 쪽
+ * (storage/quote-archive-case-numbers.ts 가 「그 장비의 **최신 견적서 폴더**」를 고른다)이
+ * 제 손으로 견주면 차례 규칙이 두 벌이 되고, 로케일 비교를 쓰지 않는 까닭(위 머리말)도 그
+ * 자리에서 조용히 사라진다.
+ *
+ * 🔴 **`null` 을 받는 것이 이 함수의 일**이다. 폴더 이름에서 번호를 못 뽑는 폴더가 실제로
+ * 섞여 있고(사람이 `DSS` 없이 적은 이름 · 번호 뒤 오타), 부르는 쪽은 「뽑힌 것들 가운데
+ * 최신」과 「하나도 못 뽑았다」를 **갈라서** 다뤄야 한다.
+ */
+export function latestArchiveFileNumber(numbers: readonly (string | null)[]): string | null {
+  let latest: string | null = null;
+  for (const number of numbers) {
+    if (number === null) continue;
+    if (latest === null || compareArchiveFileNumbers(number, latest) > 0) latest = number;
+  }
+  return latest;
+}
+
+/**
+ * 번호 끝의 **개정 꼬리**(`R1`)를 떼어 줄기와 개정 번호로 가른다. 꼬리가 없으면 개정 `0` 이다.
+ *
+ * 🔴 **가지 번호(`-1`)는 꼬리가 아니다** — `2026-104-1` 의 줄기는 `2026-104-1` 이다. 가지는
+ * 「같은 장의 새 판」이 아니라 **별도로 나간 견적서**라 원본과 나란히 살아 있는 번호다
+ * (사용자 결정 2026-10-12). 번호 뽑기 규칙상 가지와 개정이 한 번호에 함께 오는 모양은 없다.
+ */
+function archiveFileNumberRevision(number: string): { stem: string; revision: number } {
+  const match = /R(\d+)$/i.exec(number);
+  if (match === null) return { stem: number, revision: 0 };
+  return { stem: number.slice(0, match.index), revision: Number(match[1]) };
+}
+
+/**
+ * **개정본이 원본을 가린다** — 줄기가 같은 번호끼리 묶어 개정 번호가 **가장 큰 것만** 남긴다
+ * (사용자 요구 2026-10-12). 들어온 차례를 그대로 지킨다.
+ *
+ *   `2026-104` · `2026-104R1`   → `2026-104R1`      (원본은 개정 0 이다)
+ *   `2026-104R1` · `2026-104R2` → `2026-104R2`
+ *   `2026-104` · `2026-104-1`   → 🔴 **둘 다** (가지는 줄기가 다르다)
+ *   `2026-104R1` · `2026-104-1` → 🔴 **둘 다**
+ *
+ * 🔴 `quoteNumbersFromArchiveFileNames` 안에 넣지 않았다. 그 함수는 「같은 장비의 지난
+ * 견적서」 줄에서 **그 폴더가 담은 번호를 전부** 적는 데도 쓰인다
+ * (storage/quote-archive-product-folders.ts) — 거기서 원본이 사라지면 폴더 안에 무엇이
+ * 들어 있는지를 못 보게 된다. 가리는 일은 **부르는 쪽이 골라서** 한다.
+ *
+ * 🔴 `DSS ` 머리말을 **붙이기 전**에 지난다 — 붙인 뒤에 하면 글자 다루기가 두 겹이 된다.
+ */
+export function hideSupersededArchiveFileNumbers(numbers: readonly string[]): string[] {
+  const latestByStem = new Map<string, number>();
+  for (const number of numbers) {
+    const { stem, revision } = archiveFileNumberRevision(number);
+    const found = latestByStem.get(stem);
+    if (found === undefined || revision > found) latestByStem.set(stem, revision);
+  }
+  return numbers.filter((number) => {
+    const { stem, revision } = archiveFileNumberRevision(number);
+    return latestByStem.get(stem) === revision;
+  });
 }
