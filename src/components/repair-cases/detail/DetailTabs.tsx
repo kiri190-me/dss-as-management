@@ -19,9 +19,20 @@ type DetailTabsProps = {
    * 두면 조용히 안 보이고, 기본 true 로 두면 조용히 새어 나간다.
    */
   canViewQuotes: boolean;
+  /**
+   * 「발주서」 탭을 그릴까(2026-10-12). 🔴 **견적서와 다른 열쇠**다 — 이 탭이 보여 주는
+   * 것은 고객사가 우리에게 낸 발주서라 `domesticOrders` 영역이 답한다. 판정은 상위
+   * 레이아웃(서버)이 하고, 여기서는 받은 값을 그릴 뿐이다.
+   *
+   * 🔴 **감추는 것은 막은 것이 아니다.** 주소를 직접 치면 그대로 들어와지므로
+   * `/repair-cases/{id}/purchase-orders` 페이지가 스스로 다시 확인한다.
+   *
+   * 견적서와 마찬가지로 기본값을 두지 않는다 — 넘기는 것을 잊으면 tsc 가 잡는다.
+   */
+  canViewPurchaseOrders: boolean;
 };
 
-export default function DetailTabs({ id, canViewQuotes }: DetailTabsProps) {
+export default function DetailTabs({ id, canViewQuotes, canViewPurchaseOrders }: DetailTabsProps) {
   const pathname = usePathname();
 
   // 주소는 도메인 헬퍼가 만들고, 라벨과 순서만 여기(화면)에서 정한다.
@@ -33,9 +44,12 @@ export default function DetailTabs({ id, canViewQuotes }: DetailTabsProps) {
     { label: "작업 이력", href: hrefs.workHistory },
     { label: "파일 관리", href: hrefs.files },
     { label: "보고서", href: hrefs.report },
-    // 견적서 · 검수/승인이 뒤에 온다(2026-09-04 사용자 지정 차례). 견적서만
-    // 조건부다 — 나머지 일곱은 예전 그대로 언제나 그린다.
+    // 견적서 · 검수/승인이 뒤에 온다(2026-09-04 사용자 지정 차례). 견적서와
+    // 발주서만 조건부다 — 나머지 일곱은 예전 그대로 언제나 그린다.
     ...(canViewQuotes ? [{ label: "견적서", href: hrefs.quotes }] : []),
+    // 🔴 **견적서 바로 오른쪽**이다(사용자 지정 2026-10-12). 견적서를 못 보는 세션에서는
+    // 견적서가 빠진 그 자리에 선다 — 차례는 그대로이고 열쇠만 서로 다르다.
+    ...(canViewPurchaseOrders ? [{ label: "발주서", href: hrefs.purchaseOrders }] : []),
     { label: "검수/승인", href: hrefs.approval },
   ];
 

@@ -57,6 +57,18 @@ export default async function RepairCaseDetailLayout({
     actingUser !== null && (await hasPermission(actingUser, "quotes", "READ"));
 
   /**
+   * 「발주서」 탭(2026-10-12)도 같은 모양으로 정한다 — 🔴 다만 **열쇠가 다르다.**
+   * 그 탭이 보여 주는 것은 고객사가 우리에게 낸 발주서(내자)이고, 폴더 이름에 발주
+   * 금액이 들어 있다. 「발주서를 볼 수 있는가」는 이미 `domesticOrders` 하나가
+   * 답하고 있으므로 새 영역을 만들지 않는다.
+   *
+   * 🔴 이것도 **탭을 그릴지 말지**일 뿐 관문이 아니다 — 주소를 직접 치면 그대로
+   * 들어와지므로 `[id]/purchase-orders/page.tsx` 가 같은 판정을 한 번 더 한다.
+   */
+  const canViewPurchaseOrders =
+    actingUser !== null && (await hasPermission(actingUser, "domesticOrders", "READ"));
+
+  /**
    * 머리 카드(DetailHeader)의 재료 — 2026-10-06 이전에는 「기본 정보」 탭의
    * RepairCaseDetailView 가 구했다. 카드가 탭 위로 올라오면서 **같은 함수 · 같은
    * 열쇠**를 이 자리로 옮겨 왔을 뿐, 판정을 새로 만들거나 넓히지 않았다.
@@ -90,7 +102,7 @@ export default async function RepairCaseDetailLayout({
         canEditReportNumber={canEditReportNumber}
         referenceData={referenceData}
       />
-      <DetailTabs id={id} canViewQuotes={canViewQuotes} />
+      <DetailTabs id={id} canViewQuotes={canViewQuotes} canViewPurchaseOrders={canViewPurchaseOrders} />
       {children}
     </div>
   );

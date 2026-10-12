@@ -14,6 +14,7 @@ const HREFS = [
   HREFS_BY_NAME.files,
   HREFS_BY_NAME.report,
   HREFS_BY_NAME.quotes,
+  HREFS_BY_NAME.purchaseOrders,
   HREFS_BY_NAME.approval,
 ];
 
@@ -21,7 +22,7 @@ test("헬퍼가 만드는 주소는 실제 라우트 폴더와 하나씩 맞아�
   // 여기서만 문자열을 손으로 적는다. 라우트 폴더 이름이 바뀌었는데 헬퍼를 고치지
   // 않으면(또는 그 반대면) 여기서 걸린다.
   // src/app/(app)/repair-cases/[id]/ : page.tsx, execution, diagnosis,
-  // work-history, files, approval, report, quotes
+  // work-history, files, approval, report, quotes, purchase-orders
   assert.deepEqual(repairCaseDetailHrefs(CASE_ID), {
     root: `/repair-cases/${CASE_ID}`,
     execution: `/repair-cases/${CASE_ID}/execution`,
@@ -31,16 +32,17 @@ test("헬퍼가 만드는 주소는 실제 라우트 폴더와 하나씩 맞아�
     approval: `/repair-cases/${CASE_ID}/approval`,
     report: `/repair-cases/${CASE_ID}/report`,
     quotes: `/repair-cases/${CASE_ID}/quotes`,
+    purchaseOrders: `/repair-cases/${CASE_ID}/purchase-orders`,
   });
 });
 
-test("여덟 개 주소는 서로 다르다", () => {
+test("아홉 개 주소는 서로 다르다", () => {
   // 복사·붙여넣기로 두 키가 같은 곳을 가리키게 되면 탭 두 개가 동시에 활성으로
   // 보이고 한 화면에는 영영 못 간다.
-  assert.equal(new Set(HREFS).size, 8);
+  assert.equal(new Set(HREFS).size, 9);
 });
 
-test("루트가 나머지 일곱의 접두사다 — resolveActiveTabHref의 최장 일치 규칙이 필요한 이유", () => {
+test("루트가 나머지 여덟의 접두사다 — resolveActiveTabHref의 최장 일치 규칙이 필요한 이유", () => {
   // 이 성질이 깨지는 날은 상세 화면 주소 구조가 바뀐 날이다. 그때 최장 일치
   // 규칙을 다시 볼 수 있게 여기서 붙잡아 둔다.
   for (const href of HREFS.slice(1)) {
@@ -102,4 +104,33 @@ test("견적서를 못 보는 세션(탭이 빠진 목록)에서도 나머지 �
   // 주소를 직접 친 경우에는 루트로 떨어진다(그냥 알 수 없는 하위 경로다).
   // 막는 것은 탭 줄이 아니라 그 페이지 자신이다.
   assert.equal(resolveActiveTabHref(HREFS_BY_NAME.quotes, withoutQuotes), HREFS_BY_NAME.root);
+});
+
+/**
+ * ── 발주서 탭 (2026-10-12) ─────────────────────────────────────────────────
+ * 견적서와 같은 성질을 하나 더 가진다 — **열쇠가 다른 조건부 탭**이다
+ * (`domesticOrders` READ). 그래서 둘 중 하나만 빠진 목록이 실제로 생긴다.
+ */
+test("🔴 발주서 탭 주소에서 루트(기본 정보) 탭이 활성이 되지 않는다", () => {
+  assert.equal(resolveActiveTabHref(HREFS_BY_NAME.purchaseOrders, HREFS), HREFS_BY_NAME.purchaseOrders);
+  assert.notEqual(resolveActiveTabHref(HREFS_BY_NAME.purchaseOrders, HREFS), HREFS_BY_NAME.root);
+});
+
+test("견적서 탭 주소가 발주서 탭을 활성으로 만들지 않는다 — 둘은 서로 접두사가 아니다", () => {
+  assert.notEqual(HREFS_BY_NAME.purchaseOrders, HREFS_BY_NAME.quotes);
+  assert.equal(HREFS_BY_NAME.purchaseOrders.startsWith(`${HREFS_BY_NAME.quotes}/`), false);
+  assert.equal(HREFS_BY_NAME.quotes.startsWith(`${HREFS_BY_NAME.purchaseOrders}/`), false);
+  assert.equal(resolveActiveTabHref(HREFS_BY_NAME.quotes, HREFS), HREFS_BY_NAME.quotes);
+});
+
+test("둘 중 하나만 빠진 목록에서도 나머지 탭의 판정은 그대로다", () => {
+  // 견적서는 보이는데 발주서는 못 보는 세션(그 반대도)이 실제로 있다 — 열쇠가 다르다.
+  for (const missing of [HREFS_BY_NAME.quotes, HREFS_BY_NAME.purchaseOrders]) {
+    const shown = HREFS.filter((href) => href !== missing);
+    for (const href of shown) {
+      assert.equal(resolveActiveTabHref(href, shown), href);
+    }
+    // 주소를 직접 친 경우에는 루트로 떨어진다. 막는 것은 그 페이지 자신이다.
+    assert.equal(resolveActiveTabHref(missing, shown), HREFS_BY_NAME.root);
+  }
 });

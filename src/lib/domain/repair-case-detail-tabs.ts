@@ -33,13 +33,13 @@ export function resolveActiveTabHref(pathname: string, hrefs: readonly string[])
  * 화면에서가 아니라 tsc에서 걸리게 한다.
  *
  * 키는 `src/app/(app)/repair-cases/[id]/` 아래의 실제 라우트와 1:1이다
- * (루트 page.tsx + 하위 7개). 라벨은 여기 두지 않는다 — 무엇이라 부를지는
+ * (루트 page.tsx + 하위 8개). 라벨은 여기 두지 않는다 — 무엇이라 부를지는
  * 화면의 관심사다. **누가 그 탭을 볼 수 있는가도 여기 두지 않는다** — 주소는
  * 권한과 무관하게 언제나 같은 곳을 가리키고, 볼 수 있는지는 화면과 페이지가
- * 따로 판정한다(quotes 탭이 그렇다).
+ * 따로 판정한다(quotes · purchaseOrders 탭이 그렇다).
  */
 export type RepairCaseDetailHrefs = {
-  /** 루트(기본 정보). 나머지 일곱의 문자열 접두사이기도 하다. */
+  /** 루트(기본 정보). 나머지 여덟의 문자열 접두사이기도 하다. */
   root: string;
   execution: string;
   diagnosis: string;
@@ -49,6 +49,11 @@ export type RepairCaseDetailHrefs = {
   report: string;
   /** 이 접수 건에 붙은 견적서. `/quotes` 목록과 같은 표를 읽는다. */
   quotes: string;
+  /**
+   * 이 장비의 발주서 폴더(2026-10-12). 🔴 **DB 가 아니라 사내 공유폴더**를 보는
+   * 탭이다 — 고객사가 우리에게 낸 발주서는 표에 들어 있지 않다.
+   */
+  purchaseOrders: string;
 };
 
 export function repairCaseDetailHrefs(repairCaseId: string): RepairCaseDetailHrefs {
@@ -62,5 +67,6 @@ export function repairCaseDetailHrefs(repairCaseId: string): RepairCaseDetailHre
     approval: `${root}/approval`,
     report: `${root}/report`,
     quotes: `${root}/quotes`,
+    purchaseOrders: `${root}/purchase-orders`,
   };
 }
