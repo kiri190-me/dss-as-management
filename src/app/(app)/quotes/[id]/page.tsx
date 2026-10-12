@@ -193,8 +193,15 @@ export default async function QuoteDetailPage({
 
         🔴 **서버에서 공유폴더를 읽지 않는다.** 그 구역이 화면이 뜬 뒤 스스로 통로를
         부르므로, NAS 가 느리거나 꺼져 있는 날에도 이 화면은 그대로 뜬다.
+
+        🔴 `quoteNumber` 는 **보고 있는 이 장의 번호**다(2026-10-12 사용자 요구 — 「지금
+        보고 있는 그 견적서 번호의 파일만」). 공유폴더의 폴더는 **본 번호** 단위라
+        `DSS 2026-089` 와 `DSS 2026-089-1` 이 한 폴더를 쓴다 — 번호를 주지 않으면 결재하는
+        사람에게 **다른 장의 파일까지** 보인다. 🔴 **본 번호로 깎지 않고 번호 전체**를
+        그대로 넘긴다(깎으면 지금과 똑같이 전부 보인다). 거르는 일은 그 구역이 한다 —
+        이 화면은 번호만 준다.
       */
-      archiveFolderSection={<QuoteArchiveFolderSection quoteId={quote.id} />}
+      archiveFolderSection={<QuoteArchiveFolderSection quoteId={quote.id} quoteNumber={quote.quoteNumber} />}
       approvalPanel={
         <QuoteApprovalPanel
           quoteId={quote.id}

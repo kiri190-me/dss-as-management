@@ -19,11 +19,13 @@ import QuoteArchiveFolderSection, {
   QUOTE_ARCHIVE_FOLDER_SECTION_LOADING_TEXT,
   QUOTE_ARCHIVE_FOLDER_SECTION_MULTIPLE_TEXT,
   QUOTE_ARCHIVE_FOLDER_SECTION_NOT_FOUND_TEXT,
+  QUOTE_ARCHIVE_FOLDER_SECTION_NO_MATCH_TEXT,
   QuoteArchiveFolderSectionView,
   canOpenQuoteArchiveFolderEntry,
   loadQuoteArchiveFolderEntries,
   quoteArchiveFolderEntriesUrl,
   quoteArchiveFolderEntryMeta,
+  quoteArchiveFolderHiddenByNumberText,
   quoteArchiveFolderOpenPath,
   quoteArchiveFolderTruncatedText,
   readQuoteArchiveFolderEntriesAnswer,
@@ -202,6 +204,139 @@ describe("상태 여섯 — 무엇을 보이는가", () => {
 
 /*
  * ============================================================================
+ * 🔴 **보고 있는 그 견적서 번호의 파일만** (사용자 요구 2026-10-12)
+ * ============================================================================
+ * 공유폴더의 폴더를 가르는 것은 **본 번호**라 `DSS 2026-089` 와 `DSS 2026-089-1` 이 한 폴더를
+ * 쓴다. 그래서 결재 탭에서 가지 번호 견적서를 열어도 **다른 장의 파일까지** 보였다.
+ *
+ * 🔴 **칸을 주지 않으면 지금 그대로 전부 보인다** — 수리 건 「견적서」 탭은 본 번호 단위로
+ * 구역을 그리므로(label={group.baseNumber}) 폴더 전체가 보이는 것이 맞다.
+ * 거르는 규칙 자체는 quote-archive-folder-number-filter.test.ts 가 본다. 여기서는 **화면이
+ * 무엇을 내는가**다: 무엇이 사라지고 · 무엇이 남고 · 숨겼다는 말이 서는가.
+ * ============================================================================
+ */
+
+const BASE_NUMBER = "DSS 2026-089";
+const BRANCH_NUMBER = "DSS 2026-089-1";
+const BASE_XLS = `${BASE_NUMBER} 가나상사 MODEL-X1 L123 S456 전원 불량.xls`;
+/** 결재본 — 같은 줄기에 ` - 有印.pdf` 만 붙은 것이라 **같은 번호로 시작**한다. */
+const BASE_SIGNED_PDF = `${BASE_NUMBER} 가나상사 MODEL-X1 L123 S456 전원 불량 - 有印.pdf`;
+const BRANCH_XLS = `${BRANCH_NUMBER} 가나상사 MODEL-X1 L123 S456 전원 불량(OH포함).xls`;
+/** 사람이 손으로 넣은 것 — 번호로 시작하지 않는다. */
+const HAND_PUT_PDF = "참고자료.pdf";
+
+const FOLDER_ENTRIES = [entry(BASE_XLS), entry(BASE_SIGNED_PDF), entry(BRANCH_XLS), entry(HAND_PUT_PDF)];
+
+/** 번호를 주고 그린다 — `label` 은 주지 않는다(결재 탭이 지나는 길 그대로). */
+function withNumber(state: QuoteArchiveFolderSectionState, quoteNumber: string): string {
+  return renderToStaticMarkup(createElement(QuoteArchiveFolderSectionView, { state, quoteNumber }));
+}
+
+describe("🔴 그 견적서 번호의 파일만 — 폴더는 본 번호 단위라 다른 장이 섞여 있다", () => {
+  test("🔴 본 번호를 보고 있으면 **가지 번호 파일이 숨는다** · 결재본 PDF 는 보인다", () => {
+    const html = withNumber(foundState({ entries: FOLDER_ENTRIES, totalCount: 4 }), BASE_NUMBER);
+    assert.ok(html.includes(BASE_XLS), html);
+    // 🔴 `- 有印.pdf` 는 같은 번호로 시작하므로 **보여야 한다**.
+    assert.ok(html.includes(BASE_SIGNED_PDF), html);
+    assert.equal(html.includes(BRANCH_XLS), false, "가지 번호 파일이 그대로 보인다");
+    assert.equal(html.includes(HAND_PUT_PDF), false, "번호로 시작하지 않는 파일이 그대로 보인다");
+  });
+
+  test("🔴 가지 번호를 보고 있으면 **본 번호 파일이 숨는다**", () => {
+    const html = withNumber(foundState({ entries: FOLDER_ENTRIES, totalCount: 4 }), BRANCH_NUMBER);
+    assert.ok(html.includes(BRANCH_XLS), html);
+    assert.equal(html.includes(BASE_XLS), false, "본 번호 파일이 그대로 보인다");
+    assert.equal(html.includes(BASE_SIGNED_PDF), false, "본 번호 결재본이 그대로 보인다");
+  });
+
+  test("🔴 숨긴 줄이 있으면 **그 개수를 한 줄로** 알린다 — 「파일이 없어졌다」고 여기지 않게", () => {
+    const html = withNumber(foundState({ entries: FOLDER_ENTRIES, totalCount: 4 }), BASE_NUMBER);
+    // 가지 번호 한 장 + 손으로 넣은 한 장.
+    assert.ok(html.includes(quoteArchiveFolderHiddenByNumberText(2)), html);
+    // 🔴 [전부 보기] 토글은 만들지 않는다(사용자 결정) — 맨 아래 [폴더 열기]가 그 자리다.
+    assert.ok(quoteArchiveFolderHiddenByNumberText(2).includes("[폴더 열기]"));
+    assert.equal(sectionCode.includes("전부 보기"), false, "[전부 보기] 토글이 생겼다");
+  });
+
+  test("🔴 거르고 나니 **0 줄**이면 — 빈 폴더와 **다른 글자**다(폴더에 파일은 있다)", () => {
+    const html = withNumber(foundState({ entries: FOLDER_ENTRIES, totalCount: 4 }), "DSS 2026-099");
+    assert.ok(html.includes(QUOTE_ARCHIVE_FOLDER_SECTION_NO_MATCH_TEXT), html);
+    assert.equal(html.includes(QUOTE_ARCHIVE_FOLDER_SECTION_EMPTY_TEXT), false, "빈 폴더와 같은 말을 한다");
+    assert.notEqual(QUOTE_ARCHIVE_FOLDER_SECTION_NO_MATCH_TEXT, QUOTE_ARCHIVE_FOLDER_SECTION_EMPTY_TEXT);
+    // 숨긴 개수도 함께 — 네 줄 전부 숨었다.
+    assert.ok(html.includes(quoteArchiveFolderHiddenByNumberText(4)), html);
+    // 목록 자리가 서지 않는다.
+    assert.equal(html.includes("<ul"), false, html);
+    // 🔴 폴더는 찾았으니 맨 아래 [폴더 열기]가 설 자리는 그대로다.
+    assert.equal(quoteArchiveFolderOpenPath(foundState({ entries: FOLDER_ENTRIES })), RELATIVE_PATH);
+  });
+
+  test("정말 빈 폴더는 **예전 그대로** — 「폴더가 비어 있습니다」, 숨겼다는 말이 없다", () => {
+    const html = withNumber(foundState({ entries: [], totalCount: 0 }), BASE_NUMBER);
+    assert.ok(html.includes(QUOTE_ARCHIVE_FOLDER_SECTION_EMPTY_TEXT), html);
+    assert.equal(html.includes("숨겼습니다"), false, html);
+    assert.equal(html.includes(QUOTE_ARCHIVE_FOLDER_SECTION_NO_MATCH_TEXT), false, html);
+  });
+
+  test("🔴 번호가 **빈 글자**면 거르지 않는다 — 파일이 통째로 사라지면 안 된다", () => {
+    const html = withNumber(foundState({ entries: FOLDER_ENTRIES, totalCount: 4 }), "");
+    for (const name of [BASE_XLS, BASE_SIGNED_PDF, BRANCH_XLS, HAND_PUT_PDF]) {
+      assert.ok(html.includes(name), name);
+    }
+    assert.equal(html.includes("숨겼습니다"), false, html);
+  });
+
+  test("🔴 칸을 **주지 않으면** 전부 보인다 — 수리 건 「견적서」 탭이 지나는 길", () => {
+    const html = markup(foundState({ entries: FOLDER_ENTRIES, totalCount: 4 }));
+    for (const name of [BASE_XLS, BASE_SIGNED_PDF, BRANCH_XLS, HAND_PUT_PDF]) {
+      assert.ok(html.includes(name), name);
+    }
+    assert.equal(html.includes("숨겼습니다"), false, html);
+    // 머리에 본 번호를 적는 그 길(label)도 그대로 — 번호 칸과 서로 상관이 없다.
+    assert.ok(markup(foundState({ entries: FOLDER_ENTRIES, totalCount: 4 }), BASE_NUMBER).includes(BRANCH_XLS));
+  });
+
+  test("숨긴 줄의 [열기] 자리도 함께 사라진다 — 남은 줄에만 단추가 선다", () => {
+    const html = withNumber(
+      foundState({ entries: [entry(BASE_XLS), entry(BRANCH_XLS), entry(HAND_PUT_PDF)], totalCount: 3 }),
+      BASE_NUMBER
+    );
+    assert.equal(html.match(/data-quote-archive-folder-entry-openable/g)?.length, 1, html);
+  });
+
+  test("거를 때도 잘림 곁말은 그대로 선다 — **서버가 읽은 몫**을 말하는 줄이다", () => {
+    const html = withNumber(foundState({ entries: FOLDER_ENTRIES, totalCount: 120, truncated: true }), BASE_NUMBER);
+    assert.ok(html.includes(quoteArchiveFolderTruncatedText(4, 120)), html);
+    assert.ok(html.includes(quoteArchiveFolderHiddenByNumberText(2)), html);
+  });
+
+  test("🔴 거르는 규칙을 **베끼지 않았다** — 순수 함수 한 벌을 그대로 쓴다", () => {
+    assert.ok(
+      sectionSource.includes(
+        'import { filterQuoteArchiveEntriesByQuoteNumber } from "./quote-archive-folder-number-filter";'
+      ),
+      "거르는 함수를 가져다 쓰지 않는다"
+    );
+    // 🔴 본 번호로 깎으면 가지 번호 견적서에서 전부 다시 보인다.
+    assert.equal(sectionCode.includes("quoteArchiveBaseNumber"), false, "구역이 본 번호로 깎는다");
+    // 견주기를 이 파일이 다시 짜지 않는다 — 번호 규칙을 두 벌로 두면 갈라진다.
+    for (const forbidden of ["matchesShareFolderPrefix", "quoteNumberFromArchiveFileName", "quoteArchiveNumberKey"]) {
+      assert.equal(sectionCode.includes(forbidden), false, `구역이 견주기를 제 손으로 한다: ${forbidden}`);
+    }
+    // 기본 내보내기가 받은 번호를 그대로 내려보낸다.
+    assert.ok(sectionCode.includes("quoteNumber={quoteNumber}"), sectionCode);
+  });
+
+  test("🔴 **거르기는 화면에서만** 한다 — 서버 통로를 부르는 길은 하나 그대로다", () => {
+    // 통로 주소에 번호를 실어 보내는 칸이 생기지 않았다(그 통로는 다른 화면도 쓴다).
+    assert.equal(quoteArchiveFolderEntriesUrl("q-1"), "/api/quotes/q-1/archive-folder/entries");
+    assert.equal(sectionCode.includes("?quoteNumber="), false, "통로에 번호를 실어 보낸다");
+    assert.equal(/quoteArchiveFolderEntriesUrl\([^)]*,/.test(sectionCode), false, "통로 주소에 칸이 늘었다");
+  });
+});
+
+/*
+ * ============================================================================
  * 🔴 줄의 [열기] — **허용 목록 확장자의 파일 줄에만** 생긴다
  * ============================================================================
  * 서버 렌더에서는 단추 자체가 안 그려지므로(도우미는 Windows PC 에만 설치된다) **어느 줄이
@@ -322,7 +457,8 @@ describe("구역 맨 아래의 [폴더 열기] — 열 자리가 있을 때만",
 
   test("🔴 판단이 **한 자리**에만 있다 — 줄의 [열기]도 같은 함수를 본다", () => {
     assert.ok(sectionCode.includes("const relativePath = quoteArchiveFolderOpenPath(state);"), sectionCode);
-    assert.ok(sectionCode.includes("<EntryList entries={state.entries} relativePath={relativePath} />"));
+    // 🔴 그리는 줄은 **거른 뒤의 줄**이다(2026-10-12). 거르지 않으면 `state.entries` 그대로다.
+    assert.ok(sectionCode.includes("<EntryList entries={shown.entries} relativePath={relativePath} />"));
     assert.ok(
       sectionCode.includes('{relativePath !== "" && <ContactFolderPlaceOpenButton relativePath={relativePath} />}'),
       sectionCode.slice(sectionCode.indexOf("ContactFolderPlaceOpenButton relativePath"))
@@ -740,7 +876,9 @@ describe("자리 — 견적서 상세 [견적서 결재] 탭의 「견적서 승
       "상세 화면이 이 구역을 가져오지 않는다"
     );
     assert.ok(
-      quoteDetailPage.includes("archiveFolderSection={<QuoteArchiveFolderSection quoteId={quote.id} />}"),
+      quoteDetailPage.includes(
+        "archiveFolderSection={<QuoteArchiveFolderSection quoteId={quote.id} quoteNumber={quote.quoteNumber} />}"
+      ),
       quoteDetailPage.slice(quoteDetailPage.indexOf("archiveFolderSection"))
     );
     assert.equal(
@@ -770,6 +908,9 @@ describe("자리 — 견적서 상세 [견적서 결재] 탭의 「견적서 승
       ),
       "수리 건 쪽 자리가 바뀌었다"
     );
+    // 🔴 그 탭은 **본 번호 단위**로 구역을 그리므로 폴더 전체가 보이는 것이 맞다 —
+    //    번호 칸을 주면 한 장의 것만 남아 다른 장이 사라진다.
+    assert.equal(quotesTabPage.includes("quoteNumber="), false, "수리 건 탭이 번호로 거르기 시작했다");
   });
 });
 

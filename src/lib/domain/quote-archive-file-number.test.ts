@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import {
+  quoteArchiveNumberKey,
   quoteNumberFromArchiveFileName,
   quoteNumbersFromArchiveFileNames,
 } from "./quote-archive-file-number";
@@ -87,5 +88,45 @@ describe("폴더 하나의 번호들", () => {
       ]),
       ["2024-027", "2024-027-1", "2026-009", "2026-010"]
     );
+  });
+});
+
+/*
+ * ============================================================================
+ * 🔴 발행번호 → 키 — **파일 이름 쪽과 같은 규칙**에 태운다 (2026-10-12 에 여기로 올렸다)
+ * ============================================================================
+ * 한때 [Excel 보기](components/quotes/quote-archive-excel-open.ts) 안에만 있었고 이름도
+ * Excel 에 묶여 있었다. 결재 탭의 공유폴더 거르기가 둘째 쓰는 곳이 되면서 도메인으로
+ * 올렸다 — 두 벌이 되면 **같은 화면 안에서 두 규칙이 싸운다.**
+ * 🔴 `quoteArchiveExcelNumberKey` 는 **이름만 남아 이 함수를 그대로 부른다**(그쪽 시험이
+ * 동작이 안 바뀐 것을 본다).
+ * ============================================================================
+ */
+describe("발행번호에서 키 뽑기", () => {
+  test("모양 셋 — 본 번호 · 가지 · 개정", () => {
+    assert.equal(quoteArchiveNumberKey("DSS 2026-078"), "2026-078");
+    assert.equal(quoteArchiveNumberKey("DSS 2026-078-3"), "2026-078-3");
+    assert.equal(quoteArchiveNumberKey("DSS 2026-004R1"), "2026-004R1");
+  });
+
+  test("🔴 파일 이름 쪽과 **같은 키**가 나온다 — 두 쪽이 갈라지면 여기서 깨진다", () => {
+    for (const [number, fileName] of [
+      ["DSS 2026-078", "DSS 2026-078 가나상사 MODEL-X1 수리 견적서.xlsx"],
+      ["DSS-2026-099", "DSS-2026-099 가나상사 MODEL-X1.xls"],
+      ["dss 2026-001", "dss 2026-001 가나상사 MODEL-X1.pdf"],
+      ["DSS 2026-004r1", "DSS 2026-004R1 가나상사 MODEL-X1 - 有印.pdf"],
+      ["DSS  2026-007  ", "DSS  2026-007  가나상사.xlsx"],
+    ] as const) {
+      const key = quoteArchiveNumberKey(number);
+      assert.ok(key !== null, number);
+      assert.equal(quoteNumberFromArchiveFileName(fileName), key, `${number} ↔ ${fileName}`);
+    }
+  });
+
+  test("🔴 못 뽑으면 null — 지어내지 않는다", () => {
+    // `Q-7` · `DSS2026-089`(공백 빠뜨림)는 개발 DB 에 실제로 있는 모양이다.
+    for (const odd of ["", "   ", "Q-7", "QT-2024-115", "DSS2026-089", "2026-078", "견적서", null, undefined, 7]) {
+      assert.equal(quoteArchiveNumberKey(odd), null, String(odd));
+    }
   });
 });

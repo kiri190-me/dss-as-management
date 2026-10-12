@@ -14,6 +14,7 @@ import {
   shareFolderEntryMeta,
   type ShareFolderEntryMeta,
 } from "@/lib/domain/share-folder-entry-meta";
+import { filterQuoteArchiveEntriesByQuoteNumber } from "./quote-archive-folder-number-filter";
 
 /**
  * ============================================================================
@@ -88,11 +89,30 @@ import {
  * **이 파일에는 그 이름이 주석에도 들어오지 않는다.** 여기서 쓰는 것은 **루트 기준 상대
  * 경로**를 받아 그 자리를 여는 연락서 쪽 단추다(통로가 그 경로를 이미 준다).
  *
+ * ── 🔴 **그 견적서 번호의 파일만 보인다**(번호를 줬을 때) ─────────────────
+ * 사용자 요구 2026-10-12. 폴더를 가르는 것은 **본 번호**라 `DSS 2026-089` 와
+ * `DSS 2026-089-1` 이 한 폴더를 쓴다 — 가지 번호 견적서를 열어도 본 번호의 파일까지
+ * 보였다. `quoteNumber` 를 받으면 그 번호의 줄만 남긴다(quote-archive-folder-number-filter.ts —
+ * 🔴 본 번호로 깎지 않고 **번호 전체**로 견준다).
+ *  · 🔴 견주는 규칙은 **[Excel 보기]와 한 벌**이다(domain/quote-archive-file-number.ts 의
+ *    번호 뽑기). 다른 규칙으로 거르면 그 단추가 찾아 여는 파일을 바로 옆 이 구역이 숨긴다 —
+ *    실측에 `DSS-2026-099`(하이픈) · `dss 2026-001`(소문자) 같은 이름이 있다.
+ *  · 🔴 **주지 않으면 지금 그대로 전부 보인다** — 수리 건 「견적서」 탭은 **본 번호 단위**로
+ *    구역을 그리므로(label={group.baseNumber}) 폴더 전체가 보이는 것이 맞다. 그 화면은
+ *    이 칸을 주지 않는다.
+ *  · 🔴 **거르기는 화면에서만** 한다. 서버 통로는 한 줄도 바뀌지 않았다 — 그 통로는 다른
+ *    화면([Excel 보기] · 수리 건 「견적서」 탭)도 쓴다.
+ *  · 🔴 숨긴 줄이 있으면 **그 개수를 한 줄로 알린다.** 사람이 손으로 넣은 파일
+ *    (`참고자료.pdf`)도 숨겨지므로, 안내가 없으면 「파일이 없어졌다」고 여긴다.
+ *    [전부 보기] 토글은 두지 않는다(사용자 결정) — 맨 아래 [폴더 열기]가 그 자리다.
+ *
  * ── 상태별로 무엇을 보이는가 ─────────────────────────────────────────────
  *  · `disabled`  → 🔴 **구역 자체를 그리지 않는다**(설정이 없는 환경에서 빈 상자가 늘지 않게)
  *  · 불러오는 중 → 「불러오는 중…」
  *  · `not-found` → 「아직 이 견적서의 폴더가 없습니다」(muted)
  *  · `found` + 빈 폴더 → 「폴더가 비어 있습니다」
+ *  · `found` + 거르고 나니 0 줄 → 🔴 「이 견적서 번호로 저장된 파일이 없습니다」 + 숨긴 개수.
+ *                     **빈 폴더와 다른 상황**이다(폴더에 파일은 있다) — 글자로 갈라 적는다.
  *  · `found` + 목록 → 🔴 **표**다(2026-10-08): `[이름] [수정날짜] [크기] [동작]` — 윈도우
  *                     탐색기와 같은 차례. 1fr 은 이름 하나뿐이고 나머지 세 칸은 고정
  *                     길이라 **단추가 있는 줄과 없는 줄의 날짜·크기가 같은 자리에 선다.**
@@ -155,6 +175,23 @@ function rejectedReason(status: number): string {
 export function quoteArchiveFolderTruncatedText(shown: number, totalCount: number): string {
   return `앞의 ${shown}개만 보입니다 — 더 있습니다(전체 ${totalCount}개). 나머지는 [폴더 열기]로 보세요.`;
 }
+
+/**
+ * 🔴 **번호로 거르느라 덜어낸 줄이 있다**는 알림(2026-10-12). 번호로 시작하지 않는 파일
+ * (사람이 손으로 넣은 `참고자료.pdf` 같은 것)도 함께 숨겨지므로, 이 줄이 없으면 쓰는 분이
+ * 「파일이 없어졌다」고 여긴다. 가리키는 단추는 **구역 맨 아래의 [폴더 열기]**다 — 거기서
+ * 폴더 전체를 본다(그래서 [전부 보기] 토글을 따로 두지 않는다).
+ */
+export function quoteArchiveFolderHiddenByNumberText(hiddenCount: number): string {
+  return `이 견적서 번호가 아닌 파일 ${hiddenCount}개는 숨겼습니다 — 폴더 전체는 [폴더 열기]로 보세요.`;
+}
+
+/**
+ * 🔴 폴더에 파일은 있는데 **그 번호의 것이 하나도 없다.** 「폴더가 비어 있습니다」와는 다른
+ * 상황이라 다른 글자로 적는다 — 같은 문장을 쓰면 폴더가 빈 줄 알고 공유폴더를 다시 열어 본다.
+ * 바로 아래에 숨긴 개수 줄이 함께 선다.
+ */
+export const QUOTE_ARCHIVE_FOLDER_SECTION_NO_MATCH_TEXT = "이 견적서 번호로 저장된 파일이 없습니다";
 
 // ── 값 ───────────────────────────────────────────────────────────────────
 
@@ -307,6 +344,8 @@ export function quoteArchiveFolderOpenPath(state: QuoteArchiveFolderSectionState
 const ENTRY_NAME_CLASS = `min-w-0 ${SHARE_FOLDER_ENTRY_NAME_GROW_CLASS} break-all text-left text-sm text-zinc-700 dark:text-zinc-300`;
 const MUTED_CLASS = "text-sm text-zinc-500 dark:text-zinc-400";
 const WARNING_CLASS = "text-sm font-medium text-amber-700 dark:text-amber-400";
+/** 목록 아래에 붙는 **차분한** 곁말 — 잘림 곁말(amber)과 달리 경고가 아니다. */
+const NOTE_CLASS = "text-xs text-zinc-500 dark:text-zinc-400";
 
 function EntryList({
   entries,
@@ -355,16 +394,25 @@ function EntryList({
 export function QuoteArchiveFolderSectionView({
   state,
   label = "",
+  quoteNumber = "",
 }: {
   state: QuoteArchiveFolderSectionState;
   /** 🔴 어느 폴더의 상자인지 — 본 번호. 한 화면에 여럿 설 때 이것으로 가른다. */
   label?: string;
+  /**
+   * 🔴 **보고 있는 견적서의 번호**(가지 번호까지 그대로). 주면 그 번호의 파일만 보인다.
+   * 🔴 **안 주면 지금 그대로 전부 보인다** — 본 번호 단위로 구역을 그리는 수리 건
+   * 「견적서」 탭이 지나는 길이다. 빈 글자도 「거르지 않음」이다.
+   */
+  quoteNumber?: string;
 }) {
   if (state.kind === "disabled") return null;
 
   // 🔴 줄의 [열기]와 맨 아래 [폴더 열기]가 **같은 하나**를 본다. 빈 글자면 둘 다 안 그린다.
   const relativePath = quoteArchiveFolderOpenPath(state);
   const title = quoteArchiveFolderSectionTitle(label);
+  // 🔴 보이는 몫만 덜어낸다 — 서버가 준 줄은 그대로 두고 그 번호의 것만 남긴다.
+  const shown = filterQuoteArchiveEntriesByQuoteNumber(state.kind === "found" ? state.entries : [], quoteNumber);
 
   return (
     <section
@@ -402,13 +450,23 @@ export function QuoteArchiveFolderSectionView({
       {state.kind === "found" &&
         (state.entries.length === 0 ? (
           <p className={MUTED_CLASS}>{QUOTE_ARCHIVE_FOLDER_SECTION_EMPTY_TEXT}</p>
+        ) : shown.entries.length === 0 ? (
+          /* 🔴 폴더는 비어 있지 않다 — 그 번호의 것이 없을 뿐이다. 두 상황을 글자로 가른다. */
+          <div className="flex flex-col gap-0.5">
+            <p className={MUTED_CLASS}>{QUOTE_ARCHIVE_FOLDER_SECTION_NO_MATCH_TEXT}</p>
+            <p className={NOTE_CLASS}>{quoteArchiveFolderHiddenByNumberText(shown.hiddenCount)}</p>
+          </div>
         ) : (
           <div className="flex flex-col gap-1">
-            <EntryList entries={state.entries} relativePath={relativePath} />
+            <EntryList entries={shown.entries} relativePath={relativePath} />
+            {/* 🔴 잘림 곁말은 **서버가 읽은 몫**을 그대로 말한다 — 거르기와 상관없는 사실이다. */}
             {state.truncated && (
               <p className="text-xs text-amber-700 dark:text-amber-400">
                 {quoteArchiveFolderTruncatedText(state.entries.length, state.totalCount)}
               </p>
+            )}
+            {shown.hiddenCount > 0 && (
+              <p className={NOTE_CLASS}>{quoteArchiveFolderHiddenByNumberText(shown.hiddenCount)}</p>
             )}
           </div>
         ))}
@@ -440,6 +498,7 @@ export function QuoteArchiveFolderSectionView({
 export default function QuoteArchiveFolderSection({
   quoteId,
   label = "",
+  quoteNumber = "",
 }: {
   quoteId: string;
   /**
@@ -447,6 +506,11 @@ export default function QuoteArchiveFolderSection({
    * 그리므로(폴더가 여럿일 수 있다) 반드시 준다. 편집 화면은 그 견적서 하나뿐이라 안 준다.
    */
   label?: string;
+  /**
+   * 🔴 **보고 있는 견적서의 번호** — 주면 그 번호의 파일만 보인다(결재 탭). 🔴 수리 건
+   * 「견적서」 탭은 **주지 않는다**: 거기는 본 번호 단위의 구역이라 폴더 전체가 맞다.
+   */
+  quoteNumber?: string;
 }) {
   const [answer, setAnswer] = useState<{ quoteId: string; state: QuoteArchiveFolderSectionState } | null>(null);
 
@@ -463,5 +527,5 @@ export default function QuoteArchiveFolderSection({
   const state: QuoteArchiveFolderSectionState =
     answer !== null && answer.quoteId === quoteId ? answer.state : { kind: "loading" };
 
-  return <QuoteArchiveFolderSectionView state={state} label={label} />;
+  return <QuoteArchiveFolderSectionView state={state} label={label} quoteNumber={quoteNumber} />;
 }

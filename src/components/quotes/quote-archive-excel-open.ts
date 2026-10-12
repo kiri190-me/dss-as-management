@@ -2,7 +2,7 @@ import {
   runContactFolderFileOpen,
   type ContactFolderFileOpenEnvironment,
 } from "@/components/repair-cases/files/contact-folder-file-open";
-import { quoteNumberFromArchiveFileName } from "@/lib/domain/quote-archive-file-number";
+import { quoteArchiveNumberKey, quoteNumberFromArchiveFileName } from "@/lib/domain/quote-archive-file-number";
 import { isOpenableQuoteFolderFileName } from "@/lib/domain/quote-folder-file-link";
 import { compareShareFolderNames } from "@/lib/domain/share-folder-naming";
 import {
@@ -55,7 +55,8 @@ import type { QuoteIssueNoticeLine } from "./quote-issue-messages";
  *   · 줄 쪽   — 발행번호 `DSS 2026-078-3` → `2026-078-3`
  * 그 함수는 **번호 뒤에 공백**을 요구한다(실측의 오타 `DSS 2026-046- ICD …` 에서 사람이 적지
  * 않은 번호를 지어내지 않으려는 규칙이다). 발행번호는 번호에서 끝나므로 뒤에 꼬리 한 조각을
- * 붙여 **같은 규칙에 태운다**(아래 NUMBER_PROBE_TAIL — 붙이는 글자는 번호 뽑기에 쓰이지 않는다).
+ * 붙여 **같은 규칙에 태운다** — 그 일은 같은 모듈의 quoteArchiveNumberKey 가 한다(꼬리 상수도
+ * 그쪽에 한 벌만 있다. 붙이는 글자는 번호 뽑기에 쓰이지 않는다).
  * 그래서 공백 · 대소문자 · `DSS` 뒤 하이픈을 **양쪽이 똑같이** 접는다:
  *   · `DSS 2026-099` 와 `DSS-2026-099` 가 같은 번호다(함수의 `DSS[ -]`).
  *   · 두 칸 띄어쓰기 · NFD 한글 · 앞뒤 공백은 비교 전에 다듬어진다.
@@ -115,18 +116,15 @@ export const QUOTE_ARCHIVE_EXCEL_OPEN_BUTTON_TITLE =
 export const QUOTE_ARCHIVE_EXCEL_EXTENSIONS: readonly string[] = ["xlsx", "xls", "xlsm"];
 
 /**
- * 뽑는 함수의 「번호 뒤에 공백」 규칙에 맞추려고 발행번호 뒤에 붙이는 꼬리.
- * 사내 파일 이름의 기본 꼬리와 같은 글자라 붙여 놓으면 실제 파일 이름처럼 읽힌다.
- */
-const NUMBER_PROBE_TAIL = " 수리 견적서";
-
-/**
  * 그 줄의 발행번호에서 **견줄 번호**를 뽑는다. 못 뽑으면 null — 그때는 아무 파일도 고르지 않는다.
  * 🔴 파일 쪽과 **같은 함수**를 쓴다(머리말 「번호를 견주는 방식」).
+ *
+ * 🔴 셈 자체는 **도메인 한 곳**에 있다(domain/quote-archive-file-number.ts 의
+ * quoteArchiveNumberKey) — 2026-10-12 에 결재 탭의 공유폴더 거르기가 둘째 쓰는 곳이 되면서
+ * 올렸다. 여기 남은 이 이름은 **부르는 쪽을 한 글자도 안 바꾸려고** 둔 것이다.
  */
 export function quoteArchiveExcelNumberKey(quoteNumber: unknown): string | null {
-  if (typeof quoteNumber !== "string") return null;
-  return quoteNumberFromArchiveFileName(`${quoteNumber}${NUMBER_PROBE_TAIL}`);
+  return quoteArchiveNumberKey(quoteNumber);
 }
 
 /** 이름의 확장자를 접어서 돌려준다. 점이 없거나 맨 앞 · 맨 뒤면 null. */
