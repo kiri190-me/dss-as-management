@@ -1011,3 +1011,12 @@ src/lib/domain/share-folder-entry-filter.test.ts
 # 화면이 실제로 표를 그리는지(단추가 있는 줄과 없는 줄이 같은 자리인지 · [열기] 결과
 # 안내가 떠도 열이 안 밀리는지)는 components 목록의 네 시험이 그려 보고 잰다.
 src/lib/domain/share-folder-entry-meta.test.ts
+
+# 다른 사내 시스템이 읽어 가는 통로 셋 — `GET /api/v1/{intakes/{번호} · users · product-models}`.
+# 문지기(공유 토큰 `AS_API_TOKEN`)와 인수번호 모양 검사·응답 만들기는 DB 없이 그대로
+# 돌려 본다. 라우트 자체는 DB 를 부르므로(connection.ts 가 DATABASE_URL 없이 던진다)
+# 소스를 읽어 못 박는다 — 그 시험은 🔴 `[number]` 폴더 **밖**인 v1/ 바로 아래에 둔다
+# (대괄호를 글롭 문자클래스로 읽어 `tests 0` 으로 조용히 지나간다).
+src/lib/api/shared-token.test.ts
+src/lib/api/intake-lookup.test.ts
+src/app/api/v1/route-source.test.ts
