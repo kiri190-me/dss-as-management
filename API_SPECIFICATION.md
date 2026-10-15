@@ -134,7 +134,7 @@ DSS A/S 관리 시스템의 초기(Initial) REST API 엔드포인트 정의 문�
 | Method | Path | 설명 | 권한 |
 |---|---|---|---|
 | GET | /api/v1/intakes/{인수번호} | 인수번호 한 건 — 고객사 · End-User · 모델 · S/N · L/N (휴지통 제외) | 공유 토큰 |
-| GET | /api/v1/users | 결재자가 될 수 있는 사람 — id · 이름 · 메일 · 역할 | 공유 토큰 |
+| GET | /api/v1/users | 결재자가 될 수 있는 사람 — id · 이름 · 메일 · 역할 · 포털 번호(`ssoSubject`) | 공유 토큰 |
 | GET | /api/v1/product-models | 제품 모델 — id · 모델명 (지운 것 제외) | 공유 토큰 |
 
 요청/응답 모양, 인증 규칙, 오류 코드, 코드가 있는 자리는 **`API_FOR_INTERNAL_SYSTEMS.md`** 에 있다. 그 문서의 칸 이름이 다른 시스템과의 약속이므로 여기서 따로 적지 않는다(두 곳에 적으면 갈라진다).

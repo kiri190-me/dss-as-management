@@ -11,9 +11,19 @@ import { listSelectableApproverCandidates } from "@/lib/db/queries/shipment-appr
  * 사람이 한 명뿐이라 A/S 의 명부를 읽어 간다. 자격은 공유 토큰 하나다 —
  * `lib/api/shared-token.ts` 의 머리 주석.
  *
- *   200  { generatedAt, count, users: [{ id, name, email, role }] }  이름 순
+ *   200  { generatedAt, count, users: [{ id, name, email, role, ssoSubject }] }  이름 순
  *   401  { error: "unauthorized" }
  *   503  { error: "api_closed" }
+ *
+ * 🔴 **`ssoSubject` 가 받는 쪽이 사람을 알아보는 유일한 열쇠다.** 여기 `id` 는 A/S
+ * 안에서만 쓰는 번호라 재고 관리의 사람 번호와 맞지 않는다 — 재고 관리는 사람을
+ * 로그인 포털(dss-auth) 번호로 알고, A/S 가 그 번호를 적어 두는 칸이 `sso_subject`
+ * 하나다(`vendor/dss-core/src/schema/users.ts` 의 그 칸 주석). 메일로 잇지 않는
+ * 까닭도 거기 있다 — 사람은 메일을 바꿀 수 있다.
+ *
+ * 🔴 **`null` 을 감추지 않는다.** 포털로 한 번도 로그인한 적 없는 계정은 아직
+ * 안 이어져 이 값이 비어 있다. 빈 글자로 바꾸거나 그 사람을 목록에서 빼면 받는
+ * 쪽은 「안 이어진 사람」과 「없는 사람」을 구별하지 못하고 까닭도 알 수 없다.
  *
  * 🔴 **자격 규칙을 새로 쓰지 않는다.** `listSelectableApproverCandidates` 를 그대로
  * 부른다. 그 함수가 거는 넷(`approval_status = 'APPROVED'` · `is_active = true` ·
@@ -21,7 +31,7 @@ import { listSelectableApproverCandidates } from "@/lib/db/queries/shipment-appr
  * 글자 그대로 같고, 그 까닭이 그 함수 주석에 길게 적혀 있다. 여기서 베껴 쓰면
  * 두 곳이 언젠가 갈라지고, 그날 A/S 화면과 재고 화면이 다른 사람을 보여 준다.
  *
- * 🔴 **나가는 칸은 넷뿐이다** — id · 이름 · 메일 · 역할. 자격 판정과 달리 칸은
+ * 🔴 **나가는 칸은 다섯뿐이다** — id · 이름 · 메일 · 역할 · 포털 번호. 자격 판정과 달리 칸은
  * 여기서 **한 줄씩 다시 고른다.** 지금 그 함수가 고르는 칸이 마침 이 넷이지만,
  * 언젠가 화면이 전화번호 한 칸을 더 쓰려고 그 함수에 칸을 더하는 날 행을 그대로
  * 넘기고 있으면 **그 칸이 조용히 밖으로 나간다.** 개인정보가 나가는 자리는
@@ -40,6 +50,8 @@ export async function GET(request: NextRequest) {
     name: user.name,
     email: user.email,
     role: user.role,
+    // 비어 있으면 비어 있는 채로 내보낸다 — 위 머리말의 두 번째 🔴.
+    ssoSubject: user.ssoSubject,
   }));
 
   return NextResponse.json(

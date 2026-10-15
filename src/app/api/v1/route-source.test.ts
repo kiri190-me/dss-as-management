@@ -21,7 +21,8 @@ import { join } from "node:path";
  *  2. 🔴 토큰을 **쿼리 문자열로 받지 않는다.**
  *  3. 🔴 **읽기뿐이다** — POST·PATCH·PUT·DELETE 가 없다.
  *  4. 인수번호 통로는 휴지통을 거르는 **새 질의**를 쓴다.
- *  5. 사람 명부는 자격 규칙을 베끼지 않고 기존 함수를 부르며, 칸 넷만 내보낸다.
+ *  5. 사람 명부는 자격 규칙을 베끼지 않고 기존 함수를 부르며, 칸 다섯만 내보낸다
+ *     — 그중 포털 번호(`ssoSubject`)는 **빠져도 안 되고 `null` 을 감춰도 안 된다.**
  *  6. 모든 응답이 `cache-control: no-store`.
  * ============================================================================
  */
@@ -129,13 +130,35 @@ describe("사람 명부 통로", () => {
     }
   });
 
-  test("🔴 칸 넷만 내보낸다 — 개인정보가 넓게 나가지 않는다", () => {
+  test("🔴 칸 다섯만 내보낸다 — 개인정보가 넓게 나가지 않는다", () => {
     assert.match(body, /id: user\.id/);
     assert.match(body, /name: user\.name/);
     assert.match(body, /email: user\.email/);
     assert.match(body, /role: user\.role/);
-    for (const forbidden of ["phone", "department", "password", "passwordHash", "ssoSubject"]) {
+    for (const forbidden of ["phone", "department", "password", "passwordHash"]) {
       assert.ok(!body.includes(forbidden), `내보내면 안 되는 칸이 있다 — ${forbidden}`);
+    }
+  });
+
+  test("🔴 포털 번호를 함께 내보낸다 — 받는 쪽이 사람을 알아보는 유일한 열쇠다", () => {
+    // 여기 id 는 A/S 안에서만 쓰는 번호라 재고 관리의 사람 번호와 맞지 않는다.
+    // 이어 주는 칸은 sso_subject 하나뿐이고, 이 칸이 빠지면 받는 쪽은 목록을
+    // 받고도 누가 누구인지 가릴 수 없다.
+    assert.match(body, /ssoSubject: user\.ssoSubject/);
+  });
+
+  test("🔴 안 이어진 사람의 null 을 감추지 않는다 — 빈 글자로 바꾸거나 거르지 않는다", () => {
+    // 포털로 한 번도 로그인한 적 없는 계정은 sso_subject 가 비어 있다. 그것을
+    // 빈 글자로 덮으면 받는 쪽은 「안 이어진 사람」과 「이어졌는데 번호가 빈
+    // 사람」을 구별하지 못하고, 목록에서 빼 버리면 왜 안 보이는지도 알 수 없다.
+    for (const forbidden of [
+      "user.ssoSubject ??",
+      "user.ssoSubject ||",
+      "ssoSubject: user.ssoSubject ?",
+      "filter((user)",
+      ".filter(",
+    ]) {
+      assert.ok(!body.includes(forbidden), `null 을 감추거나 사람을 거르는 자리가 있다 — ${forbidden}`);
     }
   });
 });

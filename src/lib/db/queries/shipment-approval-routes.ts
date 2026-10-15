@@ -298,6 +298,17 @@ export type SelectableApproverCandidate = {
   name: string;
   email: string;
   role: Role;
+  /**
+   * 로그인 포털(dss-auth)에서의 그 사람 id. 이 칸은 **A/S 화면이 쓰지 않는다** —
+   * 이 목록을 읽어 가는 다른 사내 시스템(`GET /api/v1/users`)을 위한 칸이다.
+   * 재고 관리는 사람을 포털 번호로 알고, 여기 `id` 는 A/S 안에서만 쓰는 번호라
+   * 서로 맞지 않는다. 그 둘을 잇는 유일한 열쇠가 이 값이다
+   * (`vendor/dss-core/src/schema/users.ts` 의 `sso_subject` 주석).
+   *
+   * 🔴 **`null` 을 감추지 않는다.** 포털로 한 번도 로그인한 적 없는 계정은 아직
+   * 안 이어져 비어 있고, 받는 쪽은 「이 사람은 알아볼 수 없다」를 알아야 한다.
+   */
+  ssoSubject: string | null;
 };
 
 /**
@@ -333,6 +344,8 @@ export async function listSelectableApproverCandidates(): Promise<SelectableAppr
       name: users.name,
       email: users.email,
       role: users.role,
+      // 화면은 안 쓴다 — `GET /api/v1/users` 가 쓴다(위 타입의 주석).
+      ssoSubject: users.ssoSubject,
     })
     .from(users)
     .where(

@@ -60,21 +60,32 @@ Authorization: Bearer <AS_API_TOKEN>
 
 재고 관리로 옮긴 승인 절차(결재선) 화면의 고르개가 씁니다. 재고 관리에는 사람이 한 명뿐이라 A/S 의 명부를 읽어 갑니다.
 
+`ssoSubject` 는 통로를 연 당일(2026-10-15) 뒤이어 더한 칸입니다 — 그 전 모양(칸 넷)으로 맞춰 둔 쪽은 이 칸을 읽도록 고쳐야 사람을 알아볼 수 있습니다.
+
 ```json
 {
   "generatedAt": "2026-10-15T05:12:00.000Z",
   "count": 12,
   "users": [
-    { "id": "9f1c…", "name": "홍길동", "email": "hong@dss21.com", "role": "AS_ENGINEER" }
+    {
+      "id": "9f1c…",
+      "name": "홍길동",
+      "email": "hong@dss21.com",
+      "role": "AS_ENGINEER",
+      "ssoSubject": "bd06ad30-…"
+    },
+    { "id": "4a2d…", "name": "김철수", "email": "kim@dss21.com", "role": "SALES", "ssoSubject": null }
   ]
 }
 ```
 
 - 이름 순. 이름이 같으면 id 순입니다.
 - 🔴 **자격 규칙은 A/S 의 기존 함수**(`listSelectableApproverCandidates`)가 정합니다 — `approval_status = 'APPROVED'` · `is_active = true` · `locked_at IS NULL` · `is_deleted = false` 넷. 출하 대표로 지정할 수 있는 조건과 글자 그대로 같고, 까닭은 `src/lib/db/queries/shipment-approval-routes.ts` 의 주석에 있습니다. **역할 제한은 없습니다.**
-- 🔴 **칸은 넷뿐입니다.** 전화번호·부서·비밀번호 관련 칸은 내주지 않습니다.
+- 🔴 **칸은 다섯뿐입니다.** 전화번호·부서·비밀번호 관련 칸은 내주지 않습니다.
 - `role` 은 A/S 의 역할 코드(`SUPER_ADMIN` · `ADMIN` · `AS_ENGINEER` · `SALES` · `INVENTORY_MANAGER`)입니다. 화면에 보일 이름은 시스템마다 다를 수 있으므로 그쪽에서 바꿔 씁니다.
-- `id` 는 A/S 의 `users.id`(UUID)입니다. 포털 쪽 `sub` 가 아닙니다.
+- `id` 는 A/S 의 `users.id`(UUID)입니다. 포털 쪽 `sub` 가 **아닙니다** — A/S 안에서만 쓰는 번호라 그쪽 사람 번호와 맞지 않습니다.
+- 🔴 **사람을 알아보는 열쇠는 `ssoSubject` 입니다.** 로그인 포털(dss-auth)에서의 그 사람 id(= ID 토큰의 `sub`)이고, A/S 와 포털을 잇는 칸은 이것 하나뿐입니다. **메일로 잇지 마세요** — 사람은 메일을 바꿀 수 있어서 신원을 고정하지 못합니다.
+- 🔴 **`ssoSubject` 는 `null` 일 수 있고, 그대로 내보냅니다.** 포털로 한 번도 로그인한 적 없는 계정은 아직 안 이어져 있습니다. 빈 글자로 바꾸거나 그 사람을 목록에서 빼지 않습니다 — 받는 쪽이 「이 사람은 아직 알아볼 수 없다」를 알아야 하기 때문입니다. 받는 쪽에서는 그런 줄을 **고를 수 없게 막고 까닭을 보여 주세요**(그 사람이 포털로 한 번 로그인하면 이어집니다).
 
 ## 4. 제품 모델 목록 — `GET /api/v1/product-models`
 
