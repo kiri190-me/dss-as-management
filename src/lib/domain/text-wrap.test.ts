@@ -77,6 +77,93 @@ test("맨 앞 공백(글머리표 들여쓰기)은 살리고, 넘어가는 자�
   for (const line of lines) assert.ok(textDisplayWidth(line) <= 12);
 });
 
+/**
+ * ============================================================================
+ * 🔴 어쩔 수 없이 자를 때의 네 규칙 (2026-10-15)
+ * ============================================================================
+ * 「줄바꿈이 자연스럽지 않다」를 받고 실측한 자리들이다. 넷 다 **공백이 없는
+ * 글**에서만 나온다 — 공백이 있으면 낱말째 넘기므로 애초에 해당이 없다.
+ * 아래 시험은 규칙을 **하나씩** 못 박는다. 하나를 꺼도 나머지는 그대로 통과해야
+ * 어느 규칙이 깨졌는지 시험만 보고 알 수 있다.
+ *
+ * 🔴 글은 전부 지어낸 것이다 — 실제 고객사·모델·S/N 이 아니다.
+ * ============================================================================
+ */
+
+test("🔴 규칙 1 — 낱말 가운데를 자르지 않는다(양식의 실제 폭 75칸)", () => {
+  const lines = wrapTextToWidth(
+    "전원부 입력 퓨즈가 단선되어 있었고, 정류 다이오드 두 개가 쇼트된 상태였으며, 냉각팬 베어링에서 소음이 발생하여, 해당 부품을 모두 교체하였습니다.",
+    75
+  );
+  assert.deepEqual(lines, [
+    "전원부 입력 퓨즈가 단선되어 있었고, 정류 다이오드 두 개가 쇼트된",
+    "상태였으며, 냉각팬 베어링에서 소음이 발생하여, 해당 부품을 모두",
+    "교체하였습니다.",
+  ]);
+  // 나뉜 줄을 공백으로 다시 이으면 원래 문장이다 — 낱말이 쪼개졌다면 안 맞는다.
+  assert.equal(
+    lines.join(" "),
+    "전원부 입력 퓨즈가 단선되어 있었고, 정류 다이오드 두 개가 쇼트된 상태였으며, 냉각팬 베어링에서 소음이 발생하여, 해당 부품을 모두 교체하였습니다."
+  );
+});
+
+test("🔴 규칙 2 — 쉼표·마침표는 그 뒤에서 끊는다(다음 줄 머리에 두지 않는다)", () => {
+  // 공백이 없어 어쩔 수 없이 자르는 글. 폭 10칸이면 「가나다라마」까지가 꽉 찬
+  // 자리인데, 바로 다음 글자가 쉼표다 — 그대로 두면 둘째 줄이 `,` 로 시작한다.
+  const lines = wrapTextToWidth("가나다라마,바사아자차카타", 10);
+  assert.deepEqual(lines, ["가나다라", "마,바사아", "자차카타"]);
+  for (const line of lines) {
+    assert.equal(/^[,.;:!?)\]}>、。，．：；！？）］｝〉》」』…·・]/u.test(line), false, `"${line}" 이 부호로 시작한다`);
+    assert.ok(textDisplayWidth(line) <= 10);
+  }
+
+  // 마침표·닫는 괄호도 같다.
+  for (const mark of [".", ")", "，"]) {
+    for (const line of wrapTextToWidth(`가나다라마${mark}바사아자차카타`, 10).slice(1)) {
+      assert.equal(line.startsWith(mark), false, `"${line}" 이 ${mark} 로 시작한다`);
+    }
+  }
+});
+
+test("🔴 규칙 3 — 꼬리만 남기지 않는다(「니다」·「고,」 같은 토막)", () => {
+  // 폭 10칸에 한글 여섯 자. 꽉 채우면 마지막 줄에 「바」 한 자만 남는다.
+  assert.deepEqual(wrapTextToWidth("가나다라마바", 10), ["가나다", "라마바"]);
+  // 두 자(4칸)도 토막이다 — 「니다」가 4칸이다.
+  assert.deepEqual(wrapTextToWidth("가나다라마바사", 10), ["가나다라", "마바사"]);
+  // 세 자(6칸)부터는 토막이 아니므로 앞줄을 꽉 채운 그대로 둔다.
+  assert.deepEqual(wrapTextToWidth("가나다라마바사아", 10), ["가나다라마", "바사아"]);
+});
+
+test("🔴 규칙 4 — 영문·숫자 덩어리 가운데를 자르지 않는다", () => {
+  // `13.56MHz` 의 점은 문장부호가 아니라 수의 일부다. 예전에는 여기서 끊어
+  // 「13.」 / 「56MHz」 가 됐다.
+  assert.deepEqual(wrapTextToWidth("출력은13.56MHz이다", 12), ["출력은", "13.56MHz이다"]);
+  // 모델명의 붙임표도 같다 — 「RF-」 / 「3000B」 가 되면 다른 물건으로 읽힌다.
+  assert.deepEqual(wrapTextToWidth("형식은RF-3000B이다", 12), ["형식은", "RF-3000B이다"]);
+  // 치수도 가운데가 갈라지지 않는다.
+  for (const line of wrapTextToWidth("정격은250V10A이고정상이다", 12)) {
+    assert.equal(/\d$/u.test(line) && line.endsWith("250V1"), false, `"${line}"`);
+    assert.ok(textDisplayWidth(line) <= 12);
+  }
+});
+
+test("🔴 덩어리가 한 줄보다 길면 어쩔 수 없이 쪼갠다 — 그때는 붙임표 다음을 쓴다", () => {
+  /**
+   * 규칙 4를 **지킬 수 없는** 경우다. 이 덩어리는 줄보다 길어 어차피 쪼개진다 —
+   * 그런데도 「안을 끊지 마라」로 묶으면 끊을 자리가 통째로 사라져 마지막 줄에
+   * 글자 하나만 남는다(`…REPLACEMEN` / `T`). 그래서 쪼갤 수밖에 없는 덩어리는
+   * 안의 붙임표를 다시 끊을 자리로 쓴다.
+   */
+  const lines = wrapTextToWidth(
+    "POWER-MODULE-ASSY-RFK300FH-JS1-REV2/CONNECTOR-KIT-AB-1200-SERIES-REPLACEMENT",
+    75
+  );
+  assert.deepEqual(lines, [
+    "POWER-MODULE-ASSY-RFK300FH-JS1-REV2/CONNECTOR-KIT-AB-1200-SERIES-",
+    "REPLACEMENT",
+  ]);
+});
+
 test("줄 폭이 2보다 작으면 짐작하지 않고 던진다", () => {
   assert.throws(() => wrapTextToWidth("가", 1), /줄 폭은 2 이상/);
   assert.throws(() => wrapTextToWidth("가", Number.NaN), /줄 폭은 2 이상/);

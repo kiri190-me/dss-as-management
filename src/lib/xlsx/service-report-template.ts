@@ -1394,8 +1394,14 @@ function fillSheet(
   /**
    * 🔴 한 줄이 칸의 가로폭을 넘지 않게 먼저 나눈다. **줄 수를 셈하기 전에**
    * 해야 한다 — 나눈 뒤의 줄 수가 곧 필요한 행 수다.
+   *
+   * 🔴 양식에서 읽은 열 너비는 **기본 글꼴 기준**이라 그대로 쓰면 안 된다.
+   * 본문 칸에 박힌 글꼴(맑은 고딕 9pt)이 더 작아 같은 자리에 더 들어간다 —
+   * `contentWrapWidth` 가 그 환산이다.
    */
-  const lineWidth = readColumnRangeWidth(evened, block.contentColumn, block.contentEndColumn);
+  const lineWidth = contentWrapWidth(
+    readColumnRangeWidth(evened, block.contentColumn, block.contentEndColumn)
+  );
   const sections = bodySections(input).map((section) => ({
     labelLines: section.labelLines,
     lines: section.lines.flatMap((line) => splitBodyLine(line, lineWidth)),
@@ -1897,11 +1903,79 @@ function findContentEndColumn(sheetXml: string, row: number, contentColumn: stri
 }
 
 /**
+ * ────────────────────────────────────────────────────────────────────────
+ * 🔴 양식에 박힌 글꼴을 재서 굳힌 값 (2026-10-15 실측 · 수리·검사 양식 같음)
+ * ────────────────────────────────────────────────────────────────────────
+ * 엑셀의 열 너비 단위는 「**통합문서 기본 글꼴**로 `0` 을 몇 자 넣을 수 있는가」다.
+ * 그런데 본문·비고 칸에 박힌 글꼴은 기본 글꼴이 **아니다**:
+ *
+ *   · 기본 글꼴 — `styles.xml` 의 `fonts[0]`(「표준」 스타일) = **ＭＳ Ｐゴシック 11pt**
+ *   · 본문 `H31:AU31`~`H59:AU59`, 비고 `H60:AF60`~`H63:AF63`
+ *     — 둘 다 같은 서식 글꼴 = **맑은 고딕 9pt**
+ *
+ * 그래서 `readColumnRangeWidth` 가 돌려주는 「75칸」은 **본문 글꼴 75자가 아니다.**
+ * 글자가 더 작으니 같은 자리에 더 들어간다. 그 차이를 안 보고 75 를 그대로 줄
+ * 폭으로 쓰면 **실제보다 일찍 줄이 바뀌어** 칸이 덜 찬 채로 인쇄된다
+ * (2026-10-15 사용자 지적: 「엑셀 칸 너비 정도로 맞춰 달라」).
+ *
+ * ── 글자 폭 실측 (Windows 11 · 96dpi · GDI 보냄폭) ──────────────────────
+ *   ＭＳ Ｐゴシック 11pt  `0` = **8px**   ← 열 너비 한 칸의 정체
+ *   맑은 고딕 9pt        `0` = **7px**,  한글 음절 = **12px**
+ *
+ * 🔴 한글은 숫자의 **1.71배**다 — **2배가 아니다.** `text-wrap.ts` 는 한글을
+ * 2칸으로 세므로 **한글은 재어 보면 늘 모자라게 센다(16.7%).** 그 16.7% 가 곧
+ * 안전 여백이다 — 지어낸 값이 아니라 글꼴에서 나온 값이다.
+ *
+ * ── 안전 여백을 한 자 더 둔다 ───────────────────────────────────────────
+ * 위의 16.7% 는 **한글에만** 붙는다. 숫자만 있는 줄은 1칸이 그대로 1자라 여백이
+ * 0 이 된다. 그래서 `SAFETY_PX`(숫자 한 자)를 더 뺀다 — 넘치는 쪽으로 틀어지면
+ * 인쇄물이 잘리고, 덜 차는 쪽은 보기만 나쁘다.
+ */
+const SERVICE_REPORT_FONT_METRICS = {
+  /** 통합문서 기본 글꼴(ＭＳ Ｐゴシック 11pt)의 `0` — 열 너비 한 칸이 이것이다. */
+  normalDigitPx: 8,
+  /** 본문·비고 칸 글꼴(맑은 고딕 9pt)의 `0` — 우리가 세는 한 칸이 이것이다. */
+  contentDigitPx: 7,
+  /** 엑셀이 열 너비 식에 넣는 셀 안쪽 여백(좌 2 + 우 2 + 눈금선 1). */
+  cellPaddingPx: 5,
+  /** 🔴 안전 여백 — 본문 글꼴 숫자 한 자. 위 머리말의 까닭. */
+  safetyPx: 7,
+} as const;
+
+/**
+ * 🔴 엑셀 열 너비 합(기본 글꼴 기준)을 **본문 글꼴 기준 줄 폭**으로 바꾼다.
+ *
+ *   픽셀      = 열 너비 합 × 8
+ *   줄 폭     = ⌊(픽셀 − 5 − 7) ÷ 7⌋
+ *
+ * 이 양식에서는 이렇게 나온다:
+ *   · 본문 `H:AU` 75칸  → 600px → **84칸**(한글 42자). 엑셀이 실제로 담는 양은
+ *     한글 49자((600−5)÷12)이므로 42자는 그보다 **덜 차는 쪽**이다.
+ *   · 비고 `H:AF` 46.875칸 → 375px → **51칸**(한글 25자). 비고는 아직 나누지
+ *     않지만(줄 수를 넘으면 던진다) 나눌 날의 값이 이것이다.
+ *
+ * 순수 함수다 — 글꼴을 재지 않고 위에 굳힌 상수만 쓴다.
+ */
+export function contentWrapWidth(columnWidth: number): number {
+  const { normalDigitPx, contentDigitPx, cellPaddingPx, safetyPx } = SERVICE_REPORT_FONT_METRICS;
+  const usablePx = columnWidth * normalDigitPx - cellPaddingPx - safetyPx;
+  const width = Math.floor(usablePx / contentDigitPx);
+  // 🔴 `wrapTextToWidth` 는 2칸 미만을 거절한다. 양식이 망가져도 그 앞에서 막는다.
+  if (!(width >= 2)) {
+    throw new Error(`본문 칸이 너무 좁습니다: 열 너비 ${columnWidth} → ${width}칸`);
+  }
+  return width;
+}
+
+/**
  * 🔴 `startColumn` ~ `endColumn` 이 몇 칸인가 — **양식의 `<cols>` 에서 읽는다.**
  *
  * 이 양식은 `<col min="8" max="47" width="1.875"/>` 라 `H`~`AU` 40열이 75칸이다.
  * 75 를 코드에 박으면 사람이 양식의 열 너비를 고치는 날 줄이 어긋나고, 그때
  * 증상은 "어떤 보고서만 글자가 칸 밖으로 흘러나온다" 라서 아무도 못 잡는다.
+ *
+ * ⚠️ 돌려주는 값은 **기본 글꼴 기준**이다. 줄을 나누기 전에 반드시
+ * `contentWrapWidth` 로 본문 글꼴 기준으로 바꿔라.
  */
 export function readColumnRangeWidth(
   sheetXml: string,

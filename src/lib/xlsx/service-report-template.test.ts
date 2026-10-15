@@ -16,6 +16,7 @@ import { textDisplayWidth } from "@/lib/domain/text-wrap";
 import { translateKyosanTerm } from "@/lib/kyosan/report-terms";
 import {
   clearDrawingTextInRows,
+  contentWrapWidth,
   fillServiceReportWorkbook,
   findBodyBlock,
   findLabelledBlock,
@@ -86,6 +87,12 @@ test("본문 자리는 양식의 글자수 도우미(LEN 공유 수식)가 알�
   });
 });
 
+/**
+ * 🔴 본문 한 줄의 실제 폭. `readColumnRangeWidth` 가 읽는 75칸은 **기본 글꼴**
+ * 기준이고, 본문 칸에 박힌 글꼴은 더 작아서 같은 자리에 더 들어간다.
+ */
+const BODY_WRAP_WIDTH = contentWrapWidth(75);
+
 test("🔴 한 줄의 폭은 양식의 <cols> 에서 읽는다 — 코드에 박지 않는다", () => {
   // H~AU 40열 × 1.875 = 75칸.
   assert.equal(readColumnRangeWidth(SYNTHETIC_SHEET, "H", "AU"), 75);
@@ -98,6 +105,31 @@ test("🔴 한 줄의 폭은 양식의 <cols> 에서 읽는다 — 코드에 박
   // <cols> 에 없는 열은 기본 너비로 센다.
   const noCols = SYNTHETIC_SHEET.replace(/<cols>[\s\S]*?<\/cols>/, "");
   assert.equal(readColumnRangeWidth(noCols, "H", "I"), 8.43 * 2);
+});
+
+test("🔴 줄 폭은 기본 글꼴이 아니라 **칸에 박힌 글꼴** 기준으로 환산한다", () => {
+  /**
+   * 2026-10-15 실측값을 못 박는다. 누가 상수를 건드리면 여기가 먼저 깨진다.
+   *   본문 H:AU  75칸      × 8px = 600px → ⌊(600−5−7)÷7⌋ = 84칸(한글 42자)
+   *   비고 H:AF  46.875칸  × 8px = 375px → ⌊(375−5−7)÷7⌋ = 51칸(한글 25자)
+   */
+  assert.equal(contentWrapWidth(75), 84);
+  assert.equal(contentWrapWidth(46.875), 51);
+
+  // 🔴 기본 글꼴 기준 값보다 **넓어야** 한다 — 그래야 칸이 찬다.
+  assert.ok(contentWrapWidth(75) > 75, "환산이 오히려 좁아졌다");
+
+  /**
+   * 🔴 그래도 엑셀이 실제로 담는 양보다는 **좁아야** 한다. 한글 음절은 맑은
+   * 고딕 9pt 에서 12px 이므로 (600−5)÷12 = 49자가 진짜 용량이다.
+   */
+  assert.ok(Math.floor(contentWrapWidth(75) / 2) < Math.floor((75 * 8 - 5) / 12));
+
+  // 양식의 열 너비가 바뀌면 줄 폭도 따라간다. ⌊(150×8−12)÷7⌋ = 169.
+  assert.equal(contentWrapWidth(150), 169);
+
+  // 칸이 말이 안 되게 좁으면 파일을 만들기 전에 던진다.
+  assert.throws(() => contentWrapWidth(1), /본문 칸이 너무 좁습니다/);
 });
 
 test("본문 도우미가 없거나 여럿이면 짐작하지 않고 던진다", () => {
@@ -1645,7 +1677,7 @@ for (const total of [40, 60]) {
 }
 
 test("🔴 폭을 넘는 긴 줄은 낱말을 자르지 않고 나뉜다", { skip: skipRepair }, () => {
-  // H~AU 40열 × 1.875 = 75칸. 한글 38자면 76칸이라 한 줄에 못 들어간다.
+  // H~AU 40열 × 1.875 = 75칸 → 본문 글꼴 기준 84칸(`BODY_WRAP_WIDTH`).
   const long =
     "출력이 나오지 않는다는 연락을 받아 현지에서 확인한 결과 전원부 퓨즈가 단선되어 있었고 " +
     "정합기 연결부의 접촉 불량이 함께 발견되어 두 곳을 모두 손보았습니다.";
@@ -1670,7 +1702,10 @@ test("🔴 폭을 넘는 긴 줄은 낱말을 자르지 않고 나뉜다", { ski
   }
   assert.ok(written.length > 1, "긴 줄이 나뉘지 않았다");
   for (const line of written) {
-    assert.ok(textDisplayWidth(line) <= 75, `"${line}" 이 75칸을 넘는다`);
+    assert.ok(
+      textDisplayWidth(line) <= BODY_WRAP_WIDTH,
+      `"${line}" 이 ${BODY_WRAP_WIDTH}칸을 넘는다`
+    );
   }
   // 낱말을 자르지 않았으므로 공백만 빼면 원문 그대로다.
   assert.equal(written.join("").replace(/\s/gu, ""), long.replace(/\s/gu, ""));
@@ -1866,11 +1901,14 @@ test("확인내용이 비어 있으면 정형 문구만 남지 않는다", { ski
 });
 
 test("🔴 정형 문구도 폭을 넘으면 본문 줄과 같은 규칙으로 나뉜다", { skip: skipInspection }, () => {
-  // H~AU 는 75칸이다. 아래 문장은 그보다 길다.
+  // 아래 문장은 본문 한 줄(`BODY_WRAP_WIDTH`)보다 길다.
   const long =
     "인수품에 대하여 이하의 항목을 확인하였습니다. " +
     "아울러 반입 시 외관과 부속품 구성까지 함께 확인하였음을 알려 드립니다.";
-  assert.ok(textDisplayWidth(long) > 75, "시험 준비 실패 — 문장이 한 줄에 들어간다");
+  assert.ok(
+    textDisplayWidth(long) > BODY_WRAP_WIDTH,
+    "시험 준비 실패 — 문장이 한 줄에 들어간다"
+  );
 
   const filled = fill(inspectionPath as string, {
     ...INSPECTION_INPUT,
@@ -1893,7 +1931,10 @@ test("🔴 정형 문구도 폭을 넘으면 본문 줄과 같은 규칙으로 �
   }
   assert.ok(written.length > 2, "정형 문구가 나뉘지 않았다");
   for (const line of written) {
-    assert.ok(textDisplayWidth(line) <= 75, `"${line}" 이 75칸을 넘는다`);
+    assert.ok(
+      textDisplayWidth(line) <= BODY_WRAP_WIDTH,
+      `"${line}" 이 ${BODY_WRAP_WIDTH}칸을 넘는다`
+    );
   }
   // 낱말을 자르지 않았으므로 공백만 빼면 문구 + 확인 항목 그대로다.
   assert.equal(
