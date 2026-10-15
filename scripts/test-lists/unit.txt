@@ -1020,3 +1020,6 @@ src/lib/domain/share-folder-entry-meta.test.ts
 src/lib/api/shared-token.test.ts
 src/lib/api/intake-lookup.test.ts
 src/app/api/v1/route-source.test.ts
+src/lib/domain/inventory-gateway.test.ts
+src/lib/domain/inventory-stock-request-cart.test.ts
+src/lib/server/inventory-gateway.test.ts

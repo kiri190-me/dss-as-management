@@ -275,6 +275,32 @@ export async function getProductModelIdForProduct(productId: string): Promise<st
   return rows[0]?.productModelId ?? null;
 }
 
+/**
+ * 이 수리 건의 **인수번호** 하나. 재고 관리에 부품 반출 신청을 올릴 때 쓴다
+ * (`src/lib/server/actions/inventory-stock-requests.ts`) — 저쪽 통로는 인수번호를
+ * 반드시 받고, 올린 신청을 되읽을 때도 그 번호로 묻는다(재고 API.md 4-7절).
+ *
+ * 🔴 **화면이 보낸 값을 믿지 않으려고 둔다.** 인수번호는 그 신청이 어느 장비의 것인지를
+ * 정하는 값이라, 브라우저가 적어 보내게 두면 남의 건에 부품을 달아 놓을 수 있다. 액션이
+ * 건 id 만 받아 **여기서 다시 읽는다.**
+ *
+ * 지워진 건은 `null` 이다 — 휴지통에 든 건으로 새 반출 신청을 세우지 않는다
+ * (`findIntakeForExternalLookup` 이 같은 잣대를 쓴다).
+ */
+export async function getIntakeNumberForRepairCase(id: string): Promise<string | null> {
+  if (!UUID_PATTERN.test(id)) {
+    return null;
+  }
+
+  const rows = await db
+    .select({ intakeNumber: repairCases.intakeNumber })
+    .from(repairCases)
+    .where(and(eq(repairCases.id, id), eq(repairCases.isDeleted, false)))
+    .limit(1);
+
+  return rows[0]?.intakeNumber ?? null;
+}
+
 export type RepairCaseEditGuard = { id: string; isLocked: boolean };
 
 /**

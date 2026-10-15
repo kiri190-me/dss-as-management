@@ -523,3 +523,4 @@ src/components/repair-cases/report/ServiceReportFolderSection.test.tsx
 # (쓰는 길이 쓴 두 함수가 그대로 짓는다) · 🔴 읽고 여는 것뿐이다(원본에 만들기·쓰기·
 # 지우기가 없다) · 두 번 눌러도 두 번 안 열린다 · Windows 가 아니면 단추가 아예 없다.
 src/components/repair-cases/report/service-report-excel-open.test.ts
+src/components/inventory/part-request-section-wiring.test.ts

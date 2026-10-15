@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import type { OhTemplateRow } from "@/lib/db/queries/oh-part-templates";
 import LoadingNotice from "@/components/domain/LoadingNotice";
 import ExceptionStatusNotice from "@/components/repair-cases/detail/ExceptionStatusNotice";
 import IntakeInfoSection from "@/components/repair-cases/detail/IntakeInfoSection";
@@ -17,9 +16,14 @@ import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-reference
 import { editableFieldsForRoleInSection, isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
 import PartRequestSection from "@/components/inventory/PartRequestSection";
-import type { PartListRow, PartPickerRow } from "@/lib/db/queries/inventory";
-import type { OwnPartRequestRow, RequestCaseContext } from "@/lib/db/queries/inventory-part-requests";
-import type { StockOwner } from "@/lib/domain/inventory-types";
+import type { PartPickerRow } from "@/lib/db/queries/inventory";
+import type { RequestCaseContext } from "@/lib/db/queries/inventory-part-requests";
+import type {
+  InventoryOhTemplate,
+  InventoryPart,
+  InventoryResult,
+  InventoryStockRequest,
+} from "@/lib/domain/inventory-gateway";
 import type { DerivedServiceSummary } from "@/lib/db/queries/repair-case-work-records";
 import PendingBillingDecisionCard from "@/components/repair-cases/detail/PendingBillingDecisionCard";
 import UsedPartsSection from "@/components/repair-cases/detail/UsedPartsSection";
@@ -83,14 +87,23 @@ export default function RepairCaseDetailView({
   productModelLinkId: string | null;
   actingUser: ActingUser | null;
   referenceData: IntakeReferenceData | null;
-  /** Phase 5B-3 — only populated for an AS_ENGINEER viewing a DATABASE-backed case, see [id]/page.tsx. */
+  /**
+   * 「부품 요청」 칸의 재료. 부품 요청 쓰기 권한이 있는 사람이 DATABASE 소스 건을 볼 때만
+   * 채워진다, see [id]/page.tsx.
+   *
+   * 🔴 **2026-10-15 부터 전부 재고 관리에서 온다** — A/S 제 표를 읽지 않는다. 그래서 세 칸이
+   * `InventoryResult` 다: 「없다」와 **「못 받아 왔다」**가 다른 값이어야 화면이 빈 목록을
+   * 「재고에 하나도 없다」로 그리지 않는다.
+   */
   partRequestData: {
     caseContext: RequestCaseContext | null;
-    availableParts: PartListRow[];
-    /** 이 장비 모델에 이어진 O/H 부품 템플릿. 없으면 null 이다. */
-    ohTemplate: OhTemplateRow | null;
-    ownerAvailabilityByPartId: Record<string, Partial<Record<StockOwner, number>>>;
-    ownRequests: OwnPartRequestRow[];
+    parts: InventoryResult<InventoryPart[]>;
+    /** 🔵 `value: null` 은 **이어 둔 템플릿이 없다**는 뜻이고 오류가 아니다. */
+    ohTemplate: InventoryResult<InventoryOhTemplate | null>;
+    /** 🔵 누가 올렸든 이 건의 반출 신청 전부(재고 관리에서 직접 올린 것까지). */
+    requests: InventoryResult<InventoryStockRequest[]>;
+    /** 포털 번호가 없는 사람은 올릴 수 없다 — 까닭을 그대로 들고 온다. */
+    requesterGate: { ok: true } | { ok: false; message: string };
   } | null;
   /** record_kind 분류 체크포인트 — DATABASE 소스 건에만 존재, see [id]/page.tsx. */
   derivedServiceSummary: DerivedServiceSummary | null;
@@ -238,10 +251,10 @@ export default function RepairCaseDetailView({
       {partRequestData && partRequestData.caseContext && (
         <PartRequestSection
           repairCaseId={partRequestData.caseContext.id}
-          availableParts={partRequestData.availableParts}
+          parts={partRequestData.parts}
           ohTemplate={partRequestData.ohTemplate}
-          ownerAvailabilityByPartId={partRequestData.ownerAvailabilityByPartId}
-          ownRequests={partRequestData.ownRequests}
+          requests={partRequestData.requests}
+          requesterGate={partRequestData.requesterGate}
         />
       )}
     </div>

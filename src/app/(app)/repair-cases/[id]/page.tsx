@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { findOhTemplateForRepairCase } from "@/lib/db/queries/oh-part-templates";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
@@ -14,13 +13,8 @@ import {
   getProductModelIdForProduct,
   listRepairCasesByProductId,
 } from "@/lib/db/queries/repair-cases";
-import {
-  getPartList,
-  getPartOwnerAvailability,
-  getPartPickerList,
-  groupPartOwnerAvailability,
-} from "@/lib/db/queries/inventory";
-import { getRequestCaseContext, getOwnPartRequestsForCase } from "@/lib/db/queries/inventory-part-requests";
+import { getPartPickerList } from "@/lib/db/queries/inventory";
+import { loadPartRequestSectionData } from "@/lib/server/part-request-section-data";
 import {
   getDerivedServiceSummariesForCases,
   getDerivedServiceSummaryForCase,
@@ -129,22 +123,22 @@ export default async function RepairCaseDetailPage({
   // 그 약속에서 빠져 있었다 — 저장하는 쪽은 이미 hasPermission 을 보고
   // 있어서, 역할별 접근 권한에서 '부품 요청'을 쓰기로 올려도 **칸 자체가
   // 그려지지 않아** 올릴 방법이 없었다(2026-08-28).
+  //
+  // ── 🔴 2026-10-15: 이 칸의 재료는 **재고 관리**에서 온다 ────────────────
+  // 부품 목록 · O/H 템플릿 · 올린 신청이 전부 저쪽 통로에서 온다(A/S 의 재고 표는
+  // 운영에서 쓰이지 않고 있었고, 다음 조각에서 걷어낸다). 🔴 **못 받아 온 것을 빈
+  // 목록으로 바꾸지 않는다** — 그러면 화면이 「재고에 부품이 하나도 없다」고
+  // 거짓말한다(lib/server/inventory-gateway.ts 머리말).
   const partRequestData =
     isDatabaseBacked &&
     actingUser !== null &&
     (await hasPermission(actingUser, "inventory.requests", "WRITE"))
-      ? {
-          caseContext: await getRequestCaseContext(resolved.id),
-          availableParts: await getPartList(),
-          // 이 장비 모델에 이어진 O/H 템플릿. 없으면 null 이고, 그때는 화면이
-          // 일괄 담기 단추를 그리지 않는다.
-          ohTemplate: await findOhTemplateForRepairCase(id),
-          // 소유구분-scoped 가용 수량 checkpoint — grouped by (part, owner);
-          // a missing (partId, owner) entry means 0, never "unknown" (see
-          // getPartOwnerAvailability's doc comment).
-          ownerAvailabilityByPartId: groupPartOwnerAvailability(await getPartOwnerAvailability()),
-          ownRequests: await getOwnPartRequestsForCase(resolved.id, actingUser.id),
-        }
+      ? await loadPartRequestSectionData({
+          repairCaseId: resolved.id,
+          intakeNumber: resolved.intakeNumber,
+          productId: resolved.productId,
+          actingUserId: actingUser.id,
+        })
       : null;
 
   // 고장 및 서비스 정보의 3개 요약 필드(인수점검 결과/현재 진단·조치 요약/

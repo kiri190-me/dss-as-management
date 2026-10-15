@@ -1,0 +1,320 @@
+import { describe, test } from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  CHARGE_TYPE_LABELS,
+  MAX_STOCK_REQUEST_LINES,
+  filterInventoryParts,
+  inventoryPartNoteFirstLine,
+  inventoryUnreachableMessage,
+  isChargeType,
+  isValidRequestKey,
+  parseInventoryOhTemplateResponse,
+  parseInventoryPartsResponse,
+  parseInventoryStockRequestsResponse,
+  parseStockRequestLines,
+  type InventoryPart,
+} from "./inventory-gateway";
+
+/**
+ * ============================================================================
+ * 재고 관리에서 받아 온 것을 읽는 규칙 (2026-10-15)
+ * ============================================================================
+ * 🔴 여기서 지키는 가장 큰 것: **「모양이 아니다」와 「하나도 없다」가 다른 값이어야 한다.**
+ *    파서가 둘을 뭉개 빈 배열을 돌려주면 부르는 쪽이 「못 받아 왔다」로 바꿀 길이 사라지고,
+ *    화면은 재고가 멀쩡한데도 「재고에 부품이 하나도 없다」고 말한다.
+ *
+ * 🔴 두 번째: **유상/무상이 빠지면 올라가지 않는다.** 청구에 걸리는 값이라 저쪽 통로도
+ *    기본값으로 채워 주지 않고 400 으로 거절한다. 화면과 서버 액션이 **같은 함수**를 쓰므로
+ *    이 시험 하나가 두 자리를 함께 덮는다.
+ *
+ * 값은 전부 지어낸 것이다 — 실제 고객사 · 모델 · L/N · S/N 을 적지 않는다(공개 저장소).
+ * ============================================================================
+ */
+
+const PARTS_BODY = {
+  generatedAt: "2026-10-15T05:12:00.000Z",
+  count: 2,
+  parts: [
+    {
+      no: 11,
+      name: "AMP-TEST-A1",
+      name2: "규격 A",
+      customerName: "증폭기 조립품",
+      kyosanPartNo: "C000000001",
+      drawingNo: "WR00000AA001A",
+      quantity: 7,
+      note: "수리소 관리용\n두 번째 줄",
+      item: { code: "PCB", name: "PCB" },
+      category: { code: "RFG", label: "RFG" },
+      owner: { code: "SERVICE_SPARE", label: "보수부재" },
+      updatedAt: "2026-10-06T03:00:00.000Z",
+    },
+    {
+      no: 12,
+      name: "VVC-TEST-B2",
+      name2: "",
+      customerName: "",
+      kyosanPartNo: "",
+      drawingNo: "WR00000BB002B",
+      quantity: 0,
+      note: "",
+      owner: { code: "DSS", label: "DSS" },
+    },
+  ],
+};
+
+describe("부품 목록 읽기", () => {
+  test("모양이면 그대로 읽고, 소유·비고를 함께 들고 온다", () => {
+    const parts = parseInventoryPartsResponse(PARTS_BODY);
+    assert.ok(parts);
+    assert.equal(parts.length, 2);
+    assert.equal(parts[0].no, 11);
+    assert.equal(parts[0].owner.label, "보수부재");
+    // 같은 품명이 여럿일 때 사람이 가르는 단서는 비고의 첫 줄이다.
+    assert.equal(inventoryPartNoteFirstLine(parts[0]), "수리소 관리용");
+    assert.equal(inventoryPartNoteFirstLine(parts[1]), "");
+  });
+
+  test("🔴 모양이 아니면 null — 빈 배열이 아니다", () => {
+    // 부르는 쪽은 null 을 「못 받아 왔다」로 바꾼다. 여기서 []를 돌려주면 그 길이 끊긴다.
+    assert.equal(parseInventoryPartsResponse(null), null);
+    assert.equal(parseInventoryPartsResponse("<html>500</html>"), null);
+    assert.equal(parseInventoryPartsResponse([]), null);
+    assert.equal(parseInventoryPartsResponse({}), null);
+    assert.equal(parseInventoryPartsResponse({ parts: "nope" }), null);
+  });
+
+  test("🔴 200 에 빈 목록이 온 것은 「하나도 없다」는 사실이다 — null 이 아니다", () => {
+    assert.deepEqual(parseInventoryPartsResponse({ count: 0, parts: [] }), []);
+  });
+
+  test("번호나 품명이 빈 줄은 버린다 — 가리킬 수 없는 줄이다", () => {
+    const parts = parseInventoryPartsResponse({
+      parts: [
+        { no: 0, name: "번호 없음" },
+        { no: 5, name: "" },
+        { no: "6", name: "글자 번호" },
+        { no: 7, name: "쓸 수 있는 줄" },
+      ],
+    });
+    assert.deepEqual(parts?.map((p) => p.no), [7]);
+  });
+});
+
+describe("화면에서 거르기 — 저쪽 q 와 같은 잣대", () => {
+  const parts = parseInventoryPartsResponse(PARTS_BODY) as InventoryPart[];
+
+  test("빈 글자는 빈 목록 — 수백 개를 통째로 펼치지 않는다", () => {
+    assert.deepEqual(filterInventoryParts(parts, ""), []);
+    assert.deepEqual(filterInventoryParts(parts, "   "), []);
+  });
+
+  test("다섯 칸에서 찾는다 — 품명·품명2·고객사 품명·교산 품번·도번", () => {
+    assert.deepEqual(filterInventoryParts(parts, "amp").map((p) => p.no), [11]);
+    assert.deepEqual(filterInventoryParts(parts, "규격").map((p) => p.no), [11]);
+    assert.deepEqual(filterInventoryParts(parts, "조립품").map((p) => p.no), [11]);
+    assert.deepEqual(filterInventoryParts(parts, "C000000001").map((p) => p.no), [11]);
+    assert.deepEqual(filterInventoryParts(parts, "WR00000BB002B").map((p) => p.no), [12]);
+  });
+
+  test("🔴 낱말이 여럿이면 **모두** 들어 있어야 한다(저쪽 q 와 같다)", () => {
+    assert.deepEqual(filterInventoryParts(parts, "amp 규격").map((p) => p.no), [11]);
+    assert.deepEqual(filterInventoryParts(parts, "amp vvc"), []);
+  });
+
+  test("대소문자를 가리지 않는다", () => {
+    assert.deepEqual(filterInventoryParts(parts, "vvc-test").map((p) => p.no), [12]);
+  });
+});
+
+describe("O/H 템플릿 읽기", () => {
+  test("🔴 「이어 둔 템플릿이 없다」는 오류가 아니다 — template: null 로 온다", () => {
+    assert.deepEqual(parseInventoryOhTemplateResponse({ modelId: "m", template: null }), { template: null });
+  });
+
+  test("🔴 모양이 아니면 null — 「템플릿이 없다」와 섞이지 않는다", () => {
+    assert.equal(parseInventoryOhTemplateResponse(null), null);
+    assert.equal(parseInventoryOhTemplateResponse({ template: { name: "줄이 없다" } }), null);
+  });
+
+  test("안 이어진 줄도 그대로 들고 온다 — 빼면 「다 담겼다」고 믿게 된다", () => {
+    const parsed = parseInventoryOhTemplateResponse({
+      template: {
+        id: "t1",
+        name: "시험용 O/H",
+        note: "",
+        items: [
+          { displayOrder: 1, no: 11, name: "증폭기 PCB", partName: "AMP-TEST-A1", quantity: 2, linked: true },
+          { displayOrder: 2, no: null, name: "유량계", partName: null, quantity: 1, linked: false },
+        ],
+      },
+    });
+    assert.equal(parsed?.template?.items.length, 2);
+    assert.equal(parsed?.template?.items[1].linked, false);
+    assert.equal(parsed?.template?.items[1].name, "유량계");
+  });
+
+  test("🔴 번호가 없는데 linked 가 참이면 거짓으로 본다 — 담으려다 올리기가 통째로 400 이 된다", () => {
+    const parsed = parseInventoryOhTemplateResponse({
+      template: { id: "t1", name: "", note: "", items: [{ displayOrder: 1, no: null, name: "유량계", quantity: 1, linked: true }] },
+    });
+    assert.equal(parsed?.template?.items[0].linked, false);
+  });
+});
+
+describe("올린 신청의 지금 상태 읽기", () => {
+  const BODY = {
+    generatedAt: "2026-10-15T05:12:00.000Z",
+    count: 2,
+    requests: [
+      {
+        requestKey: "AS-TEST-0001",
+        id: "r1",
+        intakeNumber: "D260701",
+        type: "USE",
+        status: { code: "PARTIAL", label: "일부 나감" },
+        closed: false,
+        requestedAt: "2026-10-15T01:00:00.000Z",
+        lines: [{ no: 11, name: "AMP-TEST-A1", quantity: 8, issued: 5 }],
+        decision: null,
+        hold: null,
+      },
+      {
+        requestKey: null,
+        id: "r2",
+        intakeNumber: "D260701",
+        type: "USE",
+        status: { code: "CONFIRMED", label: "마감" },
+        closed: true,
+        requestedAt: "2026-10-14T06:00:00.000Z",
+        lines: [{ no: null, name: "(지워진 부품)", quantity: 2, issued: 0 }],
+        decision: { byName: "담당자", at: "2026-10-14T08:00:00.000Z", note: "재고가 없습니다" },
+        hold: { reason: "부품 입고 대기", byName: "담당자", at: "2026-10-14T07:00:00.000Z" },
+      },
+    ],
+    notFound: [],
+  };
+
+  test("🔴 상태 글자를 저쪽이 준 그대로 들고 온다 — 손으로 다시 적지 않는다", () => {
+    const requests = parseInventoryStockRequestsResponse(BODY);
+    assert.equal(requests?.[0].status.label, "일부 나감");
+    // 「마감」은 상태값이 아니라 closed 칸이다 — code 는 CONFIRMED 다.
+    assert.equal(requests?.[1].status.code, "CONFIRMED");
+    assert.equal(requests?.[1].status.label, "마감");
+    assert.equal(requests?.[1].closed, true);
+  });
+
+  test("🔵 requestKey 가 null 인 줄 = 재고 관리에서 직접 올린 신청. 지어내지 않는다", () => {
+    const requests = parseInventoryStockRequestsResponse(BODY);
+    assert.equal(requests?.[0].requestKey, "AS-TEST-0001");
+    assert.equal(requests?.[1].requestKey, null);
+  });
+
+  test("차례를 다시 매기지 않는다 — 저쪽이 최근 것부터 준다", () => {
+    const requests = parseInventoryStockRequestsResponse(BODY);
+    assert.deepEqual(requests?.map((r) => r.id), ["r1", "r2"]);
+  });
+
+  test("결정·보류 사유를 그대로 들고 온다", () => {
+    const requests = parseInventoryStockRequestsResponse(BODY);
+    assert.equal(requests?.[1].decision?.note, "재고가 없습니다");
+    assert.equal(requests?.[1].hold?.reason, "부품 입고 대기");
+  });
+
+  test("🔴 모양이 아니면 null, 빈 목록은 빈 목록", () => {
+    assert.equal(parseInventoryStockRequestsResponse({ requests: null }), null);
+    assert.equal(parseInventoryStockRequestsResponse("오류 페이지"), null);
+    assert.deepEqual(parseInventoryStockRequestsResponse({ count: 0, requests: [], notFound: [] }), []);
+  });
+});
+
+describe("올릴 줄의 모양 — 화면과 서버 액션이 함께 쓴다", () => {
+  test("🔴 유상/무상이 빠지면 올라가지 않는다", () => {
+    const result = parseStockRequestLines([{ no: 11, quantity: 2 }], new Map([[11, "AMP-TEST-A1"]]));
+    assert.equal(result.ok, false);
+    assert.match(result.ok ? "" : result.message, /유상\/무상/);
+    // 이름을 적어 준다 — 열 줄 가운데 어느 줄인지 알아야 고친다.
+    assert.match(result.ok ? "" : result.message, /AMP-TEST-A1/);
+  });
+
+  test("🔴 기본값으로 채워 주지 않는다 — 빈 글자·모르는 값도 거절", () => {
+    for (const chargeType of ["", null, undefined, "유상", "paid", "PAID ", 1]) {
+      const result = parseStockRequestLines([{ no: 11, quantity: 1, chargeType }]);
+      assert.equal(result.ok, false, `chargeType=${String(chargeType)} 가 통과했다`);
+    }
+  });
+
+  test("유상·무상이 한 요청 안에 섞여도 된다", () => {
+    const result = parseStockRequestLines([
+      { no: 11, quantity: 2, chargeType: "PAID" },
+      { no: 12, quantity: 1, chargeType: "FREE" },
+    ]);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.ok ? result.lines : null, [
+      { no: 11, quantity: 2, chargeType: "PAID" },
+      { no: 12, quantity: 1, chargeType: "FREE" },
+    ]);
+  });
+
+  test("한 줄도 없으면 거절한다", () => {
+    assert.equal(parseStockRequestLines([]).ok, false);
+    assert.equal(parseStockRequestLines(null).ok, false);
+  });
+
+  test(`${MAX_STOCK_REQUEST_LINES}줄을 넘으면 거절한다`, () => {
+    const many = Array.from({ length: MAX_STOCK_REQUEST_LINES + 1 }, (_, i) => ({
+      no: i + 1,
+      quantity: 1,
+      chargeType: "FREE",
+    }));
+    assert.equal(parseStockRequestLines(many).ok, false);
+    assert.equal(parseStockRequestLines(many.slice(0, MAX_STOCK_REQUEST_LINES)).ok, true);
+  });
+
+  test("🔴 글자로 온 숫자를 조용히 고쳐 주지 않는다", () => {
+    assert.equal(parseStockRequestLines([{ no: "11", quantity: 1, chargeType: "FREE" }]).ok, false);
+    assert.equal(parseStockRequestLines([{ no: 11, quantity: "1", chargeType: "FREE" }]).ok, false);
+  });
+
+  test("수량은 1 이상의 정수다", () => {
+    for (const quantity of [0, -1, 1.5, Number.NaN, 1_000_001]) {
+      assert.equal(parseStockRequestLines([{ no: 11, quantity, chargeType: "FREE" }]).ok, false, `${quantity} 가 통과했다`);
+    }
+    assert.equal(parseStockRequestLines([{ no: 11, quantity: 1_000_000, chargeType: "FREE" }]).ok, true);
+  });
+
+  test("🔴 같은 부품이 두 줄이면 거절한다 — 저쪽도 거절한다", () => {
+    const result = parseStockRequestLines([
+      { no: 11, quantity: 1, chargeType: "FREE" },
+      { no: 11, quantity: 2, chargeType: "PAID" },
+    ]);
+    assert.equal(result.ok, false);
+    assert.match(result.ok ? "" : result.message, /한 줄로 합쳐/);
+  });
+});
+
+describe("자잘한 것", () => {
+  test("유상/무상 코드와 글자", () => {
+    assert.equal(isChargeType("PAID"), true);
+    assert.equal(isChargeType("free"), false);
+    assert.equal(CHARGE_TYPE_LABELS.PAID, "유상");
+    assert.equal(CHARGE_TYPE_LABELS.FREE, "무상");
+  });
+
+  test("요청 번호는 1~100자 글자다", () => {
+    assert.equal(isValidRequestKey(""), false);
+    assert.equal(isValidRequestKey("   "), false);
+    assert.equal(isValidRequestKey(123), false);
+    assert.equal(isValidRequestKey("a".repeat(100)), true);
+    assert.equal(isValidRequestKey("a".repeat(101)), false);
+  });
+
+  test("🔴 못 받아 온 까닭 다섯 다 「없습니다」라고 말하지 않는다", () => {
+    for (const reason of ["not_configured", "timeout", "unauthorized", "api_closed", "error"] as const) {
+      const message = inventoryUnreachableMessage(reason);
+      assert.ok(message.length > 0, reason);
+      assert.doesNotMatch(message, /재고에 (부품이 )?없습니다/, reason);
+    }
+  });
+});

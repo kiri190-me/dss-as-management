@@ -2,416 +2,459 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import NoticePopup from "@/components/common/NoticePopup";
 import { showSavePopup } from "@/components/common/SavePopup";
-import { createPartRequestAction, cancelPartRequestAction } from "@/lib/server/actions/inventory-part-requests";
-import type { PartListRow } from "@/lib/db/queries/inventory";
-import type { OwnPartRequestRow } from "@/lib/db/queries/inventory-part-requests";
+import { createInventoryStockRequestAction } from "@/lib/server/actions/inventory-stock-requests";
 import {
-  inventoryPartRequestStatusLabels,
-  ownerScopedAvailability,
-  STOCK_OWNER_CODES,
-  stockOwnerLabels,
-  stockOwnerLabelOrUnspecified,
-  type StockOwner,
-} from "@/lib/domain/inventory-types";
-import { applyCartLinePatch, type CartLine } from "@/lib/domain/inventory-part-request-cart";
-import type { OhTemplateRow } from "@/lib/db/queries/oh-part-templates";
+  CHARGE_TYPES,
+  CHARGE_TYPE_LABELS,
+  STOCK_REQUEST_CANCEL_NOTICE,
+  filterInventoryParts,
+  inventoryPartNoteFirstLine,
+  inventoryUnreachableMessage,
+  type ChargeType,
+  type InventoryOhTemplate,
+  type InventoryPart,
+  type InventoryResult,
+  type InventoryStockRequest,
+} from "@/lib/domain/inventory-gateway";
+import {
+  addStockRequestCartLine,
+  applyStockRequestCartPatch,
+  getOrCreateRequestKey,
+  removeStockRequestCartLine,
+  resetRequestKey,
+  validateStockRequestCart,
+  type StockRequestCartLine,
+} from "@/lib/domain/inventory-stock-request-cart";
 import { generateClientUuid } from "@/lib/client-uuid";
 
 /**
- * 부품 요청 칸. 수리 건 상세에 들어간다 —
- * Parts Request permission checkpoint: 담당자가 아니어도 그 건에 요청을 올릴
- * 수 있다. **누구에게 그려지는가는 역할이 아니라 설정이 정한다** — [id]/page.tsx
- * 의 partRequestData 게이트가 부품 요청 쓰기 권한(inventory.requests WRITE)을
- * 본다. 기본값으로는 AS_ENGINEER 와 최고관리자가 갖고, 나머지 역할은 역할별
- * 접근 권한 화면에서 열어 준다. Submitting never reserves or
- * deducts stock (plan §12) — availability shown here is informational only.
- * The server independently re-checks role/authorization regardless of what
- * this section renders — a disabled/hidden form here is a UX convenience
- * only.
+ * ============================================================================
+ * 부품 요청 칸 — 🔴 **재고 관리를 본다** (2026-10-15)
+ * ============================================================================
+ * 이 칸은 더 이상 A/S 제 표를 읽지도 쓰지도 않는다. 부품 목록 · O/H 템플릿 · 올린 신청의
+ * 지금 상태가 전부 **재고 관리**에서 오고, 요청도 그리로 올라간다(사용자 결정: 「A/S 의
+ * 부품 요청은 운영에서 전혀 안 쓰고 있다. 재고 관리가 생기기를 기다리는 중이었다」).
+ * 부르는 자리는 `src/lib/server/inventory-gateway.ts` 한 곳이고, 이 화면은 서버 컴포넌트가
+ * 건네준 결과만 그린다.
  *
- * Shipment-lock removal policy: this section no longer takes an
- * isCaseLocked prop and always shows the create form — a shipped case's
- * part requests stay fully creatable, matching canCreatePartRequest
- * (inventory-authorization.ts), which the server independently enforces
- * regardless.
+ * ── 🔴 「못 받아 왔다」를 「없다」로 그리지 않는다 ───────────────────────
+ * 받는 값이 전부 `InventoryResult` 인 까닭이다. 빈 목록으로 뭉개면 화면이 **「재고에 부품이
+ * 하나도 없다」**고 거짓말하고, 사람은 그 말을 믿는다. 그래서 못 받아 왔을 때는 목록 자리에
+ * **까닭을 적고**, 올리기 단추를 잠근다(고를 수 없는데 올릴 수는 없다).
+ *
+ * ── 🔴 소유는 고르는 값이 아니다 ────────────────────────────────────────
+ * 재고 관리에서는 소유가 다르면 부품 번호가 다르다. 번호를 고르는 순간 소유가 정해지므로
+ * **보여 주기만** 한다. 대신 **유상/무상**을 줄마다 고르고 🔴 **기본값을 두지 않는다** —
+ * 청구에 걸리는 값이라 저쪽 통로도 빠지면 400 으로 거절한다.
+ *
+ * ── 🔴 [요청 취소] 단추를 그리지 않는다 ────────────────────────────────
+ * 저쪽은 A/S 에서 온 신청을 재고 관리 화면에서 못 거두게 막아 두었고(「거두는 것은 낸 쪽의
+ * 몫이다」), 낸 쪽이 거둘 통로는 **아직 없다.** 누르면 아무 일도 못 하는 단추를 두는 대신
+ * 어디로 가야 하는지 적는다(`STOCK_REQUEST_CANCEL_NOTICE`). 통로가 열리는 날 여기부터 고친다.
+ *
+ * ── 권한 ────────────────────────────────────────────────────────────────
+ * 누구에게 그려지는가는 역할이 아니라 설정이 정한다 — [id]/page.tsx 의 partRequestData
+ * 게이트가 `inventory.requests` 쓰기를 본다. 그려진다고 올릴 수 있는 것은 아니다:
+ * 서버 액션이 같은 축으로 **다시** 묻는다(화면 검사는 편의이지 울타리가 아니다).
+ * ============================================================================
  */
 export default function PartRequestSection({
   repairCaseId,
+  parts,
   ohTemplate,
-  availableParts,
-  ownerAvailabilityByPartId,
-  ownRequests,
+  requests,
+  requesterGate,
 }: {
   repairCaseId: string;
+  /** 재고 관리의 부품 전부. 🔴 못 받아 왔으면 **빈 목록이 아니라** 그 사실이 온다. */
+  parts: InventoryResult<InventoryPart[]>;
   /**
-   * 이 장비의 제품 모델에 이어진 O/H 부품 템플릿. **null 이 정상이다** —
-   * 모델을 이어 두지 않았거나 O/H 템플릿이 없는 기종이면 없다
-   * (queries/oh-part-templates.ts 의 findOhTemplateForRepairCase).
+   * 이 장비의 제품 모델에 이어진 O/H 부품 템플릿. 🔵 **`value: null` 이 정상이다** —
+   * 모델을 이어 두지 않았거나 O/H 템플릿이 없는 기종이면 없다. 「없다」와 「못 받아 왔다」는
+   * 다른 값이고, 화면도 다르게 그린다.
    */
-  ohTemplate: OhTemplateRow | null;
-  availableParts: PartListRow[];
-  /** 소유구분-scoped 가용 수량 checkpoint — a missing (partId, owner) entry means 0, never "unknown". */
-  ownerAvailabilityByPartId: Record<string, Partial<Record<StockOwner, number>>>;
-  ownRequests: OwnPartRequestRow[];
+  ohTemplate: InventoryResult<InventoryOhTemplate | null>;
+  /** 🔵 **누가 올렸든** 이 건의 반출 신청 전부(재고 관리에서 직접 올린 것까지). 최근 것이 위. */
+  requests: InventoryResult<InventoryStockRequest[]>;
+  /** 올릴 수 있는 사람인가. 🔴 포털 번호가 없으면 막고 **까닭을 말한다**(서버도 다시 막는다). */
+  requesterGate: { ok: true } | { ok: false; message: string };
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
-  const [cart, setCart] = useState<CartLine[]>([]);
+  const [cart, setCart] = useState<StockRequestCartLine[]>([]);
   const [ohMessage, setOhMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [cancelingId, setCancelingId] = useState<string | null>(null);
-  const [cancelReason, setCancelReason] = useState("");
-  const idempotencyKeyRef = useRef<string | null>(null);
+  const [noticeLines, setNoticeLines] = useState<string[] | null>(null);
+  /**
+   * 🔴 **요청 번호.** 같은 장바구니를 두 번 눌러도 **같은 값**이어야 한다 — 저쪽은 같은
+   * 열쇠면 신청을 새로 만들지 않고 처음 신청을 돌려준다(그때 「이미 올라갔습니다」로
+   * 말한다). `useRef` 라 다시 그려도 값이 살아 있고, **성공한 뒤에만** 비운다.
+   */
+  const requestKeyRef = useRef<string | null>(null);
 
-  const filteredParts = availableParts.filter((p) => {
-    if (!search.trim()) return false;
-    const term = search.trim().toLowerCase();
-    return (
-      p.partName.toLowerCase().includes(term) ||
-      (p.partSpec ?? "").toLowerCase().includes(term) ||
-      (p.drawingNo ?? "").toLowerCase().includes(term) ||
-      (p.kyosanPartNo ?? "").toLowerCase().includes(term)
+  const partList = parts.status === "ok" ? parts.value : [];
+  const filteredParts = filterInventoryParts(partList, search);
+  const template = ohTemplate.status === "ok" ? ohTemplate.value : null;
+  const canSubmit = parts.status === "ok" && requesterGate.ok;
+
+  function addToCart(part: InventoryPart) {
+    setCart((prev) =>
+      addStockRequestCartLine(prev, {
+        no: part.no,
+        name: part.name,
+        ownerLabel: part.owner.label || part.owner.code,
+        quantity: "1",
+        // 🔴 기본값을 두지 않는다. 사람이 고르기 전에는 올라가지 않는다.
+        chargeType: "",
+      })
     );
-  });
-
-  function addToCart(part: PartListRow) {
-    if (cart.some((line) => line.partId === part.id)) return;
-    setCart((prev) => [...prev, { partId: part.id, partName: part.partName, quantity: "1", owner: "", note: "" }]);
   }
 
   /**
-   * O/H 템플릿의 부품을 **한 번에** 장바구니에 담는다.
+   * O/H 템플릿의 부품을 **한 번에** 담는다.
    *
-   * ── 🔴 재고에 연결되지 않은 줄은 담기지 않는다 ──────────────────────
-   * 부품 요청은 재고 마스터의 부품(part_id)에만 걸 수 있다. 템플릿에는
-   * 마스터에 없는 이름이 섞여 있어서(양식에서 옮겨 온 그대로), 그런 줄은
-   * 담기지 않는다. **조용히 빼면 안 된다** — 담은 줄만 보고 다 담겼다고
-   * 믿으면 정작 필요한 부품을 빠뜨린 채 요청이 나간다. 그래서 무엇이 빠졌는지
-   * 이름을 그대로 알려 준다.
+   * ── 🔴 재고에 이어지지 않은 줄은 담기지 않는다 ─────────────────────
+   * 반출 신청은 재고 마스터의 부품 번호에만 걸 수 있다. 템플릿에는 마스터에 없는 이름이
+   * 섞여 있어서(양식에서 옮겨 온 그대로, `linked: false`) 그런 줄은 담기지 않는다.
+   * **조용히 빼면 안 된다** — 담은 줄만 보고 다 담겼다고 믿으면 정작 필요한 부품을 빠뜨린
+   * 채 요청이 나간다. 그래서 무엇이 빠졌는지 이름을 그대로 알려 준다(예전부터 하던 말 그대로).
    *
-   * 이미 담긴 부품은 건너뛴다(장바구니가 part_id 하나당 한 줄이다).
-   * 수량은 템플릿의 값을 그대로 쓰고, 사람이 담긴 뒤 고칠 수 있다.
+   * 이미 담긴 부품은 건너뛴다. 수량은 템플릿의 값을 그대로 쓰고 사람이 고칠 수 있다.
+   * 🔴 **유상/무상은 담아 주지 않는다** — 그 값은 사람이 줄마다 골라야 한다.
    */
   function addOhTemplateToCart() {
-    if (!ohTemplate) return;
+    if (!template) return;
 
-    const availableIds = new Set(availableParts.map((part) => part.id));
-    const added: CartLine[] = [];
+    const inStock = new Map(partList.map((part) => [part.no, part]));
+    const added: StockRequestCartLine[] = [];
     const skippedNoPart: string[] = [];
     const skippedAlready: string[] = [];
 
-    for (const item of ohTemplate.items) {
-      if (item.partId === null || !availableIds.has(item.partId)) {
-        skippedNoPart.push(item.partNameText);
+    for (const item of template.items) {
+      const part = item.linked && item.no !== null ? inStock.get(item.no) : undefined;
+      if (!part) {
+        skippedNoPart.push(item.name);
         continue;
       }
-      if (cart.some((line) => line.partId === item.partId)) {
-        skippedAlready.push(item.partNameText);
+      if (cart.some((line) => line.no === part.no) || added.some((line) => line.no === part.no)) {
+        skippedAlready.push(item.name);
         continue;
       }
-      const part = availableParts.find((candidate) => candidate.id === item.partId);
       added.push({
-        partId: item.partId,
-        partName: part?.partName ?? item.partNameText,
+        no: part.no,
+        name: part.name,
+        ownerLabel: part.owner.label || part.owner.code,
         quantity: String(item.quantity),
-        owner: "",
-        note: "",
+        chargeType: "",
       });
     }
 
     if (added.length > 0) setCart((prev) => [...prev, ...added]);
 
     const notes: string[] = [`${added.length}종을 담았습니다.`];
-    if (skippedAlready.length > 0) notes.push(`이미 담겨 있음: ${skippedAlready.join(', ')}`);
+    if (skippedAlready.length > 0) notes.push(`이미 담겨 있음: ${skippedAlready.join(", ")}`);
     if (skippedNoPart.length > 0) {
-      notes.push(`재고에 없어 담지 못함(직접 찾아 담아 주세요): ${skippedNoPart.join(', ')}`);
+      notes.push(`재고에 없어 담지 못함(직접 찾아 담아 주세요): ${skippedNoPart.join(", ")}`);
     }
     setOhMessage(notes.join(" · "));
   }
 
-  function removeFromCart(partId: string) {
-    setCart((prev) => prev.filter((line) => line.partId !== partId));
-  }
-
-  function updateCartLine(partId: string, patch: Partial<CartLine>) {
-    setCart((prev) => applyCartLinePatch(prev, partId, patch));
-  }
-
-  function getOrCreateIdempotencyKey(): string {
-    if (!idempotencyKeyRef.current) idempotencyKeyRef.current = generateClientUuid();
-    return idempotencyKeyRef.current;
+  function updateCartLine(no: number, patch: Partial<StockRequestCartLine>) {
+    setCart((prev) => applyStockRequestCartPatch(prev, no, patch));
   }
 
   async function handleSubmit() {
-    if (cart.length === 0) {
-      setErrorMessage("요청할 부품을 1개 이상 추가해 주세요.");
+    if (!requesterGate.ok) {
+      setErrorMessage(requesterGate.message);
       return;
     }
-    const items: { partId: string; quantity: number; owner: StockOwner; note?: string | null }[] = [];
-    for (const line of cart) {
-      const quantity = Number(line.quantity);
-      if (!Number.isInteger(quantity) || quantity <= 0) {
-        setErrorMessage(`${line.partName}의 수량은 1 이상의 정수여야 합니다.`);
-        return;
-      }
-      if (!line.owner) {
-        setErrorMessage(`${line.partName}의 소유구분을 선택해 주세요.`);
-        return;
-      }
-      items.push({ partId: line.partId, quantity, owner: line.owner, note: line.note || null });
+    const validated = validateStockRequestCart(cart);
+    if (!validated.ok) {
+      setErrorMessage(validated.message);
+      return;
     }
 
     setIsSubmitting(true);
     setErrorMessage(null);
-    const result = await createPartRequestAction({
+    const result = await createInventoryStockRequestAction({
       repairCaseId,
-      items,
+      // 🔴 두 번 눌러도 같은 값이 나간다(위 ref 의 머리말).
+      requestKey: getOrCreateRequestKey(requestKeyRef, generateClientUuid),
+      lines: validated.lines,
       note: null,
-      idempotencyKey: getOrCreateIdempotencyKey(),
     });
     setIsSubmitting(false);
+
     if (!result.ok) {
+      // 🔴 못 올렸으면 **올린 것처럼 보이지 않게** 한다. 장바구니도 요청 번호도 그대로 두어
+      //    다시 누르면 **같은 요청**이 간다(두 줄로 서지 않는다).
       setErrorMessage(result.message);
       return;
     }
-    idempotencyKeyRef.current = null;
+
+    resetRequestKey(requestKeyRef);
     setCart([]);
     setSearch("");
+    setOhMessage(null);
     router.refresh();
-    // 접수 건 안에 딸린 요청이라 목록으로 넘기지 않는다(common/SavePopup.tsx).
-    showSavePopup({ message: "부품을 요청했습니다.", redirectTo: null });
-  }
 
-  async function handleCancel(requestId: string) {
-    if (!cancelReason.trim()) {
-      setErrorMessage("취소 사유를 입력해 주세요.");
+    if (!result.created) {
+      // 🔵 같은 요청 번호가 이미 올라가 있었다 — 두 번 선 것이 아니다. 읽어야 하는 알림이라
+      //    저절로 닫히는 저장 팝업을 쓰지 않는다(NoticePopup 머리말).
+      setNoticeLines([
+        "이 요청은 이미 재고 관리에 올라가 있습니다.",
+        "같은 요청이 두 번 서지는 않았습니다. 아래 목록에서 지금 상태를 확인해 주세요.",
+      ]);
       return;
     }
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    const result = await cancelPartRequestAction({ requestId, reason: cancelReason, idempotencyKey: generateClientUuid() });
-    setIsSubmitting(false);
-    if (!result.ok) {
-      setErrorMessage(result.message);
-      return;
-    }
-    setCancelingId(null);
-    setCancelReason("");
-    router.refresh();
+    // 수리 건 안에 딸린 요청이라 목록으로 넘기지 않는다(common/SavePopup.tsx).
+    showSavePopup({ message: "재고 관리에 부품을 요청했습니다.", redirectTo: null });
   }
 
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">부품 요청</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">부품 요청</h2>
+        <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+          재고 관리에 「확인 대기」 신청이 섭니다 — 재고 담당자가 확인해야 부품이 나갑니다.
+        </p>
+      </div>
 
-      {/* O/H 템플릿 일괄 담기. 제품 모델에 템플릿이 이어져 있을 때만 그린다 —
-          이을 것이 없으면 담을 것도 없다(queries 의 findOhTemplateForRepairCase).
-          O/H 대상 여부로 감추지 **않는다**: 대상이 아니어도 부품을 담아야 할
+      {/* 🔴 못 받아 왔을 때. 목록을 빈 채로 그리면 「재고에 아무것도 없다」가 된다. */}
+      {parts.status !== "ok" && (
+        <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          재고 관리의 부품 목록을 불러오지 못했습니다 — {inventoryUnreachableMessage(parts.reason)} 목록이
+          비어 보이는 것이 아니라 <b>확인하지 못한 것</b>입니다. 잠시 뒤 새로고침해 주세요.
+        </p>
+      )}
+
+      {!requesterGate.ok && (
+        <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          {requesterGate.message}
+        </p>
+      )}
+
+      {/* O/H 템플릿 일괄 담기. 이어 둔 템플릿이 있을 때만 그린다 — 이을 것이 없으면 담을
+          것도 없다. O/H 대상 여부로 감추지 **않는다**: 대상이 아니어도 부품을 담아야 할
           때가 있고, 대상 판정은 알려 주는 것이지 막는 것이 아니다. */}
-      {ohTemplate && (
-        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs text-zinc-700 dark:text-zinc-300">
-              이 장비의 <b>O/H 부품 템플릿</b> — 기종 {ohTemplate.code} · 부품 {ohTemplate.items.length}종
-            </p>
-            <button
-              type="button"
-              onClick={addOhTemplateToCart}
-              className="rounded-md border border-zinc-300 bg-white px-3 py-1 text-xs dark:border-zinc-700 dark:bg-zinc-900"
-            >
-              O/H 부품 한 번에 담기
-            </button>
+      {ohTemplate.status !== "ok" ? (
+        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+          O/H 부품 템플릿을 불러오지 못했습니다 — {inventoryUnreachableMessage(ohTemplate.reason)}
+        </p>
+      ) : (
+        template && (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-zinc-700 dark:text-zinc-300">
+                이 장비의 <b>O/H 부품 템플릿</b> — {template.name || "이름 없음"} · 부품 {template.items.length}종
+              </p>
+              <button
+                type="button"
+                onClick={addOhTemplateToCart}
+                disabled={!canSubmit}
+                className="rounded-md border border-zinc-300 bg-white px-3 py-1 text-xs disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900"
+              >
+                O/H 부품 한 번에 담기
+              </button>
+            </div>
+            {ohMessage && <p className="mt-2 text-xs text-zinc-700 dark:text-zinc-300">{ohMessage}</p>}
           </div>
-          {ohMessage && (
-            <p className="mt-2 text-xs text-zinc-700 dark:text-zinc-300">{ohMessage}</p>
-          )}
-        </div>
+        )
       )}
 
       <div className="mt-3 flex flex-col gap-2">
-          <input
-            type="text"
-            placeholder="재고 조회: 품명 / 품명2 / 도번 / 교산 품번 검색"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-          />
-          {filteredParts.length > 0 && (
-            <ul className="max-h-40 overflow-y-auto rounded-md border border-zinc-200 dark:border-zinc-800">
-              {filteredParts.map((part) => (
-                <li key={part.id} className="flex items-center justify-between border-b border-zinc-100 px-3 py-1.5 text-xs last:border-0 dark:border-zinc-800">
+        <input
+          type="text"
+          placeholder="재고 관리에서 찾기: 품명 / 품명2 / 고객사 품명 / 교산 품번 / 도번"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          disabled={parts.status !== "ok"}
+          className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 disabled:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+        />
+        {parts.status === "ok" && search.trim() !== "" && filteredParts.length === 0 && (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">찾는 부품이 재고 관리에 없습니다.</p>
+        )}
+        {filteredParts.length > 0 && (
+          <ul className="max-h-40 overflow-y-auto rounded-md border border-zinc-200 dark:border-zinc-800">
+            {filteredParts.map((part) => {
+              const noteLine = inventoryPartNoteFirstLine(part);
+              return (
+                <li
+                  key={part.no}
+                  className="flex items-center justify-between gap-2 border-b border-zinc-100 px-3 py-1.5 text-xs last:border-0 dark:border-zinc-800"
+                >
                   <span>
-                    {part.partName} {part.partSpec && <span className="text-zinc-500">· {part.partSpec}</span>}
-                    <span className="ml-2 text-zinc-500">가용 {part.totalQuantity}개</span>
+                    <span className="text-zinc-500">No. {part.no}</span> {part.name}
+                    {part.name2 && <span className="text-zinc-500"> · {part.name2}</span>}
+                    {/* 🔴 소유와 비고를 함께 보여 준다 — 같은 품명이 여럿이라 이 둘이 가르는 단서다. */}
+                    <span className="ml-2 text-zinc-500">
+                      {part.owner.label || part.owner.code} · 재고 {part.quantity}개
+                    </span>
+                    {noteLine && <span className="block text-zinc-400">{noteLine}</span>}
                   </span>
                   <button
                     type="button"
                     onClick={() => addToCart(part)}
-                    disabled={cart.some((line) => line.partId === part.id)}
-                    className="rounded-md border border-zinc-300 px-2 py-0.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    disabled={cart.some((line) => line.no === part.no)}
+                    className="shrink-0 rounded-md border border-zinc-300 px-2 py-0.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
                   >
                     추가
                   </button>
                 </li>
-              ))}
-            </ul>
-          )}
+              );
+            })}
+          </ul>
+        )}
 
-          {cart.length > 0 && (
-            <div className="rounded-md border border-zinc-200 dark:border-zinc-800">
-              <table className="w-full text-xs">
-                <thead className="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
-                  <tr>
-                    <th className="px-2 py-1">부품</th>
-                    <th className="px-2 py-1">요청 수량</th>
-                    <th className="px-2 py-1">소유구분 *</th>
-                    <th className="px-2 py-1">가용</th>
-                    <th className="px-2 py-1">항목 메모</th>
-                    <th className="px-2 py-1" />
+        {cart.length > 0 && (
+          <div className="rounded-md border border-zinc-200 dark:border-zinc-800">
+            <table className="w-full text-xs">
+              <thead className="bg-zinc-50 text-left text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+                <tr>
+                  <th className="px-2 py-1">No.</th>
+                  <th className="px-2 py-1">부품</th>
+                  <th className="px-2 py-1">소유</th>
+                  <th className="px-2 py-1">요청 수량</th>
+                  <th className="px-2 py-1">유상/무상 *</th>
+                  <th className="px-2 py-1" />
+                </tr>
+              </thead>
+              <tbody>
+                {cart.map((line) => (
+                  <tr key={line.no} className="border-t border-zinc-100 dark:border-zinc-800">
+                    <td className="px-2 py-1 text-zinc-500">{line.no}</td>
+                    <td className="px-2 py-1">{line.name}</td>
+                    {/* 🔴 고르는 칸이 아니다 — 번호를 고르는 순간 정해진 값이다. */}
+                    <td className="px-2 py-1 whitespace-nowrap text-zinc-500">{line.ownerLabel || "-"}</td>
+                    <td className="px-2 py-1">
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={line.quantity}
+                        onChange={(e) => updateCartLine(line.no, { quantity: e.target.value })}
+                        className="w-16 rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <select
+                        value={line.chargeType}
+                        onChange={(e) => updateCartLine(line.no, { chargeType: e.target.value as ChargeType | "" })}
+                        className="rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                      >
+                        <option value="">선택</option>
+                        {CHARGE_TYPES.map((code) => (
+                          <option key={code} value={code}>
+                            {CHARGE_TYPE_LABELS[code]}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-2 py-1 text-right">
+                      <button
+                        type="button"
+                        onClick={() => setCart((prev) => removeStockRequestCartLine(prev, line.no))}
+                        className="text-zinc-400 hover:text-red-600"
+                      >
+                        삭제
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {cart.map((line) => {
-                    const availability = ownerScopedAvailability(ownerAvailabilityByPartId, line.partId, line.owner);
-                    return (
-                    <tr key={line.partId} className="border-t border-zinc-100 dark:border-zinc-800">
-                      <td className="px-2 py-1">{line.partName}</td>
-                      <td className="px-2 py-1">
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={line.quantity}
-                          onChange={(e) => updateCartLine(line.partId, { quantity: e.target.value })}
-                          className="w-16 rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <select
-                          value={line.owner}
-                          onChange={(e) => updateCartLine(line.partId, { owner: e.target.value as StockOwner | "" })}
-                          className="rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
-                        >
-                          <option value="">선택</option>
-                          {STOCK_OWNER_CODES.map((code) => (
-                            <option key={code} value={code}>
-                              {stockOwnerLabels[code]}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-1 whitespace-nowrap">
-                        {availability === null ? (
-                          <span className="text-zinc-400 dark:text-zinc-500">소유구분을 선택해 주세요</span>
-                        ) : (
-                          <span>가용 {availability}개</span>
-                        )}
-                      </td>
-                      <td className="px-2 py-1">
-                        <input
-                          type="text"
-                          value={line.note}
-                          onChange={(e) => updateCartLine(line.partId, { note: e.target.value })}
-                          className="w-full rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
-                        />
-                      </td>
-                      <td className="px-2 py-1 text-right">
-                        <button type="button" onClick={() => removeFromCart(line.partId)} className="text-zinc-400 hover:text-red-600">
-                          삭제
-                        </button>
-                      </td>
-                    </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div>
-            <button
-              type="button"
-              onClick={() => void handleSubmit()}
-              disabled={isSubmitting || cart.length === 0}
-              className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
-            >
-              {isSubmitting ? "제출 중..." : "부품 인수 요청"}
-            </button>
+                ))}
+              </tbody>
+            </table>
           </div>
+        )}
+
+        <div>
+          <button
+            type="button"
+            onClick={() => void handleSubmit()}
+            disabled={isSubmitting || cart.length === 0 || !canSubmit}
+            className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
+          >
+            {isSubmitting ? "올리는 중..." : "재고 관리에 요청"}
+          </button>
         </div>
+      </div>
 
       {errorMessage && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{errorMessage}</p>}
 
       <div className="mt-4">
-        <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">내 요청</h3>
-        {ownRequests.length === 0 ? (
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">아직 제출한 요청이 없습니다.</p>
+        <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">이 수리 건의 반출 신청</h3>
+        {requests.status !== "ok" ? (
+          <p className="mt-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            재고 관리에서 신청 목록을 불러오지 못했습니다 — {inventoryUnreachableMessage(requests.reason)} 요청이
+            없는 것이 아니라 <b>확인하지 못한 것</b>입니다.
+          </p>
+        ) : requests.value.length === 0 ? (
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">이 건에 올라간 반출 신청이 없습니다.</p>
         ) : (
           <ul className="mt-2 flex flex-col gap-2">
-            {ownRequests.map((request) => (
+            {requests.value.map((request) => (
               <li key={request.id} className="rounded-md border border-zinc-200 p-2 text-xs dark:border-zinc-800">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-zinc-800 dark:text-zinc-200">{inventoryPartRequestStatusLabels[request.status]}</span>
-                  <span className="text-zinc-500 dark:text-zinc-400">{new Date(request.createdAt).toLocaleString("ko-KR")}</span>
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                    {/* 🔴 저쪽이 준 글자를 그대로 쓴다 — 손으로 다시 적지 않는다. */}
+                    {request.status.label || request.status.code}
+                    {request.closed && <span className="ml-1 text-zinc-500">(마감)</span>}
+                  </span>
+                  <span className="text-zinc-500 dark:text-zinc-400">
+                    {request.requestedAt ? new Date(request.requestedAt).toLocaleString("ko-KR") : ""}
+                  </span>
                 </div>
-                {/* 보류 사유 — 관리자가 왜 멈춰 뒀는지 요청자가 여기서 본다.
-                    이걸 보여 주지 않으면 같은 요청을 다시 올리거나 담당자를
-                    찾아다니게 된다. */}
+
+                {/* 🔵 A/S 에서 올린 것이 아니다. 가려 내지 않고, 그 사실이 보이게 적는다. */}
+                {request.requestKey === null && (
+                  <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">재고 관리에서 직접 올린 신청</p>
+                )}
+
+                {/* 보류 사유 — 왜 멈춰 뒀는지 요청자가 여기서 본다. 보여 주지 않으면 같은
+                    요청을 다시 올리거나 담당자를 찾아다니게 된다. */}
                 {request.hold && (
                   <div className="mt-1 rounded-md bg-violet-50 px-2 py-1.5 dark:bg-violet-950/40">
                     <p className="font-medium text-violet-900 dark:text-violet-200">보류 사유</p>
                     <p className="mt-0.5 text-violet-900 dark:text-violet-200">{request.hold.reason}</p>
                     <p className="mt-0.5 text-[11px] text-violet-700/70 dark:text-violet-300/70">
-                      {request.hold.heldByName} · {new Date(request.hold.heldAt).toLocaleString("ko-KR")}
+                      {request.hold.byName} · {new Date(request.hold.at).toLocaleString("ko-KR")}
                     </p>
                   </div>
                 )}
 
-                <ul className="mt-1 flex flex-col gap-0.5 text-zinc-600 dark:text-zinc-300">
-                  {request.items.map((item) => (
-                    <li key={item.id}>
-                      {item.partName} ({stockOwnerLabelOrUnspecified(item.owner)}) — 요청 {item.requestedQuantity} / 불출 {item.issuedQuantity}
-                      <span className="block text-zinc-500 dark:text-zinc-400">항목 메모: {item.note ?? "-"}</span>
-                    </li>
-                  ))}
-                </ul>
-                {request.status === "PENDING" && (
-                  <div className="mt-1">
-                    {cancelingId === request.id ? (
-                      <div className="flex flex-wrap items-center gap-1">
-                        <input
-                          type="text"
-                          placeholder="취소 사유"
-                          value={cancelReason}
-                          onChange={(e) => setCancelReason(e.target.value)}
-                          className="rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => void handleCancel(request.id)}
-                          disabled={isSubmitting}
-                          className="rounded-md border border-red-300 px-2 py-0.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
-                        >
-                          취소 확정
-                        </button>
-                        <button type="button" onClick={() => setCancelingId(null)} className="text-zinc-400 hover:text-zinc-600">
-                          닫기
-                        </button>
-                      </div>
-                    ) : (
-                      <button type="button" onClick={() => setCancelingId(request.id)} className="text-red-600 hover:underline dark:text-red-400">
-                        요청 취소
-                      </button>
+                {request.decision && (
+                  <div className="mt-1 rounded-md bg-zinc-50 px-2 py-1.5 dark:bg-zinc-800/60">
+                    <p className="text-zinc-700 dark:text-zinc-300">
+                      {request.decision.byName} · {new Date(request.decision.at).toLocaleString("ko-KR")}
+                    </p>
+                    {request.decision.note && (
+                      <p className="mt-0.5 text-zinc-700 dark:text-zinc-300">{request.decision.note}</p>
                     )}
                   </div>
                 )}
+
+                <ul className="mt-1 flex flex-col gap-0.5 text-zinc-600 dark:text-zinc-300">
+                  {request.lines.map((line, index) => (
+                    <li key={`${request.id}-${line.no ?? "deleted"}-${index}`}>
+                      {line.no !== null && <span className="text-zinc-400">No. {line.no} </span>}
+                      {line.name} — 요청 {line.quantity} / 불출 {line.issued}
+                    </li>
+                  ))}
+                </ul>
               </li>
             ))}
           </ul>
         )}
+
+        {/* 🔴 [요청 취소] 단추를 그리지 않는다(머리말). 대신 어디로 가야 하는지 적는다. */}
+        <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">{STOCK_REQUEST_CANCEL_NOTICE}</p>
       </div>
+
+      {noticeLines && (
+        <NoticePopup title="이미 올라간 요청입니다" lines={noticeLines} onClose={() => setNoticeLines(null)} />
+      )}
     </div>
   );
 }
