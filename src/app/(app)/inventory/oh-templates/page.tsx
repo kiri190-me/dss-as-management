@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import InventoryTabs from "@/components/inventory/InventoryTabs";
+import InventoryRetiredBanner from "@/components/inventory/InventoryRetiredBanner";
 import OhTemplateScreen from "@/components/inventory/OhTemplateScreen";
+import { inventorySiteUrl } from "@/lib/server/inventory-gateway";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
@@ -77,6 +79,9 @@ export default async function OhTemplatesPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* 🔴 재고 일은 재고 관리 시스템으로 옮겨 갔다(2026-10-16) — 화면은 그대로 두고
+          맨 위에 안내 띠만 세운다(/inventory 페이지의 같은 주석). */}
+      <InventoryRetiredBanner href={inventorySiteUrl()} />
       <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">재고 관리</h1>
       <InventoryTabs active="OH_TEMPLATES" />
       <OhTemplateScreen

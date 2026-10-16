@@ -17,6 +17,27 @@ export type NavItem = {
    * (navigation.test.ts 가 그것을 막는다).
    */
   parentKey?: string;
+  /**
+   * 🔴 **메뉴에서 감춘다 — 항목을 지운 것이 아니다**(2026-10-16).
+   *
+   * 재고 기능이 재고 관리 시스템(dss-inventory)으로 옮겨 갔다. A/S 에 남은 재고
+   * 화면을 걷어내는 일은 배포 뒤로 미뤘으므로(사용자 결정 2026-10-16) 그때까지
+   * 두 시스템이 함께 살아 있다. 메뉴에 남아 있으면 사람이 그대로 들어와 입고·사용을
+   * 적고, 그러면 **같은 일의 기록이 두 곳으로 갈린다** — 이 칸이 막는 것은 그것 하나다.
+   *
+   * 감춘 것과 지운 것의 차이(되살릴지 지울지 정할 때 읽을 글이다):
+   *  · 열쇠 · 주소 · 권한 영역이 **그대로 남는다.** 북마크로도, 아직 `/inventory`
+   *    아래를 가리키는 알림 셋으로도 들어와지고, 그 자리에서 「여기가 아니라 저기」
+   *    띠를 본다(components/inventory/InventoryRetiredBanner.tsx). 역할별 접근 권한
+   *    설정의 줄도 그대로라 들어온 사람이 막히지 않는다.
+   *  · 묶음(navGroups)에도 **그대로 남는다.** 거기서 빼면 어느 그룹에도 없는 항목이
+   *    되어, 되살리는 날 자리를 처음부터 다시 정해야 한다.
+   *  · 되살리려면 **이 한 줄을 지우면 된다.** 아주 지우는 판단은 따로 한다.
+   *
+   * 🔴 이 칸은 **역할도 설정도 보지 않는다.** 아래 filterNavItemsForAccess 머리말이
+   *    금지한 「항목별 역할 술어」와 다른 것이다 — 누가 보든 답이 같은 상수다.
+   */
+  hiddenFromMenu?: true;
 };
 
 export const navItems: NavItem[] = [
@@ -43,7 +64,11 @@ export const navItems: NavItem[] = [
   { key: "customers", href: "/customers", label: "고객사 관리" },
   { key: "productModels", href: "/product-models", label: "제품 모델 관리" },
   { key: "technicalProcedures", href: "/procedures/technical", label: "기술 작업 절차" },
-  { key: "inventory", href: "/inventory", label: "재고 관리" },
+  // 🔴 **메뉴에서만 감췄다 — 지운 것이 아니다**(2026-10-16). 재고 일은 이제 재고 관리
+  // 시스템에서 한다. 주소 · 권한 영역 · 아래 묶음 자리는 그대로 두었다: 북마크와 알림이
+  // 아직 `/inventory` 아래를 가리키고, 들어온 사람은 화면 맨 위의 안내 띠를 본다.
+  // 까닭과 되살리는 법은 위 NavItem.hiddenFromMenu 에 적었다.
+  { key: "inventory", href: "/inventory", label: "재고 관리", hiddenFromMenu: true },
   { key: "domesticOrders", href: "/domestic-orders", label: "내자 정리" },
   { key: "quotes", href: "/quotes", label: "견적서" },
   // 견적서의 **작업비가 나오는 근거**다. 견적서 바로 옆에 두는 것은 견적을 내다가
@@ -112,6 +137,14 @@ export const navItems: NavItem[] = [
  * 드로어를 빠뜨리면 **폰에서는 아무나 개발자 모드 메뉴를 본다** — 2026-08-31 에
  * AppShell 에서 실제로 일어난 일이다. 그래서 선택 인자로 두지 않는다:
  * 빠뜨리면 컴파일이 실패한다.
+ *
+ * ── 🔴 감춘 항목(hiddenFromMenu)은 이 축들 **밖**이다 ──────────────────────
+ * 2026-10-16 에 재고 관리가 그렇게 됐다. 역할도 설정도 관문도 보지 않고 아무에게도
+ * 나오지 않는다 — 그 칸의 뜻과 「지운 것과 무엇이 다른가」는 위 NavItem 에 적었다.
+ *
+ * 거르는 자리를 **여기**로 둔 까닭: 메뉴 목록을 읽는 곳이 둘이다 — 사이드바와
+ * 「지금 이용할 수 있는 메뉴」(no-access/page.tsx). 한쪽에서만 빼면 권한에 막힌
+ * 사람에게만 감춘 메뉴가 그대로 보이는, 이 저장소가 여러 번 겪은 어긋남이 된다.
  * ============================================================================
  */
 export function filterNavItemsForAccess(
@@ -120,9 +153,13 @@ export function filterNavItemsForAccess(
   canEnterDeveloperMode: boolean
 ): NavItem[] {
   const allowed = new Set(accessibleAreaKeys);
-  return items.filter((item) =>
-    item.key === DEVELOPER_MODE_NAV_KEY ? canEnterDeveloperMode : allowed.has(item.key)
-  );
+  return items.filter((item) => {
+    // 🔴 감춘 항목은 **어느 길로도** 나오지 않는다 — 개발자 모드 예외보다 먼저 본다.
+    //    노출을 넓히는 쪽(설정 · 관문)이 이것을 되살리면 「권한을 열었더니 이관한
+    //    메뉴가 돌아왔다」가 되고, 그때 사람은 그 화면을 다시 쓰기 시작한다.
+    if (item.hiddenFromMenu) return false;
+    return item.key === DEVELOPER_MODE_NAV_KEY ? canEnterDeveloperMode : allowed.has(item.key);
+  });
 }
 
 export type NavGroup = {

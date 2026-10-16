@@ -8,6 +8,7 @@ import {
   fetchInventoryParts,
   fetchInventoryStockRequestsByIntake,
   fillInventoryPartCustomerName,
+  inventorySiteUrl,
 } from "./inventory-gateway";
 
 /**
@@ -85,6 +86,37 @@ afterEach(() => {
 });
 
 const PARTS_OK = { count: 1, parts: [{ no: 11, name: "AMP-TEST-A1", owner: { code: "DSS", label: "DSS" }, quantity: 3 }] };
+
+/**
+ * 사람을 저쪽으로 보낼 주소(2026-10-16). 🔴 **없으면 `null` 이다** — 부르는 쪽(재고 화면의
+ * 안내 띠)이 그것을 보고 **링크 없이 글만** 그린다. 빈 글자를 돌려주면 `href=""` 가 되어
+ * 눌렀을 때 같은 화면이 다시 뜬다(「고장났다」로 읽힌다).
+ */
+describe("사람이 여는 주소", () => {
+  test("설정이 있으면 그 주소다 — 끝의 / 는 통로와 같은 규칙으로 떼어 낸다", () => {
+    assert.equal(inventorySiteUrl(), BASE);
+
+    process.env.INVENTORY_API_BASE_URL = `${BASE}/`;
+    assert.equal(inventorySiteUrl(), BASE);
+
+    process.env.INVENTORY_API_BASE_URL = `  ${BASE}///  `;
+    assert.equal(inventorySiteUrl(), BASE);
+  });
+
+  test("🔴 설정이 비어 있으면 null — 없는 주소로 보내지 않는다", () => {
+    process.env.INVENTORY_API_BASE_URL = "";
+    assert.equal(inventorySiteUrl(), null);
+
+    process.env.INVENTORY_API_BASE_URL = "   ";
+    assert.equal(inventorySiteUrl(), null);
+  });
+
+  test("토큰과는 상관없다 — 통로가 막혀 있어도 사람은 저쪽 화면으로 갈 수 있다", () => {
+    process.env.INVENTORY_API_TOKEN = "";
+    process.env.INVENTORY_WRITE_TOKEN = "";
+    assert.equal(inventorySiteUrl(), BASE);
+  });
+});
 
 describe("🔴 실패를 삼키지 않는다 — 다섯 갈래 전부 「못 받아 왔다」다", () => {
   test("주소가 없으면 부르지도 않는다 (not_configured)", async () => {

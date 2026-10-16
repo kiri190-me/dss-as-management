@@ -11,8 +11,10 @@ import {
   listDeletedParts,
 } from "@/lib/db/queries/inventory";
 import InventoryListScreen from "@/components/inventory/InventoryListScreen";
+import InventoryRetiredBanner from "@/components/inventory/InventoryRetiredBanner";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { resolveInventoryCapabilities } from "@/lib/auth/inventory-capabilities";
+import { inventorySiteUrl } from "@/lib/server/inventory-gateway";
 
 export const metadata: Metadata = {
   title: "재고 관리 | DSS A/S 관리 시스템",
@@ -54,13 +56,19 @@ export default async function InventoryPage() {
   const ownerAvailabilityByPartId = groupPartOwnerAvailability(ownerAvailabilityRows);
 
   return (
-    <InventoryListScreen
-      parts={parts}
-      ownerAvailabilityByPartId={ownerAvailabilityByPartId}
-      categories={categories}
-      itemTypes={itemTypes}
-      capabilities={capabilities}
-      trashParts={trashParts}
-    />
+    // 🔴 재고 일은 재고 관리 시스템으로 옮겨 갔다(2026-10-16). 메뉴에서는 감췄지만
+    // 북마크·알림으로는 그대로 들어와지므로, 화면은 한 글자도 바꾸지 않고 맨 위에
+    // 「여기가 아니라 저기」만 세운다(components/inventory/InventoryRetiredBanner.tsx).
+    <div className="flex flex-col gap-4">
+      <InventoryRetiredBanner href={inventorySiteUrl()} />
+      <InventoryListScreen
+        parts={parts}
+        ownerAvailabilityByPartId={ownerAvailabilityByPartId}
+        categories={categories}
+        itemTypes={itemTypes}
+        capabilities={capabilities}
+        trashParts={trashParts}
+      />
+    </div>
   );
 }

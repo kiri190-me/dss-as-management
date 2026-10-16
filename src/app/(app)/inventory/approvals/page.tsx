@@ -24,6 +24,8 @@ import {
 import PartIssueApprovalScreen, {
   type PartIssueApprovalRequestView,
 } from "@/components/inventory/PartIssueApprovalScreen";
+import InventoryRetiredBanner from "@/components/inventory/InventoryRetiredBanner";
+import { inventorySiteUrl } from "@/lib/server/inventory-gateway";
 
 export const metadata: Metadata = {
   title: "불출 승인 요청건 | DSS A/S 관리 시스템",
@@ -173,14 +175,19 @@ export default async function InventoryPartIssueApprovalsPage() {
     pendingRows.length > 0 || standsOnCurrentRoute || actorHasAllowedRole(actingUser, ["SUPER_ADMIN"]);
 
   return (
-    <PartIssueApprovalScreen
-      pending={toViews(pendingRows)}
-      executable={toViews(executableRows)}
-      inProgress={toViews(visibleProgressRows)}
-      showApprovalSection={showApprovalSection}
-      showExecutionSection={showExecutionSection}
-      showProgressSection={showProgressSection}
-      progressExcludesExecutable={progressExcludesExecutable}
-    />
+    // 🔴 재고 일은 재고 관리 시스템으로 옮겨 갔다(2026-10-16) — 화면은 그대로 두고
+    // 맨 위에 안내 띠만 세운다(/inventory 페이지의 같은 주석).
+    <div className="flex flex-col gap-4">
+      <InventoryRetiredBanner href={inventorySiteUrl()} />
+      <PartIssueApprovalScreen
+        pending={toViews(pendingRows)}
+        executable={toViews(executableRows)}
+        inProgress={toViews(visibleProgressRows)}
+        showApprovalSection={showApprovalSection}
+        showExecutionSection={showExecutionSection}
+        showProgressSection={showProgressSection}
+        progressExcludesExecutable={progressExcludesExecutable}
+      />
+    </div>
   );
 }

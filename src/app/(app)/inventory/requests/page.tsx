@@ -15,6 +15,8 @@ import {
   PART_ISSUE_APPROVAL_ROUTE_SCOPE,
 } from "@/lib/domain/inventory-part-issue-rules";
 import PartRequestManagerScreen from "@/components/inventory/PartRequestManagerScreen";
+import InventoryRetiredBanner from "@/components/inventory/InventoryRetiredBanner";
+import { inventorySiteUrl } from "@/lib/server/inventory-gateway";
 
 export const metadata: Metadata = {
   title: "부품 요청 관리 | DSS A/S 관리 시스템",
@@ -81,11 +83,16 @@ export default async function InventoryPartRequestsPage() {
   }
 
   return (
-    <PartRequestManagerScreen
-      requests={requests}
-      balancesByPartId={Object.fromEntries(balancesByPartId)}
-      partIssueApprovalRequired={partIssueApprovalRequired}
-      partIssueLocksByRequestId={partIssueLocksByRequestId}
-    />
+    // 🔴 재고 일은 재고 관리 시스템으로 옮겨 갔다(2026-10-16) — 화면은 그대로 두고
+    // 맨 위에 안내 띠만 세운다(/inventory 페이지의 같은 주석).
+    <div className="flex flex-col gap-4">
+      <InventoryRetiredBanner href={inventorySiteUrl()} />
+      <PartRequestManagerScreen
+        requests={requests}
+        balancesByPartId={Object.fromEntries(balancesByPartId)}
+        partIssueApprovalRequired={partIssueApprovalRequired}
+        partIssueLocksByRequestId={partIssueLocksByRequestId}
+      />
+    </div>
   );
 }

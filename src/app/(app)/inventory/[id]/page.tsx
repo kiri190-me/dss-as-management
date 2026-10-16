@@ -18,7 +18,9 @@ import {
   PART_ISSUE_APPROVAL_ROUTE_SCOPE,
 } from "@/lib/domain/inventory-part-issue-rules";
 import InventoryPartDetailScreen from "@/components/inventory/InventoryPartDetailScreen";
+import InventoryRetiredBanner from "@/components/inventory/InventoryRetiredBanner";
 import { resolveInventoryCapabilities } from "@/lib/auth/inventory-capabilities";
+import { inventorySiteUrl } from "@/lib/server/inventory-gateway";
 
 export const metadata: Metadata = {
   title: "부품 상세 | DSS A/S 관리 시스템",
@@ -80,18 +82,23 @@ export default async function InventoryPartDetailPage({ params }: { params: Prom
   );
 
   return (
-    <InventoryPartDetailScreen
-      capabilities={await resolveInventoryCapabilities(actingUser)}
-      part={part}
-      history={history}
-      minimumQuantities={minimumQuantities}
-      unitPrice={unitPrice}
-      returnableByBalanceId={returnableByBalanceId}
-      categorySuggestions={categories}
-      itemTypeSuggestions={itemTypes}
-      repairCaseOptions={repairCaseOptions}
-      actingUser={{ id: actingUser.id, role: actingUser.role }}
-      partIssueApprovalRequired={isPartIssueApprovalRouteInForce(partIssueRoute)}
-    />
+    // 🔴 재고 일은 재고 관리 시스템으로 옮겨 갔다(2026-10-16) — 화면은 그대로 두고
+    // 맨 위에 안내 띠만 세운다(/inventory 페이지의 같은 주석).
+    <div className="flex flex-col gap-4">
+      <InventoryRetiredBanner href={inventorySiteUrl()} />
+      <InventoryPartDetailScreen
+        capabilities={await resolveInventoryCapabilities(actingUser)}
+        part={part}
+        history={history}
+        minimumQuantities={minimumQuantities}
+        unitPrice={unitPrice}
+        returnableByBalanceId={returnableByBalanceId}
+        categorySuggestions={categories}
+        itemTypeSuggestions={itemTypes}
+        repairCaseOptions={repairCaseOptions}
+        actingUser={{ id: actingUser.id, role: actingUser.role }}
+        partIssueApprovalRequired={isPartIssueApprovalRouteInForce(partIssueRoute)}
+      />
+    </div>
   );
 }

@@ -41,6 +41,22 @@ function filterNavItemsForRole(items: NavItem[], role: Role): NavItem[] {
 /** 다섯 역할 — 아래 시험들이 같은 목록을 돌게 한다. */
 const ALL_ROLES = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const;
 
+/**
+ * 🔴 **메뉴에서 감춘 항목**(navigation.ts 의 hiddenFromMenu). 2026-10-16 에 재고 관리가
+ * 들어왔다 — 재고 일이 재고 관리 시스템으로 옮겨 갔기 때문이고, **지운 것이 아니라
+ * 감춘 것**이라 navItems 에도 navGroups 에도 그대로 남아 있다.
+ *
+ * 값으로 못 박아 둔다: 둘째 항목이 여기 들어오는 것은 IA 변경이고, 그 사실이 이 줄에서
+ * 먼저 드러나야 한다. 아래 기대값들은 「**메뉴에 나오는 것**」을 말하므로 전부 이 목록을
+ * 뺀 뒤에 센다 — 그러지 않으면 「항목이 있다」와 「메뉴에 보인다」가 섞여 읽힌다.
+ */
+const MENU_HIDDEN_KEYS: readonly string[] = ["inventory"];
+
+/** 메뉴에 나올 수 있는 열쇠 전부 — 감춘 것을 뺀 navItems 의 차례 그대로. */
+function menuKeys(): string[] {
+  return navItems.map((i) => i.key).filter((key) => !MENU_HIDDEN_KEYS.includes(key));
+}
+
 
 /**
  * Regression test for nav-visibility gating. This is a UX check only;
@@ -125,24 +141,24 @@ test("navigation: 설정을 건드리지 않은 기본 상태의 역할별 노�
   // 빠진다」로 적으면 나머지 역할에게 열린 것처럼 읽힌다.
   // 과거 인수품 가져오기(2026-09-15)는 최고관리자·관리자만 기본으로 본다 — 아래 세 역할에서
   // 빠진다(auth/kyosan-intake-import-authorization.ts).
+  // 🔴 재고 관리(2026-10-16)는 이 표의 **어느 줄에도 없다** — 역할이 좁아진 것이 아니라
+  // 메뉴에서 감춘 것이라, 역할별로 적지 않고 menuKeys() 가 다섯 줄에서 한꺼번에 뺀다.
+  // 권한은 그대로다(아래 「재고 관리는 어느 역할에게도 메뉴에 나오지 않는다」가 못 박는다).
   const expected: Record<string, string[]> = {
-    SUPER_ADMIN: navItems.map((i) => i.key).filter((k) => !["myActiveWork", "developerMode"].includes(k)),
-    ADMIN: navItems.map((i) => i.key).filter((k) => !["myActiveWork", "developerMode"].includes(k)),
+    SUPER_ADMIN: menuKeys().filter((k) => !["myActiveWork", "developerMode"].includes(k)),
+    ADMIN: menuKeys().filter((k) => !["myActiveWork", "developerMode"].includes(k)),
     // 🔴 2026-09-29 — domesticOrders · quotes · repairLabor 가 이 목록에서
     // **빠졌다.** 항목이 사라진 것이 아니라 엔지니어에게 **보이게 된 것**이다
     // (사용자 결정, domestic-order-authorization.ts). 다시 적어 넣으면 그 결정을
     // 되돌리는 것이므로 사용자에게 먼저 물을 것.
-    AS_ENGINEER: navItems
-      .map((i) => i.key)
-      .filter((k) => !["mailSettings", "kyosanIntakeImport", "developerMode"].includes(k)),
-    SALES: navItems
-      .map((i) => i.key)
-      .filter(
-        (k) =>
-          !["myActiveWork", "technicalProcedures", "workflows", "mailSettings", "kyosanIntakeImport", "developerMode"].includes(k)
-      ),
-    INVENTORY_MANAGER: navItems
-      .map((i) => i.key)
+    AS_ENGINEER: menuKeys().filter(
+      (k) => !["mailSettings", "kyosanIntakeImport", "developerMode"].includes(k)
+    ),
+    SALES: menuKeys().filter(
+      (k) =>
+        !["myActiveWork", "technicalProcedures", "workflows", "mailSettings", "kyosanIntakeImport", "developerMode"].includes(k)
+    ),
+    INVENTORY_MANAGER: menuKeys()
       .filter(
         (k) =>
           ![
@@ -213,12 +229,19 @@ test("🔴 설정 밖의 길로 보이는 항목은 정확히 하나이고 devel
 test("🔴 관문은 developerMode 하나만 움직인다 — 다른 항목의 노출을 건드리지 않는다", () => {
   // 접근 권한을 전부 연 상태에서 관문만 뒤집는다. 달라지는 항목이 하나뿐이어야
   // 한다 — 관문이 다른 줄에 새면 여기서 걸린다.
+  //
+  // 🔴 재는 자가 navItems 전부가 아니라 menuKeys() 인 것은 2026-10-16 부터다. 감춘
+  // 항목은 관문과 **다른 축**이라 어느 쪽에도 나오지 않는다 — 여기서 allKeys 로 재면
+  // 「관문이 열렸는데 다른 항목이 사라졌다」로 잘못 걸린다. 단언의 뜻(관문이 움직이는
+  // 항목은 developerMode 하나다)은 그대로다.
   const allKeys = navItems.map((i) => i.key);
   const open = filterNavItemsForAccess(navItems, allKeys, true).map((i) => i.key);
   const shut = filterNavItemsForAccess(navItems, allKeys, false).map((i) => i.key);
 
-  assert.deepEqual(open, allKeys, "관문이 열렸는데 다른 항목이 사라졌다");
-  assert.deepEqual(shut, allKeys.filter((k) => k !== "developerMode"));
+  assert.deepEqual(open, menuKeys(), "관문이 열렸는데 다른 항목이 사라졌다");
+  assert.deepEqual(shut, menuKeys().filter((k) => k !== "developerMode"));
+  // 관문이 바꾸는 것은 정확히 한 줄이다 — 위 둘의 차이로 직접 잰다.
+  assert.deepEqual(open.filter((k) => !shut.includes(k)), ["developerMode"]);
 });
 
 test("🔴 developerMode 는 역할별 접근 권한 설정에 존재하지 않는다 — 그래서 열어 줄 수 없다", () => {
@@ -253,10 +276,74 @@ test("navigation: no 'procedures' (all-category list) entry exists", () => {
   assert.equal(navItems.some((i) => i.key === "procedures"), false);
 });
 
-test("filterNavItemsForRole: every role sees the inventory entry", () => {
-  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
-    const visible = filterNavItemsForRole(navItems, role);
-    assert.ok(visible.some((i) => i.key === "inventory"), `expected inventory visible for ${role}`);
+/**
+ * ============================================================================
+ * 🔴 재고 관리 — **메뉴에서 감췄다**(2026-10-16). 지운 것이 아니다.
+ * ============================================================================
+ * 재고 일이 재고 관리 시스템(dss-inventory)으로 옮겨 갔다. A/S 의 재고 화면을
+ * 걷어내는 일은 배포 뒤로 미뤘으므로 두 시스템이 함께 살아 있고, 그동안 메뉴에
+ * 남아 있으면 사람이 그대로 들어와 적어 **기록이 두 곳으로 갈린다.**
+ *
+ * 이 시험은 예전 「every role sees the inventory entry」를 **뒤집은 것이 아니라
+ * 둘로 가른 것**이다. 그 시험이 재던 것은 사실 둘이었다:
+ *  ① 다섯 역할 **모두 재고에 접근할 수 있다**(권한) — 그대로다. 아래에서 기본
+ *    정책으로 직접 잰다. 주소 · 알림 · 북마크로 들어오는 길이 살아 있는 근거다.
+ *  ② 그래서 **메뉴에 보인다** — 이것만 뒤집혔다.
+ * ============================================================================
+ */
+test("🔴 재고 관리는 어느 역할에게도 메뉴에 나오지 않는다 — 감춘 것이고, 권한은 그대로다", () => {
+  for (const role of ALL_ROLES) {
+    assert.equal(
+      filterNavItemsForRole(navItems, role).some((i) => i.key === "inventory"),
+      false,
+      `${role} 의 메뉴에 재고 관리가 나온다 — hiddenFromMenu 가 듣지 않는다`
+    );
+    // ① 권한은 한 칸도 안 건드렸다. 여기가 NONE 이 되면 감춘 것이 아니라 **막은 것**이고,
+    //    그때는 북마크 · 알림으로 들어온 사람이 「접근 권한 없음」으로 튕긴다.
+    assert.notEqual(
+      baselinePermissionLevel("inventory", role),
+      "NONE",
+      `${role} 가 재고에 못 들어간다 — 감추기가 권한까지 껐다`
+    );
+  }
+
+  // 노출을 넓히는 **어느 길로도** 되살아나지 않는다 — 설정을 전부 열어도, 개발자 모드
+  // 관문을 열어도. 설정 한 번에 이관한 메뉴가 돌아오면 사람이 그 화면을 다시 쓴다.
+  const allKeys = navItems.map((i) => i.key);
+  assert.equal(filterNavItemsForAccess(navItems, allKeys, true).some((i) => i.key === "inventory"), false);
+
+  // 🔴 **지운 것이 아니다.** 항목 · 주소 · 이름표 · 묶음 자리가 그대로 남아 있어야
+  // 되살릴 때 자리를 다시 정하지 않아도 된다(hiddenFromMenu 한 줄을 지우면 끝이다).
+  const item = navItems.find((i) => i.key === "inventory");
+  assert.equal(item?.href, "/inventory");
+  assert.equal(item?.label, "재고 관리");
+  assert.equal(item?.hiddenFromMenu, true, "감춘 표시가 사라졌다");
+  assert.deepEqual(
+    navGroups.filter((g) => g.itemKeys.includes("inventory")).map((g) => g.key),
+    ["techResources"],
+    "감추면서 묶음에서도 빼 버렸다 — 되살릴 자리가 사라진다"
+  );
+});
+
+test("🔴 감춘 항목은 정확히 그 목록뿐이고, 어느 인자로도 나오지 않는다", () => {
+  // 값으로 못 박는다 — 둘째 항목이 감춰지는 것은 IA 변경이고 여기서 먼저 드러나야 한다.
+  assert.deepEqual(
+    navItems.filter((i) => i.hiddenFromMenu).map((i) => i.key),
+    [...MENU_HIDDEN_KEYS],
+    "감춘 항목 목록이 MENU_HIDDEN_KEYS 와 다르다"
+  );
+
+  const allKeys = navItems.map((i) => i.key);
+  for (const args of [
+    [allKeys, true],
+    [allKeys, false],
+    [[], true],
+    [[], false],
+  ] as const) {
+    const visible = filterNavItemsForAccess(navItems, args[0], args[1]).map((i) => i.key);
+    for (const key of MENU_HIDDEN_KEYS) {
+      assert.equal(visible.includes(key), false, `${key} 가 ${JSON.stringify(args)} 에서 나왔다`);
+    }
   }
 });
 
@@ -507,7 +594,10 @@ test("filterNavItemsForRole: unrestricted items remain visible to every role", (
   };
   for (const role of ALL_ROLES) {
     const visible = filterNavItemsForRole(navItems, role);
-    assert.equal(visible.length, navItems.length - hiddenCountByRole[role]);
+    // 🔴 세는 바탕이 navItems.length 가 아니라 menuKeys().length 인 것은 2026-10-16
+    // 부터다. 감춘 항목(재고 관리)은 **역할 축이 아니라 다른 축**에서 빠지므로, 위
+    // 표의 다섯 줄을 하나씩 올리면 「역할 때문에 감춰졌다」로 읽혀 뜻이 흐려진다.
+    assert.equal(visible.length, menuKeys().length - hiddenCountByRole[role]);
     assert.ok(visible.some((i) => i.key === "dashboard"));
     assert.ok(visible.some((i) => i.key === "users"));
   }
