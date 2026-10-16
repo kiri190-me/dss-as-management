@@ -5,7 +5,8 @@ import QuoteEditTabs from "@/components/quotes/QuoteEditTabs";
 import QuoteApprovalPanel from "@/components/quotes/QuoteApprovalPanel";
 import QuoteArchiveFolderSection from "@/components/quotes/QuoteArchiveFolderSection";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
-import { getPartPickerList, getPartPickerUnitPrices } from "@/lib/db/queries/inventory";
+import { fetchInventoryParts } from "@/lib/server/inventory-gateway";
+import { toPartPickerOptions, toPartPickerPriceRows } from "@/lib/domain/inventory-gateway";
 import {
   readAllQuoteTemplateHeaders,
   readAllQuoteWorkSectionDefaults,
@@ -114,10 +115,12 @@ export default async function QuoteDetailPage({
   // 작업 내역을 그려야 저장 전과 후가 같은 문서로 보인다.
   // 결재 PDF · 수기 엑셀 두 칸 — 칸마다 지금 붙어 있는 파일(휴지통 것은 빼고). 내부 경로는
   // 싣지 않는 조회다(queries/attachments.ts 의 listQuoteAttachmentSlots).
-  // 부품 마스터 — 품명 칸에서 찾아 고르는 데 쓴다. 새 견적서 페이지의 같은 항목이고,
-  // 재고 · 소유구분이 없는 가벼운 조회다(getPartPickerList 머리말).
-  // 단가는 고를 때 단가 칸까지 채우는 데 쓴다 — 새 견적서 페이지의 같은 항목이고, 단가가
-  // 적힌 부품만 열몇 줄이라 같은 묶음에 태운다(getPartPickerUnitPrices 머리말).
+  // 부품 — 품명 칸에서 찾아 고르는 데 쓴다. 새 견적서 페이지의 같은 항목이고,
+  // 🔴 **2026-10-16 부터 재고 관리에서 온다**(A/S 의 부품 표는 다음 조각에서 걷어낸다).
+  // 🔴 못 받아 온 갈래를 **그대로** 폼까지 내려보낸다 — 「없습니다」가 아니라 「확인하지
+  //    못했습니다」로 말해야 사람이 없는 줄 알고 넘어가지 않는다.
+  // 단가는 고를 때 단가 칸까지 채우는 데 쓴다 — 같은 응답의 견적가 · O/H 견적가를 옮겨
+  // 담을 뿐이라 통로를 한 번 더 두드리지 않는다(toPartPickerPriceRows 머리말).
   // 결재 탭이 그릴 것 셋 — 지금 상태(+ 그 근거인 판 번호 비교), 이력, 그리고
   // 지금 쓰이는 「견적서 승인」 결재선. 🔴 상태 판정은 여기서 하지 않는다.
   // getQuoteApprovalProgress 가 도메인 함수 하나(resolveQuoteApprovalState)로
@@ -128,8 +131,7 @@ export default async function QuoteDetailPage({
     printHeaders,
     workScopeDefaults,
     attachmentSlots,
-    partOptions,
-    partPrices,
+    inventoryParts,
     approvalProgress,
     approvalHistory,
     currentApprovalRoute,
@@ -138,12 +140,16 @@ export default async function QuoteDetailPage({
     readAllQuoteTemplateHeaders(),
     readAllQuoteWorkSectionDefaults(),
     listQuoteAttachmentSlots(quote.id),
-    getPartPickerList(),
-    getPartPickerUnitPrices(),
+    fetchInventoryParts(),
     getQuoteApprovalProgress(quote.id),
     getQuoteApprovalHistory(quote.id),
     getCurrentShipmentApprovalRoute(QUOTE_APPROVAL_ROUTE_SCOPE),
   ]);
+
+  const partOptions = toPartPickerOptions(inventoryParts);
+  // 🔵 못 받아 왔으면 단가 목록도 비어 있다 — 빈 목록은 고르개에 「단가를 정하지 않았다」와
+  //    같아서 **칸을 비워 둔다**(0 을 붓지 않는다).
+  const partPrices = inventoryParts.status === "ok" ? toPartPickerPriceRows(inventoryParts.value) : [];
 
   // 🔴 이력의 줄들이 가리키는 **판들**을 한 번에 읽는다. 「n/m단계」의 m 은 그
   // 줄에 적힌 판으로 세야 한다 — 관리자가 절차를 바꾸면 새 판이 얹히고 진행

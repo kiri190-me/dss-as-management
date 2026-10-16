@@ -9,7 +9,8 @@ import {
   filterPartOptions,
   partPickPatch,
 } from "@dss/core/ui/inventory/part-picker";
-import type { PartPickerRow } from "@/lib/db/queries/inventory";
+import type { PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
+import { inventoryUnreachableMessage, type InventoryResult } from "@/lib/domain/inventory-gateway";
 import type { RepairCaseUsedPartRow } from "@/lib/db/queries/repair-case-used-parts";
 import { saveRepairCaseUsedPartsAction } from "@/lib/server/actions/repair-case-used-parts";
 import { MAX_USED_PART_LINES } from "@/lib/validation/repair-case-used-parts-input";
@@ -88,11 +89,21 @@ export default function UsedPartsEditForm({
   /** 접수 건의 version — 사용 부품도 그 건의 자료라 같은 번호로 다툰다. */
   version: number;
   rows: readonly RepairCaseUsedPartRow[];
-  /** 부품 마스터(queries/inventory.ts 의 getPartPickerList). 거르기는 브라우저에서 한다. */
-  partOptions: readonly PartPickerRow[];
+  /**
+   * 찾아 고를 부품 — 🔴 **재고 관리에서 온다**(2026-10-16). 거르기는 브라우저에서 한다.
+   *
+   * 🔴 **못 받아 온 것과 하나도 없는 것이 다른 값이다.** 못 받아 왔으면 「부품이 없습니다」가
+   * 아니라 **「확인하지 못했습니다」**라고 말하고 고를 수 없게 한다 — 사람이 없는 줄 알고
+   * 넘어가면 안 된다(같은 화면의 부품 요청 칸이 하는 그대로).
+   * 🔵 그때도 **손으로 적는 길은 그대로다** — 마스터에 없는 부품을 적는 것이 이 칸의 존재
+   *    이유 절반이다(schema/repair-case-used-parts.ts 머리말).
+   */
+  partOptions: InventoryResult<readonly PartPickerRow[]>;
   onDone: () => void;
 }) {
   const router = useRouter();
+  /** 🔴 빈 목록으로 접는 자리는 여기 하나다 — 까닭은 아래 안내가 그대로 말한다. */
+  const partOptionRows = partOptions.status === "ok" ? partOptions.value : [];
   const [lines, setLines] = useState<LineDraft[]>(() =>
     rows.length > 0 ? rows.map(toDraft) : [emptyDraft()]
   );
@@ -157,6 +168,16 @@ export default function UsedPartsEditForm({
 
   return (
     <form onSubmit={handleSubmit} noValidate className="mt-3">
+      {/* 🔴 못 받아 왔을 때. 후보가 안 뜨는 것을 「재고에 부품이 하나도 없다」로 읽으면
+          사람은 멀쩡한 부품을 두고 넘어간다 — 같은 화면의 부품 요청 칸과 같은 말투로
+          까닭을 적는다. 🔵 손으로 적는 길은 그대로 열려 있다. */}
+      {partOptions.status !== "ok" && (
+        <p className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          재고 관리의 부품 목록을 불러오지 못했습니다 — {inventoryUnreachableMessage(partOptions.reason)}{" "}
+          찾아 고를 수 없을 뿐, 부품이 <b>없는 것이 아니라 확인하지 못한 것</b>입니다. 품명은 손으로
+          적을 수 있습니다.
+        </p>
+      )}
       {fieldErrors.lines && <p className={editErrorClass}>{fieldErrors.lines}</p>}
 
       {lines.length === 0 ? (
@@ -200,10 +221,23 @@ export default function UsedPartsEditForm({
                 />
                 {pickerKey === line.key && !disabled && (
                   <PartSuggestionList
-                    options={filterPartOptions(partOptions, line.partNameText)}
+                    options={filterPartOptions(partOptionRows, line.partNameText)}
                     listLabel={`${index + 1}번째 부품 후보`}
                     onPick={(option) => {
-                      updateLine(line.key, partPickPatch(option));
+                      updateLine(line.key, {
+                        ...partPickPatch(option),
+                        /**
+                         * 🔴 **고른 부품의 번호를 `part_id` 에 넣지 않는다**(2026-10-16).
+                         * 재고 관리의 부품에는 A/S `parts.id`(UUID)가 없고, 번호를 그 칸에
+                         * 넣으면 저장이 거절된다(validation 이 UUID 를 본다). 그 칸은 원래
+                         * 비어도 되는 칸이고 품명은 글자로 저장되므로 화면은 그대로다.
+                         *
+                         * 🔴 **잃는 것이 있다** — 통계가 같은 부품을 묶는 열쇠가 이 칸이다
+                         * (schema/repair-case-used-parts.ts 머리말). 재고 관리 번호를 적어 둘
+                         * 칸이 아직 없어서(마이그레이션이 필요하다) 지금은 글자만 남는다.
+                         */
+                        partId: null,
+                      });
                       setPickerKey(null);
                     }}
                   />

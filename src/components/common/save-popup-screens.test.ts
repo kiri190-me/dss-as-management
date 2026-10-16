@@ -134,7 +134,12 @@ test("서비스 보고서는 저장하면 「보고서」 탭으로 넘어간다
 
 test("A/S 건 안에 딸린 것·실행 동작은 팝업만 띄우고 머문다", () => {
   const stayOnly: [string, number][] = [
-    ["src/components/inventory/PartRequestSection.tsx", 1],
+    // 부품 요청은 **올리기**와 **거두기**와 **고객사 품명 채우기** 셋이라 팝업도 셋이다
+    // (2026-10-16 에 「요청 취소」와 「고객사 품명 채우기」가 차례로 더해졌다). 셋 다 성공한
+    // 경로에서만 뜬다 — 거절(ok 아님)은 그 창·칸에 저쪽 문구를 그대로 적고, 「이미 올라가
+    // 있었다 · 이미 거둬져 있었다 · 이미 적혀 있었다」는 **오류가 아니라 읽어야 하는 알림**이라
+    // NoticePopup 으로 간다(저절로 닫히는 저장 팝업으로 보내면 못 읽고 지나간다).
+    ["src/components/inventory/PartRequestSection.tsx", 3],
     ["src/components/repair-cases/detail/PendingBillingDecisionCard.tsx", 1],
     ["src/components/repair-cases/workflow/ManualStepSetPanel.tsx", 1],
     ["src/components/repair-cases/workflow/DatabaseWorkflowControlPanel.tsx", 2],

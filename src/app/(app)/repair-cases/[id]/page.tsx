@@ -13,7 +13,8 @@ import {
   getProductModelIdForProduct,
   listRepairCasesByProductId,
 } from "@/lib/db/queries/repair-cases";
-import { getPartPickerList } from "@/lib/db/queries/inventory";
+import { fetchInventoryParts } from "@/lib/server/inventory-gateway";
+import { toPartPickerOptions, type InventoryPart, type InventoryResult } from "@/lib/domain/inventory-gateway";
 import { loadPartRequestSectionData } from "@/lib/server/part-request-section-data";
 import {
   getDerivedServiceSummariesForCases,
@@ -215,11 +216,16 @@ export default async function RepairCaseDetailPage({
   // 있고(repair_case_used_parts 에 mock 대응물이 없다), **같은 Promise.all 에
   // 태워 왕복을 늘리지 않는다** — 이 건 하나만 보는 작은 인덱스 조회다.
   //
-  // 그 칸의 품명 입력에서 찾아 고를 부품 마스터(B-2)도 같은 묶음에 태운다 — 재고 ·
-  // 소유구분 · 내부 비고가 없는 가벼운 조회이고(getPartPickerList 머리말), 백 줄
-  // 안쪽이라 통째로 내려보내고 브라우저에서 거른다. 적을 수 없는 건인지는 화면이
-  // 아니라 위 writeGate 가 정하므로 여기서 미리 나누지 않는다 — 나누면 판정이
-  // 두 벌이 된다.
+  // 그 칸의 품명 입력에서 찾아 고를 부품(B-2)도 같은 묶음에 태운다 — 🔴 **2026-10-16
+  // 부터 재고 관리에서 온다**(A/S 의 부품 표는 다음 조각에서 걷어낸다). 재고 · 소유 ·
+  // 비고는 서버가 떼어 내고 보낸다(domain/inventory-gateway.ts 의 toPartPickerRows).
+  // 적을 수 있는 건인지는 화면이 아니라 위 writeGate 가 정하므로 여기서 미리 나누지
+  // 않는다 — 나누면 판정이 두 벌이 된다.
+  //
+  // 🔴 **부품 요청 칸이 이미 받아 왔으면 그 목록을 그대로 쓴다** — 같은 통로를 한
+  //    화면에서 두 번 두드릴 까닭이 없다. 그 칸은 `inventory.requests` 쓰기가 있는
+  //    사람에게만 그려지므로(위 게이트), 없는 사람에게는 여기서 한 번 부른다.
+  // 🔴 **못 받아 온 것을 빈 목록으로 바꾸지 않는다** — 갈래를 그대로 화면까지 보낸다.
   //
   // 🔴 사람을 조회에 넘긴다 — 누가 적을 수 있는지도 그 writeGate 가 정하고, 그
   // 판정은 [역할별 접근 권한]의 `repairCases.usedParts` 를 묻는 일이기 때문이다
@@ -232,7 +238,7 @@ export default async function RepairCaseDetailPage({
     domesticOrderIssueDates,
     relatedSummaryByCaseId,
     usedParts,
-    usedPartOptions,
+    usedPartInventory,
   ] = await Promise.all([
     resolved.source === "DATABASE" ? getDerivedServiceSummaryForCase(resolved.id) : null,
     resolved.source === "DATABASE" ? listDomesticOrderDueDatesForRepairCase(resolved.id) : [],
@@ -247,8 +253,15 @@ export default async function RepairCaseDetailPage({
     resolved.source === "DATABASE"
       ? getRepairCaseUsedPartsView(resolved.id, actingUser)
       : null,
-    resolved.source === "DATABASE" ? getPartPickerList() : [],
+    resolved.source === "DATABASE"
+      ? (partRequestData?.parts ?? fetchInventoryParts())
+      : // MOCK · LOCAL_DEMO 건에는 「사용 부품」 칸 자체가 그려지지 않는다(usedParts 가
+        // null 이다). 🔵 그래서 이 빈 목록은 **실패를 접은 것이 아니다** — 부를 일이
+        // 없는 자리에 놓는 값이다.
+        ({ status: "ok", value: [] } satisfies InventoryResult<InventoryPart[]>),
   ]);
+
+  const usedPartOptions = toPartPickerOptions(usedPartInventory);
 
   // 화면에는 이력 줄이 실제로 그리는 한 칸(조치 내용)만 건 id 로 찾을 수 있게
   // 넘긴다 — 요약의 나머지 두 칸까지 클라이언트로 실어 보낼 이유가 없다.

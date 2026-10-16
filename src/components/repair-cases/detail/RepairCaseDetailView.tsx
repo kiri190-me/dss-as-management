@@ -16,7 +16,7 @@ import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-reference
 import { editableFieldsForRoleInSection, isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
 import PartRequestSection from "@/components/inventory/PartRequestSection";
-import type { PartPickerRow } from "@/lib/db/queries/inventory";
+import type { PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
 import type { RequestCaseContext } from "@/lib/db/queries/inventory-part-requests";
 import type {
   InventoryOhTemplate,
@@ -155,11 +155,14 @@ export default function RepairCaseDetailView({
    */
   usedParts: RepairCaseUsedPartsView | null;
   /**
-   * 「사용 부품」 품명 칸에서 찾아 고를 부품 마스터(B-2). 재고 · 소유구분 · 내부
-   * 비고가 없는 가벼운 조회다(queries/inventory.ts 의 getPartPickerList) — 거르기는
-   * 브라우저에서 한다. DATABASE 소스가 아니면 빈 배열이다.
+   * 「사용 부품」 품명 칸에서 찾아 고를 부품(B-2). 🔴 **2026-10-16 부터 재고 관리에서
+   * 온다** — 재고 · 소유 · 비고는 서버가 떼어 내고 보낸다(domain/inventory-gateway.ts 의
+   * toPartPickerRows). 거르기는 브라우저에서 한다.
+   *
+   * 🔴 **갈래가 그대로 온다** — 위 `partRequestData` 의 세 칸과 같은 까닭이다. 못 받아 온
+   * 것을 빈 목록으로 바꾸면 화면이 「재고에 부품이 하나도 없다」고 거짓말한다.
    */
-  usedPartOptions: readonly PartPickerRow[];
+  usedPartOptions: InventoryResult<readonly PartPickerRow[]>;
 }) {
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
   const [editingSection, setEditingSection] = useState<RepairCaseEditSection | null>(null);

@@ -3,10 +3,15 @@ import assert from "node:assert/strict";
 
 import {
   CHARGE_TYPE_LABELS,
+  CUSTOMER_NAME_EMPTY_NOTICE,
   MAX_STOCK_REQUEST_LINES,
   canCancelStockRequest,
+  customerNameAlreadySetLines,
   filterInventoryParts,
+  inventoryPartCustomerName,
+  inventoryPartIdLabels,
   inventoryPartNoteFirstLine,
+  inventoryPartSpec,
   inventoryUnreachableMessage,
   isChargeType,
   isValidRequestKey,
@@ -52,6 +57,9 @@ const PARTS_BODY = {
       item: { code: "PCB", name: "PCB" },
       category: { code: "RFG", label: "RFG" },
       owner: { code: "SERVICE_SPARE", label: "보수부재" },
+      // 🔴 견적가 둘 — 부품 고르개가 단가 칸을 채우는 값이다(2026-10-16).
+      quotePrice: 125000,
+      overhaulQuotePrice: 0,
       updatedAt: "2026-10-06T03:00:00.000Z",
     },
     {
@@ -91,6 +99,17 @@ describe("부품 목록 읽기", () => {
 
   test("🔴 200 에 빈 목록이 온 것은 「하나도 없다」는 사실이다 — null 이 아니다", () => {
     assert.deepEqual(parseInventoryPartsResponse({ count: 0, parts: [] }), []);
+  });
+
+  test("🔴 견적가 둘 — `0`(무상)과 「없음」(정하지 않음)을 가른다", () => {
+    const parts = parseInventoryPartsResponse(PARTS_BODY) as InventoryPart[];
+    assert.equal(parts[0].quotePrice, 125000);
+    // 🔴 `0` 이 null 로 뒤집히면 **무상으로 정해 둔 부품**이 「안 정함」이 된다.
+    assert.equal(parts[0].overhaulQuotePrice, 0);
+    // 🔴 칸이 아예 없는 줄(저쪽이 2026-10-16 전에 주던 모양)은 「정하지 않았다」다.
+    //    0 으로 채우면 그 부품이 0원으로 청구되고, 아무도 눈치채지 못한다.
+    assert.equal(parts[1].quotePrice, null);
+    assert.equal(parts[1].overhaulQuotePrice, null);
   });
 
   test("번호나 품명이 빈 줄은 버린다 — 가리킬 수 없는 줄이다", () => {
@@ -482,5 +501,96 @@ describe("자잘한 것", () => {
       assert.ok(message.length > 0, reason);
       assert.doesNotMatch(message, /재고에 (부품이 )?없습니다/, reason);
     }
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 부품 줄에 **그 부품의 모든 것**을 보인다 — 값이 있는 것만 (2026-10-16 요청 B·C)
+ * ============================================================================
+ * 다 적으면 줄이 길어져 **아무것도 안 읽히는** 쪽으로 망가진다. 그래서 「없는 칸은 안 그린다」가
+ * 규칙이고, 🔴 **`-` 만 적힌 칸도 없는 칸**이다 — 이 자료는 엑셀에서 넘어와 빈칸 대신 `-` 가
+ * 적힌 줄이 많다. 재고 관리도 **같은 글자들**을 빈 값으로 본다(저쪽 `lib/parts/form.ts` 의
+ * `DASH_ONLY`) — 자가 어긋나면 한쪽은 「이름이 있다」고 그리는데 다른 쪽은 「비어 있다」고 한다.
+ * ============================================================================
+ */
+describe("🔴 부품 줄에 보이는 것 — 값이 있는 것만, `-` 는 값이 아니다", () => {
+  const part = (over: Partial<InventoryPart>): InventoryPart => ({
+    no: 11,
+    name: "마그네트론",
+    name2: "",
+    customerName: "",
+    kyosanPartNo: "",
+    drawingNo: "",
+    quantity: 0,
+    note: "",
+    owner: { code: "DSS", label: "DSS" },
+    quotePrice: null,
+    overhaulQuotePrice: null,
+    ...over,
+  });
+
+  test("고객사 품명 — 적혀 있으면 그대로, 비어 있으면 빈 글자", () => {
+    assert.equal(inventoryPartCustomerName(part({ customerName: "발진관 조립품" })), "발진관 조립품");
+    assert.equal(inventoryPartCustomerName(part({ customerName: "" })), "");
+  });
+
+  test("🔴 `-` 만 적힌 고객사 품명은 **없는 것**이다 — 서류에 `-` 가 이름으로 찍히면 안 된다", () => {
+    // 🔴 재고 관리도 `-` 를 고객사 품명으로 받지 않는다(보내면 400). 여기서 값으로 세면
+    //    견적서는 그 부품을 고를 수 있다고 그리고, 나가는 종이에는 `-` 가 찍힌다.
+    for (const dash of ["-", "--", "–", "—", "－", "ㅡ", "  -  "]) {
+      assert.equal(inventoryPartCustomerName(part({ customerName: dash })), "", dash);
+    }
+  });
+
+  test("🔴 교산 품번 · 도번 — **값이 있는 것만** 이름표를 달아 돌려준다", () => {
+    assert.deepEqual(
+      inventoryPartIdLabels(part({ kyosanPartNo: "KY-7788", drawingNo: "DWG-1001" })),
+      [
+        { label: "교산 품번", value: "KY-7788" },
+        { label: "도번", value: "DWG-1001" },
+      ]
+    );
+    // 한쪽만 있으면 한 줄만 — 「도번 없음」을 적지 않는다.
+    assert.deepEqual(inventoryPartIdLabels(part({ kyosanPartNo: "KY-7788", drawingNo: "-" })), [
+      { label: "교산 품번", value: "KY-7788" },
+    ]);
+    // 둘 다 없으면 **아무것도 없다** — 화면이 그 줄을 아예 안 그린다.
+    assert.deepEqual(inventoryPartIdLabels(part({ kyosanPartNo: "-", drawingNo: "" })), []);
+  });
+
+  test("품명2도 같은 자로 잰다 — 품명 뒤에 ` · -` 가 붙으면 읽는 눈을 뺏는다", () => {
+    assert.equal(inventoryPartSpec(part({ name2: "2M244-M1" })), "2M244-M1");
+    assert.equal(inventoryPartSpec(part({ name2: "-" })), "");
+  });
+
+  test("🔴 다섯 가지가 **모두** 나올 길이 있다 — 하나라도 빠지면 요청 B 가 깨진다", () => {
+    const full = part({
+      name2: "2M244-M1",
+      customerName: "발진관 조립품",
+      kyosanPartNo: "KY-7788",
+      drawingNo: "DWG-1001",
+    });
+    const shown = [
+      full.name,
+      inventoryPartSpec(full),
+      inventoryPartCustomerName(full),
+      ...inventoryPartIdLabels(full).map((item) => item.value),
+    ];
+    assert.deepEqual(shown, ["마그네트론", "2M244-M1", "발진관 조립품", "KY-7788", "DWG-1001"]);
+  });
+
+  test("🔴 비어 있을 때의 안내는 **까닭과 고칠 길**까지 말한다 — 「없음」으로 끝내지 않는다", () => {
+    assert.match(CUSTOMER_NAME_EMPTY_NOTICE, /고객사 품명 없음/);
+    assert.match(CUSTOMER_NAME_EMPTY_NOTICE, /견적서/, "견적서에서 막히는 까닭이 안 적혀 있다");
+  });
+
+  test("🔴 「이미 있습니다」는 **지금 값**을 말하고 덮지 않았다고 적는다", () => {
+    const lines = customerNameAlreadySetLines({ no: 165, name: "마그네트론", customerName: "발진관 조립품" });
+    assert.ok(lines.join(" ").includes("「발진관 조립품」"), "지금 값을 말하지 않는다");
+    assert.ok(lines.join(" ").includes("No. 165"), "어느 부품인지 말하지 않는다");
+    assert.ok(lines.join(" ").includes("덮어쓰지 않았습니다"), "덮지 않았다는 사실이 없다");
+    // 🔴 거절처럼 보이면 안 된다 — 사람이 할 일이 다르다(고쳐 보내기 vs 그대로 쓰기).
+    assert.doesNotMatch(lines.join(" "), /실패|오류|거절/);
   });
 });

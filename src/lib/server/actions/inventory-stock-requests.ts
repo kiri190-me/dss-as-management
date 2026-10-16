@@ -19,6 +19,7 @@ import {
   cancelInventoryStockRequest,
   createInventoryStockRequest,
   fetchInventoryStockRequestsByIntake,
+  fillInventoryPartCustomerName,
 } from "@/lib/server/inventory-gateway";
 
 /**
@@ -79,6 +80,7 @@ export type CreateStockRequestActionResult =
 const NOT_LOGGED_IN = "로그인이 필요합니다.";
 const NO_PERMISSION = "부품 요청을 올릴 권한이 없습니다.";
 const NO_CANCEL_PERMISSION = "부품 요청을 거둘 권한이 없습니다.";
+const NO_FILL_PERMISSION = "고객사 품명을 채울 권한이 없습니다.";
 const CASE_NOT_FOUND = "이 수리 건을 찾을 수 없습니다.";
 
 export async function createInventoryStockRequestAction(input: {
@@ -199,4 +201,78 @@ export async function cancelInventoryStockRequestAction(input: {
   }
 
   return cancelInventoryStockRequest({ requestKey: input.requestKey.trim(), requesterSub: sub });
+}
+
+export type FillPartCustomerNameActionResult =
+  | {
+      ok: true;
+      /** 🔴 거짓이면 **이미 적혀 있어서 안 바꿨다**(오류가 아니다). 화면이 다른 말로 말한다. */
+      filled: boolean;
+      no: number;
+      partName: string;
+      /** 🔴 **그 부품의 지금 값.** 화면은 이 값을 그 자리에 그린다 — 보낸 값이 아니다. */
+      customerName: string;
+    }
+  | { ok: false; message: string };
+
+/**
+ * ============================================================================
+ * 비어 있는 **고객사 품명을 그 자리에서 채운다** (2026-10-16 사용자 요청 E)
+ * ============================================================================
+ * 🔴 **이것은 A/S 가 재고 관리의 자료를 고치는 첫 자리다.** 위 둘은 신청 표에 줄을 세우고
+ * 거둘 뿐이지만, 여기서는 **정본인 부품 표의 칸 하나**가 바뀐다. 그래서 세 가지를 지킨다 —
+ *
+ *  ㉠ **포털 번호는 세션에서 꺼낸다.** 저쪽 변경 이력에 「누가 채웠나」로 남는 값이라
+ *     (API.md 7-5절) 화면이 적어 보낸 번호를 실어 주면 남의 이름으로 자료가 고쳐진다.
+ *     그래서 이 액션도 거두기와 같이 **신청자를 받는 칸 자체가 없다.**
+ *  ㉡ **내용 규칙을 여기서 다시 적지 않는다.** 빈 값 · 공백만 · `-` 만 · 200자 초과를 저쪽이
+ *     **각각 다른 말**로 거절하고, 우리는 그 글자를 **그대로** 올린다. 여기서 미리 재어 우리
+ *     말로 바꾸면 자가 두 벌이 되고, 저쪽이 상한을 고치는 날 화면만 옛 규칙으로 막는다.
+ *     🔵 여기서 재는 것은 **모양**뿐이다 — 번호가 정수인가(주소에 박힌다), 글자가 글자인가.
+ *  ㉢ **권한은 이 칸을 그리는 울타리와 같다**(`inventory.requests` 쓰기). 부품 요청 칸에
+ *     들어올 수 있는 사람이 거기서 발견한 빈칸을 채우는 일이라 축이 같다.
+ *
+ * 🔵 **수리 건 id 를 받지 않는다.** 위 둘은 「이 건의 신청인가」를 재야 해서 받았지만, 부품은
+ *    건에 매이지 않은 **공용 자료**다 — 받아 봐야 아무것도 가릴 수 없고, 받는 칸이 있으면
+ *    언젠가 그것으로 뭔가를 가린다고 **착각**하게 된다.
+ * ============================================================================
+ */
+export async function fillInventoryPartCustomerNameAction(input: {
+  /** 재고 관리의 부품 번호. 🔴 주소에 박히므로 **정수인지 여기서 잰다.** */
+  no: number;
+  /** 🔴 사람이 친 글자 **그대로** 저쪽으로 간다(머리말 ㉡). */
+  customerName: string;
+}): Promise<FillPartCustomerNameActionResult> {
+  if (getAuthSource() !== "database") {
+    return { ok: false, message: "데이터베이스 저장 모드가 아닙니다." };
+  }
+  const session = await readSession();
+  if (!session) return { ok: false, message: NOT_LOGGED_IN };
+  if (session.approvalStatus !== "APPROVED") {
+    return { ok: false, message: "계정이 아직 승인되지 않았습니다." };
+  }
+
+  const actingUser = await resolveActingUserForSession(session);
+  if (!actingUser) return { ok: false, message: NOT_LOGGED_IN };
+  // 🔴 올리는 액션과 **같은 울타리**다(머리말 ㉢).
+  if (!(await hasPermission(actingUser, "inventory.requests", "WRITE"))) {
+    return { ok: false, message: NO_FILL_PERMISSION };
+  }
+
+  if (!Number.isInteger(input.no) || input.no < 1) {
+    return { ok: false, message: "재고 관리의 부품 번호를 확인할 수 없습니다." };
+  }
+  if (typeof input.customerName !== "string") {
+    return { ok: false, message: "요청 정보를 확인할 수 없습니다." };
+  }
+
+  // 🔴 포털 번호는 **세션의 사람**으로 읽는다(머리말 ㉠).
+  const sub = await getSsoSubjectForUser(actingUser.id);
+  if (!sub) return { ok: false, message: NO_PORTAL_ID_MESSAGE };
+
+  return fillInventoryPartCustomerName({
+    no: input.no,
+    customerName: input.customerName,
+    filledBy: { sub, name: actingUser.name },
+  });
 }

@@ -376,3 +376,93 @@ export async function cancelInventoryStockRequest(input: {
     statusLabel: typeof status.label === "string" ? status.label : "",
   };
 }
+
+// ---------------------------------------------------------------------------
+// 고객사 품명 채우기 — `POST /api/v1/parts/{no}/customer-name` (🔴 여기도 쓰기 토큰이다)
+// ---------------------------------------------------------------------------
+
+export type FillPartCustomerNameOutcome =
+  | {
+      ok: true;
+      /** 🔴 거짓이면 **이미 적혀 있어서 안 바꿨다** — 오류가 아니다(아래 머리말). */
+      filled: boolean;
+      no: number;
+      /** 그 부품의 **우리 품명**. 사람에게 「No. 165 AMP-… 의」라고 말할 수 있게 함께 받는다. */
+      partName: string;
+      /** 🔴 **그 부품의 지금 고객사 품명.** 채웠으면 보낸 값, 이미 있었으면 **먼저 적혀 있던 값**. */
+      customerName: string;
+    }
+  | { ok: false; message: string };
+
+/**
+ * 부품의 **비어 있는 고객사 품명을 채운다**(저쪽 API.md 7절, 2026-10-16 에 열린 통로).
+ *
+ * 🔴 **바깥이 재고 자료를 고치는 유일한 통로다.** 나머지 쓰기(신청 올리기·거두기)는 신청 표에
+ *    줄을 세울 뿐이지만, 여기서는 **정본인 부품 표의 칸 하나**가 바뀐다. 그래서 이 함수는
+ *    받은 값을 **다듬지도 자르지도 않고** 그대로 보낸다 — 빈 값 · `-` 만 · 200자 초과는 저쪽이
+ *    **각각 다른 말로** 거절하고, 그 글자를 그대로 사람에게 전하는 것이 이 조각의 일이다.
+ *    여기서 미리 재어 우리 말로 바꾸면 자가 두 벌이 되고, 저쪽이 규칙을 고치는 날 어긋난다.
+ *
+ * 🔴 **덮어쓰지 않는다.** 이미 값이 있으면 오류가 아니라 `filled: false` 와 **지금 값**이 온다
+ *    (올리기의 `created`, 거두기의 `cancelled` 와 같은 뜻의 칸). 🔵 그래서 **두 번 보내도
+ *    안전하다** — 두 번째는 방금 넣은 값을 `filled: false` 로 돌려받는다.
+ *
+ * 🔴 **없는 번호(404)와 숨긴 부품(410)도 각각 다른 말로** 온다. `callInventory` 의 4xx 갈래가
+ *    까닭이 적힌 응답을 `rejected` 로 살려 두므로 그 문구가 그대로 올라간다 — 앞은 번호를 고쳐
+ *    보내면 되는 일이고, 뒤는 재고 담당자에게 물어야 하는 일이라 뭉개면 사람이 가릴 수 없다.
+ *
+ * 🔴 **`filled` 가 빠져 있으면 「이미 있었다」로 본다.** 거두기(`cancelled`)와 기본값이 반대인
+ *    까닭: 거기서는 어느 쪽이든 **거둬진 상태**라 말투만 갈렸지만, 여기서 「채웠습니다」는
+ *    **정본을 바꿨다는 주장**이다. 모르면서 그 말을 하지 않는다.
+ */
+export async function fillInventoryPartCustomerName(input: {
+  /** 🔴 **재고 관리의 부품 번호**(1 이상의 정수). 주소에 박히므로 부르는 쪽이 모양을 재고 온다. */
+  no: number;
+  /** 🔴 사람이 친 글자 **그대로**. 다듬는 일도 거절하는 일도 저쪽 몫이다(머리말). */
+  customerName: string;
+  /** 🔴 `sub` 은 **포털 번호**. 저쪽 변경 이력에 「누가 채웠나」로 남는다(API.md 7-5절). */
+  filledBy: { sub: string; name: string };
+}): Promise<FillPartCustomerNameOutcome> {
+  const call = await callInventory(`/api/v1/parts/${input.no}/customer-name`, {
+    token: "write",
+    method: "POST",
+    timeoutMs: WRITE_TIMEOUT_MS,
+    body: {
+      customerName: input.customerName,
+      filledBy: { sub: input.filledBy.sub, name: input.filledBy.name },
+    },
+  });
+
+  if (!call.ok) {
+    return {
+      ok: false,
+      message: call.kind === "rejected" ? call.message : inventoryUnreachableMessage(call.reason),
+    };
+  }
+
+  const json = call.json;
+  const o = (json && typeof json === "object" ? json : {}) as { filled?: unknown; part?: unknown };
+  const part = (o.part && typeof o.part === "object" ? o.part : {}) as Record<string, unknown>;
+  const customerName = typeof part.customerName === "string" ? part.customerName.trim() : "";
+
+  /**
+   * 🔴 **지금 값을 못 읽었으면 성공이라고 말하지 않는다.** 이 통로를 부르는 까닭의 절반이
+   * 「그 자리에서 값이 보이게」인데, 보일 값이 없으면 화면은 여전히 「고객사 품명 없음」을 그린
+   * 채 「채웠습니다」만 띄운다 — 사람은 채워진 줄 알고 견적서로 가서 또 막힌다.
+   */
+  if (customerName === "") {
+    console.error("[inventory] 고객사 품명 채우기 응답 모양을 읽지 못했습니다.");
+    return {
+      ok: false,
+      message: "재고 관리의 응답을 읽지 못했습니다. 화면을 새로고침해 지금 값을 확인해 주세요.",
+    };
+  }
+
+  return {
+    ok: true,
+    filled: o.filled === true,
+    no: typeof part.no === "number" ? part.no : input.no,
+    partName: typeof part.name === "string" ? part.name : "",
+    customerName,
+  };
+}

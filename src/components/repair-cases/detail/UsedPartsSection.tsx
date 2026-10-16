@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { PartPickerRow } from "@/lib/db/queries/inventory";
+import type { PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
+import type { InventoryResult } from "@/lib/domain/inventory-gateway";
 import type { RepairCaseUsedPartRow } from "@/lib/db/queries/repair-case-used-parts";
 import type { UsedPartsWriteGate } from "@/lib/auth/repair-case-used-parts-authorization";
 import UsedPartsEditForm from "@/components/repair-cases/detail/edit/UsedPartsEditForm";
@@ -49,8 +50,12 @@ export default function UsedPartsSection({
   hasPartRequestHistory: boolean;
   /** 🔴 서버가 내린 판정. 화면은 이것만 본다(위 머리말). */
   writeGate: UsedPartsWriteGate;
-  /** 부품 마스터 — 품명 칸에서 찾아 고르는 데 쓴다. 적을 수 없는 건에는 빈 목록이 온다. */
-  partOptions: readonly PartPickerRow[];
+  /**
+   * 품명 칸에서 찾아 고를 부품 — 🔴 **재고 관리에서 온다**(2026-10-16).
+   * 🔴 못 받아 온 갈래를 그대로 폼까지 내려보낸다 — 「없습니다」와 「확인하지 못했습니다」는
+   * 다른 말이다(폼의 그 prop 머리말).
+   */
+  partOptions: InventoryResult<readonly PartPickerRow[]>;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const hasRows = rows.length > 0;

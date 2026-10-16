@@ -174,3 +174,137 @@ describe("O/H 한 번에 담기 — 안 이어진 줄의 말을 그대로 살린
     assert.match(source, /item\.linked && item\.no !== null/);
   });
 });
+
+/**
+ * ============================================================================
+ * 🔴 부품 줄에 **그 부품의 모든 것**이 보인다 (2026-10-16 요청 B·C)
+ * ============================================================================
+ * 「부품 요청에 뜨는 정보가 그 부품의 모든 것이면 좋겠다」 + 「검색할 때 찾아지는 목록의
+ * 내용에도 고객사 품명을 더해 달라」. 규칙 자체(무엇을 · 어떤 이름표로 · `-` 는 값이 아니다)는
+ * 순수 쪽이 재고(`lib/domain/inventory-gateway.test.ts`), 여기서는 **화면이 그것을 실제로
+ * 쓰는가**를 본다 — 규칙은 맞는데 화면이 안 부르면 시험이 비어 있는 것과 같다.
+ * ============================================================================
+ */
+describe("🔴 부품 줄에 그 부품의 모든 것 — 찾은 줄과 담은 줄 둘 다", () => {
+  test("다섯 가지가 그려질 길이 다 있다 — 품명 · 품명2 · 고객사 품명 · 교산 품번 · 도번", () => {
+    assert.match(source, /inventoryPartSpec/, "품명2를 그리지 않는다");
+    assert.match(source, /renderCustomerNameLine/, "고객사 품명 줄이 없다");
+    assert.match(source, /inventoryPartIdLabels/, "교산 품번 · 도번을 그리지 않는다");
+  });
+
+  test("🔴 **값이 있는 것만** 그린다 — 자를 화면이 다시 적지 않고 도메인 것을 쓴다", () => {
+    // 🔴 `-` 가 값으로 세어지면 「교산 품번 -」 같은 줄이 깔리고 정작 있는 값이 묻힌다.
+    //    화면이 `part.name2` · `part.customerName` 을 **날것으로** 그리면 그 자가 새 버린다.
+    assert.doesNotMatch(source, /\{part\.name2\}/, "품명2를 날것으로 그린다");
+    assert.doesNotMatch(source, /\{part\.customerName\}/, "고객사 품명을 날것으로 그린다");
+    assert.doesNotMatch(source, /\{part\.kyosanPartNo\}|\{part\.drawingNo\}/, "품번·도번을 날것으로 그린다");
+  });
+
+  test("🔵 담은 줄은 **번호로 되짚어** 그린다 — 베껴 담으면 채운 뒤에도 옛 값이 남는다", () => {
+    assert.match(source, /const partByNo = new Map\(partList\.map\(\(part\) => \[part\.no, part\]\)\);/);
+    assert.match(source, /const part = partByNo\.get\(line\.no\);/);
+    // 🔴 못 되짚은 줄에 이름을 지어내지 않는다 — 담을 때 적어 둔 이름만 그린다.
+    assert.match(source, /\{part && renderCustomerNameLine\(part, \{ canFill: false \}\)\}/);
+  });
+
+  test("🔴 찾는 칸의 안내가 다섯 가지를 그대로 적는다 — 쳐서 찾아지는 것과 같아야 한다", () => {
+    assert.match(source, /품명 \/ 품명2 \/ 고객사 품명 \/ 교산 품번 \/ 도번/);
+    // 거르는 자는 도메인 하나다(저쪽 `q` 와 같은 잣대).
+    assert.match(source, /filterInventoryParts\(partList, search\)/);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 고객사 품명을 **그 자리에서 채운다** (2026-10-16 요청 E)
+ * ============================================================================
+ * 견적서에서 「고객사 품명을 설정해 주세요」로 막힌 사람이 **여기서 채우고 돌아가면 고를 수
+ * 있게** 되는, A 와 한 쌍인 기능이다. 붙잡는 것 다섯:
+ *  ㉠ **빈 칸에만** 길이 선다 — 이 통로는 채우기만 하고 덮어쓰지 않는다.
+ *  ㉡ **되돌릴 수 없는 일이라 창에서 한 번 더** 누른다(이 저장소의 확인 창 관행).
+ *  ㉢ 🔴 **거절은 저쪽 문구 그대로, 창을 닫지 않고** — 닫히면 채워진 줄 안다.
+ *  ㉣ 🔴 **「이미 있습니다」는 거절과 다른 말**이다 — 읽는 알림으로 간다(오류가 아니다).
+ *  ㉤ 🔴 **성공하면 그 자리에서 값이 보인다** — 저쪽이 돌려준 지금 값으로.
+ * ============================================================================
+ */
+describe("🔴 고객사 품명 채우기 — 그 자리에서", () => {
+  const fillFn = source.slice(source.indexOf("async function handleFillConfirm"));
+
+  test("㉠ 비어 있을 때만 길이 선다 — 값이 있으면 그 값만 보인다", () => {
+    assert.match(source, /if \(customerName !== ""\) \{\s*return \(/);
+    assert.match(source, /고객사 품명 채우기\s*<\/button>/, "[고객사 품명 채우기] 단추가 없다");
+    // 🔴 「없음」으로 끝내지 않는다 — 견적서에서 막히는 까닭이 이 칸이다.
+    assert.match(source, /CUSTOMER_NAME_EMPTY_NOTICE/);
+  });
+
+  test("㉠ 🔵 담은 줄에는 단추를 두지 않는다 — 수량·유상무상을 고르는 표다", () => {
+    assert.match(source, /canFill: requesterGate\.ok/, "찾은 줄에 단추가 안 선다");
+    assert.match(source, /canFill: false/, "담은 줄에 단추가 섰다");
+  });
+
+  test("㉡ 창에서 한 번 더 누른 뒤에야 서버 액션을 부른다", () => {
+    assert.match(source, /setFillTarget\(part\)/, "창을 거치지 않고 바로 채우고 있다");
+    assert.match(source, /<FillCustomerNameDialog/);
+    assert.match(source, /fillInventoryPartCustomerNameAction\(\{/);
+    // 🔴 화면이 채운 사람을 적어 보내지 않는다 — 포털 번호는 서버가 세션에서 꺼낸다.
+    assert.doesNotMatch(source, /filledBy/, "화면이 채운 사람을 보낸다");
+  });
+
+  test("🔴 창이 **표 밖**에 있다 — 표 칸 안에서 태어나면 부모 칸의 CSS 가 따라온다", () => {
+    const dialogAt = source.indexOf("<FillCustomerNameDialog");
+    const tableEnd = source.indexOf("</table>");
+    assert.ok(tableEnd >= 0 && dialogAt > tableEnd, "채우기 창이 표 안에 있다");
+  });
+
+  test("㉢ 🔴 거절하면 저쪽 문구를 **그대로** 보이고 창을 닫지 않는다", () => {
+    const failure = fillFn.indexOf("if (!result.ok) {");
+    assert.ok(failure >= 0, "채우기 실패를 가르는 자리가 없다");
+    const branch = fillFn.slice(failure, fillFn.indexOf("return;", failure));
+    assert.match(branch, /setFillError\(result\.message\)/, "거절 문구를 그대로 들지 않는다");
+    assert.doesNotMatch(branch, /router\.refresh|showSavePopup|setFillTarget\(null\)/);
+  });
+
+  test("㉢ 🔴 보낸 글자를 화면이 미리 거르지 않는다 — 저쪽이 각각 다른 말로 거절한다", () => {
+    // 🔵 [채우기]를 **빈 칸일 때 잠그는 것**만 한다(누르나 마나 한 왕복을 아낀다).
+    assert.match(source, /disabled=\{isSubmitting \|\| value\.trim\(\) === ""\}/);
+    // 🔴 길이·`-` 를 화면이 재면 자가 두 벌이 되고, 저쪽이 규칙을 고치는 날 여기만 옛 규칙이다.
+    const box = source.slice(source.indexOf('id="fill-customer-name-input"'), source.indexOf("{errorMessage && ("));
+    assert.doesNotMatch(box, /maxLength/, "입력칸이 글자 수를 잘라 받는다");
+    // 🔵 `value` 는 이 창의 입력 상태다 — 그 글자의 길이를 재거나 `-` 를 가려내면 자가 두 벌이다.
+    assert.doesNotMatch(box, /\.length|DASH|\/\^-/, "화면이 친 글자의 길이나 `-` 를 재고 있다");
+    assert.doesNotMatch(source, /customerName\.length|CUSTOMER_NAME_MAX/, "화면이 길이 상한을 들고 있다");
+    // 친 글자가 **손대지 않은 채** 액션으로 간다.
+    assert.match(source, /fillInventoryPartCustomerNameAction\(\{\s*no: fillTarget\.no,\s*customerName,\s*\}\)/);
+  });
+
+  test("㉣ 🔵 이미 적혀 있던 것은 오류가 아니라 **읽는 알림**으로 말한다", () => {
+    assert.match(fillFn, /if \(!result\.filled\)/);
+    assert.match(fillFn, /customerNameAlreadySetLines/);
+    assert.match(source, /<NoticePopup/);
+    // 🔴 거절 자리(setFillError)로 보내면 「틀렸다」로 읽힌다 — 할 일이 다르다.
+    const already = fillFn.indexOf("if (!result.filled)");
+    const branch = fillFn.slice(already, fillFn.indexOf("return;", already));
+    assert.doesNotMatch(branch, /setFillError/);
+  });
+
+  test("㉤ 🔴 성공하면 **저쪽이 돌려준 지금 값**이 그 자리에 보인다 — 보낸 값이 아니다", () => {
+    assert.match(fillFn, /setFilledCustomerNames\(\(prev\) => \(\{ \.\.\.prev, \[result\.no\]: result\.customerName \}\)\);/);
+    assert.match(source, /filledCustomerNames\[part\.no\] \?\? inventoryPartCustomerName\(part\)/);
+    // 서버가 가진 목록도 따라오게 한다 — 위 값은 이 화면이 열려 있는 동안만 산다.
+    assert.match(fillFn, /router\.refresh\(\)/);
+  });
+
+  test("㉤ 🔴 실패한 뒤에 값을 그려 두지 않는다 — 확인 순서가 거꾸로가 아니다", () => {
+    const failure = fillFn.indexOf("if (!result.ok) {");
+    const paint = fillFn.indexOf("setFilledCustomerNames(");
+    assert.ok(failure >= 0 && paint > failure, "실패를 가르기 전에 값을 그린다");
+  });
+
+  test("🔴 채우기 창이 **덮어쓰지 않는다**는 것을 미리 말한다", () => {
+    assert.match(source, /비어 있을 때만 채워집니다/);
+    assert.match(source, /고객사에 나가는 서류/);
+    // 🔴 다른 부품으로 다시 열 때 앞 글자가 남아 있으면 엉뚱한 이름이 박힌다 — **여는 자리**
+    //    에서 비운다(창이 제 안에서 뒤늦게 비우면 그 한 번 그리는 사이에 눌릴 수 있다).
+    assert.match(source, /setFillValue\(""\);\s*setFillTarget\(part\);/);
+  });
+});

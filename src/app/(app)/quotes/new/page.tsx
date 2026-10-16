@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import QuoteEditForm from "@/components/quotes/QuoteEditForm";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
-import { getPartPickerList, getPartPickerUnitPrices } from "@/lib/db/queries/inventory";
+import { fetchInventoryParts } from "@/lib/server/inventory-gateway";
+import { toPartPickerOptions, toPartPickerPriceRows } from "@/lib/domain/inventory-gateway";
 import {
   readAllQuoteTemplateHeaders,
   readAllQuoteWorkSectionDefaults,
@@ -80,19 +81,25 @@ export default async function NewQuotePage({
   // 양식 머리말은 **저장 전 미리보기**가 쓴다(회사 정보·기본 문구·계좌).
   // 작업 내역 기본값은 **머리글까지** 받는다 — 폼이 칸을 채우는 데는 줄 목록이면
   // 되지만, 저장 전 미리보기가 그 양식의 머리글로 작업 내역을 그려야 한다.
-  // 부품 마스터는 품명 칸에서 찾아 고르는 데 쓴다 — **재고 · 소유구분이 없는 가벼운
-  // 조회**다(queries/inventory.ts 의 getPartPickerList 머리말). 이미 나란히 도는
-  // Promise.all 에 태워 왕복을 늘리지 않는다.
-  // 단가는 **부품을 고를 때 단가 칸까지 채우는** 데 쓴다 — 단가가 적힌 부품만 열몇 줄이라
-  // 같은 묶음에 하나 더 태운다(getPartPickerUnitPrices 머리말). 고를 때마다 서버를 다시
-  // 부르지 않는 쪽이다.
-  const [repairLabor, printHeaders, workScopeDefaults, partOptions, partPrices] = await Promise.all([
+  // 부품은 품명 칸에서 찾아 고르는 데 쓴다 — 🔴 **2026-10-16 부터 재고 관리에서 온다**
+  // (A/S 의 부품 표는 다음 조각에서 걷어낸다). 부르는 자리는 부품 요청 칸이 쓰는 그
+  // 통로 하나뿐이고(lib/server/inventory-gateway.ts), 이미 나란히 도는 Promise.all 에
+  // 태워 왕복을 늘리지 않는다.
+  // 🔴 **못 받아 온 것을 빈 목록으로 바꾸지 않는다** — 갈래를 그대로 폼까지 내려보내
+  //    「없습니다」가 아니라 「확인하지 못했습니다」로 말하게 한다(같은 파일 머리말).
+  // 단가는 **부품을 고를 때 단가 칸까지 채우는** 데 쓴다. 같은 응답의 견적가 · O/H 견적가를
+  // 옮겨 담을 뿐이라 통로를 한 번 더 두드리지 않는다(toPartPickerPriceRows 머리말).
+  const [repairLabor, printHeaders, workScopeDefaults, inventoryParts] = await Promise.all([
     listRepairLabor(),
     readAllQuoteTemplateHeaders(),
     readAllQuoteWorkSectionDefaults(),
-    getPartPickerList(),
-    getPartPickerUnitPrices(),
+    fetchInventoryParts(),
   ]);
+
+  const partOptions = toPartPickerOptions(inventoryParts);
+  // 🔵 못 받아 왔으면 단가 목록도 비어 있다 — 그때는 고를 수조차 없고, 빈 목록은 고르개에
+  //    「단가를 정하지 않았다」와 같아서 **칸을 비워 둔다**(0 을 붓지 않는다).
+  const partPrices = inventoryParts.status === "ok" ? toPartPickerPriceRows(inventoryParts.value) : [];
 
   const query = searchParams ? await searchParams : undefined;
   const link = parseNewQuoteLink(query);

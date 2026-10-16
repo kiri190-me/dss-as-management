@@ -228,8 +228,18 @@ describe("사용 부품 — 적고 저장하기", () => {
       formFlat,
       /import \{ PartSuggestionList, filterPartOptions, partPickPatch, \} from "@dss\/core\/ui\/inventory\/part-picker";/
     );
-    assert.match(formFlat, /<PartSuggestionList options=\{filterPartOptions\(partOptions, line\.partNameText\)\}/);
-    assert.match(formFlat, /onPick=\{\(option\) => \{ updateLine\(line\.key, partPickPatch\(option\)\);/);
+    assert.match(formFlat, /<PartSuggestionList options=\{filterPartOptions\(partOptionRows, line\.partNameText\)\}/);
+    /**
+     * 🔴 2026-10-16 — 고르는 대상이 **재고 관리의 부품**으로 바뀌었다. 그 부품에는 A/S
+     *    `parts.id`(UUID)가 없어서 고른 줄의 번호를 `part_id` 에 넣지 않고 **비운다** —
+     *    넣으면 저장이 거절된다(validation/repair-case-used-parts-input.ts 가 UUID 를 본다).
+     *    품명은 글자로 저장되므로 화면과 옛 줄은 그대로다.
+     */
+    assert.match(
+      formFlat,
+      /onPick=\{\(option\) => \{ updateLine\(line\.key, \{ \.\.\.partPickPatch\(option\),/
+    );
+    assert.match(formFlat, /partId: null, \}\); setPickerKey\(null\); \}\}/);
   });
 
   test("🔴 고르면 붙고, 글자를 고치면 풀린다 — 마스터에 없는 부품은 손으로 적는다", () => {
@@ -313,7 +323,13 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
       pageFlat,
       /resolved\.source === "DATABASE" \? getRepairCaseUsedPartsView\(resolved\.id, actingUser\) : null/
     );
-    assert.match(pageFlat, /resolved\.source === "DATABASE" \? getPartPickerList\(\) : \[\]/);
+    /**
+     * 🔴 품명 칸에서 고를 부품은 2026-10-16 부터 **재고 관리**에서 온다(A/S 의 부품 표는
+     * 다음 조각에서 걷어낸다). MOCK · LOCAL_DEMO 건에는 이 칸 자체가 그려지지 않으므로
+     * 부르지 않는다 — 🔵 그 자리의 빈 목록은 **실패를 접은 것이 아니다**.
+     */
+    assert.match(pageFlat, /resolved\.source === "DATABASE" \? \(partRequestData\?\.parts \?\? fetchInventoryParts\(\)\)/);
+    assert.match(pageFlat, /\{ status: "ok", value: \[\] \} satisfies InventoryResult<InventoryPart\[\]>/);
   });
 
   test("🔴 기존 Promise.all 에 태웠다 — 왕복이 늘지 않았다", () => {
@@ -327,12 +343,14 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
       bundle.includes("getRepairCaseUsedPartsView(resolved.id, actingUser)"),
       "조회가 기존 Promise.all 묶음 안에 있어야 한다"
     );
-    assert.ok(bundle.includes("getPartPickerList()"), "부품 마스터도 같은 묶음 안에 있어야 한다");
+    assert.ok(bundle.includes("fetchInventoryParts()"), "고를 부품도 같은 묶음 안에 있어야 한다");
 
     // 묶음 밖에서 따로 기다리면 왕복이 하나 늘어난다.
-    assert.ok(!/await getRepairCaseUsedPartsView|await getPartPickerList/.test(pageCode));
+    assert.ok(!/await getRepairCaseUsedPartsView|await fetchInventoryParts/.test(pageCode));
     assert.equal(pageCode.match(/getRepairCaseUsedPartsView\(/g)?.length, 1);
-    assert.equal(pageCode.match(/getPartPickerList\(/g)?.length, 1);
+    // 🔴 한 번뿐이다 — 부품 요청 칸이 이미 받아 왔으면 그 목록을 그대로 쓴다(같은 통로를
+    //    한 화면에서 두 번 두드리지 않는다).
+    assert.equal(pageCode.match(/fetchInventoryParts\(/g)?.length, 1);
   });
 
   test("결과를 상세 화면으로 넘긴다", () => {

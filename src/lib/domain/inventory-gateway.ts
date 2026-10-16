@@ -24,11 +24,26 @@
  * 보고 한글을 다시 지어내지 않는다 — 두 화면이 다른 말을 하면 같은 신청이 다른 일로 보이고,
  * 저쪽이 말을 바꾸는 날 이쪽만 옛말을 한다. 「마감」은 상태값이 아니라 `closed` 칸이다.
  *
+ * ── 부품 고르개도 여기를 지난다 (2026-10-16) ────────────────────────────
+ * 견적서의 「부품 비용」과 수리 건의 「사용 부품」이 쓰는 고르개도 이제 재고 관리의 부품을
+ * 본다. 받아 온 `InventoryPart` 에서 **고르개가 받는 줄**로 옮기는 자리가 아래
+ * `toPartPickerRows` 이고, 거기서 재고 · 소유 · 비고를 떼어 낸다(그 함수의 머리말).
+ *
  * ── 🔴 소유를 고르지 않는다 ──────────────────────────────────────────────
  * 재고 관리에서는 **소유가 다르면 부품 번호가 다르다**. 번호를 고르는 순간 소유가 정해지므로
  * 화면에는 그 부품의 소유를 **보여 주기만** 한다(A/S 옛 표의 소유구분 고르개와 다른 점이다).
  * ============================================================================
  */
+
+/* 부품 고르개가 받는 줄의 모양. 🔴 **형만 빌린다** — 이 파일은 순수하게 남는다(고르개 쪽
+   `part-picker-rows.ts` 도 react 도 DB 도 물지 않는 형 선언뿐이다). 아래 toPartPickerRows
+   가 그 모양으로 옮긴다. */
+import type { PartPickerPriceRow, PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
+/* 🔴 **칸에 값이 들어 있는가를 재는 자(`-` 는 값이 아니다)는 한 벌이어야 한다.** 고르개도
+   이 화면도 같은 칸을 보고 「있다/없다」를 말하는데 자가 둘이면, 한쪽은 고를 수 있다고 그리고
+   다른 쪽은 비었다고 말한다. 그래서 형 곁에 있는 그 함수를 **빌려 쓴다** — 그 파일은 react 도
+   DB 도 물지 않는 순수 모듈이라 이 파일이 순수하게 남는다. */
+import { partFieldValue } from "@dss/core/ui/inventory/part-picker-rows";
 
 /** 못 받아 온 까닭. 🔴 전부 **「없다」가 아니라 「모른다」**다. */
 export type InventoryUnreachableReason =
@@ -190,6 +205,14 @@ export type InventoryPart = {
   note: string;
   /** 🔴 **보여 주기만 한다.** 번호를 고르는 순간 정해지는 값이지 고르는 값이 아니다(머리말). */
   owner: { code: string; label: string };
+  /**
+   * 견적가(언제나 원). 🔴 **`null` 은 「아직 정하지 않았다」이고 `0`(무상)과 다르다** —
+   * 저쪽 API.md 2절이 그 둘을 갈라 적어 두었다. `?? 0` 으로 뭉개면 정하지 않은 부품이
+   * 0원으로 청구되고, 받은 사람은 무상으로 약속받은 것으로 읽는다.
+   */
+  quotePrice: number | null;
+  /** O/H 견적가(원). 같은 규칙이고, 🔴 없을 때 **견적가로 때우지 않는다**(아래 고르개 쪽). */
+  overhaulQuotePrice: number | null;
 };
 
 function str(value: unknown): string {
@@ -204,6 +227,15 @@ function codeLabel(value: unknown): { code: string; label: string } {
 
 function positiveInt(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 ? value : null;
+}
+
+/**
+ * 금액 한 칸. 🔴 **`0` 과 「없음」을 가른다** — 숫자면 그대로(0 도 값이다), 숫자가 아니면
+ * (빠졌거나 `null` 이거나 글자면) 「정하지 않았다」다. `|| null` 꼴을 쓰면 무상으로 정해 둔
+ * `0` 이 「안 정함」으로 뒤집힌다(저쪽 API.md 2절이 둘 다 못 박았다).
+ */
+function money(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 /**
@@ -234,6 +266,9 @@ export function parseInventoryPartsResponse(json: unknown): InventoryPart[] | nu
       quantity: typeof o.quantity === "number" && Number.isFinite(o.quantity) ? o.quantity : 0,
       note: typeof o.note === "string" ? o.note : "",
       owner: codeLabel(o.owner),
+      // 🔴 `?? 0` 도 `|| null` 도 쓰지 않는다 — 가르는 일은 money 한 곳에서 한다.
+      quotePrice: money(o.quotePrice),
+      overhaulQuotePrice: money(o.overhaulQuotePrice),
     });
   }
   return parts;
@@ -242,6 +277,84 @@ export function parseInventoryPartsResponse(json: unknown): InventoryPart[] | nu
 /** 비고의 **첫 줄**. 같은 품명이 여럿일 때 사람이 가르는 단서다(API.md 2절). */
 export function inventoryPartNoteFirstLine(part: Pick<InventoryPart, "note">): string {
   return part.note.split(/\r?\n/, 1)[0]?.trim() ?? "";
+}
+
+// ---------------------------------------------------------------------------
+// 부품 요청 칸에 **그 부품의 모든 것**을 보인다 (2026-10-16 사용자 요청 B·C)
+// ---------------------------------------------------------------------------
+
+/**
+ * ============================================================================
+ * 「값이 있는 것만」 — 🔴 `-` 는 값이 아니다
+ * ============================================================================
+ * 사용자 요청: 「부품 요청에 뜨는 정보가 그 부품의 **모든 것**(고객사 품명 · 품명 · 품명2 ·
+ * 교산 품번 · 도번)이면 좋겠다.」 그대로 다 적으면 줄이 길어져 **아무것도 안 읽히는** 쪽으로
+ * 망가진다. 그래서 거는 조건이 둘이다 —
+ *
+ *  ㉠ 🔴 **빈 칸은 그리지 않는다.** 「교산 품번 없음 · 도번 없음」이 줄줄이 적히면 정작 있는
+ *     값이 묻힌다. 이 자료는 엑셀에서 넘어와 **빈칸 대신 `-` 가 적힌 줄이 많아서**, 다듬은
+ *     글자가 비었는가만 봐서는 모자라다 — `-` 만 적힌 칸도 **없는 칸**으로 센다
+ *     (`@dss/core` 의 `partFieldValue`. 재고 관리도 같은 자를 쓴다 — 저쪽 `DASH_ONLY`).
+ *  ㉡ **이름표를 단다.** `KY-7788 · DWG-1001` 처럼 값만 이으면 어느 것이 교산 품번이고 어느
+ *     것이 도번인지 모른다. 사람이 그 둘을 서로 다른 데 쓰므로 한 글자씩 붙여 둔다.
+ *
+ * 🔵 **그리는 모양은 화면이 정한다.** 여기서는 「무엇을 · 어떤 이름표로 · 어떤 차례로」까지만
+ *    정하고, 줄을 어떻게 나눌지는 PartRequestSection 이 정한다 — 그 덕에 이 규칙에 React 가
+ *    없는 시험이 붙는다.
+ * ============================================================================
+ */
+export type InventoryPartLabel = { label: string; value: string };
+
+/**
+ * 그 부품의 **고객사 품명**. 없으면 빈 글자다 — 🔴 `-` 만 적힌 칸도 없는 것으로 센다(위 ㉠).
+ *
+ * 🔴 **우리 품명으로 때우지 않는다.** 이 값이 비었는지가 견적서에서 고를 수 있는지를 가르고
+ *    (고르개의 `canPickPartOption`), 채워 넣는 길을 그릴지도 가른다. 때우면 둘 다 조용히
+ *    막히거나 조용히 열린다.
+ */
+export function inventoryPartCustomerName(part: Pick<InventoryPart, "customerName">): string {
+  return partFieldValue(part.customerName);
+}
+
+/**
+ * 품명 곁에 적는 **나머지 이름들** — 교산 품번 · 도번. 값이 있는 것만 차례대로.
+ *
+ * 🔵 품명과 품명2 가 빠져 있는 까닭: 그 둘은 줄의 **머리**라 화면이 맨 앞에 따로 그린다
+ *    (`품명 · 품명2`). 고객사 품명도 빠져 있다 — 그것만 **채워 넣는 길**이 딸려 있어서
+ *    화면이 제 줄에 따로 그린다(위 `inventoryPartCustomerName`).
+ */
+export function inventoryPartIdLabels(
+  part: Pick<InventoryPart, "kyosanPartNo" | "drawingNo">
+): InventoryPartLabel[] {
+  return [
+    { label: "교산 품번", value: partFieldValue(part.kyosanPartNo) },
+    { label: "도번", value: partFieldValue(part.drawingNo) },
+  ].filter((item) => item.value !== "");
+}
+
+/** 품명2(규격). 🔴 여기도 `-` 는 없는 것이다 — 품명 뒤에 ` · -` 가 붙으면 읽는 눈을 뺏는다. */
+export function inventoryPartSpec(part: Pick<InventoryPart, "name2">): string {
+  return partFieldValue(part.name2);
+}
+
+/**
+ * 고객사 품명이 **비어 있을 때** 그 자리에 적는 말. 🔴 「없음」으로 끝내지 않고 **채울 수 있다는
+ * 것**까지 적는다 — 견적서에서 이 부품이 막히는 까닭이 바로 이 칸이고, 사람은 여기서 그것을
+ * 고칠 수 있다(아래 채우기 단추). 까닭 없이 「없음」만 적으면 담당자를 찾아다니게 된다.
+ */
+export const CUSTOMER_NAME_EMPTY_NOTICE = "고객사 품명 없음 — 견적서에서 이 부품을 고를 수 없습니다";
+
+/**
+ * 채우기가 **덮지 않고 돌아왔을 때** 할 말(저쪽 `filled: false`). 🔴 **거절과 다른 말이다** —
+ * 거절은 「보낸 값이 틀렸다」이고 이것은 「벌써 누가 채워 뒀다」라서, 사람이 할 일이 다르다
+ * (앞은 고쳐 보내는 일, 뒤는 그대로 쓰면 되는 일). 🔵 지금 값은 **저쪽이 돌려준 그 값**이다 —
+ * 우리가 보낸 값이 아니다(저쪽 API.md 7-3절).
+ */
+export function customerNameAlreadySetLines(part: { no: number; name: string; customerName: string }): string[] {
+  return [
+    `No. ${part.no} ${part.name} 의 고객사 품명은 이미 적혀 있습니다 — 「${part.customerName}」`,
+    "덮어쓰지 않았습니다. 이 이름을 고쳐야 하면 재고 관리 담당자에게 말씀해 주세요.",
+  ];
 }
 
 /**
@@ -262,6 +375,81 @@ export function filterInventoryParts(parts: readonly InventoryPart[], term: stri
       .toLowerCase();
     return words.every((word) => haystack.includes(word));
   });
+}
+
+// ---------------------------------------------------------------------------
+// 부품 고르개로 넘기는 줄 — 견적서의 「부품 비용」 · 수리 건의 「사용 부품」 (2026-10-16)
+// ---------------------------------------------------------------------------
+
+/**
+ * ============================================================================
+ * 재고 관리의 부품 → 부품 고르개가 받는 줄
+ * ============================================================================
+ * 고르개(`@dss/core/ui/inventory/part-picker.tsx`)는 **줄을 받아 그리기만** 한다. 그 줄을
+ * 어디서 읽어 오는가가 2026-10-16 에 바뀌었다 — A/S 제 부품 표(`parts`)에서 **재고 관리**로.
+ * 부품 마스터를 재고 관리 하나로 모으기로 한 2026-10-02 결정이고, A/S 의 재고 표는 다음
+ * 조각에서 걷어낸다. 그때 고르개가 그 표를 보고 있으면 **견적서와 사용 부품이 함께 멈춘다.**
+ *
+ * ── 🔴 **여기가 경계다** — 재고 · 소유 · 비고는 이 줄에 담지 않는다 ────────
+ * `InventoryPart` 에는 수량 · 소유 · 비고가 들어 있다(부품 요청 칸이 쓰는 값이다). 그 셋은
+ * 재고 담당의 정보라 견적서 · 사용 부품 화면으로 **내보내지 않는다** — 화면에서 안 그리는
+ * 것으로는 모자라다. props 는 브라우저로 그대로 나가므로, **여기서 떼어 내야** 안 나간다
+ * (고르개 머리말이 처음부터 못 박아 둔 그 경계다).
+ *
+ * ── 🔴 `id` 는 **재고 관리의 부품 번호(No.)** 다 ─────────────────────────
+ * 바깥에서 부품을 가리키는 값이 그것이다(저쪽 API.md 2절 — UUID 는 내주지 않는다). 글자로
+ * 담는 까닭은 고르개의 열쇠가 글자이기 때문이고, 단가 줄의 열쇠(`partId`)도 같은 값이다.
+ * 🔴 **이 값은 A/S 의 `parts.id` 가 아니다.** 그래서 폼이 이것을 `part_id`(FK)에 넣지
+ *    않는다 — 넣으면 저장이 거절된다(validation 이 UUID 를 본다).
+ * ============================================================================
+ */
+export function toPartPickerRows(parts: readonly InventoryPart[]): PartPickerRow[] {
+  return parts.map((part) => ({
+    id: String(part.no),
+    partName: part.name,
+    partSpec: part.name2,
+    /** 🔴 2026-10-16 에 거르는 칸으로 들어간 그 이름(저쪽 API.md 2절의 `customerName`). */
+    customerPartName: part.customerName,
+    drawingNo: part.drawingNo,
+    kyosanPartNo: part.kyosanPartNo,
+  }));
+}
+
+/**
+ * 받아 온 결과를 **갈래째** 옮긴다. 🔴 **못 받아 온 것을 빈 목록으로 바꾸지 않는다** —
+ * 바꾸면 화면이 「고를 부품이 하나도 없다」고 거짓말하고, 사람은 그 말을 믿고 손으로 적는
+ * 대신 「부품이 없어졌다」고 생각한다(이 파일 머리말의 그 규칙 그대로다).
+ */
+export function toPartPickerOptions(
+  result: InventoryResult<InventoryPart[]>
+): InventoryResult<PartPickerRow[]> {
+  return result.status === "ok" ? { status: "ok", value: toPartPickerRows(result.value) } : result;
+}
+
+/**
+ * 단가 줄 — 고르면 **단가 칸까지 채우는** 데 쓴다(견적서에만 있다).
+ *
+ * 🔴 **`null` 은 「정하지 않았다」라서 그대로 `null` 로 옮긴다.** 0 으로 채우면 그 부품이
+ *    0원으로 청구되고, 빈칸과 달리 아무도 눈치채지 못한다. `0`(무상)은 `"0"` 으로 남는다.
+ * 🔴 **둘 다 없는 부품은 아예 빼고 보낸다** — 고르개는 「줄이 없다 = 정하지 않았다」로 읽고
+ *    단가 칸을 비워 둔다(고르개의 `partPickUnitPrice`). 수백 줄 중 단가가 있는 것만 실린다.
+ * 🔵 숫자를 글자로 옮기는 까닭은 고르개가 DB 의 numeric(글자로 읽힌다)과 **같은 길**로
+ *    다루기 때문이다 — `toPriceFieldValue` 가 소수점을 지워 칸에 넣는다.
+ *
+ * 🔴 **이 목록은 단가 칸이 있는 화면에만 넘긴다.** 사용 부품 칸은 금액을 다루지 않으므로
+ *    받지 않는다 — 안 주면 고르개가 단가를 채우지 않는다(그 규약이 선택인 까닭).
+ */
+export function toPartPickerPriceRows(parts: readonly InventoryPart[]): PartPickerPriceRow[] {
+  const rows: PartPickerPriceRow[] = [];
+  for (const part of parts) {
+    if (part.quotePrice === null && part.overhaulQuotePrice === null) continue;
+    rows.push({
+      partId: String(part.no),
+      unitPrice: part.quotePrice === null ? null : String(part.quotePrice),
+      overhaulUnitPrice: part.overhaulQuotePrice === null ? null : String(part.overhaulQuotePrice),
+    });
+  }
+  return rows;
 }
 
 // ---------------------------------------------------------------------------

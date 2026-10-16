@@ -7,6 +7,7 @@ import {
   fetchInventoryOhTemplate,
   fetchInventoryParts,
   fetchInventoryStockRequestsByIntake,
+  fillInventoryPartCustomerName,
 } from "./inventory-gateway";
 
 /**
@@ -447,5 +448,170 @@ describe("거두기", () => {
     stubFetch(() => ({ status: 200, json: CANCELLED_BODY }));
     await cancelInventoryStockRequest(CANCEL_INPUT);
     assert.equal(calls[0].hasSignal, true);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 고객사 품명 채우기 — **바깥이 재고 자료를 고치는 유일한 통로** (2026-10-16)
+ * ============================================================================
+ * 위 셋과 무게가 다르다. 신청을 세우고 거두는 것은 신청 표에 줄을 더하는 일이지만, 여기서는
+ * **정본인 부품 표의 칸 하나**가 A/S 에서 들어온 글자로 바뀐다 — 그 값은 그대로 **고객사에
+ * 나가는 서류**에 찍힌다. 그래서 여기서 재는 것이 넷이다:
+ *
+ *  ㉠ 🔴 **쓰기 토큰**이다(읽기 토큰으로 두드리면 저쪽이 401 이다).
+ *  ㉡ 🔴 **보낸 글자를 다듬지도 자르지도 않는다** — 빈 값 · `-` 만 · 200자 초과를 저쪽이
+ *     **각각 다른 말**로 거절하고, 우리는 그 문구를 **그대로** 전한다. 여기서 미리 재어 우리
+ *     말로 바꾸면 자가 두 벌이 되고, 저쪽이 상한을 고치는 날 화면만 옛 규칙으로 막는다.
+ *  ㉢ 🔴 **덮어쓰지 않는다** — 이미 있으면 오류가 아니라 `filled: false` 와 **지금 값**이 온다.
+ *     그 값은 **우리가 보낸 값이 아니다**(저쪽 API.md 7-3절).
+ *  ㉣ 🔴 **지금 값을 못 읽으면 「채웠습니다」라고 말하지 않는다** — 그 말은 정본을 바꿨다는
+ *     주장이다. 화면은 그 값을 그 자리에 그려야 하는데, 없으면 「고객사 품명 없음」을 그린 채
+ *     「채웠습니다」만 띄우게 된다.
+ * ============================================================================
+ */
+describe("🔴 고객사 품명 채우기", () => {
+  const FILL_INPUT = {
+    no: 165,
+    customerName: "지어낸 조립품",
+    filledBy: { sub: "지어낸-포털번호", name: "홍길동" },
+  };
+  const FILLED_BODY = {
+    filled: true,
+    part: { no: 165, name: "지어낸-모델-A1", customerName: "지어낸 조립품" },
+  };
+
+  test("㉠ 🔴 **쓰기 토큰**으로 그 부품의 주소를 POST 한다 — 읽기 토큰이 아니다", async () => {
+    stubFetch(() => ({ status: 200, json: FILLED_BODY }));
+
+    await fillInventoryPartCustomerName(FILL_INPUT);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "POST");
+    assert.match(calls[0].url, /\/api\/v1\/parts\/165\/customer-name$/);
+    assert.equal(calls[0].headers.Authorization, `Bearer ${WRITE_TOKEN}`);
+    assert.notEqual(calls[0].headers.Authorization, `Bearer ${READ_TOKEN}`);
+    assert.equal(calls[0].hasSignal, true);
+  });
+
+  test("㉡ 저쪽이 받는 모양 그대로 보낸다 — 채울 이름과 **채운 사람** 둘뿐", async () => {
+    stubFetch(() => ({ status: 200, json: FILLED_BODY }));
+
+    await fillInventoryPartCustomerName(FILL_INPUT);
+
+    assert.deepEqual(calls[0].body, {
+      customerName: "지어낸 조립품",
+      filledBy: { sub: "지어낸-포털번호", name: "홍길동" },
+    });
+  });
+
+  test("㉡ 🔴 **다듬지도 자르지도 않는다** — 거르는 일은 저쪽 몫이다", async () => {
+    stubFetch(() => ({ status: 400, json: { error: "bad_request", message: "customerName 이 비어 있습니다." } }));
+
+    // 공백만 · `-` 만 · 아주 긴 글자 — 셋 다 **그대로** 나가야 한다.
+    for (const raw of ["   ", "-", "가".repeat(250)]) {
+      calls = [];
+      await fillInventoryPartCustomerName({ ...FILL_INPUT, customerName: raw });
+      assert.equal(
+        (calls[0].body as { customerName: string }).customerName,
+        raw,
+        `'${raw.slice(0, 12)}' 를 손봐서 보냈다`
+      );
+    }
+  });
+
+  test("㉢ 채웠으면 **지금 값**과 부품 이름을 들고 온다", async () => {
+    stubFetch(() => ({ status: 200, json: FILLED_BODY }));
+
+    const result = await fillInventoryPartCustomerName(FILL_INPUT);
+
+    assert.deepEqual(result, {
+      ok: true,
+      filled: true,
+      no: 165,
+      partName: "지어낸-모델-A1",
+      customerName: "지어낸 조립품",
+    });
+  });
+
+  test("㉢ 🔴 이미 있었으면 **오류가 아니고**, 돌려받는 것은 **먼저 적혀 있던 값**이다", async () => {
+    // 🔴 우리가 보낸 값이 아니다 — 둘을 뒤섞으면 화면이 「채웠다」고 그려 놓고 다른 이름이 남는다.
+    stubFetch(() => ({
+      status: 200,
+      json: { filled: false, part: { no: 165, name: "지어낸-모델-A1", customerName: "먼저 적혀 있던 이름" } },
+    }));
+
+    const result = await fillInventoryPartCustomerName(FILL_INPUT);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.ok ? result.filled : null, false);
+    assert.equal(result.ok ? result.customerName : null, "먼저 적혀 있던 이름");
+  });
+
+  test("㉣ 🔴 `filled` 가 빠져 있으면 **「채웠다」고 말하지 않는다**", async () => {
+    // 거두기(`cancelled`)와 기본값이 반대다 — 거기서는 어느 쪽이든 거둬진 상태라 말투만
+    // 갈렸지만, 여기서 「채웠습니다」는 **정본을 바꿨다는 주장**이다.
+    stubFetch(() => ({ status: 200, json: { part: { no: 165, name: "지어낸-모델-A1", customerName: "어떤 이름" } } }));
+
+    const result = await fillInventoryPartCustomerName(FILL_INPUT);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.ok ? result.filled : null, false);
+  });
+
+  test("㉣ 🔴 지금 값을 못 읽으면 **성공으로 접지 않는다**", async () => {
+    for (const json of [{ filled: true }, { filled: true, part: { no: 165, name: "x" } }, "<html>", null]) {
+      stubFetch(() => ({ status: 200, json }));
+      const result = await fillInventoryPartCustomerName(FILL_INPUT);
+      assert.equal(result.ok, false, JSON.stringify(json));
+    }
+  });
+
+  for (const [status, message] of [
+    [400, "customerName 이 「-」 뿐입니다. 재고 관리에서 「-」 는 **없음**을 뜻하므로 값으로 받지 않습니다."],
+    [400, "customerName 은 200자 이하여야 합니다 (받은 길이: 250). 잘라서 받지 않습니다 — 고객사에 나가는 이름입니다."],
+    [404, "No. 999 부품이 없습니다. GET /api/v1/parts 의 no 를 보내십시오."],
+    [410, "No. 86 는 숨긴(지운) 부품이라 고객사 품명을 채우지 않습니다. 재고 담당자에게 확인하십시오."],
+  ] as const) {
+    test(`㉡ 🔴 ${status} 로 거절당하면 저쪽 문구를 **그대로** 전한다 — 뭉개지 않는다`, async () => {
+      // 🔴 없는 번호(404)와 숨긴 부품(410)은 **고치는 길이 다르다** — 앞은 번호를 고쳐 보내면
+      //    되고 뒤는 재고 담당자에게 물어야 한다. 한 문장으로 접으면 가릴 길이 없다.
+      stubFetch(() => ({ status, json: { error: "x", message } }));
+
+      const result = await fillInventoryPartCustomerName({ ...FILL_INPUT, no: 999 });
+
+      assert.equal(result.ok, false);
+      assert.equal(result.ok ? null : result.message, message);
+    });
+  }
+
+  test("저쪽 통로가 닫혀 있으면(503) 「못 받아 왔다」 말투로 말한다", async () => {
+    stubFetch(() => ({ status: 503, json: { error: "api_closed" } }));
+
+    const result = await fillInventoryPartCustomerName(FILL_INPUT);
+
+    assert.equal(result.ok, false);
+    assert.equal(
+      result.ok ? null : result.message,
+      "재고 관리 쪽에서 통로가 닫혀 있습니다(저쪽 토큰이 설정되지 않았습니다)."
+    );
+  });
+
+  test("🔴 저쪽이 꺼져 있어도 채워진 것처럼 보이지 않는다", async () => {
+    stubFetch(() => ({ status: 500, json: {} }));
+
+    const result = await fillInventoryPartCustomerName(FILL_INPUT);
+
+    assert.equal(result.ok, false);
+  });
+
+  test("쓰기 토큰이 없으면 두드리지도 않는다", async () => {
+    process.env.INVENTORY_WRITE_TOKEN = "";
+    stubFetch(() => ({ status: 200, json: FILLED_BODY }));
+
+    const result = await fillInventoryPartCustomerName(FILL_INPUT);
+
+    assert.equal(result.ok, false);
+    assert.equal(calls.length, 0);
   });
 });

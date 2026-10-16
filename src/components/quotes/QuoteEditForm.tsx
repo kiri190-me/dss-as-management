@@ -60,9 +60,11 @@ import {
   filterPartOptions,
   partPickPatch,
 } from "@dss/core/ui/inventory/part-picker";
-/* 조회 자체는 서버 것이지만 줄의 생김새는 여기서도 알아야 한다 — 형 선언만 가져오므로
-   번들에는 아무것도 실리지 않는다(PartRequestSection 이 PartListRow 를 받는 것과 같다). */
-import type { PartPickerPriceRow, PartPickerRow } from "@/lib/db/queries/inventory";
+/* 줄의 생김새는 고르개 곁(서브모듈)에 있다 — 형 선언만 가져오므로 번들에는 아무것도
+   실리지 않는다. 🔴 2026-10-16 부터 이 줄들은 A/S 의 부품 표가 아니라 **재고 관리**에서
+   온다(서버 쪽 lib/domain/inventory-gateway.ts 의 toPartPickerRows). */
+import type { PartPickerPriceRow, PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
+import { inventoryUnreachableMessage, type InventoryResult } from "@/lib/domain/inventory-gateway";
 import type {
   QuoteTemplateHeader,
   QuoteWorkScopeSectionView,
@@ -559,23 +561,29 @@ export default function QuoteEditForm({
    */
   repairLabor: RepairLaborKindRow[];
   /**
-   * 부품 마스터 — 품명 칸에서 찾아 고르는 데 쓴다(queries/inventory.ts 의 getPartPickerList).
+   * 품명 칸에서 찾아 고를 부품 — 🔴 **재고 관리에서 온다**(2026-10-16, 사용자 결정
+   * 「부품 마스터는 재고 관리 하나로」). 서버가 한 번 받아 고르개의 줄로 옮겨 넘긴다
+   * (lib/domain/inventory-gateway.ts 의 toPartPickerOptions).
    *
-   * 🔴 **재고 · 소유구분 · 내부 비고가 없는 가벼운 목록이다.** 그 값들은 재고 담당의
-   * 정보라 견적서 화면으로 내보내지 않는다 — 그래서 재고를 조인하는 getPartList 대신
-   * 형제 조회를 따로 두었다(그 함수의 머리말).
+   * 🔴 **재고 · 소유 · 비고가 없는 줄이다.** 그 값들은 재고 담당의 정보라 견적서 화면으로
+   * 내보내지 않는다 — 떼어 내는 자리는 그 옮기는 함수다(props 는 브라우저로 나간다).
    *
-   * 통째로 한 번 받아 **브라우저에서 거른다** — 부품 마스터가 백 줄 안쪽이라 글자마다
-   * 서버를 부를 까닭이 없다(part-picker.tsx 의 filterPartOptions).
+   * 🔴 **못 받아 온 것과 하나도 없는 것이 다른 값이다.** 그래서 목록이 아니라 갈래가 온다 —
+   * 못 받아 왔으면 「없습니다」가 아니라 **「확인하지 못했습니다」**라고 말하고 고를 수 없게
+   * 한다(수리 건 상세의 부품 요청 칸이 하는 그대로). 🔵 그때도 **손으로 적는 길은 열려
+   * 있다** — 재고 관리가 꺼져 있다고 견적서를 못 쓰게 되면 안 된다.
+   *
+   * 통째로 한 번 받아 **브라우저에서 거른다** — 수백 줄 안쪽이라 글자마다 서버를 부를
+   * 까닭이 없다(part-picker.tsx 의 filterPartOptions).
    */
-  partOptions: PartPickerRow[];
+  partOptions: InventoryResult<PartPickerRow[]>;
   /**
-   * 단가가 적혀 있는 부품들(queries/inventory.ts 의 getPartPickerUnitPrices) — 부품을
-   * 고르면 **단가 칸도 함께 채우는** 데 쓴다.
+   * 단가가 적혀 있는 부품들 — 부품을 고르면 **단가 칸도 함께 채우는** 데 쓴다.
+   * 🔴 값은 재고 관리가 부품 줄에 실어 준 **견적가 · O/H 견적가**다(저쪽 API.md 2절).
    *
-   * 🔴 부품 목록과 **따로** 오는 까닭: 단가가 적힌 부품은 통틀어 열몇이고(부품은 일흔몇),
-   * 그 열몇 줄만 실으면 된다. 고를 때마다 서버를 다녀오지 않는 것은 부품 목록과 같은
-   * 판단이다 — 늦게 온 응답이 사람이 그새 적은 금액을 덮는 일이 없다.
+   * 🔴 부품 목록과 **따로** 오는 까닭: 단가가 적힌 부품만 실으면 되고, 단가 칸이 **없는**
+   * 화면(수리 건의 사용 부품)에는 아예 넘기지 않기 위해서다 — 금액은 거기로 나갈 값이
+   * 아니다. 🔵 못 받아 왔으면 빈 목록이고, 그때 고르개는 단가 칸을 **비워 둔다**.
    *
    * 채우는 규칙(덮지 않는다 · null 은 빈칸 · O/H 는 O/H 단가로만)은 고르개에 있다
    * (part-picker.tsx 의 partPickUnitPrice).
@@ -695,6 +703,12 @@ export default function QuoteEditForm({
   const [intakeNumberText, setIntakeNumberText] = useState(
     quote?.intakeNumberText ?? initialIntakeNumber ?? ""
   );
+  /**
+   * 🔴 **못 받아 왔을 때 고를 줄이 없을 뿐, 「부품이 없다」가 아니다.** 빈 목록으로 접는
+   * 자리는 여기 하나이고(후보 목록이 받는 값), 사람에게는 아래 안내가 **까닭을 그대로**
+   * 말한다 — 두 가지를 한 변수로 뭉개면 화면이 「재고에 부품이 하나도 없다」고 거짓말한다.
+   */
+  const partOptionRows = partOptions.status === "ok" ? partOptions.value : [];
   const [repairCaseId, setRepairCaseId] = useState<string | null>(quote?.repairCaseId ?? null);
   const [customerId, setCustomerId] = useState<string | null>(quote?.customerId ?? null);
   const [customerNameText, setCustomerNameText] = useState(quote?.customerNameText ?? "");
@@ -2855,12 +2869,28 @@ export default function QuoteEditForm({
         </div>
 
         {/* 찾아 고르는 길이 생긴 것을 칸만 보고는 알 수 없다 — 지금까지 자유 글자였기
-            때문이다. 손으로 적는 길이 그대로라는 것도 함께 적는다. */}
+            때문이다. 손으로 적는 길이 그대로라는 것도 함께 적는다.
+            🔴 찾는 칸에 **고객사 품명**이 들어갔다(2026-10-16) — 고객사에 나가는 서류에
+               쓰는 이름이라 사람이 그 글자로 찾는데, 지금까지는 아무것도 안 나왔다. */}
         <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
-          품명 칸에 글자를 치면 재고의 부품을 <b>품명 / 품명2 / 도번 / 교산 품번</b>으로 찾아
-          고를 수 있습니다. 고르면 그 줄이 재고의 부품과 이어지고, 이름을 손으로 고치면 이어짐이
-          풀립니다 — 재고에 없는 {isCable ? "품목" : "부품"}은 지금처럼 그냥 적으면 됩니다.
+          품명 칸에 글자를 치면 재고 관리의 부품을{" "}
+          <b>품명 / 품명2 / 고객사 품명 / 도번 / 교산 품번</b>으로 찾아 고를 수 있습니다. 고르면
+          품명과 단가가 채워지고, 이름을 손으로 고쳐도 됩니다 — 재고 관리에 없는{" "}
+          {isCable ? "품목" : "부품"}은 지금처럼 그냥 적으면 됩니다.
         </p>
+
+        {/* 🔴 못 받아 왔을 때. 후보가 안 뜨는 것을 「재고에 부품이 하나도 없다」로 읽으면
+            사람은 멀쩡한 부품을 두고 다른 길을 찾는다 — 부품 요청 칸과 **같은 말투**로
+            까닭을 적는다(components/inventory/PartRequestSection.tsx).
+            🔵 손으로 적는 길은 그대로 열어 둔다 — 재고 관리가 꺼져 있다고 견적서를 못
+               쓰게 되면 그것이 더 큰 사고다. */}
+        {partOptions.status !== "ok" && (
+          <p className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            재고 관리의 부품 목록을 불러오지 못했습니다 — {inventoryUnreachableMessage(partOptions.reason)}{" "}
+            찾아 고를 수 없을 뿐, 부품이 <b>없는 것이 아니라 확인하지 못한 것</b>입니다. 품명과
+            단가는 손으로 적을 수 있습니다.
+          </p>
+        )}
 
         {kind === "OVERHAUL" && (
           <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">
@@ -2961,8 +2991,28 @@ export default function QuoteEditForm({
                 />
                 {partPickerKey === row.key && !disabled && (
                   <PartSuggestionList
-                    options={filterPartOptions(partOptions, row.partNameText)}
+                    options={filterPartOptions(partOptionRows, row.partNameText)}
                     listLabel={`${lineOrdinals[index]}번째 ${isCable ? "품목" : "부품"} 후보`}
+                    /**
+                     * 🔴 **견적서에 적히는 품명은 고객사 품명이다**(2026-10-16 사용자 요청).
+                     * 이 종이는 고객사로 나가고, 고객사는 제 이름으로 부품을 부른다 — 우리
+                     * 품명을 적어 보내면 받는 쪽이 무엇인지 모른다.
+                     *
+                     * 🔴 **고객사 품명이 빈 부품은 이 목록에서 고를 수 없다**(사용자 결정).
+                     * 고르개가 그 줄을 눌리지 않게 하고 「고객사 품명을 설정해 주세요」를
+                     * 그 자리에 적는다 — 🔵 **감추지는 않는다**. 있는데 못 고르는 것과 아예
+                     * 없는 것은 다른 말이고, 뒤로 읽히면 사람은 손으로 적어 버린다.
+                     * 🔵 채워 넣는 길은 **수리 건 상세의 부품 요청 칸**에 있다(거기서 채우면
+                     *    여기서 바로 고를 수 있게 된다).
+                     *
+                     * 🔵 **사용 부품 칸은 이 값을 넘기지 않는다** — 그쪽은 내부 기록이라
+                     *    지금까지처럼 우리 품명으로 적고, 막지도 않는다(고르개의 기본값).
+                     *
+                     * 🔴 **아래 `partPickPatch` 의 세 번째 인자와 같은 값이어야 한다.** 한쪽만
+                     *    넘기면 「목록에 보인 이름」과 「줄에 적히는 이름」이 어긋난다 — 보기엔
+                     *    막혔는데 적히거나, 고를 수 있는데 빈 이름이 들어간다.
+                     */
+                    nameSource="customer"
                     /**
                      * 🔴 고르면 **단가도 함께** 채운다(2026-09-17 사용자 요청). 규칙은 전부
                      * 고르개 쪽에 있다(part-picker.tsx 의 partPickUnitPrice) — 여기서는
@@ -2975,14 +3025,25 @@ export default function QuoteEditForm({
                      *  · `currentUnitPrice` — 적혀 있으면 덮지 않는다(사람이 조정해 둔 금액이다)
                      */
                     onPick={(option) => {
-                      updateItem(
-                        row.key,
-                        partPickPatch(option, {
+                      updateItem(row.key, {
+                        ...partPickPatch(option, {
                           prices: partPrices,
                           isOverhaulPart: kind === "OVERHAUL" && row.isOverhaulPart,
                           currentUnitPrice: row.unitPrice,
-                        })
-                      );
+                        }, "customer"),
+                        /**
+                         * 🔴 **고른 부품의 번호를 `part_id` 에 넣지 않는다**(2026-10-16).
+                         * 고르는 대상이 재고 관리의 부품으로 바뀌었고, 그 부품에는 A/S
+                         * `parts.id`(UUID)가 **없다** — 재고 관리의 부품 번호(No.)를 그
+                         * 칸에 넣으면 저장이 거절된다(validation/quote-input.ts 가 UUID 를
+                         * 본다). 그 칸은 원래 비어도 되는 칸이고(schema/quotes.ts), 품명은
+                         * 글자로 따로 저장되므로 **화면 · 인쇄 · 옛 줄은 그대로다.**
+                         *
+                         * 🔴 재고 관리 번호를 적어 둘 칸은 아직 **없다** — 더하려면
+                         * 마이그레이션이 필요해 이 조각에서 하지 않았다(보고 참조).
+                         */
+                        partId: null,
+                      });
                       setPartPickerKey(null);
                     }}
                   />
