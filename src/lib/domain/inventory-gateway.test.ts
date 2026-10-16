@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   CHARGE_TYPE_LABELS,
   CUSTOMER_NAME_EMPTY_NOTICE,
+  INVENTORY_STOCK_AS_OF_NOTE,
   MAX_STOCK_REQUEST_LINES,
   canCancelStockRequest,
   customerNameAlreadySetLines,
@@ -12,6 +13,7 @@ import {
   inventoryPartIdLabels,
   inventoryPartNoteFirstLine,
   inventoryPartSpec,
+  inventoryStockText,
   inventoryUnreachableMessage,
   isChargeType,
   isValidRequestKey,
@@ -562,6 +564,20 @@ describe("🔴 부품 줄에 보이는 것 — 값이 있는 것만, `-` 는 값
   test("품명2도 같은 자로 잰다 — 품명 뒤에 ` · -` 가 붙으면 읽는 눈을 뺏는다", () => {
     assert.equal(inventoryPartSpec(part({ name2: "2M244-M1" })), "2M244-M1");
     assert.equal(inventoryPartSpec(part({ name2: "-" })), "");
+  });
+
+  test("🔴 재고 수에는 **언제 잰 값인지**가 붙어 있다 (2026-10-16 요청 ④)", () => {
+    /**
+     * 🔴 이 수는 화면을 **열 때** 한 번 받아 온 값이다. 숫자만 적으면 「지금 3개 있다」로
+     *    읽혀, 그 수를 믿고 요청 수량을 정했다가 막상 나갈 때 모자라면 사람은 재고 관리가
+     *    틀렸다고 생각한다 — 틀린 것은 그 수를 **언제 잰 것인지 말하지 않은 화면**이다.
+     * 🔵 「현재 재고」라고 적지 않는 까닭도 같다 — 그것은 더 틀린 말이다.
+     */
+    assert.equal(inventoryStockText(part({ quantity: 3 })), "재고 3개(불러온 때 기준)");
+    // 0 도 그대로 적는다 — 「없다」가 아니라 「그때 0 이었다」다.
+    assert.equal(inventoryStockText(part({ quantity: 0 })), "재고 0개(불러온 때 기준)");
+    assert.ok(inventoryStockText(part({ quantity: 3 })).includes(INVENTORY_STOCK_AS_OF_NOTE));
+    assert.doesNotMatch(inventoryStockText(part({ quantity: 3 })), /현재|지금/);
   });
 
   test("🔴 다섯 가지가 **모두** 나올 길이 있다 — 하나라도 빠지면 요청 B 가 깨진다", () => {

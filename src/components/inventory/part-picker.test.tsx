@@ -16,6 +16,7 @@ import {
 } from "@dss/core/ui/inventory/part-picker";
 import type { PartPickerPriceRow, PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
 import { partFieldValue } from "@dss/core/ui/inventory/part-picker-rows";
+import { quotePartPickPatch } from "@/components/quotes/quote-part-pick";
 import {
   parseInventoryPartsResponse,
   toPartPickerOptions,
@@ -92,6 +93,9 @@ const sliceBetween = (source: string, startMarker: string, endMarker: string) =>
 };
 
 const form = flat(read("src/components/quotes/QuoteEditForm.tsx"));
+/* 🔴 2026-10-16 부터 견적서는 고른 값을 **제 규칙 한 겹**을 거쳐 붓는다(요청 ①·②). 고르개에
+   그 사정을 박지 않으려고 A/S 쪽에 둔 순수 모듈이다. */
+const quotePartPick = flat(read("src/components/quotes/quote-part-pick.ts"));
 const usedPartsForm = flat(read("src/components/repair-cases/detail/edit/UsedPartsEditForm.tsx"));
 const inventory = flat(read("src/lib/db/queries/inventory.ts"));
 /* 🔴 줄의 모양(형 둘)은 2026-09-22 부터 고르개 곁 — 서브모듈에 있다. 값을 실어 오는 일은
@@ -265,12 +269,20 @@ describe("㉡ 고른 결과를 어디에 적는가 — 고쳐 쓰면 풀리는 �
      *    따로 저장되므로 화면 · 인쇄 · 옛 줄은 그대로다.
      */
     assert.ok(
-      form.includes("updateItem(row.key, { ...partPickPatch(option, {"),
+      form.includes("updateItem( row.key, quotePartPickPatch(row, option, {"),
       "견적서 폼이 고른 값을 줄에 넣는 곳이 없다"
     );
     assert.ok(
-      form.includes("partId: null, }); setPartPickerKey(null); }}"),
-      "견적서 폼이 part_id 를 비우지 않거나 고른 뒤 목록을 닫지 않는다"
+      form.includes("}) ); setPartPickerKey(null); }}"),
+      "견적서 폼이 고른 뒤 목록을 닫지 않는다"
+    );
+    /* 🔴 2026-10-16 부터 견적서는 고른 값을 **제 규칙 한 겹**을 거쳐 붓는다(요청 ②) —
+       `part_id` 를 비우는 일도 그 함수가 한다. 형에서부터 `null` 뿐이라 다른 값이 들어갈
+       길이 없고(`partId: null` 리터럴 형), 아래 시험이 실제로 돌려 보고 확인한다. */
+    assert.deepEqual(
+      quotePartPickPatch({ partNameText: "", unitPrice: "", pickedPart: null }, rows[0]).partId,
+      null,
+      "견적서 쪽 규칙이 part_id 를 비우지 않는다"
     );
     assert.ok(
       usedPartsForm.includes("updateLine(line.key, { ...partPickPatch(option),"),
@@ -379,7 +391,9 @@ describe("㉢ 🔴 재고 · 소유 · 비고가 화면 쪽으로 가지 않는�
   });
 
   test("꼬리표는 빈 칸을 건너뛰고 잇는다 — 무엇으로 찾았는지가 보여야 고를 수 있다", () => {
-    assert.equal(partOptionDetail(rows[0]), "2M244-M1 · 발진관 조립품 · DWG-1001 · KY-7788");
+    /* 🔴 2026-10-16 요청 ③ 으로 차례가 **품명2 · 교산 품번 · 도번**이 되었다(고객사 품명과
+       품명은 줄의 머리라 꼬리표에 오지 않는다 — 아래 ㉩ 이 다섯 자리를 함께 잰다). */
+    assert.equal(partOptionDetail(rows[0]), "2M244-M1 · KY-7788 · DWG-1001");
     assert.equal(partOptionDetail(rows[1]), "ky-9900");
     assert.equal(partOptionDetail(rows[2]), "RG-393 3m · dwg-2002");
   });
@@ -553,7 +567,20 @@ describe("㉥ 고르면 단가도 채운다", () => {
       form.includes('isOverhaulPart: kind === "OVERHAUL" && row.isOverhaulPart,'),
       "OH 칸으로 갈 줄인지를 저장하는 규칙과 같은 식으로 보지 않는다"
     );
-    assert.ok(form.includes("currentUnitPrice: row.unitPrice,"), "적혀 있는 금액을 안 건넨다");
+    /**
+     * 🔴 「적혀 있는 금액」은 2026-10-16 부터 **폼이 아니라 견적서 쪽 규칙**이 건넨다 —
+     *    줄이 기억하는 부품과 견주어야 「덮지 않는다」와 「따라간다」가 갈리기 때문이다
+     *    (요청 ② · quote-part-pick.ts). 🔵 고르개의 그 입력(`currentUnitPrice`)이 사라진
+     *    것이 아니다: 그 함수가 제 안에서 건넨다. 여기서는 **두 곳에 흩어지지 않았는지**만 본다.
+     */
+    assert.ok(
+      !form.includes("currentUnitPrice:"),
+      "폼이 적힌 금액을 직접 건넨다 — 「바뀌면 따라간다」 판단이 두 곳으로 갈렸다"
+    );
+    assert.ok(
+      quotePartPick.includes("currentUnitPrice: same ? row.unitPrice : \"\","),
+      "견적서 쪽 규칙이 적힌 금액을 고르개에 건네지 않는다"
+    );
   });
 
   test("🔴 옮기는 자리에서 `null` 과 `0` 이 뒤집히지 않는다 — 여기가 틀리면 아무도 못 알아본다", () => {
@@ -742,25 +769,53 @@ describe("㉧ 견적서의 품명 = 고객사 품명 · 없으면 못 고른다"
   });
 
   test("㉣ 🔴 안 넘기면 지금까지 그대로다 — PO/내자의 줄은 한 글자도 안 바뀐다", () => {
+    /**
+     * 🔴 **PO/내자의 줄로 잰다** — 그쪽 조회는 `customerPartName` 을 **아예 싣지 않는다**
+     *    (그 칸은 선택이다 — part-picker-rows.ts). 2026-10-16 요청 ③ 으로 고객사 품명이
+     *    줄의 맨 위로 올라왔지만, **값이 없으면 그 줄은 그려지지 않으므로** 그쪽 화면은
+     *    여전히 한 글자도 달라지지 않는다. 그쪽에서 달라지는 것은 꼬리표 안의 교산 품번 ·
+     *    도번 **차례**뿐이고, 그것이 ③ 이 맞추라고 한 바로 그 차례다.
+     */
+    const poRows: PartPickerRow[] = quoteRows.map((row) => ({
+      id: row.id,
+      partName: row.partName,
+      partSpec: row.partSpec,
+      drawingNo: row.drawingNo,
+      kyosanPartNo: row.kyosanPartNo,
+    }));
     const plain = renderToStaticMarkup(
-      <PartSuggestionList options={quoteRows} onPick={() => {}} listLabel="1번째 부품 후보" />
+      <PartSuggestionList options={poRows} onPick={() => {}} listLabel="1번째 부품 후보" />
     );
     assert.ok(!plain.includes(CUSTOMER_PART_NAME_REQUIRED_MESSAGE), "안 넘긴 사이트에 안내가 떴다");
-    assert.ok(!plain.includes("고객사 품명 ·"), "안 넘긴 사이트에 이름표 줄이 생겼다");
+    assert.ok(!plain.includes("고객사 품명"), "그 칸이 없는 사이트에 이름표 줄이 생겼다");
     // 🔵 `disabled=""` 로 본다 — 꾸밈 글자(`disabled:bg-…`)에도 그 낱말이 들어 있다.
     assert.ok(!plain.includes('disabled=""'), "안 넘긴 사이트에서 줄이 잠겼다");
-    // 꼬리표에는 지금까지처럼 고객사 품명이 함께 들어간다(그 글자로 찾은 줄이기 때문이다).
-    assert.equal(partOptionDetail(rows[0]), "2M244-M1 · 발진관 조립품 · DWG-1001 · KY-7788");
-    // 🔵 고객사 품명으로 **적는** 화면에서만 꼬리표에서 뺀다 — 제 줄에 이름표를 달고 뜬다.
-    assert.equal(partOptionDetail(rows[0], "customer"), "2M244-M1 · DWG-1001 · KY-7788");
+
+    /**
+     * 🔴 **그 칸이 **있는** 줄에서도 「못 고른다」는 말은 `"customer"` 화면에만 뜬다** —
+     *    기본 화면에서는 비어도 고를 수 있으니 까닭을 적을 일이 없다(적으면 고르지 말라는
+     *    말로 읽힌다). 값이 있으면 이름표를 달고 보인다 — 그것이 ③ 이 말한 그 차례다.
+     */
+    const withCustomerName = renderToStaticMarkup(
+      <PartSuggestionList options={quoteRows} onPick={() => {}} listLabel="1번째 부품 후보" />
+    );
+    assert.ok(!withCustomerName.includes(CUSTOMER_PART_NAME_REQUIRED_MESSAGE), "기본 화면에 까닭이 떴다");
+    assert.ok(!withCustomerName.includes('disabled=""'), "기본 화면에서 줄이 잠겼다");
+    assert.ok(withCustomerName.includes("고객사 품명 · 발진관 조립품"), "값이 있는데 안 보인다");
   });
 
   test("🔴 견적서 폼이 **목록과 고른 값 둘 다** 고객사 품명으로 넘긴다", () => {
     // 한쪽만 넘기면 「보인 이름」과 「적힌 이름」이 어긋난다 — 보기엔 막혔는데 적히거나 그 반대다.
     assert.ok(form.includes('nameSource="customer"'), "목록에 고객사 품명을 넘기지 않는다");
+    /* 🔴 고른 값 쪽은 견적서 규칙이 **제 안에** 들고 있다 — 폼이 두 번 적지 않게(요청 ②). */
     assert.ok(
-      form.includes('currentUnitPrice: row.unitPrice, }, "customer"),'),
-      "고른 값에 고객사 품명을 넘기지 않는다"
+      quotePartPick.includes('"customer" );'),
+      "견적서 쪽 규칙이 고른 값에 고객사 품명을 넘기지 않는다"
+    );
+    assert.deepEqual(
+      quotePartPickPatch({ partNameText: "", unitPrice: "", pickedPart: null }, rows[0]).partNameText,
+      "발진관 조립품",
+      "줄에 적히는 이름이 고객사 품명이 아니다"
     );
   });
 

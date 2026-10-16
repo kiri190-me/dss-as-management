@@ -212,6 +212,54 @@ describe("🔴 부품 줄에 그 부품의 모든 것 — 찾은 줄과 담은 �
     // 거르는 자는 도메인 하나다(저쪽 `q` 와 같은 잣대).
     assert.match(source, /filterInventoryParts\(partList, search\)/);
   });
+
+  test("🔴 차례를 화면이 따로 적지 않는다 — 이름표는 정해 둔 한 곳에서 온다(요청 ③)", () => {
+    // 🔴 「고객사 품명」을 화면에서 다시 쳐 두면 그 말이 바뀌는 날 이 줄만 옛말을 한다.
+    //    차례 자체가 지켜지는지는 quotes/quote-part-pick.test.ts 가 다섯 자리를 함께 잰다.
+    assert.match(source, /PART_FIELD_LABELS\.customerPartName/, "이름표를 손으로 적고 있다");
+    assert.doesNotMatch(source, /"고객사 품명 · "|>고객사 품명 ·/, "이름표가 화면에 박혀 있다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 담은 줄에도 **현재 재고** (2026-10-16 요청 ④)
+ * ============================================================================
+ * 「부품 요청에서 부품을 골랐을 때도 현재 재고가 표시되게.」 찾은 줄에만 있던 수를 담은
+ * 줄에도 적는다 — 수량을 치는 자리가 그쪽이라, 거기서 안 보이면 위로 눈을 올려야 한다.
+ *
+ * 🔴 **그 수는 「지금 이 순간」이 아니다.** 화면을 열 때 한 번 받아 온 값이고, 그 뒤로 다른
+ *    사람이 가져갔을 수 있다. 숫자만 적으면 「지금 3개 있다」로 읽혀 그 수를 믿고 요청
+ *    수량을 정한다 — 그래서 **숫자 바로 옆**에 언제 잰 값인지 적는다. 그 글자는 도메인 쪽
+ *    한 곳(`inventoryStockText`)에 있고 **찾은 줄과 담은 줄이 같은 것을 쓴다**.
+ * 🔵 값을 장바구니에 베껴 담지 않는다 — 번호로 되짚어 **지금 들고 있는 부품**에서 꺼낸다.
+ * ============================================================================
+ */
+describe("🔴 담은 줄에도 현재 재고 — 그 수가 「지금」이 아니라는 것까지", () => {
+  test("담은 줄에 재고가 보인다 — 수량을 치는 자리가 거기다", () => {
+    const cart = source.slice(source.indexOf("{cart.map((line) => {"), source.indexOf("</table>"));
+    assert.match(cart, /inventoryStockText\(part\)/, "담은 줄에 재고가 없다");
+  });
+
+  test("🔴 찾은 줄과 담은 줄이 **같은 글자**를 쓴다 — 한쪽만 꼬리말이 붙으면 다른 값으로 읽힌다", () => {
+    assert.equal(
+      [...source.matchAll(/inventoryStockText\(part\)/g)].length,
+      2,
+      "재고를 적는 자리가 둘이 아니다 — 한쪽이 제 글자를 따로 쓰고 있다"
+    );
+    // 🔴 수를 날것으로 적는 길이 남아 있으면 그 줄에는 「언제 잰 값인지」가 빠진다.
+    assert.doesNotMatch(source, /재고 \{part\.quantity\}/, "재고를 날것으로 그린다");
+    assert.doesNotMatch(source, /line\.quantity.*재고|재고.*line\.quantity/, "요청 수량을 재고로 적고 있다");
+  });
+
+  test("🔵 담은 줄의 재고는 **번호로 되짚은** 부품에서 온다 — 베껴 담지 않는다", () => {
+    // 베끼면 다시 읽은 뒤에도 담은 줄만 옛 수를 보인다.
+    assert.doesNotMatch(source, /quantity: part\.quantity/, "장바구니에 재고를 베껴 담는다");
+    const cart = source.slice(source.indexOf("{cart.map((line) => {"), source.indexOf("</table>"));
+    const lookup = cart.indexOf("partByNo.get(line.no)");
+    const stock = cart.indexOf("inventoryStockText(part)");
+    assert.ok(lookup >= 0 && stock > lookup, "되짚기 전에 재고를 그린다");
+  });
 });
 
 /**

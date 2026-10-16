@@ -43,7 +43,10 @@ import type { PartPickerPriceRow, PartPickerRow } from "@dss/core/ui/inventory/p
    이 화면도 같은 칸을 보고 「있다/없다」를 말하는데 자가 둘이면, 한쪽은 고를 수 있다고 그리고
    다른 쪽은 비었다고 말한다. 그래서 형 곁에 있는 그 함수를 **빌려 쓴다** — 그 파일은 react 도
    DB 도 물지 않는 순수 모듈이라 이 파일이 순수하게 남는다. */
-import { partFieldValue } from "@dss/core/ui/inventory/part-picker-rows";
+/* 🔴 **보이는 차례를 적는 자리도 한 곳이다**(2026-10-16 요청 ③ — 「어디서든 같은 순서」).
+   고객사 품명 · 품명 · 품명2 · 교산 품번 · 도번의 차례와 이름표는 저 파일의
+   `PART_FIELD_ORDER` · `PART_FIELD_LABELS` 가 쥔다 — 여기서 다시 적으면 언젠가 갈린다. */
+import { partFieldEntries, partFieldValue } from "@dss/core/ui/inventory/part-picker-rows";
 
 /** 못 받아 온 까닭. 🔴 전부 **「없다」가 아니라 「모른다」**다. */
 export type InventoryUnreachableReason =
@@ -326,15 +329,41 @@ export function inventoryPartCustomerName(part: Pick<InventoryPart, "customerNam
 export function inventoryPartIdLabels(
   part: Pick<InventoryPart, "kyosanPartNo" | "drawingNo">
 ): InventoryPartLabel[] {
-  return [
-    { label: "교산 품번", value: partFieldValue(part.kyosanPartNo) },
-    { label: "도번", value: partFieldValue(part.drawingNo) },
-  ].filter((item) => item.value !== "");
+  /* 🔴 **차례도 이름표도 여기서 짓지 않는다** — `PART_FIELD_ORDER` 가 정한 그대로다(요청 ③).
+     🔵 넘기지 않은 칸은 빈 값이라 저쪽이 알아서 뺀다 — 여기서 거를 것이 없다. */
+  return partFieldEntries({
+    kyosanPartNo: part.kyosanPartNo,
+    drawingNo: part.drawingNo,
+  }).map((entry) => ({ label: entry.label, value: entry.value }));
 }
 
 /** 품명2(규격). 🔴 여기도 `-` 는 없는 것이다 — 품명 뒤에 ` · -` 가 붙으면 읽는 눈을 뺏는다. */
 export function inventoryPartSpec(part: Pick<InventoryPart, "name2">): string {
   return partFieldValue(part.name2);
+}
+
+/**
+ * ============================================================================
+ * 🔴 재고 수는 **「지금 이 순간」이 아니다** (2026-10-16 요청 ④)
+ * ============================================================================
+ * 이 수는 화면을 **열 때** 재고 관리에서 한 번 받아 온 값이다. 그 뒤로 다른 사람이 같은
+ * 부품을 가져갔을 수 있고, 이 화면은 그것을 모른다(`router.refresh()` 가 돌기 전까지).
+ *
+ * 🔴 **숫자만 적으면 「지금 3개 있다」로 읽힌다.** 그 수를 믿고 요청 수량을 정했다가 막상
+ *    나갈 때 모자라면, 사람은 재고 관리가 틀렸다고 생각한다 — 틀린 것은 **이 화면이 그 수를
+ *    언제 잰 것인지 말하지 않은 것**이다. 그래서 숫자 **바로 옆**에 적는다(칸 위 안내문에
+ *    한 번 적어 두면 줄을 훑는 눈에는 안 닿는다).
+ * 🔵 「현재 재고」라고 적지 않는 까닭도 같다 — 그것은 더 틀린 말이다.
+ *
+ * 🔵 찾은 줄과 담은 줄이 **같은 글자**를 쓴다. 한쪽만 꼬리말을 달면 「담은 줄의 수는 옛
+ *    것이고 찾은 줄은 지금 것」으로 읽힌다 — 둘 다 같은 한 번의 응답에서 온 같은 값이다.
+ * ============================================================================
+ */
+export const INVENTORY_STOCK_AS_OF_NOTE = "불러온 때 기준";
+
+/** 줄에 적는 재고 글자. 🔴 **언제 잰 값인지가 숫자에 붙어 있다**(위 머리말). */
+export function inventoryStockText(part: Pick<InventoryPart, "quantity">): string {
+  return `재고 ${part.quantity}개(${INVENTORY_STOCK_AS_OF_NOTE})`;
 }
 
 /**

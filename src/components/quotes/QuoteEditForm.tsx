@@ -55,11 +55,17 @@ import {
 } from "@/lib/validation/quote-input";
 import OverhaulBadge from "@/components/common/OverhaulBadge";
 import QuotePrintView, { type QuoteWorkSections } from "@/components/quotes/QuotePrintView";
+import { PartSuggestionList, filterPartOptions } from "@dss/core/ui/inventory/part-picker";
+/* 🔴 고른 값을 줄에 붓는 일은 **견적서 쪽 규칙**을 한 번 거친다(2026-10-16 요청 ①·②) —
+   부품이 바뀌면 단가가 따라가고, 고른 부품을 줄이 기억한다. 고르개(PO/내자와 한 벌)에는
+   그 사정을 박지 않는다. 규칙과 까닭은 전부 quote-part-pick.ts 머리말에 있다. */
 import {
-  PartSuggestionList,
-  filterPartOptions,
-  partPickPatch,
-} from "@dss/core/ui/inventory/part-picker";
+  QUOTE_PICKED_PART_PREFIX,
+  quotePartPickPatch,
+  quotePickedPartDetail,
+  quotePickedPartOf,
+  type QuotePickedPart,
+} from "@/components/quotes/quote-part-pick";
 /* 줄의 생김새는 고르개 곁(서브모듈)에 있다 — 형 선언만 가져오므로 번들에는 아무것도
    실리지 않는다. 🔴 2026-10-16 부터 이 줄들은 A/S 의 부품 표가 아니라 **재고 관리**에서
    온다(서버 쪽 lib/domain/inventory-gateway.ts 의 toPartPickerRows). */
@@ -251,6 +257,20 @@ type ItemRow = {
    * 화면 전용 값이다.
    */
   sourceKey: string | null;
+  /**
+   * 🔴 이 줄이 **마지막으로 고른 재고 관리의 부품** (2026-10-16 요청 ①·②). 고르지 않았으면
+   * null 이다. 규칙과 까닭은 전부 `quote-part-pick.ts` 머리말에 있다 — 여기서는 **이 값이
+   * 어디로도 안 나간다**는 것만 못 박는다:
+   *
+   * 🔴 **저장에도 · 인쇄에도 · 엑셀에도 실리지 않는다.** 나가는 길 셋은 모두 칸을 하나씩 적어
+   *    옮기므로(아래 `collectFields` · 미리보기의 `items`/`itemLines` → QuotePrintView →
+   *    server/services/quote-workbook.ts) 이 칸은 저절로 따라가지 않는다. 🔴 **줄을 통째로
+   *    붓는 자리를 만들지 마라** — 그 한 줄이 고객사에 나가는 서류에 우리 품번을 찍는다
+   *    (quote-part-pick.test.ts 가 그 자리를 지킨다).
+   * 🔵 `partId` 와 다른 값이다 — 저쪽은 DB 의 FK(UUID)이고 이 칸은 재고 관리의 부품 번호다.
+   *    고른 부품에는 A/S `parts.id` 가 없어서 `partId` 는 언제나 null 로 간다.
+   */
+  pickedPart: QuotePickedPart | null;
 };
 
 function emptyItem(): ItemRow {
@@ -264,6 +284,7 @@ function emptyItem(): ItemRow {
     quantity: "1",
     unitPrice: "",
     sourceKey: null,
+    pickedPart: null,
   };
 }
 
@@ -283,6 +304,7 @@ function emptyNoteItem(): ItemRow {
     quantity: "",
     unitPrice: "",
     sourceKey: null,
+    pickedPart: null,
   };
 }
 
@@ -358,6 +380,9 @@ function usedPartToItem(part: QuoteIntakeLookup["usedParts"][number]): ItemRow {
     quantity: String(part.quantity),
     unitPrice: toPriceFieldValue(part.unitPrice),
     sourceKey: usedPartKey(part),
+    /* 🔵 **고른 줄이 아니다** — 출고 기록에서 담아 온 줄이다. 고르개로 부품을 고른 적이 없으니
+       기억할 것도 없고, 여기서 고르면 그때 「다른 부품」으로 세어 단가가 따라간다(요청 ②). */
+    pickedPart: null,
   };
 }
 
@@ -389,6 +414,8 @@ function ohTemplatePartToItem(
     quantity: String(part.quantity),
     unitPrice: toPriceFieldValue(part.overhaulUnitPrice),
     sourceKey: ohTemplatePartKey(index),
+    /* 🔵 템플릿에서 담아 온 줄이다 — 고르개로 고른 적이 없다(바로 위 출고 줄과 같은 까닭). */
+    pickedPart: null,
   };
 }
 
@@ -750,6 +777,14 @@ export default function QuoteEditForm({
           // 저장돼 있던 줄이 어느 출고 기록에서 왔는지는 남지 않는다. 그래서
           // 이미 담긴 것으로 세지 않는다 — 사람이 지웠다가 다시 담을 수 있어야 한다.
           sourceKey: null,
+          /**
+           * 🔴 **저장된 줄에는 고른 부품이 남아 있지 않다** — 화면에만 살던 값이고, 적어 둘
+           * 칸이 DB 에 없다(더하려면 마이그레이션이 필요해 이 조각에서 하지 않았다). 그래서
+           * 고치려고 다시 연 견적서의 줄은 상세를 안 보이고(지어내지 않는다), 거기서 부품을
+           * 고르면 **다른 부품**으로 세어 단가가 그 부품을 따라간다 — 적혀 있던 금액이 어느
+           * 부품의 값인지 알 길이 없으니, 「고른 부품의 값」 쪽이 근거가 있다(요청 ②).
+           */
+          pickedPart: null,
         }))
       : (newQuoteStart?.lines.items ?? [emptyItem()])
   );
@@ -2972,6 +3007,12 @@ export default function QuoteEditForm({
                    * part_id 가 남아 있으면 화면의 글자와 통계가 세는 부품이 서로 다른 것을
                    * 가리킨다. 마스터에 없는 부품을 손으로 적는 길이 그대로 남는 까닭이기도
                    * 하다 — 고르면 붙고, 고쳐 쓰면 풀린다.
+                   *
+                   * 🔴 **`pickedPart` 는 일부러 안 건드린다**(2026-10-16 요청 ②). 여기서 지우면
+                   * 「이름만 손보고 **같은 부품**을 다시 고른」 사람의 금액이 덮인다 — 줄이
+                   * 마지막으로 고른 부품을 잊어버려 다시 고르는 것이 전부 「다른 부품」이 되기
+                   * 때문이다. 🔵 대신 **상세는 사라진다**: 적힌 이름이 그 부품에서 온 이름이
+                   * 아니게 되면 그리지 않는다(아래 `quotePickedPartOf`).
                    */
                   onChange={(e) => {
                     updateItem(row.key, { partNameText: e.target.value, partId: null });
@@ -3008,46 +3049,61 @@ export default function QuoteEditForm({
                      * 🔵 **사용 부품 칸은 이 값을 넘기지 않는다** — 그쪽은 내부 기록이라
                      *    지금까지처럼 우리 품명으로 적고, 막지도 않는다(고르개의 기본값).
                      *
-                     * 🔴 **아래 `partPickPatch` 의 세 번째 인자와 같은 값이어야 한다.** 한쪽만
+                     * 🔴 **고른 값을 붓는 `quotePartPickPatch` 와 같은 값이어야 한다.** 한쪽만
                      *    넘기면 「목록에 보인 이름」과 「줄에 적히는 이름」이 어긋난다 — 보기엔
-                     *    막혔는데 적히거나, 고를 수 있는데 빈 이름이 들어간다.
+                     *    막혔는데 적히거나, 고를 수 있는데 빈 이름이 들어간다. 그래서 그 함수는
+                     *    `"customer"` 를 **제 안에** 들고 있다(quote-part-pick.ts).
                      */
                     nameSource="customer"
                     /**
-                     * 🔴 고르면 **단가도 함께** 채운다(2026-09-17 사용자 요청). 규칙은 전부
-                     * 고르개 쪽에 있다(part-picker.tsx 의 partPickUnitPrice) — 여기서는
-                     * 그 판단에 필요한 세 가지를 건넨다:
+                     * 🔴 고르면 **단가도 함께** 채운다(2026-09-17 사용자 요청). 그리고 2026-10-16
+                     * 부터 **부품이 바뀌면 단가가 따라간다**(요청 ②) — 규칙과 까닭은 전부
+                     * `quote-part-pick.ts` 머리말에 있다. 여기서는 그 판단에 필요한 둘만 건넨다:
                      *
                      *  · `prices` — 단가가 적힌 부품들(페이지가 한 번 실어 보낸 그 목록)
                      *  · `isOverhaulPart` — 🔴 **`2) OH 부품 비용` 칸으로 갈 줄일 때만** true 다.
                      *    OH 표시는 O/H 견적서에만 그리고, 저장도 그때만 싣는다(collectFields 의
                      *    같은 식) — 종류를 바꿔 표시가 사라진 줄은 일반 단가로 청구된다.
-                     *  · `currentUnitPrice` — 적혀 있으면 덮지 않는다(사람이 조정해 둔 금액이다)
+                     *
+                     * 🔴 「덮지 않는다」와 「따라간다」를 가르는 값(`currentUnitPrice`)은 **여기서
+                     *    정하지 않는다** — 줄이 기억하는 부품과 견주어야 알 수 있고, 그 판단이 두
+                     *    곳에 있으면 언젠가 갈린다. 🔴 **`partId` 는 그 함수가 언제나 null 로 준다**
+                     *    (재고 관리의 부품 번호는 A/S `parts.id` 가 아니라 FK 에 못 넣는다).
                      */
                     onPick={(option) => {
-                      updateItem(row.key, {
-                        ...partPickPatch(option, {
+                      updateItem(
+                        row.key,
+                        quotePartPickPatch(row, option, {
                           prices: partPrices,
                           isOverhaulPart: kind === "OVERHAUL" && row.isOverhaulPart,
-                          currentUnitPrice: row.unitPrice,
-                        }, "customer"),
-                        /**
-                         * 🔴 **고른 부품의 번호를 `part_id` 에 넣지 않는다**(2026-10-16).
-                         * 고르는 대상이 재고 관리의 부품으로 바뀌었고, 그 부품에는 A/S
-                         * `parts.id`(UUID)가 **없다** — 재고 관리의 부품 번호(No.)를 그
-                         * 칸에 넣으면 저장이 거절된다(validation/quote-input.ts 가 UUID 를
-                         * 본다). 그 칸은 원래 비어도 되는 칸이고(schema/quotes.ts), 품명은
-                         * 글자로 따로 저장되므로 **화면 · 인쇄 · 옛 줄은 그대로다.**
-                         *
-                         * 🔴 재고 관리 번호를 적어 둘 칸은 아직 **없다** — 더하려면
-                         * 마이그레이션이 필요해 이 조각에서 하지 않았다(보고 참조).
-                         */
-                        partId: null,
-                      });
+                        })
+                      );
                       setPartPickerKey(null);
                     }}
                   />
                 )}
+                {/**
+                  * 🔴 **고른 부품의 상세 — 작성자만 본다** (2026-10-16 요청 ①).
+                  *
+                  * 이 줄에 적히는 품명은 **고객사 품명**이라, 적어 놓고 보면 작성자도 그게 우리 쪽
+                  * 어느 부품인지 알 수 없다. 그래서 칸 밑에 **작은 글씨로** 그 부품의 다섯 가지를
+                  * 적는다(차례는 `PART_FIELD_ORDER` 한 곳이 정한다 — 요청 ③).
+                  *
+                  * 🔴 **이것은 화면에만 있다.** 저장 · 인쇄 · 엑셀 어디에도 실리지 않는다 — 고객사가
+                  *    받는 종이에 우리 품번과 우리 품명이 찍히면 안 된다(quote-part-pick.ts 머리말과
+                  *    그 시험이 나가는 길 셋을 지킨다).
+                  * 🔵 **고른 적이 없거나 · 고른 뒤 이름을 손으로 고쳤으면 안 그린다** — 그때는 그
+                  *    상세가 이 줄의 설명이 아니다(`quotePickedPartOf`).
+                  */}
+                {(() => {
+                  const picked = quotePickedPartOf(row, partOptionRows);
+                  if (picked === null) return null;
+                  return (
+                    <p className="mt-0.5 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+                      {QUOTE_PICKED_PART_PREFIX} — {quotePickedPartDetail(picked)}
+                    </p>
+                  );
+                })()}
                 {fieldErrors[`items.${index}.partNameText`] && (
                   <p className={editErrorClass}>{fieldErrors[`items.${index}.partNameText`]}</p>
                 )}

@@ -21,6 +21,7 @@ import {
   inventoryPartIdLabels,
   inventoryPartNoteFirstLine,
   inventoryPartSpec,
+  inventoryStockText,
   inventoryUnreachableMessage,
   type ChargeType,
   type InventoryOhTemplate,
@@ -38,6 +39,9 @@ import {
   type StockRequestCartLine,
 } from "@/lib/domain/inventory-stock-request-cart";
 import { generateClientUuid } from "@/lib/client-uuid";
+/* 🔴 칸 이름표는 **한 곳**에서 온다(요청 ③) — 「고객사 품명」을 화면에서 다시 쳐 두면
+   그 말이 바뀌는 날 이 줄만 옛말을 한다(@dss/core 의 part-picker-rows.ts). */
+import { PART_FIELD_LABELS } from "@dss/core/ui/inventory/part-picker-rows";
 
 /**
  * ============================================================================
@@ -73,14 +77,24 @@ import { generateClientUuid } from "@/lib/client-uuid";
  * ── 부품 줄에 **그 부품의 모든 것**을 보인다 (2026-10-16 사용자 요청 B·C) ──
  * 찾은 줄과 담은 줄 **둘 다** 고객사 품명 · 품명 · 품명2 · 교산 품번 · 도번을 보인다. 길어져
  * 안 읽히는 쪽으로 망가지지 않게 **석 줄로 나눠** 그린다 —
- *  ① `No. · 품명 · 품명2` — 줄의 머리. 사람이 눈으로 훑는 줄이라 예전 그대로 둔다.
- *  ② **고객사 품명** 한 줄. 🔴 이 칸만 따로 떼어 놓은 까닭은 **견적서가 이 이름으로 나가고**,
+ *  ① **고객사 품명** 한 줄. 🔴 이 칸만 따로 떼어 놓은 까닭은 **견적서가 이 이름으로 나가고**,
  *     비어 있으면 거기서 그 부품을 못 고르기 때문이다 — 그래서 비었을 때 그 자리에 채워
  *     넣는 길(아래 E)이 함께 선다.
+ *  ② `No. · 품명 · 품명2` — 사람이 눈으로 훑는 줄.
  *  ③ 나머지(교산 품번 · 도번 · 소유 · 재고)를 작은 글씨 한 줄로.
+ * 🔴 **차례가 ①②③ 인 까닭은 요청 ③ 이다**(2026-10-16): 「어디서든 부품 검색 결과는 **고객사
+ *    품명 · 품명 · 품명2 · 교산 품번 · 도번** 순서로.」 그 차례를 적어 둔 자리는 저장소 밖의
+ *    한 곳이다 — `@dss/core` 의 `PART_FIELD_ORDER`. 부품 고르개(견적서 · 사용 부품)도 같은
+ *    목록을 보고 그린다. 여기서 또 적으면 언젠가 두 화면이 다른 차례로 갈린다.
  * 🔴 **값이 있는 것만 그린다** — 이 자료는 엑셀에서 넘어와 빈칸 대신 `-` 가 적힌 줄이 많고,
  *    「없음」을 줄줄이 적으면 정작 있는 값이 묻힌다. 재는 자는 도메인 쪽 한 곳이다
  *    (`inventoryPartIdLabels` · `inventoryPartCustomerName` — `-` 도 없는 것으로 센다).
+ *
+ * ── 🔴 담은 줄에도 **재고**를 보인다 (2026-10-16 요청 ④) ──────────────────
+ * 찾은 줄에만 있던 수를 담은 줄에도 적는다 — 수량을 치는 자리가 그쪽이라, 거기서 안 보이면
+ * 위로 눈을 올려 찾아야 한다. 값은 **번호로 되짚은 그 부품**에서 그대로 나온다(아래
+ * `partByNo`). 🔴 그 수가 **「지금」이 아니라는 것**을 숫자 옆에 적는다 — 까닭은 도메인 쪽
+ * `inventoryStockText` 머리말에 있다.
  *
  * ── 🔴 고객사 품명을 **그 자리에서 채운다** (2026-10-16 사용자 요청 E) ────
  * 비어 있으면 **찾은 줄**에 [고객사 품명 채우기]가 선다(담은 줄이 아니다 — 담은 줄은 수량과
@@ -388,7 +402,9 @@ export default function PartRequestSection({
     const customerName = customerNameOf(part);
     if (customerName !== "") {
       return (
-        <span className="block text-zinc-500 dark:text-zinc-400">고객사 품명 · {customerName}</span>
+        <span className="block text-zinc-500 dark:text-zinc-400">
+          {PART_FIELD_LABELS.customerPartName} · {customerName}
+        </span>
       );
     }
     return (
@@ -507,17 +523,19 @@ export default function PartRequestSection({
                   className="flex items-start justify-between gap-2 border-b border-zinc-100 px-3 py-1.5 text-xs last:border-0 dark:border-zinc-800"
                 >
                   <span>
-                    {/* ① 줄의 머리 — No. · 품명 · 품명2 */}
-                    <span className="text-zinc-500">No. {part.no}</span> {part.name}
-                    {spec !== "" && <span className="text-zinc-500"> · {spec}</span>}
-                    {/* ② 🔴 고객사 품명은 제 줄에 — 견적서가 이 이름으로 나가고, 비면 거기서
-                        못 고른다. 비어 있으면 여기서 바로 채운다(머리말 E). */}
+                    {/* ① 🔴 고객사 품명이 **맨 위**다(요청 ③ 의 차례). 견적서가 이 이름으로
+                        나가고, 비면 거기서 못 고른다 — 비어 있으면 여기서 바로 채운다(머리말 E). */}
                     {renderCustomerNameLine(part, { canFill: requesterGate.ok })}
+                    {/* ② 줄의 머리 — No. · 품명 · 품명2 */}
+                    <span className="block">
+                      <span className="text-zinc-500">No. {part.no}</span> {part.name}
+                      {spec !== "" && <span className="text-zinc-500"> · {spec}</span>}
+                    </span>
                     {/* ③ 나머지 — 🔴 소유와 비고는 같은 품명이 여럿일 때 가르는 단서다. */}
                     <span className="block text-zinc-500">
                       {renderIdLabels(part)}
                       {hasIdLabels && " · "}
-                      {part.owner.label || part.owner.code} · 재고 {part.quantity}개
+                      {part.owner.label || part.owner.code} · {inventoryStockText(part)}
                     </span>
                     {noteLine && <span className="block text-zinc-400">{noteLine}</span>}
                   </span>
@@ -559,15 +577,25 @@ export default function PartRequestSection({
                   <tr key={line.no} className="border-t border-zinc-100 dark:border-zinc-800">
                     <td className="px-2 py-1 align-top text-zinc-500">{line.no}</td>
                     <td className="px-2 py-1 align-top">
-                      {line.name}
-                      {part && inventoryPartSpec(part) !== "" && (
-                        <span className="text-zinc-500"> · {inventoryPartSpec(part)}</span>
-                      )}
-                      {/* 🔵 담은 줄에는 **채우는 단추를 두지 않는다** — 그 자리는 수량과 유상/무상을
+                      {/* 🔴 찾은 줄과 **같은 차례**다(요청 ③) — 고객사 품명 · 품명 · 품명2 ·
+                          교산 품번 · 도번. 한쪽만 바꾸면 같은 부품이 두 줄에서 다르게 읽힌다.
+                          🔵 담은 줄에는 **채우는 단추를 두지 않는다** — 그 자리는 수량과 유상/무상을
                           고르는 표이고, 채우는 길은 바로 위 찾은 줄에 있다(머리말 E). */}
                       {part && renderCustomerNameLine(part, { canFill: false })}
-                      {part && inventoryPartIdLabels(part).length > 0 && (
-                        <span className="block text-zinc-500">{renderIdLabels(part)}</span>
+                      <span className="block">
+                        {line.name}
+                        {part && inventoryPartSpec(part) !== "" && (
+                          <span className="text-zinc-500"> · {inventoryPartSpec(part)}</span>
+                        )}
+                      </span>
+                      {part && (
+                        <span className="block text-zinc-500">
+                          {renderIdLabels(part)}
+                          {inventoryPartIdLabels(part).length > 0 && " · "}
+                          {/* 🔴 담은 줄에도 재고를 보인다(요청 ④) — 수량을 치는 자리가 여기다.
+                              그 수가 **「지금」이 아니라는 것**이 숫자에 붙어 있다. */}
+                          {inventoryStockText(part)}
+                        </span>
                       )}
                     </td>
                     {/* 🔴 고르는 칸이 아니다 — 번호를 고르는 순간 정해진 값이다. */}
