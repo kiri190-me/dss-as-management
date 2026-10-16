@@ -518,6 +518,9 @@ export type QuoteEditData = {
    *     열었을 때 설명 줄이 사라지고, 저장하는 순간 영영 없어진다.
    *   · **규격**을 싣는다 — 케이블 양식의 셋째 칸이다.
    *   · 그래서 수량 · 단가가 **null 일 수 있다**(설명 줄).
+   *   · 🔴 **작성자만 보는 칸이 하나 더 있다**(2026-10-16 — 아래 QuoteEditItemLine 의
+   *     `inventoryPartNo`). 그래서 이 목록의 형은 문서 쪽이 받는 형보다 **넓다** —
+   *     인쇄 · 엑셀은 QuotePrintableItemLine 으로 받아 그 칸을 못 본다.
    *
    * 차례가 곧 뜻이다 — 설명 줄이 어느 품목 묶음 **위에** 붙는지가 그 줄의 내용이다.
    * 그래서 종류로 나누지 않고 line_no 순서 그대로 한 목록으로 준다.
@@ -526,15 +529,46 @@ export type QuoteEditData = {
    * 고치는 쪽이 필요로 하는 모양이 서로 다르고, 한쪽으로 합치면 문서 쪽이 설명
    * 줄을 만난다. 둘 다 같은 조회 결과(itemRows) 하나에서 갈라 나온다.
    */
-  itemLines: {
-    partId: string | null;
-    kind: QuoteItemKind;
-    partNameText: string;
-    partSpecText: string | null;
-    isOverhaulPart: boolean;
-    quantity: number | null;
-    unitPrice: string | null;
-  }[];
+  itemLines: QuoteEditItemLine[];
+};
+
+/**
+ * ============================================================================
+ * 품목 표 한 줄 중 **문서로 나가도 되는 칸만** (2026-10-16)
+ * ============================================================================
+ * 위 itemLines 의 줄에서 **작성자만 보는 칸을 뺀** 모양이다. 인쇄 화면(QuotePrintView)과
+ * 엑셀(server/services/quote-workbook.ts)이 **이 형으로 받는다** — 그래서 그 둘은 뺀 칸을
+ * 읽을 수조차 없고, 실수로 옮겨 적는 일이 **컴파일에서 막힌다.**
+ *
+ * 🔴 두 형을 하나로 합치지 않는다. 합치는 순간 「누가 무엇을 봐도 되는가」가 **아무 데도
+ *    적혀 있지 않은 규칙**이 되고, 지키는 것은 「지금 아무도 안 읽는다」뿐이다.
+ * ============================================================================
+ */
+export type QuotePrintableItemLine = {
+  partId: string | null;
+  kind: QuoteItemKind;
+  partNameText: string;
+  partSpecText: string | null;
+  isOverhaulPart: boolean;
+  quantity: number | null;
+  unitPrice: string | null;
+};
+
+/**
+ * 고치는 화면이 받는 한 줄 — 위 문서용 칸들에 **작성자만 보는 칸 하나**가 더 붙는다.
+ *
+ * 🔴 `inventoryPartNo` 는 그 줄을 **어느 재고 관리 부품에서 집어 왔는가**다
+ * (quote_items.inventory_part_no). 수정 화면이 이 값으로 줄의 기억을 되살려,
+ * 다시 열어도 작성자용 상세가 보이고 품명을 손봐도 단가가 살아남게 한다
+ * (규칙은 수정 화면 곁의 `quoteRestoredPickedPart` 한 곳에 있다).
+ *
+ * 🔴 **null 이 정상이다** — 손으로 적은 줄 · 설명 줄 · 이 칸이 생기기 전에 저장된 줄이
+ *    전부 null 이고, null 은 「집어 넣은 적이 없다」는 뜻이다.
+ * 🔴 **문서로 나가지 않는다.** 견적서는 고객사로 나가는 종이이고 이 번호는 우리 쪽 열쇠다.
+ *    나가는 쪽은 바로 위 QuotePrintableItemLine 으로 받아 이 칸을 아예 못 본다.
+ */
+export type QuoteEditItemLine = QuotePrintableItemLine & {
+  inventoryPartNo: number | null;
 };
 
 /**
@@ -605,6 +639,12 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
       kind: quoteItems.kind,
       quantity: quoteItems.quantity,
       unitPrice: quoteItems.unitPrice,
+      /**
+       * 🔴 **칸을 하나씩 적는다** — `select()` 로 표를 통째로 긁지 않는다. 이 조회가
+       * 내주는 값은 문서로도 흘러가므로, 표에 칸이 느는 날 **아무도 모르게 따라 나가는**
+       * 자리가 되면 안 된다(mutations/attachment-purge.ts 의 같은 항목).
+       */
+      inventoryPartNo: quoteItems.inventoryPartNo,
     })
     .from(quoteItems)
     .where(eq(quoteItems.quoteId, id))
@@ -615,6 +655,10 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
    *
    *  · items     문서로 나가는 쪽이 읽는다 — **품목 줄만**, 수량 · 단가가 반드시 있다.
    *  · itemLines 고치는 화면이 읽는다 — **설명 줄까지 차례 그대로**, 규격도 함께.
+   *
+   * 🔴 **갈라지는 자리가 여기다.** 재고 관리의 부품 번호는 **아래 itemLines 쪽에만** 적는다 —
+   *    위 items 는 인쇄 화면과 엑셀 넷이 읽는 목록이고, 그 번호는 우리 쪽 열쇠라 고객사가
+   *    받는 종이에 닿을 길이 있으면 안 된다(위 QuoteEditItemLine 의 그 항목).
    */
   const items = itemRows.filter(isQuoteAmountItemLine).map((item) => ({
     partId: item.partId,
@@ -631,6 +675,7 @@ export async function getQuoteForEdit(id: string): Promise<QuoteEditData | null>
     isOverhaulPart: item.isOverhaulPart,
     quantity: item.quantity,
     unitPrice: item.unitPrice,
+    inventoryPartNo: item.inventoryPartNo,
   }));
 
   // 고른 수리 작업. **그때 값의 사본**이라 카탈로그를 조인하지 않는다 —

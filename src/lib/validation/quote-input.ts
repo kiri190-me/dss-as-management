@@ -80,6 +80,13 @@ export const MAX_QUOTE_ITEMS = 50;
 /** 수량은 integer 컬럼이다. 자바스크립트에서 통과시켜 놓고 DB 에서 터지지 않게 자른다. */
 const MAX_QUANTITY = 2_147_483_647;
 
+/**
+ * 재고 관리의 부품 번호도 integer 칸이다 — 위 MAX_QUANTITY 와 같은 까닭으로 자른다.
+ * **상수를 둘로 둔 것은 일부러다**: 값이 같다고 한 이름으로 묶으면, 언젠가 수량 폭을
+ * 손보는 날 부품 번호의 폭까지 말없이 따라 바뀐다(두 칸은 서로 아무 상관이 없다).
+ */
+const MAX_INVENTORY_PART_NO = 2_147_483_647;
+
 export type QuoteItemInput = {
   /** 재고에서 고른 경우에만. 손으로 적은 줄은 null 이 정상이다. */
   partId: string | null;
@@ -108,6 +115,31 @@ export type QuoteItemInput = {
   quantity: number | null;
   /** numeric 컬럼이라 문자열로 오간다(schema/quotes.ts 의 '금액은 numeric 이다'). */
   unitPrice: string | null;
+  /**
+   * ==========================================================================
+   * 🔴 이 줄이 어느 **재고 관리 부품**에서 왔는가 — 번호 하나 (2026-10-16)
+   * ==========================================================================
+   * 수정 화면에서 부품을 집어 넣은 줄이 그 **번호(No.)** 를 들고 온다
+   * (quote_items.inventory_part_no). **null 이 정상이고 기본이다** — 손으로 적은 줄,
+   * 설명 줄, 이 칸이 생기기 전에 저장된 줄이 전부 null 이고, null 은 「집어 넣은 적이
+   * 없다」는 뜻이다.
+   *
+   * 🔴 **위 partId 와 다른 값이다.** 저쪽은 A/S `parts.id`(UUID)라 FK 가 걸려 있고, 이쪽은
+   *    **다른 시스템의 번호**라 FK 가 없다(schema/quotes.ts 의 그 칸). 화면이 집어 넣은
+   *    줄에서는 partId 가 언제나 null 이다 — 그 번호를 UUID 칸에 넣을 수 없기 때문이다.
+   * 🔴 **설명 줄에는 실리지 않는다.** 그 줄에는 부품이 없다 — 아래 normalizeItems 가 null 로
+   *    못 박고, DB 의 CHECK 가 마지막으로 거절한다
+   *    (quote_items_inventory_part_no_item_line_only — 수량 · 단가를 막는 CHECK 와 같은 결).
+   * 🔴 **화면 전용 값은 여기까지 오지 않는다.** 화면이 들고 다니는 기억에는 집어 넣던
+   *    그때의 이름도 함께 있지만, 검증은 **번호 한 칸만** 읽고 나머지는 버린다 — 고객사로
+   *    나가는 서류의 뿌리가 되는 표에 우리 쪽 글자를 쌓지 않는다.
+   *
+   * 🔵 **없어도 된다**(`?`) — 위 partSpecText · kind 와 같은 모양이다. 뒤늦게 생긴 칸이라
+   *    이 형으로 값을 짓는 자리(시험들)가 전부 함께 고쳐져야 하는데, 그 자리들은 이 칸과
+   *    아무 상관이 없다. 없으면 null 이고, 아래 normalizeItems 는 **언제나 적어서** 내준다.
+   * ==========================================================================
+   */
+  inventoryPartNo?: number | null;
 };
 
 /**
@@ -762,6 +794,27 @@ function normalizeItems(
       }
     }
 
+    /**
+     * 재고 관리의 부품 번호(No.). **없는 것이 기본이다** — 손으로 적은 줄과 설명 줄이
+     * 그렇다(위 QuoteItemInput 의 그 항목).
+     *
+     * 🔴 **integer 칸이다.** 글자로 와도 받되(화면이 열쇠를 글자로 들고 다닌다), 정수가
+     *    아니거나 0 이하면 **접지 않고 오류로 세운다** — `Number("")` 가 0 으로 새면
+     *    있지도 않은 0번 부품이 적히고, 그 줄은 다시 열 때 엉뚱한 상세를 보인다.
+     * 🔵 값이 있는데 **사람이 고칠 수 있는 칸이 아니다** — 화면이 넣는 값이라 오류 글은
+     *    「확인할 수 없습니다」로 둔다(위 재고 연결과 같은 말투).
+     */
+    let inventoryPartNo: number | null = null;
+    const noValue = row.inventoryPartNo;
+    if (noValue !== null && noValue !== undefined && noValue !== "") {
+      const parsed = typeof noValue === "number" ? noValue : Number(noValue);
+      if (!Number.isInteger(parsed) || parsed <= 0 || parsed > MAX_INVENTORY_PART_NO) {
+        fieldErrors[at("inventoryPartNo")] = `${line}번째 부품의 재고 관리 부품 번호를 확인할 수 없습니다.`;
+      } else {
+        inventoryPartNo = parsed;
+      }
+    }
+
     items.push({
       // 설명 줄은 부품이 아니다 — 재고 연결도 OH 표시도 달 자리가 양식에 없다.
       partId: isNote ? null : partId,
@@ -771,6 +824,8 @@ function normalizeItems(
       partSpecText,
       quantity,
       unitPrice,
+      // 설명 줄에는 부품이 없다 — 위 partId 와 같은 까닭이고, DB 의 CHECK 가 한 번 더 막는다.
+      inventoryPartNo: isNote ? null : inventoryPartNo,
     });
   });
 

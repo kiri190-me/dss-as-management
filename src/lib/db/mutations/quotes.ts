@@ -273,6 +273,16 @@ async function replaceItems(tx: Tx, quoteId: string, fields: QuoteFields) {
       isOverhaulPart: item.isOverhaulPart,
       quantity: item.quantity,
       unitPrice: item.unitPrice,
+      /**
+       * 재고 관리의 부품 번호. 검증이 이미 정수로 재어 두었고, 설명 줄에서는 null 로
+       * 못 박았다(validation/quote-input.ts 의 그 항목 · CHECK
+       * quote_items_inventory_part_no_item_line_only).
+       *
+       * 🔴 **재고 연결(part_id)과 같은 줄에 둘 다 차는 일은 없다** — 화면이 집어 넣은 줄은
+       *    FK 쪽을 비우고 이 번호를 적는다(그 번호는 A/S parts.id 가 아니다). 두 칸을 한
+       *    칸으로 합칠 수 없는 까닭이 그것이다.
+       */
+      inventoryPartNo: item.inventoryPartNo ?? null,
     }))
   );
 }

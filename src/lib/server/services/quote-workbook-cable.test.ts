@@ -43,6 +43,8 @@ function itemLine(over: Partial<ItemLine> = {}): ItemLine {
     isOverhaulPart: false,
     quantity: 2,
     unitPrice: "150000",
+    /** 🔴 **작성자만 보는 칸**이다 — 기본은 null 이고, 아래 ㉢ 이 값이 있는 줄로 재어 본다. */
+    inventoryPartNo: null,
     ...over,
   };
 }
@@ -56,6 +58,7 @@ function noteLine(text: string): ItemLine {
     isOverhaulPart: false,
     quantity: null,
     unitPrice: null,
+    inventoryPartNo: null,
   };
 }
 
@@ -223,5 +226,55 @@ describe("㉡ 갈림길 — 케이블은 케이블 채우개로 간다", () => {
     const mapping = source.slice(source.indexOf("export function cableQuoteInputOf("));
     assert.ok(mapping.includes("lines: quote.itemLines.map(toCableQuoteLine),"), "품목 표를 itemLines 로 옮기지 않는다");
     assert.ok(!mapping.includes("quote.items"), "케이블 갈래가 items 를 읽는다 — 설명 줄이 사라진다");
+  });
+});
+
+/**
+ * ============================================================================
+ * ㉢ 🔴 **작성자만 보는 칸은 파일로 나가지 않는다** (2026-10-16 둘째 조각)
+ * ============================================================================
+ * 줄이 어느 재고 관리 부품에서 왔는지(`inventoryPartNo`)를 2026-10-16 부터 **저장한다** —
+ * 다시 열었을 때 상세가 보이고 품명을 손봐도 단가가 살아남게 하려는 값이다. 🔴 그 번호는
+ * **우리 쪽 열쇠**이고, 이 파일이 만드는 것은 **고객사가 받는 엑셀**이다.
+ *
+ * 울타리가 둘이다 —
+ *  ㉠ 이 파일이 그 칸의 이름을 **한 번도 적지 않는다**(받는 형에 그 칸이 아예 없다).
+ *  ㉡ 🔴 값이 들어 있는 줄을 넘겨 봐도 **결과 어디에도 그 번호가 없다** — 이름만 피해 가는
+ *     사고(값을 다른 칸에 적어 내보내는 것)는 글자만 보면 못 잡는다.
+ * ============================================================================
+ */
+describe("㉢ 🔴 작성자만 보는 번호는 엑셀로 나가지 않는다", () => {
+  /** 🔵 다른 값과 섞일 수 없는 번호다 — 수량 · 단가 · 글자 어디에도 안 나오는 자리를 골랐다. */
+  const SECRET_NO = 987654;
+
+  test("🔴 결과 어디에도 그 번호가 없다 — 값이 실린 줄을 넘겨도", () => {
+    const input = cableQuoteInputOf(
+      cableQuote({
+        itemLines: [
+          itemLine({ partNameText: "RF 케이블", inventoryPartNo: SECRET_NO }),
+          noteLine("* 안내"),
+        ],
+      })
+    );
+    const dumped = JSON.stringify(input);
+    assert.ok(!dumped.includes(String(SECRET_NO)), `엑셀로 넘기는 값에 ${SECRET_NO} 가 남았다`);
+    assert.ok(!dumped.includes("inventoryPartNo"), "엑셀로 넘기는 값에 그 칸이 따라갔다");
+    // 🔵 같은 줄의 나머지는 그대로 간다 — 「아무것도 안 넘어간다」가 되면 안 된다.
+    assert.deepEqual(input.lines[0], {
+      kind: "ITEM",
+      name: "RF 케이블",
+      spec: "3m, N(M)-N(M)",
+      quantity: 2,
+      unitPrice: 150000,
+    });
+  });
+
+  test("🔴 이 파일은 그 칸의 이름을 **한 번도 적지 않는다**", () => {
+    assert.ok(!source.includes("inventoryPartNo"), "엑셀을 만드는 자리가 그 칸을 읽는다");
+    // 🔴 좁은 형으로 받아 두어야 **읽는 일 자체가 컴파일에서 막힌다**.
+    assert.ok(
+      source.includes("function toCableQuoteLine(line: QuotePrintableItemLine): CableQuoteLine"),
+      "품목 줄을 넓은 형으로 받고 있다 — 작성자만 보는 칸을 읽을 수 있게 됐다"
+    );
   });
 });

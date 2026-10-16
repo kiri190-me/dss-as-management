@@ -17,9 +17,15 @@ import {
   quotePartNameEditPatch,
   quotePartPickPatch,
   quotePickedPartDetail,
+  quotePickedPartNo,
   quotePickedPartOf,
+  quoteRestoredPickedPart,
   type QuotePartPickRow,
 } from "@/components/quotes/quote-part-pick";
+import QuotePrintView, { type QuotePrintData } from "@/components/quotes/QuotePrintView";
+/* 🔴 **형만 빌린다** — 이 목록은 DB 에 붙는 모듈이고, 형은 컴파일에서 사라진다. */
+import type { QuoteEditItemLine } from "@/lib/db/queries/quotes";
+import type { QuoteTemplateHeader } from "@/lib/storage/quote-template";
 import { validateQuoteFields } from "@/lib/validation/quote-input";
 
 /**
@@ -192,6 +198,9 @@ describe("① 🔴 고른 부품의 상세는 작성자만 본다 — 밖으로 
     /**
      * 🔴 `{ ...row }` 한 줄이면 줄에 더해진 칸이 **전부** 따라 나간다. 지금은 셋 다 칸을
      *    하나씩 적고 있고, 그것이 이 기능이 기대는 울타리다.
+     * 🔴 셋 다 **기억을 통째로 만지지 않는다**(`row.pickedPart`). 저장만 그 안의 **번호
+     *    하나**를 함수로 꺼내 가는데(2026-10-16 둘째 조각 — 아래 ④), 그 한 자리가 어디인지를
+     *    이 시험이 못 박는다.
      */
     const blocks = {
       저장: sliceBetween(form, "items: items .filter((row) => row.partNameText.trim()", "}), };"),
@@ -200,9 +209,19 @@ describe("① 🔴 고른 부품의 상세는 작성자만 본다 — 밖으로 
     };
     for (const [name, block] of Object.entries(blocks)) {
       assert.ok(!block.includes("...row"), `${name} 가 줄을 통째로 붓는다`);
-      assert.ok(!block.includes("pickedPart"), `${name} 에 고른 부품이 실린다`);
+      assert.ok(!block.includes(".pickedPart"), `${name} 이 고른 부품의 기억을 통째로 만진다`);
       assert.ok(!block.includes("sourceKey"), `${name} 에 화면 전용 값이 실린다`);
       assert.ok(block.includes("partNameText: row.partNameText,"), `${name} 가 품명을 안 싣는다`);
+    }
+    // 🔴 저장만 번호를 싣는다 — 꺼내는 자리는 그 함수 하나다(줄을 통째로 넘기지 않는다).
+    assert.ok(
+      blocks.저장.includes("inventoryPartNo: isNote ? null : quotePickedPartNo(row),"),
+      "저장이 번호를 안 싣거나 다른 식으로 꺼낸다"
+    );
+    // 🔴 미리보기 둘에는 그 번호가 **한 글자도** 없다 — 그쪽은 고객사가 볼 종이를 그린다.
+    for (const name of ["미리보기 품목", "미리보기 품목표"] as const) {
+      assert.ok(!blocks[name].includes("inventoryPartNo"), `${name} 에 재고 관리 번호가 실린다`);
+      assert.ok(!blocks[name].includes("quotePickedPartNo"), `${name} 이 번호를 꺼내 간다`);
     }
   });
 
@@ -236,7 +255,12 @@ describe("① 🔴 고른 부품의 상세는 작성자만 본다 — 밖으로 
       ],
     });
     assert.ok(result.ok, `통과할 줄 알았는데 실패: ${JSON.stringify(result)}`);
+    /**
+     * 🔴 `inventoryPartNo` **하나만** 늘었다(2026-10-16 둘째 조각 — 아래 ④). 상세도, 집어
+     *    넣던 그때의 이름도 여전히 한 칸도 없다.
+     */
     assert.deepEqual(Object.keys(result.data.items?.[0] ?? {}).sort(), [
+      "inventoryPartNo",
       "isOverhaulPart",
       "kind",
       "partId",
@@ -678,5 +702,299 @@ describe("③ 🔴 검색 결과의 차례 — 다섯 자리에서 같다", () =
     const labels = sliceBetween(gateway, "export function inventoryPartIdLabels(", "}");
     assert.ok(labels.includes("partFieldEntries({"), "정해 둔 차례를 쓰지 않는다");
     assert.ok(!labels.includes('"교산 품번"'), "이름표를 화면 쪽에서 다시 적고 있다");
+  });
+});
+
+/**
+ * ============================================================================
+ * ④ 🔴 **줄이 번호를 저장한다 — 다시 열어도 그대로다** (2026-10-16 둘째 조각)
+ * ============================================================================
+ * 위 ①~③ 까지의 기억은 **화면에만 살았다.** 그래서 사용자가 겪은 일이 둘이다:
+ *
+ *  · 저장한 견적서를 고치려고 다시 열면 작성자용 상세가 **안 보인다**
+ *  · 🔴 그 줄의 품명을 **한 글자만 고쳐도 단가가 비워진다**(기억이 없어 「고른 적 없는 줄」로
+ *    읽힌다) — 기존 견적서를 손볼 때마다 겪는다
+ *
+ * 그래서 `quote_items.inventory_part_no` 한 칸에 **번호만** 적는다. 여기서 재는 것은 넷이다 —
+ *  ㉠ 저장에 **번호 하나만** 실린다(상세도 · 집어 넣던 그때의 이름도 아니다)
+ *  ㉡ 다시 열면 **기억이 되살아난다** — 상세가 보이고 단가가 살아남는다
+ *  ㉢ 🔴 설명 줄에는 **실리지 않는다**(그 줄에는 부품이 없다)
+ *  ㉣ 🔴 **문서로는 나가지 않는다** — 인쇄 화면 · 엑셀 어디에도 그 번호가 없다
+ *
+ * 🔴 **값은 전부 지어낸 것이다** — 실제 고객사 · 모델 · L/N · S/N 은 공개 저장소에 적지 않는다.
+ * ============================================================================
+ */
+describe("④ 🔴 저장되는 것은 번호 하나 — 다시 열면 기억이 돌아온다", () => {
+  /** 저장된 품목 줄의 모양(`QuoteItemInput`)에서 이 시험이 보는 것만. */
+  type SavedItem = {
+    kind?: string;
+    partNameText: string;
+    unitPrice: string | null;
+    inventoryPartNo: number | null;
+  };
+
+  /**
+   * 🔴 **한 바퀴를 실제로 돌린다** — 폼이 보내는 모양 그대로 검증에 넣고, 돌아온 값을
+   * 저장된 줄로 본다. 「화면에서는 되는데 저장하면 사라진다」가 바로 이 사이에서 난다.
+   */
+  function save(rows: readonly { row: QuotePartPickRow; isNote?: boolean }[]): SavedItem[] {
+    const result = validateQuoteFields({
+      quoteNumber: "DSS 2026-902",
+      quoteDate: "2026-10-16",
+      customerNameText: "가상전자 주식회사",
+      subject: "시험용 수리 견적",
+      items: rows.map(({ row, isNote }) => ({
+        kind: isNote ? "NOTE" : "ITEM",
+        partNameText: row.partNameText,
+        quantity: isNote ? null : 1,
+        unitPrice: isNote ? null : row.unitPrice,
+        // 🔴 폼의 `collectFields` 가 하는 그대로 — 줄이 아니라 **번호 하나**를 꺼내 보낸다.
+        inventoryPartNo: isNote ? null : quotePickedPartNo(row),
+      })),
+    });
+    assert.ok(result.ok, `저장이 거절됐다: ${JSON.stringify(result)}`);
+    return (result.data.items ?? []) as unknown as SavedItem[];
+  }
+
+  /** 저장된 줄을 폼이 펴는 그대로 — 기억은 `quoteRestoredPickedPart` 한 곳이 되살린다. */
+  function reopen(saved: SavedItem): QuotePartPickRow {
+    return {
+      partNameText: saved.partNameText,
+      unitPrice: saved.unitPrice ?? "",
+      pickedPart: quoteRestoredPickedPart({
+        inventoryPartNo: saved.inventoryPartNo,
+        partNameText: saved.partNameText,
+      }),
+    };
+  }
+
+  test("㉠ 🔴 저장에는 **번호 하나**뿐이다 — 상세도 그때의 이름도 가지 않는다", () => {
+    const [saved] = save([{ row: afterPick(blank(), FULL) }]);
+    assert.equal(saved?.inventoryPartNo, 11, "번호가 저장되지 않았다");
+    const dumped = JSON.stringify(saved);
+    for (const leaked of ["nameText", "마그네트론", "KY-7788", "DWG-1001", "2M244-M1"]) {
+      assert.ok(!dumped.includes(leaked), `저장되는 줄에 '${leaked}' 이 남았다`);
+    }
+  });
+
+  test("㉠ 🔵 **고른 적 없는 줄은 null** — 손으로 적은 줄이 그렇다", () => {
+    assert.equal(quotePickedPartNo(blank({ partNameText: "손으로 적은 부품" })), null);
+    const [saved] = save([{ row: { ...blank({ partNameText: "특주 브래킷" }), unitPrice: "45000" } }]);
+    assert.equal(saved?.inventoryPartNo, null, "고른 적 없는 줄에 번호가 생겼다");
+  });
+
+  test("㉠ 🔴 이름을 손으로 고친 뒤에도 **번호는 간다** — 그 줄은 그 부품에서 왔다", () => {
+    // 🔵 기억을 지우지 않는 규칙(②b)이 저장까지 이어지는가. 지우면 다시 열고 같은 부품을
+    //    다시 고를 때 「다른 부품」이 되어 적어 둔 금액이 덮인다.
+    const edited = afterNameEdit(afterPick(blank(), FULL), "발진관 조립품(특주)");
+    assert.equal(quotePickedPartNo(edited), "11");
+    const [saved] = save([{ row: { ...edited, unitPrice: "70000" } }]);
+    assert.equal(saved?.inventoryPartNo, 11);
+  });
+
+  test("㉡ 🔴 다시 열면 **상세가 보인다** — 사용자가 신고한 첫째 증상", () => {
+    const [saved] = save([{ row: afterPick(blank(), FULL) }]);
+    const reopened = reopen(saved);
+    assert.deepEqual(reopened.pickedPart, { id: "11", nameText: "발진관 조립품" });
+    assert.equal(quotePickedPartOf(reopened, [FULL, OTHER])?.id, "11", "다시 연 줄에 상세가 안 보인다");
+  });
+
+  test("㉡ 🔴 다시 연 뒤 **품명을 고쳐도 단가가 안 날아간다** — 사용자가 신고한 둘째 증상", () => {
+    const [saved] = save([{ row: afterPick(blank(), FULL) }]);
+    const reopened = reopen(saved);
+    assert.equal(reopened.unitPrice, "125000");
+    // 🔴 적힌 이름 그대로면 단가 칸을 아예 건드리지 않는다(②b 의 그 규칙).
+    assert.ok(!("unitPrice" in quotePartNameEditPatch(reopened, "발진관 조립품")));
+    assert.equal(afterNameEdit(reopened, "  발진관 조립품 ").unitPrice, "125000");
+    // 🔵 **정말 고치면** 그때는 지금까지처럼 비운다 — 되살린 줄도 같은 규칙을 탄다.
+    assert.equal(afterNameEdit(reopened, "발진관 조립품(특주)").unitPrice, "");
+  });
+
+  test("㉡ 🔴 다시 연 줄에서 **같은 부품을 다시 골라도** 조정해 둔 금액이 그대로다", () => {
+    const [saved] = save([{ row: { ...afterPick(blank(), FULL), unitPrice: "70000" } }]);
+    const reopened = reopen(saved);
+    assert.equal(isSamePickedPart(reopened.pickedPart, FULL), true);
+    assert.ok(!("unitPrice" in quotePartPickPatch(reopened, FULL, { prices })), "다시 고르니 금액이 덮인다");
+    // 🔵 **다른** 부품을 고르면 지금까지처럼 따라간다 — 그 금액은 앞 부품의 값이다.
+    assert.equal(afterPick(reopened, OTHER).unitPrice, "0");
+  });
+
+  test("㉡ 🔵 번호가 없는 줄은 **지금까지 그대로** — 옛 견적서가 달라지지 않는다", () => {
+    // 이 칸이 생기기 전에 저장된 줄은 전부 null 이다. 그 줄은 「고른 적 없음」으로 펴진다.
+    const old = reopen({ partNameText: "옛 견적서의 줄", unitPrice: "30000", inventoryPartNo: null });
+    assert.equal(old.pickedPart, null);
+    assert.equal(quotePickedPartOf(old, [FULL, OTHER]), null);
+  });
+
+  test("㉡ 🔴 되살리는 규칙은 **한 곳**이다 — 폼이 손으로 짓지 않는다", () => {
+    const restore = sliceBetween(form, "quote.itemLines.map((item) => ({", "}))");
+    assert.ok(restore.includes("pickedPart: quoteRestoredPickedPart(item),"), "폼이 기억을 손으로 짓는다");
+    /**
+     * 🔴 이름을 **따로 지어 넣으면** 저장된 품명과 어긋나, 펴자마자 상세가 사라지고 품명을
+     *    건드리는 순간 단가가 날아간다 — 고치려던 증상이 그대로 남는다.
+     */
+    assert.ok(!restore.includes("nameText"), "폼이 이름을 따로 지어 넣는다");
+    assert.ok(!restore.includes("...item"), "저장된 줄을 통째로 붓는다 — 그러면 화면 전용 칸까지 섞인다");
+  });
+
+  test("㉢ 🔴 **설명 줄에는 안 실린다** — 그 줄에는 부품이 없다", () => {
+    const sneaky = { ...afterPick(blank(), FULL), partNameText: "* 아래는 별도 주문품" };
+    const [saved] = save([{ row: sneaky, isNote: true }]);
+    assert.equal(saved?.inventoryPartNo, null, "설명 줄에 재고 관리 번호가 실렸다");
+  });
+
+  test("㉢ 🔴 검증이 **번호가 아닌 값**을 거절한다 — 0 으로 접지 않는다", () => {
+    /** 번호 한 칸만 바꿔 가며 재는 장 — 나머지는 통과하는 값이다. */
+    const withNo = (inventoryPartNo: unknown) =>
+      validateQuoteFields({
+        quoteNumber: "DSS 2026-903",
+        quoteDate: "2026-10-16",
+        customerNameText: "가상전자 주식회사",
+        subject: "시험용 수리 견적",
+        items: [{ partNameText: "발진관 조립품", quantity: 1, unitPrice: "1000", inventoryPartNo }],
+      });
+
+    for (const bad of [0, -1, 1.5, "아무 글자"]) {
+      const result = withNo(bad);
+      assert.ok(!result.ok, `'${bad}' 를 번호로 받아 버렸다`);
+      if (!result.ok) {
+        assert.ok(
+          result.fieldErrors["items.0.inventoryPartNo"],
+          `'${bad}' 를 거절은 했는데 어느 칸인지 안 알려 준다`
+        );
+      }
+    }
+
+    // 🔵 빈 값 셋은 **「없다」이지 오류가 아니다** — 손으로 적은 줄 · 옛 줄이 전부 그렇다.
+    for (const empty of [null, undefined, ""]) {
+      const result = withNo(empty);
+      assert.ok(result.ok, `${String(empty)} 를 오류로 세웠다: ${JSON.stringify(result)}`);
+      if (result.ok) assert.equal(result.data.items[0]?.inventoryPartNo, null);
+    }
+
+    // 🔵 글자로 온 번호는 받는다 — 화면은 고르개의 열쇠를 **글자로** 들고 다닌다.
+    const asText = withNo("11");
+    assert.ok(asText.ok, JSON.stringify(asText));
+    if (asText.ok) assert.equal(asText.data.items[0]?.inventoryPartNo, 11);
+  });
+});
+
+/**
+ * ============================================================================
+ * ④b 🔴 **그 번호는 문서로 나가지 않는다** (2026-10-16 둘째 조각)
+ * ============================================================================
+ * 저장되는 값이 되었으니 **조회가 그것을 되읽어 흘려보낼 길**이 생겼다. 견적서는 고객사로
+ * 나가는 종이이고, 이 번호는 우리 쪽 열쇠다 — 한 번 찍혀 나가면 되돌릴 수 없다.
+ *
+ * 울타리가 셋이다 —
+ *  ㉠ 조회가 **두 목록으로 갈라** 준다: 문서 쪽(`items`)에는 그 칸이 아예 없다.
+ *  ㉡ 문서를 만드는 자리들이 그 칸의 이름을 **한 번도 적지 않는다**.
+ *  ㉢ 🔴 값이 든 줄을 **실제로 그려 봐도** 종이에 그 번호가 없다 — 이름만 피해 가는 사고는
+ *     글자로 못 잡는다(「겉이 아니라 결과를 본다」).
+ * ============================================================================
+ */
+describe("④b 🔴 저장된 번호가 인쇄 · 엑셀로 나가지 않는다", () => {
+  /** 🔵 다른 값과 섞일 수 없는 번호다 — 금액 · 수량 · 글자 어디에도 안 나오는 자리를 골랐다. */
+  const SECRET_NO = 987654;
+
+  /** 🔴 문서 쪽이 받는 줄의 형에는 이 칸이 **없다** — 뚫렸다고 치고 일부러 실어 보낸다. */
+  const leaky = (over: Partial<QuoteEditItemLine> = {}): QuoteEditItemLine => ({
+    partId: null,
+    kind: "ITEM",
+    partNameText: "발진관 조립품",
+    partSpecText: "2M244-M1",
+    isOverhaulPart: false,
+    quantity: 1,
+    unitPrice: "125000",
+    inventoryPartNo: SECRET_NO,
+    ...over,
+  });
+
+  /** 양식에서 읽어 오는 값 — 시험에서는 비워 둔다(🔴 계좌번호는 코드에 두지 않는다). */
+  const HEADER: QuoteTemplateHeader = {
+    companyName: null,
+    ceoLine: null,
+    address: null,
+    tel: null,
+    fax: null,
+    email: null,
+    homepage: null,
+    defaultValidity: null,
+    defaultDelivery: null,
+    defaultPayment: null,
+    bankAccount: null,
+  };
+
+  const printable = (over: Partial<QuotePrintData> = {}): QuotePrintData => ({
+    quoteNumber: "DSS 2026-904",
+    quoteDate: "2026-10-16",
+    customerNameText: "가상전자 주식회사",
+    subject: "시험용 수리 견적",
+    validity: null,
+    delivery: null,
+    payment: null,
+    modelNameText: null,
+    serialNumberText: null,
+    lotNumberText: null,
+    workCost: "0",
+    items: [{ partId: null, partNameText: "발진관 조립품", isOverhaulPart: false, quantity: 1, unitPrice: "125000" }],
+    ...over,
+  });
+
+  /** 태그를 걷어 낸 글자만 — **무엇이 종이에 그려졌나**를 본다. */
+  const text = (html: string) =>
+    html.replace(/<style>[\s\S]*?<\/style>/g, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+
+  test("㉠ 🔴 조회가 **두 목록으로 가른다** — 문서 쪽 목록에 그 칸이 없다", () => {
+    const queries = flat(read("src/lib/db/queries/quotes.ts"));
+    // 고치는 쪽(itemLines)만 싣는다. 문서 쪽(items)에 한 줄이라도 생기면 그대로 나간다.
+    assert.ok(queries.includes("const itemLines = itemRows.map((item) => ({"), "고치는 쪽 목록이 달라졌다");
+    const forDocument = sliceBetween(queries, "const items = itemRows.filter(isQuoteAmountItemLine)", "const itemLines =");
+    assert.ok(!forDocument.includes("inventoryPartNo"), "문서로 나가는 목록에 재고 관리 번호가 실린다");
+    // 🔴 문서 쪽이 받는 형에도 그 칸이 없어야 한다 — 없어야 **읽는 일**이 컴파일에서 막힌다.
+    const printableType = sliceBetween(queries, "export type QuotePrintableItemLine = {", "};");
+    assert.ok(!printableType.includes("inventoryPartNo"), "문서 쪽 형에 그 칸이 들어갔다");
+  });
+
+  test("㉡ 🔴 문서를 만드는 자리들이 그 이름을 **한 번도 적지 않는다**", () => {
+    for (const path of [
+      "src/components/quotes/QuotePrintView.tsx",
+      "src/lib/server/services/quote-workbook.ts",
+      // 엑셀 네 양식 — 실제로 칸에 글자를 찍는 자리다.
+      "src/lib/xlsx/quote-template.ts",
+      "src/lib/xlsx/oh-quote-template.ts",
+      "src/lib/xlsx/matcher-quote-template.ts",
+      "src/lib/xlsx/cable-quote-template.ts",
+    ]) {
+      assert.ok(!read(path).includes("inventoryPartNo"), `${path} 가 재고 관리 번호를 읽는다`);
+    }
+  });
+
+  test("㉢ 🔴 **케이블 종이**에 그 번호가 없다 — 값이 든 줄을 그대로 그려 봐도", () => {
+    const body = text(
+      renderToStaticMarkup(
+        <QuotePrintView
+          quote={printable({
+            kind: "CABLE",
+            remarks: null,
+            itemLines: [leaky(), leaky({ kind: "NOTE", partNameText: "* 안내", quantity: null, unitPrice: null })],
+          })}
+          header={HEADER}
+          quoteId={null}
+        />
+      )
+    );
+    assert.ok(body.includes("발진관 조립품"), "줄 자체가 안 그려졌다 — 아래 판정의 전제가 무너진다");
+    assert.ok(!body.includes(String(SECRET_NO)), `케이블 종이에 ${SECRET_NO} 가 그려졌다`);
+  });
+
+  test("㉢ 🔴 **내자 종이**에도 없다 — 그쪽은 itemLines 를 보지도 않는다", () => {
+    const body = text(
+      renderToStaticMarkup(
+        <QuotePrintView quote={printable({ itemLines: [leaky()] })} header={HEADER} quoteId={null} />
+      )
+    );
+    assert.ok(body.includes("발진관 조립품"), "줄 자체가 안 그려졌다");
+    assert.ok(!body.includes(String(SECRET_NO)), `내자 종이에 ${SECRET_NO} 가 그려졌다`);
   });
 });

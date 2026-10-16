@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { QuoteEditData } from "@/lib/db/queries/quotes";
+import type { QuoteEditData, QuotePrintableItemLine } from "@/lib/db/queries/quotes";
 import { quoteTemplateKey, type QuoteTemplateKey } from "@/lib/domain/quote-template-variant";
 import { isRepairSectionDropped } from "@/lib/domain/quote-work-scope-suppression";
 import {
@@ -223,7 +223,15 @@ export function cableQuoteInputOf(quote: QuoteEditData): CableQuoteInput {
   };
 }
 
-function toCableQuoteLine(line: QuoteEditData["itemLines"][number]): CableQuoteLine {
+/**
+ * 🔴 **문서로 나가도 되는 칸만 받는다**(2026-10-16 — db/queries/quotes.ts 의
+ * QuotePrintableItemLine). 조회가 고치는 화면에 주는 줄에는 작성자만 보는 칸이 하나 더
+ * 붙어 있는데, 이 파일은 **고객사가 받는 파일을 만드는 자리**라 그 칸을 읽을 수 없어야
+ * 한다 — 좁은 형으로 받아 두면 옮겨 적는 실수가 컴파일에서 막힌다.
+ * 🔵 넘기는 쪽(`quote.itemLines`)이 더 넓은 줄이어도 그대로 들어온다. 더 넓은 것을 좁은
+ *    자리에 넣는 일은 막히지 않는다 — 막히는 것은 **여기서 그 칸을 읽는 일**이다.
+ */
+function toCableQuoteLine(line: QuotePrintableItemLine): CableQuoteLine {
   /**
    * 설명 줄의 글은 품명 칸에 들어 있다(quote_items.part_name_text). 수량 · 단가는 DB 가
    * NULL 을 보증하고(CHECK quote_items_amounts_item_line_only), 케이블 채우개의

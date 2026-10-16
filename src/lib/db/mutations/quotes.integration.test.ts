@@ -1041,4 +1041,85 @@ describe("케이블 견적서 (2026-09-16)", () => {
       "quote_items_item_line_amounts_required"
     );
   });
+
+  /**
+   * ==========================================================================
+   * 🔴 줄이 **어느 재고 관리 부품에서 왔는가**가 왕복한다 (2026-10-16 둘째 조각)
+   * ==========================================================================
+   * 수정 화면이 그 번호로 줄의 기억을 되살린다 — 안 남으면 다시 열 때 작성자용 상세가
+   * 사라지고, 품명을 한 글자만 고쳐도 단가가 비워진다(사용자가 신고한 그 증상).
+   *
+   * 여기서 보는 것은 **DB 까지 갔다 돌아오는가** 하나다. 규칙 자체(무엇을 꺼내 보내고
+   * 어떻게 되살리는가)는 망도 DB 도 없는 시험이 본다
+   * (components/quotes/quote-part-pick.test.tsx 의 ④).
+   *
+   * 🔴 그리고 마지막 방어선: **설명 줄에는 그 번호가 붙을 수 없다.** 화면도 검증도 null 로
+   * 못 박지만, 둘을 거치지 않는 부르기가 있으면 여기서 멈춘다 — 금액을 막는 CHECK 와 같은 결.
+   * ==========================================================================
+   */
+  test("🔴 저장했다 다시 열면 **재고 관리 부품 번호**가 그대로다 — 줄마다 따로", async () => {
+    const result = await create({
+      items: [
+        {
+          partId: null,
+          isOverhaulPart: false,
+          kind: "ITEM",
+          partNameText: "집어 넣은 줄",
+          partSpecText: null,
+          quantity: 1,
+          unitPrice: "1000.00",
+          inventoryPartNo: 987654,
+        },
+        {
+          partId: null,
+          isOverhaulPart: false,
+          kind: "ITEM",
+          partNameText: "손으로 적은 줄",
+          partSpecText: null,
+          quantity: 1,
+          unitPrice: "2000.00",
+        },
+      ],
+    });
+    assert.ok(result.ok, JSON.stringify(result));
+    if (!result.ok) return;
+
+    const reopened = await getQuoteForEdit(result.id);
+    assert.ok(reopened, "다시 열지 못했다");
+    // 🔴 고치는 화면이 펴는 목록에만 그 번호가 있다.
+    assert.deepEqual(
+      reopened.itemLines.map((line) => [line.partNameText, line.inventoryPartNo]),
+      [
+        ["집어 넣은 줄", 987654],
+        // 🔵 **null 이 「집어 넣은 적 없음」이다** — 0 으로 접히면 안 된다.
+        ["손으로 적은 줄", null],
+      ]
+    );
+    // 🔴 문서로 나가는 목록에는 그 칸이 아예 없다 — 고객사가 받는 종이의 뿌리다.
+    for (const item of reopened.items) {
+      assert.ok(!("inventoryPartNo" in item), "문서로 나가는 목록에 재고 관리 번호가 실린다");
+    }
+  });
+
+  test("🔴 설명 줄에 그 번호가 남으면 DB 가 거절한다 — 그 줄에는 부품이 없다", async () => {
+    await rejectsWithCheck(
+      () =>
+        create({
+          kind: "CABLE",
+          items: [
+            {
+              partId: null,
+              isOverhaulPart: false,
+              kind: "NOTE",
+              partNameText: "설명 줄인데 부품 번호가 있다",
+              partSpecText: null,
+              quantity: null,
+              unitPrice: null,
+              inventoryPartNo: 987654,
+            },
+          ],
+        }),
+      "quote_items_inventory_part_no_item_line_only"
+    );
+  });
 });

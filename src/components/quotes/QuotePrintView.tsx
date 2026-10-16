@@ -27,7 +27,7 @@ import {
   quoteAttachmentViewUrl,
   type QuotePrintSignedPdf,
 } from "@/components/quotes/quote-attachment-files";
-import type { QuoteEditData } from "@/lib/db/queries/quotes";
+import type { QuoteEditData, QuotePrintableItemLine } from "@/lib/db/queries/quotes";
 import type { QuoteTemplateHeader } from "@/lib/storage/quote-template";
 
 /**
@@ -188,8 +188,15 @@ export type QuotePrintData = Pick<
   kind?: QuoteEditData["kind"];
   /** 특이사항 — 케이블 양식 머리말 10번(quotes.remarks). 다른 두 양식에는 이 칸이 없다. */
   remarks?: string | null;
-  /** 품목 표 **전체** — 설명 줄까지, 적힌 차례 그대로. */
-  itemLines?: QuoteEditData["itemLines"];
+  /**
+   * 품목 표 **전체** — 설명 줄까지, 적힌 차례 그대로.
+   *
+   * 🔴 **조회가 고치는 화면에 주는 줄보다 좁은 형이다**(2026-10-16). 그 줄에는 작성자만
+   * 보는 칸이 하나 더 붙어 있는데(db/queries/quotes.ts 의 QuoteEditItemLine), 이 종이는
+   * 고객사로 나간다 — 받는 형에서 아예 빼 두면 **여기서 읽을 수가 없어** 옮겨 적는 실수가
+   * 컴파일에서 막힌다. 넘기는 쪽이 그 칸을 들고 와도 그릴 자리가 없다.
+   */
+  itemLines?: QuotePrintableItemLine[];
 };
 
 function productLine(quote: QuotePrintData): string {

@@ -74,7 +74,9 @@ import {
   quotePartNameEditPatch,
   quotePartPickPatch,
   quotePickedPartDetail,
+  quotePickedPartNo,
   quotePickedPartOf,
+  quoteRestoredPickedPart,
   type QuotePickedPart,
 } from "@/components/quotes/quote-part-pick";
 /* 줄의 생김새는 고르개 곁(서브모듈)에 있다 — 형 선언만 가져오므로 번들에는 아무것도
@@ -283,13 +285,16 @@ type ItemRow = {
   /**
    * 🔴 이 줄이 **마지막으로 고른 재고 관리의 부품** (2026-10-16 요청 ①·②). 고르지 않았으면
    * null 이다. 규칙과 까닭은 전부 `quote-part-pick.ts` 머리말에 있다 — 여기서는 **이 값이
-   * 어디로도 안 나간다**는 것만 못 박는다:
+   * 어디까지 가는가**만 못 박는다:
    *
-   * 🔴 **저장에도 · 인쇄에도 · 엑셀에도 실리지 않는다.** 나가는 길 셋은 모두 칸을 하나씩 적어
-   *    옮기므로(아래 `collectFields` · 미리보기의 `items`/`itemLines` → QuotePrintView →
-   *    server/services/quote-workbook.ts) 이 칸은 저절로 따라가지 않는다. 🔴 **줄을 통째로
-   *    붓는 자리를 만들지 마라** — 그 한 줄이 고객사에 나가는 서류에 우리 품번을 찍는다
-   *    (quote-part-pick.test.ts 가 그 자리를 지킨다).
+   * 🔴 **인쇄에도 엑셀에도 실리지 않는다.** 나가는 길은 칸을 하나씩 적어 옮기고(미리보기의
+   *    `items`/`itemLines` → QuotePrintView → server/services/quote-workbook.ts), 그 둘이
+   *    받는 줄의 형에는 이 값을 담을 칸이 **아예 없다**(queries/quotes.ts 의
+   *    QuotePrintableItemLine). 🔴 **줄을 통째로 붓는 자리를 만들지 마라** — 그 한 줄이
+   *    고객사에 나가는 서류에 우리 품번을 찍는다(quote-part-pick.test.tsx 가 그 자리를 지킨다).
+   * 🔴 **저장에는 번호 하나만 간다**(2026-10-16 둘째 조각 — 아래 `collectFields`). 그래야
+   *    다시 열었을 때 상세가 보이고, 품명을 손봐도 단가가 살아남는다. 집어 넣던 그때의
+   *    이름은 저장하지 않는다 — 저장된 품명이 곧 그 값이다(`quoteRestoredPickedPart`).
    * 🔵 `partId` 와 다른 값이다 — 저쪽은 DB 의 FK(UUID)이고 이 칸은 재고 관리의 부품 번호다.
    *    고른 부품에는 A/S `parts.id` 가 없어서 `partId` 는 언제나 null 로 간다.
    */
@@ -841,13 +846,16 @@ export default function QuoteEditForm({
           // 이미 담긴 것으로 세지 않는다 — 사람이 지웠다가 다시 담을 수 있어야 한다.
           sourceKey: null,
           /**
-           * 🔴 **저장된 줄에는 고른 부품이 남아 있지 않다** — 화면에만 살던 값이고, 적어 둘
-           * 칸이 DB 에 없다(더하려면 마이그레이션이 필요해 이 조각에서 하지 않았다). 그래서
-           * 고치려고 다시 연 견적서의 줄은 상세를 안 보이고(지어내지 않는다), 거기서 부품을
-           * 고르면 **다른 부품**으로 세어 단가가 그 부품을 따라간다 — 적혀 있던 금액이 어느
-           * 부품의 값인지 알 길이 없으니, 「고른 부품의 값」 쪽이 근거가 있다(요청 ②).
+           * 🔴 **저장된 줄의 기억을 되살린다**(2026-10-16 둘째 조각). 전에는 여기가 늘
+           * null 이었다 — 그 값을 적어 둘 칸이 DB 에 없었기 때문이다. 그래서 사용자는 저장한
+           * 견적서를 고치려고 열 때마다 두 가지를 겪었다: 작성자용 상세가 **안 보이고**,
+           * 그 줄의 품명을 한 글자만 고쳐도 **단가가 비워졌다**(「고른 적 없는 줄」로 읽힌다).
+           *
+           * 되살리는 규칙은 `quote-part-pick.ts` 의 그 함수 한 곳에 있다 — 여기서 손으로
+           * 짓지 않는다. 특히 **이름은 저장된 품명 그대로**여야 하는데, 그 까닭이 그 함수의
+           * 머리말에 있다(다르면 펴자마자 상세가 사라지고 단가가 날아간다).
            */
-          pickedPart: null,
+          pickedPart: quoteRestoredPickedPart(item),
         }))
       : (newQuoteStart?.lines.items ?? [emptyItem()])
   );
@@ -2034,6 +2042,18 @@ export default function QuoteEditForm({
              */
             quantity: isNote ? null : Number(row.quantity),
             unitPrice: isNote ? null : row.unitPrice,
+            /**
+             * 🔴 **줄의 기억에서 번호 하나만** 실어 보낸다(2026-10-16 둘째 조각). 저장해 두지
+             * 않으면 다시 열었을 때 그 줄이 어느 부품에서 왔는지 알 길이 없어, 상세가 사라지고
+             * 품명을 손대는 순간 단가가 비워진다(사용자가 겪은 그 증상).
+             *
+             * 🔴 **줄을 통째로 넘기지 않는다** — 꺼내는 일은 `quotePickedPartNo` 한 곳이
+             *    한다(그 함수의 머리말). 기억에는 집어 넣던 그때의 이름도 함께 있는데, 그것은
+             *    저장하지 않는다: 저장된 품명이 곧 그 값이고(되살릴 때 그대로 쓴다), 적어 두면
+             *    고객사로 나가는 서류의 뿌리가 되는 표에 우리 쪽 글자가 하나 더 쌓인다.
+             * 🔴 **설명 줄에는 안 싣는다** — 그 줄에는 부품이 없다(DB 의 CHECK 와 같은 결).
+             */
+            inventoryPartNo: isNote ? null : quotePickedPartNo(row),
           };
         }),
     };

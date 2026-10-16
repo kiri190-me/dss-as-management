@@ -1,0 +1,2 @@
+ALTER TABLE "quote_items" ADD COLUMN "inventory_part_no" integer;--> statement-breakpoint
+ALTER TABLE "quote_items" ADD CONSTRAINT "quote_items_inventory_part_no_item_line_only" CHECK ("quote_items"."kind" = 'ITEM' OR "quote_items"."inventory_part_no" IS NULL);
