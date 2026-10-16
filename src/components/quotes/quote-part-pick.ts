@@ -88,6 +88,21 @@ export function isSamePickedPart(picked: QuotePickedPart | null, option: PartPic
 }
 
 /**
+ * 줄에 적힌 이름이 **고른 그때의 이름 그대로인가**. 🔵 앞뒤 공백은 같은 것으로 본다 —
+ * 칸에 공백 하나가 더 붙었다고 「고쳤다」가 되면 안 된다.
+ *
+ * 🔴 **`options` 를 보지 않는다.** 이 판정은 **줄이 들고 있는 기억**만으로 끝난다 — 아래
+ *    `quotePartNameEditPatch` 가 이것으로 단가를 비울지 정하는데, 거기에 목록이 끼면
+ *    **재고 관리와 통신이 끊긴 날 적어 둔 금액이 날아간다**(아래 그 머리말).
+ */
+export function isPickedPartNameKept(
+  picked: QuotePickedPart | null,
+  nameText: string
+): picked is QuotePickedPart {
+  return picked !== null && nameText.trim() === picked.nameText;
+}
+
+/**
  * ============================================================================
  * 🔴 **부품이 바뀐 때만** 단가가 따라간다 (2026-10-16 요청 ②)
  * ============================================================================
@@ -148,6 +163,60 @@ export function quotePartPickPatch(
   return same ? base : { ...base, unitPrice: "" };
 }
 
+/**
+ * 품명 칸에 글자를 칠 때 줄에 부을 조각. 🔴 `unitPrice` 키는 **비울 때만 생긴다**(위 고르개와
+ * 같은 규약) — 키가 없으면 그 칸은 손대지 않은 채 남는다.
+ */
+export type QuotePartNameEditPatch = {
+  partNameText: string;
+  /** 🔴 글자를 치면 재고 연결을 **푼다** — 지금까지 그대로다(QuoteEditForm 의 그 자리). */
+  partId: null;
+  unitPrice?: string;
+};
+
+/**
+ * ============================================================================
+ * 🔴 **「고른 부품」 상세가 사라지면 단가도 사라진다** (2026-10-16 사용자 요청)
+ * ============================================================================
+ * 사용자가 한 말: 「선택된 부품이 없으면 단가도 사라지도록 해줘.」 그리고 **「선택된 부품」이
+ * 무엇인지**를 사용자가 직접 짚어 주었다 — 「품목 칸의 **밑에 [고른 부품] 하고 작은 글씨가
+ * 나오고 있는 상태**를 말한 거야.」
+ *
+ * 그래서 기준은 **「품명 칸이 비었는가」가 아니다.** 품명을 손으로 고쳐 그 작은 글씨가
+ * 사라지는 순간이 곧 「고른 부품이 없어진」 순간이고, 그때 단가도 비운다. 품명을 통째로 지운
+ * 경우는 여기에 저절로 들어간다 — 빈 글자가 고른 이름과 같을 수는 없다.
+ *
+ * ── 🔴 `options` 를 보지 않는 까닭 (지우기와 그리기는 다른 판정이다) ────────
+ * 상세를 **그릴지**는 `quotePickedPartOf` 가 정하고, 그 함수는 재고 관리에서 받아 온 목록
+ * (`options`)에서 그 부품을 찾아야 한다 — 모르는 것을 지어내지 않기 위해서다. 그래서 **목록을
+ * 못 받아 온 날에도** null 을 돌려준다.
+ * 🔴 **비울지를 그 함수로 정하면 안 된다.** 재고 관리와 통신이 끊긴 날 품명을 한 글자 고칠
+ *    때마다 단가가 사라지고, **적어 둔 금액이 통신 탓에 날아간다**. 「지금 화면에 상세가 안
+ *    보인다」와 「이 줄이 어느 부품에서 왔는지 모른다」는 다른 말이다 — 비우는 쪽은 **줄이 들고
+ *    있는 기억**(`pickedPart`)과 바뀐 글자만 견준다(`isPickedPartNameKept`).
+ *
+ * ── 🔴 `pickedPart` 는 건드리지 않는다 ───────────────────────────────────
+ * 그 기억은 「이름만 손보고 **같은 부품**을 다시 골랐다」를 알아보는 유일한 열쇠다(위
+ * `quotePartPickPatch` 의 ㉡). 지우면 다시 고르는 것이 전부 「다른 부품」이 된다.
+ * 🔵 그래서 비운 단가는 **같은 부품을 다시 고르는 것만으로** 견적가가 들어온다(고르개의
+ *    「빈칸이면 채운다」). 🔵 고친 품명을 **원래 글자로 되돌리면** 상세는 다시 뜨지만 단가는
+ *    비어 있는 그대로다 — 되살리지 않는다. 사라진 것이 저절로 돌아오면 사람이 못 믿는다.
+ *
+ * ── 🔴 `0` 이 아니라 **빈 글자**다 ───────────────────────────────────────
+ * `"0"` 은 **무상**이라는 실제 값이다(@dss/core 의 part-price-field.ts). 「정하지 않았다」와
+ * 「0원이다」는 다른 말이고, 0 으로 비우면 그 줄이 0원으로 청구된다.
+ *
+ * ── 🔵 손으로 적는 길은 그대로다 — 다만 **차례가 있다** ────────────────────
+ * 부품 마스터에 없는 것을 손으로 적는 줄은 애초에 `pickedPart` 가 없어서, 품명을 칠 때마다
+ * 단가가 빈 글자가 된다. **품명을 다 적은 뒤 단가를 적으면 그대로 남는다** — 단가 칸을 고치는
+ * 것은 이 규칙을 타지 않는다(이 함수는 품명 칸의 onChange 에서만 불린다).
+ * ============================================================================
+ */
+export function quotePartNameEditPatch(row: QuotePartPickRow, nameText: string): QuotePartNameEditPatch {
+  const base: QuotePartNameEditPatch = { partNameText: nameText, partId: null };
+  return isPickedPartNameKept(row.pickedPart, nameText) ? base : { ...base, unitPrice: "" };
+}
+
 /** 상세 줄의 머리말. 🔵 「고른 부품」이라고 적어야 **적힌 품명과 다른 글자**인 까닭이 읽힌다. */
 export const QUOTE_PICKED_PART_PREFIX = "고른 부품";
 
@@ -178,13 +247,17 @@ export function quotePickedPartDetail(option: PartPickerRow): string {
  *
  * 🔵 **베껴 두지 않고 번호로 되짚는** 까닭: 베끼면 고객사 품명이 채워진 뒤에도 이 줄만 옛 값을
  *    보인다(부품 요청 칸이 `partByNo` 로 같은 일을 하는 그 까닭이다).
+ *
+ * 🔴 **이름을 견주는 일은 `isPickedPartNameKept` 한 곳**이다 — 단가를 비울지 정하는
+ *    `quotePartNameEditPatch` 가 같은 잣대를 쓴다. 두 벌로 적으면 언젠가 갈리고, 갈린 날
+ *    「상세는 보이는데 단가가 비었다」(또는 그 반대)가 된다.
+ *    🔵 갈리는 것은 **그 뒤 한 줄뿐**이다 — 여기만 목록에서 부품을 찾는다(위 셋째 경우).
  */
 export function quotePickedPartOf(
   row: QuotePartPickRow,
   options: readonly PartPickerRow[]
 ): PartPickerRow | null {
   const picked = row.pickedPart;
-  if (picked === null) return null;
-  if (row.partNameText.trim() !== picked.nameText) return null;
+  if (!isPickedPartNameKept(picked, row.partNameText)) return null;
   return options.find((option) => option.id === picked.id) ?? null;
 }

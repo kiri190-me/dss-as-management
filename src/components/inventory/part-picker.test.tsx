@@ -16,7 +16,7 @@ import {
 } from "@dss/core/ui/inventory/part-picker";
 import type { PartPickerPriceRow, PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
 import { partFieldValue } from "@dss/core/ui/inventory/part-picker-rows";
-import { quotePartPickPatch } from "@/components/quotes/quote-part-pick";
+import { quotePartNameEditPatch, quotePartPickPatch } from "@/components/quotes/quote-part-pick";
 import {
   parseInventoryPartsResponse,
   toPartPickerOptions,
@@ -295,10 +295,26 @@ describe("㉡ 고른 결과를 어디에 적는가 — 고쳐 쓰면 풀리는 �
   });
 
   test("🔴 손으로 고치면 partId 가 풀린다 — 그 규칙을 한 글자도 바꾸지 않았다", () => {
+    /**
+     * 🔵 2026-10-16 부터 품명 칸의 onChange 는 **조각 하나를 받아** 붓는다
+     * (`quotePartNameEditPatch` — 상세가 사라지면 단가도 비우는 규칙이 붙었다). 🔴 그래도
+     * **재고 연결을 푸는 일은 그대로**여야 한다 — 형에서부터 `partId: null` 뿐이고, 아래가
+     * 실제로 돌려 보고 확인한다.
+     */
     assert.ok(
-      form.includes("updateItem(row.key, { partNameText: e.target.value, partId: null });"),
-      "글자를 칠 때 재고 연결을 푸는 곳이 없다"
+      form.includes("updateItem(row.key, quotePartNameEditPatch(row, e.target.value));"),
+      "글자를 칠 때 줄에 붓는 곳이 없다"
     );
+    for (const row of [
+      { partNameText: "", unitPrice: "", pickedPart: null },
+      { partNameText: "발진관 조립품", unitPrice: "125000", pickedPart: { id: "11", nameText: "발진관 조립품" } },
+    ]) {
+      assert.equal(
+        quotePartNameEditPatch(row, "손으로 고친 이름").partId,
+        null,
+        "글자를 칠 때 재고 연결이 풀리지 않는다"
+      );
+    }
   });
 
   test("후보 목록은 **제 줄**에서만 펴진다 — 여러 줄이 한꺼번에 뜨면 서로를 가린다", () => {
@@ -404,7 +420,19 @@ describe("㉣ 마스터에 없는 이름도 그대로 적고 저장된다", () =
     const nameField = sliceBetween(form, "value={row.partNameText} /** * 🔴 글자를 치면", "placeholder={`${lineOrdinals");
     assert.ok(!nameField.includes("readOnly"), "품명 칸이 읽기 전용이 되었다");
     assert.ok(!nameField.includes("disabled={true}"), "품명 칸이 잠겼다");
-    assert.ok(nameField.includes("partNameText: e.target.value"), "친 글자가 그대로 들어가지 않는다");
+    /**
+     * 🔵 2026-10-16 부터 친 글자는 조각(`quotePartNameEditPatch`)을 거쳐 줄에 들어간다. 🔴 그
+     * 조각은 글자를 **손질하지 않는다** — 다듬거나 자르면 사람이 적는 이름이 제 글자가 아니게
+     * 된다(앞뒤 공백은 「같은 이름인가」를 **잴 때만** 무시하고, 적히는 값은 친 그대로다).
+     */
+    assert.ok(nameField.includes("quotePartNameEditPatch(row, e.target.value)"), "친 글자가 줄로 안 간다");
+    for (const typed of ["마", "마그", "  앞뒤 공백 ", ""]) {
+      assert.equal(
+        quotePartNameEditPatch({ partNameText: "앞 글자", unitPrice: "", pickedPart: null }, typed).partNameText,
+        typed,
+        "친 글자가 그대로 들어가지 않는다"
+      );
+    }
   });
 
   test("저장에는 적힌 글자와 연결(null 일 수 있다)이 그대로 실린다", () => {

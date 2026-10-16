@@ -61,6 +61,7 @@ import { PartSuggestionList, filterPartOptions } from "@dss/core/ui/inventory/pa
    그 사정을 박지 않는다. 규칙과 까닭은 전부 quote-part-pick.ts 머리말에 있다. */
 import {
   QUOTE_PICKED_PART_PREFIX,
+  quotePartNameEditPatch,
   quotePartPickPatch,
   quotePickedPartDetail,
   quotePickedPartOf,
@@ -166,6 +167,9 @@ import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messa
  * [저장]이 견적서를 만든 **직후** 파일을 올리고, 하나라도 못 올리면 목록으로 넘기지 않는다.
  * 엑셀 전용을 켜면 부품 · 작업 구역을 접고 공급가액을 손으로 받는다. 줄이 있으면 서버가
  * 저장을 거절하므로 켤 때 비울지 묻고, 비운 줄은 저장 전에 끄면 돌아온다.
+ * 🔴 **그 구역은 2026-10-16 부터 엑셀 전용일 때만 그린다**(사용자 요청 — 보통 견적서에서는
+ *    자리만 차지했다). 통째로 없애지 않은 까닭은 「수기 견적서 엑셀」 칸이 **엑셀 전용 견적서
+ *    에서는 고객에게 나가는 견적서 그 자체**이기 때문이다(그 자리의 주석).
  *
  * ── 수기 견적서 엑셀로 칸 채우기 (견적서 ①b) ───────────────────────────
  * 엑셀 전용 장에서 「수기 견적서 엑셀」 칸에 파일을 고르는 순간(훅의 onExcelPicked) 읽기 통로로
@@ -2672,13 +2676,23 @@ export default function QuoteEditForm({
 
       {/* ── 견적서 파일(결재 PDF · 수기 엑셀) ─────────────────────────────
           상단 정보 바로 아래. 수정 화면에서는 [저장]과 따로 곧바로 반영되고, 새 견적서는
-          [저장] 뒤에 올라간다(QuoteAttachmentsSection.tsx 머리말). */}
-      <QuoteAttachmentsSection
-        controller={attachments}
-        isExcelOnly={isExcelOnly}
-        disabled={disabled}
-        excelSlotDetails={excelAutofillPanel}
-      />
+          [저장] 뒤에 올라간다(QuoteAttachmentsSection.tsx 머리말).
+
+          🔴 **엑셀 전용일 때만 그린다**(2026-10-16 사용자 요청 — 「견적서 파일 구역을
+             없애줘」). 보통 견적서에서는 이 구역이 쓸 일이 거의 없는데 자리만 차지했다.
+             🔴 **통째로 없애지는 않는다** — 그 안의 「수기 견적서 엑셀」 칸은 엑셀 전용
+             견적서에서 **고객에게 나가는 견적서 그 자체**라, 없애면 엑셀 전용 견적서를
+             만들 길이 함께 사라진다. 그래서 **보통 견적서에서만 감춘다**(사용자 결정).
+          🔵 바꾼 것은 **그리느냐 마느냐 하나**다 — 훅(useQuoteAttachments)도 올리기 통로도
+             첨부 분류도 그대로고, 엑셀 전용을 켠 화면은 한 글자도 달라지지 않는다. */}
+      {isExcelOnly && (
+        <QuoteAttachmentsSection
+          controller={attachments}
+          isExcelOnly={isExcelOnly}
+          disabled={disabled}
+          excelSlotDetails={excelAutofillPanel}
+        />
+      )}
 
       {/* ── 엑셀 전용이면 부품 · 작업 구역을 접는다 (2026-09-15 Q3) ──────
           줄은 켤 때 비웠고(저장 전에 끄면 돌아온다), 금액은 위의 공급가액 칸이 받는다.
@@ -3013,9 +3027,15 @@ export default function QuoteEditForm({
                    * 마지막으로 고른 부품을 잊어버려 다시 고르는 것이 전부 「다른 부품」이 되기
                    * 때문이다. 🔵 대신 **상세는 사라진다**: 적힌 이름이 그 부품에서 온 이름이
                    * 아니게 되면 그리지 않는다(아래 `quotePickedPartOf`).
+                   *
+                   * 🔴 그리고 **상세가 사라지면 단가도 비운다**(2026-10-16 사용자 요청 —
+                   * 「선택된 부품이 없으면 단가도 사라지도록」). 🔴 판정은 여기서 하지 않는다 —
+                   * `quotePartNameEditPatch` 한 곳이다(규칙과 까닭은 그 머리말에 전부 있다:
+                   * 목록을 못 받아 온 날 금액이 날아가지 않게 **줄이 들고 있는 기억만** 보고,
+                   * 비우는 값은 `0` 이 아니라 **빈 글자**이며, `pickedPart` 는 그대로 둔다).
                    */
                   onChange={(e) => {
-                    updateItem(row.key, { partNameText: e.target.value, partId: null });
+                    updateItem(row.key, quotePartNameEditPatch(row, e.target.value));
                     setPartPickerKey(row.key);
                   }}
                   onFocus={() => setPartPickerKey(row.key)}

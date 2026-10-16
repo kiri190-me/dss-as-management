@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 
 /**
  * ============================================================================
@@ -30,6 +30,11 @@ const indexOrFail = (source: string, marker: string) => {
   assert.ok(at >= 0, `원본에서 '${marker}' 를 찾지 못했다`);
   return at;
 };
+/** `root` 밑의 화면 원본 전부(시험 파일 제외). 「그 글자가 **여기 말고 또 있나**」를 재는 데 쓴다. */
+const sourceFilesUnder = (root: string): string[] =>
+  readdirSync(new URL(root, repoUrl), { recursive: true, encoding: "utf8" })
+    .map((name) => `${root}/${name.replace(/\\/g, "/")}`)
+    .filter((path) => /\.tsx?$/.test(path) && !/\.test\.tsx?$/.test(path));
 
 const form = flat(read("src/components/quotes/QuoteEditForm.tsx"));
 /**
@@ -65,6 +70,66 @@ describe("수정 화면 — 견적서 파일 두 칸", () => {
     assert.ok(indexOrFail(form, "{/* ── 상단 정보") < at, "상단 정보보다 앞에 있다");
     assert.ok(at < indexOrFail(form, "{/* ── O/H 템플릿 부품"), "부품 구역보다 뒤에 있다");
     assert.equal(form.split("<QuoteAttachmentsSection ").length - 1, 1, "구역을 두 번 그린다");
+  });
+
+  /**
+   * ============================================================================
+   * 🔴 **보통 견적서에는 그 구역이 없다** (2026-10-16 사용자 요청)
+   * ============================================================================
+   * 사용자가 한 말: 「견적서 창에서 [견적서 파일] 구역을 없애줘.」 🔴 **통째로 없애지는
+   * 않았다** — 그 안의 「수기 견적서 엑셀」 칸은 **엑셀 전용 견적서에서 고객에게 나가는
+   * 견적서 그 자체**라, 없애면 엑셀 전용 견적서를 만들 길이 함께 사라진다. 그래서 범위를
+   * 되물어 **「보통 견적서에서만 감춘다」**로 정해졌다(사용자 결정).
+   *
+   * 🔴 **바꾼 것은 「그리느냐 마느냐」 하나다.** 훅 · 올리기 통로 · 첨부 분류 · 구역 자체는
+   *    한 글자도 손대지 않았다 — 되돌리기가 한 줄이어야 한다.
+   * ============================================================================
+   */
+  test("🔴 엑셀 전용일 때만 그린다 — 보통 견적서에서는 조건 하나로 사라진다", () => {
+    const gated =
+      "{isExcelOnly && ( <QuoteAttachmentsSection controller={attachments} isExcelOnly={isExcelOnly} disabled={disabled} excelSlotDetails={excelAutofillPanel} /> )}";
+    assert.ok(form.includes(gated), "구역이 엑셀 전용 조건 안에 있지 않다");
+    // 그리는 자리가 하나뿐이라 조건도 하나다 — 두 곳이면 한쪽만 감춰진다.
+    assert.equal(form.split("<QuoteAttachmentsSection ").length - 1, 1, "구역을 두 번 그린다");
+  });
+
+  test("🔴 안 그리면 **화면에서 그 구역이 사라진다** — 이름표를 내는 길이 하나뿐이다", () => {
+    /**
+     * 폼은 서버 액션을 부르는 클라이언트 컴포넌트라 이 환경에서 그려 볼 수 없다(머리말).
+     * 그래서 「안 그린다」가 곧 「`aria-label="견적서 파일"` 구역이 없다」가 되는 것을
+     * **길이 하나뿐임**으로 못 박는다: 폼 → QuoteAttachmentsSection → QuoteAttachmentSlotsView.
+     * 🔵 그 구역을 실제로 그려 보는 것은 QuoteAttachmentParts.test.tsx 가 한다.
+     */
+    const label = 'aria-label="견적서 파일"';
+    const holders = sourceFilesUnder("src/components").filter((path) => read(path).includes(label));
+    assert.deepEqual(holders, ["src/components/quotes/QuoteAttachmentParts.tsx"], "이름표를 내는 곳이 더 있다");
+    const drawers = sourceFilesUnder("src/components").filter((path) =>
+      read(path).includes("<QuoteAttachmentSlotsView")
+    );
+    assert.deepEqual(drawers, ["src/components/quotes/QuoteAttachmentsSection.tsx"], "그 구역을 그리는 곳이 더 있다");
+    const users = [...sourceFilesUnder("src/components"), ...sourceFilesUnder("src/app")].filter((path) =>
+      read(path).includes("<QuoteAttachmentsSection")
+    );
+    assert.deepEqual(users, ["src/components/quotes/QuoteEditForm.tsx"], "구역을 그리는 화면이 더 있다");
+  });
+
+  test("🔵 엑셀 전용을 켠 화면은 **그대로다** — 두 칸도 차례도 안 건드렸다", () => {
+    // 넘기는 값 넷이 그대로다(위 「상단 정보 바로 아래」 시험이 같은 글자를 잰다).
+    assert.ok(form.includes("<QuoteAttachmentsSection controller={attachments} isExcelOnly={isExcelOnly}"));
+    // 🔴 두 칸과 그 차례는 **첨부 분류**가 쥔다(domain/attachment-category.ts) — 손대지 않았다.
+    assert.ok(
+      read("src/lib/domain/attachment-category.ts").includes(
+        'export const QUOTE_ATTACHMENT_SLOT_CATEGORIES = ["SIGNED_QUOTE_PDF", "QUOTE_EXCEL"] as const'
+      ),
+      "첨부 칸 둘이 바뀌었다"
+    );
+    // 🔴 올리기 통로도 그대로다 — 바꾼 것은 그리느냐 마느냐 하나다.
+    assert.ok(
+      read("src/components/quotes/quote-attachment-upload.ts").includes(
+        "quoteAttachmentUploadUrl(quoteId, category, file.name), { method: \"POST\", body: file }"
+      ),
+      "올리기 통로가 바뀌었다"
+    );
   });
 
   test("수정 화면은 칸을 읽어 폼에 넘긴다 — 견적서를 읽은 뒤에", () => {
