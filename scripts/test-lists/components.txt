@@ -297,6 +297,12 @@ src/components/inventory/part-picker.test.tsx
 # 나가는 길 넷(저장 · 다시 읽기 · 인쇄 · 엑셀) 어디에도 없는지 · 부품이 바뀐 때만 단가가
 # 따라가고 손으로 고친 금액은 안 덮이는지 · 다섯 자리의 차례가 한 곳에서 오는지를 본다.
 src/components/quotes/quote-part-pick.test.tsx
+# 견적서의 「인수번호로 불러오기」가 **재고 관리**를 본다(2026-10-16). 출고된 부품 · O/H 템플릿이
+# 조각 10~12 에서 저쪽으로 옮겨갔는데 견적서만 A/S 제 표를 읽고 있었다. 🔴 규칙 자체는 unit
+# 목록의 lib/domain/quote-intake-parts.test.ts 가 값으로 재고, 여기서는 화면 · 서버 모듈 ·
+# 액션의 **원본 글자**를 읽어 그 규칙을 제자리에서 쓰는지 본다(고르개의 자를 그대로 쓰는가 ·
+# 못 받아 온 것을 「없다」로 그리지 않는가). 고르개를 불러 쓰므로 이 목록에 둔다.
+src/components/quotes/quote-intake-inventory.test.ts
 src/components/inventory/part-owner-stock-table.test.ts
 src/components/common/file-drop.test.tsx
 src/components/common/file-drop-screens.test.ts

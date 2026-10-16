@@ -12,7 +12,7 @@ import {
 } from "@/lib/validation/quote-input";
 import { createQuote, updateQuote } from "@/lib/db/mutations/quotes";
 import { permanentlyDeleteQuote, restoreQuote, softDeleteQuote } from "@/lib/db/mutations/quote-trash";
-import { lookupIntakeForQuote, type QuoteIntakeLookup } from "@/lib/db/queries/quotes";
+import { loadQuoteIntakeLookup, type QuoteIntakeLookup } from "@/lib/server/quote-intake-lookup";
 import { archiveQuoteDocumentOnSave } from "@/lib/server/services/quote-issue";
 import { createQuoteArchiveFolder } from "@/lib/storage/quote-archive";
 
@@ -288,6 +288,11 @@ export async function updateQuoteAction(input: {
  * 견적을 내는 일이 실제로 있고, 그때 화면은 "찾지 못했습니다 — 직접 입력하세요"
  * 로 안내하고 사람이 손으로 채운다. 오류로 만들면 그 정상적인 흐름이 빨간
  * 글씨로 막힌 것처럼 보인다.
+ *
+ * 🔴 **출고된 부품과 O/H 템플릿은 재고 관리에서 온다**(2026-10-16 — quote-intake-lookup.ts).
+ *    저쪽이 꺼져 있어도 **이 액션은 실패하지 않는다** — 고객사 · 모델명 · L/N · S/N ·
+ *    신고증상은 A/S DB 의 값이라 그대로 채워지고, 못 받아 온 목록만 `unreachable` 로
+ *    올라가 화면이 「없다」가 아니라 「확인하지 못했다」로 그린다.
  */
 export async function lookupIntakeForQuoteAction(input: {
   intakeNumber: string;
@@ -299,7 +304,7 @@ export async function lookupIntakeForQuoteAction(input: {
   if (intakeNumber === "") return { ok: true, found: null };
 
   try {
-    return { ok: true, found: await lookupIntakeForQuote(intakeNumber) };
+    return { ok: true, found: await loadQuoteIntakeLookup(intakeNumber) };
   } catch (err) {
     console.error("lookupIntakeForQuoteAction: unexpected DB error", err);
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };

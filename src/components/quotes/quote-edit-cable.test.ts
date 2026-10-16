@@ -73,8 +73,13 @@ describe("㉡ 케이블이면 작업 구역을 접고, 저장에도 안 싣는�
     // 인수번호 구역 — 케이블에는 고칠 물건이 없다.
     const intake = indexOrFail(form, "{!isCable && ( <section");
     assert.ok(intake < indexOrFail(form, ">인수번호로 불러오기</h2>"), "인수번호 구역이 접는 조건 밖이다");
-    // 출고된 부품(참고) — 수리 건에 딸린 값이다.
-    assert.ok(form.includes("{!isCable && usedParts.length > 0 && ("), "출고된 부품 구역이 접히지 않는다");
+    // 출고된 부품(참고) — 수리 건에 딸린 값이다. 🔴 2026-10-16 부터 이 목록은 재고 관리에서
+    // 오고 「못 받아 왔다」 갈래가 생겼지만(구역을 감추면 「없다」는 말이 된다), **케이블에는
+    // 그 갈래까지 통째로 접힌다** — 그 종류에는 수리 건이 없어 물어볼 것 자체가 없다.
+    assert.ok(
+      form.includes('{!isCable && (usedParts.status !== "ok" || usedParts.value.length > 0) && ('),
+      "출고된 부품 구역이 접히지 않는다"
+    );
     // 수리 작업 목록 · 작업 내역 · 작업비 — 양식에 그 구역이 없다.
     const works = indexOrFail(form, "{!isCable && ( <>");
     for (const marker of [">수리 작업 목록</span>", ">작업 내역</span>", 'label="작업비"']) {
@@ -377,7 +382,9 @@ describe("㉧ 번호 — 설명 줄이 껴도 품목 번호가 밀리지 않는�
     const counter = sliceBetween(
       form,
       "function lineOrdinalsOf(rows: readonly ItemRow[]): number[] {",
-      "function usedPartKey("
+      // 🔵 그 다음 함수까지만 떼어 본다. 옛 경계였던 `usedPartKey` 는 2026-10-16 에 없어졌다 —
+      //    담긴 줄을 가리는 열쇠를 순수 쪽(quote-intake-parts.ts)이 지어 주기 때문이다.
+      "function canAddQuoteIntakeLine("
     );
     // 설명 줄은 설명 줄끼리 센다.
     assert.ok(counter.includes('if (row.lineKind === "NOTE") { noteSoFar += 1; return noteSoFar; }'), counter);

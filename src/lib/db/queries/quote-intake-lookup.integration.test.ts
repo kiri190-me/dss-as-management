@@ -3,99 +3,50 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 
 import { db, pgClient } from "../connection";
 import {
   customers,
-  inventoryPartRequestItems,
-  inventoryPartRequests,
-  parts,
   products,
   repairCaseIntakeSequences,
   repairCases,
   users,
 } from "../schema";
 import { createRepairCase } from "../mutations/repair-cases";
-import { createPart } from "../mutations/inventory";
-import { savePartOwnerSettings } from "../mutations/part-minimum-quantities";
 import { lookupIntakeForQuote } from "./quotes";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
 /**
  * ============================================================================
- * 인수번호로 견적서 채우기 — 사용한 부품과 그 단가
+ * 인수번호로 견적서 채우기 — 🔴 **A/S DB 가 아는 것이 여기까지다** (2026-10-16)
  * ============================================================================
- * 확인하는 것은 다섯 가지다.
+ * 이 조회가 돌려주던 **출고된 부품**과 **O/H 템플릿 부품**은 2026-10 조각 10~12 에서
+ * **재고 관리로 옮겨갔다.** 그 표를 세워 재던 여섯 가지(출고된 것만 센다 · 묶는 축 ·
+ * 견적가가 따라온다 · 정하지 않은 값은 null · 0원은 그대로 · O/H 견적가를 때우지 않는다)는
+ * **뜻을 그대로 들고** `src/lib/domain/quote-intake-parts.test.ts` 로 옮겼다 — 이제 그 자료가
+ * 저쪽에서 오므로 A/S 표를 세워서는 잴 수 없고, 저쪽에서 받아 온 것을 **어떻게 읽는가**가
+ * 그 규칙들이 사는 자리다.
  *
- *  1. **출고된 것만 센다.** 요청만 하고 안 나간 부품을 견적에 올리면 쓰지도
- *     않은 값을 청구하게 된다.
- *  2. **(부품, 소유구분) 짝으로 묶는다.** 단가가 소유구분마다 다르므로, DSS
- *     것과 교산 것을 한 줄로 합치면 어느 쪽 단가로 청구할지 답할 수 없다.
- *  3. **그 소유구분의 단가가 따라온다.** 다른 소유구분의 값이 오면 안 된다.
- *  4. **🔴 단가를 정하지 않은 부품은 null 이다.** 0 이 아니다 — 0 으로 오면
- *     견적서가 정하지 않은 것을 0원으로 청구하게 된다.
- *  5. **소유구분이 없는 옛 요청은 단가가 붙지 않는다.** 어느 소유구분의 값인지
- *     알 수 없는데 아무거나 가져오면 다른 소유구분의 값으로 청구하게 된다.
+ * 여기 남는 것은 **이 조회가 지금도 하는 일** 셋이다 —
+ *  1. 인수번호 하나로 고객사 · 모델명 · L/N · S/N · 신고증상이 따라온다.
+ *  2. 없는 인수번호는 **오류가 아니라 null** 이다(접수 전에 견적을 내는 일이 있다).
+ *  3. 🔴 **제품 개체 id 가 함께 온다** — 재고 관리에 O/H 템플릿을 물을 열쇠(제품 **모델**
+ *     id)를 그 값으로 얻는다. 빠지면 O/H 템플릿이 영영 안 뜬다.
  *
- * 격리 규약: 접수 월 "9603", 고객사 접두사 "AS-TEST-QUOTE-LOOKUP-",
- * 부품명 접두사 "test-quote-lookup-".
+ * 격리 규약: 접수 월 "9603", 고객사 접두사 "AS-TEST-QUOTE-LOOKUP-".
  * ============================================================================
  */
 
 const TEST_CUSTOMER_NAME_PREFIX = "AS-TEST-QUOTE-LOOKUP-";
-const TEST_PART_PREFIX = "test-quote-lookup-";
 const TEST_MODEL_PREFIX = "QUOTE-LOOKUP-TEST-";
 const TEST_YEAR_MONTH = "9603";
 const TEST_RECEIVED_AT = "2096-03-05";
 
-let actorUserId: string;
 let engineerId: string;
 let customerId: string;
 let repairCaseId: string;
 let intakeNumber: string;
-const createdPartIds: string[] = [];
-const createdRequestIds: string[] = [];
-
-async function createTestPart(label: string): Promise<string> {
-  const result = await createPart({
-    partName: `${TEST_PART_PREFIX}${label}-${randomUUID().slice(0, 6)}`,
-    partSpec: null,
-    category: "TEST",
-    actorUserId,
-  });
-  assert.equal(result.ok, true, `part create failed: ${JSON.stringify(result)}`);
-  if (!result.ok) throw new Error("unreachable");
-  createdPartIds.push(result.partId);
-  return result.partId;
-}
-
-/**
- * 부품 요청 한 건과 그 줄들을 **직접 넣는다.** 요청 → 승인 → 출고 흐름을 다
-   타지 않는 이유는, 이 시험이 보는 것이 그 흐름이 아니라 **조회가 issued_quantity
- * 와 owner 를 어떻게 읽는가**이기 때문이다. 그 흐름 자체는 재고 쪽 통합 시험이
- * 따로 본다.
- */
-async function insertIssuedRequest(
-  items: { partId: string; owner: string | null; issued: number; requested?: number }[]
-) {
-  const [request] = await db
-    .insert(inventoryPartRequests)
-    .values({ repairCaseId, requestedByUserId: engineerId, status: "FULLY_ISSUED" })
-    .returning({ id: inventoryPartRequests.id });
-  createdRequestIds.push(request.id);
-
-  await db.insert(inventoryPartRequestItems).values(
-    items.map((item) => ({
-      requestId: request.id,
-      partId: item.partId,
-      owner: item.owner as never,
-      requestedQuantity: item.requested ?? Math.max(item.issued, 1),
-      issuedQuantity: item.issued,
-    }))
-  );
-  return request.id;
-}
 
 function baseCreateRepairCaseInput(): ValidatedCreateRepairCaseInput {
   const suffix = randomUUID().slice(0, 8);
@@ -127,14 +78,6 @@ function baseCreateRepairCaseInput(): ValidatedCreateRepairCaseInput {
 }
 
 before(async () => {
-  const [admin] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(eq(users.role, "SUPER_ADMIN"), eq(users.approvalStatus, "APPROVED"), eq(users.isDeleted, false)))
-    .limit(1);
-  assert.ok(admin, "expected an approved SUPER_ADMIN in the test DB");
-  actorUserId = admin.id;
-
   const [engineer] = await db
     .select({ id: users.id })
     .from(users)
@@ -162,16 +105,6 @@ before(async () => {
 });
 
 after(async () => {
-  if (createdRequestIds.length > 0) {
-    await db
-      .delete(inventoryPartRequestItems)
-      .where(inArray(inventoryPartRequestItems.requestId, createdRequestIds));
-    await db.delete(inventoryPartRequests).where(inArray(inventoryPartRequests.id, createdRequestIds));
-  }
-  if (createdPartIds.length > 0) {
-    // 단가는 ON DELETE CASCADE 라 함께 사라진다.
-    await db.delete(parts).where(inArray(parts.id, createdPartIds));
-  }
   await db.delete(repairCases).where(like(repairCases.intakeNumber, `D${TEST_YEAR_MONTH}%`));
   await db.delete(products).where(like(products.modelName, `${TEST_MODEL_PREFIX}%`));
   await db
@@ -197,92 +130,16 @@ describe("lookupIntakeForQuote", () => {
     assert.equal(await lookupIntakeForQuote("D999999"), null);
   });
 
-  test("그 부품에 정해 둔 단가가 따라온다 — 소유구분과 무관하다", async () => {
-    const partId = await createTestPart("priced");
-    await savePartOwnerSettings({ partId, entries: [], unitPrice: "125000", actorUserId });
-    await insertIssuedRequest([{ partId, owner: "DSS", issued: 2 }]);
-
+  test("🔴 제품 개체 id 가 함께 온다 — 재고 관리에 O/H 템플릿을 물을 열쇠가 여기서 나온다", async () => {
     const found = await lookupIntakeForQuote(intakeNumber);
     assert.ok(found);
-    const used = found.usedParts.find((p) => p.partId === partId);
-    assert.ok(used, "출고한 부품이 목록에 없다");
-    assert.equal(used.owner, "DSS");
-    assert.equal(used.quantity, 2);
-    assert.equal(Number(used.unitPrice), 125000);
-  });
-
-  test("🔴 단가를 정하지 않은 부품은 null 이다 — 0 이 아니다", async () => {
-    const partId = await createTestPart("unpriced");
-    await insertIssuedRequest([{ partId, owner: "DSS", issued: 1 }]);
-
-    const found = await lookupIntakeForQuote(intakeNumber);
-    assert.ok(found);
-    const used = found.usedParts.find((p) => p.partId === partId);
-    assert.ok(used);
-    assert.equal(used.unitPrice, null, "정하지 않은 단가는 null 이어야 한다");
-  });
-
-  test("0원(무상)으로 정해 둔 단가는 그대로 온다 — 정하지 않음과 다르다", async () => {
-    const partId = await createTestPart("free");
-    await savePartOwnerSettings({ partId, entries: [], unitPrice: "0", actorUserId });
-    await insertIssuedRequest([{ partId, owner: "DSS", issued: 1 }]);
-
-    const found = await lookupIntakeForQuote(intakeNumber);
-    assert.ok(found);
-    const used = found.usedParts.find((p) => p.partId === partId);
-    assert.ok(used);
-    assert.notEqual(used.unitPrice, null, "0 은 null 이 아니다");
-    assert.equal(Number(used.unitPrice), 0);
-  });
-
-  test("같은 부품이 두 소유구분으로 나가면 두 줄이다 — 어디서 나갔는지가 남는다", async () => {
-    const partId = await createTestPart("two-owners");
-    // 🔴 단가는 부품마다 하나이므로 두 줄에 **같은 값**이 붙는다. 줄이 갈리는
-    // 것은 단가 때문이 아니라 소유구분을 화면에 보여 주기 위해서다.
-    await savePartOwnerSettings({ partId, entries: [], unitPrice: "100", actorUserId });
-    // ⚠️ 요청 **하나**에는 같은 부품이 한 번만 들어간다
-    // (inventory_part_request_items_request_part_unique). 소유구분이 다르면
-    // 요청 자체가 갈린다 — 실제로도 DSS 것을 받고 나서 교산 것을 따로 청구한다.
-    await insertIssuedRequest([{ partId, owner: "DSS", issued: 1 }]);
-    await insertIssuedRequest([{ partId, owner: "KYOSAN", issued: 3 }]);
-
-    const found = await lookupIntakeForQuote(intakeNumber);
-    assert.ok(found);
-    const rows = found.usedParts
-      .filter((p) => p.partId === partId)
-      .map((p) => [p.owner, p.quantity, Number(p.unitPrice)]);
-    assert.equal(rows.length, 2, "두 줄이어야 한다");
-    assert.deepEqual(rows.sort(), [
-      ["DSS", 1, 100],
-      ["KYOSAN", 3, 100],
-    ]);
-  });
-
-  test("🔴 소유구분이 없는 옛 요청에도 단가가 붙는다 — 부품 하나에 값이 하나다", async () => {
-    const partId = await createTestPart("no-owner");
-    await savePartOwnerSettings({ partId, entries: [], unitPrice: "555", actorUserId });
-    await insertIssuedRequest([{ partId, owner: null, issued: 1 }]);
-
-    const found = await lookupIntakeForQuote(intakeNumber);
-    assert.ok(found);
-    const used = found.usedParts.find((p) => p.partId === partId);
-    assert.ok(used);
-    assert.equal(used.owner, null);
-    // 소유구분 축이 있던 시절에는 어느 줄의 값인지 고를 수 없어 빈칸이었다.
-    // 이제 고를 일이 없으므로, 사람이 다시 찾아 적지 않아도 된다.
-    assert.equal(Number(used.unitPrice), 555);
-  });
-
-  test("출고되지 않은 요청은 세지 않는다 — 쓰지도 않은 값을 청구하면 안 된다", async () => {
-    const partId = await createTestPart("not-issued");
-    await insertIssuedRequest([{ partId, owner: "DSS", issued: 0, requested: 5 }]);
-
-    const found = await lookupIntakeForQuote(intakeNumber);
-    assert.ok(found);
-    assert.equal(
-      found.usedParts.some((p) => p.partId === partId),
-      false,
-      "출고량 0 인 줄이 목록에 있다"
-    );
+    // 🔴 이 값이 빠지면 서버 모듈이 제품 **모델** id 를 얻지 못해 저쪽을 부르지도 못하고,
+    //    화면은 영영 「이 모델에 템플릿이 이어져 있지 않습니다」만 띄운다.
+    assert.ok(found.productId, "제품 개체 id 가 없다");
+    const [product] = await db
+      .select({ modelName: products.modelName })
+      .from(products)
+      .where(eq(products.id, found.productId));
+    assert.ok(product?.modelName?.startsWith(TEST_MODEL_PREFIX), "다른 개체를 가리킨다");
   });
 });

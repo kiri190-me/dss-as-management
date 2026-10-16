@@ -375,11 +375,12 @@ describe("폼 · 새 견적서 화면이 규칙을 제자리에서 부르는가"
     // 🔴 실사용 결함(2026-09-22): D111(OH 건)을 불러온 뒤 인수번호를 없는 번호로 고쳐
     // 다시 부르면, 출고 부품 목록은 사라지는데 O/H 템플릿 목록은 앞 건 기종의 것이
     // 그대로 남고 [담기] 단추도 살아 있었다 — 담으면 지금 인수번호와 무관한 부품이
-    // O/H 템플릿 단가를 달고 청구 줄로 들어간다. 못 찾음 갈래가 둘 다 비워야 한다.
-    assert.ok(notFound.includes("setOhTemplateCode(null);"), notFound);
-    assert.ok(notFound.includes("setOhTemplateParts([]);"), notFound);
+    // O/H 견적가를 달고 청구 줄로 들어간다. 못 찾음 갈래가 둘 다 비워야 한다.
+    // 🔵 비우는 값이 **「받아 왔는데 없다」**인 까닭은 quote-intake-inventory.test.ts 가 본다
+    //    (2026-10-16 — 두 목록이 재고 관리에서 오면서 「못 받아 왔다」 갈래가 생겼다).
+    assert.ok(notFound.includes("setOhTemplate(NO_OH_TEMPLATE);"), notFound);
     // 출고 부품을 비우는 지금까지의 동작도 살아 있다.
-    assert.ok(notFound.includes("setUsedParts([]);"), notFound);
+    assert.ok(notFound.includes("setUsedParts(NO_USED_PARTS);"), notFound);
     // 🔴 같은 자리에서 **사람이 적는 칸은 그대로 둔다** — 비우는 것은 조회 결과의 사본뿐이다.
     // (종류 · 엑셀 전용 · 줄은 위 시험이 handleLookup 전체에 대해 못 박는다.)
     for (const setter of [
@@ -400,17 +401,15 @@ describe("폼 · 새 견적서 화면이 규칙을 제자리에서 부르는가"
     ]) {
       assert.ok(!notFound.includes(setter), `못 찾음 갈래가 ${setter} 를 부른다`);
     }
-    // 찾았을 때의 갈래는 그대로다 — 받아 온 값으로 셋을 덮어쓴다.
-    assert.ok(
-      lookup.includes(
-        "setUsedParts(found.usedParts); setOhTemplateCode(found.ohTemplateCode); setOhTemplateParts(found.ohTemplateParts);"
-      ),
-      lookup
-    );
-    // 왜 O/H 쪽만 눈에 남았는가 — 출고 부품 구역은 목록이 비면 구역째 안 그리지만,
+    // 찾았을 때의 갈래는 그대로다 — 받아 온 값으로 둘을 덮어쓴다.
+    assert.ok(lookup.includes("setUsedParts(found.usedParts); setOhTemplate(found.ohTemplate);"), lookup);
+    // 왜 O/H 쪽만 눈에 남았는가 — 출고 부품 구역은 줄이 없으면 구역째 안 그리지만,
     // O/H 구역은 종류가 OH 이기만 하면 값과 무관하게 그린다. 값을 비우는 것만이
     // 그 부품 줄과 [담기] 단추를 없앤다.
-    assert.ok(form.includes("{!isCable && usedParts.length > 0 && ("), "출고 부품 구역의 그리는 조건이 바뀌었다");
+    assert.ok(
+      form.includes('{!isCable && (usedParts.status !== "ok" || usedParts.value.length > 0) && ('),
+      "출고 부품 구역의 그리는 조건이 바뀌었다"
+    );
     assert.ok(form.includes('{kind === "OVERHAUL" && ('), "O/H 템플릿 구역의 그리는 조건이 바뀌었다");
   });
 
@@ -421,9 +420,8 @@ describe("폼 · 새 견적서 화면이 규칙을 제자리에서 부르는가"
     // 인수번호를 고쳐 다시 눌렀는데 조회가 DB 오류로 끝나면, 앞 건의 출고 부품 · O/H
     // 템플릿이 [담기] 단추까지 살아서 남았다 — 담으면 지금 인수번호와 무관한 부품이
     // 청구 줄로 들어간다. 사본은 받아 온 근거가 없어지면 함께 없어져야 한다.
-    assert.ok(failed.includes("setUsedParts([]);"), failed);
-    assert.ok(failed.includes("setOhTemplateCode(null);"), failed);
-    assert.ok(failed.includes("setOhTemplateParts([]);"), failed);
+    assert.ok(failed.includes("setUsedParts(NO_USED_PARTS);"), failed);
+    assert.ok(failed.includes("setOhTemplate(NO_OH_TEMPLATE);"), failed);
     // 서버가 준 까닭은 그대로 보여 준다 — 지금까지의 동작이다.
     assert.ok(failed.includes("setLookupMessage(result.message);"), failed);
     // 비운 까닭을 남긴다(아래 빈 상태 문구가 읽는다).
@@ -464,34 +462,37 @@ describe("폼 · 새 견적서 화면이 규칙을 제자리에서 부르는가"
   });
 
   test("🔴 O/H 빈 상태 문구는 갈래가 넷 — 못 찾음 · 오류 뒤에는 재고 관리가 아니라 인수번호를 가리킨다", () => {
-    const empty = sliceBetween(form, "{ohTemplateParts.length === 0 ? (", "단가는 <b>O/H 템플릿에 적어 둔 값</b>");
+    const empty = sliceBetween(form, ") : ohTemplateParts.length === 0 ? (", "단가는 재고 관리에 적어 둔");
     // 🔴 「직전 불러오기가 값 없이 끝났다」를 **맨 앞에서** 본다. 못 찾음 · 오류 갈래는
     // 세 사본만 비우고 `repairCaseId` 는 사람이 칠 수 있는 칸이라 앞 건의 값이 남으므로,
     // 이 갈래가 없으면 「이 모델에 O/H 부품 템플릿이 이어져 있지 않습니다」가 떠서 사람이
     // 재고 관리 화면을 헛되게 뒤진다(2026-09-22).
     const at = (marker: string) => indexOrFail(empty, marker);
     assert.ok(at("{lookupMissed") < at("repairCaseId === null"), empty);
-    assert.ok(at("repairCaseId === null") < at("ohTemplateCode === null"), empty);
+    assert.ok(at("repairCaseId === null") < at("ohTemplateValue === null"), empty);
     assert.ok(
       empty.includes(
         '? "인수번호를 불러오지 못해 O/H 부품을 가져오지 못했습니다 — 위 인수번호 칸의 안내를 확인하고 번호를 고친 뒤 [불러오기]를 다시 눌러 주세요."'
       ),
       empty
     );
-    // 예전 세 갈래의 문구는 한 자도 바뀌지 않았다 — 고쳐야 할 자리가 저마다 다르다.
+    // 「인수번호를 먼저」 갈래는 한 자도 바뀌지 않았다 — 고쳐야 할 자리가 그대로다.
     assert.ok(
       empty.includes('"인수번호를 먼저 불러오면 그 장비의 기종에 맞는 O/H 부품을 여기서 담을 수 있습니다."'),
       empty
     );
+    /* 🔴 나머지 둘은 **가리키는 곳이 바뀌었다**(2026-10-16). 모델을 잇고 부품을 넣는 자리가
+       A/S 안의 메뉴에서 **재고 관리 시스템**으로 옮겨갔다 — 옛 문구를 그대로 두면 사람이 이
+       시스템의 메뉴를 뒤진다. 말투와 「고쳐야 할 자리를 갈라 말한다」는 규율은 그대로다. */
     assert.ok(
       empty.includes(
-        '"이 장비의 제품 모델에 O/H 부품 템플릿이 이어져 있지 않습니다 — 재고 관리 › O/H 부품 템플릿에서 모델을 이어 주세요."'
+        '"이 장비의 제품 모델에 O/H 부품 템플릿이 이어져 있지 않습니다 — 재고 관리 시스템 › O/H 부품 템플릿에서 이 제품 모델을 이어 주세요."'
       ),
       empty
     );
     assert.ok(
       empty.includes(
-        "`기종 ${ohTemplateCode} 템플릿에 담긴 부품이 없습니다 — 재고 관리 › O/H 부품 템플릿에서 부품을 넣어 주세요.`"
+        '`${ohTemplateValue.name || "이"} 템플릿에 담긴 부품이 없습니다 — 재고 관리 시스템 › O/H 부품 템플릿에서 부품을 넣어 주세요.`'
       ),
       empty
     );

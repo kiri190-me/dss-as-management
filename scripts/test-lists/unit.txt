@@ -1024,6 +1024,12 @@ src/lib/domain/inventory-gateway.test.ts
 src/lib/domain/inventory-stock-request-cart.test.ts
 src/lib/server/inventory-gateway.test.ts
 
+# 견적서의 「인수번호로 불러오기」가 받아 오는 두 목록(출고된 부품 · O/H 템플릿, 2026-10-16).
+# 🔴 옛 A/S 표를 세워 재던 여섯 가지를 **뜻 그대로** 옮겨 온 자리다 — 그 자료가 재고 관리로
+# 옮겨가 표로는 더 이상 잴 수 없다. 화면이 이 규칙을 제자리에서 쓰는가는 components 목록의
+# quotes/quote-intake-inventory.test.ts 가 원본을 읽어 본다.
+src/lib/domain/quote-intake-parts.test.ts
+
 # 반출 신청을 **거두는** 서버 액션(2026-10-16). 세션·DB·망을 끌어오는 `"use server"` 파일이라
 # 불러 볼 수 없어 원본 글자를 읽는다 — 포털 번호를 세션에서 꺼내는가 · 그 열쇠가 이 수리
 # 건의 것인지 확인한 **뒤에** 거두러 가는가 · 권한을 액션이 직접 묻는가.

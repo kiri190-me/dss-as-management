@@ -433,7 +433,17 @@ export function filterInventoryParts(parts: readonly InventoryPart[], term: stri
  * ============================================================================
  */
 export function toPartPickerRows(parts: readonly InventoryPart[]): PartPickerRow[] {
-  return parts.map((part) => ({
+  return parts.map(toPartPickerRow);
+}
+
+/**
+ * 부품 **하나**를 옮긴다. 🔴 **경계를 긋는 자리는 여기 하나다** — 위 머리말의 셋(재고 ·
+ * 소유 · 비고)을 떼어 내는 일이 이 함수에서만 일어나야, 줄을 하나씩 옮기는 쪽
+ * (`quote-intake-parts.ts` 의 출고 부품 · O/H 템플릿 줄)이 제 손으로 칸을 적다가
+ * **실수로 하나를 더 실어 보내는** 일이 생기지 않는다.
+ */
+export function toPartPickerRow(part: InventoryPart): PartPickerRow {
+  return {
     id: String(part.no),
     partName: part.name,
     partSpec: part.name2,
@@ -441,7 +451,7 @@ export function toPartPickerRows(parts: readonly InventoryPart[]): PartPickerRow
     customerPartName: part.customerName,
     drawingNo: part.drawingNo,
     kyosanPartNo: part.kyosanPartNo,
-  }));
+  };
 }
 
 /**
