@@ -22,7 +22,7 @@ import type {
   InventoryOhTemplate,
   InventoryPart,
   InventoryResult,
-  InventoryStockRequest,
+  InventoryStockRequestForScreen,
 } from "@/lib/domain/inventory-gateway";
 import type { DerivedServiceSummary } from "@/lib/db/queries/repair-case-work-records";
 import PendingBillingDecisionCard from "@/components/repair-cases/detail/PendingBillingDecisionCard";
@@ -100,8 +100,11 @@ export default function RepairCaseDetailView({
     parts: InventoryResult<InventoryPart[]>;
     /** 🔵 `value: null` 은 **이어 둔 템플릿이 없다**는 뜻이고 오류가 아니다. */
     ohTemplate: InventoryResult<InventoryOhTemplate | null>;
-    /** 🔵 누가 올렸든 이 건의 반출 신청 전부(재고 관리에서 직접 올린 것까지). */
-    requests: InventoryResult<InventoryStockRequest[]>;
+    /**
+     * 🔵 누가 올렸든 이 건의 반출 신청 전부(재고 관리에서 직접 올린 것까지).
+     * 🔴 **포털 번호가 빠진 모양**이다 — 서버가 「내가 올린 줄인가」(`mine`)만 재어 넣는다.
+     */
+    requests: InventoryResult<InventoryStockRequestForScreen[]>;
     /** 포털 번호가 없는 사람은 올릴 수 없다 — 까닭을 그대로 들고 온다. */
     requesterGate: { ok: true } | { ok: false; message: string };
   } | null;

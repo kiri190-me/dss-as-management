@@ -1,14 +1,18 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import NoticePopup from "@/components/common/NoticePopup";
 import { showSavePopup } from "@/components/common/SavePopup";
-import { createInventoryStockRequestAction } from "@/lib/server/actions/inventory-stock-requests";
+import {
+  cancelInventoryStockRequestAction,
+  createInventoryStockRequestAction,
+} from "@/lib/server/actions/inventory-stock-requests";
 import {
   CHARGE_TYPES,
   CHARGE_TYPE_LABELS,
   STOCK_REQUEST_CANCEL_NOTICE,
+  canCancelStockRequest,
   filterInventoryParts,
   inventoryPartNoteFirstLine,
   inventoryUnreachableMessage,
@@ -16,7 +20,7 @@ import {
   type InventoryOhTemplate,
   type InventoryPart,
   type InventoryResult,
-  type InventoryStockRequest,
+  type InventoryStockRequestForScreen,
 } from "@/lib/domain/inventory-gateway";
 import {
   addStockRequestCartLine,
@@ -49,10 +53,16 @@ import { generateClientUuid } from "@/lib/client-uuid";
  * **보여 주기만** 한다. 대신 **유상/무상**을 줄마다 고르고 🔴 **기본값을 두지 않는다** —
  * 청구에 걸리는 값이라 저쪽 통로도 빠지면 400 으로 거절한다.
  *
- * ── 🔴 [요청 취소] 단추를 그리지 않는다 ────────────────────────────────
- * 저쪽은 A/S 에서 온 신청을 재고 관리 화면에서 못 거두게 막아 두었고(「거두는 것은 낸 쪽의
- * 몫이다」), 낸 쪽이 거둘 통로는 **아직 없다.** 누르면 아무 일도 못 하는 단추를 두는 대신
- * 어디로 가야 하는지 적는다(`STOCK_REQUEST_CANCEL_NOTICE`). 통로가 열리는 날 여기부터 고친다.
+ * ── 🔴 [요청 취소]는 **거둘 수 있는 줄에만** 그린다 (2026-10-16) ────────
+ * 거두는 통로가 열렸다. 단추를 그리는 조건 넷은 `canCancelStockRequest` 한 곳에 있다 —
+ * **내가 올린 것** · **A/S 에서 올린 것**(`requestKey !== null`) · **아직 대기** · **마감 아님**.
+ * 🔴 **이 조건은 편의일 뿐 울타리가 아니다.** 막는 자리는 둘이다: 서버 액션(세션의 포털
+ * 번호로 묻고, 그 열쇠가 **이 수리 건**의 것인지 다시 확인한다)과 재고 관리 통로(없는 신청 ·
+ * 본인 아님 · 대기 아님을 **각각 다른 말**로 거절한다). 화면이 실수로 단추를 그려도 아무 일도
+ * 일어나지 않고, 거절 문구가 **그대로** 떠야 한다.
+ * 🔵 「담당자에게 말씀하세요」 안내(`STOCK_REQUEST_CANCEL_NOTICE`)는 **지우지 않았다** —
+ *    거둘 수 없는 줄(이미 처리가 시작됐거나 · 남이 올렸거나 · 재고 관리에서 직접 올린 신청)은
+ *    여전히 이 화면에서 못 거둔다. 까닭 없이 단추만 없으면 사람은 화면이 고장 난 줄 안다.
  *
  * ── 권한 ────────────────────────────────────────────────────────────────
  * 누구에게 그려지는가는 역할이 아니라 설정이 정한다 — [id]/page.tsx 의 partRequestData
@@ -76,8 +86,11 @@ export default function PartRequestSection({
    * 다른 값이고, 화면도 다르게 그린다.
    */
   ohTemplate: InventoryResult<InventoryOhTemplate | null>;
-  /** 🔵 **누가 올렸든** 이 건의 반출 신청 전부(재고 관리에서 직접 올린 것까지). 최근 것이 위. */
-  requests: InventoryResult<InventoryStockRequest[]>;
+  /**
+   * 🔵 **누가 올렸든** 이 건의 반출 신청 전부(재고 관리에서 직접 올린 것까지). 최근 것이 위.
+   * 🔴 포털 번호는 들어 있지 않다 — 서버가 「내가 올린 줄인가」(`mine`)만 재어 보낸다.
+   */
+  requests: InventoryResult<InventoryStockRequestForScreen[]>;
   /** 올릴 수 있는 사람인가. 🔴 포털 번호가 없으면 막고 **까닭을 말한다**(서버도 다시 막는다). */
   requesterGate: { ok: true } | { ok: false; message: string };
 }) {
@@ -87,7 +100,17 @@ export default function PartRequestSection({
   const [ohMessage, setOhMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [noticeLines, setNoticeLines] = useState<string[] | null>(null);
+  /** 읽어야 하는 알림(올리기·거두기 둘 다 쓴다). 제목이 둘로 갈려 함께 들고 다닌다. */
+  const [notice, setNotice] = useState<{ title: string; lines: string[] } | null>(null);
+  /**
+   * 거두려고 고른 신청. 🔴 **되돌릴 수 없는 일이라 한 번 더 묻는다** — 이 값이 있으면
+   * 확인 창이 떠 있다(이 저장소의 확인 창 관행: `<dialog>` + `showModal()`, 브라우저 기본
+   * `confirm()` 이 아니다 — `common/NoticePopup.tsx` 머리말).
+   */
+  const [cancelTarget, setCancelTarget] = useState<{ requestKey: string; statusLabel: string } | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
+  /** 🔴 저쪽이 거절한 **그 문구**. 확인 창을 닫지 않고 그 안에 그대로 보여 준다. */
+  const [cancelError, setCancelError] = useState<string | null>(null);
   /**
    * 🔴 **요청 번호.** 같은 장바구니를 두 번 눌러도 **같은 값**이어야 한다 — 저쪽은 같은
    * 열쇠면 신청을 새로 만들지 않고 처음 신청을 돌려준다(그때 「이미 올라갔습니다」로
@@ -204,14 +227,58 @@ export default function PartRequestSection({
     if (!result.created) {
       // 🔵 같은 요청 번호가 이미 올라가 있었다 — 두 번 선 것이 아니다. 읽어야 하는 알림이라
       //    저절로 닫히는 저장 팝업을 쓰지 않는다(NoticePopup 머리말).
-      setNoticeLines([
-        "이 요청은 이미 재고 관리에 올라가 있습니다.",
-        "같은 요청이 두 번 서지는 않았습니다. 아래 목록에서 지금 상태를 확인해 주세요.",
-      ]);
+      setNotice({
+        title: "이미 올라간 요청입니다",
+        lines: [
+          "이 요청은 이미 재고 관리에 올라가 있습니다.",
+          "같은 요청이 두 번 서지는 않았습니다. 아래 목록에서 지금 상태를 확인해 주세요.",
+        ],
+      });
       return;
     }
     // 수리 건 안에 딸린 요청이라 목록으로 넘기지 않는다(common/SavePopup.tsx).
     showSavePopup({ message: "재고 관리에 부품을 요청했습니다.", redirectTo: null });
+  }
+
+  /**
+   * 올린 신청을 거둔다 — **확인 창에서 한 번 더 누른 뒤**에만 여기 온다.
+   *
+   * 🔴 **실패를 삼키지 않는다.** 저쪽이 거절한 문구(없는 신청 · 본인 아님 · 대기 아님)를
+   *    **그대로** 확인 창 안에 띄우고 창을 닫지 않는다 — 창이 닫히면 사람은 거둬진 줄 안다.
+   * 🔵 통로가 아직 안 열렸거나 저쪽이 꺼져 있으면 「못 받아 왔다」가 같은 자리에 뜬다.
+   */
+  async function handleCancelConfirm() {
+    if (!cancelTarget) return;
+    setIsCancelling(true);
+    setCancelError(null);
+    const result = await cancelInventoryStockRequestAction({
+      repairCaseId,
+      requestKey: cancelTarget.requestKey,
+    });
+    setIsCancelling(false);
+
+    if (!result.ok) {
+      setCancelError(result.message);
+      return;
+    }
+
+    setCancelTarget(null);
+    // 🔴 목록을 다시 읽어 **저쪽이 적어 둔 지금 상태**(「취소」)가 그 자리에 보이게 한다.
+    router.refresh();
+
+    if (!result.cancelled) {
+      // 🔵 이미 거둬져 있었다 — 오류가 아니다. 읽어야 하는 알림이라 저절로 닫히는 저장
+      //    팝업을 쓰지 않는다(NoticePopup 머리말).
+      setNotice({
+        title: "이미 거둬진 요청입니다",
+        lines: [
+          "이 요청은 이미 거둬져 있었습니다.",
+          "두 번 거둬지지는 않았습니다. 아래 목록에서 지금 상태를 확인해 주세요.",
+        ],
+      });
+      return;
+    }
+    showSavePopup({ message: "요청을 취소했습니다.", redirectTo: null });
   }
 
   return (
@@ -402,14 +469,41 @@ export default function PartRequestSection({
                     {request.status.label || request.status.code}
                     {request.closed && <span className="ml-1 text-zinc-500">(마감)</span>}
                   </span>
-                  <span className="text-zinc-500 dark:text-zinc-400">
-                    {request.requestedAt ? new Date(request.requestedAt).toLocaleString("ko-KR") : ""}
+                  <span className="flex items-center gap-2">
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                      {request.requestedAt ? new Date(request.requestedAt).toLocaleString("ko-KR") : ""}
+                    </span>
+                    {/* 🔴 **거둘 수 있는 줄에만** 그린다(조건 넷은 도메인 함수 한 곳에 있다).
+                        이 조건은 **편의**일 뿐이고, 막는 자리는 서버 액션과 저쪽 통로다 —
+                        단추가 잘못 그려져도 거기서 거절당하고 그 문구가 그대로 뜬다. */}
+                    {canCancelStockRequest(request) && request.requestKey !== null && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCancelError(null);
+                          setCancelTarget({
+                            requestKey: request.requestKey as string,
+                            statusLabel: request.status.label || request.status.code,
+                          });
+                        }}
+                        className="shrink-0 rounded-md border border-zinc-300 px-2 py-0.5 text-[11px] text-zinc-700 hover:border-red-400 hover:text-red-600 dark:border-zinc-700 dark:text-zinc-300"
+                      >
+                        요청 취소
+                      </button>
+                    )}
                   </span>
                 </div>
 
                 {/* 🔵 A/S 에서 올린 것이 아니다. 가려 내지 않고, 그 사실이 보이게 적는다. */}
                 {request.requestKey === null && (
                   <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">재고 관리에서 직접 올린 신청</p>
+                )}
+
+                {/* 🔵 남이 올린 줄에는 단추가 없다 — **누가 올렸는지**를 적어 까닭이 보이게 한다. */}
+                {request.requestKey !== null && !request.mine && request.requesterName !== "" && (
+                  <p className="mt-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                    {request.requesterName} 님이 올린 신청
+                  </p>
                 )}
 
                 {/* 보류 사유 — 왜 멈춰 뒀는지 요청자가 여기서 본다. 보여 주지 않으면 같은
@@ -452,9 +546,110 @@ export default function PartRequestSection({
         <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">{STOCK_REQUEST_CANCEL_NOTICE}</p>
       </div>
 
-      {noticeLines && (
-        <NoticePopup title="이미 올라간 요청입니다" lines={noticeLines} onClose={() => setNoticeLines(null)} />
-      )}
+      {notice && <NoticePopup title={notice.title} lines={notice.lines} onClose={() => setNotice(null)} />}
+
+      <CancelStockRequestDialog
+        target={cancelTarget}
+        isSubmitting={isCancelling}
+        errorMessage={cancelError}
+        onConfirm={() => void handleCancelConfirm()}
+        onCancel={() => {
+          setCancelTarget(null);
+          setCancelError(null);
+        }}
+      />
     </div>
+  );
+}
+
+/**
+ * ============================================================================
+ * [요청 취소] 확인 창 — **되돌릴 수 없다는 것을 분명히 말한다**
+ * ============================================================================
+ * 이 저장소의 확인 창 관행 그대로다(`files/SaveRotationDialog.tsx` 와 같은 `<dialog>` +
+ * `showModal()`). 🔴 **`window.confirm` 을 쓰지 않는다** — 글자를 꾸밀 수 없어 「되돌릴 수
+ * 없습니다」가 파묻히고, 처리 중 상태와 **저쪽이 거절한 문구**를 보여 줄 자리가 없다
+ * (`common/NoticePopup.tsx` 머리말).
+ *
+ * 🔴 **막혔으면 창을 닫지 않는다.** 거절 문구를 이 안에 그대로 띄운다 — 창이 닫히면 사람은
+ * 거둬진 줄 알고 넘어간다.
+ * ============================================================================
+ */
+function CancelStockRequestDialog({
+  target,
+  isSubmitting,
+  errorMessage,
+  onConfirm,
+  onCancel,
+}: {
+  /** `null` 이면 닫혀 있다 — 열림 여부의 주인은 React 상태다. */
+  target: { requestKey: string; statusLabel: string } | null;
+  isSubmitting: boolean;
+  errorMessage: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const isOpen = target !== null;
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (isOpen && !dialog.open) dialog.showModal();
+    else if (!isOpen && dialog.open) dialog.close();
+  }, [isOpen]);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="cancel-stock-request-title"
+      onCancel={(event) => {
+        // 보내는 중에 Esc 로 닫히면 거둬졌는지 알 수 없게 된다.
+        event.preventDefault();
+        if (!isSubmitting) onCancel();
+      }}
+      className="m-auto w-full max-w-md rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 backdrop:bg-black/40 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
+    >
+      <h2 id="cancel-stock-request-title" className="text-sm font-semibold">
+        반출 신청 거두기
+      </h2>
+      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+        지금 상태: <span className="font-medium text-zinc-900 dark:text-zinc-50">{target?.statusLabel ?? ""}</span>
+      </p>
+      <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+        <strong className="font-semibold">거둔 요청은 되돌릴 수 없습니다.</strong>
+        <br />
+        같은 부품이 다시 필요하면 새 요청으로 올려야 합니다.
+      </p>
+
+      {errorMessage && (
+        <p
+          role="alert"
+          className="mt-2 rounded-md border border-red-200 bg-white px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-zinc-900 dark:text-red-400"
+        >
+          {/* 🔴 재고 관리가 적어 준 까닭을 **그대로** 보여 준다 — 손으로 다시 적지 않는다. */}
+          {errorMessage}
+        </p>
+      )}
+
+      <div className="mt-4 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={isSubmitting}
+          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          닫기
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={isSubmitting}
+          className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+        >
+          {isSubmitting ? "거두는 중..." : "요청 거두기"}
+        </button>
+      </div>
+    </dialog>
   );
 }

@@ -1023,3 +1023,8 @@ src/app/api/v1/route-source.test.ts
 src/lib/domain/inventory-gateway.test.ts
 src/lib/domain/inventory-stock-request-cart.test.ts
 src/lib/server/inventory-gateway.test.ts
+
+# 반출 신청을 **거두는** 서버 액션(2026-10-16). 세션·DB·망을 끌어오는 `"use server"` 파일이라
+# 불러 볼 수 없어 원본 글자를 읽는다 — 포털 번호를 세션에서 꺼내는가 · 그 열쇠가 이 수리
+# 건의 것인지 확인한 **뒤에** 거두러 가는가 · 권한을 액션이 직접 묻는가.
+src/lib/server/actions/inventory-stock-requests-source.test.ts

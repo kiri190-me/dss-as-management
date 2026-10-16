@@ -124,6 +124,20 @@ async function callInventory(
       console.error("[inventory] 보낸 값을 거절했습니다", { path, message });
       return { ok: false, kind: "rejected", message: message || "재고 관리가 요청을 받지 않았습니다." };
     }
+    /**
+     * 🔴 **그 밖의 4xx 도 까닭이 적혀 있으면 그 글자를 살린다**(2026-10-16). 거두는 통로는
+     * 거절을 **셋으로 갈라** 각각 다른 말을 돌려준다 — 그런 신청이 없다 · 올린 사람이
+     * 아니다 · 이미 대기가 아니다. 그 셋이 400 으로만 온다는 보장이 없고(404·403·409 가
+     * 자연스럽다), 여기서 뭉개면 사람은 세 경우에 똑같이 「불러오지 못했습니다」만 본다.
+     * 🔵 까닭이 없는 4xx(통로가 아직 안 열려 404 HTML 이 오는 경우가 그렇다)는 거절이 아니라
+     *    **「못 받아 왔다」**로 접는다 — 고치는 길이 값을 맞추는 일이 아니라 통로를 여는 일이다.
+     */
+    if (res.status > 400 && res.status < 500) {
+      const message = errorMessageFrom(await res.json().catch(() => null));
+      console.error("[inventory] 응답", res.status, { path, message });
+      if (message !== "") return { ok: false, kind: "rejected", message };
+      return { ok: false, kind: "unreachable", reason: "error" };
+    }
     if (!res.ok) {
       console.error("[inventory] 응답", res.status, { path });
       return { ok: false, kind: "unreachable", reason: "error" };
@@ -288,6 +302,77 @@ export async function createInventoryStockRequest(
     ok: true,
     created: o.created === true,
     id: typeof request.id === "string" ? request.id : "",
+    statusLabel: typeof status.label === "string" ? status.label : "",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 거두기 — `POST /api/v1/stock-requests/cancel` (🔴 여기도 쓰기 토큰이다)
+// ---------------------------------------------------------------------------
+
+export type CancelStockRequestOutcome =
+  | {
+      ok: true;
+      /** 🔵 거짓이면 **이미 거둬져 있었다** — 오류가 아니다(아래 머리말). */
+      cancelled: boolean;
+      /** 저쪽이 준 지금 상태 글자. 돌려주는 줄 모양은 상태 통로와 같다. */
+      statusLabel: string;
+    }
+  | { ok: false; message: string };
+
+/**
+ * 올린 반출 신청을 거둔다.
+ *
+ * 🔴 **보내는 포털 번호는 부르는 쪽(서버 액션)이 세션에서 꺼낸 값이어야 한다.** 저쪽은 이
+ *    번호로 「올린 사람 본인인가」를 가린다 — 화면이 적어 보낸 값을 그대로 실어 주면 남의
+ *    신청을 거둘 수 있다. 이 함수는 받은 값을 그대로 보내므로, 그 울타리는 액션에 있다.
+ *
+ * 🔴 **거절 셋을 뭉개지 않는다.** 그런 신청이 없다 · 올린 사람이 아니다 · 이미 대기가
+ *    아니다 — 저쪽이 각각 다른 말로 적어 보내고, 우리는 그 글자를 **그대로** 사람에게
+ *    전한다(`callInventory` 의 4xx 갈래). 셋을 한 문장으로 접으면 「왜 안 되는지」가 사라져
+ *    사람이 같은 단추를 계속 누른다.
+ *
+ * 🔵 **두 번 보내도 안전하다.** 이미 거둔 신청에 다시 보내면 오류가 아니라 「거둬져 있다」가
+ *    온다(`cancelled: false`). 그래서 끊겼을 때 사람이 다시 눌러도 잃는 것이 없다.
+ */
+export async function cancelInventoryStockRequest(input: {
+  requestKey: string;
+  /** 🔴 **포털 번호**. 저쪽이 이 값으로 본인 여부를 가린다. */
+  requesterSub: string;
+}): Promise<CancelStockRequestOutcome> {
+  const call = await callInventory("/api/v1/stock-requests/cancel", {
+    token: "write",
+    method: "POST",
+    timeoutMs: WRITE_TIMEOUT_MS,
+    body: { requestKey: input.requestKey, requester: { sub: input.requesterSub } },
+  });
+
+  if (!call.ok) {
+    return {
+      ok: false,
+      message: call.kind === "rejected" ? call.message : inventoryUnreachableMessage(call.reason),
+    };
+  }
+
+  const json = call.json;
+  if (!json || typeof json !== "object") {
+    console.error("[inventory] 거두기 응답 모양을 읽지 못했습니다.");
+    return { ok: false, message: "재고 관리의 응답을 읽지 못했습니다. 목록을 새로고침해 지금 상태를 확인해 주세요." };
+  }
+  const o = json as { cancelled?: unknown; request?: unknown };
+  const request = (o.request && typeof o.request === "object" ? o.request : {}) as { status?: unknown };
+  const status = (request.status && typeof request.status === "object" ? request.status : {}) as { label?: unknown };
+
+  return {
+    ok: true,
+    /**
+     * 🔵 **빠져 있으면 「방금 거뒀다」로 본다.** 이 칸이 가르는 것은 말투 하나뿐이고(방금
+     * 거뒀습니다 / 이미 거둬져 있었습니다), 둘 다 **거둬진 상태**라는 점은 같다. 올리는 쪽
+     * (`created`)과 기본값이 반대인 까닭이 그것이다 — 거기서는 「이미 있었다」가 안전한 쪽,
+     * 여기서는 흔한 쪽이 「방금 거뒀다」다. 어느 쪽이든 화면이 목록을 다시 읽어 **저쪽이
+     * 적어 둔 지금 상태**를 보여 준다.
+     */
+    cancelled: o.cancelled !== false,
     statusLabel: typeof status.label === "string" ? status.label : "",
   };
 }

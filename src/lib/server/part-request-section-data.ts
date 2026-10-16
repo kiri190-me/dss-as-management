@@ -4,8 +4,10 @@ import { getRequestCaseContext } from "@/lib/db/queries/inventory-part-requests"
 import { getSsoSubjectForUser } from "@/lib/db/queries/users";
 import {
   NO_PORTAL_ID_MESSAGE,
+  toScreenStockRequests,
   type InventoryOhTemplate,
   type InventoryResult,
+  type InventoryStockRequestForScreen,
 } from "@/lib/domain/inventory-gateway";
 import {
   fetchInventoryOhTemplate,
@@ -58,11 +60,23 @@ export async function loadPartRequestSectionData(params: {
     fetchInventoryStockRequestsByIntake(params.intakeNumber),
   ]);
 
+  /**
+   * 🔴 **「내가 올린 신청인가」를 여기서 재고 포털 번호는 떼어 낸다**(2026-10-16). 화면은
+   * [요청 취소]를 내가 올린 줄에만 그리는데, 그러려면 비교할 값이 필요하다 — 그렇다고
+   * 포털 번호를 props 로 내려보낼 수는 없다(위 머리말과 같은 까닭이다). 그래서 서버에서
+   * 재고 `mine` 한 칸만 남긴다. 🔴 이 칸은 **편의**일 뿐이고 막는 자리는 서버 액션과
+   * 저쪽 통로다(`canCancelStockRequest` 머리말).
+   */
+  const screenRequests: InventoryResult<InventoryStockRequestForScreen[]> =
+    requests.status === "ok"
+      ? { status: "ok", value: toScreenStockRequests(requests.value, requesterSub) }
+      : requests;
+
   return {
     caseContext,
     parts,
     ohTemplate,
-    requests,
+    requests: screenRequests,
     requesterGate: requesterSub
       ? ({ ok: true } as const)
       : ({ ok: false, message: NO_PORTAL_ID_MESSAGE } as const),

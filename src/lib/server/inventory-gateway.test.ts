@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  cancelInventoryStockRequest,
   createInventoryStockRequest,
   fetchInventoryOhTemplate,
   fetchInventoryParts,
@@ -332,5 +333,119 @@ describe("올리기", () => {
 
     assert.equal(result.ok, false);
     assert.ok((result.ok ? "" : result.message).length > 0);
+  });
+});
+
+/**
+ * ============================================================================
+ * 거두기 — 🔴 **거절 셋을 뭉개지 않는다** (2026-10-16)
+ * ============================================================================
+ * 저쪽은 거절을 셋으로 갈라 **각각 다른 말**로 돌려준다 — 그런 신청이 없다 · 올린 사람이
+ * 아니다 · 이미 대기가 아니다. 그 셋이 400 으로만 온다는 보장이 없어서(404·403·409 가
+ * 자연스럽다) 이 시험이 **여러 4xx 에서** 문구가 살아 오는지를 잰다. 뭉개면 사람은 세 경우에
+ * 똑같이 「불러오지 못했습니다」만 보고, 무엇을 고쳐야 하는지 알 수 없다.
+ *
+ * 🔵 **통로가 아직 안 열렸을 수도 있다**(받는 쪽을 지금 만들고 있다). 그때는 까닭 없는 404 나
+ *    오류 페이지가 오고, 그 갈래는 **「못 받아 왔다」**로 정직하게 보여야 한다.
+ * ============================================================================
+ */
+describe("거두기", () => {
+  const CANCEL_INPUT = { requestKey: "지어낸-요청번호", requesterSub: "지어낸-포털번호" };
+  const CANCELLED_BODY = {
+    cancelled: true,
+    request: { id: "r1", requestKey: "지어낸-요청번호", status: { code: "CANCELLED", label: "취소" }, closed: false },
+  };
+
+  test("🔴 쓰기 토큰으로 거두기 주소를 POST 한다 — 보내는 것은 열쇠와 포털 번호뿐", async () => {
+    stubFetch(() => ({ status: 200, json: CANCELLED_BODY }));
+
+    await cancelInventoryStockRequest(CANCEL_INPUT);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "POST");
+    assert.match(calls[0].url, /\/api\/v1\/stock-requests\/cancel$/);
+    assert.equal(calls[0].headers.Authorization, `Bearer ${WRITE_TOKEN}`);
+    assert.notEqual(calls[0].headers.Authorization, `Bearer ${READ_TOKEN}`);
+    assert.deepEqual(calls[0].body, {
+      requestKey: "지어낸-요청번호",
+      requester: { sub: "지어낸-포털번호" },
+    });
+  });
+
+  test("거둬졌으면 저쪽이 준 상태 글자를 그대로 들고 온다", async () => {
+    stubFetch(() => ({ status: 200, json: CANCELLED_BODY }));
+
+    const result = await cancelInventoryStockRequest(CANCEL_INPUT);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.ok ? result.cancelled : null, true);
+    assert.equal(result.ok ? result.statusLabel : null, "취소");
+  });
+
+  test("🔵 이미 거둬져 있던 것은 **오류가 아니다** — 두 번 보내도 안전하다", async () => {
+    stubFetch(() => ({ status: 200, json: { ...CANCELLED_BODY, cancelled: false } }));
+
+    const result = await cancelInventoryStockRequest(CANCEL_INPUT);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.ok ? result.cancelled : null, false);
+  });
+
+  for (const [status, message] of [
+    [404, "그런 신청이 없습니다."],
+    [403, "본인이 올린 신청만 거둘 수 있습니다."],
+    [409, "이미 처리가 시작된 신청은 거둘 수 없습니다."],
+    [400, "요청 번호를 확인할 수 없습니다."],
+  ] as const) {
+    test(`🔴 ${status} 로 거절당하면 저쪽 문구를 **그대로** 전한다 — 뭉개지 않는다`, async () => {
+      stubFetch(() => ({ status, json: { error: "rejected", message } }));
+
+      const result = await cancelInventoryStockRequest(CANCEL_INPUT);
+
+      assert.equal(result.ok, false);
+      assert.equal(result.ok ? null : result.message, message);
+    });
+  }
+
+  test("🔵 까닭 없는 404(통로가 아직 안 열렸다)는 「못 받아 왔다」다 — 거절로 읽지 않는다", async () => {
+    stubFetch(() => ({ status: 404, json: "<html>Not Found</html>" }));
+
+    const result = await cancelInventoryStockRequest(CANCEL_INPUT);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok ? null : result.message, "재고 관리에서 불러오지 못했습니다.");
+  });
+
+  test("🔴 저쪽이 꺼져 있어도 거둬진 것처럼 보이지 않는다", async () => {
+    stubFetch(() => ({ status: 500, json: {} }));
+
+    const result = await cancelInventoryStockRequest(CANCEL_INPUT);
+
+    assert.equal(result.ok, false);
+    assert.ok((result.ok ? "" : result.message).length > 0);
+  });
+
+  test("🔴 응답 모양을 못 읽으면 성공으로 접지 않는다", async () => {
+    stubFetch(() => ({ status: 200, json: "<html>오류</html>" }));
+
+    const result = await cancelInventoryStockRequest(CANCEL_INPUT);
+
+    assert.equal(result.ok, false);
+  });
+
+  test("쓰기 토큰이 없으면 두드리지도 않는다", async () => {
+    process.env.INVENTORY_WRITE_TOKEN = "";
+    stubFetch(() => ({ status: 200, json: CANCELLED_BODY }));
+
+    const result = await cancelInventoryStockRequest(CANCEL_INPUT);
+
+    assert.equal(result.ok, false);
+    assert.equal(calls.length, 0);
+  });
+
+  test("시간 제한을 끊을 신호를 함께 보낸다", async () => {
+    stubFetch(() => ({ status: 200, json: CANCELLED_BODY }));
+    await cancelInventoryStockRequest(CANCEL_INPUT);
+    assert.equal(calls[0].hasSignal, true);
   });
 });

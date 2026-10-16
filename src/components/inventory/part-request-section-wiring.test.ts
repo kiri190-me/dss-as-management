@@ -17,7 +17,8 @@ import { readFileSync } from "node:fs";
  *  ㉠ **A/S 제 표를 보지 않는다** — 재고 조회·서버 액션·도메인 타입을 하나도 끌어오지 않는다.
  *  ㉡ **요청 번호를 `useRef` 에 담아 그 helper 로 꺼낸다** — 두 번 눌러도 같은 값이 나간다.
  *  ㉢ **성공한 뒤에만 번호를 비운다** — 실패하고 다시 누르는 것은 같은 요청이다.
- *  ㉣ **[요청 취소] 단추를 그리지 않는다** — 거두는 통로가 아직 없다.
+ *  ㉣ **[요청 취소]를 거둘 수 있는 줄에만 그린다**(2026-10-16 에 통로가 열렸다) — 조건 넷은
+ *     도메인 함수 한 곳(`canCancelStockRequest`)이 쥐고, 화면은 그것을 부르기만 한다.
  * ============================================================================
  */
 
@@ -77,13 +78,65 @@ describe("🔴 요청 번호는 두 번 눌러도 같은 값이 나간다", () =
   });
 });
 
-describe("🔴 거두는 통로가 아직 없다", () => {
-  test("[요청 취소] 단추를 그리지 않고, 어디로 가야 하는지 적는다", () => {
-    // 🔵 머리말에도 「요청 취소」라는 글자가 있으므로 **단추로 그려지는 자리**만 잰다 —
-    //    주석을 함께 걸면 까닭을 적어 둔 것만으로 시험이 빨개진다.
-    assert.doesNotMatch(source, />\s*(요청 취소|취소 확정)\s*</);
-    assert.doesNotMatch(source, /cancelReason|handleCancel|setCancelingId/);
+describe("🔴 [요청 취소] — 거둘 수 있는 줄에만 그린다", () => {
+  /** 거두는 손잡이 하나만 떼어 본다 — 올리는 쪽의 같은 모양(`if (!result.ok)`)과 섞이지 않게. */
+  const cancelFn = source.slice(source.indexOf("async function handleCancelConfirm"));
+  test("단추를 그릴지 **도메인 함수**가 정한다 — 화면이 조건을 다시 적지 않는다", () => {
+    // 🔴 넷(내 것 · 열쇠 있음 · 대기 · 마감 아님)을 화면이 손으로 적으면 규칙이 두 벌이 되고,
+    //    고치는 날 한쪽만 바뀐다. 규칙 자체는 lib/domain/inventory-gateway.test.ts 가 잰다.
+    assert.match(source, /canCancelStockRequest\(request\)/);
+    assert.match(source, />\s*요청 취소\s*</, "[요청 취소] 단추가 그려지지 않는다");
+    // 상태 코드를 화면에서 직접 비교하고 있으면 규칙이 두 곳이 된 것이다.
+    assert.doesNotMatch(source, /status\.code === "PENDING"/);
+  });
+
+  test("🔴 열쇠가 없는 줄에는 그리지 않는다 — 거둘 열쇠가 애초에 없다", () => {
+    assert.match(source, /canCancelStockRequest\(request\) && request\.requestKey !== null/);
+  });
+
+  test("🔴 「담당자에게 말씀하세요」 안내를 지우지 않았다 — 못 거두는 줄이 여전히 있다", () => {
     assert.match(source, /STOCK_REQUEST_CANCEL_NOTICE/);
+  });
+
+  test("🔴 화면 조건은 **편의**일 뿐이고 막는 자리는 서버와 저쪽 통로라고 적어 두었다", () => {
+    assert.match(source, /편의/);
+    assert.match(source, /울타리가 아니다/);
+  });
+
+  test("되돌릴 수 없는 일이라 **한 번 더 묻는다** — 이 저장소의 확인 창 관행", () => {
+    assert.match(source, /setCancelTarget\(\{/, "확인 창을 거치지 않고 바로 거두고 있다");
+    assert.match(source, /showModal\(\)/);
+    assert.match(source, /되돌릴 수 없습니다/);
+    // 🔴 브라우저 기본 창은 쓰지 않는다(common/NoticePopup.tsx 머리말).
+    // 🔵 **부르는 자리**만 잰다 — 머리말에 「window.confirm 을 쓰지 않는다」라고 적어 두었다.
+    assert.doesNotMatch(source, /window\.(confirm|alert|prompt)\(/);
+  });
+
+  test("확인 창에서 누른 뒤에야 서버 액션을 부른다", () => {
+    assert.match(source, /cancelInventoryStockRequestAction\(\{/);
+    // 🔴 화면이 신청자를 적어 보내지 않는다 — 포털 번호는 서버가 세션에서 꺼낸다.
+    assert.doesNotMatch(source, /requesterSub|requester:\s*\{/);
+  });
+
+  test("🔴 실패하면 저쪽 문구를 **그대로** 보이고 거둬진 것처럼 보이지 않는다", () => {
+    const failure = cancelFn.indexOf("if (!result.ok) {");
+    assert.ok(failure >= 0, "거두기 실패를 가르는 자리가 없다");
+    // 실패 갈래 안(= 돌아가기 전)에서 목록을 새로 읽거나 성공 팝업을 띄우면 거둬진 것처럼 보인다.
+    const branch = cancelFn.slice(failure, cancelFn.indexOf("return;", failure));
+    assert.match(branch, /setCancelError\(result\.message\)/, "거절 문구를 그대로 들지 않는다");
+    assert.doesNotMatch(branch, /router\.refresh|showSavePopup|setCancelTarget\(null\)/);
+    assert.match(source, /\{errorMessage\}/, "거절 문구를 그릴 자리가 없다");
+  });
+
+  test("성공하면 목록을 다시 읽는다 — 상태가 「취소」로 바뀐 것이 보여야 한다", () => {
+    const failure = cancelFn.indexOf("if (!result.ok) {");
+    const refresh = cancelFn.indexOf("router.refresh()");
+    assert.ok(refresh > failure && failure >= 0, "실패를 가른 **뒤에** 목록을 다시 읽어야 한다");
+  });
+
+  test("🔵 이미 거둬져 있던 것은 오류가 아니라 **읽는 알림**으로 말한다", () => {
+    assert.match(source, /if \(!result\.cancelled\)/);
+    assert.match(source, /이미 거둬져 있었습니다/);
   });
 });
 

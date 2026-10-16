@@ -369,6 +369,26 @@ export type InventoryStockRequest = {
   lines: InventoryStockRequestLine[];
   decision: { byName: string; at: string; note: string } | null;
   hold: { reason: string; byName: string; at: string } | null;
+  /**
+   * 올린 사람. 🔴 **가리는 값은 포털 번호(`sub`)뿐이다** — 이름은 겹친다(같은 이름이 둘이면
+   * 남의 신청을 제 것으로 본다). 그래서 `sub` 이 없으면 통째로 `null` 이고, 그런 줄은
+   * 「누가 올렸는지 모른다」로 다룬다(`toScreenStockRequests` 가 `mine: false` 로 접는다).
+   *
+   * 🔴 **이 값은 서버에서만 본다.** 화면으로 내려보내는 모양(`InventoryStockRequestForScreen`)
+   * 에는 `sub` 이 없다 — 신원을 증명하는 값이라 props 에 실으면 브라우저로 나간다.
+   */
+  requester: { sub: string; name: string } | null;
+};
+
+/**
+ * 화면에 내려보내는 신청 한 줄. 🔴 **포털 번호가 빠져 있다** — 대신 서버가 「내 것인가」를
+ * 미리 재어 `mine` 한 칸으로 넣는다(위 `requester` 머리말).
+ */
+export type InventoryStockRequestForScreen = Omit<InventoryStockRequest, "requester"> & {
+  /** 올린 사람 이름. 없을 수 있다(저쪽이 안 주거나, 재고 관리에서 직접 올린 신청). */
+  requesterName: string;
+  /** 🔴 **지금 보고 있는 사람이 올린 신청인가.** 서버가 포털 번호로 잰 값이다. */
+  mine: boolean;
 };
 
 function parseDecision(value: unknown): { byName: string; at: string; note: string } | null {
@@ -377,6 +397,19 @@ function parseDecision(value: unknown): { byName: string; at: string; note: stri
   const at = str(o.at);
   if (at === "") return null;
   return { byName: str(o.byName), at, note: typeof o.note === "string" ? o.note : "" };
+}
+
+/**
+ * 올린 사람. 🔴 **포털 번호가 없으면 통째로 `null`** 이다 — 이름만으로 사람을 가르지 않는다.
+ * 같은 이름이 둘이면 남의 신청에 [요청 취소]를 그려 주게 되고, 그 단추는 저쪽에서 거절당해
+ * 「왜 내 신청을 못 거두지」가 된다.
+ */
+function parseRequester(value: unknown): { sub: string; name: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const o = value as { sub?: unknown; name?: unknown };
+  const sub = str(o.sub);
+  if (sub === "") return null;
+  return { sub, name: str(o.name) };
 }
 
 function parseHold(value: unknown): { reason: string; byName: string; at: string } | null {
@@ -432,6 +465,7 @@ export function parseInventoryStockRequestsResponse(json: unknown): InventorySto
       lines,
       decision: parseDecision(o.decision),
       hold: parseHold(o.hold),
+      requester: parseRequester(o.requester),
     });
   }
   return requests;
@@ -446,14 +480,93 @@ export function isInventoryRequestSettled(request: Pick<InventoryStockRequest, "
   return request.status.code === "CONFIRMED" || request.status.code === "REJECTED" || request.status.code === "CANCELLED";
 }
 
+// ---------------------------------------------------------------------------
+// 거두기 — `POST /api/v1/stock-requests/cancel` (2026-10-16 에 통로가 열렸다)
+// ---------------------------------------------------------------------------
+
 /**
- * 🔴 **거두는 통로가 아직 없다.** 저쪽은 A/S 에서 온 신청을 재고 관리 화면에서 **못 거두게**
- * 막아 두었고(API.md 4-6절: 「거두는 것은 낸 쪽의 몫이다」), 낸 쪽이 거둘 통로는 아직 열리지
- * 않았다. 그래서 이 화면에는 **[요청 취소] 단추를 그리지 않는다** — 누르면 아무 일도 못 하는
- * 단추를 두는 것보다, 어디로 가야 하는지 적어 두는 편이 낫다. 통로가 열리는 날 여기부터 고친다.
+ * 🔴 **거둘 수 있는 상태는 「대기」 하나뿐이다.** 재고 담당자가 한 번이라도 손을 댄 신청
+ * (일부 나감 · 확인 · 반려 · 보류 뒤 처리)은 낸 쪽이 되돌릴 수 없다 — 이미 창고에서 물건이
+ * 움직였을 수 있기 때문이다.
+ *
+ * 🔵 **모르는 코드는 「못 거둔다」로 본다.** 위 `isInventoryRequestSettled` 는 반대쪽으로
+ *    (모르면 「안 끝났다」) 접는데, 그쪽은 **보여 주는** 판정이고 이쪽은 **되돌릴 수 없는 일을
+ *    여는** 판정이라 안전한 방향이 서로 반대다. 저쪽이 상태를 더하는 날 이 단추는 조용히
+ *    안 그려지고, 사람은 담당자에게 말하면 된다(아래 안내 문구).
+ */
+const CANCELLABLE_STATUS_CODE = "PENDING";
+
+/**
+ * 이 줄에 [요청 취소]를 그릴 것인가. 넷이 모두 맞아야 한다 —
+ *  ㉠ **내가 올린 것**(`mine`) · ㉡ **A/S 에서 올린 것**(`requestKey !== null`) ·
+ *  ㉢ **아직 대기**(위) · ㉣ **마감되지 않은 것**.
+ *
+ * 🔴 **이것은 편의일 뿐 울타리가 아니다.** 진짜로 막는 자리는 둘이다 — 서버 액션(세션의
+ * 포털 번호로 묻고, 그 열쇠가 **이 수리 건**의 것인지 본다)과 재고 관리 통로(없는 신청 ·
+ * 본인 아님 · 대기 아님을 **각각 다른 말**로 거절한다). 이 함수는 「누르면 거절당할 단추」를
+ * 미리 안 그려 주는 일만 한다.
+ *
+ * 🔵 `requestKey` 가 `null` 인 줄은 **재고 관리에서 직접 올린 신청**이라 우리가 거둘 열쇠가
+ *    애초에 없다. 그 줄은 `mine` 도 참일 수 없지만(저쪽이 올린 사람을 그렇게 적을 리 없다)
+ *    둘을 **따로** 본다 — 한쪽 약속이 바뀌어도 남의 신청이 열리지 않게.
+ */
+export function canCancelStockRequest(
+  request: Pick<InventoryStockRequestForScreen, "requestKey" | "mine" | "status" | "closed">
+): boolean {
+  return (
+    request.mine &&
+    request.requestKey !== null &&
+    request.status.code === CANCELLABLE_STATUS_CODE &&
+    !request.closed
+  );
+}
+
+/**
+ * 받아 온 신청들을 **화면 모양으로** 바꾼다 — 🔴 포털 번호를 떼어 내고 「내 것인가」만 남긴다.
+ *
+ * `mySub` 이 `null`(포털로 들어온 적 없는 계정)이면 **전부 남의 것**이다. 비교할 값이 없는데
+ * 참으로 두면 모든 줄에 단추가 그려지고, 누를 때마다 저쪽이 거절한다.
+ */
+export function toScreenStockRequests(
+  requests: readonly InventoryStockRequest[],
+  mySub: string | null
+): InventoryStockRequestForScreen[] {
+  const mine = typeof mySub === "string" && mySub.trim() !== "" ? mySub.trim() : null;
+  return requests.map(({ requester, ...rest }) => ({
+    ...rest,
+    requesterName: requester?.name ?? "",
+    mine: mine !== null && requester !== null && requester.sub === mine,
+  }));
+}
+
+/**
+ * 🔴 **그 열쇠가 이 수리 건의 신청인가.** 거두는 통로는 `requestKey` 하나로 신청을 찾으므로
+ * (수리 건을 받지 않는다) **다른 건의 열쇠를 적어 보내면 저쪽은 그것을 거둬 준다.** 그 울타리는
+ * 이쪽에만 둘 수 있다 — 서버 액션이 이 건의 인수번호로 신청 목록을 다시 받아 이 함수로 거른다.
+ *
+ * 🔵 `requestKey` 가 `null` 인 줄(재고 관리에서 직접 올린 신청)과는 **절대 맞지 않는다**.
+ */
+export function stockRequestKeyBelongsToCase(
+  requests: readonly InventoryStockRequest[],
+  requestKey: string
+): boolean {
+  const key = requestKey.trim();
+  if (key === "") return false;
+  return requests.some((request) => request.requestKey !== null && request.requestKey === key);
+}
+
+/** 이 건의 신청이 아닌 열쇠가 왔을 때. 🔴 「취소됐습니다」처럼 보이게 하지 않는다. */
+export const STOCK_REQUEST_NOT_IN_CASE_MESSAGE =
+  "이 수리 건에 올라간 신청이 아닙니다. 화면을 새로고침한 뒤 다시 눌러 주세요.";
+
+/**
+ * 거둘 수 **없는** 줄에 할 말. 🔴 **지우지 않는다** — 통로가 열렸어도 거둘 수 있는 줄은
+ * 「내가 올린, 아직 대기인」 신청뿐이다(`canCancelStockRequest`). 이미 재고 담당자가 손을
+ * 댄 신청과 남이 올린 신청은 여전히 이 화면에서 못 거두고, 그때 어디로 가야 하는지가 이 한
+ * 줄이다. 까닭을 적지 않고 단추만 없으면 사람은 제 화면이 고장 난 줄 안다.
  */
 export const STOCK_REQUEST_CANCEL_NOTICE =
-  "올린 요청은 이 화면에서 거둘 수 없습니다. 취소가 필요하면 재고 관리 담당자에게 말씀해 주세요.";
+  "[요청 취소]가 없는 줄은 이 화면에서 거둘 수 없습니다 — 이미 재고 관리에서 처리가 시작됐거나, 다른 사람이 올렸거나, 재고 관리에서 직접 올린 신청입니다. 그런 신청은 재고 관리 담당자에게 말씀해 주세요.";
 
 /**
  * 포털 번호가 없는 사람에게 할 말. 🔴 **고치는 길까지 적는다** — 「올릴 수 없습니다」만

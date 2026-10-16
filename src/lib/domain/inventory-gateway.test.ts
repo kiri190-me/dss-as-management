@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   CHARGE_TYPE_LABELS,
   MAX_STOCK_REQUEST_LINES,
+  canCancelStockRequest,
   filterInventoryParts,
   inventoryPartNoteFirstLine,
   inventoryUnreachableMessage,
@@ -13,7 +14,10 @@ import {
   parseInventoryPartsResponse,
   parseInventoryStockRequestsResponse,
   parseStockRequestLines,
+  stockRequestKeyBelongsToCase,
+  toScreenStockRequests,
   type InventoryPart,
+  type InventoryStockRequest,
 } from "./inventory-gateway";
 
 /**
@@ -226,6 +230,168 @@ describe("올린 신청의 지금 상태 읽기", () => {
     assert.equal(parseInventoryStockRequestsResponse({ requests: null }), null);
     assert.equal(parseInventoryStockRequestsResponse("오류 페이지"), null);
     assert.deepEqual(parseInventoryStockRequestsResponse({ count: 0, requests: [], notFound: [] }), []);
+  });
+});
+
+/**
+ * ============================================================================
+ * 거두기 — 🔴 **단추를 그릴 줄과 거둘 수 있는 줄** (2026-10-16)
+ * ============================================================================
+ * 거두는 통로가 열렸다. 여기서 재는 것은 **판정 규칙**이고, 화면이 그 규칙을 실제로 쓰는가는
+ * `components/inventory/part-request-section-wiring.test.ts` 가, 통로를 어떻게 두드리는가는
+ * `lib/server/inventory-gateway.test.ts` 가 잰다.
+ *
+ * 🔴 이 판정은 **편의**다 — 진짜 울타리는 서버 액션과 저쪽 통로다. 그래도 여기서 넷을 각각
+ *    재어 두는 까닭은, 남의 신청에 단추가 그려지면 누르는 사람은 「내 것인데 왜 안 되지」로
+ *    읽고 담당자를 찾아다니기 때문이다.
+ * ============================================================================
+ */
+const MY_SUB = "지어낸-포털번호-나-1111";
+const OTHER_SUB = "지어낸-포털번호-남-2222";
+
+/** 네 갈래를 **통로 응답 모양 그대로** 만든다 — 파서를 지나야 실제 길과 같은 것을 잰다. */
+function parsedFourRows(): InventoryStockRequest[] {
+  const parsed = parseInventoryStockRequestsResponse({
+    count: 4,
+    requests: [
+      {
+        requestKey: "AS-TEST-0001",
+        id: "r1",
+        intakeNumber: "D260701",
+        status: { code: "PENDING", label: "확인 대기" },
+        closed: false,
+        requestedAt: "2026-10-16T01:00:00.000Z",
+        lines: [{ no: 11, name: "AMP-TEST-A1", quantity: 2, issued: 0 }],
+        requester: { sub: MY_SUB, name: "홍길동" },
+      },
+      {
+        requestKey: "AS-TEST-0002",
+        id: "r2",
+        intakeNumber: "D260701",
+        status: { code: "PARTIAL", label: "일부 나감" },
+        closed: false,
+        requestedAt: "2026-10-16T02:00:00.000Z",
+        lines: [{ no: 11, name: "AMP-TEST-A1", quantity: 8, issued: 5 }],
+        requester: { sub: MY_SUB, name: "홍길동" },
+      },
+      {
+        requestKey: "AS-TEST-0003",
+        id: "r3",
+        intakeNumber: "D260701",
+        status: { code: "PENDING", label: "확인 대기" },
+        closed: false,
+        requestedAt: "2026-10-16T03:00:00.000Z",
+        lines: [{ no: 12, name: "AMP-TEST-B2", quantity: 1, issued: 0 }],
+        requester: { sub: OTHER_SUB, name: "임꺽정" },
+      },
+      {
+        requestKey: null,
+        id: "r4",
+        intakeNumber: "D260701",
+        status: { code: "PENDING", label: "확인 대기" },
+        closed: false,
+        requestedAt: "2026-10-16T04:00:00.000Z",
+        lines: [{ no: 13, name: "AMP-TEST-C3", quantity: 1, issued: 0 }],
+        requester: { sub: OTHER_SUB, name: "임꺽정" },
+      },
+    ],
+  });
+  assert.ok(parsed, "응답 모양을 못 읽었다");
+  return parsed;
+}
+
+describe("🔴 올린 사람 — 가르는 값은 포털 번호뿐이다", () => {
+  test("포털 번호와 이름을 그대로 읽는다", () => {
+    const rows = parsedFourRows();
+    assert.deepEqual(rows[0].requester, { sub: MY_SUB, name: "홍길동" });
+  });
+
+  test("🔴 포털 번호가 없으면 통째로 null — 이름만으로 사람을 가르지 않는다", () => {
+    const parsed = parseInventoryStockRequestsResponse({
+      requests: [{ requestKey: "AS-TEST-0009", id: "r9", status: { code: "PENDING", label: "확인 대기" }, requester: { name: "홍길동" } }],
+    });
+    assert.equal(parsed?.[0].requester, null);
+  });
+
+  test("requester 칸이 아예 없는 응답도 읽는다 — 「누가 올렸는지 모른다」다", () => {
+    const parsed = parseInventoryStockRequestsResponse({
+      requests: [{ requestKey: "AS-TEST-0010", id: "r10", status: { code: "PENDING", label: "확인 대기" } }],
+    });
+    assert.equal(parsed?.[0].requester, null);
+  });
+});
+
+describe("🔴 화면 모양으로 바꿀 때 포털 번호를 뗀다", () => {
+  test("🔴 sub 이 화면 모양에 한 글자도 남지 않는다 — props 는 브라우저로 나간다", () => {
+    const screen = toScreenStockRequests(parsedFourRows(), MY_SUB);
+    assert.equal(Object.prototype.hasOwnProperty.call(screen[0], "requester"), false);
+    assert.equal(JSON.stringify(screen).includes(MY_SUB), false, "내 포털 번호가 화면으로 나간다");
+    assert.equal(JSON.stringify(screen).includes(OTHER_SUB), false, "남의 포털 번호가 화면으로 나간다");
+  });
+
+  test("내 포털 번호와 같은 줄만 mine 이다 — 이름은 보여 주되 가름은 번호로", () => {
+    const screen = toScreenStockRequests(parsedFourRows(), MY_SUB);
+    assert.deepEqual(screen.map((r) => r.mine), [true, true, false, false]);
+    assert.equal(screen[2].requesterName, "임꺽정");
+  });
+
+  test("🔴 포털 번호가 없는 사람에게는 전부 남의 것이다 — 비교할 값이 없다", () => {
+    const screen = toScreenStockRequests(parsedFourRows(), null);
+    assert.deepEqual(screen.map((r) => r.mine), [false, false, false, false]);
+  });
+
+  test("올린 사람을 모르는 줄은 내 것이 아니다", () => {
+    const parsed = parseInventoryStockRequestsResponse({
+      requests: [{ requestKey: "AS-TEST-0011", id: "r11", status: { code: "PENDING", label: "확인 대기" } }],
+    });
+    assert.equal(toScreenStockRequests(parsed ?? [], MY_SUB)[0].mine, false);
+  });
+});
+
+describe("🔴 [요청 취소]를 그릴 줄 — 넷을 각각 잰다", () => {
+  const screen = () => toScreenStockRequests(parsedFourRows(), MY_SUB);
+
+  test("㉠ 내 것 · 대기 → 그린다", () => {
+    assert.equal(canCancelStockRequest(screen()[0]), true);
+  });
+
+  test("㉡ 내 것 · 일부 나감 → 그리지 않는다(창고에서 물건이 이미 움직였다)", () => {
+    assert.equal(canCancelStockRequest(screen()[1]), false);
+  });
+
+  test("㉢ 남의 것 · 대기 → 그리지 않는다", () => {
+    assert.equal(canCancelStockRequest(screen()[2]), false);
+  });
+
+  test("㉣ 열쇠 없는 줄(재고 관리에서 직접 올린 신청) → 그리지 않는다", () => {
+    assert.equal(canCancelStockRequest(screen()[3]), false);
+  });
+
+  test("마감된 줄은 그리지 않는다", () => {
+    assert.equal(canCancelStockRequest({ ...screen()[0], closed: true }), false);
+  });
+
+  test("🔵 모르는 상태 코드는 **못 거두는 것으로** 본다 — 되돌릴 수 없는 일을 열지 않는다", () => {
+    assert.equal(canCancelStockRequest({ ...screen()[0], status: { code: "NEW_CODE", label: "새 상태" } }), false);
+  });
+});
+
+describe("🔴 그 열쇠가 이 수리 건의 신청인가 — 서버가 거두기 전에 보는 것", () => {
+  test("이 건의 목록에 있는 열쇠면 참", () => {
+    assert.equal(stockRequestKeyBelongsToCase(parsedFourRows(), "AS-TEST-0001"), true);
+  });
+
+  test("🔴 다른 건의 열쇠는 거짓 — 그대로 보내면 남의 건 신청이 거둬진다", () => {
+    assert.equal(stockRequestKeyBelongsToCase(parsedFourRows(), "AS-TEST-9999"), false);
+  });
+
+  test("빈 글자·공백은 거짓이고, 열쇠 없는 줄과는 맞지 않는다", () => {
+    assert.equal(stockRequestKeyBelongsToCase(parsedFourRows(), "   "), false);
+    assert.equal(stockRequestKeyBelongsToCase(parsedFourRows(), ""), false);
+  });
+
+  test("앞뒤 공백은 같은 열쇠로 본다", () => {
+    assert.equal(stockRequestKeyBelongsToCase(parsedFourRows(), "  AS-TEST-0002  "), true);
   });
 });
 
