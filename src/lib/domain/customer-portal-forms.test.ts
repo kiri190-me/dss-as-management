@@ -11,9 +11,11 @@ import {
   manualColumnsOf,
   partsNameFromModelName,
   readManualValues,
+  resolvePortalFormForCustomer,
   sanitizeManualValues,
   sortPortalRowsByReceivedAt,
   type CustomerPortalForm,
+  type PortalFormCustomer,
   type PortalRowOrderKey,
 } from "./customer-portal-forms";
 
@@ -25,8 +27,10 @@ import {
  * 만든다. 열 구성이 DB 가 아니라 **코드**에 있는 까닭이 바로 이 시험이다 —
  * DB 에 있으면 "지금 ICD 표에 열이 몇 개인가"를 물어볼 방법이 없다.
  *
- * 이 시험이 못 박는 것 넷:
+ * 이 시험이 못 박는 것 다섯:
  *
+ *  0. 🔴 **어느 양식인가는 DB 칸(`portal_form_id`)이 먼저 정한다**(2026-10-17).
+ *     이름은 칸이 빌 때의 안전망이다 — 아래 「칸이 먼저, 비면 이름」 묶음.
  *  1. 🔴 세 고객사의 **열 이름과 차례가 엑셀 그대로**다. 열 하나가 조용히
  *     빠지거나 자리를 바꾸면 담당자가 다른 칸에 값을 적는다.
  *  2. 🔴 **정의가 없는 고객사는 null** 이다 — 2026-10-04 부터 그런 고객사는
@@ -436,6 +440,19 @@ describe("🔴 Parts 명 — 네 갈래, 모르는 모델명은 빈칸", () => {
 });
 
 /**
+ * 🔴 **칸이 빈** 고객사 한 줄. 지금 고객사 대부분이 이 모양이고(개발 DB 41줄 중
+ * 34줄), 그때 양식을 가리는 것은 이름이다 — 안전망.
+ *
+ * `portalFormId` 를 적는 자리를 함수로 감추지 않고 **값까지 보이게** 두는 것이
+ * 나은 자리도 있어, 칸이 채워진 줄은 시험마다 그대로 적는다.
+ */
+const byName = (id: string, name: string): PortalFormCustomer => ({
+  id,
+  name,
+  portalFormId: null,
+});
+
+/**
  * ============================================================================
  * 🔴 양식으로 고객사를 묶는다 — 「고객 안내 현황」의 단추가 서는 근거
  * ============================================================================
@@ -446,16 +463,20 @@ describe("🔴 Parts 명 — 네 갈래, 모르는 모델명은 빈칸", () => {
  * 등록돼 있다(실측 2026-09-30: `INVENIA` 와 `INVENIA Co.,Ltd` 가 둘 다 살아 있고
  * 양쪽 다 접수 건이 있다). 합치지 않으면 같은 회사의 표가 둘로 갈리는데, 빠진
  * 쪽은 아무 오류 없이 영영 안 보인다.
+ *
+ * 🔴 아래 줄들은 **칸이 빈 고객사**다(`portalFormId: null`) — 지금 고객사 대부분이
+ * 그렇고, 그때 이름이 가린다는 **안전망**을 이 묶음이 그대로 지킨다. 칸이 채워진
+ * 줄은 바로 아래 묶음이 본다.
  * ============================================================================
  */
 describe("🔴 양식으로 고객사 묶기", () => {
   const CUSTOMERS = [
-    { id: "c-icd", name: "ICD Co.,Ltd." },
-    { id: "c-inv-1", name: "INVENIA" },
-    { id: "c-inv-2", name: "INVENIA Co.,Ltd" },
-    { id: "c-jusung-1", name: "JUSUNG" },
-    { id: "c-jusung-2", name: "주성 엔지니어링" },
-    { id: "c-other", name: "이름 없는 어느 회사" },
+    byName("c-icd", "ICD Co.,Ltd."),
+    byName("c-inv-1", "INVENIA"),
+    byName("c-inv-2", "INVENIA Co.,Ltd"),
+    byName("c-jusung-1", "JUSUNG"),
+    byName("c-jusung-2", "주성 엔지니어링"),
+    byName("c-other", "이름 없는 어느 회사"),
   ];
 
   test("🔴 여러 이름으로 등록된 한 회사가 **한 묶음**이 된다", () => {
@@ -474,7 +495,7 @@ describe("🔴 양식으로 고객사 묶기", () => {
   });
 
   test("🔴 묶인 고객사가 하나도 없는 양식은 목록에서 빠진다 — 빈 단추를 그리지 않는다", () => {
-    const groups = groupCustomersByPortalForm([{ id: "c-icd", name: "ICD" }]);
+    const groups = groupCustomersByPortalForm([byName("c-icd", "ICD")]);
     assert.deepEqual(
       groups.map((group) => group.form.id),
       ["ICD"]
@@ -484,9 +505,9 @@ describe("🔴 양식으로 고객사 묶기", () => {
   test("차례는 CUSTOMER_PORTAL_FORMS 그대로다 — 고객사 이름 차례가 아니다", () => {
     // 일부러 거꾸로 넣어 본다.
     const groups = groupCustomersByPortalForm([
-      { id: "c-jusung", name: "JUSUNG" },
-      { id: "c-inv", name: "INVENIA" },
-      { id: "c-icd", name: "ICD Co.,Ltd." },
+      byName("c-jusung", "JUSUNG"),
+      byName("c-inv", "INVENIA"),
+      byName("c-icd", "ICD Co.,Ltd."),
     ]);
     assert.deepEqual(
       groups.map((group) => group.form.id),
@@ -496,7 +517,7 @@ describe("🔴 양식으로 고객사 묶기", () => {
 
   test("하나도 안 묶이면 빈 목록이다", () => {
     assert.deepEqual(groupCustomersByPortalForm([]), []);
-    assert.deepEqual(groupCustomersByPortalForm([{ id: "x", name: "어디 회사" }]), []);
+    assert.deepEqual(groupCustomersByPortalForm([byName("x", "어디 회사")]), []);
   });
 
   /**
@@ -509,9 +530,9 @@ describe("🔴 양식으로 고객사 묶기", () => {
    */
   test("🔴 운영에 남은 세 이름만으로도 양식 셋이 모두 선다(2026-10-17 장애 재현)", () => {
     const groups = groupCustomersByPortalForm([
-      { id: "c-icd", name: "(주)아이씨디" },
-      { id: "c-inv", name: "인베니아(주)" },
-      { id: "c-jusung", name: "주성엔지니어링(주)" },
+      byName("c-icd", "(주)아이씨디"),
+      byName("c-inv", "인베니아(주)"),
+      byName("c-jusung", "주성엔지니어링(주)"),
     ]);
     assert.deepEqual(
       groups.map((group) => group.form.id),
@@ -522,6 +543,148 @@ describe("🔴 양식으로 고객사 묶기", () => {
       groups.map((group) => group.customerIds),
       [["c-icd"], ["c-inv"], ["c-jusung"]]
     );
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 어느 양식인가 — **칸이 먼저**, 비면 이름 (2026-10-17, C-2)
+ * ============================================================================
+ * 2026-10-17 장애의 뿌리는 「양식 판정이 **사람이 언제든 고치는 이름**에 매달려
+ * 있었다」는 것이다. 이름 셋이 바뀌자 표 셋이 통째로 사라졌고, **시험은 박아 둔
+ * 이름으로 돌아 영원히 통과했다.**
+ *
+ * 그래서 이 묶음의 시험은 대부분 **이름을 일부러 못 쓰게 만들고**(등록부의 어느
+ * customerNames 에도 없는 가짜 이름) 칸만으로 잰다 — 판정이 이름으로 되돌아가는
+ * 순간 여기가 빨개진다. 🔴 가짜 이름은 **분명히 가짜인 것**만 쓴다. 공개 저장소라
+ * 실제 고객사 이름을 새로 들여오지 않는다.
+ *
+ * 못 박는 것 넷:
+ *  1. 🔴 칸이 채워진 줄은 **이름이 등록부에 하나도 없어도** 제 양식에 붙는다.
+ *  2. 칸이 비면 이름으로 붙는다 — 안전망이 산다.
+ *  3. 🔴 칸에 등록부에 없는 값이 있으면 **「양식 없음」**이고 **이름으로
+ *     되돌아가지 않는다** — 이름이 멀쩡히 등록부에 있어도 그렇다(사용자 결정:
+ *     칸은 사람이 고른 것이고, 그것을 무시하면 「내가 고른 게 왜 안 먹지」가 된다).
+ *  4. 칸으로 붙은 줄과 이름으로 붙은 줄이 같은 양식이면 **한 묶음**이다.
+ * ============================================================================
+ */
+describe("🔴 어느 양식인가 — 칸이 먼저, 비면 이름", () => {
+  /** 등록부의 어느 customerNames 에도 없는, 분명히 가짜인 이름. */
+  const UNKNOWN_NAME = "전혀모르는이름(주)";
+
+  test("🔴 이 묶음이 쓰는 가짜 이름은 정말로 이름으로는 안 걸린다", () => {
+    // 이 단언이 없으면 아래 시험들이 「이름으로 걸린 것」을 보고도 통과한다.
+    assert.equal(findPortalFormForCustomerName(UNKNOWN_NAME), null);
+    assert.equal(findPortalFormForCustomerName(`${UNKNOWN_NAME} 2`), null);
+    assert.equal(findPortalFormForCustomerName(`${UNKNOWN_NAME} 3`), null);
+  });
+
+  test("🔴 칸이 채워진 줄은 이름이 등록부에 없어도 제 양식에 붙는다", () => {
+    const form = resolvePortalFormForCustomer({
+      id: "c-1",
+      name: UNKNOWN_NAME,
+      portalFormId: "JUSUNG",
+    });
+    assert.equal(form?.id, "JUSUNG");
+  });
+
+  /**
+   * 🔴 2026-10-17 장애를 **칸이 있는 상태로** 다시 돌려 본다. 쓰는 분이 이름을
+   * 무엇으로 바꾸든 — 여기서는 셋 다 코드가 전혀 모르는 이름이다 — 표는 선다.
+   * 이것이 C-1 에서 칸을 만들고 C-2 에서 판정을 옮긴 까닭 전부다.
+   */
+  test("🔴 이름이 전부 바뀌어도 칸이 있으면 양식 셋이 모두 선다", () => {
+    const groups = groupCustomersByPortalForm([
+      { id: "c-icd", name: UNKNOWN_NAME, portalFormId: "ICD" },
+      { id: "c-inv", name: `${UNKNOWN_NAME} 2`, portalFormId: "INVENIA" },
+      { id: "c-jusung", name: `${UNKNOWN_NAME} 3`, portalFormId: "JUSUNG" },
+    ]);
+    assert.deepEqual(
+      groups.map((group) => group.form.id),
+      ["ICD", "INVENIA", "JUSUNG"],
+      "칸을 보지 않는다 — 「양식이 정해진 고객사가 없습니다.」 가 다시 뜬다"
+    );
+    assert.deepEqual(
+      groups.map((group) => group.customerIds),
+      [["c-icd"], ["c-inv"], ["c-jusung"]]
+    );
+  });
+
+  test("🔴 칸이 이름과 다른 양식을 가리키면 **칸이 이긴다** — 사람이 고른 쪽이다", () => {
+    const form = resolvePortalFormForCustomer({
+      id: "c-1",
+      // 이름으로 가리면 ICD 다.
+      name: "ICD Co.,Ltd.",
+      portalFormId: "JUSUNG",
+    });
+    assert.equal(form?.id, "JUSUNG");
+  });
+
+  test("칸이 비면 이름으로 붙는다 — 안전망이 산다", () => {
+    for (const empty of [null, "", "   "]) {
+      const form = resolvePortalFormForCustomer({
+        id: "c-1",
+        name: "주성엔지니어링(주)",
+        portalFormId: empty,
+      });
+      assert.equal(form?.id, "JUSUNG", `${JSON.stringify(empty)} 에서 이름이 안 걸렸다`);
+    }
+  });
+
+  test("칸도 비고 이름도 모르면 양식 없음이다", () => {
+    assert.equal(
+      resolvePortalFormForCustomer({ id: "c-1", name: UNKNOWN_NAME, portalFormId: null }),
+      null
+    );
+  });
+
+  test("🔴 등록부에 없는 값이 칸에 있으면 **양식 없음**이다 — 이름으로 되돌아가지 않는다", () => {
+    for (const unknownId of ["NOPE", "icd", "constructor", "ICD_FORM", "ICD 양식"]) {
+      assert.equal(
+        resolvePortalFormForCustomer({
+          id: "c-1",
+          // 🔴 이름은 멀쩡히 등록부에 있다. 그래도 칸이 이긴다.
+          name: "ICD Co.,Ltd.",
+          portalFormId: unknownId,
+        }),
+        null,
+        `${unknownId} 에서 이름으로 되돌아갔다`
+      );
+    }
+  });
+
+  test("🔴 칸이 안 풀리는 줄은 어느 묶음에도 안 들어간다 — 이름이 걸리는 고객사여도", () => {
+    assert.deepEqual(
+      groupCustomersByPortalForm([
+        { id: "c-bad", name: "ICD Co.,Ltd.", portalFormId: "NOPE" },
+      ]),
+      []
+    );
+  });
+
+  test("칸의 앞뒤 공백은 떼고 본다 — 대소문자는 접지 않는다", () => {
+    const of = (portalFormId: string) =>
+      resolvePortalFormForCustomer({ id: "c-1", name: UNKNOWN_NAME, portalFormId });
+    assert.equal(of("  JUSUNG  ")?.id, "JUSUNG");
+    // 양식 id 는 사람이 적는 이름이 아니라 코드가 정한 식별자라 글자 그대로 맞춘다.
+    assert.equal(of("jusung"), null);
+  });
+
+  /**
+   * 🔴 합치기는 **양식 id** 로 한다 — 「어떻게 붙었는가」로 가르지 않는다.
+   * 개발 DB 가 실제로 이 모양이다(한 회사의 세 줄 중 일부만 칸이 채워져 있다).
+   * 갈리면 같은 회사의 표가 둘이 되고, 담당자는 자기가 보는 표에 그 회사의 건이
+   * 다 들어 있다고 믿는다.
+   */
+  test("🔴 칸으로 붙은 줄과 이름으로 붙은 줄이 같은 양식이면 **한 묶음**이다", () => {
+    const groups = groupCustomersByPortalForm([
+      { id: "c-col", name: UNKNOWN_NAME, portalFormId: "INVENIA" },
+      byName("c-name-1", "INVENIA Co.,Ltd"),
+      byName("c-name-2", "인베니아(주)"),
+    ]);
+    assert.equal(groups.length, 1, "묶음이 둘로 갈렸다");
+    assert.equal(groups[0]?.form.id, "INVENIA");
+    assert.deepEqual(groups[0]?.customerIds, ["c-col", "c-name-1", "c-name-2"]);
   });
 });
 

@@ -15,15 +15,26 @@ import { classifyRfProductByModelName } from "./rf-product-kind";
  * 회사와 우리가 합의한 양식이고, 코드에 있어야 시험이 붙는다. DB 에 두면
  * "지금 ICD 표에 열이 몇 개인가"를 시험이 물어볼 수 없다.
  *
- * ── 고객사를 **이름**으로 가린다 ────────────────────────────────────────
- * 🔴 `customers` 표에는 코드 칸이 없다. 남은 후보는 `id`(uuid)와 `name` 둘뿐인데
+ * ── 🔴 어느 양식인가는 **DB 칸이 먼저** 정한다 (2026-10-17, C-2) ─────────
+ * `customers.portal_form_id` 에 값이 있으면 **그 값으로만** 가린다 — 그때는
+ * 이름을 보지 않는다. 등록부(CUSTOMER_PORTAL_FORMS)에 없는 값이 들어 있어
+ * 풀리지 않으면 **「양식 없음」**이고, 이름으로 되돌아가지 않는다. 까닭: 그 칸은
+ * **사람이 고른 것**이고, 그것을 무시하고 이름으로 가면 「내가 고른 게 왜 안
+ * 먹지」가 된다. 그 혼란이 조용한 오답보다 나쁘다.
+ *
+ * 칸이 비어 있으면(`null` · 빈 글자) 아래 이름 목록으로 가린다 — **안전망이다.**
+ * 🔴 판정은 resolvePortalFormForCustomer **한 곳**에서만 한다. 두 곳에서 같은
+ * 판단을 하면 언젠가 갈라진다.
+ *
+ * ── 고객사를 **이름**으로 가린다(안전망) ────────────────────────────────
+ * 🔴 `customers` 표에는 코드 칸이 없었다. 남은 후보는 `id`(uuid)와 `name` 둘뿐인데
  * uuid 는 개발 DB 와 운영(NAS) DB 가 서로 다르다 — 코드에 박으면 한쪽에서만
  * 동작한다. 그래서 이름으로 가리되, 회사 하나가 여러 이름으로 등록돼 있을 수
  * 있으므로(실측 2026-09-30: `INVENIA` 와 `INVENIA Co.,Ltd` 가 둘 다 살아 있었다)
  * 양식마다 **이름 목록**을 둔다. 비교는 DB 의 유일 색인과 같은 정규화를 쓴다
  * (normalizeEntityName — 앞뒤 공백 제거 · 연속 공백 하나로 · 소문자).
  *
- * 🔴 이름이 바뀌면 그 고객사는 양식을 잃고 **「고객 안내 현황」 화면에서 사라진다**
+ * 🔴 **칸이 빈 고객사는** 이름이 바뀌면 양식을 잃고 **화면에서 사라진다**
  * (2026-10-04 — 전용 주소를 걷어내면서 양식이 곧 그 화면의 단추가 됐다). 값이
  * 지워지는 것은 아니고(값은 접수 건에 붙어 있다) 이 목록에 이름을 한 줄 더하면
  * 돌아온다.
@@ -32,8 +43,9 @@ import { classifyRfProductByModelName } from "./rf-product-kind";
  * 정식 상호로 고쳤다 — 양식 ICD 는 `(주)아이씨디`, INVENIA 는 `인베니아(주)`,
  * JUSUNG 은 `주성엔지니어링(주)` 가 됐다. 그 순간 **코드가 알던 여덟 이름 중
  * 운영에 남은 것이 하나도 없게 되어** 화면이 「양식이 정해진 고객사가 없습니다.」
- * 만 띄웠다. 표 셋이 통째로 사라지는데 **오류는 어디에도 안 난다** — 고칠 곳은
- * 아래 세 `customerNames` 다.
+ * 만 띄웠다. 표 셋이 통째로 사라지는데 **오류는 어디에도 안 난다.** 그래서
+ * 판정의 근거를 사람이 고치는 이름에서 `portal_form_id` 칸으로 옮겼다(위 절).
+ * 세 `customerNames` 에는 바뀐 상호를 더해 두었고, 안전망으로 남긴다.
  *
  * ── 열 하나가 아는 것 ───────────────────────────────────────────────────
  * 키(영문, 안정적) · 화면에 보일 이름 · 차례(배열 순서) · **어디서 오는가**.
@@ -343,8 +355,54 @@ export function findPortalFormForCustomerName(
   );
 }
 
-/** 양식을 가리는 데 필요한 고객사의 두 칸. 조회가 내는 줄이 이 꼴을 만족한다. */
-export type PortalFormCustomer = { id: string; name: string };
+/**
+ * 양식을 가리는 데 필요한 고객사의 세 칸. 조회가 내는 줄이 이 꼴을 만족한다
+ * (queries/customer-portal.ts 의 listPortalFormGroups).
+ *
+ * 🔴 `portalFormId` 를 **옵션(`?`)으로 두지 않는다.** 없어도 되게 하면 조회가
+ * 그 칸을 안 읽어도 tsc 가 조용하고, 판정은 이름으로만 돌면서 **아무 오류 없이**
+ * 예전 상태로 돌아간다 — 이 조각이 없애려던 바로 그 모양이다. 필수로 두면
+ * 칸을 안 싣는 조회는 컴파일에서 막힌다. 값이 없을 때는 `null` 을 싣는다.
+ */
+export type PortalFormCustomer = {
+  id: string;
+  name: string;
+  /** `customers.portal_form_id`. 비어 있으면 이름으로 가린다(안전망). */
+  portalFormId: string | null;
+};
+
+/**
+ * 🔴 **고객사 한 줄이 어느 양식인가 — 판정은 여기 한 곳뿐이다.**
+ *
+ * ■ 차례 (사용자 결정 2026-10-17)
+ *
+ *  1. 칸(`portalFormId`)에 값이 있으면 **그 값으로만** 가린다. 등록부에 없는
+ *     값이면 **「양식 없음」**(null)이고 🔴 **이름으로 되돌아가지 않는다.**
+ *  2. 칸이 비어 있으면(`null` · 빈 글자 · 공백뿐) 이름으로 가린다 — 안전망.
+ *
+ * ■ 왜 1에서 이름으로 돌아가지 않는가
+ *
+ * 칸은 **사람이 고른 것**이다. 고른 값이 안 풀린다고 이름으로 가면, 고른 사람은
+ * 「내가 고른 게 왜 안 먹지」를 겪는다. 그 혼란이 조용한 오답보다 나쁘다. 등록부에
+ * 없는 값은 양식을 하나 걷어낸 뒤에나 남는데(스키마 주석 참조), 그때 화면에서
+ * 사라지는 것이 맞다.
+ *
+ * ■ 공백은 떼고 본다. 대소문자는 안 접는다
+ *
+ * 양식 id 는 사람이 손으로 적는 이름이 아니라 **코드가 정한 식별자**다
+ * (`CUSTOMER_PORTAL_FORMS`). 그래서 이름 쪽의 normalizeEntityName 을 쓰지 않고
+ * 글자 그대로 맞춘다 — 접으면 `icd` 같은 값이 통과해 DB 에 두 가지 표기가 쌓인다.
+ * 앞뒤 공백만 떼는 것은 빈 칸(`"  "`)을 「안 고름」으로 읽기 위해서다.
+ */
+export function resolvePortalFormForCustomer(
+  customer: PortalFormCustomer
+): CustomerPortalForm | null {
+  const chosen =
+    typeof customer.portalFormId === "string" ? customer.portalFormId.trim() : "";
+  // 🔴 값이 있으면 여기서 끝난다 — 못 찾아도 이름으로 내려가지 않는다.
+  if (chosen) return findPortalFormById(chosen);
+  return findPortalFormForCustomerName(customer.name);
+}
 
 /** 양식 하나와, 그 양식에 묶인 고객사들. */
 export type PortalFormCustomerGroup = {
@@ -357,8 +415,14 @@ export type PortalFormCustomerGroup = {
  * 고객사 목록을 **양식별로 가른다** — 「고객 안내 현황」의 단추가 서는 근거다
  * (2026-10-04 전까지는 전용 주소가 발급된 고객사가 그 근거였다).
  *
+ * 🔴 **줄마다의 판정은 resolvePortalFormForCustomer 하나가 한다**(칸이 먼저,
+ * 비면 이름). 여기서 한 벌 더 적으면 두 판단이 언젠가 갈라진다.
+ *
  * 🔴 **한 회사가 여러 이름으로 등록돼 있으면 한 묶음으로 합친다**(실측 2026-09-30:
  * `INVENIA` 와 `INVENIA Co.,Ltd` 가 둘 다 살아 있고 양쪽 다 접수 건이 있었다).
+ * 🔴 **칸으로 붙은 줄과 이름으로 붙은 줄도 같은 양식이면 한 묶음이다** — 묶는
+ * 열쇠가 「어떻게 붙었는가」가 아니라 양식 id 이기 때문이다. 개발 DB 가 실제로
+ * 그 모양이다(한 회사의 세 줄 중 일부만 칸이 채워져 있다).
  * 합치지 않으면 같은 회사의 표가 둘로 갈리는데, 담당자는 자기가 보는 표에 그
  * 회사의 건이 다 들어 있다고 믿는다 — 빠진 쪽은 아무 오류 없이 영영 안 보인다.
  *
@@ -377,7 +441,7 @@ export function groupCustomersByPortalForm(
 ): PortalFormCustomerGroup[] {
   const byFormId = new Map<string, string[]>();
   for (const customer of customers) {
-    const form = findPortalFormForCustomerName(customer.name);
+    const form = resolvePortalFormForCustomer(customer);
     if (form === null) continue;
     const found = byFormId.get(form.id);
     if (found) found.push(customer.id);

@@ -416,13 +416,24 @@ export type CustomerPortalFormGroup = {
  * 지워진 고객사는 세지 않는다 — 그 고객사의 건은 표에도 나오지 않아야 하고,
  * 그것만으로 단추가 서면 누를 때마다 빈 표가 나온다.
  *
- * 가르는 규칙(이름 맞추기 · 여러 이름 합치기 · 빈 양식 빼기 · 차례)은 전부
- * domain/customer-portal-forms.ts 의 groupCustomersByPortalForm 이 갖는다.
+ * 가르는 규칙(칸 먼저 · 비면 이름 · 여러 이름 합치기 · 빈 양식 빼기 · 차례)은
+ * 전부 domain/customer-portal-forms.ts 의 groupCustomersByPortalForm 이 갖는다.
  * 여기서 한 벌 더 적으면 시험이 붙은 규칙과 실제로 도는 규칙이 갈린다.
+ *
+ * 🔴 **`portal_form_id` 를 반드시 함께 읽는다**(2026-10-17, C-2). 이 칸이 양식을
+ * 정하는 첫째 근거다 — 안 실으면 판정이 이름으로만 돌아 2026-10-17 장애가 그대로
+ * 돌아온다. 안 싣는 길은 tsc 가 막는다(PortalFormCustomer 의 주석).
+ *
+ * 🔴 **`select()` 로 통째로 읽지 않는다** — 이 저장소의 방식이고, 전체 조회는
+ * 스키마에 칸이 늘 때마다 이 화면이 조용히 무거워진다.
  */
 export async function listPortalFormGroups(): Promise<CustomerPortalFormGroup[]> {
   const rows = await db
-    .select({ id: customers.id, name: customers.name })
+    .select({
+      id: customers.id,
+      name: customers.name,
+      portalFormId: customers.portalFormId,
+    })
     .from(customers)
     .where(eq(customers.isDeleted, false))
     .orderBy(asc(customers.name));
@@ -475,8 +486,13 @@ export async function listPortalItemsForForm(
 /**
  * 이 접수가 어느 고객사의 것인가 — **이름으로**.
  *
- * 고객사 양식은 이름으로 가려진다(domain/customer-portal-forms.ts). 저장할 때
- * "이 줄에 적어도 되는 칸이 무엇인가"를 판정하려면 그 이름이 필요한데, 🔴 그
+ * ⚠️ **저장 길은 아직 이름으로 양식을 고른다**(actions/customer-portal.ts 가 이
+ * 조회를 그렇게 쓴다). 🔴 보는 길(listPortalFormGroups)은 2026-10-17 에
+ * `portal_form_id` 칸을 먼저 보도록 바뀌었지만 저장 길은 그대로다 — 칸만 채워진
+ * 고객사(이름이 등록부에 없는)의 손 입력 칸은 **조용히 저장되지 않는다.** 옮기는
+ * 일은 이 조각(C-2)의 범위 밖이라 손대지 않았다.
+ *
+ * 저장할 때 "이 줄에 적어도 되는 칸이 무엇인가"를 판정하려면 그 이름이 필요한데, 🔴 그
  * 이름을 **화면이 보낸 값으로 받으면 안 된다** — 보내는 쪽이 남의 고객사
  * 이름을 대면 그 양식의 칸을 이 접수에 적을 수 있게 된다. 서버가 접수에서
  * 거슬러 올라가 직접 읽는다.

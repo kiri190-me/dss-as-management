@@ -287,6 +287,35 @@ describe("🔴 6. 단추는 고객사가 아니라 양식이다", () => {
     assert.ok(!pageBody.includes("listActiveLinks"), "아직 발급된 주소로 화면을 만든다");
   });
 
+  /**
+   * 🔴 2026-10-17(C-2) — 어느 양식인가의 **첫째 근거가 DB 칸**(`portal_form_id`)이
+   * 되었다. 조회가 그 칸을 안 실으면 판정은 이름으로만 돌고, 그 사실은 **아무
+   * 오류 없이** 표가 통째로 비는 모양으로만 드러난다(2026-10-17 운영 장애).
+   *
+   * 🔴 순수 쪽 시험(domain/customer-portal-forms.test.ts)은 칸을 **직접 넘겨** 재므로
+   * 조회가 칸을 안 읽어도 전부 통과한다. 조회와 판정을 잇는 이 한 줄은 여기서만 보인다.
+   */
+  test("🔴 조회가 portal_form_id 를 함께 읽어 넘긴다 — 안 읽으면 판정이 이름으로 되돌아간다", () => {
+    const queryBody = flat(code(query));
+    assert.ok(
+      queryBody.includes("portalFormId: customers.portalFormId,"),
+      "양식 칸을 안 읽는다 — 이름만 보던 2026-10-17 로 되돌아간다"
+    );
+    assert.ok(
+      queryBody.includes("return groupCustomersByPortalForm(rows).map((group) => ({"),
+      "읽은 줄을 그대로 판정에 넘기지 않는다"
+    );
+    assert.ok(
+      !/\.select\(\)\s*\.from\(customers\)/.test(code(query)),
+      "칸을 짚지 않고 통째로 읽는다 — 스키마에 칸이 늘 때마다 이 화면이 무거워진다"
+    );
+    // 🔴 우선순위(칸 먼저 · 비면 이름) 판정은 domain 한 곳뿐이다.
+    assert.ok(
+      !code(query).includes("findPortalFormForCustomerName"),
+      "조회가 이름 판정을 스스로 한다 — 우선순위가 두 곳으로 갈린다"
+    );
+  });
+
   test("🔴 고른 식별자를 양식 정의로 되짚는다 — 화면 글자를 그대로 믿지 않는다", () => {
     assert.ok(
       body.includes("const form = findPortalFormById(selectedFormId)"),
