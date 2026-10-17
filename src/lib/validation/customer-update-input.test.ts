@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { CUSTOMER_PORTAL_FORMS } from "@/lib/domain/customer-portal-forms";
 import {
   isValidCustomerId,
   isValidExpectedUpdatedAt,
@@ -38,6 +39,7 @@ test("validateCustomerUpdateFields: valid full submission trims and normalizes e
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
   }
 });
@@ -171,6 +173,67 @@ test("validateCustomerUpdateFields: 팔레트 밖의 키와 형식이 어긋난 
     assert.equal(result.ok, false, `rowColor=${JSON.stringify(bad)} 는 거절해야 한다`);
     if (!result.ok) assert.ok(result.fieldErrors.rowColor);
   }
+});
+
+// ── 고객 안내 양식(portal_form_id) — 등록부가 문지기다 (2026-10-17) ──────────
+//
+// 🔴 DB 에는 CHECK 도 enum 도 없다(schema/customers.ts — 「등록부는 코드다」). 그래서
+// 막는 자리가 이 검증뿐이고, 못 막으면 오타 한 번이 그 고객사의 표를 **아무 오류
+// 없이** 없앤다(표를 그리는 길은 칸에 값이 있으면 그 값으로만 가리고, 못 풀면 이름
+// 으로 되돌아가지 않는다 — resolvePortalFormForCustomer).
+//
+// 🔴 「맞으면 되나」와 「틀리면 안 되나」를 둘 다 본다. 고를 수 있는 값은 손으로 적지
+// 않고 등록부에서 가져온다 — 양식이 늘면 이 시험도 저절로 그 양식을 잰다.
+
+test("validateCustomerUpdateFields: 등록부에 있는 양식 id 는 그대로 통과한다", () => {
+  assert.ok(CUSTOMER_PORTAL_FORMS.length > 0, "등록부가 비면 이 시험은 아무것도 재지 않는다");
+  for (const form of CUSTOMER_PORTAL_FORMS) {
+    const result = validateCustomerUpdateFields({ name: "Acme", portalFormId: form.id });
+    assert.equal(result.ok, true, `portalFormId=${form.id} 는 통과해야 한다`);
+    if (result.ok) assert.equal(result.data.portalFormId, form.id);
+  }
+});
+
+test("validateCustomerUpdateFields: 「없음」은 통과하고 null 이 된다 — 빈 글자가 아니다", () => {
+  // 공백뿐인 값도 「안 고름」이다 — resolvePortalFormForCustomer 가 같은 자로 본다.
+  for (const empty of ["", null, undefined, "   "]) {
+    const result = validateCustomerUpdateFields({ name: "Acme", portalFormId: empty });
+    assert.equal(result.ok, true, `portalFormId=${JSON.stringify(empty)} 는 통과해야 한다`);
+    if (result.ok) assert.equal(result.data.portalFormId, null);
+  }
+});
+
+test("validateCustomerUpdateFields: portalFormId 칸이 아예 없으면 양식 없음으로 읽는다", () => {
+  const result = validateCustomerUpdateFields({ name: "Acme" });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.portalFormId, null);
+});
+
+test("🔴 validateCustomerUpdateFields: 등록부에 없는 양식은 거절한다 — 대소문자도 접지 않는다", () => {
+  for (const bad of [
+    "icd",
+    "Icd",
+    "invenia",
+    "NOPE",
+    "ICD 양식",
+    "__proto__",
+    "constructor",
+    "ICD,JUSUNG",
+    7,
+    {},
+    [],
+    true,
+  ]) {
+    const result = validateCustomerUpdateFields({ name: "Acme", portalFormId: bad });
+    assert.equal(result.ok, false, `portalFormId=${JSON.stringify(bad)} 는 거절해야 한다`);
+    if (!result.ok) assert.equal(result.fieldErrors.portalFormId, "고를 수 없는 양식입니다.");
+  }
+});
+
+test("validateCustomerUpdateFields: 양식 id 의 앞뒤 공백은 떼고 본다", () => {
+  const result = validateCustomerUpdateFields({ name: "Acme", portalFormId: "  JUSUNG  " });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.data.portalFormId, "JUSUNG");
 });
 
 // ── 대표 담당자 직급·메모(2026-09-13 사용자 요청 — 고객사 담당자와 같은 칸) ───

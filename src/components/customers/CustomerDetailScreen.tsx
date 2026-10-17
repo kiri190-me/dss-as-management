@@ -25,6 +25,7 @@ import {
 } from "@/lib/domain/product-model-sort";
 import CustomerContactList from "./CustomerContactList";
 import CustomerEditForm from "./CustomerEditForm";
+import { customerPortalFormLabel } from "./CustomerPortalFormField";
 import { CustomerRowColorSwatch } from "./CustomerRowColorField";
 import CustomerRepairCaseHistory from "./CustomerRepairCaseHistory";
 import EndUserManagementSection from "./EndUserManagementSection";
@@ -230,6 +231,17 @@ export default function CustomerDetailScreen({
                     {resolveCustomerRowColor(customer.rowColor)?.label ??
                       NO_CUSTOMER_ROW_COLOR_LABEL}
                   </span>
+                </dd>
+              </div>
+              {/* 수정 폼에서 고른 양식도 읽기 화면에서 그대로 보인다 — 색 칸과 같은
+                  까닭이다(확인하려고 매번 수정 버튼을 누르게 두지 않는다).
+                  🔴 보이는 이름은 등록부가 가진 label 이고, 못 찾는 값은 「없음」이다
+                  (customerPortalFormLabel) — 표를 그리는 길이 그 값을 양식 없음으로
+                  다루므로 화면이 다른 말을 하면 안 된다. */}
+              <div>
+                <dt className="text-xs text-zinc-500 dark:text-zinc-400">고객 안내 양식</dt>
+                <dd className="text-sm text-zinc-900 dark:text-zinc-50">
+                  {customerPortalFormLabel(customer.portalFormId)}
                 </dd>
               </div>
             </dl>

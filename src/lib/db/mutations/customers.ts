@@ -79,6 +79,17 @@ export async function updateCustomer(params: {
    * expectedUpdatedAt 대조와 이름 중복 검사는 그대로다.
    */
   rowColor: string | null;
+  /**
+   * 「고객 안내 현황」이 이 고객사를 어느 양식으로 그리는가 — 등록부의 양식 id
+   * 이거나 null(= 양식 없음)이다. 🔴 **선택 칸이 아니라 꼭 받는 칸이다**(위 두
+   * 칸과 같은 까닭) — 이 수정은 모든 칸을 통째로 다시 쓰므로, 부르는 쪽이 빠뜨리면
+   * 타입 검사가 그 자리에서 잡아 줘야 한다.
+   *
+   * 🔴 **값의 범위는 여기서 보지 않는다.** 등록부에 있는 id 인지는
+   * validateCustomerUpdateFields 가 이미 막았고(그 함수의 문지기 주석), DB 에도
+   * CHECK 가 없다. 여기서 한 벌 더 가리면 두 판단이 언젠가 갈라진다.
+   */
+  portalFormId: string | null;
 }): Promise<UpdateCustomerResult> {
   return db.transaction(async (tx) => {
     const [current] = await tx
@@ -126,6 +137,7 @@ export async function updateCustomer(params: {
             contactTitle: params.contactTitle,
             contactMemo: params.contactMemo,
             rowColor: params.rowColor,
+            portalFormId: params.portalFormId,
             updatedAt: new Date(),
           })
           .where(eq(customers.id, params.customerId))

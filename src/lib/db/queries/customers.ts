@@ -120,6 +120,14 @@ export type CustomerDetail = {
   updatedAt: string;
   /** 내자 정리 목록의 줄 배경색(팔레트 키). 편집 폼의 색 고르개 초기값이다. */
   rowColor: string | null;
+  /**
+   * 「고객 안내 현황」이 이 고객사를 그리는 양식(domain/customer-portal-forms.ts 의
+   * 양식 id). 편집 폼의 양식 고르개 초기값이고, 읽기 화면도 이 값을 보인다.
+   *
+   * 🔴 폼은 모든 칸을 다시 보내므로 여기서 빠지면 저장 한 번에 지워진다
+   * (validateCustomerUpdateFields 는 빠진 키를 「양식 없음」으로 읽는다).
+   */
+  portalFormId: string | null;
 };
 
 export async function getCustomerDetailById(id: string): Promise<CustomerDetail | null> {
@@ -135,6 +143,7 @@ export async function getCustomerDetailById(id: string): Promise<CustomerDetail 
       contactTitle: customers.contactTitle,
       contactMemo: customers.contactMemo,
       rowColor: customers.rowColor,
+      portalFormId: customers.portalFormId,
       createdAt: customers.createdAt,
       updatedAt: customers.updatedAt,
     })

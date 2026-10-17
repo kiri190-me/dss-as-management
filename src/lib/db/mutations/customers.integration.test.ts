@@ -11,6 +11,11 @@ import { createCustomer, updateCustomer } from "./customers";
 import { getCustomerDetailById } from "../queries/customers";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 import { validateCustomerUpdateFields } from "@/lib/validation/customer-update-input";
+import {
+  CUSTOMER_PORTAL_FORMS,
+  findPortalFormForCustomerName,
+  groupCustomersByPortalForm,
+} from "@/lib/domain/customer-portal-forms";
 
 /**
  * Real-DB integration test against dss-as-postgres-dev, exercising
@@ -170,6 +175,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
     if (!result.ok) return;
@@ -195,6 +201,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(first.ok, true);
     if (!first.ok) return;
@@ -209,6 +216,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(result.ok, true);
 
@@ -232,6 +240,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(result.ok, false);
     if (result.ok) return;
@@ -254,6 +263,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
   });
@@ -271,6 +281,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(first.ok, true);
 
@@ -284,6 +295,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(result.ok, false);
     if (result.ok) return;
@@ -304,6 +316,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(missing.ok, false);
     if (!missing.ok) assert.equal(missing.code, "NOT_FOUND");
@@ -320,6 +333,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "NOT_FOUND");
@@ -341,6 +355,7 @@ describe("updateCustomer", () => {
         contactTitle: null,
         contactMemo: null,
         rowColor: null,
+        portalFormId: null,
       }),
       updateCustomer({
         customerId: customerB.id,
@@ -352,6 +367,7 @@ describe("updateCustomer", () => {
         contactTitle: null,
         contactMemo: null,
         rowColor: null,
+        portalFormId: null,
       }),
     ]);
 
@@ -373,6 +389,7 @@ describe("updateCustomer", () => {
         contactTitle: null,
         contactMemo: null,
         rowColor: null,
+        portalFormId: null,
       });
 
     const results = await raceBehindUncommittedName(
@@ -418,6 +435,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
 
@@ -441,6 +459,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: "amber",
+      portalFormId: null,
     });
     assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
 
@@ -460,6 +479,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: "sky",
+      portalFormId: null,
     });
     assert.equal(first.ok, true);
     if (!first.ok) return;
@@ -474,6 +494,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: "violet",
+      portalFormId: null,
     });
     assert.equal(second.ok, true);
     if (!second.ok) return;
@@ -491,6 +512,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(cleared.ok, true);
 
@@ -510,6 +532,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(first.ok, true);
     if (!first.ok) return;
@@ -524,6 +547,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: "emerald",
+      portalFormId: null,
     });
     assert.equal(result.ok, true);
 
@@ -548,6 +572,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: "teal",
+      portalFormId: null,
     });
     assert.equal(first.ok, true);
 
@@ -561,6 +586,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: "rose",
+      portalFormId: null,
     });
     assert.equal(result.ok, false);
     if (result.ok) return;
@@ -584,6 +610,7 @@ describe("updateCustomer", () => {
       contactTitle: "부장",
       contactMemo: "견적은 메일로\n오전에만 통화",
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(first.ok, true, `update failed: ${JSON.stringify(first)}`);
     if (!first.ok) return;
@@ -602,6 +629,7 @@ describe("updateCustomer", () => {
       contactTitle: null,
       contactMemo: null,
       rowColor: null,
+      portalFormId: null,
     });
     assert.equal(cleared.ok, true, `clear failed: ${JSON.stringify(cleared)}`);
 
@@ -628,6 +656,7 @@ describe("updateCustomer", () => {
       contactTitle: "부장",
       contactMemo: "견적은 메일로\n오전에만 통화",
       rowColor: "amber",
+      portalFormId: "ICD",
     });
     assert.equal(seeded.ok, true, `seed failed: ${JSON.stringify(seeded)}`);
 
@@ -636,6 +665,7 @@ describe("updateCustomer", () => {
     if (!detail) return;
     assert.equal(detail.contactTitle, "부장", "상세 조회가 직급을 실어야 폼이 채울 수 있다");
     assert.equal(detail.contactMemo, "견적은 메일로\n오전에만 통화", "상세 조회가 메모를 실어야 폼이 채울 수 있다");
+    assert.equal(detail.portalFormId, "ICD", "상세 조회가 양식을 실어야 폼이 채울 수 있다");
 
     // 폼이 보내는 모양 그대로 — 채워 둔 값을 모두 다시 싣고, 전화만 새 값이다.
     const validation = validateCustomerUpdateFields({
@@ -646,6 +676,7 @@ describe("updateCustomer", () => {
       contactTitle: detail.contactTitle,
       contactMemo: detail.contactMemo,
       rowColor: detail.rowColor,
+      portalFormId: detail.portalFormId,
     });
     assert.equal(validation.ok, true, `validation failed: ${JSON.stringify(validation)}`);
     if (!validation.ok) return;
@@ -664,6 +695,210 @@ describe("updateCustomer", () => {
     assert.equal(row.contactName, "김대표");
     assert.equal(row.contactEmail, "rep@example.com");
     assert.equal(row.rowColor, "amber");
+    assert.equal(row.portalFormId, "ICD", "다른 칸만 고친 저장이 양식을 지우면 안 된다");
+  });
+
+  // ── 고객 안내 양식(portal_form_id) — 화면에서 고르는 값이 되었다 (2026-10-17) ──
+  //
+  // 🔴 여기서 재는 것은 **저장 길**이다. 고른 값이 그대로 칸에 들어가고, 「없음」이
+  // null 로 돌아가고, 등록부에 없는 값은 들어가기 전에 막히는가. 그리고 **그 값이
+  // 실제로 표를 가르는가** — 저장은 되는데 화면이 안 바뀌는 모양을 잡으려면 판정
+  // 함수까지 함께 봐야 한다(groupCustomersByPortalForm).
+
+  test("portalFormId: 등록부의 세 양식이 각각 그대로 저장되고 되읽힌다", async () => {
+    for (const form of CUSTOMER_PORTAL_FORMS) {
+      const customer = await createTestCustomer(`PORTAL-FORM-${form.id}`);
+      assert.equal(customer.portalFormId, null, "새 고객사는 양식이 없는 것이 기본이다");
+
+      const result = await updateCustomer({
+        customerId: customer.id,
+        expectedUpdatedAt: customer.updatedAt.toISOString(),
+        name: customer.name,
+        contactName: null,
+        contactEmail: null,
+        contactPhone: null,
+        contactTitle: null,
+        contactMemo: null,
+        rowColor: null,
+        portalFormId: form.id,
+      });
+      assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
+
+      const [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+      assert.equal(row.portalFormId, form.id);
+
+      // 되읽는 길(상세 조회)도 같은 값을 낸다 — 폼의 초기값이 이것이다.
+      const detail = await getCustomerDetailById(customer.id);
+      assert.equal(detail?.portalFormId, form.id, "상세 조회가 고른 양식을 돌려줘야 한다");
+    }
+  });
+
+  test("portalFormId: 다른 양식으로 바꿀 수 있고, 「없음」으로 되돌리면 null 이다", async () => {
+    const customer = await createTestCustomer("PORTAL-FORM-EDIT");
+    const first = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: customer.updatedAt.toISOString(),
+      name: customer.name,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
+      rowColor: null,
+      portalFormId: "INVENIA",
+    });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    const second = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: first.updatedAt,
+      name: customer.name,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
+      rowColor: null,
+      portalFormId: "JUSUNG",
+    });
+    assert.equal(second.ok, true);
+    if (!second.ok) return;
+
+    const [changed] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.equal(changed.portalFormId, "JUSUNG");
+
+    const cleared = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: second.updatedAt,
+      name: customer.name,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
+      rowColor: null,
+      portalFormId: null,
+    });
+    assert.equal(cleared.ok, true);
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.equal(row.portalFormId, null, "「없음」은 빈 문자열이 아니라 null 이어야 한다");
+  });
+
+  test("🔴 portalFormId: 등록부에 없는 값은 검증이 거절해 DB 에 닿지 않는다", async () => {
+    // DB 에 CHECK 가 없으므로(schema/customers.ts) 막는 자리는 코드뿐이다. 오타 한
+    // 번이 저장되면 그 고객사의 표가 **아무 오류 없이** 사라진다 — 표를 그리는 길은
+    // 칸에 값이 있으면 그 값으로만 가리고, 못 풀면 이름으로 되돌아가지 않는다.
+    const customer = await createTestCustomer("PORTAL-FORM-REJECT");
+
+    for (const bad of ["icd", "JUSUNG2", "NOPE", "__proto__", 7, {}, true]) {
+      const validation = validateCustomerUpdateFields({
+        name: customer.name,
+        portalFormId: bad,
+      });
+      assert.equal(validation.ok, false, `portalFormId=${JSON.stringify(bad)} 는 거절해야 한다`);
+      if (validation.ok) continue;
+      assert.ok(validation.fieldErrors.portalFormId);
+    }
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.equal(row.portalFormId, null, "거절된 값은 DB 에 닿지 않는다");
+  });
+
+  test("🔴 portalFormId: 고른 값이 실제로 「고객 안내 현황」의 묶음을 가른다", async () => {
+    // 🔴 「저장은 되는데 화면이 안 바뀐다」를 잡는 자리다. 이름은 등록부의 어느
+    //    customerNames 에도 없는 시험용 이름이라(AS-TEST-CUSTOMER-EDIT-…) 안전망으로
+    //    걸릴 길이 없다 — 묶음이 달라진다면 그것은 **칸** 때문이다.
+    const customer = await createTestCustomer("PORTAL-FORM-GROUPS");
+    assert.equal(
+      findPortalFormForCustomerName(customer.name),
+      null,
+      "시험용 이름이 이름 안전망에 걸리면 이 시험은 칸을 재지 못한다"
+    );
+
+    function groupsFor(row: { id: string; name: string; portalFormId: string | null }) {
+      return groupCustomersByPortalForm([row]).map((group) => group.form.id);
+    }
+
+    let [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.deepEqual(groupsFor(row), [], "양식이 없으면 어느 표에도 실리지 않는다");
+
+    let expectedUpdatedAt = row.updatedAt.toISOString();
+    for (const formId of ["ICD", "JUSUNG"]) {
+      const result = await updateCustomer({
+        customerId: customer.id,
+        expectedUpdatedAt,
+        name: customer.name,
+        contactName: null,
+        contactEmail: null,
+        contactPhone: null,
+        contactTitle: null,
+        contactMemo: null,
+        rowColor: null,
+        portalFormId: formId,
+      });
+      assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
+      if (!result.ok) return;
+      expectedUpdatedAt = result.updatedAt;
+
+      [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+      assert.deepEqual(groupsFor(row), [formId], `${formId} 로 바꿨는데 묶음이 안 따라왔다`);
+    }
+
+    const cleared = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt,
+      name: customer.name,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
+      rowColor: null,
+      portalFormId: null,
+    });
+    assert.equal(cleared.ok, true);
+
+    [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.deepEqual(groupsFor(row), [], "「없음」으로 되돌리면 표에서도 빠진다");
+  });
+
+  test("portalFormId: 낡은 expectedUpdatedAt 이면 양식도 바뀌지 않는다", async () => {
+    const customer = await createTestCustomer("PORTAL-FORM-CONFLICT");
+    const staleTimestamp = customer.updatedAt.toISOString();
+    const first = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: staleTimestamp,
+      name: customer.name,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
+      rowColor: null,
+      portalFormId: "ICD",
+    });
+    assert.equal(first.ok, true);
+
+    const result = await updateCustomer({
+      customerId: customer.id,
+      expectedUpdatedAt: staleTimestamp,
+      name: customer.name,
+      contactName: null,
+      contactEmail: null,
+      contactPhone: null,
+      contactTitle: null,
+      contactMemo: null,
+      rowColor: null,
+      portalFormId: "JUSUNG",
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.code, "CONFLICT");
+
+    const [row] = await db.select().from(customers).where(eq(customers.id, customer.id));
+    assert.equal(row.portalFormId, "ICD", "충돌한 두 번째 수정은 양식도 적용하지 않는다");
   });
 });
 

@@ -13,6 +13,7 @@ import EditSectionActions, {
 import type { SectionEditConflictError } from "@/components/repair-cases/detail/edit/useSectionEditSubmit";
 import { CUSTOMER_DRAFT_LABELS, buildDraftText } from "@/lib/domain/edit-draft-text";
 import { CUSTOMER_CONTACT_MEMO_MAX, CUSTOMER_CONTACT_TITLE_MAX } from "@/lib/validation/customer-contact-input";
+import { CustomerPortalFormPicker } from "./CustomerPortalFormField";
 import { CustomerRowColorPicker } from "./CustomerRowColorField";
 
 /**
@@ -68,6 +69,13 @@ export default function CustomerEditForm({
    * null 로 돌아간다.
    */
   const [rowColor, setRowColor] = useState(customer.rowColor ?? "");
+  /**
+   * 「고객 안내 현황」의 양식 id 다(2026-10-17). 색과 같은 모양으로 다룬다 — null
+   * 은 「없음」이고 폼 안에서는 빈 문자열이다(라디오의 value 는 문자열뿐이라서다).
+   * 저장할 때 다시 null 로 돌아가고, 등록부에 없는 값은 서버 검증이 거절해 이 칸
+   * 밑에 오류가 뜬다(validateCustomerUpdateFields).
+   */
+  const [portalFormId, setPortalFormId] = useState(customer.portalFormId ?? "");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -98,6 +106,7 @@ export default function CustomerEditForm({
       contactTitle: contactTitle || null,
       contactMemo: contactMemo || null,
       rowColor: rowColor || null,
+      portalFormId: portalFormId || null,
     };
     try {
       const result = await updateCustomerAction({
@@ -216,6 +225,20 @@ export default function CustomerEditForm({
         <div className="sm:col-span-2">
           <CustomerRowColorPicker value={rowColor} disabled={disabled} onChange={setRowColor} />
           {fieldErrors.rowColor && <p className={editErrorClass}>{fieldErrors.rowColor}</p>}
+        </div>
+
+        {/* 양식 고르개도 칸이 넷이고 설명 한 줄이 붙는다 — 색 고르개와 같은 자리,
+            같은 폭이다. 🔴 고를 수 있는 양식과 그 이름은 여기 적지 않는다
+            (CustomerPortalFormField.tsx 가 등록부에서 가져온다). */}
+        <div className="sm:col-span-2">
+          <CustomerPortalFormPicker
+            value={portalFormId}
+            disabled={disabled}
+            onChange={setPortalFormId}
+          />
+          {fieldErrors.portalFormId && (
+            <p className={editErrorClass}>{fieldErrors.portalFormId}</p>
+          )}
         </div>
       </dl>
 

@@ -1,3 +1,4 @@
+import { findPortalFormById } from "@/lib/domain/customer-portal-forms";
 import { normalizeCustomerRowColorValue } from "@/lib/domain/customer-row-color";
 import { CUSTOMER_CONTACT_MEMO_MAX, CUSTOMER_CONTACT_TITLE_MAX } from "@/lib/validation/customer-contact-input";
 
@@ -32,6 +33,12 @@ export type CustomerUpdateFields = {
    * (domain/customer-row-color.ts). 형식이 어긋난 색 코드는 여기까지 오지 못한다.
    */
   rowColor: string | null;
+  /**
+   * 「고객 안내 현황」이 이 고객사를 **어느 양식으로** 그리는가 — 등록부
+   * (domain/customer-portal-forms.ts 의 CUSTOMER_PORTAL_FORMS)의 양식 id 이거나
+   * null(= 양식 없음)이다. 등록부에 없는 id 는 여기까지 오지 못한다.
+   */
+  portalFormId: string | null;
 };
 
 export type ValidateCustomerUpdateResult =
@@ -180,9 +187,50 @@ export function validateCustomerUpdateFields(
     }
   }
 
+  /**
+   * 🔴 **등록부가 문지기다.** `customers.portal_form_id` 에는 CHECK 도 enum 도
+   * 두지 않았는데(schema/customers.ts), 그 까닭이 「어느 양식 id 가 뜻이 있는지는
+   * 코드가 정한다」였다. 그러면 **코드가 막아야** 한다 — 오타 한 번이 그대로
+   * 저장되면 그 고객사의 표가 조용히 사라진다. 표를 그리는 길
+   * (resolvePortalFormForCustomer)은 칸에 값이 있으면 **그 값으로만** 가리고,
+   * 못 풀면 이름으로 되돌아가지 않고 「양식 없음」이 되기 때문이다. 오류도 경고도
+   * 나지 않는 모양이라, 막는 자리가 여기밖에 없다.
+   *
+   * 맞춰 보는 자는 resolvePortalFormForCustomer 와 **같다**: 앞뒤 공백만 떼고
+   * 글자 그대로 본다(대소문자를 접으면 `icd` 가 통과해 DB 에 두 표기가 쌓인다).
+   * 공백뿐이거나 비어 있으면 「안 고름」이라 null 이다 — 빈 글자로 저장하지 않는다.
+   * 화면이 무엇을 그렸든 서버 액션은 이 검증을 다시 거치므로, 등록부에 없는 값을
+   * 직접 보내는 요청은 여기서 멈춘다.
+   */
+  let portalFormId: string | null = null;
+  const portalFormIdRaw = raw.portalFormId;
+  if (portalFormIdRaw === null || portalFormIdRaw === undefined || portalFormIdRaw === "") {
+    portalFormId = null;
+  } else if (typeof portalFormIdRaw !== "string") {
+    fieldErrors.portalFormId = "고를 수 없는 양식입니다.";
+  } else {
+    const trimmed = portalFormIdRaw.trim();
+    if (trimmed === "") {
+      portalFormId = null;
+    } else if (findPortalFormById(trimmed) === null) {
+      fieldErrors.portalFormId = "고를 수 없는 양식입니다.";
+    } else {
+      portalFormId = trimmed;
+    }
+  }
+
   if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
   return {
     ok: true,
-    data: { name, contactName, contactEmail, contactPhone, contactTitle, contactMemo, rowColor },
+    data: {
+      name,
+      contactName,
+      contactEmail,
+      contactPhone,
+      contactTitle,
+      contactMemo,
+      rowColor,
+      portalFormId,
+    },
   };
 }

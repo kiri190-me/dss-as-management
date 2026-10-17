@@ -290,6 +290,24 @@ src/components/product-models/product-model-customer-source.test.ts
 # (고르개의 키 · 「고객사 오름차순」의 비교 규칙)은 unit 목록의 product-model-sort.test.ts 가
 # 값으로 보고, 조회가 실제로 두 갈래를 돌려주는지는 db 목록의 product-models.integration 이 본다.
 src/components/customers/customer-detail-product-models.test.ts
+
+# 고객사 상세의 [고객 안내 양식] 고르개 (2026-10-17, C-3). 2026-10-17 에 고객사 세 곳의
+# 이름이 정식 상호로 바뀌자, 코드에 박아 둔 이름으로 양식을 가리던 판정이 하나도 못 맞춰
+# 「고객 안내 현황」의 표 셋이 통째로 사라졌다 — 오류가 아니라 「아무것도 없음」이라 원인이
+# 안 보인다. 그 판정을 `customers.portal_form_id` 칸으로 옮긴 마지막 조각이 이 화면이다.
+# 값 판정은 unit 목록이 본다(domain/customer-portal-forms.test.ts · validation/
+# customer-update-input.test.ts), 실제 저장과 묶음은 db 목록의 customers.integration 이 본다.
+# 🔴 여기서 못 박는 것: 고를 수 있는 양식과 **그 이름을 화면에 베껴 적지 않는가**(등록부에서
+# 가져와 label 을 쓴다 — 베끼면 양식이 늘 때 한쪽만 고쳐지고 아무 오류도 안 난다) ·
+# 🔴 「없음」이 정상임이 보이는가(대부분의 고객사가 그렇다) · 폼이 보내고 조회가 싣고 읽기
+# 화면이 보이는 셋이 다 있는가(하나만 빠져도 「저장이 안 된다」 또는 「확인할 길이 없다」) ·
+# 🔴 화면이 판정 함수를 다시 적지 않는가 · 🔴 이름 안전망 열한 개가 그대로인가 ·
+# 🔴 인가가 그대로인가(고르개는 canEdit 안에만, 서버 액션은 customers.edit 를 다시 본다).
+# 화면이 서버 액션 사슬로 server-only 에 닿아 **그려 볼 수 없다** — 위 이웃과 같은 방법으로
+# 원본을 글자로 읽고, 🔴 **주석을 걷어 낸 본문만** 잰다(이 파일들의 주석에 양식 이름도
+# 「없음」도 그대로 적혀 있어 날것을 재면 코드를 다 지워도 통과한다).
+src/components/customers/customer-portal-form-picker.test.ts
+
 src/components/repair-cases/detail/product-info-history-disclosure.test.ts
 src/components/repair-cases/detail/used-parts-section.test.ts
 src/components/inventory/part-picker.test.tsx
