@@ -45,6 +45,9 @@
  *
  * 'PART_ISSUE' 는 부품 불출 승인이 쓴다(domain/inventory-part-issue-rules.ts 의
  * PART_ISSUE_APPROVAL_ROUTE_SCOPE 가 그 값에 이름을 붙여 둔 자리다).
+ * 🔴 **2026-10-18 부터 이 값은 [사용자 관리] → [승인 절차] 탭에서 고를 수 없다.**
+ * 까닭과 「그래도 목록에 남겨 두는 이유」는 바로 아래
+ * EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES 에 적어 두었다.
  *
  * 'QUOTE' 는 견적서 승인이 쓴다(결재 기록은 db/schema/quote-approvals.ts).
  * 🔴 **다른 둘과 성격이 하나 다르다: 이 절차는 아무것도 막지 않는다**
@@ -64,6 +67,55 @@ export const SHIPMENT_APPROVAL_ROUTE_SCOPES = [
 export type ShipmentApprovalRouteScope = (typeof SHIPMENT_APPROVAL_ROUTE_SCOPES)[number];
 
 /**
+ * ── 🔴 이 저장소에서 **사람이 고칠 수 있는** 용도 ───────────────────────
+ * 위 목록은 「표에 들어갈 수 있는 값」이고, 이것은 「A/S 의 [사용자 관리] →
+ * [승인 절차] 탭에서 고를 수 있는 값」이다. 둘이 갈라진 날이 2026-10-18 이다.
+ *
+ * 🔴 **왜 반만 지웠는가** — 다음 사람이 반드시 묻는다:
+ *  · 재고 관리가 2026-10 에 **별도 시스템**으로 떨어져 나갔고, 부품 불출 결재는
+ *    이제 그쪽에서 돈다(2026-10-17 에 운영 재고 DB 에서 `PART_ISSUE` 결재선이
+ *    실제로 작동 중인 것을 값으로 확인했다). A/S 에도 같은 설정이 남아 있으면
+ *    **어느 쪽이 참인지 알 수 없고**, A/S 에서 고쳐 봐야 아무 효과가 없다.
+ *    그래서 **고르는 자리에서 뺐다.**
+ *  · 그런데 `'PART_ISSUE'` 를 위 목록에서 통째로 빼면 타입이 좁아져
+ *    **A/S 에 아직 남아 있는 재고 코드가 줄줄이 깨진다**(재고 화면 셋 ·
+ *    mutation 둘 · 사용자 삭제 영향 조회 · 알림 · 그 시험들). 그것을 걷어내는
+ *    일은 **별개의 조각**이다(「A/S 재고 기능 제거」). 2026-10-16 사용자 결정에
+ *    따라 **표도 enum 도 저장된 판도 그대로 둔다** — 운영의 과거 결재 기록이
+ *    그 표에만 있다.
+ *  · 그 조각이 끝나 A/S 에서 재고가 사라지면, 그때 위 목록에서도 빼면 된다.
+ *    enum 값은 그때도 남는다(저장된 행이 그 값을 쓴다).
+ *
+ * 🔴 **순서는 위 목록과 같게 둔다** — 탭의 고르개가 이 순서대로 그려진다.
+ * `satisfies` 로 묶어 두었으니 위 목록에 없는 값을 적으면 컴파일이 멈춘다.
+ */
+export const EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES = [
+  "FINAL_SHIPMENT",
+  "QUOTE",
+] as const satisfies readonly ShipmentApprovalRouteScope[];
+export type EditableShipmentApprovalRouteScope =
+  (typeof EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES)[number];
+
+/**
+ * 바깥에서 들어온 값이 **이 저장소에서 고칠 수 있는** 용도인가.
+ *
+ * 🔴 편집 화면과 그 저장 경로가 **같은 함수**를 본다. 화면에서만 빼고 저장
+ * 경로를 열어 두면 손으로 만든 요청이 그대로 통과해, A/S 에서 못 고치게 하려던
+ * 값이 다시 들어온다(이 파일 머리말이 경계하는 그 상태다).
+ *
+ * `isShipmentApprovalRouteScope` 는 지우지 않는다 — 「표에 넣을 수 있는 값인가」를
+ * 묻는 자리는 여전히 있고(재고 쪽 저장 경로), 그 물음은 이것과 다르다.
+ */
+export function isEditableShipmentApprovalRouteScope(
+  value: unknown
+): value is EditableShipmentApprovalRouteScope {
+  return (
+    typeof value === "string" &&
+    (EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES as readonly string[]).includes(value)
+  );
+}
+
+/**
  * 🔴 **용도의 이름표가 적힌 유일한 곳.** 코드 값(`FINAL_SHIPMENT`)은 사람이 읽을
  * 말이 아니므로 화면에 그대로 내보내지 않는다.
  *
@@ -77,6 +129,11 @@ export type ShipmentApprovalRouteScope = (typeof SHIPMENT_APPROVAL_ROUTE_SCOPES)
  */
 export const SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS: Record<ShipmentApprovalRouteScope, string> = {
   FINAL_SHIPMENT: "최종 출하 승인",
+  // 🔴 [승인 절차] 탭의 고르개에서는 2026-10-18 에 빠졌지만 **이 이름표는 남는다** —
+  // 사용자 삭제 영향 안내(db/queries/user-deletion-impact.ts ·
+  // components/users/user-deletion-dialog-text.ts)와 알림 이름표
+  // (domain/notifications.ts 의 PART_ISSUE_APPROVAL_LABEL)가 저장된 과거 판을
+  // 사람에게 보여 줄 때 이것을 쓴다. 지우면 그 자리들이 코드 값을 그대로 띄운다.
   PART_ISSUE: "부품 불출",
   // 🔴 「승인」으로 끝맺는 것은 일부러다. 편집 화면의 설명 문장이 이름표 뒤에
   // 조사 「을」을 붙인다(`${scopeLabel}을 여러 사람이 순서대로 결재하도록…`).
@@ -99,6 +156,11 @@ export const SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS: Record<ShipmentApprovalRouteS
  */
 export const SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES: Record<ShipmentApprovalRouteScope, string> = {
   FINAL_SHIPMENT: "지금은 출하 대표로 지정된 사용자가 최종 출하 승인을 처리합니다.",
+  // 🔴 2026-10-18 부터 이 문장이 사람에게 보이는 자리는 없다 — [승인 절차] 탭에서
+  // 「부품 불출」을 고를 수 없게 됐고, 저장 경로도 그 용도를 받지 않는다. 그래도
+  // 지우지 않는 것은 위 Record 가 **모든 용도**를 요구하기 때문이고, 그 요구가
+  // 「이름표·안내 없는 용도」를 막는 장치다. 재고 기능이 A/S 에서 완전히 걷히는
+  // 조각에서 용도 자체와 함께 다시 본다.
   PART_ISSUE: "지금은 재고 담당자가 그 자리에서 바로 불출합니다.",
   // 🔴 견적서는 절차가 있든 없든 **발행이 막히지 않는다.** 그래서 이 문장은
   // 「무엇이 대신 처리하는가」가 아니라 「무엇이 남지 않는가」를 말한다 —

@@ -4,26 +4,21 @@ import { Fragment, useState } from "react";
 import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
 import { useUiText } from "@/components/providers/UiTextProvider";
-import { PART_ISSUE_REQUEST_BUTTON_LABEL } from "@/components/inventory/part-issue-approval-texts";
 import { saveShipmentApprovalRouteAction } from "@/lib/server/actions/shipment-approval-routes";
 import {
+  EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES,
+  isEditableShipmentApprovalRouteScope,
   isSameRouteStepList,
-  isShipmentApprovalRouteScope,
   MAX_SHIPMENT_APPROVAL_ROUTE_STEPS,
   moveRouteStepDown,
   moveRouteStepUp,
   removeRouteStep,
   SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES,
   SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS,
-  SHIPMENT_APPROVAL_ROUTE_SCOPES,
   stepOrderFromIndex,
   validateShipmentApprovalRouteSteps,
-  type ShipmentApprovalRouteScope,
+  type EditableShipmentApprovalRouteScope,
 } from "@/lib/domain/shipment-approval-route";
-import {
-  isPartIssueApprovalRouteInForce,
-  PART_ISSUE_APPROVAL_ROUTE_SCOPE,
-} from "@/lib/domain/inventory-part-issue-rules";
 import type { Role } from "@/lib/domain/types";
 import type {
   SelectableApproverCandidate,
@@ -41,22 +36,29 @@ import type {
  * 붙지 않으므로, 실수가 나기 쉬운 부분을 시험이 붙는 자리로 내려 두었다.
  *
  * ── 🔴 용도(scope)마다 판이 따로 쌓인다 ─────────────────────────────────
- * 「최종 출하 승인」과 「부품 불출」은 같은 표를 쓰지만 **서로 다른 절차**다. 판
+ * 「최종 출하 승인」과 「견적서 승인」은 같은 표를 쓰지만 **서로 다른 절차**다. 판
  * 번호도 「현재 절차」도 용도 안에서 정해지므로, 한쪽을 고쳐도 다른 쪽은 흔들리지
  * 않는다(db/mutations·queries 의 scope 조건).
  *
  * 🔴 **그래서 편집 중이던 목록도 용도별로 갈라 둔다**(`draftByScope`). 목록을
  * 하나만 두고 용도만 갈아 끼우면, 출하 결재선을 짜다가 용도를 바꾸고 [저장]을
- * 누른 순간 **그 사람들이 부품 불출 절차로 저장된다.** 불출 절차는 만들어지는
- * 순간 재고의 [불출]·[사용]을 잠그므로(isPartIssueApprovalRouteInForce), 그
- * 실수는 조용하지 않고 즉시 업무를 멈춘다. 용도별로 갈라 두면 그 길 자체가
+ * 누른 순간 **그 사람들이 다른 절차로 저장된다.** 용도별로 갈라 두면 그 길 자체가
  * 없어지고, 덤으로 편집하던 것이 사라지지도 않는다.
+ *
+ * ── 🔴 고를 수 있는 용도는 EDITABLE_… 목록이다 ──────────────────────────
+ * 표에 들어갈 수 있는 값은 셋이지만, 이 탭이 고르게 하는 것은 **둘**이다
+ * (그 넓은 목록을 이 화면이 다시 쓰면 안 된다 — 시험이 그것을 막는다).
+ * 2026-10-18 에 「부품 불출」이 빠졌다 — 재고 관리가
+ * 별도 시스템으로 떨어져 나가 그 결재선은 이제 그쪽에서 정한다. 여기 남겨 두면
+ * 어느 쪽이 참인지 알 수 없고, 여기서 고쳐도 아무 효과가 없다.
+ * 🔴 **저장된 `PART_ISSUE` 판은 그대로 있다** — 지우지 않았고, 이 화면이 읽지
+ * 않을 뿐이다(서버 페이지도 그 용도를 읽어 내려보내지 않는다).
+ * 까닭 전문은 domain/shipment-approval-route.ts 의 그 상수 머리말에 있다.
  *
  * ── 🔴 단계 0개로 저장하는 길을 막지 않는다 ─────────────────────────────
  * 판은 지우지 않으므로(append-only) **0개짜리 판을 얹는 것이 절차를 끄는 유일한
  * 출구다.** 저장 단추를 「단계가 1개 이상일 때만」으로 잠그면 한 번 켠 절차를
- * 되돌릴 방법이 영영 없어진다 — 부품 불출에서는 그것이 곧 재고가 잠긴 채로
- * 남는다는 뜻이다.
+ * 되돌릴 방법이 영영 없어진다.
  *
  * ── 🔴 자격을 잃은 사람을 조용히 빼지 않는다 ────────────────────────────
  * 결재선에 올라간 뒤 계정이 잠기거나 지워지는 일은 실제로 일어나고, 그때 결재는
@@ -72,12 +74,17 @@ const ICON_BUTTON_CLASS =
   "rounded-md border border-zinc-300 px-2 py-1 text-xs leading-none text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
 /**
- * 용도별 현재 판. **모든 용도가 키로 있어야 한다** — 서버 페이지가 용도 목록을
- * 돌며 읽어 채우므로, 용도를 하나 더하면 그 자리가 컴파일러에 바로 보인다.
- * 값이 null 인 것은 그 용도의 판이 아직 하나도 없다는 뜻이다(정상이다).
+ * 용도별 현재 판. **고칠 수 있는 용도가 전부 키로 있어야 한다** — 서버 페이지가
+ * 그 목록을 돌며 읽어 채우므로, 용도를 하나 더하면 그 자리가 컴파일러에 바로
+ * 보인다. 값이 null 인 것은 그 용도의 판이 아직 하나도 없다는 뜻이다(정상이다).
+ *
+ * 🔴 **키는 EditableShipmentApprovalRouteScope 다** — 표의 용도 전부가 아니다.
+ * 이 탭에서 고칠 수 없는 용도(부품 불출)는 읽어 내려보내지도 않는다. 넓은 타입을
+ * 그대로 두면 서버 페이지가 그 판까지 읽어 HTML 에 실어 보내게 되고, 화면에서
+ * 안 보이는 것과 자료가 안 나가는 것은 다르다.
  */
 export type ShipmentApprovalRoutesByScope = Record<
-  ShipmentApprovalRouteScope,
+  EditableShipmentApprovalRouteScope,
   ShipmentApprovalRouteView | null
 >;
 
@@ -86,7 +93,7 @@ export type ShipmentApprovalRoutesByScope = Record<
  * 원래 그 절차 하나만 다루던 자리이고, 지금도 실제로 쓰이는 것이 그쪽이기
  * 때문이다. 사람에게 보이는 이름은 여기서 정하지 않는다(이름표는 도메인에 있다).
  */
-const DEFAULT_SCOPE: ShipmentApprovalRouteScope = "FINAL_SHIPMENT";
+const DEFAULT_SCOPE: EditableShipmentApprovalRouteScope = "FINAL_SHIPMENT";
 
 /**
  * 이 사람이 지금 결재선에 올라 있을 수 없는 이유. 올릴 수 있으면 null.
@@ -129,18 +136,18 @@ export default function ShipmentApprovalRouteSection({
   const uiText = useUiText();
 
   // 용도별 「저장돼 있는 목록」과 그 지문. 지문이 달라지면 그 용도만 다시 맞춘다.
-  const savedByScope = {} as Record<ShipmentApprovalRouteScope, string[]>;
-  const savedKeyByScope = {} as Record<ShipmentApprovalRouteScope, string>;
-  for (const routeScope of SHIPMENT_APPROVAL_ROUTE_SCOPES) {
+  const savedByScope = {} as Record<EditableShipmentApprovalRouteScope, string[]>;
+  const savedKeyByScope = {} as Record<EditableShipmentApprovalRouteScope, string>;
+  for (const routeScope of EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES) {
     savedByScope[routeScope] = (routes[routeScope]?.steps ?? []).map((step) => step.approverUserId);
     savedKeyByScope[routeScope] = savedByScope[routeScope].join("|");
   }
 
-  const [scope, setScope] = useState<ShipmentApprovalRouteScope>(DEFAULT_SCOPE);
+  const [scope, setScope] = useState<EditableShipmentApprovalRouteScope>(DEFAULT_SCOPE);
   const [draftByScope, setDraftByScope] =
-    useState<Record<ShipmentApprovalRouteScope, string[]>>(savedByScope);
+    useState<Record<EditableShipmentApprovalRouteScope, string[]>>(savedByScope);
   const [syncedKeyByScope, setSyncedKeyByScope] =
-    useState<Record<ShipmentApprovalRouteScope, string>>(savedKeyByScope);
+    useState<Record<EditableShipmentApprovalRouteScope, string>>(savedKeyByScope);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -150,7 +157,7 @@ export default function ShipmentApprovalRouteSection({
   //
   // 🔴 **바뀐 용도만 맞춘다.** 한 용도를 저장했다고 다른 용도의 편집 중이던
   // 목록까지 되돌리면, 사람은 자기가 짜던 것이 왜 사라졌는지 알 수 없다.
-  const staleScopes = SHIPMENT_APPROVAL_ROUTE_SCOPES.filter(
+  const staleScopes = EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES.filter(
     (routeScope) => syncedKeyByScope[routeScope] !== savedKeyByScope[routeScope]
   );
   if (staleScopes.length > 0) {
@@ -198,7 +205,7 @@ export default function ShipmentApprovalRouteSection({
     setMessage(null);
   }
 
-  function changeScope(next: ShipmentApprovalRouteScope) {
+  function changeScope(next: EditableShipmentApprovalRouteScope) {
     if (next === scope) return;
     setScope(next);
     // 🔴 결과 문구는 방금까지 보던 용도의 것이다. 데리고 가면 새 용도에 대한
@@ -239,15 +246,11 @@ export default function ShipmentApprovalRouteSection({
   const hasUnsavedChange = !isSameRouteStepList(savedApproverIds, steps);
   // 다른 용도에 손대다 만 것이 있는가. 갈라 두었기 때문에 사라지지는 않지만,
   // 말해 주지 않으면 사람은 저장된 줄 알고 화면을 닫는다.
-  const otherUnsavedScopes = SHIPMENT_APPROVAL_ROUTE_SCOPES.filter(
+  const otherUnsavedScopes = EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES.filter(
     (routeScope) =>
       routeScope !== scope &&
       !isSameRouteStepList(savedByScope[routeScope], draftByScope[routeScope])
   );
-  // 🔴 「부품 불출」이 **지금 켜져 있는가** — 서버가 [불출]·[사용]에 문을 달 때
-  // 보는 그 판정이다(같은 순수 함수). 편집 중인 목록이 아니라 **저장된 판**을
-  // 본다: 아직 저장하지 않은 편집으로 「지금 이렇습니다」를 말하면 거짓말이 된다.
-  const partIssueInForce = isPartIssueApprovalRouteInForce(routes[PART_ISSUE_APPROVAL_ROUTE_SCOPE]);
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
@@ -277,11 +280,13 @@ export default function ShipmentApprovalRouteSection({
             const next = event.target.value;
             // 고른 값을 그대로 믿지 않는다 — 도메인의 같은 판정으로 좁힌다
             // (형변환을 손으로 적으면 목록에 없는 값도 타입만 통과한다).
-            if (isShipmentApprovalRouteScope(next)) changeScope(next);
+            // 🔴 「표에 넣을 수 있는가」가 아니라 **「여기서 고칠 수 있는가」**를
+            // 묻는다. 넓은 쪽으로 물으면 이 탭에서 뺀 용도가 다시 들어온다.
+            if (isEditableShipmentApprovalRouteScope(next)) changeScope(next);
           }}
           className="min-w-0 rounded-md border border-zinc-200 px-2 py-1.5 text-sm text-zinc-900 disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:disabled:bg-zinc-800"
         >
-          {SHIPMENT_APPROVAL_ROUTE_SCOPES.map((routeScope) => (
+          {EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES.map((routeScope) => (
             <option key={routeScope} value={routeScope}>
               {SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS[routeScope]}
             </option>
@@ -294,18 +299,11 @@ export default function ShipmentApprovalRouteSection({
         )}
       </div>
 
-      {/* 🔴 이 용도에서 절차를 만들면 **다른 화면이 달라진다.** 그것을 미리 말해
-          주지 않으면 관리자는 결재선 하나를 저장한 것이 재고 담당자의 단추를
-          바꾼다는 사실을 모른 채 저장한다. 반대로 켜 둔 것을 끄는 길(단계를 모두
-          지우고 저장)도 여기서 말해 준다 — 판은 지우지 않으므로 그것이 유일한
-          출구다. */}
-      {scope === PART_ISSUE_APPROVAL_ROUTE_SCOPE && (
-        <p className="mt-2 rounded-md border border-zinc-200 bg-zinc-50 p-2 text-[11px] text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400">
-          {partIssueInForce
-            ? `지금 재고 화면의 [불출]·[사용]이 [${PART_ISSUE_REQUEST_BUTTON_LABEL}]으로 바뀌어 있습니다. 단계를 모두 지우고 저장하면 절차가 꺼지고 예전처럼 그 자리에서 바로 불출합니다.`
-            : `승인 절차를 만들면 재고 화면의 [불출]·[사용]이 [${PART_ISSUE_REQUEST_BUTTON_LABEL}]으로 바뀌고, 결재가 끝난 뒤 [승인 요청건] 탭에서 실행하게 됩니다.`}
-        </p>
-      )}
+      {/* 🔴 여기 있던 「부품 불출」 전용 안내를 2026-10-18 에 걷어냈다. 그 용도가
+          고르개에서 빠졌으므로(EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES) 그 글은
+          **고를 수 없는 용도를 설명하는 말**이 된다 — 읽는 사람은 어디서 고치는지
+          찾다가 못 찾는다. 재고 단추가 어떻게 바뀌는지는 이제 별도 재고 관리
+          시스템이 자기 화면에서 말한다. */}
 
       {/* 🔴 결과 문구는 이 카드 **안**에 둔다. 카드 밖 형제로 두면 부모가 격자일
           때 이 문단이 칸 하나를 먹어 배치가 깨진다(이 저장소에서 실제로 있었다). */}

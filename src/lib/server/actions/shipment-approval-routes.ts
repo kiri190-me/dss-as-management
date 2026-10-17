@@ -4,11 +4,11 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
-import { validateShipmentApprovalRouteInput } from "@/lib/validation/shipment-approval-route-input";
+import { validateEditableShipmentApprovalRouteInput } from "@/lib/validation/shipment-approval-route-input";
 import { saveShipmentApprovalRoute } from "@/lib/db/mutations/shipment-approval-routes";
 import {
   SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES,
-  type ShipmentApprovalRouteScope,
+  type EditableShipmentApprovalRouteScope,
 } from "@/lib/domain/shipment-approval-route";
 
 export type SaveShipmentApprovalRouteActionInput = {
@@ -20,8 +20,12 @@ export type SaveShipmentApprovalRouteActionInput = {
    *
    * 타입이 이미 좁지만 이 함수는 Server Action 이라 **네트워크 경계 너머**에서
    * 불린다 — 타입은 그 경계에서 아무것도 막지 못한다.
+   *
+   * 🔴 **[승인 절차] 탭에서 고칠 수 있는 용도만이다**(2026-10-18). 「부품 불출」은
+   * 별도 재고 관리 시스템으로 옮겨 갔으므로 이 길로 들어오면 거절한다 — 저장된
+   * 판과 표의 enum 은 그대로 두고, **들어오는 길만** 막는다.
    */
-  scope: ShipmentApprovalRouteScope;
+  scope: EditableShipmentApprovalRouteScope;
   /**
    * 결재 순서대로 담은 승인자 id. **자리가 곧 순서다** — 순서 번호를 따로 받지
    * 않는다(그 이유는 domain/shipment-approval-route.ts 머리말).
@@ -87,7 +91,11 @@ export async function saveShipmentApprovalRouteAction(
     return { ok: false, message: "승인 절차를 변경할 권한이 없습니다." };
   }
 
-  const validated = validateShipmentApprovalRouteInput(input);
+  // 🔴 **「고칠 수 있는 용도만」 받는 입구다**(2026-10-18). 「부품 불출」은 별도
+  // 재고 관리 시스템으로 옮겨 갔으므로 이 길로 들어오면 거절한다 — 고르개에서만
+  // 치우면 손으로 만든 요청이 그대로 통과한다. mutation 쪽 검사는 그대로 셋을
+  // 받는다(사용자 삭제가 저장된 부품 불출 판을 이어 쓴다).
+  const validated = validateEditableShipmentApprovalRouteInput(input);
   if (!validated.ok) return { ok: false, message: validated.message };
 
   try {

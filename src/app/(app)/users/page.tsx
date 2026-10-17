@@ -12,7 +12,7 @@ import {
   getCurrentShipmentApprovalRoute,
   listSelectableApproverCandidates,
 } from "@/lib/db/queries/shipment-approval-routes";
-import { SHIPMENT_APPROVAL_ROUTE_SCOPES } from "@/lib/domain/shipment-approval-route";
+import { EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES } from "@/lib/domain/shipment-approval-route";
 import type { ShipmentApprovalRoutesByScope } from "@/components/users/ShipmentApprovalRouteSection";
 import { canManageRolePermissions } from "@/lib/auth/role-permission-authorization";
 import { canManageNotificationSettings } from "@/lib/auth/notification-settings-authorization";
@@ -69,14 +69,17 @@ export default async function UsersPage() {
   const [users, delegations, approvalRouteEntries, approverCandidates] = await Promise.all([
     listUsersForRepresentativeManagement(),
     listShipmentDelegations(),
-    // 🔴 **용도 목록을 돌며 전부 읽는다.** 화면이 탭 안에서 용도를 고르는데 그
-    // 판정은 클라이언트에서 일어나므로, 고를 수 있는 용도의 현재 판이 처음부터
-    // 다 내려와 있어야 한다. 목록에서 파생시키는 이유는 용도를 하나 더할 때
-    // 여기를 고치는 것을 잊어도 새 용도가 조용히 빠지지 않게 하기 위해서다 —
-    // 글자로 적어 두면 그 용도만 「판이 없다」로 보이고, 그것은 「절차를 쓰지
-    // 않는다」와 구별되지 않는다.
+    // 🔴 **고칠 수 있는 용도를 돌며 전부 읽는다.** 화면이 탭 안에서 용도를
+    // 고르는데 그 판정은 클라이언트에서 일어나므로, 고를 수 있는 용도의 현재 판이
+    // 처음부터 다 내려와 있어야 한다. 목록에서 파생시키는 이유는 용도를 하나
+    // 더할 때 여기를 고치는 것을 잊어도 새 용도가 조용히 빠지지 않게 하기
+    // 위해서다 — 글자로 적어 두면 그 용도만 「판이 없다」로 보이고, 그것은
+    // 「절차를 쓰지 않는다」와 구별되지 않는다.
+    // 🔴 **표의 용도 전부가 아니라 EDITABLE_… 다**(2026-10-18). 「부품 불출」은
+    // 이 탭에서 고칠 수 없게 됐으므로 그 판을 읽지도, 내려보내지도 않는다 —
+    // 저장된 판은 표에 그대로 있다. 까닭은 그 상수 머리말에 있다.
     Promise.all(
-      SHIPMENT_APPROVAL_ROUTE_SCOPES.map(
+      EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES.map(
         async (scope) => [scope, await getCurrentShipmentApprovalRoute(scope)] as const
       )
     ),

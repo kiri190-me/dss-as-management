@@ -2,7 +2,9 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES,
   findNextRouteStepToApprove,
+  isEditableShipmentApprovalRouteScope,
   isRouteStepSkippedForRequester,
   isSameRouteStepList,
   isShipmentApprovalRouteScope,
@@ -496,6 +498,68 @@ describe("용도(scope)", () => {
         false,
         `${JSON.stringify(bad)} 가 통과했다`
       );
+    }
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 「표에 넣을 수 있는 값」과 「사람이 고칠 수 있는 값」은 다르다 (2026-10-18)
+ * ============================================================================
+ * 재고 관리가 별도 시스템으로 떨어져 나가면서 부품 불출 결재선은 그쪽에서 돌게
+ * 됐다. A/S 의 [사용자 관리] → [승인 절차] 탭에서 고칠 수 있게 두면 **어느 쪽이
+ * 참인지 알 수 없고**, 여기서 고쳐도 아무 효과가 없다. 그래서 고르는 목록에서
+ * 뺐다 — 그런데 값 자체는 **표에도 저장된 판에도 그대로 있다**(2026-10-16 사용자
+ * 결정: 과거 기록이 그 표에만 있다).
+ *
+ * 여기서 못 박는 것 셋:
+ *  1. 고르는 목록에 부품 불출이 없다.
+ *  2. 그래도 **표의 목록에는 그대로 있다** — 값을 지운 것이 아니다.
+ *  3. 고르는 목록은 표의 목록의 **부분집합**이고 순서도 그대로다.
+ * ============================================================================
+ */
+describe("🔴 고칠 수 있는 용도 — 부품 불출은 빠졌다", () => {
+  test("고르는 목록에 부품 불출이 없다", () => {
+    assert.deepEqual([...EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES], ["FINAL_SHIPMENT", "QUOTE"]);
+    assert.equal(isEditableShipmentApprovalRouteScope("PART_ISSUE"), false);
+  });
+
+  test("🔴 그래도 표에 넣을 수 있는 값에는 그대로 있다 — 값을 지운 것이 아니다", () => {
+    // 저장된 판 · enum · 재고 쪽 코드가 아직 이 값을 쓴다. 여기가 false 가 되는
+    // 날은 「A/S 재고 기능 제거」 조각이 끝난 뒤다.
+    assert.equal(isShipmentApprovalRouteScope("PART_ISSUE"), true);
+    assert.ok((SHIPMENT_APPROVAL_ROUTE_SCOPES as readonly string[]).includes("PART_ISSUE"));
+  });
+
+  test("고르는 목록은 표의 목록의 부분집합이고, 순서도 그대로다", () => {
+    // 순서가 어긋나면 탭의 고르개가 표와 다른 차례로 그려진다.
+    assert.deepEqual(
+      [...EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES],
+      SHIPMENT_APPROVAL_ROUTE_SCOPES.filter((scope) =>
+        (EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES as readonly string[]).includes(scope)
+      )
+    );
+  });
+
+  test("🔴 출하·견적은 그대로 고를 수 있다 — 옆 용도를 같이 망가뜨리지 않았다", () => {
+    assert.equal(isEditableShipmentApprovalRouteScope("FINAL_SHIPMENT"), true);
+    assert.equal(isEditableShipmentApprovalRouteScope("QUOTE"), true);
+  });
+
+  test("모르는 값·빈 값·다른 타입은 거절한다", () => {
+    for (const bad of ["", " ", "final_shipment", "QUOTES", 0, null, undefined, {}, []]) {
+      assert.equal(
+        isEditableShipmentApprovalRouteScope(bad),
+        false,
+        `${JSON.stringify(bad)} 가 통과했다`
+      );
+    }
+  });
+
+  test("🔴 고를 수 있는 용도에는 이름표와 빈 절차 안내가 다 있다", () => {
+    for (const scope of EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES) {
+      assert.ok(SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS[scope].trim().length > 0);
+      assert.ok(SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES[scope].trim().length > 0);
     }
   });
 });

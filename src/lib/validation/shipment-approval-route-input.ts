@@ -1,7 +1,9 @@
 import {
+  isEditableShipmentApprovalRouteScope,
   isShipmentApprovalRouteScope,
   stepOrderFromIndex,
   validateShipmentApprovalRouteSteps,
+  type EditableShipmentApprovalRouteScope,
   type ShipmentApprovalRouteScope,
   type ShipmentApprovalRouteStepsIssueCode,
 } from "@/lib/domain/shipment-approval-route";
@@ -60,6 +62,17 @@ export type ValidateShipmentApprovalRouteInputResult =
  * 모르는 값도 같은 이유로 거절한다: 표의 enum 이 결국 막아 주긴 하지만, 거기까지
  * 가면 사람에게는 「알 수 없는 오류」로 보인다.
  *
+ * 🔴 **여기가 받는 용도는 「표에 넣을 수 있는 값」 전부다 — 좁히지 마라.**
+ * 2026-10-18 에 「부품 불출」이 [승인 절차] 탭에서 빠졌지만, 이 함수를 그에 맞춰
+ * 좁히면 **사용자 삭제가 조용히 깨진다**: 계정을 지울 때 그 사람이 올라 있던
+ * 결재선마다 새 판을 얹는데(db/mutations/user-deletion.ts →
+ * saveShipmentApprovalRouteInTx → 이 함수), 그 결재선에는 `PART_ISSUE` 가 섞여
+ * 있다. 입력이 `unknown` 이라 **타입 검사로는 드러나지 않고** 실제 삭제에서야
+ * 터진다.
+ *
+ * 탭에서 들어오는 길을 막는 것은 **아래 validateEditableShipmentApprovalRouteInput**
+ * 이고, 서버 액션이 그것을 부른다.
+ *
  * 🔴 **빈 배열은 정상이다.** 「절차를 쓰지 않겠다」는 뜻이고, 그때 앱은 지금까지처럼
  * 「출하 대표」 방식으로 최종 출하 승인을 처리한다.
  */
@@ -104,4 +117,43 @@ export function validateShipmentApprovalRouteInput(
   // 새 배열로 돌려준다 — 부르는 쪽이 받은 배열을 그대로 트랜잭션에 실어 보내므로,
   // 요청 객체와 자리를 나눠 쓰지 않는 편이 안전하다.
   return { ok: true, scope, approverUserIds: [...(approverUserIds as string[])] };
+}
+
+export type ValidateEditableShipmentApprovalRouteInputResult =
+  | { ok: true; scope: EditableShipmentApprovalRouteScope; approverUserIds: string[] }
+  | { ok: false; code: ShipmentApprovalRouteInputIssueCode; message: string };
+
+/**
+ * ============================================================================
+ * 🔴 [승인 절차] 탭이 저장할 때 쓰는 입구 — 고칠 수 있는 용도만 통과시킨다
+ * ============================================================================
+ * 위 함수와 **같은 검사**를 지나되, 용도를 한 번 더 좁힌다. 2026-10-18 에
+ * 「부품 불출」이 그 탭에서 빠졌다(재고 관리가 별도 시스템으로 떨어져 나가 그
+ * 결재선은 이제 그쪽에서 돈다 — 여기서 고쳐 봐야 효과가 없고, 남겨 두면 어느
+ * 쪽이 참인지 알 수 없다).
+ *
+ * 🔴 **화면에서만 빼면 안 되는 까닭**: 서버 액션은 네트워크 경계 너머에서
+ * 불린다. 고르개에서만 치우고 저장을 열어 두면 **손으로 만든 요청이 그대로
+ * 통과해** A/S 가 다시 그 결재선을 덮어쓴다. 화면과 저장이 같은 판정을 봐야
+ * 한다는 것이 domain/shipment-approval-route.ts 머리말의 규약이다.
+ *
+ * 🔴 **그런데 위 함수를 좁히지는 않는다.** 그쪽은 mutation 도 쓰고, 사용자 삭제가
+ * 지울 사람이 올라 있던 결재선마다 새 판을 얹을 때 `PART_ISSUE` 를 그대로
+ * 넘긴다. 좁히면 그 길이 끊어지는데 입력이 `unknown` 이라 타입 검사에 걸리지도
+ * 않는다. 그래서 **들어오는 입구만** 하나 더 둔다.
+ *
+ * 거절 문구는 「모르는 용도」와 **같은 말**이다 — 사람에게는 둘 다 「이 화면에서
+ * 다루는 절차가 아니다」이고, 갈라 적으면 손으로 만든 요청에게 어떤 값이
+ * 존재하는지를 알려 주게 된다.
+ * ============================================================================
+ */
+export function validateEditableShipmentApprovalRouteInput(
+  input: unknown
+): ValidateEditableShipmentApprovalRouteInputResult {
+  const validated = validateShipmentApprovalRouteInput(input);
+  if (!validated.ok) return validated;
+  if (!isEditableShipmentApprovalRouteScope(validated.scope)) {
+    return { ok: false, code: "INVALID_INPUT", message: "어떤 승인 절차인지 확인할 수 없습니다." };
+  }
+  return { ok: true, scope: validated.scope, approverUserIds: validated.approverUserIds };
 }

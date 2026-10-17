@@ -2,11 +2,11 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES,
   SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES,
   SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS,
   SHIPMENT_APPROVAL_ROUTE_SCOPES,
 } from "@/lib/domain/shipment-approval-route";
-import { PART_ISSUE_APPROVAL_ROUTE_SCOPE } from "@/lib/domain/inventory-part-issue-rules";
 
 /**
  * ============================================================================
@@ -19,7 +19,11 @@ import { PART_ISSUE_APPROVAL_ROUTE_SCOPE } from "@/lib/domain/inventory-part-iss
  *  · 용도를 바꿔도 편집 중이던 것이 다른 용도로 새어 나가지 않는다.
  *  · 🔴 **단계 0개로 저장하는 길을 화면이 막지 않는다** — 판은 지우지 않으므로
  *    0개짜리 판을 얹는 것이 절차를 끄는 유일한 출구다. 여기가 잠기면 한 번 켠
- *    「부품 불출」 승인을 되돌릴 방법이 영영 없어진다(=재고가 잠긴 채 남는다).
+ *    승인 절차를 되돌릴 방법이 영영 없어진다.
+ *  · 🔴 **「부품 불출」은 이 탭에 없다**(2026-10-18) — 고르개에도, 서버 페이지가
+ *    읽는 목록에도, 저장 경로에도 없다. 저장된 판은 표에 그대로 있고 화면이
+ *    읽지 않을 뿐이다. 까닭은 domain/shipment-approval-route.ts 의
+ *    EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES 머리말에 있다.
  *
  * ── 왜 렌더하지 않고 원본을 읽는가 ──────────────────────────────────────
  * ShipmentApprovalRouteSection 은 **서버 액션을 직접 import 하는 클라이언트
@@ -74,13 +78,39 @@ describe("용도 고르기", () => {
   test("🔴 고를 수 있는 용도는 도메인의 목록에서 나온다 — 화면이 따로 세지 않는다", () => {
     assert.match(
       flat(sectionSource),
-      /import \{[^}]*\bSHIPMENT_APPROVAL_ROUTE_SCOPES\b[^}]*\} from "@\/lib\/domain\/shipment-approval-route"/,
+      /import \{[^}]*\bEDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES\b[^}]*\} from "@\/lib\/domain\/shipment-approval-route"/,
       "용도 목록을 도메인에서 가져오지 않는다"
     );
     assert.match(
       flat(sectionSource),
-      /SHIPMENT_APPROVAL_ROUTE_SCOPES\.map\(\(routeScope\) => \( <option key=\{routeScope\} value=\{routeScope\}> \{SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS\[routeScope\]\} <\/option>/,
+      /EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES\.map\(\(routeScope\) => \( <option key=\{routeScope\} value=\{routeScope\}> \{SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS\[routeScope\]\} <\/option>/,
       "용도 목록을 돌며 이름표로 그리는 자리가 사라졌다"
+    );
+  });
+
+  test("🔴 고르개에 「부품 불출」이 없다 — 넓은 목록을 쓰면 다시 생긴다", () => {
+    // 2026-10-18: 재고 관리가 별도 시스템으로 떨어져 나가 그 결재선은 그쪽에서
+    // 정한다. 여기 남겨 두면 어느 쪽이 참인지 알 수 없고, 여기서 고쳐도 효과가
+    // 없다. **넓은 목록(SHIPMENT_APPROVAL_ROUTE_SCOPES)을 이 화면이 다시 쓰기
+    // 시작하면 부품 불출이 조용히 되살아난다** — 그래서 쓰지 않는 것을 못 박는다.
+    assert.ok(
+      !/\bSHIPMENT_APPROVAL_ROUTE_SCOPES\b/.test(sectionSource),
+      "화면이 표의 용도 전부를 쓰고 있다 — 고르개에 부품 불출이 되살아난다"
+    );
+    // 🔴 이름표가 **글자로 박혀 있지 않은지**는 위 「이름표는 한 곳에서만 온다」가
+    // 이미 본다(따옴표까지 맞춰서). 여기서 주석의 낱말까지 금지하면 「왜 뺐는지」를
+    // 적을 자리가 없어진다 — 다음 사람이 반드시 묻는 그 까닭이다.
+    // 고를 수 있는 값이 실제로 둘뿐인지는 값으로 본다(원본 글자가 아니라).
+    assert.deepEqual([...EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES], ["FINAL_SHIPMENT", "QUOTE"]);
+  });
+
+  test("🔴 저장된 부품 불출 판은 이 화면까지 내려오지도 않는다 — 안 보이는 것과 안 나가는 것은 다르다", () => {
+    // 용도별 현재 판을 담는 자리의 **키 타입**이 좁아야 한다. 넓은 채로 두면
+    // 서버 페이지가 그 판까지 읽어 HTML 에 실어 보낸다(화면에 안 그려도 나간다).
+    assert.match(
+      flat(sectionSource),
+      /export type ShipmentApprovalRoutesByScope = Record< EditableShipmentApprovalRouteScope, ShipmentApprovalRouteView \| null >;/,
+      "용도별 현재 판의 키가 좁혀지지 않았다"
     );
   });
 
@@ -101,20 +131,29 @@ describe("용도 고르기", () => {
     );
     assert.match(
       flat(sectionSource),
-      /const DEFAULT_SCOPE: ShipmentApprovalRouteScope = "FINAL_SHIPMENT";/,
+      /const DEFAULT_SCOPE: EditableShipmentApprovalRouteScope = "FINAL_SHIPMENT";/,
       "코드 값이 처음 보여 줄 용도를 정하는 자리 밖에서 쓰인다"
     );
-    // 부품 불출 쪽은 이미 이름 붙은 상수가 있다 — 글자로 적으면 오타 하나가
-    // 「판이 없다」로 조용히 보인다.
+    // 🔴 부품 불출은 글자로도, 이름 붙은 상수로도 이 화면에 남아 있지 않다
+    // (2026-10-18 에 탭에서 빠졌다). 상수가 남아 있으면 그 용도를 가리키는 갈래가
+    // 아직 있다는 뜻이다.
     assert.ok(!/"PART_ISSUE"/.test(sectionSource), "용도를 글자로 적었다");
-    assert.match(flat(sectionSource), /\bPART_ISSUE_APPROVAL_ROUTE_SCOPE\b/);
+    assert.ok(
+      !/\bPART_ISSUE_APPROVAL_ROUTE_SCOPE\b/.test(sectionSource),
+      "부품 불출 용도를 가리키는 갈래가 화면에 남아 있다"
+    );
   });
 
   test("고른 값을 그대로 믿지 않는다 — 도메인의 판정으로 좁힌다", () => {
     assert.match(
       flat(sectionSource),
-      /if \(isShipmentApprovalRouteScope\(next\)\) changeScope\(next\);/,
+      /if \(isEditableShipmentApprovalRouteScope\(next\)\) changeScope\(next\);/,
       "고른 값을 형변환만으로 통과시키면 목록에 없는 값도 타입만 지난다"
+    );
+    // 🔴 넓은 쪽(「표에 넣을 수 있는가」)으로 물으면 부품 불출이 다시 통과한다.
+    assert.ok(
+      !/isShipmentApprovalRouteScope\(/.test(sectionSource),
+      "화면이 「표에 넣을 수 있는가」로 묻고 있다 — 「여기서 고칠 수 있는가」여야 한다"
     );
   });
 });
@@ -130,11 +169,10 @@ describe("🔴 저장은 고른 용도로만 간다", () => {
 
   test("🔴 편집 중이던 목록이 용도별로 갈라져 있다 — 다른 용도로 새어 나갈 길이 없다", () => {
     // 목록을 하나만 두고 용도만 갈아 끼우면, 출하 결재선을 짜다가 용도를 바꾸고
-    // [저장]을 누른 순간 그 사람들이 부품 불출 절차로 저장된다. 불출 절차는
-    // 만들어지는 순간 재고의 [불출]·[사용]을 잠근다.
+    // [저장]을 누른 순간 그 사람들이 견적서 절차로 저장된다.
     assert.match(
       flat(sectionSource),
-      /useState<Record<ShipmentApprovalRouteScope, string\[\]>>\(savedByScope\)/,
+      /useState<Record<EditableShipmentApprovalRouteScope, string\[\]>>\(savedByScope\)/,
       "편집 중이던 목록이 용도별로 갈라져 있지 않다"
     );
     assert.match(
@@ -152,7 +190,10 @@ describe("🔴 저장은 고른 용도로만 간다", () => {
   test("새 자료가 내려와도 **바뀐 용도만** 되돌린다", () => {
     // 한 용도를 저장했다고 다른 용도의 편집 중이던 목록까지 되돌리면, 사람은
     // 자기가 짜던 것이 왜 사라졌는지 알 수 없다.
-    assert.match(flat(sectionSource), /const staleScopes = SHIPMENT_APPROVAL_ROUTE_SCOPES\.filter\(/);
+    assert.match(
+      flat(sectionSource),
+      /const staleScopes = EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES\.filter\(/
+    );
     assert.match(flat(sectionSource), /for \(const routeScope of staleScopes\) next\[routeScope\] = savedByScope\[routeScope\];/);
   });
 
@@ -208,45 +249,48 @@ describe("🔴 안내는 용도마다 다르다", () => {
     );
   });
 
-  test("🔴 부품 불출에서는 재고 화면이 달라진다는 것을 미리 말해 준다", () => {
-    const notice = sliceBetween(
-      sectionSource,
-      "{scope === PART_ISSUE_APPROVAL_ROUTE_SCOPE && (",
-      ")}"
-    );
-    // 단추 이름은 재고 쪽이 쓰는 그 상수다 — 각자 적으면 같은 단추가 화면마다
-    // 다른 이름으로 불린다.
-    assert.match(flat(notice), /\$\{PART_ISSUE_REQUEST_BUTTON_LABEL\}/);
+  test("🔴 재고 화면을 설명하던 글이 남아 있지 않다 — 없는 용도를 가리키게 된다", () => {
+    // 2026-10-18 에 「부품 불출」이 이 탭에서 빠지면서, 그 용도에만 붙던 안내
+    // (「재고 화면의 [불출]·[사용]이 … 으로 바뀝니다」)도 함께 걷어냈다. 남겨
+    // 두면 고를 수 없는 용도를 설명하는 글이 되고, 읽는 사람은 어디서 고치는지
+    // 찾다가 못 찾는다.
     assert.ok(
-      !/불출 승인 요청/.test(notice),
-      "단추 이름을 글자로 박았다 — 이름이 적힌 곳은 part-issue-approval-texts.ts 하나여야 한다"
+      !/\[불출\]·\[사용\]/.test(sectionSource),
+      "재고 단추를 설명하는 글이 남아 있다"
     );
-    assert.match(flat(notice), /\[불출\]·\[사용\]/, "무엇이 바뀌는지 말해 주지 않는다");
+    assert.ok(
+      !/불출 승인 요청/.test(sectionSource),
+      "재고 단추 이름이 남아 있다"
+    );
   });
 
-  test("「지금 켜져 있는가」는 서버와 같은 함수로 본다", () => {
-    assert.match(
-      flat(sectionSource),
-      /import \{[^}]*\bisPartIssueApprovalRouteInForce\b[^}]*\} from "@\/lib\/domain\/inventory-part-issue-rules"/,
-      "서버가 [불출]에 문을 달 때 보는 그 함수를 화면이 보지 않는다"
+  test("🔴 재고 쪽 모듈을 더 이상 가져오지 않는다", () => {
+    // 이 탭이 재고 쪽을 가져오던 자리가 둘이었다(단추 이름표 · 「지금 켜져
+    // 있는가」 판정). 용도가 빠졌으니 가져올 까닭도 없다 — 남겨 두면 재고를
+    // 걷어내는 다음 조각에서 이 화면이 이유 없이 끌려 들어온다.
+    assert.ok(
+      !/@\/lib\/domain\/inventory-part-issue-rules/.test(sectionSource),
+      "재고 규칙 모듈을 아직 가져온다"
     );
-    assert.match(
-      flat(sectionSource),
-      /isPartIssueApprovalRouteInForce\(routes\[PART_ISSUE_APPROVAL_ROUTE_SCOPE\]\)/,
-      "편집 중인 목록으로 「지금 이렇습니다」를 말하면 거짓말이 된다 — 저장된 판을 봐야 한다"
+    assert.ok(
+      !/components\/inventory\/part-issue-approval-texts/.test(sectionSource),
+      "재고 문구 모듈을 아직 가져온다"
     );
   });
 
   test("용도마다 실제로 다른 말을 한다 — 값으로 확인한다", () => {
+    // 🔴 이 탭이 쓰는 둘만 본다. 부품 불출의 안내는 도메인에 남아 있지만(Record 가
+    // 모든 용도를 요구한다) 이 화면이 보여 줄 일은 없다.
     assert.notEqual(
       SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES.FINAL_SHIPMENT,
-      SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES[PART_ISSUE_APPROVAL_ROUTE_SCOPE]
+      SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES.QUOTE
     );
-    assert.match(
-      SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES[PART_ISSUE_APPROVAL_ROUTE_SCOPE],
-      /불출/,
-      "부품 불출의 안내가 그 용도의 일을 말하지 않는다"
-    );
+    for (const scope of EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES) {
+      assert.ok(
+        SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES[scope].trim().length > 0,
+        `${scope}: 빈 절차 안내가 비어 있다`
+      );
+    }
   });
 });
 
@@ -282,16 +326,51 @@ describe("🔴 서버 문구도 갈라졌다", () => {
 
 });
 
+describe("🔴 탭의 저장 경로도 부품 불출을 받지 않는다", () => {
+  test("서버 액션이 「고칠 수 있는 용도만」 받는 입구를 부른다", () => {
+    // 고르개에서만 치우면 안 된다 — 서버 액션은 네트워크 경계 너머에서 불리므로
+    // 손으로 만든 요청이 그대로 통과한다.
+    assert.match(
+      flat(routeActionSource),
+      /const validated = validateEditableShipmentApprovalRouteInput\(input\)/,
+      "서버 액션이 표의 용도 전부를 받는 입구를 쓰고 있다"
+    );
+  });
+
+  test("🔴 mutation 쪽 입구는 그대로 셋을 받는다 — 좁히면 사용자 삭제가 조용히 깨진다", () => {
+    // 계정을 지우면 그 사람이 올라 있던 결재선마다 새 판을 얹는데, 거기엔
+    // 'PART_ISSUE' 가 섞여 있다(db/mutations/user-deletion.ts →
+    // saveShipmentApprovalRouteInTx → validateShipmentApprovalRouteInput).
+    // 입력이 unknown 이라 **타입 검사로는 드러나지 않는다.**
+    assert.match(
+      flat(routeMutationSource),
+      /scope: ShipmentApprovalRouteScope/,
+      "mutation 의 용도 타입이 좁혀졌다 — 저장된 부품 불출 판을 이어 쓸 수 없게 된다"
+    );
+    const inputSource = read("src/lib/validation/shipment-approval-route-input.ts");
+    assert.match(
+      flat(inputSource),
+      /if \(!isShipmentApprovalRouteScope\(scope\)\)/,
+      "mutation 이 쓰는 검증이 좁혀졌다 — 사용자 삭제가 깨진다"
+    );
+  });
+});
+
 describe("서버 페이지 · 인가", () => {
-  test("🔴 용도 전부의 현재 판을 읽어 내려보낸다 — 한 용도만 읽으면 나머지는 「없음」으로 보인다", () => {
+  test("🔴 고칠 수 있는 용도 전부의 현재 판을 읽어 내려보낸다 — 한 용도만 읽으면 나머지는 「없음」으로 보인다", () => {
     assert.match(
       flat(usersPageSource),
-      /SHIPMENT_APPROVAL_ROUTE_SCOPES\.map\( async \(scope\) => \[scope, await getCurrentShipmentApprovalRoute\(scope\)\] as const \)/,
+      /EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES\.map\( async \(scope\) => \[scope, await getCurrentShipmentApprovalRoute\(scope\)\] as const \)/,
       "용도 목록을 돌며 읽는 자리가 사라졌다"
     );
     assert.ok(
       !/getCurrentShipmentApprovalRoute\("/.test(usersPageSource),
       "용도를 글자로 적었다 — 새 용도를 더할 때 이 자리가 조용히 빠진다"
+    );
+    // 🔴 넓은 목록으로 되돌아가면 부품 불출 판을 다시 읽어 HTML 에 실어 보낸다.
+    assert.ok(
+      !/\bSHIPMENT_APPROVAL_ROUTE_SCOPES\b/.test(usersPageSource),
+      "서버 페이지가 표의 용도 전부를 읽고 있다 — 부품 불출 판이 다시 내려간다"
     );
   });
 

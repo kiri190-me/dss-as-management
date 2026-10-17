@@ -1,11 +1,16 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 
-import { validateShipmentApprovalRouteInput } from "./shipment-approval-route-input";
 import {
+  validateEditableShipmentApprovalRouteInput,
+  validateShipmentApprovalRouteInput,
+} from "./shipment-approval-route-input";
+import {
+  EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES,
   MAX_SHIPMENT_APPROVAL_ROUTE_STEPS,
   SHIPMENT_APPROVAL_ROUTE_SCOPES,
 } from "@/lib/domain/shipment-approval-route";
+import { PART_ISSUE_APPROVAL_ROUTE_SCOPE } from "@/lib/domain/inventory-part-issue-rules";
 
 /**
  * ============================================================================
@@ -22,6 +27,15 @@ import {
  *     만든 절차를 되돌릴 길이 없어진다(판은 지우지 않는다).
  *  4. 🔴 **용도(scope)는 반드시 적혀 있어야 하고, 목록에 있는 값이어야 한다** —
  *     「없으면 출하」로 채워 주면 용도를 빠뜨린 요청이 조용히 출하 절차를 덮어쓴다.
+ *
+ * ── 🔴 입구가 둘이다 (2026-10-18) ───────────────────────────────────────
+ * `validateShipmentApprovalRouteInput` 은 **표에 넣을 수 있는 값 전부**를 받는다 —
+ * mutation 이 이것을 쓰고, 사용자 삭제가 지울 사람이 올라 있던 결재선마다 새 판을
+ * 얹을 때 `PART_ISSUE` 를 그대로 넘긴다.
+ * `validateEditableShipmentApprovalRouteInput` 은 **[승인 절차] 탭이 저장할 때**
+ * 쓰는 입구고, 거기서 「부품 불출」이 빠졌다. 아래에서 **둘을 따로** 시험한다 —
+ * 하나로 합치면 사용자 삭제가 조용히 깨진다(입력이 `unknown` 이라 타입 검사에
+ * 걸리지 않는다).
  * ============================================================================
  */
 
@@ -202,11 +216,98 @@ describe("validateShipmentApprovalRouteInput", () => {
     }
   });
 
+  test("🔴 「부품 불출」은 여기서 막지 않는다 — 사용자 삭제가 그 판을 이어 쓴다", () => {
+    // 계정을 지우면 그 사람이 올라 있던 결재선마다 새 판을 얹는데
+    // (db/mutations/user-deletion.ts → saveShipmentApprovalRouteInTx → 이 함수),
+    // 그 결재선에는 'PART_ISSUE' 가 섞여 있다. 여기를 좁히면 그 길이 끊어지고,
+    // 입력이 unknown 이라 **타입 검사로는 드러나지 않는다** — 실제 삭제에서야
+    // 터진다. 탭에서 들어오는 길을 막는 것은 아래 「고칠 수 있는 용도만」 쪽이다.
+    const result = validateShipmentApprovalRouteInput({
+      scope: PART_ISSUE_APPROVAL_ROUTE_SCOPE,
+      approverUserIds: [approver(1)],
+    });
+    assert.equal(result.ok, true, "사용자 삭제가 쓰는 길이 막혔다");
+  });
+
   test("🔴 용도를 승인자 목록보다 **먼저** 본다 — 둘 다 틀렸을 때 용도부터 말한다", () => {
     // 어느 절차인지 모르는 채로 「2번째 단계의 승인자를…」이라고 말하면, 사람은
     // 엉뚱한 화면에서 고칠 곳을 찾게 된다.
     const result = validateShipmentApprovalRouteInput({ scope: "NOPE", approverUserIds: "x" });
     assert.equal(result.ok, false);
     if (!result.ok) assert.match(result.message, /승인 절차/);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 [승인 절차] 탭이 저장할 때 쓰는 입구 — 「부품 불출」은 들어올 수 없다
+ * ============================================================================
+ * 2026-10-18: 재고 관리가 별도 시스템으로 떨어져 나가면서 부품 불출 결재선은
+ * 그쪽에서 돈다. A/S 의 고르개에서만 치우고 저장을 열어 두면 **손으로 만든 요청이
+ * 그대로 통과해** A/S 가 다시 덮어쓴다 — 서버 액션은 네트워크 경계 너머에서
+ * 불리므로 타입은 거기서 아무것도 막지 못한다.
+ * ============================================================================
+ */
+describe("validateEditableShipmentApprovalRouteInput", () => {
+  test("🔴 부품 불출은 거절한다", () => {
+    const result = validateEditableShipmentApprovalRouteInput({
+      scope: PART_ISSUE_APPROVAL_ROUTE_SCOPE,
+      approverUserIds: [approver(1)],
+    });
+    assert.equal(result.ok, false, "부품 불출이 탭의 저장 경로를 통과했다");
+    if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+  });
+
+  test("🔴 거절 문구가 「모르는 용도」와 같다 — 어떤 값이 있는지 알려 주지 않는다", () => {
+    const blocked = validateEditableShipmentApprovalRouteInput({
+      scope: PART_ISSUE_APPROVAL_ROUTE_SCOPE,
+      approverUserIds: [approver(1)],
+    });
+    const unknown = validateEditableShipmentApprovalRouteInput({
+      scope: "NOPE",
+      approverUserIds: [approver(1)],
+    });
+    assert.equal(blocked.ok, false);
+    assert.equal(unknown.ok, false);
+    if (!blocked.ok && !unknown.ok) assert.equal(blocked.message, unknown.message);
+  });
+
+  test("🔴 출하·견적은 그대로 통과하고 값이 그대로 돌아온다", () => {
+    for (const scope of EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES) {
+      const ids = [approver(1), approver(2)];
+      const result = validateEditableShipmentApprovalRouteInput({
+        scope,
+        approverUserIds: ids,
+      });
+      assert.equal(result.ok, true, `${scope} 가 막혔다`);
+      if (result.ok) {
+        assert.equal(result.scope, scope);
+        assert.deepEqual(result.approverUserIds, ids);
+      }
+    }
+  });
+
+  test("🔴 빈 배열은 그대로 정상이다 — 절차를 끄는 유일한 출구를 막지 않는다", () => {
+    for (const scope of EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES) {
+      const result = validateEditableShipmentApprovalRouteInput({ scope, approverUserIds: [] });
+      assert.equal(result.ok, true, `${scope}: 0개짜리 판을 막았다`);
+      if (result.ok) assert.deepEqual(result.approverUserIds, []);
+    }
+  });
+
+  test("바깥쪽 검사는 그대로 지난다 — 규칙을 다시 적지 않았다", () => {
+    const duplicated = validateEditableShipmentApprovalRouteInput({
+      scope: "FINAL_SHIPMENT",
+      approverUserIds: [approver(1), approver(1)],
+    });
+    assert.equal(duplicated.ok, false);
+    if (!duplicated.ok) assert.equal(duplicated.code, "DUPLICATE_APPROVER");
+
+    const tooMany = validateEditableShipmentApprovalRouteInput({
+      scope: "FINAL_SHIPMENT",
+      approverUserIds: approvers(MAX_SHIPMENT_APPROVAL_ROUTE_STEPS + 1),
+    });
+    assert.equal(tooMany.ok, false);
+    if (!tooMany.ok) assert.equal(tooMany.code, "TOO_MANY_STEPS");
   });
 });
