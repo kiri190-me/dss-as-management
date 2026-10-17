@@ -561,3 +561,12 @@ src/components/inventory/part-request-section-wiring.test.ts
 # 함께 쓰고 설정값을 넘기는가(페이지는 서버 컴포넌트라 원본을 글자로 읽는다) · 🔴 다섯
 # 화면이 원래 그리던 것이 그대로 있는가(이 조각은 아무것도 걷어내지 않는다).
 src/components/inventory/InventoryRetiredBanner.test.tsx
+
+# 전체 A/S 현황의 신고증상 열(표) 과 카드의 L/N·신고증상(2026-10-17). 표와 카드를 실제로
+# 그려(renderToStaticMarkup) 그려진 <th>·<td>·<dt>·<dd> 만 센다 — 원본을 글자로 읽었다면
+# 주석에 적힌 「신고증상」에 단언이 걸려 열이 사라져도 통과한다. 못 박는 것: 🔴 열 차례가
+# 「제품」 바로 다음인가 · 🔴 머리글 칸 수 = 몸통 칸 수(삭제 모드 켜고 끄고 둘 다 · 행이
+# 둘일 때도) · 🔴 정렬 단추가 안 붙는가(SortColumn 에 없다) · 🔴 긴 글이 두 줄에서 잘리고
+# 잘린 티가 나는가(line-clamp-2 + title) · 값이 없으면 "-" 이고 「없음」을 지어내지 않는가 ·
+# 🔴 카드의 Model 칸이 L/N 까지 안는가(표의 제품 셀 둘째 줄과 짝이다).
+src/components/repair-cases/repair-case-symptom-column.test.tsx

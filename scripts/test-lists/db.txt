@@ -229,6 +229,14 @@ src/lib/db/queries/customer-portal-save-form.integration.test.ts
 # "ORDER-TEST-MODEL-". legacyImportState 없이 부르므로 감사 로그·상태 이력은 안 생긴다.
 src/lib/db/queries/repair-cases-list-order.integration.test.ts
 
+# 같은 조회가 **무엇을 싣고 오는가** (2026-10-17). 표에 신고증상 열이 생기고 카드에도
+# 신고증상·L/N 이 들어오면서, 화면이 그 값을 얻는 곳은 이 조회 하나뿐이 됐다.
+# 🔴 화면 시험만으로는 못 잡는다 — 손으로 만든 줄을 그리므로 조회가 칸을 빠뜨려도
+# 전부 통과하고, 사람 눈에는 늘 빈 칸만 보인다(「값이 없는 건」과 구별되지 않아
+# 아무도 신고하지 않는다). 🔴 격리 이름: 인수 월 "9411" · 고객사
+# "AS-TEST-CUSTOMER-COLUMNS-" · 모델 "COLUMNS-TEST-MODEL-". 값은 전부 가짜다.
+src/lib/db/queries/repair-cases-list-columns.integration.test.ts
+
 # ── 종류별 공통 서류의 **가리킴** 담기·지우기 (2026-10-07) ────────────────────
 # 파일을 올리지 않고 사내 공유폴더의 자리만 적는 표. 🔴 휴지통이 없어 **감사 로그가
 # 유일한 흔적**이다 — 지우기는 PURGE 이고 previous_value 에 지워진 줄이 통째로 들어

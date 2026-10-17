@@ -31,6 +31,18 @@ type RepairCaseCardListProps = {
  * 목표 출하일이라, 같은 접수 건이 창 크기에 따라 다른 날짜를 보여 주고 있었다.
  * 표와 똑같이 실제 출하일이 비어 있어도 사내 목표 출하일로 대신 채우지 않는다
  * — 아직 출하되지 않은 건이 출하된 것처럼 보이면 안 된다.
+ *
+ * L/N 과 신고증상도 같은 까닭으로 들어왔다(2026-10-17). 표에는 둘 다 있는데
+ * 카드에만 없어서, 좁은 화면에서 보는 사람에게는 같은 건이 다른 내용으로
+ * 보이고 있었다.
+ *  · L/N 은 **Model / S/N 칸에 묶었다** — 표도 둘을 한 줄에 둔다
+ *    (RepairCaseTable 의 제품 셀 둘째 줄 `S/N … / L/N …`). 칸을 하나 더 두면
+ *    격자 칸이 일곱이 되어 마지막 줄 오른쪽에 구멍이 남는다.
+ *  · 신고증상은 문장이 들어오는 유일한 칸이라 **두 열을 가로지르는 한 칸**으로
+ *    맨 끝에 뒀다. 앞의 여섯 칸이 두 열을 꽉 채우므로 구멍 없이 한 줄이 더
+ *    붙는다(가운데에 끼우면 그 자리에서 격자가 끊긴다). 표와 같이 두 줄에서
+ *    자르고(line-clamp-2) 전체는 title 로 뜬다 — 🔴 조용히 잘리면 사람은
+ *    그게 전부인 줄 안다.
  */
 export default function RepairCaseCardList({
   rows,
@@ -90,9 +102,9 @@ export default function RepairCaseCardList({
               <dd>{row.engineerName ?? "미배정"}</dd>
             </div>
             <div>
-              <dt className="text-xs text-zinc-500 dark:text-zinc-500">Model / S/N</dt>
+              <dt className="text-xs text-zinc-500 dark:text-zinc-500">Model / S/N / L/N</dt>
               <dd>
-                {row.modelName} / {row.serialNumber}
+                {row.modelName} / {row.serialNumber} / {row.lotNumber}
               </dd>
             </div>
             <div>
@@ -106,6 +118,13 @@ export default function RepairCaseCardList({
             <div>
               <dt className="text-xs text-zinc-500 dark:text-zinc-500">실제 출하일</dt>
               <dd>{row.effectiveActualShipmentDate ?? "-"}</dd>
+            </div>
+            {/* 신고증상 — 두 열을 가로지르는 맨 끝 칸, 두 줄에서 자른다(파일 머리말). */}
+            <div className="col-span-2">
+              <dt className="text-xs text-zinc-500 dark:text-zinc-500">신고증상</dt>
+              <dd className="line-clamp-2" title={row.reportedSymptom ?? undefined}>
+                {row.reportedSymptom ?? "-"}
+              </dd>
             </div>
           </dl>
         </Link>

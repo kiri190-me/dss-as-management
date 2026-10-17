@@ -112,8 +112,8 @@ function StatusRowOverdueBadge({ isOverdue }: { isOverdue: boolean }) {
 }
 
 /**
- * Compact 8-column table for 전체 A/S 현황: 인수번호, 상태, 고객사, 제품,
- * 유·무상, 담당 엔지니어, 출하일, 상세. Every other field from the original
+ * Compact 9-column table for 전체 A/S 현황: 인수번호, 상태, 고객사, 제품,
+ * 신고증상, 유·무상, 담당 엔지니어, 출하일, 상세. Every other field from the original
  * 16-column table (인수일, End-User, 제품 구분, L/N, 우선순위, 납기
  * 지연 여부, 고객 요청 납기일) still renders, folded into a secondary line or
  * badge inside one of these cells rather than getting its own column —
@@ -130,6 +130,16 @@ function StatusRowOverdueBadge({ isOverdue }: { isOverdue: boolean }) {
  *
  * 제품 cell: line 1 (stronger) is 제품 구분(제품명 역할)/모델, line 2
  * (secondary, smaller/gray) is S/N·L/N.
+ *
+ * 신고증상 — 제품 바로 오른쪽의 독립 열(2026-10-17 요구). 🔴 정렬 대상이 아니다
+ * (SortColumn 에 없다) — 바로 옆 유·무상과 같다. 이 값으로 서버를 세우는 일은
+ * 아무도 원하지 않으므로 머리글은 누를 수 없는 글자 하나다. 긴 문장이 들어오는
+ * 유일한 칸이라 이 표에서 **whitespace-nowrap 이 아닌 유일한 셀**이다:
+ * 폭은 max-w 로 묶고(휴지통 표의 삭제 사유 칸과 같은 방식 —
+ * trash/RepairCaseTrashTable.tsx) 두 줄에서 자른다(상세의 신고증상 줄과 같은
+ * 방식 — detail/ProductInfoSection.tsx 의 HistoryLine). 🔴 잘린 것이 … 로
+ * 보이고, 전체는 title 로 뜬다 — 조용히 잘리면 사람은 그게 전부인 줄 안다.
+ * 값이 없으면 이 표의 다른 칸들과 같이 "-" 다(「없음」 같은 말을 짓지 않는다).
  *
  * 유·무상 gets its own column (2026-08-19). It used to be the third slot of
  * 제품's first line, but it is not a property of the product at all —
@@ -202,6 +212,8 @@ export default function RepairCaseTable({
               {/* 제품명(=제품 구분)/모델 (primary) + S/N·L/N (secondary) — none of these were sortable before */}
               제품
             </th>
+            {/* 신고증상 — 제품 바로 다음 자리. 정렬 대상은 아니다(SortColumn에 없다) — 파일 머리말. */}
+            <th scope="col" className={thBaseClass}>신고증상</th>
             {/* 유·무상 — 제품 셀에서 빼낸 독립 열. 정렬 대상은 아니다(SortColumn에 없다). */}
             <th scope="col" className={thBaseClass}>유·무상</th>
             <th scope="col" className={thBaseClass}>담당 엔지니어</th>
@@ -277,6 +289,12 @@ export default function RepairCaseTable({
                     S/N {row.serialNumber} / L/N {row.lotNumber}
                   </span>
                 </div>
+              </td>
+              {/* 신고증상 — 폭을 묶고 두 줄에서 자른다. 잘린 것은 …, 전체는 title(파일 머리말). */}
+              <td className="max-w-[220px] px-3 py-2">
+                <span className="line-clamp-2" title={row.reportedSymptom ?? undefined}>
+                  {row.reportedSymptom ?? "-"}
+                </span>
               </td>
               <td className="px-3 py-2 whitespace-nowrap">{row.paidOrWarranty}</td>
               <td className="px-3 py-2 whitespace-nowrap">{row.engineerName ?? "미배정"}</td>
