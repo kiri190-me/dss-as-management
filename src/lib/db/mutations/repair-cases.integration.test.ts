@@ -6,6 +6,8 @@ import { eq, and, like } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import { customers, endUsers, users, repairCases, products, repairCaseIntakeSequences } from "../schema";
 import { createRepairCase } from "./repair-cases";
+import { toKstDateOnly } from "@/lib/domain/date-only";
+import { reportNumberYearDigit } from "@/lib/domain/repair-case-report-number";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
 /**
@@ -453,43 +455,102 @@ describe("createRepairCase persists internalTargetInspectionCompletionDate (A/S 
   });
 });
 
-describe("createRepairCase persists 보고서번호 (수기 입력, 자동 채번 없음)", () => {
-  test("a typed 보고서번호 is persisted as-is", async () => {
-    const uniqueSuffix = Date.now().toString(36);
-    const input = baseInput({
-      modelName: `TG-CONC-REPNO-${uniqueSuffix}`,
-      lotNumber: `LOT-CONC-REPNO-${uniqueSuffix}`,
-      serialNumber: `SN-CONC-REPNO-${uniqueSuffix}`,
-      legacyReportNumber: `R-2026-${uniqueSuffix}`,
-    });
+/**
+ * 보고서번호 — 2026-10-18 부터 **접수할 때 자동으로 매긴다**(그 전에는 수기
+ * 전용이었다). 규칙 자체는 DB 없이 domain/repair-case-report-number.test.ts 가
+ * 못 박고, 여기서는 **DB 를 거쳐도 그대로인가**만 본다: 실제로 칸에 들어가는가 ·
+ * 연달아 접수하면 1씩 느는가 · 사람이 적어 보낸 값을 자동이 덮지 않는가.
+ */
+async function readReportNumber(id: string): Promise<string | null> {
+  const [row] = await db
+    .select({ legacyReportNumber: repairCases.legacyReportNumber })
+    .from(repairCases)
+    .where(eq(repairCases.id, id));
+  assert.ok(row, `expected repair_cases row ${id} to exist`);
+  return row!.legacyReportNumber;
+}
 
-    const result = await createRepairCase(input);
+/**
+ * 오늘 기준 앞자리. null 이면 번호를 매기지 않는 해(2030년 이후)이고, 그때는
+ * **비어 있는 것이 맞다** — 그 해가 와도 이 시험이 거짓으로 통과하거나 엉뚱하게
+ * 깨지지 않도록 두 길을 모두 적어 둔다.
+ */
+const TODAY = toKstDateOnly(new Date());
+const TODAY_YEAR_DIGIT = reportNumberYearDigit(TODAY);
+
+describe("createRepairCase 보고서번호 자동 채번", () => {
+  test("접수를 만들면 보고서번호가 실제로 칸에 들어간다", async () => {
+    const uniqueSuffix = Date.now().toString(36);
+    const result = await createRepairCase(
+      baseInput({
+        modelName: `TG-CONC-REPNO2-${uniqueSuffix}`,
+        lotNumber: `LOT-CONC-REPNO2-${uniqueSuffix}`,
+        serialNumber: `SN-CONC-REPNO2-${uniqueSuffix}`,
+      })
+    );
     assert.equal(result.ok, true, `submission failed: ${JSON.stringify(result)}`);
     if (!result.ok) return;
 
-    const [row] = await db
-      .select({ legacyReportNumber: repairCases.legacyReportNumber })
-      .from(repairCases)
-      .where(eq(repairCases.id, result.id));
-    assert.equal(row?.legacyReportNumber, `R-2026-${uniqueSuffix}`);
+    const assigned = await readReportNumber(result.id);
+    if (TODAY_YEAR_DIGIT === null) {
+      assert.equal(assigned, null, "번호를 매기지 않는 해에는 비어 있어야 한다(지어내지 않는다)");
+      return;
+    }
+    assert.match(assigned ?? "", /^[1-9][0-9]{3}$/, "네 자리 숫자여야 한다");
+    assert.equal(assigned?.[0], TODAY_YEAR_DIGIT, "앞자리는 올해(연도 − 2020)여야 한다");
   });
 
-  test("omitted 보고서번호 leaves the column NULL (nothing is auto-numbered here)", async () => {
+  test("🔴 연달아 두 건을 접수하면 보고서번호가 1씩 는다 — 같은 번호가 나오지 않는다", async () => {
     const uniqueSuffix = Date.now().toString(36);
-    const input = baseInput({
-      modelName: `TG-CONC-REPNO2-${uniqueSuffix}`,
-      lotNumber: `LOT-CONC-REPNO2-${uniqueSuffix}`,
-      serialNumber: `SN-CONC-REPNO2-${uniqueSuffix}`,
-    });
+    const first = await createRepairCase(
+      baseInput({
+        modelName: `TG-CONC-REPSEQ1-${uniqueSuffix}`,
+        lotNumber: `LOT-CONC-REPSEQ1-${uniqueSuffix}`,
+        serialNumber: `SN-CONC-REPSEQ1-${uniqueSuffix}`,
+      })
+    );
+    const second = await createRepairCase(
+      baseInput({
+        modelName: `TG-CONC-REPSEQ2-${uniqueSuffix}`,
+        lotNumber: `LOT-CONC-REPSEQ2-${uniqueSuffix}`,
+        serialNumber: `SN-CONC-REPSEQ2-${uniqueSuffix}`,
+      })
+    );
+    assert.equal(first.ok, true, `first submission failed: ${JSON.stringify(first)}`);
+    assert.equal(second.ok, true, `second submission failed: ${JSON.stringify(second)}`);
+    if (!first.ok || !second.ok) return;
 
-    const result = await createRepairCase(input);
+    const firstNumber = await readReportNumber(first.id);
+    const secondNumber = await readReportNumber(second.id);
+    if (TODAY_YEAR_DIGIT === null) {
+      assert.equal(firstNumber, null);
+      assert.equal(secondNumber, null);
+      return;
+    }
+
+    assert.notEqual(firstNumber, secondNumber, "연달아 접수한 두 건이 같은 번호를 받으면 안 된다");
+    assert.equal(
+      Number(secondNumber) - Number(firstNumber),
+      1,
+      `연달아 접수하면 1씩 늘어야 한다 (${firstNumber} → ${secondNumber})`
+    );
+  });
+
+  test("입력으로 적어 보낸 보고서번호는 그대로 들어간다 — 자동 채번이 덮지 않는다", async () => {
+    const uniqueSuffix = Date.now().toString(36);
+    // 숫자가 아닌 값이라 다음 건의 셈에도 들어가지 않는다(옛 엑셀 A열 모양).
+    const typed = `R-TEST-${uniqueSuffix}`;
+    const result = await createRepairCase(
+      baseInput({
+        modelName: `TG-CONC-REPNO-${uniqueSuffix}`,
+        lotNumber: `LOT-CONC-REPNO-${uniqueSuffix}`,
+        serialNumber: `SN-CONC-REPNO-${uniqueSuffix}`,
+        legacyReportNumber: typed,
+      })
+    );
     assert.equal(result.ok, true, `submission failed: ${JSON.stringify(result)}`);
     if (!result.ok) return;
 
-    const [row] = await db
-      .select({ legacyReportNumber: repairCases.legacyReportNumber })
-      .from(repairCases)
-      .where(eq(repairCases.id, result.id));
-    assert.equal(row?.legacyReportNumber, null);
+    assert.equal(await readReportNumber(result.id), typed);
   });
 });

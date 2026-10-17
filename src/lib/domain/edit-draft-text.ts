@@ -44,9 +44,10 @@ export const EDIT_DRAFT_LABELS: Readonly<Record<string, string>> = {
   contactName: "담당자 성함",
   contactPhone: "연락처(전화)",
   contactEmail: "연락처(이메일)",
-  // 보고서번호는 자동 채번도 형식 규칙도 없는 수기 입력값이다. 편집 지점이
-  // 상단 요약 카드(ReportNumberEditCell)일 뿐, 같은 INTAKE 섹션으로 같은
-  // 훅을 타고 저장되며 충돌도 똑같이 난다.
+  // 보고서번호는 접수할 때 자동으로 매겨지지만, 고치는 것은 형식 규칙이 없는
+  // 자유 텍스트라 사람이 손으로 친다 — 그래서 여기에 이름표가 있다. 편집
+  // 지점이 상단 요약 카드(ReportNumberEditCell)일 뿐, 같은 INTAKE 섹션으로
+  // 같은 훅을 타고 저장되며 충돌도 똑같이 난다.
   legacyReportNumber: "보고서번호",
 
   // ── 제품 정보 (PRODUCT)

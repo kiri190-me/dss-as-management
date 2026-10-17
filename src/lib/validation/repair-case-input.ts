@@ -253,9 +253,11 @@ export function validateCreateRepairCaseInput(
     fieldErrors.intakeNumber = "인수번호 형식이 올바르지 않습니다. (예: D260601)";
   }
 
-  // 보고서번호는 인수번호와 달리 자동 채번 대상이 아니다 — 형식/중복 규칙이
-  // 존재하지 않으므로 여기서도 검사하지 않는다. 다른 짧은 자유 입력 필드들과
-  // 똑같이 길이만 확인하고, 빈 값은 null로 정규화한다.
+  // 보고서번호는 인수번호와 달리 형식/중복 규칙이 없다 — 옛 번호를 그대로
+  // 옮겨 적는 칸이라 여기서도 검사하지 않고, 다른 짧은 자유 입력 필드들과
+  // 똑같이 길이만 확인한다. 빈 값을 null로 정규화하는 것이 곧 "자동으로
+  // 매겨라"는 신호다 — 자동 채번은 mutation(db/mutations/repair-cases.ts)이
+  // 트랜잭션 안에서 하고, 그렇게 매겨진 값은 이 검증을 거치지 않는다.
   const legacyReportNumber = trimToNull(input.legacyReportNumber);
   if (legacyReportNumber && legacyReportNumber.length > MAX_SHORT_TEXT) {
     fieldErrors.legacyReportNumber = "보고서번호가 너무 깁니다.";

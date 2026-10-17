@@ -12,8 +12,10 @@ import EditSectionActions, { editErrorClass, editInputClass } from "./EditSectio
  * 타므로 권한(isFieldEditable "legacyReportNumber")·버전 충돌·출하 잠금
  * 처리는 하나도 바뀌지 않는다 — 화면 위치만 옮겨온 것이다.
  *
- * 보고서번호는 자동 채번도 형식 규칙도 없는 수기 값이라, 비워서 제출하면
- * null로 지워진다(검증은 길이만 본다).
+ * 보고서번호는 접수할 때 자동으로 매겨지지만, 자동 채번은 거기서 끝이다 —
+ * 이 칸은 형식 규칙 없이 적은 값을 그대로 덮어쓰고, 비워서 제출하면 null로
+ * 지워진 채로 남는다(검증은 길이만 본다). 접수 때 번호가 매겨지지 못한 건을
+ * 사람이 채워 넣는 자리도 여기다.
  */
 export default function ReportNumberEditCell({
   repairCaseId,

@@ -9,9 +9,11 @@ export type LocalRepairCase = {
   id: string;
   intakeNumber: string;
   /**
-   * 보고서번호 — A/S 접수 폼에서 사람이 직접 적는 선택 입력값이다(인수번호와
-   * 달리 자동 채번 규칙이 없고, 형식/중복 검사도 하지 않는다). 비워두면 null.
-   * DB 모드의 repair_cases.legacy_report_number와 같은 값을 담는다.
+   * 보고서번호 — 형식/중복 검사가 없는 선택 입력값이라 비어 있으면 null이다.
+   * DB 모드의 repair_cases.legacy_report_number와 같은 값을 담지만, 그쪽의
+   * 자동 채번은 mutation(트랜잭션)에서만 일어난다 — 로컬 데모 접수 경로는
+   * 이미 사라졌으므로(local-case-storage.ts) 여기 남아 있는 레코드의 값은
+   * 전부 그때 사람이 직접 적은 것이거나 null이다.
    */
   legacyReportNumber: string | null;
   workflowType: WorkflowType;

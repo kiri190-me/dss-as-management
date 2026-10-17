@@ -1000,10 +1000,21 @@ describe("updateRepairCase", () => {
     );
   });
 
-  test("54. 보고서번호는 INTAKE 섹션에서 채우고 다시 비울 수 있다(자동 채번 없는 수기 값)", async () => {
+  /**
+   * 2026-10-18 부터 접수가 보고서번호를 **자동으로 매긴다**(createRepairCase).
+   * 이 시험이 못 박는 것은 그 뒤에도 **손으로 고치는 길이 그대로 살아 있는가**다
+   * — 자동으로 들어간 값을 사람이 다른 값으로 바꿀 수 있고, 다시 비울 수도
+   * 있어야 한다. 채번 규칙 자체는 여기서 재지 않는다(repair-cases.integration.
+   * test.ts 와 domain/repair-case-report-number.test.ts 가 본다).
+   */
+  test("54. 보고서번호는 INTAKE 섹션에서 고치고 다시 비울 수 있다(자동으로 들어간 값 위에서도)", async () => {
     const created = await createTestCase();
     const before = await fetchRow(created.id);
-    assert.equal(before.legacyReportNumber, null, "신규 접수 건은 보고서번호가 비어 있어야 한다");
+    assert.notEqual(
+      before.legacyReportNumber,
+      "R-2026-054",
+      "고쳐 넣을 값이 처음부터 들어 있으면 이 시험이 아무것도 재지 못한다"
+    );
 
     const set = await updateRepairCase(created.id, 1, "INTAKE", { legacyReportNumber: "R-2026-054" });
     assert.equal(set.ok, true, `update failed: ${JSON.stringify(set)}`);

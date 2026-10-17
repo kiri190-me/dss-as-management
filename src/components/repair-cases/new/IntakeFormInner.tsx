@@ -24,6 +24,7 @@ import { isValidDateString, isNotEarlierThan } from "@/lib/domain/local/validati
 import { nextTargetInspectionCompletionDate } from "@/lib/domain/local/draft-storage";
 import { createRepairCaseAction } from "@/lib/server/actions/create-repair-case";
 import { previewNextIntakeNumberAction } from "@/lib/server/actions/intake-number-preview";
+import { previewNextReportNumberAction } from "@/lib/server/actions/report-number-preview";
 import { findProductBySerialAction } from "@/lib/server/actions/product-by-serial";
 import type { CreateRepairCaseResultCode } from "@/lib/validation/repair-case-input";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
@@ -266,6 +267,33 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
     intakeNumberPreview && intakeNumberPreview.receivedAt === draft.receivedAt
       ? intakeNumberPreview.value
       : null;
+
+  /**
+   * "예상 보고서번호" — 위 인수번호와 **같은 방식**이다. 서버가 이미 쓰인
+   * 번호들을 읽어서만 후보를 내려주고(queries/report-number-preview.ts),
+   * 브라우저는 셈하지 않는다. 서버가 실제 채번과 **같은 함수**를 부르므로
+   * 예상값과 실제 번호가 어긋나지 않는다.
+   *
+   * 🔴 인수번호와 달리 **인수일을 따라다니지 않는다.** 보고서번호의 기준은
+   * 등록한 날(오늘)이라 어느 날짜의 답인지 담아 두고 대조할 일이 없다 — 폼을
+   * 열 때 한 번 받으면 끝이다. 없는 문제를 푸는 장치를 흉내 내지 않는다.
+   *
+   * null 이면 흐린 글씨를 아예 보이지 않는다. 번호를 매길 수 없는 때
+   * (2030년 이후 · 올해 999건 초과)가 거기 포함되므로 지어낸 번호를 약속하는
+   * 일이 없다 — 그 경우의 안내는 칸 아래 도움말 마지막 문장이 한다.
+   */
+  const [previewedReportNumber, setPreviewedReportNumber] = useState<string | null>(null);
+
+  useEffect(() => {
+    // 폼을 떠난 뒤 도착할 수 있다.
+    let cancelled = false;
+    void previewNextReportNumberAction().then((value) => {
+      if (!cancelled) setPreviewedReportNumber(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function setField<K extends keyof IntakeDraftData>(key: K, value: IntakeDraftData[K]) {
     updateDraft({ [key]: value } as Partial<IntakeDraftData>);
@@ -581,9 +609,14 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
               ref={(el) => {
                 fieldRefs.current.legacyReportNumber = el;
               }}
-              className={inputClass}
+              className={`${inputClass} placeholder:text-zinc-400 dark:placeholder:text-zinc-500`}
               value={draft.legacyReportNumber}
               onChange={(e) => setField("legacyReportNumber", e.target.value)}
+              /* 🔴 값이 아니라 placeholder 다 — 인수번호 칸과 같은 이유이자, 여기서는
+                 더 날카롭다. 미리 채워 넣으면 "사람이 적은 값"이 되어(mutation 의
+                 우선순위 ①) 자동 채번이 아예 돌지 않고, 먼저 접수한 사람과 같은
+                 번호가 그대로 굳는다. */
+              placeholder={previewedReportNumber ? `${previewedReportNumber} (예상)` : undefined}
               aria-invalid={Boolean(errors.legacyReportNumber)}
               aria-describedby={errors.legacyReportNumber ? "legacyReportNumber-error" : "legacyReportNumber-help"}
             />
@@ -591,7 +624,11 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
               <p id="legacyReportNumber-error" className={errorClass}>{errors.legacyReportNumber}</p>
             ) : (
               <p id="legacyReportNumber-help" className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                직접 입력하는 값입니다(자동 채번하지 않습니다). 비워두면 나중에 인수 정보에서 채울 수 있습니다.
+                비워두면 제출 시 서버가 올해 번호의 다음 칸으로 자동 채번합니다. 직접 입력한 값은 그대로 저장됩니다.
+                {previewedReportNumber && (
+                  <> ※ 칸에 흐리게 보이는 {previewedReportNumber} 는 예상값입니다 — 다른 접수가 먼저 등록되면 실제 번호는 달라질 수 있습니다.</>
+                )}
+                {" "}자동으로 매길 수 없는 경우에는 번호가 빈 채로 접수되고, 상세 화면 상단의 보고서번호에서 채울 수 있습니다.
               </p>
             )}
           </div>

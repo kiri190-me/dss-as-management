@@ -228,9 +228,10 @@ export type IntakeSectionUpdateFields = Partial<{
   internalTargetInspectionCompletionDate: string | null;
   customerRequestedDueDate: string | null;
   /**
-   * 보고서번호 — 자동 채번도, 형식 규칙도, 중복 검사도 없는 수기 입력값이다
-   * (인수번호와 다르다). 선택 입력이라 빈 문자열을 제출하면 null로 지워진다
-   * (연락처 필드들과 같은 원칙).
+   * 보고서번호 — 형식 규칙도 중복 검사도 없는 값이다(인수번호와 다르다).
+   * 자동 채번은 **접수할 때 한 번**뿐이고 이 수정 경로에는 없다 — 여기서
+   * 적은 값은 그대로 덮어쓰고, 빈 문자열을 제출하면 null로 지워진 채로
+   * 남는다(다시 매겨 주지 않는다 — 연락처 필드들과 같은 원칙).
    */
   legacyReportNumber: string | null;
   contactName: string | null;

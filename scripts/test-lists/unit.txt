@@ -1040,3 +1040,16 @@ src/lib/server/actions/inventory-stock-requests-source.test.ts
 # 어긋나도 그 자리에서는 아무 오류가 안 나고, 배포한 뒤 표가 통째로 비는 모양으로만
 # 드러난다 — 2026-10-17 운영 장애가 바로 그 모양이었다.
 src/lib/db/schema/customer-portal-form-id.test.ts
+
+# 보고서번호 자동 채번 규칙(2026-10-18). 🔴 번호 체계라 틀려도 그 자리에서는 아무
+# 오류가 안 나고, 몇 달 뒤 번호가 겹치거나 건너뛴 모양으로만 드러난다 — 해가 바뀌면
+# 001 부터 다시 시작하는가 · 작년 번호가 올해 셈에 섞이지 않는가 · 2030년과 999 초과는
+# 지어내지 않고 비우는가를 DB 없이 못 박는다. DB 쪽(실제로 들어가는가 · 연달아 두 건)은
+# db 목록의 repair-cases.integration.test.ts 가 본다.
+src/lib/domain/repair-case-report-number.test.ts
+
+# 접수 폼이 흐리게 보여 주는 "예상 보고서번호"의 배선(2026-10-18). 번호 규칙 자체는 위
+# 파일이 값으로 재고, 여기서 잡는 것은 어긋나는 배선이다 — 🔴 예상값이 칸의 value 로
+# 들어가면(자동 채번이 안 돈다) 화면은 멀쩡해 보이고 같은 번호가 둘 나간다 · 미리보기와
+# 실제 채번이 같은 함수·같은 좁히기·같은 기준일을 쓰는가 · 못 매길 때 지어내지 않는가.
+src/components/repair-cases/new/report-number-preview-wiring.test.ts

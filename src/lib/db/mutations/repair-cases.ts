@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, like, sql } from "drizzle-orm";
 import { db } from "../client";
 import {
   endUsers,
@@ -20,6 +20,8 @@ import { insertAuditLog } from "./audit-logs";
 import { resolveBillingWorkflowTarget } from "./billing-workflow-target";
 import { purgeAllRepairCaseFlowchartsForCase } from "./repair-case-flowcharts";
 import { formatIntakeNumber, yearMonthFromDate } from "@/lib/domain/local/intake-number";
+import { nextReportNumber, reportNumberYearDigit } from "@/lib/domain/repair-case-report-number";
+import { toKstDateOnly } from "@/lib/domain/date-only";
 import { isNotEarlierThan } from "@/lib/domain/local/validation";
 import { deriveWorkflowType, workflowKindLabels, type WorkflowKind } from "@/lib/domain/workflow-kind";
 import type { BillingType, WorkflowType } from "@/lib/domain/types";
@@ -82,13 +84,80 @@ function rollbackCreate(result: CreateRepairCaseFailure): never {
   throw new CreateRepairCaseRollback(result);
 }
 
+/**
+ * 보고서번호 자동 채번(2026-10-18 쓰는 분 결정) — **칸이 비어 있는 대화형 A/S
+ * 접수에서만** 부른다. 번호 규칙 자체(앞자리 · 순번 · 2030년 · 999 초과 ·
+ * 무엇을 세고 무엇을 빼는가)는 domain/repair-case-report-number.ts 가 DB 없이
+ * 들고 있고, 여기는 **같은 트랜잭션 안에서 읽고 바로 쓰는 일**만 한다 —
+ * 인수번호를 형식(local/intake-number.ts)과 채번(DB)으로 가른 것과 같다.
+ *
+ * 🔴 **이 칸에는 고유 제약이 없다.** 옛 엑셀 A열 값에 중복이 있을 수 있어
+ * 일부러 걸지 않은 칸이고(마이그레이션 0038), 이번에도 걸지 않는다. 그래서 DB
+ * 가 겹침을 막아 주지 않는다 — 읽기와 쓰기를 한 트랜잭션으로 묶어 창을 좁히는
+ * 것까지가 이번에 한 일이고, **동시에 두 건이 들어오면 드물게 같은 번호가 날 수
+ * 있다**(둘 다 커밋 전이라 서로가 새로 넣은 행을 보지 못한다). 그때는 사람이
+ * 상세 화면의 보고서번호 칸에서 고치면 된다. 인수번호처럼 전용 순번 표
+ * (repair_case_intake_sequences)로 완전히 막으려면 새 표가 필요하고, 그것은
+ * 스키마 변경이라 이번 범위 밖이다.
+ *
+ * 🔴 **휴지통에 간 건의 번호도 센다**(is_deleted 를 거르지 않는다) — 빼면 그
+ * 번호를 다시 쓰게 된다. 다만 휴지통에서 **영구 삭제**된 건
+ * (repair-cases-purge.ts)의 번호는 표에서 사라지므로 다시 나갈 수 있다. 이
+ * 칸만 보고는 그 이상 알 길이 없다.
+ *
+ * 🔴 **번호를 못 매겨도 접수는 성공한다.** null 을 내고 접수는 그대로 진행된다.
+ * 조용히 비면 아무도 모른 채 몇 달이 지나므로 까닭을 서버 기록에 남긴다 —
+ * 지금 구조에서 「왜 비었나」가 남는 유일한 자리다(접수 결과에는 보고서번호가
+ * 실려 가지 않는다). 사람은 상세 화면의 보고서번호 칸이 비어 있는 것을 보고
+ * 손으로 적으면 된다.
+ */
+async function allocateLegacyReportNumber(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  intakeNumber: string
+): Promise<string | null> {
+  // 기준은 **오늘(한국 날짜)**이지 인수일이 아니다. 보고서번호는 접수를 등록한
+  // 차례대로 나가는 번호이고, 「해가 바뀌면 001 부터」의 해도 등록한 해를
+  // 뜻한다 — 2026-12-30 에 받아 2027-01-02 에 등록한 건은 7001 이다. 인수번호는
+  // 반대로 인수일에서 뽑는다(아래 할당기 주석) — 일부러 다르다.
+  const today = toKstDateOnly(new Date());
+  const yearDigit = reportNumberYearDigit(today);
+
+  // 매길 수 없는 해(2030년 등)면 조회조차 하지 않는다.
+  const existing =
+    yearDigit === null
+      ? []
+      : (
+          await tx
+            .select({ value: repairCases.legacyReportNumber })
+            .from(repairCases)
+            // 올해 앞자리로 시작하는 값만 끌어온다. 네 자리인지 · 숫자인지는
+            // 순수 모듈이 다시 본다 — 좁히는 조건과 세는 조건이 갈라지면
+            // 한쪽만 고쳤을 때 조용히 어긋난다.
+            .where(like(repairCases.legacyReportNumber, `${yearDigit}%`))
+        ).map((row) => row.value);
+
+  const next = nextReportNumber(existing, today);
+  if (next.ok) return next.reportNumber;
+
+  console.warn(
+    `[repair-cases] 보고서번호를 자동으로 매기지 못했습니다(${next.reason}) — ` +
+      `인수번호 ${intakeNumber}, 기준일 ${today}. 접수는 정상 등록되었고 보고서번호만 비어 있습니다. ` +
+      (next.reason === "YEAR_OUT_OF_RANGE"
+        ? "2030년부터의 번호 규칙이 아직 정해지지 않았습니다."
+        : "올해 순번 999를 모두 사용했습니다.") +
+      " 상세 화면의 인수 정보에서 보고서번호를 직접 입력해 주세요."
+  );
+  return null;
+}
+
 export async function createRepairCase(
   input: ValidatedCreateRepairCaseInput,
   options: {
     /**
      * Excel 이관 전용 경로로 넘어오던 레거시 식별자다. 대화형 접수는 이
      * 옵션을 쓰지 않고 검증된 입력(input.legacyReportNumber)으로 같은
-     * 컬럼을 채운다 — 아래 INSERT의 우선순위 주석 참고.
+     * 컬럼을 채우며, 그마저 비어 있으면 자동으로 매긴다 — 아래 채번
+     * 우선순위 주석 참고.
      */
     legacyReportNumber?: string | null;
     legacyImportState?: {
@@ -278,6 +347,21 @@ export async function createRepairCase(
       intakeNumber = formatIntakeNumber(yy, mm, allocated.lastSequence);
     }
 
+    // 보고서번호 — ① 사람이 적어 보낸 값 ② Excel 이관 경로의 옵션 ③ 자동 채번.
+    // 🔴 **자동은 ①②가 비었을 때만**이다(손으로 적은 값을 덮지 않는다).
+    //
+    // 🔴 **과거 이관(legacyImportState)에는 자동으로 매기지 않는다.** 이관되는
+    // 줄의 보고서번호는 옛 엑셀 `목록` A열이 들고 오는 **과거** 번호이고, 비어
+    // 있는 줄에 올해 번호를 찍으면 몇 해 전 건이 올해 순번을 먹는다. 비어 있는
+    // 채로 들어가던 예전 동작 그대로 둔다.
+    //
+    // 자동 채번은 이 트랜잭션 안에서 읽고 바로 아래 INSERT 로 쓴다 —
+    // allocateLegacyReportNumber 의 주석(겹침 · 휴지통 · 못 매길 때) 참고.
+    const manualReportNumber = input.legacyReportNumber ?? options.legacyReportNumber ?? null;
+    const legacyReportNumber =
+      manualReportNumber ??
+      (options.legacyImportState ? null : await allocateLegacyReportNumber(tx, intakeNumber));
+
     // The INSERT runs inside a nested transaction (SAVEPOINT) for the same
     // reason resolveProduct() above does: Postgres aborts the *entire*
     // enclosing transaction on a statement error, so a plain try/catch
@@ -292,10 +376,8 @@ export async function createRepairCase(
           .insert(repairCases)
           .values({
             intakeNumber,
-            // 보고서번호 — 대화형 A/S 접수 폼이 수기로 받은 값이 우선이고,
-            // 값이 없을 때만 Excel 이관 경로의 옵션을 본다(두 경로가 같은
-            // 접수 건에서 동시에 값을 가지는 경우는 없다).
-            legacyReportNumber: input.legacyReportNumber ?? options.legacyReportNumber ?? null,
+            // 보고서번호 — 바로 위에서 정해진 값(수기 → 이관 옵션 → 자동 채번).
+            legacyReportNumber,
             customerId,
             endUserId,
             productId: productResult.productId,
@@ -795,8 +877,10 @@ export async function updateRepairCase(
       // 않는 순수 값 교체다.
       if ("priority" in fields) setValues.priority = fields.priority;
 
-      // 보고서번호 — 자동 채번/형식 규칙이 없는 수기 값이라 다른 값과의
-      // 정합성 검사가 없다(연락처 필드들과 같은 순수 값 교체다).
+      // 보고서번호 — 접수할 때는 자동으로 매겨지지만(allocateLegacyReportNumber),
+      // 이 수정 경로에는 자동 채번이 없다. 형식 규칙도 없어 적어 보낸 값을 그대로
+      // 넣고 다른 값과의 정합성 검사도 하지 않는다(연락처 필드들과 같은 순수 값
+      // 교체다) — 비워 보내 null이 되어도 다시 매겨 주지 않는다.
       if ("legacyReportNumber" in fields) setValues.legacyReportNumber = fields.legacyReportNumber;
 
       if ("contactName" in fields) setValues.contactNameSnapshot = fields.contactName;
