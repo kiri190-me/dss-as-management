@@ -9,9 +9,9 @@ import {
   setCustomerStatuses,
   type CustomerStatusRow,
 } from "@/lib/db/mutations/customer-portal";
-import { getCustomerNameForRepairCase } from "@/lib/db/queries/customer-portal";
+import { getPortalFormCustomerForRepairCase } from "@/lib/db/queries/customer-portal";
 import {
-  findPortalFormForCustomerName,
+  resolvePortalFormForCustomer,
   sanitizeManualValues,
 } from "@/lib/domain/customer-portal-forms";
 import {
@@ -143,18 +143,19 @@ export async function saveCustomerStatusesAction(input: {
   /*
    * 손으로 적는 칸을 거른다.
    *
-   * 🔴 양식은 **서버가 접수에서 거슬러 올라가 찾은 고객사 이름**으로 고른다.
-   * 화면이 "나는 ICD 양식이다"라고 말하게 두면 그 말이 곧 허가가 된다.
+   * 🔴 양식은 **서버가 접수에서 거슬러 올라가 읽은 고객사 줄**로 고른다 — 이름도
+   * 양식 칸도 그 줄에서 나온다. 화면이 "나는 ICD 양식이다"라고 말하게 두면 그
+   * 말이 곧 허가가 된다. 들어오는 것은 접수 id 하나뿐이다.
    *
    * 🔴 줄마다 한 번씩 묻되 **함께 쏜다.** 차례로 기다리면 줄 수만큼 왕복이
    * 쌓이고, 그 시간 동안 사람은 저장이 멈춘 줄 안다. `formValues` 를 안 보낸
    * 줄은 양식을 알 필요가 없으므로 묻지도 않는다.
    */
-  const customerNames = await Promise.all(
+  const formCustomers = await Promise.all(
     rows.map((row) =>
       row.formValues === undefined
         ? Promise.resolve(null)
-        : getCustomerNameForRepairCase(row.repairCaseId)
+        : getPortalFormCustomerForRepairCase(row.repairCaseId)
     )
   );
 
@@ -174,11 +175,19 @@ export async function saveCustomerStatusesAction(input: {
     /*
      * 양식이 없는 고객사면 적을 칸 자체가 없으므로 `undefined` 로 둔다 — `{}` 로
      * 두면 "다 지워라"가 되어, 양식이 잠깐 빠진 사이의 저장 한 번이 그 고객사의
-     * 적어 둔 값을 전부 날린다.
+     * 적어 둔 값을 전부 날린다. 접수를 못 찾아 고객사 줄이 아예 없을 때도 같다.
      */
     let formValues: Record<string, string> | undefined;
     if (row.formValues !== undefined) {
-      const form = findPortalFormForCustomerName(customerNames[index]);
+      const customer = formCustomers[index];
+      /*
+       * 🔴 「칸이 먼저, 비면 이름」을 **여기 베껴 적지 않는다.** 판정은 domain
+       * 한 곳(resolvePortalFormForCustomer)뿐이고, 표를 그리는 길
+       * (queries 의 listPortalFormGroups → groupCustomersByPortalForm)도 같은
+       * 함수를 부른다. 두 벌이 되면 언젠가 한쪽만 고쳐지고, 그때 생기는 모양이
+       * **표에는 뜨는데 적은 값만 조용히 안 들어가는** 바로 그것이다.
+       */
+      const form = customer === null ? null : resolvePortalFormForCustomer(customer);
       if (form) {
         const sanitized = sanitizeManualValues(form, row.formValues);
         if (!sanitized.ok) {

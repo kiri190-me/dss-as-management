@@ -24,8 +24,10 @@ import {
  *     (나누면 첫 저장이 올린 version 때문에 둘째가 충돌로 막힌다).
  *  4. 🔴 **안 보낸 formValues 가 있던 값을 지우지 않는다** — 양식을 모르는 다른
  *     저장 길이 이 값을 싣지 않고 온다. 지우면 아무 오류 없이 적어 둔 값이 사라진다.
- *  5. 🔴 저장할 때 **서버가 스스로 고객사를 찾아** 양식을 고른다 — 화면이 보낸
- *     이름을 믿으면 남의 양식 칸을 이 접수에 적을 수 있다.
+ *  5. 🔴 저장할 때 **서버가 스스로 고객사 줄을 찾아** 양식을 고르고, 그 판정은
+ *     보는 길과 **같은 함수**다 — 화면이 보낸 이름·양식 칸을 믿으면 남의 양식
+ *     칸을 이 접수에 적을 수 있고, 판정이 두 벌이면 **표에는 뜨는데 적은 값만
+ *     조용히 안 들어가는** 모양이 된다(2026-10-17 저장 길).
  *  6. 단추는 **양식**이고(고객사가 아니다), 지금 어느 양식을 보는지 글자로 말한다.
  *  7. 가로 스크롤을 **표를 감싼 상자가** 소유한다(표가 페이지를 밀지 않게).
  *  8. 🔴 화면 표와 엑셀이 **같은 조회**를 쓴다(2026-10-04) — 각자 모으면 담당자가
@@ -240,16 +242,55 @@ describe("🔴 4. 안 보낸 formValues 는 있던 값을 지우지 않는다", 
 describe("🔴 5. 저장할 때 양식은 서버가 고른다", () => {
   const body = flat(code(action));
 
-  test("접수에서 거슬러 올라가 고객사 이름을 읽는다 — 🔴 줄마다 한 번씩", () => {
+  test("접수에서 거슬러 올라가 고객사 줄을 읽는다 — 🔴 줄마다 한 번씩", () => {
     assert.ok(
-      body.includes("getCustomerNameForRepairCase(row.repairCaseId)"),
-      "화면이 보낸 이름을 믿으면 남의 양식 칸을 적을 수 있다"
+      body.includes("getPortalFormCustomerForRepairCase(row.repairCaseId)"),
+      "화면이 보낸 이름·양식 칸을 믿으면 남의 양식 칸을 적을 수 있다"
     );
-    assert.ok(body.includes("findPortalFormForCustomerName(customerNames[index])"));
+    assert.ok(
+      body.includes("resolvePortalFormForCustomer(customer)"),
+      "읽어 온 고객사 줄을 판정에 넘기지 않는다"
+    );
+  });
+
+  /**
+   * 🔴 2026-10-17(저장 길) — 보는 길은 C-2 에서 `portal_form_id` 를 먼저 보게
+   * 되었는데 저장 길만 이름으로 남아 있었다. 그 어긋남이 만드는 모양은 **표는
+   * 뜨는데 적은 값만 안 들어가는** 것이라, 오류도 경고도 나지 않는다.
+   *
+   * 🔴 그래서 저장 길이 **판정을 스스로 하지 않는다**는 것을 여기서 못 박는다 —
+   * 「칸이 있으면 칸, 없으면 이름」을 액션 안에 베껴 적으면 두 벌이 되고, 갈리는
+   * 날 다시 같은 모양이 된다. 값으로 도는 판정 자체는 domain 쪽 시험이 본다.
+   */
+  test("🔴 저장 길이 양식을 스스로 가리지 않는다 — 이름만 보던 길이 남아 있지 않다", () => {
+    assert.ok(
+      !body.includes("findPortalFormForCustomerName"),
+      "이름으로만 고르던 길이 남아 있다 — 칸만 채워진 고객사의 값이 조용히 안 들어간다"
+    );
+    assert.ok(
+      !body.includes("findPortalFormById"),
+      "액션이 칸을 직접 풀어 본다 — 우선순위 판정이 두 벌이 된다"
+    );
   });
 
   test("걸러 내는 문을 반드시 지난다", () => {
     assert.ok(body.includes("sanitizeManualValues(form, row.formValues)"));
+  });
+
+  /**
+   * 🔴 양식을 못 고르면 **적을 칸 자체가 없다** — `undefined` 로 둔다. `{}` 로
+   * 두면 mutation 이 "다 지워라"로 읽어(위 「4.」 묶음), 양식이 잠깐 빠진 사이의
+   * 저장 한 번이 그 고객사의 적어 둔 값을 전부 날린다. 정말 안 날아가는지는 실제
+   * DB 에서 db/queries/customer-portal-save-form.integration.test.ts 가 되읽는다.
+   */
+  test("🔴 양식을 못 고르면 빈 객체가 아니라 `undefined` 를 싣는다", () => {
+    assert.ok(
+      body.includes("let formValues: Record<string, string> | undefined;"),
+      "양식을 못 골랐을 때 「안 건드림」으로 남는 자리가 사라졌다"
+    );
+    for (const forbidden of ["formValues = {}", "formValues: {}"]) {
+      assert.ok(!body.includes(forbidden), `${forbidden} 은 적어 둔 값을 통째로 지운다`);
+    }
   });
 
   test("🔴 화면이 보낸 값이 그대로 mutation 으로 흘러가지 않는다", () => {
@@ -267,8 +308,31 @@ describe("🔴 5. 저장할 때 양식은 서버가 고른다", () => {
 
   test("조회가 고객사를 접수에서 찾는다(화면 입력이 아니다)", () => {
     assert.ok(
-      code(query).includes("export async function getCustomerNameForRepairCase"),
+      code(query).includes("export async function getPortalFormCustomerForRepairCase"),
       "그 조회가 사라졌다"
+    );
+  });
+
+  /**
+   * 🔴 인가 경계는 **칸 쪽으로도** 닫혀 있어야 한다. 양식 칸이 판정의 첫째
+   * 근거가 된 뒤로는, 그 칸을 화면이 실어 보내게 두는 순간 「나는 JUSUNG
+   * 양식이다」 한 줄로 남의 양식 칸을 이 접수에 적을 수 있게 된다. 이름과
+   * 똑같이 **서버가 DB 에서 읽은 값**이어야 한다.
+   */
+  test("🔴 양식 칸도 서버가 DB 에서 읽는다 — 화면이 실어 보낸 값이 아니다", () => {
+    const queryBody = flat(code(query));
+    // 🔴 그 함수 **안**을 본다 — 표를 그리는 쪽(listPortalFormGroups)이 같은 줄을
+    //    갖고 있어, 파일 전체로 세면 저장 길이 칸을 안 읽어도 통과한다.
+    const resolver = queryBody.slice(
+      queryBody.indexOf("export async function getPortalFormCustomerForRepairCase")
+    );
+    assert.ok(
+      resolver.includes("portalFormId: customers.portalFormId,"),
+      "접수에서 거슬러 올라가며 양식 칸을 안 읽는다 — 저장 길이 칸을 볼 수 없다"
+    );
+    assert.ok(
+      resolver.includes("eq(repairCases.id, repairCaseId)"),
+      "접수 id 로 찾지 않는다"
     );
   });
 });

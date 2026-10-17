@@ -13,6 +13,7 @@ import {
   findPortalFormById,
   groupCustomersByPortalForm,
   sortPortalRowsByReceivedAt,
+  type PortalFormCustomer,
 } from "../../domain/customer-portal-forms";
 import { foldWeeklyReportKind, type WeeklyReportKind } from "../../domain/weekly-report";
 import type { WorkflowType } from "../../domain/types";
@@ -484,32 +485,46 @@ export async function listPortalItemsForForm(
 }
 
 /**
- * 이 접수가 어느 고객사의 것인가 — **이름으로**.
+ * 이 접수가 **어느 고객사 줄의 것인가** — 양식을 가리는 데 필요한 칸들만.
  *
- * ⚠️ **저장 길은 아직 이름으로 양식을 고른다**(actions/customer-portal.ts 가 이
- * 조회를 그렇게 쓴다). 🔴 보는 길(listPortalFormGroups)은 2026-10-17 에
- * `portal_form_id` 칸을 먼저 보도록 바뀌었지만 저장 길은 그대로다 — 칸만 채워진
- * 고객사(이름이 등록부에 없는)의 손 입력 칸은 **조용히 저장되지 않는다.** 옮기는
- * 일은 이 조각(C-2)의 범위 밖이라 손대지 않았다.
- *
- * 저장할 때 "이 줄에 적어도 되는 칸이 무엇인가"를 판정하려면 그 이름이 필요한데, 🔴 그
- * 이름을 **화면이 보낸 값으로 받으면 안 된다** — 보내는 쪽이 남의 고객사
- * 이름을 대면 그 양식의 칸을 이 접수에 적을 수 있게 된다. 서버가 접수에서
+ * 저장할 때 "이 줄에 적어도 되는 칸이 무엇인가"를 판정하려면 그 고객사 줄이
+ * 필요한데, 🔴 그것을 **화면이 보낸 값으로 받으면 안 된다** — 보내는 쪽이 남의
+ * 고객사 이름을 대면 그 양식의 칸을 이 접수에 적을 수 있게 된다. 서버가 접수에서
  * 거슬러 올라가 직접 읽는다.
  *
+ * 🔴 **`portal_form_id` 도 똑같이 서버가 DB 에서 읽는다**(2026-10-17, 저장 길).
+ * 칸이 판정의 첫째 근거가 되었으므로(domain 의 resolvePortalFormForCustomer),
+ * 그 칸을 화면이 실어 보내게 두면 위 인가 경계가 **칸 쪽으로 그대로 뚫린다** —
+ * 「나는 JUSUNG 양식이다」 한 줄로 남의 양식 칸을 이 접수에 적게 된다. 이름이든
+ * 칸이든 **들어오는 것은 접수 id 하나뿐**이고 나머지는 전부 이 조회가 읽는다.
+ *
+ * ⚠️ 그래서 이름만 내던 getCustomerNameForRepairCase 가 **이 함수로 바뀌었다**
+ * (2026-10-17). 이름만 돌려주면 저장 길이 칸을 볼 길이 없어, 칸만 채워진
+ * 고객사(이름이 등록부에 없는)의 손 입력 칸이 **아무 오류 없이 안 들어갔다** —
+ * 보는 길은 C-2 에서 이미 칸을 보고 표를 그리고 있었으므로, 사람에게는 「적었는데
+ * 왜 안 들어가지」로만 보였다.
+ *
+ * 🔴 **판정은 여기서 하지 않는다.** 읽은 줄을 그대로 내고, 어느 양식인가는
+ * domain 한 곳(resolvePortalFormForCustomer)이 정한다 — 여기서 한 벌 더 적으면
+ * 보는 길과 저장 길의 우선순위가 갈린다.
+ *
  * 지워진 고객사도 그대로 돌려준다. 접수는 남아 있고, 그 접수를 고치는 일이
- * 고객사가 지워졌다는 이유로 막힐 까닭이 없다.
+ * 고객사가 지워졌다는 이유로 막힐 까닭이 없다(그래서 `is_deleted` 를 보지 않는다).
  */
-export async function getCustomerNameForRepairCase(
+export async function getPortalFormCustomerForRepairCase(
   repairCaseId: string
-): Promise<string | null> {
+): Promise<PortalFormCustomer | null> {
   const [row] = await db
-    .select({ name: customers.name })
+    .select({
+      id: customers.id,
+      name: customers.name,
+      portalFormId: customers.portalFormId,
+    })
     .from(repairCases)
     .innerJoin(customers, eq(repairCases.customerId, customers.id))
     .where(eq(repairCases.id, repairCaseId))
     .limit(1);
-  return row?.name ?? null;
+  return row ?? null;
 }
 
 /** 드롭다운에 뜨는 상태 목록. 비활성은 빠진다. */

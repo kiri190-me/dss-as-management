@@ -204,6 +204,23 @@ src/lib/server/services/intake-kind-common-files.integration.test.ts
 # 이름 "PORTAL-SAVE-TEST-". 디스크에는 아무것도 쓰지 않는다.
 src/lib/db/mutations/customer-portal.integration.test.ts
 
+# ── 저장 길이 **어느 양식으로** 적는가 (2026-10-17) ──────────────────────────
+# 표를 그리는 길은 C-2 에서 `customers.portal_form_id` 를 먼저 보게 됐는데 저장
+# 길만 이름으로 남아 있었다. 그 어긋남의 모양은 **표는 뜨는데 적은 값만 조용히 안
+# 들어가는** 것이라 오류가 어디에도 안 난다. 🔴 재는 것: 이름이 등록부에 하나도
+# 없고 **칸만** 채워진 고객사의 손 입력 값이 진짜로 DB 에 들어간다(그 이름이 이름
+# 으로는 안 걸린다는 울타리를 함께 둔다) · 칸이 비고 이름만 맞아도 그대로 저장된다
+# (안전망) · 🔴 칸에 등록부에 없는 값이 있으면 양식 없음이고 저장 값이 `undefined`
+# 라 적어 둔 값이 **안 날아간다**(`{}` 면 통째로 지워진다) · 조회가 이름과 칸을 DB
+# 에서 읽은 그대로 내고 **지워진 고객사도** 돌려준다.
+# 액션을 직접 못 부른다(세션 관문) — 끼운 자리는
+# components/customer-portal/customer-portal-form-view.test.ts 의 「5.」가 글자로 지킨다.
+# 🔴 격리 이름: 접수 월 "9208" · 고객사 "AS-TEST-PORTAL-FORM-" · 제품 모델
+# "PORTAL-FORM-TEST-". 🔴 고객사 한 줄만 등록부의 옛 이름(`JUSUNG`)을 그대로 쓴다
+# — 안전망이 재는 것이 그 이름이다. 그래서 뒷정리는 이름이 아니라 **만든 id 로만**
+# 한다. 디스크에는 아무것도 쓰지 않는다.
+src/lib/db/queries/customer-portal-save-form.integration.test.ts
+
 # ── 전체 A/S 현황의 기본 차례 — 인수번호 내림차순 (2026-10-07 사용자 지시) ─────
 # 재는 것은 listRepairCases() 가 돌려주는 **차례** 하나다. 🔴 같은 달 안에서 접수일과
 # 번호 발급 차례를 일부러 어긋나게 만든 자료를 쓴다 — 달이 갈리면 두 차례가 우연히
