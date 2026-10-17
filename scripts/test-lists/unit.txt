@@ -1034,3 +1034,9 @@ src/lib/domain/quote-intake-parts.test.ts
 # 불러 볼 수 없어 원본 글자를 읽는다 — 포털 번호를 세션에서 꺼내는가 · 그 열쇠가 이 수리
 # 건의 것인지 확인한 **뒤에** 거두러 가는가 · 권한을 액션이 직접 묻는가.
 src/lib/server/actions/inventory-stock-requests-source.test.ts
+
+# 0116 — 고객사에 「어느 양식인가」 칸을 더하고 아는 이름으로 채운다(2026-10-17).
+# 🔴 코드의 customerNames 와 마이그레이션이 채우는 열한 개 이름이 어긋나는지를 잰다.
+# 어긋나도 그 자리에서는 아무 오류가 안 나고, 배포한 뒤 표가 통째로 비는 모양으로만
+# 드러난다 — 2026-10-17 운영 장애가 바로 그 모양이었다.
+src/lib/db/schema/customer-portal-form-id.test.ts
