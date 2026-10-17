@@ -217,6 +217,30 @@ describe("🔴 고객사를 이름으로 가린다", () => {
     assert.equal(findPortalFormForCustomerName("주성 엔지니어링")?.id, "JUSUNG");
   });
 
+  /**
+   * 🔴 2026-10-17 운영 장애. 쓰는 분이 화면에서 고객사 세 곳의 이름을 정식 상호로
+   * 바꾸자 위 2026-09-30 실측 이름이 운영에 **하나도 남지 않게** 되었고, 「고객
+   * 안내 현황」이 「양식이 정해진 고객사가 없습니다.」 만 띄웠다. 글자는 운영에서
+   * 읽은 그대로다 — 셋 다 공백이 없고 `(주)` 의 자리가 회사마다 다르다.
+   */
+  test("🔴 2026-10-17 에 바뀐 정식 상호가 걸린다(운영 실측)", () => {
+    assert.equal(findPortalFormForCustomerName("(주)아이씨디")?.id, "ICD");
+    assert.equal(findPortalFormForCustomerName("인베니아(주)")?.id, "INVENIA");
+    assert.equal(findPortalFormForCustomerName("주성엔지니어링(주)")?.id, "JUSUNG");
+  });
+
+  test("🔴 한 이름이 두 양식에 들어가 있지 않다 — 겹치면 배열 차례가 표를 정한다", () => {
+    const seen = new Map<string, string>();
+    for (const form of CUSTOMER_PORTAL_FORMS) {
+      for (const name of form.customerNames) {
+        const normalized = name.trim().replace(/\s+/g, " ").toLowerCase();
+        const owner = seen.get(normalized);
+        assert.equal(owner, undefined, `${name} 이 ${owner} 와 ${form.id} 양쪽에 있다`);
+        seen.set(normalized, form.id);
+      }
+    }
+  });
+
   test("DB 의 유일 색인과 같은 정규화 — 앞뒤 공백 · 연속 공백 · 대소문자", () => {
     assert.equal(findPortalFormForCustomerName("  jusung  ")?.id, "JUSUNG");
     assert.equal(findPortalFormForCustomerName("주성   엔지니어링")?.id, "JUSUNG");
@@ -473,6 +497,31 @@ describe("🔴 양식으로 고객사 묶기", () => {
   test("하나도 안 묶이면 빈 목록이다", () => {
     assert.deepEqual(groupCustomersByPortalForm([]), []);
     assert.deepEqual(groupCustomersByPortalForm([{ id: "x", name: "어디 회사" }]), []);
+  });
+
+  /**
+   * 🔴 2026-10-17 운영 장애를 그대로 재현한다.
+   *
+   * 운영의 `customers` 에서 지워지지 않은 줄이 **이 셋뿐**이다. 코드가 옛 이름만
+   * 알던 동안 이 입력은 빈 배열을 냈고, 화면은 「양식이 정해진 고객사가 없습니다.」
+   * 만 띄웠다 — 표 셋이 통째로 사라졌는데 오류는 아무 데도 나지 않았다. 이 절이
+   * 있었다면 배포 전에 잡혔다. 🔴 **빈 배열이 아닌지**가 이 시험의 핵심이다.
+   */
+  test("🔴 운영에 남은 세 이름만으로도 양식 셋이 모두 선다(2026-10-17 장애 재현)", () => {
+    const groups = groupCustomersByPortalForm([
+      { id: "c-icd", name: "(주)아이씨디" },
+      { id: "c-inv", name: "인베니아(주)" },
+      { id: "c-jusung", name: "주성엔지니어링(주)" },
+    ]);
+    assert.deepEqual(
+      groups.map((group) => group.form.id),
+      ["ICD", "INVENIA", "JUSUNG"],
+      "양식이 붙지 않는다 — 「양식이 정해진 고객사가 없습니다.」 가 다시 뜬다"
+    );
+    assert.deepEqual(
+      groups.map((group) => group.customerIds),
+      [["c-icd"], ["c-inv"], ["c-jusung"]]
+    );
   });
 });
 
