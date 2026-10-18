@@ -111,6 +111,9 @@ export async function transitionWorkflow(
           message: "유·무상을 확정한 후 워크플로를 진행할 수 있습니다.",
         };
       }
+      // 🔴 이 잠금을 **푸는 길은 이 파일 아래 revertShipmentCompletion 하나뿐**
+      // 이다(2026-10-18). 여기를 느슨하게 만들지 말 것 — 그러면 출하 완료 뒤에
+      // 막혀야 하는 다른 전이들까지 함께 열린다.
       if (current.isLocked) {
         return {
           ok: false,
@@ -403,4 +406,258 @@ export async function transitionWorkflow(
     }
     throw err;
   }
+}
+
+/**
+ * ============================================================================
+ * 출하 완료 되돌리기 — `is_locked` 를 **푸는 하나뿐인 길** (2026-10-18)
+ * ============================================================================
+ * 위 transitionWorkflow 는 SHIPMENT_COMPLETED 에서 `is_locked = true` 를 찍고,
+ * 그다음부터 **모든 전이를 그 잠금으로 막는다**(CASE_LOCKED). 그래서 그 함수로는
+ * 출하 완료를 되돌릴 수 없다 — 되돌리기 전이를 아무리 잘 적어도 잠금 검사가
+ * 먼저 걸린다. 이 함수가 생기기 전까지 저장소 전체에 `is_locked` 를 false 로
+ * 되돌리는 코드가 **한 줄도 없었다.**
+ *
+ * 🔴 **위 함수를 고쳐 풀지 않았다.** 잠금 검사를 느슨하게 만들면 출하 완료 뒤에
+ * 금지된 다른 전이들(보류·단계 직접 변경·되돌리기)까지 함께 열린다. 여는 문은
+ * 하나여야 하고, 그 문이 여기다.
+ *
+ * ── 누가 쓰는가 ─────────────────────────────────────────────────────────
+ * 지금은 내자 정리 [완료 해제] 하나다
+ * (server/services/release-domestic-order.ts). 수리 건 상세 화면에는 되돌리기
+ * 단추가 없다 — 2026-10-18 요청 범위 밖이다.
+ *
+ * ── 되돌아갈 단계를 **DB 에서 찾는다** ──────────────────────────────────
+ * 단계 key 를 글자로 박지 않는다. 워크플로마다 출하 완료 **직전** 단계가 다르다
+ * (실측: 매쳐 둘은 `waiting_shipment`, 제너레이터·토탈컨트롤러 넷은
+ * `shipment_approved`). 그 건의 workflow_version_id 안에서 **지금 단계로
+ * 들어오는 SHIPMENT_COMPLETED 전이**를 찾아 그 `from_step` 으로 돌아간다 —
+ * 나갈 때 쓴 문으로 그대로 되돌아오는 셈이라, 전이표가 바뀌면 되돌아갈 자리도
+ * 함께 따라간다. 못 찾으면 거부한다(지어내지 않는다).
+ *
+ * ── 역할 검사도 **그 전이의 것을 그대로 쓴다** ──────────────────────────
+ * 🔵 「출하 완료를 누를 수 있는 사람이 되돌릴 수도 있다」가 규칙이다. 새 역할
+ * 표를 만들지 않고 찾아낸 전이를 그대로 checkTransitionEligibility 에 넘긴다 —
+ * 위 transitionWorkflow 가 정규 전이에서 쓰는 바로 그 함수다. 2026-10-18
+ * 마이그레이션 0117 로 담당 엔지니어·영업이 그 목록에 들어갔으므로, 그 둘이
+ * 되돌리기도 할 수 있다. 전이표를 고치면 양쪽이 함께 움직인다.
+ *
+ * ── 실제 출하일을 **지운다** ────────────────────────────────────────────
+ * 🔵 「출하 완료인가」는 워크플로 단계와 `actual_shipment_date` **둘 중
+ * 하나**로 판정된다(domain/types.ts). 날짜를 남겨 두면 단계만 되돌아가고 다른
+ * 화면에서는 **여전히 출하된 것으로 읽히는** 건이 남는다. 내자 정리 목록의
+ * `납품일` 이 바로 그 값이다(queries/domestic-orders.ts).
+ *
+ * ── 이력은 STEP_RETURNED 로 남긴다 ──────────────────────────────────────
+ * 🔴 새 action_type 값을 만들지 않았다. 그 칸은 enum 이라 값을 늘리려면
+ * 마이그레이션이 필요하고, 뜻이 맞는 값이 이미 있다(단계를 뒤로 옮겼다). 대신
+ * **평범한 되돌리기와 갈라야** 하므로 `metadata` 에 표시를 남긴다 — 그 칸은
+ * 스키마 주석이 "richer shipment-completion detail" 용으로 비워 둔 자리다.
+ * `reason` 은 부르는 쪽이 준 문장이 그대로 들어간다.
+ *
+ * ── 승인은 **자동으로 다시 받아야 한다** ────────────────────────────────
+ * 🔴 되돌리면 version 이 오른다. 최종 출하 승인은 `repair_case_version_at_request`
+ * 로 그 건의 version 에 묶여 있으므로(위 transitionWorkflow 의 승인 검사),
+ * 되돌린 뒤 다시 출하 완료를 하려면 **수리 검수 승인부터 다시** 받아야 한다.
+ * 이 함수가 승인 행을 건드려 그 일을 대신하지는 않는다 — 승인이 version 에
+ * 묶여 있다는 기존 규칙이 그대로 작용할 뿐이다.
+ * ============================================================================
+ */
+export type RevertShipmentCompletionResultCode =
+  | "NOT_FOUND"
+  | "CONFLICT"
+  | "FORBIDDEN"
+  | "INVALID_TRANSITION"
+  /** 지금 출하 완료 상태가 아니다 — 되돌릴 것이 없다. */
+  | "NOT_SHIPMENT_COMPLETED";
+
+export type RevertShipmentCompletionResult =
+  | { ok: true; id: string; version: number; currentWorkflowStepKey: string }
+  | { ok: false; code: RevertShipmentCompletionResultCode; message: string };
+
+/**
+ * 이력(status_change_histories.metadata)에 박히는 표시.
+ *
+ * 🔴 이력을 읽는 사람이 **평범한 단계 되돌리기와 가르는 열쇠**다. action_type
+ * 은 둘 다 STEP_RETURNED 라 그것만으로는 구분되지 않는다. 글자를 비교하는
+ * 대신 이 상수를 가져다 쓴다.
+ */
+export const SHIPMENT_COMPLETION_REVERT_METADATA = {
+  revertedShipmentCompletion: true,
+} as const;
+
+/**
+ * 보류 상태를 읽는다(사건 기록에서 되살린다 — 전용 칼럼이 없다).
+ *
+ * ⚠️ 위 transitionWorkflow 가 제 본문에 **같은 읽기**를 갖고 있다. 이번 조각은
+ * 그 함수를 한 글자도 건드리지 않기로 한 범위라 합치지 않았다 — 합칠 때는 둘을
+ * 함께 본다.
+ */
+async function readHoldStateForRevert(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  repairCaseId: string
+): Promise<HoldState> {
+  const [latestHold] = await tx
+    .select({ actionType: statusChangeHistories.actionType })
+    .from(statusChangeHistories)
+    .where(
+      and(
+        eq(statusChangeHistories.repairCaseId, repairCaseId),
+        inArray(statusChangeHistories.actionType, ["HOLD_STARTED", "HOLD_RELEASED"])
+      )
+    )
+    .orderBy(desc(statusChangeHistories.createdAt))
+    .limit(1);
+  return {
+    isOnHold: latestHold?.actionType === "HOLD_STARTED",
+    reason: null,
+    startedByUserId: null,
+    startedByNameSnapshot: null,
+    startedAt: null,
+  };
+}
+
+export async function revertShipmentCompletion(
+  repairCaseId: string,
+  expectedVersion: number,
+  actorUserId: string,
+  /** 이력에 남을 사유. 부르는 쪽이 어디서 비롯된 일인지 적어 넘긴다. */
+  reason: string
+): Promise<RevertShipmentCompletionResult> {
+  return db.transaction(async (tx): Promise<RevertShipmentCompletionResult> => {
+    // ── 1 · 행 잠금으로 읽는다 ────────────────────────────────────────────
+    // 조인 없이 이 표만 읽는다 — 조인한 채 FOR UPDATE 를 걸면 모든 워크플로가
+    // 함께 쓰는 workflow_steps 행까지 잠근다(단계·상태는 아래 규칙에서 꺼낸다).
+    const [current] = await tx
+      .select({
+        id: repairCases.id,
+        version: repairCases.version,
+        isLocked: repairCases.isLocked,
+        assignedEngineerId: repairCases.assignedEngineerId,
+        workflowVersionId: repairCases.workflowVersionId,
+        currentWorkflowStepId: repairCases.currentWorkflowStepId,
+      })
+      .from(repairCases)
+      .where(and(eq(repairCases.id, repairCaseId), eq(repairCases.isDeleted, false)))
+      .for("update");
+
+    if (!current) {
+      return { ok: false, code: "NOT_FOUND", message: "해당 접수 건을 찾을 수 없습니다." };
+    }
+
+    const rules = await loadWorkflowRules(tx, current.workflowVersionId);
+    if (!rules) {
+      return {
+        ok: false,
+        code: "INVALID_TRANSITION",
+        message: "이 접수 건의 워크플로 규칙을 확인할 수 없습니다.",
+      };
+    }
+
+    // ── 2 · 지금 출하 완료 상태인가 ──────────────────────────────────────
+    // 🔴 단계 key 를 글자로 비교하지 않는다 — workflow_steps.repair_status 로
+    // 본다. 내자 줄이 같은 판정을 할 때 쓰는 기준과 같다
+    // (queries/domestic-orders.ts 의 getDomesticOrderShipmentLink).
+    const currentStep = rules.steps.find((step) => step.id === current.currentWorkflowStepId);
+    if (!currentStep || currentStep.status !== "SHIPMENT_COMPLETED") {
+      return {
+        ok: false,
+        code: "NOT_SHIPMENT_COMPLETED",
+        message: "출하 완료 상태인 접수 건만 되돌릴 수 있습니다.",
+      };
+    }
+
+    // ── 3 · 낙관적 잠금 ──────────────────────────────────────────────────
+    if (current.version !== expectedVersion) {
+      return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
+    }
+
+    // ── 4 · 되돌아갈 단계를 전이표에서 찾는다(위 머리말) ──────────────────
+    const shipmentTransition = rules.transitions.find(
+      (transition) =>
+        transition.actionCode === "SHIPMENT_COMPLETED" && transition.toStepKey === currentStep.key
+    );
+    if (!shipmentTransition) {
+      return {
+        ok: false,
+        code: "INVALID_TRANSITION",
+        message: "이 접수 건의 워크플로에서 출하 완료 직전 단계를 찾을 수 없습니다.",
+      };
+    }
+    const toStep = rules.stepByKey.get(shipmentTransition.fromStepKey);
+    if (!toStep) {
+      return { ok: false, code: "INVALID_TRANSITION", message: "되돌릴 단계를 확인할 수 없습니다." };
+    }
+
+    // ── 5 · 역할 검사 — 찾아낸 그 전이의 허용 역할 그대로 ─────────────────
+    const [actor] = await tx
+      .select({
+        id: users.id,
+        name: users.name,
+        role: users.role,
+        approvalStatus: users.approvalStatus,
+        isDeveloper: users.isDeveloper,
+      })
+      .from(users)
+      .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
+    if (!actor) {
+      return { ok: false, code: "FORBIDDEN", message: "사용자 정보를 확인할 수 없습니다." };
+    }
+    const actingUser: ActingUser = actor;
+
+    const holdState = await readHoldStateForRevert(tx, repairCaseId);
+    const eligibility = checkTransitionEligibility(
+      shipmentTransition,
+      actingUser,
+      current.assignedEngineerId,
+      holdState
+    );
+    if (!eligibility.allowed) {
+      return { ok: false, code: "FORBIDDEN", message: eligibility.reason };
+    }
+
+    // ── 6 · 되돌린다 ─────────────────────────────────────────────────────
+    // 🔴 **갱신이 먼저, 이력이 나중이다.** 위 transitionWorkflow 와 차례가
+    // 반대인 데에는 까닭이 있다: 트랜잭션 콜백에서 `return` 하면 그 트랜잭션은
+    // **커밋된다.** 이력을 먼저 넣어 두고 아래에서 CONFLICT 를 반환하면 아무
+    // 일도 없었던 건에 이력 한 줄만 남는다(그래서 그쪽은 던져서 되돌린다).
+    // 이 차례면 0행일 때 그냥 반환해도 쓴 것이 없고, 이력 삽입이 실패하면
+    // 갱신까지 함께 롤백된다 — "이력은 성공했을 때만 남는다"가 양방향으로
+    // 지켜진다.
+    const [updated] = await tx
+      .update(repairCases)
+      .set({
+        currentWorkflowStepId: toStep.id,
+        isLocked: false,
+        // 🔴 날짜도 지운다(위 머리말 '실제 출하일을 지운다').
+        actualShipmentDate: null,
+        version: sql`${repairCases.version} + 1`,
+        updatedAt: sql`now()`,
+      })
+      .where(and(eq(repairCases.id, repairCaseId), eq(repairCases.version, expectedVersion)))
+      .returning({ id: repairCases.id, version: repairCases.version });
+
+    if (!updated) {
+      // 행 잠금을 쥐고 version 까지 대조한 뒤라 정상 경로로는 오지 않는다.
+      return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
+    }
+
+    await tx.insert(statusChangeHistories).values({
+      repairCaseId,
+      workflowVersionId: current.workflowVersionId,
+      fromStepId: current.currentWorkflowStepId,
+      toStepId: toStep.id,
+      actionType: "STEP_RETURNED",
+      actorUserId: actor.id,
+      reason,
+      metadata: SHIPMENT_COMPLETION_REVERT_METADATA,
+    });
+
+    return {
+      ok: true,
+      id: updated.id,
+      version: updated.version,
+      currentWorkflowStepKey: toStep.key,
+    };
+  });
 }

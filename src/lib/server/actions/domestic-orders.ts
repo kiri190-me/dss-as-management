@@ -10,11 +10,10 @@ import {
   isValidExpectedVersion,
   validateDomesticOrderFields,
 } from "@/lib/validation/domestic-order-input";
-import {
-  createDomesticOrder,
-  setDomesticOrderCompletion,
-  updateDomesticOrder,
-} from "@/lib/db/mutations/domestic-orders";
+// setDomesticOrderCompletion 은 여기서 직접 부르지 않는다 — 완료 처리·완료
+// 해제 둘 다 서비스를 거치고(아래 두 import), 그 서비스가 마지막 한 걸음으로
+// 이 mutation 을 부른다.
+import { createDomesticOrder, updateDomesticOrder } from "@/lib/db/mutations/domestic-orders";
 import {
   permanentlyDeleteDomesticOrder,
   restoreDomesticOrder,
@@ -22,6 +21,7 @@ import {
   type DomesticOrderTrashResult,
 } from "@/lib/db/mutations/domestic-orders-trash";
 import { completeDomesticOrderWithShipment } from "@/lib/server/services/complete-domestic-order";
+import { releaseDomesticOrderWithShipment } from "@/lib/server/services/release-domestic-order";
 import { saveDomesticOrderSheetHeading } from "@/lib/db/mutations/domestic-order-sheet-settings";
 import { saveRepairCaseDomesticOrderIssueDates } from "@/lib/db/mutations/domestic-order-issue-dates";
 import { normalizeDomesticOrderIssueDateInput } from "@/lib/domain/domestic-order-issue-date-edit";
@@ -185,23 +185,30 @@ export async function updateDomesticOrderAction(input: {
  * 완료는 누른 그 자리에서 다시 눌러 되돌릴 수 있는 조작이고, 값이 사라지지도
  * 않는다. 되돌릴 수 없는 조작(삭제 등)이 생기면 그때 별도의 수준을 논한다.
  *
- * ── 🔴 완료 처리는 수리 건까지 함께 움직인다 (2026-10-18) ───────────────
+ * ── 🔴 완료 처리도 완료 해제도 수리 건까지 함께 움직인다 (2026-10-18) ───
  * completed === true 는 **서비스**로 보낸다
  * (server/services/complete-domestic-order.ts). 거기서 붙어 있는 수리 건을
  * 먼저 출하 완료로 넘기고, 넘어간 뒤에만 내자 줄을 완료한다 — 차례와 그
  * 까닭은 그 파일 머리말에 있다. 이 액션이 하는 일은 그대로다: 세션 → 인가 →
  * 형식 검증 → 오류 가리기.
  *
- * **완료 해제(false)는 예전 그대로** mutation 을 곧장 부른다. 수리 건의
- * 출하 완료를 되돌리는 일은 이번 결정에 들어 있지 않다.
+ * completed === false 도 **거울 서비스**로 보낸다
+ * (server/services/release-domestic-order.ts). 붙어 있는 수리 건이 출하
+ * 완료 상태면 그것부터 되돌리고, 되돌아간 뒤에만 내자 줄의 완료 표시를 푼다.
+ * 🔴 되돌리기는 transitionWorkflow 가 하지 못한다(잠금이 모든 전이를 막는다)
+ * — 전용 mutation 이 한다(mutations/workflow-transitions.ts 의
+ * revertShipmentCompletion).
  */
 export type DomesticOrderCompletionActionResultCode =
   | DomesticOrderActionResultCode
   /**
-   * 붙어 있는 수리 건을 출하 완료로 넘기지 못해 **내자 줄도 완료되지 않았다.**
-   * 화면은 이 코드를 보고 "읽고 닫아야 하는 알림"(NoticePopup)을 띄운다 —
-   * 승인이 남았다거나 역할이 모자라다는 말은 줄 위 빨간 글씨 한 줄로는 놓치기
-   * 쉽고, 무엇보다 **내자 줄도 안 됐다**는 사실을 함께 전해야 한다.
+   * 붙어 있는 수리 건의 출하 완료 상태를 바꾸지 못해 **내자 줄도 그대로다.**
+   * 두 방향이 같은 코드를 쓴다 — 완료 처리에서는 "넘기지 못했다", 완료 해제
+   * 에서는 "되돌리지 못했다"이고, 어느 쪽인지는 화면이 이미 안다(지금 누른
+   * 단추가 무엇인지). 화면은 이 코드를 보고 "읽고 닫아야 하는
+   * 알림"(NoticePopup)을 띄운다 — 승인이 남았다거나 역할이 모자라다는 말은
+   * 줄 위 빨간 글씨 한 줄로는 놓치기 쉽고, 무엇보다 **내자 줄도 안 됐다**는
+   * 사실을 함께 전해야 한다.
    */
   | "SHIPMENT_COMPLETION_BLOCKED";
 
@@ -212,6 +219,8 @@ export type DomesticOrderCompletionActionResult =
       version: number;
       /** 이번 누름으로 수리 건까지 함께 출하 완료됐는가(화면의 성공 문구가 갈린다). */
       repairCaseShipmentCompleted: boolean;
+      /** 이번 누름으로 수리 건의 출하 완료까지 되돌렸는가(완료 해제 쪽 문구가 갈린다). */
+      repairCaseShipmentReverted: boolean;
     }
   | {
       ok: false;
@@ -256,22 +265,36 @@ export async function setDomesticOrderCompletionAction(input: {
 
   try {
     if (!input.completed) {
-      // 완료 해제 — 예전 그대로 내자 줄만 푼다(위 머리말).
-      const released = await setDomesticOrderCompletion({
+      // 완료 해제 — 붙어 있는 수리 건의 출하 완료를 **먼저** 되돌린다(위 머리말).
+      const released = await releaseDomesticOrderWithShipment({
         id: input.id,
         expectedVersion: input.expectedVersion,
-        completed: false,
         actorUserId: auth.actingUser.id,
       });
       return released.ok
-        ? { ok: true, id: released.id, version: released.version, repairCaseShipmentCompleted: false }
+        ? {
+            ok: true,
+            id: released.id,
+            version: released.version,
+            repairCaseShipmentCompleted: false,
+            repairCaseShipmentReverted: released.repairCaseShipmentReverted,
+          }
         : { ok: false, code: released.code, message: released.message };
     }
-    return await completeDomesticOrderWithShipment({
+    const completed = await completeDomesticOrderWithShipment({
       id: input.id,
       expectedVersion: input.expectedVersion,
       actorUserId: auth.actingUser.id,
     });
+    return completed.ok
+      ? {
+          ok: true,
+          id: completed.id,
+          version: completed.version,
+          repairCaseShipmentCompleted: completed.repairCaseShipmentCompleted,
+          repairCaseShipmentReverted: false,
+        }
+      : { ok: false, code: completed.code, message: completed.message };
   } catch (err) {
     console.error("setDomesticOrderCompletionAction: unexpected DB error", err);
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };

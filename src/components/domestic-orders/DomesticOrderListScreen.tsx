@@ -69,6 +69,7 @@ import {
   type DomesticOrderSheetHeadingFieldErrors,
   type SheetIndentLevel,
 } from "@/lib/domain/domestic-order-sheet-heading";
+import DomesticOrderCompletionReleaseDialog from "./DomesticOrderCompletionReleaseDialog";
 import DomesticOrderEditForm, { type QuoteOption } from "./DomesticOrderEditForm";
 import DomesticOrderTextCell from "./DomesticOrderTextCell";
 import DomesticOrderDueDatesCell from "./DomesticOrderDueDatesCell";
@@ -1376,17 +1377,26 @@ function IntakeNumberLink({ row }: { row: DomesticOrderListItem }) {
  * `<td>` 안에 산다. 팝업이 거기서 태어나면 칸의 CSS(가운데·오른쪽 정렬 등)를
  * 그대로 물려받아 글이 한쪽으로 쏠린다.
  *
- * **[완료 해제]는 예전 그대로다** — 내자 줄만 푼다.
+ * ── 🔴 [완료 해제]는 **여기서 아무것도 보내지 않는다** (2026-10-18) ──────
+ * 해제도 수리 건의 출하 완료를 함께 되돌리는 조작이 되었다
+ * (server/services/release-domestic-order.ts). 한 번의 클릭으로 그 일이
+ * 일어나면 안 된다는 것이 사용자 요청이라, 이 단추는 **확인 창을 열어 달라고
+ * 부모에게 알릴 뿐**이고(onRequestRelease) 실제 요청은 부모가 보낸다. 창과
+ * 전송 중 상태를 부모가 소유하는 까닭도 같다 — 창을 이 `<td>` 안에서 그리면
+ * 칸의 CSS 를 물려받는다(위와 같은 이유).
  */
 function CompletionToggle({
   row,
   onError,
   onBlocked,
+  onRequestRelease,
 }: {
   row: DomesticOrderListItem;
   onError: (message: string | null) => void;
   /** 출하 완료가 막혀 아무것도 저장되지 않았다 — 서버가 돌려준 까닭 한 줄. */
   onBlocked: (reason: string) => void;
+  /** [완료 해제]를 눌렀다. 보내지 않고 **확인 창을 열어 달라**는 뜻이다. */
+  onRequestRelease: (row: DomesticOrderListItem) => void;
 }) {
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
@@ -1395,13 +1405,20 @@ function CompletionToggle({
   async function toggle(event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
     if (isPending) return;
+    if (completed) {
+      // 🔴 해제는 묻고 나서 한다. 여기서는 창만 연다.
+      onError(null);
+      onRequestRelease(row);
+      return;
+    }
     setIsPending(true);
     onError(null);
     try {
+      // 여기까지 오는 것은 [완료 처리] 하나뿐이다(해제는 위에서 돌아갔다).
       const result = await setDomesticOrderCompletionAction({
         id: row.id,
         expectedVersion: row.version,
-        completed: !completed,
+        completed: true,
       });
       if (!result.ok) {
         if (result.code === "SHIPMENT_COMPLETION_BLOCKED") {
@@ -1413,11 +1430,9 @@ function CompletionToggle({
       }
       router.refresh();
       showSavePopup({
-        message: completed
-          ? "완료 표시를 풀었습니다."
-          : result.repairCaseShipmentCompleted
-            ? "완료로 표시하고, 연결된 수리 건도 출하 완료로 처리했습니다."
-            : "완료로 표시했습니다.",
+        message: result.repairCaseShipmentCompleted
+          ? "완료로 표시하고, 연결된 수리 건도 출하 완료로 처리했습니다."
+          : "완료로 표시했습니다.",
         redirectTo: null,
       });
     } finally {
@@ -1788,6 +1803,59 @@ export default function DomesticOrderListScreen({
    * 적었다 — 표 칸 안에서 팝업을 그리면 칸의 CSS 를 물려받는다.
    */
   const [shipmentBlockedReason, setShipmentBlockedReason] = useState<string | null>(null);
+  /**
+   * 되돌리기가 막혀 **아무것도 저장되지 않았을 때**의 까닭 한 줄(2026-10-18).
+   * 위 완료 처리 쪽과 **상태를 나눈 이유**는 팝업의 글이 다르기 때문이다 —
+   * 서버가 쓰는 코드는 하나지만(SHIPMENT_COMPLETION_BLOCKED), 사람에게 할 말은
+   * "완료 처리가 안 됐다"와 "완료 해제가 안 됐다"로 갈린다. 둘은 동시에 뜨지
+   * 않는다(한 번에 한 단추만 누른다).
+   */
+  const [revertBlockedReason, setRevertBlockedReason] = useState<string | null>(null);
+  /**
+   * [완료 해제] 확인 창이 묻고 있는 줄(null 이면 창이 닫혀 있다). 🔴 한 번의
+   * 클릭으로 해제되지 않게 하는 장치다 — 단추는 이 상태를 세우기만 하고, 실제
+   * 요청은 아래 releaseCompletion 이 보낸다(CompletionToggle 머리말).
+   */
+  const [releaseTarget, setReleaseTarget] = useState<DomesticOrderListItem | null>(null);
+  const [isReleasing, setIsReleasing] = useState(false);
+  const router = useRouter();
+
+  /**
+   * 확인 창에서 [완료 해제]를 눌렀다. 성공 문구가 **두 갈래**다 — 수리 건의
+   * 출하 완료까지 되돌렸는가(서버가 알려 준다), 아니면 이 줄의 표시만 풀렸는가.
+   */
+  async function releaseCompletion() {
+    if (releaseTarget === null || isReleasing) return;
+    setIsReleasing(true);
+    setCompletionError(null);
+    try {
+      const result = await setDomesticOrderCompletionAction({
+        id: releaseTarget.id,
+        expectedVersion: releaseTarget.version,
+        completed: false,
+      });
+      // 결과가 무엇이든 창은 닫는다 — 막힌 까닭은 팝업이, 그 밖의 실패는 목록
+      // 위 빨간 줄이 말한다(완료 처리 쪽과 같은 두 길을 그대로 쓴다).
+      setReleaseTarget(null);
+      if (!result.ok) {
+        if (result.code === "SHIPMENT_COMPLETION_BLOCKED") {
+          setRevertBlockedReason(result.message);
+          return;
+        }
+        setCompletionError(result.message);
+        return;
+      }
+      router.refresh();
+      showSavePopup({
+        message: result.repairCaseShipmentReverted
+          ? "완료 표시를 풀고, 연결된 수리 건의 출하 완료도 되돌렸습니다."
+          : "완료 표시를 풀었습니다.",
+        redirectTo: null,
+      });
+    } finally {
+      setIsReleasing(false);
+    }
+  }
 
   const years = useMemo(() => collectDomesticOrderYears(rows), [rows]);
   /**
@@ -2133,6 +2201,35 @@ export default function DomesticOrderListScreen({
         />
       )}
 
+      {/* 🔴 되돌리기가 막혀 **내자 줄까지 그대로**인 경우(2026-10-18). 위
+          완료 처리 쪽과 같은 길을 그대로 타되 글만 해제 상황으로 바꾼다 —
+          여기서도 "내자 줄도 안 풀렸다"를 함께 전해야 한다. */}
+      {revertBlockedReason !== null && (
+        <NoticePopup
+          title="완료 해제를 하지 못했습니다"
+          lines={[
+            "이 줄에 연결된 수리 건의 출하 완료를 되돌리지 못했습니다.",
+            revertBlockedReason,
+            "그래서 내자 정리의 완료 표시도 그대로입니다. 수리 건 쪽을 먼저 확인한 뒤 [완료 해제]를 다시 눌러 주세요.",
+          ]}
+          onClose={() => setRevertBlockedReason(null)}
+        />
+      )}
+
+      {/* 🔴 한 번의 클릭으로 완료 해제가 되지 않게 하는 확인 창. 표 칸이 아니라
+          여기서 그린다 — 칸 안에서 태어나면 칸의 정렬 CSS 를 물려받는다(위
+          NoticePopup 과 같은 자리·같은 까닭). */}
+      <DomesticOrderCompletionReleaseDialog
+        isOpen={releaseTarget !== null}
+        intakeNumber={releaseTarget?.displayIntakeNumber ?? null}
+        hasLinkedRepairCase={releaseTarget?.repairCaseId != null}
+        isSubmitting={isReleasing}
+        onConfirm={releaseCompletion}
+        onCancel={() => {
+          if (!isReleasing) setReleaseTarget(null);
+        }}
+      />
+
       {rows.length === 0 ? (
         <div className="rounded-lg border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
           등록된 내자 정리 항목이 없습니다.
@@ -2288,6 +2385,7 @@ export default function DomesticOrderListScreen({
                                 row={row}
                                 onError={setCompletionError}
                                 onBlocked={setShipmentBlockedReason}
+                                onRequestRelease={setReleaseTarget}
                               />
                             )}
                           </span>
@@ -2602,6 +2700,7 @@ export default function DomesticOrderListScreen({
                                   row={row}
                                   onError={setCompletionError}
                                   onBlocked={setShipmentBlockedReason}
+                                  onRequestRelease={setReleaseTarget}
                                 />
                               )}
                             </span>

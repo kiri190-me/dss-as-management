@@ -281,3 +281,16 @@ src/lib/db/mutations/attachment-purge.integration.test.ts
 # 완료 해제는 이 파일을 거치지 않는다. 인가는 서버 액션의 몫이라 여기서 안 본다.
 # 🔴 격리 이름: 접수 월 "9311" · 제품 모델 "DOSHIP-TEST-" · 고객사 "AS-TEST-DOSHIP-".
 src/lib/server/services/complete-domestic-order.integration.test.ts
+
+# ── 내자 [완료 해제] 한 번이 수리 건의 출하 완료까지 되돌리는가 (2026-10-18) ──
+# 위 [완료 처리]의 거울이다. 🔴 되돌리는 길이 없어서 전용 mutation 을 새로 만들었다
+# (mutations/workflow-transitions.ts 의 revertShipmentCompletion) — 출하 완료가
+# is_locked 를 찍고 그 잠금이 모든 전이를 막아 transitionWorkflow 로는 못 푼다.
+# 여섯을 못 박는다: 🔴 안 붙은 줄은 내자만 해제 · 🔴 출하 완료가 아니면 건너뛰고
+# 수리 건을 **건드리지 않는다**(version·이력 둘 다 그대로) · 🔴 되돌아간 결과 셋을
+# 전부 읽는다(직전 단계 · is_locked=false · actual_shipment_date=NULL) · 🔴 **되돌린
+# 뒤 다시 출하 완료가 된다**(잠금이 풀렸다는 증거 — 바로 다음 시도는 CASE_LOCKED 가
+# 아니라 APPROVAL_STALE 이고, 승인을 다시 받으면 그대로 나간다) · 🔴 막히면 내자 줄의
+# completed_at 이 **그대로 남는다** · 🔴 이력은 STEP_RETURNED 에 metadata 표시로 갈린다.
+# 🔴 격리 이름: 접수 월 "9312" · 제품 모델 "DOREL-TEST-" · 고객사 "AS-TEST-DOREL-".
+src/lib/server/services/release-domestic-order.integration.test.ts
