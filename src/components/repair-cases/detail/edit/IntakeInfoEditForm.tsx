@@ -51,6 +51,17 @@ function ReadOnlyField({
  * 지점이다(고장 및 서비스 정보의 편집 폼에는 더 이상 없다) — 둘 다 선택
  * 입력이라 비우면 null로 저장된다.
  *
+ * 실제 출하일(actualShipmentDate)도 이제 이 폼에서 고칠 수 있다 — 다만
+ * **조건부**다. 워크플로의 출하 완료 처리가 그 순간의 날짜를 박기 때문에,
+ * 물건이 나간 날과 버튼을 누른 날이 어긋나면 틀린 날짜가 남는다. 그것을
+ * 바로잡는 칸이다. 그래서 두 조건을 **둘 다** 만족할 때만 입력칸이 선다:
+ * (1) 이 역할이 그 칸을 고칠 수 있고(canEdit), (2) 이 건에 이미 날짜가
+ * 적혀 있을 때(= 이미 출하 완료된 건). 아직 출하 전인 건은 읽기 전용으로
+ * 남는다 — 권한만 보고 빈 입력칸을 세우면 사람이 거기 날짜를 적어 저장할
+ * 수 있고, 서버는 그것을 거부한다(화면이 할 수 있다고 해 놓고 서버가 막는
+ * 꼴이 된다). 같은 이유로 제출부도 "값이 원래 있었을 때만" 보낸다. 비우는
+ * 길은 없다(사내 목표 출하일과 다른 점이다).
+ *
  * 우선순위(priority) — 인수 정보 priority-editing 체크포인트부터 이 폼이
  * 유일한 정상 편집 지점이다. domain/types.ts의 PRIORITY_CODES/priorityLabels
  * 를 그대로 재사용하며(새 enum을 정의하지 않는다), 일정 필드들(고객 요청
@@ -109,6 +120,12 @@ export default function IntakeInfoEditForm({
   const [endUserId, setEndUserId] = useState<string | null>(resolved.endUserId);
   const [endUserCreateNew, setEndUserCreateNew] = useState(false);
   const [receivedAt, setReceivedAt] = useState(resolved.receivedAt);
+  // 아직 출하 전인 건은 빈 문자열로 시작하지만, 그때는 아래 입력칸 자체가
+  // 서지 않는다(파일 머리말의 두 조건) — 이 값이 제출되는 일도 없다.
+  const [actualShipmentDate, setActualShipmentDate] = useState(resolved.actualShipmentDate ?? "");
+  /** 이미 출하 완료된 건인가 — 서버가 보는 것과 같은 판정(저장된 값의 유무)이다. */
+  const isShipped = resolved.actualShipmentDate !== null;
+  const canEditActualShipmentDate = canEdit("actualShipmentDate") && isShipped;
   // "선택 안 함"(빈 문자열)은 "제출하지 않음"이다 — 이 셀렉트에는 저장된
   // 값을 다시 null로 되돌리는 옵션이 없다(제품 정보의 종류 재배정과 같은
   // 원칙: 명시적으로 고른 값만 제출한다).
@@ -233,6 +250,8 @@ export default function IntakeInfoEditForm({
       fields.internalTargetShipmentDate = internalTargetShipmentDate || null;
     }
     if (canEdit("priority")) fields.priority = priority;
+    // 출하 전인 건은 보내지 않는다 — 빈 문자열을 보내면 서버가 거부한다.
+    if (canEditActualShipmentDate) fields.actualShipmentDate = actualShipmentDate;
     if (canEdit("contactName")) fields.contactName = contactName || null;
     if (canEdit("contactPhone")) fields.contactPhone = contactPhone || null;
     if (canEdit("contactEmail")) fields.contactEmail = contactEmail || null;
@@ -474,7 +493,25 @@ export default function IntakeInfoEditForm({
           <ReadOnlyField label="우선순위" value={uiText.priority[resolved.priority]} />
         )}
 
-        <ReadOnlyField label="실제 출하일" value={resolved.actualShipmentDate ?? "-"} />
+        {/* 두 조건을 둘 다 봐야 한다(파일 머리말) — 권한이 있어도 아직 출하
+            전인 건이면 읽기 전용으로 남는다. */}
+        {canEditActualShipmentDate ? (
+          <div>
+            <label className={editLabelClass}>실제 출하일</label>
+            <input
+              type="date"
+              className={editInputClass}
+              value={actualShipmentDate}
+              disabled={disabled}
+              onChange={(e) => setActualShipmentDate(e.target.value)}
+            />
+            {fieldErrors.actualShipmentDate && (
+              <p className={editErrorClass}>{fieldErrors.actualShipmentDate}</p>
+            )}
+          </div>
+        ) : (
+          <ReadOnlyField label="실제 출하일" value={resolved.actualShipmentDate ?? "-"} />
+        )}
 
         {canEdit("contactName") && (
           <div>

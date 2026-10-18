@@ -59,6 +59,11 @@ test("AS_ENGINEER may edit customer/End-User (checkpoint: AS_ENGINEER customer/E
       "billingType",
       "internalTargetInspectionCompletionDate",
       "internalTargetShipmentDate",
+      // 실제 출하일 — 출하 완료 처리를 누르는 역할이라 어긋난 날짜를 자기
+      // 손으로 바로잡을 수 있다(SALES에는 주지 않았다). 여기 있다고 아무
+      // 건에나 적을 수 있는 것은 아니다 — "이미 출하 완료된 건만"은 역할과
+      // 무관한 조건이라 updateRepairCase가 DB 값을 보고 따로 막는다.
+      "actualShipmentDate",
       // 보고서번호 — 접수 폼에서 이 역할이 직접 적는 값이라 접수 후 수정
       // 권한도 함께 준다(SALES에는 주지 않았다).
       "legacyReportNumber",
@@ -288,4 +293,35 @@ test("보고서번호는 SUPER_ADMIN/ADMIN/AS_ENGINEER만 수정할 수 있다",
     ok: false,
     unauthorizedFields: ["legacyReportNumber"],
   });
+});
+
+/**
+ * 실제 출하일은 출하 완료 처리가 박아 놓고 아무도 못 고치던 값이었다. 물건이
+ * 나간 날과 버튼을 누른 날이 어긋나면 틀린 날짜가 영구히 남으므로, 출하 완료
+ * 처리를 실제로 누르는 역할(담당 엔지니어)에게 바로잡을 권한을 열었다.
+ *
+ * 다섯 역할을 전부 적는다 — 참만 세는 시험은 표가 통째로 넓어지는 실수를
+ * 잡지 못한다. SALES 가 거짓인 것이 이 시험의 핵심이다(출하는 영업의 업무가
+ * 아니다).
+ *
+ * ⚠️ 여기서 참이라고 아무 건에나 적을 수 있다는 뜻은 아니다 — "이미 출하
+ * 완료된 건만"은 역할이 아니라 DB에 저장된 값이 정하는 조건이라 이 표가 아니라
+ * updateRepairCase 가 막는다(repair-cases-update.integration.test.ts 55~58).
+ */
+test("실제 출하일은 SUPER_ADMIN/ADMIN/AS_ENGINEER만 수정할 수 있다 — SALES는 아니다", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const) {
+    assert.equal(isFieldEditable(role, "actualShipmentDate"), true, `${role} 은 실제 출하일을 고칠 수 있다`);
+  }
+  assert.equal(isFieldEditable("SALES", "actualShipmentDate"), false);
+  assert.equal(isFieldEditable("INVENTORY_MANAGER", "actualShipmentDate"), false);
+
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const) {
+    assert.deepEqual(authorizeSubmittedFields(role, "INTAKE", ["actualShipmentDate"]), { ok: true });
+  }
+  for (const role of ["SALES", "INVENTORY_MANAGER"] as const) {
+    assert.deepEqual(authorizeSubmittedFields(role, "INTAKE", ["actualShipmentDate"]), {
+      ok: false,
+      unauthorizedFields: ["actualShipmentDate"],
+    });
+  }
 });

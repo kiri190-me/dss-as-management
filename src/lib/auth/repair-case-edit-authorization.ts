@@ -51,6 +51,15 @@ const AS_ENGINEER_FIELDS: readonly string[] = [
   // 없다는 앞뒤 검증은 역할과 무관하게 updateRepairCase(db/mutations/
   // repair-cases.ts)가 그대로 막는다.
   "receivedAt",
+  // 실제 출하일 — 출하 완료 처리를 실제로 누르는 사람이 담당 엔지니어이므로,
+  // 물건이 나간 날과 버튼을 누른 날이 어긋났을 때 자기 손으로 바로잡을 수
+  // 있어야 한다(인수일·보고서번호를 연 것과 같은 까닭이다). SALES에는 넣지
+  // 않았다 — 출하는 영업의 업무가 아니고, 영업은 이 날짜가 맞는지 확인할
+  // 위치에 있지 않다. INVENTORY_MANAGER는 지금도 아무 칸도 못 고치므로
+  // 그대로다. "이미 출하 완료된 건인가"(값이 이미 있는가)는 역할과 무관한
+  // 조건이라 여기가 아니라 updateRepairCase(db/mutations/repair-cases.ts)가
+  // DB 값을 보고 판정한다 — SUPER_ADMIN/ADMIN도 출하 전인 건에는 못 적는다.
+  "actualShipmentDate",
   // 보고서번호 — A/S 접수 폼에서 이 역할이 직접 적어 넣는 값이므로(접수
   // 등록 권한이 있다), 접수 후 자기 오기입을 고칠 수 있어야 한다. SALES에는
   // 넣지 않았다(보고서를 작성하는 역할이 아니다). 실제 편집 UI는 상세 화면

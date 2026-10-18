@@ -169,6 +169,22 @@ async function createTestCase(overrides: Partial<ValidatedCreateRepairCaseInput>
   return result;
 }
 
+/**
+ * 이미 **출하 완료된** 접수 건을 만든다 — 워크플로를 끝까지 돌리는 대신
+ * actual_shipment_date 칸만 직접 UPDATE 한다(domestic-orders.integration.
+ * test.ts 가 같은 방식을 쓴다). 이 파일이 재는 것은 updateRepairCase 의 판정
+ * (출하 완료된 건인가 · 비울 수 있는가 · 인수일보다 이른가)이지 출하 완료
+ * 처리 자체가 아니다 — 그쪽은 workflow-transitions 가 책임지며 이번 변경이
+ * 손대지 않았다.
+ *
+ * version 칸은 건드리지 않으므로 이 뒤에도 기대 버전은 그대로 1 이다.
+ */
+async function createShippedTestCase(shipmentDate: string = TEST_SHIPMENT_DATE) {
+  const created = await createTestCase();
+  await db.update(repairCases).set({ actualShipmentDate: shipmentDate }).where(eq(repairCases.id, created.id));
+  return created;
+}
+
 async function fetchRow(id: string) {
   const [row] = await db.select().from(repairCases).where(eq(repairCases.id, id));
   assert.ok(row, `expected repair_cases row ${id} to exist`);
@@ -1024,5 +1040,78 @@ describe("updateRepairCase", () => {
     const cleared = await updateRepairCase(created.id, set.version, "INTAKE", { legacyReportNumber: null });
     assert.equal(cleared.ok, true, `clear failed: ${JSON.stringify(cleared)}`);
     assert.equal((await fetchRow(created.id)).legacyReportNumber, null);
+  });
+
+  // ------------------------------- 실제 출하일 바로잡기 (이미 출하 완료된 건만)
+
+  /**
+   * 실제 출하일은 출하 완료 버튼을 누른 **그 순간의 날짜**가 자동으로 박히고
+   * 그 뒤로는 아무도 못 고치던 값이었다 — 물건이 어제 나갔는데 오늘 처리하면
+   * 틀린 날짜가 영구히 남았다. 2026-10-18 부터 INTAKE 섹션으로 바로잡을 수
+   * 있다. 아래 네 시험이 그 경계 전부다: 고칠 수 있는가 · 출하 전인 건에
+   * 새로 적을 수는 없는가 · 인수일보다 이를 수 없는가 · 비울 수 없는가.
+   *
+   * 누가 고칠 수 있는가(역할)는 여기 없다 — 순수 로직이라
+   * repair-case-edit-authorization.test.ts 가 본다(파일 머리말의 계층 구분).
+   */
+  test("55. 이미 출하 완료된 건의 실제 출하일은 INTAKE 섹션에서 고칠 수 있다", async () => {
+    const created = await createShippedTestCase();
+    const before = await fetchRow(created.id);
+    assert.equal(before.actualShipmentDate, TEST_SHIPMENT_DATE, "setup: 출하 완료된 건이라야 이 시험이 뜻을 가진다");
+
+    // 물건이 이틀 먼저 나갔던 것을 바로잡는다.
+    const corrected = "2099-03-18";
+    const result = await updateRepairCase(created.id, before.version, "INTAKE", { actualShipmentDate: corrected });
+    assert.equal(result.ok, true, `update failed: ${JSON.stringify(result)}`);
+
+    const row = await fetchRow(created.id);
+    assert.equal(row.actualShipmentDate, corrected, "DB 에 실제로 바뀐 값이 남아야 한다");
+  });
+
+  test("56. 아직 출하 전인 건(actual_shipment_date 가 NULL)에는 실제 출하일을 적을 수 없다", async () => {
+    const created = await createTestCase();
+    const before = await fetchRow(created.id);
+    assert.equal(before.actualShipmentDate, null, "setup: 접수 직후에는 출하일이 없다");
+
+    const result = await updateRepairCase(created.id, 1, "INTAKE", { actualShipmentDate: "2099-03-18" });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "VALIDATION_ERROR");
+      assert.ok(result.fieldErrors?.actualShipmentDate);
+    }
+
+    const row = await fetchRow(created.id);
+    assert.equal(row.actualShipmentDate, null, "거부됐으니 NULL 그대로여야 한다 — 출하 완료 처리만 이 값을 처음 적는다");
+    assert.equal(row.version, before.version, "거부된 요청은 버전도 올리지 않는다");
+  });
+
+  test("57. 실제 출하일이 인수일보다 이르면 거부된다(이미 출하 완료된 건이어도)", async () => {
+    const created = await createShippedTestCase();
+
+    const result = await updateRepairCase(created.id, 1, "INTAKE", { actualShipmentDate: "2099-03-01" });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "VALIDATION_ERROR");
+      assert.ok(result.fieldErrors?.actualShipmentDate);
+    }
+
+    const row = await fetchRow(created.id);
+    assert.equal(row.actualShipmentDate, TEST_SHIPMENT_DATE, "거부됐으니 원래 값 그대로다");
+  });
+
+  test("58. 실제 출하일은 비워서 지울 수 없다(null 도 빈 문자열도) — 다른 선택 입력 날짜들과 다른 점", async () => {
+    for (const blank of [null, ""] as const) {
+      const created = await createShippedTestCase();
+
+      const result = await updateRepairCase(created.id, 1, "INTAKE", { actualShipmentDate: blank });
+      assert.equal(result.ok, false, `${JSON.stringify(blank)} 는 거부돼야 한다`);
+      if (!result.ok) {
+        assert.equal(result.code, "VALIDATION_ERROR");
+        assert.ok(result.fieldErrors?.actualShipmentDate);
+      }
+
+      const row = await fetchRow(created.id);
+      assert.equal(row.actualShipmentDate, TEST_SHIPMENT_DATE, "출하 완료인데 날짜가 없는 상태를 만들 수 없다");
+    }
   });
 });

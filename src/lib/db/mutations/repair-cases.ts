@@ -691,9 +691,21 @@ async function resolveTargetWorkflowVersionAndStep(
  * explicitly below, nothing is spread.
  *
  * intakeNumber, workflowVersionId, currentWorkflowStepId, exceptionStatusId,
- * isLocked, actualShipmentDate, delayReason are never referenced anywhere
- * in this function — they cannot be changed through this action no matter
- * what the caller submits, because no section's field list includes them.
+ * isLocked, delayReason are never referenced anywhere in this function —
+ * they cannot be changed through this action no matter what the caller
+ * submits, because no section's field list includes them.
+ *
+ * actualShipmentDate(실제 출하일)는 2026-10-18부터 예외다 — INTAKE 섹션
+ * 필드 목록에 들어갔고 아래에서 조건부로 고칠 수 있다. 다만 다른 칸들처럼
+ * 자유롭게 바뀌지 않는다. 세 가지 규칙이 전부 이 함수 안에 있다:
+ *   1. **이미 출하 완료된 건만** — 저장된 actual_shipment_date가 NULL이면
+ *      거부한다. 날짜를 처음 적어 넣는 일은 워크플로의 출하 완료 처리
+ *      (workflow-transitions.ts)만 할 수 있다. 이 경로는 **이미 일어난 일의
+ *      날짜를 바로잡는 것**뿐이다.
+ *   2. **비울 수 없다** — 형식 검증이 required 날짜로 받으므로(repair-case-
+ *      update-input.ts의 normalizeRequiredDate) 빈 값/null은 여기까지 오지
+ *      못하며, 혹시 와도 아래에서 거부한다.
+ *   3. **인수일보다 이를 수 없다** — 다른 날짜 칸들과 같은 선후 검증이다.
  */
 export async function updateRepairCase(
   repairCaseId: string,
@@ -717,6 +729,9 @@ export async function updateRepairCase(
         endUserId: repairCases.endUserId,
         receivedAt: repairCases.receivedAt,
         customerRequestedDueDate: repairCases.customerRequestedDueDate,
+        // 실제 출하일 — 값 자체가 "이미 출하 완료된 건인가"의 판정 근거다
+        // (NULL이면 아직 출하 전이라 이 경로로는 적을 수 없다).
+        actualShipmentDate: repairCases.actualShipmentDate,
         productId: repairCases.productId,
         currentWorkflowStepId: repairCases.currentWorkflowStepId,
         // 유·무상 변경 시 대상 워크플로를 해석하려면 현재 버전 id가 필요하다.
@@ -870,6 +885,43 @@ export async function updateRepairCase(
           };
         }
         setValues.internalTargetInspectionCompletionDate = target;
+      }
+
+      // 실제 출하일 — 위 세 날짜 칸과 달리 **현재 저장된 값**이 먼저 조건이다
+      // (함수 머리말 참조). 셋을 차례로 본다: 출하 완료된 건인가 → 비우려는
+      // 것은 아닌가 → 인수일보다 이르지 않은가.
+      if ("actualShipmentDate" in fields) {
+        const shipped = fields.actualShipmentDate;
+        if (!current.actualShipmentDate) {
+          return {
+            ok: false,
+            code: "VALIDATION_ERROR",
+            fieldErrors: {
+              actualShipmentDate: "아직 출하 완료되지 않은 건입니다. 실제 출하일은 출하 완료 처리로 적힙니다.",
+            },
+            message: "입력값을 확인해 주세요.",
+          };
+        }
+        // 빈 문자열도 "지우려는 것"으로 본다 — 선후 검증에 그냥 흘려보내면
+        // ""는 어떤 날짜보다도 작아서 "인수일보다 이전일 수 없습니다"로
+        // 거부되는데, 사람이 읽기에 까닭이 엉뚱하다.
+        if (shipped === null || shipped === "") {
+          return {
+            ok: false,
+            code: "VALIDATION_ERROR",
+            fieldErrors: { actualShipmentDate: "실제 출하일은 비울 수 없습니다." },
+            message: "입력값을 확인해 주세요.",
+          };
+        }
+        if (!isNotEarlierThan(shipped, effectiveReceivedAt)) {
+          return {
+            ok: false,
+            code: "VALIDATION_ERROR",
+            fieldErrors: { actualShipmentDate: "실제 출하일은 인수일보다 이전일 수 없습니다." },
+            message: "입력값을 확인해 주세요.",
+          };
+        }
+        setValues.actualShipmentDate = shipped;
       }
 
       // 우선순위 — NOT NULL 컬럼이라 다른 날짜 필드처럼 인수일과의 선후 관계

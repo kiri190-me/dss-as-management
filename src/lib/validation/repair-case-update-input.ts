@@ -40,6 +40,14 @@ export const SECTION_FIELD_NAMES = {
     // 섹션이 단독 소관이다(고장 및 서비스 정보에는 더 이상 없다).
     "internalTargetInspectionCompletionDate",
     "internalTargetShipmentDate",
+    // 실제 출하일 — 원래 이 목록에 없었다(워크플로의 출하 완료 처리가 그
+    // 순간의 날짜를 자동으로 박고 끝이었다). 물건이 나간 날과 버튼을 누른 날이
+    // 다르면 틀린 날짜가 영구히 남으므로, **이미 출하 완료된 건에 한해** 그
+    // 날짜를 바로잡을 수 있게 열었다. 출하 전(값이 null)인 건에 이 칸으로
+    // 날짜를 새로 적어 넣을 수는 없고 비울 수도 없다 — 그 두 가지 조건은 DB에
+    // 저장된 현재 값을 봐야 알 수 있으므로 updateRepairCase(db/mutations/
+    // repair-cases.ts)가 판정한다. 여기서는 형식만 본다.
+    "actualShipmentDate",
     // 보고서번호 — A/S 접수 폼에서 수기로 받는 값이며, 접수 이후에는 상단
     // 요약 카드의 ReportNumberEditCell이 이 섹션으로 제출해 고친다(담당
     // 엔지니어가 FAULT_SERVICE 섹션으로 제출하는 것과 같은 구조). 인수 정보
@@ -201,6 +209,14 @@ export type IntakeSectionUpdateFields = Partial<{
   newEndUserName: string;
   receivedAt: string;
   /**
+   * 실제 출하일 — 다른 선택 입력 날짜들(고객 요청 납기일/사내 목표 출하일)과
+   * 달리 `string | null`이 아니라 `string`이다. 비워서 지울 수 없기 때문이다
+   * (출하 완료인데 날짜가 없으면 앞뒤가 안 맞는다) — 인수일과 같은 모양이고
+   * 같은 normalizeRequiredDate를 쓴다. "이미 출하 완료된 건인가"는 DB에 저장된
+   * 현재 값을 봐야 알 수 있으므로 mutation layer가 판정한다.
+   */
+  actualShipmentDate: string;
+  /**
    * 유상/무상 — 종류/워크플로 배정과 독립적이다(mutation layer가 재확인).
    * 인수정보가 이 값의 단일한 정상 편집 지점이다(제품 정보에는 더 이상
    * 없다). 값을 비워 다시 null로 되돌리는 옵션은 없다 — "선택 안 함"은
@@ -289,6 +305,12 @@ export function validateIntakeSectionFields(
 
   const receivedAt = normalizeRequiredDate(raw, "receivedAt", "인수일", fieldErrors);
   if (receivedAt !== undefined) data.receivedAt = receivedAt;
+
+  // 인수일과 같은 required 처리다 — 빈 문자열/null이 오면 여기서 바로 거부되고
+  // (normalizeNullableDate와 달리 null로 넘어가지 않는다) null이 저장될 길이
+  // 아예 없다.
+  const actualShipmentDate = normalizeRequiredDate(raw, "actualShipmentDate", "실제 출하일", fieldErrors);
+  if (actualShipmentDate !== undefined) data.actualShipmentDate = actualShipmentDate;
 
   if ("billingType" in raw) {
     const value = raw.billingType;
