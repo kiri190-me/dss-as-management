@@ -43,6 +43,14 @@ const AS_ENGINEER_FIELDS: readonly string[] = [
   "assignedEngineerId",
   "internalTargetInspectionCompletionDate",
   "internalTargetShipmentDate",
+  // 인수일 — 실제로 A/S 접수를 다루는 사람이 담당 엔지니어이므로(접수 등록
+  // 권한이 있다), 접수 후 자기 오기입을 고칠 수 있어야 한다. 보고서번호를
+  // 연 것과 같은 까닭이다. SALES에는 원래부터 있던 값이고(아래
+  // SALES_FIELDS) 이번에 새로 열린 쪽은 AS_ENGINEER 하나뿐이다 — 인수일은
+  // 더 이상 SALES 전용이 아니다. 인수일이 고객 요청 납기일보다 늦을 수
+  // 없다는 앞뒤 검증은 역할과 무관하게 updateRepairCase(db/mutations/
+  // repair-cases.ts)가 그대로 막는다.
+  "receivedAt",
   // 보고서번호 — A/S 접수 폼에서 이 역할이 직접 적어 넣는 값이므로(접수
   // 등록 권한이 있다), 접수 후 자기 오기입을 고칠 수 있어야 한다. SALES에는
   // 넣지 않았다(보고서를 작성하는 역할이 아니다). 실제 편집 UI는 상세 화면

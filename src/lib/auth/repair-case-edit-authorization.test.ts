@@ -53,6 +53,9 @@ test("AS_ENGINEER may edit customer/End-User (checkpoint: AS_ENGINEER customer/E
       "newCustomerName",
       "endUserId",
       "newEndUserName",
+      // 인수일 — 접수를 직접 다루는 역할이라 접수 후 수정 권한도 함께 준다
+      // (SALES에는 원래부터 있던 값이고, 이번에 열린 쪽은 AS_ENGINEER 뿐).
+      "receivedAt",
       "billingType",
       "internalTargetInspectionCompletionDate",
       "internalTargetShipmentDate",
@@ -63,9 +66,8 @@ test("AS_ENGINEER may edit customer/End-User (checkpoint: AS_ENGINEER customer/E
   );
 });
 
-test("AS_ENGINEER may not edit the rest of INTAKE (receivedAt/dates/contact fields stay SALES-only)", () => {
+test("AS_ENGINEER may not edit the rest of INTAKE (customerRequestedDueDate/contact fields stay SALES-only — receivedAt no longer does)", () => {
   for (const field of [
-    "receivedAt",
     "customerRequestedDueDate",
     "contactName",
     "contactPhone",
@@ -200,10 +202,16 @@ test("authorizeSubmittedFields ok when every submitted field is permitted", () =
   assert.equal(result.ok, true);
 });
 
+test("authorizeSubmittedFields: AS_ENGINEER submitting receivedAt within INTAKE is authorized (인수일 편집 개방)", () => {
+  assert.deepEqual(authorizeSubmittedFields("AS_ENGINEER", "INTAKE", ["receivedAt"]), { ok: true });
+});
+
 test("authorizeSubmittedFields rejects a role submitting a field it cannot edit, even mixed with allowed ones", () => {
-  const result = authorizeSubmittedFields("AS_ENGINEER", "INTAKE", ["receivedAt"]);
+  // receivedAt 은 이제 허용, contactName 은 여전히 SALES 전용 — 한 칸이라도
+  // 막히면 요청 전체가 거부된다.
+  const result = authorizeSubmittedFields("AS_ENGINEER", "INTAKE", ["receivedAt", "contactName"]);
   assert.equal(result.ok, false);
-  if (!result.ok) assert.deepEqual(result.unauthorizedFields, ["receivedAt"]);
+  if (!result.ok) assert.deepEqual(result.unauthorizedFields, ["contactName"]);
 });
 
 test("authorizeSubmittedFields: SALES submitting only notes within FAULT_SERVICE is authorized", () => {
@@ -253,6 +261,19 @@ test("주간보고 비고는 INVENTORY_MANAGER 만 수정할 수 없다", () => 
     ok: false,
     unauthorizedFields: ["notes"],
   });
+});
+
+/**
+ * 인수일은 SALES 전용이었으나, 실제로 접수를 다루는 사람이 담당 엔지니어라
+ * 자기 오기입을 고칠 수 있도록 AS_ENGINEER 에도 열었다. 이번에 바뀐 쪽은
+ * AS_ENGINEER 하나뿐이다 — SALES 는 원래부터 있던 값이고, INVENTORY_MANAGER
+ * 는 그대로 막혀 있어야 한다(표가 통째로 넓어지는 실수를 거짓 한 줄로 잡는다).
+ */
+test("인수일은 SALES뿐 아니라 담당 엔지니어도 수정할 수 있다", () => {
+  for (const role of ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES"] as const) {
+    assert.equal(isFieldEditable(role, "receivedAt"), true, `${role} 은 인수일을 고칠 수 있다`);
+  }
+  assert.equal(isFieldEditable("INVENTORY_MANAGER", "receivedAt"), false);
 });
 
 test("보고서번호는 SUPER_ADMIN/ADMIN/AS_ENGINEER만 수정할 수 있다", () => {
