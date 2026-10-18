@@ -15,6 +15,7 @@ import {
   serviceReportFindingsLines,
   serviceReportSectionRowCount,
   splitBodyLine,
+  type ServiceReportColumnWidths,
 } from "@/lib/domain/service-report-body-wrap";
 import { koreanKyosanDocumentText } from "@/lib/kyosan/report-terms";
 
@@ -1925,6 +1926,61 @@ export function readColumnRangeWidth(
     throw new Error(`본문 칸의 폭을 읽지 못했습니다: ${startColumn}:${endColumn} → ${total}`);
   }
   return total;
+}
+
+/**
+ * ============================================================================
+ * 🔴 **작성 화면에 넘길 칸 폭** — 채우개가 쓰는 바로 그 셈으로 읽는다 (2026-10-18)
+ * ============================================================================
+ * 미리보기는 브라우저에서 그려지는데 브라우저에는 양식 파일이 없다. 그래서
+ * 화면이 폭 숫자를 **굳혀 들고 있었고**, 사용자가 양식 넷에 도장만 바꿔 저장한
+ * 날 Excel 이 열 너비를 다시 써서(1.875 → 1.90625) 그 숫자가 틀어졌다. 틀어진
+ * 미리보기는 거짓말이라 없느니만 못하다.
+ *
+ * 그래서 **서버가 읽어 넘긴다.** 읽는 셈은 `fillSheet` 이 줄을 나누기 전에 하는
+ * 것과 **같은 함수·같은 범위**다:
+ *
+ *   본문  `findBodyBlock` 의 `contentColumn`~`contentEndColumn`  ← 채우개가 쓰는 그것
+ *   라벨  같은 블록의 `labelColumn` ~ 내용 열 **바로 왼쪽**
+ *   비고  「비　고」 라벨 병합이 알려 주는 내용 열 ~ 첫 줄 병합의 오른쪽 끝
+ *
+ * 🔴 **주소를 못 박지 않는다.** `H:AU`·`C:G`·`H:AF` 는 지금 양식이 그럴 뿐이고,
+ * 셋 다 양식 안에서 찾아낸다 — 사람이 칸을 병합하거나 옮겨도 따라간다.
+ *
+ * ⚠️ 행 높이를 고르게 펴기(`normalizeBodyRowHeights`) **전의** XML 로 읽어도
+ * 같은 값이다 — 그 함수는 행 높이만 건드리고 `<cols>` 는 손대지 않는다.
+ * ============================================================================
+ */
+export function readServiceReportColumnWidths(templateXlsx: Buffer): ServiceReportColumnWidths {
+  const archive = ZipArchive.fromBuffer(templateXlsx);
+  const sheetXml = archive.readText(resolveSheetPart(archive, SERVICE_REPORT_SHEET_NAME));
+  return serviceReportColumnWidthsFromSheet(sheetXml);
+}
+
+/**
+ * 같은 일을 시트 XML 하나로. 🔴 시험이 **양식 없이도** 「범위를 어디서 찾는가」를
+ * 볼 수 있게 갈라 두었다(`SYNTHETIC_SHEET`).
+ */
+export function serviceReportColumnWidthsFromSheet(sheetXml: string): ServiceReportColumnWidths {
+  const block = findBodyBlock(sheetXml);
+  const remarkBlock = findLabelledBlock(sheetXml, REMARK_LABEL_CELL);
+
+  return {
+    body: readColumnRangeWidth(sheetXml, block.contentColumn, block.contentEndColumn),
+    // 라벨 칸은 내용 열 **바로 왼쪽**에서 끝난다 — 블록을 찾을 때 쓴 그 규칙이다.
+    label: readColumnRangeWidth(
+      sheetXml,
+      block.labelColumn,
+      indexToColumn(columnIndex(block.contentColumn) - 1)
+    ),
+    // 비고는 채우개가 나누지 않아 폭을 읽는 자리가 없었다 — 본문과 같은 규칙으로
+    // 첫 줄의 병합(`H60:AF60`)에서 오른쪽 끝을 얻는다.
+    remark: readColumnRangeWidth(
+      sheetXml,
+      remarkBlock.contentColumn,
+      findContentEndColumn(sheetXml, remarkBlock.firstRow, remarkBlock.contentColumn)
+    ),
+  };
 }
 
 type LabelledBlock = { firstRow: number; lastRow: number; contentColumn: string };

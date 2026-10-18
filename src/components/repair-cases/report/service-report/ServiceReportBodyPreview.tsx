@@ -3,18 +3,16 @@
 import { useMemo, type ReactNode } from "react";
 
 import {
-  SERVICE_REPORT_BODY_COLUMN_WIDTH,
-  SERVICE_REPORT_REMARK_COLUMN_WIDTH,
   serviceReportBodyPreviewRows,
   serviceReportBodyPreviewSections,
   serviceReportRemarkPreviewLines,
+  type ServiceReportBodyMetrics,
 } from "@/lib/domain/service-report-body-wrap";
 import { serviceReportLines } from "@/lib/domain/service-report-form";
 
 import {
   SERVICE_REPORT_GRID_CELL_PADDING_LEFT_PX,
   serviceReportGridDocumentBoxCss,
-  serviceReportGridLabelBoxCss,
   serviceReportGridPreviewScaledCss,
   serviceReportGridPreviewTextStyle,
   serviceReportGridRemarkPreviewTextStyle,
@@ -97,11 +95,32 @@ import {
  *     🔴 내용이 **더 길면 줄 자체가 길어진다.** 잘리지도, 상자 안에서 따로
  *     미끄러지지도 않는다 — 미리보기에서 숨겨진 줄이 생기면 그 순간 믿을 수
  *     없는 그림이 된다.
+ *
+ * ── 🔴 다섯째 조각: 칸 폭이 **props 로 들어온다** (2026-10-18) ──────────────
+ * 폭(열 너비·줄 폭)을 이 화면이 굳혀 들고 있었다. 사용자가 양식 넷에 **도장만
+ * 바꿔 저장**했는데 Excel 이 열 너비를 다시 써서(1.875 → 1.90625) 그 값이
+ * 틀어졌다 — 채우개는 매번 양식을 읽으므로 **문서는 85칸으로 나뉘는데 미리보기만
+ * 84칸으로** 그리는 상태였다. 그게 바로 이 화면이 막으려던 거짓말이다.
+ *
+ * 그래서 작성 화면(서버)이 **그 건이 쓸 양식**에서 읽어 넘긴다
+ * (`ServiceReportBodyMetrics`). 폭을 쓰는 자리가 넷인데(상자 폭 · 라벨 칸 폭 ·
+ * 줄 나누기 칸 수 · 비고 폭) **넷 다 이 props 에서 나온다.**
+ *
+ * 🔴 **못 읽었으면(`null`) 옛 숫자로 물러서지 않는다.** 그러면 거짓말이 조용히
+ * 돌아온다. 대신 상자를 안 그리고 「양식을 읽을 수 없어 …」 한 줄만 둔다 —
+ * 작성 화면 맨 위에는 이미 같은 사정을 말하는 빨간 줄이 떠 있고, 내려받기도
+ * 잠겨 있다(`page.tsx` · `ServiceReportForm.tsx`).
  * ============================================================================
  */
 
-/** 왼쪽 라벨 칸의 폭 — 문서의 `C`~`G` 열 너비(× 배율)다. */
-const LABEL_WIDTH = serviceReportGridLabelBoxCss();
+/**
+ * 양식을 못 읽었을 때 상자 자리에 남기는 말.
+ *
+ * 🔴 **경로도 셀 주소도 담지 않는다** — 오류가 디스크 구조를 알려 주는 창구가
+ * 되면 안 된다(`page.tsx` 의 같은 판단).
+ */
+const TEMPLATE_UNAVAILABLE_PREVIEW =
+  "양식을 읽을 수 없어 문서 미리보기를 보여 줄 수 없습니다. 적은 글은 그대로 저장됩니다.";
 
 /**
  * 미리보기 상자의 테두리와 머리말. 폭을 정하는 것은 안쪽이다.
@@ -143,30 +162,52 @@ function cellText(text: string): string {
  * 자리가 여기다.
  */
 export function ServiceReportBodyPreview({
+  metrics,
   findingsIntro,
   findings,
   actions,
   summary,
 }: {
+  /** 🔴 서버가 그 건의 양식에서 읽어 넘긴 칸 폭. 못 읽었으면 `null`. */
+  metrics: ServiceReportBodyMetrics | null;
   findingsIntro: string;
   findings: string;
   actions: string;
   summary: string;
 }) {
+  /**
+   * 🔴 폭이 `useMemo` 의 짝에 들어 있다 — 양식이 바뀌어 폭이 달라지면 **다시
+   * 나눠야** 한다. 빠뜨리면 첫 그림만 맞고 그 뒤로는 옛 폭으로 남는다.
+   */
+  const bodyWrapWidth = metrics?.bodyWrapWidth ?? null;
   const rows = useMemo(
     () =>
-      serviceReportBodyPreviewRows(
-        serviceReportBodyPreviewSections({
-          findingsIntro,
-          findings: serviceReportLines(findings),
-          actions: serviceReportLines(actions),
-          summary: serviceReportLines(summary),
-        })
-      ),
-    [findingsIntro, findings, actions, summary]
+      bodyWrapWidth === null
+        ? []
+        : serviceReportBodyPreviewRows(
+            serviceReportBodyPreviewSections(
+              {
+                findingsIntro,
+                findings: serviceReportLines(findings),
+                actions: serviceReportLines(actions),
+                summary: serviceReportLines(summary),
+              },
+              bodyWrapWidth
+            )
+          ),
+    [bodyWrapWidth, findingsIntro, findings, actions, summary]
   );
 
-  const contentWidth = serviceReportGridDocumentBoxCss(SERVICE_REPORT_BODY_COLUMN_WIDTH);
+  if (metrics === null) {
+    return (
+      <PreviewBox caption="문서에서 이렇게 나옵니다">
+        <p className="text-xs text-amber-700 dark:text-amber-400">{TEMPLATE_UNAVAILABLE_PREVIEW}</p>
+      </PreviewBox>
+    );
+  }
+
+  const labelWidth = serviceReportGridDocumentBoxCss(metrics.columns.label);
+  const contentWidth = serviceReportGridDocumentBoxCss(metrics.columns.body);
 
   return (
     <PreviewBox caption="문서에서 이렇게 나옵니다">
@@ -190,7 +231,7 @@ export function ServiceReportBodyPreview({
             // 다시 그려지는 자리라 재사용 문제가 없다.
             <div key={index} className="flex">
               <span
-                style={{ width: LABEL_WIDTH }}
+                style={{ width: labelWidth }}
                 className="shrink-0 border-r border-zinc-400 text-center whitespace-pre dark:border-zinc-500"
               >
                 {cellText(row.label)}
@@ -235,13 +276,37 @@ export function ServiceReportBodyPreview({
  * 🔴 **가운데 맞춤이다.** 실측으로 `H60:AF60`~`H63:AF63` 의 가로 맞춤이 `center`
  * 였다(본문은 `left`). 줄 높이도 본문(14.1pt)보다 조금 높은 15pt 다.
  */
-export function ServiceReportRemarkPreview({ remark }: { remark: string }) {
+export function ServiceReportRemarkPreview({
+  metrics,
+  remark,
+}: {
+  /** 🔴 본문과 **같은 한 벌**을 받는다 — 비고 폭도 그 양식에서 읽은 값이다. */
+  metrics: ServiceReportBodyMetrics | null;
+  remark: string;
+}) {
+  const remarkWrapWidth = metrics?.remarkWrapWidth ?? null;
   const lines = useMemo(
-    () => serviceReportRemarkPreviewLines(serviceReportLines(remark)),
-    [remark]
+    () =>
+      remarkWrapWidth === null
+        ? []
+        : serviceReportRemarkPreviewLines(serviceReportLines(remark), remarkWrapWidth),
+    [remarkWrapWidth, remark]
   );
   const hasOverflow = lines.some((line) => line.overflows);
-  const contentWidth = serviceReportGridDocumentBoxCss(SERVICE_REPORT_REMARK_COLUMN_WIDTH);
+
+  if (metrics === null) {
+    return (
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <PreviewBox caption="문서의 비고 칸">
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            {TEMPLATE_UNAVAILABLE_PREVIEW}
+          </p>
+        </PreviewBox>
+      </div>
+    );
+  }
+
+  const contentWidth = serviceReportGridDocumentBoxCss(metrics.columns.remark);
 
   return (
     /*

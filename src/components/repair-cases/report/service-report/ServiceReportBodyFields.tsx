@@ -3,9 +3,8 @@
 import type { ReactNode } from "react";
 
 import {
-  SERVICE_REPORT_BODY_WRAP_WIDTH,
   SERVICE_REPORT_CLOSING_MARK,
-  SERVICE_REPORT_REMARK_WRAP_WIDTH,
+  type ServiceReportBodyMetrics,
 } from "@/lib/domain/service-report-body-wrap";
 import {
   countServiceReportBodyRows,
@@ -72,17 +71,18 @@ import {
  * 같은 비율로** 함께 키운다 — 치수는 전부 `service-report-grid.ts` 가 만드는
  * `calc(비율 × var(--sr-grid-font))` 이고, 글꼴 크기는 CSS 가 칸의 안쪽 폭에서
  * 뽑는다(`@container` · `cqi` · `clamp()`). 까닭과 상·하한은 그 파일 머리말에 있다.
+ *
+ * ── 🔴 다섯째 조각: 칸 수가 **props 로 들어온다** (2026-10-18) ──────────────
+ * 위의 84·51 은 양식의 열 너비에서 나온 값인데, **화면이 굳혀 들고 있었다.**
+ * 사용자가 양식 넷에 도장만 바꿔 저장했더니 Excel 이 열 너비를 다시 써서
+ * (1.875 → 1.90625) 84 가 85 가 되었다 — 채우개는 따라갔고 화면만 뒤처졌다.
+ * 이제 서버가 그 건의 양식에서 읽어 넘긴다(`metrics`).
+ *
+ * 🔴 **못 읽으면 옛 숫자로 물러서지 않는다.** 적는 칸은 눈금 없이 보통 입력칸이
+ * 되고(`gridColumns` 를 안 준다), 미리보기 자리에는 까닭 한 줄이 뜬다. 조용히
+ * 옛 폭으로 그리면 「문서와 같다」는 약속이 거짓이 된다.
  * ============================================================================
  */
-
-/**
- * 적는 칸들이 들어가는 **왼쪽 기둥**의 폭 상한.
- *
- * 🔴 입력칸의 상한과 **같은 셈에서** 나온다. 기둥이 더 좁으면 `w-full` 인
- * 입력칸이 기둥에 먼저 잘려, 애써 맞춘 글 폭이 조용히 줄어든다.
- * 🔴 상한이라 좁은 화면에서는 화면을 따라 줄어든다 — 가름을 붙이지 않는다.
- */
-const BODY_COLUMN_MAX_WIDTH = serviceReportGridInputMaxWidthCss(SERVICE_REPORT_BODY_WRAP_WIDTH);
 
 /**
  * 🔴 적는 칸과 미리보기가 들어가는 **줄** — 본문과 비고가 **같은 것**을 쓴다.
@@ -94,11 +94,21 @@ const BODY_COLUMN_MAX_WIDTH = serviceReportGridInputMaxWidthCss(SERVICE_REPORT_B
  * 🔴 세로 맞춤을 안 적는다(= stretch). 그래야 미리보기 상자가 옆에 있는 적는 칸들
  * **전체 높이만큼** 늘어난다. 내용이 그보다 길면 줄 자체가 길어진다 — 잘리거나
  * 상자 안에서 따로 미끄러지지 않는다.
+ *
+ * 🔴 양식을 못 읽었으면 **치수를 안 심는다.** 글꼴 크기 식이 칸 폭에서 나오는데
+ * 그 칸 폭을 모르기 때문이다 — 그때는 보통 세로 배치다.
  */
-function ServiceReportGridRow({ children }: { children: ReactNode }) {
+function ServiceReportGridRow({
+  metrics,
+  children,
+}: {
+  metrics: ServiceReportBodyMetrics | null;
+  children: ReactNode;
+}) {
+  if (metrics === null) return <div className="flex flex-col gap-4">{children}</div>;
   return (
     <div className={SERVICE_REPORT_GRID_CONTAINER_CLASS}>
-      <div style={serviceReportGridScaleStyle()} className={SERVICE_REPORT_GRID_ROW_CLASS}>
+      <div style={serviceReportGridScaleStyle(metrics)} className={SERVICE_REPORT_GRID_ROW_CLASS}>
         {children}
       </div>
     </div>
@@ -130,6 +140,7 @@ export default function ServiceReportBodyFields({
   onChange,
   fieldErrors,
   limits,
+  bodyMetrics,
   rowLimitErrors,
   disabled,
 }: {
@@ -137,12 +148,30 @@ export default function ServiceReportBodyFields({
   onChange: (patch: Partial<ServiceReportFormValues>) => void;
   fieldErrors: Record<string, string> | null;
   limits: ServiceReportFormLimits;
+  /**
+   * 🔴 서버가 **그 건이 쓸 양식**에서 읽어 넘긴 칸 폭 한 벌. 양식을 못 읽었으면
+   * `null` 이고, 그때는 눈금도 미리보기도 없다(머리말의 '못 읽으면').
+   */
+  bodyMetrics: ServiceReportBodyMetrics | null;
   rowLimitErrors: { body?: string; remark?: string };
   disabled: boolean;
 }) {
   const error = (key: string) => serviceReportFieldError(fieldErrors, key);
   const bodyRows = countServiceReportBodyRows(serviceReportBodyLines(values), limits.bodyLayout);
   const remarkRows = countServiceReportRemarkRows(values);
+
+  /**
+   * 적는 칸들이 들어가는 **왼쪽 기둥**의 폭 상한.
+   *
+   * 🔴 입력칸의 상한과 **같은 셈에서** 나온다. 기둥이 더 좁으면 `w-full` 인
+   * 입력칸이 기둥에 먼저 잘려, 애써 맞춘 글 폭이 조용히 줄어든다.
+   * 🔴 상한이라 좁은 화면에서는 화면을 따라 줄어든다 — 가름을 붙이지 않는다.
+   * 🔴 양식을 못 읽었으면 상한 자체가 없다 — 지어낸 폭으로 좁히지 않는다.
+   */
+  const bodyColumnMaxWidth =
+    bodyMetrics === null
+      ? undefined
+      : serviceReportGridInputMaxWidthCss(bodyMetrics.bodyWrapWidth);
 
   return (
     <>
@@ -160,9 +189,9 @@ export default function ServiceReportBodyFields({
           「둘이 나란히 서면서 가로가 남지 않는 가장 좁은 폭」이다 — 더 좁아지면
           글자를 더 줄이는 대신 아래로 내린다(`service-report-grid.ts` 머리말).
         */}
-        <ServiceReportGridRow>
+        <ServiceReportGridRow metrics={bodyMetrics}>
           <div
-            style={{ maxWidth: BODY_COLUMN_MAX_WIDTH }}
+            style={{ maxWidth: bodyColumnMaxWidth }}
             className="flex w-full min-w-0 flex-col gap-4 @6xl:shrink-0"
           >
             {/* 🔴 머리글도 문서에서는 확인내용의 **첫 줄**이다 — 같은 칸에 같은 눈금으로 들어간다. */}
@@ -174,7 +203,7 @@ export default function ServiceReportBodyFields({
               rows={2}
               hint="비우면 문서에 안 들어갑니다"
               disabled={disabled}
-              gridColumns={SERVICE_REPORT_BODY_WRAP_WIDTH}
+              gridColumns={bodyMetrics?.bodyWrapWidth}
             />
             <TextAreaField
               label="확인내용"
@@ -183,7 +212,7 @@ export default function ServiceReportBodyFields({
               error={error("body.findings")}
               rows={8}
               disabled={disabled}
-              gridColumns={SERVICE_REPORT_BODY_WRAP_WIDTH}
+              gridColumns={bodyMetrics?.bodyWrapWidth}
             />
             <TextAreaField
               label="조치"
@@ -192,7 +221,7 @@ export default function ServiceReportBodyFields({
               error={error("body.actions")}
               rows={8}
               disabled={disabled}
-              gridColumns={SERVICE_REPORT_BODY_WRAP_WIDTH}
+              gridColumns={bodyMetrics?.bodyWrapWidth}
             />
             {/* 🔴 「정리」는 수리 보고서에만 있다. 검사로 고르면 사라지고 보내지도 않는다. */}
             {values.kind === "REPAIR" && (
@@ -203,7 +232,7 @@ export default function ServiceReportBodyFields({
                 error={error("body.summary")}
                 rows={5}
                 disabled={disabled}
-                gridColumns={SERVICE_REPORT_BODY_WRAP_WIDTH}
+                gridColumns={bodyMetrics?.bodyWrapWidth}
               />
             )}
           </div>
@@ -215,6 +244,7 @@ export default function ServiceReportBodyFields({
             미리보기에서도 빠져야 한다(적는 칸이 사라지는 것과 같은 조건).
           */}
           <ServiceReportBodyPreview
+            metrics={bodyMetrics}
             findingsIntro={values.findingsIntro}
             findings={values.findings}
             actions={values.actions}
@@ -259,9 +289,9 @@ export default function ServiceReportBodyFields({
           줄에서는 오른쪽이 조금 남는데, 그것이 **문서가 그런 것**이다(비고 칸이 본문의
           5/8 폭이다).
         */}
-        <ServiceReportGridRow>
+        <ServiceReportGridRow metrics={bodyMetrics}>
           <div
-            style={{ maxWidth: BODY_COLUMN_MAX_WIDTH }}
+            style={{ maxWidth: bodyColumnMaxWidth }}
             className="flex w-full min-w-0 flex-col gap-4 @6xl:shrink-0"
           >
             {/* 🔴 비고 칸은 문서에서 본문보다 좁다(`H60:AF60`) — 칸 수도 그만큼이다. */}
@@ -272,10 +302,10 @@ export default function ServiceReportBodyFields({
               error={error("remark")}
               rows={4}
               disabled={disabled}
-              gridColumns={SERVICE_REPORT_REMARK_WRAP_WIDTH}
+              gridColumns={bodyMetrics?.remarkWrapWidth}
             />
           </div>
-          <ServiceReportRemarkPreview remark={values.remark} />
+          <ServiceReportRemarkPreview metrics={bodyMetrics} remark={values.remark} />
         </ServiceReportGridRow>
         <RowCounter used={remarkRows} limit={limits.maxRemarkRows} />
         {rowLimitErrors.remark && (

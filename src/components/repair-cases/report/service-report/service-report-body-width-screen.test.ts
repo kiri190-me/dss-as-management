@@ -3,11 +3,8 @@ import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
 import {
-  SERVICE_REPORT_BODY_COLUMN_WIDTH,
-  SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH,
-  SERVICE_REPORT_BODY_WRAP_WIDTH,
-  SERVICE_REPORT_REMARK_COLUMN_WIDTH,
-  SERVICE_REPORT_REMARK_WRAP_WIDTH,
+  serviceReportBodyMetrics,
+  type ServiceReportColumnWidths,
 } from "@/lib/domain/service-report-body-wrap";
 
 import {
@@ -22,7 +19,6 @@ import {
   SERVICE_REPORT_GRID_INPUT_LINE_HEIGHT_PX,
   SERVICE_REPORT_GRID_MAX_FONT_SIZE_PX,
   SERVICE_REPORT_GRID_MAX_PREVIEW_FONT_SIZE_PX,
-  SERVICE_REPORT_GRID_MIN_FONT_SIZE_PX,
   SERVICE_REPORT_GRID_PREVIEW_BORDER_PX,
   SERVICE_REPORT_GRID_PREVIEW_FONT_CSS,
   SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX,
@@ -42,8 +38,7 @@ import {
   serviceReportGridInputScaledCss,
   serviceReportGridInputScaledPx,
   serviceReportGridInputStyle,
-  serviceReportGridLabelBoxCss,
-  serviceReportGridLabelBoxPx,
+  serviceReportGridMinFontSizePx,
   serviceReportGridPreviewBoxWidthPx,
   serviceReportGridPreviewFontCss,
   serviceReportGridPreviewFontSizePx,
@@ -95,8 +90,39 @@ import {
  *     글 폭이 정확히 비례하는지 본다
  *  ⑬ 🔴 **가로가 남지 않는다** — 글꼴을 정하는 식이 폭을 세는 함수의 **역산**이고,
  *     적는 칸이 상한에 닿은 뒤에는 미리보기가 남은 자리를 메운다
+ *
+ * ── 🔴 다섯째 조각(2026-10-18): 폭이 **양식에서 들어온다** ─────────────────
+ * 칸 폭이 화면에 굳어 있었다. 사용자가 양식 넷에 **도장만 바꿔 저장**했는데 Excel 이
+ * 열 너비를 다시 써서(1.875 → 1.90625) 그 값이 틀어졌다. 이제 서버가 읽어 props 로
+ * 넘긴다. 그래서 여기서 못 박을 것이 둘 늘었다:
+ *  ⑭ 🔴 치수 함수들이 **인자로 받은 폭**을 쓴다 — 옛 양식 값을 넣으면 지금까지의
+ *     px(600 · 375 · 70 · 614)가 그대로 나오고, 새 양식 값을 넣으면 **다 함께 커진다**
+ *  ⑮ 🔴 화면 원본에 폭 숫자도, 없어진 상수 이름도 남아 있지 않다
  * ============================================================================
  */
+
+/**
+ * 🔴 두 양식의 **실측 열 너비**. 시험의 입력이지 화면이 들고 있는 값이 아니다
+ * (화면에 굳힌 값이 없다는 것은 아래 「굳힌 폭이 없다」가 본다).
+ *
+ *   옛 양식 — 본문 40열 × 1.875    · 비고 25열 × 1.875    · 라벨 5열 × 1.75
+ *   새 양식 — 본문 40열 × 1.90625  · 비고 25열 × 1.90625  · 라벨 5열 × 1.7265625
+ */
+const OLD_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
+  body: 40 * 1.875,
+  remark: 25 * 1.875,
+  label: 5 * 1.75,
+};
+const NEW_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
+  body: 40 * 1.90625,
+  remark: 25 * 1.90625,
+  label: 5 * 1.7265625,
+};
+const METRICS = serviceReportBodyMetrics(OLD_TEMPLATE_COLUMNS);
+const NEW_METRICS = serviceReportBodyMetrics(NEW_TEMPLATE_COLUMNS);
+
+/** 그 양식에서 나오는 글꼴 하한. 🔴 **상수였던 것이 함수가 되었다** — 폭을 탄다. */
+const MIN_FONT_SIZE_PX = serviceReportGridMinFontSizePx(METRICS);
 
 const read = (path: string): string =>
   readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
@@ -125,12 +151,12 @@ describe("본문으로 들어가는 칸은 문서의 칸 수를 받는다", () =
       assert.ok(at >= 0, `원본에서 「${label}」 칸을 찾지 못했다`);
       const block = bodyCode.slice(at, bodyCode.indexOf("/>", at));
       assert.ok(
-        block.includes("gridColumns={SERVICE_REPORT_BODY_WRAP_WIDTH}"),
-        `「${label}」 칸이 문서의 칸 수를 안 받는다: ${block}`
+        block.includes("gridColumns={bodyMetrics?.bodyWrapWidth}"),
+        `「${label}」 칸이 **양식에서 온** 칸 수를 안 받는다: ${block}`
       );
     }
     assert.equal(
-      bodyCode.split("gridColumns={SERVICE_REPORT_BODY_WRAP_WIDTH}").length - 1,
+      bodyCode.split("gridColumns={bodyMetrics?.bodyWrapWidth}").length - 1,
       4,
       "본문 칸 수를 받는 칸이 네 개가 아니다"
     );
@@ -140,8 +166,24 @@ describe("본문으로 들어가는 칸은 문서의 칸 수를 받는다", () =
     const at = bodyCode.indexOf('label="비고"');
     assert.ok(at >= 0, "원본에서 「비고」 칸을 찾지 못했다");
     const block = bodyCode.slice(at, bodyCode.indexOf("/>", at));
-    assert.ok(block.includes("gridColumns={SERVICE_REPORT_REMARK_WRAP_WIDTH}"), block);
-    assert.ok(SERVICE_REPORT_REMARK_WRAP_WIDTH < SERVICE_REPORT_BODY_WRAP_WIDTH);
+    assert.ok(block.includes("gridColumns={bodyMetrics?.remarkWrapWidth}"), block);
+    for (const metrics of [METRICS, NEW_METRICS]) {
+      assert.ok(metrics.remarkWrapWidth < metrics.bodyWrapWidth);
+    }
+  });
+
+  test("🔴 양식을 못 읽으면 눈금을 **안 준다** — 옛 숫자로 물러서지 않는다", () => {
+    // `gridColumns` 가 `undefined` 면 `ServiceReportField` 가 보통 입력칸으로 그린다.
+    assert.ok(bodyCode.includes("gridColumns={bodyMetrics?.bodyWrapWidth}"), bodyCode.slice(0, 200));
+    assert.ok(
+      bodyCode.includes("bodyMetrics === null ? undefined :"),
+      "양식을 못 읽었을 때 기둥 폭을 비우지 않는다"
+    );
+    assert.ok(
+      !/\b(84|51|75|46\.875|8\.75)\b/.test(bodyCode),
+      "본문 폼 코드에 폭 숫자가 박혀 있다"
+    );
+    assert.ok(!/\b(84|51|75|46\.875|8\.75)\b/.test(previewCode), "미리보기에 폭 숫자가 박혀 있다");
   });
 
   test("폼의 다른 여러 줄 칸(상황 상세)은 받지 않는다 — 문서에서 다른 칸이다", () => {
@@ -164,9 +206,9 @@ describe("본문으로 들어가는 칸은 문서의 칸 수를 받는다", () =
 describe("🔴 폭이 한 곳에서 나온다", () => {
   test("적는 칸 = 한글 `칸 수 ÷ 2` 자 + 입력칸 테두리", () => {
     assert.equal(
-      serviceReportGridInputMaxWidthPx(SERVICE_REPORT_BODY_WRAP_WIDTH),
+      serviceReportGridInputMaxWidthPx(METRICS.bodyWrapWidth),
       serviceReportGridInputContentPx(
-        SERVICE_REPORT_BODY_WRAP_WIDTH,
+        METRICS.bodyWrapWidth,
         SERVICE_REPORT_GRID_INPUT_FONT_SIZE_PX
       ) + SERVICE_REPORT_GRID_INPUT_FRAME_PX
     );
@@ -178,36 +220,43 @@ describe("🔴 폭이 한 곳에서 나온다", () => {
   });
 
   test("🔴 미리보기 상자 = 문서의 칸 그 자체다 — 열 너비 × 8px", () => {
-    assert.equal(serviceReportGridDocumentBoxPx(SERVICE_REPORT_BODY_COLUMN_WIDTH), 600);
-    assert.equal(serviceReportGridDocumentBoxPx(SERVICE_REPORT_REMARK_COLUMN_WIDTH), 375);
-    assert.equal(serviceReportGridLabelBoxPx(), 70);
-    assert.equal(
-      serviceReportGridLabelBoxPx(),
-      serviceReportGridDocumentBoxPx(SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH)
-    );
+    // 옛 양식을 넣으면 지금까지의 px 그대로다.
+    assert.equal(serviceReportGridDocumentBoxPx(METRICS.columns.body), 600);
+    assert.equal(serviceReportGridDocumentBoxPx(METRICS.columns.remark), 375);
+    assert.equal(serviceReportGridDocumentBoxPx(METRICS.columns.label), 70);
+    // 🔴 새 양식을 넣으면 **다 함께 넓어진다** — 굳혀 두면 문서보다 좁게 그린다.
+    assert.equal(serviceReportGridDocumentBoxPx(NEW_METRICS.columns.body), 610);
+    assert.equal(serviceReportGridDocumentBoxPx(NEW_METRICS.columns.remark), 381);
+    assert.equal(serviceReportGridDocumentBoxPx(NEW_METRICS.columns.label), 69);
     // 🔴 문서의 칸이 한글 42자 폭보다 넓다 — 그 차이가 양식의 안전 여백이다.
-    assert.ok(
-      serviceReportGridDocumentBoxPx(SERVICE_REPORT_BODY_COLUMN_WIDTH) >
-        serviceReportGridInputContentPx(
-          SERVICE_REPORT_BODY_WRAP_WIDTH,
-          SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX
-        ),
-      "미리보기 상자가 한글 42자 폭보다 좁다 — 영숫자로 찬 줄이 테두리를 넘친다"
-    );
+    for (const metrics of [METRICS, NEW_METRICS]) {
+      assert.ok(
+        serviceReportGridDocumentBoxPx(metrics.columns.body) >
+          serviceReportGridInputContentPx(
+            metrics.bodyWrapWidth,
+            SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX
+          ),
+        "미리보기 상자가 한글 42자 폭보다 좁다 — 영숫자로 찬 줄이 테두리를 넘친다"
+      );
+    }
   });
 
   test("🔴 두 화면이 숫자를 따로 적어 두지 않았다 — 셈을 불러서 쓴다", () => {
     assert.ok(
-      bodyCode.includes("serviceReportGridInputMaxWidthCss(SERVICE_REPORT_BODY_WRAP_WIDTH)"),
+      bodyCode.includes("serviceReportGridInputMaxWidthCss(bodyMetrics.bodyWrapWidth)"),
       "적는 칸 기둥의 폭이 셈에서 안 나온다"
     );
     assert.ok(
-      previewCode.includes("serviceReportGridDocumentBoxCss("),
-      "미리보기 폭이 셈에서 안 나온다"
+      previewCode.includes("serviceReportGridDocumentBoxCss(metrics.columns.body)"),
+      "미리보기 폭이 **양식에서 온 값**으로 안 나온다"
     );
     assert.ok(
-      previewCode.includes("serviceReportGridLabelBoxCss()"),
-      "라벨 칸 폭이 셈에서 안 나온다"
+      previewCode.includes("serviceReportGridDocumentBoxCss(metrics.columns.label)"),
+      "라벨 칸 폭이 **양식에서 온 값**으로 안 나온다"
+    );
+    assert.ok(
+      previewCode.includes("serviceReportGridDocumentBoxCss(metrics.columns.remark)"),
+      "비고 칸 폭이 **양식에서 온 값**으로 안 나온다"
     );
     assert.ok(
       previewCode.includes("serviceReportGridPreviewScaledCss("),
@@ -225,19 +274,21 @@ describe("🔴 폭이 한 곳에서 나온다", () => {
   });
 
   test("🔴 기둥이 입력칸보다 좁지 않다 — 좁으면 애써 맞춘 글 폭이 잘린다", () => {
-    const at = bodyCode.indexOf("BODY_COLUMN_MAX_WIDTH =");
+    const at = bodyCode.indexOf("bodyColumnMaxWidth =");
     assert.ok(at >= 0, "기둥의 폭 상한을 찾지 못했다");
     assert.ok(
       bodyCode
-        .slice(at, at + 120)
-        .includes("serviceReportGridInputMaxWidthCss(SERVICE_REPORT_BODY_WRAP_WIDTH)"),
-      bodyCode.slice(at, at + 120)
+        .slice(at, at + 160)
+        .includes("serviceReportGridInputMaxWidthCss(bodyMetrics.bodyWrapWidth)"),
+      bodyCode.slice(at, at + 160)
     );
     // 비고 칸은 본문보다 좁으므로 같은 기둥 안에 그대로 들어간다.
-    assert.ok(
-      serviceReportGridInputMaxWidthPx(SERVICE_REPORT_REMARK_WRAP_WIDTH) <=
-        serviceReportGridInputMaxWidthPx(SERVICE_REPORT_BODY_WRAP_WIDTH)
-    );
+    for (const metrics of [METRICS, NEW_METRICS]) {
+      assert.ok(
+        serviceReportGridInputMaxWidthPx(metrics.remarkWrapWidth) <=
+          serviceReportGridInputMaxWidthPx(metrics.bodyWrapWidth)
+      );
+    }
   });
 });
 
@@ -261,7 +312,7 @@ describe("🔴 폭이 글꼴 크기에서 나온다", () => {
 
   /** 어느 크기에서도 재어 볼 글꼴 값들 — 하한·밑값·상한과 그 사이. */
   const FONT_SIZES = [
-    SERVICE_REPORT_GRID_MIN_FONT_SIZE_PX,
+    MIN_FONT_SIZE_PX,
     12,
     13,
     SERVICE_REPORT_GRID_INPUT_FONT_SIZE_PX,
@@ -271,7 +322,7 @@ describe("🔴 폭이 글꼴 크기에서 나온다", () => {
   ];
 
   test("🔴 적는 칸의 글 폭 = 한글 `칸 수 ÷ 2` 자 — **어느 글꼴 크기에서도**", () => {
-    for (const columns of [SERVICE_REPORT_BODY_WRAP_WIDTH, SERVICE_REPORT_REMARK_WRAP_WIDTH, 2]) {
+    for (const columns of [METRICS.bodyWrapWidth, METRICS.remarkWrapWidth, 2]) {
       const multiple = multipleOf(serviceReportGridInputContentCss(columns));
       assert.equal(multiple, columns / 2, `${columns}칸의 비율이 틀렸다`);
       for (const fontSizePx of FONT_SIZES) {
@@ -294,14 +345,14 @@ describe("🔴 폭이 글꼴 크기에서 나온다", () => {
   test("🔴 본문 84칸은 어느 크기에서도 **한글 42자**다", () => {
     for (const fontSizePx of FONT_SIZES) {
       assert.equal(
-        serviceReportGridInputContentPx(SERVICE_REPORT_BODY_WRAP_WIDTH, fontSizePx),
+        serviceReportGridInputContentPx(METRICS.bodyWrapWidth, fontSizePx),
         42 * fontSizePx
       );
     }
     // 밑값(14px)에서는 지금까지의 588px 그대로다 — 기준이 안 움직였다.
     assert.equal(
       serviceReportGridInputContentPx(
-        SERVICE_REPORT_BODY_WRAP_WIDTH,
+        METRICS.bodyWrapWidth,
         SERVICE_REPORT_GRID_INPUT_FONT_SIZE_PX
       ),
       588
@@ -311,28 +362,28 @@ describe("🔴 폭이 글꼴 크기에서 나온다", () => {
   test("🔴 여백과 테두리는 **안 커진다** — 커지면 글 폭이 42자를 넘는다", () => {
     for (const fontSizePx of FONT_SIZES) {
       assert.equal(
-        serviceReportGridInputMaxWidthPx(SERVICE_REPORT_BODY_WRAP_WIDTH, fontSizePx) -
-          serviceReportGridInputContentPx(SERVICE_REPORT_BODY_WRAP_WIDTH, fontSizePx),
+        serviceReportGridInputMaxWidthPx(METRICS.bodyWrapWidth, fontSizePx) -
+          serviceReportGridInputContentPx(METRICS.bodyWrapWidth, fontSizePx),
         SERVICE_REPORT_GRID_INPUT_FRAME_PX
       );
     }
     // 화면에 적히는 식도 같은 모양이다 — 비례하는 부분 + 고정 26px.
     assert.equal(
-      serviceReportGridInputMaxWidthCss(SERVICE_REPORT_BODY_WRAP_WIDTH),
-      `calc(${serviceReportGridInputContentCss(SERVICE_REPORT_BODY_WRAP_WIDTH)} + ${SERVICE_REPORT_GRID_INPUT_FRAME_PX}px)`
+      serviceReportGridInputMaxWidthCss(METRICS.bodyWrapWidth),
+      `calc(${serviceReportGridInputContentCss(METRICS.bodyWrapWidth)} + ${SERVICE_REPORT_GRID_INPUT_FRAME_PX}px)`
     );
   });
 
   test("🔴 미리보기의 모든 치수가 **한 배율**을 탄다 — 상자 안이 계속 문서와 1:1", () => {
     const cases: [string, number][] = [
-      [serviceReportGridLabelBoxCss(), serviceReportGridLabelBoxPx()],
+      [serviceReportGridDocumentBoxCss(METRICS.columns.label), serviceReportGridDocumentBoxPx(METRICS.columns.label)],
       [
-        serviceReportGridDocumentBoxCss(SERVICE_REPORT_BODY_COLUMN_WIDTH),
-        serviceReportGridDocumentBoxPx(SERVICE_REPORT_BODY_COLUMN_WIDTH),
+        serviceReportGridDocumentBoxCss(METRICS.columns.body),
+        serviceReportGridDocumentBoxPx(METRICS.columns.body),
       ],
       [
-        serviceReportGridDocumentBoxCss(SERVICE_REPORT_REMARK_COLUMN_WIDTH),
-        serviceReportGridDocumentBoxPx(SERVICE_REPORT_REMARK_COLUMN_WIDTH),
+        serviceReportGridDocumentBoxCss(METRICS.columns.remark),
+        serviceReportGridDocumentBoxPx(METRICS.columns.remark),
       ],
       [
         serviceReportGridPreviewScaledCss(SERVICE_REPORT_GRID_CELL_PADDING_LEFT_PX),
@@ -363,7 +414,7 @@ describe("🔴 폭이 글꼴 크기에서 나온다", () => {
   });
 
   test("🔴 적는 칸의 줄 높이·최소 높이도 글꼴을 탄다 — 안 그러면 칸이 글자를 못 담는다", () => {
-    const style = serviceReportGridInputStyle(SERVICE_REPORT_BODY_WRAP_WIDTH, 8);
+    const style = serviceReportGridInputStyle(METRICS.bodyWrapWidth, 8);
     assert.equal(style.fontSize, SERVICE_REPORT_GRID_FONT_CSS);
     assert.equal(
       style.lineHeight,
@@ -408,15 +459,15 @@ describe("🔴 폭이 글꼴 크기에서 나온다", () => {
  */
 describe("🔴 글꼴이 칸의 폭에서 나온다 — 가로가 남지 않는다", () => {
   /** 그 글꼴 크기에서 미리보기가 비례로 따라올 때 줄이 먹는 폭. */
-  const rowWidth = (fontSizePx: number): number => serviceReportGridRowWidthPx(fontSizePx);
+  const rowWidth = (fontSizePx: number): number => serviceReportGridRowWidthPx(METRICS, fontSizePx);
 
   test("줄의 폭 = 적는 칸 + 사이 + 미리보기 상자 — 지어낸 값이 없다", () => {
     for (const fontSizePx of [12, 14, 18]) {
       assert.equal(
         rowWidth(fontSizePx),
-        serviceReportGridInputMaxWidthPx(SERVICE_REPORT_BODY_WRAP_WIDTH, fontSizePx) +
+        serviceReportGridInputMaxWidthPx(METRICS.bodyWrapWidth, fontSizePx) +
           SERVICE_REPORT_GRID_ROW_GAP_PX +
-          serviceReportGridPreviewBoxWidthPx(
+          serviceReportGridPreviewBoxWidthPx(METRICS, 
             serviceReportGridPreviewFontSizePx(fontSizePx)
           )
       );
@@ -428,7 +479,7 @@ describe("🔴 글꼴이 칸의 폭에서 나온다 — 가로가 남지 않는�
 
   test("🔴 글꼴을 정하는 식이 그 함수의 **역산**이다", () => {
     for (const widthPx of [1152, 1300, 1500, 1669.43]) {
-      const fontSizePx = serviceReportGridFontSizeForRowWidth(widthPx);
+      const fontSizePx = serviceReportGridFontSizeForRowWidth(METRICS, widthPx);
       assert.ok(Math.abs(rowWidth(fontSizePx) - widthPx) < 1e-6, `${widthPx}px 에서 어긋난다`);
     }
   });
@@ -436,9 +487,9 @@ describe("🔴 글꼴이 칸의 폭에서 나온다 — 가로가 남지 않는�
   test("🔴 나란히 서는 **가장 좁은 폭**을 하한이 딱 채운다", () => {
     assert.equal(SERVICE_REPORT_GRID_SIDE_BY_SIDE_PX, 1152); // Tailwind 의 `@6xl` = 72rem
     assert.ok(
-      Math.abs(rowWidth(SERVICE_REPORT_GRID_MIN_FONT_SIZE_PX) - SERVICE_REPORT_GRID_SIDE_BY_SIDE_PX) <
+      Math.abs(rowWidth(MIN_FONT_SIZE_PX) - SERVICE_REPORT_GRID_SIDE_BY_SIDE_PX) <
         1e-6,
-      `하한에서 ${rowWidth(SERVICE_REPORT_GRID_MIN_FONT_SIZE_PX)}px — 1152px 를 안 채운다`
+      `하한에서 ${rowWidth(MIN_FONT_SIZE_PX)}px — 1152px 를 안 채운다`
     );
     // 가름의 자리가 CSS 에도 **같은 눈금**으로 적혀 있다.
     assert.ok(SERVICE_REPORT_GRID_ROW_CLASS.includes("@6xl:flex-row"), SERVICE_REPORT_GRID_ROW_CLASS);
@@ -446,14 +497,14 @@ describe("🔴 글꼴이 칸의 폭에서 나온다 — 가로가 남지 않는�
     // 🔴 하한이 문서 글꼴(9pt = 12px)보다 작지 않다 — 적는 칸이 인쇄물보다 작아지면
     //    읽기 괴롭다. 그 아래로는 글자를 더 줄이는 대신 아래로 쌓는다.
     assert.ok(
-      SERVICE_REPORT_GRID_MIN_FONT_SIZE_PX >= SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX,
-      `${SERVICE_REPORT_GRID_MIN_FONT_SIZE_PX}px`
+      MIN_FONT_SIZE_PX >= SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX,
+      `${MIN_FONT_SIZE_PX}px`
     );
-    assert.ok(SERVICE_REPORT_GRID_MIN_FONT_SIZE_PX < SERVICE_REPORT_GRID_INPUT_FONT_SIZE_PX);
+    assert.ok(MIN_FONT_SIZE_PX < SERVICE_REPORT_GRID_INPUT_FONT_SIZE_PX);
   });
 
   test("🔴 적는 칸의 글꼴 식 — `cqi` 로 **칸**을 재고 상·하한 사이로 자른다", () => {
-    const css = serviceReportGridRowFontCss();
+    const css = serviceReportGridRowFontCss(METRICS);
     assert.match(css, /^clamp\(/, css);
     // 창(100vw)이 아니라 칸(100cqi)이다 — 사이드바를 접고 편 것이 셈에 들어야 한다.
     assert.ok(css.includes("100cqi"), css);
@@ -464,7 +515,7 @@ describe("🔴 글꼴이 칸의 폭에서 나온다 — 가로가 남지 않는�
       css
     );
     assert.ok(bounds, css);
-    assert.ok(Math.abs(Number(bounds[1]) - SERVICE_REPORT_GRID_MIN_FONT_SIZE_PX) < 1e-3, css);
+    assert.ok(Math.abs(Number(bounds[1]) - MIN_FONT_SIZE_PX) < 1e-3, css);
     assert.equal(Number(bounds[4]), SERVICE_REPORT_GRID_MAX_FONT_SIZE_PX);
     // 🔴 식에 폭을 넣으면 그 폭을 딱 채우는 글꼴이 나온다 — 그게 「남지 않는다」다.
     const fill = (widthPx: number) => (widthPx - Number(bounds[2])) / Number(bounds[3]);
@@ -474,7 +525,7 @@ describe("🔴 글꼴이 칸의 폭에서 나온다 — 가로가 남지 않는�
   });
 
   test("🔴 상한에 닿은 뒤에는 **미리보기가 혼자 커져** 남은 자리를 메운다", () => {
-    const css = serviceReportGridPreviewFontCss();
+    const css = serviceReportGridPreviewFontCss(METRICS);
     assert.match(css, /^clamp\(/, css);
     assert.ok(css.includes("100cqi"), css);
     assert.ok(css.includes(`${SERVICE_REPORT_GRID_MAX_PREVIEW_FONT_SIZE_PX}px)`), css);
@@ -486,18 +537,18 @@ describe("🔴 글꼴이 칸의 폭에서 나온다 — 가로가 남지 않는�
       SERVICE_REPORT_GRID_ROW_GAP_PX +
       SERVICE_REPORT_GRID_PREVIEW_BORDER_PX;
     const slopePx =
-      (serviceReportGridPreviewBoxWidthPx(SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX) -
+      (serviceReportGridPreviewBoxWidthPx(METRICS, SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX) -
         SERVICE_REPORT_GRID_PREVIEW_BORDER_PX) /
       SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX;
     const previewFill = (containerPx: number, fontSizePx: number) =>
       (containerPx -
         fixedPx -
-        serviceReportGridInputContentPx(SERVICE_REPORT_BODY_WRAP_WIDTH, fontSizePx)) /
+        serviceReportGridInputContentPx(METRICS.bodyWrapWidth, fontSizePx)) /
       slopePx;
 
     // ① 적는 칸이 상한에 **닿기 전**에는 가운데 값이 하한(= 비례값)과 같다.
     for (const containerPx of [1152, 1400, 1600]) {
-      const fontSizePx = serviceReportGridFontSizeForRowWidth(containerPx);
+      const fontSizePx = serviceReportGridFontSizeForRowWidth(METRICS, containerPx);
       assert.ok(
         Math.abs(
           previewFill(containerPx, fontSizePx) - serviceReportGridPreviewFontSizePx(fontSizePx)
@@ -516,11 +567,11 @@ describe("🔴 글꼴이 칸의 폭에서 나온다 — 가로가 남지 않는�
       assert.ok(
         Math.abs(
           serviceReportGridInputMaxWidthPx(
-            SERVICE_REPORT_BODY_WRAP_WIDTH,
+            METRICS.bodyWrapWidth,
             SERVICE_REPORT_GRID_MAX_FONT_SIZE_PX
           ) +
             SERVICE_REPORT_GRID_ROW_GAP_PX +
-            serviceReportGridPreviewBoxWidthPx(previewFontSizePx) -
+            serviceReportGridPreviewBoxWidthPx(METRICS, previewFontSizePx) -
             containerPx
         ) < 1e-3,
         `${containerPx}px 에서 가로가 남는다`
@@ -538,10 +589,10 @@ describe("🔴 글꼴이 칸의 폭에서 나온다 — 가로가 남지 않는�
   });
 
   test("🔴 후보 둘을 심어 두고 **클래스가 고른다** — 인라인 style 은 못 덮기 때문이다", () => {
-    const style = serviceReportGridScaleStyle() as Record<string, string>;
+    const style = serviceReportGridScaleStyle(METRICS) as Record<string, string>;
     assert.equal(style["--sr-grid-font-stacked"], serviceReportGridStackedFontCss());
-    assert.equal(style["--sr-grid-font-row"], serviceReportGridRowFontCss());
-    assert.equal(style[SERVICE_REPORT_GRID_PREVIEW_FONT_VAR], serviceReportGridPreviewFontCss());
+    assert.equal(style["--sr-grid-font-row"], serviceReportGridRowFontCss(METRICS));
+    assert.equal(style[SERVICE_REPORT_GRID_PREVIEW_FONT_VAR], serviceReportGridPreviewFontCss(METRICS));
     // 고르는 쪽. 🔴 변수 이름이 상수와 **글자 그대로** 같아야 한다(Tailwind 는 이
     // 문자열을 글자로 훑는다 — 이름이 어긋나면 글꼴이 통째로 밑값으로 떨어진다).
     assert.ok(
@@ -583,7 +634,7 @@ describe("🔴 글꼴은 맑은 고딕 — 문서가 쓰는 그 글꼴", () => {
   });
 
   test("적는 칸과 미리보기가 **같은 글꼴**이다 — 눈으로 바로 견준다", () => {
-    const style = serviceReportGridInputStyle(SERVICE_REPORT_BODY_WRAP_WIDTH, 8);
+    const style = serviceReportGridInputStyle(METRICS.bodyWrapWidth, 8);
     assert.equal(style.fontFamily, SERVICE_REPORT_GRID_FONT_FAMILY);
     assert.equal(serviceReportGridPreviewTextStyle.fontFamily, SERVICE_REPORT_GRID_FONT_FAMILY);
     assert.equal(
@@ -597,7 +648,7 @@ describe("🔴 글꼴은 맑은 고딕 — 문서가 쓰는 그 글꼴", () => {
     // 맑은 고딕은 벡터 글꼴이고 애초에 2:1 을 기대하지 않는다. 홀수를 줘도 던지지
     // 않아야 한다 — 남겨 두면 까닭 없는 예외로 사람을 막는다.
     assert.equal(serviceReportGridInputContentPx(84, 13), 546);
-    assert.doesNotThrow(() => serviceReportGridInputStyle(SERVICE_REPORT_BODY_WRAP_WIDTH, 8));
+    assert.doesNotThrow(() => serviceReportGridInputStyle(METRICS.bodyWrapWidth, 8));
   });
 
   test("🔴 미리보기의 치수가 **문서 실측값**이다 — 9pt · 14.1pt · 15pt", () => {
@@ -626,11 +677,11 @@ describe("🔴 글꼴은 맑은 고딕 — 문서가 쓰는 그 글꼴", () => {
 
 describe("🔴 상한이지 고정 폭이 아니다", () => {
   test("폭은 `maxWidth` 로만 준다 — `width` 로 박지 않았다", () => {
-    const style = serviceReportGridInputStyle(SERVICE_REPORT_BODY_WRAP_WIDTH, 8);
-    assert.equal(style.maxWidth, serviceReportGridInputMaxWidthCss(SERVICE_REPORT_BODY_WRAP_WIDTH));
+    const style = serviceReportGridInputStyle(METRICS.bodyWrapWidth, 8);
+    assert.equal(style.maxWidth, serviceReportGridInputMaxWidthCss(METRICS.bodyWrapWidth));
     assert.equal(style.width, undefined, "입력칸에 고정 폭이 들어 있다");
     // 밑값에서는 지금까지의 614px 그대로다.
-    assert.equal(serviceReportGridInputMaxWidthPx(SERVICE_REPORT_BODY_WRAP_WIDTH), 614);
+    assert.equal(serviceReportGridInputMaxWidthPx(METRICS.bodyWrapWidth), 614);
   });
 
   test("칸은 여전히 화면을 따라 줄어든다 — `w-full` 이 그대로다", () => {
@@ -647,7 +698,7 @@ describe("🔴 상한이지 고정 폭이 아니다", () => {
     assert.equal(SERVICE_REPORT_GRID_INPUT_CLASS, "[field-sizing:content]");
     assert.ok(fieldCode.includes("SERVICE_REPORT_GRID_INPUT_CLASS"), fieldCode.slice(0, 300));
     // 늘어나는 대신 **처음 높이**는 `rows` 그대로여야 한다 — 밑값에서 8줄 + 테두리.
-    const style = serviceReportGridInputStyle(SERVICE_REPORT_BODY_WRAP_WIDTH, 8);
+    const style = serviceReportGridInputStyle(METRICS.bodyWrapWidth, 8);
     assert.equal(
       style.minHeight,
       `calc(${serviceReportGridInputScaledCss(8 * SERVICE_REPORT_GRID_INPUT_LINE_HEIGHT_PX)} + 14px)`
@@ -705,19 +756,16 @@ describe("🔴 안내문이 지금 사실과 맞는다", () => {
 /**
  * 🔴 숫자의 근거 — 지어낸 값이 아니다.
  *
- *   · 칸 수 84·51 은 양식의 열 너비에서 나온다(`contentWrapWidth` — 그 셈과
- *     양식 실측의 대조는 `lib/domain/service-report-body-wrap.test.ts` 와
- *     `lib/xlsx/service-report-template.test.ts` 가 본다).
- *   · 열 너비 75·46.875·8.75 도 같은 자리에서 양식과 대조된다.
+ *   · 칸 수(옛 84·51, 새 85·52)는 **양식의 열 너비**에서 나온다(`contentWrapWidth`).
+ *     그 셈과 실제 양식의 대조는 `lib/xlsx/service-report-template.test.ts` 가 본다.
  *   · 여백 26px 은 공용 입력칸이 두르는 `px-3`(12px씩) + `border`(1px씩)다.
  */
 describe("🔴 폭의 셈이 양식과 입력칸에서 나온다", () => {
-  test("양식에서 온 칸 수 그대로다", () => {
-    assert.equal(SERVICE_REPORT_BODY_WRAP_WIDTH, 84);
-    assert.equal(SERVICE_REPORT_REMARK_WRAP_WIDTH, 51);
-    assert.equal(SERVICE_REPORT_BODY_COLUMN_WIDTH, 75);
-    assert.equal(SERVICE_REPORT_REMARK_COLUMN_WIDTH, 46.875);
-    assert.equal(SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH, 8.75);
+  test("양식에서 온 칸 수 그대로다 — 옛 양식과 새 양식", () => {
+    assert.equal(METRICS.bodyWrapWidth, 84);
+    assert.equal(METRICS.remarkWrapWidth, 51);
+    assert.equal(NEW_METRICS.bodyWrapWidth, 85);
+    assert.equal(NEW_METRICS.remarkWrapWidth, 52);
   });
 
   test("🔴 상한 = 글 폭 + 입력칸의 안쪽 여백 + 테두리", () => {
@@ -731,8 +779,74 @@ describe("🔴 폭의 셈이 양식과 입력칸에서 나온다", () => {
     const borderPx = 1;
     assert.equal(SERVICE_REPORT_GRID_INPUT_FRAME_PX, paddingPx * 2 + borderPx * 2);
 
-    assert.equal(serviceReportGridInputMaxWidthPx(SERVICE_REPORT_BODY_WRAP_WIDTH), 588 + 26);
-    assert.equal(serviceReportGridInputMaxWidthPx(SERVICE_REPORT_REMARK_WRAP_WIDTH), 357 + 26);
+    assert.equal(serviceReportGridInputMaxWidthPx(METRICS.bodyWrapWidth), 588 + 26);
+    assert.equal(serviceReportGridInputMaxWidthPx(METRICS.remarkWrapWidth), 357 + 26);
+    // 🔴 새 양식이면 **한 칸(한글 반 자)만큼 넓어진다** — 85 ÷ 2 × 14 = 595.
+    assert.equal(serviceReportGridInputMaxWidthPx(NEW_METRICS.bodyWrapWidth), 595 + 26);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 **굳힌 폭이 화면 쪽에 남아 있지 않다** (2026-10-18 다섯째 조각)
+ * ============================================================================
+ * 이 조각이 없앤 것은 숫자만이 아니라 **「화면이 폭을 안다」는 구조**다. 다시
+ * 생기면 양식을 저장만 해도 미리보기가 거짓말을 하므로, 이름과 숫자 양쪽으로
+ * 막는다.
+ * ============================================================================
+ */
+describe("🔴 굳힌 폭이 없다", () => {
+  const gridSource = read("./service-report-grid.ts");
+  const gridCode = code(gridSource);
+
+  test("없어진 상수 이름이 화면 세 파일 어디에도 없다", () => {
+    for (const [name, source] of [
+      ["본문 폼", bodyCode],
+      ["미리보기", previewCode],
+      ["치수 모듈", gridCode],
+    ] as const) {
+      for (const stale of [
+        "SERVICE_REPORT_BODY_COLUMN_WIDTH",
+        "SERVICE_REPORT_REMARK_COLUMN_WIDTH",
+        "SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH",
+        "SERVICE_REPORT_BODY_WRAP_WIDTH",
+        "SERVICE_REPORT_REMARK_WRAP_WIDTH",
+      ]) {
+        assert.ok(!source.includes(stale), `${name}에 ${stale} 가 남아 있다`);
+      }
+    }
+  });
+
+  test("🔴 치수 모듈의 코드에 양식 폭 숫자가 없다", () => {
+    for (const literal of ["75", "46.875", "8.75", "1.875", "1.90625", "84", "51"]) {
+      assert.ok(
+        !new RegExp(`=\\s*${literal.replace(".", "\\.")}\\b`).test(gridCode),
+        `치수 모듈에 양식 폭 ${literal} 이 굳어 있다`
+      );
+    }
+  });
+
+  test("🔴 하한·기울기가 **상수가 아니라 함수**다 — 폭이 바뀌면 따라가야 한다", () => {
+    // 새 양식은 칸이 넓어서 같은 1152px 에 더 작은 글꼴로 들어간다.
+    assert.ok(
+      serviceReportGridMinFontSizePx(NEW_METRICS) < serviceReportGridMinFontSizePx(METRICS),
+      "양식이 넓어졌는데 하한이 그대로다"
+    );
+    // 그리고 그 하한이 **각 양식에서** 1152px 를 딱 채운다.
+    for (const metrics of [METRICS, NEW_METRICS]) {
+      assert.ok(
+        Math.abs(
+          serviceReportGridRowWidthPx(metrics, serviceReportGridMinFontSizePx(metrics)) -
+            SERVICE_REPORT_GRID_SIDE_BY_SIDE_PX
+        ) < 1e-6
+      );
+    }
+    // CSS 식도 양식마다 다른 수를 낸다 — 한 벌로 굳어 있지 않다.
+    assert.notEqual(serviceReportGridRowFontCss(METRICS), serviceReportGridRowFontCss(NEW_METRICS));
+    assert.notEqual(
+      serviceReportGridPreviewFontCss(METRICS),
+      serviceReportGridPreviewFontCss(NEW_METRICS)
+    );
   });
 });
 

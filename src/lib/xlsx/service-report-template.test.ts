@@ -13,15 +13,13 @@ import {
   WORKBOOK_PART,
 } from "./workbook-parts";
 import {
-  SERVICE_REPORT_BODY_COLUMN_WIDTH,
-  SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH,
-  SERVICE_REPORT_REMARK_COLUMN_WIDTH,
+  serviceReportBodyMetrics,
   serviceReportBodyPreviewSections,
 } from "@/lib/domain/service-report-body-wrap";
 /** 🔴 「한 벌인가」를 보려고 **원본 모듈째** 가져온다(아래 한 벌 시험). */
 import * as wrap from "@/lib/domain/service-report-body-wrap";
 import { textDisplayWidth } from "@/lib/domain/text-wrap";
-import { translateKyosanTerm } from "@/lib/kyosan/report-terms";
+import { koreanKyosanDocumentText, translateKyosanTerm } from "@/lib/kyosan/report-terms";
 import {
   clearDrawingTextInRows,
   contentWrapWidth,
@@ -31,6 +29,8 @@ import {
   normalizeBodyRowHeights,
   readColumnRangeWidth,
   readSectionStartRows,
+  readServiceReportColumnWidths,
+  serviceReportColumnWidthsFromSheet,
   SERVICE_REPORT_ACTIONS_INTRO,
   SERVICE_REPORT_BODY_LABELS,
   SERVICE_REPORT_CELLS,
@@ -97,10 +97,13 @@ test("본문 자리는 양식의 글자수 도우미(LEN 공유 수식)가 알�
 });
 
 /**
- * 🔴 본문 한 줄의 실제 폭. `readColumnRangeWidth` 가 읽는 75칸은 **기본 글꼴**
- * 기준이고, 본문 칸에 박힌 글꼴은 더 작아서 같은 자리에 더 들어간다.
+ * 🔴 **본문 한 줄의 폭을 여기 굳혀 두던 상수가 없어졌다**(2026-10-18 다섯째 조각).
+ *
+ * `contentWrapWidth(75)` 로 한 번 재어 두고 실제 양식 시험들이 그 값을 썼는데,
+ * 양식이 여럿이 되고 열 너비가 갈리면서(옛 1.875 · 새 1.90625) 그 수가 「어느
+ * 양식의 폭인가」를 말할 수 없게 됐다. 이제 **그 양식에서 읽는다**
+ * (`templateMetrics`).
  */
-const BODY_WRAP_WIDTH = contentWrapWidth(75);
 
 test("🔴 한 줄의 폭은 양식의 <cols> 에서 읽는다 — 코드에 박지 않는다", () => {
   // H~AU 40열 × 1.875 = 75칸.
@@ -114,6 +117,36 @@ test("🔴 한 줄의 폭은 양식의 <cols> 에서 읽는다 — 코드에 박
   // <cols> 에 없는 열은 기본 너비로 센다.
   const noCols = SYNTHETIC_SHEET.replace(/<cols>[\s\S]*?<\/cols>/, "");
   assert.equal(readColumnRangeWidth(noCols, "H", "I"), 8.43 * 2);
+});
+
+/**
+ * ============================================================================
+ * 🔴 **화면에 넘길 칸 폭 셋** — 주소를 박지 않고 양식에서 찾아낸다 (2026-10-18)
+ * ============================================================================
+ * 미리보기가 쓰는 폭이 더는 화면에 굳어 있지 않다. 서버가 그 건의 양식에서 읽어
+ * props 로 넘기고, 읽는 셈이 **채우개가 줄을 나눌 때 쓰는 그것과 같은 함수**다.
+ * 여기서는 양식 없이 뼈대 시트로 「어디를 재는가」를 못 박는다.
+ * ============================================================================
+ */
+test("🔴 본문·비고·라벨 폭을 양식 안에서 찾아 읽는다", () => {
+  assert.deepEqual(serviceReportColumnWidthsFromSheet(SYNTHETIC_SHEET), {
+    body: 40 * 1.875, // H~AU — 채우개가 줄을 나눌 때 재는 바로 그 범위
+    remark: 25 * 1.875, // H~AF — 「비　고」 병합과 첫 줄 병합이 알려 준다
+    label: 5 * 1.75, // C~G — 내용 열 **바로 왼쪽**까지
+  });
+
+  // 🔴 사람이(또는 Excel 이) 열 너비를 다시 쓰면 **세 값이 다 따라간다.**
+  //    2026-10-18 에 실제로 일어난 일이 이것이다(1.875 → 1.90625).
+  const resaved = SYNTHETIC_SHEET.replace('max="47" width="1.875"', 'max="47" width="1.90625"');
+  assert.deepEqual(serviceReportColumnWidthsFromSheet(resaved), {
+    body: 40 * 1.90625,
+    remark: 25 * 1.90625,
+    label: 5 * 1.75,
+  });
+
+  // 그리고 그 폭이 곧 화면이 쓸 줄 폭이 된다 — 84칸이 85칸으로.
+  assert.equal(serviceReportBodyMetrics(serviceReportColumnWidthsFromSheet(SYNTHETIC_SHEET)).bodyWrapWidth, 84);
+  assert.equal(serviceReportBodyMetrics(serviceReportColumnWidthsFromSheet(resaved)).bodyWrapWidth, 85);
 });
 
 test("🔴 줄 폭은 기본 글꼴이 아니라 **칸에 박힌 글꼴** 기준으로 환산한다", () => {
@@ -1768,7 +1801,8 @@ for (const total of [40, 60]) {
 }
 
 test("🔴 폭을 넘는 긴 줄은 낱말을 자르지 않고 나뉜다", { skip: skipRepair }, () => {
-  // H~AU 40열 × 1.875 = 75칸 → 본문 글꼴 기준 84칸(`BODY_WRAP_WIDTH`).
+  // 🔴 폭은 **그 양식**이 말한다 — 옛 양식 84칸 · 새 양식 85칸. 수를 적지 않는다.
+  const wrapWidth = templateMetrics(repairPath as string).bodyWrapWidth;
   const long =
     "출력이 나오지 않는다는 연락을 받아 현지에서 확인한 결과 전원부 퓨즈가 단선되어 있었고 " +
     "정합기 연결부의 접촉 불량이 함께 발견되어 두 곳을 모두 손보았습니다.";
@@ -1793,10 +1827,7 @@ test("🔴 폭을 넘는 긴 줄은 낱말을 자르지 않고 나뉜다", { ski
   }
   assert.ok(written.length > 1, "긴 줄이 나뉘지 않았다");
   for (const line of written) {
-    assert.ok(
-      textDisplayWidth(line) <= BODY_WRAP_WIDTH,
-      `"${line}" 이 ${BODY_WRAP_WIDTH}칸을 넘는다`
-    );
+    assert.ok(textDisplayWidth(line) <= wrapWidth, `"${line}" 이 ${wrapWidth}칸을 넘는다`);
   }
   // 낱말을 자르지 않았으므로 공백만 빼면 원문 그대로다.
   assert.equal(written.join("").replace(/\s/gu, ""), long.replace(/\s/gu, ""));
@@ -1818,16 +1849,50 @@ test("🔴 폭을 넘는 긴 줄은 낱말을 자르지 않고 나뉜다", { ski
  * ============================================================================
  */
 
+/**
+ * 🔴 **짝맞춤을 돌릴 양식들** (2026-10-18 다섯째 조각).
+ *
+ * 전에는 옛 양식 하나로만 돌렸다. 그런데 사용자가 양식 넷에 **도장만 바꿔
+ * 저장**했더니 Excel 이 열 너비를 다시 써서 본문 줄 폭이 84칸 → 85칸이 되었다 —
+ * 그러니 이 조각의 증명은 「한 양식에서 맞는다」가 아니라 **「어떤 양식을 써도
+ * 맞는다」**여야 한다. 설정 안 된 것은 건너뛴다(양식은 저장소에 두지 않는다).
+ *
+ * 🔴 **옛 양식도 남는다** — 새 설정이 비면 거기로 물러서므로
+ * (`storage/service-report-template.ts` 의 '물러서기'), 물러선 동안에도 맞아야 한다.
+ */
+const PARITY_TEMPLATES = [
+  { name: "옛 양식", variable: "REPAIR_REPORT_TEMPLATE_PATH" },
+  { name: "매쳐 양식", variable: "MATCHER_REPAIR_REPORT_TEMPLATE_PATH" },
+  { name: "제너레이터 양식", variable: "GENERATOR_REPAIR_REPORT_TEMPLATE_PATH" },
+] as const;
+
+/**
+ * 그 양식이 말하는 칸 폭 한 벌.
+ *
+ * 🔴 **작성 화면이 쓰는 것과 똑같은 길**이다(`page.tsx` 와 같은 두 함수). 시험이
+ * 따로 재면 「화면이 받는 값」이 아니라 「시험이 재는 값」을 보게 된다.
+ */
+function templateMetrics(templatePath: string) {
+  return serviceReportBodyMetrics(readServiceReportColumnWidths(readFileSync(templatePath)));
+}
+
 /** 화면이 넘기는 모양 그대로 — 전부 지어낸 글이다. */
 const PARITY_SAMPLES: readonly {
   name: string;
   findings: readonly string[];
-  /** 🔴 문서에서 몇 줄이 되는가. 안 적어 두면 「둘 다 안 나눈다」로도 시험이 통과한다. */
-  rows: number;
+  /**
+   * 🔴 문서에서 몇 줄이 되는가 — **줄 폭마다 실측**이다.
+   *
+   * 수 하나로는 못 적는다. 폭이 바뀌면 나뉘는 자리가 바뀌기 때문이다(실측:
+   * 「영숫자만」의 첫 줄이 딱 85칸이라 84칸 양식에서는 둘로 쪼개지고 85칸
+   * 양식에서는 한 줄에 들어간다). 여기 없는 폭이면 아래의 **규칙**만 본다 —
+   * 규칙은 폭을 안 타고, 「둘 다 안 나눈다」를 그것이 막는다.
+   */
+  rows: Readonly<Record<number, number>>;
 }[] = [
   {
     name: "한글만 — 한 줄에 안 들어간다",
-    rows: 3,
+    rows: { 84: 3, 85: 3 },
     findings: [
       "출력이 나오지 않는다는 연락을 받아 현지에서 확인한 결과 전원부 퓨즈가 단선되어 있었고 " +
         "정합기 연결부의 접촉 불량이 함께 발견되었습니다.",
@@ -1835,8 +1900,9 @@ const PARITY_SAMPLES: readonly {
     ],
   },
   {
+    // 🔴 첫 줄이 **딱 85칸**이다 — 두 양식에서 결과가 갈리는 자리를 일부러 둔다.
     name: "영숫자만 — 모델명·수치가 섞여 덩어리가 많다",
-    rows: 3,
+    rows: { 84: 3, 85: 2 },
     findings: [
       "RF-3000B 13.56MHz 30kW OUTPUT 0.0W REFLECT 0.0W DC-BUS 320V CTRL-BD REV2.1 SN 1234567",
       "FUSE 10A 250V x2 REPLACED 2026-10-18 TEST OK",
@@ -1844,7 +1910,7 @@ const PARITY_SAMPLES: readonly {
   },
   {
     name: "섞인 것 — 한글 문장 안에 모델명이 든다",
-    rows: 2,
+    rows: { 84: 2, 85: 2 },
     findings: [
       "13.56MHz 30kW 정합기(RF-3000B)의 출력단 AMP 기판에서 소손이 확인되어 기판을 교체하였고, " +
         "교체 후 DC-BUS 전압이 320V 로 정상 복귀하였습니다.",
@@ -1852,94 +1918,157 @@ const PARITY_SAMPLES: readonly {
   },
   {
     name: "아주 긴 한 줄 — 공백이 하나도 없다",
-    rows: 2,
+    rows: { 84: 2, 85: 2 },
     findings: [
       "출력이나오지않는다는연락을받아현지에서확인한결과전원부퓨즈가단선되어있었고정합기연결부의접촉불량이함께발견되어두곳을모두손보았습니다.이후출력을확인하였습니다.",
     ],
   },
   {
     name: "빈 줄이 섞인 것 — 사람이 사이를 띄운 줄은 그대로 남는다",
-    rows: 5,
+    rows: { 84: 5, 85: 5 },
     findings: ["1차 점검", "", "외관 손상 없음", "", "절연 저항 측정값 500MΩ 이상"],
   },
   {
     name: "🔴 연락서 낱말이 든 줄 — 문서에서 한글로 바뀐 뒤에 나뉜다",
-    rows: 2,
+    rows: { 84: 2, 85: 2 },
     findings: ["部品不良", "외관 손상 없음"],
   },
 ] as const;
 
-for (const sample of PARITY_SAMPLES) {
-  test(`🔴 미리보기와 문서가 같게 나뉜다 — ${sample.name}`, { skip: skipRepair }, () => {
-    const actions = ["퓨즈 교체"];
-    const filled = fill(repairPath as string, {
-      ...REPAIR_INPUT,
-      // 🔴 정형 문구는 비운다 — 「확인내용」에 **준 줄만** 들어가야 견줄 수 있다.
-      body: { findings: sample.findings, findingsIntro: "", actions, summary: [] },
-    });
+for (const template of PARITY_TEMPLATES) {
+  const templatePath = process.env[template.variable];
+  const skip = templatePath ? false : `${template.variable} 가 설정되지 않았습니다`;
 
-    // 「조치」 라벨이 붙은 줄이 곧 「확인내용」이 끝난 자리다.
-    let actionsRow = 0;
-    for (let row = REPAIR_FINDINGS_ROW; row <= TEMPLATE_BODY_LAST_ROW + 40; row += 1) {
-      if (filled.text(`C${row}`) === SERVICE_REPORT_BODY_LABELS.actions[0]) {
-        actionsRow = row;
-        break;
+  for (const sample of PARITY_SAMPLES) {
+    test(
+      `🔴 미리보기와 문서가 같게 나뉜다 — ${template.name} · ${sample.name}`,
+      { skip },
+      () => {
+        const path = templatePath as string;
+        // 🔴 화면이 받는 바로 그 값으로 미리보기를 돌린다 — 시험이 따로 재지 않는다.
+        const metrics = templateMetrics(path);
+
+        const actions = ["퓨즈 교체"];
+        const filled = fill(path, {
+          ...REPAIR_INPUT,
+          // 🔴 정형 문구는 비운다 — 「확인내용」에 **준 줄만** 들어가야 견줄 수 있다.
+          body: { findings: sample.findings, findingsIntro: "", actions, summary: [] },
+        });
+
+        // 「조치」 라벨이 붙은 줄이 곧 「확인내용」이 끝난 자리다.
+        let actionsRow = 0;
+        for (let row = REPAIR_FINDINGS_ROW; row <= TEMPLATE_BODY_LAST_ROW + 40; row += 1) {
+          if (filled.text(`C${row}`) === SERVICE_REPORT_BODY_LABELS.actions[0]) {
+            actionsRow = row;
+            break;
+          }
+        }
+        assert.ok(actionsRow > 0, "「조치」 구역을 찾지 못했다");
+
+        const written: string[] = [];
+        for (let row = REPAIR_FINDINGS_ROW; row < actionsRow; row += 1) {
+          written.push(filled.text(`H${row}`) ?? "");
+        }
+        /**
+         * 🔴 **뒤쪽 빈 줄만** 걷어낸다. 「조치」는 양식이 정한 행에서 시작하므로
+         * 확인내용이 짧으면 그 사이가 빈 채로 남는다 — 그것은 나누기의 결과가
+         * 아니라 **행 배치**이고, 화면은 애초에 그리지 않는다. 가운데 빈 줄은
+         * 사람이 넣은 줄이라 그대로 둔다.
+         */
+        while (written.length > 0 && written[written.length - 1] === "") written.pop();
+
+        const preview = serviceReportBodyPreviewSections(
+          { findingsIntro: "", findings: sample.findings, actions, summary: [] },
+          metrics.bodyWrapWidth
+        );
+        assert.equal(preview[0]?.title, "확인내용");
+        assert.deepEqual(preview[0]?.lines, written);
+
+        /**
+         * 🔴 **「둘 다 안 나눈다」로도 통과하는 것**을 여기서 막는다. 수를 하나
+         * 적어 두는 대신 **규칙**으로 적는다 — 양식마다 줄 폭이 달라 수가
+         * 갈리기 때문이다(「영숫자만」이 84칸에서 3줄, 85칸에서 2줄). 규칙은
+         * 폭을 안 탄다.
+         */
+        const sourceLines = sample.findings.map(koreanKyosanDocumentText);
+        const needsWrap = sourceLines.some(
+          (line) => textDisplayWidth(line) > metrics.bodyWrapWidth
+        );
+        if (needsWrap) {
+          assert.ok(
+            written.length > sourceLines.length,
+            `${metrics.bodyWrapWidth}칸을 넘는 줄이 있는데 ${written.length}줄뿐이다 — 안 나뉘었다`
+          );
+        } else {
+          assert.equal(written.length, sourceLines.length, "안 넘치는데 줄이 늘었다");
+        }
+        // 그 폭의 실측을 적어 두었으면 수까지 못 박는다.
+        const measured = sample.rows[metrics.bodyWrapWidth];
+        if (measured !== undefined) assert.equal(written.length, measured);
+
+        // 나뉜 줄은 하나도 칸을 넘지 않고, 낱말도 글자도 잃지 않았다.
+        for (const line of written) {
+          assert.ok(textDisplayWidth(line) <= metrics.bodyWrapWidth, `"${line}" 이 칸을 넘는다`);
+        }
+        assert.equal(
+          written.join("").replace(/\s/gu, ""),
+          sourceLines.join("").replace(/\s/gu, "")
+        );
       }
-    }
-    assert.ok(actionsRow > 0, "「조치」 구역을 찾지 못했다");
-
-    const written: string[] = [];
-    for (let row = REPAIR_FINDINGS_ROW; row < actionsRow; row += 1) {
-      written.push(filled.text(`H${row}`) ?? "");
-    }
-    /**
-     * 🔴 **뒤쪽 빈 줄만** 걷어낸다. 「조치」는 양식이 정한 행에서 시작하므로
-     * 확인내용이 짧으면 그 사이가 빈 채로 남는다 — 그것은 나누기의 결과가
-     * 아니라 **행 배치**이고, 화면은 애초에 그리지 않는다. 가운데 빈 줄은
-     * 사람이 넣은 줄이라 그대로 둔다.
-     */
-    while (written.length > 0 && written[written.length - 1] === "") written.pop();
-
-    const preview = serviceReportBodyPreviewSections({
-      findingsIntro: "",
-      findings: sample.findings,
-      actions,
-      summary: [],
-    });
-    assert.equal(preview[0]?.title, "확인내용");
-    assert.deepEqual(preview[0]?.lines, written);
-    // 🔴 줄 수까지 못 박는다 — 둘이 **나란히** 안 나누게 되어도 위 견줌은 통과한다.
-    assert.equal(written.length, sample.rows);
-  });
+    );
+  }
 }
 
-test("🔴 양식의 칸 폭이 화면이 들고 있는 값과 같다", { skip: skipRepair }, () => {
-  /**
-   * 🔴 서버는 이 상수를 안 쓴다 — 채우개는 지금도 양식의 `<cols>` 를 그때그때
-   * 읽는다. 브라우저에는 그 파일이 없어서 화면만 굳힌 값을 보고, 그래서 양식이
-   * 바뀐 날 **여기가 먼저 깨져야** 한다.
-   */
+/**
+ * ============================================================================
+ * 🔴 **화면이 받는 폭이 채우개가 쓰는 폭과 같은 수인가** (2026-10-18 다섯째 조각)
+ * ============================================================================
+ * 전에 여기 있던 시험은 「양식의 칸 폭이 **화면이 들고 있는 상수**와 같다」였다.
+ * 그 전제가 사라졌다 — 화면은 이제 상수를 안 들고 있고, 서버가 양식에서 읽어
+ * 넘긴다. 그래서 볼 것이 바뀐다: **두 길이 같은 수에 닿는가.**
+ *
+ *   채우개  `fillSheet` 안에서 `contentWrapWidth(readColumnRangeWidth(…))`
+ *   화면    `page.tsx` 에서 `serviceReportBodyMetrics(readServiceReportColumnWidths(…))`
+ *
+ * 둘이 갈라지면 미리보기가 거짓말을 한다. 짝맞춤 시험이 **결과로** 그것을 잡지만,
+ * 여기서는 **셈 자체**를 맞춰 본다 — 어느 쪽이 틀렸는지 바로 보인다.
+ * ============================================================================
+ */
+test("🔴 화면에 넘기는 칸 폭이 채우개가 재는 폭과 같다", { skip: skipRepair }, () => {
   const archive = ZipArchive.fromBuffer(readFileSync(repairPath as string));
   const sheetXml = archive.readText(resolveSheetPart(archive, SERVICE_REPORT_SHEET_NAME));
+  const widths = readServiceReportColumnWidths(readFileSync(repairPath as string));
 
+  // ① 본문 — 채우개가 줄을 나누기 전에 재는 **그 범위**와 같은 수여야 한다.
   const body = findBodyBlock(sheetXml);
   assert.equal(
-    readColumnRangeWidth(sheetXml, body.contentColumn, body.contentEndColumn),
-    SERVICE_REPORT_BODY_COLUMN_WIDTH
+    widths.body,
+    readColumnRangeWidth(sheetXml, body.contentColumn, body.contentEndColumn)
+  );
+  assert.equal(
+    serviceReportBodyMetrics(widths).bodyWrapWidth,
+    contentWrapWidth(readColumnRangeWidth(sheetXml, body.contentColumn, body.contentEndColumn))
   );
 
-  // 비고는 채우개가 나누지 않아 폭을 읽는 자리가 없다 — 양식의 병합을 직접 본다.
+  // ② 라벨 — 내용 열 **바로 왼쪽**까지. 한 열의 너비가 본문과 달라 곱으로 못 센다.
+  assert.equal(body.labelColumn, "C");
+  assert.equal(widths.label, readColumnRangeWidth(sheetXml, "C", "G"));
+  assert.notEqual(widths.label, (widths.body / 40) * 5);
+
+  // ③ 비고 — 「비　고」 병합과 첫 줄 병합이 알려 주는 범위.
   assert.ok(sheetXml.includes('<mergeCell ref="H60:AF60"/>'), "비고 칸의 병합이 바뀌었다");
-  assert.equal(readColumnRangeWidth(sheetXml, "H", "AF"), SERVICE_REPORT_REMARK_COLUMN_WIDTH);
+  assert.equal(widths.remark, readColumnRangeWidth(sheetXml, "H", "AF"));
 
   /**
-   * 🔴 본문 **라벨 칸**(`확　내`/`인　용`)의 폭도 같은 이유로 화면이 들고 있다
-   * (2026-10-18 셋째 조각 — 미리보기가 라벨 칸을 문서와 같은 폭으로 그린다).
-   * ⚠️ 라벨 열은 한 열이 1.75 라 본문 열(1.875)과 **곱하는 수가 다르다.**
+   * 🔴 그리고 **숫자가 코드에 안 박혀 있다.** 옛 양식을 쓰는 지금은 75·46.875·
+   * 8.75 가 나오지만, 그것은 이 파일이 아는 값이 아니라 **양식이 말한 값**이다 —
+   * 아래는 그 사실을 「양식이 바뀌면 값도 바뀐다」로 확인한다.
    */
-  assert.equal(body.labelColumn, "C");
-  assert.ok(sheetXml.includes('<mergeCell ref="C31:G31"/>'), "본문 라벨 칸의 병합이 바뀌었다");
-  assert.equal(readColumnRangeWidth(sheetXml, "C", "G"), SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH);
+  const resaved = sheetXml.replace(/<col ([^>]*)width="1.875"/g, '<col $1width="1.90625"');
+  assert.notEqual(resaved, sheetXml, "본문 열 너비를 바꿔 보지 못했다 — 양식이 바뀌었다");
+  const after = serviceReportColumnWidthsFromSheet(resaved);
+  assert.ok(after.body > widths.body, "열 너비를 바꿨는데 폭이 안 따라갔다");
+  assert.ok(after.remark > widths.remark, "비고 폭이 안 따라갔다");
 });
 
 test("비고는 여전히 양식의 줄 수를 넘을 수 없다", { skip: skipRepair }, () => {
@@ -2132,14 +2261,12 @@ test("확인내용이 비어 있으면 정형 문구만 남지 않는다", { ski
 });
 
 test("🔴 정형 문구도 폭을 넘으면 본문 줄과 같은 규칙으로 나뉜다", { skip: skipInspection }, () => {
-  // 아래 문장은 본문 한 줄(`BODY_WRAP_WIDTH`)보다 길다.
+  // 아래 문장은 본문 한 줄보다 길다. 🔴 폭은 **그 양식**이 말한다.
+  const wrapWidth = templateMetrics(inspectionPath as string).bodyWrapWidth;
   const long =
     "인수품에 대하여 이하의 항목을 확인하였습니다. " +
     "아울러 반입 시 외관과 부속품 구성까지 함께 확인하였음을 알려 드립니다.";
-  assert.ok(
-    textDisplayWidth(long) > BODY_WRAP_WIDTH,
-    "시험 준비 실패 — 문장이 한 줄에 들어간다"
-  );
+  assert.ok(textDisplayWidth(long) > wrapWidth, "시험 준비 실패 — 문장이 한 줄에 들어간다");
 
   const filled = fill(inspectionPath as string, {
     ...INSPECTION_INPUT,
@@ -2162,10 +2289,7 @@ test("🔴 정형 문구도 폭을 넘으면 본문 줄과 같은 규칙으로 �
   }
   assert.ok(written.length > 2, "정형 문구가 나뉘지 않았다");
   for (const line of written) {
-    assert.ok(
-      textDisplayWidth(line) <= BODY_WRAP_WIDTH,
-      `"${line}" 이 ${BODY_WRAP_WIDTH}칸을 넘는다`
-    );
+    assert.ok(textDisplayWidth(line) <= wrapWidth, `"${line}" 이 ${wrapWidth}칸을 넘는다`);
   }
   // 낱말을 자르지 않았으므로 공백만 빼면 문구 + 확인 항목 그대로다.
   assert.equal(

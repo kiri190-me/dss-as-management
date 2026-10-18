@@ -1,10 +1,8 @@
 import type { CSSProperties } from "react";
 
 import {
-  SERVICE_REPORT_BODY_COLUMN_WIDTH,
-  SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH,
-  SERVICE_REPORT_BODY_WRAP_WIDTH,
   serviceReportColumnWidthPx,
+  type ServiceReportBodyMetrics,
 } from "@/lib/domain/service-report-body-wrap";
 
 /**
@@ -106,6 +104,19 @@ import {
  *
  * 🔴 숫자를 화면에 적지 않는다. 적는 칸·미리보기·배치용 상자가 전부 이 파일의
  * 함수를 부른다.
+ *
+ * ============================================================================
+ * 🔴 **칸 폭은 이 파일에도 없다 — 인자로 들어온다** (2026-10-18 다섯째 조각)
+ * ============================================================================
+ * 예전에는 양식의 열 너비(75·46.875·8.75)와 줄 폭(84·51)을 도메인 모듈이 상수로
+ * 들고 있었고 이 파일이 그것을 가져다 썼다. 사용자가 양식에 **도장만 바꿔
+ * 저장했더니 Excel 이 열 너비를 다시 써서**(1.875 → 1.90625) 그 상수가 틀어졌다.
+ *
+ * 이제 폭은 **서버가 그 건이 쓸 양식에서 읽어** props 로 내려보낸다
+ * (`ServiceReportBodyMetrics` — `domain/service-report-body-wrap.ts` 머리말).
+ * 그래서 아래 함수 중 폭을 쓰는 것들은 전부 **`metrics` 를 첫 인자로 받는다.**
+ * 모듈 꼭대기에서 계산되던 하한·기울기도 같은 이유로 **함수**가 되었다 — 그것들이
+ * 상수로 남아 있으면 폭이 바뀌어도 안 따라간다.
  * ============================================================================
  */
 
@@ -253,10 +264,11 @@ export function serviceReportGridInputMaxWidthPx(
 /**
  * 미리보기 상자의 폭 — **문서의 칸 그 자체**에 확대 배율을 곱한 것.
  *
- * @param columnWidth 그 칸의 **엑셀 열 너비**(`SERVICE_REPORT_BODY_COLUMN_WIDTH`
- *   등). 🔴 줄 폭(84·51)이 아니다 — 둘 다 그냥 수라서 바꿔 넣어도 조용히 지나간다.
+ * @param columnWidth 그 칸의 **엑셀 열 너비**(`metrics.columns.body` 등 — 서버가
+ *   양식에서 읽어 넘긴 값). 🔴 줄 폭(84·85)이 아니다 — 둘 다 그냥 수라서 바꿔
+ *   넣어도 조용히 지나간다.
  * @param previewFontSizePx 미리보기 글꼴 크기. 기본값(9pt)이면 **문서 그대로**다:
- *   본문 75칸 → **600px** · 비고 46.875칸 → **375px** · 라벨 8.75칸 → **70px**
+ *   옛 양식 본문 75칸 → **600px** · 비고 46.875칸 → 375px · 라벨 8.75칸 → 70px
  */
 export function serviceReportGridDocumentBoxPx(
   columnWidth: number,
@@ -266,13 +278,6 @@ export function serviceReportGridDocumentBoxPx(
     serviceReportColumnWidthPx(columnWidth),
     previewFontSizePx
   );
-}
-
-/** 본문 라벨 칸(`확　내`/`인　용`)의 폭 — 양식의 `C`~`G` 다. */
-export function serviceReportGridLabelBoxPx(
-  previewFontSizePx: number = SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX
-): number {
-  return serviceReportGridDocumentBoxPx(SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH, previewFontSizePx);
 }
 
 /**
@@ -363,21 +368,19 @@ export function serviceReportGridDocumentBoxCss(columnWidth: number): string {
   return serviceReportGridPreviewScaledCss(serviceReportColumnWidthPx(columnWidth));
 }
 
-/** 본문 라벨 칸의 폭 CSS — 양식의 `C`~`G`. */
-export function serviceReportGridLabelBoxCss(): string {
-  return serviceReportGridDocumentBoxCss(SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH);
-}
-
 /**
  * 미리보기 상자 **전체**(라벨 칸 + 본문 칸 + 좌우 테두리)의 폭.
  *
  * 🔴 테두리 2px 는 배율을 안 탄다 — 그래서 고정분으로 따로 더한다. 빠뜨리면 딱
  * 맞춰 놓은 줄이 2px 넘쳐 미리보기에 가로 스크롤막대가 뜬다.
  */
-export function serviceReportGridPreviewBoxWidthPx(previewFontSizePx: number): number {
+export function serviceReportGridPreviewBoxWidthPx(
+  metrics: ServiceReportBodyMetrics,
+  previewFontSizePx: number
+): number {
   return (
-    serviceReportGridLabelBoxPx(previewFontSizePx) +
-    serviceReportGridDocumentBoxPx(SERVICE_REPORT_BODY_COLUMN_WIDTH, previewFontSizePx) +
+    serviceReportGridDocumentBoxPx(metrics.columns.label, previewFontSizePx) +
+    serviceReportGridDocumentBoxPx(metrics.columns.body, previewFontSizePx) +
     SERVICE_REPORT_GRID_PREVIEW_BORDER_PX
   );
 }
@@ -396,11 +399,14 @@ export function serviceReportGridPreviewFontSizePx(fontSizePx: number): number {
  * 글꼴 크기를 정하는 식이 이 함수의 **역산**이다. 둘을 따로 적으면 한쪽만 고쳐지는
  * 날이 오고, 그날 가로가 남거나 넘친다.
  */
-export function serviceReportGridRowWidthPx(fontSizePx: number): number {
+export function serviceReportGridRowWidthPx(
+  metrics: ServiceReportBodyMetrics,
+  fontSizePx: number
+): number {
   return (
-    serviceReportGridInputMaxWidthPx(SERVICE_REPORT_BODY_WRAP_WIDTH, fontSizePx) +
+    serviceReportGridInputMaxWidthPx(metrics.bodyWrapWidth, fontSizePx) +
     SERVICE_REPORT_GRID_ROW_GAP_PX +
-    serviceReportGridPreviewBoxWidthPx(serviceReportGridPreviewFontSizePx(fontSizePx))
+    serviceReportGridPreviewBoxWidthPx(metrics, serviceReportGridPreviewFontSizePx(fontSizePx))
   );
 }
 
@@ -410,32 +416,48 @@ const ROW_FIXED_PX =
   SERVICE_REPORT_GRID_ROW_GAP_PX +
   SERVICE_REPORT_GRID_PREVIEW_BORDER_PX;
 
-/** 글꼴 1px 당 늘어나는 폭. 위 함수에서 뽑는다 — 수를 두 번 적지 않는다. */
-const ROW_SLOPE_PX =
-  (serviceReportGridRowWidthPx(SERVICE_REPORT_GRID_INPUT_FONT_SIZE_PX) - ROW_FIXED_PX) /
-  SERVICE_REPORT_GRID_INPUT_FONT_SIZE_PX;
+/**
+ * 글꼴 1px 당 늘어나는 폭. 위 함수에서 뽑는다 — 수를 두 번 적지 않는다.
+ *
+ * 🔴 **상수가 아니라 함수다.** 양식의 칸 폭이 바뀌면 이 기울기도 바뀌어야 하는데,
+ * 모듈이 뜰 때 한 번 재어 두면 그날로 어긋난다.
+ */
+function rowSlopePx(metrics: ServiceReportBodyMetrics): number {
+  return (
+    (serviceReportGridRowWidthPx(metrics, SERVICE_REPORT_GRID_INPUT_FONT_SIZE_PX) - ROW_FIXED_PX) /
+    SERVICE_REPORT_GRID_INPUT_FONT_SIZE_PX
+  );
+}
 
-/** 미리보기 글꼴 1px 당 늘어나는 상자 폭(테두리 뺀 것). */
-const PREVIEW_SLOPE_PX =
-  (serviceReportGridPreviewBoxWidthPx(SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX) -
-    SERVICE_REPORT_GRID_PREVIEW_BORDER_PX) /
-  SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX;
+/** 미리보기 글꼴 1px 당 늘어나는 상자 폭(테두리 뺀 것). 위와 같은 이유로 함수다. */
+function previewSlopePx(metrics: ServiceReportBodyMetrics): number {
+  return (
+    (serviceReportGridPreviewBoxWidthPx(metrics, SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX) -
+      SERVICE_REPORT_GRID_PREVIEW_BORDER_PX) /
+    SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX
+  );
+}
 
 /** 그 폭을 **딱 채우는** 글꼴 크기 — `serviceReportGridRowWidthPx` 의 역산이다. */
-export function serviceReportGridFontSizeForRowWidth(widthPx: number): number {
-  return (widthPx - ROW_FIXED_PX) / ROW_SLOPE_PX;
+export function serviceReportGridFontSizeForRowWidth(
+  metrics: ServiceReportBodyMetrics,
+  widthPx: number
+): number {
+  return (widthPx - ROW_FIXED_PX) / rowSlopePx(metrics);
 }
 
 /**
  * 🔴 적는 칸 글꼴의 **하한** — 나란히 설 수 있는 가장 좁은 폭을 딱 채우는 크기.
  *
- * 지어낸 값이 아니라 `@6xl`(1152px)에서 역산한 값이다(≈ 12.2px, 미리보기로는
- * ≈ 10.5px). 더 좁아지면 글자를 더 줄이는 대신 **미리보기를 아래로 내린다** —
- * 그 아래에서는 지금까지와 같은 밑값(14px)으로 선다.
+ * 지어낸 값이 아니라 `@6xl`(1152px)에서 역산한 값이다(옛 양식에서 ≈ 12.2px,
+ * 미리보기로는 ≈ 10.5px). 더 좁아지면 글자를 더 줄이는 대신 **미리보기를 아래로
+ * 내린다** — 그 아래에서는 지금까지와 같은 밑값(14px)으로 선다.
+ *
+ * 🔴 상수였던 것이 함수가 되었다 — 칸 폭이 바뀌면 이 값도 따라가야 한다.
  */
-export const SERVICE_REPORT_GRID_MIN_FONT_SIZE_PX = serviceReportGridFontSizeForRowWidth(
-  SERVICE_REPORT_GRID_SIDE_BY_SIDE_PX
-);
+export function serviceReportGridMinFontSizePx(metrics: ServiceReportBodyMetrics): number {
+  return serviceReportGridFontSizeForRowWidth(metrics, SERVICE_REPORT_GRID_SIDE_BY_SIDE_PX);
+}
 
 /**
  * 🔴 **나란히 섰을 때**의 적는 칸 글꼴 — 칸의 안쪽 폭(`100cqi`)에서 역산한다.
@@ -445,9 +467,9 @@ export const SERVICE_REPORT_GRID_MIN_FONT_SIZE_PX = serviceReportGridFontSizeFor
  * 이 식이 곧 `serviceReportGridRowWidthPx` 의 역산이라, 상한에 닿기 전까지는
  * **가로가 한 px 도 남지 않는다.**
  */
-export function serviceReportGridRowFontCss(): string {
-  const fill = `calc((100cqi - ${ROW_FIXED_PX}px) / ${ratioText(ROW_SLOPE_PX)})`;
-  return `clamp(${ratioText(SERVICE_REPORT_GRID_MIN_FONT_SIZE_PX)}px, ${fill}, ${SERVICE_REPORT_GRID_MAX_FONT_SIZE_PX}px)`;
+export function serviceReportGridRowFontCss(metrics: ServiceReportBodyMetrics): string {
+  const fill = `calc((100cqi - ${ROW_FIXED_PX}px) / ${ratioText(rowSlopePx(metrics))})`;
+  return `clamp(${ratioText(serviceReportGridMinFontSizePx(metrics))}px, ${fill}, ${SERVICE_REPORT_GRID_MAX_FONT_SIZE_PX}px)`;
 }
 
 /**
@@ -472,13 +494,13 @@ export function serviceReportGridStackedFontCss(): string {
  * 보면 약분된다). 그래서 평소에는 지금까지와 같은 14:12 비율이고, 상한에 닿은
  * 뒤에만 벌어진다. 아래로 쌓였을 때는 가운데가 하한보다 작아져 하한이 이긴다.
  */
-export function serviceReportGridPreviewFontCss(): string {
+export function serviceReportGridPreviewFontCss(metrics: ServiceReportBodyMetrics): string {
   const proportional = `calc(${ratioText(
     SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX / SERVICE_REPORT_GRID_INPUT_FONT_SIZE_PX
   )} * ${SERVICE_REPORT_GRID_FONT_CSS})`;
   const fill = `calc((100cqi - ${ROW_FIXED_PX}px - ${serviceReportGridInputContentCss(
-    SERVICE_REPORT_BODY_WRAP_WIDTH
-  )}) / ${ratioText(PREVIEW_SLOPE_PX)})`;
+    metrics.bodyWrapWidth
+  )}) / ${ratioText(previewSlopePx(metrics))})`;
   return `clamp(${proportional}, ${fill}, ${SERVICE_REPORT_GRID_MAX_PREVIEW_FONT_SIZE_PX}px)`;
 }
 
@@ -489,11 +511,11 @@ export function serviceReportGridPreviewFontCss(): string {
  * 쪽에서 덮어쓸 수 없다. 그래서 값 둘을 미리 심어 두고 **어느 것을 쓸지만** 클래스가
  * 고른다(`SERVICE_REPORT_GRID_ROW_CLASS`). 식 자체는 전부 이 파일에서 나온다.
  */
-export function serviceReportGridScaleStyle(): CSSProperties {
+export function serviceReportGridScaleStyle(metrics: ServiceReportBodyMetrics): CSSProperties {
   return {
     [STACKED_FONT_VAR]: serviceReportGridStackedFontCss(),
-    [ROW_FONT_VAR]: serviceReportGridRowFontCss(),
-    [SERVICE_REPORT_GRID_PREVIEW_FONT_VAR]: serviceReportGridPreviewFontCss(),
+    [ROW_FONT_VAR]: serviceReportGridRowFontCss(metrics),
+    [SERVICE_REPORT_GRID_PREVIEW_FONT_VAR]: serviceReportGridPreviewFontCss(metrics),
   } as CSSProperties;
 }
 
@@ -571,7 +593,7 @@ export const SERVICE_REPORT_GRID_INPUT_CLASS = "[field-sizing:content]";
  * 폭·줄 높이·최소 높이가 그 변수에 비례한다. 그래서 창이 넓어져 글꼴이 커져도
  * 한 줄에 들어가는 한글 글자 수는 **42자 그대로**다.
  *
- * @param columns 문서가 그 칸에서 세는 칸 수(`SERVICE_REPORT_BODY_WRAP_WIDTH` 등)
+ * @param columns 문서가 그 칸에서 세는 칸 수(`metrics.bodyWrapWidth` 등)
  * @param rows 비어 있을 때 보이는 줄 수. `field-sizing:content` 는 `rows` 를
  *   무시하므로 같은 높이를 **최소 높이**로 적어 준다.
  */

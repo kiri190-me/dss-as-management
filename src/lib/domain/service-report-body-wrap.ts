@@ -119,34 +119,78 @@ export function splitBodyLine(line: string, width: number): string[] {
 }
 
 /**
- * ────────────────────────────────────────────────────────────────────────
- * 🔴 양식의 칸 폭 — **화면은 파일을 열 수 없어서** 여기 굳혀 둔다
- * ────────────────────────────────────────────────────────────────────────
- * 서버는 이 숫자를 안 쓴다. 채우개는 지금도 양식의 `<cols>` 를 그때그때 읽는다
- * (`readColumnRangeWidth`) — 사람이 Excel 에서 열 너비를 고치면 서버는 그날로
- * 따라간다. 브라우저에는 그 파일이 없으므로 화면만 이 상수를 본다.
+ * ════════════════════════════════════════════════════════════════════════
+ * 🔴 양식의 칸 폭 — **서버가 읽어 화면으로 넘긴다** (2026-10-18 다섯째 조각)
+ * ════════════════════════════════════════════════════════════════════════
+ * 여기에 숫자가 **있었다**(`SERVICE_REPORT_BODY_COLUMN_WIDTH = 75` 등 셋). 채우개는
+ * 예나 지금이나 양식의 `<cols>` 를 그때그때 읽는데(`readColumnRangeWidth`),
+ * 브라우저에는 그 파일이 없으니 화면만 굳힌 값을 본다 — 대신 시험이 둘을 맞춰
+ * 보게 해 두었다. 「양식이 바뀐 날 시험이 먼저 깨진다」는 계획이었고, 실제로
+ * 깨질 일이 일어났다:
  *
- * 🔴 **어긋나면 시험이 먼저 깨진다.** `xlsx/service-report-template.test.ts` 가
- * 실제 양식 두 파일을 열어 `readColumnRangeWidth` 의 값이 이 상수와 같은지
- * 본다. 양식이 바뀐 날 그 시험이 빨개지고, 그때 이 숫자를 함께 고친다.
+ *   사용자가 양식 넷에 **도장만 바꿔 저장**했는데 Excel 이 열 너비를 제 기준으로
+ *   다시 썼다 — 본문 열 `1.875 → 1.90625`, 즉 `H:AU` **75칸 → 76.25칸**
+ *   (줄 폭으로는 84칸 → 85칸). 손댄 적 없는 값이 저절로 바뀐 것이다.
  *
- *   본문 `H`~`AU` 40열 × 1.875 = 75칸
- *   비고 `H`~`AF` 25열 × 1.875 = 46.875칸
- *   라벨 `C`~`G`   5열 × 1.75  = 8.75칸
+ * 🔴 **한 번으로 끝날 일이 아니다.** 양식 레이아웃을 고칠 때마다 되풀이된다.
+ * 그래서 숫자를 고쳐 가며 따라가는 대신 **화면도 양식에서 받는다**:
+ *
+ *   작성 화면(서버) ── `readServiceReportColumnWidths(그 건이 쓸 양식)`
+ *                   └→ `serviceReportBodyMetrics(…)` ──props──▶ 미리보기 · 적는 칸
+ *
+ * 🔴 **읽고 환산하는 셈은 채우개의 것 그대로다**(`readColumnRangeWidth` ·
+ * `contentWrapWidth`). 화면용으로 한 벌 더 만들면 또 갈라진다.
+ *
+ * ⚠️ 그래서 이 파일에는 이제 **폭 숫자가 하나도 없다.** 아래 타입과 함수만 있고,
+ * 값은 전부 부르는 쪽이 양식에서 읽어 넣는다.
+ * ════════════════════════════════════════════════════════════════════════
  */
-export const SERVICE_REPORT_BODY_COLUMN_WIDTH = 75;
-export const SERVICE_REPORT_REMARK_COLUMN_WIDTH = 46.875;
+
 /**
- * 본문 **라벨 열**(`확　내`/`인　용` 이 찍히는 칸)의 열 너비.
+ * 양식에서 읽은 **엑셀 열 너비**(통합문서 기본 글꼴 기준) 세 가지.
  *
- * 🔴 위의 둘과 같은 이유로 여기 있다 — 미리보기가 라벨 칸을 문서와 **같은 폭**으로
- * 그리려면 이 숫자가 필요한데, 브라우저에는 양식 파일이 없다. 양식이 바뀌면
- * `xlsx/service-report-template.test.ts` 의 「양식의 칸 폭이 …」가 먼저 깨진다.
- *
- * ⚠️ 본문 열(1.875)과 **열 하나의 너비가 다르다**(1.75). 40 × 1.875 처럼 같은 곱을
- * 쓰면 틀린다.
+ * 🔴 줄 폭(84·85칸)이 **아니다** — 그 환산은 `contentWrapWidth` 가 한다.
  */
-export const SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH = 8.75;
+export type ServiceReportColumnWidths = {
+  /** 본문 내용 칸. 지금 양식에서는 `H`~`AU`. */
+  body: number;
+  /** 비고 칸. 지금 양식에서는 `H`~`AF` — 본문보다 좁다. */
+  remark: number;
+  /** 본문 라벨 칸(`확　내`/`인　용` 이 찍히는 칸). 지금 양식에서는 `C`~`G`. */
+  label: number;
+};
+
+/**
+ * 화면이 폭을 셀 때 쓰는 **한 벌** — 열 너비와, 그것에서 나온 줄 폭.
+ *
+ * 미리보기 상자 폭 · 줄 나누기 칸 수 · 적는 칸 폭 · 비고 폭 · 라벨 칸 폭이 전부
+ * 여기서 나온다. 굳힌 숫자를 쓰는 자리가 화면에 하나도 없게 하려는 것이다.
+ */
+export type ServiceReportBodyMetrics = {
+  /** 양식에서 읽은 열 너비 그대로. 미리보기 상자의 **크기**가 여기서 나온다. */
+  columns: ServiceReportColumnWidths;
+  /** 본문 한 줄에 들어가는 칸 수. 옛 양식 84(한글 42자) · 새 양식 85. */
+  bodyWrapWidth: number;
+  /** 비고 한 줄에 들어가는 칸 수. 옛 양식 51 · 새 양식 52. */
+  remarkWrapWidth: number;
+};
+
+/**
+ * 열 너비 한 벌 → 화면이 쓰는 치수 한 벌.
+ *
+ * 🔴 **서버에서 부른다.** `contentWrapWidth` 는 칸이 말이 안 되게 좁으면 던지는데,
+ * 브라우저가 그리는 도중에 던지면 화면이 통째로 죽는다. 서버에서 부르면 그 던짐이
+ * 작성 화면의 「양식을 읽을 수 없습니다」 길로 그대로 들어간다(`page.tsx`).
+ */
+export function serviceReportBodyMetrics(
+  columns: ServiceReportColumnWidths
+): ServiceReportBodyMetrics {
+  return {
+    columns,
+    bodyWrapWidth: contentWrapWidth(columns.body),
+    remarkWrapWidth: contentWrapWidth(columns.remark),
+  };
+}
 
 /**
  * 🔴 엑셀 열 너비(기본 글꼴 문자 단위) → **화면 픽셀**.
@@ -156,21 +200,16 @@ export const SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH = 8.75;
  * 종이에 그릴 때 쓰는 픽셀은 96dpi 기준이라 **CSS 픽셀과 1:1** 이다. 그래서
  * 이 값을 그대로 `width` 에 주면 미리보기 상자가 문서의 칸과 같은 크기가 된다:
  *
- *   본문 75칸 → **600px** · 비고 46.875칸 → **375px** · 라벨 8.75칸 → **70px**
+ *   옛 양식 — 본문 75칸 → **600px** · 비고 46.875칸 → 375px · 라벨 8.75칸 → 70px
+ *   새 양식 — 본문 76.25칸 → **610px** · 비고 47.65625칸 → 381px · 라벨 → 69px
  *
- * ⚠️ 인자는 **열 너비**이지 줄 폭(`SERVICE_REPORT_BODY_WRAP_WIDTH` = 84칸)이
- * 아니다. 둘 다 그냥 수라서 바꿔 넣어도 조용히 지나간다 — 이름을 보고 넣을 것.
+ * ⚠️ 인자는 **열 너비**(`ServiceReportColumnWidths` 의 값)이지 줄 폭
+ * (`bodyWrapWidth` = 84·85칸)이 아니다. 둘 다 그냥 수라서 바꿔 넣어도 조용히
+ * 지나간다 — 이름을 보고 넣을 것.
  */
 export function serviceReportColumnWidthPx(columnWidth: number): number {
   return Math.round(columnWidth * SERVICE_REPORT_FONT_METRICS.normalDigitPx);
 }
-
-/** 본문 한 줄에 들어가는 칸 수(84 = 한글 42자). */
-export const SERVICE_REPORT_BODY_WRAP_WIDTH = contentWrapWidth(SERVICE_REPORT_BODY_COLUMN_WIDTH);
-/** 비고 한 줄에 들어가는 칸 수(51 = 한글 25자). */
-export const SERVICE_REPORT_REMARK_WRAP_WIDTH = contentWrapWidth(
-  SERVICE_REPORT_REMARK_COLUMN_WIDTH
-);
 
 /**
  * 「확인내용」에 실제로 찍히는 줄 — 정형 문구가 첫 줄이다.
@@ -351,6 +390,11 @@ export type ServiceReportPreviewSection = {
  *
  * ⚠️ 구역이 문서의 **몇 행**에서 시작하는지는 그리지 않는다(머리말의 '여기
  * 없는 것'). 구역 사이의 빈 줄·맺음 표시도 마찬가지다.
+ *
+ * 🔴 `width` 에 **기본값이 없다.** 예전에는 굳힌 84칸이 기본값이었는데, 그러면
+ * 양식이 바뀐 날 폭을 안 넘긴 자리만 조용히 옛 값으로 나뉜다 — 그 조용함이
+ * 미리보기를 거짓말로 만든다(위 '양식의 칸 폭' 머리말). 부르는 쪽이 그 건의
+ * 양식에서 읽은 `bodyWrapWidth` 를 반드시 준다.
  */
 export function serviceReportBodyPreviewSections(
   body: {
@@ -359,7 +403,7 @@ export function serviceReportBodyPreviewSections(
     actions: readonly string[];
     summary: readonly string[];
   },
-  width: number = SERVICE_REPORT_BODY_WRAP_WIDTH
+  width: number
 ): ServiceReportPreviewSection[] {
   const document = (lines: readonly string[]): readonly string[] =>
     lines.map(koreanKyosanDocumentText);
@@ -458,10 +502,12 @@ export type ServiceReportPreviewRemarkLine = {
  * (`fillSheet` 의 비고 자리), 폭을 넘는 줄은 Excel 이 칸 밖으로 흘리거나 자른다.
  * 그래서 여기서 나눠 그리면 **문서에 없는 줄바꿈을 보여 주는 거짓말**이 된다 —
  * 대신 폭을 넘는 줄에 표시만 단다.
+ *
+ * 🔴 `width` 에 기본값이 없는 까닭은 위 `serviceReportBodyPreviewSections` 와 같다.
  */
 export function serviceReportRemarkPreviewLines(
   lines: readonly string[],
-  width: number = SERVICE_REPORT_REMARK_WRAP_WIDTH
+  width: number
 ): ServiceReportPreviewRemarkLine[] {
   return lines.map((line) => {
     const text = koreanKyosanDocumentText(line);

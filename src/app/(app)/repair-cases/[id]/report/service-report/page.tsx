@@ -13,6 +13,10 @@ import { readSession } from "@/lib/auth/session";
 import { getServiceReportForEdit } from "@/lib/db/queries/service-reports";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 import { repairCaseDetailHrefs } from "@/lib/domain/repair-case-detail-tabs";
+import {
+  serviceReportBodyMetrics,
+  type ServiceReportBodyMetrics,
+} from "@/lib/domain/service-report-body-wrap";
 import { createServiceReportFormValues } from "@/lib/domain/service-report-form";
 import { serviceReportKindFromParam } from "@/lib/domain/service-report-kind-param";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
@@ -32,6 +36,7 @@ import {
   SERVICE_REPORT_FINDINGS_INTRO,
   SERVICE_REPORT_MAX_BODY_ROWS,
   SERVICE_REPORT_SUMMARY_INTRO,
+  readServiceReportColumnWidths,
 } from "@/lib/xlsx/service-report-template";
 
 /**
@@ -168,6 +173,7 @@ export default async function ServiceReportPage({
   const level = await getPermissionLevel(actingUser, SERVICE_REPORT_PERMISSION_AREA);
 
   let choices: ServiceReportChoices | null = null;
+  let bodyMetrics: ServiceReportBodyMetrics | null = null;
   let templateError: string | null = null;
   try {
     /**
@@ -179,16 +185,35 @@ export default async function ServiceReportPage({
      * 성패를 가르게 된다.** 이 건이 쓸 바로 그 양식을 읽어, 그 파일이 없으면
      * 문서를 만들 때가 아니라 **여기서 먼저** 알려 준다.
      */
-    choices = readServiceReportChoices(
-      await readServiceReportTemplateForCase("REPAIR", resolved.workflowType)
-    );
+    const template = await readServiceReportTemplateForCase("REPAIR", resolved.workflowType);
+    choices = readServiceReportChoices(template);
+    /**
+     * 🔴 **본문·비고·라벨 칸의 폭도 같은 파일에서 읽는다** (2026-10-18).
+     *
+     * 미리보기는 브라우저에서 그려지는데 브라우저에는 양식이 없다. 그래서 폭을
+     * 화면이 굳혀 들고 있었고, 사용자가 양식 넷에 **도장만 바꿔 저장**한 날 Excel 이
+     * 열 너비를 다시 써서(1.875 → 1.90625) 그 값이 틀어졌다 — 채우개는 매번 읽으니
+     * 따라갔고 **미리보기만 뒤처졌다.** 미리보기가 문서와 다르게 나누면 그 화면은
+     * 없느니만 못하다.
+     *
+     * 🔴 **드롭다운 목록과 같은 버퍼·같은 try 다.** 양식을 못 읽는 사정은 하나인데
+     * 두 군데서 따로 처리하면 한쪽만 살아 있는 반쪽 화면이 생긴다.
+     *
+     * ⚠️ `serviceReportBodyMetrics` 는 칸이 말이 안 되게 좁으면 던진다. 여기서
+     * 부르니 그 던짐도 아래 `catch` 로 들어가고, 화면은 안내를 띄운 채 살아 있다 —
+     * 브라우저에서 던졌다면 화면이 통째로 죽었을 자리다.
+     */
+    bodyMetrics = serviceReportBodyMetrics(readServiceReportColumnWidths(template));
   } catch (err) {
     // 🔴 err.message 를 그대로 내보내지 않는다 — 양식이 바뀌었을 때 나오는 말은
     // 셀 주소가 섞인 개발자용 문장이다(UI_GUIDELINE 11). 자세한 것은 서버 로그다.
-    console.error("[service-report-page] 양식의 드롭다운 목록을 읽지 못했다", {
+    console.error("[service-report-page] 양식의 드롭다운 목록·칸 폭을 읽지 못했다", {
       repairCaseId: resolved.id,
       error: err instanceof Error ? err.message : String(err),
     });
+    // 🔴 반쪽으로 두지 않는다 — 목록은 읽혔는데 폭이 안 읽힌 경우도 **둘 다 없음**이다.
+    choices = null;
+    bodyMetrics = null;
     templateError = TEMPLATE_UNAVAILABLE_MESSAGE;
   }
 
@@ -258,6 +283,10 @@ export default async function ServiceReportPage({
         //    셈은 한 벌이고(`countServiceReportBodyRows`), 상수만 여기서 붙인다.
         bodyLayout: SERVICE_REPORT_BODY_ROW_LAYOUT,
       }}
+      // 🔴 칸 폭도 **양식에서** 온다 — 화면이 숫자를 들고 있으면 사람이 양식을
+      //    저장만 해도(Excel 이 열 너비를 다시 쓴다) 미리보기가 거짓말을 한다.
+      //    못 읽었으면 null 이고, 그때 미리보기는 옛 숫자로 물러서지 않고 빠진다.
+      bodyMetrics={bodyMetrics}
       choices={choices}
       // 🔴 원인 라벨도 채우개에서 온다. 화면이 사본을 들고 있으면 양식의 라벨이
       //    바뀐 날 화면과 문서가 서로 다른 이름을 부른다 — 오류가 안 나서

@@ -13,6 +13,7 @@ import { MasterDataDeleteDialog } from "@/components/common/master-data-trash-di
 import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
 import { fileNameFromContentDisposition } from "@/lib/domain/content-disposition-file-name";
 import { SERVICE_REPORT_DRAFT_LABELS, buildDraftText } from "@/lib/domain/edit-draft-text";
+import type { ServiceReportBodyMetrics } from "@/lib/domain/service-report-body-wrap";
 import { formatServiceReportNumber } from "@/lib/domain/service-report-file-name";
 import {
   SERVICE_REPORT_DRAFT_SAVE_DEBOUNCE_MS,
@@ -245,6 +246,7 @@ export default function ServiceReportForm({
   canEdit,
   canDelete,
   limits,
+  bodyMetrics,
   choices,
   causeLabels,
   templateError,
@@ -279,6 +281,14 @@ export default function ServiceReportForm({
   /** 지울 수 있는가(MANAGE). 저장보다 좁다. */
   canDelete: boolean;
   limits: ServiceReportFormLimits;
+  /**
+   * 🔴 **그 건이 쓸 양식에서 읽은 칸 폭 한 벌**(2026-10-18). 본문·비고 미리보기와
+   * 적는 칸의 폭이 전부 여기서 나온다 — 화면이 숫자를 굳혀 들고 있으면 사람이
+   * 양식을 저장만 해도(Excel 이 열 너비를 다시 쓴다) 미리보기가 거짓말을 한다.
+   *
+   * 드롭다운 목록과 **같은 양식·같은 try** 에서 오므로 `null` 인 때도 같다.
+   */
+  bodyMetrics: ServiceReportBodyMetrics | null;
   /** 🔴 양식에서 읽은 드롭다운 목록. 양식을 못 읽었으면 null 이다. */
   choices: { situationRequests: readonly string[]; productNames: readonly string[] } | null;
   /**
@@ -1000,6 +1010,7 @@ export default function ServiceReportForm({
         onChange={update}
         fieldErrors={fieldErrors}
         limits={limits}
+        bodyMetrics={bodyMetrics}
         rowLimitErrors={rowLimitErrors}
         disabled={disabled}
       />
