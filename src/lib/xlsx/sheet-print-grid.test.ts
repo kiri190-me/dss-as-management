@@ -566,22 +566,19 @@ test("🔴 실제 양식: 본문 상자의 오른쪽 변이 살아 있다", { sk
   assert.ok(bodyLine.borders.right !== null, "본문 상자의 오른쪽 변이 없습니다");
 });
 
-test("🔴 실제 양식: 열 너비 환산이 양식의 그림 앵커와 맞는다", { skip: skipRepair }, () => {
-  const { grid, archive } = filledGrid();
+/** 1픽셀 = 9525 EMU. 그림 앵커의 치우침·절대 자리가 이 단위로 적힌다. */
+const EMU_PER_PIXEL = 9525;
 
-  const sheetPart = resolveSheetPart(archive, SERVICE_REPORT_SHEET_NAME);
-  const drawingPart = resolveSheetDrawingPart(archive, sheetPart);
-  assert.ok(drawingPart, "그림 파트를 찾지 못했습니다");
-  const drawing = archive.readText(drawingPart);
+/** 그림 앵커 하나가 알려 주는 «그 열의 왼쪽 끝». 열은 **0부터** 센다. */
+type PictureAnchor = { column: number; leftEmu: number };
 
-  /**
-   * 그림 앵커에는 «몇 열째 + 몇 EMU»(`<xdr:from>`)와 «절대 x»(`<a:off>`)가 함께
-   * 적혀 있다. 두 그림의 차이를 빼면 그 사이 열들의 실제 너비(px)가 나온다 —
-   * **양식 스스로가 알려 주는 값**이라 우리 환산식의 근거가 된다
-   * (`MAX_DIGIT_WIDTH_PX` 주석).
-   */
-  const anchors: { column: number; columnOffsetEmu: number; xEmu: number }[] = [];
-  for (const match of drawing.matchAll(
+/**
+ * 양식의 그림 앵커들. 앵커에는 «몇 열째 + 몇 EMU»(`<xdr:from>`)와 «절대
+ * x»(`<a:off>`)가 함께 적혀 있어서, 치우침을 빼면 **그 열의 왼쪽 끝**이 나온다.
+ */
+function pictureAnchors(drawingXml: string): PictureAnchor[] {
+  const anchors: PictureAnchor[] = [];
+  for (const match of drawingXml.matchAll(
     /<xdr:twoCellAnchor\b[^>]*>([\s\S]*?)<\/xdr:twoCellAnchor>/g
   )) {
     const block = match[1];
@@ -591,35 +588,154 @@ test("🔴 실제 양식: 열 너비 환산이 양식의 그림 앵커와 맞는
     if (from === undefined || x === undefined) continue;
     const column = /<xdr:col>(\d+)<\/xdr:col>/.exec(from)?.[1];
     if (column === undefined) continue;
-    anchors.push({
-      column: Number(column),
-      columnOffsetEmu: Number(/<xdr:colOff>(\d+)<\/xdr:colOff>/.exec(from)?.[1] ?? "0"),
-      xEmu: Number(x),
-    });
+    const columnOffsetEmu = Number(/<xdr:colOff>(\d+)<\/xdr:colOff>/.exec(from)?.[1] ?? "0");
+    anchors.push({ column: Number(column), leftEmu: Number(x) - columnOffsetEmu });
   }
+  return anchors;
+}
+
+/**
+ * **A열부터** 재는 열 너비 표(pt). 앵커의 «절대 x» 는 A열의 왼쪽 끝에서 재는데
+ * 이 양식의 인쇄 영역은 B열에서 시작하므로, 같은 원점으로 세려면 창을 넓혀야
+ * 한다.
+ *
+ * 🔴 넓히는 것은 **보는 창**뿐이다. 열 너비는 여전히 양식의 `<cols>` 를 같은
+ * 코드가 읽는다 — 겹치는 구간이 미리보기의 표와 한 자도 다르지 않은지 아래에서
+ * 확인한다.
+ */
+function columnWidthsFromColumnA(archive: ZipArchive): number[] {
+  const workbookXml = archive
+    .readText(WORKBOOK_PART)
+    .replace(
+      /(<definedName[^>]*name="_xlnm\.Print_Area"[^>]*>)([^<]*)(<\/definedName>)/g,
+      (_whole: string, open: string, reference: string, close: string) =>
+        open +
+        reference.replace(
+          /\$[A-Z]+\$\d+:\$([A-Z]+)\$\d+/,
+          (_range: string, lastColumn: string) => `$A$1:$${lastColumn}$1`
+        ) +
+        close
+    );
+
+  return buildSheetPrintGrid({
+    sheetName: SERVICE_REPORT_SHEET_NAME,
+    workbookXml,
+    sheetXml: archive.readText(resolveSheetPart(archive, SERVICE_REPORT_SHEET_NAME)),
+    sharedStringsXml: null,
+    stylesXml: null,
+    drawingXml: null,
+    drawingRelsXml: null,
+  }).columnWidthsPt;
+}
+
+/**
+ * ============================================================================
+ * 🔴 **열 너비 환산이 양식의 그림 앵커와 맞는다** — 2026-10-19 에 자를 바꿨다
+ * ============================================================================
+ * 전에 이 시험은 앵커가 말하는 거리와 우리 표의 거리가 **정확히 같은 수**인지
+ * 보았다. 그것이 `MAX_DIGIT_WIDTH_PX = 8` 의 근거였다(그 상수의 주석).
+ *
+ * 🔴 **그 근거가 양식에서 사라졌다.** 사용자가 도장을 바꿔 저장한 뒤로 두 도장의
+ * `<a:off>` 가 **정수 픽셀이 아닌 값**으로 다시 적혔다 — 한 칸을 15px 이 아니라
+ * 13.913px 로 잡은 격자다(실측: 열 열이 150px 이 아니라 139.13px). 세로도 마찬가지라
+ * 앵커가 말하는 «61행의 윗변»이 854.25pt · 885.22pt 로 **서로 다르고**, 양식의 실제
+ * 행 높이 합(872.75pt)과도 안 맞는다. 즉 `<a:off>` 는 **그 파일을 마지막으로 그린
+ * 기계의 캐시**다. 앵커에서 역산하면 그 기계는 숫자 한 자를 ≈7.04px 로 쟀는데,
+ * 선언된 기본 글꼴(ＭＳ Ｐゴシック)이 그 PC 에 없어 다른 글꼴로 대체되면 그렇게
+ * 된다 — 까닭까지는 파일만 보고 단정할 수 없고, 단정할 필요도 없다.
+ *
+ * 그래서 **절대 크기는 양식이 더 이상 증언하지 못한다.** 증언할 수 있는 것은 둘이다:
+ *
+ *   ① **격자의 모양** — 앵커 여럿이 가리키는 자리가 **배율 하나**로 전부 설명되면,
+ *      우리 표는 양식과 같은 모양이다. 열을 하나 빠뜨리거나 숨은 열을 잘못
+ *      세면 배율이 앵커마다 갈려 바로 걸린다. 배율 자체는 **글꼴이 정하므로**
+ *      기계가 바뀌면 함께 움직인다 — 그래서 수를 박지 않는다.
+ *   ② **환산 상수의 근거인 기본 글꼴** — 8px 은 ＭＳ Ｐゴシック 11pt 의 숫자 한
+ *      자 폭이다. 양식이 다른 글꼴을 기본으로 삼는 날 그 상수를 다시 재야 한다.
+ *
+ * 🔴 손자국처럼 «몇 px» 을 적어 두지 않는다. 사용자가 양식을 다시 저장할 때마다
+ * 엑셀이 열 너비와 앵커를 함께 고쳐 쓰고 있다(2026-10-18~19 에만 세 번).
+ * ============================================================================
+ */
+test("🔴 실제 양식: 열 너비 환산이 양식의 그림 앵커와 맞는다", { skip: skipRepair }, () => {
+  const { grid, archive } = filledGrid();
+
+  const sheetPart = resolveSheetPart(archive, SERVICE_REPORT_SHEET_NAME);
+  const drawingPart = resolveSheetDrawingPart(archive, sheetPart);
+  assert.ok(drawingPart, "그림 파트를 찾지 못했습니다");
 
   // 인쇄 영역 안의 앵커만 쓴다 — 이 양식은 같은 도장을 숨은 도우미 열(68열)에도
-  // 한 장 더 붙여 두었고, 그것은 표에 없다.
-  const pair = anchors
+  // 한 장 더 붙여 두었다. 그것은 표에 없을뿐더러 **다른 때 그려진 캐시**라
+  // (세로 자리가 두 도장과 31pt 어긋나 있다) 같은 자로 잴 수가 없다.
+  const anchors = pictureAnchors(archive.readText(drawingPart))
     .filter((anchor) => anchor.column + 1 >= grid.firstColumn && anchor.column + 1 <= grid.lastColumn)
     .sort((a, b) => a.column - b.column);
-  assert.ok(pair.length >= 2, "견줄 그림 앵커가 두 개 이상 있어야 합니다");
-  const [left, right] = [pair[0], pair[pair.length - 1]];
+  assert.ok(anchors.length >= 2, "견줄 그림 앵커가 두 개 이상 있어야 합니다");
 
-  const EMU_PER_PIXEL = 9525;
-  const measuredPx =
-    (right.xEmu - right.columnOffsetEmu - (left.xEmu - left.columnOffsetEmu)) / EMU_PER_PIXEL;
+  const widthsPt = columnWidthsFromColumnA(archive);
+  // 🔴 창만 넓혔다 — 인쇄 영역 구간은 미리보기가 쓰는 표와 한 자도 다르지 않다.
+  assert.deepEqual(
+    widthsPt.slice(grid.firstColumn - 1, grid.lastColumn),
+    grid.columnWidthsPt,
+    "창을 넓혔더니 열 너비가 달라졌다 — 재는 자가 둘이다"
+  );
 
-  // 앵커의 열은 0부터 센다 — 1부터 세는 열 번호로 옮기면 `column + 1` 이다.
-  // 그 사이 열들을 우리 표에서 더한다(표는 인쇄 영역만 담으므로 자리를 옮긴다).
-  let ourPx = 0;
-  for (let column = left.column + 1; column <= right.column; column += 1) {
-    const index = column - grid.firstColumn;
-    assert.ok(index >= 0 && index < grid.columnWidthsPt.length, "그림이 인쇄 영역 밖입니다");
-    ourPx += grid.columnWidthsPt[index] / 0.75;
+  /** 앵커들이 가리키는 «우리 표 대비 배율». 하나로 모여야 같은 격자다. */
+  const scalesOf = (measured: readonly PictureAnchor[]): number[] =>
+    measured.map((anchor) => {
+      let ourPx = 0;
+      for (let index = 0; index < anchor.column; index += 1) {
+        assert.ok(index < widthsPt.length, "그림이 표 밖입니다");
+        ourPx += widthsPt[index] / 0.75;
+      }
+      assert.ok(ourPx > 0, "그림이 A열에 붙어 있어 견줄 거리가 없습니다");
+      return anchor.leftEmu / EMU_PER_PIXEL / ourPx;
+    });
+
+  const assertSameGrid = (measured: readonly PictureAnchor[], what: string): void => {
+    const scales = scalesOf(measured);
+    const spread = Math.max(...scales) - Math.min(...scales);
+    // ① 배율 하나로 전부 설명된다 — 열 하나(14~15px)를 빠뜨리면 2% 넘게 갈린다.
+    assert.ok(
+      spread < 0.01,
+      `${what}: 앵커마다 다른 격자를 가리킨다 — 배율 ${scales.map((scale) => scale.toFixed(5)).join(" · ")}`
+    );
+    // ② 그 배율이 1 언저리다. 글꼴이 달라 봐야 숫자 한 자 폭이 20% 넘게
+    //    달라지지는 않는다 — pt 와 px 을 뒤섞으면(÷0.75) 33% 어긋나 걸린다.
+    for (const scale of scales) {
+      assert.ok(scale > 0.8 && scale < 1.2, `${what}: 배율이 ${scale.toFixed(5)} 다 — 단위를 뒤섞었다`);
+    }
+  };
+
+  assertSameGrid(anchors, "양식 그대로");
+
+  /**
+   * 🔴 **또 깨지지 않는다.** 양식을 그린 기계가 바뀌어 격자가 통째로 늘거나
+   * 줄어도(2026-10-19 에 실제로 7.6% 줄었다) 이 시험은 그대로 통과한다.
+   */
+  for (const factor of [0.9, 1.1]) {
+    assertSameGrid(
+      anchors.map((anchor) => ({ ...anchor, leftEmu: anchor.leftEmu * factor })),
+      `격자를 ${factor}배로 다시 그린 양식`
+    );
   }
 
-  assert.equal(ourPx, measuredPx);
+  /**
+   * ② 환산 상수의 근거 — 이 통합문서의 **기본 글꼴**(표준 스타일, `xfId="0"`).
+   * `MAX_DIGIT_WIDTH_PX = 8` 은 ＭＳ Ｐゴシック 11pt 의 숫자 한 자 폭이다.
+   */
+  const styles = archive.readText(STYLES_PART);
+  const normalFontId = Number(
+    /<cellStyleXfs\b[^>]*>\s*<xf\b[^>]*\sfontId="(\d+)"/.exec(styles)?.[1] ?? "-1"
+  );
+  const fonts = [...(/<fonts\b[\s\S]*?<\/fonts>/.exec(styles)?.[0] ?? "").matchAll(/<font>[\s\S]*?<\/font>/g)];
+  const normalFont = fonts[normalFontId]?.[0];
+  assert.ok(normalFont !== undefined, "양식의 기본 글꼴을 찾지 못했습니다");
+  assert.equal(
+    `${/<name val="([^"]*)"/.exec(normalFont)?.[1]} ${/<sz val="([^"]*)"/.exec(normalFont)?.[1]}pt`,
+    "ＭＳ Ｐゴシック 11pt",
+    "양식의 기본 글꼴이 바뀌었다 — MAX_DIGIT_WIDTH_PX(=8) 의 근거를 다시 재야 한다"
+  );
 });
 
 test("🔴 실제 양식: 그림은 도장 둘뿐이고 ActiveX 의 EMF 는 안 딸려 온다", { skip: skipRepair }, () => {

@@ -1447,11 +1447,39 @@ function bodyRowHeights(sheetXml: string, lastRow: number): string[] {
 }
 
 /**
- * 🔴 수리 양식의 46행만 75.6pt 다 — 그 발행본을 만든 사람이 손으로 잡아 늘린
- * 자국이고, 같은 통합문서인 검사 양식의 같은 행은 13.9pt 다. 그대로 두면 문서
- * 한가운데 손가락만 한 구멍이 뚫리고 아래 구역 계산도 뒤틀린다.
+ * 그 중 **가장 많이 쓰인 높이**. 채우개가 고르는 것과 같은 규칙이다
+ * (`normalizeBodyRowHeights` — 같은 수면 먼저 나온 쪽).
+ *
+ * 🔴 높이는 **글자 그대로** 센다. 숫자로 바꾸면 `75.599999999999994` 가
+ * 반올림되어 양식에 적힌 글자와 달라진다.
  */
-test("🔴 채워진 문서의 본문에 75.6pt 짜리 손자국 행이 남지 않는다", { skip: skipRepair }, () => {
+function modalRowHeight(heights: readonly string[]): string {
+  const counts = new Map<string, number>();
+  for (const height of heights) counts.set(height, (counts.get(height) ?? 0) + 1);
+
+  let mode = "";
+  let most = -1;
+  for (const [height, count] of counts) {
+    if (count > most) {
+      mode = height;
+      most = count;
+    }
+  }
+  return mode;
+}
+
+/**
+ * 🔴 수리 양식의 46행만 유난히 높다(지금 75.65pt) — 그 발행본을 만든 사람이
+ * 손으로 잡아 늘린 자국이고, 같은 통합문서인 검사 양식의 같은 행은 본문 높이
+ * 그대로다. 그대로 두면 문서 한가운데 손가락만 한 구멍이 뚫리고 아래 구역
+ * 계산도 뒤틀린다.
+ *
+ * 🔴 **지키는 것은 「고른가」이지 「몇 pt 인가」가 아니다.** 사용자가 Excel 에서
+ * 셀 높이·글꼴을 손보면 본문 행 높이가 통째로 다시 적힌다(2026-10-18~19 에만
+ * 14.1 → 14.15). 그래서 기대값을 적어 두지 않고 **양식의 최빈값을 읽어** 견준다
+ * — 손자국 행은 여전히 걸린다(최빈값이 아니라서 통일 대상이 된다).
+ */
+test("🔴 채워진 문서의 본문에 손자국 행이 남지 않는다", { skip: skipRepair }, () => {
   const original = ZipArchive.fromBuffer(readFileSync(repairPath as string));
   const templateHeights = bodyRowHeights(
     original.readText(resolveSheetPart(original, SERVICE_REPORT_SHEET_NAME)),
@@ -1463,11 +1491,18 @@ test("🔴 채워진 문서의 본문에 75.6pt 짜리 손자국 행이 남지 �
     "양식의 본문에 늘어난 행이 없다(시험 준비 실패)"
   );
 
+  // 양식이 정한 본문 행 높이. 손자국 행은 하나뿐이라 최빈값이 될 수 없다.
+  const bodyHeight = modalRowHeight(templateHeights);
+  assert.ok(
+    Number(bodyHeight) < 70,
+    `최빈값이 늘어난 행(${bodyHeight}pt)이다 — 양식의 본문이 손자국으로 뒤덮였다`
+  );
+
   const filled = fill(repairPath as string, REPAIR_INPUT);
   assert.deepEqual(
     [...new Set(bodyRowHeights(filled.sheetXml, TEMPLATE_BODY_LAST_ROW))],
-    ["14.1"],
-    "본문 행 높이가 고르지 않다 — 최빈값으로 통일되어야 한다"
+    [bodyHeight],
+    "본문 행 높이가 고르지 않다 — 양식의 최빈값으로 통일되어야 한다"
   );
 
   // 줄을 끼워 넣어도 마찬가지다. 새로 복제된 줄까지 같은 높이여야 한다.
@@ -1482,7 +1517,7 @@ test("🔴 채워진 문서의 본문에 75.6pt 짜리 손자국 행이 남지 �
   });
   assert.deepEqual(
     [...new Set(bodyRowHeights(grown.sheetXml, TEMPLATE_BODY_LAST_ROW + 33))],
-    ["14.1"],
+    [bodyHeight],
     "늘린 줄의 높이가 다르다"
   );
 });
@@ -2019,6 +2054,31 @@ for (const template of PARITY_TEMPLATES) {
   }
 }
 
+/** `A`=1 … `AA`=27. 열 글자를 자리로 옮긴다. */
+function columnNumberOf(letters: string): number {
+  let value = 0;
+  for (const letter of letters) value = value * 26 + (letter.charCodeAt(0) - 64);
+  return value;
+}
+
+/**
+ * 그 열을 덮고 있는 `<col …/>` 한 덩이 — 너비를 **양식에 적힌 글자 그대로**
+ * 돌려준다. 숫자로 읽었다가 다시 적으면 지금은 운 좋게 같은 글자가 나오지만,
+ * 양식이 `1.906250` · `1.9062500000001` 처럼 적어 두는 날 바꿔치기가 조용히
+ * 빗나간다(아무것도 안 바뀐 채 시험만 통과한다).
+ */
+function columnTagCovering(sheetXml: string, letters: string): { tag: string; width: string } {
+  const column = columnNumberOf(letters);
+  for (const match of sheetXml.matchAll(/<col\s[^>]*\/>/g)) {
+    const tag = match[0];
+    const min = Number(/\smin="(\d+)"/.exec(tag)?.[1]);
+    const max = Number(/\smax="(\d+)"/.exec(tag)?.[1]);
+    const width = /\swidth="([\d.]+)"/.exec(tag)?.[1];
+    if (width !== undefined && column >= min && column <= max) return { tag, width };
+  }
+  assert.fail(`${letters} 열의 <col> 을 양식에서 찾지 못했다`);
+}
+
 /**
  * ============================================================================
  * 🔴 **화면이 받는 폭이 채우개가 쓰는 폭과 같은 수인가** (2026-10-18 다섯째 조각)
@@ -2060,15 +2120,28 @@ test("🔴 화면에 넘기는 칸 폭이 채우개가 재는 폭과 같다", { 
   assert.equal(widths.remark, readColumnRangeWidth(sheetXml, "H", "AF"));
 
   /**
-   * 🔴 그리고 **숫자가 코드에 안 박혀 있다.** 옛 양식을 쓰는 지금은 75·46.875·
-   * 8.75 가 나오지만, 그것은 이 파일이 아는 값이 아니라 **양식이 말한 값**이다 —
-   * 아래는 그 사실을 「양식이 바뀌면 값도 바뀐다」로 확인한다.
+   * 🔴 그리고 **숫자가 코드에 안 박혀 있다.** 지금 어떤 수가 나오든 그것은 이
+   * 파일이 아는 값이 아니라 **양식이 말한 값**이다 — 아래는 그 사실을 「양식이
+   * 바뀌면 값도 바뀐다」로 확인한다.
+   *
+   * 🔴 바꿔 넣을 값도 **양식에서 읽어** 정한다. 전에는 「1.875 를 1.90625 로」
+   * 라고 적어 두었는데, 사용자가 도장을 바꿔 저장하자 Excel 이 열 너비를 통째로
+   * 다시 계산해 양식이 이미 1.90625 가 되었고 — 바꿀 것이 없어 시험이 죽었다
+   * (2026-10-19). 지금 적힌 너비를 읽어 그 **두 배**로 바꾼다.
    */
-  const resaved = sheetXml.replace(/<col ([^>]*)width="1.875"/g, '<col $1width="1.90625"');
+  const bodyColumn = columnTagCovering(sheetXml, body.contentColumn);
+  const resaved = sheetXml.replace(bodyColumn.tag, () =>
+    bodyColumn.tag.replace(
+      `width="${bodyColumn.width}"`,
+      `width="${Number(bodyColumn.width) * 2}"`
+    )
+  );
   assert.notEqual(resaved, sheetXml, "본문 열 너비를 바꿔 보지 못했다 — 양식이 바뀌었다");
   const after = serviceReportColumnWidthsFromSheet(resaved);
   assert.ok(after.body > widths.body, "열 너비를 바꿨는데 폭이 안 따라갔다");
   assert.ok(after.remark > widths.remark, "비고 폭이 안 따라갔다");
+  // 안 건드린 라벨 열(C~G)은 그대로다 — 바꾼 열만 따라온다.
+  assert.equal(after.label, widths.label, "안 바꾼 라벨 폭까지 달라졌다");
 });
 
 test("비고는 여전히 양식의 줄 수를 넘을 수 없다", { skip: skipRepair }, () => {
