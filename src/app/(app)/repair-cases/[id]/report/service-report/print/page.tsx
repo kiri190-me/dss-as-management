@@ -14,26 +14,10 @@ import { getServiceReportForEdit } from "@/lib/db/queries/service-reports";
 import { repairCaseDetailHrefs } from "@/lib/domain/repair-case-detail-tabs";
 import { buildServiceReportRequestBody } from "@/lib/domain/service-report-form";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
-import {
-  readServiceReportTemplate,
-  serviceReportTemplateProductKindOf,
-  ServiceReportTemplateError,
-} from "@/lib/storage/service-report-template";
-import {
-  describeServiceReportBlockers,
-  validateServiceReportFields,
-} from "@/lib/validation/service-report-input";
+import { buildServiceReportPreviewGrid } from "@/lib/server/service-report-preview-grid";
 import { serviceReportFormValues } from "@/lib/validation/service-report-save-input";
-import {
-  readSheetPrintGrid,
-  type SheetPrintGrid,
-} from "@/lib/xlsx/sheet-print-grid";
-import {
-  fillServiceReportWorkbook,
-  SERVICE_REPORT_FINDINGS_INTRO,
-  SERVICE_REPORT_SHEET_NAME,
-  SERVICE_REPORT_TITLES,
-} from "@/lib/xlsx/service-report-template";
+import type { SheetPrintGrid } from "@/lib/xlsx/sheet-print-grid";
+import { SERVICE_REPORT_FINDINGS_INTRO } from "@/lib/xlsx/service-report-template";
 
 /**
  * ============================================================================
@@ -53,6 +37,11 @@ import {
  * 가운데 넷은 내려받기 라우트(`api/repair-cases/[id]/service-report/xlsx`)와
  * 작성 화면이 이미 쓰는 것 그대로다. 미리보기용 변환을 새로 만들면 그 순간
  * 문서가 두 벌이 되고, 언젠가 «미리보기와 파일이 다른 말을 하는» 날이 온다.
+ *
+ * 🔴 **뒤쪽 셋은 이 화면 밖에 있다**(2026-10-19 — `lib/server/service-report-preview-grid.ts`).
+ * 작성 화면이 **아직 저장하지 않은** 값으로 같은 문서를 보는 통로
+ * (`POST …/service-report/preview-grid`)가 생기면서 부르는 자리가 둘이 되었다.
+ * 한 자리에 모아 두어야 «저장 전에 본 문서»와 «저장 뒤에 본 문서»가 갈라지지 않는다.
  *
  * ⚠️ 그래서 이 화면은 통합문서를 **실제로 만든다**(zip 을 짓고 다시 연다). 실측
  * 109ms 다. 그 값으로 «미리보기와 파일이 같다»는 보증을 산다.
@@ -112,15 +101,6 @@ function serviceReportIdFromParam(value: string | string[] | undefined): string 
   return UUID_PATTERN.test(value) ? value : null;
 }
 
-/**
- * 양식의 제목에서 화면용 이름을 만든다. 🔴 두 이름을 여기 새로 적지 않는다 —
- * 「보고서」 탭이 이미 같은 곳에서 같은 방법으로 만든다(그 화면의 `screenTitle`).
- * 전각 공백은 문서의 자간을 벌리려고 넣은 것이라 화면에서만 걷어낸다.
- */
-function screenTitle(templateTitle: string): string {
-  return templateTitle.split("　").join("");
-}
-
 export default async function ServiceReportPrintPage({
   params,
   searchParams,
@@ -162,16 +142,24 @@ export default async function ServiceReportPrintPage({
   const backHref = `${reportHref}/service-report?id=${saved.id}`;
 
   /**
-   * 저장된 값 → 폼 값 → 채우개 입력. **이미 있는 변환만 쓴다**(위 머리말).
+   * 저장된 값 → 폼 값 → 채우개 입력 → 격자. **이미 있는 변환만 쓴다**(위 머리말).
    *
    * 🔴 `findingsIntro` 의 「안 줌」과 「일부러 비움」을 가르는 자리는
    * `serviceReportFormValues` 하나뿐이다 — 여기서 `?? ""` 같은 것을 새로 적으면
    * 사람이 지운 문장이 미리보기에서 되살아난다.
+   *
+   * 🔴 **채우고 격자로 읽는 사슬은 이 화면 밖에 있다**(2026-10-19 —
+   * `lib/server/service-report-preview-grid.ts`). 작성 화면이 **아직 저장하지 않은**
+   * 값으로 같은 문서를 보는 통로가 생기면서 부르는 자리가 둘이 되었고, 두 벌로
+   * 두면 «저장 전에 본 문서»와 «저장 뒤에 본 문서»가 다른 말을 하는 날이 온다.
+   * 양식 넷 중 하나를 고르는 것도, 도장 그림 주소가 **격자를 뽑은 그 양식**을
+   * 가리키는 것도 그쪽 한 자리에 있다. 사람에게 할 말만 이 화면이 정한다.
    */
-  const validated = validateServiceReportFields(
+  const built = await buildServiceReportPreviewGrid(
     buildServiceReportRequestBody(
       serviceReportFormValues(saved.values, SERVICE_REPORT_FINDINGS_INTRO)
-    )
+    ),
+    resolved.workflowType
   );
 
   let grid: SheetPrintGrid | null = null;
@@ -180,12 +168,15 @@ export default async function ServiceReportPrintPage({
   /**
    * 🔴 도장 그림을 꺼내 올 통로의 앞부분. **격자를 뽑아낸 바로 그 양식**을
    * 가리켜야 한다 — 그러지 않으면 미리보기 격자는 매쳐 양식에서 왔는데 도장만
-   * 제너레이터 양식에서 와서, 화면에 **엉뚱한 사람 도장**이 찍힌다. 그래서 종류
-   * 둘을 주소에 실어 보낸다(아래 try 안에서 양식을 고를 때 함께 정한다).
+   * 제너레이터 양식에서 와서, 화면에 **엉뚱한 사람 도장**이 찍힌다.
    */
   let templateImageBase = "";
 
-  if (!validated.ok) {
+  if (built.ok) {
+    grid = built.grid;
+    kindLabel = built.kindLabel;
+    templateImageBase = built.templateImageBase;
+  } else if (built.code === "INVALID_INPUT") {
     /**
      * 저장은 **적다 만 보고서도 받는다**(`validation/service-report-save-input.ts`).
      * 본문이 한 줄도 없는 장이 실제로 저장돼 있을 수 있고, 그 장은 문서로 만들 수
@@ -196,38 +187,18 @@ export default async function ServiceReportPrintPage({
      * 막혔든 "확인내용이나 조치를 적어 주세요"라고만 해서, 보고서 번호가 없어 막힌
      * 사람이 멀쩡한 본문을 다시 적었다(`describeServiceReportBlockers` 머리말).
      */
-    notice = describeServiceReportBlockers(validated.fieldErrors);
+    notice = built.message;
+  } else if (built.code === "TEMPLATE_UNAVAILABLE") {
+    // 🔴 그쪽 message 에도 경로가 없지만, 이 화면은 제 말로 바꿔 보여 준다.
+    notice = TEMPLATE_UNAVAILABLE_MESSAGE;
   } else {
-    kindLabel = screenTitle(SERVICE_REPORT_TITLES[validated.data.kind]);
-    try {
-      /**
-       * 🔴 양식 넷(문서 종류 × 매쳐·제너레이터) 중 하나를 고른다. 제품 축은
-       * 이미 읽어 둔 수리 건의 `workflowType` 에서 나오고, 고르는 규칙은 storage
-       * 한 자리에만 적혀 있다. 종류를 알 수 없으면 거기서 던진다 — 엉뚱한 사람
-       * 도장이 찍힌 미리보기를 보여 주는 것보다 못 그리는 편이 낫다.
-       */
-      const productKind = serviceReportTemplateProductKindOf(resolved.workflowType);
-      const workbook = fillServiceReportWorkbook(
-        await readServiceReportTemplate(validated.data.kind, productKind),
-        validated.data
-      );
-      grid = readSheetPrintGrid(workbook, SERVICE_REPORT_SHEET_NAME);
-      templateImageBase = `/api/service-reports/template-image/${validated.data.kind}/${productKind}/`;
-    } catch (err) {
-      if (err instanceof ServiceReportTemplateError) {
-        // 🔴 err.message 에는 경로가 들어 있지 않다(storage 쪽이 그렇게 만든다).
-        notice = TEMPLATE_UNAVAILABLE_MESSAGE;
-      } else {
-        // 양식이 바뀌어 라벨이 어긋나면 채우개가 던진다. 🔴 본문 내용은 로그에
-        // 담지 않는다 — 보고서 id 와 오류 메시지뿐이다(내려받기 라우트와 같다).
-        console.error("[service-report-print] 미리보기를 그리지 못했다", {
-          serviceReportId: saved.id,
-          kind: validated.data.kind,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        notice = RENDER_FAILED_MESSAGE;
-      }
-    }
+    // 양식이 바뀌어 라벨이 어긋나면 채우개가 던진다. 🔴 본문 내용은 로그에
+    // 담지 않는다 — 보고서 id 와 오류 메시지뿐이다(내려받기 라우트와 같다).
+    console.error("[service-report-print] 미리보기를 그리지 못했다", {
+      serviceReportId: saved.id,
+      error: built.cause instanceof Error ? built.cause.message : String(built.cause),
+    });
+    notice = RENDER_FAILED_MESSAGE;
   }
 
   if (grid === null) {

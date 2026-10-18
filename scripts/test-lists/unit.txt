@@ -228,6 +228,12 @@ src/lib/server/service-report-action-input.test.ts
 # 여섯 조합 · T/C → 제너레이터 · 모르는 종류를 제너레이터로 떨어뜨리지 않는 것 ·
 # 새 설정이 비었을 때 옛 설정으로 물러서는 것을 본다. 디스크는 읽지 않는다.
 src/lib/storage/service-report-template.test.ts
+# 🔴 **저장하지 않은 값으로 그린 문서 한 장**(2026-10-19 사용자 요구: 「저장을 누르지 않은
+# 채 미리보기를 눌렀을 때에 수정한 내용이 반영되도록」). 저장된 장의 미리보기 화면과
+# **같은 사슬**이라 두 자리가 함께 쓴다 — 보낸 값이 문서에 찍히는가(저장된 쪽이 섞이지
+# 않는가) · 못 채울 값이면 그리지 않는가 · 접수 건 종류를 모르면 그리지 않는가 ·
+# 도장 주소가 **그 건이 쓰는 양식**을 가리키는가 · 🔴 이 사슬이 DB 를 모른다(원본 글자).
+src/lib/server/service-report-preview-grid.test.ts
 src/lib/xlsx/sheet-print-grid.test.ts
 scripts/lib/db-connection-failure.test.ts
 src/lib/domain/service-report-list.test.ts
@@ -466,6 +472,12 @@ src/app/api/repair-cases/*/service-report/contact-folder/route-source.test.ts
 # 변환을 시키지 않는다(도우미 주소가 없다) · 받은 자리 · 이름을 다시 본다 · 결과 이름을 손으로
 # 짓지 않는다 · 수정 시각을 함께 내고 못 읽으면 칸이 빠진다 · 폴더가 여럿이면 아무것도 안 낸다.
 src/app/api/repair-cases/*/service-report/contact-folder/pdf/route-source.test.ts
+# 🔴 **저장 전 미리보기 통로**(2026-10-19) — 작성 화면이 아직 저장하지 않은 폼 값을 보내면
+# 그 값으로 그린 문서를 격자로 돌려준다. 🔴 저장이 일어나지 않는다(보고서 표를 읽지도 쓰지도
+# 않는다) · 인가를 새로 뚫지 않았다([Excel 내려받기]와 같은 관문 · 같은 차례 · 권한이 조회보다
+# 앞) · 양식 고르기를 우회하지 않는다(공용 사슬 하나) · 감사를 남기지 않는다(나가는 파일이
+# 없다) · 응답에 원래 오류 · 경로가 없다. `[id]` 는 위와 같은 까닭으로 `*` 다.
+src/app/api/repair-cases/*/service-report/preview-grid/route-source.test.ts
 # 접수 때 폴더를 만드는 자리(조각 7) — 🔴 EXCEL_IMPORT 제외 · 트랜잭션 바깥 ·
 # 접수를 뒤집지 않음 · 메일과 따로 · 로그에 경로 없음을 **원본 글자로** 본다.
 # 실제 동작(만들고 · 기록하고 · 인수번호가 같은 폴더가 있으면 멈춤)은 db 목록의 통합 시험이 본다.

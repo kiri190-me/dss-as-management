@@ -80,7 +80,7 @@ export default function ServiceReportPrintView({
 
   return (
     <div className="srp-root">
-      <style>{styleSheet(plan, sheetWidthPt)}</style>
+      <style>{serviceReportPaperStyleSheet(plan, sheetWidthPt)}</style>
 
       <div className="srp-toolbar">
         <Link href={backHref} className="srp-btn">
@@ -140,8 +140,15 @@ export default function ServiceReportPrintView({
  *
  * 앱 껍데기(사이드바·상단바·탭 줄)는 이미 각자 `print:hidden` 을 달고 있어서
  * 여기서 감추지 않는다(`globals.css` 의 '어떤 크롬도 직접 숨기지 않는다').
+ *
+ * ── 🔴 **저장 전 미리보기 창도 이것을 쓴다** (2026-10-19) ────────────────
+ * 작성 화면에서 [전체 미리보기]를 누르면 뜨는 창
+ * (`ServiceReportDocumentPreviewDialog.tsx`)이 같은 `.srp-*` 모양으로 종이를 그린다.
+ * CSS 를 베끼면 두 미리보기가 **같은 문서를 다르게 보여 주는** 날이 온다 — 그래서
+ * 내보낸다. 🔴 **내보내기만 했다** — 이 화면이 그리는 HTML 은 한 글자도 달라지지
+ * 않는다(`print-grid/SheetPrintGridView.test.tsx` 가 얼린 사본과 견준다).
  */
-function styleSheet(plan: PaperPlan, sheetWidthPt: number): string {
+export function serviceReportPaperStyleSheet(plan: PaperPlan, sheetWidthPt: number): string {
   const margins = `${plan.marginsMm.top.toFixed(2)}mm ${plan.marginsMm.right.toFixed(
     2
   )}mm ${plan.marginsMm.bottom.toFixed(2)}mm ${plan.marginsMm.left.toFixed(2)}mm`;

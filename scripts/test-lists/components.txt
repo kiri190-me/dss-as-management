@@ -168,6 +168,16 @@ src/components/repair-cases/report/service-report/service-report-body-width-scre
 # 에서만 짧아진다) · 🔴 비고가 본문보다 좁은 **비율**이 어느 배율에서도 지켜지는가 ·
 # 🔴 적는 칸과 줄 수 세기는 안 바뀌었는가.
 src/components/repair-cases/report/service-report/service-report-body-preview-screen.test.tsx
+# 🔴 그 옆의 **[전체 미리보기]** — 머리 항목 · 도장까지 든 **문서 한 장 전체**를, 그것도
+# **아직 저장하지 않은 값으로** 본다(2026-10-19 사용자 요구: 「저장을 누르지 않은 채
+# 미리보기를 눌렀을 때에 수정한 내용이 반영되도록」). 위의 본문 미리보기와 역할이 갈린다 —
+# 그쪽은 타자마다 본문 줄바꿈만, 이쪽은 **누를 때만** 서버가 양식을 채워 만든다.
+# 보는 것: 저장 전에도 단추가 눌리는가 · 막는 조건이 [Excel 내려받기]와 같은가 ·
+# 🔴 저장된 장의 인쇄 길([저장본 인쇄 · PDF])이 사라지지 않았는가 · 창이 「저장되지
+# 않습니다」를 말하는가 · 창에 인쇄 단추가 없는가 · 도장이 서버가 넘긴 주소에서 오는가 ·
+# 🔴 미리보기 누르기가 저장 액션 · 임시보관을 건드리지 않는가(원본 글자).
+# 값 쪽은 unit 목록의 lib/server/service-report-preview-grid.test.ts 와 그 통로의 원본 시험이 본다.
+src/components/repair-cases/report/service-report/service-report-document-preview-screen.test.tsx
 # [새 견적서]의 발행번호 칸에 **다음 번호를 미리 적어 둔다**(2026-10-06) — 🔴 제안이지
 # 채번이 아니다(승인된 결정): 새 견적서에서만 · 한 번만 묻고 · 빈 칸일 때만 채우고 ·
 # 못 받으면 조용히 빈 칸이다(오류 상자 없음) · 칸은 여전히 자유 입력이고 저장 쪽은 이 값을

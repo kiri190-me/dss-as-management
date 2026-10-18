@@ -40,8 +40,10 @@ import {
   deleteServiceReportAction,
   updateServiceReportAction,
 } from "@/lib/server/actions/service-reports";
+import type { SheetPrintGrid } from "@/lib/xlsx/sheet-print-grid";
 import type { ServiceReportKind } from "@/lib/xlsx/service-report-template";
 import ServiceReportActions from "./ServiceReportActions";
+import ServiceReportDocumentPreviewDialog from "./ServiceReportDocumentPreviewDialog";
 import ServiceReportBodyFields from "./ServiceReportBodyFields";
 import ServiceReportConflictNotice from "./ServiceReportConflictNotice";
 import ServiceReportDraftNotice from "./ServiceReportDraftNotice";
@@ -69,6 +71,11 @@ import {
  *   5. 🔴 **저장이 끝나면** 그 건의 연락서 폴더 분류 폴더에 엑셀을 넣고 PDF 로 바꾼다
  *      (2026-10-12 — 아래 `archiveReportToContactFolder`). 🔴 **2번을 한 글자도 건드리지
  *      않는다** — 공유폴더가 꺼져 있든 느리든 실패하든 보고서는 저장된 채다.
+ *
+ *   6. 🔴 **저장하지 않은 값으로 문서 한 장을 미리 본다** (2026-10-19 — 아래
+ *      `handlePreview`). 지금 폼의 값을 `POST …/service-report/preview-grid` 로
+ *      보내고 돌려받은 격자를 창으로 띄운다(`ServiceReportDocumentPreviewDialog`).
+ *      🔴 **저장이 아니다** — 서버 액션도, 임시보관 지우기도 일어나지 않는다.
  *
  * 셈은 전부 `domain/service-report-form.ts` 에 있다 — 여기 두면 시험이 붙지
  * 않고, 시험이 없으면 화면과 서버가 어긋난 것을 아무도 모른다.
@@ -113,8 +120,15 @@ import {
  * ============================================================================
  */
 
+/**
+ * 통로가 준 코드 → 사람이 알아들을 말. 🔴 [Excel 내려받기]와 [전체 미리보기]가
+ * **같은 표를 쓴다** — 막히는 까닭이 같은 문·같은 검사라, 말을 두 벌 지으면 한쪽만
+ * 고쳐진다. 그래서 문장에 「내려받기」·「미리보기」를 적지 않는다(2026-10-19 에
+ * UNAUTHENTICATED 가 "…내려받아 주세요"였던 것을 고쳤다). 통로마다 다른 것은
+ * **아무 코드도 못 읽었을 때의 기본 문구** 하나뿐이다.
+ */
 const FAILURE_MESSAGES: Record<string, string> = {
-  UNAUTHENTICATED: "로그인이 풀렸습니다. 다시 로그인한 뒤 내려받아 주세요.",
+  UNAUTHENTICATED: "로그인이 풀렸습니다. 다시 로그인한 뒤 다시 시도해 주세요.",
   ACCOUNT_NOT_APPROVED: "계정이 아직 승인되지 않았습니다. 관리자에게 문의해 주세요.",
   FORBIDDEN: "이 보고서를 만들 권한이 없습니다. 관리자에게 문의해 주세요.",
   NOT_FOUND: "접수 건을 찾을 수 없습니다. 목록에서 다시 열어 주세요.",
@@ -124,6 +138,22 @@ const FAILURE_MESSAGES: Record<string, string> = {
 };
 
 const FALLBACK_FAILURE_MESSAGE = "보고서를 내려받지 못했습니다. 잠시 후 다시 시도해 주세요.";
+
+/**
+ * 🔴 [전체 미리보기]가 실패했을 때의 기본 문구. 내려받기와 **말이 달라야 한다** —
+ * 파일을 받지 못한 것이 아니라 화면에 그리지 못한 것이고, 그 둘을 같은 말로
+ * 적으면 사람은 받지도 않은 파일을 찾으러 간다. 코드별 문구는 둘이 같다
+ * (`FAILURE_MESSAGES` — 막히는 까닭이 같은 통로이기 때문이다).
+ */
+const FALLBACK_PREVIEW_FAILURE_MESSAGE =
+  "미리보기를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.";
+
+/** 서버가 지금 폼의 값으로 채워 준 문서 한 장. 창이 떠 있는 동안만 들고 있는다. */
+type ServiceReportPreviewDocument = {
+  grid: SheetPrintGrid;
+  kindLabel: string;
+  templateImageBase: string;
+};
 
 /**
  * 종류의 한글 이름. **종류 드롭다운과 지우기 확인 창이 같은 것을 쓴다** — 한
@@ -303,6 +333,14 @@ export default function ServiceReportForm({
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  /** [전체 미리보기]를 눌러 서버가 문서를 짓는 동안. 🔴 타자마다가 아니라 **누를 때만** 돈다. */
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  /**
+   * 🔴 떠 있는 미리보기 창의 내용. **눌렀던 그 순간의 값**으로 만든 문서다 —
+   * 창이 떠 있는 동안은 폼이 가려져 고칠 수 없으므로 낡을 일이 없고, 닫으면 놓는다.
+   * 저장과는 아무 관계가 없다(이 값이 DB 로 가는 길은 없다).
+   */
+  const [previewDocument, setPreviewDocument] = useState<ServiceReportPreviewDocument | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string> | null>(null);
@@ -423,6 +461,9 @@ export default function ServiceReportForm({
     // 새 장이 되는 창을 남겨 두지 않는다.
     setDeleteOpen(false);
     setDeleteError(null);
+    // 🔴 떠 있던 미리보기 창도 닫는다 — 앞 장의 문서를 새 장의 화면 위에 띄워 두면
+    //    사람은 그것을 **이 장의 문서**로 읽는다.
+    setPreviewDocument(null);
   } else if (savedReport !== null && saved !== null && savedReport.version > saved.version) {
     /**
      * 같은 장인데 서버가 **더 앞선 토큰**을 넘겼다 — 충돌 뒤 「최신 내용 다시
@@ -514,7 +555,12 @@ export default function ServiceReportForm({
    * 불러오고 나면 풀린다.
    */
   const frozen = conflict !== null && !conflict.reloaded;
-  const busy = isSubmitting || isSaving;
+  /**
+   * 🔴 미리보기도 **바쁜 상태**다 — [Excel 내려받기]가 도는 동안 폼을 얼리는 것과
+   * 같은 자리, 같은 까닭이다(보낸 값과 화면의 값이 갈라지지 않게). 통로 한 번이라
+   * 사람이 멈춤을 느끼지 않는다.
+   */
+  const busy = isSubmitting || isSaving || isPreviewing;
   const disabled = busy || blocked || frozen;
   const canDownload =
     !disabled && !bodyEmpty && rowLimitErrors.body === undefined && rowLimitErrors.remark === undefined;
@@ -817,6 +863,63 @@ export default function ServiceReportForm({
     router.refresh();
   }
 
+  /**
+   * ── 🔴 [전체 미리보기] — 저장하지 않은 값으로 문서 한 장을 본다 (2026-10-19) ──
+   * 사용자 요구: 「보고서 수정하고서 **저장을 누르지 않은 채** 저장 옆에 있는
+   * 미리보기를 눌렀을 때에 수정한 내용이 반영되도록 해줘.」
+   *
+   *  · 🔴 **저장하지 않는다.** 여기서 서버 액션을 부르지 않는다 — 시험 삼아 쳐 본
+   *    글이 남으면 그 요구가 성립하지 않는다. 보내는 것은 [Excel 내려받기]와 **똑같은
+   *    요청 본문**이고(`buildServiceReportRequestBody`), 그 통로도 저장하지 않는다.
+   *  · 🔴 **임시보관도 건드리지 않는다** — 내려받기와 같은 판단이다(위 머리말 3번:
+   *    「내려받기는 저장이 아니다」). 뽑아 본 뒤 고칠 것을 발견하는 것이 이 화면의
+   *    보통 쓰임이다.
+   *  · 실패는 내려받기와 **같은 코드표**로 읽는다(`FAILURE_MESSAGES`) — 막히는
+   *    까닭이 같은 통로라 말을 두 벌 지을 이유가 없다. 기본 문구만 다르다.
+   */
+  async function handlePreview() {
+    if (!canDownload) return;
+
+    setIsPreviewing(true);
+    setFormError(null);
+    setStatusMessage(null);
+    setFieldErrors(null);
+
+    try {
+      const response = await fetch(`/api/repair-cases/${repairCaseId}/service-report/preview-grid`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildServiceReportRequestBody(values)),
+      });
+
+      if (!response.ok) {
+        let payload: FailurePayload = {};
+        try {
+          payload = (await response.json()) as FailurePayload;
+        } catch {
+          // 본문이 JSON 이 아닌 실패(프록시·게이트웨이)도 있다. 그때는 아래 기본 문구다.
+        }
+
+        const code = typeof payload.code === "string" ? payload.code : "";
+        setFieldErrors(
+          payload.fieldErrors !== null && typeof payload.fieldErrors === "object"
+            ? (payload.fieldErrors as Record<string, string>)
+            : null
+        );
+        setFormError(FAILURE_MESSAGES[code] ?? FALLBACK_PREVIEW_FAILURE_MESSAGE);
+        return;
+      }
+
+      // 🔴 `document` 라는 이름을 쓰지 않는다 — 전역 `document` 를 가린다.
+      const preview = (await response.json()) as ServiceReportPreviewDocument;
+      setPreviewDocument(preview);
+    } catch {
+      setFormError("서버에 닿지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.");
+    } finally {
+      setIsPreviewing(false);
+    }
+  }
+
   async function handleDownload() {
     setIsSubmitting(true);
     setFormError(null);
@@ -1021,23 +1124,37 @@ export default function ServiceReportForm({
         canDelete={canDelete}
         isSaving={isSaving}
         isDownloading={isSubmitting}
+        isPreviewing={isPreviewing}
         canSave={canSave}
         canDownload={canDownload}
-        // 🔴 저장된 장에만 붙는다 — 미리보기 화면은 DB 에 저장된 값을 그린다.
-        //    주소는 지금 보고 있는 화면(`usePathname`)이 아니라 「보고서」 탭에서
-        //    만든다. 두 화면은 형제라 같은 부모에서 갈라져 나오고, 그래야
-        //    질의문자열이 붙은 주소에서도 자리가 흔들리지 않는다.
-        previewHref={saved === null ? null : `${reportHref}/service-report/print?id=${saved.id}`}
-        // 내려받기만 막는 조건이다 — 저장은 적다 만 보고서도 받는다.
+        // 🔴 **저장된 장**의 인쇄 화면이다(DB 에 저장된 값을 그린다). 주소는 지금
+        //    보고 있는 화면(`usePathname`)이 아니라 「보고서」 탭에서 만든다. 두
+        //    화면은 형제라 같은 부모에서 갈라져 나오고, 그래야 질의문자열이 붙은
+        //    주소에서도 자리가 흔들리지 않는다.
+        savedPrintHref={saved === null ? null : `${reportHref}/service-report/print?id=${saved.id}`}
+        // 🔴 내려받기와 **전체 미리보기**를 함께 막는 조건이다 — 저장은 적다 만
+        //    보고서도 받는다. 반쪽짜리 문서를 보여 주면 사람이 그것을 결과물로 믿는다.
         hint={
           bodyEmpty && !blocked
-            ? "확인내용이나 조치를 한 줄이라도 적어야 내려받을 수 있습니다."
+            ? "확인내용이나 조치를 한 줄이라도 적어야 미리보거나 내려받을 수 있습니다."
             : null
         }
         onSave={() => void handleSave()}
+        onPreview={() => void handlePreview()}
         onDownload={() => void handleDownload()}
         onDelete={openDelete}
       />
+
+      {/* 🔴 저장하지 않은 값으로 그린 문서 한 장(2026-10-19). 창이 하는 일은
+          **보여 주기만** 이다 — 여기서 DB 로 가는 길은 없다. */}
+      {previewDocument !== null && (
+        <ServiceReportDocumentPreviewDialog
+          grid={previewDocument.grid}
+          kindLabel={previewDocument.kindLabel}
+          templateImageBase={previewDocument.templateImageBase}
+          onClose={() => setPreviewDocument(null)}
+        />
+      )}
 
       {/* 🔴 지우기 확인 — 고객사·제품 모델·견적서가 쓰는 그 창이다. 견적서와 같은
           이유로 **보관 문구를 우리 것으로 넘긴다**: 보고서에는 자동 만료도 영구
