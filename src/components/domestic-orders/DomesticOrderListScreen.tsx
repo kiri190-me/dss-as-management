@@ -4,6 +4,7 @@ import { useId, useMemo, useState, useTransition, type MouseEvent, type ReactNod
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
+import NoticePopup from "@/components/common/NoticePopup";
 import {
   LIST_CARD_GRID,
   ResponsiveList,
@@ -1356,13 +1357,36 @@ function IntakeNumberLink({ row }: { row: DomesticOrderListItem }) {
  * 실패는 조용히 넘기지 않고 부르는 쪽에 올린다. 특히 CONFLICT 는 그 사이 남이
  * 이 줄을 고쳤다는 뜻이라, 아무 일도 없었던 것처럼 두면 사람은 완료가 된 줄
  * 안다.
+ *
+ * ── 🔴 완료 처리는 수리 건까지 함께 움직인다 (2026-10-18) ───────────────
+ * [완료 처리]는 붙어 있는 수리 건을 함께 출하 완료로 넘긴다
+ * (server/services/complete-domestic-order.ts). 그래서 결과가 셋이다:
+ *
+ *  · 수리 건까지 함께 넘어갔다  → 성공 팝업 문구가 그 사실을 말한다.
+ *  · 내자 줄만 완료됐다          → 예전 문구 그대로(붙은 건이 없거나 이미 출하 완료).
+ *  · 🔴 수리 건이 막혔다         → **내자 줄도 완료되지 않는다.** 이때만
+ *    `onBlocked` 로 올려 보내 **읽고 닫아야 하는 알림**(NoticePopup)을 띄운다.
+ *    줄 위 빨간 글씨 한 줄로는 놓치기 쉽고, 무엇보다 "내자 줄도 안 됐다"를
+ *    함께 전해야 한다.
+ *
+ * 가르는 기준은 **코드**(SHIPMENT_COMPLETION_BLOCKED)다 — 메시지 글자를
+ * 비교하지 않는다. 막히는 까닭마다 서버가 돌려주는 문장이 다르다.
+ *
+ * 🔴 팝업을 이 안에서 그리지 않고 화면 위쪽으로 올리는 이유: 이 단추는 표의
+ * `<td>` 안에 산다. 팝업이 거기서 태어나면 칸의 CSS(가운데·오른쪽 정렬 등)를
+ * 그대로 물려받아 글이 한쪽으로 쏠린다.
+ *
+ * **[완료 해제]는 예전 그대로다** — 내자 줄만 푼다.
  */
 function CompletionToggle({
   row,
   onError,
+  onBlocked,
 }: {
   row: DomesticOrderListItem;
   onError: (message: string | null) => void;
+  /** 출하 완료가 막혀 아무것도 저장되지 않았다 — 서버가 돌려준 까닭 한 줄. */
+  onBlocked: (reason: string) => void;
 }) {
   const router = useRouter();
   const [isPending, setIsPending] = useState(false);
@@ -1380,11 +1404,22 @@ function CompletionToggle({
         completed: !completed,
       });
       if (!result.ok) {
+        if (result.code === "SHIPMENT_COMPLETION_BLOCKED") {
+          onBlocked(result.message);
+          return;
+        }
         onError(result.message);
         return;
       }
       router.refresh();
-      showSavePopup({ message: completed ? "완료 표시를 풀었습니다." : "완료로 표시했습니다.", redirectTo: null });
+      showSavePopup({
+        message: completed
+          ? "완료 표시를 풀었습니다."
+          : result.repairCaseShipmentCompleted
+            ? "완료로 표시하고, 연결된 수리 건도 출하 완료로 처리했습니다."
+            : "완료로 표시했습니다.",
+        redirectTo: null,
+      });
     } finally {
       setIsPending(false);
     }
@@ -1747,6 +1782,12 @@ export default function DomesticOrderListScreen({
   const [selectedYear, setSelectedYear] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
   const [completionError, setCompletionError] = useState<string | null>(null);
+  /**
+   * 출하 완료가 막혀 **아무것도 저장되지 않았을 때** 띄우는 알림의 까닭 한 줄
+   * (null 이면 안 떠 있다). 상태가 여기 있는 이유는 CompletionToggle 머리말에
+   * 적었다 — 표 칸 안에서 팝업을 그리면 칸의 CSS 를 물려받는다.
+   */
+  const [shipmentBlockedReason, setShipmentBlockedReason] = useState<string | null>(null);
 
   const years = useMemo(() => collectDomesticOrderYears(rows), [rows]);
   /**
@@ -2076,6 +2117,22 @@ export default function DomesticOrderListScreen({
         </p>
       )}
 
+      {/* 🔴 출하 완료가 막혀 **내자 줄까지 그대로**인 경우. 사람이 닫아야 닫히는
+          알림이라야 한다 — 읽기 전에 사라지면 "완료된 줄 알고" 넘어간다.
+          무엇이 막혔는지(서버가 돌려준 까닭)와 **무엇이 저장되지 않았는지**,
+          그리고 다음에 무엇을 해야 하는지를 함께 적는다. */}
+      {shipmentBlockedReason !== null && (
+        <NoticePopup
+          title="완료 처리를 하지 못했습니다"
+          lines={[
+            "이 줄에 연결된 수리 건을 출하 완료로 넘기지 못했습니다.",
+            shipmentBlockedReason,
+            "그래서 내자 정리의 완료 처리도 되지 않았습니다. 수리 건 쪽을 먼저 처리한 뒤 [완료 처리]를 다시 눌러 주세요.",
+          ]}
+          onClose={() => setShipmentBlockedReason(null)}
+        />
+      )}
+
       {rows.length === 0 ? (
         <div className="rounded-lg border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
           등록된 내자 정리 항목이 없습니다.
@@ -2226,7 +2283,13 @@ export default function DomesticOrderListScreen({
                             <span className="tabular-nums">{dash(row.displayOrder)}</span>
                             {completed && <CompletedBadge />}
                             {canEdit && <EditRowButton row={row} onOpen={openRow} />}
-                            {canEdit && <CompletionToggle row={row} onError={setCompletionError} />}
+                            {canEdit && (
+                              <CompletionToggle
+                                row={row}
+                                onError={setCompletionError}
+                                onBlocked={setShipmentBlockedReason}
+                              />
+                            )}
                           </span>
                         </td>
                         <td className="px-3 py-2">{dash(row.customerName)}</td>
@@ -2535,7 +2598,11 @@ export default function DomesticOrderListScreen({
                               {completed && <CompletedBadge />}
                               {canEdit && <EditRowButton row={row} onOpen={openRow} />}
                               {canEdit && (
-                                <CompletionToggle row={row} onError={setCompletionError} />
+                                <CompletionToggle
+                                  row={row}
+                                  onError={setCompletionError}
+                                  onBlocked={setShipmentBlockedReason}
+                                />
                               )}
                             </span>
                           </div>

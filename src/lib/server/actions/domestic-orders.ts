@@ -21,6 +21,7 @@ import {
   softDeleteDomesticOrder,
   type DomesticOrderTrashResult,
 } from "@/lib/db/mutations/domestic-orders-trash";
+import { completeDomesticOrderWithShipment } from "@/lib/server/services/complete-domestic-order";
 import { saveDomesticOrderSheetHeading } from "@/lib/db/mutations/domestic-order-sheet-settings";
 import { saveRepairCaseDomesticOrderIssueDates } from "@/lib/db/mutations/domestic-order-issue-dates";
 import { normalizeDomesticOrderIssueDateInput } from "@/lib/domain/domestic-order-issue-date-edit";
@@ -183,12 +184,47 @@ export async function updateDomesticOrderAction(input: {
  * hasPermission("domesticOrders", "WRITE"). 권한 상한을 따로 올리지 않는다:
  * 완료는 누른 그 자리에서 다시 눌러 되돌릴 수 있는 조작이고, 값이 사라지지도
  * 않는다. 되돌릴 수 없는 조작(삭제 등)이 생기면 그때 별도의 수준을 논한다.
+ *
+ * ── 🔴 완료 처리는 수리 건까지 함께 움직인다 (2026-10-18) ───────────────
+ * completed === true 는 **서비스**로 보낸다
+ * (server/services/complete-domestic-order.ts). 거기서 붙어 있는 수리 건을
+ * 먼저 출하 완료로 넘기고, 넘어간 뒤에만 내자 줄을 완료한다 — 차례와 그
+ * 까닭은 그 파일 머리말에 있다. 이 액션이 하는 일은 그대로다: 세션 → 인가 →
+ * 형식 검증 → 오류 가리기.
+ *
+ * **완료 해제(false)는 예전 그대로** mutation 을 곧장 부른다. 수리 건의
+ * 출하 완료를 되돌리는 일은 이번 결정에 들어 있지 않다.
  */
+export type DomesticOrderCompletionActionResultCode =
+  | DomesticOrderActionResultCode
+  /**
+   * 붙어 있는 수리 건을 출하 완료로 넘기지 못해 **내자 줄도 완료되지 않았다.**
+   * 화면은 이 코드를 보고 "읽고 닫아야 하는 알림"(NoticePopup)을 띄운다 —
+   * 승인이 남았다거나 역할이 모자라다는 말은 줄 위 빨간 글씨 한 줄로는 놓치기
+   * 쉽고, 무엇보다 **내자 줄도 안 됐다**는 사실을 함께 전해야 한다.
+   */
+  | "SHIPMENT_COMPLETION_BLOCKED";
+
+export type DomesticOrderCompletionActionResult =
+  | {
+      ok: true;
+      id: string;
+      version: number;
+      /** 이번 누름으로 수리 건까지 함께 출하 완료됐는가(화면의 성공 문구가 갈린다). */
+      repairCaseShipmentCompleted: boolean;
+    }
+  | {
+      ok: false;
+      code: DomesticOrderCompletionActionResultCode;
+      fieldErrors?: Record<string, string>;
+      message: string;
+    };
+
 export async function setDomesticOrderCompletionAction(input: {
   id: string;
   expectedVersion: number;
   completed: boolean;
-}): Promise<DomesticOrderActionResult> {
+}): Promise<DomesticOrderCompletionActionResult> {
   const auth = await resolveAuthorizedActingUser();
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
@@ -219,10 +255,21 @@ export async function setDomesticOrderCompletionAction(input: {
   }
 
   try {
-    return await setDomesticOrderCompletion({
+    if (!input.completed) {
+      // 완료 해제 — 예전 그대로 내자 줄만 푼다(위 머리말).
+      const released = await setDomesticOrderCompletion({
+        id: input.id,
+        expectedVersion: input.expectedVersion,
+        completed: false,
+        actorUserId: auth.actingUser.id,
+      });
+      return released.ok
+        ? { ok: true, id: released.id, version: released.version, repairCaseShipmentCompleted: false }
+        : { ok: false, code: released.code, message: released.message };
+    }
+    return await completeDomesticOrderWithShipment({
       id: input.id,
       expectedVersion: input.expectedVersion,
-      completed: input.completed,
       actorUserId: auth.actingUser.id,
     });
   } catch (err) {

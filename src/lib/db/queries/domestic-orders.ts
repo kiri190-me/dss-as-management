@@ -12,6 +12,7 @@ import {
   quotes,
   repairCases,
   users,
+  workflowSteps,
 } from "../schema";
 import {
   formatQuoteSupplyAmount,
@@ -900,6 +901,70 @@ export async function listRepairCaseLinkOptions(): Promise<RepairCaseLinkOption[
     .leftJoin(products, eq(products.id, repairCases.productId))
     .where(eq(repairCases.isDeleted, false))
     .orderBy(desc(repairCases.intakeNumber));
+}
+
+/**
+ * 내자 줄 한 개에 붙어 있는 **수리 건의 지금 상태**. [완료 처리]가 그 건을 함께
+ * 출하 완료로 넘길지 말지를 정하는 데에만 쓴다
+ * (server/services/complete-domestic-order.ts).
+ */
+export type DomesticOrderShipmentLink = {
+  repairCaseId: string;
+  /**
+   * 읽은 그 순간의 repair_cases.version. transitionWorkflow 의 낙관적 잠금
+   * 인자로 그대로 넘어간다 — **그 검사가 사실상 무의미해지는 이유**는 서비스
+   * 쪽 머리말에 적어 두었다.
+   */
+  repairCaseVersion: number;
+  /** 지금 단계가 이미 출하 완료인가. */
+  isShipmentCompleted: boolean;
+};
+
+/**
+ * 그 내자 줄에 **지금 무엇이 붙어 있는지**를 한 번에 읽는다.
+ *
+ * `null` 이 돌아오는 경우는 셋이고, 부르는 쪽에서는 **전부 같은 뜻**이다 —
+ * "함께 출하 완료로 넘길 수리 건이 없다".
+ *  1. 그 내자 줄 자체가 없거나 휴지통에 있다(그때 완료 처리는 뒤이어
+ *     setDomesticOrderCompletion 이 NOT_FOUND 로 돌려준다 — 여기서 미리
+ *     판정하지 않는다).
+ *  2. repair_case_id 가 NULL 이다. 수리 없이 납품만 하는 줄과, 인수번호를
+ *     글자로만 남긴 줄이 실제로 있다(schema/domestic-orders.ts).
+ *  3. 붙어 있던 수리 건이 **휴지통에 있다.** 그 건은 화면 어디에도 없으므로
+ *     없는 것으로 친다 — 그러지 않으면 transitionWorkflow 가 NOT_FOUND 를
+ *     돌려주고, 그 때문에 내자 줄의 완료 처리까지 영영 막힌다.
+ *
+ * 출하 완료 여부는 **workflow_steps.repair_status 로** 판정한다. 단계 key 를
+ * 글자로 비교하지 않는 이유는 워크플로마다 단계 key 가 다르기 때문이고, 이
+ * 저장소가 "지금 출하 완료인가"를 묻는 다른 자리들(queries/weekly-report.ts ·
+ * queries/repair-cases-mine.ts)이 쓰는 기준과 같다. 아직 nullable 인 칸이라
+ * NULL 은 "출하 완료가 아니다"로 접는다.
+ */
+export async function getDomesticOrderShipmentLink(
+  domesticOrderId: string
+): Promise<DomesticOrderShipmentLink | null> {
+  const [row] = await db
+    .select({
+      repairCaseId: repairCases.id,
+      repairCaseVersion: repairCases.version,
+      repairStatus: workflowSteps.repairStatus,
+    })
+    .from(domesticOrders)
+    .innerJoin(
+      repairCases,
+      and(eq(repairCases.id, domesticOrders.repairCaseId), eq(repairCases.isDeleted, false))
+    )
+    // 단계가 비어 있는 건이 생겨도 줄이 통째로 사라지지 않게 LEFT 다 — 그때는
+    // "출하 완료가 아니다"로 읽히고, 실제로 넘길 수 있는지는 transitionWorkflow 가 본다.
+    .leftJoin(workflowSteps, eq(workflowSteps.id, repairCases.currentWorkflowStepId))
+    .where(and(eq(domesticOrders.id, domesticOrderId), eq(domesticOrders.isDeleted, false)));
+
+  if (!row) return null;
+  return {
+    repairCaseId: row.repairCaseId,
+    repairCaseVersion: row.repairCaseVersion,
+    isShipmentCompleted: row.repairStatus === "SHIPMENT_COMPLETED",
+  };
 }
 
 /** 수정 폼의 '고객사' 목록에 들어갈 한 줄. */

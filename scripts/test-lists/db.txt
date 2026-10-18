@@ -269,3 +269,15 @@ src/lib/db/mutations/product-model-share-docs.integration.test.ts
 # 권한은 여기서 안 본다(mutation 에 없다) — components 목록의 attachment-purge-ui 가 본다.
 # 🔴 격리 이름: 접수 월 "9209" · 제품 모델 "ATPURGE-TEST-" · "ATPURGE-TEST-PMODEL-".
 src/lib/db/mutations/attachment-purge.integration.test.ts
+
+# ── 내자 [완료 처리] 한 번이 수리 건까지 출하 완료로 넘기는가 (2026-10-18) ──
+# 조율은 서비스 하나가 쥔다(server/services/complete-domestic-order.ts) — 두
+# mutation 이 **서로 다른 트랜잭션**이라 차례 자체가 규칙이다. 네 갈래를 못 박는다:
+# 🔴 수리 건이 안 붙은 줄은 예전처럼 완료만 된다 · 🔴 **최종 출하 승인이 없으면
+# 거절되고 그때 내자 줄의 completed_at 이 여전히 NULL 이다**(version 도 그대로) ·
+# 🔴 승인이 있으면 둘 다 움직이고 이력의 사유가 **자동 문구**라 사람이 직접 누른
+# 것과 갈린다 · 🔴 이미 출하 완료된 건은 **건너뛴다**(재시도 복구 경로 — 건너뛰지
+# 않으면 잠긴 건이라 CASE_LOCKED 로 막혀 내자 줄까지 영영 완료되지 않는다).
+# 완료 해제는 이 파일을 거치지 않는다. 인가는 서버 액션의 몫이라 여기서 안 본다.
+# 🔴 격리 이름: 접수 월 "9311" · 제품 모델 "DOSHIP-TEST-" · 고객사 "AS-TEST-DOSHIP-".
+src/lib/server/services/complete-domestic-order.integration.test.ts
