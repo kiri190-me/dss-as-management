@@ -1,0 +1,470 @@
+import { koreanKyosanDocumentText } from "@/lib/kyosan/report-terms";
+
+import { textDisplayWidth, wrapTextToWidth } from "./text-wrap";
+
+/**
+ * ============================================================================
+ * 보고서 본문이 문서에서 **어디서 줄이 바뀌는가** — 화면과 채우개가 함께 쓴다
+ * ============================================================================
+ * 작성 화면이 입력칸 옆에 「문서에서 어떻게 나올지」를 실시간으로 그린다
+ * (`components/.../ServiceReportBodyPreview.tsx`). 그러려면 줄 나누기 규칙을
+ * 브라우저에서도 돌릴 수 있어야 하는데, 그 규칙은 채우개
+ * (`xlsx/service-report-template.ts`)에 있었고 그 모듈은 zip 읽기·쓰기를 물고
+ * 있어 화면이 값으로 가져올 수 없다.
+ *
+ * 🔴 **그래서 규칙을 베끼지 않고 여기로 옮겼다.** 채우개는 이제 이 파일을
+ * 부른다 — 한 벌뿐이다. 베껴 두면 화면이 「42자에서 나뉜다」고 그려 놓고 문서는
+ * 다르게 나누는 날이 오고, 그때 미리보기는 **거짓말**이 되어 없느니만 못하다.
+ *
+ * ── 여기로 옮겨 온 것 (자리만 옮겼다 · 동작은 한 글자도 안 바뀌었다) ─────
+ *   `SERVICE_REPORT_FONT_METRICS` · `contentWrapWidth` · `splitBodyLine`
+ *   그리고 확인내용 첫 줄을 붙이는 `findingsLines`(여기서는
+ *   `serviceReportFindingsLines` — 기본 문구를 **인자로** 받는 것만 다르다.
+ *   그 문구 상수는 양식 쪽 이야기라 채우개에 그대로 두었다).
+ *
+ *   🔴 2026-10-18 둘째 조각에서 **문서의 모양**도 따라왔다 — 구역 라벨
+ *   (`SERVICE_REPORT_BODY_LABELS`) · 맺음 표시(`SERVICE_REPORT_CLOSING_MARK`) ·
+ *   구역 사이와 맺음 표시의 여백(`…GAP_ROWS`) · 구역이 먹는 줄 수
+ *   (`serviceReportSectionRowCount`). 미리보기가 「최종 결과물처럼」 보이려면
+ *   그 글자들이 필요한데, **화면이 지어내면 두 벌이 된다**(라벨의 전각 공백은
+ *   눈으로 구별되지 않아 어긋나도 아무도 못 잡는다). 채우개는 이제 여기서
+ *   가져다 쓰고 같은 이름으로 **다시 내보낸다** — 부르던 곳은 그대로다.
+ *
+ * ── 여기 **없는** 것 ────────────────────────────────────────────────────
+ * 🔴 구역이 몇 행에서 시작하는가(`planBodyLayout`·`readSectionStartRows`)는
+ * **양식 파일 안에** 있고 파일은 서버에만 있다. 그래서 미리보기는 **행 번호를
+ * 그리지 않고**, 구역 사이도 채우개가 **반드시 넣는 한 줄**까지만 그린다 —
+ * 문서에서는 다음 구역이 제 행에서 시작하느라 더 벌어질 수 있다
+ * (`service-report-form.ts` 의 `countServiceReportBodyRows` 머리말과 같은 한계).
+ *
+ * ── 🔴 이 파일은 순수하다 ───────────────────────────────────────────────
+ * `server-only` · `node:*` · React · DB 를 물지 않는다. 그래야 화면과 서버가
+ * 같은 함수를 부를 수 있다.
+ * ============================================================================
+ */
+
+/**
+ * ────────────────────────────────────────────────────────────────────────
+ * 🔴 양식에 박힌 글꼴을 재서 굳힌 값 (2026-10-15 실측 · 수리·검사 양식 같음)
+ * ────────────────────────────────────────────────────────────────────────
+ * 엑셀의 열 너비 단위는 「**통합문서 기본 글꼴**로 `0` 을 몇 자 넣을 수 있는가」다.
+ * 그런데 본문·비고 칸에 박힌 글꼴은 기본 글꼴이 **아니다**:
+ *
+ *   · 기본 글꼴 — `styles.xml` 의 `fonts[0]`(「표준」 스타일) = **ＭＳ Ｐゴシック 11pt**
+ *   · 본문 `H31:AU31`~`H59:AU59`, 비고 `H60:AF60`~`H63:AF63`
+ *     — 둘 다 같은 서식 글꼴 = **맑은 고딕 9pt**
+ *
+ * 그래서 `readColumnRangeWidth` 가 돌려주는 「75칸」은 **본문 글꼴 75자가 아니다.**
+ * 글자가 더 작으니 같은 자리에 더 들어간다. 그 차이를 안 보고 75 를 그대로 줄
+ * 폭으로 쓰면 **실제보다 일찍 줄이 바뀌어** 칸이 덜 찬 채로 인쇄된다
+ * (2026-10-15 사용자 지적: 「엑셀 칸 너비 정도로 맞춰 달라」).
+ *
+ * ── 글자 폭 실측 (Windows 11 · 96dpi · GDI 보냄폭) ──────────────────────
+ *   ＭＳ Ｐゴシック 11pt  `0` = **8px**   ← 열 너비 한 칸의 정체
+ *   맑은 고딕 9pt        `0` = **7px**,  한글 음절 = **12px**
+ *
+ * 🔴 한글은 숫자의 **1.71배**다 — **2배가 아니다.** `text-wrap.ts` 는 한글을
+ * 2칸으로 세므로 **한글은 재어 보면 늘 모자라게 센다(16.7%).** 그 16.7% 가 곧
+ * 안전 여백이다 — 지어낸 값이 아니라 글꼴에서 나온 값이다.
+ *
+ * ── 안전 여백을 한 자 더 둔다 ───────────────────────────────────────────
+ * 위의 16.7% 는 **한글에만** 붙는다. 숫자만 있는 줄은 1칸이 그대로 1자라 여백이
+ * 0 이 된다. 그래서 `SAFETY_PX`(숫자 한 자)를 더 뺀다 — 넘치는 쪽으로 틀어지면
+ * 인쇄물이 잘리고, 덜 차는 쪽은 보기만 나쁘다.
+ */
+const SERVICE_REPORT_FONT_METRICS = {
+  /** 통합문서 기본 글꼴(ＭＳ Ｐゴシック 11pt)의 `0` — 열 너비 한 칸이 이것이다. */
+  normalDigitPx: 8,
+  /** 본문·비고 칸 글꼴(맑은 고딕 9pt)의 `0` — 우리가 세는 한 칸이 이것이다. */
+  contentDigitPx: 7,
+  /** 엑셀이 열 너비 식에 넣는 셀 안쪽 여백(좌 2 + 우 2 + 눈금선 1). */
+  cellPaddingPx: 5,
+  /** 🔴 안전 여백 — 본문 글꼴 숫자 한 자. 위 머리말의 까닭. */
+  safetyPx: 7,
+} as const;
+
+/**
+ * 🔴 엑셀 열 너비 합(기본 글꼴 기준)을 **본문 글꼴 기준 줄 폭**으로 바꾼다.
+ *
+ *   픽셀      = 열 너비 합 × 8
+ *   줄 폭     = ⌊(픽셀 − 5 − 7) ÷ 7⌋
+ *
+ * 이 양식에서는 이렇게 나온다:
+ *   · 본문 `H:AU` 75칸  → 600px → **84칸**(한글 42자). 엑셀이 실제로 담는 양은
+ *     한글 49자((600−5)÷12)이므로 42자는 그보다 **덜 차는 쪽**이다.
+ *   · 비고 `H:AF` 46.875칸 → 375px → **51칸**(한글 25자). 비고는 아직 나누지
+ *     않지만(줄 수를 넘으면 던진다) 나눌 날의 값이 이것이다.
+ *
+ * 순수 함수다 — 글꼴을 재지 않고 위에 굳힌 상수만 쓴다.
+ */
+export function contentWrapWidth(columnWidth: number): number {
+  const { normalDigitPx, contentDigitPx, cellPaddingPx, safetyPx } = SERVICE_REPORT_FONT_METRICS;
+  const usablePx = columnWidth * normalDigitPx - cellPaddingPx - safetyPx;
+  const width = Math.floor(usablePx / contentDigitPx);
+  // 🔴 `wrapTextToWidth` 는 2칸 미만을 거절한다. 양식이 망가져도 그 앞에서 막는다.
+  if (!(width >= 2)) {
+    throw new Error(`본문 칸이 너무 좁습니다: 열 너비 ${columnWidth} → ${width}칸`);
+  }
+  return width;
+}
+
+/**
+ * 한 줄을 칸의 가로폭에 맞춰 나눈다.
+ *
+ * 줄 안의 줄바꿈(`\n`)은 **먼저 갈라 놓는다.** 그것을 공백처럼 다루면 사람이
+ * 나눠 쓴 두 줄이 한 줄로 붙어 버리고, 붙은 자리는 아무도 눈치채지 못한다.
+ */
+export function splitBodyLine(line: string, width: number): string[] {
+  return line.split(/\r\n?|\n/u).flatMap((piece) => wrapTextToWidth(piece, width));
+}
+
+/**
+ * ────────────────────────────────────────────────────────────────────────
+ * 🔴 양식의 칸 폭 — **화면은 파일을 열 수 없어서** 여기 굳혀 둔다
+ * ────────────────────────────────────────────────────────────────────────
+ * 서버는 이 숫자를 안 쓴다. 채우개는 지금도 양식의 `<cols>` 를 그때그때 읽는다
+ * (`readColumnRangeWidth`) — 사람이 Excel 에서 열 너비를 고치면 서버는 그날로
+ * 따라간다. 브라우저에는 그 파일이 없으므로 화면만 이 상수를 본다.
+ *
+ * 🔴 **어긋나면 시험이 먼저 깨진다.** `xlsx/service-report-template.test.ts` 가
+ * 실제 양식 두 파일을 열어 `readColumnRangeWidth` 의 값이 이 상수와 같은지
+ * 본다. 양식이 바뀐 날 그 시험이 빨개지고, 그때 이 숫자를 함께 고친다.
+ *
+ *   본문 `H`~`AU` 40열 × 1.875 = 75칸
+ *   비고 `H`~`AF` 25열 × 1.875 = 46.875칸
+ *   라벨 `C`~`G`   5열 × 1.75  = 8.75칸
+ */
+export const SERVICE_REPORT_BODY_COLUMN_WIDTH = 75;
+export const SERVICE_REPORT_REMARK_COLUMN_WIDTH = 46.875;
+/**
+ * 본문 **라벨 열**(`확　내`/`인　용` 이 찍히는 칸)의 열 너비.
+ *
+ * 🔴 위의 둘과 같은 이유로 여기 있다 — 미리보기가 라벨 칸을 문서와 **같은 폭**으로
+ * 그리려면 이 숫자가 필요한데, 브라우저에는 양식 파일이 없다. 양식이 바뀌면
+ * `xlsx/service-report-template.test.ts` 의 「양식의 칸 폭이 …」가 먼저 깨진다.
+ *
+ * ⚠️ 본문 열(1.875)과 **열 하나의 너비가 다르다**(1.75). 40 × 1.875 처럼 같은 곱을
+ * 쓰면 틀린다.
+ */
+export const SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH = 8.75;
+
+/**
+ * 🔴 엑셀 열 너비(기본 글꼴 문자 단위) → **화면 픽셀**.
+ *
+ * 열 너비 한 칸은 통합문서 기본 글꼴의 숫자 한 자이고 이 양식에서는 8px 이다
+ * (`SERVICE_REPORT_FONT_METRICS.normalDigitPx` — 위 머리말의 실측). Excel 이
+ * 종이에 그릴 때 쓰는 픽셀은 96dpi 기준이라 **CSS 픽셀과 1:1** 이다. 그래서
+ * 이 값을 그대로 `width` 에 주면 미리보기 상자가 문서의 칸과 같은 크기가 된다:
+ *
+ *   본문 75칸 → **600px** · 비고 46.875칸 → **375px** · 라벨 8.75칸 → **70px**
+ *
+ * ⚠️ 인자는 **열 너비**이지 줄 폭(`SERVICE_REPORT_BODY_WRAP_WIDTH` = 84칸)이
+ * 아니다. 둘 다 그냥 수라서 바꿔 넣어도 조용히 지나간다 — 이름을 보고 넣을 것.
+ */
+export function serviceReportColumnWidthPx(columnWidth: number): number {
+  return Math.round(columnWidth * SERVICE_REPORT_FONT_METRICS.normalDigitPx);
+}
+
+/** 본문 한 줄에 들어가는 칸 수(84 = 한글 42자). */
+export const SERVICE_REPORT_BODY_WRAP_WIDTH = contentWrapWidth(SERVICE_REPORT_BODY_COLUMN_WIDTH);
+/** 비고 한 줄에 들어가는 칸 수(51 = 한글 25자). */
+export const SERVICE_REPORT_REMARK_WRAP_WIDTH = contentWrapWidth(
+  SERVICE_REPORT_REMARK_COLUMN_WIDTH
+);
+
+/**
+ * 「확인내용」에 실제로 찍히는 줄 — 정형 문구가 첫 줄이다.
+ *
+ * 🔴 `findings` 가 비면 통째로 빈다. 그래야 "본문이 한 줄도 없습니다" 검사가
+ * 정형 문구 때문에 통과해 버리는 일이 없고, 소개할 항목 없이 소개 문장만 찍힌
+ * 문서도 안 나간다.
+ *
+ * 🔴 **「안 줌」을 푸는 일은 여기서 하지 않는다.** 채우개는 `undefined` 를
+ * `SERVICE_REPORT_FINDINGS_INTRO` 로 바꿔서 넘기고, 화면은 그 문구가 이미 칸에
+ * 들어 있는 글자를 그대로 넘긴다. 기본값을 여기 적어 두면 양식 쪽 상수가
+ * 두 벌이 된다.
+ */
+export function serviceReportFindingsLines(
+  findings: readonly string[],
+  intro: string
+): readonly string[] {
+  if (findings.length === 0) return [];
+  return intro === "" ? findings : [intro, ...findings];
+}
+
+/**
+ * ════════════════════════════════════════════════════════════════════════
+ * 🔴 문서의 **모양** — 라벨 · 맺음 표시 · 여백
+ * ════════════════════════════════════════════════════════════════════════
+ * 아래 다섯은 채우개(`xlsx/service-report-template.ts`)에서 자리만 옮겨 온
+ * 것이고 그 모듈이 같은 이름으로 다시 내보낸다. 옮긴 까닭은 머리말에 있다 —
+ * 작성 화면의 미리보기가 **이 글자 그대로** 그려야 하는데, 채우개는 zip 을 물고
+ * 있어 브라우저가 값으로 가져올 수 없다.
+ * ════════════════════════════════════════════════════════════════════════
+ */
+
+/**
+ * 본문 구역의 라벨 — **양식의 글상자에 있던 모양 그대로 두 줄짜리다.**
+ *
+ * 원본 `Text Box 9` 는 라벨을 세로로 흘려 적어 두었다. 「확인내용」은 **두 줄**
+ * (`확　내` / `인　용`)이고 「조치」·「정리」는 한 줄이다. 「확인내용」을 한 줄로
+ * 펴서 적으면 우리가 만든 문서만 다른 모양이 된다.
+ *
+ * 🔴 **공백이 라벨마다 다르다.** 원본에서 코드 포인트째 옮긴 것이다:
+ *
+ *   `확　내` = `D655 3000 B0B4`   ← 전각 공백(U+3000)
+ *   `인　용` = `C778 3000 C6A9`   ← 전각 공백(U+3000)
+ *   `조  치` = `C870 0020 0020 CE58`  ← 보통 공백(U+0020) **둘**
+ *   `정  리` = `C815 0020 0020 B9AC`  ← 보통 공백(U+0020) **둘**
+ *
+ * 왜 다른지는 모른다. 통일하지 않는다 — 원본이 그렇다. 전각 공백은 코드에서
+ * 눈에 안 보이므로 `　` 으로 적어 둔다(보통 공백과 섞이면 아무도 못 잡는다).
+ *
+ * ⚠️ 넷 다 `textDisplayWidth` 로 **6칸**이다(전각 2 + 전각 2 + 전각 2, 또는
+ * 전각 2 + 반각 1 + 반각 1 + 전각 2). 미리보기의 라벨 열 폭이 거기서 나온다.
+ */
+export const SERVICE_REPORT_BODY_LABELS = {
+  findings: ["확　내", "인　용"],
+  actions: ["조  치"],
+  summary: ["정  리"],
+} as const;
+
+/**
+ * 라벨 열이 먹는 칸 수 — **라벨 글자에서 잰다**(넷 다 6칸이다).
+ *
+ * 미리보기의 왼쪽 칸 폭이 여기서 나온다. 숫자를 적어 두면 라벨이 길어진 날
+ * 글자가 잘리고, 잘린 것은 「원래 그런가 보다」로 지나간다.
+ */
+export const SERVICE_REPORT_BODY_LABEL_WIDTH = Math.max(
+  ...Object.values(SERVICE_REPORT_BODY_LABELS)
+    .flat()
+    .map((line) => textDisplayWidth(line))
+);
+
+/**
+ * 본문 마지막 줄 다음에 오는 맺음 표시.
+ *
+ * 🔴 **양식의 글상자에 있던 글자를 코드 포인트째 옮긴 것**이다
+ * (`U+FF5E U+C774 U+3000 U+C0C1 U+FF5E`) — 물결표는 반각 `~` 가 아니라 전각
+ * `～` 이고 사이의 공백은 전각(U+3000)이다. 보통 글자로 적으면 자간이 달라져
+ * 다른 문서처럼 보인다(제목의 전각 공백과 같은 이유).
+ *
+ * 자리는 **마지막 내용 줄에서 한 줄 띄운 줄**, 본문 내용 열이다
+ * (`SERVICE_REPORT_CLOSING_GAP_ROWS`). 양식의 글상자는 이 글자를 상자 밑바닥에
+ * 두었지만 상자는 크기가 고정이라 본문이 길어지면 어긋난다. 셀에 두면 본문이 몇
+ * 줄이든 늘 끝에 붙는다. 가운데 맞춤은 양식이 이미 해 준다 — 본문 내용 칸의
+ * 서식이 `horizontal="center"` 다(왼쪽 맞춤은 맺음 표시 **앞줄까지**만 얹는다).
+ */
+export const SERVICE_REPORT_CLOSING_MARK = "～이　상～";
+
+/**
+ * 🔴 구역과 구역 **사이에 반드시 들어가는 빈 줄**의 수.
+ *
+ * 내용이 배정된 자리 안에 들어갈 때는 남는 줄이 저절로 사이를 벌려 주지만,
+ * 내용이 넘쳐 아래 구역을 밀어내면 **다음 구역이 마지막 줄 바로 아래에 딱
+ * 붙는다.** 실측으로 그 자리가 이렇게 나왔다:
+ *
+ *   42        | -종단 AMP 압착금구 고장 확인   ← 확인내용 마지막 줄
+ *   43 조  치 | • 종단 AMP 입력 보호 휴즈 교환  ← 붙어서 구분이 안 된다
+ *
+ * 그래서 밀어낼 때는 **한 줄을 더 띄운다**(2026-09-02 사용자 결정).
+ *
+ * ⚠️ 이 한 줄도 본문 용량을 먹는다 — 전체가 블록을 넘으면 `growBodyBlock` 이
+ * 여느 때처럼 줄을 끼워 넣는다. 여기서 따로 할 일은 없다.
+ *
+ * 🔴 **이것은 하한이다.** 구역은 양식이 정한 행에서 시작하므로(`planBodyLayout`)
+ * 앞 구역이 짧으면 사이가 더 벌어진다. 미리보기는 그 행을 모르니 하한만 그린다.
+ */
+export const SERVICE_REPORT_SECTION_GAP_ROWS = 1;
+
+/**
+ * 🔴 맺음 표시(`～이　상～`) **위**에 비워 두는 줄 수.
+ *
+ * 예전에는 맺음 표시가 마지막 내용 줄에 딱 붙어 있었다. 실기에서 쓰던 사람이
+ * 발행본과 견주어 짚은 자리다(2026-09-02 사용자 결정):
+ *
+ *   55        | 정리 마지막 줄
+ *   56        |                 ← 이 한 줄
+ *   57        | ～이　상～
+ *
+ * ⚠️ 구역 사이의 빈 줄(`SERVICE_REPORT_SECTION_GAP_ROWS`)과 **따로** 산다.
+ * 그쪽은 구역과 구역 사이이고, 이쪽은 본문 전체가 끝난 다음이다. 숫자가 우연히
+ * 같다고 하나로 합치지 말 것 — 한쪽만 바꾸고 싶은 날이 온다.
+ */
+export const SERVICE_REPORT_CLOSING_GAP_ROWS = 1;
+
+/**
+ * 🔴 맺음 표시 **아래**로 본문 블록 안에 남겨 두는 줄 수.
+ *
+ * 같은 자리에서 함께 결정된 것이다(2026-09-02). 맺음 표시가 상자 밑변에 딱
+ * 붙으면 답답해 보인다 — 발행본은 그 아래에 두 줄이 비어 있다.
+ *
+ * 🔴 **이것도 본문 용량이다.** 자리가 모자라면 `growBodyBlock` 이 여느 때처럼
+ * 줄을 끼워 넣는다(`fillSheet` 의 `neededRows`). 그러니 맺음 표시가 블록의
+ * 마지막 줄에 앉는 일은 이제 없다 — 상자의 아래 테두리가 걸린 그 줄은 늘
+ * 맺음 표시 **아래 두 줄째**다.
+ */
+export const SERVICE_REPORT_CLOSING_TRAILING_ROWS = 2;
+
+/**
+ * 그 구역이 차지하는 줄 수. 줄이 없는 구역은 통째로 건너뛰므로 0이다.
+ *
+ * 🔴 **라벨 줄 수가 내용 줄 수보다 많으면 라벨 쪽이 이긴다.** 「확인내용」의
+ * 라벨은 두 줄(`확　내`/`인　용`)인데 확인 내용이 한 줄뿐인 건이 있을 수 있다.
+ * 그때 다음 구역을 바로 다음 줄에서 시작하면 「조치」의 라벨이 `인　용` 자리에
+ * 앉는다 — 라벨 열은 한 칸이라 둘 중 하나만 남고, 문서에는 「확인내용」이
+ * 「확　내」 반쪽으로 찍힌다. 내용 칸 한 줄이 비는 것은 눈에 잘 안 띄지만
+ * 반쪽 라벨은 바로 보인다. 그래서 **라벨이 온전한 쪽**을 고른다.
+ *
+ * 채우개의 `sectionRowCount` 가 이것을 부른다 — 한 벌뿐이다.
+ */
+export function serviceReportSectionRowCount(lineCount: number, labelLineCount: number): number {
+  if (lineCount === 0) return 0;
+  return Math.max(lineCount, labelLineCount);
+}
+
+/** 미리보기 한 구역 — 왼쪽 이름과, **나뉜 뒤**의 줄들. */
+export type ServiceReportPreviewSection = {
+  /** 화면에 적는 구역 이름. 문서의 라벨 글상자 모양(`확　내`/`인　용`)이 아니다. */
+  title: string;
+  /**
+   * 🔴 문서의 라벨 열에 **세로로** 찍히는 글자 — `SERVICE_REPORT_BODY_LABELS`
+   * 그대로다. 위의 `title` 은 화면에서 부르는 이름이고 이쪽이 문서에 찍히는 것.
+   */
+  labelLines: readonly string[];
+  /** 문서의 한 줄 = 여기 한 칸. */
+  lines: readonly string[];
+};
+
+/**
+ * 적은 글이 문서에서 어떤 줄들이 되는가.
+ *
+ * 채우개가 하는 것과 **같은 차례**다:
+ *   ① 교산 연락서 낱말을 한글로(`koreanKyosanDocumentText` — 채우개의
+ *      `koreanServiceReportInput` 이 **줄 수를 세기도 전에** 하는 일이다.
+ *      빠뜨리면 일본어를 붙여 넣은 줄에서 미리보기와 문서가 갈린다)
+ *   ② 확인내용 첫 줄에 정형 문구를 붙이고(`serviceReportFindingsLines`)
+ *   ③ 칸 폭에 맞춰 나눈다(`splitBodyLine`)
+ *
+ * 🔴 **줄이 한 줄도 없는 구역은 통째로 빠진다** — 채우개도 그렇다
+ * (`sectionRowCount` 가 0 을 돌려주고 그 구역은 배치되지 않는다).
+ *
+ * ⚠️ 구역이 문서의 **몇 행**에서 시작하는지는 그리지 않는다(머리말의 '여기
+ * 없는 것'). 구역 사이의 빈 줄·맺음 표시도 마찬가지다.
+ */
+export function serviceReportBodyPreviewSections(
+  body: {
+    findingsIntro: string;
+    findings: readonly string[];
+    actions: readonly string[];
+    summary: readonly string[];
+  },
+  width: number = SERVICE_REPORT_BODY_WRAP_WIDTH
+): ServiceReportPreviewSection[] {
+  const document = (lines: readonly string[]): readonly string[] =>
+    lines.map(koreanKyosanDocumentText);
+
+  const sections: {
+    title: string;
+    labelLines: readonly string[];
+    source: readonly string[];
+  }[] = [
+    {
+      title: "확인내용",
+      labelLines: SERVICE_REPORT_BODY_LABELS.findings,
+      source: serviceReportFindingsLines(
+        document(body.findings),
+        koreanKyosanDocumentText(body.findingsIntro)
+      ),
+    },
+    { title: "조치", labelLines: SERVICE_REPORT_BODY_LABELS.actions, source: document(body.actions) },
+    { title: "정리", labelLines: SERVICE_REPORT_BODY_LABELS.summary, source: document(body.summary) },
+  ];
+
+  return sections
+    .filter((section) => section.source.length > 0)
+    .map((section) => ({
+      title: section.title,
+      labelLines: section.labelLines,
+      lines: section.source.flatMap((line) => splitBodyLine(line, width)),
+    }));
+}
+
+/** 미리보기가 그리는 문서의 한 줄. */
+export type ServiceReportPreviewRow = {
+  /** 라벨 열에 찍히는 글자. 라벨이 없는 줄은 빈 글자다. */
+  label: string;
+  /** 본문 내용 열에 찍히는 글자. 빈 줄은 빈 글자다. */
+  text: string;
+  /** 🔴 맺음 표시 줄 — 문서에서 **가운데 맞춤**이다(그 줄만 서식이 다르다). */
+  closing: boolean;
+};
+
+/**
+ * 구역들을 **문서의 줄 차례로** 편다 — 미리보기가 그대로 그리는 모양이다.
+ *
+ * 채우개가 하는 것과 같은 차례다:
+ *   ① 구역 하나가 먹는 줄 수 = `serviceReportSectionRowCount`
+ *      (🔴 라벨이 내용보다 길면 라벨 쪽이 이긴다 — 확인내용 한 줄짜리는 두 줄)
+ *   ② 구역과 구역 사이에 `SERVICE_REPORT_SECTION_GAP_ROWS` 줄
+ *   ③ 마지막 내용 줄에서 `SERVICE_REPORT_CLOSING_GAP_ROWS` 줄 띄우고 맺음 표시
+ *
+ * ⚠️ **행 번호는 그리지 않는다**(머리말의 '여기 없는 것'). 문서에서는 구역이
+ * 양식이 정한 행에서 시작하므로 ②의 사이가 더 벌어질 수 있고, 맺음 표시 아래의
+ * 두 줄(`SERVICE_REPORT_CLOSING_TRAILING_ROWS`)도 그리지 않는다 — 그것은
+ * «블록이 얼마나 커야 하는가»이지 «무엇이 찍히는가»가 아니다.
+ *
+ * 🔴 구역이 하나도 없으면 **아무것도 없다.** 맺음 표시만 덩그러니 그리면 적기
+ * 전부터 문서가 있는 것처럼 보인다(채우개도 본문이 비면 던진다).
+ */
+export function serviceReportBodyPreviewRows(
+  sections: readonly ServiceReportPreviewSection[]
+): ServiceReportPreviewRow[] {
+  if (sections.length === 0) return [];
+
+  const blank = (): ServiceReportPreviewRow => ({ label: "", text: "", closing: false });
+  const rows: ServiceReportPreviewRow[] = [];
+
+  sections.forEach((section, index) => {
+    if (index > 0) {
+      for (let gap = 0; gap < SERVICE_REPORT_SECTION_GAP_ROWS; gap += 1) rows.push(blank());
+    }
+    const count = serviceReportSectionRowCount(section.lines.length, section.labelLines.length);
+    for (let row = 0; row < count; row += 1) {
+      rows.push({
+        label: section.labelLines[row] ?? "",
+        text: section.lines[row] ?? "",
+        closing: false,
+      });
+    }
+  });
+
+  for (let gap = 0; gap < SERVICE_REPORT_CLOSING_GAP_ROWS; gap += 1) rows.push(blank());
+  rows.push({ label: "", text: SERVICE_REPORT_CLOSING_MARK, closing: true });
+  return rows;
+}
+
+/** 비고 미리보기의 한 줄. */
+export type ServiceReportPreviewRemarkLine = {
+  text: string;
+  /** 🔴 문서의 비고 칸보다 긴 줄. 나뉘지 않고 **칸 밖으로 흘러나가거나 잘린다**. */
+  overflows: boolean;
+};
+
+/**
+ * 비고가 문서에서 어떤 줄들이 되는가.
+ *
+ * 🔴 **비고는 나누지 않는다.** 채우개가 비고 줄을 그대로 한 행에 한 줄씩 쓰고
+ * (`fillSheet` 의 비고 자리), 폭을 넘는 줄은 Excel 이 칸 밖으로 흘리거나 자른다.
+ * 그래서 여기서 나눠 그리면 **문서에 없는 줄바꿈을 보여 주는 거짓말**이 된다 —
+ * 대신 폭을 넘는 줄에 표시만 단다.
+ */
+export function serviceReportRemarkPreviewLines(
+  lines: readonly string[],
+  width: number = SERVICE_REPORT_REMARK_WRAP_WIDTH
+): ServiceReportPreviewRemarkLine[] {
+  return lines.map((line) => {
+    const text = koreanKyosanDocumentText(line);
+    return { text, overflows: textDisplayWidth(text) > width };
+  });
+}

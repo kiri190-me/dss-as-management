@@ -1,5 +1,30 @@
-import { wrapTextToWidth } from "@/lib/domain/text-wrap";
+/**
+ * 🔴 줄 나누기 규칙과 **문서의 모양**(라벨·맺음 표시·여백)은 **이 모듈에 없다.**
+ * `domain/service-report-body-wrap.ts` 에 있고 작성 화면의 미리보기가 같은
+ * 함수·같은 글자를 쓴다 — 두 벌이 되면 미리보기가 거짓말을 한다(그 파일
+ * 머리말). 여기는 그것을 **부르기만** 하고, 부르던 곳이 그대로이게
+ * **같은 이름으로 다시 내보낸다**(아래 `export { … }`).
+ */
+import {
+  contentWrapWidth,
+  SERVICE_REPORT_BODY_LABELS,
+  SERVICE_REPORT_CLOSING_GAP_ROWS,
+  SERVICE_REPORT_CLOSING_MARK,
+  SERVICE_REPORT_CLOSING_TRAILING_ROWS,
+  SERVICE_REPORT_SECTION_GAP_ROWS,
+  serviceReportFindingsLines,
+  serviceReportSectionRowCount,
+  splitBodyLine,
+} from "@/lib/domain/service-report-body-wrap";
 import { koreanKyosanDocumentText } from "@/lib/kyosan/report-terms";
+
+export {
+  SERVICE_REPORT_BODY_LABELS,
+  SERVICE_REPORT_CLOSING_GAP_ROWS,
+  SERVICE_REPORT_CLOSING_MARK,
+  SERVICE_REPORT_CLOSING_TRAILING_ROWS,
+  SERVICE_REPORT_SECTION_GAP_ROWS,
+};
 
 import { ZipArchive } from "./zip-reader";
 import { writeZip, type ZipEntryInput } from "./zip-writer";
@@ -282,43 +307,26 @@ export const SERVICE_REPORT_TITLES: Record<ServiceReportKind, string> = {
 export const SERVICE_REPORT_CHECK_MARK = "○";
 
 /**
- * 본문 구역의 라벨 — **양식의 글상자에 있던 모양 그대로 두 줄짜리다.**
+ * 🔴 「발생 년월일」(`AK17`)이 비었을 때 그 칸에 **남겨 두는** 글자.
  *
- * 원본 `Text Box 9` 는 라벨을 세로로 흘려 적어 두었다. 「확인내용」은 **두 줄**
- * (`확　내` / `인　용`)이고 「조치」·「정리」는 한 줄이다. 「확인내용」을 한 줄로
- * 펴서 적으면 우리가 만든 문서만 다른 모양이 된다.
+ * ── 왜 이 글자인가 — 양식이 쓰던 그대로다 (2026-10-18 실측) ──────────────
+ * 검사·수리 양식 두 파일의 `AK17` 이 똑같이 `<c r="AK17" … t="str">
+ * <f>"―――"</f><v>―――</v></c>` 다. 즉 양식 스스로 `="―――"` 를 적어 두었고,
+ * 그 글자는 **U+2015(HORIZONTAL BAR) 세 자**다(U+2014 EM DASH 도, 빼기표
+ * U+002D 도 아니다 — 눈으로는 구별이 안 되니 코드포인트로 적어 둔다).
+ * 날짜를 모르는 건이 흔해서 양식이 그렇게 비워 둔 것이고, 우리도 같은 모양을
+ * 쓴다.
  *
- * 🔴 **공백이 라벨마다 다르다.** 원본에서 코드 포인트째 옮긴 것이다:
+ * ── 왜 필요한가 ─────────────────────────────────────────────────────────
+ * 값이 없으면 채우개가 `clearCell` 로 **양식에 있던 그 글자까지 지워서**,
+ * 발생 년월일을 안 적은 보고서는 그 자리가 **아무것도 없이** 나갔다
+ * (2026-10-18 사용자 지적: 「발생 년월일이 비면 `-` 가 들어가도록」).
  *
- *   `확　내` = `D655 3000 B0B4`   ← 전각 공백(U+3000)
- *   `인　용` = `C778 3000 C6A9`   ← 전각 공백(U+3000)
- *   `조  치` = `C870 0020 0020 CE58`  ← 보통 공백(U+0020) **둘**
- *   `정  리` = `C815 0020 0020 B9AC`  ← 보통 공백(U+0020) **둘**
- *
- * 왜 다른지는 모른다. 통일하지 않는다 — 원본이 그렇다. 전각 공백은 코드에서
- * 눈에 안 보이므로 `　` 으로 적어 둔다(보통 공백과 섞이면 아무도 못 잡는다).
+ * 🔴 이 예외는 **이 한 칸뿐이다.** `clearCell` 자체는 그대로 둔다 — 다른 칸은
+ * 비면 비는 것이 맞고(양식 견본에 박힌 남의 값이 새 문서로 새면 안 된다),
+ * 공용 함수를 고치면 그 칸들까지 함께 바뀐다.
  */
-export const SERVICE_REPORT_BODY_LABELS = {
-  findings: ["확　내", "인　용"],
-  actions: ["조  치"],
-  summary: ["정  리"],
-} as const;
-
-/**
- * 본문 마지막 줄 다음에 오는 맺음 표시.
- *
- * 🔴 **양식의 글상자에 있던 글자를 코드 포인트째 옮긴 것**이다
- * (`U+FF5E U+C774 U+3000 U+C0C1 U+FF5E`) — 물결표는 반각 `~` 가 아니라 전각
- * `～` 이고 사이의 공백은 전각(U+3000)이다. 보통 글자로 적으면 자간이 달라져
- * 다른 문서처럼 보인다(제목의 전각 공백과 같은 이유).
- *
- * 자리는 **마지막 내용 줄에서 한 줄 띄운 줄**, 본문 내용 열이다
- * (`SERVICE_REPORT_CLOSING_GAP_ROWS`). 양식의 글상자는 이 글자를 상자 밑바닥에
- * 두었지만 상자는 크기가 고정이라 본문이 길어지면 어긋난다. 셀에 두면 본문이 몇
- * 줄이든 늘 끝에 붙는다. 가운데 맞춤은 양식이 이미 해 준다 — 본문 내용 칸의
- * 서식이 `horizontal="center"` 다(왼쪽 맞춤은 맺음 표시 **앞줄까지**만 얹는다).
- */
-export const SERVICE_REPORT_CLOSING_MARK = "～이　상～";
+export const SERVICE_REPORT_OCCURRED_ON_PLACEHOLDER = "―――";
 
 /**
  * 「확인내용」 첫 줄의 정형 문구 — **안 주면 이것이 들어간다.**
@@ -631,6 +639,9 @@ type ServiceReportCommon = {
   /**
    * `AK17`. 날짜를 모르는 건이 흔해서 양식이 `="―――"` 를 적어 두었다 —
    * 그래서 날짜 말고 글자도 받는다.
+   *
+   * 🔴 **안 주면 칸이 비는 것이 아니라** 그 자리표시가 남는다
+   * (`SERVICE_REPORT_OCCURRED_ON_PLACEHOLDER`). 다른 칸과 다른 하나다.
    */
   occurredOn?: Date | string;
   /** `H19`. 양식이 주파수·출력 목록(`13.56MHz 30kW` …) 드롭다운을 걸어 두었다. */
@@ -928,12 +939,15 @@ type BodySection = { labelLines: readonly string[]; lines: readonly string[] };
  * 🔴 `findings` 가 비면 통째로 빈다. 그래야 "본문이 한 줄도 없습니다" 검사가
  * 정형 문구 때문에 통과해 버리는 일이 없고, 소개할 항목 없이 소개 문장만 찍힌
  * 문서도 안 나간다.
+ *
+ * 🔴 **붙이는 셈 자체는 여기 없다** — 작성 화면의 미리보기가 같은 줄을 그려야
+ * 해서 `domain/service-report-body-wrap.ts` 로 옮겼다. 여기 남은 것은 「안
+ * 줌」을 기본 문구로 푸는 **이 모듈의 몫**뿐이다(그 문구는 양식 쪽 상수다).
  */
 function findingsLines(body: ServiceReportBody): readonly string[] {
-  if (body.findings.length === 0) return [];
   // `?? 기본값` — 🔴 `||` 로 쓰면 빈 문자열이 기본값으로 되살아난다.
   const intro = body.findingsIntro ?? SERVICE_REPORT_FINDINGS_INTRO;
-  return intro === "" ? body.findings : [intro, ...body.findings];
+  return serviceReportFindingsLines(body.findings, intro);
 }
 
 function bodySections(input: ServiceReportInput): BodySection[] {
@@ -948,18 +962,14 @@ function bodySections(input: ServiceReportInput): BodySection[] {
 }
 
 /**
- * 그 구역이 차지하는 줄 수. 줄이 없는 구역은 통째로 건너뛰므로 0이다.
+ * 그 구역이 차지하는 줄 수.
  *
- * 🔴 **라벨 줄 수가 내용 줄 수보다 많으면 라벨 쪽이 이긴다.** 「확인내용」의
- * 라벨은 두 줄(`확　내`/`인　용`)인데 확인 내용이 한 줄뿐인 건이 있을 수 있다.
- * 그때 다음 구역을 바로 다음 줄에서 시작하면 「조치」의 라벨이 `인　용` 자리에
- * 앉는다 — 라벨 열은 한 칸이라 둘 중 하나만 남고, 문서에는 「확인내용」이
- * 「확　내」 반쪽으로 찍힌다. 내용 칸 한 줄이 비는 것은 눈에 잘 안 띄지만
- * 반쪽 라벨은 바로 보인다. 그래서 **라벨이 온전한 쪽**을 고른다.
+ * 🔴 **셈은 여기 없다** — 미리보기가 같은 규칙으로 그려야 해서
+ * `domain/service-report-body-wrap.ts` 의 `serviceReportSectionRowCount` 로
+ * 옮겼다(라벨이 내용보다 길면 라벨 쪽이 이기는 까닭도 거기 적혀 있다).
  */
 function sectionRowCount(section: BodySection): number {
-  if (section.lines.length === 0) return 0;
-  return Math.max(section.lines.length, section.labelLines.length);
+  return serviceReportSectionRowCount(section.lines.length, section.labelLines.length);
 }
 
 // ── 구역이 어느 행에서 시작하는가 ────────────────────────────────────────
@@ -974,50 +984,12 @@ const EMU_PER_POINT = 12700;
 const DEFAULT_TEXT_TOP_INSET = 45720;
 
 /**
- * 🔴 구역과 구역 **사이에 반드시 들어가는 빈 줄**의 수.
- *
- * 내용이 배정된 자리 안에 들어갈 때는 남는 줄이 저절로 사이를 벌려 주지만,
- * 내용이 넘쳐 아래 구역을 밀어내면 **다음 구역이 마지막 줄 바로 아래에 딱
- * 붙는다.** 실측으로 그 자리가 이렇게 나왔다:
- *
- *   42        | -종단 AMP 압착금구 고장 확인   ← 확인내용 마지막 줄
- *   43 조  치 | • 종단 AMP 입력 보호 휴즈 교환  ← 붙어서 구분이 안 된다
- *
- * 그래서 밀어낼 때는 **한 줄을 더 띄운다**(2026-09-02 사용자 결정).
- *
- * ⚠️ 이 한 줄도 본문 용량을 먹는다 — 전체가 블록을 넘으면 `growBodyBlock` 이
- * 여느 때처럼 줄을 끼워 넣는다. 여기서 따로 할 일은 없다.
+ * 🔴 구역 사이의 빈 줄(`SERVICE_REPORT_SECTION_GAP_ROWS`) · 맺음 표시 위의
+ * 여백(`…CLOSING_GAP_ROWS`) · 맺음 표시 아래로 남기는 줄
+ * (`…CLOSING_TRAILING_ROWS`)은 **이 모듈에 없다** — 미리보기가 같은 여백으로
+ * 그려야 해서 `domain/service-report-body-wrap.ts` 로 옮겼고(머리말의 import),
+ * 세 상수의 까닭도 거기 그대로 있다. 이 모듈은 같은 이름으로 다시 내보낸다.
  */
-export const SERVICE_REPORT_SECTION_GAP_ROWS = 1;
-
-/**
- * 🔴 맺음 표시(`～이　상～`) **위**에 비워 두는 줄 수.
- *
- * 예전에는 맺음 표시가 마지막 내용 줄에 딱 붙어 있었다. 실기에서 쓰던 사람이
- * 발행본과 견주어 짚은 자리다(2026-09-02 사용자 결정):
- *
- *   55        | 정리 마지막 줄
- *   56        |                 ← 이 한 줄
- *   57        | ～이　상～
- *
- * ⚠️ 구역 사이의 빈 줄(`SERVICE_REPORT_SECTION_GAP_ROWS`)과 **따로** 산다.
- * 그쪽은 구역과 구역 사이이고, 이쪽은 본문 전체가 끝난 다음이다. 숫자가 우연히
- * 같다고 하나로 합치지 말 것 — 한쪽만 바꾸고 싶은 날이 온다.
- */
-export const SERVICE_REPORT_CLOSING_GAP_ROWS = 1;
-
-/**
- * 🔴 맺음 표시 **아래**로 본문 블록 안에 남겨 두는 줄 수.
- *
- * 같은 자리에서 함께 결정된 것이다(2026-09-02). 맺음 표시가 상자 밑변에 딱
- * 붙으면 답답해 보인다 — 발행본은 그 아래에 두 줄이 비어 있다.
- *
- * 🔴 **이것도 본문 용량이다.** 자리가 모자라면 `growBodyBlock` 이 여느 때처럼
- * 줄을 끼워 넣는다(`fillSheet` 의 `neededRows`). 그러니 맺음 표시가 블록의
- * 마지막 줄에 앉는 일은 이제 없다 — 상자의 아래 테두리가 걸린 그 줄은 늘
- * 맺음 표시 **아래 두 줄째**다.
- */
-export const SERVICE_REPORT_CLOSING_TRAILING_ROWS = 2;
 
 /** 한 구역이 실제로 앉는 자리. */
 type SectionPlacement = { section: BodySection; startRow: number; rowCount: number };
@@ -1465,10 +1437,24 @@ function fillSheet(
   xml = writeText(xml, SERVICE_REPORT_CELLS.occurrencePlace, input.occurrencePlace?.trim());
   xml = writeText(xml, SERVICE_REPORT_CELLS.occurrencePlaceDetail, input.occurrencePlaceDetail?.trim());
 
+  /**
+   * 🔴 발생 년월일은 **비어도 지우지 않는다** — 양식이 쓰던 자리표시를 남긴다
+   * (`SERVICE_REPORT_OCCURRED_ON_PLACEHOLDER`). 빈 글자도 같다: 화면은 안 적은
+   * 칸을 `""` 로 보내고 검증이 그것을 `undefined` 로 떨어뜨리지만
+   * (`validation/service-report-input.ts` 의 `normalizeOccurredOn`), 다른 길로
+   * `""` 가 들어와도 결과가 같아야 한다(`setInlineString` 은 빈 글자를 받으면
+   * `clearCell` 이다).
+   */
   xml =
-    typeof input.occurredOn === "string"
-      ? setInlineString(xml, SERVICE_REPORT_CELLS.occurredOn, input.occurredOn)
-      : writeDate(xml, SERVICE_REPORT_CELLS.occurredOn, input.occurredOn);
+    input.occurredOn === undefined || input.occurredOn === ""
+      ? setInlineString(
+          xml,
+          SERVICE_REPORT_CELLS.occurredOn,
+          SERVICE_REPORT_OCCURRED_ON_PLACEHOLDER
+        )
+      : typeof input.occurredOn === "string"
+        ? setInlineString(xml, SERVICE_REPORT_CELLS.occurredOn, input.occurredOn)
+        : writeDate(xml, SERVICE_REPORT_CELLS.occurredOn, input.occurredOn);
 
   xml = writeText(xml, SERVICE_REPORT_CELLS.productName, input.productName?.trim());
   xml = writeText(xml, SERVICE_REPORT_CELLS.productCategory, input.productCategory?.trim());
@@ -1591,16 +1577,6 @@ function alignBodyContentLeft(
     if (target !== source) xml = setCellStyle(xml, ref, target);
   }
   return { sheetXml: xml, stylesXml: aligned.xml };
-}
-
-/**
- * 한 줄을 칸의 가로폭에 맞춰 나눈다.
- *
- * 줄 안의 줄바꿈(`\n`)은 **먼저 갈라 놓는다.** 그것을 공백처럼 다루면 사람이
- * 나눠 쓴 두 줄이 한 줄로 붙어 버리고, 붙은 자리는 아무도 눈치채지 못한다.
- */
-function splitBodyLine(line: string, width: number): string[] {
-  return line.split(/\r\n?|\n/u).flatMap((piece) => wrapTextToWidth(piece, width));
 }
 
 function fillBody(sheetXml: string, block: BodyBlock, layout: BodyLayout): string {
@@ -1903,69 +1879,13 @@ function findContentEndColumn(sheetXml: string, row: number, contentColumn: stri
 }
 
 /**
- * ────────────────────────────────────────────────────────────────────────
- * 🔴 양식에 박힌 글꼴을 재서 굳힌 값 (2026-10-15 실측 · 수리·검사 양식 같음)
- * ────────────────────────────────────────────────────────────────────────
- * 엑셀의 열 너비 단위는 「**통합문서 기본 글꼴**로 `0` 을 몇 자 넣을 수 있는가」다.
- * 그런데 본문·비고 칸에 박힌 글꼴은 기본 글꼴이 **아니다**:
- *
- *   · 기본 글꼴 — `styles.xml` 의 `fonts[0]`(「표준」 스타일) = **ＭＳ Ｐゴシック 11pt**
- *   · 본문 `H31:AU31`~`H59:AU59`, 비고 `H60:AF60`~`H63:AF63`
- *     — 둘 다 같은 서식 글꼴 = **맑은 고딕 9pt**
- *
- * 그래서 `readColumnRangeWidth` 가 돌려주는 「75칸」은 **본문 글꼴 75자가 아니다.**
- * 글자가 더 작으니 같은 자리에 더 들어간다. 그 차이를 안 보고 75 를 그대로 줄
- * 폭으로 쓰면 **실제보다 일찍 줄이 바뀌어** 칸이 덜 찬 채로 인쇄된다
- * (2026-10-15 사용자 지적: 「엑셀 칸 너비 정도로 맞춰 달라」).
- *
- * ── 글자 폭 실측 (Windows 11 · 96dpi · GDI 보냄폭) ──────────────────────
- *   ＭＳ Ｐゴシック 11pt  `0` = **8px**   ← 열 너비 한 칸의 정체
- *   맑은 고딕 9pt        `0` = **7px**,  한글 음절 = **12px**
- *
- * 🔴 한글은 숫자의 **1.71배**다 — **2배가 아니다.** `text-wrap.ts` 는 한글을
- * 2칸으로 세므로 **한글은 재어 보면 늘 모자라게 센다(16.7%).** 그 16.7% 가 곧
- * 안전 여백이다 — 지어낸 값이 아니라 글꼴에서 나온 값이다.
- *
- * ── 안전 여백을 한 자 더 둔다 ───────────────────────────────────────────
- * 위의 16.7% 는 **한글에만** 붙는다. 숫자만 있는 줄은 1칸이 그대로 1자라 여백이
- * 0 이 된다. 그래서 `SAFETY_PX`(숫자 한 자)를 더 뺀다 — 넘치는 쪽으로 틀어지면
- * 인쇄물이 잘리고, 덜 차는 쪽은 보기만 나쁘다.
+ * 🔴 **열 너비 → 줄 폭 환산(`contentWrapWidth`)은 이 파일에서 나갔다.**
+ * 양식에 박힌 글꼴을 재서 굳힌 값과 셈은 `domain/service-report-body-wrap.ts`
+ * 에 있다 — 작성 화면의 미리보기가 **같은 함수**로 나눠야 하기 때문이다(그
+ * 파일 머리말). 동작은 한 글자도 바뀌지 않았고, 여기서 다시 내보내므로 부르던
+ * 쪽은 그대로다.
  */
-const SERVICE_REPORT_FONT_METRICS = {
-  /** 통합문서 기본 글꼴(ＭＳ Ｐゴシック 11pt)의 `0` — 열 너비 한 칸이 이것이다. */
-  normalDigitPx: 8,
-  /** 본문·비고 칸 글꼴(맑은 고딕 9pt)의 `0` — 우리가 세는 한 칸이 이것이다. */
-  contentDigitPx: 7,
-  /** 엑셀이 열 너비 식에 넣는 셀 안쪽 여백(좌 2 + 우 2 + 눈금선 1). */
-  cellPaddingPx: 5,
-  /** 🔴 안전 여백 — 본문 글꼴 숫자 한 자. 위 머리말의 까닭. */
-  safetyPx: 7,
-} as const;
-
-/**
- * 🔴 엑셀 열 너비 합(기본 글꼴 기준)을 **본문 글꼴 기준 줄 폭**으로 바꾼다.
- *
- *   픽셀      = 열 너비 합 × 8
- *   줄 폭     = ⌊(픽셀 − 5 − 7) ÷ 7⌋
- *
- * 이 양식에서는 이렇게 나온다:
- *   · 본문 `H:AU` 75칸  → 600px → **84칸**(한글 42자). 엑셀이 실제로 담는 양은
- *     한글 49자((600−5)÷12)이므로 42자는 그보다 **덜 차는 쪽**이다.
- *   · 비고 `H:AF` 46.875칸 → 375px → **51칸**(한글 25자). 비고는 아직 나누지
- *     않지만(줄 수를 넘으면 던진다) 나눌 날의 값이 이것이다.
- *
- * 순수 함수다 — 글꼴을 재지 않고 위에 굳힌 상수만 쓴다.
- */
-export function contentWrapWidth(columnWidth: number): number {
-  const { normalDigitPx, contentDigitPx, cellPaddingPx, safetyPx } = SERVICE_REPORT_FONT_METRICS;
-  const usablePx = columnWidth * normalDigitPx - cellPaddingPx - safetyPx;
-  const width = Math.floor(usablePx / contentDigitPx);
-  // 🔴 `wrapTextToWidth` 는 2칸 미만을 거절한다. 양식이 망가져도 그 앞에서 막는다.
-  if (!(width >= 2)) {
-    throw new Error(`본문 칸이 너무 좁습니다: 열 너비 ${columnWidth} → ${width}칸`);
-  }
-  return width;
-}
+export { contentWrapWidth };
 
 /**
  * 🔴 `startColumn` ~ `endColumn` 이 몇 칸인가 — **양식의 `<cols>` 에서 읽는다.**

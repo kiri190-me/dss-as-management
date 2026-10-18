@@ -12,6 +12,14 @@ import {
   STYLES_PART,
   WORKBOOK_PART,
 } from "./workbook-parts";
+import {
+  SERVICE_REPORT_BODY_COLUMN_WIDTH,
+  SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH,
+  SERVICE_REPORT_REMARK_COLUMN_WIDTH,
+  serviceReportBodyPreviewSections,
+} from "@/lib/domain/service-report-body-wrap";
+/** 🔴 「한 벌인가」를 보려고 **원본 모듈째** 가져온다(아래 한 벌 시험). */
+import * as wrap from "@/lib/domain/service-report-body-wrap";
 import { textDisplayWidth } from "@/lib/domain/text-wrap";
 import { translateKyosanTerm } from "@/lib/kyosan/report-terms";
 import {
@@ -35,6 +43,7 @@ import {
   SERVICE_REPORT_FINDINGS_INTRO,
   SERVICE_REPORT_FINDINGS_ROW_OFFSET,
   SERVICE_REPORT_MAX_BODY_ROWS,
+  SERVICE_REPORT_OCCURRED_ON_PLACEHOLDER,
   SERVICE_REPORT_SECTION_GAP_ROWS,
   SERVICE_REPORT_SHEET_NAME,
   SERVICE_REPORT_SUMMARY_INTRO,
@@ -1094,6 +1103,22 @@ test("🔴 라벨 글자가 원본 양식과 코드 포인트까지 같다", () 
   assert.equal(SERVICE_REPORT_BODY_LABELS.summary.length, 1);
 });
 
+/**
+ * 🔴 **라벨·맺음 표시·여백이 한 벌인가** (2026-10-18)
+ *
+ * 작성 화면의 미리보기가 그 글자들을 그려야 해서
+ * `domain/service-report-body-wrap.ts` 로 옮겼고, 이 모듈은 같은 이름으로 다시
+ * 내보낸다. 어느 날 누가 여기에 «비슷한 값»을 다시 적어 두면 위의 코드 포인트
+ * 시험은 그대로 통과하면서 화면과 문서만 갈린다 — **같은 물건인지**를 본다.
+ */
+test("🔴 화면과 채우개가 같은 라벨·맺음 표시·여백을 쓴다 (한 벌)", () => {
+  assert.equal(SERVICE_REPORT_BODY_LABELS, wrap.SERVICE_REPORT_BODY_LABELS);
+  assert.equal(SERVICE_REPORT_CLOSING_MARK, wrap.SERVICE_REPORT_CLOSING_MARK);
+  assert.equal(SERVICE_REPORT_SECTION_GAP_ROWS, wrap.SERVICE_REPORT_SECTION_GAP_ROWS);
+  assert.equal(SERVICE_REPORT_CLOSING_GAP_ROWS, wrap.SERVICE_REPORT_CLOSING_GAP_ROWS);
+  assert.equal(SERVICE_REPORT_CLOSING_TRAILING_ROWS, wrap.SERVICE_REPORT_CLOSING_TRAILING_ROWS);
+});
+
 test("🔴 확인내용이 한 줄뿐이어도 라벨은 두 줄을 지킨다", { skip: skipRepair }, () => {
   const filled = fill(repairPath as string, {
     ...REPAIR_INPUT,
@@ -1500,8 +1525,11 @@ test("🔴 양식에 남아 있던 발행본 자료가 새 문서로 새지 않�
   });
 
   // 양식 견본에 값이 들어 있던 칸들이 전부 비어야 한다.
+  //
+  // 🔴 `AK17`(발생 년월일)은 **이 목록에 없다.** 그 한 칸만 비우지 않고 양식이
+  //    쓰던 자리표시를 남긴다 — 아래 전용 시험이 본다.
   for (const ref of [
-    "H13", "H17", "X17", "AK17", "H19", "H20", "V19", "AK19", "AP19",
+    "H13", "H17", "X17", "H19", "H20", "V19", "AK19", "AP19",
     "H21", "H23", "AO21", "AO23", "AK25", "AP25",
     "H27", "H28", "X27", "AF27", "AQ27", "X28", "AF28", "AO28", "AN30", "H60",
   ]) {
@@ -1511,6 +1539,69 @@ test("🔴 양식에 남아 있던 발행본 자료가 새 문서로 새지 않�
   // 고객사 코드가 박혀 있던 자리도 우리 값으로 덮인다.
   assert.equal(filled.text(SERVICE_REPORT_CELLS.reportNumberPrefix), "No. ");
   assert.equal(filled.text(SERVICE_REPORT_CELLS.customerName), "테스트 반도체(주)");
+});
+
+/**
+ * ============================================================================
+ * 🔴 발생 년월일 — 비면 **자리표시가 남는다** (2026-10-18)
+ * ============================================================================
+ * 사용자 요구: 「발생 년월일이 비면 `-` 가 들어가도록」. 예전에는 값이 없으면
+ * `clearCell` 이라 **아무것도 없이** 나갔다.
+ *
+ * 넣는 글자는 지어낸 것이 아니라 **양식에서 재서** 정했다 — 검사·수리 양식 두
+ * 파일의 `AK17` 이 똑같이 `<f>"―――"</f>` 였다(2026-10-18 실측).
+ * ============================================================================
+ */
+test("🔴 자리표시는 양식이 쓰던 글자 그대로다 — U+2015 세 자", () => {
+  assert.deepEqual(
+    [...SERVICE_REPORT_OCCURRED_ON_PLACEHOLDER].map((char) => char.codePointAt(0)),
+    [0x2015, 0x2015, 0x2015],
+    "양식의 AK17 은 `=\"―――\"`(U+2015 HORIZONTAL BAR 세 자)였다"
+  );
+});
+
+test("🔴 발생 년월일을 안 적으면 그 칸에 자리표시가 남는다", { skip: skipRepair }, () => {
+  const filled = fill(repairPath as string, { ...REPAIR_INPUT, occurredOn: undefined });
+  assert.equal(
+    filled.text(SERVICE_REPORT_CELLS.occurredOn),
+    SERVICE_REPORT_OCCURRED_ON_PLACEHOLDER,
+    "발생 년월일 칸이 빈 채로 나갔다"
+  );
+
+  /**
+   * 🔴 양식의 수식(`="―――"`)을 그냥 두고 지나간 것이 아니라 **우리가 적은
+   * 글자**다. 수식을 남기면 그 칸만 다른 길로 살아 있는 셈이 되고, 양식이
+   * 바뀌는 날 조용히 다른 글자가 나간다.
+   */
+  const cell = /<c r="AK17"[^>]*>[\s\S]*?<\/c>/.exec(filled.sheetXml)?.[0];
+  assert.ok(cell !== undefined, "AK17 셀이 사라졌다");
+  assert.ok(cell.includes('t="inlineStr"'), `AK17 이 우리가 쓴 글자가 아니다: ${cell}`);
+  assert.ok(!cell.includes("<f>"), `AK17 에 양식의 수식이 남았다: ${cell}`);
+
+  assertSheetIsSound(filled);
+});
+
+test("🔴 빈 글자로 와도 같다 — 안 적은 것과 같은 자리표시", { skip: skipInspection }, () => {
+  const filled = fill(inspectionPath as string, { ...INSPECTION_INPUT, occurredOn: "" });
+  assert.equal(
+    filled.text(SERVICE_REPORT_CELLS.occurredOn),
+    SERVICE_REPORT_OCCURRED_ON_PLACEHOLDER
+  );
+});
+
+test("🔴 적은 값이 있으면 그 값이 들어간다 — 날짜도 글자도", { skip: skipInspection }, () => {
+  const dated = fill(inspectionPath as string, {
+    ...INSPECTION_INPUT,
+    occurredOn: new Date(2026, 7, 18),
+  });
+  assert.equal(dated.text(SERVICE_REPORT_CELLS.occurredOn), "2026-08-18");
+
+  // 날짜를 모를 때 사람이 적는 글자는 그대로 간다 — 자리표시가 덮지 않는다.
+  const written = fill(inspectionPath as string, {
+    ...INSPECTION_INPUT,
+    occurredOn: "2026년 7월경",
+  });
+  assert.equal(written.text(SERVICE_REPORT_CELLS.occurredOn), "2026년 7월경");
 });
 
 const bodyLines = (count: number, prefix: string): string[] =>
@@ -1709,6 +1800,146 @@ test("🔴 폭을 넘는 긴 줄은 낱말을 자르지 않고 나뉜다", { ski
   }
   // 낱말을 자르지 않았으므로 공백만 빼면 원문 그대로다.
   assert.equal(written.join("").replace(/\s/gu, ""), long.replace(/\s/gu, ""));
+});
+
+/**
+ * ============================================================================
+ * 🔴 작성 화면의 미리보기와 채우개가 **같은 글을 같게 나눈다** (2026-10-18)
+ * ============================================================================
+ * 작성 화면이 적는 칸 옆에 「문서에서 어떻게 나올지」를 그린다
+ * (`components/.../ServiceReportBodyPreview.tsx`). 규칙이 두 벌이 되면 화면이
+ * 「여기서 나뉜다」고 그려 놓고 문서는 다르게 나누고, 그때 미리보기는
+ * **거짓말**이 되어 없느니만 못하다.
+ *
+ * 그래서 나누는 함수는 한 벌이다(`domain/service-report-body-wrap.ts`). 아래
+ * 시험은 그 「한 벌」을 **결과로** 못 박는다 — 화면이 부르는 함수의 결과와,
+ * 실제 양식을 채워 만든 문서의 본문 칸에 **실제로 찍힌 글자**를 맞춰 본다.
+ * 어느 한쪽만 고쳐지면 여기가 깨진다.
+ * ============================================================================
+ */
+
+/** 화면이 넘기는 모양 그대로 — 전부 지어낸 글이다. */
+const PARITY_SAMPLES: readonly {
+  name: string;
+  findings: readonly string[];
+  /** 🔴 문서에서 몇 줄이 되는가. 안 적어 두면 「둘 다 안 나눈다」로도 시험이 통과한다. */
+  rows: number;
+}[] = [
+  {
+    name: "한글만 — 한 줄에 안 들어간다",
+    rows: 3,
+    findings: [
+      "출력이 나오지 않는다는 연락을 받아 현지에서 확인한 결과 전원부 퓨즈가 단선되어 있었고 " +
+        "정합기 연결부의 접촉 불량이 함께 발견되었습니다.",
+      "외관 손상 없음",
+    ],
+  },
+  {
+    name: "영숫자만 — 모델명·수치가 섞여 덩어리가 많다",
+    rows: 3,
+    findings: [
+      "RF-3000B 13.56MHz 30kW OUTPUT 0.0W REFLECT 0.0W DC-BUS 320V CTRL-BD REV2.1 SN 1234567",
+      "FUSE 10A 250V x2 REPLACED 2026-10-18 TEST OK",
+    ],
+  },
+  {
+    name: "섞인 것 — 한글 문장 안에 모델명이 든다",
+    rows: 2,
+    findings: [
+      "13.56MHz 30kW 정합기(RF-3000B)의 출력단 AMP 기판에서 소손이 확인되어 기판을 교체하였고, " +
+        "교체 후 DC-BUS 전압이 320V 로 정상 복귀하였습니다.",
+    ],
+  },
+  {
+    name: "아주 긴 한 줄 — 공백이 하나도 없다",
+    rows: 2,
+    findings: [
+      "출력이나오지않는다는연락을받아현지에서확인한결과전원부퓨즈가단선되어있었고정합기연결부의접촉불량이함께발견되어두곳을모두손보았습니다.이후출력을확인하였습니다.",
+    ],
+  },
+  {
+    name: "빈 줄이 섞인 것 — 사람이 사이를 띄운 줄은 그대로 남는다",
+    rows: 5,
+    findings: ["1차 점검", "", "외관 손상 없음", "", "절연 저항 측정값 500MΩ 이상"],
+  },
+  {
+    name: "🔴 연락서 낱말이 든 줄 — 문서에서 한글로 바뀐 뒤에 나뉜다",
+    rows: 2,
+    findings: ["部品不良", "외관 손상 없음"],
+  },
+] as const;
+
+for (const sample of PARITY_SAMPLES) {
+  test(`🔴 미리보기와 문서가 같게 나뉜다 — ${sample.name}`, { skip: skipRepair }, () => {
+    const actions = ["퓨즈 교체"];
+    const filled = fill(repairPath as string, {
+      ...REPAIR_INPUT,
+      // 🔴 정형 문구는 비운다 — 「확인내용」에 **준 줄만** 들어가야 견줄 수 있다.
+      body: { findings: sample.findings, findingsIntro: "", actions, summary: [] },
+    });
+
+    // 「조치」 라벨이 붙은 줄이 곧 「확인내용」이 끝난 자리다.
+    let actionsRow = 0;
+    for (let row = REPAIR_FINDINGS_ROW; row <= TEMPLATE_BODY_LAST_ROW + 40; row += 1) {
+      if (filled.text(`C${row}`) === SERVICE_REPORT_BODY_LABELS.actions[0]) {
+        actionsRow = row;
+        break;
+      }
+    }
+    assert.ok(actionsRow > 0, "「조치」 구역을 찾지 못했다");
+
+    const written: string[] = [];
+    for (let row = REPAIR_FINDINGS_ROW; row < actionsRow; row += 1) {
+      written.push(filled.text(`H${row}`) ?? "");
+    }
+    /**
+     * 🔴 **뒤쪽 빈 줄만** 걷어낸다. 「조치」는 양식이 정한 행에서 시작하므로
+     * 확인내용이 짧으면 그 사이가 빈 채로 남는다 — 그것은 나누기의 결과가
+     * 아니라 **행 배치**이고, 화면은 애초에 그리지 않는다. 가운데 빈 줄은
+     * 사람이 넣은 줄이라 그대로 둔다.
+     */
+    while (written.length > 0 && written[written.length - 1] === "") written.pop();
+
+    const preview = serviceReportBodyPreviewSections({
+      findingsIntro: "",
+      findings: sample.findings,
+      actions,
+      summary: [],
+    });
+    assert.equal(preview[0]?.title, "확인내용");
+    assert.deepEqual(preview[0]?.lines, written);
+    // 🔴 줄 수까지 못 박는다 — 둘이 **나란히** 안 나누게 되어도 위 견줌은 통과한다.
+    assert.equal(written.length, sample.rows);
+  });
+}
+
+test("🔴 양식의 칸 폭이 화면이 들고 있는 값과 같다", { skip: skipRepair }, () => {
+  /**
+   * 🔴 서버는 이 상수를 안 쓴다 — 채우개는 지금도 양식의 `<cols>` 를 그때그때
+   * 읽는다. 브라우저에는 그 파일이 없어서 화면만 굳힌 값을 보고, 그래서 양식이
+   * 바뀐 날 **여기가 먼저 깨져야** 한다.
+   */
+  const archive = ZipArchive.fromBuffer(readFileSync(repairPath as string));
+  const sheetXml = archive.readText(resolveSheetPart(archive, SERVICE_REPORT_SHEET_NAME));
+
+  const body = findBodyBlock(sheetXml);
+  assert.equal(
+    readColumnRangeWidth(sheetXml, body.contentColumn, body.contentEndColumn),
+    SERVICE_REPORT_BODY_COLUMN_WIDTH
+  );
+
+  // 비고는 채우개가 나누지 않아 폭을 읽는 자리가 없다 — 양식의 병합을 직접 본다.
+  assert.ok(sheetXml.includes('<mergeCell ref="H60:AF60"/>'), "비고 칸의 병합이 바뀌었다");
+  assert.equal(readColumnRangeWidth(sheetXml, "H", "AF"), SERVICE_REPORT_REMARK_COLUMN_WIDTH);
+
+  /**
+   * 🔴 본문 **라벨 칸**(`확　내`/`인　용`)의 폭도 같은 이유로 화면이 들고 있다
+   * (2026-10-18 셋째 조각 — 미리보기가 라벨 칸을 문서와 같은 폭으로 그린다).
+   * ⚠️ 라벨 열은 한 열이 1.75 라 본문 열(1.875)과 **곱하는 수가 다르다.**
+   */
+  assert.equal(body.labelColumn, "C");
+  assert.ok(sheetXml.includes('<mergeCell ref="C31:G31"/>'), "본문 라벨 칸의 병합이 바뀌었다");
+  assert.equal(readColumnRangeWidth(sheetXml, "C", "G"), SERVICE_REPORT_BODY_LABEL_COLUMN_WIDTH);
 });
 
 test("비고는 여전히 양식의 줄 수를 넘을 수 없다", { skip: skipRepair }, () => {

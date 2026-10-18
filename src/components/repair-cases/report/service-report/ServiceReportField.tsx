@@ -6,6 +6,10 @@ import {
   editInputClass,
   editLabelClass,
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
+import {
+  SERVICE_REPORT_GRID_INPUT_CLASS,
+  serviceReportGridInputStyle,
+} from "./service-report-grid";
 
 /**
  * 검사·수리 보고서 폼의 입력 칸 조각들.
@@ -218,6 +222,16 @@ export function SelectField({
   );
 }
 
+/**
+ * @param gridColumns 🔴 **문서가 그 칸에서 세는 칸 수**(`84`·`51`). 주면 칸이
+ *   문서의 글꼴(맑은 고딕)로 서고, 폭 상한이 **한글 `칸 수 ÷ 2` 자**가 꼭 들어가는
+ *   값이 되며, 높이가 내용을 따라 늘어난다(`service-report-grid.ts`).
+ *   그래야 한글로 찬 줄이 문서와 **같은 자리에서** 바뀐다.
+ *   ⚠️ 맑은 고딕은 영숫자가 가변폭이라 섞인 줄은 **대략**이다 — 정확한 자리는
+ *   옆의 미리보기가 보여 준다(`service-report-grid.ts` 머리말의 「역할을 나눈다」).
+ *   안 주면 지금까지처럼 구역 폭을 다 쓰는 보통 칸이다(머리 구역의 「상황」 등).
+ *   🔴 폭은 상한(`max-width`)이다. 고정 폭이면 좁은 화면에서 가로 스크롤이 생긴다.
+ */
 export function TextAreaField({
   label,
   value,
@@ -227,6 +241,7 @@ export function TextAreaField({
   hint,
   disabled,
   placeholder,
+  gridColumns,
 }: {
   label: string;
   value: string;
@@ -236,7 +251,9 @@ export function TextAreaField({
   hint?: ReactNode;
   disabled?: boolean;
   placeholder?: string;
+  gridColumns?: number;
 }) {
+  const grid = gridColumns !== undefined;
   return (
     <Field label={label} error={error} hint={hint}>
       <textarea
@@ -245,7 +262,8 @@ export function TextAreaField({
         rows={rows}
         disabled={disabled}
         placeholder={placeholder}
-        className={`${editInputClass} resize-y`}
+        style={grid ? serviceReportGridInputStyle(gridColumns, rows) : undefined}
+        className={`${editInputClass} resize-y ${grid ? SERVICE_REPORT_GRID_INPUT_CLASS : ""}`}
       />
     </Field>
   );
