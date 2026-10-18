@@ -168,6 +168,47 @@ describe("workflow rules parity (DB ↔ transition-definitions.ts)", () => {
     assert.deepEqual(problems.slice(0, 20), [], `불일치 ${problems.length}건`);
   });
 
+  /**
+   * 0117(2026-10-18) — 출하 완료를 누를 수 있는 역할에 담당 엔지니어와 영업을
+   * 더했다. 위의 1:1 대조는 **표에 있는 워크플로의 current 판**만 본다. 반면
+   * 마이그레이션은 판의 상태와 무관하게 모든 줄을 고치는데, 진행 중인 수리건이
+   * 접수 당시의 옛 판을 끝까지 쓰기 때문이다. 그래서 그쪽 범위는 여기서 따로
+   * 못 박는다 — 워크플로 종류도 판 상태도 가리지 않고 action_code 로만 고른다.
+   */
+  test("출하 완료 전이는 판의 상태와 무관하게 전부 담당 엔지니어·영업을 포함한다", async () => {
+    const rows = await db
+      .select({
+        id: workflowTransitions.id,
+        allowedRoles: workflowTransitions.allowedRoles,
+      })
+      .from(workflowTransitions)
+      .where(eq(workflowTransitions.actionCode, "SHIPMENT_COMPLETED"));
+
+    assert.ok(rows.length > 0, "출하 완료 전이가 하나도 없으면 이 시험은 의미가 없다");
+
+    const missing = rows
+      .filter(
+        (row) => !row.allowedRoles.includes("AS_ENGINEER") || !row.allowedRoles.includes("SALES")
+      )
+      .map((row) => `${row.id}: [${row.allowedRoles.join(", ")}]`);
+    assert.deepEqual(missing, [], "0117 마이그레이션이 적용되지 않았거나 일부 줄을 건너뛰었다");
+
+    // 더하기만 했는지 — 관리자 셋과 재고 담당이 사라지지 않았다.
+    const lost = rows
+      .filter(
+        (row) => !row.allowedRoles.includes("SUPER_ADMIN") || !row.allowedRoles.includes("ADMIN")
+      )
+      .map((row) => `${row.id}: [${row.allowedRoles.join(", ")}]`);
+    assert.deepEqual(lost, []);
+
+    // 같은 역할이 두 번 들어가면 역할 검사는 통과하지만 화면의 역할 목록에
+    // 같은 이름이 두 번 뜬다.
+    const duplicated = rows
+      .filter((row) => new Set(row.allowedRoles).size !== row.allowedRoles.length)
+      .map((row) => `${row.id}: [${row.allowedRoles.join(", ")}]`);
+    assert.deepEqual(duplicated, []);
+  });
+
   test("전이의 출발·도착 단계가 모두 같은 워크플로 버전에 속한다", async () => {
     // FK만으로는 "다른 버전의 단계를 가리키는 전이"를 막지 못한다. 그런 행이
     // 생기면 접수 건이 자기 워크플로 밖의 단계로 이동해 버린다.
