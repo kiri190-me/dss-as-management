@@ -294,3 +294,17 @@ src/lib/server/services/complete-domestic-order.integration.test.ts
 # completed_at 이 **그대로 남는다** · 🔴 이력은 STEP_RETURNED 에 metadata 표시로 갈린다.
 # 🔴 격리 이름: 접수 월 "9312" · 제품 모델 "DOREL-TEST-" · 고객사 "AS-TEST-DOREL-".
 src/lib/server/services/release-domestic-order.integration.test.ts
+
+
+# ── PO 가 부르는 통로를 **진짜로 두드린다** (2026-10-18) ─────────────────
+# POST /api/v1/domestic-orders/{id}/completion. 통로의 값어치는 「서비스가 되더라」가
+# 아니라 **자격 두 겹이 실제로 막는가**에 있고, 그 두 겹은 라우트에만 있다(서비스는
+# 권한을 보지 않는다). 🔴 토큰 없으면 401 이고 DB 에 닿지 않는다 · 🔴 모르는 sub 와
+# 🔴 내자 정리를 고칠 수 없는 역할(재고 담당자 표본)과 승인 대기 계정은 403 이고
+# 그때 내자 줄이 그대로다 · 🔴 두 거절의 응답이 **서로 구별되지 않는다**(두드려 볼
+# 실마리를 주지 않는다) · 🔴 completed 가 빠진 본문은 400 이고 수리 건이 안 움직인다 ·
+# 제대로 된 요청은 내자 줄과 수리 건을 함께 움직이고 같은 POST 로 되돌아간다 ·
+# 🔵 업무 거절(SHIPMENT_COMPLETION_BLOCKED)의 문구는 가리지 않고 그대로 나간다.
+# 🔴 격리 이름: 접수 월 "9309" · 제품 모델 "DOAPI-TEST-" · 고객사 "AS-TEST-DOAPI-" ·
+# 계정 "doapi-test-"(씨앗 계정의 sso_subject 를 건드리지 않는다).
+src/app/api/v1/domestic-orders/completion-route.integration.test.ts

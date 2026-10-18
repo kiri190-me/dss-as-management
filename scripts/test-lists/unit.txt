@@ -1053,3 +1053,15 @@ src/lib/domain/repair-case-report-number.test.ts
 # 들어가면(자동 채번이 안 돈다) 화면은 멀쩡해 보이고 같은 번호가 둘 나간다 · 미리보기와
 # 실제 채번이 같은 함수·같은 좁히기·같은 기준일을 쓰는가 · 못 매길 때 지어내지 않는가.
 src/components/repair-cases/new/report-number-preview-wiring.test.ts
+
+# PO 가 부르는 「내자 줄 완료 처리·완료 해제」 통로의 자격과 형식(2026-10-18).
+# 🔴 쓰기 공유 토큰 문지기 — **설정이 비었을 때 빈 토큰으로 통과하지 않는가**가
+# 이 묶음의 핵심이다. 그 구멍은 겉으로 아무 증상이 없고, 환경변수를 빠뜨린 서버가
+# 아무에게나 쓰기를 내주는 문이 된다. 읽기 토큰으로는 열리지 않는 것도 함께 본다.
+src/lib/api/write-token.test.ts
+
+# 같은 통로의 본문 검증(순수). 🔴 `completed` 가 빠진 요청이 조용히 「완료 해제」로
+# 읽히면 붙어 있는 수리 건의 출하 완료까지 풀린다 — 서버 액션이 하는 같은 검사를
+# 통로 쪽에도 못 박는다. 라우트를 실제로 두드리는 쪽은 db 목록의
+# app/api/v1/domestic-orders/completion-route.integration.test.ts 가 본다.
+src/lib/api/domestic-order-completion-request.test.ts
