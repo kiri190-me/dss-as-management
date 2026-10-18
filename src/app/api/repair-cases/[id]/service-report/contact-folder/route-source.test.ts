@@ -122,10 +122,16 @@ describe("보고서 → 연락서 폴더 통로 — 원본으로 지킨다", () 
     );
     assert.ok(squeeze(code).includes(chain), "이 통로의 사슬이 바뀌었다");
     assert.ok(squeeze(xlsx).includes(chain), "이웃 통로의 사슬이 바뀌었다");
-    assert.ok(
-      code.includes("fillServiceReportWorkbook(await readServiceReportTemplate(input.kind), input)"),
-      code
+    /**
+     * 🔴 양식은 넷이다(문서 종류 × 매쳐·제너레이터). **두 통로가 같은 한 줄**로
+     * 고른다 — 한쪽만 제품 종류를 안 넘기면 그 통로로 뽑은 보고서에만 엉뚱한
+     * 담당자 도장이 찍히고, 아무 오류도 나지 않는다.
+     */
+    const pick = squeeze(
+      "fillServiceReportWorkbook(await readServiceReportTemplateForCase(input.kind, repairCase.workflowType), input)"
     );
+    assert.ok(squeeze(code).includes(pick), code);
+    assert.ok(squeeze(xlsx).includes(pick), "이웃 통로가 양식을 다른 규칙으로 고른다");
   });
 
   test("🔴 파일 이름은 내려받기와 **같은 규칙**이다 — 통로가 짓지 않는다", () => {

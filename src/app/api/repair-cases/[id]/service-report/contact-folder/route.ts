@@ -25,7 +25,7 @@ import {
   resolveContactFolderArchiveRoot,
 } from "@/lib/storage/contact-folder-archive";
 import {
-  readServiceReportTemplate,
+  readServiceReportTemplateForCase,
   ServiceReportTemplateError,
 } from "@/lib/storage/service-report-template";
 import {
@@ -235,9 +235,16 @@ export async function POST(
   const input = validated.data;
 
   // ── 9) 양식을 읽어 채운다 — 같은 채우개, 같은 처리 ────────────────────
+  //    🔴 양식 넷(문서 종류 × 매쳐·제너레이터) 중 하나를 고르는 규칙도 `../xlsx`
+  //    와 같은 자리에서 온다(`storage/service-report-template.ts`). 제품 축은
+  //    6번에서 이미 읽어 둔 수리 건의 `workflowType` 에서 나오므로 조회가 늘지
+  //    않는다.
   let workbook: Buffer;
   try {
-    workbook = fillServiceReportWorkbook(await readServiceReportTemplate(input.kind), input);
+    workbook = fillServiceReportWorkbook(
+      await readServiceReportTemplateForCase(input.kind, repairCase.workflowType),
+      input
+    );
   } catch (err) {
     if (err instanceof ServiceReportTemplateError) {
       // 🔴 err.message 에는 경로가 들어 있지 않다(storage 쪽이 그렇게 만든다).

@@ -18,7 +18,7 @@ import {
 } from "@/lib/domain/service-report-file-name";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import {
-  readServiceReportTemplate,
+  readServiceReportTemplateForCase,
   ServiceReportTemplateError,
 } from "@/lib/storage/service-report-template";
 import {
@@ -172,10 +172,22 @@ export async function POST(
   }
   const input = validated.data;
 
-  // ── 8) 양식을 읽어 채운다 ────────────────────────────────────────────
+  /**
+   * ── 8) 양식을 읽어 채운다 ────────────────────────────────────────────
+   *
+   * 🔴 **양식은 넷이다** — 문서 종류 × 제품 종류(매쳐 · 제너레이터). 제품 축은
+   * 접수 건이 들고 있는 `workflowType` 에서 나오고(이미 6번에서 읽어 둔 값이라
+   * 조회가 늘지 않는다), 어느 양식인지 고르는 규칙은 storage 쪽 한 자리에만
+   * 적혀 있다(`storage/service-report-template.ts`). 종류를 알 수 없으면 그쪽이
+   * 던지고, 아래 `TEMPLATE_UNAVAILABLE` 로 나간다 — 엉뚱한 사람 도장이 찍힌
+   * 문서가 나가는 것보다 한 장 못 뽑는 편이 낫다.
+   */
   let workbook: Buffer;
   try {
-    workbook = fillServiceReportWorkbook(await readServiceReportTemplate(input.kind), input);
+    workbook = fillServiceReportWorkbook(
+      await readServiceReportTemplateForCase(input.kind, repairCase.workflowType),
+      input
+    );
   } catch (err) {
     if (err instanceof ServiceReportTemplateError) {
       // 🔴 err.message 에는 경로가 들어 있지 않다(storage 쪽이 그렇게 만든다).
@@ -360,9 +372,13 @@ export async function GET(
   const input = validated.data;
 
   // ── 8) 양식을 읽어 채운다 — POST 와 같은 채우개, 같은 처리 ───────────
+  //    양식 넷 중 하나를 고르는 것도 POST 와 같은 자리, 같은 규칙이다.
   let workbook: Buffer;
   try {
-    workbook = fillServiceReportWorkbook(await readServiceReportTemplate(input.kind), input);
+    workbook = fillServiceReportWorkbook(
+      await readServiceReportTemplateForCase(input.kind, repairCase.workflowType),
+      input
+    );
   } catch (err) {
     if (err instanceof ServiceReportTemplateError) {
       // 🔴 err.message 에는 경로가 들어 있지 않다(storage 쪽이 그렇게 만든다).

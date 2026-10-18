@@ -8,7 +8,9 @@ import {
 } from "@/lib/auth/service-report-authorization";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
+import { serviceReportKindFromParam } from "@/lib/domain/service-report-kind-param";
 import {
+  isServiceReportTemplateProductKind,
   readServiceReportTemplate,
   ServiceReportTemplateError,
 } from "@/lib/storage/service-report-template";
@@ -20,7 +22,8 @@ import { ZipArchive } from "@/lib/xlsx/zip-reader";
 
 /**
  * ============================================================================
- * GET /api/service-reports/template-image/{파일이름} — 양식 안의 도장
+ * GET /api/service-reports/template-image/{문서종류}/{제품종류}/{파일이름}
+ *   — 양식 안의 도장
  * ============================================================================
  * 보고서 미리보기(`.../report/service-report/print`)가 쓰는 그림이다. **양식
  * 파일에서 그때그때 꺼낸다** — 따로 복사해서 public/ 에 두면 두 벌이 되고, 도장을
@@ -53,11 +56,20 @@ import { ZipArchive } from "@/lib/xlsx/zip-reader";
  * 붙은 것이라 도형 파트가 따로 가리키므로 이 목록에 아예 오르지 않는다 — 인쇄에
  * 나오지도 않고 브라우저가 읽지도 못하는 것이다.
  *
- * ── 어느 양식을 여는가 ──────────────────────────────────────────────────
- * 검사·수리 두 양식은 **같은 통합문서**다(채우개 머리말의 실측 — 다른 곳이 셋뿐).
- * 그래서 종류를 받지 않고 한쪽만 읽는다. 작성 화면이 드롭다운 목록을 읽을 때 이미
- * 같은 판단을 했다(`report/service-report/page.tsx` 의 '두 양식이 같은 통합문서라
- * 한 번만 읽는다').
+ * ── 🔴 어느 양식을 여는가 — **주소가 정한다** (2026-10-18) ──────────────
+ * 예전에는 종류를 받지 않고 수리 양식 하나만 읽었다. 「검사·수리 두 양식은 같은
+ * 통합문서라 그림도 같다」가 그때는 맞았지만, **양식이 넷으로 갈라지면서 틀린
+ * 말이 되었다**(실측): 담당 엔지니어의 도장이 매쳐 양식과 제너레이터 양식에서
+ * 서로 다른 그림이고, 검사와 수리도 같지 않다.
+ *
+ * 그래서 **미리보기 화면이 격자를 뽑아낸 바로 그 양식**을 주소에 실어 보낸다
+ * (`report/service-report/print/page.tsx` 의 `templateImageBase`). 그러지 않으면
+ * 격자는 매쳐 양식에서 왔는데 도장만 제너레이터 양식에서 오는, **엉뚱한 사람
+ * 도장이 찍힌 미리보기**가 된다 — 아무 오류도 나지 않아 눈으로 보기 전에는
+ * 아무도 모른다.
+ *
+ * 🔴 주소에 실려 온 두 마디는 **목록으로 거른 뒤에만** 쓴다. 양식 경로를 고르는
+ * 열쇠라, 거르지 않으면 요청이 어느 파일을 열지 정하게 된다.
  *
  * ── 실패 응답에 경로를 싣지 않는다 ──────────────────────────────────────
  * 양식을 못 읽었을 때 그 경로를 응답에 담으면 오류 메시지가 디스크 구조를 알려
@@ -82,7 +94,7 @@ const CONTENT_TYPES: Record<string, string> = {
 
 export async function GET(
   _request: NextRequest,
-  context: { params: Promise<{ name: string }> }
+  context: { params: Promise<{ kind: string; productKind: string; name: string }> }
 ): Promise<NextResponse> {
   if (getAuthSource() !== "database") {
     return NextResponse.json({ error: "데이터베이스 저장 모드가 아닙니다." }, { status: 403 });
@@ -103,10 +115,20 @@ export async function GET(
     return NextResponse.json({ error: "이 작업을 수행할 권한이 없습니다." }, { status: 403 });
   }
 
-  const { name } = await context.params;
+  const { kind: kindParam, productKind, name } = await context.params;
+
+  /**
+   * 🔴 두 마디를 **목록으로 거른다**(위 '어느 양식을 여는가'). 못 고르면 404 다 —
+   * "그런 종류는 없습니다"라고 갈라 답하면 어떤 설정이 있는지 알려 주는 창구가
+   * 된다. 미리보기는 그림 없이도 읽을 수 있어야 하므로 화면은 빈 자리로 그린다.
+   */
+  const kind = serviceReportKindFromParam(kindParam);
+  if (kind === null || !isServiceReportTemplateProductKind(productKind)) {
+    return NextResponse.json({ error: "양식에 그 그림이 없습니다." }, { status: 404 });
+  }
 
   try {
-    const archive = ZipArchive.fromBuffer(await readServiceReportTemplate("REPAIR"));
+    const archive = ZipArchive.fromBuffer(await readServiceReportTemplate(kind, productKind));
     const part = resolveReportImagePart(archive, name);
     if (part === null) {
       // 양식이 바뀌어 그림이 없어졌거나, 보고서 시트가 안 쓰는 이름이다.

@@ -16,6 +16,7 @@ import { buildServiceReportRequestBody } from "@/lib/domain/service-report-form"
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import {
   readServiceReportTemplate,
+  serviceReportTemplateProductKindOf,
   ServiceReportTemplateError,
 } from "@/lib/storage/service-report-template";
 import {
@@ -176,6 +177,13 @@ export default async function ServiceReportPrintPage({
   let grid: SheetPrintGrid | null = null;
   let kindLabel = "";
   let notice: string | null = null;
+  /**
+   * 🔴 도장 그림을 꺼내 올 통로의 앞부분. **격자를 뽑아낸 바로 그 양식**을
+   * 가리켜야 한다 — 그러지 않으면 미리보기 격자는 매쳐 양식에서 왔는데 도장만
+   * 제너레이터 양식에서 와서, 화면에 **엉뚱한 사람 도장**이 찍힌다. 그래서 종류
+   * 둘을 주소에 실어 보낸다(아래 try 안에서 양식을 고를 때 함께 정한다).
+   */
+  let templateImageBase = "";
 
   if (!validated.ok) {
     /**
@@ -192,11 +200,19 @@ export default async function ServiceReportPrintPage({
   } else {
     kindLabel = screenTitle(SERVICE_REPORT_TITLES[validated.data.kind]);
     try {
+      /**
+       * 🔴 양식 넷(문서 종류 × 매쳐·제너레이터) 중 하나를 고른다. 제품 축은
+       * 이미 읽어 둔 수리 건의 `workflowType` 에서 나오고, 고르는 규칙은 storage
+       * 한 자리에만 적혀 있다. 종류를 알 수 없으면 거기서 던진다 — 엉뚱한 사람
+       * 도장이 찍힌 미리보기를 보여 주는 것보다 못 그리는 편이 낫다.
+       */
+      const productKind = serviceReportTemplateProductKindOf(resolved.workflowType);
       const workbook = fillServiceReportWorkbook(
-        await readServiceReportTemplate(validated.data.kind),
+        await readServiceReportTemplate(validated.data.kind, productKind),
         validated.data
       );
       grid = readSheetPrintGrid(workbook, SERVICE_REPORT_SHEET_NAME);
+      templateImageBase = `/api/service-reports/template-image/${validated.data.kind}/${productKind}/`;
     } catch (err) {
       if (err instanceof ServiceReportTemplateError) {
         // 🔴 err.message 에는 경로가 들어 있지 않다(storage 쪽이 그렇게 만든다).
@@ -229,8 +245,10 @@ export default async function ServiceReportPrintPage({
       backHref={backHref}
       kindLabel={kindLabel}
       // 🔴 그림 라우트의 주소는 **서버가 정해 넘긴다** — 화면과 라우트가 각자
-      //    주소를 들고 있으면 폴더 이름을 바꾸는 날 한쪽만 고쳐진다.
-      templateImageBase="/api/service-reports/template-image/"
+      //    주소를 들고 있으면 폴더 이름을 바꾸는 날 한쪽만 고쳐진다. 주소에
+      //    종류 둘이 들어 있는 것은 **격자를 뽑은 그 양식에서 도장을 꺼내 오기
+      //    위해서**다(위 `templateImageBase` 머리말).
+      templateImageBase={templateImageBase}
     />
   );
 }

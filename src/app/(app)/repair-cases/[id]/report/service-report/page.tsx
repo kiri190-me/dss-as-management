@@ -16,7 +16,7 @@ import { repairCaseDetailHrefs } from "@/lib/domain/repair-case-detail-tabs";
 import { createServiceReportFormValues } from "@/lib/domain/service-report-form";
 import { serviceReportKindFromParam } from "@/lib/domain/service-report-kind-param";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
-import { readServiceReportTemplate } from "@/lib/storage/service-report-template";
+import { readServiceReportTemplateForCase } from "@/lib/storage/service-report-template";
 import {
   SERVICE_REPORT_BODY_ROW_LAYOUT,
   SERVICE_REPORT_MAX_REMARK_ROWS,
@@ -170,8 +170,18 @@ export default async function ServiceReportPage({
   let choices: ServiceReportChoices | null = null;
   let templateError: string | null = null;
   try {
-    // 두 양식이 같은 통합문서라 한 번만 읽는다.
-    choices = readServiceReportChoices(await readServiceReportTemplate("REPAIR"));
+    /**
+     * 검사·수리 두 양식이 같은 통합문서라 한 번만 읽는다.
+     *
+     * 🔴 **제품 종류(매쳐·제너레이터)는 넘긴다.** 드롭다운 목록 자체는 넷이 같지만
+     * (실측 — 네 양식의 칸 구조는 같고 다른 것은 담당자 도장뿐이다), 여기서만
+     * 아무 양식이나 읽으면 **이 건과 무관한 파일이 설정됐는지 여부가 이 화면의
+     * 성패를 가르게 된다.** 이 건이 쓸 바로 그 양식을 읽어, 그 파일이 없으면
+     * 문서를 만들 때가 아니라 **여기서 먼저** 알려 준다.
+     */
+    choices = readServiceReportChoices(
+      await readServiceReportTemplateForCase("REPAIR", resolved.workflowType)
+    );
   } catch (err) {
     // 🔴 err.message 를 그대로 내보내지 않는다 — 양식이 바뀌었을 때 나오는 말은
     // 셀 주소가 섞인 개발자용 문장이다(UI_GUIDELINE 11). 자세한 것은 서버 로그다.

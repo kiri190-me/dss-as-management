@@ -3,8 +3,8 @@ import dotenv from "dotenv";
 
 // 견적서·보고서 xlsx 양식 시험은 실제 양식 파일의 경로를 환경변수로 받는다.
 // 그 값은 .env.local 에 적혀 있지만 npm test 는 어떤 설정 파일도 읽지 않아서
-// 양식 시험 71건이 통째로 잠들어 있었다. 이 로더가 그 일곱 개만 골라 넣어
-// 깨운다.
+// 양식 시험 71건이 통째로 잠들어 있었다. 이 로더가 아래 목록에 적힌 것만 골라
+// 넣어 깨운다.
 //
 // 🔴 dotenv.config() 를 쓰면 안 된다. 그 함수는 파일의 모든 키를 process.env
 // 에 붓는데, .env.local 에는 개발 데이터베이스를 가리키는 DATABASE_URL 이
@@ -26,6 +26,14 @@ const TEMPLATE_PATH_KEYS = [
   "MATCHER_QUOTE_TEMPLATE_PATH",
   "MATCHER_OH_QUOTE_TEMPLATE_PATH",
   "CABLE_QUOTE_TEMPLATE_PATH",
+  // 🔴 보고서 양식은 **여섯**이다. 넷은 2026-10-18 에 갈라진 「문서 종류 × 제품
+  //    종류」이고, 뒤의 둘은 그 넷이 비었을 때 물러설 옛 이름이다 — 물러서기가
+  //    실제로 도는지 보는 시험이 있으므로 여섯을 다 넣는다
+  //    (`src/lib/storage/service-report-template.test.ts`).
+  "MATCHER_INSPECTION_REPORT_TEMPLATE_PATH",
+  "GENERATOR_INSPECTION_REPORT_TEMPLATE_PATH",
+  "MATCHER_REPAIR_REPORT_TEMPLATE_PATH",
+  "GENERATOR_REPAIR_REPORT_TEMPLATE_PATH",
   "INSPECTION_REPORT_TEMPLATE_PATH",
   "REPAIR_REPORT_TEMPLATE_PATH",
 ] as const;

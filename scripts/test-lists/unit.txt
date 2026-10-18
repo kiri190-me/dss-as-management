@@ -221,6 +221,13 @@ src/lib/db/schema/service-reports-parity.test.ts
 src/lib/validation/service-report-save-input.test.ts
 src/lib/auth/service-report-authorization.test.ts
 src/lib/server/service-report-action-input.test.ts
+
+# 보고서 양식 넷(문서 종류 × 매쳐·제너레이터) 중 하나를 고르는 규칙(2026-10-18).
+# 🔴 네 양식의 다른 점은 **담당 엔지니어의 도장 하나뿐**이라, 잘못 고르면 문서는
+# 멀쩡해 보이고 결재란의 사람만 틀린다 — 받는 쪽이 말해 주기 전에는 아무도 모른다.
+# 여섯 조합 · T/C → 제너레이터 · 모르는 종류를 제너레이터로 떨어뜨리지 않는 것 ·
+# 새 설정이 비었을 때 옛 설정으로 물러서는 것을 본다. 디스크는 읽지 않는다.
+src/lib/storage/service-report-template.test.ts
 src/lib/xlsx/sheet-print-grid.test.ts
 scripts/lib/db-connection-failure.test.ts
 src/lib/domain/service-report-list.test.ts
