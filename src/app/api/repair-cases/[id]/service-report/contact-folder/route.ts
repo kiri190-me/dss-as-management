@@ -33,9 +33,11 @@ import {
   validateServiceReportFields,
 } from "@/lib/validation/service-report-input";
 import { serviceReportFormValues } from "@/lib/validation/service-report-save-input";
+import { setActiveSheet } from "@/lib/xlsx/active-sheet";
 import {
   fillServiceReportWorkbook,
   SERVICE_REPORT_FINDINGS_INTRO,
+  SERVICE_REPORT_SHEET_NAME,
 } from "@/lib/xlsx/service-report-template";
 
 /**
@@ -239,11 +241,19 @@ export async function POST(
   //    와 같은 자리에서 온다(`storage/service-report-template.ts`). 제품 축은
   //    6번에서 이미 읽어 둔 수리 건의 `workflowType` 에서 나오므로 조회가 늘지
   //    않는다.
+  //    🔴 **활성 시트를 세우는 것도 `../xlsx` 와 같다**(2026-10-19 · 견적서와 같은
+  //    함수 `xlsx/active-sheet.ts`). 🔴 **이 통로가 가장 중요한 자리다** — 여기서
+  //    꽂은 엑셀을 그 PC 의 Excel 이 **활성 시트 하나만** PDF 로 바꿔 연락서 폴더에
+  //    둔다. 양식 파일에 저장된 활성 탭에 기대면, 사람이 `Repair_Record` 를 켠 채
+  //    양식을 저장한 날 **엉뚱한 시트가 고객에게 나간다**(아무 오류도 없다).
   let workbook: Buffer;
   try {
-    workbook = fillServiceReportWorkbook(
-      await readServiceReportTemplateForCase(input.kind, repairCase.workflowType),
-      input
+    workbook = setActiveSheet(
+      fillServiceReportWorkbook(
+        await readServiceReportTemplateForCase(input.kind, repairCase.workflowType),
+        input
+      ),
+      SERVICE_REPORT_SHEET_NAME
     );
   } catch (err) {
     if (err instanceof ServiceReportTemplateError) {

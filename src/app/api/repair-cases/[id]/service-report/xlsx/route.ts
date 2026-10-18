@@ -26,9 +26,11 @@ import {
   validateServiceReportFields,
 } from "@/lib/validation/service-report-input";
 import { serviceReportFormValues } from "@/lib/validation/service-report-save-input";
+import { setActiveSheet } from "@/lib/xlsx/active-sheet";
 import {
   fillServiceReportWorkbook,
   SERVICE_REPORT_FINDINGS_INTRO,
+  SERVICE_REPORT_SHEET_NAME,
 } from "@/lib/xlsx/service-report-template";
 
 /**
@@ -181,12 +183,22 @@ export async function POST(
    * 적혀 있다(`storage/service-report-template.ts`). 종류를 알 수 없으면 그쪽이
    * 던지고, 아래 `TEMPLATE_UNAVAILABLE` 로 나간다 — 엉뚱한 사람 도장이 찍힌
    * 문서가 나가는 것보다 한 장 못 뽑는 편이 낫다.
+   *
+   * 🔴 **보고서 시트를 활성으로 두고 내보낸다**(2026-10-19 · 견적서와 같은 함수
+   * `xlsx/active-sheet.ts`). 양식에는 보고서 말고도 `List`(숨김) · `Repair_Record` ·
+   * `oh 참고` 가 들어 있고, 그 PC 의 도우미는 **활성 시트 하나**만 PDF 로 바꾼다
+   * (`server/quote-folder-helper.ts`). 지금까지는 양식 파일에 저장된 활성 탭에
+   * 기대고 있었다 — 사람이 다른 탭을 켠 채 양식을 저장하면 **엉뚱한 시트가 PDF 로
+   * 나간다**(아무 오류도 나지 않는다). 그래서 코드가 세운다.
    */
   let workbook: Buffer;
   try {
-    workbook = fillServiceReportWorkbook(
-      await readServiceReportTemplateForCase(input.kind, repairCase.workflowType),
-      input
+    workbook = setActiveSheet(
+      fillServiceReportWorkbook(
+        await readServiceReportTemplateForCase(input.kind, repairCase.workflowType),
+        input
+      ),
+      SERVICE_REPORT_SHEET_NAME
     );
   } catch (err) {
     if (err instanceof ServiceReportTemplateError) {
@@ -373,11 +385,15 @@ export async function GET(
 
   // ── 8) 양식을 읽어 채운다 — POST 와 같은 채우개, 같은 처리 ───────────
   //    양식 넷 중 하나를 고르는 것도 POST 와 같은 자리, 같은 규칙이다.
+  //    🔴 활성 시트를 세우는 것도 POST 와 같다(까닭은 POST 쪽 주석).
   let workbook: Buffer;
   try {
-    workbook = fillServiceReportWorkbook(
-      await readServiceReportTemplateForCase(input.kind, repairCase.workflowType),
-      input
+    workbook = setActiveSheet(
+      fillServiceReportWorkbook(
+        await readServiceReportTemplateForCase(input.kind, repairCase.workflowType),
+        input
+      ),
+      SERVICE_REPORT_SHEET_NAME
     );
   } catch (err) {
     if (err instanceof ServiceReportTemplateError) {

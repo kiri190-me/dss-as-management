@@ -831,6 +831,14 @@ describe("🔴 PDF 변환 — 스크립트 본문", () => {
    *    아래 세 루트로 고정이라 새 환경변수가 이 글자를 건드리지 않는다. 바뀐 것은
    *    resolveQuoteFolderHelperInstallRoots 가 **모으는 목록**뿐이다 — 그래서 PO 저장소의
    *    같은 시험과 지문이 계속 같다(두 사이트가 같은 도우미를 내야 한다).
+   *  · 길이 16292 · `33e71a4f…` — 🔴 **2026-10-19, 「한 페이지에 시트 맞춤」으로 일부러
+   *    바꿨다.** 더한 줄은 **둘뿐**이다: `$ps = $book.ActiveSheet.PageSetup` 로 시작하는
+   *    try/catch 한 줄과 그 위 주석 한 줄. 더한 자리는 지우기(`Delete($pdf)`)와
+   *    내보내기(`ExportAsFixedFormat`) **사이**라서, 두 덩어리를 글자 그대로 맞춰 보는
+   *    아래 시험들은 한 글자도 손대지 않았다.
+   *    🔴 **PO 저장소의 같은 시험과 지문이 여기서 갈라진다** — 도우미는 PC 당 한 벌이므로
+   *    (`%LOCALAPPDATA%\DSS\open-dss-folder.ps1`) PO 쪽 설치를 나중에 돌리면 이 맞춤이
+   *    사라진다. PO 쪽에도 같은 두 줄을 넣어야 한 벌로 돌아온다.
    */
   test("🔴 상수를 domain 으로 옮겨도 스크립트 글자가 안 바뀐다 — 전체 sha256", () => {
     const fixed = buildQuoteFolderHelperScript({
@@ -838,10 +846,10 @@ describe("🔴 PDF 변환 — 스크립트 본문", () => {
       uncRootAlt: String.raw`\\10.0.0.9\견적서`,
       extraRoots: [String.raw`Z:\현황표`],
     });
-    assert.equal(fixed.length, 16123);
+    assert.equal(fixed.length, 16292);
     assert.equal(
       createHash("sha256").update(fixed, "utf8").digest("hex"),
-      "76f85922a93cd2abb92515c20f8c39ab4498585240edf7630761bef7403e8c55"
+      "33e71a4f499dcef1d49684d3ca8007be109162135f1026e135038bc24f7fd774"
     );
   });
 
@@ -935,14 +943,52 @@ describe("🔴 PDF 변환 — 스크립트 본문", () => {
     assert.ok(script.includes("        $book.ActiveSheet.ExportAsFixedFormat(0, $pdf)\r\n"));
     // 🔴 예전 줄(통합문서째)이 한 자리도 남아 있지 않다.
     assert.equal(/\$book\.ExportAsFixedFormat/.test(script), false);
-    // 활성 시트를 집는 자리도 내보내는 자리도 **각각 하나**다.
-    assert.equal(script.match(/ActiveSheet/g)?.length, 1);
+    // 🔴 활성 시트를 집는 자리는 **둘**이다 — 인쇄 설정을 세우는 줄(2026-10-19)과 내보내는 줄.
+    //    둘 다 `$book.ActiveSheet` 이고, 둘 사이에서 시트가 바뀌는 자리는 없다(아래 금지 목록).
+    assert.equal(script.match(/ActiveSheet/g)?.length, 2);
+    // 내보내는 자리는 여전히 **하나**다.
     assert.equal(script.match(/ExportAsFixedFormat/g)?.length, 1);
     // 🔴 「어느 탭인가」를 도우미가 정하지 않는다 — 시트를 이름 · 번호로 집거나 고르는
     //    자리가 하나도 없다. 그 판단은 서버에만 있다(xlsx/active-sheet.ts).
     for (const forbidden of ["Worksheets", "Sheets(", "SelectedSheets", ".Activate(", ".Select("]) {
       assert.equal(script.includes(forbidden), false, `도우미가 시트를 고른다: ${forbidden}`);
     }
+  });
+
+  /**
+   * ============================================================================
+   * 🔴 2026-10-19 — **한 페이지에 시트 맞춤**(사용자 요구)
+   * ============================================================================
+   * 요구는 「활성 시트만 · 한 페이지에 시트 맞춤으로 바꿔라」였다. 앞의 절반은 2026-10-08
+   * 부터 돌고 있었고 **뒤의 절반은 아무도 하지 않고 있었다** — 스크립트에 `Zoom` ·
+   * `FitToPages*` 가 한 줄도 없었고, 보고서 양식의 `<pageSetup>` 에도 `fitToPage` 가 없었다.
+   *
+   * 🔴 **양식이 아니라 변환할 때** 세운다(까닭은 server/quote-folder-helper.ts 머리말) —
+   * 양식은 사람이 레이아웃을 손보는 문서라 거기 넣으면 다음 수정본에서 사라진다.
+   * 🔴 **인쇄 설정에 실패해도 변환은 한다** — 프린터가 없는 PC 에서 `PageSetup` 쓰기가
+   * 던질 수 있어서 그 줄만 따로 try/catch 로 감쌌다. 「맞춰지지 않는다」는 볼 수 있지만
+   * 「PDF 가 안 나온다」는 되돌릴 수 없다.
+   * ============================================================================
+   */
+  test("🔴 한 페이지에 시트 맞춤을 세운다 — Zoom 끄고 가로 1 · 세로 1", () => {
+    const line =
+      "        try { $ps = $book.ActiveSheet.PageSetup; $ps.Zoom = $false;" +
+      " $ps.FitToPagesWide = 1; $ps.FitToPagesTall = 1 } catch { }";
+    assert.ok(script.includes(`${line}\r\n`), script);
+    // 세우는 자리는 **하나**다 — 세 값 모두 한 줄에서, 한 번씩.
+    for (const mark of ["$ps.Zoom = $false", "$ps.FitToPagesWide = 1", "$ps.FitToPagesTall = 1", "PageSetup"]) {
+      assert.equal(script.split(mark).length - 1, 1, `세우는 자리가 하나가 아니다: ${mark}`);
+    }
+    // 🔴 배율을 손으로 적지 않는다 — 「몇 %」는 Excel 이 셈한다(양식이 바뀌면 값도 바뀐다).
+    assert.equal(/\$ps\.Zoom = \d/.test(script), false, "배율을 숫자로 박았다");
+    // 🔴 차례 — 지운 **뒤**, 내보내기 **앞**. 내보낸 뒤에 세우면 아무 일도 하지 않는다.
+    const deleted = script.indexOf("[System.IO.File]::Delete($pdf)");
+    const setup = script.indexOf("$ps.Zoom = $false");
+    const exported = script.indexOf("$book.ActiveSheet.ExportAsFixedFormat(0, $pdf)");
+    assert.ok(deleted >= 0 && setup >= 0 && exported >= 0);
+    assert.ok(deleted < setup && setup < exported, "인쇄 설정이 차례에서 벗어났다");
+    // 🔴 실패해도 변환은 간다 — 그 줄 하나가 제 try/catch 를 들고 있다.
+    assert.ok(script.includes("$ps.FitToPagesTall = 1 } catch { }"), "인쇄 설정이 변환을 끌고 넘어진다");
   });
 
   /**
@@ -2113,6 +2159,12 @@ describe("파일 없이 도는 설치 명령 본문", () => {
    *    루트 한 줄이 `$Roots` 에 박히고 그것이 base64 로 부풀어 난 것뿐이다.
    *    한글 한 글자가 base64 **네 글자**이므로, 스크립트에 더 쓸 수 있는 한글 주석은
    *    **120 글자 남짓**이다. 다음 조각에서 막히면 고치려 들지 말고 압축을 잡아라.
+   *  · 🔴 32,276 — 「한 페이지에 시트 맞춤」(2026-10-19). 남은 자리는 **235 글자**뿐이다.
+   *    스크립트가 169 글자(UTF-8 209 바이트) 늘었고 명령은 그 1.33 배인 276 글자 늘었다.
+   *    🔴 **이제 한글 주석을 58 글자쯤밖에 더 못 쓴다.** 다음에 도우미에 무엇을 더하는
+   *    조각은 **길이부터 재고 시작하고**, 모자라면 주석을 지워 맞추지 말고 멈춰서 보고할 것 —
+   *    그때 할 일은 HELPER payload 를 압축하는 조각이다(설치 파일 `.cmd` 와 붙여넣는 명령이
+   *    설치 절차 한 벌을 나눠 쓰므로 두 쪽을 함께 바꾼다).
    * ============================================================================
    */
   test("🔴 명령 한 줄이 Windows 명령줄 한도 안이다 — 넘으면 설치가 통째로 막힌다", () => {
