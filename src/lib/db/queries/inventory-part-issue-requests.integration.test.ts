@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { eq, inArray, like } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
+  auditLogs,
   customers,
   inventoryPartIssueApprovals,
   inventoryPartIssueRequestItems,
@@ -15,6 +16,7 @@ import {
   partStockBalances,
   parts,
   products,
+  repairCaseFlowchartEditHistory,
   repairCaseIntakeSequences,
   repairCases,
   shipmentApprovalRouteSteps,
@@ -78,9 +80,12 @@ import {
  * 본떴다. 이 파일이 만든 "partissue-test-" 계정·부품만 쓰고,
  * ⚠️ **만든 행은 afterEach 로 반드시 걷는다.** 사람 참조가 RESTRICT 라 삭제에는
  * 순서가 있다: 승인 행 → 신청 항목 → 신청 → 부품 요청 항목 → 부품 요청 →
- * 결재선 단계 → 결재선 판 → 접수 건(제품·접수 번호표) → 잔량 → 부품 → 사람.
+ * 결재선 단계 → 결재선 판 → 접수 건(제품·접수 번호표) → 잔량 → 부품 →
+ * **행위자 기록(감사 로그·플로차트 편집 이력)** → 사람.
  * 접수 건이 신청·부품 요청보다 **뒤**인 이유: 접수 건만 가리키는 직접 사용 신청이
  * 남아 있으면 SET NULL 이 사용처 CHECK 에 걸려 접수 건 삭제가 막힌다.
+ * 🔴 사람이 맨 뒤이고 그 앞이 행위자 기록인 이유는 removeTestFixturesByPrefix()
+ * 마지막 블록의 주석에 적어 두었다 — 한 번 막히면 스스로 풀리지 않는 자리다.
  *
  * 🔴 부품 이름 접두사를 "test-inventory-" 로 하지 **않는다.** 그 접두사는
  * mutations/inventory.integration.test.ts 가 자기 after() 에서 통째로 지우는
@@ -399,6 +404,33 @@ async function removeTestFixturesByPrefix(): Promise<void> {
   }
 
   if (userIds.length > 0) {
+    // 🔴 **사람은 맨 마지막이고, 그 바로 앞에서 이 계정이 「행위자」로 박힌 기록을
+    // 걷는다.** users.id 를 가리키는 외래키 110개 중 108개가 ON DELETE restrict 라,
+    // 이 계정을 가리키는 행이 **한 줄이라도** 남아 있으면 아래 delete(users) 가
+    // 통째로 막힌다.
+    //
+    // 🔴 **걷지 않으면 스스로 풀리지 않는다.** 막히면 청소가 실패하고, 실패한
+    // 청소는 계정을 남기고, 남은 계정 때문에 다음 실행의 before() 가 또 같은
+    // 자리에서 막힌다. 2026-10-07 에 어떤 실행이 끊기며 이렇게 시작해 11일 동안
+    // 이 파일 하나가 매 실행 fail 1 / cancelled 44 였다(남은 계정 10개,
+    // audit_logs 14,894줄).
+    //
+    // 🔴 그동안 기록이 불어난 까닭: **남은 계정을 남의 시험이 주워 쓴다.** 다른
+    // 통합 시험 여럿이 「승인된 활성 AS_ENGINEER 아무나」를 limit(1) 로 집어
+    // 행위자로 쓰기 때문에, 이 파일이 흘린 계정이 attachments·service_reports·
+    // 플로차트 시험의 행위자로 박혔다. 그래서 걷을 표가 둘이다.
+    //
+    // 🔴 **반드시 userIds 로만 좁힌다.** audit_logs 는 다른 시험들도 함께 쓰는
+    // 공용 표다(전체 5만여 줄 중 이 파일 몫은 1만5천 줄). 조건 없이 비우면 남의
+    // 시험이 세고 있는 줄까지 사라진다.
+    //
+    // 다른 표에서 또 막히면 오류에 제약 이름이 그대로 나온다 — 그 표를 여기에 한
+    // 줄 더한다. **지울 자리가 아니라 늘릴 자리다.**
+    await db.delete(auditLogs).where(inArray(auditLogs.actorUserId, userIds));
+    await db
+      .delete(repairCaseFlowchartEditHistory)
+      .where(inArray(repairCaseFlowchartEditHistory.actorUserId, userIds));
+
     await db.delete(users).where(inArray(users.id, userIds));
   }
 }
