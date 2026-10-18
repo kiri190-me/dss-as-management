@@ -14,15 +14,152 @@ import { readFileSync } from "node:fs";
  * 넘어갈 곳만 null 로 바꾸되, 머무는 화면은 저장 뒤 router.refresh() 로 값을 다시
  * 읽어야 한다(목록으로 넘어갈 때 공짜로 얻던 갱신이 사라지기 때문이다).
  *
- * 브라우저 없이 볼 수 있는 것은 소스뿐이라 부르는 모양을 읽는다. 각 항목은
- * [문구 식, 넘어갈 곳 식] 이고 파일 안에 적힌 순서다. 문구를 앞에서 변수로
- * 만들어 `{ message, … }` 로 넘긴 곳은 문구 식이 "message" 로 읽힌다.
+ * 브라우저 없이 볼 수 있는 것은 소스뿐이라 부르는 모양을 읽는다 — 읽는 방법과
+ * 그 방법을 쓰는 까닭은 아래 popupCalls() 머리말에 있다.
+ */
+/**
+ * 문자열(`"` `'` `` ` ``)과 주석(`//` `/* *\/`)을 통째로 건너뛴다. 그 안의 중괄호·쉼표는
+ * 코드가 아니므로 세면 안 된다. 건너뛴 뒤 자리를 돌려주고, 건너뛸 것이 아니면 null.
+ * 템플릿 문자열의 `${ … }` 안은 다시 코드라 중괄호 짝을 맞춰 끝을 찾는다.
+ */
+function skipAtomic(text: string, i: number): number | null {
+  const ch = text[i];
+  if (ch === '"' || ch === "'") {
+    for (let j = i + 1; j < text.length; j += 1) {
+      if (text[j] === "\\") {
+        j += 1;
+        continue;
+      }
+      if (text[j] === ch) return j + 1;
+    }
+    return text.length;
+  }
+  if (ch === "`") {
+    for (let j = i + 1; j < text.length; j += 1) {
+      if (text[j] === "\\") {
+        j += 1;
+        continue;
+      }
+      if (text[j] === "`") return j + 1;
+      if (text[j] === "$" && text[j + 1] === "{") {
+        let depth = 1;
+        let k = j + 2;
+        while (k < text.length && depth > 0) {
+          const next = skipAtomic(text, k);
+          if (next !== null) {
+            k = next;
+            continue;
+          }
+          if (text[k] === "{") depth += 1;
+          else if (text[k] === "}") depth -= 1;
+          k += 1;
+        }
+        j = k - 1;
+      }
+    }
+    return text.length;
+  }
+  if (ch === "/" && text[i + 1] === "/") {
+    const nl = text.indexOf("\n", i);
+    return nl < 0 ? text.length : nl;
+  }
+  if (ch === "/" && text[i + 1] === "*") {
+    const end = text.indexOf("*/", i + 2);
+    return end < 0 ? text.length : end + 2;
+  }
+  return null;
+}
+
+/** 여는 `{` 바로 뒤에서 시작해 짝이 맞는 `}` 자리를 돌려준다. 못 찾으면 -1. */
+function objectEnd(text: string, start: number): number {
+  let depth = 1;
+  for (let i = start; i < text.length; i += 1) {
+    const next = skipAtomic(text, i);
+    if (next !== null) {
+      i = next - 1;
+      continue;
+    }
+    const ch = text[i];
+    if (ch === "{" || ch === "(" || ch === "[") depth += 1;
+    else if (ch === "}" || ch === ")" || ch === "]") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * 객체 속을 **깊이 0 의 쉼표로만** 나눈다 — 문구 안의 쉼표(`"완료로 표시하고, …"`)와
+ * 중첩된 호출·객체 안의 쉼표는 칸 경계가 아니다. 몇 줄에 걸친 식은 줄바꿈만 한 칸으로
+ * 접는다(한 줄짜리는 글자 그대로 남는다).
+ */
+function topLevelFields(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let from = 0;
+  for (let i = 0; i < body.length; i += 1) {
+    const next = skipAtomic(body, i);
+    if (next !== null) {
+      i = next - 1;
+      continue;
+    }
+    const ch = body[i];
+    if (ch === "{" || ch === "(" || ch === "[") depth += 1;
+    else if (ch === "}" || ch === ")" || ch === "]") depth -= 1;
+    else if (ch === "," && depth === 0) {
+      parts.push(body.slice(from, i));
+      from = i + 1;
+    }
+  }
+  parts.push(body.slice(from));
+  return parts.map((part) => part.replace(/\s*\n\s*/g, " ").trim()).filter((part) => part.length > 0);
+}
+
+/**
+ * 화면 소스에서 `showSavePopup({ … })` 호출을 뽑는다. 각 항목은 [문구 식, 넘어갈 곳 식]
+ * 이고 파일에 적힌 순서다. 문구를 앞에서 변수로 만들어 `{ message, … }` 로 넘긴 곳은
+ * 문구 식이 "message" 로 읽힌다.
+ *
+ * 🔴 2026-10-18 이전에는 정규식 한 줄로 읽었다:
+ *   `showSavePopup\(\{\s*message(?::\s*([^,]+?))?,\s*redirectTo:\s*([^}]+?),?\s*\}\)`
+ * 이 방식은 두 자리에서 깨진다. 문구에 쉼표가 들어가거나 삼항으로 갈리면
+ * (`result.x ? "완료로 표시하고, 연결된 수리 건도 …" : "완료로 표시했습니다."`)
+ * `[^,]+?` 가 문구를 가로지르지 못하고, 넘어갈 곳이 템플릿 문자열이면
+ * (`` `/workflows/${templateCode}/draft` ``) `[^}]+?` 가 `${…}` 의 `}` 에 걸려 멈춘다.
+ * 둘 중 하나만 걸려도 **그 호출은 통째로 안 잡힌다.**
+ *
+ * 🔵 가장 나쁜 점은 터지지 않는다는 것이다 — 시험은 그대로 통과하면서 **검사 범위만
+ * 조용히 줄어든다.** 실제로 그랬다: 진단 Flowchart·초안 화면 넷은 넘어갈 곳이 템플릿이라
+ * 오래전부터 0개로 읽히고 있었고, DomesticOrderListScreen 의 호출 셋 중 둘은 2026-10-18 에
+ * 문구가 쉼표 든 삼항으로 바뀌면서 세어지지 않게 됐다(기대값과 어긋나 터져서야 드러났다).
+ *
+ * 그래서 정규식으로 속을 가르지 않는다. `showSavePopup({` 를 찾은 뒤 **괄호 짝을 세어**
+ * 객체 덩어리를 통째로 잘라내고, 그 안에서 깊이 0 의 쉼표로 칸을 나눠 집는다.
+ * 짝이 안 맞거나 `redirectTo` 가 없으면 조용히 빠지지 않도록 **던진다** — 이 시험이
+ * 재려는 것이 바로 그 `redirectTo` 값(머무는가 · 넘어가는가)이기 때문이다.
+ * 문구는 거드는 값이라 글자를 기대값에 박지 않는다.
  */
 function popupCalls(path: string): [string, string][] {
   const source = readFileSync(path, "utf8");
-  return [
-    ...source.matchAll(/showSavePopup\(\{\s*message(?::\s*([^,]+?))?,\s*redirectTo:\s*([^}]+?),?\s*\}\)/g),
-  ].map((match) => [match[1] ?? "message", match[2]]);
+  const opener = /showSavePopup\(\s*\{/g;
+  const calls: [string, string][] = [];
+  for (let match = opener.exec(source); match; match = opener.exec(source)) {
+    const bodyStart = match.index + match[0].length;
+    const bodyEnd = objectEnd(source, bodyStart);
+    assert.ok(bodyEnd >= 0, `${path}: showSavePopup({ 의 짝이 맞는 } 를 못 찾았다`);
+    opener.lastIndex = bodyEnd;
+    const fields = new Map<string, string>();
+    for (const field of topLevelFields(source.slice(bodyStart, bodyEnd))) {
+      const colon = field.indexOf(":");
+      if (colon < 0) fields.set(field, field);
+      else fields.set(field.slice(0, colon).trim(), field.slice(colon + 1).trim());
+    }
+    const redirectTo = fields.get("redirectTo");
+    assert.ok(redirectTo !== undefined, `${path}: redirectTo 가 없는 showSavePopup 호출이 있다`);
+    calls.push([fields.get("message") ?? "message", redirectTo]);
+  }
+  return calls;
 }
 
 test("고객사 — 정보 수정은 목록으로 넘기고, 추가 창은 목록 위라 머문다", () => {
@@ -257,7 +394,10 @@ test("재고 목록·요청 관리·O/H 템플릿·내자·주간보고·작업 
     ["src/components/domestic-orders/DomesticOrderEditForm.tsx", 1],
     ["src/components/domestic-orders/DomesticOrderTextCell.tsx", 1],
     ["src/components/domestic-orders/DomesticOrderDueDatesCell.tsx", 1],
-    ["src/components/domestic-orders/DomesticOrderListScreen.tsx", 2],
+    // 머리말 저장 · 완료 표시 · 완료 표시 풀기 셋이다(2026-10-18 에 뒤의 둘이 「연결된
+    // 수리 건도 함께 처리했는가」로 문구가 갈리면서 쉼표가 들어왔다 — 그 둘을 옛 읽개가
+    // 못 읽어 이 시험이 터졌다. 자세한 것은 popupCalls() 머리말).
+    ["src/components/domestic-orders/DomesticOrderListScreen.tsx", 3],
     ["src/components/dashboard/WeeklyReportGoalsPanel.tsx", 3],
     ["src/components/dashboard/WeeklyReportDeliveriesPanel.tsx", 2],
     ["src/components/repair-labor/RepairLaborScreen.tsx", 1],
