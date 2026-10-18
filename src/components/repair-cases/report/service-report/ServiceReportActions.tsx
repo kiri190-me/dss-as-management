@@ -4,10 +4,16 @@ import Link from "next/link";
 
 /**
  * ============================================================================
- * 보고서 화면 아래 단추 줄 — 저장 · 미리보기 · 내려받기 · 지우기
+ * 보고서 화면 **맨 위** 단추 줄 — 취소 · 저장 · 미리보기 · 내려받기 · 지우기
  * ============================================================================
+ * 🔴 **자리가 「보고서 종류」 위다** (2026-10-19 사용자 요구: 「그 버튼들을 [보고서
+ * 종류] 창 위에 위치하도록 해줘」). 예전에는 폼 맨 아래였다 — 본문이 길어지면
+ * [저장]을 누르러 스무 줄을 내려가야 했다. 그리는 것은 이 조각이고 **자리를 정하는
+ * 것은 `ServiceReportForm` 의 차례**다.
+ *
  * 문턱이 서로 다르다(`auth/service-report-authorization.ts`):
  *
+ *   · 취소            없음  — 아무것도 보내지 않는다. 화면을 떠나는 일이다
  *   · 저장            WRITE
  *   · 저장본 인쇄     READ  — 이미 저장된 값을 보여 줄 뿐이다
  *   · 전체 미리보기   WRITE — 🔴 **보내는 사람이 문서 내용을 그 자리에서 짓는다.**
@@ -39,6 +45,16 @@ import Link from "next/link";
  *   · **저장된 장에는 [저장본 인쇄 · PDF]가 함께 붙는다** — 인쇄 · PDF 로 저장은
  *     그 화면의 일이다(저장 전 창에서 인쇄하면 뒤에 깔린 작성 화면까지 딸려 나가고,
  *     저장하지 않은 문서가 종이로 나가 결과물로 믿긴다).
+ *
+ * ── 🔴 [취소]는 [저장] **바로 왼쪽**이다 (2026-10-19) ────────────────────
+ * 사용자가 그렇게 짚었다. 짝이 되는 두 단추라 사이에 다른 것을 끼우지 않는다 —
+ * 「이 화면을 끝내는 길은 둘」이라는 것이 자리로 읽혀야 한다.
+ *
+ * 🔴 **저장 권한이 없어도 나온다.** [저장]은 WRITE 가 있어야 보이지만, 나가는 길은
+ * 누구에게나 있어야 한다 — 읽기만 할 수 있는 사람이 이 화면에 갇히면 안 된다.
+ * 🔴 **바쁠 때도 잠그지 않는다.** 저장 · 미리보기가 도는 동안 눌리지 않으면 서버가
+ * 느린 그 순간 사람이 화면에 묶인다. 눌렀을 때 무엇을 묻고 어디로 보낼지는 부르는
+ * 쪽이 정한다(`ServiceReportForm` 의 `handleLeave`).
  * ============================================================================
  */
 
@@ -53,6 +69,7 @@ export default function ServiceReportActions({
   canDownload,
   savedPrintHref,
   hint,
+  onCancel,
   onSave,
   onPreview,
   onDownload,
@@ -79,6 +96,11 @@ export default function ServiceReportActions({
   savedPrintHref: string | null;
   /** 지금 왜 못 누르는지 한 줄. 없으면 null. */
   hint: string | null;
+  /**
+   * 🔴 **저장하지 않고 「보고서」 탭으로 나간다.** 고친 것이 있으면 묻는 일까지
+   * 부르는 쪽의 몫이다 — 이 조각은 자리만 안다.
+   */
+  onCancel: () => void;
   onSave: () => void;
   onPreview: () => void;
   onDownload: () => void;
@@ -125,6 +147,16 @@ export default function ServiceReportActions({
           className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
         >
           {isPreviewing ? "만드는 중…" : "전체 미리보기"}
+        </button>
+
+        {/* 🔴 [저장] 바로 왼쪽. 권한이 없어도 · 바쁜 중에도 나가는 길은 열려 있다
+            (위 머리말). 묻는 것은 부르는 쪽이 한다. */}
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-800 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+          취소
         </button>
 
         {canEdit && (

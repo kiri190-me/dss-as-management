@@ -58,16 +58,18 @@ describe("🔴 보고서 저장은 그대로다", () => {
   test("🔴 변환은 저장 응답을 받은 **뒤**, 성공 갈래 안이다", () => {
     const action = indexOrFail(save, "const result = saved ? await updateServiceReportAction(");
     const notOk = indexOrFail(save, "if (!result.ok) {");
-    const forget = indexOrFail(save, "forgetDraft();");
+    // ⚠️ 2026-10-19 까지 이 자리의 표식은 `forgetDraft();`(임시보관 지우기)였다.
+    //    임시보관을 걷어내면서 성공 갈래의 마지막 한 줄이 이것으로 바뀌었다.
+    const settle = indexOrFail(save, "setSavedValues(values);");
     const convert = indexOrFail(save, "const next = await archiveReportToContactFolder(result.id);");
-    assert.ok(action < notOk && notOk < forget && forget < convert, "차례가 틀렸다");
+    assert.ok(action < notOk && notOk < settle && settle < convert, "차례가 틀렸다");
     // 부르는 자리는 하나뿐이다.
     assert.equal(save.split("await archiveReportToContactFolder(").length - 1, 1);
   });
 
   test("🔴 저장 성공 상태를 되돌리지 않는다 — 변환 뒤에 손대는 것은 팝업뿐", () => {
     const after = save.slice(indexOrFail(save, "const next = await archiveReportToContactFolder(result.id);"));
-    for (const forbidden of ["setSaved(", "setSavedSnapshot(", "setEdited(", "forgetDraft("]) {
+    for (const forbidden of ["setSaved(", "setSavedValues(", "setEdited("]) {
       assert.equal(after.includes(forbidden), false, `변환 뒤에 저장 상태를 건드린다: ${forbidden}`);
     }
     assert.ok(after.includes('if (next !== "SAVED") return;'), after);

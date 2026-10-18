@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   cancelSavePopupProgress,
@@ -8,22 +7,14 @@ import {
   showSavePopup,
   showSavePopupProgress,
 } from "@/components/common/SavePopup";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { MasterDataDeleteDialog } from "@/components/common/master-data-trash-dialogs";
 import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
 import { fileNameFromContentDisposition } from "@/lib/domain/content-disposition-file-name";
 import { SERVICE_REPORT_DRAFT_LABELS, buildDraftText } from "@/lib/domain/edit-draft-text";
 import type { ServiceReportBodyMetrics } from "@/lib/domain/service-report-body-wrap";
 import { formatServiceReportNumber } from "@/lib/domain/service-report-file-name";
-import {
-  SERVICE_REPORT_DRAFT_SAVE_DEBOUNCE_MS,
-  clearServiceReportDraft,
-  readServiceReportDraft,
-  serviceReportDraftStorageKeys,
-  writeServiceReportDraft,
-  type ServiceReportDraft,
-  type ServiceReportDraftStore,
-} from "@/lib/domain/service-report-draft";
+import { serviceReportValuesChanged } from "@/lib/domain/service-report-draft";
 import {
   buildServiceReportRequestBody,
   isServiceReportBodyEmpty,
@@ -46,7 +37,7 @@ import ServiceReportActions from "./ServiceReportActions";
 import ServiceReportDocumentPreviewDialog from "./ServiceReportDocumentPreviewDialog";
 import ServiceReportBodyFields from "./ServiceReportBodyFields";
 import ServiceReportConflictNotice from "./ServiceReportConflictNotice";
-import ServiceReportDraftNotice from "./ServiceReportDraftNotice";
+import ServiceReportLeaveConfirmDialog from "./ServiceReportLeaveConfirmDialog";
 import ServiceReportDispositionFields from "./ServiceReportDispositionFields";
 import ServiceReportHeaderFields from "./ServiceReportHeaderFields";
 import { editInputClass, Field, ServiceReportSection } from "./ServiceReportField";
@@ -80,27 +71,37 @@ import {
  * 셈은 전부 `domain/service-report-form.ts` 에 있다 — 여기 두면 시험이 붙지
  * 않고, 시험이 없으면 화면과 서버가 어긋난 것을 아무도 모른다.
  *
- * ── 🔴 임시보관과 저장의 관계 (2026-09-02 판단) ────────────────────────
- * 판단의 근거는 `domain/service-report-draft.ts` 머리말에 있고, 그것을 실제로
- * 실행하는 자리가 이 파일이다. 세 줄로:
+ * ── 🔴 **브라우저 임시보관을 걷어냈다** (2026-10-19) ───────────────────
+ * 사용자 요구: 「보고서에서 적은 내용이 지금은 브라우저에 임시보관 되고 있는데
+ * 그러지 말고 **새로고침 하거나 나갔다오면 저장했던 내용으로 뜨도록** 해줘.
+ * (임시보관과 진짜 저장된 내용간이 구분하기 힘들어서 **브라우저와 실제 파일이
+ * 차이가 생길 것 같아.**)」
  *
- *   1. **저장에 성공하면 그 장의 임시보관을 지운다.** 저장이 더 나은 사본이고,
- *      남겨 두면 다음에 열었을 때 저장된 값 대신 그것이 되살아난다 — 사람은
- *      «저장된 내용»을 보고 있다고 믿으면서 다른 글을 보게 된다.
- *   2. **열 때는 임시보관이 이긴다.** 저장된 장에 임시보관이 남아 있다는 것은
- *      «저장하지 못한 채 나갔다»는 뜻뿐이다(성공한 저장은 1번에서 지웠다). 저장된
- *      값을 대신 보여 주면 그 못 저장한 글이 조용히 사라진다. 반대 실수(임시보관이
- *      낡은 것)는 되돌릴 수 있다 — 저장된 값은 DB 에 그대로 있고, 안내가 그 사실을
- *      말하며 「저장된 내용으로」가 함께 있다(`ServiceReportDraftNotice`).
- *      **한쪽 실수만 영구적**이라, 영구적이지 않은 쪽으로 기운다.
- *   3. **내려받기는 저장이 아니다.** 파일을 뽑았다고 지우지 않는다(예전 판단
- *      그대로 — 뽑아 본 뒤 고칠 것을 발견하는 것이 이 화면의 보통 쓰임이다).
+ * 2026-09-02 ~ 2026-10-19 사이에는 이 화면이 0.5초마다 `localStorage` 에 적고,
+ * 다시 들어오면 그것을 **저장된 값보다 먼저** 되살렸다. 그 장치가 통째로 사라졌다:
  *
- * 지우기만 예외다 — 그때는 **묻고 나서** 지운다(아래 `openDelete`·`confirmDelete`).
+ *   · 🔴 **화면이 시작하는 값은 하나뿐이다** — 서버가 넘긴 `initialValues`(새 장이면
+ *     자동 채움, 저장된 장이면 DB 의 값). 새로고침하면 **저장된 내용**이 뜬다.
+ *   · 🔴 **브라우저에 적는 자리가 없다** — 이 파일에 `localStorage` 가 한 글자도
+ *     없다는 것을 시험이 지킨다(`service-report-cancel-screen.test.tsx`).
  *
- * ── 🔴 임시보관 열쇠는 보고서 장마다 갈린다 ────────────────────────────
- * 한 접수 건에 여러 장이 붙으므로 사람 + 접수 건만으로는 서로 덮는다. 옛 열쇠로
- * 적어 둔 것을 버리지 않는 방법까지 `serviceReportDraftStorageKeys` 가 정한다.
+ * ── 🔴 그 자리를 무엇이 메우는가 ────────────────────────────────────────
+ * 임시보관은 「저장 못 하고 나갔을 때 글을 지켜 주는」 장치였다. 없앴으므로 **실수로
+ * 나가면 날아간다.** 그래서 **나가는 길마다 묻는다**:
+ *
+ *   1. [취소]와 머리의 [보고서 탭으로]가 **같은 `handleLeave` 하나**를 지난다 —
+ *      고친 것이 있으면 「나가면 적은 내용이 사라집니다」를 묻는다
+ *      (`ServiceReportLeaveConfirmDialog`). 문이 둘인데 한쪽만 묻는 일이 없게 한다.
+ *   2. 저장 충돌로 얼릴 때는 적어 둔 글을 상자에 붙잡는다(`ServiceReportConflictNotice`).
+ *   3. 저장하려던 장이 이미 지워져 있으면 **새 장으로 되돌린다**(아래 `NOT_FOUND`).
+ *   4. 지우기는 **묻고 나서** 지운다(아래 `openDelete`·`confirmDelete`).
+ *
+ * ⚠️ 탭을 그냥 닫거나 전원이 나가는 사고는 이제 막지 않는다 — 사용자가 고른 쪽이다.
+ *
+ * ── 내려받기 · 전체 미리보기는 저장이 아니다 ────────────────────────────
+ * 파일을 뽑았다고, 문서를 창으로 봤다고 화면의 값이 달라지지 않는다. 특히 **전체
+ * 미리보기는 창**이라 페이지를 떠나지 않는다 — 열고 닫아도 적던 글이 그대로다
+ * (그 창은 폼 **곁에** 그려지고, 닫기는 `setPreviewDocument(null)` 하나뿐이다).
  *
  * ── 🔴 만든 objectURL 을 놓아 준다 ──────────────────────────────────────
  * `URL.createObjectURL` 이 만든 주소는 문서가 살아 있는 동안 그 블롭을 붙들고
@@ -112,11 +113,6 @@ import {
  * 라우트는 실패마다 코드를 붙여 준다. 코드를 그대로 보여 주면(`RENDER_FAILED`)
  * 화면에 영어 개발자 메시지가 뜨는 것과 같다(UI_GUIDELINE 11). 코드마다 무엇을
  * 하면 되는지를 적어 준다.
- *
- * ── 적던 내용을 이 브라우저에 임시로 보관한다 ───────────────────────────
- * 새로고침 한 번에 본문 스무 줄이 통째로 날아가지 않게 한다. 판단과 모양은 전부
- * `domain/service-report-draft.ts` 에 있고, 여기 있는 것은 `window.localStorage`
- * 를 실제로 두드리는 일과 언제 읽고 언제 적을지 정하는 일뿐이다.
  * ============================================================================
  */
 
@@ -184,90 +180,11 @@ type FailurePayload = {
   fieldErrors?: unknown;
 };
 
-/**
- * 저장소를 집는다. 🔴 **속성을 읽는 것 자체가 던진다**(사생활 보호 창, 「사이트
- * 데이터 차단」). 그래서 꺼내 오는 것부터 감싼다 — 이 한 겹이 없으면
- * `service-report-draft.ts` 안의 try/catch 가 아무 소용이 없다. 이 저장소가 실제로
- * 겪은 사고다(커밋 8454a2a).
- */
-function serviceReportDraftStore(): ServiceReportDraftStore | null {
-  try {
-    return typeof window !== "undefined" ? window.localStorage : null;
-  } catch {
-    return null;
-  }
-}
-
-const draftListeners = new Set<() => void>();
-
-/**
- * 🔴 이 화면이 **처음 본** 임시보관을 열쇠마다 들고 있는 자리. 두 가지를 한꺼번에
- * 푼다:
- *
- *   1. **useSyncExternalStore 의 스냅샷은 값이 안 바뀌었으면 같은 것이어야 한다.**
- *      부를 때마다 저장소를 읽어 JSON 을 새로 풀면 매번 새 객체가 나와 React 가
- *      "계속 바뀐다"고 보고 무한히 다시 그린다(커밋 8454a2a 가 목록 26개에서 막은
- *      바로 그 함정이다).
- *   2. **되살리기는 화면에 들어온 그 순간의 사실이다.** 이 화면은 0.5초마다
- *      스스로 저장소에 적으므로, 계속 다시 읽으면 사람이 글을 치는 도중에
- *      「되살렸습니다」 안내가 튀어나온다 — 되살린 적이 없는데도.
- */
-const seenDrafts = new Map<string, ServiceReportDraft | null>();
-
-function subscribeDraft(listener: () => void): () => void {
-  draftListeners.add(listener);
-  return () => {
-    draftListeners.delete(listener);
-    // 이 화면을 떠나면 들고 있던 것을 놓는다. 다시 들어왔을 때 **방금 적어 둔
-    // 것까지** 되살리려면 그때 저장소를 새로 읽어야 한다.
-    if (draftListeners.size === 0) seenDrafts.clear();
-  };
-}
-
-/**
- * 되살릴 임시보관. 저장소를 읽는 일은 `service-report-draft.ts` 가 하고(던지지
- * 않는다), 여기서는 그 결과를 **한 번만** 받아 들고 있는다 — 위 seenDrafts 참조.
- */
-function draftSnapshot(
-  storageKeys: readonly string[],
-  fallback: ServiceReportFormValues,
-  causeCodes: readonly string[]
-): ServiceReportDraft | null {
-  // 들고 있는 열쇠는 **적는 열쇠**(맨 앞)다. 뒤에 오는 옛 열쇠는 같은 장을 가리키는
-  // 다른 이름일 뿐이라, 둘을 따로 세면 같은 임시보관을 두 번 들고 있게 된다.
-  const cacheKey = storageKeys[0];
-  const seen = seenDrafts.get(cacheKey);
-  if (seen !== undefined) return seen;
-
-  const draft = readServiceReportDraft(
-    serviceReportDraftStore(),
-    storageKeys,
-    // 없거나 모양이 틀린 칸이 떨어질 자리 — 지금 화면이 만든 자동 채움 값이다.
-    fallback,
-    causeCodes
-  );
-  seenDrafts.set(cacheKey, draft);
-  return draft;
-}
-
-/**
- * 서버에는 저장소가 없다. **되살릴 것이 없는 사람과 같은 화면**을 준다.
- *
- * 이 한 줄이 hydration 을 맞추는 자리다 — 첫 렌더에서 그냥 읽으면 서버가 그린
- * 것과 달라지고, effect 에서 읽어 setState 하면 자동 채움 값이 한 프레임 스쳐
- * 지나간다. useSyncExternalStore 가 정확히 이 상황을 위한 것이다
- * (`common/responsive-list.tsx` 의 readServer 와 같은 판단).
- */
-function draftServerSnapshot(): ServiceReportDraft | null {
-  return null;
-}
-
 /** 저장된 장 하나를 가리키는 값. 저장할 때 되돌려 보낼 잠금 토큰까지 한 벌이다. */
 type SavedServiceReport = { id: string; version: number };
 
 export default function ServiceReportForm({
   repairCaseId,
-  actingUserId,
   intakeNumber,
   reportHref,
   initialValues,
@@ -282,13 +199,12 @@ export default function ServiceReportForm({
   templateError,
 }: {
   repairCaseId: string;
-  /**
-   * 🔴 임시보관 열쇠에 쓸 **사람 id 하나뿐**이다. 이름·역할·이메일은 받지
-   * 않는다 — 화면이 안 쓰는 것을 클라이언트로 내려보내지 않는다.
-   */
-  actingUserId: string;
   intakeNumber: string;
-  /** 돌아갈 자리 — 「보고서」 탭. 지운 뒤에도 여기로 온다. */
+  /**
+   * 돌아갈 자리 — 「보고서」 탭. 지운 뒤에도, 🔴 **[취소]로 나갈 때도** 여기로 온다.
+   * 🔴 주소를 화면이 짓지 않는다 — 서버 페이지가 `repairCaseDetailHrefs` 로 만들어
+   * 넘긴다(그 함수 한 자리가 탭 주소의 주인이다).
+   */
   reportHref: string;
   initialValues: ServiceReportFormValues;
   /**
@@ -364,6 +280,14 @@ export default function ServiceReportForm({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   /**
+   * 🔴 「저장하지 않고 나가시겠습니까」 창이 떠 있는가 (2026-10-19).
+   *
+   * 지우기 창과 같은 규칙이다 — 창은 자기 상태를 갖지 않고 여기가 소유한다. 다만
+   * **전송 중 깃발이 없다**: 나가는 일은 서버에 아무것도 보내지 않는다.
+   */
+  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
+
+  /**
    * 지금 붙들고 있는 장. 서버가 넘긴 것으로 시작하고, **저장에 성공할 때마다
    * 갱신된다.**
    *
@@ -384,51 +308,23 @@ export default function ServiceReportForm({
   } | null>(null);
 
   /**
-   * 마지막으로 **저장에 성공한** 값의 사본(JSON).
+   * 마지막으로 **저장에 성공한** 값 한 벌. 아직 이 화면에서 저장한 적이 없으면 null.
    *
-   * 이것이 있어야 "저장한 뒤로 아직 아무것도 안 고쳤다"를 알 수 있다. 그 상태에서
-   * 임시보관을 다시 적으면, 저장된 것과 똑같은 글이 «아직 저장하지 못한 것»인 척
-   * 남아 다음에 열 때 안내가 뜬다 — 위 머리말 1번이 막으려던 그 혼란이다.
+   * 🔴 **[취소]가 물을지 말지의 기준선**이다(아래 `dirty`). 저장이 끝난 뒤에는 서버가
+   * 다시 그려 줄 때까지 `initialValues` 가 낡아 있으므로, 그것만 보면 «방금 저장한
+   * 그대로»인데도 「나가면 사라집니다」를 묻게 된다 — 읽히지 않는 물음이 하나 늘면
+   * 정작 글이 사라질 때도 그냥 넘긴다.
    */
-  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
-
-  /**
-   * 이 장의 임시보관 열쇠들. **맨 앞이 적는 열쇠**다.
-   *
-   * 🔴 `saved?.id` 가 들어간다 — 한 접수 건에 여러 장이 붙으므로 장마다 갈라야
-   * 서로 덮지 않는다. 새로 만드는 중이면 `null` 이고, 그때만 옛 열쇠까지 함께
-   * 본다(`serviceReportDraftStorageKeys` 의 판단).
-   */
-  const draftKeys = useMemo(
-    () => serviceReportDraftStorageKeys(actingUserId, repairCaseId, saved?.id ?? null),
-    [actingUserId, repairCaseId, saved?.id]
-  );
-
-  /**
-   * 되살릴 때 인정할 원인 코드. 🔴 **채우개의 표에서 온 것**을 그대로 쓴다
-   * (`causeLabels`) — 목록을 여기 베끼면 양식에 원인이 하나 늘어난 날 체크가
-   * 조용히 풀린다.
-   */
-  const causeCodes = useMemo(() => Object.keys(causeLabels), [causeLabels]);
-
-  /** 들어올 때 되살린 임시보관. 없으면 null. 위 seenDrafts 주석 참조. */
-  const restoredDraft = useSyncExternalStore(
-    subscribeDraft,
-    () => draftSnapshot(draftKeys, initialValues, causeCodes),
-    draftServerSnapshot
-  );
+  const [savedValues, setSavedValues] = useState<ServiceReportFormValues | null>(null);
 
   /**
    * 🔴 **사람이 이번에 고친 값.** 아직 한 칸도 안 고쳤으면 null 이다.
    *
-   * 「지금 화면의 값」을 state 하나에 담지 않고 이렇게 갈라 두는 까닭이 둘이다:
-   *
-   *   · **hydration.** 되살린 값은 브라우저에만 있으므로 서버가 그린 첫 화면은
-   *     언제나 자동 채움 값이어야 한다. 위 useSyncExternalStore 가 그 자리를
-   *     맡고(서버 스냅샷은 null), 이 state 는 그 위에 얹힌다.
-   *   · **열어만 보고 나간 화면은 적지 않는다.** 이 값이 null 인 동안은 적어 둘
-   *     것이 없다 — 그렇지 않으면 보고서 화면을 열어 본 접수 건마다 임시보관이
-   *     하나씩 쌓여 저장소가 이유 없이 찬다.
+   * 「지금 화면의 값」을 state 하나에 담지 않고 이렇게 갈라 두는 까닭은 **서버가
+   * 넘긴 값이 언제나 바닥**이어야 하기 때문이다 — `initialValues` 가 바뀌면(저장된
+   * 장을 다시 읽어 오거나, 다른 장으로 갈아 끼우면) 고친 것이 없는 화면은 **그
+   * 자리에서 새 값**을 보여 준다. 2026-10-19 에 임시보관을 걷어낸 뒤로 이 둘 사이에
+   * 끼어드는 것은 아무것도 없다(위 머리말).
    */
   const [edited, setEdited] = useState<ServiceReportFormValues | null>(null);
 
@@ -454,13 +350,16 @@ export default function ServiceReportForm({
     // 그대로 둔다 — 새로 만든 직후가 바로 이 길이라(주소가 `?id=` 로 바뀐다),
     // 여기서 지우면 "새 보고서로 저장했습니다"가 뜨자마자 사라진다.
     setEdited(null);
-    setSavedSnapshot(null);
+    setSavedValues(null);
     setConflict(null);
     setFieldErrors(null);
     // 열려 있던 지우기 확인 창도 닫는다 — 앞 장의 이름을 보여 주면서 지우는 것은
     // 새 장이 되는 창을 남겨 두지 않는다.
     setDeleteOpen(false);
     setDeleteError(null);
+    // 🔴 「나가시겠습니까」도 닫는다 — 앞 장의 글을 두고 묻던 물음이라, 갈아 끼운
+    //    장에서 그대로 「나가기」를 누르면 묻지도 않은 것을 승낙한 꼴이 된다.
+    setLeaveConfirmOpen(false);
     // 🔴 떠 있던 미리보기 창도 닫는다 — 앞 장의 문서를 새 장의 화면 위에 띄워 두면
     //    사람은 그것을 **이 장의 문서**로 읽는다.
     setPreviewDocument(null);
@@ -476,73 +375,54 @@ export default function ServiceReportForm({
     setSaved(savedReport);
   }
 
-  /** 지금 화면의 값 — 고친 것 > 되살린 것 > 자동 채움. 이 순서를 바꾸지 말 것. */
-  const values = edited ?? restoredDraft?.values ?? initialValues;
+  /**
+   * 지금 화면의 값 — **고친 것 > 서버가 넘긴 것** 둘뿐이다.
+   *
+   * 🔴 2026-10-19 에 가운데 있던 「되살린 임시보관」이 빠졌다. 그래서 새로고침하면
+   * 언제나 **저장된 내용**이 뜬다(위 머리말).
+   */
+  const values = edited ?? initialValues;
 
   function update(patch: Partial<ServiceReportFormValues>) {
     setEdited((previous) => ({ ...(previous ?? values), ...patch }));
   }
 
   /**
-   * ── 적는 대로 보관한다 — 다만 묶어서 ─────────────────────────────────
-   * 글자마다 적으면 한 글자에 한 번씩 폼 전체를 JSON 으로 만들어 저장소를
-   * 때린다(`localStorage` 쓰기는 동기라 그대로 입력의 끊김이 된다). 그래서
-   * 0.5초 묶어서 적는다 — 그 값을 고른 까닭은
-   * `SERVICE_REPORT_DRAFT_SAVE_DEBOUNCE_MS` 주석에 있다.
+   * 🔴 **저장하지 않은 고침이 남아 있는가** — [취소]가 물을지 말지가 이 하나로
+   * 갈린다. 판단은 도메인에 있다(`serviceReportValuesChanged` — 칸이 하나 늘면
+   * tsc 가 그쪽을 잡는다).
    *
-   * 값이 바뀔 때마다 앞의 시계를 버리고 새로 건다(cleanup) — 글자를 치는 동안은
-   * 아무것도 안 적히고, 손을 떼고 0.5초가 지나야 한 번 적힌다.
+   * 기준선은 «이 화면이 저장된 것으로 믿는 값»이다: 이 화면에서 저장에 성공했으면
+   * 그 값, 아니면 서버가 넘긴 초기값. 🔴 아무것도 안 고쳤으면 **묻지 않고 바로
+   * 나간다** — 늘 물으면 사람이 읽지 않고 누르는 손을 배운다.
    */
-  useEffect(() => {
-    if (edited === null) return;
-
-    const timer = window.setTimeout(() => {
-      /**
-       * 🔴 저장에 성공한 그대로면 **적는 대신 지운다.** 임시보관의 뜻은 «아직
-       * 저장하지 못한 것»이라(위 머리말), 저장된 것과 똑같은 글을 남겨 두면 다음에
-       * 열 때 「저장하지 못한 내용을 되살렸습니다」라는 거짓말이 뜬다.
-       */
-      if (savedSnapshot !== null && JSON.stringify(edited) === savedSnapshot) {
-        clearServiceReportDraft(serviceReportDraftStore(), draftKeys);
-        return;
-      }
-      writeServiceReportDraft(
-        serviceReportDraftStore(),
-        // 적는 것은 언제나 맨 앞 열쇠다 — 옛 열쇠에 새로 적지 않는다.
-        draftKeys[0],
-        edited,
-        new Date().toISOString()
-      );
-    }, SERVICE_REPORT_DRAFT_SAVE_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [edited, draftKeys, savedSnapshot]);
+  const dirty = serviceReportValuesChanged(savedValues ?? initialValues, values);
 
   /**
-   * 임시보관을 지우고 화면이 들고 있던 것도 놓는다.
+   * ── 🔴 [취소] · 머리의 [보고서 탭으로] — 저장하지 않고 나간다 (2026-10-19) ──
+   * 사용자 요구: 「[저장] 왼쪽에 [취소] 버튼을 만들어줘. 그 버튼을 누르면 지금
+   * 내용이 저장되지 않은 채 보고서 탭으로 빠져나오게 해줘.」
    *
-   * 🔴 `seenDrafts` 까지 비워야 안내가 그 자리에서 사라진다 — 저장소만 지우면
-   * 이 화면은 아까 읽어 둔 것을 계속 들고 있다.
+   *  · 🔴 **저장하지 않는다.** 서버 액션도, 통로도 부르지 않는다.
+   *  · 🔴 **고친 것이 있으면 묻는다.** 같은 날 임시보관을 걷어내서 **돌아올 길이
+   *    없다** — 나가면 사라진다는 사실이 사람에게 보여야 한다
+   *    (`ServiceReportLeaveConfirmDialog`).
+   *  · 🔴 **문이 둘인데 한쪽만 묻는 일이 없게** 머리의 [보고서 탭으로]도 같은 길을
+   *    지난다. 그래서 그것은 이제 `<Link>` 가 아니라 단추다.
+   *  · 가는 곳은 `reportHref` 다 — 주소를 여기서 짓지 않는다(서버 페이지가
+   *    `repairCaseDetailHrefs` 로 만들어 넘긴다).
    */
-  function forgetDraft() {
-    clearServiceReportDraft(serviceReportDraftStore(), draftKeys);
-    seenDrafts.set(draftKeys[0], null);
-    for (const listener of draftListeners) listener();
+  function handleLeave() {
+    if (dirty) {
+      setLeaveConfirmOpen(true);
+      return;
+    }
+    leaveWithoutSaving();
   }
 
-  /**
-   * 「새로 시작」(새 장) · 「저장된 내용으로」(저장된 장).
-   *
-   * 두 경우 모두 임시보관을 버리고 **서버가 넘겨준 초기값**으로 돌아간다 — 새
-   * 장이면 자동 채움 값이고, 저장된 장이면 DB 에 저장된 값이다.
-   */
-  function handleDiscardDraft() {
-    forgetDraft();
-    setEdited(null);
-    // 버린 글에 붙어 있던 지적이라 함께 지운다 — 안 그러면 없는 글에 대한
-    // 오류가 칸 밑에 남는다.
-    setFieldErrors(null);
-    setFormError(null);
-    setStatusMessage(null);
+  function leaveWithoutSaving() {
+    setLeaveConfirmOpen(false);
+    router.push(reportHref);
   }
 
   const rowLimitErrors = serviceReportRowLimitErrors(values, limits);
@@ -708,23 +588,23 @@ export default function ServiceReportForm({
         if (result.code === "NOT_FOUND") {
           /**
            * 🔴 누가 이 장을 지웠다. 여기서 오류만 띄우면 **적어 둔 글이 갈 곳을
-           * 잃는다** — 이 id 는 다시 열리지 않으므로 그 열쇠에 적힌 임시보관도
-           * 영영 안 읽힌다.
+           * 잃는다** — 이 id 는 다시 열리지 않는다. 임시보관을 걷어낸 2026-10-19
+           * 뒤로는 받아 줄 자리가 어디에도 없어서, 이 갈래가 **글이 남는 유일한
+           * 길**이다.
            *
            * 그래서 이 화면을 **새 장으로 되돌린다.** 지금 보고 있는 값은 그대로
            * 두고(`setEdited(values)`) 「만들기」로 돌린다. 그러면 [저장하기]가
-           * 곧바로 새 보고서를 만들고, 임시보관도 새 장의 칸으로 따라간다(열쇠가
-           * `saved?.id` 를 따르므로 다음 0.5초에 그리로 적힌다).
+           * 곧바로 새 보고서를 만든다.
            *
            * ⚠️ **주소는 건드리지 않는다.** `?id=` 를 떼면 서버가 이 화면을 다시
            * 그리고, 그러면 위의 «장이 바뀌었다» 갈래가 돌아 `edited` 를 놓는다 —
-           * 방금 지키려던 그 글이 바로 그때 사라진다. 새로고침하면 404 를 보게
-           * 되지만, 그때도 글은 새 장의 임시보관에 남아 있어 「보고서」 탭에서
-           * 새로 만들기로 들어가면 되살아난다.
+           * 방금 지키려던 그 글이 바로 그때 사라진다. 🔴 같은 이유로 **새로고침하면
+           * 그 글은 없다** — 그래서 문구가 「지금 화면의 내용은 그대로 남아 있습니다」
+           * 로 끝나지 않고 [저장하기]를 누르라고 말한다.
            */
           setEdited(values);
           setSaved(null);
-          setSavedSnapshot(null);
+          setSavedValues(null);
           setFormError(
             "이 보고서는 이미 지워졌습니다(다른 사람이 지웠을 수 있습니다). 지금 화면의 내용은 그대로 남아 있습니다 — [저장하기]를 누르면 새 보고서로 저장됩니다."
           );
@@ -737,17 +617,17 @@ export default function ServiceReportForm({
       }
 
       /**
-       * 성공. 🔴 **지금 화면의 값을 못 박고**(`setEdited`) 임시보관을 지운다.
+       * 성공. 🔴 **지금 화면의 값을 못 박는다**(`setEdited`) — 서버는 아직 이 화면을
+       * 다시 그려 주지 않았으므로, 여기서 놓으면 새 장은 **방금 저장한 글이 아니라
+       * 자동 채움 값**으로 되돌아간다.
        *
-       * 못 박는 것이 먼저인 까닭: 되살린 임시보관을 그대로 저장한 사람은 아직
-       * `edited` 가 없다. 임시보관을 먼저 지우면 화면이 서버의 초기값으로
-       * 되돌아가는데, 새 장이라면 그것은 **방금 저장한 글이 아니라 자동 채움
-       * 값**이다.
+       * 🔴 같은 값을 `savedValues` 에도 둔다. [취소]가 「고친 것이 있는가」를 재는
+       * 기준선이라, 이것이 없으면 **방금 저장한 그대로인데도** 「나가면 사라집니다」를
+       * 묻게 된다(PDF 변환이 할 말을 남겨 이 화면에 머무는 길이 실제로 있다).
        */
       setEdited(values);
       setSaved({ id: result.id, version: result.version });
-      setSavedSnapshot(JSON.stringify(values));
-      forgetDraft();
+      setSavedValues(values);
 
       /**
        * 🔴 **여기서부터는 저장이 끝난 뒤의 일이다** (2026-10-12). 연락서 폴더에 엑셀을
@@ -778,10 +658,9 @@ export default function ServiceReportForm({
    * ── 지우기 ───────────────────────────────────────────────────────────
    * 휴지통으로 보낸다(영구 삭제가 아니다). 지운 뒤에는 목록으로 돌아간다.
    *
-   * 🔴 **묻고 나서 지운다.** 여기서만 임시보관을 사람의 글째로 버리기 때문이다 —
-   * 아직 저장하지 않은 수정이 남아 있을 수 있고, 그 장은 다시 열리지 않으므로
-   * 그 글도 갈 곳이 없다. 무엇이 함께 사라지는지 물음에 그대로 적는다(아래
-   * `cascadeNote`).
+   * 🔴 **묻고 나서 지운다.** 아직 저장하지 않은 수정이 남아 있을 수 있고, 그 장은
+   * 다시 열리지 않으므로 그 글도 갈 곳이 없다. 무엇이 함께 사라지는지 물음에
+   * 그대로 적는다(아래 `cascadeNote`).
    *
    * 🔴 묻는 창은 **이 저장소의 표준 창**이다(`MasterDataDeleteDialog`). 예전에는
    * 브라우저가 그린 기본 팝업이었는데, 그러면 이 화면만 생김새가 다르다 — 지우는
@@ -823,7 +702,6 @@ export default function ServiceReportForm({
           // 이미 없다. 지우려던 일은 어차피 이루어진 셈이라 목록으로 보낸다.
           // 🔴 이 갈래만 창을 띄운 채 화면을 떠난다 — 없는 장에 대한 오류를
           //    창에 남겨 봐야 사람이 할 수 있는 일이 없다.
-          forgetDraft();
           router.replace(reportHref);
           router.refresh();
           return;
@@ -840,7 +718,6 @@ export default function ServiceReportForm({
         return;
       }
 
-      forgetDraft();
       router.replace(reportHref);
       router.refresh();
     } catch {
@@ -853,12 +730,18 @@ export default function ServiceReportForm({
   /**
    * 충돌 뒤 「최신 내용 다시 불러오기」.
    *
-   * 🔴 낡은 임시보관까지 함께 버린다 — 안 그러면 다시 불러온 화면에 방금 그
-   * 낡은 값이 되살아난다. 버려도 되는 까닭은 **그 글이 상자에 그대로 남아
-   * 있기** 때문이고, 상자는 사람이 「옮겨 적었습니다」를 누를 때에만 사라진다.
+   * 🔴 고친 값을 놓는다(`setEdited(null)`) — 안 그러면 다시 불러온 화면에 방금 그
+   * 낡은 값이 그대로 남아 서버의 최신 내용을 덮어 보여 준다. 놓아도 되는 까닭은
+   * **그 글이 상자에 그대로 남아 있기** 때문이고, 상자는 사람이 「옮겨 적었습니다」를
+   * 누를 때에만 사라진다.
    */
   function handleConflictReload() {
-    handleDiscardDraft();
+    setEdited(null);
+    // 버린 글에 붙어 있던 지적이라 함께 지운다 — 안 그러면 없는 글에 대한
+    // 오류가 칸 밑에 남는다.
+    setFieldErrors(null);
+    setFormError(null);
+    setStatusMessage(null);
     setConflict((previous) => (previous === null ? null : { ...previous, reloaded: true }));
     router.refresh();
   }
@@ -994,22 +877,16 @@ export default function ServiceReportForm({
             {mode === "SAVED" ? "저장된 보고서를 고치는 중입니다." : "새 보고서를 적는 중입니다."}
           </p>
         </div>
-        <Link
-          href={reportHref}
+        {/* 🔴 `<Link>` 가 아니라 단추다 (2026-10-19) — [취소]와 **같은 `handleLeave`**
+            를 지나야 고친 것이 있을 때 묻는다. 링크로 두면 문이 둘인데 한쪽만 묻는다. */}
+        <button
+          type="button"
+          onClick={handleLeave}
           className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           보고서 탭으로
-        </Link>
+        </button>
       </div>
-
-      {/* 지금 적는 것이 어디에 남는지, 되살린 것이 있으면 그 사실과 버리는 길. */}
-      <ServiceReportDraftNotice
-        mode={mode}
-        restored={restoredDraft !== null}
-        savedAt={restoredDraft?.savedAt ?? null}
-        onDiscard={handleDiscardDraft}
-        disabled={busy}
-      />
 
       {/* 🔴 충돌 상자는 「옮겨 적었습니다」를 누를 때까지 남는다 — 그 안의 글이
           이 화면에서 잃을 뻔한 전부다. */}
@@ -1053,6 +930,41 @@ export default function ServiceReportForm({
           여기 줄이 차는 때는 **끝난 뒤 · 사람이 읽을 것이 남았을 때**뿐이다. 첫 줄이
           「보고서는 저장되었습니다.」라 저장이 끝났다는 것이 먼저 읽힌다. */}
       <ServiceReportSavePdfNotice lines={pdfNoticeLines} onLeave={() => router.push(reportHref)} />
+
+      {/*
+        🔴 **단추 줄이 「보고서 종류」 위다** (2026-10-19 사용자 요구: 「그 버튼들을
+        [보고서 종류] 창 위에 위치하도록 해줘」). 예전에는 폼 맨 아래였다 — 본문이
+        길어지면 [저장]을 누르러 스무 줄을 내려가야 했다. 🔴 **순서가 곧 요구**라서
+        이 자리를 옮기면 시험이 깨진다(`service-report-cancel-screen.test.tsx`).
+      */}
+      <ServiceReportActions
+        mode={mode}
+        canEdit={canEdit}
+        canDelete={canDelete}
+        isSaving={isSaving}
+        isDownloading={isSubmitting}
+        isPreviewing={isPreviewing}
+        canSave={canSave}
+        canDownload={canDownload}
+        // 🔴 **저장된 장**의 인쇄 화면이다(DB 에 저장된 값을 그린다). 주소는 지금
+        //    보고 있는 화면(`usePathname`)이 아니라 「보고서」 탭에서 만든다. 두
+        //    화면은 형제라 같은 부모에서 갈라져 나오고, 그래야 질의문자열이 붙은
+        //    주소에서도 자리가 흔들리지 않는다.
+        savedPrintHref={saved === null ? null : `${reportHref}/service-report/print?id=${saved.id}`}
+        // 🔴 내려받기와 **전체 미리보기**를 함께 막는 조건이다 — 저장은 적다 만
+        //    보고서도 받는다. 반쪽짜리 문서를 보여 주면 사람이 그것을 결과물로 믿는다.
+        hint={
+          bodyEmpty && !blocked
+            ? "확인내용이나 조치를 한 줄이라도 적어야 미리보거나 내려받을 수 있습니다."
+            : null
+        }
+        // 🔴 저장하지 않고 「보고서」 탭으로. 고친 것이 있으면 아래 창이 먼저 묻는다.
+        onCancel={handleLeave}
+        onSave={() => void handleSave()}
+        onPreview={() => void handlePreview()}
+        onDownload={() => void handleDownload()}
+        onDelete={openDelete}
+      />
 
       <ServiceReportSection
         title="보고서 종류"
@@ -1118,33 +1030,6 @@ export default function ServiceReportForm({
         disabled={disabled}
       />
 
-      <ServiceReportActions
-        mode={mode}
-        canEdit={canEdit}
-        canDelete={canDelete}
-        isSaving={isSaving}
-        isDownloading={isSubmitting}
-        isPreviewing={isPreviewing}
-        canSave={canSave}
-        canDownload={canDownload}
-        // 🔴 **저장된 장**의 인쇄 화면이다(DB 에 저장된 값을 그린다). 주소는 지금
-        //    보고 있는 화면(`usePathname`)이 아니라 「보고서」 탭에서 만든다. 두
-        //    화면은 형제라 같은 부모에서 갈라져 나오고, 그래야 질의문자열이 붙은
-        //    주소에서도 자리가 흔들리지 않는다.
-        savedPrintHref={saved === null ? null : `${reportHref}/service-report/print?id=${saved.id}`}
-        // 🔴 내려받기와 **전체 미리보기**를 함께 막는 조건이다 — 저장은 적다 만
-        //    보고서도 받는다. 반쪽짜리 문서를 보여 주면 사람이 그것을 결과물로 믿는다.
-        hint={
-          bodyEmpty && !blocked
-            ? "확인내용이나 조치를 한 줄이라도 적어야 미리보거나 내려받을 수 있습니다."
-            : null
-        }
-        onSave={() => void handleSave()}
-        onPreview={() => void handlePreview()}
-        onDownload={() => void handleDownload()}
-        onDelete={openDelete}
-      />
-
       {/* 🔴 저장하지 않은 값으로 그린 문서 한 장(2026-10-19). 창이 하는 일은
           **보여 주기만** 이다 — 여기서 DB 로 가는 길은 없다. */}
       {previewDocument !== null && (
@@ -1155,6 +1040,17 @@ export default function ServiceReportForm({
           onClose={() => setPreviewDocument(null)}
         />
       )}
+
+      {/* 🔴 [취소] · 머리의 [보고서 탭으로] 확인 창 (2026-10-19).
+
+          **고친 것이 있을 때만** 뜬다(`dirty`). 여기서 [돌아가서 계속 적기]를 누르면
+          창만 닫힌다 — `setLeaveConfirmOpen(false)` 하나뿐이라 **적던 글은 한 글자도
+          건드리지 않는다.** 같은 날 임시보관을 걷어내서, 한 번 나가면 돌아올 길이 없다. */}
+      <ServiceReportLeaveConfirmDialog
+        isOpen={leaveConfirmOpen}
+        onConfirm={leaveWithoutSaving}
+        onCancel={() => setLeaveConfirmOpen(false)}
+      />
 
       {/* 🔴 지우기 확인 — 고객사·제품 모델·견적서가 쓰는 그 창이다. 견적서와 같은
           이유로 **보관 문구를 우리 것으로 넘긴다**: 보고서에는 자동 만료도 영구

@@ -259,11 +259,10 @@ export default async function ServiceReportPage({
       //    다시 있다(`server/actions/service-reports.ts`).
       canEdit={canEditServiceReports(level)}
       canDelete={canDeleteServiceReports(level)}
-      // 🔴 임시보관 열쇠에 쓸 **id 하나만** 넘긴다. 사무실 공용 PC 를 여럿이
-      //    나눠 쓰므로 사람마다 갈라 적어야 하는데, 그러자고 이름·역할·이메일까지
-      //    클라이언트로 내려보낼 이유는 없다(위 '오류 메시지에 경로를 담지
-      //    않는다'와 같은 판단 — 필요 없는 것은 안 보낸다).
-      actingUserId={actingUser.id}
+      // ⚠️ 2026-10-19 에 `actingUserId` 를 떼었다. 브라우저 임시보관 열쇠에 사람을
+      //    가르려고 넘기던 것인데, 그 임시보관이 통째로 없어졌다
+      //    (`domain/service-report-draft.ts` 머리말). 화면이 안 쓰는 것을
+      //    클라이언트로 내려보내지 않는다.
       intakeNumber={resolved.intakeNumber}
       reportHref={repairCaseDetailHrefs(resolved.id).report}
       initialValues={initialValues}

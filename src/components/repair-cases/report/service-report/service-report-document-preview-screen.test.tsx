@@ -41,6 +41,7 @@ const ACTIONS = {
   canSave: true,
   canDownload: true,
   hint: null,
+  onCancel: () => {},
   onSave: () => {},
   onPreview: () => {},
   onDownload: () => {},
