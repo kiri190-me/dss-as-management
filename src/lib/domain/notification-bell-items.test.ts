@@ -84,7 +84,7 @@ function oneOfEachKind(): NotificationItem[] {
   ];
 }
 
-test("한 줄을 아홉 칸으로 옮긴다 — 값도 칸 이름도 묶음이 기다리는 그대로다", () => {
+test("한 줄을 열 칸으로 옮긴다 — 값도 칸 이름도 묶음이 기다리는 그대로다", () => {
   const item = buildApprovalNotification({
     repairCaseId: "case-1",
     intakeNumber: "D9705-012",
@@ -99,6 +99,7 @@ test("한 줄을 아홉 칸으로 옮긴다 — 값도 칸 이름도 묶음이 �
       id: item.id,
       kind: item.kind,
       kindLabel: NOTIFICATION_KIND_META[item.kind].label,
+      tone: NOTIFICATION_KIND_META[item.kind].toneIndex,
       subject: item.subject,
       detail: item.detail,
       href: item.href,
@@ -127,6 +128,11 @@ test("🔴 모든 종류를 옮긴다 — 종류가 늘어도 이 파일은 고�
       row.kindLabel,
       NOTIFICATION_KIND_META[item.kind].label,
       `${item.kind}: 사람이 읽는 이름이 도메인 표와 다르다`
+    );
+    assert.equal(
+      row.tone,
+      NOTIFICATION_KIND_META[item.kind].toneIndex,
+      `${item.kind}: 색 칸 번호가 도메인 표와 다르다 — 묶음이 해시로 아무 칸이나 집는다`
     );
     assert.equal(row.subject, item.subject);
     assert.equal(row.detail, item.detail);
@@ -158,10 +164,15 @@ test("🔴 없는 값은 `undefined` 가 아니라 **빈 문자열**이다 — �
   }
 });
 
-test("🔴 칸은 아홉 개다 — targetKey 를 실어 보내지 않는다", () => {
+test("🔴 칸은 열 개다 — targetKey 를 실어 보내지 않는다", () => {
   // 실어 보내면 묶음이 그것으로 개수를 다시 셀 길이 열린다. 세는 규칙은 A/S
   // 안쪽 것이고(같은 대상은 한 번만), 두 곳이 세면 종과 배지가 다른 숫자를
   // 말하게 된다 — 개수는 옮겨 담기 **전** 원본에서 세어 따로 넘긴다(아래).
+  //
+  // 🔴 2026-10-19 에 `tone`(색 칸 번호) 하나가 늘어 아홉에서 열이 됐다. 늘어난
+  //    것이 **그 하나뿐**이라는 것이 이 목록의 뜻이다 — 묶음 타입에 없는 칸이
+  //    섞이면 받는 쪽이 조용히 버리고, targetKey 같은 것이 섞이면 위의 사고가
+  //    열린다.
   for (const row of toNotificationBellItems(oneOfEachKind())) {
     assert.deepEqual(Object.keys(row).sort(), [
       "detail",
@@ -173,6 +184,7 @@ test("🔴 칸은 아홉 개다 — targetKey 를 실어 보내지 않는다", (
       "sourceId",
       "sourceName",
       "subject",
+      "tone",
     ]);
     assert.equal("targetKey" in row, false, "묶음 타입에 없는 칸을 실어 보낸다");
   }
@@ -203,13 +215,25 @@ test("🔴 옮겨 담은 뒤로는 「같은 대상은 한 번만」을 셀 수 
   );
 });
 
-test("🔴 종류별 색(Tailwind 클래스)은 넘기지 않는다 — 묶음이 제 색을 고른다", () => {
-  // 그대로 옮겨 오면 색이 **조용히 사라진다**: Tailwind v4 는 node_modules 를
-  // 훑지 않아 묶음에서 건너간 클래스에는 규칙 자체가 없고, 오류도 나지 않는다.
-  const tones = NOTIFICATION_KINDS.map((kind) => NOTIFICATION_KIND_META[kind].toneClassName);
+test("🔴 종류별 색은 **클래스 이름이 아니라 칸 번호**로 넘어간다", () => {
+  // 클래스 이름을 그대로 옮기면 색이 **조용히 사라진다**: Tailwind v4 는
+  // node_modules 를 훑지 않아 묶음에서 건너간 클래스에는 규칙 자체가 없고,
+  // 오류도 나지 않는다. 그래서 그 글자는 한 조각도 건너가면 안 된다.
+  //
+  // 🔴 2026-10-19 부터 색을 아예 안 넘기는 것은 아니다 — **숫자 하나**를 넘긴다.
+  //    묶음의 CSS 가 제 변수로 그 칸을 칠하므로 Tailwind 와 상관이 없다. 이
+  //    시험의 뜻은 「색을 안 보낸다」가 아니라 **「Tailwind 클래스를 안 보낸다」**다.
   const rendered = JSON.stringify(toNotificationBellItems(oneOfEachKind()));
-  for (const tone of tones) {
-    assert.equal(rendered.includes(tone), false, `${tone} 이 묶음으로 건너간다`);
+
+  for (const kind of NOTIFICATION_KINDS) {
+    const { toneClassName, toneIndex } = NOTIFICATION_KIND_META[kind];
+    assert.equal(rendered.includes(toneClassName), false, `${toneClassName} 이 묶음으로 건너간다`);
+    // 클래스 한 조각(색 이름 + 진하기)만 건너가도 같은 사고다.
+    for (const piece of toneClassName.split(" ")) {
+      assert.equal(rendered.includes(piece), false, `${piece} 이 묶음으로 건너간다`);
+    }
+    // 그 자리에 실제로 가는 것 — 칸 번호다.
+    assert.equal(typeof toneIndex, "number", `${kind}: 칸 번호가 숫자가 아니다`);
   }
 });
 

@@ -200,16 +200,30 @@ test("🔴 받은 차례 그대로 그린다", () => {
 
 // ─────────────────────────────────────────────── 종류를 눈으로 구분한다
 
-test("🔴 종류마다 다른 색 칸에 앉는다", () => {
-  // 색은 더 이상 이 저장소의 Tailwind 클래스가 아니다 — 묶음이 종류 코드를
-  // 해시해 제 색 칸(data-tone)을 고른다. 그대로 옮겨 왔다면 색이 **조용히**
-  // 사라졌을 자리라(Tailwind v4 는 node_modules 를 훑지 않는다), 「갈라 보인다」는
-  // 성질만 여기서 지킨다.
-  const html = renderToStaticMarkup(<NotificationBell items={oneOfEachKind()} />);
+test("🔴 종류마다 **도메인 표가 지정한** 색 칸에 앉는다 — 해시가 고른 칸이 아니다", () => {
+  // 색은 이 저장소의 Tailwind 클래스로 건너가지 않는다 — 그랬다면 색이 **조용히**
+  // 사라졌을 자리다(Tailwind v4 는 node_modules 를 훑지 않는다). 건너가는 것은
+  // 칸 번호 하나이고, 묶음의 CSS 가 그 번호로 색을 칠한다.
+  //
+  // 🔴 2026-10-19 전까지는 그 번호를 **묶음이 종류 이름을 해시해** 집었다. 셈은
+  //    「종류마다 다른 색」만 지키고 뜻은 지키지 못해서 「재고 부족」이 초록으로,
+  //    「승인 완료」가 분홍으로, 「반려됨」이 청록으로 나왔다. 이제 A/S 가 고른
+  //    칸을 실어 보내는데, **실어 보낸 값이 정말 쓰이는가**가 여기서 볼 것이다.
+  const kinds = oneOfEachKind();
+  const html = renderToStaticMarkup(<NotificationBell items={kinds} />);
 
-  const tones = [...html.matchAll(/class="dss-bell__kind" data-tone="(\d+)"/g)].map((match) => match[1]);
+  const tones = [...html.matchAll(/class="dss-bell__kind" data-tone="(\d+)"/g)].map((match) =>
+    Number(match[1])
+  );
   assert.equal(tones.length, NOTIFICATION_KINDS.length, "종류마다 색 칸이 하나씩 붙지 않았다");
   assert.equal(new Set(tones).size, tones.length, "두 종류가 같은 색이면 갈라 보이지 않는다");
+
+  // 그려진 차례는 받은 차례 그대로다(위 시험) — 그래서 줄마다 짝지어 볼 수 있다.
+  assert.deepEqual(
+    tones,
+    kinds.map((item) => NOTIFICATION_KIND_META[item.kind].toneIndex),
+    "도메인 표가 지정한 칸이 아니라 다른 칸에 앉았다 — 묶음이 해시로 집고 있다"
+  );
 });
 
 test("🔴 색만으로 구분하지 않는다 — 종류 이름이 글자로도 보인다", () => {

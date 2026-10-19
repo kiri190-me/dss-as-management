@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
+import { NOTIFICATION_TONE_COUNT, notificationToneIndex } from "@dss/ui";
 import {
   NOTIFICATION_KIND_META,
   NO_NOTIFICATION_SETTINGS,
@@ -19,6 +21,7 @@ import {
   APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS,
   NOTIFICATION_KINDS,
   REPAIR_CASE_DUE_DATE_NOTIFICATION_WINDOW_DAYS,
+  type NotificationKind,
 } from "./notifications";
 import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
 import { ROLE_CODES, type Role } from "./types";
@@ -122,6 +125,147 @@ test("🔴 색은 밝은 화면과 어두운 화면 두 벌이고, 조립하지 
   }
 });
 
+/* ── 🔴 색 이름(Tailwind)과 칸 번호(@dss/ui)가 **같은 색**인가 ─────────────
+ *
+ * 한 종류의 색이 두 곳에 적혀 있다. toneClassName 은 이 저장소의 Tailwind 가,
+ * toneIndex 는 묶음 종의 CSS 가 색으로 바꾼다. 한쪽만 고치면 같은 종류가 자리에
+ * 따라 다른 색이 되고 **아무 오류도 나지 않는다** — 2026-10-19 전까지 실제로
+ * 그랬다(표에 red 라고 적힌 「재고 부족」이 화면에서는 초록이었다. 그때는 칸을
+ * 넘기지 못해 묶음이 종류 이름을 해시해 집었다).
+ *
+ * 그래서 「칸 번호 → 색 이름」 표를 여기 손으로 적지 않고 **두 파일을 읽어**
+ * 맞댄다:
+ *   · vendor/dss-ui/src/notification-bell/notification-bell.css — 칸마다의 색
+ *   · node_modules/tailwindcss/theme.css                        — 이름마다의 색
+ * 묶음 CSS 가 Tailwind v4 값을 글자 그대로 베껴 두어서(그쪽 머리말) 두 파일의
+ * oklch 글자꼴이 같고, 글자 비교만으로 맞댈 수 있다.
+ *
+ * 🔴 묶음은 **다른 저장소**(서브모듈)다. 그래도 베껴 적지 않고 읽는 쪽을 고른
+ *    까닭은, 손으로 옮긴 표가 곧 또 하나의 「한쪽만 고쳐지는 자리」가 되기
+ *    때문이다. 파일이 없으면 이 시험은 읽기에서 죽는데, 그때는 앱도 서지
+ *    않으므로(소스가 @dss/ui 를 부른다) 조용한 실패가 아니다.
+ */
+
+/** 저장소 뿌리에서 센 경로로 파일을 읽는다. */
+const repoFile = (relativePath: string) =>
+  readFileSync(new URL(`../../../${relativePath}`, import.meta.url), "utf8");
+
+/** 묶음 종의 스타일시트. 🔴 주석 안에도 `.dss-bell {` 가 있어 먼저 걷어낸다. */
+const BELL_CSS = repoFile("vendor/dss-ui/src/notification-bell/notification-bell.css").replace(
+  /\/\*[\s\S]*?\*\//g,
+  ""
+);
+
+/**
+ * 선택자로 시작하는 한 블록 안의 `--dss-bell-tone-N` 들. 이 스타일시트에는
+ * 중첩 블록이 없어 다음 `}` 까지가 곧 한 블록이다.
+ *
+ * 라이트·다크 두 블록만 본다. 나머지 둘(system 다크 · 라이트 고정)이 이 둘과
+ * 같은 값이라는 것은 묶음 제 시험(notification-bell.css.test.ts)이 본다.
+ */
+function toneSlots(selector: string): Map<number, string> {
+  const start = BELL_CSS.indexOf(selector);
+  assert.ok(start >= 0, `묶음 CSS 에서 ${selector} 블록을 못 찾았다`);
+  const block = BELL_CSS.slice(start, BELL_CSS.indexOf("}", start));
+  const slots = new Map<number, string>();
+  for (const [, index, value] of block.matchAll(/--dss-bell-tone-(\d+)\s*:\s*([^;]+);/g)) {
+    slots.set(Number(index), value.trim());
+  }
+  return slots;
+}
+
+/** Tailwind 가 내놓는 색표 — `amber-700` → `oklch(…)`. */
+function tailwindColors(): Map<string, string> {
+  const colors = new Map<string, string>();
+  for (const [, name, value] of repoFile("node_modules/tailwindcss/theme.css").matchAll(
+    /--color-([a-z]+-\d{2,3})\s*:\s*([^;]+);/g
+  )) {
+    colors.set(name, value.trim());
+  }
+  return colors;
+}
+
+test("🔴 toneClassName 의 색과 toneIndex 가 가리키는 칸의 색이 같다 — 두 파일을 읽어 맞댄다", () => {
+  const light = toneSlots(".dss-bell {");
+  const dark = toneSlots(".dark .dss-bell,");
+  const colors = tailwindColors();
+
+  // 읽기가 빗나가면 아래 단언이 통째로 공짜가 된다.
+  assert.equal(light.size, NOTIFICATION_TONE_COUNT, "묶음 CSS 의 라이트 칸 수를 잘못 읽었다");
+  assert.equal(dark.size, NOTIFICATION_TONE_COUNT, "묶음 CSS 의 다크 칸 수를 잘못 읽었다");
+  assert.ok(colors.size > 100, `Tailwind 색표를 못 읽었다(${colors.size}개)`);
+
+  for (const kind of NOTIFICATION_KINDS) {
+    const { toneClassName, toneIndex } = NOTIFICATION_KIND_META[kind];
+    const parsed = /^text-([a-z]+-\d{2,3}) dark:text-([a-z]+-\d{2,3})$/.exec(toneClassName);
+    assert.ok(parsed, `${kind}: 색 클래스 모양이 다르다 — ${toneClassName}`);
+
+    const wantLight = colors.get(parsed[1]);
+    const wantDark = colors.get(parsed[2]);
+    assert.ok(wantLight, `${kind}: Tailwind 에 ${parsed[1]} 색이 없다`);
+    assert.ok(wantDark, `${kind}: Tailwind 에 ${parsed[2]} 색이 없다`);
+
+    // 🔴 밝은 화면과 어두운 화면을 **둘 다** 맞춘다. 한쪽만 보면 라이트는 맞는데
+    //    다크에서만 다른 색이 되는 칸을 지나친다.
+    const matching = [...light.keys()]
+      .filter((slot) => light.get(slot) === wantLight && dark.get(slot) === wantDark)
+      .sort((a, b) => a - b);
+
+    assert.deepEqual(
+      matching,
+      [toneIndex],
+      `${kind}: ${toneClassName} 는 묶음의 칸 [${matching.join(", ")}] 인데 toneIndex 는 ${toneIndex} 다`
+    );
+  }
+});
+
+test("🔴 여덟 종류가 **지정한** 칸에 앉는다 — 2026-10-19 사용자 결정", () => {
+  // 일부러 표를 그대로 읽지 않고 손으로 다시 적는다 — NOTIFICATION_KIND_META 를
+  // 읽어 비교하면 무엇을 고쳐도 늘 통과하는 시험이 된다.
+  // satisfies 가 빠진 종류와 없는 종류를 둘 다 잡는다.
+  const 지정 = {
+    REPAIR_CASE_DUE_DATE_NEAR: 0, // 빨강 — 급한 경고
+    PART_STOCK_BELOW_MINIMUM: 14, // 호박 — 급한 경고
+    APPROVAL_GRANTED: 12, // 초록 — 결과(됐다)
+    APPROVAL_REJECTED: 9, // 장미 — 결과(안 됐다)
+    REPAIR_CASE_APPROVAL: 15, // 파랑 — 내가 할 일
+    PART_REQUEST_PENDING: 8, // 하늘 — 내가 할 일
+    PART_ISSUE_APPROVAL_PENDING: 6, // 남보라 — 내가 할 일
+    QUOTE_APPROVAL_PENDING: 13, // 보라 — 내가 할 일
+  } satisfies Record<NotificationKind, number>;
+
+  for (const kind of NOTIFICATION_KINDS) {
+    assert.equal(NOTIFICATION_KIND_META[kind].toneIndex, 지정[kind], `${kind} 의 색 칸이 달라졌다`);
+  }
+});
+
+test("🔴 칸 번호는 서로 다르고, 묶음이 아는 범위 안이다", () => {
+  const indexes = NOTIFICATION_KINDS.map((kind) => NOTIFICATION_KIND_META[kind].toneIndex);
+  assert.equal(new Set(indexes).size, indexes.length, `칸이 겹친다: ${indexes.join(" / ")}`);
+
+  for (const kind of NOTIFICATION_KINDS) {
+    const tone = NOTIFICATION_KIND_META[kind].toneIndex;
+    assert.ok(
+      Number.isInteger(tone) && tone >= 0 && tone < NOTIFICATION_TONE_COUNT,
+      `${kind}: ${tone} 은 묶음의 칸(0 … ${NOTIFICATION_TONE_COUNT - 1}) 밖이다 — 묶음이 해시로 떨어뜨려 뜻이 사라진다`
+    );
+  }
+});
+
+test("🔴 지정한 칸이 해시가 고르던 칸과 다르다 — 안 넘기면 뜻이 뒤집히던 셋", () => {
+  // 넘기기 전에 화면에 실제로 나오던 색이다: 「재고 부족」이 초록(12),
+  // 「승인 완료」가 분홍(2), 「반려됨」이 청록(1). 경고가 「괜찮다」로 읽히고
+  // 좋고 나쁨이 뒤집혔다. 셋 중 하나라도 해시와 같아지면 이 조각이 무엇을
+  // 고쳤는지 알 수 없게 되므로 여기서 못 박는다.
+  for (const kind of ["PART_STOCK_BELOW_MINIMUM", "APPROVAL_GRANTED", "APPROVAL_REJECTED"] as const) {
+    assert.notEqual(
+      NOTIFICATION_KIND_META[kind].toneIndex,
+      notificationToneIndex(kind),
+      `${kind}: 지정한 칸이 해시와 같다`
+    );
+  }
+});
+
 test("isNotificationKind는 등록된 종류만 통과시킨다", () => {
   for (const kind of NOTIFICATION_KINDS) {
     assert.equal(isNotificationKind(kind), true, kind);
@@ -193,12 +337,20 @@ test("견적서 결재 대기는 다른 두 결재 대기와 이름·색이 갈�
   assert.equal(quote.label, "견적서 결재 대기");
   assert.notEqual(quote.label, NOTIFICATION_KIND_META.REPAIR_CASE_APPROVAL.label);
   assert.notEqual(quote.label, NOTIFICATION_KIND_META.PART_ISSUE_APPROVAL_PENDING.label);
-  // 색상 이름까지 달라야 한다(전체 유일성은 위 시험이 본다). 여기서는 기존 일곱 색
-  // 어느 것도 다시 쓰지 않는다는 것만 못 박는다.
+  // 색상 이름까지 달라야 한다(전체 유일성은 위 시험이 본다). 여기서는 **다른
+  // 일곱 종류 어느 것의 색도 다시 쓰지 않는다**는 것만 못 박는다.
+  //
+  // 🔴 예전에는 그때 쓰이던 일곱 색을 손으로 적어 두었다. 2026-10-19 에 색을
+  //    뜻으로 다시 배정하자 그 목록이 낡아 **멀쩡한 배정을 틀렸다고 말했다**
+  //    (violet 은 그때 불출 승인 대기 것이었지만 지금은 아니다). 지금 표에서
+  //    뽑아 비교하면 낡지 않는다 — 막으려던 사고(색을 나눠 쓴다)는 그대로 막힌다.
   const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
-  const existing = ["amber", "sky", "red", "emerald", "violet", "lime", "pink"];
+  const others = NOTIFICATION_KINDS.filter((kind) => kind !== "QUOTE_APPROVAL_PENDING").map((kind) =>
+    hueOf(NOTIFICATION_KIND_META[kind].toneClassName)
+  );
   const quoteHue = hueOf(quote.toneClassName);
-  assert.ok(quoteHue && !existing.includes(quoteHue), `견적서 결재 대기가 기존 색(${quoteHue})을 쓴다`);
+  assert.ok(quoteHue, quote.toneClassName);
+  assert.ok(!others.includes(quoteHue), `견적서 결재 대기가 남의 색(${quoteHue})을 쓴다`);
 });
 
 test("견적서 결재 대기의 설명은 누가 받는지와 절차가 없을 때를 함께 적는다", () => {
@@ -221,7 +373,7 @@ test("🔴 납기 임박의 기본값은 켜짐·다섯 역할 전부 받음이�
   }
 });
 
-test("납기 임박의 이름·설명·색 — 창의 날짜 수는 상수에서 오고, 색은 기존 일곱과 갈라진다", () => {
+test("납기 임박의 이름·설명·색 — 창의 날짜 수는 상수에서 오고, 색은 남은 일곱과 갈라진다", () => {
   const meta = NOTIFICATION_KIND_META.REPAIR_CASE_DUE_DATE_NEAR;
   assert.equal(meta.label, "납기 임박");
   // 관리자가 이 설명만 읽고 무엇을 끄는지 알아야 한다 — 며칠 창인가, 날짜가
@@ -233,14 +385,18 @@ test("납기 임박의 이름·설명·색 — 창의 날짜 수는 상수에서
   assert.ok(meta.description.includes("내자"), meta.description);
   assert.ok(meta.description.includes("뜨지 않습니다"), meta.description);
 
-  // 색상 이름까지 달라야 한다(전체 유일성은 위 시험이 본다). 여기서는 기존
-  // 일곱 색 어느 것도 다시 쓰지 않는다는 것만 못 박는다.
+  // 색상 이름까지 달라야 한다(전체 유일성은 위 시험이 본다). 여기서는 **다른
+  // 일곱 종류 어느 것의 색도 다시 쓰지 않는다**는 것만 못 박는다(위 견적서
+  // 시험의 그 자리 주석 — 손으로 적은 목록은 낡는다).
   const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
-  const existing = ["amber", "sky", "red", "violet", "fuchsia", "lime", "pink"];
+  const others = NOTIFICATION_KINDS.filter((kind) => kind !== "REPAIR_CASE_DUE_DATE_NEAR").map(
+    (kind) => hueOf(NOTIFICATION_KIND_META[kind].toneClassName)
+  );
   const hue = hueOf(meta.toneClassName);
-  assert.ok(hue && !existing.includes(hue), `납기 임박이 기존 색(${hue})을 쓴다`);
-  // 🔴 초록(green·emerald)은 고르지 않는다 — 「됐다」로 읽혀 경보가 「괜찮다」로
-  // 보인다. 승인 완료에 lime 을 준 바로 그 이유의 반대편이다(META 머리말).
+  assert.ok(hue, meta.toneClassName);
+  assert.ok(!others.includes(hue), `납기 임박이 남의 색(${hue})을 쓴다`);
+  // 🔴 초록(green·emerald·lime)은 고르지 않는다 — 「됐다」로 읽혀 경보가
+  // 「괜찮다」로 보인다. 승인 완료에 초록을 준 바로 그 이유의 반대편이다.
   assert.ok(hue !== "green" && hue !== "emerald" && hue !== "lime", `납기 임박이 초록(${hue})이다`);
 });
 
@@ -268,15 +424,29 @@ test("승인 완료·반려됨의 이름과 설명 — 사람이 읽는 말로, 
   }
 });
 
-test("🔴 승인 완료·반려됨의 색은 기존 다섯 색과도, 서로도 갈라진다", () => {
+test("🔴 승인 완료·반려됨의 색은 남은 여섯 색과도, 서로도 갈라진다", () => {
+  // 손으로 적은 목록은 낡는다(위 견적서 시험의 그 자리 주석) — 지금 표에서 뽑는다.
   const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
-  const existing = ["amber", "sky", "red", "emerald", "violet"];
+  const 결과둘: readonly string[] = ["APPROVAL_GRANTED", "APPROVAL_REJECTED"];
+  const others = NOTIFICATION_KINDS.filter((kind) => !결과둘.includes(kind)).map((kind) =>
+    hueOf(NOTIFICATION_KIND_META[kind].toneClassName)
+  );
   const grantedHue = hueOf(NOTIFICATION_KIND_META.APPROVAL_GRANTED.toneClassName);
   const rejectedHue = hueOf(NOTIFICATION_KIND_META.APPROVAL_REJECTED.toneClassName);
   assert.ok(grantedHue && rejectedHue);
-  assert.ok(!existing.includes(grantedHue), `승인 완료가 기존 색(${grantedHue})을 쓴다`);
-  assert.ok(!existing.includes(rejectedHue), `반려됨이 기존 색(${rejectedHue})을 쓴다`);
+  assert.ok(!others.includes(grantedHue), `승인 완료가 남의 색(${grantedHue})을 쓴다`);
+  assert.ok(!others.includes(rejectedHue), `반려됨이 남의 색(${rejectedHue})을 쓴다`);
   assert.notEqual(grantedHue, rejectedHue);
+  // 🔴 좋고 나쁨이 색으로 갈려야 한다 — 「승인 완료가 분홍 · 반려됨이 청록」이
+  //    실제로 나왔던 자리다(그때는 묶음이 해시로 색을 골랐다).
+  assert.ok(
+    ["green", "emerald", "lime", "teal"].includes(grantedHue),
+    `승인 완료가 초록 쪽이 아니다(${grantedHue}) — 「됐다」로 읽히지 않는다`
+  );
+  assert.ok(
+    ["rose", "red", "pink", "orange"].includes(rejectedHue),
+    `반려됨이 붉은 쪽이 아니다(${rejectedHue}) — 「안 됐다」로 읽히지 않는다`
+  );
 });
 
 test("부품 요청 대기의 기본값은 명단을 옮겨 적지 않고 저쪽 함수를 부른 결과다", () => {

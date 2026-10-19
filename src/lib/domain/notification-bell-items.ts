@@ -23,12 +23,23 @@ import type { NotificationItem } from "./notifications";
  * 담기 전 원본**에서 countNotificationTargets 로 세어 따로 넘긴다
  * (components/layout/NotificationBell.tsx).
  *
- * ── 🔴 색을 옮기지 않는다 ────────────────────────────────────────────────
+ * ── 🔴 색 **클래스**는 옮기지 않는다. 대신 **칸 번호**를 넘긴다 ──────────
  * NOTIFICATION_KIND_META 에는 toneClassName 이 함께 있지만 그것은 Tailwind 클래스
  * 이름이라 묶음으로 건너가면 **조용히 사라진다**(Tailwind v4 는 node_modules 를
- * 훑지 않아 규칙 자체가 만들어지지 않고, 오류도 나지 않는다). 묶음은 종류 코드를
- * 해시해 제 색 칸을 고른다(@dss/ui 의 tone.ts). 여기서 넘기는 것은 **사람이 읽는
- * 이름**뿐이고, 그 이름은 색과 함께 **글자로도** 그려진다(색약·흑백 인쇄).
+ * 훑지 않아 규칙 자체가 만들어지지 않고, 오류도 나지 않는다). 그 값은 지금도
+ * 건너가지 않는다 — notification-bell-items.test.ts 가 글자 단위로 막는다.
+ *
+ * 묶음에 건너가는 것은 **숫자 하나**(toneIndex)다. 묶음의 CSS 가 제 변수로 그
+ * 칸의 색을 칠하므로 Tailwind 와 아무 상관이 없고, 사라질 클래스도 없다.
+ *
+ * 🔴 **왜 번호를 넘기게 됐나**: 안 넘기면 묶음이 종류 코드를 해시해 열여섯 칸
+ * 중 하나를 집는데(@dss/ui 의 tone.ts), 그 셈은 「종류마다 다른 색」만 지키고
+ * 뜻은 지키지 못한다 — 실제로 「재고 부족」이 초록, 「승인 완료」가 분홍,
+ * 「반려됨」이 청록으로 나왔다. 어느 종류가 경고인지 아는 것은 A/S 뿐이라
+ * 이쪽이 고른다(2026-10-19). 종류별 분기는 여전히 없다 — 표 조회 한 줄이다.
+ *
+ * 사람이 읽는 **이름**도 함께 넘어가고, 그 이름은 색과 함께 **글자로도**
+ * 그려진다(색약·흑백 인쇄).
  *
  * ── 시스템 이름을 비워 보내는 이유 ───────────────────────────────────────
  * `sourceId`·`sourceName` 은 「어느 시스템에서 왔는가」다. 지금 이 종에 실리는
@@ -52,6 +63,9 @@ export function toNotificationBellItems(
     kind: item.kind,
     // 종류별 분기가 아니라 표 조회다 — 종류가 늘어도 이 줄은 그대로다.
     kindLabel: NOTIFICATION_KIND_META[item.kind].label,
+    // 🔴 색 칸 번호. 안 실으면 묶음이 해시로 아무 칸이나 집는다(머리말).
+    //    여기도 표 조회라 종류가 늘어도 이 줄은 그대로다.
+    tone: NOTIFICATION_KIND_META[item.kind].toneIndex,
     subject: item.subject,
     detail: item.detail,
     href: item.href,
