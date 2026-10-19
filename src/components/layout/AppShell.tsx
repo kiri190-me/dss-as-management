@@ -72,6 +72,15 @@ type AppShellProps = {
    */
   portalInbox?: Promise<unknown>;
   /**
+   * 지금 로그인한 사람과 **이 로그인의 시각**(세션의 issuedAt). 종이 「지운
+   * 알림」을 이 브라우저 어디에 적을지 가르는 값이고, 이 껍데기는 머리말까지
+   * 지나 보내는 일만 한다(NotificationBell.tsx 의 NotificationDismissalSession).
+   *
+   * 🔴 위 `user` 와 **다른 값이다.** 저것은 머리말에 글자로 그리는 이름·역할
+   * 이고, 이것은 사람을 가르는 id 와 시각이다 — 화면에 그려지지 않는다.
+   */
+  notificationDismissal?: { userId: string; issuedAt: number };
+  /**
    * 머리말 **안에** 앉는 서비스 메뉴바가 그릴 사내 시스템 목록
    * (layout.tsx 가 별도 서명 쿠키를 풀어 넘긴다 —
    * auth/service-menu-cookie.ts). 비어 있으면 목록 자체가 그려지지 않는다.
@@ -103,7 +112,7 @@ function isKeyboardFocus(element: HTMLElement): boolean {
   }
 }
 
-export default function AppShell({ children, user, accessibleAreaKeys, canEnterDeveloperMode, myPendingApprovalCount = 0, notifications = [], portalInbox, portalUrl = null, services = [], currentServiceId = null }: AppShellProps) {
+export default function AppShell({ children, user, accessibleAreaKeys, canEnterDeveloperMode, myPendingApprovalCount = 0, notifications = [], portalInbox, notificationDismissal, portalUrl = null, services = [], currentServiceId = null }: AppShellProps) {
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Whole-sidebar open/narrow mode — owned here (not inside Sidebar)
@@ -165,6 +174,7 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
           portalUrl={portalUrl}
           notifications={notifications}
           portalInbox={portalInbox}
+          notificationDismissal={notificationDismissal}
           serviceMenu={
             /*
               사내 시스템 오가기 목록(@dss/ui). 머리말 **안**에 제목과 알림종

@@ -145,6 +145,15 @@ export default async function AppLayout({
         myPendingApprovalCount={myPendingApprovalCount}
         notifications={notifications}
         portalInbox={portalInbox}
+        // 종에서 알림을 **지웠다**를 이 브라우저 어디에 적을지 가르는 값.
+        // 🔴 서버도 DB 도 건드리지 않는 기능이지만, 두 값은 **서버만 알 수
+        //    있다** — 세션 쿠키는 httpOnly 라 화면이 풀 수 없다.
+        //
+        // 🔴 `session.issuedAt` 은 **이 세션이 만들어진 때**(= 로그인 시각)다.
+        //    다시 로그인하면 값이 달라져 지운 기록이 저절로 비워진다 — 그것이
+        //    「로그아웃할 때까지만 숨긴다」를 지키는 장치다. users 의
+        //    sessions_valid_from 은 **다른 값**이다(강제로 끊는 기준선).
+        notificationDismissal={{ userId: user.id, issuedAt: session.issuedAt }}
         portalUrl={portalUrl}
         services={serviceMenu}
         currentServiceId={currentServiceId}

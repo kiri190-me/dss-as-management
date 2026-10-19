@@ -7,10 +7,13 @@ import NotificationBell, {
   BrowserNotificationNotice,
   NotificationBellFooter,
   NotificationBellWithInbox,
+  NotificationDismissAll,
   NotificationSelfTest,
   acknowledgeInBackground,
   announceNotificationPanelOpened,
   handleNotificationPicked,
+  handlePortalRowPicked,
+  selectVisibleNotifications,
   type AcknowledgeNotification,
 } from "./NotificationBell";
 import {
@@ -28,6 +31,7 @@ import {
 import { toNotificationBellItems } from "@/lib/domain/notification-bell-items";
 import { NOTIFICATION_KIND_META } from "@/lib/domain/notification-settings";
 import { isAcknowledgeableNotificationKind } from "@/lib/domain/notification-acknowledgement";
+import { canDismissNotification } from "@/lib/domain/notification-dismissal";
 import {
   NOTIFICATION_PANEL_OPENED_EVENT,
   describeNotificationToastFailure,
@@ -845,4 +849,242 @@ test("🔴 종은 포털 목록을 값으로도, 약속으로도 **다시 묻지
   // 포털 주소를 종이 알아서는 안 된다 — 부르는 자리는 서버 하나뿐이다.
   assert.ok(!source.includes("/api/integration/"), "종이 포털을 직접 부른다");
   assert.ok(!source.includes("fetch("), "종이 직접 망을 탄다");
+});
+
+// ───────────────────────── 종에서 알림 **지우기**(이 브라우저에만, 이번 로그인만)
+
+/**
+ * 🔴 확인 기록(서버 DB · 영구)과 **다른 것**이다. 여기가 지키는 선:
+ *  1. 로그인 정보를 안 넘기면 **예전 종 그대로**다(적을 곳을 모르는 채 단추만
+ *     서면 눌러도 아무 일이 없다).
+ *  2. 단추는 **지울 수 있는 줄에만** 선다 — 할 일 알림에는 없다.
+ *  3. 포털 줄은 **누르는 것만으로도** 지워지고, 그 길은 DB 로 가지 않는다.
+ *  4. 지운 줄은 목록에서도 **배지에서도** 빠진다.
+ */
+
+/** 서버가 내려주는 값 — 지금 로그인한 사람과 이 로그인의 시각. */
+function 세션(issuedAt = 1_700_000_000) {
+  return { userId: "11111111-2222-3333-4444-555555555555", issuedAt };
+}
+
+/** 지우기 단추들의 열쇠를 차례대로. 줄의 링크가 가진 같은 이름의 칸과 섞이지 않는다. */
+function 지우기열쇠들(html: string): string[] {
+  return [
+    ...html.matchAll(/<button[^>]*class="dss-bell__dismiss"[^>]*data-notification-key="([^"]*)"/g),
+  ].map((m) => m[1]);
+}
+
+test("🔴 로그인 정보를 안 넘기면 지우기가 아예 없다 — 예전 종과 한 글자도 다르지 않다", () => {
+  // 적을 곳(사람 · 로그인 시각)은 서버만 안다. 못 받았으면 단추를 그리지
+  // 않는다 — 눌러도 아무 일이 없는 단추가 줄마다 서는 것이 더 나쁘다.
+  const 예전 = renderToStaticMarkup(<NotificationBell items={oneOfEachKind()} />);
+
+  assert.ok(!예전.includes("dss-bell__dismiss"), "지우기 단추가 그려졌다");
+  assert.ok(!예전.includes("보이는 알림 지우기"), "일괄 지우기가 그려졌다");
+  assert.ok(!예전.includes("<button"), "스크립트 없이 못 쓰는 종이 되었다");
+});
+
+test("🔴 지우기 단추는 **지울 수 있는 줄에만** 선다 — 할 일 알림에는 없다", () => {
+  // 가리지 않으면 처리하지 않은 일을 종에서 치우는 길이 생긴다. 가리는 규칙은
+  // 도메인 한 곳이고(canDismissNotification) 화면은 그것을 묶음에 넘기기만 한다.
+  const mine = oneOfEachKind();
+  const html = renderToStaticMarkup(
+    <NotificationBellWithInbox
+      items={mine}
+      inbox={{ items: [portalRow()], count: 1, degraded: false }}
+      notificationDismissal={세션()}
+    />
+  );
+
+  assert.deepEqual(
+    지우기열쇠들(html),
+    [
+      ...mine.filter((item) => isAcknowledgeableNotificationKind(item.kind)).map((item) => item.id),
+      portalRow().key,
+    ],
+    "단추가 서는 줄이 도메인 판정과 다르다"
+  );
+  // 대조 — 위 목록이 실제로 두 갈래를 다 지났다(못 지우는 줄이 있었다).
+  assert.ok(mine.some((item) => !canDismissNotification({ kind: item.kind, sourceId: "" })));
+});
+
+test("🔴 포털 줄은 **종류를 가리지 않고** 지울 수 있다 — 저쪽 이름을 박아 두지 않았다", () => {
+  for (const kind of NOTIFICATION_KINDS) {
+    // 최악의 경우 — 종류 코드까지 A/S 의 할 일 알림과 같을 때.
+    const html = renderToStaticMarkup(
+      <NotificationBellWithInbox
+        items={[]}
+        inbox={{ items: [portalRow({ kind })], count: 1, degraded: false }}
+        notificationDismissal={세션()}
+      />
+    );
+    assert.deepEqual(지우기열쇠들(html), [portalRow().key], `${kind}: 남의 줄을 못 지운다`);
+  }
+});
+
+test("🔴 일괄 지우기는 footer 맨 위에 서고, **지울 수 있는 줄 수**를 말한다", () => {
+  const html = renderToStaticMarkup(
+    <NotificationBellWithInbox
+      items={oneOfEachKind()}
+      inbox={{ items: [portalRow()], count: 1, degraded: false }}
+      notificationDismissal={세션()}
+    />
+  );
+
+  // 결재 결과 둘 + 포털 한 줄 = 3. 할 일 알림 여섯은 세지 않는다.
+  assert.ok(html.includes("보이는 알림 지우기 3건"), "일괄 지우기가 없거나 수가 다르다");
+
+  // 🔴 묶음이 내주는 자리(footer) **안**이다 — 목록 밖으로 나가면 머리말이 두꺼워진다.
+  const 자리 = html.indexOf("dss-bell__footer");
+  const 단추 = html.indexOf("보이는 알림 지우기");
+  assert.ok(자리 > 0 && 단추 > 자리, "일괄 지우기가 그 자리 밖에 있다");
+  assert.ok(단추 < html.indexOf("</ul>"), "그 자리가 펼친 칸 밖으로 나갔다");
+
+  // 🔴 그 자리의 차례는 A/S 가 정한다 — 목록에 대한 단추가 맨 위, 기기 설정은 아래.
+  const footer = renderToStaticMarkup(
+    <NotificationBellFooter
+      status="GRANTED"
+      onAsk={() => {}}
+      onTest={() => {}}
+      selfTestResult={null}
+      dismissableCount={2}
+      onDismissAll={() => {}}
+    />
+  );
+  assert.ok(footer.indexOf("보이는 알림 지우기") < footer.indexOf("시험 알림"));
+});
+
+test("지울 수 있는 줄이 없으면 일괄 지우기를 그리지 않는다 — 눌러도 아무 일 없는 단추를 안 남긴다", () => {
+  const 할일만 = renderToStaticMarkup(
+    <NotificationBell
+      items={[approval("case-1", "D9705-012", "REPAIR_INSPECTION")]}
+      notificationDismissal={세션()}
+    />
+  );
+  assert.ok(!할일만.includes("보이는 알림 지우기"));
+  assert.deepEqual(지우기열쇠들(할일만), []);
+
+  // 조각 자신도 같은 판단을 한다 — 수가 0이거나 지울 곳을 모르면 아무것도 안 그린다.
+  assert.equal(renderToStaticMarkup(<NotificationDismissAll count={0} onDismissAll={() => {}} />), "");
+  assert.equal(renderToStaticMarkup(<NotificationDismissAll count={3} />), "");
+  assert.ok(
+    renderToStaticMarkup(<NotificationDismissAll count={3} onDismissAll={() => {}} />).includes("3건")
+  );
+});
+
+test("🔴 footer 의 지우기 쪽을 안 넘기면 예전 그대로다 — 이미 있던 호출부가 흔들리지 않는다", () => {
+  const 예전 = renderToStaticMarkup(
+    <NotificationBellFooter status="GRANTED" onAsk={() => {}} onTest={() => {}} selfTestResult={null} />
+  );
+
+  assert.ok(!예전.includes("보이는 알림 지우기"));
+  assert.ok(예전.includes("시험 알림"), "원래 있던 것이 사라졌다");
+});
+
+test("🔴 줄을 누르면 **포털 줄만** 지운 것으로 적는다 — 자기 줄은 그 길로 가지 않는다", () => {
+  // 포털 줄은 A/S 가 「확인했다」를 적을 데가 없어(그 통로가 포털에 없다) 눌러
+  // 본 뒤에도 영영 종에 남던 유일한 줄이었다. 누른 것만으로 눈에서 치운다.
+  for (const kind of NOTIFICATION_KINDS) {
+    const 지운것: string[] = [];
+    handlePortalRowPicked(portalRow({ kind }), { onDismiss: (key) => 지운것.push(key) });
+    assert.deepEqual(지운것, [portalRow().key], `${kind}: 포털 줄을 안 지웠다`);
+  }
+
+  // 🔴 자기 줄은 여기서 끝난다 — 그 줄은 확인 기록(영구)으로 가고 있고, 저장이
+  //    실패하면 되살아나야 한다. 임시 지우기로도 적으면 그대로 숨는다.
+  for (const item of toNotificationBellItems(oneOfEachKind())) {
+    const 지운것: string[] = [];
+    handlePortalRowPicked(item, { onDismiss: (key) => 지운것.push(key) });
+    assert.deepEqual(지운것, [], "자기 줄이 지우기 길로 갔다");
+  }
+
+  // 던져도 새지 않고, 지울 곳이 없으면 조용히 지나간다(이동을 막으면 안 된다).
+  assert.doesNotThrow(() =>
+    handlePortalRowPicked(portalRow(), {
+      onDismiss: () => {
+        throw new Error("저장소가 막혀 있다");
+      },
+    })
+  );
+  assert.doesNotThrow(() => handlePortalRowPicked(portalRow(), {}));
+});
+
+test("🔴 포털 줄을 **DB 확인 기록**에 적는 길은 그대로 막혀 있다 — 브라우저 길과 다르다", () => {
+  // 지우기가 열렸다고 이 가드가 풀려서는 안 된다. 풀리면 남의 시스템 알림
+  // id 로 A/S 의 확인 기록이 쌓인다 — 아무 오류도 없이, 그 줄은 남은 채.
+  const 확인한것: string[] = [];
+  handleNotificationPicked(portalRow(), { onAcknowledge: (picked) => 확인한것.push(picked.id) });
+  assert.deepEqual(확인한것, [], "포털 줄이 DB 길로 들어갔다");
+
+  const source = readLayoutSource("NotificationBell.tsx");
+  assert.match(source, /if \(item\.sourceId\) return;/, "DB 쪽 가드가 사라졌다");
+  // 지우는 규칙은 **도메인 한 곳**에서 가져온다 — 화면이 종류를 보지 않는다.
+  assert.ok(
+    source.includes('from "@/lib/domain/notification-dismissal"'),
+    "가리는 규칙이 화면 안으로 들어왔다"
+  );
+});
+
+test("🔴 지운 줄은 목록에서도 **배지에서도** 빠진다", () => {
+  // 안 빠지면 열어 보면 아무것도 없는데 숫자만 붙어 있는 종이 된다. 지운
+  // 상태는 눌러야 생기므로 정적 렌더로 만들 수 없다 — 값으로 본다.
+  const mine = [approval("case-1", "D9705-012", "REPAIR_INSPECTION"), grantedItem()];
+  const inbox = {
+    items: [portalRow(), portalRow({ key: "njlee:CAL:3", sourceId: "njlee", subject: "NJ-3" })],
+    count: 7, // 🔴 줄은 둘인데 포털이 센 값은 7 이다(세는 규칙이 시스템마다 다르다).
+    degraded: false,
+  };
+
+  const 그대로 = selectVisibleNotifications({
+    items: mine,
+    inbox,
+    acknowledgedIds: new Set(),
+    dismissedKeys: new Set(),
+  });
+  assert.equal(그대로.items.length, 2);
+  assert.equal(그대로.inboxItems.length, 2);
+  assert.equal(그대로.count, 2 + 7, "지우기 전 배지가 예전과 다르다");
+
+  const 지운뒤 = selectVisibleNotifications({
+    items: mine,
+    inbox,
+    acknowledgedIds: new Set(),
+    // 자기 줄 하나(열쇠 = 알림 id)와 포털 줄 하나(열쇠 = client_id:id).
+    dismissedKeys: new Set([grantedItem().id, "njlee:CAL:3"]),
+  });
+  assert.deepEqual(지운뒤.items.map((item) => item.id), [mine[0].id]);
+  assert.deepEqual(지운뒤.inboxItems.map((row) => row.key), [portalRow().key]);
+  assert.equal(지운뒤.count, 1 + 6, "🔴 지운 줄이 배지에 남았다");
+});
+
+test("🔴 배지는 0 아래로 내려가지 않는다 — 포털의 세는 규칙을 우리가 모른다", () => {
+  // 한 대상에 두 줄이 걸려 저쪽이 1로 셌다면 둘을 지울 때 2가 빠진다.
+  const inbox = {
+    items: [portalRow(), portalRow({ key: "x:2" })],
+    count: 1,
+    degraded: false,
+  };
+  const 지운뒤 = selectVisibleNotifications({
+    items: [],
+    inbox,
+    acknowledgedIds: new Set(),
+    dismissedKeys: new Set([portalRow().key, "x:2"]),
+  });
+
+  assert.equal(지운뒤.count, 0, "음수 배지가 나왔다");
+  assert.deepEqual(지운뒤.inboxItems, []);
+});
+
+test("확인 중인 줄과 지운 줄은 **함께** 빠진다 — 서로를 지우지 않는다", () => {
+  const mine = [grantedItem(), rejectedItem()];
+  const 둘다 = selectVisibleNotifications({
+    items: mine,
+    inbox: { items: [portalRow()], count: 1, degraded: false },
+    acknowledgedIds: new Set([grantedItem().id]),
+    dismissedKeys: new Set([rejectedItem().id]),
+  });
+
+  assert.deepEqual(둘다.items, []);
+  assert.equal(둘다.count, 0 + 1, "포털 줄은 그대로 세어져야 한다");
+  assert.equal(둘다.inboxItems.length, 1);
 });

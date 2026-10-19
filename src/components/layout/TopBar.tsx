@@ -40,6 +40,15 @@ type TopBarProps = {
    */
   portalInbox?: Promise<unknown>;
   /**
+   * 지금 로그인한 사람과 **이 로그인의 시각**. 종이 「지운 알림」을 이 브라우저
+   * 어디에 적을지 가르는 값이다(NotificationBell.tsx 의
+   * NotificationDismissalSession). 여기는 지나 보내기만 한다.
+   *
+   * 🔴 없으면 지우기 단추가 아예 그려지지 않는다 — 적을 곳을 모르는 채 단추만
+   * 서면 눌러도 아무 일이 없다.
+   */
+  notificationDismissal?: { userId: string; issuedAt: number };
+  /**
    * 사내 시스템 오가기 목록(@dss/ui 의 ServiceMenuBar). AppShell이 만들어
    * 내려보내고, 이 머리말이 **제목과 알림종 사이**에 그린다.
    *
@@ -150,7 +159,7 @@ type TopBarProps = {
  * `ml-auto` 로 그 줄의 오른쪽 끝에 서야 펼침 패널(폭 min(20rem, 100vw-2rem),
  * 종에 오른쪽 끝을 맞춰 왼쪽으로 펼친다)의 왼쪽이 화면 밖으로 잘리지 않는다.
  */
-export default function TopBar({ title, onMenuClick, user, notifications = [], portalInbox, portalUrl = null, serviceMenu = null }: TopBarProps) {
+export default function TopBar({ title, onMenuClick, user, notifications = [], portalInbox, notificationDismissal, portalUrl = null, serviceMenu = null }: TopBarProps) {
   return (
     // `h-14`가 `min-h-14`로 바뀐 것은 pt 인셋 때문이다: 고정 높이
     // (border-box)에 패딩을 더하면 높이는 그대로인 채 안쪽 내용만 눌린다.
@@ -355,7 +364,7 @@ export default function TopBar({ title, onMenuClick, user, notifications = [], p
           맞춰 왼쪽으로 펼쳐지므로(폭 min(20rem, 100vw-2rem)) 종이 줄 가운데에
           앉으면 패널 왼쪽이 화면 밖으로 잘린다.
         */}
-        <NotificationBell items={notifications} acknowledge={acknowledgeNotificationAction} portalInbox={portalInbox} />
+        <NotificationBell items={notifications} acknowledge={acknowledgeNotificationAction} portalInbox={portalInbox} notificationDismissal={notificationDismissal} />
       </div>
     </header>
   );

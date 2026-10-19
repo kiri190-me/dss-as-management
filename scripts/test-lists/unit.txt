@@ -1102,3 +1102,10 @@ src/lib/api/write-token.test.ts
 # 통로 쪽에도 못 박는다. 라우트를 실제로 두드리는 쪽은 db 목록의
 # app/api/v1/domestic-orders/completion-route.integration.test.ts 가 본다.
 src/lib/api/domestic-order-completion-request.test.ts
+
+# 종에서 알림을 **지우는** 규칙과 그것을 이 브라우저에 적어 두는 자리(2026-10-19).
+# 🔴 확인 기록(표에 남아 영영 사라진다)과 다른 개념이라 섞이면 안 된다 — 남의 줄은
+# 종류를 안 가리고 지울 수 있고, 자기 줄은 결재 결과 둘만, 할 일 알림은 못 지운다 ·
+# 열쇠가 사람과 **로그인 시각**으로 갈려 다시 로그인하면 저절로 비워지는가 ·
+# 저장소가 막혀 터져도 「아무것도 안 지웠다」로 읽는가.
+src/lib/domain/notification-dismissal.test.ts

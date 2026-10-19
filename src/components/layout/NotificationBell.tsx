@@ -1,11 +1,21 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { NotificationBell as SharedNotificationBell } from "@dss/ui";
 import type { NotificationBellItem } from "@dss/ui";
 import { countNotificationTargets, type NotificationItem } from "@/lib/domain/notifications";
 import { toNotificationBellItems } from "@/lib/domain/notification-bell-items";
 import { isAcknowledgeableNotificationKind } from "@/lib/domain/notification-acknowledgement";
+import {
+  canDismissNotification,
+  dismissableNotificationKeys,
+  notificationDismissalKeyPrefixForUser,
+  notificationDismissalStorageKey,
+  pruneOldDismissalKeys,
+  readDismissedNotificationKeys,
+  writeDismissedNotificationKeys,
+  type DismissalStore,
+} from "@/lib/domain/notification-dismissal";
 import {
   EMPTY_PORTAL_INBOX,
   asPortalNotificationInbox,
@@ -60,6 +70,16 @@ import { showBrowserNotificationToast } from "./BrowserNotifications";
  * (isAcknowledgeableNotificationKind) **한 곳**으로 여기서 가린다
  * (handleNotificationPicked). 이동은 평범한 <a href> 가 하므로 확인 저장을
  * 기다리지 않고, 저장이 실패해도 막히지 않는다 — 실패하면 그 줄이 다시 나타날 뿐이다.
+ *
+ * ── 🔴 「지우기」는 확인 기록과 **다른 것**이다 ──────────────────────────
+ * 줄마다 서는 ✕ 와 펼친 칸 아래의 「보이는 알림 지우기」는 **이 브라우저에만**
+ * 적는다 — 서버도 DB 도 한 줄 건드리지 않고, 다시 로그인하면 아직 끝나지 않은
+ * 일은 그대로 다시 뜬다. 위 확인 기록(표에 남아 영영 사라진다)과 섞지 마라.
+ * 적는 곳과 가리는 규칙은 도메인 한 곳에 있다(domain/notification-dismissal.ts).
+ *
+ * 🔴 포털에서 온 줄은 **누르는 것만으로도** 지워진다. 그 줄은 A/S 가 「확인
+ * 했다」를 적을 데가 없어(그 통로가 포털에 없다) 눌러 본 뒤에도 영영 종에
+ * 남던 유일한 줄이었다.
  *
  * ── 묶음에 올 수 없는 것은 footer 로 넣는다 ─────────────────────────────
  * 브라우저 알림 권한 안내와 「시험 알림」 단추는 `navigator`·사람마다 갈라 쓰는
@@ -134,6 +154,86 @@ export function handleNotificationPicked(
   } catch {
     // 확인을 못 적어도 이동은 막지 않는다 — 알림이 종에 남을 뿐이다.
   }
+}
+
+/**
+ * 줄을 눌렀을 때 **포털에서 온 줄만** 이 브라우저에서 지운 것으로 적는다.
+ *
+ * 🔴 **바로 위 함수와 길이 다르다. 섞지 마라.**
+ *  - 위(handleNotificationPicked)는 **서버 DB** 로 가는 길이다. 포털 줄이 그
+ *    길로 들어가면 남의 시스템 알림 id 로 A/S 의 확인 기록이 쌓인다 — 그래서
+ *    거기엔 `if (item.sourceId) return;` 이 그대로 남아 있다.
+ *  - 여기는 **이 브라우저**로 가는 길이다. DB 가 아니므로 그 금지에 걸리지
+ *    않는다. 오히려 포털 줄은 A/S 가 「확인했다」를 적을 데가 없어서, 눌러 본
+ *    줄이 영영 종에 남는 유일한 줄이었다 — 누른 것만으로 눈에서 치운다.
+ *
+ * 🔴 **자기 줄은 여기서 끝난다.** 자기 줄을 누른 것은 이미 확인 기록(영구)으로
+ * 가고 있고, 같은 누름을 임시 지우기로도 적으면 저장이 실패해 되살아나야 할
+ * 줄이 브라우저 쪽 기록 때문에 그대로 숨는다.
+ */
+export function handlePortalRowPicked(
+  item: { key: string; sourceId?: string },
+  handlers: { onDismiss?: (key: string) => void }
+): void {
+  if (!item.sourceId) return;
+  if (!handlers.onDismiss) return;
+  try {
+    handlers.onDismiss(item.key);
+  } catch {
+    // 못 지워도 이동은 막지 않는다 — 그 줄이 종에 남을 뿐이다.
+  }
+}
+
+/**
+ * 지금 종에 **보이는 것**과 배지에 찍을 **숫자**를 한 번에 고른다.
+ *
+ * 순수 함수로 빼 둔 까닭: 지운 줄은 브라우저에서 눌러야 생기는 상태라 정적
+ * 렌더로는 만들 수 없다. 🔴 **배지가 함께 줄어드는가**는 눈에 안 보이는
+ * 사고다(종을 열면 비었는데 숫자만 붙어 있는 종) — 값으로 시험한다.
+ *
+ * 🔴 **자기 줄과 받은 줄의 열쇠가 다르다.** 자기 줄은 알림 id 그대로이고
+ * (notification-bell-items.ts 가 `key: item.id` 로 싣는다) 받은 줄은
+ * `client_id:id` 다. 그래서 거르는 칸도 다르다.
+ *
+ * 🔴 **개수는 두 쪽이 다른 방식으로 센다.**
+ *  - 자기 것: 「같은 대상은 한 번만」 센다(countNotificationTargets — 한 건에
+ *    결재가 둘 걸려 있어도 1). 사이드바 배지와 같은 헬퍼라 둘이 갈릴 수 없다.
+ *  - 받은 것: **포털이 센 값 그대로** 더한다. 세는 규칙이 시스템마다 달라서
+ *    줄 수로 다시 세면 그 시스템의 종과 이 종이 다른 숫자를 말한다.
+ *    다만 **지운 줄만큼은 뺀다** — 안 빼면 사라진 줄이 배지에 남는다. 저쪽의
+ *    세는 규칙을 모르므로 「지운 줄 수」를 빼는 것이 할 수 있는 전부이고(한
+ *    대상에 두 줄이 걸려 저쪽이 1로 셌다면 2가 빠질 수 있다), 0 아래로는
+ *    내려가지 않게 막는다.
+ */
+export function selectVisibleNotifications(input: {
+  items: readonly NotificationItem[];
+  inbox: PortalNotificationInbox;
+  /** 눌러 확인해 저장이 도는 중인 자기 줄(알림 id). */
+  acknowledgedIds: ReadonlySet<string>;
+  /** 이 브라우저에서 지운 줄(종에 실린 열쇠). */
+  dismissedKeys: ReadonlySet<string>;
+}): {
+  items: readonly NotificationItem[];
+  inboxItems: readonly NotificationBellItem[];
+  count: number;
+} {
+  const hidden = input.acknowledgedIds.size === 0 && input.dismissedKeys.size === 0;
+  const items = hidden
+    ? input.items
+    : input.items.filter(
+        (item) => !input.acknowledgedIds.has(item.id) && !input.dismissedKeys.has(item.id)
+      );
+  const inboxItems =
+    input.dismissedKeys.size === 0
+      ? input.inbox.items
+      : input.inbox.items.filter((row) => !input.dismissedKeys.has(row.key));
+
+  const dismissedInboxCount = input.inbox.items.length - inboxItems.length;
+  const count =
+    countNotificationTargets(items.map((item) => item.targetKey)) +
+    Math.max(0, input.inbox.count - dismissedInboxCount);
+
+  return { items, inboxItems, count };
 }
 
 /**
@@ -294,25 +394,75 @@ export function NotificationSelfTest({
 }
 
 /**
- * 묶음 종의 `footer` 자리에 들어가는 A/S 의 것 — 위 둘을 **이 차례로** 묶는다.
+ * 🔴 **지금 보이는 것 전부 지우기** — 일괄 지우기의 자리.
  *
- * 둘이 한꺼번에 보이는 상태는 없다(권한 안내는 아직 못 띄우는 상태에서, 시험
- * 단추는 띄울 수 있는 상태에서만 그린다). 그래도 한 조각으로 묶어 두는 것은,
- * 묶음이 내주는 자리가 **하나**이고 그 안의 차례를 여기서 정해야 하기 때문이다.
+ * ── 왜 묶음에 일괄용 자리를 더하지 않았나 ───────────────────────────────
+ * 묶음이 이미 `footer` 를 내주고 있고, 그 자리는 펼친 칸 **맨 아래에 붙어**
+ * 있다(sticky — 목록이 길어도 따라온다). 단추 하나를 거기 넣으면 되는 일에
+ * 묶음의 자리를 또 늘리면 일곱 사이트가 함께 지는 약속만 늘어난다.
+ *
+ * 🔴 **자리가 하나라 차례는 A/S 가 정한다.** 이것이 맨 위다 — 바로 위에 있는
+ * 목록에 대한 단추이고, 아래 둘(권한 안내 · 시험 알림)은 이 기기의 설정에
+ * 대한 것이라 성격이 다르다.
+ *
+ * 지울 수 있는 줄이 하나도 없으면 **아무것도 그리지 않는다** — 눌러도 아무
+ * 일이 없는 단추를 남기지 않는다.
+ */
+export function NotificationDismissAll({
+  count,
+  onDismissAll,
+}: {
+  /** 지금 보이는 줄 가운데 **지울 수 있는** 것의 수. */
+  count: number;
+  onDismissAll?: () => void;
+}) {
+  if (!onDismissAll || count <= 0) return null;
+
+  return (
+    <div className="border-t border-zinc-200 px-3 py-2 dark:border-zinc-800">
+      <button
+        type="button"
+        onClick={onDismissAll}
+        className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        보이는 알림 지우기 {count}건
+      </button>
+      <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+        이 브라우저에서만 숨깁니다. 다시 로그인하면 아직 끝나지 않은 일은 다시 나타납니다.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * 묶음 종의 `footer` 자리에 들어가는 A/S 의 것 — 위 셋을 **이 차례로** 묶는다.
+ *
+ * 아래 둘이 한꺼번에 보이는 상태는 없다(권한 안내는 아직 못 띄우는 상태에서,
+ * 시험 단추는 띄울 수 있는 상태에서만 그린다). 그래도 한 조각으로 묶어 두는
+ * 것은, 묶음이 내주는 자리가 **하나**이고 그 안의 차례를 여기서 정해야 하기
+ * 때문이다.
+ *
+ * 🔴 지우기 쪽 둘은 **선택**이다. 안 넘기면 그 칸이 아예 없다 — 지울 곳을
+ * 모르는 상태(로그인 시각을 못 받은 종)에서 단추만 서지 않게 한다.
  */
 export function NotificationBellFooter({
   status,
   onAsk,
   onTest,
   selfTestResult,
+  dismissableCount = 0,
+  onDismissAll,
 }: {
   status: BrowserNotificationStatus;
   onAsk: () => void;
   onTest: () => void;
   selfTestResult: string | null;
+  dismissableCount?: number;
+  onDismissAll?: () => void;
 }) {
   return (
     <>
+      <NotificationDismissAll count={dismissableCount} onDismissAll={onDismissAll} />
       <BrowserNotificationNotice status={status} onAsk={onAsk} />
       <NotificationSelfTest status={status} onTest={onTest} result={selfTestResult} />
     </>
@@ -350,6 +500,151 @@ const unknownOnServer = (): BrowserNotificationStatus => "UNKNOWN";
 const EMPTY_LABEL = "처리할 알림이 없습니다.";
 
 /**
+ * 지금 로그인한 사람과 **이 로그인의 시각**(초 단위 epoch, 세션의 issuedAt).
+ *
+ * 🔴 **서버가 내려준다** — 레이아웃이 readSession 으로 읽어 여기까지 지나
+ * 보낸다. 화면이 쿠키를 풀지 않는다(세션 쿠키는 httpOnly 라 읽을 수도 없다).
+ *
+ * 🔴 이 값이 없으면 **지우기 단추가 아예 그려지지 않는다.** 적을 곳을 모르는
+ * 채 단추만 서면 눌러도 아무 일이 없다.
+ */
+export type NotificationDismissalSession = { userId: string; issuedAt: number };
+
+/**
+ * 지운 줄을 적어 둘 곳.
+ *
+ * 사생활 보호 창이나 저장을 막아 둔 브라우저에서는 이 속성을 **읽는 것만으로**
+ * 던진다. 그래서 접근 자체를 try/catch 로 감싼다 — 저장을 못 하는 것은 새로
+ * 고쳤을 때 지운 줄이 되살아나는 일이지만, 여기서 던지면 머리말이, 곧 모든
+ * 화면이 죽는다(BrowserNotifications 의 getSeenKeyStore 와 같은 처방).
+ */
+function getDismissalStore(): DismissalStore | null {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ── 🔴 지운 줄은 **React 바깥**에 있다 ──────────────────────────────────
+ * 적히는 곳이 이 브라우저의 localStorage 라, React 로서는 그것이 바깥 세상이다.
+ * 그 바깥을 구독하는 장치가 useSyncExternalStore 이고, 이 파일이 **알림 권한에
+ * 이미 쓰고 있는 방법**이다(readBrowserNotificationStatus). 그 길을 쓰면
+ *  - 렌더 중에 저장소를 만지지 않아 **서버에서 터지지 않고**(서버 스냅샷은 늘
+ *    「아무것도 안 지웠다」다),
+ *  - 서버·하이드레이션 때의 그림이 같아 **어긋나지 않으며**,
+ *  - 붙은 뒤에 실제 값으로 한 번 맞춰진다(포털 목록이 빈 것에서 시작해 나중에
+ *    채워지는 것과 같은 모양이다).
+ *
+ * 🔴 **스냅샷은 같은 값이면 같은 것을 돌려줘야 한다.** 렌더마다 새 Set 을
+ *    만들면 React 가 「바뀌었다」로 보고 끝없이 다시 그린다. 그래서 저장소의
+ *    날것(글자)을 함께 적어 두고, 그것이 그대로면 **지난번 Set 을 그대로**
+ *    돌려준다.
+ *
+ * 🔴 아래 모듈 변수에 손대는 곳은 **브라우저에서만 도는 둘**이다(스냅샷을
+ *    읽는 자리와 지우는 자리). 서버는 언제나 NO_DISMISSALS 를 쓰므로, 한
+ *    프로세스가 여러 사람의 요청을 받는 서버에서 값이 섞일 길이 없다.
+ */
+
+/** 아무것도 안 지운 상태. 🔴 **하나를 돌려쓴다** — 서버 스냅샷이 매번 같아야 한다. */
+const NO_DISMISSALS: ReadonlySet<string> = new Set();
+
+let dismissalKey: string | null = null;
+let dismissalRaw: string | null = null;
+let dismissalSet: ReadonlySet<string> = NO_DISMISSALS;
+
+/** 지금 적혀 있는 날것. 저장소가 막혀 터져도 null 로 떨어진다. */
+function readDismissalRaw(store: DismissalStore | null, storageKey: string): string | null {
+  if (!store) return null;
+  try {
+    return store.getItem(storageKey);
+  } catch {
+    return null;
+  }
+}
+
+const dismissalListeners = new Set<() => void>();
+
+function subscribeToDismissals(listener: () => void): () => void {
+  dismissalListeners.add(listener);
+  return () => {
+    dismissalListeners.delete(listener);
+  };
+}
+
+/** 바뀌었다고 알린다 — 구독한 종이 다시 그려진다. */
+function announceDismissals(): void {
+  for (const listener of dismissalListeners) listener();
+}
+
+function dismissalSnapshot(storageKey: string): ReadonlySet<string> {
+  const store = getDismissalStore();
+  const raw = readDismissalRaw(store, storageKey);
+  if (dismissalKey === storageKey && dismissalRaw === raw) return dismissalSet;
+
+  dismissalKey = storageKey;
+  dismissalRaw = raw;
+  dismissalSet = new Set(readDismissedNotificationKeys(store, storageKey));
+  return dismissalSet;
+}
+
+const noDismissalsSnapshot = (): ReadonlySet<string> => NO_DISMISSALS;
+
+/**
+ * 이 로그인에서 지운 줄들과, 지우는 함수.
+ *
+ * ── 옛 열쇠 치우기 ──────────────────────────────────────────────────────
+ * **같은 사람의 옛 로그인 칸**을 치운다(까닭은 domain/notification-dismissal.ts
+ * 의 pruneOldDismissalKeys). 저장소를 **고치는** 일이라 그리는 동안이 아니라
+ * 붙은 뒤에 한다. 사람이 바뀌면 그 사람 것은 그 사람이 로그인할 때 치워진다.
+ */
+function useDismissedNotifications(session: NotificationDismissalSession | undefined) {
+  // 🔴 열쇠를 **글자 하나**로 좁혀 둔다. 아래 의존성에 객체를 그대로 두면
+  //    서버가 렌더될 때마다 새로 만들어진 객체 때문에 효과가 다시 돈다.
+  const storageKey = session ? notificationDismissalStorageKey(session) : null;
+  const userId = session?.userId ?? null;
+
+  const dismissed = useSyncExternalStore(
+    subscribeToDismissals,
+    storageKey === null ? noDismissalsSnapshot : () => dismissalSnapshot(storageKey),
+    noDismissalsSnapshot
+  );
+
+  useEffect(() => {
+    if (storageKey === null || userId === null) return;
+    pruneOldDismissalKeys(getDismissalStore(), {
+      prefix: notificationDismissalKeyPrefixForUser(userId),
+      keep: storageKey,
+    });
+  }, [storageKey, userId]);
+
+  const dismiss = useCallback(
+    (keys: readonly string[]) => {
+      if (storageKey === null || keys.length === 0) return;
+
+      const store = getDismissalStore();
+      const next = new Set(readDismissedNotificationKeys(store, storageKey));
+      for (const key of keys) next.add(key);
+      writeDismissedNotificationKeys(store, storageKey, [...next]);
+
+      // 🔴 **적지 못했어도 화면에서는 치운다.** 저장을 막아 둔 브라우저에서
+      //    눌렀는데 아무 일도 안 일어나는 것이 더 나쁘다 — 그런 기기에서는
+      //    새로고침하면 되살아날 뿐이다. 날것을 **지금 적혀 있는 값**으로
+      //    맞춰 두어야 다음 렌더가 이 판단을 뒤집지 않는다.
+      dismissalKey = storageKey;
+      dismissalRaw = readDismissalRaw(store, storageKey);
+      dismissalSet = next;
+      announceDismissals();
+    },
+    [storageKey]
+  );
+
+  // 적을 곳을 아는 종만 지울 수 있다 — 모르면 단추를 그리지 않는다.
+  return { dismissed, dismiss, enabled: storageKey !== null };
+}
+
+/**
  * 종의 **속** — 포털 목록을 이미 풀린 **값으로** 받아 그린다.
  *
  * 겉(아래 기본 내보내기)과 갈라 둔 까닭이 둘이다:
@@ -363,6 +658,7 @@ export function NotificationBellWithInbox({
   items = [],
   acknowledge,
   inbox = EMPTY_PORTAL_INBOX,
+  notificationDismissal,
 }: {
   items?: readonly NotificationItem[];
   /**
@@ -372,6 +668,11 @@ export function NotificationBellWithInbox({
   acknowledge?: AcknowledgeNotification;
   /** 포털이 모아 준 **다른 시스템들의** 알림. 아직 못 받았으면 빈 것이다. */
   inbox?: PortalNotificationInbox;
+  /**
+   * 지우기를 이 브라우저 어디에 적을지 가르는 값(위 타입 주석). 안 넘기면
+   * 지우기 단추가 아예 없는 예전 종이다.
+   */
+  notificationDismissal?: NotificationDismissalSession;
 }) {
   /**
    * 눌러서 확인했고 저장이 진행 중이거나 끝난 줄. 서버가 준 목록이 다시 계산되기
@@ -379,8 +680,23 @@ export function NotificationBellWithInbox({
    * 저장이 실패하면 빠진다 — 그 줄이 다시 나타난다.
    */
   const [acknowledgedIds, setAcknowledgedIds] = useState<ReadonlySet<string>>(() => new Set());
-  const visibleItems =
-    acknowledgedIds.size === 0 ? items : items.filter((item) => !acknowledgedIds.has(item.id));
+
+  /**
+   * 이 로그인에서 **지운** 줄들. 확인 기록(위)과 달리 서버에 한 줄도 적지
+   * 않는다 — 적히는 곳은 이 브라우저뿐이고 다시 로그인하면 비워진다.
+   */
+  const { dismissed, dismiss, enabled: canDismissHere } = useDismissedNotifications(
+    notificationDismissal
+  );
+
+  // 🔴 거르는 일과 세는 일은 **위 순수 함수 하나**가 한다 — 지운 줄은 눌러야
+  //    생기는 상태라 정적 렌더로는 만들 수 없어서, 값으로 시험할 수 있어야 한다.
+  const visible = selectVisibleNotifications({
+    items,
+    inbox,
+    acknowledgedIds,
+    dismissedKeys: dismissed,
+  });
 
   const detectedStatus = useSyncExternalStore(
     subscribeToNothing,
@@ -397,17 +713,13 @@ export function NotificationBellWithInbox({
   /** `시험 알림`을 눌러 본 결과. 아직 안 눌렀으면 null. */
   const [selfTestResult, setSelfTestResult] = useState<string | null>(null);
 
-  // 🔴 세는 규칙은 묶음이 모른다 — 받은 숫자를 그대로 찍는다. 그래서 **옮겨 담기
-  // 전 원본**에서 여기가 센다(묶음 타입에는 targetKey 가 없다). 사이드바 배지와
-  // 같은 순수 헬퍼를 쓰므로 두 배지가 다른 말을 할 수 없다. 방금 눌러 확인한
-  // 줄은 세지 않는다(목록과 배지가 같은 말을 해야 한다).
-  //
-  // 🔴 포털에서 받은 개수는 **그대로 더한다 — 다시 세지 않는다.** 세는 규칙이
-  // 시스템마다 다르다(A/S 는 같은 대상을 한 번만 센다. 한 건에 결재가 둘 걸려
-  // 있어도 1이다). 받은 줄 수로 다시 세면 그 시스템의 종과 이 종이 서로 다른
-  // 숫자를 말한다(domain/portal-notification-inbox.ts 의 count 주석).
-  const count =
-    countNotificationTargets(visibleItems.map((item) => item.targetKey)) + inbox.count;
+  // 🔴 종에 실제로 실리는 줄 — **자기 것 앞, 포털에서 온 것 뒤.** 지금 이
+  //    시스템에서 일하는 사람의 할 일이 먼저 보여야 하고, 받은 목록은 다시
+  //    섞지 않는다(포털이 정한 차례가 있다).
+  const bellItems = [...toNotificationBellItems(visible.items), ...visible.inboxItems];
+  // 일괄 지우기가 집는 것. 🔴 **지금 보이는 것 가운데 지울 수 있는 것만**이다
+  // (가리는 규칙은 도메인 한 곳 — domain/notification-dismissal.ts).
+  const dismissableKeys = canDismissHere ? dismissableNotificationKeys(bellItems) : [];
 
   function handleAcknowledge(item: PickedNotification) {
     if (!acknowledge) return;
@@ -471,8 +783,11 @@ export function NotificationBellWithInbox({
       // 🔴 **자기 것 앞, 포털에서 온 것 뒤.** 지금 이 시스템에서 일하는 사람의
       //    할 일이 먼저 보여야 하고, 받은 목록은 **다시 섞지 않는다** — 포털이
       //    정한 차례가 있다(시스템 순서 · 그 안의 차례).
-      items={[...toNotificationBellItems(visibleItems), ...inbox.items]}
-      count={count}
+      items={bellItems}
+      // 🔴 **세는 규칙은 묶음이 모른다** — 받은 숫자를 그대로 찍는다. 자기 것은
+      //    옮겨 담기 전 원본에서 「같은 대상은 한 번만」 세고, 받은 것은 포털이
+      //    센 값에서 지운 줄만큼만 뺀다(selectVisibleNotifications 주석).
+      count={visible.count}
       // 🔴 `ml-auto shrink-0` 은 묶음 종에 **그대로** 건넨다. TopBar 에 래퍼를
       //    하나 더 두면 펼침 패널의 기준(position: relative)이 두 겹이 된다
       //    (TopBar.tsx 의 그 자리 주석). shrink-0 이 빠지면 좁은 폭에서 아이콘이
@@ -490,17 +805,33 @@ export function NotificationBellWithInbox({
       // 🔴 묶음은 **모든 줄에서** 이것을 부른다. 가리는 일은 A/S 가 한다 —
       //    눌러서 확인하는 종류인가(도메인 판정)와, 애초에 **우리 줄인가**
       //    (sourceId)를 그 함수 한 곳에서 본다.
-      onAcknowledge={(picked: NotificationBellItem) =>
+      //
+      // 🔴 한 번 누른 것이 **두 길로** 갈린다. 섞지 마라:
+      //    자기 줄 → 확인 기록(서버 DB, 영구) · 포털 줄 → 지우기(이 브라우저).
+      //    두 함수가 각자 「제 줄이 아니면 그냥 돌아간다」를 갖고 있어서, 어느
+      //    줄을 눌러도 한쪽만 일한다(그 둘의 주석).
+      onAcknowledge={(picked: NotificationBellItem) => {
         handleNotificationPicked(picked, {
           onAcknowledge: acknowledge ? handleAcknowledge : undefined,
-        })
-      }
+        });
+        handlePortalRowPicked(picked, {
+          onDismiss: canDismissHere ? (key) => dismiss([key]) : undefined,
+        });
+      }}
+      // 🔴 줄마다 서는 지우기 단추. 적을 곳을 아는 종에만 그려진다 —
+      //    안 넘기면 묶음이 단추를 아예 그리지 않는다(그쪽 README 「지우기」).
+      onDismiss={canDismissHere ? (picked: NotificationBellItem) => dismiss([picked.key]) : undefined}
+      // 🔴 어느 줄에 단추를 그릴지. 가리는 규칙은 도메인 한 곳이다 — 이 화면은
+      //    종류를 보지 않는다(파일 머리말).
+      canDismiss={canDismissNotification}
       footer={
         <NotificationBellFooter
           status={notificationStatus}
           onAsk={() => void handleAskForNotificationPermission()}
           onTest={() => void handleNotificationSelfTest()}
           selfTestResult={selfTestResult}
+          dismissableCount={dismissableKeys.length}
+          onDismissAll={canDismissHere ? () => dismiss(dismissableKeys) : undefined}
         />
       }
     />
@@ -584,9 +915,15 @@ export default function NotificationBell({
   items = [],
   acknowledge,
   portalInbox,
+  notificationDismissal,
 }: {
   items?: readonly NotificationItem[];
   acknowledge?: AcknowledgeNotification;
+  /**
+   * 지금 로그인한 사람과 로그인 시각(위 NotificationDismissalSession). 🔴 없는
+   * 것은 **정상**이다 — 그때는 지우기 단추가 없는 예전 종 그대로다.
+   */
+  notificationDismissal?: NotificationDismissalSession;
   /**
    * 포털이 모아 준 다른 시스템들의 알림. 🔴 **서버에서 넘어오는 약속**이고
    * (값이 아니다) 풀린 값은 못 믿을 것으로 보고 한 겹 더 거른다
@@ -595,5 +932,12 @@ export default function NotificationBell({
   portalInbox?: Promise<unknown>;
 }) {
   const inbox = usePortalNotificationInbox(portalInbox);
-  return <NotificationBellWithInbox items={items} acknowledge={acknowledge} inbox={inbox} />;
+  return (
+    <NotificationBellWithInbox
+      items={items}
+      acknowledge={acknowledge}
+      inbox={inbox}
+      notificationDismissal={notificationDismissal}
+    />
+  );
 }
