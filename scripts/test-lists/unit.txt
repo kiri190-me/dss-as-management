@@ -204,6 +204,11 @@ src/lib/domain/overhaul.test.ts
 src/lib/domain/quote-subject.test.ts
 src/lib/domain/quote-labor-cost.test.ts
 src/lib/validation/quote-input.test.ts
+# 🔴 종류 이름표가 **두 벌**이다(여기의 quote-input.ts 와 vendor/dss-core 의
+# quote-list-rows.ts — 팝업·수정 화면 vs 목록의 종류 딱지). 2026-10-19 에 한쪽만
+# 바뀌어 같은 견적서가 두 이름으로 보였고, 타입이 같아 tsc 가 잡지 못했다.
+# 그 갈라짐만 보는 시험이라 글자를 적지 않고 양쪽을 들여와 서로 맞춰 본다.
+src/lib/validation/quote-kind-labels.test.ts
 src/lib/domain/quote-document-support.test.ts
 src/lib/domain/quote-file-name.test.ts
 src/lib/domain/requested-due-date-link.test.ts
