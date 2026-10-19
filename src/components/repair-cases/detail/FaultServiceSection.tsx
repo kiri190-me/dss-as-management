@@ -2,6 +2,7 @@ import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
 import type { DerivedServiceSummary } from "@/lib/db/queries/repair-case-work-records";
 import FaultServiceEditForm from "./edit/FaultServiceEditForm";
+import { detailEditButtonClass } from "./edit-button-class";
 import { KyosanMemoText } from "@/components/kyosan/KyosanText";
 
 /**
@@ -66,7 +67,7 @@ export default function FaultServiceSection({
           <button
             type="button"
             onClick={onStartEdit}
-            className="text-xs font-medium text-zinc-600 hover:underline dark:text-zinc-400"
+            className={detailEditButtonClass}
           >
             수정
           </button>

@@ -7,6 +7,7 @@ import {
   resolveRepairCaseRequestedDueDate,
 } from "@/lib/domain/requested-due-date-link";
 import IntakeInfoEditForm from "./edit/IntakeInfoEditForm";
+import { detailEditButtonClass } from "./edit-button-class";
 
 /**
  * ⚠️ `고객 요청 납기일` 한 칸만 값이 두 곳에서 올 수 있다 — 이 건에 적힌 값이
@@ -86,7 +87,7 @@ export default function IntakeInfoSection({
           <button
             type="button"
             onClick={onStartEdit}
-            className="text-xs font-medium text-zinc-600 hover:underline dark:text-zinc-400"
+            className={detailEditButtonClass}
           >
             수정
           </button>

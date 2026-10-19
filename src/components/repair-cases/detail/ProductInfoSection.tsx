@@ -8,6 +8,7 @@ import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { workflowKindLabels, workflowKindOf } from "@/lib/domain/workflow-kind";
 import ProductInfoEditForm from "./edit/ProductInfoEditForm";
+import { detailEditButtonClass } from "./edit-button-class";
 import OverhaulBadge from "@/components/common/OverhaulBadge";
 
 /**
@@ -213,7 +214,7 @@ export default function ProductInfoSection({
           <button
             type="button"
             onClick={onStartEdit}
-            className="text-xs font-medium text-zinc-600 hover:underline dark:text-zinc-400"
+            className={detailEditButtonClass}
           >
             수정
           </button>

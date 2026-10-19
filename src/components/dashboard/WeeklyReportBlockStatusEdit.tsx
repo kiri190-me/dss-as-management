@@ -111,7 +111,7 @@ import {
  * 좁아질 때 버튼 글자가 스스로 접힌다(BlockHeading 의 `shrink-0` 주석과 같은 짝).
  */
 const EDIT_BUTTON_CLASS =
-  "shrink-0 rounded border border-zinc-300 px-1 py-0 text-wr-meta font-medium text-zinc-600 hover:bg-zinc-100 print:hidden dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+  "shrink-0 rounded border border-zinc-300 px-1 py-0 text-wr-meta font-semibold text-zinc-600 hover:bg-zinc-100 print:hidden dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 const CANCEL_BUTTON_CLASS =
   "shrink-0 rounded border border-zinc-300 px-1 py-0 text-wr-meta font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 print:hidden dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 const SAVE_BUTTON_CLASS =

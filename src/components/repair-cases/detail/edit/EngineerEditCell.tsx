@@ -5,6 +5,7 @@ import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-reference
 import { REPAIR_CASE_SAVED_POPUP, useSectionEditSubmit } from "./useSectionEditSubmit";
 import EditSectionActions, { editErrorClass, editInputClass } from "./EditSectionActions";
 import { buildEngineerSelectOptions } from "./engineer-select-options";
+import { detailEditButtonClass, inlineEditButtonAlignClass } from "../edit-button-class";
 
 /**
  * Top-summary-card 담당 엔지니어 편집 — the only normal edit location for
@@ -53,7 +54,7 @@ export default function EngineerEditCell({
               setValue(assignedEngineerId ?? "");
               setIsEditing(true);
             }}
-            className="text-xs font-medium text-zinc-600 hover:underline dark:text-zinc-400"
+            className={`${detailEditButtonClass} ${inlineEditButtonAlignClass}`}
           >
             수정
           </button>

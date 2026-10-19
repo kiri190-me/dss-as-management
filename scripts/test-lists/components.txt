@@ -619,3 +619,12 @@ src/components/inventory/InventoryRetiredBanner.test.tsx
 # 잘린 티가 나는가(line-clamp-2 + title) · 값이 없으면 "-" 이고 「없음」을 지어내지 않는가 ·
 # 🔴 카드의 Model 칸이 L/N 까지 안는가(표의 제품 셀 둘째 줄과 짝이다).
 src/components/repair-cases/repair-case-symptom-column.test.tsx
+
+# 수리 건 상세의 [수정] 단추 일곱이 **한 벌을 같이 입는가**(2026-10-19 사용자 결정 —
+# 「박스를 씌워 단추임이 보이게 · font-semibold」). 그 전까지 똑같은 className 글자가
+# 일곱 파일에 복사되어 있었고, 그래서 저장소의 [수정] 이 갈래 셋으로 갈렸다. 못 박는 것:
+# 🔴 상수가 박스 한 벌인가(테두리·여백·font-semibold) · 🔴 일곱이 전부 그 상수를 쓰고
+# className 에 글자를 다시 적지 않는가 · 🔴 hover:underline 이 한 곳도 안 남았는가 ·
+# 🔴 **값 옆 글줄에 끼인 둘**(ReportNumberEditCell · EngineerEditCell)에만 세로 정렬
+# 클래스가 더 붙는가(그 둘은 값과 한 줄에 서서 박스가 높아지면 위아래로 뜬다).
+src/components/repair-cases/detail/edit-button-class.test.ts

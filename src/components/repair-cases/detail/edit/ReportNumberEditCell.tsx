@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { REPAIR_CASE_SAVED_POPUP, useSectionEditSubmit } from "./useSectionEditSubmit";
 import EditSectionActions, { editErrorClass, editInputClass } from "./EditSectionActions";
+import { detailEditButtonClass, inlineEditButtonAlignClass } from "../edit-button-class";
 
 /**
  * 상단 요약 카드의 보고서번호 편집 — EngineerEditCell과 정확히 같은 구조이며,
@@ -51,7 +52,7 @@ export default function ReportNumberEditCell({
               setValue(legacyReportNumber ?? "");
               setIsEditing(true);
             }}
-            className="text-xs font-medium text-zinc-600 hover:underline dark:text-zinc-400"
+            className={`${detailEditButtonClass} ${inlineEditButtonAlignClass}`}
           >
             수정
           </button>

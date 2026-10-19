@@ -7,7 +7,7 @@ import { CategoryBadge, DeletedStatusBadge, MalwareScanStatusBadge, PreviewStatu
 import type { AttachmentRowActions } from "./types";
 
 const actionButtonClass =
-  "rounded-md border border-zinc-300 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
+  "rounded-md border border-zinc-300 px-2 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800";
 
 type AttachmentCardListProps = {
   records: LocalAttachmentMetadata[];

@@ -6,6 +6,7 @@ import type { InventoryResult } from "@/lib/domain/inventory-gateway";
 import type { RepairCaseUsedPartRow } from "@/lib/db/queries/repair-case-used-parts";
 import type { UsedPartsWriteGate } from "@/lib/auth/repair-case-used-parts-authorization";
 import UsedPartsEditForm from "@/components/repair-cases/detail/edit/UsedPartsEditForm";
+import { detailEditButtonClass } from "@/components/repair-cases/detail/edit-button-class";
 
 /**
  * ============================================================================
@@ -73,7 +74,7 @@ export default function UsedPartsSection({
             <button
               type="button"
               onClick={() => setIsEditing(true)}
-              className="text-xs font-medium text-zinc-600 hover:underline dark:text-zinc-400"
+              className={detailEditButtonClass}
             >
               수정
             </button>

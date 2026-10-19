@@ -9,6 +9,7 @@ import EditSectionActions, {
   editInputClass,
   editLabelClass,
 } from "./edit/EditSectionActions";
+import { detailEditButtonClass } from "./edit-button-class";
 import { saveRepairCaseDomesticOrderIssueDatesAction } from "@/lib/server/actions/domestic-orders";
 import {
   DOMESTIC_ORDER_ISSUE_DATE_QUOTE_LOCK_MESSAGE,
@@ -196,7 +197,7 @@ export default function DomesticOrderDatesSection({
           <button
             type="button"
             onClick={startEdit}
-            className="text-xs font-medium text-zinc-600 hover:underline dark:text-zinc-400"
+            className={detailEditButtonClass}
           >
             수정
           </button>

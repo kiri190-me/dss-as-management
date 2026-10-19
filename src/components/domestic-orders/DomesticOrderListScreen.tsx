@@ -1202,7 +1202,7 @@ function CompletedBadge() {
  * 있으므로 둘의 크기와 색이 어긋나면 한쪽이 다른 성격의 조작처럼 보인다.
  */
 const rowActionButtonClass =
-  "rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-[11px] leading-none text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-700";
+  "rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-[11px] font-semibold leading-none text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-700";
 
 /**
  * 표의 현황·이력·기타 칸 **안쪽 블록**의 모양.
