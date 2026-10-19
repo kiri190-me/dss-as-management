@@ -488,6 +488,18 @@ src/app/api/repair-cases/*/service-report/preview-grid/route-source.test.ts
 # 접수를 뒤집지 않음 · 메일과 따로 · 로그에 경로 없음을 **원본 글자로** 본다.
 # 실제 동작(만들고 · 기록하고 · 인수번호가 같은 폴더가 있으면 멈춤)은 db 목록의 통합 시험이 본다.
 src/lib/server/services/create-contact-folder-source.test.ts
+# 접수와 함께 올라온 **수리 의뢰서**(2026-10-19). 셋이 한 벌이다:
+#  · 받아도 되는 파일인가 — 올리기 통로와 **같은 허용목록 · 같은 앞머리 바이트 대조**
+#  · 연락서 폴더 안 「수리 의뢰서」 폴더에 꽂는다 — 임시 폴더(mkdtemp)에서만 돌고
+#    실제 공유폴더에는 닿지 않는다
+#  · 🔴 끼운 자리 — 메일이 파일보다 뒤 · 서버 디스크에 안 씀 · 첨부 표에 행을 안 만듦 ·
+#    지우는 코드 없음 · 파일이 없으면 예전 그대로를 **원본 글자로** 본다
+src/lib/domain/intake-repair-request.test.ts
+src/lib/server/services/save-intake-repair-request.test.ts
+src/lib/server/services/intake-repair-request-source.test.ts
+# 🔴 메일 첨부가 **인라인이 아니라 내려받는 첨부**로 나가는가 — nodemailer 에 넘어가는
+# 값을 그대로 본다. 서명 그림(cid 있음)이 안 깨지는 것도 함께.
+src/lib/server/mail/send-attachments.test.ts
 src/lib/domain/quote-issue-result.test.ts
 src/lib/domain/content-disposition-file-name.test.ts
 src/lib/xlsx/handwritten-quote-reader.test.ts

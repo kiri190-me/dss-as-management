@@ -63,19 +63,50 @@ const INTERACTIVE_GUARD = 'if (input.logContext === "INTERACTIVE") {';
 
 const folderCallIndex = intake.indexOf("await createContactFolderForIntake(");
 const mailCallIndex = intake.indexOf("await sendIntakeNotificationMail(");
-/** 연락서 폴더를 부르는 토막 — 그것을 감싼 `INTERACTIVE` 문 하나. */
-const folderBlock = blockAt(intake, intake.lastIndexOf(INTERACTIVE_GUARD, folderCallIndex));
-/** 메일 토막 — 건드리지 않았음을 보기 위해서만 쓴다. */
-const mailBlock = blockAt(intake, intake.lastIndexOf(INTERACTIVE_GUARD, mailCallIndex));
 /** 접수가 확정된 뒤의 후처리가 모두 들어 있는 블록. */
 const okBlock = blockAt(intake, intake.indexOf("if (result.ok) {"));
 
+/*
+ * ── 🔴 2026-10-19 — 대화형 후처리가 **문 하나에 네 토막**이 되었다 ────────
+ * 예전에는 `INTERACTIVE` 문이 둘이었다(메일 하나 · 폴더+공통 하나). 수리 의뢰서가
+ * 들어오면서 차례가 **폴더 → 의뢰서 → 메일 → 공통** 으로 정해졌고, 네 토막이 한
+ * 문 안에 차례로 선다. 그래서 토막을 **시작 표지로 갈라** 각각을 따로 본다 —
+ * 문 전체를 한 덩어리로 보면 「메일 토막이 폴더를 모른다」 같은 단언이 전부
+ * 무의미해진다(한 덩어리에는 다 들어 있다).
+ */
+const interactiveBlock = blockAt(intake, intake.indexOf(INTERACTIVE_GUARD));
+const folderStepStart = interactiveBlock.indexOf("let contactFolderReady = false;");
+const repairStepStart = interactiveBlock.indexOf("if (input.repairRequest && contactFolderReady) {");
+const mailStepStart = interactiveBlock.lastIndexOf(
+  "try {",
+  interactiveBlock.indexOf("await sendIntakeNotificationMail(")
+);
+const commonStepStart = interactiveBlock.indexOf("if (contactFolderReady) {");
+
+/** ① 연락서 폴더를 만드는 토막(try · catch 까지). */
+const folderBlock = interactiveBlock.slice(folderStepStart, repairStepStart);
+/* ② 수리 의뢰서를 꽂는 토막은 **이웃 시험**이 본다(intake-repair-request-source.test.ts) — 여기서는 자리만 센다. */
+/** ③ 메일 토막. */
+const mailBlock = interactiveBlock.slice(mailStepStart, commonStepStart);
+/** ④ 종류 공통 서류 토막. */
+const commonStepBlock = interactiveBlock.slice(commonStepStart);
+
 describe("접수 때 연락서 폴더 — 끼운 자리", () => {
+  test("🔴 네 토막이 이 차례로 선다 — 폴더 → 수리 의뢰서 → 메일 → 공통 서류", () => {
+    // 🔴 2026-10-19. 토막을 가르는 표지가 하나라도 사라지면 아래 시험 전부가
+    //    엉뚱한 글자를 보게 되므로, 자리부터 못 박는다.
+    assert.equal(occurrences(intake, INTERACTIVE_GUARD), 1, "대화형 문이 하나가 아니다");
+    assert.ok(folderStepStart >= 0, "폴더 토막의 표지가 없다");
+    assert.ok(repairStepStart > folderStepStart, "🔴 수리 의뢰서가 폴더보다 앞이다(꽂을 자리가 없다)");
+    assert.ok(mailStepStart > repairStepStart, "🔴 메일이 수리 의뢰서보다 앞이다 — 이 조각의 요점이 깨졌다");
+    assert.ok(commonStepStart > mailStepStart, "공통 서류가 메일보다 앞으로 올라왔다");
+  });
+
   test("🔴 EXCEL_IMPORT 에서는 돌지 않는다 — 부르는 자리가 INTERACTIVE 문 안에 하나뿐이다", () => {
     assert.ok(folderCallIndex >= 0, "연락서 폴더를 부르는 자리가 없다");
     assert.equal(occurrences(intake, "createContactFolderForIntake("), 1, "부르는 자리가 둘 이상이다");
     assert.ok(folderBlock.includes("await createContactFolderForIntake("), "INTERACTIVE 문 밖에서 부른다");
-    assert.equal(folderBlock.includes("EXCEL_IMPORT"), false, "이관에서도 도는 길이 생겼다");
+    assert.equal(interactiveBlock.includes("EXCEL_IMPORT"), false, "이관에서도 도는 길이 생겼다");
     // 이관 경로가 이 토막에 닿지 않는다는 것을 한 번 더 — 문의 조건이 그 글자 그대로다.
     assert.ok(intake.lastIndexOf(INTERACTIVE_GUARD, folderCallIndex) >= 0);
   });
@@ -113,12 +144,16 @@ describe("접수 때 연락서 폴더 — 끼운 자리", () => {
   });
 
   test("🔴 메일과 서로 모른다 — 하나가 실패해도 다른 하나는 돈다", () => {
-    assert.ok(intake.includes("await sendIntakeNotificationMail({ repairCaseId: result.id });"), "메일 호출이 바뀌었다");
+    // 🔴 2026-10-19 에 메일이 **폴더 뒤로** 내려왔다(수리 의뢰서를 꽂은 뒤에 알린다).
+    //    그래도 「서로 모른다」는 그대로다 — try 가 따로이고 서로를 부르지 않는다.
+    assert.ok(intake.includes("await sendIntakeNotificationMail({"), "메일 호출이 바뀌었다");
+    assert.ok(intake.includes("repairCaseId: result.id,"), "메일에 어느 건인지 넘기지 않는다");
     assert.equal(mailBlock.includes("createContactFolderForIntake"), false, "메일 토막 안에서 폴더를 만든다");
     assert.equal(folderBlock.includes("sendIntakeNotificationMail"), false, "폴더 토막이 메일을 안다");
-    assert.ok(mailCallIndex < folderCallIndex, "메일보다 앞으로 끼어들었다");
-    // try 가 둘이다 — 하나의 catch 가 둘을 함께 삼키면 「서로 모른다」가 깨진다.
+    assert.ok(folderCallIndex < mailCallIndex, "🔴 폴더보다 앞으로 다시 올라갔다");
+    // try 가 따로다 — 하나의 catch 가 둘을 함께 삼키면 「서로 모른다」가 깨진다.
     assert.ok(mailBlock.includes("} catch (mailError) {"), "메일 쪽 catch 가 바뀌었다");
+    assert.ok(folderBlock.includes("} catch (folderError) {"), "폴더 쪽 catch 가 바뀌었다");
   });
 
   test("🔴 로그에 경로 · 루트 · 폴더 이름이 없다 — 사유 코드와 수리 건 id 뿐이다", () => {
@@ -207,8 +242,8 @@ describe("접수 때 연락서 폴더 — 끼운 자리", () => {
  */
 
 const commonCallIndex = intake.indexOf("await copyKindCommonFilesForIntake(");
-/** 공통 서류를 부르는 토막 — 「폴더가 준비됐는가」 문 하나. */
-const commonBlock = blockAt(intake, intake.lastIndexOf("if (contactFolderReady) {", commonCallIndex));
+/** 공통 서류를 부르는 토막 — 「폴더가 준비됐는가」 문 하나(위에서 갈라 둔 넷째 토막). */
+const commonBlock = commonStepBlock;
 /**
  * 서류를 하나씩 꽂는 몸통(모듈 바깥 자리에 둔 도우미). 🔴 `blockAt` 을 쓰지 않는다 —
  * 매개변수가 인라인 객체 타입이라 첫 중괄호가 그 타입이다. 다음 내보내는 함수까지 벤다.
@@ -225,7 +260,7 @@ describe("접수 때 종류 공통 서류 — 끼운 자리", () => {
     assert.ok(commonCallIndex >= 0, "공통 서류를 꽂는 자리가 없다");
     assert.equal(occurrences(intake, "await copyKindCommonFilesForIntake("), 1, "부르는 자리가 둘 이상이다");
     // 🔴 폴더 만들기를 감싼 그 INTERACTIVE 문 안이다 — 이관 경로는 이 토막에 닿지 않는다.
-    assert.ok(folderBlock.includes("await copyKindCommonFilesForIntake("), "INTERACTIVE 문 밖에서 꽂는다");
+    assert.ok(interactiveBlock.includes("await copyKindCommonFilesForIntake("), "INTERACTIVE 문 밖에서 꽂는다");
     assert.ok(folderCallIndex < commonCallIndex, "🔴 폴더를 만들기 전에 서류를 꽂는다");
   });
 
@@ -235,8 +270,9 @@ describe("접수 때 종류 공통 서류 — 끼운 자리", () => {
       "🔴 꽂을지 말지를 폴더 결과로 가르지 않는다"
     );
     assert.equal(occurrences(intake, "contactFolderReady = folder.status"), 1, "준비 여부를 여러 곳에서 적는다");
-    // 적는 자리는 셋뿐이다 — 처음 값 · 폴더 결과로 정하기 · 꽂기 전에 보기.
-    assert.equal(occurrences(intake, "contactFolderReady"), 3, "준비 여부를 다른 데서도 건드린다");
+    // 자리는 넷뿐이다 — 처음 값 · 폴더 결과로 정하기 · **수리 의뢰서를 꽂기 전에
+    // 보기**(2026-10-19 에 하나 늘었다) · 공통 서류를 꽂기 전에 보기.
+    assert.equal(occurrences(intake, "contactFolderReady"), 4, "준비 여부를 다른 데서도 건드린다");
     // 🔴 그 값이 거짓이면 꽂기를 **아예 부르지 않는다**(폴더가 없거나 어느 것인지 모른다).
     assert.ok(commonBlock.includes("await copyKindCommonFilesForIntake("), "준비 여부를 보지 않고 꽂는다");
     // 준비 여부를 처음에 거짓으로 두지 않으면 폴더 만들기가 던졌을 때 꽂게 된다.
@@ -247,13 +283,7 @@ describe("접수 때 종류 공통 서류 — 끼운 자리", () => {
     assert.ok(commonBlock.includes("try {"), "감싸지 않았다 — 무엇이든 새어 나오면 안 된다");
     assert.ok(commonBlock.includes("} catch (commonError) {"), "catch 가 없다");
     // 🔴 폴더 만들기의 catch 가 이것을 함께 삼키지 않는다.
-    assert.equal(
-      blockAt(intake, intake.indexOf("await createContactFolderForIntake(")).includes(
-        "copyKindCommonFilesForIntake"
-      ),
-      false,
-      "폴더 만들기 토막 안에서 서류를 꽂는다"
-    );
+    assert.equal(folderBlock.includes("copyKindCommonFilesForIntake"), false, "폴더 만들기 토막 안에서 서류를 꽂는다");
     assert.equal(commonBlock.includes("createContactFolderForIntake"), false, "서류 토막이 폴더 만들기를 부른다");
     assert.equal(commonBlock.includes("sendIntakeNotificationMail"), false, "서류 토막이 메일을 안다");
   });

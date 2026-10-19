@@ -9,6 +9,13 @@ import {
 } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
 import { showSavePopup } from "@/components/common/SavePopup";
+import {
+  ATTACHMENT_EXTENSION_RULES,
+  MAX_ATTACHMENT_SIZE_BYTES,
+  isExtensionAllowedForCategory,
+  normalizeFileExtension,
+} from "@/lib/domain/attachment-allowlist";
+import { INTAKE_REPAIR_REQUEST_CATEGORY } from "@/lib/domain/intake-repair-request";
 import { normalizeEntityName, rankSimilarNames } from "@/lib/domain/entity-name-match";
 import {
   deriveWorkflowType,
@@ -139,6 +146,36 @@ const FIELD_ORDER: FieldKey[] = [
   "serialNumber",
 ];
 
+/**
+ * ============================================================================
+ * 🔴 수리 의뢰서 — 접수와 **함께** 붙이는 파일 한 장 (2026-10-19, 선택)
+ * ============================================================================
+ * 붙이면 그 건의 **연락서 폴더 안 「수리 의뢰서」 폴더**에 저장되고, **접수 알림
+ * 메일에 첨부**되어 함께 나간다.
+ *
+ * 🔴 **[파일 관리] 목록에는 올라가지 않는다.** 서버 디스크에 남기지 않기로 한
+ * 파일이라, 목록에 줄만 생기면 눌러도 안 열린다(사용자에게 알린 판단이다).
+ *
+ * 🔴 **작성 내용(초안)에 담지 않는다.** 초안은 localStorage 에 저장되는데 파일
+ * 바이트를 거기 넣을 수 없고, 넣는 흉내를 내면 새로고침한 뒤 「붙어 있는 줄
+ * 알았는데 안 간」 파일이 생긴다. 이 칸만 화면 state 로 들고, 새로고침하면 비워진다.
+ *
+ * 🔴 **여기서 보는 것은 이름과 크기뿐**이다. 진짜 판정(앞머리 바이트 대조)은
+ * 서버가 하고(domain/intake-repair-request.ts), 그래서 **브라우저가 보낸 형식을
+ * 서버가 믿지 않는다.** 여기 검사는 20MB 를 올려 보내고 나서 거절당하는 일을
+ * 줄이려는 것이지 울타리가 아니다.
+ * ============================================================================
+ */
+const REPAIR_REQUEST_EXTENSIONS = ATTACHMENT_EXTENSION_RULES.map((rule) => rule.extension).filter(
+  (extension) => isExtensionAllowedForCategory(extension, INTAKE_REPAIR_REQUEST_CATEGORY)
+);
+
+/** 고르는 창이 먼저 보여 줄 형식. 🔴 서버 판정과 같은 목록에서 뽑는다. */
+const REPAIR_REQUEST_ACCEPT = REPAIR_REQUEST_EXTENSIONS.map((extension) => `.${extension}`).join(",");
+
+/** 사람이 읽는 크기 상한(`20MB`) — 안내문과 거절 문구가 같은 자리에서 나온다. */
+const REPAIR_REQUEST_SIZE_LABEL = `${Math.round(MAX_ATTACHMENT_SIZE_BYTES / (1024 * 1024))}MB`;
+
 type IntakeFormInnerProps = {
   /** 실제 데이터베이스의 고객사/End-User/엔지니어/Product Model 목록. 접수는
    * 데이터베이스에만 등록되므로 항상 존재한다(new/page.tsx가 매 요청 조회). */
@@ -187,6 +224,51 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isClearDialogOpen, setIsClearDialogOpen] = useState(false);
   const fieldRefs = useRef<Partial<Record<FieldKey, HTMLElement | null>>>({});
+
+  /**
+   * 🔴 수리 의뢰서 — **초안(updateDraft)에 넣지 않는다**(위 머리말). 화면 state 로만
+   * 들고, 새로고침하면 비워진다.
+   */
+  const [repairRequestFile, setRepairRequestFile] = useState<File | null>(null);
+  const [repairRequestError, setRepairRequestError] = useState<string | null>(null);
+  const repairRequestInputRef = useRef<HTMLInputElement | null>(null);
+
+  /** 고른 파일을 뺀다 — 칸의 값까지 비워야 같은 파일을 다시 고를 수 있다. */
+  function clearRepairRequestFile() {
+    setRepairRequestFile(null);
+    setRepairRequestError(null);
+    if (repairRequestInputRef.current) repairRequestInputRef.current.value = "";
+  }
+
+  function handleRepairRequestPick(file: File | null) {
+    if (!file) {
+      clearRepairRequestFile();
+      return;
+    }
+    const extension = normalizeFileExtension(file.name);
+    if (!extension || !isExtensionAllowedForCategory(extension, INTAKE_REPAIR_REQUEST_CATEGORY)) {
+      setRepairRequestFile(null);
+      setRepairRequestError(
+        `수리 의뢰서로 붙일 수 없는 형식입니다. (${REPAIR_REQUEST_EXTENSIONS.join(", ")})`
+      );
+      if (repairRequestInputRef.current) repairRequestInputRef.current.value = "";
+      return;
+    }
+    if (file.size === 0) {
+      setRepairRequestFile(null);
+      setRepairRequestError("빈 파일은 붙일 수 없습니다.");
+      if (repairRequestInputRef.current) repairRequestInputRef.current.value = "";
+      return;
+    }
+    if (file.size > MAX_ATTACHMENT_SIZE_BYTES) {
+      setRepairRequestFile(null);
+      setRepairRequestError(`수리 의뢰서는 ${REPAIR_REQUEST_SIZE_LABEL} 이하만 붙일 수 있습니다.`);
+      if (repairRequestInputRef.current) repairRequestInputRef.current.value = "";
+      return;
+    }
+    setRepairRequestError(null);
+    setRepairRequestFile(file);
+  }
 
   // 접수는 데이터베이스에만 등록되므로 선택 후보도 실제 데이터베이스 행
   // (UUID 키)만 쓴다 — mock 문자열 ID("c-001" 같은 값)는 Postgres에 아예
@@ -477,9 +559,23 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
       contactEmail: draft.contactEmail,
     };
 
+    /*
+     * 🔴 수리 의뢰서를 **같은 요청에** 싣는다 — 단추 한 번이 요청 하나다.
+     *
+     * 안 붙였으면 `null` 이 넘어가고 서버는 예전과 한 글자도 다르지 않게 돈다
+     * (선택 기능이다). FormData 인 까닭은 base64 가 33% 부풀기 때문이고,
+     * 크기는 next.config 의 serverActions bodySizeLimit(21mb)이 받아 준다 —
+     * 까닭 전부는 actions/create-repair-case.ts 머리말에 있다.
+     */
+    let repairRequest: FormData | null = null;
+    if (repairRequestFile) {
+      repairRequest = new FormData();
+      repairRequest.set("file", repairRequestFile);
+    }
+
     setIsSubmitting(true);
     try {
-      const result = await createRepairCaseAction(input, idempotencyKey);
+      const result = await createRepairCaseAction(input, idempotencyKey, repairRequest);
       if (!result.ok) {
         if (result.fieldErrors) {
           setErrors((prev) => ({ ...prev, ...result.fieldErrors }));
@@ -489,6 +585,9 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
         return;
       }
       clear();
+      // 🔴 고른 파일도 함께 비운다 — 초안에 없는 값이라 clear() 가 지우지 못한다.
+      //    안 비우면 뒤로 돌아왔을 때 지난 건의 의뢰서가 붙어 있는 것처럼 보인다.
+      clearRepairRequestFile();
       // 등록 팝업을 0.5초 띄운 뒤 목록으로 넘어간다 — 넘기는 것은 팝업이 한다
       // (common/SavePopup.tsx).
       showSavePopup({
@@ -503,6 +602,8 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
   function handleClearClick() {
     if (isEmpty) {
       clear();
+      // 🔴 초안에 없는 값이라 clear() 가 지우지 못한다 — 함께 비운다.
+      clearRepairRequestFile();
       return;
     }
     setIsClearDialogOpen(true);
@@ -525,6 +626,8 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
         isOpen={isClearDialogOpen}
         onConfirm={() => {
           clear();
+          // 🔴 초안에 없는 값이라 clear() 가 지우지 못한다 — 함께 비운다.
+          clearRepairRequestFile();
           setIsClearDialogOpen(false);
         }}
         onCancel={() => setIsClearDialogOpen(false)}
@@ -1022,6 +1125,47 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
             />
           </div>
         </div>
+      </section>
+
+      {/*
+        🔴 수리 의뢰서 — 선택이다. 안 붙이면 접수는 예전과 똑같이 돈다.
+        위 REPAIR_REQUEST_EXTENSIONS 머리말에 이 칸의 규율 전부가 있다.
+      */}
+      <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
+        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">수리 의뢰서 (선택)</h2>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <input
+            id="repairRequestFile"
+            ref={repairRequestInputRef}
+            type="file"
+            accept={REPAIR_REQUEST_ACCEPT}
+            disabled={isSubmitting}
+            onChange={(e) => handleRepairRequestPick(e.target.files?.[0] ?? null)}
+            className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
+            aria-invalid={Boolean(repairRequestError)}
+            aria-describedby={repairRequestError ? "repairRequestFile-error" : "repairRequestFile-help"}
+          />
+          {repairRequestFile && (
+            <button
+              type="button"
+              onClick={clearRepairRequestFile}
+              disabled={isSubmitting}
+              className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              파일 빼기
+            </button>
+          )}
+        </div>
+        {repairRequestError ? (
+          <p id="repairRequestFile-error" className={errorClass}>
+            {repairRequestError}
+          </p>
+        ) : (
+          <p id="repairRequestFile-help" className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+            붙이면 접수 알림 메일에 첨부되어 함께 나가고, 그 건의 연락서 폴더 안 「수리 의뢰서」 폴더에 저장됩니다.
+            {" "}파일 한 장, {REPAIR_REQUEST_SIZE_LABEL} 까지입니다. ※ 이 파일은 [파일 관리] 목록에는 올라가지 않습니다.
+          </p>
+        )}
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">

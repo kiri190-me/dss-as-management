@@ -9,7 +9,7 @@ import {
 } from "@/lib/db/queries/intake-mail-settings";
 import { getRepairCaseById } from "@/lib/db/queries/repair-cases";
 import { getRelatedRepairHistory } from "@/lib/db/queries/procedure-case-execution";
-import { sendMail } from "@/lib/server/mail/send";
+import { sendMail, type MailAttachment } from "@/lib/server/mail/send";
 
 /**
  * ============================================================================
@@ -51,6 +51,16 @@ export async function sendIntakeNotificationMail(params: {
   repairCaseId: string;
   /** O/H 판정 기준일. 인자로 받는 이유는 domain/overhaul.ts 와 같다 — 시험 가능해야 한다. */
   referenceDate?: Date;
+  /**
+   * 🔴 접수와 함께 올라온 **수리 의뢰서**(2026-10-19 — 선택).
+   *
+   *  · **없으면 이 함수는 예전과 한 글자도 다르지 않게 돈다** — 서명 그림만 동봉된다.
+   *  · 🔴 `cid` 를 **붙이지 않는다.** 붙이면 nodemailer 가 본문 속 인라인 자원으로
+   *    다뤄 메일 프로그램에 따라 **첨부 목록에 안 보인다**(mail/send.ts 머리말).
+   *  · 🔴 이 바이트는 **메모리에만** 있다 — 서버 디스크에서 읽어 오는 것이 아니고,
+   *    보낸 뒤에 지울 것도 없다.
+   */
+  repairRequestAttachment?: { fileName: string; mimeType: string; content: Buffer } | null;
 }): Promise<IntakeMailDispatchResult> {
   try {
     const settings = await getIntakeMailDispatchSettings();
@@ -101,12 +111,23 @@ export async function sendIntakeNotificationMail(params: {
 
     const images = await getSignatureImagesByCids(referencedCids(settings.signatureHtml));
 
+    /*
+     * 🔴 동봉하는 것이 두 종류다 — **섞이지 않게 모양으로 가른다.**
+     *   · 서명 그림  cid 가 있다 → 본문에 박히는 인라인 자원(예전 그대로)
+     *   · 수리 의뢰서 cid 가 **없다** → 받는 사람이 내려받는 진짜 첨부
+     * 가르는 규칙 자체는 mail/send.ts 의 toNodemailerAttachments 한 자리에 있다.
+     * 의뢰서가 없으면 이 배열은 예전과 똑같이 서명 그림뿐이다.
+     */
+    const attachments: MailAttachment[] = params.repairRequestAttachment
+      ? [...images, params.repairRequestAttachment]
+      : images;
+
     const result = await sendMail({
       to: recipients,
       subject: composed.subject,
       text: composed.body,
       html: composed.html,
-      attachments: images,
+      attachments,
     });
 
     if (!result.ok) return { sent: false, reason: "SEND_FAILED", detail: result.message };

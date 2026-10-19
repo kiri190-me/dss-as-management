@@ -28,6 +28,62 @@ export type SendMailResult =
 /** 오류 문구가 화면과 감사 로그에 실려도 부담 없는 길이로 자른다. */
 const MAX_ERROR_LENGTH = 300;
 
+/**
+ * ============================================================================
+ * 메일에 동봉하는 파일 하나 — 🔴 `cid` 하나가 **두 가지 다른 것**을 가른다
+ * ============================================================================
+ *  · `cid` 가 **있다** → 본문의 `<img src="cid:이름">` 이 가리키는 **인라인 자원**이다.
+ *    서명 이미지가 그것이고, 외부 URL 은 NAS 가 인터넷에서 안 보이고 `data:` 는
+ *    Gmail · Outlook 이 막으므로 이 방식이 사실상 유일하다.
+ *
+ *  · 🔴 `cid` 가 **없다** → 받는 사람이 **내려받는 진짜 첨부**다(접수와 함께 올라온
+ *    수리 의뢰서, 2026-10-19). nodemailer 는 `cid` 가 붙은 첨부를 인라인 자원으로
+ *    다루므로, 첨부에 아무 `cid` 나 붙여 보내면 **메일 프로그램에 따라 첨부 목록에
+ *    아예 안 보인다.** 그래서 `cid` 를 선택으로 열었고, 갈림은 아래
+ *    `toNodemailerAttachments` 한 자리에만 있다.
+ * ============================================================================
+ */
+export type MailAttachment = {
+  /** 본문이 `cid:` 로 가리키는 이름. 🔴 없으면 **내려받는 첨부**다. */
+  cid?: string;
+  fileName: string;
+  mimeType: string;
+  content: Buffer;
+};
+
+/**
+ * 🔴 nodemailer 에 **실제로 넘어가는 값**을 만든다.
+ *
+ * 따로 내보내는 까닭은 이 값이 **눈에 안 보이는 곳에서 갈리기** 때문이다 — 같은
+ * 배열 한 벌이 `cid` 하나로 「본문에 박히는 그림」과 「내려받는 첨부」로 갈라지고,
+ * 잘못 갈려도 발송은 성공한다(받는 사람 메일함에서만 드러난다). 그래서 시험이
+ * 이 함수가 내놓는 값을 그대로 본다.
+ *
+ *  · `cid` 가 있다 → 그대로 Content-ID 로 넘긴다. `contentDisposition` 을 **적지
+ *    않는다** — nodemailer 가 inline 으로 다뤄 서명 그림이 본문에 박힌다.
+ *  · `cid` 가 없다 → 🔴 `cid` 칸을 **아예 넣지 않고**(`undefined` 로도 넣지 않는다)
+ *    `contentDisposition: "attachment"` 를 **못 박는다.** 라이브러리의 기본 판정에
+ *    기대지 않는다 — 그 기본이 바뀌는 날 첨부가 조용히 본문 속 자원이 된다.
+ */
+export function toNodemailerAttachments(attachments: readonly MailAttachment[]) {
+  return attachments.map((attachment) =>
+    attachment.cid === undefined
+      ? {
+          filename: attachment.fileName,
+          contentType: attachment.mimeType,
+          content: attachment.content,
+          contentDisposition: "attachment" as const,
+        }
+      : {
+          // cid 를 그대로 Content-ID 로 쓴다 — 본문의 `cid:이름` 과 짝이 맞아야 한다.
+          cid: attachment.cid,
+          filename: attachment.fileName,
+          contentType: attachment.mimeType,
+          content: attachment.content,
+        }
+  );
+}
+
 export async function sendMail(input: {
   /** 받는 사람 주소들. 비어 있으면 부르는 쪽의 실수다 — 보내지 않고 알린다. */
   to: string[];
@@ -40,11 +96,10 @@ export async function sendMail(input: {
   /** HTML 판. 맑은 고딕과 서명이 여기 들어간다. */
   html?: string;
   /**
-   * 서명 이미지. `<img src="cid:이름">` 이 가리키는 실물을 **메일에 동봉**한다.
-   * 외부 URL 은 NAS 가 인터넷에서 안 보이고 data: 는 Gmail·Outlook 이 막으므로,
-   * 이 방식이 사실상 유일하다.
+   * 동봉할 파일들. 🔴 `cid` 유무가 「본문에 박히는 그림」과 「내려받는 첨부」를
+   * 가른다 — 갈림은 위 `MailAttachment` · `toNodemailerAttachments` 에 있다.
    */
-  attachments?: { cid: string; fileName: string; mimeType: string; content: Buffer }[];
+  attachments?: readonly MailAttachment[];
 }): Promise<SendMailResult> {
   if (input.to.length === 0) {
     return { ok: false, reason: "SEND_FAILED", message: "받는 사람이 없습니다." };
@@ -66,13 +121,9 @@ export async function sendMail(input: {
       subject: input.subject,
       text: input.text,
       html: input.html,
-      attachments: input.attachments?.map((a) => ({
-        // cid 를 그대로 Content-ID 로 쓴다 — 본문의 `cid:이름` 과 짝이 맞아야 한다.
-        cid: a.cid,
-        filename: a.fileName,
-        contentType: a.mimeType,
-        content: a.content,
-      })),
+      // 🔴 여기서 모양을 만들지 않는다 — 인라인이냐 첨부냐를 가르는 한 자리는
+      //    toNodemailerAttachments 뿐이다(시험이 그 값을 본다).
+      attachments: input.attachments === undefined ? undefined : toNodemailerAttachments(input.attachments),
     });
     return { ok: true, accepted: info.accepted?.length ?? input.to.length };
   } catch (error) {
