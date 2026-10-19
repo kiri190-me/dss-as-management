@@ -23,8 +23,10 @@
  * 데모에는 넣지 않았다(데모는 localStorage 뿐인 옛 화면이고, 실기 화면은
  * StoredAttachmentList 쪽이다). 2026-10-01 통문증(PASS_SLIP)도 같은 까닭으로
  * 데모에 없다 — 수리 건 전용 분류이고, 데모 계층을 손대지 않는 규칙은 그대로다.
+ * 2026-10-19 수리 의뢰서(REPAIR_REQUEST)도 마찬가지다 — 같은 수리 건 전용이고
+ * 데모 계층은 여전히 손대지 않는다.
  * 그래서 attachment-category.test.ts 는 「데모 목록 =
- * 이 목록에서 그 일곱을 뺀 것」을 순서까지 대조한다 — 다른 한 줄이라도 어긋나면
+ * 이 목록에서 그 여덟을 뺀 것」을 순서까지 대조한다 — 다른 한 줄이라도 어긋나면
  * 여전히 걸린다.
  *
  * ── 순수 파일이다 ─────────────────────────────────────────────────────────
@@ -110,6 +112,26 @@ export const ATTACHMENT_CATEGORY_CODES = [
   // 기타 **앞**에 둔다 — 기타는 언제나 목록의 맨 끝이다(attachment-category.test.ts).
   // 데모 파일에는 없다 — 파일 헤더의 '데모 파일과의 관계' 참조.
   "PASS_SLIP",
+  // 수리 의뢰서(2026-10-19 사용자) — 고객이 수리를 맡기며 함께 보내는 의뢰
+  // 서류다. 올릴 마땅한 분류가 없어 「고객사 문서」나 「기타」로 섞여 들어갔다.
+  //
+  // 🔴 **바로 위 REPAIR_REPORT(「수리 보고서」)와 다른 것이다.** 코드가 닮아
+  // 한쪽을 다른 쪽으로 고치거나 하나로 합치기 쉬운데, 둘은 방향이 반대다:
+  //   · REPAIR_REPORT  = 수리를 마치고 **우리가 만들어 고객에게 보내는** 문서
+  //   · REPAIR_REQUEST = 수리를 맡기며 **고객이 보내오는** 문서
+  // 둘 다 남는다 — 어느 쪽도 다른 쪽으로 갈음하지 말 것.
+  //
+  // 🔴 **수리 건 전용이다**(아래 REPAIR_CASE_ONLY_CATEGORIES) — 그 건으로 들어온
+  // 서류라 모델마다 한 벌 두는 자료가 아니고(제품 모델 ✕), 견적서에 붙는 두 칸과도
+  // 관계가 없다(견적서 ✕). 통문증과 같은 자리다.
+  //
+  // 확장자는 좁히지 않는다 — attachment-allowlist.ts 의 두 목록(좁히는
+  // CATEGORY_EXTENSION_ALLOWLIST · 다 여는 ANY_EXTENSION_CATEGORIES) 어디에도
+  // 넣지 않으면 전체 허용목록 14종을 그대로 쓴다. 통문증과 같은 선택이다.
+  //
+  // 기타 **앞**에 둔다 — 기타는 언제나 목록의 맨 끝이다(attachment-category.test.ts).
+  // 데모 파일에는 없다 — 파일 헤더의 '데모 파일과의 관계' 참조.
+  "REPAIR_REQUEST",
   "OTHER",
 ] as const;
 
@@ -140,6 +162,7 @@ export const attachmentCategoryLabels: Record<AttachmentCategory, string> = {
   POWER_TEST: "통전검사",
   CHECKLIST: "점검표",
   PASS_SLIP: "통문증",
+  REPAIR_REQUEST: "수리 의뢰서",
   OTHER: "기타",
 };
 
@@ -223,7 +246,8 @@ export function isProductModelOnlyCategory(category: AttachmentCategory): catego
 }
 
 /**
- * 접수 건(수리 건)에만 붙는 분류 (2026-10-01) — 지금은 통문증 하나다.
+ * 접수 건(수리 건)에만 붙는 분류 (2026-10-01) — 통문증 · 수리 의뢰서 둘이다
+ * (수리 의뢰서는 2026-10-19 에 더해졌다).
  *
  * ── 왜 이 자리를 새로 만들었나 ────────────────────────────────────────────
  * 여기에는 「제품 모델 전용」(바로 위 PRODUCT_MODEL_ONLY_CATEGORIES)과 「견적서
@@ -246,9 +270,19 @@ export function isProductModelOnlyCategory(category: AttachmentCategory): catego
  * 읽어 고객 안내 표에 채우는 일이고, 그것은 분류가 아니라 **다음 조각**의 일이다.
  *
  * 목록으로 둔 것은 하나뿐이어서가 아니다 — 다음에 접수 건 전용 분류가 더 생기면
- * 여기 한 줄을 더하는 일이 되고, 함수를 또 고치지 않는다.
+ * 여기 한 줄을 더하는 일이 되고, 함수를 또 고치지 않는다. **그 말대로 됐다** —
+ * 2026-10-19 수리 의뢰서(REPAIR_REQUEST)가 둘째로 들어왔고, 고친 것은 이 배열
+ * 한 줄뿐이다(아래 isAttachmentCategoryAllowedForOwner 는 그대로다).
+ *
+ * 수리 의뢰서가 접수 건 전용인 까닭: 고객이 수리를 맡기며 **그 건과 함께**
+ * 보내오는 서류다. 모델마다 한 벌 두는 기본 자료가 아니고(제품 모델 ✕),
+ * 견적서에 붙는 결재 PDF · 수기 엑셀 두 칸과도 무관하다(견적서 ✕).
+ *
+ * 🔴 수리 의뢰서(REPAIR_REQUEST)는 **수리 보고서(REPAIR_REPORT)와 다른 분류다.**
+ * 그쪽은 우리가 만들어 보내는 문서라 주인을 가리지 않고, 이 목록에 넣으면
+ * 제품 모델 파일 화면에서 수리 보고서가 사라진다 — 넣지 말 것.
  */
-export const REPAIR_CASE_ONLY_CATEGORIES = ["PASS_SLIP"] as const satisfies readonly AttachmentCategory[];
+export const REPAIR_CASE_ONLY_CATEGORIES = ["PASS_SLIP", "REPAIR_REQUEST"] as const satisfies readonly AttachmentCategory[];
 
 export type RepairCaseOnlyCategory = (typeof REPAIR_CASE_ONLY_CATEGORIES)[number];
 
@@ -264,7 +298,7 @@ export function isAttachmentCategoryAllowedForOwner(
   if (ownerKind === "QUOTE") return isQuoteAttachmentSlotCategory(category);
   // 모델 전용 셋은 제품 모델에만 — 접수 건에는 나오지도, 받아지지도 않는다.
   if (isProductModelOnlyCategory(category)) return ownerKind === "PRODUCT_MODEL";
-  // 접수 건 전용(통문증)은 그 반대다 — 제품 모델 파일 화면에는 나오지 않는다.
+  // 접수 건 전용(통문증 · 수리 의뢰서)은 그 반대다 — 제품 모델 파일 화면에는 나오지 않는다.
   if (isRepairCaseOnlyCategory(category)) return ownerKind === "REPAIR_CASE";
   // 접수 건 · 제품 모델 — 주인 없는 분류(스크린샷)와 견적서 전용 두 칸만 빠진다.
   return !OWNERLESS_ATTACHMENT_CATEGORIES.includes(category) && !isQuoteAttachmentSlotCategory(category);

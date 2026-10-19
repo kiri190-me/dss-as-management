@@ -1,0 +1,1 @@
+ALTER TYPE "public"."attachment_category" ADD VALUE 'REPAIR_REQUEST' BEFORE 'OTHER';
