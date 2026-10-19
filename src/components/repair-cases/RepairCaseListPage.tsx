@@ -115,6 +115,21 @@ type RepairCaseListPageProps = {
    * undefined(mock 모드)이면 "장기 PO 미발행" 조건 자체를 그리지 않는다.
    */
   longPendingPoCaseIds?: string[];
+  /**
+   * 지금 **납기 임박**인 접수 건 id — 서버가 계산해 내려준다(2026-10-19). 고객
+   * 요청 납기일이 오늘부터 7일 안으로 다가온 건이고, 그 날짜는 이 건의 칸이
+   * 비어 있으면 연결된 내자 정리에서 빌려 온다.
+   *
+   * 🔴 화면이 스스로 판정할 수 없는 까닭은 장기 PO 미발행과 **똑같다** — "오늘"을
+   * 화면에서 만들면 서버가 그린 것과 달라져 hydration 이 어긋난다. 거기에 하나
+   * 더 있다: 같은 사실을 종 알림이 이미 말하고 있어서, 조건을 화면에 또 적으면
+   * 종과 표가 서로 다른 말을 한다(판정은 서버가 domain/notifications.ts 의
+   * isRepairCaseDueDateNear 하나로 한다).
+   *
+   * 🔵 이것은 **필터가 아니라 표시**다 — 위 두 묶음과 달리 조건을 만들지 않는다.
+   * 그래서 undefined 여도 감출 조건이 없고, 배지와 글자색만 안 붙는다.
+   */
+  dueDateNearCaseIds?: string[];
 };
 
 export default function RepairCaseListPage({
@@ -125,6 +140,7 @@ export default function RepairCaseListPage({
   canPermanentlyDelete = false,
   myPendingApprovalCaseIds,
   longPendingPoCaseIds,
+  dueDateNearCaseIds,
 }: RepairCaseListPageProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -220,6 +236,13 @@ export default function RepairCaseListPage({
   const longPendingPoIdSet = useMemo(
     () => (longPendingPoCaseIds ? new Set(longPendingPoCaseIds) : undefined),
     [longPendingPoCaseIds]
+  );
+
+  // 납기 임박은 **거르는 조건이 아니라 표시**라 짝이 되는 canFilter… 가 없다.
+  // 묶음이 없으면(mock 모드) 아무 줄에도 배지·색이 붙지 않을 뿐이다.
+  const dueDateNearIdSet = useMemo(
+    () => (dueDateNearCaseIds ? new Set(dueDateNearCaseIds) : undefined),
+    [dueDateNearCaseIds]
   );
 
   const [filters, setFilters] = useState<Filters>(() => {
@@ -809,6 +832,7 @@ export default function RepairCaseListPage({
                         selectableIds={selectableIds}
                         onToggleSelect={handleToggleSelect}
                         onToggleSelectAll={handleToggleSelectAllOnPage}
+                        dueDateNearCaseIds={dueDateNearIdSet}
                       />
                     }
                     cards={
@@ -818,6 +842,7 @@ export default function RepairCaseListPage({
                         selectedIds={selectedIds}
                         selectableIds={selectableIds}
                         onToggleSelect={handleToggleSelect}
+                        dueDateNearCaseIds={dueDateNearIdSet}
                       />
                     }
                   />

@@ -20,6 +20,7 @@ import {
   buildRepairCaseDueDateNearNotification,
   countNotificationTargets,
   countNotificationTargetsByKind,
+  isRepairCaseDueDateNear,
   isRepairCaseDueDateWithinNotificationWindow,
   isRepairCaseShipmentFinished,
   previewApprovalRejectionReason,
@@ -691,6 +692,106 @@ test("🔴 이미 나간 건은 뺀다 — 출하 완료 상태이거나 출하�
   // 평탄화 상태가 비어 있는 단계가 아직 있다(workflow_steps.repair_status 는
   // nullable). 그런 건은 「아직 안 나갔다」로 둔다 — 조용히 빠지는 쪽이 나쁘다.
   assert.equal(isRepairCaseShipmentFinished({ status: null, actualShipmentDate: null }), false);
+});
+
+// ──────────── 배지·글자색이 쓰는 한 함수 — 종과 **같은 세 함수**를 묶기만 한다
+
+/**
+ * 2026-10-19 사용자 요구로 같은 사실을 종 말고도 세 자리에서 그린다(전체 A/S
+ * 현황 표·카드 배지 · 상세 머리 줄 배지 · 네 목록과 상세의 날짜 글자색). 아래
+ * 시험들이 지키는 것은 **그 자리들이 종과 같은 말을 하는가** 하나다.
+ */
+function nearingRow(overrides: Partial<Parameters<typeof isRepairCaseDueDateNear>[0]> = {}) {
+  return {
+    customerRequestedDueDate: daysFromToday(3),
+    domesticOrderDueDates: [] as readonly string[],
+    status: "IN_REPAIR" as const,
+    actualShipmentDate: null as string | null,
+    ...overrides,
+  };
+}
+
+test("🔴 배지 판정은 종 알림과 **같은 함수**로 선다 — 조건을 새로 적지 않았다", () => {
+  // ① 글자로 — 세 함수를 그대로 부르는가. 하나라도 빠지면 그 자리에서 규칙이
+  //    한 벌 더 생긴 것이다(조회 쪽을 같은 방법으로 지키는 시험이 아래에 있다).
+  const source = readFileSync(new URL("./notifications.ts", import.meta.url), "utf8");
+  const body = source.slice(source.indexOf("export function isRepairCaseDueDateNear"));
+  assert.ok(
+    body.includes("resolveRepairCaseRequestedDueDate("),
+    "화면이 쓰는 날짜 함수를 부르지 않는다 — 빌려 온 날짜를 못 본다"
+  );
+  assert.ok(
+    body.includes("isRepairCaseDueDateWithinNotificationWindow("),
+    "창 판정을 종과 같은 함수로 하지 않는다 — 표와 종이 다른 날 울린다"
+  );
+  assert.ok(
+    body.includes("isRepairCaseShipmentFinished("),
+    "이미 나간 건을 빼는 판정을 종과 같은 함수로 하지 않는다"
+  );
+
+  // ② 값으로 — 창의 경계에서 종의 판정과 **한 날도 어긋나지 않는다**. 글자 검사만
+  //    두면 세 함수를 부르면서 결과를 뒤집어 쓰는 구현도 통과한다.
+  for (const days of [-1, 0, 3, 7, 8, 30]) {
+    const dueDate = daysFromToday(days);
+    assert.equal(
+      isRepairCaseDueDateNear(nearingRow({ customerRequestedDueDate: dueDate }), DUE_NOW),
+      isRepairCaseDueDateWithinNotificationWindow(dueDate, DUE_NOW),
+      `오늘 + ${days}일에서 배지와 종이 다른 말을 한다`
+    );
+  }
+});
+
+test("🔴 출하가 끝난 건에는 배지가 붙지 않는다 — 날짜가 창 안이어도", () => {
+  // 종 알림 조회가 isRepairCaseShipmentFinished 로 빼고 있다. 배지가 안 빼면
+  // 이미 나간 건에 「납기 임박」이 서서, 종에는 없는 경보가 표에만 뜬다.
+  assert.equal(
+    isRepairCaseDueDateNear(nearingRow(), DUE_NOW),
+    true,
+    "이 표본은 출하만 빼면 임박이어야 한다 — 아니면 아래 둘이 거짓인 까닭을 못 가린다"
+  );
+  assert.equal(
+    isRepairCaseDueDateNear(nearingRow({ status: "SHIPMENT_COMPLETED" }), DUE_NOW),
+    false,
+    "출하 완료 상태인데 배지가 붙는다"
+  );
+  assert.equal(
+    isRepairCaseDueDateNear(
+      nearingRow({ status: "WAITING_SHIPMENT", actualShipmentDate: daysFromToday(-2) }),
+      DUE_NOW
+    ),
+    false,
+    "출하일이 찍힌 건은 단계가 뒤처져 있어도 이미 나간 것이다"
+  );
+});
+
+test("🔴 수리 건 칸이 비면 내자에서 빌려 온 날짜로 배지를 단다 — 상세정보에 보이는 그 날짜다", () => {
+  assert.equal(
+    isRepairCaseDueDateNear(
+      nearingRow({
+        customerRequestedDueDate: null,
+        domesticOrderDueDates: [daysFromToday(3), daysFromToday(20)],
+      }),
+      DUE_NOW
+    ),
+    true,
+    "빌려 온 날짜를 안 본다 — 화면에는 날짜가 보이는데 배지만 없는 건이 생긴다"
+  );
+  // 빌려 왔다는 사실이 창을 넓히지는 않는다.
+  assert.equal(
+    isRepairCaseDueDateNear(
+      nearingRow({ customerRequestedDueDate: null, domesticOrderDueDates: [daysFromToday(30)] }),
+      DUE_NOW
+    ),
+    false
+  );
+  // 양쪽 어디에도 날짜가 없으면 붙지 않는다(미기재는 거짓이다).
+  assert.equal(
+    isRepairCaseDueDateNear(
+      nearingRow({ customerRequestedDueDate: null, domesticOrderDueDates: [] }),
+      DUE_NOW
+    ),
+    false
+  );
 });
 
 test("납기 임박 알림은 인수번호를 굵게, 날짜를 detail 에 내고, 상세 첫 화면으로 링크한다", () => {

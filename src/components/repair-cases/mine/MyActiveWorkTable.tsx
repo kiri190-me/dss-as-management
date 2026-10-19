@@ -109,10 +109,16 @@ export default function MyActiveWorkTable({
   rows,
   sort,
   onSortChange,
+  dueDateNearCaseIds,
 }: {
   rows: MyActiveWorkRow[];
   sort: MyWorkSortState;
   onSortChange: (column: MyWorkSortColumn) => void;
+  /**
+   * 서버가 재 둔 「납기 임박」 건 id — 이 표는 **배지를 달지 않고** 「고객 요청
+   * 납기일」 글자만 굵은 붉은색이 된다(MyActiveWorkScreen 의 같은 prop 주석).
+   */
+  dueDateNearCaseIds?: ReadonlySet<string>;
 }) {
   return (
       <table className="w-full min-w-[1040px] border-collapse text-sm">
@@ -242,6 +248,7 @@ export default function MyActiveWorkTable({
                     <RequestedDueDateValue
                       customerRequestedDueDate={row.customerRequestedDueDate}
                       domesticOrderDueDates={row.domesticOrderDueDates}
+                      isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false}
                     />
                   </span>
                   <span className="text-xs whitespace-nowrap text-zinc-500 dark:text-zinc-400">

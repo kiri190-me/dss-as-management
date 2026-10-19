@@ -30,7 +30,10 @@ import { inventoryPartRequestStatusLabels, stockOwnerLabels, type StockOwner } f
 import { LABELS as APPROVAL_TYPE_LABELS, type ShipmentApprovalType } from "./local/workflow/shipment-approval-checklist";
 import { quoteEditHref } from "./quote-new-link";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
-import { DUE_DATE_FROM_DOMESTIC_ORDER_LABEL } from "./requested-due-date-link";
+import {
+  DUE_DATE_FROM_DOMESTIC_ORDER_LABEL,
+  resolveRepairCaseRequestedDueDate,
+} from "./requested-due-date-link";
 import { SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS } from "./shipment-approval-route";
 import type { RepairStatus } from "./types";
 
@@ -396,6 +399,52 @@ export function isRepairCaseShipmentFinished(row: {
 }): boolean {
   if (row.status === "SHIPMENT_COMPLETED") return true;
   return row.actualShipmentDate !== null && row.actualShipmentDate.trim() !== "";
+}
+
+/**
+ * 이 수리 건에 **「납기 임박」 표시를 붙이는가** — 종 알림이 뜨는 조건과 같다.
+ *
+ * ── 🔴 왜 이 함수가 있나 ────────────────────────────────────────────────
+ * 2026-10-19 사용자 요구로 같은 사실을 **종 말고도** 세 자리에서 그리게 됐다 —
+ * 전체 A/S 현황의 표·카드 배지, 수리 건 상세 머리 줄의 배지, 그리고 네 목록과
+ * 상세의 「고객 요청 납기일」 글자색. 조건을 그 자리마다 다시 적으면 언젠가 한
+ * 곳만 고쳐져 **종과 표가 서로 다른 말을 한다.** 그래서 조건을 **새로 적지
+ * 않고** 바로 위 세 함수를 한 줄로 묶기만 한다:
+ *
+ *   1. 화면에 보이는 날짜를 구한다 — resolveRepairCaseRequestedDueDate
+ *      (자기 칸이 먼저, 비면 연결된 내자 정리에서 가장 이른 하루를 빌린다).
+ *   2. 창을 잰다 — isRepairCaseDueDateWithinNotificationWindow
+ *      (오늘 ≤ 날짜 ≤ 오늘 + 7일. 미기재도 지난 납기도 거짓이다).
+ *   3. 🔴 이미 나간 건을 뺀다 — isRepairCaseShipmentFinished. 알림 조회가 빼고
+ *      있으므로 배지도 빼야 한다. 안 그러면 출하가 끝난 건에 「납기 임박」이
+ *      붙어 종에는 없는 경보가 표에만 선다.
+ *
+ * 종 알림 쪽은 이 함수를 부르지 않는다 — 그쪽은 날짜와 「빌려 왔는가」까지
+ * 필요해서(알림 한 줄의 detail) 같은 세 함수를 자기 자리에서 펴 쓴다
+ * (db/queries/repair-case-due-date-notifications.ts). 묶는 방식이 둘일 뿐
+ * **판정하는 함수는 하나도 다르지 않다.**
+ *
+ * ── 🔴 `now` 를 받는다 — 화면에서 만들지 않는다 ─────────────────────────
+ * 「오늘」을 그리는 쪽에서 `new Date()` 로 만들면 서버가 그린 HTML 과 어긋나
+ * hydration 이 깨진다(app/(app)/repair-cases/page.tsx 의 longPendingPoCaseIds
+ * 주석에 같은 함정이 적혀 있다). 그래서 이 함수를 부르는 자리는 **전부 서버**이고,
+ * 화면은 그 결과(불리언·id 집합)만 받는다.
+ */
+export function isRepairCaseDueDateNear(
+  row: {
+    customerRequestedDueDate: string | null;
+    domesticOrderDueDates: readonly string[];
+    status: RepairStatus | null;
+    actualShipmentDate: string | null;
+  },
+  now: Date
+): boolean {
+  if (isRepairCaseShipmentFinished(row)) return false;
+  const { dueDate } = resolveRepairCaseRequestedDueDate({
+    customerRequestedDueDate: row.customerRequestedDueDate,
+    domesticOrderDueDates: row.domesticOrderDueDates,
+  });
+  return isRepairCaseDueDateWithinNotificationWindow(dueDate, now);
 }
 
 /**

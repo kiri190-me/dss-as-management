@@ -29,7 +29,27 @@ import MyActiveWorkCardList from "./MyActiveWorkCardList";
  * 담당하는 미출하 건은 한 화면에 들어오는 양이고, 나누면 오히려 "내 일 전부"를
  * 한눈에 보는 이 화면의 쓸모가 줄어든다.
  */
-export default function MyActiveWorkScreen({ rows }: { rows: MyActiveWorkRow[] }) {
+export default function MyActiveWorkScreen({
+  rows,
+  dueDateNearCaseIds,
+}: {
+  rows: MyActiveWorkRow[];
+  /**
+   * 지금 **납기 임박**인 접수 건 id — 서버가 재 둔 것이다(2026-10-19). 이 화면은
+   * 배지를 달지 않고 **「고객 요청 납기일」 글자만** 굵은 붉은색이 된다(사용자가
+   * 배지를 요구한 곳은 전체 A/S 현황과 상세 둘이다).
+   *
+   * 🔴 화면이 스스로 재지 않는 까닭은 전체 A/S 현황과 같다 — "오늘"을 화면에서
+   * 만들면 서버가 그린 것과 어긋나고(hydration), 조건을 적으면 종 알림과 두 말이
+   * 된다. 🔵 이 묶음은 **내 건만 담고 있지 않다**(종이 쓰는 조회 그대로다). 남의
+   * 건 id 가 섞여 있어도 이 화면에는 내 행만 있어 아무 줄에도 닿지 않는다.
+   */
+  dueDateNearCaseIds?: readonly string[];
+}) {
+  const dueDateNearIdSet = useMemo(
+    () => (dueDateNearCaseIds ? new Set(dueDateNearCaseIds) : undefined),
+    [dueDateNearCaseIds]
+  );
   const [filters, setFilters] = useState(DEFAULT_MY_WORK_FILTERS);
   const [sort, setSort] = useState(DEFAULT_MY_WORK_SORT);
 
@@ -93,8 +113,15 @@ export default function MyActiveWorkScreen({ rows }: { rows: MyActiveWorkRow[] }
           ) : (
             <ResponsiveList
               listId="my-active-work"
-              table={<MyActiveWorkTable rows={sortedRows} sort={sort} onSortChange={handleSortChange} />}
-              cards={<MyActiveWorkCardList rows={sortedRows} />}
+              table={
+                <MyActiveWorkTable
+                  rows={sortedRows}
+                  sort={sort}
+                  onSortChange={handleSortChange}
+                  dueDateNearCaseIds={dueDateNearIdSet}
+                />
+              }
+              cards={<MyActiveWorkCardList rows={sortedRows} dueDateNearCaseIds={dueDateNearIdSet} />}
             />
           )}
         </>

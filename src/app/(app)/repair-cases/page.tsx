@@ -11,6 +11,7 @@ import {
   listRepairCasesPendingMyApproval,
 } from "@/lib/db/queries/repair-case-approvals-pending";
 import { listLongPendingPoCaseIds } from "@/lib/db/queries/long-pending-po";
+import { isRepairCaseDueDateNear } from "@/lib/domain/notifications";
 import RepairCaseListPage from "@/components/repair-cases/RepairCaseListPage";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 
@@ -88,6 +89,26 @@ export default async function RepairCasesPage() {
   // "지금 그런 건이 없다"는 사실 그대로다.
   const longPendingPoCaseIds = await listLongPendingPoCaseIds();
 
+  /**
+   * 「납기 임박」 배지와 붉은 날짜 글자의 근거(2026-10-19 사용자 요구) — 고객 요청
+   * 납기일이 오늘부터 7일 안으로 다가온 건.
+   *
+   * 🔴 "오늘"을 서버가 정하는 까닭은 바로 위 장기 PO 미발행과 **같다**(화면이
+   * new Date()로 만들면 hydration 이 어긋난다). 🔴 판정을 새로 적지 않는 까닭은
+   * 하나 더 있다 — 같은 사실을 종 알림이 이미 말하고 있어서, 조건이 두 벌이 되면
+   * 종과 표가 서로 다른 말을 한다. 그래서 종 알림이 쓰는 세 함수를 그대로 묶은
+   * isRepairCaseDueDateNear 하나만 부른다(domain/notifications.ts).
+   *
+   * 🔵 **질의를 더 하지 않는다.** 판정에 필요한 네 칸(이 건의 납기 칸 · 내자에서
+   * 빌릴 날짜들 · 평탄화 상태 · 실제 출하일)이 이미 위 listRepairCases() 의 행에
+   * 다 실려 있다. 종 알림 쪽 조회를 여기서 한 번 더 부르면 같은 표를 두 번 훑게
+   * 된다 — 답은 같고 값은 더 치른다.
+   */
+  const now = new Date();
+  const dueDateNearCaseIds = serverBaseCases
+    .filter((row) => isRepairCaseDueDateNear(row, now))
+    .map((row) => row.id);
+
   return (
     <Suspense>
       <RepairCaseListPage
@@ -98,6 +119,7 @@ export default async function RepairCasesPage() {
         canPermanentlyDelete={canPermanentlyDelete}
         myPendingApprovalCaseIds={myPendingApprovalCaseIds}
         longPendingPoCaseIds={longPendingPoCaseIds}
+        dueDateNearCaseIds={dueDateNearCaseIds}
       />
     </Suspense>
   );

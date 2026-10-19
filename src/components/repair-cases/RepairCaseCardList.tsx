@@ -1,7 +1,15 @@
 import Link from "next/link";
 import { LIST_CARD_GRID } from "@/components/common/responsive-list";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
-import { HoldBadge, OverdueBadge, PriorityBadge, SourceBadge, StatusBadge, WorkflowOverrideBadge } from "./badges";
+import {
+  DueDateNearBadge,
+  HoldBadge,
+  OverdueBadge,
+  PriorityBadge,
+  SourceBadge,
+  StatusBadge,
+  WorkflowOverrideBadge,
+} from "./badges";
 import RequestedDueDateValue from "./RequestedDueDateValue";
 import { preventShiftClickTextSelection, shiftKeyOf } from "@/lib/hooks/useShiftRangeSelection";
 
@@ -16,6 +24,13 @@ type RepairCaseCardListProps = {
   selectableIds?: ReadonlySet<string>;
   /** shiftKey — Shift 를 누른 채 눌렀는가. 표와 같은 부모 훅이 범위를 고른다. */
   onToggleSelect?: (id: string, shiftKey: boolean) => void;
+  /**
+   * 「납기 임박」인 접수 건의 id 묶음 — 표와 **같은 값을 같은 부모가** 내려 준다
+   * (RepairCaseTable 의 같은 prop 주석에 판정을 서버가 하는 까닭이 있다).
+   * 🔴 표에만 넣으면 창 크기에 따라 배지가 보이는 사람과 안 보이는 사람이 갈린다
+   * — 이 파일 머리말이 유·무상·날짜·L/N 에서 세 번 겪은 바로 그 결함이다.
+   */
+  dueDateNearCaseIds?: ReadonlySet<string>;
 };
 
 /**
@@ -51,6 +66,7 @@ export default function RepairCaseCardList({
   selectedIds,
   selectableIds,
   onToggleSelect,
+  dueDateNearCaseIds,
 }: RepairCaseCardListProps) {
   return (
     <div className={LIST_CARD_GRID}>
@@ -89,6 +105,8 @@ export default function RepairCaseCardList({
           <div className="flex flex-wrap items-center gap-2">
             <PriorityBadge priority={row.priority} />
             <OverdueBadge isOverdue={row.effectiveIsOverdue} />
+            {/* 표와 같은 자리·같은 차례다(「납기 지연」 바로 뒤). */}
+            <DueDateNearBadge isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false} />
             <HoldBadge isOnHold={row.holdState?.isOnHold ?? false} />
             <WorkflowOverrideBadge hasOverride={row.hasWorkflowOverride} />
             <SourceBadge source={row.source} />
@@ -118,6 +136,7 @@ export default function RepairCaseCardList({
                 <RequestedDueDateValue
                   customerRequestedDueDate={row.customerRequestedDueDate}
                   domesticOrderDueDates={row.domesticOrderDueDates}
+                  isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false}
                 />
               </dd>
             </div>

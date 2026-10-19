@@ -3,6 +3,7 @@ import {
   DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_NOTE,
   resolveRepairCaseRequestedDueDate,
 } from "@/lib/domain/requested-due-date-link";
+import { DUE_DATE_NEAR_TEXT_CLASS } from "./due-date-near";
 
 /**
  * ============================================================================
@@ -31,16 +32,31 @@ import {
  * 긴 설명은 `title` 이 맡는다. 글자 크기를 px 가 아니라 **em 으로** 잡은 것도
  * 같은 이유다 — 표(text-xs)와 카드(text-sm) 양쪽에서 제 바탕보다 한 단계만
  * 작아진다.
+ *
+ * 🔴 **납기 임박이면 날짜만 굵은 붉은색이 된다**(2026-10-19 사용자 요구). 임박
+ * 여부를 **여기서 재지 않고 받는** 까닭은 둘이다: 「오늘」을 화면에서 만들면 서버가
+ * 그린 것과 어긋나고(hydration), 조건을 여기 적으면 종 알림과 두 말이 된다. 판정은
+ * 서버가 domain/notifications.ts 의 isRepairCaseDueDateNear 으로 한다.
+ * 🔴 임박이 아닐 때 나오는 HTML 은 **예전과 글자 하나 다르지 않아야 한다** —
+ * 이 조각은 네 화면이 함께 쓰므로, 평소 모양이 바뀌면 네 곳이 한꺼번에 바뀐다.
+ * 꼬리표(내자)는 임박이어도 색이 바뀌지 않는다 — 그것은 경보가 아니라 **어디서 온
+ * 값인가**를 말하는 표시이고, 함께 붉어지면 날짜와 같은 무게로 읽힌다.
  * ============================================================================
  */
 export default function RequestedDueDateValue({
   customerRequestedDueDate,
   domesticOrderDueDates,
+  isDueDateNear = false,
 }: {
   /** 이 건의 repair_cases.customer_requested_due_date 그대로. */
   customerRequestedDueDate: string | null;
   /** 연결된 내자 정리 줄들의 납기요청일 **전부**. 고르는 일은 도메인이 한다. */
   domesticOrderDueDates: readonly string[];
+  /**
+   * 서버가 재 둔 「납기 임박」 여부. 기본은 거짓이라, 이 값을 넘기지 않는 화면은
+   * 예전과 똑같이 그려진다(전체 A/S 현황·내 작업 넷만 넘긴다).
+   */
+  isDueDateNear?: boolean;
 }) {
   const { dueDate, borrowed } = resolveRepairCaseRequestedDueDate({
     customerRequestedDueDate,
@@ -48,11 +64,18 @@ export default function RequestedDueDateValue({
   });
 
   // 양쪽 어디에도 없으면 이 목록들이 쓰던 대로 "-" 다 — 「없음」 같은 말을 짓지 않는다.
-  if (!borrowed) return <>{dueDate ?? "-"}</>;
+  // 임박일 때만 날짜가 span 하나를 입는다(임박이 아니면 예전 그대로 맨 글자다).
+  const value = isDueDateNear ? (
+    <span className={DUE_DATE_NEAR_TEXT_CLASS}>{dueDate}</span>
+  ) : (
+    dueDate ?? "-"
+  );
+
+  if (!borrowed) return <>{value}</>;
 
   return (
     <>
-      {dueDate}{" "}
+      {value}{" "}
       <span
         className="text-[0.9em] text-zinc-400 dark:text-zinc-500"
         title={DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_NOTE}

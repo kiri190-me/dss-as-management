@@ -3,7 +3,15 @@
 import Link from "next/link";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { SortColumn, SortState } from "@/lib/domain/repair-case-filters";
-import { HoldBadge, OverdueBadge, PriorityBadge, SourceBadge, StatusBadge, WorkflowOverrideBadge } from "./badges";
+import {
+  DueDateNearBadge,
+  HoldBadge,
+  OverdueBadge,
+  PriorityBadge,
+  SourceBadge,
+  StatusBadge,
+  WorkflowOverrideBadge,
+} from "./badges";
 import RequestedDueDateValue from "./RequestedDueDateValue";
 import SelectAllCheckbox from "@/components/common/select-all-checkbox";
 import { preventShiftClickTextSelection, shiftKeyOf } from "@/lib/hooks/useShiftRangeSelection";
@@ -34,6 +42,20 @@ type RepairCaseTableProps = {
    * 여기서 직접 하고, 실제 선택 변경만 부모에게 맡긴다.
    */
   onToggleSelectAll?: (nextChecked: boolean) => void;
+  /**
+   * 「납기 임박」인 접수 건의 id 묶음 — 고객 요청 납기일이 오늘부터 7일 안으로
+   * 다가온 건이다(2026-10-19). 배지 하나와 날짜 글자색이 이 묶음을 본다.
+   *
+   * 🔴 **판정은 서버가 한다.** 「오늘」을 화면에서 `new Date()` 로 만들면 서버가
+   * 그린 HTML 과 어긋나고(app/(app)/repair-cases/page.tsx 의 longPendingPoCaseIds
+   * 가 적어 둔 바로 그 함정), 조건을 여기 적으면 종 알림과 두 말이 된다. 그래서
+   * 이 표는 **다 재 둔 id 묶음**만 받는다 — 결재 대기·장기 PO 미발행 묶음과 같은
+   * 모양이다.
+   *
+   * undefined 가 기본이다. 이 표를 함께 쓰는 다른 화면들(고객사·모델 이력 등)은
+   * 이 값을 넘기지 않으므로 예전과 한 글자도 다르지 않게 그려진다.
+   */
+  dueDateNearCaseIds?: ReadonlySet<string>;
 };
 
 const thBaseClass =
@@ -173,6 +195,7 @@ export default function RepairCaseTable({
   selectableIds,
   onToggleSelect,
   onToggleSelectAll,
+  dueDateNearCaseIds,
 }: RepairCaseTableProps) {
   const selectableVisible = selectionMode ? rows.filter((row) => selectableIds?.has(row.id) ?? false) : [];
   const selectedVisibleCount = selectableVisible.filter((row) => selectedIds?.has(row.id) ?? false).length;
@@ -274,6 +297,10 @@ export default function RepairCaseTable({
                   <div className="flex flex-wrap items-center gap-1">
                     <PriorityBadge priority={row.priority} />
                     <StatusRowOverdueBadge isOverdue={row.effectiveIsOverdue} />
+                    {/* 「납기 지연」 바로 뒤다 — 둘은 다른 판정이지만(지연은 사내
+                        목표 출하일, 임박은 고객 요청 납기일) 사람이 같은 물음으로
+                        읽는 자리라 나란히 선다. 색은 일부러 갈랐다(badges.tsx). */}
+                    <DueDateNearBadge isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false} />
                     <HoldBadge isOnHold={row.holdState?.isOnHold ?? false} />
                     <WorkflowOverrideBadge hasOverride={row.hasWorkflowOverride} />
                   </div>
@@ -311,6 +338,7 @@ export default function RepairCaseTable({
                     <RequestedDueDateValue
                       customerRequestedDueDate={row.customerRequestedDueDate}
                       domesticOrderDueDates={row.domesticOrderDueDates}
+                      isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false}
                     />
                   </span>
                 </div>

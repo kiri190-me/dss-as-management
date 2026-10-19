@@ -26,6 +26,7 @@ import {
   listDomesticOrderIssueDatesForRepairCase,
 } from "@/lib/db/queries/domestic-orders";
 import { getRepairCaseUsedPartsView } from "@/lib/db/queries/repair-case-used-parts";
+import { isRepairCaseDueDateNear } from "@/lib/domain/notifications";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import RepairCaseDetailView from "@/components/repair-cases/detail/RepairCaseDetailView";
 
@@ -270,6 +271,26 @@ export default async function RepairCaseDetailPage({
     related.map((match) => [match.id, relatedSummaryByCaseId.get(match.id)?.currentDiagnosisSummary ?? null])
   );
 
+  /**
+   * 「인수 정보」의 고객 요청 납기일을 굵은 붉은색으로 그릴 것인가(2026-10-19
+   * 사용자 요구). 🔴 판정을 새로 적지 않는다 — 종 알림이 쓰는 세 함수를 그대로 묶은
+   * isRepairCaseDueDateNear 하나를 부른다(domain/notifications.ts). "오늘"도
+   * 서버가 정한다: 화면에서 new Date() 로 만들면 서버가 그린 것과 어긋난다.
+   *
+   * 🔵 머리 카드의 배지는 [id]/layout.tsx 가 **같은 함수로 따로** 잰다. 레이아웃과
+   * 탭은 서로 props 를 주고받지 못해서지 판정이 둘인 것이 아니다 — 두 자리 다 같은
+   * 함수에 같은 네 칸을 넘긴다(내자 날짜 조회도 같은 함수다).
+   */
+  const isDueDateNear = isRepairCaseDueDateNear(
+    {
+      customerRequestedDueDate: resolved.customerRequestedDueDate,
+      domesticOrderDueDates,
+      status: resolved.status,
+      actualShipmentDate: resolved.actualShipmentDate,
+    },
+    new Date()
+  );
+
   return (
     <RepairCaseDetailView
       resolved={resolved}
@@ -281,6 +302,7 @@ export default async function RepairCaseDetailPage({
       partRequestData={partRequestData}
       derivedServiceSummary={derivedServiceSummary}
       domesticOrderDueDates={domesticOrderDueDates}
+      isDueDateNear={isDueDateNear}
       domesticOrderIssueDates={domesticOrderIssueDates}
       canWriteDomesticOrderIssueDates={canWriteDomesticOrders}
       usedParts={usedParts}

@@ -6,6 +6,8 @@ import { isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
 import { readSession } from "@/lib/auth/session";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
+import { listDomesticOrderDueDatesForRepairCase } from "@/lib/db/queries/domestic-orders";
+import { isRepairCaseDueDateNear } from "@/lib/domain/notifications";
 import DetailHeader from "@/components/repair-cases/detail/DetailHeader";
 import DetailTabs from "@/components/repair-cases/detail/DetailTabs";
 
@@ -91,6 +93,35 @@ export default async function RepairCaseDetailLayout({
   const canEditReportNumber =
     canEditAtAll && actingUser !== null && isFieldEditable(actingUser.role, "legacyReportNumber");
 
+  /**
+   * 머리 카드의 「납기 임박」 배지(2026-10-19 사용자 요구).
+   *
+   * 🔴 **여기서 읽어야 한다.** 이 건의 `고객 요청 납기일` 칸이 비어 있으면 화면에
+   * 보이는 날짜는 연결된 내자 정리에서 빌려 온 것인데(domain/requested-due-date-link.ts),
+   * 그 날짜를 읽는 곳은 「기본 정보」 탭([id]/page.tsx)뿐이었다. 레이아웃이 그걸
+   * 모르면 **상세정보에는 날짜가 보이는데 머리 줄에만 배지가 없는** 건이 생긴다 —
+   * 종 알림이 그 빌려 온 날짜로 뜨고 있으므로 정확히 「종과 화면이 다른 말을 하는」
+   * 모양이다. 한 건에 대한 작은 인덱스 조회 하나다.
+   *
+   * 🔴 판정은 새로 적지 않는다 — 종 알림이 쓰는 세 함수를 그대로 묶은
+   * isRepairCaseDueDateNear 하나를 부른다(domain/notifications.ts). "오늘"도
+   * 서버가 정한다: 화면에서 new Date() 로 만들면 서버가 그린 것과 어긋난다.
+   *
+   * mock/로컬 소스에는 내자 정리가 없으므로 빈 배열이다 — [id]/page.tsx 가 같은
+   * 조회를 같은 조건으로 거르는 것과 한 줄도 다르지 않다.
+   */
+  const headerDomesticOrderDueDates =
+    resolved.source === "DATABASE" ? await listDomesticOrderDueDatesForRepairCase(resolved.id) : [];
+  const isDueDateNear = isRepairCaseDueDateNear(
+    {
+      customerRequestedDueDate: resolved.customerRequestedDueDate,
+      domesticOrderDueDates: headerDomesticOrderDueDates,
+      status: resolved.status,
+      actualShipmentDate: resolved.actualShipmentDate,
+    },
+    new Date()
+  );
+
   return (
     <div className="flex flex-col gap-4">
       {/* 🔴 탭 줄보다 **위**다 — 어느 탭을 눌러도 같은 카드가 그대로 남는다
@@ -101,6 +132,7 @@ export default async function RepairCaseDetailLayout({
         canEditEngineer={canEditEngineer}
         canEditReportNumber={canEditReportNumber}
         referenceData={referenceData}
+        isDueDateNear={isDueDateNear}
       />
       <DetailTabs id={id} canViewQuotes={canViewQuotes} canViewPurchaseOrders={canViewPurchaseOrders} />
       {children}

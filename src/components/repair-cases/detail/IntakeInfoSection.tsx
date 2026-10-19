@@ -8,6 +8,7 @@ import {
 } from "@/lib/domain/requested-due-date-link";
 import IntakeInfoEditForm from "./edit/IntakeInfoEditForm";
 import { detailEditButtonClass } from "./edit-button-class";
+import { DUE_DATE_NEAR_TEXT_CLASS } from "@/components/repair-cases/due-date-near";
 
 /**
  * ⚠️ `고객 요청 납기일` 한 칸만 값이 두 곳에서 올 수 있다 — 이 건에 적힌 값이
@@ -25,6 +26,7 @@ function Field({
   value,
   borrowedLabel,
   hint,
+  emphasized = false,
 }: {
   label: string;
   value: string;
@@ -32,13 +34,28 @@ function Field({
   borrowedLabel?: string;
   /** 이름표에 마우스를 올렸을 때 뜨는 설명. 규칙이 있는 칸에만 붙는다. */
   hint?: string;
+  /**
+   * 값을 **굵은 붉은색**으로 — 지금 켜지는 칸은 「고객 요청 납기일」 하나뿐이고,
+   * 그 건이 납기 임박일 때만이다(2026-10-19 사용자 요구). 🔴 기본은 거짓이고,
+   * 거짓일 때 나오는 HTML 은 예전과 한 글자도 다르지 않다 — 이 조각은 이 구역의
+   * 모든 칸이 함께 쓰므로 평소 모양이 바뀌면 열 칸이 한꺼번에 바뀐다.
+   */
+  emphasized?: boolean;
 }) {
   return (
     <div>
       <dt className="text-xs text-zinc-500 dark:text-zinc-400" title={hint}>
         {label}
       </dt>
-      <dd className="text-sm text-zinc-900 dark:text-zinc-50">{value}</dd>
+      <dd
+        className={
+          emphasized
+            ? `text-sm ${DUE_DATE_NEAR_TEXT_CLASS}`
+            : "text-sm text-zinc-900 dark:text-zinc-50"
+        }
+      >
+        {value}
+      </dd>
       {borrowedLabel && (
         <p className="text-xs text-zinc-500 dark:text-zinc-400">{borrowedLabel}</p>
       )}
@@ -52,6 +69,7 @@ export default function IntakeInfoSection({
   editingSection,
   referenceData,
   domesticOrderDueDates,
+  isDueDateNear,
   onStartEdit,
   onDone,
 }: {
@@ -65,6 +83,15 @@ export default function IntakeInfoSection({
    * 고르는 일은 화면이 아니라 도메인이 한다(위 Field 주석).
    */
   domesticOrderDueDates: readonly string[];
+  /**
+   * 이 건이 「납기 임박」인가 — 그러면 아래 「고객 요청 납기일」 **한 칸만** 굵은
+   * 붉은색이 된다(2026-10-19 사용자 요구).
+   *
+   * 🔴 여기서 재지 않고 받는 까닭은 머리 카드의 같은 배지와 같다 — "오늘"을
+   * 화면에서 만들면 서버가 그린 것과 어긋나고(hydration), 조건을 적으면 종 알림과
+   * 두 말이 된다. 서버가 종과 같은 함수로 재 온다([id]/page.tsx).
+   */
+  isDueDateNear: boolean;
   onStartEdit: () => void;
   onDone: () => void;
 }) {
@@ -123,6 +150,10 @@ export default function IntakeInfoSection({
               requestedDueDate.borrowed ? DUE_DATE_FROM_DOMESTIC_ORDER_LABEL : undefined
             }
             hint={REPAIR_CASE_DUE_DATE_LINK_NOTE}
+            // 🔴 이 한 칸에서만 켠다 — 「납기 임박」은 이 날짜에 대한 말이다.
+            // 빌려 왔다는 표시(아래 줄)는 함께 붉어지지 않는다: 그것은 경보가
+            // 아니라 어디서 온 값인가를 말하는 표시다.
+            emphasized={isDueDateNear}
           />
           <Field
             label="사내 목표 검수 완료일"

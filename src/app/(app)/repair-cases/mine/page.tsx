@@ -6,6 +6,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { listMyActiveRepairCases } from "@/lib/db/queries/repair-cases-mine";
+import { listRepairCasesWithDueDateNear } from "@/lib/db/queries/repair-case-due-date-notifications";
 import MyActiveWorkScreen from "@/components/repair-cases/mine/MyActiveWorkScreen";
 import MineTabs from "@/components/repair-cases/mine/MineTabs";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
@@ -60,13 +61,28 @@ export default async function MyActiveWorkPage() {
 
   const rows = await listMyActiveRepairCases(actingUser.id);
 
+  /**
+   * 「고객 요청 납기일」 글자를 굵은 붉은색으로 만들 건(2026-10-19 사용자 요구).
+   * 배지는 달지 않는다 — 사용자가 배지를 말한 곳은 전체 A/S 현황과 상세 둘이다.
+   *
+   * 🔴 **종 알림이 쓰는 그 조회를 그대로 부른다.** 전체 A/S 현황은 행에 실린 칸으로
+   * 직접 접지만(그쪽 page.tsx), 이 화면의 행에는 **실제 출하일 칸이 없어** 같은
+   * 판정을 접을 수 없다 — 출하일이 찍혔는데 단계가 뒤처진 건을 가려낼 수가 없다.
+   * 거기서 「대충 없는 셈 치고」 넘기면 종에는 없는 경보가 이 표에만 뜬다. 그래서
+   * 짐작 대신 이미 다 가려 둔 묶음을 받아 온다. 이 조회는 머리말의 종이 어차피 이
+   * 화면에서도 한 번 돌리는 것과 같은 것이고, 읽는 칸이 다섯뿐이다.
+   */
+  const dueDateNearCaseIds = (await listRepairCasesWithDueDateNear()).map(
+    (row) => row.repairCaseId
+  );
+
   // 탭 줄만 얹는다 — 이 화면이 보여 주는 것(조회·필터·정렬·표)은 한 글자도
   // 달라지지 않는다. 탭은 「내 작업기록」(/repair-cases/mine/work-records)과
   // 이 화면을 가른다(MineTabs).
   return (
     <div className="flex flex-col gap-4">
       <MineTabs />
-      <MyActiveWorkScreen rows={rows} />
+      <MyActiveWorkScreen rows={rows} dueDateNearCaseIds={dueDateNearCaseIds} />
     </div>
   );
 }

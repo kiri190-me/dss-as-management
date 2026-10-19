@@ -64,6 +64,7 @@ export default function RepairCaseDetailView({
   partRequestData,
   derivedServiceSummary,
   domesticOrderDueDates,
+  isDueDateNear,
   domesticOrderIssueDates,
   canWriteDomesticOrderIssueDates,
   usedParts,
@@ -122,6 +123,14 @@ export default function RepairCaseDetailView({
    * 보여 준다.
    */
   domesticOrderDueDates: readonly string[];
+  /**
+   * 이 건이 「납기 임박」인가 — 「인수 정보」의 고객 요청 납기일 글자를 굵은
+   * 붉은색으로 만든다(2026-10-19). 🔴 **서버가 재 온다**([id]/page.tsx): "오늘"을
+   * 화면에서 만들면 hydration 이 어긋나고, 조건을 적으면 종 알림과 두 말이 된다.
+   * 머리 카드의 같은 배지는 레이아웃이 따로 같은 함수로 재 온다(그 쪽은 이 화면의
+   * prop 을 볼 수 없다 — 레이아웃과 탭은 서로 props 를 주고받지 않는다).
+   */
+  isDueDateNear: boolean;
   /**
    * 「내자 정리 발행일」 구역의 재료 — 이 건에 연결된 내자 줄들의 **견적발행일 ·
    * 발주발행일**(지워지지 않은 줄만).
@@ -207,6 +216,7 @@ export default function RepairCaseDetailView({
           editingSection={editingSection}
           referenceData={referenceData}
           domesticOrderDueDates={domesticOrderDueDates}
+          isDueDateNear={isDueDateNear}
           onStartEdit={() => setEditingSection("INTAKE")}
           onDone={handleDone}
         />

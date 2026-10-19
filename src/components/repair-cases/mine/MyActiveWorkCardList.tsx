@@ -17,7 +17,14 @@ import { daysSinceIntake } from "@/lib/domain/date-only";
  * 태블릿 폭에서는 답답해서, 그쪽도 카드로 넘긴다. 제품 줄에 유·무상을 붙인
  * 것도 같은 이유다.
  */
-export default function MyActiveWorkCardList({ rows }: { rows: MyActiveWorkRow[] }) {
+export default function MyActiveWorkCardList({
+  rows,
+  dueDateNearCaseIds,
+}: {
+  rows: MyActiveWorkRow[];
+  /** 표와 **같은 값을 같은 부모가** 내려 준다 — MyActiveWorkTable 의 같은 prop 주석. */
+  dueDateNearCaseIds?: ReadonlySet<string>;
+}) {
   return (
     <div className={LIST_CARD_GRID}>
       {rows.map((row) => (
@@ -67,6 +74,7 @@ export default function MyActiveWorkCardList({ rows }: { rows: MyActiveWorkRow[]
                 <RequestedDueDateValue
                   customerRequestedDueDate={row.customerRequestedDueDate}
                   domesticOrderDueDates={row.domesticOrderDueDates}
+                  isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false}
                 />
               </dd>
             </div>

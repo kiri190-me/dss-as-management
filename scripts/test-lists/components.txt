@@ -639,3 +639,13 @@ src/components/repair-cases/detail/edit-button-class.test.ts
 # 새지 않는가) · 🔴 빌려 온 값에만 꼬리표 + 설명(title)이 붙는가 · 🔴 자기 칸이 있으면
 # 그 값이 이기고 꼬리표가 안 붙는가 · 양쪽 다 없으면 "-" 이고 「없음」을 지어내지 않는가.
 src/components/repair-cases/repair-case-borrowed-due-date.test.tsx
+
+# 「납기 임박」 배지가 전체 A/S 현황 표·카드와 상세 머리 줄에 서는가(2026-10-19 사용자
+# 요구). 같은 사실을 전날 만든 종 알림이 이미 말하고 있어서, 이 시험이 먼저 지키는 것은
+# **둘이 같은 말을 하는가**다 — 판정을 화면에도 서버 자리에도 새로 적지 않고 종이 쓰는
+# 세 함수를 묶은 isRepairCaseDueDateNear 하나만 부르는가를 원본으로 확인한다.
+# 못 박는 것: 🔴 서버가 짚어 준 건에만 서는가 · 🔴 표와 카드가 **둘 다** 서는가(표에만
+# 넣으면 창 크기로 보이는 사람이 갈린다) · 🔴 「납기 지연」과 **색이 다른가**(같으면
+# 「이미 늦음」과 「곧 늦음」이 구별되지 않는다) · 🔴 머리 줄에서 [폴더 열기] 묶음 안에
+# 서는가 · 🔴 그리는 조각들이 「오늘」을 스스로 만들지 않는가(hydration).
+src/components/repair-cases/due-date-near-badge.test.tsx

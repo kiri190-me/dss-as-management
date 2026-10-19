@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 
 import {
+  DueDateNearBadge,
   HoldBadge,
   OverdueBadge,
   PriorityBadge,
@@ -101,11 +102,23 @@ export default function DetailHeader({
   canEditEngineer,
   canEditReportNumber,
   referenceData,
+  isDueDateNear,
 }: {
   resolved: ResolvedRepairCase;
   canEditEngineer: boolean;
   canEditReportNumber: boolean;
   referenceData: IntakeReferenceData | null;
+  /**
+   * 「납기 임박」인가 — 고객 요청 납기일이 오늘부터 7일 안으로 다가왔는가
+   * (2026-10-19 사용자 요구로 배지가 한 장 늘었다).
+   *
+   * 🔴 **레이아웃이 재 온다.** 이 조각이 스스로 재지 않는 까닭이 둘이다: 「오늘」을
+   * 화면에서 만들면 서버가 그린 것과 어긋나고(hydration), 빌려 올 내자 납기요청일이
+   * 여기에는 없다 — 그 값을 읽는 곳은 서버뿐이다([id]/layout.tsx). 조건 자체도
+   * 종 알림과 같은 함수 하나로 모여 있다(domain/notifications.ts 의
+   * isRepairCaseDueDateNear).
+   */
+  isDueDateNear: boolean;
 }) {
   const uiText = useUiText();
   // 훅은 어떤 갈래에서도 같은 차례로 불려야 하므로 이른 반환보다 먼저 부른다.
@@ -167,6 +180,10 @@ export default function DetailHeader({
           <HoldBadge isOnHold={effective.holdState?.isOnHold ?? false} />
           <WorkflowOverrideBadge hasOverride={effective.hasWorkflowOverride} />
           <SourceBadge source={effective.source} />
+          {/* 🔴 「납기 임박」은 **같은 묶음 안**이다 — 배지만 따로 서던 줄을
+              2026-10-06 에 없앴고(아래 ⑤ 주석·detail-header-placement.test.ts),
+              일곱째도 그 규율을 따른다. 색은 「납기 지연」과 갈라 둔다(badges.tsx). */}
+          <DueDateNearBadge isDueDateNear={isDueDateNear} />
         </div>
         {/* 🔴 값 알약 묶음 — 조각마다 연한 배경과 짧은 이름표를 쓴다. 가운뎃점
             구분자는 없다(알약이 가른다). 배경은 상태 배지가 쓰는 회색과 같은 단계고
