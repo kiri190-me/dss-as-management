@@ -429,7 +429,22 @@ export default function PartRequestSection({
     );
   }
 
-  /** 교산 품번 · 도번 — 🔴 **값이 있는 것만** 이름표를 달아 잇는다(`-` 는 값이 아니다). */
+  /**
+   * 값을 눈에 띄게 하는 색 (2026-10-19 사용자 결정) — 🔴 **값에만** 입힌다.
+   * 이름표(「도번」 · 「재고」)는 **회색 그대로**다: 색이 이름표까지 번지면 눈이 어디에 멎어야
+   * 하는지가 다시 흐려진다. 🔵 이 저장소가 값을 강조할 때 쓰는 그 파란색이고, **다크 짝이
+   * 붙어 있다** — 밝은 쪽만 적으면 어두운 화면에서 글자가 배경에 잠긴다.
+   */
+  const VALUE_HIGHLIGHT = "text-blue-700 dark:text-blue-400";
+
+  /**
+   * 교산 품번 · 도번 — 🔴 **값이 있는 것만** 이름표를 달아 잇는다(`-` 는 값이 아니다).
+   *
+   * 🔴 **도번은 값에만 색을 입힌다**(2026-10-19) — 교산 품번은 회색 그대로다. 어느 것이
+   *    도번인지는 글자를 짐작해 견주지 않고 **그 이름표를 지은 한 곳**에 물어본다
+   *    (`PART_FIELD_LABELS.drawingNo`). 「도번」을 여기 박아 두면 그 말이 바뀌는 날 오류 없이
+   *    **색만 조용히 빠진다**.
+   */
   function renderIdLabels(part: InventoryPart) {
     const labels = inventoryPartIdLabels(part);
     if (labels.length === 0) return null;
@@ -438,9 +453,36 @@ export default function PartRequestSection({
         {labels.map((item, index) => (
           <span key={item.label}>
             {index > 0 && " · "}
-            {item.label} {item.value}
+            {item.label}{" "}
+            {item.label === PART_FIELD_LABELS.drawingNo ? (
+              <span className={VALUE_HIGHLIGHT}>{item.value}</span>
+            ) : (
+              item.value
+            )}
           </span>
         ))}
+      </>
+    );
+  }
+
+  /**
+   * 재고 한 덩어리를 **그릴 때만** 세 토막으로 가른다 — 앞(이름표) · 수 · 뒤(언제 잰 값인지).
+   * 🔴 **수에만** 색이 들어간다(2026-10-19): 「재고」와 「(불러온 때 기준)」은 회색 그대로다.
+   *
+   * 🔴 **글자를 여기서 다시 짓지 않는다.** 그 말은 도메인 한 곳(`inventoryStockText`)이 쥐고
+   *    있고 **다른 화면도 그 함수를 쓴다** — 반환값을 건드리면 여기서 색을 입히자고 저쪽
+   *    글자까지 바꾸는 일이 된다. 그래서 받은 글자를 그대로 두고 **그리는 자리에서만** 가른다.
+   * 🔵 못 가르면(글자 모양이 바뀌면) **색 없이 통째로** 그린다 — 색이 빠지는 것은 아쉬운
+   *    일이지만, 수가 사라지거나 꼬리말이 떨어지는 것은 사람이 수량을 잘못 정하는 일이다.
+   */
+  function renderStockText(text: string) {
+    const parts = /^(\D*)(\d[^(]*)(.*)$/.exec(text);
+    if (!parts) return text;
+    return (
+      <>
+        {parts[1]}
+        <span className={VALUE_HIGHLIGHT}>{parts[2]}</span>
+        {parts[3]}
       </>
     );
   }
@@ -535,7 +577,7 @@ export default function PartRequestSection({
                     <span className="block text-zinc-500">
                       {renderIdLabels(part)}
                       {hasIdLabels && " · "}
-                      {part.owner.label || part.owner.code} · {inventoryStockText(part)}
+                      {part.owner.label || part.owner.code} · {renderStockText(inventoryStockText(part))}
                     </span>
                     {noteLine && <span className="block text-zinc-400">{noteLine}</span>}
                   </span>
@@ -594,7 +636,7 @@ export default function PartRequestSection({
                           {inventoryPartIdLabels(part).length > 0 && " · "}
                           {/* 🔴 담은 줄에도 재고를 보인다(요청 ④) — 수량을 치는 자리가 여기다.
                               그 수가 **「지금」이 아니라는 것**이 숫자에 붙어 있다. */}
-                          {inventoryStockText(part)}
+                          {renderStockText(inventoryStockText(part))}
                         </span>
                       )}
                     </td>

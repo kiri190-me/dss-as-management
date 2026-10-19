@@ -356,3 +356,59 @@ describe("🔴 고객사 품명 채우기 — 그 자리에서", () => {
     assert.match(source, /setFillValue\(""\);\s*setFillTarget\(part\);/);
   });
 });
+
+/**
+ * ============================================================================
+ * 🔴 도번과 재고는 **값만** 눈에 띄게 (2026-10-19 사용자 결정)
+ * ============================================================================
+ * 후보 줄의 셋째 줄(교산 품번 · 도번 · 소유 · 재고)이 통째로 한 가지 회색이라, 사람이 가장
+ * 자주 짚어 보는 **도번**과 **재고**가 나머지에 묻혀 있었다. 둘만 골라 색을 준다.
+ *
+ * 🔴 **이름표가 아니라 값이다** — 회색 「도번」 + 색 있는 「D-1420」. 이름표까지 칠하면 줄이
+ *    다시 한 덩어리가 되어 아무것도 도드라지지 않는다.
+ * 🔴 **찾은 줄과 담은 줄 둘 다**다. 한쪽만 칠하면 같은 부품이 두 자리에서 다르게 보인다.
+ * 🔵 색 자체가 맞는지는 눈으로 볼 일이고, 여기서 잴 수 있는 것은 **색이 붙는 자리**다 —
+ *    가려내는 자를 화면이 따로 적고 있지는 않은가, 두 자리에 다 붙었는가, 다크 짝이 있는가.
+ * ============================================================================
+ */
+describe("🔴 도번과 재고는 값만 눈에 띄게", () => {
+  test("㉠ 색은 한 곳에 적어 두고 **다크 짝**이 붙어 있다", () => {
+    assert.match(source, /text-blue-700 dark:text-blue-400/, "값을 강조하는 색이 없다");
+    // 🔴 밝은 쪽만 적으면 어두운 화면에서 글자가 배경에 잠긴다(이웃 고객사 품명 줄에는 짝이 있다).
+    assert.equal(
+      [...source.matchAll(/text-blue-700(?! dark:text-blue-400)/g)].length,
+      0,
+      "다크 짝 없는 파란색이 있다"
+    );
+  });
+
+  test("㉡ 도번 **값**만 — 어느 것이 도번인지는 이름표를 지은 한 곳에 묻는다", () => {
+    // 🔴 `inventoryPartIdLabels` 는 교산 품번과 도번을 **한 배열**로 돌려준다. 가려내지 않으면
+    //    둘 다 칠해지거나 둘 다 안 칠해진다.
+    assert.match(source, /item\.label === PART_FIELD_LABELS\.drawingNo/, "도번을 가려내지 않는다");
+    // 🔴 「도번」을 화면에 박아 두고 견주면, 그 말이 바뀌는 날 오류 없이 **색만 조용히 빠진다**.
+    assert.doesNotMatch(source, /=== "도번"/, "이름표 글자를 박아 두고 견준다");
+    // 🔴 교산 품번은 회색 그대로다(사용자 결정: 도번과 재고 둘만).
+    assert.doesNotMatch(source, /PART_FIELD_LABELS\.kyosanPartNo/, "교산 품번에도 색을 입힌다");
+  });
+
+  test("㉢ 재고는 **수**에만 — 찾은 줄과 담은 줄 둘 다", () => {
+    assert.equal(
+      [...source.matchAll(/renderStockText\(inventoryStockText\(part\)\)/g)].length,
+      2,
+      "두 자리 중 한쪽에만 색이 들어갔다 — 같은 부품이 두 줄에서 다르게 보인다"
+    );
+    const cart = source.slice(source.indexOf("{cart.map((line) => {"), source.indexOf("</table>"));
+    assert.match(cart, /renderStockText\(inventoryStockText\(part\)\)/, "담은 줄의 재고에 색이 없다");
+  });
+
+  test("㉢ 🔴 글자는 도메인 것을 그대로 쓴다 — 그릴 때만 가른다", () => {
+    // 🔴 색을 입히자고 `inventoryStockText` 의 반환값을 바꾸면 **다른 화면까지** 따라 바뀐다.
+    //    그래서 받은 글자를 그대로 두고 그리는 자리에서만 토막 낸다.
+    assert.match(source, /function renderStockText\(text: string\)/, "가르는 자리가 없다");
+    // 🔴 꼬리말을 화면이 따로 적기 시작하면 도메인 한 곳이 쥔 말과 갈린다.
+    assert.doesNotMatch(source, /INVENTORY_STOCK_AS_OF_NOTE/, "꼬리말을 화면이 다시 적는다");
+    // 🔵 못 가를 때 색을 포기하고 **글자는 통째로** 내놓는다 — 수가 사라지면 수량을 잘못 정한다.
+    assert.match(source, /if \(!parts\) return text;/, "못 가를 때 글자가 사라진다");
+  });
+});
