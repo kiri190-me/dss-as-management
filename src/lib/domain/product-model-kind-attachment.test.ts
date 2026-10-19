@@ -219,12 +219,17 @@ describe("종류 서류가 받는 분류 — 모델 첨부와 **같은 집합**"
     }
   });
 
-  test("주인 없는 분류 · 견적서 전용 두 칸 · 수리 건 전용 통문증은 거절된다", () => {
+  test("주인 없는 분류 · 견적서 전용 두 칸 · 수리 건 전용 통문증 · 수리 의뢰서는 거절된다", () => {
+    // 🔴 이 배열은 **표본이지 보호선이 아니다** — 진짜 보호선은 위 「전 분류가 같은
+    // 답이다」 시험이고, 그쪽이 ATTACHMENT_CATEGORY_CODES 전부를 모델 쪽 판정과
+    // 대조한다. 그래서 새 분류가 늘 때 여기 한 줄을 빠뜨려도 조용히 새어 나가지
+    // 않는다. 여기는 **지금 거절되는 것이 무엇인지 사람이 읽는 자리**다.
     for (const category of [
       "SCREENSHOT",
       "SIGNED_QUOTE_PDF",
       "QUOTE_EXCEL",
       "PASS_SLIP",
+      "REPAIR_REQUEST",
     ] as const) {
       assert.equal(isAttachmentCategoryAllowedForProductModelKind(category), false, category);
     }
