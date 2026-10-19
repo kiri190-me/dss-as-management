@@ -15,7 +15,11 @@ import {
   roleReceivesNotification,
   type NotificationSettingsOverrides,
 } from "./notification-settings";
-import { APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS, NOTIFICATION_KINDS } from "./notifications";
+import {
+  APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS,
+  NOTIFICATION_KINDS,
+  REPAIR_CASE_DUE_DATE_NOTIFICATION_WINDOW_DAYS,
+} from "./notifications";
 import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
 import { ROLE_CODES, type Role } from "./types";
 
@@ -68,6 +72,14 @@ function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
     // 그 결재선에도 역할 제한이 없다. 결재를 막는 decideQuoteApproval 은 아예
     // 권한 영역을 묻지 않으므로, 역할을 하나라도 빼면 「지정은 됐는데 알림은 못
     // 받는」 결재자가 생긴다.
+    return true;
+  }
+  if (kind === "REPAIR_CASE_DUE_DATE_NEAR") {
+    // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로
+    // 적는다 — 다섯 역할 전부(2026-10-19 사용자 결정 「모두에게 보인다」).
+    // 앞의 결재 대기 셋과 답은 같지만 까닭이 다르다: 저쪽은 결재선 지정이
+    // 누가 받는지를 정해서이고, 이쪽은 **가를 축이 아예 없어서**다 — 납기가
+    // 다가온 건은 네 역할에게 각자 다른 모양으로 걸린다.
     return true;
   }
   if (kind === "APPROVAL_GRANTED" || kind === "APPROVAL_REJECTED") {
@@ -196,6 +208,40 @@ test("견적서 결재 대기의 설명은 누가 받는지와 절차가 없을 
   assert.ok(description.includes("지정된"), description);
   assert.ok(description.includes("최고관리자"), description);
   assert.ok(description.includes("절차"), description);
+});
+
+test("🔴 납기 임박의 기본값은 켜짐·다섯 역할 전부 받음이다 — 모두에게 보인다", () => {
+  // 2026-10-19 사용자 결정. 여기서 어느 역할이 빠지면 그 사람은 자기 몫의
+  // 납기가 다가오는 것을 모른 채 지나가고, 그 실패는 화면에 아무 표시도
+  // 남기지 않는다(관리자가 나중에 이 화면에서 끌 수는 있다).
+  assert.equal(defaultNotificationKindEnabled("REPAIR_CASE_DUE_DATE_NEAR"), true, "켜진 채로 태어난다");
+  for (const role of ROLE_CODES) {
+    assert.equal(defaultRoleReceivesNotification("REPAIR_CASE_DUE_DATE_NEAR", role), true, role);
+    assert.equal(deliversNotification("REPAIR_CASE_DUE_DATE_NEAR", role, NO_NOTIFICATION_SETTINGS), true, role);
+  }
+});
+
+test("납기 임박의 이름·설명·색 — 창의 날짜 수는 상수에서 오고, 색은 기존 일곱과 갈라진다", () => {
+  const meta = NOTIFICATION_KIND_META.REPAIR_CASE_DUE_DATE_NEAR;
+  assert.equal(meta.label, "납기 임박");
+  // 관리자가 이 설명만 읽고 무엇을 끄는지 알아야 한다 — 며칠 창인가, 날짜가
+  // 어디서 오는가, 언제 안 뜨는가.
+  assert.ok(
+    meta.description.includes(`${REPAIR_CASE_DUE_DATE_NOTIFICATION_WINDOW_DAYS}일`),
+    meta.description
+  );
+  assert.ok(meta.description.includes("내자"), meta.description);
+  assert.ok(meta.description.includes("뜨지 않습니다"), meta.description);
+
+  // 색상 이름까지 달라야 한다(전체 유일성은 위 시험이 본다). 여기서는 기존
+  // 일곱 색 어느 것도 다시 쓰지 않는다는 것만 못 박는다.
+  const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
+  const existing = ["amber", "sky", "red", "violet", "fuchsia", "lime", "pink"];
+  const hue = hueOf(meta.toneClassName);
+  assert.ok(hue && !existing.includes(hue), `납기 임박이 기존 색(${hue})을 쓴다`);
+  // 🔴 초록(green·emerald)은 고르지 않는다 — 「됐다」로 읽혀 경보가 「괜찮다」로
+  // 보인다. 승인 완료에 lime 을 준 바로 그 이유의 반대편이다(META 머리말).
+  assert.ok(hue !== "green" && hue !== "emerald" && hue !== "lime", `납기 임박이 초록(${hue})이다`);
 });
 
 test("🔴 승인 완료·반려됨의 기본값은 켜짐·다섯 역할 전부 받음이다 — 요청자 본인에게만 가는 알림이다", () => {

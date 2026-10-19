@@ -15,11 +15,13 @@ import {
   buildQuoteApprovalNotification,
   buildApprovalGrantedNotification,
   buildApprovalRejectedNotification,
+  buildRepairCaseDueDateNearNotification,
 } from "@/lib/domain/notifications";
 import type { Role } from "@/lib/domain/types";
 import { listPartIssueRequestsPendingMyApproval } from "./inventory-part-issue-requests";
 import { listQuoteApprovalsPendingMyApproval } from "./quote-approvals-pending";
 import { listMyGrantedApprovalOutcomes, listMyRejectedApprovalOutcomes } from "./approval-outcome-notifications";
+import { listRepairCasesWithDueDateNear } from "./repair-case-due-date-notifications";
 import { listAcknowledgedNotificationKeys } from "./notification-acknowledgements";
 
 /**
@@ -40,6 +42,12 @@ import { listAcknowledgedNotificationKeys } from "./notification-acknowledgement
  *       아니라 역할이고, 조회 자체는 "지금 처리 대기 중인 요청 전부"라 누가
  *       봐도 같은 결과다. 그래서 조회를 부르기 **전에** 역할을 보고, 아니면
  *       빈 배열로 끝낸다 — 권한 없는 사람 앞에서 그 조회는 아예 돌지 않는다.
+ *  (다) **아무도 거르지 않는다** — 납기 임박이 그렇다. 조회는 "지금 납기가
+ *       다가온 건 전부"라 누가 봐도 같은 결과인데, (나)와 달리 **받을 사람을
+ *       가를 축이 없다**: 납기가 다가온 건은 엔지니어·관리자·영업·재고 담당자
+ *       에게 각자 다른 모양으로 걸린다(2026-10-19 사용자 결정 — 모두에게).
+ *       그래서 load 가 사용자 id 도 역할도 받지 않는다. 좁히는 일은 알림 설정
+ *       화면이 한다 — 아래 「설정은 윗단 필터다」 절 그대로다.
  * 판정 자체는 이 파일이 쓰지 않는다. auth/inventory-authorization.ts의 순수
  * 함수를 부른다(화면·mutation이 쓰는 그 파일).
  *
@@ -58,6 +66,12 @@ import { listAcknowledgedNotificationKeys } from "./notification-acknowledgement
  *  1. domain/notifications.ts의 NOTIFICATION_KINDS에 키를 추가하고
  *  2. 그 종류를 NotificationItem으로 바꾸는 순수 build 함수를 같은 파일에 두고
  *  3. 아래 NOTIFICATION_SOURCES에 { kind, load } 하나를 더 넣는다.
+ *  4. domain/notification-settings.ts의 NOTIFICATION_KIND_META에 이름·설명·색을
+ *     채우고,
+ *  5. 같은 파일의 defaultNotificationKindEnabled·defaultRoleReceivesNotification
+ *     에 case 를 더한다. 🔴 4·5를 빠뜨리면 기본값이 false로 떨어져 **등록해 두고
+ *     한 줄도 안 뜨는** 종류가 된다(두 함수의 default 절). 빠뜨림 자체는
+ *     domain/notification-settings.test.ts가 곧바로 잡는다.
  * 화면(NotificationBell)은 손대지 않는다. 그것이 이 구조의 목적이다.
  *
  * 다만 종류를 늘리는 일은 UI 작업이 아니라 **"이 알림을 누구에게 보여도
@@ -214,6 +228,31 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
           quoteNumber: item.quoteNumber,
           routeStepOrder: item.routeStepOrder,
           requestedByName: item.requestedByName,
+        })
+      );
+    },
+  },
+  {
+    kind: "REPAIR_CASE_DUE_DATE_NEAR",
+    load: async () => {
+      // 🔴 역할로 거르지 않는다 — **모두에게 간다**(2026-10-19 사용자 결정).
+      // 재고 부족과 같은 「상태가 그러한 것」이지만 (나)형이 아니다: 저쪽은 재고를
+      // 채울 사람이 정해져 있어 조회를 부르기 전에 역할을 보는데, 납기가 다가온
+      // 건은 엔지니어·관리자·영업·재고 담당자에게 각자 다른 모양으로 걸려 가를
+      // 축이 없다. 그래서 load 가 역할을 **받지도** 않는다. 좁히고 싶으면 알림
+      // 설정 화면에서 역할 스위치를 끈다(윗단 필터 — 이 파일 머리말).
+      //
+      // 「무엇을 알릴 것인가」도 여기서 정하지 않는다 — 화면이 쓰는 그 함수로
+      // 날짜를 구하고 창·출하 완료·휴지통을 거르는 일은 전부 저 조회 안에 있다
+      // (queries/repair-case-due-date-notifications.ts). 여기서 하는 일은 모양
+      // 변환뿐이다.
+      const soon = await listRepairCasesWithDueDateNear();
+      return soon.map((row) =>
+        buildRepairCaseDueDateNearNotification({
+          repairCaseId: row.repairCaseId,
+          intakeNumber: row.intakeNumber,
+          dueDate: row.dueDate,
+          borrowed: row.borrowed,
         })
       );
     },

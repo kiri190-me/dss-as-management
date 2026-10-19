@@ -8,6 +8,7 @@ import {
   NOTIFICATION_KINDS,
   PART_ISSUE_APPROVAL_LABEL,
   QUOTE_APPROVAL_LABEL,
+  REPAIR_CASE_DUE_DATE_NOTIFICATION_WINDOW_DAYS,
   approvalOutcomeNotificationWindowStart,
   buildApprovalGrantedNotification,
   buildApprovalNotification,
@@ -16,12 +17,21 @@ import {
   buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
   buildQuoteApprovalNotification,
+  buildRepairCaseDueDateNearNotification,
   countNotificationTargets,
   countNotificationTargetsByKind,
+  isRepairCaseDueDateWithinNotificationWindow,
+  isRepairCaseShipmentFinished,
   previewApprovalRejectionReason,
+  repairCaseDueDateNotificationWindowEnd,
   type ApprovalOutcomeTarget,
   type NotificationItem,
 } from "./notifications";
+import { addCalendarDays, toKstDateOnly } from "./date-only";
+import {
+  DUE_DATE_FROM_DOMESTIC_ORDER_LABEL,
+  resolveRepairCaseRequestedDueDate,
+} from "./requested-due-date-link";
 import { inventoryPartRequestStatusLabels, stockOwnerLabels } from "./inventory-types";
 import { LABELS as APPROVAL_TYPE_LABELS } from "./local/workflow/shipment-approval-checklist";
 import { quoteEditHref } from "./quote-new-link";
@@ -109,7 +119,7 @@ test("등록된 모든 종류가 개수 표에 키로 들어 있다", () => {
   }
 });
 
-test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부족·불출 승인 대기·견적서 결재 대기·승인 완료·반려됨 일곱이다", () => {
+test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부족·불출 승인 대기·견적서 결재 대기·납기 임박·승인 완료·반려됨 여덟이다", () => {
   // 종류를 늘리는 것은 "누구에게 보여도 되는가"를 다시 판정해야 하는 일이라
   // 별도 작업으로 다룬다. 늘어난 것을 여기서 알아차리게 둔다 — 그래서 목록
   // 전체를 그대로 못 박는다(있는지만 보는 검사로 무르게 만들지 않는다).
@@ -146,6 +156,11 @@ test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부
   // (queries/approval-outcome-notifications.ts 의 `requested_by_user_id = 나`). 남의
   // 결재 결과를 요구할 입구가 없고, 역할로 거르지 않는 (가)형이다. 할 일이 아니라
   // 정보성이라 눌러서 확인하면 사라진다(domain/notification-acknowledgement.ts).
+  //
+  // REPAIR_CASE_DUE_DATE_NEAR 은 판정이 **아예 없다** — 2026-10-19 사용자 결정으로
+  // 모든 역할이 받는다. 대상이 사람도 역할도 아니라 「지금 납기가 다가온 건」이라는
+  // 상태뿐이고, 그것을 챙기는 일은 엔지니어·관리자·영업·재고 담당자에게 각자 다른
+  // 모양으로 걸려 가를 축이 없다. 좁히는 일은 알림 설정 화면의 역할 스위치가 한다.
   assert.deepEqual(
     [...NOTIFICATION_KINDS],
     [
@@ -154,6 +169,7 @@ test("등록된 알림 종류는 결재 요청·부품 요청 대기·재고 부
       "PART_STOCK_BELOW_MINIMUM",
       "PART_ISSUE_APPROVAL_PENDING",
       "QUOTE_APPROVAL_PENDING",
+      "REPAIR_CASE_DUE_DATE_NEAR",
       "APPROVAL_GRANTED",
       "APPROVAL_REJECTED",
     ]
@@ -553,6 +569,260 @@ test("🔴 견적서 결재 대기는 판정을 새로 적지 않고 지정 관�
   );
   // 🔴 처리된 건은 뜨지 않는다 — 후보가 아직 결정되지 않은 행뿐이다.
   assert.ok(pendingSource.includes('eq(quoteApprovals.status, "REQUESTED")'), "열린 요청으로 좁히지 않는다");
+});
+
+// ═══════════════════════════════ 납기 임박 — 고객 요청 납기일이 다가온 수리 건
+
+/**
+ * 시험이 쓰는 「지금」. **시각을 박아 넣는다** — 안 그러면 오늘이 며칠이냐에
+ * 따라 통과·실패가 갈린다(결재 결과 조회가 `now` 를 옵션으로 받는 것과 같은
+ * 이유: queries/approval-outcome-notifications.ts).
+ *
+ * UTC 03:00 = 한국 12:00 이라 한국 날짜가 2026-10-19 로 또렷하다. 날짜를
+ * 손으로 적지 않고 toKstDateOnly/addCalendarDays 로 만드는 것은, 이 시험이
+ * 「오늘을 어떻게 구하는가」까지 함께 보기 위해서다.
+ */
+const DUE_NOW = new Date("2026-10-19T03:00:00Z");
+const TODAY_KST = toKstDateOnly(DUE_NOW);
+const daysFromToday = (days: number) => addCalendarDays(TODAY_KST, days);
+
+test("창은 7일이고, 상수 하나가 그 숫자를 쥔다 — 마지막 날은 오늘 + 7일이다", () => {
+  assert.equal(REPAIR_CASE_DUE_DATE_NOTIFICATION_WINDOW_DAYS, 7);
+  assert.equal(TODAY_KST, "2026-10-19", "기준 시각의 한국 날짜가 바뀌면 아래 단언의 뜻이 달라진다");
+  assert.equal(repairCaseDueDateNotificationWindowEnd(DUE_NOW), "2026-10-26");
+  assert.equal(
+    repairCaseDueDateNotificationWindowEnd(DUE_NOW),
+    daysFromToday(REPAIR_CASE_DUE_DATE_NOTIFICATION_WINDOW_DAYS),
+    "창의 마지막 날이 상수에서 오지 않는다"
+  );
+});
+
+test("🔴 납기일이 오늘 + 3일이면 뜬다", () => {
+  assert.equal(isRepairCaseDueDateWithinNotificationWindow(daysFromToday(3), DUE_NOW), true);
+});
+
+test("🔴 납기일이 오늘 + 8일이면 안 뜬다 — 창 밖이다", () => {
+  assert.equal(isRepairCaseDueDateWithinNotificationWindow(daysFromToday(8), DUE_NOW), false);
+  // 경계 바로 앞은 뜬다. 이 짝이 없으면 창이 통째로 닫혀 있어도 위 단언은 통과한다.
+  assert.equal(isRepairCaseDueDateWithinNotificationWindow(daysFromToday(7), DUE_NOW), true);
+});
+
+test("오늘이 납기면 뜬다 — 창은 오늘을 포함한다", () => {
+  assert.equal(isRepairCaseDueDateWithinNotificationWindow(TODAY_KST, DUE_NOW), true);
+});
+
+test("🔴 이미 지난 납기는 안 뜬다 — 이번 알림의 범위 밖이다(지연은 isRepairCaseOverdue 가 따로 본다)", () => {
+  assert.equal(isRepairCaseDueDateWithinNotificationWindow(daysFromToday(-1), DUE_NOW), false);
+  assert.equal(isRepairCaseDueDateWithinNotificationWindow("2020-01-01", DUE_NOW), false);
+});
+
+test("🔴 납기일이 미기재면 안 뜬다", () => {
+  // 2026-10-19 사용자 결정 — 「납기일 미기재 시 알림 없음」.
+  assert.equal(isRepairCaseDueDateWithinNotificationWindow(null, DUE_NOW), false);
+
+  // 실제로 쓰이는 모양 그대로: 양쪽 어디에도 날짜가 없으면 그 함수가 null 을
+  // 주고, 그 null 이 그대로 창 판정에 들어간다.
+  const resolved = resolveRepairCaseRequestedDueDate({
+    customerRequestedDueDate: null,
+    domesticOrderDueDates: [],
+  });
+  assert.equal(resolved.dueDate, null);
+  assert.equal(isRepairCaseDueDateWithinNotificationWindow(resolved.dueDate, DUE_NOW), false);
+});
+
+test("🔴 수리 건 칸은 비었지만 내자에서 빌려 온 날짜가 창 안이면 뜬다", () => {
+  // 사용자 결정의 핵심이다 — 화면(상세정보)이 이미 그 날짜를 그리고 있으므로,
+  // 화면에는 날짜가 보이는데 알림만 안 뜨는 일이 없어야 한다.
+  const resolved = resolveRepairCaseRequestedDueDate({
+    customerRequestedDueDate: null,
+    domesticOrderDueDates: [daysFromToday(3), daysFromToday(20)],
+  });
+  assert.equal(resolved.dueDate, daysFromToday(3), "내자 날짜 중 가장 이른 하루를 빌려 온다");
+  assert.equal(resolved.borrowed, true);
+  assert.equal(isRepairCaseDueDateWithinNotificationWindow(resolved.dueDate, DUE_NOW), true);
+});
+
+test("수리 건 칸이 공백뿐이어도 내자에서 빌려 온다 — 화면과 같은 접기(foldBlankToNull)", () => {
+  const resolved = resolveRepairCaseRequestedDueDate({
+    customerRequestedDueDate: "   ",
+    domesticOrderDueDates: [daysFromToday(2)],
+  });
+  assert.equal(resolved.borrowed, true);
+  assert.equal(isRepairCaseDueDateWithinNotificationWindow(resolved.dueDate, DUE_NOW), true);
+});
+
+test("빌려 온 날짜가 창 밖이면 안 뜬다 — 빌려 왔다는 사실이 창을 넓히지 않는다", () => {
+  const resolved = resolveRepairCaseRequestedDueDate({
+    customerRequestedDueDate: null,
+    domesticOrderDueDates: [daysFromToday(30)],
+  });
+  assert.equal(resolved.borrowed, true);
+  assert.equal(isRepairCaseDueDateWithinNotificationWindow(resolved.dueDate, DUE_NOW), false);
+});
+
+test("🔴 오늘은 한국 날짜다 — UTC 로 재면 하루가 밀린다", () => {
+  // 한국 10/20 00:30(=UTC 10/19 15:30). UTC 날짜는 아직 10/19 라, UTC 로 재는
+  // 구현에서는 10/27 이 아직 창 안으로 보인다.
+  const justAfterKstMidnight = new Date("2026-10-19T15:30:00Z");
+  assert.equal(toKstDateOnly(justAfterKstMidnight), "2026-10-20");
+  assert.equal(repairCaseDueDateNotificationWindowEnd(justAfterKstMidnight), "2026-10-27");
+  assert.equal(isRepairCaseDueDateWithinNotificationWindow("2026-10-27", justAfterKstMidnight), true);
+  assert.equal(
+    isRepairCaseDueDateWithinNotificationWindow("2026-10-19", justAfterKstMidnight),
+    false,
+    "한국에서는 어제인 날짜가 아직 창 안이다 — UTC 로 재고 있다"
+  );
+});
+
+test("🔴 이미 나간 건은 뺀다 — 출하 완료 상태이거나 출하일이 찍혀 있다", () => {
+  // 「납기 지연」을 가리는 isRepairCaseOverdue 가 보는 바로 그 두 사실이다.
+  // 상태 하나에만 기대면, 출하일은 찍혀 있는데 단계가 따라가지 못한 건에
+  // 「납기 임박」이 붙는 모순된 종이 된다.
+  assert.equal(
+    isRepairCaseShipmentFinished({ status: "SHIPMENT_COMPLETED", actualShipmentDate: null }),
+    true
+  );
+  assert.equal(
+    isRepairCaseShipmentFinished({ status: "WAITING_SHIPMENT", actualShipmentDate: "2026-10-18" }),
+    true,
+    "출하일이 찍힌 건은 단계가 뒤처져 있어도 이미 나간 것이다"
+  );
+  assert.equal(isRepairCaseShipmentFinished({ status: "IN_REPAIR", actualShipmentDate: null }), false);
+  // 평탄화 상태가 비어 있는 단계가 아직 있다(workflow_steps.repair_status 는
+  // nullable). 그런 건은 「아직 안 나갔다」로 둔다 — 조용히 빠지는 쪽이 나쁘다.
+  assert.equal(isRepairCaseShipmentFinished({ status: null, actualShipmentDate: null }), false);
+});
+
+test("납기 임박 알림은 인수번호를 굵게, 날짜를 detail 에 내고, 상세 첫 화면으로 링크한다", () => {
+  const item = buildRepairCaseDueDateNearNotification({
+    repairCaseId: "case-due-1",
+    intakeNumber: "D261012",
+    dueDate: "2026-10-22",
+    borrowed: false,
+  });
+
+  assert.equal(item.kind, "REPAIR_CASE_DUE_DATE_NEAR");
+  assert.equal(item.id, "REPAIR_CASE_DUE_DATE_NEAR:case-due-1");
+  assert.equal(item.targetKey, "case-due-1");
+  assert.equal(item.subject, "D261012");
+  // 종류 이름(「납기 임박」)은 종 패널이 이 줄 위에 따로 적는다 — 여기 또 적으면
+  // 잘리는 자리의 폭만 먹는다(다른 종류들과 같은 갈림).
+  assert.equal(item.detail, "2026-10-22");
+  assert.equal(item.href, "/repair-cases/case-due-1");
+  assert.equal(
+    item.href,
+    repairCaseDetailHrefs("case-due-1").root,
+    "주소는 탭 헬퍼와 같은 것을 써야 한다"
+  );
+});
+
+test("🔴 빌려 온 날짜에는 표시가 붙는다 — 상세정보 화면이 쓰는 그 글자 그대로", () => {
+  const borrowed = buildRepairCaseDueDateNearNotification({
+    repairCaseId: "case-due-2",
+    intakeNumber: "D261013",
+    dueDate: "2026-10-22",
+    borrowed: true,
+  });
+  assert.equal(borrowed.detail, `2026-10-22 · ${DUE_DATE_FROM_DOMESTIC_ORDER_LABEL}`);
+  // 글자를 새로 쓰면 같은 것을 두 말로 부르게 된다. 한쪽만 고쳐지면 여기서 깨져야 한다.
+  assert.ok(borrowed.detail.includes("내자 납기요청일"), borrowed.detail);
+});
+
+test("납기 임박은 접수 건 단위로 센다 — 결재 배지를 건드리지 않는다", () => {
+  const items: NotificationItem[] = [
+    buildRepairCaseDueDateNearNotification({
+      repairCaseId: "case-a",
+      intakeNumber: "D261001",
+      dueDate: "2026-10-22",
+      borrowed: false,
+    }),
+    buildRepairCaseDueDateNearNotification({
+      repairCaseId: "case-b",
+      intakeNumber: "D261002",
+      dueDate: "2026-10-23",
+      borrowed: true,
+    }),
+    buildApprovalNotification({
+      repairCaseId: "case-a",
+      intakeNumber: "D261001",
+      approvalType: "REPAIR_INSPECTION",
+    }),
+  ];
+
+  const counts = countNotificationTargetsByKind(items);
+  assert.equal(counts.REPAIR_CASE_DUE_DATE_NEAR, 2);
+  assert.equal(counts.REPAIR_CASE_APPROVAL, 1, "같은 접수 건이어도 결재 배지는 결재만 센다");
+});
+
+test("🔴 납기 임박은 눌러서 확인하는 종류가 아니다 — 처리하지 않은 일을 숨기는 길을 만들지 않는다", () => {
+  const item = buildRepairCaseDueDateNearNotification({
+    repairCaseId: "case-due-3",
+    intakeNumber: "D261014",
+    dueDate: "2026-10-22",
+    borrowed: false,
+  });
+  const check = checkNotificationAcknowledgementKey(item.id);
+  assert.equal(check.ok, false, "확인 기록에 적을 수 있는 키가 되어 버렸다");
+});
+
+// ─────────────────────── 레지스트리 — 납기 임박은 아무도 거르지 않는다 (다)형
+
+test("🔴 납기 임박 load 는 사용자도 역할도 받지 않는다 — 모두에게 간다", () => {
+  const block = registryBlockFor("REPAIR_CASE_DUE_DATE_NEAR");
+  assert.match(block, /load:\s*async\s*\(\s*\)\s*=>/, "load 가 인자를 받는다");
+  assert.ok(!block.includes("actorRole"), "납기 임박 load 가 역할을 본다");
+  assert.ok(!/canReceive\w*\(/.test(block), "납기 임박 load 가 역할 판정 함수를 부른다");
+
+  // 대조 — 같은 방법으로 자른 (나)형(부품 요청)은 역할을 본다. 이 대조가 없으면
+  // 자르는 경계가 틀려 빈 문자열을 검사해도 위 단언이 초록색으로 남는다.
+  assert.ok(registryBlockFor("PART_REQUEST_PENDING").includes("actorRole"), "자르는 방법이 (나)형을 못 잡는다");
+});
+
+test("🔴 납기 임박은 판정을 새로 적지 않고 전용 조회 하나를 부른다", () => {
+  const block = registryBlockFor("REPAIR_CASE_DUE_DATE_NEAR");
+  assert.ok(block.includes("listRepairCasesWithDueDateNear()"), "전용 조회를 부르지 않는다");
+  assert.ok(block.includes("buildRepairCaseDueDateNearNotification("), "모양 변환은 도메인의 build 함수가 한다");
+  assert.match(
+    registrySource,
+    /import \{[^}]*\blistRepairCasesWithDueDateNear\b[^}]*\} from "\.\/repair-case-due-date-notifications"/,
+    "납기 임박 조회를 그 파일에서 가져오지 않는다"
+  );
+
+  // 🔴 조회가 날짜 규칙을 베껴 적지 않고 화면이 쓰는 그 함수를 부른다. 베껴
+  // 적으면 상세정보 화면과 조용히 어긋나고, 그때 「화면엔 보이는데 알림은 안
+  // 뜨는」 건이 생긴다 — 이번 작업이 막으려던 바로 그 실패다.
+  const dueDateSource = readFileSync(
+    new URL("../db/queries/repair-case-due-date-notifications.ts", import.meta.url),
+    "utf8"
+  );
+  assert.ok(
+    dueDateSource.includes("resolveRepairCaseRequestedDueDate("),
+    "화면이 쓰는 날짜 함수를 부르지 않는다 — 규칙이 두 벌이 된다"
+  );
+  // 🔴 그 함수에 **내자 날짜를 실제로 넘긴다.** 빈 배열을 넘기면 함수는 그대로
+  // 불리는데 빌려 오기만 조용히 꺼진다 — 사용자 결정의 핵심이 사라지는 자리이고,
+  // 위 단언만으로는 초록색으로 남는다. DB 없이 붙잡을 수 있는 것은 여기까지다.
+  assert.ok(
+    dueDateSource.includes("domesticOrderDueDates: dueDatesByCaseId.get(row.id)"),
+    "수리 건 칸이 비었을 때 내자에서 빌려 올 날짜를 넘기지 않는다"
+  );
+  assert.ok(
+    dueDateSource.includes("isRepairCaseDueDateWithinNotificationWindow("),
+    "창 판정을 도메인에서 가져오지 않는다 — 규칙이 두 벌이 된다"
+  );
+  assert.ok(
+    dueDateSource.includes("isRepairCaseShipmentFinished("),
+    "이미 나간 건을 빼는 판정을 도메인에서 가져오지 않는다"
+  );
+  assert.ok(
+    dueDateSource.includes("eq(repairCases.isDeleted, false)"),
+    "휴지통에 든 건을 빼지 않는다"
+  );
+  // 지운 발주 줄에 붙어 있던 날짜가 알림을 만들어 내면 안 된다(주간보고와 같은 규칙).
+  assert.ok(
+    dueDateSource.includes("eq(domesticOrders.isDeleted, false)"),
+    "지워진 내자 줄의 날짜까지 빌려 온다"
+  );
 });
 
 // ═════════════════════════════════════ 결재 결과 — 승인 완료 · 반려됨

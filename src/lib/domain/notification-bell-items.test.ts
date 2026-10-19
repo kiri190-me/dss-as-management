@@ -13,6 +13,7 @@ import {
   buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
   buildQuoteApprovalNotification,
+  buildRepairCaseDueDateNearNotification,
   type NotificationItem,
 } from "./notifications";
 
@@ -57,6 +58,12 @@ function oneOfEachKind(): NotificationItem[] {
       quoteNumber: "Q-9705-001",
       routeStepOrder: 1,
       requestedByName: "박영업",
+    }),
+    buildRepairCaseDueDateNearNotification({
+      repairCaseId: "case-due-1",
+      intakeNumber: "D9705-400",
+      dueDate: "2026-10-22",
+      borrowed: true,
     }),
     buildApprovalGrantedNotification({
       source: "REPAIR_CASE",

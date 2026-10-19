@@ -25,11 +25,14 @@
  * ============================================================================
  */
 
+import { addCalendarDays, toKstDateOnly } from "./date-only";
 import { inventoryPartRequestStatusLabels, stockOwnerLabels, type StockOwner } from "./inventory-types";
 import { LABELS as APPROVAL_TYPE_LABELS, type ShipmentApprovalType } from "./local/workflow/shipment-approval-checklist";
 import { quoteEditHref } from "./quote-new-link";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
+import { DUE_DATE_FROM_DOMESTIC_ORDER_LABEL } from "./requested-due-date-link";
 import { SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS } from "./shipment-approval-route";
+import type { RepairStatus } from "./types";
 
 /**
  * 등록된 알림 종류. 새 종류를 붙일 때 손대는 곳은 이 배열과
@@ -41,6 +44,17 @@ import { SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS } from "./shipment-approval-route"
  * 여기서 빠진 종류의 행은 **읽히지 않을 뿐**이다(isNotificationKind 가 거른다).
  * 2026-10-04 에 CUSTOMER_REPAIR_REQUEST_NEW 를 이렇게 뺐다 — 고객이 의뢰를 넣던
  * 길(전용 주소)이 없어져 그 알림이 뜰 수 없게 됐다.
+ *
+ * 🔴 **키의 철자가 종 패널의 색을 정한다.** 종(@dss/ui 의 NotificationBell)은
+ * 색표를 갖지 않고 이 코드를 해시해 열여섯 칸 중 하나를 집는다
+ * (vendor/dss-ui/src/notification-bell/tone.ts 의 notificationToneIndex). 그래서
+ * 새 종류의 키가 기존 종류와 같은 칸에 앉을 수 있고, 그러면 한 패널에서 두
+ * 종류가 같은 색으로 보인다. 2026-10-19 에 실제로 겪었다 —
+ * `REPAIR_CASE_DUE_DATE_SOON` 이 APPROVAL_REJECTED 와 겹쳐
+ * `REPAIR_CASE_DUE_DATE_NEAR` 로 고쳐 적었다. 고칠 수 있는 것은 **이 키의
+ * 철자뿐**이고(vendor 는 별도 저장소다), 겹침 자체는
+ * components/layout/NotificationBell.test.tsx 의 「종류마다 다른 색 칸에
+ * 앉는다」가 잡는다.
  */
 export const NOTIFICATION_KINDS = [
   "REPAIR_CASE_APPROVAL",
@@ -48,6 +62,7 @@ export const NOTIFICATION_KINDS = [
   "PART_STOCK_BELOW_MINIMUM",
   "PART_ISSUE_APPROVAL_PENDING",
   "QUOTE_APPROVAL_PENDING",
+  "REPAIR_CASE_DUE_DATE_NEAR",
   "APPROVAL_GRANTED",
   "APPROVAL_REJECTED",
 ] as const;
@@ -318,6 +333,111 @@ export function buildQuoteApprovalNotification(input: {
     subject: input.quoteNumber,
     detail: `${step}요청자 ${input.requestedByName}`,
     href: quoteEditHref({ quoteId: input.quoteId, repairCaseId: null }),
+  };
+}
+
+// ═══════════════════════════════ 납기 임박 — 고객 요청 납기일이 다가온 수리 건
+
+/**
+ * 고객 요청 납기일이 **며칠 앞**으로 다가오면 종에 뜨는가. 오늘을 포함해 이만큼
+ * 뒤까지가 창이다(2026-10-19 사용자 요구 — 「1주일 전에 알림이 뜨도록」).
+ *
+ * 이 숫자가 적힌 곳은 여기 하나다 — 조회(창의 마지막 날)와 알림 설정 화면의 설명
+ * 문구가 이 값을 가져다 쓴다. 결재 결과의
+ * APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS 와 같은 자리·같은 이유다.
+ */
+export const REPAIR_CASE_DUE_DATE_NOTIFICATION_WINDOW_DAYS = 7;
+
+/**
+ * `now` 기준 창의 **마지막 날**("YYYY-MM-DD", 한국 달력). 납기일이 이 날 이하이고
+ * 오늘 이상이면 창 안이다.
+ *
+ * 날짜를 밀리초로 더하지 않는다 — `date` 칸에서 온 날짜를 Date 로 파싱하면 UTC
+ * 자정이 되어 한국에서 하루가 밀린다(domain/date-only.ts 머리말). 한국 날짜로
+ * 바꾼 뒤 달력 날짜로 더하고, 견주는 일도 끝까지 문자열로 한다("YYYY-MM-DD" 는
+ * 자리수가 고정이라 사전순이 곧 날짜순이다).
+ */
+export function repairCaseDueDateNotificationWindowEnd(now: Date): string {
+  return addCalendarDays(toKstDateOnly(now), REPAIR_CASE_DUE_DATE_NOTIFICATION_WINDOW_DAYS);
+}
+
+/**
+ * 그 납기일이 지금 창 안인가 — **오늘 ≤ 납기일 ≤ 오늘 + 7일**.
+ *
+ * 🔴 **미기재면 거짓이다.** 납기일이 없는 건에는 알림이 뜨지 않는다(2026-10-19
+ * 사용자 결정 — 「납기일 미기재 시 알림 없음」). 여기서 `null` 을 받는 이유는
+ * 부르는 쪽이 resolveRepairCaseRequestedDueDate 의 답을 그대로 넘기기 때문이다 —
+ * 그 함수가 `null` 을 주는 것이 곧 「화면에도 날짜가 안 보인다」는 뜻이다.
+ *
+ * 🔴 **이미 지난 납기는 창 밖이라 뜨지 않는다.** 이 알림은 「곧 온다」를 알리는
+ * 것이고, 「지났다」는 이 저장소에 이미 따로 있다(types.ts 의 isRepairCaseOverdue —
+ * 사내 목표 출하일로 재는 다른 판정이다). 둘을 섞지 않는다.
+ */
+export function isRepairCaseDueDateWithinNotificationWindow(dueDate: string | null, now: Date): boolean {
+  if (dueDate === null) return false;
+  return dueDate >= toKstDateOnly(now) && dueDate <= repairCaseDueDateNotificationWindowEnd(now);
+}
+
+/**
+ * 이 건은 이미 나갔는가 — **출하 완료된 건에는 「납기 임박」이 뜨지 않는다.**
+ *
+ * 보는 사실이 둘인 것은 isRepairCaseOverdue(types.ts)가 「납기 지연」을 가릴 때
+ * 보는 바로 그 둘이기 때문이다. 상태 하나에만 기대면, 출하일은 찍혀 있는데
+ * 워크플로 단계가 따라가지 못한 건에 「납기 임박」이 붙는 모순된 종이 된다. 두
+ * 판정 다 역사적 기록이 아니라 **살아 있는 경보**라 같은 곳에서 빠져야 한다.
+ *
+ * `status` 가 `null` 일 수 있는 것은 workflow_steps.repair_status 가 아직
+ * nullable 이기 때문이다(그 스키마 주석). 그런 건은 상태를 지어내지 않고 「아직
+ * 안 나갔다」로 둔다 — 날짜가 임박했는데 조용히 빠지는 쪽보다 낫다.
+ */
+export function isRepairCaseShipmentFinished(row: {
+  status: RepairStatus | null;
+  actualShipmentDate: string | null;
+}): boolean {
+  if (row.status === "SHIPMENT_COMPLETED") return true;
+  return row.actualShipmentDate !== null && row.actualShipmentDate.trim() !== "";
+}
+
+/**
+ * 「고객 요청 납기일이 다가왔다」 알림 한 줄.
+ *
+ * ── subject 는 인수번호다 ──────────────────────────────────────────────
+ * 접수 건을 가리키는 말 중 사람이 먼저 찾는 것이고, 결재 알림이 굵게 두는 것과
+ * 같은 값이다.
+ *
+ * ── detail 은 **날짜**와, 빌려 온 값이면 그 표시다 ────────────────────
+ * 「납기 임박」이라는 종류 이름은 종 패널이 이 줄 **위에** 따로 적는다
+ * (NOTIFICATION_KIND_META). 여기 또 적으면 잘리는 자리의 폭만 먹는다 — 다른
+ * 종류들과 같은 갈림이다. 사람이 알아야 하는 것은 「며칠인가」이고, 그 날짜가
+ * 이 건에 적힌 값이 아니라 **연결된 내자에서 빌려 온 값**이면 그 사실이 함께
+ * 드러나야 한다. 표시 글자는 새로 쓰지 않고 상세정보 화면이 이미 쓰는 것을
+ * 그대로 가져온다(requested-due-date-link.ts 의
+ * DUE_DATE_FROM_DOMESTIC_ORDER_LABEL) — 같은 것을 두 말로 부르지 않는다.
+ *
+ * ── href 는 상세 첫 화면이다 ──────────────────────────────────────────
+ * 고객 요청 납기일이 그 화면의 「인수 정보」에 있고, 날짜를 고치는 자리도 거기다.
+ * 주소는 직접 적지 않고 탭 헬퍼에서 가져온다.
+ *
+ * targetKey 는 접수 건 id 다. 한 건에 납기일은 하나뿐이고, 사람에게도 「그 한
+ * 건」이다.
+ */
+export function buildRepairCaseDueDateNearNotification(input: {
+  repairCaseId: string;
+  intakeNumber: string;
+  /** 화면에 보이는 그 날짜("YYYY-MM-DD"). 창 안이라고 이미 가려진 값이다. */
+  dueDate: string;
+  /** 이 건의 칸이 아니라 연결된 내자 정리에서 빌려 온 날짜인가. */
+  borrowed: boolean;
+}): NotificationItem {
+  return {
+    id: `REPAIR_CASE_DUE_DATE_NEAR:${input.repairCaseId}`,
+    kind: "REPAIR_CASE_DUE_DATE_NEAR",
+    targetKey: input.repairCaseId,
+    subject: input.intakeNumber,
+    detail: input.borrowed
+      ? `${input.dueDate} · ${DUE_DATE_FROM_DOMESTIC_ORDER_LABEL}`
+      : input.dueDate,
+    href: repairCaseDetailHrefs(input.repairCaseId).root,
   };
 }
 

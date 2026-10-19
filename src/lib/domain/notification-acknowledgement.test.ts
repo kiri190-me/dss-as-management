@@ -16,6 +16,7 @@ import {
   buildPartStockBelowMinimumNotification,
   buildPendingPartRequestNotification,
   buildQuoteApprovalNotification,
+  buildRepairCaseDueDateNearNotification,
   type NotificationItem,
 } from "./notifications";
 
@@ -122,6 +123,12 @@ test("🔴 할 일 알림의 실제 id 는 형식이 맞아도 거절한다 — 
       quoteNumber: "Q-2609-001",
       routeStepOrder: 1,
       requestedByName: "홍길동",
+    }),
+    buildRepairCaseDueDateNearNotification({
+      repairCaseId: randomUUID(),
+      intakeNumber: "D261012",
+      dueDate: "2026-10-22",
+      borrowed: false,
     }),
   ];
 

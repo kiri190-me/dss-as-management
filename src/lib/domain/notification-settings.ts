@@ -1,5 +1,10 @@
 import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
-import { APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS, NOTIFICATION_KINDS, type NotificationKind } from "./notifications";
+import {
+  APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS,
+  NOTIFICATION_KINDS,
+  REPAIR_CASE_DUE_DATE_NOTIFICATION_WINDOW_DAYS,
+  type NotificationKind,
+} from "./notifications";
 import { ROLE_CODES, type Role } from "./types";
 
 /**
@@ -101,6 +106,16 @@ import { ROLE_CODES, type Role } from "./types";
  * 떨어진** fuchsia 를 준다 — violet(불출)과도 pink(반려)와도 색상환에서 한참
  * 벌어져 있고, 그 사이의 purple·rose 처럼 이웃에 붙어 보이지 않는다.
  *
+ * 납기 임박은 teal 이다. 지금 쓰는 일곱(amber·sky·red·violet·fuchsia·lime·pink)을
+ * 색상환에 놓으면 **lime 과 sky 사이가 가장 넓게 비어 있고**, 새 색은 거기
+ * 들어가야 이웃에 붙어 보이지 않는다. 그 틈에 있는 green·emerald 를 고르지 않은
+ * 이유는 **초록이 「됐다」로 읽히기 때문**이다 — 승인 완료에 lime 을 준 바로 그
+ * 이유의 반대편이고, 「아직 안 끝났으니 챙기라」는 경보가 「괜찮다」로 보이면 안
+ * 된다. teal 은 그 틈에서 초록으로 읽히지 않는 유일한 칸이고, sky 와의 거리도
+ * 이미 받아들인 이웃 간격(red–pink, violet–fuchsia)과 비슷하다. 2026-09 에
+ * 「teal 은 emerald 와 너무 붙어서」 제외했던 메모는 더 이상 걸리지 않는다 —
+ * emerald 는 2026-10-04 이후 비어 있다.
+ *
  * ── 색만으로 구분하지 않는다 ────────────────────────────────────────────
  * 색약이신 분에게는 amber와 red가 붙어 보이고, 흑백으로 인쇄하면 셋 다 같은
  * 회색이 된다. 그래서 화면은 이 색과 **함께 label을 글자로도** 그린다
@@ -151,6 +166,15 @@ export const NOTIFICATION_KIND_META: Record<
     description:
       "내가 결재해야 할 견적서입니다. 실제로 누구에게 가는지는 견적서 승인 절차에서 지금 단계의 승인자로 지정된 사람이 정하고, 지정된 사람이 자리를 비워도 결재가 멈추지 않도록 최고관리자도 받습니다. 견적서 승인 절차가 없으면 결재를 올릴 수 없으므로 이 알림도 뜨지 않습니다(그때는 결재 없이 발행합니다). 여기 역할 설정은 그 위에 덧씌우는 필터입니다.",
     toneClassName: "text-fuchsia-700 dark:text-fuchsia-400",
+  },
+  REPAIR_CASE_DUE_DATE_NEAR: {
+    label: "납기 임박",
+    description:
+      `고객 요청 납기일이 오늘부터 ${REPAIR_CASE_DUE_DATE_NOTIFICATION_WINDOW_DAYS}일 안으로 다가온 수리 건입니다. ` +
+      `수리 건에 날짜가 적혀 있지 않아도 연결된 내자 정리의 납기요청일이 있으면 그 가장 이른 하루로 봅니다 — ` +
+      `상세정보 화면에 보이는 날짜 그대로입니다. 양쪽 어디에도 날짜가 없으면 뜨지 않고, 이미 지난 납기와 ` +
+      `출하가 끝난 건도 뜨지 않습니다. 처리할 사람이 정해져 있는 알림이 아니라서 모든 역할이 받습니다.`,
+    toneClassName: "text-teal-700 dark:text-teal-400",
   },
   APPROVAL_GRANTED: {
     label: "승인 완료",
@@ -212,6 +236,7 @@ export function defaultNotificationKindEnabled(kind: NotificationKind): boolean 
     case "PART_STOCK_BELOW_MINIMUM":
     case "PART_ISSUE_APPROVAL_PENDING":
     case "QUOTE_APPROVAL_PENDING":
+    case "REPAIR_CASE_DUE_DATE_NEAR":
     case "APPROVAL_GRANTED":
     case "APPROVAL_REJECTED":
       // 종류를 등록하는 일 자체가 "이 알림을 보낸다"는 결정이다(레지스트리에
@@ -269,6 +294,18 @@ export function defaultRoleReceivesNotification(kind: NotificationKind, role: Ro
       // 결재를 막는 decideQuoteApproval 은 아예 권한 영역을 묻지 않는다 — 여기서
       // 어느 역할을 빼면 관리자가 「지정은 됐는데 알림은 못 받는」 결재자를 만들 수
       // 있게 되고, 그 실패는 화면에 아무 표시도 남기지 않는다.
+      return true;
+
+    case "REPAIR_CASE_DUE_DATE_NEAR":
+      // 🔴 2026-10-19 사용자 결정 — **모두에게 보인다.** 역할로 좁히지 않는다.
+      // 새로 태어나는 종류라 재현할 옛 동작은 없고, 결재 대기 셋과 같은 모양의
+      // 답이다. 까닭은 조금 다르다: 저쪽은 「누가 받는지를 결재선이 정하기」
+      // 때문이고, 이쪽은 **애초에 받을 사람을 정하는 축이 없기** 때문이다 —
+      // 납기가 다가온 건을 챙기는 일은 엔지니어(수리)·관리자(일정)·영업(고객
+      // 응대)·재고 담당자(부품 수급)에게 각자 다른 모양으로 걸린다. 여기서
+      // 어느 역할을 빼면 그 사람은 자기 몫이 다가오는 것을 모른 채 지나가고,
+      // 그 실패는 화면에 아무 표시도 남기지 않는다. 좁히는 것은 관리자가
+      // 나중에 이 화면에서 할 수 있다.
       return true;
 
     case "APPROVAL_GRANTED":
