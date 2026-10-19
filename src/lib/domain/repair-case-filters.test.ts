@@ -593,3 +593,95 @@ test("해가 바뀌어도 글자 내림차순이 곧 시간 내림차순이다",
   ];
   assert.deepEqual(idsOf(sortRows(rows, { column: "intakeNumber", direction: "desc" })), ["new", "old"]);
 });
+
+// ─────────────────────────────────────────────── 출하일 차례
+
+/**
+ * 출하일 정렬(2026-10-19 요구, SortColumn "actualShipmentDate").
+ *
+ * 세우는 값은 **실제 출하일**(effectiveActualShipmentDate)이다 — 워크플로
+ * 재정의가 반영된 값이고, 표가 그 칸에 그대로 그리는 값이다.
+ *
+ * 🔴 아래 세 시험이 함께 지키는 것: 아직 출하 안 된 건(널)을 사내 목표 출하일
+ * (internalTargetShipmentDate)로 **대신 채워 세우지 않는다.** 그렇게 하면
+ * 화면에 "-"로 그려진 줄이 날짜가 있는 줄 사이에 끼어 선다.
+ */
+test("출하일 오름차순은 이른 출하일이 먼저다", () => {
+  const rows = [
+    row({ id: "nov", effectiveActualShipmentDate: "2026-11-01" }),
+    row({ id: "sep", effectiveActualShipmentDate: "2026-09-01" }),
+    row({ id: "oct", effectiveActualShipmentDate: "2026-10-01" }),
+  ];
+  assert.deepEqual(idsOf(sortRows(rows, { column: "actualShipmentDate", direction: "asc" })), [
+    "sep",
+    "oct",
+    "nov",
+  ]);
+  assert.deepEqual(idsOf(sortRows(rows, { column: "actualShipmentDate", direction: "desc" })), [
+    "nov",
+    "oct",
+    "sep",
+  ]);
+});
+
+/**
+ * 🔴 가장 틀리기 쉬운 자리. "not-shipped" 는 실제 출하일이 널이지만 사내 목표
+ * 출하일은 2026-10-01 로 **두 날짜 사이에 떨어지게** 잡아 두었다. 널을 목표
+ * 출하일로 바꿔 끼워 세우는 순간 이 줄이 sep 과 nov 사이로 올라가고, 그러면
+ * 화면에서 "-" 인 줄이 날짜가 있는 줄인 척 줄 서게 된다.
+ *
+ * 올바른 차례는 고객 요청 납기일과 **같다**(compareNullableString) — 오름차순에
+ * 널이 맨 앞, 내림차순에 맨 뒤다.
+ */
+test("실제 출하일이 널인 줄은 사내 목표 출하일로 끼워지지 않는다", () => {
+  const rows = [
+    row({ id: "nov", effectiveActualShipmentDate: "2026-11-01", internalTargetShipmentDate: "2026-11-01" }),
+    // 실제 출하일 없음 + 목표 출하일만 있음 — 끼워 넣으면 한가운데로 간다.
+    row({ id: "not-shipped", effectiveActualShipmentDate: null, internalTargetShipmentDate: "2026-10-01" }),
+    row({ id: "sep", effectiveActualShipmentDate: "2026-09-01", internalTargetShipmentDate: "2026-09-01" }),
+  ];
+
+  assert.deepEqual(
+    idsOf(sortRows(rows, { column: "actualShipmentDate", direction: "asc" })),
+    ["not-shipped", "sep", "nov"],
+    "오름차순에서 출하 안 된 줄이 목표 출하일 자리(sep 과 nov 사이)로 끼어들었다"
+  );
+  assert.deepEqual(
+    idsOf(sortRows(rows, { column: "actualShipmentDate", direction: "desc" })),
+    ["nov", "sep", "not-shipped"],
+    "내림차순에서 출하 안 된 줄이 목표 출하일 자리로 끼어들었다"
+  );
+});
+
+/**
+ * 한 머리글 칸에 포개 놓은 두 차례(출하일 · 고객 요청 납기일)가 **서로 다른 값**을
+ * 본다는 것. 두 칸을 어긋나는 자료로 재야, 출하일을 더하면서 아래 보조 단추의
+ * 차례를 건드리지 않았음이 드러난다.
+ */
+test("고객 요청 납기일 차례는 출하일을 더한 뒤에도 그대로다", () => {
+  const rows = [
+    row({ id: "a", effectiveActualShipmentDate: "2026-11-01", customerRequestedDueDate: "2026-09-10" }),
+    row({ id: "b", effectiveActualShipmentDate: "2026-09-01", customerRequestedDueDate: "2026-11-10" }),
+    row({ id: "c", effectiveActualShipmentDate: null, customerRequestedDueDate: null }),
+  ];
+
+  // 널(c)이 오름차순 맨 앞 — 예전 그대로다.
+  assert.deepEqual(idsOf(sortRows(rows, { column: "customerRequestedDueDate", direction: "asc" })), [
+    "c",
+    "a",
+    "b",
+  ]);
+  assert.deepEqual(idsOf(sortRows(rows, { column: "customerRequestedDueDate", direction: "desc" })), [
+    "b",
+    "a",
+    "c",
+  ]);
+
+  // 같은 자료를 출하일로 세우면 a 와 b 가 뒤집힌다 — 위가 우연이 아니라는 증거다.
+  // 널 자리(c 가 맨 앞)는 두 칸이 똑같다 — 같은 compareNullableString 을 쓴다.
+  assert.deepEqual(idsOf(sortRows(rows, { column: "actualShipmentDate", direction: "asc" })), [
+    "c",
+    "b",
+    "a",
+  ]);
+});

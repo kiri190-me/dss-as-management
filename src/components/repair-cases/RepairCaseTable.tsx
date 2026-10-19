@@ -117,11 +117,11 @@ function StatusRowOverdueBadge({ isOverdue }: { isOverdue: boolean }) {
  * 16-column table (인수일, End-User, 제품 구분, L/N, 우선순위, 납기
  * 지연 여부, 고객 요청 납기일) still renders, folded into a secondary line or
  * badge inside one of these cells rather than getting its own column —
- * see the doc comments on each <td> below. All 6 SortColumn values
+ * see the doc comments on each <td> below. All 7 SortColumn values
  * (intakeNumber, receivedAt, customerName, status, priority,
- * customerRequestedDueDate) remain independently clickable, via a
- * secondary sort button stacked under the relevant primary header where the
- * field itself no longer has its own column.
+ * actualShipmentDate, customerRequestedDueDate) remain independently
+ * clickable, via a secondary sort button stacked under the relevant primary
+ * header where the field itself no longer has its own column.
  *
  * 상태 cell is two lines: 상태 배지 alone on line 1, 우선순위/납기/보류/재정의
  * 배지 cluster on line 2 — StatusRowOverdueBadge keeps the non-overdue
@@ -152,6 +152,10 @@ function StatusRowOverdueBadge({ isOverdue }: { isOverdue: boolean }) {
  * internalTargetShipmentDate — renders "-" when not yet shipped rather than
  * silently substituting the target date. 고객 요청 납기일 stays as secondary
  * context (still sortable via the header's secondary button).
+ * 머리글 「출하일」도 2026-10-19부터 누를 수 있다(SortColumn "actualShipmentDate").
+ * 🔴 정렬도 본문과 같은 값으로 선다 — 널을 사내 목표 출하일로 대신 채우지
+ * 않는다(repair-case-filters.ts 의 sortRows). 그렇지 않으면 "-"로 그려진 줄이
+ * 날짜가 있는 줄 사이에 끼어 선다.
  *
  * No wrapping div here — the table/card switch is owned by ResponsiveList
  * (components/common/responsive-list.tsx), which measures real overflow and
@@ -218,9 +222,9 @@ export default function RepairCaseTable({
             <th scope="col" className={thBaseClass}>유·무상</th>
             <th scope="col" className={thBaseClass}>담당 엔지니어</th>
             <th scope="col" className={thBaseClass}>
-              {/* 실제 출하일(effectiveActualShipmentDate, primary — never substitutes 사내 목표 출하일 when null) + 고객 요청 납기일 (secondary, still sortable) */}
+              {/* 실제 출하일(effectiveActualShipmentDate, primary — never substitutes 사내 목표 출하일 when null, in the body *and* in the sort) + 고객 요청 납기일 (secondary, still sortable) */}
               <div className="flex flex-col gap-0.5">
-                <span className="whitespace-nowrap">출하일</span>
+                <PrimarySortButton column="actualShipmentDate" label="출하일" sort={sort} onSortChange={onSortChange} />
                 <SecondarySortButton column="customerRequestedDueDate" label="고객 요청 납기일" sort={sort} onSortChange={onSortChange} />
               </div>
             </th>

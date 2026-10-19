@@ -272,6 +272,13 @@ export type SortColumn =
   | "customerName"
   | "status"
   | "priority"
+  /**
+   * 출하일(2026-10-19 요구). 이름은 **원본 칸 이름**(actualShipmentDate)이고
+   * 비교하는 값은 **재정의가 반영된** effectiveActualShipmentDate 다 — 바로 위
+   * "status" 와 똑같은 결이다(그쪽도 이름은 status, 비교는 effectiveStatus).
+   * 나머지 넷은 effective 짝이 없는 칸이라 이름이 곧 비교 대상이다.
+   */
+  | "actualShipmentDate"
   | "customerRequestedDueDate";
 
 export type SortDirection = "asc" | "desc";
@@ -301,6 +308,13 @@ export function sortRows(rows: EffectiveRepairCase[], sort: SortState): Effectiv
         return REPAIR_STATUS_CODES.indexOf(a.effectiveStatus) - REPAIR_STATUS_CODES.indexOf(b.effectiveStatus);
       case "priority":
         return PRIORITY_CODES.indexOf(a.priority) - PRIORITY_CODES.indexOf(b.priority);
+      case "actualShipmentDate":
+        // 🔴 널을 internalTargetShipmentDate(사내 목표 출하일)로 대신 채우지 않는다.
+        // 표는 아직 출하 안 된 건을 "-"로 그리는데(RepairCaseTable 의 출하일 셀),
+        // 정렬에서만 목표 출하일을 끼워 넣으면 "-"인 줄이 날짜가 있는 줄 사이에
+        // 끼어 선다. 널 자리는 바로 아래 고객 요청 납기일과 **같은 함수**가 정한다
+        // — 한 머리글 칸에 포개 놓은 두 차례가 서로 다르게 굴면 안 된다.
+        return compareNullableString(a.effectiveActualShipmentDate, b.effectiveActualShipmentDate);
       case "customerRequestedDueDate":
         return compareNullableString(a.customerRequestedDueDate, b.customerRequestedDueDate);
       default:
