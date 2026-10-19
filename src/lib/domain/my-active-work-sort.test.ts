@@ -26,6 +26,7 @@ function row(overrides: Partial<MyActiveWorkRow>): MyActiveWorkRow {
     internalTargetInspectionCompletionDate: null,
     internalTargetShipmentDate: null,
     customerRequestedDueDate: null,
+    domesticOrderDueDates: [],
     lastActivityAt: null,
     lastWorkRecordAt: null,
     activePartsRequestStatus: null,
@@ -121,6 +122,82 @@ test("정렬은 원본 배열을 건드리지 않는다", () => {
   const rows = [row({ id: "b", customerName: "동해정밀" }), row({ id: "a", customerName: "가온전자" })];
   sortMyActiveWorkRowsBy(rows, { column: "customerName", direction: "asc" });
   assert.deepEqual(rows.map((r) => r.id), ["b", "a"]);
+});
+
+// ──────────────────────── 2026-10-19 고객 요청 납기일은 **보이는 날짜**로 선다
+
+/**
+ * ============================================================================
+ * 자기 칸이 비면 이 화면도 내자 정리에서 날짜를 빌려 그린다
+ * ============================================================================
+ * 전체 A/S 현황과 같은 조각을 쓴다(components/repair-cases/RequestedDueDateValue.tsx
+ * → domain/requested-due-date-link.ts). 그리는 값이 바뀌었으면 **줄 서는 차례도
+ * 함께** 바뀌어야 한다 — 안 그러면 화면에 2026-10-20 이라고 적힌 줄이 "값 없음"
+ * 자리(맨 뒤)로 가서 선다. 값이 안 나오는 것보다 더 나쁜 결함이다.
+ *
+ * 🔵 이 화면의 널 처리는 전체 A/S 현황과 다르다 — **방향과 무관하게 늘 맨 뒤**다
+ * (my-active-work-sort.ts 의 주석). 그 성질은 그대로 두고, "무엇이 널인가"만
+ * 달라진다: 양쪽 다 없는 건만 널이다.
+ * ============================================================================
+ */
+test("🔴 자기 칸이 빈 건은 내자에서 빌려 온 날짜 자리에 줄 선다 — 맨 뒤가 아니다", () => {
+  const rows = [
+    row({ id: "own-early", intakeNumber: "D1", customerRequestedDueDate: "2026-09-05" }),
+    // 빌려 올 날짜 중 가장 이른 하루는 2026-10-20 — 위아래 두 건 **사이**다.
+    // 원본 칸으로 세우면 이 줄은 널로 보여 어느 방향에서도 맨 뒤로 밀린다.
+    row({
+      id: "borrowed",
+      intakeNumber: "D2",
+      customerRequestedDueDate: null,
+      domesticOrderDueDates: ["2026-11-20", "2026-10-20"],
+    }),
+    row({ id: "own-late", intakeNumber: "D3", customerRequestedDueDate: "2026-12-01" }),
+  ];
+
+  assert.deepEqual(
+    sortMyActiveWorkRowsBy(rows, { column: "customerRequestedDueDate", direction: "asc" }).map((r) => r.id),
+    ["own-early", "borrowed", "own-late"],
+    "오름차순에서 빌려 온 줄이 제 날짜 자리에 서지 않았다"
+  );
+  assert.deepEqual(
+    sortMyActiveWorkRowsBy(rows, { column: "customerRequestedDueDate", direction: "desc" }).map((r) => r.id),
+    ["own-late", "borrowed", "own-early"],
+    "내림차순에서 빌려 온 줄이 제 날짜 자리에 서지 않았다"
+  );
+});
+
+test("🔴 자기 칸이 적혀 있으면 그 값이 이긴다 — 내자 날짜가 더 일러도 끌려가지 않는다", () => {
+  const rows = [
+    // 내자 날짜(2026-01-02)가 훨씬 이르다. 빌려 온 것이 이기면 이 줄이 맨 앞으로 온다.
+    row({
+      id: "own-wins",
+      intakeNumber: "D1",
+      customerRequestedDueDate: "2026-12-01",
+      domesticOrderDueDates: ["2026-01-02"],
+    }),
+    row({ id: "mid", intakeNumber: "D2", customerRequestedDueDate: "2026-06-01" }),
+  ];
+
+  assert.deepEqual(
+    sortMyActiveWorkRowsBy(rows, { column: "customerRequestedDueDate", direction: "asc" }).map((r) => r.id),
+    ["mid", "own-wins"],
+    "자기 칸이 있는데도 내자 날짜로 줄을 세웠다"
+  );
+});
+
+test("양쪽 어디에도 날짜가 없는 행만 맨 뒤로 간다 — 예전 그대로다", () => {
+  const rows = [
+    row({ id: "none", intakeNumber: "D1", customerRequestedDueDate: null, domesticOrderDueDates: [] }),
+    row({ id: "dated", intakeNumber: "D2", customerRequestedDueDate: "2026-09-01" }),
+  ];
+
+  for (const direction of ["asc", "desc"] as const) {
+    assert.deepEqual(
+      sortMyActiveWorkRowsBy(rows, { column: "customerRequestedDueDate", direction }).map((r) => r.id),
+      ["dated", "none"],
+      `${direction} 에서 값 없는 행이 맨 뒤에 남지 않았다`
+    );
+  }
 });
 
 // ──────────────────────────────── 2026-10-06 작업기록이 적힌 시각 순으로 정렬

@@ -51,6 +51,7 @@ function fakeRow(overrides: Partial<EffectiveRepairCase> = {}): EffectiveRepairC
     currentWorkflowStepKey: "REPAIR",
     receivedAt: "2094-01-02",
     customerRequestedDueDate: null,
+    domesticOrderDueDates: [],
     internalTargetInspectionCompletionDate: null,
     internalTargetShipmentDate: null,
     actualShipmentDate: null,

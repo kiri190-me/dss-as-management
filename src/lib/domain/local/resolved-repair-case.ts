@@ -50,6 +50,29 @@ export type ResolvedRepairCase = {
   currentWorkflowStepKey: string;
   receivedAt: string;
   customerRequestedDueDate: string | null;
+  /**
+   * 이 건에 연결된 내자 정리 줄들의 **납기요청일 전부**(없으면 빈 배열).
+   *
+   * 🔴 **계산한 날짜가 아니라 재료다.** 위 customerRequestedDueDate 가 비었을 때
+   * 화면이 무엇을 그릴지는 domain/requested-due-date-link.ts 의
+   * resolveRepairCaseRequestedDueDate 가 정하는데, 그 파일 머리말이 **"이 결과는
+   * 어느 저장 payload 타입에도 들어가지 않는다"**고 못 박았다 — 계산된 값을 원본
+   * 옆에 실어 두면 자동으로 따라오던 날짜가 그 줄에 박제되고, 그때부터 "일부러
+   * 다르게 적었다"와 "그냥 안 건드렸다"를 구분할 수 없다. 그래서 여기 싣는 것은
+   * **고르기 전의 날짜 목록**이고, 고르는 일은 그리는 자리에서 한다(상세 화면이
+   * 이미 그렇게 한다 — detail/IntakeInfoSection.tsx).
+   *
+   * 🔵 **MOCK · LOCAL_DEMO 는 늘 빈 배열이다.** 그 두 소스에는 내자 정리라는
+   * 자료 자체가 없다(내자는 DB 표 domestic_orders 에만 있다). 빈 배열이면 위
+   * 함수는 "빌릴 것이 없다"로 답하므로, 그 화면들은 예전과 똑같이 자기 칸만
+   * 그린다.
+   *
+   * 🔴 DATABASE 소스라고 언제나 차 있는 것도 아니다 — 싣는 쪽은 **목록 조회
+   * 둘**(queries/repair-cases.ts 의 listRepairCases, queries/repair-cases-mine.ts)
+   * 뿐이고, 나머지 조회(고객사·제품 이력, 휴지통 등)는 빈 배열로 둔다. 그 화면들은
+   * 이 칸을 그리지 않는다.
+   */
+  domesticOrderDueDates: readonly string[];
   /** Not carried by mock/local demo data (Stage G-3R column) — always null there. */
   internalTargetInspectionCompletionDate: string | null;
   internalTargetShipmentDate: string | null;
@@ -111,6 +134,8 @@ export function toResolvedFromMock(
     currentWorkflowStepKey: repairCase.currentWorkflowStepKey,
     receivedAt: repairCase.receivedAt,
     customerRequestedDueDate: repairCase.customerRequestedDueDate,
+    // mock 자료에는 내자 정리가 없다 — 빌려 올 날짜도 없다(타입 주석).
+    domesticOrderDueDates: [],
     internalTargetInspectionCompletionDate: null,
     internalTargetShipmentDate: repairCase.internalTargetShipmentDate,
     actualShipmentDate: repairCase.actualShipmentDate,
@@ -161,6 +186,8 @@ export function toResolvedFromLocal(
     currentWorkflowStepKey: localCase.currentWorkflowStepKey,
     receivedAt: localCase.receivedAt,
     customerRequestedDueDate: localCase.customerRequestedDueDate,
+    // 브라우저에만 있는 건이라 내자 정리에 붙을 자리가 없다(타입 주석).
+    domesticOrderDueDates: [],
     internalTargetInspectionCompletionDate: null,
     internalTargetShipmentDate: localCase.internalTargetShipmentDate,
     actualShipmentDate: localCase.actualShipmentDate,

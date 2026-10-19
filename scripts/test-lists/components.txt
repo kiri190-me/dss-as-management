@@ -628,3 +628,14 @@ src/components/repair-cases/repair-case-symptom-column.test.tsx
 # 🔴 **값 옆 글줄에 끼인 둘**(ReportNumberEditCell · EngineerEditCell)에만 세로 정렬
 # 클래스가 더 붙는가(그 둘은 값과 한 줄에 서서 박스가 높아지면 위아래로 뜬다).
 src/components/repair-cases/detail/edit-button-class.test.ts
+
+# 목록의 「고객 요청 납기일」이 비면 **연결된 내자 정리에서 빌려 그리는가**(2026-10-19
+# 사용자 신고 — 내자정리에 적은 날짜가 전체 A/S 현황 표에는 안 나왔다). 빌려 오는 규칙은
+# 2026-08-26 에 이미 있었으나 상세정보와 내자 목록 두 화면에만 붙어 있었고, 어제 만든 종
+# 알림 「납기 임박」이 빌려 온 날짜로 뜨면서 같은 건이 두 날짜로 보여 틈이 드러났다.
+# 네 화면(전체 A/S 현황 표·카드, 내 작업 표·카드)을 **실제로 그려** 같은 잣대로 잰다 —
+# 한 조각을 나눠 쓰지만 넷 중 하나라도 그 조각을 안 쓰면 거기만 조용히 "-" 로 남는다.
+# 못 박는 것: 🔴 자기 칸이 비면 내자의 **가장 이른 하루**가 보이는가(늦은 날짜가 함께
+# 새지 않는가) · 🔴 빌려 온 값에만 꼬리표 + 설명(title)이 붙는가 · 🔴 자기 칸이 있으면
+# 그 값이 이기고 꼬리표가 안 붙는가 · 양쪽 다 없으면 "-" 이고 「없음」을 지어내지 않는가.
+src/components/repair-cases/repair-case-borrowed-due-date.test.tsx

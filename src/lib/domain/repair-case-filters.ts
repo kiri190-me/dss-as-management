@@ -10,6 +10,7 @@ import {
 } from "./types";
 import type { EffectiveRepairCase } from "./local/workflow/effective-repair-case";
 import { reportedSymptomFromSearchParams } from "./reported-symptom-param";
+import { resolveRepairCaseRequestedDueDate } from "./requested-due-date-link";
 
 /**
  * ── 워크플로 유형 대신 제품군 + 유·무상 ─────────────────────────────────
@@ -295,6 +296,26 @@ function compareNullableString(a: string | null, b: string | null): number {
   return a.localeCompare(b);
 }
 
+/**
+ * 이 줄의 「고객 요청 납기일」 칸에 **화면이 실제로 그리는 날짜**.
+ *
+ * 🔴 원본 칸(customerRequestedDueDate)이 아니다. 그 칸이 비면 표는 연결된 내자
+ * 정리의 납기요청일 중 가장 이른 하루를 빌려 그리므로(components/repair-cases/
+ * RequestedDueDateValue.tsx), 정렬이 원본 칸을 보면 **보이는 날짜와 줄 서는
+ * 차례가 다른** 더 나쁜 결함이 된다 — 바로 아래 출하일 정렬이 널을 사내 목표
+ * 출하일로 끼워 넣지 않기로 한 것과 같은 결의 판단이다.
+ *
+ * 규칙은 여기서 새로 적지 않고 화면이 쓰는 그 함수를 그대로 부른다. 넘기는 것도
+ * **그 함수가 보는 두 칸뿐**이다 — 행을 통째로 넘기면 언젠가 다른 날짜 칸이
+ * 섞여 들어온다(requested-due-date-link.ts 의 같은 경고).
+ */
+function visibleRequestedDueDate(row: EffectiveRepairCase): string | null {
+  return resolveRepairCaseRequestedDueDate({
+    customerRequestedDueDate: row.customerRequestedDueDate,
+    domesticOrderDueDates: row.domesticOrderDueDates,
+  }).dueDate;
+}
+
 export function sortRows(rows: EffectiveRepairCase[], sort: SortState): EffectiveRepairCase[] {
   const sorted = [...rows].sort((a, b) => {
     switch (sort.column) {
@@ -316,7 +337,9 @@ export function sortRows(rows: EffectiveRepairCase[], sort: SortState): Effectiv
         // — 한 머리글 칸에 포개 놓은 두 차례가 서로 다르게 굴면 안 된다.
         return compareNullableString(a.effectiveActualShipmentDate, b.effectiveActualShipmentDate);
       case "customerRequestedDueDate":
-        return compareNullableString(a.customerRequestedDueDate, b.customerRequestedDueDate);
+        // 🔴 보이는 날짜로 세운다(위 visibleRequestedDueDate) — 자기 칸이 빈 건은
+        // 내자에서 빌려 온 날짜 자리에 선다. 널 자리는 위 출하일과 **같은 함수**다.
+        return compareNullableString(visibleRequestedDueDate(a), visibleRequestedDueDate(b));
       default:
         return 0;
     }

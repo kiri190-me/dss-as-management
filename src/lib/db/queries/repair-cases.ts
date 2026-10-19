@@ -15,6 +15,10 @@ import {
   workflowVersions,
 } from "../schema";
 import { mapRepairCaseRow, mapRepairCaseTrashRow } from "../mappers/repair-case";
+import {
+  dueDateBorrowerIds,
+  loadDomesticOrderDueDatesByCaseId,
+} from "./repair-case-domestic-order-due-dates";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { TrashedRepairCase } from "../mappers/repair-case";
 
@@ -144,13 +148,40 @@ function selectRepairCaseTrashJoin() {
  * 바꿀 수 있고 그 **기본값**도 인수번호 내림차순이다. 그 화면은 받은 행을 제 손으로
  * 다시 정렬하므로 눈에 보이는 첫 차례를 정하는 것은 거기 있는 DEFAULT_SORT 다 —
  * 여기만 바꾸면 이 화면은 아무것도 달라지지 않는다. 두 곳을 늘 함께 본다.
+ *
+ * ── 🔴 내자 납기요청일을 **따로 한 번 더** 읽는다 (2026-10-19) ───────────
+ * 고객 요청 납기일이 빈 건은 연결된 내자 정리의 납기요청일을 빌려 그린다. 그
+ * 규칙은 2026-08-26 에 만들어졌는데 **상세정보와 내자 목록 두 화면에만** 붙어
+ * 있었고, 그래서 [내자정리]에 적은 날짜가 이 표에는 "-"로 보였다(사용자 신고).
+ * 어제 만든 종 알림 「납기 임박」이 빌려 온 날짜로 뜨면서 같은 건이 두 날짜로
+ * 보이게 돼 틈이 드러났다.
+ *
+ * 🔴 **조인으로 끌어오지 않는다.** 한 건에 내자 줄이 여럿이고 줄마다 날짜가 또
+ * 여럿이라, 위 join 에 붙이면 그 건이 날짜 수만큼 복제된다 — 목록에서는 같은
+ * 줄이 서너 번 선다. 따로 읽어 **건별로 묶어 덧씌운다**(공용 조각
+ * queries/repair-case-domestic-order-due-dates.ts, 종 알림 조회와 같은 것).
+ *
+ * 🔵 두 번째 질의는 **빌릴 필요가 있는 건만** 묻는다(dueDateBorrowerIds) —
+ * 자기 칸이 찬 건은 어차피 내자를 보지 않는다. 하나도 없으면 질의가 아예 돌지
+ * 않는다. 목록은 수백 건이라 이 좁히기가 곧 질의 크기다.
+ *
+ * 🔴 싣는 것은 **고르기 전의 날짜 목록**이지 계산한 날짜가 아니다. 무엇을 그릴지는
+ * 그리는 자리에서 domain/requested-due-date-link.ts 가 정한다 — 그 파일 머리말의
+ * "이 결과는 어느 저장 payload 타입에도 들어가지 않는다" 그대로다.
  */
 export async function listRepairCases(): Promise<ResolvedRepairCase[]> {
   const rows = await selectRepairCaseJoin()
     .where(eq(repairCases.isDeleted, false))
     .orderBy(desc(repairCases.intakeNumber));
 
-  return rows.map((row) => mapRepairCaseRow(row));
+  const dueDatesByCaseId = await loadDomesticOrderDueDatesByCaseId(dueDateBorrowerIds(rows));
+
+  return rows.map((row) => ({
+    ...mapRepairCaseRow(row),
+    // 매퍼는 빈 배열을 내놓는다(조인 한 줄에는 없는 값이다 — mappers/repair-case.ts).
+    // 실제 날짜를 얹는 자리는 여기 하나뿐이다.
+    domesticOrderDueDates: dueDatesByCaseId.get(row.id) ?? [],
+  }));
 }
 
 /**

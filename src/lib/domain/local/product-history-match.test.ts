@@ -29,6 +29,7 @@ function caseOf(overrides: Partial<ResolvedRepairCase> & { id: string }): Resolv
     currentWorkflowStepKey: "intake_inspection",
     receivedAt: "2026-01-01",
     customerRequestedDueDate: null,
+    domesticOrderDueDates: [],
     internalTargetInspectionCompletionDate: null,
     internalTargetShipmentDate: null,
     actualShipmentDate: null,

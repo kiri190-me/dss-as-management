@@ -88,6 +88,36 @@ export const REPAIR_CASE_DUE_DATE_LINK_NOTE =
   `대신 보여 줍니다. 그 값에는 '${DUE_DATE_FROM_DOMESTIC_ORDER_LABEL}' 표시가 붙습니다.`;
 
 /**
+ * **목록**에서 빌려 온 날짜 옆에 붙는 표시 — 전체 A/S 현황 표·카드와 내 작업
+ * 화면이 쓴다(2026-10-19).
+ *
+ * 🔴 위 DUE_DATE_FROM_DOMESTIC_ORDER_LABEL("내자 납기요청일")을 그대로 쓰지
+ * 않는 이유는 **자리가 다르기** 때문이다. 상세정보는 칸 아래에 한 줄을 통째로
+ * 내줄 수 있지만, 목록에서 이 값이 사는 곳은 출하일 칸 안의 `text-xs` 보조 줄
+ * 하나이고 그 줄은 줄바꿈을 하지 않는다(whitespace-nowrap). 거기에 긴 이름표를
+ * 붙이면 그 열만 넓어져 표가 옆으로 길어진다 — 내자 정리 쪽이 목록용으로
+ * 짧은 DUE_DATE_FROM_REPAIR_CASE_LABEL 을 따로 둔 것과 같은 판단이다.
+ *
+ * 🔴 **그래도 한 파일에 둔다.** 긴 것과 짧은 것이 서로 다른 파일에 흩어지면
+ * 언젠가 한쪽만 고쳐져, 같은 사실이 화면마다 다른 말로 설명된다. 둘은 같은
+ * 규칙의 두 자리일 뿐이다.
+ */
+export const DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL = "(내자)";
+
+/**
+ * 위 짧은 표시에 마우스를 올렸을 때 나오는 설명(title).
+ *
+ * 짧은 표시만으로는 "내자"가 무엇을 뜻하는지 알 수 없다 — 표시는 **다른 데서
+ * 온 값임을 알리는 신호**이고, 어디서 왔는지는 이 문장이 말한다. 표시 글자를
+ * 문장에 박아 넣지 않고 위 상수를 끼워 넣는 것은 REPAIR_CASE_DUE_DATE_LINK_NOTE
+ * 와 같은 이유다(설명이 화면에 없는 표시를 가리키면 안 된다).
+ */
+export const DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_NOTE =
+  `이 건에는 고객 요청 납기일이 적혀 있지 않습니다. ` +
+  `'${DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL}' 가 붙은 날짜는 연결된 내자 정리의 ` +
+  `납기요청일 중 가장 이른 하루입니다.`;
+
+/**
  * 내자 정리 목록의 `납기요청일` 칸에 그릴 것.
  *
  * `lines` 는 **한 줄에 날짜 하나**다(formatDomesticOrderDueDateLines 와 같은

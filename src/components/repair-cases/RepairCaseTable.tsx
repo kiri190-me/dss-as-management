@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { SortColumn, SortState } from "@/lib/domain/repair-case-filters";
 import { HoldBadge, OverdueBadge, PriorityBadge, SourceBadge, StatusBadge, WorkflowOverrideBadge } from "./badges";
+import RequestedDueDateValue from "./RequestedDueDateValue";
 import SelectAllCheckbox from "@/components/common/select-all-checkbox";
 import { preventShiftClickTextSelection, shiftKeyOf } from "@/lib/hooks/useShiftRangeSelection";
 
@@ -306,7 +307,11 @@ export default function RepairCaseTable({
                 <div className="flex flex-col gap-0.5">
                   <span className="font-medium whitespace-nowrap">{row.effectiveActualShipmentDate ?? "-"}</span>
                   <span className="text-xs whitespace-nowrap text-zinc-500 dark:text-zinc-400">
-                    고객요청 {row.customerRequestedDueDate ?? "-"}
+                    고객요청{" "}
+                    <RequestedDueDateValue
+                      customerRequestedDueDate={row.customerRequestedDueDate}
+                      domesticOrderDueDates={row.domesticOrderDueDates}
+                    />
                   </span>
                 </div>
               </td>

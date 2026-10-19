@@ -18,6 +18,10 @@ import {
   inventoryPartRequests,
 } from "../schema";
 import { resolveRepairStatusFromStep } from "../mappers/repair-status";
+import {
+  dueDateBorrowerIds,
+  loadDomesticOrderDueDatesByCaseId,
+} from "./repair-case-domestic-order-due-dates";
 import { productCategoryLabels, type BillingType, type ExceptionStatus, type RepairStatus, type WorkflowType } from "@/lib/domain/types";
 
 /**
@@ -53,6 +57,19 @@ export type MyActiveWorkRow = {
   internalTargetInspectionCompletionDate: string | null;
   internalTargetShipmentDate: string | null;
   customerRequestedDueDate: string | null;
+  /**
+   * 이 건에 연결된 내자 정리 줄들의 **납기요청일 전부**(없으면 빈 배열).
+   *
+   * 🔴 위 customerRequestedDueDate 가 비었을 때 화면이 그 자리에 무엇을 그릴지는
+   * domain/requested-due-date-link.ts 가 정한다. 여기 싣는 것은 **고르기 전의
+   * 재료**이지 계산한 날짜가 아니다 — 계산된 값을 원본 옆에 실어 두면 자동으로
+   * 따라오던 날짜가 박제되고, 그때부터 "일부러 다르게 적었다"와 "그냥 안
+   * 건드렸다"를 구분할 수 없다(그 파일 머리말).
+   *
+   * 전체 A/S 현황의 ResolvedRepairCase.domesticOrderDueDates 와 **같은 뜻의 같은
+   * 칸**이고, 채우는 조각도 같다(queries/repair-case-domestic-order-due-dates.ts).
+   */
+  domesticOrderDueDates: readonly string[];
   /** MAX(created_at) across repair_case_work_records (invalidated excluded), status_change_histories, and procedure_case_execution_history — null when none of the three has ever recorded activity for this case. */
   lastActivityAt: string | null;
   /**
@@ -177,6 +194,10 @@ function toMyActiveWorkRow(row: JoinRow): MyActiveWorkRow {
     internalTargetInspectionCompletionDate: row.internalTargetInspectionCompletionDate,
     internalTargetShipmentDate: row.internalTargetShipmentDate,
     customerRequestedDueDate: row.customerRequestedDueDate,
+    // 🔴 조인해 온 한 줄에는 없다 — 한 건에 내자 줄이 여럿이고 줄마다 날짜가 또
+    // 여럿이라 끌어다 붙이면 그 건이 날짜 수만큼 복제된다. 아래 조회가 따로 읽어
+    // 덧씌운다(queries/repair-case-domestic-order-due-dates.ts 머리말).
+    domesticOrderDueDates: [],
     lastActivityAt: row.lastActivityAt ? new Date(row.lastActivityAt).toISOString() : null,
     lastWorkRecordAt: row.lastWorkRecordAt ? new Date(row.lastWorkRecordAt).toISOString() : null,
     activePartsRequestStatus: row.activePartsRequestStatus,
@@ -192,6 +213,16 @@ function toMyActiveWorkRow(row: JoinRow): MyActiveWorkRow {
  * established pattern as isRepairCaseOverdue/deriveRepairStatus elsewhere
  * in this codebase — never expressed as raw SQL against the static
  * step-status-map.ts table).
+ *
+ * ── 🔴 내자 납기요청일을 **따로 한 번 더** 읽는다 (2026-10-19) ───────────
+ * 전체 A/S 현황(queries/repair-cases.ts 의 listRepairCases)과 똑같은 이유다 —
+ * 고객 요청 납기일이 빈 건은 연결된 내자 정리의 납기요청일을 빌려 그리는데, 그
+ * 규칙이 목록 화면에는 붙어 있지 않아 [내자정리]에 적은 날짜가 여기도 "-"로
+ * 보였다. 조인하지 않고 따로 읽는 까닭, **빌릴 건만 묻는** 좁히기는 공용 조각
+ * (queries/repair-case-domestic-order-due-dates.ts)의 머리말에 있다.
+ *
+ * 🔵 좁히기를 **거르고 난 뒤**에 한다 — 출하 완료된 건은 이 화면에 없으므로
+ * 그 건들의 내자 날짜까지 읽을 이유가 없다.
  */
 export async function listMyActiveRepairCases(actorId: string): Promise<MyActiveWorkRow[]> {
   const rows = await db
@@ -229,5 +260,16 @@ export async function listMyActiveRepairCases(actorId: string): Promise<MyActive
     .leftJoin(exceptionStatuses, eq(repairCases.exceptionStatusId, exceptionStatuses.id))
     .where(and(eq(repairCases.assignedEngineerId, actorId), eq(repairCases.isDeleted, false)));
 
-  return rows.map((row) => toMyActiveWorkRow(row as JoinRow)).filter((row) => row.status !== "SHIPMENT_COMPLETED");
+  const active = rows
+    .map((row) => toMyActiveWorkRow(row as JoinRow))
+    .filter((row) => row.status !== "SHIPMENT_COMPLETED");
+
+  const dueDatesByCaseId = await loadDomesticOrderDueDatesByCaseId(dueDateBorrowerIds(active));
+
+  return active.map((row) => ({
+    ...row,
+    // 위 변환은 빈 배열을 내놓는다(조인 한 줄에는 없는 값이다). 실제 날짜를
+    // 얹는 자리는 여기 하나뿐이다.
+    domesticOrderDueDates: dueDatesByCaseId.get(row.id) ?? [],
+  }));
 }

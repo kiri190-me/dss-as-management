@@ -818,9 +818,23 @@ test("🔴 납기 임박은 판정을 새로 적지 않고 전용 조회 하나�
     dueDateSource.includes("eq(repairCases.isDeleted, false)"),
     "휴지통에 든 건을 빼지 않는다"
   );
+  // 🔵 날짜를 모아 오는 조각은 2026-10-19 에 공용으로 옮겼다 — 목록 둘(전체 A/S
+  // 현황 · 내 작업)이 같은 것을 쓰게 됐기 때문이다. 여기서는 **그 조각을 쓰는가**
+  // 만 본다. 베껴 적은 SQL 을 따로 들고 있으면 한쪽만 고쳐지는 날 같은 건이
+  // 화면마다 다른 날짜로 보인다(그 어긋남이 이번 결함이었다).
+  assert.match(
+    dueDateSource,
+    /from "\.\/repair-case-domestic-order-due-dates"/,
+    "내자 날짜를 모으는 공용 조각을 쓰지 않는다 — 규칙이 두 벌이 된다"
+  );
   // 지운 발주 줄에 붙어 있던 날짜가 알림을 만들어 내면 안 된다(주간보고와 같은 규칙).
+  // 그 조건은 이제 그 공용 조각이 갖는다.
+  const sharedDueDateSource = readFileSync(
+    new URL("../db/queries/repair-case-domestic-order-due-dates.ts", import.meta.url),
+    "utf8"
+  );
   assert.ok(
-    dueDateSource.includes("eq(domesticOrders.isDeleted, false)"),
+    sharedDueDateSource.includes("eq(domesticOrders.isDeleted, false)"),
     "지워진 내자 줄의 날짜까지 빌려 온다"
   );
 });

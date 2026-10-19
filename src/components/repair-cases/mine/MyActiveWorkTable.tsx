@@ -9,6 +9,7 @@ import {
 } from "@/lib/domain/my-active-work-sort";
 import { billingTypeLabels } from "@/lib/domain/types";
 import { StatusBadge } from "@/components/repair-cases/badges";
+import RequestedDueDateValue from "@/components/repair-cases/RequestedDueDateValue";
 import { ExceptionStatusBadge } from "./ExceptionStatusBadge";
 import { formatLastActivity, formatLastWorkRecord, formatPartsRequestStatus } from "./format";
 import { daysSinceIntake } from "@/lib/domain/date-only";
@@ -237,7 +238,11 @@ export default function MyActiveWorkTable({
                 <div className="flex flex-col gap-0.5">
                   <span className="font-medium whitespace-nowrap">{row.internalTargetShipmentDate ?? "-"}</span>
                   <span className="text-xs whitespace-nowrap text-zinc-500 dark:text-zinc-400">
-                    고객요청 {row.customerRequestedDueDate ?? "-"}
+                    고객요청{" "}
+                    <RequestedDueDateValue
+                      customerRequestedDueDate={row.customerRequestedDueDate}
+                      domesticOrderDueDates={row.domesticOrderDueDates}
+                    />
                   </span>
                   <span className="text-xs whitespace-nowrap text-zinc-500 dark:text-zinc-400">
                     검수완료 {row.internalTargetInspectionCompletionDate ?? "-"}

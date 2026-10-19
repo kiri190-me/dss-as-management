@@ -135,6 +135,13 @@ export function mapRepairCaseRow(
     currentWorkflowStepKey: row.currentWorkflowStepKey,
     receivedAt: row.receivedAt,
     customerRequestedDueDate: row.customerRequestedDueDate,
+    // 🔴 조인해 온 한 줄에는 들어 있지 않다 — 들어 있을 수 없다. 한 건에 내자
+    // 줄이 여럿이고 줄마다 날짜가 또 여럿이라, 이 join 에 끌어다 붙이면 그 건이
+    // 날짜 수만큼 복제된다(queries/repair-case-domestic-order-due-dates.ts 머리말).
+    // 그래서 **따로 읽어 덧씌우고**, 그 일을 하는 곳은 목록 조회
+    // (queries/repair-cases.ts 의 listRepairCases) 하나다. 나머지 조회가 받는
+    // 줄은 빈 배열 그대로이고, 그 화면들은 이 칸을 그리지 않는다.
+    domesticOrderDueDates: [],
     internalTargetInspectionCompletionDate: row.internalTargetInspectionCompletionDate,
     internalTargetShipmentDate: row.internalTargetShipmentDate,
     actualShipmentDate: row.actualShipmentDate,

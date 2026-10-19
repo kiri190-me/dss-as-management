@@ -32,6 +32,7 @@ function row(overrides: Partial<EffectiveRepairCase> = {}): EffectiveRepairCase 
     currentWorkflowStepKey: "repair",
     receivedAt: "2026-08-03",
     customerRequestedDueDate: null,
+    domesticOrderDueDates: [],
     internalTargetInspectionCompletionDate: null,
     internalTargetShipmentDate: null,
     actualShipmentDate: null,
@@ -683,5 +684,86 @@ test("고객 요청 납기일 차례는 출하일을 더한 뒤에도 그대로�
     "c",
     "b",
     "a",
+  ]);
+});
+
+// ──────────────────────────────── 고객 요청 납기일 차례 — 빌려 온 날짜까지
+
+/**
+ * ============================================================================
+ * 고객 요청 납기일 정렬은 **보이는 날짜**로 선다 (2026-10-19)
+ * ============================================================================
+ * 자기 칸(customerRequestedDueDate)이 비면 표는 연결된 내자 정리의 납기요청일
+ * 중 가장 이른 하루를 빌려 그린다(components/repair-cases/RequestedDueDateValue.tsx).
+ *
+ * 🔴 그런데 정렬이 원본 칸을 보면 **보이는 날짜와 줄 서는 차례가 달라진다** —
+ * 화면에 2026-10-20 이라고 적힌 줄이 "날짜 없음" 자리에 가서 선다. 값이 안
+ * 나오는 것보다 더 나쁜 결함이다. 바로 위 출하일 정렬이 널을 사내 목표
+ * 출하일로 끼워 넣지 않기로 한 것과 같은 결의 판단이다.
+ *
+ * 🔴 아래 세 시험이 함께 지키는 것:
+ *  · 빌려 온 건은 **빌려 온 날짜 자리**에 선다(널 자리가 아니다).
+ *  · 자기 칸이 적혀 있으면 **그 값이 이긴다** — 내자 날짜가 더 일러도 끌려가지 않는다.
+ *  · 양쪽 다 없으면 **널 자리**다 — 예전과 같다.
+ * ============================================================================
+ */
+test("🔴 자기 칸이 빈 건은 내자에서 빌려 온 날짜 자리에 줄 선다 — 널 자리가 아니다", () => {
+  const rows = [
+    row({ id: "own-late", customerRequestedDueDate: "2026-12-01" }),
+    // 자기 칸은 비었고 내자에만 날짜가 있다. 가장 이른 하루는 2026-10-20 이고,
+    // 그 날짜는 아래 두 건 **사이**에 떨어지게 잡아 두었다 — 원본 칸으로 세우면
+    // 이 줄은 널로 보여 오름차순 맨 앞, 내림차순 맨 뒤로 튄다.
+    row({
+      id: "borrowed",
+      customerRequestedDueDate: null,
+      domesticOrderDueDates: ["2026-11-20", "2026-10-20"],
+    }),
+    row({ id: "own-early", customerRequestedDueDate: "2026-09-05" }),
+  ];
+
+  assert.deepEqual(
+    idsOf(sortRows(rows, { column: "customerRequestedDueDate", direction: "asc" })),
+    ["own-early", "borrowed", "own-late"],
+    "오름차순에서 빌려 온 줄이 제 날짜 자리에 서지 않았다"
+  );
+  assert.deepEqual(
+    idsOf(sortRows(rows, { column: "customerRequestedDueDate", direction: "desc" })),
+    ["own-late", "borrowed", "own-early"],
+    "내림차순에서 빌려 온 줄이 제 날짜 자리에 서지 않았다"
+  );
+});
+
+test("🔴 자기 칸이 적혀 있으면 그 값이 이긴다 — 내자 날짜가 더 일러도 끌려가지 않는다", () => {
+  const rows = [
+    // 내자 날짜(2026-01-02)가 훨씬 이르다. 빌려 온 것이 이기면 이 줄이 맨 앞으로 온다.
+    row({
+      id: "own-wins",
+      customerRequestedDueDate: "2026-12-01",
+      domesticOrderDueDates: ["2026-01-02"],
+    }),
+    row({ id: "mid", customerRequestedDueDate: "2026-06-01" }),
+  ];
+
+  assert.deepEqual(
+    idsOf(sortRows(rows, { column: "customerRequestedDueDate", direction: "asc" })),
+    ["mid", "own-wins"],
+    "자기 칸이 있는데도 내자 날짜로 줄을 세웠다"
+  );
+});
+
+test("양쪽 어디에도 날짜가 없으면 널 자리다 — 예전과 같다", () => {
+  const rows = [
+    row({ id: "none", customerRequestedDueDate: null, domesticOrderDueDates: [] }),
+    row({ id: "dated", customerRequestedDueDate: "2026-09-01" }),
+  ];
+
+  // 오름차순에 널이 맨 앞, 내림차순에 맨 뒤 — compareNullableString 그대로다.
+  assert.deepEqual(idsOf(sortRows(rows, { column: "customerRequestedDueDate", direction: "asc" })), [
+    "none",
+    "dated",
+  ]);
+  assert.deepEqual(idsOf(sortRows(rows, { column: "customerRequestedDueDate", direction: "desc" })), [
+    "dated",
+    "none",
   ]);
 });

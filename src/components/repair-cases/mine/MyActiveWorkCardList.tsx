@@ -3,6 +3,7 @@ import { LIST_CARD_GRID } from "@/components/common/responsive-list";
 import type { MyActiveWorkRow } from "@/lib/db/queries/repair-cases-mine";
 import { billingTypeLabels } from "@/lib/domain/types";
 import { StatusBadge } from "@/components/repair-cases/badges";
+import RequestedDueDateValue from "@/components/repair-cases/RequestedDueDateValue";
 import { ExceptionStatusBadge } from "./ExceptionStatusBadge";
 import { formatLastActivity, formatLastWorkRecord, formatPartsRequestStatus } from "./format";
 import { daysSinceIntake } from "@/lib/domain/date-only";
@@ -62,7 +63,12 @@ export default function MyActiveWorkCardList({ rows }: { rows: MyActiveWorkRow[]
             </div>
             <div>
               <dt className="text-xs text-zinc-500 dark:text-zinc-500">고객 요청 납기일</dt>
-              <dd>{row.customerRequestedDueDate ?? "-"}</dd>
+              <dd>
+                <RequestedDueDateValue
+                  customerRequestedDueDate={row.customerRequestedDueDate}
+                  domesticOrderDueDates={row.domesticOrderDueDates}
+                />
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-zinc-500 dark:text-zinc-500">입고 후 경과일</dt>

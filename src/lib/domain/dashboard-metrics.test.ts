@@ -25,6 +25,7 @@ function row(overrides: Partial<EffectiveRepairCase> = {}): EffectiveRepairCase 
     currentWorkflowStepKey: "repair",
     receivedAt: "2026-08-03",
     customerRequestedDueDate: null,
+    domesticOrderDueDates: [],
     internalTargetInspectionCompletionDate: null,
     internalTargetShipmentDate: null,
     actualShipmentDate: null,

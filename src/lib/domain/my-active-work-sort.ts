@@ -1,4 +1,5 @@
 import type { MyActiveWorkRow } from "@/lib/db/queries/repair-cases-mine";
+import { resolveRepairCaseRequestedDueDate } from "./requested-due-date-link";
 
 /**
  * Phase 5C-3 default sort for "내 담당 제품": nearest internal shipment
@@ -110,7 +111,16 @@ function primaryValue(row: MyActiveWorkRow, column: MyWorkSortColumn): string | 
     case "internalTargetShipmentDate":
       return row.internalTargetShipmentDate;
     case "customerRequestedDueDate":
-      return row.customerRequestedDueDate;
+      // 🔴 원본 칸이 아니라 **화면이 그리는 날짜**다. 그 칸이 비면 이 화면은
+      // 연결된 내자 정리의 납기요청일 중 가장 이른 하루를 빌려 그리므로
+      // (components/repair-cases/RequestedDueDateValue.tsx), 원본 칸으로 세우면
+      // 보이는 날짜와 줄 서는 차례가 달라진다. 규칙은 화면이 쓰는 그 함수가
+      // 갖고, 여기로 베껴 적지 않는다. 널 처리(값 없는 행은 늘 맨 뒤)는 그대로다 —
+      // 양쪽 다 없는 건만 널이 된다.
+      return resolveRepairCaseRequestedDueDate({
+        customerRequestedDueDate: row.customerRequestedDueDate,
+        domesticOrderDueDates: row.domesticOrderDueDates,
+      }).dueDate;
     case "lastWorkRecordAt":
       // ISO 8601 문자열이라 글자 순서가 곧 시간 순서다(자리수가 늘 같다).
       return row.lastWorkRecordAt;

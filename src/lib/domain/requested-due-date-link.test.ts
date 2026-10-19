@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   DOMESTIC_ORDER_DUE_DATE_LINK_NOTE,
   DUE_DATE_FROM_DOMESTIC_ORDER_LABEL,
+  DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL,
+  DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_NOTE,
   DUE_DATE_FROM_REPAIR_CASE_LABEL,
   REPAIR_CASE_DUE_DATE_LINK_NOTE,
   resolveDomesticOrderDueDateDisplay,
@@ -287,4 +290,112 @@ test("이 줄에 적힌 납기요청일은 그대로 되실려 나간다 — 칸
   );
   assert.deepEqual(fields.dueDates, [{ dueDate: "2026-01-20", note: "1차분" }]);
   assert.equal(Object.keys(fields).length, 24);
+});
+
+// ── ⑥ 목록용 짧은 표시 ──────────────────────────────────────────────────
+
+test("목록용 짧은 표시는 상세정보의 긴 이름표와 다른 글자다 — 자리가 다르기 때문이다", () => {
+  // 표에서 이 값이 사는 곳은 출하일 칸 안의 보조 줄 하나이고 줄바꿈을 하지
+  // 않는다. 긴 이름표를 그대로 쓰면 그 열만 넓어져 표가 옆으로 길어진다.
+  assert.notEqual(DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL, DUE_DATE_FROM_DOMESTIC_ORDER_LABEL);
+  assert.ok(
+    DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL.length < DUE_DATE_FROM_DOMESTIC_ORDER_LABEL.length,
+    "좁은 자리에 쓰려고 만든 표시가 긴 쪽보다 짧지 않다"
+  );
+});
+
+test("짧은 표시의 설명도 화면에 실제로 붙는 글자를 가리킨다", () => {
+  assert.ok(
+    DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_NOTE.includes(DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL),
+    "목록 설명이 그 화면의 꼬리표 글자를 말하지 않는다"
+  );
+});
+
+// ── ⑦ 🔴 목록 조회가 **빌려 올 재료를 실제로 싣고 오는가** ──────────────
+
+/**
+ * ============================================================================
+ * 조회 소스를 글자로 읽는 시험 — 왜 이렇게까지 하는가
+ * ============================================================================
+ * 2026-10-19 사용자 신고: 「[내자정리]에서 고객 요청 납기일을 적으면 [전체 A/S
+ * 현황] 표에는 그 날짜가 안 나온다」. 빌려 오는 규칙은 2026-08-26 에 이미
+ * 있었는데 **상세정보와 내자 목록 두 화면에만** 붙어 있었고, 목록 조회는
+ * domestic_orders 를 한 글자도 읽지 않았다.
+ *
+ * 🔴 **화면 시험만으로는 이 결함을 못 잡는다.** 화면 시험은 손으로 만든 줄을
+ * 넘겨 그리므로, 조회가 재료를 빠뜨려도 전부 통과한다. 사람 눈에는 늘 "-"만
+ * 보이고 그건 "날짜가 없는 건"과 구별되지 않아 아무도 신고하지 않는다
+ * (queries/repair-cases-list-columns.integration.test.ts 머리말의 바로 그 말).
+ *
+ * 🔴 그리고 **빈 배열을 넘기는 실패**는 타입으로도 안 잡힌다 — 칸은 있고
+ * 함수도 그대로 불리는데 빌려 오기만 조용히 꺼진다. 그래서 「재료를 묶어 오는
+ * 호출이 있는가」와 「그 결과를 줄에 얹는가」를 따로 센다. 종 알림 조회에 같은
+ * 가드가 걸려 있다(domain/notifications.test.ts).
+ *
+ * DB 없이 붙잡을 수 있는 것은 여기까지다. 실제로 값이 실려 오는지는 DB 시험이
+ * 본다(queries/repair-cases-list-columns.integration.test.ts).
+ * ============================================================================
+ */
+function querySource(fileName: string): string {
+  return readFileSync(new URL(`../db/queries/${fileName}`, import.meta.url), "utf8");
+}
+
+test("🔴 전체 A/S 현황 목록 조회가 내자 납기요청일을 묶어 와 줄에 얹는다", () => {
+  const source = querySource("repair-cases.ts");
+
+  assert.ok(
+    source.includes("loadDomesticOrderDueDatesByCaseId("),
+    "목록 조회가 내자 납기요청일을 읽지 않는다 — 표는 영영 자기 칸만 그린다"
+  );
+  // 🔴 읽기만 하고 줄에 얹지 않으면 화면에는 아무 변화가 없다. 위 단언만으로는
+  // 초록색으로 남는 자리다.
+  assert.ok(
+    source.includes("domesticOrderDueDates: dueDatesByCaseId.get(row.id)"),
+    "읽어 온 날짜를 줄에 얹지 않는다 — 화면에 닿지 않는다"
+  );
+  // 🔵 「빌릴 건만」 좁혀 묻는다. 목록은 수백 건이라 이 좁히기가 곧 질의 크기다.
+  assert.ok(
+    source.includes("dueDateBorrowerIds("),
+    "자기 칸이 찬 건의 내자 날짜까지 읽는다 — 쓰이지 않을 것을 묻는다"
+  );
+});
+
+test("🔴 내 작업 화면 조회도 같은 재료를 싣고 온다", () => {
+  const source = querySource("repair-cases-mine.ts");
+
+  assert.ok(
+    source.includes("loadDomesticOrderDueDatesByCaseId("),
+    "내 작업 조회가 내자 납기요청일을 읽지 않는다"
+  );
+  assert.ok(
+    source.includes("domesticOrderDueDates: dueDatesByCaseId.get(row.id)"),
+    "읽어 온 날짜를 줄에 얹지 않는다"
+  );
+  assert.ok(source.includes("dueDateBorrowerIds("), "빌릴 건만 묻는 좁히기가 없다");
+});
+
+test("🔴 재료를 모으는 조각은 한 벌뿐이고, 지운 내자 줄의 날짜는 세지 않는다", () => {
+  const source = querySource("repair-case-domestic-order-due-dates.ts");
+
+  // 화면에서 지운 줄에 붙어 있던 날짜가 다른 화면의 값을 정하면 안 된다
+  // (주간보고·종 알림과 같은 규칙).
+  assert.ok(
+    source.includes("eq(domesticOrders.isDeleted, false)"),
+    "지워진 내자 줄의 날짜까지 빌려 온다"
+  );
+  // repair_case_id 는 nullable 이다(접수 건 영구 삭제 시 SET NULL).
+  assert.ok(source.includes("row.repairCaseId === null"), "null 인 repair_case_id 를 거르지 않는다");
+  // inArray 에 빈 배열을 넘기면 뜻 없는 SQL 이 만들어진다. 빌릴 건이 하나도
+  // 없으면 질의 자체가 돌지 않아야 한다.
+  assert.ok(source.includes("caseIds.length === 0"), "빌릴 건이 없을 때도 질의를 돌린다");
+
+  // 🔴 세 곳(목록 둘 + 종 알림)이 이 한 벌을 쓴다. 한 곳이 제 SQL 을 들고 있으면
+  // 언젠가 거기만 고쳐지고, 그때 같은 건이 화면마다 다른 날짜로 보인다.
+  for (const caller of ["repair-cases.ts", "repair-cases-mine.ts", "repair-case-due-date-notifications.ts"]) {
+    assert.match(
+      querySource(caller),
+      /from "\.\/repair-case-domestic-order-due-dates"/,
+      `${caller} 가 공용 조각을 쓰지 않는다 — 규칙이 두 벌이 된다`
+    );
+  }
 });

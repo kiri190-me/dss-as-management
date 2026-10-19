@@ -2,6 +2,7 @@ import Link from "next/link";
 import { LIST_CARD_GRID } from "@/components/common/responsive-list";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import { HoldBadge, OverdueBadge, PriorityBadge, SourceBadge, StatusBadge, WorkflowOverrideBadge } from "./badges";
+import RequestedDueDateValue from "./RequestedDueDateValue";
 import { preventShiftClickTextSelection, shiftKeyOf } from "@/lib/hooks/useShiftRangeSelection";
 
 type RepairCaseCardListProps = {
@@ -113,7 +114,12 @@ export default function RepairCaseCardList({
             </div>
             <div>
               <dt className="text-xs text-zinc-500 dark:text-zinc-500">고객 요청 납기일</dt>
-              <dd>{row.customerRequestedDueDate ?? "-"}</dd>
+              <dd>
+                <RequestedDueDateValue
+                  customerRequestedDueDate={row.customerRequestedDueDate}
+                  domesticOrderDueDates={row.domesticOrderDueDates}
+                />
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-zinc-500 dark:text-zinc-500">실제 출하일</dt>
