@@ -48,7 +48,7 @@ const collect = () => sliceBetween(form, "function collectFields() {", "async fu
 describe("㉠ 입구 — 케이블이 고를 수 있는 종류다", () => {
   test("🔴 종류 목록에 케이블이 있고 이름표가 붙어 있다", () => {
     assert.ok((QUOTE_KINDS as readonly string[]).includes("CABLE"), "케이블을 아직 고를 수 없다");
-    assert.equal(quoteKindLabels.CABLE, "케이블 견적서");
+    assert.equal(quoteKindLabels.CABLE, "기타 견적서");
   });
 
   test("🔴 화면은 종류 하나로 갈린다 — 갈림길이 여럿이면 한 곳만 고쳐지는 날이 온다", () => {

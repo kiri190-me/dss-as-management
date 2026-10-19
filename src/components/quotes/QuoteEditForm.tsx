@@ -2732,7 +2732,7 @@ export default function QuoteEditForm({
             <Field
               label="특이사항"
               error={fieldErrors.remarks}
-              hint="케이블 견적서 양식의 10번 항목 · 여러 줄"
+              hint="기타 견적서 양식의 10번 항목 · 여러 줄"
             >
               <textarea
                 value={remarks}
@@ -3131,7 +3131,7 @@ export default function QuoteEditForm({
         {/* 🔴 상한에 닿으면 **까닭을 적는다.** 단추만 잠가 두면 「왜 안 눌리지」가 된다. */}
         {isCable && itemLinesFull && (
           <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-            줄이 {cableMaxLines}줄을 다 찼습니다 — 케이블 견적서 양식에 더 넣을 자리가 없습니다.
+            줄이 {cableMaxLines}줄을 다 찼습니다 — 기타 견적서 양식에 더 넣을 자리가 없습니다.
             줄을 지우거나 견적서를 나눠 주세요.
           </p>
         )}

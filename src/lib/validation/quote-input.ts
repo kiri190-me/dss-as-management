@@ -185,7 +185,7 @@ export type StoredQuoteKind = (typeof STORED_QUOTE_KINDS)[number];
 export const quoteKindLabels: Record<StoredQuoteKind, string> = {
   DOMESTIC: "내자 견적서",
   OVERHAUL: "OH 견적서",
-  CABLE: "케이블 견적서",
+  CABLE: "기타 견적서",
 };
 
 export function isQuoteKind(value: unknown): value is QuoteKind {

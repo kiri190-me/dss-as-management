@@ -309,7 +309,7 @@ export function validateCableQuoteInput(input: CableQuoteInput): void {
 
   if (input.lines.length > CABLE_QUOTE_MAX_LINES) {
     problems.push(
-      `케이블 견적서 양식에는 품목 줄과 설명 줄을 합쳐 ${CABLE_QUOTE_MAX_LINES}줄까지 넣을 수 있습니다` +
+      `기타 견적서 양식에는 품목 줄과 설명 줄을 합쳐 ${CABLE_QUOTE_MAX_LINES}줄까지 넣을 수 있습니다` +
         `(지금 ${input.lines.length}줄). 줄을 줄이거나 견적서를 나눠 주세요.`
     );
   }

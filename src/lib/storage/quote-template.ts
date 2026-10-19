@@ -283,7 +283,7 @@ const TEMPLATE_VARIANTS: Record<string, TemplateVariant> = {
    */
   CABLE: {
     envVar: "CABLE_QUOTE_TEMPLATE_PATH",
-    label: "케이블 견적서",
+    label: "기타 견적서",
     sheetName: CABLE_QUOTE_SHEET_NAME,
     headerCells: CABLE_HEADER_CELLS,
   },
