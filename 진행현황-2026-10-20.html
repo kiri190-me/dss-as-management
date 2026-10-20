@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>진행현황 — 부품 요청·승인·출하 (2026-10-20)</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --line:#e3e6ea; --fg:#1d2126; --dim:#6b7280;
+    --b1:#b42318; --b2:#b54708; --b3:#175cd3; --b4:#5925dc; --b5:#475467; --b6:#0e7490;
+    --ask:#b42318;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 20px 64px;background:var(--bg);color:var(--fg);
+       font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;line-height:1.65;}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:25px;margin:0 0 6px}
+  .sub{color:var(--dim);font-size:14px;margin:0 0 22px}
+  h2{font-size:17.5px;margin:36px 0 10px;padding-bottom:7px;border-bottom:2px solid var(--line)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+  .row{display:flex;gap:10px;align-items:flex-start}
+  .no{flex:0 0 auto;min-width:30px;height:24px;padding:0 7px;border-radius:6px;
+      background:#eef1f5;color:#344054;font-size:12.5px;font-weight:700;
+      display:inline-flex;align-items:center;justify-content:center;margin-top:2px}
+  .t{font-weight:700;font-size:15px}
+  .where{display:inline-block;font-size:11.5px;color:#344054;background:#eef1f5;
+         border-radius:5px;padding:1px 7px;margin-left:7px;vertical-align:1px;font-weight:600}
+  .body{font-size:14px;margin-top:5px}
+  .note{font-size:13px;color:var(--dim);margin-top:6px}
+  .red{color:var(--ask);font-weight:700}
+  .blue{color:var(--b3);font-weight:700}
+  .grp{border-left:4px solid var(--line);padding-left:14px;margin:14px 0 26px}
+  .gh{font-weight:800;font-size:15.5px;margin-bottom:2px}
+  .gw{font-size:13px;color:var(--dim);margin-bottom:10px}
+  .pill{display:inline-block;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 10px;color:#fff}
+  .p1{background:var(--b1)} .p2{background:var(--b2)} .p3{background:var(--b3)}
+  .p4{background:var(--b4)} .p5{background:var(--b5)} .p6{background:var(--b6)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#f0f2f5;font-weight:700}
+  .st{font-size:12px;font-weight:700;border-radius:5px;padding:2px 8px;display:inline-block;background:#eef1f5;color:#475467}
+  .ask{background:#fef3f2;border:1px solid #fecdca;border-radius:9px;padding:13px 15px;margin:12px 0}
+  .tip{background:#eff8ff;border:1px solid #b2ddff;border-radius:9px;padding:13px 15px;margin:12px 0}
+  .ok{background:#ecfdf3;border:1px solid #abefc6;border-radius:9px;padding:13px 15px;margin:12px 0}
+  .vis{background:#f5f3ff;border:1px solid #ddd6fe;border-radius:9px;padding:13px 15px;margin:12px 0}
+  ul{margin:6px 0 0;padding-left:20px} li{margin:3px 0}
+  code{background:#eef1f5;border-radius:4px;padding:1px 5px;font-size:12.5px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>진행현황 — 부품 요청 · 승인 · 출하</h1>
+<p class="sub">2026-10-20 접수 13가지 · 사용자 결정 셋 반영 · 아직 <b>아무것도 시작 안 함</b> · 무대는 <b>A/S 관리</b> + <b>재고 관리</b></p>
+
+<div class="ok">
+<b>정해진 것 셋 (2026-10-20)</b>
+<ul>
+<li><b>반영 속도 = 누른 즉시.</b> 🔴 지금 구조에 없는 통로 둘을 만들어야 합니다 — 아래 「즉시의 값」을 보세요</li>
+<li><b>취소는 불출 전까지만.</b> 실물이 나간 뒤에는 못 되돌립니다 — 재고 수량이 안전해집니다</li>
+<li><b>[출하승인]에서 승인까지</b> 할 수 있게. 그리고 길게는 <b>모든 시스템의 결재를 한곳에서</b></li>
+</ul>
+</div>
+
+<div class="vis">
+<b>먼 목표 — 결재를 한곳에서</b><br />
+지금 결재는 시스템마다 따로입니다(A/S 출하 승인 · 재고 부품 불출 · 견적 승인…).
+최종적으로 <b>한 화면에서 모두 보고 처리</b>하는 것이 목표입니다.
+🔵 <b>그래서 7번(출하승인) 화면을 지을 때 「A/S 전용」으로 짓지 않습니다</b> —
+나중에 다른 시스템의 결재가 같은 자리에 얹힐 수 있는 모양으로 지어야 그때 다시 안 만듭니다.
+그 하나만 지키면 지금은 A/S 것만 보여도 됩니다.
+</div>
+
+<div class="ask">
+<b>「즉시」의 값 — 두 걸음으로 나누기를 권합니다</b><br />
+지금 A/S 화면은 <b>열릴 때</b> 재고 관리에 물어봅니다. 「즉시」가 되려면 <b>처음 만드는 것 둘</b>이 필요합니다 —
+① 재고 관리가 A/S 에 알리는 통로(지금은 방향이 반대입니다) ② A/S 서버가 열린 브라우저에 밀어 주는 길.
+<table>
+<tr><th style="width:74px">걸음</th><th>무엇</th><th style="width:300px">사람이 느끼는 것</th></tr>
+<tr><td><b>1-A</b></td><td>상태·사유가 흐르게 + 화면이 열려 있는 동안 <b>몇 초마다</b> 다시 묻기</td>
+    <td>「반려를 누르고 A/S 쪽을 보면 바뀌어 있다」 — <b>새로고침은 더 이상 필요 없습니다</b></td></tr>
+<tr><td><b>1-B</b></td><td>진짜 밀어 주기(통로 둘 신설)</td><td>눈 깜짝할 사이</td></tr>
+</table>
+<div class="note" style="margin-top:9px">
+🔵 <b>1-B 를 나중에 얹어도 1-A 가 헛일이 되지 않습니다.</b> 1-A 만으로 「새로고침해야 보인다」가 사라집니다.
+🔴 <b>1-B 를 지금 함께 하길 원하시면 그렇게 합니다</b> — 1순위 묶음이 그만큼 길어진다는 것만 알고 가시면 됩니다.
+</div>
+</div>
+
+<!-- ───── 우선순위 ───── -->
+<h2>급한 순서</h2>
+<table>
+<tr><th style="width:84px">순위</th><th style="width:116px">항목</th><th>묶음</th><th>왜 이 자리인가</th></tr>
+<tr><td><span class="pill p1">1</span></td><td>4</td><td><b>결재권 위임</b></td>
+    <td>🔴 <b>지금 일이 멈추고 있습니다</b>(2026-10-20 확인). 결재권자가 자리를 비우면 그 건이 서 버립니다 — 「틀린 정보가 보인다」보다 <b>「아예 안 돌아간다」가 급합니다</b></td></tr>
+<tr><td><span class="pill p2">2</span></td><td>1 · 9 · 10 · 11</td><td><b>반려·취소의 진실을 양쪽에 같게</b></td>
+    <td><b>틀린 정보가 보입니다.</b> 반려됐는데 A/S 에서는 진행 중으로 보이면 사람이 잘못 판단합니다 — 「없는 것」보다 「거짓인 것」이 나쁩니다</td></tr>
+<tr><td><span class="pill p3">3</span></td><td>3</td><td><b>취소가 승인 요청건까지</b></td>
+    <td>끝난 결재가 유령으로 남아 결재함이 지저분해집니다. <b>「불출 전까지만」으로 정해져 일이 작아졌습니다</b></td></tr>
+<tr><td><span class="pill p4">4</span></td><td>5 · 8</td><td><b>부품을 화면에서 알아보게</b></td>
+    <td>매일 쓰는 세 화면에 정보가 모자랍니다. 8(비고)은 2순위와 <b>같은 통로</b>를 타서 함께 하면 쌉니다</td></tr>
+<tr><td><span class="pill p5">5</span></td><td>7</td><td><b>재고 알림 확인</b></td>
+    <td>오늘 깔아 둔 알림 구조 위에 얹는 일이라 <b>지금이 제일 쌉니다.</b> 미루면 기억이 흐려집니다</td></tr>
+<tr><td><span class="pill p5">6</span></td><td>12</td><td><b>승인 절차 매처/제너레이터 분리</b></td>
+    <td>스키마가 바뀌고, <b>진행 중인 결재</b>를 어느 절차로 볼지 정해야 합니다. 1·2순위가 끝나야 화면이 안정됩니다</td></tr>
+<tr><td><span class="pill p6">7</span></td><td>6</td><td><b>[출하승인] 메뉴 + 승인</b></td>
+    <td>새로 생기는 능력이고 <b>먼 목표(결재 통합)의 첫 조각</b>입니다. 급하진 않지만 <b>짓는 모양이 뒤에 오래 남습니다</b></td></tr>
+<tr><td><span class="pill p6">8</span></td><td>2</td><td><b>OH 템플릿에서 재고 고르기</b></td>
+    <td>편해지는 일이지 틀린 것을 고치는 일이 아닙니다. 독립적이라 아무 때나 끼울 수 있습니다</td></tr>
+</table>
+
+<!-- ───── 1순위 ───── -->
+<h2><span class="pill p1">1순위</span> &nbsp;반려·취소의 진실을 양쪽에 같게</h2>
+<div class="grp" style="border-color:var(--b1)">
+<div class="gh">넷이 한 덩어리입니다 — 따로 하면 같은 자리를 세 번 고칩니다</div>
+<div class="gw">전부 <b>「반려·취소됐다는 사실과 그 사유」</b>가 재고 관리 → A/S 로 흐르는 같은 길을 씁니다.</div>
+
+<div class="card"><div class="row"><div class="no">1</div><div>
+<span class="t">반려·취소가 수리건 상세에 반영</span><span class="where">A/S ← 재고</span>
+<div class="body">재고 관리에서 반려·취소하면 <b>수리건 상세의 [부품 요청]에도</b> 보여야 합니다.</div>
+<div class="note"><span class="blue">바탕은 이미 있습니다</span> A/S 는 부품 요청을 <b>제 표에 저장하지 않고 재고에서 직접 읽습니다.</b> 새 표가 필요 없고, 재고가 상태를 내주고 A/S 가 그리면 됩니다. 「즉시」만 위 1-A/1-B 의 몫입니다.</div>
+</div></div></div>
+
+<div class="card"><div class="row"><div class="no">9</div><div>
+<span class="t">[승인 요청건] 반려 → 세 곳 반영 + 알림</span><span class="where">재고 → A/S</span>
+<div class="body">결재권자가 <b>반려</b>하면 ① [부품 요청] 반려 처리 ② 수리건에도 반려 표시 ③ <b>알림</b>이 뜹니다. 이 알림은 <b>확인하면 사라집니다.</b></div>
+<div class="note"><span class="red">5순위(7번)와 같은 뿌리</span> 「확인하면 사라진다」는 오늘 만든 <b>지우기와 다른 것</b>입니다 — 함께 설계해야 두 벌이 안 됩니다.</div>
+</div></div></div>
+
+<div class="card"><div class="row"><div class="no">10</div><div>
+<span class="t">반려 사유(비고)를 양쪽에서 확인</span><span class="where">재고 → A/S</span>
+<div class="body">반려하면서 비고에 적은 내용을 <b>[부품 요청]과 [수리건 상세]</b>에서 볼 수 있어야 합니다.</div>
+<div class="note">1·9와 <b>같은 자료</b>가 흐르는 길입니다.</div>
+</div></div></div>
+
+<div class="card"><div class="row"><div class="no">11</div><div>
+<span class="t">승인 요청 뒤에는 [반려]·[보류]를 못 누르게</span><span class="where">재고</span>
+<div class="body">[부품 요청]에서 승인 요청을 누르면 그 뒤로 <b>[반려]·[보류]가 눌리지 않아야</b> 합니다.</div>
+<div class="note"><span class="blue">끼워 넣으면 거의 공짜</span> 같은 화면입니다. 따로 하면 그 화면을 또 열어야 합니다.</div>
+</div></div></div>
+</div>
+
+<!-- ───── 2순위 ───── -->
+<h2><span class="pill p2">2순위</span> &nbsp;취소가 승인 요청건까지</h2>
+<div class="grp" style="border-color:var(--b2)">
+<div class="card"><div class="row"><div class="no">3</div><div>
+<span class="t">반출 신청을 취소하면 [승인 요청건]도 사라짐</span><span class="where">재고 · A/S</span>
+<div class="body">수리건 상세나 재고의 [부품 요청]에서 취소하면 <b>[승인 요청건]에서 진행 중이던 건도 함께</b> 없어집니다.
+<b>승인이 모두 통과해 실행만 남은 상태여도</b> 그렇습니다.</div>
+<div class="ok" style="margin:9px 0 0"><b>경계가 정해졌습니다(2026-10-20)</b> — <b>불출 전까지만</b> 취소됩니다.
+실물이 나간 뒤에는 되돌리지 않습니다. 재고 수량이 장부와 어긋날 길이 없어졌습니다.</div>
+</div></div></div>
+</div>
+
+<!-- ───── 3순위 ───── -->
+<h2><span class="pill p3">3순위</span> &nbsp;부품을 화면에서 알아보게</h2>
+<div class="grp" style="border-color:var(--b3)">
+<div class="card"><div class="row"><div class="no">5</div><div>
+<span class="t">세 화면에 품명 정보를 다 보이게</span><span class="where">A/S · 재고</span>
+<div class="body"><b>고객사 품명 · 품명 · 품명2 · 교산 품번 · 도번</b>을 아래 세 곳에.</div>
+<ul><li>[수리건 상세] → [부품요청]의 <b>반출 신청된 내용</b></li>
+<li>[부품 요청]의 <b>불출 신청 팝업</b></li><li><b>[승인 요청건]</b></li></ul>
+<div class="note">세 화면이 두 저장소에 걸쳐 있습니다 — 내주는 자료를 <b>한 번에</b> 넓히는 것이 핵심입니다.</div>
+</div></div></div>
+
+<div class="card"><div class="row"><div class="no">8</div><div>
+<span class="t">부품 요청에 비고칸</span><span class="where">A/S → 재고</span>
+<div class="body">A/S 에서 요청할 때 <b>비고</b>를 적고, 그 내용이 <b>재고 관리의 [부품 요청]에 그대로</b> 보입니다.</div>
+<div class="note"><span class="blue">1순위와 묶으면 쌉니다</span> 10번(반려 사유)과 <b>같은 통로를 반대 방향으로</b> 쓰는 일입니다.</div>
+</div></div></div>
+</div>
+
+<!-- ───── 4순위 ───── -->
+<h2><span class="pill p1">1순위</span> &nbsp;결재권 위임 — 지금 일이 멈추고 있다</h2>
+<div class="grp" style="border-color:var(--b1)">
+<div class="card"><div class="row"><div class="no">4</div><div>
+<span class="t">결재권자가 다른 사람에게 결재권을 넘김</span><span class="where">재고 설정</span>
+<div class="body">출타했을 때를 위한 장치입니다. <b class="red">2026-10-20 확인 — 지금 실제로 일이 멈추고 있습니다.</b></div>
+
+<div class="tip" style="margin:9px 0 0">
+<b>실측 — 지금 있는 것과 없는 것</b><br />
+<b>있다</b>: <code>approval_routes</code>(승인 절차) · <code>approval_route_steps</code>(단계) · <code>stock_issue_approvals</code>(진행 중인 결재)<br />
+<b>없다</b>: 위임. <span class="red">코드에 한 줄도 없습니다</span>(<code>delegat</code>·위임·대행 전부 0건) — 처음부터 만듭니다.<br />
+🔴 <b>핵심</b>: 결재 단계에 <b>사람이 직접 박혀</b> 있습니다(<code>approver_user_id</code>, 역할이 아니라 사람). 이름·직책도 함께 적혀 있습니다.
+</div>
+
+<div class="ok" style="margin:9px 0 0">
+<b>방법이 정해졌습니다 — B(별도 표) (2026-10-20 결정)</b>
+<table>
+<tr><th style="width:72px">길</th><th>무엇</th><th style="width:330px">판단</th></tr>
+<tr><td><b>A</b></td><td>절차의 그 자리를 다른 사람으로 바꾼다</td>
+    <td>🔴 <b>안 씁니다.</b> 돌아오면 되돌려야 하고 깜빡하면 영영 남습니다. <b>진행 중인 결재</b>가 함께 흔들리고, 기록에서 「원래 누구 자리였는지」가 사라집니다</td></tr>
+<tr><td><b>B</b></td><td><b>위임 표를 따로</b> — 「A 의 결재권을 이 기간 동안 B 가 대신한다」</td>
+    <td>🔵 <b>이쪽입니다.</b> 절차는 그대로 두고 「이 사람이 결재할 수 있나」를 볼 때 위임을 함께 봅니다. 기록에 <b>「B 가 A 를 대신해 결재」</b>로 남습니다</td></tr>
+</table>
+</div>
+
+<div class="note"><span class="red">설계에서 정할 것</span> 기간을 정하는가 · 되돌릴 수 있는가 · 위임받은 사람이 또 위임할 수 있는가 ·
+위임 중에 원래 결재권자가 결재하면 어떻게 되는가 · <b>누가 눌렀고 누구 자리였는지가 둘 다 기록에 남는가</b>(감사에서 제일 중요합니다).</div>
+
+<div class="note">🔵 <b>12번(절차 분리)과 같은 표를 건드립니다.</b> <b>설계는 함께, 구현은 위임 먼저</b> — 표 모양을 둘 다 받아들이게 잡아 두면 나중에 설계를 다시 하지 않습니다. 급한 쪽만 먼저 내보냅니다.</div>
+
+<div class="note">🔴 <b>먼 목표에 걸립니다</b> — 결재 단계에 사람이 박힌 구조는 「모든 시스템의 결재를 한곳에」에 불리합니다(시스템마다 제 사람을 박으면 이름 공간이 네 벌). 지금 고칠 일은 아니지만 <b>위임 표를 어디에 둘지</b>가 나중을 가릅니다.</div>
+</div></div></div>
+</div>
+
+<!-- ───── 5·6순위 ───── -->
+<h2><span class="pill p5">5·6순위</span> &nbsp;재고 알림 확인 · 승인 절차 분리</h2>
+<div class="grp" style="border-color:var(--b5)">
+<div class="card"><div class="row"><div class="no">7</div><div>
+<span class="t">알림을 눌러 확인하면 종에서 사라지게</span><span class="where">재고</span>
+<div class="body">재고 관리의 알림을 <b>확인하면</b> 종에서 사라집니다. <b>계정별</b>로요.</div>
+<div class="tip" style="margin:9px 0 0">
+<b>오늘 한 것과 다른 일입니다</b><br />
+<b>지우기(✕)</b> = 오늘 만든 것. 「그만 보겠다」. <b>포털</b>에 적히고 <b>로그아웃하면 돌아옵니다.</b><br />
+<b>확인 기록</b> = 이번에 만들 것. 「처리했다」. <b>그 시스템의 DB</b>에 <b>영영</b> 남습니다.<br />
+A/S(<code>notification_acknowledgements</code>)와 개선요청에 이미 있습니다 — <b>재고 관리에만 없습니다.</b> 그 둘을 본보기로.
+</div>
+<div class="note">🔵 1순위 9번의 「확인하면 사라지는 알림」과 <b>같은 뿌리</b>입니다 — 9번을 할 때 설계를 함께 잡으면 두 벌이 안 됩니다.</div>
+</div></div></div>
+
+<div class="card"><div class="row"><div class="no">12</div><div>
+<span class="t">승인 절차를 매처 / 제너레이터로 나누기</span><span class="where">재고 설정</span>
+<div class="body">[승인 절차]를 <b>[매처 부품 불출]</b>과 <b>[제너레이터 부품 불출]</b>로 갈라 <b>다른 결재 순서</b>를 지정합니다.</div>
+<div class="note"><span class="red">진행 중인 결재가 있습니다</span> 나누는 순간 그 건들이 <b>어느 절차를 따를지</b> 정해야 합니다 — 옛 절차로 끝낼지, 새 절차로 옮길지. 자료를 건드리는 일이라 설계부터.</div>
+</div></div></div>
+</div>
+
+<!-- ───── 7·8순위 ───── -->
+<h2><span class="pill p6">7·8순위</span> &nbsp;출하승인 · OH 템플릿</h2>
+<div class="grp" style="border-color:var(--b6)">
+<div class="card"><div class="row"><div class="no">6</div><div>
+<span class="t">[출하승인] 메뉴 신설 — 보고, 들어가고, 승인까지</span><span class="where">A/S</span>
+<div class="body">출하 요청된 건들을 <b>한 창에 모아</b> 보여 주고, 수리건 내용을 <b>꽤 자세히</b> 함께 보여 주며,
+<b>인수번호를 눌러 수리건 상세로</b> 갈 수 있고, <b>그 화면에서 승인까지</b> 할 수 있게 합니다.</div>
+<div class="vis" style="margin:9px 0 0"><b>먼 목표의 첫 조각입니다</b> — 최종적으로 <b>모든 시스템의 결재를 한곳에서</b> 관리하는 것이 목표입니다.
+🔴 그래서 이 화면을 <b>「A/S 전용」으로 짓지 않습니다.</b> 다른 시스템의 결재가 나중에 같은 자리에 얹힐 수 있는 모양으로 지어야 그때 다시 안 만듭니다.
+지금은 A/S 것만 보여도 됩니다 — <b>모양만 열어 두면 됩니다.</b></div>
+<div class="note">A/S 에는 이미 출하 결재선이 있습니다. 새 화면은 <b>그 절차를 그대로 쓰고</b> 보기와 누르기를 모아 주는 자리입니다 — 결재 규칙을 새로 만들지 않습니다.</div>
+</div></div></div>
+
+<div class="card"><div class="row"><div class="no">2</div><div>
+<span class="t">OH 템플릿 품명란에서 재고를 바로 고르기</span><span class="where">재고</span>
+<div class="body">품명란에서 <b>재고의 부품을 바로 고를</b> 수 있게 하고, <b>단가를 비워 두면 그 부품의 원래 견적가</b>가 들어갑니다.</div>
+<div class="note">독립적이라 아무 때나 끼울 수 있습니다. <b>「비워 둠」과 「0 을 적음」을 어떻게 가를지</b>만 정하면 됩니다.</div>
+</div></div></div>
+</div>
+
+<!-- ───── 질문 ───── -->
+<h2>정해진 것 — 더 물을 것 없음</h2>
+<div class="ok">
+<b>① 결재권 위임이 지금 막고 있는가 → 그렇다.</b> 1순위로 올렸습니다(2026-10-20).<br />
+<b>② 위임 방법 → B(별도 표).</b> 절차는 그대로 두고 「대신한다」를 따로 적습니다.<br />
+<b>③ 「즉시」 → 1-A 부터.</b> 상태·사유가 흐르고 화면이 열린 동안 몇 초마다 다시 묻습니다 —
+<b>새로고침이 필요 없어집니다.</b> 1-B(진짜 밀어 주기)는 나중에 얹어도 1-A 가 헛일이 되지 않습니다.<br />
+<b>④ 취소 경계 → 불출 전까지만.</b> &nbsp; <b>⑤ 출하승인 → 그 화면에서 승인까지</b>, 그리고 길게는 결재 통합.
+</div>
+
+<!-- ───── 진행 ───── -->
+<h2>따로 적어 두는 것 — 두 시스템이 같은 말을 하는지 재는 도구</h2>
+<div class="grp" style="border-color:var(--b3)">
+<div class="card"><div class="row"><div class="no">13</div><div>
+<span class="t">A/S ↔ 재고 관리 맞대어 보기 (점검 스크립트)</span><span class="where">A/S · 재고</span>
+<div class="body">두 시스템이 <b>같은 정보·같은 상태</b>를 띄우고 있는지 기계가 확인합니다. 2026-10-20 사용자 제안.</div>
+
+<div class="tip" style="margin:9px 0 0">
+<b>오늘 이게 필요한 증거가 나왔습니다</b><br />
+휴가 관리는 제 알림 열쇠에 <code>self:</code> 를 붙이고 있었고, 개선요청은 <b>접두사가 아예 없었습니다.</b>
+🔴 <b>둘 다 오류를 한 번도 안 냈습니다.</b> 같은 알림이 보는 위치에 따라 다른 이름이었고,
+「계측기에서 지웠는데 거기서는 안 지워진다」로만 드러났을 일입니다 — 아무도 신고하지 않았을 겁니다.
+</div>
+
+<div class="note"><b>시험으로는 못 잡습니다.</b> 저장소마다 제 시험만 돌리기 때문입니다. <b>두 시스템을 동시에 세워 놓고 맞대어 봐야</b> 드러납니다.</div>
+
+<div class="note"><b>무엇을 재는가</b>(초안)
+<ul>
+<li><b>열쇠·식별자 모양</b> — 같은 것을 양쪽이 같은 글자로 부르는가(오늘 겪은 그 자리)</li>
+<li><b>상태 이름</b> — 재고의 상태를 A/S 가 제 말로 옮길 때 빠진 상태가 없는가(새 상태가 생기면 A/S 는 조용히 모릅니다)</li>
+<li><b>개수 세는 규칙</b> — 양쪽이 같은 수를 말하는가</li>
+<li><b>권한 판정</b> — 한쪽에서 보이는 사람이 다른 쪽에서도 보이는가</li>
+</ul></div>
+
+<div class="note">🔵 <b>이미 같은 모양의 도구가 있습니다</b> — 포털의 <code>npm run check:oidc</code>·<code>check:notify:site</code> 가
+브라우저 없이 진짜 서버에 대고 왕복과 <b>거절</b>까지 확인합니다. 그 자리에 하나 더 두면 됩니다.</div>
+
+<div class="note">🔴 <b>자리</b>: 1·9·10번(상태·사유가 흐르게)을 할 때 <b>함께 만드는 것이 가장 쌉니다</b> —
+그때 양쪽이 주고받는 말을 정하게 되므로, 그 말이 맞는지 재는 자도 같이 만들면 됩니다. 따로 하면 그 설계를 두 번 읽어야 합니다.</div>
+</div></div></div>
+</div>
+
+<h2>진행 상황</h2>
+<table>
+<tr><th style="width:62px">순위</th><th style="width:52px">번호</th><th>할 일</th><th style="width:140px">상태</th></tr>
+<tr><td><span class="pill p1">1</span></td><td>4</td><td><b>결재권 위임</b> — 일이 멈추고 있다</td><td><span class="st">다음 차례 · 설계 먼저</span></td></tr>
+<tr><td><span class="pill p2">2</span></td><td>1</td><td>반려·취소가 수리건 상세에 반영</td><td><span class="st">대기 · 1-A 로</span></td></tr>
+<tr><td><span class="pill p2">2</span></td><td>9</td><td>반려 → 세 곳 반영 + 알림</td><td><span class="st">대기</span></td></tr>
+<tr><td><span class="pill p2">2</span></td><td>10</td><td>반려 사유를 양쪽에서 확인</td><td><span class="st">대기</span></td></tr>
+<tr><td><span class="pill p2">2</span></td><td>11</td><td>승인 요청 뒤 [반려]·[보류] 잠금</td><td><span class="st">대기</span></td></tr>
+<tr><td><span class="pill p3">3</span></td><td>3</td><td>취소하면 [승인 요청건]도 사라짐</td><td><span class="st">대기 · 경계 확정</span></td></tr>
+<tr><td><span class="pill p4">4</span></td><td>5</td><td>세 화면에 품명 정보 표시</td><td><span class="st">대기</span></td></tr>
+<tr><td><span class="pill p4">4</span></td><td>8</td><td>부품 요청 비고칸</td><td><span class="st">대기</span></td></tr>
+<tr><td><span class="pill p5">5</span></td><td>7</td><td>재고 알림 확인하면 사라짐</td><td><span class="st">대기</span></td></tr>
+<tr><td><span class="pill p5">6</span></td><td>12</td><td>승인 절차를 매처/제너레이터로</td><td><span class="st">대기 · 설계 먼저</span></td></tr>
+<tr><td><span class="pill p6">7</span></td><td>6</td><td>[출하승인] 메뉴 + 승인</td><td><span class="st">대기 · 설계 먼저</span></td></tr>
+<tr><td><span class="pill p6">8</span></td><td>2</td><td>OH 템플릿에서 재고 고르기</td><td><span class="st">대기</span></td></tr>
+<tr><td><span class="pill p3">2와 함께</span></td><td>13</td><td>두 시스템이 같은 말을 하는지 재는 도구</td><td><span class="st">대기 · 2순위에 끼움</span></td></tr>
+</table>
+
+<p class="sub" style="margin-top:26px">조각이 끝날 때마다 이 표의 「상태」를 함께 고칩니다. &nbsp;·&nbsp; 2026-10-20</p>
+
+</div>
+</body>
+</html>
