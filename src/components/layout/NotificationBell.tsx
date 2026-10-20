@@ -4,7 +4,10 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { NotificationBell as SharedNotificationBell } from "@dss/ui";
 import type { NotificationBellItem } from "@dss/ui";
 import { countNotificationTargets, type NotificationItem } from "@/lib/domain/notifications";
-import { toNotificationBellItems } from "@/lib/domain/notification-bell-items";
+import {
+  notificationBellKey,
+  toNotificationBellItems,
+} from "@/lib/domain/notification-bell-items";
 import { isAcknowledgeableNotificationKind } from "@/lib/domain/notification-acknowledgement";
 import {
   canDismissNotification,
@@ -80,6 +83,12 @@ import { showBrowserNotificationToast } from "./BrowserNotifications";
  * 🔴 포털에서 온 줄은 **누르는 것만으로도** 지워진다. 그 줄은 A/S 가 「확인
  * 했다」를 적을 데가 없어(그 통로가 포털에 없다) 눌러 본 뒤에도 영영 종에
  * 남던 유일한 줄이었다.
+ *
+ * 🔴 **읽는 방향은 2026-10-20 에 포털로 이어졌다.** 다른 사내 시스템의 종에서
+ * 지운 A/S 줄이 포털의 `dismissed` 로 돌아와 여기서도 빠진다 — 그래서 자기 줄의
+ * 열쇠에도 `rf-service-system:` 접두사가 붙는다(domain 의 notificationBellKey).
+ * 🔴 **적는 쪽은 아직 이 브라우저다.** 여기서 누른 ✕ 는 포털에 가지 않는다 —
+ * 그것은 다음 조각(A-2)이다.
  *
  * ── 묶음에 올 수 없는 것은 footer 로 넣는다 ─────────────────────────────
  * 브라우저 알림 권한 안내와 「시험 알림」 단추는 `navigator`·사람마다 갈라 쓰는
@@ -191,13 +200,33 @@ export function handlePortalRowPicked(
  * 렌더로는 만들 수 없다. 🔴 **배지가 함께 줄어드는가**는 눈에 안 보이는
  * 사고다(종을 열면 비었는데 숫자만 붙어 있는 종) — 값으로 시험한다.
  *
- * 🔴 **자기 줄과 받은 줄의 열쇠가 다르다.** 자기 줄은 알림 id 그대로이고
- * (notification-bell-items.ts 가 `key: item.id` 로 싣는다) 받은 줄은
- * `client_id:id` 다. 그래서 거르는 칸도 다르다.
+ * 🔴 **자기 줄도 받은 줄도 열쇠 모양이 같다** — 둘 다 `client_id:id` 다
+ * (notification-bell-items.ts 의 notificationBellKey). 2026-10-19 까지 자기 줄은
+ * 접두사 없는 알림 id 였고 그때는 거르는 칸이 서로 달랐다. 지움이 포털 한 곳에
+ * 모이면서 모양을 맞췄다 — 안 맞추면 「계측기에서 지웠는데 A/S 종에만 남는다」가
+ * 된다. 🔴 그래서 **자기 줄도 `id` 가 아니라 열쇠로 맞춰 본다.** 확인 기록만은
+ * 여전히 `id` 로 적히므로 acknowledgedIds 는 `id` 그대로다.
+ *
+ * ── 🔴 지운 목록이 **둘**이고, 여기서 합친다 ────────────────────────────
+ *  ⓐ `dismissedKeys` — 이 브라우저(localStorage)에 적힌 것.
+ *  ⓑ `inbox.dismissed` — 포털이 돌려준, 이 사람이 **어느 시스템에서든** 지운
+ *     A/S 줄의 열쇠(규격서 「dismissed」절 — 그 사이트 몫만 온다).
+ *
+ * 🔴 **합치는 자리를 여기로 잡은 까닭**: 거르는 일과 세는 일이 이미 이 함수
+ * 하나이고, 두 목록은 **같은 모양의 열쇠**라 한 Set 으로 합쳐진다. 바깥(종
+ * 컴포넌트)에서 합치면 거르기는 맞아도 **개수를 맞추는 셈이 다른 자리에**
+ * 남아 둘이 갈라질 수 있다 — 그 어긋남은 「열면 비었는데 숫자만 붙은 종」으로만
+ * 드러난다. 순수 함수 안에 두면 합치기·거르기·세기를 값 하나로 시험할 수 있다.
+ *
+ * 🔵 ⓑ 에는 **A/S 줄의 열쇠만** 온다(남의 줄은 포털이 제 손으로 걸러 `items`
+ * 에서 빼고 `count` 도 줄여 보낸다). 그래서 합쳐 쓴다고 받은 줄이 두 번 빠질
+ * 일은 없다 — 접두사가 달라 애초에 맞지 않는다.
  *
  * 🔴 **개수는 두 쪽이 다른 방식으로 센다.**
  *  - 자기 것: 「같은 대상은 한 번만」 센다(countNotificationTargets — 한 건에
  *    결재가 둘 걸려 있어도 1). 사이드바 배지와 같은 헬퍼라 둘이 갈릴 수 없다.
+ *    🔴 세는 것은 **지운 줄이 빠진 뒤의 목록**이라(아래 `items`) 줄과 숫자가
+ *    저절로 함께 줄어든다 — 따로 빼는 셈이 없다.
  *  - 받은 것: **포털이 센 값 그대로** 더한다. 세는 규칙이 시스템마다 달라서
  *    줄 수로 다시 세면 그 시스템의 종과 이 종이 다른 숫자를 말한다.
  *    다만 **지운 줄만큼은 뺀다** — 안 빼면 사라진 줄이 배지에 남는다. 저쪽의
@@ -208,25 +237,44 @@ export function handlePortalRowPicked(
 export function selectVisibleNotifications(input: {
   items: readonly NotificationItem[];
   inbox: PortalNotificationInbox;
-  /** 눌러 확인해 저장이 도는 중인 자기 줄(알림 id). */
+  /** 눌러 확인해 저장이 도는 중인 자기 줄. 🔴 **알림 id** 다(확인 기록의 키). */
   acknowledgedIds: ReadonlySet<string>;
-  /** 이 브라우저에서 지운 줄(종에 실린 열쇠). */
+  /** 이 브라우저에서 지운 줄(종에 실린 열쇠 = `client_id:id`). */
   dismissedKeys: ReadonlySet<string>;
+  /**
+   * 포털에 등록된 이 시스템의 식별자. 🔴 자기 줄의 열쇠를 **만드는 쪽과 같은
+   * 값**이어야 한다(종이 toNotificationBellItems 에 넘기는 그 값) — 어긋나면
+   * 아무 오류 없이 「지워지지 않는 알림」만 남는다. 못 읽었으면 빈 문자열이고,
+   * 그때는 양쪽 다 접두사 없는 예전 모양이라 여전히 맞는다.
+   */
+  clientId?: string;
 }): {
   items: readonly NotificationItem[];
   inboxItems: readonly NotificationBellItem[];
   count: number;
 } {
-  const hidden = input.acknowledgedIds.size === 0 && input.dismissedKeys.size === 0;
+  const clientId = input.clientId ?? "";
+  // ⓐ 와 ⓑ 를 한 Set 으로(위 머리말). 더할 것이 없으면 받은 Set 을 그대로 쓴다 —
+  // 렌더마다 새 Set 을 만들지 않기 위해서다.
+  const dismissedKeys =
+    input.inbox.dismissed.length === 0
+      ? input.dismissedKeys
+      : new Set([...input.dismissedKeys, ...input.inbox.dismissed]);
+
+  const hidden = input.acknowledgedIds.size === 0 && dismissedKeys.size === 0;
   const items = hidden
     ? input.items
     : input.items.filter(
-        (item) => !input.acknowledgedIds.has(item.id) && !input.dismissedKeys.has(item.id)
+        (item) =>
+          // 🔴 확인 기록은 `id`, 지움은 **열쇠**다. 섞으면 둘 중 하나가 영영
+          //    안 맞는다(위 머리말).
+          !input.acknowledgedIds.has(item.id) &&
+          !dismissedKeys.has(notificationBellKey(item.id, clientId))
       );
   const inboxItems =
-    input.dismissedKeys.size === 0
+    dismissedKeys.size === 0
       ? input.inbox.items
-      : input.inbox.items.filter((row) => !input.dismissedKeys.has(row.key));
+      : input.inbox.items.filter((row) => !dismissedKeys.has(row.key));
 
   const dismissedInboxCount = input.inbox.items.length - inboxItems.length;
   const count =
@@ -659,6 +707,7 @@ export function NotificationBellWithInbox({
   acknowledge,
   inbox = EMPTY_PORTAL_INBOX,
   notificationDismissal,
+  notificationClientId = "",
 }: {
   items?: readonly NotificationItem[];
   /**
@@ -673,6 +722,16 @@ export function NotificationBellWithInbox({
    * 지우기 단추가 아예 없는 예전 종이다.
    */
   notificationDismissal?: NotificationDismissalSession;
+  /**
+   * 포털에 등록된 이 시스템의 식별자(`SSO_CLIENT_ID`). 🔴 자기 줄 열쇠의
+   * **접두사**다(domain 의 notificationBellKey). 서버가 내려준다 — 이 조각은
+   * 클라이언트라 환경변수를 읽을 수 없다.
+   *
+   * 🔴 **빈 문자열은 정상이다**: 설정을 못 읽은 서버(데모 모드 등)에서 물러서는
+   * 자리이고, 그때는 접두사 없는 예전 모양으로 그려진다. 잃는 것은 제 줄 지움이
+   * 포털과 안 통하는 것 하나뿐이다.
+   */
+  notificationClientId?: string;
 }) {
   /**
    * 눌러서 확인했고 저장이 진행 중이거나 끝난 줄. 서버가 준 목록이 다시 계산되기
@@ -696,6 +755,9 @@ export function NotificationBellWithInbox({
     inbox,
     acknowledgedIds,
     dismissedKeys: dismissed,
+    // 🔴 열쇠를 **만드는 쪽**(아래 toNotificationBellItems)과 같은 값이어야
+    //    한다. 갈라지면 오류 없이 「지워지지 않는 알림」만 남는다.
+    clientId: notificationClientId,
   });
 
   const detectedStatus = useSyncExternalStore(
@@ -716,7 +778,10 @@ export function NotificationBellWithInbox({
   // 🔴 종에 실제로 실리는 줄 — **자기 것 앞, 포털에서 온 것 뒤.** 지금 이
   //    시스템에서 일하는 사람의 할 일이 먼저 보여야 하고, 받은 목록은 다시
   //    섞지 않는다(포털이 정한 차례가 있다).
-  const bellItems = [...toNotificationBellItems(visible.items), ...visible.inboxItems];
+  const bellItems = [
+    ...toNotificationBellItems(visible.items, notificationClientId),
+    ...visible.inboxItems,
+  ];
   // 일괄 지우기가 집는 것. 🔴 **지금 보이는 것 가운데 지울 수 있는 것만**이다
   // (가리는 규칙은 도메인 한 곳 — domain/notification-dismissal.ts).
   const dismissableKeys = canDismissHere ? dismissableNotificationKeys(bellItems) : [];
@@ -916,9 +981,15 @@ export default function NotificationBell({
   acknowledge,
   portalInbox,
   notificationDismissal,
+  notificationClientId = "",
 }: {
   items?: readonly NotificationItem[];
   acknowledge?: AcknowledgeNotification;
+  /**
+   * 자기 줄 열쇠의 접두사 — 이 시스템의 `SSO_CLIENT_ID`(위 속 조각의 같은 이름
+   * 주석). 🔴 서버가 내려준다. 없으면 접두사 없는 예전 모양이다.
+   */
+  notificationClientId?: string;
   /**
    * 지금 로그인한 사람과 로그인 시각(위 NotificationDismissalSession). 🔴 없는
    * 것은 **정상**이다 — 그때는 지우기 단추가 없는 예전 종 그대로다.
@@ -938,6 +1009,7 @@ export default function NotificationBell({
       acknowledge={acknowledge}
       inbox={inbox}
       notificationDismissal={notificationDismissal}
+      notificationClientId={notificationClientId}
     />
   );
 }

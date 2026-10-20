@@ -165,11 +165,17 @@ test("🔴 무엇이 들어와도 던지지 않고 빈 것이 된다", () => {
   }
 
   // 객체이긴 한데 안이 엉뚱한 경우 — 「물어보기는 했다」라 degraded 는 거짓이다.
-  assert.deepEqual(normalizePortalNotificationFeed({}), { items: [], count: 0, degraded: false });
+  assert.deepEqual(normalizePortalNotificationFeed({}), {
+    items: [],
+    count: 0,
+    degraded: false,
+    dismissed: [],
+  });
   assert.deepEqual(normalizePortalNotificationFeed({ items: "목록", count: "셋" }), {
     items: [],
     count: 0,
     degraded: false,
+    dismissed: [],
   });
 });
 
@@ -193,10 +199,53 @@ test("degraded 는 포털이 참이라고 말할 때만 참이다 — 「알림�
 });
 
 test("🔴 못 물어봤을 때의 답은 얼린 상수 하나다 — 종이 useState 초깃값으로 쓴다", () => {
-  assert.deepEqual(EMPTY_PORTAL_INBOX, { items: [], count: 0, degraded: true });
+  assert.deepEqual(EMPTY_PORTAL_INBOX, { items: [], count: 0, degraded: true, dismissed: [] });
   assert.ok(Object.isFrozen(EMPTY_PORTAL_INBOX), "얼지 않으면 누군가 고칠 수 있다");
   // 두 번 불러도 **같은 객체**다 — 렌더마다 참조가 달라지면 안 된다.
   assert.equal(normalizePortalNotificationFeed(null), normalizePortalNotificationFeed("x"));
+});
+
+// ───────────────────────── 포털이 돌려주는 「지운 알림」 목록
+
+test("🔴 지운 열쇠 목록을 그대로 나른다 — 이 목록으로 **제 줄**을 거른다", () => {
+  // 남의 시스템 줄은 포털이 제 손으로 걸러 보낸다. 포털이 손댈 수 없는 것은
+  // A/S 자신의 줄이고(포털은 부른 사이트에 묻지 않는다) 그것을 거르라고 오는
+  // 칸이다 — 안 쓰면 「A/S 에서 지웠는데 A/S 종에만 그대로 뜬다」가 된다.
+  const inbox = normalizePortalNotificationFeed({
+    items: [row()],
+    count: 1,
+    dismissed: ["rf-service-system:APPROVAL:456", "rf-service-system:QUOTE_APPROVAL:9"],
+  });
+
+  assert.deepEqual(inbox.dismissed, [
+    "rf-service-system:APPROVAL:456",
+    "rf-service-system:QUOTE_APPROVAL:9",
+  ]);
+  assert.equal(inbox.items.length, 1, "지운 목록이 왔다고 줄까지 버리지 않는다");
+});
+
+test("🔴 칸이 없는 **아직 안 고친 포털**에서는 빈 배열이다 — 예전 그대로 돈다", () => {
+  // 포털 쪽이 먼저 올라가지 않아도 이 사이트는 멀쩡히 돌아야 한다. 그때는
+  // 제 줄이 걸러지지 않을 뿐, 종은 2026-10-19 까지와 똑같이 그려진다.
+  assert.deepEqual(normalizePortalNotificationFeed({ items: [row()], count: 1 }).dismissed, []);
+
+  // 배열이 아닌 값도 같다 — 던지지 않고 빈 배열로 떨어진다.
+  for (const dismissed of ["열쇠", 7, null, true, {}, () => {}]) {
+    assert.deepEqual(
+      normalizePortalNotificationFeed({ items: [], count: 0, dismissed }).dismissed,
+      [],
+      `dismissed=${String(dismissed)}`
+    );
+  }
+});
+
+test("🔴 글자가 아닌 조각은 **그 조각만** 버린다 — 남의 시스템이 만든 글자다", () => {
+  const inbox = normalizePortalNotificationFeed({
+    items: [],
+    count: 0,
+    dismissed: ["rf-service-system:A", null, 7, "", {}, "rf-service-system:B"],
+  });
+  assert.deepEqual(inbox.dismissed, ["rf-service-system:A", "rf-service-system:B"]);
 });
 
 // ───────────────────────── 화면이 값을 받을 때의 마지막 한 겹
@@ -223,4 +272,20 @@ test("모양이 맞으면 목록을 그대로 쓰고 개수만 다시 본다", (
   const odd = asPortalNotificationInbox({ items, count: "넷" });
   assert.equal(odd.count, 0);
   assert.equal(odd.items, items);
+});
+
+test("🔴 지운 열쇠 목록도 마지막 한 겹을 지난다 — 글자인 줄만 남는다", () => {
+  const items = [row()] as unknown as NotificationBellItem[];
+
+  assert.deepEqual(
+    asPortalNotificationInbox({ items, count: 1, dismissed: ["rf-service-system:A"] }).dismissed,
+    ["rf-service-system:A"]
+  );
+  // 칸이 없거나 모양이 틀리면 빈 배열이다 — 여기서 던지면 모든 화면이 깨진다.
+  assert.deepEqual(asPortalNotificationInbox({ items, count: 1 }).dismissed, []);
+  assert.deepEqual(
+    asPortalNotificationInbox({ items, count: 1, dismissed: ["ok", 7, null, ""] }).dismissed,
+    ["ok"]
+  );
+  assert.deepEqual(asPortalNotificationInbox({ items, dismissed: "열쇠" }).dismissed, []);
 });

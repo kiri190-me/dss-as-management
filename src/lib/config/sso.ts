@@ -53,6 +53,30 @@ export function getSsoClientId(): string {
   return required("SSO_CLIENT_ID");
 }
 
+/**
+ * 🔴 같은 값을 **던지지 않고** 읽는다 — 못 읽으면 빈 문자열이다.
+ *
+ * 쓰는 곳은 알림 종의 **열쇠 접두사**다((app)/layout.tsx →
+ * domain/notification-bell-items.ts 의 notificationBellKey). 위 getter 를 그
+ * 자리에서 그냥 부르면 설정이 빠진 서버(데모 모드 · LOGIN_MODE≠sso)에서 종이,
+ * 곧 **이 앱의 모든 화면에 딸려 오는 머리말**이 통째로 깨진다.
+ *
+ * 🔴 **물러서는 모습은 「접두사 없음」이지 「알림 없음」이 아니다.** 빈 문자열이면
+ * 열쇠가 2026-10-19 이전 모양(`{id}`)이 되고, 그때 잃는 것은 **제 줄 지움이
+ * 포털과 안 통하는 것** 하나뿐이다 — 종은 예전과 똑같이 그려진다.
+ *
+ * 🔴 다른 쓰임에는 이 함수를 쓰지 마라. 로그인 왕복(토큰 교환 · 알림 통로
+ * 자격증명)에서 값이 비면 **크게 틀리는 편이 낫다** — 그래서 그쪽은 던지는
+ * getter 를 그대로 쓴다.
+ */
+export function getSsoClientIdOrEmpty(): string {
+  try {
+    return getSsoClientId();
+  } catch {
+    return "";
+  }
+}
+
 export function getSsoClientSecret(): string {
   return required("SSO_CLIENT_SECRET");
 }

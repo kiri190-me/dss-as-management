@@ -28,7 +28,7 @@ import { listAccessibleAreaKeys } from "@/lib/auth/permission-resolver";
 import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
 import { getLoginMode } from "@/lib/config/login-mode";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
-import { getSsoClientId, getSsoPortalUrl } from "@/lib/config/sso";
+import { getSsoClientId, getSsoClientIdOrEmpty, getSsoPortalUrl } from "@/lib/config/sso";
 import { readServiceMenu } from "@/lib/auth/service-menu-cookie";
 import { listMyNotifications } from "@/lib/db/queries/notifications";
 import { getSsoSubjectForUser } from "@/lib/db/queries/users";
@@ -131,6 +131,20 @@ export default async function AppLayout({
   // 모드에는 SSO_CLIENT_ID 가 없고, 그때는 쿠키도 없으므로 여기 오지 않는다.
   const currentServiceId = serviceMenu.length > 0 ? getSsoClientId() : null;
 
+  // 종에 실리는 **자기 줄 열쇠의 접두사**(`rf-service-system:{id}`). 어느 사내
+  // 시스템에서 지우든 모든 종에서 사라지게 하려면 열쇠 모양이 포털의 것과 같아야
+  // 한다(dss-auth/docs/사이트-알림-통로.md, domain/notification-bell-items.ts).
+  //
+  // 🔴 **던지지 않는 쪽으로 읽는다**(바로 위 getSsoClientId 와 다른 함수다).
+  //    설정이 빠진 서버에서 이 한 줄이 던지면 이 레이아웃이, 곧 모든 화면이
+  //    깨진다. 못 읽으면 빈 문자열이고 그때는 접두사 없는 예전 모양으로 물러선다
+  //    — 잃는 것은 제 줄 지움이 포털과 안 통하는 것 하나뿐이다.
+  //
+  // 🔴 위 `currentServiceId` 를 돌려쓰지 않는다. 그것은 **서비스 메뉴바 목록이
+  //    있을 때만** 값이 있어서, 합치면 「메뉴바 쿠키가 없는 사람은 알림 지움도
+  //    안 통한다」가 된다 — 두 기능이 서로 모르게 묶인다.
+  const notificationClientId = getSsoClientIdOrEmpty();
+
   // 사이드바 프로필에 찍히는 역할 이름은 저장된 문구를 따른다. 조회는 루트
   // 레이아웃에서 이미 한 번 돌았고, getUiText 는 요청 단위 cache 라 여기서
   // 다시 불러도 DB 를 또 읽지 않는다.
@@ -154,6 +168,8 @@ export default async function AppLayout({
         //    「로그아웃할 때까지만 숨긴다」를 지키는 장치다. users 의
         //    sessions_valid_from 은 **다른 값**이다(강제로 끊는 기준선).
         notificationDismissal={{ userId: user.id, issuedAt: session.issuedAt }}
+        // 자기 줄 열쇠의 접두사(바로 위 notificationClientId 주석).
+        notificationClientId={notificationClientId}
         portalUrl={portalUrl}
         services={serviceMenu}
         currentServiceId={currentServiceId}

@@ -692,7 +692,10 @@ test("🔴 자기 알림이 앞, 포털에서 온 것이 뒤 — 차례가 섞�
     portalRow({ key: "njlee:CAL:3", sourceId: "njlee", sourceName: "DSS 계측기", subject: "NJ-3" }),
   ];
   const html = renderToStaticMarkup(
-    <NotificationBellWithInbox items={mine} inbox={{ items: received, count: 2, degraded: false }} />
+    <NotificationBellWithInbox
+      items={mine}
+      inbox={{ items: received, count: 2, degraded: false, dismissed: [] }}
+    />
   );
 
   const order = [
@@ -720,7 +723,12 @@ test("🔴 배지는 자기 개수 + 받은 개수다 — 받은 값을 다시 �
   const html = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={[approval("case-1", "D9705-012", "REPAIR_INSPECTION")]}
-      inbox={{ items: [portalRow(), portalRow({ key: "x:1" })], count: 7, degraded: false }}
+      inbox={{
+        items: [portalRow(), portalRow({ key: "x:1" })],
+        count: 7,
+        degraded: false,
+        dismissed: [],
+      }}
     />
   );
   assert.ok(html.includes(">알림 8건</span>"), "배지가 자기 개수 + 받은 개수가 아니다");
@@ -728,13 +736,19 @@ test("🔴 배지는 자기 개수 + 받은 개수다 — 받은 값을 다시 �
 
 test("자기 알림이 없어도 받은 것만으로 배지가 선다 — 반대도 같다", () => {
   const onlyReceived = renderToStaticMarkup(
-    <NotificationBellWithInbox items={[]} inbox={{ items: [portalRow()], count: 3, degraded: false }} />
+    <NotificationBellWithInbox
+      items={[]}
+      inbox={{ items: [portalRow()], count: 3, degraded: false, dismissed: [] }}
+    />
   );
   assert.ok(onlyReceived.includes(">알림 3건</span>"));
   assert.ok(onlyReceived.includes("IMP-2026-0031"));
 
   const onlyMine = renderToStaticMarkup(
-    <NotificationBellWithInbox items={[grantedItem()]} inbox={{ items: [], count: 0, degraded: false }} />
+    <NotificationBellWithInbox
+      items={[grantedItem()]}
+      inbox={{ items: [], count: 0, degraded: false, dismissed: [] }}
+    />
   );
   assert.ok(onlyMine.includes(">알림 1건</span>"));
 });
@@ -781,7 +795,10 @@ test("🔴 머리말은 포털을 기다리지 않는다 — 끝나지 않는 �
 test("포털 목록을 안 넘기면 예전과 똑같은 종이다 — 데모 모드 · 포털에 이어지지 않은 계정", () => {
   const withoutInbox = renderToStaticMarkup(<NotificationBell items={[grantedItem()]} />);
   const withEmptyInbox = renderToStaticMarkup(
-    <NotificationBellWithInbox items={[grantedItem()]} inbox={{ items: [], count: 0, degraded: true }} />
+    <NotificationBellWithInbox
+      items={[grantedItem()]}
+      inbox={{ items: [], count: 0, degraded: true, dismissed: [] }}
+    />
   );
   assert.equal(withoutInbox, withEmptyInbox, "포털을 못 물어본 종이 예전 종과 다르게 그려졌다");
 });
@@ -794,6 +811,7 @@ test("🔴 포털 줄의 그릴 수 없는 주소는 **그 줄만** 빠진다", 
         items: [portalRow({ href: "javascript:alert(1)" }), portalRow({ key: "ok:1", subject: "NJ-9" })],
         count: 2,
         degraded: false,
+        dismissed: [],
       }}
     />
   );
@@ -895,7 +913,7 @@ test("🔴 지우기 단추는 **8종류 전부**에 선다 — 할 일 알림�
   const html = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={mine}
-      inbox={{ items: [portalRow()], count: 1, degraded: false }}
+      inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [] }}
       notificationDismissal={세션()}
     />
   );
@@ -921,7 +939,7 @@ test("🔴 포털 줄은 **종류를 가리지 않고** 지울 수 있다 — �
     const html = renderToStaticMarkup(
       <NotificationBellWithInbox
         items={[]}
-        inbox={{ items: [portalRow({ kind })], count: 1, degraded: false }}
+        inbox={{ items: [portalRow({ kind })], count: 1, degraded: false, dismissed: [] }}
         notificationDismissal={세션()}
       />
     );
@@ -933,7 +951,7 @@ test("🔴 일괄 지우기는 footer 맨 위에 서고, **보이는 줄 수**�
   const html = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={oneOfEachKind()}
-      inbox={{ items: [portalRow()], count: 1, degraded: false }}
+      inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [] }}
       notificationDismissal={세션()}
     />
   );
@@ -1050,6 +1068,7 @@ test("🔴 지운 줄은 목록에서도 **배지에서도** 빠진다", () => {
     items: [portalRow(), portalRow({ key: "njlee:CAL:3", sourceId: "njlee", subject: "NJ-3" })],
     count: 7, // 🔴 줄은 둘인데 포털이 센 값은 7 이다(세는 규칙이 시스템마다 다르다).
     degraded: false,
+    dismissed: [],
   };
 
   const 그대로 = selectVisibleNotifications({
@@ -1080,6 +1099,7 @@ test("🔴 배지는 0 아래로 내려가지 않는다 — 포털의 세는 규
     items: [portalRow(), portalRow({ key: "x:2" })],
     count: 1,
     degraded: false,
+    dismissed: [],
   };
   const 지운뒤 = selectVisibleNotifications({
     items: [],
@@ -1096,7 +1116,7 @@ test("확인 중인 줄과 지운 줄은 **함께** 빠진다 — 서로를 지�
   const mine = [grantedItem(), rejectedItem()];
   const 둘다 = selectVisibleNotifications({
     items: mine,
-    inbox: { items: [portalRow()], count: 1, degraded: false },
+    inbox: { items: [portalRow()], count: 1, degraded: false, dismissed: [] },
     acknowledgedIds: new Set([grantedItem().id]),
     dismissedKeys: new Set([rejectedItem().id]),
   });
@@ -1104,4 +1124,223 @@ test("확인 중인 줄과 지운 줄은 **함께** 빠진다 — 서로를 지�
   assert.deepEqual(둘다.items, []);
   assert.equal(둘다.count, 0 + 1, "포털 줄은 그대로 세어져야 한다");
   assert.equal(둘다.inboxItems.length, 1);
+});
+
+/* ─────────────────────────────────────────────────────────────────────────
+   🔴 지움을 포털과 맞춘다 (2026-10-20, A-1 — 읽는 방향만)
+
+   다른 사내 시스템의 종에서 지운 A/S 줄이 포털의 `dismissed` 로 돌아와 여기서도
+   빠진다. 그러려면 제 줄의 열쇠가 포털에 적히는 모양(`{client_id}:{id}`)이어야
+   하고, 거르는 쪽도 그 열쇠로 맞춰 봐야 한다.
+
+   🔴 **적는 쪽은 아직 이 브라우저다** — 여기서 누른 ✕ 는 포털에 가지 않는다.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/** 포털에 등록된 이 시스템의 식별자. 제 줄 열쇠의 접두사가 되는 값이다. */
+const CLIENT_ID = "rf-service-system";
+
+test("🔴 제 줄의 지움도 **열쇠**로 맞춰 본다 — `id` 로 맞춰 보면 영영 안 맞는다", () => {
+  // 접두사가 붙으면 `item.key` 와 `item.id` 가 갈라진다. 거르는 쪽이 `id` 로
+  // 남아 있으면 ✕ 를 눌러도(열쇠로 적힌다) 줄이 그대로 남는다 — 오류는 없다.
+  const mine = [approval("case-1", "D9705-012", "REPAIR_INSPECTION"), grantedItem()];
+  const 지울열쇠 = `${CLIENT_ID}:${grantedItem().id}`;
+
+  const 지운뒤 = selectVisibleNotifications({
+    items: mine,
+    inbox: { items: [], count: 0, degraded: false, dismissed: [] },
+    acknowledgedIds: new Set(),
+    dismissedKeys: new Set([지울열쇠]),
+    clientId: CLIENT_ID,
+  });
+  assert.deepEqual(지운뒤.items.map((item) => item.id), [mine[0].id], "🔴 지운 제 줄이 남았다");
+  assert.equal(지운뒤.count, 1, "🔴 지운 줄이 배지에 남았다");
+
+  // 🔴 대조 — 접두사 **없는** id 로 적힌 옛 기록은 이제 안 맞는다. 그것이
+  //    정상이다(열쇠 모양이 바뀌면 그 브라우저의 옛 기록은 그냥 안 듣는다).
+  const 옛기록 = selectVisibleNotifications({
+    items: mine,
+    inbox: { items: [], count: 0, degraded: false, dismissed: [] },
+    acknowledgedIds: new Set(),
+    dismissedKeys: new Set([grantedItem().id]),
+    clientId: CLIENT_ID,
+  });
+  assert.equal(옛기록.items.length, 2, "접두사 없는 열쇠가 접두사 붙은 줄에 맞았다");
+  assert.notEqual(지울열쇠, grantedItem().id, "둘이 같으면 이 시험이 아무것도 못 본다");
+});
+
+test("🔴 접두사를 못 읽어도 거르기는 돈다 — 만드는 쪽과 거르는 쪽이 함께 물러선다", () => {
+  // 설정을 못 읽으면 양쪽 다 접두사 없는 예전 모양이라 여전히 맞는다. 한쪽만
+  // 물러서면 그때부터 지우기가 통째로 안 듣는다.
+  const mine = [grantedItem()];
+  for (const clientId of [undefined, ""]) {
+    const 지운뒤 = selectVisibleNotifications({
+      items: mine,
+      inbox: { items: [], count: 0, degraded: false, dismissed: [] },
+      acknowledgedIds: new Set(),
+      dismissedKeys: new Set([grantedItem().id]),
+      clientId,
+    });
+    assert.deepEqual(지운뒤.items, [], `${String(clientId)}: 예전 모양에서 안 지워졌다`);
+    assert.equal(지운뒤.count, 0);
+  }
+});
+
+test("🔴 포털이 돌려준 지움으로 **제 줄**이 빠진다 — 두 목록을 합쳐 본다", () => {
+  // 남의 시스템 줄은 포털이 제 손으로 걸러 보낸다(items 에 없고 count 도 줄어
+  // 있다). 포털이 손댈 수 없는 것은 A/S 자신의 줄이라, 그것을 거르라고
+  // `dismissed` 가 온다. 안 거르면 「계측기에서 지웠는데 A/S 종에만 뜬다」가 된다.
+  const mine = [approval("case-1", "D9705-012", "REPAIR_INSPECTION"), grantedItem()];
+  const inbox = {
+    items: [portalRow()],
+    count: 3,
+    degraded: false,
+    // 🔴 그 사이트 몫만 온다 — 남의 줄 열쇠는 애초에 실리지 않는다(규격서).
+    dismissed: [`${CLIENT_ID}:${grantedItem().id}`],
+  };
+
+  const 보이는것 = selectVisibleNotifications({
+    items: mine,
+    inbox,
+    acknowledgedIds: new Set(),
+    // 🔴 이 브라우저에는 아무것도 안 적혀 있다 — 오직 포털이 보낸 목록으로만
+    //    빠져야 한다.
+    dismissedKeys: new Set(),
+    clientId: CLIENT_ID,
+  });
+
+  assert.deepEqual(보이는것.items.map((item) => item.id), [mine[0].id], "🔴 포털의 지움이 안 들었다");
+  assert.deepEqual(보이는것.inboxItems, inbox.items, "남의 줄까지 건드렸다");
+  // 🔴 **개수도 함께 줄어든다.** 자기 몫은 걸러진 목록에서 다시 세고(1), 포털이
+  //    센 값(3)은 그대로 더한다 — 저쪽 몫은 이미 저쪽에서 빠져 있다.
+  assert.equal(보이는것.count, 1 + 3, "🔴 지운 줄이 배지에 남았다");
+});
+
+test("🔴 두 지움 목록이 **함께** 든다 — 브라우저 것과 포털 것", () => {
+  const mine = [grantedItem(), rejectedItem()];
+  const 보이는것 = selectVisibleNotifications({
+    items: mine,
+    inbox: {
+      items: [portalRow(), portalRow({ key: "njlee:CAL:3", sourceId: "njlee" })],
+      count: 2,
+      degraded: false,
+      dismissed: [`${CLIENT_ID}:${rejectedItem().id}`],
+    },
+    acknowledgedIds: new Set(),
+    // 브라우저 쪽에는 제 줄 하나와 포털 줄 하나가 적혀 있다(지금 A/S 는 둘 다
+    // 여기에 적는다 — 적는 쪽을 포털로 옮기는 것은 A-2 다).
+    dismissedKeys: new Set([`${CLIENT_ID}:${grantedItem().id}`, "njlee:CAL:3"]),
+    clientId: CLIENT_ID,
+  });
+
+  assert.deepEqual(보이는것.items, [], "🔴 두 목록 가운데 한쪽만 들었다");
+  assert.deepEqual(보이는것.inboxItems.map((row) => row.key), [portalRow().key]);
+  assert.equal(보이는것.count, 0 + 1, "포털 줄 하나를 지웠으니 2에서 1이 빠진다");
+});
+
+test("포털이 지움을 안 보내도(빈 배열·안 고친 포털) 예전 그대로 돈다", () => {
+  const mine = [grantedItem()];
+  const 그대로 = selectVisibleNotifications({
+    items: mine,
+    inbox: { items: [portalRow()], count: 1, degraded: true, dismissed: [] },
+    acknowledgedIds: new Set(),
+    dismissedKeys: new Set(),
+    clientId: CLIENT_ID,
+  });
+  assert.equal(그대로.items.length, 1);
+  assert.equal(그대로.inboxItems.length, 1);
+  assert.equal(그대로.count, 1 + 1);
+});
+
+test("🔴 확인 기록은 깨지지 않는다 — 확인에 넘어가는 값은 `id` 이고 `key` 와 다르다", () => {
+  // 🔴 여기가 이 조각에서 가장 위험한 자리다. 확인이 `item.key` 로 바뀌면 운영
+  //    DB 에 쌓인 열쇠와 모양이 달라져 **이미 확인한 알림이 전부 다시 뜬다** —
+  //    되돌릴 수도 없다(사람들이 다시 확인해야 한다).
+  const [row] = toNotificationBellItems([grantedItem()], CLIENT_ID);
+  assert.notEqual(row.key, row.id, "둘이 같으면 이 시험이 아무것도 못 본다");
+
+  const { acknowledge, calls } = fakeAcknowledge();
+  const hidden: string[] = [];
+  acknowledgeInBackground(row, acknowledge, {
+    hide: (id) => hidden.push(id),
+    restore: () => {},
+  });
+
+  assert.deepEqual(calls, [{ notificationKey: row.id }], "🔴 확인에 접두사가 붙은 열쇠가 넘어갔다");
+  assert.deepEqual(hidden, [row.id], "감추는 값도 확인 기록의 키(id)와 같아야 한다");
+
+  // 가짜 함수를 넘기는 위 단언만으로는 **다른 경로가 생겼을 때** 조용히
+  // 지나간다 — 소스에도 못 박는다.
+  const source = readLayoutSource("NotificationBell.tsx");
+  assert.match(source, /acknowledge\(\{ notificationKey: item\.id \}\)/);
+  assert.equal(/notificationKey: item\.key/.test(source), false, "🔴 확인이 열쇠로 적힌다");
+});
+
+test("🔴 확인해서 감춘 줄은 **접두사와 상관없이** 빠진다 — 그 목록은 `id` 다", () => {
+  // acknowledgedIds 에 드는 값은 위 시험이 못 박은 `id` 다. 거르는 쪽이 그것을
+  // 열쇠로 맞춰 보게 바뀌면 눌러 확인한 줄이 종에 그대로 남는다.
+  const mine = [grantedItem(), rejectedItem()];
+  const 확인중 = selectVisibleNotifications({
+    items: mine,
+    inbox: { items: [], count: 0, degraded: false, dismissed: [] },
+    acknowledgedIds: new Set([grantedItem().id]),
+    dismissedKeys: new Set(),
+    clientId: CLIENT_ID,
+  });
+  assert.deepEqual(확인중.items.map((item) => item.id), [rejectedItem().id]);
+  assert.equal(확인중.count, 1);
+});
+
+test("🔴 종이 그리는 열쇠에 접두사가 붙는다 — 만드는 쪽과 거르는 쪽이 같은 값을 쓴다", () => {
+  // 두 곳에 다른 값이 가면 ✕ 는 접두사 붙은 열쇠로 적는데 거르기는 안 붙은
+  // 열쇠로 맞춰 보게 되어, 눌러도 줄이 안 사라진다. 그 어긋남은 오류를 내지
+  // 않으므로 값과 소스 양쪽으로 본다.
+  const mine = [grantedItem()];
+  const html = renderToStaticMarkup(
+    <NotificationBellWithInbox
+      items={mine}
+      inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [] }}
+      notificationDismissal={세션()}
+      notificationClientId={CLIENT_ID}
+    />
+  );
+  assert.deepEqual(
+    지우기열쇠들(html),
+    [`${CLIENT_ID}:${grantedItem().id}`, portalRow().key],
+    "🔴 ✕ 가 적는 열쇠에 접두사가 없다"
+  );
+
+  // 안 넘기면 예전 모양이다(데모 모드 · 설정을 못 읽은 서버).
+  const 예전 = renderToStaticMarkup(
+    <NotificationBellWithInbox items={mine} notificationDismissal={세션()} />
+  );
+  assert.deepEqual(지우기열쇠들(예전), [grantedItem().id]);
+
+  const source = readLayoutSource("NotificationBell.tsx");
+  assert.match(source, /toNotificationBellItems\(visible\.items, notificationClientId\)/);
+  assert.match(source, /clientId: notificationClientId,/);
+});
+
+test("🔴 머리말이 종까지 client_id 를 실제로 날라 준다 — 빠지면 조용히 접두사가 사라진다", () => {
+  // 종은 환경변수를 읽을 수 없다(클라이언트 조각). 서버가 내려보내는 줄이
+  // 어디 한 군데서 끊기면 아무 오류 없이 **예전 모양으로 물러선다** — 화면에
+  // 흔적이 남지 않는 실패라 원본으로 붙잡는다.
+  const 레이아웃 = readFileSync(new URL("../../app/(app)/layout.tsx", import.meta.url), "utf8");
+  // 🔴 던지는 getter 가 아니라 물러서는 쪽으로 읽는다. 그냥 읽으면 설정이 빠진
+  //    서버에서 이 레이아웃이, 곧 모든 화면이 깨진다.
+  assert.match(레이아웃, /const notificationClientId = getSsoClientIdOrEmpty\(\);/);
+  assert.match(레이아웃, /notificationClientId=\{notificationClientId\}/);
+
+  for (const 파일 of ["AppShell.tsx", "TopBar.tsx"] as const) {
+    const source = readFileSync(new URL(`./${파일}`, import.meta.url), "utf8");
+    assert.match(
+      source,
+      /notificationClientId=\{notificationClientId\}/,
+      `${파일} 이 client_id 를 지나 보내지 않는다`
+    );
+  }
+
+  // 그 읽는 함수가 **던지지 않는다**는 것까지 본다.
+  const config = readFileSync(new URL("../../lib/config/sso.ts", import.meta.url), "utf8");
+  const reader = config.slice(config.indexOf("export function getSsoClientIdOrEmpty"));
+  assert.match(reader, /try \{\s*return getSsoClientId\(\);\s*\} catch \{\s*return "";/);
 });

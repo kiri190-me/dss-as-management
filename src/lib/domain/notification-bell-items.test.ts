@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { toNotificationBellItems } from "./notification-bell-items";
+import { notificationBellKey, toNotificationBellItems } from "./notification-bell-items";
 import { NOTIFICATION_KIND_META } from "./notification-settings";
 import {
   NOTIFICATION_KINDS,
@@ -121,7 +121,9 @@ test("🔴 모든 종류를 옮긴다 — 종류가 늘어도 이 파일은 고�
 
   for (const [index, item] of source.entries()) {
     const row = mapped[index];
-    assert.equal(row.key, item.id, `${item.kind}: 열쇠가 알림 id 가 아니다`);
+    // 접두사를 안 넘겼으니 예전 모양이다 — 접두사가 붙은 모습은 아래 「열쇠의
+    // 접두사」 묶음이 따로 본다.
+    assert.equal(row.key, item.id, `${item.kind}: 접두사 없이 불렀는데 열쇠가 알림 id 가 아니다`);
     assert.equal(row.id, item.id, `${item.kind}: 확인 기록의 키가 알림 id 가 아니다`);
     assert.equal(row.kind, item.kind);
     assert.equal(
@@ -235,6 +237,53 @@ test("🔴 종류별 색은 **클래스 이름이 아니라 칸 번호**로 넘�
     // 그 자리에 실제로 가는 것 — 칸 번호다.
     assert.equal(typeof toneIndex, "number", `${kind}: 칸 번호가 숫자가 아니다`);
   }
+});
+
+// ───────────────────────── 열쇠의 접두사 (2026-10-20)
+
+/** 포털에 등록된 이 시스템의 식별자. 열쇠의 접두사가 되는 값이다. */
+const CLIENT_ID = "rf-service-system";
+
+test("🔴 제 줄의 열쇠는 `{client_id}:` 로 시작한다 — 어긋나면 포털이 조용히 버린다", () => {
+  // 포털은 모르는 시스템의 열쇠를 **조용히 버린다**(규격서). 그래서 접두사가
+  // 어긋나면 오류 없이 「지워지지 않는 알림」만 남는다. 같은 알림이 A/S 에서는
+  // `{id}`, 계측기에서는 `rf-service-system:{id}` 이던 것이 이 조각에서 맞춰졌다.
+  const source = oneOfEachKind();
+  for (const [index, row] of toNotificationBellItems(source, CLIENT_ID).entries()) {
+    const item = source[index];
+    assert.equal(row.key, `${CLIENT_ID}:${item.id}`, `${item.kind}: 접두사가 안 붙었다`);
+    // 🔴 여기가 이 조각에서 가장 위험한 자리다. id 가 함께 바뀌면 운영 DB 에
+    //    쌓인 확인 기록과 모양이 달라져 **이미 확인한 알림이 전부 다시 뜬다.**
+    assert.equal(row.id, item.id, `${item.kind}: id 가 함께 바뀌었다 — 확인 기록이 깨진다`);
+    assert.notEqual(row.key, row.id, `${item.kind}: 둘이 같으면 이 시험이 아무것도 못 본다`);
+  }
+});
+
+test("🔴 접두사를 못 읽으면 **예전 모양**으로 물러선다 — 종은 그대로 그려진다", () => {
+  // 설정(SSO_CLIENT_ID)을 못 읽었을 때의 모습이다(config/sso.ts 의
+  // getSsoClientIdOrEmpty). 잃는 것은 제 줄 지움이 포털과 안 통하는 것 하나뿐이고,
+  // 🔴 물러서는 모습이 「알림 없음」이 아니라 **「접두사 없음」**이다.
+  const source = oneOfEachKind();
+  for (const fallback of [undefined, ""]) {
+    const rows = toNotificationBellItems(source, fallback);
+    assert.equal(rows.length, source.length, `${String(fallback)}: 줄이 사라졌다`);
+    for (const [index, row] of rows.entries()) {
+      assert.equal(row.key, source[index].id, `${String(fallback)} 에서 물러서지 않았다`);
+      assert.equal(row.id, source[index].id);
+    }
+  }
+});
+
+test("🔴 열쇠를 짓는 자리는 하나다 — 거르는 쪽도 이 함수를 쓴다", () => {
+  // 두 곳에서 따로 조립하면 갈라졌을 때 오류 없이 「지워지지 않는 알림」만
+  // 남는다. 그래서 만드는 쪽(아래 첫 단언)과 거르는 쪽(화면의
+  // selectVisibleNotifications)이 같은 함수를 부른다.
+  assert.equal(notificationBellKey("APPROVAL:7", CLIENT_ID), "rf-service-system:APPROVAL:7");
+  assert.equal(notificationBellKey("APPROVAL:7", ""), "APPROVAL:7");
+
+  const [item] = oneOfEachKind();
+  const [row] = toNotificationBellItems([item], CLIENT_ID);
+  assert.equal(row.key, notificationBellKey(item.id, CLIENT_ID));
 });
 
 test("🔴 이 파일은 순수 계산이다 — server-only · 화면의 물건을 물지 않는다", () => {

@@ -53,6 +53,24 @@ export type PortalNotificationInbox = {
    * 않는다 — 나중에 「일부를 못 불러왔습니다」를 보여 주기로 하면 여기 있다.
    */
   degraded: boolean;
+  /**
+   * 🔴 그 사람이 「그만 보겠다」로 지운 알림의 열쇠 — **이 사이트 몫만** 온다
+   * (2026-10-20, 규격서 「dismissed」절).
+   *
+   * 포털은 **남의 시스템 줄을 제 손으로 걸러서** 보낸다. 위 `items` 에 없고
+   * `count` 도 그만큼 줄어 있으므로 거기에는 할 일이 없다. 할 일이 남는 것은
+   * **A/S 자신의 줄**뿐이다 — 포털은 부른 사이트에게는 묻지 않아(위 머리말) 이
+   * 목록을 애초에 모르고, 그 목록은 A/S 가 제 DB 에서 만들어 이어 붙인다.
+   * 포털이 손댈 수 없는 그 목록을 거르라고 있는 칸이다.
+   *
+   * 🔴 **안 거르면 「A/S 에서 지웠는데 A/S 종에만 그대로 뜬다」가 된다.**
+   * 거르는 자리는 화면의 selectVisibleNotifications 하나다.
+   *
+   * 🔵 열쇠 모양은 `items[].key` 와 **같다**(`{client_id}:{id}`). 지운 것이
+   * 없으면 빈 배열이고, 칸이 아예 없는 **아직 안 고친 포털**에 대고도 빈 배열이
+   * 되어 예전 그대로 돈다.
+   */
+  dismissed: string[];
 };
 
 /**
@@ -66,7 +84,22 @@ export const EMPTY_PORTAL_INBOX: PortalNotificationInbox = Object.freeze({
   items: [],
   count: 0,
   degraded: true,
+  // 🔴 못 물어봤으면 지운 목록도 **빈 배열**이다. 그때는 지웠던 제 줄이 다시
+  //    뜬다 — 지움은 보기를 미루는 것이지 지워지는 자료가 아니라, 종을 통째로
+  //    끄는 것보다 그 편이 낫다고 보았다(규격서).
+  dismissed: [],
 });
+
+/**
+ * 포털이 보낸 지움 목록을 **글자인 줄만** 받는다.
+ *
+ * 🔴 칸이 아예 없는(아직 안 고친) 포털에서는 **빈 배열**이 되어 예전 그대로
+ * 돈다 — 제 줄이 걸러지지 않을 뿐 종은 똑같이 그려진다.
+ */
+function toDismissedKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((key): key is string => typeof key === "string" && key !== "");
+}
 
 /** 한 줄의 아홉 칸. 하나라도 글자가 아니면 그 줄만 버린다. */
 function toBellItem(row: unknown): NotificationBellItem | null {
@@ -122,7 +155,12 @@ export function normalizePortalNotificationFeed(body: unknown): PortalNotificati
 
   // 여기까지 왔으면 **물어보기는 했다.** degraded 는 포털이 「일부 시스템에
   // 못 물어봤다」고 말할 때만 참이다.
-  return { items, count, degraded: answer.degraded === true };
+  return {
+    items,
+    count,
+    degraded: answer.degraded === true,
+    dismissed: toDismissedKeys(answer.dismissed),
+  };
 }
 
 /**
@@ -147,5 +185,8 @@ export function asPortalNotificationInbox(value: unknown): PortalNotificationInb
         ? candidate.count
         : 0,
     degraded: candidate.degraded === true,
+    // 🔴 여기도 한 겹 더 본다. 이 값은 약속이 풀린 것이라 타입이 지켜 준다는
+    //    보장이 없고, 모양이 틀린 것을 그대로 받으면 거르는 쪽에서 터진다.
+    dismissed: toDismissedKeys(candidate.dismissed),
   };
 }

@@ -81,6 +81,17 @@ type AppShellProps = {
    */
   notificationDismissal?: { userId: string; issuedAt: number };
   /**
+   * 포털에 등록된 이 시스템의 식별자(`SSO_CLIENT_ID`). 종이 **자기 줄 열쇠의
+   * 접두사**로 쓴다 — 어느 시스템에서 지우든 모든 종에서 사라지게 하는 장치다
+   * (NotificationBell.tsx 의 같은 이름 프롭). 이 껍데기는 지나 보내기만 한다.
+   *
+   * 🔴 아래 `currentServiceId` 와 **같은 값이지만 같은 프롭이 아니다.** 저것은
+   * 서비스 메뉴바가 「지금 여기」 칸을 고르는 데 쓰고 목록이 비면 null 이다.
+   * 이것은 메뉴바 쿠키가 없어도 있어야 한다 — 하나로 합치면 「메뉴바가 안 뜨는
+   * 사람은 알림 지움도 안 통한다」가 되고, 그 어긋남은 신고로만 드러난다.
+   */
+  notificationClientId?: string;
+  /**
    * 머리말 **안에** 앉는 서비스 메뉴바가 그릴 사내 시스템 목록
    * (layout.tsx 가 별도 서명 쿠키를 풀어 넘긴다 —
    * auth/service-menu-cookie.ts). 비어 있으면 목록 자체가 그려지지 않는다.
@@ -112,7 +123,7 @@ function isKeyboardFocus(element: HTMLElement): boolean {
   }
 }
 
-export default function AppShell({ children, user, accessibleAreaKeys, canEnterDeveloperMode, myPendingApprovalCount = 0, notifications = [], portalInbox, notificationDismissal, portalUrl = null, services = [], currentServiceId = null }: AppShellProps) {
+export default function AppShell({ children, user, accessibleAreaKeys, canEnterDeveloperMode, myPendingApprovalCount = 0, notifications = [], portalInbox, notificationDismissal, notificationClientId = "", portalUrl = null, services = [], currentServiceId = null }: AppShellProps) {
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Whole-sidebar open/narrow mode — owned here (not inside Sidebar)
@@ -175,6 +186,7 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
           notifications={notifications}
           portalInbox={portalInbox}
           notificationDismissal={notificationDismissal}
+          notificationClientId={notificationClientId}
           serviceMenu={
             /*
               사내 시스템 오가기 목록(@dss/ui). 머리말 **안**에 제목과 알림종

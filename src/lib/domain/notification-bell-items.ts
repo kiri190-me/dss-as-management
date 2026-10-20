@@ -49,14 +49,59 @@ import type { NotificationItem } from "./notifications";
  * 다른 시스템 알림을 포털에서 끌어오게 되면 그때 이 두 칸이 채워진다.
  * ============================================================================
  */
+
+/**
+ * 알림 id → 종 한 줄의 **열쇠**(`key`).
+ *
+ * ── 🔴 왜 `id` 와 다른 값이 되었나 (2026-10-20) ──────────────────────────
+ * 2026-10-19 까지 「이 알림 그만 보겠다」는 각 사이트의 **브라우저**에 적혔고,
+ * 그래서 우리 줄은 `key` 와 `id` 가 같아도 아무 탈이 없었다. 지금 그 기록은
+ * **포털 한 곳**에 쌓인다 — 어느 시스템에서 지우든 사내 시스템 전부의 종에서
+ * 사라지게 하려는 것이다(dss-auth/docs/사이트-알림-통로.md).
+ *
+ * 포털에 적히는 열쇠는 **`{client_id}:{id}`** 다. 접두사가 없으면 같은 알림이
+ * A/S 종에서는 `{id}`, 계측기 종에서는 `rf-service-system:{id}` 로 보여서
+ * **계측기에서 지워도 A/S 종에는 그대로 남는다** — 다른 곳에서는 사라지는데
+ * 여기서만 남는, 제일 헷갈리는 모양이다.
+ *
+ * 🔴 **`id` 는 건드리지 않는다.** 확인 기록(notification_acknowledgements)과
+ * 알림을 잇는 것은 `id` 하나뿐이고 그 표는 **영구**다. 확인을 적는 쪽이
+ * `item.key` 를 쓰게 바뀌면 옛 기록과 모양이 달라져 **이미 확인한 알림이 전부
+ * 다시 뜨고**, 되돌릴 수도 없다(사람들이 다시 확인해야 한다). 확인 경로는 지금도
+ * `item.id` 를 쓴다(components/layout/NotificationBell.tsx 의
+ * acknowledgeInBackground).
+ *
+ * 🔴 접두사가 **빈 문자열이면 붙이지 않는다** — 설정(SSO_CLIENT_ID)을 못 읽었을
+ * 때 물러서는 자리다. 그때 잃는 것은 제 줄 지움이 포털과 안 통하는 것 하나뿐이고
+ * 종은 예전 그대로 그려진다.
+ *
+ * 🔴 **열쇠를 짓는 자리는 여기 하나다.** 거르는 쪽(화면의
+ * selectVisibleNotifications)도 이 함수를 불러 맞춰 본다 — 두 곳에서 따로
+ * 조립하면 갈라졌을 때 오류 없이 「지워지지 않는 알림」만 남는다.
+ */
+export function notificationBellKey(id: string, clientId: string): string {
+  return clientId === "" ? id : `${clientId}:${id}`;
+}
+
+/**
+ * @param clientId 포털에 등록된 이 시스템의 식별자(`SSO_CLIENT_ID`). 🔴 `key` 의
+ *                 접두사이고, **빈 문자열이면 접두사 없이**(2026-10-20 이전
+ *                 모양) 만든다 — 위 notificationBellKey 머리말.
+ */
 export function toNotificationBellItems(
-  items: readonly NotificationItem[]
+  items: readonly NotificationItem[],
+  clientId = ""
 ): NotificationBellItem[] {
   return items.map((item) => ({
-    // 목록 전체에서 유일한 열쇠. A/S 알림 id 가 이미 그러하고(`종류:나머지`),
-    // 눌린 줄을 되찾는 열쇠이자 확인 기록에 적는 키이기도 하다 — 그래서 key 와
-    // id 가 같은 값이다. 포털을 거쳐 온 줄은 `client_id:id` 라 둘이 갈라진다.
-    key: item.id,
+    // 목록 전체에서 유일한 열쇠 — `{client_id}:{id}` 다. 포털에 지움이 적히는
+    // 그 열쇠이고(notificationBellKey), 눌린 줄을 되찾는 열쇠이기도 하다.
+    //
+    // 🔴 **확인 기록에 적히는 것은 이 `key` 가 아니라 아래 `id` 다.**
+    //    (acknowledge({ notificationKey: item.id }) — NotificationBell.tsx).
+    //    2026-10-19 까지 둘이 같은 값이라 헷갈리게 적혀 있었는데, 접두사가
+    //    붙으면서 **갈라졌다.** 여기를 확인 기록의 키로 읽고 되돌리면 운영 DB 에
+    //    쌓인 열쇠와 모양이 달라져 이미 확인한 알림이 전부 다시 뜬다.
+    key: notificationBellKey(item.id, clientId),
     sourceId: "",
     sourceName: "",
     id: item.id,

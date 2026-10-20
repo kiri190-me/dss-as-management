@@ -49,6 +49,14 @@ type TopBarProps = {
    */
   notificationDismissal?: { userId: string; issuedAt: number };
   /**
+   * 포털에 등록된 이 시스템의 식별자(`SSO_CLIENT_ID`). 종이 **자기 줄 열쇠의
+   * 접두사**로 쓴다 — 어느 시스템에서 지우든 모든 종에서 사라지게 하는 장치다
+   * (NotificationBell.tsx 의 같은 이름 프롭). 여기는 지나 보내기만 한다.
+   *
+   * 🔴 없거나 빈 문자열이면 접두사 없는 예전 모양이다(정상 — 데모 모드).
+   */
+  notificationClientId?: string;
+  /**
    * 사내 시스템 오가기 목록(@dss/ui 의 ServiceMenuBar). AppShell이 만들어
    * 내려보내고, 이 머리말이 **제목과 알림종 사이**에 그린다.
    *
@@ -159,7 +167,7 @@ type TopBarProps = {
  * `ml-auto` 로 그 줄의 오른쪽 끝에 서야 펼침 패널(폭 min(20rem, 100vw-2rem),
  * 종에 오른쪽 끝을 맞춰 왼쪽으로 펼친다)의 왼쪽이 화면 밖으로 잘리지 않는다.
  */
-export default function TopBar({ title, onMenuClick, user, notifications = [], portalInbox, notificationDismissal, portalUrl = null, serviceMenu = null }: TopBarProps) {
+export default function TopBar({ title, onMenuClick, user, notifications = [], portalInbox, notificationDismissal, notificationClientId = "", portalUrl = null, serviceMenu = null }: TopBarProps) {
   return (
     // `h-14`가 `min-h-14`로 바뀐 것은 pt 인셋 때문이다: 고정 높이
     // (border-box)에 패딩을 더하면 높이는 그대로인 채 안쪽 내용만 눌린다.
@@ -364,7 +372,7 @@ export default function TopBar({ title, onMenuClick, user, notifications = [], p
           맞춰 왼쪽으로 펼쳐지므로(폭 min(20rem, 100vw-2rem)) 종이 줄 가운데에
           앉으면 패널 왼쪽이 화면 밖으로 잘린다.
         */}
-        <NotificationBell items={notifications} acknowledge={acknowledgeNotificationAction} portalInbox={portalInbox} notificationDismissal={notificationDismissal} />
+        <NotificationBell items={notifications} acknowledge={acknowledgeNotificationAction} portalInbox={portalInbox} notificationDismissal={notificationDismissal} notificationClientId={notificationClientId} />
       </div>
     </header>
   );
