@@ -12,11 +12,7 @@ import { isAcknowledgeableNotificationKind } from "@/lib/domain/notification-ack
 import {
   canDismissNotification,
   dismissableNotificationKeys,
-  notificationDismissalKeyPrefixForUser,
-  notificationDismissalStorageKey,
-  pruneOldDismissalKeys,
-  readDismissedNotificationKeys,
-  writeDismissedNotificationKeys,
+  purgeStoredDismissals,
   type DismissalStore,
 } from "@/lib/domain/notification-dismissal";
 import {
@@ -75,20 +71,28 @@ import { showBrowserNotificationToast } from "./BrowserNotifications";
  * 기다리지 않고, 저장이 실패해도 막히지 않는다 — 실패하면 그 줄이 다시 나타날 뿐이다.
  *
  * ── 🔴 「지우기」는 확인 기록과 **다른 것**이다 ──────────────────────────
- * 줄마다 서는 ✕ 와 펼친 칸 아래의 「보이는 알림 지우기」는 **이 브라우저에만**
- * 적는다 — 서버도 DB 도 한 줄 건드리지 않고, 다시 로그인하면 아직 끝나지 않은
- * 일은 그대로 다시 뜬다. 위 확인 기록(표에 남아 영영 사라진다)과 섞지 마라.
- * 적는 곳과 가리는 규칙은 도메인 한 곳에 있다(domain/notification-dismissal.ts).
+ * 줄마다 서는 ✕ 와 펼친 칸 아래의 「보이는 알림 지우기」는 **포털에** 적는다
+ * (2026-10-20) — A/S 의 표는 한 줄도 건드리지 않고, 어느 사내 시스템에서 지우든
+ * **모든 시스템의 종에서** 사라진다. 위 확인 기록(A/S 의 표에 남아 영영
+ * 사라진다)과 섞지 마라. 가리는 규칙은 도메인 한 곳에 있고
+ * (domain/notification-dismissal.ts), 적는 일은 서버 액션이 한다
+ * (server/actions/notification-dismissals.ts — 아래 `dismiss` 프롭).
  *
  * 🔴 포털에서 온 줄은 **누르는 것만으로도** 지워진다. 그 줄은 A/S 가 「확인
  * 했다」를 적을 데가 없어(그 통로가 포털에 없다) 눌러 본 뒤에도 영영 종에
  * 남던 유일한 줄이었다.
  *
- * 🔴 **읽는 방향은 2026-10-20 에 포털로 이어졌다.** 다른 사내 시스템의 종에서
- * 지운 A/S 줄이 포털의 `dismissed` 로 돌아와 여기서도 빠진다 — 그래서 자기 줄의
- * 열쇠에도 `rf-service-system:` 접두사가 붙는다(domain 의 notificationBellKey).
- * 🔴 **적는 쪽은 아직 이 브라우저다.** 여기서 누른 ✕ 는 포털에 가지 않는다 —
- * 그것은 다음 조각(A-2)이다.
+ * 🔴 **두 방향이 다 포털로 이어졌다.** 읽는 쪽 — 다른 사내 시스템의 종에서 지운
+ * A/S 줄이 포털의 `dismissed` 로 돌아와 여기서도 빠진다(그래서 자기 줄의 열쇠
+ * 에도 `rf-service-system:` 접두사가 붙는다 — domain 의 notificationBellKey).
+ * 적는 쪽 — 여기서 누른 ✕ 가 그 포털에 그대로 적힌다.
+ *
+ * 🔵 **「누른 즉시 사라진다」는 A/S 만의 것이고 그대로 둔다.** 다른 여섯 사이트는
+ * 서버가 다시 그릴 때(한 박자 뒤) 줄이 빠지지만, 여기서는 아래
+ * useDismissedNotifications 가 지운 열쇠를 **이 화면 안(메모리)** 에 들고 있어
+ * 곧바로 빠진다. 🔴 그 기억은 **브라우저에 적히지 않는다** — 포털에 적는 것이
+ * 실패하면 그 줄은 새로고침했을 때 **다시 뜬다**. 그 편이 정직하다: 안 적혔는데
+ * 여기서만 안 보이면 같은 줄이 다른 시스템의 종에는 그대로 있다.
  *
  * ── 묶음에 올 수 없는 것은 footer 로 넣는다 ─────────────────────────────
  * 브라우저 알림 권한 안내와 「시험 알림」 단추는 `navigator`·사람마다 갈라 쓰는
@@ -166,19 +170,20 @@ export function handleNotificationPicked(
 }
 
 /**
- * 줄을 눌렀을 때 **포털에서 온 줄만** 이 브라우저에서 지운 것으로 적는다.
+ * 줄을 눌렀을 때 **포털에서 온 줄만** 지운 것으로 적는다.
  *
  * 🔴 **바로 위 함수와 길이 다르다. 섞지 마라.**
- *  - 위(handleNotificationPicked)는 **서버 DB** 로 가는 길이다. 포털 줄이 그
+ *  - 위(handleNotificationPicked)는 **A/S 의 DB** 로 가는 길이다. 포털 줄이 그
  *    길로 들어가면 남의 시스템 알림 id 로 A/S 의 확인 기록이 쌓인다 — 그래서
  *    거기엔 `if (item.sourceId) return;` 이 그대로 남아 있다.
- *  - 여기는 **이 브라우저**로 가는 길이다. DB 가 아니므로 그 금지에 걸리지
- *    않는다. 오히려 포털 줄은 A/S 가 「확인했다」를 적을 데가 없어서, 눌러 본
- *    줄이 영영 종에 남는 유일한 줄이었다 — 누른 것만으로 눈에서 치운다.
+ *  - 여기는 **포털**로 가는 길이다. 우리 표가 아니므로 그 금지에 걸리지 않는다.
+ *    오히려 포털 줄은 A/S 가 「확인했다」를 적을 데가 없어서, 눌러 본 줄이 영영
+ *    종에 남는 유일한 줄이었다 — 누른 것만으로 치운다.
  *
  * 🔴 **자기 줄은 여기서 끝난다.** 자기 줄을 누른 것은 이미 확인 기록(영구)으로
- * 가고 있고, 같은 누름을 임시 지우기로도 적으면 저장이 실패해 되살아나야 할
- * 줄이 브라우저 쪽 기록 때문에 그대로 숨는다.
+ * 가고 있고, 같은 누름을 지움으로도 적으면 **확인 저장이 실패해 되살아나야 할
+ * 줄이 포털의 지움 기록 때문에 그대로 숨는다** — 그것도 이 시스템에서만이
+ * 아니라 모든 사내 시스템의 종에서.
  */
 export function handlePortalRowPicked(
   item: { key: string; sourceId?: string },
@@ -208,9 +213,14 @@ export function handlePortalRowPicked(
  * 여전히 `id` 로 적히므로 acknowledgedIds 는 `id` 그대로다.
  *
  * ── 🔴 지운 목록이 **둘**이고, 여기서 합친다 ────────────────────────────
- *  ⓐ `dismissedKeys` — 이 브라우저(localStorage)에 적힌 것.
+ *  ⓐ `dismissedKeys` — **이 화면이 열려 있는 동안** 방금 누른 것(메모리).
+ *     포털에 적는 왕복을 기다리지 않고 곧바로 감추기 위한 것이다.
  *  ⓑ `inbox.dismissed` — 포털이 돌려준, 이 사람이 **어느 시스템에서든** 지운
  *     A/S 줄의 열쇠(규격서 「dismissed」절 — 그 사이트 몫만 온다).
+ *
+ * 🔴 ⓐ 는 새로고침하면 비워지고 ⓑ 가 그 자리를 잇는다. 포털에 적는 것이
+ *    실패했으면 그 줄은 그때 **다시 뜬다** — 알고 받아들인 값이다
+ *    (useDismissedNotifications 주석).
  *
  * 🔴 **합치는 자리를 여기로 잡은 까닭**: 거르는 일과 세는 일이 이미 이 함수
  * 하나이고, 두 목록은 **같은 모양의 열쇠**라 한 Set 으로 합쳐진다. 바깥(종
@@ -239,7 +249,7 @@ export function selectVisibleNotifications(input: {
   inbox: PortalNotificationInbox;
   /** 눌러 확인해 저장이 도는 중인 자기 줄. 🔴 **알림 id** 다(확인 기록의 키). */
   acknowledgedIds: ReadonlySet<string>;
-  /** 이 브라우저에서 지운 줄(종에 실린 열쇠 = `client_id:id`). */
+  /** 이 화면에서 방금 지운 줄(종에 실린 열쇠 = `client_id:id`). */
   dismissedKeys: ReadonlySet<string>;
   /**
    * 포털에 등록된 이 시스템의 식별자. 🔴 자기 줄의 열쇠를 **만드는 쪽과 같은
@@ -476,7 +486,7 @@ export function NotificationDismissAll({
         보이는 알림 지우기 {count}건
       </button>
       <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-        이 브라우저에서만 숨깁니다. 다시 로그인하면 아직 끝나지 않은 일은 다시 나타납니다.
+        사내 시스템 전체의 종에서 사라집니다. 아직 끝나지 않은 일 자체는 그대로 남습니다.
       </p>
     </div>
   );
@@ -548,23 +558,33 @@ const unknownOnServer = (): BrowserNotificationStatus => "UNKNOWN";
 const EMPTY_LABEL = "처리할 알림이 없습니다.";
 
 /**
- * 지금 로그인한 사람과 **이 로그인의 시각**(초 단위 epoch, 세션의 issuedAt).
+ * 지움을 **포털에 적는** 서버 액션 — dismissNotificationsAction
+ * (server/actions/notification-dismissals.ts)과 같은 모양이다.
  *
- * 🔴 **서버가 내려준다** — 레이아웃이 readSession 으로 읽어 여기까지 지나
- * 보낸다. 화면이 쿠키를 풀지 않는다(세션 쿠키는 httpOnly 라 읽을 수도 없다).
+ * 🔴 위 AcknowledgeNotification 과 같은 까닭으로 **받아서** 쓴다: 그 서버 액션
+ * 파일은 `server-only` 사슬(세션·DB·포털)을 물고 있어서, 여기서 가져오면 이
+ * 파일을 정적 렌더로 시험하는 NotificationBell.test.tsx 가 가져오는 순간 죽는다.
+ * 넘겨 주는 일은 TopBar.tsx 가 한다.
  *
- * 🔴 이 값이 없으면 **지우기 단추가 아예 그려지지 않는다.** 적을 곳을 모르는
- * 채 단추만 서면 눌러도 아무 일이 없다.
+ * 🔴 **사람을 가리키는 칸이 없다.** 누구의 지움인지는 서버가 제 세션에서 다시
+ * 읽는다 — 인자로 받으면 브라우저가 아무 번호나 실어 남의 알림을 지울 수 있다
+ * (그 액션 머리말).
+ *
+ * 🔴 이 값이 없으면 **지우기 단추가 아예 그려지지 않는다.** 적을 곳을 모르는 채
+ * 단추만 서면 눌러도 아무 일이 없다.
  */
-export type NotificationDismissalSession = { userId: string; issuedAt: number };
+export type DismissNotifications = (input: { keys: string[] }) => Promise<void>;
 
 /**
- * 지운 줄을 적어 둘 곳.
+ * 브라우저에 **남아 있던 옛 지움 기록**을 치울 곳.
+ *
+ * 🔴 **여기에 적지 않는다.** 2026-10-20부터 지움은 포털에 적히고
+ * (domain/notification-dismissal.ts 머리말), 이 저장소에 남은 칸들은 영영
+ * 안 쓰인다 — 한 번 치우고 끝이다.
  *
  * 사생활 보호 창이나 저장을 막아 둔 브라우저에서는 이 속성을 **읽는 것만으로**
- * 던진다. 그래서 접근 자체를 try/catch 로 감싼다 — 저장을 못 하는 것은 새로
- * 고쳤을 때 지운 줄이 되살아나는 일이지만, 여기서 던지면 머리말이, 곧 모든
- * 화면이 죽는다(BrowserNotifications 의 getSeenKeyStore 와 같은 처방).
+ * 던진다. 그래서 접근 자체를 try/catch 로 감싼다 — 여기서 던지면 머리말이, 곧
+ * 모든 화면이 죽는다(BrowserNotifications 의 getSeenKeyStore 와 같은 처방).
  */
 function getDismissalStore(): DismissalStore | null {
   try {
@@ -574,122 +594,66 @@ function getDismissalStore(): DismissalStore | null {
   }
 }
 
-/**
- * ── 🔴 지운 줄은 **React 바깥**에 있다 ──────────────────────────────────
- * 적히는 곳이 이 브라우저의 localStorage 라, React 로서는 그것이 바깥 세상이다.
- * 그 바깥을 구독하는 장치가 useSyncExternalStore 이고, 이 파일이 **알림 권한에
- * 이미 쓰고 있는 방법**이다(readBrowserNotificationStatus). 그 길을 쓰면
- *  - 렌더 중에 저장소를 만지지 않아 **서버에서 터지지 않고**(서버 스냅샷은 늘
- *    「아무것도 안 지웠다」다),
- *  - 서버·하이드레이션 때의 그림이 같아 **어긋나지 않으며**,
- *  - 붙은 뒤에 실제 값으로 한 번 맞춰진다(포털 목록이 빈 것에서 시작해 나중에
- *    채워지는 것과 같은 모양이다).
- *
- * 🔴 **스냅샷은 같은 값이면 같은 것을 돌려줘야 한다.** 렌더마다 새 Set 을
- *    만들면 React 가 「바뀌었다」로 보고 끝없이 다시 그린다. 그래서 저장소의
- *    날것(글자)을 함께 적어 두고, 그것이 그대로면 **지난번 Set 을 그대로**
- *    돌려준다.
- *
- * 🔴 아래 모듈 변수에 손대는 곳은 **브라우저에서만 도는 둘**이다(스냅샷을
- *    읽는 자리와 지우는 자리). 서버는 언제나 NO_DISMISSALS 를 쓰므로, 한
- *    프로세스가 여러 사람의 요청을 받는 서버에서 값이 섞일 길이 없다.
- */
-
-/** 아무것도 안 지운 상태. 🔴 **하나를 돌려쓴다** — 서버 스냅샷이 매번 같아야 한다. */
+/** 아무것도 안 지운 상태. 🔴 **하나를 돌려쓴다** — 서버 렌더가 매번 같아야 한다. */
 const NO_DISMISSALS: ReadonlySet<string> = new Set();
 
-let dismissalKey: string | null = null;
-let dismissalRaw: string | null = null;
-let dismissalSet: ReadonlySet<string> = NO_DISMISSALS;
-
-/** 지금 적혀 있는 날것. 저장소가 막혀 터져도 null 로 떨어진다. */
-function readDismissalRaw(store: DismissalStore | null, storageKey: string): string | null {
-  if (!store) return null;
-  try {
-    return store.getItem(storageKey);
-  } catch {
-    return null;
-  }
-}
-
-const dismissalListeners = new Set<() => void>();
-
-function subscribeToDismissals(listener: () => void): () => void {
-  dismissalListeners.add(listener);
-  return () => {
-    dismissalListeners.delete(listener);
-  };
-}
-
-/** 바뀌었다고 알린다 — 구독한 종이 다시 그려진다. */
-function announceDismissals(): void {
-  for (const listener of dismissalListeners) listener();
-}
-
-function dismissalSnapshot(storageKey: string): ReadonlySet<string> {
-  const store = getDismissalStore();
-  const raw = readDismissalRaw(store, storageKey);
-  if (dismissalKey === storageKey && dismissalRaw === raw) return dismissalSet;
-
-  dismissalKey = storageKey;
-  dismissalRaw = raw;
-  dismissalSet = new Set(readDismissedNotificationKeys(store, storageKey));
-  return dismissalSet;
-}
-
-const noDismissalsSnapshot = (): ReadonlySet<string> => NO_DISMISSALS;
-
 /**
- * 이 로그인에서 지운 줄들과, 지우는 함수.
+ * 지운 줄들과, 지우는 함수.
  *
- * ── 옛 열쇠 치우기 ──────────────────────────────────────────────────────
- * **같은 사람의 옛 로그인 칸**을 치운다(까닭은 domain/notification-dismissal.ts
- * 의 pruneOldDismissalKeys). 저장소를 **고치는** 일이라 그리는 동안이 아니라
- * 붙은 뒤에 한다. 사람이 바뀌면 그 사람 것은 그 사람이 로그인할 때 치워진다.
+ * ── 🔴 기억하는 곳이 **둘**이고 역할이 다르다 ───────────────────────────
+ *  ⓐ **이 화면 안(메모리)** — 누른 즉시 줄을 감추기 위한 것. 새로고침하면
+ *     사라진다. 🔴 브라우저에 **적지 않는다**(2026-10-20 에 localStorage 를
+ *     걷어냈다 — domain/notification-dismissal.ts 머리말).
+ *  ⓑ **포털** — 진짜 기록. 어느 사내 시스템에서 지우든 모든 종에서 사라진다.
+ *     돌아오는 길은 포털이 주는 `dismissed` 다(selectVisibleNotifications).
+ *
+ * 🔴 **치르는 값**: ⓑ 가 실패하면 그 줄은 새로고침했을 때 **다시 뜬다**(전에는
+ * 브라우저에 남아 안 떴다). 그 편이 정직하다 — 안 적혔는데 여기서만 안 보이면
+ * 같은 줄이 다른 시스템의 종에는 그대로 있다.
+ *
+ * 🔴 **결과를 기다리지 않는다.** 서버 액션은 어떤 일이 있어도 던지지 않지만
+ * (그 파일 머리말), 부르는 자체가 망을 타므로 거절을 한 겹 더 받아 둔다 —
+ * 삼키지 않으면 「처리되지 않은 거절」이 모든 화면의 머리말에서 터진다.
+ *
+ * ── 옛 기록 치우기 ──────────────────────────────────────────────────────
+ * 브라우저에 쌓여 있던 옛 칸을 **한 번** 치운다(까닭은
+ * domain/notification-dismissal.ts 의 purgeStoredDismissals). 저장소를 **고치는**
+ * 일이라 그리는 동안이 아니라 붙은 뒤에 한다.
  */
-function useDismissedNotifications(session: NotificationDismissalSession | undefined) {
-  // 🔴 열쇠를 **글자 하나**로 좁혀 둔다. 아래 의존성에 객체를 그대로 두면
-  //    서버가 렌더될 때마다 새로 만들어진 객체 때문에 효과가 다시 돈다.
-  const storageKey = session ? notificationDismissalStorageKey(session) : null;
-  const userId = session?.userId ?? null;
-
-  const dismissed = useSyncExternalStore(
-    subscribeToDismissals,
-    storageKey === null ? noDismissalsSnapshot : () => dismissalSnapshot(storageKey),
-    noDismissalsSnapshot
-  );
+function useDismissedNotifications(record: DismissNotifications | undefined) {
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(NO_DISMISSALS);
 
   useEffect(() => {
-    if (storageKey === null || userId === null) return;
-    pruneOldDismissalKeys(getDismissalStore(), {
-      prefix: notificationDismissalKeyPrefixForUser(userId),
-      keep: storageKey,
-    });
-  }, [storageKey, userId]);
+    purgeStoredDismissals(getDismissalStore());
+  }, []);
 
   const dismiss = useCallback(
     (keys: readonly string[]) => {
-      if (storageKey === null || keys.length === 0) return;
+      if (!record || keys.length === 0) return;
 
-      const store = getDismissalStore();
-      const next = new Set(readDismissedNotificationKeys(store, storageKey));
-      for (const key of keys) next.add(key);
-      writeDismissedNotificationKeys(store, storageKey, [...next]);
+      // 🔴 **먼저 감춘다.** 포털의 답을 기다리면 ✕ 를 눌러도 한 박자 동안
+      //    아무 일이 없고, 그 사이에 같은 줄을 또 누르게 된다.
+      setDismissed((prev) => {
+        const next = new Set(prev);
+        for (const key of keys) next.add(key);
+        return next;
+      });
 
-      // 🔴 **적지 못했어도 화면에서는 치운다.** 저장을 막아 둔 브라우저에서
-      //    눌렀는데 아무 일도 안 일어나는 것이 더 나쁘다 — 그런 기기에서는
-      //    새로고침하면 되살아날 뿐이다. 날것을 **지금 적혀 있는 값**으로
-      //    맞춰 두어야 다음 렌더가 이 판단을 뒤집지 않는다.
-      dismissalKey = storageKey;
-      dismissalRaw = readDismissalRaw(store, storageKey);
-      dismissalSet = next;
-      announceDismissals();
+      try {
+        // 🔵 열쇠가 몇 개든 **한 번만** 부른다 — 200개씩 나눠 보내는 일은 서버가
+        //    한다(server/integration/portal-inbox.ts 의 DISMISSALS_PER_REQUEST).
+        void Promise.resolve(record({ keys: [...keys] })).catch(() => {
+          // 못 적었으면 새로고침했을 때 그 줄이 다시 뜬다(위 머리말).
+        });
+      } catch {
+        // 부르는 것 자체가 터져도 감춘 것은 그대로 둔다 — 같은 까닭이다.
+      }
     },
-    [storageKey]
+    [record]
   );
 
   // 적을 곳을 아는 종만 지울 수 있다 — 모르면 단추를 그리지 않는다.
-  return { dismissed, dismiss, enabled: storageKey !== null };
+  return { dismissed, dismiss, enabled: record !== undefined };
 }
 
 /**
@@ -706,7 +670,7 @@ export function NotificationBellWithInbox({
   items = [],
   acknowledge,
   inbox = EMPTY_PORTAL_INBOX,
-  notificationDismissal,
+  dismiss: record,
   notificationClientId = "",
 }: {
   items?: readonly NotificationItem[];
@@ -718,10 +682,10 @@ export function NotificationBellWithInbox({
   /** 포털이 모아 준 **다른 시스템들의** 알림. 아직 못 받았으면 빈 것이다. */
   inbox?: PortalNotificationInbox;
   /**
-   * 지우기를 이 브라우저 어디에 적을지 가르는 값(위 타입 주석). 안 넘기면
-   * 지우기 단추가 아예 없는 예전 종이다.
+   * 지움을 **포털에 적는** 서버 액션(위 타입 주석). 안 넘기면 지우기 단추가
+   * 아예 없는 예전 종이다 — 적을 곳을 모르는 채 ✕ 만 서면 눌러도 아무 일이 없다.
    */
-  notificationDismissal?: NotificationDismissalSession;
+  dismiss?: DismissNotifications;
   /**
    * 포털에 등록된 이 시스템의 식별자(`SSO_CLIENT_ID`). 🔴 자기 줄 열쇠의
    * **접두사**다(domain 의 notificationBellKey). 서버가 내려준다 — 이 조각은
@@ -741,12 +705,11 @@ export function NotificationBellWithInbox({
   const [acknowledgedIds, setAcknowledgedIds] = useState<ReadonlySet<string>>(() => new Set());
 
   /**
-   * 이 로그인에서 **지운** 줄들. 확인 기록(위)과 달리 서버에 한 줄도 적지
-   * 않는다 — 적히는 곳은 이 브라우저뿐이고 다시 로그인하면 비워진다.
+   * **지운** 줄들. 확인 기록(위)과 달리 A/S 의 표에는 한 줄도 적지 않는다 —
+   * 적히는 곳은 포털이고(그래서 모든 사내 시스템의 종에서 사라진다), 여기 든
+   * 것은 **누른 즉시 감추기 위한 이 화면의 기억**이다.
    */
-  const { dismissed, dismiss, enabled: canDismissHere } = useDismissedNotifications(
-    notificationDismissal
-  );
+  const { dismissed, dismiss, enabled: canDismissHere } = useDismissedNotifications(record);
 
   // 🔴 거르는 일과 세는 일은 **위 순수 함수 하나**가 한다 — 지운 줄은 눌러야
   //    생기는 상태라 정적 렌더로는 만들 수 없어서, 값으로 시험할 수 있어야 한다.
@@ -980,7 +943,7 @@ export default function NotificationBell({
   items = [],
   acknowledge,
   portalInbox,
-  notificationDismissal,
+  dismiss,
   notificationClientId = "",
 }: {
   items?: readonly NotificationItem[];
@@ -991,10 +954,10 @@ export default function NotificationBell({
    */
   notificationClientId?: string;
   /**
-   * 지금 로그인한 사람과 로그인 시각(위 NotificationDismissalSession). 🔴 없는
-   * 것은 **정상**이다 — 그때는 지우기 단추가 없는 예전 종 그대로다.
+   * 지움을 포털에 적는 서버 액션(위 DismissNotifications). 🔴 없는 것은
+   * **정상**이다 — 그때는 지우기 단추가 없는 예전 종 그대로다.
    */
-  notificationDismissal?: NotificationDismissalSession;
+  dismiss?: DismissNotifications;
   /**
    * 포털이 모아 준 다른 시스템들의 알림. 🔴 **서버에서 넘어오는 약속**이고
    * (값이 아니다) 풀린 값은 못 믿을 것으로 보고 한 겹 더 거른다
@@ -1008,7 +971,7 @@ export default function NotificationBell({
       items={items}
       acknowledge={acknowledge}
       inbox={inbox}
-      notificationDismissal={notificationDismissal}
+      dismiss={dismiss}
       notificationClientId={notificationClientId}
     />
   );

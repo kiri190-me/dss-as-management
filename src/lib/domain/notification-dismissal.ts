@@ -1,33 +1,50 @@
 /**
  * ============================================================================
- * 알림 **지우기** — 이 브라우저에, 이번 로그인 동안만
+ * 알림 **지우기** — 적히는 곳은 **포털**이다(2026-10-20)
  * ============================================================================
- * 종에 뜬 줄을 눈앞에서 치우는 일이다. 🔴 **서버도 DB 도 건드리지 않는다** —
- * 적히는 곳은 이 브라우저의 localStorage 하나뿐이고, 다시 로그인하면 아직
- * 끝나지 않은 일은 **그대로 다시 뜬다**.
+ * 종에 뜬 줄을 「그만 보겠다」고 치우는 일이다. 🔴 **A/S 의 DB 에는 한 줄도
+ * 적지 않는다.** 적히는 곳은 통합 로그인 포털(dss-auth) 한 곳이고, 그래서 어느
+ * 사내 시스템의 종에서 지우든 **모든 시스템의 종에서** 사라진다.
+ *
+ * ── 🔴 2026-10-20 에 브라우저 저장을 걷어냈다 ────────────────────────────
+ * 그 전까지 지움은 이 브라우저의 `localStorage` 에 적혔다. 브라우저 저장소는
+ * 주소(포트)별로 갈려서 **같은 사람이 시스템마다 다른 목록을 봤다** — A/S
+ * (3000)에서 지운 줄이 계측기·PO 의 종에는 그대로 떴다. 포털에 적으면서 그
+ * 저장은 걷어냈다: 둘 다 두면 「브라우저엔 있는데 포털엔 없거나 반대이거나」가
+ * 생긴다.
+ *
+ * 🔴 **치르는 값이 있다.** 포털에 적는 것이 실패하면 그 줄은 **새로고침하면
+ * 다시 뜬다**(전에는 브라우저에 남아 안 떴다). 그 편이 정직하다 — 안 적혔는데
+ * 여기서만 안 보이면, 같은 줄이 다른 시스템의 종에는 그대로 있다.
+ *
+ * 🔵 **「누른 즉시 사라진다」는 그대로다.** 다만 그 기억은 화면 안(메모리)에만
+ * 있고(NotificationBell.tsx 의 useDismissedNotifications), 진짜 기록은 포털에
+ * 있다. 새로고침하면 포털이 돌려준 `dismissed` 가 그 자리를 잇는다.
  *
  * ── 🔴 「확인 기록」과 다른 개념이다 ─────────────────────────────────────
- * 옆 파일 notification-acknowledgement.ts 의 확인 기록은 **영구**다 — 결재
- * 결과를 눌러 확인하면 notification_acknowledgements 표에 남아 영영 사라진다.
- * 이쪽은 **임시**다. 둘을 섞지 않는다:
+ * 옆 파일 notification-acknowledgement.ts 의 확인 기록은 **A/S 의 표**에 남는다
+ * — 결재 결과를 눌러 확인하면 notification_acknowledgements 에 영영 남는다.
+ * 둘을 섞지 않는다:
  *
  * | | 확인 기록(표) | 지우기(이 파일) |
  * |---|---|---|
- * | 어디에 | 서버 DB | 이 브라우저 |
- * | 언제까지 | 영영 | 다음 로그인까지 |
- * | 누구 것까지 | 그 사람 계정 | 이 브라우저의 이 로그인 |
+ * | 어디에 | A/S 의 DB | 포털 |
+ * | 무엇으로 | 알림 `id` | 종의 **열쇠**(`client_id:id`) |
+ * | 어디까지 | 이 시스템의 종 | 사내 시스템 **전부**의 종 |
  * | 남의 시스템 알림 | 🔴 적을 수 없다 | 적을 수 있다 |
  *
  * ── 🔴 왜 「해결됐는지」를 따로 재지 않나 ────────────────────────────────
  * 알림은 DB 에 쌓이지 않는다 — 매 요청 업무 자료에서 다시 계산한다
- * (db/queries/notifications.ts). 해결된 일은 **애초에 목록에 없다.** 그래서
- * 지운 뒤 다시 로그인했을 때 그 줄이 다시 뜨면 그것이 곧 「아직 안 끝났다」는
- * 뜻이다.
+ * (db/queries/notifications.ts). 해결된 일은 **애초에 목록에 없다.** 지움은
+ * 보기를 미루는 것이지 할 일을 없애는 것이 아니다.
  *
  * ── 🔴 순수 계산만 한다 ──────────────────────────────────────────────────
- * `server-only` 도 `window` 도 물지 않는다 — 저장소는 **인자로 받는다**
- * (DismissalStore). 그래야 화면 없이 시험할 수 있고, 저장을 막아 둔 브라우저를
- * 그대로 흉내 낼 수 있다(notification-toast.ts 의 SeenKeyStore 와 같은 방식).
+ * `server-only` 도 `window` 도 물지 않는다. 포털에 적는 왕복은 서버에 있고
+ * (server/integration/portal-inbox.ts 의 dismissPortalNotifications), 여기 남은
+ * 것은 **가리는 규칙**과, 옛 브라우저 저장을 한 번 치우는 일뿐이다. 저장소는
+ * **인자로 받는다**(DismissalStore) — 그래야 화면 없이 시험할 수 있고, 저장을
+ * 막아 둔 브라우저를 그대로 흉내 낼 수 있다(notification-toast.ts 의 SeenKeyStore
+ * 와 같은 방식).
  * ============================================================================
  */
 
@@ -67,10 +84,11 @@ export type DismissableNotification = { kind: string; sourceId?: string };
  * 만들고 있었다 — 계측기에서는 모든 종류가 지워지는데 A/S 에서만 둘 빼고 ✕ 가
  * 아예 안 섰다(2026-10-20 사용자가 직접 눌러 보고 찾아냈다).
  *
- * 🔵 **그리고 지움은 영영 숨기는 것이 아니다.** 적히는 곳은 이 브라우저
- * 하나이고(파일 머리말), 로그아웃하거나 하루가 지나면 열쇠가 바뀌어 **그대로
- * 다시 뜬다.** 할 일 자체는 업무 자료에서 매 요청 다시 계산되므로(파일 머리말
- * 「왜 해결됐는지를 따로 재지 않나」) 지운다고 사라지지 않는다.
+ * 🔵 **그리고 지움은 할 일을 없애지 않는다.** 할 일 자체는 업무 자료에서 매
+ * 요청 다시 계산되므로(파일 머리말 「왜 해결됐는지를 따로 재지 않나」) 지운다고
+ * 사라지지 않는다 — 결재는 그대로 기다리고 있고, 목록 화면과 사이드바 배지에도
+ * 그대로 있다. 🔴 **다만 2026-10-20부터 지움은 포털에 적혀** 모든 사내 시스템의
+ * 종에서 사라진다(파일 머리말) — 「이 브라우저에서만」이 아니다.
  *
  * 🔴 **「확인 기록」은 그대로 좁혀 둔다.** 그쪽(notification-acknowledgement.ts)은
  * 서버 DB 에 영구히 남는 **다른 기능**이라(파일 머리말의 표) 여전히
@@ -102,112 +120,53 @@ export function dismissableNotificationKeys(items: readonly DismissableRow[]): s
   return items.filter((item) => canDismissNotification(item)).map((item) => item.key);
 }
 
-// ──────────────────────────────────────────── 이 브라우저에 적어 두기
+// ─────────────────────────────── 브라우저에 남은 **옛 기록**을 치운다(한 번)
 
 /**
  * `localStorage` 처럼 생긴 것. 실물을 직접 부르지 않는 이유는 옆 파일
  * (notification-toast.ts 의 SeenKeyStore)과 같다 — 시험에서 **터지는 저장소**를
  * 흉내 낼 수 있고, 이 파일이 브라우저 전역에 손대지 않아 Node 에서 그대로 돈다.
  *
- * 🔴 `length`·`key()` 까지 받는 이유는 **옛 열쇠를 치우기 위해서**다(아래
- * pruneOldDismissalKeys). 그 둘이 없으면 무엇이 쌓여 있는지 알 길이 없다.
+ * 🔴 칸은 **치우는 데 필요한 것만** 받는다(`length`·`key()`·`removeItem`).
+ * `getItem`·`setItem` 이 없는 것은 실수가 아니다 — 2026-10-20부터 이 저장소에
+ * **적지도 읽지도 않는다**(파일 머리말). 칸을 남겨 두면 다음 사람이 「여기에
+ * 적어도 되나 보다」로 읽고, 포털과 두 벌이 된다.
  */
 export type DismissalStore = {
   readonly length: number;
   key(index: number): string | null;
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
   removeItem(key: string): void;
 };
 
-/** 열쇠의 앞머리. `v1` 은 적어 두는 모양이 바뀌면 올린다 — 옛 값이 조용히 무시된다. */
-const PREFIX = "dss.notifications.dismissed.v1.";
+/**
+ * 옛 기록들의 앞머리. 🔴 **판(`v1.`)까지 적지 않는다** — 걷어낼 대상은 지금까지
+ * 쌓인 **모든 판**이기 때문이다. 뒤에는 사람 id 와 로그인 시각이 붙어 있었다
+ * (`dss.notifications.dismissed.v1.{userId}.{issuedAt}`).
+ *
+ * 🔴 옆 기능의 칸과 **한 글자 차이**다 — `dss.notifications.seen.v1.…` 은 컴퓨터·
+ * 폰 알림창이 「이미 띄운 줄」을 적어 두는 자리다(notification-toast.ts). 지금도
+ * 쓰이므로 치우면 안 된다. 앞머리에 `dismissed.` 가 들어 있는 것이 그 선이다.
+ */
+export const DISMISSAL_STORAGE_PREFIX = "dss.notifications.dismissed.";
 
 /**
- * 🔴 **사람과 로그인 시각으로 갈린다.** 둘 다 섞는 까닭이 각각 있다:
+ * 브라우저에 쌓여 있던 **옛 지움 기록**을 치운다. 한 번 돌고 조용히 끝난다 —
+ * 사람에게는 아무것도 보이지 않는다.
  *
- *  - `userId` — 한 컴퓨터를 여럿이 나눠 쓰면(사무실 공용 PC) 앞사람이 지운
- *    것을 뒷사람이 물려받아서는 안 된다. 뒷사람에게는 그것이 처음 보는 일이다.
- *  - `issuedAt` — 이 세션이 **만들어진 때**(= 로그인 시각, auth/session.ts).
- *    다시 로그인하면 이 값이 달라져 **열쇠가 통째로 바뀐다** — 지운 기록을
- *    지우는 일을 따로 하지 않아도 저절로 빈 상태가 된다. 세션은 8시간 고정이고
- *    연장되지 않으므로 사람은 하루에 최소 한 번 새 값을 받는다.
+ * 🔴 2026-10-19 에 열쇠 모양이 바뀌었고(제 줄에 `rf-service-system:` 접두사가
+ * 붙었다) 2026-10-20 에 적는 곳이 포털로 옮겨 갔다. 그래서 이 칸들은 **영영
+ * 안 쓰인다** — 아무도 읽지 않는데 저장 공간만 먹고, 꽉 차면 다른 기능의 저장
+ * 까지 실패한다(바로 옆 알림창의 `seen` 칸이 그 피해자가 된다).
  *
- * 🔴 `issuedAt` 은 **서버가 내려준다**(레이아웃이 readSession 으로 읽는다).
- * 화면이 쿠키를 풀지 않는다 — 세션 쿠키는 httpOnly 라 애초에 읽을 수 없고,
- * 읽을 수 있다 해도 서명을 확인하는 자리는 서버 하나여야 한다.
+ * 🔴 **우리 열쇠만 지운다.** `dss.notifications.dismissed.` 로 시작하는 것뿐이다
+ * — 같은 주소를 쓰는 다른 기능과 남의 값은 건드리지 않는다.
+ *
+ * 🔴 **던지지 않는다.** 사생활 보호 창이나 저장을 막아 둔 브라우저에서는 저장소에
+ * 손대는 것 자체가 터진다. 못 치워도 잃는 것이 없다(쓰지 않는 칸이 남을 뿐이다).
+ *
+ * 치운 열쇠를 돌려주는 것은 시험이 「무엇을 치웠나」를 볼 수 있게 하기 위한 것이다.
  */
-export function notificationDismissalStorageKey(session: {
-  userId: string;
-  issuedAt: number;
-}): string {
-  return `${PREFIX}${session.userId}.${session.issuedAt}`;
-}
-
-/** 그 사람의 열쇠들이 공통으로 가진 앞머리. 옛 것을 가려내는 데 쓴다. */
-export function notificationDismissalKeyPrefixForUser(userId: string): string {
-  return `${PREFIX}${userId}.`;
-}
-
-/**
- * 적어 둔 열쇠를 읽는다. **어떤 경우에도 던지지 않는다.**
- *
- * 사생활 보호 창이나 저장을 막아 둔 브라우저에서는 저장소에 손대는 것 자체가
- * 터진다. 못 읽었으면 **빈 목록**이다 — 「아무것도 안 지웠다」쪽으로 기운다.
- * 반대로 기울면(못 읽었는데 뭔가 지워진 것으로 치면) 알림이 사라진다.
- */
-export function readDismissedNotificationKeys(
-  store: DismissalStore | null,
-  storageKey: string
-): string[] {
-  if (!store) return [];
-  try {
-    const raw = store.getItem(storageKey);
-    if (raw === null) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    if (!parsed.every((value): value is string => typeof value === "string")) return [];
-    return parsed;
-  } catch {
-    return [];
-  }
-}
-
-/** 적어 둔다. 읽기와 같은 이유로 **어떤 경우에도 던지지 않는다**(저장 공간이 꽉 찬 경우 포함). */
-export function writeDismissedNotificationKeys(
-  store: DismissalStore | null,
-  storageKey: string,
-  keys: readonly string[]
-): void {
-  if (!store) return;
-  try {
-    store.setItem(storageKey, JSON.stringify([...keys]));
-  } catch {
-    // 못 적어 두면 새로고침했을 때 지운 줄이 되살아날 뿐이다 — 알림이 사라지는
-    // 쪽이 아니라 남는 쪽이라 조용할지언정 위험하지 않다.
-  }
-}
-
-/**
- * **같은 사람의 옛 열쇠**를 치운다. 지금 쓰는 것 하나만 남긴다.
- *
- * 🔴 열쇠에 로그인 시각이 섞여 있어 **로그인할 때마다 새 칸이 하나 생긴다.**
- * 하루 한두 번이라도 몇 해가 쌓이면 이 브라우저에 쓰지 않는 칸이 수백 개가
- * 된다 — 아무도 읽지 않는데 저장 공간만 먹고, 꽉 차면 다른 기능의 저장까지
- * 실패한다.
- *
- * 🔴 **다른 사람의 열쇠는 건드리지 않는다.** 공용 PC 에서 옆자리 사람이 아직
- * 그 세션을 쓰고 있을 수 있고(다른 브라우저 프로필·다른 창), 남의 것을 치우는
- * 일은 이 함수가 판단할 것이 아니다. 그 사람 것은 **그 사람이 다음에
- * 로그인할 때** 이 함수가 치운다.
- *
- * 던지지 않는다. 치운 열쇠를 돌려주는 것은 시험이 「무엇을 치웠나」를 볼 수
- * 있게 하기 위한 것이다.
- */
-export function pruneOldDismissalKeys(
-  store: DismissalStore | null,
-  owner: { prefix: string; keep: string }
-): string[] {
+export function purgeStoredDismissals(store: DismissalStore | null): string[] {
   if (!store) return [];
   const 치울것: string[] = [];
   try {
@@ -216,15 +175,14 @@ export function pruneOldDismissalKeys(
     for (let index = 0; index < store.length; index += 1) {
       const name = store.key(index);
       if (name === null) continue;
-      if (!name.startsWith(owner.prefix)) continue;
-      if (name === owner.keep) continue;
+      if (!name.startsWith(DISMISSAL_STORAGE_PREFIX)) continue;
       치울것.push(name);
     }
     for (const name of 치울것) {
       store.removeItem(name);
     }
   } catch {
-    // 못 치워도 지금 로그인은 제 열쇠로 멀쩡히 돈다 — 다음 로그인에 다시 해 본다.
+    // 못 치워도 종은 멀쩡히 돈다 — 다음에 화면을 열 때 다시 해 본다.
   }
   return 치울것;
 }

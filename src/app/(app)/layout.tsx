@@ -159,15 +159,15 @@ export default async function AppLayout({
         myPendingApprovalCount={myPendingApprovalCount}
         notifications={notifications}
         portalInbox={portalInbox}
-        // 종에서 알림을 **지웠다**를 이 브라우저 어디에 적을지 가르는 값.
-        // 🔴 서버도 DB 도 건드리지 않는 기능이지만, 두 값은 **서버만 알 수
-        //    있다** — 세션 쿠키는 httpOnly 라 화면이 풀 수 없다.
+        // 🔴 「이 알림은 그만 보겠다」를 **여기서 내려보내지 않는다**(2026-10-20).
+        //    한때 `notificationDismissal={{ userId, issuedAt }}` 이 이 자리에
+        //    있었다 — 지움을 이 브라우저의 localStorage 어느 칸에 적을지 가르는
+        //    값이었다. 지움이 포털로 옮겨 가면서 그 칸도, 그것을 가르는 값도
+        //    없어졌다. 적는 일은 TopBar 가 종에 건네는 서버 액션이 하고
+        //    (server/actions/notification-dismissals.ts), **누구의 지움인지는 그
+        //    액션이 제 세션에서 다시 읽는다** — 그래서 사람을 가리키는 값이 이
+        //    줄기를 타고 내려갈 까닭이 없다.
         //
-        // 🔴 `session.issuedAt` 은 **이 세션이 만들어진 때**(= 로그인 시각)다.
-        //    다시 로그인하면 값이 달라져 지운 기록이 저절로 비워진다 — 그것이
-        //    「로그아웃할 때까지만 숨긴다」를 지키는 장치다. users 의
-        //    sessions_valid_from 은 **다른 값**이다(강제로 끊는 기준선).
-        notificationDismissal={{ userId: user.id, issuedAt: session.issuedAt }}
         // 자기 줄 열쇠의 접두사(바로 위 notificationClientId 주석).
         notificationClientId={notificationClientId}
         portalUrl={portalUrl}

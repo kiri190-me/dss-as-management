@@ -869,20 +869,29 @@ test("🔴 종은 포털 목록을 값으로도, 약속으로도 **다시 묻지
   assert.ok(!source.includes("fetch("), "종이 직접 망을 탄다");
 });
 
-// ───────────────────────── 종에서 알림 **지우기**(이 브라우저에만, 이번 로그인만)
+// ─────────────────── 종에서 알림 **지우기**(2026-10-20부터 적히는 곳은 포털)
 
 /**
- * 🔴 확인 기록(서버 DB · 영구)과 **다른 것**이다. 여기가 지키는 선:
- *  1. 로그인 정보를 안 넘기면 **예전 종 그대로**다(적을 곳을 모르는 채 단추만
- *     서면 눌러도 아무 일이 없다).
+ * 🔴 확인 기록(A/S 의 표 · 영구)과 **다른 것**이다. 여기가 지키는 선:
+ *  1. 지우는 **서버 액션**을 안 넘기면 **예전 종 그대로**다(적을 곳을 모르는
+ *     채 단추만 서면 눌러도 아무 일이 없다).
  *  2. 단추는 **보이는 줄 전부**에 선다(2026-10-20부터 — 종류를 가리지 않는다).
- *  3. 포털 줄은 **누르는 것만으로도** 지워지고, 그 길은 DB 로 가지 않는다.
+ *  3. 포털 줄은 **누르는 것만으로도** 지워지고, 그 길은 A/S 의 표로 가지 않는다.
  *  4. 지운 줄은 목록에서도 **배지에서도** 빠진다.
  */
 
-/** 서버가 내려주는 값 — 지금 로그인한 사람과 이 로그인의 시각. */
-function 세션(issuedAt = 1_700_000_000) {
-  return { userId: "11111111-2222-3333-4444-555555555555", issuedAt };
+/**
+ * 종이 받는 「지움을 포털에 적는 서버 액션」의 가짜.
+ *
+ * 🔴 **사람을 가리키는 칸이 없다** — 누구의 지움인지는 서버가 제 세션에서 다시
+ * 읽는다(server/actions/notification-dismissals.ts). 한때 이 자리에 있던
+ * `notificationDismissal={{ userId, issuedAt }}` 은 localStorage 어느 칸에 적을지
+ * 가르는 값이었고, 지움이 포털로 옮겨 가면서 통째로 걷혔다.
+ */
+function 지움(적힌것: string[] = []) {
+  return async ({ keys }: { keys: string[] }) => {
+    적힌것.push(...keys);
+  };
 }
 
 /** 지우기 단추들의 열쇠를 차례대로. 줄의 링크가 가진 같은 이름의 칸과 섞이지 않는다. */
@@ -892,9 +901,9 @@ function 지우기열쇠들(html: string): string[] {
   ].map((m) => m[1]);
 }
 
-test("🔴 로그인 정보를 안 넘기면 지우기가 아예 없다 — 예전 종과 한 글자도 다르지 않다", () => {
-  // 적을 곳(사람 · 로그인 시각)은 서버만 안다. 못 받았으면 단추를 그리지
-  // 않는다 — 눌러도 아무 일이 없는 단추가 줄마다 서는 것이 더 나쁘다.
+test("🔴 지우는 서버 액션을 안 넘기면 지우기가 아예 없다 — 예전 종과 한 글자도 다르지 않다", () => {
+  // 적는 길(포털로 가는 서버 액션)은 머리말(TopBar)이 건넨다. 못 받았으면 단추를
+  // 그리지 않는다 — 눌러도 아무 일이 없는 단추가 줄마다 서는 것이 더 나쁘다.
   const 예전 = renderToStaticMarkup(<NotificationBell items={oneOfEachKind()} />);
 
   assert.ok(!예전.includes("dss-bell__dismiss"), "지우기 단추가 그려졌다");
@@ -914,7 +923,7 @@ test("🔴 지우기 단추는 **8종류 전부**에 선다 — 할 일 알림�
     <NotificationBellWithInbox
       items={mine}
       inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [] }}
-      notificationDismissal={세션()}
+      dismiss={지움()}
     />
   );
 
@@ -940,7 +949,7 @@ test("🔴 포털 줄은 **종류를 가리지 않고** 지울 수 있다 — �
       <NotificationBellWithInbox
         items={[]}
         inbox={{ items: [portalRow({ kind })], count: 1, degraded: false, dismissed: [] }}
-        notificationDismissal={세션()}
+        dismiss={지움()}
       />
     );
     assert.deepEqual(지우기열쇠들(html), [portalRow().key], `${kind}: 남의 줄을 못 지운다`);
@@ -952,7 +961,7 @@ test("🔴 일괄 지우기는 footer 맨 위에 서고, **보이는 줄 수**�
     <NotificationBellWithInbox
       items={oneOfEachKind()}
       inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [] }}
-      notificationDismissal={세션()}
+      dismiss={지움()}
     />
   );
 
@@ -985,7 +994,7 @@ test("🔴 일괄 지우기는 footer 맨 위에 서고, **보이는 줄 수**�
 });
 
 test("보이는 줄이 없으면 일괄 지우기를 그리지 않는다 — 눌러도 아무 일 없는 단추를 안 남긴다", () => {
-  const 빈종 = renderToStaticMarkup(<NotificationBell items={[]} notificationDismissal={세션()} />);
+  const 빈종 = renderToStaticMarkup(<NotificationBell items={[]} dismiss={지움()} />);
   assert.ok(!빈종.includes("보이는 알림 지우기"));
   assert.deepEqual(지우기열쇠들(빈종), []);
 
@@ -993,7 +1002,7 @@ test("보이는 줄이 없으면 일괄 지우기를 그리지 않는다 — 눌
   //    「지울 것이 없는 종」이었다(여기가 그 뒤집힌 자리다).
   const 할일하나 = approval("case-1", "D9705-012", "REPAIR_INSPECTION");
   const 할일만 = renderToStaticMarkup(
-    <NotificationBell items={[할일하나]} notificationDismissal={세션()} />
+    <NotificationBell items={[할일하나]} dismiss={지움()} />
   );
   assert.ok(!isAcknowledgeableNotificationKind(할일하나.kind), "표본이 할 일 줄이 아니다");
   assert.ok(할일만.includes("보이는 알림 지우기 1건"), "할 일 줄 하나를 세지 않았다");
@@ -1026,7 +1035,8 @@ test("🔴 줄을 누르면 **포털 줄만** 지운 것으로 적는다 — 자
   }
 
   // 🔴 자기 줄은 여기서 끝난다 — 그 줄은 확인 기록(영구)으로 가고 있고, 저장이
-  //    실패하면 되살아나야 한다. 임시 지우기로도 적으면 그대로 숨는다.
+  //    실패하면 되살아나야 한다. 지움으로도 적으면 **모든 사내 시스템의 종에서**
+  //    그대로 숨는다(2026-10-20부터 지움은 포털에 적힌다).
   for (const item of toNotificationBellItems(oneOfEachKind())) {
     const 지운것: string[] = [];
     handlePortalRowPicked(item, { onDismiss: (key) => 지운것.push(key) });
@@ -1044,7 +1054,7 @@ test("🔴 줄을 누르면 **포털 줄만** 지운 것으로 적는다 — 자
   assert.doesNotThrow(() => handlePortalRowPicked(portalRow(), {}));
 });
 
-test("🔴 포털 줄을 **DB 확인 기록**에 적는 길은 그대로 막혀 있다 — 브라우저 길과 다르다", () => {
+test("🔴 포털 줄을 **A/S 확인 기록**에 적는 길은 그대로 막혀 있다 — 지움 길과 다르다", () => {
   // 지우기가 열렸다고 이 가드가 풀려서는 안 된다. 풀리면 남의 시스템 알림
   // id 로 A/S 의 확인 기록이 쌓인다 — 아무 오류도 없이, 그 줄은 남은 채.
   const 확인한것: string[] = [];
@@ -1052,12 +1062,154 @@ test("🔴 포털 줄을 **DB 확인 기록**에 적는 길은 그대로 막혀 
   assert.deepEqual(확인한것, [], "포털 줄이 DB 길로 들어갔다");
 
   const source = readLayoutSource("NotificationBell.tsx");
-  assert.match(source, /if \(item\.sourceId\) return;/, "DB 쪽 가드가 사라졌다");
+  assert.match(source, /if \(item\.sourceId\) return;/, "확인 기록 쪽 가드가 사라졌다");
   // 지우는 규칙은 **도메인 한 곳**에서 가져온다 — 화면이 종류를 보지 않는다.
   assert.ok(
     source.includes('from "@/lib/domain/notification-dismissal"'),
     "가리는 규칙이 화면 안으로 들어왔다"
   );
+});
+
+/* ─────────────── 적는 곳이 포털로 옮겨 갔다(2026-10-20, 조각 A-2) ─────────────── */
+
+test("🔴 종은 브라우저 저장소에 지움을 **한 글자도 적지 않는다** — 포털과 두 벌이 되면 안 된다", () => {
+  // 2026-10-20 까지는 localStorage 에 적고 그것을 읽어 걸렀다. 둘 다 두면
+  // 「브라우저엔 있는데 포털엔 없거나 반대이거나」가 생기고, 그 어긋남은
+  // **「계측기에서는 지웠는데 A/S 에만 뜬다」** 라는 신고로만 드러난다.
+  const source = readLayoutSource("NotificationBell.tsx");
+
+  assert.ok(!/\.setItem\(/.test(source), "🔴 종이 브라우저 저장소에 다시 적고 있다");
+  assert.ok(!/\.getItem\(/.test(source), "🔴 종이 브라우저 저장소에서 다시 읽고 있다");
+  assert.ok(
+    !/readDismissedNotificationKeys|writeDismissedNotificationKeys|notificationDismissalStorageKey/.test(
+      source
+    ),
+    "걷어낸 저장 함수가 되살아났다"
+  );
+
+  // 🔴 저장소에 **남아 있는 옛 칸을 치우는** 일만 남았다 — 한 번 돌고 끝난다.
+  assert.match(source, /purgeStoredDismissals\(getDismissalStore\(\)\)/);
+  assert.match(
+    source,
+    /useEffect\(\(\) => \{\s*purgeStoredDismissals\(getDismissalStore\(\)\);\s*\}, \[\]\);/,
+    "옛 칸 치우기가 한 번만 도는 자리에 있지 않다"
+  );
+});
+
+test("🔴 ✕ 는 **먼저 감추고** 나서 포털에 적는다 — A/S 만의 「즉시 사라짐」을 지킨다", () => {
+  // 다른 여섯 사이트는 서버가 다시 그릴 때(한 박자 뒤) 줄이 빠진다. A/S 는 그
+  // 자리에서 사라지고, 그것이 더 나은 동작이라 유지하기로 했다(2026-10-20).
+  // 포털의 답을 기다리면 ✕ 를 눌러도 한 박자 동안 아무 일이 없다.
+  const source = readLayoutSource("NotificationBell.tsx");
+  const 지우는함수 = source.slice(
+    source.indexOf("  const dismiss = useCallback("),
+    source.indexOf("  // 적을 곳을 아는 종만 지울 수 있다")
+  );
+  assert.ok(지우는함수.length > 0, "지우는 함수를 못 찾았다 — 이 시험이 아무것도 안 본다");
+
+  const 감추는자리 = 지우는함수.indexOf("setDismissed(");
+  const 적는자리 = 지우는함수.indexOf("record({ keys:");
+  assert.ok(감추는자리 > 0, "화면에서 감추는 자리가 없다");
+  assert.ok(적는자리 > 0, "포털에 적는 자리가 없다");
+  assert.ok(감추는자리 < 적는자리, "🔴 포털의 답을 기다린 뒤에 감추고 있다");
+
+  // 🔴 **기다리지 않는다**(await 가 아니다). 기다리면 누름 처리가 망 왕복만큼
+  //    붙잡히고, 그 사이에 같은 줄을 또 누르게 된다.
+  assert.ok(!/await record\(/.test(지우는함수), "포털 왕복을 기다리고 있다");
+  // 🔴 거절을 삼킨다 — 안 삼키면 「처리되지 않은 거절」이 모든 화면에서 터진다.
+  assert.match(지우는함수, /\.catch\(\(\) => \{/);
+});
+
+test("🔴 일괄 지우기는 열쇠를 **한 번에** 넘긴다 — 줄마다 따로 부르지 않는다", () => {
+  // 50줄을 지우면서 서버 액션을 50번 부르면 포털로 가는 왕복도 50번이 된다.
+  // 한 번에 넘기면 200개씩 나누는 일은 서버가 한 번만 한다.
+  const source = readLayoutSource("NotificationBell.tsx");
+  assert.match(
+    source,
+    /onDismissAll=\{canDismissHere \? \(\) => dismiss\(dismissableKeys\) : undefined\}/,
+    "일괄 지우기가 열쇠 묶음을 한 번에 넘기지 않는다"
+  );
+  // 줄 하나짜리 길도 그대로다(✕ 와 포털 줄 누름).
+  assert.match(source, /onDismiss=\{canDismissHere \? \(picked: NotificationBellItem\) => dismiss\(\[picked\.key\]\) : undefined\}/);
+});
+
+test("🔴 종은 지움 서버 액션을 **직접 가져오지 않는다** — 머리말이 건넨다", () => {
+  // 그 액션 파일은 `server-only` 사슬(세션·DB·포털)을 물고 있다. 여기서
+  // 가져오면 이 시험 파일이 종을 가져오는 순간 죽는다 — 확인 기록이 같은
+  // 까닭으로 이미 그렇게 돼 있다.
+  const source = readLayoutSource("NotificationBell.tsx");
+  assert.ok(
+    !/from "@\/lib\/server\//.test(source),
+    "🔴 종이 서버 모듈을 직접 가져왔다 — 정적 렌더 시험이 죽는다"
+  );
+  assert.ok(!/from "@\/lib\/db\//.test(source), "🔴 종이 DB 모듈을 직접 가져왔다");
+  assert.match(source, /export type DismissNotifications = /, "받아서 쓰는 모양이 사라졌다");
+
+  // 🔴 머리말이 실제로 건넨다 — 빠지면 아무 오류 없이 ✕ 가 통째로 사라진다.
+  const topBar = readFileSync(new URL("./TopBar.tsx", import.meta.url), "utf8");
+  assert.match(
+    topBar,
+    /import \{ dismissNotificationsAction \} from "@\/lib\/server\/actions\/notification-dismissals";/
+  );
+  assert.match(topBar, /dismiss=\{dismissNotificationsAction\}/, "머리말이 종에 안 건넨다");
+  // 확인 기록 쪽은 그대로다 — 둘은 다른 길이다.
+  assert.match(topBar, /acknowledge=\{acknowledgeNotificationAction\}/);
+});
+
+test("🔴 사람을 가리키는 값은 이 줄기를 타고 내려가지 않는다 — 서버가 제 세션에서 읽는다", () => {
+  // 한때 `notificationDismissal={{ userId, issuedAt }}` 이 layout → AppShell →
+  // TopBar → 종으로 내려갔다(localStorage 어느 칸에 적을지 가르는 값이었다).
+  // 🔴 그 칸이 되살아나면 「브라우저가 보낸 사람 번호」가 생기고, 그것을 믿는
+  //    순간 남의 알림을 지우는 통로가 된다.
+  // 🔵 **주석은 빼고 본다.** 걷어낸 경위를 적어 둔 주석에 그 이름이 그대로
+  //    적혀 있다 — 글자로 세면 그 설명을 지워야 통과하게 된다.
+  const 코드만 = (source: string) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+
+  for (const [이름, source] of [
+    ["layout.tsx", readFileSync(new URL("../../app/(app)/layout.tsx", import.meta.url), "utf8")],
+    ["AppShell.tsx", readFileSync(new URL("./AppShell.tsx", import.meta.url), "utf8")],
+    ["TopBar.tsx", readFileSync(new URL("./TopBar.tsx", import.meta.url), "utf8")],
+    ["NotificationBell.tsx", readLayoutSource("NotificationBell.tsx")],
+  ] as const) {
+    assert.ok(!/notificationDismissal/.test(코드만(source)), `${이름}: 걷어낸 프롭이 되살아났다`);
+  }
+  // 받는 칸 자체가 없다 — 칸이 없으면 실수로 믿을 수도 없다.
+  assert.ok(
+    !/issuedAt/.test(코드만(readLayoutSource("NotificationBell.tsx"))),
+    "종이 로그인 시각을 다시 받는다"
+  );
+});
+
+test("🔴 지움 서버 액션의 **첫 토큰**이 `use server` 다 — 본문이 번들로 새지 않는다", () => {
+  // 🔴 주석에 그 낱말이 적힌 서버 파일이 다른 저장소마다 실제로 있었다. 단순
+  //    grep 으로 세면 통과하므로 **주석을 걷어낸 뒤 첫 토큰**으로 판정한다.
+  const source = readFileSync(
+    new URL("../../lib/server/actions/notification-dismissals.ts", import.meta.url),
+    "utf8"
+  );
+  const 코드만 = source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^[ \t]*\/\/.*$/gm, "")
+    .trim();
+
+  assert.ok(
+    코드만.startsWith('"use server";'),
+    `🔴 첫 토큰이 "use server" 가 아니다: ${코드만.slice(0, 40)}`
+  );
+  // 🔴 `"use client"` 가 섞이면 세션·DB·시크릿이 브라우저로 간다.
+  assert.ok(!/"use client"/.test(코드만), "클라이언트 조각으로 바뀌었다");
+
+  // 🔴 사람 번호를 **받지 않는다** — 받는 칸이 없어야 실수로 믿을 수도 없다.
+  const signature = 코드만.slice(
+    코드만.indexOf("export async function dismissNotificationsAction"),
+    코드만.indexOf("): Promise<void>")
+  );
+  assert.match(signature, /input: \{ keys: string\[\] \}/);
+  assert.doesNotMatch(signature, /sub|subject|userId|actor/i, "브라우저가 보낸 사람 번호를 받는다");
+  // 그 값은 서버가 제 세션에서 읽는다.
+  assert.match(코드만, /const session = await readSession\(\);/);
+  assert.match(코드만, /await getSsoSubjectForUser\(session\.userId\)/);
 });
 
 test("🔴 지운 줄은 목록에서도 **배지에서도** 빠진다", () => {
@@ -1215,7 +1367,7 @@ test("🔴 포털이 돌려준 지움으로 **제 줄**이 빠진다 — 두 목
   assert.equal(보이는것.count, 1 + 3, "🔴 지운 줄이 배지에 남았다");
 });
 
-test("🔴 두 지움 목록이 **함께** 든다 — 브라우저 것과 포털 것", () => {
+test("🔴 두 지움 목록이 **함께** 든다 — 방금 누른 것과 포털이 돌려준 것", () => {
   const mine = [grantedItem(), rejectedItem()];
   const 보이는것 = selectVisibleNotifications({
     items: mine,
@@ -1226,8 +1378,8 @@ test("🔴 두 지움 목록이 **함께** 든다 — 브라우저 것과 포털
       dismissed: [`${CLIENT_ID}:${rejectedItem().id}`],
     },
     acknowledgedIds: new Set(),
-    // 브라우저 쪽에는 제 줄 하나와 포털 줄 하나가 적혀 있다(지금 A/S 는 둘 다
-    // 여기에 적는다 — 적는 쪽을 포털로 옮기는 것은 A-2 다).
+    // 이 화면에서 방금 누른 것에 제 줄 하나와 포털 줄 하나가 들어 있다. 둘 다
+    // 포털로도 나갔지만, 그 답이 돌아오기 전까지 감추는 일은 이 목록이 한다.
     dismissedKeys: new Set([`${CLIENT_ID}:${grantedItem().id}`, "njlee:CAL:3"]),
     clientId: CLIENT_ID,
   });
@@ -1299,7 +1451,7 @@ test("🔴 종이 그리는 열쇠에 접두사가 붙는다 — 만드는 쪽�
     <NotificationBellWithInbox
       items={mine}
       inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [] }}
-      notificationDismissal={세션()}
+      dismiss={지움()}
       notificationClientId={CLIENT_ID}
     />
   );
@@ -1311,7 +1463,7 @@ test("🔴 종이 그리는 열쇠에 접두사가 붙는다 — 만드는 쪽�
 
   // 안 넘기면 예전 모양이다(데모 모드 · 설정을 못 읽은 서버).
   const 예전 = renderToStaticMarkup(
-    <NotificationBellWithInbox items={mine} notificationDismissal={세션()} />
+    <NotificationBellWithInbox items={mine} dismiss={지움()} />
   );
   assert.deepEqual(지우기열쇠들(예전), [grantedItem().id]);
 

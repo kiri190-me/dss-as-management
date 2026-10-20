@@ -4,6 +4,7 @@ import NotificationBell from "./NotificationBell";
 import ThemeToggle from "./ThemeToggle";
 import type { NotificationItem } from "@/lib/domain/notifications";
 import { acknowledgeNotificationAction } from "@/lib/server/actions/notification-acknowledgements";
+import { dismissNotificationsAction } from "@/lib/server/actions/notification-dismissals";
 
 type TopBarProps = {
   title: string;
@@ -39,15 +40,6 @@ type TopBarProps = {
    * 그린다.
    */
   portalInbox?: Promise<unknown>;
-  /**
-   * 지금 로그인한 사람과 **이 로그인의 시각**. 종이 「지운 알림」을 이 브라우저
-   * 어디에 적을지 가르는 값이다(NotificationBell.tsx 의
-   * NotificationDismissalSession). 여기는 지나 보내기만 한다.
-   *
-   * 🔴 없으면 지우기 단추가 아예 그려지지 않는다 — 적을 곳을 모르는 채 단추만
-   * 서면 눌러도 아무 일이 없다.
-   */
-  notificationDismissal?: { userId: string; issuedAt: number };
   /**
    * 포털에 등록된 이 시스템의 식별자(`SSO_CLIENT_ID`). 종이 **자기 줄 열쇠의
    * 접두사**로 쓴다 — 어느 시스템에서 지우든 모든 종에서 사라지게 하는 장치다
@@ -167,7 +159,7 @@ type TopBarProps = {
  * `ml-auto` 로 그 줄의 오른쪽 끝에 서야 펼침 패널(폭 min(20rem, 100vw-2rem),
  * 종에 오른쪽 끝을 맞춰 왼쪽으로 펼친다)의 왼쪽이 화면 밖으로 잘리지 않는다.
  */
-export default function TopBar({ title, onMenuClick, user, notifications = [], portalInbox, notificationDismissal, notificationClientId = "", portalUrl = null, serviceMenu = null }: TopBarProps) {
+export default function TopBar({ title, onMenuClick, user, notifications = [], portalInbox, notificationClientId = "", portalUrl = null, serviceMenu = null }: TopBarProps) {
   return (
     // `h-14`가 `min-h-14`로 바뀐 것은 pt 인셋 때문이다: 고정 높이
     // (border-box)에 패딩을 더하면 높이는 그대로인 채 안쪽 내용만 눌린다.
@@ -372,7 +364,13 @@ export default function TopBar({ title, onMenuClick, user, notifications = [], p
           맞춰 왼쪽으로 펼쳐지므로(폭 min(20rem, 100vw-2rem)) 종이 줄 가운데에
           앉으면 패널 왼쪽이 화면 밖으로 잘린다.
         */}
-        <NotificationBell items={notifications} acknowledge={acknowledgeNotificationAction} portalInbox={portalInbox} notificationDismissal={notificationDismissal} notificationClientId={notificationClientId} />
+        {/*
+          🔴 서버 액션 **둘**을 여기서 건넨다 — 종은 이 둘을 직접 가져오지
+          않는다(`server-only` 사슬을 물고 있어 정적 렌더 시험이 죽는다 —
+          NotificationBell.tsx 의 AcknowledgeNotification 주석).
+          확인은 A/S 의 표로, 지움은 **포털**로 간다. 섞지 마라.
+        */}
+        <NotificationBell items={notifications} acknowledge={acknowledgeNotificationAction} dismiss={dismissNotificationsAction} portalInbox={portalInbox} notificationClientId={notificationClientId} />
       </div>
     </header>
   );

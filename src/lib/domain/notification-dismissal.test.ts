@@ -1,31 +1,37 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { NOTIFICATION_KINDS } from "./notifications";
 import {
   ACKNOWLEDGEABLE_NOTIFICATION_KINDS,
   isAcknowledgeableNotificationKind,
 } from "./notification-acknowledgement";
 import {
+  DISMISSAL_STORAGE_PREFIX,
   canDismissNotification,
   dismissableNotificationKeys,
-  notificationDismissalKeyPrefixForUser,
-  notificationDismissalStorageKey,
-  pruneOldDismissalKeys,
-  readDismissedNotificationKeys,
-  writeDismissedNotificationKeys,
+  purgeStoredDismissals,
   type DismissalStore,
 } from "./notification-dismissal";
 
 /**
- * 종에서 알림을 **지우는** 규칙과, 그것을 이 브라우저에 적어 두는 자리.
+ * 종에서 알림을 **지우는** 규칙과, 브라우저에 남은 **옛 기록을 치우는** 일.
  *
  * 🔴 이 파일이 지키는 선이 셋이다:
  *  1. **지울 수 있는 줄**을 가리는 규칙 — 2026-10-20부터 **전부** 지울 수 있다.
- *  2. 열쇠가 **사람과 로그인 시각**으로 갈린다 — 공용 PC 와 다음 로그인.
+ *  2. 🔴 **이 모듈은 브라우저에 적지 않는다**(2026-10-20). 지움은 포털에 적히고
+ *     (server/integration/portal-inbox.ts 의 dismissPortalNotifications), 여기
+ *     남은 저장소 일은 **옛 칸을 한 번 치우는 것**뿐이다. 둘 다 적으면
+ *     「브라우저엔 있는데 포털엔 없거나 반대이거나」가 생긴다.
  *  3. 저장소가 터져도 **던지지 않는다** — 알림 하나 때문에 머리말이 죽지 않는다.
  */
 
-/** 진짜 localStorage 처럼 구는 가짜. 칸 번호가 당겨지는 것까지 같다. */
+/**
+ * 진짜 localStorage 처럼 구는 가짜. 칸 번호가 당겨지는 것까지 같다.
+ *
+ * 🔴 `getItem`/`setItem` 은 **DismissalStore 에 없다**(적지도 읽지도 않으므로).
+ * 가짜 쪽에는 그대로 두어 「적힌 것이 하나도 없다」를 시험이 들여다볼 수 있게 한다.
+ */
 function 가짜저장소(처음: Record<string, string> = {}) {
   const 칸 = new Map<string, string>(Object.entries(처음));
   const store: DismissalStore = {
@@ -33,10 +39,6 @@ function 가짜저장소(처음: Record<string, string> = {}) {
       return 칸.size;
     },
     key: (index) => [...칸.keys()][index] ?? null,
-    getItem: (key) => 칸.get(key) ?? null,
-    setItem: (key, value) => {
-      칸.set(key, value);
-    },
     removeItem: (key) => {
       칸.delete(key);
     },
@@ -52,16 +54,15 @@ const 터지는저장소: DismissalStore = {
   key: () => {
     throw new Error("막혀 있다");
   },
-  getItem: () => {
-    throw new Error("막혀 있다");
-  },
-  setItem: () => {
-    throw new Error("막혀 있다");
-  },
   removeItem: () => {
     throw new Error("막혀 있다");
   },
 };
+
+/** 2026-10-19 까지 쓰던 칸 이름 — 사람 id 와 로그인 시각이 붙어 있었다. */
+function 옛칸(userId: string, issuedAt: number): string {
+  return `${DISMISSAL_STORAGE_PREFIX}v1.${userId}.${issuedAt}`;
+}
 
 // ─────────────────────────────────────────── 1. 지울 수 있는 줄 가리기
 
@@ -158,120 +159,93 @@ test("🔴 일괄 지우기는 **보이는 줄 전부**를 집는다 — 차례�
   assert.deepEqual(dismissableNotificationKeys([]), []);
 });
 
-// ────────────────────────────────── 2. 열쇠 — 사람과 로그인 시각으로 갈린다
+// ────────────────── 2. 🔴 브라우저에는 **적지 않는다**(2026-10-20)
 
-test("🔴 열쇠는 사람으로 갈린다 — 공용 PC 에서 앞사람 것이 남으면 안 된다", () => {
-  const 앞사람 = notificationDismissalStorageKey({ userId: "user-a", issuedAt: 1_700_000_000 });
-  const 뒷사람 = notificationDismissalStorageKey({ userId: "user-b", issuedAt: 1_700_000_000 });
-
-  assert.notEqual(앞사람, 뒷사람);
-  assert.ok(앞사람.includes("user-a"));
-});
-
-test("🔴 열쇠는 **로그인 시각**으로도 갈린다 — 다시 로그인하면 저절로 비워진다", () => {
-  const 어제 = notificationDismissalStorageKey({ userId: "user-a", issuedAt: 1_700_000_000 });
-  const 오늘 = notificationDismissalStorageKey({ userId: "user-a", issuedAt: 1_700_086_400 });
-
-  assert.notEqual(어제, 오늘, "다시 로그인해도 같은 칸을 본다 — 지운 알림이 영영 안 돌아온다");
-
-  // 같은 사람 · 같은 로그인이면 같은 칸이다(화면을 옮겨 다녀도 그대로).
-  assert.equal(오늘, notificationDismissalStorageKey({ userId: "user-a", issuedAt: 1_700_086_400 }));
-
-  // 🔴 그리고 **지운 것이 실제로 안 걸러진다** — 열쇠만 다른 것이 아니라
-  //    어제 칸에 적힌 것이 오늘 칸에서 읽히지 않는다.
-  const { store } = 가짜저장소();
-  writeDismissedNotificationKeys(store, 어제, ["APPROVAL:1"]);
-  assert.deepEqual(readDismissedNotificationKeys(store, 오늘), []);
-  assert.deepEqual(readDismissedNotificationKeys(store, 어제), ["APPROVAL:1"]);
-});
-
-test("같은 사람의 열쇠들은 한 앞머리를 나눠 갖는다 — 옛 것을 가려내는 재료다", () => {
-  const prefix = notificationDismissalKeyPrefixForUser("user-a");
-
-  assert.ok(notificationDismissalStorageKey({ userId: "user-a", issuedAt: 1 }).startsWith(prefix));
-  assert.ok(notificationDismissalStorageKey({ userId: "user-a", issuedAt: 2 }).startsWith(prefix));
-  assert.equal(
-    notificationDismissalStorageKey({ userId: "user-b", issuedAt: 1 }).startsWith(prefix),
-    false
+test("🔴 이 모듈에는 저장소에 **적는 길이 없다** — 포털과 두 벌이 되지 않게", () => {
+  // 지움이 포털로 옮겨 가면서 브라우저 저장을 걷어냈다. 둘 다 두면 「브라우저엔
+  // 있는데 포털엔 없거나 반대이거나」가 생기고, 그 어긋남은 **「계측기에서는
+  // 지웠는데 A/S 에만 뜬다」** 라는 신고로만 드러난다.
+  //
+  // 🔴 타입 자체에 적는 칸이 없어야 한다 — 칸을 남겨 두면 다음 사람이 「여기에
+  //    적어도 되나 보다」로 읽는다. 값으로는 확인할 수 없는 선이라 원본을 본다.
+  const source = readFileSync(new URL("./notification-dismissal.ts", import.meta.url), "utf8");
+  const 타입 = source.slice(
+    source.indexOf("export type DismissalStore"),
+    source.indexOf("export const DISMISSAL_STORAGE_PREFIX")
   );
+  assert.ok(타입.includes("removeItem"), "치우는 칸까지 사라졌다 — 옛 기록이 영영 남는다");
+  assert.ok(!/\bsetItem\b/.test(타입), "저장소에 적는 칸이 다시 생겼다");
+  assert.ok(!/\bgetItem\b/.test(타입), "저장소에서 읽는 칸이 다시 생겼다");
+
+  // 🔴 본문 어디에도 적거나 읽는 부름이 없다. (글자 `localStorage` 자체는
+  //    주석에 남아 있다 — 걷어낸 경위를 적어 둔 자리라 지우지 않는다.)
+  assert.ok(!/store\.setItem|store\.getItem/.test(source), "저장소를 다시 읽거나 적고 있다");
+  assert.ok(!/window\./.test(source), "이 순수 모듈이 브라우저 전역을 직접 만진다");
 });
 
-// ───────────────────────────────────────────────── 3. 적어 두고 읽어 오기
+// ─────────────────────────── 3. 옛 기록 치우기 — 한 번 돌고 조용히 끝난다
 
-test("적어 둔 것을 그대로 읽는다", () => {
-  const { store } = 가짜저장소();
-  const key = notificationDismissalStorageKey({ userId: "user-a", issuedAt: 7 });
-
-  assert.deepEqual(readDismissedNotificationKeys(store, key), [], "아직 아무것도 안 지웠다");
-  writeDismissedNotificationKeys(store, key, ["A:1", "dss-improvements:IMPROVEMENT:7"]);
-  assert.deepEqual(readDismissedNotificationKeys(store, key), ["A:1", "dss-improvements:IMPROVEMENT:7"]);
-});
-
-test("🔴 깨진 값·저장소 없음·터지는 저장소는 전부 「아무것도 안 지웠다」로 읽는다", () => {
-  // 반대로 기울면(못 읽었는데 뭔가 지워진 것으로 치면) 알림이 사라진다.
-  const key = notificationDismissalStorageKey({ userId: "user-a", issuedAt: 7 });
-
-  for (const 깨진값 of ["{", "null", '"글자"', "123", '{"a":1}', '["ok", 7]']) {
-    const { store } = 가짜저장소({ [key]: 깨진값 });
-    assert.deepEqual(readDismissedNotificationKeys(store, key), [], 깨진값);
-  }
-
-  assert.deepEqual(readDismissedNotificationKeys(null, key), []);
-  assert.deepEqual(readDismissedNotificationKeys(터지는저장소, key), []);
-});
-
-test("🔴 적어 두지 못해도 던지지 않는다 — 알림 하나 때문에 머리말이 죽으면 안 된다", () => {
-  const key = notificationDismissalStorageKey({ userId: "user-a", issuedAt: 7 });
-
-  assert.doesNotThrow(() => writeDismissedNotificationKeys(null, key, ["A:1"]));
-  assert.doesNotThrow(() => writeDismissedNotificationKeys(터지는저장소, key, ["A:1"]));
-});
-
-// ─────────────────────────────────────────────────── 4. 옛 열쇠 치우기
-
-test("🔴 같은 사람의 **옛 로그인 칸만** 치운다 — 지금 것도 남의 것도 그대로", () => {
-  const 지금 = notificationDismissalStorageKey({ userId: "user-a", issuedAt: 300 });
-  const 어제 = notificationDismissalStorageKey({ userId: "user-a", issuedAt: 200 });
-  const 그제 = notificationDismissalStorageKey({ userId: "user-a", issuedAt: 100 });
-  const 남의것 = notificationDismissalStorageKey({ userId: "user-b", issuedAt: 100 });
-
+test("🔴 **우리 열쇠만** 치운다 — 앞머리가 다른 칸은 한 글자도 안 건드린다", () => {
+  // 🔴 `seen.v1.` 은 **지금도 쓰인다**(컴퓨터·폰 알림창이 「이미 띄운 줄」을
+  //    적어 두는 자리 — notification-toast.ts). 한 글자 차이라 함께 쓸려 가면
+  //    같은 알림이 다시 한 번 폰에 뜬다.
   const { store, 이름들 } = 가짜저장소({
-    [그제]: "[]",
-    [어제]: "[]",
-    [지금]: '["A:1"]',
-    [남의것]: "[]",
+    [옛칸("user-a", 100)]: "[]",
+    [옛칸("user-a", 200)]: '["A:1"]',
     "dss.notifications.seen.v1.user-a": "[]",
+    "dss.notifications.dismissedX": "x",
     "남의 앱 칸": "x",
   });
 
-  const 치운것 = pruneOldDismissalKeys(store, {
-    prefix: notificationDismissalKeyPrefixForUser("user-a"),
-    keep: 지금,
-  });
+  const 치운것 = purgeStoredDismissals(store);
 
-  // 🔴 **둘 다** 치워져야 한다. 지우면서 훑으면 뒤 칸 번호가 당겨져 하나만
-  //    치워진다 — 절반만 남고 아무도 모른다.
-  assert.deepEqual(치운것.sort(), [그제, 어제].sort());
-  assert.deepEqual(이름들().sort(), [지금, 남의것, "dss.notifications.seen.v1.user-a", "남의 앱 칸"].sort());
-  // 지금 칸의 내용은 손대지 않았다.
-  assert.deepEqual(readDismissedNotificationKeys(store, 지금), ["A:1"]);
+  assert.deepEqual(치운것.sort(), [옛칸("user-a", 100), 옛칸("user-a", 200)].sort());
+  assert.deepEqual(
+    이름들().sort(),
+    ["dss.notifications.seen.v1.user-a", "dss.notifications.dismissedX", "남의 앱 칸"].sort(),
+    "남의 칸이 함께 치워졌다"
+  );
 });
 
-test("치울 것이 없으면 아무 일도 아니고, 저장소가 터져도 던지지 않는다", () => {
-  const 지금 = notificationDismissalStorageKey({ userId: "user-a", issuedAt: 300 });
-  const { store, 이름들 } = 가짜저장소({ [지금]: "[]" });
+test("🔴 **남의 것도 옛 판도 가리지 않고** 전부 치운다 — 영영 안 쓰이는 칸이다", () => {
+  // 옛 함수(pruneOldDismissalKeys)는 「같은 사람의 옛 로그인 칸」만 치우고 지금
+  // 쓰는 것 하나와 남의 것은 남겼다. 이제 **쓰는 칸이 하나도 없으므로** 남길
+  // 까닭도 없다 — 공용 PC 에 앞사람 것이 몇 해씩 쌓여 있다.
+  const 처음: Record<string, string> = {};
+  for (let i = 0; i < 40; i += 1) 처음[옛칸("user-a", i)] = "[]";
+  for (let i = 0; i < 10; i += 1) 처음[옛칸("user-b", i)] = "[]";
+  // 판이 올라간 뒤의 모양도, 사람·시각이 안 붙은 모양도 함께 쓸려 가야 한다.
+  처음[`${DISMISSAL_STORAGE_PREFIX}v2.user-a.1`] = "[]";
+  처음[DISMISSAL_STORAGE_PREFIX] = "[]";
+  처음["남의 앱 칸"] = "x";
 
-  assert.deepEqual(
-    pruneOldDismissalKeys(store, {
-      prefix: notificationDismissalKeyPrefixForUser("user-a"),
-      keep: 지금,
-    }),
-    []
-  );
-  assert.deepEqual(이름들(), [지금]);
+  const { store, 이름들 } = 가짜저장소(처음);
+  const 치운것 = purgeStoredDismissals(store);
 
-  assert.doesNotThrow(() =>
-    pruneOldDismissalKeys(터지는저장소, { prefix: "dss.", keep: 지금 })
-  );
-  assert.deepEqual(pruneOldDismissalKeys(null, { prefix: "dss.", keep: 지금 }), []);
+  // 🔴 **하나도 안 남는다.** 지우면서 훑으면 뒤 칸 번호가 당겨져 절반만
+  //    치워진다 — 그래도 오류가 안 나서 아무도 모른다.
+  assert.equal(치운것.length, 52);
+  assert.deepEqual(이름들(), ["남의 앱 칸"]);
+});
+
+test("치울 것이 없으면 아무 일도 아니고, 저장소가 없거나 터져도 던지지 않는다", () => {
+  const { store, 이름들 } = 가짜저장소({ "dss.notifications.seen.v1.user-a": "[]" });
+
+  assert.deepEqual(purgeStoredDismissals(store), []);
+  assert.deepEqual(이름들(), ["dss.notifications.seen.v1.user-a"]);
+
+  // 사생활 보호 창 · 저장을 막아 둔 브라우저. 못 치워도 잃는 것이 없다.
+  assert.doesNotThrow(() => purgeStoredDismissals(터지는저장소));
+  assert.deepEqual(purgeStoredDismissals(터지는저장소), []);
+  assert.deepEqual(purgeStoredDismissals(null), []);
+});
+
+test("🔴 앞머리에 판 번호를 넣지 않는다 — 넣으면 옛 판이 영영 남는다", () => {
+  // 옛 칸 이름은 `…dismissed.v1.{userId}.{issuedAt}` 이었다. 앞머리를 `v1.`
+  // 까지로 잡으면 그 뒤에 올라간 판은 걸리지 않는다.
+  assert.equal(DISMISSAL_STORAGE_PREFIX, "dss.notifications.dismissed.");
+  assert.ok(옛칸("user-a", 1).startsWith(DISMISSAL_STORAGE_PREFIX));
+  assert.ok(!DISMISSAL_STORAGE_PREFIX.includes("v1"));
+  // 🔴 옆 기능의 칸과 섞이지 않는다.
+  assert.ok(!"dss.notifications.seen.v1.user-a".startsWith(DISMISSAL_STORAGE_PREFIX));
 });
