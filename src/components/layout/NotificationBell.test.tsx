@@ -2,12 +2,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { NotificationBell as SharedNotificationBell, type NotificationBellItem } from "@dss/ui";
+import {
+  NotificationBell as SharedNotificationBell,
+  isSafeNotificationHref,
+  type NotificationBellItem,
+} from "@dss/ui";
 import NotificationBell, {
   BrowserNotificationNotice,
+  DismissAllNotice,
   NotificationBellFooter,
   NotificationBellWithInbox,
-  NotificationDismissAll,
   NotificationSelfTest,
   acknowledgeInBackground,
   announceNotificationPanelOpened,
@@ -31,7 +35,10 @@ import {
 import { toNotificationBellItems } from "@/lib/domain/notification-bell-items";
 import { NOTIFICATION_KIND_META } from "@/lib/domain/notification-settings";
 import { isAcknowledgeableNotificationKind } from "@/lib/domain/notification-acknowledgement";
-import { canDismissNotification } from "@/lib/domain/notification-dismissal";
+import {
+  canDismissNotification,
+  dismissableNotificationKeys,
+} from "@/lib/domain/notification-dismissal";
 import {
   NOTIFICATION_PANEL_OPENED_EVENT,
   describeNotificationToastFailure,
@@ -956,7 +963,64 @@ test("🔴 포털 줄은 **종류를 가리지 않고** 지울 수 있다 — �
   }
 });
 
-test("🔴 일괄 지우기는 footer 맨 위에 서고, **보이는 줄 수**를 말한다", () => {
+/* ─────────── 일괄 지우기는 **묶음 것**이다(2026-10-20, 조각 B-3) ───────────
+ *
+ * 🔴 이 단추는 A/S 가 손수 지어 footer 안에 넣고 있었다(NotificationDismissAll).
+ * 묶음이 자리를 내주면서(`onDismissAll` — dss-ui 1210d11) 단추·글자·적히는 수가
+ * 전부 묶음 것이 됐고, A/S 는 함수만 넘긴다. 여기가 지키는 선은 둘이다 —
+ * **단추가 하나만 설 것**(제 것을 안 걷으면 둘이 된다)과, **적히는 수가 그려지는
+ * 줄 수와 같을 것**.
+ */
+
+/** 묶음이 그린 일괄 단추의 글자. 단추가 없으면 null. */
+function 일괄글자(html: string): string | null {
+  return /<button[^>]*class="dss-bell__dismissall"[^>]*>([^<]*)</.exec(html)?.[1] ?? null;
+}
+
+/** 줄의 링크들이 가진 열쇠 — 곧 **실제로 그려진 줄**. */
+function 그려진줄열쇠들(html: string): string[] {
+  return [
+    ...html.matchAll(/<a[^>]*class="dss-bell__link"[^>]*data-notification-key="([^"]*)"/g),
+  ].map((m) => m[1]);
+}
+
+test("🔴 일괄 지우기 단추는 **하나뿐**이다 — A/S 가 제 것을 걷어냈다", () => {
+  const html = renderToStaticMarkup(
+    <NotificationBellWithInbox
+      items={oneOfEachKind()}
+      inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [] }}
+      dismiss={지움()}
+    />
+  );
+
+  // 🔴 묶음 것이 footer **위**에 서므로, A/S 가 제 단추를 남겨 두면 같은 글자가
+  //    두 번 나온다. 눈으로는 「단추가 둘」로 보이고 시험으로는 이 수로 보인다.
+  assert.equal(
+    (html.match(/보이는 알림 지우기/g) ?? []).length,
+    1,
+    "🔴 일괄 지우기 단추가 둘이다 — A/S 가 제 것을 안 걷었다"
+  );
+  // 그 하나는 **묶음 것**이다(A/S 가 짓던 단추에는 이 클래스가 없었다).
+  assert.equal(
+    (html.match(/class="dss-bell__dismissall"/g) ?? []).length,
+    1,
+    "묶음이 그린 단추가 아니다 — A/S 가 다시 제 단추를 짓고 있다"
+  );
+  // 🔴 A/S 쪽 소스에서도 단추가 사라졌다 — 마크업만 보면 조건이 거짓이라
+  //    안 그려졌을 뿐인 상태를 통과시킨다.
+  const source = readLayoutSource("NotificationBell.tsx");
+  assert.ok(
+    !/<button[\s\S]{0,200}보이는 알림 지우기/.test(source),
+    "🔴 A/S 가 일괄 지우기 단추를 다시 짓고 있다"
+  );
+  assert.match(
+    source,
+    /onDismissAll=\{canDismissHere/,
+    "묶음에 일괄 지우기를 안 넘긴다 — 일곱 중 혼자 그 기능이 없어진다"
+  );
+});
+
+test("🔴 단추에 적히는 수가 **그려지는 줄 수**와 같다", () => {
   const html = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={oneOfEachKind()}
@@ -968,35 +1032,61 @@ test("🔴 일괄 지우기는 footer 맨 위에 서고, **보이는 줄 수**�
   // 🔴 자기 줄 **전부**(종류마다 하나) + 포털 한 줄. 옛 규칙에서는 결재 결과
   //    둘 + 포털 하나 = 3 이었다. 수를 글자로 박지 않고 종류 수에서 뽑으므로
   //    종류가 늘어도 따라온다.
-  assert.ok(
-    html.includes(`보이는 알림 지우기 ${NOTIFICATION_KINDS.length + 1}건`),
-    "일괄 지우기가 없거나 수가 다르다 — 보이는 줄 전부를 세야 한다"
-  );
+  assert.equal(일괄글자(html), `보이는 알림 지우기 ${NOTIFICATION_KINDS.length + 1}건`);
+  // 🔴 그리고 그 수는 **실제로 그려진 줄 수**다. 글자만 맞추면 목록이 달라지는
+  //    날 조용히 어긋난다.
+  assert.equal(그려진줄열쇠들(html).length, NOTIFICATION_KINDS.length + 1);
 
-  // 🔴 묶음이 내주는 자리(footer) **안**이다 — 목록 밖으로 나가면 머리말이 두꺼워진다.
-  const 자리 = html.indexOf("dss-bell__footer");
-  const 단추 = html.indexOf("보이는 알림 지우기");
-  assert.ok(자리 > 0 && 단추 > 자리, "일괄 지우기가 그 자리 밖에 있다");
-  assert.ok(단추 < html.indexOf("</ul>"), "그 자리가 펼친 칸 밖으로 나갔다");
-
-  // 🔴 그 자리의 차례는 A/S 가 정한다 — 목록에 대한 단추가 맨 위, 기기 설정은 아래.
-  const footer = renderToStaticMarkup(
-    <NotificationBellFooter
-      status="GRANTED"
-      onAsk={() => {}}
-      onTest={() => {}}
-      selfTestResult={null}
-      dismissableCount={2}
-      onDismissAll={() => {}}
+  // 🔴 묶음은 **그릴 수 없는 주소의 줄을 안 그리고** 수에서도 뺀다. A/S 도 같은
+  //    기준으로 걸러야 한다 — 안 그러면 「n건」을 눌렀는데 n+1 건이 나간다
+  //    (보이지도 않은 줄이 말없이 지워진다).
+  const 적힌것: string[] = [];
+  const 나쁜줄 = portalRow({ key: "njlee:CAL:9", href: "javascript:alert(1)" });
+  const 섞인종 = renderToStaticMarkup(
+    <NotificationBellWithInbox
+      items={[]}
+      inbox={{ items: [portalRow(), 나쁜줄], count: 2, degraded: false, dismissed: [] }}
+      dismiss={지움(적힌것)}
     />
   );
-  assert.ok(footer.indexOf("보이는 알림 지우기") < footer.indexOf("시험 알림"));
+  assert.deepEqual(그려진줄열쇠들(섞인종), [portalRow().key], "못 그릴 줄이 그려졌다");
+  assert.equal(일괄글자(섞인종), "보이는 알림 지우기 1건");
+
+  // 눌렀을 때 실제로 나가는 열쇠도 그 한 줄뿐이다.
+  const keys = dismissableNotificationKeys(
+    [portalRow(), 나쁜줄].filter((item) => isSafeNotificationHref(item.href))
+  );
+  assert.deepEqual(keys, [portalRow().key], "🔴 안 보이는 줄까지 지우려 한다");
+  assert.deepEqual(적힌것, [], "그리기만 했는데 지움이 적혔다");
+
+  // 🔴 **마크업으로는 못 보는 선**이라 소스로 못 박는다. 나가는 열쇠가 어디서
+  //    모이는지는 정적 렌더에 흔적이 남지 않는다 — 수가 어긋나도 화면은 멀쩡하고
+  //    「3건을 눌렀는데 4건이 사라졌다」로만 드러난다.
+  const source = readLayoutSource("NotificationBell.tsx");
+  assert.match(
+    source,
+    /import \{ NotificationBell as SharedNotificationBell, isSafeNotificationHref \} from "@dss\/ui";/,
+    "거르는 함수를 묶음에서 가져오지 않았다 — 같은 판정을 두 벌로 적으면 갈라진다"
+  );
+  assert.match(
+    source,
+    /const drawableItems = bellItems\.filter\(\(item\) => isSafeNotificationHref\(item\.href\)\);/,
+    "🔴 묶음과 같은 기준으로 거르지 않는다"
+  );
+  assert.match(source, /dismissableNotificationKeys\(drawableItems\)/);
+  assert.ok(
+    !/dismissableNotificationKeys\(bellItems\)/.test(source),
+    "🔴 거르기 전 목록(bellItems)을 그대로 집는다 — 안 보이는 줄까지 나간다"
+  );
 });
 
 test("보이는 줄이 없으면 일괄 지우기를 그리지 않는다 — 눌러도 아무 일 없는 단추를 안 남긴다", () => {
   const 빈종 = renderToStaticMarkup(<NotificationBell items={[]} dismiss={지움()} />);
+  assert.equal(일괄글자(빈종), null);
   assert.ok(!빈종.includes("보이는 알림 지우기"));
   assert.deepEqual(지우기열쇠들(빈종), []);
+  // 🔴 설명만 남아서도 안 된다 — 없는 단추를 설명하는 글이 된다.
+  assert.ok(!빈종.includes("사내 시스템 전체의 종에서 사라집니다"));
 
   // 🔴 반대쪽 — 줄이 **할 일 하나뿐**이어도 둘 다 선다. 옛 규칙에서는 이 종이
   //    「지울 것이 없는 종」이었다(여기가 그 뒤집힌 자리다).
@@ -1005,24 +1095,69 @@ test("보이는 줄이 없으면 일괄 지우기를 그리지 않는다 — 눌
     <NotificationBell items={[할일하나]} dismiss={지움()} />
   );
   assert.ok(!isAcknowledgeableNotificationKind(할일하나.kind), "표본이 할 일 줄이 아니다");
-  assert.ok(할일만.includes("보이는 알림 지우기 1건"), "할 일 줄 하나를 세지 않았다");
+  assert.equal(일괄글자(할일만), "보이는 알림 지우기 1건", "할 일 줄 하나를 세지 않았다");
   assert.deepEqual(지우기열쇠들(할일만), [할일하나.id], "할 일 줄에 ✕ 가 안 섰다");
-
-  // 조각 자신도 같은 판단을 한다 — 수가 0이거나 지울 곳을 모르면 아무것도 안 그린다.
-  assert.equal(renderToStaticMarkup(<NotificationDismissAll count={0} onDismissAll={() => {}} />), "");
-  assert.equal(renderToStaticMarkup(<NotificationDismissAll count={3} />), "");
-  assert.ok(
-    renderToStaticMarkup(<NotificationDismissAll count={3} onDismissAll={() => {}} />).includes("3건")
-  );
 });
 
-test("🔴 footer 의 지우기 쪽을 안 넘기면 예전 그대로다 — 이미 있던 호출부가 흔들리지 않는다", () => {
+test("🔴 지울 곳을 모르는 종에는 일괄 단추도 설명도 없다 — 예전 종 그대로다", () => {
+  // 적는 길(포털로 가는 서버 액션)을 못 받았으면 묶음에 onDismissAll 을 안
+  // 넘긴다 = 묶음이 단추를 아예 안 그린다(그쪽 README).
+  const html = renderToStaticMarkup(<NotificationBell items={oneOfEachKind()} />);
+
+  assert.equal(일괄글자(html), null);
+  assert.ok(!html.includes("사내 시스템 전체의 종에서 사라집니다"));
+  // 🔴 줄은 그대로 그려진다 — 사라진 것은 지우는 길뿐이다.
+  assert.equal(그려진줄열쇠들(html).length, NOTIFICATION_KINDS.length);
+});
+
+test("🔴 안내 문구는 footer 에 남았다 — 묶음은 「지운다」의 뜻을 모른다", () => {
+  // 묶음이 그리는 것은 단추와 「보이는 알림 지우기 n건」뿐이다. 「사내 시스템
+  // 전체의 종에서 사라집니다 / 끝나지 않은 일 자체는 그대로 남습니다」는 이
+  // 시스템의 사정이라 A/S 가 제 자리(footer)에서 그린다.
+  const html = renderToStaticMarkup(
+    <NotificationBellWithInbox items={oneOfEachKind()} dismiss={지움()} />
+  );
+
+  const 단추 = html.indexOf("dss-bell__dismissall");
+  const 안내 = html.indexOf("사내 시스템 전체의 종에서 사라집니다");
+  const 자리 = html.indexOf("dss-bell__footer");
+  assert.ok(단추 > 0 && 안내 > 0 && 자리 > 0);
+  assert.ok(단추 < 자리, "🔴 묶음 단추가 footer 위에 서지 않았다");
+  assert.ok(안내 > 자리, "안내가 footer 밖에 있다");
+  assert.ok(안내 < html.indexOf("</ul>"), "그 자리가 펼친 칸 밖으로 나갔다");
+  // 🔵 footer 안의 차례(안내가 맨 위)는 아래 조각 시험이 본다 — 정적 렌더에서는
+  //    기기 설정 쪽 둘이 「모르는 상태」라 그려지지 않는다.
+
+  // 조각 자신도 같은 판단을 한다 — 단추가 없는 종에서는 아무것도 안 그린다.
+  assert.equal(renderToStaticMarkup(<DismissAllNotice show={false} />), "");
+  assert.ok(
+    renderToStaticMarkup(<DismissAllNotice show />).includes("아직 끝나지 않은 일 자체는")
+  );
+  // 🔴 설명만 하고 **누르는 것은 없다** — 단추는 묶음 것 하나뿐이다.
+  assert.ok(!renderToStaticMarkup(<DismissAllNotice show />).includes("<button"));
+});
+
+test("🔴 footer 의 안내를 안 넘기면 예전 그대로다 — 이미 있던 호출부가 흔들리지 않는다", () => {
   const 예전 = renderToStaticMarkup(
     <NotificationBellFooter status="GRANTED" onAsk={() => {}} onTest={() => {}} selfTestResult={null} />
   );
 
-  assert.ok(!예전.includes("보이는 알림 지우기"));
+  assert.ok(!예전.includes("사내 시스템 전체의 종에서 사라집니다"));
   assert.ok(예전.includes("시험 알림"), "원래 있던 것이 사라졌다");
+
+  // 넘기면 그 말이 **시험 알림 위**에 붙는다.
+  const 켠것 = renderToStaticMarkup(
+    <NotificationBellFooter
+      status="GRANTED"
+      onAsk={() => {}}
+      onTest={() => {}}
+      selfTestResult={null}
+      showDismissAllNotice
+    />
+  );
+  assert.ok(
+    켠것.indexOf("사내 시스템 전체의 종에서 사라집니다") < 켠것.indexOf("시험 알림")
+  );
 });
 
 test("🔴 줄을 누르면 **포털 줄만** 지운 것으로 적는다 — 자기 줄은 그 길로 가지 않는다", () => {

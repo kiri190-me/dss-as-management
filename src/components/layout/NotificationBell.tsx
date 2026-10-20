@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { NotificationBell as SharedNotificationBell } from "@dss/ui";
+import { NotificationBell as SharedNotificationBell, isSafeNotificationHref } from "@dss/ui";
 import type { NotificationBellItem } from "@dss/ui";
 import { countNotificationTargets, type NotificationItem } from "@/lib/domain/notifications";
 import {
@@ -99,6 +99,17 @@ import { showBrowserNotificationToast } from "./BrowserNotifications";
  * localStorage·이 사이트의 아이콘 경로를 문다. 묶음은 제 시험으로 그것들을
  * 금지하므로(그쪽 no-network.test.ts), 자리(`footer`)만 내주고 사이트가 제 것을
  * 끼워 넣는다. 🔴 함수가 아니라 **노드**를 넘긴다.
+ *
+ * 🔴 **「보이는 알림 지우기 n건」 단추는 2026-10-20에 묶음으로 넘겼다.** 그 전까지는
+ * 이 파일이 footer 안에 제 단추를 손수 지어 썼고(NotificationDismissAll), 그래서
+ * 일곱 사내 시스템 가운데 A/S 에만 그 기능이 있었다. 묶음이 자리를 내주면서
+ * (`onDismissAll` — dss-ui 1210d11) 나머지 여섯이 함께 얻었고, 여기는 **함수만**
+ * 넘긴다 — 단추도 글자도 적히는 수도 묶음이 그린다. 🔴 제 단추를 남겨 두면
+ * 묶음 것이 footer **위**에 또 서서 **단추가 둘**이 된다.
+ *
+ * 🔵 묶음은 「지운다」가 무슨 뜻인지 모르므로 안내 문구를 그리지 않는다. 그 문구
+ * (「사내 시스템 전체의 종에서 사라집니다…」)만 footer 에 남아 단추 바로 아래에
+ * 선다(아래 DismissAllNotice).
  *
  * ── 🔴 다른 시스템들의 알림도 이 종에 실린다 ─────────────────────────────
  * 포털(dss-auth)이 개선요청 · 계측기 · PO/내자 · 휴가에 물어 합쳐 준 목록이
@@ -452,40 +463,30 @@ export function NotificationSelfTest({
 }
 
 /**
- * 🔴 **지금 보이는 것 전부 지우기** — 일괄 지우기의 자리.
+ * 🔴 일괄 지우기 **단추 아래에 붙는 안내 한 줄**. 단추 자체는 여기 없다.
  *
- * ── 왜 묶음에 일괄용 자리를 더하지 않았나 ───────────────────────────────
- * 묶음이 이미 `footer` 를 내주고 있고, 그 자리는 펼친 칸 **맨 아래에 붙어**
- * 있다(sticky — 목록이 길어도 따라온다). 단추 하나를 거기 넣으면 되는 일에
- * 묶음의 자리를 또 늘리면 일곱 사이트가 함께 지는 약속만 늘어난다.
+ * ── 왜 단추는 없고 글자만 남았나 ────────────────────────────────────────
+ * 2026-10-20 까지는 이 자리에 A/S 가 손수 지은 단추(NotificationDismissAll)가
+ * 있었다 — 묶음에 그 자리가 없어서였고, 그래서 일곱 사내 시스템 가운데 A/S
+ * 에만 일괄 지우기가 있었다. 묶음이 자리를 내주면서(`onDismissAll`) 단추·글자·
+ * 적히는 수가 전부 묶음 것이 됐고, 여기 남은 것은 **묶음이 그릴 수 없는 말**
+ * 하나다: 묶음은 「지운다」가 **무슨 뜻인지 모른다**(그것이 그 설계의 약속이다).
  *
- * 🔴 **자리가 하나라 차례는 A/S 가 정한다.** 이것이 맨 위다 — 바로 위에 있는
- * 목록에 대한 단추이고, 아래 둘(권한 안내 · 시험 알림)은 이 기기의 설정에
- * 대한 것이라 성격이 다르다.
+ * 🔴 **그 말을 지우지 않고 옮긴 까닭**은 둘째 문장이다 — 「끝나지 않은 일 자체는
+ * 그대로 남습니다」가 없으면, 결재 대기 줄을 지우는 것이 **그 결재를 없애는
+ * 일**로 읽힐 수 있다. 첫 문장도 마찬가지로 놀라운 사실이다(이 종에서 지운 것이
+ * 계측기·PO 의 종에서도 사라진다).
  *
- * 지울 수 있는 줄이 하나도 없으면 **아무것도 그리지 않는다** — 눌러도 아무
- * 일이 없는 단추를 남기지 않는다.
+ * 🔴 **단추가 설 때만 그린다.** 조건은 묶음이 단추를 그리는 조건과 같아야 한다 —
+ * 어긋나면 단추 없이 설명만 남거나(없는 단추를 설명한다) 그 반대가 된다. 그
+ * 조건을 맞추는 자리는 이것을 넘기는 쪽이다(아래 NotificationBellWithInbox).
  */
-export function NotificationDismissAll({
-  count,
-  onDismissAll,
-}: {
-  /** 지금 보이는 줄 가운데 **지울 수 있는** 것의 수. */
-  count: number;
-  onDismissAll?: () => void;
-}) {
-  if (!onDismissAll || count <= 0) return null;
+export function DismissAllNotice({ show }: { show: boolean }) {
+  if (!show) return null;
 
   return (
     <div className="border-t border-zinc-200 px-3 py-2 dark:border-zinc-800">
-      <button
-        type="button"
-        onClick={onDismissAll}
-        className="rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-      >
-        보이는 알림 지우기 {count}건
-      </button>
-      <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
         사내 시스템 전체의 종에서 사라집니다. 아직 끝나지 않은 일 자체는 그대로 남습니다.
       </p>
     </div>
@@ -500,27 +501,32 @@ export function NotificationDismissAll({
  * 것은, 묶음이 내주는 자리가 **하나**이고 그 안의 차례를 여기서 정해야 하기
  * 때문이다.
  *
- * 🔴 지우기 쪽 둘은 **선택**이다. 안 넘기면 그 칸이 아예 없다 — 지울 곳을
- * 모르는 상태(로그인 시각을 못 받은 종)에서 단추만 서지 않게 한다.
+ * 🔴 **차례의 까닭**: 맨 위는 바로 위(목록)에 대한 말이고, 아래 둘은 **이 기기의
+ * 설정**에 대한 것이라 성격이 다르다. 묶음의 일괄 단추가 이 자리 **바로 위**에
+ * 서므로(그쪽 README — footer 보다 위), 그 단추 → 안내 한 줄 → 기기 설정 순으로
+ * 이어진다.
+ *
+ * 🔴 `showDismissAllNotice` 는 **선택**이고 기본은 거짓이다 — 안 넘기면 그 칸이
+ * 아예 없다. 단추가 없는 종(지울 곳을 모르거나 줄이 하나도 없는 종)에서 설명만
+ * 남지 않게 한다.
  */
 export function NotificationBellFooter({
   status,
   onAsk,
   onTest,
   selfTestResult,
-  dismissableCount = 0,
-  onDismissAll,
+  showDismissAllNotice = false,
 }: {
   status: BrowserNotificationStatus;
   onAsk: () => void;
   onTest: () => void;
   selfTestResult: string | null;
-  dismissableCount?: number;
-  onDismissAll?: () => void;
+  /** 묶음이 일괄 지우기 단추를 그리는가. 🔴 **그때만** 안내를 그린다. */
+  showDismissAllNotice?: boolean;
 }) {
   return (
     <>
-      <NotificationDismissAll count={dismissableCount} onDismissAll={onDismissAll} />
+      <DismissAllNotice show={showDismissAllNotice} />
       <BrowserNotificationNotice status={status} onAsk={onAsk} />
       <NotificationSelfTest status={status} onTest={onTest} result={selfTestResult} />
     </>
@@ -745,9 +751,23 @@ export function NotificationBellWithInbox({
     ...toNotificationBellItems(visible.items, notificationClientId),
     ...visible.inboxItems,
   ];
+  /**
+   * 🔴 **묶음이 실제로 그리는 줄.** 묶음은 그릴 수 없는 주소(`javascript:` 등)의
+   * 줄을 **안 그리고**, 일괄 단추에 적는 수도 그렇게 남은 줄 수다(그쪽의
+   * `drawable`). 여기서 같은 기준으로 거르지 않으면 「3건」을 눌렀는데 4건이
+   * 나간다 — 보이지도 않은 줄이 말없이 지워지는 것이다.
+   *
+   * 🔴 거르는 함수를 **묶음에서 가져다 쓴다**(같은 판정을 여기 베껴 적지
+   * 않는다). 베끼면 묶음이 기준을 고치는 날 두 수가 조용히 갈라진다.
+   */
+  const drawableItems = bellItems.filter((item) => isSafeNotificationHref(item.href));
   // 일괄 지우기가 집는 것. 🔴 **지금 보이는 것 가운데 지울 수 있는 것만**이다
   // (가리는 규칙은 도메인 한 곳 — domain/notification-dismissal.ts).
-  const dismissableKeys = canDismissHere ? dismissableNotificationKeys(bellItems) : [];
+  //
+  // 🔴 넘기는 것은 **거른 뒤의 목록**(visible.* 에서 온 bellItems)이다 — 이미
+  //    지운 줄·확인한 줄이 빠져 있다. 거르기 전 목록을 쓰면 이미 지운 줄을 또
+  //    보내고, 묶음이 단추에 적는 수와도 어긋난다.
+  const dismissableKeys = canDismissHere ? dismissableNotificationKeys(drawableItems) : [];
 
   function handleAcknowledge(item: PickedNotification) {
     if (!acknowledge) return;
@@ -852,14 +872,28 @@ export function NotificationBellWithInbox({
       // 🔴 어느 줄에 단추를 그릴지. 가리는 규칙은 도메인 한 곳이다 — 이 화면은
       //    종류를 보지 않는다(파일 머리말).
       canDismiss={canDismissNotification}
+      // 🔴 「보이는 알림 지우기 n건」 — 단추도 글자도 **묶음이 그린다**(2026-10-20).
+      //    A/S 가 손수 짓던 단추를 걷어내고 함수만 넘긴다. 남겨 두면 묶음 것이
+      //    footer **위**에 또 서서 단추가 둘이 된다.
+      //
+      // 🔴 `bind` 를 쓰지 않는다. 이 조각은 `"use client"` 라 평범한 함수를 그대로
+      //    넘길 수 있다 — 서버 조각에서 종을 그리는 사이트(계측기)만 경계를 건널
+      //    수 있는 것이 서버 액션뿐이라 `액션.bind(null, 열쇠들)` 로 미리 묶는다.
+      //
+      // 🔴 열쇠는 **여기서** 모은다(서버에서 미리 묶지 않는다). 이 종에는 확인을
+      //    저장하는 동안 줄을 미리 감추는 장치가 있어서(acknowledgedIds), 서버에서
+      //    묶으면 감춘 줄을 알 길이 없어 「2건」을 눌렀는데 3건이 나간다.
+      onDismissAll={canDismissHere ? () => dismiss(dismissableKeys) : undefined}
       footer={
         <NotificationBellFooter
           status={notificationStatus}
           onAsk={() => void handleAskForNotificationPermission()}
           onTest={() => void handleNotificationSelfTest()}
           selfTestResult={selfTestResult}
-          dismissableCount={dismissableKeys.length}
-          onDismissAll={canDismissHere ? () => dismiss(dismissableKeys) : undefined}
+          // 🔴 묶음이 단추를 그리는 조건을 **그대로** 적는다 — 함수를 받았고
+          //    (canDismissHere) 그릴 줄이 있을 때(drawableItems). 어긋나면 단추
+          //    없이 설명만 남거나 그 반대가 된다.
+          showDismissAllNotice={canDismissHere && drawableItems.length > 0}
         />
       }
     />
