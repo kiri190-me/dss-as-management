@@ -857,7 +857,7 @@ test("🔴 종은 포털 목록을 값으로도, 약속으로도 **다시 묻지
  * 🔴 확인 기록(서버 DB · 영구)과 **다른 것**이다. 여기가 지키는 선:
  *  1. 로그인 정보를 안 넘기면 **예전 종 그대로**다(적을 곳을 모르는 채 단추만
  *     서면 눌러도 아무 일이 없다).
- *  2. 단추는 **지울 수 있는 줄에만** 선다 — 할 일 알림에는 없다.
+ *  2. 단추는 **보이는 줄 전부**에 선다(2026-10-20부터 — 종류를 가리지 않는다).
  *  3. 포털 줄은 **누르는 것만으로도** 지워지고, 그 길은 DB 로 가지 않는다.
  *  4. 지운 줄은 목록에서도 **배지에서도** 빠진다.
  */
@@ -884,10 +884,14 @@ test("🔴 로그인 정보를 안 넘기면 지우기가 아예 없다 — 예�
   assert.ok(!예전.includes("<button"), "스크립트 없이 못 쓰는 종이 되었다");
 });
 
-test("🔴 지우기 단추는 **지울 수 있는 줄에만** 선다 — 할 일 알림에는 없다", () => {
-  // 가리지 않으면 처리하지 않은 일을 종에서 치우는 길이 생긴다. 가리는 규칙은
-  // 도메인 한 곳이고(canDismissNotification) 화면은 그것을 묶음에 넘기기만 한다.
+test("🔴 지우기 단추는 **8종류 전부**에 선다 — 할 일 알림에도(2026-10-20)", () => {
+  // 가리는 규칙은 도메인 한 곳이고(canDismissNotification) 화면은 그것을 묶음에
+  // 넘기기만 한다. 옛 규칙은 결재 결과 둘에만 ✕ 를 세웠는데, 같은 줄이 포털을
+  // 거쳐 간 다른 사이트에서는 이미 전부 지워지고 있었다 — A/S 안에서만 막혀
+  // 헷갈리기만 했다(도메인 쪽 주석).
   const mine = oneOfEachKind();
+  assert.equal(mine.length, NOTIFICATION_KINDS.length, "종류마다 한 줄씩이 아니다 — 일부만 본다");
+
   const html = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={mine}
@@ -898,14 +902,17 @@ test("🔴 지우기 단추는 **지울 수 있는 줄에만** 선다 — 할 �
 
   assert.deepEqual(
     지우기열쇠들(html),
-    [
-      ...mine.filter((item) => isAcknowledgeableNotificationKind(item.kind)).map((item) => item.id),
-      portalRow().key,
-    ],
-    "단추가 서는 줄이 도메인 판정과 다르다"
+    [...mine.map((item) => item.id), portalRow().key],
+    "✕ 가 서는 줄이 도메인 판정과 다르다 — 종류를 가리는 자리가 되살아났다"
   );
-  // 대조 — 위 목록이 실제로 두 갈래를 다 지났다(못 지우는 줄이 있었다).
-  assert.ok(mine.some((item) => !canDismissNotification({ kind: item.kind, sourceId: "" })));
+  // 🔴 대조 — **옛 규칙이 막던 할 일 줄에도** 실제로 단추가 섰다. 이것이 없으면
+  //    종류가 전부 「눌러서 확인하는」 것이 되는 날 위 단언이 공짜로 통과한다.
+  const 옛날에막히던줄 = mine.filter((item) => !isAcknowledgeableNotificationKind(item.kind));
+  assert.ok(옛날에막히던줄.length > 0, "할 일 줄이 하나도 없다 — 이 시험이 아무것도 안 본다");
+  for (const item of 옛날에막히던줄) {
+    assert.ok(지우기열쇠들(html).includes(item.id), `${item.kind}: 할 일 줄에 ✕ 가 안 섰다`);
+  }
+  assert.ok(mine.every((item) => canDismissNotification({ kind: item.kind, sourceId: "" })));
 });
 
 test("🔴 포털 줄은 **종류를 가리지 않고** 지울 수 있다 — 저쪽 이름을 박아 두지 않았다", () => {
@@ -922,7 +929,7 @@ test("🔴 포털 줄은 **종류를 가리지 않고** 지울 수 있다 — �
   }
 });
 
-test("🔴 일괄 지우기는 footer 맨 위에 서고, **지울 수 있는 줄 수**를 말한다", () => {
+test("🔴 일괄 지우기는 footer 맨 위에 서고, **보이는 줄 수**를 말한다", () => {
   const html = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={oneOfEachKind()}
@@ -931,8 +938,13 @@ test("🔴 일괄 지우기는 footer 맨 위에 서고, **지울 수 있는 줄
     />
   );
 
-  // 결재 결과 둘 + 포털 한 줄 = 3. 할 일 알림 여섯은 세지 않는다.
-  assert.ok(html.includes("보이는 알림 지우기 3건"), "일괄 지우기가 없거나 수가 다르다");
+  // 🔴 자기 줄 **전부**(종류마다 하나) + 포털 한 줄. 옛 규칙에서는 결재 결과
+  //    둘 + 포털 하나 = 3 이었다. 수를 글자로 박지 않고 종류 수에서 뽑으므로
+  //    종류가 늘어도 따라온다.
+  assert.ok(
+    html.includes(`보이는 알림 지우기 ${NOTIFICATION_KINDS.length + 1}건`),
+    "일괄 지우기가 없거나 수가 다르다 — 보이는 줄 전부를 세야 한다"
+  );
 
   // 🔴 묶음이 내주는 자리(footer) **안**이다 — 목록 밖으로 나가면 머리말이 두꺼워진다.
   const 자리 = html.indexOf("dss-bell__footer");
@@ -954,15 +966,20 @@ test("🔴 일괄 지우기는 footer 맨 위에 서고, **지울 수 있는 줄
   assert.ok(footer.indexOf("보이는 알림 지우기") < footer.indexOf("시험 알림"));
 });
 
-test("지울 수 있는 줄이 없으면 일괄 지우기를 그리지 않는다 — 눌러도 아무 일 없는 단추를 안 남긴다", () => {
+test("보이는 줄이 없으면 일괄 지우기를 그리지 않는다 — 눌러도 아무 일 없는 단추를 안 남긴다", () => {
+  const 빈종 = renderToStaticMarkup(<NotificationBell items={[]} notificationDismissal={세션()} />);
+  assert.ok(!빈종.includes("보이는 알림 지우기"));
+  assert.deepEqual(지우기열쇠들(빈종), []);
+
+  // 🔴 반대쪽 — 줄이 **할 일 하나뿐**이어도 둘 다 선다. 옛 규칙에서는 이 종이
+  //    「지울 것이 없는 종」이었다(여기가 그 뒤집힌 자리다).
+  const 할일하나 = approval("case-1", "D9705-012", "REPAIR_INSPECTION");
   const 할일만 = renderToStaticMarkup(
-    <NotificationBell
-      items={[approval("case-1", "D9705-012", "REPAIR_INSPECTION")]}
-      notificationDismissal={세션()}
-    />
+    <NotificationBell items={[할일하나]} notificationDismissal={세션()} />
   );
-  assert.ok(!할일만.includes("보이는 알림 지우기"));
-  assert.deepEqual(지우기열쇠들(할일만), []);
+  assert.ok(!isAcknowledgeableNotificationKind(할일하나.kind), "표본이 할 일 줄이 아니다");
+  assert.ok(할일만.includes("보이는 알림 지우기 1건"), "할 일 줄 하나를 세지 않았다");
+  assert.deepEqual(지우기열쇠들(할일만), [할일하나.id], "할 일 줄에 ✕ 가 안 섰다");
 
   // 조각 자신도 같은 판단을 한다 — 수가 0이거나 지울 곳을 모르면 아무것도 안 그린다.
   assert.equal(renderToStaticMarkup(<NotificationDismissAll count={0} onDismissAll={() => {}} />), "");

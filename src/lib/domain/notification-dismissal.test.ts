@@ -20,7 +20,7 @@ import {
  * 종에서 알림을 **지우는** 규칙과, 그것을 이 브라우저에 적어 두는 자리.
  *
  * 🔴 이 파일이 지키는 선이 셋이다:
- *  1. **지울 수 있는 줄**을 가리는 규칙 — 할 일 알림은 지울 수 없다.
+ *  1. **지울 수 있는 줄**을 가리는 규칙 — 2026-10-20부터 **전부** 지울 수 있다.
  *  2. 열쇠가 **사람과 로그인 시각**으로 갈린다 — 공용 PC 와 다음 로그인.
  *  3. 저장소가 터져도 **던지지 않는다** — 알림 하나 때문에 머리말이 죽지 않는다.
  */
@@ -68,6 +68,10 @@ const 터지는저장소: DismissalStore = {
 test("🔴 남의 시스템에서 온 줄은 **종류를 가리지 않고** 전부 지울 수 있다", () => {
   // 저쪽 종류 목록은 이 저장소의 것이 아니다. 이름을 여기 박아 두면 저쪽이
   // 바꾸는 날 조용히 안 맞는다 — 아무 오류 없이 「안 지워지는 알림」이 된다.
+  //
+  // 🔴 2026-10-20부터 자기 줄도 전부 지울 수 있어 답이 같아졌지만, **까닭이
+  //    다르다** — 자기 줄은 「사용자가 그렇게 정했다」, 남의 줄은 「저쪽 종류를
+  //    알 수 없다」다. 다시 좁힐 때 둘이 갈리므로 이 시험을 남겨 둔다.
   const 남의종류 = [
     "IMPROVEMENT",
     "CALIBRATION_DUE",
@@ -88,51 +92,69 @@ test("🔴 남의 시스템에서 온 줄은 **종류를 가리지 않고** 전�
   }
 });
 
-test("🔴 A/S 자기 줄은 **결과 둘만** 지울 수 있다 — 할 일 알림은 못 지운다", () => {
-  // 지우게 두면 처리하지 않은 일을 종에서 치우는 길이 생긴다. 판정은 확인
-  // 기록 쪽과 **같은 목록** 하나를 본다 — 두 곳에 적으면 한쪽만 늘었을 때 갈린다.
-  for (const kind of NOTIFICATION_KINDS) {
-    assert.equal(
-      canDismissNotification({ kind, sourceId: "" }),
-      isAcknowledgeableNotificationKind(kind),
-      `${kind}: 지울 수 있는지가 도메인 판정과 다르다`
-    );
-  }
-
-  // 대조 — 위 반복이 두 갈래를 다 지났다.
-  assert.ok(NOTIFICATION_KINDS.some((kind) => canDismissNotification({ kind, sourceId: "" })));
-  assert.ok(NOTIFICATION_KINDS.some((kind) => !canDismissNotification({ kind, sourceId: "" })));
-  // 그리고 「지울 수 있는 자기 줄」은 **정확히 결재 결과 둘**이다.
+test("🔴 A/S 자기 줄은 **종류 전부** 지울 수 있다 — 할 일 알림도(2026-10-20)", () => {
+  // 옛 규칙은 「눌러서 확인하는 종류」(결재 결과 둘)만 열어 두었다. 그 막은 이미
+  // 뚫려 있었다 — 같은 줄이 포털을 거쳐 다른 사이트로 가면 그쪽에서는 「남의
+  // 시스템 줄」이 되어 언제나 지워졌다. A/S 안에서만 막혀 헷갈리기만 했다.
+  //
+  // 🔴 목록을 NOTIFICATION_KINDS 에서 가져오므로 **종류가 늘어도 따라온다** —
+  //    새 종류를 더하면 이 시험이 그 종류까지 「지울 수 있어야 한다」로 본다.
   assert.deepEqual(
     NOTIFICATION_KINDS.filter((kind) => canDismissNotification({ kind, sourceId: "" })),
-    [...ACKNOWLEDGEABLE_NOTIFICATION_KINDS]
+    [...NOTIFICATION_KINDS],
+    "자기 줄 가운데 못 지우는 종류가 남아 있다"
+  );
+  for (const kind of NOTIFICATION_KINDS) {
+    assert.equal(canDismissNotification({ kind, sourceId: "" }), true, `${kind}: 자기 줄을 못 지운다`);
+  }
+
+  // 🔴 대조 — **옛 규칙이 막던 종류가 실제로 이 목록 안에 있다.** 이것이 없으면
+  //    ACKNOWLEDGEABLE 가 전부가 되는 날 위 단언이 공짜로 통과한다.
+  const 옛날에막히던것 = NOTIFICATION_KINDS.filter((kind) => !isAcknowledgeableNotificationKind(kind));
+  assert.ok(옛날에막히던것.length > 0, "할 일 알림이 하나도 없다 — 이 시험이 아무것도 안 본다");
+  for (const kind of 옛날에막히던것) {
+    assert.equal(canDismissNotification({ kind, sourceId: "" }), true, `${kind}: 옛 규칙이 되살아났다`);
+  }
+
+  // 🔴 그리고 **확인 기록 쪽은 그대로 좁혀 둔 채**다 — 지우기와 확인 기록은
+  //    다른 기능이고, 이쪽을 열었다고 영구 기록까지 열지 않았다.
+  assert.deepEqual(
+    [...ACKNOWLEDGEABLE_NOTIFICATION_KINDS],
+    ["APPROVAL_GRANTED", "APPROVAL_REJECTED"],
+    "확인 기록의 종류 목록이 지우기를 따라 넓어졌다"
   );
 });
 
-test("sourceId 가 아예 없는 것은 「자기 것」으로 읽는다 — A/S 안쪽 모양에는 그 칸이 없다", () => {
-  const 할일 = NOTIFICATION_KINDS.find((kind) => !isAcknowledgeableNotificationKind(kind));
-  assert.ok(할일, "할 일 알림이 하나도 없다 — 이 시험이 아무것도 안 본다");
-
-  assert.equal(canDismissNotification({ kind: 할일 }), false);
-  assert.equal(canDismissNotification({ kind: ACKNOWLEDGEABLE_NOTIFICATION_KINDS[0] }), true);
+test("🔴 `sourceId` 칸의 모양이 답을 바꾸지 않는다 — 없음 · 빈 문자열 · 값 있음", () => {
+  // A/S 안쪽 모양(NotificationItem)에는 이 칸이 아예 없고, 옮겨 담은 뒤에는 빈
+  // 문자열이며, 포털 줄에만 값이 있다. 셋 다 같은 답이어야 호출부가 어느 모양을
+  // 넘기든 단추가 들쭉날쭉하지 않는다.
+  for (const kind of NOTIFICATION_KINDS) {
+    assert.equal(canDismissNotification({ kind }), true, `${kind}: 칸이 없는 모양에서 못 지운다`);
+    assert.equal(canDismissNotification({ kind, sourceId: "" }), true, `${kind}: 빈 문자열에서 못 지운다`);
+    assert.equal(canDismissNotification({ kind, sourceId: "njlee" }), true, `${kind}: 값이 있을 때 못 지운다`);
+  }
 });
 
-test("🔴 일괄 지우기는 **지울 수 있는 줄만** 집는다 — 차례는 그대로", () => {
-  const 할일 = NOTIFICATION_KINDS.find((kind) => !isAcknowledgeableNotificationKind(kind));
-  assert.ok(할일);
-
+test("🔴 일괄 지우기는 **보이는 줄 전부**를 집는다 — 차례는 그대로", () => {
+  // 「보이는 알림 지우기 n건」의 n 이 이 길이다. 한 줄이라도 빠지면 열어 보면
+  // 남아 있는데 단추는 안 세는 종이 된다.
   const 보이는것 = [
-    { key: "mine-todo", kind: 할일, sourceId: "" },
-    { key: "mine-result", kind: ACKNOWLEDGEABLE_NOTIFICATION_KINDS[0], sourceId: "" },
+    ...NOTIFICATION_KINDS.map((kind) => ({ key: `mine:${kind}`, kind, sourceId: "" })),
     { key: "dss-improvements:IMPROVEMENT:7", kind: "IMPROVEMENT", sourceId: "dss-improvements" },
-    { key: "njlee:CAL:3", kind: 할일, sourceId: "njlee" },
+    { key: "njlee:CAL:3", kind: NOTIFICATION_KINDS[0], sourceId: "njlee" },
   ];
 
-  assert.deepEqual(dismissableNotificationKeys(보이는것), [
-    "mine-result",
-    "dss-improvements:IMPROVEMENT:7",
-    "njlee:CAL:3",
-  ]);
+  assert.deepEqual(
+    dismissableNotificationKeys(보이는것),
+    보이는것.map((row) => row.key),
+    "지우지 못한다고 빠진 줄이 있다"
+  );
+  assert.equal(
+    dismissableNotificationKeys(보이는것).length,
+    NOTIFICATION_KINDS.length + 2,
+    "자기 줄 전부 + 포털 둘이 아니다 — 「보이는 알림 지우기 n건」의 n 이 줄어든다"
+  );
   assert.deepEqual(dismissableNotificationKeys([]), []);
 });
 
