@@ -782,6 +782,183 @@ export function isInventoryRequestSettled(request: Pick<InventoryStockRequest, "
 }
 
 // ---------------------------------------------------------------------------
+// 반출 신청 줄의 **꾸밈** — 상태 배지 · 수량 · 부품 덩어리 (2026-10-21 쓰는 분 요청 셋)
+// ---------------------------------------------------------------------------
+
+/**
+ * ============================================================================
+ * 🔴 수리 건 상세의 「이 수리 건의 반출 신청」이 **너무 수수하다** (2026-10-21)
+ * ============================================================================
+ * 쓰는 분이 화면을 눈으로 보고 짚은 것 셋 —
+ *  ① **부품별 구분감이 없다** — 부품 하나가 석 줄까지 늘어나는데 간격만으로 벌려 뒀다.
+ *  ② **요청·불출 수량이 안 띈다** — 그 줄의 요점이 숫자인데 이름과 같은 크기·같은 색이다.
+ *  ③ **지금 상태가 안 띈다** — 「대기」·「반려」·「마감」이 그냥 굵은 글씨다.
+ *
+ * ── 🔵 **꾸밈이 왜 화면이 아니라 여기 사는가** ──────────────────────────
+ * 부르는 자리가 서버 액션을 부르는 클라이언트 컴포넌트라 이 환경에서 **그려 볼 수 없다**
+ * (`part-request-section-wiring.test.ts` 머리말). 꾸밈을 화면 안에 흩으면 「색 말고도
+ * 갈리는가」·「다크 짝이 붙어 있는가」를 **아무도 돌려 보지 못한다.** 바로 아래 딱지 둘이
+ * 같은 까닭으로 여기 살고, 이 셋도 그 결을 따른다.
+ *
+ * ── 🔴 **고르는 자리는 한 곳** ──────────────────────────────────────────
+ * 화면은 상수를 그대로 붙이거나 `stockRequestStatusBadge` 를 부르기만 한다. 한 군데라도
+ * 화면에서 덧칠하기 시작하면 「색 말고도 갈리는가」를 재는 자리가 둘로 쪼개진다.
+ * ============================================================================
+ */
+
+/**
+ * 상태 배지의 **뼈대** — 색이 들어가기 전의 모양.
+ *
+ * 🔵 한 곳에 둔 까닭: 크기·둥글기를 색표마다 따로 적으면 배지가 저마다 다른 치수로 갈린다.
+ * 🔵 `text-[11px]` 인 까닭: 이 칸은 수리 건 상세 안의 **좁은 구역**이라, 배지를 키우면 같은
+ *    줄에 선 날짜와 [요청 취소] 단추가 다음 줄로 밀린다(머리줄이 `flex-wrap` 이다).
+ */
+export const STOCK_REQUEST_STATUS_BADGE_SHAPE =
+  "inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] leading-tight";
+
+/** 저쪽이 쓰는 상태 코드(API.md 4-3절). 🔵 **배지 색표의 열쇠**이자 「모르는 값」을 가르는 자다. */
+const STOCK_REQUEST_STATUS_CODES = [
+  "PENDING",
+  "IN_APPROVAL",
+  "CONFIRMING",
+  "PARTIAL",
+  "CONFIRMED",
+  "REJECTED",
+  "CANCELLED",
+  "ON_HOLD",
+] as const;
+export type StockRequestStatusCode = (typeof STOCK_REQUEST_STATUS_CODES)[number];
+
+/**
+ * 상태별 배지 색 — 🔴 **재고 관리와 같은 색조**, 다만 **베낀 것이 아니다**.
+ *
+ * ── 🔵 왜 맞추는가 ──────────────────────────────────────────────────────
+ * **같은 신청을 두 화면이 그린다**(저쪽 [부품 요청] 관리 화면 · 이쪽 [부품 요청] 칸). 색조가
+ * 어긋나면 두 화면을 오가는 사람이 같은 것을 다른 것으로 읽는다. 그래서 색조는 저쪽 표를
+ * 읽고 맞췄다 — `dss-inventory/src/lib/stock/codes.ts` 의 `REQUEST_STATUS_BADGE`(2026-10-21 판):
+ * 대기 **주황** · 결재 중 **남색** · 처리 중 **회색** · 일부 나감 **파랑** · 확인됨 **초록** ·
+ * 반려 **빨강** · 취소 **옅은 회색** · 보류 **보라**.
+ *
+ * ── 🔴 왜 글자값까지 베끼지는 않는가 ────────────────────────────────────
+ * 저쪽은 **다크 모드가 없고**(그 표 머리말에 「`dark:` 만 뺐다」고 적혀 있다) 이쪽은 있다.
+ * `bg-amber-100 text-amber-800` 을 그대로 옮기면 어두운 화면에서 글자가 배경에 잠긴다.
+ * 그래서 **뜻(색조)만 가져오고 값은 이 집 말로 다시 지었다** — 다크 짝까지 한 줄에 묶어서.
+ *
+ * ── 🔴 **색 말고도 갈린다 — 「아직 도는 신청」은 바탕이 차 있고 굵다** ────
+ * 끝난 신청(확인됨 · 반려 · 취소)은 **바탕을 비우고 보통 굵기**로 둔다. 색을 전부 지워도
+ * ⓐ 바탕이 차 있나 ⓑ 굵은가가 남고, 저쪽이 준 글자(「대기」·「반려」)까지 셋이 남는다.
+ * 🔵 뜻도 맞는다 — 올린 사람이 이 목록에서 훑는 것은 「**뭐가 아직 안 나왔나**」이고, 칠해진
+ *    배지만 눈에 걸리면 그 물음에 바로 답이 된다.
+ * 🔴 가름을 **표에 구워 둔다**(함수가 다시 재지 않는다) — 저쪽이 글자와 색을 한 함수에서
+ *    함께 고르는 것과 같은 까닭이다(「마감인데 초록」 같은 짝을 막는다). 대신 구워 둔 값이
+ *    **이미 있는 자**(`isInventoryRequestSettled`)와 어긋나지 않는지를 시험이 **전수로** 본다.
+ */
+export const STOCK_REQUEST_STATUS_BADGE_CLASS: Record<StockRequestStatusCode, string> = {
+  PENDING:
+    "border-amber-300 bg-amber-100 font-semibold text-amber-900 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200",
+  IN_APPROVAL:
+    "border-indigo-300 bg-indigo-100 font-semibold text-indigo-900 dark:border-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200",
+  CONFIRMING:
+    "border-zinc-300 bg-zinc-200 font-semibold text-zinc-800 dark:border-zinc-600 dark:bg-zinc-700 dark:text-zinc-100",
+  PARTIAL:
+    "border-blue-300 bg-blue-100 font-semibold text-blue-900 dark:border-blue-700 dark:bg-blue-950/60 dark:text-blue-200",
+  CONFIRMED: "border-green-300 text-green-800 dark:border-green-700 dark:text-green-300",
+  REJECTED: "border-red-300 text-red-700 dark:border-red-700 dark:text-red-300",
+  CANCELLED: "border-zinc-200 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400",
+  ON_HOLD:
+    "border-violet-300 bg-violet-100 font-semibold text-violet-900 dark:border-violet-700 dark:bg-violet-950/60 dark:text-violet-200",
+};
+
+/**
+ * **마감**된 신청의 배지 — 🔴 **상태값이 아니라 `closed` 칸으로 가린다.**
+ *
+ * 🔴 **색도 글자를 따라가야 한다.** 마감이면 저쪽이 `label` 자체를 「마감」으로 바꿔 보내면서
+ *    (상태 코드는 `CONFIRMED` **그대로**다) **색도 함께** 바꾼다 — 글자와 색을 한 함수에서
+ *    고르는 까닭이 「마감인데 초록」 같은 짝을 막는 것이다(저쪽 `requestStatusDisplay` 주석).
+ *    여기서 `closed` 를 안 보면 **「마감」이라 쓰인 배지가 확인됨의 초록**으로 떠서, 같은
+ *    신청을 두 저장소가 다른 색으로 그리게 된다. 그래서 이 칸을 **맨 먼저** 본다.
+ * 🔵 색조는 저쪽 `CLOSED_REQUEST_BADGE`(주황) 그대로다. 바탕을 비우는 것은 **끝난 신청**이기
+ *    때문이고(위 머리말), 덕분에 「대기」(찬 주황)와 「마감」(빈 주황)이 같은 색조 안에서도
+ *    갈린다 — 색약인 눈에도 한쪽만 칠해져 있는 것은 보인다.
+ * 🔴 **글자는 여기서 짓지 않는다** — 「마감」이라는 말은 저쪽이 보낸 `label` 에 이미 들어 있다.
+ *    여기서 또 적으면 「마감 (마감)」이 된다(2026-10-21 에 실제로 그랬다).
+ */
+export const STOCK_REQUEST_STATUS_BADGE_CLOSED =
+  "border-amber-400 text-amber-800 dark:border-amber-600 dark:text-amber-300";
+
+/**
+ * 🔴 **모르는 상태 코드의 배지** — 저쪽이 상태를 하나 더 만드는 날 쓰인다.
+ *
+ * 🔵 **테두리를 점선으로** 둔다 — 색이 아니라 **선의 모양**이라 흑백에서도 보이고, 「우리가
+ *    모르는 값이다」가 한눈에 드러난다(아래 유상/무상 딱지가 쓰는 길과 같다).
+ * 🔴 어느 쪽으로도 칠하지 않는 까닭: 모르는 상태를 「끝남」이나 「대기」처럼 칠하면 사람이
+ *    **없는 사실**을 읽는다. 글자는 저쪽이 준 것을 그대로 그린다.
+ */
+export const STOCK_REQUEST_STATUS_BADGE_UNKNOWN =
+  "border-dashed border-zinc-400 text-zinc-700 dark:border-zinc-500 dark:text-zinc-200";
+
+function isStockRequestStatusCode(code: string): code is StockRequestStatusCode {
+  return (STOCK_REQUEST_STATUS_CODES as readonly string[]).includes(code);
+}
+
+/**
+ * 이 신청의 상태 배지에 붙일 **꾸밈 한 줄**(뼈대 + 색).
+ *
+ * 🔴 **차례를 글자로 못 박는다 — ① 마감 ② 상태 표 ③ 모르는 값.** 저쪽이 같은 차례로 고른다
+ *    (`requestStatusDisplay`). 적어 두지 않으면 마감된 줄이 「확인됨」 색으로 새는 날이 온다.
+ * 🔴 **글자는 건드리지 않는다.** 이 함수가 돌려주는 것은 꾸밈뿐이고, 무슨 글자를 그릴지는
+ *    `request.status.label || request.status.code` — 저쪽이 준 것 그대로다.
+ * 🔵 **「실행 대기」는 못 가린다** — 저쪽은 결재가 끝나 실행만 남은 신청을 청록으로 그리는데
+ *    (2026-10-21, `AWAITING_EXECUTION_REQUEST_BADGE`), 그것을 가르는 값은 결재건 잠금이고
+ *    **통로가 그 칸을 내주지 않는다**(우리가 받는 것은 `status` 와 `closed` 둘뿐이다).
+ *    그래서 이쪽에서는 「결재 중」과 같은 남색으로 선다 — 🔴 **글자는 저쪽이 보낸 「실행 대기」
+ *    그대로**라 사람이 읽는 말은 틀리지 않는다. 색까지 맞추려면 통로가 칸을 하나 더 내줘야
+ *    하고, 그것은 **저쪽과 약속을 고치는 일**이라 꾸밈 조각에서 할 일이 아니다.
+ */
+export function stockRequestStatusBadge(request: Pick<InventoryStockRequest, "status" | "closed">): string {
+  const tone = request.closed
+    ? STOCK_REQUEST_STATUS_BADGE_CLOSED
+    : isStockRequestStatusCode(request.status.code)
+      ? STOCK_REQUEST_STATUS_BADGE_CLASS[request.status.code]
+      : STOCK_REQUEST_STATUS_BADGE_UNKNOWN;
+  return `${STOCK_REQUEST_STATUS_BADGE_SHAPE} ${tone}`;
+}
+
+/**
+ * 신청 줄의 **요청·불출 숫자** 꾸밈 — 🔴 **숫자에만** 들어간다 (요청 ②).
+ *
+ * 🔴 **글자는 한 자도 안 바뀐다.** 「요청」·「불출」도, 사이의 `/` 도, 앞의 `—` 도 그대로
+ *    있다 — 바뀌는 것은 **어떻게 보이는가**뿐이다.
+ * 🔴 **색만으로 가르지 않는다**: 숫자는 ⓐ **굵고** ⓑ 색이 들어가고, 이름표는 ⓒ **옅어진다**.
+ *    색을 전부 지워도 「굵은 숫자 + 옅은 이름표」가 남는다.
+ * 🔵 `tabular-nums` 인 까닭: 신청 하나에 부품이 대여섯 줄 붙을 수 있어서, 자릿수가 다른
+ *    숫자가 들쭉날쭉하면 훑어 내리는 눈이 자꾸 멎는다.
+ * 🔵 색은 **이 칸이 이미 「짚어 볼 값」에 쓰는 파랑**이다(찾은 줄의 도번 · 재고 수,
+ *    2026-10-19 사용자 결정). 새 색을 들이면 같은 화면 안에서 파랑의 뜻이 둘이 된다.
+ */
+export const STOCK_REQUEST_QUANTITY_VALUE_CLASS = "font-semibold tabular-nums text-blue-700 dark:text-blue-400";
+
+/**
+ * 위 숫자를 받치는 **이름표**(「— 요청」 · 「/ 불출」).
+ * 🔵 이름표가 옅어져야 숫자가 선다 — 이 줄에서 이름표는 「무슨 수인지」만 알려 주면 된다
+ *    (바로 아래 자세한 내용 줄이 이름표를 다루는 방식과 같다).
+ */
+export const STOCK_REQUEST_QUANTITY_LABEL_CLASS = "text-zinc-400 dark:text-zinc-500";
+
+/**
+ * 신청 줄 **부품 한 덩이**를 묶는 꾸밈 — 🔴 왼쪽 세로 선 하나 (요청 ①).
+ *
+ * 🔵 부품 하나가 **넉 줄까지** 늘어난다(머리줄 · 고객사 품명 · 딱지 · 나머지). 쓰는 분 말이
+ *    「간격만으로는 어디서 끊기는지 안 보인다」였다.
+ * 🔴 **줄마다 상자를 두르지 않았다.** 대여섯 줄이 붙는 좁은 칸이라 네 변을 다 두르면
+ *    답답해지고 안쪽 여백까지 먹어 글이 더 좁아진다. 세로 선 하나는 ⓐ 여러 줄을 **한 덩이로
+ *    묶고** ⓑ 다음 부품과 **갈라 주면서** ⓒ **폭을 거의 안 먹는다**.
+ * 🔵 색을 입히지 않는 까닭: 이 선은 **구분선**이지 뜻을 나르는 자리가 아니다. 뜻을 나르는
+ *    색은 이 줄 안에 이미 셋이다(상태 배지 · 유상/무상 딱지 · 수량).
+ */
+export const STOCK_REQUEST_LINE_BLOCK_CLASS = "border-l-2 border-zinc-200 pl-2 dark:border-zinc-700";
+
+// ---------------------------------------------------------------------------
 // 신청 줄에 **어느 부품인지**를 보인다 (2026-10-21)
 // ---------------------------------------------------------------------------
 

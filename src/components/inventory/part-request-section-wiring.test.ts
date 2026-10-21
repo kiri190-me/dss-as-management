@@ -503,9 +503,22 @@ describe("🔴 반출 신청 줄 — 어느 부품인지가 보인다", () => {
   const detailsStart = source.indexOf("function StockRequestLineDetails");
   const detailsBlock = source.slice(detailsStart, source.indexOf("function CancelStockRequestDialog", detailsStart));
 
-  test("🔵 **머리줄은 한 글자도 안 바뀌었다** — 수량이 어떻게 됐는지를 보는 줄이다", () => {
-    assert.match(requestLines, /\{line\.name\} — 요청 \{line\.quantity\} \/ 불출 \{line\.issued\}/);
+  test("🔵 **머리줄의 글자는 한 자도 안 바뀌었다** — 2026-10-21 에 붙은 것은 꾸밈뿐이다", () => {
     assert.match(requestLines, /\{line\.no !== null && <span className="text-zinc-400">No\. \{line\.no\} <\/span>\}/);
+    /* 🔴 꾸밈 태그를 걷어내면 **예전 글자 그대로**여야 한다 — 「요청」·「불출」도, 사이의 `/`
+       도, 앞의 `—` 도. 숫자를 돋보이게 하려다 말이 바뀌면 그것은 다른 일이다(요청 ②).
+       🔵 자리를 짚어 견주지 않고 **글자만 남겨 통째로** 견주는 까닭: 태그를 어떻게 나누든
+       사람이 읽는 줄이 그대로인지를 묻는 것이 이 시험의 뜻이다. */
+    const head = requestLines.slice(
+      requestLines.indexOf("{line.name}"),
+      requestLines.indexOf("<StockRequestLineDetails")
+    );
+    const text = head
+      .replace(/<\/?span[^>]*>/g, "")
+      .replace(/\{" "\}/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    assert.equal(text, "{line.name} — 요청 {line.quantity} / 불출 {line.issued}");
   });
 
   test("🔴 자세한 내용을 그리는 조각을 **그 줄에서** 부른다", () => {
@@ -575,5 +588,87 @@ describe("🔴 반출 신청 줄 — 어느 부품인지가 보인다", () => {
     assert.match(block, /\$\{tag\.className\}/, "도메인이 고른 꾸밈을 안 쓴다");
     // 🔴 여기서 색을 덧붙이기 시작하면 「색 말고도 갈리는가」를 재는 자리가 둘로 쪼개진다.
     assert.doesNotMatch(block, /bg-amber|text-amber|border-amber/, "화면이 딱지 색을 따로 적는다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 「이 수리 건의 반출 신청」이 **너무 수수하다** (2026-10-21 쓰는 분이 눈으로 보고)
+ * ============================================================================
+ * 짚은 것 셋 — ① 부품별 구분감이 없다 ② 요청·불출 수량이 안 띈다 ③ 지금 상태가 안 띈다.
+ *
+ * 🔵 **꾸밈 자체**(재고 관리와 색조가 같은가 · 색 말고도 갈리는가 · 다크 짝이 다 붙었는가)는
+ *    순수 쪽 시험이 **돌려 본다**(`lib/domain/inventory-gateway.test.ts`). 여기서 재는 것은
+ *    **화면이 그 한 곳을 실제로 쓰는가**뿐이다 — 화면이 제 손으로 덧칠하기 시작하면 꾸밈이
+ *    두 벌이 되고, 고치는 날 한쪽만 바뀐다(바로 위 딱지 둘과 같은 가름).
+ * ============================================================================
+ */
+describe("🔴 반출 신청 줄 — 셋이 눈에 띈다", () => {
+  /** 신청 목록 구역만 떼어 본다 — 부품 찾기·담은 줄과 섞이지 않게. */
+  const list = source.slice(source.indexOf("이 수리 건의 반출 신청"), source.indexOf("{notice && <NoticePopup"));
+  /**
+   * 🔵 **주석을 걷어낸 화면.** 이 구역의 주석에는 「마감」이 **까닭으로** 길게 적혀 있다
+   * (「마감 (마감)」 사고의 기록). 그 말은 설명이지 그리는 글자가 아니다.
+   */
+  const listCode = list.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  const requestLines = source.slice(
+    source.indexOf("{request.lines.map((line, index) =>"),
+    source.indexOf("{notice && <NoticePopup")
+  );
+
+  test("③ 🔴 상태 배지의 꾸밈을 **도메인 함수**가 고른다 — 화면이 색을 안 적는다", () => {
+    /* 🔵 **머리줄만** 떼어 본다 — 아래 결정 사유 상자의 머리글이 옛 상태 글씨와 같은 꾸밈
+       (`font-medium text-zinc-800`)을 쓰고 있어서, 구역을 안 끊으면 거기에 걸린다. */
+    const header = listCode.slice(
+      listCode.indexOf('<div className="flex flex-wrap items-center justify-between gap-1">'),
+      listCode.indexOf("{request.requestKey === null &&")
+    );
+    assert.match(header, /<span className=\{stockRequestStatusBadge\(request\)\}>/, "상태가 그냥 굵은 글씨 그대로다");
+    // 🔴 옛 꾸밈이 남아 있으면 안 된다 — 두 벌이 되면 고치는 날 한쪽만 바뀐다.
+    assert.doesNotMatch(header, /className="font-medium text-zinc-800 dark:text-zinc-200"/, "옛 꾸밈이 남아 있다");
+    // 🔴 화면이 배지에 색을 덧칠하면 「색 말고도 갈리는가」를 재는 자리가 둘로 쪼개진다.
+    assert.doesNotMatch(header, /bg-(?:amber|green|red|violet|indigo|blue)/, "화면이 상태 색을 따로 적는다");
+  });
+
+  test("③ 🔴 **글자는 저쪽이 준 것 그대로**다 — 「마감」을 손으로 적지 않는다", () => {
+    assert.match(listCode, /\{request\.status\.label \|\| request\.status\.code\}/);
+    /* 🔴 `closed` 를 보고 글자 뒤에 꼬리를 붙이면 **「마감 (마감)」**이 된다(2026-10-21 에
+       실제로 그랬다). `closed` 로 가르는 일은 **색에만** 쓰이고, 그것도 도메인 함수 안이다. */
+    assert.doesNotMatch(listCode, /마감/, "화면이 「마감」을 손으로 적는다");
+  });
+
+  test("② 🔴 수량 꾸밈을 **도메인 상수**로 붙인다 — 숫자에만, 이름표는 받쳐만 준다", () => {
+    assert.match(requestLines, /<span className=\{STOCK_REQUEST_QUANTITY_VALUE_CLASS\}>\{line\.quantity\}<\/span>/);
+    assert.match(requestLines, /<span className=\{STOCK_REQUEST_QUANTITY_VALUE_CLASS\}>\{line\.issued\}<\/span>/);
+    assert.equal(
+      [...requestLines.matchAll(/STOCK_REQUEST_QUANTITY_LABEL_CLASS/g)].length,
+      2,
+      "이름표 둘(「— 요청」·「/ 불출」) 중 하나가 안 받쳐져 있다 — 한쪽만 옅으면 더 어지럽다"
+    );
+    // 🔴 좁은 칸이라 「요청 2 / 불출 0」이 가운데서 끊기면 한 덩이로 안 읽힌다.
+    assert.match(requestLines, /<span className="whitespace-nowrap">/, "수량이 가운데서 끊긴다");
+  });
+
+  test("① 🔴 부품 한 덩이를 **도메인 상수**가 묶는다 — 화면이 선을 따로 안 그린다", () => {
+    assert.match(
+      requestLines,
+      /<li key=\{`\$\{request\.id\}-\$\{line\.no \?\? "deleted"\}-\$\{index\}`\} className=\{STOCK_REQUEST_LINE_BLOCK_CLASS\}>/,
+      "줄에 덩이 꾸밈이 안 붙었다"
+    );
+    assert.doesNotMatch(requestLines, /border-l-|rounded border/, "화면이 구분선을 제 손으로 적는다");
+  });
+
+  test("🔴 꾸밈은 **도메인 한 곳**에서 온다 — 화면이 제 손으로 짓지 않는다", () => {
+    for (const name of [
+      "STOCK_REQUEST_LINE_BLOCK_CLASS",
+      "STOCK_REQUEST_QUANTITY_LABEL_CLASS",
+      "STOCK_REQUEST_QUANTITY_VALUE_CLASS",
+      "stockRequestStatusBadge",
+    ]) {
+      assert.match(source, new RegExp(`\\n  ${name},`), `${name} 를 도메인에서 안 끌어온다`);
+    }
+    /* 🔴 화면 안에 꾸밈 상수를 지으면 이 환경에서 **돌려 볼 수 없는 자리**로 숨는다
+       (이 파일 머리말: 클라이언트 컴포넌트라 그려 볼 수 없다). */
+    assert.doesNotMatch(source, /const STOCK_REQUEST_[A-Z_]+ =/, "화면이 꾸밈 상수를 제 손으로 짓는다");
   });
 });

@@ -16,6 +16,7 @@ import {
   inventoryStockText,
   inventoryUnreachableMessage,
   isChargeType,
+  isInventoryRequestSettled,
   isValidRequestKey,
   parseInventoryOhTemplateResponse,
   parseInventoryPartsResponse,
@@ -27,10 +28,18 @@ import {
   stockRequestLineCustomerName,
   stockRequestLineDetails,
   stockRequestLineOwnerTag,
+  stockRequestStatusBadge,
   toScreenStockRequests,
   STOCK_REQUEST_CHARGE_TAG_CLASS,
   STOCK_REQUEST_CHARGE_TAG_UNKNOWN_CLASS,
+  STOCK_REQUEST_LINE_BLOCK_CLASS,
   STOCK_REQUEST_OWNER_TAG_CLASS,
+  STOCK_REQUEST_QUANTITY_LABEL_CLASS,
+  STOCK_REQUEST_QUANTITY_VALUE_CLASS,
+  STOCK_REQUEST_STATUS_BADGE_CLASS,
+  STOCK_REQUEST_STATUS_BADGE_CLOSED,
+  STOCK_REQUEST_STATUS_BADGE_SHAPE,
+  STOCK_REQUEST_STATUS_BADGE_UNKNOWN,
   type InventoryPart,
   type InventoryStockRequest,
   type InventoryStockRequestLine,
@@ -915,5 +924,167 @@ describe("🔴 딱지 둘 — 성격이 다르고, 색 말고도 갈린다", () 
     assert.equal(stockRequestLineOwnerTag(parsedLine({ owner: { code: "SERVICE_SPARE", label: "보수부재" } }))?.value, "보수부재");
     assert.equal(stockRequestLineOwnerTag(parsedLine({ owner: { code: "SERVICE_SPARE" } }))?.value, "SERVICE_SPARE");
     assert.equal(stockRequestLineChargeTag(parsedLine({ chargeType: { code: "FREE" } }))?.value, "FREE");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 반출 신청 줄의 **꾸밈** — 상태 배지 · 수량 · 부품 덩이 (2026-10-21 요청 셋)
+ * ============================================================================
+ * 「눈에 띄는가」는 시험으로 못 잰다. 대신 **고를 수 있는 값**으로 잰다 —
+ *  ㉠ 상태 글자를 **손으로 적지 않는가**(꾸밈만 고른다)
+ *  ㉡ **색 말고도** 갈리는가(바탕이 차 있나 · 굵기 · 선의 모양)
+ *  ㉢ **다크 짝**이 전부 붙어 있는가(전수)
+ *  ㉣ **재고 관리와 색조가 같은가**
+ *
+ * 🔵 색조 표를 **여기 적어 두는** 까닭: 저쪽은 **다른 저장소**라 끌어올 수 없다. 끌어올 수
+ *    없는 약속은 적어 두는 것이 유일한 기록이고, 누가 색을 바꾸는 날 이 시험이 먼저 울어
+ *    「저쪽도 같이 봐야 한다」고 말해 준다(두 시스템이 같은 말을 하는지 재는 자리).
+ * ============================================================================
+ */
+describe("🔴 반출 신청 줄의 꾸밈 — 상태 배지", () => {
+  /**
+   * 재고 관리가 쓰는 색조 — `dss-inventory/src/lib/stock/codes.ts` 의 `REQUEST_STATUS_BADGE`
+   * 와 `CLOSED_REQUEST_BADGE`(2026-10-21 판)에서 **색 이름만** 옮겨 적었다.
+   * 🔴 값(`bg-amber-100`)이 아니라 **색조**를 적는 까닭: 저쪽은 다크 모드가 없어 글자값이
+   *    같을 수 없다. 맞춰야 하는 것은 「주황인가」이지 「bg-amber-100 인가」가 아니다.
+   */
+  const INVENTORY_HUE: Record<string, string> = {
+    PENDING: "amber",
+    IN_APPROVAL: "indigo",
+    CONFIRMING: "zinc",
+    PARTIAL: "blue",
+    CONFIRMED: "green",
+    REJECTED: "red",
+    CANCELLED: "zinc",
+    ON_HOLD: "violet",
+  };
+
+  /** 꾸밈 한 줄에서 **색조**만 뽑는다 — `bg-amber-100 dark:text-amber-200` → `amber`. */
+  function hueOf(className: string): string {
+    const hues = new Set(
+      [...className.matchAll(/(?:^|\s)(?:dark:)?(?:border|bg|text)-([a-z]+)-\d/g)].map((m) => m[1])
+    );
+    return [...hues].join(",");
+  }
+
+  function request(code: string, closed = false) {
+    // 🔵 글자는 아무것이나 좋다 — 배지는 **글자를 보지 않는다**(그것이 이 조각의 약속이다).
+    return { status: { code, label: "아무 글자" }, closed };
+  }
+
+  test("㉣ 🔴 **재고 관리와 색조가 같다** — 같은 신청을 두 화면이 다른 색으로 그리지 않는다", () => {
+    for (const [code, className] of Object.entries(STOCK_REQUEST_STATUS_BADGE_CLASS)) {
+      assert.equal(hueOf(className), INVENTORY_HUE[code], `${code} 의 색조가 재고 관리와 다르다`);
+    }
+    // 🔴 표에 구멍이 없는가 — 저쪽 상태 여덟이 전부 덮여 있어야 한다.
+    assert.deepEqual(Object.keys(STOCK_REQUEST_STATUS_BADGE_CLASS).sort(), Object.keys(INVENTORY_HUE).sort());
+  });
+
+  test("㉡ 🔴 **끝난 신청은 바탕이 비고 보통 굵기다** — 색을 지워도 남는 가름(전수)", () => {
+    for (const [code, className] of Object.entries(STOCK_REQUEST_STATUS_BADGE_CLASS)) {
+      // 🔴 가르는 자를 **여기서 다시 적지 않는다** — 이미 있는 한 곳에 묻는다.
+      const settled = isInventoryRequestSettled({ status: { code, label: "" } });
+      assert.equal(/(?<!dark:)\bbg-/.test(className), !settled, `${code} 의 바탕이 「끝났나」와 어긋난다`);
+      assert.equal(/\bfont-semibold\b/.test(className), !settled, `${code} 의 굵기가 「끝났나」와 어긋난다`);
+    }
+  });
+
+  test("🔴 **마감은 `closed` 로 가른다** — 코드는 CONFIRMED 인데 확인됨의 초록이면 안 된다", () => {
+    const closed = stockRequestStatusBadge(request("CONFIRMED", true));
+    const confirmed = stockRequestStatusBadge(request("CONFIRMED"));
+    assert.notEqual(closed, confirmed, "마감이 확인됨과 같은 색으로 뜬다 — 저쪽은 글자까지 「마감」으로 바꿔 보낸다");
+    assert.equal(hueOf(closed), "amber", "저쪽 마감 배지(주황)와 색조가 다르다");
+    assert.equal(hueOf(confirmed), "green");
+  });
+
+  test("㉡ 🔴 「마감」과 「대기」는 **같은 주황 안에서도** 갈린다 — 한쪽만 칠해져 있다", () => {
+    // 🔴 색조가 같으니 색만으로는 못 가른다. 바탕이 차 있나가 그 가름이다(마감은 끝난 신청).
+    assert.match(STOCK_REQUEST_STATUS_BADGE_CLASS.PENDING, /(?<!dark:)\bbg-amber-/, "대기가 칠해져 있지 않다");
+    assert.doesNotMatch(STOCK_REQUEST_STATUS_BADGE_CLOSED, /(?<!dark:)\bbg-/, "마감이 대기처럼 칠해져 있다");
+  });
+
+  test("㉠ 🔴 **글자를 짓지 않는다** — 돌려주는 것은 꾸밈뿐이다", () => {
+    const badge = stockRequestStatusBadge(request("CONFIRMED", true));
+    // 🔴 여기서 「마감」을 보태면 화면이 「마감 (마감)」을 그린다(2026-10-21 에 실제로 그랬다).
+    assert.doesNotMatch(badge, /[가-힣]/, "배지 꾸밈에 사람이 읽는 글자가 섞여 있다");
+    // 🔵 글자를 안 보는지도 값으로 확인한다 — 같은 코드·같은 closed 면 글자가 달라도 같은 꾸밈이다.
+    assert.equal(
+      stockRequestStatusBadge({ status: { code: "PENDING", label: "대기" }, closed: false }),
+      stockRequestStatusBadge({ status: { code: "PENDING", label: "딴 말" }, closed: false })
+    );
+  });
+
+  test("🔴 모르는 상태 코드는 **아무 색으로도 안 칠하고** 점선으로 세운다", () => {
+    const badge = stockRequestStatusBadge(request("BRAND_NEW"));
+    assert.match(badge, /\bborder-dashed\b/, "모르는 값인지 알 길이 없다");
+    for (const [code, known] of Object.entries(STOCK_REQUEST_STATUS_BADGE_CLASS)) {
+      assert.ok(!badge.includes(known), `모르는 값이 ${code} 의 색으로 칠해진다`);
+    }
+    assert.ok(!badge.includes(STOCK_REQUEST_STATUS_BADGE_CLOSED), "모르는 값이 마감 색으로 칠해진다");
+  });
+
+  test("🔵 뼈대는 **한 곳**에서 온다 — 어느 상태든 같은 치수의 배지다", () => {
+    for (const r of [request("PENDING"), request("CONFIRMED", true), request("BRAND_NEW")]) {
+      assert.ok(
+        stockRequestStatusBadge(r).startsWith(`${STOCK_REQUEST_STATUS_BADGE_SHAPE} `),
+        `${r.status.code} 의 배지에 뼈대가 안 붙었다`
+      );
+    }
+  });
+
+  test("㉢ 🔴 **다크 짝이 전부 붙어 있다** — 밝은 쪽만 적으면 어두운 화면에서 글자가 잠긴다", () => {
+    const classes = [
+      ...Object.values(STOCK_REQUEST_STATUS_BADGE_CLASS),
+      STOCK_REQUEST_STATUS_BADGE_CLOSED,
+      STOCK_REQUEST_STATUS_BADGE_UNKNOWN,
+      STOCK_REQUEST_QUANTITY_VALUE_CLASS,
+      STOCK_REQUEST_QUANTITY_LABEL_CLASS,
+      STOCK_REQUEST_LINE_BLOCK_CLASS,
+    ];
+    for (const className of classes) {
+      for (const kind of ["border", "bg", "text"] as const) {
+        const light = new RegExp(`(?<!dark:)\\b${kind}-(?:[a-z]+-\\d|white\\b)`).test(className);
+        const dark = new RegExp(`dark:${kind}-(?:[a-z]+-\\d|white\\b)`).test(className);
+        assert.equal(light, dark, `${kind} 의 다크 짝이 빠졌다: ${className}`);
+      }
+    }
+  });
+});
+
+describe("🔴 반출 신청 줄의 꾸밈 — 수량과 부품 덩이", () => {
+  test("㉡ 🔴 **숫자만 굵다** — 색을 전부 지워도 이름표와 갈린다", () => {
+    assert.match(STOCK_REQUEST_QUANTITY_VALUE_CLASS, /\bfont-semibold\b/, "숫자가 이름표와 같은 굵기다");
+    assert.doesNotMatch(
+      STOCK_REQUEST_QUANTITY_LABEL_CLASS,
+      /\bfont-(?:medium|semibold|bold)\b/,
+      "이름표가 숫자만큼 굵다 — 숫자가 다시 묻힌다"
+    );
+  });
+
+  test("🔵 자릿수가 달라도 줄이 흔들리지 않는다 — 대여섯 줄을 훑어 내리는 자리다", () => {
+    assert.match(STOCK_REQUEST_QUANTITY_VALUE_CLASS, /\btabular-nums\b/);
+  });
+
+  test("🔵 숫자 색은 **이 칸이 이미 쓰는 그 파랑**이다 — 같은 화면에서 파랑의 뜻이 둘이 되지 않게", () => {
+    // 🔵 찾은 줄의 도번·재고 수에 쓰는 값과 같다(`PartRequestSection.tsx` 의 VALUE_HIGHLIGHT).
+    assert.match(STOCK_REQUEST_QUANTITY_VALUE_CLASS, /\btext-blue-700\b/);
+    assert.match(STOCK_REQUEST_QUANTITY_VALUE_CLASS, /\bdark:text-blue-400\b/);
+  });
+
+  test("㉡ 🔴 부품 덩이는 **세로 선 하나**로 묶는다 — 네 변 상자가 아니다(좁은 칸)", () => {
+    assert.match(STOCK_REQUEST_LINE_BLOCK_CLASS, /\bborder-l-\d\b/, "덩이를 묶는 선이 없다");
+    assert.ok(
+      !/(?:^|\s)border(?:\s|$)/.test(STOCK_REQUEST_LINE_BLOCK_CLASS),
+      "네 변을 다 두른다 — 대여섯 줄이 붙는 좁은 칸이 답답해진다"
+    );
+    assert.doesNotMatch(STOCK_REQUEST_LINE_BLOCK_CLASS, /\brounded/, "덩이가 상자가 된다");
+    // 🔵 선에 글이 붙으면 선이 글자의 일부처럼 읽힌다.
+    assert.match(STOCK_REQUEST_LINE_BLOCK_CLASS, /\bpl-\d/, "선과 글 사이가 붙어 있다");
+  });
+
+  test("🔵 구분선에는 **뜻을 나르는 색을 안 쓴다** — 뜻 있는 색은 이 줄에 이미 셋이다", () => {
+    // 상태 배지 · 유상/무상 딱지 · 수량. 구분선까지 칠하면 어느 색이 뜻인지 알 수 없다.
+    assert.match(STOCK_REQUEST_LINE_BLOCK_CLASS, /\bborder-zinc-\d/, "구분선이 중립색이 아니다");
   });
 });

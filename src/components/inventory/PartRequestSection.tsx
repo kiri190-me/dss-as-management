@@ -14,6 +14,11 @@ import {
   CHARGE_TYPE_LABELS,
   CUSTOMER_NAME_EMPTY_NOTICE,
   STOCK_REQUEST_CANCEL_NOTICE,
+  /* 🔵 꾸밈 상수가 **도메인 쪽**에 사는 까닭은 그 자리 머리말에 있다 — 이 화면은 여기서
+     그려 볼 수 없어서, 꾸밈을 화면에 흩으면 「색 말고도 갈리는가」를 아무도 못 돌려 본다. */
+  STOCK_REQUEST_LINE_BLOCK_CLASS,
+  STOCK_REQUEST_QUANTITY_LABEL_CLASS,
+  STOCK_REQUEST_QUANTITY_VALUE_CLASS,
   canCancelStockRequest,
   customerNameAlreadySetLines,
   filterInventoryParts,
@@ -28,6 +33,7 @@ import {
   stockRequestLineCustomerName,
   stockRequestLineDetails,
   stockRequestLineOwnerTag,
+  stockRequestStatusBadge,
   type ChargeType,
   type InventoryOhTemplate,
   type InventoryPart,
@@ -718,7 +724,14 @@ export default function PartRequestSection({
             {requests.value.map((request) => (
               <li key={request.id} className="rounded-md border border-zinc-200 p-2 text-xs dark:border-zinc-800">
                 <div className="flex flex-wrap items-center justify-between gap-1">
-                  <span className="font-medium text-zinc-800 dark:text-zinc-200">
+                  {/* 🔴 **상태 배지** (2026-10-21 요청 ③) — 「대기」·「반려」·「마감」이 그냥 굵은
+                      글씨라 안 띄었다. 🔴 **꾸밈을 고르는 자리는 도메인 한 곳**이고(이 화면은
+                      여기서 그려 볼 수 없다), 여기서 색을 덧칠하지 않는다 — 덧칠하기 시작하면
+                      「색 말고도 갈리는가」를 재는 자리가 둘로 쪼개진다.
+                      🔵 색조는 **재고 관리와 맞췄고**, 마감이면 `closed` 를 보고 색까지 함께
+                      바뀐다(그 함수 머리말) — 안 그러면 「마감」이라 쓰인 배지가 확인됨의
+                      초록으로 뜬다. */}
+                  <span className={stockRequestStatusBadge(request)}>
                     {/* 🔴 저쪽이 준 글자를 그대로 쓴다 — 손으로 다시 적지도, **뒤에 덧붙이지도**
                         않는다.
                         🔴 **마감이면 저쪽이 `label` 자체를 「마감」으로 바꿔 보낸다**(상태 코드는
@@ -801,14 +814,27 @@ export default function PartRequestSection({
 
                 {/* 🔵 줄 사이를 벌린 까닭: 2026-10-21 에 줄 하나가 석 줄까지 늘었다(아래
                     `StockRequestLineDetails`). 예전 간격(gap-0.5)으로는 어느 토막이 어느 부품의
-                    것인지 눈으로 못 가른다. */}
-                <ul className="mt-1 flex flex-col gap-1.5 text-zinc-600 dark:text-zinc-300">
+                    것인지 눈으로 못 가른다.
+                    🔴 **간격만으로는 모자랐다**(같은 날 쓰는 분 요청 ①) — 간격을 한 칸 더 벌리고
+                    줄마다 **왼쪽 세로 선**으로 묶는다. 선을 고르는 자리와 「왜 상자가 아닌가」는
+                    도메인 쪽 `STOCK_REQUEST_LINE_BLOCK_CLASS` 머리말에 있다. */}
+                <ul className="mt-1 flex flex-col gap-2 text-zinc-600 dark:text-zinc-300">
                   {request.lines.map((line, index) => (
-                    <li key={`${request.id}-${line.no ?? "deleted"}-${index}`}>
-                      {/* 🔵 **머리줄은 한 글자도 안 바뀌었다** — 수량이 어떻게 됐는지를 보는 줄이다. */}
+                    <li key={`${request.id}-${line.no ?? "deleted"}-${index}`} className={STOCK_REQUEST_LINE_BLOCK_CLASS}>
+                      {/* 🔵 **머리줄의 글자는 한 자도 안 바뀌었다** — 「요청」·「불출」도, 사이의
+                          `/` 도, 앞의 `—` 도 그대로다. 바뀐 것은 **숫자가 어떻게 보이는가**뿐이다
+                          (요청 ②: 그 줄의 요점이 숫자인데 이름에 묻혀 있었다).
+                          🔵 `whitespace-nowrap` 인 까닭: 좁은 칸이라 「요청 2 / 불출 0」이 가운데서
+                          끊기면 한 덩이로 안 읽힌다 — 통째로 다음 줄로 넘어가는 편이 낫다. */}
                       <span className="block">
                         {line.no !== null && <span className="text-zinc-400">No. {line.no} </span>}
-                        {line.name} — 요청 {line.quantity} / 불출 {line.issued}
+                        {line.name}{" "}
+                        <span className="whitespace-nowrap">
+                          <span className={STOCK_REQUEST_QUANTITY_LABEL_CLASS}>— 요청 </span>
+                          <span className={STOCK_REQUEST_QUANTITY_VALUE_CLASS}>{line.quantity}</span>
+                          <span className={STOCK_REQUEST_QUANTITY_LABEL_CLASS}> / 불출 </span>
+                          <span className={STOCK_REQUEST_QUANTITY_VALUE_CLASS}>{line.issued}</span>
+                        </span>
                       </span>
                       <StockRequestLineDetails line={line} />
                     </li>
