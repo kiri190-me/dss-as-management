@@ -58,7 +58,8 @@
 
 <h1>진행현황 — 부품 요청 · 승인 · 출하 &nbsp;+&nbsp; RF 이슈관리</h1>
 <p class="sub">2026-10-20 접수 13가지 + 2026-10-21 접수 3가지(14·15·16) + <b>2026-10-22 접수 — 알림 9가지</b> + <b>RF 이슈관리 통합 로그인</b>
-&nbsp;·&nbsp; <b>끝남: A·11·15·1·9·10·13·14·16·5</b> &nbsp;·&nbsp; <b>4 는 조각 셋까지</b>
+&nbsp;·&nbsp; <b>끝남: A·11·15·1·9·10·13·14·16·5·4·8·2</b> &nbsp;·&nbsp; <b>알림 9가지 중 여덟</b>
+&nbsp;·&nbsp; 🔄 <b>남은 것: 12(승인 절차 가려 붙이기) · 6(출하승인) · 알림 ⑦</b>
 &nbsp;·&nbsp; 마지막 갱신 <b>2026-10-22</b></p>
 
 <div class="ok">
@@ -110,8 +111,14 @@ RF 만 <b>6커밋이 이 PC 에 남아 있습니다.</b>
 <tr><td><b>알림 2-나</b> ✅</td><td><b>여섯 집 중 넷</b> — 포털(<code>3dd31bf</code>) · PO(<code>53a2f47</code>) · 휴가(<code>294c040</code>) · 게시판(<code>80beecf</code>) · 개선요청(<code>975781d</code>). 🔄 재고관리·A/S 구현 중</td></tr>
 <tr><td><b>5-나</b> (RF) ✅</td><td>RF 에 <b>설정 통로</b>(<code>ad7c8b8</code>) · 포털에 <b>등록</b>(<code>b1c11f0</code>) —
     RF 가 통합 알림에 <b>온전히 들어왔습니다</b></td></tr>
-<tr><td>🔴 <b>바로잡은 것 셋</b></td><td>① 위임 조각 4(대리 표시)가 <b>안 됐는데 「넷 전부 끝남」</b>으로 집계 ·
-    ② 포털 주석이 <b>두 번 낡아</b> 「넷이다」에 멈춰 있었음 · ③ <b>1-A 의 절반</b>이 아무 목록에도 없었음(아래)</td></tr>
+<tr><td>🔴 <b>바로잡은 것 다섯</b></td><td>① 위임 조각 4(대리 표시)가 <b>안 됐는데 「넷 전부 끝남」</b>으로 집계 ·
+    ② 포털 주석이 <b>두 번 낡아</b> 「넷이다」에 멈춰 있었음 · ③ <b>1-A 의 절반</b>이 아무 목록에도 없었음 ·
+    ④ <b>관리자 열은 넷이 아니라 셋</b>이 거꾸로였음(개선요청은 처음부터 맞았음) ·
+    ⑤ <b>8번의 절반은 이미 되어 있었음</b>(품명 고르개는 2026-10-15)</td></tr>
+<tr><td>🔵 <b>순위 8번</b> ✅</td><td>O/H 단가가 비면 <b>견적가를 회색으로 비쳐 줌</b>(<code>9d8df96</code>) —
+    🔴 기존 원칙과 부딪혀 「저장」이 아니라 <b>「보여 주기」</b>로</td></tr>
+<tr><td>🔵 <b>승인 절차</b></td><td>그릇(<code>99c6e35</code>) · A/S 가 종류를 보냄(<code>d6e6d71</code>) —
+    🔄 재고관리가 받아 가려 붙이는 중. 🔴 <b>배포 전에 완성</b>합니다</td></tr>
 </table>
 🔴 <b>포털 476 → 523</b> · <b>재고관리 1382 → 1411</b> · <b>A/S 화면 3108 → 3122</b> · <b>RF 189 → 205</b>.
 🔵 비고칸은 <b>마이그레이션이 필요 없었습니다</b>(아래 8번).
@@ -328,9 +335,10 @@ RF 의 창구 셋이 <b>서로 막힙니다</b>(알림용 토큰으로 설정을
     <td>✅ <b>2026-10-22 조사 끝.</b> 🔴 부품 분류로는 못 가릅니다(신청 30%가 두 분류를 섞습니다) — <b>A/S 수리 건에서 받아오기</b>로 정했습니다. 🔵 <b>진행 중인 결재는 안전</b>합니다(절차 판이 안 고쳐지는 구조).
         🔴 <b>2026-10-21 바로잡음</b>: 「4번(위임)과 같은 표를 건드린다」고 적어 뒀는데 <b>틀렸습니다</b> —
         위임은 <b>별도 표</b>라 절차 표를 전혀 건드리지 않습니다. 🔵 <b>그래서 따로 가도 됩니다</b></td></tr>
-<tr><td><span class="pill p6">8</span></td><td>2</td><td><b>OH 템플릿에서 재고 고르기</b></td>
-    <td>편해지는 일이지 틀린 것을 고치는 일이 아닙니다. 🔵 <b>독립적이라 아무 때나 끼울 수 있습니다</b>
-        (2026-10-21 순위 바꿈 — 전에는 9번이었습니다)</td></tr>
+<tr><td><span class="pill p6">8</span> <span class="donepill">끝남</span></td><td>2</td><td><b>OH 템플릿에서 재고 고르기</b></td>
+    <td>✅ <b>2026-10-22 끝남</b>(<code>9d8df96</code>). 🔵 <b>절반은 이미 되어 있었습니다</b> — 품명 고르개가 2026-10-15 에 들어갔고,
+        템플릿 줄 5개가 <b>전부 부품과 이어져</b> 있었습니다.
+        🔴 나머지 절반은 <b>기존 결정과 부딪혀</b> 「저장」이 아니라 <b>「보여 주기」</b>로 갔습니다(아래 8·9순위)</td></tr>
 <tr><td><span class="pill p6">9</span></td><td>6</td><td><b>[출하승인] 메뉴 + 승인</b></td>
     <td>새로 생기는 능력이고 <b>먼 목표(결재 통합)의 첫 조각</b>입니다. 급하진 않지만 <b>짓는 모양이 뒤에 오래 남습니다</b>
         (2026-10-21 순위 바꿈 — 전에는 8번이었습니다)</td></tr>
@@ -786,7 +794,7 @@ A/S 의 서버 액션·통로도, 재고 관리의 받는 쪽도 <b>이미 비�
 
 </div>
 
-<h2><span class="pill p5">7순위</span> &nbsp;승인 절차 분리</h2>
+<h2><span class="pill p5">7순위</span> <span class="fixnow">진행 중</span> &nbsp;승인 절차 분리 — 🔴 <b>배포 전에 완성합니다</b></h2>
 <div class="grp" style="border-color:var(--b5)">
 <div class="card"><div class="row"><div class="no">12</div><div>
 <span class="t">승인 절차를 매쳐 / 제너레이터로 나누기</span><span class="where">재고 설정</span>
@@ -826,10 +834,50 @@ A/S 의 서버 액션·통로도, 재고 관리의 받는 쪽도 <b>이미 비�
 🔵 그런데 <b>A/S 의 요청 액션이 이미 그 수리 건을 조회하고 있습니다</b>
 (인수번호를 가져오려고). <b>같은 자리에서 종류도 읽어 요청을 보낼 때 함께 실으면</b> 됩니다 —
 <b>비고와 똑같은 모양</b>입니다.<br />
-🔵 그러면 <b>새 통로도, 왕복도, 「A/S 가 죽으면 신청이 막힌다」는 실패 자리도 안 생깁니다.</b>
-🔴 다만 <b>재고 관리가 그 값을 어디에 담을지</b>가 남아 조사 중입니다 —
-결재를 올리는 시점에 절차를 고르므로 신청에 남아 있어야 합니다.
+🔵 그러면 <b>새 통로도, 왕복도, 「A/S 가 죽으면 신청이 막힌다」는 실패 자리도 안 생깁니다.</b><br />
+✅ <b>A/S 쪽은 끝났습니다</b>(<code>d6e6d71</code>) — 같은 질의에 조인 둘을 더해 종류를 함께 받고,
+요청을 보낼 때 싣습니다. <b>왕복은 그대로 하나</b>이고, 그것을 소스에서 <b>세어 재는 시험</b>을 붙였습니다.
+🔵 종류 그대로 보냅니다 — 절차 이름으로 안 바꿉니다(나중에 짝을 바꿔도 자료를 안 고치게).
 </div>
+
+<div class="ask" style="margin:9px 0 0">
+<b>🔴 조사에서 「결재가 조용히 우회되는 길」을 찾았습니다 (2026-10-22)</b><br />
+<code>"PART_ISSUE"</code> 가 박힌 자리가 <b>셋</b>인데 <b>성격이 둘로 갈립니다.</b>
+<table>
+<tr><th style="width:190px">자리</th><th>무엇</th></tr>
+<tr><td>결재를 <b>올릴 때</b></td><td>어느 판을 붙일지 <b>고르는</b> 자리</td></tr>
+<tr><td>담당자가 <b>[확인]을 바로 누를 때</b></td><td>「절차가 켜져 있나」 <b>게이트</b></td></tr>
+<tr><td><b>화면을 그릴 때</b></td><td>같은 게이트 — 🔴 지금 <b>화면 전체에 값 하나</b></td></tr>
+</table>
+🔴 <b>첫째만 고치면</b>: 관리자가 <b>매쳐용만 켜고</b> 기존 「부품 불출」은 안 켜 두면 —
+결재 올리는 자리는 매쳐 절차를 요구하는데 <b>[확인] 게이트는 「부품 불출이 비었다」고 보고
+결재 없이 바로 내주는 길을 엽니다.</b> <b>종류별 결재가 통째로 우회됩니다.</b><br />
+🔵 <b>쓰는 분이 「세 자리 전부 정확히」로 정했습니다</b>(2026-10-22). 근사치로 안 갑니다.
+🔴 셋째는 화면을 <b>「줄마다 다른 값」</b> 구조로 바꿔야 합니다.
+</div>
+
+<div class="ask" style="margin:9px 0 0">
+<b>🔴 담을 자리가 <code>payload</code> 가 아니었습니다</b><br />
+제가 「비고처럼 <code>payload</code> 에 실으면 된다」고 봤는데 <b>틀렸습니다.</b> 그 칸은
+<b>「확인할 때 이 값으로 원장을 쓴다」</b>로 못 박혀 있고, 종류는 원장과 아무 상관이 없습니다.
+🔵 <code>source</code>·<code>requester_sub</code> 처럼 <b>payload 밖 칸</b>이 선례입니다
+→ <b>마이그레이션 하나</b>가 듭니다.
+</div>
+
+<div class="ask" style="margin:9px 0 0">
+<b>🔴 떠 있는 신청 3건 — 따로 채워야 합니다</b><br />
+결재를 아직 안 올린 신청이 <b>3건</b>인데, 전부 같은 수리 건이고 실측하니 <b>매쳐</b>입니다.
+이 기능이 생기기 전에 올라와 <b>종류 칸이 비어 있어서</b>, 그대로 두면 나중에 결재가
+<b>「부품 불출」로 잘못 갑니다.</b><br />
+🔵 <b>채우기로 했습니다</b>(2026-10-22). 인수번호로 A/S 에서 종류를 다시 찾는 1회성 작업입니다 —
+🔴 <b>자료를 고치는 일이라 별도 조각</b>이고 따로 승인받습니다.
+</div>
+
+<div class="note">🔵 <b>실측: 세 종류가 다 쓰입니다</b> — 수리 건 225건이 여섯 코드에 퍼져 있고
+<b>Total Controller 가 61건</b>입니다. 🔴 T/C 를 빠뜨렸으면 그 61건의 부품 요청이
+엉뚱한 절차로 갔을 것입니다.<br />
+🔵 접두사 없는 <b>레거시 코드는 0건</b>이라 지금은 안 물립니다. 다만 그런 건이 생기면
+조용히 제너레이터로 접힙니다 — 기록해 둡니다.</div>
 
 <div class="ok" style="margin:9px 0 0">
 <b>🔵 생각보다 쌉니다 — 그릇이 이미 거의 되어 있습니다</b><br />
@@ -848,12 +896,40 @@ A/S 의 서버 액션·통로도, 재고 관리의 받는 쪽도 <b>이미 비�
 </div>
 
 <!-- ───── 7·8순위 ───── -->
-<h2><span class="pill p6">8·9순위</span> &nbsp;OH 템플릿 · 출하승인</h2>
+<h2><span class="pill p6">8·9순위</span> &nbsp;<s>OH 템플릿</s> · 출하승인 &nbsp;<span class="donepill">8번 끝남</span></h2>
 <div class="grp" style="border-color:var(--b6)">
 <div class="card"><div class="row"><div class="no">2</div><div>
-<span class="t">OH 템플릿 품명란에서 재고를 바로 고르기</span><span class="where">재고</span>
+<span class="t">OH 템플릿 품명란에서 재고를 바로 고르기</span><span class="where">재고</span><span class="donepill">끝남</span>
 <div class="body">품명란에서 <b>재고의 부품을 바로 고를</b> 수 있게 하고, <b>단가를 비워 두면 그 부품의 원래 견적가</b>가 들어갑니다.</div>
-<div class="note">독립적이라 아무 때나 끼울 수 있습니다. <b>「비워 둠」과 「0 을 적음」을 어떻게 가를지</b>만 정하면 됩니다.</div>
+
+<div class="ok" style="margin:9px 0 0">
+<b>🔵 2026-10-22 실측 — 절반은 이미 되어 있었습니다</b><br />
+품명 고르개(<code>PartPicker</code>)가 <b>2026-10-15 에 이미</b> 그 화면에 들어갔습니다.
+실측으로도 템플릿 줄 <b>5개가 전부 부품과 이어져</b> 있고 자유 입력은 0줄입니다 —
+🔵 <b>고르개로 바꾸면서 떠내려갈 옛 자료가 없었습니다.</b><br />
+🔵 고를 때 그 부품의 <b>고객사 품명</b>이 함께 채워지고, 저장할 때 화면이 보낸 글자를 안 믿고 <b>DB 에서 다시 읽습니다.</b>
+</div>
+
+<div class="ask" style="margin:9px 0 0">
+<b>🔴 나머지 절반은 이 저장소의 기존 결정과 정반대였습니다</b><br />
+「빈 칸을 다른 값으로 대신 채우지 않는다」가 <b>세 군데에 반복해서</b> 적혀 있습니다:<br />
+<div class="note" style="margin:6px 0 0;color:var(--fg)">
+🔴 <code>null</code> 은 「정하지 않았다」이고 <code>0</code> 은 「무상」이다 — 섞지 않는다.
+<code>null</code> 을 0 으로 바꿔 보내면 고르개가 <b>0원을 부어</b> 정하지 않은 부품을 <b>0원으로 청구한다.</b>
+</div>
+「비워 두면 견적가가 들어간다」를 글자 그대로 만들면 그 원칙을 뒤집고,
+<b>「정하지 않음」을 담을 자리가 사라집니다.</b>
+</div>
+
+<div class="ok" style="margin:9px 0 0">
+<b>✅ 그래서 「보여 주기」로 갔습니다 (2026-10-22 사용자 결정)</b><br />
+빈 칸에 그 부품의 견적가를 <b>회색으로 비치고</b>, 누르면 채워집니다.
+🔵 <b>저장되는 뜻은 안 바뀝니다</b> — 아무것도 안 하면 여전히 「정하지 않음」입니다.
+🔵 누르는 단추는 <b>기존 입력 함수를 그대로</b> 부릅니다(새 쓰기 경로 없음).<br />
+🔵 견적가는 <b>83종 중 79종(95%)</b>에 있습니다 — 쓸모없는 기능이 아닙니다.
+🔴 견적가가 없는 부품과 재고에 안 이어진 줄에는 아무것도 안 보입니다.<br />
+🔴 <b>이 화면을 소스로 재는 시험 틀이 없어</b> 「단추가 기존 경로를 쓰는가」는 기계로 못 쟀습니다.
+</div>
 </div></div></div>
 
 <div class="card"><div class="row"><div class="no">6</div><div>
@@ -992,13 +1068,13 @@ A/S 의 서버 액션·통로도, 재고 관리의 받는 쪽도 <b>이미 비�
 <tr><td><span class="pill p4">5</span></td><td>8</td><td>부품 요청 비고칸 — <b>세 화면에</b> + A/S 되읽기</td><td><span class="st done">✅ <b>네 조각 전부</b> · 2026-10-22</span></td></tr>
 <tr><td><span class="pill p4">5</span></td><td><b>16</b></td><td>상태 거르개에 <b>「마감」</b>도</td><td><span class="st done">✅ 끝남 · 2026-10-21</span></td></tr>
 <tr><td><span class="pill p5">6</span></td><td><b>7</b> + 9가지</td><td><b>알림을 확인하면 사라짐</b> — 사내 전체</td><td><span class="st doing">🔄 <b>1·2-가·5 + 가·나 끝</b> · 다·라·마</span></td></tr>
-<tr><td><span class="pill p5">7</span></td><td>12</td><td>승인 절차를 매쳐/제너레이터로</td><td><span class="st doing">🔄 <b>조사 끝 · 그릇 조각 다음</b></span></td></tr>
+<tr><td><span class="pill p5">7</span></td><td>12</td><td>승인 절차를 매쳐/제너레이터로</td><td><span class="st doing">🔄 <b>그릇 끝 · A/S 끝</b> · 재고관리 구현 중</span></td></tr>
 <tr><td colspan="2" style="text-align:right"><b>새 무대</b></td><td><b>RF 이슈관리를 통합 로그인에</b> — 로그인 · 머리말 · <b>알림종</b>까지</td><td><span class="st done">✅ <b>전부 끝남</b> · 2026-10-22</span></td></tr>
 <tr><td colspan="2" style="text-align:right"><b>폐기</b></td><td><s>1-A 의 「몇 초마다 다시 묻기」</s> — 알림 종이 그 자리를 메운다</td><td><span class="st">❌ <b>안 함</b> · 2026-10-22</span></td></tr>
 <tr><td colspan="2" style="text-align:right"><b>되살린 것</b></td><td>위임 <b>조각 4</b> — 결재 그림에 <b>「○○ 결재 (○○ 대리)」</b></td><td><span class="st done">✅ <code>e4ffe89</code></span></td></tr>
 <tr><td colspan="2" style="text-align:right">🔴 <b>새로 드러난 것</b></td><td><b>같은 반려를 두 곳이 다른 이름으로</b> — 종은 원래 결재권자, 상자는 누른 사람</td><td><span class="st done">✅ <b>네 자리 전부</b> · 2026-10-22</span></td></tr>
 <tr><td colspan="2" style="text-align:right">🔴 <b>새로 드러난 것</b></td><td><b>A/S 쪽 결재 그림에 대리가 안 보인다</b> — 통로가 단계 자료를 안 싣는다</td><td><span class="st">🔴 <b>미정</b> · 별도 조각</span></td></tr>
-<tr><td><span class="pill p6">8</span></td><td>2</td><td>OH 템플릿에서 재고 고르기</td><td><span class="st">대기</span></td></tr>
+<tr><td><span class="pill p6">8</span></td><td>2</td><td>OH 템플릿에서 재고 고르기</td><td><span class="st done">✅ <code>9d8df96</code> · 2026-10-22</span></td></tr>
 <tr><td><span class="pill p6">9</span></td><td>6</td><td>[출하승인] 메뉴 + 승인</td><td><span class="st">대기 · 설계 먼저</span></td></tr>
 <tr><td colspan="2" style="text-align:right"><b>딸려 갔던 것</b></td><td>11 · 승인 요청 뒤 [반려]·[보류] 잠금</td><td><span class="st done">✅ A 와 함께 끝남</span></td></tr>
 </table>
