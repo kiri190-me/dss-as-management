@@ -478,3 +478,102 @@ describe("🔴 도번과 재고는 값만 눈에 띄게", () => {
     assert.match(source, /if \(!parts\) return text;/, "못 가를 때 글자가 사라진다");
   });
 });
+
+/**
+ * ============================================================================
+ * 🔴 **반출 신청 줄에도 어느 부품인지가 보인다** (2026-10-21 쓰는 분 요청)
+ * ============================================================================
+ * 「No. 165 AMP-… — 요청 2 / 불출 0」만으로는 가릴 수 없었다 — 같은 품명인 부품 묶음이 16개
+ * 있다. 재고 관리가 같은 날 제 화면([부품 요청]·[승인 요청건])을 그렇게 바꿨고, 통로가 칸을
+ * 내주게 넓어졌다.
+ *
+ * 🔵 **규칙 자체**(무엇을 · 어떤 차례로 · 무엇을 앞세우고 · 딱지가 어떻게 갈리는가)는 순수 쪽
+ *    시험이 잰다(`lib/domain/inventory-gateway.test.ts`). 여기서는 **화면이 그것을 실제로
+ *    쓰는가**만 본다 — 규칙은 맞는데 화면이 제 손으로 다시 적으면 두 벌이 되고, 고치는 날
+ *    한쪽만 바뀐다.
+ * ============================================================================
+ */
+describe("🔴 반출 신청 줄 — 어느 부품인지가 보인다", () => {
+  /** 신청 목록의 줄만 떼어 본다 — 찾은 줄·담은 줄(부품 고르기 쪽)과 섞이지 않게. */
+  const requestLines = source.slice(source.indexOf("{request.lines.map((line, index) =>"), source.indexOf("{notice && <NoticePopup"));
+  /**
+   * 그리는 조각 **하나만** 떼어 본다. 🔴 끝을 안 끊으면 뒤의 확인 창 둘까지 딸려 와서
+   * (거기는 amber 로 경고를 그린다) 「화면이 딱지 색을 따로 적는가」가 영영 ✗ 가 된다.
+   */
+  const detailsStart = source.indexOf("function StockRequestLineDetails");
+  const detailsBlock = source.slice(detailsStart, source.indexOf("function CancelStockRequestDialog", detailsStart));
+
+  test("🔵 **머리줄은 한 글자도 안 바뀌었다** — 수량이 어떻게 됐는지를 보는 줄이다", () => {
+    assert.match(requestLines, /\{line\.name\} — 요청 \{line\.quantity\} \/ 불출 \{line\.issued\}/);
+    assert.match(requestLines, /\{line\.no !== null && <span className="text-zinc-400">No\. \{line\.no\} <\/span>\}/);
+  });
+
+  test("🔴 자세한 내용을 그리는 조각을 **그 줄에서** 부른다", () => {
+    assert.match(requestLines, /<StockRequestLineDetails line=\{line\} \/>/, "신청 줄에 자세한 내용이 안 붙는다");
+    assert.match(source, /function StockRequestLineDetails\(\{ line \}/, "그리는 조각이 없다");
+  });
+
+  test("🔴 규칙을 **도메인 함수**가 정한다 — 화면이 다시 적지 않는다", () => {
+    for (const fn of [
+      /stockRequestLineCustomerName\(line\)/,
+      /stockRequestLineDetails\(line\)/,
+      /stockRequestLineOwnerTag\(line\)/,
+      /stockRequestLineChargeTag\(line\)/,
+    ]) {
+      assert.match(source, fn, String(fn));
+    }
+  });
+
+  test("🔴 **두 딱지를 따로 묻는다** — 한 함수로 합치면 「이 부품은 유상인가」가 된다", () => {
+    assert.match(
+      source,
+      /\[stockRequestLineOwnerTag\(line\), stockRequestLineChargeTag\(line\)\]/,
+      "딱지를 한 번에 받아 오고 있다 — 부품의 것과 줄의 것이 뭉개진다"
+    );
+    // 🔴 화면이 코드값을 직접 견주면 가르는 자리가 두 곳이 된다.
+    assert.doesNotMatch(source, /chargeType\.code === "PAID"|chargeType === "PAID"/, "화면이 유상/무상을 직접 가른다");
+    assert.doesNotMatch(source, /line\.owner\.code ===/, "화면이 소유구분을 직접 가른다");
+  });
+
+  test("🔴 **값이 없으면 빈 자리를 만들지 않는다** — 셋 다 없으면 아무것도 안 그린다", () => {
+    assert.match(
+      source,
+      /if \(customerName === "" && tags\.length === 0 && rest\.length === 0\) return null;/,
+      "빈 상자나 여백이 남는다"
+    );
+    // 🔴 날것으로 그리면 `-` 만 적힌 칸이 값으로 서고, 「없음」을 메워 넣는 길도 생긴다.
+    assert.doesNotMatch(source, /\{line\.customerName\}|\{line\.name2\}/, "자세한 내용을 날것으로 그린다");
+    assert.doesNotMatch(source, /\{line\.kyosanPartNo\}|\{line\.drawingNo\}/, "품번·도번을 날것으로 그린다");
+    assert.doesNotMatch(source, /\{line\.owner\?\.|\{line\.chargeType\?\./, "딱지를 날것으로 그린다");
+  });
+
+  test("🔴 **고객사 품명이 앞선다** — 딱지보다, 나머지 글자보다 먼저", () => {
+    const block = detailsBlock;
+    const lead = block.indexOf("{customerName}");
+    const tags = block.indexOf("{tag.value}");
+    const rest = block.indexOf("{detail.value}");
+    assert.ok(lead >= 0 && tags > lead, "딱지가 고객사 품명보다 앞에 선다");
+    assert.ok(rest > tags, "나머지 글자가 딱지보다 앞에 선다");
+  });
+
+  test("🔴 **색만으로 가르지 않는다** — 앞세운 줄은 자리·굵기·크기로도 갈린다", () => {
+    const block = detailsBlock;
+    // ⓐ 제 줄(block) ⓑ 굵고(font-medium) ⓒ 한 치수 크다(text-xs ↔ 나머지 text-[11px]).
+    assert.match(block, /className="mt-0\.5 block text-xs leading-snug font-medium/, "앞세운 줄이 굵지도 크지도 않다");
+    assert.match(block, /className="mt-0\.5 block text-\[11px\] leading-snug/, "나머지가 앞세운 줄과 같은 크기다");
+  });
+
+  test("🔴 이름표는 **정해 둔 한 곳**에서 온다 — 화면에 박아 두지 않는다", () => {
+    const block = detailsBlock;
+    assert.match(block, /PART_FIELD_LABELS\.customerPartName/, "이름표를 손으로 적고 있다");
+    assert.match(block, /\{detail\.label\}/, "나머지 이름표를 손으로 적고 있다");
+    assert.doesNotMatch(block, />품명2|>교산 품번|>도번|>소유</, "이름표 글자가 화면에 박혀 있다");
+  });
+
+  test("🔴 딱지 꾸밈을 화면이 덧칠하지 않는다 — 도메인이 준 것을 그대로 붙인다", () => {
+    const block = detailsBlock;
+    assert.match(block, /\$\{tag\.className\}/, "도메인이 고른 꾸밈을 안 쓴다");
+    // 🔴 여기서 색을 덧붙이기 시작하면 「색 말고도 갈리는가」를 재는 자리가 둘로 쪼개진다.
+    assert.doesNotMatch(block, /bg-amber|text-amber|border-amber/, "화면이 딱지 색을 따로 적는다");
+  });
+});

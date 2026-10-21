@@ -24,11 +24,17 @@ import {
   inventoryStockText,
   inventoryUnreachableMessage,
   stockRequestDecisionLabel,
+  stockRequestLineChargeTag,
+  stockRequestLineCustomerName,
+  stockRequestLineDetails,
+  stockRequestLineOwnerTag,
   type ChargeType,
   type InventoryOhTemplate,
   type InventoryPart,
   type InventoryResult,
   type InventoryStockRequestForScreen,
+  type InventoryStockRequestLine,
+  type StockRequestLineTag,
 } from "@/lib/domain/inventory-gateway";
 import {
   addStockRequestCartLine,
@@ -793,11 +799,18 @@ export default function PartRequestSection({
                   </div>
                 )}
 
-                <ul className="mt-1 flex flex-col gap-0.5 text-zinc-600 dark:text-zinc-300">
+                {/* 🔵 줄 사이를 벌린 까닭: 2026-10-21 에 줄 하나가 석 줄까지 늘었다(아래
+                    `StockRequestLineDetails`). 예전 간격(gap-0.5)으로는 어느 토막이 어느 부품의
+                    것인지 눈으로 못 가른다. */}
+                <ul className="mt-1 flex flex-col gap-1.5 text-zinc-600 dark:text-zinc-300">
                   {request.lines.map((line, index) => (
                     <li key={`${request.id}-${line.no ?? "deleted"}-${index}`}>
-                      {line.no !== null && <span className="text-zinc-400">No. {line.no} </span>}
-                      {line.name} — 요청 {line.quantity} / 불출 {line.issued}
+                      {/* 🔵 **머리줄은 한 글자도 안 바뀌었다** — 수량이 어떻게 됐는지를 보는 줄이다. */}
+                      <span className="block">
+                        {line.no !== null && <span className="text-zinc-400">No. {line.no} </span>}
+                        {line.name} — 요청 {line.quantity} / 불출 {line.issued}
+                      </span>
+                      <StockRequestLineDetails line={line} />
                     </li>
                   ))}
                 </ul>
@@ -838,6 +851,87 @@ export default function PartRequestSection({
         }}
       />
     </div>
+  );
+}
+
+/**
+ * ============================================================================
+ * 반출 신청 줄 **아래**에 붙는 작은 글씨 (2026-10-21 쓰는 분 요청)
+ * ============================================================================
+ * 「No. 165 AMP-… — 요청 2 / 불출 0」만으로는 **어느 부품인지 가릴 수 없었다** — 같은 품명인
+ * 부품 묶음이 16개 있다(재고 관리 API.md 2절). 재고 관리의 [부품 요청]·[승인 요청건]이 같은
+ * 날 같은 자리를 그렇게 바꿨고, 이 줄도 **같은 규칙**을 따른다.
+ *
+ * ── 🔴 **규칙은 여기 적지 않는다** ──────────────────────────────────────
+ * 무엇을 어떤 차례로 보일지(`stockRequestLineDetails`), 앞세울 값(`stockRequestLineCustomerName`),
+ * 딱지의 글자와 꾸밈(`stockRequestLineOwnerTag` · `stockRequestLineChargeTag`)이 전부 순수
+ * 모듈 쪽이고 **여기는 받은 것을 그리기만** 한다. 🔵 이 화면은 서버 액션을 부르는 클라이언트
+ * 컴포넌트라 이 환경에서 그려 볼 수 없어서(이 파일 짝 시험의 머리말), 규칙을 여기 적으면
+ * **아무도 돌려 보지 못한다.**
+ *
+ * ── 차례는 ① 고객사 품명 ② 딱지 둘 ③ 나머지 글자 ───────────────────────
+ * 🔴 **고객사 품명이 앞선다** — 고객사와 말을 주고받을 때 쓰는 이름이라 **눈으로 훑어 찾는 값**이
+ *    이것이다. **색만으로 가르지 않는다**: ⓐ 제 줄을 갖고 ⓑ 맨 위에 서고 ⓒ 굵고 ⓓ 한 치수 크다.
+ *    색은 그 위에 얹는 것이고, 색을 빼도 넷이 남는다.
+ * 🔴 **딱지가 앞자리를 빼앗지도, 맨 뒤로 밀리지도 않는다.** 유상/무상은 **돈이 걸린 값**이라
+ *    (틀리면 비용이 잘못 간다) 품번·도번 뒤에 흘려 적으면 놓친다. 가운데에서 **상자 모양**으로
+ *    서는 자리가 「훑을 값 하나」와 「놓치면 안 되는 값」을 둘 다 지킨다.
+ * 🔴 **값이 없으면 그 줄이 통째로 안 선다** — 빈 자리도, 「없음」 같은 글자도 만들지 않는다.
+ * 🔵 `span`(display:block)인 까닭: 부르는 자리가 `li` 안이라 글 흐름을 끊지 않게.
+ * ============================================================================
+ */
+function StockRequestLineDetails({ line }: { line: InventoryStockRequestLine }) {
+  const customerName = stockRequestLineCustomerName(line);
+  const rest = stockRequestLineDetails(line);
+  /**
+   * 🔴 **두 번 따로 묻는다.** 받는 칸이 갈려 있어(부품의 소유 ↔ 그 줄의 유상/무상) 이 두 줄이 곧
+   *    「성격이 다르다」는 말이고, 한 함수로 합치면 그 가름이 사라진다(도메인 쪽 머리말).
+   * 🔵 차례는 소유 → 유상/무상이다 — 재고 관리 화면과 같다.
+   */
+  const tags: StockRequestLineTag[] = [stockRequestLineOwnerTag(line), stockRequestLineChargeTag(line)].filter(
+    (tag): tag is StockRequestLineTag => tag !== null
+  );
+  if (customerName === "" && tags.length === 0 && rest.length === 0) return null;
+  return (
+    <>
+      {/* 🔴 앞세우는 줄 — 굵기·크기·자리로 가른다(색만으로 가르지 않는다, 위 머리말). */}
+      {customerName !== "" && (
+        <span className="mt-0.5 block text-xs leading-snug font-medium text-zinc-900 dark:text-zinc-100">
+          {/* 🔵 이름표는 값보다 옅고 가늘게 — 굵은 것이 둘이면 어느 쪽을 훑어야 하는지 알 수 없다.
+              🔴 글자는 **정해 둔 한 곳**에서 온다(요청 ③) — 여기 쳐 두면 그 말이 바뀌는 날 이 줄만 옛말을 한다. */}
+          <span className="font-normal text-zinc-400 dark:text-zinc-500">{PART_FIELD_LABELS.customerPartName} </span>
+          {customerName}
+        </span>
+      )}
+      {/* 🔵 **딱지 줄** — 값이 몇 가지뿐인 짧은 값이라 글에 섞지 않고 상자로 세운다.
+          🔵 `flex-wrap` 인 까닭: 수리 건 상세의 이 칸은 좁아서 둘이 한 줄에 못 설 수 있다. */}
+      {tags.length > 0 && (
+        <span className="mt-1 flex flex-wrap items-center gap-1">
+          {tags.map((tag) => (
+            <span
+              key={tag.key}
+              className={`inline-flex items-center gap-1 rounded border px-1.5 py-px text-[11px] leading-tight ${tag.className}`}
+            >
+              {/* 🔵 이름표가 있는 딱지만 이름표를 그린다 — 「유상」·「무상」은 값 자체가 말이 된다(도메인 쪽 주석). */}
+              {tag.label !== "" && <span className="font-normal text-zinc-400 dark:text-zinc-500">{tag.label}</span>}
+              {tag.value}
+            </span>
+          ))}
+        </span>
+      )}
+      {rest.length > 0 && (
+        <span className="mt-0.5 block text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+          {rest.map((detail, index) => (
+            <span key={detail.key}>
+              {/* 🔵 이름표는 더 옅게, 값은 읽히게 — 훑는 것은 값이고 이름표는 「무슨 칸인지」만 알려 주면 된다. */}
+              {index > 0 && <span className="text-zinc-300 dark:text-zinc-600"> · </span>}
+              <span className="text-zinc-400 dark:text-zinc-500">{detail.label} </span>
+              {detail.value}
+            </span>
+          ))}
+        </span>
+      )}
+    </>
   );
 }
 

@@ -121,8 +121,39 @@ export const INVENTORY_STOCK_REQUEST_FIELDS = [
   "lines",
 ] as const;
 
-/** 신청 줄 하나에서 읽는 칸. 🔵 줄이 하나도 없는 신청이면 잴 것이 없다(건너뛴다). */
-export const INVENTORY_STOCK_REQUEST_LINE_FIELDS = ["no", "name", "quantity", "issued"] as const;
+/**
+ * 신청 줄 하나에서 읽는 칸. 🔵 줄이 하나도 없는 신청이면 잴 것이 없다(건너뛴다).
+ *
+ * 🔴 **2026-10-21 에 여섯이 더해졌다** — 그 부품을 알아보는 넷(고객사 품명 · 품명2 · 교산 품번 ·
+ *    도번)과 딱지 둘(소유구분 · 유상/무상). A/S 신청 줄이 그것을 그린다.
+ * 🔴 **`owner` 와 `chargeType` 은 여기서 **속을 보지 않는다**(`owner.code` 로 적지 않는다) —
+ *    둘 다 **`null` 이 정상인 칸**이라 점 찍힌 길로 재면 지워진 부품·대여 줄마다 ✗ 가 뜬다.
+ *    속 칸은 아래 두 목록으로 **들어 있을 때만** 본다(`decision`·`hold`·`requester` 와 같은 길).
+ */
+export const INVENTORY_STOCK_REQUEST_LINE_FIELDS = [
+  "no",
+  "name",
+  "quantity",
+  "issued",
+  "customerName",
+  "name2",
+  "kyosanPartNo",
+  "drawingNo",
+  "owner",
+  "chargeType",
+] as const;
+
+/**
+ * 🔵 **있을 때만 재는 칸들** — 신청 줄 안의 딱지 둘.
+ *
+ * 🔴 **`null` 이 어긋남이 아니다.** 소유는 **지워진 부품**이면 없고, 유상/무상은 **반출이 아닌
+ *    신청**(재고 관리에서 올린 대여·폐기)이면 처음부터 없다. 들어 있을 때 **속 칸이 맞는가**만 본다.
+ * 🔵 **둘을 한 목록으로 합치지 않는다.** 지금은 칸 이름이 같지만, 소유구분은 **부품의 속성**이고
+ *    유상/무상은 **그 줄의 값**이라 한쪽만 모양이 바뀔 수 있다(A/S 쪽 `InventoryStockRequestLine`
+ *    머리말). 합쳐 두면 그날 둘 다 고쳐야 하는 것처럼 보인다.
+ */
+export const INVENTORY_STOCK_REQUEST_LINE_OWNER_FIELDS = ["code", "label"] as const;
+export const INVENTORY_STOCK_REQUEST_LINE_CHARGE_FIELDS = ["code", "label"] as const;
 
 /**
  * 🔵 **있을 때만 재는 칸들.** 셋 다 `null` 이 정상이라(아직 결정 전 · 보류 아님 · 재고 관리에서

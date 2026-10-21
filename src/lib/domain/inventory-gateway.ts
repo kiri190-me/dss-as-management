@@ -46,7 +46,7 @@ import type { PartPickerPriceRow, PartPickerRow } from "@dss/core/ui/inventory/p
 /* 🔴 **보이는 차례를 적는 자리도 한 곳이다**(2026-10-16 요청 ③ — 「어디서든 같은 순서」).
    고객사 품명 · 품명 · 품명2 · 교산 품번 · 도번의 차례와 이름표는 저 파일의
    `PART_FIELD_ORDER` · `PART_FIELD_LABELS` 가 쥔다 — 여기서 다시 적으면 언젠가 갈린다. */
-import { partFieldEntries, partFieldValue } from "@dss/core/ui/inventory/part-picker-rows";
+import { partFieldEntries, partFieldValue, type PartFieldEntry } from "@dss/core/ui/inventory/part-picker-rows";
 
 /** 못 받아 온 까닭. 🔴 전부 **「없다」가 아니라 「모른다」**다. */
 export type InventoryUnreachableReason =
@@ -226,6 +226,25 @@ function codeLabel(value: unknown): { code: string; label: string } {
   if (!value || typeof value !== "object") return { code: "", label: "" };
   const o = value as { code?: unknown; label?: unknown; name?: unknown };
   return { code: str(o.code), label: str(o.label) || str(o.name) };
+}
+
+/**
+ * 같은 모양이되 🔴 **「없음」을 `null` 로 가른다.**
+ *
+ * 🔵 위 `codeLabel` 은 **언제나 있는 칸**(부품의 소유처럼)에 쓴다 — 거기서는 빈 글자가 와도
+ *    화면이 그냥 비워 두면 그만이다. 이쪽은 **없는 것이 정상인 칸**에 쓴다(지워진 부품의
+ *    소유 · 반출이 아닌 줄의 유상/무상). 🔴 그 둘을 한 함수로 다루면 `{ code: "", label: "" }`
+ *    이 「값이 있다」로 세어져 **글자 없는 빈 딱지**가 화면에 선다 — 이 조각이 지키려는
+ *    「값이 없으면 빈 자리를 만들지 않는다」가 바로 거기서 깨진다.
+ * 🔴 **코드가 없으면 통째로 `null`** 이다. 글자만 오고 코드가 없는 값은 가릴 수도 그릴 수도
+ *    없는 값이라(`parseRequester` 가 포털 번호에 거는 그 잣대와 같다) 없는 것으로 본다.
+ */
+function codeLabelOrNull(value: unknown): { code: string; label: string } | null {
+  if (!value || typeof value !== "object") return null;
+  const o = value as { code?: unknown; label?: unknown; name?: unknown };
+  const code = str(o.code);
+  if (code === "") return null;
+  return { code, label: str(o.label) || str(o.name) };
 }
 
 function positiveInt(value: unknown): number | null {
@@ -571,12 +590,57 @@ export function parseInventoryOhTemplateResponse(
 // 올린 신청의 지금 상태 (`GET /api/v1/stock-requests?intake=…`)
 // ---------------------------------------------------------------------------
 
+/**
+ * 올린 신청의 줄 하나.
+ *
+ * ── 🔴 **부품의 것과 줄의 것이 섞여 있다. 뭉뚱그리지 마라** (2026-10-21) ──
+ * **소유구분은 부품을 따라간다** — 어느 신청에서 보든 같은 값이다. **유상/무상은 그 줄의
+ * 값이다** — 같은 부품이라도 신청마다, 한 신청 안에서도 **줄마다 다를 수 있다.** 그래서
+ * 아래 딱지를 만드는 함수 둘은 **받는 칸이 갈려 있다**(`Pick<…, "owner">` ↔
+ * `Pick<…, "chargeType">`): 소유만 들고 유상/무상을 물을 수 없고 그 반대도 안 된다.
+ * 🔴 한 함수로 합치면 「이 **부품**은 유상인가요?」라는 **답이 없는 물음**이 생기고, 틀리면
+ *    비용이 잘못 간다. 재고 관리도 같은 가름을 타입으로 세워 두었다(저쪽 API.md 4-7절).
+ */
 export type InventoryStockRequestLine = {
   /** 그 사이 재고 쪽에서 지워진 부품이면 `null` 이고 이름이 「(지워진 부품)」이다. */
   no: number | null;
   name: string;
   quantity: number;
   issued: number;
+  /**
+   * 그 부품을 **알아보는 값 넷** (2026-10-21 에 저쪽 통로가 넓어졌다).
+   *
+   * 🔵 **왜 필요한가**: 같은 품명인 부품 묶음이 16개 있어서(저쪽 API.md 2절) 신청 줄에
+   *    품명만 떠 있으면 **어느 것인지 가릴 수 없었다.** 재고 관리 화면은 2026-10-16 부터
+   *    이 넷을 그리고 있었는데, A/S 로 나오는 통로만 네 칸을 안 옮겨 적고 있었다.
+   * 🔴 **없으면 빈 글자**이고, 지워진 부품이면 넷 다 빈 글자다.
+   * 🔴 **`-` 만 적힌 칸은 저쪽도 다듬지 않고 그대로 준다** — 값으로 셀지 말지는 보는 쪽이
+   *    정하는 일이고, 그 자는 이 저장소에 이미 하나 있다(`partFieldValue`). 아래
+   *    `stockRequestLineCustomerName`·`stockRequestLineDetails` 가 그것을 쓴다.
+   */
+  customerName: string;
+  name2: string;
+  kyosanPartNo: string;
+  drawingNo: string;
+  /**
+   * **소유구분** — 🔴 **부품의 속성이다**(위 머리말).
+   *
+   * 🔴 **지워진 부품이면 `null`** 이다. 저쪽이 「DSS」 같은 기본값을 지어내지 않고, 이쪽도
+   *    그때 **아무것도 안 그린다** — `-` 를 적으면 「소유가 없는 부품」처럼 읽히는데 참말은
+   *    「부품을 못 찾았다」이고 그것은 품명 칸이 이미 말하고 있다.
+   * 🔵 `{ code, label }` 모양은 부품 목록의 `owner` 와 같다 — 글자는 **저쪽이 준 것을 그대로**
+   *    쓴다(이 파일 머리말).
+   */
+  owner: { code: string; label: string } | null;
+  /**
+   * **유상/무상** — 🔴 **그 줄의 값이다**(위 머리말).
+   *
+   * 🔴 **`null` 이 정상인 자리가 있다** — 반출이 아닌 신청(재고 관리에서 올린 대여·폐기)의
+   *    줄에는 처음부터 없는 칸이다. **못 찾은 것이 아니라 없는 것**이라, 그때 딱지도 안 선다.
+   * 🔵 A/S 가 올리는 신청은 전부 반출이고 줄마다 이 값을 반드시 실어 보내므로(`parseStockRequestLines`),
+   *    우리가 올린 신청에서는 언제나 들어 있다.
+   */
+  chargeType: { code: string; label: string } | null;
 };
 
 export type InventoryStockRequest = {
@@ -678,6 +742,16 @@ export function parseInventoryStockRequestsResponse(json: unknown): InventorySto
         name: str(e.name),
         quantity: typeof e.quantity === "number" ? e.quantity : 0,
         issued: typeof e.issued === "number" ? e.issued : 0,
+        /* 🔵 **다듬지 않고 그대로 담는다**(`str` 은 앞뒤 공백만 뗀다) — `-` 를 값으로 셀지는
+           그리는 자리의 일이고, 그 자는 `partFieldValue` 하나다(위 타입 주석). */
+        customerName: str(e.customerName),
+        name2: str(e.name2),
+        kyosanPartNo: str(e.kyosanPartNo),
+        drawingNo: str(e.drawingNo),
+        /* 🔴 **없는 것과 빈 것을 가른다** — 지워진 부품의 소유도, 반출이 아닌 줄의 유상/무상도
+           `null` 이 참말이다. 빈 `{ code, label }` 로 두면 글자 없는 딱지가 선다. */
+        owner: codeLabelOrNull(e.owner),
+        chargeType: codeLabelOrNull(e.chargeType),
       });
     }
 
@@ -705,6 +779,173 @@ export function parseInventoryStockRequestsResponse(json: unknown): InventorySto
  */
 export function isInventoryRequestSettled(request: Pick<InventoryStockRequest, "status">): boolean {
   return request.status.code === "CONFIRMED" || request.status.code === "REJECTED" || request.status.code === "CANCELLED";
+}
+
+// ---------------------------------------------------------------------------
+// 신청 줄에 **어느 부품인지**를 보인다 (2026-10-21)
+// ---------------------------------------------------------------------------
+
+/**
+ * ============================================================================
+ * 🔴 「No. 165 AMP-… — 요청 2 / 불출 0」만으로는 **어느 부품인지 모른다**
+ * ============================================================================
+ * 같은 품명인 부품 묶음이 16개 있다(저쪽 API.md 2절). 재고 관리의 [부품 요청]·[승인 요청건]
+ * 화면은 2026-10-21 에 같은 자리를 이렇게 바꿨고, A/S 의 반출 신청 줄도 **같은 규칙**을 따른다.
+ *
+ * ── 지키는 규칙 셋 — 🔴 **베끼는 것이 아니라 맞추는 것이다** ───────────────
+ *  ㉠ **고객사 품명을 앞세운다.** 고객사와 말을 주고받을 때 쓰는 이름이라 **눈으로 훑어 찾는
+ *     값**이 이것이다. 넷을 같은 크기로 늘어놓으면 매번 뒤져야 한다.
+ *  ㉡ **값이 없는 칸은 아예 안 그린다.** 「교산 품번 없음 · 도번 없음」이 줄줄이 깔리면 정작
+ *     있는 값이 묻힌다. 🔴 `-` 만 적힌 칸도 **없는 칸**이다(자료가 엑셀에서 넘어왔다) —
+ *     재는 자는 이 저장소에 이미 있는 `partFieldValue` 하나이고, 재고 관리도 같은 자를 쓴다.
+ *  ㉢ **딱지 둘은 성격이 다르다** — 소유구분은 부품의 것, 유상/무상은 그 줄의 것
+ *     (`InventoryStockRequestLine` 머리말). 그래서 **함수가 둘**이고 받는 칸도 갈라 둔다.
+ *
+ * 🔵 **그리는 모양이 아니라 「무엇을 어떤 차례로」만 여기서 정한다** — 줄을 어떻게 나눌지는
+ *    `PartRequestSection` 이 정한다. 그 덕에 이 규칙에 React 없는 시험이 붙는다(이 파일의
+ *    `inventoryPartIdLabels` 머리말과 같은 가름이다).
+ * ============================================================================
+ */
+
+/**
+ * 줄에서 **앞세우는 값** — 고객사 품명. 없으면 **빈 글자**이고, 그때 화면은 그 줄을 안 그린다.
+ *
+ * 🔴 **품명으로 대신 세우지 않는다.** 바로 윗줄이 이미 `No. 165 <품명>` 을 그리고 있어서,
+ *    대신 세우면 같은 글자가 두 줄에 걸쳐 나오고 **그 복사본이 줄에서 가장 굵은 글자**가 된다.
+ *    앞세우기는 「훑을 값을 하나 고르는 일」인데 윗줄과 같은 값을 고르면 고른 것이 없는 것과 같다.
+ * 🔵 **부품 찾기 줄과 같은 자를 쓴다**(`inventoryPartCustomerName` 도 `partFieldValue` 다) —
+ *    한쪽만 `-` 를 값으로 세면 같은 부품이 두 자리에서 다르게 보인다.
+ */
+export function stockRequestLineCustomerName(line: Pick<InventoryStockRequestLine, "customerName">): string {
+  return partFieldValue(line.customerName);
+}
+
+/**
+ * 줄에 **작게 늘어놓는 나머지** — 품명2 · 교산 품번 · 도번. 🔴 **값이 있는 것만** 차례대로.
+ *
+ * 🔴 **차례도 이름표도 여기서 짓지 않는다** — `PART_FIELD_ORDER` 가 쥔다(2026-10-16 요청 ③:
+ *    「어디서든 같은 순서」). 부품 찾기 줄·견적서 고르개도 같은 표를 보고 그린다.
+ * 🔵 **고객사 품명은 빠져 있다** — 바로 위에서 제 줄로 따로 세운다. 품명도 빠져 있다 — 줄의
+ *    머리가 이미 그 값이다.
+ */
+export function stockRequestLineDetails(
+  line: Pick<InventoryStockRequestLine, "name2" | "kyosanPartNo" | "drawingNo">
+): PartFieldEntry[] {
+  /* 🔵 넘기지 않은 칸은 빈 값이라 저쪽이 알아서 뺀다 — 여기서 거를 것이 없다. */
+  return partFieldEntries({
+    partSpec: line.name2,
+    kyosanPartNo: line.kyosanPartNo,
+    drawingNo: line.drawingNo,
+  });
+}
+
+/**
+ * 줄에 붙는 **딱지** 하나.
+ *
+ * 🔴 **글자와 꾸밈을 한 자리에서 함께 고른다.** 따로 두면 한쪽만 늘어나고, 그때 색약인 사람에게
+ *    모든 딱지가 같아 보인다. **색을 빼도 말이 되어야 한다**(이 저장소와 재고 관리 양쪽의 규약).
+ * 🔵 이 모듈에 꾸밈이 사는 까닭: 이 화면은 서버 액션을 부르는 클라이언트 컴포넌트라 이 환경에서
+ *    **그려 볼 수 없다**(`part-request-section-wiring.test.ts` 머리말). 꾸밈을 화면 안에 두면
+ *    「색 말고도 갈리는가」를 **아무도 돌려 보지 못한다.**
+ */
+export type StockRequestLineTag = {
+  /** 어느 값인가. 🔵 화면의 `key` 이자, 시험이 「둘이 섞이지 않았나」를 짚는 이름이다. */
+  key: "owner" | "chargeType";
+  /**
+   * 값 앞에 붙는 작은 글자. 🔵 **빈 글자일 수 있다** — 값 자체가 이미 말이 되는 딱지는 라벨을
+   * 달지 않는다(아래 유상/무상). 🔴 그 있고 없음이 두 딱지를 가르는 **「색 아닌」 표식 하나**다.
+   */
+  label: string;
+  value: string;
+  /** 상자 꾸밈. 🔴 위 머리말 — 색만 담지 않고, 🔴 **다크 짝이 붙어 있어야 한다**. */
+  className: string;
+};
+
+/** 소유구분 딱지의 라벨. 🔵 값(`DSS`·`KYOSAN`·`보수부재`)만으로는 무슨 칸인지 모른다 — 그래서 붙인다. */
+export const STOCK_REQUEST_OWNER_TAG_LABEL = "소유";
+
+/**
+ * 소유구분 딱지의 꾸밈 — **중립색 · 보통 굵기**.
+ *
+ * 🔵 **일부러 눈에 덜 띄게 둔다.** 이 줄에서 돈이 걸린 값은 아래 유상/무상이고, 둘을 같은 세기로
+ *    그리면 그쪽이 묻힌다. 소유는 「어느 재고에서 빠지나」를 확인하는 값이라 보이면 충분하다.
+ */
+export const STOCK_REQUEST_OWNER_TAG_CLASS =
+  "border-zinc-200 bg-zinc-50 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
+
+/**
+ * **부품의 소유구분** 딱지. 없으면 `null` 이고, 그때 화면은 **아무것도 안 그린다.**
+ *
+ * 🔴 **받는 칸이 `owner` 하나다** — 유상/무상을 들고는 이 함수를 부를 수 없다. 그 가름이 이
+ *    조각의 뜻이다(`InventoryStockRequestLine` 머리말).
+ * 🔴 **빈 자리를 만들지 않는다.** 부품을 못 찾은 줄에 `-` 를 적으면 「소유가 없는 부품」처럼
+ *    읽히는데, 참말은 **부품을 못 찾았다**이고 그것은 품명 칸이 이미 말하고 있다.
+ * 🔵 글자는 **저쪽이 준 것을 그대로** 쓰고, 없으면 코드를 그린다 — 이 저장소가 상태 배지와
+ *    부품 찾기 줄에서 쓰는 그 `label || code` 그대로다. 우리 표로 다시 지으면 두 화면이 다른
+ *    말을 하고, 저쪽이 말을 바꾸는 날 이쪽만 옛말을 한다.
+ */
+export function stockRequestLineOwnerTag(
+  line: Pick<InventoryStockRequestLine, "owner">
+): StockRequestLineTag | null {
+  if (line.owner === null) return null;
+  return {
+    key: "owner",
+    label: STOCK_REQUEST_OWNER_TAG_LABEL,
+    value: line.owner.label || line.owner.code,
+    className: STOCK_REQUEST_OWNER_TAG_CLASS,
+  };
+}
+
+/**
+ * 유상/무상 딱지의 꾸밈 — 🔴 **둘이 색 말고도 갈린다.**
+ *
+ *  ① **글자가 다르다**(「유상」 ↔ 「무상」). 색을 전부 지워도 이 가름은 남는다.
+ *  ② **바탕이 차 있나**가 다르다(연노랑 ↔ 카드와 같은 바탕). 흑백으로 찍어도, 색약인 눈에도
+ *     **한쪽만 칠해져 있다**는 것은 보인다.
+ *
+ * 🔴 **둘 다 굵다**(`font-semibold`). 돈이 걸린 값이라 흘려 적어서 놓치는 일이 없어야 하고,
+ *    소유구분 딱지가 보통 굵기인 것과 함께 **두 딱지를 가르는 「색 아닌」 표식**이 된다.
+ * 🔴 **다크 짝이 붙어 있다** — 밝은 쪽만 적으면 어두운 화면에서 글자가 배경에 잠긴다
+ *    (이 화면의 이웃 꾸밈들도 전부 짝이 있다).
+ * 🔵 유상에 노랑을 고른 까닭: 이 화면에서 주황·노랑은 「사람이 더 볼 것이 있다」는 뜻으로 쓰인다
+ *    (고객사 품명 없음 안내 · 못 불러옴 상자). 유상은 **청구가 따라붙는** 줄이다.
+ */
+export const STOCK_REQUEST_CHARGE_TAG_CLASS: Record<ChargeType, string> = {
+  PAID: "border-amber-300 bg-amber-50 font-semibold text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200",
+  FREE: "border-zinc-300 bg-white font-semibold text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200",
+};
+
+/**
+ * 🔴 **모르는 코드의 꾸밈** — 저쪽이 유상/무상을 하나 더 만드는 날 쓰인다.
+ *
+ * 🔵 **테두리를 점선으로** 둔다. 색이 아니라 **선의 모양**이라 흑백에서도 보이고, 「우리가 모르는
+ *    값이다」가 한눈에 드러난다. 🔴 둘 중 아무 쪽으로도 칠하지 않는 까닭: 모르는 값을 무상처럼
+ *    칠하면 **청구가 따라붙는 줄이 안 붙는 줄로 보인다.** 글자는 저쪽이 준 것을 그대로 그린다.
+ */
+export const STOCK_REQUEST_CHARGE_TAG_UNKNOWN_CLASS =
+  "border-dashed border-zinc-400 bg-white font-semibold text-zinc-700 dark:border-zinc-500 dark:bg-zinc-900 dark:text-zinc-200";
+
+/**
+ * **그 줄의 유상/무상** 딱지. 없으면 `null` 이고, 그때 화면은 **아무것도 안 그린다.**
+ *
+ * 🔴 **받는 칸이 `chargeType` 하나다** — 소유를 들고는 부를 수 없다. 「이 **부품**은 유상인가요?」는
+ *    답이 없는 물음이기 때문이다(`InventoryStockRequestLine` 머리말).
+ * 🔴 **라벨을 달지 않는다.** 「유상」·「무상」이 그 자체로 무슨 칸인지까지 말하는 낱말이라, 앞에
+ *    「유상/무상」을 또 적으면 같은 말이 두 번 나오고 딱지가 길어져 **오히려 묻힌다.**
+ * 🔵 **비어 있는 것이 정상인 자리가 있다** — 재고 관리에서 올린 대여·폐기 줄에는 이 값이 처음부터
+ *    없다. 그래서 「없으면 안 그린다」가 여기서는 **빠뜨림이 아니라 참말**이다.
+ */
+export function stockRequestLineChargeTag(
+  line: Pick<InventoryStockRequestLine, "chargeType">
+): StockRequestLineTag | null {
+  if (line.chargeType === null) return null;
+  const code = line.chargeType.code;
+  return {
+    key: "chargeType",
+    label: "",
+    value: line.chargeType.label || code,
+    className: isChargeType(code) ? STOCK_REQUEST_CHARGE_TAG_CLASS[code] : STOCK_REQUEST_CHARGE_TAG_UNKNOWN_CLASS,
+  };
 }
 
 // ---------------------------------------------------------------------------

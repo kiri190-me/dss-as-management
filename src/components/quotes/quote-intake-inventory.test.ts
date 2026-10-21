@@ -308,6 +308,15 @@ function stockRequest(lines: { no: number; issued: number }[]): InventoryStockRe
       name: `부품-${line.no}`,
       quantity: line.issued,
       issued: line.issued,
+      /* 🔵 2026-10-21 에 줄이 넓어졌다(그 부품을 알아보는 값들 · 딱지 둘). 이 시험이 재는 것은
+         **출고 부품을 세는 일**이라 그 칸들을 쓰지 않는다 — 「없음」 쪽으로 둔다. 그리는 규칙은
+         `lib/domain/inventory-gateway.test.ts` 가 따로 잰다. */
+      customerName: "",
+      name2: "",
+      kyosanPartNo: "",
+      drawingNo: "",
+      owner: null,
+      chargeType: null,
     })),
     decision: null,
     hold: null,

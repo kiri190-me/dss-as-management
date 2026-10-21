@@ -23,10 +23,21 @@ import {
   parseStockRequestLines,
   stockRequestDecisionLabel,
   stockRequestKeyBelongsToCase,
+  stockRequestLineChargeTag,
+  stockRequestLineCustomerName,
+  stockRequestLineDetails,
+  stockRequestLineOwnerTag,
   toScreenStockRequests,
+  STOCK_REQUEST_CHARGE_TAG_CLASS,
+  STOCK_REQUEST_CHARGE_TAG_UNKNOWN_CLASS,
+  STOCK_REQUEST_OWNER_TAG_CLASS,
   type InventoryPart,
   type InventoryStockRequest,
+  type InventoryStockRequestLine,
 } from "./inventory-gateway";
+/* 🔴 차례와 이름표를 **여기서 다시 적지 않는다** — 시험이 제 손으로 적으면 그 표를 고치는 날
+   시험만 옛 차례를 지키고, 화면은 조용히 다른 차례로 간다(2026-10-16 요청 ③). */
+import { PART_FIELD_LABELS, PART_FIELD_ORDER } from "@dss/core/ui/inventory/part-picker-rows";
 
 /**
  * ============================================================================
@@ -649,5 +660,260 @@ describe("🔴 결정 사유의 머리글", () => {
     assert.equal(stockRequestDecisionLabel(decided("CONFIRMED", false)), "결정 사유");
     assert.equal(stockRequestDecisionLabel(decided("CANCELLED", false)), "결정 사유");
     assert.equal(stockRequestDecisionLabel(decided("BRAND_NEW", false)), "결정 사유");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 신청 줄에 **어느 부품인지**가 보인다 (2026-10-21 쓰는 분 요청)
+ * ============================================================================
+ * 「No. 165 AMP-… — 요청 2 / 불출 0」만으로는 가릴 수 없었다 — 같은 품명인 부품 묶음이 16개
+ * 있다(재고 관리 API.md 2절). 재고 관리가 같은 날 제 화면을 그렇게 바꿨고, 그 뒤에 통로가
+ * 칸을 내주게 넓어졌다. 🔵 **조회는 전부터 싣고 있었다** — 끊겨 있던 자리는 통로가 칸을 손으로
+ * 옮겨 적는 그 한 곳이었다.
+ *
+ * 여기서 재는 것 넷:
+ *  ㉠ **파서가 여섯을 다 들고 온다**(넷 + 딱지 둘), 그리고 **없는 것과 빈 것을 가른다.**
+ *  ㉡ 🔴 **값이 없으면 빈 자리를 만들지 않는다** — `-` 만 적힌 칸도 없는 칸이다.
+ *  ㉢ 🔴 **고객사 품명이 앞선다**, 나머지는 정해 둔 차례대로.
+ *  ㉣ 🔴 **딱지 둘이 색 말고도 갈린다**, 그리고 **다크 짝이 붙어 있다.**
+ *
+ * 🔵 화면이 이 규칙을 실제로 쓰는가는 짝 시험이 잰다
+ *    (`components/inventory/part-request-section-wiring.test.ts`). 둘 중 하나만 있으면 시험이
+ *    비어 있는 것과 같다 — 규칙은 맞는데 화면이 안 쓰거나, 화면은 부르는데 규칙이 없다.
+ * ============================================================================
+ */
+
+/** 줄 하나를 **통로 응답 모양 그대로** 만들어 파서를 지나게 한다 — 실제 길과 같은 것을 재려고. */
+function parsedLine(over: Record<string, unknown> = {}): InventoryStockRequestLine {
+  const parsed = parseInventoryStockRequestsResponse({
+    requests: [
+      {
+        requestKey: "AS-TEST-0001",
+        id: "r1",
+        intakeNumber: "D260701",
+        status: { code: "PENDING", label: "대기" },
+        closed: false,
+        requestedAt: "2026-10-21T01:00:00.000Z",
+        lines: [
+          {
+            no: 165,
+            name: "AMP-TEST-A1",
+            quantity: 2,
+            issued: 0,
+            customerName: "증폭기 조립품",
+            name2: "13M",
+            kyosanPartNo: "KY-7788",
+            drawingNo: "DWG-1001",
+            owner: { code: "KYOSAN", label: "KYOSAN" },
+            chargeType: { code: "PAID", label: "유상" },
+            ...over,
+          },
+        ],
+      },
+    ],
+  });
+  assert.ok(parsed, "응답 모양을 못 읽었다");
+  return parsed[0].lines[0];
+}
+
+describe("🔴 신청 줄의 자세한 내용 — 파서가 들고 온다", () => {
+  test("㉠ 그 부품을 알아보는 값 넷이 그대로 온다", () => {
+    const line = parsedLine();
+    assert.equal(line.customerName, "증폭기 조립품");
+    assert.equal(line.name2, "13M");
+    assert.equal(line.kyosanPartNo, "KY-7788");
+    assert.equal(line.drawingNo, "DWG-1001");
+  });
+
+  test("㉠ 딱지 둘도 코드와 글자를 그대로 들고 온다", () => {
+    const line = parsedLine();
+    assert.deepEqual(line.owner, { code: "KYOSAN", label: "KYOSAN" });
+    assert.deepEqual(line.chargeType, { code: "PAID", label: "유상" });
+  });
+
+  test("🔴 옛 모양(칸이 없는 줄)도 읽는다 — 저쪽이 넓히기 전에 선 신청이 그렇다", () => {
+    // 🔵 칸이 없는 것은 **오류가 아니다.** 없는 것으로 읽고 그 줄은 자세한 내용 없이 그려진다.
+    const line = parsedLine({
+      customerName: undefined,
+      name2: undefined,
+      kyosanPartNo: undefined,
+      drawingNo: undefined,
+      owner: undefined,
+      chargeType: undefined,
+    });
+    assert.deepEqual([line.customerName, line.name2, line.kyosanPartNo, line.drawingNo], ["", "", "", ""]);
+    assert.equal(line.owner, null);
+    assert.equal(line.chargeType, null);
+    // 🔴 머리줄이 쓰는 값은 그대로다 — 새 칸이 없다고 줄 자체가 무너지면 안 된다.
+    assert.equal(line.no, 165);
+    assert.equal(line.quantity, 2);
+  });
+
+  test("🔴 **없음과 빈 것을 가른다** — 코드가 없는 딱지는 통째로 `null` 이다", () => {
+    // 🔴 `{ code: "", label: "" }` 을 「값이 있다」로 세면 **글자 없는 빈 딱지**가 화면에 선다.
+    assert.equal(parsedLine({ owner: { code: "", label: "" } }).owner, null);
+    assert.equal(parsedLine({ chargeType: { code: "", label: "" } }).chargeType, null);
+    assert.equal(parsedLine({ owner: null }).owner, null);
+    assert.equal(parsedLine({ chargeType: null }).chargeType, null);
+  });
+
+  test("🔵 글자가 없어도 코드가 있으면 값이다 — 그릴 때 코드를 그린다", () => {
+    assert.deepEqual(parsedLine({ owner: { code: "DSS" } }).owner, { code: "DSS", label: "" });
+  });
+});
+
+describe("🔴 신청 줄 — 값이 없으면 빈 자리를 만들지 않는다", () => {
+  test("㉡ 고객사 품명이 비면 빈 글자다 — 「없음」을 지어내지 않는다", () => {
+    assert.equal(stockRequestLineCustomerName(parsedLine({ customerName: "" })), "");
+  });
+
+  test("㉡ 🔴 `-` 만 적힌 칸도 **없는 칸**이다 — 자료가 엑셀에서 넘어왔다", () => {
+    // 🔴 재는 자가 부품 찾기 줄과 **같은 하나**여야 한다 — 한쪽만 `-` 를 값으로 세면 같은 부품이
+    //    두 자리에서 다르게 보인다.
+    assert.equal(stockRequestLineCustomerName(parsedLine({ customerName: "-" })), "");
+    assert.deepEqual(stockRequestLineDetails(parsedLine({ name2: "-", kyosanPartNo: "-", drawingNo: "-" })), []);
+  });
+
+  test("㉡ 빈 칸은 목록에서 아예 빠진다 — 있는 것만 남는다", () => {
+    const details = stockRequestLineDetails(parsedLine({ name2: "", kyosanPartNo: "" }));
+    assert.deepEqual(
+      details.map((d) => d.key),
+      ["drawingNo"]
+    );
+  });
+
+  test("㉡ 🔴 지워진 부품 줄에는 **아무것도 안 그린다** — 소유도 자세한 내용도 없다", () => {
+    const line = parsedLine({
+      no: null,
+      name: "(지워진 부품)",
+      customerName: "",
+      name2: "",
+      kyosanPartNo: "",
+      drawingNo: "",
+      owner: null,
+    });
+    assert.equal(stockRequestLineCustomerName(line), "");
+    assert.deepEqual(stockRequestLineDetails(line), []);
+    assert.equal(stockRequestLineOwnerTag(line), null);
+    // 🔵 **유상/무상은 남는다** — 부품 표가 아니라 신청 줄에서 오는 값이다.
+    assert.notEqual(stockRequestLineChargeTag(line), null);
+  });
+});
+
+describe("🔴 신청 줄 — 고객사 품명이 앞선다", () => {
+  test("㉢ 앞세우는 값은 고객사 품명 하나다", () => {
+    assert.equal(stockRequestLineCustomerName(parsedLine()), "증폭기 조립품");
+  });
+
+  test("㉢ 🔴 앞세운 값이 **나머지에 또 끼지 않는다** — 같은 글자가 두 줄에 서면 고른 것이 없는 것과 같다", () => {
+    const keys = stockRequestLineDetails(parsedLine()).map((d) => d.key);
+    assert.ok(!keys.includes("customerPartName"), "고객사 품명이 나머지에도 끼어 있다");
+    assert.ok(!keys.includes("partName"), "품명이 끼어 있다 — 줄의 머리가 이미 그 값이다");
+  });
+
+  test("㉢ 나머지의 차례는 품명2 · 교산 품번 · 도번이고, 이름표도 정해 둔 한 곳에서 온다", () => {
+    const details = stockRequestLineDetails(parsedLine());
+    assert.deepEqual(
+      details.map((d) => d.key),
+      ["partSpec", "kyosanPartNo", "drawingNo"]
+    );
+    assert.deepEqual(
+      details.map((d) => d.label),
+      [PART_FIELD_LABELS.partSpec, PART_FIELD_LABELS.kyosanPartNo, PART_FIELD_LABELS.drawingNo]
+    );
+    assert.deepEqual(
+      details.map((d) => d.value),
+      ["13M", "KY-7788", "DWG-1001"]
+    );
+  });
+
+  test("🔴 차례를 **이 자리에서 다시 적지 않았다** — `PART_FIELD_ORDER` 한 표가 쥔다", () => {
+    // 🔵 거슬러 적어 두면 그 표를 고치는 날 이 줄만 옛 차례로 남는다.
+    const order = stockRequestLineDetails(parsedLine()).map((d) => d.key);
+    const inFieldOrder = [...order].sort((a, b) => PART_FIELD_ORDER.indexOf(a) - PART_FIELD_ORDER.indexOf(b));
+    assert.deepEqual(order, inFieldOrder);
+  });
+});
+
+describe("🔴 딱지 둘 — 성격이 다르고, 색 말고도 갈린다", () => {
+  test("㉣ 소유구분은 **부품의 것**이고 이름표가 붙는다 — 값만으로는 무슨 칸인지 모른다", () => {
+    const tag = stockRequestLineOwnerTag(parsedLine());
+    assert.equal(tag?.key, "owner");
+    assert.equal(tag?.label, "소유");
+    assert.equal(tag?.value, "KYOSAN");
+  });
+
+  test("㉣ 유상/무상은 **그 줄의 것**이고 이름표가 없다 — 값 자체가 말이 된다", () => {
+    const tag = stockRequestLineChargeTag(parsedLine());
+    assert.equal(tag?.key, "chargeType");
+    assert.equal(tag?.label, "", "「유상/무상 유상」처럼 같은 말이 두 번 나온다");
+    assert.equal(tag?.value, "유상");
+  });
+
+  test("🔴 **둘을 따로 묻는다** — 한쪽이 없어도 다른 쪽은 선다", () => {
+    // 🔴 한 함수로 합치면 「이 **부품**은 유상인가요?」라는 답이 없는 물음이 생긴다. 받는 칸이
+    //    갈려 있다는 것을 값으로 확인한다 — 지워진 부품 줄은 소유가 없어도 유상/무상이 서고(위),
+    //    대여·폐기 줄은 유상/무상이 없어도 소유가 선다(아래).
+    const line = parsedLine({ chargeType: null });
+    assert.equal(stockRequestLineChargeTag(line), null);
+    assert.notEqual(stockRequestLineOwnerTag(line), null);
+  });
+
+  test("㉣ 🔴 유상과 무상이 **글자로** 갈린다 — 색을 전부 지워도 남는 가름", () => {
+    assert.equal(stockRequestLineChargeTag(parsedLine({ chargeType: { code: "PAID", label: "유상" } }))?.value, "유상");
+    assert.equal(stockRequestLineChargeTag(parsedLine({ chargeType: { code: "FREE", label: "무상" } }))?.value, "무상");
+  });
+
+  test("㉣ 🔴 유상과 무상이 **바탕이 차 있나**로도 갈린다 — 흑백으로 찍어도 보인다", () => {
+    const paid = STOCK_REQUEST_CHARGE_TAG_CLASS.PAID;
+    const free = STOCK_REQUEST_CHARGE_TAG_CLASS.FREE;
+    // 🔴 색 이름만 다른 것으로는 모자라다. **칠해진 쪽과 안 칠해진 쪽**이 있어야 한다.
+    assert.match(paid, /\bbg-amber-/, "유상 쪽이 칠해져 있지 않다");
+    assert.match(free, /\bbg-white\b/, "무상 쪽이 카드와 같은 바탕이 아니다");
+    assert.notEqual(paid.replace(/amber/g, "zinc"), free, "색 이름만 다르다 — 색약인 눈에는 같아 보인다");
+  });
+
+  test("㉣ 🔴 돈이 걸린 딱지만 굵다 — 소유구분은 보통 굵기다(색 아닌 표식 하나)", () => {
+    for (const code of ["PAID", "FREE"] as const) {
+      assert.match(STOCK_REQUEST_CHARGE_TAG_CLASS[code], /\bfont-semibold\b/, code);
+    }
+    assert.doesNotMatch(
+      STOCK_REQUEST_OWNER_TAG_CLASS,
+      /\bfont-semibold\b/,
+      "소유구분이 유상/무상만큼 굵다 — 돈 걸린 값이 묻힌다"
+    );
+  });
+
+  test("㉣ 🔴 **다크 짝이 전부 붙어 있다** — 밝은 쪽만 적으면 어두운 화면에서 글자가 잠긴다", () => {
+    const classes = [
+      STOCK_REQUEST_OWNER_TAG_CLASS,
+      STOCK_REQUEST_CHARGE_TAG_CLASS.PAID,
+      STOCK_REQUEST_CHARGE_TAG_CLASS.FREE,
+      STOCK_REQUEST_CHARGE_TAG_UNKNOWN_CLASS,
+    ];
+    for (const className of classes) {
+      // 밝은 쪽에 적은 border · bg · text 마다 dark: 짝이 하나씩 있어야 한다.
+      for (const kind of ["border", "bg", "text"] as const) {
+        const light = new RegExp(`(?<!dark:)\\b${kind}-(?:[a-z]+-\\d|white\\b)`).test(className);
+        const dark = new RegExp(`dark:${kind}-(?:[a-z]+-\\d|white\\b)`).test(className);
+        assert.equal(light, dark, `${kind} 의 다크 짝이 빠졌다: ${className}`);
+      }
+    }
+  });
+
+  test("🔴 모르는 유상/무상 코드는 **둘 중 아무 쪽으로도 칠하지 않는다** — 점선으로 세운다", () => {
+    // 🔴 모르는 값을 무상처럼 칠하면 **청구가 따라붙는 줄이 안 붙는 줄로 보인다.**
+    const tag = stockRequestLineChargeTag(parsedLine({ chargeType: { code: "BRAND_NEW", label: "새 값" } }));
+    assert.equal(tag?.value, "새 값", "저쪽이 준 글자를 안 쓴다");
+    assert.match(tag?.className ?? "", /\bborder-dashed\b/, "모르는 값인지 알 길이 없다");
+    assert.notEqual(tag?.className, STOCK_REQUEST_CHARGE_TAG_CLASS.PAID);
+    assert.notEqual(tag?.className, STOCK_REQUEST_CHARGE_TAG_CLASS.FREE);
+  });
+
+  test("🔴 글자는 **저쪽이 준 것 그대로**다 — 없으면 코드를 그리고, 우리 표로 다시 짓지 않는다", () => {
+    assert.equal(stockRequestLineOwnerTag(parsedLine({ owner: { code: "SERVICE_SPARE", label: "보수부재" } }))?.value, "보수부재");
+    assert.equal(stockRequestLineOwnerTag(parsedLine({ owner: { code: "SERVICE_SPARE" } }))?.value, "SERVICE_SPARE");
+    assert.equal(stockRequestLineChargeTag(parsedLine({ chargeType: { code: "FREE" } }))?.value, "FREE");
   });
 });

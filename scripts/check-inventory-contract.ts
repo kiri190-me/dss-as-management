@@ -10,7 +10,9 @@ import {
   INVENTORY_STOCK_REQUEST_DECISION_FIELDS,
   INVENTORY_STOCK_REQUEST_FIELDS,
   INVENTORY_STOCK_REQUEST_HOLD_FIELDS,
+  INVENTORY_STOCK_REQUEST_LINE_CHARGE_FIELDS,
   INVENTORY_STOCK_REQUEST_LINE_FIELDS,
+  INVENTORY_STOCK_REQUEST_LINE_OWNER_FIELDS,
   INVENTORY_STOCK_REQUEST_REQUESTER_FIELDS,
   codesMissingFromInventory,
   codesUnknownToAs,
@@ -282,7 +284,31 @@ function checkOneRequest(raw: unknown, where: string): string | null {
     cannotMeasure(`${where}: 신청 줄의 칸`, "줄이 하나도 없는 신청이다");
   } else {
     const lineGone = missingFields(lines[0], INVENTORY_STOCK_REQUEST_LINE_FIELDS);
-    check(`${where}: 신청 줄의 칸이 다 있다`, lineGone.length === 0, `없는 칸: ${lineGone.join(", ")}`);
+    check(`🔴 ${where}: 신청 줄이 A/S 가 읽는 칸을 다 준다`, lineGone.length === 0, `없는 칸: ${lineGone.join(", ")}`);
+
+    /**
+     * 🔴 **딱지 둘의 속까지 본다** (2026-10-21). A/S 신청 줄은 소유구분과 유상/무상을 상자로 그리는데,
+     *    그릴 값은 `{ code, label }` 이다 — `code` 가 없으면 A/S 파서가 그 줄을 **통째로 `null`** 로
+     *    접고(`codeLabelOrNull`) 딱지가 **조용히 사라진다.** 오류가 아니라 빠짐이라 아무도 신고하지 않는다.
+     * 🔵 둘 다 **`null` 이 정상인 자리가 있다**(지워진 부품의 소유 · 반출이 아닌 줄의 유상/무상)라서
+     *    `decision`·`hold`·`requester` 와 **같은 길**로 — 들어 있을 때만 속을 본다.
+     * 🔴 **줄 하나만 보지 않는다.** 지워진 부품 줄 하나가 맨 앞에 서면 `null` 만 보고 「못 쟀다」로 끝나,
+     *    같은 신청의 멀쩡한 줄이 주는 값을 영영 안 재게 된다.
+     */
+    for (const [name, fields] of [
+      ["owner", INVENTORY_STOCK_REQUEST_LINE_OWNER_FIELDS],
+      ["chargeType", INVENTORY_STOCK_REQUEST_LINE_CHARGE_FIELDS],
+    ] as const) {
+      const present = lines
+        .map((line) => (line && typeof line === "object" ? (line as Record<string, unknown>)[name] : undefined))
+        .filter((value) => value !== null && value !== undefined);
+      if (present.length === 0) {
+        cannotMeasure(`${where}: 신청 줄의 ${name} 속 칸`, `이 신청의 줄에는 ${name} 이 하나도 없다 (지워진 부품이거나 반출이 아닌 신청)`);
+        continue;
+      }
+      const inner = present.flatMap((value) => missingFields(value, fields));
+      check(`${where}: 신청 줄의 ${name} 칸이 다 있다`, inner.length === 0, `없는 칸: ${[...new Set(inner)].join(", ")}`);
+    }
   }
 
   /* 🔵 셋 다 `null` 이 정상이라 **들어 있을 때만** 속을 본다(없다고 어긋난 것이 아니다). */

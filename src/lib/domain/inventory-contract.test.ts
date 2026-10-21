@@ -9,7 +9,9 @@ import {
   INVENTORY_REQUEST_STATUS_LABELS,
   INVENTORY_STATUS_LABEL_OVERRIDES,
   INVENTORY_STOCK_REQUEST_FIELDS,
+  INVENTORY_STOCK_REQUEST_LINE_CHARGE_FIELDS,
   INVENTORY_STOCK_REQUEST_LINE_FIELDS,
+  INVENTORY_STOCK_REQUEST_LINE_OWNER_FIELDS,
   codesMissingFromInventory,
   codesUnknownToAs,
   judgedStatusCodes,
@@ -247,7 +249,21 @@ function sampleRequestRow() {
     status: { code: "CONFIRMED", label: "확인됨" },
     closed: true,
     requestedAt: "2026-10-21T01:00:00.000Z",
-    lines: [{ no: 165, name: "부품", quantity: 2, issued: 1 }],
+    lines: [
+      {
+        no: 165,
+        name: "부품",
+        quantity: 2,
+        issued: 1,
+        // 🔵 2026-10-21 에 저쪽 통로가 줄을 넓혔다 — 그 부품을 알아보는 넷과 딱지 둘.
+        customerName: "고객사 품명",
+        name2: "규격",
+        kyosanPartNo: "KY-1",
+        drawingNo: "DWG-1",
+        owner: { code: "KYOSAN", label: "KYOSAN" },
+        chargeType: { code: "PAID", label: "유상" },
+      },
+    ],
     decision: { byName: "홍길동", at: "2026-10-21T02:00:00.000Z", note: "사유" },
     hold: null,
     requester: { sub: "s1", name: "홍길동" },
@@ -284,13 +300,38 @@ describe("🔴 「파서가 읽는 칸」 목록이 실제 파서와 어긋나�
     }
   });
 
-  test("신청 줄 안의 줄 — 네 칸 다 읽힌다", () => {
+  test("신청 줄 안의 줄 — 적어 둔 칸이 **하나도 빠짐없이** 읽힌다", () => {
     const full = { requests: [sampleRequestRow()] };
     const base = JSON.stringify(parseInventoryStockRequestsResponse(full));
     for (const field of INVENTORY_STOCK_REQUEST_LINE_FIELDS) {
       const row = sampleRequestRow();
       const without = { requests: [{ ...row, lines: [withoutField(row.lines[0], field)] }] };
       assert.notEqual(JSON.stringify(parseInventoryStockRequestsResponse(without)), base, field);
+    }
+  });
+
+  /**
+   * 🔴 **딱지 둘의 속 칸**(`code`·`label`)은 줄 칸 목록에 점 찍힌 길로 적을 수 없다 — 둘 다
+   *    `null` 이 정상인 칸이라(지워진 부품의 소유 · 반출이 아닌 줄의 유상/무상) 그렇게 적으면
+   *    멀쩡한 줄마다 「없는 칸」으로 세어진다. 그래서 목록을 따로 두고, **들어 있을 때만** 본다.
+   * 🔵 그 목록도 **파서에 대고** 잰다 — 손으로 맞춰 둔 목록은 언젠가 갈린다.
+   */
+  test("신청 줄의 딱지 둘 — 속 칸을 빼면 파서의 답이 달라진다", () => {
+    const full = { requests: [sampleRequestRow()] };
+    const base = JSON.stringify(parseInventoryStockRequestsResponse(full));
+    for (const [tag, fields] of [
+      ["owner", INVENTORY_STOCK_REQUEST_LINE_OWNER_FIELDS],
+      ["chargeType", INVENTORY_STOCK_REQUEST_LINE_CHARGE_FIELDS],
+    ] as const) {
+      for (const field of fields) {
+        const row = sampleRequestRow();
+        const without = { requests: [{ ...row, lines: [withoutField(row.lines[0], `${tag}.${field}`)] }] };
+        assert.notEqual(
+          JSON.stringify(parseInventoryStockRequestsResponse(without)),
+          base,
+          `${tag}.${field} 를 빼도 파서의 답이 같다 — 목록에만 있고 아무도 안 읽는 칸이다`
+        );
+      }
     }
   });
 
