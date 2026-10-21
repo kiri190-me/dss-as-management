@@ -71,6 +71,27 @@ export type PortalNotificationInbox = {
    * 되어 예전 그대로 돈다.
    */
   dismissed: string[];
+  /**
+   * 🔴 그 사람이 **✓ 로 확인한** 알림의 열쇠 — **이 사이트 몫만** 온다
+   * (2026-10-22, 규격서 「acknowledged」절).
+   *
+   * 거르는 데 쓰는 법은 바로 위 `dismissed` 와 같고, 담기는 까닭과 **수명이
+   * 다르다.** 🔴 **두 칸을 한 뭉치로 만들지 마라.** ✕ 지움은 「지금은 그만
+   * 보겠다」라 로그아웃하면 **돌아오고**, ✓ 확인은 「해소됐다」라 **안 돌아온다**.
+   * 확인을 지움으로 읽으면 안 돌아와야 할 줄이 돌아오고, 지움을 확인으로 읽으면
+   * **영영 사라진다**. 그래서 칸도 둘이고, 아래 정규화도 둘을 따로 읽는다.
+   *
+   * 🔵 **이 집은 아무것도 판단하지 않는다.** 「기록이 있는가 · 그때 본 내용과
+   * 지금 내용이 같은가 · 그 종류가 정보 확인용인가」 셋을 포털이 다 보고 **판단을
+   * 끝내고** 보낸다(규격서). 그래서 결재 승인처럼 **동작이 필요한 줄**은 확인을
+   * 눌러도 이 목록에 안 담겨 종에 그대로 남는다. 같은 판정을 여기 베껴 적지 마라.
+   *
+   * 🔴 거르는 자리는 `dismissed` 와 같은 한 곳이다 — 화면의
+   * selectVisibleNotifications. 안 거르면 「PO 종에서 눌러 확인했는데 A/S 종에만
+   * 그대로 뜬다」가 된다. 🔵 칸이 아예 없는 **아직 안 고친 포털**에 대고도 빈
+   * 배열이 되어 예전 그대로 돈다.
+   */
+  acknowledged: string[];
 };
 
 /**
@@ -88,15 +109,23 @@ export const EMPTY_PORTAL_INBOX: PortalNotificationInbox = Object.freeze({
   //    뜬다 — 지움은 보기를 미루는 것이지 지워지는 자료가 아니라, 종을 통째로
   //    끄는 것보다 그 편이 낫다고 보았다(규격서).
   dismissed: [],
+  // 🔴 확인 목록도 같다. 포털이 확인 기록을 못 읽었거나 그 사이트에 못
+  //    물어봤으면 확인해 둔 줄이 **다시 뜬다** — 「틀렸을 때 덜 나쁜 쪽」이기
+  //    때문이다(규격서): 안 빼면 처리한 알림이 한 번 더 보이고, 빼면 아직 안
+  //    한 일이 안 보인다.
+  acknowledged: [],
 });
 
 /**
- * 포털이 보낸 지움 목록을 **글자인 줄만** 받는다.
+ * 포털이 보낸 열쇠 목록을 **글자인 줄만** 받는다. 🔴 지움(`dismissed`)과
+ * 확인(`acknowledged`) **둘 다** 이 한 곳을 지난다 — 모양 검사가 같아야 한쪽만
+ * 느슨해지는 일이 없다. 🔴 다만 **값을 섞지는 않는다**: 부르는 자리가 둘이고
+ * 담기는 칸도 둘이다(수명이 다르다 — 위 `acknowledged` 주석).
  *
  * 🔴 칸이 아예 없는(아직 안 고친) 포털에서는 **빈 배열**이 되어 예전 그대로
  * 돈다 — 제 줄이 걸러지지 않을 뿐 종은 똑같이 그려진다.
  */
-function toDismissedKeys(value: unknown): string[] {
+function toNotificationKeys(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((key): key is string => typeof key === "string" && key !== "");
 }
@@ -159,7 +188,11 @@ export function normalizePortalNotificationFeed(body: unknown): PortalNotificati
     items,
     count,
     degraded: answer.degraded === true,
-    dismissed: toDismissedKeys(answer.dismissed),
+    // 🔴 **두 칸을 따로 읽는다.** 합쳐 한 목록으로 만들면 확인을 지움으로
+    //    읽어 로그아웃 뒤에 안 돌아와야 할 줄이 돌아오고, 그 반대는 영영
+    //    사라진다(위 `acknowledged` 주석).
+    dismissed: toNotificationKeys(answer.dismissed),
+    acknowledged: toNotificationKeys(answer.acknowledged),
   };
 }
 
@@ -187,6 +220,8 @@ export function asPortalNotificationInbox(value: unknown): PortalNotificationInb
     degraded: candidate.degraded === true,
     // 🔴 여기도 한 겹 더 본다. 이 값은 약속이 풀린 것이라 타입이 지켜 준다는
     //    보장이 없고, 모양이 틀린 것을 그대로 받으면 거르는 쪽에서 터진다.
-    dismissed: toDismissedKeys(candidate.dismissed),
+    //    🔴 확인 목록도 **따로** 지난다 — 섞지 않는다(위 머리말).
+    dismissed: toNotificationKeys(candidate.dismissed),
+    acknowledged: toNotificationKeys(candidate.acknowledged),
   };
 }

@@ -267,6 +267,13 @@ export function acknowledgePortalInBackground(
 }
 
 /**
+ * 빈 열쇠 묶음 하나를 돌려쓴다 — 거를 것이 없을 때 렌더마다 새 Set 을 만들지
+ * 않기 위해서다(아래 selectVisibleNotifications 가 쓴다). 🔴 **비어 있으므로
+ * 누가 가져가도 바뀔 것이 없다.**
+ */
+const NO_KEYS: ReadonlySet<string> = new Set();
+
+/**
  * 지금 종에 **보이는 것**과 배지에 찍을 **숫자**를 한 번에 고른다.
  *
  * 순수 함수로 빼 둔 까닭: 지운 줄은 브라우저에서 눌러야 생기는 상태라 정적
@@ -300,6 +307,27 @@ export function acknowledgePortalInBackground(
  * 에서 빼고 `count` 도 줄여 보낸다). 그래서 합쳐 쓴다고 받은 줄이 두 번 빠질
  * 일은 없다 — 접두사가 달라 애초에 맞지 않는다.
  *
+ * ── 🔴 거르는 목록이 **셋째**로 하나 더 있다 — `inbox.acknowledged` ─────────
+ * ⓒ **다른 집에서 눌러 확인한** A/S 줄의 열쇠다(2026-10-22, 규격서의
+ * 「acknowledged」절). A/S 의 알림은 다른 시스템의 종에도 뜨는데, 그 줄을 **PO ·
+ * 게시판 등 거기서 눌러 확인**하면 포털에 적히고 거기서는 사라진다. 그것을 안
+ * 읽으면 **A/S 제 종에만 그대로 남는다.**
+ *
+ * 🔴 **ⓐⓑ 와 한 Set 으로 합치지 마라.** 담기는 까닭과 **수명이 다르다** —
+ * ✕ 지움은 로그아웃하면 돌아오고 ✓ 확인은 안 돌아온다(domain 의 그 칸 주석).
+ * 지금 그리는 한 화면에서는 둘 다 「감춘다」로 같아 보이지만, 합쳐 두면 다음에
+ * 「지운 것만 되살린다」 같은 일을 할 때 어느 쪽이 어느 쪽인지 알 수 없다.
+ * 그래서 Set 도 거르는 줄도 **따로** 선다.
+ *
+ * 🔴 **제 표로 거르는 길(acknowledgedIds)과도 다른 것이다. 나란히 돈다.**
+ *  - `acknowledgedIds` — **이 집에서** 눌러 확인해 A/S 의 표로 가고 있는 줄.
+ *    열쇠가 **알림 `id`** 다(그 표가 그렇게 적는다).
+ *  - ⓒ — **다른 집에서** 눌러 확인해 **포털**에 적힌 줄. 열쇠가
+ *    **`{client_id}:{id}`** 다. 둘 중 하나만 돌면 그 쪽에서 누른 확인만 듣는다.
+ *
+ * 🔵 ⓒ 도 ⓑ 와 같이 **이 사이트 몫만** 온다 — 받은 줄(`inbox.items`)과는 접두사가
+ * 달라 애초에 맞지 않으므로, 같은 기준으로 받은 줄까지 걸러도 두 번 빠지지 않는다.
+ *
  * 🔴 **개수는 두 쪽이 다른 방식으로 센다.**
  *  - 자기 것: 「같은 대상은 한 번만」 센다(countNotificationTargets — 한 건에
  *    결재가 둘 걸려 있어도 1). 사이드바 배지와 같은 헬퍼라 둘이 갈릴 수 없다.
@@ -311,6 +339,10 @@ export function acknowledgePortalInBackground(
  *    세는 규칙을 모르므로 「지운 줄 수」를 빼는 것이 할 수 있는 전부이고(한
  *    대상에 두 줄이 걸려 저쪽이 1로 셌다면 2가 빠질 수 있다), 0 아래로는
  *    내려가지 않게 막는다.
+ *
+ * 🔴 ⓒ 로 빠진 줄도 **똑같이 배지에서 줄어야 한다.** 줄만 빼고 숫자를 그대로
+ *    두면 「열면 비었는데 빨간 점만 붙은 종」이 된다 — 자기 줄은 걸러진 뒤의
+ *    목록을 다시 세어 저절로 줄고, 받은 줄은 지움과 같은 셈에 함께 들어간다.
  */
 export function selectVisibleNotifications(input: {
   items: readonly NotificationItem[];
@@ -338,26 +370,40 @@ export function selectVisibleNotifications(input: {
     input.inbox.dismissed.length === 0
       ? input.dismissedKeys
       : new Set([...input.dismissedKeys, ...input.inbox.dismissed]);
+  // 🔴 ⓒ 는 **따로 선다**(위 머리말). 지움과 한 Set 으로 합치지 않는다 —
+  //    수명이 정반대라, 지금 같아 보인다고 합쳐 두면 나중에 가를 수 없다.
+  //    여기도 빈 배열이면 새 Set 을 만들지 않는다.
+  const portalAcknowledgedKeys: ReadonlySet<string> =
+    input.inbox.acknowledged.length === 0 ? NO_KEYS : new Set(input.inbox.acknowledged);
 
-  const hidden = input.acknowledgedIds.size === 0 && dismissedKeys.size === 0;
-  const items = hidden
+  const nothingHidden =
+    input.acknowledgedIds.size === 0 &&
+    dismissedKeys.size === 0 &&
+    portalAcknowledgedKeys.size === 0;
+  const items = nothingHidden
     ? input.items
-    : input.items.filter(
-        (item) =>
-          // 🔴 확인 기록은 `id`, 지움은 **열쇠**다. 섞으면 둘 중 하나가 영영
-          //    안 맞는다(위 머리말).
-          !input.acknowledgedIds.has(item.id) &&
-          !dismissedKeys.has(notificationBellKey(item.id, clientId))
-      );
+    : input.items.filter((item) => {
+        // 🔴 **제 표로 거르는 길**(이 집에서 누른 확인)은 그대로다 — 열쇠가
+        //    알림 `id` 다. 지움·포털 확인은 **열쇠**(`client_id:id`)다. 섞으면
+        //    둘 중 하나가 영영 안 맞는다(위 머리말).
+        if (input.acknowledgedIds.has(item.id)) return false;
+        const key = notificationBellKey(item.id, clientId);
+        // 🔴 지움과 포털 확인을 **나란히** 본다. 둘 중 하나에만 들어도 빠진다.
+        return !dismissedKeys.has(key) && !portalAcknowledgedKeys.has(key);
+      });
   const inboxItems =
-    dismissedKeys.size === 0
+    dismissedKeys.size === 0 && portalAcknowledgedKeys.size === 0
       ? input.inbox.items
-      : input.inbox.items.filter((row) => !dismissedKeys.has(row.key));
+      : input.inbox.items.filter(
+          (row) => !dismissedKeys.has(row.key) && !portalAcknowledgedKeys.has(row.key)
+        );
 
-  const dismissedInboxCount = input.inbox.items.length - inboxItems.length;
+  // 🔴 지움으로 빠졌든 포털 확인으로 빠졌든 **같은 수만큼** 배지에서 뺀다 —
+  //    줄 수의 차이로 세므로 한 줄이 둘 다에 들어도 두 번 세지 않는다.
+  const hiddenInboxCount = input.inbox.items.length - inboxItems.length;
   const count =
     countNotificationTargets(items.map((item) => item.targetKey)) +
-    Math.max(0, input.inbox.count - dismissedInboxCount);
+    Math.max(0, input.inbox.count - hiddenInboxCount);
 
   return { items, inboxItems, count };
 }

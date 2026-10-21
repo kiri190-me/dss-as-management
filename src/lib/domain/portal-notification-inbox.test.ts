@@ -170,12 +170,14 @@ test("🔴 무엇이 들어와도 던지지 않고 빈 것이 된다", () => {
     count: 0,
     degraded: false,
     dismissed: [],
+    acknowledged: [],
   });
   assert.deepEqual(normalizePortalNotificationFeed({ items: "목록", count: "셋" }), {
     items: [],
     count: 0,
     degraded: false,
     dismissed: [],
+    acknowledged: [],
   });
 });
 
@@ -199,7 +201,13 @@ test("degraded 는 포털이 참이라고 말할 때만 참이다 — 「알림�
 });
 
 test("🔴 못 물어봤을 때의 답은 얼린 상수 하나다 — 종이 useState 초깃값으로 쓴다", () => {
-  assert.deepEqual(EMPTY_PORTAL_INBOX, { items: [], count: 0, degraded: true, dismissed: [] });
+  assert.deepEqual(EMPTY_PORTAL_INBOX, {
+    items: [],
+    count: 0,
+    degraded: true,
+    dismissed: [],
+    acknowledged: [],
+  });
   assert.ok(Object.isFrozen(EMPTY_PORTAL_INBOX), "얼지 않으면 누군가 고칠 수 있다");
   // 두 번 불러도 **같은 객체**다 — 렌더마다 참조가 달라지면 안 된다.
   assert.equal(normalizePortalNotificationFeed(null), normalizePortalNotificationFeed("x"));
@@ -248,6 +256,77 @@ test("🔴 글자가 아닌 조각은 **그 조각만** 버린다 — 남의 시
   assert.deepEqual(inbox.dismissed, ["rf-service-system:A", "rf-service-system:B"]);
 });
 
+// ───────────────────────── 포털이 돌려주는 「확인한 알림」 목록 (2026-10-22)
+
+test("🔴 확인한 열쇠 목록을 그대로 나른다 — 다른 집에서 누른 확인이 돌아온다", () => {
+  // A/S 의 알림은 다른 시스템의 종에도 뜬다. 그 줄을 PO·게시판 등 거기서 눌러
+  // 확인하면 포털에 적히고 거기서는 사라지는데, 이 칸을 안 읽으면 **A/S 제
+  // 종에만 그대로 남는다**.
+  const inbox = normalizePortalNotificationFeed({
+    items: [row()],
+    count: 1,
+    acknowledged: ["rf-service-system:APPROVAL_OUTCOME:12", "rf-service-system:STOCK_SHORTAGE"],
+  });
+
+  assert.deepEqual(inbox.acknowledged, [
+    "rf-service-system:APPROVAL_OUTCOME:12",
+    "rf-service-system:STOCK_SHORTAGE",
+  ]);
+  assert.equal(inbox.items.length, 1, "확인 목록이 왔다고 줄까지 버리지 않는다");
+});
+
+test("🔴 지움과 확인은 **따로** 담긴다 — 한 뭉치가 되면 수명이 뒤섞인다", () => {
+  // ✕ 지움은 로그아웃하면 돌아오고 ✓ 확인은 안 돌아온다. 합쳐 두면 확인을
+  // 지움으로 읽어 안 돌아와야 할 줄이 돌아오고, 그 반대는 영영 사라진다.
+  const 둘다 = normalizePortalNotificationFeed({
+    items: [],
+    count: 0,
+    dismissed: ["rf-service-system:D:1"],
+    acknowledged: ["rf-service-system:A:1"],
+  });
+  assert.deepEqual(둘다.dismissed, ["rf-service-system:D:1"], "🔴 확인이 지움에 섞였다");
+  assert.deepEqual(둘다.acknowledged, ["rf-service-system:A:1"], "🔴 지움이 확인에 섞였다");
+
+  // 한쪽만 온 경우에도 다른 칸은 비어 있어야 한다 — 베껴 담지 않는다.
+  const 지움만 = normalizePortalNotificationFeed({
+    items: [],
+    count: 0,
+    dismissed: ["rf-service-system:D:1"],
+  });
+  assert.deepEqual(지움만.acknowledged, [], "🔴 지움이 확인 칸으로 넘어갔다");
+
+  const 확인만 = normalizePortalNotificationFeed({
+    items: [],
+    count: 0,
+    acknowledged: ["rf-service-system:A:1"],
+  });
+  assert.deepEqual(확인만.dismissed, [], "🔴 확인이 지움 칸으로 넘어갔다");
+});
+
+test("🔴 확인 칸이 없는 **아직 안 고친 포털**에서도 안 터지고 빈 배열이다", () => {
+  // 이 칸은 2026-10-22 에 늘었다. 포털이 먼저 올라가지 않아도 이 사이트는
+  // 멀쩡히 돌아야 한다 — 확인한 줄이 안 걸러질 뿐 종은 예전과 똑같이 그려진다.
+  assert.deepEqual(normalizePortalNotificationFeed({ items: [row()], count: 1 }).acknowledged, []);
+
+  // 배열이 아닌 값도 같다 — 던지지 않고 빈 배열로 떨어진다.
+  for (const acknowledged of ["열쇠", 7, null, true, {}, () => {}]) {
+    assert.deepEqual(
+      normalizePortalNotificationFeed({ items: [], count: 0, acknowledged }).acknowledged,
+      [],
+      `acknowledged=${String(acknowledged)}`
+    );
+  }
+});
+
+test("🔴 확인 목록에서도 글자가 아닌 조각은 **그 조각만** 버린다", () => {
+  const inbox = normalizePortalNotificationFeed({
+    items: [],
+    count: 0,
+    acknowledged: ["rf-service-system:A", null, 7, "", {}, "rf-service-system:B"],
+  });
+  assert.deepEqual(inbox.acknowledged, ["rf-service-system:A", "rf-service-system:B"]);
+});
+
 // ───────────────────────── 화면이 값을 받을 때의 마지막 한 겹
 
 test("🔴 약속이 풀린 값이 기대한 모양이 아니면 빈 것으로 친다", () => {
@@ -288,4 +367,25 @@ test("🔴 지운 열쇠 목록도 마지막 한 겹을 지난다 — 글자인 
     ["ok"]
   );
   assert.deepEqual(asPortalNotificationInbox({ items, dismissed: "열쇠" }).dismissed, []);
+});
+
+test("🔴 확인한 열쇠 목록도 마지막 한 겹을 지난다 — 그리고 지움과 섞이지 않는다", () => {
+  const items = [row()] as unknown as NotificationBellItem[];
+
+  const 둘다 = asPortalNotificationInbox({
+    items,
+    count: 1,
+    dismissed: ["rf-service-system:D:1"],
+    acknowledged: ["rf-service-system:A:1"],
+  });
+  assert.deepEqual(둘다.acknowledged, ["rf-service-system:A:1"]);
+  assert.deepEqual(둘다.dismissed, ["rf-service-system:D:1"], "🔴 두 목록이 한 뭉치가 됐다");
+
+  // 칸이 없거나 모양이 틀리면 빈 배열이다 — 여기서 던지면 모든 화면이 깨진다.
+  assert.deepEqual(asPortalNotificationInbox({ items, count: 1 }).acknowledged, []);
+  assert.deepEqual(
+    asPortalNotificationInbox({ items, count: 1, acknowledged: ["ok", 7, null, ""] }).acknowledged,
+    ["ok"]
+  );
+  assert.deepEqual(asPortalNotificationInbox({ items, acknowledged: "열쇠" }).acknowledged, []);
 });

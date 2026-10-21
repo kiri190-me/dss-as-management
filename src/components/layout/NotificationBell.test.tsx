@@ -702,7 +702,7 @@ test("🔴 자기 알림이 앞, 포털에서 온 것이 뒤 — 차례가 섞�
   const html = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={mine}
-      inbox={{ items: received, count: 2, degraded: false, dismissed: [] }}
+      inbox={{ items: received, count: 2, degraded: false, dismissed: [], acknowledged: [] }}
     />
   );
 
@@ -736,6 +736,7 @@ test("🔴 배지는 자기 개수 + 받은 개수다 — 받은 값을 다시 �
         count: 7,
         degraded: false,
         dismissed: [],
+        acknowledged: [],
       }}
     />
   );
@@ -746,7 +747,7 @@ test("자기 알림이 없어도 받은 것만으로 배지가 선다 — 반대
   const onlyReceived = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={[]}
-      inbox={{ items: [portalRow()], count: 3, degraded: false, dismissed: [] }}
+      inbox={{ items: [portalRow()], count: 3, degraded: false, dismissed: [], acknowledged: [] }}
     />
   );
   assert.ok(onlyReceived.includes(">알림 3건</span>"));
@@ -755,7 +756,7 @@ test("자기 알림이 없어도 받은 것만으로 배지가 선다 — 반대
   const onlyMine = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={[grantedItem()]}
-      inbox={{ items: [], count: 0, degraded: false, dismissed: [] }}
+      inbox={{ items: [], count: 0, degraded: false, dismissed: [], acknowledged: [] }}
     />
   );
   assert.ok(onlyMine.includes(">알림 1건</span>"));
@@ -807,7 +808,7 @@ test("포털 목록을 안 넘기면 예전과 똑같은 종이다 — 데모 �
   const withEmptyInbox = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={[grantedItem()]}
-      inbox={{ items: [], count: 0, degraded: true, dismissed: [] }}
+      inbox={{ items: [], count: 0, degraded: true, dismissed: [], acknowledged: [] }}
     />
   );
   assert.equal(withoutInbox, withEmptyInbox, "포털을 못 물어본 종이 예전 종과 다르게 그려졌다");
@@ -822,6 +823,7 @@ test("🔴 포털 줄의 그릴 수 없는 주소는 **그 줄만** 빠진다", 
         count: 2,
         degraded: false,
         dismissed: [],
+        acknowledged: [],
       }}
     />
   );
@@ -934,7 +936,7 @@ test("🔴 지우기 단추는 **8종류 전부**에 선다 — 할 일 알림�
   const html = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={mine}
-      inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [] }}
+      inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [], acknowledged: [] }}
       dismiss={지움()}
     />
   );
@@ -960,7 +962,7 @@ test("🔴 포털 줄은 **종류를 가리지 않고** 지울 수 있다 — �
     const html = renderToStaticMarkup(
       <NotificationBellWithInbox
         items={[]}
-        inbox={{ items: [portalRow({ kind })], count: 1, degraded: false, dismissed: [] }}
+        inbox={{ items: [portalRow({ kind })], count: 1, degraded: false, dismissed: [], acknowledged: [] }}
         dismiss={지움()}
       />
     );
@@ -993,7 +995,7 @@ test("🔴 일괄 지우기 단추는 **하나뿐**이다 — A/S 가 제 것을
   const html = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={oneOfEachKind()}
-      inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [] }}
+      inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [], acknowledged: [] }}
       dismiss={지움()}
     />
   );
@@ -1029,7 +1031,7 @@ test("🔴 단추에 적히는 수가 **그려지는 줄 수**와 같다", () =>
   const html = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={oneOfEachKind()}
-      inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [] }}
+      inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [], acknowledged: [] }}
       dismiss={지움()}
     />
   );
@@ -1050,7 +1052,7 @@ test("🔴 단추에 적히는 수가 **그려지는 줄 수**와 같다", () =>
   const 섞인종 = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={[]}
-      inbox={{ items: [portalRow(), 나쁜줄], count: 2, degraded: false, dismissed: [] }}
+      inbox={{ items: [portalRow(), 나쁜줄], count: 2, degraded: false, dismissed: [], acknowledged: [] }}
       dismiss={지움(적힌것)}
     />
   );
@@ -1500,6 +1502,7 @@ test("🔴 지운 줄은 목록에서도 **배지에서도** 빠진다", () => {
     count: 7, // 🔴 줄은 둘인데 포털이 센 값은 7 이다(세는 규칙이 시스템마다 다르다).
     degraded: false,
     dismissed: [],
+    acknowledged: [],
   };
 
   const 그대로 = selectVisibleNotifications({
@@ -1531,6 +1534,7 @@ test("🔴 배지는 0 아래로 내려가지 않는다 — 포털의 세는 규
     count: 1,
     degraded: false,
     dismissed: [],
+    acknowledged: [],
   };
   const 지운뒤 = selectVisibleNotifications({
     items: [],
@@ -1547,7 +1551,7 @@ test("확인 중인 줄과 지운 줄은 **함께** 빠진다 — 서로를 지�
   const mine = [grantedItem(), rejectedItem()];
   const 둘다 = selectVisibleNotifications({
     items: mine,
-    inbox: { items: [portalRow()], count: 1, degraded: false, dismissed: [] },
+    inbox: { items: [portalRow()], count: 1, degraded: false, dismissed: [], acknowledged: [] },
     acknowledgedIds: new Set([grantedItem().id]),
     dismissedKeys: new Set([rejectedItem().id]),
   });
@@ -1578,7 +1582,7 @@ test("🔴 제 줄의 지움도 **열쇠**로 맞춰 본다 — `id` 로 맞춰 
 
   const 지운뒤 = selectVisibleNotifications({
     items: mine,
-    inbox: { items: [], count: 0, degraded: false, dismissed: [] },
+    inbox: { items: [], count: 0, degraded: false, dismissed: [], acknowledged: [] },
     acknowledgedIds: new Set(),
     dismissedKeys: new Set([지울열쇠]),
     clientId: CLIENT_ID,
@@ -1590,7 +1594,7 @@ test("🔴 제 줄의 지움도 **열쇠**로 맞춰 본다 — `id` 로 맞춰 
   //    정상이다(열쇠 모양이 바뀌면 그 브라우저의 옛 기록은 그냥 안 듣는다).
   const 옛기록 = selectVisibleNotifications({
     items: mine,
-    inbox: { items: [], count: 0, degraded: false, dismissed: [] },
+    inbox: { items: [], count: 0, degraded: false, dismissed: [], acknowledged: [] },
     acknowledgedIds: new Set(),
     dismissedKeys: new Set([grantedItem().id]),
     clientId: CLIENT_ID,
@@ -1606,7 +1610,7 @@ test("🔴 접두사를 못 읽어도 거르기는 돈다 — 만드는 쪽과 �
   for (const clientId of [undefined, ""]) {
     const 지운뒤 = selectVisibleNotifications({
       items: mine,
-      inbox: { items: [], count: 0, degraded: false, dismissed: [] },
+      inbox: { items: [], count: 0, degraded: false, dismissed: [], acknowledged: [] },
       acknowledgedIds: new Set(),
       dismissedKeys: new Set([grantedItem().id]),
       clientId,
@@ -1627,6 +1631,7 @@ test("🔴 포털이 돌려준 지움으로 **제 줄**이 빠진다 — 두 목
     degraded: false,
     // 🔴 그 사이트 몫만 온다 — 남의 줄 열쇠는 애초에 실리지 않는다(규격서).
     dismissed: [`${CLIENT_ID}:${grantedItem().id}`],
+    acknowledged: [],
   };
 
   const 보이는것 = selectVisibleNotifications({
@@ -1655,6 +1660,7 @@ test("🔴 두 지움 목록이 **함께** 든다 — 방금 누른 것과 포�
       count: 2,
       degraded: false,
       dismissed: [`${CLIENT_ID}:${rejectedItem().id}`],
+      acknowledged: [],
     },
     acknowledgedIds: new Set(),
     // 이 화면에서 방금 누른 것에 제 줄 하나와 포털 줄 하나가 들어 있다. 둘 다
@@ -1672,7 +1678,7 @@ test("포털이 지움을 안 보내도(빈 배열·안 고친 포털) 예전 �
   const mine = [grantedItem()];
   const 그대로 = selectVisibleNotifications({
     items: mine,
-    inbox: { items: [portalRow()], count: 1, degraded: true, dismissed: [] },
+    inbox: { items: [portalRow()], count: 1, degraded: true, dismissed: [], acknowledged: [] },
     acknowledgedIds: new Set(),
     dismissedKeys: new Set(),
     clientId: CLIENT_ID,
@@ -1680,6 +1686,184 @@ test("포털이 지움을 안 보내도(빈 배열·안 고친 포털) 예전 �
   assert.equal(그대로.items.length, 1);
   assert.equal(그대로.inboxItems.length, 1);
   assert.equal(그대로.count, 1 + 1);
+});
+
+/* ─────────────────────────────────────────────────────────────────────────
+   🔴 다른 집에서 누른 ✓ 확인을 읽어 제 줄을 거른다 (2026-10-22, `acknowledged`)
+
+   A/S 의 알림은 다른 시스템의 종에도 뜬다(포털이 날라 준다). 그 줄을 PO·게시판
+   등 **거기서** 눌러 확인하면 포털에 적히고 거기서는 사라지는데, 이 칸을 안
+   읽으면 **A/S 제 종에만 그대로 남는다** — A/S 는 제 줄을 제 표로만 걸러 왔다.
+
+   🔴 거르는 길이 이제 **셋**이고 셋 다 나란히 돈다:
+    · `acknowledgedIds`  — **이 집에서** 누른 확인(A/S 의 표). 열쇠가 알림 `id`.
+    · `inbox.dismissed`  — 어느 집에서든 누른 ✕ 지움(포털). 열쇠가 `client_id:id`.
+    · `inbox.acknowledged` — **다른 집에서** 누른 ✓ 확인(포털). 같은 열쇠 모양.
+   ───────────────────────────────────────────────────────────────────────── */
+
+test("🔴 포털이 돌려준 **확인**으로 제 줄이 빠진다 — 배지도 함께 줄어든다", () => {
+  // 안 거르면 「PO 종에서 눌러 확인했는데 A/S 종에만 그대로 뜬다」가 된다.
+  const mine = [approval("case-1", "D9705-012", "REPAIR_INSPECTION"), grantedItem()];
+  const inbox = {
+    items: [portalRow()],
+    count: 3,
+    degraded: false,
+    dismissed: [],
+    // 🔴 그 사이트 몫만 온다 — 남의 줄 열쇠는 애초에 실리지 않는다(규격서).
+    acknowledged: [`${CLIENT_ID}:${grantedItem().id}`],
+  };
+
+  const 보이는것 = selectVisibleNotifications({
+    items: mine,
+    inbox,
+    // 🔴 이 집에서는 아무것도 안 눌렀다 — 오직 포털이 보낸 **확인** 목록으로만
+    //    빠져야 한다(지움 목록도 비어 있다).
+    acknowledgedIds: new Set(),
+    dismissedKeys: new Set(),
+    clientId: CLIENT_ID,
+  });
+
+  assert.deepEqual(
+    보이는것.items.map((item) => item.id),
+    [mine[0].id],
+    "🔴 다른 집에서 누른 확인이 안 들었다"
+  );
+  assert.deepEqual(보이는것.inboxItems, inbox.items, "남의 줄까지 건드렸다");
+  // 🔴 줄만 빼고 숫자를 그대로 두면 「없는데 빨간 점」이 된다. 자기 몫은 걸러진
+  //    목록에서 다시 세고(1), 포털이 센 값(3)은 그대로 더한다.
+  assert.equal(보이는것.count, 1 + 3, "🔴 확인한 줄이 배지에 남았다");
+});
+
+test("🔴 제 표로 거르는 길과 **나란히** 돈다 — 둘 다 걸러진다", () => {
+  // 제 표는 「이 집에서 눌러 확인한 것」, 포털 열쇠는 「다른 집에서 눌러 확인한
+  // 것」이다. 한쪽만 돌면 그쪽에서 누른 확인만 듣는다.
+  const mine = [grantedItem(), rejectedItem()];
+  const 포털열쇠 = `${CLIENT_ID}:${rejectedItem().id}`;
+  assert.notEqual(포털열쇠, rejectedItem().id, "둘이 같으면 이 시험이 아무것도 못 본다");
+
+  const 둘다 = selectVisibleNotifications({
+    items: mine,
+    inbox: { items: [], count: 0, degraded: false, dismissed: [], acknowledged: [포털열쇠] },
+    // 🔴 제 표의 열쇠는 **알림 id** 다(확인 기록이 그 모양으로 적힌다).
+    acknowledgedIds: new Set([grantedItem().id]),
+    dismissedKeys: new Set(),
+    clientId: CLIENT_ID,
+  });
+  assert.deepEqual(둘다.items, [], "🔴 두 길 가운데 한쪽만 들었다");
+  assert.equal(둘다.count, 0, "🔴 거른 줄이 배지에 남았다");
+
+  // 🔴 서로를 지우지 않는다 — 한쪽만 있을 때는 **그 줄만** 빠진다.
+  const 제표만 = selectVisibleNotifications({
+    items: mine,
+    inbox: { items: [], count: 0, degraded: false, dismissed: [], acknowledged: [] },
+    acknowledgedIds: new Set([grantedItem().id]),
+    dismissedKeys: new Set(),
+    clientId: CLIENT_ID,
+  });
+  assert.deepEqual(
+    제표만.items.map((item) => item.id),
+    [rejectedItem().id],
+    "제 표로 거르는 길이 깨졌다"
+  );
+
+  const 포털만 = selectVisibleNotifications({
+    items: mine,
+    inbox: { items: [], count: 0, degraded: false, dismissed: [], acknowledged: [포털열쇠] },
+    acknowledgedIds: new Set(),
+    dismissedKeys: new Set(),
+    clientId: CLIENT_ID,
+  });
+  assert.deepEqual(
+    포털만.items.map((item) => item.id),
+    [grantedItem().id],
+    "포털이 준 확인이 엉뚱한 줄을 걸렀다"
+  );
+});
+
+test("🔴 지움과 확인을 **따로** 거른다 — 둘이 함께 와도 각자 제 줄만 뺀다", () => {
+  const mine = [grantedItem(), rejectedItem()];
+  const 보이는것 = selectVisibleNotifications({
+    items: mine,
+    inbox: {
+      items: [portalRow(), portalRow({ key: "njlee:CAL:3", sourceId: "njlee" })],
+      count: 2,
+      degraded: false,
+      // 🔴 수명이 정반대인 두 목록이다(지움은 로그아웃하면 돌아오고 확인은 안
+      //    돌아온다). 한 뭉치로 만들면 가를 수 없다 — 칸도 거르는 줄도 둘이다.
+      dismissed: [`${CLIENT_ID}:${grantedItem().id}`],
+      acknowledged: [`${CLIENT_ID}:${rejectedItem().id}`],
+    },
+    acknowledgedIds: new Set(),
+    dismissedKeys: new Set(),
+    clientId: CLIENT_ID,
+  });
+
+  assert.deepEqual(보이는것.items, [], "🔴 두 목록 가운데 한쪽만 들었다");
+  assert.deepEqual(
+    보이는것.inboxItems.map((row) => row.key),
+    [portalRow().key, "njlee:CAL:3"],
+    "남의 줄까지 건드렸다"
+  );
+  assert.equal(보이는것.count, 0 + 2, "포털이 센 값은 그대로 더해져야 한다");
+});
+
+test("🔴 확인을 안 보내도(빈 배열·안 고친 포털) 예전 그대로 돈다", () => {
+  // 이 칸은 2026-10-22 에 늘었다. 포털이 먼저 올라가지 않아도 종은 예전과
+  // 똑같이 그려져야 한다 — 확인해 둔 줄이 다시 보일 뿐이다(규격서: 「틀렸을 때
+  // 덜 나쁜 쪽」).
+  const mine = [grantedItem()];
+  const 그대로 = selectVisibleNotifications({
+    items: mine,
+    inbox: { items: [portalRow()], count: 1, degraded: true, dismissed: [], acknowledged: [] },
+    acknowledgedIds: new Set(),
+    dismissedKeys: new Set(),
+    clientId: CLIENT_ID,
+  });
+  assert.equal(그대로.items.length, 1);
+  assert.equal(그대로.inboxItems.length, 1);
+  assert.equal(그대로.count, 1 + 1);
+});
+
+test("🔴 확인한 제 줄은 **그린 종에서도** 사라진다 — 배지까지", () => {
+  // 값으로만 보면 그리는 쪽이 이 함수를 안 쓰게 바뀌어도 통과한다. 마크업으로
+  // 한 번 더 본다.
+  const html = renderToStaticMarkup(
+    <NotificationBellWithInbox
+      items={[approval("case-1", "D9705-012", "REPAIR_INSPECTION"), grantedItem()]}
+      notificationClientId={CLIENT_ID}
+      inbox={{
+        items: [],
+        count: 0,
+        degraded: false,
+        dismissed: [],
+        acknowledged: [`${CLIENT_ID}:${grantedItem().id}`],
+      }}
+    />
+  );
+
+  assert.ok(!html.includes(grantedItem().subject), "🔴 다른 집에서 확인한 줄이 종에 남았다");
+  assert.ok(html.includes("D9705-012"), "확인하지 않은 줄까지 사라졌다");
+  assert.ok(html.includes(">알림 1건</span>"), "🔴 줄은 빠졌는데 배지가 그대로다");
+});
+
+test("🔴 지움과 확인을 **한 Set 으로 합치지 않는다** — 소스에도 못 박는다", () => {
+  // 지금 그리는 한 화면에서는 둘 다 「감춘다」라 값 시험으로는 갈라지지 않는다.
+  // 합쳐 두면 나중에 「지운 것만 되살린다」를 할 때 어느 쪽이 어느 쪽인지 알 수
+  // 없다 — 확인을 지움으로 읽으면 안 돌아와야 할 줄이 돌아온다.
+  const source = readLayoutSource("NotificationBell.tsx");
+  const 고르는함수 = source.slice(
+    source.indexOf("export function selectVisibleNotifications"),
+    source.indexOf("export function acknowledgeInBackground")
+  );
+  assert.ok(고르는함수.length > 0, "고르는 함수를 못 찾았다 — 이 시험이 아무것도 안 본다");
+  assert.ok(고르는함수.includes("input.inbox.acknowledged"), "자른 토막이 엉뚱한 자리다");
+
+  const 지움Set = 고르는함수.slice(
+    고르는함수.indexOf("const dismissedKeys ="),
+    고르는함수.indexOf("const portalAcknowledgedKeys")
+  );
+  assert.ok(지움Set.length > 0, "지움 Set 을 만드는 자리를 못 찾았다");
+  assert.equal(/acknowledg/i.test(지움Set), false, "🔴 확인 목록이 지움 Set 에 섞였다");
 });
 
 test("🔴 확인 기록은 깨지지 않는다 — 확인에 넘어가는 값은 `id` 이고 `key` 와 다르다", () => {
@@ -1712,7 +1896,7 @@ test("🔴 확인해서 감춘 줄은 **접두사와 상관없이** 빠진다 �
   const mine = [grantedItem(), rejectedItem()];
   const 확인중 = selectVisibleNotifications({
     items: mine,
-    inbox: { items: [], count: 0, degraded: false, dismissed: [] },
+    inbox: { items: [], count: 0, degraded: false, dismissed: [], acknowledged: [] },
     acknowledgedIds: new Set([grantedItem().id]),
     dismissedKeys: new Set(),
     clientId: CLIENT_ID,
@@ -1729,7 +1913,7 @@ test("🔴 종이 그리는 열쇠에 접두사가 붙는다 — 만드는 쪽�
   const html = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={mine}
-      inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [] }}
+      inbox={{ items: [portalRow()], count: 1, degraded: false, dismissed: [], acknowledged: [] }}
       dismiss={지움()}
       notificationClientId={CLIENT_ID}
     />
