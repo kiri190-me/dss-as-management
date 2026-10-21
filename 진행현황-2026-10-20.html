@@ -85,13 +85,26 @@
     — 눈으로 지적하신 셋을 고쳤습니다(<code>9cd3998</code>)</td></tr>
 <tr><td><b>알림 조각 1</b></td><td>포털 [알림 설정]에 <b>「정보 확인용 / 승인용」 고르개</b>(<code>5d91100</code> · 마이그레이션 <b>0006 적용 완료</b>)</td></tr>
 <tr><td><b>알림 조각 2-가</b></td><td>포털에 <b>확인 기록</b> + 받는 통로 + 확인된 줄 거르기 — 🔄 <b>검수 끝, 적용·커밋 대기</b></td></tr>
-<tr><td><b>비고칸</b></td><td>A/S 입력 칸(<code>02299c8</code>) · [승인요청건]에 요청 비고(<code>7910e38</code>) ·
-    목록에서 인수번호와 <b>떼어 내기</b> · <b>불출 신청 팝업</b> · <b>상태 응답에 실어 보내기</b> — 🔄 <b>마지막 둘 검수 중</b></td></tr>
-<tr><td><b>5-나</b> (RF)</td><td>RF 에 <b>설정 통로</b>를 열고 포털에 <b>등록</b> — 🔄 <b>구현 중</b></td></tr>
-<tr><td>🔴 <b>바로잡은 것</b></td><td><b>위임 조각 4(대리 표시)가 안 되어 있는데 「넷 전부 끝남」으로 적혀 있었습니다</b> — 아래 2순위</td></tr>
+<tr><td><b>비고칸</b> ✅</td><td><b>네 조각 전부</b> — A/S 입력(<code>02299c8</code>) · [승인요청건](<code>7910e38</code>) ·
+    목록 구분·불출 팝업·<b>되돌려 보내기</b>(<code>62b436d</code>) · <b>A/S 가 되읽기</b>(<code>960e7ba</code>)</td></tr>
+<tr><td><b>5-나</b> (RF) ✅</td><td>RF 에 <b>설정 통로</b>(<code>ad7c8b8</code>) · 포털에 <b>등록</b>(<code>b1c11f0</code>) —
+    RF 가 통합 알림에 <b>온전히 들어왔습니다</b></td></tr>
+<tr><td>🔴 <b>바로잡은 것 셋</b></td><td>① 위임 조각 4(대리 표시)가 <b>안 됐는데 「넷 전부 끝남」</b>으로 집계 ·
+    ② 포털 주석이 <b>두 번 낡아</b> 「넷이다」에 멈춰 있었음 · ③ <b>1-A 의 절반</b>이 아무 목록에도 없었음(아래)</td></tr>
 </table>
-🔴 <b>포털 시험 476 → 522</b> · <b>재고관리 1382 → 1411</b> · <b>A/S 화면 3108 → 3116</b>.
-🔵 비고칸은 <b>마이그레이션이 필요 없습니다</b>(아래 8번).
+🔴 <b>포털 476 → 523</b> · <b>재고관리 1382 → 1411</b> · <b>A/S 화면 3108 → 3122</b> · <b>RF 189 → 205</b>.
+🔵 비고칸은 <b>마이그레이션이 필요 없었습니다</b>(아래 8번).
+
+<div class="ask" style="margin:9px 0 0">
+<b>🔴 죽어 있던 보안 검사 하나를 찾았습니다</b><br />
+13번 점검 도구에 <b>「틀린 토큰이면 거절한다」</b>는 검사가 있는데, <b>만들어진 뒤 한 번도 돈 적이 없습니다.</b>
+가짜 토큰을 <b>한글</b>로 적어 둔 탓입니다 — HTTP 머리말은 한글을 실을 수 없어
+<b>요청이 나가기도 전에 던집니다.</b><br />
+🔴 그래서 늘 ✗ 였고, 그 ✗ 가 <b>「재고 관리가 틀린 토큰을 받아 준다」처럼 보였지만 도구 자신의 탓</b>이었습니다.
+🔵 서버는 멀쩡합니다(영문 가짜 토큰에 <b>401</b>).<br />
+✅ <b>고쳤습니다</b>(<code>1145cff</code>). 한글로 되돌리면 깨지는 시험을 붙였고, 실제로 되돌려 <b>깨지는 것을 확인</b>한 뒤 되돌려 놓았습니다.
+→ 도구를 돌려 <b>112 통과 · 실패 0 · 못 쟀다 0</b>.
+</div>
 </div>
 
 <div class="vis">
@@ -114,8 +127,13 @@
 <tr><td><b>3·4</b></td><td><b>포털이 우리에게 말 거는 길 둘</b> — 끊어라 신호 · 내 알림 내주기</td>
     <td><span class="st done">✅ <code>b22794c</code></span></td></tr>
 <tr><td><b>5-나</b></td><td>🔴 <b>포털에 RF 등록</b> — 여기만 일곱 사이트가 걸립니다</td>
-    <td><span class="st doing">🔄 <b>구현 중</b> · 2026-10-22</span></td></tr>
+    <td><span class="st done">✅ <code>ad7c8b8</code> · <code>b1c11f0</code></span></td></tr>
 </table>
+<div class="ok" style="margin-top:7px">
+<b>✅ RF 이슈관리가 통합 알림에 온전히 들어왔습니다 (2026-10-22)</b> — 조각 전부 끝났습니다.
+RF 의 창구 셋이 <b>서로 막힙니다</b>(알림용 토큰으로 설정을 못 읽고, 읽기 토큰으로 저장 못 합니다) —
+여섯 방향을 다 시험으로 덮었습니다. 시험 <b>189 → 205</b>.
+</div>
 <div class="ask" style="margin-top:7px">
 <b>🔴 2026-10-22 — 「한 줄」이 아니었습니다</b><br />
 포털은 등록된 시스템마다 <b>통로 둘</b>을 두드립니다. RF 는 <b>알림 통로는 이미 열어 뒀지만
@@ -205,6 +223,15 @@
 <div class="note" style="margin-top:9px">
 🔵 <b>1-B 를 나중에 얹어도 1-A 가 헛일이 되지 않습니다.</b> 1-A 만으로 「새로고침해야 보인다」가 사라집니다.
 🔴 <b>1-B 를 지금 함께 하길 원하시면 그렇게 합니다</b> — 1순위 묶음이 그만큼 길어진다는 것만 알고 가시면 됩니다.
+</div>
+<div class="ask" style="margin:9px 0 0">
+<b>🔴 2026-10-22 실측 — 1-A 의 절반이 아직입니다</b><br />
+<b>상태·사유가 흐르는 것</b>은 됐습니다(1·9·10·14 가 그 일이었습니다).
+🔴 그런데 <b>「화면이 열려 있는 동안 몇 초마다 다시 묻기」는 코드에 없습니다</b> — 실측으로 확인했습니다.<br />
+→ <b>지금도 A/S 화면을 새로고침해야 재고 관리의 결정이 보입니다.</b><br />
+🔴 <b>이 절반이 어느 목록에도 안 올라가 있었습니다.</b> 계획에만 있고 아무도 세지 않았습니다 —
+그래서 「1·9·10 끝남」이 「즉시가 됐다」로 읽힐 수 있었습니다.
+🔵 <b>작은 일입니다</b>(화면 한 곳에 되묻는 주기 하나). 언제 할지 정해 주시면 끼우겠습니다.
 </div>
 </div>
 
@@ -615,17 +642,50 @@ A/S 의 서버 액션·통로도, 재고 관리의 받는 쪽도 <b>이미 비�
     <td><span class="st done">✅ <code>5d91100</code> · <b>0006 적용</b></span></td></tr>
 <tr><td><b>2-가</b></td><td>포털에 <b>확인 기록</b> + 받는 통로 + 거르기</td><td>①②③④</td>
     <td><span class="st doing">🔄 검수 끝 · <b>적용·커밋 대기</b></span></td></tr>
-<tr><td><b>2-나</b></td><td>여섯 사이트의 종이 <b>확인을 포털로</b> 보내기</td><td>①②③④</td>
-    <td><span class="st">대기 · <b>2-가 뒤에</b></span></td></tr>
+<tr><td><b>2-나</b></td><td>여섯 사이트의 종이 <b>확인을 포털로</b> 보내기 <b>+ 포털이 확인 열쇠를 되돌려 주기</b></td><td>①②③④</td>
+    <td><span class="st">🔴 <b>가장 큼</b> · 다음</td></tr>
 <tr><td><b>3</b></td><td><b>[관리자] 열을 앞으로</b> — 넷이 거꾸로입니다</td><td>⑧</td>
     <td><span class="st">대기 · 작음</span></td></tr>
 <tr><td><b>4</b></td><td>🔴 <b>네 시스템에 실질적인 설정</b> — 저장소를 새로 만듭니다</td><td>⑦</td>
     <td><span class="st">🔴 <b>배포 뒤로</b>(2026-10-22 결정)</span></td></tr>
 <tr><td><b>5</b></td><td>RF 이슈관리를 포털 알림 목록에 등록 <span class="blue">(= RF 의 5-나)</span></td><td>⑥</td>
-    <td><span class="st doing">🔄 <b>구현 중</b> · 저장소 둘</span></td></tr>
+    <td><span class="st done">✅ <code>b1c11f0</code></span></td></tr>
 </table>
 <b>⑥ 빠진 알림이 있나 → 없습니다.</b> 각 시스템이 설정 목록을 <b>실제로 내보내는 알림 목록에서 직접 만들어 내므로</b>
-빠질 수가 없습니다. 반대로 「떠 있는데 안 오는 유령」도 없습니다. 🔴 RF 이슈관리만 등록이 빠져 있고, 그것이 조각 5 입니다.
+빠질 수가 없습니다. 반대로 「떠 있는데 안 오는 유령」도 없습니다.
+✅ <b>RF 이슈관리만 등록이 빠져 있었고 2026-10-22 에 넣었습니다</b>(조각 5).
+</div>
+
+<div class="ask" style="margin:9px 0 0">
+<b>🔴 조각 2-나 조사에서 드러난 구멍 — 포털 쪽 일이 하나 더 붙습니다 (2026-10-22)</b><br />
+포털이 사이트에 알림을 내줄 때 <b>지운 열쇠는 함께 보내는데 확인한 열쇠는 안 보냅니다.</b> 그래서:
+<div class="note" style="margin:7px 0 0;color:var(--fg)">
+[재고부족]을 <b>A/S 종에서</b> 확인 → A/S · PO · 게시판에서 사라짐<br />
+🔴 그런데 <b>재고관리 제 종에서는 그대로 남음</b> — 제 알림은 제 DB 에서 그리는데
+포털이 「이건 확인됐다」를 안 알려 주기 때문입니다
+</div>
+말씀하신 <b>[재고부족]이 정확히 이 경우</b>입니다. 🔵 지운 열쇠를 보내는 길이 이미 있어서
+<b>그 옆에 하나 더 얹는 일</b>입니다.
+</div>
+
+<div class="tip" style="margin:9px 0 0">
+<b>🔵 여섯 사이트 조사 — 지금 「눌렀다」를 쓰는 곳은 둘뿐입니다</b>
+<table>
+<tr><th style="width:110px">사이트</th><th>지금</th><th style="width:180px">조각 2-나 난이도</th></tr>
+<tr><td><b>PO</b></td><td>제 알림이 <b>아예 없습니다</b> — 가를 것이 없습니다</td><td><span class="st done">가장 쉬움</span></td></tr>
+<tr><td><b>휴가</b></td><td>🔴 <b>일부러</b> 안 씁니다 — 「결재 안 한 일을 확인으로 숨기는 길이 생긴다」</td><td><span class="st">쉬움 + 울타리 하나</span></td></tr>
+<tr><td><b>게시판</b></td><td>글을 열면 사라집니다(열람 기록이 대신)</td><td><span class="st">쉬움 · 🔴 <b>시험이 0개</b></span></td></tr>
+<tr><td><b>개선요청</b></td><td>제 줄은 적고 <b>포털 줄은 무반응</b></td><td><span class="st">빈 자리를 채우는 일</span></td></tr>
+<tr><td><b>재고관리</b></td><td>안 씁니다 — 제 확인 기록 표가 <b>없습니다</b></td><td><span class="st">남의 줄은 쉬움 · 제 줄은 위 구멍 먼저</span></td></tr>
+<tr><td><b>A/S</b></td><td>🔴 포털 줄을 누르면 <b>「지움」으로 적습니다</b></td><td><span class="st doing">🔴 <b>가장 어려움</b></span></td></tr>
+</table>
+🔵 <b>휴가관리가 안 쓰는 까닭이 쓰는 분 요구와 같은 생각입니다</b> —
+「결재 안 한 일을 확인으로 숨기면 안 된다」가 곧 <b>「승인용은 남는다」</b>입니다. 분류가 그 걱정을 풉니다.<br />
+🔴 <b>A/S 가 어려운 까닭</b>: 지금 동작(포털 줄 클릭 = 지움)이 <b>시험 둘에 고정</b>돼 있습니다.
+그 코드의 주석이 <b>「포털에 확인을 적을 데가 없어서」</b>라고 까닭을 적어 두었는데,
+<b>그 전제가 이번에 사라집니다</b> — 단언을 뒤집어야 합니다.<br />
+🔴 <b>제 지시서가 또 틀렸습니다</b> — 게시판에 확인 기록 표가 있다고 적었는데 <b>없습니다.</b>
+글 열람 기록이 그 역할을 대신하고 있었습니다.
 </div>
 
 <div class="ask" style="margin:9px 0 0">
@@ -794,11 +854,13 @@ A/S 의 서버 액션·통로도, 재고 관리의 받는 쪽도 <b>이미 비�
 <tr><td><span class="pill p3">4</span></td><td><b>14</b></td><td><b>실행 대기에서도 [반려]</b> — 「결재 중」이 만든 빚</td><td><span class="st done">✅ 끝남 · 2026-10-21</span></td></tr>
 <tr><td><span class="pill p3">4</span></td><td>3</td><td>취소하면 [승인 요청건]도 사라짐</td><td><span class="st">🔵 <b>절반은 14번이</b> · 다시 재야 함</span></td></tr>
 <tr><td><span class="pill p4">5</span></td><td>5</td><td>세 화면에 품명 정보 + <b>소유구분·유상/무상</b></td><td><span class="st done">✅ 끝남 · 2026-10-21</span></td></tr>
-<tr><td><span class="pill p4">5</span></td><td>8</td><td>부품 요청 비고칸 — <b>세 화면에</b></td><td><span class="st doing">🔄 <b>구현 중</b> · 🔵 마이그레이션 없음</span></td></tr>
+<tr><td><span class="pill p4">5</span></td><td>8</td><td>부품 요청 비고칸 — <b>세 화면에</b> + A/S 되읽기</td><td><span class="st done">✅ <b>네 조각 전부</b> · 2026-10-22</span></td></tr>
 <tr><td><span class="pill p4">5</span></td><td><b>16</b></td><td>상태 거르개에 <b>「마감」</b>도</td><td><span class="st done">✅ 끝남 · 2026-10-21</span></td></tr>
-<tr><td><span class="pill p5">6</span></td><td><b>7</b> + 9가지</td><td><b>알림을 확인하면 사라짐</b> — 사내 전체</td><td><span class="st doing">🔄 <b>조각 1 끝</b> · 2-가 적용 대기</span></td></tr>
+<tr><td><span class="pill p5">6</span></td><td><b>7</b> + 9가지</td><td><b>알림을 확인하면 사라짐</b> — 사내 전체</td><td><span class="st doing">🔄 <b>1 · 2-가 · 5 끝</b> · 2-나 다음</span></td></tr>
 <tr><td><span class="pill p5">7</span></td><td>12</td><td>승인 절차를 매처/제너레이터로</td><td><span class="st">대기 · 🔵 <b>위임과 따로 가도 됨</b></span></td></tr>
-<tr><td colspan="2" style="text-align:right"><b>새 무대</b></td><td><b>RF 이슈관리를 통합 로그인에</b> — 로그인 · 머리말 · <b>알림종</b>까지</td><td><span class="st doing">🔄 <b>다섯 끝</b> · <b>5-나</b>만 남음</span></td></tr>
+<tr><td colspan="2" style="text-align:right"><b>새 무대</b></td><td><b>RF 이슈관리를 통합 로그인에</b> — 로그인 · 머리말 · <b>알림종</b>까지</td><td><span class="st done">✅ <b>전부 끝남</b> · 2026-10-22</span></td></tr>
+<tr><td colspan="2" style="text-align:right">🔴 <b>새로 드러난 것</b></td><td><b>1-A 의 「몇 초마다 다시 묻기」</b> — 계획에만 있고 아무 목록에도 없었다</td><td><span class="st">🔴 <b>미정</b> · 작음</span></td></tr>
+<tr><td colspan="2" style="text-align:right">🔴 <b>새로 드러난 것</b></td><td>위임 <b>조각 4</b> — 결재 그림에 <b>「○○ 결재 (○○ 대리)」</b></td><td><span class="st">🔴 <b>미정</b> · 자료는 쌓이는 중</span></td></tr>
 <tr><td><span class="pill p6">8</span></td><td>2</td><td>OH 템플릿에서 재고 고르기</td><td><span class="st">대기</span></td></tr>
 <tr><td><span class="pill p6">9</span></td><td>6</td><td>[출하승인] 메뉴 + 승인</td><td><span class="st">대기 · 설계 먼저</span></td></tr>
 <tr><td colspan="2" style="text-align:right"><b>딸려 갔던 것</b></td><td>11 · 승인 요청 뒤 [반려]·[보류] 잠금</td><td><span class="st done">✅ A 와 함께 끝남</span></td></tr>
