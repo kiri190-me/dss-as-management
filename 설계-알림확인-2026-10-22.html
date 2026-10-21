@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>설계 — 알림을 확인하면 사라지게 (조각 2-나, 2026-10-22)</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --line:#e3e6ea; --fg:#1d2126; --dim:#6b7280;
+    --b1:#b42318; --b3:#175cd3; --b5:#475467; --b6:#0e7490;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 20px 64px;background:var(--bg);color:var(--fg);
+       font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;line-height:1.65;}
+  .wrap{max-width:1000px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 6px}
+  .sub{color:var(--dim);font-size:14px;margin:0 0 24px}
+  h2{font-size:17px;margin:34px 0 10px;padding-bottom:7px;border-bottom:2px solid var(--line)}
+  h3{font-size:15px;margin:20px 0 6px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#f0f2f5;font-weight:700}
+  code{background:#eef1f5;border-radius:4px;padding:1px 5px;font-size:12.5px}
+  .ask{background:#fef3f2;border:1px solid #fecdca;border-radius:9px;padding:13px 15px;margin:12px 0}
+  .tip{background:#eff8ff;border:1px solid #b2ddff;border-radius:9px;padding:13px 15px;margin:12px 0}
+  .ok{background:#ecfdf3;border:1px solid #abefc6;border-radius:9px;padding:13px 15px;margin:12px 0}
+  .vis{background:#f5f3ff;border:1px solid #ddd6fe;border-radius:9px;padding:13px 15px;margin:12px 0}
+  .note{font-size:13px;color:var(--dim);margin-top:6px}
+  ul{margin:6px 0 0;padding-left:20px} li{margin:4px 0}
+  ol{margin:6px 0 0;padding-left:22px}
+  .st{font-size:12px;font-weight:700;border-radius:5px;padding:2px 8px;display:inline-block;background:#eef1f5;color:#475467}
+  .st.done{background:#ecfdf3;color:#067647;border:1px solid #abefc6}
+  .st.doing{background:#fffaeb;color:#93370d;border:1px solid #fedf89}
+  .flow{background:#fff;border:1px solid var(--line);border-radius:9px;padding:14px 16px;margin:10px 0;
+        font-size:13.5px;line-height:1.9}
+  .red{color:var(--b1);font-weight:700}
+  .blue{color:var(--b3);font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>설계 — 알림을 눌러 확인하면 사라지게</h1>
+<p class="sub">조각 2-나 · 2026-10-22 &nbsp;·&nbsp; 사내 여섯 사이트 + 포털
+&nbsp;·&nbsp; 현황판의 <b>6순위 7번 + 알림 아홉 가지</b></p>
+
+<div class="ok">
+<b>이 문서가 답하는 것</b>
+<ul>
+<li>지금 사이트마다 <b>동작이 다른데</b>, 그것을 어떻게 하나로 맞추는가</li>
+<li>🔴 <b>포털이 확인 열쇠를 사이트에 안 돌려주는 구멍</b>을 어떻게 메우는가</li>
+<li>A/S 가 왜 가장 어렵고, 그 결정을 어떻게 내리는가</li>
+<li>조각을 몇으로 나누고 어떤 순서로 가는가</li>
+</ul>
+</div>
+
+<!-- ─────────── 1 ─────────── -->
+<h2>1. 받은 요구와, 지금까지 된 것</h2>
+
+<p>쓰는 분이 2026-10-22 에 아홉 가지를 주셨습니다. 그중 이 조각이 맡는 것은 <b>①②③④</b> 입니다.</p>
+
+<table>
+<tr><th style="width:40px"></th><th>요구</th><th style="width:150px">상태</th></tr>
+<tr><td>①</td><td>알림을 눌러 확인하면 종에서 <b>사라지게</b></td><td><span class="st doing">이 조각</span></td></tr>
+<tr><td>②</td><td>🔴 <b>결재 승인·부품 요청</b>처럼 해소되어야 하는 알림은 그때까지 <b>남아 있게</b></td><td><span class="st doing">이 조각</span></td></tr>
+<tr><td>③</td><td><b>정보 확인용 = 사라짐</b> / <b>승인용 = 남음</b></td><td><span class="st doing">이 조각</span></td></tr>
+<tr><td>④</td><td><b>[재고부족]</b>은 정보 확인용 — 확인하면 사라짐</td><td><span class="st doing">이 조각</span></td></tr>
+<tr><td>⑤</td><td><b>[X]</b> 는 <b>지금대로</b> — 당장 사라지고 재로그인하면 돌아옴</td><td><span class="st done">건드리지 않음</span></td></tr>
+<tr><td>⑥</td><td>포털 [알림 설정]에 빠진 알림이 없는지</td><td><span class="st done">끝남 · 없었음</span></td></tr>
+<tr><td>⑦</td><td>역할별로 <b>실질적으로</b> 설정 가능하게</td><td><span class="st">조각 4 · 배포 뒤</span></td></tr>
+<tr><td>⑧</td><td>[관리자]를 열 앞쪽으로</td><td><span class="st">조각 3</span></td></tr>
+<tr><td>⑨</td><td>정보 확인용인지 승인용인지 고르게</td><td><span class="st done">끝남 <code>5d91100</code></span></td></tr>
+</table>
+
+<div class="ok">
+<b>이미 깔린 바닥 (2026-10-22 에 끝남)</b>
+<ul>
+<li><b>분류</b> — 포털 [알림 설정]에서 알림 종류마다 <b>정보 확인용 / 승인용</b>을 고를 수 있습니다.
+    🔵 <b>잠겨 있는 네 시스템에서도 이 칸만은 바뀝니다.</b></li>
+<li><b>확인 기록</b> — 포털에 표와 받는 통로가 있습니다
+    (<code>POST /api/integration/notification-acknowledgements</code>).</li>
+<li><b>거르기</b> — 포털이 알림을 내줄 때 <b>확인된 줄을 뺍니다.</b> 조건 셋이 모두 맞아야 뺍니다:
+    기록이 있고 · <b>내용 지문이 지금과 같고</b> · <b>분류가 정보 확인용</b>.</li>
+</ul>
+🔴 <b>그런데 아무도 그 통로를 부르지 않습니다.</b> 그것이 이 조각입니다.
+</div>
+
+<!-- ─────────── 2 ─────────── -->
+<h2>2. 🔴 지금은 사이트마다 동작이 다릅니다</h2>
+
+<p>조사해 보니 같은 알림 줄을 눌러도 <b>어느 사이트에서 눌렀느냐에 따라 다른 일</b>이 일어납니다.</p>
+
+<table>
+<tr><th style="width:110px">사이트</th><th>줄을 누르면 지금</th><th style="width:230px">까닭 (코드 주석에 적혀 있음)</th></tr>
+<tr><td><b>A/S</b></td><td>🔴 <b>「지움」으로 적힌다</b> — 재로그인하면 돌아온다</td>
+    <td>「포털 줄은 A/S 가 확인했다를 <b>적을 데가 없어서</b> 눌러 본 뒤에도 영영 종에 남던 유일한 줄이었다」</td></tr>
+<tr><td><b>개선요청</b></td><td>제 줄은 적고, <b>포털 줄은 아무 일도 안 일어난다</b></td>
+    <td>제 줄만 가려 제 표에 적는다</td></tr>
+<tr><td><b>재고관리</b></td><td><b>아무 일도 안 일어난다</b> — 주소로 이동만</td>
+    <td>제 확인 기록 표가 <b>없다</b></td></tr>
+<tr><td><b>PO</b></td><td><b>아무 일도 안 일어난다</b></td><td>「이 사이트에는 자체 알림이 없다」</td></tr>
+<tr><td><b>게시판</b></td><td><b>아무 일도 안 일어난다</b></td><td>「글을 열면 사라진다 — 열람 기록이 확인을 대신한다」</td></tr>
+<tr><td><b>휴가</b></td><td><b>아무 일도 안 일어난다</b></td>
+    <td>🔴 「확인했다를 적을 곳이 없고, 적으면 <b>결재 안 한 일을 숨기는 길</b>이 생긴다」</td></tr>
+</table>
+
+<div class="vis">
+<b>🔵 휴가관리의 까닭이 쓰는 분 요구와 같은 생각입니다</b><br />
+「결재 안 한 일을 확인으로 숨기면 안 된다」 = <b>「승인용은 남는다」</b>.
+그 시스템은 <b>적을 데가 없어서</b> 아예 막아 두는 길을 택했고,
+우리는 이번에 <b>적을 데를 만들되 분류로 가르는</b> 길을 택합니다. 같은 걱정을 다르게 푼 것입니다.
+</div>
+
+<div class="ask">
+<b>🔴 여섯의 까닭에 공통점이 하나 있습니다 — 그 전제가 이번에 사라집니다</b><br />
+여섯 중 넷이 「<b>확인했다를 적을 데가 없다</b>」를 이유로 들고 있습니다.
+포털에 적을 데가 생겼으므로 <b>그 까닭이 전부 과거형</b>이 됩니다.
+🔴 그래서 코드를 고칠 때 <b>주석도 함께 고쳐야</b> 합니다 — 안 고치면 다음 사람이 낡은 까닭을 믿고 되돌립니다.
+</div>
+
+<!-- ─────────── 3 ─────────── -->
+<h2>3. 🔴 설계의 중심 — 구멍 하나를 먼저 메웁니다</h2>
+
+<div class="ask">
+<b>포털이 「지운 열쇠」는 사이트에 돌려주는데 「확인한 열쇠」는 안 돌려줍니다.</b>
+</div>
+
+<p>왜 문제가 되는지 <b>[재고부족]</b>으로 따라가 봅니다. 쓰는 분이 예로 드신 바로 그 알림입니다.</p>
+
+<div class="flow">
+재고관리가 「한계수량 이하」를 알립니다. 그 줄은 <b>두 곳</b>에 뜹니다.<br />
+&nbsp;&nbsp;· <b>재고관리 제 종</b> — 제 DB 에서 직접 그립니다<br />
+&nbsp;&nbsp;· <b>A/S · PO · 게시판 등의 종</b> — 포털이 모아다 줍니다<br />
+<br />
+사람이 <b>A/S 종에서</b> 그 줄을 눌러 확인합니다.<br />
+&nbsp;&nbsp;→ 포털에 적힘 → A/S · PO · 게시판에서 <b class="blue">사라짐</b> ✅<br />
+&nbsp;&nbsp;→ 🔴 <b>재고관리 제 종에서는 그대로 남음</b> — 포털이 「이건 확인됐다」를 안 알려 주기 때문
+</div>
+
+<div class="ok">
+<b>메우는 법 — 이미 있는 길 옆에 하나</b><br />
+포털이 사이트에 알림을 내줄 때 <b>지운 열쇠 목록</b>을 함께 보냅니다(사이트가 제 줄을 거르라고).
+🔵 <b>그 옆에 「확인한 열쇠 목록」을 하나 더</b> 보냅니다.
+<table>
+<tr><th style="width:150px">지금</th><th>이 조각 뒤</th></tr>
+<tr><td><code>dismissed: [열쇠…]</code></td><td><code>dismissed: [열쇠…]</code><br /><code>acknowledged: [열쇠…]</code></td></tr>
+</table>
+🔴 <b>둘을 한 목록으로 합치지 마라.</b> 수명이 다릅니다 — 지움은 로그아웃하면 사라지고 확인은 안 사라집니다.
+합치면 사이트가 확인을 지움으로 읽어 <b>영구히 빼 버립니다.</b>
+</div>
+
+<div class="tip">
+<b>🔵 그러면 제 줄과 남의 줄이 같은 규칙으로 돕니다</b><br />
+사이트는 제 줄을 그릴 때 <b>「지운 것 빼고, 확인한 것도 빼고」</b> 그리면 됩니다 —
+이미 「지운 것 빼기」를 하고 있으니 <b>그 옆에 한 줄</b>입니다.
+</div>
+
+<!-- ─────────── 4 ─────────── -->
+<h2>4. 눌렀을 때 무슨 일이 일어나는가</h2>
+
+<div class="flow">
+<b>사람이 종의 줄을 누른다</b><br />
+&nbsp;&nbsp;↓<br />
+사이트가 <b>포털에 「이 열쇠를 확인했다」</b>를 보낸다 &nbsp;<span class="note">(열쇠만 보낸다)</span><br />
+&nbsp;&nbsp;↓<br />
+<b>포털이 판단한다</b> — 제 목록에서 그 줄을 찾아 <b>내용 지문을 직접 계산</b>해 적는다<br />
+&nbsp;&nbsp;↓<br />
+다음에 종을 열 때, 포털이 <b>분류가 「정보 확인용」인 줄만</b> 뺀다<br />
+&nbsp;&nbsp;↓<br />
+<b>정보 확인용</b> → 사라짐 &nbsp;·&nbsp; <b>승인용</b> → 그대로 남음
+</div>
+
+<div class="ask">
+<b>🔴 사이트는 판단하지 않습니다 — 이것이 이 설계의 핵심입니다</b><br />
+사이트는 <b>「눌렀다」만</b> 전합니다. 분류가 무엇인지, 영구히 없애도 되는지, 내용이 바뀌었는지는
+<b>전부 포털이</b> 봅니다.<br />
+🔵 그래서 <b>여섯 사이트에 같은 규칙을 여섯 번 적지 않아도</b> 됩니다. 분류를 바꾸면 그날로 전부 따라옵니다.<br />
+🔴 그리고 사이트가 <b>지문을 정하지 못하게</b> 한 것이 보안상 중요합니다 — 정할 수 있으면 아무 값이나 넣어
+그 알림을 <b>영영 안 보이게</b> 만들 수 있습니다.
+</div>
+
+<h3>🔴 「N종 더 있습니다」 함정</h3>
+<div class="ok">
+재고부족 알림은 <b>부품마다 한 줄</b>이라 영구히 없애도 안전한데,
+<b>「한계수량 이하인 부품이 N종 더 있습니다」</b> 한 줄만 <b>번호가 고정</b>입니다.<br />
+그냥 없애면 <b>3종이 10종이 되어도 영영 안 보입니다.</b><br />
+🔵 그래서 확인 기록에 <b>그때 그 줄의 내용</b>을 함께 적습니다. 「3종 더」를 확인하면 사라지고,
+「10종 더」가 되면 내용이 달라 <b>다시 뜹니다.</b> 🔵 <b>이미 만들어 둔 장치</b>이고 각 시스템은 안 고칩니다.
+</div>
+
+<!-- ─────────── 5 ─────────── -->
+<h2>5. 🔴 A/S 의 결정 — 사람이 정해야 합니다</h2>
+
+<p>A/S 만 지금 <b>포털 줄을 누르면 「지움」으로 적고</b> 있습니다.
+그 동작이 <b>시험 둘에 고정</b>돼 있어서, 이 조각은 그 단언을 뒤집어야 합니다.</p>
+
+<table>
+<tr><th style="width:52px">길</th><th>무엇</th><th>판단</th></tr>
+<tr><td><b>가</b></td><td>누르면 <b>확인</b>으로 바꾼다 (지움 호출을 뺀다)</td>
+    <td>🔵 <b>권장.</b> 여섯이 같아집니다. 쓰는 분 요구 ①②③ 그대로입니다.
+        🔴 <b>승인용 줄은 눌러도 안 사라지게 됩니다</b> — 지금은 임시로 사라지던 것입니다</td></tr>
+<tr><td><b>나</b></td><td>누르면 <b>확인과 지움을 둘 다</b> 적는다</td>
+    <td>🔴 <b>안 됩니다.</b> 승인용 줄이 눌린 순간 지움으로 숨어 ②가 깨집니다.
+        그리고 확인 저장이 실패했을 때 <b>되살아나야 할 줄이 지움 때문에 그대로 숨습니다</b></td></tr>
+<tr><td><b>다</b></td><td>지금대로 두고 A/S 만 예외</td>
+    <td>🔴 <b>안 됩니다.</b> 같은 알림이 사이트마다 다르게 굴어 「왜 여기선 안 사라지지」가 생깁니다</td></tr>
+</table>
+
+<div class="ask">
+<b>🔴 (가)로 가면 눈에 보이는 동작이 하나 바뀝니다 — 쓰는 분이 이미 알고 계십니다</b>
+<ul>
+<li><b>정보 확인용</b> 줄 → 눌러 확인하면 <b>영영</b> 사라짐 <span class="blue">(지금보다 강해집니다)</span></li>
+<li><b>승인용</b> 줄 → <b>눌러도 안 사라집니다</b> <span class="red">(지금은 임시로 사라지던 것)</span></li>
+</ul>
+승인용이 「덜 사라지는」 쪽으로 바뀌는데, <b>「동작을 해야 하는 알림은 해소될 때까지 남아야 한다」</b>가
+그 뜻입니다. 당장 치우고 싶을 때는 <b>[X]</b> 가 그대로 있습니다.
+</div>
+
+<!-- ─────────── 6 ─────────── -->
+<h2>6. 조각 나누기</h2>
+
+<table>
+<tr><th style="width:52px">조각</th><th>저장소</th><th>무엇</th><th style="width:110px">크기</th></tr>
+<tr><td><b>가</b></td><td><code>dss-auth</code></td>
+    <td>🔴 <b>확인 열쇠를 사이트에 돌려주기</b> — 3절의 구멍. 지운 열쇠 옆에 하나</td>
+    <td><span class="st">중 · <b>먼저</b></span></td></tr>
+<tr><td><b>나</b></td><td><code>dss-po</code></td>
+    <td><b>가장 쉬운 하나로 길을 뚫는다</b> — 제 알림이 없어 가를 것이 없다</td>
+    <td><span class="st done">작음 · <b>본보기</b></span></td></tr>
+<tr><td><b>다</b></td><td>휴가 · 게시판 · 개선요청</td>
+    <td>같은 모양을 셋에. 🔴 게시판은 <b>자격 변수 이름이 혼자 다르다</b></td>
+    <td><span class="st">중</span></td></tr>
+<tr><td><b>라</b></td><td><code>dss-inventory</code></td>
+    <td>남의 줄 + <b>제 줄</b>(가 조각이 있어야 제 종에서도 사라진다)</td>
+    <td><span class="st">중</span></td></tr>
+<tr><td><b>마</b></td><td><code>RF_Service_System</code></td>
+    <td>🔴 <b>가장 어려움</b> — 「지움」을 「확인」으로 바꾸고 시험 둘의 단언을 뒤집는다</td>
+    <td><span class="st doing">🔴 큼 · <b>마지막</b></span></td></tr>
+</table>
+
+<div class="tip">
+<b>🔵 왜 PO 를 둘째로 두는가</b><br />
+여섯 중 <b>가장 단순한 집</b>입니다 — 제 알림이 아예 없어 「제 줄/남의 줄」을 가를 필요가 없습니다.
+<b>거기서 한 벌을 완성해 눈으로 확인</b>한 뒤 나머지에 옮기면, 나중 다섯은 <b>베끼는 일</b>이 됩니다.
+🔴 처음부터 어려운 집(A/S)에서 시작하면 <b>통로 문제인지 그 집 문제인지</b>를 가를 수 없습니다.
+</div>
+
+<div class="ask">
+<b>🔴 조각마다 조심할 것</b>
+<ul>
+<li><b>게시판</b> — 🔴 <b>시험이 하나도 없습니다</b>(<code>test</code> 명령도, 시험 파일도 0개).
+    여섯 중 유일하게 자동 검증 수단이 없으니 <b>눈 확인에 더 기대야</b> 합니다.
+    🔴 그리고 <b>포털 자격 변수 이름이 혼자 다릅니다</b> — 다른 다섯에서 베껴 오면 그 자리에서 깨집니다.</li>
+<li><b>휴가</b> — 🔴 <b>제 줄(결재 대기)은 이 길로 보내면 안 됩니다.</b> 그 시스템이 일부러 막아 둔 것이고,
+    까닭이 옳습니다. <b>포털 줄에만</b> 한정하는 울타리를 새로 지어야 합니다
+    (지금은 그 가름 자체가 없습니다).</li>
+<li><b>개선요청</b> — 🔵 가름이 이미 있고 <b>포털 줄 자리가 비어 있습니다.</b> 채우기만 하면 됩니다.
+    🔴 다만 「포털 줄은 적지도 감추지도 않는다」를 단언하는 기존 시험을 고쳐야 합니다.</li>
+<li><b>재고관리</b> — 🔴 <b>조각 가 없이는 반쪽</b>입니다. 남의 줄은 사라지는데 제 줄은 안 사라집니다.</li>
+<li><b>A/S</b> — 🔴 코드뿐 아니라 <b>주석의 까닭</b>도 고쳐야 합니다. 「적을 데가 없어서」가 거짓이 됩니다.</li>
+</ul>
+</div>
+
+<!-- ─────────── 7 ─────────── -->
+<h2>7. 하지 않는 것</h2>
+
+<div class="ok">
+<ul>
+<li>🔴 <b>[X](지움)의 동작을 바꾸지 않습니다</b> — 쓰는 분이 「지금대로」라고 하셨습니다.
+    당장 사라지고 재로그인하면 돌아옵니다.</li>
+<li>🔴 <b>각 시스템의 제 확인 기록 표를 걷어내지 않습니다.</b> A/S·개선요청에 있는 그 표는 그대로 둡니다 —
+    제 알림의 확인은 그쪽이 계속 맡습니다. <b>포털은 포털이 나른 줄만</b> 맡습니다.
+    🔵 걷어내면 그 시스템의 옛 기록이 사라집니다.</li>
+<li>🔴 <b>재고관리에 확인 기록 표를 새로 만들지 않습니다.</b> 원래 7번의 내용이었지만,
+    <b>포털이 그 자리를 대신하므로</b> 필요 없어졌습니다.</li>
+<li><b>알림을 만드는 코드를 건드리지 않습니다.</b> 이 조각은 <b>이미 만들어진 줄을 어떻게 다루는가</b>입니다.</li>
+<li><b>분류(정보 확인용/승인용) 저장 쪽을 건드리지 않습니다</b> — 끝난 조각입니다.</li>
+</ul>
+</div>
+
+<!-- ─────────── 8 ─────────── -->
+<h2>8. 끝났는지 어떻게 아는가</h2>
+
+<div class="tip">
+<b>시험으로 잡히는 것</b>
+<ul>
+<li>포털이 <b>확인 열쇠를 돌려준다</b> · 지운 열쇠와 <b>섞이지 않는다</b></li>
+<li>사이트가 제 줄을 그릴 때 <b>확인한 것을 뺀다</b></li>
+<li>🔴 <b>승인용 줄은 확인해도 안 빠진다</b></li>
+<li>🔴 <b>내용이 바뀌면 다시 뜬다</b>(「3종 더」 → 「10종 더」)</li>
+<li>🔴 휴가관리의 <b>제 줄은 포털로 안 간다</b></li>
+</ul>
+</div>
+
+<div class="ask">
+<b>🔴 눈으로만 잡히는 것 — 사람이 봐야 합니다</b>
+<ol>
+<li><b>[재고부족]을 A/S 종에서 확인</b> → A/S 에서 사라지고, <b>재고관리 제 종에서도 사라지는가</b>
+    <span class="note">(3절의 구멍이 메워졌는지를 재는 자리입니다)</span></li>
+<li><b>로그아웃했다 다시 들어와도</b> 안 보이는가 <span class="note">(「해소됐다」의 뜻)</span></li>
+<li><b>승인용 줄</b>(결재 차례 등)을 눌러 보고 <b>그대로 남는가</b></li>
+<li><b>[X]</b> 로 지운 줄은 <b>재로그인하면 돌아오는가</b> <span class="note">(⑤ 가 안 깨졌는지)</span></li>
+<li>🔴 <b>게시판</b> — 시험이 없으니 여기만 전부 눈으로</li>
+</ol>
+</div>
+
+<p class="sub" style="margin-top:26px">
+관련 문서: <code>진행현황-2026-10-20.html</code>(6순위 7번) ·
+<code>설계-결재권위임-2026-10-21.html</code> &nbsp;·&nbsp; 작성 2026-10-22</p>
+
+</div>
+</body>
+</html>
