@@ -70,12 +70,26 @@
 <tr><td><b>4</b> 결재권 위임</td><td><b>조각 셋</b> — 표·판정·본인 위임 화면(+설정 탭). 🔵 <b>O/H 템플릿도 모두에게 열었습니다</b><br />
     🔴 <b>2026-10-22 바로잡음</b>: 「넷 전부」로 적혀 있었는데 <b>조각 4(대리 표시)가 안 됐습니다</b> — 아래 2순위를 보세요</td></tr>
 <tr><td><b>1 · 9 · 10</b></td><td>반려·취소의 진실 — 🔵 <b>대부분 이미 되어 있었고</b>, 담당자 화면에 <b>사유</b>를 더했습니다</td></tr>
-<tr><td><b>13</b></td><td><b>두 시스템이 같은 말을 하는지 재는 도구</b>(21가지) — 🔴 만들자마자 <b>「마감 (마감)」</b>을 잡았습니다</td></tr>
+<tr><td><b>13</b></td><td><b>두 시스템이 같은 말을 하는지 재는 도구</b> — 🔴 만들자마자 <b>「마감 (마감)」</b>을 잡았습니다.
+    🔵 2026-10-22 실측 <b>112 통과 · 실패 0</b>(신청을 하나 주고 쟀습니다 — 신청 수에 따라 늡니다)</td></tr>
 <tr><td><b>14</b></td><td>실행 대기에서도 <b>[반려]</b> — 「결재 중」이 만든 빚을 갚았습니다</td></tr>
 <tr><td><b>RF 이슈관리</b></td><td>통합 로그인 · 머리말 셋 · 자체 로그인 걷어내기 · <b>전역 알림종</b></td></tr>
 </table>
-🔵 재고관리는 커밋 여섯을 <b>올렸고</b>, 그 뒤 셋이 더 쌓였습니다. 시험 <b>1,331개</b>.
+🔵 재고관리는 커밋 여섯을 <b>올렸고</b>, 그 뒤로 더 쌓였습니다(아래 「아직 안 올린 것」).
 </div>
+
+<div class="ask">
+<b>🔴 아직 안 올린 것 — 2026-10-22 기준 <b>31 커밋</b></b>
+<table>
+<tr><th style="width:190px">저장소</th><th style="width:90px">미푸시</th><th>비고</th></tr>
+<tr><td><b>A/S</b>(RF_Service_System)</td><td><b>14</b></td><td>비고칸 · 점검 도구 · 현황판 · 설계안</td></tr>
+<tr><td><b>재고 관리</b>(dss-inventory)</td><td><b>8</b></td><td>요청 비고 · 대리 표시</td></tr>
+<tr><td><b>RF 이슈관리</b>(dss-trouble)</td><td><b>6</b></td><td>🔴 <b>공개 저장소</b> — 올리기는 따로 승인받습니다</td></tr>
+<tr><td><b>포털</b>(dss-auth)</td><td><b>3</b></td><td>분류 · 확인 기록 · RF 등록</td></tr>
+</table>
+🔴 <b>이 PC 가 고장 나면 그만큼 잃습니다.</b> 배포 전에 한 번 올리는 것이 안전합니다.
+</div>
+
 
 <div class="ok">
 <b>✅ 2026-10-22 에 끝난 것 · 도는 것</b>
@@ -264,7 +278,7 @@ RF 의 창구 셋이 <b>서로 막힙니다</b>(알림용 토큰으로 설정을
         🔵 머리글을 셋으로 갈랐습니다(마감 사유 / 반려 사유 / 결정 사유) — 배지가 「마감」인데 상자가 「반려 사유」면
         같은 줄이 두 말을 합니다</td></tr>
 <tr><td><span class="pill p2">3과 함께</span> <span class="donepill">끝남</span></td><td><b>13</b></td><td><b>두 시스템이 같은 말을 하는지 재는 도구</b></td>
-    <td>✅ <b>2026-10-21 끝남</b>(<code>8c59ee9</code>) — <b>21가지</b>를 잽니다.
+    <td>✅ <b>2026-10-21 끝남</b>(<code>8c59ee9</code>) — 서버에 대고 잽니다. 🔵 2026-10-22 실측 <b>112 통과 · 실패 0</b>.
         <code>npm run check:inventory-contract</code><br />
         🔴 <b>만들자마자 진짜 결함을 잡았습니다</b> — 마감된 신청이 A/S 에서 <b>「마감 (마감)」</b>으로 뜨고 있었습니다.
         재고관리는 마감이면 글자 자체를 「마감」으로 바꿔 보내는데 A/S 는 그걸 모르고 꼬리를 하나 더 붙이고 있었습니다.
@@ -541,8 +555,33 @@ A/S 의 서버 액션·통로도, 재고 관리의 받는 쪽도 <b>이미 비�
 <tr><td><b>3</b></td><td><b>본인 위임 화면</b> — 🔴 <code>delegator_sub</code> 는 서버가 세션에서 꺼낸다</td>
     <td><span class="st done">✅ <code>1b1c22b</code> · 설정 탭 <code>1c016ac</code></span></td></tr>
 <tr><td><b>4</b></td><td>결재 그림·이력에 <b>「○○ 결재 (○○ 대리)」</b></td>
-    <td><span class="st doing">🔄 <b>구현 중</b> · 2026-10-22</span></td></tr>
+    <td><span class="st done">✅ <code>e4ffe89</code> · 2026-10-22</span></td></tr>
 </table>
+<div class="ok" style="margin:9px 0 0">
+<b>✅ 네 조각 전부 끝났습니다 (2026-10-22)</b> — 상자 안에 <b>두 줄</b>로 섭니다.
+윗줄이 <b>결재선에 적힌 사람</b>, 아랫줄이 <b>실제로 누른 대리인</b>(더 작고 흐리게).
+🔵 결재선은 「누구 자리인가」를 보는 그림이라 대리인이 먼저 눈에 들어오면 거꾸로 읽힙니다.
+🔵 <b>괄호를 씌운 까닭</b>: 없으면 「이○○ 대리」가 <b>직급</b>으로 읽힙니다.<br />
+🔵 <b>옛 결재는 지금처럼 이름 하나</b>입니다. 2026-10-21 이전에는 위임 기능 자체가 없어
+적힌 사람이 누른 것이 사실상 맞습니다 — 다만 코드는 「사실상 맞다」와 「적혀 있다」를 계속 가릅니다.
+</div>
+
+<div class="ask" style="margin:9px 0 0">
+<b>🔴 그 조각이 결함을 하나 드러냈습니다 — 같은 반려를 두 곳이 다른 이름으로 말합니다</b>
+<table>
+<tr><th style="width:230px">어디</th><th>누구 이름</th></tr>
+<tr><td><b>알림 종</b>(「반려되었습니다」)</td><td>🔴 <b>원래 결재권자</b> — 「김○○ 반려」</td></tr>
+<tr><td><b>[부품 요청]의 반려 사유 상자</b></td><td>🔴 <b>실제로 누른 사람</b> — 「이○○ 반려」</td></tr>
+</table>
+대리인이 반려하면 <b>보는 자리에 따라 다른 사람이 반려한 것처럼</b> 보입니다.
+🔴 오류가 안 나고 둘 다 그럴듯해서 조용합니다.
+🔄 <b>고치는 중</b>입니다 — 기준은 위 결재선 그림과 같게(「김○○ 반려 (이○○ 대리)」).
+🔵 종 쪽은 <b>스키마가 필요 없습니다</b>(그 질의가 이미 결재 단계 줄을 끌어다 씁니다).
+</div>
+
+<div class="note">🔴 <b>A/S 쪽 같은 그림에는 대리가 안 보입니다.</b> A/S 로 나가는 통로가
+<b>결재 단계 자료를 한 칸도 안 싣습니다</b>(잠금 상태만). 보이게 하려면 통로에 칸을 더해야 합니다 —
+<b>별도 조각</b>입니다.</div>
 <div class="ask" style="margin:9px 0 0">
 <b>🔴 2026-10-22 바로잡음 — 「조각 넷 전부 끝남」이 틀렸습니다</b><br />
 커밋 넷을 세면서 <b>네 번째를 다른 것</b>(설정 탭 이동)으로 셌습니다. <b>조각 4 는 아직입니다.</b><br />
@@ -642,8 +681,9 @@ A/S 의 서버 액션·통로도, 재고 관리의 받는 쪽도 <b>이미 비�
     <td><span class="st done">✅ <code>5d91100</code> · <b>0006 적용</b></span></td></tr>
 <tr><td><b>2-가</b></td><td>포털에 <b>확인 기록</b> + 받는 통로 + 거르기</td><td>①②③④</td>
     <td><span class="st doing">🔄 검수 끝 · <b>적용·커밋 대기</b></span></td></tr>
-<tr><td><b>2-나</b></td><td>여섯 사이트의 종이 <b>확인을 포털로</b> 보내기 <b>+ 포털이 확인 열쇠를 되돌려 주기</b></td><td>①②③④</td>
-    <td><span class="st">🔴 <b>가장 큼</b> · 다음</td></tr>
+<tr><td><b>2-나</b></td><td>여섯 사이트의 종이 <b>확인을 포털로</b> 보내기 <b>+ 포털이 확인 열쇠를 되돌려 주기</b><br />
+    🔵 설계안 한 장: <code>설계-알림확인-2026-10-22.html</code></td><td>①②③④</td>
+    <td><span class="st doing">🔄 <b>가·나 구현 중</b></span></td></tr>
 <tr><td><b>3</b></td><td><b>[관리자] 열을 앞으로</b> — 넷이 거꾸로입니다</td><td>⑧</td>
     <td><span class="st">대기 · 작음</span></td></tr>
 <tr><td><b>4</b></td><td>🔴 <b>네 시스템에 실질적인 설정</b> — 저장소를 새로 만듭니다</td><td>⑦</td>
@@ -850,7 +890,7 @@ A/S 의 서버 액션·통로도, 재고 관리의 받는 쪽도 <b>이미 비�
 <tr><td><span class="pill p2">3</span></td><td>9</td><td>반려 → 세 곳 반영 + 알림</td><td><span class="st done">✅ 사실상 되어 있었음</span></td></tr>
 <tr><td><span class="pill p2">3</span></td><td>10</td><td>반려 사유를 양쪽에서 확인</td><td><span class="st done">✅ 끝남 · 2026-10-21</span></td></tr>
 <tr><td><span class="pill p2">3</span></td><td>—</td><td>A/S 의 반려 사유에 <b>제목 붙이기</b></td><td><span class="st done">✅ 끝남 · 2026-10-21</span></td></tr>
-<tr><td><span class="pill p2">3과 함께</span></td><td>13</td><td>두 시스템이 같은 말을 하는지 재는 도구</td><td><span class="st done">✅ <b>21가지</b> · 결함 하나 잡음</span></td></tr>
+<tr><td><span class="pill p2">3과 함께</span></td><td>13</td><td>두 시스템이 같은 말을 하는지 재는 도구</td><td><span class="st done">✅ <b>112 통과</b> · 결함 <b>둘</b> 잡음</span></td></tr>
 <tr><td><span class="pill p3">4</span></td><td><b>14</b></td><td><b>실행 대기에서도 [반려]</b> — 「결재 중」이 만든 빚</td><td><span class="st done">✅ 끝남 · 2026-10-21</span></td></tr>
 <tr><td><span class="pill p3">4</span></td><td>3</td><td>취소하면 [승인 요청건]도 사라짐</td><td><span class="st">🔵 <b>절반은 14번이</b> · 다시 재야 함</span></td></tr>
 <tr><td><span class="pill p4">5</span></td><td>5</td><td>세 화면에 품명 정보 + <b>소유구분·유상/무상</b></td><td><span class="st done">✅ 끝남 · 2026-10-21</span></td></tr>
@@ -860,7 +900,9 @@ A/S 의 서버 액션·통로도, 재고 관리의 받는 쪽도 <b>이미 비�
 <tr><td><span class="pill p5">7</span></td><td>12</td><td>승인 절차를 매처/제너레이터로</td><td><span class="st">대기 · 🔵 <b>위임과 따로 가도 됨</b></span></td></tr>
 <tr><td colspan="2" style="text-align:right"><b>새 무대</b></td><td><b>RF 이슈관리를 통합 로그인에</b> — 로그인 · 머리말 · <b>알림종</b>까지</td><td><span class="st done">✅ <b>전부 끝남</b> · 2026-10-22</span></td></tr>
 <tr><td colspan="2" style="text-align:right"><b>폐기</b></td><td><s>1-A 의 「몇 초마다 다시 묻기」</s> — 알림 종이 그 자리를 메운다</td><td><span class="st">❌ <b>안 함</b> · 2026-10-22</span></td></tr>
-<tr><td colspan="2" style="text-align:right"><b>되살린 것</b></td><td>위임 <b>조각 4</b> — 결재 그림에 <b>「○○ 결재 (○○ 대리)」</b></td><td><span class="st doing">🔄 <b>구현 중</b> · 2026-10-22</span></td></tr>
+<tr><td colspan="2" style="text-align:right"><b>되살린 것</b></td><td>위임 <b>조각 4</b> — 결재 그림에 <b>「○○ 결재 (○○ 대리)」</b></td><td><span class="st done">✅ <code>e4ffe89</code></span></td></tr>
+<tr><td colspan="2" style="text-align:right">🔴 <b>새로 드러난 것</b></td><td><b>같은 반려를 두 곳이 다른 이름으로</b> — 종은 원래 결재권자, 상자는 누른 사람</td><td><span class="st doing">🔄 <b>고치는 중</b></span></td></tr>
+<tr><td colspan="2" style="text-align:right">🔴 <b>새로 드러난 것</b></td><td><b>A/S 쪽 결재 그림에 대리가 안 보인다</b> — 통로가 단계 자료를 안 싣는다</td><td><span class="st">🔴 <b>미정</b> · 별도 조각</span></td></tr>
 <tr><td><span class="pill p6">8</span></td><td>2</td><td>OH 템플릿에서 재고 고르기</td><td><span class="st">대기</span></td></tr>
 <tr><td><span class="pill p6">9</span></td><td>6</td><td>[출하승인] 메뉴 + 승인</td><td><span class="st">대기 · 설계 먼저</span></td></tr>
 <tr><td colspan="2" style="text-align:right"><b>딸려 갔던 것</b></td><td>11 · 승인 요청 뒤 [반려]·[보류] 잠금</td><td><span class="st done">✅ A 와 함께 끝남</span></td></tr>
