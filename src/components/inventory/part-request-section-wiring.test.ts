@@ -672,3 +672,100 @@ describe("🔴 반출 신청 줄 — 셋이 눈에 띈다", () => {
     assert.doesNotMatch(source, /const STOCK_REQUEST_[A-Z_]+ =/, "화면이 꾸밈 상수를 제 손으로 짓는다");
   });
 });
+
+/**
+ * ============================================================================
+ * 🔴 **비고** — 적은 글이 재고 관리까지 간다 (2026-10-22 쓰는 분 요청)
+ * ============================================================================
+ * 나르는 길(서버 액션 → 통로 → 저쪽)은 **처음부터 다 뚫려 있었다**. 막혀 있던 곳은 화면
+ * 하나뿐이었다 — 사람이 적을 칸이 없어서 올릴 때 `null` 이 박혀 나갔다. 그래서 여기서 재는
+ * 것은 **그 칸이 생겼는가**가 아니라 **적은 글이 실제로 실려 나가는가**다.
+ *
+ * 붙잡는 것 넷:
+ *  ㉠ **적은 글이 그대로 실린다** — 박혀 있던 `null` 이 사라졌다.
+ *  ㉡ **안 적으면 `null`** 이 간다 — 빈 글자(`""`)를 보내면 「적었는데 비어 있다」와
+ *     「안 적었다」가 저쪽에서 갈리지 않는다.
+ *  ㉢ **성공하면 비우고 실패하면 안 비운다** — 안 비우면 다음 요청에 지난 비고가 따라붙고,
+ *     실패했는데 비우면 사람이 쓴 글이 날아간다.
+ *  ㉣ **상한이 저쪽 수와 같다** — 저쪽은 넘치면 거절하지 않고 **조용히 자른다**. 그 수가
+ *     어디서 왔는지가 화면에 적혀 있어야 다음 사람이 「왜 1000인가」를 찾아 헤매지 않는다.
+ * ============================================================================
+ */
+describe("🔴 비고 — 적은 글이 재고 관리까지 간다", () => {
+  /** 올리는 함수만 떼어 본다 — 거두기·채우기 함수의 같은 모양과 섞이지 않게. */
+  const submitFn = source.slice(
+    source.indexOf("async function handleSubmit"),
+    source.indexOf("async function handleCancelConfirm")
+  );
+
+  test("㉠ 적을 칸이 있다 — 여러 줄로, **요청 하나에 하나**다", () => {
+    assert.match(source, /const \[note, setNote\] = useState\(""\);/);
+    assert.match(source, /<textarea/, "한 줄 입력이다 — 여러 줄을 못 적는다");
+    assert.match(source, /id="stock-request-note"/);
+    // 🔴 이름표가 칸에 이어져 있어야 눌러서 들어갈 수 있다.
+    assert.match(source, /htmlFor="stock-request-note"/, "이름표가 칸에 안 이어져 있다");
+    assert.match(source, /비고 <span/, "「비고」 이름표가 없다");
+    /* 🔴 **줄마다가 아니다**(쓰는 분이 정했다) — 장바구니 줄에 비고가 생기면 「이 요청의
+       비고」와 「이 부품의 비고」 둘이 되고, 저쪽은 요청 하나치만 받는다. */
+    assert.doesNotMatch(source, /note: line\.note|\{ note: /, "장바구니 줄마다 비고를 들고 있다");
+  });
+
+  test("㉠ 자리가 **담은 줄 아래, 올리는 단추 위**다", () => {
+    const noteAt = source.indexOf('id="stock-request-note"');
+    const tableEnd = source.indexOf("</table>");
+    const submitAt = source.indexOf("onClick={() => void handleSubmit()}");
+    assert.ok(tableEnd >= 0 && noteAt > tableEnd, "비고 칸이 담은 줄 표 안에 있다");
+    assert.ok(submitAt >= 0 && noteAt < submitAt, "비고 칸이 올리는 단추 아래로 밀렸다");
+  });
+
+  test("㉠ 🔴 적은 글이 **그대로** 실려 나간다 — 박혀 있던 `null` 이 사라졌다", () => {
+    assert.doesNotMatch(submitFn, /note: null,/, "비고가 아직 박힌 null 이다 — 적어도 안 간다");
+    assert.match(submitFn, /note: note\.trim\(\) === "" \? null : note,/);
+  });
+
+  test("㉡ 🔴 안 적으면 `null` 이 간다 — 빈 글자는 「안 적었다」와 다른 말이다", () => {
+    assert.match(submitFn, /\? null : note,/, "빈 칸일 때 null 로 갈라 주지 않는다");
+    assert.doesNotMatch(submitFn, /note: note,/, "빈 글자가 그대로 나갈 수 있다");
+    /* 🔵 적었으면 **다듬지 않고** 보낸다 — 앞뒤 공백을 떼는 자리는 서버 액션 한 곳이고,
+       여기서 또 떼면 자가 두 벌이 된다(저쪽이 규칙을 고치는 날 여기만 옛 규칙이다). */
+    assert.doesNotMatch(submitFn, /note: note\.trim\(\),/, "화면이 글자를 미리 다듬어 보낸다");
+  });
+
+  test("㉢ 🔴 성공하면 비운다 — **장바구니를 비우는 그 자리에서 함께**", () => {
+    const clear = [...submitFn.matchAll(/setNote\(""\)/g)];
+    assert.equal(clear.length, 1, "비우는 자리가 하나가 아니다");
+
+    const clearCart = submitFn.indexOf("setCart([]);");
+    assert.ok(clearCart >= 0, "장바구니를 비우는 자리가 없다");
+    assert.ok(clear[0].index > clearCart, "장바구니를 비우는 자리와 떨어져 있다");
+
+    // 🔴 안 비우면 다음 요청에 **지난 비고가 그대로** 따라붙는다.
+    assert.match(source, /onChange=\{\(e\) => setNote\(e\.target\.value\)\}/, "친 글자가 칸에 안 담긴다");
+  });
+
+  test("㉢ 🔴 실패하면 **안 비운다** — 사람이 쓴 글을 날리지 않는다(장바구니와 같은 결)", () => {
+    const failure = submitFn.indexOf("if (!result.ok) {");
+    assert.ok(failure >= 0, "실패를 가르는 자리가 없다");
+    const branch = submitFn.slice(failure, submitFn.indexOf("return;", failure));
+    assert.doesNotMatch(branch, /setNote|setCart/, "못 올렸는데 사람이 쓴 것을 지우고 있다");
+
+    // 비우는 자리는 실패해서 돌아가는 자리보다 **뒤**다.
+    const clear = submitFn.indexOf('setNote("")');
+    assert.ok(clear > failure, "실패해도 비고를 지우고 있다");
+  });
+
+  test("㉣ 🔴 상한이 **저쪽 수**와 같다 — 넘치면 저쪽이 조용히 자른다", () => {
+    assert.match(source, /const NOTE_MAX_LENGTH = 1000;/);
+    assert.match(source, /maxLength=\{NOTE_MAX_LENGTH\}/, "입력 칸에 상한이 안 걸렸다");
+    // 숫자를 쓰는 자리에 다시 박아 두지 않는다 — 두 곳이 되면 한쪽만 고쳐진다.
+    assert.doesNotMatch(source, /maxLength=\{1000\}/, "상한을 쓰는 자리에 박아 두었다");
+  });
+
+  test("㉣ 🔴 **그 수가 어디서 왔는지**가 적혀 있다 — 저쪽이 바꾸면 여기도 바꿔야 한다", () => {
+    /* 🔴 두 저장소에 나뉘어 있어 **어느 쪽도 혼자서는** 어긋난 것을 알지 못한다. 다음 사람이
+       「왜 1000인가」를 찾아 헤매지 않게 저쪽 파일과 그 줄을 그대로 적어 둔다. */
+    assert.match(source, /dss-inventory/, "어느 저장소에서 온 수인지 안 적혀 있다");
+    assert.match(source, /src\/lib\/api\/stock-requests\.ts/, "저쪽 파일 자리가 안 적혀 있다");
+    assert.match(source, /text\(body\.note, 1000\)/, "저쪽의 그 줄이 안 적혀 있다");
+  });
+});

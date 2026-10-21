@@ -57,6 +57,17 @@ import { generateClientUuid } from "@/lib/client-uuid";
 import { PART_FIELD_LABELS } from "@dss/core/ui/inventory/part-picker-rows";
 
 /**
+ * 비고에 적을 수 있는 글자 수 — 🔴 **이 수는 저쪽(재고 관리) 코드에서 왔다.**
+ *
+ * 받는 자리가 `dss-inventory` 의 `src/lib/api/stock-requests.ts` 이고, 거기서 비고를
+ * `text(body.note, 1000)` 으로 받는다 — 넘치면 **거절하지 않고 조용히 잘라** 저장한다.
+ * 여기서 같은 수로 막지 않으면 길게 쓴 글이 **아무 말 없이** 사라지고, 쓴 사람은 다 갔다고
+ * 믿는다. 🔴 저쪽이 이 수를 고치면 **여기도 함께 고쳐야 한다** — 두 저장소에 나뉘어 있어
+ * 어느 쪽도 혼자서는 어긋난 것을 알지 못한다.
+ */
+const NOTE_MAX_LENGTH = 1000;
+
+/**
  * ============================================================================
  * 부품 요청 칸 — 🔴 **재고 관리를 본다** (2026-10-15)
  * ============================================================================
@@ -152,6 +163,12 @@ export default function PartRequestSection({
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<StockRequestCartLine[]>([]);
+  /**
+   * 🔴 **요청 하나에 비고 하나**다(2026-10-22 쓰는 분 결정) — 부품 줄마다가 아니다. 그래서
+   * 장바구니 줄(`StockRequestCartLine`)이 아니라 **이 칸이** 들고 있다.
+   * 🔵 **안 적어도 된다** — 빈 채로 두면 올릴 때 `null` 로 나간다(아래 `handleSubmit`).
+   */
+  const [note, setNote] = useState("");
   const [ohMessage, setOhMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -290,19 +307,27 @@ export default function PartRequestSection({
       // 🔴 두 번 눌러도 같은 값이 나간다(위 ref 의 머리말).
       requestKey: getOrCreateRequestKey(requestKeyRef, generateClientUuid),
       lines: validated.lines,
-      note: null,
+      /* 🔴 **안 적었으면 `null`**이다 — 빈 글자(`""`)를 보내면 「적었는데 비어 있다」와
+         「안 적었다」가 저쪽에서 구별되지 않는다.
+         🔵 적었으면 **다듬지 않고 그대로** 보낸다 — 앞뒤 공백을 떼는 자리는 서버 액션 한
+         곳이고(`inventory-stock-requests.ts`), 여기서 또 떼면 자가 두 벌이 된다. */
+      note: note.trim() === "" ? null : note,
     });
     setIsSubmitting(false);
 
     if (!result.ok) {
       // 🔴 못 올렸으면 **올린 것처럼 보이지 않게** 한다. 장바구니도 요청 번호도 그대로 두어
       //    다시 누르면 **같은 요청**이 간다(두 줄로 서지 않는다).
+      // 🔴 **비고도 그대로 둔다** — 사람이 쓴 글이라 지우면 다시 칠 수가 없다.
       setErrorMessage(result.message);
       return;
     }
 
     resetRequestKey(requestKeyRef);
     setCart([]);
+    // 🔴 장바구니를 비우는 **그 자리에서 함께** 비운다 — 안 그러면 다음 요청에 지난 비고가
+    //    그대로 따라붙고, 쓴 사람은 비어 있는 줄 안다.
+    setNote("");
     setSearch("");
     setOhMessage(null);
     router.refresh();
@@ -693,6 +718,40 @@ export default function PartRequestSection({
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* 🔴 **비고** (2026-10-22 쓰는 분 요청) — 담은 줄 **아래**, 올리는 단추 **위**다.
+            적은 글은 재고 관리의 [부품 요청]·[승인요청건]·[기록내역] 세 화면에 그대로 뜬다.
+            🔵 **요청 하나에 하나**이고 **안 적어도 된다** — 그래서 이름표에 「선택」을 붙여
+               비워 두어도 되는 칸이라는 것을 먼저 말한다(단추가 잠기는 칸이 아니다).
+            🔵 담은 줄이 있을 때만 그린다 — 담은 것이 없으면 올릴 수도 없어서(단추가 잠긴다)
+               적을 자리만 덩그러니 서면 무엇에 붙는 글인지 알 수 없다. 🔴 **친 글자는 그대로
+               남는다** — 줄을 다 지웠다가 다시 담아도 쓰던 글이 돌아온다(상태가 이 칸의 것이다). */}
+        {cart.length > 0 && (
+          <div>
+            <label htmlFor="stock-request-note" className="block text-xs text-zinc-600 dark:text-zinc-400">
+              비고 <span className="text-zinc-400 dark:text-zinc-500">(선택)</span>
+            </label>
+            <textarea
+              id="stock-request-note"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              disabled={isSubmitting}
+              rows={2}
+              /* 🔴 상한이 **저쪽에서 온 수**인 까닭은 그 상수의 머리말에 있다 — 여기서 막지
+                 않으면 저쪽이 조용히 잘라 저장한다. */
+              maxLength={NOTE_MAX_LENGTH}
+              placeholder="재고 담당자가 알아야 할 것을 적어 주세요 — 예: 분해 후 추가 부품이 더 필요할 수 있습니다 / 출장 일정이 있어 금요일 오전까지 받아야 합니다"
+              className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-900 disabled:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+            />
+            {/* 🔵 센 수는 **적었을 때만** 보인다 — 빈 칸 밑의 「0 / 1000」은 아무 말도 안 한다.
+                🔴 상한에 닿는 순간 글자가 더 안 쳐지는데, 이 수가 없으면 자판이 고장 난 줄 안다. */}
+            {note.length > 0 && (
+              <p className="mt-0.5 text-right text-[11px] text-zinc-400 dark:text-zinc-500">
+                {note.length} / {NOTE_MAX_LENGTH}자
+              </p>
+            )}
           </div>
         )}
 
