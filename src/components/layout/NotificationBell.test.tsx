@@ -14,6 +14,7 @@ import NotificationBell, {
   NotificationBellWithInbox,
   NotificationSelfTest,
   acknowledgeInBackground,
+  acknowledgePortalInBackground,
   announceNotificationPanelOpened,
   handleNotificationPicked,
   handlePortalRowPicked,
@@ -760,10 +761,12 @@ test("자기 알림이 없어도 받은 것만으로 배지가 선다 — 반대
   assert.ok(onlyMine.includes(">알림 1건</span>"));
 });
 
-test("🔴 포털에서 온 줄에서는 확인을 부르지 않는다 — 남의 시스템 id 로 기록을 적으면 안 된다", () => {
-  // 「확인했다」를 적을 수 있는 곳은 그 알림을 만든 시스템뿐이고, 포털에 그
-  // 통로가 아직 없다. 🔴 묶음은 **모든 줄에서** 확인 함수를 부르므로, 이 갈래가
-  // 없으면 `IMPROVEMENT:7` 같은 남의 id 로 A/S 에 확인 기록이 쌓인다.
+test("🔴 포털에서 온 줄에서는 **A/S 의** 확인을 부르지 않는다 — 남의 id 로 우리 표를 적으면 안 된다", () => {
+  // 「확인했다」를 **A/S 의 표**에 적을 수 있는 것은 A/S 가 만든 알림뿐이다.
+  // 🔴 묶음은 **모든 줄에서** 확인 함수를 부르므로, 이 갈래가 없으면
+  // `IMPROVEMENT:7` 같은 남의 id 로 A/S 에 확인 기록이 쌓인다.
+  // 🔵 2026-10-22 부터 포털 줄의 확인은 **포털**에 적힌다(handlePortalRowPicked)
+  //    — 길이 생긴 것이지 이 가드가 풀린 것이 아니다.
   for (const kind of NOTIFICATION_KINDS) {
     // 최악의 경우 — 종류 코드까지 A/S 의 「눌러서 확인하는」 종류와 같을 때.
     const acknowledged: string[] = [];
@@ -883,7 +886,9 @@ test("🔴 종은 포털 목록을 값으로도, 약속으로도 **다시 묻지
  *  1. 지우는 **서버 액션**을 안 넘기면 **예전 종 그대로**다(적을 곳을 모르는
  *     채 단추만 서면 눌러도 아무 일이 없다).
  *  2. 단추는 **보이는 줄 전부**에 선다(2026-10-20부터 — 종류를 가리지 않는다).
- *  3. 포털 줄은 **누르는 것만으로도** 지워지고, 그 길은 A/S 의 표로 가지 않는다.
+ *  3. 🔴 **✕ 만 지움이다.** 줄을 **누르는 것**은 2026-10-22 부터 지움이 아니라
+ *     확인으로 간다(위 handlePortalRowPicked). 둘을 섞지 마라 — 지움은
+ *     재로그인하면 돌아오고 확인은 안 돌아온다.
  *  4. 지운 줄은 목록에서도 **배지에서도** 빠진다.
  */
 
@@ -1160,49 +1165,188 @@ test("🔴 footer 의 안내를 안 넘기면 예전 그대로다 — 이미 있
   );
 });
 
-test("🔴 줄을 누르면 **포털 줄만** 지운 것으로 적는다 — 자기 줄은 그 길로 가지 않는다", () => {
-  // 포털 줄은 A/S 가 「확인했다」를 적을 데가 없어(그 통로가 포털에 없다) 눌러
-  // 본 뒤에도 영영 종에 남던 유일한 줄이었다. 누른 것만으로 눈에서 치운다.
+test("🔴 줄을 누르면 **포털 줄만** 포털에 **확인**으로 적는다 — 자기 줄은 그 길로 가지 않는다", () => {
+  // 🔴 2026-10-22 에 뒤집힌 단언이다. 그 전까지 이 길은 **지움**이었다 — 포털
+  //    줄은 A/S 가 「확인했다」를 적을 데가 없어(그 통로가 포털에 없었다) 눌러
+  //    본 뒤에도 영영 종에 남던 유일한 줄이었고, 그래서 누른 것만으로 치웠다.
+  //    포털이 그 통로를 열면서 전제가 사라졌다(규격서의 「acknowledged」절).
+  //    정보 확인용 줄은 이제 **영영** 빠지고, 결재 승인·부품 요청처럼 동작이
+  //    필요한 줄은 확인을 적어도 **해소될 때까지 남는다**(포털이 판단한다).
   for (const kind of NOTIFICATION_KINDS) {
-    const 지운것: string[] = [];
-    handlePortalRowPicked(portalRow({ kind }), { onDismiss: (key) => 지운것.push(key) });
-    assert.deepEqual(지운것, [portalRow().key], `${kind}: 포털 줄을 안 지웠다`);
+    const 확인한것: string[] = [];
+    handlePortalRowPicked(portalRow({ kind }), { onAcknowledge: (key) => 확인한것.push(key) });
+    assert.deepEqual(확인한것, [portalRow().key], `${kind}: 포털 줄의 확인을 안 적었다`);
   }
 
-  // 🔴 자기 줄은 여기서 끝난다 — 그 줄은 확인 기록(영구)으로 가고 있고, 저장이
-  //    실패하면 되살아나야 한다. 지움으로도 적으면 **모든 사내 시스템의 종에서**
-  //    그대로 숨는다(2026-10-20부터 지움은 포털에 적힌다).
+  // 🔴 넘어가는 것은 **열쇠**(`client_id:id`)다 — 포털은 그 모양으로만 제 목록에서
+  //    줄을 찾는다. `id` 만 보내면 아무 오류 없이 조용히 버려진다(dropped).
+  const 열쇠 = portalRow().key;
+  assert.notEqual(열쇠, portalRow().id, "표본이 열쇠와 id 를 못 가른다 — 이 단언이 헛돈다");
+
+  // 🔴 자기 줄은 여기서 끝난다 — 그 줄의 확인은 이미 **A/S 의 표**로 가고 있다.
+  //    같은 누름을 포털에도 적으면 같은 일이 두 곳에 적혀 어느 쪽이 참인지 알 수
+  //    없게 된다.
   for (const item of toNotificationBellItems(oneOfEachKind())) {
-    const 지운것: string[] = [];
-    handlePortalRowPicked(item, { onDismiss: (key) => 지운것.push(key) });
-    assert.deepEqual(지운것, [], "자기 줄이 지우기 길로 갔다");
+    const 확인한것: string[] = [];
+    handlePortalRowPicked(item, { onAcknowledge: (key) => 확인한것.push(key) });
+    assert.deepEqual(확인한것, [], "자기 줄이 포털 확인 길로 갔다");
   }
 
-  // 던져도 새지 않고, 지울 곳이 없으면 조용히 지나간다(이동을 막으면 안 된다).
+  // 던져도 새지 않고, 적을 곳이 없으면 조용히 지나간다(이동을 막으면 안 된다).
   assert.doesNotThrow(() =>
     handlePortalRowPicked(portalRow(), {
-      onDismiss: () => {
-        throw new Error("저장소가 막혀 있다");
+      onAcknowledge: () => {
+        throw new Error("망이 끊겼다");
       },
     })
   );
   assert.doesNotThrow(() => handlePortalRowPicked(portalRow(), {}));
 });
 
-test("🔴 포털 줄을 **A/S 확인 기록**에 적는 길은 그대로 막혀 있다 — 지움 길과 다르다", () => {
-  // 지우기가 열렸다고 이 가드가 풀려서는 안 된다. 풀리면 남의 시스템 알림
-  // id 로 A/S 의 확인 기록이 쌓인다 — 아무 오류도 없이, 그 줄은 남은 채.
+test("🔴 포털 줄을 **A/S 의 표**에 적는 길은 그대로 막혀 있다 — 포털 확인 길과 다르다", () => {
+  // 🔴 **이 단언의 뜻은 2026-10-22 에도 그대로다.** 포털 줄이 확인으로 적히게
+  //    바뀐 것은 **포털 쪽** 길이고, A/S 의 표(notification_acknowledgements)로
+  //    가는 길은 여전히 막혀 있어야 한다. 풀리면 남의 시스템 알림 id 로 우리
+  //    표가 쌓인다 — 아무 오류도 없이, 그 줄은 남은 채.
   const 확인한것: string[] = [];
   handleNotificationPicked(portalRow(), { onAcknowledge: (picked) => 확인한것.push(picked.id) });
-  assert.deepEqual(확인한것, [], "포털 줄이 DB 길로 들어갔다");
+  assert.deepEqual(확인한것, [], "포털 줄이 A/S 표 길로 들어갔다");
+
+  // 🔴 **두 길을 한 번에** — 묶음은 모든 줄에서 한 번 부르므로, 실제 누름처럼
+  //    둘 다 불러 본다. 포털 줄이면 포털 쪽만, 자기 줄이면 A/S 표 쪽만 일해야
+  //    한다. 한쪽이라도 새면 같은 누름이 두 곳에 적힌다.
+  for (const [이름, item] of [
+    ["포털 줄", portalRow()],
+    ["자기 줄", toNotificationBellItems([grantedItem()])[0]],
+  ] as const) {
+    const AS표: string[] = [];
+    const 포털: string[] = [];
+    handleNotificationPicked(item, { onAcknowledge: (picked) => AS표.push(picked.id) });
+    handlePortalRowPicked(item, { onAcknowledge: (key) => 포털.push(key) });
+
+    if (이름 === "포털 줄") {
+      assert.deepEqual(AS표, [], "포털 줄이 A/S 표에도 적혔다");
+      assert.deepEqual(포털, [item.key]);
+    } else {
+      assert.deepEqual(AS표, [item.id], "자기 줄이 A/S 표에 안 적혔다");
+      assert.deepEqual(포털, [], "자기 줄이 포털로 샜다");
+    }
+  }
 
   const source = readLayoutSource("NotificationBell.tsx");
-  assert.match(source, /if \(item\.sourceId\) return;/, "확인 기록 쪽 가드가 사라졌다");
+  assert.match(source, /if \(item\.sourceId\) return;/, "A/S 표 쪽 가드가 사라졌다");
+  // 🔴 종은 어느 표에도 직접 적지 않는다 — 두 길 다 **받은 함수**로만 나간다.
+  assert.ok(
+    !/from "@\/lib\/server\//.test(source) && !/from "@\/lib\/db\//.test(source),
+    "종이 서버·DB 모듈을 직접 가져왔다"
+  );
   // 지우는 규칙은 **도메인 한 곳**에서 가져온다 — 화면이 종류를 보지 않는다.
   assert.ok(
     source.includes('from "@/lib/domain/notification-dismissal"'),
     "가리는 규칙이 화면 안으로 들어왔다"
   );
+});
+
+test("🔴 줄을 누르는 길에 **지움이 한 글자도 없다** — 동작이 필요한 줄이 숨으면 안 된다", () => {
+  // 🔴 2026-10-22 요구 ②. 포털 줄을 확인과 **함께** 지움으로도 적으면, 결재
+  //    승인·부품 요청처럼 해소될 때까지 남아야 하는 줄이 눌린 순간 종에서
+  //    사라진다(포털은 그런 줄을 확인해도 일부러 남겨 둔다). 확인 저장이
+  //    실패했을 때 되살아나야 할 줄이 지움 때문에 그대로 숨기도 한다.
+  const 지운것: string[] = [];
+  const 확인한것: string[] = [];
+  // 🔴 걷어낸 칸(`onDismiss`)을 일부러 함께 끼워 넣는다 — 되살아나면 여기서 잡힌다.
+  //    글자로 쓰면 칸 이름이 바뀌는 날 조용히 통과하므로 **값으로** 본다.
+  const 양쪽: Record<string, (key: string) => void> = {
+    onAcknowledge: (key) => 확인한것.push(key),
+    onDismiss: (key) => 지운것.push(key),
+  };
+  handlePortalRowPicked(portalRow(), 양쪽);
+  assert.deepEqual(지운것, [], "🔴 누르는 길이 아직 지움을 부른다");
+  assert.deepEqual(확인한것, [portalRow().key]);
+
+  // 🔴 묶음에 물린 **누름 처리 안**에도 지움이 없어야 한다. 함수만 고치고 호출부에
+  //    지움을 남겨 두면 값으로는 안 드러난다.
+  const source = readLayoutSource("NotificationBell.tsx");
+  const 누름처리 = source.slice(
+    source.indexOf("      onAcknowledge={(picked: NotificationBellItem) => {"),
+    source.indexOf("      // 🔴 줄마다 서는 지우기 단추.")
+  );
+  assert.ok(누름처리.length > 0, "누름 처리를 못 찾았다 — 이 시험이 아무것도 안 본다");
+  assert.ok(누름처리.includes("handlePortalRowPicked("), "자른 토막이 엉뚱한 자리다");
+  assert.ok(!/dismiss\(/.test(누름처리), "🔴 줄을 누르면 아직 지움이 불린다");
+
+  // 🔵 **✕ 는 그대로 지움으로 간다** — 바뀐 것은 줄을 누를 때뿐이다.
+  const 지우기길 = source.slice(
+    source.indexOf("      // 🔴 줄마다 서는 지우기 단추."),
+    source.indexOf("      footer={")
+  );
+  assert.ok(지우기길.length > 0, "지우기 쪽을 못 찾았다 — 이 시험이 아무것도 안 본다");
+  assert.match(지우기길, /onDismiss=\{canDismissHere \? \(picked: NotificationBellItem\) => dismiss\(\[picked\.key\]\) : undefined\}/);
+  assert.match(지우기길, /onDismissAll=\{canDismissHere \? \(\) => dismiss\(dismissableKeys\) : undefined\}/);
+});
+
+test("🔴 포털 확인은 **기다리지 않고 감추지도 않는다** — 이동을 붙잡으면 안 된다", () => {
+  // 이 줄의 주소는 다른 시스템의 절대 주소라 누르면 페이지를 통째로 떠난다.
+  // 감췄다 되살릴 틈이 없고, 포털이 센 개수는 줄 수와 달라 감추면 배지가 어긋난다.
+  const 보낸것: string[] = [];
+  // 영영 안 풀리는 약속을 돌려준다 — 기다린다면 여기서 멈춘다.
+  const 결과 = acknowledgePortalInBackground(
+    "dss-improvements:IMPROVEMENT:7",
+    ({ notificationKey }) => {
+      보낸것.push(notificationKey);
+      return new Promise<{ ok: boolean }>(() => {});
+    }
+  );
+  assert.equal(결과, undefined, "🔴 약속을 돌려준다 — 누름 처리가 망 왕복만큼 붙잡힌다");
+  assert.deepEqual(보낸것, ["dss-improvements:IMPROVEMENT:7"], "저장을 시작도 안 했다");
+
+  // 🔴 넘어간 것은 **열쇠**다 — 감추는 쪽(acknowledgeInBackground)은 `id` 로
+  //    감추지만 여기는 감출 것이 없고, 포털이 아는 모양은 열쇠뿐이다.
+  const source = readLayoutSource("NotificationBell.tsx");
+  const 포털확인함수 = source.slice(
+    source.indexOf("export function acknowledgePortalInBackground"),
+    source.indexOf("export function selectVisibleNotifications")
+  );
+  assert.ok(포털확인함수.length > 0, "포털 확인 함수를 못 찾았다 — 이 시험이 아무것도 안 본다");
+  assert.ok(포털확인함수.includes("acknowledge({ notificationKey: key })"), "자른 토막이 엉뚱한 자리다");
+  assert.ok(!/view\.|hide\(|restore\(/.test(포털확인함수), "🔴 포털 줄을 감췄다 되살리고 있다");
+  assert.ok(!/await /.test(포털확인함수), "🔴 포털 왕복을 기다리고 있다");
+
+  // 🔴 부르는 것 자체가 터져도, 거절이 와도 새지 않는다 — 안 삼키면 「처리되지
+  //    않은 거절」이 모든 화면의 머리말에서 터진다.
+  assert.doesNotThrow(() =>
+    acknowledgePortalInBackground("x:1", () => {
+      throw new Error("망이 끊겼다");
+    })
+  );
+  assert.doesNotThrow(() =>
+    acknowledgePortalInBackground("x:1", async () => {
+      throw new Error("포털이 거절했다");
+    })
+  );
+});
+
+test("🔴 포털 확인 서버 액션도 머리말이 건넨다 — 종은 직접 가져오지 않는다", () => {
+  const source = readLayoutSource("NotificationBell.tsx");
+  // 받아서 쓰는 모양 그대로다 — A/S 표 쪽(acknowledge)과 **같은 타입, 다른 함수**다.
+  assert.match(source, /acknowledgePortal\?: AcknowledgeNotification;/, "받는 칸이 없다");
+
+  const topBar = readFileSync(new URL("./TopBar.tsx", import.meta.url), "utf8");
+  assert.match(
+    topBar,
+    /import \{[^}]*\backnowledgePortalNotificationAction\b[^}]*\} from "@\/lib\/server\/actions\/notification-acknowledgements"/,
+    "머리말이 포털 확인 액션을 가져오지 않는다"
+  );
+  const bells = topBar.match(/<NotificationBell\b[^>]*>/g) ?? [];
+  assert.equal(bells.length, 1, "TopBar 가 그리는 종이 하나가 아니다");
+  assert.match(
+    bells[0],
+    /acknowledgePortal=\{acknowledgePortalNotificationAction\}/,
+    "🔴 종에 포털 확인 액션을 안 건넨다 — 아무 오류 없이 포털 줄이 영영 안 빠진다"
+  );
+  // 🔴 나머지 둘은 그대로다 — 셋이 가는 곳이 다 다르다.
+  assert.match(bells[0], /\backnowledge=\{acknowledgeNotificationAction\}/);
+  assert.match(bells[0], /dismiss=\{dismissNotificationsAction\}/);
 });
 
 /* ─────────────── 적는 곳이 포털로 옮겨 갔다(2026-10-20, 조각 A-2) ─────────────── */

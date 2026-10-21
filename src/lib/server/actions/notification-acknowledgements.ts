@@ -4,13 +4,21 @@ import { revalidatePath } from "next/cache";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
+import { getLoginMode } from "@/lib/config/login-mode";
 import { acknowledgeNotification } from "@/lib/db/mutations/notification-acknowledgements";
+import { getSsoSubjectForUser } from "@/lib/db/queries/users";
 import { checkNotificationAcknowledgementKey } from "@/lib/domain/notification-acknowledgement";
+import { acknowledgePortalNotification } from "@/lib/server/integration/portal-inbox";
 
 /**
  * ============================================================================
  * 알림 확인 — 서버 액션
  * ============================================================================
+ * 🔴 **이 파일에 확인 액션이 둘이다**(2026-10-22). 이것은 **A/S 자신의 줄**을
+ * A/S 의 표에 적는 쪽이고, 파일 아래쪽의 acknowledgePortalNotificationAction 은
+ * **포털에서 온 줄**을 포털에 적는 쪽이다. 적히는 곳이 다르고 가르는 자리는 종
+ * 한 곳이다 — 섞지 마라.
+ *
  * 종에서 정보성 알림(승인 완료·반려됨)을 눌렀을 때 부른다(NotificationBell). 층을
  * 나누는 방식은 이 폴더의 다른 액션들과 같다:
  *
@@ -143,4 +151,83 @@ export async function acknowledgeNotificationAction(
   // 새로 적었는지(newlyAcknowledged)는 화면에 알릴 이유가 없다 — 사람에게는 둘 다
   // 「사라졌다」로 같다.
   return { ok: true };
+}
+
+/**
+ * ============================================================================
+ * 알림 확인 — **포털에서 온 줄** (2026-10-22)
+ * ============================================================================
+ * 종의 줄을 눌렀는데 그것이 **남의 시스템 알림**이면(`sourceId` 가 있으면) 종이
+ * 위 acknowledgeNotificationAction 대신 **이 액션**을 부른다. 가르는 자리는 종
+ * 한 곳이다(components/layout/NotificationBell.tsx 의 handlePortalRowPicked).
+ *
+ * ── 🔴 위 액션과 적히는 곳이 다르다. 섞지 마라 ────────────────────────────
+ *  · 위는 **A/S 의 표**(notification_acknowledgements)에 적는다. 그 길에는
+ *    `if (item.sourceId) return;` 가드가 그대로 있어서 포털 줄이 들어갈 수 없다
+ *    — 남의 시스템 알림 id 로 우리 표가 쌓이면 아무 오류 없이 영영 남는다.
+ *  · 여기는 **포털**에 적는다. 우리 DB 에는 한 줄도 쓰지 않는다 — 그 알림을
+ *    만든 시스템이 우리가 아니기 때문이다.
+ *
+ * ── 🔴 ✕ 지움(notification-dismissals.ts)과도 다르다 ─────────────────────
+ * 모양은 거의 같지만 **수명이 정반대**다. ✕ 는 「지금은 그만 보겠다」라
+ * 재로그인하면 돌아오고, 줄을 누르는 것은 「확인했다」라 안 돌아온다. 포털의
+ * 표도 그래서 둘이다(규격서 「acknowledged」절). 🔴 **그래서 여기서 지움을
+ * 함께 적지 않는다** — 둘 다 적으면 동작이 필요한 줄(결재 승인·부품 요청)이
+ * 눌린 순간 지움으로 숨어 「해소될 때까지 남아 있게」라는 요구가 깨진다.
+ *
+ * ── 위 액션과 같은 것 ────────────────────────────────────────────────────
+ * 서버 액션인 까닭 · 세션을 다시 읽는 까닭 · 던지지 않는 까닭은 위 머리말과
+ * 옆 액션(notification-dismissals.ts)에 있다 — 되풀이하지 않는다.
+ *
+ * ── 🔴 다른 것 셋 ────────────────────────────────────────────────────────
+ *  · **사람을 가리키는 칸이 없다.** 누구의 확인인지는 서버가 제 세션에서 읽는다
+ *    — 받으면 브라우저가 아무 번호나 실어 남의 알림을 확인 처리할 수 있다.
+ *  · **권한을 따로 보지 않는다.** 위 액션은 살아 있는 계정인지까지 본다(우리 표에
+ *    줄이 영구히 쌓이므로). 여기는 우리 표에 아무것도 안 쓰고, 포털이 **그 사람
+ *    몫으로만** 적는다 — 지움 액션과 같은 판단이다.
+ *  · **열쇠 모양을 다시 가리지 않는다.** 위 액션은 우리 모양인지 다시 보지만
+ *    (우리 표에 쓰레기가 쌓이면 안 되므로) 모르는 모양은 포털이 제 손으로 버린다.
+ *    빈 문자열만 걸러 포털에 거절 한 줄을 쌓는 헛걸음을 막는다.
+ *
+ * ── 🔵 다시 그리게 하지 않는다 ───────────────────────────────────────────
+ * `revalidatePath` 를 부르지 않는다(옆 지움 액션과 같다). 이 줄의 주소는 다른
+ * 시스템의 **절대 주소**라 누르면 이 페이지를 통째로 떠나고, 돌아왔을 때는
+ * 포털이 제 목록에서 그 줄을 이미 빼고 준다. 여기서 레이아웃을 다시 계산하면
+ * 줄 한 번 누르기마다 알림 조회와 포털 왕복이 통째로 다시 돈다.
+ * ============================================================================
+ */
+export async function acknowledgePortalNotificationAction(input: {
+  notificationKey: string;
+}): Promise<{ ok: boolean }> {
+  try {
+    // 데모 모드에는 포털이 없다 — 적을 곳이 없는 것이 정상이다(옆 지움 액션과
+    // 같은 갈래).
+    if (getLoginMode() !== "sso") return { ok: false };
+
+    // 인자는 브라우저가 보낸 그대로라 타입 선언을 믿지 않는다 — 객체가 아닐
+    // 수도 있다.
+    const raw =
+      typeof input === "object" && input !== null
+        ? (input as { notificationKey?: unknown }).notificationKey
+        : undefined;
+    const notificationKey = typeof raw === "string" ? raw : "";
+    if (notificationKey === "") return { ok: false };
+
+    const session = await readSession();
+    if (!session) return { ok: false };
+
+    // 🔴 **여기가 「누구의 확인인가」를 정하는 유일한 자리다.** 인자에는 사람을
+    //    가리키는 칸이 아예 없다(위 머리말).
+    const subject = await getSsoSubjectForUser(session.userId);
+    // 포털 계정에 이어지지 않은 로컬 계정은 적을 곳이 없다(설계서 F-3).
+    if (!subject) return { ok: false };
+
+    return { ok: await acknowledgePortalNotification(subject, notificationKey) };
+  } catch (error) {
+    // 🔴 남기는 것은 오류의 **종류**뿐이다 — 열쇠에는 업무 식별자가 들어 있다.
+    console.error("acknowledgePortalNotificationAction: failed", {
+      name: error instanceof Error ? error.name : "unknown",
+    });
+    return { ok: false };
+  }
 }

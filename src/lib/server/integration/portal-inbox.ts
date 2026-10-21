@@ -19,10 +19,12 @@ import {
  *  1. `server/integration/portal-notifications.ts` — **들어오는 쪽**. 포털이
  *     A/S 에 물어 갈 때 내주는 판단(PortalNotificationFeed).
  *  2. `domain/portal-notification-inbox.ts` — **받은 것의 모양과 검사**(순수).
- *  3. 이 파일 — **나가는 왕복 둘**. 위를 향해 묻는 쪽
+ *  3. 이 파일 — **나가는 왕복 셋**. 위를 향해 묻는 쪽
  *     (fetchPortalNotificationInbox)과, 「그만 보겠다」를 적는 쪽
- *     (dismissPortalNotifications — 파일 아래쪽). 둘은 같은 자격증명 · 같은
- *     상한 · 같은 거절을 쓴다.
+ *     (dismissPortalNotifications — 파일 가운데)과, 「확인했다」를 적는 쪽
+ *     (acknowledgePortalNotification — 파일 맨 아래, 2026-10-22). 셋은 같은
+ *     자격증명 · 같은 상한 · 같은 거절을 쓴다. 🔴 **뒤의 둘은 뜻이 다르다** —
+ *     지움은 재로그인하면 돌아오고 확인은 안 돌아온다(그 둘의 머리말).
  *
  * ── 🔴 왜 서버에서만 부르나 ─────────────────────────────────────────────
  * 자격은 이 사이트의 `client_secret` 이다(포털 세션 쿠키가 없는 곳에서 부르기
@@ -280,4 +282,106 @@ export async function dismissPortalNotifications(
   }
 
   return recorded;
+}
+
+/* ========================================================================== */
+/* 「이 알림은 확인했다」를 포털에 적는다 — **쓰는 쪽 둘째** (2026-10-22)       */
+/*                                                                            */
+/* 🔴 바로 위 지움과 **뜻이 다르다. 한 뭉치로 만들지 마라.** ✕ 지움은 「지금은 */
+/*    그만 보겠다」라 재로그인하면 **돌아오고**, 줄을 **누르는 것**은          */
+/*    「확인했다」라 **안 돌아온다**. 포털의 표가 그래서 둘이고 돌아오는 칸도  */
+/*    둘이다(`dismissed` · `acknowledged` — dss-auth/docs/사이트-알림-통로.md  */
+/*    의 「acknowledged」절). 확인을 지움으로 읽으면 안 돌아와야 할 줄이       */
+/*    로그아웃 뒤에 돌아오고, 지움을 확인으로 읽으면 영영 사라진다.            */
+/*                                                                            */
+/* 🔴 **무엇을 없앨지 이 사이트가 판단하지 않는다.** 나가는 것은 열쇠뿐이고,   */
+/*    「그때 본 내용」의 지문은 포털이 제 목록에서 직접 계산한다. 종에서        */
+/*    빠지는 것은 (기록이 있고 · 지문이 지금 내용과 같고 · 그 종류가 「정보    */
+/*    확인용」) 셋이 다 맞을 때뿐이다 — 그래서 **결재 승인·부품 요청처럼       */
+/*    동작이 필요한 줄은 확인을 적어도 종에 그대로 남는다**(2026-10-22 요구).  */
+/*    🔴 같은 판정을 여기 베껴 적지 마라: 한 사이트만 어긋나도 그 시스템에서만 */
+/*    확인이 영영 안 먹히고 오류는 한 줄도 안 난다(규격서).                    */
+/*                                                                            */
+/* 🔴 여기로 나가는 것은 **남의 시스템 줄뿐이다.** A/S 자신의 알림 확인은      */
+/*    예전 그대로 A/S 의 표(notification_acknowledgements)에 적힌다 —          */
+/*    server/actions/notification-acknowledgements.ts 의                       */
+/*    acknowledgeNotificationAction. 둘을 가르는 자리는 종 한 곳이다           */
+/*    (components/layout/NotificationBell.tsx 의 handlePortalRowPicked).       */
+/*                                                                            */
+/* 🔴 **읽는 쪽·지움 쪽과 같은 자격증명 · 같은 상한 · 같은 거절이다.** 그래서  */
+/*    같은 파일에 나란히 둔다 — 셋이 어긋나면 「알림은 오는데 확인만 안        */
+/*    먹히는」 상태가 되고, 그 어긋남은 신고로만 드러난다.                     */
+/* ========================================================================== */
+
+/**
+ * 「이 알림은 확인했다」를 포털에 적는다. 🔴 **어떤 일이 있어도 던지지 않는다**
+ * — 묻는 쪽·지움 쪽과 같은 약속이다. 못 적으면 그 줄이 종에 남을 뿐이고, 그것이
+ * 화면이 깨지는 것보다 훨씬 낫다.
+ *
+ * @param subject 포털의 `users.id`(= ID 토큰의 `sub`). A/S 는 `users.sso_subject`
+ *                로 들고 있다. 🔴 **서버가 제 세션에서 읽은 값**이어야 한다 —
+ *                브라우저가 보낸 값을 그대로 넘기면 남의 알림을 확인 처리하는
+ *                통로가 된다(지움 쪽과 같은 규약).
+ * @param acknowledgementKey `{client_id}:{id}` 모양 **하나**. 모양이 틀리거나
+ *                모르는 시스템의 것은 포털이 조용히 버린다(`dropped`·`skipped`).
+ *
+ * 🔴 지움과 달리 **열쇠를 하나만 받는다.** 확인은 줄을 하나 누르는 일이라 열쇠가
+ *    언제나 하나다 — 「확인 전부」 같은 단추가 생기는 날 나눠 보내는 고리를
+ *    그때 더한다(포털의 상한은 지움과 **같은 값**이라 그대로 쓸 수 있다).
+ *    미리 두면 아무도 안 도는 고리가 된다.
+ *
+ * @returns 적혔는가. 🔵 몇 번을 다시 보내도 안전하다 — 같은 열쇠를 두 번 확인하는
+ *          것은 한 번 확인하는 것과 같다. 그래서 실패를 되돌리는 장치가 없다.
+ */
+export async function acknowledgePortalNotification(
+  subject: string,
+  acknowledgementKey: string,
+  deps: PortalInboxDeps = {}
+): Promise<boolean> {
+  // 🔴 포털 계정에 이어지지 않은 로컬 계정은 적을 곳이 없다(묻는 쪽·지움 쪽과
+  //    같은 갈래).
+  if (!subject) return false;
+  // 빈 열쇠는 포털이 400(`no_keys`)으로 거절한다 — 아예 보내지 않는다.
+  if (!acknowledgementKey) return false;
+
+  const send = deps.fetch ?? globalThis.fetch;
+  let response: Response;
+  try {
+    // 🔴 자격증명을 읽는 자리가 **try 안**인 것은 묻는 쪽·지움 쪽과 같은 까닭이다
+    //    — config 의 getter 는 값이 없으면 던지고, 설정이 빠진 것 때문에 줄 한 번
+    //    누르기가 화면을 깨면 안 된다.
+    const { issuer, clientId, clientSecret } = (deps.readCredentials ?? readCredentialsFromEnv)();
+    // 규격서: base64(urlencode(client_id) + ":" + urlencode(client_secret)).
+    const credentials = `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`;
+
+    response = await send(`${issuer}/api/integration/notification-acknowledgements`, {
+      method: "POST",
+      headers: {
+        authorization: `Basic ${Buffer.from(credentials, "utf8").toString("base64")}`,
+        "content-type": "application/x-www-form-urlencoded",
+        accept: "application/json",
+      },
+      // 🔴 칸 이름은 하나여도 `keys` 다 — 지움 통로와 **같은 몸통 모양**이고
+      //    포털도 같은 파서를 쓴다(규격서).
+      body: new URLSearchParams({ sub: subject, keys: acknowledgementKey }).toString(),
+      cache: "no-store",
+      signal: AbortSignal.timeout(NOTIFICATIONS_TIMEOUT_MS),
+    });
+  } catch (error) {
+    // 🔴 남기는 것은 오류의 **종류**뿐이다. 열쇠에는 수리 건 번호 같은 업무
+    //    식별자가 들어 있어서 그것도 찍지 않는다(묻는 쪽·지움 쪽과 같은 규약).
+    console.error(
+      "[sso] 알림 확인을 적지 못했습니다:",
+      error instanceof Error ? error.name : "unknown"
+    );
+    return false;
+  }
+
+  if (!response?.ok) {
+    // 거절 본문은 포털의 내부 설정을 설명할 수 있다. 상태만 남긴다.
+    console.error("[sso] 알림 확인 통로 거절:", response?.status);
+    return false;
+  }
+
+  return true;
 }

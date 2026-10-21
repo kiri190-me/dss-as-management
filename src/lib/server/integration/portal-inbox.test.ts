@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { EMPTY_PORTAL_INBOX } from "@/lib/domain/portal-notification-inbox";
 import {
+  acknowledgePortalNotification,
   dismissPortalNotifications,
   fetchPortalNotificationInbox,
   type PortalInboxCredentials,
@@ -444,4 +445,151 @@ test("🔴 설정이 빠져 있어도 ✕ 한 번이 화면을 깨지 않는다 
 
   assert.equal(value, false);
   assert.equal(calls.length, 0, "설정도 없이 포털을 불렀다");
+});
+
+/* ────────── 「확인했다」를 적는 쪽 (2026-10-22, acknowledgePortalNotification) ──────────
+ *
+ * 🔴 위 지움과 **뜻이 다르다**(지움은 재로그인하면 돌아오고 확인은 안 돌아온다).
+ * 여기서 지키는 것은 그 뜻이 **주소로 갈린다**는 것이다 — 통로가 둘이고, 한
+ * 글자만 틀려도 확인이 지움으로 적혀 「안 돌아와야 할 줄이 돌아온다」가 된다.
+ * 나머지(자격증명 · 상한 · 거절 삼키기 · 로그에 값 안 찍기)는 지움과 **같아야**
+ * 한다 — 그래서 같은 잣대로 다시 잰다.
+ */
+
+test("🔴 규격서대로 적는다 — **확인 통로** 주소 · POST · Basic · sub 과 keys · 상한", async () => {
+  const { fetchImpl, calls } = recordingFetch(
+    () => new Response(JSON.stringify({ recorded: 1, dropped: 0, skipped: 0 }), { status: 200 })
+  );
+  const recorded = await acknowledgePortalNotification(
+    "portal-user-1",
+    "dss-improvements:IMPROVEMENT:7",
+    { fetch: fetchImpl, readCredentials }
+  );
+
+  assert.equal(recorded, true);
+  assert.equal(calls.length, 1);
+  const [{ url, init }] = calls;
+  // 🔴 **지움 통로가 아니다.** 여기로 적히면 「해소됐다」가 「지금은 그만
+  //    보겠다」로 적혀, 재로그인했을 때 안 돌아와야 할 줄이 돌아온다.
+  assert.equal(url, "http://portal.test:3100/api/integration/notification-acknowledgements");
+  assert.notEqual(url, "http://portal.test:3100/api/integration/notification-dismissals");
+  assert.equal(init.method, "POST");
+
+  const headers = init.headers as Record<string, string>;
+  assert.equal(headers["content-type"], "application/x-www-form-urlencoded");
+  const [scheme, token] = headers.authorization.split(" ");
+  assert.equal(scheme, "Basic");
+  assert.equal(
+    Buffer.from(token, "base64").toString("utf8"),
+    `${encodeURIComponent(CREDENTIALS.clientId)}:${encodeURIComponent(CREDENTIALS.clientSecret)}`,
+    "🔴 묻는 쪽·지움 쪽과 자격증명을 다르게 실었다"
+  );
+
+  const body = new URLSearchParams(String(init.body));
+  assert.equal(body.get("sub"), "portal-user-1");
+  // 🔴 하나여도 칸 이름은 `keys` 다 — 포털이 지움과 같은 파서를 쓴다.
+  assert.equal(body.get("keys"), "dss-improvements:IMPROVEMENT:7");
+  // 🔴 **지문 칸은 없다** — 「그때 본 내용」은 포털이 제 목록에서 직접 계산한다.
+  //    사이트가 그 판정을 들고 있으면 한 곳만 어긋나도 오류 없이 영영 안 먹힌다.
+  assert.equal(body.get("fingerprint"), null);
+  assert.equal(body.get("digest"), null);
+
+  assert.ok(!url.includes(CREDENTIALS.clientSecret), "주소에 비밀값이 실렸다");
+  assert.ok(init.signal instanceof AbortSignal, "왕복에 상한(AbortSignal)이 없다");
+  assert.equal(init.cache, "no-store");
+});
+
+test("🔴 `sub` 이나 열쇠가 비면 **아예 부르지 않는다** — 빈 열쇠는 포털이 400 으로 거절한다", async () => {
+  for (const [subject, key] of [
+    ["", "dss-improvements:IMPROVEMENT:7"],
+    ["portal-user-1", ""],
+    ["", ""],
+  ] as const) {
+    const { fetchImpl, calls } = recordingFetch(() => new Response("{}"));
+    const recorded = await acknowledgePortalNotification(subject, key, {
+      fetch: fetchImpl,
+      readCredentials,
+    });
+
+    assert.equal(recorded, false, `sub="${subject}" key="${key}" 에서 적혔다고 답했다`);
+    assert.equal(calls.length, 0, `sub="${subject}" key="${key}" 인데 포털을 불렀다`);
+  }
+});
+
+test("🔴 어떤 거절이 와도 던지지 않는다 — 상태 코드만 남기고 거짓을 돌려준다(확인 쪽)", async () => {
+  for (const status of [400, 401, 403, 405, 429, 500, 503]) {
+    const { fetchImpl } = recordingFetch(
+      () =>
+        new Response(JSON.stringify({ error: "forbidden", error_description: "내부 사정" }), {
+          status,
+        })
+    );
+    const { value, logged } = await captureErrors(() =>
+      acknowledgePortalNotification("portal-user-1", "dss-improvements:IMPROVEMENT:7", {
+        fetch: fetchImpl,
+        readCredentials,
+      })
+    );
+
+    assert.equal(value, false, `${status} 에서 적혔다고 답했다`);
+    assert.ok(logged.includes(String(status)), `${status}: 무엇이 거절인지 알 수 없다`);
+    assert.ok(!logged.includes("내부 사정"), `${status}: 거절 본문을 로그에 남겼다`);
+  }
+});
+
+test("🔴 포털이 죽었거나 시간이 넘어도 던지지 않는다 — 열쇠도 비밀값도 안 찍는다(확인 쪽)", async () => {
+  const failures = [
+    new DOMException("The operation was aborted due to timeout", "TimeoutError"),
+    new TypeError("fetch failed"),
+    "문자열을 던짐",
+  ];
+  for (const failure of failures) {
+    const { fetchImpl } = recordingFetch(() => {
+      throw failure;
+    });
+    const { value, logged } = await captureErrors(() =>
+      acknowledgePortalNotification("portal-user-1", "rf-service-system:APPROVAL:D240913-1", {
+        fetch: fetchImpl,
+        readCredentials,
+      })
+    );
+
+    assert.equal(value, false, `${String(failure)} 에서 적혔다고 답했다`);
+    // 🔴 열쇠에는 **수리 건 번호** 같은 업무 식별자가 들어 있다. 종류만 남긴다.
+    assert.ok(!logged.includes("D240913"), "🔴 로그에 열쇠(업무 식별자)가 찍혔다");
+    assert.ok(!logged.includes("fetch failed"), "오류 본문을 그대로 찍었다");
+    assert.ok(!logged.includes(CREDENTIALS.clientSecret), "🔴 로그에 비밀값이 섞였다");
+  }
+});
+
+test("🔴 설정이 빠져 있어도 줄 한 번 누르기가 화면을 깨지 않는다 — 묻는 쪽·지움 쪽과 같은 처방", async () => {
+  const { fetchImpl, calls } = recordingFetch(() => new Response("{}"));
+  const { value } = await captureErrors(() =>
+    acknowledgePortalNotification("portal-user-1", "dss-improvements:IMPROVEMENT:7", {
+      fetch: fetchImpl,
+      readCredentials: () => {
+        throw new Error("SSO_CLIENT_SECRET is not set.");
+      },
+    })
+  );
+
+  assert.equal(value, false);
+  assert.equal(calls.length, 0, "설정도 없이 포털을 불렀다");
+});
+
+test("🔴 확인과 지움이 **같은 상한**을 쓴다 — 한쪽만 늘리면 어느 쪽이 느린지 알 수 없다", async () => {
+  // 규격서가 「같은 자격증명·같은 상한·같은 거절」을 못 박는다. 상한 값은 상수라
+  // 글자로 읽을 수밖에 없는데, 🔴 그 토막이 빈 문자열이면 이 시험이 아무것도 안
+  // 본다 — 그래서 자른 자리를 먼저 확인한다.
+  const source = readFileSync(new URL("./portal-inbox.ts", import.meta.url), "utf8");
+  const 상한들 = source.match(/AbortSignal\.timeout\([A-Z_]+\)/g) ?? [];
+  assert.equal(상한들.length, 3, "왕복 셋이 저마다 상한을 들고 있지 않다");
+  assert.equal(new Set(상한들).size, 1, "🔴 왕복마다 다른 상한을 쓴다");
+
+  const 확인함수 = source.slice(source.indexOf("export async function acknowledgePortalNotification"));
+  assert.ok(확인함수.length > 0, "확인 함수를 못 찾았다 — 이 시험이 아무것도 안 본다");
+  assert.ok(확인함수.includes("notification-acknowledgements"), "자른 토막이 엉뚱한 자리다");
+  // 🔴 확인 함수 안에서 **지움 통로를 부르지 않는다.** 둘이 한 몸이 되면
+  //    「해소됐다」와 「그만 보겠다」가 섞인다.
+  assert.ok(!확인함수.includes("notification-dismissals"), "🔴 확인이 지움 통로도 두드린다");
 });

@@ -78,9 +78,13 @@ import { showBrowserNotificationToast } from "./BrowserNotifications";
  * (domain/notification-dismissal.ts), 적는 일은 서버 액션이 한다
  * (server/actions/notification-dismissals.ts — 아래 `dismiss` 프롭).
  *
- * 🔴 포털에서 온 줄은 **누르는 것만으로도** 지워진다. 그 줄은 A/S 가 「확인
- * 했다」를 적을 데가 없어(그 통로가 포털에 없다) 눌러 본 뒤에도 영영 종에
- * 남던 유일한 줄이었다.
+ * 🔴 **2026-10-22 — 포털 줄을 누르면 「지움」이 아니라 「확인」으로 적는다.**
+ * 그 전까지는 지움으로 적었다: 포털 줄은 A/S 가 「확인했다」를 적을 데가 없어
+ * (그 통로가 포털에 없었다) 눌러 본 뒤에도 영영 종에 남던 유일한 줄이었기
+ * 때문이다. 포털이 그 통로를 열면서 전제가 사라졌다. 그래서 정보 확인용 줄은
+ * **영영** 사라지고(지움은 재로그인하면 돌아왔다), 결재 승인·부품 요청처럼
+ * **동작이 필요한 줄은 해소될 때까지 남는다**(무엇을 뺄지는 포털이 판단한다 —
+ * 아래 handlePortalRowPicked). 당장 치우고 싶으면 ✕ 가 그대로 있다.
  *
  * 🔴 **두 방향이 다 포털로 이어졌다.** 읽는 쪽 — 다른 사내 시스템의 종에서 지운
  * A/S 줄이 포털의 `dismissed` 로 돌아와 여기서도 빠진다(그래서 자기 줄의 열쇠
@@ -181,32 +185,85 @@ export function handleNotificationPicked(
 }
 
 /**
- * 줄을 눌렀을 때 **포털에서 온 줄만** 지운 것으로 적는다.
+ * 줄을 눌렀을 때 **포털에서 온 줄만** 「확인했다」로 적는다.
+ *
+ * ── 🔴 2026-10-22 — 여기는 「지움」이었다. 그 까닭이 사라졌다 ──────────────
+ * 이 자리에는 「포털 줄은 A/S 가 **확인했다를 적을 데가 없어서**(그 통로가
+ * 포털에 없다) 눌러 본 뒤에도 영영 종에 남는 유일한 줄이었다 — 누른 것만으로
+ * 치운다」고 적혀 있었다. 그래서 줄을 누르면 **지움**으로 적었다.
+ * 🔴 **2026-10-22 에 포털이 그 통로를 만들었다**(규격서의 「acknowledged」절).
+ * 그 전제가 사라졌으므로 이 길은 지움이 아니라 **확인**으로 간다.
+ *
+ * 🔴 **지움 호출을 여기 함께 두지 마라.** 둘 다 적으면
+ *  - 결재 승인·부품 요청처럼 **동작이 필요한 줄**이 눌린 순간 지움으로 숨어
+ *    「해소될 때까지 남아 있게」라는 요구가 깨지고(그런 줄은 확인을 적어도
+ *    포털이 일부러 남겨 둔다 — 아래 「포털이 판단한다」),
+ *  - **확인 저장이 실패해 되살아나야 할 줄이 지움 때문에 그대로 숨는다** —
+ *    그것도 이 시스템에서만이 아니라 모든 사내 시스템의 종에서.
+ * ✕ 를 눌러 당장 치우는 길은 그대로 있다(onDismiss · onDismissAll).
  *
  * 🔴 **바로 위 함수와 길이 다르다. 섞지 마라.**
- *  - 위(handleNotificationPicked)는 **A/S 의 DB** 로 가는 길이다. 포털 줄이 그
+ *  - 위(handleNotificationPicked)는 **A/S 의 표**로 가는 길이다. 포털 줄이 그
  *    길로 들어가면 남의 시스템 알림 id 로 A/S 의 확인 기록이 쌓인다 — 그래서
- *    거기엔 `if (item.sourceId) return;` 이 그대로 남아 있다.
+ *    거기엔 `if (item.sourceId) return;` 이 그대로 남아 있고, 여기에는 그
+ *    **반대쪽** 울타리가 선다.
  *  - 여기는 **포털**로 가는 길이다. 우리 표가 아니므로 그 금지에 걸리지 않는다.
- *    오히려 포털 줄은 A/S 가 「확인했다」를 적을 데가 없어서, 눌러 본 줄이 영영
- *    종에 남는 유일한 줄이었다 — 누른 것만으로 치운다.
  *
- * 🔴 **자기 줄은 여기서 끝난다.** 자기 줄을 누른 것은 이미 확인 기록(영구)으로
- * 가고 있고, 같은 누름을 지움으로도 적으면 **확인 저장이 실패해 되살아나야 할
- * 줄이 포털의 지움 기록 때문에 그대로 숨는다** — 그것도 이 시스템에서만이
- * 아니라 모든 사내 시스템의 종에서.
+ * 🔴 **자기 줄은 여기서 끝난다**(`if (!item.sourceId) return;`). 자기 줄의 확인은
+ * 이미 A/S 의 표로 가고 있고, 같은 누름을 포털에도 적으면 같은 일이 두 곳에
+ * 적혀 어느 쪽이 참인지 알 수 없게 된다.
+ *
+ * 🔵 **무엇을 종에서 뺄지는 포털이 판단한다** — 여기서 나가는 것은 **열쇠
+ * 하나**뿐이다. 「그때 본 내용과 지금 내용이 같은가」도, 「그 종류가 정보
+ * 확인용인가」도 포털이 본다(server/integration/portal-inbox.ts 의
+ * acknowledgePortalNotification 머리말). 그 판정을 화면에 베껴 적지 마라.
+ *
+ * 🔴 확인은 기다리지 않는다 — 이동은 평범한 <a href> 가 하므로 저장을 기다리지
+ * 않고, 저장이 실패해도 막히지 않는다(위 함수와 같은 약속).
  */
 export function handlePortalRowPicked(
   item: { key: string; sourceId?: string },
-  handlers: { onDismiss?: (key: string) => void }
+  handlers: { onAcknowledge?: (key: string) => void }
 ): void {
   if (!item.sourceId) return;
-  if (!handlers.onDismiss) return;
+  if (!handlers.onAcknowledge) return;
   try {
-    handlers.onDismiss(item.key);
+    handlers.onAcknowledge(item.key);
   } catch {
-    // 못 지워도 이동은 막지 않는다 — 그 줄이 종에 남을 뿐이다.
+    // 못 적어도 이동은 막지 않는다 — 그 줄이 종에 남을 뿐이다.
   }
+}
+
+/**
+ * 포털 줄의 확인 저장을 뒤에서 시작한다 — **줄을 감추지 않는다.**
+ *
+ * 🔴 자기 줄 쪽(acknowledgeInBackground)과 달리 감췄다 되살리는 장치가 없다.
+ * 까닭 둘:
+ *  - 이 줄의 주소는 **다른 시스템의 절대 주소**라 누르면 이 페이지를 통째로
+ *    떠난다(포트가 다르면 브라우저가 보는 출처가 달라 새 페이지 로드다).
+ *    감췄다 되살릴 틈이 없고, 「감춘 채 영영 안 돌아온다」가 될 일도 없다.
+ *  - 포털이 센 개수는 줄 수와 다를 수 있어(selectVisibleNotifications 주석)
+ *    감춘 줄을 그 셈에 끌어들이면 배지가 잠깐 어긋난다.
+ *
+ * 결과를 기다리지 않고 곧바로 돌아온다 — 이동을 붙잡지 않기 위해서다. 🔴 두
+ * 갈래를 다 받아 거절을 삼킨다: 안 삼키면 「처리되지 않은 거절」이 모든 화면의
+ * 머리말에서 터진다.
+ */
+export function acknowledgePortalInBackground(
+  key: string,
+  acknowledge: AcknowledgeNotification
+): void {
+  let pending: Promise<{ ok: boolean }>;
+  try {
+    pending = acknowledge({ notificationKey: key });
+  } catch {
+    // 감춘 것이 없으니 되살릴 것도 없다 — 조용히 지나간다.
+    return;
+  }
+  void Promise.resolve(pending).then(
+    () => {},
+    () => {}
+  );
 }
 
 /**
@@ -675,6 +732,7 @@ function useDismissedNotifications(record: DismissNotifications | undefined) {
 export function NotificationBellWithInbox({
   items = [],
   acknowledge,
+  acknowledgePortal,
   inbox = EMPTY_PORTAL_INBOX,
   dismiss: record,
   notificationClientId = "",
@@ -685,6 +743,12 @@ export function NotificationBellWithInbox({
    * 종에서 빠지지 않는다(저장하지 않은 것을 뺀 것처럼 보이게 하지 않는다).
    */
   acknowledge?: AcknowledgeNotification;
+  /**
+   * 🔴 **포털에서 온 줄**의 확인을 **포털에** 적는 서버 액션(2026-10-22).
+   * 위 `acknowledge`(A/S 의 표)와 **모양은 같지만 다른 함수**다 — 적히는 곳이
+   * 다르다. 안 넘기면 그 줄은 2026-10-22 이전처럼 이동만 하고 종에 남는다.
+   */
+  acknowledgePortal?: AcknowledgeNotification;
   /** 포털이 모아 준 **다른 시스템들의** 알림. 아직 못 받았으면 빈 것이다. */
   inbox?: PortalNotificationInbox;
   /**
@@ -855,15 +919,22 @@ export function NotificationBellWithInbox({
       //    (sourceId)를 그 함수 한 곳에서 본다.
       //
       // 🔴 한 번 누른 것이 **두 길로** 갈린다. 섞지 마라:
-      //    자기 줄 → 확인 기록(서버 DB, 영구) · 포털 줄 → 지우기(이 브라우저).
-      //    두 함수가 각자 「제 줄이 아니면 그냥 돌아간다」를 갖고 있어서, 어느
-      //    줄을 눌러도 한쪽만 일한다(그 둘의 주석).
+      //    자기 줄 → **A/S 의 표**(영구) · 포털 줄 → **포털**(2026-10-22).
+      //    둘 다 「확인했다」이고 적히는 곳만 다르다. 두 함수가 각자 「제 줄이
+      //    아니면 그냥 돌아간다」를 갖고 있어서, 어느 줄을 눌러도 한쪽만
+      //    일한다(그 둘의 주석).
+      //
+      // 🔴 **여기서 지움을 부르지 않는다.** 포털 줄을 지움으로도 적으면 동작이
+      //    필요한 줄이 눌린 순간 숨어 버린다(handlePortalRowPicked 머리말).
+      //    ✕ 는 아래 onDismiss 로 그대로 간다.
       onAcknowledge={(picked: NotificationBellItem) => {
         handleNotificationPicked(picked, {
           onAcknowledge: acknowledge ? handleAcknowledge : undefined,
         });
         handlePortalRowPicked(picked, {
-          onDismiss: canDismissHere ? (key) => dismiss([key]) : undefined,
+          onAcknowledge: acknowledgePortal
+            ? (key) => acknowledgePortalInBackground(key, acknowledgePortal)
+            : undefined,
         });
       }}
       // 🔴 줄마다 서는 지우기 단추. 적을 곳을 아는 종에만 그려진다 —
@@ -976,12 +1047,18 @@ function usePortalNotificationInbox(
 export default function NotificationBell({
   items = [],
   acknowledge,
+  acknowledgePortal,
   portalInbox,
   dismiss,
   notificationClientId = "",
 }: {
   items?: readonly NotificationItem[];
   acknowledge?: AcknowledgeNotification;
+  /**
+   * 포털에서 온 줄의 확인을 **포털에** 적는 서버 액션(위 속 조각의 같은 이름
+   * 주석). 🔴 없는 것은 **정상**이다 — 그때 그 줄은 이동만 하고 종에 남는다.
+   */
+  acknowledgePortal?: AcknowledgeNotification;
   /**
    * 자기 줄 열쇠의 접두사 — 이 시스템의 `SSO_CLIENT_ID`(위 속 조각의 같은 이름
    * 주석). 🔴 서버가 내려준다. 없으면 접두사 없는 예전 모양이다.
@@ -1004,6 +1081,7 @@ export default function NotificationBell({
     <NotificationBellWithInbox
       items={items}
       acknowledge={acknowledge}
+      acknowledgePortal={acknowledgePortal}
       inbox={inbox}
       dismiss={dismiss}
       notificationClientId={notificationClientId}

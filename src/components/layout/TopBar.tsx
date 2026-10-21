@@ -3,7 +3,10 @@
 import NotificationBell from "./NotificationBell";
 import ThemeToggle from "./ThemeToggle";
 import type { NotificationItem } from "@/lib/domain/notifications";
-import { acknowledgeNotificationAction } from "@/lib/server/actions/notification-acknowledgements";
+import {
+  acknowledgeNotificationAction,
+  acknowledgePortalNotificationAction,
+} from "@/lib/server/actions/notification-acknowledgements";
 import { dismissNotificationsAction } from "@/lib/server/actions/notification-dismissals";
 
 type TopBarProps = {
@@ -365,12 +368,15 @@ export default function TopBar({ title, onMenuClick, user, notifications = [], p
           앉으면 패널 왼쪽이 화면 밖으로 잘린다.
         */}
         {/*
-          🔴 서버 액션 **둘**을 여기서 건넨다 — 종은 이 둘을 직접 가져오지
+          🔴 서버 액션 **셋**을 여기서 건넨다 — 종은 이것들을 직접 가져오지
           않는다(`server-only` 사슬을 물고 있어 정적 렌더 시험이 죽는다 —
           NotificationBell.tsx 의 AcknowledgeNotification 주석).
-          확인은 A/S 의 표로, 지움은 **포털**로 간다. 섞지 마라.
+          섞지 마라 — 셋이 가는 곳이 다 다르다:
+           · acknowledge       자기 줄의 확인 → **A/S 의 표**(영구)
+           · acknowledgePortal 포털 줄의 확인 → **포털**(2026-10-22)
+           · dismiss           ✕ 지움        → **포털**(재로그인하면 돌아온다)
         */}
-        <NotificationBell items={notifications} acknowledge={acknowledgeNotificationAction} dismiss={dismissNotificationsAction} portalInbox={portalInbox} notificationClientId={notificationClientId} />
+        <NotificationBell items={notifications} acknowledge={acknowledgeNotificationAction} acknowledgePortal={acknowledgePortalNotificationAction} dismiss={dismissNotificationsAction} portalInbox={portalInbox} notificationClientId={notificationClientId} />
       </div>
     </header>
   );
