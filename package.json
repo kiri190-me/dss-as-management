@@ -31,6 +31,7 @@
     "test:db": "node scripts/run-test-list.mjs db -- --require ./scripts/node-windows-test-preload.cjs --conditions=react-server --import tsx --import ./scripts/test-db-bootstrap.ts --test --test-concurrency=1",
     "test:components": "node scripts/run-test-list.mjs components -- --import tsx --test",
     "check:sso": "node --conditions=react-server --import tsx scripts/check-sso-provision.ts",
+    "check:inventory-contract": "node --conditions=react-server --import tsx scripts/check-inventory-contract.ts",
     "sso:link": "tsx scripts/link-sso-subject.ts",
     "seed:customer-status": "tsx scripts/seed-customer-status-options.ts"
   },

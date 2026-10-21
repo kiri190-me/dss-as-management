@@ -23,6 +23,7 @@ import {
   inventoryPartSpec,
   inventoryStockText,
   inventoryUnreachableMessage,
+  stockRequestDecisionLabel,
   type ChargeType,
   type InventoryOhTemplate,
   type InventoryPart,
@@ -712,9 +713,16 @@ export default function PartRequestSection({
               <li key={request.id} className="rounded-md border border-zinc-200 p-2 text-xs dark:border-zinc-800">
                 <div className="flex flex-wrap items-center justify-between gap-1">
                   <span className="font-medium text-zinc-800 dark:text-zinc-200">
-                    {/* 🔴 저쪽이 준 글자를 그대로 쓴다 — 손으로 다시 적지 않는다. */}
+                    {/* 🔴 저쪽이 준 글자를 그대로 쓴다 — 손으로 다시 적지도, **뒤에 덧붙이지도**
+                        않는다.
+                        🔴 **마감이면 저쪽이 `label` 자체를 「마감」으로 바꿔 보낸다**(상태 코드는
+                        `CONFIRMED` 그대로다 — 마감은 상태값이 아니라 `closed` 칸이라서). 그래서
+                        여기서 `closed` 를 보고 꼬리를 붙이면 **「마감 (마감)」**이 된다 —
+                        2026-10-21 에 실제로 그렇게 보이고 있었고, 두 저장소를 맞대어 보고서야
+                        드러났다(어느 쪽도 혼자서는 틀린 데가 없었다).
+                        🔵 `closed` 칸 자체는 계속 쓴다 — 사유 상자의 머리글과 [요청 취소] 판정이
+                        그 칸으로 갈린다(`stockRequestDecisionLabel` · `canCancelStockRequest`). */}
                     {request.status.label || request.status.code}
-                    {request.closed && <span className="ml-1 text-zinc-500">(마감)</span>}
                   </span>
                   <span className="flex items-center gap-2">
                     <span className="text-zinc-500 dark:text-zinc-400">
@@ -767,6 +775,15 @@ export default function PartRequestSection({
 
                 {request.decision && (
                   <div className="mt-1 rounded-md bg-zinc-50 px-2 py-1.5 dark:bg-zinc-800/60">
+                    {/* 🔴 사유가 있을 때만 제목을 단다 — 글이 없는데 제목만 떠 있으면 사유를
+                        못 받아 온 것처럼 읽힌다. 셋으로 가르는 규칙(마감 · 반려 · 그 밖)과
+                        그 차례는 도메인 함수 한 곳에 있고 **재고 관리와 같다**(그 머리말).
+                        🔵 글자를 여기 적지 않는 까닭도 그것이다 — 적으면 말이 두 벌이 된다. */}
+                    {request.decision.note && (
+                      <p className="font-medium text-zinc-800 dark:text-zinc-200">
+                        {stockRequestDecisionLabel(request)}
+                      </p>
+                    )}
                     <p className="text-zinc-700 dark:text-zinc-300">
                       {request.decision.byName} · {new Date(request.decision.at).toLocaleString("ko-KR")}
                     </p>

@@ -21,6 +21,7 @@ import {
   parseInventoryPartsResponse,
   parseInventoryStockRequestsResponse,
   parseStockRequestLines,
+  stockRequestDecisionLabel,
   stockRequestKeyBelongsToCase,
   toScreenStockRequests,
   type InventoryPart,
@@ -608,5 +609,45 @@ describe("🔴 부품 줄에 보이는 것 — 값이 있는 것만, `-` 는 값
     assert.ok(lines.join(" ").includes("덮어쓰지 않았습니다"), "덮지 않았다는 사실이 없다");
     // 🔴 거절처럼 보이면 안 된다 — 사람이 할 일이 다르다(고쳐 보내기 vs 그대로 쓰기).
     assert.doesNotMatch(lines.join(" "), /실패|오류|거절/);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 결정 사유 상자의 머리글 — 셋으로 갈린다 (2026-10-21)
+ * ============================================================================
+ * 보류 사유에는 제목이 있는데 결정 사유에만 없어서, 사람이 **상태 배지를 보고 유추**해야
+ * 했다. 재고 관리가 같은 자리를 먼저 셋으로 갈랐고(저쪽 `requestDecisionNote`), **같은
+ * 규칙**으로 맞춘다 — 두 화면이 같은 자료를 다른 말로 부르면 오가는 사람이 다른 것인 줄 안다.
+ *
+ * 🔴 **가르는 차례가 상태 배지와 같아야 한다 — ① 마감 ② 반려 ③ 그 밖.** 배지가 「마감」인데
+ *    상자가 「반려 사유」라고 하면 같은 줄이 두 말을 한다.
+ * ============================================================================
+ */
+describe("🔴 결정 사유의 머리글", () => {
+  function decided(code: string, closed: boolean) {
+    return { status: { code, label: "" }, closed };
+  }
+
+  test("마감된 신청은 「마감 사유」 — 🔴 상태값이 아니라 `closed` 칸으로 가린다", () => {
+    // 🔵 마감의 코드는 CONFIRMED 다(저쪽은 상태를 새로 만들지 않았다) — code 로는 「다 나감」과
+    //    구별되지 않으므로, closed 를 안 보면 이 줄이 「결정 사유」로 떨어진다.
+    assert.equal(stockRequestDecisionLabel(decided("CONFIRMED", true)), "마감 사유");
+  });
+
+  test("반려된 신청은 「반려 사유」", () => {
+    assert.equal(stockRequestDecisionLabel(decided("REJECTED", false)), "반려 사유");
+  });
+
+  test("🔴 마감이 반려보다 **앞**이다 — 둘 다 맞는 줄이 생겨도 답이 하나다", () => {
+    // 저쪽도 같은 차례다. 적어 두지 않으면 그런 줄이 하나 생기는 날 두 화면이 다른 이름을 부른다.
+    assert.equal(stockRequestDecisionLabel(decided("REJECTED", true)), "마감 사유");
+  });
+
+  test("그 밖은 「결정 사유」 — 🔵 지금 도달하지 않지만 「반려」로 뭉개지 않는다", () => {
+    // 뭉개면 나중에 사유를 적는 자리가 하나 더 생겼을 때 그 줄이 **반려라고 거짓말을 한다.**
+    assert.equal(stockRequestDecisionLabel(decided("CONFIRMED", false)), "결정 사유");
+    assert.equal(stockRequestDecisionLabel(decided("CANCELLED", false)), "결정 사유");
+    assert.equal(stockRequestDecisionLabel(decided("BRAND_NEW", false)), "결정 사유");
   });
 });
