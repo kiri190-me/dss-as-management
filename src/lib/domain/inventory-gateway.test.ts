@@ -277,6 +277,111 @@ describe("올린 신청의 지금 상태 읽기", () => {
 
 /**
  * ============================================================================
+ * 🔴 **요청 비고 — 올릴 때 적은 말을 되읽는다** (2026-10-22 쓰는 분 요청)
+ * ============================================================================
+ * 2026-10-22 에 올리는 쪽이 뚫렸다(화면에 적는 칸이 생겼다). 그런데 **되읽는 길이 없어서**
+ * 적어 보낸 말이 A/S 화면에서는 어디에도 안 보였다 — 통로가 주는 값을 파서가 안 담고 있었다.
+ *
+ * ── 🔴 **없으면 `null` 이 아니라 빈 글자다** ──────────────────────────────
+ * 이웃한 `decision`·`hold` 와 **다른 종류의 값**이라서다. 저 둘은 「일어났나 안 일어났나」지만
+ * 요청 비고는 **적힌 말**이다 — 받는 쪽이 `null` 검사와 빈 글자 검사를 둘 다 하게 만들 까닭이
+ * 없다. 🔵 **빈 것이 정상인 자리가 많다**: 안 적은 신청 · 칸이 생기기 전의 옛 신청 · 재고
+ * 관리에서 직접 올린 신청.
+ *
+ * ── 🔴 **저쪽이 아직 안 보내도 안 터진다** ───────────────────────────────
+ * 두 저장소가 따로 고쳐지므로 **칸이 아예 없는 응답**이 실제로 온다. 그때 화면이 500 이 되거나
+ * 「undefined」를 그리면 안 되고, **안 적은 신청과 똑같이** 보여야 한다. 🔵 저쪽이 칸을 영영
+ * 안 보내게 되는 것은 다른 이야기라 점검 도구가 ✗ 로 잡는다(`scripts/check-inventory-contract.ts`).
+ * ============================================================================
+ */
+describe("🔴 요청 비고 — 올릴 때 적은 말을 되읽는다", () => {
+  /** 🔵 **통로 응답 모양 그대로** 만든다 — 파서를 지나야 실제 길과 같은 것을 잰다. */
+  function noteOf(over: Record<string, unknown>): string | undefined {
+    const parsed = parseInventoryStockRequestsResponse({
+      count: 1,
+      requests: [
+        {
+          requestKey: "AS-TEST-0001",
+          id: "r1",
+          intakeNumber: "D260701",
+          status: { code: "PENDING", label: "대기" },
+          closed: false,
+          requestedAt: "2026-10-22T01:00:00.000Z",
+          lines: [{ no: 11, name: "AMP-TEST-A1", quantity: 2, issued: 0 }],
+          ...over,
+        },
+      ],
+    });
+    assert.ok(parsed, "응답 모양을 못 읽었다");
+    return parsed[0]?.note;
+  }
+
+  test("① 적어 보낸 말이 있으면 그대로 읽는다", () => {
+    assert.equal(noteOf({ note: "O/H 때 쓸 부품입니다" }), "O/H 때 쓸 부품입니다");
+  });
+
+  test("① 🔵 가운데 줄바꿈은 **적은 사람의 것**이라 살린다 — 앞뒤 공백만 뗀다", () => {
+    // 🔴 여러 줄로 적을 수 있는 칸이다(화면이 textarea 다). 줄바꿈을 뭉개면 적은 글이 달라진다.
+    assert.equal(noteOf({ note: "  첫 줄\n둘째 줄  " }), "첫 줄\n둘째 줄");
+  });
+
+  test("② 🔴 칸이 **아예 없어도 안 터지고** 빈 글자다 — 저쪽이 아직 안 고쳐졌을 수 있다", () => {
+    assert.equal(noteOf({}), "");
+  });
+
+  test("③ 🔴 글자가 아닌 값이 와도 빈 글자다 — `null`·숫자·객체 전부", () => {
+    // 🔴 `null` 을 그대로 들고 가면 화면이 `null` 검사와 빈 글자 검사를 둘 다 해야 한다.
+    assert.equal(noteOf({ note: null }), "");
+    assert.equal(noteOf({ note: 1000 }), "");
+    assert.equal(noteOf({ note: { text: "적은 말" } }), "");
+    assert.equal(noteOf({ note: ["적은 말"] }), "");
+  });
+
+  test("🔴 **`decision.note` 와 섞이지 않는다** — 적은 사람이 다르다", () => {
+    const parsed = parseInventoryStockRequestsResponse({
+      count: 1,
+      requests: [
+        {
+          requestKey: "AS-TEST-0001",
+          id: "r1",
+          intakeNumber: "D260701",
+          status: { code: "REJECTED", label: "반려" },
+          closed: false,
+          requestedAt: "2026-10-22T01:00:00.000Z",
+          note: "요청한 사람이 적은 말",
+          lines: [{ no: 11, name: "AMP-TEST-A1", quantity: 2, issued: 0 }],
+          decision: { byName: "담당자", at: "2026-10-22T02:00:00.000Z", note: "재고 담당자가 적은 말" },
+        },
+      ],
+    });
+    assert.equal(parsed?.[0].note, "요청한 사람이 적은 말");
+    assert.equal(parsed?.[0].decision?.note, "재고 담당자가 적은 말");
+  });
+
+  test("🔵 화면 모양으로 바뀌어도 따라간다 — 되읽는 자리가 화면이다", () => {
+    const parsed = parseInventoryStockRequestsResponse({
+      count: 1,
+      requests: [
+        {
+          requestKey: "AS-TEST-0001",
+          id: "r1",
+          intakeNumber: "D260701",
+          status: { code: "PENDING", label: "대기" },
+          closed: false,
+          requestedAt: "2026-10-22T01:00:00.000Z",
+          note: "O/H 때 쓸 부품입니다",
+          lines: [{ no: 11, name: "AMP-TEST-A1", quantity: 2, issued: 0 }],
+          requester: { sub: MY_SUB, name: "홍길동" },
+        },
+      ],
+    });
+    assert.ok(parsed);
+    assert.equal(toScreenStockRequests(parsed, MY_SUB)[0].note, "O/H 때 쓸 부품입니다");
+  });
+});
+
+/**
+ * ============================================================================
  * 거두기 — 🔴 **단추를 그릴 줄과 거둘 수 있는 줄** (2026-10-16)
  * ============================================================================
  * 거두는 통로가 열렸다. 여기서 재는 것은 **판정 규칙**이고, 화면이 그 규칙을 실제로 쓰는가는

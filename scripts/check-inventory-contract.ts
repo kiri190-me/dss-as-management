@@ -232,6 +232,30 @@ function checkOneRequest(raw: unknown, where: string): string | null {
   const gone = missingFields(row, INVENTORY_STOCK_REQUEST_FIELDS);
   check(`${where}: 통로가 A/S 가 읽는 칸을 다 준다`, gone.length === 0, `없는 칸: ${gone.join(", ")}`);
 
+  /**
+   * 🔴 **요청 비고는 「들어 있을 때만」이 아니다** (2026-10-22).
+   *
+   * 아래 `decision`·`hold`·`requester` 는 `null` 이 정상이라 **없으면 건너뛴다**. 요청 비고는
+   * 다르다 — **언제나 있어야 하는 글자 칸**이고 안 적은 신청은 **빈 글자**다(A/S 쪽
+   * `InventoryStockRequest` 머리말에 적어 둔 약속). 그래서 **칸 목록에 넣어** 위에서 재고,
+   * 🔴 저쪽이 이 칸을 안 보내게 되는 날 **위 줄이 ✗** 가 된다. 건너뛰는 쪽에 두었으면 그날
+   * 조용히 지나가고, A/S 화면에서는 **요청 비고 줄이 그냥 사라진다**(오류가 아니라 빠짐이라
+   * 아무도 신고하지 않는다 — 이 도구가 막으려는 바로 그 모양이다).
+   *
+   * 🔵 **여기서는 나머지 반쪽을 본다**: 칸은 있는데 **글자가 아닌** 경우(`null` 이 그렇다).
+   *    그때 A/S 파서는 빈 글자로 접으므로, 적어 보낸 말이 있어도 화면에서는 **안 적은 것과
+   *    똑같이** 보인다. 🔵 칸이 아예 없을 때 또 세지 않는 까닭: 위에서 이미 ✗ 로 셌다.
+   * 🔴 **「비어 있지 않은가」는 재지 않는다** — 빈 글자가 정상이다(안 적었거나 재고 관리에서
+   *    직접 올린 신청). 그것까지 ✗ 로 세면 도구가 늘 빨개져 아무도 안 본다.
+   */
+  if ("note" in row) {
+    check(
+      `🔴 ${where}: 요청 비고가 **글자로** 온다 (빈 글자여도 좋다 · null 은 안 된다)`,
+      typeof row.note === "string",
+      `받은 값: ${JSON.stringify(row.note)} — A/S 는 이것을 빈 글자로 접어 「안 적은 신청」처럼 그린다`
+    );
+  }
+
   const status = (row.status && typeof row.status === "object" ? row.status : {}) as Record<string, unknown>;
   const code = typeof status.code === "string" ? status.code : "";
   const label = typeof status.label === "string" ? status.label : "";

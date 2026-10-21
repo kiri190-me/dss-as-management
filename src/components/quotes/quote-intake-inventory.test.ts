@@ -303,6 +303,10 @@ function stockRequest(lines: { no: number; issued: number }[]): InventoryStockRe
     status: { code: "CONFIRMED", label: "확인" },
     closed: false,
     requestedAt: "2096-03-05T01:00:00.000Z",
+    /* 🔵 요청 비고(2026-10-22). 이 시험이 재는 것은 **출고 부품을 세는 일**이라 쓰지 않는다 —
+       「안 적었다」 쪽으로 둔다(빈 글자가 그 말이다). 읽는 규칙은
+       `lib/domain/inventory-gateway.test.ts` 가 따로 잰다. */
+    note: "",
     lines: lines.map((line) => ({
       no: line.no,
       name: `부품-${line.no}`,

@@ -769,3 +769,80 @@ describe("🔴 비고 — 적은 글이 재고 관리까지 간다", () => {
     assert.match(source, /text\(body\.note, 1000\)/, "저쪽의 그 줄이 안 적혀 있다");
   });
 });
+
+/**
+ * ============================================================================
+ * 🔴 **요청 비고를 되읽는다** — 적은 말이 신청 목록에 보인다 (2026-10-22 쓰는 분 요청)
+ * ============================================================================
+ * 앞 조각에서 **보내는 길**이 뚫렸다(화면에 적는 칸이 생겼다). 그런데 적은 말이 **어디에도
+ * 안 보였다** — 신청 목록을 다시 받아 그릴 때 그 값을 아무도 안 그렸다. 이 조각은 그것을
+ * 화면에 올린다.
+ *
+ * 🔵 **읽는 규칙 자체**(없으면 빈 글자 · 글자가 아니면 빈 글자 · 앞뒤 공백만 뗀다)는 순수 쪽
+ *    시험이 잰다(`lib/domain/inventory-gateway.test.ts`). 여기서 재는 것은 **화면이 그 값을
+ *    실제로 그리는가**와 **옆자리 말과 섞이지 않는가**다.
+ * 🔴 **섞이면 안 되는 옆자리**: 바로 아래 상자는 **재고 담당자**가 적은 말이고(보류 · 결정)
+ *    이것은 **요청한 사람**이 적은 말이다. 한 카드에 나란히 설 수 있어서, 제목이 없으면 사람이
+ *    남의 말을 제 말로 읽는다.
+ * ============================================================================
+ */
+describe("🔴 요청 비고 — 적은 말이 신청 목록에 보인다", () => {
+  /** 신청 카드 구역만 떼어 본다 — 위의 **적는 칸**(textarea)과 섞이지 않게. */
+  const card = source.slice(source.indexOf("이 수리 건의 반출 신청"), source.indexOf("{notice && <NoticePopup"));
+  /** 🔵 **주석을 걷어낸 화면** — 까닭을 적어 둔 글이 「그리는 글자」로 세어지지 않게. */
+  const cardCode = card.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+  /** 요청 비고 상자 하나만. 🔴 끝을 안 끊으면 아래 두 상자(보류 · 결정)가 딸려 온다. */
+  const noteBox = cardCode.slice(cardCode.indexOf('{request.note !== "" && ('), cardCode.indexOf("{request.hold && ("));
+
+  test("① 🔴 신청 카드가 **되읽어** 그린다 — 보내기만 하던 값이다", () => {
+    assert.match(cardCode, /\{request\.note\}/, "적은 말이 어디에도 안 그려진다");
+    assert.equal(
+      [...cardCode.matchAll(/\{request\.note\}/g)].length,
+      1,
+      "같은 말을 두 자리에 그린다 — 한 신청의 비고는 하나다"
+    );
+  });
+
+  test("② 🔴 이름표가 「요청 비고」다 — 재고 관리 화면과 **같은 말**이어야 한다", () => {
+    // 🔴 이 말이 갈리면 두 화면을 오가는 사람이 같은 글을 다른 것으로 읽는다.
+    assert.match(noteBox, /요청 비고/, "이름표가 없다 — 제목 없는 글은 누구 말인지 모른다");
+  });
+
+  test("③ 🔴 **비면 아예 안 그린다** — 옛 신청과 재고 관리에서 직접 올린 신청은 늘 비어 있다", () => {
+    assert.match(cardCode, /\{request\.note !== "" && \(/, "빈 비고에도 상자가 선다");
+    // 🔴 빈 자리를 「없음」·`-` 같은 글자로 채우면 적을 것이 없었다는 사실을 글자로 지어내는 셈이다.
+    assert.doesNotMatch(noteBox, /없음|"-"|request\.note \|\|/, "빈 비고 자리를 글자로 메운다");
+    // 그리는 자리는 가림막 **뒤**다 — 앞에 있으면 가림막이 있으나 마나다.
+    assert.ok(
+      cardCode.indexOf('{request.note !== "" && (') < cardCode.indexOf("{request.note}"),
+      "가림막보다 앞에서 그린다"
+    );
+  });
+
+  test("④ 🔴 **재고 담당자의 말과 갈린다** — 제목이 붙고, 차례가 먼저다", () => {
+    // 🔴 누구 말인지를 제목에 적는다 — 「요청 비고」 넉 자만으로는 옆자리와 가를 수 없다.
+    assert.match(noteBox, /신청한 사람이 적은 말/, "누구 말인지 안 적혀 있다");
+    // 🔵 요청할 때 적은 말이 먼저고, 담당자가 답한 말이 뒤다 — 읽는 차례가 일이 일어난 차례다.
+    const noteAt = cardCode.indexOf('{request.note !== "" && (');
+    const holdAt = cardCode.indexOf("{request.hold && (");
+    const decisionAt = cardCode.indexOf("{request.decision && (");
+    assert.ok(noteAt >= 0 && holdAt > noteAt, "보류 사유보다 뒤에 선다");
+    assert.ok(decisionAt > noteAt, "담당자가 적은 사유보다 뒤에 선다");
+    // 🔴 제목을 짓는 자리가 둘이 되지 않게 — 저쪽 상자의 머리글은 여전히 도메인 함수가 고른다.
+    assert.match(cardCode, /\{stockRequestDecisionLabel\(request\)\}/, "옆자리 제목이 사라졌다");
+  });
+
+  test("⑤ 🔴 **잘라서 숨기지 않는다** — 1000자까지 오고, 읽으라고 적은 글이다", () => {
+    // 🔴 적은 사람의 줄바꿈을 살린다(여러 줄로 적는 칸이다).
+    assert.match(noteBox, /whitespace-pre-wrap/, "줄바꿈이 뭉개진다");
+    // 🔵 띄어쓰기 없는 긴 글이 카드를 밀어내지 않게만 한다 — 글을 감추는 것이 아니다.
+    assert.match(noteBox, /break-words/, "긴 글이 카드를 밀어낸다");
+    assert.doesNotMatch(noteBox, /line-clamp|truncate|\.slice\(|substring/, "긴 비고를 잘라서 숨긴다");
+  });
+
+  test("🔴 **적는 칸과 다른 값이다** — 올릴 때 치는 글(`note` 상태)을 목록에 그리지 않는다", () => {
+    /* 🔴 올릴 때 치는 글은 `useState` 의 `note` 이고, 목록에 그리는 것은 **저쪽이 돌려준**
+       `request.note` 다. 둘을 섞으면 아직 안 올린 글이 지난 신청에 붙어 보인다. */
+    assert.doesNotMatch(noteBox, /\{note\}/, "아직 안 올린 글을 신청 줄에 그린다");
+  });
+});

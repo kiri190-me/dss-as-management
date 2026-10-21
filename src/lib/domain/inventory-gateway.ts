@@ -657,6 +657,24 @@ export type InventoryStockRequest = {
   /** 마감 — 「준 것은 그대로 두고 남은 것만 접은」 것. 상태값이 아니라 이 칸으로 가른다. */
   closed: boolean;
   requestedAt: string;
+  /**
+   * **요청 비고** — 🔴 **요청한 사람이 신청할 때 적은 말**이다 (2026-10-22).
+   *
+   * ── 🔴 **없으면 `null` 이 아니라 빈 글자다** ─────────────────────────────
+   * 이웃한 `decision`·`hold` 는 **「일어났나 안 일어났나」**라서 안 일어났으면 `null` 이지만,
+   * 이 값은 **적힌 말**이다. 「안 적었다」와 「빈 글을 적었다」는 사람에게 같은 일이라, 받는
+   * 쪽이 `null` 검사와 빈 글자 검사를 **둘 다** 하게 만들 까닭이 없다 — 한 가지로 묻는다.
+   * 🔵 **빈 것이 정상인 자리가 많다**: 안 적고 올린 신청, 비고 칸이 생기기 전(2026-10-22)에
+   *    올라간 옛 신청, 재고 관리에서 직접 올린 신청은 전부 빈 글자다.
+   *
+   * ── 🔴 **`decision.note` 와 다른 사람의 말이다** ─────────────────────────
+   * 이쪽은 **요청한 사람**이 적은 말이고, 저쪽은 **재고 담당자**가 적은 말이다(반려·마감 사유).
+   * 한 신청에 **둘 다** 있을 수 있어서 화면이 제목을 붙여 가른다 — 재고 관리도 같은 까닭으로
+   * 제 화면에 「요청 비고 (신청한 사람이 적은 말)」이라고 적는다(저쪽 `IssueApprovalScreen`).
+   *
+   * 🔵 **저쪽이 아직 이 칸을 안 보내도 안 터진다** — 아래 파서가 빈 글자로 떨어뜨린다.
+   */
+  note: string;
   lines: InventoryStockRequestLine[];
   decision: { byName: string; at: string; note: string } | null;
   hold: { reason: string; byName: string; at: string } | null;
@@ -763,6 +781,10 @@ export function parseInventoryStockRequestsResponse(json: unknown): InventorySto
       status: codeLabel(o.status),
       closed: o.closed === true,
       requestedAt: str(o.requestedAt),
+      /* 🔵 **이미 있는 자를 쓴다** — `str` 하나가 셋을 다 한다: 글자가 아니거나 칸이 없으면
+         빈 글자, 있으면 **앞뒤 공백만** 뗀다(가운데 줄바꿈은 적은 사람의 것이라 살려 둔다).
+         🔴 `decision`·`hold` 처럼 `null` 로 가르지 않는 까닭은 위 타입 주석에 있다. */
+      note: str(o.note),
       lines,
       decision: parseDecision(o.decision),
       hold: parseHold(o.hold),

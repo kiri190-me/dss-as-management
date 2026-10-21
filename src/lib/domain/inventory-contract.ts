@@ -109,6 +109,12 @@ export const INVENTORY_STATUS_LABEL_OVERRIDES = [
  * 🔴 이 목록이 파서와 어긋나지 않는 것은 시험이 지킨다 — 칸을 하나씩 빼 보고 **파서의 답이
  *    달라지는가**로 잰다(`inventory-contract.test.ts`). 손으로 맞춰 둔 목록은 언젠가 갈리지만,
  *    「빼면 답이 달라진다」는 거짓말을 할 수 없다.
+ *
+ * 🔴 **2026-10-22 에 `note`(요청 비고)가 더해졌다.** 이 칸은 아래 `decision`·`hold`·`requester`
+ *    와 **다른 길로 잰다** — 저 셋은 `null` 이 정상이라 「들어 있을 때만」 속을 보지만, 요청
+ *    비고는 **언제나 있어야 하는 글자 칸**이다(없으면 빈 글자, A/S 쪽 `InventoryStockRequest`
+ *    머리말). 🔵 그래서 **이 목록에 넣는다** — 저쪽이 칸을 안 보내면 점검 도구에 ✗ 가 뜬다.
+ *    「들어 있을 때만」 쪽에 두면 안 보내는 날 **조용히 건너뛰어** 아무 말도 안 하게 된다.
  */
 export const INVENTORY_STOCK_REQUEST_FIELDS = [
   "id",
@@ -118,6 +124,7 @@ export const INVENTORY_STOCK_REQUEST_FIELDS = [
   "status.label",
   "closed",
   "requestedAt",
+  "note",
   "lines",
 ] as const;
 
