@@ -59,7 +59,7 @@ tools: Read, Glob, Grep, Bash, Edit, Write
 |---|---|
 | `njlee` | 글롭 — `src/**/*.test.ts` (두면 자동) |
 | `dss-po` · `dss-improvements` | **목록 파일** `scripts/test-lists/*.txt` — 🔴 적어야 돈다 |
-| `dss-inventory` | **`tests/` 폴더** — `src/` 에 두면 안 돈다 |
+| `dss-inventory` | 글롭 둘 — `tests/**/*.test.ts` + `src/lib/xlsx/*.test.ts` (실측 2026-10-21) |
 | `dss-leave` | `scripts/test-*.ts` — `test` 스크립트가 없고 `test:bell` 등 여섯 |
 | `dss-auth` | `package.json` 의 `test` 줄에 경로를 하나씩 나열 |
 | `dss-board` | 🔴 **정말로 없다** — 만들지 마라 |
