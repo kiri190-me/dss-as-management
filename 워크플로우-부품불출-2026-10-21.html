@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>부품 불출 워크플로우 — 지금과 개선안 (2026-10-21)</title>
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--line:#e3e6ea;--fg:#1d2126;--dim:#6b7280;
+        --red:#b42318;--amb:#b54708;--blu:#175cd3;--grn:#067647;--vio:#5925dc;}
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 20px 72px;background:var(--bg);color:var(--fg);
+       font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;line-height:1.65}
+  .wrap{max-width:1140px;margin:0 auto}
+  h1{font-size:25px;margin:0 0 6px} .sub{color:var(--dim);font-size:14px;margin:0 0 22px}
+  h2{font-size:18px;margin:38px 0 10px;padding-bottom:7px;border-bottom:2px solid var(--line)}
+  h3{font-size:15.5px;margin:22px 0 8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:15px 17px;margin:11px 0}
+  .bad{background:#fef3f2;border:1px solid #fecdca;border-radius:10px;padding:14px 16px;margin:11px 0}
+  .good{background:#ecfdf3;border:1px solid #abefc6;border-radius:10px;padding:14px 16px;margin:11px 0}
+  .tip{background:#eff8ff;border:1px solid #b2ddff;border-radius:10px;padding:14px 16px;margin:11px 0}
+  .warn{background:#fffaeb;border:1px solid #fedf89;border-radius:10px;padding:14px 16px;margin:11px 0}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#f0f2f5;font-weight:700}
+  code{background:#eef1f5;border-radius:4px;padding:1px 5px;font-size:12.5px}
+  .red{color:var(--red);font-weight:700} .blu{color:var(--blu);font-weight:700}
+  ul{margin:6px 0 0;padding-left:20px} li{margin:4px 0}
+  /* 흐름도 */
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin:10px 0;font-size:13px}
+  .st{display:inline-flex;align-items:center;border:2px solid #cfd4da;background:#fff;
+      border-radius:8px;padding:5px 11px;font-weight:700;white-space:nowrap}
+  .st.ok{border-color:#75d3a0;background:#f0fdf5}
+  .st.no{border-color:#f7a9a2;background:#fef5f4}
+  .st.wait{border-color:#f5c87a;background:#fffbf2}
+  .st.lock{border-color:#a8c7f0;background:#f2f7fe}
+  .ar{color:var(--dim);font-weight:700}
+  .lbl{font-size:11.5px;color:#475467;background:#eef1f5;border-radius:5px;padding:1px 7px;font-weight:600}
+  .hole{display:inline-block;font-size:11.5px;font-weight:800;color:#fff;background:var(--red);
+        border-radius:5px;padding:1px 8px}
+  .fix{display:inline-block;font-size:11.5px;font-weight:800;color:#fff;background:var(--grn);
+       border-radius:5px;padding:1px 8px}
+  .lane{border-left:4px solid var(--line);padding-left:14px;margin:14px 0 24px}
+  .lane h3{margin-top:4px}
+  .ln1{border-color:var(--blu)} .ln2{border-color:var(--vio)}
+  .num{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:24px;
+       border-radius:6px;background:var(--red);color:#fff;font-weight:800;font-size:12.5px;margin-right:7px}
+  .numg{background:var(--grn)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>부품 불출 워크플로우 — 지금과 개선안</h1>
+<p class="sub">2026-10-21 · 코드를 읽어 실측한 것 · 무대는 <b>재고 관리</b>와 <b>A/S 관리</b></p>
+
+<div class="tip">
+<b>이 문서가 하는 말 한 줄</b><br />
+지금 구조는 <b>문이 한 군데에만 달려 있습니다.</b> 「결재가 도는 중에 그 자리에서 부품을 빼는 것」은
+확실히 막는데, <b>그 옆의 반려·보류·취소는 전부 열려 있습니다.</b> 그래서 <b>결재건과 부품 요청이
+서로 모르는 채 따로 움직일 수 있습니다</b> — 그게 아래 구멍 여섯의 뿌리입니다.
+</div>
+
+<!-- ─────────── 지금 ─────────── -->
+<h2>지금의 워크플로우 (실측)</h2>
+
+<div class="card">
+<b>상태가 두 벌입니다 — 이게 출발점입니다</b>
+<table>
+<tr><th style="width:150px">무엇</th><th>상태값</th></tr>
+<tr><td><b>부품 요청</b><br /><code>stock_requests</code></td>
+    <td><code>PENDING</code> · <code>CONFIRMING</code> · <code>CONFIRMED</code> · <code>PARTIAL</code> ·
+        <code>REJECTED</code> · <code>CANCELLED</code> · <code>ON_HOLD</code></td></tr>
+<tr><td><b>불출 승인</b><br /><code>stock_issue_approvals</code></td>
+    <td><code>PENDING_APPROVAL</code> · <code>APPROVED</code> · <code>EXECUTED</code> ·
+        <code>REJECTED</code> · <code>CANCELLED</code> &nbsp; <span class="red">← 보류가 없다</span></td></tr>
+</table>
+<div style="margin-top:9px;font-size:13.5px">
+🔴 <b>둘은 서로의 상태를 바꾸지 않습니다.</b> 승인 쪽 코드가 부품 요청 표를 <b>읽기만 하고 쓰지 않습니다</b>(실측).
+</div>
+</div>
+
+<div class="lane ln1">
+<h3>① 승인 절차가 <b>꺼져</b> 있을 때 — 지금까지와 같다</h3>
+<div class="flow">
+<span class="st">신청 <code>PENDING</code></span><span class="ar">→</span>
+<span class="lbl">담당자 [확인]</span><span class="ar">→</span>
+<span class="st">집기 <code>CONFIRMING</code></span><span class="ar">→</span>
+<span class="st ok">완료 <code>CONFIRMED</code></span>
+<span class="ar">／</span><span class="st wait">일부 <code>PARTIAL</code></span>
+</div>
+<div class="flow">
+<span class="st">신청 <code>PENDING</code></span><span class="ar">→</span><span class="lbl">[반려]+사유</span>
+<span class="ar">→</span><span class="st no">반려 <code>REJECTED</code></span>
+<span style="width:22px"></span>
+<span class="st">PENDING·PARTIAL</span><span class="ar">→</span><span class="lbl">[보류]+사유</span>
+<span class="ar">→</span><span class="st wait">보류 <code>ON_HOLD</code></span>
+</div>
+<div style="font-size:13px;color:var(--dim)">🔵 보류 중에는 확인·반려·마감이 전부 막힙니다. 이 길은 깨끗합니다.</div>
+</div>
+
+<div class="lane ln2">
+<h3>② 승인 절차가 <b>켜져</b> 있을 때 — 여기서 갈라집니다</h3>
+<div class="flow">
+<span class="st">신청 <code>PENDING</code></span><span class="ar">→</span>
+<span class="lbl">[불출 신청]</span><span class="ar">→</span>
+<span class="st lock">결재 중 <code>PENDING_APPROVAL</code></span><span class="ar">→</span>
+<span class="st wait">실행 대기 <code>APPROVED</code></span><span class="ar">→</span>
+<span class="lbl">[실행]</span><span class="ar">→</span>
+<span class="st ok">불출됨 <code>EXECUTED</code></span>
+</div>
+<div class="bad" style="margin-top:10px">
+🔴 <b>이때 부품 요청은 <code>PENDING</code> 그대로입니다.</b> 「결재가 돌고 있다」를 말해 주는 상태값이 없습니다.
+화면은 <b>잠금 표시</b>로만 알려 주고, 목록·배지·알림은 그 줄을 여전히 <b>「대기」로 셉니다.</b>
+</div>
+<div class="flow" style="margin-top:12px">
+<span class="st lock">결재 중</span><span class="ar">→</span><span class="lbl">결재자 [반려]+사유</span>
+<span class="ar">→</span><span class="st no">결재 반려 <code>REJECTED</code></span>
+<span style="width:22px"></span>
+<span class="st lock">결재 중</span><span class="ar">→</span><span class="lbl">올린 사람 [거두기]</span>
+<span class="ar">→</span><span class="st no"><code>CANCELLED</code></span>
+</div>
+</div>
+
+<!-- ─────────── 구멍 ─────────── -->
+<h2>실제로 겪을 절차적 문제 여섯</h2>
+
+<div class="bad">
+<span class="num">1</span><b>고아 결재건 — 문이 [확인] 한 군데에만 달려 있다</b> <span class="hole">가장 큼</span>
+<div style="margin-top:7px">
+결재가 도는 중에도 부품 요청은 <code>PENDING</code> 이라, <b>담당자가 [반려]</b>하거나 <b>[보류]</b>할 수 있고
+<b>신청자가 [취소]</b>할 수도 있습니다(세 함수 모두 <code>PENDING</code> 을 받습니다 — 실측).
+</div>
+<div class="flow" style="margin-top:8px">
+<span class="st no">요청 <code>REJECTED</code></span><span class="ar">＋</span>
+<span class="st lock">승인건 <code>PENDING_APPROVAL</code> 살아 있음</span>
+<span class="ar">⇒</span><span class="hole">결재자에게 계속 뜬다</span>
+</div>
+<div style="margin-top:7px">
+결재자는 <b>이미 반려된 요청을 결재</b>하게 되고, 승인해도 실행은 막힙니다(요청이 <code>PENDING</code> 이 아니므로).
+<b class="red">아무도 이 상태를 설명할 수 없습니다.</b>
+</div>
+</div>
+
+<div class="bad">
+<span class="num">2</span><b>결재 반려가 요청에 닿지 않는다</b>
+<div style="margin-top:7px">
+결재자가 <b>[반려]</b>하면 승인건만 <code>REJECTED</code> 가 되고 <b>부품 요청은 <code>PENDING</code> 그대로</b>입니다.
+신청자와 A/S 수리건에서는 <b>아무 일도 없었던 것처럼 보입니다.</b> 반려 사유도 승인건 안에만 있습니다.
+</div>
+<div style="margin-top:7px">🔵 접수된 요구사항 <b>9·10번</b>이 바로 이 구멍입니다.</div>
+</div>
+
+<div class="bad">
+<span class="num">3</span><b><code>APPROVED</code>(실행 대기)에서 막히면 빠져나갈 길이 없다</b>
+<div style="margin-top:7px">
+코드 주석이 적어 둔 그대로입니다 — <b>「막혔을 때(재고 부족·보류 중 등) 결재건은 <code>APPROVED</code> 로 그대로 남는다」.</b>
+그런데 그 상태에서는:
+</div>
+<ul>
+<li><b>반려 못 함</b> — 결재는 <code>PENDING_APPROVAL</code> 에서만 받습니다</li>
+<li><b>거두기 못 함</b> — 올린 사람도 <code>PENDING_APPROVAL</code> 에서만 거둘 수 있습니다</li>
+<li><b>실행도 못 함</b> — 재고가 모자라거나 요청이 보류 중이면 막힙니다</li>
+</ul>
+<div style="margin-top:7px"><b class="red">세 길이 다 막혀 영영 그 자리에 남습니다.</b>
+🔵 접수된 요구사항 <b>14번</b>이 정확히 이 구멍을 메웁니다.</div>
+</div>
+
+<div class="bad">
+<span class="num">4</span><b>보류가 승인 쪽에 아예 없다</b>
+<div style="margin-top:7px">
+부품 요청에는 <code>ON_HOLD</code> 가 있는데 <b>불출 승인에는 없습니다.</b>
+14번이 「실행 옆에 보류」를 요구하므로 <b class="red">승인 쪽에 새 상태를 하나 만들어야 합니다</b> — 칸 하나 더하는 일이 아닙니다.
+</div>
+</div>
+
+<div class="bad">
+<span class="num">5</span><b>요구사항 3번과 지금 코드가 정면으로 부딪힌다</b> <span class="hole">결정 필요</span>
+<div style="margin-top:7px">
+요구사항 3번: <b>「승인이 모두 통과해서 실행만을 앞두고 있더라도 취소되게」</b><br />
+그런데 지금은 <b>일부러 막아 두었고</b> 까닭이 코드에 적혀 있습니다:
+</div>
+<div class="card" style="margin:8px 0;font-size:13px">
+「승인된 건이 재고 담당자의 <b>일감 목록</b>에 올라가 있다. 담당자가 <b>상자를 뜯으러 간 사이에</b>
+신청자가 거둬 버리면 <b>그 헛걸음을 아무도 설명할 수 없다.</b>」
+</div>
+<div>
+🔵 <b>14번이 이 둘을 화해시킵니다</b> — 「신청자가 몰래 거두기」는 계속 막고, <b>담당자·결재자가 그 자리에서
+반려·보류하는 길</b>을 여는 것입니다. 아래 개선안이 그 모양입니다.
+</div>
+</div>
+
+<div class="bad">
+<span class="num">6</span><b>「결재 중」이 상태값으로 없어 숫자가 틀린다</b>
+<div style="margin-top:7px">
+결재가 도는 요청도 <code>PENDING</code> 이라 <b>머리말 배지·대기 목록·알림이 「처리해야 할 일」로 셉니다.</b>
+담당자는 그 줄을 눌러 봐야 「결재 대기 중이라 지금은 할 게 없다」를 압니다.
+</div>
+</div>
+
+<!-- ─────────── 개선안 ─────────── -->
+<h2>개선안 — 둘을 한 쌍으로 움직인다</h2>
+
+<div class="good">
+<b>바꾸는 규칙은 셋뿐입니다</b>
+<ol style="margin:7px 0 0;padding-left:20px">
+<li><b>결재가 살아 있는 동안 부품 요청 쪽 결정 단추를 잠근다</b> — [확인]처럼 [반려]·[보류]·[취소]도
+   (🔵 요구사항 <b>11번</b>)</li>
+<li><b>그 결정을 승인 화면으로 옮긴다</b> — <code>PENDING_APPROVAL</code> 과 <code>APPROVED</code> <b>둘 다</b>에서
+   [반려]·[보류]가 된다 (🔵 요구사항 <b>14번</b>)</li>
+<li><b>승인 쪽 결정이 부품 요청과 A/S 수리건에 그대로 흐른다</b> — 사유까지
+   (🔵 요구사항 <b>1·9·10번</b>)</li>
+</ol>
+</div>
+
+<div class="lane" style="border-color:var(--grn)">
+<h3>개선된 흐름</h3>
+<div class="flow">
+<span class="st">신청 <code>PENDING</code></span><span class="ar">→</span>
+<span class="lbl">[불출 신청]</span><span class="ar">→</span>
+<span class="st lock">요청 <code>IN_APPROVAL</code> <span class="fix">새 상태</span></span>
+<span class="ar">＋</span>
+<span class="st lock">승인건 <code>PENDING_APPROVAL</code></span>
+</div>
+<div style="font-size:13px;color:var(--dim);margin-bottom:10px">
+🔵 요청에 <b>「결재 중」을 말하는 상태</b>가 생겨 구멍 6이 닫힙니다 — 배지·목록·알림이 그 줄을 「대기」로 안 셉니다.
+그리고 <b>반려·보류·취소 함수가 전부 <code>PENDING</code> 을 WHERE 에 걸고 있으므로</b>, 상태만 바꿔도 구멍 1이 함께 닫힙니다.
+</div>
+
+<div class="flow">
+<span class="st lock">결재 중</span><span class="ar">→</span><span class="lbl">[승인]</span><span class="ar">→</span>
+<span class="st wait">실행 대기 <code>APPROVED</code></span><span class="ar">→</span>
+<span class="lbl">[실행]</span><span class="ar">→</span><span class="st ok">불출됨</span>
+<span class="ar">＋</span><span class="st ok">요청 <code>CONFIRMED</code>／<code>PARTIAL</code></span>
+</div>
+
+<div class="flow">
+<span class="st lock">결재 중</span><span class="ar">／</span><span class="st wait">실행 대기</span>
+<span class="ar">→</span><span class="lbl">[반려]+사유 <span class="fix">실행 옆에도</span></span><span class="ar">→</span>
+<span class="st no">승인건 <code>REJECTED</code></span>
+<span class="ar">＋</span><span class="st no">요청 <code>REJECTED</code>+사유</span>
+<span class="ar">＋</span><span class="st no">A/S 수리건에 표시<span class="fix">+알림</span></span>
+</div>
+
+<div class="flow">
+<span class="st lock">결재 중</span><span class="ar">／</span><span class="st wait">실행 대기</span>
+<span class="ar">→</span><span class="lbl">[보류]+사유 <span class="fix">새로</span></span><span class="ar">→</span>
+<span class="st wait">승인건 <code>ON_HOLD</code> <span class="fix">새 상태</span></span>
+<span class="ar">＋</span><span class="st wait">요청 <code>ON_HOLD</code>+사유</span>
+<span class="ar">↩</span><span class="lbl">[보류 풀기]</span>
+</div>
+<div style="font-size:13px;color:var(--dim)">
+🔵 보류는 <b>되돌아올 수 있어야</b> 합니다 — 반려는 끝이고 보류는 멈춤입니다. 부품 요청 쪽이 이미 그 모양입니다
+(<code>releaseRequestHold</code>).
+</div>
+</div>
+
+<div class="warn">
+<b>🔴 이것만은 정해 주셔야 합니다 — 코드로 못 고르는 것 셋</b>
+<table style="margin-top:8px">
+<tr><th style="width:118px">무엇</th><th>물음</th><th style="width:300px">제 권장</th></tr>
+<tr><td><b>반려 뒤</b></td><td>결재가 반려되면 부품 요청은 <b>끝난 것</b>입니까, <b>다시 올릴 수 있는 것</b>입니까?</td>
+    <td><b>끝</b>(<code>REJECTED</code>). 다시 필요하면 새로 신청합니다 — 지금 결재선도 「반려되면 처음부터 다시」 구조입니다</td></tr>
+<tr><td><b>보류 푼 뒤</b></td><td>보류를 풀면 <b>결재를 처음부터</b> 다시 받습니까, <b>멈춘 자리에서</b> 이어 갑니까?</td>
+    <td><b>멈춘 자리에서</b>. 처음부터면 보류가 사실상 반려와 같아져 단추를 둘 둘 까닭이 없어집니다</td></tr>
+<tr><td><b>신청자 취소</b></td><td>요구사항 3번의 「실행 직전에도 취소」를 <b>신청자에게</b>도 열까요?</td>
+    <td>🔴 <b>열지 마십시오.</b> 담당자 헛걸음 문제가 그대로입니다. <b>담당자·결재자가 [반려]</b>로 처리하면
+        같은 결과가 나오고 <b>사유가 남습니다</b></td></tr>
+</table>
+</div>
+
+<div class="tip">
+<b>구현 순서 — 작은 것부터</b>
+<ol style="margin:7px 0 0;padding-left:20px">
+<li><b>요청에 「결재 중」 상태 하나</b> — 구멍 1·6이 함께 닫힙니다. <b>가장 싸고 가장 크게 막습니다</b></li>
+<li><b>승인 → 요청 → A/S 로 결정과 사유가 흐르게</b> — 구멍 2 (요구사항 1·9·10)</li>
+<li><b>실행 대기에서도 반려·보류</b> + 승인 쪽 <code>ON_HOLD</code> — 구멍 3·4 (요구사항 14)</li>
+<li>요청 화면의 결정 단추 잠금 — 요구사항 11 (1번을 하면 거의 따라옵니다)</li>
+</ol>
+<div style="margin-top:8px">🔵 <b>1번을 먼저 하면 2·3·4가 쉬워집니다</b> — 「지금 이 요청이 어느 단계인가」를
+상태 하나로 물어볼 수 있게 되기 때문입니다. 지금은 그걸 <b>승인 표를 뒤져서</b> 알아내고 있습니다.</div>
+</div>
+
+<p class="sub" style="margin-top:26px">
+실측 근거: <code>stock-requests.ts</code> · <code>stock-issue-approvals.ts</code> ·
+<code>part-issue-rules.ts</code> · <code>part-issue-gate.ts</code> · <code>stock/requests.ts</code> ·
+<code>approval/part-issue.ts</code> &nbsp;·&nbsp; 2026-10-21
+</p>
+
+</div>
+</body>
+</html>
