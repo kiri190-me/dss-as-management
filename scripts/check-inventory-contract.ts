@@ -374,7 +374,15 @@ async function checkLive(intakes: readonly string[]) {
   }
   check("토큰 없이 부르면 401", noAuth.status === 401, `status ${noAuth.status}`);
 
-  const badToken = await ask(`${base}/api/v1/parts`, "이건-틀린-토큰");
+  // 🔴 이 값은 **반드시 ASCII** 여야 한다. HTTP 머리말은 Latin-1(0~255)만 실을 수 있어서,
+  //    한글처럼 255 를 넘는 문자가 들어가면 `fetch` 가 요청을 보내기도 전에 던진다
+  //    ("Cannot convert argument to a ByteString because the character at index 7 has
+  //    a value of 51060 which is greater than 255."). `ask()` 가 그 예외를 삼켜
+  //    `status: 0` 을 돌려주므로 아래 검사는 **언제나 ✗** 가 된다 — 실제로 한글
+  //    "이건-틀린-토큰" 을 썼을 때 그렇게 조용히 죽어 있었다(2026-10-22 에 발견). 서버는
+  //    멀쩡하다(영문 가짜 토큰을 보내면 401 이 온다) — 「읽기 쉽게」 한글로 되돌리지 말 것.
+  //    scripts/check-inventory-contract-bad-token.test.ts 가 이 값이 ASCII 인지 소스에서 잰다.
+  const badToken = await ask(`${base}/api/v1/parts`, "not-a-real-token");
   check("토큰이 틀리면 401", badToken.status === 401, `status ${badToken.status}`);
 
   /* 🔴 읽기와 쓰기는 **다른 문**이다(저쪽 `lib/api/auth.ts`). 섞이면 읽기 토큰 하나로

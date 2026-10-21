@@ -1082,6 +1082,11 @@ src/lib/server/inventory-gateway.test.ts
 # scripts/check-inventory-contract.ts 몫이고, 거기서는 서버가 없으면 「못 쟀다」다.
 src/lib/domain/inventory-contract.test.ts
 
+# 🔴 그 도구 안의 "틀린 토큰이면 401" 검사가 한글 가짜 토큰 때문에 한 번도 돈 적이
+# 없었다(fetch 가 ByteString 변환에서 던진다, 2026-10-22). 서버 없이도 재발을 잡게
+# 소스에서 토큰 리터럴이 ASCII 인지만 본다.
+scripts/check-inventory-contract-bad-token.test.ts
+
 # 견적서의 「인수번호로 불러오기」가 받아 오는 두 목록(출고된 부품 · O/H 템플릿, 2026-10-16).
 # 🔴 옛 A/S 표를 세워 재던 여섯 가지를 **뜻 그대로** 옮겨 온 자리다 — 그 자료가 재고 관리로
 # 옮겨가 표로는 더 이상 잴 수 없다. 화면이 이 규칙을 제자리에서 쓰는가는 components 목록의
