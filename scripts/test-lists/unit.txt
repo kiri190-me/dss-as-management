@@ -1142,3 +1142,12 @@ src/lib/api/domestic-order-completion-request.test.ts
 # 열쇠가 사람과 **로그인 시각**으로 갈려 다시 로그인하면 저절로 비워지는가 ·
 # 저장소가 막혀 터져도 「아무것도 안 지웠다」로 읽는가.
 src/lib/domain/notification-dismissal.test.ts
+
+# 부품을 요청할 때 **그 수리 건의 종류**를 함께 보낸다(2026-10-22). 재고 관리가 승인 절차를
+# 매쳐용·제너레이터용으로 갈라, 어느 쪽을 붙일지를 이 값이 정한다.
+# 🔴 종류는 `repair_cases` 에 칸이 없다 — 조인 둘을 지나야 나온다. 그래서 **조인을 더했지
+# 조회를 더하지 않았는가**(신청 한 번에 왕복 하나)를 원본 글자로 세고, 화면이 보낸 종류를
+# 싣는 길이 없는가 · 건을 못 읽었으면 아예 안 보내는가를 함께 본다.
+# 🔵 본문에 실제로 무엇이 담기는지(셋이 제 글자로 · 모르면 칸이 아예 없다)는 같은 목록의
+# lib/server/inventory-gateway.test.ts 가 통로를 진짜로 불러 잰다.
+src/lib/server/actions/inventory-stock-request-workflow-kind.test.ts

@@ -4,7 +4,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { getIntakeNumberForRepairCase } from "@/lib/db/queries/repair-cases";
+import { getIntakeAndWorkflowKindForRepairCase } from "@/lib/db/queries/repair-cases";
 import { getSsoSubjectForUser } from "@/lib/db/queries/users";
 import { isValidUuid } from "@/lib/validation/procedure-validation-resolution-input";
 import {
@@ -111,9 +111,13 @@ export async function createInventoryStockRequestAction(input: {
     return { ok: false, message: "요청 정보를 확인할 수 없습니다." };
   }
 
-  // 🔴 인수번호는 **여기서 읽는다**(머리말). 화면이 보낸 값을 쓰지 않는다.
-  const intakeNumber = await getIntakeNumberForRepairCase(input.repairCaseId);
-  if (!intakeNumber) {
+  /**
+   * 🔴 인수번호**와 종류**는 **여기서 읽는다**(머리말). 화면이 보낸 값을 쓰지 않는다.
+   * 🔵 둘을 **한 질의로** 받는다 — 종류를 따로 물으면 신청 한 번에 왕복이 둘이 된다
+   *    (`getIntakeAndWorkflowKindForRepairCase` 머리말).
+   */
+  const repairCase = await getIntakeAndWorkflowKindForRepairCase(input.repairCaseId);
+  if (!repairCase) {
     return { ok: false, message: CASE_NOT_FOUND };
   }
 
@@ -126,7 +130,15 @@ export async function createInventoryStockRequestAction(input: {
 
   return createInventoryStockRequest({
     requestKey: input.requestKey.trim(),
-    intakeNumber,
+    intakeNumber: repairCase.intakeNumber,
+    /**
+     * 🔴 **종류 그대로** 싣는다(`MATCHER`·`GENERATOR`·`TOTAL_CONTROLLER`). 저쪽이 이 값으로
+     * 승인 절차를 고른다(2026-10-22) — 절차 이름으로 바꿔 보내면 저쪽이 짝을 바꾸는 날
+     * 이미 보낸 자료가 틀린 절차를 가리킨다.
+     * 🔵 수리 건을 못 읽었으면 여기까지 오지 않는다(위에서 돌아갔다) — 「모르는데 보내는」
+     *    길이 없다.
+     */
+    workflowKind: repairCase.workflowKind,
     requester: { sub, name: actingUser.name },
     lines: parsed.lines,
     note: input.note?.trim() ? input.note.trim() : undefined,
@@ -178,8 +190,10 @@ export async function cancelInventoryStockRequestAction(input: {
     return { ok: false, message: "요청 정보를 확인할 수 없습니다." };
   }
 
-  const intakeNumber = await getIntakeNumberForRepairCase(input.repairCaseId);
-  if (!intakeNumber) {
+  // 🔵 올리는 쪽과 **같은 조회**다. 거두는 데 쓰는 것은 인수번호뿐이고(종류는 올릴 때만
+  //    싣는다), 질의는 어차피 하나라 따로 두지 않는다.
+  const repairCase = await getIntakeAndWorkflowKindForRepairCase(input.repairCaseId);
+  if (!repairCase) {
     return { ok: false, message: CASE_NOT_FOUND };
   }
 
@@ -189,7 +203,7 @@ export async function cancelInventoryStockRequestAction(input: {
 
   // 🔴 이 건의 신청인가(머리말 ㉡). 못 받아 왔으면 **거두지 않는다** — 확인하지 못한 것을
   //    통과시키면 다른 건의 열쇠가 그대로 지나간다.
-  const requests = await fetchInventoryStockRequestsByIntake(intakeNumber);
+  const requests = await fetchInventoryStockRequestsByIntake(repairCase.intakeNumber);
   if (requests.status !== "ok") {
     return {
       ok: false,

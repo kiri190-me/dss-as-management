@@ -54,8 +54,13 @@ describe("🔴 포털 번호는 서버가 세션에서 꺼낸다 — 화면 값�
 
 describe("🔴 거둘 신청이 **이 수리 건**의 것인가", () => {
   test("이 건의 인수번호로 목록을 다시 받아 그 안에 있는 열쇠일 때만 거두러 간다", () => {
-    assert.match(cancelAction, /const intakeNumber = await getIntakeNumberForRepairCase\(input\.repairCaseId\);/);
-    assert.match(cancelAction, /await fetchInventoryStockRequestsByIntake\(intakeNumber\)/);
+    // 🔵 2026-10-22 에 이 조회가 종류도 함께 돌려주게 되면서(승인 절차를 저쪽이 가른다)
+    //    받는 모양이 글자 하나에서 묶음으로 바뀌었다 — 재는 뜻은 그대로다.
+    assert.match(
+      cancelAction,
+      /const repairCase = await getIntakeAndWorkflowKindForRepairCase\(input\.repairCaseId\);/
+    );
+    assert.match(cancelAction, /await fetchInventoryStockRequestsByIntake\(repairCase\.intakeNumber\)/);
     assert.match(
       cancelAction,
       /if \(!stockRequestKeyBelongsToCase\(requests\.value, input\.requestKey\)\) \{\s*return \{ ok: false, message: STOCK_REQUEST_NOT_IN_CASE_MESSAGE \};/

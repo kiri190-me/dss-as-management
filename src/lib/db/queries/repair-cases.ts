@@ -19,8 +19,10 @@ import {
   dueDateBorrowerIds,
   loadDomesticOrderDueDatesByCaseId,
 } from "./repair-case-domestic-order-due-dates";
+import { workflowKindOf } from "@/lib/domain/workflow-kind";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { TrashedRepairCase } from "../mappers/repair-case";
+import type { WorkflowKind } from "@/lib/domain/workflow-kind";
 
 const deletedByUsers = alias(users, "repair_case_deleted_by_users");
 
@@ -306,30 +308,57 @@ export async function getProductModelIdForProduct(productId: string): Promise<st
   return rows[0]?.productModelId ?? null;
 }
 
+/** 부품 반출 신청을 올릴 때 **서버가 제 손으로 읽어 싣는 값**(아래 함수 머리말). */
+export type RepairCaseStockRequestContext = {
+  intakeNumber: string;
+  /**
+   * 🔴 **종류 그대로**다(매쳐 · 제너레이터 · T/C). 절차 이름(`PART_ISSUE_MATCHER` 따위)으로
+   * 바꾸지 않는다 — 어느 승인 절차를 붙일지는 **재고 관리가** 정하고, 그래야 저쪽이 짝을
+   * 바꾸는 날 이미 보낸 자료를 고칠 일이 없다.
+   */
+  workflowKind: WorkflowKind;
+};
+
 /**
- * 이 수리 건의 **인수번호** 하나. 재고 관리에 부품 반출 신청을 올릴 때 쓴다
+ * 이 수리 건의 **인수번호와 종류**. 재고 관리에 부품 반출 신청을 올릴 때 쓴다
  * (`src/lib/server/actions/inventory-stock-requests.ts`) — 저쪽 통로는 인수번호를
  * 반드시 받고, 올린 신청을 되읽을 때도 그 번호로 묻는다(재고 API.md 4-7절).
  *
  * 🔴 **화면이 보낸 값을 믿지 않으려고 둔다.** 인수번호는 그 신청이 어느 장비의 것인지를
  * 정하는 값이라, 브라우저가 적어 보내게 두면 남의 건에 부품을 달아 놓을 수 있다. 액션이
- * 건 id 만 받아 **여기서 다시 읽는다.**
+ * 건 id 만 받아 **여기서 다시 읽는다.** 종류도 같은 까닭으로 여기서 읽는다 — 저쪽이 그
+ * 값으로 **승인 절차를 고르므로**(2026-10-22, 매쳐용·제너레이터용) 브라우저가 적어 보내게
+ * 두면 제 건의 절차를 골라 올릴 수 있다.
+ *
+ * 🔴 **왕복은 하나 그대로다.** 종류는 `repair_cases` 에 칸으로 없고
+ * `workflow_versions` → `workflow_templates.code` 를 지나야 나오는데, 그 길은
+ * `selectRepairCaseJoin()` 이 이미 쓰는 조인 둘이다 — 여기서도 **같은 조인을 이 질의에
+ * 붙여** 한 번에 읽는다(조회를 하나 더 두면 신청 한 번에 왕복이 둘이 된다).
+ * 🔵 `workflow_version_id` 는 NOT NULL 이고 `workflow_versions.workflow_template_id` 도
+ * 그렇다 — 그래서 `innerJoin` 이 줄을 떨어뜨리지 않는다(목록·상세가 쓰는 조인과 같다).
  *
  * 지워진 건은 `null` 이다 — 휴지통에 든 건으로 새 반출 신청을 세우지 않는다
  * (`findIntakeForExternalLookup` 이 같은 잣대를 쓴다).
  */
-export async function getIntakeNumberForRepairCase(id: string): Promise<string | null> {
+export async function getIntakeAndWorkflowKindForRepairCase(
+  id: string
+): Promise<RepairCaseStockRequestContext | null> {
   if (!UUID_PATTERN.test(id)) {
     return null;
   }
 
   const rows = await db
-    .select({ intakeNumber: repairCases.intakeNumber })
+    .select({ intakeNumber: repairCases.intakeNumber, workflowTypeCode: workflowTypeCodeColumn() })
     .from(repairCases)
+    .innerJoin(workflowVersions, eq(repairCases.workflowVersionId, workflowVersions.id))
+    .innerJoin(workflowTemplates, eq(workflowVersions.workflowTemplateId, workflowTemplates.id))
     .where(and(eq(repairCases.id, id), eq(repairCases.isDeleted, false)))
     .limit(1);
 
-  return rows[0]?.intakeNumber ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  // 🔴 꼬리를 보고 셋으로 접는 일은 **도메인의 그 함수 하나**가 한다 — 여기서 다시 적지 않는다.
+  return { intakeNumber: row.intakeNumber, workflowKind: workflowKindOf(row.workflowTypeCode) };
 }
 
 export type RepairCaseEditGuard = { id: string; isLocked: boolean };

@@ -331,6 +331,68 @@ describe("올리기", () => {
     });
   });
 
+  /**
+   * ==========================================================================
+   * 🔴 **수리 건의 종류를 함께 싣는다** (2026-10-22)
+   * ==========================================================================
+   * 저쪽이 승인 절차를 **매쳐용·제너레이터용**으로 갈랐고, 어느 쪽을 붙일지는 이 값이
+   * 정한다. 그래서 이 시험이 보는 것은 셋이다 —
+   *  ㉠ **셋이 각각 제 글자로** 나간다(절차 이름으로 바꿔 보내지 않는다 — 짝 짓는 일은
+   *     저쪽 몫이고, 저쪽이 짝을 바꾸는 날 이미 보낸 자료가 틀린 절차를 가리키면 안 된다).
+   *  ㉡ **모르면 칸을 아예 안 보낸다.** `null` 이나 빈 글자를 보내면 저쪽은 「모름」이
+   *     아니라 「값이 왔는데 이상하다」로 읽는다. 칸이 없어야 기존 「부품 불출」 절차로
+   *     조용히 떨어진다.
+   *  ㉢ 종류가 **본문 최상위**에 있다 — `requester` 안이나 줄 안이 아니다.
+   * ==========================================================================
+   */
+  describe("🔴 수리 건의 종류", () => {
+    const OK = { status: 201, json: { created: true, request: { id: "r1", status: { code: "PENDING", label: "대기" } } } };
+
+    for (const kind of ["MATCHER", "GENERATOR", "TOTAL_CONTROLLER"] as const) {
+      test(`㉠ ${kind} 는 **제 글자 그대로** 본문 최상위로 간다`, async () => {
+        stubFetch(() => OK);
+
+        await createInventoryStockRequest({ ...INPUT, workflowKind: kind });
+
+        const body = calls[0].body as Record<string, unknown>;
+        assert.equal(body.workflowKind, kind);
+        // 🔴 절차 이름으로 둔갑하지 않았다.
+        assert.doesNotMatch(JSON.stringify(body), /PART_ISSUE/);
+      });
+    }
+
+    test("㉡ 🔴 모르면 **칸을 아예 안 보낸다** — `null` 도 빈 글자도 아니다", async () => {
+      stubFetch(() => OK);
+
+      await createInventoryStockRequest(INPUT);
+
+      const body = calls[0].body as Record<string, unknown>;
+      assert.ok(!("workflowKind" in body), "모르는데 칸을 보내고 있다");
+      assert.deepEqual(body, {
+        requestKey: "지어낸-요청번호",
+        intakeNumber: "D260701",
+        requester: { sub: "지어낸-포털번호", name: "홍길동" },
+        lines: [{ no: 11, quantity: 2, chargeType: "PAID" }],
+        note: "오후에 가져갑니다",
+      });
+    });
+
+    test("㉢ 나머지 칸은 종류가 붙어도 그대로다", async () => {
+      stubFetch(() => OK);
+
+      await createInventoryStockRequest({ ...INPUT, workflowKind: "MATCHER" });
+
+      assert.deepEqual(calls[0].body, {
+        requestKey: "지어낸-요청번호",
+        intakeNumber: "D260701",
+        workflowKind: "MATCHER",
+        requester: { sub: "지어낸-포털번호", name: "홍길동" },
+        lines: [{ no: 11, quantity: 2, chargeType: "PAID" }],
+        note: "오후에 가져갑니다",
+      });
+    });
+  });
+
   test("새로 섰으면 created: true", async () => {
     stubFetch(() => ({ status: 201, json: { created: true, request: { id: "r1", status: { code: "PENDING", label: "대기" } } } }));
 

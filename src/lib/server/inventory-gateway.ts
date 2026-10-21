@@ -12,6 +12,7 @@ import {
   type InventoryStockRequest,
   type InventoryUnreachableReason,
 } from "@/lib/domain/inventory-gateway";
+import type { WorkflowKind } from "@/lib/domain/workflow-kind";
 
 /**
  * ============================================================================
@@ -260,6 +261,15 @@ export type CreateStockRequestInput = {
   /** 🔴 같은 값으로 두 번 부르면 신청이 두 번 서지 않는다(API.md 4-4절). 화면이 만들어 보낸다. */
   requestKey: string;
   intakeNumber: string;
+  /**
+   * 🔴 **그 수리 건의 종류**(2026-10-22). 저쪽은 승인 절차를 **매쳐용·제너레이터용**으로
+   * 갈라 두었고, 어느 쪽을 붙일지를 이 값이 정한다.
+   * 🔴 **종류 그대로 보낸다** — 절차 이름(`PART_ISSUE_MATCHER` 따위)으로 바꾸지 않는다.
+   *    짝 짓는 일은 재고 관리가 한다(저쪽이 짝을 바꿔도 이미 보낸 자료를 안 고치려는 것이다).
+   * 🔴 **모르면 칸을 아예 빼고 보낸다** — `null` 도 빈 글자도 보내지 않는다. 받는 쪽은 칸이
+   *    없으면 「모름」으로 보고 기존 「부품 불출」 절차를 쓴다. `note` 와 같은 결이다.
+   */
+  workflowKind?: WorkflowKind;
   /** 🔴 `sub` 은 **포털 번호**다. 저쪽이 그 번호로 사람을 잇는다(API.md 4-5절). */
   requester: { sub: string; name: string };
   lines: { no: number; quantity: number; chargeType: ChargeType }[];
@@ -292,6 +302,8 @@ export async function createInventoryStockRequest(
     body: {
       requestKey: input.requestKey,
       intakeNumber: input.intakeNumber,
+      // 🔴 **본문 최상위**에 종류 그대로. 모르면 이 줄이 아무것도 더하지 않는다(위 머리말).
+      ...(input.workflowKind ? { workflowKind: input.workflowKind } : {}),
       requester: { sub: input.requester.sub, name: input.requester.name },
       lines: input.lines,
       ...(input.reason ? { reason: input.reason } : {}),
