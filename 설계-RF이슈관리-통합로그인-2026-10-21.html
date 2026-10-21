@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>설계안 — RF 이슈관리를 통합 로그인에 (2026-10-21)</title>
+<style>
+  :root{ --bg:#f6f7f9; --card:#fff; --line:#e3e6ea; --fg:#1d2126; --dim:#6b7280;
+         --ask:#b42318; --ok:#067647; --blue:#175cd3; }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 20px 64px;background:var(--bg);color:var(--fg);
+       font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;line-height:1.65;}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:25px;margin:0 0 6px}
+  .sub{color:var(--dim);font-size:14px;margin:0 0 22px}
+  h2{font-size:17.5px;margin:36px 0 10px;padding-bottom:7px;border-bottom:2px solid var(--line)}
+  h3{font-size:15px;margin:20px 0 6px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+  .note{font-size:13px;color:var(--dim);margin-top:6px}
+  .red{color:var(--ask);font-weight:700}
+  .blue{color:var(--blue);font-weight:700}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
+  th,td{border:1px solid var(--line);padding:7px 9px;text-align:left;vertical-align:top}
+  th{background:#f0f2f5;font-weight:700}
+  code{background:#eef1f5;border-radius:4px;padding:1px 5px;font-size:12.5px}
+  pre{background:#1d2126;color:#e8eaed;border-radius:9px;padding:13px 15px;overflow-x:auto;
+      font-size:12.5px;line-height:1.55}
+  pre code{background:none;color:inherit;padding:0;font-size:inherit}
+  .ask{background:#fef3f2;border:1px solid #fecdca;border-radius:9px;padding:13px 15px;margin:12px 0}
+  .tip{background:#eff8ff;border:1px solid #b2ddff;border-radius:9px;padding:13px 15px;margin:12px 0}
+  .ok{background:#ecfdf3;border:1px solid #abefc6;border-radius:9px;padding:13px 15px;margin:12px 0}
+  ul{margin:6px 0 0;padding-left:20px} li{margin:3px 0}
+  .pill{display:inline-block;font-size:11.5px;font-weight:700;border-radius:999px;
+        padding:2px 10px;color:#fff;background:#475467}
+  .p-rf{background:#175cd3} .p-portal{background:#b42318}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>설계안 — RF 이슈관리를 통합 로그인에</h1>
+<p class="sub">2026-10-21 · 저장소 <code>dss-trouble</code>(<code>DSS-RF-Trouble</code>) ·
+   동료가 만들었고 <b>개발 전권을 받았다</b> · 조사는 읽기 전용으로 수행, 코드는 아직 한 줄도 안 바뀜</p>
+
+<div class="ask">
+<b>🔴 먼저 — 이 저장소는 공개(public)다.</b>
+저장소 자신이 그렇게 적어 두고 비밀값 검사 도구까지 갖고 있다(<code>tools/check-secrets.js</code>).
+<b>통합 로그인의 클라이언트 비밀값이 한 번이라도 들어가면 커밋 이력에 영구히 남는다</b> —
+지워도 이력에서는 안 지워진다. 어느 조각에서든 이것이 1순위 규칙이다.
+</div>
+
+<h2>지금 모습 (2026-10-21 실측)</h2>
+
+<table>
+<tr><th style="width:150px">무엇</th><th>지금</th></tr>
+<tr><td><b>틀</b></td><td>순수 Node — <code>server.js</code> 한 장(1,251줄). <b><code>package.json</code> 이 없다</b>(의존성 0). 빌드 단계 없음</td></tr>
+<tr><td><b>화면</b></td><td>정적 HTML + 순수 자바스크립트(<code>public/app.js</code> 1,604줄). React 없음</td></tr>
+<tr><td><b>로그인</b></td><td>팀 비밀번호 <b>하나</b>를 다 같이 씀(<code>tools/auth.js</code> 84줄). 서명 쿠키 <code>rfsess</code>(30일), 5회 틀리면 10분 잠금</td></tr>
+<tr><td><b>자료</b></td><td>DB 가 아니다 — <b>NAS 공유폴더의 엑셀</b>을 읽어 <code>data/*.json</code> 으로 캐시</td></tr>
+<tr><td><b>배포</b></td><td>단일 컨테이너, 포트 <b>7331</b>(운영)/<b>7332</b>(시험). 🔵 우리 일곱(3000~3800)과 <b>안 부딪힌다</b></td></tr>
+<tr><td><b>시험</b></td><td>🔴 <b>자동으로 도는 것이 없다.</b> 사람이 서버를 띄우고 손으로 돌리는 스크립트 넷</td></tr>
+</table>
+
+<div class="ok">
+<b>🔵 「사람」에 대한 좋은 소식 — 채워야 할 칸이 0개다</b><br />
+담당자(<code>engineer</code>) 칸이 자료에는 있지만 <b>입력하는 화면이 이미 없어져 있다</b>
+(코드 주석: 「담당 엔지니어는 입력받지 않는다」). 그래서 <b>로그인을 붙여도 반드시 채워야 하는 칸이 없다.</b><br />
+🔴 <b>「로그인했으니 그 칸에 자동으로 넣자」는 따로 결정할 일이다</b> — 신원을 붙이는 것과
+담당자 입력을 되살리는 것은 **다른 일**이고, 과거 자료는 소급할 수 없다(그때는 신원 개념이 없었다).
+</div>
+
+<h2>🔴 설계를 가른 사실 — 「메뉴만 따로 받기」는 불가능하다</h2>
+
+<div class="ask">
+시스템 목록(다른 시스템으로 건너가는 드롭다운)은 <b>조회 주소가 없다.</b>
+그 목록은 <b>로그인할 때 발급되는 신분 토큰 안의 한 칸(<code>dss_services</code>)에만</b> 들어 있다.<br />
+🔴 그래서 <b>「순수 자바스크립트가 fetch 로 메뉴를 받아 그린다」가 설계상 성립하지 않는다.</b>
+로그인 흐름 전체(인가 → 토큰 교환 → 서명 검증)를 구현해야 목록이 손에 들어온다.<br />
+🔵 대신 <b>들어갈 수 있는 시스템만</b> 담겨 오므로, 받은 뒤 걸러낼 일은 없다.
+</div>
+
+<div class="note">🔴 <b>메뉴는 로그인 시점에 굳는다.</b> 관리자가 중간에 권한을 더하거나 거둬도
+<b>다시 로그인하기 전까지 드롭다운이 안 바뀐다.</b> 지금 설계에 「실시간으로 다시 묻는 길」이 없다 —
+다른 일곱도 전부 그렇다. 이상해 보여도 <b>우리 전체가 그렇게 돌고 있다.</b></div>
+
+<h2>네 기능이 실제로 요구하는 것</h2>
+
+<table>
+<tr><th style="width:140px">기능</th><th>어디서 오는가</th><th style="width:180px">자격</th></tr>
+<tr><td><b>시스템 목록</b></td><td>로그인 토큰의 <code>dss_services</code> 칸 — 🔴 별도 주소 없음</td><td>로그인 흐름 안</td></tr>
+<tr><td><b>통합 로그인으로</b></td><td>포털 주소 + <code>/apps</code></td><td>🔵 없음 — 그냥 링크</td></tr>
+<tr><td><b>로그아웃</b></td><td>내 세션 파기 → 포털의 로그아웃 주소로 보냄 <b>(포털까지 끊긴다)</b></td><td>🔵 없음</td></tr>
+<tr><td><b>남의 알림 받아오기</b></td><td><code>POST {포털}/api/integration/notifications</code></td><td>🔴 <b>클라이언트 비밀값</b>(Basic)</td></tr>
+<tr><td><b>내 알림 내주기</b></td><td><code>GET {RF}/api/integration/notifications</code> — 포털이 물으러 온다</td><td>🔴 <b>포털이 서명한 토큰</b>(Bearer, 공개키로 검증)</td></tr>
+<tr><td><b>끊어라 신호 받기</b></td><td><code>POST {RF}/.../backchannel-logout</code></td><td>🔴 <b>인증 없이 열린 창구 — 서명 검증이 전부</b></td></tr>
+</table>
+
+<div class="ask">
+<b>🔴 자격이 방향마다 다르다. 하나로 통일하면 한쪽이 조용히 401 로 막힌다.</b><br />
+받아올 때는 <b>우리 비밀값</b>으로, 내줄 때는 <b>포털의 서명</b>을 검증한다. 거꾸로 적으면
+오류가 사람 눈에 안 보이고 「알림이 안 뜬다」로만 나타난다.
+</div>
+
+<div class="ask">
+<b>🔴 끊어라 신호를 받는 창구는 인증이 아예 없다.</b> 서명 검증이 유일한 문지기다.
+<b>경로만 만들고 서명 검증을 빠뜨리면 누구나 아무나 로그아웃시킬 수 있는 구멍이 된다.</b>
+순수 Node 로 손수 짜는 자리라 가장 조심해야 한다.
+</div>
+
+<h2>🔵 그대로 쓸 수 있는 것</h2>
+
+<div class="ok">
+<ul>
+<li><b>세션 쿠키 전체</b>(<code>rfsess</code>) — HMAC 서명·수명·확인이 이미 있다.
+    <b>「무엇으로 로그인하나」만 바꾸면 된다.</b> 쿠키를 굽고 푸는 부분은 손댈 것이 없다</li>
+<li><b>자료·엑셀·캐시</b> — 한 줄도 안 바뀐다</li>
+<li><b>배포</b>(Dockerfile·compose·NAS 볼륨) — 환경변수만 는다</li>
+<li><code>tools/</code> 의 2,947줄(엑셀 읽기·백업 등) — 그대로</li>
+<li>🔴 <b>「권한 없는 사람」 처리</b> — <b>포털이 자기 화면에서 가로채고 RF 로 돌려보내지 않는다.</b>
+    RF 는 거부 화면을 만들 필요가 전혀 없다</li>
+</ul>
+</div>
+
+<h2>값 — 두 길을 재면</h2>
+
+<table>
+<tr><th style="width:150px"></th><th>지금 틀에 붙이기 <b>(권장)</b></th><th>Next.js 로 다시 짓기</th></tr>
+<tr><td>새로 쓸 줄 수</td><td>🔵 <b>1,000~1,500줄</b></td><td>🔴 약 3,790줄 + 그 뒤</td></tr>
+<tr><td>의존성</td><td>0 유지 또는 <b>JWT 라이브러리 하나</b></td><td>14개쯤</td></tr>
+<tr><td>자료·엑셀</td><td>🔵 손댈 것 없음</td><td>어댑터 필요</td></tr>
+<tr><td>배포</td><td>🔵 거의 그대로</td><td>전면 교체</td></tr>
+<tr><td>공용 메뉴바(@dss/ui)</td><td>🔴 못 씀 — <b>직접 만든다</b></td><td>붙는다</td></tr>
+<tr><td>화면 모양</td><td>🔵 <b>지금 디자인 그대로</b></td><td>다시 그림</td></tr>
+</table>
+
+<div class="note">🔴 <b>앞서 「약 110줄」이라고 말한 것은 틀렸다</b>(2026-10-21 정정).
+그것은 비밀번호 자리를 바꾸는 칸만 센 숫자였고 <b>로그인 구현 자체를 안 셌다.</b></div>
+
+<div class="tip">
+🔵 <b>베낄 본보기가 바로 옆에 있다</b> — <b>A/S 관리 시스템</b>이 네 기능을 전부 구현한
+<b>실제 운영 사례</b>다. 포털 코드가 그것을 「A/S 가 실제로 열어 둔 주소」라고 가리키고 있다.
+개선요청(<code>dss-improvements</code>)은 더 단순한 쪽 사례다. <b>두 수준의 실물이 있다.</b>
+</div>
+
+<h2>조각 나누기 — 🔴 포털 건드리는 것을 맨 뒤에, 따로</h2>
+
+<table>
+<tr><th style="width:52px">조각</th><th>무엇</th><th style="width:96px">어디</th><th style="width:150px">게이트</th></tr>
+<tr><td><b>1</b></td><td><b>통합 로그인으로 들어오기</b> — 인가 → 토큰 교환 → 서명 검증 → 지금 쓰던 <code>rfsess</code> 굽기.
+    팀 비밀번호 길은 <b>남겨 둔다</b>(되돌릴 자리)</td><td><span class="pill p-rf">RF</span></td><td>🔵 눈 확인</td></tr>
+<tr><td><b>2</b></td><td><b>머리말 세 가지</b> — 시스템 목록 드롭다운 · 통합 로그인으로 · 로그아웃.
+    🔵 <b>RF 디자인에 맞춰 직접 그린다</b></td><td><span class="pill p-rf">RF</span></td><td>🔵 눈 확인</td></tr>
+<tr><td><b>3</b></td><td><b>끊어라 신호 받는 창구</b> — 🔴 <b>서명 검증이 유일한 문지기다</b></td><td><span class="pill p-rf">RF</span></td><td>시험</td></tr>
+<tr><td><b>4</b></td><td><b>내 알림 내주는 통로</b> — 포털이 물으러 올 자리를 미리 열어 둔다</td><td><span class="pill p-rf">RF</span></td><td>시험</td></tr>
+<tr><td><b>5</b></td><td>🔴 <b>포털에 RF 등록 + 알림 물어볼 목록에 한 줄</b><br />
+    🔴 <b>여기만 일곱 사이트 전부가 걸린다</b></td><td><span class="pill p-portal">포털</span></td><td>🔴 <b>되돌릴 길을 먼저 적고</b> 사람 확인</td></tr>
+<tr><td><b>6</b></td><td><b>알림종 화면</b> — 받아온 것 + 내 것을 합쳐 그리기, 지우기(✕)</td><td><span class="pill p-rf">RF</span></td><td>🔵 눈 확인</td></tr>
+</table>
+
+<div class="ok">
+🔵 <b>1~4 는 포털을 전혀 안 건드린다.</b> 5번 하나만 조심하면 된다.<br />
+🔵 <b>4를 5보다 먼저 하는 까닭</b>: 포털이 물으러 왔을 때 창구가 이미 열려 있어야 한다.
+순서를 뒤집으면 포털이 없는 주소를 두드리며 실패를 쌓는다.
+</div>
+
+<div class="ask">
+<b>🔴 조각 5 — 왜 여기만 다른가</b><br />
+포털이 <b>어느 시스템에 알림을 물어볼지</b>가 <b>DB 가 아니라 포털 코드에 상수로 박혀 있다.</b>
+거기에 RF 를 한 줄 더하고 <b>포털을 다시 배포</b>해야 한다.<br />
+🔴 포털은 <b>운영에서 일곱 사이트의 로그인을 떠받친다.</b> 잘못되면 RF 하나가 아니라 <b>전부가 못 들어온다.</b><br />
+🔵 그래서 이 조각은 ① 바꿀 줄을 먼저 보여 주고 ② <b>되돌리는 방법을 적어 두고</b>
+③ 배포 뒤 <b>일곱이 다 들어가지는지</b>를 확인하는 순서로 간다.
+</div>
+
+<h2>정해 둔 것</h2>
+
+<div class="card">
+<ul>
+<li><b>길</b>: 지금 틀에 붙인다(다시 짓지 않는다)</li>
+<li><b>메뉴바</b>: <code>@dss/ui</code> 를 쓰지 않고 <b>RF 디자인에 맞춰 네 기능을 직접 만든다</b>
+    (2026-10-21 사용자 결정)</li>
+<li><b>들어올 사람</b>: 포털의 <b>[시스템 접근] 권한</b>으로 정한다 — 지금 일곱이 쓰는 방식 그대로.
+    🔵 <b>새로 만들 것이 없다</b>(관리 화면도 이미 있다)</li>
+<li><b>담당자 자동 채우기</b>: 🔴 <b>이 작업에 넣지 않는다.</b> 별도 결정</li>
+</ul>
+</div>
+
+<h2>🔴 아직 정하지 않은 것</h2>
+
+<div class="ask">
+<ul>
+<li><b>팀 비밀번호 길을 언제 걷어내나?</b> 조각 1에서는 <b>남겨 둔다</b>(되돌릴 자리).
+    통합 로그인이 안정되면 걷어내는데, <b>그 시점을 정해야 한다.</b>
+    🔴 둘 다 열어 두는 동안은 <b>비밀번호만 알면 신원 없이 들어올 수 있다.</b></li>
+<li><b>JWT 검증을 손으로 짜나, 라이브러리를 하나 들이나?</b>
+    지금 의존성이 0개인 것이 이 저장소의 성격인데, <b>서명 검증을 직접 짜는 것은 틀리기 쉬운 자리</b>다.
+    🔵 조각 1을 시작할 때 정하면 된다.</li>
+<li><b>시험을 어떻게 하나?</b> 🔴 이 저장소에는 <b>자동으로 도는 시험이 없다.</b>
+    인가 경계를 건드리는 일이라 최소한 <b>서명 검증 쪽은 돌려 볼 수 있어야</b> 한다 —
+    틀을 하나 들일지, 지금처럼 손으로 돌리는 스크립트로 둘지.</li>
+</ul>
+</div>
+
+<p class="sub" style="margin-top:26px">2026-10-21 작성 · 조사 둘(저장소 구조 · 포털 통로)의 실측을 합친 것</p>
+
+</div>
+</body>
+</html>
