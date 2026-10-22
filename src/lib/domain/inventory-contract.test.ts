@@ -266,6 +266,9 @@ function sampleRequestRow() {
         drawingNo: "DWG-1",
         owner: { code: "KYOSAN", label: "KYOSAN" },
         chargeType: { code: "PAID", label: "유상" },
+        /* 🔵 2026-10-22 에 O/H 표시가 더해졌다. 🔴 **참**으로 둔다 — 거짓이면 빼도 파서의 답이
+           그대로라(없으면 거짓) 「빼면 달라진다」가 거짓말을 한다(이 본보기의 머리말 규칙). */
+        fromOhTemplate: true,
       },
     ],
     decision: { byName: "홍길동", at: "2026-10-21T02:00:00.000Z", note: "사유" },

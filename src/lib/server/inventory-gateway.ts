@@ -272,7 +272,13 @@ export type CreateStockRequestInput = {
   workflowKind?: WorkflowKind;
   /** 🔴 `sub` 은 **포털 번호**다. 저쪽이 그 번호로 사람을 잇는다(API.md 4-5절). */
   requester: { sub: string; name: string };
-  lines: { no: number; quantity: number; chargeType: ChargeType }[];
+  /**
+   * 🔴 **이 객체가 그대로 본문에 실린다**(아래 `lines: input.lines`) — 칸 이름이 곧 저쪽이 받는
+   * 글자다. `fromOhTemplate` 은 「[O/H 부품 한 번에 담기]로 담긴 줄인가」이고(2026-10-22),
+   * 정해 둔 자리는 `lib/domain/inventory-contract.ts` 의 `INVENTORY_OH_LINE_FIELD` 하나다.
+   * 🔵 `chargeType` 과 달리 **거짓도 그대로 보낸다** — 「모른다」가 없는 값이다.
+   */
+  lines: { no: number; quantity: number; chargeType: ChargeType; fromOhTemplate: boolean }[];
   reason?: string;
   note?: string;
 };

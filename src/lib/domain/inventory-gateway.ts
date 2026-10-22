@@ -116,7 +116,32 @@ export const MAX_STOCK_REQUEST_QUANTITY = 1_000_000;
 /** 요청 번호(`requestKey`)의 글자 수 상한. 저쪽이 이 길이로 자르고 저장한다. */
 export const MAX_REQUEST_KEY_LENGTH = 100;
 
-export type StockRequestLine = { no: number; quantity: number; chargeType: ChargeType };
+/**
+ * 올릴 줄 하나.
+ *
+ * 🔴 **`fromOhTemplate` 는 통로로 나가는 칸 이름 그대로다** (2026-10-22). 이 객체가 그대로
+ *    `POST /api/v1/stock-requests` 의 본문에 실리므로(`lib/server/inventory-gateway.ts` 가
+ *    `lines: input.lines` 로 넘긴다), **여기 적은 글자가 곧 저쪽이 받는 글자**다. 그 글자를
+ *    정해 둔 자리는 `lib/domain/inventory-contract.ts` 의 `INVENTORY_OH_LINE_FIELD` 하나이고,
+ *    재고 관리가 같은 글자를 쓰는지는 `scripts/check-inventory-contract.ts` 가 두 저장소를
+ *    맞대어 잰다 — 🔴 어긋나도 **아무 오류가 안 난다**(저쪽이 못 읽은 칸을 조용히 거짓으로
+ *    떨어뜨려 딱지만 영영 안 뜬다).
+ */
+export type StockRequestLine = {
+  no: number;
+  quantity: number;
+  chargeType: ChargeType;
+  /**
+   * **[O/H 부품 한 번에 담기]로 담긴 줄인가** — 담긴 **그 순간**의 사실이다(스냅샷).
+   *
+   * 🔴 **나중에 다시 계산하지 않는다.** 「지금 O/H 템플릿에 그 부품이 있나」로 재면 템플릿이
+   *    바뀐 날 옛 신청의 표시가 조용히 달라지고, 같은 부품을 **손으로** 담은 줄까지 O/H 로
+   *    보이게 된다. 쓰는 분의 말이 「**[O/H 부품 한 번에 담기]를 하면**」이다.
+   * 🔵 **거짓도 그대로 보낸다**(칸을 빼지 않는다) — 수리 건의 종류(`workflowKind`)와 다르다:
+   *    저쪽은 「모른다」가 있지만 여기는 아니다. 담은 자리가 어디였는지는 화면이 언제나 안다.
+   */
+  fromOhTemplate: boolean;
+};
 
 export type ParseStockRequestLinesResult =
   | { ok: true; lines: StockRequestLine[] }
@@ -154,7 +179,7 @@ export function parseStockRequestLines(
     if (!item || typeof item !== "object") {
       return { ok: false, message: "요청할 부품 정보를 확인할 수 없습니다." };
     }
-    const o = item as { no?: unknown; quantity?: unknown; chargeType?: unknown };
+    const o = item as { no?: unknown; quantity?: unknown; chargeType?: unknown; fromOhTemplate?: unknown };
     const no = o.no;
     if (typeof no !== "number" || !Number.isInteger(no) || no < 1) {
       return { ok: false, message: "재고 관리의 부품 번호를 확인할 수 없습니다." };
@@ -177,7 +202,13 @@ export function parseStockRequestLines(
       return { ok: false, message: `${partLabel(no, labels)}의 유상/무상을 골라 주세요.` };
     }
 
-    lines.push({ no, quantity, chargeType: o.chargeType });
+    /**
+     * 🔴 **O/H 표시는 「고르지 않으면 못 올린다」가 아니다**(위 유상/무상과 일부러 다르다).
+     *    참이 아니면 전부 거짓으로 눕힌다 — 이 값으로 달라지는 일이 **화면의 딱지 하나뿐**이고,
+     *    여기서 거절하면 담지도 않은 사람이 부품을 못 받는다. 저쪽도 같은 쪽으로 눕힌다.
+     * 🔵 **칸은 언제나 선다** — 거짓도 그대로 실려 나간다(위 타입 주석).
+     */
+    lines.push({ no, quantity, chargeType: o.chargeType, fromOhTemplate: o.fromOhTemplate === true });
   }
   return { ok: true, lines };
 }
@@ -641,6 +672,22 @@ export type InventoryStockRequestLine = {
    *    우리가 올린 신청에서는 언제나 들어 있다.
    */
   chargeType: { code: string; label: string } | null;
+  /**
+   * **[O/H 부품 한 번에 담기]로 담긴 줄인가** — 🔴 **올릴 때 우리가 보낸 값을 되받은 것**이다
+   * (2026-10-22, 쓰는 분 요청).
+   *
+   * ── 🔴 **왜 되받아야 하는가** ───────────────────────────────────────────
+   * A/S 는 재고에 관한 것을 **제 표에 하나도 저장하지 않는다**(이 모듈 머리말). 올리고 나면 장바구니는
+   * 비워지고, 아래 「이 수리 건의 반출 신청」 목록은 전부 저쪽에서 받은 것으로 그린다 — 되받지
+   * 못하면 **담는 중에는 보이던 딱지가 올리는 순간 사라진다.**
+   *
+   * ── 🔴 **없으면 「O/H 아님」이고, 그것이 깨짐이 아니다** ─────────────────
+   * 2026-10-22 전에 올라간 신청, 재고 관리에서 직접 올린 신청, 반출이 아닌 신청에는 이 칸이
+   * 아예 없다. 위 `owner`·`chargeType` 처럼 `null` 로 가르지 않는 까닭: **가를 수 있어도 화면이
+   * 하는 일이 같다**(어느 쪽이든 딱지를 안 그린다). 🔴 **「일반」 딱지를 만들지 않는 까닭도
+   * 그것이다** — 값이 없던 때의 신청이 「확인해 보니 일반 부품」으로 단정돼 보인다.
+   */
+  fromOhTemplate: boolean;
 };
 
 export type InventoryStockRequest = {
@@ -770,6 +817,10 @@ export function parseInventoryStockRequestsResponse(json: unknown): InventorySto
            `null` 이 참말이다. 빈 `{ code, label }` 로 두면 글자 없는 딱지가 선다. */
         owner: codeLabelOrNull(e.owner),
         chargeType: codeLabelOrNull(e.chargeType),
+        /* 🔴 **참일 때만 참이다** — 칸이 없는 옛 신청도, 글자 `"true"` 도 전부 거짓으로 눕는다.
+           이 글자(`fromOhTemplate`)가 저쪽이 보내는 칸 이름과 어긋나면 **오류 없이 딱지만
+           영영 안 뜬다** — 그래서 점검 도구가 두 저장소를 맞대어 잰다(`inventory-contract.ts`). */
+        fromOhTemplate: e.fromOhTemplate === true,
       });
     }
 
@@ -1048,8 +1099,8 @@ export function stockRequestLineDetails(
  *    「색 말고도 갈리는가」를 **아무도 돌려 보지 못한다.**
  */
 export type StockRequestLineTag = {
-  /** 어느 값인가. 🔵 화면의 `key` 이자, 시험이 「둘이 섞이지 않았나」를 짚는 이름이다. */
-  key: "owner" | "chargeType";
+  /** 어느 값인가. 🔵 화면의 `key` 이자, 시험이 「섞이지 않았나」를 짚는 이름이다. */
+  key: "owner" | "chargeType" | "oh";
   /**
    * 값 앞에 붙는 작은 글자. 🔵 **빈 글자일 수 있다** — 값 자체가 이미 말이 되는 딱지는 라벨을
    * 달지 않는다(아래 유상/무상). 🔴 그 있고 없음이 두 딱지를 가르는 **「색 아닌」 표식 하나**다.
@@ -1144,6 +1195,57 @@ export function stockRequestLineChargeTag(
     label: "",
     value: line.chargeType.label || code,
     className: isChargeType(code) ? STOCK_REQUEST_CHARGE_TAG_CLASS[code] : STOCK_REQUEST_CHARGE_TAG_UNKNOWN_CLASS,
+  };
+}
+
+/**
+ * **O/H 딱지에 적히는 글자** (2026-10-22, 쓰는 분 요청).
+ *
+ * 🔴 **이 저장소에서 그 말을 적는 자리는 여기 하나다.** 화면 둘(담는 중 · 올린 뒤)이 전부
+ *    `stockRequestOhTag` 를 지나므로 화면에 손으로 적을 자리가 없다 — 적어 두면 말을 바꾸는 날
+ *    한쪽만 옛말을 한다.
+ * 🔴 **「오버홀」로 풀지 않는다.** 두 저장소가 쓰는 낱말이 「O/H」다(「O/H 부품 템플릿」·「O/H 단가」).
+ * 🔴 **재고 관리도 같은 글자를 쓴다**(저쪽 `REQUEST_ITEM_OH_TAG_VALUE`). 같은 딱지가 네 화면에
+ *    서는데 글자가 두 저장소에 나뉘어 있어 **어느 쪽도 혼자서는 어긋난 것을 알지 못한다** —
+ *    그래서 `scripts/check-inventory-contract.ts` 가 두 저장소의 그 글자를 맞대어 잰다.
+ */
+export const STOCK_REQUEST_OH_TAG_VALUE = "O/H";
+
+/**
+ * O/H 딱지의 꾸밈 — 🔴 **이웃한 두 딱지와 색 말고도 갈린다.**
+ *
+ *  ① **글자가 다르다**(「O/H」). 소유(`DSS`·`KYOSAN`)와도 유상/무상과도 섞일 수 없는 낱말이라,
+ *     색을 전부 지워도 무엇인지 알 수 있다.
+ *  ② **바탕이 차 있고 굵다.** 소유(연회색·보통 굵기)와 갈리고, 무상(흰 바탕)과도 갈린다.
+ *
+ * 🔵 보라를 고른 까닭: **사람이 일부러 그렇게 해 둔 것**에 쓰는 색이다(이 화면의 보류 사유 상자가
+ *    같은 계열이고, 재고 관리도 보류 배지에 보라를 쓴다). O/H 로 담긴 줄도 [한 번에 담기]를 눌러
+ *    **그렇게 담긴** 줄이다. 🔴 유상의 노랑과 겹치지 않는 계열이라, 둘이 나란히 서도 **어느 쪽이
+ *    돈 이야기인지** 흐려지지 않는다.
+ * 🔴 **다크 짝이 붙어 있다** — 밝은 쪽만 적으면 어두운 화면에서 글자가 배경에 잠긴다.
+ */
+export const STOCK_REQUEST_OH_TAG_CLASS =
+  "border-violet-300 bg-violet-50 font-semibold text-violet-900 dark:border-violet-700 dark:bg-violet-950/40 dark:text-violet-200";
+
+/**
+ * **그 줄이 O/H 템플릿에서 담긴 줄인가** 딱지. 아니면 `null` 이고, 그때 화면은 **아무것도 안 그린다.**
+ *
+ * 🔴 **「일반」 같은 딱지를 만들지 않는다**(쓰는 분 지시). 줄마다 딱지가 하나 더 서면 목록이
+ *    시끄러워지고, 무엇보다 **옛 신청**(칸이 없어 거짓인 줄)이 「확인해 보니 일반 부품」으로
+ *    단정돼 보인다 — 참말은 「그때는 그 값을 적지 않았다」다.
+ * 🔴 **받는 칸이 `fromOhTemplate` 하나다** — 이웃 둘과 같은 관례다(소유만 들고 유상/무상을 물을 수
+ *    없고, 그 반대도 안 된다). 🔵 그 덕에 **담는 중인 장바구니 줄**도 같은 함수를 부른다: 그쪽은
+ *    아직 저쪽에서 받아 온 줄이 아니지만 **같은 칸 하나**를 들고 있다. 두 화면이 같은 딱지를
+ *    그려야 하므로 함수를 둘로 두지 않는다.
+ */
+export function stockRequestOhTag(line: { fromOhTemplate: boolean }): StockRequestLineTag | null {
+  if (!line.fromOhTemplate) return null;
+  return {
+    key: "oh",
+    // 🔴 라벨을 달지 않는다 — 「O/H」가 그 자체로 무슨 뜻인지까지 말한다(유상/무상과 같은 까닭).
+    label: "",
+    value: STOCK_REQUEST_OH_TAG_VALUE,
+    className: STOCK_REQUEST_OH_TAG_CLASS,
   };
 }
 

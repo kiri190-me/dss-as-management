@@ -564,9 +564,11 @@ describe("올릴 줄의 모양 — 화면과 서버 액션이 함께 쓴다", ()
       { no: 12, quantity: 1, chargeType: "FREE" },
     ]);
     assert.equal(result.ok, true);
+    /* 🔵 2026-10-22: O/H 표시를 안 준 줄은 **거짓**으로 서고, 칸은 그래도 선다 — 「안 보내면
+       O/H 아님」이 실제로 도는 모습이다. 그 칸만 재는 자리는 `inventory-oh-line.test.ts` 다. */
     assert.deepEqual(result.ok ? result.lines : null, [
-      { no: 11, quantity: 2, chargeType: "PAID" },
-      { no: 12, quantity: 1, chargeType: "FREE" },
+      { no: 11, quantity: 2, chargeType: "PAID", fromOhTemplate: false },
+      { no: 12, quantity: 1, chargeType: "FREE", fromOhTemplate: false },
     ]);
   });
 

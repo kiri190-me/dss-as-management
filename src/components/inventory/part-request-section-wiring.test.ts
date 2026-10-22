@@ -502,6 +502,14 @@ describe("🔴 반출 신청 줄 — 어느 부품인지가 보인다", () => {
    */
   const detailsStart = source.indexOf("function StockRequestLineDetails");
   const detailsBlock = source.slice(detailsStart, source.indexOf("function CancelStockRequestDialog", detailsStart));
+  /**
+   * 🔴 **딱지를 그리는 markup 은 2026-10-22 에 제 조각으로 떨어져 나갔다**(`LineTags`) — 같은 날
+   * **담는 중인 장바구니 줄**에도 딱지가 서면서, 두 벌로 적으면 담는 중과 올린 뒤가 다르게
+   * 보이기 때문이다. 🔵 그래서 「딱지를 어떻게 그리나」를 묻는 단언은 **옮겨 간 자리에서** 잰다 —
+   *    단언을 약하게 고치는 것이 아니라 **찾는 자리를 넓히는** 것이다.
+   */
+  const tagsStart = source.indexOf("function LineTags(");
+  const tagsBlock = source.slice(tagsStart, detailsStart);
 
   test("🔵 **머리줄의 글자는 한 자도 안 바뀌었다** — 2026-10-21 에 붙은 것은 꾸밈뿐이다", () => {
     assert.match(requestLines, /\{line\.no !== null && <span className="text-zinc-400">No\. \{line\.no\} <\/span>\}/);
@@ -537,11 +545,16 @@ describe("🔴 반출 신청 줄 — 어느 부품인지가 보인다", () => {
     }
   });
 
-  test("🔴 **두 딱지를 따로 묻는다** — 한 함수로 합치면 「이 부품은 유상인가」가 된다", () => {
-    assert.match(
-      source,
-      /\[stockRequestLineOwnerTag\(line\), stockRequestLineChargeTag\(line\)\]/,
-      "딱지를 한 번에 받아 오고 있다 — 부품의 것과 줄의 것이 뭉개진다"
+  test("🔴 **딱지를 하나씩 따로 묻는다** — 한 함수로 합치면 「이 부품은 유상인가」가 된다", () => {
+    /* 🔴 2026-10-22 에 셋째(O/H)가 붙으면서 한 줄이던 목록이 여러 줄이 됐다 — **단언을 약하게
+       고치지 않고**, 「셋을 각각 제 함수로 묻는가」를 그대로 센다. 한 함수로 합치는 날이 와도
+       여기서 걸린다. 🔵 차례(소유 → 유상/무상 → O/H)는 재고 관리 화면과 같다. */
+    const calls = detailsBlock.slice(detailsBlock.indexOf("const tags:"), detailsBlock.indexOf("if (customerName ==="));
+    assert.ok(calls.length > 0, "딱지를 묻는 자리를 못 찾았다 — 모양이 바뀌었으면 시험도 함께 고쳐라");
+    assert.deepEqual(
+      [...calls.matchAll(/stockRequest(?:Line)?(\w+?)Tag\(line\)/g)].map((m) => m[1]),
+      ["Owner", "Charge", "Oh"],
+      "딱지를 한 번에 받아 오거나 차례가 바뀌었다 — 부품의 것과 줄의 것이 뭉개진다"
     );
     // 🔴 화면이 코드값을 직접 견주면 가르는 자리가 두 곳이 된다.
     assert.doesNotMatch(source, /chargeType\.code === "PAID"|chargeType === "PAID"/, "화면이 유상/무상을 직접 가른다");
@@ -563,7 +576,9 @@ describe("🔴 반출 신청 줄 — 어느 부품인지가 보인다", () => {
   test("🔴 **고객사 품명이 앞선다** — 딱지보다, 나머지 글자보다 먼저", () => {
     const block = detailsBlock;
     const lead = block.indexOf("{customerName}");
-    const tags = block.indexOf("{tag.value}");
+    /* 🔵 딱지 markup 이 `LineTags` 로 떨어져 나가(2026-10-22) 이 줄에서는 **부르는 자리**가
+       딱지의 자리다 — 찾는 글자만 옮겼고, 묻는 것(차례)은 그대로다. */
+    const tags = block.indexOf("<LineTags ");
     const rest = block.indexOf("{detail.value}");
     assert.ok(lead >= 0 && tags > lead, "딱지가 고객사 품명보다 앞에 선다");
     assert.ok(rest > tags, "나머지 글자가 딱지보다 앞에 선다");
@@ -584,10 +599,23 @@ describe("🔴 반출 신청 줄 — 어느 부품인지가 보인다", () => {
   });
 
   test("🔴 딱지 꾸밈을 화면이 덧칠하지 않는다 — 도메인이 준 것을 그대로 붙인다", () => {
-    const block = detailsBlock;
-    assert.match(block, /\$\{tag\.className\}/, "도메인이 고른 꾸밈을 안 쓴다");
+    // 🔵 markup 이 옮겨 간 자리에서 잰다(위 `tagsBlock` 머리말). 묻는 것은 그대로다.
+    assert.ok(tagsStart >= 0 && tagsBlock.length > 0, "딱지를 그리는 조각을 못 찾았다");
+    assert.match(tagsBlock, /\$\{tag\.className\}/, "도메인이 고른 꾸밈을 안 쓴다");
     // 🔴 여기서 색을 덧붙이기 시작하면 「색 말고도 갈리는가」를 재는 자리가 둘로 쪼개진다.
-    assert.doesNotMatch(block, /bg-amber|text-amber|border-amber/, "화면이 딱지 색을 따로 적는다");
+    for (const block of [tagsBlock, detailsBlock]) {
+      assert.doesNotMatch(block, /bg-amber|text-amber|border-amber|bg-violet|text-violet|border-violet/, "화면이 딱지 색을 따로 적는다");
+    }
+  });
+
+  /**
+   * 🔴 **딱지를 그리는 markup 이 한 벌이다** (2026-10-22). 담는 중인 장바구니 줄과 올린 뒤의
+   * 신청 줄이 **같은 조각**을 쓴다 — 두 벌로 적으면 같은 요청의 같은 부품인데 테두리·여백·
+   * 글자 크기가 갈리고, 이 환경에서는 그려 볼 수 없어 **아무도 못 본다.**
+   */
+  test("🔴 담는 중과 올린 뒤가 **같은 조각**으로 딱지를 그린다", () => {
+    assert.match(source, /function LineTags\(/, "딱지를 그리는 조각이 없다");
+    assert.equal([...source.matchAll(/<LineTags /g)].length, 2, "조각을 쓰는 자리가 둘이 아니다 — 담는 중과 올린 뒤 둘이다");
   });
 });
 

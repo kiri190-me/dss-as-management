@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 
+import { INVENTORY_OH_LINE_FIELD } from "@/lib/domain/inventory-contract";
 import {
   cancelInventoryStockRequest,
   createInventoryStockRequest,
@@ -274,7 +275,7 @@ describe("🔴 읽기 토큰과 쓰기 토큰을 가른다", () => {
       requestKey: "지어낸-요청번호",
       intakeNumber: "D260701",
       requester: { sub: "지어낸-포털번호", name: "홍길동" },
-      lines: [{ no: 11, quantity: 2, chargeType: "PAID" }],
+      lines: [{ no: 11, quantity: 2, chargeType: "PAID", fromOhTemplate: false }],
     });
 
     assert.equal(calls[0].method, "POST");
@@ -300,7 +301,7 @@ describe("🔴 읽기 토큰과 쓰기 토큰을 가른다", () => {
       requestKey: "지어낸-요청번호",
       intakeNumber: "D260701",
       requester: { sub: "지어낸-포털번호", name: "홍길동" },
-      lines: [{ no: 11, quantity: 1, chargeType: "FREE" }],
+      lines: [{ no: 11, quantity: 1, chargeType: "FREE", fromOhTemplate: false }],
     });
 
     assert.equal(read.status, "ok");
@@ -313,7 +314,9 @@ describe("올리기", () => {
     requestKey: "지어낸-요청번호",
     intakeNumber: "D260701",
     requester: { sub: "지어낸-포털번호", name: "홍길동" },
-    lines: [{ no: 11, quantity: 2, chargeType: "PAID" as const }],
+    /* 🔵 2026-10-22: **[O/H 부품 한 번에 담기]로 담긴 줄**로 둔다(참). 거짓으로 두면 칸을 통째로
+       빠뜨려도 저쪽이 받는 기본값과 같아져, 아래 「모양 그대로」 시험이 **빠뜨린 것을 못 본다**. */
+    lines: [{ no: 11, quantity: 2, chargeType: "PAID" as const, fromOhTemplate: true }],
     note: "오후에 가져갑니다",
   };
 
@@ -326,8 +329,71 @@ describe("올리기", () => {
       requestKey: "지어낸-요청번호",
       intakeNumber: "D260701",
       requester: { sub: "지어낸-포털번호", name: "홍길동" },
-      lines: [{ no: 11, quantity: 2, chargeType: "PAID" }],
+      lines: [{ no: 11, quantity: 2, chargeType: "PAID", fromOhTemplate: true }],
       note: "오후에 가져갑니다",
+    });
+  });
+
+  /**
+   * ==========================================================================
+   * 🔴 **O/H 표시가 줄마다 실려 나간다** (2026-10-22, 쓰는 분 요청)
+   * ==========================================================================
+   * 「O/H 부품이라는 표시를 부품을 요청하는 모든 과정에 부품마다」. 그 표시는 **줄 안**에
+   * 실린다(수리 건의 종류와 달리 본문 최상위가 아니다 — 건이 아니라 줄의 값이다).
+   *
+   * 🔴 **칸 이름을 여기 손으로 적지 않는다.** 두 시스템이 정한 글자를 쥔 자리는
+   *    `INVENTORY_OH_LINE_FIELD` 하나이고, 이 시험은 **본문에 실제로 나간 키**를 그 상수와
+   *    견준다 — 글자를 베껴 적으면 이름이 갈리는 날 시험까지 함께 갈려 **그대로 통과한다.**
+   * 🔵 저쪽 저장소가 같은 글자로 읽는지는 여기서 잴 수 없다(저쪽 코드가 없다) —
+   *    `scripts/check-inventory-contract.ts` 의 ㉢ 이 두 저장소를 맞댄다.
+   */
+  describe("🔴 O/H 표시", () => {
+    const OK = { status: 201, json: { created: true, request: { id: "r1", status: { code: "PENDING", label: "대기" } } } };
+
+    test("㉠ **줄 안에** 그 이름의 칸으로 나간다 — 본문 최상위가 아니다", async () => {
+      stubFetch(() => OK);
+
+      await createInventoryStockRequest(INPUT);
+
+      const body = calls[0].body as Record<string, unknown>;
+      assert.ok(!(INVENTORY_OH_LINE_FIELD in body), "건 단위로 올라갔다 — 줄마다 다를 수 있는 값이다");
+      const line = (body.lines as Record<string, unknown>[])[0];
+      assert.ok(
+        Object.hasOwn(line, INVENTORY_OH_LINE_FIELD),
+        `줄에 「${INVENTORY_OH_LINE_FIELD}」 칸이 없다 — 저쪽은 못 읽고 조용히 거짓으로 눕힌다`
+      );
+      assert.equal(line[INVENTORY_OH_LINE_FIELD], true);
+    });
+
+    test("㉡ 🔴 **줄마다 제 값**으로 간다 — 섞여 있어도 뒤바뀌지 않는다", async () => {
+      stubFetch(() => OK);
+
+      await createInventoryStockRequest({
+        ...INPUT,
+        lines: [
+          { no: 11, quantity: 1, chargeType: "PAID", fromOhTemplate: true },
+          { no: 12, quantity: 1, chargeType: "FREE", fromOhTemplate: false },
+        ],
+      });
+
+      const lines = (calls[0].body as { lines: Record<string, unknown>[] }).lines;
+      assert.deepEqual(
+        lines.map((l) => [l.no, l[INVENTORY_OH_LINE_FIELD]]),
+        [
+          [11, true],
+          [12, false],
+        ]
+      );
+    });
+
+    test("㉢ 🔵 **거짓도 칸을 세워** 보낸다 — 「모른다」가 없는 값이다(종류와 다르다)", async () => {
+      stubFetch(() => OK);
+
+      await createInventoryStockRequest({ ...INPUT, lines: [{ no: 11, quantity: 1, chargeType: "PAID", fromOhTemplate: false }] });
+
+      const line = (calls[0].body as { lines: Record<string, unknown>[] }).lines[0];
+      assert.ok(Object.hasOwn(line, INVENTORY_OH_LINE_FIELD), "거짓이라고 칸을 빼 버렸다");
+      assert.equal(line[INVENTORY_OH_LINE_FIELD], false);
     });
   });
 
@@ -372,7 +438,7 @@ describe("올리기", () => {
         requestKey: "지어낸-요청번호",
         intakeNumber: "D260701",
         requester: { sub: "지어낸-포털번호", name: "홍길동" },
-        lines: [{ no: 11, quantity: 2, chargeType: "PAID" }],
+        lines: [{ no: 11, quantity: 2, chargeType: "PAID", fromOhTemplate: true }],
         note: "오후에 가져갑니다",
       });
     });
@@ -387,7 +453,7 @@ describe("올리기", () => {
         intakeNumber: "D260701",
         workflowKind: "MATCHER",
         requester: { sub: "지어낸-포털번호", name: "홍길동" },
-        lines: [{ no: 11, quantity: 2, chargeType: "PAID" }],
+        lines: [{ no: 11, quantity: 2, chargeType: "PAID", fromOhTemplate: true }],
         note: "오후에 가져갑니다",
       });
     });

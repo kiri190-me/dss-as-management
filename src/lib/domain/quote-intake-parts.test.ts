@@ -85,6 +85,9 @@ function request(id: string, lines: Line[]): InventoryStockRequest {
       drawingNo: "",
       owner: null,
       chargeType: null,
+      /* 🔵 2026-10-22 에 O/H 표시가 더해졌다. 이 시험이 재는 것은 **출고 부품을 합치는 일**이라
+         쓰지 않는다 — 「O/H 로 담긴 줄이 아니다」 쪽으로 둔다. */
+      fromOhTemplate: false,
     })),
     decision: null,
     hold: null,

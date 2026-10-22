@@ -1089,6 +1089,15 @@ src/lib/server/inventory-gateway.test.ts
 # scripts/check-inventory-contract.ts 몫이고, 거기서는 서버가 없으면 「못 쟀다」다.
 src/lib/domain/inventory-contract.test.ts
 
+# 🔴 [O/H 부품 한 번에 담기]로 담긴 줄에 **줄마다 O/H 표시**가 따라붙는가 (2026-10-22 요청).
+# 두 시스템이 **칸 이름 글자 하나**로 이어져 있고 어긋나도 오류가 안 난다 — 받는 쪽이
+# 「칸이 없다」로 보고 조용히 거짓으로 눕혀 **딱지만 영영 안 뜬다**. 그래서 이 시험은 글자를
+# 손으로 다시 적지 않고 `INVENTORY_OH_LINE_FIELD` 와 견준다. 담기는 순간의 스냅샷(템플릿을
+# 다시 보지 않는다) · 장바구니에서 올릴 줄까지의 운반 · 칸이 없는 옛 신청 · 딱지 규칙까지.
+# 🔵 저쪽 저장소가 같은 글자를 쓰는지는 한 저장소 안에서 잴 수 없다 —
+# scripts/check-inventory-contract.ts 의 ㉢ 이 두 저장소를 맞댄다.
+src/lib/domain/inventory-oh-line.test.ts
+
 # 🔴 그 도구 안의 "틀린 토큰이면 401" 검사가 한글 가짜 토큰 때문에 한 번도 돈 적이
 # 없었다(fetch 가 ByteString 변환에서 던진다, 2026-10-22). 서버 없이도 재발을 잡게
 # 소스에서 토큰 리터럴이 ASCII 인지만 본다.

@@ -33,6 +33,7 @@ import {
   stockRequestLineCustomerName,
   stockRequestLineDetails,
   stockRequestLineOwnerTag,
+  stockRequestOhTag,
   stockRequestStatusBadge,
   type ChargeType,
   type InventoryOhTemplate,
@@ -232,6 +233,10 @@ export default function PartRequestSection({
         quantity: "1",
         // 🔴 기본값을 두지 않는다. 사람이 고르기 전에는 올라가지 않는다.
         chargeType: "",
+        /* 🔴 **손으로 담은 줄은 O/H 가 아니다** (2026-10-22). 같은 부품이 템플릿에 들어 있어도
+           그렇다 — 쓰는 분의 말이 「**[O/H 부품 한 번에 담기]를 하면**」이고, 여기서 템플릿을
+           들여다보기 시작하면 「담은 자리」가 아니라 「지금 템플릿」이 딱지를 정하게 된다. */
+        fromOhTemplate: false,
       })
     );
   }
@@ -247,6 +252,13 @@ export default function PartRequestSection({
    *
    * 이미 담긴 부품은 건너뛴다. 수량은 템플릿의 값을 그대로 쓰고 사람이 고칠 수 있다.
    * 🔴 **유상/무상은 담아 주지 않는다** — 그 값은 사람이 줄마다 골라야 한다.
+   *
+   * ── 🔴 **여기서 담긴 줄에만 O/H 표시를 찍는다** (2026-10-22, 쓰는 분 요청) ──
+   * 「O/H 부품이라는 표시를 부품을 요청하는 모든 과정에 부품마다」. 그 표시가 **이 함수 안에서
+   * 태어나고**, 그 뒤로는 손대지 않은 채 재고 관리의 세 화면까지 실려 간다.
+   * 🔴 **이미 담겨 있던 줄은 고치지 않는다.** 손으로 담아 둔 줄을 [한 번에 담기]가 나중에
+   *    O/H 로 바꿔 버리면, 사람이 본 적 없는 표시가 제 요청에 붙는다 — 그 줄은 「이미 담겨
+   *    있음」으로 건너뛰고 **그대로 둔다**(건너뛴다는 말은 예전부터 그대로 알려 주고 있다).
    */
   function addOhTemplateToCart() {
     if (!template) return;
@@ -272,6 +284,8 @@ export default function PartRequestSection({
         ownerLabel: part.owner.label || part.owner.code,
         quantity: String(item.quantity),
         chargeType: "",
+        // 🔴 O/H 표시가 태어나는 **유일한 자리**다(머리말).
+        fromOhTemplate: true,
       });
     }
 
@@ -668,6 +682,14 @@ export default function PartRequestSection({
                           <span className="text-zinc-500"> · {inventoryPartSpec(part)}</span>
                         )}
                       </span>
+                      {/* 🔴 **O/H 딱지** (2026-10-22 쓰는 분 요청) — [O/H 부품 한 번에 담기]로 담긴
+                          줄에만 선다. 🔴 **아닌 줄에는 아무것도 안 그린다**: 「일반」 같은 딱지를
+                          달면 표가 시끄러워지고, 그 말이 맞는지 확인한 적도 없다.
+                          🔴 **글자도 꾸밈도 여기 적지 않는다** — 올린 뒤의 줄(아래
+                          `StockRequestLineDetails`)과 **같은 함수·같은 조각**을 쓴다. 두 벌로 적으면
+                          담는 중과 올린 뒤의 딱지가 다르게 보이는 날이 온다.
+                          🔵 자리가 ① 고객사 품명 ② 딱지 ③ 품번·재고인 것도 그 줄과 같다. */}
+                      <LineTags tags={[stockRequestOhTag(line)]} />
                       {part && (
                         <span className="block text-zinc-500">
                           {renderIdLabels(part)}
@@ -993,6 +1015,41 @@ export default function PartRequestSection({
  * 🔵 `span`(display:block)인 까닭: 부르는 자리가 `li` 안이라 글 흐름을 끊지 않게.
  * ============================================================================
  */
+/**
+ * ============================================================================
+ * 딱지 줄 하나 — 🔴 **이 칸에서 딱지를 그리는 자리는 여기 하나다** (2026-10-22)
+ * ============================================================================
+ * 전에는 올린 뒤의 줄(`StockRequestLineDetails`) 안에만 있던 markup 인데, 같은 날 **담는 중인
+ * 장바구니 줄**에도 딱지가 서게 되면서 떼어 냈다. 재고 관리가 세 화면을 위해 `RequestItemDetails`
+ * 하나로 모아 둔 것과 **같은 까닭·같은 처방**이다.
+ *
+ * 🔴 **두 벌로 적으면 담는 중과 올린 뒤의 딱지가 다르게 보인다** — 같은 요청의 같은 부품인데
+ *    테두리·여백·글자 크기가 갈리고, 이 환경에서는 그려 볼 수 없어 아무도 못 본다.
+ * 🔴 **글자도 꾸밈도 여기서 고르지 않는다** — 받은 것을 그리기만 한다(도메인 쪽 `*Tag` 함수들).
+ * 🔵 **하나도 없으면 `null`** 이라 상자도 여백도 안 선다. 그래서 부르는 쪽이 「딱지가 있나」를
+ *    따로 묻지 않는다 — 장바구니 줄은 대부분 비어 있다(손으로 담은 줄).
+ * 🔵 `span`(display:flex)인 까닭: 부르는 자리 둘이 `td` 와 `li` 안이라 글 흐름을 끊지 않게.
+ * 🔵 `flex-wrap` 인 까닭: 수리 건 상세의 이 칸은 좁아서 딱지들이 한 줄에 못 설 수 있다.
+ */
+function LineTags({ tags }: { tags: ReadonlyArray<StockRequestLineTag | null> }) {
+  const shown = tags.filter((tag): tag is StockRequestLineTag => tag !== null);
+  if (shown.length === 0) return null;
+  return (
+    <span className="mt-1 flex flex-wrap items-center gap-1">
+      {shown.map((tag) => (
+        <span
+          key={tag.key}
+          className={`inline-flex items-center gap-1 rounded border px-1.5 py-px text-[11px] leading-tight ${tag.className}`}
+        >
+          {/* 🔵 이름표가 있는 딱지만 이름표를 그린다 — 「유상」·「무상」·「O/H」는 값 자체가 말이 된다(도메인 쪽 주석). */}
+          {tag.label !== "" && <span className="font-normal text-zinc-400 dark:text-zinc-500">{tag.label}</span>}
+          {tag.value}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function StockRequestLineDetails({ line }: { line: InventoryStockRequestLine }) {
   const customerName = stockRequestLineCustomerName(line);
   const rest = stockRequestLineDetails(line);
@@ -1001,9 +1058,17 @@ function StockRequestLineDetails({ line }: { line: InventoryStockRequestLine }) 
    *    「성격이 다르다」는 말이고, 한 함수로 합치면 그 가름이 사라진다(도메인 쪽 머리말).
    * 🔵 차례는 소유 → 유상/무상이다 — 재고 관리 화면과 같다.
    */
-  const tags: StockRequestLineTag[] = [stockRequestLineOwnerTag(line), stockRequestLineChargeTag(line)].filter(
-    (tag): tag is StockRequestLineTag => tag !== null
-  );
+  /**
+   * 🔴 **O/H 딱지가 셋째다** (2026-10-22, 쓰는 분 요청). **앞의 둘 자리를 건드리지 않는다** —
+   *    소유와 유상/무상은 이미 눈이 익은 자리이고, 새 딱지가 사이로 끼어들면 그 둘이 통째로 밀린다.
+   * 🔵 **같은 차례를 재고 관리도 쓴다**(저쪽 `RequestItemDetails`): 소유 → 유상/무상 → O/H.
+   * 🔵 담는 중인 장바구니 줄도 **같은 함수**(`stockRequestOhTag`)를 부른다 — 위 표의 그 줄.
+   */
+  const tags: StockRequestLineTag[] = [
+    stockRequestLineOwnerTag(line),
+    stockRequestLineChargeTag(line),
+    stockRequestOhTag(line),
+  ].filter((tag): tag is StockRequestLineTag => tag !== null);
   if (customerName === "" && tags.length === 0 && rest.length === 0) return null;
   return (
     <>
@@ -1016,22 +1081,7 @@ function StockRequestLineDetails({ line }: { line: InventoryStockRequestLine }) 
           {customerName}
         </span>
       )}
-      {/* 🔵 **딱지 줄** — 값이 몇 가지뿐인 짧은 값이라 글에 섞지 않고 상자로 세운다.
-          🔵 `flex-wrap` 인 까닭: 수리 건 상세의 이 칸은 좁아서 둘이 한 줄에 못 설 수 있다. */}
-      {tags.length > 0 && (
-        <span className="mt-1 flex flex-wrap items-center gap-1">
-          {tags.map((tag) => (
-            <span
-              key={tag.key}
-              className={`inline-flex items-center gap-1 rounded border px-1.5 py-px text-[11px] leading-tight ${tag.className}`}
-            >
-              {/* 🔵 이름표가 있는 딱지만 이름표를 그린다 — 「유상」·「무상」은 값 자체가 말이 된다(도메인 쪽 주석). */}
-              {tag.label !== "" && <span className="font-normal text-zinc-400 dark:text-zinc-500">{tag.label}</span>}
-              {tag.value}
-            </span>
-          ))}
-        </span>
-      )}
+      <LineTags tags={tags} />
       {rest.length > 0 && (
         <span className="mt-0.5 block text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
           {rest.map((detail, index) => (

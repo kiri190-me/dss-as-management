@@ -1,9 +1,10 @@
 import "./load-env";
 
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
   INVENTORY_CLOSED_STATUS_LABEL,
+  INVENTORY_OH_LINE_FIELD,
   INVENTORY_PART_FIELDS,
   INVENTORY_REQUEST_STATUS_CODES,
   INVENTORY_REQUEST_STATUS_LABELS,
@@ -22,6 +23,7 @@ import {
   statusLabelMatches,
 } from "../src/lib/domain/inventory-contract";
 import {
+  STOCK_REQUEST_OH_TAG_VALUE,
   canCancelStockRequest,
   isInventoryRequestSettled,
   parseInventoryPartsResponse,
@@ -51,11 +53,17 @@ import {
  * (`dss-auth/scripts/check-site-notifications.ts` 의 `skip`), 여기서는 한 발 더 나가
  * **못 잰 것이 하나라도 있으면 종료 코드가 1** 이다.
  *
- * ── 두 토막으로 잰다 ─────────────────────────────────────────────────────
+ * ── 석 토막으로 잰다 ─────────────────────────────────────────────────────
  *  ㉠ **서버 없이**(순수) — 우리가 코드값으로 판단하는 자리를 **원본 글자에서 긁어모아**
  *     저쪽 코드 목록에 다 들어 있는지 본다. 모르는 코드를 어느 쪽으로 접는지도 **실제로
  *     함수를 불러** 잰다. 이 토막은 시험도 덮는다(`src/lib/domain/inventory-contract.test.ts`).
  *  ㉡ **살아 있는 서버에 대고** — 왕복 · 거절 · 응답의 칸 · 상태 글자.
+ *  ㉢ **저쪽 저장소의 원본 글자에 대고** (2026-10-22). 🔴 ㉡ 이 못 재는 방향이 있다:
+ *     **A/S 가 보내는 쪽**이다. 이 도구는 아무것도 바꾸지 않으므로 `POST` 를 두드리지
+ *     않고, 그래서 「우리가 적어 보내는 칸 이름을 저쪽이 그 이름으로 읽는가」는 살아 있는
+ *     서버로 잴 길이 없다. 그 하나를 **저쪽 저장소의 파일을 읽어** 맞댄다. 🔵 사람이 보는
+ *     딱지 글자(「O/H」)도 같은 자리에서 맞댄다 — 두 저장소에 나뉘어 있어 어느 쪽도 혼자서는
+ *     어긋난 것을 알지 못한다.
  * ============================================================================
  */
 
@@ -494,10 +502,153 @@ async function checkLive(intakes: readonly string[]) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// ㉢ 재고 관리 **저장소의 원본 글자**에 대고 (2026-10-22)
+// ---------------------------------------------------------------------------
+
+/**
+ * 저쪽 저장소를 어디서 찾나. 🔵 **설정으로 덮을 수 있다** — 두 저장소가 나란히 있지 않은 PC 도
+ * 있다. 없으면 이 PC 의 관례대로 **옆집**(`../dss-inventory`)을 본다.
+ *
+ * 🔴 **못 찾으면 「없는 것」이 아니라 「못 쟀다」**다 — 이 도구 전체의 규칙 그대로다. 조용히
+ *    통과시키면 이 토막은 있으나 마나 하고, 하필 **어긋나도 오류가 안 나는** 자리를 재고 있다.
+ */
+const INVENTORY_REPO_ENV = "INVENTORY_REPO_PATH";
+
+function inventoryRepoRoot(): string | null {
+  const configured = (process.env[INVENTORY_REPO_ENV] ?? "").trim();
+  const candidate = configured !== "" ? path.resolve(configured) : path.resolve(ROOT, "..", "dss-inventory");
+  return existsSync(path.join(candidate, "package.json")) ? candidate : null;
+}
+
+/**
+ * 🔴 **주석을 뗀다.** 안 떼면 저쪽 **주석에 적힌 글자**를 「코드가 쓰고 있다」로 세어 통과한다 —
+ * 이 저장소들의 주석은 길고, 칸 이름을 설명하느라 그 글자가 거의 반드시 적혀 있다.
+ * 🔵 재는 쪽을 좁히는 수법은 저쪽 `tests/part-limit-quantity.test.ts` 의 것과 같다.
+ */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+}
+
+/** 저쪽 파일 하나를 **주석을 뗀 채** 읽는다. 없으면 `null`(못 쟀다). */
+function inventorySource(root: string, relative: string): string | null {
+  const full = path.join(root, relative.split("/").join(path.sep));
+  if (!existsSync(full)) return null;
+  return stripComments(readFileSync(full, "utf8"));
+}
+
+/**
+ * 저쪽 파일에서 **함수 하나만** 떼어 낸다. 다음 `export` 앞에서 끊는다.
+ *
+ * 🔴 **파일 통째로 재면 헛통과한다.** 2026-10-22 에 실제로 겪었다: 받는 자리의 읽기를
+ *    `line.ohTemplate` 으로 바꿔 놓고 돌려 봤는데, **같은 파일의 타입 선언과 쓰는 자리에**
+ *    그 글자가 그대로 남아 있어 「쓰고 있다」로 세어졌다. 재는 자리를 **그 함수 안으로**
+ *    좁혀야 「읽는 이름이 갈렸다」가 보인다.
+ * 🔴 **못 찾으면 `null`** 이고 부르는 쪽이 그것을 실패로 센다 — 조용히 통과시키지 않는다.
+ */
+function inventoryFunction(source: string, name: string): string | null {
+  const start = source.indexOf(`export function ${name}(`);
+  if (start < 0) return null;
+  const after = source.indexOf("\nexport ", start + 1);
+  const cut = source.slice(start, after < 0 ? source.length : after);
+  return cut.trim() === "" ? null : cut;
+}
+
+function checkInventoryRepo() {
+  console.log("\n─ ㉢ 재고 관리 저장소와 맞대기 (A/S 가 **보내는** 쪽 · 사람이 보는 글자)");
+
+  const root = inventoryRepoRoot();
+  if (root === null) {
+    cannotMeasure(
+      "🔴 재고 관리 저장소 맞대기",
+      `저장소를 못 찾았다 — ${INVENTORY_REPO_ENV} 에 경로를 적거나 옆집(../dss-inventory)에 두십시오`
+    );
+    return;
+  }
+  note(`저쪽 저장소: ${root}`);
+
+  /**
+   * 🔴 **보내는 쪽의 칸 이름.** 어긋나면 저쪽이 칸을 못 찾아 조용히 거짓으로 눕히고, 그 뒤로
+   *    딱지는 한 번도 안 뜬다 — 양쪽 시험은 각자 제 이름으로 통과한다.
+   *
+   * 🔵 **받는 자리와 돌려주는 자리를 따로 본다**: 저쪽이 본문에서는 읽는데 응답에 안 실어 주면
+   *    「담는 중에는 보이다 올리면 사라지는」 딱지가 된다. 한쪽만 보면 그 절반을 놓친다.
+   * 🔴 **보는 모양도 다르다.** 받는 자리는 그 이름으로 **읽어야**(`.이름` 또는 `["이름"]`) 하고,
+   *    돌려주는 자리는 그 이름으로 **써야**(`이름:`) 한다. 「파일 어딘가에 그 글자가 있나」로 재면
+   *    **읽는 이름만 갈렸을 때 통과한다** — 타입 선언과 쓰는 자리에 글자가 그대로 남아 있기
+   *    때문이고, 2026-10-22 에 일부러 깨 보고서야 드러났다.
+   */
+  for (const [label, relative, fn, shape, why] of [
+    [
+      "받는 자리 (POST 본문 파서)",
+      "src/lib/api/stock-requests.ts",
+      "parseApiStockRequest",
+      new RegExp(`[.\\[]\\s*["']?${INVENTORY_OH_LINE_FIELD}\\b`),
+      "그 이름으로 **읽지** 않는다 — 우리가 보낸 칸이 조용히 버려지고 딱지가 영영 안 뜬다",
+    ],
+    [
+      "돌려주는 자리 (GET 응답)",
+      "src/lib/api/stock-request-status.ts",
+      "toApiRequestStatus",
+      new RegExp(`\\b${INVENTORY_OH_LINE_FIELD}\\s*:`),
+      "그 이름으로 **내보내지** 않는다 — 올린 뒤의 A/S 화면에서 딱지가 사라진다",
+    ],
+  ] as const) {
+    const source = inventorySource(root, relative);
+    if (source === null) {
+      cannotMeasure(`${label} — ${relative}`, "그 파일이 없다 (저쪽에서 옮겼으면 이 경로를 고쳐라)");
+      continue;
+    }
+    const body = inventoryFunction(source, fn);
+    if (body === null) {
+      check(
+        `🔴 ${label}: 저쪽 함수 ${fn} 을 찾았다`,
+        false,
+        `${relative} 에 그 함수가 없다 — 이름이 바뀌었으면 이 점검도 함께 고쳐라(못 찾은 것을 통과로 세지 않는다)`
+      );
+      continue;
+    }
+    check(`🔴 ${label}: ${fn} 이 「${INVENTORY_OH_LINE_FIELD}」를 쓴다`, shape.test(body), `${relative} 의 ${fn} 이 ${why}`);
+  }
+
+  /**
+   * 🔴 **사람이 보는 글자.** 네 화면에 서는 딱지인데 글자를 쥔 상수가 저장소마다 하나씩이다 —
+   *    한쪽만 고치면 **같은 것이 화면마다 다른 말**로 불린다. 오류도 안 난다.
+   * 🔵 저쪽 상수 이름(`REQUEST_ITEM_OH_TAG_VALUE`)을 짚어 읽고, **값끼리** 견준다. 글자를
+   *    여기 또 적지 않는다 — 적으면 맞대는 자가 셋이 된다.
+   */
+  const detailRelative = "src/lib/stock/request-item-detail.ts";
+  const detail = inventorySource(root, detailRelative);
+  if (detail === null) {
+    cannotMeasure(`딱지 글자 — ${detailRelative}`, "그 파일이 없다 (저쪽에서 옮겼으면 이 경로를 고쳐라)");
+  } else {
+    const found = /\bREQUEST_ITEM_OH_TAG_VALUE\b[^=\n]*=\s*"([^"]*)"/.exec(detail);
+    if (found === null) {
+      check(
+        "🔴 저쪽 딱지 글자 상수를 찾았다",
+        false,
+        `${detailRelative} 에 REQUEST_ITEM_OH_TAG_VALUE 가 없다 — 이름이 바뀌었으면 여기도 함께 고쳐라`
+      );
+    } else {
+      check(
+        `🔴 두 저장소의 딱지 글자가 같다 — A/S 「${STOCK_REQUEST_OH_TAG_VALUE}」 / 재고 관리 「${found[1]}」`,
+        found[1] === STOCK_REQUEST_OH_TAG_VALUE,
+        "같은 딱지가 화면마다 다른 말을 한다"
+      );
+    }
+    check(
+      "🔴 저쪽 화면 조각이 그 딱지를 순수 함수로 묻는다 (requestItemOhTag)",
+      detail.includes("export function requestItemOhTag"),
+      `${detailRelative} 에 그 함수가 없다 — 저쪽 화면 셋이 딱지를 못 그린다`
+    );
+  }
+}
+
 async function main() {
   const intakes = process.argv.slice(2).filter((argument) => !argument.startsWith("-"));
 
   checkOurJudgements();
+  checkInventoryRepo();
   await checkLive(intakes);
 
   console.log("\n" + "─".repeat(64));

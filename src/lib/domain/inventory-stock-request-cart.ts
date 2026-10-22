@@ -30,6 +30,17 @@ export type StockRequestCartLine = {
   quantity: string;
   /** 🔴 **빈 글자가 기본이다.** 사람이 고르기 전에는 올리지 못한다. */
   chargeType: ChargeType | "";
+  /**
+   * **[O/H 부품 한 번에 담기]로 담긴 줄인가** (2026-10-22, 쓰는 분 요청).
+   *
+   * 🔴 **담는 그 순간에 정해지고, 그 뒤로 바뀌지 않는다.** 손으로 담으면 거짓, [한 번에 담기]로
+   *    담기면 참이다 — 담은 **자리**가 정하는 값이라 사람이 고치는 칸이 아니고, 그래서 위
+   *    `chargeType` 과 달리 **빈 상태가 없다.**
+   * 🔴 **나중에 템플릿을 다시 보지 않는다.** 템플릿은 바뀐다 — 지금 템플릿에 있는지로 판정하면
+   *    담아 둔 줄의 딱지가 **고치지도 않았는데** 달라진다.
+   * 🔵 수량을 고치거나 유상/무상을 골라도 그대로다(`applyStockRequestCartPatch` 는 준 칸만 덮는다).
+   */
+  fromOhTemplate: boolean;
 };
 
 /** 한 칸만 고치는 패치가 그 줄의 다른 칸이나 다른 줄을 건드리면 안 된다. */
@@ -77,6 +88,9 @@ export function validateStockRequestCart(
       no: line.no,
       quantity: line.quantity.trim() === "" ? null : Number(line.quantity),
       chargeType: line.chargeType === "" ? null : line.chargeType,
+      /* 🔴 **그대로 넘긴다** — 여기서 템플릿을 다시 보지 않는다(그 칸 주석). 넘기지 않으면
+         올릴 때 조용히 거짓이 되어 **담는 중에만 보이던 딱지**가 된다. */
+      fromOhTemplate: line.fromOhTemplate,
     })),
     labels
   );

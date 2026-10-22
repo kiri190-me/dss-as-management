@@ -27,7 +27,9 @@ import {
  */
 
 function line(no: number, patch: Partial<StockRequestCartLine> = {}): StockRequestCartLine {
-  return { no, name: `부품-${no}`, ownerLabel: "DSS", quantity: "1", chargeType: "", ...patch };
+  /* 🔵 2026-10-22: 기본은 **손으로 담은 줄**이다(O/H 아님). [한 번에 담기]로 담긴 줄은 그 자리에서
+     `fromOhTemplate: true` 로 태어난다 — `lib/domain/inventory-oh-line.test.ts` 가 따로 잰다. */
+  return { no, name: `부품-${no}`, ownerLabel: "DSS", quantity: "1", chargeType: "", fromOhTemplate: false, ...patch };
 }
 
 describe("담고 고치고 빼기", () => {
@@ -42,7 +44,7 @@ describe("담고 고치고 빼기", () => {
   test("한 칸만 고치면 그 줄의 다른 칸도, 다른 줄도 그대로다", () => {
     const cart = [line(11, { quantity: "3" }), line(12)];
     const patched = applyStockRequestCartPatch(cart, 11, { chargeType: "PAID" });
-    assert.deepEqual(patched[0], { no: 11, name: "부품-11", ownerLabel: "DSS", quantity: "3", chargeType: "PAID" });
+    assert.deepEqual(patched[0], { no: 11, name: "부품-11", ownerLabel: "DSS", quantity: "3", chargeType: "PAID", fromOhTemplate: false });
     assert.deepEqual(patched[1], cart[1]);
   });
 
@@ -63,12 +65,14 @@ describe("🔴 올리기 전 검사 — 유상/무상이 없으면 못 올린다
   test("전부 고르면 통과하고, 글자로 들고 있던 수량이 숫자가 된다", () => {
     const result = validateStockRequestCart([
       line(11, { chargeType: "PAID", quantity: "2" }),
-      line(12, { chargeType: "FREE", quantity: "1" }),
+      // 🔵 2026-10-22: 둘을 **다르게** 둔다 — O/H 표시가 줄마다 제 값으로 실려 가는지 보려면
+      //    같은 값이어서는 안 된다(뒤바뀌어도 통과한다).
+      line(12, { chargeType: "FREE", quantity: "1", fromOhTemplate: true }),
     ]);
     assert.equal(result.ok, true);
     assert.deepEqual(result.ok ? result.lines : null, [
-      { no: 11, quantity: 2, chargeType: "PAID" },
-      { no: 12, quantity: 1, chargeType: "FREE" },
+      { no: 11, quantity: 2, chargeType: "PAID", fromOhTemplate: false },
+      { no: 12, quantity: 1, chargeType: "FREE", fromOhTemplate: true },
     ]);
   });
 
