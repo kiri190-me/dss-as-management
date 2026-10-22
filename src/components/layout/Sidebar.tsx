@@ -317,6 +317,11 @@ export default function Sidebar({ activeHref, onNavigate, isCollapsed, isPinnedO
           올라갔다(SidebarFooter.tsx · TopBar.tsx 의 그 날짜 주석). 그래서 이
           조각은 ☰ 가 없는 호출부(모바일 드로어)에서는 아무것도 그리지 않는다.
 
+          🔴 2026-10-22 에 그 넷이 폰에서 ☰ 서랍으로 내려왔지만 **이 조각으로
+          돌아온 것은 아니다** — AppShell 이 드로어 안, 이 사이드바 바로
+          **다음**에 AccountControls 를 직접 그린다. 이 조각에 넣으면 데스크톱
+          사이드바에도 함께 생겨 머리말과 두 벌이 된다.
+
           모양은 메뉴와 같은 값(isNarrow)을 따르고, ☰ 의 말만 고정
           여부(isPinnedOpen)를 따른다 — 두 prop 의 주석 참조. */}
       <SidebarFooter isCompact={isNarrow} isPinnedOpen={isPinnedOpen} onToggleCollapsed={onToggleCollapsed} />

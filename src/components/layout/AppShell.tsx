@@ -6,6 +6,7 @@ import { ServiceMenuBar, type ServiceMenuEntry } from "@dss/ui";
 import { navItems } from "@/lib/navigation";
 import type { Role } from "@/lib/domain/types";
 import type { NotificationItem } from "@/lib/domain/notifications";
+import AccountControls from "./AccountControls";
 import TopBar from "./TopBar";
 import Sidebar from "./Sidebar";
 
@@ -172,6 +173,13 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
           // 없다」고 적혀 있었다 — 그 줄은 그 파일에서 갱신했다). 지금은
           // 「이름님 · 역할」· 테마 · 「통합 로그인으로」· 「로그아웃」이
           // 다른 사내 시스템들과 같은 자리, 머리말 오른쪽 끝에 있다.
+          //
+          // 🔴 2026-10-22: 그 넷은 **768px 미만에서 ☰ 서랍으로 내려간다**
+          // (아래 모바일 드로어의 <AccountControls variant="drawer" />).
+          // 그래서 같은 `user` · `portalUrl` 이 **두 곳으로** 간다 — 그리는
+          // 조각이 하나(AccountControls)라 내용이 갈릴 일은 없고, 갈리는 것은
+          // 보이는 폭뿐이다. 🔴 **한쪽만 지우지 마라**: 머리말 쪽을 지우면
+          // 컴퓨터에서, 서랍 쪽을 지우면 폰에서 로그아웃에 닿을 길이 사라진다.
           user={user}
           portalUrl={portalUrl}
           notifications={notifications}
@@ -295,6 +303,16 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
               SidebarFooter 는 null 이 되었지만(☰ 를 넘기지 않는 호출부다),
               이 패딩은 **그대로 남는다** — 이제 그 자리에 닿는 것이 메뉴
               링크이고, 눌리지 않으면 곤란한 것은 마찬가지다.
+
+              🔴 2026-10-22 에 그 넷이 **이 서랍의 바닥으로 돌아왔다**(아래
+              <AccountControls variant="drawer" />). 그래서 이 패딩이 지키는
+              것은 다시 「맨 아래 단추」가 됐다 — 없으면 「로그아웃」이 홈
+              인디케이터에 겹쳐 안 눌린다. 🔴 **이 패딩을 아래 조각으로
+              옮기지 마라.** 여기(서랍 상자)에 있어야 서랍이 화면 바닥까지
+              차면서 그 안쪽만큼만 내용이 밀린다.
+              🔴 되돌아온 자리는 SidebarFooter 가 **아니다** — 그 조각은 ☰
+              접기/펼치기 한 줄로 남아 있고, 거기에 넷을 되돌리면 데스크톱
+              사이드바에도 함께 생겨 머리말과 두 벌이 된다(그 파일 주석).
             */}
             <aside className="relative z-50 flex min-h-0 w-64 flex-col border-r border-zinc-200 bg-white pb-[env(safe-area-inset-bottom)] dark:border-zinc-800 dark:bg-zinc-900">
               {/* 🔴 accessibleAreaKeys 를 여기에도 넘긴다. 빠뜨렸던 동안 모바일
@@ -311,6 +329,29 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
                 onNavigate={() => setMobileNavOpen(false)}
                 myPendingApprovalCount={myPendingApprovalCount}
               />
+              {/*
+                🔴 계정 넷(사용자 이름·역할 · 테마 · 「통합 로그인으로」·
+                「로그아웃」) — 2026-10-22 에 폰 머리말에서 여기로 내려왔다.
+                까닭은 TopBar.tsx 의 그 날짜 주석에 있다(다른 사내 시스템 넷이
+                같은 날 전부 그 모양이 됐다). 🔴 **머리말 것과 같은 조각이다** —
+                베껴 적지 않는 까닭은 AccountControls.tsx 머리말에.
+
+                🔴 **바닥에 붙는 장치는 이미 있다. 새로 넣지 마라.** 바로 위
+                형제인 Sidebar 가 `flex-1 min-h-0` 이라 남는 자리를 전부
+                가져가고, 그 안의 메뉴 nav 가 스스로 구른다. 그래서 이 묶음은
+                자리가 남든(바닥에 붙는다) 메뉴가 길든(메뉴만 구르고 이 묶음은
+                그대로 바닥에 남는다) 두 경우가 모두 옳다.
+                🔴 `mt-auto` 를 쓰면 안 되는 자리다 — margin-top:auto 는 남는
+                자리가 있을 때만 내려 주고 메뉴가 서랍보다 길어지는 순간 0 으로
+                풀려, 구분선 위 간격이 **가장 필요한 때** 사라진다(재고관리가
+                같은 함정에 빠졌다가 빈 칸막이로 고쳤다 — 6fe1db5).
+
+                🔵 `md:hidden` 을 여기 또 적지 않는다 — 바깥 상자가 이미
+                `md:hidden print:hidden` 이라 넓은 화면과 인쇄에서는 이 서랍이
+                통째로 그려지지 않는다. 그래서 「넓은 화면에서 두 벌로 보인다」는
+                일이 생길 수 없다.
+              */}
+              <AccountControls variant="drawer" user={user} portalUrl={portalUrl} />
             </aside>
           </div>
         )}
