@@ -19,6 +19,10 @@ import {
  * 응답 만들기에서 지키는 것 하나: 🔴 **없는 값은 빈 글자다.** 받는 쪽의
  * `IntakeInfo` 여섯 칸이 전부 string 이고, 화면이 그 값을 이어 붙여 사용처 글자를
  * 만든다 — null 이 가면 거기에 "null" 이 박힌다.
+ *
+ * 🔵 2026-10-22: 응답은 이제 일곱 칸(`receivedAt` 추가)이지만 받는 쪽 `IntakeInfo`
+ * 는 아직 여섯 칸 그대로다 — 재고 관리가 아직 이 칸을 안 읽어도 깨지지 않는다
+ * (모르는 칸은 그냥 무시된다).
  * ============================================================================
  */
 
@@ -67,9 +71,10 @@ describe("응답 만들기", () => {
     productModel: "TG-100",
     productSerial: "SN-0001",
     productLot: "LN-0001",
+    receivedAt: "2026-07-01",
   };
 
-  test("여섯 칸이 약속한 이름 그대로 나간다", () => {
+  test("일곱 칸이 약속한 이름 그대로 나간다", () => {
     assert.deepEqual(buildIntakeLookupResponse(full), {
       intakeNumber: "D260701",
       customerName: "가나다 주식회사",
@@ -77,6 +82,7 @@ describe("응답 만들기", () => {
       productModel: "TG-100",
       productSerial: "SN-0001",
       productLot: "LN-0001",
+      receivedAt: "2026-07-01",
     });
   });
 
@@ -88,6 +94,7 @@ describe("응답 만들기", () => {
       productModel: "TG-100",
       productSerial: null,
       productLot: null,
+      receivedAt: "2026-07-01",
     };
     const built = buildIntakeLookupResponse(sparse);
     assert.deepEqual(built, {
@@ -97,12 +104,13 @@ describe("응답 만들기", () => {
       productModel: "TG-100",
       productSerial: "",
       productLot: "",
+      receivedAt: "2026-07-01",
     });
     // JSON 으로 구워도 null 이 섞여 있지 않은가 — 받는 쪽이 보는 것은 이 글자다.
     assert.ok(!JSON.stringify(built).includes("null"), "응답에 null 이 들어 있다");
   });
 
-  test("조인이 하나도 안 붙은 건도 번호만 남고 나머지는 빈 글자다", () => {
+  test("조인이 하나도 안 붙은 건도 번호·인수일만 남고 나머지는 빈 글자다", () => {
     const empty: ExternalIntakeRow = {
       intakeNumber: "D260701",
       customerName: null,
@@ -110,6 +118,7 @@ describe("응답 만들기", () => {
       productModel: null,
       productSerial: null,
       productLot: null,
+      receivedAt: "2026-07-01",
     };
     assert.deepEqual(buildIntakeLookupResponse(empty), {
       intakeNumber: "D260701",
@@ -118,6 +127,7 @@ describe("응답 만들기", () => {
       productModel: "",
       productSerial: "",
       productLot: "",
+      receivedAt: "2026-07-01",
     });
   });
 
@@ -128,7 +138,13 @@ describe("응답 만들기", () => {
     assert.equal(built.productLot, "");
   });
 
-  test("칸이 여섯 개뿐이다 — 묻지 않은 것이 따라 나가지 않는다", () => {
+  test("🔴 인수일은 손대지 않고 그대로 나간다 — 조인된 다른 칸처럼 trim 하거나 비우지 않는다", () => {
+    for (const receivedAt of ["2026-01-01", "2026-12-31", "2026-02-29"]) {
+      assert.equal(buildIntakeLookupResponse({ ...full, receivedAt }).receivedAt, receivedAt);
+    }
+  });
+
+  test("칸이 일곱 개뿐이다 — 묻지 않은 것이 따라 나가지 않는다", () => {
     assert.deepEqual(Object.keys(buildIntakeLookupResponse(full)).sort(), [
       "customerName",
       "endUser",
@@ -136,6 +152,7 @@ describe("응답 만들기", () => {
       "productLot",
       "productModel",
       "productSerial",
+      "receivedAt",
     ]);
   });
 });

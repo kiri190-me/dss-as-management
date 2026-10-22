@@ -28,6 +28,12 @@ import type { ExternalIntakeRow } from "@/lib/api/intake-lookup";
  * 되어 받는 쪽이 사용처 글자를 못 만든다.
  *
  * 인수번호는 표 전체에서 하나뿐이라(unique index) `limit(1)` 이 "그 건"이다.
+ *
+ * 🔵 2026-10-22: **`receivedAt`(인수일)을 더했다.** 재고 관리의 [부품 요청]·
+ * [승인요청건] 화면이 model · L/N · S/N · 인수일 · 고객사를 보여 주려는데 인수일만
+ * 못 받고 있었다. 다른 다섯 칸과 달리 **조인 없이 `repair_cases` 자신의 칸**이라
+ * (`received_at`, `date`, `NOT NULL`) 건이 있으면 항상 값이 있다 — 그래서
+ * `ExternalIntakeRow.receivedAt` 은 `string | null` 이 아니라 `string` 이다.
  * ============================================================================
  */
 export async function findIntakeForExternalLookup(
@@ -41,6 +47,7 @@ export async function findIntakeForExternalLookup(
       productModel: products.modelName,
       productSerial: products.serialNumber,
       productLot: products.lotNumber,
+      receivedAt: repairCases.receivedAt,
     })
     .from(repairCases)
     .leftJoin(customers, eq(customers.id, repairCases.customerId))

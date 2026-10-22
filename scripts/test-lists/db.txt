@@ -53,6 +53,7 @@ src/lib/db/queries/inventory-part-requests.integration.test.ts
 src/lib/db/mutations/part-minimum-quantities.integration.test.ts
 src/lib/db/mutations/part-unit-prices.integration.test.ts
 src/lib/db/queries/quote-intake-lookup.integration.test.ts
+src/lib/db/queries/external-intake-lookup.integration.test.ts
 src/lib/db/queries/part-minimum-quantities.integration.test.ts
 src/lib/db/mutations/repair-case-work-records.integration.test.ts
 src/lib/db/queries/repair-cases-mine.integration.test.ts

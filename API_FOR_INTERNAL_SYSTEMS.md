@@ -63,14 +63,16 @@ Authorization: Bearer <AS_WRITE_TOKEN>
   "endUser": "라마바 사업장",
   "productModel": "TG-100",
   "productSerial": "SN-0001",
-  "productLot": "LN-0001"
+  "productLot": "LN-0001",
+  "receivedAt": "2026-07-01"
 }
 ```
 
-- 🔴 **없는 값은 빈 글자(`""`)입니다. `null` 을 내보내지 않습니다** — 받는 쪽의 여섯 칸이 전부 `string` 이고, 그 값을 이어 붙여 사용처 글자를 만들기 때문입니다.
+- 🔴 **없는 값은 빈 글자(`""`)입니다. `null` 을 내보내지 않습니다** — 받는 쪽의 (이 칸이 더해지기 전) 여섯 칸이 전부 `string` 이고, 그 값을 이어 붙여 사용처 글자를 만들기 때문입니다.
 - 🔴 **휴지통(삭제)에 든 건은 내주지 않습니다.** 인수번호는 삭제 여부와 무관하게 표 전체에서 하나뿐이지만(`repair_cases_intake_number_unique`), 이 통로는 "지금 살아 있는 그 인수품이 무엇인가"를 답합니다. 지운 건을 내주면 재고 쪽 원장에 A/S 에서 이미 사라진 건이 남습니다.
 - 고객사 · End-User · 제품은 `leftJoin` 입니다. 이어지지 않은 칸은 빈 글자로 나갑니다.
 - DB 의 CHECK 는 이보다 좁습니다(가운데 두 자리가 달이라 01~12). 거기 걸리는 번호는 400 이 아니라 404 로 나갑니다 — 두 시스템이 **같은 잣대로** 모양을 재기 위해서입니다.
+- 🔵 **`receivedAt`(인수일, 2026-10-22 에 더함)은 `repair_cases.received_at` 을 그대로 내보낸 "YYYY-MM-DD" 글자입니다.** DB 의 `date` 칸이 시각·시간대 없이 날짜만 가지고 있고, A/S 가 그 글자를 그대로(시각으로 바꾸거나 다시 포맷하지 않고) 전달하므로 받는 쪽에서 시간대 때문에 하루가 밀리거나 당겨지는 일이 없습니다. 🔴 이 칸은 **다른 다섯 칸과 달리 조인이 아니라 `repair_cases` 자신의 칸**(`NOT NULL`)이라 건이 있으면 항상 값이 있고, 빈 글자로 나가는 일이 없습니다.
 
 ## 3. 결재자가 될 수 있는 사람 — `GET /api/v1/users`
 
@@ -180,7 +182,7 @@ Authorization: Bearer <AS_WRITE_TOKEN>
 | 🔴 **완료 처리·해제의 업무 규칙** | `src/lib/server/services/complete-domestic-order.ts` · `release-domestic-order.ts` (화면도 **같은 것**을 부릅니다 — 규칙이 한 벌인 까닭입니다) |
 | 읽기 라우트 셋 | `src/app/api/v1/intakes/[number]/route.ts` · `src/app/api/v1/users/route.ts` · `src/app/api/v1/product-models/route.ts` |
 | 🔴 **쓰기 라우트 하나** | `src/app/api/v1/domestic-orders/[id]/completion/route.ts` |
-| 시험 | `src/lib/api/shared-token.test.ts` · `src/lib/api/intake-lookup.test.ts` · `src/app/api/v1/route-source.test.ts` · `src/lib/api/write-token.test.ts` · `src/lib/api/domestic-order-completion-request.test.ts` · `src/app/api/v1/domestic-orders/completion-route.integration.test.ts` |
+| 시험 | `src/lib/api/shared-token.test.ts` · `src/lib/api/intake-lookup.test.ts` · `src/app/api/v1/route-source.test.ts` · `src/lib/api/write-token.test.ts` · `src/lib/api/domestic-order-completion-request.test.ts` · `src/app/api/v1/domestic-orders/completion-route.integration.test.ts` · `src/lib/db/queries/external-intake-lookup.integration.test.ts`(DB 필요 — 질의 자체를 재는 첫 시험, 2026-10-22) |
 
 - 읽는 통로 셋은 스키마를 한 칸도 건드리지 않습니다 — 전부 **읽기**입니다.
 - 🔴 쓰는 통로 하나(4-2절)는 **`domestic_orders` 와 `repair_cases` 를 고칩니다.** 다만 자기 SQL 을 쓰지 않고 화면과 **같은 서비스**를 부릅니다 — 규칙을 두 벌로 만들지 않기 위해서입니다.
