@@ -28,12 +28,18 @@ const ALL_EDITABLE_FIELDS: readonly string[] = [
   ...SECTION_FIELD_NAMES.FAULT_SERVICE,
 ];
 
-// "priority" (SECTION_FIELD_NAMES.INTAKE) is deliberately absent from both
-// AS_ENGINEER_FIELDS and SALES_FIELDS below — it's only in ALL_EDITABLE_FIELDS,
-// so today only SUPER_ADMIN/ADMIN can edit it (자동 상속, 아래 두 목록에 손댈
-// 필요 없음). No requirement specified which non-admin roles should also get
-// it; broaden deliberately later if needed, not as a side effect of some
-// other change.
+// "priority"(SECTION_FIELD_NAMES.INTAKE)는 2026-10-23 전까지 아래 두 목록 어디에도
+// 없었다 — ALL_EDITABLE_FIELDS 에만 있어 SUPER_ADMIN/ADMIN 이 자동 상속으로 받았고,
+// 어느 비관리자 역할에 열지 정해진 요구가 없어 "필요하면 나중에 의도적으로 넓혀라,
+// 다른 변경의 부작용으로 말고"라고 적어 둔 자리였다. 그 요구가 2026-10-23 에 왔다:
+// 담당 엔지니어 하나에만 연다(아래 AS_ENGINEER_FIELDS 의 두 칸 주석). SALES 에는
+// 넣지 않았다 — 영업은 고객 요청 납기일만 그대로다.
+//
+// 🔴 이 원칙 자체는 그대로 살아 있다 — SECTION_FIELD_NAMES 에는 있는데 아래 두 목록
+// 어디에도 없는 칸이 아직 남아 있고(그래서 관리자만 고친다), 그 칸을 어느 역할에
+// 열 때는 이번처럼 요구를 받고 일부러 여는 것이어야 한다. 다른 변경의 부작용으로
+// 목록이 넓어지지 않게, 다섯 역할을 모두 단언하는 시험이 아래 목록마다 붙어 있다
+// (repair-case-edit-authorization.test.ts).
 const AS_ENGINEER_FIELDS: readonly string[] = [
   "reportedSymptom",
   "accessoryList",
@@ -65,6 +71,24 @@ const AS_ENGINEER_FIELDS: readonly string[] = [
   // 넣지 않았다(보고서를 작성하는 역할이 아니다). 실제 편집 UI는 상세 화면
   // 상단 카드의 ReportNumberEditCell이며, INTAKE 섹션으로 제출한다.
   "legacyReportNumber",
+  // 고객 요청 납기일 · 우선순위 — 2026-10-23 사용자 결정으로 담당 엔지니어에게
+  // 함께 열었다. 둘은 한 묶음이다: 납기를 보고 작업 순서를 정하는 사람이 실제로
+  // 물건을 쥐고 있는 담당 엔지니어인데, 한쪽만 열면 "납기 날짜는 고쳤지만 급한
+  // 건으로 올리지는 못한다"가 되어 반쪽짜리가 된다.
+  //
+  // SALES 에는 우선순위를 주지 않았다 — 고객 요청 납기일은 원래부터 SALES 의
+  // 칸이지만(아래 SALES_FIELDS), 우선순위는 사내 작업 순서를 정하는 값이라
+  // 고객 쪽 요구를 받아 적는 자리가 아니다. INVENTORY_MANAGER 는 그대로 아무
+  // 칸도 못 고친다.
+  //
+  // 고객 요청 납기일이 인수일보다 이를 수 없다는 앞뒤 검증은 역할과 무관하게
+  // updateRepairCase(db/mutations/repair-cases.ts)가 그대로 막는다. 이 역할은
+  // 인수일(위 receivedAt)도 고칠 수 있어 **둘을 한 번에 보내는 길**이 이번에
+  // 열리는데, 그 경우에도 맞게 돈다 — 그 함수는 이번 제출에 인수일이 실렸으면
+  // 그 값을(없으면 저장된 값을) 기준으로 삼아 납기일을 재고, 납기일이 함께
+  // 실렸을 때는 "저장된 옛 납기일" 쪽 검사를 건너뛴다.
+  "customerRequestedDueDate",
+  "priority",
   "productModelId",
   "lotNumber",
   "serialNumber",

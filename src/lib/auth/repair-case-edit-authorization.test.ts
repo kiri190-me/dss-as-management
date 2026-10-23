@@ -57,6 +57,12 @@ test("AS_ENGINEER may edit customer/End-User (checkpoint: AS_ENGINEER customer/E
       // (SALES에는 원래부터 있던 값이고, 이번에 열린 쪽은 AS_ENGINEER 뿐).
       "receivedAt",
       "billingType",
+      // 우선순위 · 고객 요청 납기일 — 2026-10-23 에 담당 엔지니어에게 열렸다.
+      // 차례는 SECTION_FIELD_NAMES.INTAKE 를 따른다(AS_ENGINEER_FIELDS 에 적은
+      // 차례가 아니다) — editableFieldsForRoleInSection 이 섹션 목록을
+      // filter 하기 때문이다.
+      "priority",
+      "customerRequestedDueDate",
       "internalTargetInspectionCompletionDate",
       "internalTargetShipmentDate",
       // 실제 출하일 — 출하 완료 처리를 누르는 역할이라 어긋난 날짜를 자기
@@ -71,13 +77,11 @@ test("AS_ENGINEER may edit customer/End-User (checkpoint: AS_ENGINEER customer/E
   );
 });
 
-test("AS_ENGINEER may not edit the rest of INTAKE (customerRequestedDueDate/contact fields stay SALES-only — receivedAt no longer does)", () => {
-  for (const field of [
-    "customerRequestedDueDate",
-    "contactName",
-    "contactPhone",
-    "contactEmail",
-  ]) {
+test("AS_ENGINEER may not edit the rest of INTAKE (contact fields stay SALES-only — receivedAt/customerRequestedDueDate no longer do)", () => {
+  // 고객 요청 납기일은 2026-10-23 에 담당 엔지니어에게 열렸으므로 이 목록에서
+  // 빠졌다(인수일이 먼저 같은 길을 갔다). 남은 것은 연락처 세 칸뿐이다 —
+  // 고객 쪽 연락 창구를 적는 자리라 영업의 칸으로 남긴다.
+  for (const field of ["contactName", "contactPhone", "contactEmail"]) {
     assert.equal(isFieldEditable("AS_ENGINEER", field), false, `AS_ENGINEER should not edit ${field}`);
   }
 });
@@ -91,12 +95,89 @@ test("AS_ENGINEER may edit 종류(workflowKind)/billingType; SALES may not (chec
   assert.equal(isFieldEditable("INVENTORY_MANAGER", "billingType"), false);
 });
 
-test("priority is SUPER_ADMIN/ADMIN-only for now (인수 정보 priority-editing checkpoint) — AS_ENGINEER/SALES/INVENTORY_MANAGER never see it", () => {
-  assert.equal(isFieldEditable("SUPER_ADMIN", "priority"), true);
-  assert.equal(isFieldEditable("ADMIN", "priority"), true);
-  assert.equal(isFieldEditable("AS_ENGINEER", "priority"), false);
-  assert.equal(isFieldEditable("SALES", "priority"), false);
-  assert.equal(isFieldEditable("INVENTORY_MANAGER", "priority"), false);
+/**
+ * 고객 요청 납기일 · 우선순위를 담당 엔지니어에게 연 변경(2026-10-23 사용자 결정).
+ *
+ * 다섯 역할 × 두 칸을 **한 표로** 단언한다. 참만 세는 시험은 "목록이 통째로
+ * 넓어지는" 실수를 못 잡는다 — 이 표에서 거짓이어야 하는 두 칸(SALES 의
+ * 우선순위, INVENTORY_MANAGER 의 두 칸)이 이번 변경이 옆으로 새지 않았다는
+ * 증거다. 특히 SALES 의 우선순위는 **고객 요청 납기일과 한 줄 차이**라, 두 칸을
+ * 같은 묶음으로 보고 한꺼번에 넣어 버리기 쉬운 자리다.
+ *
+ * 기대값을 변수로 적어 두 칸을 같은 자리에서 비교한다 — 한 칸만 고치고 다른
+ * 칸을 잊는 일이 없게 한다.
+ */
+test("고객 요청 납기일은 영업과 담당 엔지니어 둘 다, 우선순위는 담당 엔지니어만 — 영업은 아니다", () => {
+  const expected = [
+    { role: "SUPER_ADMIN", customerRequestedDueDate: true, priority: true },
+    { role: "ADMIN", customerRequestedDueDate: true, priority: true },
+    // 2026-10-23 에 열린 쪽은 이 역할 하나뿐이다 — 두 칸 모두.
+    { role: "AS_ENGINEER", customerRequestedDueDate: true, priority: true },
+    // 🔴 납기일은 원래부터 있던 값이고, 우선순위는 **일부러 주지 않았다**.
+    { role: "SALES", customerRequestedDueDate: true, priority: false },
+    // 🔴 이 역할은 어느 칸도 고치지 못한다 — 이번 변경 전과 같다.
+    { role: "INVENTORY_MANAGER", customerRequestedDueDate: false, priority: false },
+  ] as const;
+  const fields = ["customerRequestedDueDate", "priority"] as const;
+
+  // 표본이 비어서 공짜로 통과하는 일이 없게 — 무엇을 재는지 먼저 단언한다.
+  assert.equal(expected.length, 5, "다섯 역할을 모두 재야 한다");
+  assert.equal(fields.length, 2, "두 칸을 모두 재야 한다");
+
+  for (const row of expected) {
+    for (const field of fields) {
+      const allowed = row[field];
+      assert.equal(
+        isFieldEditable(row.role, field),
+        allowed,
+        `${row.role} 의 ${field} 은(는) ${allowed ? "고칠 수 있어야" : "막혀 있어야"} 한다`
+      );
+      // 화면이 아니라 서버가 보는 쪽 — 같은 표를 쓰는지 한 번 더 확인한다.
+      assert.deepEqual(
+        authorizeSubmittedFields(row.role, "INTAKE", [field]),
+        allowed ? { ok: true } : { ok: false, unauthorizedFields: [field] },
+        `${row.role} 가 ${field} 하나만 보낼 때의 판정`
+      );
+    }
+  }
+});
+
+/**
+ * 담당 엔지니어는 인수일도 고칠 수 있으므로(receivedAt), 이번 변경으로 **인수일과
+ * 고객 요청 납기일을 한 번에 보내는 길**이 열렸다. 권한 표는 그 조합을 통과시켜야
+ * 한다 — 두 칸의 앞뒤(납기일이 인수일보다 이를 수 없다)를 보는 것은 이 표가 아니라
+ * updateRepairCase 이고, 그쪽은 이번 제출에 실린 인수일을 기준으로 잰다
+ * (repair-cases-update.integration.test.ts 의 날짜 선후 시험).
+ */
+test("담당 엔지니어는 인수일 · 납기일 · 우선순위를 한 번에 제출할 수 있다", () => {
+  assert.deepEqual(
+    authorizeSubmittedFields("AS_ENGINEER", "INTAKE", [
+      "receivedAt",
+      "customerRequestedDueDate",
+      "priority",
+    ]),
+    { ok: true }
+  );
+
+  // 같은 묶음에 연락처가 섞이면 요청 전체가 거부된다 — 이번에 열린 두 칸이
+  // 나머지 칸까지 함께 통과시키지 않는다는 뜻이다.
+  const withContact = authorizeSubmittedFields("AS_ENGINEER", "INTAKE", [
+    "customerRequestedDueDate",
+    "priority",
+    "contactPhone",
+  ]);
+  assert.equal(withContact.ok, false);
+  if (!withContact.ok) assert.deepEqual(withContact.unauthorizedFields, ["contactPhone"]);
+
+  // 영업이 납기일에 우선순위를 얹어 보내면 **통째로** 거부된다. 납기일만 보낼
+  // 때는 통과하므로, 거부의 까닭이 우선순위 하나임이 분명해야 한다.
+  assert.deepEqual(authorizeSubmittedFields("SALES", "INTAKE", ["customerRequestedDueDate"]), {
+    ok: true,
+  });
+  assert.deepEqual(
+    authorizeSubmittedFields("SALES", "INTAKE", ["customerRequestedDueDate", "priority"]),
+    { ok: false, unauthorizedFields: ["priority"] }
+  );
 });
 
 test("no role — including SUPER_ADMIN/ADMIN — may edit the 3 derived-summary fields (record_kind checkpoint)", () => {

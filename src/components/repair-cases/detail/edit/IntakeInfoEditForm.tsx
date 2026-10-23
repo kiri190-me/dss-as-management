@@ -66,10 +66,14 @@ function ReadOnlyField({
  * 유일한 정상 편집 지점이다. domain/types.ts의 PRIORITY_CODES/priorityLabels
  * 를 그대로 재사용하며(새 enum을 정의하지 않는다), 일정 필드들(고객 요청
  * 납기일/사내 목표 출하일) 바로 옆에 배치해 "운영 계획 정보"라는 같은
- * 성격임을 드러낸다. 현재는 SUPER_ADMIN/ADMIN만 이 필드를 볼 수 있는 select로
- * 얻는다(SECTION_FIELD_NAMES.INTAKE에는 있지만 AS_ENGINEER_FIELDS/
- * SALES_FIELDS에는 의도적으로 넣지 않았다 — repair-case-edit-
- * authorization.ts 참고) — 다른 역할은 항상 읽기 전용으로 본다.
+ * 성격임을 드러낸다. 2026-10-23부터 SUPER_ADMIN/ADMIN에 더해 AS_ENGINEER도
+ * 이 필드를 select로 얻는다 — SALES는 아니다(SECTION_FIELD_NAMES.INTAKE에는
+ * 있지만 SALES_FIELDS에는 의도적으로 넣지 않았다 — repair-case-edit-
+ * authorization.ts 참고). 영업과 재고담당은 항상 읽기 전용으로 본다.
+ *
+ * 같은 날 고객 요청 납기일(customerRequestedDueDate)도 AS_ENGINEER에 열렸다.
+ * 이 폼은 그 전부터 canEdit("customerRequestedDueDate")로 갈라 그리고 있었으므로
+ * 화면 코드는 한 줄도 바뀌지 않았다 — 열린 것은 권한 목록뿐이다.
  *
  * 보고서번호(legacyReportNumber)는 INTAKE 섹션 필드지만 이 폼에는 없다 —
  * 담당 엔지니어와 같은 이유로 상단 요약 카드의 ReportNumberEditCell이 유일한
