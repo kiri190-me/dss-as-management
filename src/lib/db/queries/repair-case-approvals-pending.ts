@@ -125,6 +125,20 @@ export type PendingApprovalItem = {
    * 판정으로 좁혀졌는지를 타입에 적어 두기 위해서다.
    */
   state: "PENDING";
+  /**
+   * **지금 열려 있는 그 요청이 들어온 때** — ISO 문자열(서버 컴포넌트 경계를
+   * 넘을 수 있게 Date 를 그대로 보내지 않는다. 견적서 쪽 조회가 같은 까닭으로
+   * 같게 한다 — quote-approvals-pending.ts).
+   *
+   * 🔴 **처음 요청한 때가 아니다.** 아래에서 (건, 종류)별 **가장 최근 행** 하나로
+   * 접은 뒤 그 행의 값을 싣는다. 반려 뒤 다시 올린 건은 「다시 올린 때」가 맞다 —
+   * 결재자가 기다리게 한 시간은 그때부터이고, 통합 승인함이 「오래 기다린 순」을
+   * 세울 때 재는 것도 그 시간이다(server/integration/portal-approvals.ts).
+   *
+   * 조회가 이미 이 칸으로 정렬하고 있어서(아래 orderBy) 늘어나는 것은 고르는 칸
+   * 하나뿐이다 — 조인도 조건도 그대로다. 종 · 사이드바 배지는 이 값을 읽지 않는다.
+   */
+  requestedAt: string;
 };
 
 /** 지정 관문(mayDecideAssignedApproval)에 그대로 넘기는 최소 모양. */
@@ -263,6 +277,9 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
       assignedApproverUserId: repairCaseApprovals.assignedApproverUserId,
       // 이 행이 결재선을 타는가를 가르는 나머지 한 칸(파일 상단 "결재선" 참조).
       routeId: repairCaseApprovals.routeId,
+      // 「언제부터 기다리고 있나」. 이미 이 칸으로 정렬하고 있어서(아래 orderBy)
+      // 읽는 데 드는 값이 없다 — PendingApprovalItem.requestedAt 의 주석 참조.
+      requestedAt: repairCaseApprovals.requestedAt,
     })
     .from(repairCaseApprovals)
     .innerJoin(repairCases, eq(repairCases.id, repairCaseApprovals.repairCaseId))
@@ -303,6 +320,7 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
       repairCaseVersionAtRequest: number;
       assignedApproverUserId: string | null;
       routeId: string | null;
+      requestedAt: Date;
     }
   >();
   for (const row of approvalRows) {
@@ -342,6 +360,8 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
       intakeNumber: latest.intakeNumber,
       approvalType: latest.approvalType,
       state,
+      // 접은 **뒤**의 행이다 — 지금 열려 있는 요청이 들어온 때(타입 주석 참조).
+      requestedAt: latest.requestedAt.toISOString(),
     });
   }
   // 인수번호 순 — 후보를 requested_at 순으로 뽑았으므로 여기서 다시 세운다.

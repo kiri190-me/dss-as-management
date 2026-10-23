@@ -963,6 +963,38 @@ describe("listRepairCasesPendingMyApproval: 유·무상 미확정", () => {
   });
 });
 
+describe("listRepairCasesPendingMyApproval: requestedAt", () => {
+  test("🔴 **지금 열려 있는** 요청이 들어온 때가 ISO 로 실린다 — 처음 요청한 때가 아니다", async () => {
+    // 통합 승인함이 「오래 기다린 순」을 세울 때 재는 값이다
+    // (server/integration/portal-approvals.ts). 반려 뒤 다시 올린 건에서 옛
+    // 요청의 때가 실리면, 이미 치워진 요청의 시각으로 줄이 맨 위에 선다.
+    const caseId = await createTestCase();
+    const current = await getCase(caseId);
+    await insertApproval(caseId, "REPAIR_INSPECTION", "REJECTED", current.version, superAdminId);
+    await insertApproval(caseId, "REPAIR_INSPECTION", "REQUESTED", current.version, null);
+
+    // requested_at 은 기본값이 now() 라 두 행이 밀리초 차이로 들어간다 — 어느
+    // 쪽이 실렸는지 가를 수 없으므로 시각을 손으로 벌려 둔다.
+    const first = new Date("2097-05-01T01:02:03.000Z");
+    const again = new Date("2097-05-02T04:05:06.000Z");
+    await db
+      .update(repairCaseApprovals)
+      .set({ requestedAt: first })
+      .where(and(eq(repairCaseApprovals.repairCaseId, caseId), eq(repairCaseApprovals.status, "REJECTED")));
+    await db
+      .update(repairCaseApprovals)
+      .set({ requestedAt: again })
+      .where(and(eq(repairCaseApprovals.repairCaseId, caseId), eq(repairCaseApprovals.status, "REQUESTED")));
+
+    const item = (await listRepairCasesPendingMyApproval(engineerId)).find(
+      (row) => row.repairCaseId === caseId
+    );
+    assert.ok(item, "다시 올린 요청은 결재 대기다 — 대조가 성립한다");
+    assert.equal(item!.requestedAt, again.toISOString());
+    assert.notEqual(item!.requestedAt, first.toISOString());
+  });
+});
+
 describe("countRepairCasesPendingMyApproval", () => {
   test("결재할 게 하나도 없는 사용자는 0 — 배지를 그리지 않는 조건", async () => {
     const salesUserId = await createTestUser({ role: "SALES" });
