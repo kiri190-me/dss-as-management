@@ -6,6 +6,18 @@ import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { decideRepairCaseApproval, requestRepairCaseApproval } from "@/lib/db/mutations/repair-case-approvals";
 import {
+  getCurrentApprovalsForCase,
+  listInspectionApproverCandidates,
+} from "@/lib/db/queries/repair-case-approvals";
+import {
+  listShipmentDelegations,
+  listUsersForRepresentativeManagement,
+  resolveShipmentDecideAuthorization,
+} from "@/lib/db/queries/shipment-delegations";
+import { getSsoSubjectForUser } from "@/lib/db/queries/users";
+import { notifyRepairCaseApprovalCreated } from "@/lib/server/integration/approval-created-notice";
+import { notifyPortalApprovalCreated } from "@/lib/server/integration/portal-inbox";
+import {
   isValidApprovalDecision,
   isValidApprovalType,
   isValidRepairCaseId,
@@ -88,6 +100,38 @@ function revalidateApprovalSurfaces(repairCaseId: string): void {
   revalidatePath(`/repair-cases/${repairCaseId}`, "layout");
 }
 
+/**
+ * 결재가 저장된 **뒤** 포털을 한 번 쿡 찔러, 지금 차례인 사람에게 결재 메일이
+ * 바로 나가게 한다(2026-10-24 사용자 요청. 그 전에는 밤에 도는 주기 작업이
+ * 물어 갈 때까지 기다렸다).
+ *
+ * 🔴 **여기가 액션 계층인 것이 핵심이다.** mutation 은 통째로 트랜잭션 하나이고,
+ * 그 안에서 포털을 부르면 ① 포털이 느릴 때 결재 저장이 함께 느려지고 ② 포털이
+ * 죽으면 **결재 자체가 실패한다.** 그래서 mutation 은 이 파일을 한 글자도 알지
+ * 못하고, 부르는 자리는 `await requestRepairCaseApproval(...)`/
+ * `await decideRepairCaseApproval(...)` 이 **값을 돌려준 뒤**다 — 그 시점에는
+ * 커밋이 끝나 있다. (revalidateApprovalSurfaces 가 같은 자리에 있는 것과 같은
+ * 까닭이다.)
+ *
+ * 🔴 판정을 여기서 짓지 않는다 — 조회를 그대로 꽂아 넘길 뿐이고, 고르는 규칙은
+ * server/integration/approval-created-notice.ts 하나에 있다. 🔴 던지지 않는다:
+ * 그 함수가 제 안에서 전부 삼킨다(결재는 이미 저장됐다).
+ */
+async function notifyPortalOfApprovalTurn(
+  repairCaseId: string,
+  approvalType: RepairCaseApprovalType
+): Promise<void> {
+  await notifyRepairCaseApprovalCreated(repairCaseId, approvalType, {
+    readCurrentApprovals: getCurrentApprovalsForCase,
+    listInspectionApprovers: listInspectionApproverCandidates,
+    listRepresentativeCandidates: listUsersForRepresentativeManagement,
+    listDelegations: listShipmentDelegations,
+    resolveShipmentDecide: resolveShipmentDecideAuthorization,
+    readPortalSubject: getSsoSubjectForUser,
+    notifyPortal: notifyPortalApprovalCreated,
+  });
+}
+
 export async function requestRepairCaseApprovalAction(
   input: RequestApprovalActionInput
 ): Promise<ApprovalActionResult> {
@@ -127,7 +171,11 @@ export async function requestRepairCaseApprovalAction(
   }
 
   // 성사됐을 때만 — 실패한 요청은 바뀐 것이 없으므로 캐시를 버릴 이유가 없다.
-  if (result.ok) revalidateApprovalSurfaces(input.repairCaseId);
+  if (result.ok) {
+    revalidateApprovalSurfaces(input.repairCaseId);
+    // 결재가 **새로 생긴** 자리다 — 처음 요청과 반려 뒤 재요청이 둘 다 여기로 온다.
+    await notifyPortalOfApprovalTurn(input.repairCaseId, input.approvalType);
+  }
   return result;
 }
 
@@ -168,6 +216,16 @@ export async function decideRepairCaseApprovalAction(
 
   // 승인·반려가 성사되면 결재자 자신의 배지·종 알림에서 그 건이 곧바로 빠져야
   // 한다 — 눌렀는데 숫자가 그대로면 처리가 안 된 줄 알고 다시 누르게 된다.
-  if (result.ok) revalidateApprovalSurfaces(input.repairCaseId);
+  if (result.ok) {
+    revalidateApprovalSurfaces(input.repairCaseId);
+    // 🔴 **결재가 생기는 자리는 여기도다.** 결재선을 타는 최종 출하 승인은 한
+    // 단계가 승인되면 저장 경로가 **다음 단계 요청 행을 이어 만든다**
+    // (mutations/repair-case-approvals.ts 의 「사슬을 잇는다」). 그 순간
+    // 다음 사람에게 **새로** 차례가 오므로 그 사람도 메일을 받아야 한다.
+    // 사슬이 끝났거나(마지막 단계 승인) 반려면 가장 최근 행이 REQUESTED 가
+    // 아니라서 아무것도 나가지 않는다 — 그 판단은 부르는 쪽이 아니라
+    // notifyRepairCaseApprovalCreated 안에 있다.
+    await notifyPortalOfApprovalTurn(input.repairCaseId, input.approvalType);
+  }
   return result;
 }

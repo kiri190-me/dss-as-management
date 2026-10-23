@@ -11,6 +11,10 @@ import {
   requestQuoteApproval,
   type QuoteApprovalFailureCode,
 } from "@/lib/db/mutations/quote-approvals";
+import { getQuoteApprovalProgress } from "@/lib/db/queries/quote-approvals";
+import { getSsoSubjectForUser } from "@/lib/db/queries/users";
+import { notifyQuoteApprovalCreated } from "@/lib/server/integration/approval-created-notice";
+import { notifyPortalApprovalCreated } from "@/lib/server/integration/portal-inbox";
 import {
   isValidApprovalDecision,
   validateReasonFormat,
@@ -124,6 +128,28 @@ function revalidateQuoteApprovalSurfaces(quoteId: string): void {
   revalidatePath(`/quotes/${quoteId}`, "layout");
 }
 
+/**
+ * 결재가 저장된 **뒤** 포털을 한 번 쿡 찔러, 지금 차례인 사람에게 결재 메일이
+ * 바로 나가게 한다(2026-10-24. actions/repair-case-approvals.ts 의 같은 도우미와
+ * 한 쌍이고, 규칙도 그쪽 주석 그대로다).
+ *
+ * 🔴 **액션 계층인 것이 핵심이다.** mutation 은 통째로 트랜잭션 하나라, 그 안에서
+ * 포털을 부르면 포털이 느릴 때 결재 저장이 함께 느려지고 포털이 죽으면 결재
+ * 자체가 실패한다. 부르는 자리는 mutation 이 **값을 돌려준 뒤** — 커밋이 끝난
+ * 시점이다.
+ *
+ * 🔴 견적서 결재는 **언제나 지정이 있다**(절차가 없으면 요청 자체가 거절된다).
+ * 그래서 접수 건 쪽과 달리 「자격 있는 사람 모두」를 찾는 조회를 꽂지 않는다 —
+ * 그 길이 쓰이면 notifyQuoteApprovalCreated 가 경고를 남긴다.
+ */
+async function notifyPortalOfQuoteApprovalTurn(quoteId: string): Promise<void> {
+  await notifyQuoteApprovalCreated(quoteId, {
+    readQuoteProgress: getQuoteApprovalProgress,
+    readPortalSubject: getSsoSubjectForUser,
+    notifyPortal: notifyPortalApprovalCreated,
+  });
+}
+
 export async function requestQuoteApprovalAction(
   input: RequestQuoteApprovalActionInput
 ): Promise<QuoteApprovalActionResult> {
@@ -159,7 +185,12 @@ export async function requestQuoteApprovalAction(
   }
 
   // 성사됐을 때만 — 실패한 요청은 바뀐 것이 없으므로 캐시를 버릴 이유가 없다.
-  if (result.ok) revalidateQuoteApprovalSurfaces(input.quoteId);
+  if (result.ok) {
+    revalidateQuoteApprovalSurfaces(input.quoteId);
+    // 결재가 **새로 생긴** 자리다 — 처음 요청과 반려 뒤 재요청이 둘 다 여기로 온다
+    // (반려는 사슬을 끊으므로 다시 받으려면 이 길로 새 요청을 올린다).
+    await notifyPortalOfQuoteApprovalTurn(input.quoteId);
+  }
   return result;
 }
 
@@ -198,7 +229,15 @@ export async function decideQuoteApprovalAction(
 
   // 승인·반려가 성사되면 결재자 자신의 화면에서 그 건이 곧바로 빠져야 한다 —
   // 눌렀는데 그대로면 처리가 안 된 줄 알고 다시 누르게 된다.
-  if (result.ok) revalidateQuoteApprovalSurfaces(input.quoteId);
+  if (result.ok) {
+    revalidateQuoteApprovalSurfaces(input.quoteId);
+    // 🔴 **결재가 생기는 자리는 여기도다.** 한 단계가 승인되면 저장 경로가
+    // **다음 단계 요청 행을 이어 만들고**(mutations/quote-approvals.ts 의
+    // 「사슬을 잇는다」 — 돌려주는 nextApprovalId 가 그 행이다), 그 순간 다음
+    // 사람에게 **새로** 차례가 온다. 사슬이 끝났거나 반려면 가장 최근 행이
+    // REQUESTED 가 아니라서 아무것도 나가지 않는다.
+    await notifyPortalOfQuoteApprovalTurn(input.quoteId);
+  }
   return result.ok ? { ok: true, id: result.id } : result;
 }
 

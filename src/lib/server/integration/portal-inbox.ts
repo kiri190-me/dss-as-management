@@ -19,12 +19,15 @@ import {
  *  1. `server/integration/portal-notifications.ts` — **들어오는 쪽**. 포털이
  *     A/S 에 물어 갈 때 내주는 판단(PortalNotificationFeed).
  *  2. `domain/portal-notification-inbox.ts` — **받은 것의 모양과 검사**(순수).
- *  3. 이 파일 — **나가는 왕복 셋**. 위를 향해 묻는 쪽
+ *  3. 이 파일 — **나가는 왕복 넷**. 위를 향해 묻는 쪽
  *     (fetchPortalNotificationInbox)과, 「그만 보겠다」를 적는 쪽
  *     (dismissPortalNotifications — 파일 가운데)과, 「확인했다」를 적는 쪽
- *     (acknowledgePortalNotification — 파일 맨 아래, 2026-10-22). 셋은 같은
- *     자격증명 · 같은 상한 · 같은 거절을 쓴다. 🔴 **뒤의 둘은 뜻이 다르다** —
- *     지움은 재로그인하면 돌아오고 확인은 안 돌아온다(그 둘의 머리말).
+ *     (acknowledgePortalNotification — 2026-10-22)과, 「이 사람에게 결재할 것이
+ *     생겼다」를 알리는 쪽(notifyPortalApprovalCreated — 파일 맨 아래,
+ *     2026-10-24). 넷은 같은 자격증명 · 같은 상한 · 같은 거절을 쓴다.
+ *     🔴 **가운데 둘은 뜻이 다르다** — 지움은 재로그인하면 돌아오고 확인은 안
+ *     돌아온다(그 둘의 머리말). 🔴 **맨 아래 하나는 알림이 아니라 메일을 깨우는
+ *     신호다** — 종에 줄을 더하지 않는다(그 함수의 머리말).
  *
  * ── 🔴 왜 서버에서만 부르나 ─────────────────────────────────────────────
  * 자격은 이 사이트의 `client_secret` 이다(포털 세션 쿠키가 없는 곳에서 부르기
@@ -61,8 +64,13 @@ import {
 
 /**
  * 왕복 상한. 묻는 쪽에서 이 시간을 넘기면 빈 목록이고, 적는 쪽에서 넘기면
- * 「못 적었다」다. 🔴 **두 방향이 같은 값을 쓴다** — 같은 포털의 같은 종류의
+ * 「못 적었다」다. 🔴 **네 방향이 같은 값을 쓴다** — 같은 포털의 같은 종류의
  * 왕복이라, 한쪽만 늘리면 어느 쪽이 느린지 알 수 없게 된다.
+ *
+ * 🔴 맨 아래 결재 알림(notifyPortalApprovalCreated)에는 이 값이 **사람이
+ * 기다리는 시간**이다 — [승인 요청] 단추를 누른 그 자리에서 불리기 때문이다.
+ * 그래서 이 값을 올리는 것은 다른 셋보다 비싸다. 2초를 넘기려거든 그 함수를
+ * 응답 뒤로 미루는 쪽(next 의 `after`)을 먼저 보라.
  */
 const NOTIFICATIONS_TIMEOUT_MS = 2000;
 
@@ -380,6 +388,113 @@ export async function acknowledgePortalNotification(
   if (!response?.ok) {
     // 거절 본문은 포털의 내부 설정을 설명할 수 있다. 상태만 남긴다.
     console.error("[sso] 알림 확인 통로 거절:", response?.status);
+    return false;
+  }
+
+  return true;
+}
+
+/* ========================================================================== */
+/* 「이 사람에게 결재할 것이 생겼다」를 포털에 알린다 — **쓰는 쪽 셋째**        */
+/* (2026-10-24)                                                               */
+/*                                                                            */
+/* 결재 알림 메일은 포털이 보낸다. 2026-10-23 까지 그 메일은 **밤에 도는 주기**  */
+/* **작업**이 사람마다 세 시스템에 「결재할 것 있나요」를 물어 보내는 것이라,    */
+/* 결재가 생긴 순간이 아니라 **그 다음 작업 때** 나갔다. 여기서 포털을 한 번     */
+/* 쿡 찔러 그 작업을 그 사람 몫만 지금 돌게 한다(2026-10-24 사용자 요청:         */
+/* 「결재건이 생기자마자 메일이 보내졌으면」).                                   */
+/*                                                                            */
+/* ── 🔴 나가는 것은 「누구에게」 하나뿐이다 ─────────────────────────────────  */
+/* 건 번호도 갈래도 제목도 싣지 않는다. 포털은 이 신호를 받고 **제 통로로 그**   */
+/* **사람의 결재를 다시 물어** 안 보낸 것에만 메일을 띄운다. 그래서              */
+/*  · 이 시스템이 거짓을 보내도 메일 내용이 흔들리지 않고,                       */
+/*  · 포털의 「보낸 기록」이 중복을 그대로 막는다(두 번 찔러도 한 통이다).        */
+/* 🔴 이 함수가 **문자열 목록 말고는 아무것도 받지 않는 것**이 그 약속을 코드로  */
+/*    지키는 자리다. 「어느 건인지도 같이 보내면 편하지 않나」는 여기서 막힌다 — */
+/*    칸을 더하려면 포털 규격부터 고쳐야 한다.                                   */
+/*                                                                            */
+/* ── 🔴 못 보내도 아무 일이 없어야 한다 ───────────────────────────────────── */
+/* 부르는 자리는 결재가 **이미 저장된 뒤**다(server/actions/*-approvals.ts —    */
+/* 트랜잭션 밖이다). 포털이 404(통로가 아직 없다)·500·시간 초과·연결 거부 어느   */
+/* 쪽이든 사람에게는 아무 일도 없어야 한다: 결재는 저장됐고, 못 보낸 메일은      */
+/* **밤의 주기 작업이 그대로 줍는다.** 그것이 이 설계의 뒷받침이라, 여기서       */
+/* 다시 보내는 장치도 쌓아 두는 칸도 두지 않는다.                               */
+/* ========================================================================== */
+
+/**
+ * 「이 사람(들)에게 결재할 것이 생겼다」를 포털에 알린다. 🔴 **어떤 일이 있어도
+ * 던지지 않는다** — 위의 셋과 같은 약속이고, 여기서는 더 세다: 던지면 이미
+ * 저장된 결재가 사람에게 **실패로 보인다.**
+ *
+ * @param approverSubjects 포털의 `users.id`(= ID 토큰의 `sub`). A/S 는
+ *        `users.sso_subject` 로 들고 있다. 🔴 **포털 번호가 없는 사람은 애초에
+ *        이 목록에 넣지 않는다** — 이 집은 포털과 이어지지 않은 로컬 계정을
+ *        허용하고(설계서 F-3), 그 사람은 통합 메일을 못 받는다. 거르는 자리와
+ *        그것을 로그에 남기는 자리는 approval-created-notice.ts 다.
+ *
+ * 🔴 여럿이면 **한 번의 왕복에 `approverSub` 를 여러 개** 싣는다. 사람마다 따로
+ *    부르면 상한(2초)이 사람 수만큼 곱해지는데, 여기는 사람이 단추를 누르고
+ *    기다리는 자리다. 🔵 포털이 첫 값만 읽는 구현이면 나머지는 메일을 못 받지만
+ *    **밤의 주기 작업이 줍는다** — 지금과 같아질 뿐 나빠지지 않는다.
+ *
+ * @returns 알렸는가. 🔵 몇 번을 다시 보내도 안전하다 — 포털이 「보낸 기록」으로
+ *          중복을 거르므로 두 번 찔러도 메일은 한 통이다.
+ */
+export async function notifyPortalApprovalCreated(
+  approverSubjects: readonly string[],
+  deps: PortalInboxDeps = {}
+): Promise<boolean> {
+  // 같은 사람이 두 번 실려 와도 한 번만 보낸다. 포털이 어느 쪽이든 같은 답을
+  // 주지만, 겹친 값은 저쪽에서 같은 사람 몫 작업을 두 번 돌리는 일감이 된다.
+  const wanted = Array.from(
+    new Set(
+      approverSubjects.filter(
+        (subject): subject is string => typeof subject === "string" && subject !== ""
+      )
+    )
+  );
+  // 🔴 보낼 사람이 없으면 **아예 부르지 않는다.** 빈 몸통은 포털이 거절하므로,
+  //    부르는 것은 거절 한 줄을 로그에 쌓는 일뿐이다(지움 쪽과 같은 규약).
+  if (wanted.length === 0) return false;
+
+  const body = new URLSearchParams();
+  for (const subject of wanted) body.append("approverSub", subject);
+
+  const send = deps.fetch ?? globalThis.fetch;
+  let response: Response;
+  try {
+    // 🔴 자격증명을 읽는 자리가 **try 안**인 것은 위의 셋과 같은 까닭이다 —
+    //    config 의 getter 는 값이 없으면 던지고, 설정이 빠진 것 때문에 저장이 끝난
+    //    결재가 실패로 보이면 안 된다.
+    const { issuer, clientId, clientSecret } = (deps.readCredentials ?? readCredentialsFromEnv)();
+    // 규격서: base64(urlencode(client_id) + ":" + urlencode(client_secret)).
+    const credentials = `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`;
+
+    response = await send(`${issuer}/api/integration/approval-created`, {
+      method: "POST",
+      headers: {
+        authorization: `Basic ${Buffer.from(credentials, "utf8").toString("base64")}`,
+        "content-type": "application/x-www-form-urlencoded",
+        accept: "application/json",
+      },
+      body: body.toString(),
+      cache: "no-store",
+      signal: AbortSignal.timeout(NOTIFICATIONS_TIMEOUT_MS),
+    });
+  } catch (error) {
+    // 🔴 남기는 것은 오류의 **종류**뿐이다. 포털 번호는 사람을 가리키는 값이라
+    //    로그에 쌓지 않는다(위의 셋과 같은 규약).
+    console.error(
+      "[sso] 결재가 생긴 것을 알리지 못했습니다:",
+      error instanceof Error ? error.name : "unknown"
+    );
+    return false;
+  }
+
+  if (!response?.ok) {
+    // 🔴 통로가 아직 없는 동안에는 여기로 404 가 온다. 그것도 그냥 **한 줄**이다
+    //    — 거절 본문은 포털의 내부 설정을 설명할 수 있어 상태만 남긴다.
+    console.error("[sso] 결재 생성 알림 통로 거절:", response?.status);
     return false;
   }
 

@@ -6,16 +6,20 @@ import {
   acknowledgePortalNotification,
   dismissPortalNotifications,
   fetchPortalNotificationInbox,
+  notifyPortalApprovalCreated,
   type PortalInboxCredentials,
 } from "./portal-inbox";
 
 /**
- * 포털로 나가는 왕복 **둘** — 묻는 쪽(위쪽)과 「그만 보겠다」를 적는 쪽(아래쪽).
- * 🔴 이 파일이 지키는 것은 **한 문장**이다: 무슨 일이 있어도 던지지 않는다.
+ * 포털로 나가는 왕복 **넷** — 묻는 쪽 · 「그만 보겠다」를 적는 쪽 · 「확인했다」를
+ * 적는 쪽 · 「이 사람에게 결재할 것이 생겼다」를 알리는 쪽(파일 맨 아래,
+ * 2026-10-24). 🔴 이 파일이 지키는 것은 **한 문장**이다: 무슨 일이 있어도 던지지
+ * 않는다.
  *
- * 그 값이 모든 화면에 딸려 오는 머리말에 실리기 때문이다 — 포털이 죽었다고
- * A/S 가 안 뜨면 통합의 대가가 너무 크다. 적는 쪽은 사람이 ✕ 를 누른 **그
- * 순간** 불리므로 같은 선을 더 세게 지켜야 한다.
+ * 앞의 셋은 그 값이 모든 화면에 딸려 오는 머리말에 실리기 때문이다 — 포털이
+ * 죽었다고 A/S 가 안 뜨면 통합의 대가가 너무 크다. 적는 쪽은 사람이 ✕ 를 누른
+ * **그 순간** 불리므로 같은 선을 더 세게 지켜야 한다. 🔴 맨 아래 하나는 더
+ * 세다: 거기서 던지면 **이미 저장된 결재가 사람에게 실패로 보인다.**
  *
  * 망을 타지 않는다: `fetch` 와 자격증명 읽기를 둘 다 인자로 받아(PortalInboxDeps)
  * 거절 · 시간 초과 · 이상한 JSON 을 값으로 재현한다.
@@ -581,9 +585,13 @@ test("🔴 확인과 지움이 **같은 상한**을 쓴다 — 한쪽만 늘리�
   // 규격서가 「같은 자격증명·같은 상한·같은 거절」을 못 박는다. 상한 값은 상수라
   // 글자로 읽을 수밖에 없는데, 🔴 그 토막이 빈 문자열이면 이 시험이 아무것도 안
   // 본다 — 그래서 자른 자리를 먼저 확인한다.
+  //
+  // 🔵 2026-10-24 에 넷이 됐다(결재 생성 알림이 더해졌다). 숫자를 세는 것이
+  //    이 단언의 값어치다 — 상한 없는 왕복이 하나라도 생기면 그 요청은 포털이
+  //    대답하지 않을 때 **끝나지 않는다.**
   const source = readFileSync(new URL("./portal-inbox.ts", import.meta.url), "utf8");
   const 상한들 = source.match(/AbortSignal\.timeout\([A-Z_]+\)/g) ?? [];
-  assert.equal(상한들.length, 3, "왕복 셋이 저마다 상한을 들고 있지 않다");
+  assert.equal(상한들.length, 4, "왕복 넷이 저마다 상한을 들고 있지 않다");
   assert.equal(new Set(상한들).size, 1, "🔴 왕복마다 다른 상한을 쓴다");
 
   const 확인함수 = source.slice(source.indexOf("export async function acknowledgePortalNotification"));
@@ -592,4 +600,137 @@ test("🔴 확인과 지움이 **같은 상한**을 쓴다 — 한쪽만 늘리�
   // 🔴 확인 함수 안에서 **지움 통로를 부르지 않는다.** 둘이 한 몸이 되면
   //    「해소됐다」와 「그만 보겠다」가 섞인다.
   assert.ok(!확인함수.includes("notification-dismissals"), "🔴 확인이 지움 통로도 두드린다");
+});
+
+/* ========================================================================== */
+/* 「이 사람에게 결재할 것이 생겼다」를 알리는 쪽 (2026-10-24)                  */
+/*                                                                            */
+/* 🔴 여기가 지키는 것은 둘이다: **몸통에 결재의 내용이 한 글자도 없다**(포털이 */
+/*    제 통로로 다시 물어 보내기 때문이다)와, **무슨 일이 있어도 안 터진다**    */
+/*    (부르는 자리가 이미 저장된 결재 뒤다).                                    */
+/* ========================================================================== */
+
+test("🔴 보내는 몸통은 **`approverSub` 하나뿐**이다 — 건 번호도 갈래도 제목도 없다", async () => {
+  const { fetchImpl, calls } = recordingFetch(() => new Response("{}"));
+  await notifyPortalApprovalCreated(["portal-user-1"], { fetch: fetchImpl, readCredentials });
+
+  assert.equal(calls.length, 1);
+  const [{ url, init }] = calls;
+  assert.equal(url, "http://portal.test:3100/api/integration/approval-created");
+  assert.equal(init.method, "POST");
+  // 🔴 **글자 하나까지 맞춰 본다.** 「칸 하나쯤 더 실어도 편하겠지」가 들어오는
+  //    순간 이 단언이 빨개진다 — 그것이 이 줄의 값어치다.
+  assert.equal(init.body, "approverSub=portal-user-1");
+
+  const headers = init.headers as Record<string, string>;
+  assert.equal(headers["content-type"], "application/x-www-form-urlencoded");
+  const [scheme, token] = headers.authorization.split(" ");
+  assert.equal(scheme, "Basic");
+  assert.equal(
+    Buffer.from(token, "base64").toString("utf8"),
+    `${encodeURIComponent(CREDENTIALS.clientId)}:${encodeURIComponent(CREDENTIALS.clientSecret)}`
+  );
+  // 🔴 자격증명이 주소에 실리면 접근 로그에 남아 다시 발급해야 한다.
+  assert.ok(!url.includes(CREDENTIALS.clientSecret));
+  assert.equal(init.cache, "no-store");
+  assert.ok(init.signal instanceof AbortSignal, "상한 없이 불렀다");
+});
+
+test("🔴 여럿이면 **한 번의 왕복**에 `approverSub` 를 여러 개 싣는다", async () => {
+  // 사람마다 따로 부르면 상한(2초)이 사람 수만큼 곱해진다 — 사람이 [승인 요청]
+  // 단추를 누르고 기다리는 자리다.
+  const { fetchImpl, calls } = recordingFetch(() => new Response("{}"));
+  await notifyPortalApprovalCreated(["portal-a", "portal-b"], {
+    fetch: fetchImpl,
+    readCredentials,
+  });
+
+  assert.equal(calls.length, 1, "사람 수만큼 포털을 불렀다");
+  const body = new URLSearchParams(String(calls[0].init.body));
+  assert.deepEqual(body.getAll("approverSub"), ["portal-a", "portal-b"]);
+  // 🔴 다른 칸이 끼어들지 않았다.
+  assert.deepEqual([...new Set([...body.keys()])], ["approverSub"]);
+});
+
+test("같은 사람이 겹쳐 들어오면 한 번만 싣는다", async () => {
+  const { fetchImpl, calls } = recordingFetch(() => new Response("{}"));
+  await notifyPortalApprovalCreated(["portal-a", "portal-a", "portal-b"], {
+    fetch: fetchImpl,
+    readCredentials,
+  });
+
+  const body = new URLSearchParams(String(calls[0].init.body));
+  assert.deepEqual(body.getAll("approverSub"), ["portal-a", "portal-b"]);
+});
+
+test("🔴 보낼 사람이 없으면 **아예 부르지 않는다** — 거절 한 줄을 쌓을 뿐이다", async () => {
+  const { fetchImpl, calls } = recordingFetch(() => new Response("{}"));
+
+  for (const subjects of [[], [""], ["", ""]]) {
+    assert.equal(await notifyPortalApprovalCreated(subjects, { fetch: fetchImpl, readCredentials }), false);
+  }
+  assert.equal(calls.length, 0, "빈 몸통으로 포털을 불렀다");
+});
+
+test("🔴 통로가 아직 없어 404 여도 **던지지 않는다** — 결재는 이미 저장됐다", async () => {
+  // 포털 쪽 통로는 다른 조각이 만든다. 그때까지 여기로 오는 것은 404 뿐이고,
+  // 그 404 가 사람 눈에 보이면 「승인 요청이 실패했다」로 읽힌다.
+  for (const status of [404, 401, 429, 500, 503]) {
+    const { fetchImpl } = recordingFetch(
+      () => new Response(JSON.stringify({ error: "내부 사정" }), { status })
+    );
+    const { value, logged } = await captureErrors(() =>
+      notifyPortalApprovalCreated(["portal-user-1"], { fetch: fetchImpl, readCredentials })
+    );
+
+    assert.equal(value, false, `${status} 에서 보냈다고 답했다`);
+    assert.ok(logged.includes(String(status)), `${status}: 상태를 안 남겼다`);
+    // 거절 본문은 포털의 내부 설정을 설명할 수 있다.
+    assert.ok(!logged.includes("내부 사정"), `${status}: 거절 본문을 로그에 남겼다`);
+  }
+});
+
+test("🔴 시간 초과 · 연결 거부 · 이상한 것을 던져도 **던지지 않는다** — 사람 번호도 안 찍는다", async () => {
+  const failures = [
+    new DOMException("The operation was aborted due to timeout", "TimeoutError"),
+    // 포털이 꺼져 있을 때 fetch 가 내는 모양(ECONNREFUSED).
+    new TypeError("fetch failed"),
+    "문자열을 던짐",
+  ];
+  for (const failure of failures) {
+    const { fetchImpl } = recordingFetch(() => {
+      throw failure;
+    });
+    const { value, logged } = await captureErrors(() =>
+      notifyPortalApprovalCreated(["portal-user-1"], { fetch: fetchImpl, readCredentials })
+    );
+
+    assert.equal(value, false, `${String(failure)} 에서 보냈다고 답했다`);
+    assert.ok(!logged.includes("portal-user-1"), "🔴 로그에 포털 번호를 실었다");
+    assert.ok(!logged.includes("fetch failed"), "오류 본문을 그대로 찍었다");
+    assert.ok(!logged.includes(CREDENTIALS.clientSecret), "🔴 로그에 비밀값이 섞였다");
+  }
+});
+
+test("🔴 설정이 빠져 있어도 [승인 요청] 단추가 실패하지 않는다", async () => {
+  const { fetchImpl, calls } = recordingFetch(() => new Response("{}"));
+  const { value } = await captureErrors(() =>
+    notifyPortalApprovalCreated(["portal-user-1"], {
+      fetch: fetchImpl,
+      readCredentials: () => {
+        throw new Error("SSO_CLIENT_SECRET is not set.");
+      },
+    })
+  );
+
+  assert.equal(value, false);
+  assert.equal(calls.length, 0, "설정도 없이 포털을 불렀다");
+});
+
+test("정상 응답이면 알렸다고 답한다", async () => {
+  const { fetchImpl } = recordingFetch(() => new Response(JSON.stringify({ queued: 1 })));
+  assert.equal(
+    await notifyPortalApprovalCreated(["portal-user-1"], { fetch: fetchImpl, readCredentials }),
+    true
+  );
 });
