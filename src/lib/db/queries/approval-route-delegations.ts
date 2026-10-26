@@ -6,6 +6,7 @@ import { hasPermission, type PermissionActor } from "@/lib/auth/permission-resol
 import { approvalRouteDelegations, users } from "../schema";
 import {
   actingApproverUserIds,
+  actingDelegateUserIdsFor,
   type ActingApproverUserIds,
   type ApprovalRouteDelegationPeriod,
 } from "@/lib/domain/approval-route-delegation";
@@ -27,6 +28,8 @@ import {
  *    인가를 **제 손으로** 본다. 까닭은 그 함수 머리말에 있다.
  *  · `resolveActingApproverUserIds` — **판정이 쓰는 값**이다. id 목록 하나뿐이고,
  *    트랜잭션을 받는다. 화면에 쓰지 마라(이름이 없다).
+ *  · `resolveActingDelegateUserIds` — 위와 **방향이 반대**인 id 목록이다(「나를 누가
+ *    대신하나」). 🔴 **판정에 쓰지 마라** — 알림 받을 사람을 넓히는 자리 전용이다.
  * ============================================================================
  */
 
@@ -350,4 +353,60 @@ export async function resolveActingApproverUserIds(
     );
 
   return actingApproverUserIds(rows, actorUserId, now);
+}
+
+/**
+ * 🔴 **「이 결재권자를 지금 대신할 수 있는 사람」 전부.** 바로 위 함수와 **방향이
+ * 반대**이고, 그것 말고는 같은 함수다 — 같은 표를 같은 셋으로 좁히고, 판정은 순수
+ * 함수(`actingDelegateUserIdsFor`)에 맡긴다.
+ *
+ * 2026-10-26 에 더했다. 쓰는 자리는 **결재가 생겼을 때 나가는 즉시 알림**이다
+ * (server/integration/approval-created-notice.ts). 그 전에는 결재선 단계에 적힌 한
+ * 사람에게만 가서, **자리를 비운 사람이 메일을 받고 대신 눌러야 할 사람은 못 받았다.**
+ *
+ * ── 🔴 이것은 **인가가 아니다** ─────────────────────────────────────────
+ * 「누를 수 있나」는 지금도 위 `resolveActingApproverUserIds` 하나가 정하고, 결재
+ * mutation 이 자기 트랜잭션 안에서 그것을 묻는다. 여기에 한 사람이 더 들어와도 그
+ * 사람이 누를 수 있게 되지는 **않는다** — 늘어나는 것은 메일 받을 사람뿐이다.
+ * 🔵 두 함수가 같은 표를 같은 규칙으로 읽으므로 실제로는 답이 짝을 이룬다. 한쪽만
+ * 고치면 「메일은 오는데 눌리지 않는다」(또는 그 반대)가 되고 그 어긋남은 조용하니,
+ * 조건을 손댈 때는 **둘을 함께** 본다.
+ *
+ * ── 🔴 돌려주는 목록은 **빌 수 있다** ───────────────────────────────────
+ * 위 함수가 빈 적이 없는 꼴(`[string, ...string[]]`)인 것은 그 값이 `inArray` 에 그대로
+ * 들어가기 때문이고, 이 값은 거기 안 들어간다. 빈 목록은 오류가 아니라 **「지금 대신할
+ * 사람이 없다」** 는 정상적인 답이고, 그때 알림은 지정된 한 사람에게만 간다.
+ *
+ * ── 🔵 이 방향에는 색인이 없다. 알고 그대로 둔다 ────────────────────────
+ * 표의 색인은 `(delegate_user_id, revoked_at, ends_at)` 하나뿐이라(표 쪽 주석) 맡긴
+ * 사람으로 좁히는 이 조회는 타지 못한다. 그래도 두는 까닭은 이 표가 **「지금 자리를
+ * 비운 사람 수」만큼만** 자라기 때문이다 — 통째로 훑어도 몇 줄이고, 부르는 자리는
+ * 결재가 생기는 순간 한 번뿐이다. 색인을 더하려면 마이그레이션이 필요하니, 느려진
+ * 뒤에 **재어 보고** 더해라.
+ */
+export async function resolveActingDelegateUserIds(
+  delegatorUserId: string,
+  now: Date,
+  executor: Executor = db
+): Promise<string[]> {
+  const rows: ApprovalRouteDelegationPeriod[] = await executor
+    .select({
+      delegatorUserId: approvalRouteDelegations.delegatorUserId,
+      delegateUserId: approvalRouteDelegations.delegateUserId,
+      startsAt: approvalRouteDelegations.startsAt,
+      endsAt: approvalRouteDelegations.endsAt,
+      revokedAt: approvalRouteDelegations.revokedAt,
+    })
+    .from(approvalRouteDelegations)
+    .where(
+      and(
+        // 🔴 위 함수가 `delegateUserId` 로 좁히는 그 자리에서 **칸만 바뀐다.** 나머지
+        //    둘은 같고, 시작 시각을 일부러 SQL 에서 안 보는 것도 같다(위 주석).
+        eq(approvalRouteDelegations.delegatorUserId, delegatorUserId),
+        isNull(approvalRouteDelegations.revokedAt),
+        gt(approvalRouteDelegations.endsAt, now)
+      )
+    );
+
+  return actingDelegateUserIdsFor(rows, delegatorUserId, now);
 }

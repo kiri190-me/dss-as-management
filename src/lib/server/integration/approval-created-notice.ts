@@ -16,16 +16,22 @@
  * ── 🔴 판정을 새로 짓지 않는다 ─────────────────────────────────────────
  * 「지금 이 건의 차례인 사람」은 한 줄도 여기 적지 않는다. 이미 있는 것을 **인자로
  * 받아** 그대로 부른다:
- *  · 지정이 있는 행 → 그 한 사람. 지정 칸이 곧 「그 단계의 결재자」다
- *    (auth/approval-assignment.ts 의 mayDecideAssignedApproval 이 보는 그 칸).
- *    결재선을 타는 행은 언제나 여기에 해당한다 — 요청 경로가 판과 지정을 함께
- *    넣기 때문이다(mutations/quote-approvals.ts · repair-case-approvals.ts).
+ *  · 지정이 있는 행 → 그 사람 **과 그 사람의 대리인들.** 지정 칸이 곧 「그 단계의
+ *    결재자」다(auth/approval-assignment.ts 의 mayDecideAssignedApproval 이 보는 그
+ *    칸). 결재선을 타는 행은 언제나 여기에 해당한다 — 요청 경로가 판과 지정을
+ *    함께 넣기 때문이다(mutations/quote-approvals.ts · repair-case-approvals.ts).
  *    🔴 **2026-10-26 부터 그 단계를 위임받은 사람도 누를 수 있다**(결재선 단계
- *    위임 — approval_route_delegations). 그래도 **여기서는 그 사람을 찾지
- *    않는다**: 즉시 알림은 「지정된 한 사람」에게만 간다. 지금 알려진 구멍이고,
- *    위임받은 사람은 종 · 통합 승인함에서는 그 건을 본다(queries/
- *    repair-case-approvals-pending.ts · quote-approvals-pending.ts 가 위임을
- *    함께 본다). 이 자리를 넓히려면 위임 조회를 deps 로 받아야 한다.
+ *    위임 — approval_route_delegations). **같은 날 이 자리도 함께 넓혔다**:
+ *    위임 조회를 `listRouteDelegatesFor` 로 받아 대리인도 함께 부른다(꽂는 것은
+ *    queries/approval-route-delegations.ts 의 resolveActingDelegateUserIds).
+ *    그 전에는 지정된 한 사람에게만 가서 **자리를 비운 사람이 메일을 받고 대신
+ *    눌러야 할 사람은 못 받는** 구멍이 있었다 — 종 · 통합 승인함의 대기 목록에는
+ *    그때도 떴다(queries/repair-case-approvals-pending.ts ·
+ *    quote-approvals-pending.ts 가 위임을 함께 본다). 모자랐던 것은 **생길 때
+ *    나가는 알림**뿐이었다.
+ *    🔴 **지정된 사람은 빼지 않는다.** 위임은 넘기는 것이 아니라 늘리는 것이고
+ *    (domain/approval-route-delegation.ts), 자리를 비웠더라도 자기 차례가 왔다는
+ *    것은 본인이 알 일이다.
  *  · 지정이 없는 검수 결재 → queries/repair-case-approvals.ts 의
  *    listInspectionApproverCandidates. 요청 창의 「누구에게 보낼까요」 후보와
  *    **같은 목록**이고, 그것이 곧 그 결재를 처리할 수 있는 사람들이다.
@@ -94,18 +100,42 @@ export type ApprovalNoticeRecipientDeps = {
   resolveShipmentDecide: (userId: string) => Promise<{ allowed: boolean }>;
 };
 
+/**
+ * 지정이 **있는** 결재에서 「그 사람을 지금 누가 대신하나」를 묻는 조회.
+ *
+ * 🔴 위 `ApprovalNoticeRecipientDeps` 와 **쓰이는 때가 정반대**라 묶지 않았다. 그쪽
+ * 넷은 지정이 **없을 때만** 불리고, 이쪽 하나는 지정이 **있을 때만** 불린다. 한
+ * 덩어리로 묶어 두면 견적서 쪽처럼 「지정이 없는 길이 아예 없는」 갈래가 쓰지도 않을
+ * 빈 함수 넷을 함께 들고 다녀야 한다.
+ *
+ * 🔴 **이것은 인가가 아니다.** 꽂히는 조회(queries/approval-route-delegations.ts 의
+ * resolveActingDelegateUserIds)는 「누를 수 있나」를 정하는 함수와 방향만 반대일 뿐
+ * 같은 규칙을 읽는다 — 여기서 한 사람이 더 나와도 그 사람이 누를 수 있게 되지는
+ * 않는다. 늘어나는 것은 메일 받을 사람뿐이다.
+ */
+export type ApprovalRouteDelegateDeps = {
+  /**
+   * queries/approval-route-delegations.ts 의 resolveActingDelegateUserIds.
+   * 🔵 **빈 목록이 정상이다** — 「지금 대신할 사람이 없다」는 뜻이고, 그때 알림은
+   * 지정된 한 사람에게만 간다.
+   */
+  listRouteDelegatesFor: (approverUserId: string) => Promise<readonly string[]>;
+};
+
 export type RepairCaseApprovalNoticeDeps = ApprovalNoticeSendDeps &
-  ApprovalNoticeRecipientDeps & {
+  ApprovalNoticeRecipientDeps &
+  ApprovalRouteDelegateDeps & {
     /** queries/repair-case-approvals.ts 의 getCurrentApprovalsForCase. */
     readCurrentApprovals: (
       repairCaseId: string
     ) => Promise<readonly { approvalType: RepairCaseApprovalType; latest: ApprovalRowForNotice | null }[]>;
   };
 
-export type QuoteApprovalNoticeDeps = ApprovalNoticeSendDeps & {
-  /** queries/quote-approvals.ts 의 getQuoteApprovalProgress. */
-  readQuoteProgress: (quoteId: string) => Promise<{ latest: ApprovalRowForNotice | null } | null>;
-};
+export type QuoteApprovalNoticeDeps = ApprovalNoticeSendDeps &
+  ApprovalRouteDelegateDeps & {
+    /** queries/quote-approvals.ts 의 getQuoteApprovalProgress. */
+    readQuoteProgress: (quoteId: string) => Promise<{ latest: ApprovalRowForNotice | null } | null>;
+  };
 
 /**
  * 사람 번호 목록 → 포털 번호 목록 → 한 번의 왕복.
@@ -147,19 +177,57 @@ async function sendToUsers(
 }
 
 /**
- * 「지금 이 결재의 차례인 사람들」. 지정이 있으면 한 사람, 없으면 자격 있는
- * 사람 모두다(파일 머리말의 「판정을 새로 짓지 않는다」).
+ * 지정된 결재자의 **대리인들**을 묻는다. 🔴 **여기서 던지지 않는다.**
+ *
+ * 바깥(notify*Created)의 try 에 맡기면 위임 조회가 깨진 날 **지정된 사람까지 메일을
+ * 못 받는다.** 이 조각이 들어오기 전에는 그 사람에게 언제나 갔으므로, 넓히려고 더한
+ * 것이 이미 되던 일을 가져가는 꼴이 된다. 그래서 한 겹 더 감싼다 — 위임 조회가
+ * 죽으면 **2026-10-26 이전과 똑같이** 지정된 한 사람에게만 간다.
+ *
+ * 🔵 남기는 것은 결재자의 A/S 사용자 번호뿐이다(아래 sendToUsers 와 같은 로그 규약).
+ */
+async function readRouteDelegates(
+  approverUserId: string,
+  deps: ApprovalRouteDelegateDeps
+): Promise<readonly string[]> {
+  try {
+    return await deps.listRouteDelegatesFor(approverUserId);
+  } catch (error) {
+    console.error(
+      "[sso] 결재권 위임을 읽지 못해 대리인에게는 알리지 못했습니다:",
+      approverUserId,
+      error instanceof Error ? error.name : "unknown"
+    );
+    return [];
+  }
+}
+
+/**
+ * 「지금 이 결재의 차례인 사람들」. 지정이 있으면 그 사람과 그 사람의 대리인들,
+ * 없으면 자격 있는 사람 모두다(파일 머리말의 「판정을 새로 짓지 않는다」).
  */
 async function resolveRecipients(
   kind: RepairCaseApprovalType | "QUOTE_APPROVAL",
   assignedApproverUserId: string | null,
-  deps: ApprovalNoticeRecipientDeps
+  deps: ApprovalNoticeRecipientDeps & ApprovalRouteDelegateDeps
 ): Promise<string[]> {
   // 지정이 있으면 거기서 끝이다 — 결재선을 타는 행은 전부 이 길로 간다.
   // 🔴 최고관리자 비상구(mayDecideAssignedApproval)를 여기서 펴지 않는다. 그것은
   //    「막히면 대신 처리할 수 있다」는 뒷문이지 「메일을 받아야 할 사람」이
   //    아니다 — 펴면 결재가 생길 때마다 최고관리자 전원에게 메일이 간다.
-  if (assignedApproverUserId) return [assignedApproverUserId];
+  // 🔴 대리인은 **다르다.** 그 사람은 「막히면」이 아니라 **맡긴 사람이 자리를 비운
+  //    동안 그 단계를 누르라고 세워 둔** 사람이고, 그게 이 기능이 있는 까닭이다.
+  //    못 받으면 기능이 반만 도는 셈이라 2026-10-26 에 여기로 넓혔다.
+  if (assignedApproverUserId) {
+    const delegates = await readRouteDelegates(assignedApproverUserId, deps);
+    // 🔴 **지정된 사람이 언제나 맨 앞에 남는다.** 더하기만 하고 빼지 않는다.
+    // 🔵 중복은 여기서 걷는다. 뒤의 sendToUsers 도 한 번 더 걷지만, 이 함수의
+    //    돌려주는 값이 곧 「누구에게 가는가」라 그것만 보고 말할 수 있어야 한다.
+    //    겹치는 기간의 위임이 여러 줄이어도 대리인 번호는 한 번만 나오고
+    //    (순수 함수가 거른다), 대리인이 결재자 본인일 수는 없다(표의 CHECK).
+    //    그래도 두 벌이 섞이는 자리이므로 Set 하나로 못 박아 둔다.
+    return Array.from(new Set([assignedApproverUserId, ...delegates]));
+  }
 
   if (kind === "REPAIR_INSPECTION") {
     const candidates = await deps.listInspectionApprovers();
@@ -250,7 +318,11 @@ export async function notifyQuoteApprovalCreated(
     // 견적서 결재는 언제나 지정이 있다. 없으면 resolveRecipients 가 빈 목록과
     // 로그 한 줄을 돌려준다 — 그래서 여기에 가를 것이 없다.
     const recipients = await resolveRecipients("QUOTE_APPROVAL", latest.assignedApproverUserId, {
-      // 🔴 견적서 결재는 지정 없는 길이 없으므로 아래 셋은 **불릴 수 없다.**
+      // 🔴 **이것만은 진짜로 불린다.** 견적서 결재는 언제나 지정이 있으므로 위임
+      //    조회가 도는 길은 오히려 여기가 확실하다 — 비워 두면 견적서 결재의
+      //    대리인은 영영 메일을 못 받는다.
+      listRouteDelegatesFor: deps.listRouteDelegatesFor,
+      // 🔴 견적서 결재는 지정 없는 길이 없으므로 아래 넷은 **불릴 수 없다.**
       //    그래도 자리를 비워 두지 않고 「불리면 빈 목록」으로 채운다 — 나중에
       //    지정 없는 길이 생기는 날 조용히 아무에게도 안 가는 대신, 위의 경고가
       //    로그에 남는다.

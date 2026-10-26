@@ -11,6 +11,7 @@ import {
   requestQuoteApproval,
   type QuoteApprovalFailureCode,
 } from "@/lib/db/mutations/quote-approvals";
+import { resolveActingDelegateUserIds } from "@/lib/db/queries/approval-route-delegations";
 import { getQuoteApprovalProgress } from "@/lib/db/queries/quote-approvals";
 import { getSsoSubjectForUser } from "@/lib/db/queries/users";
 import { notifyQuoteApprovalCreated } from "@/lib/server/integration/approval-created-notice";
@@ -141,10 +142,20 @@ function revalidateQuoteApprovalSurfaces(quoteId: string): void {
  * 🔴 견적서 결재는 **언제나 지정이 있다**(절차가 없으면 요청 자체가 거절된다).
  * 그래서 접수 건 쪽과 달리 「자격 있는 사람 모두」를 찾는 조회를 꽂지 않는다 —
  * 그 길이 쓰이면 notifyQuoteApprovalCreated 가 경고를 남긴다.
+ *
+ * 🔴 **위임 조회는 그와 반대로 꼭 꽂아야 한다.** 언제나 지정이 있다는 말은 곧
+ * 견적서 결재가 **전부 결재선을 탄다**는 말이고, 결재선 단계를 대신 누르는 사람이
+ * 바로 그 위임의 대리인이다(2026-10-26). 안 꽂으면 그 사람은 결재가 생긴 줄도
+ * 모른 채 종을 눌러 봐야 알게 된다 — 자리를 비운 사람을 대신하라고 세운 기능이
+ * 반만 도는 셈이다.
  */
 async function notifyPortalOfQuoteApprovalTurn(quoteId: string): Promise<void> {
   await notifyQuoteApprovalCreated(quoteId, {
     readQuoteProgress: getQuoteApprovalProgress,
+    // 그대로 못 꽂고 감싸는 까닭은 접수 건 쪽 같은 도우미의 주석에 있다 — 그 조회가
+    // 「지금」을 인자로 받는다(트랜잭션 안에서 읽는 자리와 같은 함수라서다).
+    listRouteDelegatesFor: (approverUserId) =>
+      resolveActingDelegateUserIds(approverUserId, new Date()),
     readPortalSubject: getSsoSubjectForUser,
     notifyPortal: notifyPortalApprovalCreated,
   });

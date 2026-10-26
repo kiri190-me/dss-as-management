@@ -21,9 +21,12 @@ import type { ShipmentDelegationDisplayStatus } from "./shipment-delegation-stat
  * 그쪽은 남의 시스템 사람을 FK 없이 가리켜야 해서 그런 것이지 그 모양이 더 나아서가
  * 아니다. **여기에 포털 번호를 넘기면 이 함수들은 오류 없이 영원히 빈 답을 준다.**
  *
- * 🔵 이 조각은 **표와 판정까지**다. 실제 결재 판정·화면 연결은 다음 조각이고, 그때
- * 쓰는 자리는 아래 `actingApproverUserIds` 하나다 — 「누를 수 있나」가 두 벌로
- * 적히지 않게 하려는 것이다.
+ * ── 🔴 방향이 둘이다. 어느 쪽을 묻는지 먼저 가려라 ──────────────────────
+ * 「누를 수 있나」(인가)는 `actingApproverUserIds` **하나**가 정한다 — 두 벌로 적히지
+ * 않게 하려는 것이고, 결재 mutation·목록·화면이 전부 그것을 쓴다(2026-10-26 연결 완료).
+ * 그 반대 방향인 `actingDelegateUserIdsFor`(「나를 누가 대신하나」)는 **인가가 아니다.**
+ * 결재가 생겼을 때 **알림을 받을 사람**을 넓히는 데만 쓴다. 두 함수는 같은 규칙을
+ * 공유하지만 하는 일이 다르니, 고칠 때 어느 쪽 이야기인지 먼저 가릴 것.
  * ============================================================================
  */
 
@@ -134,6 +137,53 @@ export function delegatorUserIdsFor(
     if (seen.has(delegation.delegatorUserId)) continue;
     seen.add(delegation.delegatorUserId);
     out.push(delegation.delegatorUserId);
+  }
+  return out;
+}
+
+/**
+ * 이 결재권자를 **지금 누가 대신할 수 있나** — 살아 있는 대리인들의 `users.id`.
+ *
+ * 🔴 **바로 위 `delegatorUserIdsFor` 와 방향이 반대다.** 그쪽은 「내가 누구를
+ * 대신하나」(대리인으로 좁혀 결재권자를 준다)이고, 이쪽은 「나를 누가 대신하나」
+ * (결재권자로 좁혀 대리인을 준다)다. 같은 표를 같은 규칙으로 읽지만 **거르는 칸이
+ * 반대**라, 섞어 쓰면 오류 없이 빈 목록이 돌아온다 — 그래서 이름에 방향을 적어 둔다.
+ *
+ * 2026-10-26 에 더했다. 쓰는 자리는 **결재가 생겼을 때 나가는 즉시 알림**이다
+ * (server/integration/approval-created-notice.ts). 그 전에는 단계에 적힌 한 사람에게만
+ * 가서, **자리를 비운 사람이 메일을 받고 대신 눌러야 할 사람은 못 받았다.**
+ *
+ * 규칙 넷은 위 함수와 **글자 그대로 같다**: 되돌린 줄 제외 · 끝은 포함하지 않음 ·
+ * 중복 없음 · 이어 붙지 않음. 그래서 「살아 있나」는 베껴 적지 않고
+ * `isActiveRouteDelegation` 하나에 맡기고, 여기서는 **방향만** 바꾼다.
+ *
+ * ── 🔴 이어 붙지 않는다. 이쪽에서도 같다 ────────────────────────────────
+ * A→B 와 B→C 가 둘 다 살아 있어도 **A 를 대신할 수 있는 사람은 B 뿐이다.** 알림을
+ * 이어 붙이면 더 나쁘다: C 는 A 의 단계를 누를 수 없는데(위 함수가 막는다) **A 에게
+ * 결재 차례가 왔다는 사실만 먼저 알게 된다.** 자격은 없고 알림만 가는 꼴이다.
+ *
+ * ── 🔴 결재권자 본인은 **여기 넣지 않는다** ─────────────────────────────
+ * 아래 `actingApproverUserIds` 가 본인을 맨 앞에 끼워 주는 것과 일부러 다르다. 그쪽은
+ * 돌려준 값이 그대로 `inArray` 에 들어가서 비면 안 되는 목록이고, 이쪽은 **「대리인이
+ * 있나」를 묻는 값**이다. 부르는 쪽은 결재권자 본인을 이미 손에 들고 있으므로 여기서
+ * 한 번 더 주면 그 쪽이 중복을 걷어 내야 한다.
+ *
+ * 🔴 **빈 목록이 정상이고, 그 뜻은 「지금 대신할 사람이 없다」다.** 그래서 아래 타입
+ * (`ActingApproverUserIds`)을 쓰지 않고 그냥 `string[]` 이다.
+ */
+export function actingDelegateUserIdsFor(
+  delegations: readonly ApprovalRouteDelegationPeriod[],
+  delegatorUserId: string,
+  now: Date
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const delegation of delegations) {
+    if (delegation.delegatorUserId !== delegatorUserId) continue;
+    if (!isActiveRouteDelegation(delegation, now)) continue;
+    if (seen.has(delegation.delegateUserId)) continue;
+    seen.add(delegation.delegateUserId);
+    out.push(delegation.delegateUserId);
   }
   return out;
 }

@@ -5,6 +5,7 @@ import { readSession } from "@/lib/auth/session";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { decideRepairCaseApproval, requestRepairCaseApproval } from "@/lib/db/mutations/repair-case-approvals";
+import { resolveActingDelegateUserIds } from "@/lib/db/queries/approval-route-delegations";
 import {
   getCurrentApprovalsForCase,
   listInspectionApproverCandidates,
@@ -127,6 +128,15 @@ async function notifyPortalOfApprovalTurn(
     listRepresentativeCandidates: listUsersForRepresentativeManagement,
     listDelegations: listShipmentDelegations,
     resolveShipmentDecide: resolveShipmentDecideAuthorization,
+    // 🔴 결재선 단계 위임 — 지정된 사람을 지금 대신할 수 있는 사람들(2026-10-26).
+    //    여기만 그대로 못 꽂고 한 겹 감싸는 것은 그 조회가 **「지금」을 인자로
+    //    받기** 때문이다(트랜잭션 안에서 읽는 자리와 같은 함수를 쓰려고 그렇게 돼
+    //    있다 — queries/approval-route-delegations.ts). 알림은 트랜잭션 밖이라
+    //    그 순간의 답이면 충분하다.
+    //    🔴 **옛 출하 대표 위임(listDelegations)과 다른 표다.** 둘은 쓰이는 때가
+    //    갈려 있어 한쪽으로 합칠 수 없다(표 머리말).
+    listRouteDelegatesFor: (approverUserId) =>
+      resolveActingDelegateUserIds(approverUserId, new Date()),
     readPortalSubject: getSsoSubjectForUser,
     notifyPortal: notifyPortalApprovalCreated,
   });

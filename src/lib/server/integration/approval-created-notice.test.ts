@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  actingDelegateUserIdsFor,
+  type ApprovalRouteDelegationPeriod,
+} from "@/lib/domain/approval-route-delegation";
+import {
   notifyQuoteApprovalCreated,
   notifyRepairCaseApprovalCreated,
   type QuoteApprovalNoticeDeps,
@@ -13,7 +17,9 @@ import {
  * ============================================================================
  * 2026-10-24. 여기서 재는 것은 둘이다:
  *  ① 「지금 차례인 사람」을 **새로 판정하지 않고** 이미 있는 조회로 고르는가 —
- *     지정이 있으면 한 사람, 없으면 자격 있는 사람들.
+ *     지정이 있으면 그 사람 **과 그 사람의 대리인들**, 없으면 자격 있는 사람들.
+ *     🔴 대리인은 2026-10-26 에 더했다. 그 전에는 지정된 한 사람에게만 가서
+ *     **자리를 비운 사람이 메일을 받고 대신 눌러야 할 사람은 못 받았다.**
  *  ② 무슨 일이 있어도 **던지지 않는가.** 부르는 자리는 결재가 이미 저장된
  *     뒤이고, 여기서 던지면 저장된 결재가 사람에게 실패로 보인다.
  *
@@ -33,6 +39,8 @@ function deps(overrides: Partial<RepairCaseApprovalNoticeDeps> = {}) {
     inspectionAsked: 0,
     representativesAsked: 0,
     shipmentDecideAsked: [] as string[],
+    /** 🔴 **누구의 대리인을 물었나.** 지정이 없을 때는 비어 있어야 한다. */
+    routeDelegatesAskedFor: [] as string[],
   };
   const base: RepairCaseApprovalNoticeDeps = {
     readCurrentApprovals: async () => [],
@@ -45,6 +53,10 @@ function deps(overrides: Partial<RepairCaseApprovalNoticeDeps> = {}) {
       return [];
     },
     listDelegations: async () => [],
+    listRouteDelegatesFor: async (approverUserId) => {
+      calls.routeDelegatesAskedFor.push(approverUserId);
+      return [];
+    },
     resolveShipmentDecide: async (userId) => {
       calls.shipmentDecideAsked.push(userId);
       return { allowed: false };
@@ -87,7 +99,7 @@ async function captureLogs<T>(run: () => Promise<T>): Promise<{ value: T; logged
   }
 }
 
-test("🔴 지정이 있으면 **그 한 사람**뿐이다 — 자격자 목록을 묻지도 않는다", async () => {
+test("🔴 지정이 있으면 **그 사람과 대리인들**뿐이다 — 지정 없는 길의 자격자 목록은 묻지도 않는다", async () => {
   const { deps: d, calls } = deps({
     readCurrentApprovals: current("REPAIR_INSPECTION", {
       status: "REQUESTED",
@@ -95,13 +107,201 @@ test("🔴 지정이 있으면 **그 한 사람**뿐이다 — 자격자 목록�
     }),
   });
 
+  // 기본 묶음은 「대리인 없음」이라, 여기서 나가는 것은 지정된 한 사람뿐이다.
   await notifyRepairCaseApprovalCreated("case-1", "REPAIR_INSPECTION", d);
 
   assert.deepEqual(calls.notified, [["portal-user-assigned"]]);
-  // 🔴 지정이 있는데도 자격자 전원을 묻는다면, 결재가 생길 때마다 관계없는
-  //    사람들에게 메일이 간다.
+  // 🔴 묻는 것은 **그 사람의 대리인**뿐이다. 「자격 있는 사람 전원」을 묻는 길은
+  //    지정이 없을 때의 것이고, 지정이 있는데 그 길로 가면 결재가 생길 때마다
+  //    관계없는 사람들에게 메일이 간다.
+  assert.deepEqual(calls.routeDelegatesAskedFor, ["user-assigned"]);
   assert.equal(calls.inspectionAsked, 0, "지정이 있는데 자격자 목록을 물었다");
   assert.equal(calls.representativesAsked, 0, "지정이 있는데 대표 목록을 물었다");
+});
+
+/* -------------------------------------------------------------------------- */
+/* 결재선 단계 위임 — 지정된 사람 **과 그 대리인들** (2026-10-26)                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * 🔴 **가짜 대답을 손으로 적지 않고 진짜 규칙을 통과시킨다.** 위임 줄을 그대로 주고
+ * domain/approval-route-delegation.ts 의 `actingDelegateUserIdsFor` 를 꽂는다 —
+ * 운영에서 꽂히는 조회(queries/approval-route-delegations.ts 의
+ * `resolveActingDelegateUserIds`)가 하는 일이 정확히 그것이기 때문이다. 여기에
+ * `async () => ["user-delegate"]` 를 적어 두면 「기간이 지나면 안 간다」 같은 시험이
+ * 규칙이 아니라 **그 손글씨**를 재게 되고, 규칙이 뒤집혀도 초록으로 통과한다.
+ *
+ * 🔵 DB 쪽이 `revoked_at IS NULL AND ends_at > now` 로 한 번 더 좁히는 것은 흉내 내지
+ *    않는다. 그 좁히기가 지우는 줄은 순수 함수가 어차피 버리는 줄뿐이라 답이 같고(그
+ *    함수 주석), 흉내 내면 같은 조건이 시험에 두 벌 적힌다.
+ */
+const 지금 = new Date("2026-03-15T00:00:00.000Z");
+
+/** 가짜 위임 한 줄. 기본은 **지금 살아 있는** 「지정자 → 대리인」이다. */
+function 위임(
+  overrides: Partial<ApprovalRouteDelegationPeriod> = {}
+): ApprovalRouteDelegationPeriod {
+  return {
+    delegatorUserId: "user-assigned",
+    delegateUserId: "user-delegate",
+    startsAt: new Date("2026-03-10T00:00:00.000Z"),
+    endsAt: new Date("2026-03-20T00:00:00.000Z"),
+    revokedAt: null,
+    ...overrides,
+  };
+}
+
+/** 그 줄들을 **진짜 규칙으로** 걸러 돌려주는 조회. */
+function 위임조회(rows: readonly ApprovalRouteDelegationPeriod[]) {
+  return async (approverUserId: string) => actingDelegateUserIdsFor(rows, approverUserId, 지금);
+}
+
+/** 지정이 있는 검수 결재 하나 — 아래 시험들이 공통으로 쓰는 자리. */
+function 지정된결재(rows: readonly ApprovalRouteDelegationPeriod[]) {
+  return deps({
+    readCurrentApprovals: current("REPAIR_INSPECTION", {
+      status: "REQUESTED",
+      assignedApproverUserId: "user-assigned",
+    }),
+    listRouteDelegatesFor: 위임조회(rows),
+  });
+}
+
+test("🔴 지정된 사람의 **대리인에게도** 간다 — 지정된 사람은 그대로 남는다", async () => {
+  const { deps: d, calls } = 지정된결재([위임()]);
+
+  await notifyRepairCaseApprovalCreated("case-1", "REPAIR_INSPECTION", d);
+
+  assert.equal(calls.notified.length, 1, "사람마다 따로 포털을 불렀다");
+  assert.deepEqual(
+    calls.notified[0],
+    ["portal-user-assigned", "portal-user-delegate"],
+    "🔴 지정된 사람이 빠졌거나 대리인이 안 실렸다"
+  );
+});
+
+test("🔴 대리인이 둘이면 둘 다 — 두 사람이 동시에 대신할 수 있다", async () => {
+  const { deps: d, calls } = 지정된결재([
+    위임({ delegateUserId: "user-delegate-1" }),
+    위임({ delegateUserId: "user-delegate-2" }),
+  ]);
+
+  await notifyRepairCaseApprovalCreated("case-1", "REPAIR_INSPECTION", d);
+
+  assert.deepEqual(calls.notified[0].sort(), [
+    "portal-user-assigned",
+    "portal-user-delegate-1",
+    "portal-user-delegate-2",
+  ]);
+});
+
+test("🔴 기간이 지난 위임의 대리인에게는 안 간다 — 살아 있었다면 갔을 줄이다", async () => {
+  const 끝난줄 = 위임({
+    startsAt: new Date("2026-02-01T00:00:00.000Z"),
+    endsAt: new Date("2026-02-10T00:00:00.000Z"),
+  });
+  // 🔵 표본이 비어서 공짜로 통과하지 않게 — **기간만 달랐다면** 갔다는 것을 먼저 본다.
+  const { deps: 살아있을때, calls: 살아있을때기록 } = 지정된결재([위임()]);
+  await notifyRepairCaseApprovalCreated("case-1", "REPAIR_INSPECTION", 살아있을때);
+  assert.ok(
+    살아있을때기록.notified[0].includes("portal-user-delegate"),
+    "표본이 틀렸다 — 살아 있는 줄인데도 대리인에게 안 갔다"
+  );
+
+  const { deps: d, calls } = 지정된결재([끝난줄]);
+  await notifyRepairCaseApprovalCreated("case-1", "REPAIR_INSPECTION", d);
+
+  assert.deepEqual(calls.notified, [["portal-user-assigned"]], "🔴 끝난 위임의 대리인에게 갔다");
+});
+
+test("🔴 되돌린 위임의 대리인에게는 안 간다 — 되돌림만 없었다면 갔을 줄이다", async () => {
+  const 되돌린줄 = 위임({ revokedAt: new Date("2026-03-12T00:00:00.000Z") });
+  // 표본 확인 — 같은 줄에서 되돌림만 지우면 대리인이 나온다.
+  assert.deepEqual(actingDelegateUserIdsFor([{ ...되돌린줄, revokedAt: null }], "user-assigned", 지금), [
+    "user-delegate",
+  ]);
+
+  const { deps: d, calls } = 지정된결재([되돌린줄]);
+  await notifyRepairCaseApprovalCreated("case-1", "REPAIR_INSPECTION", d);
+
+  assert.deepEqual(calls.notified, [["portal-user-assigned"]], "🔴 되돌린 위임의 대리인에게 갔다");
+});
+
+test("🔴 이어 붙지 않는다 — A→B · B→C 일 때 C 에게는 안 간다", async () => {
+  const rows = [
+    위임({ delegatorUserId: "user-assigned", delegateUserId: "user-b" }),
+    위임({ delegatorUserId: "user-b", delegateUserId: "user-c" }),
+  ];
+  // 🔵 두 겹이 **둘 다 살아 있는** 표본인지 먼저 — 하나라도 죽어 있으면 이 시험은
+  //    아무것도 지키지 못한다.
+  assert.deepEqual(actingDelegateUserIdsFor(rows, "user-assigned", 지금), ["user-b"]);
+  assert.deepEqual(actingDelegateUserIdsFor(rows, "user-b", 지금), ["user-c"]);
+
+  const { deps: d, calls } = 지정된결재(rows);
+  await notifyRepairCaseApprovalCreated("case-1", "REPAIR_INSPECTION", d);
+
+  // 여기가 본론 — C 는 그 단계를 누를 수 없는데 메일만 받는 꼴이 되면 안 된다.
+  assert.deepEqual(calls.notified, [["portal-user-assigned", "portal-user-b"]]);
+});
+
+test("🔴 대리인이 이미 목록에 있어도 **중복이 안 생긴다**", async () => {
+  // 🔴 조회가 같은 번호를 두 번 주거나 지정된 사람 본인을 섞어 줘도, 나가는 목록은
+  //    한 사람당 한 번이다. 중복이 실리면 포털이 같은 사람에게 두 번 묻는다.
+  const { deps: d, calls } = deps({
+    readCurrentApprovals: current("REPAIR_INSPECTION", {
+      status: "REQUESTED",
+      assignedApproverUserId: "user-assigned",
+    }),
+    listRouteDelegatesFor: async () => ["user-delegate", "user-delegate", "user-assigned"],
+  });
+
+  await notifyRepairCaseApprovalCreated("case-1", "REPAIR_INSPECTION", d);
+
+  assert.deepEqual(calls.askedSubjectsFor, ["user-assigned", "user-delegate"]);
+  assert.deepEqual(calls.notified, [["portal-user-assigned", "portal-user-delegate"]]);
+});
+
+test("🔴 지정이 **없으면** 위임을 묻지도 않는다 — 대표 + 옛 위임 그대로다", async () => {
+  // 🔴 결재선을 타지 않는 길의 동작은 이 조각에서 한 글자도 안 바뀐다. 옛 출하 대표
+  //    위임(shipment_approval_delegations)과 결재선 단계 위임은 **다른 표**이고,
+  //    여기서 새 조회를 끼우면 두 기능이 섞인다.
+  const { deps: d, calls } = deps({
+    readCurrentApprovals: current("FINAL_SHIPMENT", {
+      status: "REQUESTED",
+      assignedApproverUserId: null,
+    }),
+    listRepresentativeCandidates: async () => [{ id: "rep-ok", isShipmentRepresentative: true }],
+    listDelegations: async () => [{ delegateUserId: "old-delegate", status: "ACTIVE" }],
+    resolveShipmentDecide: async () => ({ allowed: true }),
+  });
+
+  await notifyRepairCaseApprovalCreated("case-1", "FINAL_SHIPMENT", d);
+
+  assert.deepEqual(calls.routeDelegatesAskedFor, [], "🔴 지정이 없는데 결재선 위임을 물었다");
+  assert.equal(calls.notified.length, 1);
+  assert.deepEqual(calls.notified[0].sort(), ["portal-old-delegate", "portal-rep-ok"]);
+});
+
+test("🔴 위임 조회가 터져도 **지정된 사람에게는 간다** — 넓히려다 되던 일을 가져가지 않는다", async () => {
+  const { deps: d, calls } = deps({
+    readCurrentApprovals: current("REPAIR_INSPECTION", {
+      status: "REQUESTED",
+      assignedApproverUserId: "user-assigned",
+    }),
+    listRouteDelegatesFor: async () => {
+      throw new Error("DB 가 죽었다");
+    },
+  });
+
+  const { logged } = await captureLogs(() =>
+    notifyRepairCaseApprovalCreated("case-1", "REPAIR_INSPECTION", d)
+  );
+
+  // 🔴 2026-10-26 이전과 똑같이 지정된 한 사람에게 간다. 바깥 try 에 맡겼다면
+  //    이 자리에서 **아무에게도** 안 갔을 것이다.
+  assert.deepEqual(calls.notified, [["portal-user-assigned"]]);
+  // 조용히 삼키지 않는다 — 대리인이 「메일이 안 와요」 했을 때 쫓아갈 한 줄.
+  assert.match(logged, /결재권 위임을 읽지 못해/);
 });
 
 test("🔴 가장 최근 행이 REQUESTED 가 아니면 아무것도 안 나간다 — 아무의 차례도 아니다", async () => {
@@ -307,9 +507,13 @@ test("🔴 무슨 일이 있어도 던지지 않는다 — 조회가 터져도 �
 /* -------------------------------------------------------------------------- */
 
 function quoteDeps(overrides: Partial<QuoteApprovalNoticeDeps> = {}) {
-  const calls = { notified: [] as string[][] };
+  const calls = { notified: [] as string[][], routeDelegatesAskedFor: [] as string[] };
   const base: QuoteApprovalNoticeDeps = {
     readQuoteProgress: async () => null,
+    listRouteDelegatesFor: async (approverUserId) => {
+      calls.routeDelegatesAskedFor.push(approverUserId);
+      return [];
+    },
     readPortalSubject: async (userId) => `portal-${userId}`,
     notifyPortal: async (subjects) => {
       calls.notified.push([...subjects]);
@@ -319,7 +523,7 @@ function quoteDeps(overrides: Partial<QuoteApprovalNoticeDeps> = {}) {
   return { deps: { ...base, ...overrides }, calls };
 }
 
-test("견적서 결재 — 지정된 그 한 사람에게 간다", async () => {
+test("견적서 결재 — 지정된 그 사람에게 간다(대리인이 없을 때)", async () => {
   const { deps: d, calls } = quoteDeps({
     readQuoteProgress: async () => ({
       latest: { status: "REQUESTED", assignedApproverUserId: "user-step-2" },
@@ -329,6 +533,28 @@ test("견적서 결재 — 지정된 그 한 사람에게 간다", async () => {
   await notifyQuoteApprovalCreated("quote-1", d);
 
   assert.deepEqual(calls.notified, [["portal-user-step-2"]]);
+  assert.deepEqual(calls.routeDelegatesAskedFor, ["user-step-2"]);
+});
+
+test("🔴 견적서 결재도 **대리인에게 간다** — 전부 결재선을 타므로 오히려 이 길이 확실하다", async () => {
+  // 🔴 견적서 결재는 절차가 없으면 요청 자체가 거절되므로 **언제나 지정이 있다.**
+  //    곧 전부 결재선을 탄다는 뜻이고, 그 단계를 대신 누르라고 세운 사람이 바로
+  //    결재선 단계 위임의 대리인이다. 여기 조회를 안 꽂으면 그 사람은 결재가 생긴
+  //    줄도 모른 채 종을 눌러 봐야 알게 된다.
+  const { deps: d, calls } = quoteDeps({
+    readQuoteProgress: async () => ({
+      latest: { status: "REQUESTED", assignedApproverUserId: "user-step-2" },
+    }),
+    listRouteDelegatesFor: 위임조회([
+      위임({ delegatorUserId: "user-step-2", delegateUserId: "user-stand-in" }),
+      // 남의 줄 — 섞여 있어도 안 실린다.
+      위임({ delegatorUserId: "user-step-1", delegateUserId: "user-other" }),
+    ]),
+  });
+
+  await notifyQuoteApprovalCreated("quote-1", d);
+
+  assert.deepEqual(calls.notified, [["portal-user-step-2", "portal-user-stand-in"]]);
 });
 
 test("견적서 결재 — 사슬이 끝났거나(승인) 끊겼으면(반려) 아무것도 안 나간다", async () => {
