@@ -1174,3 +1174,21 @@ src/lib/domain/notification-dismissal.test.ts
 # 🔵 본문에 실제로 무엇이 담기는지(셋이 제 글자로 · 모르면 칸이 아예 없다)는 같은 목록의
 # lib/server/inventory-gateway.test.ts 가 통로를 진짜로 불러 잰다.
 src/lib/server/actions/inventory-stock-request-workflow-kind.test.ts
+
+# 결재선 **단계**를 대신 눌러 줄 사람 — 기간 기반 위임의 순수 규칙(2026-10-26).
+# 🔴 옛 `shipment_approval_delegations`(출하 대표 위임)와 **다른 표**다. 그쪽은 결재선을
+# 안 짜 뒀을 때만 쓰이고, 이쪽은 결재선을 쓸 때 단계를 대신 누른다.
+# 여기서 재는 것: 끝을 포함하지 않는 반열린 구간(잇대어 적은 두 위임이 한순간 둘 다
+# 살아 있지 않은가) · 되돌린 줄은 기간 안이어도 죽었는가 · 🔴 A→B·B→C 가 **안 이어지는가**
+# · 본인은 언제나 목록에 있는가(빈 목록이면 DB 쪽 inArray 가 통째로 거짓이 된다) ·
+# 겹친 줄이 여럿이어도 중복이 안 생기는가 · 화면 낱말 넷이 판정과 어긋나지 않는가.
+src/lib/domain/approval-route-delegation.test.ts
+
+# 위 위임 표(0119)의 바탕 — 틀려도 그 자리에서는 아무 오류가 안 나는 것들.
+# 🔴 마이그레이션이 **만들기만 하는가**(옛 위임 표를 한 글자도 언급하지 않는가) ·
+# drizzle 의 sql 템플릿이 상수를 `$1` 로 구워 놓지 않았는가(적용하는 날에야 터진다) ·
+# 겹침을 막는 유니크/EXCLUDE 가 슬그머니 들어오지 않았는가(겹침은 정상이다) ·
+# 사람 참조 넷이 전부 ON DELETE restrict 인가 · 🔴 되돌림 두 칸이 짝으로 묶여 있는가
+# (판정 함수가 시각 한 칸만 보므로, 짝 CHECK 가 사라지면 「되돌렸는데 살아 있는」 줄이 난다) ·
+# 판정 함수가 보는 칸 이름이 표에 있는가.
+src/lib/db/schema/approval-route-delegations-safety.test.ts
