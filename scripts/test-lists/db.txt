@@ -309,3 +309,20 @@ src/lib/server/services/release-domestic-order.integration.test.ts
 # 🔴 격리 이름: 접수 월 "9309" · 제품 모델 "DOAPI-TEST-" · 고객사 "AS-TEST-DOAPI-" ·
 # 계정 "doapi-test-"(씨앗 계정의 sso_subject 를 건드리지 않는다).
 src/app/api/v1/domestic-orders/completion-route.integration.test.ts
+
+
+# ── 결재선 **단계** 위임의 쓰기·읽기 통로 (2026-10-26) ───────────────────
+# 표 `approval_route_delegations`(0119). 🔴 옛 `shipment_approval_delegations`(출하 대표
+# 위임)를 한 줄도 건드리지 않는다 — 그 표를 import 조차 하지 않는다. 여기서 재는 것:
+# 🔴 인가 — 본인 / 권한 없는 남(제삼자·ADMIN) / 관리 권한자, 그리고 **관리자가 자기를
+# 대리인으로** 세우는 것은 막지 않는다(2026-10-26 결정이라 거절되기 시작하면 걸린다) ·
+# 🔴 되돌림 **두 칸이 함께** 채워진다(표의 짝 CHECK) · 대리인은 제 위임을 못 거둔다 ·
+# 두 번 되돌리기는 CONFLICT 이고 처음 기록을 덮어쓰지 않는다 · 이미 끝난 기간은
+# DELEGATION_EXPIRED · 🔴 **겹치는 기간이 거절되지 않는다**(옛 위임과 반대다 — 본보기를
+# 옮겨 적다 겹침 검사가 따라 들어오면 여기서 걸린다) · 감사 기록이 만들기·되돌리기
+# 각각 한 줄이고 **이름까지** 남는다 · 🔴 「누를 수 있는 자리들」이 본인 + 살아 있는
+# 위임만 주고, **트랜잭션을 넘기면 그 트랜잭션의 되돌리기를 본다**(안 보이면 되돌린
+# 위임으로 결재가 통과한다).
+# 🔴 격리 이름: 계정 "routedeleg-test-". 접수 건을 하나도 만들지 않는다(접수번호 차례와
+# 공유 폴더에 손이 닿지 않는다). 치우기가 남의 줄을 안 지우는지는 지문으로 증명한다.
+src/lib/db/mutations/approval-route-delegations.integration.test.ts

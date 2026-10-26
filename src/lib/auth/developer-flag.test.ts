@@ -1057,7 +1057,7 @@ test("🔴 대표 지정 화면 둘의 prop 이름이 값의 뜻과 같다 — i
   }
 });
 
-test("🔴 화면 페이지와 서버 mutation·액션 다섯 파일이 같은 영역 열쇠·같은 수준을 쓴다", () => {
+test("🔴 화면 페이지와 서버 mutation·액션 여섯 파일이 같은 영역 열쇠·같은 수준을 쓴다", () => {
   // 열쇠나 수준이 한 곳만 달라지면 개발자에게 또 갈린다 — 그때 증상은
   // 「단추는 보이는데 저장은 거절」이고, 화면에는 아무 설명도 남지 않는다.
   //
@@ -1065,12 +1065,20 @@ test("🔴 화면 페이지와 서버 mutation·액션 다섯 파일이 같은 �
   // 절차」가 들어올 때 같은 열쇠를 쓰는 자리가 둘 늘었는데 이 목록에 없어서,
   // 새 자리 둘이 조용히 안 지켜지고 있었다 — 통과하니까 저절로 알려 주지도
   // 않는다. 같은 열쇠로 판정하는 자리를 새로 만들면 **여기에도 넣을 것.**
+  //
+  // 🔴 2026-10-26: 「결재선 **단계** 위임」(approval_route_delegations)이 여섯째
+  // 파일로 들어와 6 → 8 이 됐다. 같은 열쇠를 쓰는 까닭은 **새 권한 영역을 만들지
+  // 않기로 해서**다 — 새 영역을 만들면 운영 DB 의 role_permissions 에 그 영역의 행이
+  // 한 줄도 없어서, 배포한 날 아무도 그 화면을 못 쓴다. 그리고 「결재선을 고칠 수 있는
+  // 사람」과 「그 단계를 대신 누를 사람을 정할 수 있는 사람」은 한 물음의 두 얼굴이라
+  // 갈려서는 안 된다(mutations/approval-route-delegations.ts 머리말).
   const sources = [
     "src/app/(app)/users/page.tsx",
     "src/lib/db/mutations/shipment-representatives.ts",
     "src/lib/db/mutations/shipment-delegations.ts",
     "src/lib/db/mutations/shipment-approval-routes.ts",
     "src/lib/server/actions/shipment-approval-routes.ts",
+    "src/lib/db/mutations/approval-route-delegations.ts",
   ];
 
   const pattern = /hasPermission\(\s*\w+(?:\.\w+)*\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)/g;
@@ -1085,8 +1093,8 @@ test("🔴 화면 페이지와 서버 mutation·액션 다섯 파일이 같은 �
     total += found.length;
   }
   // 화면 1 + 대표 지정 1 + 위임 생성·철회 2 + 절차 저장(mutation) 1 +
-  // 절차 저장(서버 액션) 1 = 6. 늘거나 줄면 새 자리가 생긴 것이므로 같은
-  // 열쇠·수준인지 사람이 한 번 봐야 한다.
+  // 절차 저장(서버 액션) 1 + **결재선 단계 위임 생성·철회 2** = 8. 늘거나 줄면 새
+  // 자리가 생긴 것이므로 같은 열쇠·수준인지 사람이 한 번 봐야 한다.
   //
   // 🔴 위 정규식은 **주석과 코드를 구별하지 못한다.** 어느 파일이든 주석에
   // `hasPermission(actor, "…", "…")` 을 호출 모양 그대로 적어 두면 그 문장이
@@ -1094,7 +1102,7 @@ test("🔴 화면 페이지와 서버 mutation·액션 다섯 파일이 같은 �
   // 깨진다** — 덫이 진짜 신호가 아니라 잡음이 된다. 설명이 필요하면 호출 모양이
   // 아니라 문장으로 적을 것(mutations/shipment-approval-routes.ts 머리말이
   // 그렇게 적혀 있고, 그 이유도 거기 적혀 있다).
-  assert.equal(total, 6, `대표 지정 판정 자리의 수가 달라졌다: ${total}`);
+  assert.equal(total, 8, `대표 지정 판정 자리의 수가 달라졌다: ${total}`);
 });
 
 /**

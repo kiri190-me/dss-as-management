@@ -1192,3 +1192,11 @@ src/lib/domain/approval-route-delegation.test.ts
 # (판정 함수가 시각 한 칸만 보므로, 짝 CHECK 가 사라지면 「되돌렸는데 살아 있는」 줄이 난다) ·
 # 판정 함수가 보는 칸 이름이 표에 있는가.
 src/lib/db/schema/approval-route-delegations-safety.test.ts
+
+# 위 위임에 들어오는 값의 **모양** 검사(2026-10-26). 🔴 옛 `shipment-delegation-input.ts`
+# 의 복사본이 아니다 — 사유가 널이 아니라 **빈 글자**이고(이 표의 reason 은 NOT NULL
+# DEFAULT ''), 널이 들어가면 깨끗한 결과가 아니라 날것의 DB 오류로 나간다. 그 차이를
+# 되돌려 놓아도 tsc 는 침묵하므로, 두 함수를 **나란히 불러** 갈린 곳(사유)과 갈리지
+# 않은 곳(기간 경계)을 함께 못 박는다. 🔵 지난 날짜를 막지 않는 것도 여기서 지킨다 —
+# 막으려면 순수 층이 「지금」을 알아야 하고, 그러면 같은 입력의 답이 때마다 달라진다.
+src/lib/validation/approval-route-delegation-input.test.ts
