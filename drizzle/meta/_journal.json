@@ -841,6 +841,13 @@
       "when": 1792987752805,
       "tag": "0119_approval_route_delegations",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1793012883606,
+      "tag": "0120_quote_approval_delegated_from",
+      "breakpoints": true
     }
   ]
 }

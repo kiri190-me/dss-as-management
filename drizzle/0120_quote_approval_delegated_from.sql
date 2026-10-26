@@ -1,0 +1,2 @@
+ALTER TABLE "quote_approvals" ADD COLUMN "delegated_from_user_id" uuid;--> statement-breakpoint
+ALTER TABLE "quote_approvals" ADD CONSTRAINT "quote_approvals_delegated_from_user_id_users_id_fk" FOREIGN KEY ("delegated_from_user_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;
