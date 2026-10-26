@@ -405,6 +405,34 @@ describe("결재 탭이 놓인 자리", () => {
     assert.match(panelSource, /mayDecideAssignedApproval/);
     assert.match(panelSource, /from "@\/lib\/auth\/approval-assignment"/);
   });
+
+  test("🔴 결재선 단계 위임도 **서버에서 받아** 같은 함수에 넘긴다 — 화면이 DB 를 읽지 않는다", () => {
+    // 위임 목록은 `approval_route_delegations` 를 읽어야 나온다. 클라이언트가
+    // 그것을 읽게 두지 않는 것은 actingUser 를 서버에서 만들어 내려보내는 것과
+    // 같은 이유다(페이지가 읽어 프롭으로 준다).
+    assert.match(flat(editPageSource), /actingApproverUserIds=\{actingApproverUserIds\}/);
+    assert.match(flat(editPageSource), /resolveActingApproverUserIds\(actingUser\.id/);
+    // 화면은 받은 목록을 **공용 관문에 그대로 넘기기만** 한다 — 「누가 누를 수
+    // 있나」를 여기서 다시 계산하면 서버와 갈라진다.
+    assert.doesNotMatch(panelSource, /actingApproverUserIds\.includes\(/);
+  });
+
+  test("🔴 「대신 처리」 안내가 **까닭에 따라 둘**이다 — 위임받은 사람에게 「최고관리자 권한으로」라고 말하지 않는다", () => {
+    // 2026-10-26 전에는 비상구 하나뿐이라 문장도 하나였다. 위임이 붙은 뒤에도 그
+    // 문장만 남으면, 위임받은 사람은 **자기가 왜 누를 수 있는지** 끝내 모른다.
+    assert.ok(
+      panelSource.includes("위임받은 결재권으로 대신 처리합니다."),
+      "위임 쪽 안내가 없다"
+    );
+    assert.ok(
+      panelSource.includes("최고관리자 권한으로 대신 처리합니다."),
+      "비상구 쪽 안내가 사라졌다"
+    );
+    // 어느 쪽인지는 **기록에 적을 값을 정하는 그 함수**가 가른다 — 화면이 따로
+    // 판정하면 안내와 기록이 서로 다른 말을 하는 날이 온다.
+    assert.match(flat(panelSource), /delegatedFromUserId\s*\?\s*`지금 차례는/);
+    assert.match(panelSource, /delegatedFromUserIdFor\(/);
+  });
 });
 
 /*

@@ -13,7 +13,13 @@ import {
   QUOTE_APPROVAL_ROUTE_MISSING_NOTICE,
   QUOTE_APPROVAL_STATE_DESCRIPTIONS,
 } from "./quote-approval-texts";
-import { mayDecideAssignedApproval, standsInForAssignedApprover } from "@/lib/auth/approval-assignment";
+import {
+  approvalFollowsRoute,
+  delegatedFromUserIdFor,
+  mayDecideAssignedApproval,
+  NO_ROUTE_DELEGATIONS,
+  standsInForAssignedApprover,
+} from "@/lib/auth/approval-assignment";
 import type { QuoteApprovalState } from "@/lib/domain/quote-approval-rules";
 import type { QuoteApprovalRecordRow } from "@/lib/db/queries/quote-approvals";
 import type { ShipmentApprovalRouteStepList } from "@/lib/db/queries/shipment-approval-routes";
@@ -125,6 +131,7 @@ export default function QuoteApprovalPanel({
   isRouteConfigured,
   currentRouteSteps,
   actingUser,
+  actingApproverUserIds,
 }: {
   quoteId: string;
   /**
@@ -147,20 +154,46 @@ export default function QuoteApprovalPanel({
   /** 현재 판의 단계들 — 올리기 전에 누구를 거치는지 보여 준다. */
   currentRouteSteps: readonly QuoteApprovalRouteStepPreview[];
   actingUser: QuoteApprovalActingUser;
+  /**
+   * 🔴 지금 보고 있는 사람이 **대신할 수 있는 결재자 id 전부**(맨 앞은 본인).
+   * 결재선 단계 위임(`approval_route_delegations`)을 서버(page.tsx)가 읽어
+   * 내려준다 — 클라이언트가 DB 를 읽게 두지 않는다.
+   *
+   * 🔴 **힌트일 뿐이다.** 실제 승인·반려는 decideQuoteApproval 이 자기 트랜잭션
+   * 안에서 같은 목록을 다시 읽어 판정한다(되돌려진 위임으로 결재가 통과하지
+   * 않게 하려면 그 길밖에 없다).
+   */
+  actingApproverUserIds: readonly string[];
 }) {
   const router = useRouter();
   const [dialogState, setDialogState] = useState<DialogState>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // 🔴 위임이 걸리는 것은 결재선 **단계**뿐이다 — 서버(decideQuoteApproval)가 같은
+  // 함수로 같게 가른다. 견적서 결재는 언제나 결재선을 타므로 실제로는 언제나 왼쪽이다.
+  const routeDelegations =
+    latest && approvalFollowsRoute(latest) ? actingApproverUserIds : NO_ROUTE_DELEGATIONS;
   // 지정 관문 — 서버가 실제로 강제하는 것과 **같은 함수**를 부른다.
   // 지정이 없으면(null) 언제나 참이다.
-  const assignedGateOpen = mayDecideAssignedApproval(latest?.assignedApproverUserId ?? null, actingUser);
-  // 지정된 사람이 따로 있는데 내가 그 자리에 서 있는가 — 최고관리자 비상구다.
-  // 「그래도 되는가」는 위 관문이 이미 답했고, 이것은 **모양**만 묻는 판정이다.
+  const assignedGateOpen = mayDecideAssignedApproval(
+    latest?.assignedApproverUserId ?? null,
+    actingUser,
+    routeDelegations
+  );
+  // 지정된 사람이 따로 있는데 내가 그 자리에 서 있는가 — 위임이거나 최고관리자
+  // 비상구다. 「그래도 되는가」는 위 관문이 이미 답했고, 이것은 **모양**만 묻는 판정이다.
   const standingInForAssignee = standsInForAssignedApprover(
     latest?.assignedApproverUserId ?? null,
     actingUser.id
+  );
+  // 그 자리에 서 있는 **까닭**이 위임인가 비상구인가. 서버가 기록
+  // (`delegated_from_user_id`)에 적을 값을 정하는 **그 함수**를 그대로 부른다 —
+  // 안내 문구와 기록이 서로 다른 말을 하지 않게 하려는 것이다.
+  const delegatedFromUserId = delegatedFromUserIdFor(
+    latest?.assignedApproverUserId ?? null,
+    actingUser.id,
+    routeDelegations
   );
 
   const canRequest = isRouteConfigured && REQUESTABLE_STATES.includes(state);
@@ -262,13 +295,18 @@ export default function QuoteApprovalPanel({
         )}
 
         {/*
-          비상구를 **누르기 전에** 말한다. 지정 관문이 열렸는데 지정된 사람이 따로
-          있다는 것은, 지금 보고 있는 사람이 최고관리자 권한으로 남의 자리에 서
-          있다는 뜻이다(mayDecideAssignedApproval 의 유일한 예외다).
+          **누르기 전에** 말한다. 지정 관문이 열렸는데 지정된 사람이 따로 있다는
+          것은, 지금 보고 있는 사람이 남의 자리에 서 있다는 뜻이다.
+
+          🔴 **까닭이 둘이라 말도 둘이다**(2026-10-26): 그 단계를 위임받았거나,
+          최고관리자 비상구이거나. 위임받은 사람에게 「최고관리자 권한으로」라고
+          말하면 거짓이고, 그 사람은 자기가 왜 누를 수 있는지 끝내 모른다.
         */}
         {canDecide && standingInForAssignee && (
           <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
-            {`지금 차례는 ${latest?.assignedApproverName ?? "다른 결재자"} 님입니다. 최고관리자 권한으로 대신 처리합니다.`}
+            {delegatedFromUserId
+              ? `지금 차례는 ${latest?.assignedApproverName ?? "다른 결재자"} 님입니다. 위임받은 결재권으로 대신 처리합니다.`
+              : `지금 차례는 ${latest?.assignedApproverName ?? "다른 결재자"} 님입니다. 최고관리자 권한으로 대신 처리합니다.`}
           </p>
         )}
 

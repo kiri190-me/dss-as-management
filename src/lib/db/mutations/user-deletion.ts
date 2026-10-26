@@ -1,7 +1,8 @@
 import "server-only";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "../client";
 import {
+  approvalRouteDelegations,
   intakeMailRecipients,
   inventoryPartIssueApprovals,
   procedureCaseExecutionNodes,
@@ -21,6 +22,7 @@ import {
 import { writeRepresentativeFlagChange } from "./shipment-representatives";
 import { writeDeveloperFlagChange } from "./developer-flag";
 import { revokeActiveDelegationsInTx } from "./shipment-delegations";
+import { revokeActiveRouteDelegationsInTx } from "./approval-route-delegations";
 import { INSPECTION_DECIDE_ELIGIBLE_ROLES } from "./repair-case-approvals";
 import {
   collectUserDeletionImpact,
@@ -57,7 +59,13 @@ import { isValidUuid } from "@/lib/validation/procedure-validation-resolution-in
  *  - 진행 중 결재: 지울 사람에게 열린 단계는 이어받을 사람에게, 지울 사람이 현재 판의
  *    뒤 단계에 있는 사슬은 새 판으로 옮긴다. 옛 판의 뒤 단계에 남아 있으면 멈춘다.
  *  - 출하 대표: 끈다. 마지막 활성 대표였으면 결재 이어받을 사람을 대표로 세운다.
- *  - 위임: 대표로서든 위임받은 사람으로서든 ACTIVE 인 것을 전부 닫는다.
+ *  - 위임: **두 제도를 모두** 닫는다. 옛 출하 대표 위임
+ *    (`shipment_approval_delegations`)의 ACTIVE 한 줄과, 결재선 **단계** 위임
+ *    (`approval_route_delegations`, 0119)의 살아 있는 줄 — 맡긴 것이든 맡은 것이든.
+ *    🔴 뒤쪽을 빠뜨리면 **지운 사람의 결재권을 대리인이 계속 행사**한다
+ *    (2026-10-26 부터 그 위임이 실제 결재 판정에 걸린다 —
+ *    auth/approval-assignment.ts). 되돌림 두 칸은 표의 CHECK 때문에 **함께**
+ *    채워져야 하고, 그 쓰기는 각 표의 mutation 에 모여 있다.
  *  - 담당: 열린 접수 건은 담당 이어받을 사람에게, 열린 절차 노드는 「접수 건 담당을
  *    따른다」(NULL)로 되돌린다.
  *  - 개발자 표시를 끄고, 접수 메일 수신자 행을 지운다(되살려도 돌아오지 않는다).
@@ -122,6 +130,8 @@ export type UserDeletionSummary = {
   /** 마지막 대표였으면 대표를 이어받은 사람. */
   representativeHandedTo: string | null;
   revokedDelegations: number;
+  /** 🔴 옛 대표 위임(바로 위)과 **다른 표**라 따로 센다 — 결재선 단계 위임(0119). */
+  revokedRouteDelegations: number;
   reassignedRepairCases: number;
   releasedExecutionNodes: number;
   developerFlagCleared: boolean;
@@ -546,6 +556,40 @@ export async function deleteUserAccount(params: DeleteUserAccountParams): Promis
         actorUserId: actor.id,
       });
 
+      // (4b) 결재선 **단계** 위임 — 🔴 (4) 와 **다른 표**다(approval_route_delegations).
+      // 2026-10-26 부터 이 위임이 실제 결재 판정에 걸리므로, 닫지 않고 지우면 지운
+      // 사람의 결재권을 대리인이 계속 행사한다. 맡긴 것·맡은 것을 **둘 다** 닫는다:
+      // 맡긴 줄을 남기면 위의 이야기가 되고, 맡은 줄을 남기면 지워진 사람이 남의
+      // 단계를 누를 수 있는 채로 남는다(포털 재로그인으로 되살아날 수 있는 계정이다).
+      //
+      // (4) 와 같은 이유로 **대상 행을 잠근 뒤에 다시 읽는다** — 위임 생성이 맡긴 사람·
+      // 대리인 행을 FOR SHARE 로 잡으므로, 우리가 잠금을 얻은 시점에는 그 생성이 이미
+      // 커밋돼 있어 빠짐없이 보인다. 「살아 있다」의 경계(예정 줄은 들어오고 끝난 줄은
+      // 안 들어온다)는 수집 함수와 되돌리기 쓰기가 같은 조건으로 적고 있다.
+      const activeRouteDelegationIds = (
+        await tx
+          .select({ id: approvalRouteDelegations.id })
+          .from(approvalRouteDelegations)
+          .where(
+            and(
+              isNull(approvalRouteDelegations.revokedAt),
+              gt(approvalRouteDelegations.endsAt, now),
+              or(
+                eq(approvalRouteDelegations.delegatorUserId, targetId),
+                eq(approvalRouteDelegations.delegateUserId, targetId)
+              )
+            )
+          )
+      ).map((row) => row.id);
+      // 🔴 되돌림 두 칸(revoked_at · revoked_by_user_id)을 **함께** 적는 쓰기는 그 표의
+      // mutation 한 곳에만 있다 — 한쪽만 적으면 표의 `…_revocation_metadata` CHECK 이
+      // 거절한다.
+      const revokedRouteDelegationIds = await revokeActiveRouteDelegationsInTx(tx, {
+        delegationIds: activeRouteDelegationIds,
+        actorUserId: actor.id,
+        now,
+      });
+
       // (5) 담당 이관 — 🔴 version 을 올리지 않는다(파일 머리말). 지금 열린 건을 다시
       // 잠그며 고른다 — 모은 뒤에 출하되었거나 새로 배정된 건을 놓치지 않게.
       const openCases = await tx
@@ -680,6 +724,9 @@ export async function deleteUserAccount(params: DeleteUserAccountParams): Promis
           repinnedApprovalIds,
           representativeHandedTo,
           revokedDelegationIds,
+          // 🔴 옛 위임 id 와 **섞지 않는다** — 다른 표의 id 라, 한 칸에 담으면 나중에
+          // 로그만 보고는 어느 표를 뒤져야 하는지 알 수 없다.
+          revokedRouteDelegationIds,
           reassignedRepairCaseIds: openCases.map((row) => row.id),
           releasedExecutionNodeIds: releasedNodes.map((row) => row.id),
           developerFlagCleared,
@@ -695,6 +742,7 @@ export async function deleteUserAccount(params: DeleteUserAccountParams): Promis
           repinnedApprovals: countApprovalIds(repinnedApprovalIds),
           representativeHandedTo,
           revokedDelegations: revokedDelegationIds.length,
+          revokedRouteDelegations: revokedRouteDelegationIds.length,
           reassignedRepairCases: openCases.length,
           releasedExecutionNodes: releasedNodes.length,
           developerFlagCleared,

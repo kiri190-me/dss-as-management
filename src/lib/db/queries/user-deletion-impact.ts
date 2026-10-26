@@ -1,7 +1,8 @@
 import "server-only";
-import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "../client";
 import {
+  approvalRouteDelegations,
   intakeMailRecipients,
   inventoryPartIssueApprovals,
   inventoryPartIssueRequests,
@@ -149,6 +150,18 @@ export type UserDeletionImpactSnapshot = {
   openApprovals: UserDeletionOpenApproval[];
   isLastRepresentative: boolean;
   activeDelegations: { id: string; representativeUserId: string; delegateUserId: string }[];
+  /**
+   * 🔴 아직 살아 있는 **결재선 단계 위임**(`approval_route_delegations`, 0119) —
+   * 바로 위의 옛 대표 위임과 **다른 표**다. 둘을 한 칸에 합치지 않는 까닭은
+   * 섞으면 「위임 3건」이 두 제도에 걸친 수가 되어, 확인 창을 보고도 어느 쪽을
+   * 정리해야 하는지 알 수 없기 때문이다.
+   *
+   * 「살아 있다」의 뜻: 아직 안 되돌렸고 **아직 안 끝났다**(`ends_at > now`).
+   * 기간이 이미 끝난 줄은 닫을 것이 없고, 닫으면 「기간이 다 돼서 끝난 것」과
+   * 「사람이 거둬들인 것」을 나중에 구별할 수 없다. 아직 시작 안 한(예정) 줄은
+   * **들어온다** — 지운 사람 앞으로 걸린 위임이 나중에 저절로 살아나면 안 된다.
+   */
+  activeRouteDelegations: { id: string; delegatorUserId: string; delegateUserId: string }[];
   /** 담당 이관 대상 — 휴지통에 없고 출하 완료로 잠기지 않은 접수 건. */
   openAssignedCaseIds: string[];
   /** 그대로 두는 담당 건(휴지통 · 출하 완료) — 안내용. */
@@ -470,6 +483,34 @@ export async function collectUserDeletionImpact(
     );
   const activeDelegations = lock ? await delegationQuery.for("update") : await delegationQuery;
 
+  // 7b. 아직 살아 있는 **결재선 단계 위임** — 맡긴 것이든 맡은 것이든.
+  //     🔴 7 과 **다른 표**다(approval_route_delegations, 0119). 2026-10-26 부터 이
+  //     위임이 실제 결재 판정에 걸리므로(auth/approval-assignment.ts), 닫지 않고
+  //     지우면 **지운 사람의 결재권을 대리인이 계속 행사**하게 된다.
+  //     「살아 있다」는 아직 안 되돌렸고 아직 안 끝났다는 뜻이다 — 타입 쪽 주석에
+  //     그 경계와 까닭(예정 줄은 들어오고, 끝난 줄은 안 들어온다)이 적혀 있다.
+  //     잠금은 7 과 같은 자리다(위임 행 → 사용자 행).
+  const routeDelegationQuery = executor
+    .select({
+      id: approvalRouteDelegations.id,
+      delegatorUserId: approvalRouteDelegations.delegatorUserId,
+      delegateUserId: approvalRouteDelegations.delegateUserId,
+    })
+    .from(approvalRouteDelegations)
+    .where(
+      and(
+        isNull(approvalRouteDelegations.revokedAt),
+        gt(approvalRouteDelegations.endsAt, new Date()),
+        or(
+          eq(approvalRouteDelegations.delegatorUserId, targetId),
+          eq(approvalRouteDelegations.delegateUserId, targetId)
+        )
+      )
+    );
+  const activeRouteDelegations = lock
+    ? await routeDelegationQuery.for("update")
+    : await routeDelegationQuery;
+
   // 8. 대상 행 — 잠금 순서의 마지막이다(파일 머리말).
   const targetQuery = executor
     .select({
@@ -614,6 +655,7 @@ export async function collectUserDeletionImpact(
     openApprovals,
     isLastRepresentative,
     activeDelegations,
+    activeRouteDelegations,
     openAssignedCaseIds,
     untouchedAssignedCaseCount: assignedCases.length - openAssignedCaseIds.length,
     openClaimedNodeIds,
@@ -658,6 +700,11 @@ export type UserDeletionPreviewImpact = {
   isRepresentative: boolean;
   isLastRepresentative: boolean;
   activeDelegations: { asRepresentative: number; asDelegate: number };
+  /**
+   * 🔴 **결재선 단계 위임**(0119) — 위 옛 대표 위임과 **다른 표**라 따로 센다.
+   * `asDelegator` 는 지울 사람이 **맡긴** 것, `asDelegate` 는 **맡은** 것이다.
+   */
+  activeRouteDelegations: { asDelegator: number; asDelegate: number };
   openAssignedCases: number;
   untouchedAssignedCases: number;
   openClaimedNodes: number;
@@ -837,6 +884,13 @@ export async function getUserDeletionPreview(
       activeDelegations: {
         asRepresentative: snapshot.activeDelegations.filter((row) => row.representativeUserId === targetId).length,
         asDelegate: snapshot.activeDelegations.filter((row) => row.delegateUserId === targetId).length,
+      },
+      // 🔴 같은 모양으로 센다(바로 위) — 다른 표지만 사람에게는 같은 종류의 일이다.
+      // 한 줄이 양쪽에 동시에 들어가는 일은 없다: 표의 `…_different_users` CHECK 이
+      // 맡긴 사람과 맡은 사람이 같은 줄을 아예 못 만들게 한다.
+      activeRouteDelegations: {
+        asDelegator: snapshot.activeRouteDelegations.filter((row) => row.delegatorUserId === targetId).length,
+        asDelegate: snapshot.activeRouteDelegations.filter((row) => row.delegateUserId === targetId).length,
       },
       openAssignedCases: snapshot.openAssignedCaseIds.length,
       untouchedAssignedCases: snapshot.untouchedAssignedCaseCount,

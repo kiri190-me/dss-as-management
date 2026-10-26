@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, inArray, like, notInArray, or } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
+  approvalRouteDelegations,
   auditLogs,
   customers,
   intakeMailRecipients,
@@ -388,6 +389,18 @@ async function removePerTestFixtures(userIds: readonly string[]): Promise<void> 
         inArray(shipmentApprovalDelegations.delegateUserId, ids)
       )
     );
+  // 🔴 옛 위임과 **다른 표**다(결재선 단계 위임, 0119). 사람 참조 넷이 전부
+  // RESTRICT 라, 남겨 두면 아래 사람 삭제가 막힌다.
+  await db
+    .delete(approvalRouteDelegations)
+    .where(
+      or(
+        inArray(approvalRouteDelegations.delegatorUserId, ids),
+        inArray(approvalRouteDelegations.delegateUserId, ids),
+        inArray(approvalRouteDelegations.createdByUserId, ids),
+        inArray(approvalRouteDelegations.revokedByUserId, ids)
+      )
+    );
   await db.delete(intakeMailRecipients).where(inArray(intakeMailRecipients.userId, ids));
   await db.update(users).set({ isShipmentRepresentative: false }).where(inArray(users.id, ids));
 }
@@ -555,6 +568,7 @@ describe("건수 · 필요한 이어받을 사람", () => {
       isRepresentative: false,
       isLastRepresentative: false,
       activeDelegations: { asRepresentative: 0, asDelegate: 0 },
+      activeRouteDelegations: { asDelegator: 0, asDelegate: 0 },
       openAssignedCases: 0,
       untouchedAssignedCases: 0,
       openClaimedNodes: 0,
@@ -979,6 +993,86 @@ describe("건수 · 필요한 이어받을 사람", () => {
 
     const result = await preview(target);
     assert.deepEqual(result.impact.activeDelegations, { asRepresentative: 2, asDelegate: 1 });
+    // 🔴 **다른 표**는 한 줄도 없다 — 이 시험이 만든 것은 옛 대표 위임뿐이다.
+    // 두 수가 섞이면 확인 창이 「위임 3건」이라고 말하면서도 어느 쪽을 정리해야
+    // 하는지 못 알려 준다.
+    assert.deepEqual(result.impact.activeRouteDelegations, { asDelegator: 0, asDelegate: 0 });
+  });
+
+  test("🔴 결재선 단계 위임 — 살아 있는 것만 센다(예정 포함, 되돌린 것 · 끝난 것 · 남의 것 제외)", async () => {
+    // 🔴 옛 위임과 **다른 표**다(approval_route_delegations, 0119). 미리보기가 이
+    // 줄을 말해 주지 않으면, 지우는 사람은 **지운 사람의 결재권이 대리인에게 남아
+    // 있었다는 사실**을 누른 뒤에도 모른다.
+    const target = await createTestUser("단계위임 대상");
+    const delegate = await createTestUser("단계위임 대리인");
+    const giver = await createTestUser("단계위임을 준 사람");
+    const bystander = await createTestUser("단계위임 상관없는 사람");
+
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    await db.insert(approvalRouteDelegations).values([
+      // 맡긴 것 — 지금 살아 있다.
+      {
+        delegatorUserId: target,
+        delegateUserId: delegate,
+        startsAt: new Date(now - day),
+        endsAt: new Date(now + day),
+        reason: "",
+        createdByUserId: target,
+      },
+      // 맡긴 것 — 아직 시작 안 함(예정). 🔴 **센다** — 안 닫으면 지운 뒤에 저절로 산다.
+      {
+        delegatorUserId: target,
+        delegateUserId: delegate,
+        startsAt: new Date(now + 10 * day),
+        endsAt: new Date(now + 20 * day),
+        reason: "",
+        createdByUserId: target,
+      },
+      // 맡긴 것 — 기간이 이미 끝났다. 세지 않는다(닫을 것이 없다).
+      {
+        delegatorUserId: target,
+        delegateUserId: delegate,
+        startsAt: new Date(now - 5 * day),
+        endsAt: new Date(now - 4 * day),
+        reason: "",
+        createdByUserId: target,
+      },
+      // 맡긴 것 — 이미 되돌렸다. 세지 않는다.
+      {
+        delegatorUserId: target,
+        delegateUserId: delegate,
+        startsAt: new Date(now - 5 * day),
+        endsAt: new Date(now + day),
+        reason: "",
+        createdByUserId: target,
+        revokedAt: new Date(now - 4 * day),
+        revokedByUserId: superAdminId,
+      },
+      // **맡은** 것 — 지워진 사람이 남의 단계를 누를 수 있는 채로 남으면 안 된다.
+      {
+        delegatorUserId: giver,
+        delegateUserId: target,
+        startsAt: new Date(now - day),
+        endsAt: new Date(now + day),
+        reason: "",
+        createdByUserId: giver,
+      },
+      // 🔴 남의 줄 — 세면 미리보기가 남의 결재권까지 거둔다고 말하게 된다.
+      {
+        delegatorUserId: bystander,
+        delegateUserId: delegate,
+        startsAt: new Date(now - day),
+        endsAt: new Date(now + day),
+        reason: "",
+        createdByUserId: bystander,
+      },
+    ]);
+
+    const result = await preview(target);
+    assert.deepEqual(result.impact.activeRouteDelegations, { asDelegator: 2, asDelegate: 1 });
+    // 대조 — 옛 위임은 한 줄도 만들지 않았다.
+    assert.deepEqual(result.impact.activeDelegations, { asRepresentative: 0, asDelegate: 0 });
   });
 
   test("담당 건 · 절차 노드 — 열린 건만 넘기고, 잠긴 · 휴지통 건은 그대로, 끝난 노드는 세지 않는다", async () => {

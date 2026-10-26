@@ -49,6 +49,7 @@ function impact(overrides: Partial<UserDeletionPreviewImpact> = {}): UserDeletio
     isRepresentative: false,
     isLastRepresentative: false,
     activeDelegations: { asRepresentative: 0, asDelegate: 0 },
+    activeRouteDelegations: { asDelegator: 0, asDelegate: 0 },
     openAssignedCases: 0,
     untouchedAssignedCases: 0,
     openClaimedNodes: 0,

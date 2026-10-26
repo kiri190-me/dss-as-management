@@ -113,6 +113,53 @@ const USER_FIELDS = {
 /** 감사 기록의 targetEntity — **표 이름 그대로**(이 저장소의 규약). */
 const AUDIT_ENTITY = "approval_route_delegations";
 
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * 아직 살아 있는 위임들을 되돌린다 — **부르는 쪽의 트랜잭션 안에서.** 실제로
+ * 닫힌 줄의 id 만 돌려준다(이미 되돌린 것·기간이 끝난 것·없는 것은 빠진다).
+ *
+ * 🔴 **판정은 하지 않는다.** 누가 되돌릴 수 있는가는 부르는 자리마다 다르다 —
+ * 화면의 [되돌리기]는 revokeApprovalRouteDelegation 이(맡긴 본인 또는 권한 있는
+ * 관리자), 사용자 계정 삭제는 진짜 최고관리자 판정을 지난 뒤 지울 사람이 **맡긴
+ * 것과 맡은 것을 모두** 닫는다. 여기는 그 뒤의 **쓰기**만 한 곳에 모았다 —
+ * 되돌림 두 칸이 표의 `…_revocation_metadata` CHECK 대로 언제나 함께 채워지게.
+ * (옛 위임의 revokeActiveDelegationsInTx 가 같은 까닭으로 같은 자리에 있다.)
+ *
+ * 🔴 **조건을 UPDATE 에도 적는다**(아직 안 되돌림 · 아직 안 끝남). 부르는 쪽이
+ * 행을 잠그고 읽었어도, 0행 쓰기를 조용히 성공으로 넘기지 않으려면 돌려받은 id 로
+ * 확인해야 한다. 기간이 이미 끝난 줄을 「철회됨」으로 덮지 않는 것도 중요하다 —
+ * 덮으면 그 줄이 **왜 끝났는지**(기간이 다 돼서인지 사람이 거둬들여서인지)를
+ * 나중에 구별할 수 없다(화면의 되돌리기가 같은 까닭으로 같게 거절한다).
+ */
+export async function revokeActiveRouteDelegationsInTx(
+  tx: Tx,
+  params: { delegationIds: readonly string[]; actorUserId: string; now: Date }
+): Promise<string[]> {
+  // 빈 IN 절은 드라이버마다 다르게 굴러 굳이 확인할 이유가 없다 — 닫을 것이
+  // 없으면 질의 자체를 하지 않는다.
+  if (params.delegationIds.length === 0) return [];
+
+  const revoked = await tx
+    .update(approvalRouteDelegations)
+    .set({
+      // 🔴 **두 칸을 함께** 적는다. 한쪽만 적힌 줄은 표의 CHECK 이 아예 받아
+      // 주지 않는다 — 판정 함수가 `revoked_at` 한 칸만 보기 때문이다.
+      revokedAt: params.now,
+      revokedByUserId: params.actorUserId,
+    })
+    .where(
+      and(
+        inArray(approvalRouteDelegations.id, [...params.delegationIds]),
+        isNull(approvalRouteDelegations.revokedAt),
+        gt(approvalRouteDelegations.endsAt, params.now)
+      )
+    )
+    .returning({ id: approvalRouteDelegations.id });
+
+  return revoked.map((row) => row.id);
+}
+
 export type CreateApprovalRouteDelegationParams = {
   /** 🔴 **누구의 결재권인가** — 결재선 단계에 적힌 사람의 `users.id`. */
   delegatorUserId: string;

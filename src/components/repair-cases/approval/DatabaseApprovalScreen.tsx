@@ -23,6 +23,7 @@ export default function DatabaseApprovalScreen({
   decideAuthorization,
   inspectionAssigneeCandidates,
   routeSteps,
+  actingApproverUserIds,
 }: {
   resolved: ResolvedRepairCase;
   actingUser: ActingUser | null;
@@ -41,6 +42,13 @@ export default function DatabaseApprovalScreen({
    * 아니라 목록이고, 줄마다 **자기 판**을 골라 쓴다.
    */
   routeSteps: ShipmentApprovalRouteStepList[];
+  /**
+   * 🔴 지금 보고 있는 사람이 **대신할 수 있는 결재자 id 전부**(맨 앞은 본인).
+   * 결재선 단계 위임을 서버(page.tsx)가 읽어 내려준다 — 쓰는 곳은 출하 카드
+   * 하나다. 검수 카드는 받지 않는다: 검수 승인은 결재선을 탈 수 없어(표의
+   * CHECK) 대신할 단계가 애초에 없고, 안 쓰는 값을 넘겨 두면 언젠가 쓰인다.
+   */
+  actingApproverUserIds: readonly string[];
 }) {
   if (!actingUser) {
     return (
@@ -90,6 +98,7 @@ export default function DatabaseApprovalScreen({
           inspectionApproved={inspectionApproved}
           currentVersion={resolved.version}
           routeSteps={shipmentRouteSteps}
+          actingApproverUserIds={actingApproverUserIds}
           // 이미 이 화면에 와 있는 값이다 — 서버도 조회도 새로 부르지 않는다.
           // 카드는 이것을 확인 창에 읽기 전용으로 넘기기만 한다.
           internalTargetShipmentDate={resolved.internalTargetShipmentDate}

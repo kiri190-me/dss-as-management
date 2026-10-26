@@ -11,7 +11,9 @@ import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import {
   approvalFollowsRoute,
+  delegatedFromUserIdFor,
   mayDecideAssignedApproval,
+  NO_ROUTE_DELEGATIONS,
   standsInForAssignedApprover,
 } from "@/lib/auth/approval-assignment";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
@@ -134,6 +136,7 @@ export default function DatabaseFinalShipmentCard({
   inspectionApproved,
   currentVersion,
   routeSteps,
+  actingApproverUserIds,
   internalTargetShipmentDate,
 }: {
   repairCaseId: string;
@@ -160,6 +163,16 @@ export default function DatabaseFinalShipmentCard({
    */
   routeSteps: ShipmentApprovalRouteStepLabel[] | null;
   /**
+   * 🔴 **지금 보고 있는 사람이 대신할 수 있는 결재자 id 전부**(맨 앞은 언제나
+   * 본인). 결재선 단계 위임(`approval_route_delegations`)을 서버가 읽어 내려준다 —
+   * 클라이언트가 DB 를 읽게 두지 않는 것은 `decideAuthorization` 과 같은 이유다.
+   *
+   * 🔴 이것은 **힌트**다. 실제 승인·반려는 decideRepairCaseApproval 이 자기
+   * 트랜잭션 안에서 같은 목록을 **다시 읽어** 판정한다 — 되돌려진 위임으로 결재가
+   * 통과하지 않게 하려면 그 길밖에 없다.
+   */
+  actingApproverUserIds: readonly string[];
+  /**
    * 사내 목표 출하일 — **읽기 전용**으로 두 자리에 보여 준다: 카드의 회색 상자와
    * 확인 창. 창에만 있으면 창을 열어야 보이는데, 「열어 볼까」를 정하는 것이 바로
    * 그 날짜다. 요청하는 사람과 결재하는 사람이 같은 카드·같은 창을 쓰므로 양쪽이
@@ -183,15 +196,31 @@ export default function DatabaseFinalShipmentCard({
   // 이 요청이 결재선을 타는가 — 서버가 실제로 판정하는 것과 **같은 함수**를
   // 부른다. 참이면 절차가 「출하 대표」를 대신하므로 대표·위임을 보지 않는다.
   const followsRoute = record !== null && approvalFollowsRoute(record);
+  // 🔴 위임이 걸리는 것은 결재선 **단계**뿐이다 — 서버(decideRepairCaseApproval)가
+  // 같은 함수로 같게 가른다. 조건이 갈리면 「단추는 보이는데 누르면 거절」이나 그
+  // 반대가 되고, 후자는 화면에 아무 표시도 남기지 않아 더 나쁘다.
+  const routeDelegations = followsRoute ? actingApproverUserIds : NO_ROUTE_DELEGATIONS;
   // 지정 관문. 결재선을 타지 않는 출하 요청은 지정이 언제나 NULL 이라 늘
   // 열려 있어 동작이 바뀌지 않는다 — 그래도 두 축을 함께 적어 둔다.
-  const assignedGateOpen = mayDecideAssignedApproval(record?.assignedApproverUserId ?? null, actingUser);
+  const assignedGateOpen = mayDecideAssignedApproval(
+    record?.assignedApproverUserId ?? null,
+    actingUser,
+    routeDelegations
+  );
   // 지정된 사람이 따로 있는데 내가 그 자리에 서 있는가. 「그래도 되는가」는 위
   // 지정 관문이 이미 답했다 — 이것은 **모양**만 묻는 판정이고, 이력의 「지정자
   // 대신 처리」 배지가 같은 함수를 본다.
   const standingInForAssignee = standsInForAssignedApprover(
     record?.assignedApproverUserId ?? null,
     actingUser.id
+  );
+  // 그 자리에 서 있는 **까닭**이 위임인가, 최고관리자 비상구인가. 서버가
+  // `delegated_from_user_id` 에 적을 값을 정하는 **그 함수**를 그대로 부른다 —
+  // 안내 문구와 기록이 서로 다른 말을 하지 않게 하려는 것이다.
+  const delegatedFromUserId = delegatedFromUserIdFor(
+    record?.assignedApproverUserId ?? null,
+    actingUser.id,
+    routeDelegations
   );
   // 「2/3단계」의 뒷자리. 서버가 **이 행에 적힌 판**으로 읽어 준 단계 수다.
   const routeTotalSteps = routeSteps?.length ?? 0;
@@ -242,10 +271,19 @@ export default function DatabaseFinalShipmentCard({
       //
       // 결재선을 타지 않는 출하 요청은 지정이 언제나 NULL 이라 여기서 언제나
       // 거짓이다 — 예전 화면에 없던 문구가 끼어들지 않는다.
+      //
+      // 🔴 **까닭이 둘이라 말도 둘이다**(2026-10-26). 위임받아 서 있는 사람에게
+      // 「최고관리자 권한으로」라고 말하면 거짓이고, 그 사람은 자기가 왜 누를 수
+      // 있는지 끝내 모른다. 어느 쪽인지는 서버가 기록에 적을 값을 정하는 그
+      // 함수가 이미 갈라 두었다(delegatedFromUserId).
       if (standingInForAssignee) {
-        blockedNotice = `지금 차례는 ${
-          record?.assignedApproverName ?? "다른 승인자"
-        } 님입니다. 최고관리자 권한으로 대신 처리합니다.`;
+        blockedNotice = delegatedFromUserId
+          ? `지금 차례는 ${
+              record?.assignedApproverName ?? "다른 승인자"
+            } 님입니다. 위임받은 결재권으로 대신 처리합니다.`
+          : `지금 차례는 ${
+              record?.assignedApproverName ?? "다른 승인자"
+            } 님입니다. 최고관리자 권한으로 대신 처리합니다.`;
       }
       actions.push(
         { key: "approve", label: "출하 승인", onClick: () => setDialogState("APPROVED") },

@@ -2,8 +2,14 @@ import "server-only";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../client";
 import { quoteApprovals, quotes, users } from "../schema";
-import { mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
+import {
+  approvalFollowsRoute,
+  delegatedFromUserIdFor,
+  mayDecideAssignedApproval,
+  NO_ROUTE_DELEGATIONS,
+} from "@/lib/auth/approval-assignment";
 import { hasPermission } from "@/lib/auth/permission-resolver";
+import { resolveActingApproverUserIds } from "../queries/approval-route-delegations";
 import {
   QUOTE_APPROVAL_ROUTE_SCOPE,
   isQuoteApprovalRouteInForce,
@@ -53,6 +59,16 @@ import { acquireShipmentApprovalRouteSharedLock } from "./shipment-approval-rout
  * 순서가 뒤집히면 **지정이 권한을 만들어 낸다**(auth/approval-assignment.ts 의
  * 머리말). 지정은 「자격 있는 사람들 중 누구」를 좁히는 것이지 자격을 주는 것이
  * 아니다. 판정 자체는 여기 새로 적지 않고 그 파일의 함수 하나를 부른다.
+ *
+ * ── 🔴 결재선 단계 위임 (2026-10-26) ────────────────────────────────────
+ * 지정된 사람의 결재권을 기간으로 맡은 사람도 그 단계를 누를 수 있다
+ * (`approval_route_delegations`, 0119). 그때 **누가 눌렀는가**는
+ * `decided_by_user_id` 에, **누구 자리였는가**는 `delegated_from_user_id` 에
+ * 남는다 — 둘 다 남아야 한다(2026-10-20 결정).
+ *
+ * 🔴 **옛 `shipment_approval_delegations`(출하 대표 위임)가 아니다.** 견적서
+ * 결재에는 「대표」라는 개념이 없고, 이 표의 결재자는 언제나 단계에 적힌
+ * 사람이다 — 그 표는 이 파일에서 import 조차 하지 않는다.
  * ============================================================================
  */
 
@@ -336,20 +352,49 @@ export async function decideQuoteApproval(
         fail("CONFLICT", "이미 처리된 결재입니다. 최신 정보를 다시 불러와 주세요.");
       }
 
+      // 🔴 「지금 이 사람이 대신할 수 있는 자리들」 — **이 트랜잭션 안에서** 읽는다.
+      // 바깥에서 읽으면 읽은 직후 되돌려진 위임으로 결재가 통과하고, 그 어긋남은
+      // 오류를 내지 않는다(resolveActingApproverUserIds 의 🔴 주석). 그래서 세 번째
+      // 인자로 tx 를 넘긴다.
+      //
+      // 🔵 조건을 다는 것은 모양을 출하 승인과 **한 벌로 두기 위해서**다 — 위임이
+      // 걸리는 것은 결재선 **단계**이고, 그 판정은 공용 함수 하나(approvalFollowsRoute)만
+      // 본다. 견적서 결재는 언제나 결재선을 타므로(판이 없으면 요청 자체가
+      // ROUTE_NOT_CONFIGURED 로 거절된다 — 위 requestQuoteApproval) 실제로는 언제나
+      // 참이다. 거짓인 행이 있다면 저장 경로가 깨진 것이고, 그때는 위임을 붙이지
+      // 않는 쪽(좁은 쪽)으로 넘어간다.
+      const actingApproverUserIds = approvalFollowsRoute(latest)
+        ? await resolveActingApproverUserIds(actor.id, new Date(), tx)
+        : NO_ROUTE_DELEGATIONS;
+
       // 🔴 지정 관문 — 계정 자격(requireActor)을 본 **뒤에** 얹는다. 순서가
       // 뒤집히면 지정이 권한을 만들어 낸다. 판정은 여기서 새로 적지 않고 출하
       // 승인·부품 불출·알림 조회와 **같은 함수 하나**를 부른다. 최고관리자
       // 비상구도 그 함수 안에 있다 — 지정된 사람이 자리를 비워 영영 막히는 것을
       // 막는 유일한 길이다.
       if (
-        !mayDecideAssignedApproval(latest.assignedApproverUserId, {
-          id: actor.id,
-          role: actor.role,
-          isDeveloper: actor.isDeveloper,
-        })
+        !mayDecideAssignedApproval(
+          latest.assignedApproverUserId,
+          {
+            id: actor.id,
+            role: actor.role,
+            isDeveloper: actor.isDeveloper,
+          },
+          actingApproverUserIds
+        )
       ) {
         await failAssignmentGate(tx, latest.assignedApproverUserId);
       }
+
+      // 🔴 **누구 자리를 대신 누른 것인가** — 관문을 통과한 **뒤에** 정한다. 위임으로
+      // 통과한 것이 아니면(본인 차례 · 최고관리자 비상구) null 이고, 그것이 「직접
+      // 눌렀다」라는 정상값이다(표의 delegated_from_user_id 주석). 판정은 여기 새로
+      // 적지 않고 출하 승인·화면과 **같은 함수 하나**를 부른다.
+      const delegatedFromUserId = delegatedFromUserIdFor(
+        latest.assignedApproverUserId,
+        actor.id,
+        actingApproverUserIds
+      );
 
       if (input.decision === "REJECTED" && !input.decisionReason) {
         // 표의 CHECK 이 최종적으로 막지만, 여기서 먼저 사람 말로 말한다 — 거기서
@@ -364,6 +409,11 @@ export async function decideQuoteApproval(
           decidedByUserId: actor.id,
           decidedAt: new Date(),
           decisionReason: input.decisionReason,
+          // 🔴 **누가 눌렀는가**(바로 위)와 **누구 자리였는가**가 둘 다 남는다
+          // (2026-10-20 사용자 결정). 대리인 이름으로 누른 사람 칸을 덮으면
+          // 「본인이 눌렀다」와 구분이 사라지고, 거꾸로 맡긴 사람 이름만 남기면
+          // 실제로 손을 댄 사람을 영영 못 찾는다.
+          delegatedFromUserId,
           updatedAt: new Date(),
         })
         .where(and(eq(quoteApprovals.id, latest.id), eq(quoteApprovals.status, "REQUESTED")))

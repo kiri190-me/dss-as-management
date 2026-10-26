@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, inArray, like, notInArray, or } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
+  approvalRouteDelegations,
   auditLogs,
   customers,
   intakeMailRecipients,
@@ -499,6 +500,18 @@ async function removePerTestFixtures(userIds: readonly string[]): Promise<void> 
         inArray(shipmentApprovalDelegations.revokedByUserId, ids)
       )
     );
+  // 🔴 옛 위임과 **다른 표**다(결재선 단계 위임, 0119). 사람 참조 넷이 전부
+  // RESTRICT 라, 남겨 두면 아래 사람 삭제가 막힌다.
+  await db
+    .delete(approvalRouteDelegations)
+    .where(
+      or(
+        inArray(approvalRouteDelegations.delegatorUserId, ids),
+        inArray(approvalRouteDelegations.delegateUserId, ids),
+        inArray(approvalRouteDelegations.createdByUserId, ids),
+        inArray(approvalRouteDelegations.revokedByUserId, ids)
+      )
+    );
   await db
     .delete(representativeChangeHistory)
     .where(
@@ -674,6 +687,7 @@ describe("삭제가 하는 일", () => {
       repinnedApprovals: 0,
       representativeHandedTo: null,
       revokedDelegations: 0,
+      revokedRouteDelegations: 0,
       reassignedRepairCases: 0,
       releasedExecutionNodes: 0,
       developerFlagCleared: false,
@@ -1019,6 +1033,131 @@ describe("삭제가 하는 일", () => {
     assert.deepEqual(await userRow(target), before);
     assert.equal(await routeCount("FINAL_SHIPMENT"), 2, "거절됐는데 새 판이 얹혔다");
     assert.deepEqual(await openShipmentRow(oldCase.id), rowBefore);
+  });
+
+  test("🔴 결재선 단계 위임 — 맡긴 것도 맡은 것도 닫히고, 되돌림 두 칸이 **함께** 채워진다", async () => {
+    // 🔴 이 표(approval_route_delegations, 0119)는 옛 대표 위임과 **다른 표**다.
+    // 2026-10-26 부터 실제 결재 판정에 걸리므로, 닫지 않고 지우면 **지운 사람의
+    // 결재권을 대리인이 계속 행사**한다. 그 구멍을 여기서 막는다.
+    const target = await createTestUser("단계위임 대상");
+    const delegate = await createTestUser("단계위임 대리인");
+    const giver = await createTestUser("단계위임을 준 사람");
+    const bystander = await createTestUser("상관없는 사람");
+    const bystanderDelegate = await createTestUser("상관없는 대리인");
+
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const earlierRevokedAt = new Date(now - 4 * day);
+    const rows = await db
+      .insert(approvalRouteDelegations)
+      .values([
+        // 1) 지울 사람이 **맡긴** 것 — 지금 살아 있다.
+        {
+          delegatorUserId: target,
+          delegateUserId: delegate,
+          startsAt: new Date(now - day),
+          endsAt: new Date(now + day),
+          reason: "",
+          createdByUserId: target,
+        },
+        // 2) 지울 사람이 맡긴 **예정**(아직 시작 안 함) — 닫아야 한다. 안 닫으면
+        //    지운 뒤에 저절로 살아난다.
+        {
+          delegatorUserId: target,
+          delegateUserId: delegate,
+          startsAt: new Date(now + 10 * day),
+          endsAt: new Date(now + 20 * day),
+          reason: "",
+          createdByUserId: target,
+        },
+        // 3) 지울 사람이 **맡은** 것 — 지워진 사람이 남의 단계를 누를 수 있는 채로
+        //    남으면 안 된다(포털 재로그인으로 되살아날 수 있는 계정이다).
+        {
+          delegatorUserId: giver,
+          delegateUserId: target,
+          startsAt: new Date(now - day),
+          endsAt: new Date(now + day),
+          reason: "",
+          createdByUserId: giver,
+        },
+        // 4) 이미 되돌린 것 — 다시 덮지 않는다(처음 기록이 그대로 남아야 한다).
+        {
+          delegatorUserId: target,
+          delegateUserId: delegate,
+          startsAt: new Date(now - 5 * day),
+          endsAt: new Date(now + day),
+          reason: "",
+          createdByUserId: target,
+          revokedAt: earlierRevokedAt,
+          revokedByUserId: giver,
+        },
+        // 5) 기간이 이미 끝난 것 — 닫을 것이 없다. 「철회됨」으로 덮으면 **왜
+        //    끝났는지**(기간이 다 돼서인지 사람이 거둬들여서인지)를 못 가린다.
+        {
+          delegatorUserId: target,
+          delegateUserId: delegate,
+          startsAt: new Date(now - 5 * day),
+          endsAt: new Date(now - 4 * day),
+          reason: "",
+          createdByUserId: target,
+        },
+        // 6) 🔴 **남의 줄** — 지울 사람과 아무 상관이 없다. 이것이 닫히면 삭제가
+        //    남의 결재권까지 거둬들인 것이다.
+        {
+          delegatorUserId: bystander,
+          delegateUserId: bystanderDelegate,
+          startsAt: new Date(now - day),
+          endsAt: new Date(now + day),
+          reason: "",
+          createdByUserId: bystander,
+        },
+      ])
+      .returning({ id: approvalRouteDelegations.id });
+    const [liveGiven, scheduledGiven, liveReceived, alreadyRevoked, expired, othersRow] = rows.map(
+      (row) => row.id
+    );
+
+    // 미리보기가 **누르기 전에** 그 줄을 말해 줘야 한다 — 맡긴 것 셋(살아 있는 것 ·
+    // 예정)과 맡은 것 하나. 되돌린 줄과 끝난 줄은 세지 않는다.
+    const preview = await getUserDeletionPreview(target, superAdminId);
+    assert.equal(preview.ok, true);
+    if (!preview.ok) throw new Error("unreachable");
+    assert.deepEqual(
+      preview.impact.activeRouteDelegations,
+      { asDelegator: 2, asDelegate: 1 },
+      "미리보기가 결재선 단계 위임을 세지 않았다"
+    );
+    // 🔴 옛 위임과 섞이지 않았다 — 이 시험에는 옛 위임이 한 줄도 없다.
+    assert.deepEqual(preview.impact.activeDelegations, { asRepresentative: 0, asDelegate: 0 });
+
+    const summary = expectOk(await del(target));
+    assert.equal(summary.revokedRouteDelegations, 3, "닫은 줄 수가 다르다");
+    assert.equal(summary.revokedDelegations, 0, "옛 위임까지 셌다");
+
+    const after = await db
+      .select({
+        id: approvalRouteDelegations.id,
+        revokedAt: approvalRouteDelegations.revokedAt,
+        revokedByUserId: approvalRouteDelegations.revokedByUserId,
+      })
+      .from(approvalRouteDelegations)
+      .where(inArray(approvalRouteDelegations.id, rows.map((row) => row.id)));
+    const byId = new Map(after.map((row) => [row.id, row]));
+
+    for (const id of [liveGiven, scheduledGiven, liveReceived]) {
+      const row = byId.get(id);
+      assert.ok(row, id);
+      // 🔴 **두 칸이 함께** 채워진다 — 한쪽만 적힌 줄은 표의
+      // `…_revocation_metadata` CHECK 이 아예 받아 주지 않는다. 그래서 「닫혔다」를
+      // 시각 하나로만 확인하지 않는다.
+      assert.ok(row.revokedAt, `닫히지 않았다: ${id}`);
+      assert.equal(row.revokedByUserId, superAdminId, `되돌린 사람이 안 적혔다: ${id}`);
+    }
+    const revokedRow = byId.get(alreadyRevoked);
+    assert.equal(revokedRow?.revokedByUserId, giver, "이미 닫힌 위임을 다시 닫았다");
+    assert.equal(revokedRow?.revokedAt?.getTime(), earlierRevokedAt.getTime());
+    assert.equal(byId.get(expired)?.revokedAt, null, "기간이 끝난 줄을 「철회됨」으로 덮었다");
+    assert.equal(byId.get(othersRow)?.revokedAt, null, "🔴 남의 위임까지 거둬들였다");
   });
 
   test("마지막 대표 · 위임 · 메일 수신자 · 개발자 — 대표는 이어받을 사람에게, 위임은 모두 닫고, 부품 요청 · 불출 신청은 그대로", async () => {

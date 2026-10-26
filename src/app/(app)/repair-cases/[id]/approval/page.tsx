@@ -11,6 +11,7 @@ import {
   listInspectionApproverCandidates,
 } from "@/lib/db/queries/repair-case-approvals";
 import { resolveShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
+import { resolveActingApproverUserIds } from "@/lib/db/queries/approval-route-delegations";
 import { listShipmentApprovalRouteSteps } from "@/lib/db/queries/shipment-approval-routes";
 import { roleLabels, type Role } from "@/lib/domain/types";
 
@@ -53,12 +54,23 @@ export default async function RepairCaseApprovalPage({
   // 목록·같은 함수**를 써야 하고, 그것은 서버에만 있다. 클라이언트가 사용자
   // 표를 읽어 스스로 거르게 두면 두 판정이 갈라진다(decideAuthorization을
   // 서버에서 계산해 내려보내는 것과 같은 이유다).
-  const [currentApprovals, history, decideAuthorization, inspectionAssignees] = await Promise.all([
-    getCurrentApprovalsForCase(resolved.id),
-    getApprovalHistoryForCase(resolved.id),
-    actingUser ? resolveShipmentDecideAuthorization(actingUser.id) : Promise.resolve({ allowed: false as const }),
-    listInspectionApproverCandidates(),
-  ]);
+  //
+  // 결재선 단계 위임도 여기서 읽어 내려보낸다 — 「지금 보고 있는 사람이 대신
+  // 누를 수 있는 자리들」이다. 🔴 화면에 주는 것은 **힌트**이고, 실제 승인·반려는
+  // decideRepairCaseApproval 이 자기 트랜잭션 안에서 같은 목록을 다시 읽어
+  // 판정한다(그래야 읽은 직후 되돌려진 위임으로 결재가 통과하지 않는다).
+  // 로그인 사용자를 못 읽었으면 빈 배열이다 — 그때는 화면이 단추를 아예 그리지
+  // 않는다(DatabaseApprovalScreen 의 첫 갈래).
+  const [currentApprovals, history, decideAuthorization, inspectionAssignees, actingApproverUserIds] =
+    await Promise.all([
+      getCurrentApprovalsForCase(resolved.id),
+      getApprovalHistoryForCase(resolved.id),
+      actingUser ? resolveShipmentDecideAuthorization(actingUser.id) : Promise.resolve({ allowed: false as const }),
+      listInspectionApproverCandidates(),
+      actingUser
+        ? resolveActingApproverUserIds(actingUser.id, new Date())
+        : Promise.resolve([] as readonly string[]),
+    ]);
 
   // 결재선을 그리는 데 필요한 단계들. 🔴 「현재 판」이 아니라 **각 줄에 적힌
   // 판**으로 읽는다 — 진행 중인 건은 관리자가 절차를 바꿔도 옛 판을 끝까지
@@ -84,6 +96,7 @@ export default async function RepairCaseApprovalPage({
       history={history}
       decideAuthorization={decideAuthorization}
       routeSteps={routeSteps}
+      actingApproverUserIds={actingApproverUserIds}
       // 역할 이름표는 화면에 보여 줄 **값**이라 승격하지 않는다 — 개발자
       // 표시가 켜져 있어도 그 사람의 역할은 그대로다(developer-promotion.ts).
       inspectionAssigneeCandidates={inspectionAssignees.map((candidate) => ({

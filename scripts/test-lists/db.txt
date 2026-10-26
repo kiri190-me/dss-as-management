@@ -326,3 +326,17 @@ src/app/api/v1/domestic-orders/completion-route.integration.test.ts
 # 🔴 격리 이름: 계정 "routedeleg-test-". 접수 건을 하나도 만들지 않는다(접수번호 차례와
 # 공유 폴더에 손이 닿지 않는다). 치우기가 남의 줄을 안 지우는지는 지문으로 증명한다.
 src/lib/db/mutations/approval-route-delegations.integration.test.ts
+
+# ── 결재선 단계 위임이 **실제 결재에 걸린다** (2026-10-26) ───────────────
+# 0119 로 만든 위임을 결재 판정에 연결한 조각. 🔴 걸리는 결재는 **둘뿐**이다 —
+# 최종 출하 승인 · 견적서 승인(부품 불출은 빈 목록을 넘겨 일부러 안 걸리고, 그 사실은
+# inventory-part-issue-requests.integration.test.ts 가 같은 자리에서 잰다).
+# 여기서 재는 것: 🔴 대리인이 두 결재를 대신 누를 수 있는가 · 🔴 기록에 **누가
+# 눌렀는가**(decided_by)와 **누구 자리였는가**(delegated_from)가 둘 다 남는가(양쪽 결재) ·
+# 결재권자 본인이 눌렀으면 뒤쪽 칸이 비어 있는가(대조) · 기간이 지난 · 아직 시작 안 한 ·
+# 되돌린 위임으로는 못 누르는가(되돌리기 **전에는 된다**는 것까지 잰다) · 🔴 위임이 없는
+# 남은 여전히 못 누르는가 · 🔴 A→B·B→C 가 안 이어지는가 · 🔴 대기 목록에 위임받은 건이
+# 뜨고 되돌리면 사라지는가(단추와 목록이 어긋나면 안 된다).
+# 🔴 격리 이름: 계정 "routedelegdecide-test-" · 접수 월 "9510" · 견적서 "RDD-TEST-".
+# ⚠️ 판·단계는 afterEach 로 반드시 걷는다 — 남으면 다른 파일이 갑자기 결재선을 탄다.
+src/lib/db/mutations/approval-route-delegation-decide.integration.test.ts

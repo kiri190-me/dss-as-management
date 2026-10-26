@@ -24,6 +24,7 @@ import {
   getQuoteApprovalHistory,
   getQuoteApprovalProgress,
 } from "@/lib/db/queries/quote-approvals";
+import { resolveActingApproverUserIds } from "@/lib/db/queries/approval-route-delegations";
 import {
   getCurrentShipmentApprovalRoute,
   listShipmentApprovalRouteSteps,
@@ -126,6 +127,10 @@ export default async function QuoteDetailPage({
   // getQuoteApprovalProgress 가 도메인 함수 하나(resolveQuoteApprovalState)로
   // 정해 주고, 화면은 그 답을 그대로 그린다 — 두 곳에서 계산하면 화면은
   // 「승인 완료」라는데 기록은 「낡았다」고 답하는 날이 온다.
+  // 결재선 단계 위임도 여기서 읽어 내려보낸다 — 「지금 보고 있는 사람이 대신 누를
+  // 수 있는 자리들」이다. 🔴 화면에 주는 것은 **힌트**이고, 실제 승인·반려는
+  // decideQuoteApproval 이 자기 트랜잭션 안에서 같은 목록을 다시 읽어 판정한다
+  // (그래야 읽은 직후 되돌려진 위임으로 결재가 통과하지 않는다).
   const [
     repairLabor,
     printHeaders,
@@ -135,6 +140,7 @@ export default async function QuoteDetailPage({
     approvalProgress,
     approvalHistory,
     currentApprovalRoute,
+    actingApproverUserIds,
   ] = await Promise.all([
     listRepairLabor(),
     readAllQuoteTemplateHeaders(),
@@ -144,6 +150,7 @@ export default async function QuoteDetailPage({
     getQuoteApprovalProgress(quote.id),
     getQuoteApprovalHistory(quote.id),
     getCurrentShipmentApprovalRoute(QUOTE_APPROVAL_ROUTE_SCOPE),
+    resolveActingApproverUserIds(actingUser.id, new Date()),
   ]);
 
   const partOptions = toPartPickerOptions(inventoryParts);
@@ -234,6 +241,9 @@ export default async function QuoteDetailPage({
             role: actingUser.role,
             isDeveloper: actingUser.isDeveloper,
           }}
+          /* 결재선 단계 위임 — 「지금 이 사람이 대신 누를 수 있는 자리들」. 서버에서
+             읽어 내려보낸다(클라이언트가 DB 를 읽게 두지 않는다). */
+          actingApproverUserIds={actingApproverUserIds}
         />
       }
     />

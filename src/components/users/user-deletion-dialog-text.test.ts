@@ -37,6 +37,7 @@ function zeroImpact(overrides: Partial<UserDeletionPreviewImpact> = {}): UserDel
     isRepresentative: false,
     isLastRepresentative: false,
     activeDelegations: { asRepresentative: 0, asDelegate: 0 },
+    activeRouteDelegations: { asDelegator: 0, asDelegate: 0 },
     openAssignedCases: 0,
     untouchedAssignedCases: 0,
     openClaimedNodes: 0,
@@ -159,6 +160,33 @@ describe("영향 건수 문장", () => {
       "출하 대표 지정 · 개발자 표시 · 접수 메일 수신을 해제합니다.",
       "맡고 있던 열린 절차 노드 3개는 접수 건 담당을 따르도록 되돌립니다.",
     ]);
+  });
+
+  test("🔴 결재권 위임(결재선 단계)은 **따로 한 줄**이다 — 옛 위임과 수가 섞이지 않는다", () => {
+    // 두 위임은 서로 다른 표이고 정리하는 자리도 다르다(출하 대표 ↔ 결재선 단계).
+    // 한 줄로 합치면 「위임 3건」이 두 제도에 걸친 수가 되어, 확인 창을 보고도 어느
+    // 쪽을 손봐야 하는지 알 수 없다. 둘을 **함께** 넣어 두 줄이 나오는지 본다.
+    const text = describeUserDeletionImpact(
+      zeroImpact({
+        activeDelegations: { asRepresentative: 1, asDelegate: 0 },
+        activeRouteDelegations: { asDelegator: 2, asDelegate: 1 },
+      })
+    );
+    assert.deepEqual(text.changes, [
+      "위임 1건(대표로서 맡긴 것 1건)을 철회합니다.",
+      "결재권 위임 3건(맡긴 것 2건, 맡은 것 1건)을 철회합니다.",
+    ]);
+  });
+
+  test("🔴 결재권 위임이 0건이면 그 줄이 아예 없다 — 「0건을 철회합니다」를 말하지 않는다", () => {
+    // 0 인 항목을 적으면 읽는 사람에게 무언가 있다고 말한다(이 파일의 규칙).
+    // 대조로 맡은 것만 1건 있는 경우도 함께 본다 — 한쪽만 세는 실수를 잡는다.
+    assert.deepEqual(describeUserDeletionImpact(zeroImpact()).changes, []);
+    assert.deepEqual(
+      describeUserDeletionImpact(zeroImpact({ activeRouteDelegations: { asDelegator: 0, asDelegate: 1 } }))
+        .changes,
+      ["결재권 위임 1건(맡은 것 1건)을 철회합니다."]
+    );
   });
 
   test("해제 문장의 조사는 마지막 항목을 따른다", () => {

@@ -4,7 +4,13 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { repairCaseApprovals, repairCases, shipmentApprovalDelegations, users } from "../schema";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
-import { approvalFollowsRoute, mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
+import {
+  approvalFollowsRoute,
+  delegatedFromUserIdFor,
+  mayDecideAssignedApproval,
+  NO_ROUTE_DELEGATIONS,
+} from "@/lib/auth/approval-assignment";
+import { resolveActingApproverUserIds } from "../queries/approval-route-delegations";
 import {
   getCurrentShipmentApprovalRouteChain,
   getShipmentApprovalRouteSteps,
@@ -42,9 +48,32 @@ const delegationRepresentative = alias(users, "delegation_representative");
  * alone (a representative can be unflagged, or an account
  * deactivated/locked, after a delegation was granted).
  *
+ * ── 🔴 `delegated_from_user_id` 한 칸에 **위임 두 제도**가 함께 적힌다 ────
+ * 2026-10-26 부터 이 칸을 채우는 경로가 둘이고, 둘은 **서로 다른 표**를 본다.
+ * 고칠 일이 생기면 **어느 쪽 이야기인지 먼저 가려라**:
+ *
+ *  · **대표·위임 경로**(바로 위 문단, 결재선을 타지 **않는** 행):
+ *    `shipment_approval_delegations` — 「출하 대표」 권한을 통째로 맡기는 옛 표.
+ *    아래 `!actor.isShipmentRepresentative` 갈래가 적는다.
+ *  · **결재선 경로**(`route_id` 가 채워진 행):
+ *    `approval_route_delegations`(0119) — 결재선 **단계**를 기간으로 맡기는 새 표.
+ *    아래 지정 관문 바로 뒤에서 적는다. 한 결재선 단계의 결재권자가 자리를 비운
+ *    사이 그 단계만 대신 눌러 주는 것이고, 「출하 대표」와는 아무 상관이 없다.
+ *
+ * 두 경로는 **동시에 일어날 수 없다** — 결재선을 타는 행은 대표·위임 판정을
+ * 아예 건너뛴다(아래 followsRoute 갈래). 그래서 한 칸으로 충분하고, 어느 쪽이든
+ * 뜻은 같다: 「**누구 자리**를 대신 누른 것인가」. 누가 실제로 눌렀는지는
+ * `decided_by_user_id` 에 그대로 남는다(둘 다 남아야 한다 — 2026-10-20 결정).
+ *
+ * 🔴 **수리 검수 승인에는 어느 쪽도 걸리지 않는다.** 표의
+ * `repair_case_approvals_delegation_only_for_final_shipment` CHECK 이 이 칸을
+ * 최종 출하 승인에만 허락하고, 검수 승인은 결재선을 탈 수 없어
+ * (`…_route_only_for_final_shipment`) 대신할 「단계」도 없다.
+ *
  * 지정 승인자(assigned_approver_user_id): 요청할 때 「누가 처리할지」를 고를 수
  * 있고, 고르지 않으면(NULL) 지금까지와 완전히 같다 — 자격 있는 사람 누구나
- * 처리한다. 지정이 있으면 그 사람(과 최고관리자)만 처리할 수 있다. 그 판정은
+ * 처리한다. 지정이 있으면 그 사람 · **그 단계를 위임받은 사람**(결재선 행에
+ * 한한다 — 바로 아래 문단) · 최고관리자만 처리할 수 있다. 그 판정은
  * 여기서 새로 적지 않고 mayDecideAssignedApproval(auth/approval-assignment.ts)
  * 하나만 부른다 — 화면·서버 액션·알림 조회도 같은 함수를 본다. 이 관문은 아래
  * 자격 검사들을 **약하게 만들지 않고 그 위에 얹힌다**.
@@ -394,6 +423,19 @@ export async function decideRepairCaseApproval(
       // 그 함수 주석에 있다.
       const followsRoute = approvalFollowsRoute(latest);
 
+      // 🔴 「지금 이 사람이 대신할 수 있는 자리들」 — **이 트랜잭션 안에서** 읽는다.
+      // 바깥에서 읽으면 읽은 직후 되돌려진 위임으로 결재가 통과하고, 그 어긋남은
+      // 오류를 내지 않아 로그를 봐도 설명할 수 없다(resolveActingApproverUserIds 의
+      // 🔴 주석). 그래서 세 번째 인자로 tx 를 넘긴다.
+      //
+      // 🔴 **결재선을 타는 행에만 묻는다.** 이 표는 결재선 **단계**를 맡기는 것이라
+      // (approval_route_delegations) 단계가 없는 행에는 대신할 자리가 없다 — 검수
+      // 승인(결재선을 탈 수 없다)과 대표·위임 방식의 출하 승인(지정이 NULL 이라 관문이
+      // 어차피 열려 있다)이 그 둘이다. 묻지 않는 쪽이 질의도 하나 아낀다.
+      const actingApproverUserIds = followsRoute
+        ? await resolveActingApproverUserIds(actorUserId, new Date(), tx)
+        : NO_ROUTE_DELEGATIONS;
+
       let delegatedFromUserId: string | null = null;
       if (approvalType === "REPAIR_INSPECTION") {
         // Unchanged from before this task — REPAIR_INSPECTION eligibility
@@ -415,12 +457,17 @@ export async function decideRepairCaseApproval(
         // 있어도 결재할 수 없다.
         fail("FORBIDDEN", "비활성화되었거나 잠긴 계정은 이 작업을 수행할 수 없습니다.");
       } else if (followsRoute) {
-        // 결재선 경로 — 대표·위임 판정을 하지 않는다. 여기서 대표를 요구하면
-        // 절차에 올라간 사람이 대표가 아니라는 이유로 자기 단계를 결재하지
-        // 못하게 되어, 절차가 대표를 대신한다는 설계 자체가 성립하지 않는다.
-        // 좁히는 일은 아래 지정 관문이 한다 — 그 단계의 승인자(와 최고관리자)만
-        // 통과한다. delegatedFromUserId 는 이 경로에서 언제나 null 이다(위임으로
-        // 결재한 것이 아니다).
+        // 결재선 경로 — **옛 대표·위임**(shipment_approval_delegations) 판정을
+        // 하지 않는다. 여기서 대표를 요구하면 절차에 올라간 사람이 대표가 아니라는
+        // 이유로 자기 단계를 결재하지 못하게 되어, 절차가 대표를 대신한다는 설계
+        // 자체가 성립하지 않는다. 좁히는 일은 아래 지정 관문이 한다 — 그 단계의
+        // 승인자 · **그 단계를 위임받은 사람** · 최고관리자만 통과한다.
+        //
+        // 🔴 그러니 이 경로에서도 delegatedFromUserId 가 채워질 수 있다. 다만
+        // 여기서 정하지 않고 **지정 관문을 통과한 뒤에** 정한다(아래) — 관문에
+        // 막힐 사람의 위임을 미리 기록으로 만들어 두지 않기 위해서다. 적히는 것은
+        // 새 표(approval_route_delegations)의 위임뿐이고, 옛 대표 위임은 아래
+        // `!actor.isShipmentRepresentative` 갈래에서만 적힌다(파일 머리말).
       } else if (!actor.isShipmentRepresentative) {
         // Not a direct representative — check for a currently-valid active
         // delegation (window includes now, not revoked) whose representative
@@ -478,11 +525,15 @@ export async function decideRepairCaseApproval(
       // 지정이 NULL 이면 이 관문은 언제나 참이다 — 지금까지의 동작 그대로다.
       const assignedApproverUserId = latest.assignedApproverUserId;
       if (
-        !mayDecideAssignedApproval(assignedApproverUserId, {
-          id: actorUserId,
-          role: actor.role,
-          isDeveloper: actor.isDeveloper,
-        })
+        !mayDecideAssignedApproval(
+          assignedApproverUserId,
+          {
+            id: actorUserId,
+            role: actor.role,
+            isDeveloper: actor.isDeveloper,
+          },
+          actingApproverUserIds
+        )
       ) {
         // 「권한이 없습니다」만 돌려주면 사람은 무엇을 해야 할지 모른다 —
         // 누구에게 지정되어 있는지 이름을 넣는다. 이름을 못 찾는 경우(있을 수
@@ -495,6 +546,23 @@ export async function decideRepairCaseApproval(
           assignee
             ? `이 승인 요청은 ${assignee.name} 님에게 지정되어 있어 다른 사람은 처리할 수 없습니다.`
             : "이 승인 요청은 지정된 승인자만 처리할 수 있습니다."
+        );
+      }
+
+      // 🔴 **누구 자리를 대신 누른 것인가** — 관문을 통과한 **뒤에** 정한다. 위임으로
+      // 통과한 것이 아니면(본인 차례 · 최고관리자 비상구) null 이고, 그것이 「직접
+      // 눌렀다」라는 정상값이다. 판정은 여기 새로 적지 않고 공용 함수 하나를 부른다 —
+      // 화면 둘이 안내 문구를 고를 때 **같은 함수**를 보므로, 두 벌로 적으면 화면은
+      // 「위임받아 처리합니다」라는데 기록은 비어 있는 날이 온다.
+      //
+      // 🔵 대표·위임 경로에서 이미 값이 정해졌으면 덮지 않는다 — 두 경로는 함께
+      // 일어날 수 없지만(followsRoute 면 그 갈래를 지나지 않는다), 덮어쓰는 모양으로
+      // 적어 두면 나중에 갈래가 하나 늘었을 때 조용히 한쪽을 지운다.
+      if (followsRoute) {
+        delegatedFromUserId = delegatedFromUserIdFor(
+          assignedApproverUserId,
+          actorUserId,
+          actingApproverUserIds
         );
       }
 
@@ -568,7 +636,10 @@ export async function decideRepairCaseApproval(
             assignedApproverUserId: nextStep.approverUserId,
             routeId: latest.routeId,
             routeStepOrder: nextStep.stepOrder,
-            // delegatedFromUserId 는 결재선 경로에서 언제나 NULL 이다.
+            // 🔴 delegatedFromUserId 를 싣지 않는다(기본값 NULL). 이 칸은 **결재할
+            // 때** 채워지는 것이지 요청을 열 때 정해지는 값이 아니다 — 지금 여는
+            // 행은 아직 아무도 누르지 않았으므로 「누구 자리를 대신했는가」가 없다.
+            // 이 단계를 위임받은 사람이 누르면 그때 위 지정 관문 뒤에서 채워진다.
           });
         }
       }

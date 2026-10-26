@@ -29,7 +29,7 @@ import {
   issuePartRequestCore,
   type InventoryPartRequestResultCode,
 } from "./inventory-part-requests";
-import { mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
+import { mayDecideAssignedApproval, NO_ROUTE_DELEGATIONS } from "@/lib/auth/approval-assignment";
 import { isRequestIssuable } from "@/lib/auth/inventory-authorization";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
@@ -641,12 +641,26 @@ export async function decidePartIssueRequestApproval(
       // 🔴 지정 관문 — **계정 자격을 본 뒤에** 얹는다(requireActor 가 위에서 이미
       // 봤다). 순서가 뒤집히면 지정이 권한을 만들어 낸다. 판정 자체는 여기서
       // 새로 적지 않고 출하 승인·알림 조회와 **같은 함수 하나**를 부른다.
+      //
+      // 🔴 **결재선 단계 위임을 여기서는 걸지 않는다**(NO_ROUTE_DELEGATIONS,
+      // 2026-10-26 사용자 결정). 이 결재는 판이 있어 걸 수야 있지만 일부러 비운다:
+      // 사이드바에서 메뉴가 감춰져 있고(lib/navigation.ts 의 inventory 가
+      // hiddenFromMenu), [승인 절차] 탭에도 안 뜨며
+      // (EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES 밖), 2026-09-11 이후 실제로 안
+      // 쓰인다(실측: 신청 12건의 최근 날짜). A/S 쪽 부품 불출은 **재고관리로
+      // 걷어내는 중**이고, 그쪽 위임은 `dss-inventory` 가 담당한다(2026-10-22 배포).
+      // 🔵 여기에 위임을 붙이려면 걷어내기 계획부터 다시 봐야 한다 — 두 시스템이
+      // 같은 결재를 서로 다른 규칙으로 판정하게 된다.
       if (
-        !mayDecideAssignedApproval(latest.assignedApproverUserId, {
-          id: actor.id,
-          role: actor.role,
-          isDeveloper: actor.isDeveloper,
-        })
+        !mayDecideAssignedApproval(
+          latest.assignedApproverUserId,
+          {
+            id: actor.id,
+            role: actor.role,
+            isDeveloper: actor.isDeveloper,
+          },
+          NO_ROUTE_DELEGATIONS
+        )
       ) {
         // 「권한이 없습니다」만 돌려주면 사람은 무엇을 해야 할지 모른다 — 누구에게
         // 지정되어 있는지 이름을 넣는다.

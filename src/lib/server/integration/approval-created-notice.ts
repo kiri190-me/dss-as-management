@@ -20,6 +20,12 @@
  *    (auth/approval-assignment.ts 의 mayDecideAssignedApproval 이 보는 그 칸).
  *    결재선을 타는 행은 언제나 여기에 해당한다 — 요청 경로가 판과 지정을 함께
  *    넣기 때문이다(mutations/quote-approvals.ts · repair-case-approvals.ts).
+ *    🔴 **2026-10-26 부터 그 단계를 위임받은 사람도 누를 수 있다**(결재선 단계
+ *    위임 — approval_route_delegations). 그래도 **여기서는 그 사람을 찾지
+ *    않는다**: 즉시 알림은 「지정된 한 사람」에게만 간다. 지금 알려진 구멍이고,
+ *    위임받은 사람은 종 · 통합 승인함에서는 그 건을 본다(queries/
+ *    repair-case-approvals-pending.ts · quote-approvals-pending.ts 가 위임을
+ *    함께 본다). 이 자리를 넓히려면 위임 조회를 deps 로 받아야 한다.
  *  · 지정이 없는 검수 결재 → queries/repair-case-approvals.ts 의
  *    listInspectionApproverCandidates. 요청 창의 「누구에게 보낼까요」 후보와
  *    **같은 목록**이고, 그것이 곧 그 결재를 처리할 수 있는 사람들이다.

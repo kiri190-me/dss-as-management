@@ -6,7 +6,12 @@ import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-appro
 import { resolveShipmentDecideAuthorization } from "./shipment-delegations";
 import { countNotificationTargets } from "@/lib/domain/notifications";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
-import { approvalFollowsRoute, mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
+import {
+  approvalFollowsRoute,
+  mayDecideAssignedApproval,
+  NO_ROUTE_DELEGATIONS,
+} from "@/lib/auth/approval-assignment";
+import { resolveActingApproverUserIds } from "./approval-route-delegations";
 import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approval-input";
 
 /**
@@ -72,9 +77,10 @@ import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approv
  *
  * ── 결재선(순차 출하 승인) ──────────────────────────────────────────────
  * 최종 출하 승인 행에 `route_id`가 적혀 있으면 「누가 결재하는가」를 **절차가**
- * 정한다 — 대표·위임 판정을 건너뛰고 그 단계의 지정 승인자(와 최고관리자)만
- * 본다. 결재를 실제로 막는 decideRepairCaseApproval이 그렇게 판정하므로 여기도
- * 같아야 한다. 판정 자체는 여기서 새로 적지 않고 approvalFollowsRoute
+ * 정한다 — 옛 대표·위임 판정을 건너뛰고 그 단계의 지정 승인자 · **그 단계를
+ * 위임받은 사람**(결재선 단계 위임, 2026-10-26) · 최고관리자만 본다. 결재를
+ * 실제로 막는 decideRepairCaseApproval이 그렇게 판정하므로 여기도 같아야 한다.
+ * 판정 자체는 여기서 새로 적지 않고 approvalFollowsRoute
  * (auth/approval-assignment.ts) 하나만 부른다.
  *
  * 그래서 두 곳이 함께 넓어져야 한다:
@@ -91,8 +97,9 @@ import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approv
  *
  * ── 지정 승인자 ─────────────────────────────────────────────────────────
  * 요청 행에 「누가 처리할지」가 지정돼 있을 수 있다
- * (`assigned_approver_user_id`). 지정된 건은 **그 사람(과 최고관리자)에게만**
- * 보여야 한다 — 안 그러면 지정이 장식이 되고, 엉뚱한 사람이 알림을 받는다.
+ * (`assigned_approver_user_id`). 지정된 건은 **그 사람 · 그 단계를 위임받은
+ * 사람(2026-10-26) · 최고관리자에게만** 보여야 한다 — 안 그러면 지정이 장식이
+ * 되고, 엉뚱한 사람이 알림을 받는다.
  * 판정은 여기서 새로 적지 않고 `mayDecideAssignedApproval`
  * (auth/approval-assignment.ts) 하나만 부른다. 결재를 실제로 막는
  * decideRepairCaseApproval도, 단추를 그리는 화면도 같은 함수를 본다.
@@ -257,6 +264,19 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
   const { types, actor, shipmentDecideAllowed } = await resolveDecidableApprovalTypes(actorUserId);
   if (types.length === 0 || !actor) return [];
 
+  // 🔴 「지금 이 사람이 대신할 수 있는 자리들」 — 위임받은 단계도 **내 차례로
+  // 보여야** 한다. 맡긴 사람은 자리를 비운 사람이라, 목록에 안 뜨면 대리인은
+  // 결재할 것이 있다는 사실 자체를 모른다.
+  //
+  // 트랜잭션을 넘기지 않는 것이 맞다 — 읽기 전용이고 최종 판정도 아니다(실제
+  // 승인·반려는 decideRepairCaseApproval 이 자기 트랜잭션 안에서 다시 확인한다).
+  //
+  // 🔵 조회 종류를 고르는 자리(resolveDecidableApprovalTypes)는 손대지 않아도
+  // 된다. 거기서 FINAL_SHIPMENT 를 묻는 조건이 이미 「대표·위임이거나 **결재선
+  // 단계를 맡을 수 있는 계정**이거나」로 넓고, 대리인은 승인됨·활성·잠기지 않음을
+  // 모두 만족해야 위임을 만들 수 있으므로 그 그물에 언제나 걸린다.
+  const actingApproverUserIds = await resolveActingApproverUserIds(actor.id, new Date());
+
   // 후보는 요청 기록이다 — 내가 결재할 수 있는 종류의 결재 행 전부를, 그 행이
   // 달린 접수 건과 함께 가져온다. 워크플로 단계는 조건에 없다(파일 상단 주석
   // "후보는 요청 기록에서 나온다" 참조).
@@ -347,14 +367,24 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
     //    이미 걸렀으므로 지정 관문만 남는다.
     // 지정이 NULL(지정 없음)이면 관문이 언제나 열리므로, 결재선을 쓰지 않는
     // 저장소에서는 이 줄들이 기존 동작을 한 톨도 바꾸지 않는다.
+    const followsRoute = approvalFollowsRoute(latest);
+    if (latest.approvalType === "FINAL_SHIPMENT" && !followsRoute && !shipmentDecideAllowed) {
+      continue;
+    }
+    // 🔴 위임 목록을 거는 조건도 decideRepairCaseApproval 과 **같은 함수**다 —
+    // 결재선 **단계**를 맡기는 표라, 단계가 없는 행에는 대신할 자리가 없다(검수
+    // 승인은 결재선을 탈 수 없고, 대표·위임 방식의 출하 승인은 지정이 NULL 이라
+    // 관문이 어차피 열려 있다). 조건이 갈리면 「목록에는 뜨는데 눌러도 거절」이
+    // 되고, 그 어긋남은 화면에 아무 표시도 남기지 않는다.
     if (
-      latest.approvalType === "FINAL_SHIPMENT" &&
-      !approvalFollowsRoute(latest) &&
-      !shipmentDecideAllowed
+      !mayDecideAssignedApproval(
+        latest.assignedApproverUserId,
+        actor,
+        followsRoute ? actingApproverUserIds : NO_ROUTE_DELEGATIONS
+      )
     ) {
       continue;
     }
-    if (!mayDecideAssignedApproval(latest.assignedApproverUserId, actor)) continue;
     items.push({
       repairCaseId: latest.repairCaseId,
       intakeNumber: latest.intakeNumber,

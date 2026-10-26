@@ -14,6 +14,8 @@ import { actorHasAllowedRole, type PromotableActor } from "./developer-promotion
  *  - 지정이 NULL → **참**. 「지정 없음」은 정상값이고, 이 칸이 생기기 전과
  *    완전히 같은 동작을 뜻한다(자격 있는 사람 누구나 처리).
  *  - 지정이 나 자신 → 참.
+ *  - 지정된 사람의 결재권을 **지금 위임받고 있다** → 참(2026-10-26). 넘겨받는
+ *    자리들은 부르는 쪽이 목록으로 넘긴다 — 아래 인자 주석 참조.
  *  - 내가 최고관리자 → 참. 지정된 사람이 자리를 비워 영영 막히는 것을 막는
  *    비상구다.
  *  - 그 밖 → 거짓.
@@ -47,18 +49,75 @@ import { actorHasAllowedRole, type PromotableActor } from "./developer-promotion
 const ASSIGNMENT_OVERRIDE_ROLES = ["SUPER_ADMIN"] as const;
 
 /**
+ * 🔴 **「이 결재에는 결재선 단계 위임이 걸리지 않는다」를 글자로 적는 자리.**
+ *
+ * `[]` 를 그 자리에 바로 쓰면 「위임을 아직 안 붙였다」와 「일부러 안 붙였다」가
+ * 똑같이 생긴다. 이름을 붙여 두면 **왜 비었는지**를 부르는 쪽 주석이 설명하게
+ * 되고, 나중에 이 상수를 지우려는 사람이 그 주석을 먼저 읽는다.
+ *
+ * 지금 이 상수를 쓰는 자리는 셋이다(2026-10-26 사용자 결정):
+ *  · A/S 안의 **부품 불출** 결재(mutation · 대기 목록) — 메뉴가 감춰져 있고
+ *    승인 절차 탭에도 안 뜨며 2026-09-11 이후 안 쓰인다. 재고관리로 걷어내는
+ *    중이고, 그쪽 위임은 `dss-inventory` 가 담당한다(2026-10-22 배포).
+ *  · **수리 검수 승인** — 결재선을 탈 수 없다(표의
+ *    `repair_case_approvals_route_only_for_final_shipment` CHECK). 대신할
+ *    「단계」가 애초에 없다.
+ */
+export const NO_ROUTE_DELEGATIONS: readonly string[] = [];
+
+/**
  * 지정 관문을 통과하는가. **자격 검사를 통과한 뒤에** 부른다(위 주석 참조).
  *
  * @param assignedApproverUserId 요청 행의 지정 승인자. `null` 은 「지정 없음」.
  * @param actor 지금 처리하려는 사람. `id` 와 역할 승격에 필요한 값만 본다.
+ * @param actingApproverUserIds 🔴 **「지금 이 사람의 자격으로 누를 수 있는 결재자
+ *   id」 전부.** db/queries/approval-route-delegations.ts 의
+ *   `resolveActingApproverUserIds` 가 만든 목록을 그대로 넘긴다(맨 앞은 언제나
+ *   본인이라 비어 있지 않다). 위임이 걸리지 않는 결재에는 위의
+ *   `NO_ROUTE_DELEGATIONS` 를 넘긴다.
+ *
+ *   🔴 **선택 인자가 아니다.** 기본값을 두면 빠뜨린 자리에서만 위임이 조용히 안
+ *   걸린다 — 오류가 나지 않고 「어떤 화면에서만 대리 결재가 안 된다」가 되며, 그
+ *   화면에는 아무 표시도 남지 않는다. 필수로 받아 **모든 호출부가 무엇을 넘길지
+ *   고르게** 한다.
+ *
+ *   🔴 이 목록이 **자격을 만들지는 않는다.** 위임받았다고 해서 그 결재의 역할·
+ *   계정 자격이 생기는 것이 아니고, 그 검사는 여전히 이 함수 **앞**에 있다.
  */
 export function mayDecideAssignedApproval(
   assignedApproverUserId: string | null,
-  actor: { id: string } & PromotableActor<string>
+  actor: { id: string } & PromotableActor<string>,
+  actingApproverUserIds: readonly string[]
 ): boolean {
   if (assignedApproverUserId === null) return true;
   if (assignedApproverUserId === actor.id) return true;
+  if (actingApproverUserIds.includes(assignedApproverUserId)) return true;
   return actorHasAllowedRole(actor, ASSIGNMENT_OVERRIDE_ROLES);
+}
+
+/**
+ * 「지금 누르는 이 한 번이 **누구 자리**를 대신하는 것인가」 — 결재 행의
+ * `delegated_from_user_id` 에 그대로 적을 값. 위임으로 누른 것이 아니면 `null`
+ * 이고, `null` 은 「직접 눌렀다」라는 뜻 있는 정상값이다(표의 칸 주석).
+ *
+ * 🔴 **최고관리자 비상구로 누른 것은 위임이 아니다** — 그때 `null` 을 돌려준다.
+ * 둘을 한 칸에 섞으면 「A 의 결재권을 받아 B 가 눌렀다」와 「막혀 있어 최고관리자가
+ * 풀었다」가 기록에서 구별되지 않는다. 뒤쪽은 `decided_by_user_id` 와 지정 칸이
+ * 다르다는 것만으로 이미 드러난다(standsInForAssignedApprover 가 그 모양을 읽는다).
+ *
+ * 🔴 **판정을 여기 한 곳에만 둔다.** 결재를 집는 mutation 둘(출하 · 견적서)이
+ * 이 값을 쓰고, 화면 둘이 **같은 함수**로 「위임으로 서 있는가」를 물어 안내 문구를
+ * 고른다 — 두 벌로 적으면 화면은 「위임받아 처리합니다」라는데 기록에는 아무것도
+ * 안 남는 날이 온다.
+ */
+export function delegatedFromUserIdFor(
+  assignedApproverUserId: string | null,
+  actorUserId: string,
+  actingApproverUserIds: readonly string[]
+): string | null {
+  if (assignedApproverUserId === null) return null;
+  if (assignedApproverUserId === actorUserId) return null;
+  return actingApproverUserIds.includes(assignedApproverUserId) ? assignedApproverUserId : null;
 }
 
 /**

@@ -12,7 +12,7 @@ import {
   repairCases,
   users,
 } from "../schema";
-import { mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
+import { mayDecideAssignedApproval, NO_ROUTE_DELEGATIONS } from "@/lib/auth/approval-assignment";
 import {
   INVENTORY_PART_ISSUE_REQUEST_STATUSES,
   isPartIssueRequestAwaitingApproval,
@@ -390,7 +390,13 @@ export async function listPartIssueRequestsPendingMyApproval(
   return rows
     // 🔴 지정이 걸린 건은 **그 사람과 최고관리자에게만** 보인다. 판정은 여기서
     // 새로 적지 않고 출하 승인과 같은 함수 하나를 부른다.
-    .filter((row) => mayDecideAssignedApproval(row.assignedApproverUserId, actor))
+    //
+    // 🔴 **결재선 단계 위임을 여기서는 걸지 않는다**(NO_ROUTE_DELEGATIONS). 결재를
+    // 실제로 막는 decidePartIssueRequestApproval 이 같은 값을 넘기므로 「목록에는
+    // 뜨는데 눌리지 않는」 어긋남이 생기지 않는다 — 비워 두는 까닭은 그 함수의
+    // 지정 관문 주석에 길게 적혀 있다(메뉴가 감춰져 있고, 2026-09-11 이후 안 쓰이며,
+    // 재고관리로 걷어내는 중이다).
+    .filter((row) => mayDecideAssignedApproval(row.assignedApproverUserId, actor, NO_ROUTE_DELEGATIONS))
     .map((row) => ({
       issueRequestId: row.issueRequestId,
       approvalId: row.approvalId,

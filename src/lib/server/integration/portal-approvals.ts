@@ -31,8 +31,8 @@
  * 조회 둘을 **인자로 받아** 그대로 부른다:
  *   · queries/repair-case-approvals-pending.ts 의 listRepairCasesPendingMyApproval
  *   · queries/quote-approvals-pending.ts 의 listQuoteApprovalsPendingMyApproval
- * 그 둘이 결재선 지정자 · 대표/위임 · 최고관리자 비상구(mayDecideAssignedApproval)
- * 까지 이미 가른다. 판정이 두 벌이 되면 한쪽만 고쳐지는 날이 오고, 그것은 권한
+ * 그 둘이 결재선 지정자 · **그 단계를 위임받은 사람**(결재선 단계 위임, 2026-10-26) ·
+ * 출하 대표/옛 위임 · 최고관리자 비상구(mayDecideAssignedApproval)까지 이미 가른다. 판정이 두 벌이 되면 한쪽만 고쳐지는 날이 오고, 그것은 권한
  * 구멍이다 — 그리고 **잘못 좁힌 쪽은 화면에 아무 표시도 남기지 않는다.**
  *
  * DB 를 여기서 부르지 않고 인자로 받는 것은 portal-notifications.ts 와 같은

@@ -3,9 +3,10 @@ import "../../../../scripts/load-env";
 import { after, afterEach, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, like } from "drizzle-orm";
+import { and, asc, eq, inArray, like, or } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
+  approvalRouteDelegations,
   auditLogs,
   customers,
   inventoryPartIssueApprovals,
@@ -35,6 +36,7 @@ import {
   executePartIssueRequest,
 } from "./inventory-part-issue-requests";
 import { createRepairCase } from "./repair-cases";
+import { createApprovalRouteDelegation } from "./approval-route-delegations";
 import { saveShipmentApprovalRoute } from "./shipment-approval-routes";
 import { getCurrentShipmentApprovalRoute } from "../queries/shipment-approval-routes";
 import { listPartIssueRequestsPendingMyApproval } from "../queries/inventory-part-issue-requests";
@@ -316,6 +318,20 @@ async function removeIssueFixtures(): Promise<void> {
       .where(inArray(inventoryPartRequestItems.requestId, partRequestIds));
     await db.delete(inventoryPartRequests).where(inArray(inventoryPartRequests.id, partRequestIds));
   }
+
+  // 🔴 결재선 **단계** 위임(approval_route_delegations, 0119) — 「여기엔 안 걸린다」를
+  // 재는 시험이 한 줄 만든다. 사람을 RESTRICT 로 넷이나 가리켜, 남으면 after() 의
+  // 사람 삭제가 막힌다.
+  await db
+    .delete(approvalRouteDelegations)
+    .where(
+      or(
+        inArray(approvalRouteDelegations.delegatorUserId, createdUserIds),
+        inArray(approvalRouteDelegations.delegateUserId, createdUserIds),
+        inArray(approvalRouteDelegations.createdByUserId, createdUserIds),
+        inArray(approvalRouteDelegations.revokedByUserId, createdUserIds)
+      )
+    );
 
   // 판을 지우면 단계는 함께 사라진다. 매 시험이 스스로 판을 정하려면 판 번호가
   // 1부터 다시 시작해야 한다.
@@ -886,6 +902,62 @@ describe("결재 — 사슬이 한 단계씩 나아간다", () => {
     assert.equal(rows.length, 1, "거절이 행을 만들었다");
     assert.equal(rows[0].status, "REQUESTED", "거절됐는데 행이 바뀌었다");
     assert.equal((await issueRequestRow(issueRequestId)).status, "PENDING_APPROVAL");
+  });
+
+  test("🔴 19b. **결재선 단계 위임은 여기에 걸리지 않는다** — 대리인도 거절된다", async () => {
+    // 2026-10-26 사용자 결정: 위임(`approval_route_delegations`, 0119)이 걸리는
+    // 결재는 **최종 출하 승인 · 견적서 승인 둘뿐**이다. 부품 불출은 판을 타지만
+    // 일부러 빈 목록(NO_ROUTE_DELEGATIONS)을 넘긴다 — 메뉴가 감춰져 있고, [승인
+    // 절차] 탭에도 안 뜨며, 2026-09-11 이후 안 쓰이고, 재고관리로 걷어내는 중이라
+    // 그쪽 위임은 dss-inventory 가 담당한다.
+    //
+    // 🔴 이 시험이 지키는 것은 **빼 둔 것이 실수가 아니라는 사실**이다. 두 결재에
+    // 위임을 붙이면서 여기까지 같이 붙이면(한 줄이면 된다) 아무 오류 없이 통과하고,
+    // A/S 와 재고관리가 같은 결재를 서로 다른 규칙으로 판정하게 된다.
+    const issueRequestId = await arrangePending([approverAId, approverBId]);
+
+    // approverA(지금 차례) → approverC 에게 **지금 살아 있는** 위임을 건다.
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const granted = await createApprovalRouteDelegation({
+      delegatorUserId: approverAId,
+      delegateUserId: approverCId,
+      startsAt: new Date(now - day),
+      endsAt: new Date(now + day),
+      reason: "",
+      // 결재권자 본인이 맡긴다 — 권한을 보지 않는 길이다.
+      actorUserId: approverAId,
+    });
+    assert.equal(granted.ok, true, `setup delegation failed: ${JSON.stringify(granted)}`);
+
+    const decided = await decidePartIssueRequestApproval({
+      issueRequestId,
+      decision: "APPROVED",
+      actorUserId: approverCId,
+      decisionReason: null,
+    });
+    assert.equal(decided.ok, false, "🔴 부품 불출에 결재선 단계 위임이 걸렸다");
+    if (!decided.ok) assert.equal(decided.code, "FORBIDDEN");
+
+    // 🔵 대조 — 같은 위임을 두고 **지정된 본인**은 그대로 누를 수 있다. 이 줄이
+    //    없으면 「무슨 까닭으로든 막혔다」로도 이 시험이 통과한다.
+    const bySelf = await decidePartIssueRequestApproval({
+      issueRequestId,
+      decision: "APPROVED",
+      actorUserId: approverAId,
+      decisionReason: null,
+    });
+    assert.equal(bySelf.ok, true, `지정된 본인이 막혔다: ${JSON.stringify(bySelf)}`);
+
+    // 대기 목록도 같아야 한다 — 눌리지 않는 줄이 목록에만 서면 안 된다.
+    // (여기서는 이미 1단계가 끝나 2단계가 approverB 에게 열려 있다.)
+    assert.equal(
+      (await listPartIssueRequestsPendingMyApproval(approverCId)).some(
+        (item) => item.issueRequestId === issueRequestId
+      ),
+      false,
+      "🔴 위임받은 대리인의 대기 목록에 부품 불출이 떴다"
+    );
   });
 
   test("20. 최고관리자는 언제나 처리할 수 있다 — 사슬은 그대로 이어진다", async () => {

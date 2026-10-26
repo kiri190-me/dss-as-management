@@ -773,6 +773,41 @@ describe("🔴 최종 출하 승인 카드 — 비상구 안내", () => {
     );
   });
 
+  test("🔴 안내가 **까닭에 따라 둘**이다 — 위임받은 사람에게 「최고관리자 권한으로」라고 말하지 않는다", () => {
+    // 2026-10-26 전에는 남의 자리에 설 길이 비상구 하나뿐이라 문장도 하나였다.
+    // 결재선 단계 위임이 붙은 뒤에도 그 문장만 남으면, 위임받은 사람은 **자기가
+    // 왜 누를 수 있는지** 끝내 모르고 화면은 거짓을 말한다.
+    assert.ok(
+      decideBranch.includes("위임받은 결재권으로 대신 처리합니다."),
+      "위임 쪽 안내가 없다"
+    );
+    assert.ok(
+      decideBranch.includes("최고관리자 권한으로 대신 처리합니다."),
+      "비상구 쪽 안내가 사라졌다"
+    );
+    // 어느 쪽인지는 **서버가 기록에 적을 값을 정하는 그 함수**가 가른다 — 화면이
+    // 따로 판정하면 안내와 기록(delegated_from_user_id)이 서로 다른 말을 한다.
+    assert.match(flat(decideBranch), /blockedNotice = delegatedFromUserId \? `지금 차례는/);
+    assert.match(flat(shipmentCardSource), /delegatedFromUserIdFor\(/);
+  });
+
+  test("🔴 위임 목록은 **서버에서 받아** 공용 관문에 그대로 넘긴다 — 화면이 DB 를 읽지 않는다", () => {
+    // 위임 목록은 approval_route_delegations 를 읽어야 나온다. 서버(page.tsx)가
+    // 읽어 카드까지 내려보내는 것은 decideAuthorization 과 같은 이유다.
+    assert.match(flat(shipmentCardSource), /actingApproverUserIds: readonly string\[\]/);
+    assert.match(flat(approvalScreenSource), /actingApproverUserIds=\{actingApproverUserIds\}/);
+    // 🔴 걸리는 자리를 카드가 새로 적지 않는다 — 서버와 **같은 함수**로 가른다.
+    assert.match(
+      flat(shipmentCardSource),
+      /const routeDelegations = followsRoute \? actingApproverUserIds : NO_ROUTE_DELEGATIONS;/
+    );
+    // 「목록에 들어 있나」를 손으로 세지 않는다 — 그러면 판정이 두 벌이 된다.
+    assert.ok(
+      !/actingApproverUserIds\.includes\(/.test(shipmentCardSource),
+      "위임 판정을 카드가 한 벌 더 적었다"
+    );
+  });
+
   test("🔴 안내는 단추가 열리는 갈래에서만 나온다 — 내 차례면 나오지 않는다", () => {
     // 지정 관문(!assignedGateOpen)에서 걸러진 사람은 단추 자체가 없고 지정된
     // 사람의 이름만 본다. 그 뒤 갈래에 있어야 「단추는 열렸는데 남의 차례」다.
@@ -903,6 +938,21 @@ describe("🔴 수리 검수 승인 카드 — 비상구 안내", () => {
   test("🔴 문구가 출하 카드와 글자 그대로 같다 — 대비 문구까지", () => {
     assert.match(flat(decideBranch), NOTICE_SOURCE);
     assert.match(flat(shipmentCardSource), NOTICE_SOURCE, "출하 카드 쪽 문구가 바뀌어 둘이 갈라졌다");
+  });
+
+  test("🔴 검수 카드에는 **위임 안내가 없다** — 걸릴 위임이 애초에 없다", () => {
+    // 2026-10-26: 결재선 단계 위임이 걸리는 결재는 최종 출하 승인 · 견적서 승인
+    // 둘뿐이다. 검수 승인은 결재선을 탈 수 없어(표의
+    // `repair_case_approvals_route_only_for_final_shipment` CHECK) 대신할 단계가
+    // 없고, 그래서 이 카드는 공용 관문에 **빈 목록**을 넘긴다.
+    //
+    // 🔴 위의 「문구가 출하 카드와 같다」를 읽고 출하 카드의 새 갈래를 여기로
+    // 베껴 오면, 이 카드는 **일어날 수 없는 상황**을 말하게 된다.
+    assert.match(flat(inspectionCardSource), /NO_ROUTE_DELEGATIONS/);
+    assert.ok(
+      !inspectionCardSource.includes("위임받은 결재권으로 대신 처리합니다."),
+      "검수 카드에 위임 안내가 들어왔다 — 이 결재에는 위임이 걸리지 않는다"
+    );
   });
 
   test("🔴 지정된 본인이거나 지정이 없으면(NULL) 안내가 만들어지지 않는다", () => {

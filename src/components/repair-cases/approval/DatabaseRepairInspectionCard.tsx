@@ -8,7 +8,11 @@ import ApprovalActionDialog, { type ApprovalAssigneeOption } from "./ApprovalAct
 import { requestRepairCaseApprovalAction, decideRepairCaseApprovalAction } from "@/lib/server/actions/repair-case-approvals";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
-import { mayDecideAssignedApproval, standsInForAssignedApprover } from "@/lib/auth/approval-assignment";
+import {
+  mayDecideAssignedApproval,
+  NO_ROUTE_DELEGATIONS,
+  standsInForAssignedApprover,
+} from "@/lib/auth/approval-assignment";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
 import type { DatabaseDisplayApprovalStatus } from "./DatabaseApprovalStatusBadge";
 import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
@@ -71,7 +75,17 @@ export default function DatabaseRepairInspectionCard({
   // 자격(위)을 통과한 **뒤** 보는 관문이다. 서버가 실제로 강제하는 것과 같은
   // 함수를 부른다 — 여기서 따로 계산하면 「단추는 보이는데 누르면 거절」이나
   // 그 반대가 된다. 지정이 없으면(null) 언제나 참이라 지금까지와 같다.
-  const assignedGateOpen = mayDecideAssignedApproval(record?.assignedApproverUserId ?? null, actingUser);
+  //
+  // 🔴 **결재선 단계 위임은 검수 승인에 걸리지 않는다**(NO_ROUTE_DELEGATIONS).
+  // 검수 승인은 결재선을 탈 수 없어(표의
+  // `repair_case_approvals_route_only_for_final_shipment` CHECK) 대신할 「단계」가
+  // 애초에 없다 — 서버(decideRepairCaseApproval)도 같은 까닭으로 같은 값을
+  // 넘긴다. 그래서 이 카드에는 「위임받아 처리합니다」 안내도 없다.
+  const assignedGateOpen = mayDecideAssignedApproval(
+    record?.assignedApproverUserId ?? null,
+    actingUser,
+    NO_ROUTE_DELEGATIONS
+  );
   // 지정된 사람이 따로 있는데 내가 그 자리에 서 있는가. 「그래도 되는가」는 위
   // 지정 관문이 이미 답했다 — 이것은 **모양**만 묻는 판정이고, 이력의 「지정자
   // 대신 처리」 배지와 출하 카드의 안내가 같은 함수를 본다.

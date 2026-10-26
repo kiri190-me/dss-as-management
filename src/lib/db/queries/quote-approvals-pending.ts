@@ -3,7 +3,8 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { quoteApprovals, quotes, users } from "../schema";
-import { mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
+import { approvalFollowsRoute, mayDecideAssignedApproval, NO_ROUTE_DELEGATIONS } from "@/lib/auth/approval-assignment";
+import { resolveActingApproverUserIds } from "./approval-route-delegations";
 
 /**
  * ============================================================================
@@ -23,7 +24,7 @@ import { mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
  * ── 판정을 새로 만들지 않는다 ───────────────────────────────────────────
  * 「이 결재를 내가 처리할 수 있는가」는 출하 승인·부품 불출과 **같은 함수 하나**를
  * 본다 — auth/approval-assignment.ts 의 `mayDecideAssignedApproval`(지정된 사람,
- * 또는 최고관리자 비상구). 실제로 승인·반려를 막는 decideQuoteApproval 이 자기
+ * 그 단계를 위임받은 사람, 또는 최고관리자 비상구). 실제로 승인·반려를 막는 decideQuoteApproval 이 자기
  * 트랜잭션 안에서 부르는 바로 그 함수다. 여기서 한 벌 더 적으면 알림에는 뜨는데
  * 눌러도 거절되는(또는 그 반대의) 어긋남이 생기고, 후자는 화면에 아무 표시도
  * 남기지 않아 더 나쁘다.
@@ -37,7 +38,14 @@ import { mayDecideAssignedApproval } from "@/lib/auth/approval-assignment";
  * 다만 견적서는 두 알림보다 **좁다**: 견적서 결재 요청은 언제나 결재선을 타므로
  * (판이 없거나 단계가 0개면 요청 자체가 거절된다 —
  * domain/quote-approval-rules.ts 의 isQuoteApprovalRouteInForce) 지정이 NULL 인 행이
- * 생기지 않는다. 즉 「지정된 사람 + 최고관리자」 말고는 아무에게도 뜨지 않는다.
+ * 생기지 않는다. 즉 「지정된 사람 + 그 단계를 위임받은 사람 + 최고관리자」 말고는
+ * 아무에게도 뜨지 않는다.
+ *
+ * ── 🔴 위임받은 단계도 **내 차례로 뜬다** (2026-10-26) ──────────────────
+ * 결재선 단계 위임(`approval_route_delegations`)으로 남의 단계를 누를 수 있게 된
+ * 사람에게는 그 건이 여기에도 서야 한다. 맡긴 사람은 자리를 비운 사람이고, 목록에
+ * 안 뜨면 대리인은 **결재할 것이 있다는 사실 자체를** 모른다. 넘기는 목록은
+ * queries/approval-route-delegations.ts 의 resolveActingApproverUserIds 가 만든다.
  *
  * ── 처리된 건은 뜨지 않는다 · 한 장에 한 줄이다 ─────────────────────────
  * 후보는 **아직 결정되지 않은 행**(`status = 'REQUESTED'`)뿐이다. 승인·반려된 행은
@@ -120,12 +128,21 @@ export async function listQuoteApprovalsPendingMyApproval(
   const actor = await resolveQuoteApprovalActor(actorUserId);
   if (!actor) return [];
 
+  // 🔴 「지금 이 사람이 대신할 수 있는 자리들」 — 위임받은 단계도 **내 차례로
+  // 보여야** 한다. 트랜잭션을 넘기지 않는 것이 맞다: 읽기 전용이고 최종 판정도
+  // 아니라 그 순간의 답이면 충분하다(실제 승인·반려는 decideQuoteApproval 이 자기
+  // 트랜잭션 안에서 전부 다시 확인한다).
+  const actingApproverUserIds = await resolveActingApproverUserIds(actor.id, new Date());
+
   const rows = await db
     .select({
       quoteId: quotes.id,
       quoteNumber: quotes.quoteNumber,
       approvalId: quoteApprovals.id,
       routeStepOrder: quoteApprovals.routeStepOrder,
+      // 「이 행이 결재선 단계인가」를 가르는 나머지 한 칸 — 위임은 단계에만 걸린다.
+      // 같은 표의 칸이라 조인도 조건도 늘지 않는다.
+      routeId: quoteApprovals.routeId,
       assignedApproverUserId: quoteApprovals.assignedApproverUserId,
       requestedByUserId: quoteApprovals.requestedByUserId,
       requestedByName: approvalRequester.name,
@@ -144,9 +161,18 @@ export async function listQuoteApprovalsPendingMyApproval(
     .orderBy(asc(quoteApprovals.requestedAt), asc(quoteApprovals.id));
 
   return rows
-    // 🔴 지정이 걸린 건은 **그 사람과 최고관리자에게만** 보인다. 판정은 여기서 새로
-    // 적지 않고 출하 승인·부품 불출·결재 mutation 과 같은 함수 하나를 부른다.
-    .filter((row) => mayDecideAssignedApproval(row.assignedApproverUserId, actor))
+    // 🔴 지정이 걸린 건은 **그 사람 · 그 단계를 위임받은 사람 · 최고관리자에게만**
+    // 보인다. 판정은 여기서 새로 적지 않고 출하 승인·부품 불출·결재 mutation 과 같은
+    // 함수 하나를 부른다. 위임 목록을 거는 조건도 decideQuoteApproval 과 **같은
+    // 함수**(approvalFollowsRoute)다 — 조건이 갈리면 「목록에는 뜨는데 눌러도
+    // 거절」이 되고, 그 어긋남은 화면에 아무 표시도 남기지 않는다.
+    .filter((row) =>
+      mayDecideAssignedApproval(
+        row.assignedApproverUserId,
+        actor,
+        approvalFollowsRoute(row) ? actingApproverUserIds : NO_ROUTE_DELEGATIONS
+      )
+    )
     .map((row) => ({
       quoteId: row.quoteId,
       quoteNumber: row.quoteNumber,

@@ -133,6 +133,21 @@ export function describeUserDeletionImpact(impact: UserDeletionPreviewImpact): U
     changes.push(`위임 ${delegationTotal}건(${parts.join(", ")})을 철회합니다.`);
   }
 
+  // 4b. 결재선 단계 위임 — 맡긴 것이든 맡은 것이든.
+  // 🔴 위 4 와 **다른 표**라 줄을 따로 세운다(approval_route_delegations, 0119).
+  // 한 줄로 합치면 「위임 3건」이 두 제도에 걸친 수가 되어, 확인 창을 보고도 어느
+  // 쪽을 정리해야 하는지 알 수 없다. 낱말도 그 화면의 말을 따른다 — 사용자 관리의
+  // 탭 이름이 「결재권 위임」이다.
+  const routeDelegations = impact.activeRouteDelegations;
+  const routeDelegationTotal = routeDelegations.asDelegator + routeDelegations.asDelegate;
+  if (routeDelegationTotal > 0) {
+    const parts = [
+      routeDelegations.asDelegator > 0 ? `맡긴 것 ${routeDelegations.asDelegator}건` : null,
+      routeDelegations.asDelegate > 0 ? `맡은 것 ${routeDelegations.asDelegate}건` : null,
+    ].filter((part): part is string => part !== null);
+    changes.push(`결재권 위임 ${routeDelegationTotal}건(${parts.join(", ")})을 철회합니다.`);
+  }
+
   // 5. 표시 — 되살려도 돌아오지 않는 것들.
   const flags = [
     impact.isRepresentative ? "출하 대표 지정" : null,
