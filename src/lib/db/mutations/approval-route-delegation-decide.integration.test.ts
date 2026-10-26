@@ -30,7 +30,8 @@ import {
 } from "./approval-route-delegations";
 import { saveShipmentApprovalRoute } from "./shipment-approval-routes";
 import { getCurrentShipmentApprovalRoute } from "../queries/shipment-approval-routes";
-import { resolveApprovalValidity } from "../queries/repair-case-approvals";
+import { getApprovalHistoryForCase, resolveApprovalValidity } from "../queries/repair-case-approvals";
+import { getQuoteApprovalHistory } from "../queries/quote-approvals";
 import { listRepairCasesPendingMyApproval } from "../queries/repair-case-approvals-pending";
 import { listQuoteApprovalsPendingMyApproval } from "../queries/quote-approvals-pending";
 import { QUOTE_APPROVAL_ROUTE_SCOPE } from "@/lib/domain/quote-approval-rules";
@@ -63,6 +64,9 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  *  6. 🔴 **위임이 없는 남**은 여전히 못 누른다 — 넓히기만 했지 구멍이 안 생겼다.
  *  7. 🔴 **대기 목록에 위임받은 건이 보인다**(종 · 통합 승인함의 원본). 단추는
  *     보이는데 누르면 거절되거나 그 반대가 되면 안 된다.
+ *  8. 🔴 **이력 조회가 그 사실을 이름으로 내보낸다** — 양쪽 결재 모두. 칸에 적기만
+ *     하고 조회가 읽지 않으면 화면에서 「위임으로 대신 눌렀다」와 「최고관리자가
+ *     비상구로 눌렀다」가 똑같이 보인다(2026-10-26 견적서 쪽이 실제로 그랬다).
  *
  * ── 격리·청소 규약 ──────────────────────────────────────────────────────
  * repair-case-approvals-route.integration.test.ts · quote-approvals.integration
@@ -494,6 +498,101 @@ describe("🔴 견적서 결재 — 대리인이 대신 누른다", () => {
     const [row] = await quoteRows(quoteId);
     assert.equal(row.decidedByUserId, approverId);
     assert.equal(row.delegatedFromUserId, null, "직접 눌렀는데 「대신 눌렀다」로 남았다");
+  });
+});
+
+describe("🔴 이력이 「누구 자리였나」를 **이름으로** 내보낸다", () => {
+  /** 그 사람의 지금 이름 — 글자로 적어 두면 계정 이름이 바뀐 날 시험만 틀린다. */
+  async function userName(userId: string): Promise<string> {
+    const [row] = await db.select({ name: users.name }).from(users).where(eq(users.id, userId));
+    assert.ok(row, "시험 계정을 찾지 못했다 — 시험의 전제가 사라졌다");
+    return row.name;
+  }
+
+  test("🔴 견적서 — 위임으로 누른 줄에 **원래 자리 사람의 이름**이 실린다", async () => {
+    await saveRoute(QUOTE_APPROVAL_ROUTE_SCOPE, [approverId]);
+    const quoteId = await arrangePendingQuote();
+    await grantDelegation();
+
+    const decided = await decideQuoteApproval({
+      quoteId,
+      decision: "APPROVED",
+      actorUserId: delegateId,
+      decisionReason: null,
+    });
+    assert.equal(decided.ok, true, `대리인이 막혔다: ${JSON.stringify(decided)}`);
+
+    const history = await getQuoteApprovalHistory(quoteId);
+    assert.equal(history.length, 1, "이력 줄이 하나가 아니다 — 시험의 전제가 사라졌다");
+    const [row] = history;
+    assert.equal(row.delegatedFromUserId, approverId);
+    assert.equal(row.delegatedFromName, await userName(approverId), "이름이 안 실렸다");
+    // 🔵 누른 사람도 함께 — 두 칸을 함께 읽어야 「B 가 A 를 대신해 승인했다」가
+    // 복원된다(2026-10-20 사용자 결정). 하나만 실으면 기록이 반쪽이다.
+    assert.equal(row.decidedByUserId, delegateId);
+    assert.equal(row.decidedByName, await userName(delegateId));
+  });
+
+  test("🔴 견적서 — 직접 누른 줄에는 그 이름이 **없다**", async () => {
+    // 위 시험이 「언제나 결재권자 이름을 싣는다」로도 통과하지 않게 하는 대조다.
+    await saveRoute(QUOTE_APPROVAL_ROUTE_SCOPE, [approverId]);
+    const quoteId = await arrangePendingQuote();
+    await grantDelegation();
+
+    const decided = await decideQuoteApproval({
+      quoteId,
+      decision: "APPROVED",
+      actorUserId: approverId,
+      decisionReason: null,
+    });
+    assert.equal(decided.ok, true, `결재권자 본인이 막혔다: ${JSON.stringify(decided)}`);
+
+    const [row] = await getQuoteApprovalHistory(quoteId);
+    assert.equal(row.delegatedFromUserId, null);
+    assert.equal(row.delegatedFromName, null, "직접 누른 줄이 위임으로 읽힌다");
+    // 🔴 지정 칸은 그대로 실린다 — 「원래 누구 차례였나」는 그쪽이 답한다. 이
+    // 줄에서 위임 이름만 비는 것이 「본인이 자기 차례에 눌렀다」의 모양이다.
+    assert.equal(row.assignedApproverUserId, approverId);
+    assert.equal(row.assignedApproverName, await userName(approverId));
+  });
+
+  test("🔴 접수 건 이력과 **같은 모양**이다 — 두 조회가 같은 사실을 다르게 싣지 않는다", async () => {
+    await saveRoute("FINAL_SHIPMENT", [approverId]);
+    await saveRoute(QUOTE_APPROVAL_ROUTE_SCOPE, [approverId]);
+    const caseId = await arrangePendingShipment();
+    const quoteId = await arrangePendingQuote();
+    await grantDelegation();
+
+    const shipment = await decideRepairCaseApproval(caseId, "FINAL_SHIPMENT", "APPROVED", delegateId, null);
+    assert.equal(shipment.ok, true, `대리인이 막혔다: ${JSON.stringify(shipment)}`);
+    const quote = await decideQuoteApproval({
+      quoteId,
+      decision: "APPROVED",
+      actorUserId: delegateId,
+      decisionReason: null,
+    });
+    assert.equal(quote.ok, true, `대리인이 막혔다: ${JSON.stringify(quote)}`);
+
+    const [caseRow] = await getApprovalHistoryForCase(caseId);
+    const [quoteRow] = await getQuoteApprovalHistory(quoteId);
+
+    // 🔵 **표본이 비어서 공짜로 통과하지 않게** 먼저 둘 다 값이 있는지 본다 —
+    // 두 조회가 나란히 null 을 싣는 것으로도 아래 비교는 통과한다.
+    assert.equal(caseRow.delegatedFromUserId, approverId, "접수 건 쪽이 안 실었다");
+    assert.equal(quoteRow.delegatedFromUserId, approverId, "견적서 쪽이 안 실었다");
+
+    // 같은 사람의 같은 위임이므로 **두 조회가 글자 하나까지 같은 답**을 내야 한다.
+    // 값을 베껴 적지 않고 둘을 맞대어 본다 — 한쪽만 바뀌면 여기서 걸린다.
+    assert.deepEqual(
+      { id: quoteRow.delegatedFromUserId, name: quoteRow.delegatedFromName },
+      { id: caseRow.delegatedFromUserId, name: caseRow.delegatedFromName },
+      "두 결재의 「누구 자리였나」가 서로 다르게 실린다"
+    );
+    assert.deepEqual(
+      { id: quoteRow.decidedByUserId, name: quoteRow.decidedByName },
+      { id: caseRow.decidedByUserId, name: caseRow.decidedByName },
+      "두 결재의 「누가 눌렀나」가 서로 다르게 실린다"
+    );
   });
 });
 

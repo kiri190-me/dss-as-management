@@ -10,9 +10,13 @@ import { QUOTE_APPROVAL_EMPTY_HISTORY_TEXT } from "./quote-approval-texts";
  * repair-cases/approval/DatabaseApprovalEventTimeline 과 같은 자리이고 같은
  * 규칙을 따른다. 다른 점은 둘이다:
  *  · 승인 **종류가 하나뿐**이라 종류 이름표가 없다(견적서 승인 하나).
- *  · 위임이 없다 — 견적서 결재는 결재선 하나로만 굴러가므로 「위임 승인 처리」
- *    배지가 나올 자리가 없다. 「지정자 대신 처리」(최고관리자 비상구)는 그대로
- *    남는다.
+ *  · 🔴 **위임의 갈래가 하나뿐**이다 — 견적서 결재는 언제나 결재선을 타므로
+ *    결재선 **단계** 위임(`approval_route_delegations`)만 걸리고, 접수 건 쪽의
+ *    「출하 대표」 위임은 이 자리에 올 수 없다. 2026-10-26 전까지는 그 단계
+ *    위임조차 결재에 연결돼 있지 않아 여기 「위임이 없다」고 적혀 있었다. 지금은
+ *    대신 누른 줄에 **누구 자리였는지 이름**이 붙는다(quoteDecidedByLabel).
+ *    「지정자 대신 처리」 배지는 그대로다 — 배지만 있고 그 이름이 없으면
+ *    최고관리자가 비상구로 처리한 줄이라는 뜻이다.
  *
  * 🔴 **표시만 한다.** 이 화면은 아무 문도 여닫지 않는다 — 결재가 끝나기 전에도
  * 견적서는 발행된다(2026-09-18 사용자 결정).
@@ -43,6 +47,30 @@ function formatTimestamp(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/**
+ * 「처리자」 한 마디 — 위임으로 대신 누른 줄이면 **누구 자리였는지**까지 적는다.
+ * 아직 처리되지 않은 줄은 `null`(그리는 쪽이 그 자리를 비운다).
+ *
+ * 🔴 **두 이름이 다 있어야 기록이 복원된다**(2026-10-20 사용자 결정). 누른 사람만
+ * 적으면 「왜 저 사람이 눌렀지」가 남지 않고, 맡긴 사람만 적으면 실제로 손을 댄
+ * 사람을 영영 못 찾는다 — 표가 두 칸을 함께 남기는 이유 그대로다.
+ *
+ * 🔴 **괄호가 없는 것에도 뜻이 있다.** 「지정자 대신 처리」 배지가 붙었는데 이
+ * 괄호가 없으면 **최고관리자가 비상구로** 처리한 줄이다. 위임으로 대신 누른 줄과
+ * 그 줄을 가르는 표시는 이 이름 하나뿐이다(비상구는 위임이 아니라서 표의
+ * `delegated_from_user_id` 가 비어 있다 — auth/approval-assignment.ts).
+ *
+ * 접수 건 쪽 승인 카드(DatabaseApprovalCard 의 decidedByLabel)와 같은 모양이고,
+ * 말만 「승인」이 아니라 「처리」다 — 이 자리에는 반려 줄도 온다.
+ */
+export function quoteDecidedByLabel(
+  record: Pick<QuoteApprovalRecordRow, "decidedByName" | "delegatedFromName"> | null
+): string | null {
+  if (!record?.decidedByName) return null;
+  if (!record.delegatedFromName) return record.decidedByName;
+  return `${record.decidedByName} (${record.delegatedFromName} 님 자리를 위임받아 처리)`;
 }
 
 /**
@@ -119,7 +147,7 @@ export default function QuoteApprovalHistory({
                   </div>
                   <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
                     요청자: {record.requestedByName}
-                    {record.decidedByName && <> · 처리자: {record.decidedByName}</>}
+                    {record.decidedByName && <> · 처리자: {quoteDecidedByLabel(record)}</>}
                     {record.assignedApproverName && <> · 지정: {record.assignedApproverName}</>}
                     {/*
                       지정된 사람과 실제로 처리한 사람이 다를 때만 — 최고관리자가

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { showSavePopup } from "@/components/common/SavePopup";
 import QuoteApprovalDialog from "./QuoteApprovalDialog";
-import QuoteApprovalHistory from "./QuoteApprovalHistory";
+import QuoteApprovalHistory, { quoteDecidedByLabel } from "./QuoteApprovalHistory";
 import QuoteApprovalStatusBadge from "./QuoteApprovalStatusBadge";
 import {
   QUOTE_APPROVAL_DOES_NOT_BLOCK_ISSUE_NOTICE,
@@ -334,7 +334,14 @@ export default function QuoteApprovalPanel({
 
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
           <Field label="요청자" value={latest?.requestedByName ?? null} />
-          <Field label="처리자" value={latest?.decidedByName ?? null} />
+          {/*
+            🔴 처리자 한 칸에 **누가 눌렀는가**와 **누구 자리였는가**가 함께 적힌다 —
+            위임으로 대신 누른 줄에만 괄호가 붙는다. 글자를 만드는 일은 이력과
+            **같은 함수 하나**가 한다(QuoteApprovalHistory 의 quoteDecidedByLabel):
+            두 벌로 적으면 같은 줄이 이 상자에서는 「대리인」, 아래 이력에서는
+            「대리인 (결재권자 님 자리를 위임받아 처리)」로 보이는 날이 온다.
+          */}
+          <Field label="처리자" value={quoteDecidedByLabel(latest)} />
           <Field label="지정 결재자" value={latest?.assignedApproverName ?? null} />
           <Field label="요청 시각" value={formatTimestamp(latest?.requestedAt ?? null)} />
           <Field label="결정 시각" value={formatTimestamp(latest?.decidedAt ?? null)} />

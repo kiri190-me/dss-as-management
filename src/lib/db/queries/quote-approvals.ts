@@ -12,6 +12,8 @@ import {
 const requester = alias(users, "quote_approval_requester");
 const decider = alias(users, "quote_approval_decider");
 const assignedApprover = alias(users, "quote_approval_assigned_approver");
+/** 「누구 자리를 대신 눌렀나」의 그 사람 — queries/repair-case-approvals.ts 의 delegator 와 같은 자리다. */
+const delegator = alias(users, "quote_approval_delegator");
 
 /**
  * ============================================================================
@@ -67,6 +69,24 @@ export type QuoteApprovalRecordRow = {
   decidedByName: string | null;
   decidedAt: string | null;
   decisionReason: string | null;
+  /**
+   * 「**누구 자리**를 대신 누른 것인가」 — 결재선 단계를 위임받아 대신 누른 줄에만
+   * 값이 있다. `null` 은 「직접 눌렀다」이고 정상값이다(표의 칸 주석): 결재권자
+   * 본인이 누른 줄과 **최고관리자 비상구**로 누른 줄이 그렇다.
+   *
+   * 🔴 `decidedByUserId` 와 **함께 읽어야** 「B 가 A 를 대신해 승인했다」가
+   * 복원된다(2026-10-20 사용자 결정). 둘 중 하나만 그리면 기록이 반쪽이 된다.
+   */
+  delegatedFromUserId: string | null;
+  /**
+   * 그 자리 사람의 이름 — 화면이 그릴 글자다. 직접 누른 줄이면 `null`.
+   *
+   * 🔵 견적서 결재에서는 이 사람이 언제나 지정 결재자(`assignedApproverName`)와
+   * 같은 사람이다(위임은 **그 단계**에 걸린다). 그래도 따로 싣는 것은, 이 이름이
+   * 있고 없고가 「위임으로 대신 눌렀다」와 「최고관리자가 비상구로 눌렀다」를
+   * 가르는 **유일한** 표시이기 때문이다 — 지정 칸만으로는 둘이 똑같이 보인다.
+   */
+  delegatedFromName: string | null;
   /** 🔴 요청한 순간의 `quotes.version`. 「지금 내용에 대한 승인인가」의 근거다. */
   quoteVersionAtRequest: number;
 };
@@ -86,6 +106,8 @@ const SELECT_COLUMNS = {
   decidedByName: decider.name,
   decidedAt: quoteApprovals.decidedAt,
   decisionReason: quoteApprovals.decisionReason,
+  delegatedFromUserId: quoteApprovals.delegatedFromUserId,
+  delegatedFromName: delegator.name,
   quoteVersionAtRequest: quoteApprovals.quoteVersionAtRequest,
 };
 
@@ -94,8 +116,11 @@ function baseQuery() {
     .select(SELECT_COLUMNS)
     .from(quoteApprovals)
     .innerJoin(requester, eq(quoteApprovals.requestedByUserId, requester.id))
-    // LEFT JOIN — 아직 결정되지 않은 행, 지정이 없는 행이 여기서 떨어지면 안 된다.
+    // LEFT JOIN — 아직 결정되지 않은 행, 지정이 없는 행, **직접 누른 행**(위임이
+    // 아니라 `delegated_from_user_id` 가 NULL 인 쪽이 대부분이다)이 여기서
+    // 떨어지면 안 된다.
     .leftJoin(decider, eq(quoteApprovals.decidedByUserId, decider.id))
+    .leftJoin(delegator, eq(quoteApprovals.delegatedFromUserId, delegator.id))
     .leftJoin(assignedApprover, eq(quoteApprovals.assignedApproverUserId, assignedApprover.id));
 }
 

@@ -83,6 +83,10 @@ function approvalRecord(overrides: Partial<QuoteApprovalRecordRow> = {}): QuoteA
     decidedByName: null,
     decidedAt: null,
     decisionReason: null,
+    // 🔴 기본은 「직접 눌렀다」다 — NULL 이 정상값이고 뜻이 있다(표의 칸 주석).
+    // 위임 줄을 재는 시험만 이 둘을 함께 덮어쓴다.
+    delegatedFromUserId: null,
+    delegatedFromName: null,
     quoteVersionAtRequest: 3,
     ...overrides,
   };
@@ -377,6 +381,70 @@ describe("결재 이력", () => {
     );
     assert.ok(markup.includes("지정자 대신 처리"));
   });
+
+  /**
+   * 🔴 2026-10-26 — 결재선 단계 위임이 실제 결재에 연결되면서 이 줄이 생겼다.
+   * 그 전까지 견적서 이력은 위임을 **적기만 하고 읽지 않았다**(조회가 칸을
+   * select 하지 않았다). 그때도 「지정자 대신 처리」 배지는 떴기 때문에, 화면만
+   * 보면 위임으로 누른 줄과 최고관리자가 비상구로 누른 줄이 **똑같이** 보였다.
+   */
+  describe("🔴 위임으로 대신 누른 줄에는 누구 자리였는지 이름이 남는다", () => {
+    const delegated = approvalRecord({
+      status: "APPROVED",
+      assignedApproverUserId: "approver-2",
+      assignedApproverName: "김도윤",
+      decidedByUserId: "delegate-1",
+      decidedByName: "박하늘",
+      decidedAt: "2026-10-26T03:00:00.000Z",
+      delegatedFromUserId: "approver-2",
+      delegatedFromName: "김도윤",
+    });
+
+    test("처리자 옆에 **원래 자리 사람의 이름**이 붙는다", () => {
+      const markup = renderToStaticMarkup(<QuoteApprovalHistory records={[delegated]} />);
+      // 🔵 「김도윤」은 지정 칸에도 나오므로 이름만 세면 공짜로 통과한다 —
+      // **누른 사람과 함께 적힌 한 마디**를 본다.
+      assert.ok(markup.includes("처리자: 박하늘 (김도윤 님 자리를 위임받아 처리)"), markup);
+      // 누가 눌렀는지도 그대로 남는다 — 둘 중 하나만 남으면 기록이 반쪽이다.
+      assert.ok(markup.includes("박하늘"));
+    });
+
+    test("🔴 직접 누른 줄에는 그 말이 없다 — 「언제나 적는다」로는 통과하지 못한다", () => {
+      const direct = approvalRecord({
+        status: "APPROVED",
+        assignedApproverUserId: "approver-2",
+        assignedApproverName: "김도윤",
+        decidedByUserId: "approver-2",
+        decidedByName: "김도윤",
+        decidedAt: "2026-10-26T03:00:00.000Z",
+      });
+      const markup = renderToStaticMarkup(<QuoteApprovalHistory records={[direct]} />);
+      assert.ok(markup.includes("처리자: 김도윤"));
+      assert.ok(!markup.includes("위임받아 처리"), "직접 누른 줄이 위임으로 읽힌다");
+    });
+
+    test("🔴 최고관리자 비상구와 갈린다 — 배지는 둘 다, 이름은 위임 쪽에만", () => {
+      // 이것이 이 조각이 고친 결함이다. 두 줄을 **함께** 그려 맞대어 본다.
+      const override = approvalRecord({
+        id: "a-override",
+        status: "APPROVED",
+        assignedApproverUserId: "approver-2",
+        assignedApproverName: "김도윤",
+        decidedByUserId: "super-admin",
+        decidedByName: "최희만",
+        decidedAt: "2026-10-26T04:00:00.000Z",
+      });
+      const markup = renderToStaticMarkup(
+        <QuoteApprovalHistory records={[delegated, override]} />
+      );
+      // 배지는 둘 다 붙는다(지정≠처리자) — 그래서 배지만으로는 못 가른다.
+      assert.equal(markup.split("지정자 대신 처리").length - 1, 2, markup);
+      // 가르는 것은 이름 한 마디다 — 위임 줄에만 붙는다.
+      assert.equal(markup.split("위임받아 처리").length - 1, 1, markup);
+      assert.ok(markup.includes("처리자: 최희만"), markup);
+      assert.ok(!markup.includes("최희만 ("), "비상구로 누른 줄에 위임 괄호가 붙었다");
+    });
+  });
 });
 
 describe("결재 탭이 놓인 자리", () => {
@@ -432,6 +500,16 @@ describe("결재 탭이 놓인 자리", () => {
     // 판정하면 안내와 기록이 서로 다른 말을 하는 날이 온다.
     assert.match(flat(panelSource), /delegatedFromUserId\s*\?\s*`지금 차례는/);
     assert.match(panelSource, /delegatedFromUserIdFor\(/);
+  });
+
+  test("🔴 상자의 「처리자」도 이력과 **같은 함수**로 글자를 만든다", () => {
+    // 두 벌로 적으면 같은 줄이 위 상자에서는 이름만, 아래 이력에서는 「누구
+    // 자리를 위임받아」까지 붙어 서로 다르게 보인다.
+    assert.ok(
+      flat(panelSource).includes('<Field label="처리자" value={quoteDecidedByLabel(latest)} />'),
+      "처리자 칸이 위임 이름을 거치지 않는다"
+    );
+    assert.match(panelSource, /import QuoteApprovalHistory, \{ quoteDecidedByLabel \}/);
   });
 });
 
