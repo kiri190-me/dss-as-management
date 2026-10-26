@@ -1,7 +1,8 @@
 import "server-only";
-import { and, desc, eq, gt, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
+import { hasPermission, type PermissionActor } from "@/lib/auth/permission-resolver";
 import { approvalRouteDelegations, users } from "../schema";
 import {
   actingApproverUserIds,
@@ -22,6 +23,8 @@ import {
  *
  *  · `listApprovalRouteDelegationsForUser` — **사람에게 보여 줄 값**이다. 이름·사유·
  *    만든 사람까지 싣는다. 판정에 쓰지 마라(되돌림 여부를 글자로 다시 풀게 된다).
+ *  · `listAllApprovalRouteDelegations` — 같은 모양이지만 **모두의 줄**이다. 🔴 이것만
+ *    인가를 **제 손으로** 본다. 까닭은 그 함수 머리말에 있다.
  *  · `resolveActingApproverUserIds` — **판정이 쓰는 값**이다. id 목록 하나뿐이고,
  *    트랜잭션을 받는다. 화면에 쓰지 마라(이름이 없다).
  * ============================================================================
@@ -72,22 +75,15 @@ export type ApprovalRouteDelegationRow = {
 };
 
 /**
- * 「내가 맡긴 것」과 「내가 대신하고 있는 것」. 둘 다 **되돌린 줄·끝난 줄까지**
- * 돌려준다 — 화면이 네 딱지(활성·예정·만료·철회됨)를 그리려면 죽은 줄도 보여야
- * 하고, 상태는 저장되지 않고 읽을 때 계산되기 때문이다
- * (deriveApprovalRouteDelegationDisplayStatus).
+ * 한 줄을 그리는 데 필요한 칸·조인을 **한 곳에서만** 적는다. 아래 두 조회가 같은
+ * 모양을 돌려주어야 화면이 같은 부품으로 두 목록을 그릴 수 있는데, 칸 목록을 두 벌
+ * 적어 두면 한쪽에만 칸이 늘어나는 날이 오고 그때 `tsc` 는 아무 말도 하지 않는다
+ * (돌려주는 타입이 넓어질 뿐이다).
  *
- * 🔵 한 줄이 양쪽에 동시에 들어가는 일은 없다 — 그러려면 맡긴 사람과 대신하는
- * 사람이 같아야 하는데, 표의 `…_different_users` CHECK 가 그런 줄을 못 만들게 한다.
- *
- * 🔵 질의를 한 번만 던진다(`OR`). 두 번 나눠 던지면 두 목록의 「지금」이 미세하게
- * 어긋나, 같은 화면에서 한쪽에만 보이는 줄이 생길 수 있다.
+ * `.where()` 와 `.orderBy()` 는 부르는 쪽이 붙인다.
  */
-export async function listApprovalRouteDelegationsForUser(userId: string): Promise<{
-  given: ApprovalRouteDelegationRow[];
-  received: ApprovalRouteDelegationRow[];
-}> {
-  const rows = await db
+function delegationRowsBase() {
+  return db
     .select({
       id: approvalRouteDelegations.id,
       delegatorUserId: approvalRouteDelegations.delegatorUserId,
@@ -114,7 +110,26 @@ export async function listApprovalRouteDelegationsForUser(userId: string): Promi
     .innerJoin(delegate, eq(approvalRouteDelegations.delegateUserId, delegate.id))
     .innerJoin(createdBy, eq(approvalRouteDelegations.createdByUserId, createdBy.id))
     // 되돌린 사람만 널을 허락하는 칸이라 여기만 leftJoin 이다.
-    .leftJoin(revokedBy, eq(approvalRouteDelegations.revokedByUserId, revokedBy.id))
+    .leftJoin(revokedBy, eq(approvalRouteDelegations.revokedByUserId, revokedBy.id));
+}
+
+/**
+ * 「내가 맡긴 것」과 「내가 대신하고 있는 것」. 둘 다 **되돌린 줄·끝난 줄까지**
+ * 돌려준다 — 화면이 네 딱지(활성·예정·만료·철회됨)를 그리려면 죽은 줄도 보여야
+ * 하고, 상태는 저장되지 않고 읽을 때 계산되기 때문이다
+ * (deriveApprovalRouteDelegationDisplayStatus).
+ *
+ * 🔵 한 줄이 양쪽에 동시에 들어가는 일은 없다 — 그러려면 맡긴 사람과 대신하는
+ * 사람이 같아야 하는데, 표의 `…_different_users` CHECK 가 그런 줄을 못 만들게 한다.
+ *
+ * 🔵 질의를 한 번만 던진다(`OR`). 두 번 나눠 던지면 두 목록의 「지금」이 미세하게
+ * 어긋나, 같은 화면에서 한쪽에만 보이는 줄이 생길 수 있다.
+ */
+export async function listApprovalRouteDelegationsForUser(userId: string): Promise<{
+  given: ApprovalRouteDelegationRow[];
+  received: ApprovalRouteDelegationRow[];
+}> {
+  const rows = await delegationRowsBase()
     .where(
       or(
         eq(approvalRouteDelegations.delegatorUserId, userId),
@@ -126,6 +141,154 @@ export async function listApprovalRouteDelegationsForUser(userId: string): Promi
   return {
     given: rows.filter((row) => row.delegatorUserId === userId),
     received: rows.filter((row) => row.delegateUserId === userId),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* 대리 결재자로 세울 수 있는 사람 — 이름까지만                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 🔴 **이 목록은 `users.view` 권한이 없는 사람에게도 내려간다.** 결재선에 박힌
+ * 엔지니어가 자기 결재권을 맡기려면 「누구에게」를 골라야 하고, 그 고르개가 없으면
+ * 기능 자체가 없는 것과 같다(auth/users-area-access.ts 머리말).
+ *
+ * 그래서 **싣는 칸이 셋뿐**이다. `listSelectableApproverCandidates`(결재선 편집용)가
+ * 역할과 포털 번호(`sso_subject`)까지 싣는 것과 일부러 다르다 — 그 목록을 돌려쓰면
+ * 사내 전원의 역할과 포털 번호가 엔지니어의 HTML 에 그대로 실려 나간다.
+ *
+ * 🔴 **이메일은 여기서 거르지 않는다.** 누구에게 내릴지는 **부르는 쪽**이 정한다
+ * (app/(app)/users/page.tsx 가 권한에 따라 `null` 로 바꾼다) — 이름이 같은 사람을
+ * 가려야 하는 관리자에게는 필요하고, 권한 없이 들어온 사람에게는 필요 없다. 조회가
+ * 세션을 들여다보고 알아서 가리면 「왜 어떤 때는 이메일이 없나」를 설명할 자리가
+ * 사라진다.
+ *
+ * 🔴 **자격 넷은 쓰기 쪽과 글자 그대로 같다**(mutations/approval-route-delegations.ts
+ * 의 isEligibleUser): 안 지워졌고 · 승인됐고 · 활성이고 · 안 잠겼다. 넓히면 고를 수는
+ * 있는데 저장이 거절되고, 좁히면 세울 수 있는 사람이 목록에 없다.
+ */
+export type ApprovalRouteDelegateCandidate = {
+  id: string;
+  name: string;
+  /** 🔴 권한 없이 들어온 사람에게는 부르는 쪽이 `null` 로 바꿔 내린다. */
+  email: string | null;
+};
+
+export async function listApprovalRouteDelegateCandidates(): Promise<
+  ApprovalRouteDelegateCandidate[]
+> {
+  return db
+    .select({ id: users.id, name: users.name, email: users.email })
+    .from(users)
+    .where(
+      and(
+        eq(users.isDeleted, false),
+        eq(users.approvalStatus, "APPROVED"),
+        eq(users.isActive, true),
+        isNull(users.lockedAt)
+      )
+    )
+    .orderBy(asc(users.name));
+}
+
+/* ------------------------------------------------------------------ */
+/* 모두의 결재권 위임 — 관리 권한이 있는 사람만                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 🔴 **끝난 줄을 몇 개까지 가져올까.** 살아 있는 줄에는 상한을 두지 않는다(그 집합은
+ * 「지금 자리를 비운 사람 수」라 본질적으로 작고, 상한에 밀려 **되돌려야 할 줄**이
+ * 안 보이는 것이 이 기능에서 가장 나쁜 일이다). 상한이 필요한 쪽은 끝난 줄뿐이다 —
+ * 줄을 지우는 길이 없어(표 머리말) 해가 갈수록 쌓이기만 한다.
+ *
+ * 🔵 50 에 깊은 뜻은 없다. 「한 화면에서 훑을 수 있는 양」이고, 더 뒤까지 찾아야 하면
+ * 감사 로그가 영구 기록이다(위임을 만들 때도 되돌릴 때도 한 줄씩 남는다 —
+ * mutations/approval-route-delegations.ts). 잘렸다는 사실은 화면이 말해 준다.
+ */
+const FINISHED_DELEGATION_LIMIT = 50;
+
+export type AllApprovalRouteDelegationsView = {
+  /**
+   * 아직 되돌리지 않았고 아직 안 끝난 줄 — **전부**. 🔴 이 집합은 되돌리기 mutation 이
+   * 받아 주는 집합과 **정확히 같다**(`revoked_at IS NULL AND ends_at > now`). 그래서
+   * 이 목록의 모든 줄에는 [되돌리기]가 붙고, 눌러도 거절당하는 줄이 섞이지 않는다.
+   */
+  live: ApprovalRouteDelegationRow[];
+  /** 되돌렸거나 기간이 끝난 줄 — 최근 것부터 `FINISHED_DELEGATION_LIMIT` 건까지. */
+  finished: ApprovalRouteDelegationRow[];
+  /** 끝난 줄이 상한보다 많았다. 화면이 「최근 N건만 보여 준다」를 말해 줘야 한다. */
+  finishedTruncated: boolean;
+  /** 화면이 「최근 N건」의 N 을 글자로 박지 않게 함께 내보낸다. */
+  finishedLimit: number;
+};
+
+export type AllApprovalRouteDelegationsResult =
+  | { ok: true; view: AllApprovalRouteDelegationsView }
+  | { ok: false; reason: "FORBIDDEN" };
+
+/**
+ * **모든 사람의** 결재권 위임. 관리 권한이 있는 사람만 받을 수 있다.
+ *
+ * ── 🔴 인가를 **이 함수가** 본다. 화면·페이지에 맡기지 않는다 ───────────────
+ * 이 파일의 다른 조회들과 달리 여기만 제 손으로 `hasPermission` 을 부른다. 까닭은
+ * 돌려주는 것이 **남의 줄**이라서다 — 페이지가 가리는 데 그치면 이 함수를 부르는
+ * 새 자리(다음에 생길 API 통로·스크립트)가 생기는 날 조용히 다 새어 나간다. 그리고
+ * 2026-10-26 에 실제로 겪었다: 「화면에서 가린다」로 시작한 자리가 늘 그렇게 된다.
+ *
+ * 🔴 **열쇠와 수준은 쓰기와 같은 것**이다(`users.shipmentRepresentatives` / MANAGE).
+ * 새 권한 영역을 만들지 않는 까닭은 mutations/approval-route-delegations.ts 머리말에
+ * 있다 — 새 영역은 운영 DB 의 `role_permissions` 에 행이 한 줄도 없어서, 배포한 날
+ * 아무도 그 화면을 못 쓴다. 읽기를 쓰기보다 **느슨하게** 열지 않는 것도 중요하다:
+ * 되돌릴 수 없는 사람에게 남의 위임 목록을 보여 줄 까닭이 없다.
+ *
+ * 🔴 거절은 **빈 목록이 아니라 `ok: false`** 다. 빈 목록으로 돌려주면 「권한이 없다」와
+ * 「아직 아무도 안 맡겼다」가 같은 값이 되고, 화면은 둘을 구별해 말할 수 없다.
+ * 거절한 값에는 `view` 칸 자체가 없어서, 부르는 쪽이 `ok` 를 안 보고 꺼내려 하면
+ * `tsc` 가 멈춘다.
+ *
+ * ── 왜 두 질의인가, 그리고 왜 겹치지 않는가 ────────────────────────────────
+ * 상한이 필요한 쪽이 한쪽뿐이라 한 질의로는 표현되지 않는다(위 상수 주석). 두 질의의
+ * 조건은 **서로 정확한 여집합**이고, 🔴 **「지금」을 TS 에서 한 번 만들어 둘 다에 같은
+ * 값으로 넘긴다** — 각자 `now()` 를 쓰면 두 질의 사이에 끝난 줄이 양쪽에서 빠지거나
+ * 양쪽에 들어간다.
+ */
+export async function listAllApprovalRouteDelegations(
+  actor: PermissionActor,
+  now: Date = new Date()
+): Promise<AllApprovalRouteDelegationsResult> {
+  if (!(await hasPermission(actor, "users.shipmentRepresentatives", "MANAGE"))) {
+    return { ok: false, reason: "FORBIDDEN" };
+  }
+
+  const isLive = and(
+    isNull(approvalRouteDelegations.revokedAt),
+    gt(approvalRouteDelegations.endsAt, now)
+  );
+  // 위의 정확한 여집합: 되돌렸거나(기간과 무관하다) 기간이 끝났거나.
+  const isFinished = or(
+    isNotNull(approvalRouteDelegations.revokedAt),
+    lte(approvalRouteDelegations.endsAt, now)
+  );
+
+  const [live, finishedPage] = await Promise.all([
+    delegationRowsBase().where(isLive).orderBy(desc(approvalRouteDelegations.createdAt)),
+    delegationRowsBase()
+      .where(isFinished)
+      .orderBy(desc(approvalRouteDelegations.createdAt))
+      // 🔵 한 건 더 받아 「더 있다」를 센다. 따로 COUNT 를 던지면 그 사이에 줄이 늘어
+      // 「더 있다는데 다 보인다」가 될 수 있고, 질의가 하나 더 는다.
+      .limit(FINISHED_DELEGATION_LIMIT + 1),
+  ]);
+
+  const finishedTruncated = finishedPage.length > FINISHED_DELEGATION_LIMIT;
+  return {
+    ok: true,
+    view: {
+      live,
+      finished: finishedTruncated ? finishedPage.slice(0, FINISHED_DELEGATION_LIMIT) : finishedPage,
+      finishedTruncated,
+      finishedLimit: FINISHED_DELEGATION_LIMIT,
+    },
   };
 }
 

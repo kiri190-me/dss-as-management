@@ -439,6 +439,10 @@ test("설정 화면은 성공 문구를 팝업으로 옮기고 그 자리에 머
     ["src/components/users/DeveloperFlagSection.tsx", 1],
     ["src/components/users/RepresentativeListSection.tsx", 1],
     ["src/components/users/DelegationSection.tsx", 1],
+    // 2026-10-26 에 들어온 「결재권 위임」 탭도 같은 규칙이다 — 성공만 팝업으로
+    // 알리고 그 자리에 머문다(router.refresh() 로 목록을 다시 읽는다). 거절 사유와
+    // 되돌리기 결과는 **읽어야 하는 글**이라 화면에 남는다(아래 시험).
+    ["src/components/users/ApprovalRouteDelegationSection.tsx", 1],
     ["src/components/users/ShipmentApprovalRouteSection.tsx", 1],
     ["src/components/customer-portal/CustomerStatusOptionSettings.tsx", 1],
   ];
@@ -471,6 +475,13 @@ test("메일 시험 발송 결과 · 계정 삭제 안내 · 위임 철회는 �
   assert.match(list, /setMessage\(userDeletionSuccessMessage\(deletedName\)\)/);
   const delegation = readFileSync("src/components/users/DelegationSection.tsx", "utf8");
   assert.match(delegation, /setListMessage\("위임을 철회했습니다\."\);/);
+  // 결재권 위임(2026-10-26)도 같다 — 되돌린 결과는 화면에 남는다. 낱말만 그 탭의
+  // 단추([되돌리기])와 맞춰 적는다.
+  const routeDelegation = readFileSync(
+    "src/components/users/ApprovalRouteDelegationSection.tsx",
+    "utf8"
+  );
+  assert.match(routeDelegation, /setListMessage\("결재권 위임을 되돌렸습니다\."\);/);
 });
 
 test("승인 카드는 성공 문구를 팝업으로 옮기고, 거절 이유만 카드에 남긴다", () => {

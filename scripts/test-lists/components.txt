@@ -649,3 +649,25 @@ src/components/repair-cases/repair-case-borrowed-due-date.test.tsx
 # 「이미 늦음」과 「곧 늦음」이 구별되지 않는다) · 🔴 머리 줄에서 [폴더 열기] 묶음 안에
 # 서는가 · 🔴 그리는 조각들이 「오늘」을 스스로 만들지 않는가(hydration).
 src/components/repair-cases/due-date-near-badge.test.tsx
+
+# 「사용자 관리」의 다섯째 탭 「결재권 위임」(2026-10-26). 화면 본체는 서버 액션을
+# 직접 가져오는 클라이언트 컴포넌트라 여기서 렌더할 수 없어 원본을 글자로 읽고,
+# **값으로 재야 하는 것**(딱지 넷 · 어느 줄에 [되돌리기]가 붙는가)만 떼어 둔 모듈을
+# 실제로 돌린다. 같은 두 파일(RepresentativeManagementScreen.tsx · users/page.tsx)을
+# 읽는 이웃 셋이 이미 이 목록에 있다.
+# 🔴 못 박는 것: 탭이 조건 없이 늘 보이는가 · 관리 권한이 없으면 「누구의 결재권」
+# 고르개가 **안 뜨는가** · 되돌린 것·끝난 것에 단추가 **안 붙는가** · 「내가 대신하고
+# 있는 것」에 단추가 **없는가**(대리인은 제가 맡은 위임을 못 거둔다) · 옛 위임과
+# 설명 문구가 **서로 다른가**.
+src/components/users/approval-route-delegation-section.test.ts
+
+# 「결재선에 올라 있는 사람의 문」(2026-10-26 눈 확인에서 잡힌 결함). 운영 DB 에
+# users.view 가 NONE 으로 저장돼 있어 엔지니어는 [사용자 관리]에 못 들어갔고, 그래서
+# 결재선에 박힌 사람이 자기 결재권을 맡길 길이 없었다. 저장값을 되돌리지 않고 코드로
+# 문 하나만 열었는데, 그 문의 **모양**을 지키는 시험이다.
+# 🔴 못 박는 것: 메뉴·안내 화면·페이지 셋이 **같은 함수**를 보는가 · 판정이 **현재
+# 판**만 보는가 · 권한 없이 들어온 사람에게 탭이 **하나뿐**인가 · 그 사람의 HTML 에
+# 사용자 목록·이메일이 **안 실리는가** · hiddenFromMenu 가 여전히 이기는가.
+# 🔵 「실제로 열리는가」는 실제 DB 로 돈다(db 목록의
+# shipment-approval-routes.integration.test.ts).
+src/components/users/users-area-gate.test.ts

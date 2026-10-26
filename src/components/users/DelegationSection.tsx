@@ -156,6 +156,16 @@ export default function DelegationSection({
       <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
         대표가 부재중일 때 기간을 정해 다른 사용자가 최종 출하 승인을 대신 처리하도록 위임할 수 있습니다.
       </p>
+      {/* 🔴 2026-10-26: 「결재권 위임」 탭이 생기면서 같은 화면에 위임이 둘이 됐다.
+          둘은 **다른 표**이고 쓰이는 때가 갈린다 — 이쪽은 승인 절차(결재선)를 아직
+          짜지 않아 「출하 대표」가 최종 승인을 하는 동안에만 쓰인다. 절차를 켜면
+          이 위임은 판정에서 통째로 건너뛰어지므로, 차이를 적어 두지 않으면 사람이
+          여기에 맡겨 놓고 결재가 멈춘 까닭을 알 수 없다(실제로 그 자리가 이 조각의
+          출발점이었다). 고친 것은 이 안내 한 줄뿐이고 동작은 그대로다. */}
+      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        승인 절차(결재선)를 아직 짜지 않았을 때 쓰는 「출하 대표」 대리입니다. 절차를 쓰는 결재의
+        단계를 맡기려면 「결재권 위임」 탭을 쓰세요.
+      </p>
 
       {canAssign ? (
         <form onSubmit={(e) => void handleAssign(e)} className="mt-4 flex flex-col gap-3 rounded-md border border-zinc-100 p-3 dark:border-zinc-800">

@@ -7,8 +7,15 @@ import { asc, eq, inArray, like } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import { auditLogs, shipmentApprovalRouteSteps, shipmentApprovalRoutes, users } from "../schema";
 import { saveShipmentApprovalRoute } from "./shipment-approval-routes";
-import { getCurrentShipmentApprovalRoute } from "../queries/shipment-approval-routes";
-import type { ShipmentApprovalRouteScope } from "@/lib/domain/shipment-approval-route";
+import {
+  getCurrentShipmentApprovalRoute,
+  isOnCurrentShipmentApprovalRoute,
+} from "../queries/shipment-approval-routes";
+import {
+  EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES,
+  SHIPMENT_APPROVAL_ROUTE_SCOPES,
+  type ShipmentApprovalRouteScope,
+} from "@/lib/domain/shipment-approval-route";
 
 /**
  * ============================================================================
@@ -617,5 +624,173 @@ describe("🔴 saveShipmentApprovalRoute — 용도(scope)가 판을 가른다",
     if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
     assert.equal(await routeRowCount(), 0, "거절됐는데 판이 생겼다");
     assert.equal(await routeAuditCount(), 0, "거절됐는데 감사 기록이 남았다");
+  });
+});
+
+/**
+ * ============================================================================
+ * isOnCurrentShipmentApprovalRoute — 「지금 결재선에 올라 있는가」
+ * ============================================================================
+ * 2026-10-26 눈 확인에서 잡힌 결함을 고치며 생긴 판정이다. [사용자 관리]의
+ * 「결재권 위임」 탭은 「누구나 자기 결재권은 맡길 수 있다」로 만들었는데, 운영·개발
+ * DB 에 엔지니어·영업·재고담당의 `users.view` 가 NONE 으로 저장돼 있어
+ * (2026-08-19) 정작 결재선에 박힌 사람이 그 화면에 못 들어갔다. 이 판정이 그
+ * 사람들에게만 문을 연다(auth/users-area-access.ts).
+ *
+ * 🔴 여기서 재는 것은 셋이다:
+ *  · **현재 판**에 있으면 참 — 어느 용도(scope)든.
+ *  · 🔴 **옛 판에만** 있으면 거짓. 결재선이 바뀌어 빠진 사람은 지금 결재권이
+ *    없고, 없는 권한을 맡길 화면을 열어 줄 까닭도 없다. 표 전체를 보면 **한
+ *    번이라도 올랐던 사람 전부**가 영원히 열리는데, 그 차이는 조용하다.
+ *  · 🔴 「현재 판」의 정의가 **옆 조회와 같은 답**을 준다. 그 정의는 이 저장소에서
+ *    한 곳(queries/shipment-approval-routes.ts)에만 있어야 하는데, 이 판정은
+ *    모든 화면에서 도는 자리라 한 질의로 적을 수밖에 없었다 — 두 적음이 갈리지
+ *    않는지를 여기서 실제 DB 로 맞대어 본다.
+ * ============================================================================
+ */
+describe("isOnCurrentShipmentApprovalRoute — 지금 결재선에 올라 있는가", () => {
+  test("현재 판에 있으면 참, 결재선에 없으면 거짓", async () => {
+    // 🔵 먼저 **아무 판도 없을 때 거짓**인지 본다 — 표본이 비어서 아래가 공짜로
+    //    통과하지 않게 한다(판이 없으면 아무도 열리면 안 된다).
+    assert.equal(await isOnCurrentShipmentApprovalRoute(approverAId), false, "판이 없는데 열렸다");
+
+    const saved = await saveShipmentApprovalRoute([approverAId, approverBId], superAdminId, "FINAL_SHIPMENT");
+    assert.equal(saved.ok, true);
+
+    assert.equal(await isOnCurrentShipmentApprovalRoute(approverAId), true, "1단계가 안 열렸다");
+    assert.equal(await isOnCurrentShipmentApprovalRoute(approverBId), true, "2단계가 안 열렸다");
+    // 결재선에 없는 사람은 그대로 닫혀 있다 — 이 문이 **모두에게** 열리면 안 된다.
+    assert.equal(await isOnCurrentShipmentApprovalRoute(approverCId), false, "결재선에 없는 사람이 열렸다");
+    assert.equal(await isOnCurrentShipmentApprovalRoute(engineerId), false, "엔지니어가 그냥 열렸다");
+  });
+
+  test("🔴 옛 판에만 이름이 있던 사람은 **안 열린다**", async () => {
+    const first = await saveShipmentApprovalRoute([approverAId], superAdminId, "FINAL_SHIPMENT");
+    assert.equal(first.ok, true);
+    assert.equal(await isOnCurrentShipmentApprovalRoute(approverAId), true, "첫 판에서 안 열렸다");
+
+    // 결재선을 갈아 끼운다. 판은 지우지 않으므로(append-only) A 의 단계는 **표에
+    // 그대로 남는다** — 표 전체를 보는 판정이었다면 여기서 계속 참이 된다.
+    const second = await saveShipmentApprovalRoute([approverBId], superAdminId, "FINAL_SHIPMENT");
+    assert.equal(second.ok, true);
+    if (second.ok) assert.equal(second.version, 2, "새 판이 안 쌓였다");
+
+    // 🔵 옛 줄이 실제로 남아 있는지 먼저 확인한다 — 지워졌다면 아래 단언은
+    //    「현재 판만 본다」가 아니라 「줄이 없다」를 재는 것이 되어 뜻이 없다.
+    const [oldRoute] = (await routeRows()).filter((row) => row.version === 1);
+    assert.ok(oldRoute, "옛 판이 사라졌다");
+    assert.deepEqual(
+      (await stepRows(oldRoute.id)).map((row) => row.approverUserId),
+      [approverAId],
+      "옛 판의 단계가 사라졌다 — 이 시험이 재려는 상황이 아니다"
+    );
+
+    assert.equal(
+      await isOnCurrentShipmentApprovalRoute(approverAId),
+      false,
+      "옛 판에만 있는 사람이 아직 열려 있다 — 지금 결재권이 없는데 문이 열린다"
+    );
+    assert.equal(await isOnCurrentShipmentApprovalRoute(approverBId), true, "새 판의 사람이 안 열렸다");
+  });
+
+  test("🔴 부품 불출 결재선에**만** 있으면 안 열린다 (2026-10-26 사용자 결정)", async () => {
+    // 2026-10-26 눈 확인: 사용자가 [승인 절차] 탭에서 자기 이름을 다 뺐는데도
+    // [사용자 관리]가 계속 보였다. 그 탭이 그리는 용도는 출하·견적서 둘뿐이라
+    // **부품 불출 판에 남은 이름은 그 화면에서 뺄 방법이 아예 없었다** — 닫는 길이
+    // 없는 문이 생긴 것이다. 그래서 세는 용도를 고칠 수 있는 둘로 좁혔다.
+    const saved = await saveShipmentApprovalRoute([approverCId], superAdminId, "PART_ISSUE");
+    assert.equal(saved.ok, true);
+
+    // 🔵 판이 **실제로 생겼는지** 먼저 확인한다 — 저장이 조용히 실패했다면 아래
+    //    단언은 「안 열린다」가 아니라 「판이 없다」를 재는 것이 되어 공짜로 통과한다.
+    const partIssueRoute = await getCurrentShipmentApprovalRoute("PART_ISSUE");
+    assert.deepEqual(
+      partIssueRoute?.steps.map((step) => step.approverUserId),
+      [approverCId],
+      "부품 불출 현재 판이 그 사람으로 서 있지 않다 — 이 시험이 재려는 상황이 아니다"
+    );
+
+    assert.equal(
+      await isOnCurrentShipmentApprovalRoute(approverCId),
+      false,
+      "부품 불출 결재선만으로 문이 열렸다 — 쓰는 사람이 그 이름을 뺄 화면이 없다"
+    );
+  });
+
+  test("고칠 수 있는 용도 둘(출하·견적서)은 각각 문을 연다", async () => {
+    assert.equal((await saveShipmentApprovalRoute([approverAId], superAdminId, "FINAL_SHIPMENT")).ok, true);
+    assert.equal((await saveShipmentApprovalRoute([approverBId], superAdminId, "QUOTE")).ok, true);
+
+    assert.equal(await isOnCurrentShipmentApprovalRoute(approverAId), true, "출하 결재선이 안 열렸다");
+    assert.equal(await isOnCurrentShipmentApprovalRoute(approverBId), true, "견적서 결재선이 안 열렸다");
+  });
+
+  test("🔴 세는 용도가 [승인 절차] 탭이 그리는 목록과 **같다** — 글자로 두 벌 적히지 않았다", async () => {
+    // 🔴 상수를 글자로 베껴 적으면 한쪽만 바뀌는 날이 오고, 그때 증상이 바로 위
+    //    시험이 막는 그것이다(화면에서 뺄 수 없는 이름이 문을 연다). 그래서 기대값을
+    //    여기 적지 않고 **상수에서 끌어와** 용도마다 돌며 잰다.
+    const openedBy: Record<string, boolean> = {};
+    for (const scope of SHIPMENT_APPROVAL_ROUTE_SCOPES) {
+      const approverId = await createTestUser(`shiproutesave ${scope} 승인자`);
+      const saved = await saveShipmentApprovalRoute([approverId], superAdminId, scope);
+      assert.equal(saved.ok, true, `${scope}: 판을 못 만들었다`);
+      openedBy[scope] = await isOnCurrentShipmentApprovalRoute(approverId);
+    }
+
+    // 표본이 비어서 공짜로 통과하지 않게 — 용도 셋을 전부 돌았는가.
+    assert.equal(Object.keys(openedBy).length, SHIPMENT_APPROVAL_ROUTE_SCOPES.length);
+    assert.equal(
+      SHIPMENT_APPROVAL_ROUTE_SCOPES.length > EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES.length,
+      true,
+      "안 세는 용도가 하나도 없다 — 이 시험이 가를 것이 없다"
+    );
+
+    for (const scope of SHIPMENT_APPROVAL_ROUTE_SCOPES) {
+      assert.equal(
+        openedBy[scope],
+        (EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES as readonly string[]).includes(scope),
+        `${scope}: 문이 열리는 용도와 [승인 절차] 탭이 그리는 용도가 갈렸다`
+      );
+    }
+  });
+
+  test("🔴 용도마다 현재 판을 따로 고른다 — 판 번호가 큰 쪽에 휩쓸리지 않는다", async () => {
+    // 판 번호는 **용도 안에서** 센다. 그래서 다른 용도의 번호가 더 클 수 있고,
+    // 「현재 판」을 용도 없이 고르면 그때 엉뚱한 사람이 열린다.
+    assert.equal((await saveShipmentApprovalRoute([approverAId], superAdminId, "FINAL_SHIPMENT")).ok, true);
+    assert.equal((await saveShipmentApprovalRoute([approverBId], superAdminId, "FINAL_SHIPMENT")).ok, true);
+    assert.equal((await saveShipmentApprovalRoute([approverCId], superAdminId, "QUOTE")).ok, true);
+
+    // 출하는 2판(B), 견적서는 1판(C). A 는 출하 1판에만 남았다.
+    assert.equal(await isOnCurrentShipmentApprovalRoute(approverBId), true, "출하 현재 판이 안 열렸다");
+    assert.equal(await isOnCurrentShipmentApprovalRoute(approverCId), true, "견적서 현재 판이 안 열렸다");
+    assert.equal(await isOnCurrentShipmentApprovalRoute(approverAId), false, "출하 옛 판이 아직 열려 있다");
+  });
+
+  test("🔴 「현재 판」의 정의가 옆 조회와 **같은 답**을 준다", async () => {
+    // 이 판정은 한 질의로 적혀 있고(DISTINCT ON), 화면용 조회는 용도마다
+    // ORDER BY version DESC LIMIT 1 로 적혀 있다. 두 적음이 갈리면 「메뉴는
+    // 열리는데 결재선에는 없다」(또는 그 반대)가 된다.
+    assert.equal((await saveShipmentApprovalRoute([approverAId], superAdminId, "FINAL_SHIPMENT")).ok, true);
+    assert.equal((await saveShipmentApprovalRoute([approverBId], superAdminId, "FINAL_SHIPMENT")).ok, true);
+    assert.equal((await saveShipmentApprovalRoute([approverCId], superAdminId, "QUOTE")).ok, true);
+
+    // 🔴 맞대는 용도는 **문이 세는 용도와 같은 목록**이다(2026-10-26 에 둘로 좁혔다).
+    //    여기에 부품 불출을 넣으면 「현재 판의 정의가 갈렸다」가 아니라 「세는 용도가
+    //    다르다」를 재게 되고, 그것은 바로 위 시험의 일이다.
+    const fromViewQuery = new Set<string>();
+    for (const scope of EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES) {
+      const route = await getCurrentShipmentApprovalRoute(scope);
+      for (const step of route?.steps ?? []) fromViewQuery.add(step.approverUserId);
+    }
+    assert.ok(fromViewQuery.size > 0, "맞댈 표본이 비었다");
+
+    for (const userId of [approverAId, approverBId, approverCId, engineerId, superAdminId]) {
+      assert.equal(
+        await isOnCurrentShipmentApprovalRoute(userId),
+        fromViewQuery.has(userId),
+        `${userId}: 두 조회의 「현재 판」이 갈렸다`
+      );
+    }
   });
 });

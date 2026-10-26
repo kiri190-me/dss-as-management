@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { ServiceMenuBar, type ServiceMenuEntry } from "@dss/ui";
-import { navItems } from "@/lib/navigation";
+import { navItems, type NavAccessFlags } from "@/lib/navigation";
 import type { Role } from "@/lib/domain/types";
 import type { NotificationItem } from "@/lib/domain/notifications";
 import AccountControls from "./AccountControls";
@@ -23,7 +23,7 @@ type AppShellProps = {
   // 이제 TopBar 로 내려간다.
   //
   // `role` 은 이 껍데기가 **읽지 않는다.** 메뉴 노출은 accessibleAreaKeys 와
-  // canEnterDeveloperMode 가 정하고(그 둘의 주석), 역할 이름은 레이아웃이
+  // navAccessFlags 가 정하고(그 둘의 주석), 역할 이름은 레이아웃이
   // 이미 `roleLabel` 로 풀어서 넘긴다. 모양에 남겨 둔 것은 호출부가 한 덩이로
   // 만들어 넘기기 때문이고, 어느 쪽이든 **인가 경계가 아니다** — 막는 일은
   // 페이지마다 서버에서 다시 한다.
@@ -41,16 +41,22 @@ type AppShellProps = {
    */
   accessibleAreaKeys: readonly string[];
   /**
-   * 개발자 모드 메뉴를 그릴지(layout.tsx가 서버에서 mayEnterDeveloperMode 로
-   * 계산해 넘긴다). 위 accessibleAreaKeys 와 **다른 축이다** — 그 항목은
-   * 역할별 접근 권한 설정에 존재하지 않으므로 저 목록에 담길 수 없다
-   * (auth/developer-mode-gate.ts).
+   * 설정 밖의 길 **둘**(layout.tsx 가 서버에서 계산해 넘긴다). 위
+   * accessibleAreaKeys 와 **다른 축이다**:
+   *  · `canEnterDeveloperMode` — 「개발자 모드」 항목은 역할별 접근 권한 설정에
+   *    아예 없어서 저 목록에 담길 수 없다(auth/developer-mode-gate.ts).
+   *  · `mayEnterUsersArea` — 「사용자 관리」는 반대로, **설정이 닫아 버린 것을**
+   *    결재선에 올라 있는 사람에게만 되연다(auth/users-area-access.ts).
    *
    * **null 도 선택 인자도 허용하지 않는다.** 아래 두 Sidebar(데스크톱 <aside>,
-   * 모바일 드로어)에 똑같이 넘겨야 하고, 한쪽을 빠뜨리면 폰에서만 관문이
-   * 사라진다 — accessibleAreaKeys 가 정확히 그렇게 새던 자리다.
+   * 모바일 드로어)에 똑같이 넘겨야 하고, 한쪽을 빠뜨리면 폰에서만 메뉴가
+   * 달라진다 — accessibleAreaKeys 가 정확히 그렇게 새던 자리다.
+   *
+   * 🔴 둘을 **한 객체로** 받는 까닭: 참/거짓 둘이 자리 인자로 나란히 서면 바꿔
+   * 넣어도 tsc 가 침묵하고, 그때 증상은 「개발자 모드가 아무에게나 보이고 사용자
+   * 관리가 아무에게도 안 보인다」라 둘 다 조용하다(navigation.ts 의 같은 주석).
    */
-  canEnterDeveloperMode: boolean;
+  navAccessFlags: NavAccessFlags;
   /**
    * 로그인한 사용자가 결재해야 할 A/S 건수(layout.tsx가 서버에서 계산해
    * 넘긴다). 사이드바 배지를 그릴지에만 쓴다 — 실제 결재 권한은 승인
@@ -115,7 +121,7 @@ function isKeyboardFocus(element: HTMLElement): boolean {
   }
 }
 
-export default function AppShell({ children, user, accessibleAreaKeys, canEnterDeveloperMode, myPendingApprovalCount = 0, notifications = [], portalInbox, notificationClientId = "", portalUrl = null, services = [], currentServiceId = null }: AppShellProps) {
+export default function AppShell({ children, user, accessibleAreaKeys, navAccessFlags, myPendingApprovalCount = 0, notifications = [], portalInbox, notificationClientId = "", portalUrl = null, services = [], currentServiceId = null }: AppShellProps) {
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Whole-sidebar open/narrow mode — owned here (not inside Sidebar)
@@ -270,7 +276,7 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
             // 폰과 컴퓨터가 서로 다른 메뉴를 그린다(같은 파일 안의 두 호출부라
             // 여기서 갈리는 것을 막을 수 있는 것은 사람 눈뿐이다 —
             // developer-mode-gate 시험이 이 파일을 읽어 대조한다).
-            canEnterDeveloperMode={canEnterDeveloperMode}
+            navAccessFlags={navAccessFlags}
             // 메뉴와 하단 유틸의 **모양**은 둘 다 "지금 보이는가"를 따른다
             // — 머무름으로 펼쳐진 동안에도 하단이 넓은 모양이다.
             isCollapsed={!isSidebarOpen}
@@ -318,14 +324,14 @@ export default function AppShell({ children, user, accessibleAreaKeys, canEnterD
               {/* 🔴 accessibleAreaKeys 를 여기에도 넘긴다. 빠뜨렸던 동안 모바일
                   드로어만 **역할별 접근 권한 설정을 통째로 무시**했다 —
                   관리자가 좁혀도 폰에서는 메뉴가 그대로 보였다(2026-08-31). */}
-              {/* 🔴 canEnterDeveloperMode 도 데스크톱과 **같은 값**으로 여기에
+              {/* 🔴 navAccessFlags 도 데스크톱과 **같은 값**으로 여기에
                   넘긴다. 빠뜨리면 컴파일이 실패한다(필수 prop) — 위
                   accessibleAreaKeys 가 조용히 빠져 있었던 경험 때문에 그렇게
                   두었다. */}
               <Sidebar
                 activeHref={pathname}
                 accessibleAreaKeys={accessibleAreaKeys}
-                canEnterDeveloperMode={canEnterDeveloperMode}
+                navAccessFlags={navAccessFlags}
                 onNavigate={() => setMobileNavOpen(false)}
                 myPendingApprovalCount={myPendingApprovalCount}
               />

@@ -3,7 +3,10 @@ import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../client";
 import { shipmentApprovalRouteSteps, shipmentApprovalRoutes, users } from "../schema";
 import type { AccountApprovalStatus, Role } from "@/lib/domain/types";
-import type { ShipmentApprovalRouteScope } from "@/lib/domain/shipment-approval-route";
+import {
+  EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES,
+  type ShipmentApprovalRouteScope,
+} from "@/lib/domain/shipment-approval-route";
 
 /**
  * ============================================================================
@@ -96,6 +99,90 @@ async function selectCurrentRouteHeader(tx: Tx, scope: ShipmentApprovalRouteScop
     .orderBy(desc(shipmentApprovalRoutes.version))
     .limit(1);
   return route ?? null;
+}
+
+/**
+ * 🔴 **「현재 판」을 용도마다 하나씩, 질의 한 번에 고르는 조각.** 위
+ * `selectCurrentRouteHeader` 와 **같은 규칙**(그 용도 안에서 version 이 가장 큰 판)
+ * 이고, 그래서 그 함수 **바로 옆에** 둔다 — 「현재」의 정의가 이 파일 밖으로 새면
+ * 언젠가 한쪽만 고쳐지고, 그때 「현재」가 둘이 된다(이 파일 머리말).
+ *
+ * 저쪽이 `WHERE scope = ? ORDER BY version DESC LIMIT 1` 로 **한 용도**를 고르는 것을,
+ * 이쪽은 `DISTINCT ON (scope) … ORDER BY scope, version DESC` 로 **모든 용도**를 한
+ * 번에 고른다. 둘이 같은 답을 주는지는 시험이 실제 DB 로 맞대어 본다.
+ *
+ * 🔵 이 모양이 필요한 까닭은 아래 `isOnCurrentShipmentApprovalRoute` 가 **모든
+ * 화면에서** 도는 자리에 붙기 때문이다(레이아웃). 용도마다 한 번씩 물으면 왕복이
+ * 용도 수만큼 늘고, 용도는 앞으로도 늘어난다.
+ *
+ * 🔴 **볼 용도를 인자로 받고, 기본값을 두지 않는다**(이 파일 머리말의 규칙 그대로).
+ * 기본값을 두면 「어느 용도까지 세는가」가 부르는 쪽에서 안 보이게 되고, 그 질문은
+ * 아래 함수에서 실제로 **사람을 열고 닫는** 질문이다.
+ */
+function currentRouteIdsSubquery(scopes: readonly ShipmentApprovalRouteScope[]) {
+  return db
+    .selectDistinctOn([shipmentApprovalRoutes.scope], { id: shipmentApprovalRoutes.id })
+    .from(shipmentApprovalRoutes)
+    .where(inArray(shipmentApprovalRoutes.scope, [...scopes]))
+    .orderBy(shipmentApprovalRoutes.scope, desc(shipmentApprovalRoutes.version));
+}
+
+/**
+ * 이 사람이 **지금 쓰이는 결재선 어딘가에 단계로 올라 있는가.**
+ *
+ * ── 🔴 왜 이 판정이 있는가 ─────────────────────────────────────────────
+ * 결재선 단계에 박힌 사람은 자리를 비울 때 **자기 결재권을 남에게 맡길 수 있어야**
+ * 한다(2026-10-26 사용자 결정). 그런데 그 화면은 [사용자 관리] 안에 있고, 운영 DB 의
+ * `role_permissions` 에는 A/S 엔지니어·영업·재고담당의 `users.view` 가 **NONE 으로
+ * 저장돼 있다**(2026-08-19). 저장값이 기본 정책을 이기므로 그 사람들에게는 메뉴가
+ * 아예 안 뜨고, 결국 **관리자에게 부탁하는 수밖에 없었다** — 그 결정과 정면으로
+ * 어긋난다. 이 판정이 그 문을 **결재선에 올라 있는 사람에게만** 연다.
+ *
+ * 🔴 **옛 판에 있던 사람은 거짓이다.** 결재선이 바뀌어 이름이 빠졌으면 지금 그
+ * 사람의 결재권은 없고, 없는 권한을 맡길 수 있게 열어 줄 까닭도 없다. 그래서
+ * 위 조각(현재 판만)을 쓴다 — 표 전체를 보면 **한 번이라도 올랐던 사람 전부**가
+ * 영원히 열리고, 그 차이는 조용하다.
+ *
+ * ── 🔴 세는 용도는 **이 저장소에서 고칠 수 있는 둘**뿐이다 (2026-10-26 사용자 결정)
+ * 처음에는 용도를 가리지 않았다. 「어느 용도든 현재 판에 있으면 그 사람의 결재가
+ * 멈출 수 있으니 열어 주자」는 생각이었고, 부품 불출도 결재는 그대로 A/S 에서
+ * 돈다(mutations/inventory-part-issue-requests.ts 가 그 판을 읽는다).
+ *
+ * **그런데 그날 눈 확인에서 사람이 메뉴를 닫지 못했다.** 사용자가 [승인 절차] 탭에서
+ * 자기 이름을 다 뺐는데도 [사용자 관리]가 계속 보였다. 까닭은 그 탭이 그리는 용도가
+ * `EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES`(출하·견적서) 둘뿐이라, 부품 불출 판에
+ * 남은 이름은 **그 화면에서 뺄 방법이 아예 없었기** 때문이다.
+ *
+ * 그래서 좁혔다. 까닭이 둘이다:
+ *  1. 🔴 **화면에서 고칠 수 있는 것과 메뉴가 열리는 근거가 같아야 한다.** 어긋나면
+ *     쓰는 사람에게 「닫는 길이 없는 문」이 생기고, 그것은 설명할 수도 없다.
+ *  2. 🔵 **부품 불출 결재자의 위임은 재고관리(dss-inventory)가 담당한다.** 그쪽에
+ *     같은 결재선과 위임이 이미 있고 2026-10-22 에 배포됐다. A/S 쪽 부품 불출은
+ *     재고관리로 옮겨가는 중인 기능이다.
+ *
+ * 🔴 **그 목록을 여기 글자로 다시 적지 않는다.** 두 벌로 적으면 [승인 절차] 탭이
+ * 그리는 용도와 이 문이 열리는 용도가 **한쪽만 바뀌는 날**이 오고, 그때 증상이 바로
+ * 위에서 겪은 그것이다. 상수 하나를 함께 본다 — 시험이 값으로 맞대어 본다.
+ *
+ * 🔵 **계정 상태를 보지 않는다.** 잠기거나 비활성이 된 사람의 단계도 결재선에 그대로
+ * 남아 있고(getCurrentShipmentApprovalRoute 가 그 줄을 일부러 안 뺀다), 애초에 이
+ * 함수를 부르는 자리는 **이미 로그인해 들어온 사람**이라 그 상태를 다시 물을 일이 없다.
+ */
+export async function isOnCurrentShipmentApprovalRoute(userId: string): Promise<boolean> {
+  const [hit] = await db
+    .select({ routeId: shipmentApprovalRouteSteps.routeId })
+    .from(shipmentApprovalRouteSteps)
+    .where(
+      and(
+        eq(shipmentApprovalRouteSteps.approverUserId, userId),
+        inArray(
+          shipmentApprovalRouteSteps.routeId,
+          currentRouteIdsSubquery(EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES)
+        )
+      )
+    )
+    .limit(1);
+  return hit !== undefined;
 }
 
 /**

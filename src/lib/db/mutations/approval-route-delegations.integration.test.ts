@@ -11,6 +11,7 @@ import {
   revokeApprovalRouteDelegation,
 } from "./approval-route-delegations";
 import {
+  listAllApprovalRouteDelegations,
   listApprovalRouteDelegationsForUser,
   resolveActingApproverUserIds,
 } from "../queries/approval-route-delegations";
@@ -712,5 +713,177 @@ describe("listApprovalRouteDelegationsForUser", () => {
     assert.equal(afterRevoke.given.length, 1, "되돌린 줄이 목록에서 사라졌다 — 줄은 남아야 한다");
     assert.equal(afterRevoke.given[0].revokedByName, "위임 시험 나");
     assert.ok(afterRevoke.given[0].revokedAt instanceof Date);
+  });
+});
+
+/**
+ * ============================================================================
+ * listAllApprovalRouteDelegations — 모두의 줄, 그리고 **조회가 제 손으로 보는 인가**
+ * ============================================================================
+ * 2026-10-26: 관리자가 A→B 위임을 세워도 **제 화면 어디에도 안 보였다.** 위의
+ * `listApprovalRouteDelegationsForUser` 는 「내가 결재권자」 또는 「내가 대리인」인 줄만
+ * 주는데 세운 사람은 둘 다 아니기 때문이다. 되돌릴 권한이 있는데도 그 줄을 집을 길이
+ * 없었다. 그래서 「모두의 줄」 조회가 생겼다.
+ *
+ * 🔴 **인가를 조회 함수가 직접 본다** — 돌려주는 것이 남의 줄이라서, 화면이나 페이지가
+ * 가리는 데 그치면 그 함수를 부르는 새 자리가 생기는 날 조용히 다 새어 나간다. 여기서
+ * 재는 것이 바로 그 판정이다(원본 글자로는 「판정이 있다」까지만 알 수 있다 —
+ * components/users/approval-route-delegation-section.test.ts 의 ㉦).
+ *
+ * 🔴 열쇠·수준은 **쓰기와 같은 것**이다(`users.shipmentRepresentatives` / MANAGE).
+ * 읽기를 쓰기보다 느슨하게 열지 않는다 — 되돌릴 수 없는 사람에게 남의 위임 목록을
+ * 보여 줄 까닭이 없다.
+ * ============================================================================
+ */
+describe("listAllApprovalRouteDelegations — 인가와 보이는 범위", () => {
+  /** 권한을 묻는 주체는 id 가 아니라 역할·개발자 표시다. 같은 사람에게서 뽑아 쓴다. */
+  async function actorOf(userId: string) {
+    const [row] = await db
+      .select({ role: users.role, isDeveloper: users.isDeveloper })
+      .from(users)
+      .where(eq(users.id, userId));
+    assert.ok(row, "행위자를 찾지 못했다");
+    return row;
+  }
+
+  test("🔴 권한 없는 사람이 부르면 거절된다 — 줄이 한 줄도 안 나온다", async () => {
+    const result = await listAllApprovalRouteDelegations(await actorOf(outsiderAdminId));
+
+    assert.equal(result.ok, false, "권한 없는 사람에게 모두의 목록이 내려갔다");
+    if (result.ok) return;
+    assert.equal(result.reason, "FORBIDDEN");
+    // 🔴 빈 목록이 아니라 **칸 자체가 없다.** 빈 목록으로 돌려주면 「권한이 없다」와
+    // 「아직 아무도 안 맡겼다」가 같은 값이 되고, 화면은 둘을 구별해 말할 수 없다.
+    assert.ok(!("view" in result), "거절했는데 자료 칸이 함께 왔다");
+  });
+
+  test("🔴 관리 권한자가 부르면 **남의 줄까지** 온다 — 바로 이것이 안 보이던 줄이다", async () => {
+    const delegatorId = await createTestUser("위임 시험 남의 결재권자");
+    const delegateId = await createTestUser("위임 시험 남의 대리인");
+
+    // 관리자가 **남의 결재권을** 세운다. 관리자는 결재권자도 대리인도 아니다.
+    const created = await createApprovalRouteDelegation({
+      delegatorUserId: delegatorId,
+      delegateUserId: delegateId,
+      ...liveWindow(),
+      reason: "관리자가 세운 줄",
+      actorUserId: managerId,
+    });
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+
+    // 🔵 먼저 **안 보인다는 것**을 못 박는다 — 이 조회가 메우는 구멍이 실제로 거기
+    // 있다는 증거다. 이 단언이 없으면 아래가 무엇을 고쳤는지 알 수 없다.
+    const mine = await listApprovalRouteDelegationsForUser(managerId);
+    assert.ok(
+      !mine.given.some((row) => row.id === created.id),
+      "세운 사람의 「내가 맡긴 것」에 들어 있다 — 구멍이 메워진 방식이 달라졌다"
+    );
+    assert.ok(
+      !mine.received.some((row) => row.id === created.id),
+      "세운 사람의 「내가 대신하고 있는 것」에 들어 있다"
+    );
+
+    const result = await listAllApprovalRouteDelegations(await actorOf(managerId));
+    assert.equal(result.ok, true, "관리 권한자가 거절당했다");
+    if (!result.ok) return;
+
+    const found = result.view.live.find((row) => row.id === created.id);
+    assert.ok(found, "관리 권한자의 모두의 목록에 자기가 세운 남의 줄이 없다");
+    // 이름이 함께 와야 화면이 다시 묻지 않는다. 🔴 그리고 **누가 만들었나**가 있어야
+    // 본인이 맡긴 것과 관리자가 세운 것을 사람이 가를 수 있다.
+    assert.equal(found.delegatorName, "위임 시험 남의 결재권자");
+    assert.equal(found.delegateName, "위임 시험 남의 대리인");
+    assert.equal(found.createdByUserId, managerId, "만든 사람이 관리자로 남지 않았다");
+    assert.notEqual(found.createdByUserId, found.delegatorUserId);
+    assert.ok(found.createdByName.length > 0, "만든 사람 이름이 비었다");
+  });
+
+  test("🔴 개발자 표시가 켜진 비관리자도 통과한다 — 쓰기와 같은 승격이다", async () => {
+    // 읽기만 다른 규칙으로 가르면 「세울 수는 있는데 목록은 못 본다」가 된다.
+    const developerId = await createTestUser("위임 시험 개발자", { isDeveloper: true });
+    const plainId = await createTestUser("위임 시험 평사원");
+
+    const asDeveloper = await listAllApprovalRouteDelegations(await actorOf(developerId));
+    assert.equal(asDeveloper.ok, true, "개발자 표시가 켜진 계정이 읽기에서 막혔다");
+
+    // 같은 역할인데 표시만 꺼진 계정은 막힌다 — 통과한 까닭이 역할이 아니라
+    // 개발자 표시임을 못 박는다(안 그러면 위 단언이 공짜로 통과할 수 있다).
+    const asPlain = await listAllApprovalRouteDelegations(await actorOf(plainId));
+    assert.equal(asPlain.ok, false, "표시가 꺼진 같은 역할까지 통과했다 — 울타리가 없다");
+  });
+
+  test("🔴 되돌린 줄·끝난 줄은 `finished` 로 가고 `live` 에서 빠진다 — 겹치지도 빠지지도 않는다", async () => {
+    const delegatorId = await createTestUser("위임 시험 세 갈래 결재권자");
+    const liveDelegateId = await createTestUser("위임 시험 살아있는 대리인");
+    const revokedDelegateId = await createTestUser("위임 시험 되돌린 대리인");
+    const expiredDelegateId = await createTestUser("위임 시험 끝난 대리인");
+
+    const live = await createApprovalRouteDelegation({
+      delegatorUserId: delegatorId,
+      delegateUserId: liveDelegateId,
+      ...liveWindow(),
+      reason: "",
+      actorUserId: delegatorId,
+    });
+    const revoked = await createApprovalRouteDelegation({
+      delegatorUserId: delegatorId,
+      delegateUserId: revokedDelegateId,
+      // 🔴 기간은 **아직 남아 있다.** 되돌림만으로 finished 쪽에 가는지 보려는 것이다 —
+      // 기간까지 끝난 줄로 재면 두 조건 가운데 어느 쪽이 일했는지 알 수 없다.
+      ...liveWindow(),
+      reason: "",
+      actorUserId: delegatorId,
+    });
+    const expired = await createApprovalRouteDelegation({
+      delegatorUserId: delegatorId,
+      delegateUserId: expiredDelegateId,
+      startsAt: hoursFromNow(-48),
+      endsAt: hoursFromNow(-1),
+      reason: "",
+      actorUserId: delegatorId,
+    });
+    assert.equal(live.ok, true);
+    assert.equal(revoked.ok, true);
+    assert.equal(expired.ok, true);
+    if (!live.ok || !revoked.ok || !expired.ok) return;
+
+    const revokeResult = await revokeApprovalRouteDelegation({
+      delegationId: revoked.id,
+      actorUserId: delegatorId,
+    });
+    assert.equal(revokeResult.ok, true);
+
+    const result = await listAllApprovalRouteDelegations(await actorOf(managerId));
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+
+    const liveIds = new Set(result.view.live.map((row) => row.id));
+    const finishedIds = new Set(result.view.finished.map((row) => row.id));
+
+    assert.ok(liveIds.has(live.id), "살아 있는 줄이 live 에 없다");
+    assert.ok(!finishedIds.has(live.id), "살아 있는 줄이 finished 에도 들어갔다");
+
+    assert.ok(finishedIds.has(revoked.id), "되돌린 줄이 finished 에 없다 — 기간이 남아 있어도 끝난 것이다");
+    assert.ok(!liveIds.has(revoked.id), "되돌린 줄이 아직 live 에 있다 — [되돌리기] 가 또 뜬다");
+
+    assert.ok(finishedIds.has(expired.id), "기간이 끝난 줄이 finished 에 없다");
+    assert.ok(!liveIds.has(expired.id), "기간이 끝난 줄이 아직 live 에 있다");
+
+    // 🔴 두 목록이 서로의 여집합이다 — 한 줄이 양쪽에 들어가면 화면에 두 번 뜨고,
+    // 양쪽에서 빠지면 사람은 그 줄을 영영 못 찾는다.
+    for (const id of liveIds) {
+      assert.ok(!finishedIds.has(id), `줄 하나가 두 목록에 함께 있다: ${id}`);
+    }
+
+    // live 에는 상한이 없다 — 되돌려야 할 줄이 밀려나면 안 된다.
+    assert.ok(result.view.finishedLimit > 0, "끝난 줄 상한이 내려오지 않는다");
+    assert.ok(
+      result.view.finished.length <= result.view.finishedLimit,
+      "끝난 줄이 상한보다 많이 내려왔다"
+    );
+    if (result.view.finished.length < result.view.finishedLimit) {
+      assert.equal(result.view.finishedTruncated, false, "상한에 안 찼는데 잘렸다고 한다");
+    }
   });
 });

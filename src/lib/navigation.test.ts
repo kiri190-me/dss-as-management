@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { navItems, navGroups, childNavItems, filterNavItemsForAccess, type NavItem } from "./navigation";
+import { navItems, navGroups, childNavItems, filterNavItemsForAccess, USERS_NAV_KEY, type NavItem } from "./navigation";
 import { baselinePermissionLevel } from "./auth/permission-baseline";
 import { PERMISSION_AREAS } from "./auth/permission-areas";
 import { PERMISSION_LEAF_KEYS } from "./auth/permission-features";
@@ -26,16 +26,35 @@ import type { Role } from "./domain/types";
  * 정책)에서 키 목록을 만들고, filterNavItemsForAccess 가 그것으로 거른다.
  * 여기서는 DB 를 타지 않으려고 기본 정책을 직접 쓴다.
  *
- * 🔴 개발자 모드 관문은 **닫아 둔다**(셋째 인자 false). 이 함수가 답하는 질문은
- * 「역할과 접근 권한 설정만으로 무엇이 보이는가」이고, 개발자 모드는 그 축에
- * 아예 존재하지 않는다 — 어느 역할의 기본 노출에도 없는 것이 사실이다. 관문이
- * 열렸을 때의 답은 아래 「설정 밖의 길」 시험들이 따로 본다.
+ * 🔴 개발자 모드 관문은 **닫아 둔다**. 이 함수가 답하는 질문은 「역할과 접근 권한
+ * 설정만으로 무엇이 보이는가」이고, 개발자 모드는 그 축에 아예 존재하지 않는다 —
+ * 어느 역할의 기본 노출에도 없는 것이 사실이다. 관문이 열렸을 때의 답은 아래
+ * 「설정 밖의 길」 시험들이 따로 본다.
+ *
+ * 🔴 [사용자 관리]는 **기본 정책대로** 넘긴다(2026-10-26). 그 항목만은
+ * `accessibleAreaKeys` 를 보지 않고 `mayEnterUsersArea` 하나로 정해지므로
+ * (navigation.ts), 여기서 그 값을 안 맞춰 주면 **다섯 역할 전부에서 사라져**
+ * 「역할 술어를 떼도 기본 노출이 한 칸도 안 바뀌었다」는 이 파일의 안전 근거가
+ * 통째로 거짓이 된다. 결재선에 올라 있는지는 DB 를 봐야 아는 값이라 여기서는
+ * 거짓으로 두고, 그 길이 실제로 여는지는 users-area-access 쪽 시험이 본다.
  */
+function navAccessFlagsForRole(role: Role) {
+  return {
+    canEnterDeveloperMode: false,
+    mayEnterUsersArea: baselinePermissionLevel(USERS_NAV_KEY, role) !== "NONE",
+  };
+}
+
 function filterNavItemsForRole(items: NavItem[], role: Role): NavItem[] {
   const accessibleAreaKeys = items
     .map((item) => item.key)
     .filter((key) => baselinePermissionLevel(key, role) !== "NONE");
-  return filterNavItemsForAccess(items, accessibleAreaKeys, false);
+  return filterNavItemsForAccess(items, accessibleAreaKeys, navAccessFlagsForRole(role));
+}
+
+/** 설정 밖의 길 둘을 한꺼번에 여닫는다 — 아래 시험들이 조합을 적기 쉽게. */
+function flags(canEnterDeveloperMode: boolean, mayEnterUsersArea = true) {
+  return { canEnterDeveloperMode, mayEnterUsersArea };
 }
 
 /** 다섯 역할 — 아래 시험들이 같은 목록을 돌게 한다. */
@@ -213,35 +232,72 @@ test("filterNavItemsForRole: SUPER_ADMIN / ADMIN / AS_ENGINEER see the workflows
  * ============================================================================
  */
 
-test("🔴 설정 밖의 길로 보이는 항목은 정확히 하나이고 developerMode 다", () => {
+test("🔴 설정 밖의 길로 보이는 항목은 정확히 둘이고 developerMode · users 다", () => {
   // 접근 권한을 통째로 비운 상태 = 설정이 아무것도 열어 주지 않은 상태.
   // 그런데도 남는 항목이 곧 「설정 밖의 길로 통과한 항목」이다.
+  //
+  // 🔴 2026-10-26 에 하나 → 둘이 됐다. 늘어난 과정 자체가 이 모양이 하려던 일이다 —
+  // 둘째를 들이려면 filterNavItemsForAccess 의 모양을 고쳐야 했고, 그 순간 이 단언이
+  // 먼저 걸려 사람이 한 번 보았다. 셋째가 생기면 또 여기서 걸린다.
   assert.deepEqual(
-    filterNavItemsForAccess(navItems, [], true).map((i) => i.key),
-    ["developerMode"],
-    "설정 밖의 길로 통과하는 항목이 developerMode 하나가 아니다"
+    filterNavItemsForAccess(navItems, [], flags(true, true)).map((i) => i.key),
+    ["users", "developerMode"],
+    "설정 밖의 길로 통과하는 항목이 그 둘이 아니다"
   );
 
-  // 관문이 닫혀 있으면 그 하나까지 사라진다 — 예외가 「늘 열린 문」이 아니다.
-  assert.deepEqual(filterNavItemsForAccess(navItems, [], false), []);
+  // 두 길이 다 닫혀 있으면 둘 다 사라진다 — 예외가 「늘 열린 문」이 아니다.
+  assert.deepEqual(filterNavItemsForAccess(navItems, [], flags(false, false)), []);
 });
 
-test("🔴 관문은 developerMode 하나만 움직인다 — 다른 항목의 노출을 건드리지 않는다", () => {
-  // 접근 권한을 전부 연 상태에서 관문만 뒤집는다. 달라지는 항목이 하나뿐이어야
-  // 한다 — 관문이 다른 줄에 새면 여기서 걸린다.
+test("🔴 설정 밖의 길 둘은 **각자 한 줄만** 움직인다 — 서로에게도, 다른 항목에도 새지 않는다", () => {
+  // 접근 권한을 전부 연 상태에서 값 하나씩만 뒤집는다. 달라지는 항목이 각각
+  // 하나뿐이어야 한다 — 어느 쪽이든 다른 줄에 새면 여기서 걸린다.
   //
   // 🔴 재는 자가 navItems 전부가 아니라 menuKeys() 인 것은 2026-10-16 부터다. 감춘
-  // 항목은 관문과 **다른 축**이라 어느 쪽에도 나오지 않는다 — 여기서 allKeys 로 재면
-  // 「관문이 열렸는데 다른 항목이 사라졌다」로 잘못 걸린다. 단언의 뜻(관문이 움직이는
-  // 항목은 developerMode 하나다)은 그대로다.
+  // 항목은 이 축들과 **다른 축**이라 어느 쪽에도 나오지 않는다 — 여기서 allKeys 로
+  // 재면 「값이 열렸는데 다른 항목이 사라졌다」로 잘못 걸린다.
   const allKeys = navItems.map((i) => i.key);
-  const open = filterNavItemsForAccess(navItems, allKeys, true).map((i) => i.key);
-  const shut = filterNavItemsForAccess(navItems, allKeys, false).map((i) => i.key);
+  const bothOpen = filterNavItemsForAccess(navItems, allKeys, flags(true, true)).map((i) => i.key);
+  const devShut = filterNavItemsForAccess(navItems, allKeys, flags(false, true)).map((i) => i.key);
+  const usersShut = filterNavItemsForAccess(navItems, allKeys, flags(true, false)).map((i) => i.key);
 
-  assert.deepEqual(open, menuKeys(), "관문이 열렸는데 다른 항목이 사라졌다");
-  assert.deepEqual(shut, menuKeys().filter((k) => k !== "developerMode"));
-  // 관문이 바꾸는 것은 정확히 한 줄이다 — 위 둘의 차이로 직접 잰다.
-  assert.deepEqual(open.filter((k) => !shut.includes(k)), ["developerMode"]);
+  assert.deepEqual(bothOpen, menuKeys(), "둘 다 열렸는데 다른 항목이 사라졌다");
+  assert.deepEqual(devShut, menuKeys().filter((k) => k !== "developerMode"));
+  assert.deepEqual(usersShut, menuKeys().filter((k) => k !== "users"));
+  // 각 값이 바꾸는 것은 정확히 한 줄이다 — 차이로 직접 잰다.
+  assert.deepEqual(bothOpen.filter((k) => !devShut.includes(k)), ["developerMode"]);
+  assert.deepEqual(bothOpen.filter((k) => !usersShut.includes(k)), ["users"]);
+});
+
+test("🔴 [사용자 관리]의 노출은 mayEnterUsersArea 하나가 정한다 — 설정값을 겹쳐 보지 않는다", () => {
+  // 규칙이 한 곳에만 적혀 있다는 것을 값으로 못 박는다. 이 함수가
+  // `allowed.has("users") || flags.mayEnterUsersArea` 처럼 **한 번 더 합치면**
+  // 같은 규칙이 두 곳에 적히고, 그 순간 「메뉴에는 뜨는데 눌러도 쫓겨난다」가
+  // 생길 자리가 다시 열린다(auth/users-area-access.ts 가 이미 합쳐서 준다).
+  const allKeys = navItems.map((i) => i.key);
+  assert.equal(
+    filterNavItemsForAccess(navItems, allKeys, flags(false, false)).some((i) => i.key === "users"),
+    false,
+    "설정에 users 가 있다고 메뉴가 열린다 — 두 규칙이 겹쳐 있다"
+  );
+  assert.equal(
+    filterNavItemsForAccess(navItems, [], flags(false, true)).some((i) => i.key === "users"),
+    true,
+    "설정 밖의 길이 열렸는데 메뉴가 안 나온다"
+  );
+});
+
+test("🔴 메뉴 열쇠와 권한 영역 열쇠가 같은 글자다 — 갈리면 아무에게도 안 보인다", () => {
+  // auth/users-area-access.ts 의 USERS_AREA_KEY 와 같아야 한다. 그 파일은
+  // server-only 라 여기서 가져올 수 없어 글자를 한 벌 더 적어 두었고, 갈리면
+  // 「영역은 열렸는데 메뉴 항목을 못 찾는다」가 된다.
+  assert.equal(USERS_NAV_KEY, "users");
+  assert.equal(navItems.some((i) => i.key === USERS_NAV_KEY), true, "메뉴에 그 열쇠가 없다");
+  assert.equal(
+    PERMISSION_AREAS.some((area) => area.key === USERS_NAV_KEY),
+    true,
+    "권한 영역에 그 열쇠가 없다 — 설정 화면에서 열어 줄 수 없게 된다"
+  );
 });
 
 test("🔴 developerMode 는 역할별 접근 권한 설정에 존재하지 않는다 — 그래서 열어 줄 수 없다", () => {
@@ -310,7 +366,7 @@ test("🔴 재고 관리는 어느 역할에게도 메뉴에 나오지 않는다
   // 노출을 넓히는 **어느 길로도** 되살아나지 않는다 — 설정을 전부 열어도, 개발자 모드
   // 관문을 열어도. 설정 한 번에 이관한 메뉴가 돌아오면 사람이 그 화면을 다시 쓴다.
   const allKeys = navItems.map((i) => i.key);
-  assert.equal(filterNavItemsForAccess(navItems, allKeys, true).some((i) => i.key === "inventory"), false);
+  assert.equal(filterNavItemsForAccess(navItems, allKeys, flags(true, true)).some((i) => i.key === "inventory"), false);
 
   // 🔴 **지운 것이 아니다.** 항목 · 주소 · 이름표 · 묶음 자리가 그대로 남아 있어야
   // 되살릴 때 자리를 다시 정하지 않아도 된다(hiddenFromMenu 한 줄을 지우면 끝이다).
@@ -335,10 +391,10 @@ test("🔴 감춘 항목은 정확히 그 목록뿐이고, 어느 인자로도 �
 
   const allKeys = navItems.map((i) => i.key);
   for (const args of [
-    [allKeys, true],
-    [allKeys, false],
-    [[], true],
-    [[], false],
+    [allKeys, flags(true, true)],
+    [allKeys, flags(false, false)],
+    [[], flags(true, true)],
+    [[], flags(false, false)],
   ] as const) {
     const visible = filterNavItemsForAccess(navItems, args[0], args[1]).map((i) => i.key);
     for (const key of MENU_HIDDEN_KEYS) {

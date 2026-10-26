@@ -984,10 +984,11 @@ test("🔴 단계 추가의 화면과 서버가 둘 다 승격 창구를 지난�
  * ============================================================================
  * 🔴 출하 대리인 「지정」 — 화면과 서버가 같은 열쇠·같은 수준을 쓴다
  * ============================================================================
- * 서버는 세 곳 모두 `hasPermission(actor, "users.shipmentRepresentatives",
- * "MANAGE")` 으로 판정한다(대표 지정, 위임 생성, 위임 철회). 화면은
- * 클라이언트 컴포넌트라 그 함수를 await 할 수 없어서, 서버 페이지가 계산해
- * prop 으로 내려보낸다.
+ * 서버는 영역 열쇠 `users.shipmentRepresentatives` 를 수준 MANAGE 로 묻는다. 처음엔
+ * 세 곳이었고(대표 지정, 위임 생성, 위임 철회) 그 뒤로 늘었다 — **지금 몇 곳인지는
+ * 아래 `sources` 목록과 `total` 기대값이 가진다.** 여기 숫자를 또 적지 않는 것은,
+ * 두 벌로 적으면 늘 때마다 한쪽만 고쳐지기 때문이다. 화면은 클라이언트 컴포넌트라
+ * 그 함수를 await 할 수 없어서, 서버 페이지가 계산해 prop 으로 내려보낸다.
  *
  * 기본 정책이 `MANAGE = 최고관리자` 라서 다섯 역할에서는 화면이 역할 리터럴을
  * 쓰던 시절에도 두 답이 같았다. **개발자에게만 갈렸다** — 서버는 허용하는데
@@ -1025,10 +1026,17 @@ test("🔴 대표 지정 판정을 화면이 직접 계산하지 않는다 — �
   // 것이 이 단언의 값 그 자체다 — 새 소비자가 생기면 여기서 걸려 사람이 「그
   // 자리도 같은 열쇠를 쓰는 것이 맞는가」를 한 번 보게 된다. 실제로 위 탭이
   // 들어올 때 그렇게 걸렸다.
+  //
+  // 2026-10-26: 「결재권 위임」 탭이 넷째 소비자로 들어와 3 → 4 가 됐다. 그 탭에서
+  // 이 값이 가르는 것은 **「누구의 결재권인가」 고르개 하나**다 — 남의 결재권을
+  // 대신 맡기는 것만 권한을 보고, **본인 위임은 권한과 무관하게 열려 있다**
+  // (mutations/approval-route-delegations.ts). 같은 열쇠를 쓰는 까닭도 그 파일
+  // 머리말에 있다: 새 권한 영역을 만들면 운영 DB 의 role_permissions 가 그 영역만
+  // 빈 채로 남아 배포한 날 아무도 못 쓴다.
   assert.equal(
     [...screen.matchAll(/canManageRepresentatives=\{canManageRepresentatives\}/g)].length,
-    3,
-    "받은 값을 아래 세 화면(대표 목록·위임·출하 승인 절차) 모두에 넘기지 않는다"
+    4,
+    "받은 값을 아래 네 화면(대표 목록·위임·출하 승인 절차·결재권 위임) 모두에 넘기지 않는다"
   );
   // 옛 이름으로 넘기는 자리가 남아 있지 않다(주석에서 경위를 설명하는 것은 별개).
   assert.ok(!/isSuperAdmin=\{/.test(screen), "옛 prop 이름 isSuperAdmin 으로 넘기는 자리가 남아 있다");
@@ -1072,6 +1080,14 @@ test("🔴 화면 페이지와 서버 mutation·액션 여섯 파일이 같은 �
   // 한 줄도 없어서, 배포한 날 아무도 그 화면을 못 쓴다. 그리고 「결재선을 고칠 수 있는
   // 사람」과 「그 단계를 대신 누를 사람을 정할 수 있는 사람」은 한 물음의 두 얼굴이라
   // 갈려서는 안 된다(mutations/approval-route-delegations.ts 머리말).
+  //
+  // 🔴 2026-10-26(같은 날, 뒤): **읽기 자리가 하나 생겨** 8 → 9 가 됐다 —
+  // queries/approval-route-delegations.ts 의 `listAllApprovalRouteDelegations`
+  // (모두의 결재권 위임). 이 파일에서 **조회가 인가를 보는 자리는 거기 하나뿐**이고,
+  // 그렇게 둔 까닭은 돌려주는 것이 **남의 줄**이라서다(페이지가 가리는 데 그치면
+  // 그 함수를 부르는 새 자리가 생기는 날 조용히 다 새어 나간다).
+  // 🔴 **읽기를 쓰기보다 느슨하게 열지 않는 것**이 요점이라 열쇠·수준이 같아야 한다 —
+  // 되돌릴 수 없는 사람에게 남의 위임 목록을 보여 줄 까닭이 없다.
   const sources = [
     "src/app/(app)/users/page.tsx",
     "src/lib/db/mutations/shipment-representatives.ts",
@@ -1079,6 +1095,7 @@ test("🔴 화면 페이지와 서버 mutation·액션 여섯 파일이 같은 �
     "src/lib/db/mutations/shipment-approval-routes.ts",
     "src/lib/server/actions/shipment-approval-routes.ts",
     "src/lib/db/mutations/approval-route-delegations.ts",
+    "src/lib/db/queries/approval-route-delegations.ts",
   ];
 
   const pattern = /hasPermission\(\s*\w+(?:\.\w+)*\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)/g;
@@ -1093,8 +1110,9 @@ test("🔴 화면 페이지와 서버 mutation·액션 여섯 파일이 같은 �
     total += found.length;
   }
   // 화면 1 + 대표 지정 1 + 위임 생성·철회 2 + 절차 저장(mutation) 1 +
-  // 절차 저장(서버 액션) 1 + **결재선 단계 위임 생성·철회 2** = 8. 늘거나 줄면 새
-  // 자리가 생긴 것이므로 같은 열쇠·수준인지 사람이 한 번 봐야 한다.
+  // 절차 저장(서버 액션) 1 + **결재선 단계 위임 생성·철회 2** + **모두의 결재권 위임
+  // 조회 1** = 9. 늘거나 줄면 새 자리가 생긴 것이므로 같은 열쇠·수준인지 사람이 한 번
+  // 봐야 한다.
   //
   // 🔴 위 정규식은 **주석과 코드를 구별하지 못한다.** 어느 파일이든 주석에
   // `hasPermission(actor, "…", "…")` 을 호출 모양 그대로 적어 두면 그 문장이
@@ -1102,7 +1120,7 @@ test("🔴 화면 페이지와 서버 mutation·액션 여섯 파일이 같은 �
   // 깨진다** — 덫이 진짜 신호가 아니라 잡음이 된다. 설명이 필요하면 호출 모양이
   // 아니라 문장으로 적을 것(mutations/shipment-approval-routes.ts 머리말이
   // 그렇게 적혀 있고, 그 이유도 거기 적혀 있다).
-  assert.equal(total, 8, `대표 지정 판정 자리의 수가 달라졌다: ${total}`);
+  assert.equal(total, 9, `대표 지정 판정 자리의 수가 달라졌다: ${total}`);
 });
 
 /**
@@ -1190,21 +1208,27 @@ test("🔴 데스크톱과 모바일 드로어가 같은 답을 준다 — 폰�
   // 컴파일이 실패하게 하고, 두 호출부가 같은 값을 넘기는지 여기서 대조한다.
   const shell = readFileSync(join(process.cwd(), "src/components/layout/AppShell.tsx"), "utf8");
 
+  // 🔴 2026-10-26: 설정 밖의 길이 둘이 되면서(개발자 모드 · 사용자 관리) 참/거짓이
+  // 나란히 서게 됐다. 자리 인자로 늘리면 `(items, keys, true, false)` 에서 순서를
+  // 바꿔 넣어도 tsc 가 침묵하고, 그때 증상은 **둘 다 조용한** 고장이다. 그래서
+  // 한 객체(`navAccessFlags`)로 묶었다 — 이 시험이 재던 것(필수인가 · 두 호출부가
+  // 같은 값을 넘기는가)은 그대로이고, 재는 이름만 옮겼다.
+  //
   // 필수 prop 이다(물음표가 붙어 있으면 빠뜨려도 컴파일이 통과한다).
   assert.ok(
-    /canEnterDeveloperMode:\s*boolean/.test(shell),
-    "AppShell 이 canEnterDeveloperMode 를 받지 않는다"
+    /navAccessFlags:\s*NavAccessFlags/.test(shell),
+    "AppShell 이 navAccessFlags 를 받지 않는다"
   );
   assert.ok(
-    !/canEnterDeveloperMode\?:/.test(shell),
-    "canEnterDeveloperMode 가 선택 인자다 — 빠뜨려도 컴파일이 통과한다"
+    !/navAccessFlags\?:/.test(shell),
+    "navAccessFlags 가 선택 인자다 — 빠뜨려도 컴파일이 통과한다"
   );
 
   // <Sidebar 호출이 정확히 둘(데스크톱·모바일)이고, 둘 다 같은 값을 넘긴다.
   const sidebarCalls = [...shell.matchAll(/<Sidebar\b/g)].length;
   assert.equal(sidebarCalls, 2, `AppShell 의 Sidebar 호출부가 둘이 아니다: ${sidebarCalls}`);
   assert.equal(
-    [...shell.matchAll(/canEnterDeveloperMode=\{canEnterDeveloperMode\}/g)].length,
+    [...shell.matchAll(/navAccessFlags=\{navAccessFlags\}/g)].length,
     sidebarCalls,
     "Sidebar 호출부 중 관문 값을 안 넘기는 곳이 있다 — 폰과 컴퓨터가 다른 메뉴를 그린다"
   );
@@ -1213,13 +1237,21 @@ test("🔴 데스크톱과 모바일 드로어가 같은 답을 준다 — 폰�
     [...shell.matchAll(/accessibleAreaKeys=\{accessibleAreaKeys\}/g)].length,
     sidebarCalls
   );
+  // 🔴 묶음 안에 **두 값이 다 있다.** 한쪽만 담으면 그 축이 통째로 사라지는데,
+  //    사라지는 쪽이 `mayEnterUsersArea` 면 [사용자 관리]가 아무에게도 안 보인다.
+  const layout = readFileSync(join(process.cwd(), "src/app/(app)/layout.tsx"), "utf8");
+  assert.ok(/canEnterDeveloperMode,/.test(layout), "레이아웃이 관문 값을 묶음에 안 담는다");
+  assert.ok(
+    /mayEnterUsersArea:\s*usersAreaAccess\.mayEnterUsersArea/.test(layout),
+    "레이아웃이 사용자 관리 쪽 값을 묶음에 안 담는다"
+  );
 
   // Sidebar 쪽도 필수로 받고, 거른다.
   const sidebar = readFileSync(join(process.cwd(), "src/components/layout/Sidebar.tsx"), "utf8");
-  assert.ok(/canEnterDeveloperMode:\s*boolean/.test(sidebar), "Sidebar 가 관문 값을 받지 않는다");
-  assert.ok(!/canEnterDeveloperMode\?:/.test(sidebar), "Sidebar 의 관문 prop 이 선택 인자다");
+  assert.ok(/navAccessFlags:\s*NavAccessFlags/.test(sidebar), "Sidebar 가 관문 값을 받지 않는다");
+  assert.ok(!/navAccessFlags\?:/.test(sidebar), "Sidebar 의 관문 prop 이 선택 인자다");
   assert.ok(
-    /filterNavItemsForAccess\(navItems,\s*accessibleAreaKeys,\s*canEnterDeveloperMode\)/.test(sidebar),
+    /filterNavItemsForAccess\(navItems,\s*accessibleAreaKeys,\s*navAccessFlags\)/.test(sidebar),
     "Sidebar 가 관문 값을 필터에 넘기지 않는다"
   );
 });

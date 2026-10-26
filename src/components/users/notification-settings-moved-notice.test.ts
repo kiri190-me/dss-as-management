@@ -2,6 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { USERS_TAB_KEYS } from "./users-tab-access";
 
 /**
  * ============================================================================
@@ -20,7 +21,8 @@ import { join } from "node:path";
  *   ㉢ 🔴 **관리자 이상일 때만 주소가 내려간다** — 탭이 보였던 조건과 같다. 판정은
  *      서버 페이지에 있고 화면은 받은 값만 본다(클라이언트가 판정을 들고 있으면
  *      서버와 갈릴 길이 다시 생긴다 — developer-flag.test.ts 가 같은 줄을 긋는다).
- *   ㉣ 탭은 **넷**이고 `"notifications"` 키가 어디에도 남아 있지 않다.
+ *   ㉣ 탭은 **다섯**이고 `"notifications"` 키가 어디에도 남아 있지 않다
+ *      (2026-10-26 에 「결재권 위임」이 들어와 넷 → 다섯이 됐다).
  *
  * ── 왜 components.txt 인가 ──────────────────────────────────────────────
  * 원본을 글자로 읽는 시험이라 세 목록 어디서든 돌지만, 같은 두 파일
@@ -153,21 +155,41 @@ describe("㉢ 관리자 이상일 때만 주소가 내려간다", () => {
   });
 });
 
-describe("㉣ 탭은 넷이고 알림 설정 탭은 없다", () => {
-  test("🔴 탭 단추가 정확히 넷이고 키가 그대로다", () => {
-    // 개수를 「넷 이하」 같은 바닥선으로 두지 않는다 — 정확한 개수인 것이 이
+describe("㉣ 탭은 다섯이고 알림 설정 탭은 없다", () => {
+  test("🔴 탭 단추가 정확히 다섯이고 키가 그대로다", () => {
+    // 개수를 「다섯 이하」 같은 바닥선으로 두지 않는다 — 정확한 개수인 것이 이
     // 단언의 값이다. 탭이 하나 늘거나 되살아나면 여기서 걸려 사람이 본다.
+    //
+    // 🔴 2026-10-26: 「결재권 위임」(routeDelegation)이 들어와 넷 → 다섯이 됐다.
+    // 자리는 「승인 절차」 바로 다음이고, 그 절차의 단계를 대신 누르게 맡기는
+    // 일이라 둘이 붙어 있어야 한 이야기인 것이 보인다. 이 시험이 지키는 것은
+    // **알림 설정 탭이 돌아오지 않았는가**이지 탭이 넷이라는 사실이 아니므로,
+    // 기대값을 늘리되 ㉢ 과 아래 `notifications` 금지는 그대로 둔다.
     const keys = [...screenCode.matchAll(/setActiveTab\("(\w+)"\)/g)].map(([, key]) => key);
-    assert.deepEqual(keys, ["representatives", "approvalRoute", "permissions", "developer"]);
+    assert.deepEqual(keys, [
+      "representatives",
+      "approvalRoute",
+      "routeDelegation",
+      "permissions",
+      "developer",
+    ]);
   });
 
-  test("🔴 유니언에 `notifications` 키가 없다 — 다른 네 키는 글자 하나 안 바뀌었다", () => {
-    assert.match(
-      screenCode,
-      /"representatives" \| "approvalRoute" \| "permissions" \| "developer"/,
-      "탭 키 유니언이 바뀌었다"
+  test("🔴 열쇠 목록에 `notifications` 가 없다 — 다른 다섯 키는 글자 하나 안 바뀌었다", () => {
+    // 🔴 2026-10-26: 유니언이 화면에서 **순수 모듈로 옮겨 갔다**
+    // (components/users/users-tab-access.ts). 탭마다 보이는 조건이 생기면서 그
+    // 규칙을 한 곳에 모았기 때문이다 — 그래서 여기서는 글자가 아니라 **값**으로
+    // 잰다(더 강한 단언이다. 글자가 어디 적혀 있든 실제 목록을 본다).
+    assert.deepEqual(
+      [...USERS_TAB_KEYS],
+      ["representatives", "approvalRoute", "routeDelegation", "permissions", "developer"],
+      "탭 열쇠 목록이 바뀌었다"
     );
-    assert.ok(!/"notifications"/.test(screenCode), "알림 설정 탭 키가 남아 있다");
+    assert.ok(!/"notifications"/.test(screenCode), "알림 설정 탭 키가 화면에 남아 있다");
+    assert.ok(
+      !USERS_TAB_KEYS.includes("notifications" as never),
+      "알림 설정 탭 키가 열쇠 목록에 되살아났다"
+    );
   });
 
   test("🔴 걷어낸 두 파일이 되살아나지 않았다", () => {

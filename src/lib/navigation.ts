@@ -1,5 +1,15 @@
 import { DEVELOPER_MODE_NAV_KEY } from "./auth/developer-mode-gate";
 
+/**
+ * 「사용자 관리」 항목이자 권한 영역의 열쇠.
+ *
+ * 🔴 **`auth/users-area-access.ts` 의 `USERS_AREA_KEY` 와 같은 글자여야 한다.** 그
+ * 파일은 `server-only` 라 여기서 가져올 수 없어(이 모듈은 클라이언트 쪽 Sidebar 도
+ * 읽는다) 글자를 한 벌 더 적는다 — 둘이 갈리지 않는지는 navigation.test.ts 가
+ * 맞대어 본다.
+ */
+export const USERS_NAV_KEY = "users";
+
 export type NavItem = {
   key: string;
   href: string;
@@ -60,7 +70,9 @@ export const navItems: NavItem[] = [
   // 생성」과 같은 원본 양식을 다루므로 그 바로 뒤에 둔다. 기본으로는 최고관리자·관리자만 본다
   // (auth/kyosan-intake-import-authorization.ts).
   { key: "kyosanIntakeImport", href: "/excel-imports/kyosan-intake-list", label: "과거 인수품 가져오기" },
-  { key: "users", href: "/users", label: "사용자 관리" },
+  // 🔴 이 열쇠는 **영역 열쇠이자 메뉴 열쇠**이고, 2026-10-26 부터 아래 필터의
+  // 두 번째 예외이기도 하다 — 글자를 상수로 묶어 둔 까닭은 개발자 모드와 같다.
+  { key: USERS_NAV_KEY, href: "/users", label: "사용자 관리" },
   { key: "customers", href: "/customers", label: "고객사 관리" },
   { key: "productModels", href: "/product-models", label: "제품 모델 관리" },
   { key: "technicalProcedures", href: "/procedures/technical", label: "기술 작업 절차" },
@@ -117,26 +129,40 @@ export const navItems: NavItem[] = [
  * 차단 자체는 여전히 각 페이지의 requireAreaAccess 가 한다 — 여기서 보인다고
  * 들어가지는 것이 아니고, 여기서 감춘다고 막히는 것도 아니다.
  *
- * ── 🔴 예외는 하나다: 개발자 모드 ──────────────────────────────────────────
- * 그 항목만 접근 권한 설정 **밖의** 길로 통과한다. 이유는 설정 화면의 존재
- * 목적이 「접근을 넓히는 것」이라서다 — 목록에 넣으면 최고관리자가 영업
- * 담당자에게 개발자 모드를 열어 줄 수 있게 된다(developer-mode-gate.ts).
+ * ── 🔴 설정 밖의 길은 **둘**이고, 둘 다 이름이 박혀 있다 ───────────────────
+ * 2026-10-26 까지는 하나(개발자 모드)였다. 그날 둘이 됐고, 늘어난 과정 자체가
+ * 이 모양이 하려던 일이다 — 「이 함수의 모양을 고쳐야 하고 그러면 시험이 먼저
+ * 걸린다」고 적어 둔 그대로 걸렸고, 사람이 한 번 보고 들였다.
  *
- * **이 예외가 퍼지지 못하게 하는 것**이 아래 모양의 요점이다:
+ *  ① `developerMode` — 설정 화면의 존재 목적이 「접근을 넓히는 것」이라, 목록에
+ *     넣으면 최고관리자가 영업 담당자에게 개발자 모드를 열어 줄 수 있게 된다
+ *     (developer-mode-gate.ts). **설정으로 열 수 없어야 하는** 항목이다.
+ *  ② `users` — 반대 방향이다. 🔴 **설정이 닫아 버린 것을 좁게 되여는** 자리다.
+ *     운영 DB 에 엔지니어·영업·재고담당의 `users.view` 가 NONE 으로 저장돼 있어
+ *     (2026-08-19), 결재선에 박힌 사람조차 자기 결재권을 맡길 화면에 못 들어갔다.
+ *     저장값을 되돌리면 사용자 목록·역할 설정까지 통째로 열리므로 코드로 푼다 —
+ *     판정과 그 까닭은 auth/users-area-access.ts 에 있다.
  *
- *  - 예외 대상이 상수 하나(`DEVELOPER_MODE_NAV_KEY`)로 못 박혀 있다.
- *    「예외 열쇠 목록」이 아니라 열쇠 하나다 — 둘째 항목을 예외로 만들려면
- *    이 함수의 모양 자체를 고쳐야 하고, 그러면 시험이 먼저 걸린다.
- *  - 새 입력은 **참/거짓 하나**다. 항목마다 붙일 수 있는 술어 인자가 아니다 —
+ * **예외가 퍼지지 못하게 하는 것**이 아래 모양의 요점이고, 둘이 된 지금도 그대로다:
+ *
+ *  - 예외 대상이 **이름 박힌 상수 둘**이다(`DEVELOPER_MODE_NAV_KEY` ·
+ *    `USERS_NAV_KEY`). 「예외 열쇠 목록」이 아니다 — 셋째를 만들려면 또 이 함수를
+ *    고쳐야 하고, 그러면 시험이 또 먼저 걸린다.
+ *  - 새 입력은 **이름 붙은 참/거짓**이다. 항목마다 붙일 수 있는 술어 인자가 아니다 —
  *    그런 인자를 두는 것이 위 머리말이 금지한 「항목별 역할 술어」의 부활이다.
- *  - 시험이 「설정 밖의 길로 보이는 항목은 정확히 하나이고 그것은
- *    developerMode 다」를 단언한다(navigation.test.ts).
+ *  - 시험이 「설정 밖의 길로 보이는 항목은 그 둘뿐이고, 각 값이 움직이는 줄은 정확히
+ *    하나다」를 단언한다(navigation.test.ts).
  *
- * ── 🔴 canEnterDeveloperMode 도 필수다 ─────────────────────────────────────
+ * ── 🔴 두 값 다 **필수**이고, 그래서 객체로 받는다 ─────────────────────────
  * accessibleAreaKeys 와 정확히 같은 함정이 있다. 데스크톱만 고치고 모바일
  * 드로어를 빠뜨리면 **폰에서는 아무나 개발자 모드 메뉴를 본다** — 2026-08-31 에
  * AppShell 에서 실제로 일어난 일이다. 그래서 선택 인자로 두지 않는다:
  * 빠뜨리면 컴파일이 실패한다.
+ *
+ * 🔴 **자리 인자로 늘리지 않고 객체로 바꾼 까닭**(2026-10-26): 참/거짓 둘이 나란히
+ * 서면 `(items, keys, true, false)` 에서 순서를 바꿔 넣어도 `tsc` 가 한마디도 하지
+ * 않는다. 그때 증상은 「개발자 모드가 아무에게나 보이고 사용자 관리가 아무에게도
+ * 안 보인다」인데, 둘 다 **조용한** 고장이다. 이름을 붙이면 바꿔 넣는 길이 없다.
  *
  * ── 🔴 감춘 항목(hiddenFromMenu)은 이 축들 **밖**이다 ──────────────────────
  * 2026-10-16 에 재고 관리가 그렇게 됐다. 역할도 설정도 관문도 보지 않고 아무에게도
@@ -147,18 +173,40 @@ export const navItems: NavItem[] = [
  * 사람에게만 감춘 메뉴가 그대로 보이는, 이 저장소가 여러 번 겪은 어긋남이 된다.
  * ============================================================================
  */
+/**
+ * 설정 밖의 길 둘. 🔴 **이름 박힌 참/거짓만** 들어온다 — 항목마다 붙일 수 있는
+ * 술어가 아니다(위 머리말). 둘 다 **필수**라 빠뜨리면 컴파일이 실패한다.
+ */
+export type NavAccessFlags = {
+  /** 「개발자 모드」 항목 하나만 움직인다(auth/developer-mode-gate.ts). */
+  canEnterDeveloperMode: boolean;
+  /**
+   * 「사용자 관리」 항목 하나만 움직인다. 🔴 **설정이 열어 준 쪽까지 합쳐진 값**이다
+   * (auth/users-area-access.ts 의 `mayEnterUsersArea`) — 「결재선에 올라 있는가」만
+   * 넘기면 이 함수가 설정값과 한 번 더 합쳐야 하고, 그러면 규칙이 두 곳에 적힌다.
+   */
+  mayEnterUsersArea: boolean;
+};
+
 export function filterNavItemsForAccess(
   items: NavItem[],
   accessibleAreaKeys: readonly string[],
-  canEnterDeveloperMode: boolean
+  flags: NavAccessFlags
 ): NavItem[] {
   const allowed = new Set(accessibleAreaKeys);
   return items.filter((item) => {
-    // 🔴 감춘 항목은 **어느 길로도** 나오지 않는다 — 개발자 모드 예외보다 먼저 본다.
-    //    노출을 넓히는 쪽(설정 · 관문)이 이것을 되살리면 「권한을 열었더니 이관한
-    //    메뉴가 돌아왔다」가 되고, 그때 사람은 그 화면을 다시 쓰기 시작한다.
+    // 🔴 감춘 항목은 **어느 길로도** 나오지 않는다 — 설정 밖의 길 둘보다 먼저 본다.
+    //    노출을 넓히는 쪽(설정 · 관문 · 결재선)이 이것을 되살리면 「권한을 열었더니
+    //    이관한 메뉴가 돌아왔다」가 되고, 그때 사람은 그 화면을 다시 쓰기 시작한다.
     if (item.hiddenFromMenu) return false;
-    return item.key === DEVELOPER_MODE_NAV_KEY ? canEnterDeveloperMode : allowed.has(item.key);
+    if (item.key === DEVELOPER_MODE_NAV_KEY) return flags.canEnterDeveloperMode;
+    // 🔴 [사용자 관리]만은 `accessibleAreaKeys` 를 **보지 않는다.** 설정이 열어 준
+    //    쪽은 이미 그 값 안에 들어 있다(auth/users-area-access.ts 가
+    //    `hasUsersPermission || isOnCurrentApprovalRoute` 로 합쳐 준다). 여기서
+    //    `allowed.has(...) || flags...` 로 한 번 더 합치면 같은 규칙이 두 곳에 적히고,
+    //    그 순간 「메뉴에는 뜨는데 눌러도 쫓겨난다」가 생길 자리가 다시 열린다.
+    if (item.key === USERS_NAV_KEY) return flags.mayEnterUsersArea;
+    return allowed.has(item.key);
   });
 }
 

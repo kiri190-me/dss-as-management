@@ -26,6 +26,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getUiText } from "@/lib/server/ui-text";
 import { listAccessibleAreaKeys } from "@/lib/auth/permission-resolver";
 import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
+import { resolveUsersAreaAccess } from "@/lib/auth/users-area-access";
 import { getLoginMode } from "@/lib/config/login-mode";
 import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getSsoClientId, getSsoClientIdOrEmpty, getSsoPortalUrl } from "@/lib/config/sso";
@@ -67,7 +68,20 @@ export default async function AppLayout({
 
   // 사이드바에서 감출 항목을 정하기 위한 것이다. 차단 자체는 각 페이지가
   // requireAreaAccess로 따로 하므로, 여기서 열려 있다고 들어가지지는 않는다.
-  const accessibleAreaKeys = await listAccessibleAreaKeys(user);
+  //
+  // 🔴 [사용자 관리]만은 **설정 밖의 길이 하나 더 있다**(2026-10-26). 지금 쓰이는
+  // 결재선에 이름이 올라 있는 사람은 `users.view` 가 NONE 으로 저장돼 있어도 그
+  // 화면에 들어가 **「결재권 위임」 탭 하나**를 쓸 수 있다 — 까닭과 판정은
+  // auth/users-area-access.ts 에 있다. 🔴 **그 페이지의 관문도 같은 함수를 본다**
+  // (app/(app)/users/page.tsx) — 메뉴만 열고 페이지를 안 열면 눌러도 쫓겨난다.
+  //
+  // 🔴 **같은 묶음으로 던진다.** 이 레이아웃은 모든 화면에 딸려 오므로 줄 세우면
+  // 전 화면이 그 왕복만큼 느려진다. 결재선 조회는 요청 단위로 묶여 있어
+  // (users-area-access.ts 의 cache) /users 페이지가 다시 물어도 왕복이 늘지 않는다.
+  const [accessibleAreaKeys, usersAreaAccess] = await Promise.all([
+    listAccessibleAreaKeys(user),
+    resolveUsersAreaAccess(user),
+  ]);
 
   // 개발자 모드는 위 목록에 **담길 수 없다** — PERMISSION_AREAS 에 없기 때문이고,
   // 없는 이유는 역할별 접근 권한 설정이 「접근을 넓히는 화면」이라서다
@@ -155,7 +169,12 @@ export default async function AppLayout({
       <AppShell
         user={{ name: user.name, roleLabel: uiText.role[user.role], role: user.role }}
         accessibleAreaKeys={accessibleAreaKeys}
-        canEnterDeveloperMode={canEnterDeveloperMode}
+        // 🔴 설정 밖의 길 **둘**을 한 객체로 넘긴다. 참/거짓 둘이 자리 인자로 나란히
+        //    서면 바꿔 넣어도 tsc 가 침묵하고, 그때 고장은 조용하다(navigation.ts).
+        navAccessFlags={{
+          canEnterDeveloperMode,
+          mayEnterUsersArea: usersAreaAccess.mayEnterUsersArea,
+        }}
         myPendingApprovalCount={myPendingApprovalCount}
         notifications={notifications}
         portalInbox={portalInbox}

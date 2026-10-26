@@ -6,6 +6,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { findPermissionArea } from "@/lib/auth/permission-areas";
 import { listAccessibleAreaKeys } from "@/lib/auth/permission-resolver";
 import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
+import { resolveUsersAreaAccess } from "@/lib/auth/users-area-access";
 import { filterNavItemsForAccess, navItems } from "@/lib/navigation";
 import { getUiText } from "@/lib/server/ui-text";
 
@@ -40,11 +41,19 @@ export default async function NoAccessPage({
   // 걸렀는데, 그러면 설정 밖의 길(개발자 모드)이 이쪽에만 없어서 "사이드바에는
   // 있는 메뉴가 이 목록에는 없다"가 된다 — 이 저장소가 반복해 겪은
   // 「보이는데 없다」류 어긋남이라 한 함수로 모은다.
-  const accessibleItems = filterNavItemsForAccess(
-    navItems,
-    await listAccessibleAreaKeys(actingUser),
-    mayEnterDeveloperMode(actingUser)
-  );
+  // 🔴 [사용자 관리]의 노출은 **설정 밖의 길**도 본다(2026-10-26) — 결재선에 올라
+  // 있는 사람은 `users.view` 가 NONE 이어도 「결재권 위임」 탭을 쓸 수 있다
+  // (auth/users-area-access.ts). 여기서 그 값을 안 넘기면 **이 화면에서만** 그
+  // 항목이 사라져, 막혀 들어온 사람에게 「갈 수 있는 곳」이 사이드바와 달라진다 —
+  // 위 주석이 말하는 「보이는데 없다」류 어긋남이 바로 그것이다.
+  const [accessibleAreaKeys, usersAreaAccess] = await Promise.all([
+    listAccessibleAreaKeys(actingUser),
+    resolveUsersAreaAccess(actingUser),
+  ]);
+  const accessibleItems = filterNavItemsForAccess(navItems, accessibleAreaKeys, {
+    canEnterDeveloperMode: mayEnterDeveloperMode(actingUser),
+    mayEnterUsersArea: usersAreaAccess.mayEnterUsersArea,
+  });
 
   // 막힌 이유를 설명하는 문장에 들어가는 역할 이름 — 저장된 문구를 따른다.
   const uiText = await getUiText();

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { navItems, navGroups, childNavItems, filterNavItemsForAccess, type NavItem } from "@/lib/navigation";
+import { navItems, navGroups, childNavItems, filterNavItemsForAccess, type NavAccessFlags, type NavItem } from "@/lib/navigation";
 
 import SidebarFooter from "./SidebarFooter";
 
@@ -44,17 +44,20 @@ type SidebarProps = {
    */
   accessibleAreaKeys: readonly string[];
   /**
-   * 개발자 모드 항목을 그릴지 — **위 접근 권한과는 다른 축이다.**
+   * 설정 밖의 길 **둘** — **위 접근 권한과는 다른 축이다.**
    *
-   * 그 항목은 PERMISSION_AREAS 에 없어서 accessibleAreaKeys 에 절대 담기지
-   * 않는다(설정으로 열 수 없다는 뜻이다). 대신 서버가
-   * mayEnterDeveloperMode 로 계산해 내려보낸다(auth/developer-mode-gate.ts).
+   *  · `canEnterDeveloperMode` — 「개발자 모드」는 PERMISSION_AREAS 에 없어서
+   *    accessibleAreaKeys 에 절대 담기지 않는다(설정으로 **열 수 없다**).
+   *    서버가 mayEnterDeveloperMode 로 계산해 내려보낸다.
+   *  · `mayEnterUsersArea` — 「사용자 관리」는 반대다. 설정이 **닫아 버린** 것을
+   *    (운영 DB 에 users.view 가 NONE 으로 저장돼 있다) 지금 쓰이는 결재선에
+   *    올라 있는 사람에게만 되연다(auth/users-area-access.ts).
    *
    * 🔴 필수다. accessibleAreaKeys 와 **똑같은 함정**이 있다 — 데스크톱만 넘기고
-   * 모바일 드로어를 빠뜨리면 폰에서 아무나 이 메뉴를 본다(2026-08-31 에 실제로
+   * 모바일 드로어를 빠뜨리면 폰에서만 메뉴가 달라진다(2026-08-31 에 실제로
    * 일어난 일). 빠뜨리면 컴파일이 실패하게 둔다.
    */
-  canEnterDeveloperMode: boolean;
+  navAccessFlags: NavAccessFlags;
   /**
    * Omitted for the mobile drawer — SidebarFooter only renders its ☰ toggle
    * row when this is provided (see SidebarFooter.tsx's doc comment).
@@ -160,8 +163,8 @@ function navLinkClassName(isActive: boolean): string {
  * mounted lifetime (AppShell/Sidebar don't remount on route change) —
  * reset only on a full page load, no localStorage (not required yet).
  */
-export default function Sidebar({ activeHref, onNavigate, isCollapsed, isPinnedOpen = true, onToggleCollapsed, accessibleAreaKeys, canEnterDeveloperMode, myPendingApprovalCount = 0 }: SidebarProps) {
-  const visibleItems = filterNavItemsForAccess(navItems, accessibleAreaKeys, canEnterDeveloperMode);
+export default function Sidebar({ activeHref, onNavigate, isCollapsed, isPinnedOpen = true, onToggleCollapsed, accessibleAreaKeys, navAccessFlags, myPendingApprovalCount = 0 }: SidebarProps) {
+  const visibleItems = filterNavItemsForAccess(navItems, accessibleAreaKeys, navAccessFlags);
   const visibleByKey = new Map(visibleItems.map((item) => [item.key, item]));
   /** 좁은 모양으로 그릴지. prop 을 넘기지 않는 모바일 드로어는 늘 넓다. */
   const isNarrow = isCollapsed ?? false;
