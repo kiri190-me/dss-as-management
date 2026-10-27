@@ -12,9 +12,6 @@ import {
   buildApprovalGrantedNotification,
   buildApprovalNotification,
   buildApprovalRejectedNotification,
-  buildPartIssueApprovalNotification,
-  buildPartStockBelowMinimumNotification,
-  buildPendingPartRequestNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateNearNotification,
   type NotificationItem,
@@ -45,6 +42,7 @@ test("🔴 눌러서 확인하는 종류는 결재 결과 둘뿐이고, 둘 다 
 test("🔴 결재 결과 build 함수가 실제로 만드는 알림 id 는 전부 통과한다", () => {
   // 형식 규칙이 파생 쪽 id 보다 좁아지면, 확인 버튼을 눌러도 조용히 거절되는 알림이
   // 생긴다. 눌러서 확인하는 종류의 모든 갈래(두 표 × 승인·반려)의 실제 id 로 확인한다.
+  // 🔵 2026-10-27(13-C4)까지는 세 표였다 — 부품 불출 갈래를 함께 들어냈다.
   const items: NotificationItem[] = [
     buildApprovalGrantedNotification({
       source: "REPAIR_CASE",
@@ -55,11 +53,10 @@ test("🔴 결재 결과 build 함수가 실제로 만드는 알림 id 는 전�
       decidedByName: "김결재",
     }),
     buildApprovalGrantedNotification({
-      source: "PART_ISSUE",
+      source: "QUOTE",
       approvalId: randomUUID(),
-      partRequestId: null,
-      intakeNumber: null,
-      destinationNote: "사용처",
+      quoteId: randomUUID(),
+      quoteNumber: "DSS 2026-077",
       decidedByName: "김결재",
     }),
     buildApprovalRejectedNotification({
@@ -71,12 +68,11 @@ test("🔴 결재 결과 build 함수가 실제로 만드는 알림 id 는 전�
       decisionReason: "사진 누락",
     }),
     buildApprovalRejectedNotification({
-      source: "PART_ISSUE",
+      source: "QUOTE",
       approvalId: randomUUID(),
-      partRequestId: randomUUID(),
-      intakeNumber: "D9705-013",
-      destinationNote: null,
-      decisionReason: "수량 과다",
+      quoteId: randomUUID(),
+      quoteNumber: "DSS 2026-078",
+      decisionReason: "금액 근거 보완 요망",
     }),
   ];
 
@@ -98,25 +94,6 @@ test("🔴 할 일 알림의 실제 id 는 형식이 맞아도 거절한다 — 
       repairCaseId,
       intakeNumber: "D9705-012",
       approvalType: "FINAL_SHIPMENT",
-    }),
-    buildPendingPartRequestNotification({
-      requestId: randomUUID(),
-      intakeNumber: null,
-      requestedByName: "홍길동",
-    }),
-    buildPartStockBelowMinimumNotification({
-      partId: randomUUID(),
-      partName: "필터",
-      owner: "DSS",
-      currentQuantity: 1,
-      minimumQuantity: 3,
-    }),
-    buildPartIssueApprovalNotification({
-      issueRequestId: randomUUID(),
-      intakeNumber: null,
-      destinationNote: "사용처",
-      routeStepOrder: 2,
-      requestedByName: "홍길동",
     }),
     buildQuoteApprovalNotification({
       quoteId: randomUUID(),

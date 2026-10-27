@@ -373,3 +373,131 @@ ID 토큰에도 `/userinfo` 에도 없다. 나머지 세 시스템에는 그 칸
 
 **운영 배포 전**
 - 🔴 포털은 **모든 시스템의 로그인 통로**다. 포털을 건드리는 조각은 되돌리기 계획을 함께 적는다
+
+---
+
+## K. 재고 알림 3종 철거 — 고아 행 정리 (2026-10-27, 조각 13-C4)
+
+🔴 **아직 한 줄도 실행하지 않았다. 이 절은 「적어 둔 것」이고, 실행은 사용자 승인을 받는다.**
+
+### K-1. 무슨 일이 있었나
+
+조각 13-C4 에서 A/S 의 알림 종류 셋을 코드에서 뺐다.
+
+| 종류 코드 | 사람이 읽던 이름 |
+|---|---|
+| `PART_REQUEST_PENDING` | 부품 요청 대기 |
+| `PART_STOCK_BELOW_MINIMUM` | 재고 부족 |
+| `PART_ISSUE_APPROVAL_PENDING` | 불출 승인 대기 |
+
+까닭은 「뜰 수 없게 됐다」가 아니라 **두 번 오기 때문**이다 — 재고 기능이 별도
+시스템(`dss-inventory`)으로 옮겨 갔고 그쪽이 제 알림을 포털로 직접 보낸다. A/S 에도
+두면 같은 일이 종에 두 줄로 선다.
+
+### K-2. 🔵 급하지 않다 — 지금 그대로 둬도 깨지지 않는다
+
+세 표 모두 **종류 코드를 글자로** 들고 있고, 읽는 쪽이 등록된 종류만 통과시킨다
+(`isNotificationKind`). 그래서 남은 행은 **읽히지 않을 뿐**이고 오류도 화면 이상도
+없다. 이 절의 `DELETE` 는 고장을 고치는 것이 아니라 **치우는** 일이다.
+
+🔴 **그래도 치우는 까닭:** 나중에 설정 화면을 열어 「이 종류가 왜 DB 에만 있나」를
+묻게 되고, 답을 아는 사람이 없으면 종류를 **되살리는** 쪽으로 손이 간다.
+
+### K-3. 🔴 실행 규칙 — 네 가지
+
+1. **`SELECT` 를 먼저 돌려 행 수를 센다.** 숫자를 기록한 뒤에만 `DELETE` 를 친다.
+2. **`SELECT` 가 0행이면 그 `DELETE` 는 치지 않는다.** 0행이 정상이다 — 아무도 그
+   종류의 설정을 만진 적이 없으면 행이 애초에 생기지 않는다(기본값은 행이 없는 것).
+3. **표마다 따로 돌린다.** 한 번에 묶지 않는다 — 어느 표에서 몇 행이 지워졌는지
+   따로 봐야 한다.
+4. 🔴 **K-6 은 다른 저장소 · 다른 DB 다**(통합 로그인 포털). A/S DB 에 치면 표가
+   없다는 오류가 난다.
+
+### K-4. A/S DB — `notification_kind_settings`
+
+종류 스위치(켜기/끄기). 유니크가 `kind_key` 하나라 **종류당 최대 한 줄**이다.
+
+```sql
+-- 먼저: 몇 줄인가 (정상 범위 0 ~ 3)
+SELECT kind_key, is_enabled, updated_at
+FROM notification_kind_settings
+WHERE kind_key IN ('PART_REQUEST_PENDING', 'PART_STOCK_BELOW_MINIMUM', 'PART_ISSUE_APPROVAL_PENDING')
+ORDER BY kind_key;
+
+-- 위에서 센 수만큼만 지워져야 한다
+DELETE FROM notification_kind_settings
+WHERE kind_key IN ('PART_REQUEST_PENDING', 'PART_STOCK_BELOW_MINIMUM', 'PART_ISSUE_APPROVAL_PENDING');
+```
+
+### K-5. A/S DB — `notification_role_settings`
+
+종류 × 역할. 유니크가 `(kind_key, role)` 이고 역할이 다섯이라 **종류당 최대 다섯 줄**,
+셋이면 **최대 15줄**이다.
+
+```sql
+-- 먼저: 몇 줄인가 (정상 범위 0 ~ 15)
+SELECT kind_key, role, receives, updated_at
+FROM notification_role_settings
+WHERE kind_key IN ('PART_REQUEST_PENDING', 'PART_STOCK_BELOW_MINIMUM', 'PART_ISSUE_APPROVAL_PENDING')
+ORDER BY kind_key, role;
+
+-- 위에서 센 수만큼만 지워져야 한다
+DELETE FROM notification_role_settings
+WHERE kind_key IN ('PART_REQUEST_PENDING', 'PART_STOCK_BELOW_MINIMUM', 'PART_ISSUE_APPROVAL_PENDING');
+```
+
+### K-6. 🔴 포털(`dss-auth`) DB — `notification_kind_purposes`
+
+**다른 저장소 · 다른 DB 다.** 2026-10-21 에 생긴 표라 옛 정리 계획에 없었다.
+알림 종류마다 「정보 확인용(`INFO`)인가 승인용(`ACTION`)인가」를 포털이 직접 들고 있는
+유일한 값이고(설계서 D-5 의 예외), 열쇠는 `(client_id, kind)` 다.
+
+🔵 **A/S 의 `client_id` 는 `rf-service-system`** 이다(포털의
+`src/lib/notifications/sources.ts` 의 `NOTIFICATION_SOURCE_PATHS` 가 그 글자를 쓴다).
+🔴 **`client_id` 조건을 빼지 마라** — 다른 시스템이 우연히 같은 종류 코드를 쓰고 있으면
+남의 설정을 지운다.
+
+```sql
+-- 먼저: 몇 줄인가 (정상 범위 0 ~ 3)
+SELECT client_id, kind, purpose, updated_at
+FROM notification_kind_purposes
+WHERE client_id = 'rf-service-system'
+  AND kind IN ('PART_REQUEST_PENDING', 'PART_STOCK_BELOW_MINIMUM', 'PART_ISSUE_APPROVAL_PENDING')
+ORDER BY kind;
+
+-- 위에서 센 수만큼만 지워져야 한다
+DELETE FROM notification_kind_purposes
+WHERE client_id = 'rf-service-system'
+  AND kind IN ('PART_REQUEST_PENDING', 'PART_STOCK_BELOW_MINIMUM', 'PART_ISSUE_APPROVAL_PENDING');
+```
+
+### K-7. 손대지 않는 표 둘 — 까닭을 적어 둔다
+
+「빠진 표도 있는 것 아닌가」로 다시 묻지 않도록 **일부러** 여기 남긴다.
+
+| 표 | 어디 | 왜 안 건드리나 |
+|---|---|---|
+| `notification_dismissals` | 포털 | **저절로 없어진다.** 로그아웃 때 지우고, 로그아웃 없이 끝난 세션의 행은 `dismissed_at` 이 하루 넘으면 야간 작업(`db:purge`)이 걷어 간다. 손으로 칠 것이 없다 |
+| `notification_acknowledgements` | A/S | 아래 K-8 |
+
+### K-8. 🔵 `notification_acknowledgements` — **지우지 않기로 한다**
+
+결재 결과 알림 중 **부품 불출 갈래**(`APPROVAL_GRANTED:pia:<uuid>` ·
+`APPROVAL_REJECTED:pia:<uuid>`)도 13-C4 에서 사라졌으므로, 그 글자로 적힌 확인 기록은
+이제 어떤 알림과도 이어지지 않는다. 그래도 **지우지 않는다**:
+
+- **해가 없다.** 조회는 언제나 「지금 띄우려는 알림의 키」로 좁혀 묻는다
+  (`listAcknowledgedNotificationKeys`) — 가리킬 알림이 없는 행은 읽히지도 않는다.
+- 🔴 **남겨 두는 것이 안전장치다.** `pia` 라는 표 딱지를 **다른 표에 다시 물려주면**
+  남이 눌러 둔 그 기록이 엉뚱한 알림을 미리 지운다. 행이 남아 있는 동안은 그 사고가
+  실제 자료로 드러난다. 코드 쪽에도 같은 것을 막는 시험을 두었다
+  (`domain/notifications.test.ts` 의 「빠진 표 딱지 `pia` 를 다시 쓰지 않는다」).
+
+지울 거리가 정말 필요해지면, 보관 정책(`SECURITY_POLICY.md`)에 확인 기록의 보관 기간을
+정하면서 **함께** 정한다 — 이 표에는 아직 삭제 규칙 자체가 없다.
+
+### K-9. 되돌리기
+
+`DELETE` 한 줄들은 **설정값**이다. 되돌리려면 알림 설정 화면에서 다시 그 값을 고르면
+되고, 그러려면 먼저 종류를 코드에 되살려야 한다. 🔴 되살리기 전에 **재고관리 쪽 알림을
+끄는 것이 먼저다** — 안 끄면 같은 일이 종에 두 줄로 선다(K-1).

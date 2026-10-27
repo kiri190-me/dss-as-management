@@ -9,9 +9,6 @@ import {
   buildApprovalGrantedNotification,
   buildApprovalNotification,
   buildApprovalRejectedNotification,
-  buildPartIssueApprovalNotification,
-  buildPartStockBelowMinimumNotification,
-  buildPendingPartRequestNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateNearNotification,
   type NotificationItem,
@@ -34,25 +31,6 @@ function oneOfEachKind(): NotificationItem[] {
       intakeNumber: "D9705-012",
       approvalType: "REPAIR_INSPECTION",
     }),
-    buildPendingPartRequestNotification({
-      requestId: "req-1",
-      intakeNumber: "D9705-100",
-      requestedByName: "홍길동",
-    }),
-    buildPartStockBelowMinimumNotification({
-      partId: "part-1",
-      partName: "커넥터 SMA",
-      owner: "DSS",
-      currentQuantity: 15,
-      minimumQuantity: 30,
-    }),
-    buildPartIssueApprovalNotification({
-      issueRequestId: "issue-1",
-      intakeNumber: "D9705-200",
-      destinationNote: null,
-      routeStepOrder: 2,
-      requestedByName: "홍길동",
-    }),
     buildQuoteApprovalNotification({
       quoteId: "quote-1",
       quoteNumber: "Q-9705-001",
@@ -73,13 +51,15 @@ function oneOfEachKind(): NotificationItem[] {
       approvalType: "FINAL_SHIPMENT",
       decidedByName: "김결재",
     }),
+    // 🔴 반려는 **승인 완료와 다른 표**를 표본으로 둔다 — 한 표만 쓰면 「두 갈래가
+    // 각각 옮겨지는가」를 못 잰다. 2026-10-27 까지는 부품 불출이었고, 그 갈래를
+    // 들어내면서(13-C4) 남은 둘 중 접수 건이 아닌 쪽인 견적서로 바꿨다.
     buildApprovalRejectedNotification({
-      source: "PART_ISSUE",
+      source: "QUOTE",
       approvalId: "approval-r1",
-      partRequestId: null,
-      intakeNumber: null,
-      destinationNote: "상해수리소",
-      decisionReason: "수량 과다",
+      quoteId: "quote-9",
+      quoteNumber: "Q-9705-009",
+      decisionReason: "금액 근거 보완 요망",
     }),
   ];
 }

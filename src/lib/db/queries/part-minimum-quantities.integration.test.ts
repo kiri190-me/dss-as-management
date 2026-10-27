@@ -98,12 +98,17 @@ async function shortagesOf(partId: string) {
   return rows.filter((row) => row.partId === partId);
 }
 
-/** 이 스위트가 만든 부품에서 나온 재고 부족 알림만. */
-async function lowStockItemsFor(actorUserId: string, actorRole: Role) {
+/**
+ * 이 스위트가 만든 부품을 가리키는 **종 알림 줄 전부**.
+ *
+ * 🔴 2026-10-27(13-C4)까지는 `kind === "PART_STOCK_BELOW_MINIMUM"` 으로도 걸렀다.
+ * 그 종류가 없어져 **종류로 거르면 무엇이 와도 빈 목록**이 되므로, 지금은 종류를
+ * 보지 않고 「이 부품을 가리키는 줄이 하나라도 있는가」만 본다 — 재고 알림이
+ * 되살아나면 종류 이름이 무엇이든 여기 걸린다.
+ */
+async function bellItemsPointingAtTestParts(actorUserId: string, actorRole: Role) {
   const items = await listMyNotifications(actorUserId, actorRole);
-  return items.filter(
-    (item) => item.kind === "PART_STOCK_BELOW_MINIMUM" && createdPartIds.some((id) => item.href.endsWith(id))
-  );
+  return items.filter((item) => createdPartIds.some((id) => item.href.includes(id)));
 }
 
 before(async () => {
@@ -118,8 +123,10 @@ before(async () => {
 
   // ── 한계수량을 하나도 만들기 전의 상태 ────────────────────────────────
   shortagesBeforeAnyMinimum = (await listPartsBelowMinimumQuantity()).length;
-  lowStockItemsBeforeAnyMinimum = (await listMyNotifications(superAdminId, "SUPER_ADMIN")).filter(
-    (item) => item.kind === "PART_STOCK_BELOW_MINIMUM"
+  // 🔵 종류로 거르던 것을 2026-10-27 에 「재고를 가리키는 주소인가」로 바꿨다 —
+  //    종류가 사라져 종류로 세면 무엇이 와도 0 이 된다(위 헬퍼 주석).
+  lowStockItemsBeforeAnyMinimum = (await listMyNotifications(superAdminId, "SUPER_ADMIN")).filter((item) =>
+    item.href.startsWith("/inventory")
   ).length;
 
   // ── 한계 없음 · 재고 있음 ─────────────────────────────────────────────
@@ -271,41 +278,40 @@ describe("한계수량 읽기", () => {
   });
 });
 
-describe("재고 부족 종 알림", () => {
-  test("11. 🔴 재고관리자·관리자·최고관리자가 받는다", async () => {
+describe("재고 부족 종 알림 — 2026-10-27(13-C4)에 걷어냈다", () => {
+  /**
+   * 🔴 **여기 있던 시험 넷을 이 하나로 바꿨다.** 그 넷은 재고 부족 알림이
+   *  ① 재고관리자·관리자·최고관리자에게 가고 ② 엔지니어·영업에게는 안 가고
+   *  ③ 한 줄에 품명·소유자·두 숫자가 실리고 ④ 재고 행이 없는 소유자도 뜬다
+   * 를 쟀다. 재고 기능이 별도 시스템(dss-inventory)으로 옮겨 가 **그쪽이 제 알림을
+   * 포털로 직접 보내므로**, A/S 가 같은 줄을 또 올리면 종에 두 번 뜬다.
+   *
+   * 🔵 그래서 이 자리에는 「뜬다」가 아니라 **「이제 안 뜬다」**를 남긴다. 밑자락은
+   * 그대로다 — 위 before() 가 실제로 **부족한 부품 다섯을 만들어 둔** 상태이고
+   * (listPartsBelowMinimumQuantity 는 지금도 그 줄들을 내놓는다: 아래 첫 단언),
+   * 그 상태에서 다섯 역할 **누구의 종에도** 재고를 가리키는 줄이 서지 않는 것을
+   * 본다. 표본이 비어서 공짜로 통과하는 것이 아니라는 근거가 첫 단언이다.
+   */
+  test("11. 🔴 부족한 부품이 실제로 있는데도 다섯 역할 누구의 종에도 뜨지 않는다", async () => {
+    // 표본이 비지 않았다는 근거 — 조회는 지금도 부족 줄을 내놓는다.
+    const shortages = await listPartsBelowMinimumQuantity();
+    assert.ok(
+      shortages.some((row) => createdPartIds.includes(row.partId)),
+      "이 시험이 만든 부족 줄이 하나도 없다 — 밑자락이 깨져 아래 단언이 공짜로 통과한다"
+    );
+
     for (const [userId, role] of [
       [superAdminId, "SUPER_ADMIN"],
       [adminId, "ADMIN"],
       [inventoryManagerId, "INVENTORY_MANAGER"],
-    ] as const) {
-      const items = await lowStockItemsFor(userId, role);
-      assert.ok(items.length > 0, `${role} 가 재고 부족 알림을 못 받는다`);
-    }
-  });
-
-  test("12. 🔴 엔지니어와 영업은 받지 않는다", async () => {
-    for (const [userId, role] of [
       [engineerId, "AS_ENGINEER"],
       [salesId, "SALES"],
     ] as const) {
-      const items = await lowStockItemsFor(userId, role);
-      assert.deepEqual(items, [], `${role} 에게 재고 부족 알림이 갔다`);
+      assert.deepEqual(
+        await bellItemsPointingAtTestParts(userId, role),
+        [],
+        `${role} 의 종에 재고 줄이 다시 섰다 — 포털에서 dss-inventory 와 겹쳐 두 번 보인다`
+      );
     }
-  });
-
-  test("13. 알림 한 줄에 품명·소유자·두 숫자가 모두 실린다", async () => {
-    const items = await lowStockItemsFor(adminId, "ADMIN");
-    const item = items.find((candidate) => candidate.href === `/inventory/${partPerOwnerId}`);
-    assert.ok(item, "부족한 부품의 알림이 있어야 한다");
-    assert.ok(item.subject.startsWith(TEST_PART_PREFIX), `subject 는 품명이다: ${item.subject}`);
-    assert.equal(item.detail, "DSS · 2 / 한계 5");
-    assert.equal(item.targetKey, `${partPerOwnerId}:DSS`);
-  });
-
-  test("14. 재고 행이 아예 없는 소유자의 알림도 실제로 종에 뜬다", async () => {
-    const items = await lowStockItemsFor(adminId, "ADMIN");
-    const item = items.find((candidate) => candidate.href === `/inventory/${partNoBalanceRowId}`);
-    assert.ok(item, "재고 행이 없다는 이유로 알림에서 빠지면 안 된다");
-    assert.equal(item.detail, "DSS · 0 / 한계 1");
   });
 });

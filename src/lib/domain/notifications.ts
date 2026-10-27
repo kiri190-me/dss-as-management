@@ -26,7 +26,6 @@
  */
 
 import { addCalendarDays, toKstDateOnly } from "./date-only";
-import { inventoryPartRequestStatusLabels, stockOwnerLabels, type StockOwner } from "./inventory-types";
 import { LABELS as APPROVAL_TYPE_LABELS, type ShipmentApprovalType } from "./local/workflow/shipment-approval-checklist";
 import { quoteEditHref } from "./quote-new-link";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
@@ -48,6 +47,16 @@ import type { RepairStatus } from "./types";
  * 2026-10-04 에 CUSTOMER_REPAIR_REQUEST_NEW 를 이렇게 뺐다 — 고객이 의뢰를 넣던
  * 길(전용 주소)이 없어져 그 알림이 뜰 수 없게 됐다.
  *
+ * 🔴 **2026-10-27(조각 13-C4): 재고 알림 셋을 같은 방식으로 뺐다** —
+ * PART_REQUEST_PENDING · PART_STOCK_BELOW_MINIMUM · PART_ISSUE_APPROVAL_PENDING.
+ * 까닭은 「뜰 수 없게 됐다」가 아니라 **두 번 오기 때문**이다: 재고 기능이 별도
+ * 시스템(dss-inventory)으로 옮겨 갔고 그쪽이 제 알림을 포털로 직접 보낸다. A/S 에도
+ * 두면 같은 일이 종에 두 줄로 선다. 🔵 A/S 가 이 배열에서 빼면 **포털 화면에서도
+ * 조용히 사라진다** — 포털은 각 시스템이 내놓는 목록을 그리기만 하고, 사라진 종류의
+ * 설정 행은 읽히지 않을 뿐 깨지지 않는다. 남은 DB 행을 치우는 SQL 은
+ * NOTIFICATION_AND_IDENTITY_DESIGN.md 의 「재고 알림 3종 철거 — 고아 행 정리」 절에
+ * 적어 두었다(표 셋, 포털 DB 하나 포함).
+ *
  * 🔴 **키의 철자가 종 패널의 색을 정한다.** 종(@dss/ui 의 NotificationBell)은
  * 색표를 갖지 않고 이 코드를 해시해 열여섯 칸 중 하나를 집는다
  * (vendor/dss-ui/src/notification-bell/tone.ts 의 notificationToneIndex). 그래서
@@ -61,9 +70,6 @@ import type { RepairStatus } from "./types";
  */
 export const NOTIFICATION_KINDS = [
   "REPAIR_CASE_APPROVAL",
-  "PART_REQUEST_PENDING",
-  "PART_STOCK_BELOW_MINIMUM",
-  "PART_ISSUE_APPROVAL_PENDING",
   "QUOTE_APPROVAL_PENDING",
   "REPAIR_CASE_DUE_DATE_NEAR",
   "APPROVAL_GRANTED",
@@ -155,140 +161,13 @@ export function buildApprovalNotification(input: {
 }
 
 /**
- * 접수 건이 사라진 부품 요청의 subject.
- *
- * repair_case_id는 NULL이 될 수 있다(접수 건 영구 삭제 시 ON DELETE SET NULL).
- * 요청 행 자체는 재고 회계 기록이라 남고, 알림에도 계속 나와야 한다 — 인수번호
- * 자리가 비면 굵은 글씨가 통째로 사라져 무엇에 대한 알림인지 알 수 없다.
- *
- * 문구는 부품 요청 관리 목록(getPartRequestsForManager)이 같은 상황에 이미
- * 쓰고 있는 것을 그대로 따른다 — 같은 것을 두 가지 말로 부르지 않는다.
- */
-export const DELETED_REPAIR_CASE_SUBJECT = "삭제된 접수 건";
-
-/**
- * "처리 대기 중인 부품 요청" 알림 한 줄.
- *
- * detail 라벨은 새로 쓰지 않고 inventory-types.ts의
- * inventoryPartRequestStatusLabels를 그대로 가져온다 — 부품 요청 관리 목록과
- * 내 작업 화면이 이미 그 문자열("요청 대기")로 이 상태를 부르고 있다. 뒤에
- * 요청자를 붙이는 것은 목록을 열기 전에 "누구 요청인지"까지 보이게 하기
- * 위한 것이다(관리자가 처리 순서를 정할 때 먼저 보는 값).
- *
- * href는 건별 상세가 아니라 부품 요청 관리 목록이다 — 요청에는 자기만의 상세
- * 화면이 없고, 실제로 불출/거절/보류를 누르는 자리가 그 목록이다.
- *
- * targetKey는 요청 id다. 요청 하나가 사람에게도 한 건이고, 한 요청에 부품이
- * 여러 개 들어 있어도 배지에 여러 건으로 세면 안 된다.
- */
-export function buildPendingPartRequestNotification(input: {
-  requestId: string;
-  /** NULL이면 접수 건이 영구 삭제된 요청이다 — DELETED_REPAIR_CASE_SUBJECT로 대신한다. */
-  intakeNumber: string | null;
-  requestedByName: string;
-}): NotificationItem {
-  return {
-    id: `PART_REQUEST_PENDING:${input.requestId}`,
-    kind: "PART_REQUEST_PENDING",
-    targetKey: input.requestId,
-    subject: input.intakeNumber ?? DELETED_REPAIR_CASE_SUBJECT,
-    detail: `${inventoryPartRequestStatusLabels.PENDING} · ${input.requestedByName}`,
-    href: "/inventory/requests",
-  };
-}
-
-/**
- * "재고가 한계수량 아래로 떨어졌다" 알림 한 줄.
- *
- * subject 는 품명이다 — 이 알림에서 사람이 먼저 찾는 것은 "어느 부품인가"다.
- *
- * detail 에는 **소유자 이름과 두 숫자가 모두** 드러난다("DSS · 15 / 한계 30").
- * 소유자를 빼면 같은 부품의 네 줄을 구별할 수 없고, 숫자를 빼면 상세를 열기 전에는
- * 급한지 아닌지를 알 수 없다 — 15/30 과 29/30 은 같은 알림이 아니다. 소유자 라벨은
- * 새로 쓰지 않고 inventory-types.ts 의 stockOwnerLabels 를 그대로 가져온다(재고
- * 보유 표·부품 요청 화면이 이미 그 문자열로 이 소유자를 부른다).
- *
- * href 는 그 품목 상세다. 한계수량 구역이 거기 있고, 지금 수량을 보면서 기준을
- * 고치거나 입고를 잡는 일이 전부 그 화면에서 일어난다.
- *
- * ── targetKey 는 (부품, 소유자)다 — 부품 하나가 넷으로 셀 수 있다 ────────
- * 결재 알림은 한 접수 건에 결재가 둘 걸려 있어도 targetKey 가 접수 건 id 라
- * 배지에 1 로 센다. 여기서는 반대로 정했다. 가르는 기준은 **한 번의 조치로 함께
- * 사라지는가**다 — 결재는 한 화면에서 둘 다 처리하면 함께 사라지지만, DSS 재고를
- * 채워도 교산 부족은 그대로 남는다. 소유자마다 채우는 경로도 상대도 다르다. 넷이
- * 동시에 부족하면 실제로 해야 할 일이 넷이므로 배지도 4 로 센다.
- */
-export function buildPartStockBelowMinimumNotification(input: {
-  partId: string;
-  partName: string;
-  owner: StockOwner;
-  currentQuantity: number;
-  minimumQuantity: number;
-}): NotificationItem {
-  return {
-    id: `PART_STOCK_BELOW_MINIMUM:${input.partId}:${input.owner}`,
-    kind: "PART_STOCK_BELOW_MINIMUM",
-    targetKey: `${input.partId}:${input.owner}`,
-    subject: input.partName,
-    detail: `${stockOwnerLabels[input.owner]} · ${input.currentQuantity} / 한계 ${input.minimumQuantity}`,
-    href: `/inventory/${input.partId}`,
-  };
-}
-
-/**
- * "지금 내 차례인 부품 불출 결재" 알림 한 줄.
- *
- * ── subject 는 무엇에 대한 신청인가 ────────────────────────────────────
- * [승인 요청건] 탭의 신청 카드가 굵게 적는 것과 같은 순서다 — 접수 건이 있으면
- * 그 인수번호, 없으면 직접 사용의 사용처. 인수번호는 헤더가 직접 가리키는 접수
- * 건이거나(직접 사용) 부품 요청이 가리키는 접수 건이다(요청 기반). 둘 중 어느
- * 쪽인지를 가려 읽는 것은 조회의 몫이고, 여기는 받은 값을 순서대로 고르기만 한다.
- *
- * 둘 다 없는 행은 **요청 기반인데 그 접수 건이 영구 삭제된 것**뿐이다. 직접
- * 사용은 표 CHECK(direct_use_has_destination)가 접수 건이나 사용처 중 하나를
- * 요구하고, 부품 요청은 접수 건 없이 만들어지지 않는다. 그래서 대신하는 문구는
- * 부품 요청 알림과 같은 DELETED_REPAIR_CASE_SUBJECT 다 — 같은 상황을 두 말로
- * 부르지 않는다.
- *
- * ── detail 은 몇 단계의 결재인가 + 신청자 ──────────────────────────────
- * "불출 승인 대기"라는 종류 이름은 종 패널이 이 줄 **위에** 따로 적는다
- * (NOTIFICATION_KIND_META). detail 에 같은 말을 또 넣으면 잘리는 자리의 폭만
- * 먹는다 — 결재 알림이 detail 에 "무슨 결재인가"(수리 검수 승인)만 적는 것과 같은
- * 갈림이다. "결재선 N단계"는 신청 카드의 결재선 줄이 이미 쓰는 말이고, 결재선을
- * 타지 않는 행(단계 번호가 없는 행)이면 단계 없이 신청자만 적는다.
- *
- * href 는 건별 상세가 아니라 [승인 요청건] 탭이다 — 신청에는 자기만의 상세 화면이
- * 없고, 실제로 승인·반려를 누르는 자리가 그 탭의 「내가 결재할 건」이다.
- *
- * targetKey 는 불출 신청 id 다. 한 신청에 열린 결재는 언제나 하나이고(표의 부분
- * 유니크), 신청 하나가 사람에게도 한 건이다.
- */
-export function buildPartIssueApprovalNotification(input: {
-  issueRequestId: string;
-  /** 그 신청이 향하는 접수 건의 인수번호. 없으면(사용처만 있는 직접 사용 등) `null`. */
-  intakeNumber: string | null;
-  /** 직접 사용의 사용처. 요청 기반이면 언제나 `null`. */
-  destinationNote: string | null;
-  /** 몇 번째 단계인가(1부터). 결재선을 타지 않는 행이면 `null`. */
-  routeStepOrder: number | null;
-  requestedByName: string;
-}): NotificationItem {
-  const step = input.routeStepOrder !== null ? `결재선 ${input.routeStepOrder}단계 · ` : "";
-  return {
-    id: `PART_ISSUE_APPROVAL_PENDING:${input.issueRequestId}`,
-    kind: "PART_ISSUE_APPROVAL_PENDING",
-    targetKey: input.issueRequestId,
-    subject: input.intakeNumber ?? input.destinationNote ?? DELETED_REPAIR_CASE_SUBJECT,
-    detail: `${step}신청자 ${input.requestedByName}`,
-    href: "/inventory/approvals",
-  };
-}
-
-/**
  * 견적서 결재의 이름 — 「견적서 승인」.
  *
- * 글자로 새로 적지 않고 결재선 용도 이름표에서 가져온다(PART_ISSUE_APPROVAL_LABEL 과
- * 같은 자리·같은 이유). 🔴 뒤에 「 승인」을 붙이지 않는 것은 그 이름표가 이미
+ * 글자로 새로 적지 않고 결재선 용도 이름표(SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS)에서
+ * 가져온다 — 절차 화면이 이 용도를 부르는 이름과 알림이 부르는 이름이 한쪽만 바뀌지
+ * 않게 하려는 것이다. 접수 건 결재의 이름(「수리 검수 승인」·「최종 출하 승인」)이
+ * 승인 체크리스트의 LABELS 에서 오는 것과 같은 자리다.
+ * 🔴 뒤에 「 승인」을 붙이지 않는 것은 그 이름표가 이미
  * 「승인」으로 끝나기 때문이다 — 붙이면 「견적서 승인 승인」이 된다. 이름표 쪽 주석이
  * 왜 그렇게 끝맺었는지를 적고 있다.
  */
@@ -512,16 +391,6 @@ export function approvalOutcomeNotificationWindowStart(now: Date): Date {
 }
 
 /**
- * 부품 불출 결재의 이름 — 「부품 불출 승인」.
- *
- * 글자로 새로 적지 않고 결재선 용도 이름표(「부품 불출」)에서 만든다. 절차 화면이
- * 이 용도를 부르는 이름과 알림이 부르는 이름이 한쪽만 바뀌지 않게 하려는 것이다.
- * 접수 건 결재의 이름(「수리 검수 승인」·「최종 출하 승인」)이 승인 체크리스트의
- * LABELS 에서 오는 것과 같은 자리다.
- */
-export const PART_ISSUE_APPROVAL_LABEL = `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.PART_ISSUE} 승인`;
-
-/**
  * 반려 사유를 detail 에 몇 글자까지 보여 주는가.
  *
  * 종 패널의 상세 칸은 어차피 한 줄에서 잘리지만(CSS truncate), 같은 detail 이
@@ -548,12 +417,17 @@ export function previewApprovalRejectionReason(reason: string | null): string {
  *  · REPAIR_CASE — `repair_case_approvals` 의 한 행(수리 검수 승인 · 최종 출하 승인).
  *    접수 건이 없거나 휴지통에 간 결재는 조회가 애초에 내놓지 않으므로 인수번호가
  *    언제나 있다.
- *  · PART_ISSUE — `inventory_part_issue_approvals` 의 한 행(부품 불출 승인). 무엇에
- *    대한 신청인가는 「불출 승인 대기」 알림과 같은 규칙으로 고른다(인수번호 → 사용처
- *    → 삭제된 접수 건). `partRequestId` 가 있으면 요청 기반, 없으면 직접 사용이다.
  *  · QUOTE — `quote_approvals` 의 한 행(견적서 승인). 견적서가 없거나 휴지통에 간
  *    결재는 조회가 애초에 내놓지 않으므로 발행번호가 언제나 있다(접수 건 결재와
  *    같은 처리다 — 누르면 갈 화면이 없는 결재는 알리지 않는다).
+ *
+ * 🔴 **셋째 갈래 PART_ISSUE(`inventory_part_issue_approvals`, 부품 불출 승인)는
+ * 2026-10-27(조각 13-C4)에 들어냈다.** 누르면 갈 세 주소(`/inventory` ·
+ * `/inventory/approvals` · `/inventory/requests`)가 13-A 에서 전부 404 가 됐고,
+ * 재고는 별도 시스템(dss-inventory)이 제 알림을 포털로 직접 보낸다. 🔵 **DB enum 과
+ * 과거 결재 기록의 `PART_ISSUE` 는 그대로 산다** — 여기서 뺀 것은 「그 결과를 종에
+ * 띄우는가」뿐이고, 결재선 용도 이름표(domain/shipment-approval-route.ts)는 영구
+ * 유지다.
  */
 export type ApprovalOutcomeTarget =
   | {
@@ -563,14 +437,6 @@ export type ApprovalOutcomeTarget =
       repairCaseId: string;
       intakeNumber: string;
       approvalType: ShipmentApprovalType;
-    }
-  | {
-      source: "PART_ISSUE";
-      approvalId: string;
-      /** 요청 기반 불출이면 그 부품 요청. 직접 사용이면 `null`. */
-      partRequestId: string | null;
-      intakeNumber: string | null;
-      destinationNote: string | null;
     }
   | {
       source: "QUOTE";
@@ -583,10 +449,14 @@ export type ApprovalOutcomeTarget =
  * 알림 키에서 결재 행이 어느 표의 것인지 가르는 짧은 표시. 두 표의 id 가 우연히
  * 겹쳐도(둘 다 uuid 라 실제로는 없다) 키가 겹치지 않게 하고, 키만 보고도 어느 표를
  * 봐야 하는지 알게 한다. 확인 키의 형식(`종류:나머지`, 영숫자·`:`·`-`·`_`)을 지킨다.
+ *
+ * 🔴 **빠진 `pia`(불출 결재) 자리를 다시 쓰지 마라.** 운영의
+ * `notification_acknowledgements` 에는 `APPROVAL_GRANTED:pia:<uuid>` 로 적힌 과거
+ * 확인 기록이 남아 있을 수 있다. 새 표에 그 글자를 물려주면 남이 눌러 둔 기록이
+ * 엉뚱한 알림을 미리 지운다.
  */
 const APPROVAL_OUTCOME_KEY_TABLE_TAG: Record<ApprovalOutcomeTarget["source"], string> = {
   REPAIR_CASE: "rca",
-  PART_ISSUE: "pia",
   QUOTE: "qa",
 };
 
@@ -595,22 +465,21 @@ function approvalOutcomeKeySuffix(target: ApprovalOutcomeTarget): string {
 }
 
 function approvalOutcomeSubject(target: ApprovalOutcomeTarget): string {
-  if (target.source === "REPAIR_CASE") return target.intakeNumber;
-  if (target.source === "QUOTE") return target.quoteNumber;
-  return target.intakeNumber ?? target.destinationNote ?? DELETED_REPAIR_CASE_SUBJECT;
+  return target.source === "REPAIR_CASE" ? target.intakeNumber : target.quoteNumber;
 }
 
 function approvalOutcomeName(target: ApprovalOutcomeTarget): string {
-  if (target.source === "REPAIR_CASE") return APPROVAL_TYPE_LABELS[target.approvalType];
-  if (target.source === "QUOTE") return QUOTE_APPROVAL_LABEL;
-  return PART_ISSUE_APPROVAL_LABEL;
+  return target.source === "REPAIR_CASE" ? APPROVAL_TYPE_LABELS[target.approvalType] : QUOTE_APPROVAL_LABEL;
 }
 
 /**
- * 결과 알림을 누르면 갈 곳. 🔴 **승인 완료와 반려됨이 서로 다르다** — 승인은
- * 「결과를 확인하는 자리」이고 반려는 「다시 올리는 자리」라서, 불출만 두 갈래로
- * 갈린다. 견적서는 승인이든 반려든 그 장 하나이므로 한 주소다(그 화면의 [견적서
- * 결재] 탭에서 다시 올린다 — 탭은 주소로 열지 못한다: buildQuoteApprovalNotification).
+ * 결과 알림을 누르면 갈 곳 — 견적서는 승인이든 반려든 그 장 하나이므로 한 주소다
+ * (그 화면의 [견적서 결재] 탭에서 다시 올린다 — 탭은 주소로 열지 못한다:
+ * buildQuoteApprovalNotification).
+ *
+ * 🔵 예전에는 이 자리에 「승인 완료와 반려됨이 서로 다르다」는 단서가 붙어 있었다.
+ * 승인은 「결과를 확인하는 자리」, 반려는 「다시 올리는 자리」로 갈리던 것이 **불출
+ * 하나뿐**이었고, 그 갈래를 2026-10-27 에 들어내면서 두 함수의 href 가 같아졌다.
  */
 function approvalOutcomeQuoteHref(target: Extract<ApprovalOutcomeTarget, { source: "QUOTE" }>): string {
   return quoteEditHref({ quoteId: target.quoteId, repairCaseId: null });
@@ -632,7 +501,6 @@ function approvalOutcomeQuoteHref(target: Extract<ApprovalOutcomeTarget, { sourc
  *
  * ── href 는 결과를 확인하는 자리 ────────────────────────────────────────
  *  · 접수 건 결재 → 그 건의 검수/승인 화면(결재 대기 알림과 같은 헬퍼).
- *  · 부품 불출 → [승인 요청건] 탭. 승인이 끝난 신청이 「실행 대기」로 보이는 곳이다.
  *  · 견적서 → 그 견적서 화면. [견적서 결재] 탭에 결재 이력이 있지만 탭은 주소로
  *    열지 못한다(buildQuoteApprovalNotification 의 주석).
  */
@@ -649,9 +517,7 @@ export function buildApprovalGrantedNotification(
     href:
       input.source === "REPAIR_CASE"
         ? repairCaseDetailHrefs(input.repairCaseId).approval
-        : input.source === "QUOTE"
-          ? approvalOutcomeQuoteHref(input)
-          : "/inventory/approvals",
+        : approvalOutcomeQuoteHref(input),
   };
 }
 
@@ -667,8 +533,6 @@ export function buildApprovalGrantedNotification(
  *
  * href 는 다시 올리는 자리다:
  *  · 접수 건 결재 → 그 건의 검수/승인 화면(재요청 단추가 거기 있다).
- *  · 요청 기반 불출 → 부품 요청 관리 목록(반려된 요청을 거기서 다시 불출 신청한다).
- *  · 직접 사용 불출 → 재고 목록(직접 사용은 품목의 [사용]에서 다시 시작한다).
  *  · 견적서 → 그 견적서 화면([견적서 수정]에서 고치고 [견적서 결재]에서 다시 올린다).
  */
 export function buildApprovalRejectedNotification(
@@ -686,10 +550,6 @@ export function buildApprovalRejectedNotification(
     href:
       input.source === "REPAIR_CASE"
         ? repairCaseDetailHrefs(input.repairCaseId).approval
-        : input.source === "QUOTE"
-          ? approvalOutcomeQuoteHref(input)
-          : input.partRequestId !== null
-            ? "/inventory/requests"
-            : "/inventory",
+        : approvalOutcomeQuoteHref(input),
   };
 }

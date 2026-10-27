@@ -114,13 +114,13 @@ test("기본값 그대로 저장하면 행이 하나도 생기지 않는다", as
 
 test("종류를 끄면 종류 표에만 행이 생긴다 — 역할 표는 한 줄도 건드리지 않는다", async () => {
   const result = await saveNotificationSettings({
-    changes: [{ ...allDefaults("PART_REQUEST_PENDING"), enabled: false }],
+    changes: [{ ...allDefaults("QUOTE_APPROVAL_PENDING"), enabled: false }],
     actorUserId: adminId,
   });
 
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.changedCount, 1);
-  assert.equal(await storedKindEnabled("PART_REQUEST_PENDING"), false);
+  assert.equal(await storedKindEnabled("QUOTE_APPROVAL_PENDING"), false);
   assert.equal(
     (await db.select().from(notificationRoleSettings)).length,
     0,
@@ -129,35 +129,35 @@ test("종류를 끄면 종류 표에만 행이 생긴다 — 역할 표는 한 �
 });
 
 test("기본값에서 뺀 역할만 행으로 남는다", async () => {
-  assert.equal(defaultRoleReceivesNotification("PART_REQUEST_PENDING", "INVENTORY_MANAGER"), true);
+  assert.equal(defaultRoleReceivesNotification("QUOTE_APPROVAL_PENDING", "INVENTORY_MANAGER"), true);
 
   const result = await saveNotificationSettings({
-    changes: [allDefaults("PART_REQUEST_PENDING", { INVENTORY_MANAGER: false })],
+    changes: [allDefaults("QUOTE_APPROVAL_PENDING", { INVENTORY_MANAGER: false })],
     actorUserId: adminId,
   });
 
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.changedCount, 1);
-  assert.equal(await storedRoleReceives("PART_REQUEST_PENDING", "INVENTORY_MANAGER"), false);
+  assert.equal(await storedRoleReceives("QUOTE_APPROVAL_PENDING", "INVENTORY_MANAGER"), false);
   // 나머지 넷은 기본값과 같으므로 행이 없다.
   assert.equal((await db.select().from(notificationRoleSettings)).length, 1);
 });
 
 test("기본값으로 되돌리면 행이 지워진다", async () => {
   await saveNotificationSettings({
-    changes: [allDefaults("PART_REQUEST_PENDING", { INVENTORY_MANAGER: false })],
+    changes: [allDefaults("QUOTE_APPROVAL_PENDING", { INVENTORY_MANAGER: false })],
     actorUserId: adminId,
   });
-  assert.equal(await storedRoleReceives("PART_REQUEST_PENDING", "INVENTORY_MANAGER"), false);
+  assert.equal(await storedRoleReceives("QUOTE_APPROVAL_PENDING", "INVENTORY_MANAGER"), false);
 
   const result = await saveNotificationSettings({
-    changes: [allDefaults("PART_REQUEST_PENDING")],
+    changes: [allDefaults("QUOTE_APPROVAL_PENDING")],
     actorUserId: adminId,
   });
 
   assert.equal(result.ok, true);
   if (result.ok) assert.equal(result.changedCount, 1, "지운 것도 바뀐 것으로 센다");
-  assert.equal(await storedRoleReceives("PART_REQUEST_PENDING", "INVENTORY_MANAGER"), null);
+  assert.equal(await storedRoleReceives("QUOTE_APPROVAL_PENDING", "INVENTORY_MANAGER"), null);
 });
 
 test("🔴 최고관리자가 받는 것은 끌 수 없다", async () => {
@@ -190,8 +190,8 @@ test("최고관리자를 켠 채로 보내는 것은 통과하되, 행으로 남
 test("같은 종류를 두 번 보내면 거절한다", async () => {
   const result = await saveNotificationSettings({
     changes: [
-      allDefaults("PART_REQUEST_PENDING", { INVENTORY_MANAGER: false }),
-      allDefaults("PART_REQUEST_PENDING"),
+      allDefaults("QUOTE_APPROVAL_PENDING", { INVENTORY_MANAGER: false }),
+      allDefaults("QUOTE_APPROVAL_PENDING"),
     ],
     actorUserId: superAdminId,
   });
@@ -206,14 +206,14 @@ test("🔴 한 종류가 거절되면 같이 보낸 다른 종류도 저장되�
   // 무엇을 받고 있는지 아무도 모르는 상태가 된다.
   const result = await saveNotificationSettings({
     changes: [
-      allDefaults("PART_REQUEST_PENDING", { INVENTORY_MANAGER: false }), // 그 자체로는 정상
+      allDefaults("QUOTE_APPROVAL_PENDING", { INVENTORY_MANAGER: false }), // 그 자체로는 정상
       allDefaults("REPAIR_CASE_APPROVAL", { SUPER_ADMIN: false }), // 거절 — 여기서 전체가 되돌아가야 한다
     ],
     actorUserId: superAdminId,
   });
 
   assert.equal(result.ok, false);
-  assert.equal(await storedRoleReceives("PART_REQUEST_PENDING", "INVENTORY_MANAGER"), null);
+  assert.equal(await storedRoleReceives("QUOTE_APPROVAL_PENDING", "INVENTORY_MANAGER"), null);
 });
 
 test("등록되지 않은 종류는 저장되지 않는다", async () => {
@@ -233,7 +233,7 @@ test("등록되지 않은 종류는 저장되지 않는다", async () => {
 
 test("관리자 미만은 저장할 수 없다 — 트랜잭션 안에서 다시 확인한다", async () => {
   const result = await saveNotificationSettings({
-    changes: [allDefaults("PART_REQUEST_PENDING", { INVENTORY_MANAGER: false })],
+    changes: [allDefaults("QUOTE_APPROVAL_PENDING", { INVENTORY_MANAGER: false })],
     actorUserId: engineerId,
   });
 
@@ -244,7 +244,7 @@ test("관리자 미만은 저장할 수 없다 — 트랜잭션 안에서 다시
 
 test("없는 사용자로는 저장할 수 없다", async () => {
   const result = await saveNotificationSettings({
-    changes: [allDefaults("PART_REQUEST_PENDING", { INVENTORY_MANAGER: false })],
+    changes: [allDefaults("QUOTE_APPROVAL_PENDING", { INVENTORY_MANAGER: false })],
     actorUserId: "00000000-0000-0000-0000-000000000000",
   });
 
@@ -255,46 +255,58 @@ test("없는 사용자로는 저장할 수 없다", async () => {
 test("관리자도 좁히고 넓힐 수 있다 — 알림은 인가 경계가 아니다", async () => {
   // 권한 설정과 다른 점이다. 알림을 넓혀도 없던 권한이 생기지 않으므로
   // (설정은 윗단 필터일 뿐 원래 판정을 대신하지 않는다) 관리자에게도 연다.
-  assert.equal(defaultRoleReceivesNotification("PART_REQUEST_PENDING", "SALES"), false);
+  //
+  // 🔵 2026-10-27(13-C4)까지는 **기본값이 거짓인 칸**(영업 × 부품 요청 대기)을 열어
+  //    넓히는 쪽을 보였다. 재고 알림 셋이 빠지면서 역할로 갈리는 종류가 하나도 남지
+  //    않아(다섯 × 다섯이 전부 참) 그런 칸을 만들 수 없다. 그래서 **좁혔다 다시
+  //    넓히는** 두 걸음으로 같은 것을 본다 — 관리자가 두 방향 다 저장할 수 있다.
+  assert.equal(defaultRoleReceivesNotification("QUOTE_APPROVAL_PENDING", "SALES"), true);
 
-  const result = await saveNotificationSettings({
-    changes: [allDefaults("PART_REQUEST_PENDING", { SALES: true })],
+  const narrowed = await saveNotificationSettings({
+    changes: [allDefaults("QUOTE_APPROVAL_PENDING", { SALES: false })],
     actorUserId: adminId,
   });
+  assert.equal(narrowed.ok, true);
+  assert.equal(await storedRoleReceives("QUOTE_APPROVAL_PENDING", "SALES"), false, "관리자가 좁히지 못했다");
 
-  assert.equal(result.ok, true);
-  assert.equal(await storedRoleReceives("PART_REQUEST_PENDING", "SALES"), true);
+  const widened = await saveNotificationSettings({
+    changes: [allDefaults("QUOTE_APPROVAL_PENDING", { SALES: true })],
+    actorUserId: adminId,
+  });
+  assert.equal(widened.ok, true);
+  if (widened.ok) assert.equal(widened.changedCount, 1, "되돌린 것도 바뀐 것으로 센다");
+  assert.equal(await storedRoleReceives("QUOTE_APPROVAL_PENDING", "SALES"), null, "기본값과 같아져 행이 지워진다");
 });
 
 test("🔴 종류를 껐다 켜도 역할 설정이 그대로 살아 있다", async () => {
   // 이것이 표를 둘로 나눈 이유다 — '모든 역할 해제'로 대신했다면 다시 켤 때
   // 원래 누가 받았는지가 남지 않는다.
   await saveNotificationSettings({
-    changes: [allDefaults("PART_REQUEST_PENDING", { INVENTORY_MANAGER: false })],
+    changes: [allDefaults("QUOTE_APPROVAL_PENDING", { INVENTORY_MANAGER: false })],
     actorUserId: adminId,
   });
 
   await saveNotificationSettings({
-    changes: [{ ...allDefaults("PART_REQUEST_PENDING", { INVENTORY_MANAGER: false }), enabled: false }],
+    changes: [{ ...allDefaults("QUOTE_APPROVAL_PENDING", { INVENTORY_MANAGER: false }), enabled: false }],
     actorUserId: adminId,
   });
-  assert.equal(await storedKindEnabled("PART_REQUEST_PENDING"), false);
-  assert.equal(await storedRoleReceives("PART_REQUEST_PENDING", "INVENTORY_MANAGER"), false);
+  assert.equal(await storedKindEnabled("QUOTE_APPROVAL_PENDING"), false);
+  assert.equal(await storedRoleReceives("QUOTE_APPROVAL_PENDING", "INVENTORY_MANAGER"), false);
 
   await saveNotificationSettings({
-    changes: [allDefaults("PART_REQUEST_PENDING", { INVENTORY_MANAGER: false })],
+    changes: [allDefaults("QUOTE_APPROVAL_PENDING", { INVENTORY_MANAGER: false })],
     actorUserId: adminId,
   });
 
   const stored = await loadStoredNotificationSettings();
-  assert.equal(await storedKindEnabled("PART_REQUEST_PENDING"), null, "다시 켜면 종류 행이 지워진다");
+  assert.equal(await storedKindEnabled("QUOTE_APPROVAL_PENDING"), null, "다시 켜면 종류 행이 지워진다");
   assert.equal(
-    deliversNotification("PART_REQUEST_PENDING", "ADMIN", stored),
+    deliversNotification("QUOTE_APPROVAL_PENDING", "ADMIN", stored),
     true,
     "켜면 관리자는 그대로 돌아온다"
   );
   assert.equal(
-    deliversNotification("PART_REQUEST_PENDING", "INVENTORY_MANAGER", stored),
+    deliversNotification("QUOTE_APPROVAL_PENDING", "INVENTORY_MANAGER", stored),
     false,
     "빼 두었던 역할은 여전히 빠져 있다"
   );
@@ -304,7 +316,7 @@ test("감사 로그를 남긴다 — 만들 때·바꿀 때·기본값으로 되
   const before = await countAuditLogs();
 
   await saveNotificationSettings({
-    changes: [{ ...allDefaults("PART_REQUEST_PENDING", { INVENTORY_MANAGER: false }), enabled: false }],
+    changes: [{ ...allDefaults("QUOTE_APPROVAL_PENDING", { INVENTORY_MANAGER: false }), enabled: false }],
     actorUserId: adminId,
   });
   const afterCreate = await countAuditLogs();
@@ -312,7 +324,7 @@ test("감사 로그를 남긴다 — 만들 때·바꿀 때·기본값으로 되
   assert.equal(afterCreate.role, before.role + 1, "역할 칸 기록");
 
   await saveNotificationSettings({
-    changes: [allDefaults("PART_REQUEST_PENDING")],
+    changes: [allDefaults("QUOTE_APPROVAL_PENDING")],
     actorUserId: adminId,
   });
   const afterRevert = await countAuditLogs();

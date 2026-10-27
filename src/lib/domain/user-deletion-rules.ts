@@ -164,7 +164,6 @@ export function engineerSuccessorBlock(
 export type UserDeletionPendingApprovalCounts = {
   finalShipment: number;
   repairInspection: number;
-  partIssue: number;
   quote: number;
 };
 
@@ -174,7 +173,8 @@ export type UserDeletionPendingApprovalCounts = {
  * 🔴 **칸을 손으로 더하지 않는다.** 예전에는 부르는 쪽마다 세 칸을 글자로 더했고
  * (`finalShipment + repairInspection + partIssue`), 그래서 종류가 늘어도 타입 오류가
  * 나지 않은 채 확인 창이 **조용히 빠뜨린 건수**를 말할 수 있었다. 여기 한 곳에서
- * 값들을 훑으면 새 칸이 저절로 따라온다.
+ * 값들을 훑으면 새 칸이 저절로 따라온다. (그때 세던 `partIssue` 칸은 2026-10-27 에
+ * 사라졌다 — OPEN_APPROVAL_KINDS 주석. 칸이 **줄어도** 이 모양은 그대로 맞는다.)
  */
 export function totalPendingApprovals(counts: UserDeletionPendingApprovalCounts): number {
   return Object.values(counts).reduce((total, count) => total + count, 0);
@@ -224,8 +224,35 @@ export function resolveUserDeletionRequirements(facts: UserDeletionRequirementFa
  * ============================================================================
  */
 
-/** 넘겨받을 수 있는 결재 대기의 종류 — 접수 건 승인 둘과 부품 불출 · 견적서. */
-export const OPEN_APPROVAL_KINDS = ["FINAL_SHIPMENT", "REPAIR_INSPECTION", "PART_ISSUE", "QUOTE"] as const;
+/**
+ * 넘겨받을 수 있는 결재 대기의 종류 — 접수 건 승인 둘과 견적서.
+ *
+ * ── 🔴 `PART_ISSUE`(부품 불출)를 2026-10-27(조각 13-C4)에 뺐다 ─────────────
+ * **이것은 동작이 바뀌는 변경이다.** 전에는 지울 사람에게 열린 불출 결재가 하나라도
+ * 있으면 「결재 이어받을 사람을 정해야 삭제된다」였고, 그 사람이 **옛 판**의 뒤 단계에
+ * 있으면 삭제가 아예 멈췄다(IN_FLIGHT_ON_OLD_ROUTE). 지금은 그 행을 **세지도 넘기지도
+ * 않는다** — 불출 결재만 걸린 사람은 이어받을 사람 없이 그냥 삭제된다.
+ *
+ * 🔴 바로 아래 「견적서 결재만 걸린 사람이 이어받을 사람 없이 삭제됐다」가 **사고로**
+ * 적혀 있는데, 이번 것은 **일부러** 그렇게 한다. 갈린 지점은 「넘겨받을 일이 실제로
+ * 있는가」다. 뺄 수 있다고 판단한 근거 셋을 전부 적어 둔다:
+ *
+ *  1. **운영에 그런 행이 없다.** 2026-10-27 실측에서 열린 `PART_ISSUE` 결재 0건,
+ *     재고 표 여섯이 전부 0행이었다.
+ *  2. **새로 생길 길이 없다.** `inventory_part_issue_approvals` 에 행을 넣는 코드는
+ *     mutations/inventory-part-issue-requests.ts 하나뿐이고, 그 파일을 import 하는
+ *     살아 있는 화면·액션·조회가 **하나도 없다**(13-A 가 화면을, 13-B 가 액션을
+ *     걷어냈다. 2026-10-27 저장소 전체 grep).
+ *  3. **넘겨도 할 수 있는 일이 없다.** 설령 옛 행이 남아 있어도 그것을 결재하는 화면이
+ *     13-A 에서 사라졌다. 이어받을 사람에게 넘기는 것은 **아무도 누를 수 없는 결재**를
+ *     옮겨 적는 일일 뿐이고, 그 대가로 멀쩡한 계정 삭제가 막힌다.
+ *
+ * 🔵 **`domain/shipment-approval-route.ts` 의 `PART_ISSUE` 는 그대로다** — DB enum 과
+ * 과거 결재 기록이 그 값을 쓰고, 지울 사람이 **현재 불출 결재선 판에 올라 있으면**
+ * 지금도 이어받을 사람이 필요하다(routeSlotCount). 여기서 뺀 것은 「열린 결재 **행**」
+ * 한 가지뿐이다.
+ */
+export const OPEN_APPROVAL_KINDS = ["FINAL_SHIPMENT", "REPAIR_INSPECTION", "QUOTE"] as const;
 export type OpenApprovalKind = (typeof OPEN_APPROVAL_KINDS)[number];
 
 /**
@@ -237,7 +264,6 @@ export type OpenApprovalKind = (typeof OPEN_APPROVAL_KINDS)[number];
 const ROUTE_SCOPE_BY_APPROVAL_KIND: Record<OpenApprovalKind, ShipmentApprovalRouteScope | null> = {
   FINAL_SHIPMENT: "FINAL_SHIPMENT",
   REPAIR_INSPECTION: null,
-  PART_ISSUE: "PART_ISSUE",
   // 견적서 결재는 결재선을 탄다. 🔴 그 절차가 **발행을 막지 않는다**는 것과는 별개다
   // (schema/quote-approvals.ts 머리말) — 여기서 보는 것은 「이 행의 뒤 단계가 지울
   // 사람에게 가는가」뿐이고, 그 판정은 다른 둘과 글자 그대로 같다.
@@ -384,7 +410,6 @@ export function replaceApproverInRouteSteps(
 const COUNT_KEY_BY_APPROVAL_KIND: Record<OpenApprovalKind, keyof UserDeletionPendingApprovalCounts> = {
   FINAL_SHIPMENT: "finalShipment",
   REPAIR_INSPECTION: "repairInspection",
-  PART_ISSUE: "partIssue",
   QUOTE: "quote",
 };
 
@@ -397,7 +422,6 @@ export function countPendingApprovalsAssignedTo(
   const counts: UserDeletionPendingApprovalCounts = {
     finalShipment: 0,
     repairInspection: 0,
-    partIssue: 0,
     quote: 0,
   };
   for (const row of rows) {

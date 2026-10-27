@@ -4,7 +4,6 @@ import { db } from "../client";
 import {
   approvalRouteDelegations,
   intakeMailRecipients,
-  inventoryPartIssueApprovals,
   inventoryPartIssueRequests,
   inventoryPartRequests,
   procedureCaseExecutionNodes,
@@ -64,13 +63,15 @@ import type { Role } from "@/lib/domain/types";
  *
  * ── 잠금 순서 (lock: true 일 때) ────────────────────────────────────────
  * 결재 결정이 잡는 순서에 맞춘다 — 결재 행 → 위임 행 → 사용자 행
- * (mutations/repair-case-approvals.ts 의 decideRepairCaseApproval). 부품 불출은 신청
- * 헤더를 결재 행보다 먼저 잠근다(decidePartIssueRequestApproval · cancel 과 같은
- * 순서). 견적서는 결재 행 하나만 잠근다 — decideQuoteApproval 도 견적서 행은 잠그지
- * 않고 결재 행만 FOR UPDATE 로 잡으므로 같은 순서다(그 함수의 🔴 주석).
+ * (mutations/repair-case-approvals.ts 의 decideRepairCaseApproval). 견적서는 결재 행
+ * 하나만 잠근다 — decideQuoteApproval 도 견적서 행은 잠그지 않고 결재 행만
+ * FOR UPDATE 로 잡으므로 같은 순서다(그 함수의 🔴 주석).
  * 순서가 어긋나면 삭제와 결재가 서로를 기다리는 교착이 난다. 결재선 판은
  * 잠그지 않는다 — 부르는 쪽이 결재선 잠금(acquireShipmentApprovalRouteLock)을 먼저
  * 건다.
+ * 🔵 2026-10-27(13-C4)까지는 여기 한 줄이 더 있었다 — 부품 불출은 **신청 헤더를 결재
+ * 행보다 먼저** 잠갔다(decidePartIssueRequestApproval · cancel 과 같은 순서). 그
+ * 갈래를 들어내면서 함께 없어졌다(아래 4번).
  *
  * ── 개인정보 ────────────────────────────────────────────────────────────
  * 이메일 · 전화 · sso_subject 는 싣지 않는다. 포털 연결 여부만 참/거짓으로 알린다
@@ -183,15 +184,8 @@ function nonNull<T>(value: T | null | undefined): value is T {
 
 function approvalLabel(
   kind: OpenApprovalKind,
-  subject: { intakeNumber?: string | null; issueRequestId?: string | null; quoteNumber?: string | null }
+  subject: { intakeNumber?: string | null; quoteNumber?: string | null }
 ): string {
-  if (kind === "PART_ISSUE") {
-    // 불출 신청에는 사람이 읽는 번호가 없다 — id 앞 여덟 자를 쓰고, 접수 건에 매인
-    // 신청이면 접수번호를 곁들인다.
-    const short = (subject.issueRequestId ?? "").slice(0, 8);
-    const base = `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.PART_ISSUE} 신청 ${short}`;
-    return subject.intakeNumber ? `${base} (${subject.intakeNumber})` : base;
-  }
   if (kind === "QUOTE") {
     // 견적서 번호는 사람이 손으로 적는 값이라 그대로가 가장 알아보기 쉽다
     // (「DSS 2026-077」). 견적서가 영구 삭제되면 결재 행의 연결이 끊기므로
@@ -279,58 +273,15 @@ export async function collectUserDeletionImpact(
     .where(and(eq(repairCaseApprovals.status, "REQUESTED"), repairCondition));
   const repairRows = lock ? await repairQuery.for("update") : await repairQuery;
 
-  // 4. 부품 불출 결재 대기 — 헤더를 먼저 잠그고(결재 · 취소와 같은 순서) 결재 행을 다시
-  //    읽는다. 신청이 결재 대기(PENDING_APPROVAL)가 아닌 행은 넘길 것이 없다.
-  const issueCondition =
-    routeIdsWithTarget.length > 0
-      ? or(
-          eq(inventoryPartIssueApprovals.assignedApproverUserId, targetId),
-          inArray(inventoryPartIssueApprovals.routeId, routeIdsWithTarget)
-        )
-      : eq(inventoryPartIssueApprovals.assignedApproverUserId, targetId);
-  const issueCandidates = await executor
-    .select({ id: inventoryPartIssueApprovals.id, issueRequestId: inventoryPartIssueApprovals.issueRequestId })
-    .from(inventoryPartIssueApprovals)
-    .where(and(eq(inventoryPartIssueApprovals.status, "REQUESTED"), issueCondition));
-
-  const issueHeaders = await (async () => {
-    const ids = unique(issueCandidates.map((row) => row.issueRequestId));
-    if (ids.length === 0) return [];
-    const query = executor
-      .select({
-        id: inventoryPartIssueRequests.id,
-        status: inventoryPartIssueRequests.status,
-        repairCaseId: inventoryPartIssueRequests.repairCaseId,
-        partRequestId: inventoryPartIssueRequests.partRequestId,
-      })
-      .from(inventoryPartIssueRequests)
-      .where(inArray(inventoryPartIssueRequests.id, ids));
-    return lock ? await query.for("update") : await query;
-  })();
-  const headerById = new Map(issueHeaders.map((header) => [header.id, header]));
-
-  const issueRows = await (async () => {
-    const ids = issueCandidates.map((row) => row.id);
-    if (ids.length === 0) return [];
-    const query = executor
-      .select({
-        id: inventoryPartIssueApprovals.id,
-        issueRequestId: inventoryPartIssueApprovals.issueRequestId,
-        assignedApproverUserId: inventoryPartIssueApprovals.assignedApproverUserId,
-        requestedByUserId: inventoryPartIssueApprovals.requestedByUserId,
-        routeId: inventoryPartIssueApprovals.routeId,
-        routeStepOrder: inventoryPartIssueApprovals.routeStepOrder,
-      })
-      .from(inventoryPartIssueApprovals)
-      .where(and(inArray(inventoryPartIssueApprovals.id, ids), eq(inventoryPartIssueApprovals.status, "REQUESTED")));
-    return lock ? await query.for("update") : await query;
-  })();
-  const awaitingIssueRows = issueRows.filter(
-    (row) => headerById.get(row.issueRequestId)?.status === "PENDING_APPROVAL"
-  );
+  // 4. 🔴 **부품 불출 결재 대기를 여기서 모으던 갈래는 2026-10-27(조각 13-C4)에
+  //    들어냈다** — `OPEN_APPROVAL_KINDS` 에서 PART_ISSUE 를 뺀 것과 한 몸이다. 뺀
+  //    까닭(운영 0건 · 새로 생길 길 없음 · 넘겨도 누를 화면이 없음)의 전문은
+  //    domain/user-deletion-rules.ts 의 그 상수 주석에 있다. 🔵 그 갈래는 혼자
+  //    **신청 헤더를 결재 행보다 먼저 잠그고**(결재 · 취소와 같은 순서) 헤더 상태가
+  //    PENDING_APPROVAL 인 것만 골랐다 — 아래 잠금 순서 설명에서 그 한 줄이 함께 빠졌다.
 
   // 4b. 견적서 결재 대기 — 3번과 같은 모양이다(지정됐거나, 지울 사람이 있는 판을 따라가는 것).
-  //     🔴 불출과 달리 헤더를 먼저 잠글 것이 없다 — 견적서는 결재가 끝나기 전에도 발행되므로
+  //     🔴 접수 건과 달리 헤더를 먼저 잠글 것이 없다 — 견적서는 결재가 끝나기 전에도 발행되므로
   //     「지금 결재 중인가」라는 상태 칸이 quotes 에 없다(schema/quote-approvals.ts 머리말).
   //     REQUESTED 인 결재 행 자신이 곧 「살아 있는 요청」이다.
   const quoteCondition =
@@ -352,41 +303,15 @@ export async function collectUserDeletionImpact(
 
   // 5. 붙잡은 판의 단계들 — 「현재 판」이 아니라 행에 적힌 판이다.
   const pinnedRouteIds = unique(
-    [
-      ...repairRows.map((row) => row.routeId),
-      ...awaitingIssueRows.map((row) => row.routeId),
-      ...quoteRows.map((row) => row.routeId),
-    ].filter(nonNull)
+    [...repairRows.map((row) => row.routeId), ...quoteRows.map((row) => row.routeId)].filter(nonNull)
   );
   const stepsByRoute = new Map<string, RouteStepAssignment[]>();
   for (const routeId of pinnedRouteIds) {
     stepsByRoute.set(routeId, await getShipmentApprovalRouteSteps(executor, routeId));
   }
 
-  // 6. 사람이 알아볼 식별자 — 접수번호. 요청 기반 불출은 부품 요청을 거쳐 접수 건을 찾는다.
-  const partRequestIds = unique(
-    awaitingIssueRows.map((row) => headerById.get(row.issueRequestId)?.partRequestId).filter(nonNull)
-  );
-  const partRequestCaseById = new Map<string, string | null>();
-  if (partRequestIds.length > 0) {
-    const rows = await executor
-      .select({ id: inventoryPartRequests.id, repairCaseId: inventoryPartRequests.repairCaseId })
-      .from(inventoryPartRequests)
-      .where(inArray(inventoryPartRequests.id, partRequestIds));
-    for (const row of rows) partRequestCaseById.set(row.id, row.repairCaseId);
-  }
-  const issueCaseId = (issueRequestId: string): string | null => {
-    const header = headerById.get(issueRequestId);
-    if (!header) return null;
-    if (header.repairCaseId) return header.repairCaseId;
-    return header.partRequestId ? (partRequestCaseById.get(header.partRequestId) ?? null) : null;
-  };
-  const caseIds = unique(
-    [
-      ...repairRows.map((row) => row.repairCaseId),
-      ...awaitingIssueRows.map((row) => issueCaseId(row.issueRequestId)),
-    ].filter(nonNull)
-  );
+  // 6. 사람이 알아볼 식별자 — 접수번호.
+  const caseIds = unique(repairRows.map((row) => row.repairCaseId).filter(nonNull));
   const intakeById = new Map<string, string>();
   if (caseIds.length > 0) {
     const rows = await executor
@@ -426,23 +351,6 @@ export async function collectUserDeletionImpact(
       },
       subject: { repairCaseId: row.repairCaseId, issueRequestId: null, quoteId: null, intakeNumber },
       label: approvalLabel(row.approvalType, { intakeNumber }),
-    });
-  }
-  for (const row of awaitingIssueRows) {
-    const repairCaseId = issueCaseId(row.issueRequestId);
-    const intakeNumber = repairCaseId ? (intakeById.get(repairCaseId) ?? null) : null;
-    pushIfRelevant({
-      approvalId: row.id,
-      facts: {
-        kind: "PART_ISSUE",
-        assignedApproverUserId: row.assignedApproverUserId,
-        requestedByUserId: row.requestedByUserId,
-        routeId: row.routeId,
-        routeStepOrder: row.routeStepOrder,
-        routeSteps: row.routeId ? (stepsByRoute.get(row.routeId) ?? []) : [],
-      },
-      subject: { repairCaseId, issueRequestId: row.issueRequestId, quoteId: null, intakeNumber },
-      label: approvalLabel("PART_ISSUE", { intakeNumber, issueRequestId: row.issueRequestId }),
     });
   }
   for (const row of quoteRows) {

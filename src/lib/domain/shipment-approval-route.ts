@@ -130,10 +130,15 @@ export function isEditableShipmentApprovalRouteScope(
 export const SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS: Record<ShipmentApprovalRouteScope, string> = {
   FINAL_SHIPMENT: "최종 출하 승인",
   // 🔴 [승인 절차] 탭의 고르개에서는 2026-10-18 에 빠졌지만 **이 이름표는 남는다** —
-  // 사용자 삭제 영향 안내(db/queries/user-deletion-impact.ts ·
-  // components/users/user-deletion-dialog-text.ts)와 알림 이름표
-  // (domain/notifications.ts 의 PART_ISSUE_APPROVAL_LABEL)가 저장된 과거 판을
-  // 사람에게 보여 줄 때 이것을 쓴다. 지우면 그 자리들이 코드 값을 그대로 띄운다.
+  // [승인 절차] 탭(components/users/ShipmentApprovalRouteSection.tsx)과 계정 삭제 안내의
+  // **결재선 자리** 문장(user-deletion-dialog-text.ts 의 slot.scope ·
+  // db/queries/user-deletion-impact.ts 의 blocker)이 저장된 과거 판을 사람에게 보여 줄 때
+  // 이것을 쓴다. 지우면 그 자리들이 코드 값을 그대로 띄운다.
+  // 🔵 알림 이름표(domain/notifications.ts 의 PART_ISSUE_APPROVAL_LABEL)도 이것을 썼는데
+  //    **2026-10-27(13-C4)에 사라졌다** — 재고 알림을 걷어내면서 함께 지웠고, 계정 삭제에서
+  //    「열린 결재 **행**」을 세던 쪽도 같은 조각에서 빠졌다. 남은 쓰임은 **판에 적힌 자리**를
+  //    보여 주는 것뿐이다(판 자체는 그대로 돌아간다 — 지울 사람이 불출 결재선에 올라 있으면
+  //    지금도 이어받을 사람이 필요하다).
   PART_ISSUE: "부품 불출",
   // 🔴 「승인」으로 끝맺는 것은 일부러다. 편집 화면의 설명 문장이 이름표 뒤에
   // 조사 「을」을 붙인다(`${scopeLabel}을 여러 사람이 순서대로 결재하도록…`).

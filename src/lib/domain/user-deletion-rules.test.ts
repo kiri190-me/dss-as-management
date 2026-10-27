@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  OPEN_APPROVAL_KINDS,
   approvalSuccessorBlock,
   collectSuccessorExclusions,
   countPendingApprovalsAssignedTo,
@@ -123,7 +124,7 @@ test("담당 이어받을 사람 — 자기 자신 · 계정 조건 · 역할이
 
 const NOTHING = {
   routeSlotCount: 0,
-  pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 0 },
+  pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 0 },
   isLastRepresentative: false,
   openAssignedCaseCount: 0,
 };
@@ -136,14 +137,13 @@ test("필요한가 — 아무것도 없으면 둘 다 필요 없다", () => {
   });
 });
 
-test("필요한가 — 결재선 자리 · 대기 결재 넷 · 마지막 대표는 각각 결재 쪽을 요구한다", () => {
+test("필요한가 — 결재선 자리 · 대기 결재 셋 · 마지막 대표는 각각 결재 쪽을 요구한다", () => {
   const cases = [
     { ...NOTHING, routeSlotCount: 1 },
-    { ...NOTHING, pendingApprovals: { finalShipment: 1, repairInspection: 0, partIssue: 0, quote: 0 } },
-    { ...NOTHING, pendingApprovals: { finalShipment: 0, repairInspection: 1, partIssue: 0, quote: 0 } },
-    { ...NOTHING, pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 1, quote: 0 } },
+    { ...NOTHING, pendingApprovals: { finalShipment: 1, repairInspection: 0, quote: 0 } },
+    { ...NOTHING, pendingApprovals: { finalShipment: 0, repairInspection: 1, quote: 0 } },
     // 🔴 견적서 결재만 걸린 사람 — 예전에는 세 칸만 더해 이어받을 사람 없이 삭제됐다.
-    { ...NOTHING, pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 1 } },
+    { ...NOTHING, pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 1 } },
     { ...NOTHING, isLastRepresentative: true },
   ];
   for (const facts of cases) {
@@ -151,6 +151,46 @@ test("필요한가 — 결재선 자리 · 대기 결재 넷 · 마지막 대표
     assert.equal(required.approvalSuccessor, true, JSON.stringify(facts));
     assert.equal(required.engineerSuccessor, false, JSON.stringify(facts));
   }
+});
+
+/**
+ * 🔴 **동작이 바뀐 자리 — 2026-10-27(조각 13-C4).** 전에는 넷째 갈래(부품 불출
+ * `partIssue` 칸)가 위 목록에 있었고, 그 칸만 1 이어도 이어받을 사람을 요구했다.
+ * 지금은 그 칸이 **세는 대상에서 빠져** 요구하지 않는다.
+ *
+ * 🔵 바로 위 시험에 「견적서 결재만 걸린 사람이 이어받을 사람 없이 삭제됐다」가
+ * **사고**로 적혀 있다. 모양이 같아 보이지만 갈린 지점은 「넘겨받을 일이 실제로
+ * 있는가」다 — 까닭 셋(운영 0건 · 새로 생길 길 없음 · 넘겨도 누를 화면이 없음)의
+ * 전문은 OPEN_APPROVAL_KINDS 주석에 있다. 되살리려면 그 셋을 먼저 다시 재라.
+ */
+test("🔴 부품 불출은 이제 세는 종류가 아니다 — 그 결재만 걸린 사람은 이어받을 사람 없이 삭제된다", () => {
+  assert.deepEqual(
+    [...OPEN_APPROVAL_KINDS],
+    ["FINAL_SHIPMENT", "REPAIR_INSPECTION", "QUOTE"],
+    "넘겨받는 결재 종류가 달라졌다 — 계정 삭제의 동작이 바뀐다"
+  );
+
+  // 불출 결재 행을 그대로 넣어 봐도 어느 칸도 올라가지 않는다. 🔴 인자 타입이
+  // OpenApprovalKind 라 글자를 그냥 적을 수 없으므로, **입구에서 막히는 것이 아니라
+  // 세는 표에 자리가 없다**는 것을 표 자체로 본다.
+  const counted = countPendingApprovalsAssignedTo(
+    [
+      { kind: "FINAL_SHIPMENT", assignedApproverUserId: TARGET },
+      { kind: "QUOTE", assignedApproverUserId: TARGET },
+    ],
+    TARGET
+  );
+  assert.deepEqual(Object.keys(counted).sort(), ["finalShipment", "quote", "repairInspection"]);
+  assert.ok(!("partIssue" in counted), "세는 칸에 부품 불출이 남아 있다");
+
+  // 그 칸이 없으니 「불출만 걸린 사람」은 곧 「아무것도 안 걸린 사람」이다.
+  assert.equal(
+    resolveUserDeletionRequirements({
+      ...NOTHING,
+      pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 0 },
+    }).approvalSuccessor,
+    false
+  );
 });
 
 test("필요한가 — 검수 역할은 검수 수동 지정이 있을 때만 요구한다", () => {
@@ -161,14 +201,14 @@ test("필요한가 — 검수 역할은 검수 수동 지정이 있을 때만 �
   assert.equal(
     resolveUserDeletionRequirements({
       ...NOTHING,
-      pendingApprovals: { finalShipment: 0, repairInspection: 2, partIssue: 0, quote: 0 },
+      pendingApprovals: { finalShipment: 0, repairInspection: 2, quote: 0 },
     }).approvalSuccessorMustInspect,
     true
   );
   // 견적서 결재는 검수 역할을 요구하지 않는다 — 결재는 요구한다.
   const quoteOnly = resolveUserDeletionRequirements({
     ...NOTHING,
-    pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 3 },
+    pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 3 },
   });
   assert.equal(quoteOnly.approvalSuccessorMustInspect, false);
   assert.equal(quoteOnly.approvalSuccessor, true);
@@ -186,11 +226,16 @@ test("필요한가 — 열린 담당 건이 있으면 담당 쪽만 요구한다
 
 test("승인 종류 → 결재선 용도 — 검수는 결재선을 타지 않는다", () => {
   assert.equal(routeScopeForApprovalKind("FINAL_SHIPMENT"), "FINAL_SHIPMENT");
-  assert.equal(routeScopeForApprovalKind("PART_ISSUE"), "PART_ISSUE");
   assert.equal(routeScopeForApprovalKind("QUOTE"), "QUOTE");
   assert.equal(routeScopeForApprovalKind("REPAIR_INSPECTION"), null);
 });
 
+/**
+ * 🔵 `PART_ISSUE` 칸이 **여기에는 남는다.** 넘겨받는 승인 종류에서는 빠졌지만
+ * (OPEN_APPROVAL_KINDS, 2026-10-27) 결재선 **용도**는 영구 유지라
+ * (domain/shipment-approval-route.ts) 지울 사람이 그 판에 올라 있으면 지금도
+ * 이어받을 사람이 필요하다. 이 Record 는 용도 쪽 타입을 따른다.
+ */
 const CURRENT = {
   FINAL_SHIPMENT: "route-current",
   PART_ISSUE: "part-current",
@@ -229,14 +274,19 @@ test("사슬 — 지울 사람이 현재 판의 뒤 단계에 있으면 REPIN", 
   });
 });
 
-test("사슬 — 부품 불출은 부품 불출의 현재 판과 견준다", () => {
-  const row = routeRow({ kind: "PART_ISSUE", routeId: "part-current" });
+// 🔵 2026-10-27(13-C4)까지 여기에 「사슬 — 부품 불출은 부품 불출의 현재 판과 견준다」가
+//    있었다. 그 시험이 재던 것 둘은 아래 견적서 시험이 글자 그대로 같은 모양으로
+//    이어받는다 — ① 제 용도의 현재 판이면 REPIN ② 다른 용도의 현재 판 id 와 같아도
+//    옛 판이라 STOP. 불출이 **넘겨받는 종류에서 빠져**(OPEN_APPROVAL_KINDS) 그 갈래로
+//    들어오는 행 자체가 없어졌다.
+test("사슬 — 견적서 결재는 견적서의 현재 판과 견준다", () => {
+  const row = routeRow({ kind: "QUOTE", routeId: "quote-current" });
   assert.deepEqual(planOpenApproval(row, { targetUserId: TARGET, currentRouteIdByScope: CURRENT }), {
     action: "REPIN",
     reassign: false,
   });
   // 출하의 현재 판 id 와 같아도 용도가 다르면 옛 판이다.
-  const crossed = routeRow({ kind: "PART_ISSUE", routeId: "route-current" });
+  const crossed = routeRow({ kind: "QUOTE", routeId: "route-current" });
   assert.deepEqual(planOpenApproval(crossed, { targetUserId: TARGET, currentRouteIdByScope: CURRENT }), {
     action: "STOP",
     code: "IN_FLIGHT_ON_OLD_ROUTE",
@@ -391,22 +441,22 @@ test("대기 결재 — 지울 사람에게 지정된 것만 종류별로 센다
       { kind: "FINAL_SHIPMENT", assignedApproverUserId: TARGET },
       { kind: "FINAL_SHIPMENT", assignedApproverUserId: "a" },
       { kind: "REPAIR_INSPECTION", assignedApproverUserId: TARGET },
-      { kind: "PART_ISSUE", assignedApproverUserId: TARGET },
-      { kind: "PART_ISSUE", assignedApproverUserId: TARGET },
-      { kind: "PART_ISSUE", assignedApproverUserId: null },
+      { kind: "REPAIR_INSPECTION", assignedApproverUserId: null },
+      { kind: "QUOTE", assignedApproverUserId: TARGET },
       { kind: "QUOTE", assignedApproverUserId: TARGET },
       { kind: "QUOTE", assignedApproverUserId: "a" },
     ],
     TARGET
   );
-  // 🔴 견적서가 제 칸으로 간다 — 예전 `else counts.partIssue += 1` 이면 partIssue 가 3이었다.
-  assert.deepEqual(counts, { finalShipment: 1, repairInspection: 1, partIssue: 2, quote: 1 });
+  // 🔴 견적서가 제 칸으로 간다 — 예전 `else counts.partIssue += 1` 이면 그 둘이
+  //    partIssue 로 샜다(그 칸은 2026-10-27 에 사라졌다).
+  assert.deepEqual(counts, { finalShipment: 1, repairInspection: 1, quote: 2 });
 });
 
 test("🔴 대기 결재 합 — 칸을 손으로 더하지 않는다(종류가 늘어도 따라온다)", () => {
   // 확인 창의 「대기 결재 N건」과 「이어받을 사람이 필요한가」가 둘 다 이 함수를 본다.
-  assert.equal(totalPendingApprovals({ finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 0 }), 0);
-  assert.equal(totalPendingApprovals({ finalShipment: 1, repairInspection: 2, partIssue: 3, quote: 4 }), 10);
+  assert.equal(totalPendingApprovals({ finalShipment: 0, repairInspection: 0, quote: 0 }), 0);
+  assert.equal(totalPendingApprovals({ finalShipment: 1, repairInspection: 2, quote: 4 }), 7);
   // 견적서 한 건만 있어도 0 이 아니다 — 세 칸만 더하던 시절의 구멍이다.
-  assert.equal(totalPendingApprovals({ finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 1 }), 1);
+  assert.equal(totalPendingApprovals({ finalShipment: 0, repairInspection: 0, quote: 1 }), 1);
 });

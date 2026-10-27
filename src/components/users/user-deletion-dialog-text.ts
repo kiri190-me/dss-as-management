@@ -100,7 +100,9 @@ export function describeUserDeletionImpact(impact: UserDeletionPreviewImpact): U
     const parts = [
       pending.finalShipment > 0 ? `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.FINAL_SHIPMENT} ${pending.finalShipment}건` : null,
       pending.repairInspection > 0 ? `수리 검수 승인 ${pending.repairInspection}건` : null,
-      pending.partIssue > 0 ? `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.PART_ISSUE} ${pending.partIssue}건` : null,
+      // 🔵 부품 불출 칸은 2026-10-27(13-C4)에 사라졌다 — domain/user-deletion-rules.ts
+      //    의 OPEN_APPROVAL_KINDS 주석. 이름표(…SCOPE_LABELS.PART_ISSUE)는 그대로 살아
+      //    있다 — 결재선 **자리**(위 routeSlots)가 아직 그것으로 적힌다.
       pending.quote > 0 ? `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.QUOTE} ${pending.quote}건` : null,
     ].filter((part): part is string => part !== null);
     approvalItems.push(`대기 결재 ${pendingTotal}건(${parts.join(", ")})`);

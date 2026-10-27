@@ -563,7 +563,7 @@ describe("건수 · 필요한 이어받을 사람", () => {
     });
     assert.deepEqual(result.impact, {
       routeSlots: [],
-      pendingApprovals: { finalShipment: 0, repairInspection: 0, partIssue: 0, quote: 0 },
+      pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 0 },
       chainsToRepin: 0,
       isRepresentative: false,
       isLastRepresentative: false,
@@ -639,7 +639,7 @@ describe("건수 · 필요한 이어받을 사람", () => {
     assert.deepEqual(result.blockers, []);
   });
 
-  test("대기 결재 넷 · 옮길 사슬 — 결정된 행과 끝난 신청은 세지 않는다, 사슬 요청자 · 검수 자격 미달은 후보가 아니다", async () => {
+  test("대기 결재 셋 · 옮길 사슬 — 결정된 행과 불출 결재는 세지 않는다, 사슬 요청자 · 검수 자격 미달은 후보가 아니다", async () => {
     const target = await createTestUser("대기 결재 대상");
     const stepA = await createTestUser("대기 결재 1단계");
     const inventoryManager = await createTestUser("대기 결재 재고 담당", { role: "INVENTORY_MANAGER" });
@@ -683,18 +683,13 @@ describe("건수 · 필요한 이어받을 사람", () => {
       routeStepOrder: 2,
       decidedByUserId: target,
     });
-    // 불출: 1단계가 대상에게 열려 있다 → 넘김.
+    // 🔴 **불출: 1단계가 대상에게 열려 있다 → 그래도 세지 않는다**(2026-10-27, 13-C4).
+    //    밑자락을 일부러 남겨 둔다 — 이 행이 **있는데도** 아래 합계에 안 나오는 것이
+    //    이 조각이 바꾼 동작이다. 지우면 「빠지는가」를 아무도 재지 않는다.
+    //    까닭 셋의 전문은 domain/user-deletion-rules.ts 의 OPEN_APPROVAL_KINDS 주석에.
     const openIssue = await insertPartIssueRequest({});
     await insertPartIssueApproval({
       issueRequestId: openIssue,
-      routeId: partIssueRoute,
-      routeStepOrder: 1,
-      assignedApproverUserId: target,
-    });
-    // 불출: 신청이 이미 끝났으면 결재 행이 열려 있어도 넘길 것이 없다.
-    const cancelledIssue = await insertPartIssueRequest({ status: "CANCELLED" });
-    await insertPartIssueApproval({
-      issueRequestId: cancelledIssue,
       routeId: partIssueRoute,
       routeStepOrder: 1,
       assignedApproverUserId: target,
@@ -723,12 +718,19 @@ describe("건수 · 필요한 이어받을 사람", () => {
     });
 
     const result = await preview(target);
+    // 🔴 불출 결재 행이 열린 채로 있는데도 칸이 없다 — 그 갈래를 13-C4 에서 들어냈다.
     assert.deepEqual(result.impact.pendingApprovals, {
       finalShipment: 1,
       repairInspection: 1,
-      partIssue: 1,
       quote: 1,
     });
+    // 수집 단계에서부터 빠진다 — 넘김/옮김 대상에 들어가면 삭제가 그 행을 고친다.
+    const snapshot = await collectUserDeletionImpact(db, target, { lock: false });
+    assert.ok(snapshot);
+    assert.ok(
+      !snapshot.openApprovals.some((row) => row.subject.issueRequestId === openIssue),
+      "불출 결재 행이 아직 수집된다"
+    );
     assert.equal(result.impact.chainsToRepin, 1);
     assert.deepEqual(result.requires, {
       approvalSuccessor: true,
@@ -744,7 +746,7 @@ describe("건수 · 필요한 이어받을 사람", () => {
     assert.ok(!candidateIds.has(inventoryManager), "검수 역할이 없는 사람이 결재 후보에 있다(검수 지정을 넘겨받는다)");
   });
 
-  test("옛 판을 따라가는 진행 중 결재에 대상이 뒤 단계로 남으면 blockers — 접수번호 · 불출 신청 식별자를 싣는다", async () => {
+  test("옛 판을 따라가는 진행 중 결재에 대상이 뒤 단계로 남으면 blockers — 접수번호를 싣는다, 불출은 더 이상 막지 않는다", async () => {
     const target = await createTestUser("옛 판 사슬 대상");
     const stepA = await createTestUser("옛 판 사슬 1단계");
     const stepB = await createTestUser("옛 판 사슬 새 2단계");
@@ -783,7 +785,10 @@ describe("건수 · 필요한 이어받을 사람", () => {
     const result = await preview(target);
     assert.deepEqual(result.impact.routeSlots, []);
     assert.equal(result.impact.chainsToRepin, 0);
-    assert.equal(result.blockers.length, 2, JSON.stringify(result.blockers));
+    // 🔴 **하나다.** 2026-10-27(13-C4) 전에는 둘이었다 — 옛 불출 판을 따라가는 사슬도
+    //    IN_FLIGHT_ON_OLD_ROUTE 로 삭제를 **멈췄다.** 지금은 그 갈래를 수집하지 않아
+    //    멈추지 않는다(위 oldIssue 밑자락을 일부러 남겨 그것을 재고 있다).
+    assert.equal(result.blockers.length, 1, JSON.stringify(result.blockers));
 
     const shipmentBlock = result.blockers.find(
       (blocker) => blocker.code === "IN_FLIGHT_ON_OLD_ROUTE" && blocker.kind === "FINAL_SHIPMENT"
@@ -793,13 +798,18 @@ describe("건수 · 필요한 이어받을 사람", () => {
     assert.ok(shipmentBlock.label.includes(oldCase.intakeNumber));
     assert.ok(shipmentBlock.message.includes(oldCase.intakeNumber), "사람이 알아볼 접수번호가 사유에 없다");
 
-    const partIssueBlock = result.blockers.find(
-      (blocker) => blocker.code === "IN_FLIGHT_ON_OLD_ROUTE" && blocker.kind === "PART_ISSUE"
-    );
-    assert.ok(partIssueBlock && partIssueBlock.code === "IN_FLIGHT_ON_OLD_ROUTE");
-    assert.equal(partIssueBlock.issueRequestId, oldIssue);
-    assert.ok(partIssueBlock.label.includes(oldIssue.slice(0, 8)), "불출 신청 식별자가 이름에 없다");
-    assert.ok(partIssueBlock.message.includes(oldIssue.slice(0, 8)));
+    // 밑자락이 비어서 공짜로 통과하는 것이 아니다 — 불출 쪽 옛 판 사슬은 지금도 DB 에
+    // 그대로 열려 있다. 그것이 blockers 에 들어오지 않는 것이 이 조각이 바꾼 동작이다.
+    const stillOpen = await db
+      .select({ id: inventoryPartIssueApprovals.id })
+      .from(inventoryPartIssueApprovals)
+      .where(
+        and(
+          eq(inventoryPartIssueApprovals.issueRequestId, oldIssue),
+          eq(inventoryPartIssueApprovals.status, "REQUESTED")
+        )
+      );
+    assert.equal(stillOpen.length, 1, "밑자락이 깨져 위 단언이 공짜로 통과한다");
   });
 
   test("🔴 견적서 결재만 걸린 사람도 이어받을 사람이 필요하다 — 결재선 없이 지정만 된 행", async () => {
@@ -820,8 +830,7 @@ describe("건수 · 필요한 이어받을 사람", () => {
     assert.deepEqual(result.impact.pendingApprovals, {
       finalShipment: 0,
       repairInspection: 0,
-      partIssue: 0,
-      quote: 1,
+           quote: 1,
     });
     assert.deepEqual(result.requires, {
       approvalSuccessor: true,
@@ -1180,9 +1189,18 @@ describe("collectUserDeletionImpact — 잠그며 읽기", () => {
     const locked = await db.transaction((tx) => collectUserDeletionImpact(tx, target, { lock: true }));
     assert.ok(unlocked && locked);
     assert.deepEqual(locked, unlocked);
-    assert.equal(locked.openApprovals.length, 2);
+    // 🔵 **하나다.** 2026-10-27(13-C4) 전에는 둘이었다 — 아래 밑자락의 불출 결재 행이
+    //    함께 잡혔다. 그 갈래를 수집에서 들어냈고, 밑자락은 **일부러 남겨 두었다**:
+    //    잠그며 읽기가 그 행을 건너뛰는 것까지 이 시험이 함께 본다.
+    assert.equal(locked.openApprovals.length, 1);
     assert.equal(locked.activeDelegations.length, 1);
     assert.deepEqual(locked.openAssignedCaseIds, [assignedCase.id]);
+    // 🔴 판 자리는 그대로 잡힌다 — 대상이 현재 불출 판에 올라 있다(용도는 영구 유지).
+    assert.deepEqual(
+      locked.routeSlots.map((slot) => slot.scope).sort(),
+      ["FINAL_SHIPMENT", "PART_ISSUE"],
+      "불출 결재선 자리까지 함께 빠지면 판을 고치지 않은 채 사람이 사라진다"
+    );
   });
 
   test("없는 대상은 잠그며 읽어도 null", async () => {

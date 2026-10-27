@@ -818,7 +818,10 @@ describe("삭제가 하는 일", () => {
     const inspection = await requestRepairCaseApproval(inspectionCase.id, "REPAIR_INSPECTION", successor, null, target);
     assert.equal(inspection.ok, true, JSON.stringify(inspection));
 
-    // 대상에게 열린 불출 결재.
+    // 🔴 대상에게 열린 **불출 결재** — 2026-10-27(13-C4)부터 삭제가 이 행을 손대지
+    //    않는다. 밑자락을 일부러 남겨 둔다: 아래에서 「그대로 남아 있는가」를 재는
+    //    것이 이 조각이 바꾼 동작이다. 까닭 셋의 전문은
+    //    domain/user-deletion-rules.ts 의 OPEN_APPROVAL_KINDS 주석에 있다.
     const issue = await insertPartIssueRequest({});
     const issueApproval = await insertPartIssueApproval({
       issueRequestId: issue,
@@ -828,11 +831,13 @@ describe("삭제가 하는 일", () => {
     });
 
     const summary = expectOk(await del(target, { approvalSuccessorUserId: successor }));
+    // 🔵 **결재선 판은 그대로 바뀐다** — 대상이 현재 불출 판에 올라 있기 때문이다.
+    //    빠진 것은 「열린 결재 행」 한 가지뿐이고, 판 자리(routeSlots)는 영구 유지다.
     assert.deepEqual(summary.routeVersions, [
       { scope: "FINAL_SHIPMENT", version: 2 },
       { scope: "PART_ISSUE", version: 2 },
     ]);
-    assert.equal(summary.reassignedApprovals, 2, "검수 · 불출이 넘어가야 한다");
+    assert.equal(summary.reassignedApprovals, 1, "검수만 넘어간다 — 불출 결재 행은 손대지 않는다");
     assert.equal(summary.repinnedApprovals, 1);
 
     const shipmentRoute = await currentRoute("FINAL_SHIPMENT");
@@ -866,14 +871,25 @@ describe("삭제가 하는 일", () => {
       );
     assert.equal(inspectionRow.assignedApproverUserId, successor);
 
+    // 🔴 **지운 사람 앞으로 그대로 남는다.** 2026-10-27(13-C4) 전에는 여기가
+    //    `{ assignedApproverUserId: successor, … }` 였다 — 그때는 삭제가 이 행의
+    //    지정을 이어받을 사람에게 넘겼다. 지금은 넘기지 않는다(그 결재를 누를 화면이
+    //    13-A 에서 사라졌고, 운영에 그런 행이 0건이다).
     const [issueRow] = await db
       .select({
         assignedApproverUserId: inventoryPartIssueApprovals.assignedApproverUserId,
         routeId: inventoryPartIssueApprovals.routeId,
+        status: inventoryPartIssueApprovals.status,
       })
       .from(inventoryPartIssueApprovals)
       .where(eq(inventoryPartIssueApprovals.id, issueApproval));
-    assert.deepEqual(issueRow, { assignedApproverUserId: successor, routeId: partIssueRoute });
+    assert.deepEqual(issueRow, {
+      assignedApproverUserId: target,
+      routeId: partIssueRoute,
+      status: "REQUESTED",
+    });
+    // 감사에도 한 줄 안 남는다 — 손대지 않았다는 뜻이다.
+    assert.deepEqual(await auditRowsFor("inventory_part_issue_approvals", issueApproval), []);
 
     const approvalAudit = await auditRowsFor("repair_case_approvals", repinned.id);
     assert.equal(approvalAudit.length, 1);
@@ -938,9 +954,10 @@ describe("삭제가 하는 일", () => {
     // 삭제 한 줄 요약에도 그 id 가 견적서 칸으로 담긴다.
     const deletionAudit = (await auditRowsFor("users", target)).filter((row) => row.actionType === "SOFT_DELETE");
     assert.equal(deletionAudit.length, 1);
+    // 🔵 `partIssue` 칸은 2026-10-27(13-C4)에 사라졌다 — 그 갈래를 삭제가 더는 손대지
+    //    않는다(domain/user-deletion-rules.ts 의 OPEN_APPROVAL_KINDS 주석).
     assert.deepEqual((deletionAudit[0].newValue as { reassignedApprovalIds: unknown }).reassignedApprovalIds, {
       repairCase: [],
-      partIssue: [],
       quote: [approvalId],
     });
   });

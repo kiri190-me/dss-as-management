@@ -7,7 +7,6 @@ import {
   NOTIFICATION_KIND_META,
   NO_NOTIFICATION_SETTINGS,
   buildNotificationSettingsScreenData,
-  canReceiveLowStockNotifications,
   defaultNotificationKindEnabled,
   defaultRoleReceivesNotification,
   deliversNotification,
@@ -23,7 +22,6 @@ import {
   REPAIR_CASE_DUE_DATE_NOTIFICATION_WINDOW_DAYS,
   type NotificationKind,
 } from "./notifications";
-import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
 import { ROLE_CODES, type Role } from "./types";
 
 /**
@@ -40,37 +38,32 @@ import { ROLE_CODES, type Role } from "./types";
  * 각 종류가 **누구에게 가야 하는가**를 이 파일 안에 손으로 다시 적은 것.
  *
  * 일부러 defaultRoleReceivesNotification을 부르지 않는다 — 그 함수를 그대로
- * 부르면 무엇을 고쳐도 늘 통과하는 시험이 된다. 앞의 두 종류는 알림 설정을
- * 만들기 **전**의 코드가 실제로 하던 일이 전부였다:
- *   · 결재 대기      — 역할로 막는 코드가 한 줄도 없었다(전원 통과)
- *   · 부품 요청 대기 — queries/notifications.ts가 canReceivePartRequestNotifications로 걸렀다
+ * 부르면 무엇을 고쳐도 늘 통과하는 시험이 된다. 결재 대기는 알림 설정을 만들기
+ * **전**의 코드가 실제로 하던 일이 전부였다 — 역할로 막는 코드가 한 줄도
+ * 없었다(전원 통과). 나머지는 그 뒤에 태어난 종류라 재현할 옛 동작이 없고,
+ * **그때 내린 결정**을 여기 손으로 적는다.
  *
- * 3단계에서 붙인 재고 부족은 그 이전에 존재하지 않았으므로 재현할 옛 동작이
- * 없다. 대신 **그때 내린 결정**을 여기 손으로 적는다 — 재고를 채우는 사람
- * 셋(재고관리자·관리자·최고관리자). 여전히 저쪽 함수를 부르지 않는 것이 요점이다.
+ * 🔴 **지금은 다섯 종류가 전부 「전원 받음」이다.** 역할로 갈리던 둘(부품 요청
+ * 대기는 저쪽 함수를 불렀고, 재고 부족은 명단을 손으로 적었다)은 2026-10-27
+ * (13-C4)에 종류째 사라졌다. 🔵 그래서 이 함수가 지금은 role 을 한 번도 안 보지만
+ * **인자를 지우지 않는다** — 역할로 갈리는 종류를 다시 붙이는 날 여기가 그것을
+ * 손으로 다시 적는 자리이기 때문이다.
  *
  * 모르는 종류는 계속 throw 한다. 종류만 늘리고 이 규칙을 적지 않으면, 아무도
  * 판정하지 않은 알림이 조용히 태어난다.
  */
 function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
+  // 🔵 지금은 `role` 을 한 번도 안 읽는다(머리말). 인자를 남기는 까닭도 거기 있다 —
+  //    쓰지 않는 인자를 린트가 경고하므로 한 번 삼킨다.
+  void role;
   if (kind === "REPAIR_CASE_APPROVAL") return true;
-  if (kind === "PART_REQUEST_PENDING") return canReceivePartRequestNotifications(role);
-  if (kind === "PART_STOCK_BELOW_MINIMUM") {
-    return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
-  }
-  // CUSTOMER_REPAIR_REQUEST_NEW(「새 수리 의뢰」)는 2026-10-04 에 종류 자체가
-  // 빠졌다 — 고객이 의뢰를 넣던 길(전용 주소)이 없어졌다. 되살아나면 아래
-  // throw 가 잡는다(판정을 다시 세우지 않고는 못 지나간다).
-  if (kind === "PART_ISSUE_APPROVAL_PENDING") {
-    // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로
-    // 적는다 — 다섯 역할 전부. 결재 대기와 같은 이유다: 누가 받는지는 역할이
-    // 아니라 결재선 지정(과 최고관리자 비상구)이 정하고, 결재선에는 역할 제한 없이
-    // 누구든 올라간다. 역할을 하나라도 빼면 자기 차례인 결재자가 알림을 못 받는다.
-    return true;
-  }
+  // CUSTOMER_REPAIR_REQUEST_NEW(「새 수리 의뢰」)는 2026-10-04 에, 재고 알림 셋
+  // (PART_REQUEST_PENDING · PART_STOCK_BELOW_MINIMUM · PART_ISSUE_APPROVAL_PENDING)은
+  // 2026-10-27 에 종류 자체가 빠졌다. 되살아나면 아래 throw 가 잡는다(판정을 다시
+  // 세우지 않고는 못 지나간다).
   if (kind === "QUOTE_APPROVAL_PENDING") {
     // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로
-    // 적는다 — 다섯 역할 전부. 불출 승인 대기와 같은 이유다: 누가 받는지는
+    // 적는다 — 다섯 역할 전부. 결재 대기와 같은 이유다: 누가 받는지는
     // 역할이 아니라 견적서 승인 결재선의 지정(과 최고관리자 비상구)이 정하고,
     // 그 결재선에도 역할 제한이 없다. 결재를 막는 decideQuoteApproval 은 아예
     // 권한 영역을 묻지 않으므로, 역할을 하나라도 빼면 「지정은 됐는데 알림은 못
@@ -80,7 +73,7 @@ function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
   if (kind === "REPAIR_CASE_DUE_DATE_NEAR") {
     // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로
     // 적는다 — 다섯 역할 전부(2026-10-19 사용자 결정 「모두에게 보인다」).
-    // 앞의 결재 대기 셋과 답은 같지만 까닭이 다르다: 저쪽은 결재선 지정이
+    // 앞의 결재 대기 둘과 답은 같지만 까닭이 다르다: 저쪽은 결재선 지정이
     // 누가 받는지를 정해서이고, 이쪽은 **가를 축이 아예 없어서**다 — 납기가
     // 다가온 건은 네 역할에게 각자 다른 모양으로 걸린다.
     return true;
@@ -219,18 +212,17 @@ test("🔴 toneClassName 의 색과 toneIndex 가 가리키는 칸의 색이 같
   }
 });
 
-test("🔴 여덟 종류가 **지정한** 칸에 앉는다 — 2026-10-19 사용자 결정", () => {
+test("🔴 다섯 종류가 **지정한** 칸에 앉는다 — 2026-10-19 사용자 결정", () => {
   // 일부러 표를 그대로 읽지 않고 손으로 다시 적는다 — NOTIFICATION_KIND_META 를
   // 읽어 비교하면 무엇을 고쳐도 늘 통과하는 시험이 된다.
   // satisfies 가 빠진 종류와 없는 종류를 둘 다 잡는다.
+  // 🔵 2026-10-27(13-C4)에 재고 알림 셋이 빠져 여덟에서 다섯이 됐다 — 비워진 칸은
+  //    호박 14(재고 부족) · 하늘 8(부품 요청 대기) · 남보라 6(불출 승인 대기)이다.
   const 지정 = {
     REPAIR_CASE_DUE_DATE_NEAR: 0, // 빨강 — 급한 경고
-    PART_STOCK_BELOW_MINIMUM: 14, // 호박 — 급한 경고
     APPROVAL_GRANTED: 12, // 초록 — 결과(됐다)
     APPROVAL_REJECTED: 9, // 장미 — 결과(안 됐다)
     REPAIR_CASE_APPROVAL: 15, // 파랑 — 내가 할 일
-    PART_REQUEST_PENDING: 8, // 하늘 — 내가 할 일
-    PART_ISSUE_APPROVAL_PENDING: 6, // 남보라 — 내가 할 일
     QUOTE_APPROVAL_PENDING: 13, // 보라 — 내가 할 일
   } satisfies Record<NotificationKind, number>;
 
@@ -252,12 +244,13 @@ test("🔴 칸 번호는 서로 다르고, 묶음이 아는 범위 안이다", (
   }
 });
 
-test("🔴 지정한 칸이 해시가 고르던 칸과 다르다 — 안 넘기면 뜻이 뒤집히던 셋", () => {
-  // 넘기기 전에 화면에 실제로 나오던 색이다: 「재고 부족」이 초록(12),
-  // 「승인 완료」가 분홍(2), 「반려됨」이 청록(1). 경고가 「괜찮다」로 읽히고
-  // 좋고 나쁨이 뒤집혔다. 셋 중 하나라도 해시와 같아지면 이 조각이 무엇을
+test("🔴 지정한 칸이 해시가 고르던 칸과 다르다 — 안 넘기면 뜻이 뒤집히던 둘", () => {
+  // 넘기기 전에 화면에 실제로 나오던 색이다: 「승인 완료」가 분홍(2), 「반려됨」이
+  // 청록(1). 좋고 나쁨이 뒤집혔다. 둘 중 하나라도 해시와 같아지면 이 조각이 무엇을
   // 고쳤는지 알 수 없게 되므로 여기서 못 박는다.
-  for (const kind of ["PART_STOCK_BELOW_MINIMUM", "APPROVAL_GRANTED", "APPROVAL_REJECTED"] as const) {
+  // 🔵 셋째 표본이던 「재고 부족」(해시로는 초록 12 — 경고가 「괜찮다」로 읽혔다)은
+  //    2026-10-27 에 종류째 사라졌다.
+  for (const kind of ["APPROVAL_GRANTED", "APPROVAL_REJECTED"] as const) {
     assert.notEqual(
       NOTIFICATION_KIND_META[kind].toneIndex,
       notificationToneIndex(kind),
@@ -282,8 +275,8 @@ test("종류 자체는 켜져 있는 것이 기본이다", () => {
 });
 
 test("🔴 설정이 하나도 없으면 다섯 역할의 알림이 손으로 적은 규칙 그대로다", () => {
-  // 이 시험이 이번 작업의 성공 조건이다. 앞의 두 종류에서는 "1단계와 똑같다"가,
-  // 재고 부족에서는 "정한 대로 간다"가 그 뜻이다.
+  // 이 시험이 이번 작업의 성공 조건이다. 결재 대기에서는 "1단계와 똑같다"가,
+  // 그 뒤에 태어난 종류에서는 "정한 대로 간다"가 그 뜻이다.
   for (const kind of NOTIFICATION_KINDS) {
     for (const role of ROLE_CODES) {
       assert.equal(
@@ -301,24 +294,10 @@ test("결재 대기의 기본값은 다섯 역할 전부 받음이다 — 지금
   }
 });
 
-test("🔴 불출 승인 대기의 기본값도 다섯 역할 전부 받음이다 — 누가 받는지는 결재선 지정이 정한다", () => {
-  // 결재선에는 역할 제한 없이 누구든 올라간다(영업도). 여기서 어느 역할이
-  // 빠지면 그 역할의 결재자는 자기 차례인데 알림을 못 받고, 그 실패는 화면에
-  // 아무 표시도 남기지 않는다.
-  for (const role of ROLE_CODES) {
-    assert.equal(defaultRoleReceivesNotification("PART_ISSUE_APPROVAL_PENDING", role), true, role);
-    assert.equal(deliversNotification("PART_ISSUE_APPROVAL_PENDING", role, NO_NOTIFICATION_SETTINGS), true, role);
-  }
-  assert.equal(defaultNotificationKindEnabled("PART_ISSUE_APPROVAL_PENDING"), true, "켜진 채로 태어난다");
-});
-
-test("불출 승인 대기는 결재 대기와 이름·색이 갈라진다 — 한 패널에 섞여도 구별된다", () => {
-  const partIssue = NOTIFICATION_KIND_META.PART_ISSUE_APPROVAL_PENDING;
-  const approval = NOTIFICATION_KIND_META.REPAIR_CASE_APPROVAL;
-  assert.equal(partIssue.label, "불출 승인 대기");
-  assert.notEqual(partIssue.label, approval.label);
-  assert.notEqual(partIssue.toneClassName, approval.toneClassName);
-  // 색상 이름까지 달라야 한다 — 같은 amber 의 진하기만 바꾸면 눈으로 갈라지지 않는다.
+test("🔴 종류마다 색상 이름이 갈라진다 — 한 패널에 섞여도 구별된다", () => {
+  // 같은 amber 의 진하기만 바꾸면 눈으로 갈라지지 않는다. 🔵 2026-10-27 까지는
+  // 「불출 승인 대기 ↔ 결재 대기」 한 쌍을 따로 못 박고 그 끝에 이 전체 단언을
+  // 붙여 두었다 — 쌍이 사라지면서 전체 단언만 남겼다.
   const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
   const hues = NOTIFICATION_KINDS.map((kind) => hueOf(NOTIFICATION_KIND_META[kind].toneClassName));
   assert.equal(new Set(hues).size, hues.length, `색상 이름이 겹친다: ${hues.join(" / ")}`);
@@ -332,18 +311,18 @@ test("🔴 견적서 결재 대기의 기본값도 켜짐·다섯 역할 전부 
   assert.equal(defaultNotificationKindEnabled("QUOTE_APPROVAL_PENDING"), true, "켜진 채로 태어난다");
 });
 
-test("견적서 결재 대기는 다른 두 결재 대기와 이름·색이 갈라진다 — 한 패널에 섞여도 구별된다", () => {
+test("견적서 결재 대기는 다른 결재 대기와 이름·색이 갈라진다 — 한 패널에 섞여도 구별된다", () => {
   const quote = NOTIFICATION_KIND_META.QUOTE_APPROVAL_PENDING;
   assert.equal(quote.label, "견적서 결재 대기");
   assert.notEqual(quote.label, NOTIFICATION_KIND_META.REPAIR_CASE_APPROVAL.label);
-  assert.notEqual(quote.label, NOTIFICATION_KIND_META.PART_ISSUE_APPROVAL_PENDING.label);
   // 색상 이름까지 달라야 한다(전체 유일성은 위 시험이 본다). 여기서는 **다른
   // 일곱 종류 어느 것의 색도 다시 쓰지 않는다**는 것만 못 박는다.
   //
   // 🔴 예전에는 그때 쓰이던 일곱 색을 손으로 적어 두었다. 2026-10-19 에 색을
   //    뜻으로 다시 배정하자 그 목록이 낡아 **멀쩡한 배정을 틀렸다고 말했다**
   //    (violet 은 그때 불출 승인 대기 것이었지만 지금은 아니다). 지금 표에서
-  //    뽑아 비교하면 낡지 않는다 — 막으려던 사고(색을 나눠 쓴다)는 그대로 막힌다.
+  //    뽑아 비교하면 낡지 않는다 — 2026-10-27 에 종류가 여덟에서 다섯으로
+  //    줄었을 때도 이 줄은 손댈 것이 없었다.
   const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
   const others = NOTIFICATION_KINDS.filter((kind) => kind !== "QUOTE_APPROVAL_PENDING").map((kind) =>
     hueOf(NOTIFICATION_KIND_META[kind].toneClassName)
@@ -449,41 +428,28 @@ test("🔴 승인 완료·반려됨의 색은 남은 여섯 색과도, 서로도
   );
 });
 
-test("부품 요청 대기의 기본값은 명단을 옮겨 적지 않고 저쪽 함수를 부른 결과다", () => {
-  // 명단이 저쪽에서 바뀌면 여기 기본값도 저절로 따라 바뀌어야 한다.
-  for (const role of ROLE_CODES) {
-    assert.equal(
-      defaultRoleReceivesNotification("PART_REQUEST_PENDING", role),
-      canReceivePartRequestNotifications(role),
-      role
-    );
-  }
-  // 지금 답을 그대로 못 박아 둔다 — 위 단언만으로는 양쪽이 함께 틀려도 통과한다.
-  assert.deepEqual(
-    ROLE_CODES.filter((role) => defaultRoleReceivesNotification("PART_REQUEST_PENDING", role)),
-    ["SUPER_ADMIN", "ADMIN", "INVENTORY_MANAGER"]
-  );
-});
-
-test("🔴 재고 부족의 기본값은 재고를 채우는 셋뿐이다 — 엔지니어·영업은 받지 않는다", () => {
-  assert.deepEqual(
-    ROLE_CODES.filter((role) => defaultRoleReceivesNotification("PART_STOCK_BELOW_MINIMUM", role)),
-    ["SUPER_ADMIN", "ADMIN", "INVENTORY_MANAGER"]
-  );
-  assert.equal(defaultRoleReceivesNotification("PART_STOCK_BELOW_MINIMUM", "AS_ENGINEER"), false);
-  assert.equal(defaultRoleReceivesNotification("PART_STOCK_BELOW_MINIMUM", "SALES"), false);
-});
-
-test("재고 부족의 판정 함수는 부품 요청의 것과 별개다 — 지금 답이 같을 뿐이다", () => {
-  // 두 함수가 같은 셋을 내는 것은 지금의 사실이지 규칙이 아니다. 여기서 못 박는
-  // 것은 재고 부족 쪽이 **자기 함수**로 답한다는 것이다 — 저쪽 명단이 바뀌어도
-  // 이쪽이 따라 움직이면 안 된다.
-  for (const role of ROLE_CODES) {
-    assert.equal(
-      defaultRoleReceivesNotification("PART_STOCK_BELOW_MINIMUM", role),
-      canReceiveLowStockNotifications(role),
-      role
-    );
+/**
+ * 🔴 **역할로 갈리는 종류가 지금 하나도 없다 — 그래서 못 재는 길이 하나 생겼다.**
+ *
+ * 2026-10-27(13-C4) 전에는 부품 요청 대기(저쪽 함수를 부른 결과)와 재고 부족(명단을
+ * 손으로 적은 결과)이 역할마다 답이 갈렸고, 그 둘이
+ *  · 「기본값이 거짓인 칸을 역할 스위치로 **열 수 있는가**」
+ *  · 「두 종류의 명단이 지금 같아도 **서로 다른 함수**로 답하는가」
+ * 를 재는 유일한 표본이었다. 종류가 사라지면서 그 시험 넷이 함께 사라졌다.
+ *
+ * 그 자리를 빈 채로 두지 않고 **사라진 사실 자체를 단언으로 남긴다** — 역할로 갈리는
+ * 종류를 다시 붙이면 이 시험이 곧바로 깨지고, 그때가 위 두 보증을 다시 세워야 하는
+ * 때다. 지금 상태를 그냥 넘어가면 「열리는가」를 아무도 재지 않는 채로 그 종류가 태어난다.
+ */
+test("🔴 지금은 역할로 갈리는 종류가 하나도 없다 — 다섯 × 다섯이 전부 받음이다", () => {
+  for (const kind of NOTIFICATION_KINDS) {
+    for (const role of ROLE_CODES) {
+      assert.equal(
+        defaultRoleReceivesNotification(kind, role),
+        true,
+        `${kind} × ${role} 의 기본값이 거짓이다 — 「역할 스위치로 열 수 있는가」를 재는 시험을 다시 세워라`
+      );
+    }
   }
 });
 
@@ -498,8 +464,8 @@ test("🔴 최고관리자가 받는 것은 끌 수 없다 — 저장된 false�
     kindEnabled: {},
     roleReceives: {
       REPAIR_CASE_APPROVAL: { SUPER_ADMIN: false },
-      PART_REQUEST_PENDING: { SUPER_ADMIN: false },
-      PART_STOCK_BELOW_MINIMUM: { SUPER_ADMIN: false },
+      QUOTE_APPROVAL_PENDING: { SUPER_ADMIN: false },
+      APPROVAL_REJECTED: { SUPER_ADMIN: false },
     },
   };
   for (const kind of NOTIFICATION_KINDS) {
@@ -510,13 +476,13 @@ test("🔴 최고관리자가 받는 것은 끌 수 없다 — 저장된 false�
 
 test("🔴 종류를 끄면 그 종류만 사라지고 다른 종류는 그대로다", () => {
   const overrides: NotificationSettingsOverrides = {
-    kindEnabled: { PART_REQUEST_PENDING: false },
+    kindEnabled: { QUOTE_APPROVAL_PENDING: false },
     roleReceives: {},
   };
 
   for (const role of ROLE_CODES) {
     assert.equal(
-      deliversNotification("PART_REQUEST_PENDING", role, overrides),
+      deliversNotification("QUOTE_APPROVAL_PENDING", role, overrides),
       false,
       `끈 종류가 ${role}에게 아직 간다`
     );
@@ -529,21 +495,21 @@ test("🔴 종류를 끄면 그 종류만 사라지고 다른 종류는 그대�
 });
 
 test("종류를 껐다 켜면 역할 설정이 그대로 살아 있다 — '모든 역할 해제'와 갈라지는 지점", () => {
-  // 관리자가 재고 담당자를 부품 요청 알림에서 뺀 상태.
+  // 관리자가 재고 담당자를 견적서 결재 알림에서 뺀 상태.
   const roleReceives: NotificationSettingsOverrides["roleReceives"] = {
-    PART_REQUEST_PENDING: { INVENTORY_MANAGER: false },
+    QUOTE_APPROVAL_PENDING: { INVENTORY_MANAGER: false },
   };
 
   const off: NotificationSettingsOverrides = {
-    kindEnabled: { PART_REQUEST_PENDING: false },
+    kindEnabled: { QUOTE_APPROVAL_PENDING: false },
     roleReceives,
   };
   const backOn: NotificationSettingsOverrides = { kindEnabled: {}, roleReceives };
 
-  assert.equal(deliversNotification("PART_REQUEST_PENDING", "ADMIN", off), false, "꺼 두면 관리자에게도 안 간다");
+  assert.equal(deliversNotification("QUOTE_APPROVAL_PENDING", "ADMIN", off), false, "꺼 두면 관리자에게도 안 간다");
   // 다시 켰을 때 관리자는 돌아오고, 빼 두었던 재고 담당자는 여전히 빠져 있다.
-  assert.equal(deliversNotification("PART_REQUEST_PENDING", "ADMIN", backOn), true);
-  assert.equal(deliversNotification("PART_REQUEST_PENDING", "INVENTORY_MANAGER", backOn), false);
+  assert.equal(deliversNotification("QUOTE_APPROVAL_PENDING", "ADMIN", backOn), true);
+  assert.equal(deliversNotification("QUOTE_APPROVAL_PENDING", "INVENTORY_MANAGER", backOn), false);
 });
 
 test("역할 스위치를 끄면 그 역할만 빠진다", () => {
@@ -558,21 +524,23 @@ test("역할 스위치를 끄면 그 역할만 빠진다", () => {
   }
   // 다른 종류는 건드려지지 않는다.
   assert.equal(
-    deliversNotification("PART_REQUEST_PENDING", "SALES", overrides),
-    canReceivePartRequestNotifications("SALES")
+    deliversNotification("QUOTE_APPROVAL_PENDING", "SALES", overrides),
+    defaultRoleReceivesNotification("QUOTE_APPROVAL_PENDING", "SALES")
   );
 });
 
-test("역할 스위치를 켜도 기본값에 없던 종류가 열린다 — 윗단 필터이지 원래 판정이 아니다", () => {
-  // 영업을 부품 요청 알림 대상으로 넣는다. 이 설정만으로 알림이 가는 것이
-  // 아니라, 그 종류의 원래 판정이 여전히 따로 돈다는 것이 설계다 — 여기서는
-  // 필터가 통과시킨다는 사실까지만 확인한다(원래 판정은 통합 테스트에서 본다).
+test("🔴 역할 스위치에 적힌 true 가 기본값을 가린다 — 설정은 윗단 필터이지 원래 판정이 아니다", () => {
+  // 저장된 값이 있으면 기본값을 보지 않는다. 🔵 2026-10-27(13-C4) 전에는 **기본값이
+  // 거짓인 칸**(영업 × 부품 요청 대기)을 열어 그 사실을 보였는데, 역할로 갈리는
+  // 종류가 없어져 그런 칸을 만들 수 없다 — 바로 위 「다섯 × 다섯이 전부 받음」 참조.
+  // 지금 잴 수 있는 것은 「적힌 값이 먼저 쓰인다」까지이고, false 로 가리는 쪽은 아래
+  // 「역할 스위치를 끄면 그 역할만 빠진다」가 이미 본다.
   const overrides: NotificationSettingsOverrides = {
     kindEnabled: {},
-    roleReceives: { PART_REQUEST_PENDING: { SALES: true } },
+    roleReceives: { QUOTE_APPROVAL_PENDING: { SALES: true } },
   };
-  assert.equal(canReceivePartRequestNotifications("SALES"), false, "기본값에서는 닫혀 있다");
-  assert.equal(deliversNotification("PART_REQUEST_PENDING", "SALES", overrides), true);
+  assert.equal(roleReceivesNotification("QUOTE_APPROVAL_PENDING", "SALES", overrides), true);
+  assert.equal(deliversNotification("QUOTE_APPROVAL_PENDING", "SALES", overrides), true);
 });
 
 // ─────────────────────────────────────────────────────── 화면이 그릴 자료
@@ -601,21 +569,21 @@ test("화면 자료는 등록 순서대로 종류를 내고, 칸마다 지금 �
 
 test("화면 자료는 저장된 값을 반영하되 기본값 칸은 그대로 남긴다", () => {
   const data = buildNotificationSettingsScreenData({
-    kindEnabled: { PART_REQUEST_PENDING: false },
+    kindEnabled: { QUOTE_APPROVAL_PENDING: false },
     roleReceives: { REPAIR_CASE_APPROVAL: { SALES: false } },
   });
 
   const approval = data.kinds.find((row) => row.kind === "REPAIR_CASE_APPROVAL");
-  const partRequest = data.kinds.find((row) => row.kind === "PART_REQUEST_PENDING");
-  assert.ok(approval && partRequest);
+  const quote = data.kinds.find((row) => row.kind === "QUOTE_APPROVAL_PENDING");
+  assert.ok(approval && quote);
 
-  assert.equal(partRequest.enabled, false);
-  assert.equal(partRequest.defaultEnabled, true, "기본값은 저장된 값과 무관하게 그대로다");
+  assert.equal(quote.enabled, false);
+  assert.equal(quote.defaultEnabled, true, "기본값은 저장된 값과 무관하게 그대로다");
 
   assert.equal(approval.roles.SALES.receives, false);
   assert.equal(approval.roles.SALES.defaultReceives, true, "기본값은 그대로여야 화면이 '바뀐 칸'을 표시한다");
   assert.equal(approval.roles.AS_ENGINEER.receives, true, "건드리지 않은 칸은 기본값 그대로다");
 
   // 종류를 꺼도 역할 칸의 값은 남아 있다 — 다시 켜면 그대로 돌아온다.
-  assert.equal(partRequest.roles.INVENTORY_MANAGER.receives, true);
+  assert.equal(quote.roles.INVENTORY_MANAGER.receives, true);
 });

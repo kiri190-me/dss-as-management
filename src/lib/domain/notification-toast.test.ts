@@ -24,8 +24,8 @@ import {
 } from "./notification-toast";
 import {
   buildApprovalNotification,
-  buildPartStockBelowMinimumNotification,
-  buildPendingPartRequestNotification,
+  buildQuoteApprovalNotification,
+  buildRepairCaseDueDateNearNotification,
   type NotificationItem,
 } from "./notifications";
 
@@ -43,21 +43,35 @@ function approval(repairCaseId: string, intakeNumber: string, approvalType: "REP
   return buildApprovalNotification({ repairCaseId, intakeNumber, approvalType });
 }
 
-function partRequest(requestId: string) {
-  return buildPendingPartRequestNotification({
-    requestId,
-    intakeNumber: "D9705-100",
+/**
+ * 🔴 아래 두 밑자락이 재는 것은 「무슨 알림인가」가 아니라 **id 의 모양**이다. 이
+ * 파일의 판정은 id 만 보기 때문이다(decideNotificationToasts).
+ *
+ *  · otherKind — 인자마다 **id 가 달라지는** 알림. 「하나 사라지고 하나 생기면」·
+ *    「같은 것이 두 번 들어오면」을 재는 데 쓴다.
+ *  · stableId — 내용(detail)이 흔들려도 **id 가 그대로인** 알림. 「값만 바뀌는 것은
+ *    새 알림이 아니다」·「사라졌다 다시 생기면 tag 가 같다」를 재는 데 쓴다.
+ *
+ * 2026-10-27(13-C4)까지는 각각 부품 요청 대기 · 재고 부족이었다. 재고 알림 셋을
+ * 걷어내면서 **같은 두 성질을 가진 살아 있는 종류**로 갈아 끼웠다 — 견적서 결재
+ * 대기(id 가 견적서마다 다르다)와 납기 임박(id 가 접수 건 하나, detail 은 날짜라
+ * 날짜가 바뀌어도 id 는 그대로다).
+ */
+function otherKind(quoteId: string) {
+  return buildQuoteApprovalNotification({
+    quoteId,
+    quoteNumber: `DSS ${quoteId}`,
+    routeStepOrder: 1,
     requestedByName: "홍길동",
   });
 }
 
-function lowStock(partId: string, currentQuantity: number) {
-  return buildPartStockBelowMinimumNotification({
-    partId,
-    partName: "커넥터 SMA",
-    owner: "DSS",
-    currentQuantity,
-    minimumQuantity: 30,
+function stableId(repairCaseId: string, dueDate: string) {
+  return buildRepairCaseDueDateNearNotification({
+    repairCaseId,
+    intakeNumber: "D9705-100",
+    dueDate,
+    borrowed: false,
   });
 }
 
@@ -70,7 +84,7 @@ function keysOf(items: readonly NotificationItem[]): string[] {
 test("🔴 처음에는 쌓여 있던 것을 하나도 띄우지 않고 '이미 본 것'으로 적어 두기만 한다", () => {
   // 종에 21건이 떠 있는 상태로 처음 켜는 일이 실제로 있다. 그때 21개가 한꺼번에
   // 뜨면 그것이 곧 폭탄이다.
-  const items = [approval("case-1", "D9705-012", "REPAIR_INSPECTION"), partRequest("req-1"), lowStock("part-1", 15)];
+  const items = [approval("case-1", "D9705-012", "REPAIR_INSPECTION"), otherKind("q-1"), stableId("case-9", "2026-10-30")];
   const decision = decideNotificationToasts(items, null);
 
   assert.deepEqual(decision.toShow, [], "첫 방문에는 아무것도 띄우지 않는다");
@@ -78,7 +92,7 @@ test("🔴 처음에는 쌓여 있던 것을 하나도 띄우지 않고 '이미 
 });
 
 test("🔴 같은 목록을 두 번 줘도 두 번째에는 아무것도 띄우지 않는다", () => {
-  const items = [approval("case-1", "D9705-012", "REPAIR_INSPECTION"), partRequest("req-1")];
+  const items = [approval("case-1", "D9705-012", "REPAIR_INSPECTION"), otherKind("q-1")];
 
   const first = decideNotificationToasts(items, null);
   const second = decideNotificationToasts(items, first.nextSeenKeys);
@@ -90,31 +104,31 @@ test("🔴 같은 목록을 두 번 줘도 두 번째에는 아무것도 띄우�
 
 test("🔴 하나가 사라지고 하나가 생기면 개수가 같아도 새것을 띄운다", () => {
   // 개수만 비교하는 방식이 못 잡는 바로 그 경우다.
-  const before = [partRequest("req-1"), partRequest("req-2")];
-  const after = [partRequest("req-2"), partRequest("req-3")];
+  const before = [otherKind("q-1"), otherKind("q-2")];
+  const after = [otherKind("q-2"), otherKind("q-3")];
 
   const first = decideNotificationToasts(before, null);
   const second = decideNotificationToasts(after, first.nextSeenKeys);
 
   assert.equal(before.length, after.length, "개수는 그대로다");
-  assert.deepEqual(keysOf(second.toShow), [partRequest("req-3").id], "새로 생긴 것만 뜬다");
+  assert.deepEqual(keysOf(second.toShow), [otherKind("q-3").id], "새로 생긴 것만 뜬다");
 });
 
 test("🔴 사라진 알림은 기억에서도 지운다 — 다시 생기면 그것은 다시 알려야 할 새 일이다", () => {
-  // 재고를 채워 알림이 없어졌다가 다시 떨어진 경우. 이미 알린 일이 아니라 다시
-  // 생긴 일이므로 다시 울려야 한다.
-  const shortage = [lowStock("part-1", 15)];
+  // 날짜를 미뤄 알림이 없어졌다가 다시 창 안으로 들어온 경우. 이미 알린 일이
+  // 아니라 다시 생긴 일이므로 다시 울려야 한다.
+  const gone = [stableId("case-9", "2026-10-30")];
 
-  const first = decideNotificationToasts(shortage, null);
-  const refilled = decideNotificationToasts([], first.nextSeenKeys);
-  assert.deepEqual(refilled.nextSeenKeys, [], "사라진 것은 적어 둔 것에서도 빠진다");
+  const first = decideNotificationToasts(gone, null);
+  const cleared = decideNotificationToasts([], first.nextSeenKeys);
+  assert.deepEqual(cleared.nextSeenKeys, [], "사라진 것은 적어 둔 것에서도 빠진다");
 
-  const again = decideNotificationToasts(shortage, refilled.nextSeenKeys);
-  assert.deepEqual(keysOf(again.toShow), keysOf(shortage), "다시 떨어졌으면 다시 알린다");
+  const again = decideNotificationToasts(gone, cleared.nextSeenKeys);
+  assert.deepEqual(keysOf(again.toShow), keysOf(gone), "다시 생겼으면 다시 알린다");
 });
 
 test("지난번이 0건이었던 것과 적어 둔 것이 아예 없는 것은 다르다", () => {
-  const items = [partRequest("req-1")];
+  const items = [otherKind("q-1")];
 
   // 빈 배열 = "지난번에는 알림이 0건이었다". 그 뒤에 생긴 것은 새것이다.
   assert.deepEqual(keysOf(decideNotificationToasts(items, []).toShow), keysOf(items));
@@ -136,17 +150,18 @@ test("🔴 열쇠는 targetKey가 아니라 id다 — 한 접수 건에 결재�
   assert.deepEqual(keysOf(second.toShow), [shipment.id], "새로 붙은 결재가 조용히 묻히지 않는다");
 });
 
-test("재고 수량만 흔들리는 것은 새 알림이 아니다", () => {
-  // id가 (품번, 소유자)라 15 → 14로 줄어도 그대로다. 수량이 내려갈 때마다 다시
-  // 울리면 부족한 동안 내내 시끄럽다.
-  const first = decideNotificationToasts([lowStock("part-1", 15)], null);
-  const second = decideNotificationToasts([lowStock("part-1", 14)], first.nextSeenKeys);
+test("🔴 detail 만 흔들리는 것은 새 알림이 아니다 — id 가 그대로면 한 번만 울린다", () => {
+  // id 가 접수 건 하나라 날짜가 30 → 29 로 바뀌어도 그대로다. 값이 움직일 때마다
+  // 다시 울리면 그 상태가 이어지는 동안 내내 시끄럽다. (2026-10-27 까지는 같은
+  // 성질을 재고 부족의 (품번, 소유자) id 로 쟀다 — 밑자락 주석.)
+  const first = decideNotificationToasts([stableId("case-9", "2026-10-30")], null);
+  const second = decideNotificationToasts([stableId("case-9", "2026-10-29")], first.nextSeenKeys);
 
-  assert.deepEqual(second.toShow, [], "같은 (품번, 소유자)의 부족은 한 번만 알린다");
+  assert.deepEqual(second.toShow, [], "같은 id 는 한 번만 알린다");
 });
 
 test("같은 알림이 목록에 두 번 들어와도 한 번만 띄우고 한 번만 적는다", () => {
-  const item = partRequest("req-1");
+  const item = otherKind("q-1");
   const decision = decideNotificationToasts([item, item], []);
 
   assert.deepEqual(keysOf(decision.toShow), [item.id]);
@@ -191,7 +206,7 @@ test("저장소를 아예 못 얻었을 때(null)도 조용히 넘어간다", ()
 test("못 읽었을 때는 폭탄이 아니라 침묵 쪽으로 기운다", () => {
   // 못 읽음 → null → 첫 방문 규칙 → 아무것도 띄우지 않는다. 반대로 "빈 배열"로
   // 다뤘다면 저장소가 막힌 브라우저에서 새로고침마다 전부 뜬다.
-  const items = [approval("case-1", "D9705-012", "REPAIR_INSPECTION"), partRequest("req-1")];
+  const items = [approval("case-1", "D9705-012", "REPAIR_INSPECTION"), otherKind("q-1")];
   const seen = readSeenNotificationKeys(fakeStore({ getThrows: true }), "k");
 
   assert.deepEqual(decideNotificationToasts(items, seen).toShow, []);
@@ -352,26 +367,26 @@ test("🔴 renotify가 켜져 있고 tag가 함께 있다 — 신고 ②의 처�
   // 같은 tag의 알림이 오면 브라우저는 기존 것을 **조용히 대체**한다(renotify
   // 기본값 false). 소리도 팝업도 없다. 그리고 renotify는 tag 없이 주면 브라우저가
   // 던지므로 둘은 반드시 함께 간다.
-  const toast = toastFor(lowStock("part-1", 15));
+  const toast = toastFor(stableId("case-9", "2026-10-30"));
 
   assert.equal(toast.options.renotify, true, "다시 알리지 않으면 알림창에 아무 일도 안 일어난다");
   assert.equal(typeof toast.options.tag, "string");
   assert.ok(toast.options.tag.length > 0, "renotify를 빈 tag와 함께 주면 브라우저가 던진다");
 });
 
-test("🔴 사라졌다 다시 생긴 재고 부족은 tag가 같다 — 그래서 renotify가 있어야 한다", () => {
+test("🔴 사라졌다 다시 생긴 알림은 tag가 같다 — 그래서 renotify가 있어야 한다", () => {
   // 판정 쪽은 멀쩡하다: 사라진 것은 기억에서 지워지고 다시 생기면 새것으로
   // 골라낸다. 문제는 브라우저에 넘기는 순간에만 있었다.
-  const shortage = [lowStock("part-1", 15)];
-  const first = decideNotificationToasts(shortage, null);
-  const refilled = decideNotificationToasts([], first.nextSeenKeys);
-  const again = decideNotificationToasts(shortage, refilled.nextSeenKeys);
+  const gone = [stableId("case-9", "2026-10-30")];
+  const first = decideNotificationToasts(gone, null);
+  const cleared = decideNotificationToasts([], first.nextSeenKeys);
+  const again = decideNotificationToasts(gone, cleared.nextSeenKeys);
 
   assert.equal(again.toShow.length, 1, "판정은 다시 알릴 것으로 골라낸다");
 
-  const before = toastFor(shortage[0]);
+  const before = toastFor(gone[0]);
   const after = toastFor(again.toShow[0]);
-  assert.equal(after.options.tag, before.options.tag, "재고 부족의 id는 사라졌다 생겨도 그대로다");
+  assert.equal(after.options.tag, before.options.tag, "같은 대상의 id는 사라졌다 생겨도 그대로다");
   assert.equal(after.options.renotify, true, "그래도 다시 울려야 한다 — 이것이 없으면 조용히 덮어쓴다");
 });
 

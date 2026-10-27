@@ -26,9 +26,6 @@ import {
   buildApprovalGrantedNotification,
   buildApprovalNotification,
   buildApprovalRejectedNotification,
-  buildPartIssueApprovalNotification,
-  buildPartStockBelowMinimumNotification,
-  buildPendingPartRequestNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateNearNotification,
   type NotificationItem,
@@ -69,21 +66,6 @@ function approval(repairCaseId: string, intakeNumber: string, approvalType: "REP
 function oneOfEachKind() {
   return [
     approval("case-1", "D9705-012", "REPAIR_INSPECTION"),
-    buildPendingPartRequestNotification({ requestId: "req-1", intakeNumber: "D9705-100", requestedByName: "홍길동" }),
-    buildPartStockBelowMinimumNotification({
-      partId: "part-1",
-      partName: "커넥터 SMA",
-      owner: "DSS",
-      currentQuantity: 15,
-      minimumQuantity: 30,
-    }),
-    buildPartIssueApprovalNotification({
-      issueRequestId: "issue-1",
-      intakeNumber: "D9705-200",
-      destinationNote: null,
-      routeStepOrder: 2,
-      requestedByName: "홍길동",
-    }),
     buildQuoteApprovalNotification({
       quoteId: "quote-1",
       quoteNumber: "Q-9705-001",
@@ -113,15 +95,20 @@ function grantedItem(): NotificationItem {
   });
 }
 
-/** 눌러서 확인하는 줄 — 내가 올린 직접 사용 불출이 반려됐다. */
+/**
+ * 눌러서 확인하는 줄 — 내가 올린 견적서 결재가 반려됐다.
+ *
+ * 🔴 승인 완료 줄(grantedItem)과 **다른 표**를 쓴다 — 한 표만 쓰면 「두 갈래가 각각
+ * 그려지는가」를 못 잰다. 2026-10-27 까지는 부품 불출이었고, 그 갈래를 들어내면서
+ * (13-C4) 남은 둘 중 접수 건이 아닌 쪽으로 바꿨다.
+ */
 function rejectedItem(): NotificationItem {
   return buildApprovalRejectedNotification({
-    source: "PART_ISSUE",
+    source: "QUOTE",
     approvalId: "approval-r1",
-    partRequestId: null,
-    intakeNumber: null,
-    destinationNote: "상해수리소",
-    decisionReason: "수량 과다",
+    quoteId: "quote-9",
+    quoteNumber: "Q-9705-009",
+    decisionReason: "금액 근거 보완 요망",
   });
 }
 
@@ -247,25 +234,27 @@ test("🔴 색만으로 구분하지 않는다 — 종류 이름이 글자로도
   }
 });
 
-test("불출 승인 대기도 화면을 고치지 않고 같은 한 줄로 그려진다 — 이름·대상·상세·링크", () => {
+// 🔵 아래 시험은 2026-10-27(13-C4)까지 「불출 승인 대기」로 같은 것을 쟀다. 재고 알림
+//    셋을 걷어내면서 **결재선을 타는 다른 종류**인 견적서 결재 대기로 갈아 끼웠다 —
+//    재는 것은 종류 이름이 아니라 「화면을 안 고쳐도 같은 한 줄이 나오는가」다.
+test("견적서 결재 대기도 화면을 고치지 않고 같은 한 줄로 그려진다 — 이름·대상·상세·링크", () => {
   const html = renderToStaticMarkup(
     <NotificationBell
       items={[
-        buildPartIssueApprovalNotification({
-          issueRequestId: "issue-1",
-          intakeNumber: null,
-          destinationNote: "상해수리소",
+        buildQuoteApprovalNotification({
+          quoteId: "quote-7",
+          quoteNumber: "Q-9705-007",
           routeStepOrder: 1,
           requestedByName: "홍길동",
         }),
       ]}
     />
   );
-  assert.ok(html.includes('href="/inventory/approvals"'), "[승인 요청건] 탭으로 가야 한다");
-  assert.ok(html.includes(NOTIFICATION_KIND_META.PART_ISSUE_APPROVAL_PENDING.label));
+  assert.ok(html.includes('href="/quotes/quote-7"'), "그 견적서 화면으로 가야 한다");
+  assert.ok(html.includes(NOTIFICATION_KIND_META.QUOTE_APPROVAL_PENDING.label));
   assert.match(html, /class="dss-bell__kind" data-tone="\d+"/, "색 칸이 붙지 않았다");
-  assert.ok(html.includes("상해수리소"));
-  assert.ok(html.includes("결재선 1단계 · 신청자 홍길동"));
+  assert.ok(html.includes("Q-9705-007"));
+  assert.ok(html.includes("결재선 1단계 · 요청자 홍길동"));
 });
 
 test("종류 이름은 윗줄에 따로 온다 — 지금 줄(대상 · 상세)이 길어져 잘리지 않게", () => {
@@ -531,8 +520,10 @@ test("승인 완료·반려됨도 화면을 고치지 않고 같은 한 줄로 �
   assert.ok(html.includes(NOTIFICATION_KIND_META.APPROVAL_REJECTED.label));
   assert.ok(html.includes('href="/repair-cases/case-9/approval"'));
   assert.ok(html.includes("최종 출하 승인 · 김결재"));
-  assert.ok(html.includes('href="/inventory"'));
-  assert.ok(html.includes("부품 불출 승인 · 사유: 수량 과다"));
+  // 🔵 반려 줄의 표본은 2026-10-27(13-C4)에 부품 불출 → 견적서로 바뀌었다
+  //    (rejectedItem 주석). 재는 것은 「두 갈래가 각각 제 주소·제 글로 그려지는가」다.
+  assert.ok(html.includes('href="/quotes/quote-9"'));
+  assert.ok(html.includes("견적서 승인 · 사유: 금액 근거 보완 요망"));
 });
 
 /** 부른 기록을 남기는 가짜 확인 함수. `result` 를 넘기지 않으면 끝나지 않는 약속을 돌려준다. */

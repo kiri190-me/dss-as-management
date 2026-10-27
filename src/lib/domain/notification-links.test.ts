@@ -23,13 +23,17 @@ describe("absoluteNotificationHref", () => {
     );
   });
 
+  // 🔵 아래 두 시험의 경로는 **주소를 잇는 규칙만** 재는 보기다(어느 화면인지는 잴
+  // 것에 없다). 2026-10-27 까지는 `/inventory` 였고, 그 주소가 13-A 에서 404 가 된 뒤
+  // 살아 있는 경로로 바꿔 적었다 — 뜻은 한 글자도 달라지지 않는다. 죽은 주소를 보기로
+  // 두면 「아직 그 화면이 있다」로 읽힌다.
   test("기준 주소 끝의 슬래시는 겹치지 않는다", () => {
-    assert.equal(absoluteNotificationHref("/inventory", `${BASE}/`), `${BASE}/inventory`);
-    assert.equal(absoluteNotificationHref("/inventory", `${BASE}///`), `${BASE}/inventory`);
+    assert.equal(absoluteNotificationHref("/repair-cases", `${BASE}/`), `${BASE}/repair-cases`);
+    assert.equal(absoluteNotificationHref("/repair-cases", `${BASE}///`), `${BASE}/repair-cases`);
   });
 
   test("슬래시로 시작하지 않는 경로에도 하나만 붙는다", () => {
-    assert.equal(absoluteNotificationHref("inventory/requests", BASE), `${BASE}/inventory/requests`);
+    assert.equal(absoluteNotificationHref("repair-cases/abc", BASE), `${BASE}/repair-cases/abc`);
   });
 
   test("🔴 `//남의사이트` 는 남의 사이트로 가지 않는다 — 앞의 슬래시를 한 칸으로 줄인다", () => {
@@ -80,13 +84,17 @@ describe("toExternalNotificationItems", () => {
   });
 
   test("순서를 바꾸지 않는다", () => {
+    // 🔴 둘째 줄은 **첫째와 다른 종류**여야 한다 — 같은 종류 둘이면 「종류별로 묶어
+    // 다시 세우지 않는가」를 못 잰다. 2026-10-27 까지는 PART_REQUEST_PENDING 이었고,
+    // 재고 알림 셋을 걷어내면서(13-C4) 살아 있는 종류로 바꿨다(kind 가 NotificationKind
+    // 라 타입이 먼저 걸린다).
     const second: NotificationItem = {
-      id: "PART_REQUEST_PENDING:x",
-      kind: "PART_REQUEST_PENDING",
+      id: "QUOTE_APPROVAL_PENDING:x",
+      kind: "QUOTE_APPROVAL_PENDING",
       targetKey: "x",
       subject: "S",
       detail: "D",
-      href: "/inventory/requests",
+      href: "/quotes/x",
     };
     const out = toExternalNotificationItems([item, second], BASE);
     assert.deepEqual(

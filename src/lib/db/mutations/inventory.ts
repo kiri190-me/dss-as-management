@@ -113,19 +113,43 @@ import type { StockOwner } from "@/lib/domain/inventory-types";
  *    저쪽은 결재 **사슬**(「앞 단계를 결정하면 다음 단계 행이 더 늦게 생긴다」)이 단언의
  *    전제라 사슬 잇는 mutation 을 손으로 흉내 낼 수 없었다. 출하·검수 결재 갈래는 한 줄도
  *    건드리지 않고 PART_ISSUE 갈래만 뺐다(시험 다섯 + 묶음 하나).
- *    🔴 **그래서 지금 비어 있는 자리**: queries/approval-outcome-notifications.ts 의
- *    listPartIssueApprovalOutcomes 와 domain/notifications.ts 의 PART_ISSUE 갈래는
- *    **살아 있는 코드인데 통합 시험이 없다.** 그 갈래가 만드는 href 셋
- *    (`/inventory` · `/inventory/approvals` · `/inventory/requests`)은 13-A 에서 **전부
- *    404 가 됐다.** 13-C5(알림 3종 정리) 때 함께 정할 것.
+ *    🔵 **그때 「지금 비어 있는 자리」로 적어 둔 것은 13-C4 가 메웠다** — 시험이 없던
+ *    그 살아 있는 코드(listPartIssueApprovalOutcomes · domain/notifications.ts 의
+ *    PART_ISSUE 갈래)를 **코드째 들어냈다.** 비는 것이 아니라 맞아떨어졌다.
  *
  * ────────────────────────────────────────────────────────────────────────────
- * 🔴 **13-C4 를 막는 것이 이제 무엇인가 — 2026-10-27(13-C3 끝) 다시 셈**
+ * 🔵 **13-C4 가 한 일 — 2026-10-27**
  * ────────────────────────────────────────────────────────────────────────────
- * 아래 여덟을 지우는 것이 13-C4 다 — inventory.ts · inventory-part-requests.ts ·
+ * 앞 조각들과 달리 **실제 동작이 바뀌었다.** 넷을 했다:
+ *  ① 알림 종류 셋을 뺐다(PART_REQUEST_PENDING · PART_STOCK_BELOW_MINIMUM ·
+ *     PART_ISSUE_APPROVAL_PENDING). queries/notifications.ts 가 그 셋 때문에 부르던
+ *     재고 조회 셋이 함께 사라져, **queries/inventory-part-requests.ts ·
+ *     queries/inventory-part-issue-requests.ts · queries/part-minimum-quantities.ts 를
+ *     부르는 살아 있는 코드가 이제 하나도 없다.**
+ *  ② 404 로 보내던 결재 결과 알림의 PART_ISSUE 갈래를 **갈래째** 걷어냈다
+ *     (domain/notifications.ts · queries/approval-outcome-notifications.ts).
+ *  ③ 계정 삭제의 OPEN_APPROVAL_KINDS 에서 PART_ISSUE 를 뺐다 — 아래 🔴.
+ *  ④ 운영 DB 고아 행을 치우는 SQL 을 **적어만** 두었다(실행 안 함):
+ *     NOTIFICATION_AND_IDENTITY_DESIGN.md 의 K 절. 표 셋이고 하나는 포털 DB 다.
+ *
+ * 🔴 **③ 은 동작이 바뀌는 변경이었다** — 지울 사람에게 열린 불출 결재가 있어도 이제
+ *    이어받을 사람을 요구하지 않고, 옛 불출 판을 따라가던 사슬도 삭제를 멈추지
+ *    않는다. 근거 셋(운영 0건 · 새로 생길 길 없음 · 넘겨도 누를 화면이 없음)의 전문은
+ *    domain/user-deletion-rules.ts 의 OPEN_APPROVAL_KINDS 주석에 있다.
+ *    🔵 **결재선 판(routeSlots)의 PART_ISSUE 는 그대로다** — 지울 사람이 현재 불출
+ *    판에 올라 있으면 지금도 이어받을 사람이 필요하다. 빠진 것은 「열린 결재 **행**」
+ *    한 가지뿐이고, domain/shipment-approval-route.ts 의 "PART_ISSUE" 는 **영구 유지**다
+ *    (DB enum 과 과거 결재 기록이 그 값을 쓴다).
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * 🔴 **13-C5 를 막는 것이 이제 무엇인가 — 2026-10-27(13-C4 끝) 다시 셈**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 아래 여덟을 지우는 것이 13-C5 다 — inventory.ts · inventory-part-requests.ts ·
  * inventory-part-issue-requests.ts · part-minimum-quantities.ts · part-unit-prices.ts ·
  * part-overhaul-unit-prices.ts · internal/inventory-stock-use.ts ·
  * internal/inventory-request-idempotency.ts.
+ * **같은 이름의 queries/ 넷도 이제 함께 지울 수 있다** — 13-C4 가 queries/notifications.ts
+ * 의 호출을 걷어내 살아 있는 상위 의존이 사라졌다(위 ①).
  * 그것을 **import 하는 곳은 이제 시험 열뿐이고, 살아 있는 화면·액션·조회는 하나도
  * 없다**(2026-10-27 저장소 전체 grep). 열의 갈래는 둘이다:
  *
@@ -144,17 +168,20 @@ import type { StockOwner } from "@/lib/domain/inventory-types";
  *       mutations/repair-case-billing-decision.integration.test.ts
  *     바로 위에 적은 대로 **통째로 지우는 쪽**이다(잴 것이 mutation 과 함께 사라진다).
  *
- * 🔵 그 밖에 13-C4 가 함께 정리할 것: db.txt 의 재고 줄 아홉, 그리고 이 세 조회가
- *    남긴 상위 의존 — queries/inventory*.ts · queries/part-minimum-quantities.ts 는
- *    **queries/notifications.ts 가 아직 부른다.** 그것은 13-C5 다(알림 3종).
+ * 🔴 **ⓐ 의 두 파일에는 13-C4 가 새로 넣은 「이제 안 뜬다」 시험이 하나씩 들어 있다** —
+ *    queries/part-minimum-quantities.integration.test.ts 의 「11.」과
+ *    queries/inventory-part-issue-requests.integration.test.ts 의 종 알림 describe 다.
+ *    파일과 함께 지워도 된다: 같은 보증을 **재고 표 없이** 재는 자리가 따로 있다
+ *    (domain/notifications.test.ts 의 「재고 알림 셋은 레지스트리에서 사라졌다」 —
+ *    레지스트리 소스를 글자로 읽는다).
  *
- * 🔵 **13-C 가 아직 손대면 안 되는 것 둘**(이 조각에서 따로 결정됐다):
- *    ① queries/user-deletion-impact.ts · domain/user-deletion-rules.ts 의 "PART_ISSUE" —
- *       OPEN_APPROVAL_KINDS 에서 빼면 계정 삭제의 **동작이 바뀐다**(이어받을 사람 없이
- *       삭제될 수 있다. user-deletion-rules.ts 211-212 에 같은 모양의 과거 사고가 적혀 있다).
- *       운영 DB 에 열린 PART_ISSUE 결재가 남은 사람이 있는지 **사람이 먼저 세기로** 했다.
- *    ② domain/shipment-approval-route.ts 의 "PART_ISSUE" 는 **영구 유지**다 — DB enum 과
- *       과거 결재 기록이 그 값을 쓴다.
+ * 🔵 그 밖에 13-C5 가 함께 정리할 것: db.txt 의 재고 줄 아홉.
+ *    그리고 queries/user-deletion-impact.ts 가 아직 inventory_part_requests ·
+ *    inventory_part_issue_requests **표**를 읽는다(「본인이 올린 열린 요청 N건」을
+ *    참고로 세는 자리 — 12·13번). 🔴 그것은 **표를 직접 읽는 것**이라 위 여덟을 지워도
+ *    깨지지 않는다. 표는 남기기로 했으므로(아래) 그대로 둬도 되고, 치우려면 화면
+ *    문구(user-deletion-dialog-text.ts 의 「(참고) 직접 올린 열린 부품 요청 …」)까지
+ *    한 몸으로 다뤄야 한다 — 13-C5 가 아니라 따로 정할 일이다.
  *
  * 🔵 이름이 닮아 섞이기 쉬운 것: `oh-part-templates`(옛 관리 화면, 13-B 에서 지웠다)와
  *    `fetchInventoryOhTemplate`(새, 재고 관리 API)은 **완전히 다른 통로**다.

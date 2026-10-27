@@ -1,33 +1,28 @@
 import "server-only";
-import { and, desc, eq, gt, gte, inArray, ne, notExists, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, ne, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
-import {
-  inventoryPartIssueApprovals,
-  inventoryPartIssueRequests,
-  inventoryPartRequests,
-  quoteApprovals,
-  quotes,
-  repairCaseApprovals,
-  repairCases,
-  users,
-} from "../schema";
-import { isPartIssueApprovalClosedByRequester, type InventoryPartIssueRequestStatus } from "@/lib/domain/inventory-part-issue-rules";
+import { quoteApprovals, quotes, repairCaseApprovals, repairCases, users } from "../schema";
 import { approvalOutcomeNotificationWindowStart, type ApprovalOutcomeTarget } from "@/lib/domain/notifications";
 
 /**
  * ============================================================================
  * 내가 요청한 결재의 결과 — 종 알림 「승인 완료」·「반려됨」의 원본
  * ============================================================================
- * 결재를 **요청한 사람**에게 그 결과를 알리는 조회 둘이다. 대상 결재는 네 가지고
- * 표는 셋이다:
+ * 결재를 **요청한 사람**에게 그 결과를 알리는 조회 둘이다. 대상 결재는 세 가지고
+ * 표는 둘이다:
  *   · repair_case_approvals           — 수리 검수 승인 · 최종 출하 승인
- *   · inventory_part_issue_approvals  — 부품 불출 승인
  *   · quote_approvals                 — 견적서 승인
- * 세 표 모두 「단계마다 요청 행 하나, 앞 행을 결정한 뒤 다음 행을 넣는」 사슬 모양이고
- * (mutations/repair-case-approvals.ts · mutations/inventory-part-issue-requests.ts ·
- * mutations/quote-approvals.ts 의 사슬 잇는 자리), 요청자(`requested_by_user_id`)는
- * 사슬 내내 처음 올린 사람 그대로다.
+ * 두 표 모두 「단계마다 요청 행 하나, 앞 행을 결정한 뒤 다음 행을 넣는」 사슬 모양이고
+ * (mutations/repair-case-approvals.ts · mutations/quote-approvals.ts 의 사슬 잇는 자리),
+ * 요청자(`requested_by_user_id`)는 사슬 내내 처음 올린 사람 그대로다.
+ *
+ * 🔴 **셋째 표(`inventory_part_issue_approvals`, 부품 불출 승인)를 읽던 갈래는
+ * 2026-10-27(조각 13-C4)에 들어냈다.** 누르면 갈 주소가 13-A 에서 404 가 됐고,
+ * 재고는 별도 시스템(dss-inventory)이 제 알림을 포털로 직접 보낸다. 그 갈래가
+ * 혼자 지고 있던 두 가지(신청 상태로 승인/반려를 한 번 더 가르는 일,
+ * isPartIssueApprovalClosedByRequester 로 「신청자가 스스로 취소해 닫힌 행」을
+ * 빼는 일)도 함께 사라졌다 — 남은 두 표에는 그런 상태 칸이 없다.
  *
  * 🔴 **이 파일은 아무것도 쓰지 않는다.** 결재·출하·불출 mutation 을 한 줄도 건드리지
  * 않고, 이미 쌓인 결재 기록에서 결과 사건을 골라 읽기만 한다.
@@ -42,9 +37,8 @@ import { approvalOutcomeNotificationWindowStart, type ApprovalOutcomeTarget } fr
  *    오래된 것은 확인하지 않아도 뜨지 않는다 — 기능을 켜는 순간 옛 결재가 쏟아지지
  *    않게 하려는 것이다.
  *  · 🔴 **결정자가 요청자 본인이면 알리지 않는다.** 최고관리자가 비상구로 자기 요청을
- *    스스로 결정한 경우, 엔지니어가 자기 검수 요청을 스스로 승인한 경우, 그리고
- *    신청자가 불출 신청을 취소해 열린 결재 행이 REJECTED 로 닫힌 경우가 여기 걸린다
- *    (cancelPartIssueRequest 머리말). 자기가 한 일을 자기에게 알릴 이유가 없다.
+ *    스스로 결정한 경우와, 엔지니어가 자기 검수 요청을 스스로 승인한 경우가 여기
+ *    걸린다. 자기가 한 일을 자기에게 알릴 이유가 없다.
  *  · 승인 완료는 **최종 승인일 때만**이다(아래 「최종」 절).
  *  · 반려는 어느 단계에서든 알린다 — 반려되면 사슬이 거기서 끝나므로 그 행이 곧
  *    결과다.
@@ -56,7 +50,7 @@ import { approvalOutcomeNotificationWindowStart, type ApprovalOutcomeTarget } fr
  *
  *     그 행이 APPROVED 이고, 같은 묶음에 requested_at 이 더 늦은 행이 없다
  *
- * 로 가른다. 묶음은 접수 건 결재면 (접수 건, 결재 종류), 불출이면 신청 하나다. 이것은
+ * 로 가른다. 묶음은 접수 건 결재면 (접수 건, 결재 종류), 견적서면 그 한 장이다. 이것은
  * queries/repair-case-approvals.ts 의 getCurrentApprovalsForCase(와 출하 문
  * resolveApprovalValidity)가 쓰는 「가장 최근 행」과 같은 정의다 — 그 함수들은 한 건을
  * requested_at 내림차순으로 읽어 맨 앞 행을 고르고, 여기서는 여러 건을 한 번에 읽으려고
@@ -68,10 +62,6 @@ import { approvalOutcomeNotificationWindowStart, type ApprovalOutcomeTarget } fr
  * 승인도 뒤에 새 요청이 들어오면(접수 건이 바뀌어 다시 요청하는 경우) 최신이 아니게
  * 되어 빠진다 — 그 뒤의 결과가 새로 알림이 된다.
  *
- * 불출은 여기에 **신청 상태**를 하나 더 본다: APPROVED(실행 대기) 또는 EXECUTED(이미
- * 나감)일 때만 승인 완료다. 승인 뒤에 신청자가 스스로 취소한(CANCELLED) 신청은 알릴
- * 결과가 남아 있지 않다.
- *
  * ── 접수 건이 없어진 결재 ────────────────────────────────────────────────
  *  · 접수 건 결재: 기존 「결재 대기」 조회(repair-case-approvals-pending.ts)와 같이
  *    접수 건에 INNER JOIN 하고 휴지통(`is_deleted`)을 뺀다. 영구 삭제로
@@ -79,10 +69,6 @@ import { approvalOutcomeNotificationWindowStart, type ApprovalOutcomeTarget } fr
  *    검수/승인 화면이 없다. 출하 완료로 잠긴 건(`is_locked`)은 빼지 않는다 — 대기
  *    조회와 달리 이쪽은 결과를 알리는 것이고, 출하 승인이 끝난 건이 곧 잠기는 것이
  *    정상 흐름이라 빼면 출하 승인 완료가 거의 알려지지 않는다.
- *  · 부품 불출: 기존 「불출 승인 대기」 조회(inventory-part-issue-requests.ts)와 같이
- *    접수 건을 LEFT JOIN 으로만 붙여 거르지 않는다. 불출 신청은 재고 기록이라 접수
- *    건보다 오래 살고, 누르면 가는 곳도 재고 화면이다. 인수번호가 없으면 사용처,
- *    둘 다 없으면 「삭제된 접수 건」으로 적는다(domain/notifications.ts).
  *  · 견적서: 접수 건 결재와 같다 — `quotes` 에 INNER JOIN 하고 휴지통(`is_deleted`)을
  *    뺀다. 완전 삭제로 `quote_id` 가 NULL 이 된 행은 조인에서 떨어진다. 누르면 갈
  *    화면이 없는 결과를 알리지 않는다는 같은 이유다(queries/quote-approvals-pending.ts).
@@ -99,11 +85,7 @@ import { approvalOutcomeNotificationWindowStart, type ApprovalOutcomeTarget } fr
 
 const decider = alias(users, "outcome_decider");
 const laterCaseApproval = alias(repairCaseApprovals, "later_case_approval");
-const laterIssueApproval = alias(inventoryPartIssueApprovals, "later_issue_approval");
 const laterQuoteApproval = alias(quoteApprovals, "later_quote_approval");
-/** 헤더가 가리키는 접수 건과, 부품 요청이 가리키는 접수 건을 따로 읽는다(불출 조회와 같다). */
-const directCase = alias(repairCases, "outcome_direct_repair_case");
-const requestCase = alias(repairCases, "outcome_part_request_repair_case");
 
 /** 결재 결과 한 건 — 종 알림 한 줄의 원본. */
 export type ApprovalOutcome = ApprovalOutcomeTarget & {
@@ -113,12 +95,6 @@ export type ApprovalOutcome = ApprovalOutcomeTarget & {
   /** 결정 사유. 반려면 표 CHECK 가 NULL 을 막는다. */
   decisionReason: string | null;
 };
-
-/**
- * 불출 신청이 이 상태일 때만 「승인 완료」다 — 결재가 끝나 실행을 기다리거나, 이미
- * 나갔다. 결재 중·반려·취소는 알릴 승인 결과가 없다.
- */
-const PART_ISSUE_GRANTED_REQUEST_STATUSES: readonly InventoryPartIssueRequestStatus[] = ["APPROVED", "EXECUTED"];
 
 type OutcomeOptions = {
   /** 창을 잴 기준 시각. 시험이 창의 경계를 보려고 넘긴다. 기본은 지금이다. */
@@ -206,94 +182,6 @@ async function listRepairCaseApprovalOutcomes(
           },
         ]
   );
-}
-
-// ──────────────────────────────────────────────────────────────── 부품 불출
-
-async function listPartIssueApprovalOutcomes(
-  requesterUserId: string,
-  status: CaseOutcomeStatus,
-  since: Date
-): Promise<ApprovalOutcome[]> {
-  const rows = await db
-    .select({
-      approvalId: inventoryPartIssueApprovals.id,
-      requestedByUserId: inventoryPartIssueApprovals.requestedByUserId,
-      decidedByUserId: inventoryPartIssueApprovals.decidedByUserId,
-      status: inventoryPartIssueApprovals.status,
-      partRequestId: inventoryPartIssueRequests.partRequestId,
-      directIntakeNumber: directCase.intakeNumber,
-      partRequestIntakeNumber: requestCase.intakeNumber,
-      destinationNote: inventoryPartIssueRequests.destinationNote,
-      decidedByName: decider.name,
-      decidedAt: inventoryPartIssueApprovals.decidedAt,
-      decisionReason: inventoryPartIssueApprovals.decisionReason,
-    })
-    .from(inventoryPartIssueApprovals)
-    .innerJoin(
-      inventoryPartIssueRequests,
-      eq(inventoryPartIssueRequests.id, inventoryPartIssueApprovals.issueRequestId)
-    )
-    // 무엇에 대한 신청인가 — 불출 승인 대기 조회와 같은 두 갈래 조인이다. 셋 다
-    // 상대의 기본키에 붙는 LEFT JOIN 이라 행이 늘지도 줄지도 않는다.
-    .leftJoin(directCase, eq(directCase.id, inventoryPartIssueRequests.repairCaseId))
-    .leftJoin(inventoryPartRequests, eq(inventoryPartRequests.id, inventoryPartIssueRequests.partRequestId))
-    .leftJoin(requestCase, eq(requestCase.id, inventoryPartRequests.repairCaseId))
-    .leftJoin(decider, eq(decider.id, inventoryPartIssueApprovals.decidedByUserId))
-    .where(
-      and(
-        // 🔴 요청자 본인. 결재 행의 요청자는 사슬 내내 신청을 올린 사람이다.
-        eq(inventoryPartIssueApprovals.requestedByUserId, requesterUserId),
-        eq(inventoryPartIssueApprovals.status, status),
-        // 🔴 결정자가 요청자 본인이면 알리지 않는다 — 신청 취소로 닫힌 행이 여기서
-        // 빠진다(아래 isPartIssueApprovalClosedByRequester 가 한 번 더 본다).
-        ne(inventoryPartIssueApprovals.decidedByUserId, requesterUserId),
-        gte(inventoryPartIssueApprovals.decidedAt, since),
-        ...(status === "APPROVED"
-          ? [
-              // 결재가 끝나 실행을 기다리거나 이미 나간 신청만.
-              inArray(inventoryPartIssueRequests.status, PART_ISSUE_GRANTED_REQUEST_STATUSES),
-              // 🔴 최종 승인 — 같은 신청에 이 행보다 늦게 요청된 행이 없다.
-              notExists(
-                db
-                  .select({ one: sql`1` })
-                  .from(laterIssueApproval)
-                  .where(
-                    and(
-                      eq(laterIssueApproval.issueRequestId, inventoryPartIssueApprovals.issueRequestId),
-                      gt(laterIssueApproval.requestedAt, inventoryPartIssueApprovals.requestedAt)
-                    )
-                  )
-              ),
-            ]
-          : [
-              // 반려로 끝난 신청만 — 취소(CANCELLED)로 닫힌 신청의 결재 행은 표에
-              // REJECTED 로 남지만 신청 상태가 다르다.
-              eq(inventoryPartIssueRequests.status, "REJECTED"),
-            ])
-      )
-    )
-    .orderBy(desc(inventoryPartIssueApprovals.decidedAt), desc(inventoryPartIssueApprovals.id));
-
-  return rows.flatMap((row) => {
-    if (row.decidedAt === null) return [];
-    // 취소로 닫힌 행을 가리는 판정은 순수 규칙 하나가 쥐고 있다 — 재고 화면의 결재
-    // 이력이 「신청자가 취소함」으로 그리는 바로 그 판정이다. SQL 이 이미 같은 것을
-    // 걸렀지만, 판정이 두 벌로 갈라지지 않게 여기서도 그 함수를 거친다.
-    if (isPartIssueApprovalClosedByRequester(row)) return [];
-    return [
-      {
-        source: "PART_ISSUE" as const,
-        approvalId: row.approvalId,
-        partRequestId: row.partRequestId,
-        intakeNumber: row.directIntakeNumber ?? row.partRequestIntakeNumber,
-        destinationNote: row.destinationNote,
-        decidedByName: row.decidedByName ?? "",
-        decidedAt: row.decidedAt,
-        decisionReason: row.decisionReason,
-      },
-    ];
-  });
 }
 
 // ────────────────────────────────────────────────────────────────── 견적서
@@ -388,7 +276,7 @@ async function listQuoteApprovalOutcomes(
 // ──────────────────────────────────────────────────────────────── 바깥 입구
 
 /**
- * 내가 요청한 결재 중 **최근 창 안에 최종 승인된** 것 — 네 결재 모두, 결정이 늦은
+ * 내가 요청한 결재 중 **최근 창 안에 최종 승인된** 것 — 세 결재 모두, 결정이 늦은
  * 것부터.
  */
 export async function listMyGrantedApprovalOutcomes(
@@ -396,27 +284,25 @@ export async function listMyGrantedApprovalOutcomes(
   options: OutcomeOptions = {}
 ): Promise<ApprovalOutcome[]> {
   const since = approvalOutcomeNotificationWindowStart(options.now ?? new Date());
-  const [cases, partIssues, quoteOutcomes] = await Promise.all([
+  const [cases, quoteOutcomes] = await Promise.all([
     listRepairCaseApprovalOutcomes(requesterUserId, "APPROVED", since),
-    listPartIssueApprovalOutcomes(requesterUserId, "APPROVED", since),
     listQuoteApprovalOutcomes(requesterUserId, "APPROVED", since),
   ]);
-  return [...cases, ...partIssues, ...quoteOutcomes].sort(byDecisionNewestFirst);
+  return [...cases, ...quoteOutcomes].sort(byDecisionNewestFirst);
 }
 
 /**
- * 내가 요청한 결재 중 **최근 창 안에 반려된** 것 — 어느 단계에서든, 네 결재 모두,
- * 결정이 늦은 것부터. 내가 스스로 닫은 것(취소·자기 결정)은 빠진다.
+ * 내가 요청한 결재 중 **최근 창 안에 반려된** 것 — 어느 단계에서든, 세 결재 모두,
+ * 결정이 늦은 것부터. 내가 스스로 결정한 것은 빠진다.
  */
 export async function listMyRejectedApprovalOutcomes(
   requesterUserId: string,
   options: OutcomeOptions = {}
 ): Promise<ApprovalOutcome[]> {
   const since = approvalOutcomeNotificationWindowStart(options.now ?? new Date());
-  const [cases, partIssues, quoteOutcomes] = await Promise.all([
+  const [cases, quoteOutcomes] = await Promise.all([
     listRepairCaseApprovalOutcomes(requesterUserId, "REJECTED", since),
-    listPartIssueApprovalOutcomes(requesterUserId, "REJECTED", since),
     listQuoteApprovalOutcomes(requesterUserId, "REJECTED", since),
   ]);
-  return [...cases, ...partIssues, ...quoteOutcomes].sort(byDecisionNewestFirst);
+  return [...cases, ...quoteOutcomes].sort(byDecisionNewestFirst);
 }

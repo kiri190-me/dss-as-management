@@ -4,7 +4,6 @@ import { db } from "../client";
 import {
   approvalRouteDelegations,
   intakeMailRecipients,
-  inventoryPartIssueApprovals,
   procedureCaseExecutionNodes,
   quoteApprovals,
   repairCaseApprovals,
@@ -178,10 +177,10 @@ type TransactionExecutor = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * 넘긴 · 옮긴 결재 id 를 표별로 갈라 담는 바구니. 감사 기록이 이 모양을 그대로 싣고
  * (「어느 표의 어느 행을 건드렸나」), 요약은 합만 쓴다.
  */
-type ApprovalIdBuckets = { repairCase: string[]; partIssue: string[]; quote: string[] };
+type ApprovalIdBuckets = { repairCase: string[]; quote: string[] };
 
 function emptyApprovalIdBuckets(): ApprovalIdBuckets {
-  return { repairCase: [], partIssue: [], quote: [] };
+  return { repairCase: [], quote: [] };
 }
 
 /** 🔴 칸을 손으로 더하지 않는다 — 바구니가 늘어도 합이 저절로 따라온다. */
@@ -230,6 +229,9 @@ const REPAIR_CASE_APPROVAL_WRITE_TARGET: OpenApprovalWriteTarget = {
  * repair_case_approvals 에서 찾다가 0행이 되고, 감사에는 남의 표 이름이 적힌다.
  * Record 로 두면 종류를 더하는 순간 빠진 자리를 컴파일러가 잡는다
  * (domain/user-deletion-rules.ts 의 ROUTE_SCOPE_BY_APPROVAL_KIND 와 같은 까닭).
+ * 🔵 그 삼항식이 가리키던 `inventory_part_issue_approvals` 갈래는 2026-10-27(13-C4)에
+ * 사라졌다 — 까닭은 OPEN_APPROVAL_KINDS 주석에 있다. Record 는 종류가 **줄 때도**
+ * 빠뜨림을 잡는다(여기를 안 지우면 컴파일이 안 된다).
  *
  * 🔴 route_step_order 는 어느 갈래도 건드리지 않는다. 옮길 때(REPIN) 새 판은 지울
  * 사람 자리만 바뀐 것이라 같은 번호가 같은 자리를 가리키고, quote_approvals 의
@@ -238,27 +240,6 @@ const REPAIR_CASE_APPROVAL_WRITE_TARGET: OpenApprovalWriteTarget = {
 const OPEN_APPROVAL_WRITE_TARGETS: Record<OpenApprovalKind, OpenApprovalWriteTarget> = {
   FINAL_SHIPMENT: REPAIR_CASE_APPROVAL_WRITE_TARGET,
   REPAIR_INSPECTION: REPAIR_CASE_APPROVAL_WRITE_TARGET,
-  PART_ISSUE: {
-    targetEntity: "inventory_part_issue_approvals",
-    bucket: "partIssue",
-    write: async (tx, params) =>
-      (
-        await tx
-          .update(inventoryPartIssueApprovals)
-          .set({
-            assignedApproverUserId: params.assignedApproverUserId,
-            routeId: params.routeId,
-            updatedAt: params.now,
-          })
-          .where(
-            and(
-              eq(inventoryPartIssueApprovals.id, params.approvalId),
-              eq(inventoryPartIssueApprovals.status, "REQUESTED")
-            )
-          )
-          .returning({ id: inventoryPartIssueApprovals.id })
-      ).length,
-  },
   QUOTE: {
     targetEntity: "quote_approvals",
     bucket: "quote",

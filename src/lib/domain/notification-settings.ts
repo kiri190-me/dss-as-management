@@ -1,4 +1,3 @@
-import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
 import {
   APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS,
   NOTIFICATION_KINDS,
@@ -32,34 +31,27 @@ import { ROLE_CODES, type Role } from "./types";
  * 그래서 역할 스위치는 "이 역할이 이 종류를 받을 **수** 있는가"라는 윗단
  * 필터로만 둔다. 켜져 있다고 알림이 가는 것이 아니라, 꺼져 있으면 가지 않는다.
  * 원래 판정은 종전 그대로 각 조회가 계속한다 — 설정을 넓게 열어도 남의 결재
- * 건이 보이지 않고, 부품 요청 알림도 canReceivePartRequestNotifications가
- * queries/notifications.ts 안에서 한 번 더 확인한다.
+ * 건이 보이지 않는다.
  *
  * ── 기본값은 "지금과 같음"이다 ──────────────────────────────────────────
  * 저장된 행이 없을 때 이 파일의 답이 그대로 통한다. 그 답은 이 화면을 만들기
  * 전의 동작과 **한 줄도 다르지 않아야 한다** — 표를 만들었다는 이유로 알림이
  * 하나라도 달라지면 그것이 이 작업의 가장 나쁜 결과다.
  *
- * 그래서 부품 요청 알림의 기본값은 여기에 역할 명단을 옮겨 적지 않고
- * auth/inventory-authorization.ts의 canReceivePartRequestNotifications를
- * **호출해서** 구한다(permission-baseline.ts 머리말의 그 규칙이다). 저쪽
- * 명단이 바뀌면 기본값도 저절로 따라 바뀐다.
- *
- * ── 그런데 새로 태어나는 종류는 가리킬 "지금"이 없다 ────────────────────
- * 3단계에서 붙인 PART_STOCK_BELOW_MINIMUM은 반대로 **명단을 여기 적는다**
- * (canReceiveLowStockNotifications). 지금 명단이 부품 요청 알림과 우연히 같은
- * 셋인데도 그 함수를 부르지 않는 이유는 두 가지다.
- *
- *  1) **재현할 옛 동작이 없다.** 위의 규칙("기본값은 지금과 같음")은 이미
- *     돌고 있던 알림을 옮겨 담을 때의 규칙이다. 새 종류에는 지금 통하는 동작이
- *     없으므로 가리킬 대상 자체가 없다 — 대상을 정하는 결정이 바로 여기서 처음
- *     내려진다.
- *  2) **두 질문이 다르다.** 저쪽은 "밀린 **요청**을 처리할 사람이 누구인가"이고
- *     이쪽은 "**재고를 채울** 사람이 누구인가"다. 엔지니어에게 요청 알림을 열어
- *     주기로 하는 날이 와도, 그 결정이 재고 부족 알림까지 조용히 함께 열어서는
- *     안 된다. auth/inventory-authorization.ts가 canProcessPartRequests와
- *     canReceivePartRequestNotifications를 명단이 같은데도 일부러 따로 둔 것과
- *     같은 판단이다.
+ * 🔴 **2026-10-27(조각 13-C4): 역할 명단으로 갈리던 종류가 하나도 안 남았다.**
+ * 지금 등록된 다섯은 전부 「모든 역할이 받고, 실제로 누구에게 가는지는 그 종류의
+ * 원래 판정이 정한다」 쪽이다. 그 전에는 갈림이 둘 더 있었고 규칙도 둘이었다 —
+ *  · 부품 요청 대기(PART_REQUEST_PENDING)는 명단을 여기 옮겨 적지 않고
+ *    auth/inventory-authorization.ts 의 canReceivePartRequestNotifications 를
+ *    **호출해서** 썼다. 옮겨 담는 종류라 가리킬 「지금」이 있었기 때문이다
+ *    (permission-baseline.ts 머리말의 그 규칙).
+ *  · 재고 부족(PART_STOCK_BELOW_MINIMUM)은 반대로 명단을 **이 파일에 적었다.**
+ *    새로 태어나는 종류라 재현할 옛 동작이 없었고, 「밀린 요청을 처리할 사람」과
+ *    「재고를 채울 사람」은 명단이 같아도 **다른 질문**이라 한쪽을 넓히는 결정이
+ *    다른 쪽까지 조용히 열어서는 안 됐다.
+ * 🔵 두 규칙은 지워진 것이 아니라 **쓸 자리가 지금 없을 뿐**이다. 역할로 갈리는
+ *    종류를 다시 붙일 때 위 둘 중 어느 쪽인지를 먼저 가려라 — 옮겨 담는 것이면
+ *    그 판정이 적힌 곳을 부르고, 새로 태어나는 것이면 명단을 여기 적는다.
  * ============================================================================
  */
 
@@ -89,18 +81,20 @@ import { ROLE_CODES, type Role } from "./types";
  *
  * 이제 칸 번호를 이 표에 적어 묶음에 **넘긴다**(toneIndex). 뜻의 갈래는 셋이다:
  *
- *   1. **급한 경고 둘** — 납기 임박(빨강 0) · 재고 부족(호박 14).
- *      가장 눈에 띄는 두 색을 준다. 둘 다 사람이 눌러 없애는 줄이 아니라
- *      **밖의 일이 풀려야** 사라진다(출하 · 입고).
+ *   1. **급한 경고** — 납기 임박(빨강 0).
+ *      가장 눈에 띄는 색을 준다. 사람이 눌러 없애는 줄이 아니라 **밖의 일이
+ *      풀려야** 사라진다(출하). 🔵 2026-10-27 에 재고 부족(호박 14)을 걷어내
+ *      이 갈래는 지금 하나뿐이다 — 호박 칸은 비어 있다.
  *   2. **결과 둘** — 승인 완료(초록 12) · 반려됨(장미 9).
- *      할 일이 아니라 지나간 사건이라 아래 넷과 갈라야 하고, 둘끼리는 좋고
+ *      할 일이 아니라 지나간 사건이라 아래 둘과 갈라야 하고, 둘끼리는 좋고
  *      나쁨이 한눈에 갈려야 한다. 초록이 「됐다」, 붉은 쪽이 「안 됐다」다.
  *      반려에 빨강을 주지 않는 것은 그 자리를 급한 경고가 쓰기 때문이다 —
  *      한 칸 비켜선 장미다.
- *   3. **내가 할 일 넷** — 결재 대기(파랑 15) · 부품 요청 대기(하늘 8) ·
- *      불출 승인 대기(남보라 6) · 견적서 결재 대기(보라 13).
- *      넷 다 「눌러 처리하면 없어지는 대기 줄」이라 **파랑 계열로 묶어** 한
- *      덩어리로 읽히게 하고, 그 안에서 네 색이 서로 갈라진다.
+ *   3. **내가 할 일 둘** — 결재 대기(파랑 15) · 견적서 결재 대기(보라 13).
+ *      둘 다 「눌러 처리하면 없어지는 대기 줄」이라 **파랑 계열로 묶어** 한
+ *      덩어리로 읽히게 하고, 그 안에서 두 색이 서로 갈라진다. 🔵 걷어낸 둘
+ *      (부품 요청 대기 하늘 8 · 불출 승인 대기 남보라 6)도 이 갈래였다 —
+ *      대기 줄을 새로 붙이면 그 두 칸이 비어 있다.
  *
  * ⚠️ 그래서 2026-09 ~ 2026-10 에 적어 두었던 고른 까닭들(「amber 는 밀린 일」·
  *    「승인 완료는 lime」·「납기 임박은 teal」·「fuchsia 가 가장 멀다」)은 더
@@ -154,29 +148,6 @@ export const NOTIFICATION_KIND_META: Record<
     toneClassName: "text-blue-700 dark:text-blue-400",
     toneIndex: 15,
   },
-  PART_REQUEST_PENDING: {
-    label: "부품 요청 대기",
-    description: "엔지니어가 올린 부품 요청 중 아직 처리되지 않은 것입니다. 처리하는 쪽이 받습니다.",
-    // 내가 할 일.
-    toneClassName: "text-sky-700 dark:text-sky-400",
-    toneIndex: 8,
-  },
-  PART_STOCK_BELOW_MINIMUM: {
-    label: "재고 부족",
-    description:
-      "품목 상세에서 소유 구분마다 정해 둔 한계수량보다 재고가 적어진 것입니다. 한계수량을 정하지 않은 품목은 이 알림에 잡히지 않습니다.",
-    // 급한 경고 — 입고가 되어야 사라진다.
-    toneClassName: "text-amber-700 dark:text-amber-400",
-    toneIndex: 14,
-  },
-  PART_ISSUE_APPROVAL_PENDING: {
-    label: "불출 승인 대기",
-    description:
-      "내가 결재해야 할 부품 불출 신청입니다. 실제로 누구에게 가는지는 부품 불출 승인 절차에서 지금 단계의 승인자로 지정된 사람이 정하고, 지정된 사람이 자리를 비워도 결재가 멈추지 않도록 최고관리자도 받습니다. 여기 역할 설정은 그 위에 덧씌우는 필터입니다.",
-    // 내가 할 일.
-    toneClassName: "text-indigo-700 dark:text-indigo-400",
-    toneIndex: 6,
-  },
   QUOTE_APPROVAL_PENDING: {
     label: "견적서 결재 대기",
     description:
@@ -192,43 +163,26 @@ export const NOTIFICATION_KIND_META: Record<
       `수리 건에 날짜가 적혀 있지 않아도 연결된 내자 정리의 납기요청일이 있으면 그 가장 이른 하루로 봅니다 — ` +
       `상세정보 화면에 보이는 날짜 그대로입니다. 양쪽 어디에도 날짜가 없으면 뜨지 않고, 이미 지난 납기와 ` +
       `출하가 끝난 건도 뜨지 않습니다. 처리할 사람이 정해져 있는 알림이 아니라서 모든 역할이 받습니다.`,
-    // 급한 경고 — 가장 센 색. 여덟 중 유일하게 날짜가 지나면 손쓸 수 없는 일이다.
+    // 급한 경고 — 가장 센 색. 다섯 중 유일하게 날짜가 지나면 손쓸 수 없는 일이다.
     toneClassName: "text-red-700 dark:text-red-400",
     toneIndex: 0,
   },
   APPROVAL_GRANTED: {
     label: "승인 완료",
-    description: `내가 요청한 결재(수리 검수 승인·최종 출하 승인·부품 불출 승인·견적서 승인)가 마지막 단계까지 승인된 것입니다. 요청한 사람 본인에게만 가고, 결정된 지 ${APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS}일이 지난 것은 뜨지 않습니다. 할 일이 아니라 알려 드리는 것이라 눌러서 확인하면 사라집니다(다른 기기에서도).`,
+    description: `내가 요청한 결재(수리 검수 승인·최종 출하 승인·견적서 승인)가 마지막 단계까지 승인된 것입니다. 요청한 사람 본인에게만 가고, 결정된 지 ${APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS}일이 지난 것은 뜨지 않습니다. 할 일이 아니라 알려 드리는 것이라 눌러서 확인하면 사라집니다(다른 기기에서도).`,
     // 결과 — 초록이 「됐다」다.
     toneClassName: "text-green-700 dark:text-green-400",
     toneIndex: 12,
   },
   APPROVAL_REJECTED: {
     label: "반려됨",
-    description: `내가 요청한 결재가 어느 단계에서든 반려된 것입니다. 요청한 사람 본인에게만 가고, 결정된 지 ${APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS}일이 지난 것과 내가 스스로 취소한 신청은 뜨지 않습니다. 눌러서 확인하면 사라집니다(다른 기기에서도).`,
+    description: `내가 요청한 결재가 어느 단계에서든 반려된 것입니다. 요청한 사람 본인에게만 가고, 결정된 지 ${APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS}일이 지난 것과 내가 스스로 결정한 것은 뜨지 않습니다. 눌러서 확인하면 사라집니다(다른 기기에서도).`,
     // 결과 — 붉은 쪽이 「안 됐다」다. 빨강은 급한 경고(납기 임박)가 쓰므로
     // 한 칸 비켜선 장미다.
     toneClassName: "text-rose-700 dark:text-rose-400",
     toneIndex: 9,
   },
 };
-
-/**
- * 재고가 한계수량 아래로 떨어졌을 때 종 알림을 받는 역할.
- *
- * 왜 이 셋인가 — 부품을 실제로 채워 넣는 사람(INVENTORY_MANAGER)과, 그것이 밀려
- * 있을 때 나서야 하는 사람(ADMIN·SUPER_ADMIN)이다. AS_ENGINEER는 부품을 쓰는
- * 쪽이고 필요한 것은 부품 요청으로 올린다 — 재고를 채우는 일에 손댈 수단이 없는
- * 사람에게 보내는 알림은 끌 수도 없는 소음이 된다. SALES는 재고를 읽기만 한다
- * (canViewInventory).
- *
- * **명단으로 적는 이유**는 이 시스템의 역할에 순서가 없기 때문이다 —
- * canReceivePartRequestNotifications가 같은 이유로 명단을 쓴다. 그 함수를 부르지
- * 않고 따로 두는 이유는 이 파일 머리말에 있다.
- */
-export function canReceiveLowStockNotifications(role: Role): boolean {
-  return role === "SUPER_ADMIN" || role === "ADMIN" || role === "INVENTORY_MANAGER";
-}
 
 /** 화면·서버가 나눠 갖지 않도록, 종류 순서는 언제나 NOTIFICATION_KINDS 그대로다. */
 export function isNotificationKind(value: string): value is NotificationKind {
@@ -241,7 +195,7 @@ export function isNotificationKind(value: string): value is NotificationKind {
  * 역할별 접근 권한 설정이 최고관리자 줄을 잠가 두는 것과 같은 이유다
  * (permission-areas.ts의 isRoleEditableInPermissionSettings). 모두를 끄면
  * 되돌릴 사람이 남지 않듯, 알림을 전부 꺼 버리면 밀린 일을 아무도 모르게 된다.
- * 결재를 기다리는 건도 처리되지 않은 부품 요청도 조용히 쌓이기만 하고, 그
+ * 결재를 기다리는 건도 납기가 다가온 건도 조용히 쌓이기만 하고, 그
  * 상태는 화면 어디에도 표시되지 않아 고장과 구별되지 않는다. 최고관리자 한
  * 줄만은 언제나 남겨 둔다.
  *
@@ -257,9 +211,6 @@ export function isRoleEditableInNotificationSettings(role: Role): boolean {
 export function defaultNotificationKindEnabled(kind: NotificationKind): boolean {
   switch (kind) {
     case "REPAIR_CASE_APPROVAL":
-    case "PART_REQUEST_PENDING":
-    case "PART_STOCK_BELOW_MINIMUM":
-    case "PART_ISSUE_APPROVAL_PENDING":
     case "QUOTE_APPROVAL_PENDING":
     case "REPAIR_CASE_DUE_DATE_NEAR":
     case "APPROVAL_GRANTED":
@@ -280,10 +231,16 @@ export function defaultNotificationKindEnabled(kind: NotificationKind): boolean 
 /**
  * 이 역할이 이 종류를 받는가 — 저장된 설정이 없을 때의 답.
  *
- * 여기가 "지금과 같음"을 지키는 자리다. 두 종류의 지금 규칙이 서로 다른 곳에
- * 흩어져 있던 것을 이 함수 하나로 모은다.
+ * 여기가 "지금과 같음"을 지키는 자리다. 종류마다 흩어져 있던 지금 규칙을 이 함수
+ * 하나로 모은다. 🔵 지금 등록된 다섯은 **전부 참**이다 — 역할로 갈리던 둘을
+ * 2026-10-27 에 걷어냈다(이 파일 머리말). switch 를 if 로 접지 않는 것은 다음에
+ * 붙는 종류가 참이라는 보장이 없어서다.
  */
 export function defaultRoleReceivesNotification(kind: NotificationKind, role: Role): boolean {
+  // 🔵 `role` 을 지금은 한 번도 읽지 않는다 — 다섯 종류가 전부 「전원 받음」이라서다.
+  //    인자를 지우지 않는 까닭은 바로 위 주석에 있다(역할로 갈리는 종류를 다시 붙이는
+  //    날 여기가 그 판정을 적는 자리다). 쓰지 않는 인자를 린트가 경고하므로 한 번 삼킨다.
+  void role;
   switch (kind) {
     case "REPAIR_CASE_APPROVAL":
       // 지금 이 알림을 역할로 막고 있는 코드가 한 줄도 없다 — 누가 받는지는
@@ -292,27 +249,8 @@ export function defaultRoleReceivesNotification(kind: NotificationKind, role: Ro
       // 달라진다(결재자인데 알림을 못 받는 사람이 생긴다).
       return true;
 
-    case "PART_REQUEST_PENDING":
-      // 명단을 옮겨 적지 않고 저쪽 함수를 부른다 — 이 파일 머리말 참조.
-      return canReceivePartRequestNotifications(role);
-
-    case "PART_STOCK_BELOW_MINIMUM":
-      // 반대로 이쪽은 명단을 이 파일에 적었다 — 재현할 옛 동작이 없고, 부품
-      // 요청과는 다른 질문이기 때문이다(이 파일 머리말).
-      return canReceiveLowStockNotifications(role);
-
-    case "PART_ISSUE_APPROVAL_PENDING":
-      // 새로 태어나는 종류라 재현할 옛 동작은 없지만, 답은 결재 대기와 같은
-      // 이유로 다섯 역할 전부 받음이다. 누가 받는지는 역할이 아니라 **결재선
-      // 지정**(과 최고관리자 비상구)이 정하고, 그 판정은 조회 안의 지정 관문
-      // (queries/inventory-part-issue-requests.ts)이 한다. 결재선에는 역할 제한
-      // 없이 누구든 올릴 수 있으므로(영업도 된다), 여기서 어느 역할을 빼면 그
-      // 순간 자기 차례인 결재자인데 알림을 못 받는 사람이 생긴다 — 그 실패는
-      // 화면에 아무 표시도 남기지 않는다.
-      return true;
-
     case "QUOTE_APPROVAL_PENDING":
-      // 불출 승인 대기와 **글자 그대로 같은 이유**로 다섯 역할 전부 받음이다 —
+      // 결재 대기와 같은 까닭으로 다섯 역할 전부 받음이다 —
       // 누가 받는지는 역할이 아니라 결재선 지정(과 최고관리자 비상구)이 정하고,
       // 그 판정은 조회 안의 지정 관문(queries/quote-approvals-pending.ts)이 한다.
       // 견적서 결재선에도 역할 제한이 없고(listSelectableApproverCandidates),
@@ -323,7 +261,7 @@ export function defaultRoleReceivesNotification(kind: NotificationKind, role: Ro
 
     case "REPAIR_CASE_DUE_DATE_NEAR":
       // 🔴 2026-10-19 사용자 결정 — **모두에게 보인다.** 역할로 좁히지 않는다.
-      // 새로 태어나는 종류라 재현할 옛 동작은 없고, 결재 대기 셋과 같은 모양의
+      // 새로 태어나는 종류라 재현할 옛 동작은 없고, 결재 대기 둘과 같은 모양의
       // 답이다. 까닭은 조금 다르다: 저쪽은 「누가 받는지를 결재선이 정하기」
       // 때문이고, 이쪽은 **애초에 받을 사람을 정하는 축이 없기** 때문이다 —
       // 납기가 다가온 건을 챙기는 일은 엔지니어(수리)·관리자(일정)·영업(고객
@@ -339,9 +277,9 @@ export function defaultRoleReceivesNotification(kind: NotificationKind, role: Ro
       // 이 알림은 **요청자 본인에게만** 가는 사람 단위 알림이다 — 누가 받는지는
       // 조회가 `requested_by_user_id = 나` 로 정하고(queries/approval-outcome-
       // notifications.ts), 남의 결재 결과가 보일 길이 애초에 없다. 결재를 요청하는
-      // 쪽은 역할이 여럿이라(검수·출하는 엔지니어·관리자, 불출은 재고 담당자) 여기서
-      // 역할을 빼면 자기가 올린 결재의 결과를 모르는 사람이 생길 뿐 막아 주는 것이
-      // 없다.
+      // 쪽은 역할이 여럿이라(검수·출하는 엔지니어·관리자, 견적서는 영업·관리자)
+      // 여기서 역할을 빼면 자기가 올린 결재의 결과를 모르는 사람이 생길 뿐 막아
+      // 주는 것이 없다.
       return true;
 
     default:

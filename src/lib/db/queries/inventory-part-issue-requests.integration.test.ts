@@ -26,7 +26,6 @@ import {
 import { createRepairCase } from "../mutations/repair-cases";
 import { listMyNotifications } from "./notifications";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
-import { ROLE_CODES, type Role } from "@/lib/domain/types";
 import {
   getPartIssueRequestDetail,
   listExecutablePartIssueRequests,
@@ -1112,175 +1111,44 @@ describe("listPartIssueRequestsPendingMyApproval", () => {
   });
 });
 
-describe("종 알림 — 불출 승인 대기 (listMyNotifications 를 그대로 태운다)", () => {
+describe("종 알림 — 불출 승인 대기는 2026-10-27(13-C4)에 걷어냈다", () => {
   /**
-   * 이 신청에 대한 불출 승인 대기 알림만. 다른 종류·시드 자료에 흔들리지 않게
-   * 종류와 대상으로 좁힌다. 역할은 그 사람의 실제 역할을 그대로 넘긴다.
+   * 🔴 **여기 있던 시험 다섯을 이 하나로 바꿨다.** 그 다섯은 불출 승인 대기 알림이
+   *  ① 지금 차례인 결재자에게만 잡히고 ② 「내가 결재할 건」 목록과 같은 말을 하고
+   *  ③ 승인하면 다음 단계로 넘어가고 ④ 반려되면 누구에게도 안 남고 ⑤ 역할로 거르지
+   * 않는다를 쟀다. 재고 기능이 별도 시스템(dss-inventory)으로 옮겨 가 **그쪽이 제
+   * 알림을 포털로 직접 보내므로**, A/S 가 같은 줄을 또 올리면 종에 두 번 뜬다.
+   *
+   * 🔵 그래서 이 자리에는 「뜬다」가 아니라 **「이제 안 뜬다」**를 남긴다. 밑자락은
+   * 그대로 진짜다 — 결재선 판을 깔고 지금 열린 결재 행을 넣어, **조회는 그 줄을
+   * 여전히 내놓는** 상태를 만든 뒤(아래 첫 단언) 그 사람의 종이 비어 있는 것을 본다.
+   * 표본이 비어서 공짜로 통과하는 것이 아니라는 근거가 그 첫 단언이다.
    */
-  async function partIssueNotificationsFor(actorUserId: string, actorRole: Role, issueRequestId: string) {
-    const items = await listMyNotifications(actorUserId, actorRole);
-    return items.filter(
-      (item) => item.kind === "PART_ISSUE_APPROVAL_PENDING" && item.targetKey === issueRequestId
-    );
-  }
-
-  test("🔴 지금 차례인 결재자에게 한 줄이 잡히고, 다음 단계 승인자·신청자·무관한 사람에게는 안 잡힌다", async () => {
-    const repairCase = await createTestRepairCase();
-    const { requestId } = await insertPartRequestWithItem(repairCase.id);
-    const issueRequestId = await insertDirectIssueRequest({
-      partRequestId: requestId,
-      destinationNote: null,
-    });
-    const routeId = await insertPartIssueRoute(1, [approverAId, approverBId]);
+  test("🔴 지금 차례인 결재자의 조회에는 잡히는데 그 사람의 종에는 한 줄도 서지 않는다", async () => {
+    const issueRequestId = await insertDirectIssueRequest({ destinationNote: "상해수리소" });
+    const routeId = await insertPartIssueRoute(1, [approverAId]);
     await insertPendingApproval(issueRequestId, {
       routeId,
       routeStepOrder: 1,
       assignedApproverUserId: approverAId,
     });
 
-    const mine = await partIssueNotificationsFor(approverAId, "AS_ENGINEER", issueRequestId);
-    assert.equal(mine.length, 1, "지금 차례인 결재자에게 알림이 없다");
-    assert.equal(mine[0].subject, repairCase.intakeNumber, "요청 기반은 부품 요청의 접수 건 인수번호를 굵게 적는다");
-    assert.equal(mine[0].detail, "결재선 1단계 · 신청자 partissue requester");
-    assert.equal(mine[0].href, "/inventory/approvals");
-
+    // 표본이 비지 않았다는 근거 — 조회는 지금도 이 신청을 내놓는다.
     assert.deepEqual(
-      await partIssueNotificationsFor(approverBId, "AS_ENGINEER", issueRequestId),
-      [],
-      "다음 단계 승인자는 아직 차례가 아니다"
+      (await listPartIssueRequestsPendingMyApproval(approverAId)).map((row) => row.issueRequestId),
+      [issueRequestId],
+      "밑자락이 깨져 아래 단언이 공짜로 통과한다"
     );
-    assert.deepEqual(
-      await partIssueNotificationsFor(requesterId, "AS_ENGINEER", issueRequestId),
-      [],
-      "신청자는 결재자가 아니다"
-    );
-    assert.deepEqual(await partIssueNotificationsFor(outsiderId, "AS_ENGINEER", issueRequestId), []);
-    assert.deepEqual(
-      await partIssueNotificationsFor(inactiveApproverId, "AS_ENGINEER", issueRequestId),
-      [],
-      "비활성 계정에게는 가지 않는다"
-    );
-    assert.equal(
-      (await partIssueNotificationsFor(superAdminId, "SUPER_ADMIN", issueRequestId)).length,
-      1,
-      "최고관리자는 비상구로 받는다 — [승인 요청건] 탭의 「내가 결재할 건」과 같다"
-    );
-  });
 
-  test("🔴 알림과 「내가 결재할 건」 목록이 같은 말을 한다 — 같은 신청, 같은 수", async () => {
-    const first = await insertDirectIssueRequest();
-    const second = await insertDirectIssueRequest({ destinationNote: "평택 창고" });
-    const routeId = await insertPartIssueRoute(1, [approverAId]);
-    for (const issueRequestId of [first, second]) {
-      await insertPendingApproval(issueRequestId, {
-        routeId,
-        routeStepOrder: 1,
-        assignedApproverUserId: approverAId,
-      });
-    }
-
-    const listed = (await listPartIssueRequestsPendingMyApproval(approverAId)).map((row) => row.issueRequestId);
-    const notified = (await listMyNotifications(approverAId, "AS_ENGINEER"))
-      .filter((item) => item.kind === "PART_ISSUE_APPROVAL_PENDING")
-      .map((item) => item.targetKey);
-    assert.deepEqual(notified, listed);
-    assert.deepEqual([...listed].sort(), [first, second].sort());
-  });
-
-  test("🔴 승인하면 다음 조회에서 저절로 사라지고, 다음 단계 승인자에게 넘어간다", async () => {
-    const issueRequestId = await insertDirectIssueRequest();
-    const routeId = await insertPartIssueRoute(1, [approverAId, approverBId]);
-    const firstId = await insertPendingApproval(issueRequestId, {
-      routeId,
-      routeStepOrder: 1,
-      assignedApproverUserId: approverAId,
-    });
-    assert.equal((await partIssueNotificationsFor(approverAId, "AS_ENGINEER", issueRequestId)).length, 1);
-
-    // 1단계를 닫고 2단계를 연다 — 결재 mutation 이 하는 일을 손으로 한다(이 파일은
-    // 표와 읽는 길을 본다. 결재 경로 자체는 mutations 쪽 시험이 본다).
-    await db
-      .update(inventoryPartIssueApprovals)
-      .set({ status: "APPROVED", decidedByUserId: approverAId, decidedAt: new Date() })
-      .where(eq(inventoryPartIssueApprovals.id, firstId));
-    await insertPendingApproval(issueRequestId, {
-      routeId,
-      routeStepOrder: 2,
-      assignedApproverUserId: approverBId,
-    });
-
-    assert.deepEqual(
-      await partIssueNotificationsFor(approverAId, "AS_ENGINEER", issueRequestId),
-      [],
-      "처리한 사람에게 알림이 남아 있다"
-    );
-    const next = await partIssueNotificationsFor(approverBId, "AS_ENGINEER", issueRequestId);
-    assert.equal(next.length, 1, "다음 단계 승인자에게 넘어가지 않았다");
-    assert.equal(next[0].subject, "상해수리소");
-    assert.equal(next[0].detail, "결재선 2단계 · 신청자 partissue requester");
-  });
-
-  test("반려되면 누구에게도 남지 않는다 — 최고관리자에게도", async () => {
-    const issueRequestId = await insertDirectIssueRequest();
-    const routeId = await insertPartIssueRoute(1, [approverAId]);
-    const approvalId = await insertPendingApproval(issueRequestId, {
-      routeId,
-      routeStepOrder: 1,
-      assignedApproverUserId: approverAId,
-    });
-
-    await db
-      .update(inventoryPartIssueApprovals)
-      .set({
-        status: "REJECTED",
-        decidedByUserId: approverAId,
-        decidedAt: new Date(),
-        decisionReason: "수량 과다",
-      })
-      .where(eq(inventoryPartIssueApprovals.id, approvalId));
-    await db
-      .update(inventoryPartIssueRequests)
-      .set({ status: "REJECTED" })
-      .where(eq(inventoryPartIssueRequests.id, issueRequestId));
-
-    assert.deepEqual(await partIssueNotificationsFor(approverAId, "AS_ENGINEER", issueRequestId), []);
-    assert.deepEqual(await partIssueNotificationsFor(superAdminId, "SUPER_ADMIN", issueRequestId), []);
-  });
-
-  test("🔴 역할로 거르지 않는다 — 결재선에 오른 사람은 역할이 무엇이든 자기 차례의 알림을 받는다", async () => {
-    // 결재선에는 역할 제한 없이 누구든 올라간다(영업도, 재고 메뉴 권한이 없는 사람도).
-    // 알림 쪽이 역할로 먼저 걸렀다면 여기서 어느 한 역할이 비어 나온다.
-    const roles = ROLE_CODES.filter((role) => role !== "SUPER_ADMIN");
-    const approvers: { role: Role; userId: string; issueRequestId: string }[] = [];
-    for (const role of roles) {
-      approvers.push({
-        role,
-        userId: await createTestUser(`partissue ${role} approver`, { role }),
-        issueRequestId: await insertDirectIssueRequest(),
-      });
-    }
-
-    const routeId = await insertPartIssueRoute(
-      1,
-      approvers.map((approver) => approver.userId)
-    );
-    for (const [index, approver] of approvers.entries()) {
-      await insertPendingApproval(approver.issueRequestId, {
-        routeId,
-        routeStepOrder: index + 1,
-        assignedApproverUserId: approver.userId,
-      });
-    }
-
-    for (const approver of approvers) {
-      const items = (await listMyNotifications(approver.userId, approver.role)).filter(
-        (item) => item.kind === "PART_ISSUE_APPROVAL_PENDING"
+    // 결재자 본인과 최고관리자(비상구) 둘 다 — 종에는 그 신청을 가리키는 줄이 없다.
+    for (const [userId, role] of [
+      [approverAId, "AS_ENGINEER"],
+      [superAdminId, "SUPER_ADMIN"],
+    ] as const) {
+      const items = (await listMyNotifications(userId, role)).filter(
+        (item) => item.targetKey === issueRequestId || item.href.startsWith("/inventory")
       );
-      assert.deepEqual(
-        items.map((item) => item.targetKey),
-        [approver.issueRequestId],
-        `${approver.role} 결재자가 자기 차례의 알림만 정확히 한 줄 받지 못했다`
-      );
+      assert.deepEqual(items, [], `${role} 의 종에 재고 줄이 다시 섰다 — 포털에서 두 번 보인다`);
     }
   });
 });

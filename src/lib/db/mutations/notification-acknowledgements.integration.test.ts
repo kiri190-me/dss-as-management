@@ -217,6 +217,11 @@ describe("acknowledgeNotification / listAcknowledgedNotificationKeys", () => {
 
   test("🔴 6a. 형식이 맞아도 할 일 알림의 키는 거절되고 행이 남지 않는다 — 확인으로 숨기는 길이 없다", async () => {
     const before = (await rowsFor(userAId)).length;
+    // 🔵 가운데 셋(재고 알림)은 2026-10-27(13-C4)에 **종류 자체가 사라졌다.** 그래서
+    //    지금은 「등록된 할 일이라 거절」이 아니라 「모르는 종류라 거절」로 막힌다 —
+    //    막는 쪽이 둘 다 같은 함수이고(isAcknowledgeableNotificationKind), 답도 같다.
+    //    글자를 남겨 두는 까닭은 **운영에 그 키로 눌러 보려는 옛 화면이 남아 있어도**
+    //    거절되는 것을 계속 재기 위해서다(종류를 지웠다고 입구가 열리면 안 된다).
     const todoKeys = [
       `REPAIR_CASE_APPROVAL:${randomUUID()}:FINAL_SHIPMENT`,
       `PART_REQUEST_PENDING:${randomUUID()}`,

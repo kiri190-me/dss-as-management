@@ -1,24 +1,17 @@
 import "server-only";
 import { listRepairCasesPendingMyApproval } from "./repair-case-approvals-pending";
-import { getPendingPartRequestsForNotification } from "./inventory-part-requests";
-import { listPartsBelowMinimumQuantity } from "./part-minimum-quantities";
-import { canReceivePartRequestNotifications } from "@/lib/auth/inventory-authorization";
 import { loadNotificationSettings } from "./notification-settings";
-import { canReceiveLowStockNotifications, deliversNotification } from "@/lib/domain/notification-settings";
+import { deliversNotification } from "@/lib/domain/notification-settings";
 import {
   buildApprovalNotification,
-  buildPartStockBelowMinimumNotification,
-  buildPendingPartRequestNotification,
   type NotificationItem,
   type NotificationKind,
-  buildPartIssueApprovalNotification,
   buildQuoteApprovalNotification,
   buildApprovalGrantedNotification,
   buildApprovalRejectedNotification,
   buildRepairCaseDueDateNearNotification,
 } from "@/lib/domain/notifications";
 import type { Role } from "@/lib/domain/types";
-import { listPartIssueRequestsPendingMyApproval } from "./inventory-part-issue-requests";
 import { listQuoteApprovalsPendingMyApproval } from "./quote-approvals-pending";
 import { listMyGrantedApprovalOutcomes, listMyRejectedApprovalOutcomes } from "./approval-outcome-notifications";
 import { listRepairCasesWithDueDateNear } from "./repair-case-due-date-notifications";
@@ -34,22 +27,24 @@ import { listAcknowledgedNotificationKeys } from "./notification-acknowledgement
  * ── 인가 판정은 두 가지 모양 중 하나다 ─────────────────────────────────
  *  (가) 부르는 조회가 스스로 판정한다 — 결재 알림이 그렇다. 누가 결재자인지가
  *       사람 단위(대표 자격·위임)라 SQL 안에서 정해지고, 사용자 id 하나면
- *       충분하다(repair-case-approvals-pending.ts). 불출 승인 대기도 같은 모양이다
- *       — 결재선 지정(과 최고관리자 비상구)이 조회 안에서 정해진다
- *       (inventory-part-issue-requests.ts). 견적서 결재 대기도 그 모양 그대로다
+ *       충분하다(repair-case-approvals-pending.ts). 견적서 결재 대기도 같은
+ *       모양이다 — 결재선 지정(과 최고관리자 비상구)이 조회 안에서 정해진다
  *       (quote-approvals-pending.ts).
- *  (나) load가 **역할로** 먼저 거른다 — 부품 요청 알림이 그렇다. 대상이 사람이
- *       아니라 역할이고, 조회 자체는 "지금 처리 대기 중인 요청 전부"라 누가
- *       봐도 같은 결과다. 그래서 조회를 부르기 **전에** 역할을 보고, 아니면
- *       빈 배열로 끝낸다 — 권한 없는 사람 앞에서 그 조회는 아예 돌지 않는다.
  *  (다) **아무도 거르지 않는다** — 납기 임박이 그렇다. 조회는 "지금 납기가
- *       다가온 건 전부"라 누가 봐도 같은 결과인데, (나)와 달리 **받을 사람을
- *       가를 축이 없다**: 납기가 다가온 건은 엔지니어·관리자·영업·재고 담당자
- *       에게 각자 다른 모양으로 걸린다(2026-10-19 사용자 결정 — 모두에게).
- *       그래서 load 가 사용자 id 도 역할도 받지 않는다. 좁히는 일은 알림 설정
- *       화면이 한다 — 아래 「설정은 윗단 필터다」 절 그대로다.
- * 판정 자체는 이 파일이 쓰지 않는다. auth/inventory-authorization.ts의 순수
- * 함수를 부른다(화면·mutation이 쓰는 그 파일).
+ *       다가온 건 전부"라 누가 봐도 같은 결과인데, **받을 사람을 가를 축이
+ *       없다**: 납기가 다가온 건은 엔지니어·관리자·영업에게 각자 다른 모양으로
+ *       걸린다(2026-10-19 사용자 결정 — 모두에게). 그래서 load 가 사용자 id 도
+ *       역할도 받지 않는다. 좁히는 일은 알림 설정 화면이 한다 — 아래 「설정은
+ *       윗단 필터다」 절 그대로다.
+ *
+ * 🔴 **(나)형은 지금 하나도 없다 — 번호를 다시 매기지 않았다.** (나)는 「load 가
+ *    **역할로** 먼저 걸러, 자격 없는 사람 앞에서는 그 조회가 아예 돌지 않는다」는
+ *    모양이고, 표본이 부품 요청 대기 · 재고 부족 둘뿐이었다. 그 셋(불출 승인 대기
+ *    포함)을 2026-10-27(조각 13-C4)에 걷어내면서 자리가 비었다. 🔵 번호를 (가)·(나)
+ *    로 당기지 않는 까닭은 이 저장소의 다른 주석 여럿이 「(나)형」이라는 말로 이
+ *    모양을 가리키고 있어서다 — 역할로 거르는 종류를 다시 붙일 때 그대로 쓴다.
+ *    그때 쓸 본보기: 조회를 부르기 **전에** 역할을 보고 아니면 빈 배열로 끝낸다
+ *    (걸러 내는 것이 아니라 아예 읽지 않는 쪽이 인가 경계로도 맞다).
  *
  * 결재 결과(승인 완료·반려됨)도 (가)형이다 — 대상이 **요청자 본인**이고, 조회가
  * `requested_by_user_id = 나` 로 스스로 좁힌다(approval-outcome-notifications.ts).
@@ -140,77 +135,6 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
     },
   },
   {
-    kind: "PART_REQUEST_PENDING",
-    load: async (_actorUserId, actorRole) => {
-      // 역할 판정이 먼저다. 이 조회는 사용자별로 결과가 달라지지 않으므로
-      // (처리 대기 중인 요청 전부), 자격이 없으면 부르지 않고 끝낸다 —
-      // 걸러내는 것이 아니라 아예 읽지 않는 쪽이 인가 경계로도 맞고, 요청
-      // 화면에 못 들어가는 사람 앞에서 DB를 건드리지도 않는다.
-      //
-      // 이 함수의 답이 알림 설정의 **기본값**이다
-      // (domain/notification-settings.ts의 defaultRoleReceivesNotification).
-      // 설정이 앞에서 이미 같은 판정을 했더라도 여기를 지우지 않는다 — 이
-      // 조회를 부르는 자리가 나중에 늘었을 때 인가 경계가 설정 한 곳에만
-      // 남아 있으면 안 된다.
-      if (!canReceivePartRequestNotifications(actorRole)) return [];
-
-      const pending = await getPendingPartRequestsForNotification();
-      return pending.map((row) =>
-        buildPendingPartRequestNotification({
-          requestId: row.id,
-          intakeNumber: row.intakeNumber,
-          requestedByName: row.requestedByName,
-        })
-      );
-    },
-  },
-  {
-    kind: "PART_STOCK_BELOW_MINIMUM",
-    load: async (_actorUserId, actorRole) => {
-      // 부품 요청 알림과 같은 모양 (나) — 대상이 사람이 아니라 역할이고, 조회
-      // 자체는 "지금 한계 밑으로 떨어진 것 전부"라 누가 봐도 같은 결과다.
-      // 그래서 조회를 부르기 **전에** 역할을 본다. 판정 함수를 따로 둔 이유는
-      // domain/notification-settings.ts 머리말에 있다(부품 요청과 명단은 같지만
-      // 같은 질문이 아니다).
-      if (!canReceiveLowStockNotifications(actorRole)) return [];
-
-      // 한계수량이 정해진 짝만 돌아온다 — 아무도 한계수량을 정하지 않았다면 이
-      // 조회는 빈 목록이고, 이 종류는 한 줄도 뜨지 않는다.
-      const shortages = await listPartsBelowMinimumQuantity();
-      return shortages.map((row) =>
-        buildPartStockBelowMinimumNotification({
-          partId: row.partId,
-          partName: row.partName,
-          owner: row.owner,
-          currentQuantity: row.currentQuantity,
-          minimumQuantity: row.minimumQuantity,
-        })
-      );
-    },
-  },
-  {
-    kind: "PART_ISSUE_APPROVAL_PENDING",
-    load: async (actorUserId) => {
-      // 결재 알림과 같은 모양 (가) — 대상이 역할이 아니라 **사람**이다. 그래서 역할로
-      // 먼저 거르지 않는다: 결재선에는 역할 제한 없이 누구든 올라갈 수 있어서, 여기서
-      // 역할을 보는 순간 자기 차례인 결재자가 알림을 못 받는다.
-      //
-      // 판정도 새로 적지 않는다 — [승인 요청건] 탭의 「내가 결재할 건」이 쓰는 바로
-      // 그 조회다(지정된 사람 + 최고관리자 비상구, 지금 열린 단계만). 알림과 목록이
-      // 서로 다른 말을 하면 안 된다. 여기서 하는 일은 모양 변환뿐이다.
-      const pending = await listPartIssueRequestsPendingMyApproval(actorUserId);
-      return pending.map((item) =>
-        buildPartIssueApprovalNotification({
-          issueRequestId: item.issueRequestId,
-          intakeNumber: item.intakeNumber,
-          destinationNote: item.destinationNote,
-          routeStepOrder: item.routeStepOrder,
-          requestedByName: item.requestedByName,
-        })
-      );
-    },
-  },
-  {
     kind: "QUOTE_APPROVAL_PENDING",
     load: async (actorUserId) => {
       // 결재 요청·불출 승인 대기와 같은 모양 (가) — 대상이 역할이 아니라 **사람**이다.
@@ -236,11 +160,12 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
     kind: "REPAIR_CASE_DUE_DATE_NEAR",
     load: async () => {
       // 🔴 역할로 거르지 않는다 — **모두에게 간다**(2026-10-19 사용자 결정).
-      // 재고 부족과 같은 「상태가 그러한 것」이지만 (나)형이 아니다: 저쪽은 재고를
-      // 채울 사람이 정해져 있어 조회를 부르기 전에 역할을 보는데, 납기가 다가온
-      // 건은 엔지니어·관리자·영업·재고 담당자에게 각자 다른 모양으로 걸려 가를
-      // 축이 없다. 그래서 load 가 역할을 **받지도** 않는다. 좁히고 싶으면 알림
-      // 설정 화면에서 역할 스위치를 끈다(윗단 필터 — 이 파일 머리말).
+      // 「지금 상태가 그러한 건 전부」를 내놓는 조회라는 점은 걷어낸 재고 부족
+      // 알림과 같았지만, 그쪽은 재고를 채울 사람이 정해져 있어 조회를 부르기
+      // 전에 역할을 보는 (나)형이었다(이 파일 머리말의 빈 자리). 납기가 다가온
+      // 건은 엔지니어·관리자·영업에게 각자 다른 모양으로 걸려 가를 축이 없다.
+      // 그래서 load 가 역할을 **받지도** 않는다. 좁히고 싶으면 알림 설정 화면에서
+      // 역할 스위치를 끈다(윗단 필터 — 이 파일 머리말).
       //
       // 「무엇을 알릴 것인가」도 여기서 정하지 않는다 — 화면이 쓰는 그 함수로
       // 날짜를 구하고 창·출하 완료·휴지통을 거르는 일은 전부 저 조회 안에 있다
@@ -301,7 +226,7 @@ export async function listMyNotifications(actorUserId: string, actorRole: Role):
 
   // 걸러진 종류는 load를 **부르지 않는다**. 결과를 받아 버리는 것이 아니라
   // 아예 읽지 않는 쪽이 맞다 — 알림에서 뺀 사람 앞에서 그 조회가 DB를
-  // 건드리지도 않는다(PART_REQUEST_PENDING이 원래 쓰던 방식과 같다).
+  // 건드리지도 않는다(머리말 (나)형의 자리가 원래 쓰던 방식과 같다).
   const delivered = NOTIFICATION_SOURCES.filter((source) =>
     deliversNotification(source.kind, actorRole, settings)
   );

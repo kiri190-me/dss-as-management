@@ -34,6 +34,15 @@
 #     src/lib/db/queries/part-minimum-quantities.integration.test.ts
 #     src/lib/db/queries/inventory-part-issue-requests.integration.test.ts
 #
+# 🔵 **2026-10-27(13-C4): 아홉 줄 그대로지만 두 파일의 속이 바뀌었다.**
+#    queries/part-minimum-quantities(시험 넷 → 하나) 와
+#    queries/inventory-part-issue-requests(종 알림 다섯 → 하나)에서 「종에 뜬다」를
+#    재던 시험 아홉이 「**이제 안 뜬다**」 하나씩으로 바뀌었다(합계 −7). 알림 종류
+#    셋을 코드에서 뺀 조각이라 그 보증 자체가 뒤집혔다.
+#    🔴 **두 파일을 지울 때 그 둘도 함께 사라진다** — 대신 재고 표 없이 같은 것을
+#    재는 자리를 unit 쪽에 두었다(domain/notifications.test.ts 의
+#    「재고 알림 셋은 레지스트리에서 사라졌다」). 그래서 지워도 보증이 비지 않는다.
+#
 # 🔴 그런데 **13-B 쪽 여섯도 아직 못 뺐다**(2026-10-27 현재 아홉 줄 그대로다).
 #    13-B 에서 실제로 지운 것은 **옛 서버 액션 여섯 + mutations/oh-part-templates.ts** 뿐이고,
 #    그 일곱에는 딸린 시험이 하나도 없어서 **이 목록은 한 줄도 안 바뀌었다.**
@@ -42,7 +51,8 @@
 #
 # 🔵 이 목록에서 「재고」로 검색해도 **안 걸리는** 시험이 같은 mutation 을 밑자락으로 썼다.
 #    처음 여섯이었고 **2026-10-27 현재 하나**다 — mutations/repair-case-billing-decision
-#    뿐이다(그것은 13-C4 에서 mutation 과 함께 **통째로** 지운다).
+#    뿐이다(그것은 **13-C5** 에서 mutation 과 함께 **통째로** 지운다 — 13-C4 는 알림만
+#    걷어냈고 mutation 은 한 줄도 안 지웠다).
 #    끊은 다섯은 방법이 **셋으로 갈린다**:
 #      · 표본을 재고 밖으로 옮긴 둘 — role-permissions(13-C1) ·
 #        queries/notification-settings(13-C2).
