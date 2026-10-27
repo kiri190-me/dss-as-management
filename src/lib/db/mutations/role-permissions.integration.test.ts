@@ -2,12 +2,10 @@ import "../../../../scripts/load-env";
 
 import { after, afterEach, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { db, pgClient } from "../connection";
-import { parts, rolePermissions, users } from "../schema";
+import { rolePermissions, users } from "../schema";
 import { saveRolePermissions } from "./role-permissions";
-import { createPart } from "./inventory";
 import { hasPermission, roleOnlyActor } from "@/lib/auth/permission-resolver";
 import { PERMISSION_LEAF_KEYS } from "@/lib/auth/permission-features";
 import { baselineLeafLevel } from "@/lib/auth/permission-baseline";
@@ -201,44 +199,20 @@ test("트리에 없는 키는 저장되지 않는다", async () => {
 });
 
 /**
- * ============================================================================
- * 넓힌 값이 실제로 조작을 열어 주는가 (재고 — 4단계 전환 완료 영역)
- * ============================================================================
- * 여기까지 통과해야 넓히기가 "저장은 되는데 아무 일도 안 일어나는" 기능이
- * 아니라는 것이 증명된다. 재고 mutation이 can*() 대신 설정을 보게 된 것이
- * 4단계 전환이고, 이 테스트가 그 전환의 유일한 끝단 증거다.
- * ============================================================================
+ * ────────────────────────────────────────────────────────────────────────────
+ * 🔴 여기 있던 「끝단 증거」는 자리를 옮겼다 — 없어진 것이 아니다
+ * ────────────────────────────────────────────────────────────────────────────
+ * 「설정으로 저장한 값이 **실제로 그 mutation 을 열어 주는가**」를 끝에서 끝까지
+ * 재는 자리는 이제 mutations/repair-case-used-parts.integration.test.ts 의
+ * 「🔴 [역할별 접근 권한]에서 넓히면 실제로 열리고, 좁히면 막힌다」 하나다.
+ *
+ * 2026-10-27 에 옮겼다(옛 재고 걷어내기 13-C1). 여기 있던 표본이 `createPart`
+ * (mutations/inventory.ts)였는데 옛 재고 mutation 은 곧 지워질 것이라 밑자락으로
+ * 둘 수 없었다. 저쪽은 원래 표에 행을 직접 넣어 「넓히기 · 좁히기 · 조회 판정」을
+ * 재고 있었고, 이번에 저장 경로(saveRolePermissions)로 바꿔 이 이음새까지 품었다.
+ * 🔵 여기에 다시 만들지 말고 저쪽을 고쳐라.
+ * ────────────────────────────────────────────────────────────────────────────
  */
-test("설정으로 넓히면 실제로 그 조작이 열린다 — 영업의 부품 등록", async () => {
-  const [sales] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.role, "SALES"))
-    .limit(1);
-  assert.ok(sales, "테스트 DB에 영업 담당자 계정이 필요합니다");
-
-  const partName = `PERM-TEST-${randomUUID().slice(0, 8)}`;
-
-  // 1) 기본 정책에서는 막힌다.
-  const blocked = await createPart({ partName, actorUserId: sales.id });
-  assert.equal(blocked.ok, false, "기본 정책에서 영업이 부품을 등록할 수 있으면 안 됩니다");
-  if (!blocked.ok) assert.equal(blocked.code, "FORBIDDEN");
-
-  // 2) 최고관리자가 넓힌다.
-  const saved = await saveRolePermissions({
-    changes: [{ role: "SALES", levels: { "inventory.parts": "WRITE" } }],
-    actorUserId: superAdminId,
-  });
-  assert.equal(saved.ok, true);
-
-  // 3) 이제 열린다.
-  const allowed = await createPart({ partName, actorUserId: sales.id });
-  assert.equal(allowed.ok, true, "넓혔는데도 막혔다면 mutation이 아직 설정을 보지 않는 것입니다");
-
-  if (allowed.ok) {
-    await db.delete(parts).where(eq(parts.id, allowed.partId));
-  }
-});
 
 test("한 노드 안에서 쓰기와 관리가 갈린다 — End-User 등록 vs 이름 변경", async () => {
   // 이 구분이 하위 기능 권한을 만든 계기다. 메뉴 하나에 수준 하나만 붙이던

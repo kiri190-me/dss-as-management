@@ -52,25 +52,28 @@ import type { StockOwner } from "@/lib/domain/inventory-types";
  *    조회 시험이 제 질의를 재려고 **이 mutation 으로 행을 만든다.** 그래서 mutation 을
  *    조회보다 먼저 떼면 조회 시험이 먼저 깨진다. **13-C 와 한 덩어리로** 떼야 한다.
  *
- * 🔴 **밑자락으로 쓰는 남의 시험 여섯** — 여섯 다 파일 이름에 「inventory」가 없다.
- *    그래서 「재고 파일 목록」을 아무리 들여다봐도 안 나타나고, 지운 뒤 test:db 에서야
- *    터진다. 지우기 전에 **반드시 이 목록을 보라.**
+ * 🔴 **밑자락으로 쓰는 남의 시험 — 처음 여섯, 지금 다섯**(㉣ 는 13-C1 에서 끊었다).
+ *    남은 다섯 다 파일 이름에 「inventory」가 없다. 그래서 「재고 파일 목록」을 아무리
+ *    들여다봐도 안 나타나고, 지운 뒤 test:db 에서야 터진다. 지우기 전에 **반드시 이
+ *    목록을 보라.**
  *
  *    ㉠ mutations/repair-cases-purge.integration.test.ts          (createPart·receiveStock·consumeStock)
  *    ㉡ mutations/repair-cases-permanent-delete.integration.test.ts (위 + createPartRequest)
  *    ㉢ mutations/repair-case-billing-decision.integration.test.ts  (consumeStock·createPartRequest)
- *    ㉣ mutations/role-permissions.integration.test.ts              (createPart)
+ *    ㉣ mutations/role-permissions.integration.test.ts              — **끊겼다**(아래 참조)
  *    ㉤ queries/notification-settings.integration.test.ts           (createPart·createPartRequest)
  *    ㉥ queries/approval-outcome-notifications.integration.test.ts  (decidePartIssueRequestApproval·
  *                                                                   cancelPartIssueRequest — 저쪽은
  *                                                                   mutations/inventory-part-issue-requests.ts 를 쓴다)
  *
- * 🔴 **㉣ 는 지우면 대신할 것이 없다.** 그 시험의 머리말이 제 입으로 「재고 mutation 이
- *    can*() 대신 설정을 보게 된 것이 4단계 전환이고, **이 테스트가 그 전환의 유일한 끝단
- *    증거다**」라고 적어 두었다. 「설정을 넓히면 *실제로* 그 조작이 열리는가」를 끝에서
- *    끝까지 재는 자리가 저기 하나뿐이고, 하필 표본이 `createPart` 다. 밑자락만 갈아
- *    끼우면 되는 ㉠㉡㉤㉥ 과 달리, 저것은 **다른 권한 게이트 mutation 으로 표본을
- *    옮기는 설계 결정**이 먼저 있어야 한다.
+ * 🔵 **㉣ 는 2026-10-27(13-C1)에 풀렸다 — 이제 이 파일을 import 하지 않는다.** 전에는
+ *    「설정을 넓히면 *실제로* 그 조작이 열리는가」를 끝에서 끝까지 재는 자리가 거기
+ *    하나뿐이었고 하필 표본이 `createPart` 라, 밑자락만 갈아 끼우면 되는 ㉠㉡㉤㉥ 과
+ *    달리 **표본을 옮기는 설계 결정**이 먼저 있어야 했다. 그 보증은
+ *    mutations/repair-case-used-parts.integration.test.ts 의 「🔴 [역할별 접근 권한]에서
+ *    넓히면 실제로 열리고, 좁히면 막힌다」로 옮겼다 — 저쪽은 role_permissions 표에 행을
+ *    직접 넣던 것을 `saveRolePermissions()` 호출로 바꿔, 「설정 화면이 **쓰는** 값」과
+ *    「mutation 이 **읽는** 값」이 같은 모양인지까지 한 시험이 잇는다.
  * 🔵 ㉢ 은 함께 지워도 되는 쪽이다 — 거기서 재는 잠금(BILLING_DECISION_REQUIRED)이
  *    **이 파일 안**(consumeStockCore 의 billingType === "PENDING_DECISION" 갈래)과
  *    inventory-part-requests.ts 안에 있어서, mutation 이 사라지면 잴 것도 같이 사라진다.

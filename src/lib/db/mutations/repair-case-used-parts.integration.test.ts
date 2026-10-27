@@ -24,6 +24,7 @@ import { createRepairCaseWithIdempotency } from "@/lib/server/services/create-re
 import type { IntakeSubmissionInput } from "@/lib/domain/local/submit-intake";
 import { getRepairCaseUsedPartsView } from "../queries/repair-case-used-parts";
 import { saveRepairCaseUsedParts } from "./repair-case-used-parts";
+import { saveRolePermissions } from "./role-permissions";
 import { roleOnlyActor } from "@/lib/auth/permission-resolver";
 import { ROLE_CODES, type Role } from "@/lib/domain/types";
 
@@ -36,8 +37,9 @@ import { ROLE_CODES, type Role } from "@/lib/domain/types";
  *     아무도 설정을 만지지 않았을 때의 **기본값**은 종전 그대로다 — SUPER_ADMIN ·
  *     ADMIN · AS_ENGINEER 쓰기, SALES · INVENTORY_MANAGER 막힘. 막힌 사람은
  *     **주소로 직접 불러도** 거절되고 한 줄도 · version 도 · 감사 이력도 남기지
- *     못한다. 그리고 설정을 넓히면 실제로 열리고 좁히면 막힌다(같은 describe 의
- *     마지막 시험이 표에 행을 넣어 확인한다).
+ *     못한다. 그리고 설정을 넓히면 실제로 열리고 좁히면 막힌다 — 같은 describe 의
+ *     「🔴 [역할별 접근 권한]에서 넓히면…」 시험이 **설정 저장 경로**(saveRolePermissions)
+ *     로 넣어 확인한다.
  *  1. 🔴 반출 이력이 있으면 **서버가** 거절한다(화면이 감추는 것으로는 모자라다).
  *  2. 🔴 출하 잠금 + 「과거 인수품 가져오기」로 들어온 건 → 적을 수 있다.
  *  3. 🔴 출하 잠금 + 그 밖의 건 → 막힌다.
@@ -523,16 +525,47 @@ describe("사용 부품 저장 — 누가 적을 수 있나 (설정의 기본값
     // 화면의 드롭다운이 저장하는 값이 곧 이 표의 행이고, 조회 · 저장이 그 값을
     // 본다 — 개발자가 코드를 고치지 않아도 바뀐다.
     //
+    // 🔴 **설정을 표에 직접 넣지 않고 저장 함수로 넣는다**(2026-10-27, 옛 재고
+    // 걷어내기 13-C1). 그래야 「설정 화면이 **쓰는** 값」과 「mutation 이 **읽는**
+    // 값」이 같은 모양인지까지 이 시험 하나가 잇는다 — 표에 손으로 넣으면 저장
+    // 쪽이 다른 키로 적고 있어도 시험은 멀쩡히 통과한다. 이 이음새를 재던 자리는
+    // role-permissions.integration.test.ts 의 「영업의 부품 등록」이었는데, 그
+    // 표본이 곧 사라질 옛 재고 mutation(createPart)이라 여기로 옮겼다.
+    //
     // `repairCases.usedParts` 는 이번에 새로 생긴 키라 다른 시험이 남긴 행이
     // 있을 수 없다. 그래도 끝에서 반드시 치운다 — 남으면 뒤따르는 시험이 기본값
     // 대신 이 행을 보게 된다.
     try {
-      await db.insert(rolePermissions).values([
-        // 기본값이 「없음」인 역할을 열어 준다.
-        { role: "SALES", areaKey: "repairCases.usedParts", level: "WRITE", updatedBy: adminId },
-        // 기본값이 「쓰기」인 역할에서 걷어 간다.
-        { role: "AS_ENGINEER", areaKey: "repairCases.usedParts", level: "NONE", updatedBy: adminId },
-      ]);
+      const saved = await saveRolePermissions({
+        changes: [
+          // 기본값이 「없음」인 역할을 열어 준다.
+          { role: "SALES", levels: { "repairCases.usedParts": "WRITE" } },
+          // 기본값이 「쓰기」인 역할에서 걷어 간다.
+          { role: "AS_ENGINEER", levels: { "repairCases.usedParts": "NONE" } },
+        ],
+        // 🔴 `adminId` 는 이름과 달리 **최고관리자**다(before 가 SUPER_ADMIN 을
+        // 고른다). 기본 정책보다 넓게 주는 것은 최고관리자만 할 수 있어서,
+        // 관리자로 부르면 영업 쪽이 **조용히 기본값으로 깎인 채 ok:true** 가 온다.
+        actorUserId: adminId,
+      });
+      assert.equal(saved.ok, true, `설정 저장이 거절됐다: ${JSON.stringify(saved)}`);
+      if (!saved.ok) return;
+      // 깎였으면 여기서 멈춘다 — ok 만 보면 "저장은 됐는데 아무 행도 안 생긴"
+      // 경우를 못 가른다.
+      assert.equal(saved.changedCount, 2, "두 역할 모두 실제로 저장돼야 한다");
+      // 🔴 이음새 그 자체 — 저장이 적어 넣은 (역할, 기능 키, 수준)이 아래 판정이
+      // 읽는 것과 같은 모양인가. 키 이름이 어긋나면 여기서 먼저 터진다.
+      assert.deepEqual(
+        Object.fromEntries(
+          (
+            await db
+              .select({ role: rolePermissions.role, level: rolePermissions.level })
+              .from(rolePermissions)
+              .where(eq(rolePermissions.areaKey, "repairCases.usedParts"))
+          ).map((row) => [row.role, row.level])
+        ),
+        { SALES: "WRITE", AS_ENGINEER: "NONE" }
+      );
 
       const widened = await saveRepairCaseUsedParts({
         repairCaseId: roleCaseId,
@@ -566,7 +599,27 @@ describe("사용 부품 저장 — 누가 적을 수 있나 (설정의 기본값
       const narrowedView = await getRepairCaseUsedPartsView(roleCaseId, roleOnlyActor("AS_ENGINEER"));
       assert.equal(narrowedView.writeGate.ok, false, "화면도 함께 닫혀야 한다");
     } finally {
+      // 🔴 저장 함수로 넣었으므로 **감사 이력도 함께 남았다** — role-permissions.ts
+      // 가 행마다 한 줄씩 적는다(targetEntity = "role_permissions", targetRecordId
+      // = 그 행의 id). 행을 지우면 그 id 를 더는 알 수 없으므로 **지우기 전에**
+      // 집어 둔다. 남겨 두면 가리키는 행이 없는 자취가 시험 DB 에 매 실행마다
+      // 쌓인다 — 이 파일은 제가 만든 것을 모두 되돌리는 쪽이다(머리말 '격리').
+      const savedRows = await db
+        .select({ id: rolePermissions.id })
+        .from(rolePermissions)
+        .where(eq(rolePermissions.areaKey, "repairCases.usedParts"));
       await db.delete(rolePermissions).where(eq(rolePermissions.areaKey, "repairCases.usedParts"));
+      if (savedRows.length > 0) {
+        await db.delete(auditLogs).where(
+          and(
+            eq(auditLogs.targetEntity, "role_permissions"),
+            inArray(
+              auditLogs.targetRecordId,
+              savedRows.map((row) => row.id)
+            )
+          )
+        );
+      }
     }
 
     // 치운 뒤에는 기본값으로 돌아온다 — 설정을 만지지 않은 상태가 종전 동작이다.
