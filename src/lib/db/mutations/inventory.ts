@@ -33,6 +33,69 @@ import type { StockOwner } from "@/lib/domain/inventory-types";
  *    unconditionally for every role, including SUPER_ADMIN/ADMIN.
  */
 
+/**
+ * ============================================================================
+ * 🔴 **이 묶음은 조회보다 먼저 못 뗀다** — 옛 재고 걷어내기(조각 13), 2026-10-27
+ * ============================================================================
+ * 옛 재고 기능은 별도 시스템(dss-inventory)으로 옮겨 갔고, A/S 는 재고 관리 API 를
+ * 부르는 **새 통로**(server/actions/inventory-stock-requests · server/inventory-gateway ·
+ * domain/inventory-gateway)로 바뀌었다. 화면과 경로는 13-A 에서 사라졌고(/inventory 는
+ * 404), 13-B 에서 **옛 서버 액션 여섯**이 사라졌다. 이 파일을 비롯한 mutation 여덟은
+ * **그때 일부러 남겼다.**
+ *
+ * 🔴 **까닭: 의존이 한 줄이 아니다.** 13-B 지시서는 「화면 → 액션 → mutation → 조회」
+ *    한 줄이라 역순으로 떼면 된다고 보았는데, 실측해 보니 아래가 거꾸로였다 —
+ *
+ *        13-C 의 조회 시험  ──(밑자락으로)──▶  이 mutation 들
+ *        남의 기능 시험 여섯 ──(밑자락으로)──▶  이 mutation 들
+ *
+ *    조회 시험이 제 질의를 재려고 **이 mutation 으로 행을 만든다.** 그래서 mutation 을
+ *    조회보다 먼저 떼면 조회 시험이 먼저 깨진다. **13-C 와 한 덩어리로** 떼야 한다.
+ *
+ * 🔴 **밑자락으로 쓰는 남의 시험 여섯** — 여섯 다 파일 이름에 「inventory」가 없다.
+ *    그래서 「재고 파일 목록」을 아무리 들여다봐도 안 나타나고, 지운 뒤 test:db 에서야
+ *    터진다. 지우기 전에 **반드시 이 목록을 보라.**
+ *
+ *    ㉠ mutations/repair-cases-purge.integration.test.ts          (createPart·receiveStock·consumeStock)
+ *    ㉡ mutations/repair-cases-permanent-delete.integration.test.ts (위 + createPartRequest)
+ *    ㉢ mutations/repair-case-billing-decision.integration.test.ts  (consumeStock·createPartRequest)
+ *    ㉣ mutations/role-permissions.integration.test.ts              (createPart)
+ *    ㉤ queries/notification-settings.integration.test.ts           (createPart·createPartRequest)
+ *    ㉥ queries/approval-outcome-notifications.integration.test.ts  (decidePartIssueRequestApproval·
+ *                                                                   cancelPartIssueRequest — 저쪽은
+ *                                                                   mutations/inventory-part-issue-requests.ts 를 쓴다)
+ *
+ * 🔴 **㉣ 는 지우면 대신할 것이 없다.** 그 시험의 머리말이 제 입으로 「재고 mutation 이
+ *    can*() 대신 설정을 보게 된 것이 4단계 전환이고, **이 테스트가 그 전환의 유일한 끝단
+ *    증거다**」라고 적어 두었다. 「설정을 넓히면 *실제로* 그 조작이 열리는가」를 끝에서
+ *    끝까지 재는 자리가 저기 하나뿐이고, 하필 표본이 `createPart` 다. 밑자락만 갈아
+ *    끼우면 되는 ㉠㉡㉤㉥ 과 달리, 저것은 **다른 권한 게이트 mutation 으로 표본을
+ *    옮기는 설계 결정**이 먼저 있어야 한다.
+ * 🔵 ㉢ 은 함께 지워도 되는 쪽이다 — 거기서 재는 잠금(BILLING_DECISION_REQUIRED)이
+ *    **이 파일 안**(consumeStockCore 의 billingType === "PENDING_DECISION" 갈래)과
+ *    inventory-part-requests.ts 안에 있어서, mutation 이 사라지면 잴 것도 같이 사라진다.
+ *
+ * 🔴 **㉠㉡ 은 「남긴 표」를 건드리는 살아 있는 코드의 유일한 증거다.** 재고 표는 운영의
+ *    과거 출고 기록이 거기에만 있어 **지우지 않기로 했다**(2026-10-16 사용자 결정). 그래서
+ *    repair-cases-purge.ts 와 repair-cases.ts 의 영구삭제는 **지금도** stock_transactions ·
+ *    inventory_part_issue_requests 의 destination_note 를 **개인정보 없이** 되메워 CHECK
+ *    제약을 지킨다. 그 되메움을 재는 자리가 ㉠㉡ 이고, 밑자락을 진짜 경로(receiveStock →
+ *    consumeStock)로 만드는 것 자체가 단언의 일부다 — raw insert 로 바꾸면 「정말 그 경로로
+ *    생긴 행인가」라는 보증이 빠진다.
+ *
+ * 🔵 **13-C 가 아직 손대면 안 되는 것 둘**(이 조각에서 따로 결정됐다):
+ *    ① queries/user-deletion-impact.ts · domain/user-deletion-rules.ts 의 "PART_ISSUE" —
+ *       OPEN_APPROVAL_KINDS 에서 빼면 계정 삭제의 **동작이 바뀐다**(이어받을 사람 없이
+ *       삭제될 수 있다. user-deletion-rules.ts 211-212 에 같은 모양의 과거 사고가 적혀 있다).
+ *       운영 DB 에 열린 PART_ISSUE 결재가 남은 사람이 있는지 **사람이 먼저 세기로** 했다.
+ *    ② domain/shipment-approval-route.ts 의 "PART_ISSUE" 는 **영구 유지**다 — DB enum 과
+ *       과거 결재 기록이 그 값을 쓴다.
+ *
+ * 🔵 이름이 닮아 섞이기 쉬운 것: `oh-part-templates`(옛 관리 화면, 13-B 에서 지웠다)와
+ *    `fetchInventoryOhTemplate`(새, 재고 관리 API)은 **완전히 다른 통로**다.
+ * ============================================================================
+ */
+
 export type InventoryMutationResultCode =
   | "FORBIDDEN"
   | "NOT_FOUND"

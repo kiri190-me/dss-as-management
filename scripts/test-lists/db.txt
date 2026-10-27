@@ -11,6 +11,40 @@
 #   - node-windows-test-preload.cjs: db-safety.txt 머리를 볼 것.
 #
 # 적는 법은 unit.txt 머리를 볼 것.
+#
+# ============================================================================
+# 옛 재고 걷어내기(조각 13) — 이 목록에서 **언제 무엇을 빼는가**  2026-10-27
+# ============================================================================
+# 재고 관련 줄이 이 목록에 아홉 있는데, 그 아홉이 **한 조각의 것이 아니다.**
+# 🔴 섞어 빼면 조용히 깨진다 — 안 지운 시험을 목록에서 빼면 오류 없이 **그냥 안 돈다.**
+#
+# 🔴 **줄 번호로 적지 않는다.** 이 머리말에 한 줄만 더해도 아래가 전부 밀린다.
+#    아래는 **파일 경로**가 열쇠다.
+#
+#   [13-B — 옛 액션·mutation 과 함께 빠진다]
+#     src/lib/db/mutations/inventory.integration.test.ts
+#     src/lib/db/mutations/inventory-trash.integration.test.ts
+#     src/lib/db/mutations/inventory-part-requests.integration.test.ts
+#     src/lib/db/mutations/inventory-part-issue-requests.integration.test.ts
+#     src/lib/db/mutations/part-minimum-quantities.integration.test.ts
+#     src/lib/db/mutations/part-unit-prices.integration.test.ts
+#
+#   [13-C — 조회가 걷힐 때 빠진다. 🔴 13-B 에서 빼면 안 된다]
+#     src/lib/db/queries/inventory-part-requests.integration.test.ts
+#     src/lib/db/queries/part-minimum-quantities.integration.test.ts
+#     src/lib/db/queries/inventory-part-issue-requests.integration.test.ts
+#
+# 🔴 그런데 **13-B 쪽 여섯도 아직 못 뺐다**(2026-10-27 현재 아홉 줄 그대로다).
+#    13-B 에서 실제로 지운 것은 **옛 서버 액션 여섯 + mutations/oh-part-templates.ts** 뿐이고,
+#    그 일곱에는 딸린 시험이 하나도 없어서 **이 목록은 한 줄도 안 바뀌었다.**
+#    mutation 여덟을 못 뗀 까닭(= 조회 시험과 남의 시험 여섯이 그것을 밑자락으로 쓴다)은
+#    src/lib/db/mutations/inventory.ts 머리말에 자세히 적어 두었다. 거기를 먼저 읽을 것.
+#
+# 🔵 이 목록에서 「재고」로 검색해도 **안 걸리는** 시험 여섯이 같은 mutation 을 밑자락으로
+#    쓴다(repair-cases-purge · repair-cases-permanent-delete · repair-case-billing-decision ·
+#    role-permissions · queries/notification-settings · queries/approval-outcome-notifications).
+#    재고 줄만 세고 「이만큼 빠지겠구나」 하면 틀린다.
+# ============================================================================
 
 src/lib/db/workflow-foundation.integration.test.ts
 src/lib/db/workflow-rules-parity.integration.test.ts
