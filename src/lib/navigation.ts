@@ -36,10 +36,12 @@ export type NavItem = {
    * 적고, 그러면 **같은 일의 기록이 두 곳으로 갈린다** — 이 칸이 막는 것은 그것 하나다.
    *
    * 감춘 것과 지운 것의 차이(되살릴지 지울지 정할 때 읽을 글이다):
-   *  · 열쇠 · 주소 · 권한 영역이 **그대로 남는다.** 북마크로도, 아직 `/inventory`
-   *    아래를 가리키는 알림 셋으로도 들어와지고, 그 자리에서 「여기가 아니라 저기」
-   *    띠를 본다(components/inventory/InventoryRetiredBanner.tsx). 역할별 접근 권한
-   *    설정의 줄도 그대로라 들어온 사람이 막히지 않는다.
+   *  · 열쇠 · 권한 영역이 **그대로 남는다.** 역할별 접근 권한 설정의 줄도 그대로다.
+   *  · 🔴 **주소는 2026-10-27 부터 비어 있다 — 화면이 지워졌다.** 그날 `app/(app)/inventory/`
+   *    의 경로 다섯과 `components/inventory/` 의 옛 화면이 걷혔다(사용자 결정: 안내 띠를
+   *    남기지 않는다). 그래서 북마크로도, 아직 `/inventory` 아래를 가리키는 알림으로도
+   *    들어가면 **404** 다. 알림의 주소를 손보는 일은 그 알림을 만드는 옛 재고 조회를
+   *    걷어내는 조각이 함께 한다(domain/notifications.ts 의 `/inventory…` 줄들).
    *  · 묶음(navGroups)에도 **그대로 남는다.** 거기서 빼면 어느 그룹에도 없는 항목이
    *    되어, 되살리는 날 자리를 처음부터 다시 정해야 한다.
    *  · 되살리려면 **이 한 줄을 지우면 된다.** 아주 지우는 판단은 따로 한다.
@@ -76,10 +78,12 @@ export const navItems: NavItem[] = [
   { key: "customers", href: "/customers", label: "고객사 관리" },
   { key: "productModels", href: "/product-models", label: "제품 모델 관리" },
   { key: "technicalProcedures", href: "/procedures/technical", label: "기술 작업 절차" },
-  // 🔴 **메뉴에서만 감췄다 — 지운 것이 아니다**(2026-10-16). 재고 일은 이제 재고 관리
-  // 시스템에서 한다. 주소 · 권한 영역 · 아래 묶음 자리는 그대로 두었다: 북마크와 알림이
-  // 아직 `/inventory` 아래를 가리키고, 들어온 사람은 화면 맨 위의 안내 띠를 본다.
-  // 까닭과 되살리는 법은 위 NavItem.hiddenFromMenu 에 적었다.
+  // 🔴 **메뉴에서 감췄다**(2026-10-16). 재고 일은 이제 재고 관리 시스템에서 한다.
+  // 🔴 2026-10-27 에 그 **화면과 경로가 지워졌다** — 이 줄의 주소는 이제 404 로 간다.
+  // 그래도 열쇠 · 권한 영역 · 아래 묶음 자리는 **남겨 둔다**: 열쇠를 빼면 역할별 접근 권한
+  // 설정에 저장돼 있는 `inventory` 줄이 갈 곳을 잃고, 묶음에서 빼면 되살리는 날 자리를
+  // 처음부터 다시 정해야 한다. 지우는 판단은 따로 한다 —
+  // 까닭과 그때 읽을 글은 위 NavItem.hiddenFromMenu 에 적었다.
   { key: "inventory", href: "/inventory", label: "재고 관리", hiddenFromMenu: true },
   { key: "domesticOrders", href: "/domestic-orders", label: "내자 정리" },
   { key: "quotes", href: "/quotes", label: "견적서" },

@@ -62,7 +62,9 @@ const sliceBetween = (source: string, startMarker: string, endMarker: string) =>
 };
 
 const form = flat(read("src/components/quotes/QuoteEditForm.tsx"));
-const partRequest = flat(read("src/components/inventory/PartRequestSection.tsx"));
+/* 🔵 2026-10-27 에 `components/inventory/` 에서 수리 건 상세 폴더로 옮겨 왔다(옛 재고 화면을
+   걷어내면서 — 이 칸은 지워진 그 화면들과 달리 재고 관리의 통로를 쓰는 새 코드다). */
+const partRequest = flat(read("src/components/repair-cases/detail/PartRequestSection.tsx"));
 
 /** 다 들어 있는 줄 하나 — 다섯 칸이 **서로 다른 글자**라 차례를 자리로 잴 수 있다. */
 const FULL: PartPickerRow = {

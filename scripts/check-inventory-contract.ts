@@ -300,7 +300,8 @@ function checkOneRequest(raw: unknown, where: string): string | null {
    * **「확인됨」**으로 그리는데, 오류가 아니라 빠짐이라 아무도 신고하지 않는다.
    *
    * 🔵 화면이 글자를 덧붙이고 있지 않은가는 여기서 못 잰다 — 그것은 원본을 읽는 일이라
-   *    `src/components/inventory/part-request-section-wiring.test.ts` 가 매번 잰다. 이 도구는
+   *    `src/components/repair-cases/detail/part-request-section-wiring.test.ts` 가 매번 잰다
+   *    (2026-10-27 에 `components/inventory/` 에서 그리로 옮겼다). 이 도구는
    *    **저쪽이 지금 무슨 글자를 보내는가**라는, 거기서 못 재는 반쪽을 맡는다.
    */
   if (row.closed === true) {

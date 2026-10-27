@@ -23,7 +23,7 @@ import { join } from "node:path";
  *    여기서는 **소스를 글자로 읽어**, 그 자리에 쓰는 가짜 토큰 값이 ASCII 인지만 잰다 —
  *    서버 없이도 "한글을 다시 넣으면 이 시험이 깨지는가"를 재는 것이 이 시험의 전부다.
  * 🔵 서버 없이 도는 코드를 소스로 재는 선례가 이 저장소에 이미 여럿이다
- *    (`src/components/inventory/part-request-section-wiring.test.ts`,
+ *    (`src/components/repair-cases/detail/part-request-section-wiring.test.ts`,
  *    `src/app/api/v1/route-source.test.ts`). 같은 결을 따른다.
  * ============================================================================
  */
@@ -43,7 +43,9 @@ test("🔴 「토큰이 틀리면 401」 검사의 가짜 토큰이 ASCII 다 �
 
   // 🔴 헛도는 단언을 막는다 — 잘라 낸 토막이 빈 문자열이면 아래 ASCII 검사가 늘 통과해
   //    아무것도 안 잰 것과 같다(이 저장소에 그런 반쯤 죽은 시험이 실제로 있었다 —
-  //    src/components/inventory/part-request-section-wiring.test.ts 385행 근처).
+  //    src/components/repair-cases/detail/part-request-section-wiring.test.ts 의 `const box =
+  //    source.slice(…)` 자리 — indexOf 가 -1 이면 빈 토막이 된다. 🔵 2026-10-27 에 그 파일이
+  //    components/inventory/ 에서 옮겨 오면서 385행이 392행이 되었다).
   assert.notEqual(token, "", "틀린 토큰 값이 비어 있다 — 자리를 잘못 잘랐을 수 있다");
 
   // 🔴 HTTP 머리말은 ASCII(실제로는 Latin-1, 0~255)만 싣는다. 한글은 255 를 넘어 fetch 가

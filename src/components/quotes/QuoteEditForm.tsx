@@ -2831,7 +2831,7 @@ export default function QuoteEditForm({
           {/* 🔴 **못 받아 온 것을 「없다」로 그리지 않는다**(2026-10-16). 템플릿은 이제 재고
               관리에서 오므로, 저쪽이 꺼진 날 아래 빈 상태 문구를 그리면 「이 모델에 템플릿이
               이어져 있지 않습니다」가 떠서 사람이 멀쩡히 이어 둔 설정을 뒤지러 간다.
-              🔵 말투는 부품 요청 칸과 같다(components/inventory/PartRequestSection.tsx). */}
+              🔵 말투는 부품 요청 칸과 같다(components/repair-cases/detail/PartRequestSection.tsx). */}
           {ohTemplate.status !== "ok" ? (
             <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
               O/H 부품 템플릿을 재고 관리에서 불러오지 못했습니다 —{" "}
@@ -3102,7 +3102,7 @@ export default function QuoteEditForm({
 
         {/* 🔴 못 받아 왔을 때. 후보가 안 뜨는 것을 「재고에 부품이 하나도 없다」로 읽으면
             사람은 멀쩡한 부품을 두고 다른 길을 찾는다 — 부품 요청 칸과 **같은 말투**로
-            까닭을 적는다(components/inventory/PartRequestSection.tsx).
+            까닭을 적는다(components/repair-cases/detail/PartRequestSection.tsx).
             🔵 손으로 적는 길은 그대로 열어 둔다 — 재고 관리가 꺼져 있다고 견적서를 못
                쓰게 되면 그것이 더 큰 사고다. */}
         {partOptions.status !== "ok" && (

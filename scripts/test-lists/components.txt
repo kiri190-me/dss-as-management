@@ -65,7 +65,6 @@ src/components/repair-cases/files/preview-object-fit.test.ts
 # 글자로 읽는다 — 같은 파일들을 읽는 이웃 다섯이 바로 위에 있다.
 src/components/repair-cases/files/shrink-download-per-image-labels.test.ts
 src/components/repair-cases/approval/approval-screen-layout.test.tsx
-src/components/inventory/part-issue-approval-screen.test.tsx
 src/components/users/approval-route-section.test.ts
 # 견적서 목록은 2026-10-07(설계서 G절 조각 4)부터 **공용 묶음의 한 벌**을 쓴다
 # (@dss/core/ui/quotes/QuoteListScreen — vendor/dss-core). 이 저장소의 868줄짜리 복사본은
@@ -370,7 +369,6 @@ src/components/quotes/quote-part-pick.test.tsx
 # 액션의 **원본 글자**를 읽어 그 규칙을 제자리에서 쓰는지 본다(고르개의 자를 그대로 쓰는가 ·
 # 못 받아 온 것을 「없다」로 그리지 않는가). 고르개를 불러 쓰므로 이 목록에 둔다.
 src/components/quotes/quote-intake-inventory.test.ts
-src/components/inventory/part-owner-stock-table.test.ts
 src/components/common/file-drop.test.tsx
 src/components/common/file-drop-screens.test.ts
 src/components/quotes/new-quote-excel-sheets.test.ts
@@ -600,16 +598,11 @@ src/components/repair-cases/report/ServiceReportFolderSection.test.tsx
 # (쓰는 길이 쓴 두 함수가 그대로 짓는다) · 🔴 읽고 여는 것뿐이다(원본에 만들기·쓰기·
 # 지우기가 없다) · 두 번 눌러도 두 번 안 열린다 · Windows 가 아니면 단추가 아예 없다.
 src/components/repair-cases/report/service-report-excel-open.test.ts
-src/components/inventory/part-request-section-wiring.test.ts
-
-# 「여기가 아니라 저기」 안내 띠 — 재고 화면 다섯이 함께 쓴다(2026-10-16). 재고 일이 재고
-# 관리 시스템으로 옮겨 가 메뉴에서는 감췄지만 북마크·알림으로는 그대로 들어와진다.
-# 🔴 못 박는 것: 「여기에 적은 것은 재고 관리에 들어가지 않습니다」가 그려진 글자와 문구
-# 상수 **둘 다**에 있는가(이 말이 빠지면 사람은 쓰던 대로 쓴다) · 설정이 없으면 링크 없이
-# 글만(없는 주소로 보내지 않는다) · 주소를 코드에 박지 않았다 · 다섯 페이지가 한 조각을
-# 함께 쓰고 설정값을 넘기는가(페이지는 서버 컴포넌트라 원본을 글자로 읽는다) · 🔴 다섯
-# 화면이 원래 그리던 것이 그대로 있는가(이 조각은 아무것도 걷어내지 않는다).
-src/components/inventory/InventoryRetiredBanner.test.tsx
+# 🔵 2026-10-27 에 `components/inventory/` 에서 **수리 건 상세 폴더로 옮겼다** — 옛 재고 화면을
+# 걷어내면서, 그 폴더에 섞여 있던 이 칸만 건져 냈다(이 칸은 옛 재고 표가 아니라 재고 관리
+# 시스템의 통로를 쓴다). 같은 날 「여기가 아니라 저기」 안내 띠의 시험
+# (InventoryRetiredBanner.test.tsx)은 띠를 그릴 화면이 사라져 함께 지워졌다.
+src/components/repair-cases/detail/part-request-section-wiring.test.ts
 
 # 전체 A/S 현황의 신고증상 열(표) 과 카드의 L/N·신고증상(2026-10-17). 표와 카드를 실제로
 # 그려(renderToStaticMarkup) 그려진 <th>·<td>·<dt>·<dd> 만 센다 — 원본을 글자로 읽었다면

@@ -50,7 +50,10 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
 }
 
-const SCREEN_PATH = "src/components/inventory/PartRequestSection.tsx";
+/* 🔵 2026-10-27 에 `components/inventory/` 에서 수리 건 상세 폴더로 옮겨 왔다 — 옛 재고 화면을
+   걷어내면서 그 폴더에 섞여 있던 **새 코드**만 건져 낸 것이다(그 화면들과 달리 이 칸은 재고
+   관리 시스템의 통로를 쓴다). 여기서 바뀐 것은 읽어 오는 자리뿐이고 재는 것은 그대로다. */
+const SCREEN_PATH = "src/components/repair-cases/detail/PartRequestSection.tsx";
 const screen = stripComments(readFileSync(SCREEN_PATH, "utf8"));
 
 /** 화면의 함수 하나만 떼어 본다. 🔴 **빈 토막이면 아래 단언이 전부 거짓말을 한다.** */

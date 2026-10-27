@@ -19,10 +19,17 @@ import { readFileSync } from "node:fs";
  *  ㉢ **성공한 뒤에만 번호를 비운다** — 실패하고 다시 누르는 것은 같은 요청이다.
  *  ㉣ **[요청 취소]를 거둘 수 있는 줄에만 그린다**(2026-10-16 에 통로가 열렸다) — 조건 넷은
  *     도메인 함수 한 곳(`canCancelStockRequest`)이 쥐고, 화면은 그것을 부르기만 한다.
+ *  ㉤ 🔴 **상세 화면이 이 칸을 실제로 끌어다 그린다**(2026-10-27 에 더했다) — 아래 그 절.
+ *
+ * ── 🔴 2026-10-27 — 이 시험과 재는 파일이 함께 **이 폴더로 옮겨 왔다** ──────
+ * 그 전까지 둘은 `components/inventory/` 에 있었다. 그 폴더에는 **옛 재고 화면**이 함께
+ * 살고 있었고, 그것을 걷어내는 조각에서 이 칸까지 폴더째 사라질 뻔했다. 부품 요청 칸은
+ * 옛 재고 표를 한 줄도 읽지 않고(㉠ 이 그것을 잰다) 그리는 자리도 수리 건 상세 하나뿐이라,
+ * 이름이 그 사실을 말하는 자리로 옮겼다.
  * ============================================================================
  */
 
-const PATH = "src/components/inventory/PartRequestSection.tsx";
+const PATH = "src/components/repair-cases/detail/PartRequestSection.tsx";
 const source = readFileSync(PATH, "utf8");
 
 describe("🔴 A/S 제 표를 보지 않는다", () => {
@@ -872,5 +879,58 @@ describe("🔴 요청 비고 — 적은 말이 신청 목록에 보인다", () =
     /* 🔴 올릴 때 치는 글은 `useState` 의 `note` 이고, 목록에 그리는 것은 **저쪽이 돌려준**
        `request.note` 다. 둘을 섞으면 아직 안 올린 글이 지난 신청에 붙어 보인다. */
     assert.doesNotMatch(noteBox, /\{note\}/, "아직 안 올린 글을 신청 줄에 그린다");
+  });
+});
+
+/**
+ * ============================================================================
+ * ㉤ 🔴 수리 건 상세가 이 칸을 **실제로 끌어다 그리는가** (2026-10-27)
+ * ============================================================================
+ * 이 절은 **옛 재고 화면을 걷어낸 날** 더했다. 그날 지워진 것은 `components/inventory/`
+ * 의 옛 화면 스물다섯이고, 이 칸은 **같은 폴더에 있었지만 살아 있는 새 코드**였다 —
+ * 폴더째 지우면 수리 건 상세에서 부품 요청 칸이 통째로 사라진다. 그런데 **아무 시험도
+ * 붉어지지 않는다**: 위의 모든 단언은 재는 파일이 없어지면 `readFileSync` 에서 터지므로
+ * 「파일이 없다」만 말하고, 「상세 화면이 이 칸을 잃었다」는 아무도 말하지 않는다.
+ *
+ * 그래서 **잇는 줄 자체**를 여기서 잰다. 셋이다:
+ *  ㉠ 상세 화면이 **옮긴 자리**에서 가져온다 — 옛 자리(`@/components/inventory/…`)로
+ *     돌아가면 그 경로가 비어 있어 빌드가 깨진다. 글자로 못 박아 두면 되살아나지 않는다.
+ *  ㉡ 그려 넣는 자리가 남아 있다 — 가져오기만 하고 안 그리면 화면에서는 사라진 것과 같다.
+ *  ㉢ 🔴 **값이 있을 때만** 그린다 — 부품 요청 칸을 못 보는 사람에게는 서버가 `null` 을
+ *     주므로, 조건을 떼면 빈 칸이 모두에게 뜬다.
+ *
+ * 🔵 「무엇을 재는지」를 먼저 단언한다 — 읽어 온 원본이 비어 있으면 아래 세 단언이
+ *    전부 공짜로 통과한다.
+ * ============================================================================
+ */
+describe("㉤ 🔴 수리 건 상세가 부품 요청 칸을 그린다", () => {
+  const VIEW_PATH = "src/components/repair-cases/detail/RepairCaseDetailView.tsx";
+  const view = readFileSync(VIEW_PATH, "utf8").replace(/\r\n/g, "\n");
+  const viewFlat = view.replace(/\s+/g, " ");
+
+  test("재는 원본이 비어 있지 않다 — 빈 글자에 대고 단언하면 전부 통과한다", () => {
+    assert.ok(view.length > 1000, `${VIEW_PATH} 를 제대로 읽지 못했다`);
+    assert.match(view, /export default function RepairCaseDetailView/);
+  });
+
+  test("㉠ 🔴 옮긴 자리에서 가져온다 — 옛 `components/inventory/` 로 돌아가지 않았다", () => {
+    assert.match(
+      view,
+      /^import PartRequestSection from "@\/components\/repair-cases\/detail\/PartRequestSection";$/m,
+      "부품 요청 칸을 가져오는 줄이 없거나 자리가 다르다"
+    );
+    assert.doesNotMatch(
+      view,
+      /from "@\/components\/inventory\/PartRequestSection"/,
+      "옛 자리로 되돌아갔다 — 그 폴더에는 이 파일이 없다"
+    );
+  });
+
+  test("㉡㉢ 🔴 값이 있을 때만 그린다 — 가져오기만 하고 안 그리면 화면에서는 사라진 것이다", () => {
+    assert.match(
+      viewFlat,
+      /\{partRequestData && partRequestData\.caseContext && \( <PartRequestSection/,
+      "부품 요청 칸을 그리는 자리가 없거나 조건이 바뀌었다"
+    );
   });
 });

@@ -15,7 +15,11 @@ import type { RelatedMatch } from "@/lib/domain/local/product-history-match";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { editableFieldsForRoleInSection, isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
-import PartRequestSection from "@/components/inventory/PartRequestSection";
+/* 🔴 2026-10-27 에 `components/inventory/` 에서 **이 폴더로 옮겨 왔다.** 그 폴더에는 옛 재고
+   화면이 함께 살고 있었고, 그것을 걷어내면서 이 칸까지 폴더째 지워질 뻔했다 — 이 칸은 옛 재고
+   표를 한 줄도 읽지 않는 **새 통로**(server/actions/inventory-stock-requests · domain/
+   inventory-gateway) 전용이고, 그리는 자리도 수리 건 상세 하나뿐이라 여기가 제자리다. */
+import PartRequestSection from "@/components/repair-cases/detail/PartRequestSection";
 import type { PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
 import type { RequestCaseContext } from "@/lib/db/queries/inventory-part-requests";
 import type {

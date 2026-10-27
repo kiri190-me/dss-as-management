@@ -61,7 +61,9 @@ const TOGGLE_SITES: { file: string; sites: number; why: string }[] = [
   { file: "src/components/repair-cases/trash/RepairCaseTrashCardList.tsx", sites: 1, why: "접수 건 휴지통 카드" },
   { file: "src/components/customers/CustomerListScreen.tsx", sites: 4, why: "삭제 모드 표·카드, 휴지통 표·카드" },
   { file: "src/components/product-models/ProductModelListScreen.tsx", sites: 4, why: "삭제 모드 표·카드, 휴지통 표·카드" },
-  { file: "src/components/inventory/InventoryListScreen.tsx", sites: 4, why: "삭제 모드 표·카드, 휴지통 표·카드" },
+  // 🔴 2026-10-27 — 재고 목록(InventoryListScreen)이 이 표에서 빠졌다. 재고 기능이 재고 관리
+  //    시스템(dss-inventory)으로 옮겨 가면서 A/S 의 그 화면이 지워졌다. **규칙이 느슨해진 것이
+  //    아니라 잴 화면이 없어진 것**이다 — 여기 남은 목록은 전과 똑같은 잣대로 잰다.
   {
     file: "src/components/procedures/TechnicalProcedureTemplateListScreen.tsx",
     sites: 4,
@@ -128,16 +130,7 @@ const OWNERS: { file: string; hooks: number; expects: string[] }[] = [
       "orderedIds: trashRows.map((row) => row.id)",
     ],
   },
-  {
-    file: "src/components/inventory/InventoryListScreen.tsx",
-    hooks: 2,
-    expects: [
-      "orderedIds: filtered.map((p) => p.id)",
-      "isSelectable: (id) => selectableVisibleIdSet.has(id)",
-      "orderedIds: trashParts.map((p) => p.id)",
-      "onToggleSelected={trashRangeSelection.toggle}",
-    ],
-  },
+  // 🔴 2026-10-27 — 재고 목록이 여기서도 빠졌다(위 TOGGLE_SITES 의 같은 까닭).
   {
     file: "src/components/procedures/TechnicalProcedureTemplateListScreen.tsx",
     hooks: 2,
@@ -247,7 +240,7 @@ test("전체 선택은 그대로다 — 범위 고르기와 섞지 않았다", (
     ],
     ["src/components/customers/CustomerListScreen.tsx", ["onChange={toggleSelectAllVisible}"]],
     ["src/components/product-models/ProductModelListScreen.tsx", ["onChange={toggleSelectAllVisible}"]],
-    ["src/components/inventory/InventoryListScreen.tsx", ["onToggleSelectAll={toggleSelectAllVisible}"]],
+    // 🔴 2026-10-27 — 재고 목록이 여기서도 빠졌다(위 TOGGLE_SITES 의 같은 까닭).
     ["src/components/procedures/TechnicalProcedureTemplateListScreen.tsx", ["onChange={toggleSelectAll}"]],
     ["src/components/repair-cases/files/StoredAttachmentList.tsx", ["onChange={toggleAll}"]],
     ["src/components/repair-cases/files/FilesScreen.tsx", ["onClick={() => setAllPhotosSelected(true)}"]],

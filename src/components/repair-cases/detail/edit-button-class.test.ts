@@ -17,8 +17,9 @@ import { detailEditButtonClass, inlineEditButtonAlignClass } from "./edit-button
  *
  * 이 일곱은 서버 액션을 부르는 화면 조각이라 여기서 그려 볼 수 없다(이웃
  * `used-parts-section.test.ts` · `detail-header-placement.test.ts` 와 같은 사정).
- * 그래서 **원본 글자**를 읽어 본다 — 본보기는
- * `src/components/inventory/part-request-section-wiring.test.ts`.
+ * 그래서 **원본 글자**를 읽어 본다 — 본보기는 이제 같은 폴더의
+ * `part-request-section-wiring.test.ts` 다(2026-10-27 에 `components/inventory/` 에서 이리로
+ * 옮겨 왔다 — 옛 재고 화면을 걷어내면서 그 폴더에 섞여 있던 새 코드만 건져 냈다).
  *
  * 붙잡는 것 넷:
  *  ㉠ 상수가 **박스 한 벌**이다 — 테두리 · 안쪽 여백 · font-semibold.

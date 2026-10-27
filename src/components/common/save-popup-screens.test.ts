@@ -276,7 +276,9 @@ test("A/S 건 안에 딸린 것·실행 동작은 팝업만 띄우고 머문다"
     // 경로에서만 뜬다 — 거절(ok 아님)은 그 창·칸에 저쪽 문구를 그대로 적고, 「이미 올라가
     // 있었다 · 이미 거둬져 있었다 · 이미 적혀 있었다」는 **오류가 아니라 읽어야 하는 알림**이라
     // NoticePopup 으로 간다(저절로 닫히는 저장 팝업으로 보내면 못 읽고 지나간다).
-    ["src/components/inventory/PartRequestSection.tsx", 3],
+    // 🔵 2026-10-27 에 `components/inventory/` 에서 수리 건 상세 폴더로 옮겼다 — 이 칸은 옛
+    //    재고 표가 아니라 재고 관리 시스템의 통로를 쓰고, 그리는 자리도 수리 건 상세 하나다.
+    ["src/components/repair-cases/detail/PartRequestSection.tsx", 3],
     ["src/components/repair-cases/detail/PendingBillingDecisionCard.tsx", 1],
     ["src/components/repair-cases/workflow/ManualStepSetPanel.tsx", 1],
     ["src/components/repair-cases/workflow/DatabaseWorkflowControlPanel.tsx", 2],
@@ -357,40 +359,24 @@ test("워크플로 발행·폐기는 도착 화면이 이미 알리므로 팝업
   assert.match(page, /DONE_MESSAGES\[done\]/);
 });
 
-test("부품 상세에서 부품·재고를 바꿔도 팝업만 띄우고 그 자리에 남는다", () => {
-  // 2026-09-17 사용자 요청으로 이 다섯이 「팝업 뒤 /inventory 로 넘김」에서 이쪽으로
-  // 옮겨 왔다. 한 부품의 값을 몇 번 고치려고 매번 목록에서 다시 찾아 들어가지
-  // 않으려는 것이다. 문구는 그대로 두고 넘어갈 곳만 없앴다.
-  const stayOnly: [string, string][] = [
-    ["PartEditDialog.tsx", '"부품 정보를 저장했습니다."'],
-    ["ReceiveStockDialog.tsx", '"입고했습니다."'],
-    ["ConsumeStockDialog.tsx", 'approvalRequired ? "불출 승인을 요청했습니다." : "사용 처리했습니다."'],
-    ["ReturnStockDialog.tsx", '"반환했습니다."'],
-    ["PartMinimumQuantitySection.tsx", '"한계수량·단가를 저장했습니다."'],
-  ];
-  for (const [name, message] of stayOnly) {
-    const path = `src/components/inventory/${name}`;
-    assert.deepEqual(popupCalls(path), [[message, "null"]], name);
-    // 🔴 목록으로 넘어가면 서버가 화면을 다시 그려 값이 갱신됐다. 그 자리에 남으면
-    // 그 갱신이 사라지므로, **저장이 성공한 경로에서**(실패는 그 위에서 return 한다)
-    // 화면을 다시 읽어야 한다 — 안 그러면 저장했는데 옛 값이 보인다.
-    assert.match(
-      readFileSync(path, "utf8"),
-      /if \(!result\.ok\) \{[\s\S]*?return;\s*\}\s*(?:onClose\(\);\s*)?(?:\/\/[^\n]*\n\s*)*router\.refresh\(\);\s*(?:\/\/[^\n]*\n\s*)*showSavePopup\(/,
-      name
-    );
-  }
-});
-
-test("재고 목록·요청 관리·O/H 템플릿·내자·주간보고·작업 비용은 팝업만 띄우고 머문다", () => {
+/**
+ * 🔴 2026-10-27 — **옛 재고 화면 열둘의 절이 여기서 사라졌다.**
+ *
+ * 「부품 상세에서 부품·재고를 바꿔도 …」 한 절(부품 수정·입고·사용·반환·한계수량 다섯)과
+ * 「불출 승인 화면은 … 팝업을 더하지 않는다」 한 절이 통째로 빠졌고, 아래 절에서는 일곱 줄
+ * (부품 등록·불출·보류·반려·부분 마감·요청 관리·O/H 템플릿)이 빠졌다.
+ *
+ * **단언을 약하게 만든 것이 아니라 잴 대상이 없어졌다** — 재고 기능은 재고 관리 시스템
+ * (dss-inventory)으로 옮겨 갔고, 그날 `src/components/inventory/` 의 옛 화면과
+ * `src/app/(app)/inventory/` 의 경로 다섯이 지워졌다. 되살릴 일이 생기면 그 커밋에서
+ * 꺼내고, 이 절들도 함께 돌아와야 한다.
+ *
+ * 🔵 **부품 요청 칸만은 남았다** — 위 「A/S 건 안에 딸린 것」 절의
+ * `repair-cases/detail/PartRequestSection.tsx` 가 그것이다. 옛 재고 표가 아니라 재고 관리의
+ * 통로를 쓰는 **새 코드**라 지우지 않고 수리 건 상세 폴더로 옮겼다.
+ */
+test("내자·주간보고·작업 비용은 팝업만 띄우고 머문다", () => {
   const stayOnly: [string, number][] = [
-    ["src/components/inventory/PartCreateDialog.tsx", 1],
-    ["src/components/inventory/IssuePartRequestDialog.tsx", 1],
-    ["src/components/inventory/HoldPartRequestDialog.tsx", 1],
-    ["src/components/inventory/RejectPartRequestDialog.tsx", 1],
-    ["src/components/inventory/PartiallyCloseRequestDialog.tsx", 1],
-    ["src/components/inventory/PartRequestManagerScreen.tsx", 1],
-    ["src/components/inventory/OhTemplateScreen.tsx", 3],
     ["src/components/domestic-orders/DomesticOrderEditForm.tsx", 1],
     ["src/components/domestic-orders/DomesticOrderTextCell.tsx", 1],
     ["src/components/domestic-orders/DomesticOrderDueDatesCell.tsx", 1],
@@ -410,15 +396,6 @@ test("재고 목록·요청 관리·O/H 템플릿·내자·주간보고·작업 
       path
     );
   }
-});
-
-test("불출 승인 화면은 누른 카드에 결과 한 줄을 싣는 설계라 팝업을 더하지 않는다", () => {
-  // 승인·반려·실행·취소의 결과는 이미 **누른 카드**에 한 줄로 뜨고 읽어 주기 통로도
-  // 있다. 그 함수 몸통은 part-issue-approval-screen.test.tsx 가 정해진 인자로 떼어
-  // 실제로 돌리므로, 여기에 팝업을 끼우면 그 시험의 계약(부르는 차례)부터 바뀐다.
-  const screen = readFileSync("src/components/inventory/PartIssueApprovalScreen.tsx", "utf8");
-  assert.doesNotMatch(screen, /showSavePopup/);
-  assert.match(screen, /setMessage\(issueRequestId, "불출을 실행했습니다\."\);/);
 });
 
 test("주간보고 가져오기 — 건너뛴 건수는 팝업으로 지나치기 쉬워 화면에도 남는다", () => {
