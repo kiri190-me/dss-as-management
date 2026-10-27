@@ -52,19 +52,17 @@ import type { StockOwner } from "@/lib/domain/inventory-types";
  *    조회 시험이 제 질의를 재려고 **이 mutation 으로 행을 만든다.** 그래서 mutation 을
  *    조회보다 먼저 떼면 조회 시험이 먼저 깨진다. **13-C 와 한 덩어리로** 떼야 한다.
  *
- * 🔴 **밑자락으로 쓰는 남의 시험 — 처음 여섯, 지금 넷**(㉣ 는 13-C1, ㉤ 는 13-C2 에서
- *    끊었다). 남은 넷 다 파일 이름에 「inventory」가 없다. 그래서 「재고 파일 목록」을
- *    아무리 들여다봐도 안 나타나고, 지운 뒤 test:db 에서야 터진다. 지우기 전에
- *    **반드시 이 목록을 보라.**
+ * 🔴 **밑자락으로 쓰는 남의 시험 — 처음 여섯, 지금 하나**(㉣ 는 13-C1, ㉤ 는 13-C2,
+ *    ㉠㉡㉥ 는 13-C3 에서 끊었다). 남은 하나도 파일 이름에 「inventory」가 없다. 그래서
+ *    「재고 파일 목록」을 아무리 들여다봐도 안 나타나고, 지운 뒤 test:db 에서야 터진다.
+ *    지우기 전에 **반드시 이 목록을 보라.**
  *
- *    ㉠ mutations/repair-cases-purge.integration.test.ts          (createPart·receiveStock·consumeStock)
- *    ㉡ mutations/repair-cases-permanent-delete.integration.test.ts (위 + createPartRequest)
+ *    ㉠ mutations/repair-cases-purge.integration.test.ts            — **끊겼다**(아래 참조)
+ *    ㉡ mutations/repair-cases-permanent-delete.integration.test.ts — **끊겼다**(아래 참조)
  *    ㉢ mutations/repair-case-billing-decision.integration.test.ts  (consumeStock·createPartRequest)
  *    ㉣ mutations/role-permissions.integration.test.ts              — **끊겼다**(아래 참조)
  *    ㉤ queries/notification-settings.integration.test.ts           — **끊겼다**(아래 참조)
- *    ㉥ queries/approval-outcome-notifications.integration.test.ts  (decidePartIssueRequestApproval·
- *                                                                   cancelPartIssueRequest — 저쪽은
- *                                                                   mutations/inventory-part-issue-requests.ts 를 쓴다)
+ *    ㉥ queries/approval-outcome-notifications.integration.test.ts  — **끊겼다**(아래 참조)
  *
  * 🔵 **㉣ 는 2026-10-27(13-C1)에 풀렸다 — 이제 이 파일을 import 하지 않는다.** 전에는
  *    「설정을 넓히면 *실제로* 그 조작이 열리는가」를 끝에서 끝까지 재는 자리가 거기
@@ -99,9 +97,56 @@ import type { StockOwner } from "@/lib/domain/inventory-types";
  *    **dss-po 가 같은 표를 함께 쓴다.** 그래서
  *    repair-cases-purge.ts 와 repair-cases.ts 의 영구삭제는 **지금도** stock_transactions ·
  *    inventory_part_issue_requests 의 destination_note 를 **개인정보 없이** 되메워 CHECK
- *    제약을 지킨다. 그 되메움을 재는 자리가 ㉠㉡ 이고, 밑자락을 진짜 경로(receiveStock →
- *    consumeStock)로 만드는 것 자체가 단언의 일부다 — raw insert 로 바꾸면 「정말 그 경로로
- *    생긴 행인가」라는 보증이 빠진다.
+ *    제약을 지킨다. 그 되메움을 재는 자리가 ㉠㉡ 이다.
+ * 🔵 **㉠㉡ 은 2026-10-27(13-C3)에 풀렸다 — 밑자락을 raw insert 로 갈아 끼웠다.**
+ *    🔴 바로 위 줄에 「밑자락을 진짜 경로로 만드는 것 자체가 단언의 일부다 — raw insert
+ *    로 바꾸면 『정말 그 경로로 생긴 행인가』라는 보증이 빠진다」고 적어 두었던 것을
+ *    **뒤집었다.** 까닭: 그 경로가 **사라진다.** 경로가 없어지면 「그 경로로 생긴 행인가」는
+ *    영영 잴 수 없는 질문이 되고, 운영에 남아 있을 옛 행은 **과거 코드**가 만든 것이지
+ *    지금 코드가 만드는 것이 아니다. 영구삭제·소각이 실제로 책임지는 질문은 **「표에
+ *    그런 행이 있을 때 개인정보 없이 되메우는가」**이고, raw insert 가 오히려 그 상황에
+ *    더 가깝다. 🔴 대신 **모양을 실측으로 맞췄다** — 시험 DB 에서 옛 경로와 직접 넣기를
+ *    나란히 돌려 parts · part_stock_balances · stock_transactions(RECEIPT/USE) ·
+ *    inventory_part_requests(헤더·항목·이력) 를 **칸마다 대조**했고, 두 시험 파일의
+ *    밑자락 헬퍼 머리말에 그 칸과 값을 적어 두었다.
+ * 🔵 **㉥ 도 2026-10-27(13-C3)에 풀렸다 — 다만 갈아 끼우기가 아니라 갈래째 들어냈다.**
+ *    저쪽은 결재 **사슬**(「앞 단계를 결정하면 다음 단계 행이 더 늦게 생긴다」)이 단언의
+ *    전제라 사슬 잇는 mutation 을 손으로 흉내 낼 수 없었다. 출하·검수 결재 갈래는 한 줄도
+ *    건드리지 않고 PART_ISSUE 갈래만 뺐다(시험 다섯 + 묶음 하나).
+ *    🔴 **그래서 지금 비어 있는 자리**: queries/approval-outcome-notifications.ts 의
+ *    listPartIssueApprovalOutcomes 와 domain/notifications.ts 의 PART_ISSUE 갈래는
+ *    **살아 있는 코드인데 통합 시험이 없다.** 그 갈래가 만드는 href 셋
+ *    (`/inventory` · `/inventory/approvals` · `/inventory/requests`)은 13-A 에서 **전부
+ *    404 가 됐다.** 13-C5(알림 3종 정리) 때 함께 정할 것.
+ *
+ * ────────────────────────────────────────────────────────────────────────────
+ * 🔴 **13-C4 를 막는 것이 이제 무엇인가 — 2026-10-27(13-C3 끝) 다시 셈**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 아래 여덟을 지우는 것이 13-C4 다 — inventory.ts · inventory-part-requests.ts ·
+ * inventory-part-issue-requests.ts · part-minimum-quantities.ts · part-unit-prices.ts ·
+ * part-overhaul-unit-prices.ts · internal/inventory-stock-use.ts ·
+ * internal/inventory-request-idempotency.ts.
+ * 그것을 **import 하는 곳은 이제 시험 열뿐이고, 살아 있는 화면·액션·조회는 하나도
+ * 없다**(2026-10-27 저장소 전체 grep). 열의 갈래는 둘이다:
+ *
+ *  ⓐ **이름에 「inventory/part-」가 든 제 시험 아홉** — 전부 scripts/test-lists/db.txt 에
+ *     등록돼 있다. mutation 과 **함께** 지우고 목록에서도 뺀다.
+ *       mutations/inventory.integration.test.ts
+ *       mutations/inventory-trash.integration.test.ts
+ *       mutations/inventory-part-requests.integration.test.ts
+ *       mutations/inventory-part-issue-requests.integration.test.ts
+ *       mutations/part-minimum-quantities.integration.test.ts
+ *       mutations/part-unit-prices.integration.test.ts
+ *       queries/inventory-part-requests.integration.test.ts
+ *       queries/part-minimum-quantities.integration.test.ts
+ *       queries/inventory-part-issue-requests.integration.test.ts
+ *  ⓑ **이름에 재고가 안 든 남의 시험 — 이제 ㉢ 하나다.**
+ *       mutations/repair-case-billing-decision.integration.test.ts
+ *     바로 위에 적은 대로 **통째로 지우는 쪽**이다(잴 것이 mutation 과 함께 사라진다).
+ *
+ * 🔵 그 밖에 13-C4 가 함께 정리할 것: db.txt 의 재고 줄 아홉, 그리고 이 세 조회가
+ *    남긴 상위 의존 — queries/inventory*.ts · queries/part-minimum-quantities.ts 는
+ *    **queries/notifications.ts 가 아직 부른다.** 그것은 13-C5 다(알림 3종).
  *
  * 🔵 **13-C 가 아직 손대면 안 되는 것 둘**(이 조각에서 따로 결정됐다):
  *    ① queries/user-deletion-impact.ts · domain/user-deletion-rules.ts 의 "PART_ISSUE" —

@@ -8,10 +8,6 @@ import { db, pgClient } from "../connection";
 import {
   auditLogs,
   customers,
-  inventoryPartIssueApprovals,
-  inventoryPartIssueRequestItems,
-  inventoryPartIssueRequests,
-  inventoryPartRequests,
   notificationAcknowledgements,
   products,
   repairCaseApprovals,
@@ -23,7 +19,6 @@ import {
 } from "../schema";
 import { createRepairCase } from "../mutations/repair-cases";
 import { decideRepairCaseApproval, requestRepairCaseApproval } from "../mutations/repair-case-approvals";
-import { cancelPartIssueRequest, decidePartIssueRequestApproval } from "../mutations/inventory-part-issue-requests";
 import { acknowledgeNotification } from "../mutations/notification-acknowledgements";
 import { getCurrentApprovalsForCase } from "./repair-case-approvals";
 import { isUndefinedTableError } from "./notification-acknowledgements";
@@ -36,7 +31,6 @@ import {
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approval-input";
 import { ROLE_CODES, type Role } from "@/lib/domain/types";
-import { isPartIssueApprovalClosedByRequester } from "@/lib/domain/inventory-part-issue-rules";
 import {
   APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS,
   buildApprovalGrantedNotification,
@@ -51,35 +45,43 @@ import {
  * 종 알림 「승인 완료」·「반려됨」(listMyNotifications)을 본다.
  *
  * 결재 사슬은 **진짜 mutation 으로** 만든다(requestRepairCaseApproval ·
- * decideRepairCaseApproval · decidePartIssueRequestApproval · cancelPartIssueRequest)
- * — 「중간 단계 승인이면 다음 단계 행이 더 늦게 생긴다」는 사슬의 모양이 이 조회의
- * 「최종」 판정의 전제라서, 손으로 흉내 낸 행이 아니라 사슬 잇는 코드가 실제로
- * 만든 행으로 봐야 뜻이 있다. 결재선 판과 불출 신청 헤더·첫 결재 행만 손으로 넣는다
- * (queries/inventory-part-issue-requests.integration.test.ts 와 같다 — 신청 mutation 은
- * 권한 설정·재고까지 끌고 들어온다).
+ * decideRepairCaseApproval) — 「중간 단계 승인이면 다음 단계 행이 더 늦게 생긴다」는
+ * 사슬의 모양이 이 조회의 「최종」 판정의 전제라서, 손으로 흉내 낸 행이 아니라 사슬
+ * 잇는 코드가 실제로 만든 행으로 봐야 뜻이 있다. 결재선 판만 손으로 넣는다.
+ *
+ * 🔴 **부품 불출(PART_ISSUE) 갈래는 2026-10-27(조각 13-C3)에 여기서 빠졌다.** 옛 재고
+ * 기능이 별도 시스템(dss-inventory)으로 옮겨 가면서 화면과 경로가 13-A 에서 사라졌고
+ * (`/inventory` 는 404), 이 파일이 사슬을 잇는 데 쓰던
+ * mutations/inventory-part-issue-requests.ts 의 decidePartIssueRequestApproval ·
+ * cancelPartIssueRequest 가 13-C4 에서 지워진다. 사슬을 잇는 코드가 없으면 위에 적은
+ * 「진짜 mutation 으로 만든다」가 성립하지 않아 **갈래째** 들어냈다 — 밑자락만 갈아
+ * 끼우면 되는 repair-cases-purge/permanent-delete 쪽과 다른 점이다.
+ * 🔵 **그래서 지금 비어 있는 자리**: queries/approval-outcome-notifications.ts 의
+ * listPartIssueApprovalOutcomes 는 **살아 있는 코드인데 통합 시험이 없다.** 불출 결재
+ * 행을 새로 만드는 길이 A/S 에 남지 않으므로 운영에서 새 결과가 생길 일은 없지만,
+ * 그 조회를 고치면 여기서 걸리지 않는다. 13-C5(알림 3종 정리) 때 그 조회·
+ * domain/notifications.ts 의 PART_ISSUE 갈래를 **어떻게 할지 함께 정해야 한다.**
  *
  * 이 파일이 못 박는 것:
  *  1. 🔴 **요청자에게만** 간다 — 결정자·다음 단계 승인자·다른 요청자에게는 없다.
- *  2. 🔴 **중간 단계 승인은 안 잡히고 마지막 단계 승인만** 잡힌다(검수·출하·불출).
+ *  2. 🔴 **중간 단계 승인은 안 잡히고 마지막 단계 승인만** 잡힌다(검수·출하).
  *  3. 반려는 **어느 단계에서든** 잡힌다.
  *  4. 🔴 **결정자가 요청자 본인이면** 안 잡힌다 — 스스로 승인한 검수, 최고관리자가
- *     자기 요청을 스스로 반려, 불출 신청 취소로 닫힌 행.
- *  5. 불출 승인 완료는 신청이 APPROVED 든 EXECUTED 든 잡히고, 승인 뒤 취소하면 빠진다.
+ *     자기 요청을 스스로 반려.
  *  6. **7일 창** — 결정 시각으로 잰다.
  *  7. 휴지통에 간 접수 건·영구 삭제된 접수 건(repair_case_id NULL)의 결재는 안 잡힌다.
  *  8. 🔴 「최신 행」 판정이 getCurrentApprovalsForCase 와 같은 말이다.
  *  9. 🔴 레지스트리: 확인한 키는 빠지고, 남의 확인은 영향이 없다. 역할로 거르지 않는다.
  * 10. 표가 없을 때의 오류(42P01)를 Drizzle 이 감싼 모양 그대로 알아본다.
+ * (5번은 불출 전용이라 함께 빠졌다. 번호는 시험 이름과 맞추려고 **다시 매기지 않는다.**)
  *
- * 격리·청소 규약은 mutations/repair-case-approvals-route.integration.test.ts 와
- * queries/inventory-part-issue-requests.integration.test.ts 를 본떴다. 이 파일이 만든
- * "apoutcome-test-" 계정과 "D9711" 접수 건만 쓴다(접수월 9711 은 다른 시험이 쓰지
- * 않는다 — 청소가 인수번호 접두사로 이뤄지므로 겹치면 서로의 행을 지운다).
- * ⚠️ **결재 행·불출 신청·결재선 판은 afterEach 로 반드시 걷는다** — 시험 DB 에 판이
- * 남으면 다른 시험 파일이 갑자기 결재선을 타면서 깨지고, 불출 표가 비어 있다고
- * 전제하는 시험도 깨진다. 사람 참조가 RESTRICT 라 삭제에는 순서가 있다: 결재 행 →
- * 불출 신청 항목 → 불출 신청 → 부품 요청 → 결재선 판(단계 CASCADE) → 확인 기록 →
- * 감사 기록 → (after) 접수 건·제품·접수 번호표 → 사람.
+ * 격리·청소 규약은 mutations/repair-case-approvals-route.integration.test.ts 를 본떴다.
+ * 이 파일이 만든 "apoutcome-test-" 계정과 "D9711" 접수 건만 쓴다(접수월 9711 은 다른
+ * 시험이 쓰지 않는다 — 청소가 인수번호 접두사로 이뤄지므로 겹치면 서로의 행을 지운다).
+ * ⚠️ **결재 행·결재선 판은 afterEach 로 반드시 걷는다** — 시험 DB 에 판이 남으면 다른
+ * 시험 파일이 갑자기 결재선을 타면서 깨진다. 사람 참조가 RESTRICT 라 삭제에는 순서가
+ * 있다: 결재 행 → 결재선 판(단계 CASCADE) → 확인 기록 → 감사 기록 →
+ * (after) 접수 건·제품·접수 번호표 → 사람.
  * ============================================================================
  */
 
@@ -102,8 +104,6 @@ let superAdminId: string; // 판을 만드는 사람 + 비상구
 
 const testUserIds: string[] = [];
 const userNames = new Map<string, string>();
-const createdIssueRequestIds: string[] = [];
-const createdPartRequestIds: string[] = [];
 let routeVersionCounter = 0;
 
 async function createTestUser(name: string, overrides: Partial<typeof users.$inferInsert> = {}): Promise<string> {
@@ -167,8 +167,12 @@ async function createTestCase(): Promise<{ id: string; intakeNumber: string }> {
   return { id: created.id, intakeNumber: row.intakeNumber };
 }
 
-/** 결재선 판 하나. 판을 넣으면 그 용도의 「현재 판」이 된다(이 시험은 판이 없는 상태에서 시작한다). */
-async function insertRoute(scope: "FINAL_SHIPMENT" | "PART_ISSUE", approverUserIds: readonly string[]): Promise<string> {
+/**
+ * 결재선 판 하나. 판을 넣으면 그 용도의 「현재 판」이 된다(이 시험은 판이 없는 상태에서
+ * 시작한다). 🔵 받는 용도가 "FINAL_SHIPMENT" 하나인 것은 13-C3 에서 불출 갈래가 빠졌기
+ * 때문이다 — DB enum 의 "PART_ISSUE" 자체는 **영구 유지**다(과거 결재 기록이 쓴다).
+ */
+async function insertRoute(scope: "FINAL_SHIPMENT", approverUserIds: readonly string[]): Promise<string> {
   routeVersionCounter += 1;
   const [route] = await db
     .insert(shipmentApprovalRoutes)
@@ -217,44 +221,6 @@ async function createInspectedCase(): Promise<{ id: string; intakeNumber: string
   return { ...repairCase, inspectionId };
 }
 
-/** 직접 사용 불출 신청 헤더 하나(항목은 결재 경로가 보지 않으므로 넣지 않는다). */
-async function insertIssueRequest(
-  overrides: Partial<typeof inventoryPartIssueRequests.$inferInsert> = {}
-): Promise<string> {
-  const [row] = await db
-    .insert(inventoryPartIssueRequests)
-    .values({ requestedByUserId: requesterId, destinationNote: "상해수리소", ...overrides })
-    .returning({ id: inventoryPartIssueRequests.id });
-  createdIssueRequestIds.push(row.id);
-  return row.id;
-}
-
-/** 신청 mutation 이 만드는 것과 같은 첫 결재 행(결재선 1단계). */
-async function insertFirstIssueApproval(
-  issueRequestId: string,
-  routeId: string,
-  assignedApproverUserId: string,
-  requestedByUserId = requesterId
-): Promise<string> {
-  const [row] = await db
-    .insert(inventoryPartIssueApprovals)
-    .values({ issueRequestId, routeId, routeStepOrder: 1, assignedApproverUserId, requestedByUserId })
-    .returning({ id: inventoryPartIssueApprovals.id });
-  return row.id;
-}
-
-async function decideIssue(
-  issueRequestId: string,
-  decision: "APPROVED" | "REJECTED",
-  actorUserId: string,
-  decisionReason: string | null = decision === "REJECTED" ? "수량 과다" : null
-) {
-  const result = await decidePartIssueRequestApproval({ issueRequestId, decision, actorUserId, decisionReason });
-  assert.equal(result.ok, true, `불출 결정이 막혔다: ${JSON.stringify(result)}`);
-  if (!result.ok) throw new Error("unreachable");
-  return result;
-}
-
 const grantedIds = async (userId: string, now?: Date) =>
   (await listMyGrantedApprovalOutcomes(userId, now ? { now } : {})).map((outcome) => outcome.approvalId);
 const rejectedIds = async (userId: string, now?: Date) =>
@@ -268,22 +234,8 @@ async function outcomeNotificationIds(userId: string, role: Role): Promise<strin
     .map((item) => item.id);
 }
 
-/** 이 파일이 만든 결재 행·불출 신청·판·확인 기록·감사 기록을 걷는다. 접수 건·사람은 after() 가 지운다. */
+/** 이 파일이 만든 결재 행·판·확인 기록·감사 기록을 걷는다. 접수 건·사람은 after() 가 지운다. */
 async function removeOutcomeFixtures(): Promise<void> {
-  if (createdIssueRequestIds.length > 0) {
-    await db
-      .delete(inventoryPartIssueApprovals)
-      .where(inArray(inventoryPartIssueApprovals.issueRequestId, createdIssueRequestIds));
-    await db
-      .delete(inventoryPartIssueRequestItems)
-      .where(inArray(inventoryPartIssueRequestItems.issueRequestId, createdIssueRequestIds));
-    await db.delete(inventoryPartIssueRequests).where(inArray(inventoryPartIssueRequests.id, createdIssueRequestIds));
-    createdIssueRequestIds.length = 0;
-  }
-  if (createdPartRequestIds.length > 0) {
-    await db.delete(inventoryPartRequests).where(inArray(inventoryPartRequests.id, createdPartRequestIds));
-    createdPartRequestIds.length = 0;
-  }
   if (testUserIds.length > 0) {
     // 결재 행은 판을 RESTRICT 로 참조한다 — 결재 행이 먼저다. 요청자로 고르므로 접수
     // 건이 NULL 이 된 행(시험 7)까지 걷힌다.
@@ -307,21 +259,9 @@ async function removeTestFixturesByPrefix(): Promise<void> {
   const ids = leftovers.map((row) => row.id);
 
   if (ids.length > 0) {
-    const issueRequests = await db
-      .select({ id: inventoryPartIssueRequests.id })
-      .from(inventoryPartIssueRequests)
-      .where(inArray(inventoryPartIssueRequests.requestedByUserId, ids));
-    const issueRequestIds = issueRequests.map((row) => row.id);
-    if (issueRequestIds.length > 0) {
-      await db
-        .delete(inventoryPartIssueApprovals)
-        .where(inArray(inventoryPartIssueApprovals.issueRequestId, issueRequestIds));
-      await db
-        .delete(inventoryPartIssueRequestItems)
-        .where(inArray(inventoryPartIssueRequestItems.issueRequestId, issueRequestIds));
-      await db.delete(inventoryPartIssueRequests).where(inArray(inventoryPartIssueRequests.id, issueRequestIds));
-    }
-    await db.delete(inventoryPartRequests).where(inArray(inventoryPartRequests.requestedByUserId, ids));
+    // 🔵 13-C3 전에는 여기서 불출 신청·항목·결재 행·부품 요청까지 걷었다. 이 파일이
+    //    그 행들을 더는 만들지 않으므로 함께 뺐다 — 만들지 않는 것을 걷는 코드는
+    //    「이 파일이 그것도 만든다」는 거짓말이 된다.
     await db.delete(repairCaseApprovals).where(inArray(repairCaseApprovals.requestedByUserId, ids));
     await db.delete(shipmentApprovalRouteSteps).where(inArray(shipmentApprovalRouteSteps.approverUserId, ids));
     await db.delete(shipmentApprovalRoutes).where(inArray(shipmentApprovalRoutes.createdByUserId, ids));
@@ -575,174 +515,62 @@ describe("접수 건 결재 — 최종 승인과 반려", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════ 부품 불출
-
-describe("부품 불출 — 최종 승인과 반려", () => {
-  test("🔴 2. 결재선 2단계 — 1단계 승인은 안 잡히고 마지막 단계 승인만 잡힌다(신청 APPROVED)", async () => {
-    const routeId = await insertRoute("PART_ISSUE", [stepAId, stepBId]);
-    const issueRequestId = await insertIssueRequest();
-    const step1Id = await insertFirstIssueApproval(issueRequestId, routeId, stepAId);
-
-    const first = await decideIssue(issueRequestId, "APPROVED", stepAId);
-    assert.equal(first.status, "PENDING_APPROVAL", "전제 — 아직 결재 중이다");
-    assert.ok(first.nextApprovalId, "전제 — 다음 단계가 열렸다");
-    assert.deepEqual(await grantedIds(requesterId), [], "중간 단계 승인이 승인 완료로 잡혔다");
-
-    const second = await decideIssue(issueRequestId, "APPROVED", stepBId);
-    assert.equal(second.status, "APPROVED");
-    const granted = await listMyGrantedApprovalOutcomes(requesterId);
-    assert.deepEqual(granted.map((outcome) => outcome.approvalId), [first.nextApprovalId]);
-    assert.ok(!granted.some((outcome) => outcome.approvalId === step1Id));
-    const [outcome] = granted;
-    assert.equal(outcome.source, "PART_ISSUE");
-    if (outcome.source === "PART_ISSUE") {
-      assert.equal(outcome.destinationNote, "상해수리소");
-      assert.equal(outcome.intakeNumber, null);
-      assert.equal(outcome.partRequestId, null);
-    }
-    assert.equal(outcome.decidedByName, userNames.get(stepBId));
-  });
-
-  test("🔴 5. 신청이 EXECUTED 여도 승인 완료로 잡히고, 승인 뒤 신청자가 취소하면 빠진다", async () => {
-    const routeId = await insertRoute("PART_ISSUE", [stepAId]);
-
-    const executed = await insertIssueRequest();
-    await insertFirstIssueApproval(executed, routeId, stepAId);
-    const executedDecision = await decideIssue(executed, "APPROVED", stepAId);
-    // 실행은 재고를 끌고 들어오므로 상태만 옮긴다 — 표 CHECK 가 요구하는 실행 기록과 함께.
-    await db
-      .update(inventoryPartIssueRequests)
-      .set({ status: "EXECUTED", executedByUserId: stepAId, executedAt: new Date() })
-      .where(eq(inventoryPartIssueRequests.id, executed));
-
-    const cancelledAfterApproval = await insertIssueRequest({ destinationNote: "평택 창고" });
-    await insertFirstIssueApproval(cancelledAfterApproval, routeId, stepAId);
-    const cancelledDecision = await decideIssue(cancelledAfterApproval, "APPROVED", stepAId);
-    assert.deepEqual(
-      [...(await grantedIds(requesterId))].sort(),
-      [executedDecision.approvalId, cancelledDecision.approvalId].sort(),
-      "APPROVED · EXECUTED 둘 다 승인 완료다"
-    );
-
-    const cancelled = await cancelPartIssueRequest({
-      issueRequestId: cancelledAfterApproval,
-      actorUserId: requesterId,
-      reason: null,
-    });
-    assert.equal(cancelled.ok, true, JSON.stringify(cancelled));
-    assert.deepEqual(await grantedIds(requesterId), [executedDecision.approvalId], "취소한 신청의 승인이 남았다");
-  });
-
-  test("🔴 3. 반려는 어느 단계든 잡힌다 — 요청 기반이면 부품 요청의 접수 건 인수번호를 읽는다", async () => {
-    const routeId = await insertRoute("PART_ISSUE", [stepAId, stepBId]);
-
-    const repairCase = await createTestCase();
-    const [partRequest] = await db
-      .insert(inventoryPartRequests)
-      .values({ requestedByUserId: requesterId, note: "apoutcome-test", repairCaseId: repairCase.id })
-      .returning({ id: inventoryPartRequests.id });
-    createdPartRequestIds.push(partRequest.id);
-    const requestBased = await insertIssueRequest({ partRequestId: partRequest.id, destinationNote: null });
-    await insertFirstIssueApproval(requestBased, routeId, stepAId);
-    const approvedFirst = await decideIssue(requestBased, "APPROVED", stepAId);
-    const rejectedAtStep2 = await decideIssue(requestBased, "REJECTED", stepBId, "2단계 반려");
-
-    const directUse = await insertIssueRequest({ destinationNote: "상해수리소" });
-    const directStep1 = await insertFirstIssueApproval(directUse, routeId, stepAId);
-    await decideIssue(directUse, "REJECTED", stepAId, "1단계 반려");
-
-    const rejected = await listMyRejectedApprovalOutcomes(requesterId);
-    assert.deepEqual(rejected.map((outcome) => outcome.approvalId), [directStep1, rejectedAtStep2.approvalId]);
-    const requestBasedOutcome = rejected.find((outcome) => outcome.approvalId === rejectedAtStep2.approvalId);
-    assert.ok(requestBasedOutcome && requestBasedOutcome.source === "PART_ISSUE");
-    if (requestBasedOutcome.source === "PART_ISSUE") {
-      assert.equal(requestBasedOutcome.intakeNumber, repairCase.intakeNumber);
-      assert.equal(requestBasedOutcome.partRequestId, partRequest.id);
-      assert.equal(requestBasedOutcome.decisionReason, "2단계 반려");
-    }
-    assert.ok(!(await grantedIds(requesterId)).includes(approvedFirst.approvalId), "반려된 신청의 1단계 승인이 잡혔다");
-  });
-
-  test("🔴 4. 신청자가 취소해 닫힌 결재 행 · 최고관리자가 자기 신청을 스스로 반려한 행은 안 잡힌다", async () => {
-    const routeId = await insertRoute("PART_ISSUE", [stepAId]);
-
-    const cancelled = await insertIssueRequest();
-    const cancelledApprovalId = await insertFirstIssueApproval(cancelled, routeId, stepAId);
-    const result = await cancelPartIssueRequest({ issueRequestId: cancelled, actorUserId: requesterId, reason: "잘못 올림" });
-    assert.equal(result.ok, true, JSON.stringify(result));
-    const [closedRow] = await db
-      .select({
-        status: inventoryPartIssueApprovals.status,
-        requestedByUserId: inventoryPartIssueApprovals.requestedByUserId,
-        decidedByUserId: inventoryPartIssueApprovals.decidedByUserId,
-      })
-      .from(inventoryPartIssueApprovals)
-      .where(eq(inventoryPartIssueApprovals.id, cancelledApprovalId));
-    assert.equal(closedRow.status, "REJECTED", "전제 — 취소는 열린 행을 REJECTED 로 닫는다");
-    assert.equal(isPartIssueApprovalClosedByRequester(closedRow), true);
-
-    const adminOwn = await insertIssueRequest({ requestedByUserId: superAdminId });
-    const adminOwnApprovalId = await insertFirstIssueApproval(adminOwn, routeId, stepAId, superAdminId);
-    await decideIssue(adminOwn, "REJECTED", superAdminId, "비상구로 스스로 반려");
-
-    // 대조 — 결재자가 반려하면 잡힌다.
-    const rejectedByApprover = await insertIssueRequest();
-    const rejectedByApproverId = await insertFirstIssueApproval(rejectedByApprover, routeId, stepAId);
-    await decideIssue(rejectedByApprover, "REJECTED", stepAId);
-
-    assert.deepEqual(await rejectedIds(requesterId), [rejectedByApproverId], "취소로 닫힌 행이 반려로 잡혔다");
-    assert.ok(!(await rejectedIds(superAdminId)).includes(adminOwnApprovalId), "스스로 반려한 신청이 잡혔다");
-  });
-
-  test("🔴 1. 불출 결과도 요청자에게만 간다", async () => {
-    const routeId = await insertRoute("PART_ISSUE", [stepAId]);
-    const granted = await insertIssueRequest();
-    await insertFirstIssueApproval(granted, routeId, stepAId);
-    await decideIssue(granted, "APPROVED", stepAId);
-    const rejected = await insertIssueRequest();
-    await insertFirstIssueApproval(rejected, routeId, stepAId);
-    await decideIssue(rejected, "REJECTED", stepAId);
-
-    assert.equal((await grantedIds(requesterId)).length, 1);
-    assert.equal((await rejectedIds(requesterId)).length, 1);
-    for (const someoneElse of [stepAId, otherRequesterId, superAdminId]) {
-      assert.deepEqual(await grantedIds(someoneElse), []);
-      assert.deepEqual(await rejectedIds(someoneElse), []);
-    }
-  });
-});
-
 // ═════════════════════════════════════ 레지스트리 — listMyNotifications 를 그대로 태운다
 
 describe("종 알림 — 승인 완료 · 반려됨", () => {
-  /** 요청자에게 승인 완료 하나(검수)와 반려 하나(불출)를 만든다. */
-  async function arrangeOneOfEach(): Promise<{ grantedKey: string; rejectedKey: string; grantedHref: string }> {
-    const repairCase = await createInspectedCase();
-    const routeId = await insertRoute("PART_ISSUE", [stepAId]);
-    const issueRequestId = await insertIssueRequest();
-    await insertFirstIssueApproval(issueRequestId, routeId, stepAId);
-    const decided = await decideIssue(issueRequestId, "REJECTED", stepAId);
+  /**
+   * 요청자에게 승인 완료 하나와 반려 하나를 만든다 — **서로 다른 접수 건의 검수 결재**다.
+   *
+   * 🔵 13-C3 전에는 반려 쪽이 직접 사용 **불출 신청**이었다(두 줄의 원본 표가 갈렸다).
+   *    불출 갈래가 이 파일에서 빠지면서 같은 표의 두 건으로 바꿨다 — 아래 세 시험이
+   *    재는 것은 **레지스트리가 종류(승인 완료/반려됨)별 묶음을 순서대로 내는가**와
+   *    **확인 키가 사건마다 따로인가**라, 원본 표가 같아도 그대로 선다. 반대로 「원본
+   *    표가 달라도 한 묶음에 섞인다」를 재던 자리는 아니었다.
+   */
+  async function arrangeOneOfEach(): Promise<{
+    grantedKey: string;
+    rejectedKey: string;
+    grantedHref: string;
+    rejectedCaseId: string;
+  }> {
+    const grantedCase = await createInspectedCase();
+    const rejectedCase = await createTestCase();
+    const rejectedApprovalId = await requestCaseApproval(rejectedCase.id, "REPAIR_INSPECTION", requesterId);
+    await decideCaseApproval(rejectedCase.id, "REPAIR_INSPECTION", "REJECTED", inspectorId);
 
     const [grantedOutcome] = await listMyGrantedApprovalOutcomes(requesterId);
     const [rejectedOutcome] = await listMyRejectedApprovalOutcomes(requesterId);
-    assert.equal(grantedOutcome.approvalId, repairCase.inspectionId);
-    assert.equal(rejectedOutcome.approvalId, decided.approvalId);
+    assert.equal(grantedOutcome.approvalId, grantedCase.inspectionId);
+    assert.equal(rejectedOutcome.approvalId, rejectedApprovalId);
     const granted = buildApprovalGrantedNotification(grantedOutcome as ApprovalOutcome);
     const rejected = buildApprovalRejectedNotification(rejectedOutcome as ApprovalOutcome);
-    return { grantedKey: granted.id, rejectedKey: rejected.id, grantedHref: granted.href };
+    return {
+      grantedKey: granted.id,
+      rejectedKey: rejected.id,
+      grantedHref: granted.href,
+      rejectedCaseId: rejectedCase.id,
+    };
   }
 
   test("🔴 9. 요청자의 종에 두 줄이 뜨고, 다른 사람의 종에는 없다", async () => {
-    const { grantedKey, rejectedKey, grantedHref } = await arrangeOneOfEach();
+    const { grantedKey, rejectedKey, grantedHref, rejectedCaseId } = await arrangeOneOfEach();
 
     const items = (await listMyNotifications(requesterId, "AS_ENGINEER")).filter(
       (item) => item.kind === "APPROVAL_GRANTED" || item.kind === "APPROVAL_REJECTED"
     );
+    // 🔴 아래 두 줄은 **차례(index)로** 집는다 — 위 deepEqual 이 [승인 완료, 반려됨]
+    //    차례를 이미 못 박으므로 0 이 승인 완료, 1 이 반려됨이다. 13-C3 에서 반려 쪽
+    //    표본이 불출에서 검수로 바뀌었으니(arrangeOneOfEach 주석) 기대값도 함께 바꿨다.
     assert.deepEqual(items.map((item) => item.id), [grantedKey, rejectedKey], "레지스트리 순서대로 종류별로 온다");
+    assert.equal(items.length, 2, "차례로 집기 전에 줄 수부터 못 박는다");
     assert.equal(items[0].targetKey, grantedKey, "사건 하나가 한 건이다");
     assert.equal(items[0].href, grantedHref);
-    assert.equal(items[1].href, "/inventory", "직접 사용 불출의 반려는 재고 목록으로 간다");
-    assert.equal(items[1].detail, "부품 불출 승인 · 사유: 수량 과다");
+    assert.equal(
+      items[1].href,
+      `/repair-cases/${rejectedCaseId}/approval`,
+      "반려는 **다시 올리는 자리**로 간다 — 그 건의 결재 화면(재요청 단추가 거기 있다)"
+    );
+    assert.equal(items[1].detail, "수리 검수 승인 · 사유: 시험 반려 사유");
 
     for (const [someoneElse, role] of [
       [stepAId, "AS_ENGINEER"],

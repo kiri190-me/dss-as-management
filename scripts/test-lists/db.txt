@@ -40,12 +40,16 @@
 #    mutation 여덟을 못 뗀 까닭(= 조회 시험과 남의 시험이 그것을 밑자락으로 쓴다)은
 #    src/lib/db/mutations/inventory.ts 머리말에 자세히 적어 두었다. 거기를 먼저 읽을 것.
 #
-# 🔵 이 목록에서 「재고」로 검색해도 **안 걸리는** 시험이 같은 mutation 을 밑자락으로 쓴다.
-#    처음 여섯이었고 **2026-10-27 현재 넷**이다 — repair-cases-purge ·
-#    repair-cases-permanent-delete · repair-case-billing-decision ·
-#    queries/approval-outcome-notifications.
-#    끊은 둘은 **표본을 재고 밖으로 옮기는 일**이었다(밑자락만 갈아 끼우면 되는 것과 다르다):
-#    role-permissions 는 13-C1 에서, queries/notification-settings 는 13-C2 에서.
+# 🔵 이 목록에서 「재고」로 검색해도 **안 걸리는** 시험이 같은 mutation 을 밑자락으로 썼다.
+#    처음 여섯이었고 **2026-10-27 현재 하나**다 — mutations/repair-case-billing-decision
+#    뿐이다(그것은 13-C4 에서 mutation 과 함께 **통째로** 지운다).
+#    끊은 다섯은 방법이 **셋으로 갈린다**:
+#      · 표본을 재고 밖으로 옮긴 둘 — role-permissions(13-C1) ·
+#        queries/notification-settings(13-C2).
+#      · 밑자락을 raw insert 로 갈아 끼운 둘 — repair-cases-purge ·
+#        repair-cases-permanent-delete(둘 다 13-C3). 되메움을 재는 코드는 **남는다**.
+#      · 갈래째 들어낸 하나 — queries/approval-outcome-notifications(13-C3). 부품 불출
+#        갈래만 뺐고 출하·검수 결재 갈래는 그대로다(시험 다섯 + 묶음 하나가 줄었다).
 #    재고 줄만 세고 「이만큼 빠지겠구나」 하면 틀린다.
 # ============================================================================
 

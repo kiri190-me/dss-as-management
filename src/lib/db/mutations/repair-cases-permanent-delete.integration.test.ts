@@ -11,6 +11,7 @@ import {
   inventoryPartIssueApprovals,
   inventoryPartIssueRequestItems,
   inventoryPartIssueRequests,
+  inventoryPartRequestHistory,
   inventoryPartRequestItems,
   inventoryPartRequests,
   parts,
@@ -32,8 +33,6 @@ import { guardPreexistingRows, type PreexistingRowsGuard } from "../test-cleanup
 import { createRepairCase, permanentlyDeleteRepairCase, restoreRepairCase, softDeleteRepairCase } from "./repair-cases";
 import { createRepairCaseFlowchart } from "./repair-case-flowcharts";
 import { createRepairCaseFlowchartNode, createRepairCaseFlowchartEdge } from "./repair-case-flowchart-graph";
-import { createPart, receiveStock, consumeStock } from "./inventory";
-import { createPartRequest } from "./inventory-part-requests";
 import { createWorkRecord } from "./repair-case-work-records";
 import { getRepairCaseById, listDeletedRepairCases } from "../queries/repair-cases";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
@@ -63,8 +62,9 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  * design, that's exactly what this suite tests — so cleanup below never
  * relies on repair_case_id to find those rows again; it tracks created ids
  * explicitly (createdPartIds/createdRequestIds/createdFlowchartIds) and
- * cascades from there, same "createdXIds array, not a repair_case_id
- * lookup" precedent inventory.integration.test.ts already uses for parts.
+ * cascades from there — a "createdXIds array, not a repair_case_id lookup"
+ * convention. (전에는 그 본보기로 inventory.integration.test.ts 를 가리켰는데,
+ * 그 파일은 옛 재고 걷어내기 13-C4 에서 사라진다 — 가리킬 곳을 뺐다.)
  */
 
 const TEST_CUSTOMER_NAME_PREFIX = "AS-TEST-CUSTOMER-PD-";
@@ -172,7 +172,7 @@ after(async () => {
   // Parts request rows: tracked explicitly (repair_case_id is nulled by the
   // very purge this suite tests, so it can't be used to find them after).
   if (createdRequestIds.length > 0) {
-    const { inventoryPartRequestIssues, inventoryPartRequestHistory, inventoryPartRequestIdempotencyKeys } = await import("../schema");
+    const { inventoryPartRequestIssues, inventoryPartRequestIdempotencyKeys } = await import("../schema");
     await db.delete(inventoryPartRequestIdempotencyKeys).where(inArray(inventoryPartRequestIdempotencyKeys.requestId, createdRequestIds));
     await db.delete(inventoryPartRequestHistory).where(inArray(inventoryPartRequestHistory.requestId, createdRequestIds));
     await db.delete(inventoryPartRequestIssues).where(inArray(inventoryPartRequestIssues.requestId, createdRequestIds));
@@ -281,17 +281,122 @@ async function createAndDeleteTestCase(overrides: Partial<ValidatedCreateRepairC
   return created;
 }
 
-async function createTestPart() {
-  const result = await createPart({
-    partName: `${TEST_PART_PREFIX}${randomUUID().slice(0, 8)}`,
-    partSpec: "PD 테스트 스펙",
-    category: "TEST",
-    actorUserId: superAdminId,
+/**
+ * ============================================================================
+ * 🔴 아래 두 밑자락은 **옛 재고 경로가 만들던 모양**이다 — 2026-10-27(조각 13-C3)에
+ *    그 경로를 걷어내면서 표에 직접 넣는 방식으로 바꿨다
+ * ============================================================================
+ * 전에는 createPart → receiveStock(10) → consumeStock(n) 과 createPartRequest 를
+ * 실제로 태웠다(mutations/inventory.ts · mutations/inventory-part-requests.ts).
+ *
+ * 🔴 **왜 바꿨나.** 그 경로가 **사라진다**(13-C4 가 저 두 mutation 을 지운다). 경로가
+ * 없어지면 「정말 그 경로로 생긴 행인가」는 영영 잴 수 없는 질문이 되고, 운영에 남아
+ * 있을 옛 행은 어차피 **지금 코드가 아니라 과거 코드**가 만든 것이다. 영구 삭제가
+ * 실제로 책임지는 질문은 **「표에 그런 행이 있을 때 개인정보 없이 되메우는가」**이고,
+ * 표에 직접 넣는 쪽이 오히려 그 상황에 더 가깝다. 🔴 되메우는 코드(repair-cases.ts 의
+ * 6a·6b)는 **그대로 남는다** — 스키마가 공용 서브모듈 vendor/dss-core 라 dss-po 가 같은
+ * 표를 함께 쓰고, 그래서 재고 표를 지우지 않기로 했다. 바로 아래 세 시험이 그 되메움의
+ * 유일한 증거다.
+ *
+ * 🔴 **모양은 추측이 아니라 실측으로 맞췄다**(2026-10-27, 시험 DB 에서 옛 경로와 직접
+ * 넣기를 나란히 돌려 네 표를 칸마다 대조했다). 입고 10 → 사용 n 이 남기던 것:
+ *   · parts               — 품명·품명2·분류만 채우고 나머지는 표 기본값(version 1)
+ *   · part_stock_balances — current_quantity 10-n, version 3 (입고 1→2, 사용 2→3)
+ *   · stock_transactions RECEIPT — +10, resulting_quantity 10, 사용처 칸은 전부 NULL
+ *   · stock_transactions USE     — -n, resulting_quantity 10-n, repair_case_id 와
+ *                                  (운영자가 적었다면) destination_note
+ * 부품 요청 쪽은 헤더(status PENDING) · 항목 한 줄 · 이력 SUBMITTED 한 줄이다. 옛
+ * 경로가 함께 쓰던 멱등 키 행은 **부르는 쪽의 배관**이지 영구 삭제가 건드리는 행이
+ * 아니라 넣지 않는다.
+ *
+ * 🔴 **destination_note 가 NULL 인 것이 이 시험들의 전제다.** 두 표의 CHECK 이
+ *   · stock_transactions_use_has_destination:
+ *       `transaction_type <> 'USE' OR repair_case_id IS NOT NULL OR destination_note IS NOT NULL`
+ *   · inventory_part_issue_requests_direct_use_has_destination:
+ *       `part_request_id IS NOT NULL OR repair_case_id IS NOT NULL OR destination_note IS NOT NULL`
+ * 을 요구하므로, 영구 삭제가 repair_case_id 를 NULL 로 떨구기 전에 destination_note 를
+ * 채우지 않으면 그 DELETE 의 SET NULL 이 CHECK 에 걸려 **삭제 전체가 되돌아간다.**
+ */
+async function insertTestPart(): Promise<string> {
+  const [row] = await db
+    .insert(parts)
+    .values({
+      partName: `${TEST_PART_PREFIX}${randomUUID().slice(0, 8)}`,
+      partSpec: "PD 테스트 스펙",
+      category: "TEST",
+    })
+    .returning({ id: parts.id });
+  createdPartIds.push(row.id);
+  return row.id;
+}
+
+/** 부품 하나 + 재고 칸 하나 + 입고 한 줄 + 그 접수 건에 묶인 사용 한 줄. 위 머리말 참조. */
+async function insertLegacyStockUse(
+  repairCaseId: string,
+  options: { quantity?: number; destinationNote?: string | null } = {}
+): Promise<{ partId: string; partStockBalanceId: string }> {
+  const quantity = options.quantity ?? 2;
+  const RECEIPT_QUANTITY = 10;
+  const partId = await insertTestPart();
+
+  const [balance] = await db
+    .insert(partStockBalances)
+    .values({
+      partId,
+      owner: "DSS",
+      location: TEST_LOCATION,
+      currentQuantity: RECEIPT_QUANTITY - quantity,
+      // 입고 한 번(1→2)과 사용 한 번(2→3)이 올리던 값.
+      version: 3,
+    })
+    .returning({ id: partStockBalances.id });
+
+  await db.insert(stockTransactions).values([
+    {
+      partStockBalanceId: balance.id,
+      transactionType: "RECEIPT",
+      quantityDelta: RECEIPT_QUANTITY,
+      resultingQuantity: RECEIPT_QUANTITY,
+      actorUserId: superAdminId,
+    },
+    {
+      partStockBalanceId: balance.id,
+      transactionType: "USE",
+      quantityDelta: -quantity,
+      resultingQuantity: RECEIPT_QUANTITY - quantity,
+      repairCaseId,
+      destinationNote: options.destinationNote ?? null,
+      actorUserId: superAdminId,
+    },
+  ]);
+
+  return { partId, partStockBalanceId: balance.id };
+}
+
+/** 그 접수 건에 묶인 부품 요청 하나 — 헤더 · 항목 한 줄 · 이력 한 줄. 위 머리말 참조. */
+async function insertLegacyPartRequest(repairCaseId: string): Promise<string> {
+  const partId = await insertTestPart();
+  const [request] = await db
+    .insert(inventoryPartRequests)
+    .values({ repairCaseId, requestedByUserId: engineerId, status: "PENDING", note: null })
+    .returning({ id: inventoryPartRequests.id });
+  createdRequestIds.push(request.id);
+
+  await db.insert(inventoryPartRequestItems).values({
+    requestId: request.id,
+    partId,
+    requestedQuantity: 3,
+    owner: "DSS",
+    note: null,
   });
-  assert.equal(result.ok, true, `part create failed: ${JSON.stringify(result)}`);
-  if (!result.ok) throw new Error("unreachable");
-  createdPartIds.push(result.partId);
-  return result.partId;
+  await db.insert(inventoryPartRequestHistory).values({
+    requestId: request.id,
+    actionType: "SUBMITTED",
+    afterState: { status: "PENDING", items: [{ partId, quantity: 3, owner: "DSS", note: null }] },
+    actorUserId: engineerId,
+  });
+
+  return request.id;
 }
 
 async function fetchRow(id: string) {
@@ -489,20 +594,8 @@ describe("permanentlyDeleteRepairCase", () => {
   });
 
   test("stock_transactions: a case-linked USE row (destination_note NULL) survives, gets repair_case_id=NULL and a non-PII destination_note backfill satisfying the CHECK constraint", async () => {
-    const partId = await createTestPart();
     const created = await createTestCase();
-    const received = await receiveStock({ partId, owner: "DSS", location: TEST_LOCATION, quantity: 10, actorUserId: superAdminId });
-    assert.equal(received.ok, true);
-    if (!received.ok) return;
-
-    const used = await consumeStock({
-      partStockBalanceId: received.partStockBalanceId,
-      quantity: 2,
-      repairCaseId: created.id,
-      actorUserId: superAdminId,
-      expectedVersion: received.version,
-    });
-    assert.equal(used.ok, true, JSON.stringify(used));
+    await insertLegacyStockUse(created.id, { quantity: 2 });
 
     const [useRowBefore] = await db
       .select()
@@ -529,22 +622,9 @@ describe("permanentlyDeleteRepairCase", () => {
   });
 
   test("stock_transactions: an existing destination_note is never overwritten by the purge backfill", async () => {
-    const partId = await createTestPart();
     const created = await createTestCase();
-    const received = await receiveStock({ partId, owner: "DSS", location: TEST_LOCATION, quantity: 10, actorUserId: superAdminId });
-    assert.equal(received.ok, true);
-    if (!received.ok) return;
-
     const ORIGINAL_NOTE = "PD-TEST-EXISTING-DESTINATION-NOTE";
-    const used = await consumeStock({
-      partStockBalanceId: received.partStockBalanceId,
-      quantity: 1,
-      repairCaseId: created.id,
-      destinationNote: ORIGINAL_NOTE,
-      actorUserId: superAdminId,
-      expectedVersion: received.version,
-    });
-    assert.equal(used.ok, true, JSON.stringify(used));
+    await insertLegacyStockUse(created.id, { quantity: 1, destinationNote: ORIGINAL_NOTE });
 
     const [useRowBefore] = await db
       .select()
@@ -564,24 +644,12 @@ describe("permanentlyDeleteRepairCase", () => {
   });
 
   test("inventory_part_issue_requests: a direct-use request pointing only at the case (destination_note NULL) no longer blocks the purge — it gets the ledger's exact note whatever its status; an existing note and another case's request are left alone", async () => {
-    const partId = await createTestPart();
-    const received = await receiveStock({ partId, owner: "DSS", location: TEST_LOCATION, quantity: 10, actorUserId: superAdminId });
-    assert.equal(received.ok, true);
-    if (!received.ok) return;
-
     const created = await createTestCase();
     const otherCase = await createTestCase();
 
     // 같은 접수 건에 사용처가 빈 재고 장부 USE 줄도 하나 — 두 표가 **같은 문구**를
     // 받는지 본다.
-    const used = await consumeStock({
-      partStockBalanceId: received.partStockBalanceId,
-      quantity: 1,
-      repairCaseId: created.id,
-      actorUserId: superAdminId,
-      expectedVersion: received.version,
-    });
-    assert.equal(used.ok, true, JSON.stringify(used));
+    const { partStockBalanceId } = await insertLegacyStockUse(created.id, { quantity: 1 });
     const [useRowBefore] = await db
       .select()
       .from(stockTransactions)
@@ -591,7 +659,7 @@ describe("permanentlyDeleteRepairCase", () => {
 
     // 결재 중 — 항목과 대기 중인 결재 행이 딸려 있다.
     const pendingId = await insertDirectIssueRequest({ repairCaseId: created.id, status: "PENDING_APPROVAL", requestReason: "PD-TEST-PENDING" });
-    await db.insert(inventoryPartIssueRequestItems).values({ issueRequestId: pendingId, partStockBalanceId: received.partStockBalanceId, quantity: 2 });
+    await db.insert(inventoryPartIssueRequestItems).values({ issueRequestId: pendingId, partStockBalanceId, quantity: 2 });
     await db.insert(inventoryPartIssueApprovals).values({
       issueRequestId: pendingId,
       requestedByUserId: engineerId,
@@ -674,24 +742,18 @@ describe("permanentlyDeleteRepairCase", () => {
   });
 
   test("inventory_part_requests survives purge with repair_case_id = NULL", async () => {
-    const partId = await createTestPart();
     const created = await createTestCase();
-    const request = await createPartRequest({
-      repairCaseId: created.id,
-      items: [{ partId, quantity: 3, owner: "DSS" }],
-      actorUserId: engineerId,
-      idempotencyKey: randomUUID(),
-    });
-    assert.equal(request.ok, true, JSON.stringify(request));
-    if (!request.ok) return;
-    createdRequestIds.push(request.requestId);
+    const requestId = await insertLegacyPartRequest(created.id);
+
+    const [requestBefore] = await db.select().from(inventoryPartRequests).where(eq(inventoryPartRequests.id, requestId));
+    assert.equal(requestBefore.repairCaseId, created.id, "setup: the request must point at the case before the purge");
 
     const softDeleted = await softDeleteRepairCase({ id: created.id, expectedVersion: 1, actorUserId: engineerId, reason: null });
     assert.equal(softDeleted.ok, true);
     const purged = await permanentlyDeleteRepairCase({ id: created.id, expectedVersion: 2, actorUserId: adminId, reason: "부품 요청 보존 검증" });
     assert.equal(purged.ok, true, JSON.stringify(purged));
 
-    const [requestRow] = await db.select().from(inventoryPartRequests).where(eq(inventoryPartRequests.id, request.requestId));
+    const [requestRow] = await db.select().from(inventoryPartRequests).where(eq(inventoryPartRequests.id, requestId));
     assert.ok(requestRow, "the inventory_part_requests row must survive the purge");
     assert.equal(requestRow.repairCaseId, null);
   });

@@ -28,7 +28,6 @@ import { guardPreexistingRows, type PreexistingRowsGuard } from "../test-cleanup
 import { createRepairCase, restoreRepairCase, softDeleteRepairCase } from "./repair-cases";
 import { createRepairCaseFlowchart } from "./repair-case-flowcharts";
 import { createRepairCaseFlowchartNode } from "./repair-case-flowchart-graph";
-import { createPart, receiveStock, consumeStock } from "./inventory";
 import { createWorkRecord } from "./repair-case-work-records";
 import { purgeExpiredRepairCase, listPurgeEligibleRepairCaseIds, runRepairCasePurgeSweep } from "./repair-cases-purge";
 import { REPAIR_CASE_TRASH_RETENTION_DAYS } from "@/lib/domain/repair-case-trash-retention";
@@ -304,17 +303,78 @@ async function createEligibleCase(overrides: Partial<ValidatedCreateRepairCaseIn
   return created;
 }
 
-async function createTestPart() {
-  const result = await createPart({
-    partName: `${TEST_PART_PREFIX}${randomUUID().slice(0, 8)}`,
-    partSpec: "APG 테스트 스펙",
-    category: "TEST",
-    actorUserId: superAdminId,
-  });
-  assert.equal(result.ok, true, `part create failed: ${JSON.stringify(result)}`);
-  if (!result.ok) throw new Error("unreachable");
-  createdPartIds.add(result.partId);
-  return result.partId;
+/**
+ * 접수 건 하나에 묶인 재고 사용 장부 줄을 **표에 직접** 세운다 — 부품 하나, 재고 칸
+ * 하나, 입고 한 줄, 사용 한 줄.
+ *
+ * 🔴 **이 모양은 옛 재고 경로가 만들던 것이다.** 2026-10-27(조각 13-C3)에 그 경로를
+ * 걷어내면서 표에 직접 넣는 방식으로 바꿨다 — 전에는 createPart → receiveStock(10)
+ * → consumeStock(2) 를 실제로 태웠다.
+ *
+ * 🔴 **왜 바꿨나.** 그 경로가 **사라진다**(13-C4 가 mutations/inventory.ts 를 지운다).
+ * 경로가 없어지면 「정말 그 경로로 생긴 행인가」는 영영 잴 수 없는 질문이 되고, 운영에
+ * 남아 있을 옛 행은 어차피 **지금 코드가 아니라 과거 코드**가 만든 것이다. 자동 소각이
+ * 실제로 책임지는 질문은 **「표에 그런 행이 있을 때 개인정보 없이 되메우는가」**이고,
+ * 표에 직접 넣는 쪽이 오히려 그 상황에 더 가깝다. 되메우는 코드(repair-cases-purge.ts
+ * 의 3번 단계)는 그대로 남는다 — 스키마가 공용 서브모듈이라 재고 표를 지우지 않는다.
+ *
+ * 🔴 **모양은 추측이 아니라 실측으로 맞췄다**(2026-10-27, 시험 DB 에서 두 길을 나란히
+ * 돌려 칸마다 대조했다). 입고 10 → 사용 2 가 남기던 것:
+ *   · parts               — 품명·품명2·분류만 채우고 나머지는 표 기본값(version 1)
+ *   · part_stock_balances — current_quantity 8, version 3 (입고가 1→2, 사용이 2→3)
+ *   · stock_transactions RECEIPT — +10, resulting_quantity 10, 사용처 칸은 전부 NULL
+ *   · stock_transactions USE     — -2, resulting_quantity 8, repair_case_id 만 채우고
+ *                                  destination_note 는 NULL
+ *
+ * 🔴 **USE 줄의 destination_note 가 NULL 인 것이 이 시험의 전제다.**
+ * stock_transactions_use_has_destination CHECK 이 USE 줄에
+ * `repair_case_id IS NOT NULL OR destination_note IS NOT NULL` 을 요구하므로, 소각이
+ * repair_case_id 를 NULL 로 떨구기 전에 destination_note 를 채우지 않으면 그 DELETE 의
+ * SET NULL 이 CHECK 에 걸려 **소각 전체가 되돌아간다.**
+ */
+async function insertLegacyStockUse(repairCaseId: string, quantity = 2, receiptQuantity = 10) {
+  const [part] = await db
+    .insert(parts)
+    .values({
+      partName: `${TEST_PART_PREFIX}${randomUUID().slice(0, 8)}`,
+      partSpec: "APG 테스트 스펙",
+      category: "TEST",
+    })
+    .returning({ id: parts.id });
+  createdPartIds.add(part.id);
+
+  const [balance] = await db
+    .insert(partStockBalances)
+    .values({
+      partId: part.id,
+      owner: "DSS",
+      location: TEST_LOCATION,
+      currentQuantity: receiptQuantity - quantity,
+      // 입고 한 번(1→2)과 사용 한 번(2→3)이 올리던 값.
+      version: 3,
+    })
+    .returning({ id: partStockBalances.id });
+  createdStockBalanceIds.add(balance.id);
+
+  await db.insert(stockTransactions).values([
+    {
+      partStockBalanceId: balance.id,
+      transactionType: "RECEIPT",
+      quantityDelta: receiptQuantity,
+      resultingQuantity: receiptQuantity,
+      actorUserId: superAdminId,
+    },
+    {
+      partStockBalanceId: balance.id,
+      transactionType: "USE",
+      quantityDelta: -quantity,
+      resultingQuantity: receiptQuantity - quantity,
+      repairCaseId,
+      actorUserId: superAdminId,
+    },
+  ]);
+
+  return { partId: part.id, partStockBalanceId: balance.id };
 }
 
 async function fetchRow(id: string) {
@@ -465,21 +525,8 @@ describe("purgeExpiredRepairCase", () => {
   });
 
   test("stock_transactions: a case-linked USE row survives auto-purge, gets repair_case_id=NULL and a non-PII destination_note backfill satisfying the CHECK constraint", async () => {
-    const partId = await createTestPart();
     const created = await createTestCase();
-    const received = await receiveStock({ partId, owner: "DSS", location: TEST_LOCATION, quantity: 10, actorUserId: superAdminId });
-    assert.equal(received.ok, true);
-    if (!received.ok) return;
-    createdStockBalanceIds.add(received.partStockBalanceId);
-
-    const used = await consumeStock({
-      partStockBalanceId: received.partStockBalanceId,
-      quantity: 2,
-      repairCaseId: created.id,
-      actorUserId: superAdminId,
-      expectedVersion: received.version,
-    });
-    assert.equal(used.ok, true, JSON.stringify(used));
+    await insertLegacyStockUse(created.id);
 
     const [useRowBefore] = await db
       .select()
