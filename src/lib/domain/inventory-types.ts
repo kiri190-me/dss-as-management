@@ -83,8 +83,11 @@ export const stockTransactionTypeLabels: Record<StockTransactionType, string> = 
 /**
  * Phase 5B-3 — Parts Request & Issue Workflow. Client-safe mirror of
  * src/lib/db/schema/inventory-part-requests.ts's enums. Exactly the 6
- * approved statuses (no purchasing/backorder, no item-level reject) — see
- * inventory-part-request-rules.ts for the transition function.
+ * approved statuses (no purchasing/backorder, no item-level reject).
+ *
+ * 🔵 전이 함수가 있던 `inventory-part-request-rules.ts` 는 2026-10-27(조각 13-C5)에
+ *    재고 코드와 함께 지웠다. 이 목록이 남은 까닭은 `auth/inventory-authorization.ts`
+ *    가 아직 이 타입을 쓰기 때문이다 — 그쪽 정리는 13-D 다.
  */
 export const INVENTORY_PART_REQUEST_STATUS_CODES = [
   "PENDING",

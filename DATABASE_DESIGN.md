@@ -362,3 +362,88 @@ FK는 기본적으로 `ON DELETE RESTRICT`로 하고, Soft Delete 정책과 결�
   - `permissions`: 개별 권한 정의
   - `role_permissions`: 역할별 기본 권한 매핑
   - `user_permissions`: 사용자별 예외 권한(추가/회수) 매핑
+
+---
+
+## 18. 옛 재고 기능 걷어내기 — 코드는 사라지고 표는 남는다 (조각 13, 2026-10)
+
+재고 관리는 2026-10 에 **별도 시스템**(dss-inventory)으로 떨어져 나갔다. A/S 는 이제 그쪽
+API 를 부르는 **새 통로**(`server/actions/inventory-stock-requests` ·
+`server/inventory-gateway` · `domain/inventory-gateway`)만 쓴다.
+
+A/S 안의 옛 재고 코드는 조각 13 에서 단계를 나눠 걷어냈다 — 화면·경로(13-A) → 옛 서버
+액션(13-B) → 남의 시험이 그것을 밑자락으로 쓰던 자리 다섯(13-C1~C3) → 알림 종류 셋
+(13-C4) → **mutation·조회·도메인·검증·인가 스물일곱과 그 시험 열일곱(13-C5, 2026-10-27).**
+그 과정 기록은 조각이 끝나면서 함께 지웠다. **아래 여섯만 지금도 사실이고, 그래서 남긴다.**
+
+### 18-1. 🔴 재고 표를 지우지 않는 진짜 까닭
+
+2026-10-16 사용자 결정으로 재고 표(`parts` · `part_stock_balances` ·
+`stock_transactions` · `inventory_part_requests` · `inventory_part_request_items` ·
+`inventory_part_issue_requests`)는 **그대로 둔다.**
+
+🔴 **그때 적어 두었던 까닭 — 「운영의 과거 출고 기록이 거기에만 있다」 — 은 사실이
+아니었다.** 2026-10-27 운영 실측에서 **재고 표 여섯이 전부 0행**이었다(개발 PC 에 있는
+행은 전부 데모 자료다. 2026-09-04 결정 D 로 NAS 에 안 따라갔고 그 뒤 운영에서 한 번도
+안 쓰였다).
+
+🔴 **남기는 진짜 까닭은 따로다**: 스키마가 공용 서브모듈 `vendor/dss-core` 이고
+**dss-po 가 같은 표 정의를 함께 쓴다**(E-2 절, `PO_DOMESTIC_SPLIT_DESIGN.md`). 표를
+지우려면 그쪽과 한 몸으로 다뤄야 한다.
+
+그래서 **표를 건드리는 살아 있는 코드가 지금도 둘 있다.** 수리 건 영구삭제·소각이
+`stock_transactions` 와 `inventory_part_issue_requests` 의 `destination_note` 를
+**개인정보 없이** 되메워 CHECK 제약을 지킨다 — `mutations/repair-cases-purge.ts` 와
+`mutations/repair-cases.ts`. 재는 자리는 각각의 integration 시험이고, 밑자락은
+2026-10-27(13-C3)에 raw insert 로 갈아 끼웠다(옛 경로가 사라지기 때문이다).
+
+### 18-2. 🔴 `shipment_approval_route_scope` 의 `'PART_ISSUE'` 는 **영구 유지**
+
+enum 값도, `domain/shipment-approval-route.ts` 의 `SHIPMENT_APPROVAL_ROUTE_SCOPES` 목록도
+그대로 둔다. 까닭이 재고 코드가 아니기 때문이다 — **저장된 판과 과거 결재 기록이 그 값을
+쓴다.** 목록에서 빼면 타입이 좁아져 그 판을 읽지도 이어 쓰지도 못하고, **계정 삭제**가
+거기서 조용히 깨진다(`mutations/user-deletion.ts` → `saveShipmentApprovalRouteInTx` →
+`validateShipmentApprovalRouteInput`. 입력이 `unknown` 이라 타입 검사로는 안 드러난다).
+
+🔵 2026-10-18 부터 이 용도는 **[사용자 관리] → [승인 절차] 탭에서 고를 수 없다**
+(`EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES`). 「고를 수 없다」와 「값이 없다」는 다르다.
+
+🔵 13-C4 에서 계정 삭제의 `OPEN_APPROVAL_KINDS` 에서는 `PART_ISSUE` 를 **뺐다**(열린 불출
+결재가 있어도 이어받을 사람을 요구하지 않는다). 🔴 **결재선 판(routeSlots)의 `PART_ISSUE`
+는 그대로다** — 지울 사람이 현재 불출 판에 올라 있으면 지금도 이어받을 사람이 필요하다.
+빠진 것은 「열린 결재 **행**」 한 가지뿐이다. 근거 셋의 전문은
+`domain/user-deletion-rules.ts` 의 `OPEN_APPROVAL_KINDS` 주석에 있다.
+
+### 18-3. 🔵 아직 재고 **표**를 직접 읽는 코드 하나
+
+`queries/user-deletion-impact.ts` 가 `inventory_part_requests` ·
+`inventory_part_issue_requests` 를 읽어 「본인이 올린 열린 요청 N건」을 **참고로** 센다
+(영향 목록 12·13번). 🔴 **표를 직접 읽는 것이라 조각 13 의 코드 삭제로 깨지지 않는다.**
+치우려면 화면 문구(`components/users/user-deletion-dialog-text.ts` 의 「(참고) 직접 올린
+열린 부품 요청 …」)까지 한 몸으로 다뤄야 해서, 따로 정할 일로 남겨 두었다.
+
+### 18-4. 13-D 에 남은 일 — 권한 키 `inventory.*`
+
+`auth/permission-baseline.ts` 의 `inventory.view` · `inventory.parts` ·
+`inventory.stock` · `inventory.history` · `inventory.requests` ·
+`inventory.requestProcessing` · `inventory.lifecycle` 일곱과, 그 기본값을 내는
+`auth/inventory-authorization.ts` 가 **아직 그대로다.** 13-C5 에서 건드리지 않았다.
+
+🔵 **`inventory.requests` 는 남긴다** — 새 통로(부품 반출 신청)가 그 키를 쓴다.
+🔴 권한은 코드가 아니라 **운영 DB 의 `role_permissions` 값이 최종 판정**이므로
+(`permission-features.ts` 의 `SETTINGS_ENFORCED_AREAS`), 키를 줄이기 전에 운영에서
+저장된 행을 먼저 SELECT 해 「실제로 달라지는 칸」을 세어야 한다.
+
+### 18-5. 🔵 이름이 닮아 섞이기 쉬운 것
+
+- `queries/oh-part-templates`(옛 관리 화면, 13-B·13-C5 에서 지웠다)와
+  `fetchInventoryOhTemplate`(새, 재고 관리 API)은 **완전히 다른 통로**다.
+- `components/repair-cases/detail/PartRequestSection.tsx` 는 이름이 재고처럼 생겼지만
+  **지금 운영 중인 새 코드**다(수리 건 상세가 쓴다).
+- `components/inventory/part-picker.test.tsx` 는 폴더 이름만 `inventory` 다 — 재는 대상은
+  서브모듈의 고르개(`@dss/core/ui/inventory/part-picker`)이고 **지금 돌고 있는 코드**다.
+
+### 18-6. 운영 DB 고아 행
+
+13-C4 가 알림 종류 셋을 뺀 뒤 남는 고아 행을 치우는 SQL 은 **적어만 두었고 실행하지
+않았다** — `NOTIFICATION_AND_IDENTITY_DESIGN.md` 의 K 절. 표 셋이고 하나는 포털 DB 다.

@@ -11,6 +11,7 @@ import {
   MAX_SHIPMENT_APPROVAL_ROUTE_STEPS,
   moveRouteStepDown,
   moveRouteStepUp,
+  PART_ISSUE_APPROVAL_ROUTE_SCOPE,
   removeRouteStep,
   SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES,
   SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS,
@@ -525,10 +526,23 @@ describe("🔴 고칠 수 있는 용도 — 부품 불출은 빠졌다", () => {
   });
 
   test("🔴 그래도 표에 넣을 수 있는 값에는 그대로 있다 — 값을 지운 것이 아니다", () => {
-    // 저장된 판 · enum · 재고 쪽 코드가 아직 이 값을 쓴다. 여기가 false 가 되는
-    // 날은 「A/S 재고 기능 제거」 조각이 끝난 뒤다.
+    // 🔴 **여기는 영영 true 다.** 2026-10-27(조각 13-C5)에 A/S 의 옛 재고 코드가 전부
+    // 사라졌는데도 그대로인 까닭은 이 값을 쓰는 것이 재고 코드가 아니기 때문이다 —
+    // 표의 enum · 저장된 판 · 과거 결재 기록이다. 좁히면 계정 삭제가 그 판을 이어 쓰지
+    // 못해 조용히 깨진다(입력이 unknown 이라 타입 검사로는 안 드러난다).
+    // 🔵 2026-10-27 이전 판에는 「재고 제거 조각이 끝나면 false 가 된다」고 적혀 있었다.
+    //    그것이 틀린 셈이었다 — 단언은 맞아서 그 글만 조용히 남아 있었다.
     assert.equal(isShipmentApprovalRouteScope("PART_ISSUE"), true);
     assert.ok((SHIPMENT_APPROVAL_ROUTE_SCOPES as readonly string[]).includes("PART_ISSUE"));
+  });
+
+  test("🔴 글자를 적는 자리는 하나다 — PART_ISSUE_APPROVAL_ROUTE_SCOPE 가 목록의 값이다", () => {
+    // 🔵 이 단언은 domain/inventory-part-issue-rules.test.ts 에서 옮겨 왔다
+    //    (2026-10-27, 조각 13-C5). 상수가 이 파일로 옮겨 오면서 시험도 따라왔다.
+    assert.equal(PART_ISSUE_APPROVAL_ROUTE_SCOPE, "PART_ISSUE");
+    assert.ok(
+      (SHIPMENT_APPROVAL_ROUTE_SCOPES as readonly string[]).includes(PART_ISSUE_APPROVAL_ROUTE_SCOPE)
+    );
   });
 
   test("고르는 목록은 표의 목록의 부분집합이고, 순서도 그대로다", () => {

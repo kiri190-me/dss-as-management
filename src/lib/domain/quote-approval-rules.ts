@@ -6,8 +6,8 @@ import type { ShipmentApprovalRouteScope } from "./shipment-approval-route";
  * ============================================================================
  * DB 도 서버도 여기서 만지지 않는다. 저장 경로(mutations/quote-approvals.ts) ·
  * 조회(queries/quote-approvals.ts) · 다음 조각의 화면이 **같은 함수 하나**를 보게
- * 하려고 따로 뺀 자리다. domain/inventory-part-issue-rules.ts ·
- * domain/shipment-approval-route.ts 와 같은 자리이고, 규칙을 두 곳에 적으면
+ * 하려고 따로 뺀 자리다. domain/shipment-approval-route.ts 와 같은 자리이고,
+ * 규칙을 두 곳에 적으면
  * 화면은 「승인 완료」라는데 서버는 「낡은 승인」이라고 답하는 날이 온다.
  *
  * 표 구조와 설계의 이유는 db/schema/quote-approvals.ts 머리말에 있다.

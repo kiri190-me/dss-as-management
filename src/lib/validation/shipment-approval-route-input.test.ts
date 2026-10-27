@@ -8,9 +8,9 @@ import {
 import {
   EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES,
   MAX_SHIPMENT_APPROVAL_ROUTE_STEPS,
+  PART_ISSUE_APPROVAL_ROUTE_SCOPE,
   SHIPMENT_APPROVAL_ROUTE_SCOPES,
 } from "@/lib/domain/shipment-approval-route";
-import { PART_ISSUE_APPROVAL_ROUTE_SCOPE } from "@/lib/domain/inventory-part-issue-rules";
 
 /**
  * ============================================================================

@@ -21,7 +21,7 @@ import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-
    inventory-gateway) 전용이고, 그리는 자리도 수리 건 상세 하나뿐이라 여기가 제자리다. */
 import PartRequestSection from "@/components/repair-cases/detail/PartRequestSection";
 import type { PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
-import type { RequestCaseContext } from "@/lib/db/queries/inventory-part-requests";
+import type { RequestCaseContext } from "@/lib/db/queries/repair-cases";
 import type {
   InventoryOhTemplate,
   InventoryPart,

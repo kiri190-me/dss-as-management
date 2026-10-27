@@ -2,14 +2,33 @@ import type { Role } from "@/lib/domain/types";
 import type { InventoryPartRequestStatus } from "@/lib/domain/inventory-types";
 
 /**
+ * ============================================================================
+ * 🔴 **이 파일이 지키던 mutation 은 2026-10-27(조각 13-C5)에 사라졌다**
+ * ============================================================================
+ * 옛 재고 기능이 A/S 에서 통째로 걷혔다(화면·경로 13-A · 서버 액션 13-B ·
+ * mutation·조회·도메인·검증 13-C5). 그래서 아래 `can*()` 들을 **인가 관문으로
+ * 부르는 코드는 이제 하나도 없다.** 🔴 그런데도 파일이 남아 있는 까닭은 하나다 —
+ * `auth/permission-baseline.ts` 가 `inventory.*` 권한 키 일곱의 **기본값**을 여기서
+ * 뽑는다. 즉 지금 이 파일이 답하는 것은 「막는가」가 아니라 「설정이 비었을 때의
+ * 기본값은 무엇인가」다.
+ *
+ * 🔴 **권한 키를 줄이는 일은 13-D 다.** 여기서 함수를 지우면 그 키들의 기본값이
+ *    조용히 바뀐다 — 권한은 운영 DB 의 `role_permissions` 값이 최종 판정이라
+ *    (`permission-features.ts` 의 SETTINGS_ENFORCED_AREAS) 개발 PC 에서는 아무
+ *    증상도 안 보인다. 까닭과 남은 일은 DATABASE_DESIGN.md 18-4 절에 있다.
+ * 🔵 `inventory.requests` 는 **남긴다** — 새 통로(부품 반출 신청)가 그 키를 쓴다.
+ * ============================================================================
+ *
+ * 아래는 그 기본값이 만들어진 2026-08 당시의 정책 기록이다. 부르던 mutation 이름이
+ * 나오면 **지금은 없는 파일**이다.
+ *
  * Centralized, server-side authorization for inventory mutations (Phase
  * 5B-2 core ledger + Phase 5B-3 Parts Request & Issue Workflow). Same
  * convention as procedure-case-execution-authorization.ts: pure functions
  * of `Role` (plus live context where needed), used both by UI components
- * (to decide what to render) and re-checked independently by every mutation
- * in db/mutations/inventory.ts and db/mutations/inventory-part-requests.ts
- * — a hidden button here is a UX convenience only, never the enforcement
- * boundary.
+ * (to decide what to render) and re-checked independently by every inventory
+ * mutation — a hidden button here is a UX convenience only, never the
+ * enforcement boundary.
  *
  * Policy:
  *  - View stock/transaction history: all 5 roles.

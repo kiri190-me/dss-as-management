@@ -78,12 +78,8 @@ src/lib/graph-editor-core/save-sequence.test.ts
 src/lib/domain/procedure-editor-save-state.test.ts
 src/lib/domain/procedure-execution-topology.test.ts
 src/lib/domain/product-relation.test.ts
-src/lib/domain/inventory-return-rules.test.ts
 src/lib/auth/inventory-authorization.test.ts
-src/lib/domain/inventory-part-request-rules.test.ts
-src/lib/domain/inventory-part-request-fingerprint.test.ts
 src/lib/domain/inventory-types.test.ts
-src/lib/domain/inventory-part-request-cart.test.ts
 src/lib/validation/repair-case-work-record-input.test.ts
 src/lib/auth/repair-case-work-record-authorization.test.ts
 src/lib/auth/my-active-work-authorization.test.ts
@@ -140,8 +136,7 @@ src/lib/domain/notification-settings.test.ts
 src/lib/domain/notification-toast.test.ts
 src/lib/domain/save-popup.test.ts
 src/lib/domain/amount-input.test.ts
-src/lib/validation/part-minimum-quantity-input.test.ts
-src/lib/validation/part-unit-price-input.test.ts
+src/lib/validation/amount-value.test.ts
 src/lib/validation/repair-task-input.test.ts
 src/lib/domain/attachment-category.test.ts
 src/lib/domain/attachment-allowlist.test.ts
@@ -253,10 +248,8 @@ src/lib/domain/ui-text-overrides.test.ts
 src/lib/validation/ui-text-override-input.test.ts
 src/lib/domain/ui-text.test.ts
 src/lib/domain/shipment-approval-route.test.ts
-src/lib/domain/inventory-part-issue-rules.test.ts
 src/lib/validation/shipment-approval-route-input.test.ts
 src/lib/auth/approval-assignment.test.ts
-src/lib/validation/inventory-part-issue-input.test.ts
 src/lib/domain/notification-acknowledgement.test.ts
 src/lib/domain/quote-repair-task-selection.test.ts
 src/lib/domain/quote-link-options.test.ts

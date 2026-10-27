@@ -56,6 +56,9 @@ import {
  * 다섯이 지워졌다. **이 시험은 그 화면들을 하나도 재지 않는다** — 재는 것은 서브모듈의
  * 고르개(vendor/dss-core)와 견적서 폼 · 사용 부품 폼 · 견적서 두 페이지 · 수리 건 상세
  * 페이지이고, 그 전부가 **지금 돌고 있는 코드**다. 그래서 남겼다.
+ * 🔵 **같은 날(조각 13-C5) 옛 조회까지 사라져 시험 하나를 뺐다** — 위 2026-10-16 절이
+ *    말하는 `queries/inventory.ts` 가 그것이다. 자세한 까닭은 아래 그 자리의 주석에
+ *    적어 두었다. 나머지 마흔넷은 한 줄도 건드리지 않았다.
  *
  * 🔴 폴더 이름만 보고 함께 지우지 마라. 이름이 `inventory` 인 까닭은 재는 모듈의 자리가
  *    `@dss/core/ui/inventory/part-picker` 라서다 — A/S 의 옛 재고 기능과는 상관이 없다.
@@ -109,7 +112,6 @@ const form = flat(read("src/components/quotes/QuoteEditForm.tsx"));
    그 사정을 박지 않으려고 A/S 쪽에 둔 순수 모듈이다. */
 const quotePartPick = flat(read("src/components/quotes/quote-part-pick.ts"));
 const usedPartsForm = flat(read("src/components/repair-cases/detail/edit/UsedPartsEditForm.tsx"));
-const inventory = flat(read("src/lib/db/queries/inventory.ts"));
 /* 🔴 줄의 모양(형 둘)은 2026-09-22 부터 고르개 곁 — 서브모듈에 있다. 값을 실어 오는 일은
    2026-10-16 부터 재고 관리 쪽이고(domain/inventory-gateway.ts), 아래 ㉢ 은 그 **옮기는
    함수**를 실제로 돌려 본다. */
@@ -384,13 +386,13 @@ describe("㉢ 🔴 재고 · 소유 · 비고가 화면 쪽으로 가지 않는�
     assert.deepEqual(toPartPickerPriceRows(INVENTORY_PARTS).map((row) => row.partId), ["11", "12"]);
   });
 
-  test("🔴 getPartList 는 그대로다 — 재고 화면이 쓰는 조회는 건드리지 않았다", () => {
-    // 재고 화면이 쓰는 그 조회는 여전히 잔량을 조인하고 합계를 싣는다.
-    assert.ok(inventory.includes("export async function getPartList(filters: PartListFilters = {})"));
-    const legacy = sliceBetween(inventory, "export async function getPartList(", "// ---- 부품 고르기 목록");
-    assert.ok(legacy.includes(".leftJoin( partStockBalances,"), "getPartList 의 재고 조인이 사라졌다");
-    assert.ok(legacy.includes("hasLedgerHistory: withHistory.has(row.id)"), "getPartList 의 결과가 바뀌었다");
-  });
+  /* 🔵 여기 있던 「getPartList 는 그대로다 — 재고 화면이 쓰는 조회는 건드리지 않았다」는
+     2026-10-27(조각 13-C5)에 지웠다. 그 시험은 `src/lib/db/queries/inventory.ts` 의 원본
+     글자를 읽어 「2026-10-16 에 고르개를 옮기면서 옛 조회를 건드리지 않았다」를 못 박던
+     자리인데, 그 파일이 이 조각에서 **통째로 사라졌다** — 잴 대상이 없어진 것이라 옮길
+     곳도 없다(파일이 없으면 readFileSync 가 던져 이 묶음 전체가 못 돈다).
+     🔴 옛 조회가 아니라 **지금 쓰는 길**을 재는 것은 바로 위 세 시험이다
+     (toPartPickerRows · toPartPickerPriceRows — domain/inventory-gateway.ts). */
 
   test("🔴 그려 본 후보 목록에 재고 · 소유구분 · 비고가 없다", () => {
     const html = renderToStaticMarkup(

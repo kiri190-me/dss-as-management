@@ -1,5 +1,5 @@
 import { WORKFLOW_KIND_CODES, type WorkflowKind } from "@/lib/domain/workflow-kind";
-import { parseAmountValue } from "./part-unit-price-input";
+import { parseAmountValue } from "./amount-value";
 
 /**
  * ============================================================================
@@ -8,9 +8,11 @@ import { parseAmountValue } from "./part-unit-price-input";
  * DB 도 세션도 여기서 만지지 않는다. 순수 함수만 두어야 단위 시험이 붙는다.
  *
  * ── 금액 규칙은 여기서 다시 쓰지 않는다 ─────────────────────────────────
- * 시간당 단가는 part-unit-price-input.ts 의 `parseAmountValue` 를 그대로 쓴다.
+ * 시간당 단가는 amount-value.ts 의 `parseAmountValue` 를 그대로 쓴다.
  * 쉼표·자릿수·지수 표기 규칙이 갈라지면 한쪽만 고쳐지는 날 견적서 금액이 조용히
  * 어긋난다.
+ * 🔵 2026-10-27(조각 13-C5)까지 그 함수의 자리는 `part-unit-price-input.ts` 였다 —
+ *    옛 재고 기능과 함께 그 파일이 사라지면서 금액 규칙만 떼어 옮겼다.
  *
  * ── 🔴 기본 작업비(base_cost)는 더 이상 이 검증을 지나지 않는다 ──────────
  * 2026-09-16 부터 기본 작업비는 사람이 적는 값이 아니라 **세 공수시간의 합 × 시간당

@@ -384,6 +384,28 @@ export async function getRepairCaseEditGuardById(id: string): Promise<RepairCase
   return row ?? null;
 }
 
+/**
+ * 수리 건 상세 「부품 요청」 칸이 쓰는 건 맥락 — 잠금과 담당 엔지니어.
+ *
+ * 🔵 **원래 자리는 `queries/inventory-part-requests.ts` 였다**(2026-10-27, 조각 13-C5 에서
+ *    옮겼다). 이름만 재고처럼 생겼을 뿐 **재고 표를 한 줄도 읽지 않는다** — `repair_cases`
+ *    한 표에서 세 칸을 집어 올 뿐이고, 지금 부르는 쪽도 새 통로 쪽이다
+ *    (`server/part-request-section-data.ts` → 재고 관리 API). 옛 재고 조회가 통째로
+ *    사라지면서 그 파일에 남을 까닭이 없어져, 같은 표를 읽는 이웃들 곁으로 옮겼다.
+ *
+ * 🔴 **본문은 한 글자도 바꾸지 않았다** — 이웃 셋과 달리 `UUID_PATTERN` 을 보지 않는 것도
+ *    그대로다. 걷어내는 조각에서 동작을 함께 고치면 무엇이 원인인지 가를 수 없다.
+ */
+export type RequestCaseContext = { id: string; isLocked: boolean; assignedEngineerId: string | null };
+
+export async function getRequestCaseContext(repairCaseId: string): Promise<RequestCaseContext | null> {
+  const [row] = await db
+    .select({ id: repairCases.id, isLocked: repairCases.isLocked, assignedEngineerId: repairCases.assignedEngineerId })
+    .from(repairCases)
+    .where(and(eq(repairCases.id, repairCaseId), eq(repairCases.isDeleted, false)));
+  return row ?? null;
+}
+
 /** 연락서 공유폴더를 찾는 데 쓰는 최소한의 것 — 🔴 찾는 열쇠는 인수번호 하나뿐이다. */
 export type RepairCaseContactFolderKey = { id: string; intakeNumber: string };
 

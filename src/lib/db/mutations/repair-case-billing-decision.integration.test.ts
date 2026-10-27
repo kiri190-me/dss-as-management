@@ -20,8 +20,6 @@ import { createWorkRecord, invalidateWorkRecord } from "./repair-case-work-recor
 import { startProcedureExecution } from "./procedure-case-execution";
 import { createRepairCaseFlowchart, updateRepairCaseFlowchartMetadata } from "./repair-case-flowcharts";
 import { createRepairCaseFlowchartNode } from "./repair-case-flowchart-graph";
-import { createPartRequest } from "./inventory-part-requests";
-import { consumeStock } from "./inventory";
 
 const runToken = randomUUID().slice(0, 8);
 const createdCaseIds: string[] = [];
@@ -131,8 +129,14 @@ describe("Partial Paid + Pending Billing foundation", () => {
     assertBillingBlocked(await createWorkRecord({ repairCaseId: pending.id, actorUserId: engineerId, memo: "test", recordKind: "GENERAL", relatedProcedureExecutionNodeId: null, clientRequestId: randomUUID() }));
     assertBillingBlocked(await startProcedureExecution(pending.id, randomUUID(), engineerId));
     assertBillingBlocked(await createRepairCaseFlowchart({ repairCaseId: pending.id, actorUserId: engineerId, title: "test", description: null }));
-    assertBillingBlocked(await createPartRequest({ repairCaseId: pending.id, items: [{ partId: randomUUID(), quantity: 1, owner: "DSS", note: null }], actorUserId: engineerId, idempotencyKey: randomUUID() }));
-    assertBillingBlocked(await consumeStock({ partStockBalanceId: randomUUID(), quantity: 1, repairCaseId: pending.id, actorUserId: adminId, expectedVersion: 1 }));
+    /* 🔵 여기 있던 경계 둘 — `createPartRequest`(부품 요청) · `consumeStock`(재고 사용) —
+       은 2026-10-27(조각 13-C5)에 빠졌다. 그 두 mutation 이 옛 재고 기능과 함께 **코드째
+       사라졌기** 때문이고, 막을 것이 없어진 것이지 막기를 그만둔 것이 아니다.
+       🔴 **파일은 지우지 않았다.** 이 묶음이 재는 것은 대부분 지금 돌고 있는 코드다 —
+       나머지 경계 여덟 · 확정의 원자성과 이력 · 동시 확정의 승자 하나 · 활동이 쌓인
+       뒤에도 확정된다는 것. 옛 장부(mutations/inventory.ts 머리말)에 「㉢ 은 mutation 이
+       사라지면 잴 것도 같이 사라진다」고 적혀 있었는데 **그 셈이 틀렸다**: 재고와 닿는
+       줄은 이 둘뿐이었다. */
 
     const [workRecord] = await db.insert(repairCaseWorkRecords).values({ repairCaseId: pending.id, authorUserId: engineerId, memo: "fixture", recordKind: "GENERAL", clientRequestId: randomUUID() }).returning({ id: repairCaseWorkRecords.id });
     createdWorkRecordIds.push(workRecord.id);

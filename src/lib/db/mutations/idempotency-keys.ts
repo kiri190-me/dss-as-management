@@ -11,11 +11,13 @@ import { repairCaseIdempotencyKeys } from "../schema";
  * added later without a schema change (out of scope for this task).
  */
 /**
- * Exported so Phase 5B-3's inventory-part-request idempotency table
- * (db/mutations/internal/inventory-request-idempotency.ts) reuses this
- * exact 2-hour policy rather than defining a second literal — same
- * SECURITY_POLICY.md §12-1 rationale applies there (short-lived operational
- * table, non-PII snapshot).
+ * Exported so another idempotency table could reuse this exact 2-hour
+ * policy rather than defining a second literal — SECURITY_POLICY.md §12-1
+ * (short-lived operational table, non-PII snapshot).
+ *
+ * 🔵 2026-10-27(조각 13-C5)까지 실제로 되쓰던 곳이 하나 있었다(옛 재고의
+ *    `internal/inventory-request-idempotency.ts`). 그 파일이 재고와 함께 사라져
+ *    **지금 이 상수를 쓰는 곳은 이 파일뿐**이다 — 내보내는 것은 그대로 둔다.
  */
 export const IDEMPOTENCY_KEY_TTL_MS = 2 * 60 * 60 * 1000;
 

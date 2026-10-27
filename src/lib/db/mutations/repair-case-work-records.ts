@@ -172,7 +172,7 @@ export type CreateWorkRecordParams = {
  * (repair_case_id, client_request_id) DO NOTHING RETURNING. Postgres's own
  * conflict-wait semantics (a second concurrent inserter of the same key
  * waits for the first to commit/rollback before resolving the conflict —
- * same property documented in inventory-request-idempotency.ts) is what
+ * same property) is what
  * guarantees "concurrent duplicate submits cannot create two rows," with
  * no extra locking needed beyond the unique index itself.
  *

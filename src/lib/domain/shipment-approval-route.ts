@@ -43,8 +43,8 @@
  * (repair_case_approval_type ↔ REPAIR_CASE_APPROVAL_TYPES 와 같은 관례다) 두 벌이
  * 되고, 갈라지지 않도록 이 파일의 시험이 둘을 맞춰 본다.
  *
- * 'PART_ISSUE' 는 부품 불출 승인이 쓴다(domain/inventory-part-issue-rules.ts 의
- * PART_ISSUE_APPROVAL_ROUTE_SCOPE 가 그 값에 이름을 붙여 둔 자리다).
+ * 'PART_ISSUE' 는 부품 불출 승인이 쓴다. 바로 아래 PART_ISSUE_APPROVAL_ROUTE_SCOPE 가
+ * 그 값에 이름을 붙여 둔 자리다.
  * 🔴 **2026-10-18 부터 이 값은 [사용자 관리] → [승인 절차] 탭에서 고를 수 없다.**
  * 까닭과 「그래도 목록에 남겨 두는 이유」는 바로 아래
  * EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES 에 적어 두었다.
@@ -67,6 +67,20 @@ export const SHIPMENT_APPROVAL_ROUTE_SCOPES = [
 export type ShipmentApprovalRouteScope = (typeof SHIPMENT_APPROVAL_ROUTE_SCOPES)[number];
 
 /**
+ * 부품 불출 승인이 쓰는 결재선의 용도. 🔴 **`PART_ISSUE` 를 글자로 적는 자리를 하나로
+ * 묶어 둔다** — 저장 경로와 검증이 각자 문자열을 적으면 오타 하나가 「판이 없다」로
+ * 조용히 보이고, 그것이 안전장치의 정상 동작이라 오류도 나지 않는다.
+ *
+ * 🔵 **원래 자리는 `domain/inventory-part-issue-rules.ts` 였다**(2026-10-27, 조각
+ *    13-C5 에서 옮겼다). 그 파일은 옛 재고 기능과 함께 지워졌는데, 이 상수만은
+ *    **재고가 아닌 자리**가 쓰고 있었다 — 계정을 지울 때 그 사람이 올라 있던
+ *    `PART_ISSUE` 판을 이어 쓰는 길이 막히지 않았는지 재는 시험
+ *    (`validation/shipment-approval-route-input.test.ts`)이다. 값 목록을 쥔 여기로
+ *    옮겨 두면 둘이 갈라질 자리 자체가 없다.
+ */
+export const PART_ISSUE_APPROVAL_ROUTE_SCOPE: ShipmentApprovalRouteScope = "PART_ISSUE";
+
+/**
  * ── 🔴 이 저장소에서 **사람이 고칠 수 있는** 용도 ───────────────────────
  * 위 목록은 「표에 들어갈 수 있는 값」이고, 이것은 「A/S 의 [사용자 관리] →
  * [승인 절차] 탭에서 고를 수 있는 값」이다. 둘이 갈라진 날이 2026-10-18 이다.
@@ -77,14 +91,15 @@ export type ShipmentApprovalRouteScope = (typeof SHIPMENT_APPROVAL_ROUTE_SCOPES)
  *    실제로 작동 중인 것을 값으로 확인했다). A/S 에도 같은 설정이 남아 있으면
  *    **어느 쪽이 참인지 알 수 없고**, A/S 에서 고쳐 봐야 아무 효과가 없다.
  *    그래서 **고르는 자리에서 뺐다.**
- *  · 그런데 `'PART_ISSUE'` 를 위 목록에서 통째로 빼면 타입이 좁아져
- *    **A/S 에 아직 남아 있는 재고 코드가 줄줄이 깨진다**(재고 화면 셋 ·
- *    mutation 둘 · 사용자 삭제 영향 조회 · 알림 · 그 시험들). 그것을 걷어내는
- *    일은 **별개의 조각**이다(「A/S 재고 기능 제거」). 2026-10-16 사용자 결정에
- *    따라 **표도 enum 도 저장된 판도 그대로 둔다** — 운영의 과거 결재 기록이
- *    그 표에만 있다.
- *  · 그 조각이 끝나 A/S 에서 재고가 사라지면, 그때 위 목록에서도 빼면 된다.
- *    enum 값은 그때도 남는다(저장된 행이 그 값을 쓴다).
+ *  · 🔴 **그래도 `'PART_ISSUE'` 는 위 목록에서 빼지 않는다 — 영구히 그대로다.**
+ *    2026-10-27(조각 13-C5)에 A/S 의 옛 재고 코드가 전부 사라졌지만 그 값은 남았다.
+ *    까닭이 재고 코드가 아니기 때문이다: **표의 enum 이 그 값을 가지고 있고**
+ *    (`shipment_approval_route_scope`), **저장된 판과 과거 결재 기록이 그 값을 쓴다.**
+ *    목록에서 빼면 타입이 좁아져 저장된 그 판을 **읽지도 이어 쓰지도** 못한다 —
+ *    계정을 지울 때 그 사람이 올라 있던 판마다 새 판을 얹는 길이 거기서 끊긴다
+ *    (db/mutations/user-deletion.ts → saveShipmentApprovalRouteInTx).
+ *    🔴 「재고를 다 걷어냈으니 이제 빼도 된다」고 읽지 말 것. 2026-10-27 이전 판의
+ *    이 주석에 그렇게 적혀 있었고, 그것이 틀린 셈이었다.
  *
  * 🔴 **순서는 위 목록과 같게 둔다** — 탭의 고르개가 이 순서대로 그려진다.
  * `satisfies` 로 묶어 두었으니 위 목록에 없는 값을 적으면 컴파일이 멈춘다.
@@ -104,7 +119,10 @@ export type EditableShipmentApprovalRouteScope =
  * 값이 다시 들어온다(이 파일 머리말이 경계하는 그 상태다).
  *
  * `isShipmentApprovalRouteScope` 는 지우지 않는다 — 「표에 넣을 수 있는 값인가」를
- * 묻는 자리는 여전히 있고(재고 쪽 저장 경로), 그 물음은 이것과 다르다.
+ * 묻는 자리는 여전히 있고, 그 물음은 이것과 다르다. 🔵 2026-10-27(조각 13-C5)로
+ * 재고 쪽 저장 경로가 사라진 뒤 그 자리는 **계정 삭제가 쓰는 입구 하나**다
+ * (validation/shipment-approval-route-input.ts 의 validateShipmentApprovalRouteInput —
+ * 거기로 `PART_ISSUE` 판이 그대로 들어온다).
  */
 export function isEditableShipmentApprovalRouteScope(
   value: unknown
@@ -164,8 +182,12 @@ export const SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES: Record<ShipmentApprovalRoute
   // 🔴 2026-10-18 부터 이 문장이 사람에게 보이는 자리는 없다 — [승인 절차] 탭에서
   // 「부품 불출」을 고를 수 없게 됐고, 저장 경로도 그 용도를 받지 않는다. 그래도
   // 지우지 않는 것은 위 Record 가 **모든 용도**를 요구하기 때문이고, 그 요구가
-  // 「이름표·안내 없는 용도」를 막는 장치다. 재고 기능이 A/S 에서 완전히 걷히는
-  // 조각에서 용도 자체와 함께 다시 본다.
+  // 「이름표·안내 없는 용도」를 막는 장치다.
+  // 🔴 **「재고가 다 걷히면 용도 자체와 함께 다시 본다」고 적혀 있었는데 그렇게 되지
+  //    않았다.** 2026-10-27(조각 13-C5)에 A/S 의 옛 재고 코드가 전부 사라졌지만 용도는
+  //    **영구 유지**다 — 까닭은 위 EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES 에 있다
+  //    (표의 enum·저장된 판·과거 결재 기록). 그러니 이 줄도 **그대로 남는다.**
+  //    🔵 문장 자체는 이제 A/S 밖의 일을 말한다 — 불출은 재고 관리 시스템에서 돈다.
   PART_ISSUE: "지금은 재고 담당자가 그 자리에서 바로 불출합니다.",
   // 🔴 견적서는 절차가 있든 없든 **발행이 막히지 않는다.** 그래서 이 문장은
   // 「무엇이 대신 처리하는가」가 아니라 「무엇이 남지 않는가」를 말한다 —

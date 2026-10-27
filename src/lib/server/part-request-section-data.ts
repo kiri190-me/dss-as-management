@@ -1,6 +1,5 @@
 import "server-only";
-import { getProductModelIdForProduct } from "@/lib/db/queries/repair-cases";
-import { getRequestCaseContext } from "@/lib/db/queries/inventory-part-requests";
+import { getProductModelIdForProduct, getRequestCaseContext } from "@/lib/db/queries/repair-cases";
 import { getSsoSubjectForUser } from "@/lib/db/queries/users";
 import {
   NO_PORTAL_ID_MESSAGE,
@@ -21,11 +20,13 @@ import {
  * ============================================================================
  * A/S DB 에서 읽는 것은 **이 건의 맥락 하나**(`getRequestCaseContext`)와 **올리는 사람의
  * 포털 번호**뿐이다. 부품 목록 · O/H 템플릿 · 올린 신청은 저쪽 통로에서 받는다. A/S 의 재고
- * 표는 한 줄도 읽지 않는다 — 운영에서 쓰이지 않고 있었고, 다음 조각에서 걷어낸다.
+ * 표는 한 줄도 읽지 않는다.
+ * 🔵 **2026-10-27(조각 13-C5)**: 옛 재고 조회가 통째로 사라지면서 `getRequestCaseContext`
+ *    도 `queries/repair-cases.ts` 로 옮겼다 — 그 함수는 처음부터 `repair_cases` 만 읽었다.
+ *    이 파일이 부르는 A/S 조회는 이제 **재고와 이름조차 닿지 않는다.**
  *
  * 🔵 **페이지가 아니라 여기 둔 까닭**: `[id]/page.tsx` 는 이미 열 가지 조회가 지나는 자리라,
- *    이 칸의 재료까지 그 안에서 풀면 「어디까지가 이 칸의 일인가」가 흐려진다. 조각 13 에서
- *    옛 표를 걷어낼 때 고칠 자리도 이 파일 하나로 모인다.
+ *    이 칸의 재료까지 그 안에서 풀면 「어디까지가 이 칸의 일인가」가 흐려진다.
  *
  * 🔴 **셋을 나란히 부른다**(`Promise.all`). 차례로 기다리면 저쪽이 느린 날 이 화면이
  *    통로 수만큼 느려진다 — 서로 기다릴 까닭이 없는 조회다.
