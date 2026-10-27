@@ -52,34 +52,51 @@ import type { StockOwner } from "@/lib/domain/inventory-types";
  *    조회 시험이 제 질의를 재려고 **이 mutation 으로 행을 만든다.** 그래서 mutation 을
  *    조회보다 먼저 떼면 조회 시험이 먼저 깨진다. **13-C 와 한 덩어리로** 떼야 한다.
  *
- * 🔴 **밑자락으로 쓰는 남의 시험 — 처음 여섯, 지금 다섯**(㉣ 는 13-C1 에서 끊었다).
- *    남은 다섯 다 파일 이름에 「inventory」가 없다. 그래서 「재고 파일 목록」을 아무리
- *    들여다봐도 안 나타나고, 지운 뒤 test:db 에서야 터진다. 지우기 전에 **반드시 이
- *    목록을 보라.**
+ * 🔴 **밑자락으로 쓰는 남의 시험 — 처음 여섯, 지금 넷**(㉣ 는 13-C1, ㉤ 는 13-C2 에서
+ *    끊었다). 남은 넷 다 파일 이름에 「inventory」가 없다. 그래서 「재고 파일 목록」을
+ *    아무리 들여다봐도 안 나타나고, 지운 뒤 test:db 에서야 터진다. 지우기 전에
+ *    **반드시 이 목록을 보라.**
  *
  *    ㉠ mutations/repair-cases-purge.integration.test.ts          (createPart·receiveStock·consumeStock)
  *    ㉡ mutations/repair-cases-permanent-delete.integration.test.ts (위 + createPartRequest)
  *    ㉢ mutations/repair-case-billing-decision.integration.test.ts  (consumeStock·createPartRequest)
  *    ㉣ mutations/role-permissions.integration.test.ts              — **끊겼다**(아래 참조)
- *    ㉤ queries/notification-settings.integration.test.ts           (createPart·createPartRequest)
+ *    ㉤ queries/notification-settings.integration.test.ts           — **끊겼다**(아래 참조)
  *    ㉥ queries/approval-outcome-notifications.integration.test.ts  (decidePartIssueRequestApproval·
  *                                                                   cancelPartIssueRequest — 저쪽은
  *                                                                   mutations/inventory-part-issue-requests.ts 를 쓴다)
  *
  * 🔵 **㉣ 는 2026-10-27(13-C1)에 풀렸다 — 이제 이 파일을 import 하지 않는다.** 전에는
  *    「설정을 넓히면 *실제로* 그 조작이 열리는가」를 끝에서 끝까지 재는 자리가 거기
- *    하나뿐이었고 하필 표본이 `createPart` 라, 밑자락만 갈아 끼우면 되는 ㉠㉡㉤㉥ 과
+ *    하나뿐이었고 하필 표본이 `createPart` 라, 밑자락만 갈아 끼우면 되는 ㉠㉡㉥ 과
  *    달리 **표본을 옮기는 설계 결정**이 먼저 있어야 했다. 그 보증은
  *    mutations/repair-case-used-parts.integration.test.ts 의 「🔴 [역할별 접근 권한]에서
  *    넓히면 실제로 열리고, 좁히면 막힌다」로 옮겼다 — 저쪽은 role_permissions 표에 행을
  *    직접 넣던 것을 `saveRolePermissions()` 호출로 바꿔, 「설정 화면이 **쓰는** 값」과
  *    「mutation 이 **읽는** 값」이 같은 모양인지까지 한 시험이 잇는다.
+ * 🔵 **㉤ 도 2026-10-27(13-C2)에 풀렸다 — 이 파일도 inventory-part-requests.ts 도 더는
+ *    import 하지 않는다.** 🔴 저쪽도 ㉣ 과 같은 **표본 교체**였지 밑자락 갈아 끼우기가
+ *    아니었다(위 줄에서 ㉤ 를 「갈아 끼우면 되는 쪽」으로 세어 두었던 것은 틀린 셈이다):
+ *    「알림 설정이 실제로 걸리는가」를 재려면 알림 종류가 **둘** 있어야 하는데(그 파일
+ *    시험의 절반이 「하나만 껐을 때 다른 하나는 멀쩡한가」다), 그 첫째 표본이 하필
+ *    PART_REQUEST_PENDING 이라 부품 하나와 부품 요청 하나를 밑자락으로 만들고 있었다.
+ *    새 표본은 APPROVAL_GRANTED(승인 완료)다 — 결정이 끝난 결재 행 두 줄을 직접 넣으면
+ *    끝이고, 「요청자 본인에게만 간다」는 축이 둘째 표본(REPAIR_CASE_APPROVAL, 「그 건의
+ *    결재자인가」)과 갈려서 역할 갈림을 재던 자리가 그대로 산다. 고른 까닭의 전문은 그
+ *    시험 파일 머리말에 있다.
  * 🔵 ㉢ 은 함께 지워도 되는 쪽이다 — 거기서 재는 잠금(BILLING_DECISION_REQUIRED)이
  *    **이 파일 안**(consumeStockCore 의 billingType === "PENDING_DECISION" 갈래)과
  *    inventory-part-requests.ts 안에 있어서, mutation 이 사라지면 잴 것도 같이 사라진다.
  *
- * 🔴 **㉠㉡ 은 「남긴 표」를 건드리는 살아 있는 코드의 유일한 증거다.** 재고 표는 운영의
- *    과거 출고 기록이 거기에만 있어 **지우지 않기로 했다**(2026-10-16 사용자 결정). 그래서
+ * 🔴 **㉠㉡ 은 「남긴 표」를 건드리는 살아 있는 코드의 증거다**(🔵 「유일하다」고 적으려다
+ *    말았다 — ㉣ 에 똑같이 적혀 있던 주장이 13-C1 에서 **이미 낡아 있었다.** 떼기 전에
+ *    「무엇을 재는가」로 **다시 세라**).
+ *    재고 표는 **지우지 않기로 했다**(2026-10-16 사용자 결정). 🔴 다만 **그때 적은 까닭은
+ *    사실이 아니었다** — 「운영의 과거 출고 기록이 거기에만 있다」고 했는데 2026-10-27
+ *    운영 실측에서 **재고 표 여섯이 전부 0행**이었다(개발 PC 의 행은 전부 데모 자료다.
+ *    2026-09-04 결정 D 로 NAS 에 안 따라갔고 그 뒤 운영에서 한 번도 안 쓰였다).
+ *    🔴 **남기는 진짜 까닭은 따로다**: 스키마가 공용 서브모듈 `vendor/dss-core` 라
+ *    **dss-po 가 같은 표를 함께 쓴다.** 그래서
  *    repair-cases-purge.ts 와 repair-cases.ts 의 영구삭제는 **지금도** stock_transactions ·
  *    inventory_part_issue_requests 의 destination_note 를 **개인정보 없이** 되메워 CHECK
  *    제약을 지킨다. 그 되메움을 재는 자리가 ㉠㉡ 이고, 밑자락을 진짜 경로(receiveStock →
