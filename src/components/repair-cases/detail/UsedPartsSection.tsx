@@ -28,6 +28,12 @@ import { detailEditButtonClass } from "@/components/repair-cases/detail/edit-but
  * 그래서 이 파일에는 `hasPartRequestHistory` 로 **잠그는** 줄이 없다. 그 값은
  * 아래 안내 문구를 고르는 데만 쓴다(무엇이 막았는지 사람에게 말해 주려고).
  *
+ * ── 🔴 보이는 글자와 저장된 글자가 다르다 (2026-10-28) ─────────────────
+ * 저장된 글자는 **품번**이다(연락서 이식이 `型式`·`仕様書番号` 칸을 읽는다). 품번만
+ * 떠 있으면 사람이 무슨 부품인지 몰라서, **보여 줄 때만** 재고 관리의 고객사 품명을
+ * 앞에 붙인 `displayNames` 를 쓴다. 🔴 합치는 규칙은 이 파일에 없다 — 서버가
+ * domain/used-part-display.ts 로 만들어 내려보낸다(그 prop 머리말).
+ *
  * ── 이력과 손글씨가 겹친 건 ─────────────────────────────────────────────
  * 요청서를 **나중에** 내면 이미 적어 둔 줄이 남을 수 있다(DB 가 막지 않는다 —
  * 스키마 머리말). 그때 줄을 감추면 두 번 세어질 자료가 화면에서 사라져 아무도
@@ -42,6 +48,7 @@ export default function UsedPartsSection({
   hasPartRequestHistory,
   writeGate,
   partOptions,
+  displayNames,
 }: {
   repairCaseId: string;
   /** 접수 건의 version — 저장할 때 그대로 되돌려 보내 동시 편집을 막는다. */
@@ -57,6 +64,18 @@ export default function UsedPartsSection({
    * 다른 말이다(폼의 그 prop 머리말).
    */
   partOptions: InventoryResult<readonly PartPickerRow[]>;
+  /**
+   * 줄마다 **보여 줄 글자** — 줄 id → `고객사 품명 (품번)` 또는 `품번`.
+   *
+   * 🔴 **여기서 합치지 않는다.** 서버가 재고 관리의 고객사 품명을 앞에 붙여 만들어
+   *    내려보낸 것이다(`domain/used-part-display.ts`). [고장 부품] 그래프도 같은 규칙을
+   *    부를 자리라, 합치는 곳이 둘이 되면 같은 부품이 화면마다 다른 이름으로 보인다.
+   * 🔴 **저장된 글자는 `row.partNameText`(품번) 그대로다** — 합친 글자는 화면에만 있다.
+   *    아래 수정 폼은 줄을 그대로 받아 **품번**을 칸에 넣는다.
+   * 🔴 **빠진 줄은 품번으로 떨어뜨린다**(아래 `?? row.partNameText`). 사용 부품은 이미
+   *    저장된 사실이라, 재고 관리가 멈췄다고 글자가 사라지면 안 된다.
+   */
+  displayNames: Record<string, string>;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const hasRows = rows.length > 0;
@@ -121,7 +140,9 @@ export default function UsedPartsSection({
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id} className="border-t border-zinc-100 dark:border-zinc-800">
-                  <td className="px-2 py-1 text-zinc-900 dark:text-zinc-100">{row.partNameText}</td>
+                  <td className="px-2 py-1 text-zinc-900 dark:text-zinc-100">
+                    {displayNames[row.id] ?? row.partNameText}
+                  </td>
                   <td className="px-2 py-1 text-right tabular-nums text-zinc-900 dark:text-zinc-100">
                     {row.quantity}
                   </td>

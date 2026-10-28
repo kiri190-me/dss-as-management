@@ -73,6 +73,7 @@ export default function RepairCaseDetailView({
   canWriteDomesticOrderIssueDates,
   usedParts,
   usedPartOptions,
+  usedPartDisplayNames,
 }: {
   resolved: ResolvedRepairCase;
   related: RelatedMatch[];
@@ -176,6 +177,15 @@ export default function RepairCaseDetailView({
    * 것을 빈 목록으로 바꾸면 화면이 「재고에 부품이 하나도 없다」고 거짓말한다.
    */
   usedPartOptions: InventoryResult<readonly PartPickerRow[]>;
+  /**
+   * 「사용 부품」 줄마다 **보여 줄 글자** — 줄 id → `고객사 품명 (품번)` 또는 `품번`.
+   * 🔴 **서버가 만든다**(domain/used-part-display.ts, [id]/page.tsx). 화면이 다시
+   * 합치지 않는다 — [고장 부품] 그래프도 같은 규칙을 쓸 자리라, 합치는 곳이 둘이 되면
+   * 같은 부품이 화면마다 다른 이름으로 보인다.
+   * 🔴 **저장된 글자는 바뀌지 않는다** — 줄의 `partNameText` 는 그대로 품번이고,
+   * 수정 폼은 그 글자를 칸에 넣는다.
+   */
+  usedPartDisplayNames: Record<string, string>;
 }) {
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
   const [editingSection, setEditingSection] = useState<RepairCaseEditSection | null>(null);
@@ -266,6 +276,7 @@ export default function RepairCaseDetailView({
           hasPartRequestHistory={usedParts.hasPartRequestHistory}
           writeGate={usedParts.writeGate}
           partOptions={usedPartOptions}
+          displayNames={usedPartDisplayNames}
         />
       )}
       {partRequestData && partRequestData.caseContext && (

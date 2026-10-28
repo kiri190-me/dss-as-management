@@ -33,6 +33,11 @@ import { readFileSync } from "node:fs";
  *     **나르기만** 하고, 「누가 적을 수 있는가」는 [역할별 접근 권한]의
  *     `repairCases.usedParts` 가 정한다(2026-09-17 전환). 기본값과 판정 차례는
  *     auth/repair-case-used-parts-authorization.test.ts 가 못 박는다.
+ * 11. 🔴 **보이는 글자와 저장되는 글자가 다르다**(2026-10-28) — 저장은 품번 그대로,
+ *     화면은 서버가 재고 관리의 고객사 품명을 앞에 붙여 만든 글자. 합치는 규칙은
+ *     domain/used-part-display.ts 한 곳이고, 갈래마다 무엇이 보이는지는 그 곁의
+ *     used-part-display.test.ts 가 **값으로** 못 박는다. 여기서 재는 것은 「그 규칙을
+ *     어디서 부르고 어디로 나르는가」다.
  * ============================================================================
  */
 
@@ -158,8 +163,39 @@ describe("사용 부품 — 칸", () => {
     assert.match(sectionFlat, /<th[^>]*>품명<\/th>/);
     assert.match(sectionFlat, /<th[^>]*>수량<\/th>/);
     assert.match(sectionFlat, /\{rows\.map\(\(row\) => \(/);
-    assert.match(sectionFlat, /\{row\.partNameText\}/);
+    /**
+     * 🔴 2026-10-28 에 품명 칸의 글자가 바뀌었다. 저장된 글자는 **품번**이고(연락서
+     * 이식이 `型式`·`仕様書番号` 칸을 읽는다), 화면은 서버가 고객사 품명을 앞에 붙여
+     * 만들어 준 글자를 그린다. 🔴 **없는 줄은 품번으로 떨어진다** — 그 `??` 가 없으면
+     * 재고 관리가 멈춘 날 품명 칸이 통째로 빈다(이미 저장된 사실이 사라진다).
+     */
+    assert.match(sectionFlat, /\{displayNames\[row\.id\] \?\? row\.partNameText\}/);
     assert.match(sectionFlat, /\{row\.quantity\}/);
+  });
+
+  test("🔴 합치는 규칙이 화면에 없다 — 서버가 만든 글자를 그리기만 한다", () => {
+    // 괄호로 잇는 일도, 재고 관리 줄을 뒤지는 일도 여기서 하지 않는다. 규칙이 두 벌이
+    // 되면 [사용부품] 칸과 [고장 부품] 그래프가 같은 부품을 다른 이름으로 부른다.
+    assert.ok(
+      !/customerPartName|kyosanPartNo|partFieldValue|usedPartMatchKey|usedPartDisplayName/.test(sectionCode),
+      "화면이 스스로 합치고 있다"
+    );
+  });
+
+  test("🔴 저장되는 글자는 품번 그대로다 — 수정 폼에 합친 글자가 들어가지 않는다", () => {
+    // 폼은 줄을 그대로 받는다(`rows={rows}`). displayNames 는 폼으로 내려가지 않는다 —
+    // 내려가면 「고객사 품명 (품번)」이 그대로 저장돼, 재고 관리에서 이름이 바뀌어도
+    // 안 따라가는 글자가 DB 에 박힌다.
+    assert.ok(!/displayNames/.test(formCode), "폼이 합친 글자를 보고 있다");
+    // 🔵 `indexOf` 가 -1 이면 slice(-1) 이 마지막 한 글자가 되어 아래가 **공짜로** 통과한다.
+    //    그래서 폼을 그리는 자리를 먼저 찾았는지 단언한다.
+    const formTagAt = sectionFlat.indexOf("<UsedPartsEditForm");
+    assert.ok(formTagAt > 0, "수정 폼을 그리는 자리를 찾지 못했다");
+    assert.ok(
+      !/displayNames=\{/.test(sectionFlat.slice(formTagAt)),
+      "폼으로 합친 글자를 넘기고 있다"
+    );
+    assert.match(formFlat, /value=\{line\.partNameText\}/);
   });
 
   test("정렬을 여기서 다시 하지 않는다 — 조회가 line_no 차례로 준다", () => {
@@ -360,6 +396,37 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
     );
     assert.match(pageFlat, /usedParts=\{usedParts\}/);
     assert.match(pageFlat, /usedPartOptions=\{usedPartOptions\}/);
+    assert.match(pageFlat, /usedPartDisplayNames=\{usedPartDisplayNames\}/);
+  });
+
+  test("🔴 보여 줄 글자는 **서버가** 합친다 — 통로를 더 두드리지 않는다 (2026-10-28)", () => {
+    assert.match(
+      pageFlat,
+      /import \{ buildUsedPartNameIndex, usedPartDisplayNamesById \} from "@\/lib\/domain\/used-part-display";/
+    );
+    /**
+     * 🔴 **바로 위에서 받아 온 그 목록**으로 만든다(`usedPartOptions`). 여기서 다시
+     * `fetchInventoryParts()` 를 부르면 한 화면이 같은 통로를 두 번 두드리고, 위
+     * 「왕복이 늘지 않았다」 시험은 그것을 못 잡는다(그 시험은 Promise.all 묶음만 본다).
+     */
+    assert.match(
+      pageFlat,
+      /const usedPartDisplayNames = usedPartDisplayNamesById\( usedParts\?\.rows \?\? \[\], buildUsedPartNameIndex\(usedPartOptions\) \);/
+    );
+    // 🔴 합치는 규칙이 페이지에 번지지 않았다 — 규칙은 domain 한 곳이다.
+    assert.ok(
+      !/customerPartName|kyosanPartNo|normalizeKey|kyosanUsedPartKey/.test(pageCode),
+      "페이지가 스스로 칸을 뒤지고 있다"
+    );
+  });
+
+  test("🔴 합친 글자가 화면까지 그대로 간다 — 가운데서 다시 만들지 않는다", () => {
+    assert.match(viewFlat, /usedPartDisplayNames: Record<string, string>;/);
+    assert.match(viewFlat, /displayNames=\{usedPartDisplayNames\}/);
+    assert.ok(
+      !/buildUsedPartNameIndex|usedPartDisplayNamesById|usedPartDisplayName\(/.test(viewCode),
+      "상세 화면이 스스로 합치고 있다"
+    );
   });
 
   test("칸은 조회 결과가 있을 때만 그려진다 — PartRequestSection 과 같은 모양", () => {

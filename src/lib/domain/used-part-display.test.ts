@@ -1,0 +1,222 @@
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import type { PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
+import type { InventoryResult } from "@/lib/domain/inventory-gateway";
+import {
+  buildUsedPartNameIndex,
+  usedPartCustomerName,
+  usedPartDisplayName,
+  usedPartDisplayNamesById,
+  usedPartMatchKey,
+  type UsedPartNameIndex,
+} from "@/lib/domain/used-part-display";
+
+/**
+ * ============================================================================
+ * 사용 부품을 「고객사 품명 (품번)」으로 보인다 — 값으로 못 박는다 (2026-10-28)
+ * ============================================================================
+ * 🔴 **갈래마다 「무엇이 보이는가」를 글자로** 적는다. 「함수를 불렀다」나 「빈 값이
+ *    아니다」로 재면, 합치는 규칙이 통째로 되살아나거나 뒤집혀도 통과한다.
+ *
+ * 🔴 **부품 이름은 가짜다.** 실제 고객사·품번을 시험에 적으면 공개 저장소에 박힌다
+ *    (이 저장소의 규칙이고, 실제로 한 번 걸렸다).
+ *
+ * 🔵 맞대기 시험은 **표본이 비면 공짜로 통과한다** — 「안 걸렸다」와 「애초에 담긴
+ *    것이 없다」가 같은 결과를 낸다. 그래서 묶음마다 **지도가 실제로 무엇을 담고
+ *    있는지**를 먼저 단언한다.
+ * ============================================================================
+ */
+
+/** 재고 관리에서 받아 온 줄 하나. 안 적은 칸은 빈 글자다(저쪽도 그렇게 준다). */
+function part(row: Partial<PartPickerRow> & { id: string }): PartPickerRow {
+  return {
+    partName: "",
+    partSpec: "",
+    drawingNo: "",
+    kyosanPartNo: "",
+    customerPartName: "",
+    ...row,
+  };
+}
+
+function okIndex(rows: readonly PartPickerRow[]): UsedPartNameIndex {
+  return buildUsedPartNameIndex({ status: "ok", value: rows });
+}
+
+describe("사용 부품 표시 — 열쇠 누르기", () => {
+  test("🔴 `-` 만 적힌 칸은 맞댈 수 없는 값이다 — 빈 열쇠", () => {
+    assert.equal(usedPartMatchKey("-"), "");
+    assert.equal(usedPartMatchKey("－－－"), "");
+    assert.equal(usedPartMatchKey("   "), "");
+    assert.equal(usedPartMatchKey(""), "");
+  });
+
+  test("전각·공백·대소문자·붙임표를 눌러 같은 열쇠로 만든다", () => {
+    const key = usedPartMatchKey("SCV-255P110");
+    assert.notEqual(key, "", "눌러서 빈 글자가 되면 아래 비교가 공짜로 통과한다");
+    assert.equal(usedPartMatchKey("scv-255p110"), key, "대소문자");
+    assert.equal(usedPartMatchKey("SCV 255 P110"), key, "공백");
+    assert.equal(usedPartMatchKey("ＳＣＶ－２５５Ｐ１１０"), key, "전각");
+    assert.equal(usedPartMatchKey("SCV255P110"), key, "붙임표 — 🔴 품번은 넉넉하게 맞댄다");
+  });
+
+  test("다른 품번은 다른 열쇠다 — 눌러도 뭉개지지 않는다", () => {
+    assert.notEqual(usedPartMatchKey("SCV-255P110"), usedPartMatchKey("SCV-255P120"));
+  });
+});
+
+describe("사용 부품 표시 — 네 갈래", () => {
+  const stored = "SCV-255P110";
+
+  test("㉠ 고객사 품명이 차 있으면 「고객사 품명 (품번)」", () => {
+    const index = okIndex([
+      part({ id: "1", kyosanPartNo: "SCV-255P110", customerPartName: "전원 퓨즈" }),
+    ]);
+    assert.equal(index.byKyosanPartNo.size, 1, "지도가 비었으면 아래가 공짜로 통과한다");
+    assert.equal(usedPartDisplayName(stored, index), "전원 퓨즈 (SCV-255P110)");
+  });
+
+  test("㉡ 고객사 품명이 비어 있으면 품번만", () => {
+    const index = okIndex([part({ id: "1", kyosanPartNo: "SCV-255P110", customerPartName: "" })]);
+    assert.equal(usedPartCustomerName(stored, index), "");
+    assert.equal(usedPartDisplayName(stored, index), "SCV-255P110");
+  });
+
+  test("🔴 고객사 품명이 `-` 뿐이어도 빈 칸이다 — 품번만", () => {
+    const index = okIndex([part({ id: "1", kyosanPartNo: "SCV-255P110", customerPartName: "-" })]);
+    assert.equal(usedPartDisplayName(stored, index), "SCV-255P110");
+  });
+
+  test("㉢ 재고 관리에 그 품번이 없으면 품번만", () => {
+    const index = okIndex([
+      part({ id: "1", kyosanPartNo: "SCV-255P120", customerPartName: "다른 부품" }),
+    ]);
+    assert.equal(index.byKyosanPartNo.size, 1, "지도에 **다른** 품번은 담겨 있다");
+    assert.equal(usedPartDisplayName(stored, index), "SCV-255P110");
+  });
+
+  test("㉣ 재고 관리에 못 물어봤으면 품번만 — 🔴 빈 칸도 「불러오지 못했습니다」도 아니다", () => {
+    const unreachable: InventoryResult<readonly PartPickerRow[]> = {
+      status: "unreachable",
+      reason: "timeout",
+    };
+    const index = buildUsedPartNameIndex(unreachable);
+    assert.equal(index.byKyosanPartNo.size, 0);
+    assert.equal(index.byPartName.size, 0);
+    assert.equal(usedPartDisplayName(stored, index), "SCV-255P110");
+  });
+
+  test("🔴 통로가 200 으로 빈 목록을 줘도 품번만 — 「없다」와 「모른다」가 같은 글자다", () => {
+    assert.equal(usedPartDisplayName(stored, okIndex([])), "SCV-255P110");
+  });
+
+  test("🔴 괄호 안은 저장된 글자 그대로다 — 눌러 적지 않는다", () => {
+    const index = okIndex([
+      part({ id: "1", kyosanPartNo: "SCV-255P110", customerPartName: "전원 퓨즈" }),
+    ]);
+    // 저장된 쪽은 전각·공백으로 적혀 있고 재고 관리 쪽은 반각이다. 묶이기는 하되
+    // 보이는 품번은 **이 건에 적힌 글자**여야 사람이 연락서에서 되짚을 수 있다.
+    assert.equal(usedPartDisplayName("ＳＣＶ－２５５Ｐ１１０", index), "전원 퓨즈 (ＳＣＶ－２５５Ｐ１１０)");
+  });
+
+  test("저장된 글자가 `-` 뿐이면 맞대지 않고 그대로 보인다", () => {
+    const index = okIndex([part({ id: "1", kyosanPartNo: "-", customerPartName: "전원 퓨즈" })]);
+    assert.equal(usedPartDisplayName("-", index), "-");
+  });
+});
+
+describe("사용 부품 표시 — 어느 칸으로 맞추나", () => {
+  test("재고 관리의 **품명** 칸에 품번이 적혀 있어도 걸린다", () => {
+    const index = okIndex([
+      part({ id: "1", partName: "SCV-255P110", customerPartName: "전원 퓨즈" }),
+    ]);
+    assert.equal(index.byKyosanPartNo.size, 0, "교산 품번 칸은 비어 있다");
+    assert.equal(index.byPartName.size, 1);
+    assert.equal(usedPartDisplayName("SCV-255P110", index), "전원 퓨즈 (SCV-255P110)");
+  });
+
+  test("🔴 교산 품번이 품명을 이긴다 — 차례가 뜻이다", () => {
+    const index = okIndex([
+      part({ id: "1", partName: "SCV-255P110", customerPartName: "엉뚱한 부품" }),
+      part({ id: "2", kyosanPartNo: "SCV-255P110", customerPartName: "전원 퓨즈" }),
+    ]);
+    assert.equal(usedPartDisplayName("SCV-255P110", index), "전원 퓨즈 (SCV-255P110)");
+  });
+
+  test("🔴 품명2·도번은 열쇠가 아니다 — 우연히 맞은 줄이 남의 이름을 달면 안 된다", () => {
+    const bySpec = okIndex([
+      part({ id: "1", partSpec: "SCV-255P110", customerPartName: "규격 칸 부품" }),
+    ]);
+    assert.equal(usedPartDisplayName("SCV-255P110", bySpec), "SCV-255P110");
+
+    const byDrawing = okIndex([
+      part({ id: "1", drawingNo: "SCV-255P110", customerPartName: "도번 칸 부품" }),
+    ]);
+    assert.equal(usedPartDisplayName("SCV-255P110", byDrawing), "SCV-255P110");
+  });
+
+  test("🔴 고객사 품명 자체는 열쇠가 아니다 — 「휴즈 (휴즈)」가 되지 않는다", () => {
+    const index = okIndex([part({ id: "1", customerPartName: "휴즈" })]);
+    assert.equal(usedPartDisplayName("휴즈", index), "휴즈");
+  });
+});
+
+describe("사용 부품 표시 — 엇갈리면 품번", () => {
+  test("🔴 한 품번에 서로 다른 고객사 품명이 걸리면 품번만 — 절반이 남의 이름이 된다", () => {
+    const index = okIndex([
+      part({ id: "1", kyosanPartNo: "SCV-255P110", customerPartName: "전원 퓨즈" }),
+      part({ id: "2", kyosanPartNo: "SCV255P110", customerPartName: "제어 릴레이" }),
+    ]);
+    assert.equal(usedPartDisplayName("SCV-255P110", index), "SCV-255P110");
+  });
+
+  test("🔴 엇갈린 뒤에 같은 이름이 또 와도 되살아나지 않는다", () => {
+    const index = okIndex([
+      part({ id: "1", kyosanPartNo: "SCV-255P110", customerPartName: "전원 퓨즈" }),
+      part({ id: "2", kyosanPartNo: "SCV-255P110", customerPartName: "제어 릴레이" }),
+      part({ id: "3", kyosanPartNo: "SCV-255P110", customerPartName: "전원 퓨즈" }),
+    ]);
+    assert.equal(usedPartDisplayName("SCV-255P110", index), "SCV-255P110");
+  });
+
+  test("🔵 같은 이름이 여러 줄에 걸리는 것은 엇갈림이 아니다 — 소유만 다른 같은 부품", () => {
+    const index = okIndex([
+      part({ id: "1", kyosanPartNo: "SCV-255P110", customerPartName: "전원 퓨즈" }),
+      part({ id: "2", kyosanPartNo: "SCV-255P110", customerPartName: "전원 퓨즈" }),
+    ]);
+    assert.equal(usedPartDisplayName("SCV-255P110", index), "전원 퓨즈 (SCV-255P110)");
+  });
+
+  test("🔵 이름이 빈 줄은 엇갈림으로 세지 않는다 — 있는 이름을 지우면 안 된다", () => {
+    const index = okIndex([
+      part({ id: "1", kyosanPartNo: "SCV-255P110", customerPartName: "전원 퓨즈" }),
+      part({ id: "2", kyosanPartNo: "SCV-255P110", customerPartName: "" }),
+      part({ id: "3", kyosanPartNo: "SCV-255P110", customerPartName: "-" }),
+    ]);
+    assert.equal(usedPartDisplayName("SCV-255P110", index), "전원 퓨즈 (SCV-255P110)");
+  });
+});
+
+describe("사용 부품 표시 — 줄마다의 글자", () => {
+  const index = okIndex([
+    part({ id: "1", kyosanPartNo: "SCV-255P110", customerPartName: "전원 퓨즈" }),
+  ]);
+
+  test("🔴 줄 id 로 적는다 — 차례로 적으면 거르는 날 한 칸씩 밀린다", () => {
+    const names = usedPartDisplayNamesById(
+      [
+        { id: "row-a", partNameText: "SCV-255P110" },
+        { id: "row-b", partNameText: "SCV-255P120" },
+      ],
+      index
+    );
+    assert.deepEqual(names, {
+      "row-a": "전원 퓨즈 (SCV-255P110)",
+      "row-b": "SCV-255P120",
+    });
+  });
+
+  test("줄이 없으면 빈 묶음이다", () => {
+    assert.deepEqual(usedPartDisplayNamesById([], index), {});
+  });
+});

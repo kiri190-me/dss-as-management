@@ -15,6 +15,7 @@ import {
 } from "@/lib/db/queries/repair-cases";
 import { fetchInventoryParts } from "@/lib/server/inventory-gateway";
 import { toPartPickerOptions, type InventoryPart, type InventoryResult } from "@/lib/domain/inventory-gateway";
+import { buildUsedPartNameIndex, usedPartDisplayNamesById } from "@/lib/domain/used-part-display";
 import { loadPartRequestSectionData } from "@/lib/server/part-request-section-data";
 import {
   getDerivedServiceSummariesForCases,
@@ -264,6 +265,29 @@ export default async function RepairCaseDetailPage({
 
   const usedPartOptions = toPartPickerOptions(usedPartInventory);
 
+  /**
+   * 「사용 부품」 줄에 **보여 줄 글자** — 🔴 **저장된 글자는 품번**이다(2026-10-28 에
+   * 연락서 이식이 `型式`·`仕様書番号` 칸을 먼저 읽게 바뀌었다). 품번만 떠 있으면 사람이
+   * 무슨 부품인지 모르므로 **보여 줄 때만** 재고 관리의 **고객사 품명**을 앞에 붙여
+   * 「고객사 품명 (품번)」으로 만든다.
+   *
+   * 🔴 **저장되는 글자는 그대로 품번이다** — 합친 글자를 저장하면 재고 관리에서 이름이
+   *    바뀌어도 안 따라간다. 반대로 지금처럼 보여 줄 때만 합치면, 나중에 재고 관리에서
+   *    고객사 품명을 채우는 것만으로 이 화면이 저절로 바뀐다(그래서 고른 설계다).
+   * 🔴 **못 얻으면 언제나 품번**이다 — 그 품번이 없든, 이름이 비었든, 재고 관리에
+   *    못 물어봤든 넷 다 품번을 보인다(domain/used-part-display.ts 머리말).
+   *
+   * 🔵 **통로를 더 두드리지 않는다** — 바로 위 묶음에서 이미 받아 온 그 목록으로 만든다.
+   * 🔵 **서버에서 합치는 까닭**: 이 규칙은 「같은 부품으로 볼 것인가」의 자를 연락서
+   *    판독기(`lib/kyosan/*`)에서 빌려 쓴다 — 자가 두 벌이면 한 줄로 묶인 부품이 재고
+   *    관리와는 안 묶인다. 글자 몇 개를 만들려고 그 판독기를 브라우저 묶음으로 보낼
+   *    까닭이 없어, 화면에는 **만들어진 글자**만 내려보낸다.
+   */
+  const usedPartDisplayNames = usedPartDisplayNamesById(
+    usedParts?.rows ?? [],
+    buildUsedPartNameIndex(usedPartOptions)
+  );
+
   // 화면에는 이력 줄이 실제로 그리는 한 칸(조치 내용)만 건 id 로 찾을 수 있게
   // 넘긴다 — 요약의 나머지 두 칸까지 클라이언트로 실어 보낼 이유가 없다.
   // 작업기록이 없는 건은 여기서 null 이 되고, 화면은 "-" 를 그린다.
@@ -307,6 +331,7 @@ export default async function RepairCaseDetailPage({
       canWriteDomesticOrderIssueDates={canWriteDomesticOrders}
       usedParts={usedParts}
       usedPartOptions={usedPartOptions}
+      usedPartDisplayNames={usedPartDisplayNames}
     />
   );
 }
