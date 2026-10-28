@@ -542,31 +542,51 @@ describe("attachment 휴지통: 두 번 눌러도 조용히 성공하지 않는�
 
 // ─────────────────────────────────── 4. 잠긴 접수 건
 
-describe("attachment 휴지통: 출하 완료로 잠긴 건", () => {
-  test("잠긴 건의 첨부는 지울 수 없다 — 파일도 그대로 남는다", async () => {
+/**
+ * 🔴 **2026-10-28 에 통째로 뒤집힌 절이다.**
+ *
+ * 그날 전까지 이 두 시험의 제목은 「잠긴 건의 첨부는 지울 수 없다 — 파일도 그대로
+ * 남는다」· 「잠긴 건의 첨부는 되살릴 수도 없다」였고, 둘 다 `CASE_LOCKED` 를 단언했다.
+ * 까닭은 mutation 머리말에 이렇게 적혀 있었다 — 「잠금의 뜻이 "이 건의 자료 구성은
+ * 확정됐다"인데 첨부만 뺄 수 있으면 그 뜻이 반만 지켜진다.」
+ *
+ * 사용자가 뒤집었다: **출하가 끝난 건에도 [파일관리] 탭에서 파일을 올리고 · 지우고 ·
+ * 되살릴 수 있어야 한다.** 올리기 쪽 관문도 같은 날 함께 빠졌다. 그래서 **단언을 약하게
+ * 만들지 않고 방향을 뒤집었다** — 잠긴 건에서 두 조작이 **성공하는지**를 본다.
+ *
+ * 디스크 실물이 남는지(이 파일의 가장 중요한 사실)와 감사 한 줄은 그대로 본다 — 잠금이
+ * 풀렸다고 해서 지우기가 파일을 지우기 시작하면 그것은 또 다른 사고다.
+ */
+describe("attachment 휴지통: 출하 완료로 잠긴 건도 지우고 되살린다 (2026-10-28)", () => {
+  test("잠긴 건의 첨부를 휴지통에 보낼 수 있다 — 파일은 그대로 남는다", async () => {
     const caseId = await createTestCase();
     const { attachmentId, absolutePath } = await storedAttachment(caseId);
 
     await db.update(repairCases).set({ isLocked: true }).where(eq(repairCases.id, caseId));
 
     const result = await softDeleteAttachment({ attachmentId, actorUserId: adminId, reason: null });
-    assert.equal(result.ok, false);
-    assert.equal(result.ok === false && result.code, "CASE_LOCKED");
+    assert.equal(result.ok, true, JSON.stringify(result));
 
     const [row] = await db
       .select({ isDeleted: attachments.isDeleted })
       .from(attachments)
       .where(eq(attachments.id, attachmentId));
-    assert.equal(row.isDeleted, false, "거절됐는데 표시가 바뀌었다");
+    assert.equal(row.isDeleted, true, "성공이라 했는데 표시가 안 바뀌었다");
+    // 🔴 잠금이 풀린 것이지 이 파일의 규율이 풀린 것이 아니다 — 실물은 남는다.
     assert.equal(await existsOnDisk(absolutePath), true);
 
-    // 대조 — 잠금을 풀면 같은 요청이 통한다(막힌 이유가 잠금이었다).
-    await db.update(repairCases).set({ isLocked: false }).where(eq(repairCases.id, caseId));
-    const retry = await softDeleteAttachment({ attachmentId, actorUserId: adminId, reason: null });
-    assert.equal(retry.ok, true, "잠금을 풀었는데도 막혔다 — 다른 이유로 막히고 있다");
+    const counts = await auditCounts(attachmentId);
+    assert.equal(counts.FILE_DELETE, 1);
+
+    // 🔴 그 건이 **아직 잠겨 있는** 채로 된 일이다(시험이 몰래 잠금을 풀지 않았다).
+    const [after] = await db
+      .select({ isLocked: repairCases.isLocked })
+      .from(repairCases)
+      .where(eq(repairCases.id, caseId));
+    assert.equal(after.isLocked, true);
   });
 
-  test("잠긴 건의 첨부는 되살릴 수도 없다", async () => {
+  test("잠긴 건의 첨부를 되살릴 수 있다", async () => {
     const caseId = await createTestCase();
     const { attachmentId } = await storedAttachment(caseId);
 
@@ -574,13 +594,20 @@ describe("attachment 휴지통: 출하 완료로 잠긴 건", () => {
     await db.update(repairCases).set({ isLocked: true }).where(eq(repairCases.id, caseId));
 
     const result = await restoreAttachment({ attachmentId, actorUserId: adminId });
-    assert.equal(result.ok, false);
-    assert.equal(result.ok === false && result.code, "CASE_LOCKED");
+    assert.equal(result.ok, true, JSON.stringify(result));
 
-    // 대조
-    await db.update(repairCases).set({ isLocked: false }).where(eq(repairCases.id, caseId));
-    const retry = await restoreAttachment({ attachmentId, actorUserId: adminId });
-    assert.equal(retry.ok, true);
+    const [row] = await db
+      .select({ isDeleted: attachments.isDeleted, deletedAt: attachments.deletedAt })
+      .from(attachments)
+      .where(eq(attachments.id, attachmentId));
+    assert.equal(row.isDeleted, false);
+    assert.equal(row.deletedAt, null);
+
+    const [after] = await db
+      .select({ isLocked: repairCases.isLocked })
+      .from(repairCases)
+      .where(eq(repairCases.id, caseId));
+    assert.equal(after.isLocked, true, "잠긴 채로 되살아난 것이어야 뜻이 있다");
   });
 });
 

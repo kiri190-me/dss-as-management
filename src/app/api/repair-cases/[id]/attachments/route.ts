@@ -48,8 +48,9 @@ import { AttachmentTooLargeError, type StorageAdapter } from "@/lib/storage/stor
  * `fetch(url, { method: "POST", body: file })` 한 줄이면 된다.
  *
  * ── 순서가 이 파일의 핵심이다 ────────────────────────────────────────────
- *  1) 본문을 **받기 전에** 세션·권한·접수 건 존재·잠금을 확인한다. 막히면 한
- *     바이트도 받지 않는다.
+ *  1) 본문을 **받기 전에** 세션·권한·접수 건 존재를 확인한다. 막히면 한
+ *     바이트도 받지 않는다. (2026-10-28 전에는 여기에 출하 잠금도 있었다 —
+ *     아래 「잠긴 건에도 올린다」 절.)
  *  2) 임시 파일로 흘려보내며 크기·SHA-256을 동시에 계산한다. 20MB를 넘으면
  *     그 자리에서 끊고 임시 파일을 버린다.
  *  3) 확장자 허용목록 + 실제 앞머리 바이트 대조. 브라우저가 보낸 MIME은 믿지
@@ -62,6 +63,56 @@ import { AttachmentTooLargeError, type StorageAdapter } from "@/lib/storage/stor
  * 나오지 않는 **깨진 기록**이다. 지금 순서에서 최악의 경우는 주인 없는 파일이
  * 하나 남는 것인데, 그건 나중에 훑어서 치울 수 있는 문제다. 되돌릴 수 없는
  * 고장과 치울 수 있는 찌꺼기 중에서 후자를 고른 것이다.
+ *
+ * ── 잠긴 건에도 올린다 (2026-10-28 사용자 결정) ───────────────────────────
+ * 2026-10-28 전까지 위 1) 에는 관문이 하나 더 있었다. 지운 글자 그대로다:
+ *
+ *     if (target.isLocked) {
+ *       return fail(409, "CASE_LOCKED", "출하 완료로 잠긴 접수 건에는 파일을 올릴 수 없습니다.");
+ *     }
+ *
+ * 왜 두었는지는 첨부 휴지통 쪽 머리말(mutations/attachment-trash.ts)이 이렇게 적고
+ * 있었다 — 「잠금의 뜻이 "이 건의 자료 구성은 확정됐다"인데 첨부만 뺄 수 있으면 그
+ * 뜻이 반만 지켜진다.」
+ *
+ * 사용자가 그것을 뒤집었다: **출하가 끝난 건에도 [파일관리] 탭에서 파일을 올릴 수
+ * 있어야 한다.** 같은 날 함께 푼 것이 둘 더 있다 — 휴지통행과 되살리기
+ * (attachment-trash.ts). 셋을 한꺼번에 푼 까닭은 하나다: 올리기만 풀면 **잘못 올린
+ * 파일을 치울 길이 없다.**
+ *
+ * 🔴 위 걱정(「반만 지켜진다」)은 **이미 현실이었다.** 영구 삭제
+ * (mutations/attachment-purge.ts)와 내려받기(queries/attachment-download.ts)에는 처음부터
+ * 이 검사가 없다 — 잠긴 건의 첨부를 디스크에서 영영 지우는 일이 그동안 그냥 통과하고
+ * 있었다. 셋을 푸는 쪽이 오히려 앞뒤가 맞는다.
+ *
+ * 🔴 **잃는 것**: 출하가 끝난 뒤에도 첨부 구성이 바뀐다. 「이 건의 자료 구성은
+ * 확정됐다」는 뜻이 그만큼 약해지고, 남는 것은 **누가 언제 무엇을 했는가**뿐이다
+ * (FILE_UPLOAD · FILE_DELETE · RESTORE 감사 세 줄).
+ *
+ * 🔴 **푼 것은 잠금 하나뿐이다.** 나머지 관문은 한 글자도 바뀌지 않았다 — 신뢰 출처 ·
+ * 세션 · 살아 있는 계정 · 승인 상태 · 권한(repairCases.files WRITE) · 건 존재(휴지통이면
+ * 404) · 분류 · 확장자 · 내용 대조 · 20MB.
+ *
+ * 🔴 **넷째가 같은 날 뒤따랐다 — 사진 회전 저장.** 위 셋을 푼 뒤 같은 [파일관리] 탭에서
+ * **같은 사진을 올릴 수도 지울 수도 있는데 돌려서 저장만 안 되는** 모양이 남았고,
+ * 사용자가 「같은 탭인데 하나만 막히면 이상하다」로 그것도 풀었다. 🔴 그쪽은 **원본을
+ * 덮어쓰고 되돌릴 수 없다** — 잃는 것이 이 셋보다 크고, 사용자가 그 점을 알고 골랐다
+ * (api/attachments/[id]/rotation/route.ts · mutations/attachment-rotation.ts 머리말).
+ *
+ * 🔴 **잠금 자체는 그대로 선다** — workflow-transitions.ts 의 SHIPMENT_COMPLETED 전이가
+ * 지금도 repair_cases.is_locked 를 true 로 세운다. 첨부 쪽이 그 값을 안 볼 뿐이다.
+ * 그래서 「출하 잠금은 이제 다 풀렸다」로 읽으면 틀린다. **2026-10-28 에 직접 세어 본
+ * 살아 있는 잠금이 다섯**이다(그날 저녁 기준 — 회전이 빠진 뒤의 수다):
+ *   · 워크플로 전이       mutations/workflow-transitions.ts
+ *   · 수동 단계 세우기     mutations/case-workflow-steps.ts
+ *   · 결재 요청            mutations/repair-case-approvals.ts
+ *   · 사용 부품            auth/repair-case-used-parts-authorization.ts (가져온 건만 예외)
+ *   · 연락서 폴더 만들기   api/repair-cases/[id]/contact-folder/route.ts — 🔴 **이것만
+ *                          남았다.** 파일을 다루는 일이 아니라 **사람의 서류함에 폴더를
+ *                          만드는** 일이라 이번 결정에 들어가지 않았다
+ * 이미 무력화된 것(인자는 그대로 받되 늘 false 를 돌려준다): auth/repair-case-edit-
+ * authorization.ts 의 isBlockedByShipmentLock · auth/procedure-case-execution-
+ * authorization.ts 의 isBlockedByCaseLock.
  *
  * ── 6) 사내 공유폴더(연락서 폴더)에 사본 (2026-10-05 연락서 조각 6) ───────
  * 시스템 창고의 파일은 디스크 이름이 첨부 ID(UUID)라 사람이 탐색기에서 찾을 수
@@ -104,7 +155,8 @@ type FailureCode =
   | "ACCOUNT_NOT_APPROVED"
   | "FORBIDDEN"
   | "CASE_NOT_FOUND"
-  | "CASE_LOCKED"
+  // 🔴 "CASE_LOCKED" 가 여기 없는 것은 빠뜨린 것이 아니다 — 2026-10-28 에 뺐다
+  //    (머리말의 「잠긴 건에도 올린다」). 화면은 이 코드를 따로 다루지 않았다.
   | "INVALID_CATEGORY"
   | "CATEGORY_NOT_ALLOWED_FOR_OWNER"
   | "INVALID_FILE_NAME"
@@ -243,9 +295,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   if (!target) {
     return fail(404, "CASE_NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
   }
-  if (target.isLocked) {
-    return fail(409, "CASE_LOCKED", "출하 완료로 잠긴 접수 건에는 파일을 올릴 수 없습니다.");
-  }
+  // 🔴 조회는 출하 잠금 값을 그대로 돌려주지만 **여기서 보지 않는다**(2026-10-28
+  //    사용자 결정 — 머리말의 「잠긴 건에도 올린다」). 그 값을 지금 쓰는 곳은 연락서
+  //    폴더 만들기 통로 하나이고, 그래서 조회에서 칸을 빼지 않았다.
 
   // ── 메타데이터(쿼리 문자열) 검증 — 아직 본문은 건드리지 않았다 ────────
   const searchParams = request.nextUrl.searchParams;

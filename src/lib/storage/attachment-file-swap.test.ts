@@ -225,7 +225,12 @@ describe("옛 사진 — 썸네일이 아예 없던 자리", () => {
         { relPath: ORIGINAL_PATH, tempPath: await stage(storage, NEW_ORIGINAL) },
         { relPath: PREVIEW_PATH, tempPath: await stage(storage, NEW_PREVIEW) },
       ],
-      record: async () => ({ ok: false, code: "CASE_LOCKED", message: "잠긴 접수 건입니다." }),
+      // 🔴 **실제로 올 수 있는** 거절 하나. 2026-10-28 전까지 여기 적힌 것은
+      //    CASE_LOCKED 였는데, 그날 회전 저장이 출하 잠금에서 풀려 그 코드는 이 자리에
+      //    더는 오지 않는다(mutations/attachment-rotation.ts). 이 시험이 보는 것은
+      //    「거절되면 디스크가 없던 그대로인가」라 코드가 무엇이든 성립하지만, 일어날 수
+      //    없는 값을 표본으로 두면 다음 사람이 살아 있는 규칙으로 읽는다.
+      record: async () => ({ ok: false, code: "CHANGED", message: "그 사이 이 파일이 바뀌었습니다." }),
     });
 
     assert.equal(result.ok, false);

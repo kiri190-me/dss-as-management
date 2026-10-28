@@ -685,7 +685,10 @@ describe("getAttachmentUploadTarget", () => {
 
     await db.update(repairCases).set({ isLocked: true }).where(eq(repairCases.id, repairCaseId));
     const locked = await getAttachmentUploadTarget(repairCaseId);
-    assert.equal(locked!.isLocked, true, "출하 완료로 잠긴 건은 라우트가 여기서 막는다");
+    // 🔴 이 조회는 잠금 값을 **그대로 돌려줄 뿐**이고, 그 값으로 막는 곳은 2026-10-28
+    //    부터 하나다 — 연락서 폴더 만들기 통로(api/repair-cases/[id]/contact-folder).
+    //    첨부 올리기는 같은 날 이 값을 보지 않게 됐다(그 라우트 머리말).
+    assert.equal(locked!.isLocked, true, "잠긴 건을 그대로 돌려주지 않는다");
   });
 
   test("휴지통에 있는 건은 없는 것으로 본다", async () => {

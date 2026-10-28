@@ -31,9 +31,28 @@ import { describeOrientation, type ImageOrientation } from "@/lib/domain/image-o
  * 안 고치면 그다음부터 원본이 잘려 나가거나 브라우저가 그리다 만다.
  *
  * ── 잠긴 건 · 휴지통 — 지우기와 같은 문 ──────────────────────────────────
- * 출하 완료로 잠긴 접수 건의 파일은 올리지도 지우지도 못한다. 원본을 덮어쓰는
- * 것은 그보다 더한 일이라 같은 기준으로 막는다. 견적서 파일은 견적서 행을 잠그고
- * 본다(guardQuoteAttachmentChange — 올리기·지우기와 **같은 함수**다).
+ * 2026-10-28 전까지 이 자리에 이렇게 적혀 있었고, 코드도 그대로였다:
+ *
+ *   「출하 완료로 잠긴 접수 건의 파일은 올리지도 지우지도 못한다. 원본을 덮어쓰는
+ *    것은 그보다 더한 일이라 같은 기준으로 막는다.」
+ *
+ * 같은 날 아침에 올리기 · 휴지통행 · 되살리기 셋이 그 잠금에서 풀렸고, 그러자
+ * **같은 탭에서 같은 파일을 다루는 조작 가운데 회전 저장 하나만 막히는** 모양이
+ * 남았다. 사용자가 그것을 보고 정했다 — 「**같은 탭인데 하나만 막히면 이상하다**」
+ * (2026-10-28). 그래서 접수 건 잠금 판정이 여기서도 빠졌다.
+ *
+ * 🔴 **잃는 것이 앞의 셋보다 크다. 사용자가 그 점을 알고 골랐다.** 회전 저장은
+ * **원본을 덮어쓴다**(이 파일 맨 위 · 라우트 머리말의 「되돌릴 수 없다」). 올리기는
+ * 파일이 하나 느는 일이고 휴지통행은 되살릴 수 있지만, 이쪽은 **되돌릴 수 없다** —
+ * 출하가 끝난 건의 증거 사진이 바뀔 수 있고, 바뀌기 전 바이트는 어디에도 남지
+ * 않는다. 남는 것은 감사 한 줄(UPDATE)뿐이고, 그 줄은 **무엇이 어떻게 바뀌었는지**
+ * (방향 · 전후 크기 · 전후 체크섬)를 적지만 옛 그림 자체를 돌려주지는 못한다.
+ *
+ * 🔴 **함께 풀린 것은 없다.** 바로 아래 두 문은 그대로다 — 휴지통에 있는 파일은
+ * 여전히 못 바꾸고(DELETED), 견적서 파일은 견적서 행을 잠그고 본다
+ * (guardQuoteAttachmentChange — 올리기·지우기와 **같은 함수**다). 그리고 「그 사이
+ * 바뀌었는가」(위 🔴 CHANGED)는 이 파일에서 가장 중요한 잠금인데, 잠금이 풀린 뒤로는
+ * **출하된 건에서도 그 경합이 일어날 수 있다** — 더 중요해졌지 느슨해지지 않았다.
  *
  * ── 감사는 UPDATE 다 ─────────────────────────────────────────────────────
  * ⚠️ 이 저장소의 감사 종류(vendor/dss-core 의 audit_log_action_type)에는
@@ -56,7 +75,8 @@ export type AttachmentRotationFailureCode =
   | "INVALID_ID"
   | "NOT_FOUND"
   | "DELETED"
-  | "CASE_LOCKED"
+  // 🔴 "CASE_LOCKED" 가 여기 없는 것은 빠뜨린 것이 아니다 — 2026-10-28 에 뺐다
+  //    (머리말의 「잠긴 건 · 휴지통」). 휴지통 · 견적서 두 코드는 그대로다.
   | "QUOTE_IN_TRASH"
   /** 읽은 뒤 저장하기까지 사이에 파일이 바뀌었다(위 🔴). */
   | "CHANGED";
@@ -93,7 +113,9 @@ export async function recordAttachmentRotation(params: {
         category: attachments.category,
         isDeleted: attachments.isDeleted,
         checksumSha256: attachments.checksumSha256,
-        caseIsLocked: repairCases.isLocked,
+        // 접수 건 조인은 감사에 실을 접수번호 **하나** 때문에 남아 있다. 잠금
+        // (is_locked)은 2026-10-28 에 더는 보지 않게 되어 읽지 않는다 — 쓰지 않을
+        // 값을 읽어 두면 다음 사람이 「어딘가에서 보고 있다」고 읽는다.
         caseIntakeNumber: repairCases.intakeNumber,
         productModelName: productModels.modelName,
         quoteNumber: quotes.quoteNumber,
@@ -113,13 +135,7 @@ export async function recordAttachmentRotation(params: {
         message: "휴지통에 있는 파일은 바꿀 수 없습니다. 복원한 뒤 다시 시도해 주세요.",
       };
     }
-    if (current.caseIsLocked === true) {
-      return {
-        ok: false,
-        code: "CASE_LOCKED",
-        message: "출하 완료로 잠긴 접수 건의 파일은 바꿀 수 없습니다.",
-      };
-    }
+    // 🔴 출하 완료로 잠긴 건이어도 여기서 막지 않는다(2026-10-28 — 머리말).
 
     // 견적서 파일이면 견적서 행을 잠그고 본다 — 올리기 · 지우기와 같은 함수다.
     if (current.quoteId !== null) {

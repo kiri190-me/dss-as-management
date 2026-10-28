@@ -473,9 +473,13 @@ describe("🔴 일부만 실패했을 때 사람에게 보이는 것", () => {
         outcome={{
           total: 5,
           saved: 3,
+          // 🔴 둘 다 **실제로 올 수 있는** 사유다. 2026-10-28 전까지 둘째는 「출하 완료로
+          //    잠긴 접수 건입니다.」였는데, 그날 회전 저장이 출하 잠금에서 풀려
+          //    (api/attachments/[id]/rotation/route.ts 머리말) 이제 오지 않는 사유가 됐다.
+          //    일어날 수 없는 일을 표본으로 두면 다음 사람이 그것을 살아 있는 규칙으로 읽는다.
           failures: [
             { name: "둘.jpg", message: "그 사이 이 파일이 바뀌었습니다." },
-            { name: "넷.jpg", message: "출하 완료로 잠긴 접수 건입니다." },
+            { name: "넷.jpg", message: "휴지통에 있는 파일은 바꿀 수 없습니다." },
           ],
         }}
         onConfirm={() => {}}
@@ -486,7 +490,7 @@ describe("🔴 일부만 실패했을 때 사람에게 보이는 것", () => {
     assert.ok(html.includes("둘.jpg"), "실패한 파일 이름이 없다");
     assert.ok(html.includes("그 사이 이 파일이 바뀌었습니다."), "막힌 까닭이 없다");
     assert.ok(html.includes("넷.jpg"));
-    assert.ok(html.includes("출하 완료로 잠긴 접수 건입니다."));
+    assert.ok(html.includes("휴지통에 있는 파일은 바꿀 수 없습니다."));
     assert.ok(
       html.includes("실패한 사진은 고른 채로 남겨 두었습니다"),
       "다시 시도할 수 있다는 것을 말해 주지 않는다"

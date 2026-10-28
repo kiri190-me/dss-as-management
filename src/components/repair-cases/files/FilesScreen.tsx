@@ -298,8 +298,8 @@ function DatabaseFilesScreen({
     setIsMutating(true);
     setStatusMessage(null);
     try {
-      // 한 건씩 차례로 보낸다. 한 건이 막혀도(잠긴 건 등) 나머지는 지운다 —
-      // 여러 개를 고른 사람에게 "하나가 안 되니 전부 취소"는 도움이 안 된다.
+      // 한 건씩 차례로 보낸다. 한 건이 막혀도(휴지통에 있는 견적서의 파일 등) 나머지는
+      // 지운다 — 여러 개를 고른 사람에게 "하나가 안 되니 전부 취소"는 도움이 안 된다.
       const failures: { name: string; reason: string }[] = [];
       let deleted = 0;
       for (const target of pendingDeletes) {

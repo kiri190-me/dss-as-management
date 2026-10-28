@@ -292,11 +292,35 @@ describe("연락서 폴더 만들기 통로 — 소스로 지킨다", () => {
     }
   });
 
-  test("🔴 잠긴 건은 409 — 올리기 통로와 **같은 조회 · 같은 번호**다", () => {
+  /**
+   * 🔴 2026-10-28 에 이 시험의 전제 하나가 뒤집혔다.
+   *
+   * 예전 제목은 「잠긴 건은 409 — 올리기 통로와 **같은 조회 · 같은 번호**다」였고,
+   * 올리기 통로에도 `if (target.isLocked) {` 가 있다는 것을 함께 못 박고 있었다. 그날
+   * 사용자 결정으로 **올리기 · 휴지통행 · 되살리기 셋이 출하 잠금에서 풀렸다**
+   * (api/repair-cases/[id]/attachments/route.ts 머리말의 「잠긴 건에도 올린다」).
+   *
+   * 그래서 지키는 것을 **둘로 가른다**:
+   *  · 아직 같은 것 — **판정의 재료**(getAttachmentUploadTarget). 이 조회를 둘로
+   *    나누면 어느 날 한쪽만 고쳐진다.
+   *  · 이제 다른 것 — **판정 자체.** 폴더 만들기만 잠금을 본다. 사람의 서류함에 폴더가
+   *    하나 더 생기는 일이라 풀어 달라는 말이 없었다.
+   *
+   * 🔴 올리기 쪽은 **주석을 걷어내고** 본다 — 그 머리말이 지운 글자
+   * (`if (target.isLocked) {`)를 인용으로 남겨 두어서, 날것으로 세면 아직 막고 있는
+   * 것처럼 읽힌다.
+   */
+  test("🔴 잠긴 건은 409 — 판정의 **재료**는 올리기 통로와 같은 조회다", () => {
     const upload = readFileSync(new URL("../attachments/route.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-    // 판정을 새로 만들지 않았다 — 두 통로가 같은 조회를 부른다.
-    assert.ok(upload.includes("getAttachmentUploadTarget("), "올리기 통로가 이 조회를 안 쓴다");
-    assert.ok(upload.includes("if (target.isLocked) {"), "올리기 통로의 잠금 판정이 바뀌었다");
+    const uploadCode = upload.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    // 재료는 그대로 하나다 — 두 통로가 같은 조회를 부른다.
+    assert.ok(uploadCode.includes("getAttachmentUploadTarget("), "올리기 통로가 이 조회를 안 쓴다");
+    // 🔴 판정은 이제 이쪽 하나뿐이다(2026-10-28).
+    assert.equal(
+      /\bisLocked\b/.test(uploadCode),
+      false,
+      "올리기 통로가 잠금을 다시 보고 있다 — 2026-10-28 결정이 뒤집혔다"
+    );
     assert.ok(postBody.includes("if (target.isLocked) {"));
     assert.ok(postBody.includes('fail(409, "CASE_LOCKED"'));
     // 🔴 isLocked 를 **직접** 읽어 흉내 내지 않는다(조회가 주는 값 하나만 본다).

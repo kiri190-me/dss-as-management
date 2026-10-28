@@ -64,9 +64,36 @@ import { checkRotationPayload, checkRotationTarget, parseRotationRequest } from 
  *  1) 출처 · 세션 · 계정 승인
  *  2) **넓은 문턱** — 어느 주인의 파일도 못 다루는 사람은 조회 전에 403
  *  3) 첨부 행  → 4) 주인별 권한(404 로 감춘다)  → 5) 내보내도 되는 상태인가
- *  6) 잠긴 접수 건인가  → 7) 돌릴 수 있는 형식인가  → 8) 인자
+ *  6) 돌릴 수 있는 형식인가  → 7) 인자
  *  **여기까지 한 바이트도 받지 않는다.**
- *  9) 두 덩어리를 임시 자리로  → 10) 앞머리 대조  → 11) 갈아 끼우기 + 기록
+ *  8) 두 덩어리를 임시 자리로  → 9) 앞머리 대조  → 10) 갈아 끼우기 + 기록
+ *
+ * ── 잠긴 접수 건도 돌려 저장한다 (2026-10-28 사용자 결정) ────────────────
+ * 2026-10-28 전까지 5) 와 6) 사이에 관문이 하나 더 있었다. 지운 글자 그대로다:
+ *
+ *     // ── 6) 잠긴 접수 건 — 올리기 · 지우기와 같은 문 ────────────────────
+ *     //
+ *     // mutation 도 같은 것을 보지만(트랜잭션 안에서 다시), 여기서 먼저 막는 까닭은
+ *     // 20MB 를 받아 놓고 되돌리지 않기 위해서다.
+ *     if (attachment.caseLocked) {
+ *       return fail(409, "CASE_LOCKED", "출하 완료로 잠긴 접수 건의 파일은 바꿀 수 없습니다.");
+ *     }
+ *
+ * 그 말대로 **같은 날 아침에 「올리기 · 지우기」 쪽 문이 열렸고**(사용자 결정 —
+ * api/repair-cases/[id]/attachments/route.ts 의 「잠긴 건에도 올린다」), 그러자 같은
+ * [파일관리] 탭에서 **같은 사진을 올릴 수도 지울 수도 있는데 돌려서 저장만 안 되는**
+ * 모양이 남았다. 사용자가 그것을 보고 정했다 — 「**같은 탭인데 하나만 막히면
+ * 이상하다**」. 그래서 이 문도 닫지 않는다.
+ *
+ * 🔴 **그래도 이 통로는 다르다는 것을 잊지 마라.** 맨 위 🔴 가 그대로다 — **원본을
+ * 덮어쓰고, 되돌릴 수 없다.** 출하가 끝난 건의 증거 사진이 바뀔 수 있고 옛 바이트는
+ * 어디에도 남지 않는다. 사용자가 **그 점을 알고** 골랐다(2026-10-28). 까닭과 잃는
+ * 것을 한 번 더 적어 둔 자리는 mutations/attachment-rotation.ts 머리말이다.
+ *
+ * 🔴 **함께 열린 문은 없다.** 5) 의 휴지통 · 감염 · 주인 없음은 그대로이고, 견적서
+ * 파일은 지금도 견적서 행을 잠그고 본다(QUOTE_IN_TRASH). 2026-10-28 현재 아직
+ * `repair_cases.is_locked` 로 막는 자리는 **다섯**이다 — 워크플로 전이 · 수동 단계
+ * 세우기 · 결재 요청 · 사용 부품 · 연락서 폴더 만들기(목록은 위 올리기 라우트 머리말).
  *
  * ── 권한은 「지금 이 첨부를 지울 수 있는 사람」과 **같은 기준**이다 ───────
  * 새 권한을 만들지 않는다(사용자 결정 2026-09-29). 판정 파일의 표
@@ -81,8 +108,9 @@ export const dynamic = "force-dynamic";
 
 /**
  * 실패 코드는 네 곳에서 온다 — 이 파일(UNTRUSTED_ORIGIN · UNAUTHENTICATED ·
- * ACCOUNT_NOT_APPROVED · FORBIDDEN · NOT_FOUND · CASE_LOCKED · EMPTY_BODY ·
- * FILE_TOO_LARGE · PREVIEW_TOO_LARGE · STORAGE_FAILED), 내려받기 판정(DETACHED ·
+ * ACCOUNT_NOT_APPROVED · FORBIDDEN · NOT_FOUND · EMPTY_BODY ·
+ * FILE_TOO_LARGE · PREVIEW_TOO_LARGE · STORAGE_FAILED — 🔴 CASE_LOCKED 가 빠진 것은
+ * 2026-10-28 이다, 머리말의 「잠긴 접수 건도 돌려 저장한다」), 내려받기 판정(DETACHED ·
  * QUOTE_IN_TRASH · DELETED · SCAN_BLOCKED), 인자·앞머리 판정(rotation-payload.ts),
  * 그리고 기록(mutations/attachment-rotation.ts 의 CHANGED 등). 한 벌로 세지
  * 않는 까닭은 그 목록들이 저마다 자기 파일에서 정본이기 때문이다.
@@ -149,21 +177,13 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
     return fail(status, decision.reason, decision.message);
   }
 
-  // ── 6) 잠긴 접수 건 — 올리기 · 지우기와 같은 문 ────────────────────────
-  //
-  // mutation 도 같은 것을 보지만(트랜잭션 안에서 다시), 여기서 먼저 막는 까닭은
-  // 20MB 를 받아 놓고 되돌리지 않기 위해서다.
-  if (attachment.caseLocked) {
-    return fail(409, "CASE_LOCKED", "출하 완료로 잠긴 접수 건의 파일은 바꿀 수 없습니다.");
-  }
-
-  // ── 7) 돌릴 수 있는 형식인가 ───────────────────────────────────────────
+  // ── 6) 돌릴 수 있는 형식인가 ───────────────────────────────────────────
   const target = checkRotationTarget(attachment);
   if (!target.ok) {
     return fail(target.rejection.status, target.rejection.code, target.rejection.message);
   }
 
-  // ── 8) 인자 — 방향과 두 덩어리의 경계 ──────────────────────────────────
+  // ── 7) 인자 — 방향과 두 덩어리의 경계 ──────────────────────────────────
   const parsed = parseRotationRequest(request.nextUrl.searchParams);
   if (!parsed.ok) {
     return fail(parsed.rejection.status, parsed.rejection.code, parsed.rejection.message);
@@ -199,7 +219,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
   const body = request.body;
   if (!body) return fail(400, "EMPTY_BODY", "저장할 내용이 비어 있습니다.");
 
-  // ── 9) 두 덩어리를 임시 자리로 ─────────────────────────────────────────
+  // ── 8) 두 덩어리를 임시 자리로 ─────────────────────────────────────────
   //
   // 🔴 앞(썸네일)을 **다 읽은 뒤에** 뒤(원본)를 읽는다. 둘은 같은 reader 를
   //    나눠 쓰므로 차례가 바뀌면 바이트가 섞인다(split-stream.ts 머리말).
@@ -232,7 +252,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
     return fail(500, "STORAGE_FAILED", "파일을 저장하는 중 문제가 발생했습니다.");
   }
 
-  // ── 10) 앞머리 대조 — 확장자가 아니라 내용으로 ─────────────────────────
+  // ── 9) 앞머리 대조 — 확장자가 아니라 내용으로 ──────────────────────────
   const rejection = checkRotationPayload({
     extension: target.extension,
     declaredPreviewBytes: previewBytes,
@@ -245,7 +265,7 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
     return fail(rejection.status, rejection.code, rejection.message);
   }
 
-  // ── 11) 갈아 끼우기 + 기록 — 둘 다 아니면 둘 다 ────────────────────────
+  // ── 10) 갈아 끼우기 + 기록 — 둘 다 아니면 둘 다 ───────────────────────
   //
   // 옛 파일 둘을 치우고, 새 파일 둘을 놓고, DB 에 적는다. 어디서 실패하든
   // 치워 둔 옛 파일이 제자리로 돌아간다(attachment-file-swap.ts).
@@ -286,14 +306,15 @@ export async function PUT(request: NextRequest, context: { params: Promise<{ id:
         code: swapped.failure.code,
       });
     }
+    // 🔴 2026-10-28 에 "CASE_LOCKED" 갈래가 빠졌다 — 기록 쪽에서 그 코드가 더는 오지
+    //    않는다(mutations/attachment-rotation.ts). 409 자리는 남아 있다: 「그 사이
+    //    바뀌었다」와 「견적서가 휴지통에 있다」 둘이 여전히 그리로 온다.
     const status =
-      swapped.failure.code === "CHANGED"
+      swapped.failure.code === "CHANGED" || swapped.failure.code === "QUOTE_IN_TRASH"
         ? 409
-        : swapped.failure.code === "CASE_LOCKED" || swapped.failure.code === "QUOTE_IN_TRASH"
-          ? 409
-          : swapped.failure.code === "NOT_FOUND" || swapped.failure.code === "DELETED"
-            ? 404
-            : 500;
+        : swapped.failure.code === "NOT_FOUND" || swapped.failure.code === "DELETED"
+          ? 404
+          : 500;
     return fail(status, swapped.failure.code, swapped.failure.message);
   }
 

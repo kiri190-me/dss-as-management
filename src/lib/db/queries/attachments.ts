@@ -273,7 +273,14 @@ export async function listTrashedAttachmentsForProductModel(
 
 export type AttachmentUploadTarget = {
   id: string;
-  /** 출하 완료로 잠긴 건. 잠긴 건에는 파일을 붙이지 않는다. */
+  /**
+   * 출하 완료로 잠긴 건.
+   *
+   * 🔴 **첨부 올리기는 2026-10-28 부터 이 값을 보지 않는다**(사용자 결정 —
+   * api/repair-cases/[id]/attachments/route.ts 머리말의 「잠긴 건에도 올린다」).
+   * 그런데도 칸이 남아 있는 까닭은 **연락서 폴더 만들기 통로**가 이 조회를 그대로
+   * 가져다 쓰고 그 값으로 409 를 내기 때문이다(api/repair-cases/[id]/contact-folder).
+   */
   isLocked: boolean;
 };
 
@@ -302,8 +309,9 @@ export async function getAttachmentUploadTarget(
 /**
  * 업로드가 향할 제품 모델. **isLocked에 해당하는 것이 없다.**
  *
- * 접수 건 쪽(getAttachmentUploadTarget)은 출하 완료로 잠긴 건을 막아야 해서
- * is_locked를 함께 읽지만, product_models에는 그런 개념이 없다. 없는 개념을
+ * 접수 건 쪽(getAttachmentUploadTarget)은 is_locked를 함께 읽지만(2026-10-28 부터
+ * 그 값으로 막는 것은 올리기가 아니라 연락서 폴더 만들기다 — 그 타입의 주석),
+ * product_models에는 그런 개념이 없다. 없는 개념을
  * `isLocked: false`로 흉내 내지 않는다 — 그렇게 두면 부르는 쪽이 "언젠가 참이
  * 될 수 있는 값"으로 읽고, 모델에 잠금이 생기지 않는 한 영영 죽어 있는 분기가
  * 남는다. 필드가 없으면 라우트에도 그 확인이 없다는 것이 한눈에 보인다.

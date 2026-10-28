@@ -24,11 +24,39 @@ import { insertAuditLog } from "./audit-logs";
  * 휴지통에 있는 행만 받고(여기서 넣은 것만), DB 행을 DELETE 하며, 커밋한 **뒤에**
  * 디스크 파일을 지운다. 이 파일의 두 함수는 그 뒤로도 한 글자도 바뀌지 않았다.
  *
- * ── 잠긴 접수 건 ────────────────────────────────────────────────────────
- * 출하 완료로 잠긴 건(`repair_cases.is_locked`)에는 파일을 올릴 수 없다
- * (업로드 라우트가 CASE_LOCKED로 막는다). 지우고 되살리는 것도 같은 기준으로
- * 막는다 — 잠금의 뜻이 "이 건의 자료 구성은 확정됐다"인데 첨부만 뺄 수 있으면
- * 그 뜻이 반만 지켜진다.
+ * ── 잠긴 접수 건 — 2026-10-28 에 풀었다 ──────────────────────────────────
+ * 이 자리에 그날 전까지 이렇게 적혀 있었고, 코드도 그대로였다:
+ *
+ *   「출하 완료로 잠긴 건(`repair_cases.is_locked`)에는 파일을 올릴 수 없다
+ *    (업로드 라우트가 CASE_LOCKED로 막는다). 지우고 되살리는 것도 같은 기준으로
+ *    막는다 — 잠금의 뜻이 "이 건의 자료 구성은 확정됐다"인데 첨부만 뺄 수 있으면
+ *    그 뜻이 반만 지켜진다.」
+ *
+ * 사용자가 2026-10-28 에 뒤집었다 — **출하가 끝난 건에도 [파일관리] 탭에서 파일을
+ * 올리고 · 휴지통에 보내고 · 되살릴 수 있어야 한다.** 그래서 이 파일의 두 함수에서
+ * `caseIsLocked` 판정이 빠졌고(그래서 조회도 그 칸을 더는 읽지 않는다), 올리기 쪽
+ * 관문도 같은 날 함께 빠졌다 — 지운 글자 그대로는
+ * api/repair-cases/[id]/attachments/route.ts 머리말에 남겨 두었다.
+ *
+ * 셋을 한꺼번에 푼 까닭은 하나다: 올리기만 풀면 **잘못 올린 파일을 치울 길이 없다.**
+ *
+ * 🔴 위 걱정(「반만 지켜진다」)은 **이미 현실이었다.** 영구 삭제(attachment-purge.ts)와
+ * 내려받기(queries/attachment-download.ts)는 처음부터 이 잠금을 보지 않는다 — 잠긴 건의
+ * 파일을 디스크에서 영영 지우는 일이 그동안 그냥 통과하고 있었다. 셋을 푸는 쪽이
+ * 오히려 앞뒤가 맞는다.
+ *
+ * 🔴 **잃는 것**: 출하가 끝난 뒤에도 첨부 구성이 바뀐다. 「자료 구성은 확정됐다」는 뜻이
+ * 그만큼 약해지고, 남는 것은 감사 세 줄(FILE_UPLOAD · FILE_DELETE · RESTORE)뿐이다.
+ *
+ * 🔴 **푼 것은 접수 건 잠금 하나뿐이다.** 견적서 쪽 잠금(아래 '셋째 주인')도, 두 번
+ * 눌렀을 때의 ALREADY_IN_STATE 도 그대로다. 그리고 `is_locked` 를 보고 막는 **다른 자리는
+ * 살아 있다** — 2026-10-28 저녁 기준 **다섯**이다: 워크플로 전이 · 수동 단계 세우기 ·
+ * 결재 요청 · 사용 부품 · 연락서 폴더 만들기. 목록과 까닭은 올리기 라우트 머리말에 모아
+ * 두었다. 「출하 잠금은 이제 다 풀렸다」로 읽지 마라.
+ *
+ * 🔵 같은 날 **사진 회전 저장**(attachment-rotation.ts)도 뒤따라 풀렸다 — 「같은 탭인데
+ * 하나만 막히면 이상하다」(사용자). 그쪽은 **원본을 덮어쓰고 되돌릴 수 없어** 잃는 것이
+ * 이 파일의 두 함수보다 크다(여기는 실물을 남기고 되살릴 수 있다).
  *
  * ── 다운로드 감사도 여기 둔다 ────────────────────────────────────────────
  * recordAttachmentDownload는 상태를 바꾸지 않지만 audit_logs에 **쓴다.** 쓰기는
@@ -72,7 +100,8 @@ export type AttachmentTrashFailureCode =
   | "INVALID_ID"
   | "NOT_FOUND"
   | "ALREADY_IN_STATE"
-  | "CASE_LOCKED"
+  // 🔴 "CASE_LOCKED" 가 여기 없는 것은 빠뜨린 것이 아니다 — 2026-10-28 에 뺐다
+  //    (머리말의 「잠긴 접수 건」). 견적서 쪽 두 코드는 그대로다.
   /** 견적서 첨부 — 그 견적서가 휴지통에 있다(2026-09-15 Q2). */
   | "QUOTE_IN_TRASH"
   /** 견적서 첨부 되살리기 — 그 칸에 이미 살아 있는 파일이 있다(2026-09-15 Q2). */
@@ -167,7 +196,13 @@ export function ownerAuditFields(owner: {
   return { ownerType: "NONE" };
 }
 
-/** 첨부와 그것이 붙은 접수 건의 잠금 상태를 한 번에 잡는다. */
+/**
+ * 첨부 한 줄과 그 주인(접수 건 · 모델 · 견적서 · 종류)을 한 번에 잡는다.
+ *
+ * 🔴 접수 건의 `is_locked` 는 **읽지 않는다** — 2026-10-28 에 판정이 사라졌고, 쓰지도
+ * 않을 값을 읽어 두면 다음 사람이 「어딘가에서 보고 있다」고 읽는다(머리말 참조).
+ * 접수 건 조인은 감사에 실을 접수번호 때문에 그대로 둔다.
+ */
 async function loadForTrash(tx: Tx, attachmentId: string) {
   const [row] = await tx
     .select({
@@ -182,9 +217,8 @@ async function loadForTrash(tx: Tx, attachmentId: string) {
       originalFileName: attachments.originalFileName,
       category: attachments.category,
       isDeleted: attachments.isDeleted,
-      // 접수 건이 영구 삭제되어 연결이 끊긴 첨부는 잠금을 물을 대상이 없다.
-      // LEFT JOIN이라 그 경우 null이 온다.
-      caseIsLocked: repairCases.isLocked,
+      // 감사 기록에 남길 접수번호. 접수 건이 영구 삭제되어 연결이 끊긴 첨부에서는
+      // LEFT JOIN이라 null이 온다(ownerAuditFields 가 그대로 다룬다).
       caseIntakeNumber: repairCases.intakeNumber,
       // 모델 첨부의 감사 기록에 남길 사람이 읽는 이름. 접수 건 쪽 intakeNumber
       // 와 같은 자리다(ownerAuditFields 주석). 접수 건 첨부에서는 이 조인이
@@ -262,13 +296,7 @@ export async function softDeleteAttachment(params: {
     if (current.isDeleted) {
       return { ok: false, code: "ALREADY_IN_STATE", message: "이미 휴지통에 있는 파일입니다." };
     }
-    if (current.caseIsLocked === true) {
-      return {
-        ok: false,
-        code: "CASE_LOCKED",
-        message: "출하 완료로 잠긴 접수 건의 파일은 지울 수 없습니다.",
-      };
-    }
+    // 🔴 출하 완료로 잠긴 건이어도 여기서 막지 않는다(2026-10-28 — 머리말).
     const rejected = await guardQuoteOwner(tx, current, { adding: false });
     if (rejected) return rejected;
 
@@ -345,13 +373,7 @@ export async function restoreAttachment(params: {
     if (!current.isDeleted) {
       return { ok: false, code: "ALREADY_IN_STATE", message: "휴지통에 있는 파일이 아닙니다." };
     }
-    if (current.caseIsLocked === true) {
-      return {
-        ok: false,
-        code: "CASE_LOCKED",
-        message: "출하 완료로 잠긴 접수 건의 파일은 되살릴 수 없습니다.",
-      };
-    }
+    // 🔴 출하 완료로 잠긴 건이어도 여기서 막지 않는다(2026-10-28 — 머리말).
     const rejected = await guardQuoteOwner(tx, current, { adding: true });
     if (rejected) return rejected;
 

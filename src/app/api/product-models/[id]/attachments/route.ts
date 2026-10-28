@@ -49,9 +49,9 @@ import { AttachmentTooLargeError } from "@/lib/storage/storage-adapter";
  * ── 접수 건 통로와 다른 점 ───────────────────────────────────────────────
  *   권한      repairCases.files WRITE   →  **productModels.files WRITE**
  *   대상 조회  getAttachmentUploadTarget →  getProductModelAttachmentUploadTarget
- *   잠금 확인  is_locked 확인            →  **없다** (모델에 잠금 개념이 없다)
+ *   잠금 확인  없다 (2026-10-28 부터)    →  **없다** (모델에 잠금 개념이 없다)
  *   경로      buildAttachmentStoredPath →  buildProductModelAttachmentStoredPath
- *   실패 코드  CASE_NOT_FOUND/CASE_LOCKED → **MODEL_NOT_FOUND** (잠금 코드 없음)
+ *   실패 코드  CASE_NOT_FOUND            →  **MODEL_NOT_FOUND**
  *   원본 수정일 없다                      →  **?lastModified= 를 받아 적는다**
  *
  * ── 원본 수정일은 이쪽에만 있다 (2026-09-30) ─────────────────────────────
@@ -89,8 +89,9 @@ type FailureCode =
   | "UNAUTHENTICATED"
   | "ACCOUNT_NOT_APPROVED"
   | "FORBIDDEN"
-  // 접수 건 쪽의 CASE_NOT_FOUND에 해당한다. CASE_LOCKED에 해당하는 코드는
-  // 두지 않는다 — 제품 모델에는 잠금이 없다.
+  // 접수 건 쪽의 CASE_NOT_FOUND에 해당한다. 잠금 코드는 양쪽 다 없다 — 제품 모델에는
+  // 잠금 개념이 아예 없고, 접수 건 쪽은 2026-10-28 에 그 관문을 걷어냈다(그 라우트
+  // 머리말의 「잠긴 건에도 올린다」).
   | "MODEL_NOT_FOUND"
   | "INVALID_CATEGORY"
   | "CATEGORY_NOT_ALLOWED_FOR_OWNER"
