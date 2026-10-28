@@ -14,8 +14,12 @@ import {
   buildBackfillNextLines,
   classifyBackfillTraceShape,
   emptyBackfillTally,
+  formatKyosanUsedPartsBackfillSummary,
+  screenSafeMessage,
   tallyBackfillOutcomes,
   type BackfillUsedPartRow,
+  type KyosanBackfillTraceRecord,
+  type KyosanUsedPartsBackfillRecord,
 } from "./kyosan-used-parts-backfill-plan";
 import type { KyosanPreviewPart } from "../../src/lib/kyosan/report-preview";
 
@@ -291,6 +295,158 @@ describe("갈래별로 센다", () => {
     assert.equal(tally.updated, 2);
     assert.equal(tally.unchanged, 1);
     assert.equal(backfillTallyTotal(tally), outcomes.length);
+  });
+});
+
+// ══════════════════════════════════════════════ 🔴 요약에 파일 이름이 안 들어간다
+
+/**
+ * ============================================================================
+ * 🔴 **요약(화면)에 파일 이름이 한 글자도 안 들어간다** (2026-10-28)
+ * ============================================================================
+ * 연락서 파일 이름에는 **고객사명 · 모델 · L/N · S/N** 이 그대로 들어 있다. 이 도구의
+ * 첫 판이 「내용이 같은 파일」 절에 이름을 전부 늘어놓고 있었고, 계획을 한 번 돌려
+ * 보니 한 묶음이 80장을 넘었다.
+ *
+ * 🔵 **소스 글자로 재지 않는다.** 「`fileNames` 를 안 쓴다」를 grep 으로 재면, 나중에
+ * 다른 자리에서 이름이 새는 것을 못 잡는다. 그래서 **요약을 실제로 만들어** 그 안에
+ * 이름이 있는지 본다.
+ * 🔴 여기 쓰는 이름은 전부 **지어낸 것**이다 — 진짜 고객사·S/N 을 시험에 넣지 않는다.
+ * ============================================================================
+ */
+
+const FAKE_FILE_NAME = "DSS 2026-0000 값-고객사 값-모델 값-LN 값-SN 수리연락서.xlsm";
+const FAKE_LOCK_NAME = "~$DSS 2026-0000 값-고객사 값-모델.xlsm";
+const FAKE_FS_ERROR =
+  `ENOENT: no such file or directory, open 'C:\\값-공유폴더\\연락서\\${FAKE_FILE_NAME}'`;
+
+function traceRecordOf(
+  overrides: Partial<KyosanBackfillTraceRecord>
+): KyosanBackfillTraceRecord {
+  return {
+    index: 1,
+    traceId: "trace-1",
+    repairCaseId: "case-1",
+    intakeNumber: "D260101",
+    sourceSha256: "a".repeat(64),
+    fileName: FAKE_FILE_NAME,
+    outcome: "updated",
+    previousLineCount: 3,
+    nextLineCount: 2,
+    previousQuantityTotal: 5,
+    nextQuantityTotal: 5,
+    message: "3줄 → 2줄",
+    ...overrides,
+  };
+}
+
+function recordOf(
+  overrides: Partial<KyosanUsedPartsBackfillRecord> = {}
+): KyosanUsedPartsBackfillRecord {
+  const traces = overrides.traces ?? [traceRecordOf({})];
+  return {
+    ranAt: "2026-10-28T00:00:00.000Z",
+    databaseName: "값-DB",
+    mode: "dry-run",
+    backfillRunId: null,
+    actorUserId: null,
+    scannedFileCount: 1622,
+    ignoredFileCount: 83,
+    traceCount: 469,
+    unmatchedTraceIntakeNumbers: ["D260102"],
+    orphanFileCount: 1485,
+    tally: tallyBackfillOutcomes(traces.map((trace) => trace.outcome)),
+    changedPreviousLineTotal: 3,
+    changedNextLineTotal: 2,
+    changedPreviousQuantityTotal: 5,
+    changedNextQuantityTotal: 5,
+    duplicateHashGroups: [
+      { sha256: "b".repeat(64), fileNames: [FAKE_LOCK_NAME, FAKE_LOCK_NAME, FAKE_FILE_NAME] },
+      { sha256: "c".repeat(64), fileNames: [FAKE_FILE_NAME, FAKE_FILE_NAME] },
+    ],
+    ...overrides,
+    traces,
+  };
+}
+
+describe("🔴 요약을 실제로 만들어 본다 — 파일 이름이 한 글자도 없다", () => {
+  test("🔵 먼저 **요약이 실제로 내용을 담는다** — 아니면 아래가 전부 공짜로 통과한다", () => {
+    const summary = formatKyosanUsedPartsBackfillSummary(recordOf());
+    assert.ok(summary.includes("갈래별 합계"), summary);
+    assert.ok(summary.includes("2묶음"), "내용이 같은 파일 묶음 수를 찍어야 한다");
+    assert.ok(summary.includes("가장 큰 묶음 3장"), "묶음당 장수를 찍어야 한다");
+    assert.ok(summary.includes("83장"), "세지 않은 찌꺼기 수를 찍어야 한다");
+    assert.ok(summary.includes("1622장"), "연락서 장수를 찍어야 한다");
+    assert.ok(summary.includes("D260102"), "접수번호는 찍는다 — 우리 번호다");
+  });
+
+  test("🔴 묶음 절에 파일 이름이 없다 — 수만 찍는다", () => {
+    const summary = formatKyosanUsedPartsBackfillSummary(recordOf());
+    assert.equal(summary.includes(FAKE_FILE_NAME), false, summary);
+    assert.equal(summary.includes(FAKE_LOCK_NAME), false, summary);
+    assert.equal(summary.includes("값-고객사"), false, "고객사명이 새어 나갔다");
+    assert.equal(summary.includes("값-SN"), false, "S/N 이 새어 나갔다");
+    assert.equal(summary.includes("~$DSS"), false, "잠금 파일 이름이 새어 나갔다");
+  });
+
+  test("🔴 실패한 건의 fs 오류 문장에 섞인 **경로**도 안 나간다", () => {
+    const summary = formatKyosanUsedPartsBackfillSummary(
+      recordOf({
+        traces: [traceRecordOf({ outcome: "failed", message: FAKE_FS_ERROR })],
+      })
+    );
+    // 🔵 그 건이 보이기는 해야 한다 — 조용히 사라지면 더 나쁘다.
+    assert.ok(summary.includes("D260101"), "실패한 건의 접수번호는 찍어야 한다");
+    assert.ok(summary.includes(KYOSAN_BACKFILL_OUTCOME_LABEL.failed), summary);
+    // 🔴 그런데 이름·경로는 한 글자도 없다.
+    assert.equal(summary.includes(FAKE_FILE_NAME), false, summary);
+    assert.equal(summary.includes("값-공유폴더"), false, "공유폴더 경로가 새어 나갔다");
+    assert.equal(summary.includes("ENOENT"), false, "fs 오류 문장이 통째로 실렸다");
+    assert.ok(summary.includes("--out"), "대신 어디서 보는지 알려 줘야 한다");
+  });
+
+  test("🔴 어느 갈래가 와도 이름이 안 나간다 — 갈래를 전부 넣어 본다", () => {
+    const traces = KYOSAN_BACKFILL_OUTCOME_ORDER.map((outcome, index) =>
+      traceRecordOf({ index: index + 1, outcome, message: FAKE_FS_ERROR })
+    );
+    const summary = formatKyosanUsedPartsBackfillSummary(recordOf({ traces }));
+    assert.equal(summary.includes(FAKE_FILE_NAME), false, summary);
+    assert.equal(summary.includes("값-공유폴더"), false, summary);
+    assert.equal(summary.includes("값-모델"), false, summary);
+  });
+
+  test("우리가 지은 문장(개수·까닭)은 그대로 보인다 — 지나치게 가리지 않는다", () => {
+    const summary = formatKyosanUsedPartsBackfillSummary(
+      recordOf({
+        traces: [
+          traceRecordOf({
+            outcome: "row-mismatch",
+            message: "흔적은 이식이 3줄을 넣었다고 말하는데 지금 칸에는 4줄이 있고 그 줄이 같지 않습니다.",
+          }),
+        ],
+      })
+    );
+    assert.ok(summary.includes("3줄을 넣었다고 말하는데"), summary);
+  });
+});
+
+describe("화면에 올려도 되는 문장인가", () => {
+  test("🔵 개수·까닭만 담은 문장은 그대로 지난다", () => {
+    assert.equal(screenSafeMessage("3줄 → 2줄"), "3줄 → 2줄");
+    assert.equal(screenSafeMessage(null), null);
+  });
+
+  test("🔴 경로 구분자나 통합문서 확장자가 보이면 통째로 바꾼다", () => {
+    for (const leaky of [
+      FAKE_FS_ERROR,
+      `열지 못했습니다: ${FAKE_FILE_NAME}`,
+      "C:/값-폴더/값.xlsx 를 읽지 못했습니다",
+      "값-폴더\\값-파일",
+    ]) {
+      const safe = screenSafeMessage(leaky);
+      assert.notEqual(safe, leaky, `가려지지 않았다: ${leaky}`);
+      assert.ok(safe !== null && safe.includes("--out"), safe ?? "(null)");
+    }
   });
 });
 

@@ -470,6 +470,39 @@ describe("🔴 `--apply` 없이 돌리면 DB 가 한 줄도 안 바뀐다", () =
   });
 });
 
+// ══════════════════════════════════════════════ 🔵 1-2. 엑셀 잠금 파일은 세지 않는다
+
+describe("🔵 `~$…` 엑셀 잠금 파일은 연락서로 세지 않는다", () => {
+  test("세지 않고, 해시도 재지 않고, 뺀 장수를 따로 찍는다", async () => {
+    const target = await seedImportedCase("lock");
+    await makeRowsLookOld(target.repairCaseId);
+
+    /**
+     * 🔴 **진짜와 같은 모양으로 짓는다** — 엑셀이 열어 둔 문서 옆에 두는 잠금 파일은
+     * 165바이트이고 ZIP 이 아니다(`kyosan-report.ts` 의 실측). 이름이 `~$` 로 시작한다.
+     */
+    const lockPath = path.join(path.dirname(target.filePath), "~$0001.xlsm");
+    await writeFile(lockPath, Buffer.alloc(165, 0x20));
+
+    const record = await runKyosanUsedPartsBackfill({
+      workbookPaths: [lockPath, target.filePath],
+      apply: false,
+      databaseName: DATABASE_NAME,
+      limit: null,
+    });
+
+    assert.equal(record.ignoredFileCount, 1, "🔴 잠금 파일을 안 셌다고 말해야 한다");
+    assert.equal(record.scannedFileCount, 1, "🔴 연락서 장수에 잠금 파일이 들었다");
+    assert.equal(
+      record.duplicateHashGroups.length,
+      0,
+      "🔴 잠금 파일의 해시를 재고 있다 — 읽기 전에 빠져야 한다"
+    );
+    // 「안 셌다」가 「아무것도 못 했다」여서는 안 된다.
+    assert.equal(record.tally.updatable, 1, JSON.stringify(record.tally));
+  });
+});
+
 // ══════════════════════════════════════════════ 🔴 2. 바꾸고 나서도 되돌릴 수 있다
 
 describe("🔴 `--apply` — 사용 부품만 갈아 끼운다", () => {

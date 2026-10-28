@@ -179,7 +179,9 @@ async function main(): Promise<number> {
   console.log(`  대상 DB:    ${databaseName}`);
   console.log(`  모드:       ${options.apply ? "APPLY (실제로 바꿉니다)" : "DRY RUN (읽기 전용)"}`);
   console.log(`  훑은 자리:  --dir ${options.dirs.length}곳 · --file ${options.files.length}장`);
-  console.log(`  연락서:     ${workbookPaths.length}장${options.limit === null ? "" : ` (--limit ${options.limit}건까지)`}`);
+  // 🔵 여기 수는 **찌꺼기를 포함한** 수다 — `~$…` 잠금 파일을 몇 장 뺐는지는 아래 요약이
+  //    따로 찍는다(조용히 빠지면 수가 달라진 까닭을 아무도 모른다).
+  console.log(`  훑은 파일:  ${workbookPaths.length}장${options.limit === null ? "" : ` (--limit ${options.limit}건까지)`}`);
   console.log("  🔴 작업 기록 · 첨부 · 신고 증상 · 보고서는 한 줄도 건드리지 않습니다.");
   if (!options.apply) {
     console.log("  🔴 `--apply` 를 주지 않았으므로 DB 에 한 글자도 쓰지 않습니다.");
@@ -211,8 +213,13 @@ async function main(): Promise<number> {
     await fs.mkdir(path.dirname(outPath), { recursive: true });
     await fs.writeFile(outPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
     console.log(`기록: ${outPath}`);
-  } else if (options.apply) {
-    console.log("⚠ `--out` 을 주지 않아 기록 JSON 을 남기지 않았습니다.");
+  } else {
+    // 🔴 **이름은 화면에 안 찍는다**(요약 쪽 머리말) — 그래서 `--out` 이 없으면 어느
+    //    파일이었는지 볼 길이 아예 없다. 그 사실을 여기서 한 줄로 말해 준다.
+    console.log(
+      "⚠ `--out` 을 주지 않아 기록 JSON 을 남기지 않았습니다 — 연락서 **파일 이름**은 그 기록으로만 볼 수 있습니다" +
+        (options.apply ? "." : "(화면에는 접수번호만 찍습니다).")
+    );
   }
 
   if (!options.apply) {

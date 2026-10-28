@@ -350,3 +350,246 @@ export function backfillQuantityTotal(
 ): number {
   return lines.reduce((sum, line) => sum + line.quantity, 0);
 }
+
+// ─────────────────────────────────────────────── 기록의 모양
+
+export type KyosanBackfillTraceRecord = {
+  /** 1부터. 진행 표시와 같은 수다. */
+  index: number;
+  traceId: string;
+  repairCaseId: string | null;
+  intakeNumber: string | null;
+  sourceSha256: string;
+  /**
+   * 해시로 짝지은 연락서 **파일 이름**.
+   * 🔴 **기록 JSON 전용이다 — 요약(화면)에 절대 싣지 않는다**(아래 머리말).
+   */
+  fileName: string;
+  outcome: KyosanUsedPartsBackfillOutcome;
+  /** 바꾸기 전 줄 수(= 흔적이 말한 이식 줄 수). */
+  previousLineCount: number;
+  /** 바꾼(또는 바꿀) 줄 수. 안 바꾸는 갈래에서는 0. */
+  nextLineCount: number;
+  previousQuantityTotal: number;
+  nextQuantityTotal: number;
+  /**
+   * 사람이 읽을 한 문장. 값(부품 이름)은 담지 않는다 — 개수와 까닭뿐이다.
+   * ⚠️ `failed` 갈래에서는 **파일 경로가 섞일 수 있다**(fs 오류 문장) — 그래서 화면에
+   * 올릴 때 `screenSafeMessage` 를 지난다.
+   */
+  message: string | null;
+};
+
+export type KyosanBackfillDuplicateGroup = {
+  sha256: string;
+  /** 🔴 **기록 JSON 전용.** 요약은 묶음 수와 장수만 찍는다. */
+  fileNames: readonly string[];
+};
+
+export type KyosanUsedPartsBackfillRecord = {
+  ranAt: string;
+  databaseName: string;
+  mode: "dry-run" | "apply";
+  /** 🔴 한 회차를 묶는 번호. 계획에서는 `null` — 아무것도 안 바꿨다. */
+  backfillRunId: string | null;
+  actorUserId: string | null;
+  /** 연락서로 센 장수. 🔴 아래 `ignoredFileCount` 는 여기에 **안 들어간다**. */
+  scannedFileCount: number;
+  /**
+   * 🔴 **세지 않은 찌꺼기 장수**(`~$…` 엑셀 잠금 파일 · 숨김 파일 등). 조용히 빼면
+   * 「연락서가 몇 장인지」가 달라진 까닭을 아무도 모른다.
+   */
+  ignoredFileCount: number;
+  /** DB 에 있는 연락서 이식 흔적 수(짝을 못 지은 것까지 전부). */
+  traceCount: number;
+  /** 🔴 해시가 짝지지 않은 흔적 — 그 연락서 파일이 훑은 자리에 없다. **접수번호**다. */
+  unmatchedTraceIntakeNumbers: readonly string[];
+  /** 흔적이 없는 연락서 파일 수(= 아직 한 번도 이식되지 않은 장). */
+  orphanFileCount: number;
+  tally: KyosanBackfillTally;
+  /** 🔴 **바뀌는 건만** 더한 줄 수 — 「N줄 → M줄」의 그 수다. */
+  changedPreviousLineTotal: number;
+  changedNextLineTotal: number;
+  /** 🔴 수량 합계. 묶기가 수량을 더하므로 **전후가 같아야** 정상이다. */
+  changedPreviousQuantityTotal: number;
+  changedNextQuantityTotal: number;
+  duplicateHashGroups: readonly KyosanBackfillDuplicateGroup[];
+  traces: readonly KyosanBackfillTraceRecord[];
+};
+
+// ─────────────────────────────────────────────── 사람이 읽는 표
+
+/**
+ * ============================================================================
+ * 🔴 **요약(화면)에는 파일 이름을 한 글자도 싣지 않는다** (2026-10-28)
+ * ============================================================================
+ * 연락서 파일 이름에는 **고객사명 · 모델 · L/N · S/N 이 그대로** 들어 있다. 이
+ * 저장소는 「이식 흔적에 파일 이름을 싣지 않는다」를 규율로 지켜 왔는데
+ * (`kyosan-report-import.ts` 머리말), 이 도구의 첫 판이 그 규율을 깨고 있었다 —
+ * 「내용이 같은 파일」 절이 묶음마다 이름을 **전부** 늘어놓았고, 계획을 한 번
+ * 돌려 보니 한 묶음이 80장을 넘었다(운영이면 1,622장 분량이 터미널에 쏟아진다).
+ *
+ * 🔵 **이름이 필요한 사람은 기록 JSON(`--out`)에서 본다.** 그 파일은 저장소 밖에만
+ * 쓰게 CLI 가 막고 있어 git 에 들어갈 길이 없다.
+ *
+ * 🔴 **화면에 올라가는 글자는 넷뿐이다**: 접수번호 · 개수 · 갈래 이름 · 우리가 지은
+ * 문장. 그래서 이 파일의 `format…Summary` 는
+ *   · `duplicateHashGroups` 의 `fileNames` 를 **세기만** 하고,
+ *   · `traces[].fileName` 을 **아예 읽지 않으며**,
+ *   · `traces[].message` 는 `screenSafeMessage` 를 지나게 한다(fs 오류 문장에 전체
+ *     경로가 섞여 올 수 있다 — `failed` 갈래).
+ * 🔵 시험이 **요약을 실제로 만들어** 그 안에 이름이 없는지 본다(소스 글자를 읽는
+ *    검사로는 못 잡는다).
+ * ============================================================================
+ */
+
+/**
+ * 🔴 **파일 이름·경로가 섞일 수 있는 문장은 화면에 올리지 않는다.** 막히는 쪽으로
+ * 떨어뜨린다 — 경로 구분자나 통합문서 확장자가 하나라도 보이면 통째로 바꾼다.
+ *
+ * 🔵 우리가 지은 문장에는 그 글자가 들어갈 일이 없다(개수와 까닭뿐이다). 실제로
+ * 걸리는 것은 `failed` 갈래의 fs 오류 문장
+ * (`ENOENT: no such file or directory, open 'C:\…\DSS 2026-… <고객사> ….xlsm'`)이다.
+ */
+export function screenSafeMessage(message: string | null): string | null {
+  if (message === null) return null;
+  return /[\\/]|\.xlsm|\.xlsx/i.test(message)
+    ? "(자세한 사유는 기록 JSON 에 있습니다 — `--out` 을 주고 다시 돌리세요.)"
+    : message;
+}
+
+/**
+ * 한글은 화면에서 두 칸을 먹는다 — `padEnd` 는 글자 수로 세므로 섞인 칸이
+ * 어긋난다(일괄 이식 러너·되돌리기 도구의 같은 함수).
+ */
+function padLabel(label: string, columns: number): string {
+  let width = 0;
+  for (const character of label) width += /[ᄀ-ᇿ⺀-꓏가-힣豈-﫿︰-﹏]/u.test(character) ? 2 : 1;
+  return label + " ".repeat(Math.max(0, columns - width));
+}
+
+export function formatKyosanUsedPartsBackfillSummary(
+  record: KyosanUsedPartsBackfillRecord
+): string {
+  const lines: string[] = [];
+
+  lines.push("=== 갈래별 합계 ===");
+  for (const outcome of KYOSAN_BACKFILL_OUTCOME_ORDER) {
+    const count = record.tally[outcome];
+    // 계획에는 `updated` 가, `--apply` 에는 `updatable` 이 있을 수 없다 — 그 칸은 감춘다.
+    if (count === 0 && (outcome === "updated" || outcome === "updatable")) continue;
+    lines.push(
+      // 🔵 34칸 — 가장 긴 이름(「부품 요청 있음(설계대로 안 넣음)」)이 화면에서 32칸이다.
+      //    모자라면 그 줄만 수가 밀려 표가 어긋난다(실측으로 한 줄이 밀려 있었다).
+      `  ${padLabel(KYOSAN_BACKFILL_OUTCOME_LABEL[outcome], 34)}${String(count).padStart(4, " ")}건`
+    );
+  }
+  lines.push(`  ${padLabel("(합계)", 34)}${String(backfillTallyTotal(record.tally)).padStart(4, " ")}건`);
+  lines.push("");
+
+  // 🔴 「몇 줄이 바뀌는가」 — 사람이 승인하려면 이 수를 봐야 한다.
+  const label = record.mode === "apply" ? "바꾼" : "바꿀";
+  lines.push(`=== 🔴 ${label} 줄 수 ===`);
+  lines.push(
+    `  사용 부품   ${record.changedPreviousLineTotal}줄 → ${record.changedNextLineTotal}줄`
+  );
+  lines.push(
+    `  수량 합계   ${record.changedPreviousQuantityTotal} → ${record.changedNextQuantityTotal}` +
+      (record.changedPreviousQuantityTotal === record.changedNextQuantityTotal
+        ? "  (같다 — 정상)"
+        : "  ⚠ 달라졌다. 연락서 쪽에서 수량을 다시 읽은 결과다 — 표본을 눈으로 볼 것")
+  );
+  lines.push("");
+
+  lines.push("=== 훑은 자리 ===");
+  lines.push(`  연락서 파일            ${record.scannedFileCount}장`);
+  lines.push(
+    `  세지 않은 찌꺼기        ${record.ignoredFileCount}장 (\`~$…\` 엑셀 잠금 파일 · 숨김 파일 — 연락서가 아니다)`
+  );
+  lines.push(`  연락서 이식 흔적       ${record.traceCount}건 (DB 전체)`);
+  lines.push(`  🔴 해시가 짝지지 않은 흔적  ${record.unmatchedTraceIntakeNumbers.length}건`);
+  if (record.unmatchedTraceIntakeNumbers.length > 0) {
+    lines.push(
+      "     (그 연락서 파일이 훑은 자리에 없다 — 폴더를 덜 주었거나 원본이 사라졌다. 아래 접수번호)"
+    );
+    for (const intakeNumber of record.unmatchedTraceIntakeNumbers) lines.push(`     ${intakeNumber}`);
+  }
+  lines.push(`  흔적이 없는 연락서 파일  ${record.orphanFileCount}장 (아직 한 번도 이식되지 않은 장)`);
+  lines.push("");
+
+  /**
+   * 🔴 **그대로 다시 돌리면 들어가는 건은 접수번호를 전부 찍는다.**
+   * 사람이 알아야 하는 것이 「몇 건」이 아니라 **「어느 건」**이기 때문이다 — 수만
+   * 찍으면 그 몇 건을 다시 찾는 길이 기록 JSON 을 손으로 뒤지는 것뿐이다
+   * (일괄 이식 러너의 `inventory-unknown` 표와 같은 자리).
+   * 🔵 접수번호는 우리 번호라 화면에 찍어도 된다 — 파일 이름과 다르다.
+   */
+  const retryable = record.traces.filter((trace) =>
+    KYOSAN_BACKFILL_RETRYABLE_OUTCOMES.includes(trace.outcome)
+  );
+  lines.push(`=== 🔴 그대로 다시 돌리면 되는 건: ${retryable.length}건 ===`);
+  if (retryable.length === 0) {
+    lines.push("  (없음)");
+  } else {
+    for (const trace of retryable) {
+      lines.push(
+        `  ${trace.intakeNumber ?? "(접수번호 없음)"}  ${KYOSAN_BACKFILL_OUTCOME_LABEL[trace.outcome]}`
+      );
+    }
+    lines.push("  🔴 **실패가 아니다** — 재고 관리가 멈췄거나 그 사이에 자료가 바뀐 것이고,");
+    lines.push("     아무것도 쓰지 않았다. 나중에 같은 명령을 그대로 다시 돌리면 된다.");
+  }
+  lines.push("");
+
+  // 🔴 사람이 **봐야 하는** 건 — 조용히 지나가면 안 되는 갈래들.
+  const needsHuman = record.traces.filter(
+    (trace) =>
+      trace.outcome === "legacy-trace" ||
+      trace.outcome === "trace-inconsistent" ||
+      trace.outcome === "multi-trace" ||
+      trace.outcome === "row-mismatch" ||
+      trace.outcome === "gate-blocked" ||
+      trace.outcome === "case-missing" ||
+      trace.outcome === "unreadable" ||
+      trace.outcome === "failed"
+  );
+  lines.push(`=== 🔴 사람이 따로 정해야 하는 건: ${needsHuman.length}건 ===`);
+  if (needsHuman.length === 0) {
+    lines.push("  (없음)");
+  } else {
+    for (const trace of needsHuman) {
+      // 🔴 `screenSafeMessage` 를 반드시 지난다 — fs 오류 문장에 경로가 섞여 온다.
+      const message = screenSafeMessage(trace.message);
+      lines.push(
+        `  ${trace.intakeNumber ?? "(접수번호 없음)"}  ${KYOSAN_BACKFILL_OUTCOME_LABEL[trace.outcome]}` +
+          (message === null ? "" : `\n     ${message}`)
+      );
+    }
+  }
+  lines.push("");
+
+  /**
+   * 🔴 **묶음 수와 장수만.** 이름은 기록 JSON 에만 있다(이 절의 머리말).
+   */
+  const biggestGroup = record.duplicateHashGroups.reduce(
+    (most, group) => Math.max(most, group.fileNames.length),
+    0
+  );
+  lines.push(
+    `=== 내용이 같은 파일(sha256) — ${record.duplicateHashGroups.length}묶음` +
+      (biggestGroup === 0 ? " ===" : ` (가장 큰 묶음 ${biggestGroup}장) ===`)
+  );
+  if (record.duplicateHashGroups.length === 0) {
+    lines.push("  (없음 — 훑은 파일의 내용이 전부 다르다)");
+  } else {
+    lines.push("  (바이트가 같으니 어느 장을 읽어도 결과가 같다 — 먼저 나온 한 장만 읽는다.)");
+  }
+  lines.push(
+    "  🔴 파일 이름은 화면에 찍지 않는다 — 고객사명·모델·S/N 이 들어 있다. 기록 JSON(`--out`)에서 본다."
+  );
+  lines.push("");
+  lines.push("  🔴 이 도구는 작업 기록 · 첨부 · 신고 증상 · 보고서를 한 줄도 건드리지 않는다.");
+  lines.push("  🔴 이식 흔적을 새로 만들지 않는다 — 기존 흔적의 사용 부품 id 만 갈아 끼운다.");
+
+  return lines.join("\n");
+}
