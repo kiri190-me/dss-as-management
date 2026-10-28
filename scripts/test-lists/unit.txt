@@ -602,6 +602,11 @@ src/app/api/integration/route-source.test.ts
 src/lib/kyosan/report-photo-filter.test.ts
 src/lib/kyosan/report-match.test.ts
 src/lib/kyosan/report-preview.test.ts
+# 🔴 시트 칸 → 미리보기 → 사용 부품 칸을 **한 줄로 이어** 재는 시험(2026-10-29).
+# 위 둘(parts-detail-sheet.test.ts · report-preview.test.ts)이 저마다 제 모듈만
+# 보는 동안 운영에서 줄 하나와 수량 하나가 사라졌다 — 틀린 값은 셋이 이어진
+# 끝에서만 보였다. DB 도 렌더도 쓰지 않는 순수 함수라 unit 에 둔다.
+src/lib/kyosan/parts-detail-to-used-parts.test.ts
 src/lib/kyosan/report-causes.test.ts
 src/lib/kyosan/report-terms.test.ts
 src/lib/kyosan/report-free-text-terms.test.ts

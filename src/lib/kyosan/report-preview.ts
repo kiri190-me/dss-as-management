@@ -240,6 +240,24 @@ export function buildKyosanPreviewLines(report: KyosanReport): KyosanPreviewLine
  * 이 `予防③`·`予防⑩` 두 줄). 화면이 `` `${kind}-${text}` `` 를 React key 로 쓰므로
  * (`KyosanReportImportParts.tsx`) 같은 갈래에서 두 줄을 내면 열쇠가 부딪친다.
  *
+ * 🔴 **그런데 수량은 더한다** (2026-10-29). 2026-09-22 부터 이 자리는 묶이는 줄의
+ * **처음 줄 수량만** 쓰고 나머지를 버렸다. **그 규칙의 근거는 한 번도 적힌 적이
+ * 없다** — 위 문단이 대는 까닭은 「줄을 하나로 묶는다」(React 열쇠)뿐이고,
+ * 수량까지 버려야 할 까닭은 아니었다. `予防③` 과 `予防⑩` 은 **두 번의 서로 다른
+ * 교체**라 적힌 수를 둘 다 세어야 한다. 바로 아래 「추정수리내용 쪽은 같은 이름의
+ * 수량을 더한다」 절이 같은 말을 이미 하고 있었고, 두 경로가 서로 다른 규칙으로
+ * 돌고 있었다.
+ *
+ * 🔵 이름이 **품번**이 된 뒤로 이 자리는 더 분명해졌다 — 같은 갈래에 같은 품번이
+ * 두 줄이면 **정말로 같은 부품 두 줄**이다. (설명 글자로 묶던 때에는 이름이 같아도
+ * 다른 부품일 수 있었고, 2026-10-29 운영 실측에서 그 꼴이 실제로 터졌다:
+ * `部品名` 이 같고 품번이 다른 별개 부품 둘이 한 줄로 뭉개져 수량이 2 대신 1 이
+ * 됐다. 그쪽은 `parts-detail-sheet.ts` 의 차례를 고쳐 애초에 안 묶이게 했다.)
+ *
+ * ⚠️ 그래서 이 파일 아래에 적힌 **실측 수량 합계(2,874)는 옛 규칙에서 센 수**다.
+ * 버려지던 수량이 살아나므로 지금 코드로 다시 재면 그보다 크다 — 다시 재지
+ * 못했다(연락서 원본이 저장소에 없다). 🔴 그 수를 「지금 이렇다」로 읽지 마라.
+ *
  * 열쇠 글자는 **이름 글자 그대로**다. `normalizeKey` 로 눌러 견주어도 실측에서
  * 한 건도 더 잡히지 않아 기존 규칙을 바꾸지 않았다.
  *
@@ -416,15 +434,26 @@ function legacyPreviewParts(
   report: KyosanReport,
   sources: KyosanLegacyPartSources
 ): KyosanPreviewPart[] {
-  // 같은 갈래·같은 이름이 詳細 시트에 여러 줄이면 **처음 줄**의 수량을 쓴다
-  // (그것이 같은 갈래 안의 겹침이다 — 위 머리말).
-  const quantityByKindAndText = new Map<string, number>();
+  // 🔴 같은 갈래·같은 이름이 詳細 시트에 여러 줄이면 **한 줄로 묶되 수량을 더한다**
+  //    (2026-10-29 — 위 머리말 「같은 갈래 안의 겹침」 절). 줄을 하나로 묶는 것은
+  //    그대로이고, 바뀐 것은 **뒤 줄의 수량을 버리지 않는다**는 것 하나다.
+  // 🔵 `undefined` 는 「그 줄들에 수량이 한 번도 안 적혔다」는 뜻이고, 그때는 열쇠
+  //    자체를 비워 둔다 — 넣는 쪽이 1 로 센다(`kyosan-report-import.ts` 의 `?? 1`).
+  //    `has` 로 보아야 한다: `get` 은 「없다」와 「비었다」를 못 가른다.
+  const quantityByKindAndText = new Map<string, number | undefined>();
   for (const part of report.detailParts) {
     const text = part.name.trim();
-    if (text === "" || part.quantity === null) continue;
+    if (text === "") continue;
     const key = partKey(part.kind, text);
-    if (quantityByKindAndText.has(key)) continue;
-    quantityByKindAndText.set(key, part.quantity);
+    if (!quantityByKindAndText.has(key)) {
+      quantityByKindAndText.set(key, part.quantity ?? undefined);
+      continue;
+    }
+    // 🔴 안 적힌 줄은 1 로 세어 더한다 — `estimatedPreviewParts` 와 같은 규칙이다.
+    quantityByKindAndText.set(
+      key,
+      (quantityByKindAndText.get(key) ?? 1) + (part.quantity ?? 1)
+    );
   }
 
   const parts: KyosanPreviewPart[] = [];

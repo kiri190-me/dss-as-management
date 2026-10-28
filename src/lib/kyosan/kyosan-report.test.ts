@@ -233,7 +233,11 @@ describe("판독 결과 — 항목·원인·해시", () => {
   });
 });
 
-/** 판본 C 의 교체부품상세 — 실측 머리글(16행) 배치 그대로, 값만 가짜. */
+/**
+ * 판본 C 의 교체부품상세 — 실측 머리글(16행) 배치 그대로, 값만 가짜.
+ * 🔴 **B열은 설명이고 D열이 품번이다**(2026-10-29 운영 실측). 그래서 이름은
+ * D열에서 온다 — 칸 이름을 그 뜻대로 적어 둔다(`parts-detail-sheet.ts` 의 머리말).
+ */
 const PARTS_DETAIL_CELLS: Record<string, string | number> = {
   H1: "故障・修理",
   A15: "交換部品（故障・予防措置）",
@@ -242,8 +246,8 @@ const PARTS_DETAIL_CELLS: Record<string, string | number> = {
   G16: "数量",
   H16: "状況",
   A17: "①",
-  B17: "값-상세부품1",
-  D17: "값-상세규격1",
+  B17: "값-상세부품설명1",
+  D17: "값-상세품번1",
   G17: 4,
   H17: "故障・修理",
 };
@@ -260,7 +264,7 @@ describe("🔴 交換部品詳細 시트도 함께 읽는다", () => {
     assert.ok(result.ok);
     assert.deepEqual(
       result.report.detailParts.map((part) => [part.name, part.quantity, part.sheetName]),
-      [["값-상세부품1", 4, "交換部品詳細"]]
+      [["값-상세품번1", 4, "交換部品詳細"]]
     );
     assert.deepEqual(result.report.problems, []);
   });
@@ -270,15 +274,17 @@ describe("🔴 交換部品詳細 시트도 함께 읽는다", () => {
       workbookOf([
         { name: "Card", cells: CARD_CELLS },
         { name: "交換部品詳細(RF)", cells: PARTS_DETAIL_CELLS },
-        { name: "交換部品詳細(DC)", cells: { ...PARTS_DETAIL_CELLS, B17: "값-상세부품2", G17: 1 } },
+        // 🔴 가르는 값은 **D열(품번)**에 둔다 — 이름이 거기서 오기 때문이다.
+        //    B열(설명)만 갈라 두면 두 시트가 같은 이름으로 읽혀 이 시험이 무력해진다.
+        { name: "交換部品詳細(DC)", cells: { ...PARTS_DETAIL_CELLS, D17: "값-상세품번2", G17: 1 } },
       ])
     );
     assert.ok(result.ok);
     assert.deepEqual(
       result.report.detailParts.map((part) => [part.name, part.sheetName]),
       [
-        ["값-상세부품1", "交換部品詳細(RF)"],
-        ["값-상세부품2", "交換部品詳細(DC)"],
+        ["값-상세품번1", "交換部品詳細(RF)"],
+        ["값-상세품번2", "交換部品詳細(DC)"],
       ]
     );
   });
@@ -398,7 +404,7 @@ describe("🔴 推定修理内容 블록도 함께 읽는다", () => {
       "・값-오버홀부품の交換…7枚",
     ]);
     // 🔴 `交換部品詳細` 판독은 **그대로 살아 있다** — 갈아타기는 미리보기가 한다.
-    assert.deepEqual(result.report.detailParts.map((part) => part.name), ["값-상세부품1"]);
+    assert.deepEqual(result.report.detailParts.map((part) => part.name), ["값-상세품번1"]);
     assert.deepEqual(result.report.problems, []);
   });
 

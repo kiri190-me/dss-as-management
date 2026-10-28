@@ -445,12 +445,24 @@ describe("교체 부품 — 🔴 출처를 장마다 하나만 고른다(`交換
   });
 
   /**
-   * ⚠️ 이 규칙은 **바뀌지 않았다.** 같은 갈래 안의 겹침은 지금처럼 한 번만
-   * 넣는다(실측 예: `終段AMPゲート基板` 이 `予防③`·`予防⑩` 두 줄). 화면이
-   * `` `${kind}-${text}` `` 를 React key 로 쓰므로 같은 갈래에서 두 줄을 내면
-   * 열쇠가 부딪친다.
+   * ⚠️ **줄을 하나로 묶는 규칙은 바뀌지 않았다.** 같은 갈래 안의 겹침은 지금처럼
+   * 한 번만 넣는다(실측 예: `終段AMPゲート基板` 이 `予防③`·`予防⑩` 두 줄).
+   * 화면이 `` `${kind}-${text}` `` 를 React key 로 쓰므로 같은 갈래에서 두 줄을
+   * 내면 열쇠가 부딪친다.
+   *
+   * 🔴 **바뀐 것은 수량이다** (2026-10-29). 예전 제목과 기대값을 인용해 남긴다:
+   *
+   *     「🔴 같은 갈래에서 같은 이름이 詳細 시트에 두 줄이면 한 번만,
+   *       **수량은 첫 줄에서**」 · `[{ kind: "fault", text: "값-부품E", quantity: 3 }]`
+   *
+   * 🔴 수량 9 가 **아무 까닭 없이 버려지고 있었다.** 위 문단이 대는 근거는
+   * 「줄을 하나로 묶는다」뿐이고, 수량까지 버려야 할 까닭은 어디에도 적혀 있지
+   * 않았다. `予防③` 과 `予防⑩` 은 **두 번의 서로 다른 교체**다. 같은 파일의
+   * `推定修理内容` 경로는 2026-09-22 부터 「먼저 나온 줄만 남기면 뒤 줄의 수량이
+   * 사라진다」며 **더하고** 있었고, 두 경로가 서로 다른 규칙으로 돌고 있었다.
+   * (`report-preview.ts` 의 「같은 갈래 안의 겹침」 절.)
    */
-  test("🔴 같은 갈래에서 같은 이름이 詳細 시트에 두 줄이면 한 번만, 수량은 첫 줄에서", () => {
+  test("🔴 같은 갈래에서 같은 이름이 詳細 시트에 두 줄이면 한 번만, 수량은 **더한다**", () => {
     const report = reportOf({
       card: cardOf({ intakeNumber: "D210105", model: "FAKE-100", serialNumber: "SN-0001" }),
       detailParts: [
@@ -461,7 +473,27 @@ describe("교체 부품 — 🔴 출처를 장마다 하나만 고른다(`交換
     const preview = previewOf(report, caseOf(), stateOf());
     assert.ok(preview.plan);
     if (!preview.plan) return;
-    assert.deepEqual(preview.plan.parts, [{ kind: "fault", text: "값-부품E", quantity: 3 }]);
+    assert.deepEqual(preview.plan.parts, [{ kind: "fault", text: "값-부품E", quantity: 12 }]);
+  });
+
+  /**
+   * 🔵 **수량이 안 적힌 줄이 섞인 자리.** 더하기를 넣으면서 여기가
+   * `undefined + 9` 가 되지 않는지, 그리고 **한 줄뿐인 빈 수량**은 여전히 열쇠
+   * 없이 남는지(바로 아래 시험)를 함께 못 박는다. 안 적힌 줄은 1 로 센다 —
+   * 넣는 쪽의 `?? 1` 과 같은 규칙이다(`kyosan-report-import.ts`).
+   */
+  test("🔴 수량이 안 적힌 줄이 섞이면 1 로 세어 더한다 — `undefined` 로 새지 않는다", () => {
+    const report = reportOf({
+      card: cardOf({ intakeNumber: "D210105", model: "FAKE-100", serialNumber: "SN-0001" }),
+      detailParts: [
+        detailPartOf({ name: "값-부품G", quantity: null, kind: "fault" }),
+        detailPartOf({ name: "값-부품G", quantity: 9, kind: "fault" }),
+      ],
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [{ kind: "fault", text: "값-부품G", quantity: 10 }]);
   });
 
   test("🔴 수량이 없는 줄은 열쇠가 아예 없다 — 넣는 쪽이 1 로 본다", () => {
