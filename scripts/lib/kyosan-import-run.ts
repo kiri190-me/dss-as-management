@@ -272,6 +272,19 @@ function describeMatchOutcome(outcome: KyosanMatchOutcome): string {
  * 돌려주지 않는다(흔적을 남기는 것은 그 함수의 마지막 INSERT 다). 한 회차를
  * 통째로 되돌리는 데에는 `--batch` 만 있으면 되지만, **한 장만** 되돌려야 할 때
  * (`--trace`) 사람이 이 기록에서 그 id 를 꺼낸다. select 한 줄이다.
+ *
+ * ⚠️ **`orderBy` 가 없는 `limit(1)` 이다 — 지금은 맞다**(2026-10-28 확인).
+ * 한 수리 건에 같은 `sourceSha256` 의 흔적은 **많아야 하나**이기 때문이다: 이식기가
+ * 저장 직전에 잠금 안에서 그 조건으로 다시 보고 `ALREADY_IMPORTED` 로 막는다. 그래서
+ * 고를 것이 애초에 한 줄뿐이고 차례를 정할 까닭이 없다.
+ * 🔴 **그 전제가 깨지는 설계를 고르지 않았다.** 2026-10-28 에 「이미 넣은 연락서도 다시
+ * 넣기」를 검토하다가, 다시 넣으면 흔적이 **둘로 쌓이고** 그 순간 이 줄이 어느 흔적을
+ * 집을지 알 수 없게 된다는 것이 드러났다(게다가 첫 흔적은 되돌릴 수 없게 된다). 그래서
+ * 사용자가 **연락서를 다시 넣지 않는** 길을 골랐다 — 이미 들어간 건의 사용 부품만 다시
+ * 적는 `scripts/backfill-kyosan-used-parts.ts` 다. 그 도구는 흔적을 새로 만들지 않고
+ * **기존 흔적의 사용 부품 id 칸만 갈아 끼우므로**, 한 건에 흔적이 하나라는 이 전제가
+ * 그대로 산다.
+ * 🔴 **흔적이 쌓이는 길을 나중에 누가 열면 이 줄부터 고쳐야 한다**(최신 것을 집도록).
  */
 async function findTraceId(repairCaseId: string, sourceSha256: string): Promise<string | null> {
   const [trace] = await db

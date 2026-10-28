@@ -148,6 +148,18 @@ src/lib/server/services/kyosan-import-revert.integration.test.ts
 # 제품 모델 "KYRUN-TEST-" (A/S·PO 어느 스위트와도 겹치지 않는다). 저장소는 OS 임시 폴더.
 src/lib/server/services/kyosan-report-import-run.integration.test.ts
 
+# 연락서 **사용 부품 백필**(scripts/backfill-kyosan-used-parts.ts ·
+# scripts/lib/kyosan-used-parts-backfill.ts, 2026-10-28). 진짜 이식을 한 번 돌려 흔적을
+# 만든 뒤 그 건의 사용 부품만 다시 적어 본다 — `--apply` 없이는 한 줄도 안 바뀌는가,
+# 🔴 작업 기록·첨부·신고 증상이 **안 느는가**(연락서를 다시 「넣으면」 둘 다 한 벌 더
+# 생긴다 — 이 도구가 존재하는 까닭), 흔적이 새로 안 생기고 기존 흔적의 usedPartIds 가
+# 새 줄을 가리키는가, 그 뒤에도 `--batch` 되돌리기가 그대로 말이 되는가, 멱등 장치
+# (ALREADY_IMPORTED)가 글자 하나 같게 사는가, 사람이 손댄 칸·옛 흔적·한 건에 여러 장·
+# 부품 요청이 있는 건·재고 관리에 못 물어본 건을 한 줄도 안 바꾸는가.
+# 🔴 격리 이름: 접수 월 "9409" · 고객사 "AS-TEST-KYBF-" · 제품 모델 "KYBF-TEST-"
+# (A/S·PO 어느 스위트와도 겹치지 않는다). 저장소는 OS 임시 폴더, 재고 관리는 덮개.
+src/lib/server/services/kyosan-used-parts-backfill.integration.test.ts
+
 # 수리 건 상세 「내자 정리 발행일」 저장(2026-09-29) — 두 칸만 고치고, 줄이 없으면
 # 그 자리에서 만든다. 🔴 이 조각의 안전선이 여기 있다: **줄이 있을 때 저장해도 다른
 # 칸(금액·입금·납품일·세금계산서·견적서 연결·납기요청일)이 그대로인가**를 칼럼마다

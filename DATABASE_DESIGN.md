@@ -485,3 +485,34 @@ enum 값도, `domain/shipment-approval-route.ts` 의 `SHIPMENT_APPROVAL_ROUTE_SC
 
 🔵 재고 **표** 쪽에는 고아 행이 없다 — 2026-10-27 운영 실측에서 여섯 표가 전부 0행이었다
 (18-1).
+
+---
+
+## 19. 🔴 `status_change_histories` 의 append-only 에는 **도구 층 예외 둘**이 있다 (2026-10-28)
+
+스키마가 그 표를 이렇게 못 박고 있다(`vendor/dss-core/src/schema/status-change-histories.ts`):
+
+> *Immutable/append-only: no soft-delete columns, **no update path anywhere in the mutation layer**.*
+
+🔵 **그 문장은 지금도 참이다** — `src/lib/db/mutations/` 어디에도 `update(statusChangeHistories)`
+가 없다. 🔴 **다만 「mutation 층」이라는 한정이 중요하다.** `scripts/` 의 도구 둘은
+그 표를 고친다:
+
+| 도구 | 하는 일 |
+|---|---|
+| `scripts/revert-kyosan-import.ts` | 흔적 **행을 지운다**(이식을 통째로 되돌린다) |
+| `scripts/backfill-kyosan-used-parts.ts` | 흔적의 **`metadata.usedPartIds`·`usedPartCount` 만 고친다** |
+
+🔴 **왜 백필이 그 칸을 고쳐야 하나.** 그 칸의 뜻은 「**이 이식이 만든 사용 부품 줄이
+무엇인가**」다. 백필이 줄을 갈아 끼우면 옛 id 는 **없는 줄을 가리키게 되고**, 되돌리기가
+그 흔적을 「그 사이에 줄이 사라졌다」로 보아 **통째로 건너뛴다** — 그 순간 그 이식은
+영영 못 되돌리는 것이 된다. 칸을 따라 고치는 쪽이 **사실에 맞고 되돌릴 수 있는 쪽**이다.
+
+🔵 **「무슨 일이 있었나」를 적는 칸은 한 글자도 안 건드린다** — `action_type` · `created_at` ·
+`actor_user_id` · `reason` · `importBatchId` · `workRecordIds` · `attachmentIds` ·
+`photoCount` · `reportedSymptomFilled` 전부 그대로다. 그리고 **고치기 전 값을
+`metadata.usedPartsBackfills` 에 이력으로 쌓는다** — 무엇이 언제 어느 회차로 바뀌었는지
+그 칸만 읽으면 된다.
+
+🔴 **새 도구가 이 표를 고치려 들면 먼저 여기를 읽어라.** 늘려도 되는 예외가 아니다 —
+위 둘은 **사람이 승인해 한 번 돌리는 도구**이고, 앱이 도는 중에는 아무도 이 표를 안 고친다.

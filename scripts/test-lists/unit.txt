@@ -665,6 +665,14 @@ scripts/lib/kyosan-import-revert-plan.test.ts
 # 않았는지 **파일의 글자를 읽어** 보는 시험이라 렌더도 필요 없다. 격리 이름 없음(DB 안 씀).
 scripts/lib/kyosan-import-run-plan.test.ts
 
+# 연락서 **사용 부품 백필**(scripts/backfill-kyosan-used-parts.ts)의 가려내는 규칙(2026-10-28).
+# 흔적이 백필 대상인가(옛 흔적 · 한 건에 여러 장 · 이식이 한 줄도 안 넣은 건) ·
+# 🔴 사람이 그 뒤에 고친 칸을 손대지 않는가 · 넣을 줄의 글자가 이식기와 같은가
+# (묶고 나서 번역, 수량 합계는 그대로) · 이미 같으면 한 글자도 안 쓰는가.
+# 🔴 unit 에 적은 이유: 순수 함수라 DB 도 환경변수도 필요 없고, 이식기와 갈라지지
+# 않았는지 **그 파일의 글자를 읽어** 보는 시험이라 렌더도 필요 없다. 격리 이름 없음(DB 안 씀).
+scripts/lib/kyosan-used-parts-backfill-plan.test.ts
+
 # 수리 건 상세 「기본 정보」의 내자 정리 발행일 구역(2026-09-29). 0개·1개·N개를 가르는
 # 판정과, 여럿을 하나로 접는 일을 **주간보고와 같은 함수**(pickWeeklyReportOrderDates)가
 # 하는가를 값으로 대조한다. 계산된 값이 저장 payload 로 새지 않는지도 여기서 본다 —
