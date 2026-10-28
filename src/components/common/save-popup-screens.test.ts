@@ -260,13 +260,29 @@ test("같은 훅을 쓰는 주간보고 비고 칸은 표에 머문다", () => {
   assert.match(cell, /savedPopup: \{ message: "비고를 저장했습니다\.", redirectTo: null \},/);
 });
 
-test("서비스 보고서는 저장하면 「보고서」 탭으로 넘어간다", () => {
+test("서비스 보고서는 저장해도 휴지통에 보내도 「보고서」 탭으로 넘어간다", () => {
   const form = readFileSync("src/components/repair-cases/report/service-report/ServiceReportForm.tsx", "utf8");
+  // 🔴 **차례까지 못 박는다** — 저장이 먼저, 지우기가 뒤다. 둘 다 같은 곳으로
+  //    넘기지만 하는 말이 달라야 한다. 한쪽 문구를 다른 쪽에 베껴 넣으면 여기서 걸린다.
   assert.deepEqual(popupCalls("src/components/repair-cases/report/service-report/ServiceReportForm.tsx"), [
     ['saved ? "보고서를 저장했습니다." : "새 보고서를 저장했습니다."', "reportHref"],
+    // 🔵 2026-10-28 에 생겼다. 전에는 말없이 목록으로 갔다 — 창이 닫히고 화면만 바뀌어서
+    //    지운 것이 맞는지 확인할 자리가 없었다(사용자 요청).
+    ['"휴지통으로 이동되었습니다."', "reportHref"],
   ]);
   // 떠날 화면에서 주소를 바꾸면 이동과 다툰다.
   assert.doesNotMatch(form, /router\.replace\(`\$\{pathname\}\?id=/);
+  // 🔴 지우기가 성공한 뒤에도 그렇다 — 팝업이 넘기는데 여기서 또 밀면 둘이 다툰다.
+  //    `confirmDelete` 안에 replace·refresh 가 **다시 들어오면** 이 줄이 잡는다.
+  //    (NOT_FOUND 갈래의 replace 는 그대로 산다 — 거기는 팝업을 안 띄운다.)
+  const afterDelete = form.slice(form.indexOf("async function confirmDelete"));
+  const deleteBody = afterDelete.slice(0, afterDelete.indexOf("\n  }"));
+  assert.ok(deleteBody.length > 0, "confirmDelete 를 못 찾았다 — 이름이 바뀌었나");
+  assert.equal(
+    (deleteBody.match(/router\.refresh\(\)/g) ?? []).length,
+    1,
+    "confirmDelete 의 router.refresh 는 NOT_FOUND 갈래 하나뿐이어야 한다"
+  );
 });
 
 test("A/S 건 안에 딸린 것·실행 동작은 팝업만 띄우고 머문다", () => {

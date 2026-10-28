@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "../client";
 import {
   repairCases,
@@ -46,7 +46,7 @@ import {
  * 내역과 같은 판단이다. 하나씩 대조해 넣고 빼는 방식은 같은 결과를 훨씬 어렵게
  * 만들 뿐이고, 그 어려움은 "폼에서 지웠는데 남아 있는 줄" 같은 모양으로 드러난다.
  *
- * ── 🔴 감사에는 본문을 담지 않는다 ──────────────────────────────────────
+ * ── 🔴 감사에는 본문을 담지 않는다 — **영구 삭제 하나만 예외다** ─────────
  * 확인내용·조치·정리·비고, 그리고 **고객사명·발생 장소·「상황」도** 남기지
  * 않는다. 남기는 것은 종류·문서번호·발행일과 어느 접수 건이었나뿐이다.
  *
@@ -58,11 +58,50 @@ import {
  * 언제 우리 이름으로 어느 문서를 만들고 고쳤나"** 이고, 그 질문에는 이 네 값으로
  * 충분하다. 원본을 되짚을 곳은 이제 감사 로그가 아니라 **이 표 자신**이다.
  *
- * ── 영구 삭제는 없다 ────────────────────────────────────────────────────
- * `softDelete` 와 `restore` 만 있다. 견적서와 같은 이유이고, 여기에는 하나가 더
- * 있다: 보고서는 **접수 건이 영구 삭제될 때 함께 사라진다**
- * (`schema/service-reports.ts` 의 «판단 1» — CASCADE). 개인정보 정리는 그 길로
- * 이미 끝나므로, 보고서만 따로 영구 삭제하는 경로를 미리 만들어 둘 이유가 없다.
+ * 🔴 **그래서 `permanentlyDeleteServiceReport` 만 반대로 간다**(2026-10-28
+ * 사용자 결정). 위 문단이 서 있는 다리가 «되짚을 곳은 이 표 자신»인데, 그
+ * 함수는 바로 그 행을 없앤다 — 다리가 끊기므로 규칙도 함께 서지 못한다. 그래서
+ * 그 한 함수만 지우기 **직전의 행·본문 줄·고른 원인을 한 벌 떠서** 감사에
+ * 남긴다. ⚠️ 그 사본도 3년을 산다는 사실은 그대로이고, 위 문단이 걱정하던 바로
+ * 그 일이다 — **범위를 넓히지 마라.** CREATE·UPDATE·SOFT_DELETE·RESTORE 는
+ * 지금도 네 값뿐이고, 그래야 한다.
+ *
+ * 🔴 **알고 받아들인 구멍 하나 — 따로 볼 일이다**(2026-10-28 사용자 결정).
+ * 접수 건을 영구 삭제하면 그 건의 자료는 CASCADE 로 사라지지만 **이 PURGE 로그의
+ * 사본은 따라 지워지지 않는다** — `audit_logs.target_record_id` 는 어느 표든
+ * 가리킬 수 있는 칸이라 외래키가 없고, 그래서 접수 건 쪽 삭제가 닿지 못한다.
+ * 보고서 본문에는 고객사명과 장비 사정이 섞여 있으므로 **개인정보 정리가 거기서
+ * 한 칸 비는 것이 맞다.**
+ * 🔵 그래도 남기기로 한 까닭: 되돌릴 수 없게 지운 **법인 직인 문서**가 무엇이었는지는
+ * 남아야 하고, 이 조작은 개발자만 쓰는 드문 길이며, 감사 로그 자체가 보호되는 자리다.
+ * 🔴 **메울 길은 정해져 있다** — 접수 건 영구 삭제가 그 건의 보고서 PURGE 로그도
+ * 함께 지우게 하는 것이다(`mutations/repair-cases.ts` 의 영구 삭제 자리).
+ * 이번 조각에 넣지 않은 것은 **범위가 커서**이지 안 해도 되기 때문이 아니다.
+ *
+ * ── 영구 삭제 — **2026-10-28 에 생겼다** ────────────────────────────────
+ * 🔴 **먼저 왜 없었는지부터.** 원래 이 파일에는 `softDelete` 와 `restore` 만
+ * 있었고 까닭은 이랬다: 보고서는 **접수 건이 영구 삭제될 때 함께 사라지므로**
+ * (`schema/service-reports.ts` 의 «판단 1» — CASCADE) 개인정보 정리는 그 길로
+ * 이미 끝나고, 따라서 보고서만 따로 영구 삭제하는 경로를 **미리 만들어 둘 이유가
+ * 없다**는 것이었다.
+ *
+ * 🔴 그 문장은 「해서는 안 된다」가 아니라 **「아직 쓸 데가 없다」**였다. 그래서
+ * 2026-10-28 에 사용자가 필요하다고 정했을 때 뒤집을 수 있었다 — 잘못 만든 문서
+ * 한 장을 접수 건은 그대로 둔 채 치우는 자리다. 🔴 **위 CASCADE 는 손대지 않았고
+ * 그대로 산다.** 이번에 생긴 것은 **보고서 한 장만 따로** 지우는 길이다.
+ *
+ * 🔴 **본보기는 여기서도 견적서다**(`mutations/quote-trash.ts` 의
+ * `permanentlyDeleteQuote`). 휴지통에 든 장만 받는 것도, 사유를 필수로 받는
+ * 것도, PURGE 감사 한 줄로 끝내는 것도 그쪽을 그대로 옮겼다. **다른 것은 딱
+ * 하나** — 그쪽은 스냅숏에 자유 입력 칸을 **일부러 빼지만**(그 파일의 '감사
+ * 로그에 자유 입력 칸은 넣지 않는다'), 여기는 담는다. 까닭은 바로 위 문단이다:
+ * 견적서는 지워도 내자 정리 줄에 번호·금액이 남지만, 보고서에는 그런 바깥
+ * 사본이 하나도 없다.
+ *
+ * 🔴 **문턱이 지우기(MANAGE)보다 높다.** 되돌릴 수 없는 데다 법인 직인이 찍혀
+ * 고객사로 나간 문서라 **개발자 모드 관문**까지 넘어야 한다
+ * (`server/actions/service-reports.ts` 의 `resolveAuthorizedActor`). 이 계층은
+ * 기계라 그 판정을 하지 않는다 — 위 '이 계층은 기계다' 그대로다.
  * ============================================================================
  */
 
@@ -80,9 +119,26 @@ export type ServiceReportMutationResult =
       message: string;
     };
 
+/**
+ * 영구 삭제의 결과. **version 이 없다** — 행이 사라진 뒤에는 「다음 판」이라는
+ * 것이 없고, 있는 척하면 화면이 그 숫자를 들고 다음 요청을 보낸다. 견적서의
+ * `QuotePurgeResult` 와 같은 모양, 같은 까닭이다(접수 건의
+ * `PermanentlyDeleteRepairCaseResult` 도 그렇다).
+ */
+export type ServiceReportPurgeResult =
+  | { ok: true; id: string }
+  | { ok: false; code: "NOT_FOUND" | "CONFLICT"; message: string };
+
 const VERSION_CONFLICT_MESSAGE =
   "다른 사용자가 이 보고서를 먼저 수정했습니다. 최신 정보를 다시 불러온 뒤 시도해 주세요.";
 const NOT_FOUND_MESSAGE = "해당 보고서를 찾을 수 없습니다.";
+/**
+ * 영구 삭제만 쓰는 문장. 「없는 id · 살아 있는 장 · 이미 지워진 장」 셋을 **한
+ * 답으로 묶는다** — 셋을 갈라 말하면 이 창구가 "그 id 가 있긴 한가"를 알려 주는
+ * 조회창이 된다(견적서의 `NOT_IN_TRASH_MESSAGE` 와 같은 판단).
+ */
+const NOT_IN_TRASH_MESSAGE =
+  "휴지통에서 해당 보고서를 찾을 수 없습니다. 이미 되살렸거나 지워졌을 수 있습니다.";
 const UNKNOWN_REPAIR_CASE_MESSAGE = "선택한 접수 건을 찾을 수 없습니다.";
 
 /**
@@ -446,4 +502,141 @@ export async function restoreServiceReport(params: {
 
     return { ok: true, id: updated.id, version: updated.version };
   });
+}
+
+/**
+ * 🔴 **휴지통의 보고서 한 장을 되돌릴 수 없게 지운다** (2026-10-28).
+ *
+ * 왜 이 함수가 생겼는지는 머리말의 '영구 삭제 — 2026-10-28 에 생겼다' 에 있다.
+ * 여기에는 그 결정이 코드에 어떻게 박혔는지만 적는다.
+ *
+ * ── 🔴 휴지통을 거친 장만 받는다 ────────────────────────────────────────
+ * `is_deleted = true` 로 좁힌다. **살아 있는 장을 바로 지우는 길은 없다** —
+ * 한 번 휴지통에 넣고 다시 눌러야 한다는 것이 이 조작의 유일한 안전장치이고,
+ * 그 길을 열어 두면 안전장치를 건너뛰는 문이 된다(견적서의 '활성 견적서를
+ * 바로 지우는 길은 없다'). 살아 있는 장을 넘기면 NOT_FOUND 다.
+ *
+ * ── 🔴 줄·원인은 DB 가 함께 지운다 ──────────────────────────────────────
+ * `service_reports` 를 가리키는 표는 **둘뿐이고 둘 다 ON DELETE CASCADE** 다
+ * (`service_report_lines` · `service_report_causes` — 2026-10-28 실측:
+ * `drizzle/meta/0120_snapshot.json` 의 foreignKeys 에서 `tableTo` 가 이 표인
+ * 것이 그 둘뿐이다). 그래서 **행 하나만 지우면 된다.** 자식을 여기서 먼저
+ * 지우지 않는 것은 일부러다 — 스키마가 이미 약속한 일을 코드가 한 번 더 하면
+ * 둘 중 하나가 바뀐 날 어느 쪽이 실제로 지웠는지 말할 수 없게 된다(견적서
+ * 휴지통의 '딸린 것' 과 같은 판단).
+ *
+ * ── 🔴 지우기 **전에** 읽고, 같은 트랜잭션에서 남긴다 ───────────────────
+ * 본문 줄과 고른 원인은 행이 사라지는 순간 함께 없어지므로 **DELETE 앞에서**
+ * 읽어야 한다. 감사 한 줄도 같은 트랜잭션 안이다 — 지우고 나서 따로 적으면
+ * 그 사이에 끊겼을 때 **기록만 없는** 상태가 남는다(`insertAuditLog` 가 tx 를
+ * 받는 까닭 그대로).
+ */
+export async function permanentlyDeleteServiceReport(params: {
+  serviceReportId: string;
+  expectedVersion: number;
+  actorUserId: string;
+  /** 🔴 **필수다.** 되돌릴 수 없는 조작에는 이유가 남아야 한다 — 빈 사유를 막는
+   *  것은 부르는 쪽이고(`readServiceReportPurgeReason`), 여기는 받은 것을 그대로
+   *  감사에 싣는다. */
+  reason: string;
+}): Promise<ServiceReportPurgeResult> {
+  return db.transaction(async (tx): Promise<ServiceReportPurgeResult> => {
+    /**
+     * 🔴 칸을 고르지 않고 **행을 통째로** 읽는다. 다른 함수들이 네 값만 고르는
+     * 것과 정반대인데, 그것이 이 함수의 목적이기 때문이다 — 머리말의 '영구 삭제
+     * 하나만 예외다'. 칸을 나열하면 나중에 칸이 하나 늘었을 때 **그 칸만 조용히
+     * 스냅숏에서 빠지고**, 그 사실은 행이 이미 없어진 뒤에야 드러난다.
+     */
+    const [current] = await tx
+      .select()
+      .from(serviceReports)
+      .where(
+        and(eq(serviceReports.id, params.serviceReportId), eq(serviceReports.isDeleted, true))
+      )
+      .for("update");
+
+    if (!current) return { ok: false, code: "NOT_FOUND", message: NOT_IN_TRASH_MESSAGE };
+    if (current.version !== params.expectedVersion) {
+      return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
+    }
+
+    // 본문과 원인. 화면·조회가 쓰는 것과 같은 순서로 읽는다 — 감사에 담긴 글을
+    // 나중에 사람이 읽을 때 문서에서 보던 차례 그대로여야 한다.
+    const lines = await tx
+      .select({
+        section: serviceReportLines.section,
+        lineNo: serviceReportLines.lineNo,
+        text: serviceReportLines.text,
+      })
+      .from(serviceReportLines)
+      .where(eq(serviceReportLines.serviceReportId, params.serviceReportId))
+      .orderBy(asc(serviceReportLines.section), asc(serviceReportLines.lineNo));
+
+    const causeRows = await tx
+      .select({ cause: serviceReportCauses.cause })
+      .from(serviceReportCauses)
+      .where(eq(serviceReportCauses.serviceReportId, params.serviceReportId))
+      .orderBy(asc(serviceReportCauses.cause));
+
+    const deleted = await tx
+      .delete(serviceReports)
+      // 잠금을 쥐고 있어 실제로는 늘 한 행이지만, 0행 쓰기를 마지막 안전망으로
+      // 두는 이 저장소의 관례를 그대로 따른다(견적서 영구 삭제의 같은 자리).
+      .where(
+        and(
+          eq(serviceReports.id, params.serviceReportId),
+          eq(serviceReports.isDeleted, true),
+          eq(serviceReports.version, params.expectedVersion)
+        )
+      )
+      .returning({ id: serviceReports.id });
+
+    if (deleted.length === 0) {
+      return { ok: false, code: "NOT_FOUND", message: NOT_IN_TRASH_MESSAGE };
+    }
+
+    await insertAuditLog(tx, {
+      actorUserId: params.actorUserId,
+      actionType: "PURGE",
+      targetEntity: "service_reports",
+      targetRecordId: params.serviceReportId,
+      previousValue: {
+        /**
+         * 앞의 두 묶음은 **다른 기록과 같은 말**이다 — "누가 언제 우리 이름으로
+         * 어느 문서를 다뤘나". 뒤의 셋이 이 함수에만 있는 「무엇이 적혀 있었나」다.
+         */
+        repairCaseId: current.repairCaseId,
+        ...auditSnapshot(current),
+        /** 왜 지웠는가. 표의 `delete_reason`(휴지통에 넣을 때 적은 것)과 **다른
+         *  값이다** — 그 값은 `columns` 안에 그대로 들어 있다. */
+        purgeReason: params.reason,
+        /** 행 전부. 위 select 가 칸을 고르지 않는 까닭 참조. */
+        columns: serializeServiceReportSnapshot(current),
+        lines,
+        causes: causeRows.map((row) => row.cause),
+      },
+      newValue: null,
+    });
+
+    return { ok: true, id: params.serviceReportId };
+  });
+}
+
+/**
+ * 스냅숏의 시각 칸을 ISO 글자로 바꾼다 — 다른 휴지통의 PURGE 로그와 **같은
+ * 모양**이다(견적서의 `serializeSnapshot`).
+ *
+ * JSON 으로 실어 보내면 `Date` 는 어차피 ISO 글자가 되지만, 여기서 한 번
+ * 드러내 두면 **타입이 글자라고 말해 준다** — 나중에 이 로그를 읽는 코드가
+ * `new Date(row.createdAt)` 로 풀어야 한다는 사실이 선언에 남는다.
+ */
+function serializeServiceReportSnapshot<
+  T extends { createdAt: Date; updatedAt: Date; deletedAt: Date | null },
+>(row: T) {
+  return {
+    ...row,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
+  };
 }

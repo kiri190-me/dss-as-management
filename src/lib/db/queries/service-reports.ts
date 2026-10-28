@@ -173,8 +173,15 @@ export type DeletedServiceReportRow = {
  * 🔴 **고객사명·발생 장소·본문은 여기에도 담지 않는다** — 위 머리말의 PII 항목
  * 그대로다. 되살릴 장을 알아보는 데는 종류·문서번호·발행일이면 충분하다.
  *
- * 영구 삭제는 없다(`mutations/service-reports.ts`). 그래서 이 조회가 답하는 것은
- * "무엇을 지웠고 되살릴 수 있는가" 하나뿐이고, 보관 기한 같은 값은 없다.
+ * 🔴 **자동 만료가 없다** — 휴지통에 둔 장은 누가 누르기 전까지 그대로 있다.
+ * 그래서 이 조회에는 보관 기한 같은 값이 없고, 화면도 「N일 뒤 사라집니다」를
+ * 말하지 않는다.
+ *
+ * ⚠️ **「영구 삭제가 아예 없다」고 적혀 있던 자리다.** 2026-10-28 에 사람이 눌러
+ * 한 장을 없애는 길이 생겼다(`mutations/service-reports.ts` 의
+ * `permanentlyDeleteServiceReport`). 이 조회가 돌려주는 줄이 그 단추의 대상이고,
+ * `version` 을 함께 싣는 까닭도 그것이다 — 되살리기와 완전 삭제가 같은 낙관적
+ * 잠금 토큰을 쓴다. 자동 만료가 없다는 **위 문장은 그대로 사실이다.**
  */
 export async function listDeletedServiceReportsForRepairCase(
   repairCaseId: string

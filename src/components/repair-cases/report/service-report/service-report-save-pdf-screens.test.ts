@@ -82,7 +82,32 @@ describe("🔴 보고서 저장은 그대로다", () => {
       ),
       save
     );
-    assert.equal(form.split("showSavePopup({").length - 1, 1);
+    // 🔴 **저장 흐름 안에서는 여전히 하나다.** 이것이 이 시험의 본래 보증이고,
+    //    PDF 변환이 끼어든 뒤에도 팝업이 두 번 뜨지 않게 하는 자리다.
+    assert.equal(save.split("showSavePopup({").length - 1, 1, "저장 흐름에서 팝업이 둘 이상이다");
+    // 🔵 파일 전체로는 **둘**이다 — 2026-10-28 에 지우기 쪽에도 생겼다(사용자 요청:
+    //    「휴지통으로 보내기를 누르면 목록으로 나오면서 0.5초 안내가 뜨게」).
+    //    🔴 수를 못 박는 것은 일부러다. 늘면 여기서 멈추고 **어느 길에 생겼는지**
+    //    적게 된다 — 저장 팝업은 성공 전용이라 아무 갈래에나 달면 안 된다.
+    assert.equal(form.split("showSavePopup({").length - 1, 2, "팝업이 생기거나 사라졌다");
+  });
+
+  test("🔴 지우기 쪽 팝업은 지우기 흐름 안에만 있다 — 실패 갈래에는 없다", () => {
+    const del = sliceBetween(form, "async function confirmDelete() {", "function handleConflictReload() {");
+    assert.equal(del.split("showSavePopup({").length - 1, 1, "지우기 흐름의 팝업이 하나가 아니다");
+    assert.ok(
+      del.includes('showSavePopup({ message: "휴지통으로 이동되었습니다.", redirectTo: reportHref, });'),
+      del
+    );
+    // 🔴 **성공 갈래에서만 뜬다.** `if (!result.ok)` 보다 뒤에 있어야 한다 —
+    //    앞에 있으면 실패했는데도 「이동되었습니다」가 뜨고 목록으로 넘어간다.
+    const notOk = indexOrFail(del, "if (!result.ok) {");
+    const popup = indexOrFail(del, 'showSavePopup({ message: "휴지통으로 이동되었습니다."');
+    assert.ok(notOk < popup, "실패를 가르기 전에 팝업을 띄운다");
+    // 🔴 팝업이 넘기는 길과 router 가 미는 길이 **다투면 안 된다**. 지우기 흐름의
+    //    replace·refresh 는 NOT_FOUND 갈래 하나뿐이어야 한다(거기는 팝업을 안 띄운다).
+    assert.equal((del.match(/router\.refresh\(\)/g) ?? []).length, 1, "지우기에 refresh 가 둘 이상이다");
+    assert.equal((del.match(/router\.replace\(/g) ?? []).length, 1, "지우기에 replace 가 둘 이상이다");
   });
 
   test("🔴 흐름이 던져도 저장은 되돌아가지 않는다 — 삼키고 넘어간다", () => {

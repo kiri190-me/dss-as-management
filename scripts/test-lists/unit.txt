@@ -225,6 +225,13 @@ src/lib/validation/service-report-save-input.test.ts
 src/lib/auth/service-report-authorization.test.ts
 src/lib/server/service-report-action-input.test.ts
 
+# 보고서 휴지통의 [완전 삭제] 가 **서버에서도** 막히는가 (2026-10-28).
+# 🔴 화면이 단추를 감추는 것은 경계가 아니다 — 주소로 직접 부르면 그만이다.
+# 관문 함수 자체는 값으로, 「액션이 그 함수를 MANAGE 뒤·mutation 앞에서 부르는가」는
+# 글자로 잰다(액션 파일은 "use server" 라 값으로 부를 수 없다). 🔴 주석을 걷어내고
+# 센다 — 머리말들이 관문 이름을 여러 번 적고 있어, 안 걷으면 관문을 지워도 통과한다.
+src/lib/server/actions/service-report-purge-gate.test.ts
+
 # 보고서 양식 넷(문서 종류 × 매쳐·제너레이터) 중 하나를 고르는 규칙(2026-10-18).
 # 🔴 네 양식의 다른 점은 **담당 엔지니어의 도장 하나뿐**이라, 잘못 고르면 문서는
 # 멀쩡해 보이고 결재란의 사람만 틀린다 — 받는 쪽이 말해 주기 전에는 아무도 모른다.

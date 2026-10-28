@@ -10,6 +10,7 @@ import ServiceReportTabs, {
   type DeletedServiceReportListRow,
 } from "@/components/repair-cases/report/ServiceReportTabs";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
+import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
 import { getPermissionLevel } from "@/lib/auth/permission-resolver";
 import {
   SERVICE_REPORT_PERMISSION_AREA,
@@ -61,6 +62,13 @@ import { SERVICE_REPORT_TITLES } from "@/lib/xlsx/service-report-template";
  * 없으면 그 사실이 아무 쓸모가 없어서, **지울 수 있는 사람에게만** 「사용중 /
  * 휴지통」 탭을 그린다. 권한이 없으면 휴지통을 **읽지도 내려보내지도 않는다** —
  * 견적서 화면과 같은 규칙이다(`quotes/page.tsx`).
+ *
+ * ── 🔴 「완전 삭제」 단추는 문턱이 하나 더 있다 (2026-10-28) ────────────
+ * 휴지통 안의 [완전 삭제] 는 **개발자 모드 관문을 넘은 사람에게만** 그려진다
+ * (`mayEnterDeveloperMode`). 되돌릴 수 없는 데다 법인 직인이 찍혀 고객사로 나간
+ * 문서라, 평소에는 그 단추가 아예 없는 쪽으로 정했다(2026-10-28 사용자 결정).
+ * 🔴 그것은 **화면일 뿐 경계가 아니다** — 서버 액션이 같은 관문을 다시 지난다
+ * (`actions/service-reports.ts` 의 '완전 삭제만 문턱이 하나 더 있다').
  * ============================================================================
  */
 
@@ -226,7 +234,14 @@ export default async function RepairCaseReportPage({
       {showTabs ? (
         // 「사용중」 목록은 **서버가 그려서** 넘긴다 — 그 조각을 클라이언트로
         // 끌어들이지 않기 위해서다(ServiceReportTabs 머리말).
-        <ServiceReportTabs savedCount={rows.length} trashRows={trashRows}>
+        <ServiceReportTabs
+          savedCount={rows.length}
+          trashRows={trashRows}
+          // 🔴 위 머리말의 '「완전 삭제」 단추는 문턱이 하나 더 있다'. 판정을 여기
+          //    적지 않고 관문 함수를 그대로 부른다 — 「이 사람이 개발자냐」의 답이
+          //    나오는 자리는 하나다(`auth/developer-mode-gate.ts`).
+          canPermanentlyDelete={mayEnterDeveloperMode(actingUser)}
+        >
           {savedList}
         </ServiceReportTabs>
       ) : (

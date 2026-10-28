@@ -20,6 +20,7 @@ import {
 import { createRepairCase } from "./repair-cases";
 import {
   createServiceReport,
+  permanentlyDeleteServiceReport,
   restoreServiceReport,
   softDeleteServiceReport,
   updateServiceReport,
@@ -602,6 +603,213 @@ describe("휴지통", () => {
     if (stale.ok) return;
     assert.equal(stale.code, "CONFLICT");
     assert.equal((await readReport(created.id)).isDeleted, false);
+  });
+
+  /**
+   * ==========================================================================
+   * 🔴 완전 삭제 (2026-10-28)
+   * ==========================================================================
+   * 되돌릴 수 없는 길이라 **열리면 안 되는 문**을 먼저 잰다 — 살아 있는 장과
+   * 낡은 version. 그다음에 열려야 하는 문과, 열린 뒤 남는 것을 잰다.
+   *
+   * 🔴 인가는 여기서 보지 않는다. 이 계층은 기계이고(파일 머리말), 개발자 모드
+   * 관문은 서버 액션의 몫이다 — `server/actions/service-report-purge-gate.test.ts`
+   * 가 「서버가 다시 보는가」를 따로 잰다.
+   */
+  describe("완전 삭제", () => {
+    /** 그 장에 붙은 감사 줄 전부. 🔴 지우지 않는다 — 감사는 append-only 다. */
+    async function readAuditOf(targetRecordId: string) {
+      return db
+        .select({
+          actionType: auditLogs.actionType,
+          previousValue: auditLogs.previousValue,
+          newValue: auditLogs.newValue,
+        })
+        .from(auditLogs)
+        .where(
+          and(
+            eq(auditLogs.targetEntity, "service_reports"),
+            eq(auditLogs.targetRecordId, targetRecordId)
+          )
+        )
+        .orderBy(desc(auditLogs.createdAt));
+    }
+
+    test("🔴 살아 있는 장은 지울 수 없다 — 휴지통을 거쳐야 한다", async () => {
+      const created = await create({ findings: "살아 있는 장의 확인내용" });
+      assert.ok(created.ok);
+      if (!created.ok) return;
+
+      const result = await permanentlyDeleteServiceReport({
+        serviceReportId: created.id,
+        expectedVersion: 1,
+        actorUserId,
+        reason: "휴지통을 건너뛰려는 시도",
+      });
+      assert.equal(result.ok, false, "살아 있는 장이 바로 지워졌다");
+      if (!result.ok) assert.equal(result.code, "NOT_FOUND");
+
+      // 🔵 거절만 보고 끝내지 않는다 — 행이 실제로 남아 있어야 한다.
+      const row = await readReport(created.id);
+      assert.ok(row, "거절했는데 행이 사라졌다");
+      assert.equal(row.isDeleted, false);
+      assert.equal((await readLines(created.id)).length > 0, true, "본문 줄이 사라졌다");
+    });
+
+    test("🔴 낡은 version 으로는 지울 수 없다 — 그 사이 누가 손댔다는 뜻이다", async () => {
+      const created = await create();
+      assert.ok(created.ok);
+      if (!created.ok) return;
+
+      await softDeleteServiceReport({
+        serviceReportId: created.id,
+        expectedVersion: 1,
+        actorUserId,
+        reason: null,
+      });
+
+      // 지우고 나면 version 이 2다. 1을 대면 CONFLICT 여야 한다.
+      const stale = await permanentlyDeleteServiceReport({
+        serviceReportId: created.id,
+        expectedVersion: 1,
+        actorUserId,
+        reason: "낡은 토큰",
+      });
+      assert.equal(stale.ok, false);
+      if (!stale.ok) assert.equal(stale.code, "CONFLICT");
+      assert.ok(await readReport(created.id), "CONFLICT 인데 행이 사라졌다");
+    });
+
+    test("🔴 지우면 행·본문 줄·고른 원인이 함께 사라지고, 접수 건은 남는다", async () => {
+      const created = await create({ findings: "곧 사라질 확인내용" });
+      assert.ok(created.ok);
+      if (!created.ok) return;
+      assert.equal((await readLines(created.id)).length > 0, true, "본문 줄이 없으면 시험이 공짜다");
+      assert.equal((await readCauses(created.id)).length > 0, true, "고른 원인이 없으면 시험이 공짜다");
+
+      await softDeleteServiceReport({
+        serviceReportId: created.id,
+        expectedVersion: 1,
+        actorUserId,
+        reason: null,
+      });
+      const purged = await permanentlyDeleteServiceReport({
+        serviceReportId: created.id,
+        expectedVersion: 2,
+        actorUserId,
+        reason: "번호를 잘못 받았다",
+      });
+      assert.equal(purged.ok, true, JSON.stringify(purged));
+
+      assert.equal(await readReport(created.id), undefined, "행이 남아 있다");
+      assert.deepEqual(await readLines(created.id), [], "본문 줄이 남았다 — CASCADE 가 안 돌았다");
+      assert.deepEqual(await readCauses(created.id), [], "고른 원인이 남았다");
+
+      // 🔴 접수 건은 이 길로 사라지지 않는다 — CASCADE 는 반대 방향이다.
+      const [stillThere] = await db
+        .select({ id: repairCases.id })
+        .from(repairCases)
+        .where(eq(repairCases.id, repairCaseId));
+      assert.ok(stillThere, "보고서를 지웠는데 접수 건까지 사라졌다");
+    });
+
+    test("한 번 지운 장은 두 번째 요청에서 NOT_FOUND 다 — 두 번 누르기", async () => {
+      const created = await create();
+      assert.ok(created.ok);
+      if (!created.ok) return;
+
+      await softDeleteServiceReport({
+        serviceReportId: created.id,
+        expectedVersion: 1,
+        actorUserId,
+        reason: null,
+      });
+      const first = await permanentlyDeleteServiceReport({
+        serviceReportId: created.id,
+        expectedVersion: 2,
+        actorUserId,
+        reason: "첫 번째",
+      });
+      assert.equal(first.ok, true, JSON.stringify(first));
+
+      const second = await permanentlyDeleteServiceReport({
+        serviceReportId: created.id,
+        expectedVersion: 2,
+        actorUserId,
+        reason: "두 번째",
+      });
+      assert.equal(second.ok, false);
+      if (!second.ok) assert.equal(second.code, "NOT_FOUND");
+    });
+
+    /**
+     * 🔴 **이 파일의 다른 시험과 정반대의 단언이다.** 위 '감사에는 본문이 담기지
+     * 않는다' 는 지금도 그대로 맞고, 이 한 조작만 예외다 — 행을 없애는 순간
+     * 「무엇이 적혀 있었나」에 답할 곳이 감사 로그밖에 남지 않기 때문이다
+     * (`mutations/service-reports.ts` 머리말, 2026-10-28 사용자 결정).
+     *
+     * 🔴 **되살아나면 깨지는 단언으로 적는다** — 누군가 스냅숏을 네 값으로
+     * 되돌리면 아래가 먼저 깨진다.
+     */
+    test("🔴 지우면 감사 로그에 **내용이** 남는다 — 되짚을 곳이 여기뿐이다", async () => {
+      const findings = "감사에 남아야 하는 확인내용 9611";
+      const created = await create({ findings, remark: "비고도 남아야 한다 9611" });
+      assert.ok(created.ok);
+      if (!created.ok) return;
+
+      await softDeleteServiceReport({
+        serviceReportId: created.id,
+        expectedVersion: 1,
+        actorUserId,
+        reason: "먼저 휴지통으로",
+      });
+      const purged = await permanentlyDeleteServiceReport({
+        serviceReportId: created.id,
+        expectedVersion: 2,
+        actorUserId,
+        reason: "양식을 잘못 골라 다시 만들었다",
+      });
+      assert.equal(purged.ok, true, JSON.stringify(purged));
+
+      const rows = await readAuditOf(created.id);
+      const purgeRow = rows.find((row) => row.actionType === "PURGE");
+      assert.ok(purgeRow, "PURGE 기록이 없다");
+      assert.equal(purgeRow.newValue, null, "지운 뒤의 값이 있을 리 없다");
+
+      const snapshot = purgeRow.previousValue as Record<string, unknown>;
+      // 다른 기록과 같은 네 값이 그대로 있다.
+      assert.equal(snapshot.repairCaseId, repairCaseId);
+      assert.equal(snapshot.kind, "REPAIR");
+      assert.equal(snapshot.issuedOn, "2096-11-20");
+      assert.equal(snapshot.purgeReason, "양식을 잘못 골라 다시 만들었다");
+
+      // 🔴 그리고 **내용**. 본문은 줄로 쪼개져 들어가므로 글자로 맞대 본다.
+      const serialized = JSON.stringify(snapshot);
+      assert.ok(serialized.includes(findings), "확인내용이 감사에 남지 않았다");
+      assert.ok(serialized.includes("비고도 남아야 한다 9611"), "비고가 감사에 남지 않았다");
+      assert.ok(serialized.includes("ICD Co.,Ltd"), "고객사명이 감사에 남지 않았다");
+
+      const lines = snapshot.lines as { section: string; text: string }[];
+      assert.ok(Array.isArray(lines) && lines.length > 0, "본문 줄이 한 줄도 안 담겼다");
+      assert.ok(
+        lines.some((line) => line.text === findings),
+        "본문 줄에 확인내용이 그대로 들어 있지 않다"
+      );
+      assert.deepEqual(snapshot.causes, ["PART_DEFECT", "AGING"], "고른 원인이 안 담겼다");
+
+      // 지우기 직전의 상태도 들어 있다 — 누가 언제 휴지통에 넣었나.
+      const columns = snapshot.columns as Record<string, unknown>;
+      assert.equal(columns.isDeleted, true);
+      assert.equal(columns.deletedBy, actorUserId);
+      assert.equal(columns.deleteReason, "먼저 휴지통으로");
+      assert.equal(typeof columns.deletedAt, "string", "시각이 ISO 글자가 아니다");
+
+      // 앞서 남은 기록은 그대로 산다 — 감사는 append-only 다.
+      assert.deepEqual(
+        rows.map((row) => row.actionType).sort(),
+        ["CREATE", "PURGE", "SOFT_DELETE"]
+      );
+    });
   });
 
   test("이미 지운 장을 또 지울 수 없고, 살아 있는 장을 되살릴 수 없다", async () => {

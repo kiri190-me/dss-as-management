@@ -1,6 +1,7 @@
 "use server";
 
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
+import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
 import { getPermissionLevel } from "@/lib/auth/permission-resolver";
 import {
   SERVICE_REPORT_PERMISSION_AREA,
@@ -11,6 +12,7 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import {
   createServiceReport,
+  permanentlyDeleteServiceReport,
   restoreServiceReport,
   softDeleteServiceReport,
   updateServiceReport,
@@ -19,6 +21,7 @@ import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import {
   readServiceReportActionValues,
   readServiceReportDeleteReason,
+  readServiceReportPurgeReason,
 } from "@/lib/server/service-report-action-input";
 import { SERVICE_REPORT_CAUSES } from "@/lib/xlsx/service-report-template";
 
@@ -47,6 +50,21 @@ import { SERVICE_REPORT_CAUSES } from "@/lib/xlsx/service-report-template";
  * `auth/service-report-authorization.ts` 가 그 판단의 **원본**이기 때문이다 —
  * 라우트·액션·화면이 각자 수준을 적어 두면 한 곳만 고쳐지는 날이 온다.
  *
+ * ── 🔴 완전 삭제만 문턱이 하나 더 있다 (2026-10-28) ────────────────────
+ * MANAGE 를 넘은 **다음에** 개발자 모드 관문(`mayEnterDeveloperMode`)을 한 번
+ * 더 지난다. 되돌릴 수 없는 데다 법인 직인이 찍혀 고객사로 나간 문서라, 평소에는
+ * 그 단추가 아예 없는 쪽으로 정했다(2026-10-28 사용자 결정).
+ *
+ * 🔴 **판정을 여기에 새로 적지 않는다.** `actor.isDeveloper === true` 라고
+ * 적으면 「이 사람이 개발자냐」를 답하는 자리가 둘이 되고, `developer-mode-gate.ts`
+ * 가 "이 질문의 답은 여기 한 곳에서만 나온다"고 못 박아 둔 것이 깨진다. 그
+ * 함수를 그대로 부르므로 **승인되지 않은 계정은 개발자 표시가 켜져 있어도
+ * 막히고**, 역할이 최고관리자인 사람은 표시와 무관하게 통과한다 — 그것이 그
+ * 관문이 정의한 「개발자」다.
+ *
+ * ⚠️ 권한 수준(MANAGE)을 **먼저** 본다. 순서를 뒤집으면 접수 건을 볼 권한조차
+ * 없는 개발자 계정이 남의 건의 보고서를 지울 수 있게 된다.
+ *
  * ── 결과 코드는 mutation 의 것을 그대로 나른다 ─────────────────────────
  * `NOT_FOUND`·`CONFLICT`·`VALIDATION_ERROR` 는 `mutations/service-reports.ts` 가
  * 정한 뜻 그대로다. 화면은 그 셋을 서로 다르게 다뤄야 한다(CONFLICT 는 적어 둔
@@ -70,6 +88,16 @@ export type ServiceReportActionResult =
       fieldErrors?: Record<string, string>;
       message: string;
     };
+
+/**
+ * 완전 삭제의 결과. **성공에 version 이 없다** — 행이 사라진 뒤에는 돌려줄
+ * 다음 판이 없다(mutation 의 `ServiceReportPurgeResult`). 실패 코드는 위의
+ * 것을 그대로 쓴다: 개발자 모드 관문에 막히면 `FORBIDDEN`, 휴지통에 없으면
+ * `NOT_FOUND`, 그 사이에 누가 되살렸으면 `CONFLICT` 다.
+ */
+export type ServiceReportPurgeActionResult =
+  | { ok: true; id: string }
+  | { ok: false; code: ServiceReportActionResultCode; message: string };
 
 const VALIDATION_MESSAGE = "보고서 내용을 확인해 주세요.";
 const DATABASE_UNAVAILABLE_MESSAGE = "일시적으로 저장할 수 없습니다. 잠시 후 다시 시도해 주세요.";
@@ -99,9 +127,11 @@ type AuthorizedActor =
  * 저장 모드 → 세션 → 계정 승인 → 살아 있는 계정 → 인가.
  *
  * `need` 는 이 조작이 요구하는 문턱이다. 판정 자체는 인가 모듈이 하고, 여기서는
- * **어느 문턱인지만** 고른다.
+ * **어느 문턱인지만** 고른다. `"purge"` 는 `"delete"` 와 같은 수준을 요구한 뒤
+ * 개발자 모드 관문을 하나 더 지난다 — 위 머리말의 '완전 삭제만 문턱이 하나 더
+ * 있다'.
  */
-async function resolveAuthorizedActor(need: "edit" | "delete"): Promise<AuthorizedActor> {
+async function resolveAuthorizedActor(need: "edit" | "delete" | "purge"): Promise<AuthorizedActor> {
   if (getAuthSource() !== "database") {
     return { ok: false, code: "FORBIDDEN", message: "데이터베이스 저장 모드가 아닙니다." };
   }
@@ -123,9 +153,24 @@ async function resolveAuthorizedActor(need: "edit" | "delete"): Promise<Authoriz
 
   const level = await getPermissionLevel(actingUser, SERVICE_REPORT_PERMISSION_AREA);
   const allowed =
-    need === "delete" ? canDeleteServiceReports(level) : canEditServiceReports(level);
+    need === "edit" ? canEditServiceReports(level) : canDeleteServiceReports(level);
   if (!allowed) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
+  }
+
+  /**
+   * 🔴 완전 삭제만 지나는 두 번째 문. 화면이 단추를 감췄든 말든 **여기서 다시**
+   * 본다 — 이 파일 머리말의 '화면이 감춘 것은 경계가 아니다' 가 바로 이 자리에
+   * 걸린다. 주소로 직접 부르면 이 줄이 거절한다.
+   */
+  if (need === "purge" && !mayEnterDeveloperMode(actingUser)) {
+    return {
+      ok: false,
+      code: "FORBIDDEN",
+      // 🔴 「개발자 표시가 꺼져 있다」고 알려 주지 않는다 — 어떤 칸을 켜면
+      //    뚫리는지를 거절 문구가 가르쳐 줄 이유가 없다.
+      message: "이 작업을 수행할 권한이 없습니다.",
+    };
   }
 
   return { ok: true, actorUserId: actingUser.id };
@@ -227,7 +272,9 @@ export async function updateServiceReportAction(input: {
 }
 
 /**
- * 휴지통으로 보낸다. **영구 삭제가 아니다**(mutation 의 '영구 삭제는 없다').
+ * 휴지통으로 보낸다. **영구 삭제가 아니다** — 그쪽은 아래
+ * `permanentlyDeleteServiceReportAction` 이고, 휴지통에 든 장만 받는다
+ * (mutation 의 '영구 삭제 — 2026-10-28 에 생겼다').
  *
  * 문턱이 저장보다 높다(MANAGE) — 이미 고객사에 나간 문서라, 지우면 "무엇을
  * 확인했고 원인이 무엇이었다고 알렸는가"의 기록이 목록에서 사라진다
@@ -313,16 +360,83 @@ export async function restoreServiceReportAction(input: {
 }
 
 /**
+ * 🔴 **휴지통의 보고서 한 장을 되돌릴 수 없게 지운다** (2026-10-28).
+ *
+ * 순서는 이 파일의 다른 액션과 **같다** — 관문 → 신원 검증 → 사유 → mutation.
+ * 순서가 곧 규칙이라는 머리말이 여기에도 그대로 걸린다: 사유를 먼저 보면
+ * 로그인하지 않은 요청이 "사유가 몇 자까지 되나"를 알아낼 수 있다.
+ *
+ * 🔴 **관문이 `"purge"` 다** — MANAGE 를 넘은 뒤 개발자 모드 관문을 한 번 더
+ * 지난다(위 머리말의 '완전 삭제만 문턱이 하나 더 있다'). 화면도 같은 판정으로
+ * 단추를 감추지만(`report/page.tsx`), 그것은 편의일 뿐이라 이 줄이 없으면
+ * 아무것도 막지 못한다.
+ *
+ * 🔴 **사유가 필수다**(`readServiceReportPurgeReason` — 지우기의 선택 사유와
+ * 다른 함수다). 되돌릴 수 없는 조작이라 왜 지웠는지가 감사에 남아야 한다.
+ *
+ * 결과에 **version 이 없다** — 행이 사라졌으므로 돌려줄 다음 판이 없다
+ * (mutation 의 `ServiceReportPurgeResult`). 그래서 이 액션만 반환 타입이 다르다.
+ */
+export async function permanentlyDeleteServiceReportAction(input: {
+  serviceReportId: string;
+  expectedVersion: number;
+  reason: string;
+}): Promise<ServiceReportPurgeActionResult> {
+  const auth = await resolveAuthorizedActor("purge");
+  if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
+
+  const identity = validateReportIdentity(input?.serviceReportId, input?.expectedVersion);
+  if (identity) return { ok: false, code: identity.code, message: identity.message };
+
+  const reason = readServiceReportPurgeReason(input?.reason);
+  if (!reason.ok) {
+    // 🔴 이 실패는 **확인 창 안에** 그대로 뜬다(`submitError`) — 지우기 액션의
+    //    같은 자리와 같은 까닭이다. 창에는 칸별 오류를 놓을 자리가 없다.
+    return { ok: false, code: "VALIDATION_ERROR", message: reason.message };
+  }
+
+  try {
+    const result = await permanentlyDeleteServiceReport({
+      serviceReportId: input.serviceReportId,
+      expectedVersion: input.expectedVersion,
+      actorUserId: auth.actorUserId,
+      reason: reason.reason,
+    });
+    if (!result.ok) return { ok: false, code: result.code, message: result.message };
+    return { ok: true, id: result.id };
+  } catch (err) {
+    // 🔴 오류 객체를 통째로 남기지 않고 코드만 남긴다 — 되돌릴 수 없는 조작의
+    //    실패라 사유(사람이 적은 글자)가 오류 문맥에 섞여 로그로 새면 안 된다
+    //    (`actions/quotes.ts` 의 완전 삭제와 같은 판단).
+    const code =
+      typeof err === "object" && err !== null && "code" in err
+        ? (err as { code?: unknown }).code
+        : undefined;
+    console.error("permanentlyDeleteServiceReportAction: unexpected DB error", {
+      id: input.serviceReportId,
+      code,
+    });
+    return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
+  }
+}
+
+/**
  * 「어느 장을 어느 시점 기준으로」가 성립하는가. 성립하면 `null`, 아니면 그대로
  * 돌려줄 실패다.
  *
  * ⚠️ 이 파일은 `"use server"` 라 **내보내는 것은 전부 async 함수여야 한다.** 그래서
  * 이 도우미는 내보내지 않는다(Next 가 빌드에서 막는다).
+ *
+ * 🔴 반환 타입이 **실패 갈래로 좁혀져 있다**(`Extract<…, { ok: false }>`).
+ * `ServiceReportActionResult` 를 그대로 쓰면 「성공일 수도 있는 값」이 되어,
+ * 반환 모양이 다른 완전 삭제 액션이 여기서 받은 실패를 되넘길 수 없다 — 그 액션은
+ * `version` 을 돌려주지 않으므로 `code`·`message` 만 꺼내 다시 싸야 한다.
+ * 기존 세 액션은 `return identity;` 그대로다(실패 갈래는 원래 타입에 그대로 든다).
  */
 function validateReportIdentity(
   serviceReportId: unknown,
   expectedVersion: unknown
-): ServiceReportActionResult | null {
+): Extract<ServiceReportActionResult, { ok: false }> | null {
   if (!isUuid(serviceReportId)) {
     return {
       ok: false,

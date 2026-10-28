@@ -15,6 +15,7 @@ import {
   SERVICE_REPORT_DELETE_REASON_MAX_LENGTH,
   readServiceReportActionValues,
   readServiceReportDeleteReason,
+  readServiceReportPurgeReason,
 } from "./service-report-action-input";
 
 /**
@@ -262,4 +263,52 @@ test("길이는 다듬은 뒤에 센다 — 공백으로 상한을 넘겼다고 
     ok: true,
     reason: "가".repeat(SERVICE_REPORT_DELETE_REASON_MAX_LENGTH),
   });
+});
+
+// ──────────────────────────────────────────── 완전 삭제 사유 (2026-10-28)
+
+/**
+ * 🔴 위 「삭제 사유」와 **답이 달라야 하는** 자리다. 휴지통으로 보내는 일은
+ * 되돌릴 수 있어서 사유가 없어도 되지만, 완전 삭제는 되돌릴 수 없다.
+ *
+ * 🔴 **되살아나면 깨지는 단언으로 적는다.** 누군가 두 함수를 하나로 합치거나
+ * `readServiceReportPurgeReason` 을 선택 사유로 되돌리면 아래 첫 시험이 먼저
+ * 깨진다 — 그 실수는 오류를 내지 않고, 사람이 감사 로그를 열어 보기 전까지
+ * 아무도 모른다.
+ */
+
+test("🔴 완전 삭제 사유는 필수다 — 안 적었거나 공백만 적었으면 거절한다", () => {
+  for (const empty of [null, undefined, "", "   \n\t ", 7, { reason: "지움" }, ["지움"], true]) {
+    const result = readServiceReportPurgeReason(empty);
+    assert.equal(result.ok, false, `${JSON.stringify(empty)} 가 사유로 통과했다`);
+    assert.equal(!result.ok && result.message, "완전 삭제 사유를 입력해 주세요.");
+  }
+});
+
+test("🔴 두 사유 함수의 답이 갈린다 — 같은 입력에 한쪽은 통과, 한쪽은 거절", () => {
+  // 🔵 무엇을 재는지 먼저 못 박는다 — 빈 사유는 지우기에서 «사유 없음»으로
+  //    통과하고, 완전 삭제에서는 거절이다. 둘이 같아지면 이 시험이 깨진다.
+  assert.deepEqual(readServiceReportDeleteReason(""), { ok: true, reason: null });
+  assert.equal(readServiceReportPurgeReason("").ok, false);
+});
+
+test("적은 사유는 앞뒤만 다듬어 그대로 담긴다 — 가운데 줄바꿈은 사람이 넣은 것이다", () => {
+  assert.deepEqual(readServiceReportPurgeReason("  번호를 잘못 받은 장  "), {
+    ok: true,
+    reason: "번호를 잘못 받은 장",
+  });
+  assert.deepEqual(readServiceReportPurgeReason("번호를 잘못 받은 장\n다시 발행했다"), {
+    ok: true,
+    reason: "번호를 잘못 받은 장\n다시 발행했다",
+  });
+});
+
+test("완전 삭제 사유의 상한은 삭제 사유와 같다 — 같은 창의 같은 칸이다", () => {
+  const atLimit = "가".repeat(SERVICE_REPORT_DELETE_REASON_MAX_LENGTH);
+  assert.deepEqual(readServiceReportPurgeReason(atLimit), { ok: true, reason: atLimit });
+
+  const tooLong = "가".repeat(SERVICE_REPORT_DELETE_REASON_MAX_LENGTH + 1);
+  const rejected = readServiceReportPurgeReason(tooLong);
+  assert.equal(rejected.ok, false);
+  assert.equal(!rejected.ok && rejected.message, "완전 삭제 사유가 너무 깁니다.");
 });

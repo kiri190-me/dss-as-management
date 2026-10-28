@@ -718,8 +718,24 @@ export default function ServiceReportForm({
         return;
       }
 
-      router.replace(reportHref);
-      router.refresh();
+      /**
+       * 🔴 **저장과 같은 길로 끝낸다**(2026-10-28 사용자 요청: 「팝업이 사라지고
+       * 목록으로 나오면서 0.5초 동안 안내가 뜨게」). 전에는 여기서 `router.replace`
+       * 와 `router.refresh` 를 불러 **말없이** 목록으로 갔다 — 창이 닫히고 화면만
+       * 바뀌어서, 지운 것이 맞는지 사람이 확인할 자리가 없었다.
+       *
+       * 🔴 **replace·refresh 를 함께 부르지 않는다.** 위 저장 자리의 주석이 적어 둔
+       * 그 사정이다 — 넘어가기 직전에 둘을 부르면 팝업의 이동과 다툰다. **넘기는
+       * 것은 팝업이 한다**(`redirectTo`).
+       *
+       * 🔵 저장 팝업은 **성공 전용**이라 이 자리가 제자리다. 위 실패 갈래 둘은
+       * 그대로 둔다 — NOT_FOUND 는 말없이 목록으로 보내고(사람이 할 수 있는 일이
+       * 없다), 나머지는 창 안에 오류를 남긴다.
+       */
+      showSavePopup({
+        message: "휴지통으로 이동되었습니다.",
+        redirectTo: reportHref,
+      });
     } catch {
       setDeleteError("서버에 닿지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.");
     } finally {
@@ -1052,10 +1068,13 @@ export default function ServiceReportForm({
         onCancel={() => setLeaveConfirmOpen(false)}
       />
 
-      {/* 🔴 지우기 확인 — 고객사·제품 모델·견적서가 쓰는 그 창이다. 견적서와 같은
-          이유로 **보관 문구를 우리 것으로 넘긴다**: 보고서에는 자동 만료도 영구
-          삭제도 없어서(`mutations/service-reports.ts` 의 '영구 삭제는 없다') 기본
-          문장(15일 뒤 완전 삭제)이 사실이 아니다. */}
+      {/* 🔴 지우기 확인 — 고객사·제품 모델·견적서가 쓰는 그 창이다. **보관 문구를
+          우리 것으로 넘긴다**: 보고서에는 **자동 만료가 없어서** 기본 문장(15일 뒤
+          자동 완전 삭제)이 사실이 아니다.
+          ⚠️ 여기에는 "영구 삭제도 없어서" 라고도 적혀 있었다. 2026-10-28 에 사람이
+          휴지통에서 눌러 한 장을 없애는 길이 생겼다(`ServiceReportTabs` 의 '「완전
+          삭제」 는 2026-10-28 에 생겼다'). **자동이 아니므로 아래 문장은 그대로
+          사실이고**, 그래서 문구는 한 글자도 바꾸지 않았다. */}
       <MasterDataDeleteDialog
         isOpen={deleteOpen}
         entityLabel="보고서"

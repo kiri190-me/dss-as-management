@@ -233,3 +233,44 @@ export function readServiceReportDeleteReason(raw: unknown): ServiceReportDelete
   }
   return { ok: true, reason: trimmed === "" ? null : trimmed };
 }
+
+/**
+ * ============================================================================
+ * 완전 삭제 사유 — 🔴 **여기서는 필수다** (2026-10-28)
+ * ============================================================================
+ * 바로 위 함수와 **모양은 같고 답이 다르다.** 휴지통으로 보내는 일은 되돌릴 수
+ * 있으므로 사유가 없어도 되지만, 완전 삭제는 되돌릴 수 없다 — 이 저장소의 다른
+ * 완전 삭제(접수 건 · 흐름도 · 견적서 · 마스터 데이터)가 전부 빈 사유를 거절하고,
+ * 공용 확인 창도 「완전 삭제 사유 (필수)」로 그린다
+ * (`common/master-data-trash-dialogs.tsx` 의 `MasterDataPermanentDeleteDialog`).
+ *
+ * 🔴 **두 함수를 하나로 합치지 마라.** 「필수냐 아니냐」를 인자로 받는 한 함수로
+ * 만들면 부르는 쪽이 그 인자를 빠뜨리는 날 **되돌릴 수 없는 조작이 사유 없이**
+ * 지나간다. 그 실수는 오류를 내지 않고, 사람이 감사 로그를 열어 보기 전까지
+ * 아무도 모른다.
+ *
+ * 길이 상한은 위와 **같은 값**을 쓴다 — 같은 창에서 같은 칸에 적는 글이라 한쪽만
+ * 길면 어느 쪽이 규칙인지 알 수 없다.
+ * ============================================================================
+ */
+
+const PURGE_REASON_REQUIRED_MESSAGE = "완전 삭제 사유를 입력해 주세요.";
+const PURGE_REASON_TOO_LONG_MESSAGE = "완전 삭제 사유가 너무 깁니다.";
+
+export type ServiceReportPurgeReasonResult =
+  | { ok: true; reason: string }
+  | { ok: false; message: string };
+
+/**
+ * 받은 완전 삭제 사유를 감사에 담을 값으로. **글자가 아니거나 다듬어서 빈
+ * 글자면 거절**한다 — 공백만 두들긴 사유를 «사유가 있다»고 기록하면, 나중에 그
+ * 기록을 보는 사람이 이유가 적혀 있는 줄 알고 열어 본다.
+ */
+export function readServiceReportPurgeReason(raw: unknown): ServiceReportPurgeReasonResult {
+  const trimmed = typeof raw === "string" ? raw.trim() : "";
+  if (trimmed === "") return { ok: false, message: PURGE_REASON_REQUIRED_MESSAGE };
+  if (trimmed.length > SERVICE_REPORT_DELETE_REASON_MAX_LENGTH) {
+    return { ok: false, message: PURGE_REASON_TOO_LONG_MESSAGE };
+  }
+  return { ok: true, reason: trimmed };
+}
