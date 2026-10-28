@@ -39,6 +39,54 @@ import { collapseWhitespace, isDashPlaceholder, normalizeKey, type GridLike } fr
  * 머리글이 여럿이면(묶음이 여럿이면) 각각을 따로 읽는다 — 실측으로 시트당 묶음이
  * 1개(334시트) · 2개(159시트) · 3개(143시트)다.
  *
+ * ── 🔴 이름은 **품번 칸**에서 온다 (2026-10-28 뒤집음) ───────────────
+ * 2026-09-22 부터 이 파일은 반대로 적고 있었다. **그 문장을 인용해 남긴다**:
+ *
+ *     「`型式`·`仕様書番号` 칸은 `spec` 이다」 ·
+ *     「부품 이름. 🔴 `部品名` 칸이 비고 규격 칸만 적힌 줄에서는 규격 글자다」 ·
+ *     「`交換部品詳細` 시트의 `spec`(형식번호)은 미리보기가 이미 버린다」
+ *
+ * 🔵 사용자가 **실물 연락서 두 장을 열어 보여 주었다**(2026-10-28). 거기서
+ * 드러난 것이 이렇다:
+ *
+ *     탭 `交換部品詳細(RF)` · `部品名`=일본어 설명 · `型式`=**빈칸** · `仕様書番号`=**품번**
+ *     탭 `交換部品詳細`     · `部品名`=일본어 설명 · `型式`=**품번**  · `仕様書番号`=빈칸
+ *
+ * 🔴 **`部品名` 은 두 장 다 「사람이 읽는 일본어 설명」이지 부품명이 아니다.**
+ * 재고관리 시스템의 부품명과 같은 글자는 **품번**이고, 그것은 `型式` 과
+ * `仕様書番号` 가운데 **값이 있는 쪽**에 적힌다 — 어느 쪽이 찰지는 장마다 다르고
+ * 양식이 정해 주지 않는다. 이 품번으로 [고장 부품] 그래프가 재고관리 쪽 부품과
+ * 같은 것으로 묶는다.
+ *
+ * 그래서 이름은 **`型式` → `仕様書番号` → `部品名`** 차례로 고른다:
+ *  · 앞의 둘이 품번이다. 둘 다 보아야 두 판본을 다 담는다.
+ *  · 🔵 `部品名` 은 **맨 마지막 비상구**다. 사람이 읽는 설명이라 재고관리와
+ *    묶이지 않지만, 앞의 둘이 다 빈 줄에서 이름이 통째로 사라지는 것보다는
+ *    설명이라도 남는 쪽이 낫다.
+ *  · 🔴 **쓰지 않은 칸을 버리지 않는다.** `model`(`型式`) · `partName`(`部品名`) ·
+ *    `spec`(`仕様書番号`)을 칸 글자 그대로 함께 싣는다. 「이름이 이상하다」는
+ *    신고가 왔을 때 어느 칸에서 왔는지 되짚을 수 있어야 한다. `address` 도
+ *    **이름을 가져온 칸**을 가리킨다(예전에는 언제나 `部品名` 열이었다).
+ *  · 🔵 **품번만 싣는다.** 설명을 괄호로 덧붙이지 않는다(사용자 2026-10-28) —
+ *    화면에도 저장에도 품번 글자 그대로 나간다.
+ *
+ * ⚠️ **판본 C(143시트)는 차례를 그대로 둔다.** 머리글이 `部品名 / 型式`(B열)과
+ * `仕様書番号 / 型式`(D열)로 **두 칸 다 `型式` 을 품은 겹뜻**이라, 품번이 어느
+ * 칸에 들었는지 가를 근거가 양식에 **없다.** 사용자가 보여 준 두 장도 판본 C 가
+ * 아니었다(세 칸이 홑뜻으로 따로 선 판본이었다). 그래서 판본 C 는 지금까지처럼
+ * `部品名…`(B열)을 먼저 쓰고, `仕様書番号…`(D열)은 앞이 빈 줄의 비상구로 둔다
+ * (실측 11줄).
+ * 🔴 그 차례를 지키려고 `仕様書番号 / 型式` 에만 **`specCombined` 라는 따로 된
+ * 구실**을 주고 **고르는 차례의 맨 뒤**에 둔다. 판본 A·B 의 홑뜻 `仕様書番号` 와
+ * 같은 자리에 놓으면 판본 C 의 이름이 B열에서 D열로 옮겨 가는데, 그것은 실물로
+ * 재어 보지 않은 변경이다.
+ *
+ * 🔴 **세지 못한 것** — `型式`·`仕様書番号`·`部品名` 이 한 줄에 어떤 짝으로
+ * 차는지 그 분포는 재지 못했다(연락서 원본 xlsm 이 저장소에 없다). 본 것은
+ * 사용자가 열어 준 **두 장**과, 기록으로 남은 「부품 줄 1,315줄 가운데 `部品名`
+ * 이 비고 규격만 있는 줄 11줄」뿐이다. 그래서 떨어지는 길을 끝까지 남긴다 —
+ * 재지 못한 자리에서는 잃지 않는 쪽을 고른다.
+ *
  * ── 🔴 드롭다운 목록 열을 부품으로 읽지 않는다 ────────────────────────
  * 이 시트에는 사람이 고르는 **부품 이름 목록**이 숨은 열에 통째로 들어 있다 —
  * A 판본은 N 열(`部品名リスト`)과 O 열, B 판본은 N 열, C 판본은 L·M 열이다.
@@ -93,14 +141,34 @@ export function pickPartsDetailSheetNames(sheetNames: readonly string[]): string
   return sheetNames.filter(isPartsDetailSheetName);
 }
 
-/** 머리글 칸이 어느 구실을 하는가. `ignore` 는 드롭다운 목록 열, `foreign` 은 남의 표. */
-type HeaderRole = "name" | "spec" | "quantity" | "status" | "measure" | "unit" | "ignore" | "foreign";
+/**
+ * 머리글 칸이 어느 구실을 하는가. `ignore` 는 드롭다운 목록 열, `foreign` 은 남의 표.
+ *
+ * 🔴 이름이 될 수 있는 칸이 **넷으로 갈라져 있다.** 네 칸의 값이 서로 다른
+ * 물건이고 **고르는 차례가 다르기** 때문이다(머리말 「이름은 품번 칸에서 온다」):
+ *   `model`(`型式`) · `spec`(`仕様書番号`)   — 품번. 판본 A·B 의 홑뜻 칸.
+ *   `name`(`部品名`)                        — 사람이 읽는 설명. 맨 마지막 비상구.
+ *   `specCombined`(`仕様書番号 / 型式`)      — 판본 C 전용 겹뜻 칸. 차례의 맨 뒤.
+ */
+type HeaderRole =
+  | "name"
+  | "model"
+  | "spec"
+  | "specCombined"
+  | "quantity"
+  | "status"
+  | "measure"
+  | "unit"
+  | "ignore"
+  | "foreign";
 
 /**
  * 머리글 글자 → 구실. **정확히 같을 때만** 맞춘다(앞머리 일치가 아니다) —
  * `部品名リスト`(드롭다운 목록)가 `部品名` 으로 잡히면 교산 부품 대장이 통째로
- * 부품으로 들어오고, `単体(So側)型式：`(인수 정보 줄)이 `型式` 로 잡히면 모델명이
- * 부품으로 들어온다. 실측에서 둘 다 실제로 있는 글자다.
+ * 부품으로 들어오고, `単体(So側)型式：`(인수 정보 줄)이 `型式` 로 잡히면 **제품
+ * 모델명이 부품 이름으로** 들어온다. 실측에서 둘 다 실제로 있는 글자다.
+ * 🔴 `型式` 이 이름 칸이 된 2026-10-28 뒤로 뒤쪽 위험이 더 커졌다 — 예전에는
+ * 모델명이 버려지는 `spec` 으로 떨어졌지만 이제는 곧바로 이름이 된다.
  */
 const HEADER_ROLES: ReadonlyMap<string, HeaderRole> = new Map([
   // 🔴 드롭다운 목록 열 — 값이 아니라 고를 거리다. 버린다.
@@ -110,12 +178,20 @@ const HEADER_ROLES: ReadonlyMap<string, HeaderRole> = new Map([
   ["変更実施日", "foreign"],
   ["変更及び追加内容", "foreign"],
   ["変更者", "foreign"],
-  // 부품 표의 열들. `部品名 / 型式`(C 판본)은 공백을 눌러 `部品名/型式` 이 된다.
+  // 🔴 홀로 선 `型式` 열(판본 A 의 D열 · 판본 B 의 E열). **품번이고 1순위다.**
+  ["型式", "model"],
+  // 🔴 홀로 선 `仕様書番号` 열. **여기도 품번이다** — 실물 판본 ①(`(RF)` 탭)은
+  //    `型式` 을 비워 두고 이 칸에 품번을 적는다(머리말). 2순위.
+  ["仕様書番号", "spec"],
+  // 🔴 사람이 읽는 일본어 설명. **맨 마지막 비상구**다(머리말).
+  //    판본 C 의 `部品名 / 型式`(공백을 눌러 `部品名/型式` 이 된다)도 여기다 —
+  //    한 칸에 두 뜻을 겹쳐 적은 것이라 `型式` 을 가려낼 수 없고, 판본 C 의
+  //    차례를 그대로 두기로 했기 때문이다(머리말).
   ["部品名/型式", "name"],
   ["部品名", "name"],
-  ["仕様書番号/型式", "spec"],
-  ["仕様書番号", "spec"],
-  ["型式", "spec"],
+  // 🔴 판본 C 전용 겹뜻 규격 칸. **고르는 차례의 맨 뒤**다 — 홑뜻 `仕様書番号`
+  //    와 같은 자리에 놓으면 판본 C 의 이름이 B열에서 D열로 옮겨 간다(머리말).
+  ["仕様書番号/型式", "specCombined"],
   ["数量", "quantity"],
   ["状況", "status"],
   ["対象", "status"],
@@ -169,12 +245,34 @@ export type KyosanDetailPartKind = "fault" | "preventive";
 /** 「交換部品詳細」 시트에서 읽은 부품 한 줄. */
 export type KyosanDetailPart = {
   /**
-   * 부품 이름. 🔴 `部品名` 칸이 비고 규격 칸만 적힌 줄에서는 **규격 글자**다
-   * (실측 11줄 — D210102 의 `COM-CA-DNS` 가 그렇다). 이름이 하나도 없으면 줄을
-   * 만들지 않으므로 여기는 언제나 값이 있다.
+   * 부품 이름 — 🔴 **품번**이다 (2026-10-28, 머리말 「이름은 품번 칸에서 온다」).
+   * **`型式` → `仕様書番号` → `部品名`** 차례로 고른 값이고, 앞의 둘이 품번,
+   * `部品名` 은 사람이 읽는 설명이라 **맨 마지막 비상구**다. 🔵 설명을 괄호로
+   * 덧붙이지 않는다 — 고른 칸의 글자 그대로다. 넷이 다 비면 줄을 만들지 않으므로
+   * 여기는 언제나 값이 있다.
    */
   name: string;
-  /** `型式`·`仕様書番号` 칸. 없으면 null. 이름으로 올려 쓴 줄에서도 null 이다. */
+  /**
+   * 🔴 `型式` 칸 글자 그대로. 없으면 null. **이름으로 쓴 줄에서도 비우지
+   * 않는다** — 이름이 어느 칸에서 왔는지 되짚으려면 날것이 남아 있어야 한다.
+   * 판본 C 에는 이 칸이 따로 없어 언제나 null 이다(머리말).
+   * ⚠️ 제품 모델(`単体(So側)型式：`)이 아니라 **부품의 품번**이다.
+   */
+  model: string | null;
+  /**
+   * `部品名` 칸 글자 그대로. 없으면 null. 이름으로 쓴 줄에서도 비우지 않는다.
+   * 🔴 **사람이 읽는 일본어 설명**이다(실물 두 장 모두). 재고관리 부품명이
+   * 아니므로 이 글자로는 묶이지 않는다.
+   */
+  partName: string | null;
+  /**
+   * `仕様書番号`(판본 C 는 `仕様書番号 / 型式`) 칸 글자 그대로. 없으면 null.
+   * 🔴 실물 판본 ①(`交換部品詳細(RF)` 탭)은 **여기에 품번을 적는다** — 「규격
+   * 번호라 버린다」가 아니다(머리말).
+   * 🔴 2026-10-28 전에는 여기에 `型式` 이 섞여 들어왔고, 이름으로 올려 쓴 줄에서는
+   * null 로 비웠다. 지금은 **칸 글자 그대로**다 — 비우지 않는다(위 `model` 과
+   * 같은 까닭이다).
+   */
   spec: string | null;
   kind: KyosanDetailPartKind;
   /**
@@ -189,7 +287,12 @@ export type KyosanDetailPart = {
   measure: string | null;
   /** 어느 시트에서 왔는가 — (RF)/(DC) 를 가르는 데 쓴다. */
   sheetName: string;
-  /** `C17` 꼴. 보고와 시험에서 어디를 읽었는지 말하려고 들고 있다. */
+  /**
+   * `C17` 꼴. 보고와 시험에서 어디를 읽었는지 말하려고 들고 있다.
+   * 🔴 **이름을 가져온 칸**을 가리킨다(2026-10-28). 예전에는 이름이 어느 칸에서
+   * 왔든 언제나 `部品名` 열을 적었는데, `型式` 이 이름이 된 뒤로 그 글자는
+   * 거짓이 된다 — 「어디를 읽었는가」가 이 값의 유일한 쓸모다.
+   */
   address: string;
 };
 
@@ -212,7 +315,12 @@ function readRowLabels(grid: GridLike, row: number): RowLabels {
   return { count, byRole };
 }
 
-/** 부품 표의 머리글 줄인가 — 품명 열과 수량 열이 **둘 다** 있어야 한다. */
+/**
+ * 부품 표의 머리글 줄인가 — 품명 열과 수량 열이 **둘 다** 있어야 한다.
+ * ⚠️ `型式`(`model`)만 있고 `部品名` 이 없는 머리글은 부품 표로 치지 않는다.
+ * `型式` 이 이름이 된 2026-10-28 뒤로도 그대로 둔다 — 실측 세 판본이 모두
+ * `部品名` 을 갖고 있고, 재어 보지 않은 꼴을 여기서 열면 남의 표를 집는다.
+ */
 function isPartsHeaderRow(labels: RowLabels): boolean {
   return labels.count >= HEADER_MIN_LABELS && labels.byRole.has("name") && labels.byRole.has("quantity");
 }
@@ -235,11 +343,50 @@ function cellText(grid: GridLike, row: number, column: number | undefined): stri
   return text === "" || isDashPlaceholder(text) ? null : text;
 }
 
-/** 열들을 왼쪽부터 보아 처음 나오는 값. `型式` 이 `仕様書番号` 보다 왼쪽이다. */
-function firstText(grid: GridLike, row: number, columns: readonly number[]): string | null {
+/** 칸 하나를 집은 결과 — 글자와 **어느 열에서 왔는가**. `address` 가 그 열을 적는다. */
+type PickedCell = { text: string; column: number };
+
+/**
+ * 열들을 왼쪽부터 보아 처음 값이 있는 칸. 같은 구실의 열이 **여럿일 수 있어서**
+ * 배열을 받는다 — 실측 세 판본에서는 구실마다 한 머리글에 한 열씩이지만, 머리글을
+ * 글자로 찾는 이상 같은 이름이 두 번 나오는 판본을 막아 둘 까닭이 없다.
+ * 🔵 `spec` 칸에 실을 때만은 홑뜻 `仕様書番号` 와 겹뜻 `仕様書番号 / 型式` 을
+ * 한 묶음으로 넘긴다(`allSpecColumns`) — 둘이 **같은 판본에 함께 나오지 않는다.**
+ */
+function firstCell(
+  grid: GridLike,
+  row: number,
+  columns: readonly number[]
+): PickedCell | null {
   for (const column of columns) {
     const text = cellText(grid, row, column);
-    if (text !== null) return text;
+    if (text !== null) return { text, column };
+  }
+  return null;
+}
+
+/** `firstCell` 의 글자만. */
+function firstText(grid: GridLike, row: number, columns: readonly number[]): string | null {
+  return firstCell(grid, row, columns)?.text ?? null;
+}
+
+/**
+ * 🔴 이 줄의 **이름**은 어느 칸에서 오는가 — 열 묶음을 **적힌 차례대로** 보아
+ * 처음 값이 있는 칸이 이름이다. 차례는 부르는 쪽이 적어 넘긴다(호출부에 칸
+ * 이름이 한 줄씩 주석으로 붙어 있다 — 거기가 이 설계를 읽는 자리다).
+ *
+ * 🔴 **차례가 곧 설계다**(머리말 「이름은 품번 칸에서 온다」). 품번 칸이 먼저고,
+ * 사람이 읽는 설명(`部品名`)이 맨 마지막 비상구다. 다 비면 null — 사람이 안
+ * 적은 줄이다(양식이 미리 그려 둔 빈 줄).
+ */
+function pickPartName(
+  grid: GridLike,
+  row: number,
+  columnsInOrder: readonly (readonly number[])[]
+): PickedCell | null {
+  for (const columns of columnsInOrder) {
+    const picked = firstCell(grid, row, columns);
+    if (picked !== null) return picked;
   }
   return null;
 }
@@ -278,7 +425,14 @@ export function readPartsDetailSheet(grid: GridLike, sheetName: string): KyosanD
     if (!header || !isPartsHeaderRow(header)) continue;
 
     const nameColumn = header.byRole.get("name")?.[0];
+    const nameColumns = nameColumn === undefined ? [] : [nameColumn];
+    const modelColumns = header.byRole.get("model") ?? [];
     const specColumns = header.byRole.get("spec") ?? [];
+    const specCombinedColumns = header.byRole.get("specCombined") ?? [];
+    // 규격 칸은 판본마다 **둘 중 하나만** 나온다(홑뜻 `仕様書番号` 은 판본 A·B,
+    // 겹뜻 `仕様書番号 / 型式` 은 판본 C). `spec` 칸에 실을 때는 한 묶음으로 본다 —
+    // 갈라 둔 까닭은 **고르는 차례**뿐이고, 담기는 값의 뜻은 같은 규격 칸이다.
+    const allSpecColumns = [...specColumns, ...specCombinedColumns].sort((a, b) => a - b);
     const quantityColumn = header.byRole.get("quantity")?.[0];
     const statusColumn = header.byRole.get("status")?.[0];
     const measureColumn = header.byRole.get("measure")?.[0];
@@ -288,25 +442,38 @@ export function readPartsDetailSheet(grid: GridLike, sheetName: string): KyosanD
       const labels = labelsByRow.get(row);
       if (labels && isBlockBoundaryRow(labels)) break;
 
-      const name = cellText(grid, row, nameColumn);
-      const spec = firstText(grid, row, specColumns);
-      // 품명도 규격도 없으면 사람이 안 적은 줄이다(양식이 미리 그려 둔 빈 줄).
-      if (name === null && spec === null) continue;
-      // 🔴 「交換無し」 는 부품이 아니다(위 머리말). Card 시트 경로와 같은 판정이다.
-      if (name !== null && isKyosanStateOnlyPartName(name)) continue;
+      const partName = cellText(grid, row, nameColumn);
+      // 🔴 「交換無し」 는 부품이 아니다(위 머리말). **`部品名` 칸으로 판정한다** —
+      //    실측 187줄이 거기 적혀 있고, Card 시트 경로와 같은 판정이다. `型式` 을
+      //    이름으로 쓰게 된 뒤에도 이 판정 자리를 옮기지 않는다: 옮기면 그 187줄의
+      //    거름이 재어 보지 않은 규칙으로 바뀐다.
+      if (partName !== null && isKyosanStateOnlyPartName(partName)) continue;
+
+      // 🔴 **이름 고르기 차례 — 여기가 이 조각의 설계다**(머리말 「이름은 품번
+      //    칸에서 온다」). 다 비면 사람이 안 적은 줄이다(양식이 그려 둔 빈 줄).
+      const picked = pickPartName(grid, row, [
+        modelColumns, // 1. `型式`           — 품번. 실물 판본 ②(`交換部品詳細` 탭)가 여기에 적는다.
+        specColumns, // 2. `仕様書番号`      — 품번. 실물 판본 ①(`(RF)` 탭)이 여기에 적는다.
+        nameColumns, // 3. `部品名`          — 🔵 비상구. 사람이 읽는 일본어 설명이라 재고관리와 안 묶인다.
+        specCombinedColumns, // 4. `仕様書番号 / 型式` — 판본 C 전용 겹뜻 칸. 차례를 지키려고 맨 뒤다.
+      ]);
+      if (picked === null) continue;
 
       const measure = cellText(grid, row, measureColumn);
       const status = cellText(grid, row, statusColumn);
       parts.push({
-        // 품명이 비면 규격을 이름으로 올려 쓴다 — 그러지 않으면 그 줄이 사라진다.
-        name: name ?? (spec as string),
-        spec: name === null ? null : spec,
+        name: picked.text,
+        // 🔴 쓰지 않은 칸도 날것 그대로 싣는다 — 이름이 어디서 왔는지 되짚는 길이다.
+        model: firstText(grid, row, modelColumns),
+        partName,
+        spec: firstText(grid, row, allSpecColumns),
         kind: toPartKind(measure, status),
         quantity: toQuantity(cellText(grid, row, quantityColumn)),
         status,
         measure,
         sheetName,
-        address: `${columnNumberToLetters(nameColumn ?? 1)}${row}`,
+        // 🔴 **이름을 가져온 칸**을 적는다(`型式` 열일 수도 `部品名` 열일 수도 있다).
+        address: `${columnNumberToLetters(picked.column)}${row}`,
       });
     }
   }

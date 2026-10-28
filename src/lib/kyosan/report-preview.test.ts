@@ -300,18 +300,28 @@ describe("연락서 미리보기", () => {
  * 삼켜졌다. 갈래가 다르면 **두 줄**, 갈래가 같으면 **한 줄**이다 — 그 둘을
  * 각각의 시험이 못 박는다.
  */
+/**
+ * 🔴 `model`(`型式`)을 따로 주지 않으면 **이름과 같은 글자**를 채운다
+ * (2026-10-28). 판독기가 이름을 `型式` 칸에서 가져오므로, 이름이 있는데 세 곁
+ * 칸이 다 비어 있는 줄은 **실제로는 나올 수 없다** — 그런 본보기를 두면 다음
+ * 사람이 그것을 사실로 읽는다. 미리보기가 보는 것은 `name`·`kind`·`quantity`
+ * 뿐이라 아래 시험들의 결과는 이 채움과 무관하다.
+ */
 function detailPartOf(overrides: Partial<KyosanDetailPart> = {}): KyosanDetailPart {
-  return {
+  const part: KyosanDetailPart = {
     name: "값-부품A",
+    model: null,
+    partName: null,
     spec: null,
     kind: "fault",
     quantity: null,
     status: null,
     measure: null,
     sheetName: "交換部品詳細",
-    address: "C8",
+    address: "D8",
     ...overrides,
   };
+  return part.model === null ? { ...part, model: part.name } : part;
 }
 
 describe("교체 부품 — Card 시트와 交換部品詳細 시트를 합친다", () => {
@@ -671,9 +681,21 @@ function estimatedOf(
  * 들어 있다. 아래 시험들은 그것이 **나타나는가/사라지는가**로 갈아타기를 잰다.
  */
 describe("推定修理内容 — 🔴 장 단위로 갈아탄다", () => {
-  test("🔴 추정수리내용이 부품을 냈으면 그 이름만 쓴다 — 대장 이름은 섞이지 않는다", () => {
+  /**
+   * 🔴 **뜻을 뒤집은 시험** (2026-10-28). 예전 제목은 「🔴 추정수리내용이 부품을
+   * 냈으면 그 이름만 쓴다 — 대장 이름은 섞이지 않는다」였고, 같은 자료에서
+   * `값-손글씨A`·`값-손글씨B` 만 나오는 것을 못 박고 있었다.
+   *
+   * 🔵 사용자가 실물 연락서 두 장을 열어 보여 주었다 — **재고관리 부품명과 같은
+   * 글자(품번)는 `交換部品詳細` 시트에만 있다.** 그런데 옛 차례 때문에 **두 장
+   * 다 품번이 멀쩡히 있는데도 손글씨 이름을 쓰고 있었다.** 그래서 이기는 쪽을
+   * 뒤집었다.
+   *
+   * 🔵 **되살아나면 깨지는 단언이다** — 되돌리면 손글씨 둘만 남아 여기서 깨진다.
+   */
+  test("🔴 `交換部品詳細` 가 부품을 냈으면 **그쪽이 이긴다** — 추정수리내용에 부품이 있어도", () => {
     const report = reportOf({
-      detailParts: [detailPartOf({ name: "값-대장부품", quantity: 4, kind: "fault" })],
+      detailParts: [detailPartOf({ name: "값-품번A", quantity: 4, kind: "fault" })],
       estimatedRepair: estimatedOf({
         parts: [
           estimatedPartOf({ name: "값-손글씨A", kind: "fault", quantity: 3 }),
@@ -684,13 +706,46 @@ describe("推定修理内容 — 🔴 장 단위로 갈아탄다", () => {
     const preview = previewOf(report, caseOf(), stateOf());
     assert.ok(preview.plan);
     if (!preview.plan) return;
-    // Card 의 `값-부품A`·`값-부품B` 도, 詳細의 `값-대장부품` 도 들어오지 않는다.
+    // 🔴 지금까지의 길(Card + 詳細)이 그대로 돌아왔다. 손글씨는 **하나도** 없다.
+    assert.deepEqual(preview.plan.parts, [
+      { kind: "fault", text: "값-부품A" },
+      { kind: "preventive", text: "값-부품B" },
+      { kind: "fault", text: "값-품번A", quantity: 4 },
+    ]);
+    assert.equal(
+      preview.plan.parts.some((part) => part.text.startsWith("값-손글씨")),
+      false
+    );
+  });
+
+  /**
+   * 🔵 **그 길은 그대로 산다** — `交換部品詳細` 가 부품 줄을 **못 내면** 지금처럼
+   * `推定修理内容` 으로 떨어진다. 🔴 이것이 없으면 뒤집기가 「손글씨 출처를
+   * 걷어낸 것」이 되어 버린다(사용자가 화면을 보고 두 번 짚어 들인 출처다).
+   */
+  test("🔴 `交換部品詳細` 가 비면 추정수리내용으로 떨어진다 — 손글씨 출처가 살아 있다", () => {
+    const report = reportOf({
+      detailParts: [],
+      estimatedRepair: estimatedOf({
+        parts: [
+          estimatedPartOf({ name: "값-손글씨A", kind: "fault", quantity: 3 }),
+          estimatedPartOf({ name: "값-손글씨B", kind: "preventive", quantity: 7 }),
+        ],
+      }),
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    // Card 의 `값-부품A`·`값-부품B` 도 들어오지 않는다 — 한 장에서 두 출처를 섞지 않는다.
     assert.deepEqual(preview.plan.parts, [
       { kind: "fault", text: "값-손글씨A", quantity: 3 },
       { kind: "preventive", text: "값-손글씨B", quantity: 7 },
     ]);
   });
 
+  // ⚠️ 2026-10-28 뒤로 이 장은 **첫 관문**에서 지금까지의 길로 간다(詳細에 줄이
+  //    있다). 단언은 그대로 참이고, 「추정수리내용이 비면」을 홀로 재는 자리는
+  //    아래 `O/H 권유만` 짝 시험으로 옮겨 두었다.
   test("추정수리내용이 부품을 못 냈으면 지금까지의 길을 그대로 쓴다", () => {
     const report = reportOf({
       detailParts: [detailPartOf({ name: "값-부품A", quantity: 4, kind: "fault" })],
@@ -731,6 +786,31 @@ describe("推定修理内容 — 🔴 장 단위로 갈아탄다", () => {
       preview.plan.parts.some((part) => part.text === "값-오버홀부품"),
       false
     );
+  });
+
+  /**
+   * 🔴 **위 시험의 짝** (2026-10-28). 이기는 쪽이 뒤집힌 뒤로 위 장은 `交換部品詳細`
+   * 에 줄이 있어 **첫 관문에서** 지금까지의 길로 간다 — 그래서 「O/H 권유만 적힌
+   * 장을 빈 장으로 떨어뜨리지 않는다」는 멈춤막(`parts.length > 0`)을 더 이상
+   * 혼자 재지 못한다. 이 시험이 그 자리를 이어받는다: `交換部品詳細` 가 비어 있고
+   * 추정수리내용에 **O/H 권유만** 있는 장이다. 멈춤막을 걷어내면 부품이 0줄이 되어
+   * 여기서 깨진다.
+   */
+  test("🔴 `交換部品詳細` 도 비고 O/H 권유만 있으면 Card 로 떨어진다 — 부품을 통째로 잃지 않는다", () => {
+    const report = reportOf({
+      detailParts: [],
+      estimatedRepair: estimatedOf({
+        parts: [],
+        overhaulRecommendations: ["O/Hとして以下の作業を推奨致します。", "・값-오버홀부품の交換…7枚"],
+      }),
+    });
+    const preview = previewOf(report, caseOf(), stateOf());
+    assert.ok(preview.plan);
+    if (!preview.plan) return;
+    assert.deepEqual(preview.plan.parts, [
+      { kind: "fault", text: "값-부품A" },
+      { kind: "preventive", text: "값-부품B" },
+    ]);
   });
 
   test("같은 갈래·같은 이름이 두 줄이면 **수량을 더한다** — 뒤 줄을 잃지 않는다", () => {
