@@ -79,7 +79,9 @@ src/lib/domain/procedure-editor-save-state.test.ts
 src/lib/domain/procedure-execution-topology.test.ts
 src/lib/domain/product-relation.test.ts
 src/lib/auth/inventory-authorization.test.ts
-src/lib/domain/inventory-types.test.ts
+# 🔵 2026-10-28(조각 13-D): `src/lib/domain/inventory-types.test.ts` 를 뺐다 — 재던
+# 모듈(`domain/inventory-types.ts`)을 같은 조각에서 지웠다. 마지막 참조는
+# `auth/inventory-authorization.ts` 의 상태 타입 하나였고, 그 함수들도 함께 지웠다.
 src/lib/validation/repair-case-work-record-input.test.ts
 src/lib/auth/repair-case-work-record-authorization.test.ts
 src/lib/auth/my-active-work-authorization.test.ts

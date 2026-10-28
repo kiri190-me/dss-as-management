@@ -158,10 +158,59 @@ test("고객사 추가는 영업·엔지니어까지 되지만 수정은 여전�
   assert.equal(isSettingsEnforced("customers.create"), true);
 });
 
-test("엔지니어는 부품을 요청할 수 있지만 요청을 처리하지는 못한다", () => {
+/**
+ * ============================================================================
+ * 🔴 재고 관리에 남은 잎은 **부품 요청 하나**다 (2026-10-28, 조각 13-D)
+ * ============================================================================
+ * 옛 재고 기능이 A/S 에서 통째로 걷히면서 잎 여섯(`view` · `parts` · `stock` ·
+ * `history` · `requestProcessing` · `lifecycle`)을 트리와 상한 계산에서 함께
+ * 뺐다. 아래 둘은 **그것이 되살아나면 깨지는** 단언이다 — 한쪽만 되돌리는 것도
+ * 잡는다(트리에만 넣으면 ㉠ 이, 상한에만 넣으면 ㉡ 가 깨진다).
+ * ============================================================================
+ */
+test("㉠ 🔴 재고 관리의 잎은 `inventory.requests` 하나뿐이다", () => {
+  assert.deepEqual(
+    featuresOfArea("inventory").map((feature) => feature.key),
+    ["inventory.requests"]
+  );
+  // 🔴 키 글자가 바뀌면 운영에 저장된 role_permissions 행이 갈 곳을 잃는다 —
+  //    오류 없이 조용히 기본값으로 되돌아간다. 그래서 글자를 그대로 못 박는다.
+  assert.equal(isPermissionLeafKey("inventory.requests"), true);
+  // 지운 여섯은 이제 「트리에 없는 키」다(바로 위 시험과 같은 자리로 떨어진다).
+  for (const gone of ["view", "parts", "stock", "history", "requestProcessing", "lifecycle"]) {
+    assert.equal(isPermissionLeafKey(`inventory.${gone}`), false, gone);
+    assert.equal(baselineLeafLevel(`inventory.${gone}`, "SUPER_ADMIN"), "NONE", gone);
+  }
+});
+
+test("㉡ 🔴 재고 메뉴의 상한이 잎 최대값과 **정확히** 같다", () => {
+  // 🔵 다른 메뉴에는 댈 수 없는 잣대다 — 메뉴 상한은 잎들과 **따로** 계산되고
+  //    (permission-baseline.ts 의 원칙), 보통은 메뉴 쪽이 근사치라 더 높다.
+  //    재고만 등호를 요구하는 까닭은 잎이 하나뿐이고, 그 하나와 메뉴가 같은 두
+  //    함수를 부르기 때문이다. 한쪽만 고치는 날 여기서 걸린다.
+  // 🔴 값을 손으로 적지 않고 양쪽을 맞대어 본다 — 적어 두면 기본 정책이 바뀌는
+  //    날 「어긋났는가」가 아니라 「숫자가 바뀌었는가」를 재게 된다.
+  for (const role of ROLE_CODES) {
+    assert.equal(
+      baselinePermissionLevel("inventory", role),
+      featureMax("inventory", role),
+      `${role}: 메뉴 상한과 잎 최대값이 갈렸다`
+    );
+  }
+  // 표본이 비어서 공짜로 통과하지 않게, 지금 갈리는 자리 둘을 함께 못 박는다.
+  assert.equal(baselinePermissionLevel("inventory", "AS_ENGINEER"), "WRITE", "요청을 올리는 쪽");
+  assert.equal(baselinePermissionLevel("inventory", "SALES"), "NONE", "부품 요청에 닿지 못한다");
+});
+
+test("엔지니어는 부품을 요청할 수 있다 — 기본값이 2026-08-28 결정 그대로다", () => {
   assert.equal(baselineLeafLevel("inventory.requests", "AS_ENGINEER"), "WRITE");
-  assert.equal(baselineLeafLevel("inventory.requestProcessing", "AS_ENGINEER"), "NONE");
-  assert.equal(baselineLeafLevel("inventory.requestProcessing", "INVENTORY_MANAGER"), "MANAGE");
+  assert.equal(baselineLeafLevel("inventory.requests", "SUPER_ADMIN"), "WRITE");
+  // 올리지는 못해도 보기는 하는 역할이 있다 — 쓰기와 읽기가 갈리는 잎이다.
+  assert.equal(baselineLeafLevel("inventory.requests", "ADMIN"), "READ");
+  assert.equal(baselineLeafLevel("inventory.requests", "INVENTORY_MANAGER"), "READ");
+  // 🔴 SALES 가 닫혀 있다는 것이 「넓히기」 시험의 표본이다
+  //    (mutations/role-permissions.integration.test.ts 의 WIDENING_TARGET).
+  assert.equal(baselineLeafLevel("inventory.requests", "SALES"), "NONE");
 });
 
 test("엔지니어는 작업 기록을 남길 수 있지만 무효화는 못 한다", () => {
@@ -299,19 +348,24 @@ test("절차 수행은 기술 작업 절차가 아니라 접수 건 아래에 �
 // ───────────────────────────────────── 메뉴 수준 계산 (resolver·저장·화면 공용)
 
 test("메뉴 수준은 하위 기능 중 가장 높은 값이다", () => {
+  // 🔵 2026-10-28(조각 13-D)에 **표본을 재고에서 고객사로 옮겼다** — 재고의 잎이
+  //    하나만 남아 「여럿 중 최대」를 재지 못하게 됐기 때문이다. 단언을 약하게
+  //    고친 것이 아니라, 여럿이 있는 메뉴로 옮긴 것이다.
   const levels: Record<string, PermissionLevel> = {
-    "inventory.view": "READ",
-    "inventory.parts": "NONE",
-    "inventory.stock": "WRITE",
-    "inventory.history": "READ",
-    "inventory.requests": "NONE",
-    "inventory.requestProcessing": "NONE",
+    "customers.view": "READ",
+    "customers.create": "NONE",
+    "customers.edit": "WRITE",
+    "customers.endUsers": "READ",
+    "customers.contacts": "NONE",
+    "customers.lifecycle": "NONE",
   };
-  assert.equal(areaLevelFromLeaves("inventory", (key) => levels[key] ?? "NONE"), "WRITE");
+  assert.ok(featuresOfArea("customers").length > 1, "표본이 잎 하나짜리 메뉴로 줄었다");
+  assert.equal(areaLevelFromLeaves("customers", (key) => levels[key] ?? "NONE"), "WRITE");
 });
 
 test("하위 기능이 하나도 열려 있지 않으면 메뉴가 닫힌다", () => {
   // 사이드바에서 감추고 페이지 가드가 막는 판단이 이 값 하나에 달려 있다.
+  assert.equal(areaLevelFromLeaves("customers", () => "NONE"), "NONE");
   assert.equal(areaLevelFromLeaves("inventory", () => "NONE"), "NONE");
 });
 

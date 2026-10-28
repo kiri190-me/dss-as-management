@@ -24,7 +24,7 @@ import {
  * 그 키가 그대로 저장된다.
  *
  * ── 키는 경로다 ─────────────────────────────────────────────────────────
- * "inventory.parts"처럼 점으로 잇는다. role_permissions.area_key가 자유
+ * "inventory.requests"처럼 점으로 잇는다. role_permissions.area_key가 자유
  * 텍스트라서 저장 구조를 바꾸지 않고 그대로 들어간다 — 마이그레이션이 필요
  * 없다는 뜻이다.
  *
@@ -375,52 +375,30 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
     },
   }),
 
+  /**
+   * ── 🔴 2026-10-28(조각 13-D): 이 메뉴에 남은 하위 기능은 **하나뿐**이다 ──────
+   * 옛 재고 기능이 A/S 에서 통째로 걷히면서(화면·경로 13-A → 서버 액션 13-B →
+   * mutation·조회·도메인 13-C5) 잎 여섯(`view` · `parts` · `stock` · `history` ·
+   * `requestProcessing` · `lifecycle`)이 **가리킬 조작을 잃었다.** 고를 수는 있는데
+   * 아무것도 달라지지 않는 칸을 남겨 두면, 고른 사람은 무언가 열었다고 믿는다 —
+   * 이 파일이 minMeaningfulLevel 을 두는 바로 그 까닭이라 여기서도 같게 판단했다.
+   *
+   * 🔴 **`requests` 의 키 글자를 바꾸거나 다른 메뉴로 옮기지 마라.** 이 잎은 죽지
+   *    않았다 — 수리 건 상세의 [부품 반출 신청] 칸이 지금도 이 키를 최종 관문으로
+   *    쓴다(`hasPermission(… "inventory.requests", "WRITE")` 가 페이지 가드 한 곳과
+   *    서버 액션 세 곳에 있다). 키 글자가 바뀌면 운영에 저장된 `role_permissions`
+   *    행이 가리킬 곳을 잃고, **오류 없이 조용히** 기본값으로 되돌아간다.
+   *
+   * 🔵 빠진 여섯의 저장된 행은 운영에 그대로 남지만 아무 일도 하지 않는다 —
+   *    읽기·화면·판정·쓰기 네 구간이 모두 `PERMISSION_LEAF_KEYS` 에 없는 키를
+   *    걸러낸다(DATABASE_DESIGN.md 18-4).
+   */
   inventory: features("inventory", {
-    view: {
-      label: "재고 조회",
-      description: "부품 목록과 현재 수량을 봅니다.",
-      maxMeaningfulLevel: "READ",
-    },
-    parts: {
-      label: "부품 등록·수정",
-      minMeaningfulLevel: "WRITE",
-      description: "부품 마스터를 만들고 고칩니다.",
-      levelHints: { WRITE: "부품을 만들고 고칩니다" },
-      maxMeaningfulLevel: "WRITE",
-    },
-    stock: {
-      label: "입출고 처리",
-      minMeaningfulLevel: "WRITE",
-      description: "실제 재고 수량을 움직입니다.",
-      levelHints: { WRITE: "입고·반품·사용을 기록합니다" },
-      maxMeaningfulLevel: "WRITE",
-    },
-    history: {
-      label: "입출고 이력 조회",
-      description: "부품이 언제 얼마나 드나들었는지 봅니다.",
-      maxMeaningfulLevel: "READ",
-    },
     requests: {
       label: "부품 요청",
       description: "엔지니어가 수리에 필요한 부품을 달라고 올리는 요청입니다.",
       levelHints: { READ: "요청 목록을 봅니다", WRITE: "요청을 올리고 자기 요청을 취소합니다" },
       maxMeaningfulLevel: "WRITE",
-    },
-    requestProcessing: {
-      label: "부품 요청 처리",
-      minMeaningfulLevel: "MANAGE",
-      description: "올라온 요청에 답하는 쪽입니다.",
-      levelHints: { MANAGE: "요청을 출고·거부·부분 마감합니다" },
-      maxMeaningfulLevel: "MANAGE",
-    },
-    lifecycle: {
-      // 고객사·제품 모델의 '삭제·복원'과 같은 모양. 조작 하나뿐이라
-      // '접근 불가 아니면 관리'만 둔다.
-      label: "부품 삭제·복원",
-      minMeaningfulLevel: "MANAGE",
-      description: "부품 마스터 자체를 지우거나 되살립니다. 입출고 이력이 있는 부품은 지울 수 없습니다.",
-      levelHints: { MANAGE: "휴지통으로 보내기, 복원, 완전 삭제" },
-      maxMeaningfulLevel: "MANAGE",
     },
   }),
 };

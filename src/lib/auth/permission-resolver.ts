@@ -181,7 +181,7 @@ export async function resolveEffectivePermissions(actor: PermissionActor): Promi
 
 /**
  * 메뉴 또는 하위 기능의 실효 수준. 둘 다 같은 함수로 묻는다 — 부르는 쪽이
- * "inventory"인지 "inventory.parts"인지만 정하면 된다.
+ * "inventory"인지 "inventory.requests"인지만 정하면 된다.
  */
 export async function getPermissionLevel(actor: PermissionActor, key: string): Promise<PermissionLevel> {
   const resolved = await resolveEffectivePermissions(actor);

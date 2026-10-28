@@ -19,7 +19,7 @@ import {
   canEditDomesticOrders,
   canViewDomesticOrders,
 } from "./domestic-order-authorization";
-import { canViewInventory, canCreateOrEditPart, canProcessPartRequests } from "./inventory-authorization";
+import { canCreatePartRequest, canViewPartRequests } from "./inventory-authorization";
 import { canViewMyActiveWork } from "./my-active-work-authorization";
 import { canViewProductModels, canEditProductModels } from "./product-model-authorization";
 import { canEditWeeklyReportGoals } from "./weekly-report-authorization";
@@ -119,7 +119,9 @@ function assertCeilingAllows(areaKey: string, role: Role, required: PermissionLe
 test("지금 볼 수 있는 화면은 상한이 최소 읽기다", () => {
   for (const role of ROLE_CODES) {
     if (canViewCustomers(role)) assertCeilingAllows("customers", role, "READ", "고객사 보기");
-    if (canViewInventory(role)) assertCeilingAllows("inventory", role, "READ", "재고 보기");
+    // 🔴 2026-10-28(조각 13-D): 「재고 보기」가 아니라 「부품 요청 보기」다. 옛 재고
+    // 화면은 A/S 에서 사라졌고, 이 메뉴에 남은 조작은 부품 반출 신청 하나다.
+    if (canViewPartRequests(role)) assertCeilingAllows("inventory", role, "READ", "부품 요청 보기");
     if (canViewProductModels(role)) assertCeilingAllows("productModels", role, "READ", "제품 모델 보기");
     if (canViewMyActiveWork(role)) assertCeilingAllows("myActiveWork", role, "READ", "내 담당 제품 보기");
     if (canViewWorkflowTemplates(role)) assertCeilingAllows("workflows", role, "READ", "워크플로 보기");
@@ -131,7 +133,11 @@ test("지금 고칠 수 있는 것은 상한이 최소 쓰기다", () => {
   for (const role of ROLE_CODES) {
     if (canEditCustomers(role)) assertCeilingAllows("customers", role, "WRITE", "고객사 수정");
     if (canEditProductModels(role)) assertCeilingAllows("productModels", role, "WRITE", "제품 모델 수정");
-    if (canCreateOrEditPart(role)) assertCeilingAllows("inventory", role, "WRITE", "부품 등록/수정");
+    // 🔴 2026-10-28(조각 13-D): 부품 마스터는 재고 관리(dss-inventory)로 갔다.
+    // A/S 에서 이 메뉴에 남은 쓰기는 부품 반출 신청을 **올리는** 일 하나다.
+    if (canCreatePartRequest(role, { isCaseLocked: false })) {
+      assertCeilingAllows("inventory", role, "WRITE", "부품 요청 올리기");
+    }
     // 2단계에서 행 추가·수정이 생겼다. 상한이 읽기에 머물면 그 순간
     // "화면에서는 저장되는데 설정으로는 줄 수 없는 권한"이 된다.
     if (canEditDomesticOrders(role)) assertCeilingAllows("domesticOrders", role, "WRITE", "내자 정리 추가/수정");
@@ -142,8 +148,11 @@ test("지금 고칠 수 있는 것은 상한이 최소 쓰기다", () => {
 // 테스트에 줄이 늘었다 — 휴지통으로 보내기·복원·완전 삭제(canDeleteDomesticOrders).
 
 test("지금 되돌리기 어려운 조작을 할 수 있으면 상한이 관리다", () => {
+  // 🔴 2026-10-28(조각 13-D): 여기 있던 「부품 요청 처리」 줄을 뺐다. 출고·거부·
+  // 부분 마감·부품 삭제는 A/S 에 더 이상 없고(재고 관리로 갔다), 이 메뉴에서
+  // 관리 수준이 가리킬 조작이 하나도 남지 않았다 — 약화가 아니라 **잴 대상이
+  // 없어진 것**이다. 그 사실 자체는 아래 「부품 요청 하나뿐」 시험이 지킨다.
   for (const role of ROLE_CODES) {
-    if (canProcessPartRequests(role)) assertCeilingAllows("inventory", role, "MANAGE", "부품 요청 처리");
     if (canPublishWorkflowTemplates(role)) assertCeilingAllows("workflows", role, "MANAGE", "워크플로 발행");
     if (canDeleteDomesticOrders(role)) assertCeilingAllows("domesticOrders", role, "MANAGE", "내자 정리 삭제");
   }
@@ -165,6 +174,21 @@ test("지금 못 보는 화면은 상한이 접근 불가다", () => {
     // "못 보는 역할에게는 상한도 없다"는 불변식만 지킨다.
     if (!canViewDomesticOrders(role)) {
       assert.equal(baselinePermissionLevel("domesticOrders", role), "NONE", `${role} 내자 정리`);
+    }
+    /*
+     * 🔴 2026-10-28(조각 13-D)에 **방향이 뒤집힌 자리**다. 그전까지 재고 메뉴는
+     * canViewInventory 로 다섯 역할 **전부**에게 열려 있었다(옛 재고 조회 화면).
+     * 그 화면이 사라지고 남은 것이 부품 반출 신청 하나라, 그 신청에 닿지 못하는
+     * 역할(지금은 SALES)에게는 이 메뉴에 볼 것이 하나도 없다.
+     *
+     * 🔴 메뉴 상한이 다시 열리면 여기서 걸린다 — 열려 있으면 설정으로 「없는
+     * 권한」을 줄 수 있게 되고, 그렇게 열어 준 칸은 눌러도 아무 일도 일어나지
+     * 않는다(/inventory 는 2026-10-27 부터 404 다).
+     * 🔵 역할 이름을 적지 않고 술어를 그대로 쓴다 — 정책이 또 바뀌어도 「못 닿는
+     * 역할에게는 상한도 없다」는 불변식만 지킨다.
+     */
+    if (!canViewPartRequests(role) && !canCreatePartRequest(role, { isCaseLocked: false })) {
+      assert.equal(baselinePermissionLevel("inventory", role), "NONE", `${role} 재고 관리`);
     }
   }
 });

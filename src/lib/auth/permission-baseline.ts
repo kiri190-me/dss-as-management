@@ -19,18 +19,7 @@ import {
   canEditEndUserContact,
   canRemoveEndUserContact,
 } from "./customer-authorization";
-import {
-  canViewInventory,
-  canCreateOrEditPart,
-  canDeleteParts,
-  canProcessPartRequests,
-  canReceiveStock,
-  canReturnStock,
-  canUseStock,
-  canViewTransactionHistory,
-  canViewPartRequests,
-  canCreatePartRequest,
-} from "./inventory-authorization";
+import { canViewPartRequests, canCreatePartRequest } from "./inventory-authorization";
 import {
   canDeleteDomesticOrders,
   canEditDomesticOrders,
@@ -262,10 +251,19 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
       });
 
     case "inventory":
+      // 🔴 2026-10-28(조각 13-D): 이 메뉴에 남은 조작은 **부품 반출 신청 하나**다.
+      // 재고 조회·부품 등록·입출고·이력·요청 처리·부품 삭제는 전부 재고 관리
+      // 시스템(dss-inventory)으로 옮겨 갔고, A/S 쪽 코드는 조각 13 에서 걷어냈다.
+      // 그래서 부를 함수도 부품 요청 둘만 남는다 — 넓게 적어 두면 「재고에서 볼 것이
+      // 더 있다」는 말이 되고, 그 말이 권한 설정 화면에 그대로 나간다.
+      //
+      // 🔴 아래 `inventory.requests` 잎과 **같은 두 함수를 같은 차례로** 부른다.
+      // 베껴 적은 것이 아니라, 잎이 하나뿐이라 메뉴의 답과 잎의 답이 같아진 것이다
+      // (이 파일의 원칙은 양쪽 다 *-authorization.ts 를 호출해서 구하는 것이고,
+      // 둘이 갈라지는 날 permission-features.test.ts 의 불변식이 잡는다).
       return ladder({
-        manage: canProcessPartRequests(role) || canDeleteParts(role),
-        write: canCreateOrEditPart(role),
-        read: canViewInventory(role),
+        write: canCreatePartRequest(role, PERMISSIVE_CASE_LOCK),
+        read: canViewPartRequests(role),
       });
 
     case "domesticOrders":
@@ -364,7 +362,6 @@ export function baselinePermissionMap(role: Role): Record<string, PermissionLeve
 /** 잠기지 않았고, 본인이 담당이고, 대상이 존재하는 맥락. 위 주석 참조. */
 const PERMISSIVE_WORK_RECORD = { isAssignedToCase: true, isCaseLocked: false } as const;
 const PERMISSIVE_CASE_LOCK = { isCaseLocked: false } as const;
-const PERMISSIVE_USE_STOCK = { hasRepairCase: true, isCaseLocked: false } as const;
 const PERMISSIVE_ASSIGNMENT = { effectiveAssigneeId: "self", actorUserId: "self" } as const;
 
 function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
@@ -521,27 +518,15 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
       return ladder({ manage: canDeleteTechnicalTemplates(role, "TECHNICAL_TASK"), read: false });
 
     // ── 재고 관리 ─────────────────────────────────────────────────────────
-    case "inventory.view":
-      return canViewInventory(role) ? "READ" : "NONE";
-    case "inventory.parts":
-      return ladder({ write: canCreateOrEditPart(role), read: canViewInventory(role) });
-    case "inventory.stock":
-      return ladder({
-        write: canReceiveStock(role) || canReturnStock(role) || canUseStock(role, PERMISSIVE_USE_STOCK),
-        read: canViewInventory(role),
-      });
-    case "inventory.history":
-      return canViewTransactionHistory(role) ? "READ" : "NONE";
+    // 🔴 2026-10-28(조각 13-D): 잎 여섯(`view` · `parts` · `stock` · `history` ·
+    // `requestProcessing` · `lifecycle`)의 case 를 여기서 걷어냈다. 트리에서도
+    // 함께 뺐으므로(permission-features.ts) default 로 떨어질 일이 없다 —
+    // baselineLeafLevel 이 isPermissionLeafKey 로 먼저 거른다.
     case "inventory.requests":
       return ladder({
         write: canCreatePartRequest(role, PERMISSIVE_CASE_LOCK),
         read: canViewPartRequests(role),
       });
-    case "inventory.requestProcessing":
-      return ladder({ manage: canProcessPartRequests(role), read: false });
-    case "inventory.lifecycle":
-      // 등록·수정(재고 담당자까지)보다 좁다 — 삭제는 관리자 이상이다.
-      return ladder({ manage: canDeleteParts(role), read: false });
 
     default:
       // 트리에 없는 키는 열어 주지 않는다. 노드를 permission-features.ts에만

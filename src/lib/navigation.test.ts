@@ -82,10 +82,12 @@ function menuKeys(): string[] {
  * server-side rejection for a direct URL hit is covered separately by each
  * gated page's own role checks.
  *
- * Phase 5B-2 adds a gated entry, "inventory" — its predicate
- * (canViewInventory) currently returns true for all 5 roles, so it never
- * actually hides for anyone, but it still counts as "restricted" (has an
- * isVisibleForRole predicate at all) for the purposes of these tests.
+ * 🔵 Phase 5B-2 가 넣었던 "inventory" 항목은 더 이상 여기 세어지지 않는다.
+ * 재고 기능이 재고 관리 시스템으로 옮겨 가면서 그 줄은 `hiddenFromMenu` 가 됐고
+ * (navigation.ts, 설정에 저장된 `inventory` 행이 갈 곳을 잃지 않게 묶음에는
+ * 남겨 둔다), 2026-10-28(조각 13-D)에 그 술어였던 canViewInventory 까지 지웠다 —
+ * 메뉴에서 감춰진 줄을 「막는가」로 다시 재면 없는 화면을 재는 셈이 된다.
+ * 위 MENU_HIDDEN_KEYS 가 그 줄을 세기 전에 뺀다.
  *
  * Phase 5C-3 adds a second gated entry, "myActiveWork" — unlike the other
  * two, its predicate (canViewMyActiveWork) is AS_ENGINEER-only, deliberately
@@ -342,26 +344,48 @@ test("navigation: no 'procedures' (all-category list) entry exists", () => {
  *
  * 이 시험은 예전 「every role sees the inventory entry」를 **뒤집은 것이 아니라
  * 둘로 가른 것**이다. 그 시험이 재던 것은 사실 둘이었다:
- *  ① 다섯 역할 **모두 재고에 접근할 수 있다**(권한) — 그대로다. 아래에서 기본
- *    정책으로 직접 잰다. 주소 · 알림 · 북마크로 들어오는 길이 살아 있는 근거다.
+ *  ① 재고 **열쇠는 살아 있다**(권한) — 아래에서 기본 정책으로 직접 잰다.
  *  ② 그래서 **메뉴에 보인다** — 이것만 뒤집혔다.
+ *
+ * ── 🔴 2026-10-28(조각 13-D): ① 의 **근거가 바뀌었고 답도 한 칸 바뀌었다** ──
+ * 2026-10-16 에 ① 을 적을 때의 근거는 「주소 · 알림 · 북마크로 들어오는 길이
+ * 살아 있다」였다. **그 근거는 더 이상 사실이 아니다** — `/inventory` 아래 경로는
+ * 13-A(2026-10-27)에 지워져 404 이고, 그리로 보내던 알림 종류 셋은 13-C4 에서
+ * 들어냈다. 권한이 열려 있든 닫혀 있든 그 길로는 아무 데도 못 간다.
+ *
+ * 🔴 그래서 지금 이 열쇠가 **실제로 지키는 자리는 하나**다 — 수리 건 상세의
+ * [부품 반출 신청] 칸(`hasPermission(… "inventory.requests", "WRITE")`). 13-D 에서
+ * 잎 여섯을 걷어내면서 메뉴 기본값도 그 하나를 따라가게 했고, 그 결과 **SALES 가
+ * 접근 불가로 떨어졌다.** 막은 것이 아니라 **볼 것이 없어진 것**이다: 영업은
+ * 2026-08 부터 부품 요청 화면에 접근하지 않았고(확인된 결정), 옛 재고 조회
+ * 화면은 이제 없다.
+ *
+ * 🔵 그래서 아래 ① 은 「다섯 전부 열려 있다」가 아니라 「**부품 요청에 닿는
+ * 역할에게는 그대로 열려 있다**」를 잰다 — 감추기가 열쇠를 통째로 끄지 않았다는
+ * 원래의 걱정은 이 쪽이 더 정확하게 잡는다(전부 NONE 이 되면 바로 깨진다).
  * ============================================================================
  */
-test("🔴 재고 관리는 어느 역할에게도 메뉴에 나오지 않는다 — 감춘 것이고, 권한은 그대로다", () => {
+test("🔴 재고 관리는 어느 역할에게도 메뉴에 나오지 않는다 — 감춘 것이고, 열쇠는 살아 있다", () => {
   for (const role of ALL_ROLES) {
     assert.equal(
       filterNavItemsForRole(navItems, role).some((i) => i.key === "inventory"),
       false,
       `${role} 의 메뉴에 재고 관리가 나온다 — hiddenFromMenu 가 듣지 않는다`
     );
-    // ① 권한은 한 칸도 안 건드렸다. 여기가 NONE 이 되면 감춘 것이 아니라 **막은 것**이고,
-    //    그때는 북마크 · 알림으로 들어온 사람이 「접근 권한 없음」으로 튕긴다.
-    assert.notEqual(
-      baselinePermissionLevel("inventory", role),
-      "NONE",
-      `${role} 가 재고에 못 들어간다 — 감추기가 권한까지 껐다`
-    );
   }
+
+  // ① 🔴 감추기가 열쇠까지 끄지 않았다. 여기가 전부 NONE 이 되면 수리 건 상세의
+  //    [부품 반출 신청] 칸이 **조용히 사라진다** — 오류도 안내도 없이 칸만 없어져서,
+  //    쓰는 사람은 그것이 권한 문제인지조차 알 수 없다.
+  assert.deepEqual(
+    ALL_ROLES.filter((role) => baselinePermissionLevel("inventory", role) !== "NONE").sort(),
+    ["ADMIN", "AS_ENGINEER", "INVENTORY_MANAGER", "SUPER_ADMIN"],
+    "재고 열쇠가 열려 있는 역할이 달라졌다 — 13-D 머리말을 읽고 고칠 것"
+  );
+  // 🔴 그 칸을 실제로 쓰는 쪽(요청을 올리는 역할)에게는 **쓰기**가 있어야 한다.
+  //    페이지 가드가 WRITE 를 보므로 읽기로 떨어지면 칸이 안 그려진다.
+  assert.equal(baselinePermissionLevel("inventory", "AS_ENGINEER"), "WRITE");
+  assert.equal(baselinePermissionLevel("inventory", "SUPER_ADMIN"), "WRITE");
 
   // 노출을 넓히는 **어느 길로도** 되살아나지 않는다 — 설정을 전부 열어도, 개발자 모드
   // 관문을 열어도. 설정 한 번에 이관한 메뉴가 돌아오면 사람이 그 화면을 다시 쓴다.

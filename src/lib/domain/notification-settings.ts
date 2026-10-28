@@ -44,7 +44,10 @@ import { ROLE_CODES, type Role } from "./types";
  *  · 부품 요청 대기(PART_REQUEST_PENDING)는 명단을 여기 옮겨 적지 않고
  *    auth/inventory-authorization.ts 의 canReceivePartRequestNotifications 를
  *    **호출해서** 썼다. 옮겨 담는 종류라 가리킬 「지금」이 있었기 때문이다
- *    (permission-baseline.ts 머리말의 그 규칙).
+ *    (permission-baseline.ts 머리말의 그 규칙). 🔵 **그 함수 자체는 2026-10-28
+ *    (조각 13-D)에 지웠다** — 부를 종류가 없어진 뒤로 아무도 안 불렀다. 지금
+ *    그 파일에 남은 것은 부품 요청 기본값 셋뿐이라, 다시 붙일 때 그대로 가져다
+ *    쓸 함수는 **없다**(여기 적힌 것은 규칙이지 그 함수가 아니다).
  *  · 재고 부족(PART_STOCK_BELOW_MINIMUM)은 반대로 명단을 **이 파일에 적었다.**
  *    새로 태어나는 종류라 재현할 옛 동작이 없었고, 「밀린 요청을 처리할 사람」과
  *    「재고를 채울 사람」은 명단이 같아도 **다른 질문**이라 한쪽을 넓히는 결정이

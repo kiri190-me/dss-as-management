@@ -365,16 +365,17 @@ FK는 기본적으로 `ON DELETE RESTRICT`로 하고, Soft Delete 정책과 결�
 
 ---
 
-## 18. 옛 재고 기능 걷어내기 — 코드는 사라지고 표는 남는다 (조각 13, 2026-10)
+## 18. 옛 재고 기능 걷어내기 — 코드는 사라지고 표는 남는다 (조각 13, 2026-10, **끝났다**)
 
 재고 관리는 2026-10 에 **별도 시스템**(dss-inventory)으로 떨어져 나갔다. A/S 는 이제 그쪽
 API 를 부르는 **새 통로**(`server/actions/inventory-stock-requests` ·
 `server/inventory-gateway` · `domain/inventory-gateway`)만 쓴다.
 
-A/S 안의 옛 재고 코드는 조각 13 에서 단계를 나눠 걷어냈다 — 화면·경로(13-A) → 옛 서버
-액션(13-B) → 남의 시험이 그것을 밑자락으로 쓰던 자리 다섯(13-C1~C3) → 알림 종류 셋
-(13-C4) → **mutation·조회·도메인·검증·인가 스물일곱과 그 시험 열일곱(13-C5, 2026-10-27).**
-그 과정 기록은 조각이 끝나면서 함께 지웠다. **아래 여섯만 지금도 사실이고, 그래서 남긴다.**
+A/S 안의 옛 재고 코드는 조각 13 에서 단계를 나눠 걷어냈고 **2026-10-28 에 끝났다** —
+화면·경로(13-A) → 옛 서버 액션(13-B) → 남의 시험이 그것을 밑자락으로 쓰던 자리 다섯
+(13-C1~C3) → 알림 종류 셋(13-C4) → mutation·조회·도메인·검증(13-C5) → **권한 키 여섯과
+인가 함수 스물(13-D).** 단계별 과정 기록은 조각이 끝나면서 함께 지웠다.
+**아래 여섯만 지금도 사실이고, 그래서 남긴다.**
 
 ### 18-1. 🔴 재고 표를 지우지 않는 진짜 까닭
 
@@ -422,17 +423,30 @@ enum 값도, `domain/shipment-approval-route.ts` 의 `SHIPMENT_APPROVAL_ROUTE_SC
 치우려면 화면 문구(`components/users/user-deletion-dialog-text.ts` 의 「(참고) 직접 올린
 열린 부품 요청 …」)까지 한 몸으로 다뤄야 해서, 따로 정할 일로 남겨 두었다.
 
-### 18-4. 13-D 에 남은 일 — 권한 키 `inventory.*`
+### 18-4. 🔴 권한 키는 `inventory.requests` **하나만** 남았다 (13-D, 2026-10-28)
 
-`auth/permission-baseline.ts` 의 `inventory.view` · `inventory.parts` ·
-`inventory.stock` · `inventory.history` · `inventory.requests` ·
-`inventory.requestProcessing` · `inventory.lifecycle` 일곱과, 그 기본값을 내는
-`auth/inventory-authorization.ts` 가 **아직 그대로다.** 13-C5 에서 건드리지 않았다.
+권한 트리(`auth/permission-features.ts`)와 상한 계산(`auth/permission-baseline.ts`)에서
+잎 여섯 — `inventory.view` · `inventory.parts` · `inventory.stock` · `inventory.history` ·
+`inventory.requestProcessing` · `inventory.lifecycle` — 을 뺐다. 가리킬 조작이 하나도 없어서
+다(화면은 13-A 에, mutation 은 13-C5 에 사라졌다).
 
-🔵 **`inventory.requests` 는 남긴다** — 새 통로(부품 반출 신청)가 그 키를 쓴다.
-🔴 권한은 코드가 아니라 **운영 DB 의 `role_permissions` 값이 최종 판정**이므로
-(`permission-features.ts` 의 `SETTINGS_ENFORCED_AREAS`), 키를 줄이기 전에 운영에서
-저장된 행을 먼저 SELECT 해 「실제로 달라지는 칸」을 세어야 한다.
+기본값을 내던 `auth/inventory-authorization.ts` 의 `can*()` 열여섯 중 **열셋을 지우고 셋만
+남겼다**(`canCreatePartRequest` · `canProcessPartRequests` · `canViewPartRequests`). 그것들만
+쓰던 맥락 헬퍼 일곱(`isRequestCancellable` 류 · `statusAfterHoldRelease`)과
+`domain/inventory-types.ts` 도 통째로 지웠다 — 지운 `export` 가 모두 스물하나다.
+
+🔵 **`inventory.requests` 는 남는다 — 지금도 운영 중인 관문이다.** 수리 건 상세의
+[부품 반출 신청] 칸이 `hasPermission(… "inventory.requests", "WRITE")` 를 페이지 가드 한
+곳과 서버 액션 세 곳에서 본다. 🔴 **그 키 글자를 바꾸거나 다른 메뉴로 옮기지 마라** —
+운영에 저장된 `role_permissions` 행이 갈 곳을 잃고 **오류 없이 조용히** 기본값으로
+되돌아간다.
+
+🔴 **메뉴 수준 기본값도 그 잎 하나를 따라가게 맞췄다.** 그러면서 **SALES 의 재고 메뉴
+기본값이 READ 에서 NONE 으로 떨어졌다** — 이 조각에서 기본 정책이 실제로 달라지는 칸은
+이것 하나뿐이다. 막은 것이 아니라 볼 것이 없어진 것이다: 영업은 2026-08 부터 부품 요청에
+접근하지 않았고(확인된 결정), 옛 재고 조회 화면은 `/inventory` 와 함께 404 가 됐다.
+
+🔵 **마이그레이션은 만들지 않았다.** 아래 18-6 의 까닭으로 필요가 없다.
 
 ### 18-5. 🔵 이름이 닮아 섞이기 쉬운 것
 
@@ -443,7 +457,31 @@ enum 값도, `domain/shipment-approval-route.ts` 의 `SHIPMENT_APPROVAL_ROUTE_SC
 - `components/inventory/part-picker.test.tsx` 는 폴더 이름만 `inventory` 다 — 재는 대상은
   서브모듈의 고르개(`@dss/core/ui/inventory/part-picker`)이고 **지금 돌고 있는 코드**다.
 
-### 18-6. 운영 DB 고아 행
+### 18-6. 🔴 운영 DB 에 고아 행이 남는다 — 그래도 안전한 까닭
 
-13-C4 가 알림 종류 셋을 뺀 뒤 남는 고아 행을 치우는 SQL 은 **적어만 두었고 실행하지
-않았다** — `NOTIFICATION_AND_IDENTITY_DESIGN.md` 의 K 절. 표 셋이고 하나는 포털 DB 다.
+조각 13 은 **운영 데이터를 한 줄도 지우지 않았다.** 그래서 코드에서 사라진 이름을 가리키는
+행이 운영 DB 에 그대로 남아 있다. 둘 다 **치워도 되지만 치우지 않아도 된다.**
+
+**① 알림 종류 셋**(13-C4). 치우는 SQL 은 **적어만 두었고 실행하지 않았다** —
+`NOTIFICATION_AND_IDENTITY_DESIGN.md` 의 K 절. 표 셋이고 하나는 포털 DB 다.
+
+**② 권한 키 여섯**(13-D). `role_permissions` 에 `inventory.view` 같은 행이 저장돼 있을 수
+있다(개발 DB 에는 `inventory.stock` = AS_ENGINEER/WRITE 가 실제로 있다). 🔴 **그 행들은
+읽기·화면·판정·쓰기 네 구간에서 모두 무시된다** — 「혹시 어딘가에서 통할까」를 한 자리씩
+확인한 결과다:
+
+| 구간 | 거르는 자리 | 어떻게 |
+|---|---|---|
+| 읽기 | `db/queries/role-permissions.ts` | `isPermissionLeafKey` 가 아닌 행을 버린다 |
+| 판정 | `auth/permission-resolver.ts` | `PERMISSION_LEAF_KEYS` 만 돌며 실효 수준을 만든다 |
+| 화면 | `auth/role-permission-views.ts` | 같은 목록만 돌며 표를 만든다 |
+| 쓰기 | `db/mutations/role-permissions.ts` | 트리에 없는 키는 저장 자체를 거른다 |
+
+그 사실을 지키는 시험이 이미 있다 — `role-permissions.integration.test.ts` 의 「트리에 없는
+키는 저장되지 않는다」(`"inventory.nonexistent"` 표본)와 `permission-features.test.ts` 의
+「트리에 없는 키는 열리지 않는다」. 🔴 **그러므로 고아 행이 권한을 넓히는 일은 없다.**
+지우는 마이그레이션을 만들지 않은 까닭이 이것이다(운영 행을 지우는 것은 승인 사항이고,
+얻는 것이 없다).
+
+🔵 재고 **표** 쪽에는 고아 행이 없다 — 2026-10-27 운영 실측에서 여섯 표가 전부 0행이었다
+(18-1).

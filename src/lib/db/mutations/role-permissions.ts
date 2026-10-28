@@ -236,7 +236,7 @@ async function applyOneRole(
   }
 }
 
-/** 화면에 보여 줄 이름. 오류 문구가 "inventory.parts"로 나가지 않게 한다. */
+/** 화면에 보여 줄 이름. 오류 문구가 "inventory.requests"로 나가지 않게 한다. */
 function labelOf(leafKey: string): string {
   const feature = findPermissionFeature(leafKey);
   if (feature) {
