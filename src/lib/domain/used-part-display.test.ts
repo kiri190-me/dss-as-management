@@ -101,7 +101,9 @@ describe("사용 부품 표시 — 네 갈래", () => {
       reason: "timeout",
     };
     const index = buildUsedPartNameIndex(unreachable);
+    assert.equal(index.byDrawingNo.size, 0);
     assert.equal(index.byKyosanPartNo.size, 0);
+    assert.equal(index.byPartSpec.size, 0);
     assert.equal(index.byPartName.size, 0);
     assert.equal(usedPartDisplayName(stored, index), "SCV-255P110");
   });
@@ -125,7 +127,39 @@ describe("사용 부품 표시 — 네 갈래", () => {
   });
 });
 
+/**
+ * 🔴 **2026-10-29 에 맞추는 칸이 둘에서 넷으로 늘었다.** 운영 겹침 점검을 품번 백필
+ *    **뒤에** 돌려 보니 연락서의 품번이 들어 있는 칸은 **도번**(30.3%)이었고, 「뜻으로
+ *    보아 품번 자리는 교산 품번 하나」라던 2026-10-28 의 근거가 틀렸다(모듈 머리말).
+ *    그래서 **「품명2·도번은 열쇠가 아니다」를 재던 옛 시험을 지우지 않고 뒤집어** 적는다
+ *    — 그 이름이 초록 ✔ 옆에 남아 있으면 다음 사람이 틀린 설계를 사실로 읽는다.
+ */
 describe("사용 부품 표시 — 어느 칸으로 맞추나", () => {
+  test("🔴 **도번** 칸에 품번이 적혀 있으면 걸린다 — 운영에서 가장 많이 맞는 칸(30.3%)", () => {
+    const index = okIndex([
+      part({ id: "1", drawingNo: "AA000111", customerPartName: "게이트 기판" }),
+    ]);
+    assert.equal(index.byDrawingNo.size, 1, "지도가 비었으면 아래가 공짜로 통과한다");
+    assert.equal(index.byKyosanPartNo.size, 0, "교산 품번 칸은 비어 있다");
+    assert.equal(usedPartDisplayName("AA000111", index), "게이트 기판 (AA000111)");
+  });
+
+  test("재고 관리의 **교산 품번** 칸에 적혀 있어도 걸린다", () => {
+    const index = okIndex([
+      part({ id: "1", kyosanPartNo: "AA000111", customerPartName: "게이트 기판" }),
+    ]);
+    assert.equal(index.byKyosanPartNo.size, 1);
+    assert.equal(usedPartDisplayName("AA000111", index), "게이트 기판 (AA000111)");
+  });
+
+  test("재고 관리의 **품명2** 칸에 적혀 있어도 걸린다 — 14.6% 라 뺄 수 없다", () => {
+    const index = okIndex([
+      part({ id: "1", partSpec: "AA000111", customerPartName: "게이트 기판" }),
+    ]);
+    assert.equal(index.byPartSpec.size, 1);
+    assert.equal(usedPartDisplayName("AA000111", index), "게이트 기판 (AA000111)");
+  });
+
   test("재고 관리의 **품명** 칸에 품번이 적혀 있어도 걸린다", () => {
     const index = okIndex([
       part({ id: "1", partName: "SCV-255P110", customerPartName: "전원 퓨즈" }),
@@ -143,21 +177,62 @@ describe("사용 부품 표시 — 어느 칸으로 맞추나", () => {
     assert.equal(usedPartDisplayName("SCV-255P110", index), "전원 퓨즈 (SCV-255P110)");
   });
 
-  test("🔴 품명2·도번은 열쇠가 아니다 — 우연히 맞은 줄이 남의 이름을 달면 안 된다", () => {
-    const bySpec = okIndex([
-      part({ id: "1", partSpec: "SCV-255P110", customerPartName: "규격 칸 부품" }),
-    ]);
-    assert.equal(usedPartDisplayName("SCV-255P110", bySpec), "SCV-255P110");
+  test("🔴 네 칸이 한꺼번에 걸리면 **도번**이 이긴다 — 차례는 도번 → 교산 품번 → 품명2 → 품명", () => {
+    // 🔵 줄을 **일부러 거꾸로** 넣는다. 담는 차례가 이기는 칸을 정한다면 여기서 품명이
+    //    이겨야 하고, 시험이 바로 깨진다 — 차례를 정하는 곳이 한 군데임을 못 박는 표본이다.
+    const rows = [
+      part({ id: "1", partName: "AA000111", customerPartName: "품명 쪽 이름" }),
+      part({ id: "2", partSpec: "AA000111", customerPartName: "품명2 쪽 이름" }),
+      part({ id: "3", kyosanPartNo: "AA000111", customerPartName: "교산 품번 쪽 이름" }),
+      part({ id: "4", drawingNo: "AA000111", customerPartName: "도번 쪽 이름" }),
+    ];
+    const index = okIndex(rows);
+    assert.equal(index.byDrawingNo.size, 1, "네 지도가 다 차 있어야 차례를 잰 것이 된다");
+    assert.equal(index.byKyosanPartNo.size, 1);
+    assert.equal(index.byPartSpec.size, 1);
+    assert.equal(index.byPartName.size, 1);
+    assert.equal(usedPartCustomerName("AA000111", index), "도번 쪽 이름");
 
-    const byDrawing = okIndex([
-      part({ id: "1", drawingNo: "SCV-255P110", customerPartName: "도번 칸 부품" }),
+    // 앞 칸을 하나씩 걷어내면 그다음 칸이 이긴다 — 차례 전체를 잰다.
+    assert.equal(usedPartCustomerName("AA000111", okIndex(rows.slice(0, 3))), "교산 품번 쪽 이름");
+    assert.equal(usedPartCustomerName("AA000111", okIndex(rows.slice(0, 2))), "품명2 쪽 이름");
+    assert.equal(usedPartCustomerName("AA000111", okIndex(rows.slice(0, 1))), "품명 쪽 이름");
+  });
+
+  test("🔴 도번에서 찾은 이름과 품명에서 찾은 이름이 달라도 **엇갈림이 아니다** — 도번 쪽을 보인다", () => {
+    const index = okIndex([
+      part({ id: "1", partName: "AA000111", customerPartName: "우연히 맞은 남의 부품" }),
+      part({ id: "2", drawingNo: "AA000111", customerPartName: "게이트 기판" }),
     ]);
-    assert.equal(usedPartDisplayName("SCV-255P110", byDrawing), "SCV-255P110");
+    // 🔴 칸끼리도 엇갈림으로 셌다면 여기서 품번만 남는다. 그러면 비상구 한 칸(3.0%)을
+    //    더한 탓에 도번(30.3%)으로 찾아낸 이름이 지워진다 — 넓히려던 고침이 거꾸로 좁힌다.
+    assert.equal(usedPartDisplayName("AA000111", index), "게이트 기판 (AA000111)");
+  });
+
+  test("🔵 앞 칸이 **엇갈려서** 비면 뒤 칸으로 내려간다 — 그 칸이 모를 뿐이다", () => {
+    const index = okIndex([
+      part({ id: "1", drawingNo: "AA000111", customerPartName: "도번 쪽 이름 하나" }),
+      part({ id: "2", drawingNo: "AA000111", customerPartName: "도번 쪽 이름 둘" }),
+      part({ id: "3", kyosanPartNo: "AA000111", customerPartName: "교산 품번 쪽 이름" }),
+    ]);
+    assert.equal(index.byDrawingNo.size, 0, "도번 지도는 엇갈려서 비어 있다");
+    assert.equal(usedPartDisplayName("AA000111", index), "교산 품번 쪽 이름 (AA000111)");
   });
 
   test("🔴 고객사 품명 자체는 열쇠가 아니다 — 「휴즈 (휴즈)」가 되지 않는다", () => {
     const index = okIndex([part({ id: "1", customerPartName: "휴즈" })]);
     assert.equal(usedPartDisplayName("휴즈", index), "휴즈");
+  });
+
+  test("🔴 열쇠로 쓰는 칸이 넷으로 늘어도 **고객사 품명은 끝까지 열쇠가 아니다**", () => {
+    // 칸을 늘린 2026-10-29 의 고침이 고객사 품명까지 쓸어 담지 않았는지 — 네 칸이 모두
+    // 빈 줄이라 이 줄은 어느 지도에도 들어가지 않아야 한다.
+    const index = okIndex([part({ id: "1", customerPartName: "AA000111" })]);
+    assert.equal(index.byDrawingNo.size, 0);
+    assert.equal(index.byKyosanPartNo.size, 0);
+    assert.equal(index.byPartSpec.size, 0);
+    assert.equal(index.byPartName.size, 0);
+    assert.equal(usedPartDisplayName("AA000111", index), "AA000111");
   });
 });
 
@@ -168,6 +243,15 @@ describe("사용 부품 표시 — 엇갈리면 품번", () => {
       part({ id: "2", kyosanPartNo: "SCV255P110", customerPartName: "제어 릴레이" }),
     ]);
     assert.equal(usedPartDisplayName("SCV-255P110", index), "SCV-255P110");
+  });
+
+  test("🔴 **도번** 한 값에 서로 다른 고객사 품명이 걸려도 품번만 — 새 칸에도 같은 자를 댄다", () => {
+    const index = okIndex([
+      part({ id: "1", drawingNo: "AA000111", customerPartName: "게이트 기판" }),
+      part({ id: "2", drawingNo: "AA000111", customerPartName: "제어 릴레이" }),
+    ]);
+    assert.equal(index.byDrawingNo.size, 0, "엇갈린 열쇠는 지도에서 빠진다");
+    assert.equal(usedPartDisplayName("AA000111", index), "AA000111");
   });
 
   test("🔴 엇갈린 뒤에 같은 이름이 또 와도 되살아나지 않는다", () => {
