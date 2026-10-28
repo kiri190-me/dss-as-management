@@ -5,9 +5,11 @@ import {
   parseInventoryOhTemplateResponse,
   parseInventoryPartsResponse,
   parseInventoryStockRequestsResponse,
+  resolveInventoryPartRequestTrace,
   type ChargeType,
   type InventoryOhTemplate,
   type InventoryPart,
+  type InventoryPartRequestTrace,
   type InventoryResult,
   type InventoryStockRequest,
   type InventoryUnreachableReason,
@@ -251,6 +253,22 @@ export async function fetchInventoryStockRequestsByIntake(
   }
   const call = await callInventory(`/api/v1/stock-requests?intake=${encodeURIComponent(n)}`, { token: "read" });
   return finishRead(call, parseInventoryStockRequestsResponse, "반출 신청 목록");
+}
+
+/**
+ * 🔴 **이 수리 건에 부품 요청 흔적이 있는가** — 위 통로 한 번 + 순수 판정 한 번 (2026-10-28).
+ *
+ * 🔵 서버에서 그 판정이 필요한 자리가 생겨서(연락서 이식이 교체 부품을 사용 부품 칸에
+ *    덮어쓸지 가린다) 두 줄을 **이름 하나**로 묶는다. 묶지 않으면 부르는 쪽마다
+ *    `status !== "ok"` 를 제 손으로 적게 되고, 그중 하나가 언젠가 `?? []` 로 적힌다 —
+ *    그날 저쪽이 멈춘 사이에 「요청한 적 없다」가 되어 남의 기록을 덮는다.
+ * 🔴 **셋을 그대로 돌려준다.** 「모른다」를 여기서 접지 않는다(순수 쪽 머리말).
+ * 🔴 **열쇠는 인수번호다** — 요청 번호를 우리 표에 저장하지 않기 때문이다(위 통로 머리말).
+ */
+export async function probeInventoryPartRequestTrace(
+  intakeNumber: string
+): Promise<InventoryPartRequestTrace> {
+  return resolveInventoryPartRequestTrace(await fetchInventoryStockRequestsByIntake(intakeNumber));
 }
 
 // ---------------------------------------------------------------------------

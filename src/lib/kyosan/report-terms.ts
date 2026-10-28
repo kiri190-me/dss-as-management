@@ -62,7 +62,7 @@ import { translateKyosanSentence } from "./report-word-terms";
  * 🔴 **사용 부품 칸은 예외다 (2026-09-23 사용자 결정).** 위 문장은 다른 모든 곳에서
  * 여전히 참이지만, `repair_case_used_parts.part_name_text` **한 칸만은** 연락서를
  * 이식할 때 `translateKyosanSentence` 를 지나 **한글로 저장된다**
- * (`server/services/kyosan-report-import.ts` 의 `appendUsedParts`). 사람이 고칠 수
+ * (`server/services/kyosan-report-import.ts` 의 `replaceUsedParts`). 사람이 고칠 수
  * 있는 칸이라 보여 줄 때만 바꾸면 수정 폼에 일본어가 되살아나고, `part_id` 가 거의
  * 다 null 이라 그 글자 자체가 통계의 묶는 열쇠이기 때문이다. 그 칸의 일본어 원문은
  * 같은 이식이 남기는 작업 기록 메모와 첨부된 연락서 원본에 그대로 있다.

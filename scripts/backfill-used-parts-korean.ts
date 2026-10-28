@@ -13,7 +13,7 @@ import { translateKyosanSentence } from "../src/lib/kyosan/report-word-terms";
  * ============================================================================
  * 연락서 이식이 `repair_case_used_parts.part_name_text` 에 **일본어를 그대로** 넣어
  * 왔다(사용자가 수리 건 상세의 「사용 부품」 표에서 잡아냈다). 넣는 쪽은 고쳤다 —
- * `server/services/kyosan-report-import.ts` 의 `appendUsedParts` 가 이제
+ * `server/services/kyosan-report-import.ts` 의 `replaceUsedParts` 가 이제
  * `translateKyosanSentence` 를 지나 저장한다. 이 스크립트는 **그 고침 이전에 들어간
  * 줄**을 같은 규칙으로 맞춘다.
  *

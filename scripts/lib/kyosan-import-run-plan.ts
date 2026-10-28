@@ -90,6 +90,15 @@ export type KyosanRunOutcome =
   | "non-document"
   /** 문서인데 판독기가 열지 못했다. */
   | "unreadable"
+  /**
+   * 🔴 **재고 관리에 물어보지 못해 건너뛰었다**(`INVENTORY_UNREACHABLE`, 2026-10-28).
+   *
+   * 「실패」에 섞지 않는 까닭: 이 장들은 **고치지 않고 그대로 다시 돌리면 들어간다.** 섞어
+   * 두면 503장을 돌린 뒤 「실패 7장」만 남아, 그 일곱이 **다시 돌릴 거리인지 들여다볼
+   * 거리인지** 아무도 모른다. 러너는 이 갈래의 **파일 이름을 끝에 모아 찍는다**
+   * (`formatKyosanRunSummary`) — 🔴 경고로 흘려보내면 아무도 모르게 빠진다.
+   */
+  | "inventory-unknown"
   /** 그 밖의 실패(`TARGET_CHANGED` · `SOURCE_*` · `STORAGE_FAILED` · `SAVE_REJECTED`). */
   | "failed";
 
@@ -101,6 +110,7 @@ export const KYOSAN_RUN_OUTCOME_ORDER: readonly KyosanRunOutcome[] = [
   "not-importable",
   "non-document",
   "unreadable",
+  "inventory-unknown",
   "failed",
 ];
 
@@ -111,6 +121,7 @@ export const KYOSAN_RUN_OUTCOME_LABEL: Readonly<Record<KyosanRunOutcome, string>
   "not-importable": "짝 없음·막힘",
   "non-document": "문서 아님(잠금·자리표시자)",
   unreadable: "못 읽음",
+  "inventory-unknown": "재고 확인 못 함(다시 돌릴 것)",
   failed: "실패",
 };
 
@@ -125,6 +136,9 @@ export function outcomeForFailureCode(code: KyosanReportImportFailureCode): Kyos
       return "already-imported";
     case "NOT_IMPORTABLE":
       return "not-importable";
+    // 🔴 **「실패」가 아니다** — 고치지 않고 그대로 다시 돌리면 들어간다(위 갈래 주석).
+    case "INVENTORY_UNREACHABLE":
+      return "inventory-unknown";
     case "TARGET_CHANGED":
     case "SOURCE_REJECTED":
     case "SOURCE_TOO_LARGE":
@@ -173,6 +187,7 @@ export function emptyRunTally(): KyosanRunTally {
     "not-importable": 0,
     "non-document": 0,
     unreadable: 0,
+    "inventory-unknown": 0,
     failed: 0,
   };
 }
@@ -227,7 +242,7 @@ export function findDuplicateHashGroups(
 // ─────────────────────────────────────────────── 경고 세기
 
 /**
- * 🔴 **부품 건너뛰기**를 가르는 글자. 이식기의 `appendUsedParts` 가 막힐 때
+ * 🔴 **부품 건너뛰기**를 가르는 글자. 이식기의 `replaceUsedParts` 가 막힐 때
  * 남기는 문장이다:
  *
  *     `교체 부품 ${N}건을 사용 부품 칸에 적지 않았습니다 — ${gate.message}`

@@ -1,5 +1,11 @@
 import "../../../../scripts/load-env";
 
+import {
+  INVENTORY_STUB_NO_REQUESTS,
+  installInventoryFetchStub,
+  setInventoryStubAnswer,
+} from "../../../../scripts/test-inventory-fetch-stub";
+
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -29,6 +35,7 @@ import { writeZip, type ZipEntryInput } from "@/lib/xlsx/zip-writer";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 import {
   collectKyosanWorkbookPaths,
+  formatKyosanRunSummary,
   runKyosanReportImport,
 } from "../../../../scripts/lib/kyosan-import-run";
 import { readKyosanRevertPlan } from "../../../../scripts/lib/kyosan-import-revert";
@@ -366,6 +373,24 @@ async function isEmptyDir(dir: string): Promise<boolean> {
   }
 }
 
+/**
+ * 🔴 **재고 관리를 진짜로 두드리지 않게** 덮개를 씌운다 (2026-10-28).
+ *
+ * 러너는 이식기를 그대로 부르므로 **2026-10-28 의 「부품 요청 흔적을 묻는다」도 그대로
+ * 물려받는다.** 덮개가 없으면 이 파일이 옆 저장소 개발 서버의 상태에 매달린다(까닭은
+ * `scripts/test-inventory-fetch-stub.ts` 머리말). 기본 답은 「신청 없음」이다.
+ */
+let restoreInventoryStub: (() => void) | null = null;
+
+before(() => {
+  restoreInventoryStub = installInventoryFetchStub();
+});
+
+after(() => {
+  restoreInventoryStub?.();
+  restoreInventoryStub = null;
+});
+
 before(async () => {
   const [engineer] = await db
     .select({ id: users.id })
@@ -573,6 +598,121 @@ describe("🔴 한 장이 막혀도 나머지가 계속된다", () => {
     // 그리고 정상인 한 장은 실제로 들어갔다.
     const traces = await readTraces(target.id);
     assert.equal(traces.length, 1);
+  });
+});
+
+// ══════════════════════════════════════════════ 🔴 3-2. 재고 관리에 못 물어본 장 (2026-10-28)
+
+/**
+ * ============================================================================
+ * 🔴 **백필에서 「모른다」를 만났을 때** — 멈추지도, 덮어쓰지도 않는다 (2026-10-28)
+ * ============================================================================
+ * 러너는 이식기를 그대로 부르므로 2026-10-28 의 규칙을 **그대로 물려받는다**. 이 묶음이
+ * 못 박는 것 셋:
+ *  ① 그 장은 **아무것도 안 넣고** 건너뛴다(「모른다」를 「요청 없음」으로 눕히지 않는다).
+ *  ② **전체가 멈추지 않는다** — 뒤에 오는 장은 그대로 들어간다.
+ *  ③ 🔴 **조용히 지나가지 않는다** — 갈래를 따로 세고, 요약 끝에 **파일 이름까지** 찍는다.
+ *     나중에 그 장만 `--file` 로 다시 돌릴 수 있어야 하기 때문이다.
+ * ============================================================================
+ */
+describe("🔴 재고 관리에 못 물어본 장은 건너뛰고, 끝에 이름을 모아 찍는다", () => {
+  test("그 장만 비껴가고 나머지는 들어간다 — 요약에 파일 이름이 남는다", async () => {
+    const blockedTarget = await seedCase();
+    const dir = await makeInbox("inventory-down");
+    await putReport(dir, "0001.xlsm", {
+      intakeNumber: blockedTarget.intakeNumber,
+      model: blockedTarget.modelName,
+      serialNumber: blockedTarget.serialNumber,
+      customerFault: "값-증상",
+      faultPart: "값-막혀야-하는-부품",
+      salt: "재고멈춤-러너",
+    });
+    // 🔵 **교체 부품이 없는 장**은 재고 관리에 묻지도 않으므로 저쪽이 멈춰도 그대로 들어간다 —
+    //    「전체가 멈추지 않는다」를 같은 회차 안에서 본다.
+    const passingTarget = await seedCase();
+    await putReport(dir, "0002.xlsm", {
+      intakeNumber: passingTarget.intakeNumber,
+      model: passingTarget.modelName,
+      serialNumber: passingTarget.serialNumber,
+      customerFault: "값-부품없는-장",
+      salt: "재고멈춤-부품없음",
+    });
+
+    setInventoryStubAnswer({ kind: "down", httpStatus: 503 });
+    let record;
+    try {
+      record = await runKyosanReportImport({
+        files: collectKyosanWorkbookPaths({ dirs: [dir], files: [], limit: null }),
+        apply: true,
+        databaseName: DATABASE_NAME,
+        actorUserId,
+        storage,
+        today: TODAY,
+      });
+    } finally {
+      setInventoryStubAnswer(INVENTORY_STUB_NO_REQUESTS);
+    }
+
+    assert.equal(record.scannedFileCount, 2);
+    // 🔴 **실패로 세지 않는다** — 고치지 않고 그대로 다시 돌리면 들어가는 장이다.
+    assert.equal(record.tally["inventory-unknown"], 1, JSON.stringify(record.tally));
+    assert.equal(record.tally.failed, 0, JSON.stringify(record.tally));
+    assert.equal(record.tally.imported, 1, JSON.stringify(record.tally));
+
+    const blocked = record.files.find((file) => file.fileName === "0001.xlsm");
+    assert.ok(blocked);
+    assert.equal(blocked.outcome, "inventory-unknown");
+    assert.equal(blocked.failureCode, "INVENTORY_UNREACHABLE");
+    // 🔴 그 건에는 **한 줄도** 안 들어갔다.
+    assert.equal((await readTraces(blockedTarget.id)).length, 0);
+    // 그리고 뒤의 장은 그대로 들어갔다.
+    assert.equal((await readTraces(passingTarget.id)).length, 1);
+
+    // 🔴 **요약에 이름이 남는다** — 수만 찍으면 503장 가운데 그 장을 다시 찾을 길이 없다.
+    const summary = formatKyosanRunSummary(record);
+    assert.ok(summary.includes("재고 관리에 못 물어봐 건너뛴 장: 1장"), summary);
+    assert.ok(summary.includes("0001.xlsm"), summary);
+    assert.ok(summary.includes("--file"), summary);
+  });
+
+  test("🔵 저쪽이 돌아온 뒤 **그 장만** 다시 돌리면 그대로 들어간다", async () => {
+    const target = await seedCase();
+    const dir = await makeInbox("inventory-retry");
+    await putReport(dir, "0001.xlsm", {
+      intakeNumber: target.intakeNumber,
+      model: target.modelName,
+      serialNumber: target.serialNumber,
+      faultPart: "값-다시돌린-부품",
+      salt: "재고멈춤-다시",
+    });
+    const files = collectKyosanWorkbookPaths({ dirs: [dir], files: [], limit: null });
+
+    setInventoryStubAnswer({ kind: "down", httpStatus: 503 });
+    try {
+      const blockedRun = await runKyosanReportImport({
+        files,
+        apply: true,
+        databaseName: DATABASE_NAME,
+        actorUserId,
+        storage,
+        today: TODAY,
+      });
+      assert.equal(blockedRun.tally["inventory-unknown"], 1, JSON.stringify(blockedRun.tally));
+    } finally {
+      setInventoryStubAnswer(INVENTORY_STUB_NO_REQUESTS);
+    }
+
+    const retried = await runKyosanReportImport({
+      files,
+      apply: true,
+      databaseName: DATABASE_NAME,
+      actorUserId,
+      storage,
+      today: TODAY,
+    });
+    assert.equal(retried.tally.imported, 1, JSON.stringify(retried.tally));
+    assert.equal(retried.tally["already-imported"], 0, "🔴 막힌 회차가 흔적을 남겼다");
+    assert.equal(retried.files[0].usedPartCount, 1);
   });
 });
 

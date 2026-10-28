@@ -213,22 +213,46 @@ describe("🔴 상태 글자에 화면이 덧붙이지 않는다", () => {
   });
 });
 
+/**
+ * 🔴 **2026-10-28 에 재는 자리가 옮겨 갔다 — 느슨해진 것이 아니라 넓어졌다.**
+ *
+ * 신청 목록의 「있다·없다·모른다」를 가르던 인라인 식(`requests.status !== "ok"` ·
+ * `requests.value.length === 0`)이 도메인 쪽 **이름 붙은 함수**(`resolveInventoryPartRequestTrace`)로
+ * 옮겼다. 연락서 이식이 **그 판정으로** 사용 부품을 덮어쓸지 말지를 가리기 때문이다
+ * (`server/services/kyosan-report-import.ts`) — 화면과 서버가 다른 자를 쓰면, 사람이 이 칸에서
+ * 신청을 보고 있는데 서버는 「요청한 적 없다」로 읽고 그 건의 기록을 덮는다.
+ *
+ * 그래서 아래 시험이 막는 것이 **하나 늘었다**: 그리는 세 갈래가 그대로 있는지 + 🔴 **이
+ * 화면에 두 번째 자가 다시 생기지 않는지**(`requests.value.length` 를 직접 세는 식).
+ */
 describe("🔴 못 받아 온 것을 「없다」로 그리지 않는다", () => {
   test("세 가지 재료 전부 `status !== \"ok\"` 를 따로 그린다", () => {
     for (const guard of [
       /parts\.status !== "ok"/,
       /ohTemplate\.status !== "ok"/,
-      /requests\.status !== "ok"/,
+      // 🔵 신청 목록만 이름 붙은 자를 지난다(위 머리말) — 「못 받아 왔다」 갈래는 그 자의
+      //    `unknown` 이고, 그 갈래에서만 `reason` 을 꺼낼 수 있다(타입이 막는다).
+      /const partRequestTrace = resolveInventoryPartRequestTrace\(requests\);/,
+      /partRequestTrace\.kind === "unknown" \? \(/,
     ]) {
       assert.match(source, guard, String(guard));
     }
     // 못 받아 왔을 때는 까닭을 사람 말로 적는다.
     assert.match(source, /inventoryUnreachableMessage\(parts\.reason\)/);
-    assert.match(source, /inventoryUnreachableMessage\(requests\.reason\)/);
+    assert.match(source, /inventoryUnreachableMessage\(partRequestTrace\.reason\)/);
   });
 
   test("「없다」는 말은 ok 일 때만 한다", () => {
-    assert.match(source, /requests\.value\.length === 0 \? \(\s*<p[\s\S]{0,200}반출 신청이 없습니다/);
+    assert.match(source, /partRequestTrace\.kind === "absent" \? \(\s*<p[\s\S]{0,200}반출 신청이 없습니다/);
+  });
+
+  test("🔴 신청이 「있다·없다」를 재는 자가 이 화면에 두 벌 생기지 않았다", () => {
+    // 🔴 `requests.value.length` 를 직접 세는 식이 다시 생기면, 그 식은 서버가 쓰는 자와
+    //    따로 자란다 — 2026-10-28 에 한 벌로 모은 것이 그 까닭이다.
+    assert.doesNotMatch(source, /requests\.value\.length/);
+    // 🔵 목록을 그릴 때 쓰는 줄은 **빈 목록 받침** 하나뿐이다(그 갈래는 위에서 이미 갈렸다).
+    assert.match(source, /const stockRequests = requests\.status === "ok" \? requests\.value : \[\];/);
+    assert.equal(source.split("requests.value").length - 1, 1, "requests.value 를 쓰는 자리가 둘 이상이다");
   });
 
   test("부품 목록을 못 받아 왔으면 올리기를 잠근다 — 고를 수 없는데 올릴 수는 없다", () => {

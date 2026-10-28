@@ -1,5 +1,12 @@
 import "../../../../scripts/load-env";
 
+import {
+  INVENTORY_STUB_NO_REQUESTS,
+  installInventoryFetchStub,
+  inventoryStubUrls,
+  setInventoryStubAnswer,
+} from "../../../../scripts/test-inventory-fetch-stub";
+
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -447,6 +454,51 @@ async function assertNothingSaved(repairCaseId: string, label: string) {
   assert.equal(parts.length, 0, `${label}: 사용 부품이 남았다`);
 }
 
+/**
+ * 🔴 「이식이 아무것도 안 남겼다」 — 다만 **시험이 미리 심어 둔 사용 부품 줄은 그대로**여야
+ * 한다 (2026-10-28).
+ *
+ * 위 `assertNothingSaved` 는 사용 부품이 **0줄**인 것까지 요구한다. 덮어쓰기 시험은 반대로
+ * **심어 둔 줄이 살아남는 것**을 보는 자리라, 그 한 항목만 갈라 두고 나머지 다섯은 똑같이
+ * 본다 — 느슨하게 만든 것이 아니라 **다른 것을 재는 자**다(심어 둔 줄은 부르는 쪽이 값으로
+ * 다시 확인한다).
+ */
+async function assertNothingSavedExceptSeededParts(repairCaseId: string, label: string) {
+  assert.equal((await readReports(repairCaseId)).length, 0, `${label}: 보고서가 남았다`);
+  assert.equal((await readAttachments(repairCaseId)).length, 0, `${label}: 첨부가 남았다`);
+  assert.equal((await readTrace(repairCaseId)).length, 0, `${label}: 이식 흔적이 남았다`);
+  assert.equal(
+    (await readImportedWorkRecords(repairCaseId)).length,
+    0,
+    `${label}: 이식한 작업 기록이 남았다`
+  );
+  assert.equal(await readSymptom(repairCaseId), null, `${label}: 신고 증상이 채워졌다`);
+}
+
+/**
+ * ============================================================================
+ * 🔴 재고 관리를 **진짜로 두드리지 않게** 덮개를 씌운다 (2026-10-28)
+ * ============================================================================
+ * 이식은 저장 직전에 재고 관리에 묻는다 — 「이 건에 부품 요청(반출) 흔적이 있나」. 덮개가
+ * 없으면 이 시험이 `.env.local` 의 주소로 **옆 저장소의 개발 서버를 실제로 두드린다.**
+ * 🔴 2026-10-28 실측: 덮개 없이 돌렸더니 32개가 전부 통과했는데, **옆집 서버가 켜져 있어서**
+ *    였다 — 꺼 두면 전부 「재고 관리에 물어보지 못했습니다」로 떨어진다. 통과도 실패도 이
+ *    시험이 한 말이 아니게 된다.
+ * 🔵 기본 답은 **「신청이 없다」**(빈 목록)다 — 아래 대부분의 시험이 부품이 들어가는 자리다.
+ *    바꾸는 시험은 제자리에서 바꾸고 `finally` 로 되돌린다.
+ * ============================================================================
+ */
+let restoreInventoryStub: (() => void) | null = null;
+
+before(() => {
+  restoreInventoryStub = installInventoryFetchStub();
+});
+
+after(() => {
+  restoreInventoryStub?.();
+  restoreInventoryStub = null;
+});
+
 before(async () => {
   const [engineer] = await db
     .select({ id: users.id })
@@ -743,7 +795,7 @@ describe("짝이 하나로 정해지면 들어간다", () => {
   /**
    * ── 🔴 사용 부품 칸은 **한글로 저장된다** (2026-09-23 사용자 결정) ──────────
    * 사용자가 수리 건 상세의 「사용 부품」 표에서 일본어 품명을 잡아냈다. 이 칸만
-   * **저장할 때** `translateKyosanSentence` 를 지난다(`appendUsedParts` 의 주석에
+   * **저장할 때** `translateKyosanSentence` 를 지난다(`replaceUsedParts` 의 주석에
    * 까닭 셋이 적혀 있다 — 사람이 고치는 칸이고, 통계의 묶는 열쇠이고, 미리보기는
    * 이미 한글을 보여 주고 있었다).
    *
@@ -944,6 +996,272 @@ describe("짝이 하나로 정해지면 들어간다", () => {
     const memos = (await readImportedWorkRecords(target.id)).map((row) => row.memo);
     assert.ok(memos.some((memo) => memo.includes("값-첫장")), "첫 장의 내용이 사라지면 안 된다");
     assert.ok(memos.some((memo) => memo.includes("값-둘째장")));
+  });
+});
+
+// ══════════════════════════════════════════════ 🔴 사용 부품 — 덮어쓴다 (2026-10-28)
+
+/**
+ * ============================================================================
+ * 🔴 **「붙인다」에서 「덮어쓴다」로 뒤집힌 자리** (2026-10-28 사용자 결정)
+ * ============================================================================
+ * 쓰는 분의 말: 「읽어와서 [수리건 상세]의 [사용부품]에 저장해줘. (기존에 적어두었던 내용들
+ * 위에 **덮어씌워줘**.) 만일, [a/s시스템]에서 **부품 요청을 했었다면** [사용부품]에 등록하지
+ * 말아줘.」
+ *
+ * 🔴 이 묶음이 못 박는 것 셋 — **되살아나면 전부 깨진다**:
+ *  ① **덮어쓴다** — 먼저 있던 줄이 **값으로** 사라지는 것을 본다(개수가 아니라 글자로).
+ *  ② **요청 흔적이 있으면 한 줄도 안 넣는다** — 그리고 **있던 줄도 안 지운다**.
+ *  ③ 🔴 **「모른다」를 「없다」로 바꾸지 않는다** — 가장 비싼 실수 자리다. 재고 관리가
+ *     멈춘 사이에 덮어쓰면, 이미 부품을 받아 간 건의 기록이 오류 한 번 없이 사라진다.
+ * ============================================================================
+ */
+describe("🔴 사용 부품을 덮어쓴다 — 부품 요청 흔적이 있으면 넣지 않는다", () => {
+  /** 이 건의 사용 부품 줄 — **글자까지** 본다(개수만 세면 덮어쓰기와 붙이기가 안 갈린다). */
+  async function readUsedPartLines(repairCaseId: string) {
+    return db
+      .select({
+        lineNo: repairCaseUsedParts.lineNo,
+        partNameText: repairCaseUsedParts.partNameText,
+        quantity: repairCaseUsedParts.quantity,
+      })
+      .from(repairCaseUsedParts)
+      .where(eq(repairCaseUsedParts.repairCaseId, repairCaseId))
+      .orderBy(asc(repairCaseUsedParts.lineNo));
+  }
+
+  /** 사람이 손으로 적어 둔 줄 하나. 🔴 덮어쓰기가 **지워야 할 바로 그 줄**이다. */
+  async function seedHandWrittenLine(repairCaseId: string, text: string) {
+    await db.insert(repairCaseUsedParts).values({
+      repairCaseId,
+      lineNo: 1,
+      partId: null,
+      partNameText: text,
+      quantity: 7,
+    });
+    // 🔵 심은 것이 실제로 들어갔는지 먼저 본다 — 표본이 비면 아래 단언이 공짜로 통과한다.
+    assert.deepEqual(await readUsedPartLines(repairCaseId), [
+      { lineNo: 1, partNameText: text, quantity: 7 },
+    ]);
+  }
+
+  test("🔴 사람이 손으로 적어 둔 줄이 **사라진다** — 2026-09-18 의 「붙인다」가 뒤집혔다", async () => {
+    const target = await seedCase();
+    await seedHandWrittenLine(target.id, "값-사람이-적은-부품");
+
+    const result = await importOf(
+      fakeReport({
+        intakeNumber: target.intakeNumber,
+        model: target.modelName,
+        serialNumber: target.serialNumber,
+        faultPart: "값-연락서-부품",
+        salt: "덮어쓰기",
+      })
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+
+    assert.equal(result.usedPartCount, 1);
+    // 🔴 **값으로** 본다 — 손으로 적은 글자가 한 줄도 남아 있으면 안 되고, 차례는 1부터다.
+    assert.deepEqual(await readUsedPartLines(target.id), [
+      { lineNo: 1, partNameText: "값-연락서-부품", quantity: 1 },
+    ]);
+
+    // 🔴 흔적의 `usedPartIds` 는 **방금 넣은 줄**이다(지워진 줄이 섞이면 되돌리기가 엉뚱한
+    //    줄을 지운다).
+    const metadata = (await readTrace(target.id))[0].metadata as Record<string, unknown>;
+    assert.deepEqual(metadata.usedPartIds, await readUsedPartIds(target.id));
+    assert.equal(metadata.usedPartCount, 1);
+  });
+
+  test("🔴 먼저 넣은 **다른 연락서**의 줄도 사라진다 — 마지막 한 장만 남는다(알고 고른 손해)", async () => {
+    const target = await seedCase();
+    const identityOf = {
+      intakeNumber: target.intakeNumber,
+      model: target.modelName,
+      serialNumber: target.serialNumber,
+    };
+
+    const first = await importOf(fakeReport({ ...identityOf, faultPart: "값-첫장부품", salt: "첫장부품" }));
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.deepEqual(await readUsedPartLines(target.id), [
+      { lineNo: 1, partNameText: "값-첫장부품", quantity: 1 },
+    ]);
+
+    const second = await importOf(fakeReport({ ...identityOf, faultPart: "값-둘째장부품", salt: "둘째장부품" }));
+    assert.equal(second.ok, true, JSON.stringify(second));
+
+    // 🔴 첫 장의 부품이 **없다**. 2026-09-18 이 막으려던 바로 그 일이고, 2026-10-28 에
+    //    쓰는 분이 그것을 알고 고른 쪽이다.
+    assert.deepEqual(await readUsedPartLines(target.id), [
+      { lineNo: 1, partNameText: "값-둘째장부품", quantity: 1 },
+    ]);
+    // 🔵 작업 기록은 여전히 **쌓인다** — 뒤집힌 것은 사용 부품 칸 하나뿐이다.
+    assert.equal((await readTrace(target.id)).length, 2);
+  });
+
+  test("🔵 교체 부품이 없는 연락서는 칸을 비우지 않는다 — 재고 관리에 묻지도 않는다", async () => {
+    const target = await seedCase();
+    await seedHandWrittenLine(target.id, "값-남아야-하는-부품");
+    const urlsBefore = inventoryStubUrls().length;
+
+    const result = await importOf(
+      fakeReport({
+        intakeNumber: target.intakeNumber,
+        model: target.modelName,
+        serialNumber: target.serialNumber,
+        internalFinding: "값-부품없는-연락서",
+        salt: "부품없음",
+      })
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    assert.equal(result.usedPartCount, 0);
+
+    assert.deepEqual(await readUsedPartLines(target.id), [
+      { lineNo: 1, partNameText: "값-남아야-하는-부품", quantity: 7 },
+    ]);
+    assert.equal(
+      inventoryStubUrls().length,
+      urlsBefore,
+      "🔴 넣을 부품이 없으면 재고 관리를 두드리지 않는다"
+    );
+  });
+
+  test("🔴 부품 요청 흔적이 있으면 **한 줄도 안 넣고**, 있던 줄도 **안 지운다**", async () => {
+    const target = await seedCase();
+    await seedHandWrittenLine(target.id, "값-요청있는건의-부품");
+
+    setInventoryStubAnswer({ kind: "requests", count: 2 });
+    try {
+      const result = await importOf(
+        fakeReport({
+          intakeNumber: target.intakeNumber,
+          model: target.modelName,
+          serialNumber: target.serialNumber,
+          faultPart: "값-들어가면-안-되는-부품",
+          salt: "요청있음",
+        })
+      );
+      assert.equal(result.ok, true, JSON.stringify(result));
+      if (!result.ok) return;
+
+      // 🔴 이식 자체는 **성공한다** — 막히는 것은 사용 부품 칸뿐이다(본문·첨부는 들어간다).
+      assert.equal(result.usedPartCount, 0);
+      // 🔴 흔적도 **0줄을 넣었다**고 적어야 한다 — 여기에 id 가 하나라도 실리면 되돌리기가
+      //    **사람이 적은 줄**을 지운다(이 칸의 id 로 지우기 때문이다).
+      const metadata = (await readTrace(target.id))[0].metadata as Record<string, unknown>;
+      assert.deepEqual(metadata.usedPartIds, []);
+      assert.equal(metadata.usedPartCount, 0);
+      // 🔴 **지우지도 않는다** — 건너뛰기는 「이 칸을 건드리지 않는다」는 뜻이다.
+      assert.deepEqual(await readUsedPartLines(target.id), [
+        { lineNo: 1, partNameText: "값-요청있는건의-부품", quantity: 7 },
+      ]);
+      // 🔴 **조용히 건너뛰지 않는다** — 러너가 세는 그 글자로 알린다.
+      assert.ok(
+        result.warnings.some((warning) => warning.includes("사용 부품 칸에 적지 않았습니다")),
+        `왜 안 넣었는지 알려야 한다: ${JSON.stringify(result.warnings)}`
+      );
+      // 🔵 **인수번호로** 물었다 — 재고 관리는 수리 건 id 를 모른다.
+      assert.ok(
+        inventoryStubUrls().some((url) => url.includes(`intake=${target.intakeNumber}`)),
+        inventoryStubUrls().join(" · ")
+      );
+    } finally {
+      setInventoryStubAnswer(INVENTORY_STUB_NO_REQUESTS);
+    }
+  });
+
+  test("🔴 **취소된** 신청도 흔적이다 — 상태로 거르지 않는다(화면도 전부 그린다)", async () => {
+    const target = await seedCase();
+
+    setInventoryStubAnswer({ kind: "requests", count: 1, statusCode: "CANCELLED", statusLabel: "취소됨" });
+    try {
+      const result = await importOf(
+        fakeReport({
+          intakeNumber: target.intakeNumber,
+          model: target.modelName,
+          serialNumber: target.serialNumber,
+          faultPart: "값-취소된요청-부품",
+          salt: "취소된요청",
+        })
+      );
+      assert.equal(result.ok, true, JSON.stringify(result));
+      if (!result.ok) return;
+      assert.equal(result.usedPartCount, 0, "🔴 취소된 신청을 「흔적 없음」으로 세면 안 된다");
+      assert.deepEqual(await readUsedPartLines(target.id), []);
+    } finally {
+      setInventoryStubAnswer(INVENTORY_STUB_NO_REQUESTS);
+    }
+  });
+
+  /**
+   * 🔴 **가장 비싼 실수 자리.** 「모른다」를 「없다」로 눕히면 재고 관리가 잠깐 멈춘 사이에
+   * 이미 부품을 받아 간 건의 사용 부품이 연락서 내용으로 덮어써진다 — 오류가 한 번도 안 나서
+   * 아무도 신고하지 않는다.
+   */
+  test("🔴 재고 관리에 못 물어보면 **아무것도 안 들어간다** — 「없다」로 눕히지 않는다", async () => {
+    const target = await seedCase();
+    await seedHandWrittenLine(target.id, "값-덮이면-안-되는-부품");
+
+    setInventoryStubAnswer({ kind: "down", httpStatus: 503 });
+    try {
+      const result = await importOf(
+        fakeReport({
+          intakeNumber: target.intakeNumber,
+          model: target.modelName,
+          serialNumber: target.serialNumber,
+          faultPart: "값-막혀야-하는-부품",
+          customerFault: "값-막혀야-하는-증상",
+          withPhoto: true,
+          salt: "재고멈춤",
+        })
+      );
+
+      assert.equal(result.ok, false, JSON.stringify(result));
+      if (result.ok) return;
+      assert.equal(result.code, "INVENTORY_UNREACHABLE");
+
+      // 🔴 **한 글자도 안 들어갔다** — 반쯤 넣고 부품만 빼면 같은 파일을 다시 올려도
+      //    `ALREADY_IMPORTED` 로 막혀 그 건의 부품이 영영 안 들어간다.
+      await assertNothingSavedExceptSeededParts(target.id, "재고 관리 멈춤");
+      // 🔴 손으로 적어 둔 줄은 **그대로** 있다.
+      assert.deepEqual(await readUsedPartLines(target.id), [
+        { lineNo: 1, partNameText: "값-덮이면-안-되는-부품", quantity: 7 },
+      ]);
+    } finally {
+      setInventoryStubAnswer(INVENTORY_STUB_NO_REQUESTS);
+    }
+  });
+
+  test("🔴 저쪽이 돌아오면 **같은 파일이 그대로 들어간다** — 막힌 자리에 찌꺼기가 없다", async () => {
+    const target = await seedCase();
+    const fake = fakeReport({
+      intakeNumber: target.intakeNumber,
+      model: target.modelName,
+      serialNumber: target.serialNumber,
+      faultPart: "값-다시올린-부품",
+      salt: "다시올리기",
+    });
+
+    setInventoryStubAnswer({ kind: "down", httpStatus: 503 });
+    try {
+      const blocked = await importOf(fake);
+      assert.equal(blocked.ok, false);
+      if (blocked.ok) return;
+      assert.equal(blocked.code, "INVENTORY_UNREACHABLE");
+    } finally {
+      setInventoryStubAnswer(INVENTORY_STUB_NO_REQUESTS);
+    }
+
+    // 🔴 같은 바이트를 그대로 다시 — `ALREADY_IMPORTED` 로 막히면 안 된다(흔적이 안 남았다).
+    const retried = await importOf(fake);
+    assert.equal(retried.ok, true, JSON.stringify(retried));
+    if (!retried.ok) return;
+    assert.equal(retried.usedPartCount, 1);
+    assert.deepEqual(await readUsedPartLines(target.id), [
+      { lineNo: 1, partNameText: "값-다시올린-부품", quantity: 1 },
+    ]);
   });
 });
 

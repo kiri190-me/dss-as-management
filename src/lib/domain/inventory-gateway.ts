@@ -854,6 +854,45 @@ export function isInventoryRequestSettled(request: Pick<InventoryStockRequest, "
   return request.status.code === "CONFIRMED" || request.status.code === "REJECTED" || request.status.code === "CANCELLED";
 }
 
+/**
+ * ============================================================================
+ * 🔴 「이 수리 건에 부품 요청 흔적이 있는가」 — **있다 · 없다 · 모른다** (2026-10-28)
+ * ============================================================================
+ * 쓰는 분의 판정 그대로다: 「수리건 상세의 [부품 요청] 칸에 **반출신청된 어떤 흔적이라도**
+ * 있으면 부품요청을 했었다고 판단한다.」 연락서 이식이 교체 부품을 사용 부품 칸에 덮어쓸지
+ * 말지를 이 판정 하나로 가른다(`server/services/kyosan-report-import.ts`).
+ *
+ * ── 🔴 상태로 거르지 않는다 ──────────────────────────────────────────────
+ * 취소된 신청도 반려된 신청도 **흔적**이다. 「이 건에 무엇이 나갔나」를 보는 그 칸이 상태를
+ * 가리지 않고 **전부 그리기** 때문이고(`PartRequestSection` 의 목록), 사람이 그 칸에서 보는
+ * 것과 서버가 세는 것이 다르면 「요청한 적이 있는데 왜 덮어썼지」가 된다.
+ * 🔵 그래서 이 함수는 **줄의 내용을 한 칸도 쳐다보지 않는다** — 형이 `T` 인 까닭이 그것이다.
+ *    화면이 받는 모양(`…ForScreen`)과 서버가 받는 모양이 달라도 **같은 자**로 잰다.
+ *
+ * ── 🔴 「모른다」를 「없다」로 바꾸지 않는다 ──────────────────────────────
+ * 이 파일 머리말의 그 규칙이 **가장 비싸게** 걸리는 자리다. 저쪽이 잠깐 멈춘 사이에 「없다」로
+ * 읽으면 **이미 부품을 받아 간 건의 사용 부품이 연락서 내용으로 덮어써진다** — 지워진 줄을
+ * 되짚는 길은 감사 이력뿐이고, 아무도 그 사고를 신고하지 않는다(오류가 안 난다). 그래서
+ * 갈래가 둘이 아니라 셋이다.
+ * ============================================================================
+ */
+export type InventoryPartRequestTrace =
+  /** 신청이 한 건이라도 있다. 🔴 상태는 보지 않는다(취소·반려도 든다). */
+  | { kind: "present"; count: number }
+  /** 저쪽이 **빈 목록**을 주었다 — 「없다」는 사실이다. */
+  | { kind: "absent" }
+  /** 🔴 못 물어봤다. **「없다」가 아니다.** */
+  | { kind: "unknown"; reason: InventoryUnreachableReason };
+
+export function resolveInventoryPartRequestTrace<T>(
+  requests: InventoryResult<readonly T[]>
+): InventoryPartRequestTrace {
+  if (requests.status !== "ok") return { kind: "unknown", reason: requests.reason };
+  return requests.value.length === 0
+    ? { kind: "absent" }
+    : { kind: "present", count: requests.value.length };
+}
+
 // ---------------------------------------------------------------------------
 // 반출 신청 줄의 **꾸밈** — 상태 배지 · 수량 · 부품 덩어리 (2026-10-21 쓰는 분 요청 셋)
 // ---------------------------------------------------------------------------

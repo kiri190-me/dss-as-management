@@ -74,7 +74,7 @@ export type KyosanPreviewPart = {
   /**
    * 🔴 `交換部品詳細` 시트의 `数量` 칸에서 읽은 수. **연락서에 수량이 적혀
    * 있을 때만** 값이 있다 — 없으면 이 열쇠가 아예 없고, 넣는 쪽이 1 로 본다
-   * (`kyosan-report-import.ts` 의 `appendUsedParts`). Card 시트에만 있는 부품은
+   * (`kyosan-report-import.ts` 의 `replaceUsedParts`). Card 시트에만 있는 부품은
    * 수량 칸이 없는 자리라 언제나 열쇠가 없다.
    */
   quantity?: number;
@@ -315,22 +315,49 @@ export function buildKyosanPreviewLines(report: KyosanReport): KyosanPreviewLine
  * 가 부품을 낸 장이 먼저 가져가므로 두 수가 뒤바뀐다 — 다시 재지 않았다(연락서
  * 원본이 저장소에 없다). 🔴 그 수를 「지금 이렇다」로 읽지 마라.
  *
- * ⚠️ 🔴 **Card 시트의 이름은 품번이 아니다.** 되살아난 이 길에서
- * `legacyPreviewParts` 는 Card 의 **대장 이름**과 `交換部品詳細` 의 **품번**을
- * 한 목록에 담는다 — 한 장 안에 이름 계통이 둘이 된다. 이 조각에서 걷어내지
- * 않았다(「Card 시트 경로는 그대로 산다」가 같은 결정의 일부였다). [고장 부품]
- * 그래프가 재고관리와 묶을 때 이것이 변수다.
+ * ── 🔴 **Card 는 그 장에서 빠진다** (2026-10-28, 같은 날 두 번째 고침) ──
+ * 위 뒤집기를 넣은 날, 이 자리에 **경고만 적고 고치지 않은 줄**이 있었다 —
+ * **인용해 남긴다**:
+ *
+ *     「⚠️ 🔴 **Card 시트의 이름은 품번이 아니다.** 되살아난 이 길에서
+ *       `legacyPreviewParts` 는 Card 의 **대장 이름**과 `交換部品詳細` 의
+ *       **품번**을 한 목록에 담는다 — 한 장 안에 이름 계통이 둘이 된다.」
+ *
+ * 🔵 그 경고가 **그날 바로 실물에서 터졌다.** 사용자가 연락서를 넣고 [사용 부품]을
+ * 열었더니 `交換部品詳細` 에 부품이 **2줄**인데 **4건**이 들어가 있었다:
+ *
+ *     (설명 A 의 한글 번역)  1   ← Card 쪽에서 온 일본어 이름이 한글로 번역된 것
+ *     (설명 B 의 한글 번역)  1      (`report-terms.ts` 의 「사용 부품 칸은 예외다」)
+ *     (품번 A)              1   ← `交換部品詳細` 의 `型式`
+ *     (품번 B)              1
+ *
+ * 🔴 사용자 결정: **「`型式`(품번)만 나오는 것이 맞다.」** 그래서 `交換部品詳細` 가
+ * 부품 줄을 낸 장에서는 **그 줄만** 담는다(`"detail-only"`).
+ *
+ * 🔴 **Card 시트를 걷어낸 것이 아니다.** `交換部品詳細` 도 `推定修理内容` 도 부품을
+ * 못 내는 장에서는 Card 가 **여전히 유일한 출처**이고 그 길은 그대로 산다. 바뀐
+ * 것은 **둘이 함께 담기던 한 갈래**뿐이다 — 그 갈래만 이 파일이 스스로 적어 둔
+ * 「한 장에서 두 출처를 섞지 않는다」를 어기고 있었다. 고쳐서 규칙과 코드가 다시
+ * 맞는다.
+ *
+ * ⚠️ 🔴 **잃는 것이 있다 — 몰래 넘어가지 않게 적어 둔다.** `交換部品詳細` 가 부품을
+ * 낸 장에서 **Card 에만 있고 詳細에는 없는 부품**은 이제 들어가지 않는다. 사용자가
+ * 「품번만」을 골랐으므로 **받아들인 손해**다. 🔴 그런 부품이 몇 건인지는 **재지
+ * 못했다**(연락서 원본이 저장소에 없다). 기록으로 남은 이웃 수치는 「Card 쪽
+ * 1,129건 · 詳細 쪽 1,128건 · Card 가 텅 비고 詳細에만 있던 장 45장」뿐이고,
+ * **그 수는 이 손해를 말해 주지 않는다.**
  */
 export function buildKyosanPreviewParts(report: KyosanReport): KyosanPreviewPart[] {
-  // 🔴 `交換部品詳細` 가 부품 줄을 냈으면 **그쪽이 이긴다**(위 머리말). 품번이
-  //    거기에만 있어서다.
-  if (hasDetailPartLine(report)) return legacyPreviewParts(report);
+  // 🔴 `交換部品詳細` 가 부품 줄을 냈으면 **그 줄만** 쓴다(위 머리말). 품번이
+  //    거기에만 있고, Card 의 일본어 이름을 함께 담으면 같은 물건이 두 번 들어간다.
+  if (hasDetailPartLine(report)) return legacyPreviewParts(report, "detail-only");
   const estimated = report.estimatedRepair;
   if (estimated !== null) {
     const parts = estimatedPreviewParts(estimated);
     if (parts.length > 0) return parts;
   }
-  return legacyPreviewParts(report);
+  // 🔴 둘 다 못 낸 장 — 여기서는 Card 가 **유일한 출처**다. 그 길은 그대로 산다.
+  return legacyPreviewParts(report, "card-and-detail");
 }
 
 /**
@@ -372,8 +399,23 @@ function estimatedPreviewParts(block: KyosanEstimatedRepairBlock): KyosanPreview
   return parts;
 }
 
-/** Card 시트 + `交換部品詳細` — 추정수리내용이 빈 장에서 쓰는 지금까지의 길. */
-function legacyPreviewParts(report: KyosanReport): KyosanPreviewPart[] {
+/**
+ * 이 장에서 **어느 출처를 담는가**. 🔴 이름 계통이 섞이지 않게 **장마다 하나만**
+ * 고른다(`buildKyosanPreviewParts` 의 머리말 「한 장에서 두 출처를 섞지 않는다」).
+ *
+ *   `"detail-only"`     — `交換部品詳細` 의 **품번만**. 그 시트가 부품을 낸 장.
+ *   `"card-and-detail"` — Card 시트의 대장 이름까지. 🔴 `交換部品詳細` 도
+ *                         `推定修理内容` 도 부품을 못 낸 장에서만 쓴다. 그 장에서는
+ *                         Card 가 **유일한 출처**이고, `detailParts` 는 어차피 비어
+ *                         있으므로 섞일 것이 없다.
+ */
+type KyosanLegacyPartSources = "detail-only" | "card-and-detail";
+
+/** Card 시트 + `交換部品詳細` — 고른 출처만 담는다(위 `KyosanLegacyPartSources`). */
+function legacyPreviewParts(
+  report: KyosanReport,
+  sources: KyosanLegacyPartSources
+): KyosanPreviewPart[] {
   // 같은 갈래·같은 이름이 詳細 시트에 여러 줄이면 **처음 줄**의 수량을 쓴다
   // (그것이 같은 갈래 안의 겹침이다 — 위 머리말).
   const quantityByKindAndText = new Map<string, number>();
@@ -396,11 +438,16 @@ function legacyPreviewParts(report: KyosanReport): KyosanPreviewPart[] {
     parts.push(quantity === undefined ? { kind, text } : { kind, text, quantity });
   };
 
-  for (const [key, kind] of [
-    ["faultParts", "fault"],
-    ["preventiveParts", "preventive"],
-  ] as const) {
-    for (const value of report.card.lists[key].values) push(kind, value.trim());
+  // 🔴 Card 시트의 이름은 **품번이 아니다**(교산 부품 대장에서 드롭다운으로 고른
+  //    일본어 이름이다). `交換部品詳細` 가 품번을 낸 장에서는 담지 않는다 — 담으면
+  //    같은 물건이 품번 한 줄과 일본어 한 줄로 **두 번** 들어간다(위 머리말).
+  if (sources === "card-and-detail") {
+    for (const [key, kind] of [
+      ["faultParts", "fault"],
+      ["preventiveParts", "preventive"],
+    ] as const) {
+      for (const value of report.card.lists[key].values) push(kind, value.trim());
+    }
   }
   for (const part of report.detailParts) push(part.kind, part.name.trim());
 
@@ -459,7 +506,7 @@ export type KyosanUsedPartLine = {
  *   보이는 차례와 같은 차례가 되고, 예방분에만 있는 부품이 그 뒤에 붙는다.
  *   `Map` 이 넣은 차례를 지키므로 따로 정렬하지 않는다.
  * · **수량을 더한다. 수량이 안 적힌 줄은 1** 이다 — 넣는 쪽이 `?? 1` 로 그렇게
- *   다뤄 왔고(`kyosan-report-import.ts` 의 `appendUsedParts`), 그 규칙을 여기로
+ *   다뤄 왔고(`kyosan-report-import.ts` 의 `replaceUsedParts`), 그 규칙을 여기로
  *   옮겨만 왔다. 🔴 **그러므로 수량 합계가 달라지지 않는다** — 줄 수만 줄어든다.
  *
  * 🔴 곁 값을 고를 일이 없다. 미리보기 줄이 가진 것은 `kind` · `text` ·

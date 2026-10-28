@@ -1,5 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   CHARGE_TYPE_LABELS,
@@ -22,6 +24,7 @@ import {
   parseInventoryPartsResponse,
   parseInventoryStockRequestsResponse,
   parseStockRequestLines,
+  resolveInventoryPartRequestTrace,
   stockRequestDecisionLabel,
   stockRequestKeyBelongsToCase,
   stockRequestLineChargeTag,
@@ -272,6 +275,102 @@ describe("올린 신청의 지금 상태 읽기", () => {
     assert.equal(parseInventoryStockRequestsResponse({ requests: null }), null);
     assert.equal(parseInventoryStockRequestsResponse("오류 페이지"), null);
     assert.deepEqual(parseInventoryStockRequestsResponse({ count: 0, requests: [], notFound: [] }), []);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 부품 요청 흔적 — **있다 · 없다 · 모른다** (2026-10-28)
+ * ============================================================================
+ * 이 판정이 가리는 것은 연락서 이식이 교체 부품을 **사용 부품 칸에 덮어쓸지 말지**다
+ * (`server/services/kyosan-report-import.ts`). 쓰는 분의 잣대 그대로 — 「[부품 요청] 칸에
+ * **반출신청된 어떤 흔적이라도** 있으면 했었다고 본다」.
+ *
+ * 🔴 **가장 비싼 실수 자리는 「모른다」를 「없다」로 바꾸는 것**이다. 그러면 재고 관리가
+ *    잠깐 멈춘 사이에 **이미 부품을 받아 간 건**의 사용 부품이 연락서 내용으로 덮어써지고,
+ *    오류가 한 번도 안 나므로 아무도 신고하지 않는다. 그래서 다섯 갈래를 하나씩 센다.
+ * ============================================================================
+ */
+describe("🔴 부품 요청 흔적 — 있다 · 없다 · 모른다", () => {
+  test("🔴 못 받아 온 다섯 갈래가 **전부** 「모른다」다 — 하나도 「없다」로 눕지 않는다", () => {
+    const reasons = ["not_configured", "timeout", "unauthorized", "api_closed", "error"] as const;
+    // 🔵 표본이 비면 이 시험은 공짜로 통과한다 — 다섯을 다 재는지부터 못 박는다.
+    assert.equal(reasons.length, 5);
+    for (const reason of reasons) {
+      const trace = resolveInventoryPartRequestTrace({ status: "unreachable", reason });
+      assert.deepEqual(trace, { kind: "unknown", reason }, reason);
+    }
+  });
+
+  test("빈 목록은 「없다」 — 저쪽이 200 으로 준 **사실**이다", () => {
+    assert.deepEqual(resolveInventoryPartRequestTrace({ status: "ok", value: [] }), { kind: "absent" });
+  });
+
+  test("🔴 취소·반려된 신청도 **흔적**이다 — 상태로 거르지 않는다", () => {
+    const parsed = parseInventoryStockRequestsResponse({
+      count: 1,
+      requests: [
+        {
+          requestKey: "AS-TEST-0009",
+          id: "r9",
+          intakeNumber: "D260701",
+          status: { code: "CANCELLED", label: "취소됨" },
+          closed: false,
+          requestedAt: "2026-10-20T01:00:00.000Z",
+          lines: [],
+        },
+      ],
+    });
+    // 🔵 **표본이 진짜 그 표본인지** 먼저 센다 — 빈 목록을 「취소된 신청」이라 부르며
+    //    통과하는 시험이 되지 않게.
+    assert.ok(parsed);
+    assert.equal(parsed.length, 1);
+    assert.equal(
+      isInventoryRequestSettled(parsed[0]),
+      true,
+      "표본이 **끝난(취소된) 신청**이어야 이 시험이 뜻이 있다"
+    );
+    assert.deepEqual(resolveInventoryPartRequestTrace({ status: "ok", value: parsed }), {
+      kind: "present",
+      count: 1,
+    });
+  });
+
+  test("🔵 줄의 내용을 쳐다보지 않는다 — 화면의 모양이든 서버의 모양이든 **같은 자**다", () => {
+    assert.deepEqual(resolveInventoryPartRequestTrace({ status: "ok", value: [{}, {}, {}] }), {
+      kind: "present",
+      count: 3,
+    });
+  });
+});
+
+/**
+ * 🔴 **자가 한 벌인지 파일의 글자로 본다.** 화면과 서버가 따로 세기 시작하면, 사람은 그 칸에서
+ * 신청을 보고 있는데 서버는 「요청한 적 없다」로 읽고 **그 건의 사용 부품을 덮는다.** 그 어긋남은
+ * 오류를 내지 않으므로 값 시험으로는 영영 안 잡힌다 — 세 파일이 **같은 함수**에 닿는지를 본다.
+ */
+describe("🔴 화면과 서버가 같은 자를 쓴다 — 세 파일의 글자", () => {
+  const read = (relative: string) => readFileSync(join(process.cwd(), relative), "utf8");
+
+  test("화면은 이름 붙은 자를 쓴다 — 제 손으로 길이를 세지 않는다", () => {
+    const screen = read("src/components/repair-cases/detail/PartRequestSection.tsx");
+    assert.match(screen, /resolveInventoryPartRequestTrace\(requests\)/);
+    assert.doesNotMatch(screen, /requests\.value\.length/);
+  });
+
+  test("서버 통로의 probe 가 **그 함수를 그대로** 지난다", () => {
+    const gateway = read("src/lib/server/inventory-gateway.ts");
+    assert.match(
+      gateway,
+      /export async function probeInventoryPartRequestTrace[\s\S]{0,400}resolveInventoryPartRequestTrace\(await fetchInventoryStockRequestsByIntake\(intakeNumber\)\)/
+    );
+  });
+
+  test("🔴 연락서 이식이 그 probe 를 쓴다 — 제 판정을 새로 짓지 않는다", () => {
+    const importer = read("src/lib/server/services/kyosan-report-import.ts");
+    assert.match(importer, /await probeInventoryPartRequestTrace\(plan\.intakeNumber\)/);
+    // 🔴 상태 코드로 거르는 식이 이식기 쪽에 따로 생기지 않았는가(화면은 안 거른다).
+    assert.doesNotMatch(importer, /status\.code === "(?:PENDING|CONFIRMED|REJECTED|CANCELLED)"/);
   });
 });
 

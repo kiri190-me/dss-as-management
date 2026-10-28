@@ -296,6 +296,13 @@ export const KYOSAN_IMPORT_FAILURE_TEXT: Readonly<Record<KyosanReportImportFailu
   SOURCE_TOO_LARGE: "원본 파일이 첨부 상한을 넘습니다.",
   STORAGE_FAILED: "파일을 저장하지 못했습니다.",
   SAVE_REJECTED: "저장하지 못했습니다.",
+  /**
+   * 🔴 **「실패했습니다」로 적지 않는다** (2026-10-28). 나머지 일곱은 「이 연락서 · 이 건 ·
+   * 이 파일에 무엇이 잘못됐다」인데 이것만 **우리 쪽에도 연락서에도 잘못이 없다** — 재고
+   * 관리에 「이 건에 부품 요청이 있었나」를 못 물어봤을 뿐이고, 잠시 뒤 **같은 파일을 그대로
+   * 다시 올리면 들어간다.** 같은 말투로 적으면 사람이 파일을 고치려 들거나 포기한다.
+   */
+  INVENTORY_UNREACHABLE: "재고 관리에 물어보지 못해 넣지 않았습니다 — 잠시 뒤 다시 올려 주세요.",
 };
 
 /**

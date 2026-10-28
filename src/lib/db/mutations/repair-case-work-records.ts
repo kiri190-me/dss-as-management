@@ -139,7 +139,7 @@ export type CreateWorkRecordResult =
  *                      액션에서 이미 판정했고, 이식하는 사람이 그 건의 담당
  *                      엔지니어일 이유가 없다. 사용 부품 이식이 이미 같은
  *                      판단을 한다(services/kyosan-report-import.ts 의
- *                      appendUsedParts 주석 — `canWriteUsedParts: true`).
+ *                      replaceUsedParts 주석 — `canWriteUsedParts: true`).
  *
  * 🔴 **갈라지는 것은 이 둘뿐이다.** 살아 있는 계정 확인 · 접수 건 존재 ·
  * 유·무상 확정 · 절차 항목 연결 · 멱등 판정은 **두 갈래 다** 그대로 받는다.

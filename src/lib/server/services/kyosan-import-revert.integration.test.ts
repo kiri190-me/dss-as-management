@@ -1,5 +1,7 @@
 import "../../../../scripts/load-env";
 
+import { installInventoryFetchStub } from "../../../../scripts/test-inventory-fetch-stub";
+
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -458,6 +460,26 @@ async function makeTraceLookLegacy(traceId: string): Promise<void> {
     .where(eq(statusChangeHistories.id, traceId));
 }
 
+/**
+ * 🔴 **재고 관리를 진짜로 두드리지 않게** 덮개를 씌운다 (2026-10-28).
+ *
+ * 이 시험은 되돌리기를 보려고 **먼저 이식을 돌린다.** 2026-10-28 부터 이식은 저장 직전에
+ * 재고 관리에 「이 건에 부품 요청 흔적이 있나」를 묻고, **못 물어보면 이식을 막는다** — 덮개가
+ * 없으면 이 파일의 밑자락이 통째로 **옆 저장소 개발 서버의 상태에 매달린다**(그 까닭은
+ * `scripts/test-inventory-fetch-stub.ts` 머리말). 기본 답은 「신청 없음」이라 이식은 평소대로
+ * 돌고, 되돌리기가 **사용 부품 줄까지** 지우는지를 그대로 볼 수 있다.
+ */
+let restoreInventoryStub: (() => void) | null = null;
+
+before(() => {
+  restoreInventoryStub = installInventoryFetchStub();
+});
+
+after(() => {
+  restoreInventoryStub?.();
+  restoreInventoryStub = null;
+});
+
 before(async () => {
   const [engineer] = await db
     .select({ id: users.id })
@@ -561,6 +583,12 @@ describe("🔴 되돌리면 이식이 만든 여섯이 사라지고 남의 것�
     const target = await seedCase();
 
     // ── 사람의 자료를 **먼저** 둔다 — 이식보다 앞선 줄이 살아남아야 한다 ──
+    //
+    // 🔴 **사용 부품 줄만 예외다**(2026-10-28). 그 칸은 이제 이식이 **덮어쓴다** — 쓰는 분이
+    //    「기존에 적어두었던 내용들 위에 덮어씌워줘」로 정했고, **사람이 적은 줄도 사라진다는
+    //    것을 알고** 고른 쪽이다(`kyosan-report-import.ts` 의 `replaceUsedParts` 머리말).
+    //    그래서 이 줄은 아래에서 **「되돌리기가 남겨 두는 것」이 아니라 「이식이 지우는 것」**
+    //    으로 세어진다. 작업 기록 · 첨부 · 보고서는 그대로 남는다(그것까지 바뀐 것이 아니다).
     const humanPart = await db
       .insert(repairCaseUsedParts)
       .values({ repairCaseId: target.id, lineNo: 1, partId: null, partNameText: "사람이-적은-부품", quantity: 7 })
@@ -607,6 +635,24 @@ describe("🔴 되돌리면 이식이 만든 여섯이 사라지고 남의 것�
       .where(inArray(attachments.id, [...imported.attachmentIds]));
     assert.equal(importedFiles.length, 2);
 
+    // 🔴 **이식이 사람이 적은 줄을 이미 지웠다**(2026-10-28 의 덮어쓰기). 되돌리기를 돌리기
+    //    **전에** 그것을 여기서 못 박는다 — 아래 「되돌린 뒤 0줄」만 보면, 덮어쓰기가 사라지고
+    //    붙이기로 되돌아가도 그 단언이 **그대로 통과**해 버린다(되돌리기가 둘 다 지우므로).
+    const partsAfterImport = await db
+      .select({ id: repairCaseUsedParts.id, partNameText: repairCaseUsedParts.partNameText })
+      .from(repairCaseUsedParts)
+      .where(eq(repairCaseUsedParts.repairCaseId, target.id));
+    assert.deepEqual(
+      partsAfterImport.map((row) => row.partNameText),
+      ["값-이식한-부품"],
+      "🔴 이식이 사용 부품 칸을 덮어쓰지 않았다(사람이 적은 줄이 남아 있다)"
+    );
+    assert.equal(
+      partsAfterImport.some((row) => row.id === humanPart[0].id),
+      false,
+      "🔴 사람이 적어 둔 줄이 그대로 있다 — 덮어쓰기가 되돌아갔다"
+    );
+
     // ── 🔴 회차 번호로 골라 되돌린다 ──
     const selector: RevertSelector = { kind: "batch", importBatchId };
     const plan = await readKyosanRevertPlan(selector);
@@ -626,12 +672,20 @@ describe("🔴 되돌리면 이식이 만든 여섯이 사라지고 남의 것�
     assert.deepEqual(recordsLeft.map((row) => row.id), [humanRecord.id]);
     assert.equal(reverted.deletedWorkRecordIds.length, imported.workRecordIds.length);
 
-    // 2. 사용 부품 — 이식 줄만 사라진다.
+    // 2. 사용 부품 — 되돌리기는 **흔적에 적힌 id 만** 지운다.
+    //
+    //    🔴 **되돌려도 사람이 적어 둔 줄은 돌아오지 않는다**(2026-10-28). 그 줄은 이식이
+    //    지웠고(바로 위에서 확인했다) 되돌리기 도구는 **지우기만** 하는 도구다 — 흔적의
+    //    `usedPartIds` 에 없는 줄은 되살릴 재료가 없다. 지워진 줄을 되짚을 자리는 감사
+    //    이력(`audit_logs` 의 `previousValue.lines`)뿐이다. 그래서 이 칸은 **0줄**이 맞다.
     const partsLeft = await db
       .select({ id: repairCaseUsedParts.id, partNameText: repairCaseUsedParts.partNameText })
       .from(repairCaseUsedParts)
       .where(eq(repairCaseUsedParts.repairCaseId, target.id));
-    assert.deepEqual(partsLeft, [{ id: humanPart[0].id, partNameText: "사람이-적은-부품" }]);
+    assert.deepEqual(partsLeft, []);
+    // 🔴 지운 것이 **이식이 넣은 그 줄**이어야 한다 — 「0줄이면 됐다」로 두면 엉뚱한 줄을
+    //    지우고도 통과한다.
+    assert.deepEqual(reverted.deletedUsedPartIds, partsAfterImport.map((row) => row.id));
 
     // 3. 첨부 — 이식 두 장만 사라지고 사람이 올린 것은 남는다.
     const filesLeft = await db

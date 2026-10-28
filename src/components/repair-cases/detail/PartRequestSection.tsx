@@ -28,6 +28,7 @@ import {
   inventoryPartSpec,
   inventoryStockText,
   inventoryUnreachableMessage,
+  resolveInventoryPartRequestTrace,
   stockRequestDecisionLabel,
   stockRequestLineChargeTag,
   stockRequestLineCustomerName,
@@ -209,6 +210,19 @@ export default function PartRequestSection({
   const [fillError, setFillError] = useState<string | null>(null);
 
   const partList = parts.status === "ok" ? parts.value : [];
+  /**
+   * 🔴 **이 칸이 「있다·없다·모른다」를 가르는 자는 이제 이름이 있다**(2026-10-28).
+   *
+   * 여기 인라인으로 적혀 있던 `status === "ok" && value.length === 0` 을 도메인 쪽
+   * `resolveInventoryPartRequestTrace` 로 옮겼다 — 연락서 이식이 **그 판정으로** 사용 부품을
+   * 덮어쓸지 말지를 가리기 때문이다(`services/kyosan-report-import.ts`). 자가 두 벌이면
+   * 사람이 이 칸에서 신청을 보고 있는데 서버는 「요청한 적 없다」로 읽는 날이 온다.
+   * 🔵 그리는 모양은 한 글자도 바뀌지 않았다 — 셋으로 갈리는 자리만 같은 함수를 지난다.
+   */
+  const partRequestTrace = resolveInventoryPartRequestTrace(requests);
+  /** 🔵 못 받아 왔으면 빈 목록이다 — 그릴 일이 없다(위 갈래가 먼저 막는다). 바로 위
+      `partList` 와 같은 관행이다. */
+  const stockRequests = requests.status === "ok" ? requests.value : [];
   const filteredParts = filterInventoryParts(partList, search);
   const template = ohTemplate.status === "ok" ? ohTemplate.value : null;
   const canSubmit = parts.status === "ok" && requesterGate.ok;
@@ -793,16 +807,16 @@ export default function PartRequestSection({
 
       <div className="mt-4">
         <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">이 수리 건의 반출 신청</h3>
-        {requests.status !== "ok" ? (
+        {partRequestTrace.kind === "unknown" ? (
           <p className="mt-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            재고 관리에서 신청 목록을 불러오지 못했습니다 — {inventoryUnreachableMessage(requests.reason)} 요청이
+            재고 관리에서 신청 목록을 불러오지 못했습니다 — {inventoryUnreachableMessage(partRequestTrace.reason)} 요청이
             없는 것이 아니라 <b>확인하지 못한 것</b>입니다.
           </p>
-        ) : requests.value.length === 0 ? (
+        ) : partRequestTrace.kind === "absent" ? (
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">이 건에 올라간 반출 신청이 없습니다.</p>
         ) : (
           <ul className="mt-2 flex flex-col gap-2">
-            {requests.value.map((request) => (
+            {stockRequests.map((request) => (
               <li key={request.id} className="rounded-md border border-zinc-200 p-2 text-xs dark:border-zinc-800">
                 <div className="flex flex-wrap items-center justify-between gap-1">
                   {/* 🔴 **상태 배지** (2026-10-21 요청 ③) — 「대기」·「반려」·「마감」이 그냥 굵은

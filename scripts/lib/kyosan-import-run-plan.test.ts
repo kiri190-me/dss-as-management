@@ -5,6 +5,7 @@ import { describe, test } from "node:test";
 
 import {
   KYOSAN_NON_DOCUMENT_MAX_BYTES,
+  KYOSAN_RUN_OUTCOME_LABEL,
   KYOSAN_RUN_OUTCOME_ORDER,
   USED_PARTS_SKIPPED_WARNING_MARK,
   classifyPlanOutcome,
@@ -126,7 +127,7 @@ describe("🔴 계획의 판정은 이식기의 네 줄 그대로다", () => {
     );
   });
 
-  test("🔴 실패 코드 일곱이 빠짐없이 갈래로 옮겨진다", () => {
+  test("🔴 실패 코드 여덟이 빠짐없이 갈래로 옮겨진다", () => {
     assert.equal(outcomeForFailureCode("ALREADY_IMPORTED"), "already-imported");
     assert.equal(outcomeForFailureCode("NOT_IMPORTABLE"), "not-importable");
     for (const code of [
@@ -138,6 +139,19 @@ describe("🔴 계획의 판정은 이식기의 네 줄 그대로다", () => {
     ] as const) {
       assert.equal(outcomeForFailureCode(code), "failed", code);
     }
+  });
+
+  /**
+   * 🔴 **「실패」에 섞으면 안 되는 갈래**(2026-10-28). 재고 관리에 「이 건에 부품 요청이
+   * 있었나」를 못 물은 장은 **아무것도 안 들어갔고**, 저쪽이 돌아온 뒤 **그대로 다시 돌리면
+   * 들어간다.** 실패에 섞으면 503장을 돌린 뒤 사람이 그 둘을 가를 수 없다.
+   */
+  test("🔴 재고 관리에 못 물어본 것은 「실패」가 아니라 따로 센다", () => {
+    assert.equal(outcomeForFailureCode("INVENTORY_UNREACHABLE"), "inventory-unknown");
+    assert.notEqual(outcomeForFailureCode("INVENTORY_UNREACHABLE"), "failed");
+    // 표에 찍히는 줄이 있어야 사람이 본다 — 이름표가 비면 빈 칸이 찍힌다.
+    assert.ok(KYOSAN_RUN_OUTCOME_LABEL["inventory-unknown"].length > 0);
+    assert.ok(KYOSAN_RUN_OUTCOME_ORDER.includes("inventory-unknown"));
   });
 });
 

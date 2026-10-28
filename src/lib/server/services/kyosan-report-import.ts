@@ -25,6 +25,8 @@ import {
 } from "@/lib/db/queries/kyosan-report-link";
 import { hasLivePartRequest, isImportedFromKyosanIntake } from "@/lib/db/queries/repair-case-used-parts";
 import { resolveUsedPartsWriteGate } from "@/lib/auth/repair-case-used-parts-authorization";
+import type { InventoryPartRequestTrace } from "@/lib/domain/inventory-gateway";
+import { probeInventoryPartRequestTrace } from "@/lib/server/inventory-gateway";
 import {
   MAX_ATTACHMENT_SIZE_BYTES,
   canonicalMimeTypeForExtension,
@@ -92,8 +94,13 @@ import { ZipArchive } from "@/lib/xlsx/zip-reader";
  *   교체 부품                       → `repair_case_used_parts`
  *                                     🔴 2026-09-22 사용자 지시. **이 칸에만**
  *                                     갈래(고장분/예방분)를 버리고 **부품 이름으로
- *                                     묶어 수량을 더한다**(`appendUsedParts` 머리말).
+ *                                     묶어 수량을 더한다**(`replaceUsedParts` 머리말).
  *                                     미리보기와 작업 기록은 갈래별로 그대로다
+ *                                     🔴 2026-10-28 사용자 결정으로 **덮어쓴다** —
+ *                                     있던 줄을 지우고 다시 적는다(그 머리말의
+ *                                     「무엇을 잃는가」). 단, **부품 요청(반출)
+ *                                     흔적이 있으면 한 줄도 넣지 않고**, 재고
+ *                                     관리에 물어보지 못하면 **이식 자체를 막는다**
  *   사진 · 원본 `.xlsm`             → `attachments` (지금 그대로)
  *   비고                            → 🔴 넣지 않는다(`report-detail-values.ts`)
  *
@@ -211,7 +218,17 @@ export type KyosanReportImportFailureCode =
   /** 파일을 저장소에 놓지 못했다. */
   | "STORAGE_FAILED"
   /** 상세 칸에 넣지 못했다(자료 규칙 · 작업 기록 규칙). */
-  | "SAVE_REJECTED";
+  | "SAVE_REJECTED"
+  /**
+   * 🔴 **재고 관리에 「이 건에 부품 요청 흔적이 있나」를 물어보지 못했다** (2026-10-28).
+   *
+   * 다른 실패 코드와 결이 다르다 — 우리 쪽에도 연락서에도 잘못이 없고, **잠시 뒤 같은
+   * 파일을 그대로 다시 올리면 들어간다.** 그런데도 실패로 돌려주는 까닭은 「모른다」를
+   * 「요청 없음」으로 눕히면 **이미 부품을 받아 간 건의 사용 부품이 덮어써지기** 때문이다
+   * (`replaceUsedParts` 머리말). 반쯤 넣고 부품만 빼면 더 나쁘다 — 같은 파일을 다시 올려도
+   * `ALREADY_IMPORTED` 로 막혀 **그 건의 부품은 영영 안 들어간다.**
+   */
+  | "INVENTORY_UNREACHABLE";
 
 export type KyosanReportImportResult =
   | {
@@ -359,6 +376,33 @@ export async function importKyosanReport(
     };
   }
 
+  // ── 1-2. 🔴 재고 관리에 **「이 건에 부품 요청 흔적이 있나」**를 묻는다 (2026-10-28) ──
+  //
+  // 🔴 **트랜잭션 밖이다.** 저쪽을 두드리는 데 최대 5초가 걸리는데, 그동안 접수 건 행을
+  //    `FOR UPDATE` 로 잡고 있으면 그 건의 다른 저장이 전부 선다(일괄 이식에서는 503장이
+  //    차례로 그 시간을 문다). 그 대신 묻는 순간과 쓰는 순간 사이가 벌어지는데, 그 사이에
+  //    새 반출 신청이 설 수는 있어도 **있던 신청이 사라지지는 않는다**(취소도 흔적으로
+  //    남는다) — 틀리는 쪽이 「덮어쓰지 말아야 할 것을 덮어쓴다」가 아니라 「한 번 더 사람이
+  //    확인한다」 쪽이다.
+  // 🔴 **열쇠는 접수번호**다. 재고 관리는 수리 건 id 를 모른다(`inventory-gateway.ts`).
+  //    잠금 안에서 다시 읽는 번호(`locked.intakeNumber`)와 여기 번호가 어긋날 자리는
+  //    `basis: "intake-number"` 에서 `lockAndReconfirm` 이 막는다.
+  // 🔵 **넣을 교체 부품이 없으면 묻지 않는다**(`null`). 쓸 것이 없어 판정이 아무것도 가르지
+  //    않고, 그때까지 저쪽이 멈췄다고 연락서 이식을 막으면 **아무 쓸모 없이** 막는 것이다.
+  const partRequestTrace: InventoryPartRequestTrace | null =
+    plan.parts.length === 0 ? null : await probeInventoryPartRequestTrace(plan.intakeNumber);
+
+  // 🔴 **「모른다」를 「없다」로 바꾸지 않는다** — 여기서 눕히면 이미 부품을 받아 간 건의
+  //    사용 부품이 연락서 내용으로 덮어써진다. 사람이 잠시 뒤 같은 파일을 다시 올리면 된다
+  //    (아직 한 글자도 안 썼고 파일도 안 놓았다 — 되돌릴 것이 없다).
+  if (partRequestTrace !== null && partRequestTrace.kind === "unknown") {
+    return {
+      ok: false,
+      code: "INVENTORY_UNREACHABLE",
+      message: INVENTORY_UNREACHABLE_MESSAGE,
+    };
+  }
+
   // ── 2. 🔴 상세 칸 값은 **트랜잭션 안에서** 만든다 ──
   //    「신고 증상이 비어 있는가」는 잠금 안에서 방금 읽은 값으로 물어야 한다 —
   //    여기서 미리 정하면 그 사이에 사람이 적은 글자를 덮을 수 있다.
@@ -424,11 +468,14 @@ export async function importKyosanReport(
         actorUserId: input.actorUserId,
       });
 
-      const usedParts = await appendUsedParts(tx, {
+      const usedParts = await replaceUsedParts(tx, {
         repairCaseId: plan.repairCaseId,
         parts: plan.parts,
         actorUserId: input.actorUserId,
         isShipmentLocked: locked.isLocked,
+        // 🔴 위에서 트랜잭션 **밖**에서 물어 온 답. 여기서 다시 묻지 않는다(망을 잠금 안으로
+        //    끌어들이지 않는다 — 1-2 의 머리말).
+        partRequestTrace,
       });
       if (usedParts.skippedReason !== null) warnings.push(usedParts.skippedReason);
 
@@ -514,6 +561,15 @@ export async function importKyosanReport(
 
 const STORAGE_FAILED_MESSAGE = "연락서 파일을 저장하지 못했습니다. 관리자에게 문의해 주세요.";
 const SAVE_FAILED_MESSAGE = "연락서를 저장하지 못했습니다. 관리자에게 문의해 주세요.";
+/**
+ * 🔴 **「관리자에게 문의해 주세요」로 끝내지 않는다** — 위 둘과 다른 말이어야 한다.
+ * 이것은 사람이 **스스로 풀 수 있는** 막힘이다(잠시 뒤 같은 파일을 다시 올리면 된다).
+ * 「문의해 주세요」로 적으면 멀쩡히 다시 누르면 될 일에 전화가 걸려 오고, 반대로 까닭을
+ * 안 적으면 「왜 됐다 안 됐다 하지」가 된다.
+ */
+export const INVENTORY_UNREACHABLE_MESSAGE =
+  "재고 관리에 이 건의 부품 요청 이력을 물어보지 못했습니다 — 잠시 뒤 다시 올려 주세요. " +
+  "요청이 없는 것이 아니라 확인하지 못한 것이라, 사용 부품을 덮어쓰지 않았습니다.";
 
 export type KyosanLockedCase = {
   repairCaseId: string;
@@ -761,22 +817,56 @@ async function appendWorkRecords(
   return ids;
 }
 
-// ─────────────────────────────────────────────── 사용 부품 (붙인다 — 갈아 끼우지 않는다)
+// ─────────────────────────────────────────────── 사용 부품 (🔴 덮어쓴다 — 2026-10-28)
 
 /**
- * 교체 부품을 `repair_case_used_parts` 에 **덧붙인다** (2026-09-18 사용자 결정 —
- * 보고서 줄과 둘 다).
+ * ============================================================================
+ * 🔴 2026-10-28 — 「붙인다」에서 **「덮어쓴다」**로 뒤집혔다 (사용자 결정)
+ * ============================================================================
+ * 쓰는 분의 말 그대로다: 「읽어와서 [수리건 상세]의 [사용부품]에 저장해줘. (기존에
+ * 적어두었던 내용들 위에 **덮어씌워줘**.)」 **무엇을 잃는지 알고 고른 결정**이다.
  *
- * 🔴 `saveRepairCaseUsedParts` 를 그대로 부르지 않는 까닭은 **뜻이 다르기
- * 때문**이다. 그 함수는 화면이 보낸 목록으로 이 건의 부품을 **통째로 다시
- * 그린다**(전부 지우고 다시 넣는다). 연락서 이식은 그 반대다 — 사람이 이미 적어
- * 둔 줄도, 먼저 넣은 다른 연락서의 줄도 **그대로 두고 뒤에 붙여야** 한다.
- * 그것을 그 함수로 하면 첫 연락서의 부품이 둘째 연락서를 넣는 순간 사라진다.
+ * ── 🔴 **지워 둔 2026-09-18 의 판단을 그대로 인용해 남긴다** ─────────────
+ * 그때 이 자리에 적혀 있던 말:
+ *
+ *     「`saveRepairCaseUsedParts` 를 그대로 부르지 않는 까닭은 **뜻이 다르기
+ *      때문**이다. 그 함수는 화면이 보낸 목록으로 이 건의 부품을 **통째로 다시
+ *      그린다**(전부 지우고 다시 넣는다). 연락서 이식은 그 반대다 — 사람이 이미
+ *      적어 둔 줄도, 먼저 넣은 다른 연락서의 줄도 **그대로 두고 뒤에 붙여야** 한다.
+ *      그것을 그 함수로 하면 첫 연락서의 부품이 둘째 연락서를 넣는 순간 사라진다.」
+ *
+ * ── 🔴 **그래서 무엇을 잃는가** (뒤집은 쪽이 지는 값) ────────────────────
+ *  · **사람이 손으로 적어 둔 줄이 사라진다.** 이식이 그 자리를 통째로 다시 적는다.
+ *  · **먼저 넣은 다른 연락서의 줄이 사라진다.** 한 수리 건에 연락서가 여러 장이면
+ *    **마지막에 넣은 한 장**의 교체 부품만 남는다 — 2026-09-18 이 막으려던 바로 그
+ *    일이고, 쓰는 분이 그 사실을 알고 「그래도 덮어쓴다」를 골랐다(2026-10-28).
+ *  · **되돌리기(`revert-kyosan-import.ts`)가 되살려 주지 못한다.** 그 도구는 흔적에
+ *    적힌 `usedPartIds` 를 **지우기만** 한다 — 이 이식이 지운 옛 줄은 그 목록에 없다.
+ *    지워진 줄을 되짚을 자리는 감사 이력(`audit_logs` 의 `previousValue.lines`)뿐이다.
+ *
+ * ── 🔵 **그래도 `saveRepairCaseUsedParts` 를 부르지 않는다** (까닭이 바뀌었다) ──
+ * 이제 둘 다 「전부 지우고 다시 넣는다」지만, 그 함수는 **이 자리에서 부를 수 없다**:
+ *  ① **제 트랜잭션을 연다**(`db.transaction`, `tx` 를 받지 않는다). 이식은 신고 증상 ·
+ *     작업 기록 · 사용 부품 · 첨부 · 흔적이 **한 트랜잭션**이어야 한다(파일 머리말) —
+ *     그 함수를 부르면 사용 부품만 **따로 커밋**되어, 뒤가 실패해도 남는다.
+ *  ② **`expectedVersion` 과 `PermissionActor` 를 요구한다.** 이식에는 화면이 들고 있던
+ *     version 이 없고(있다면 여기서 지어내는 값이다), 권한은 액션이 이미 더 무거운
+ *     판정(`kyosanIntakeImport` MANAGE)으로 보았다 — 그 함수가 다시 묻는 것은
+ *     `repairCases.usedParts` 쓰기라 **이식을 할 수 있는 사람이 부품만 못 넣는** 일이
+ *     생긴다.
+ *  ③ 감사 이력의 `newValue` 에 `source: KYOSAN_REPORT` 가 붙지 않는다 — 어느 줄이
+ *     이식에서 왔는지 되짚을 단서가 그 칸과 흔적의 `usedPartIds` 둘뿐이다.
+ * 그래서 **덮어쓰는 방식만** 이 함수가 그 함수를 본떠 가져온다(아래 delete → insert).
+ * ============================================================================
+ */
+
+/**
+ * 교체 부품으로 `repair_case_used_parts` 를 **다시 적는다**(이 건의 줄을 전부 지우고
+ * 연락서의 줄을 1번부터 넣는다).
  *
  * 🔴 **규칙은 그대로 다시 본다.** 판정 함수도(`resolveUsedPartsWriteGate`)
  * probe 둘도(`hasLivePartRequest` · `isImportedFromKyosanIntake`) 그 파일들이
- * 가진 것을 그대로 부른다. 특히 **반출 이력이 있으면 적지 않는다** — 같은 부품을
- * 통계가 두 번 세는 것을 막는 규칙이고, 이식이라고 예외일 이유가 없다.
+ * 가진 것을 그대로 부른다.
  *
  * 🔴 막히면 **이식 전체를 실패시키지 않는다.** 교체 부품 글자는 「진단/조치」
  * 작업 기록에도 함께 들어가(`report-detail-values.ts`) 잃는 내용이 없고, 반출
@@ -786,6 +876,24 @@ async function appendWorkRecords(
  * 권한은 보지 않는다 — 이 통로는 사람이 칸에 적는 화면이 아니라 서버가 도는
  * 이식이고, 누가 이식을 할 수 있는지는 부르는 쪽(S4 의 화면·라우트)이 본다.
  * 그래서 `canWriteUsedParts` 자리에는 `true` 를 넣고, **나머지 두 규칙만** 본다.
+ *
+ * ── 🔴 **부품 요청을 했던 건에는 한 줄도 넣지 않는다** (2026-10-28) ──────
+ * 쓰는 분의 판정: 「[부품 요청] 칸에 **반출신청된 어떤 흔적이라도** 있으면 부품요청을
+ * 했었다고 판단한다.」 그 답을 재는 자는 `resolveInventoryPartRequestTrace` 하나이고
+ * (`domain/inventory-gateway.ts` — 조각 D 의 백필도 같은 자를 쓴다), 묻는 일은 부르는
+ * 쪽이 **트랜잭션 밖에서** 미리 해 둔다(이 파일 1-2 묶음).
+ *
+ * 🔴 **게이트의 `hasPartRequestHistory` 규칙으로 바꾸지 않았다.** 그 규칙이 보는
+ *    `inventory_part_requests` 표는 **운영에서 0행**이라(조각 13 으로 재고가 걷힌 뒤)
+ *    지금 아무것도 막고 있지 않다 — 죽어 있는 글자다. 그런데도 손대지 않은 까닭은 그
+ *    게이트를 **사람이 손으로 적는 화면**(`mutations/repair-case-used-parts.ts`)이 함께
+ *    쓰기 때문이다. 거기까지 바꾸면 「손으로 적는 칸이 재고 관리의 신청으로 잠긴다」는
+ *    **다른 결정**이 되고, 이 조각이 정할 일이 아니다(2026-10-28 지시). 그래서 이 규칙은
+ *    **연락서 이식 경로에만** 건다.
+ *
+ * 🔴 **「모른다」는 여기까지 오지 않는다** — 부르는 쪽이 이미 `INVENTORY_UNREACHABLE` 로
+ *    막는다. 그래도 아래에서 한 번 더 던지는 까닭: 이 함수를 나중에 다른 자리에서 부르는
+ *    사람이 트레이스를 `null` 로 넘기면 **조용히 덮어쓰게** 되기 때문이다. 울타리는 둘이다.
  *
  * ── 🔴 여기서만 갈래를 버리고 이름으로 묶는다 (2026-09-22) ──────────────
  * 받는 `params.parts` 는 **갈래별로 갈라진** 목록이다(고장분·예방분이 따로 줄을
@@ -800,6 +908,12 @@ async function appendWorkRecords(
  * 되돌려 주는 `insertedCount` 는 **실제로 넣은 줄 수**라 묶은 뒤의 수다
  * (화면이 「사용 부품 N줄」로 보여 주고, 이식 흔적의 `usedPartCount` 도 그 수다).
  *
+ * ── 🔴 교체 부품이 **하나도 없는 연락서는 칸을 비우지 않는다** ───────────
+ * 맨 앞의 빠른 반환이 그것이다. 덮어쓰기는 「연락서에서 읽은 부품을 그 칸에 적는 일」이지
+ * 「칸을 연락서에 맞추는 일」이 아니다 — 교체 부품 항목이 비어 있는 연락서(수리 없이 반송된
+ * 건 따위)에 적혀 있던 줄을 지우면 **얻는 것 없이 잃기만 한다.** 그래서 그때는 묻지도 않고
+ * (부르는 쪽이 재고 관리를 두드리지도 않는다) 한 줄도 건드리지 않는다.
+ *
  * ── 🔴 넣은 줄의 id 를 함께 돌려준다 (되돌리기를 위해) ──────────────────
  * `repair_case_used_parts` 에는 **어느 줄이 이식에서 왔는지 알려 주는 칸이
  * 없다.** `part_id IS NULL` 로도 못 가른다 — 사람이 손으로 적는 줄도 비어
@@ -809,21 +923,37 @@ async function appendWorkRecords(
  * 🔴 `insertedCount` 는 `insertedIds.length` 로만 센다 — 세는 길을 둘로 두면
  * 한쪽만 고쳐지는 날이 온다. 안 넣고 건너뛰는 갈래에서는 둘 다 빈 값이다.
  */
-async function appendUsedParts(
+async function replaceUsedParts(
   tx: Tx,
   params: {
     repairCaseId: string;
     parts: KyosanImportPlan["parts"];
     actorUserId: string;
     isShipmentLocked: boolean;
+    /**
+     * 🔴 이 건에 **부품 요청(반출) 흔적**이 있는가 — 부르는 쪽이 트랜잭션 밖에서 재고
+     * 관리에 물어 온 답. `null` 은 「묻지 않았다」이고 **교체 부품이 0건일 때만** 그렇다.
+     */
+    partRequestTrace: InventoryPartRequestTrace | null;
   }
 ): Promise<{ insertedCount: number; insertedIds: string[]; skippedReason: string | null }> {
+  // 🔴 교체 부품이 없는 연락서는 **칸을 비우지 않는다**(위 머리말). 지우기 전에 선다.
   if (params.parts.length === 0) return { insertedCount: 0, insertedIds: [], skippedReason: null };
+
+  // 🔴 **둘째 울타리** — 「모른다」로도, 「안 물어봤다」로도 덮어쓰지 않는다. 부르는 쪽이
+  //    이미 막고 있어 평소에는 여기 닿지 않지만, 닿는 날은 조용히 남의 기록이 사라지는
+  //    날이라 값싼 검사를 하나 더 둔다.
+  const trace = params.partRequestTrace;
+  if (trace === null || trace.kind === "unknown") {
+    throw new ImportAbort("INVENTORY_UNREACHABLE", INVENTORY_UNREACHABLE_MESSAGE);
+  }
 
   const hasPartRequestHistory = await hasLivePartRequest(tx, params.repairCaseId);
   const isLegacyImportedCase = await isImportedFromKyosanIntake(tx, params.repairCaseId);
   const gate = resolveUsedPartsWriteGate({
     canWriteUsedParts: true,
+    // 🔴 **A/S 제 표(`inventory_part_requests`)를 보는 규칙이다 — 지금 0행이라 죽어 있다**
+    //    (위 머리말). 새 판정으로 갈아 끼우지 않고 그대로 넘긴다.
     hasPartRequestHistory,
     isShipmentLocked: params.isShipmentLocked,
     isLegacyImportedCase,
@@ -840,6 +970,26 @@ async function appendUsedParts(
     };
   }
 
+  // 🔴 **부품 요청을 했던 건에는 한 줄도 넣지 않는다**(2026-10-28 쓰는 분 결정).
+  //    🔵 **지우지도 않는다** — 건너뛰기는 「이 칸을 건드리지 않는다」는 뜻이다. 여기서
+  //       지우면 요청 이력이 있는 건의 사용 부품이 **아무 대체물 없이** 사라진다.
+  if (trace.kind === "present") {
+    return {
+      insertedCount: 0,
+      insertedIds: [],
+      // 🔴 앞머리 글자는 게이트 쪽과 **같다** — 러너가 「부품 건너뜀」을 그 글자로 센다
+      //    (`scripts/lib/kyosan-import-run-plan.ts` 의 `USED_PARTS_SKIPPED_WARNING_MARK`).
+      //    🔴 값은 담지 않는다 — 건수뿐이다(이 파일 머리말).
+      skippedReason:
+        `교체 부품 ${params.parts.length}건을 사용 부품 칸에 적지 않았습니다 — ` +
+        `이 건에는 재고 관리에 올라간 부품 요청(반출) 신청이 ${trace.count}건 있습니다. ` +
+        "그 요청에서 잡히므로 덮어쓰지 않았습니다.",
+    };
+  }
+
+  // 🔴 **지우기 전에 읽어 둔다** — 감사 이력의 `previousValue` 다. 덮어쓰기로 바뀐 뒤로는
+  //    이 줄이 **사라진 기록을 되짚는 유일한 자리**다(되돌리기 도구는 못 되살린다 —
+  //    위 머리말의 「무엇을 잃는가」).
   const previousLines = await tx
     .select({
       lineNo: repairCaseUsedParts.lineNo,
@@ -856,8 +1006,14 @@ async function appendUsedParts(
   //    `?? 1` 을 다시 하지 않는다 — 두 곳에 두면 한쪽만 고쳐지는 날이 온다.
   const usedPartLines = mergeKyosanPartsForUsedParts(params.parts);
 
-  // 🔴 차례는 있는 것 **뒤에** 이어 붙인다(유니크 인덱스가 건 + line_no 다).
-  let nextLineNo = previousLines.reduce((max, line) => Math.max(max, line.lineNo), 0);
+  // ⚠️ **반드시 `repair_case_id` 로 좁힌다.** 조건 없는 delete 는 이 표를 통째로 비운다
+  //    (`mutations/repair-case-used-parts.ts` 의 같은 자리에 붙은 같은 경고다).
+  //    🔴 여기가 2026-10-28 에 「붙인다」가 「덮어쓴다」로 뒤집힌 **그 한 줄**이다.
+  await tx.delete(repairCaseUsedParts).where(eq(repairCaseUsedParts.repairCaseId, params.repairCaseId));
+
+  // 🔴 차례는 **1번부터 다시** 매긴다 — 앞의 줄을 지웠으니 이어 붙일 자리가 없다.
+  //    (유니크 인덱스가 건 + line_no 라 빈 번호를 남겨 둘 까닭도 없다.)
+  let nextLineNo = 0;
   const nextLines = usedPartLines.map((line) => ({
     repairCaseId: params.repairCaseId,
     lineNo: (nextLineNo += 1),
@@ -921,9 +1077,11 @@ async function appendUsedParts(
     targetEntity: "repair_case_used_parts",
     targetRecordId: params.repairCaseId,
     previousValue: { lines: previousLines },
+    // 🔴 **앞의 줄을 여기 더하지 않는다**(2026-10-28). 덮어쓰기로 바뀌었으므로 저장 뒤의
+    //    목록은 **이식이 넣은 줄 그것뿐**이다 — 옛 줄까지 적으면 감사 이력이 「남아 있다」고
+    //    거짓말한다. 사라진 줄은 바로 위 `previousValue` 에 통째로 들어 있다.
     newValue: {
       lines: [
-        ...previousLines,
         ...nextLines.map((line) => ({
           lineNo: line.lineNo,
           partId: line.partId,

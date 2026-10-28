@@ -10,6 +10,7 @@ import {
   fetchInventoryStockRequestsByIntake,
   fillInventoryPartCustomerName,
   inventorySiteUrl,
+  probeInventoryPartRequestTrace,
 } from "./inventory-gateway";
 
 /**
@@ -218,6 +219,86 @@ describe("🔴 실패를 삼키지 않는다 — 다섯 갈래 전부 「못 받
     const result = await fetchInventoryStockRequestsByIntake("X26070");
 
     assert.equal(result.status, "unreachable");
+    assert.equal(calls.length, 0);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 **부품 요청 흔적을 묻는다** — 연락서 이식이 덮어쓸지 가리는 그 물음 (2026-10-28)
+ * ============================================================================
+ * 위 통로를 그대로 지나므로 **못 받아 온 것은 전부 「모른다」**로 와야 한다. 여기서 한 갈래라도
+ * 「없다」로 눕으면, 재고 관리가 잠깐 멈춘 사이에 **이미 부품을 받아 간 건**의 사용 부품이
+ * 연락서 내용으로 덮어써진다(`services/kyosan-report-import.ts`).
+ * ============================================================================
+ */
+describe("🔴 부품 요청 흔적을 묻는다 — 셋으로 갈린다", () => {
+  test("신청이 있으면 「있다」 — 🔴 **취소된 신청도 든다**(상태로 거르지 않는다)", async () => {
+    stubFetch(() => ({
+      status: 200,
+      json: {
+        count: 1,
+        requests: [
+          {
+            requestKey: "AS-TEST-0009",
+            id: "r9",
+            intakeNumber: "D260701",
+            status: { code: "CANCELLED", label: "취소됨" },
+            closed: false,
+            requestedAt: "2026-10-20T01:00:00.000Z",
+            lines: [],
+          },
+        ],
+      },
+    }));
+
+    const trace = await probeInventoryPartRequestTrace("D260701");
+
+    assert.deepEqual(trace, { kind: "present", count: 1 });
+    // 🔵 **읽기 토큰**으로, **인수번호**로 물었는가(열쇠를 우리 표에 저장하지 않는다).
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /\/api\/v1\/stock-requests\?intake=D260701$/);
+    assert.equal(calls[0].headers.Authorization, `Bearer ${READ_TOKEN}`);
+  });
+
+  test("🔵 200 에 빈 목록이면 「없다」 — 그때만 덮어쓸 수 있다", async () => {
+    stubFetch(() => ({ status: 200, json: { count: 0, requests: [], notFound: [] } }));
+
+    assert.deepEqual(await probeInventoryPartRequestTrace("D260701"), { kind: "absent" });
+  });
+
+  test("🔴 저쪽이 멈췄으면 「모른다」다 — **「없다」가 아니다**", async () => {
+    for (const [status, reason] of [
+      [503, "api_closed"],
+      [401, "unauthorized"],
+      [500, "error"],
+    ] as const) {
+      calls = [];
+      stubFetch(() => ({ status, json: {} }));
+
+      const trace = await probeInventoryPartRequestTrace("D260701");
+
+      assert.deepEqual(trace, { kind: "unknown", reason }, `${status}`);
+    }
+  });
+
+  test("🔴 통로 설정이 비어 있어도 「모른다」다 — 개발 PC 에서 조용히 덮어쓰지 않게", async () => {
+    process.env.INVENTORY_API_BASE_URL = "";
+    stubFetch(() => ({ status: 200, json: { requests: [] } }));
+
+    assert.deepEqual(await probeInventoryPartRequestTrace("D260701"), {
+      kind: "unknown",
+      reason: "not_configured",
+    });
+    assert.equal(calls.length, 0, "설정이 없으면 두드리지도 않는다");
+  });
+
+  test("🔴 인수번호 모양이 틀려도 「없다」로 바꾸지 않는다", async () => {
+    stubFetch(() => ({ status: 200, json: { requests: [] } }));
+
+    const trace = await probeInventoryPartRequestTrace("X26070");
+
+    assert.equal(trace.kind, "unknown");
     assert.equal(calls.length, 0);
   });
 });
