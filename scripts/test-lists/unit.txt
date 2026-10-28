@@ -1211,3 +1211,13 @@ src/lib/validation/approval-route-delegation-input.test.ts
 # repair_case_approvals 의 같은 칸과 모양이 어긋나지 않는가** — 값을 베껴 적지 않고
 # 두 스키마 객체를 맞대어 본다(세 곳이 되면 두 곳만 고쳐졌을 때 시험이 틀린 쪽 편을 든다).
 src/lib/db/schema/quote-approval-delegated-from-safety.test.ts
+
+# 사용 부품 이름 ↔ 재고 관리 부품명 겹침을 **세는 규칙**(scripts/check-part-name-overlap.ts).
+# 그 수 하나로 「고장 부품 그래프를 이름으로 묶어도 되는가」가 갈리는데, 운영 자료를
+# 봐야 나오는 수라 사람이 눈으로 검산할 수 없다 — 그래서 셈만 떼어 값으로 못 박는다.
+# 누를수록 더 겹치는가(사다리가 실제로 일하는가) · 🔴 `-` 끼리 붙는 **공짜 겹침**이
+# 없는가 · 「못 쟀다」와 「0% 겹친다」가 갈리는가 · 🔴 도구에 쓰는 길이 생기지 않았는가
+# (주석을 떼고 센다 — 머리말에 금지어가 그대로 적혀 있어 날것으로 세면 늘 깨진다).
+# 🔴 unit 에 적은 이유: 순수 함수라 DB 도 환경변수도 필요 없고, 도구의 글자를 읽는
+# 부분도 렌더가 필요 없다. 격리 이름 없음(DB 안 씀).
+scripts/lib/part-name-overlap.test.ts
