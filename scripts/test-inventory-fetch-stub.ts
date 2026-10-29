@@ -29,7 +29,21 @@
 /** 재고 관리가 이번에 무엇으로 답하는가. 🔴 셋 다 **실제로 일어나는 일**이다. */
 export type InventoryStubAnswer =
   /** 200 + 신청 `count` 건. 🔵 0 이면 「이 건에 올라간 신청이 없다」는 **사실**이다. */
-  | { kind: "requests"; count: number; statusCode?: string; statusLabel?: string }
+  | {
+      kind: "requests";
+      count: number;
+      statusCode?: string;
+      statusLabel?: string;
+      /**
+       * 신청마다 실릴 **줄**. 🔵 **기본은 줄이 없다**(종전 그대로) — 「신청이 있나」만 보는
+       * 시험들은 줄을 쳐다보지 않기 때문이다.
+       *
+       * 🔴 **[사용 부품] 칸의 문지기는 줄을 본다**(2026-10-29) — 막는 잣대가 「신청이
+       *    있나」가 아니라 **「나간 줄(`issued >= 1`)이 있나」**로 좁아졌다. 줄 없이
+       *    흉내 내면 그 시험은 **무엇을 세든 「안 나갔다」**가 되어 공짜로 통과한다.
+       */
+      lines?: readonly { name?: string; quantity: number; issued: number }[];
+    }
   /** 저쪽이 멈췄거나 토큰이 안 맞는다 — 🔴 「없다」가 아니라 **「모른다」**로 와야 한다. */
   | { kind: "down"; httpStatus: number };
 
@@ -52,7 +66,12 @@ export function inventoryStubUrls(): readonly string[] {
   return stockRequestUrls;
 }
 
-function bodyFor(count: number, statusCode: string, statusLabel: string): unknown {
+function bodyFor(
+  count: number,
+  statusCode: string,
+  statusLabel: string,
+  lines: readonly { name?: string; quantity: number; issued: number }[]
+): unknown {
   return {
     count,
     requests: Array.from({ length: count }, (_value, index) => ({
@@ -62,7 +81,14 @@ function bodyFor(count: number, statusCode: string, statusLabel: string): unknow
       status: { code: statusCode, label: statusLabel },
       closed: false,
       requestedAt: "2096-09-10T01:00:00.000Z",
-      lines: [],
+      /* 🔵 부품 번호는 **줄 차례**로 지어낸다 — 가리키는 값이 있어야 파서가 줄을 버리지
+         않는다. 이름이 없으면 「지어낸 부품 N」으로 채운다(가짜 이름만 쓴다). */
+      lines: lines.map((line, lineIndex) => ({
+        no: lineIndex + 1,
+        name: line.name ?? `지어낸 부품 ${lineIndex + 1}`,
+        quantity: line.quantity,
+        issued: line.issued,
+      })),
       decision: null,
       hold: null,
     })),
@@ -101,7 +127,12 @@ export function installInventoryFetchStub(): () => void {
         json: async () => ({}),
       } as unknown as Response;
     }
-    const json = bodyFor(answer.count, answer.statusCode ?? "PENDING", answer.statusLabel ?? "확인 대기");
+    const json = bodyFor(
+      answer.count,
+      answer.statusCode ?? "PENDING",
+      answer.statusLabel ?? "확인 대기",
+      answer.lines ?? []
+    );
     return { ok: true, status: 200, json: async () => json } as unknown as Response;
   }) as typeof fetch;
 

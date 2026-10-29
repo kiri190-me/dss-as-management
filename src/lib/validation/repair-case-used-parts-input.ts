@@ -145,6 +145,12 @@ export type SaveRepairCaseUsedPartsResultCode =
   | "ROLE_NOT_ALLOWED"
   | "PART_REQUEST_HISTORY_EXISTS"
   | "CASE_LOCKED"
+  /**
+   * 🔴 **재고 관리에 못 물어봤다**(2026-10-29). 반출 흔적의 절반이 그쪽에 있어서
+   * 못 물어보면 「흔적이 없다」고 말할 근거가 없다 — 그래서 **막되 다른 말로** 막는다
+   * (auth/repair-case-used-parts-authorization.ts 의 그 상수).
+   */
+  | "INVENTORY_UNREACHABLE"
   | "INVALID_PART"
   | "DATABASE_UNAVAILABLE";
 

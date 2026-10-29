@@ -4,10 +4,12 @@ import { db } from "../client";
 import { inventoryPartRequests, repairCases, repairCaseUsedParts, statusChangeHistories } from "../schema";
 import { KYOSAN_INTAKE_LIST_SOURCE } from "./kyosan-intake-import";
 import {
-  resolveUsedPartsWriteGate,
+  hasUsedPartsPartRequestHistory,
+  resolveUsedPartsWriteGateWithInventory,
   type UsedPartsWriteGate,
 } from "@/lib/auth/repair-case-used-parts-authorization";
 import { hasPermission, type PermissionActor } from "@/lib/auth/permission-resolver";
+import type { InventoryIssuedPartsTrace } from "@/lib/domain/inventory-gateway";
 
 /**
  * ============================================================================
@@ -28,6 +30,24 @@ import { hasPermission, type PermissionActor } from "@/lib/auth/permission-resol
  * 이 함수는 그 판단의 재료(`hasPartRequestHistory`)를 함께 돌려준다. **DB 제약이
  * 아니다** — 요청서를 나중에 내면 이미 적어 둔 줄이 남을 수 있고, 그것은 위법이
  * 아니라 사람이 확인할 일이다(스키마 머리말의 같은 판단).
+ *
+ * ── 🔴 반출 흔적의 **절반은 이 DB 에 없다** (2026-10-29) ────────────────────
+ * 아래 `livePartRequestCondition` 이 보는 `inventory_part_requests` 는 **A/S 의 옛
+ * 표**이고, 2026-10-16 부터 한 줄도 늘지 않는다 — 새 반출 신청은 전부 재고 관리로
+ * 올라간다. 그래서 이 파일만으로는 「반출 이력이 있는가」에 답할 수 없고, 답의
+ * 나머지 반쪽은 **부르는 쪽이 재고 관리에 물어** 이 함수에 넣어 준다
+ * (`getRepairCaseUsedPartsView` 의 `issuedPartsTrace`).
+ *
+ * 🔴 그 반쪽이 재는 것은 **「실제로 나간 것이 있나」**다(2026-10-29 사용자 결정) —
+ *    「신청이 있기만 하면」이 아니다. 아래 `livePartRequestCondition` 이 REJECTED ·
+ *    CANCELLED 를 빼는 것과 **같은 뜻**이고, 그래서 두 쪽 잣대가 어긋나지 않는다
+ *    (`domain/inventory-gateway.ts` 의 `resolveInventoryIssuedPartsTrace`).
+ *
+ * 🔴 **여기서 재고 관리를 부르지 않는 까닭**: 이 모듈은 조회라 **어디서 부르는지가
+ *    정해져 있지 않다.** 안에서 통로를 두드리면 줄마다 부르는 화면이 생기는 날
+ *    왕복이 줄 수만큼 늘고, 저쪽이 멈추면 그 화면이 통째로 느려진다. 묻는 자리를
+ *    부르는 쪽에 두면 **한 화면에 한 번**으로 묶을 수 있다(지금 쓰는 자리가 수리 건
+ *    상세 한 곳이고, 그 페이지는 이미 같은 통로를 한 번 두드리고 있다).
  *
  * ── 🔴 어떤 요청 줄을 "반출 이력"으로 치는가 ──────────────────────────────
  * REJECTED · CANCELLED 는 **치지 않는다.** 통계가 그 둘을 이미 빼고 세기 때문이다
@@ -71,6 +91,14 @@ export type RepairCaseUsedPartsView = {
   /**
    * 이 건에 살아 있는 부품 요청 줄이 하나라도 있는가 — 있으면 화면은 적을 자리를
    * 그리지 않고 안내만 낸다. 위 머리말의 '한 건의 부품 출처를 둘로 쪼개지 않는다'.
+   *
+   * 🔴 **두 시스템을 더한 답이다**(2026-10-29) — A/S 옛 표 + 재고 관리. 한쪽만 보면
+   *    2026-10-16 뒤의 건이 조용히 열린다(auth 모듈의 그 머리말).
+   * 🔴 **두 쪽 다 「실제로 효력이 있는 것」만 센다** — 옛 표는 REJECTED · CANCELLED 를
+   *    빼고, 재고 관리 쪽은 나간 줄(`issued >= 1`)만 센다. 반려·취소만 되고 한 개도 안
+   *    나간 건은 **거짓**이고, 그 건은 손으로 적을 수 있어야 한다(위 머리말의 그 구멍).
+   * 🔴 **「못 물어봤다」는 여기에 담기지 않는다** — 거짓이 되어 「흔적이 없다」로 읽힌다.
+   *    막는 일은 아래 `writeGate` 가 따로 맡는다(코드 `INVENTORY_UNREACHABLE`).
    */
   hasPartRequestHistory: boolean;
   /**
@@ -175,12 +203,33 @@ export async function isImportedFromKyosanIntake(
  * 일어난다(permission-resolver 의 cache) — 같은 화면의 다른 칸이 이미 물었으면
  * 왕복이 아예 없다. 부르는 쪽도 이 함수를 자기 Promise.all 에 태우므로 화면이
  * 기다리는 시간은 늘지 않는다.
+ *
+ * ── 🔴 여섯째는 **DB 가 아니라 재고 관리의 답**이다 (2026-10-29) ────────────
+ * `issuedPartsTrace` 는 부르는 쪽이 받아 온 답이고, **아직 안 끝난 약속(Promise)으로
+ * 넘겨도 된다.** 그래야 위 다섯 질의와 **같은 묶음에서 나란히** 기다린다 — 밖에서
+ * 먼저 `await` 하면 그 왕복이 DB 조회 앞에 직렬로 붙어 화면이 그만큼 늦어진다.
+ * 🔴 **이 함수가 통로를 두드리지는 않는다**(위 머리말의 그 까닭).
  */
 export async function getRepairCaseUsedPartsView(
   repairCaseId: string,
-  actor: PermissionActor | null
+  actor: PermissionActor | null,
+  /**
+   * 🔴 **재고 관리에서 실제로 나간 것이 있는지 물어본 답** — 있다 · 없다 · 모른다. 기본값을
+   * 두지 않는다: 안 넘기면 「없다」로 눕는 길이 생기고, 그날 반출된 부품을 또 적는 칸이
+   * 조용히 열린다.
+   * 🔴 **「요청이 있나」의 답을 넣지 마라**(`InventoryPartRequestTrace`) — 형이 달라 tsc 가
+   *    막는다. 그 둘이 왜 다른 물음인지는 도메인 쪽 두 함수의 머리말에 있다.
+   */
+  issuedPartsTrace: InventoryIssuedPartsTrace | PromiseLike<InventoryIssuedPartsTrace>
 ): Promise<RepairCaseUsedPartsView> {
-  const [rows, hasPartRequestHistory, caseProbe, isLegacyImportedCase, canWriteUsedParts] = await Promise.all([
+  const [
+    rows,
+    hasLegacyPartRequest,
+    caseProbe,
+    isLegacyImportedCase,
+    canWriteUsedParts,
+    inventoryIssuedPartsTrace,
+  ] = await Promise.all([
     db
       .select({
         id: repairCaseUsedParts.id,
@@ -200,14 +249,19 @@ export async function getRepairCaseUsedPartsView(
       .limit(1),
     isImportedFromKyosanIntake(db, repairCaseId),
     actor === null ? false : hasPermission(actor, "repairCases.usedParts", "WRITE"),
+    issuedPartsTrace,
   ]);
 
   return {
     rows,
-    hasPartRequestHistory,
-    writeGate: resolveUsedPartsWriteGate({
+    hasPartRequestHistory: hasUsedPartsPartRequestHistory(
+      hasLegacyPartRequest,
+      inventoryIssuedPartsTrace
+    ),
+    writeGate: resolveUsedPartsWriteGateWithInventory({
       canWriteUsedParts,
-      hasPartRequestHistory,
+      hasLegacyPartRequest,
+      inventoryIssuedPartsTrace,
       // 건을 못 찾았으면(휴지통에 들어갔거나 사라졌다) **잠긴 것으로 본다** —
       // 그래야 화면이 적을 자리를 열지 않는다. 저장 쪽은 같은 경우를 NOT_FOUND 로
       // 돌려준다.

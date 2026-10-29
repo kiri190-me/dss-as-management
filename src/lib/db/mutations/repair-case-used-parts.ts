@@ -7,8 +7,9 @@ import {
   hasLivePartRequest,
   isImportedFromKyosanIntake,
 } from "../queries/repair-case-used-parts";
-import { resolveUsedPartsWriteGate } from "@/lib/auth/repair-case-used-parts-authorization";
+import { resolveUsedPartsWriteGateWithInventory } from "@/lib/auth/repair-case-used-parts-authorization";
 import { hasPermission, type PermissionActor } from "@/lib/auth/permission-resolver";
+import type { InventoryIssuedPartsTrace } from "@/lib/domain/inventory-gateway";
 import type { UsedPartLineInput } from "@/lib/validation/repair-case-used-parts-input";
 
 /**
@@ -23,8 +24,28 @@ import type { UsedPartLineInput } from "@/lib/validation/repair-case-used-parts-
  * 조회(getRepairCaseUsedPartsView)가 화면에 「적을 수 있다」를 내려보낸 뒤에도
  * 그 사이에 부품 요청서가 생기거나 건이 출하되어 잠길 수 있다. 그래서 규칙 셋을
  * **이 트랜잭션 안에서 다시** 판정한다 — 조회와 **같은 함수**로
- * (hasLivePartRequest · isImportedFromKyosanIntake · resolveUsedPartsWriteGate).
- * 주소로 직접 부른 요청도 여기서 같은 거절을 받는다.
+ * (hasLivePartRequest · isImportedFromKyosanIntake ·
+ * resolveUsedPartsWriteGateWithInventory). 주소로 직접 부른 요청도 여기서 같은
+ * 거절을 받는다.
+ *
+ * ── 🔴 재고 관리의 답은 **받아서 들어온다 — 여기서 묻지 않는다** (2026-10-29) ──
+ * 반출 흔적의 절반이 재고 관리에 있다(auth 모듈 머리말). 그런데 그것을 묻는 일은
+ * **HTTP 왕복**이고, 이 함수는 첫 줄부터 마지막 줄까지 **트랜잭션 안**이다. 여기서
+ * 두드리면 `SELECT … FOR UPDATE` 로 잡아 둔 그 건의 잠금이 **재고 관리의 응답만큼**
+ * 길어진다 — 읽기 통로에 걸린 시간 제한이 5초라, 저쪽이 느린 날 한 건의 저장이
+ * 5초 동안 그 수리 건을 통째로 잠근다.
+ *
+ * 🔴 그래서 `params.issuedPartsTrace` 는 **이미 받아 온 값**이다(약속도 함수도
+ *    아니다 — 타입이 그것을 못 박는다). 묻는 자리는 **트랜잭션을 열기 전**,
+ *    서버 액션(`server/actions/repair-case-used-parts.ts`)이다. 연락서 이식도 같은
+ *    모양이다(`server/services/kyosan-report-import.ts` 의 `replaceUsedParts`).
+ * 🔴 이 파일에 `lib/server/inventory-gateway` 를 import 하는 줄이 **하나도 없다.**
+ *    들어오는 순간 위 울타리가 글자만 남는다.
+ *
+ * 🔵 **트랜잭션 밖에서 본 값이라 낡았을 수 있다** — 그 사이에 재고 관리에 신청이
+ *    올라갔으면 이 저장은 통과한다. 그것은 이 칸이 처음부터 안고 있던 성질이고
+ *    (요청서를 나중에 내면 적어 둔 줄이 남는다 — 스키마 머리말), DB 제약이 아니라
+ *    사람이 확인할 일이다. **반대쪽(이미 나간 부품을 또 적는 길)은 막힌다.**
  *
  * 🔴 **권한도 그 셋에 든다.** 화면에서 「수정」 단추를 감추는 것만으로는 모자라다 —
  * 권한 없는 사람이 서버 액션을 직접 불러도 이 안에서 거절된다. 그 판정은 역할
@@ -64,6 +85,8 @@ export type SaveUsedPartsMutationResultCode =
   | "ROLE_NOT_ALLOWED"
   | "PART_REQUEST_HISTORY_EXISTS"
   | "CASE_LOCKED"
+  /** 🔴 재고 관리에 못 물어봤다 — 「흔적이 없다」가 아니라 「모른다」다(auth 모듈). */
+  | "INVENTORY_UNREACHABLE"
   | "INVALID_PART";
 
 export type SavedUsedPartLine = {
@@ -93,9 +116,19 @@ export async function saveRepairCaseUsedParts(params: {
   actorUserId: string;
   /**
    * 살아 있는 계정에서 읽은 사람(역할 + 개발자 표시). 이 안에서 권한을 **다시**
-   * 묻는다 — 판정은 아래 resolveUsedPartsWriteGate 가 한다.
+   * 묻는다 — 판정은 아래 resolveUsedPartsWriteGateWithInventory 가 한다.
    */
   actor: PermissionActor;
+  /**
+   * 🔴 **재고 관리에서 실제로 나간 것이 있는지 물어본 답** — 있다 · 없다 · 모른다.
+   * **트랜잭션 밖에서** 받아 온 값이어야 한다(위 머리말). 기본값을 두지 않는다 — 안
+   * 넘기면 「없다」로 눕고, 그날 이미 반출된 부품을 손으로 또 적는 길이 조용히 열린다.
+   *
+   * 🔴 **「요청이 있나」의 답이 아니다**(2026-10-29 사용자 결정). 반려·취소만 되고 한 개도
+   *    안 나간 건은 **적을 수 있어야 한다** — 막으면 그 건의 부품이 어디에도 안 잡힌다
+   *    (`domain/inventory-gateway.ts` 의 `resolveInventoryIssuedPartsTrace` 머리말).
+   */
+  issuedPartsTrace: InventoryIssuedPartsTrace;
   lines: readonly UsedPartLineInput[];
 }): Promise<SaveUsedPartsMutationResult> {
   return db.transaction(async (tx) => {
@@ -109,9 +142,13 @@ export async function saveRepairCaseUsedParts(params: {
       return { ok: false, code: "NOT_FOUND", message: "해당 접수 건을 찾을 수 없습니다." };
     }
 
-    // 🔴 조회가 쓰는 바로 그 세 재료 + 그것을 합치는 바로 그 함수. 트랜잭션
+    // 🔴 조회가 쓰는 바로 그 재료들 + 그것을 합치는 바로 그 함수. 트랜잭션
     // 안에서 다시 본다 — 화면이 열어 준 뒤에 바뀌었을 수 있다(요청서가 생기거나,
     // 건이 잠기거나, 관리자가 권한을 좁히거나).
+    //
+    // 🔴 **넷째 재료(재고 관리의 답)만 여기서 다시 보지 않는다** — HTTP 라서
+    // 트랜잭션 안에서 부를 수 없다(위 머리말). 액션이 트랜잭션을 열기 전에 물어
+    // params.issuedPartsTrace 로 들고 들어온다.
     //
     // 권한만 먼저 보고 일찍 빠져나가지 않는다 — 그러면 판정이 두 벌이 되고,
     // 「권한이 먼저」라는 차례가 이 파일에도 한 벌 적히게 된다. 두 probe 는 이 건
@@ -119,11 +156,14 @@ export async function saveRepairCaseUsedParts(params: {
     // (permission-resolver 의 cache). 작업 기록 저장(mutations/repair-case-work-
     // records.ts)도 트랜잭션 안에서 같은 창구를 부른다.
     const canWriteUsedParts = await hasPermission(params.actor, "repairCases.usedParts", "WRITE");
-    const hasPartRequestHistory = await hasLivePartRequest(tx, params.repairCaseId);
+    const hasLegacyPartRequest = await hasLivePartRequest(tx, params.repairCaseId);
     const isLegacyImportedCase = await isImportedFromKyosanIntake(tx, params.repairCaseId);
-    const gate = resolveUsedPartsWriteGate({
+    const gate = resolveUsedPartsWriteGateWithInventory({
       canWriteUsedParts,
-      hasPartRequestHistory,
+      // 🔴 **A/S 옛 표만** 본 답이다 — 2026-10-16 이전 건의 흔적이 거기에만 있다.
+      //    재고 관리 쪽 답은 트랜잭션 밖에서 받아 온 params.issuedPartsTrace 다.
+      hasLegacyPartRequest,
+      inventoryIssuedPartsTrace: params.issuedPartsTrace,
       isShipmentLocked: current.isLocked,
       isLegacyImportedCase,
     });

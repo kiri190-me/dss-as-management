@@ -410,7 +410,14 @@ export async function getRequestCaseContext(repairCaseId: string): Promise<Reque
 export type RepairCaseContactFolderKey = { id: string; intakeNumber: string };
 
 /**
- * 인수번호만 읽는 조회 — `GET /api/repair-cases/{id}/contact-folder` 하나가 쓴다.
+ * 인수번호만 읽는 조회.
+ *
+ * 🔵 **이름은 첫 쓰임에서 왔다**(`GET /api/repair-cases/{id}/contact-folder`). 지금은
+ *    연락서 공유폴더 통로 넷 말고도 **「사용 부품」 저장 액션**이 쓴다(2026-10-29) —
+ *    재고 관리에 「이 건에 반출 흔적이 있나」를 묻는 열쇠가 인수번호 하나뿐이라
+ *    (`lib/server/inventory-gateway.ts` 머리말), 건 id 만 받은 액션이 여기서 한 번
+ *    더 읽는다. 🔴 **읽는 것은 여전히 인수번호 한 칸**이라 함수를 더 만들지 않았다 —
+ *    같은 칸을 읽는 조회가 둘이면 한쪽만 고쳐지는 날이 온다.
  *
  * getRepairCaseById 의 8-테이블 join 을 쓰지 않는 까닭은 위
  * getRepairCaseEditGuardById · listRepairCasesForFlowchartCreateSelector 와 같다: 그 join 은

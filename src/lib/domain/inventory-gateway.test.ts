@@ -24,6 +24,7 @@ import {
   parseInventoryPartsResponse,
   parseInventoryStockRequestsResponse,
   parseStockRequestLines,
+  resolveInventoryIssuedPartsTrace,
   resolveInventoryPartRequestTrace,
   stockRequestDecisionLabel,
   stockRequestKeyBelongsToCase,
@@ -47,6 +48,10 @@ import {
   type InventoryStockRequest,
   type InventoryStockRequestLine,
 } from "./inventory-gateway";
+/* 🔴 **[고장 부품] 그래프의 자를 빌려 온다**(2026-10-29) — 「실제로 나간 줄」을 두 곳이
+   따로 세면 한쪽만 고쳐지는 날이 오고, 그날 [사용 부품] 칸이 열리는 건과 그래프가 세는 건이
+   어긋난다. 순수 모듈이라 react 도 DB 도 따라오지 않는다. */
+import { issuedPartRowsOf } from "./product-model-fault-parts";
 /* 🔴 차례와 이름표를 **여기서 다시 적지 않는다** — 시험이 제 손으로 적으면 그 표를 고치는 날
    시험만 옛 차례를 지키고, 화면은 조용히 다른 차례로 간다(2026-10-16 요청 ③). */
 import { PART_FIELD_LABELS, PART_FIELD_ORDER } from "@dss/core/ui/inventory/part-picker-rows";
@@ -345,6 +350,137 @@ describe("🔴 부품 요청 흔적 — 있다 · 없다 · 모른다", () => {
 });
 
 /**
+ * ============================================================================
+ * 🔴 **실제로 나간 것** — 위와 **다른 자**다 (2026-10-29 사용자 결정)
+ * ============================================================================
+ * 이 판정이 가리는 것은 [사용 부품] 칸을 **손으로 적을 수 있는가**다. 「요청한 적이 있나」로
+ * 막던 동안에는 **반려·취소만 되고 한 개도 안 나간 건**까지 막혔고, 그 건의 부품은
+ * [고장 부품] 그래프에도 안 잡혔다(그쪽은 `issued >= 1` 인 줄만 센다) — 어디에도 안 잡히고
+ * 적을 자리도 없는 **구멍**이다.
+ *
+ * 🔴 여기서 가장 비싼 실수 둘:
+ *   ① **신청 단위로 가리는 것** — `PARTIAL` 한 건 안에 나간 줄과 안 나간 줄이 섞여 있다.
+ *   ② **「모른다」를 「안 나갔다」로 눕히는 것** — 그 순간 이미 나간 부품을 또 적는 길이 열린다.
+ * ============================================================================
+ */
+describe("🔴 실제로 나간 것 — 줄로 가른다", () => {
+  /** 🔵 **가짜 값만 쓴다.** 저쪽 응답 모양 그대로 만들어 **제품 코드의 파서**에 태운다. */
+  function parse(lineSets: readonly (readonly { quantity: number; issued: number }[])[]) {
+    const parsed = parseInventoryStockRequestsResponse({
+      count: lineSets.length,
+      requests: lineSets.map((lines, index) => ({
+        requestKey: `AS-FAKE-${index + 1}`,
+        id: `fake-${index + 1}`,
+        intakeNumber: "D990101",
+        status: { code: "PARTIAL", label: "일부 나감" },
+        closed: false,
+        requestedAt: "2099-01-01T00:00:00.000Z",
+        lines: lines.map((line, lineIndex) => ({
+          no: lineIndex + 1,
+          name: `지어낸 부품 ${lineIndex + 1}`,
+          quantity: line.quantity,
+          issued: line.issued,
+        })),
+      })),
+      notFound: [],
+    });
+    assert.ok(parsed, "표본이 저쪽 응답 모양이어야 한다");
+    assert.equal(parsed.length, lineSets.length);
+    // 🔵 **표본이 진짜 그 표본인지** 먼저 센다 — 줄이 사라졌으면 무엇을 세든 「안 나갔다」다.
+    assert.deepEqual(
+      parsed.map((request) => request.lines.map((line) => line.issued)),
+      lineSets.map((lines) => lines.map((line) => line.issued))
+    );
+    return parsed;
+  }
+
+  test("🔴 못 받아 온 다섯 갈래가 **전부** 「모른다」다 — 하나도 「안 나갔다」로 눕지 않는다", () => {
+    const reasons = ["not_configured", "timeout", "unauthorized", "api_closed", "error"] as const;
+    assert.equal(reasons.length, 5, "표본이 비면 이 시험은 공짜로 통과한다");
+    for (const reason of reasons) {
+      assert.deepEqual(
+        resolveInventoryIssuedPartsTrace({ status: "unreachable", reason }),
+        { kind: "unknown", reason },
+        reason
+      );
+    }
+  });
+
+  test("빈 목록은 「안 나갔다」 — 저쪽이 200 으로 준 **사실**이다", () => {
+    assert.deepEqual(resolveInventoryIssuedPartsTrace({ status: "ok", value: [] }), { kind: "absent" });
+  });
+
+  test("🔴 신청은 있는데 한 줄도 안 나갔으면 「없다」 — 2026-10-29 에 열어 준 자리", () => {
+    const parsed = parse([[{ quantity: 3, issued: 0 }], [{ quantity: 1, issued: 0 }]]);
+    // 🔴 **옛 자로는 「있다」**였다 — 두 자가 같은 표본에서 갈린다는 것이 이 시험의 요점이다.
+    assert.deepEqual(resolveInventoryPartRequestTrace({ status: "ok", value: parsed }), {
+      kind: "present",
+      count: 2,
+    });
+    assert.deepEqual(resolveInventoryIssuedPartsTrace({ status: "ok", value: parsed }), {
+      kind: "absent",
+    });
+  });
+
+  test("🔴 한 신청 안에 섞여 있어도 나간 줄만 센다 — 그리고 **줄 수**다(수량 합이 아니다)", () => {
+    const parsed = parse([
+      [
+        { quantity: 8, issued: 5 },
+        { quantity: 2, issued: 0 },
+      ],
+      [{ quantity: 4, issued: 1 }],
+    ]);
+    assert.deepEqual(resolveInventoryIssuedPartsTrace({ status: "ok", value: parsed }), {
+      kind: "present",
+      issuedLineCount: 2,
+    });
+  });
+
+  test("🔵 줄이 아예 없는 신청은 「안 나갔다」다 — 빈 줄 목록이 「있다」로 세어지지 않는다", () => {
+    const parsed = parse([[]]);
+    assert.equal(parsed[0].lines.length, 0);
+    assert.deepEqual(resolveInventoryIssuedPartsTrace({ status: "ok", value: parsed }), {
+      kind: "absent",
+    });
+  });
+
+  /**
+   * 🔴 **[고장 부품] 그래프와 같은 자인가** — 두 자가 갈리면 2026-10-29 의 결정이 깨진다.
+   * 그래프가 세는 줄이 하나라도 있는 건은 [사용 부품] 칸이 막혀야 하고, 그래프가 한 줄도
+   * 안 세는 건은 열려야 한다. 🔵 글자로 재지 않고 **두 함수를 같은 표본에 태워** 견준다 —
+   * 글자는 같은데 셈이 다른 날이 있고, 그런 날은 글자 시험이 못 잡는다.
+   */
+  test("🔴 [고장 부품] 그래프가 세는 줄과 **정확히 같은 줄**을 본다", () => {
+    const samples: (readonly (readonly { quantity: number; issued: number }[])[])[] = [
+      [[{ quantity: 1, issued: 0 }]],
+      [[{ quantity: 1, issued: 1 }]],
+      [
+        [
+          { quantity: 8, issued: 5 },
+          { quantity: 2, issued: 0 },
+        ],
+      ],
+      [[], [{ quantity: 2, issued: 0 }]],
+      [[{ quantity: 9, issued: 9 }], [{ quantity: 1, issued: 0 }]],
+    ];
+    assert.equal(samples.length, 5, "표본이 비면 이 시험은 공짜로 통과한다");
+    for (const sample of samples) {
+      const parsed = parse(sample);
+      const graphRows = issuedPartRowsOf("fake-case", parsed);
+      const trace = resolveInventoryIssuedPartsTrace({ status: "ok", value: parsed });
+      assert.equal(
+        trace.kind === "present",
+        graphRows.length > 0,
+        `그래프 줄 ${graphRows.length}개 ↔ ${JSON.stringify(trace)}`
+      );
+      if (trace.kind === "present") {
+        assert.equal(trace.issuedLineCount, graphRows.length, "세는 줄 수까지 같다");
+      }
+    }
+  });
+});
+
+/**
  * 🔴 **자가 한 벌인지 파일의 글자로 본다.** 화면과 서버가 따로 세기 시작하면, 사람은 그 칸에서
  * 신청을 보고 있는데 서버는 「요청한 적 없다」로 읽고 **그 건의 사용 부품을 덮는다.** 그 어긋남은
  * 오류를 내지 않으므로 값 시험으로는 영영 안 잡힌다 — 세 파일이 **같은 함수**에 닿는지를 본다.
@@ -364,6 +500,21 @@ describe("🔴 화면과 서버가 같은 자를 쓴다 — 세 파일의 글자
       gateway,
       /export async function probeInventoryPartRequestTrace[\s\S]{0,400}resolveInventoryPartRequestTrace\(await fetchInventoryStockRequestsByIntake\(intakeNumber\)\)/
     );
+  });
+
+  /**
+   * 🔴 **2026-10-29 에 probe 가 둘이 되었다.** 둘째(`…IssuedParts…`)도 **같은 통로 + 제
+   * 순수 판정**을 그대로 지나야 한다 — 거기서 신청을 제 손으로 세기 시작하면 [사용 부품]
+   * 칸이 여는 조건과 화면이 쓰는 자가 갈리고, 그 어긋남은 오류를 내지 않는다.
+   */
+  test("🔴 「실제로 나간 것」 probe 도 **제 순수 판정을 그대로** 지난다", () => {
+    const gateway = read("src/lib/server/inventory-gateway.ts");
+    assert.match(
+      gateway,
+      /export async function probeInventoryIssuedPartsTrace[\s\S]{0,400}resolveInventoryIssuedPartsTrace\(await fetchInventoryStockRequestsByIntake\(intakeNumber\)\)/
+    );
+    // 🔴 **둘을 한 함수로 합치지 않았다** — 합치면 반려·취소만 된 건이 다시 막힌다.
+    assert.match(gateway, /export async function probeInventoryPartRequestTrace/);
   });
 
   test("🔴 연락서 이식이 그 probe 를 쓴다 — 제 판정을 새로 짓지 않는다", () => {

@@ -893,6 +893,72 @@ export function resolveInventoryPartRequestTrace<T>(
     : { kind: "present", count: requests.value.length };
 }
 
+/**
+ * ============================================================================
+ * 🔴 「**실제로 나간 것**이 있는가」 — 바로 위와 **다른 자**다 (2026-10-29 사용자 결정)
+ * ============================================================================
+ * 위 `resolveInventoryPartRequestTrace` 가 재는 것은 **「요청한 적이 있나」**다(취소된
+ * 신청도 반려된 신청도 흔적이다). 이것이 재는 것은 **「물건이 나갔나」**다 — 줄의 불출
+ * 수량(`issued`)이 **1 이상인 줄**이 하나라도 있나.
+ *
+ * ── 🔴 왜 자가 둘이어야 하는가 ──────────────────────────────────────────
+ * **서로 다른 물음**이기 때문이다. 연락서 이식은 「사람이 부품 요청을 했었나」를 묻고(했으면
+ * 그 건의 교체 부품은 요청서 쪽 기록이라 덮지 않는다), [사용 부품] 칸의 문지기는 「이미 나간
+ * 부품이 또 세어질까」를 묻는다. **반려·취소만 되고 한 개도 안 나간 건**은 앞 물음에 「예」,
+ * 뒤 물음에 「아니오」다 — 한 자로 두 물음에 답하면 그 건에서 반드시 한쪽이 틀린다.
+ *
+ * 🔴 그 건을 뒤 물음에서도 「있다」로 읽으면 **그 건의 부품이 어디에도 안 잡히고 적을 자리도
+ *    없는 구멍**이 된다: 나간 것이 없으니 [고장 부품] 그래프의 반출 입력에도 안 들어가고
+ *    (그쪽도 `issued >= 1` 로 센다 — `domain/product-model-fault-parts.ts` 의
+ *    `issuedPartRowsOf`), 손으로 적을 칸은 막혀 있다. A/S 옛 표 쪽 판정
+ *    (`db/queries/repair-case-used-parts.ts` 의 `livePartRequestCondition`)이 `REJECTED` ·
+ *    `CANCELLED` 를 빼 온 까닭이 처음부터 그 구멍이었다 — 이 자가 두 시스템의 잣대를
+ *    **같은 뜻**으로 맞춘다(둘 다 「실제로 효력이 있는 것만」).
+ *
+ * ── 🔴 상태로 거르지 않는다 — **줄로** 가른다 ───────────────────────────
+ * `PARTIAL`(일부 나감)인 **한 신청 안에서도 나간 줄과 안 나간 줄이 섞여 있다.** 신청 단위로
+ * 가리면 그런 신청에서 둘 중 한쪽을 반드시 틀린다. 🔵 `REJECTED` · `CANCELLED` 는 나간 것이
+ * 없으므로 **저절로 빠진다** — 뺄 상태 목록을 여기 적지 않는 까닭이고, 저쪽이 상태를 더하는
+ * 날에도 이 자는 안 어긋난다.
+ *
+ * ── 🔴 「모른다」는 **그대로 셋째 갈래**다 ───────────────────────────────
+ * 위 자와 같다(이 파일 머리말). 못 물어본 것을 「안 나갔다」로 눕히면 이미 나간 부품을 손으로
+ * 또 적는 길이 열리고, 그 중복은 오류 없이 그래프의 **조용히 틀린 수**로만 드러난다.
+ *
+ * 🔵 **형을 돌려 쓰지 않고 따로 세운 까닭**: 갈래 이름은 같아도 `present` 가 **다른 것을
+ *    센다**(신청 건수 ↔ 나간 줄 수). 한 형으로 두면 두 자를 서로 바꿔 넣어도 tsc 가 침묵하고,
+ *    그날 [사용 부품] 칸은 「요청만 해도 막히는」 옛 자로 조용히 돌아간다.
+ * ============================================================================
+ */
+export type InventoryIssuedPartsTrace =
+  /** 🔴 **나간 줄이 있다.** `issuedLineCount` 는 그 **줄 수**다(나간 수량의 합이 아니다). */
+  | { kind: "present"; issuedLineCount: number }
+  /** 신청이 있든 없든 **한 개도 안 나갔다** — 저쪽이 200 으로 준 **사실**이다. */
+  | { kind: "absent" }
+  /** 🔴 못 물어봤다. **「안 나갔다」가 아니다.** */
+  | { kind: "unknown"; reason: InventoryUnreachableReason };
+
+/**
+ * 🔵 **줄의 `issued` 하나만 본다** — 그래서 형이 `T` 로 열려 있다. 화면이 받는 모양
+ * (`InventoryStockRequestForScreen`)이든 서버가 받는 모양(`InventoryStockRequest`)이든
+ * **같은 자**로 재야, 화면이 여는 조건과 서버가 받아 주는 조건이 갈리지 않는다.
+ */
+export function resolveInventoryIssuedPartsTrace<
+  T extends { lines: readonly { issued: number }[] },
+>(requests: InventoryResult<readonly T[]>): InventoryIssuedPartsTrace {
+  if (requests.status !== "ok") return { kind: "unknown", reason: requests.reason };
+
+  let issuedLineCount = 0;
+  for (const request of requests.value) {
+    for (const line of request.lines) {
+      /* 🔴 [고장 부품] 그래프가 반출 줄을 고르는 자와 **같은 식**이다(`issuedPartRowsOf`).
+         🔴 **수량은 거르는 데만 쓴다** — 5개가 나간 줄도 1개가 나간 줄도 한 줄이다. */
+      if (line.issued >= 1) issuedLineCount += 1;
+    }
+  }
+  return issuedLineCount === 0 ? { kind: "absent" } : { kind: "present", issuedLineCount };
+}
+
 // ---------------------------------------------------------------------------
 // 반출 신청 줄의 **꾸밈** — 상태 배지 · 수량 · 부품 덩어리 (2026-10-21 쓰는 분 요청 셋)
 // ---------------------------------------------------------------------------

@@ -3,11 +3,19 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   USED_PARTS_CASE_LOCKED_MESSAGE,
+  USED_PARTS_INVENTORY_UNREACHABLE_MESSAGE,
   USED_PARTS_PART_REQUEST_HISTORY_MESSAGE,
   USED_PARTS_ROLE_NOT_ALLOWED_MESSAGE,
+  hasUsedPartsPartRequestHistory,
   isUsedPartsBlockedByShipmentLock,
   resolveUsedPartsWriteGate,
+  resolveUsedPartsWriteGateWithInventory,
 } from "./repair-case-used-parts-authorization";
+import {
+  parseInventoryStockRequestsResponse,
+  resolveInventoryIssuedPartsTrace,
+  type InventoryIssuedPartsTrace,
+} from "@/lib/domain/inventory-gateway";
 import { baselineLeafLevel } from "./permission-baseline";
 import { isPermissionLeafKey, isSettingsEnforced, selectableLevelsOfLeaf } from "./permission-features";
 import { ROLE_CODES, roleLabels, type Role } from "@/lib/domain/types";
@@ -152,13 +160,16 @@ describe("사용 부품 — 누가 적을 수 있나 (설정이 정한다)", () 
     }
   });
 
-  test("🔴 거절 사유 셋이 서로 다른 안내다 — 사람이 할 일이 저마다 다르다", () => {
+  test("🔴 거절 사유 넷이 서로 다른 안내다 — 사람이 할 일이 저마다 다르다", () => {
     const messages = [
       USED_PARTS_ROLE_NOT_ALLOWED_MESSAGE,
       USED_PARTS_PART_REQUEST_HISTORY_MESSAGE,
       USED_PARTS_CASE_LOCKED_MESSAGE,
+      // 🔴 2026-10-29 에 넷째가 생겼다 — 「못 물어봤다」. 셋과 **같은 말이면 안 된다**
+      //    (특히 「권한이 없습니다」와 섞이면 사람이 관리자를 찾아가고, 그 사람도 못 연다).
+      USED_PARTS_INVENTORY_UNREACHABLE_MESSAGE,
     ];
-    assert.equal(new Set(messages).size, 3, "세 문구가 겹치지 않는다");
+    assert.equal(new Set(messages).size, 4, "네 문구가 겹치지 않는다");
     for (const message of messages) {
       assert.ok(message.trim().length > 0);
     }
@@ -214,10 +225,11 @@ describe("사용 부품 — 누가 적을 수 있나 (설정이 정한다)", () 
       );
     }
 
-    // 업무 규칙 둘은 애초에 사람의 성질을 말하지 않는다 — 역할 이름이 아예 없어야 한다.
+    // 업무 규칙 셋은 애초에 사람의 성질을 말하지 않는다 — 역할 이름이 아예 없어야 한다.
     for (const message of [
       USED_PARTS_PART_REQUEST_HISTORY_MESSAGE,
       USED_PARTS_CASE_LOCKED_MESSAGE,
+      USED_PARTS_INVENTORY_UNREACHABLE_MESSAGE,
     ]) {
       for (const role of ROLE_CODES) {
         assert.ok(
@@ -314,6 +326,327 @@ describe("사용 부품 — 적을 수 있는 건인가", () => {
   });
 });
 
+/**
+ * ============================================================================
+ * 🔴 반출 흔적을 **두 시스템에서** 본다 (2026-10-29)
+ * ============================================================================
+ * 옛 표(`inventory_part_requests`)는 2026-10-16 부터 한 줄도 늘지 않고, 새 반출 신청은
+ * 전부 재고 관리로 올라간다. 그래서 **옛 표만 보던 동안 반출이 끝난 건에도 이 칸이
+ * 열려 있었다** — 같은 부품을 손으로 또 적으면 [고장 부품] 그래프가 두 번 센다.
+ *
+ * 🔴 재고 관리 쪽이 재는 것은 **「실제로 나간 것이 있나」**다(2026-10-29 사용자 결정) —
+ *    「신청이 있나」가 아니다. 반려·취소만 되고 한 개도 안 나간 건은 **열어 준다**
+ *    (`domain/inventory-gateway.ts` 의 `resolveInventoryIssuedPartsTrace`). 이 파일이
+ *    받는 값은 이미 그 자로 잰 답이라, 여기서는 **셋 갈래의 쓰임**만 못 박는다.
+ *
+ * 여기서 못 박는 표가 이것이다 —
+ *
+ *   옛 표   재고 관리(나간 것)  →  적을 수 있나
+ *   ─────   ────────────────      ────────────
+ *   없음    없다                  예   ← 반려·취소만 된 건이 여기로 떨어진다
+ *   없음    있다                  아니오 (PART_REQUEST_HISTORY_EXISTS)  ← 2026-10-29 에 메운 구멍
+ *   있음    없다                  아니오 (PART_REQUEST_HISTORY_EXISTS)  ← 그 시절 건
+ *   있음    있다                  아니오 (PART_REQUEST_HISTORY_EXISTS)
+ *   없음    **모른다**            아니오 (INVENTORY_UNREACHABLE)        ← 다른 말이어야 한다
+ *   있음    **모른다**            아니오 (PART_REQUEST_HISTORY_EXISTS)  ← 더 확실한 쪽
+ * ============================================================================
+ */
+describe("사용 부품 — 반출 흔적은 두 시스템에 나뉘어 있다", () => {
+  const PRESENT: InventoryIssuedPartsTrace = { kind: "present", issuedLineCount: 1 };
+  const ABSENT: InventoryIssuedPartsTrace = { kind: "absent" };
+  const UNKNOWN: InventoryIssuedPartsTrace = { kind: "unknown", reason: "api_closed" };
+
+  /** 권한 · 잠금을 적지 않은 시험은 「적을 수 있는 사람 + 평범한 건」을 뜻한다. */
+  function gateWith(facts: {
+    canWriteUsedParts?: boolean;
+    hasLegacyPartRequest: boolean;
+    inventoryIssuedPartsTrace: InventoryIssuedPartsTrace;
+    isShipmentLocked?: boolean;
+    isLegacyImportedCase?: boolean;
+  }) {
+    return resolveUsedPartsWriteGateWithInventory({
+      canWriteUsedParts: facts.canWriteUsedParts ?? true,
+      hasLegacyPartRequest: facts.hasLegacyPartRequest,
+      inventoryIssuedPartsTrace: facts.inventoryIssuedPartsTrace,
+      isShipmentLocked: facts.isShipmentLocked ?? false,
+      isLegacyImportedCase: facts.isLegacyImportedCase ?? false,
+    });
+  }
+
+  test("🔴 둘 중 하나라도 있으면 흔적이 있다 — 네 칸을 하나도 빠뜨리지 않는다", () => {
+    assert.equal(hasUsedPartsPartRequestHistory(false, ABSENT), false);
+    assert.equal(hasUsedPartsPartRequestHistory(false, PRESENT), true, "재고 관리 쪽만 있어도");
+    assert.equal(hasUsedPartsPartRequestHistory(true, ABSENT), true, "옛 표 쪽만 있어도");
+    assert.equal(hasUsedPartsPartRequestHistory(true, PRESENT), true);
+    // 🔴 「모른다」는 **흔적이 아니다** — 여기서 참으로 세면 화면이 「부품 요청에서
+    //    잡힙니다」라고 근거 없는 말을 한다. 막는 일은 게이트가 따로 한다.
+    assert.equal(hasUsedPartsPartRequestHistory(false, UNKNOWN), false);
+    assert.equal(hasUsedPartsPartRequestHistory(true, UNKNOWN), true, "옛 표 쪽은 그대로 센다");
+  });
+
+  test("🔴 재고 관리에만 흔적이 있어도 막힌다 — 2026-10-16 뒤의 건이 그렇다", () => {
+    const result = gateWith({ hasLegacyPartRequest: false, inventoryIssuedPartsTrace: PRESENT });
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.equal(result.code, "PART_REQUEST_HISTORY_EXISTS");
+    assert.equal(result.message, USED_PARTS_PART_REQUEST_HISTORY_MESSAGE);
+  });
+
+  test("🔴 옛 표에만 흔적이 있어도 막힌다 — 옛 판정을 걷어내지 않았다", () => {
+    const result = gateWith({ hasLegacyPartRequest: true, inventoryIssuedPartsTrace: ABSENT });
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.equal(result.code, "PART_REQUEST_HISTORY_EXISTS");
+  });
+
+  test("둘 다 없으면 적을 수 있다 — 종전 그대로", () => {
+    assert.deepEqual(
+      gateWith({ hasLegacyPartRequest: false, inventoryIssuedPartsTrace: ABSENT }),
+      { ok: true }
+    );
+  });
+
+  test("🔴 못 물어봤으면 막힌다 — 그리고 「흔적이 있어서」와 다른 말이다", () => {
+    const result = gateWith({ hasLegacyPartRequest: false, inventoryIssuedPartsTrace: UNKNOWN });
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.equal(result.code, "INVENTORY_UNREACHABLE");
+    assert.equal(result.message, USED_PARTS_INVENTORY_UNREACHABLE_MESSAGE);
+    // 🔴 「모른다」를 「없다」로 눕히면 이 단언이 깨진다 — 그 순간 이미 반출된 부품을
+    //    손으로 또 적는 길이 열린다.
+    assert.notEqual(result.message, USED_PARTS_PART_REQUEST_HISTORY_MESSAGE);
+    assert.notEqual(result.message, USED_PARTS_ROLE_NOT_ALLOWED_MESSAGE);
+  });
+
+  test("🔴 못 물어봤어도 **더 확실한 까닭**이 먼저 나온다 — 권한 · 흔적 · 잠금", () => {
+    // 권한이 없는 사람에게 「재고 관리에 물어볼 수 없어서」라고 하면 거짓 안내다 —
+    // 저쪽이 돌아와도 그 사람은 여전히 못 적는다.
+    const denied = gateWith({
+      canWriteUsedParts: false,
+      hasLegacyPartRequest: false,
+      inventoryIssuedPartsTrace: UNKNOWN,
+    });
+    assert.equal(denied.ok, false);
+    if (denied.ok) throw new Error("unreachable");
+    assert.equal(denied.code, "ROLE_NOT_ALLOWED");
+
+    // 옛 표에 흔적이 있으면 그쪽이 더 확실하고 더 쓸모 있는 안내다(기다려도 안 열린다).
+    const legacy = gateWith({ hasLegacyPartRequest: true, inventoryIssuedPartsTrace: UNKNOWN });
+    assert.equal(legacy.ok, false);
+    if (legacy.ok) throw new Error("unreachable");
+    assert.equal(legacy.code, "PART_REQUEST_HISTORY_EXISTS");
+
+    // 잠긴 건(가져온 건이 아님)도 마찬가지다.
+    const locked = gateWith({
+      hasLegacyPartRequest: false,
+      inventoryIssuedPartsTrace: UNKNOWN,
+      isShipmentLocked: true,
+    });
+    assert.equal(locked.ok, false);
+    if (locked.ok) throw new Error("unreachable");
+    assert.equal(locked.code, "CASE_LOCKED");
+  });
+
+  test("🔴 업무 규칙 둘은 그대로다 — 재고 관리의 답이 잠금을 풀지 않는다", () => {
+    // 잠긴 가져온 건은 여전히 열린다(이 칸을 만든 까닭).
+    assert.deepEqual(
+      gateWith({
+        hasLegacyPartRequest: false,
+        inventoryIssuedPartsTrace: ABSENT,
+        isShipmentLocked: true,
+        isLegacyImportedCase: true,
+      }),
+      { ok: true }
+    );
+    // 그 건이라도 재고 관리에 흔적이 있으면 막힌다.
+    const withTrace = gateWith({
+      hasLegacyPartRequest: false,
+      inventoryIssuedPartsTrace: PRESENT,
+      isShipmentLocked: true,
+      isLegacyImportedCase: true,
+    });
+    assert.equal(withTrace.ok, false);
+    if (withTrace.ok) throw new Error("unreachable");
+    assert.equal(withTrace.code, "PART_REQUEST_HISTORY_EXISTS");
+  });
+
+  test("🔴 감싸개일 뿐이다 — 차례를 베껴 적지 않았다", () => {
+    // 재고 관리 쪽 답을 빼면 **옛 함수와 글자 하나 다르지 않은 답**이 나와야 한다.
+    for (const canWriteUsedParts of [false, true]) {
+      for (const hasLegacyPartRequest of [false, true]) {
+        for (const isShipmentLocked of [false, true]) {
+          for (const isLegacyImportedCase of [false, true]) {
+            assert.deepEqual(
+              resolveUsedPartsWriteGateWithInventory({
+                canWriteUsedParts,
+                hasLegacyPartRequest,
+                inventoryIssuedPartsTrace: ABSENT,
+                isShipmentLocked,
+                isLegacyImportedCase,
+              }),
+              resolveUsedPartsWriteGate({
+                canWriteUsedParts,
+                hasPartRequestHistory: hasLegacyPartRequest,
+                isShipmentLocked,
+                isLegacyImportedCase,
+              }),
+              `${canWriteUsedParts}/${hasLegacyPartRequest}/${isShipmentLocked}/${isLegacyImportedCase}`
+            );
+          }
+        }
+      }
+    }
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 재고 관리 쪽 잣대는 **「실제로 나간 것」**이다 (2026-10-29 사용자 결정)
+ * ============================================================================
+ * 2026-10-29 **아침까지는** 「신청이 한 건이라도 있으면 막는다」였다. 그 잣대는 **반려·취소만
+ * 되고 한 개도 안 나간 건**까지 막았고, 그러면 그 건의 부품은 —
+ *   · [고장 부품] 그래프의 반출 입력에 **안 들어가고**(그쪽은 `issued >= 1` 인 줄만 센다), ·
+ *   · [사용 부품] 칸에 **손으로도 못 적는다.**
+ * 즉 **어디에도 안 잡히고 적을 자리도 없는 구멍**이 된다. A/S 옛 표 쪽 판정이 `REJECTED` ·
+ * `CANCELLED` 를 빼는 까닭이 처음부터 그 구멍이었고, 이제 **두 쪽 잣대가 같아졌다.**
+ *
+ * 🔵 **트레이스를 손으로 지어내지 않는다** — 저쪽 응답(JSON)을 제품 코드의 파서와 제품
+ *    코드의 판정(`resolveInventoryIssuedPartsTrace`)에 그대로 태운다. 손으로 지은 트레이스만
+ *    재면 「판정 함수가 그 응답에서 무엇을 뽑는가」가 영영 안 잡힌다.
+ * ============================================================================
+ */
+describe("사용 부품 — 재고 관리 쪽은 「실제로 나간 것」만 센다", () => {
+  /** 🔵 **가짜 값만 쓴다** — 인수번호 · 품명 · 요청 번호 전부 지어낸 것이다. */
+  function traceOf(
+    requests: readonly {
+      status: string;
+      lines: readonly { name: string; quantity: number; issued: number }[];
+    }[]
+  ): InventoryIssuedPartsTrace {
+    const parsed = parseInventoryStockRequestsResponse({
+      count: requests.length,
+      requests: requests.map((request, index) => ({
+        requestKey: `AS-FAKE-${index + 1}`,
+        id: `fake-request-${index + 1}`,
+        intakeNumber: "D990101",
+        status: { code: request.status, label: request.status },
+        closed: false,
+        requestedAt: "2099-01-01T00:00:00.000Z",
+        lines: request.lines.map((line, lineIndex) => ({
+          no: lineIndex + 1,
+          name: line.name,
+          quantity: line.quantity,
+          issued: line.issued,
+        })),
+      })),
+      notFound: [],
+    });
+    // 🔵 **표본이 진짜 그 표본인지** 먼저 센다 — 파서가 줄을 버리면 아래 단언이 공짜로
+    //    통과한다(줄이 0개면 무엇을 세든 「안 나갔다」다).
+    assert.ok(parsed, "표본이 저쪽 응답 모양이어야 한다");
+    assert.equal(parsed.length, requests.length);
+    assert.deepEqual(
+      parsed.map((request) => request.lines.map((line) => line.issued)),
+      requests.map((request) => request.lines.map((line) => line.issued)),
+      "불출 수량이 파서를 지나며 사라지지 않았다"
+    );
+    return resolveInventoryIssuedPartsTrace({ status: "ok", value: parsed });
+  }
+
+  function gateFor(trace: InventoryIssuedPartsTrace) {
+    return resolveUsedPartsWriteGateWithInventory({
+      canWriteUsedParts: true,
+      hasLegacyPartRequest: false,
+      inventoryIssuedPartsTrace: trace,
+      isShipmentLocked: false,
+      isLegacyImportedCase: false,
+    });
+  }
+
+  test("🔴 반려·취소만 되고 한 개도 안 나갔으면 **적을 수 있다**", () => {
+    const trace = traceOf([
+      { status: "REJECTED", lines: [{ name: "가짜부품-ㄱ", quantity: 2, issued: 0 }] },
+      { status: "CANCELLED", lines: [{ name: "가짜부품-ㄴ", quantity: 1, issued: 0 }] },
+    ]);
+    assert.deepEqual(trace, { kind: "absent" }, "나간 줄이 없으니 「없다」다");
+    // 🔴 **「모른다」가 아니다** — 저쪽은 멀쩡히 답했고, 답의 내용이 「안 나갔다」다.
+    assert.notEqual(trace.kind, "unknown");
+    assert.equal(hasUsedPartsPartRequestHistory(false, trace), false);
+    assert.deepEqual(gateFor(trace), { ok: true });
+  });
+
+  test("🔴 한 줄이라도 나갔으면 막힌다 — **요청 상태가 무엇이든**", () => {
+    // 🔵 여덟 상태를 다 돌 까닭이 없다. 못 박을 것은 「상태를 안 본다」이므로, 나간 줄이
+    //    있는데도 상태만 보면 빠질 법한 둘(취소됨 · 반려됨)을 **일부러** 넣는다.
+    const statuses = ["CONFIRMED", "PARTIAL", "PENDING", "CANCELLED", "REJECTED"];
+    assert.equal(statuses.length, 5, "표본이 비면 이 시험은 공짜로 통과한다");
+    for (const status of statuses) {
+      const trace = traceOf([{ status, lines: [{ name: "가짜부품-ㄷ", quantity: 1, issued: 1 }] }]);
+      assert.deepEqual(trace, { kind: "present", issuedLineCount: 1 }, status);
+      assert.equal(hasUsedPartsPartRequestHistory(false, trace), true, status);
+      const result = gateFor(trace);
+      assert.equal(result.ok, false, status);
+      if (result.ok) throw new Error("unreachable");
+      assert.equal(result.code, "PART_REQUEST_HISTORY_EXISTS", status);
+      assert.equal(result.message, USED_PARTS_PART_REQUEST_HISTORY_MESSAGE);
+    }
+  });
+
+  test("🔴 「일부 나감」 — 한 신청 안에 섞여 있어도 나간 줄이 있으면 막힌다", () => {
+    const trace = traceOf([
+      {
+        status: "PARTIAL",
+        lines: [
+          { name: "가짜부품-ㄹ", quantity: 3, issued: 0 },
+          { name: "가짜부품-ㅁ", quantity: 2, issued: 2 },
+        ],
+      },
+    ]);
+    // 🔴 **줄 수**다(나간 수량의 합이 아니다) — 2개가 나간 한 줄이라 1 이다.
+    assert.deepEqual(trace, { kind: "present", issuedLineCount: 1 });
+    const result = gateFor(trace);
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.equal(result.code, "PART_REQUEST_HISTORY_EXISTS");
+  });
+
+  test("🔴 아직 안 나간 신청만 있으면 적을 수 있다 — 기다리는 중인 건", () => {
+    // 🔵 이 갈래가 2026-10-29 **아침과 달라진** 자리다. 종전에는 「신청이 있다」로 막혔다.
+    const trace = traceOf([
+      { status: "PENDING", lines: [{ name: "가짜부품-ㅂ", quantity: 1, issued: 0 }] },
+    ]);
+    assert.deepEqual(trace, { kind: "absent" });
+    assert.deepEqual(gateFor(trace), { ok: true });
+  });
+
+  test("🔴 못 물어봤으면 여전히 막힌다 — 그 결정은 안 바뀌었다", () => {
+    const trace = resolveInventoryIssuedPartsTrace({ status: "unreachable", reason: "timeout" });
+    assert.deepEqual(trace, { kind: "unknown", reason: "timeout" });
+    const result = gateFor(trace);
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.equal(result.code, "INVENTORY_UNREACHABLE");
+    assert.equal(result.message, USED_PARTS_INVENTORY_UNREACHABLE_MESSAGE);
+  });
+
+  test("🔴 옛 표에만 흔적이 있으면 재고 관리가 「안 나갔다」고 해도 막힌다", () => {
+    const trace = traceOf([
+      { status: "REJECTED", lines: [{ name: "가짜부품-ㅅ", quantity: 1, issued: 0 }] },
+    ]);
+    assert.deepEqual(trace, { kind: "absent" });
+    const result = resolveUsedPartsWriteGateWithInventory({
+      canWriteUsedParts: true,
+      hasLegacyPartRequest: true,
+      inventoryIssuedPartsTrace: trace,
+      isShipmentLocked: false,
+      isLegacyImportedCase: false,
+    });
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.equal(result.code, "PART_REQUEST_HISTORY_EXISTS");
+  });
+});
+
 describe("사용 부품 — 판정이 한 벌뿐이다", () => {
   const repoUrl = new URL("../../../", import.meta.url);
   const read = (path: string) => readFileSync(new URL(path, repoUrl), "utf8");
@@ -338,6 +671,54 @@ describe("사용 부품 — 판정이 한 벌뿐이다", () => {
     assert.ok(
       !/REJECTED|CANCELLED|inventoryPartRequests/.test(mutationCode),
       "반출 이력 판정을 두 벌로 적지 않는다"
+    );
+  });
+
+  /**
+   * 🔴 **트랜잭션 안에서 바깥 통로를 부르지 않는다** (2026-10-29)
+   *
+   * `saveRepairCaseUsedParts` 는 첫 줄부터 마지막 줄까지 `db.transaction` 안이다. 거기서
+   * 재고 관리를 두드리면 `SELECT … FOR UPDATE` 로 잡아 둔 행 잠금이 **저쪽 응답만큼**
+   * 길어진다(읽기 제한 5초). 그래서 답은 **값으로 받아서** 들어온다.
+   *
+   * 🔵 시험으로 「부르지 않는다」를 재기 어려워 **구조로** 못 박는다 — ① 통로 모듈을
+   *    import 하는 줄이 없고 ② 받는 칸의 타입이 **값**이다(약속도 함수도 아니다).
+   *    둘 중 하나라도 깨지면 여기서 멈춘다.
+   */
+  test("🔴 저장은 트랜잭션 안에서 재고 관리를 부르지 않는다 — 답을 받아서 들어간다", () => {
+    /* 🔴 **probe 이름을 하나만 적지 않는다**(2026-10-29) — 2026-10-29 에 둘이 되었고
+       (`probeInventoryPartRequestTrace` · `probeInventoryIssuedPartsTrace`), 이름을 하나만
+       막아 두면 **다른 하나로 트랜잭션 안에서 부르는 줄**이 조용히 통과한다. */
+    assert.ok(
+      !/server\/inventory-gateway|probeInventory|fetch\(/.test(mutationCode),
+      "mutation 이 트랜잭션 안에서 바깥 통로를 부르고 있다"
+    );
+    assert.match(
+      mutationCode.replace(/\s+/g, " "),
+      /issuedPartsTrace: InventoryIssuedPartsTrace;/,
+      "받는 칸이 **이미 받아 온 값**이어야 한다(Promise 도 함수도 아니다)"
+    );
+    /* 🔴 **묻는 자는 「실제로 나갔나」 쪽이다**(2026-10-29 사용자 결정). 「요청이 있나」 쪽
+       (`probeInventoryPartRequestTrace` — 연락서 이식 · 백필이 쓴다)을 여기에 끼우면
+       반려·취소만 된 건이 다시 막힌다. */
+    assert.match(
+      actionCode.replace(/\s+/g, " "),
+      /const issuedPartsTrace = await probeInventoryIssuedPartsTrace\(caseKey\.intakeNumber\);/
+    );
+    assert.ok(
+      !/probeInventoryPartRequestTrace/.test(actionCode),
+      "액션이 「요청이 있나」 쪽 자를 쓰고 있다 — 화면 쪽과 잣대가 갈린다"
+    );
+    const actionFlat = actionCode.replace(/\s+/g, " ");
+    assert.ok(
+      actionFlat.indexOf("probeInventoryIssuedPartsTrace(caseKey.intakeNumber)") <
+        actionFlat.indexOf("saveRepairCaseUsedParts("),
+      "트랜잭션을 열기 전에 물어야 한다"
+    );
+    // 🔴 액션은 **나르기만** 한다 — 받아 온 답을 가리거나 접지 않는다.
+    assert.ok(
+      !/kind === "unknown"|kind === "present"|kind === "absent"/.test(actionCode),
+      "액션이 트레이스를 제 손으로 가리고 있다 — 판정이 두 벌이 된다"
     );
   });
 
@@ -417,7 +798,10 @@ describe("사용 부품 — 판정이 한 벌뿐이다", () => {
       mutationCode.replace(/\s+/g, " "),
       /const canWriteUsedParts = await hasPermission\(params\.actor, "repairCases\.usedParts", "WRITE"\);/
     );
-    assert.match(mutationCode.replace(/\s+/g, " "), /resolveUsedPartsWriteGate\(\{ canWriteUsedParts,/);
+    assert.match(
+      mutationCode.replace(/\s+/g, " "),
+      /resolveUsedPartsWriteGateWithInventory\(\{ canWriteUsedParts,/
+    );
     assert.ok(
       !/resolveUsedPartsWriteGate|hasPermission/.test(actionCode),
       "액션이 판정을 미리 흉내 내지 않는다 — 트랜잭션 밖에서 본 값은 바뀔 수 있다"
@@ -426,8 +810,15 @@ describe("사용 부품 — 판정이 한 벌뿐이다", () => {
 
   test("🔴 조회와 저장이 같은 판정 함수를 부른다", () => {
     for (const code of [queryCode, mutationCode]) {
-      assert.match(code, /resolveUsedPartsWriteGate\(\{/);
+      assert.match(code, /resolveUsedPartsWriteGateWithInventory\(\{/);
     }
+    // 🔴 그 함수는 **옛 함수를 감싸는 것**이라 차례가 여전히 한 곳에만 있다 —
+    //    감싸개가 제 손으로 권한 · 흔적 · 잠금을 다시 적으면 판정이 두 벌이 된다.
+    const authCode = strip(read("src/lib/auth/repair-case-used-parts-authorization.ts"));
+    assert.match(
+      authCode.replace(/\s+/g, " "),
+      /export function resolveUsedPartsWriteGateWithInventory\([\s\S]*?const gate = resolveUsedPartsWriteGate\(\{/
+    );
   });
 
   test("🔴 화면은 스스로 판정하지 않는다 — 서버가 준 writeGate 만 본다", () => {

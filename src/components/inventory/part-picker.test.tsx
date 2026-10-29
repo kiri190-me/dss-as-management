@@ -510,8 +510,14 @@ describe("㉤ 두 페이지가 모두 목록을 넘긴다", () => {
   }
 
   test("🔴 수리 건 상세도 재고 관리에서 받아 「사용 부품」 칸에 넘긴다", () => {
+    /* 🔴 2026-10-29 에 같은 통로에서 **하나 더** 받는다 — 「이 건에서 부품이 실제로
+       나갔나」(`probeInventoryIssuedPartsTrace`). 그 답이 「사용 부품」 칸을 열지 말지를
+       가른다. 🔵 같은 날 **잣대가 한 번 좁아졌다** — 「신청이 있나」가 아니라 「나간 줄이
+       있나」다(반려·취소만 된 건은 열어 준다). */
     assert.ok(
-      casePage.includes('import { fetchInventoryParts } from "@/lib/server/inventory-gateway";'),
+      casePage.includes(
+        'import { fetchInventoryParts, probeInventoryIssuedPartsTrace } from "@/lib/server/inventory-gateway";'
+      ),
       "수리 건 상세가 재고 관리를 부르지 않는다"
     );
     assert.ok(!casePage.includes("getPartPickerList("), "A/S 부품 표를 아직 읽는다");

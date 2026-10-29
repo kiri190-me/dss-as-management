@@ -53,6 +53,33 @@
  * 갖고, 화면(조회)과 저장(mutation)이 **같은 그 조건**을 쓴다. 두 벌로 적으면
  * 한쪽만 고쳐지는 날이 오고, 그날 통계가 조용히 어긋난다.
  *
+ * ── 🔴 규칙 1 의 반쪽이 2026-10-16 에 **다른 시스템으로 옮겨 갔다** (2026-10-29) ──
+ * 저 조건이 보는 `inventory_part_requests` 는 **A/S 의 옛 표**다. 새 반출 신청은
+ * 2026-10-16 부터 전부 재고 관리로 올라가고, 운영 코드에 그 표로 `insert` 하는 길이
+ * 한 줄도 없다 — 그래서 **재고 관리로 반출 확인까지 끝난 건도 이 칸이 열려 있었다.**
+ * 그 건에 엔지니어가 같은 부품을 손으로 또 적으면 [고장 부품] 그래프가 **같은 반출을
+ * 두 번** 센다(이 규칙이 막으려던 바로 그 일이다).
+ *
+ * 🔴 **옛 표 판정을 걷어내지 않는다 — 둘을 더해서 본다.** 2026-10-16 이전 건의 흔적은
+ *    그 표에만 있고, 재고 관리는 그 시절을 모른다. 그래서 **둘 중 하나라도 있으면
+ *    막는다**(아래 `hasUsedPartsPartRequestHistory`).
+ *
+ * ── 🔴 재고 관리 쪽 잣대는 **「실제로 나간 것」**이다 (2026-10-29 사용자 결정) ──
+ * 재고 관리에 신청이 **반려·취소만** 되고 **한 개도 안 나간** 건은 **이 칸을 열어 준다.**
+ * 반출이 일어나지 않았으니 손으로 적을 수 있어야 하고, 그래야 [고장 부품] 그래프의 잣대와
+ * 자가 같아진다(그쪽도 `issued >= 1` 인 줄만 센다). 막아 두면 그 건의 부품은 **어디에도
+ * 안 잡히고 적을 자리도 없는 구멍**이 된다 — 바로 위 옛 표 조건이 `REJECTED` ·
+ * `CANCELLED` 를 빼는 까닭이 처음부터 그 구멍이었고, 이제 **두 쪽의 잣대가 같아졌다.**
+ * 🔵 그 자는 도메인 쪽 `resolveInventoryIssuedPartsTrace` 하나이고, 「요청한 적이 있나」를
+ *    재는 옛 자(`resolveInventoryPartRequestTrace` — 연락서 이식 · 백필이 쓴다)는 **그대로
+ *    둔다.** 둘은 다른 물음에 답한다(그 함수들의 머리말).
+ *
+ * 🔴 **못 물어봤으면 막는다** — 「모른다」를 「없다」로 눕히지 않는다. 눕히면 반출된
+ *    부품을 또 적는 길이 열리고, 그 중복은 나중에 그래프에서 **조용히 틀린 수**로만
+ *    드러난다(오류가 안 나므로 아무도 신고하지 않는다). 🔵 그 대신 **다른 말**로
+ *    막는다 — 「흔적이 있어서」와 「물어보지 못해서」는 사람이 할 일이 다르다.
+ *    도메인 쪽이 그 셋을 이미 갈라 두었다(`InventoryIssuedPartsTrace`).
+ *
  * ── 🔴 규칙 2 — 출하 잠금은 「과거 인수품 가져오기」로 들어온 건에만 푼다 ───
  * 사용 부품은 **이미 출하된 옛 건에 적으려고** 만든 칸이다. 출하 잠금을 그대로
  * 두면 주 용도가 통째로 막히고, 반대로 모든 건에서 풀면 잠금이 뜻을 잃는다.
@@ -81,6 +108,15 @@
  * ============================================================================
  */
 
+/* 🔴 **형만 빌린다** — 이 파일은 순수하게 남는다. `domain/inventory-gateway.ts` 도 DB 도
+   망도 물지 않는 순수 모듈이라 가져다 써도 이 파일에 비동기가 들어오지 않는다.
+   🔴 **갈래 셋을 여기서 다시 짓지 않는다**(있다·없다·모른다). 같은 것을 두 벌로 적으면
+   언젠가 한쪽이 둘로 접히고, 그날 「모른다」가 조용히 「없다」가 된다.
+   🔴 **옆에 있는 `InventoryPartRequestTrace` 가 아니다**(2026-10-29) — 그것은 「요청한 적이
+   있나」(취소·반려도 흔적)이고 이 칸이 묻는 것은 「**실제로 나갔나**」다. 갈래 이름이 같아
+   눈으로는 헷갈리지만 `present` 가 담는 것이 서로 달라 tsc 가 바꿔치기를 잡아 준다. */
+import type { InventoryIssuedPartsTrace } from "@/lib/domain/inventory-gateway";
+
 /**
  * 적을 수 없는 까닭. 서버 액션이 그대로 결과 코드로 쓴다.
  *
@@ -91,7 +127,13 @@
 export type UsedPartsWriteBlockCode =
   | "ROLE_NOT_ALLOWED"
   | "PART_REQUEST_HISTORY_EXISTS"
-  | "CASE_LOCKED";
+  | "CASE_LOCKED"
+  /**
+   * 🔴 **재고 관리에 못 물어봤다** (2026-10-29). 「흔적이 있다」가 아니라 **「모른다」**다 —
+   * 막는 것은 같지만 사람이 할 일이 다르고(기다렸다 다시 하면 된다), 무엇보다
+   * **이 건에 반출 이력이 있다고 단정하지 않는다.**
+   */
+  | "INVENTORY_UNREACHABLE";
 
 export type UsedPartsWriteGate =
   | { ok: true }
@@ -111,7 +153,11 @@ export type UsedPartsWriteGateFacts = {
    * 닫히는 쪽으로 떨어뜨리는 것이 그 자리의 규칙이다.
    */
   canWriteUsedParts: boolean;
-  /** 이 건에 살아 있는 부품 요청(반출) 줄이 있는가. REJECTED · CANCELLED 는 치지 않는다. */
+  /**
+   * 이 건에 살아 있는 부품 요청(반출) 줄이 있는가. 🔴 **두 시스템 다 「실제로 효력이 있는
+   * 것」만 센다** — A/S 옛 표는 REJECTED · CANCELLED 를 빼고, 재고 관리 쪽은 `issued >= 1`
+   * 인 줄만 센다(2026-10-29 에 잣대가 같아졌다 — 머리말).
+   */
   hasPartRequestHistory: boolean;
   /** repair_cases.is_locked — 출하 완료로 잠겼는가. */
   isShipmentLocked: boolean;
@@ -151,6 +197,20 @@ export const USED_PARTS_PART_REQUEST_HISTORY_MESSAGE =
 
 export const USED_PARTS_CASE_LOCKED_MESSAGE =
   "출하 완료로 잠긴 접수 건입니다. 과거 인수품 가져오기로 들어온 건에만 사용 부품을 적을 수 있습니다.";
+
+/**
+ * 🔴 **「막는다」와 「권한이 없다」는 다른 말이다** (2026-10-29).
+ *
+ * 위 세 문구는 전부 **무엇이 막았는지가 확실할 때**의 말이다. 이것 하나만 **모를 때**의
+ * 말이라, 섞어 쓰면 사람이 엉뚱한 곳을 고치러 간다 —
+ *   · 「권한이 없습니다」로 적으면 권한을 쥔 관리자를 찾아간다. 그 사람도 못 연다.
+ *   · 빈 칸으로 두면 단추가 까닭 없이 사라진 것으로 보여 「고장났다」가 된다.
+ *
+ * 그래서 **무슨 일이 일어났고 무엇을 하면 되는지**를 둘 다 적는다. 🔵 기다리면 풀리는
+ * 유일한 거절이라 「다시 해 주세요」가 참말인 자리이기도 하다.
+ */
+export const USED_PARTS_INVENTORY_UNREACHABLE_MESSAGE =
+  "재고 관리에 물어볼 수 없어 지금은 사용 부품을 적을 수 없습니다. 재고 관리가 열리면 다시 해 주세요.";
 
 /**
  * 규칙 2 만 따로 떼어 둔 것 — 「모든 건에서 푸는 것」과 「가져온 건에만 푸는 것」의
@@ -194,6 +254,87 @@ export function resolveUsedPartsWriteGate(facts: UsedPartsWriteGateFacts): UsedP
   }
   if (isUsedPartsBlockedByShipmentLock(facts.isShipmentLocked, facts.isLegacyImportedCase)) {
     return { ok: false, code: "CASE_LOCKED", message: USED_PARTS_CASE_LOCKED_MESSAGE };
+  }
+  return { ok: true };
+}
+
+/**
+ * ============================================================================
+ * 🔴 반출 흔적은 **두 시스템에 나뉘어 있다** (2026-10-29)
+ * ============================================================================
+ * 「반출 이력이 있는가」의 답을 갖고 있는 곳이 둘이다 —
+ *
+ *   · **A/S 의 옛 표**(`inventory_part_requests`) … 2026-10-16 이전 건. 그 뒤로는 한 줄도
+ *     늘지 않는다(운영 코드에 insert 가 없다). 🔴 그래도 **지우지 않는다** — 그 시절 건의
+ *     흔적은 여기에만 있고, 재고 관리는 그 시절을 모른다.
+ *   · **재고 관리**(`probeInventoryIssuedPartsTrace`) … 2026-10-16 이후 전부.
+ *
+ * 그래서 **둘 중 하나라도 있으면 흔적이 있다**로 본다. 한쪽만 보면 반쪽 기간이 조용히
+ * 열린다 — 실제로 2026-10-16 ~ 2026-10-29 사이가 그렇게 열려 있었다.
+ *
+ * ── 🔴 **두 쪽이 재는 자가 같다** (2026-10-29 사용자 결정) ──────────────────
+ * 옛 표 쪽은 `REJECTED` · `CANCELLED` 를 빼고(`livePartRequestCondition`), 재고 관리 쪽은
+ * **나간 줄(`issued >= 1`)이 하나라도 있나**를 본다. 둘 다 **「실제로 효력이 있는 것만」**
+ * 이라는 한 가지 뜻이다 — 🔴 재고 관리 쪽만 「신청이 있기만 하면」으로 두면, 반려·취소만
+ * 된 건이 **통계에도 안 잡히고 적을 자리도 없는 구멍**이 된다(옛 표 쪽이 그 둘을 빼는
+ * 까닭 그대로다. `domain/inventory-gateway.ts` 의 `resolveInventoryIssuedPartsTrace`).
+ */
+export function hasUsedPartsPartRequestHistory(
+  hasLegacyPartRequest: boolean,
+  inventoryIssuedPartsTrace: InventoryIssuedPartsTrace
+): boolean {
+  return hasLegacyPartRequest || inventoryIssuedPartsTrace.kind === "present";
+}
+
+/** 위 두 재료가 더해진 판정의 재료. 나머지 셋은 `UsedPartsWriteGateFacts` 그대로다. */
+export type UsedPartsWriteGateFactsWithInventory = Omit<
+  UsedPartsWriteGateFacts,
+  "hasPartRequestHistory"
+> & {
+  /** 🔴 **A/S 옛 표만** 본 답(`hasLivePartRequest`). 이것만으로는 모자라다(위 머리말). */
+  hasLegacyPartRequest: boolean;
+  /**
+   * 🔴 재고 관리에 물어본 답 — **있다 · 없다 · 모른다 셋 그대로**다.
+   *
+   * 🔴 **「요청이 있나」가 아니라 「나간 것이 있나」**다(2026-10-29). 이름과 형을 그쪽으로
+   *    못 박아 두는 까닭: 연락서 이식이 쓰는 `InventoryPartRequestTrace` 와 갈래 이름이
+   *    같아, 형이 하나였다면 둘을 바꿔 넣어도 아무 소리가 안 난다.
+   */
+  inventoryIssuedPartsTrace: InventoryIssuedPartsTrace;
+};
+
+/**
+ * 🔴 **조회와 저장이 함께 부르는 바깥 창구.** 위 `resolveUsedPartsWriteGate` 를 **감싸는**
+ * 것이지 베끼는 것이 아니다 — 권한 · 흔적 · 잠금의 차례는 여전히 그 함수 한 곳에만 있다.
+ *
+ * ── 🔴 「모른다」를 **맨 뒤**에서 본다 ────────────────────────────────────────
+ * 앞의 셋은 **확실한 까닭**이고(재고 관리가 돌아와도 달라지지 않는다), 이것 하나만
+ * **지금 못 물어봤다**는 말이다. 뒤에 두면 권한 없는 사람은 「권한이 없습니다」를, 잠긴
+ * 건은 「잠긴 건입니다」를 그대로 받는다 — 재고 관리가 멈춘 날 **모든 거절이 한 가지
+ * 말로 뭉개지지 않는다.**
+ * 🔵 옛 표에 흔적이 있으면 못 물어봐도 「흔적이 있어서」가 나온다. 그쪽이 더 확실하고
+ *    더 쓸모 있는 안내다(기다려도 열리지 않는다).
+ */
+export function resolveUsedPartsWriteGateWithInventory(
+  facts: UsedPartsWriteGateFactsWithInventory
+): UsedPartsWriteGate {
+  const gate = resolveUsedPartsWriteGate({
+    canWriteUsedParts: facts.canWriteUsedParts,
+    hasPartRequestHistory: hasUsedPartsPartRequestHistory(
+      facts.hasLegacyPartRequest,
+      facts.inventoryIssuedPartsTrace
+    ),
+    isShipmentLocked: facts.isShipmentLocked,
+    isLegacyImportedCase: facts.isLegacyImportedCase,
+  });
+  if (!gate.ok) return gate;
+
+  if (facts.inventoryIssuedPartsTrace.kind === "unknown") {
+    return {
+      ok: false,
+      code: "INVENTORY_UNREACHABLE",
+      message: USED_PARTS_INVENTORY_UNREACHABLE_MESSAGE,
+    };
   }
   return { ok: true };
 }

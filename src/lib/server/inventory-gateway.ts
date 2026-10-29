@@ -5,8 +5,10 @@ import {
   parseInventoryOhTemplateResponse,
   parseInventoryPartsResponse,
   parseInventoryStockRequestsResponse,
+  resolveInventoryIssuedPartsTrace,
   resolveInventoryPartRequestTrace,
   type ChargeType,
+  type InventoryIssuedPartsTrace,
   type InventoryOhTemplate,
   type InventoryPart,
   type InventoryPartRequestTrace,
@@ -269,6 +271,24 @@ export async function probeInventoryPartRequestTrace(
   intakeNumber: string
 ): Promise<InventoryPartRequestTrace> {
   return resolveInventoryPartRequestTrace(await fetchInventoryStockRequestsByIntake(intakeNumber));
+}
+
+/**
+ * 🔴 **이 수리 건에서 부품이 실제로 나갔는가** — 같은 통로 한 번 + **다른 순수 판정** 한 번
+ * (2026-10-29).
+ *
+ * 🔴 **바로 위 함수와 묻는 것이 다르다.** 위는 「요청한 적이 있나」(취소·반려도 흔적), 이것은
+ *    「물건이 나갔나」(`issued >= 1` 인 줄이 있나)다. 두 물음이 왜 갈려야 하는지는 순수 쪽
+ *    `resolveInventoryIssuedPartsTrace` 머리말에 있다 — 🔴 **둘을 합치지 마라.** 합치는
+ *    순간 반려·취소만 된 건이 「어디에도 안 잡히고 적을 자리도 없는」 구멍으로 돌아간다.
+ * 🔵 [사용 부품] 칸의 문지기(조회 · 저장)가 쓰는 쪽이 **이것**이고, 연락서 이식 · 백필은
+ *    위 것을 그대로 쓴다.
+ * 🔴 **셋을 그대로 돌려준다** — 「모른다」를 여기서 접지 않는다(순수 쪽 머리말).
+ */
+export async function probeInventoryIssuedPartsTrace(
+  intakeNumber: string
+): Promise<InventoryIssuedPartsTrace> {
+  return resolveInventoryIssuedPartsTrace(await fetchInventoryStockRequestsByIntake(intakeNumber));
 }
 
 // ---------------------------------------------------------------------------

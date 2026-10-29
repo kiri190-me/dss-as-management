@@ -38,6 +38,12 @@ import { readFileSync } from "node:fs";
  *     domain/used-part-display.ts 한 곳이고, 갈래마다 무엇이 보이는지는 그 곁의
  *     used-part-display.test.ts 가 **값으로** 못 박는다. 여기서 재는 것은 「그 규칙을
  *     어디서 부르고 어디로 나르는가」다.
+ * 12. 🔴 **반출 흔적의 절반은 재고 관리에 있다**(2026-10-29) — 2026-10-16 부터 새
+ *     신청이 전부 저쪽으로 올라가서, A/S 옛 표만 보던 동안 **반출이 끝난 건에도 칸이
+ *     열려 있었다.** 그 답은 **부르는 쪽이 받아** 조회에 넘기고(이 화면은 이미 같은
+ *     통로를 한 번 두드린다), 판정은 조회·저장이 같은 함수로 한다. 값으로 재는 일은
+ *     auth/repair-case-used-parts-authorization.test.ts 와 DB 시험이 한다 — 여기서
+ *     재는 것은 「어디서 묻고 어디로 나르는가」다.
  * ============================================================================
  */
 
@@ -122,9 +128,35 @@ describe("사용 부품 — 조회", () => {
   });
 
   test("질의를 나란히 쏜다 — 왕복을 직렬로 늘리지 않는다", () => {
+    /**
+     * 🔴 2026-10-29 에 **여섯째**가 붙었다 — 재고 관리에 물어본 답(`issuedPartsTrace`).
+     * 그것만 DB 가 아니라 부르는 쪽이 넘겨 준 값이고, **약속 그대로 같은 묶음에** 태운다.
+     * 밖에서 먼저 `await` 하면 그 HTTP 왕복이 다섯 질의 앞에 직렬로 붙는다.
+     */
     assert.match(
       queryFlat,
-      /const \[rows, hasPartRequestHistory, caseProbe, isLegacyImportedCase, canWriteUsedParts\] = await Promise\.all\(\[/
+      /const \[ rows, hasLegacyPartRequest, caseProbe, isLegacyImportedCase, canWriteUsedParts, inventoryIssuedPartsTrace, \] = await Promise\.all\(\[/
+    );
+    assert.match(queryFlat, /hasLivePartRequest\(db, repairCaseId\), /);
+    assert.match(queryFlat, /issuedPartsTrace, \]\);/);
+  });
+
+  test("🔴 조회가 스스로 재고 관리를 두드리지 않는다 — 답을 받아서 쓴다", () => {
+    // 조회는 **어디서 부르는지가 정해져 있지 않다.** 안에서 통로를 두드리면 줄마다
+    // 부르는 화면이 생기는 날 왕복이 줄 수만큼 늘고, 저쪽이 멈추면 그 화면이 통째로
+    // 느려진다 — 묻는 자리를 부르는 쪽에 두면 한 화면에 한 번으로 묶인다.
+    //
+    // 🔴 **probe 이름을 하나만 적지 않는다**(2026-10-29) — 그 함수가 둘이 되었고
+    //    (`probeInventoryPartRequestTrace` · `probeInventoryIssuedPartsTrace`), 하나만
+    //    막아 두면 다른 하나로 두드리는 줄이 조용히 통과한다.
+    assert.ok(
+      !/server\/inventory-gateway|probeInventory|fetch\(/.test(queryCode),
+      "조회가 바깥 통로를 부르고 있다"
+    );
+    // 🔴 기본값을 두지 않는다 — 안 넘기면 「없다」로 눕는 길이 생긴다.
+    assert.ok(
+      !/issuedPartsTrace\s*=\s*\{/.test(queryCode),
+      "안 넘겨도 도는 기본값이 생겼다 — 「모른다」가 조용히 「없다」가 된다"
     );
   });
 
@@ -139,9 +171,16 @@ describe("사용 부품 — 조회", () => {
   });
 
   test("🔴 적을 수 있는 건인가를 **서버가** 정해 내려보낸다", () => {
-    assert.match(queryFlat, /writeGate: resolveUsedPartsWriteGate\(\{/);
+    assert.match(queryFlat, /writeGate: resolveUsedPartsWriteGateWithInventory\(\{/);
     assert.match(queryFlat, /isShipmentLocked: caseProbe\[0\]\?\.isLocked \?\? true/);
     assert.match(queryFlat, /isLegacyImportedCase,/);
+    // 🔴 두 시스템의 답을 **둘 다** 넘긴다 — 한쪽만 넘기면 반쪽 기간이 조용히 열린다.
+    assert.match(queryFlat, /hasLegacyPartRequest, inventoryIssuedPartsTrace,/);
+    // 🔴 화면에 내려보내는 `hasPartRequestHistory` 도 둘을 더한 값이다.
+    assert.match(
+      queryFlat,
+      /hasPartRequestHistory: hasUsedPartsPartRequestHistory\( hasLegacyPartRequest, inventoryIssuedPartsTrace \)/
+    );
   });
 });
 
@@ -357,7 +396,7 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
   test("🔴 DATABASE 소스 건에만 조회한다 — MOCK·LOCAL_DEMO 에는 이 표가 없다", () => {
     assert.match(
       pageFlat,
-      /resolved\.source === "DATABASE" \? getRepairCaseUsedPartsView\(resolved\.id, actingUser\) : null/
+      /resolved\.source === "DATABASE" \? getRepairCaseUsedPartsView\(resolved\.id, actingUser, usedPartsIssuedPartsTrace\(\)\) : null/
     );
     /**
      * 🔴 품명 칸에서 고를 부품은 2026-10-16 부터 **재고 관리**에서 온다(A/S 의 부품 표는
@@ -376,7 +415,7 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
     assert.ok(start > 0 && end > start, "Promise.all 묶음을 찾지 못했다");
     const bundle = pageFlat.slice(start, end);
     assert.ok(
-      bundle.includes("getRepairCaseUsedPartsView(resolved.id, actingUser)"),
+      bundle.includes("getRepairCaseUsedPartsView(resolved.id, actingUser, usedPartsIssuedPartsTrace())"),
       "조회가 기존 Promise.all 묶음 안에 있어야 한다"
     );
     assert.ok(bundle.includes("fetchInventoryParts()"), "고를 부품도 같은 묶음 안에 있어야 한다");
@@ -387,6 +426,32 @@ describe("사용 부품 — 상세 화면에 붙이기", () => {
     // 🔴 한 번뿐이다 — 부품 요청 칸이 이미 받아 왔으면 그 목록을 그대로 쓴다(같은 통로를
     //    한 화면에서 두 번 두드리지 않는다).
     assert.equal(pageCode.match(/fetchInventoryParts\(/g)?.length, 1);
+
+    /**
+     * 🔴 **반출 흔적을 묻는 왕복도 늘리지 않는다** (2026-10-29). 부품 요청 칸이 이미
+     * 그 목록을 받아 왔으면 **그것으로 센다** — 같은 통로를 한 화면에서 두 번 두드리지
+     * 않는다. 없는 사람(기본값에서는 관리자가 그렇다)에게만 한 번 묻고, 그것도
+     * `await` 없이 위 묶음 안에서 나란히 기다린다.
+     *
+     * 🔴 **재는 자가 「실제로 나간 것」 쪽이다**(2026-10-29 사용자 결정). 두 길
+     * (받아 둔 목록 · 직접 묻기)이 **같은 순수 함수**에 닿아야 한다 —
+     * `probeInventoryIssuedPartsTrace` 는 통로 한 번 + 바로 그
+     * `resolveInventoryIssuedPartsTrace` 다(`lib/server/inventory-gateway.ts`).
+     * 한쪽만 「요청이 있나」 쪽으로 돌아가면 **화면이 여는 조건과 서버가 받아 주는
+     * 조건이 갈린다.**
+     */
+    assert.match(
+      pageFlat,
+      /const usedPartsIssuedPartsTrace = \(\): Promise<InventoryIssuedPartsTrace> => partRequestData \? Promise\.resolve\(resolveInventoryIssuedPartsTrace\(partRequestData\.requests\)\) : probeInventoryIssuedPartsTrace\(resolved\.intakeNumber\);/
+    );
+    assert.ok(!/await probeInventoryIssuedPartsTrace/.test(pageCode), "묶음 밖에서 기다리지 않는다");
+    assert.equal(pageCode.match(/probeInventoryIssuedPartsTrace\(/g)?.length, 1);
+    // 🔴 「요청이 있나」 쪽 자(연락서 이식 · 백필의 것)는 이 화면의 사용 부품 칸에 쓰이지
+    //    않는다 — 쓰면 반려·취소만 된 건이 다시 막힌다.
+    assert.ok(
+      !/probeInventoryPartRequestTrace/.test(pageCode),
+      "상세 페이지가 「요청이 있나」 쪽 자로 사용 부품 칸을 가리고 있다"
+    );
   });
 
   test("결과를 상세 화면으로 넘긴다", () => {

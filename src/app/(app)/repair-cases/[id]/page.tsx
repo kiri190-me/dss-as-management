@@ -13,8 +13,14 @@ import {
   getProductModelIdForProduct,
   listRepairCasesByProductId,
 } from "@/lib/db/queries/repair-cases";
-import { fetchInventoryParts } from "@/lib/server/inventory-gateway";
-import { toPartPickerOptions, type InventoryPart, type InventoryResult } from "@/lib/domain/inventory-gateway";
+import { fetchInventoryParts, probeInventoryIssuedPartsTrace } from "@/lib/server/inventory-gateway";
+import {
+  resolveInventoryIssuedPartsTrace,
+  toPartPickerOptions,
+  type InventoryIssuedPartsTrace,
+  type InventoryPart,
+  type InventoryResult,
+} from "@/lib/domain/inventory-gateway";
 import { buildUsedPartNameIndex, usedPartDisplayNamesById } from "@/lib/domain/used-part-display";
 import { loadPartRequestSectionData } from "@/lib/server/part-request-section-data";
 import {
@@ -234,6 +240,31 @@ export default async function RepairCaseDetailPage({
   // (auth/repair-case-used-parts-authorization.ts). 여기서 역할 이름을 비교하지
   // 않는다. actingUser 가 null 이면(삭제 · 정지 · 세션 끊김) null 을 그대로 넘겨
   // 닫히는 쪽으로 떨어뜨린다 — 칸 자체는 읽기로 남는다.
+  //
+  // ── 🔴 **반출 흔적의 절반은 재고 관리에 있다** (2026-10-29) ─────────────
+  // 2026-10-16 부터 새 반출 신청은 전부 재고 관리로 올라간다. 그래서 A/S 옛 표만
+  // 보면 **재고 관리로 반출까지 끝난 건에도 「사용 부품」 칸이 열린다** — 엔지니어가
+  // 같은 부품을 손으로 또 적으면 [고장 부품] 그래프가 같은 반출을 두 번 센다.
+  // 그 답을 받아 조회에 넘긴다(판정은 조회·저장이 같은 함수로 한다).
+  //
+  // 🔴 **묻는 것은 「실제로 나간 것이 있나」다**(2026-10-29 사용자 결정) — 「신청이
+  //    있나」가 아니다. 반려·취소만 되고 한 개도 안 나간 건은 이 칸을 열어 준다. 바로
+  //    아래 [부품 요청] 칸이 쓰는 자(`resolveInventoryPartRequestTrace`)와 **다른
+  //    물음**이라 함수가 둘이다 — 그 칸은 「이 건에 무슨 신청이 올라왔나」를 그리는
+  //    자리라 취소·반려도 보여 줘야 한다(두 함수의 머리말).
+  // 🔴 **서버 액션도 같은 자를 쓴다**(`probeInventoryIssuedPartsTrace` = 통로 + 아래
+  //    그 순수 함수). 화면이 여는 조건과 서버가 받아 주는 조건이 어긋날 길을 두지 않는다.
+  //
+  // 🔴 **부품 요청 칸이 이미 받아 왔으면 그 목록으로 센다** — 같은 통로를 한 화면에서
+  //    두 번 두드리지 않는다(바로 위 부품 목록과 같은 규율). 그 칸은
+  //    `inventory.requests` 쓰기가 있는 사람에게만 그려지므로, 없는 사람(기본값에서는
+  //    관리자가 그렇다)에게는 여기서 한 번 묻는다.
+  // 🔴 **await 하지 않고 약속 그대로 넘긴다** — 아래 Promise.all 안에서 DB 조회들과
+  //    나란히 기다려야 화면이 늦어지지 않는다.
+  const usedPartsIssuedPartsTrace = (): Promise<InventoryIssuedPartsTrace> =>
+    partRequestData
+      ? Promise.resolve(resolveInventoryIssuedPartsTrace(partRequestData.requests))
+      : probeInventoryIssuedPartsTrace(resolved.intakeNumber);
   const [
     derivedServiceSummary,
     domesticOrderDueDates,
@@ -253,7 +284,7 @@ export default async function RepairCaseDetailPage({
       ? getDerivedServiceSummariesForCases(relatedDatabaseCaseIds)
       : new Map<string, DerivedServiceSummary>(),
     resolved.source === "DATABASE"
-      ? getRepairCaseUsedPartsView(resolved.id, actingUser)
+      ? getRepairCaseUsedPartsView(resolved.id, actingUser, usedPartsIssuedPartsTrace())
       : null,
     resolved.source === "DATABASE"
       ? (partRequestData?.parts ?? fetchInventoryParts())
