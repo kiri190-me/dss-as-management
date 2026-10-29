@@ -12,11 +12,23 @@ import {
   buildSymptomBreakdown,
   faultPartIssuedWarning,
   selectProductModelPeriodFaultParts,
+  type FaultPartDetail,
   type FaultPartIssuedLookup,
   type FaultPartRow,
   type IntakeInspectionDetail,
   type ProductModelBreakdownCase,
 } from "@/lib/domain/product-model-breakdown";
+import {
+  lookupFaultPartInventory,
+  type FaultPartInventoryIndex,
+  type FaultPartInventoryRow,
+} from "@/lib/domain/fault-part-inventory";
+import {
+  inventoryPartCustomerName,
+  inventoryPartIdLabels,
+  inventoryPartSpec,
+  inventoryStockText,
+} from "@/lib/domain/inventory-gateway";
 import {
   formatFaultSymptomPeriodLabel,
   listFaultSymptomYears,
@@ -84,6 +96,18 @@ import {
  * **수**뿐이라(faultPartIssuedLookup) 어느 건이 빠졌는지 알 수 없어, 기간에 맞춰 줄이면
  * 「이 달은 다 셌다」는 **거짓말**이 된다. 그래서 그대로 둔다.
  *
+ * ── 🔴 **조각을 누르면 펼쳐지는 카드가 둘이다** (2026-10-29 사용자 요청) ───
+ * [고장 증상]은 그 증상 건들의 **인수점검 결과**를, [고장 부품]은 그 부품의 **재고 관리
+ * 줄**(전체 이름 · 재고 · 소유구분)을 펼친다. 🔵 펼치는 틀은 ChartCard 의 `detail` 하나라
+ * 두 카드가 같은 자리·같은 모양으로 열린다.
+ * 🔴 [고장 부품]은 2026-10-29 전까지 `detail` 을 **안 넘겼고** 조각의 딸린 값도 늘 `null`
+ *    이라(`NO_PIE_DETAIL`) **눌러도 하이라이트만 되고 아무것도 안 펼쳐졌다.**
+ * 🔴 **재고를 여기서 묻지 않는다.** 서버가 그래프에 뜬 부품의 줄만 골라 내려보내고
+ *    (`domain/fault-part-inventory.ts`), 이 화면은 고른 조각의 열쇠로 **찾아 그리기만** 한다 —
+ *    「새 조회를 하지 않는다」(위)가 여기에도 그대로 걸린다.
+ * 🔵 **기간을 바꾸면 펼친 것이 접힌다**는 기존 동작이 이 카드에도 그대로 든다 —
+ *    changeYear · changeMonth 가 네 그래프의 선택을 함께 지운다(아래 setSelection({})).
+ *
  * 🔴 **아래 접수 건 목록도 같은 기간에 걸린다** (2026-10-29 사용자 결정). 처음에는 네
  * 그래프만 걸고 목록은 전체를 두었는데, 그러면 「총 3건」 옆에 「목록 보기 (25건)」이
  * 떠서 어느 쪽이 맞는지 알 수 없다. 🔵 그래서 **이 구역의 숫자는 전부 한 기간**이다 —
@@ -124,11 +148,18 @@ export default function ProductModelHistoryBreakdown({
   resolved,
   faultParts,
   faultPartIssuedLookup,
+  faultPartInventory,
 }: {
   resolved: ResolvedRepairCase[];
   faultParts: FaultPartRow[];
   /** 🔴 반출 확인된 부품을 **다 세었는가**. 서버가 센 값이다(위 머리말). */
   faultPartIssuedLookup: FaultPartIssuedLookup;
+  /**
+   * 🔴 [고장 부품] 조각을 눌렀을 때 펼칠 **재고 관리 줄** (2026-10-29 사용자 요청).
+   * 서버가 그래프에 뜬 열쇠만 골라 담아 준다 — 이 파일은 고른 조각의 열쇠로 찾아 그리기만
+   * 한다(`domain/fault-part-inventory.ts` 의 `lookupFaultPartInventory` 가 갈래를 가른다).
+   */
+  faultPartInventory: FaultPartInventoryIndex;
 }) {
   // 배열이다(Set 이 아니다) — **고른 차례**가 곧 쌓이는 차례라서, 그 차례 자체가
   // 기억해야 할 값이다.
@@ -370,7 +401,9 @@ export default function ProductModelHistoryBreakdown({
                 // 포함, 취소·반려만 뺌)를 세고 반출은 「실제로 나간 줄」만 센다 —
                 // 사용자가 알고 고른 가름이라 화면도 그대로 말한다
                 // (domain/product-model-breakdown.ts 머리말의 「한 원 안에 자가 둘이다」).
-                note="부품 요청 · 수리 건에 적힌 사용 부품 · 재고 관리에서 반출 확인된 부품을 함께 셉니다. 한 건에 여러 부품이 있을 수 있어 접수 건수와 합이 다릅니다. 부품 요청은 취소·반려된 것을 빼고 세고, 반출 부품은 실제로 나간 줄만 셉니다."
+                // 🔵 **조각을 누르면 무엇이 나오는지 적는다** (2026-10-29). [고장 증상] 카드가
+                // 같은 자리에 같은 말을 적고 있다 — 적지 않으면 누를 수 있다는 것을 모른다.
+                note="부품 요청 · 수리 건에 적힌 사용 부품 · 재고 관리에서 반출 확인된 부품을 함께 셉니다. 한 건에 여러 부품이 있을 수 있어 접수 건수와 합이 다릅니다. 부품 요청은 취소·반려된 것을 빼고 세고, 반출 부품은 실제로 나간 줄만 셉니다. 조각을 누르면 그 부품의 재고 관리 정보가 펼쳐집니다."
                 warning={faultPartWarning}
                 emptyMessage={emptyPartMessage}
                 countUnit="개"
@@ -378,6 +411,11 @@ export default function ProductModelHistoryBreakdown({
                 ariaLabel={`고장 부품별 요청 비율, ${periodLabel} 부품 ${faultPart.total}개`}
                 selectedKey={selectedKey}
                 onSelectSlice={onSelectSlice}
+                // 🔴 **기간을 바꾸면 저절로 접힌다** — 위 changeYear·changeMonth 가 네 그래프의
+                //    고른 조각을 함께 지운다(setSelection({})). 이 카드만 따로 다루지 않는다.
+                detail={(slice) => (
+                  <FaultPartInventoryPanel slice={slice} inventory={faultPartInventory} />
+                )}
               />
             );
           }
@@ -549,5 +587,157 @@ function IntakeInspectionDetailPanel({ slice }: { slice: PieSlice<IntakeInspecti
         ) : null}
       </ul>
     </div>
+  );
+}
+
+/**
+ * ============================================================================
+ * 고른 **고장 부품** 조각 하나를 펼친 자리 — 그 부품의 재고 관리 줄 (2026-10-29)
+ * ============================================================================
+ * 사용자 요청: 「고장 부품을 누르면 그 아랫부분에 **그 부품의 전체 이름과 현재 재고 등을
+ * 구체적으로** 확인할 수 있도록 해줘.」 같은 날 결정 — 🔴 **소유구분을 나눠서 줄마다
+ * 보인다. 합치지 않는다**(까닭은 `domain/fault-part-inventory.ts` 머리말).
+ *
+ * 🔵 위 [고장 증상] 펼침(IntakeInspectionDetailPanel)과 **같은 상자·같은 제목 모양**이다.
+ *    한 화면에서 같은 동작(조각 누르기)의 결과가 서로 다르게 생기면 다른 기능으로 읽힌다.
+ *
+ * 🔴 **여기서 글자를 짓지 않는다.** 「없습니다 / 못 물어봤습니다 / 품번이 없습니다」를 가르는
+ *    일도 그 문장도 전부 도메인이 쥐고 있고(`lookupFaultPartInventory`), 재고 수에 「불러온
+ *    때 기준」을 붙이는 일도 도메인 한 곳이다(`inventoryStockText`). 이 파일이 하는 일은
+ *    **받은 글자를 눈에 띄는 자리에 놓는 것**뿐이다 — 그래야 수리 건 상세의 [부품 요청]
+ *    칸과 같은 말을 한다.
+ *
+ * 🔴 **export 한 까닭** — 이 카드는 처음에 꺼져 있어(INITIAL_OPEN_CHARTS) 시험 환경에서
+ *    열 수가 없다(눌러 볼 도구가 없다 — product-model-fault-part-warning.test.tsx 머리말).
+ *    펼친 자리를 **따로 그려 보려고** 내보낸다. 🔵 다른 화면이 쓰라고 내보낸 것이 아니다.
+ * ============================================================================
+ */
+export function FaultPartInventoryPanel({
+  slice,
+  inventory,
+}: {
+  slice: PieSlice<FaultPartDetail>;
+  inventory: FaultPartInventoryIndex;
+}) {
+  // 🔴 값·미입력 조각은 부품 하나, **기타 조각만 접힌 종류 수만큼**이다(FaultPartDetail
+  //    머리말). 여럿일 때만 부품마다 제목을 단다 — 하나뿐인데 제목을 달면 바로 위 제목과
+  //    같은 글자가 두 줄로 겹친다.
+  const parts = slice.detail.parts;
+  const isFolded = parts.length > 1;
+
+  return (
+    <div className="mt-4 rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-800/40">
+      <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+        {formatPieSliceLabel(slice)} — {slice.count}개
+      </h4>
+      <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+        재고 관리의 부품 정보 · 소유구분이 다르면 다른 부품이라 줄을 나눠 적습니다
+      </p>
+
+      <ul className="mt-2 space-y-3">
+        {parts.map((entry) => (
+          <li key={entry.displayName}>
+            {isFolded ? (
+              <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                {entry.displayName} · {entry.count}개
+              </p>
+            ) : null}
+            <FaultPartInventoryLines matchKey={entry.matchKey} inventory={inventory} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * 부품 하나의 재고 관리 줄들 — 또는 **왜 줄이 없는지**.
+ *
+ * 🔴 빈 자리를 그리지 않는다. 줄이 없을 때 아무것도 안 그리면 「재고가 0개」로 읽히고,
+ *    그것이 이 조각이 막으려는 거짓말이다(도메인 머리말). 갈래를 가르는 자도 할 말도
+ *    `lookupFaultPartInventory` 한 곳에 있다.
+ */
+function FaultPartInventoryLines({
+  matchKey,
+  inventory,
+}: {
+  matchKey: string;
+  inventory: FaultPartInventoryIndex;
+}) {
+  const found = lookupFaultPartInventory(inventory, matchKey);
+
+  if (found.status === "notice") {
+    // 🔵 회색 안내가 아니라 테두리 있는 상자다 — 「못 찾았다」는 **읽어야 하는** 말이고,
+    //    늘 보던 회색 글이면 눈이 건너뛴다(주황 띠와 같은 결, 색은 한 단계 약하게).
+    return (
+      <p className="mt-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs leading-relaxed text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+        {found.notice}
+      </p>
+    );
+  }
+
+  return (
+    <ul className="mt-1 space-y-2">
+      {found.rows.map((row) => (
+        <li
+          key={row.no}
+          className="rounded-md border border-zinc-200 bg-white px-3 py-2 dark:border-zinc-700 dark:bg-zinc-900"
+        >
+          <FaultPartInventoryLine row={row} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * 재고 관리 줄 **하나**.
+ *
+ * ── 🔴 머리에 **소유구분과 재고**를 둔다 ────────────────────────────────
+ * 사용자가 보낸 실물이 그 모양이다(`KYOSAN 수량 1` · `DSS 수량 153`). 줄이 둘인 까닭이
+ * 소유라, 그것이 맨 앞에 없으면 같은 부품이 왜 두 번 적혀 있는지 알 수 없다.
+ * 🔴 **재고 수에 「불러온 때 기준」이 붙어 있다** — 화면을 열 때 받아 온 값이라 지금 수가
+ *    아니다. 그 꼬리말을 떼지 마라(`inventoryStockText` 머리말).
+ * 🔵 **부품 번호(No.)도 적는다.** 재고 관리에서 그 줄을 그대로 찾는 값이고, 반출 신청도
+ *    번호로 건다.
+ *
+ * ── 🔴 **값이 있는 칸만 그린다** ────────────────────────────────────────
+ * 이 자료는 엑셀에서 넘어와 빈칸 대신 `-` 가 적힌 줄이 많다. 「교산 품번 없음 · 도번 없음」이
+ * 줄줄이 적히면 정작 있는 값이 묻힌다 — 재는 자는 도메인 쪽 한 곳이다
+ * (`inventoryPartIdLabels` · `inventoryPartSpec` · `inventoryPartCustomerName`, 셋 다 `-` 를
+ * 없는 값으로 센다). 수리 건 상세의 [부품 요청] 칸이 같은 자를 쓴다.
+ */
+function FaultPartInventoryLine({ row }: { row: FaultPartInventoryRow }) {
+  const customerName = inventoryPartCustomerName(row);
+  const spec = inventoryPartSpec(row);
+  const idLabels = inventoryPartIdLabels(row);
+
+  return (
+    <>
+      <p className="flex flex-wrap items-baseline gap-x-2 text-sm text-zinc-900 dark:text-zinc-50">
+        <span className="font-semibold">{row.ownerLabel}</span>
+        <span className="tabular-nums">{inventoryStockText(row)}</span>
+        <span className="ml-auto text-xs text-zinc-500 dark:text-zinc-400">No. {row.no}</span>
+      </p>
+      {/* 🔵 사용자가 먼저 말한 「전체 이름」이 이 줄이다 — 비어 있는 부품이 훨씬 많아
+          (재고 관리 319줄 중 27줄에만 적혀 있다, used-part-display.ts 머리말) 없으면 접는다.
+          🔴 우리 품명으로 때우지 않는다 — 그 둘은 다른 칸이고 다음 줄에 그대로 적힌다. */}
+      {customerName !== "" ? (
+        <p className="mt-0.5 text-sm text-zinc-800 dark:text-zinc-200">{customerName}</p>
+      ) : null}
+      <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">
+        {row.name}
+        {spec !== "" ? ` · ${spec}` : ""}
+      </p>
+      {idLabels.length > 0 ? (
+        <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+          {idLabels.map((item) => `${item.label} ${item.value}`).join(" · ")}
+        </p>
+      ) : null}
+      {/* 🔵 같은 품명인 부품 묶음이 16개 있어 비고가 가르는 단서다(재고 관리 API.md 2절). */}
+      {row.noteFirstLine !== "" ? (
+        <p className="mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">{row.noteFirstLine}</p>
+      ) : null}
+    </>
   );
 }

@@ -117,7 +117,11 @@ import type { InventoryResult } from "./inventory-gateway";
  *   · 수리 건 상세 → [사용부품] 칸 (`repair-cases/[id]/page.tsx` 가 서버에서 합친다)
  *   · 제품 모델 상세 → [A/S 이력] → [고장 부품] 그래프 (2026-10-29 에 들어왔다 —
  *     `domain/product-model-fault-parts.ts` 가 서버에서 합친다). 🔴 그 그래프는 **사용
- *     부품만이 아니라 부품 요청 줄도** 같은 글자로 만든다 — 아래 `partRowDisplayName`.
+ *     부품만이 아니라 부품 요청 줄과 반출 확인된 줄도** 같은 글자로 만든다.
+ *     🔴 **그쪽은 이름만으로 모자라 아래 `…WithKey` 두 함수를 부른다**(2026-10-29) —
+ *     조각을 누르면 그 부품의 재고 관리 줄을 펼쳐야 해서 **열쇠도 함께** 필요하다.
+ *     🔵 가는 길은 같다(`partIdentityText` → `usedPartDisplayName`). 열쇠를 **같은 글자**
+ *     에서 뽑는 것만 다르고, 그 까닭은 저 두 함수의 머리말에 있다.
  * 🔴 한 벌로 두는 까닭: 두 곳에 적으면 한쪽만 고쳐지는 날이 오고, 같은 부품이 화면마다
  *    다른 이름으로 보인다.
  *
@@ -307,9 +311,64 @@ export function partIdentityText(fields: PartIdentityFields): string {
  * 🔴 같은 말을 두 벌로 적지 않으려고 둔 함수다. 사용 부품은 저장된 글자를 그대로
  *    `usedPartDisplayName` 에 넘기고, 부품 요청은 행에서 글자를 뽑아 **같은 함수**에 넘긴다 —
  *    그래서 같은 부품이면 두 입력이 **같은 글자**가 된다.
+ *
+ * 🔴 **2026-10-29 실측: 지금 이 함수를 부르는 운영 코드는 없다.** [고장 부품] 그래프가
+ *    열쇠까지 함께 받으려고 아래 `partRowDisplayWithKey` 로 옮겨 갔다(그 함수가 같은 길을
+ *    간다). 🔴 **그래도 지우지 않는다** — 「행 하나 → 보일 글자」라는 규칙 자체를 이름으로
+ *    들고 있는 함수이고, 값 시험(`used-part-display.test.ts`)이 그 규칙을 여기서 못 박고
+ *    있다. 이름만 필요한 자리가 다시 생기면 여기로 온다.
  */
 export function partRowDisplayName(fields: PartIdentityFields, index: UsedPartNameIndex): string {
   return usedPartDisplayName(partIdentityText(fields), index);
+}
+
+/**
+ * ============================================================================
+ * 🔴 **보일 글자와 맞댈 열쇠를 한 번에** (2026-10-29)
+ * ============================================================================
+ * [고장 부품] 그래프는 조각을 **완성된 글자**로 묶는데(`product-model-fault-parts.ts`),
+ * 조각을 눌러 재고 관리 줄을 펼치려면 그 조각이 **열쇠**도 들고 있어야 한다. 글자만으로는
+ * 줄을 못 찾는다 — 괄호를 도로 떼어 내는 일은 「고객사 품명 (품번)」의 품명 안에 괄호가
+ * 들어 있는 날 조용히 틀린다.
+ *
+ * 🔴 **둘을 따로 뽑지 않는다.** 이름은 `partIdentityText` 가 고른 한 칸에서 나오고 열쇠도
+ *    같은 칸에서 나와야 하는데, 부르는 쪽이 두 번 뽑으면 한쪽만 칸을 바꾸는 날이 온다 —
+ *    그러면 **그래프에 묶인 조각과 펼친 상세가 서로 다른 부품을 가리킨다.** 오류는 안 나고
+ *    화면에 엉뚱한 재고가 뜰 뿐이라 아무도 신고하지 않는다.
+ * 🔵 그래서 **같은 글자 하나**(`partNameText` · `partIdentityText(fields)`)를 두 함수에
+ *    넘기는 자리를 여기 한 곳에 둔다. 아래 두 함수 말고 다른 길로 열쇠를 만들지 마라.
+ * ============================================================================
+ */
+export type UsedPartDisplay = {
+  /** 「고객사 품명 (품번)」 또는 품번 그대로. [고장 부품] 그래프가 조각을 묶는 글자다. */
+  displayName: string;
+  /** 재고 관리 줄을 맞대는 열쇠. 🔴 맞댈 수 없는 줄이면 **빈 글자**다(`-` 만 적힌 칸 등). */
+  matchKey: string;
+};
+
+/** 저장된 품번 글자 하나에서 — 사용 부품 줄이 쓴다. */
+export function usedPartDisplayWithKey(
+  partNameText: string,
+  index: UsedPartNameIndex
+): UsedPartDisplay {
+  return {
+    displayName: usedPartDisplayName(partNameText, index),
+    matchKey: usedPartMatchKey(partNameText),
+  };
+}
+
+/**
+ * 부품 **행 하나**에서 — 부품 요청 줄과 반출 확인된 줄이 쓴다.
+ *
+ * 🔵 `partRowDisplayName` 과 같은 길을 간다(그 함수도 `partIdentityText` 를 거쳐
+ *    `usedPartDisplayName` 을 부른다). 여기서는 그 가운데 글자를 **한 번만 뽑아** 이름과
+ *    열쇠 둘 다에 쓴다 — 위 머리말이 막으려는 어긋남이 그 「두 번 뽑기」에서 생긴다.
+ */
+export function partRowDisplayWithKey(
+  fields: PartIdentityFields,
+  index: UsedPartNameIndex
+): UsedPartDisplay {
+  return usedPartDisplayWithKey(partIdentityText(fields), index);
 }
 
 /**

@@ -1,5 +1,12 @@
-import { partRowDisplayName, usedPartDisplayName, type UsedPartNameIndex } from "./used-part-display";
-import type { InventoryStockRequest } from "./inventory-gateway";
+import {
+  partRowDisplayWithKey,
+  usedPartDisplayWithKey,
+  usedPartMatchKey,
+  type UsedPartNameIndex,
+} from "./used-part-display";
+import { inventoryPartNoteFirstLine } from "./inventory-gateway";
+import type { InventoryPart, InventoryResult, InventoryStockRequest } from "./inventory-gateway";
+import type { FaultPartInventoryIndex, FaultPartInventoryRow } from "./fault-part-inventory";
 import type {
   FaultPartRow,
   IssuedPartRow,
@@ -37,9 +44,13 @@ import type {
  * 그래서 **셋 다 「고객사 품명 (품번)」으로 만든 뒤 그 글자로 묶는다.** 같은 부품이면
  * 같은 글자가 나온다 — 이름은 둘 다 재고 관리에서 같은 지도로 찾고(도번 → 교산 품번 →
  * 품명2 → 품명), 괄호 안은 둘 다 **그 줄을 가리키는 한 글자**다(`partIdentityText`).
- * 🔴 **합성 규칙은 한 벌뿐이다** — 요청 쪽은 `partRowDisplayName`, 사용 쪽은
- *    `usedPartDisplayName` 을 부르는데, 앞의 것이 뒤의 것을 부른다. 두 벌로 적으면
+ * 🔴 **합성 규칙은 한 벌뿐이다** — 요청·반출 쪽은 `partRowDisplayWithKey`, 사용 쪽은
+ *    `usedPartDisplayWithKey` 를 부르는데, 앞의 것이 뒤의 것을 부른다. 두 벌로 적으면
  *    한쪽만 고쳐지는 날이 오고, 그날부터 같은 부품이 조각 둘로 갈린다.
+ * 🔴 **이름과 함께 열쇠도 받는다**(2026-10-29) — 조각을 누르면 그 부품의 재고 관리 줄을
+ *    펼쳐야 해서다(아래 `buildFaultPartInventoryIndex`). 🔴 **둘을 따로 뽑지 않는 까닭**은
+ *    저 두 함수의 머리말에 있다: 따로 뽑으면 **그래프에 묶인 조각과 펼친 상세가 다른
+ *    부품을 가리키는** 날이 오고, 오류는 안 난다.
  *
  * 🔵 **이름을 못 얻으면 품번 그대로**다(`used-part-display.ts` 머리말의 네 길). 그것도
  *    열쇠가 된다 — 두 입력이 같은 품번을 들고 있으면 이름 없이도 한 조각이다.
@@ -135,26 +146,138 @@ export function toFaultPartRows(
 ): FaultPartRow[] {
   const rows: FaultPartRow[] = [];
   for (const row of input.requested) {
-    rows.push({
-      repairCaseId: row.repairCaseId,
-      // 🔴 네 칸을 그대로 넘긴다 — 어느 칸이 품번인지는 저쪽 한 곳이 정한다.
-      displayName: partRowDisplayName(row, index),
-    });
+    // 🔴 네 칸을 그대로 넘긴다 — 어느 칸이 품번인지는 저쪽 한 곳이 정한다.
+    // 🔴 **이름과 열쇠를 한 번에 받는다**(2026-10-29). 따로 뽑으면 그래프에 묶인 조각과
+    //    펼친 상세가 다른 부품을 가리키는 날이 온다(`usedPartDisplayWithKey` 머리말).
+    rows.push({ repairCaseId: row.repairCaseId, ...partRowDisplayWithKey(row, index) });
   }
   for (const row of input.used) {
+    // 🔴 저장된 글자는 **품번**이다(그 칸 이름이 partNameText 일 뿐이다).
     rows.push({
       repairCaseId: row.repairCaseId,
-      // 🔴 저장된 글자는 **품번**이다(그 칸 이름이 partNameText 일 뿐이다).
-      displayName: usedPartDisplayName(row.partNameText, index),
+      ...usedPartDisplayWithKey(row.partNameText, index),
     });
   }
   for (const row of input.issued) {
-    rows.push({
-      repairCaseId: row.repairCaseId,
-      // 🔴 요청 줄과 **같은 함수**다 — 칸 이름을 맞춰 둔 까닭이 이것이다. 같은 부품이면
-      //    출처가 달라도 같은 글자가 나와 한 조각으로 모인다.
-      displayName: partRowDisplayName(row, index),
-    });
+    // 🔴 요청 줄과 **같은 함수**다 — 칸 이름을 맞춰 둔 까닭이 이것이다. 같은 부품이면
+    //    출처가 달라도 같은 글자가 나와 한 조각으로 모인다.
+    rows.push({ repairCaseId: row.repairCaseId, ...partRowDisplayWithKey(row, index) });
   }
   return rows;
+}
+
+/**
+ * ============================================================================
+ * 🔴 조각을 누르면 펼칠 **재고 관리 줄**을 모은다 (2026-10-29 사용자 요청)
+ * ============================================================================
+ * 사용자 말: 「고장 부품을 누르면 그 아랫부분에 **그 부품의 전체 이름과 현재 재고 등을**
+ * 확인할 수 있도록」. 그리는 모양과 「못 찾았다 / 못 물어봤다」를 가르는 일은
+ * `domain/fault-part-inventory.ts` 가 하고, 여기서는 **열쇠로 줄을 고르는 일**만 한다 —
+ * 🔴 그 열쇠를 만드는 자(`usedPartMatchKey`)가 연락서 판독기를 물고 있어, 이 일은
+ * **서버에서** 끝나야 한다(이 파일 머리말의 「왜 서버인가」 그대로다).
+ *
+ * ── 🔴 어느 칸으로 맞추는가 — **이름을 찾는 차례와 같은 차례** ──────────
+ * 도번 → 교산 품번 → 품명2 → 품명. `used-part-display.ts` 의 `usedPartCustomerName` 이
+ * 지도 넷을 보는 차례와 **글자 하나 다르지 않아야** 한다. 조각의 이름표를 그 차례가
+ * 정했으므로, 여기서 다른 차례를 쓰면 **이름은 A 부품인데 펼친 재고는 B 부품**이 된다.
+ * 🔵 앞 칸에서 한 줄이라도 찾으면 **뒤 칸은 보지 않는다** — 이것도 저쪽과 같다.
+ *
+ * ── 🔴 엇갈려도 **줄은 보여 준다** (저쪽 이름 지도와 일부러 다른 점) ─────
+ * 이름 지도는 한 칸 안에서 **서로 다른 이름**이 걸리면 그 열쇠를 통째로 버린다(㉣ —
+ * 절반은 남의 이름을 보여 주게 되니까). 🔴 이 지도는 **버리지 않는다.** 까닭 둘:
+ *   · 여기서 버리면 재고 관리에 **분명히 있는** 부품에 「없습니다」가 뜬다 — 이 조각이
+ *     막으려는 거짓말이 바로 그것이다.
+ *   · 두 쪽이 모르는 것이 다르다. 저쪽이 모르는 것은 **어느 이름인가**이고, 이쪽은
+ *     **줄을 다 보여 주면 사람이 눈으로 가른다**(소유·비고·번호가 함께 뜬다).
+ * 🔵 그래서 이름이 엇갈려 품번 그대로 뜬 조각도 펼치면 줄이 나온다. 그 조각의 이름표가
+ *    품번인 것과 어긋나지 않는다 — 이름을 못 고른 것이지 부품을 못 찾은 것이 아니다.
+ *
+ * ── 🔵 **쓰는 열쇠만 담는다** ───────────────────────────────────────────
+ * 이 값은 `"use client"` 인 화면까지 그대로 실려 나간다. 재고 관리 부품은 300줄이 넘는데
+ * 한 모델의 그래프에 뜨는 부품은 몇 가지뿐이라, **그래프에 있는 열쇠만** 담는다.
+ * 🔴 `partRows` 를 받는 까닭이 그것이고, 🔴 **그 배열은 기간을 안 거른 전체**여야 한다 —
+ *    화면이 년/월을 바꿀 때마다 서버를 다시 부르지 않기 때문이다(그 거르기는 전부 화면
+ *    안의 계산이다 — `ProductModelHistoryBreakdown` 머리말).
+ * ============================================================================
+ */
+export function buildFaultPartInventoryIndex(
+  result: InventoryResult<InventoryPart[]>,
+  partRows: readonly FaultPartRow[]
+): FaultPartInventoryIndex {
+  // 🔴 못 받아 온 것을 빈 지도로 눕히지 않는다 — 그러면 화면이 「재고 관리에 없습니다」라고
+  //    거짓말한다(`domain/inventory-gateway.ts` 머리말). 이름 지도는 일부러 눕히지만
+  //    (거기서 못 받는 것은 **이름**이다), 여기서 못 받는 것은 **재고 수**다.
+  if (result.status !== "ok") return { status: "unreachable", reason: result.reason };
+
+  const needed = new Set<string>();
+  for (const row of partRows) {
+    if (row.matchKey !== "") needed.add(row.matchKey);
+  }
+  if (needed.size === 0) return { status: "ok", rowsByKey: {} };
+
+  // 🔴 칸마다 따로 짠다 — 한 지도에 섞으면 위 「차례」가 사라진다(이름 지도가 지도를 넷으로
+  //    갈라 둔 것과 같은 까닭).
+  const byDrawingNo = indexRows(result.value, needed, (part) => part.drawingNo);
+  const byKyosanPartNo = indexRows(result.value, needed, (part) => part.kyosanPartNo);
+  const byPartSpec = indexRows(result.value, needed, (part) => part.name2);
+  const byPartName = indexRows(result.value, needed, (part) => part.name);
+
+  const rowsByKey: Record<string, FaultPartInventoryRow[]> = {};
+  for (const key of needed) {
+    // 🔴 이 차례가 `usedPartCustomerName` 의 차례와 같아야 한다(위 머리말).
+    const found =
+      byDrawingNo.get(key) ?? byKyosanPartNo.get(key) ?? byPartSpec.get(key) ?? byPartName.get(key);
+    // 🔵 빈 배열은 담지 않는다 — 「열쇠가 없다」와 같은 뜻이다(저쪽 타입 주석).
+    if (found && found.length > 0) rowsByKey[key] = found;
+  }
+  return { status: "ok", rowsByKey };
+}
+
+/**
+ * 한 칸을 열쇠로 삼아 **줄을 모은다**. 🔴 이름 지도와 달리 **엇갈림으로 버리지 않는다**
+ * (위 머리말) — 같은 열쇠에 걸린 줄을 전부 담는 것이 이 지도가 하는 일이다. 사용자가
+ * 보낸 실물이 바로 그 모양이다(같은 도번에 `KYOSAN` 1개 · `DSS` 153개).
+ *
+ * 🔵 **차례는 재고 관리가 준 차례 그대로**다. 여기서 소유나 수로 다시 정렬하면 저쪽 화면과
+ *    줄 차례가 달라져, 두 화면을 나란히 놓고 보는 사람이 같은 것을 보고 있다고 느끼지 못한다.
+ * 🔵 쓰지도 않을 열쇠는 담지 않는다(`needed`) — 지도가 브라우저까지 나간다.
+ */
+function indexRows(
+  parts: readonly InventoryPart[],
+  needed: ReadonlySet<string>,
+  keyFieldOf: (part: InventoryPart) => string
+): Map<string, FaultPartInventoryRow[]> {
+  const found = new Map<string, FaultPartInventoryRow[]>();
+  for (const part of parts) {
+    const key = usedPartMatchKey(keyFieldOf(part));
+    if (key === "" || !needed.has(key)) continue;
+    const rows = found.get(key);
+    if (rows) rows.push(toFaultPartInventoryRow(part));
+    else found.set(key, [toFaultPartInventoryRow(part)]);
+  }
+  return found;
+}
+
+/**
+ * 재고 관리의 부품 → 펼친 자리가 그리는 줄.
+ *
+ * 🔴 **경계를 긋는 자리는 여기 하나다** — 무엇을 싣고 무엇을 뺐는지와 그 까닭은
+ *    `domain/fault-part-inventory.ts` 의 `FaultPartInventoryRow` 머리말에 있다
+ *    (🔴 견적가·O/H 견적가는 **안 싣는다**). `toPartPickerRow` 가 고르개의 경계를 한
+ *    함수에 가둬 둔 것과 같은 모양이다.
+ */
+function toFaultPartInventoryRow(part: InventoryPart): FaultPartInventoryRow {
+  return {
+    no: part.no,
+    name: part.name,
+    name2: part.name2,
+    customerName: part.customerName,
+    kyosanPartNo: part.kyosanPartNo,
+    drawingNo: part.drawingNo,
+    quantity: part.quantity,
+    // 🔵 화면이 하는 일이 `label || code` 하나뿐이라 그 판단을 여기서 끝낸다.
+    ownerLabel: part.owner.label || part.owner.code,
+    // 🔵 첫 줄을 고르는 규칙은 도메인 한 곳에 있다 — 비고 전문은 안 내보낸다.
+    noteFirstLine: inventoryPartNoteFirstLine(part),
+  };
 }

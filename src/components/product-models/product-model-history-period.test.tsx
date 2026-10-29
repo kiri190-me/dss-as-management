@@ -123,8 +123,14 @@ function render(resolved: ResolvedRepairCase[] = RESOLVED): string {
   return renderToStaticMarkup(
     createElement(ProductModelHistoryBreakdown, {
       resolved,
-      faultParts: [{ repairCaseId: "case-02", displayName: "가 부품 (DWG-001)" }],
+      faultParts: [
+        { repairCaseId: "case-02", displayName: "가 부품 (DWG-001)", matchKey: "dwg001" },
+      ],
       faultPartIssuedLookup: { uncountedCaseCount: 0, skippedCaseCount: 0, caseLimit: 40 },
+      /* 🔴 2026-10-29 에 생긴 프롭. [고장 부품] 카드는 처음에 꺼져 있어 이 파일이 재는
+         기간 거르기와는 상관이 없지만, **없으면 화면이 아예 안 뜬다** — 빈 지도를 넘긴다.
+         펼친 자리가 무엇을 그리는지는 product-model-fault-part-detail.test.tsx 가 본다. */
+      faultPartInventory: { status: "ok", rowsByKey: {} },
     })
   );
 }

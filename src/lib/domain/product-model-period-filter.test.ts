@@ -63,8 +63,16 @@ function historyCase(
   };
 }
 
-function part(repairCaseId: string, displayName: string): FaultPartRow {
-  return { repairCaseId, displayName };
+/**
+ * 🔴 `matchKey`(2026-10-29 에 생긴 칸)는 **이 파일이 보지 않는 값**이라 기본값을 둔다 —
+ * 여기서 재는 것은 「어느 줄이 그 기간에 남는가」뿐이고, 거르는 자는 `repairCaseId` 만 본다.
+ * 🔴 **운영에서 열쇠는 이름표와 같은 글자가 아니다**(품번을 눌러 적은 값이다 —
+ *    `used-part-display.ts` 의 `usedPartMatchKey`). 여기 같은 글자를 넣는 것은 줄마다 다른
+ *    값을 만드는 가장 짧은 길일 뿐이고, 열쇠가 그래프와 맞는지는 `fault-part-inventory.test.ts`
+ *    가 **진짜 자로** 잰다.
+ */
+function part(repairCaseId: string, displayName: string, matchKey = displayName): FaultPartRow {
+  return { repairCaseId, displayName, matchKey };
 }
 
 function labels(slices: readonly PieSlice<unknown>[]): string[] {

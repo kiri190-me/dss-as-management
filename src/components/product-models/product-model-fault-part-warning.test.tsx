@@ -152,6 +152,9 @@ describe("[고장 부품] 안내 — 그려 보는 쪽", () => {
         resolved,
         faultParts: [],
         faultPartIssuedLookup: { uncountedCaseCount: 0, skippedCaseCount: 0, caseLimit: 40 },
+        // 🔴 2026-10-29 에 생긴 프롭 — 조각을 누르면 펼칠 재고 관리 줄. 여기서는 부품 줄이
+        //    아예 없어 쓰이지 않지만 없으면 화면이 안 뜬다.
+        faultPartInventory: { status: "ok", rowsByKey: {} },
       })
     );
     assert.ok(html.includes("고장 부품"), "그래프 고르는 단추가 사라졌다");
@@ -168,6 +171,7 @@ describe("[고장 부품] 안내 — 그려 보는 쪽", () => {
         resolved,
         faultParts: [],
         faultPartIssuedLookup: lookup,
+        faultPartInventory: { status: "ok", rowsByKey: {} },
       })
     );
     assert.equal(

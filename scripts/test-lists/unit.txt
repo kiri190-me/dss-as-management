@@ -228,6 +228,17 @@ src/lib/domain/product-model-fault-parts.test.ts
 # product-model-history-period.test.tsx 가 본다 — 눌러 볼 도구가 없어 값으로 잴 것과
 # 글자로밖에 못 잴 것을 일부러 갈랐다.
 src/lib/domain/product-model-period-filter.test.ts
+# 🔴 [고장 부품] 조각을 누르면 펼쳐지는 **그 부품의 재고 관리 줄**(2026-10-29 사용자 요청:
+# 「고장 부품을 누르면 그 아랫부분에 그 부품의 전체 이름과 현재 재고 등을」, 그리고 결정:
+# 「소유구분을 나눠서 보여 준다」). 🔴 여기서 재는 것은 **열쇠가 그래프와 어긋나지 않는가**다 —
+# 조각을 묶는 글자(「고객사 품명 (품번)」)와 재고 관리 줄을 찾는 열쇠는 서로 다른 값이라,
+# 따로 만들면 오류 없이 **엉뚱한 부품의 재고가 뜬다.** 그래서 화면이 가는 길 그대로
+# (이름표 지도 → 줄 → 조각 → 재고 지도) 만들어 놓고, 표본의 품번을 **일부러 다르게 적어**
+# (`dwg aa1001` ↔ `DWG-AA1001`) 눌러 적는 자를 안 쓰면 한 줄도 안 나오게 해 두었다.
+# 🔵 「못 찾았다 · 못 물어봤다 · 품번이 없다」 세 문장이 서로 다른 말인지도 여기서 본다 —
+# 하나로 뭉개면 화면이 「재고 0개」로 읽힌다. 화면 배선은 components 목록의
+# product-model-fault-part-detail.test.tsx 가 본다.
+src/lib/domain/fault-part-inventory.test.ts
 src/lib/domain/intake-mail-body.test.ts
 src/lib/domain/mail-signature-html.test.ts
 src/lib/xlsx/service-report-choices.test.ts

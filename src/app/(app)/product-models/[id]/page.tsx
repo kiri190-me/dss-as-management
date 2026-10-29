@@ -20,7 +20,10 @@ import {
 import { listShareDocsForProductModel } from "@/lib/db/queries/product-model-share-docs";
 import { listRepairCasesByProductModelId } from "@/lib/db/queries/repair-cases";
 import { toPartPickerOptions } from "@/lib/domain/inventory-gateway";
-import { toFaultPartRows } from "@/lib/domain/product-model-fault-parts";
+import {
+  buildFaultPartInventoryIndex,
+  toFaultPartRows,
+} from "@/lib/domain/product-model-fault-parts";
 import { buildUsedPartNameIndex } from "@/lib/domain/used-part-display";
 import { fetchInventoryParts } from "@/lib/server/inventory-gateway";
 import { fetchIssuedFaultPartRows } from "@/lib/server/product-model-issued-parts";
@@ -167,6 +170,20 @@ export default async function ProductModelDetailPage({
   );
 
   /**
+   * 🔴 **조각을 누르면 펼칠 재고 관리 줄** (2026-10-29 사용자 요청: 「고장 부품을 누르면
+   * 그 아랫부분에 **그 부품의 전체 이름과 현재 재고 등을** 구체적으로」).
+   *
+   * 🔴 **새 조회를 하지 않는다** — 바로 위에서 이름표를 만드느라 이미 받아 온 그 목록
+   *    (`inventoryParts`)을 그대로 쓴다. 통로는 이 화면에 여전히 한 번이다.
+   * 🔴 **좁혀서 넘긴다.** 위 `toPartPickerOptions` 는 재고·소유·비고를 **떼어 내는** 길이라
+   *    (그쪽 머리말 — 견적서·사용 부품 화면의 경계다) 여기서는 쓸 수 없다. 대신 그래프에
+   *    실제로 뜬 열쇠의 줄만 골라 담는다(`buildFaultPartInventoryIndex` 머리말).
+   * 🔴 **거르기 전 전체 줄**을 넘긴다. 년/월 거르기는 전부 화면 안의 계산이라, 기간을
+   *    바꿀 때 서버를 다시 부르지 않는다 — 걸러서 넘기면 다른 달을 고른 순간 재고가 사라진다.
+   */
+  const faultPartInventory = buildFaultPartInventoryIndex(inventoryParts, faultParts);
+
+  /**
    * 🔴 **못 센 건이 몇인가**를 화면까지 나른다. 반출 쪽만 「일부만 받아 오는」 일이
    * 생기는데(건마다 통로를 한 번씩 두드린다), 그 사실을 안 적으면 사람이 적은 수를
    * 보고 **「이 모델은 이 부품이 적게 고장난다」**는 틀린 결론을 낸다.
@@ -189,6 +206,7 @@ export default async function ProductModelDetailPage({
       repairCases={repairCases}
       faultParts={faultParts}
       faultPartIssuedLookup={faultPartIssuedLookup}
+      faultPartInventory={faultPartInventory}
       canEdit={canEdit}
       customerOptions={customerOptions}
       attachments={attachments}

@@ -7,7 +7,12 @@ import {
   type FaultSymptomPeriod,
   type IntakeInspectionResultGroup,
 } from "./fault-symptom-breakdown";
-import { buildPieSlices, NO_PIE_DETAIL, type PieSlice } from "./pie-slices";
+import {
+  buildPieSlices,
+  NO_PIE_DETAIL,
+  type PieDetailHandlers,
+  type PieSlice,
+} from "./pie-slices";
 import { BILLING_TYPE_CODES, billingTypeLabels, type BillingType } from "./types";
 
 /**
@@ -191,6 +196,17 @@ export type FaultPartRow = {
   repairCaseId: string;
   /** 「고객사 품명 (품번)」. 이름을 못 얻었으면 품번 그대로다(그것도 열쇠가 된다). */
   displayName: string;
+  /**
+   * 🔴 **재고 관리 줄을 맞대는 열쇠** (2026-10-29). 조각을 누르면 이 값으로 그 부품의
+   * 재고·소유를 찾는다(`domain/fault-part-inventory.ts`).
+   *
+   * 🔴 **위 `displayName` 과 같은 글자에서 나온 값이다** — 둘을 뽑는 자리가
+   *    `used-part-display.ts` 의 `usedPartDisplayWithKey` 한 곳이다. 따로 뽑으면 한쪽만
+   *    칸을 바꾸는 날 **그래프에 묶인 조각과 펼친 상세가 다른 부품을 가리킨다**(그 함수의
+   *    머리말). 🔵 맞댈 수 없는 줄이면 빈 글자이고, 그런 줄은 `displayName` 도 비어 있어
+   *    `미입력` 조각으로 간다.
+   */
+  matchKey: string;
 };
 
 /** 고장 증상 조각이 달고 다니는 것 — 그 증상 건들의 인수점검 결과. */
@@ -330,7 +346,67 @@ export function faultPartIssuedWarning(lookup: FaultPartIssuedLookup | null): st
   return null;
 }
 
-export type FaultPartBreakdown = ProductModelPieBreakdown<null> & {
+/**
+ * ============================================================================
+ * 🔴 **고장 부품 조각이 「어느 부품인가」를 들고 다닌다** (2026-10-29 사용자 요청)
+ * ============================================================================
+ * 사용자 말: 「고장 부품을 누르면 **그 아랫부분에 그 부품의 전체 이름과 현재 재고 등을
+ * 구체적으로** 확인할 수 있도록 해줘.」 2026-10-29 전까지 이 그래프는 `NO_PIE_DETAIL` 을
+ * 써서 조각마다 딸린 값이 늘 `null` 이었고, 그래서 **눌러도 하이라이트만 되고 아무것도
+ * 펼쳐지지 않았다.**
+ *
+ * ── 🔴 조각에 담는 것은 **열쇠**이지 재고가 아니다 ──────────────────────
+ * 재고·소유는 재고 관리에서 받아 오는 값이라 **서버에서** 붙인다
+ * (`domain/fault-part-inventory.ts`). 이 파일은 그 줄을 찾을 **열쇠**(`matchKey`)와 사람이
+ * 읽을 **이름표**(`displayName`)만 조각에 달아 둔다 — 여기에 재고를 담으면 숫자 파일이
+ * 망을 물게 되고, 기간을 바꿀 때마다 다시 세는 이 계산이 통로를 두드리게 된다.
+ *
+ * ── 🔴 조각 하나에 부품이 **여럿일 수 있다** ────────────────────────────
+ * 값 조각·미입력 조각은 언제나 하나다(이름표 글자로 묶었으니 당연하다). 🔴 **기타 조각만
+ * 접힌 종류 수만큼** 들어 있다 — 접을 때 딸린 값도 함께 합쳐지기 때문이다(`pie-slices.ts`
+ * 의 `merge`). 그래서 화면은 「부품 하나」가 아니라 **목록**을 그릴 수 있어야 한다.
+ * 🔵 차례는 **접기 전 차례 그대로**(건수 많은 순)다. 합칠 때 다시 정렬하지 않는다 —
+ *    기타 조각의 범례가 `기타(12종)` 라고 적는 그 12가지와 같은 차례여야 한다.
+ * ============================================================================
+ */
+export type FaultPartDetailEntry = {
+  /** 「고객사 품명 (품번)」. 🔵 값 조각이면 조각 이름표와 같은 글자다. */
+  displayName: string;
+  /** 🔴 재고 관리 줄을 맞대는 열쇠(FaultPartRow.matchKey). 빈 글자일 수 있다. */
+  matchKey: string;
+  /** 이 조각 안에서 그 부품이 나온 **줄 수**. 조각 건수의 합과 같다. */
+  count: number;
+};
+
+export type FaultPartDetail = {
+  /** 🔴 값·미입력 조각은 하나, 기타 조각은 접힌 종류 수만큼(위 머리말). */
+  parts: FaultPartDetailEntry[];
+};
+
+/**
+ * 조각에 부품 목록을 달아 두는 처리기.
+ *
+ * 🔴 **같은 이름표를 두 줄로 쌓지 않는다** — 한 조각 안의 줄들은 이름표가 같아서(그것으로
+ *    묶었다) 언제나 한 묶음이다. 그래도 찾아 보고 더하는 까닭은, 이름표를 다듬는 자
+ *    (`pie-slices.ts` 의 `normalize` — 앞뒤 공백을 떼어 낸다)와 여기 적는 글자가 **원형**이라
+ *    드물게 두 글자가 한 조각에 들어올 수 있기 때문이다. 그때도 조각 건수와 합이 맞는다.
+ * 🔵 `add` 는 누적기를 **제자리에서** 바꾼다(PieDetailHandlers 의 약속).
+ */
+const faultPartDetail: PieDetailHandlers<FaultPartRow, FaultPartDetail> = {
+  create: () => ({ parts: [] }),
+  add: (detail, row) => {
+    const found = detail.parts.find((entry) => entry.displayName === row.displayName);
+    if (found) {
+      found.count += 1;
+      return;
+    }
+    detail.parts.push({ displayName: row.displayName, matchKey: row.matchKey, count: 1 });
+  },
+  // 🔵 접힌 차례 그대로 이어 붙인다(위 머리말). 다시 정렬하지 않는다.
+  merge: (details) => ({ parts: details.flatMap((detail) => detail.parts) }),
+};
+
+export type FaultPartBreakdown = ProductModelPieBreakdown<FaultPartDetail> & {
   /**
    * 부품 줄이 하나라도 붙어 있는 **접수 건 수**(요청 · 사용 · 반출을 가리지 않는다).
    * total(부품 개수)과 다를 수 있고, 다른 것이 정상이다 — 화면이 두 숫자를 나란히
@@ -355,6 +431,9 @@ export type FaultPartBreakdown = ProductModelPieBreakdown<null> & {
  *
  * 이름표가 공백뿐인 줄만 `미입력`으로 센다. 실무에서 거의 없지만, 버리면 조각 합이
  * 부품 개수와 어긋나므로 버리지 않는다.
+ *
+ * 🔴 **조각마다 「어느 부품인가」가 달려 나온다**(2026-10-29). 2026-10-29 전에는
+ *    `NO_PIE_DETAIL` 이라 눌러도 펼칠 것이 없었다 — 위 FaultPartDetail 머리말.
  */
 export function buildFaultPartBreakdown(partRows: readonly FaultPartRow[]): FaultPartBreakdown {
   return {
@@ -364,7 +443,7 @@ export function buildFaultPartBreakdown(partRows: readonly FaultPartRow[]): Faul
       labelOf: (row) => row.displayName,
       unspecifiedLabel: FAULT_SYMPTOM_UNSPECIFIED_LABEL,
       fold: { topLimit: PRODUCT_MODEL_TOP_SLICE_LIMIT, otherLabel: PRODUCT_MODEL_OTHER_LABEL },
-      detail: NO_PIE_DETAIL,
+      detail: faultPartDetail,
     }),
   };
 }

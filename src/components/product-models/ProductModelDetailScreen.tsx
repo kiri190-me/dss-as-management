@@ -11,6 +11,7 @@ import type { ProductModelCustomerOption } from "@/lib/db/queries/product-model-
 import type { ProductModelDetail } from "@/lib/db/queries/product-models";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { FaultPartIssuedLookup, FaultPartRow } from "@/lib/domain/product-model-breakdown";
+import type { FaultPartInventoryIndex } from "@/lib/domain/fault-part-inventory";
 import { mergeProductModelCustomers } from "@/lib/domain/product-model-customer-merge";
 import { productModelKindLabel } from "@/lib/domain/product-model-kind";
 import {
@@ -160,6 +161,7 @@ export default function ProductModelDetailScreen({
   repairCases,
   faultParts,
   faultPartIssuedLookup,
+  faultPartInventory,
   canEdit,
   customerOptions,
   attachments,
@@ -182,6 +184,12 @@ export default function ProductModelDetailScreen({
    * faultPartIssuedWarning). 🔵 다 셌으면 세 값이 전부 0 쪽이고 아무것도 안 그린다.
    */
   faultPartIssuedLookup: FaultPartIssuedLookup;
+  /**
+   * 🔴 **고장 부품 조각을 누르면 펼칠 재고 관리 줄** (2026-10-29 사용자 요청).
+   * 그래프에 뜬 부품의 열쇠만 담겨 있고(재고 관리 부품 전부가 아니다), 못 받아 온 것은
+   * 빈 지도가 아니라 **그 사실**로 들어 있다 — domain/fault-part-inventory.ts 머리말.
+   */
+  faultPartInventory: FaultPartInventoryIndex;
   canEdit: boolean;
   /** 수정 폼의 고객사 콤보박스가 고를 수 있는 목록. canEdit 이 아닌 세션에는
    * 서버가 빈 배열을 넘긴다 — 폼 자체가 뜨지 않는 자리라 실어 보낼 이유가 없다. */
@@ -304,6 +312,7 @@ export default function ProductModelDetailScreen({
           resolved={repairCases}
           faultParts={faultParts}
           faultPartIssuedLookup={faultPartIssuedLookup}
+          faultPartInventory={faultPartInventory}
         />
       </section>
     </div>

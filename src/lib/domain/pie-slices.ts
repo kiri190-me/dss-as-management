@@ -113,7 +113,13 @@ export type PieDetailHandlers<TRow, TDetail> = {
   merge: (details: readonly TDetail[]) => TDetail;
 };
 
-/** 조각에 달 것이 없는 그래프가 쓴다(고장 부품 · End-User · 유/무상). */
+/**
+ * 조각에 달 것이 없는 그래프가 쓴다(End-User · 유/무상).
+ *
+ * 🔴 2026-10-29 에 **고장 부품이 여기서 빠졌다** — 조각을 누르면 그 부품의 재고·소유를
+ *    펼치게 되면서 제 처리기(`product-model-breakdown.ts` 의 `faultPartDetail`)를 쓴다.
+ *    그 전까지는 이 목록에 적혀 있었고, 그래서 **눌러도 아무것도 안 펼쳐졌다.**
+ */
 export const NO_PIE_DETAIL: PieDetailHandlers<unknown, null> = {
   create: () => null,
   add: () => undefined,
