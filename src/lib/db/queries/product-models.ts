@@ -355,10 +355,16 @@ const UNCOUNTED_PART_REQUEST_STATUSES = ["REJECTED", "CANCELLED"] as const;
  * 🔴 **고객사 품명은 여기서 읽을 수 없다 — `parts` 표에 그 칸이 없다**(2026-10-29
  * 실측, vendor/dss-core 의 schema/inventory.ts). 이름은 언제나 재고 관리에서 온다.
  *
- * ── 무엇을 한 줄로 세는가 ───────────────────────────────────────────────
- * **요청 줄(inventory_part_request_items) 하나가 한 개**다. 수량(requested_quantity)
- * 은 보지 않는다 — 이 그래프가 묻는 것은 "어느 부품이 몇 번 지목되었나"이지 "몇
- * 개가 나갔나"가 아니고, 후자는 재고 원장(stock_transactions)이 답할 질문이다.
+ * ── 🔴 무엇을 몇으로 세는가 — **수량(requested_quantity)** (2026-10-29) ──
+ * 사용자 요청: 「각 부품이 들어있는 수리건의 수 말고 **실제로 사용된 부품의 수**를
+ * 표시해줘.」 그래서 이 조회가 수량 칸을 함께 돌려준다. 🔴 **2026-10-29 오전까지는
+ * 정반대로 적혀 있었다** — 「요청 줄 하나가 한 개다, 수량은 보지 않는다」. 다음 사람이
+ * 그 문장을 찾아 되돌리지 않게 적어 둔다.
+ * 🔴 **`issued_quantity`(실제로 나간 수)가 아니다.** 이 조회가 세는 집합은 처음부터
+ * 「요청한 의도」라 대기·보류까지 포함하는데(아래 UNCOUNTED_PART_REQUEST_STATUSES 는
+ * 취소·반려만 뺀다), 나간 수로 세면 **그 줄들이 전부 0 이 되어 조용히 사라진다.**
+ * 「실제로 나간 것」은 2026-10-16 부터 재고 관리가 갖고 있고, 그래프의 셋째 입력이
+ * 그쪽에서 온다(domain/product-model-fault-parts.ts 의 issuedPartRowsOf).
  *
  * 접수 건 id 를 함께 돌려주는 이유는 화면이 **부품 기록이 있는 건 수**를 셀 수
  * 있어야 하기 때문이다(부품 개수와 다른 것이 정상이고, 화면은 둘을 나란히 적는다).
@@ -379,6 +385,8 @@ export async function listRequestedPartsByProductModelId(
   const rows = await db
     .select({
       repairCaseId: repairCases.id,
+      // 🔴 요청한 수. 빠뜨리면 그래프가 **오류 없이** 줄 하나를 1 로 센다(위 머리말).
+      quantity: inventoryPartRequestItems.requestedQuantity,
       partName: parts.partName,
       partSpec: parts.partSpec,
       kyosanPartNo: parts.kyosanPartNo,
@@ -420,9 +428,11 @@ export async function listRequestedPartsByProductModelId(
  * 구멍을 메우려고 만든 표가 `repair_case_used_parts` 이고, 운영에 **1,222줄**이
  * 들어 있다. 2026-10-29 전까지 이 그래프에 그 줄이 한 줄도 오지 않았다.
  *
- * ── 무엇을 한 줄로 세는가 ───────────────────────────────────────────────
- * **적힌 줄 하나가 한 개**다. 수량(quantity)은 보지 않는다 — 위 요청 쪽과 같은
- * 셈법이어야 한 원 안에서 두 출처의 자가 같다.
+ * ── 🔴 무엇을 몇으로 세는가 — **수량(quantity)** (2026-10-29) ───────────
+ * **적힌 수량 그대로** 센다. 🔴 2026-10-29 오전까지는 「수량은 보지 않는다」였는데,
+ * 사용자가 「실제로 사용된 부품의 수」를 보자고 정하면서 뒤집혔다 — 연락서에서 「3」을
+ * 읽어 저장해 놓고 그래프에서 1 로 세면 그 3 을 적어 둔 까닭이 없어진다.
+ * 🔵 위 요청 쪽도 같은 날 같은 방향으로 바뀌었다 — 한 원 안에서 두 출처의 자가 같다.
  *
  * ── 무엇을 거르는가 ─────────────────────────────────────────────────────
  * 휴지통에 든 접수 건·장비만 뺀다. 🔴 **상태로 거르지 않는다** — 이 표에는 거절·취소
@@ -443,6 +453,8 @@ export async function listUsedPartsByProductModelId(
     .select({
       repairCaseId: repairCases.id,
       partNameText: repairCaseUsedParts.partNameText,
+      // 🔴 몇 개를 갈았나. 빠뜨리면 그래프가 **오류 없이** 줄 하나를 1 로 센다(위 머리말).
+      quantity: repairCaseUsedParts.quantity,
     })
     .from(repairCaseUsedParts)
     .innerJoin(repairCases, eq(repairCaseUsedParts.repairCaseId, repairCases.id))

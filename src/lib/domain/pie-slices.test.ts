@@ -18,6 +18,8 @@ import {
  *      고장 증상 조각은 인수점검 결과를 달고 다니고, 기타로 접히면 그것들도
  *      합쳐져야 한다.
  *   4) **접기를 끌 수 있다.** 값이 넷뿐인 칸(유/무상)에 기타가 생기면 고장이다.
+ *   5) 🔴 **무게(weightOf)를 넘긴 그래프만 한 줄을 하나보다 크게 센다** (2026-10-29).
+ *      안 넘기면 1)의 등식이 글자 그대로 남는다 — 그 기본값에 그래프 다섯이 기대고 있다.
  */
 
 type Row = { value: string | null; weight?: number };
@@ -277,6 +279,126 @@ test("NO_PIE_DETAIL 을 넘기면 조각의 딸린 값은 null 이다", () => {
     detail: NO_PIE_DETAIL,
   });
   assert.equal(slices[0].detail, null);
+});
+
+// ─────────────────────────────────────────────── 무게 (weightOf)
+
+/**
+ * ============================================================================
+ * 🔴 **한 줄이 하나보다 클 수 있다** (2026-10-29 사용자 요청)
+ * ============================================================================
+ * [고장 부품] 그래프가 **실제로 사용된 부품의 수**를 세게 되면서 생긴 길이다. 여기서
+ * 못 박는 것 둘:
+ *   ① 무게를 넘기면 총계·조각·%·각도·딸린 값이 **전부** 그 수에서 나온다
+ *   ② 🔴 **안 넘기면 한 글자도 안 바뀐다** — 나머지 그래프 다섯(고장 증상 · End-User ·
+ *      유/무상 · 대시보드의 신고 증상 둘)이 그 기본값에 기대고 있다
+ * ============================================================================
+ */
+
+/** 🔴 **받은 무게를 그대로 쌓는** 누적기 — 조각의 수와 같은 자인지 보려는 것이다. */
+const weightEchoDetail: PieDetailHandlers<Row, { sum: number; calls: number }> = {
+  create: () => ({ sum: 0, calls: 0 }),
+  add: (detail, _row, weight) => {
+    detail.sum += weight;
+    detail.calls += 1;
+  },
+  merge: (details) => ({
+    sum: details.reduce((acc, d) => acc + d.sum, 0),
+    calls: details.reduce((acc, d) => acc + d.calls, 0),
+  }),
+};
+
+test("🔴 weightOf 를 안 넘기면 **한 줄이 하나**다 — 행에 수가 있어도 안 본다", () => {
+  // 🔴 무게 칸에 값이 들어 있는데도 세지 않는다 — 이것이 다른 그래프 다섯의 상태다.
+  const rows = [row("가", 5), row("가", 5), row("나", 3)];
+  const slices = buildPieSlices(rows, {
+    labelOf,
+    unspecifiedLabel: UNSPECIFIED,
+    detail: NO_PIE_DETAIL,
+  });
+  assert.equal(sumCounts(slices), rows.length);
+  assert.deepEqual(
+    slices.map((s) => [s.label, s.count]),
+    [
+      ["가", 2],
+      ["나", 1],
+    ]
+  );
+});
+
+test("🔴 weightOf 를 넘기면 그 수만큼 센다 — 총계도 %도 각도도 무게에서 나온다", () => {
+  const rows = [row("가", 5), row("가", 5), row("나", 3), row(null, 2)];
+  const slices = buildPieSlices(rows, {
+    labelOf,
+    unspecifiedLabel: UNSPECIFIED,
+    weightOf: (r) => r.weight ?? 1,
+    detail: NO_PIE_DETAIL,
+  });
+
+  assert.equal(sumCounts(slices), 15, "🔴 줄 수(4)로 세면 안 된다");
+  assert.deepEqual(
+    slices.map((s) => [s.label, s.count]),
+    [
+      ["가", 10],
+      ["나", 3],
+      [UNSPECIFIED, 2],
+    ]
+  );
+  // %는 무게의 합(15)을 밑으로 한다 — 10/15 = 66.7%.
+  assert.equal(slices[0].percentage, 66.7);
+  const sweepSum = slices.reduce((acc, s) => acc + s.sweepAngle, 0);
+  assert.ok(Math.abs(sweepSum - 360) < 1e-9, `각도 합이 360 이 아니다: ${sweepSum}`);
+  assert.equal(slices[0].startAngle, 0);
+  assert.ok(Math.abs(slices[0].sweepAngle - (10 / 15) * 360) < 1e-9);
+});
+
+test("🔴 접기도 무게로 가른다 — 줄 수로 재면 접히는 종류가 달라진다", () => {
+  // 값 하나당 줄은 하나뿐인데 무게가 다르다. 줄 수로 세면 전부 1 이라 이름 순으로
+  // 접히고, 무게로 세면 작은 것 둘(「값 09」· 「값 10」)이 접힌다.
+  const rows: Row[] = [];
+  for (let i = 1; i <= 10; i += 1) rows.push(row(`값 ${String(i).padStart(2, "0")}`, 100 - i * 5));
+
+  const slices = buildPieSlices(rows, {
+    labelOf,
+    unspecifiedLabel: UNSPECIFIED,
+    fold: { topLimit: 8, otherLabel: OTHER },
+    weightOf: (r) => r.weight ?? 1,
+    detail: NO_PIE_DETAIL,
+  });
+
+  const other = find(slices, OTHER);
+  assert.equal(other.foldedGroupCount, 2);
+  // 접힌 둘은 무게 55 · 50 이다. 🔴 줄 수로 세면 여기가 2 가 된다.
+  assert.equal(other.count, 105, "접힌 둘의 **무게 합**이어야 한다");
+  assert.equal(sumCounts(slices), rows.reduce((acc, r) => acc + (r.weight ?? 1), 0));
+});
+
+test("🔴 딸린 값에도 **같은 무게**가 넘어온다 — 두 수가 갈리면 화면에서 어긋난다", () => {
+  const rows = [row("가", 5), row("가", 2), row("나", 3)];
+  const slices = buildPieSlices(rows, {
+    labelOf,
+    unspecifiedLabel: UNSPECIFIED,
+    weightOf: (r) => r.weight ?? 1,
+    detail: weightEchoDetail,
+  });
+
+  const first = find(slices, "가");
+  assert.equal(first.count, 7);
+  assert.equal(first.detail.sum, first.count, "🔴 조각의 수와 딸린 값의 수가 다르다");
+  // 🔵 **줄마다 한 번씩** 불린다 — 무게만큼 여러 번 부르는 식이 아니다.
+  assert.equal(first.detail.calls, 2);
+});
+
+test("🔵 무게가 전부 0 이하이면 빈 배열이다 — NaN 으로 그린 원을 내놓지 않는다", () => {
+  // 🔴 눕히는 자가 제자리에 있으면 여기까지 오지 않는다(부르는 쪽이 1 이상으로 눕힌다).
+  //    그래도 0 으로 나누는 자리를 열어 두지 않는다.
+  const slices = buildPieSlices([row("가"), row("나")], {
+    labelOf,
+    unspecifiedLabel: UNSPECIFIED,
+    weightOf: () => 0,
+    detail: NO_PIE_DETAIL,
+  });
+  assert.deepEqual(slices, []);
 });
 
 // ─────────────────────────────────────────────── key

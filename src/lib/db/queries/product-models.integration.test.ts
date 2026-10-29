@@ -166,11 +166,16 @@ async function insertTestPart(fields: {
   return row.id;
 }
 
-/** 그 접수 건에 묶인 부품 요청 하나 — 머리 + 줄 하나. */
+/**
+ * 그 접수 건에 묶인 부품 요청 하나 — 머리 + 줄 하나.
+ * 🔵 수량은 안 적으면 1 이다. [고장 부품] 그래프가 **수량을 세게 되면서**(2026-10-29)
+ *    이 칸이 조회에 실려 나가는지를 아래 시험이 본다.
+ */
 async function insertPartRequest(
   repairCaseId: string,
   partId: string,
-  status: "PENDING" | "FULLY_ISSUED" | "REJECTED" | "CANCELLED" | "ON_HOLD"
+  status: "PENDING" | "FULLY_ISSUED" | "REJECTED" | "CANCELLED" | "ON_HOLD",
+  requestedQuantity = 1
 ): Promise<string> {
   const [request] = await db
     .insert(inventoryPartRequests)
@@ -179,7 +184,7 @@ async function insertPartRequest(
   createdRequestIds.push(request.id);
   await db
     .insert(inventoryPartRequestItems)
-    .values({ requestId: request.id, partId, requestedQuantity: 1 });
+    .values({ requestId: request.id, partId, requestedQuantity });
   return request.id;
 }
 
@@ -188,10 +193,15 @@ async function insertPartRequest(
  * 🔴 `part_id` 는 **NULL** 이다 — 연락서 이식분이 전부 그렇고, 그래서 이 표의 줄은
  * 부품 마스터와 조인되지 않는다(글자만 있다).
  */
-async function insertUsedPart(repairCaseId: string, lineNo: number, partNameText: string) {
+async function insertUsedPart(
+  repairCaseId: string,
+  lineNo: number,
+  partNameText: string,
+  quantity = 1
+) {
   await db
     .insert(repairCaseUsedParts)
-    .values({ repairCaseId, lineNo, partId: null, partNameText, quantity: 1 });
+    .values({ repairCaseId, lineNo, partId: null, partNameText, quantity });
 }
 
 /**
@@ -235,8 +245,10 @@ describe("listRequestedPartsByProductModelId / listUsedPartsByProductModelId", (
     const uncountedPartId = await insertTestPart({ partName: uncountedPartName });
     const otherModelPartId = await insertTestPart({ partName: otherModelPartName });
 
-    await insertPartRequest(caseA.id, countedPartId, "PENDING");
-    await insertPartRequest(caseB.id, countedPartId, "FULLY_ISSUED");
+    // 🔴 수량을 **서로 다르게** 넣는다(1 · 5). 둘 다 1 이면 그래프가 줄 수를 세도
+    //    아래 단언이 통과한다 — 2026-10-29 에 고친 것이 바로 그 셈법이다.
+    await insertPartRequest(caseA.id, countedPartId, "PENDING", 1);
+    await insertPartRequest(caseB.id, countedPartId, "FULLY_ISSUED", 5);
     // 🔴 세지 않는 둘. 같은 건에 걸어 두어야 "건이 빠진 것"과 구별된다.
     await insertPartRequest(caseA.id, uncountedPartId, "REJECTED");
     await insertPartRequest(caseB.id, uncountedPartId, "CANCELLED");
@@ -258,6 +270,14 @@ describe("listRequestedPartsByProductModelId / listUsedPartsByProductModelId", (
     assert.equal(rows[0].drawingNo, "AA000111");
     assert.equal(rows[0].kyosanPartNo, "KY000111");
     assert.equal(rows[0].partSpec, "AC100V");
+    // 🔴 **요청한 수(requested_quantity)가 실려 나온다**(2026-10-29 사용자 요청).
+    //    빠뜨리면 그래프가 줄 수를 세고, 18개가 나간 건이 「부품 4개」로 뜬다.
+    //    🔵 두 줄의 차례는 건 id(무작위 UUID)가 정하므로 **모아서** 견준다.
+    assert.deepEqual(
+      rows.map((row) => row.quantity).sort((a, b) => a - b),
+      [1, 5],
+      "요청 수량이 그대로 안 나온다"
+    );
 
     // 휴지통에 든 건은 빠진다.
     await db.update(repairCases).set({ isDeleted: true }).where(eq(repairCases.id, caseB.id));
@@ -286,7 +306,8 @@ describe("listRequestedPartsByProductModelId / listUsedPartsByProductModelId", (
     await insertMasterAndLinkUnits(otherModelName);
 
     await insertUsedPart(caseA.id, 1, "AA000111");
-    await insertUsedPart(caseA.id, 2, "AA000222");
+    // 🔴 수량을 1 이 아닌 수로 둔다 — 전부 1 이면 아래 단언이 줄 수로도 통과한다.
+    await insertUsedPart(caseA.id, 2, "AA000222", 3);
     await insertUsedPart(caseB.id, 1, "AA000111");
     await insertUsedPart(caseOther.id, 1, "AA000999");
 
@@ -301,6 +322,17 @@ describe("listRequestedPartsByProductModelId / listUsedPartsByProductModelId", (
       rows.filter((row) => row.repairCaseId === caseA.id).length,
       2,
       "같은 건에 적힌 두 줄이 둘 다 온다"
+    );
+    // 🔴 **적힌 수량(quantity)이 실려 나온다**(2026-10-29 사용자 요청). 연락서에서 읽은
+    //    「3」을 저장해 놓고 조회가 안 돌려주면 그래프가 1 로 센다.
+    assert.deepEqual(
+      rows.map((row) => [row.partNameText, row.quantity]),
+      [
+        ["AA000111", 1],
+        ["AA000111", 1],
+        ["AA000222", 3],
+      ],
+      "사용 부품 수량이 그대로 안 나온다"
     );
 
     await db.update(repairCases).set({ isDeleted: true }).where(eq(repairCases.id, caseB.id));

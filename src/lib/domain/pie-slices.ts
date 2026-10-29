@@ -16,6 +16,20 @@
  *   총 건수와 달라지고, 한 번 어긋난 그래프는 아무도 다시 보지 않는다.
  *   **조각 건수의 합은 언제나 넘겨받은 행 수와 같다** — 시험이 못 박아 둔다.
  *
+ *   ── 🔴 한 줄이 **하나보다 클 수 있다** — weightOf (2026-10-29) ──────────
+ *   기본은 그대로 **한 줄이 하나**다. `weightOf` 를 넘기지 않으면 모든 행의 무게가
+ *   1 이고, 위 등식(조각 건수의 합 = 넘겨받은 행 수)도 글자 그대로 남는다.
+ *   넘기면 그 함수가 돌려준 수만큼 세고, 등식은 **무게의 합**으로 읽는다 — 총계도
+ *   %도 각도도 전부 그 합에서 나온다.
+ *   🔴 **쓰는 그래프는 [고장 부품] 하나뿐이다**(2026-10-29 사용자 요청: 「각 부품이
+ *      들어있는 수리건의 수 말고 **실제로 사용된 부품의 수**를 표시해줘」). 반출 5개짜리
+ *      줄은 5 로 센다. 🔴 **나머지 그래프(고장 증상 · End-User · 유/무상, 대시보드의
+ *      신고 증상 둘)는 한 글자도 안 바뀐다** — 그 셋이 묻는 것은 「몇 **건**인가」라
+ *      한 줄이 하나인 것이 맞고, 넷 다 `weightOf` 를 넘기지 않는다.
+ *   🔵 무게는 **부르는 쪽이 이미 눕혀서** 준다(1 이상의 정수). 여기서 0·음수·소수를
+ *      되잡지 않는 까닭: 되잡는 규칙이 두 벌이 되면 어느 쪽이 참인지 알 수 없다.
+ *      다만 무게의 합이 0 이하로 떨어지면 나눌 수가 없어 **빈 배열**로 돌아간다.
+ *
  *   ── 접되, 몇 가지를 접었는지 말한다 ────────────────────────────────────
  *   종류가 많으면 원이 실오라기로 뒤덮여 읽을 수 없어 상위 N 개만 남기고 나머지를
  *   **기타** 하나로 접는다. 말없이 잘라내면 "이게 전부"로 읽히므로 접힌 종류 수를
@@ -105,10 +119,17 @@ export type PieSlice<TDetail> = PieChartSlice & {
  *
  * add 는 누적기를 **제자리에서** 바꾼다(반환하지 않는다) — 건마다 새 객체를
  * 만들면 큰 목록에서 그것만으로 시간이 간다.
+ *
+ * 🔴 **add 는 그 행의 무게도 함께 받는다**(2026-10-29). 딸린 값이 수를 세고 있다면
+ *    그 수가 조각 건수와 **반드시 같아야** 하는데(화면이 둘을 나란히 적는다 — 기타
+ *    조각을 펼치면 `부품 A · 2개` 밑에 조각 제목 `3개`가 뜨는 식의 어긋남이 바로
+ *    보인다), 무게를 안 주면 처리기가 제 나름대로 다시 재야 해서 자가 둘이 된다.
+ * 🔵 무게를 안 쓰는 처리기는 **칸을 안 받으면 된다**(인수점검 결과 · NO_PIE_DETAIL).
+ *    그 셋은 무게 1 인 그래프에만 걸려 있어 받아도 달라질 것이 없다.
  */
 export type PieDetailHandlers<TRow, TDetail> = {
   create: () => TDetail;
-  add: (detail: TDetail, row: TRow) => void;
+  add: (detail: TDetail, row: TRow, weight: number) => void;
   /** 기타로 접힌 조각들의 딸린 값을 하나로 합친다. */
   merge: (details: readonly TDetail[]) => TDetail;
 };
@@ -140,6 +161,13 @@ export type PieSliceOptions<TRow, TDetail> = {
   unspecifiedLabel: string;
   /** 없으면 **접지 않는다**. 값이 몇 개뿐인 칸에 기타가 생기면 고장으로 보인다. */
   fold?: PieFoldOptions;
+  /**
+   * 이 행을 **몇으로 셀 것인가**. 🔴 **넘기지 않으면 한 줄이 하나**다(파일 머리말).
+   *
+   * 🔴 돌려주는 값은 **1 이상의 정수**여야 한다 — 눕히는 일은 부르는 쪽 한 곳에서
+   *    끝낸다([고장 부품]은 `domain/product-model-fault-parts.ts` 의 `faultPartQuantity`).
+   */
+  weightOf?: (row: TRow) => number;
   /**
    * 값 조각의 차례를 못 박는다. 여기 없는 이름표는 그 뒤에 건수 순으로 붙는다.
    * 넘기지 않으면 전부 건수 많은 순 → 이름 오름차순이다.
@@ -193,14 +221,16 @@ function normalize(value: string | null): string {
  *
  * 행이 하나도 없으면 **빈 배열**이다(0 으로 나누는 자리가 생기지 않는다). 화면은
  * 그때 원 대신 한 줄짜리 안내를 그린다.
+ *
+ * 🔵 총계는 **무게의 합**이다 — `weightOf` 를 안 넘기면 그 합이 곧 행 수라 예전과
+ *    같은 수다(파일 머리말).
  */
 export function buildPieSlices<TRow, TDetail>(
   rows: readonly TRow[],
   options: PieSliceOptions<TRow, TDetail>
 ): PieSlice<TDetail>[] {
-  const { labelOf, unspecifiedLabel, fold, valueOrder, detail } = options;
-  const total = rows.length;
-  if (total === 0) return [];
+  const { labelOf, unspecifiedLabel, fold, valueOrder, weightOf, detail } = options;
+  if (rows.length === 0) return [];
 
   const valueBuckets = new Map<string, Bucket<TDetail>>();
   const unspecified: Bucket<TDetail> = {
@@ -209,6 +239,8 @@ export function buildPieSlices<TRow, TDetail>(
     detail: detail.create(),
   };
 
+  // 🔴 **무게의 합**이다. `weightOf` 가 없으면 줄마다 1 이라 행 수와 같다(머리말).
+  let total = 0;
   for (const row of rows) {
     const label = normalize(labelOf(row));
     let bucket: Bucket<TDetail>;
@@ -223,9 +255,16 @@ export function buildPieSlices<TRow, TDetail>(
         valueBuckets.set(label, bucket);
       }
     }
-    bucket.count += 1;
-    detail.add(bucket.detail, row);
+    const weight = weightOf ? weightOf(row) : 1;
+    bucket.count += weight;
+    total += weight;
+    // 🔴 조각이 센 수와 딸린 값이 센 수가 어긋나지 않도록 **같은 무게**를 넘긴다.
+    detail.add(bucket.detail, row, weight);
   }
+  // 🔴 무게가 전부 0 이하로 들어온 날에도 나눗셈을 하지 않는다 — 행이 있는데 빈 원이
+  //    되는 것은 참이 아니지만, NaN 으로 그린 원보다는 화면이 고쳐야 할 곳을 가리킨다.
+  //    (눕히는 자가 제자리에 있으면 여기로 못 온다 — `weightOf` 주석.)
+  if (total <= 0) return [];
 
   const sortedValues = [...valueBuckets.values()].sort((a, b) =>
     valueOrder ? compareByFixedOrder(valueOrder, a, b) : compareByCountThenLabel(a, b)

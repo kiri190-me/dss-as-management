@@ -124,7 +124,7 @@ function render(resolved: ResolvedRepairCase[] = RESOLVED): string {
     createElement(ProductModelHistoryBreakdown, {
       resolved,
       faultParts: [
-        { repairCaseId: "case-02", displayName: "가 부품 (DWG-001)", matchKey: "dwg001" },
+        { repairCaseId: "case-02", quantity: 1, displayName: "가 부품 (DWG-001)", matchKey: "dwg001" },
       ],
       faultPartIssuedLookup: { uncountedCaseCount: 0, timedOutCaseCount: 0, timeBudgetMs: 5000 },
       /* 🔴 2026-10-29 에 생긴 프롭. [고장 부품] 카드는 처음에 꺼져 있어 이 파일이 재는

@@ -392,6 +392,9 @@ export default function ProductModelHistoryBreakdown({
                 title={CHART_LABELS.PART}
                 // 이 두 숫자를 나란히 적지 않으면 "10건인데 왜 부품이 12개지"에서
                 // 사람이 그래프 전체를 안 믿게 된다.
+                // 🔴 **앞은 수량, 뒤는 건수다**(2026-10-29 사용자 요청). 자가 둘이라
+                // 이상해 보이지만 그래야 맞다 — 한 건에서 18개가 나갔으면
+                // 「부품 18개 · 부품 기록이 있는 1건」이다(domain 의 FaultPartBreakdown).
                 meta={`부품 ${faultPart.total}개 · 부품 기록이 있는 ${faultPart.caseWithPartRecordCount}건`}
                 // 🔴 **어디까지 센 수인지 적는다**(2026-10-29). 이 그래프는 부품 요청만
                 // 세던 때가 있었고, 지금은 연락서에서 읽은 사용 부품과 재고 관리에서
@@ -403,12 +406,18 @@ export default function ProductModelHistoryBreakdown({
                 // (domain/product-model-breakdown.ts 머리말의 「한 원 안에 자가 둘이다」).
                 // 🔵 **조각을 누르면 무엇이 나오는지 적는다** (2026-10-29). [고장 증상] 카드가
                 // 같은 자리에 같은 말을 적고 있다 — 적지 않으면 누를 수 있다는 것을 모른다.
-                note="부품 요청 · 수리 건에 적힌 사용 부품 · 재고 관리에서 반출 확인된 부품을 함께 셉니다. 한 건에 여러 부품이 있을 수 있어 접수 건수와 합이 다릅니다. 부품 요청은 취소·반려된 것을 빼고 세고, 반출 부품은 실제로 나간 줄만 셉니다. 조각을 누르면 그 부품의 재고 관리 정보가 펼쳐집니다."
+                // 🔴 **「개수는 실제 수량」이 맨 앞에 선다** (2026-10-29 사용자 요청). 같은 날
+                // 오전까지 이 줄은 「반출 부품은 실제로 나간 **줄만** 셉니다」라고 적고 있었고,
+                // 그 말이 틀린 말이 되었다 — 이제 줄이 아니라 수량을 센다. 세는 자가 바뀐 것은
+                // 화면에서 수가 갑자기 네 배가 되는 변화라, 설명 줄이 그 사실을 먼저 말한다.
+                note="개수는 부품 줄 수가 아니라 실제 수량입니다 — 요청한 수 · 연락서에 적힌 수 · 실제로 나간 수를 더합니다. 부품 요청 · 수리 건에 적힌 사용 부품 · 재고 관리에서 반출 확인된 부품을 함께 세고, 부품 요청은 취소·반려된 것을 뺍니다. 한 건에 여러 부품이 있을 수 있어 접수 건수와 합이 다릅니다. 조각을 누르면 그 부품의 재고 관리 정보가 펼쳐집니다."
                 warning={faultPartWarning}
                 emptyMessage={emptyPartMessage}
                 countUnit="개"
                 slices={faultPart.slices}
-                ariaLabel={`고장 부품별 요청 비율, ${periodLabel} 부품 ${faultPart.total}개`}
+                // 🔴 **「요청 비율」이 아니다**(2026-10-29). 눈으로 읽는 사람에게는 위 설명
+                //    줄이 세는 자를 말해 주지만, 낭독기로 듣는 사람에게는 이 글자가 전부다.
+                ariaLabel={`고장 부품별 수량 비율, ${periodLabel} 부품 ${faultPart.total}개`}
                 selectedKey={selectedKey}
                 onSelectSlice={onSelectSlice}
                 // 🔴 **기간을 바꾸면 저절로 접힌다** — 위 changeYear·changeMonth 가 네 그래프의

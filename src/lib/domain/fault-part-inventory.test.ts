@@ -129,7 +129,7 @@ describe("[고장 부품] 조각 → 그 부품의 재고 관리 줄", () => {
     const { breakdown, index } = buildAll({
       // 🔴 적혀 있는 글자가 재고 관리의 도번과 **다르다**(소문자 · 붙임표 대신 공백).
       //    눌러 적는 자를 안 쓰면 여기서 한 줄도 안 나온다.
-      used: [{ repairCaseId: "case-01", partNameText: "dwg aa1001" }],
+      used: [{ repairCaseId: "case-01", partNameText: "dwg aa1001", quantity: 1 }],
     });
 
     const slice = sliceNamed(breakdown.slices, "종단 증폭 기판 (dwg aa1001)");
@@ -153,7 +153,7 @@ describe("[고장 부품] 조각 → 그 부품의 재고 관리 줄", () => {
 
   test("🔴 **그래프 조각과 상세가 같은 부품을 가리킨다** — 이름표를 준 줄이 펼친 줄 안에 있다", () => {
     const { breakdown, index } = buildAll({
-      used: [{ repairCaseId: "case-01", partNameText: "dwg aa1001" }],
+      used: [{ repairCaseId: "case-01", partNameText: "dwg aa1001", quantity: 1 }],
     });
     const slice = sliceNamed(breakdown.slices, "종단 증폭 기판 (dwg aa1001)");
     const found = lookupFaultPartInventory(index, slice.detail.parts[0].matchKey);
@@ -172,7 +172,7 @@ describe("[고장 부품] 조각 → 그 부품의 재고 관리 줄", () => {
 
   test("🔴 열쇠가 어긋나면 깨진다 — 글자 그대로 맞대면 한 줄도 안 나온다", () => {
     const { breakdown, index } = buildAll({
-      used: [{ repairCaseId: "case-01", partNameText: "dwg aa1001" }],
+      used: [{ repairCaseId: "case-01", partNameText: "dwg aa1001", quantity: 1 }],
     });
     const slice = sliceNamed(breakdown.slices, "종단 증폭 기판 (dwg aa1001)");
     const key = slice.detail.parts[0].matchKey;
@@ -190,16 +190,21 @@ describe("[고장 부품] 조각 → 그 부품의 재고 관리 줄", () => {
       requested: [
         {
           repairCaseId: "case-01",
+          // 🔵 셋 다 1 개씩이라 조각의 수가 **입력 수(3)와 같다** — 이 시험이 보는 것은
+          //    「한 조각으로 모이는가」지 수량이 아니다(수량은 product-model-breakdown
+          //    .test.ts 가 값으로 본다).
+          quantity: 1,
           partName: "AMP-XX(13M)",
           partSpec: null,
           kyosanPartNo: null,
           drawingNo: "DWG-AA1001",
         },
       ],
-      used: [{ repairCaseId: "case-02", partNameText: "DWG-AA1001" }],
+      used: [{ repairCaseId: "case-02", partNameText: "DWG-AA1001", quantity: 1 }],
       issued: [
         {
           repairCaseId: "case-03",
+          quantity: 1,
           partName: "AMP-XX(13M)",
           partSpec: "",
           kyosanPartNo: "",
@@ -217,7 +222,7 @@ describe("[고장 부품] 조각 → 그 부품의 재고 관리 줄", () => {
 
   test("🔴 **재고 관리에서 못 찾은 부품**도 깨지지 않는다 — 빈 칸이 아니라 그 사실을 말한다", () => {
     const { breakdown, index } = buildAll({
-      used: [{ repairCaseId: "case-01", partNameText: "DWG-ZZ9999" }],
+      used: [{ repairCaseId: "case-01", partNameText: "DWG-ZZ9999", quantity: 1 }],
     });
 
     // 이름을 못 얻었으니 품번 그대로가 조각 이름이다(used-part-display 의 네 길 중 ㉠).
@@ -232,7 +237,7 @@ describe("[고장 부품] 조각 → 그 부품의 재고 관리 줄", () => {
 
   test("🔴 **재고 관리가 멈췄으면** 그 사실이 드러난다 — 「재고 0」이 아니다", () => {
     const { breakdown, index } = buildAll({
-      used: [{ repairCaseId: "case-01", partNameText: "DWG-AA1001" }],
+      used: [{ repairCaseId: "case-01", partNameText: "DWG-AA1001", quantity: 1 }],
       inventory: { status: "unreachable", reason: "timeout" },
     });
 
@@ -255,6 +260,7 @@ describe("[고장 부품] 조각 → 그 부품의 재고 관리 줄", () => {
       requested: [
         {
           repairCaseId: "case-01",
+          quantity: 1,
           partName: "-",
           partSpec: null,
           kyosanPartNo: null,
@@ -287,7 +293,7 @@ describe("[고장 부품] 조각 → 그 부품의 재고 관리 줄", () => {
    */
   test("🔴 사용 부품에 `-` 만 적혀 있으면 조각 이름은 「-」 지만 **열쇠는 비어 있다**", () => {
     const { breakdown, index } = buildAll({
-      used: [{ repairCaseId: "case-01", partNameText: "-" }],
+      used: [{ repairCaseId: "case-01", partNameText: "-", quantity: 1 }],
     });
 
     const slice = sliceNamed(breakdown.slices, "-");
@@ -308,7 +314,7 @@ describe("[고장 부품] 조각 → 그 부품의 재고 관리 줄", () => {
 describe("[고장 부품] 재고 지도 — 무엇을 담고 무엇을 뺐나", () => {
   test("🔴 **그래프에 뜬 열쇠만** 담는다 — 지도가 브라우저까지 나간다", () => {
     const { index } = buildAll({
-      used: [{ repairCaseId: "case-01", partNameText: "DWG-BB2002" }],
+      used: [{ repairCaseId: "case-01", partNameText: "DWG-BB2002", quantity: 1 }],
     });
     assert.ok(index.status === "ok");
     assert.deepEqual(Object.keys(index.rowsByKey), [usedPartMatchKey("DWG-BB2002")]);
@@ -319,7 +325,7 @@ describe("[고장 부품] 재고 지도 — 무엇을 담고 무엇을 뺐나", 
   test("🔴 **돈은 안 싣는다** — 이 화면의 문은 productModels.view 하나다", () => {
     const priced = [inventoryPart({ no: 201, drawingNo: "DWG-CC3003", quotePrice: 125000, overhaulQuotePrice: 98000 })];
     const rows = toFaultPartRows(
-      { requested: [], used: [{ repairCaseId: "case-01", partNameText: "DWG-CC3003" }], issued: [] },
+      { requested: [], used: [{ repairCaseId: "case-01", partNameText: "DWG-CC3003", quantity: 1 }], issued: [] },
       NAME_INDEX
     );
     const index = buildFaultPartInventoryIndex({ status: "ok", value: priced }, rows);
@@ -335,7 +341,7 @@ describe("[고장 부품] 재고 지도 — 무엇을 담고 무엇을 뺐나", 
   });
 
   test("🔴 비고는 **첫 줄만** 싣는다 — 재고 담당이 적는 칸이라 전문을 내보내지 않는다", () => {
-    const { index } = buildAll({ used: [{ repairCaseId: "case-01", partNameText: "DWG-AA1001" }] });
+    const { index } = buildAll({ used: [{ repairCaseId: "case-01", partNameText: "DWG-AA1001", quantity: 1 }] });
     assert.ok(index.status === "ok");
     const rows = index.rowsByKey[usedPartMatchKey("DWG-AA1001")];
     assert.ok(rows, "이 시험의 표본이 비었다");
@@ -346,7 +352,7 @@ describe("[고장 부품] 재고 지도 — 무엇을 담고 무엇을 뺐나", 
   test("🔵 소유는 **글자**로 눕혀 싣는다 — 화면이 하는 일이 `label || code` 하나뿐이다", () => {
     const codeOnly = [inventoryPart({ no: 301, drawingNo: "DWG-DD4004", owner: { code: "ETC", label: "" } })];
     const rows = toFaultPartRows(
-      { requested: [], used: [{ repairCaseId: "case-01", partNameText: "DWG-DD4004" }], issued: [] },
+      { requested: [], used: [{ repairCaseId: "case-01", partNameText: "DWG-DD4004", quantity: 1 }], issued: [] },
       NAME_INDEX
     );
     const index = buildFaultPartInventoryIndex({ status: "ok", value: codeOnly }, rows);
@@ -368,7 +374,7 @@ describe("[고장 부품] 재고 지도 — 어느 칸으로 맞추나", () => {
   test("🔴 **도번이 품명을 이긴다** — 앞 칸에서 찾으면 뒤 칸은 보지 않는다", () => {
     const nameIndex = buildUsedPartNameIndex(toPartPickerOptions({ status: "ok", value: CROSSED }));
     const rows = toFaultPartRows(
-      { requested: [], used: [{ repairCaseId: "case-01", partNameText: "SAME-0001" }], issued: [] },
+      { requested: [], used: [{ repairCaseId: "case-01", partNameText: "SAME-0001", quantity: 1 }], issued: [] },
       nameIndex
     );
     const index = buildFaultPartInventoryIndex({ status: "ok", value: CROSSED }, rows);
@@ -391,7 +397,7 @@ describe("[고장 부품] 재고 지도 — 어느 칸으로 맞추나", () => {
     ];
     const nameIndex = buildUsedPartNameIndex(toPartPickerOptions({ status: "ok", value: conflicting }));
     const rows = toFaultPartRows(
-      { requested: [], used: [{ repairCaseId: "case-01", partNameText: "DWG-EE5005" }], issued: [] },
+      { requested: [], used: [{ repairCaseId: "case-01", partNameText: "DWG-EE5005", quantity: 1 }], issued: [] },
       nameIndex
     );
     const breakdown = buildFaultPartBreakdown(rows);
@@ -411,7 +417,9 @@ describe("[고장 부품] 기타 조각 — 접힌 부품이 전부 들어 있�
     // 10종 → 상위 8 + 기타(2종).
     for (let i = 1; i <= 10; i += 1) {
       for (let n = 0; n < 20 - i; n += 1) {
-        rows.push({ repairCaseId: `case-${i}`, displayName: `부품 ${i}`, matchKey: `key-${i}` });
+        // 🔵 줄마다 1 개 — 이 시험이 보는 것은 「접힌 부품이 다 들어 있는가」라, 수량을
+        //    1 로 두어야 조각 수가 곧 줄 수여서 기대값을 눈으로 셀 수 있다.
+        rows.push({ repairCaseId: `case-${i}`, quantity: 1, displayName: `부품 ${i}`, matchKey: `key-${i}` });
       }
     }
     const breakdown = buildFaultPartBreakdown(rows);
@@ -435,8 +443,8 @@ describe("[고장 부품] 기타 조각 — 접힌 부품이 전부 들어 있�
   test("🔴 값 조각의 부품 건수도 조각 건수와 같다 — 줄을 흘리지 않는다", () => {
     const { breakdown } = buildAll({
       used: [
-        { repairCaseId: "case-01", partNameText: "DWG-BB2002" },
-        { repairCaseId: "case-02", partNameText: "DWG-BB2002" },
+        { repairCaseId: "case-01", partNameText: "DWG-BB2002", quantity: 1 },
+        { repairCaseId: "case-02", partNameText: "DWG-BB2002", quantity: 1 },
       ],
     });
     const slice = sliceNamed(breakdown.slices, "DWG-BB2002");

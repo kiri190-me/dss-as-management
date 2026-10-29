@@ -951,8 +951,11 @@ export function resolveInventoryIssuedPartsTrace<
   let issuedLineCount = 0;
   for (const request of requests.value) {
     for (const line of request.lines) {
-      /* 🔴 [고장 부품] 그래프가 반출 줄을 고르는 자와 **같은 식**이다(`issuedPartRowsOf`).
-         🔴 **수량은 거르는 데만 쓴다** — 5개가 나간 줄도 1개가 나간 줄도 한 줄이다. */
+      /* 🔴 **거르는 식**은 [고장 부품] 그래프와 같다(`issuedPartRowsOf` — `issued >= 1`).
+         🔴 **세는 자는 다르다**: 여기는 **줄 수**라 5개가 나간 줄도 한 줄이고, 그래프는
+            2026-10-29 부터 **수량**을 센다(사용자 요청). 이 값이 하는 일은 「사용 부품 칸을
+            열까 말까」 하나뿐이라 몇 개가 나갔는지가 상관없고, 그래프가 답하는 물음은
+            「몇 개가 나갔나」다. 🔵 거르는 식만 같으면 두 자리가 **같은 줄 집합**을 본다. */
       if (line.issued >= 1) issuedLineCount += 1;
     }
   }

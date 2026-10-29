@@ -52,8 +52,18 @@ function caseRow(overrides: Partial<ProductModelBreakdownCase> = {}): ProductMod
  *    여기 같은 글자를 넣는 것은 부품마다 다른 값을 만드는 가장 짧은 길일 뿐이다. 열쇠가
  *    그래프와 어긋나지 않는지는 `fault-part-inventory.test.ts` 가 진짜 자로 잰다.
  */
-function part(repairCaseId: string, displayName: string, matchKey = displayName): FaultPartRow {
-  return { repairCaseId, displayName, matchKey };
+/**
+ * 🔴 `quantity`(2026-10-29 에 생긴 칸)의 기본값은 **1** 이다 — 「줄 하나가 한 개」였던
+ *    예전과 같은 수라, 아래 옛 시험들의 기대값이 그대로 참이어야 한다. 수량을 **실제로
+ *    세는지**는 이 파일 맨 아래 묶음이 따로 본다.
+ */
+function part(
+  repairCaseId: string,
+  displayName: string,
+  quantity = 1,
+  matchKey = displayName
+): FaultPartRow {
+  return { repairCaseId, quantity, displayName, matchKey };
 }
 
 function labels(slices: readonly PieSlice<unknown>[]): string[] {
@@ -231,7 +241,9 @@ test("고장 부품은 부품 줄을 세므로 조각 합이 접수 건수와 �
   ];
 
   const breakdown = buildFaultPartBreakdown(partRows);
-  assert.equal(breakdown.total, 5, "부품 개수는 부품 줄 수다");
+  // 🔴 「줄 수다」가 아니다(2026-10-29) — **수량의 합**이고, 이 표본은 줄마다 1 개라
+  //    옛 기대값 5 가 그대로 맞다. 수량을 실제로 세는지는 아래 전용 묶음이 본다.
+  assert.equal(breakdown.total, 5, "부품 개수는 수량의 합이다(이 표본은 줄마다 1 개)");
   assert.equal(breakdown.caseWithPartRecordCount, 3, "부품 기록이 있는 건은 3건이다");
   assert.equal(sumCounts(breakdown.slices), 5);
   assert.deepEqual(labels(breakdown.slices), ["메인 PCB", "퓨즈", "RF 케이블"]);
@@ -281,6 +293,136 @@ test("고장 부품도 9종 이상이면 상위 8 + 기타로 접힌다", () => 
   assert.equal(breakdown.slices[8].foldedGroupCount, 2);
   assert.equal(breakdown.caseWithPartRecordCount, 10);
   assert.equal(sumCounts(breakdown.slices), breakdown.total);
+});
+
+/**
+ * ============================================================================
+ * 🔴 **고장 부품만 「줄 수」가 아니라 「수량」을 센다** (2026-10-29 사용자 요청)
+ * ============================================================================
+ * 사용자 말: 「각 부품이 들어있는 수리건의 수 말고 **실제로 사용된 부품의 수**를
+ * 표시해줘.」 세 입력이 어느 칸을 수량으로 싣고 오는지는 `product-model-fault-parts
+ * .test.ts` 가 보고, 여기서 보는 것은 **이미 수량이 실린 줄을 어떻게 세는가**다:
+ *   · 조각의 수 · 총계 · %가 전부 수량으로 나오는가
+ *   · 펼친 자리의 수가 조각의 수와 **같은 자**인가(기타로 접혀도)
+ *   · 🔴 「부품 기록이 있는 N건」은 **건수 그대로**인가
+ *   · 🔴 **다른 세 그래프는 안 바뀌는가** — 그 셋이 묻는 것은 「몇 건인가」다
+ * ============================================================================
+ */
+test("🔴 고장 부품은 **수량의 합**을 센다 — 줄 넷이어도 5+5+3+5 면 18개다", () => {
+  // 🔵 사용자가 보낸 운영 화면의 모양이다(이름은 가짜). 한 건에서 나온 네 부품.
+  const partRows = [
+    part("case-A", "가 기판 (AA000111)", 5),
+    part("case-A", "나 기판 (AA000222)", 5),
+    part("case-A", "다 트랜스 (AA000333)", 3),
+    part("case-A", "라 기판 (AA000444)", 5),
+  ];
+
+  const breakdown = buildFaultPartBreakdown(partRows);
+  assert.equal(breakdown.total, 18, "🔴 줄 수로 세면 4 가 된다 — 신고된 그 증상이다");
+  assert.equal(sumCounts(breakdown.slices), 18, "조각의 합도 같은 자여야 한다");
+  assert.deepEqual(
+    breakdown.slices.map((slice) => [slice.label, slice.count]),
+    [
+      ["가 기판 (AA000111)", 5],
+      ["나 기판 (AA000222)", 5],
+      ["라 기판 (AA000444)", 5],
+      ["다 트랜스 (AA000333)", 3],
+    ]
+  );
+  // 🔵 %도 수량에서 나온다 — 5/18 = 27.8%, 3/18 = 16.7%.
+  assert.deepEqual(
+    breakdown.slices.map((slice) => slice.percentage),
+    [27.8, 27.8, 27.8, 16.7]
+  );
+  // 🔴 각도의 합은 여전히 360 이다(무게를 실어도 원은 원이다).
+  assert.equal(
+    Math.round(breakdown.slices.reduce((sum, slice) => sum + slice.sweepAngle, 0)),
+    360
+  );
+});
+
+test("🔴 「부품 기록이 있는 N건」은 **건수 그대로**다 — 수량으로 안 바뀐다", () => {
+  const breakdown = buildFaultPartBreakdown([
+    part("case-A", "가 기판 (AA000111)", 5),
+    part("case-A", "나 기판 (AA000222)", 5),
+    part("case-A", "다 트랜스 (AA000333)", 3),
+    part("case-A", "라 기판 (AA000444)", 5),
+  ]);
+  assert.equal(breakdown.total, 18, "이 시험의 표본이 비었다 — 수량이 실려야 한다");
+  assert.equal(breakdown.caseWithPartRecordCount, 1, "🔴 18 이 되면 「건」이 거짓말이 된다");
+});
+
+test("🔴 펼친 자리의 수도 수량이다 — 조각의 수와 갈리면 화면에서 어긋난 수가 보인다", () => {
+  const breakdown = buildFaultPartBreakdown([
+    part("case-A", "가 기판 (AA000111)", 5),
+    part("case-B", "가 기판 (AA000111)", 2),
+  ]);
+  const slice = breakdown.slices[0];
+  assert.equal(slice.count, 7);
+  assert.deepEqual(
+    slice.detail.parts.map((entry) => [entry.displayName, entry.count]),
+    [["가 기판 (AA000111)", 7]]
+  );
+});
+
+test("🔴 **기타로 접혀도** 접힌 부품 수량의 합이 조각의 수와 같다", () => {
+  const partRows: FaultPartRow[] = [];
+  // 값 9종 — 앞 8 종은 넉넉히, 접힐 두 종은 수량을 일부러 크게 둔다(줄 수로 세면
+  // 접히는 차례 자체가 달라진다).
+  for (let i = 1; i <= 8; i += 1) {
+    for (let n = 0; n < 10; n += 1) partRows.push(part(`case-${i}`, `상위 부품 ${i}`, 1));
+  }
+  partRows.push(part("case-9", "접힐 부품 가", 4));
+  partRows.push(part("case-9", "접힐 부품 나", 3));
+
+  const breakdown = buildFaultPartBreakdown(partRows);
+  const other = breakdown.slices[breakdown.slices.length - 1];
+  assert.equal(other.sliceKind, "OTHER", "이 시험의 전제가 깨졌다 — 기타 조각이 없다");
+  assert.equal(other.count, 7, "4 + 3 — 줄 수로 세면 2 가 된다");
+  assert.deepEqual(
+    other.detail.parts.map((entry) => entry.count),
+    [4, 3]
+  );
+  assert.equal(
+    other.detail.parts.reduce((sum, entry) => sum + entry.count, 0),
+    other.count,
+    "접힌 부품 수량의 합이 조각의 수와 다르다"
+  );
+  assert.equal(sumCounts(breakdown.slices), breakdown.total);
+});
+
+test("🔴 **다른 세 그래프는 한 줄이 한 건 그대로**다 — 수량에 안 물든다", () => {
+  // 같은 모델의 접수 건 셋 · 그 건들에서 나온 부품 수량 18개.
+  const cases = [
+    caseRow({ reportedSymptom: "출력 저하", endUserName: "가 연구소", billingType: "PAID" }),
+    caseRow({ reportedSymptom: "출력 저하", endUserName: "가 연구소", billingType: "PAID" }),
+    caseRow({ reportedSymptom: "전원 인가 불가", endUserName: "나 공장", billingType: "WARRANTY" }),
+  ];
+  const partRows = [
+    part(cases[0].id, "가 기판 (AA000111)", 5),
+    part(cases[0].id, "나 기판 (AA000222)", 5),
+    part(cases[1].id, "다 트랜스 (AA000333)", 3),
+    part(cases[2].id, "라 기판 (AA000444)", 5),
+  ];
+
+  assert.equal(buildFaultPartBreakdown(partRows).total, 18, "표본이 비었다 — 수량이 실려야 한다");
+  // 🔴 셋 다 **건수**다. 부품 수량이 어떻든 3 이어야 한다.
+  for (const breakdown of [
+    buildSymptomBreakdown(cases),
+    buildEndUserBreakdown(cases),
+    buildBillingBreakdown(cases),
+  ]) {
+    assert.equal(breakdown.total, 3, "접수 건 수가 아닌 수로 세고 있다");
+    assert.equal(sumCounts(breakdown.slices), 3);
+  }
+  // 조각 하나하나도 건수다 — 「출력 저하」는 2건이지 10개가 아니다.
+  assert.deepEqual(
+    buildSymptomBreakdown(cases).slices.map((slice) => [slice.label, slice.count]),
+    [
+      ["출력 저하", 2],
+      ["전원 인가 불가", 1],
+    ]
+  );
 });
 
 /**

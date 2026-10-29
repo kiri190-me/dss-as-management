@@ -28,7 +28,7 @@ import { BILLING_TYPE_CODES, billingTypeLabels, type BillingType } from "./types
  * 합은 언제나 접수 건수와 같다.
  *
  * `고장 부품`은 그렇지 않다. 이 시스템에는 "이 건에서 뭐가 고장났나"를 적는 칸이
- * **없다**. 가장 가까운 것이 **부품 줄**이라 그것을 쓰는데, 그래서 세 가지가 다르다:
+ * **없다**. 가장 가까운 것이 **부품 줄**이라 그것을 쓰는데, 그래서 네 가지가 다르다:
  *
  *   1. 한 건에서 부품이 여러 개일 수 있어 **조각의 합이 접수 건수와 맞지
  *      않는다.** 고장이 아니라 이 그래프의 성질이다. 화면은 원 밑에 그 사실을 한
@@ -38,6 +38,7 @@ import { BILLING_TYPE_CODES, billingTypeLabels, type BillingType } from "./types
  *      않는다 — `미입력` 조각을 만들면 그것이 원의 대부분을 먹어 정작 부품이 보이지
  *      않는다. 대신 `부품 기록이 있는 N건`을 숫자로 적는다.
  *   3. 그래서 이 함수만 접수 건이 아니라 **부품 줄**을 받는다.
+ *   4. 🔴 **이 함수만 줄 수가 아니라 수량을 센다**(2026-10-29 사용자 요청 — 아래 절).
  *
  * ── 🔴 부품 줄은 **세 군데**에서 온다 (2026-10-29 사용자 요청) ───────────
  * 2026-10-29 전에는 **부품 요청**(`inventory_part_request_items`)뿐이었다. 사용자 말이
@@ -64,8 +65,25 @@ import { BILLING_TYPE_CODES, billingTypeLabels, type BillingType } from "./types
  *    맞추는 일(= 옛 표도 좁히거나 반출도 넓히는 일)은 **하지 않기로 했다** — 옛 표는
  *    이미 멈춰서 넓히든 좁히든 새로 들어오는 줄이 없고, 반출 쪽을 넓히면 「신청만 하고
  *    안 나간 부품」이 고장 부품으로 세어진다.
- * 🔵 **수량은 세 입력 모두 안 본다.** `issued` 도 **거르는 데만** 쓰고 수로는 안 쓴다 —
- *    이 그래프의 셈법이 처음부터 「줄 하나가 한 개」다(아래 세 타입 주석이 같은 말을 한다).
+ *
+ * ── 🔴 **세는 것은 줄 수가 아니라 수량이다** (2026-10-29 사용자 요청) ────
+ * 사용자 말: 「반출 완료된 부품들의 갯수가 정확하게 들어가 있지 않아. 지금은 각 부품이
+ * 들어있는 수리건의 수를 파악해서 표시한 것 같은데, 그러지 말고 **실제로 사용된 부품의
+ * 수**를 표시해줘.」 운영에서 한 건에 「요청 5 / 불출 5」가 넷 있는데(= 18개가 나갔다)
+ * 그래프에는 **부품 4개**라고 떠 있었다.
+ *
+ * 🔴 **2026-10-29 그날 오전까지는 정반대로 적혀 있었다** — 「수량은 세 입력 모두 안
+ *    본다, 줄 하나가 한 개다」. 그것은 반출 입력이 들어올 때 **처음 그래프의 셈법을
+ *    그대로 이은** 것이었고, 고장 통계로 보면 맞는 물음은 「몇 개가 나갔나」다. 다음
+ *    사람이 옛 주석을 찾아 되돌리지 않게 적어 둔다.
+ * 🔴 **세 입력이 각각 어느 칸을 수량으로 쓰는가** — 아래 세 타입 주석에 한 줄씩 있다.
+ *    요약하면 요청은 `requested_quantity`(요청한 수), 사용은 `quantity`(연락서에 적힌
+ *    수), 반출은 `issued`(**실제로 나간 수** — 요청 수가 아니다).
+ * 🔵 **「부품 기록이 있는 N건」은 그대로 건수**다(`caseWithPartRecordCount`). 그것이
+ *    답하는 물음은 「몇 건에 부품 기록이 있나」라 수량과 아무 상관이 없다.
+ * 🔴 **다른 세 그래프는 안 바뀐다** — 고장 증상 · End-User · 유/무상은 「몇 건인가」를
+ *    묻는다. 무게를 싣는 길(`pie-slices.ts` 의 `weightOf`)을 이 그래프만 쓴다.
+ *
  * 🔴 **합치는 일은 이 파일이 하지 않는다.** 두 입력을 「고객사 품명 (품번)」 한 글자로
  *    만들어 섞는 자리는 `domain/product-model-fault-parts.ts` 이고(서버에서 돈다),
  *    여기는 **이미 글자가 된 줄**을 받아 세기만 한다 — 그 글자를 만드는 규칙이 연락서
@@ -116,9 +134,13 @@ export type ProductModelBreakdownCase = {
  * 도메인에 두는 이유: 조회 파일은 `server-only` 이라 그 타입을 아무나 import 할 수
  * 없다. 조회와 합치는 자리가 같은 모양을 말하려면 타입이 둘 다 닿는 자리에 있어야 한다.
  *
- * **요청 줄 하나가 한 개**다(수량이 아니다). 같은 건에서 같은 부품을 두 번 다른
- * 요청으로 올렸으면 두 줄이고, 그래프에서도 2 로 센다 — "몇 번 지목되었나"가 이
- * 그래프가 답하는 질문이라서다.
+ * 🔴 **세는 것은 그 줄의 수량(`requested_quantity`)이다**(2026-10-29 사용자 요청 —
+ *    파일 머리말). 5개를 요청한 줄은 5 로 센다. 같은 건에서 같은 부품을 두 번 다른
+ *    요청으로 올렸으면 두 줄이고, 그래프에서는 **두 줄의 수량을 더한다.**
+ * 🔴 **`issued_quantity`(실제로 나간 수)가 아니다.** 이 입력이 재는 것은 처음부터
+ *    「요청한 의도」라 대기·보류까지 세고(아래 조회의 `UNCOUNTED_PART_REQUEST_STATUSES`
+ *    는 취소·반려만 뺀다), 나간 수로 바꾸면 **대기 중인 줄이 전부 0 이 되어 조용히
+ *    사라진다.** 🔵 한 원 안에 자가 둘인 것은 알고 고른 것이다(파일 머리말).
  *
  * 🔴 **품명 말고 세 칸이 더 있는 까닭** (2026-10-29): 이름표를 「고객사 품명 (품번)」으로
  *    만들려면 그 줄의 **품번**을 알아야 하고, 그것이 어느 칸인지는 재고 관리에서 잰 차례가
@@ -127,6 +149,13 @@ export type ProductModelBreakdownCase = {
  */
 export type RequestedPartRow = {
   repairCaseId: string;
+  /**
+   * 요청한 수(`inventory_part_request_items.requested_quantity`). 🔴 DB 가 **NOT NULL ·
+   * 0 보다 큼**을 지키지만(`inventory_part_request_items_requested_quantity_positive`),
+   * 그 보장을 믿고 그대로 세지는 않는다 — 눕히는 자가 한 곳에 있다
+   * (`domain/product-model-fault-parts.ts` 의 `faultPartQuantity`).
+   */
+  quantity: number;
   partName: string;
   partSpec: string | null;
   kyosanPartNo: string | null;
@@ -141,12 +170,19 @@ export type RequestedPartRow = {
  *    (`domain/used-part-display.ts` 머리말). 그래서 칸 이름이 `partNameText` 인데 들어
  *    있는 것은 품명이 아니다 — 그 글자를 보여 줄 때만 이름을 앞에 붙인다.
  *
- * **줄 하나가 한 개**다. 위 요청 줄과 같은 셈법이고, `quantity` 는 보지 않는다 — 이
- * 그래프가 묻는 것은 "어느 부품이 몇 번 나왔나"이지 "몇 개가 나갔나"가 아니다.
+ * 🔴 **세는 것은 `quantity`(몇 개를 갈았나)다**(2026-10-29 사용자 요청 — 파일 머리말).
+ *    2026-10-29 오전까지는 「`quantity` 는 보지 않는다」였다. 연락서에서 「3」을 읽어
+ *    저장해 놓고 그래프에서 1 로 세면, 그 3 을 적어 둔 까닭이 없어진다.
  */
 export type UsedPartRow = {
   repairCaseId: string;
   partNameText: string;
+  /**
+   * 연락서에서 읽어 저장한 수량(`repair_case_used_parts.quantity`). 🔴 DB 가 **NOT NULL ·
+   * 0 보다 큼**을 지킨다(`repair_case_used_parts_quantity_positive`). 연락서에 수량이
+   * 안 적혀 있던 줄은 **이식할 때 이미 1 로** 들어왔다(`kyosan-report-import.ts` 의 `?? 1`).
+   */
+  quantity: number;
 };
 
 /**
@@ -172,10 +208,18 @@ export type UsedPartRow = {
  * 규칙을 이 입력만 따로 적지 않으려는 것이다.
  * 🔵 **없는 칸은 빈 글자**다(`null` 이 아니다). 저쪽 파서가 그렇게 눕혀 준다.
  *
- * **줄 하나가 한 개**다. 위 둘과 같은 셈법이고 `issued` 를 수로 쓰지 않는다.
+ * ── 🔴 수량은 `issued` 다 — **요청 수가 아니다** (2026-10-29 사용자 요청) ──
+ * 저쪽 줄에는 수가 둘이다: `quantity`(요청한 수)와 `issued`(**실제로 나간 수**). 이
+ * 입력이 재는 것은 「물건이 실제로 나갔다」라 `issued` 를 쓴다 — `PARTIAL`(일부 나감)
+ * 신청에서 5개를 요청하고 2개만 나갔으면 **2** 다. 🔴 `quantity` 를 쓰면 안 나간 3개가
+ * 고장 부품으로 세어진다.
+ * 🔵 그래서 `issued` 가 **거르는 자이면서 세는 자**다(1 이상인 줄만 오고, 그 수가 곧
+ *    무게다). 2026-10-29 오전까지는 거르는 데만 썼다.
  */
 export type IssuedPartRow = {
   repairCaseId: string;
+  /** 🔴 **실제로 나간 수**(저쪽 줄의 `issued`). 언제나 1 이상이다 — 0 인 줄은 안 온다. */
+  quantity: number;
   partName: string;
   partSpec: string;
   kyosanPartNo: string;
@@ -194,6 +238,18 @@ export type IssuedPartRow = {
  */
 export type FaultPartRow = {
   repairCaseId: string;
+  /**
+   * 🔴 **이 줄을 몇으로 셀 것인가** (2026-10-29). 세 입력의 수량이 여기로 모인다
+   * (요청 수 · 연락서에 적힌 수 · 실제로 나간 수).
+   *
+   * 🔴 **이미 눕혀진 값이다 — 언제나 1 이상의 정수**다. 눕히는 자는
+   *    `domain/product-model-fault-parts.ts` 의 `faultPartQuantity` 한 곳이고, 아래
+   *    `buildFaultPartBreakdown` 은 이 값을 그대로 무게로 쓴다.
+   * 🔴 **고르는 칸이 아니라 반드시 적어야 하는 칸이다**(`quantity?:` 로 두지 않았다).
+   *    빠뜨리면 그 줄이 **오류 없이 1 로** 세어지는데, 그것이 2026-10-29 에 사용자가
+   *    신고한 바로 그 증상이다 — 18개가 나간 건이 「부품 4개」로 떠 있었다.
+   */
+  quantity: number;
   /** 「고객사 품명 (품번)」. 이름을 못 얻었으면 품번 그대로다(그것도 열쇠가 된다). */
   displayName: string;
   /**
@@ -397,7 +453,14 @@ export type FaultPartDetailEntry = {
   displayName: string;
   /** 🔴 재고 관리 줄을 맞대는 열쇠(FaultPartRow.matchKey). 빈 글자일 수 있다. */
   matchKey: string;
-  /** 이 조각 안에서 그 부품이 나온 **줄 수**. 조각 건수의 합과 같다. */
+  /**
+   * 이 조각 안에서 그 부품이 나온 **수량의 합**. 🔴 **조각의 수와 같은 자로 센다**
+   * (2026-10-29) — 줄 수로 세던 값이다.
+   *
+   * 🔴 두 자가 갈리면 **화면에서 바로 어긋난 수가 보인다**: 기타 조각을 펼치면
+   *    조각 제목(`기타(2종) — 7개`) 밑에 부품마다 `· N개`가 뜨는데, 그 합이 제목과
+   *    달라진다. 그래서 무게를 처리기까지 날라 둔다(`pie-slices.ts` 의 `add`).
+   */
   count: number;
 };
 
@@ -414,16 +477,19 @@ export type FaultPartDetail = {
  *    (`pie-slices.ts` 의 `normalize` — 앞뒤 공백을 떼어 낸다)와 여기 적는 글자가 **원형**이라
  *    드물게 두 글자가 한 조각에 들어올 수 있기 때문이다. 그때도 조각 건수와 합이 맞는다.
  * 🔵 `add` 는 누적기를 **제자리에서** 바꾼다(PieDetailHandlers 의 약속).
+ * 🔴 **수는 받은 무게로 더한다**(2026-10-29). `row.quantity` 를 여기서 다시 읽지 않는
+ *    까닭: 무게를 정하는 자가 둘이 되면 어느 날 한쪽만 고쳐져 **조각의 수와 펼친 자리의
+ *    수가 달라진다.** 넘겨준 자는 `buildFaultPartBreakdown` 의 `weightOf` 하나다.
  */
 const faultPartDetail: PieDetailHandlers<FaultPartRow, FaultPartDetail> = {
   create: () => ({ parts: [] }),
-  add: (detail, row) => {
+  add: (detail, row, weight) => {
     const found = detail.parts.find((entry) => entry.displayName === row.displayName);
     if (found) {
-      found.count += 1;
+      found.count += weight;
       return;
     }
-    detail.parts.push({ displayName: row.displayName, matchKey: row.matchKey, count: 1 });
+    detail.parts.push({ displayName: row.displayName, matchKey: row.matchKey, count: weight });
   },
   // 🔵 접힌 차례 그대로 이어 붙인다(위 머리말). 다시 정렬하지 않는다.
   merge: (details) => ({ parts: details.flatMap((detail) => detail.parts) }),
@@ -434,6 +500,10 @@ export type FaultPartBreakdown = ProductModelPieBreakdown<FaultPartDetail> & {
    * 부품 줄이 하나라도 붙어 있는 **접수 건 수**(요청 · 사용 · 반출을 가리지 않는다).
    * total(부품 개수)과 다를 수 있고, 다른 것이 정상이다 — 화면이 두 숫자를 나란히
    * 적어 그 차이를 먼저 말한다.
+   *
+   * 🔴 **이 수만 수량을 안 탄다**(2026-10-29). 2026-10-29 에 그래프가 줄 수에서 수량으로
+   *    바뀌었지만 이 칸이 답하는 물음은 「**몇 건에** 부품 기록이 있나」라 그대로 건수다.
+   *    한 건에서 18개가 나가도 1 이다 — 수량으로 바꾸면 「건」이라는 글자가 거짓말이 된다.
    *
    * 🔴 2026-10-29 전에는 이름이 `caseWithRequestCount` 였다. 사용 부품이 들어오면서
    *    **요청만 세는 수가 아니게 되어** 이름을 바꿨다 — 그대로 두면 다음 사람이 그
@@ -457,15 +527,28 @@ export type FaultPartBreakdown = ProductModelPieBreakdown<FaultPartDetail> & {
  *
  * 🔴 **조각마다 「어느 부품인가」가 달려 나온다**(2026-10-29). 2026-10-29 전에는
  *    `NO_PIE_DETAIL` 이라 눌러도 펼칠 것이 없었다 — 위 FaultPartDetail 머리말.
+ *
+ * ── 🔴 **세는 것은 줄 수가 아니라 수량이다** (2026-10-29 사용자 요청) ────
+ * `total` 도 조각의 수도 %도 전부 **수량의 합**이다. 줄이 넷이어도 5+5+3+5 가 나갔으면
+ * **18개**다(사용자가 보낸 실측 그대로). 🔴 **그러면서 `caseWithPartRecordCount` 는 건수
+ * 그대로**다 — 두 수가 다른 자로 세어지는 것이 이 그래프의 성질이고, 화면이 둘을 나란히
+ * 적어 그 차이를 먼저 말한다.
+ * 🔵 무게를 싣는 길은 `pie-slices.ts` 가 열어 두었고 **이 그래프만** 쓴다. 다른 셋은
+ *    `weightOf` 를 안 넘겨 예전 그대로 「한 줄이 하나」다.
  */
 export function buildFaultPartBreakdown(partRows: readonly FaultPartRow[]): FaultPartBreakdown {
   return {
-    total: partRows.length,
+    // 🔴 조각 수의 합과 **같은 자**여야 한다(줄 수로 두면 화면 위 「부품 N개」와 원 안의
+    //    수가 어긋난다). 그래서 여기서도 수량을 더한다.
+    total: partRows.reduce((sum, row) => sum + row.quantity, 0),
     caseWithPartRecordCount: new Set(partRows.map((row) => row.repairCaseId)).size,
     slices: buildPieSlices(partRows, {
       labelOf: (row) => row.displayName,
       unspecifiedLabel: FAULT_SYMPTOM_UNSPECIFIED_LABEL,
       fold: { topLimit: PRODUCT_MODEL_TOP_SLICE_LIMIT, otherLabel: PRODUCT_MODEL_OTHER_LABEL },
+      // 🔴 **이 한 줄이 「줄 수」와 「수량」을 가른다.** 넘기지 않으면 조용히 예전처럼
+      //    한 줄을 하나로 센다(`pie-slices.ts` 의 기본값).
+      weightOf: (row) => row.quantity,
       detail: faultPartDetail,
     }),
   };

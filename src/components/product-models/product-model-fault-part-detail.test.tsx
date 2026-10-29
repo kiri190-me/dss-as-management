@@ -49,6 +49,23 @@ function flat(text: string): string {
   return text.replace(/\s+/g, " ");
 }
 
+/**
+ * [고장 부품] 카드 **한 장의 코드**만 잘라 낸다 — 다음 카드([End-User])가 시작하는
+ * 자리까지다.
+ *
+ * 🔴 **거리로 자르지 않는 까닭**(`[\s\S]{0,600}?` 같은 것): 설명 줄 한 줄만 길어져도
+ *    규칙이 조용히 안 걸리고, 그때 시험은 「못 찾았다」로 실패해 **고칠 자리를 엉뚱한
+ *    데서 찾게** 만든다. 카드 경계는 제목으로 분명히 갈린다.
+ * 🔴 못 찾으면 **그 자리에서 실패**한다 — 빈 글자를 돌려주면 아래 단언들이 공짜로
+ *    통과한다(「없다」는 쪽 단언이 특히 그렇다).
+ */
+function partCardCode(): string {
+  const from = code.indexOf("title={CHART_LABELS.PART}");
+  const to = code.indexOf("title={CHART_LABELS.END_USER}");
+  assert.ok(from > 0 && to > from, "[고장 부품] 카드의 자리를 못 찾았다");
+  return code.slice(from, to);
+}
+
 function inventoryRow(overrides: Partial<FaultPartInventoryRow> & { no: number }): FaultPartInventoryRow {
   return {
     // 🔵 `no` 는 기본값을 두지 않는다 — 타입이 부르는 쪽에 적게 만든다.
@@ -282,6 +299,49 @@ describe("[고장 부품] 펼친 자리 — 카드까지 연결돼 있는가", (
     assert.ok(note, "[고장 부품] 카드의 설명 줄을 못 찾았다");
     assert.ok(note[1].includes("조각을 누르면"), note[1]);
   });
+
+  /**
+   * 🔴 **세는 자가 바뀌면 설명 줄도 바뀌어야 한다** (2026-10-29 사용자 요청). 같은 날
+   * 오전까지 이 줄은 「반출 부품은 실제로 나간 **줄만** 셉니다」라고 적고 있었고, 그래프가
+   * 수량을 세게 되면서 **틀린 말**이 되었다. 🔵 화면에서 수가 갑자기 네 배가 되는 변화라,
+   * 설명 줄이 그 사실을 말하지 않으면 사람이 그래프를 안 믿게 된다.
+   * 🔴 이 카드는 처음에 꺼져 있어 그려 볼 수 없다 — 그래서 **글자로** 읽는다(파일 머리말).
+   */
+  test("🔴 설명 줄이 **개수는 실제 수량**이라고 말한다 — 「나간 줄만」은 이제 틀린 말이다", () => {
+    const note = /note="([^"]+)"[\s\S]{0,200}?warning=\{faultPartWarning\}/.exec(code);
+    assert.ok(note, "[고장 부품] 카드의 설명 줄을 못 찾았다");
+    assert.ok(note[1].includes("실제 수량"), `수량으로 센다는 말이 없다: ${note[1]}`);
+    assert.equal(
+      note[1].includes("나간 줄만"),
+      false,
+      `줄을 센다고 적혀 있다 — 2026-10-29 뒤로 틀린 말이다: ${note[1]}`
+    );
+    // 🔵 기존에 적혀 있던 말 둘은 **그대로** 있어야 한다 — 더한 것이지 갈아 끼운 것이 아니다.
+    assert.ok(note[1].includes("취소·반려"), note[1]);
+    assert.ok(note[1].includes("접수 건수와 합이 다릅니다"), note[1]);
+  });
+
+  test("🔴 낭독기에 읽히는 글자도 **수량 비율**이다 — 「요청 비율」이 아니다", () => {
+    const aria = /ariaLabel=\{`([^`]+)`\}/.exec(partCardCode());
+    assert.ok(aria, "[고장 부품] 카드의 ariaLabel 을 못 찾았다");
+    assert.ok(aria[1].includes("수량 비율"), aria[1]);
+    assert.equal(aria[1].includes("요청 비율"), false, aria[1]);
+  });
+
+  /**
+   * 🔴 **두 수가 서로 다른 자로 세어진다** — 앞은 수량, 뒤는 건수다. 한 건에서 18개가
+   * 나갔으면 「부품 18개 · 부품 기록이 있는 1건」이 맞다. 🔵 이상해 보이는 짝이라
+   * 누군가 「맞추려고」 뒤엣것을 수량으로 바꾸기 쉬워서 글자로 못 박아 둔다.
+   */
+  test("🔴 머리의 두 수는 **수량 + 건수**다 — 뒤엣것을 수량으로 맞추면 「건」이 거짓말이 된다", () => {
+    const meta = /meta=\{`([^`]+)`\}/.exec(partCardCode());
+    assert.ok(meta, "[고장 부품] 카드의 meta 를 못 찾았다");
+    assert.ok(meta[1].includes("부품 ${faultPart.total}개"), meta[1]);
+    assert.ok(
+      meta[1].includes("부품 기록이 있는 ${faultPart.caseWithPartRecordCount}건"),
+      meta[1]
+    );
+  });
 });
 
 /** 접수 건 한 줄. 🔴 고객사명·L/N·S/N 은 **전부 가짜**다. */
@@ -339,7 +399,7 @@ describe("[고장 부품] 펼친 자리 — 안 켠 카드로는 새지 않는�
       createElement(ProductModelHistoryBreakdown, {
         resolved: [fakeCase("case-01")],
         faultParts: [
-          { repairCaseId: "case-01", displayName: "종단 증폭 기판 (DWG-AA1001)", matchKey: "dwgaa1001" },
+          { repairCaseId: "case-01", quantity: 1, displayName: "종단 증폭 기판 (DWG-AA1001)", matchKey: "dwgaa1001" },
         ],
         faultPartIssuedLookup: { uncountedCaseCount: 0, timedOutCaseCount: 0, timeBudgetMs: 5000 },
         faultPartInventory: INDEX,

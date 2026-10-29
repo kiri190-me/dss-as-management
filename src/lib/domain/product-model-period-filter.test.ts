@@ -71,8 +71,13 @@ function historyCase(
  *    값을 만드는 가장 짧은 길일 뿐이고, 열쇠가 그래프와 맞는지는 `fault-part-inventory.test.ts`
  *    가 **진짜 자로** 잰다.
  */
+/**
+ * 🔴 `quantity`(2026-10-29 에 생긴 칸)도 **이 파일이 보지 않는 값**이라 1 로 둔다 —
+ *    거르는 자는 `repairCaseId` 만 본다. 수량을 세는지는 `product-model-breakdown.test.ts`
+ *    가 값으로 보고, 여기서 1 로 두어야 **조각 수 = 남은 줄 수**라 기대값을 눈으로 센다.
+ */
 function part(repairCaseId: string, displayName: string, matchKey = displayName): FaultPartRow {
-  return { repairCaseId, displayName, matchKey };
+  return { repairCaseId, quantity: 1, displayName, matchKey };
 }
 
 function labels(slices: readonly PieSlice<unknown>[]): string[] {
