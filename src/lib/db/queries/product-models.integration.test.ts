@@ -3,11 +3,27 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, inArray, like } from "drizzle-orm";
 import { db, pgClient } from "../connection";
-import { customers, productModels, products, repairCaseIntakeSequences, repairCases, users } from "../schema";
+import {
+  customers,
+  inventoryPartRequestItems,
+  inventoryPartRequests,
+  parts,
+  productModels,
+  products,
+  repairCaseIntakeSequences,
+  repairCaseUsedParts,
+  repairCases,
+  users,
+} from "../schema";
 import { createRepairCase } from "../mutations/repair-cases";
-import { getProductModelDetailById, listProductModels } from "./product-models";
+import {
+  getProductModelDetailById,
+  listProductModels,
+  listRequestedPartsByProductModelId,
+  listUsedPartsByProductModelId,
+} from "./product-models";
 import { listRepairCasesByProductModelId } from "./repair-cases";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -40,6 +56,15 @@ const TEST_RECEIVED_AT_LATER = "2098-06-20";
 let customerId: string;
 let engineerId: string;
 
+/**
+ * 부품 쪽이 만든 행은 **id 를 손에 쥐고** 지운다(아래 after). 접수 건 번호로 찾을 수
+ * 없어서다 — `inventory_part_requests.repair_case_id` 는 ON DELETE SET NULL 이라,
+ * 접수 건을 먼저 지우면 이 행들이 **주인 없이 남는다**(오류도 안 난다).
+ * 🔵 `repair_case_used_parts` 는 CASCADE 라 접수 건과 함께 사라진다 — 따로 세지 않는다.
+ */
+const createdPartIds: string[] = [];
+const createdRequestIds: string[] = [];
+
 before(async () => {
   const customer = await db
     .insert(customers)
@@ -57,6 +82,15 @@ before(async () => {
 });
 
 after(async () => {
+  // 🔴 접수 건보다 **먼저** 치운다(위 createdRequestIds 주석). 줄 → 머리 차례여야
+  // 한다 — items.request_id 는 RESTRICT 다.
+  if (createdRequestIds.length > 0) {
+    await db
+      .delete(inventoryPartRequestItems)
+      .where(inArray(inventoryPartRequestItems.requestId, createdRequestIds));
+    await db.delete(inventoryPartRequests).where(inArray(inventoryPartRequests.id, createdRequestIds));
+  }
+
   const testCaseRows = await db
     .select({ id: repairCases.id, productId: repairCases.productId })
     .from(repairCases)
@@ -67,6 +101,10 @@ after(async () => {
     for (const id of productIds) {
       await db.delete(products).where(eq(products.id, id));
     }
+  }
+  // 요청 줄이 사라진 뒤라야 부품을 지울 수 있다(part_id 도 RESTRICT).
+  if (createdPartIds.length > 0) {
+    await db.delete(parts).where(inArray(parts.id, createdPartIds));
   }
   await db.delete(repairCaseIntakeSequences).where(eq(repairCaseIntakeSequences.yearMonth, TEST_YEAR_MONTH));
   await db.delete(customers).where(like(customers.name, `${TEST_CUSTOMER_NAME_PREFIX}%`));
@@ -115,6 +153,192 @@ async function insertMasterAndLinkUnits(modelName: string): Promise<string> {
   await db.update(products).set({ productModelId: master.id }).where(eq(products.modelName, modelName));
   return master.id;
 }
+
+/** 부품 마스터 한 줄. 🔴 `parts` 에는 **고객사 품명 칸이 없다** — 넷이 전부다. */
+async function insertTestPart(fields: {
+  partName: string;
+  partSpec?: string | null;
+  kyosanPartNo?: string | null;
+  drawingNo?: string | null;
+}): Promise<string> {
+  const [row] = await db.insert(parts).values(fields).returning({ id: parts.id });
+  createdPartIds.push(row.id);
+  return row.id;
+}
+
+/** 그 접수 건에 묶인 부품 요청 하나 — 머리 + 줄 하나. */
+async function insertPartRequest(
+  repairCaseId: string,
+  partId: string,
+  status: "PENDING" | "FULLY_ISSUED" | "REJECTED" | "CANCELLED" | "ON_HOLD"
+): Promise<string> {
+  const [request] = await db
+    .insert(inventoryPartRequests)
+    .values({ repairCaseId, requestedByUserId: engineerId, status })
+    .returning({ id: inventoryPartRequests.id });
+  createdRequestIds.push(request.id);
+  await db
+    .insert(inventoryPartRequestItems)
+    .values({ requestId: request.id, partId, requestedQuantity: 1 });
+  return request.id;
+}
+
+/**
+ * 그 접수 건에 손으로 적힌 사용 부품 한 줄.
+ * 🔴 `part_id` 는 **NULL** 이다 — 연락서 이식분이 전부 그렇고, 그래서 이 표의 줄은
+ * 부품 마스터와 조인되지 않는다(글자만 있다).
+ */
+async function insertUsedPart(repairCaseId: string, lineNo: number, partNameText: string) {
+  await db
+    .insert(repairCaseUsedParts)
+    .values({ repairCaseId, lineNo, partId: null, partNameText, quantity: 1 });
+}
+
+/**
+ * ============================================================================
+ * [고장 부품] 그래프가 읽는 두 조회 (2026-10-29)
+ * ============================================================================
+ * 🔴 **2026-10-29 전까지 이 둘을 재는 단언이 한 줄도 없었다.** 조인 조건도, 상태
+ *    제외도, 휴지통 제외도 바꿔 버릴 수 있었고 아무것도 깨지지 않았다.
+ * 🔴 **부품 이름·품번은 가짜다**(`AA000111` 꼴). 공개 저장소다.
+ * ============================================================================
+ */
+describe("listRequestedPartsByProductModelId / listUsedPartsByProductModelId", () => {
+  test("요청 줄: 그 모델의 건만 · 취소·반려는 빼고 · 품번 칸 셋을 함께 돌려준다", async () => {
+    const modelName = `${TEST_MODEL_PREFIX}REQPARTS-${randomUUID().slice(0, 8)}`;
+    const otherModelName = `${TEST_MODEL_PREFIX}REQPARTS-OTHER-${randomUUID().slice(0, 8)}`;
+
+    const caseA = await createRepairCase(
+      baseCreateInput({ modelName, lotNumber: "LOT-A", serialNumber: "SN-A" })
+    );
+    const caseB = await createRepairCase(
+      baseCreateInput({ modelName, lotNumber: "LOT-B", serialNumber: "SN-B" })
+    );
+    const caseOther = await createRepairCase(baseCreateInput({ modelName: otherModelName }));
+    assert.equal(caseA.ok, true, `setup failed: ${JSON.stringify(caseA)}`);
+    assert.equal(caseB.ok, true, `setup failed: ${JSON.stringify(caseB)}`);
+    assert.equal(caseOther.ok, true, `setup failed: ${JSON.stringify(caseOther)}`);
+    if (!caseA.ok || !caseB.ok || !caseOther.ok) return;
+
+    const masterId = await insertMasterAndLinkUnits(modelName);
+    await insertMasterAndLinkUnits(otherModelName);
+
+    const countedPartName = `AS-TEST-PART-COUNTED-${randomUUID().slice(0, 8)}`;
+    const uncountedPartName = `AS-TEST-PART-UNCOUNTED-${randomUUID().slice(0, 8)}`;
+    const otherModelPartName = `AS-TEST-PART-OTHERMODEL-${randomUUID().slice(0, 8)}`;
+    const countedPartId = await insertTestPart({
+      partName: countedPartName,
+      partSpec: "AC100V",
+      kyosanPartNo: "KY000111",
+      drawingNo: "AA000111",
+    });
+    const uncountedPartId = await insertTestPart({ partName: uncountedPartName });
+    const otherModelPartId = await insertTestPart({ partName: otherModelPartName });
+
+    await insertPartRequest(caseA.id, countedPartId, "PENDING");
+    await insertPartRequest(caseB.id, countedPartId, "FULLY_ISSUED");
+    // 🔴 세지 않는 둘. 같은 건에 걸어 두어야 "건이 빠진 것"과 구별된다.
+    await insertPartRequest(caseA.id, uncountedPartId, "REJECTED");
+    await insertPartRequest(caseB.id, uncountedPartId, "CANCELLED");
+    // 다른 모델의 건 — 이 모델의 그래프에 오면 안 된다.
+    await insertPartRequest(caseOther.id, otherModelPartId, "PENDING");
+
+    const rows = await listRequestedPartsByProductModelId(masterId);
+    assert.equal(rows.length, 2, "세는 요청 둘만 — 취소·반려와 남의 모델은 빠진다");
+    assert.deepEqual(
+      rows.map((row) => row.partName),
+      [countedPartName, countedPartName]
+    );
+    assert.deepEqual(
+      [...new Set(rows.map((row) => row.repairCaseId))].sort(),
+      [caseA.id, caseB.id].sort(),
+      "두 건에서 한 줄씩 나온다"
+    );
+    // 🔴 이름표를 「고객사 품명 (품번)」으로 만들려면 이 셋이 있어야 한다.
+    assert.equal(rows[0].drawingNo, "AA000111");
+    assert.equal(rows[0].kyosanPartNo, "KY000111");
+    assert.equal(rows[0].partSpec, "AC100V");
+
+    // 휴지통에 든 건은 빠진다.
+    await db.update(repairCases).set({ isDeleted: true }).where(eq(repairCases.id, caseB.id));
+    const afterTrash = await listRequestedPartsByProductModelId(masterId);
+    assert.equal(afterTrash.length, 1, "휴지통에 든 건의 줄은 세지 않는다");
+    assert.equal(afterTrash[0].repairCaseId, caseA.id);
+  });
+
+  test("사용 부품 줄: 그 모델의 건만 · 한 건의 여러 줄을 다 돌려준다 · 휴지통은 뺀다", async () => {
+    const modelName = `${TEST_MODEL_PREFIX}USEDPARTS-${randomUUID().slice(0, 8)}`;
+    const otherModelName = `${TEST_MODEL_PREFIX}USEDPARTS-OTHER-${randomUUID().slice(0, 8)}`;
+
+    const caseA = await createRepairCase(
+      baseCreateInput({ modelName, lotNumber: "LOT-A", serialNumber: "SN-A" })
+    );
+    const caseB = await createRepairCase(
+      baseCreateInput({ modelName, lotNumber: "LOT-B", serialNumber: "SN-B" })
+    );
+    const caseOther = await createRepairCase(baseCreateInput({ modelName: otherModelName }));
+    assert.equal(caseA.ok, true, `setup failed: ${JSON.stringify(caseA)}`);
+    assert.equal(caseB.ok, true, `setup failed: ${JSON.stringify(caseB)}`);
+    assert.equal(caseOther.ok, true, `setup failed: ${JSON.stringify(caseOther)}`);
+    if (!caseA.ok || !caseB.ok || !caseOther.ok) return;
+
+    const masterId = await insertMasterAndLinkUnits(modelName);
+    await insertMasterAndLinkUnits(otherModelName);
+
+    await insertUsedPart(caseA.id, 1, "AA000111");
+    await insertUsedPart(caseA.id, 2, "AA000222");
+    await insertUsedPart(caseB.id, 1, "AA000111");
+    await insertUsedPart(caseOther.id, 1, "AA000999");
+
+    const rows = await listUsedPartsByProductModelId(masterId);
+    assert.equal(rows.length, 3, "한 건의 두 줄도 각각 한 개다");
+    assert.deepEqual(
+      rows.map((row) => row.partNameText),
+      ["AA000111", "AA000111", "AA000222"],
+      "품번 오름차순 — 남의 모델의 AA000999 는 오지 않는다"
+    );
+    assert.equal(
+      rows.filter((row) => row.repairCaseId === caseA.id).length,
+      2,
+      "같은 건에 적힌 두 줄이 둘 다 온다"
+    );
+
+    await db.update(repairCases).set({ isDeleted: true }).where(eq(repairCases.id, caseB.id));
+    const afterTrash = await listUsedPartsByProductModelId(masterId);
+    assert.equal(afterTrash.length, 2, "휴지통에 든 건의 줄은 세지 않는다");
+    assert.ok(afterTrash.every((row) => row.repairCaseId === caseA.id));
+  });
+
+  test("🔴 한 건에 요청 줄과 사용 부품 줄이 둘 다 있으면 두 조회가 각각 그대로 돌려준다", async () => {
+    // 그래프는 이 둘을 **더해서** 센다(domain/product-model-fault-parts.ts 머리말 —
+    // 「겹치면 둘 다 센다」). 🔴 어느 한쪽 조회가 상대를 보고 줄을 빼기 시작하면
+    // 그 결정이 조용히 뒤집히므로, DB 층에서 못 박아 둔다.
+    const modelName = `${TEST_MODEL_PREFIX}BOTHPARTS-${randomUUID().slice(0, 8)}`;
+    const theCase = await createRepairCase(baseCreateInput({ modelName }));
+    assert.equal(theCase.ok, true, `setup failed: ${JSON.stringify(theCase)}`);
+    if (!theCase.ok) return;
+
+    const masterId = await insertMasterAndLinkUnits(modelName);
+    const partName = `AS-TEST-PART-BOTH-${randomUUID().slice(0, 8)}`;
+    const partId = await insertTestPart({ partName, drawingNo: "AA000111" });
+    await insertPartRequest(theCase.id, partId, "PENDING");
+    await insertUsedPart(theCase.id, 1, "AA000111");
+
+    const requested = await listRequestedPartsByProductModelId(masterId);
+    const used = await listUsedPartsByProductModelId(masterId);
+    assert.equal(requested.length, 1);
+    assert.equal(requested[0].drawingNo, "AA000111");
+    assert.equal(used.length, 1, "요청 줄이 있다고 사용 부품 줄을 빼지 않는다");
+    assert.equal(used[0].partNameText, "AA000111");
+  });
+
+  test("두 조회 다 UUID 가 아닌 id 에는 빈 목록이다 — 던지지 않는다", async () => {
+    assert.deepEqual(await listRequestedPartsByProductModelId("not-a-uuid"), []);
+    assert.deepEqual(await listUsedPartsByProductModelId("not-a-uuid"), []);
+    assert.deepEqual(await listRequestedPartsByProductModelId(randomUUID()), []);
+    assert.deepEqual(await listUsedPartsByProductModelId(randomUUID()), []);
+  });
+});
 
 describe("listProductModels / getProductModelDetailById / listRepairCasesByProductModelId", () => {
   test("a model with 2 distinct units and a repeat-intake case: unitCount=2, repairCaseCount=3, lastReceivedAt is the max", async () => {

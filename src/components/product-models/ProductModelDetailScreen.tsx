@@ -10,7 +10,7 @@ import type {
 import type { ProductModelCustomerOption } from "@/lib/db/queries/product-model-customers";
 import type { ProductModelDetail } from "@/lib/db/queries/product-models";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
-import type { RequestedPartRow } from "@/lib/domain/product-model-breakdown";
+import type { FaultPartRow } from "@/lib/domain/product-model-breakdown";
 import { mergeProductModelCustomers } from "@/lib/domain/product-model-customer-merge";
 import { productModelKindLabel } from "@/lib/domain/product-model-kind";
 import {
@@ -158,7 +158,7 @@ function CustomerField({
 export default function ProductModelDetailScreen({
   detail,
   repairCases,
-  requestedParts,
+  faultParts,
   canEdit,
   customerOptions,
   attachments,
@@ -168,8 +168,12 @@ export default function ProductModelDetailScreen({
 }: {
   detail: ProductModelDetail;
   repairCases: ResolvedRepairCase[];
-  /** 고장 부품 그래프의 재료. 접수 건마다 한 줄이 아니다 — 여러 줄이거나 없다. */
-  requestedParts: RequestedPartRow[];
+  /**
+   * 고장 부품 그래프의 재료. 접수 건마다 한 줄이 아니다 — 여러 줄이거나 없다.
+   * 🔴 **부품 요청 줄과 사용 부품 줄이 이미 합쳐져** 있고, 이름표도 서버가
+   * 「고객사 품명 (품번)」으로 만들어 두었다(2026-10-29 — page.tsx 의 그 주석).
+   */
+  faultParts: FaultPartRow[];
   canEdit: boolean;
   /** 수정 폼의 고객사 콤보박스가 고를 수 있는 목록. canEdit 이 아닌 세션에는
    * 서버가 빈 배열을 넘긴다 — 폼 자체가 뜨지 않는 자리라 실어 보낼 이유가 없다. */
@@ -288,7 +292,7 @@ export default function ProductModelDetailScreen({
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">A/S 이력</h2>
-        <ProductModelHistoryBreakdown resolved={repairCases} requestedParts={requestedParts} />
+        <ProductModelHistoryBreakdown resolved={repairCases} faultParts={faultParts} />
       </section>
     </div>
   );

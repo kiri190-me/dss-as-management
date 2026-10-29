@@ -115,7 +115,9 @@ import type { InventoryResult } from "./inventory-gateway";
  *
  * ── 🔵 부를 자리가 둘이다 ───────────────────────────────────────────────
  *   · 수리 건 상세 → [사용부품] 칸 (`repair-cases/[id]/page.tsx` 가 서버에서 합친다)
- *   · 제품 모델 상세 → [A/S 이력] → [고장 부품] 그래프 (**다음 조각**)
+ *   · 제품 모델 상세 → [A/S 이력] → [고장 부품] 그래프 (2026-10-29 에 들어왔다 —
+ *     `domain/product-model-fault-parts.ts` 가 서버에서 합친다). 🔴 그 그래프는 **사용
+ *     부품만이 아니라 부품 요청 줄도** 같은 글자로 만든다 — 아래 `partRowDisplayName`.
  * 🔴 한 벌로 두는 까닭: 두 곳에 적으면 한쪽만 고쳐지는 날이 오고, 같은 부품이 화면마다
  *    다른 이름으로 보인다.
  *
@@ -257,6 +259,57 @@ export function usedPartCustomerName(partNameText: string, index: UsedPartNameIn
 export function usedPartDisplayName(partNameText: string, index: UsedPartNameIndex): string {
   const customerName = usedPartCustomerName(partNameText, index);
   return customerName === "" ? partNameText : `${customerName} (${partNameText})`;
+}
+
+/**
+ * 부품을 **가리키는 칸 넷**. 🔴 재고 관리의 줄(`PartPickerRow`)도 A/S 의 부품 표(`parts`)
+ * 줄도 **같은 이름의 칸**으로 갖고 있어서, 어느 쪽 행이든 그대로 넘길 수 있다.
+ *
+ * 🔵 **고객사 품명은 여기 없다.** 그것은 이 규칙이 **내놓는 값**이고(머리말), 🔴 A/S 의
+ *    `parts` 표에는 애초에 그 칸이 없다(2026-10-29 실측 — `vendor/dss-core` 의
+ *    `schema/inventory.ts`. 품명 · 품명2 · 교산 품번 · 도번 넷뿐이다). 이름은 언제나 재고
+ *    관리에서 온다.
+ */
+export type PartIdentityFields = {
+  drawingNo?: string | null;
+  kyosanPartNo?: string | null;
+  partSpec?: string | null;
+  partName?: string | null;
+};
+
+/**
+ * 그 부품 줄을 **가리키는 글자 하나** — 머리말의 실측 차례(도번 → 교산 품번 → 품명2 →
+ * 품명)대로 보아 **처음으로 값이 있는 칸**을 쓴다. 🔴 `-` 만 적힌 칸은 없는 칸이다.
+ *
+ * 🔴 **왜 한 칸만 고르는가.** 이 글자가 곧 아래 `partRowDisplayName` 의 괄호 안이고,
+ *    [고장 부품] 그래프는 **완성된 글자로 줄을 묶는다.** 사용 부품은 연락서에서 읽은 품번
+ *    **한 글자**를 들고 오므로(이 파일 머리말), 부품 요청 쪽도 글자가 하나여야 같은 부품이
+ *    같은 조각으로 모인다 — 칸을 여럿 쓰면 괄호 안이 줄마다 달라져 **같은 부품이 조각 둘**이
+ *    된다.
+ * 🔵 그 값으로 치르는 것: 도번이 적혀 있지만 재고 관리에서 안 걸리고 **품명2 로는 걸리는**
+ *    줄은 이름을 못 얻는다(품번 그대로 보인다). 🔴 이름을 더 얻겠다고 칸마다 따로 찾으면
+ *    위의 「같은 부품이 한 조각」이 깨진다 — 이름 하나보다 그쪽이 무겁다.
+ * 🔵 네 칸이 다 비면 **빈 글자**다. 그래프는 그 줄을 `미입력` 조각으로 센다(버리지 않는다).
+ */
+export function partIdentityText(fields: PartIdentityFields): string {
+  return (
+    partFieldValue(fields.drawingNo) ||
+    partFieldValue(fields.kyosanPartNo) ||
+    partFieldValue(fields.partSpec) ||
+    partFieldValue(fields.partName)
+  );
+}
+
+/**
+ * 부품 **행 하나**를 「고객사 품명 (품번)」으로 — 🔴 **합치는 규칙은 빌려 쓴다**
+ * (위 `usedPartDisplayName` 한 줄). 여기서 하는 일은 「그 행의 품번은 어느 칸인가」뿐이다.
+ *
+ * 🔴 같은 말을 두 벌로 적지 않으려고 둔 함수다. 사용 부품은 저장된 글자를 그대로
+ *    `usedPartDisplayName` 에 넘기고, 부품 요청은 행에서 글자를 뽑아 **같은 함수**에 넘긴다 —
+ *    그래서 같은 부품이면 두 입력이 **같은 글자**가 된다.
+ */
+export function partRowDisplayName(fields: PartIdentityFields, index: UsedPartNameIndex): string {
+  return usedPartDisplayName(partIdentityText(fields), index);
 }
 
 /**

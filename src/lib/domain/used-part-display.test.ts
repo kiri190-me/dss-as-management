@@ -4,6 +4,8 @@ import type { PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
 import type { InventoryResult } from "@/lib/domain/inventory-gateway";
 import {
   buildUsedPartNameIndex,
+  partIdentityText,
+  partRowDisplayName,
   usedPartCustomerName,
   usedPartDisplayName,
   usedPartDisplayNamesById,
@@ -302,5 +304,61 @@ describe("사용 부품 표시 — 줄마다의 글자", () => {
 
   test("줄이 없으면 빈 묶음이다", () => {
     assert.deepEqual(usedPartDisplayNamesById([], index), {});
+  });
+});
+
+/**
+ * ============================================================================
+ * 부품 **행 하나**에서 바로 만드는 길 (2026-10-29)
+ * ============================================================================
+ * [고장 부품] 그래프가 부품 요청 줄도 같은 글자로 보이게 되면서 생긴 두 함수다
+ * (`domain/product-model-fault-parts.ts`). 🔴 **합성 규칙을 두 벌로 적지 않으려고**
+ * 둔 것이라, 여기서 재는 것은 「그 행의 품번은 어느 칸인가」뿐이다.
+ * ============================================================================
+ */
+describe("부품 행에서 바로 — 품번은 어느 칸인가", () => {
+  test("🔴 차례는 도번 → 교산 품번 → 품명2 → 품명이다", () => {
+    assert.equal(
+      partIdentityText({
+        drawingNo: "AA000111",
+        kyosanPartNo: "KY000111",
+        partSpec: "AC100V",
+        partName: "FUSE 1A",
+      }),
+      "AA000111"
+    );
+    assert.equal(
+      partIdentityText({ kyosanPartNo: "KY000111", partSpec: "AC100V", partName: "FUSE 1A" }),
+      "KY000111"
+    );
+    assert.equal(partIdentityText({ partSpec: "AC100V", partName: "FUSE 1A" }), "AC100V");
+    assert.equal(partIdentityText({ partName: "FUSE 1A" }), "FUSE 1A");
+  });
+
+  test("🔴 `-` 만 적힌 칸은 없는 칸이다 — 건너뛰고 다음 칸으로 간다", () => {
+    assert.equal(partIdentityText({ drawingNo: "-", kyosanPartNo: "－", partName: "FUSE 1A" }), "FUSE 1A");
+  });
+
+  test("네 칸이 다 비면 빈 글자다 — 그래프가 미입력으로 센다", () => {
+    assert.equal(partIdentityText({}), "");
+    assert.equal(partIdentityText({ drawingNo: null, kyosanPartNo: "   ", partSpec: "", partName: "-" }), "");
+  });
+
+  test("🔴 합성 규칙은 빌려 쓴다 — 행에서 뽑은 글자를 그대로 「고객사 품명 (품번)」에 넣는다", () => {
+    const index = okIndex([part({ id: "1", drawingNo: "AA000111", customerPartName: "전원 퓨즈" })]);
+    assert.equal(index.byDrawingNo.size, 1, "지도가 비었으면 아래가 공짜로 통과한다");
+
+    assert.equal(
+      partRowDisplayName({ drawingNo: "AA000111", partName: "FUSE 1A" }, index),
+      "전원 퓨즈 (AA000111)"
+    );
+    // 🔴 저장된 글자로 부른 것과 **같은 글자**여야 한 조각으로 묶인다.
+    assert.equal(partRowDisplayName({ drawingNo: "AA000111" }, index), usedPartDisplayName("AA000111", index));
+  });
+
+  test("이름을 못 얻으면 품번 그대로이고, 칸이 다 비면 빈 글자다", () => {
+    const index = okIndex([part({ id: "1", drawingNo: "AA000999", customerPartName: "다른 부품" })]);
+    assert.equal(partRowDisplayName({ drawingNo: "AA000111" }, index), "AA000111");
+    assert.equal(partRowDisplayName({}, index), "");
   });
 });

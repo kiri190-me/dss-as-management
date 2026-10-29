@@ -7,8 +7,8 @@ import {
   buildEndUserBreakdown,
   buildFaultPartBreakdown,
   buildSymptomBreakdown,
+  type FaultPartRow,
   type ProductModelBreakdownCase,
-  type RequestedPartRow,
 } from "./product-model-breakdown";
 import { FAULT_SYMPTOM_OTHER_LABEL, FAULT_SYMPTOM_UNSPECIFIED_LABEL } from "./fault-symptom-breakdown";
 import type { PieSlice } from "./pie-slices";
@@ -19,7 +19,11 @@ import type { BillingType } from "./types";
  * 여기서 지키는 것은 **이 화면만의 판단**이다:
  *   · 네 그래프가 각각 어느 칸을 읽는가
  *   · 유/무상은 접지 않고 차례가 고정인가
- *   · 고장 부품만 접수 건이 아니라 요청 부품 줄을 세는가 (그래서 합이 다르다)
+ *   · 고장 부품만 접수 건이 아니라 **부품 줄**을 세는가 (그래서 합이 다르다)
+ *
+ * 🔴 **고장 부품의 줄이 어디서 오는지는 여기서 재지 않는다**(2026-10-29). 부품 요청과
+ *    사용 부품을 합치고 이름표를 만드는 일은 `product-model-fault-parts.test.ts` 가
+ *    본다 — 이 파일이 보는 것은 **이미 글자가 된 줄을 어떻게 세는가**뿐이다.
  */
 
 let seq = 0;
@@ -35,8 +39,12 @@ function caseRow(overrides: Partial<ProductModelBreakdownCase> = {}): ProductMod
   };
 }
 
-function part(repairCaseId: string, partName: string): RequestedPartRow {
-  return { repairCaseId, partName };
+/**
+ * 그래프가 세는 줄 하나. 🔴 **이름표는 이미 만들어져 있다** — 부품 요청에서 왔는지
+ * 사용 부품에서 왔는지 이 함수는 더 이상 세지 않는다(2026-10-29).
+ */
+function part(repairCaseId: string, displayName: string): FaultPartRow {
+  return { repairCaseId, displayName };
 }
 
 function labels(slices: readonly PieSlice<unknown>[]): string[] {
@@ -191,8 +199,20 @@ test("유/무상은 접지 않는다 — 건수 0 인 값은 조각을 만들지
 
 // ─────────────────────────────────────────────── ④ 고장 부품
 
-test("고장 부품은 요청 부품 줄을 세므로 조각 합이 접수 건수와 다를 수 있다", () => {
-  // 접수 건 10건 중 3건에만 요청 기록이 있고, 그 3건에서 부품 5개가 나갔다.
+/**
+ * 🔴 **제목을 뒤집었다**(2026-10-29). 2026-10-29 전의 제목은 이랬다 —
+ *
+ *   > "고장 부품은 **요청 부품 줄**을 세므로 조각 합이 접수 건수와 다를 수 있다"
+ *   > "**요청 기록이** 없는 건은 조각을 만들지 않는다 — 부품 줄이 없으면 빈 그래프다"
+ *   > "**품명이** 공백뿐인 줄만 미입력으로 세고, 버리지 않는다"
+ *
+ * 단언은 전부 맞았지만 제목이 **옛 설계**를 적고 있었다. 이 그래프는 이제 부품 요청
+ * 줄과 사용 부품 줄을 **함께** 세고(사용자 요청 2026-10-29), 묶는 열쇠도 품명이
+ * 아니라 **이름표 글자**다. 초록 ✔ 옆의 글은 아무도 의심하지 않아서, 틀린 설명이
+ * 그대로 다음 사람의 전제가 된다.
+ */
+test("고장 부품은 부품 줄을 세므로 조각 합이 접수 건수와 다를 수 있다", () => {
+  // 접수 건 10건 중 3건에만 부품 기록이 있고, 그 3건에서 부품 5개가 나왔다.
   const partRows = [
     part("case-A", "RF 케이블"),
     part("case-A", "메인 PCB"),
@@ -202,28 +222,47 @@ test("고장 부품은 요청 부품 줄을 세므로 조각 합이 접수 건�
   ];
 
   const breakdown = buildFaultPartBreakdown(partRows);
-  assert.equal(breakdown.total, 5, "부품 개수는 요청 줄 수다");
-  assert.equal(breakdown.caseWithRequestCount, 3, "요청 기록이 있는 건은 3건이다");
+  assert.equal(breakdown.total, 5, "부품 개수는 부품 줄 수다");
+  assert.equal(breakdown.caseWithPartRecordCount, 3, "부품 기록이 있는 건은 3건이다");
   assert.equal(sumCounts(breakdown.slices), 5);
   assert.deepEqual(labels(breakdown.slices), ["메인 PCB", "퓨즈", "RF 케이블"]);
 });
 
-test("요청 기록이 없는 건은 조각을 만들지 않는다 — 부품 줄이 없으면 빈 그래프다", () => {
+test("부품 기록이 없는 건은 조각을 만들지 않는다 — 부품 줄이 없으면 빈 그래프다", () => {
   const breakdown = buildFaultPartBreakdown([]);
   assert.equal(breakdown.total, 0);
-  assert.equal(breakdown.caseWithRequestCount, 0);
+  assert.equal(breakdown.caseWithPartRecordCount, 0);
   assert.deepEqual(breakdown.slices, []);
 });
 
-test("품명이 공백뿐인 줄만 미입력으로 세고, 버리지 않는다", () => {
+test("이름표가 공백뿐인 줄만 미입력으로 세고, 버리지 않는다", () => {
   const breakdown = buildFaultPartBreakdown([part("case-A", "퓨즈"), part("case-A", "   ")]);
   assert.equal(breakdown.total, 2);
   assert.equal(sumCounts(breakdown.slices), 2);
   assert.deepEqual(labels(breakdown.slices), ["퓨즈", FAULT_SYMPTOM_UNSPECIFIED_LABEL]);
 });
 
+/**
+ * 🔴 **묶는 열쇠는 이름표 글자 그대로**다 — 「고객사 품명 (품번)」이 통째로 한 조각의
+ * 이름이 된다. 괄호를 떼거나 품번만 남기는 손질을 여기서 하지 않는다(하면 서로 다른
+ * 부품이 한 조각으로 뭉친다).
+ */
+test("이름표 글자가 그대로 조각 이름이 된다 — 「고객사 품명 (품번)」도 한 글자로 묶인다", () => {
+  const breakdown = buildFaultPartBreakdown([
+    part("case-A", "전원 퓨즈 (AA000111)"),
+    part("case-B", "전원 퓨즈 (AA000111)"),
+    // 같은 이름이지만 품번이 다르다 — **다른 조각**이다.
+    part("case-C", "전원 퓨즈 (AA000222)"),
+  ]);
+  assert.deepEqual(labels(breakdown.slices), ["전원 퓨즈 (AA000111)", "전원 퓨즈 (AA000222)"]);
+  assert.deepEqual(
+    breakdown.slices.map((slice) => slice.count),
+    [2, 1]
+  );
+});
+
 test("고장 부품도 9종 이상이면 상위 8 + 기타로 접힌다", () => {
-  const partRows: RequestedPartRow[] = [];
+  const partRows: FaultPartRow[] = [];
   for (let i = 1; i <= 10; i += 1) {
     for (let n = 0; n < 20 - i; n += 1) partRows.push(part(`case-${i}`, `부품 ${i}`));
   }
@@ -231,6 +270,6 @@ test("고장 부품도 9종 이상이면 상위 8 + 기타로 접힌다", () => 
   assert.equal(breakdown.slices.length, 9);
   assert.equal(breakdown.slices[8].label, FAULT_SYMPTOM_OTHER_LABEL);
   assert.equal(breakdown.slices[8].foldedGroupCount, 2);
-  assert.equal(breakdown.caseWithRequestCount, 10);
+  assert.equal(breakdown.caseWithPartRecordCount, 10);
   assert.equal(sumCounts(breakdown.slices), breakdown.total);
 });

@@ -10,9 +10,9 @@ import {
   buildEndUserBreakdown,
   buildFaultPartBreakdown,
   buildSymptomBreakdown,
+  type FaultPartRow,
   type IntakeInspectionDetail,
   type ProductModelBreakdownCase,
-  type RequestedPartRow,
 } from "@/lib/domain/product-model-breakdown";
 
 /**
@@ -37,8 +37,14 @@ import {
  * 스며들면 시험할 방법이 브라우저를 띄우는 것밖에 남지 않는다.
  *
  * ── 새 조회를 하지 않는다 ───────────────────────────────────────────────
- * 접수 건도 요청 부품도 서버가 이미 손에 쥐어 준다(page.tsx). 그래야 이 화면의
+ * 접수 건도 부품 줄도 서버가 이미 손에 쥐어 준다(page.tsx). 그래야 이 화면의
  * 숫자와 위쪽 `모델 통계`의 숫자가 같은 행 집합에서 나온다.
+ *
+ * ── 🔴 부품 이름표를 여기서 만들지 않는다 (2026-10-29) ──────────────────
+ * [고장 부품] 줄은 **부품 요청 + 사용 부품**을 합친 것이고, 이름표는 서버가
+ * 「고객사 품명 (품번)」으로 만들어 내려보낸다. 🔴 그 규칙이 연락서 판독기를 물고
+ * 있어 이 파일("use client")에서 부르면 엑셀·zip 읽개가 통째로 브라우저 묶음에
+ * 실린다(domain/product-model-fault-parts.ts 머리말).
  * ============================================================================
  */
 
@@ -59,10 +65,10 @@ const INITIAL_OPEN_CHARTS: ChartId[] = ["SYMPTOM"];
 
 export default function ProductModelHistoryBreakdown({
   resolved,
-  requestedParts,
+  faultParts,
 }: {
   resolved: ResolvedRepairCase[];
-  requestedParts: RequestedPartRow[];
+  faultParts: FaultPartRow[];
 }) {
   // 배열이다(Set 이 아니다) — **고른 차례**가 곧 쌓이는 차례라서, 그 차례 자체가
   // 기억해야 할 값이다.
@@ -86,7 +92,7 @@ export default function ProductModelHistoryBreakdown({
   const symptom = useMemo(() => buildSymptomBreakdown(cases), [cases]);
   const endUser = useMemo(() => buildEndUserBreakdown(cases), [cases]);
   const billing = useMemo(() => buildBillingBreakdown(cases), [cases]);
-  const faultPart = useMemo(() => buildFaultPartBreakdown(requestedParts), [requestedParts]);
+  const faultPart = useMemo(() => buildFaultPartBreakdown(faultParts), [faultParts]);
 
   if (resolved.length === 0) {
     // 단추 줄도 그리지 않는다 — 켤 그래프도 펼칠 목록도 없다.
@@ -172,9 +178,13 @@ export default function ProductModelHistoryBreakdown({
                 title={CHART_LABELS.PART}
                 // 이 두 숫자를 나란히 적지 않으면 "10건인데 왜 부품이 12개지"에서
                 // 사람이 그래프 전체를 안 믿게 된다.
-                meta={`부품 ${faultPart.total}개 · 요청 기록이 있는 ${faultPart.caseWithRequestCount}건`}
-                note="한 건에 여러 부품이 있을 수 있어 접수 건수와 합이 다릅니다. 취소·반려된 요청은 세지 않습니다."
-                emptyMessage="부품 요청 기록이 없습니다."
+                meta={`부품 ${faultPart.total}개 · 부품 기록이 있는 ${faultPart.caseWithPartRecordCount}건`}
+                // 🔴 **어디까지 센 수인지 적는다**(2026-10-29). 이 그래프는 부품 요청만
+                // 세던 때가 있었고, 지금은 연락서에서 읽은 사용 부품을 함께 센다 —
+                // 그 사실이 안 적혀 있으면 같은 모델의 수가 어느 날 갑자기 늘어난 것으로만
+                // 보인다.
+                note="부품 요청과 수리 건에 적힌 사용 부품을 함께 셉니다. 한 건에 여러 부품이 있을 수 있어 접수 건수와 합이 다릅니다. 취소·반려된 요청은 세지 않습니다."
+                emptyMessage="부품 기록이 없습니다."
                 countUnit="개"
                 slices={faultPart.slices}
                 ariaLabel={`고장 부품별 요청 비율, 부품 ${faultPart.total}개`}

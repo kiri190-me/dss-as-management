@@ -8,6 +8,7 @@ import {
   productModels,
   products,
   repairCases,
+  repairCaseUsedParts,
   users,
 } from "../schema";
 import {
@@ -17,7 +18,7 @@ import {
   listRepairCaseCustomersForProductModels,
   type ProductModelCustomerOption,
 } from "./product-model-customers";
-import type { RequestedPartRow } from "@/lib/domain/product-model-breakdown";
+import type { RequestedPartRow, UsedPartRow } from "@/lib/domain/product-model-breakdown";
 import type { ProductModelKind } from "@/lib/validation/product-model-input";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -336,7 +337,10 @@ const UNCOUNTED_PART_REQUEST_STATUSES = ["REJECTED", "CANCELLED"] as const;
 
 /**
  * 이 모델의 접수 건들에 대해 **요청된 부품** 줄. 제품 모델 상세의 `고장 부품`
- * 원형 그래프가 쓰는 유일한 재료다.
+ * 원형 그래프가 쓰는 재료 **둘 중 하나**다 — 🔴 2026-10-29 부터 아래
+ * `listUsedPartsByProductModelId`(사용 부품)와 **함께** 쓰인다. 합치는 자리는
+ * domain/product-model-fault-parts.ts 이고, 이 함수가 세는 집합은 그때 한 줄도
+ * 바뀌지 않았다.
  *
  * ── 왜 부품 요청인가 ────────────────────────────────────────────────────
  * 이 시스템에는 "이 건에서 뭐가 고장났나"를 적는 칸이 **없다**. 가장 가까운 것이
@@ -344,13 +348,21 @@ const UNCOUNTED_PART_REQUEST_STATUSES = ["REJECTED", "CANCELLED"] as const;
  * 아니고 — 한 건이 여러 줄일 수도, 아예 없을 수도 있다. 화면이 그 사실을 원 밑에
  * 한 줄로 적는다(product-model-breakdown.ts 헤더).
  *
+ * ── 🔴 품명 말고 세 칸을 더 읽는 까닭 (2026-10-29) ──────────────────────
+ * 이름표가 「고객사 품명 (품번)」이 되면서 그 줄의 **품번**이 필요해졌다. 어느 칸이
+ * 품번인지는 재고 관리에서 잰 차례가 정하므로(도번 → 교산 품번 → 품명2 → 품명,
+ * domain/used-part-display.ts 머리말) 넷을 다 읽어 그 판단에 넘긴다.
+ * 🔴 **고객사 품명은 여기서 읽을 수 없다 — `parts` 표에 그 칸이 없다**(2026-10-29
+ * 실측, vendor/dss-core 의 schema/inventory.ts). 이름은 언제나 재고 관리에서 온다.
+ *
  * ── 무엇을 한 줄로 세는가 ───────────────────────────────────────────────
  * **요청 줄(inventory_part_request_items) 하나가 한 개**다. 수량(requested_quantity)
  * 은 보지 않는다 — 이 그래프가 묻는 것은 "어느 부품이 몇 번 지목되었나"이지 "몇
  * 개가 나갔나"가 아니고, 후자는 재고 원장(stock_transactions)이 답할 질문이다.
  *
- * 접수 건 id 를 함께 돌려주는 이유는 화면이 **요청 기록이 있는 건 수**를 셀 수
+ * 접수 건 id 를 함께 돌려주는 이유는 화면이 **부품 기록이 있는 건 수**를 셀 수
  * 있어야 하기 때문이다(부품 개수와 다른 것이 정상이고, 화면은 둘을 나란히 적는다).
+ * 🔵 그 수는 이제 사용 부품 줄이 붙은 건까지 함께 센다 — 아래 조회와 합친 뒤에 센다.
  *
  * 삭제된 부품(parts.is_deleted)도 그대로 센다 — 부품 대장에서 지운 것은 "앞으로 쓸
  * 수 있는 목록"에서 뺀 것이지 **그때 그 부품을 요청했다는 과거**가 없어진 것이
@@ -368,6 +380,9 @@ export async function listRequestedPartsByProductModelId(
     .select({
       repairCaseId: repairCases.id,
       partName: parts.partName,
+      partSpec: parts.partSpec,
+      kyosanPartNo: parts.kyosanPartNo,
+      drawingNo: parts.drawingNo,
     })
     .from(inventoryPartRequestItems)
     .innerJoin(
@@ -391,6 +406,57 @@ export async function listRequestedPartsByProductModelId(
     // 조각 차례는 도메인이 정하지만, 같은 입력에 같은 배열이 나오도록 여기서도
     // 한 번 못 박아 둔다 — 정렬 없는 조회는 계획이 바뀌면 순서가 바뀐다.
     .orderBy(parts.partName, repairCases.id);
+
+  return rows;
+}
+
+/**
+ * 이 모델의 접수 건들에 **적혀 있는 사용 부품** 줄 — `고장 부품` 그래프의 둘째 재료
+ * (2026-10-29 사용자 요청: 「리페어 리포트에서 읽어들인 것들과 … 포함해서」).
+ *
+ * ── 🔴 왜 이것도 세어야 하는가 ──────────────────────────────────────────
+ * 위 요청 줄은 **부품 요청서를 낸 건**밖에 못 본다(개발 DB 216건 중 36건, 17% —
+ * schema/repair-case-used-parts.ts 머리말이 잰 수다). 연락서를 읽어 들이면서 그
+ * 구멍을 메우려고 만든 표가 `repair_case_used_parts` 이고, 운영에 **1,222줄**이
+ * 들어 있다. 2026-10-29 전까지 이 그래프에 그 줄이 한 줄도 오지 않았다.
+ *
+ * ── 무엇을 한 줄로 세는가 ───────────────────────────────────────────────
+ * **적힌 줄 하나가 한 개**다. 수량(quantity)은 보지 않는다 — 위 요청 쪽과 같은
+ * 셈법이어야 한 원 안에서 두 출처의 자가 같다.
+ *
+ * ── 무엇을 거르는가 ─────────────────────────────────────────────────────
+ * 휴지통에 든 접수 건·장비만 뺀다. 🔴 **상태로 거르지 않는다** — 이 표에는 거절·취소
+ * 같은 상태가 애초에 없다(사람이 "이건 갈았다"고 적어 둔 기록이다). 요청 쪽의
+ * UNCOUNTED_PART_REQUEST_STATUSES 에 해당하는 것을 여기서 지어내지 않는다.
+ * 🔵 `part_id` 는 보지 않는다 — **NULL 이 정상**이고(마스터에 없는 부품을 글자로
+ * 적는 길이 이 표의 존재 이유 절반이다), 연락서 이식분은 전부 NULL 이다. 그래서
+ * `parts` 와 조인하지 않는다.
+ *
+ * 읽기 전용이다. 이 파일의 다른 함수들과 같이 권한을 보지 않는다 — 페이지가 판정한다.
+ */
+export async function listUsedPartsByProductModelId(
+  productModelId: string
+): Promise<UsedPartRow[]> {
+  if (!UUID_PATTERN.test(productModelId)) return [];
+
+  const rows = await db
+    .select({
+      repairCaseId: repairCases.id,
+      partNameText: repairCaseUsedParts.partNameText,
+    })
+    .from(repairCaseUsedParts)
+    .innerJoin(repairCases, eq(repairCaseUsedParts.repairCaseId, repairCases.id))
+    .innerJoin(products, eq(repairCases.productId, products.id))
+    .where(
+      and(
+        eq(products.productModelId, productModelId),
+        eq(products.isDeleted, false),
+        eq(repairCases.isDeleted, false)
+      )
+    )
+    // 위 요청 쪽과 같은 까닭으로 차례를 못 박는다 — 정렬 없는 조회는 계획이 바뀌면
+    // 순서가 바뀐다. 줄 차례(line_no)까지 넣어야 같은 건의 같은 품번 두 줄도 고정된다.
+    .orderBy(repairCaseUsedParts.partNameText, repairCases.id, repairCaseUsedParts.lineNo);
 
   return rows;
 }

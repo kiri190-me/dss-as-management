@@ -14,10 +14,15 @@ import { listCustomerOptions } from "@/lib/db/queries/customers";
 import {
   getProductModelDetailById,
   listRequestedPartsByProductModelId,
+  listUsedPartsByProductModelId,
   toProductModelDetailForScreen,
 } from "@/lib/db/queries/product-models";
 import { listShareDocsForProductModel } from "@/lib/db/queries/product-model-share-docs";
 import { listRepairCasesByProductModelId } from "@/lib/db/queries/repair-cases";
+import { toPartPickerOptions } from "@/lib/domain/inventory-gateway";
+import { toFaultPartRows } from "@/lib/domain/product-model-fault-parts";
+import { buildUsedPartNameIndex } from "@/lib/domain/used-part-display";
+import { fetchInventoryParts } from "@/lib/server/inventory-gateway";
 
 export const metadata: Metadata = {
   title: "제품 모델 상세 | DSS A/S 관리 시스템",
@@ -83,9 +88,9 @@ export default async function ProductModelDetailPage({
     hasPermission(actingUser, "productModels.files", "WRITE"),
   ]);
 
-  // A/S 이력 구역이 쓰는 두 재료와, 사진·도면 구역이 쓰는 두 목록, 그리고 수정
-  // 폼의 고객사 콤보박스가 고를 목록. 서로 기다릴 이유가 없어 함께 띄운다.
-  // 다섯 다 읽기 전용이다.
+  // A/S 이력 구역이 쓰는 재료들과, 사진·도면 구역이 쓰는 두 목록, 가리킴 목록,
+  // 그리고 수정 폼의 고객사 콤보박스가 고를 목록. 서로 기다릴 이유가 없어 함께
+  // 띄운다. 전부 읽기 전용이다.
   //
   // 🔴 고객사 후보는 **수정할 수 있는 세션에만** 내려보낸다. 상세 화면은
   // "use client" 라 여기서 넘긴 값이 그대로 브라우저까지 실려 가는데, 그 목록을
@@ -100,15 +105,49 @@ export default async function ProductModelDetailPage({
   // 화면이 뜬 뒤 클라이언트가 통로로 따로 묻는다
   // (components/product-models/ModelShareFolderPicker). NAS 가 느린 날 이 화면 자체가
   // 안 뜨는 것을 막는 선이고, 종류별 서류함 page.tsx 가 그은 선과 같다.
-  const [repairCases, requestedParts, attachments, trashedAttachments, customerOptions, shareDocs] =
-    await Promise.all([
-      listRepairCasesByProductModelId(detail.id),
-      listRequestedPartsByProductModelId(detail.id),
-      listAttachmentsForProductModel(detail.id),
-      listTrashedAttachmentsForProductModel(detail.id),
-      canEdit ? listCustomerOptions() : Promise.resolve([]),
-      listShareDocsForProductModel(detail.id),
-    ]);
+  //
+  // 🔴 **재고 관리 통로가 이 묶음에 하나 더 있다**(2026-10-29). [고장 부품] 그래프의
+  // 이름표가 「고객사 품명 (품번)」이 되면서 그 이름을 재고 관리에서 가져온다 —
+  // A/S 의 부품 표에도 사용 부품 줄에도 고객사 품명 칸이 **없다**
+  // (domain/used-part-display.ts 머리말의 「왜 이름을 재고 관리에서 가져오는가」).
+  // 🔵 **못 받아 와도 이 화면은 그대로 뜬다** — 아래 색인이 비고 모든 줄이 품번으로
+  // 떨어질 뿐이다. 그래서 실패를 따로 다루지 않고 같은 묶음에 태운다(수리 건 상세가
+  // 같은 통로를 같은 방식으로 부른다).
+  const [
+    repairCases,
+    requestedParts,
+    usedParts,
+    inventoryParts,
+    attachments,
+    trashedAttachments,
+    customerOptions,
+    shareDocs,
+  ] = await Promise.all([
+    listRepairCasesByProductModelId(detail.id),
+    listRequestedPartsByProductModelId(detail.id),
+    listUsedPartsByProductModelId(detail.id),
+    fetchInventoryParts(),
+    listAttachmentsForProductModel(detail.id),
+    listTrashedAttachmentsForProductModel(detail.id),
+    canEdit ? listCustomerOptions() : Promise.resolve([]),
+    listShareDocsForProductModel(detail.id),
+  ]);
+
+  /**
+   * [고장 부품] 그래프가 셀 줄 — 🔴 **요청 부품과 사용 부품을 더한 것**이다
+   * (2026-10-29 사용자 요청: 「리페어 리포트에서 읽어들인 것들과 [a/s시스템]에서
+   * 부품요청 한 부품들을 **포함해서**」). 한쪽을 다른 쪽으로 갈아 끼운 것이 아니다.
+   *
+   * 🔴 **합치는 일을 서버에서 한다.** 이름표를 만드는 규칙이 연락서 판독기를 물고
+   *    있고 상세 화면은 "use client" 라, 화면에서 합치면 그 판독기가 통째로 브라우저
+   *    묶음에 실린다(domain/product-model-fault-parts.ts 머리말). 화면에는
+   *    **만들어진 글자**만 내려간다.
+   * 🔴 **겹치면 둘 다 센다** — 그 판단의 까닭도 저 파일 머리말에 있다.
+   */
+  const faultParts = toFaultPartRows(
+    { requested: requestedParts, used: usedParts },
+    buildUsedPartNameIndex(toPartPickerOptions(inventoryParts))
+  );
 
   // `등록 장비` 표가 사라져 units 를 읽는 화면이 없다. 상세 화면은 "use client"
   // 라 여기서 넘긴 값이 그대로 브라우저까지 실려 가므로, 아무도 읽지 않는 배열은
@@ -118,7 +157,7 @@ export default async function ProductModelDetailPage({
     <ProductModelDetailScreen
       detail={toProductModelDetailForScreen(detail)}
       repairCases={repairCases}
-      requestedParts={requestedParts}
+      faultParts={faultParts}
       canEdit={canEdit}
       customerOptions={customerOptions}
       attachments={attachments}

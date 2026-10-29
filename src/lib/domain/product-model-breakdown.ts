@@ -22,17 +22,31 @@ import { BILLING_TYPE_CODES, billingTypeLabels, type BillingType } from "./types
  * 합은 언제나 접수 건수와 같다.
  *
  * `고장 부품`은 그렇지 않다. 이 시스템에는 "이 건에서 뭐가 고장났나"를 적는 칸이
- * **없다**. 가장 가까운 것이 수리하며 **요청한 부품**이라 그것을 쓰는데, 그래서
- * 세 가지가 다르다:
+ * **없다**. 가장 가까운 것이 **부품 줄**이라 그것을 쓰는데, 그래서 세 가지가 다르다:
  *
- *   1. 한 건에서 부품을 여러 개 요청했을 수 있어 **조각의 합이 접수 건수와 맞지
+ *   1. 한 건에서 부품이 여러 개일 수 있어 **조각의 합이 접수 건수와 맞지
  *      않는다.** 고장이 아니라 이 그래프의 성질이다. 화면은 원 밑에 그 사실을 한
  *      줄로 적는다 — 그 줄이 없으면 "10건인데 왜 부품이 12개지"에서 사람이 그래프
  *      전체를 안 믿게 된다.
- *   2. **부품 요청 기록이 아예 없는 건이 훨씬 많다.** 그런 건은 조각으로 만들지
+ *   2. **부품 기록이 아예 없는 건이 훨씬 많다.** 그런 건은 조각으로 만들지
  *      않는다 — `미입력` 조각을 만들면 그것이 원의 대부분을 먹어 정작 부품이 보이지
- *      않는다. 대신 `요청 기록이 있는 N건`을 숫자로 적는다.
- *   3. 그래서 이 함수만 접수 건이 아니라 **요청 부품 줄**을 받는다.
+ *      않는다. 대신 `부품 기록이 있는 N건`을 숫자로 적는다.
+ *   3. 그래서 이 함수만 접수 건이 아니라 **부품 줄**을 받는다.
+ *
+ * ── 🔴 부품 줄은 **두 군데**에서 온다 (2026-10-29 사용자 요청) ───────────
+ * 2026-10-29 전에는 **부품 요청**(`inventory_part_request_items`)뿐이었다. 사용자 말이
+ * 「**리페어 리포트에서 읽어들인 것들과 부품요청 한 부품들을 포함해서**」라 이제 둘을
+ * **더한다**:
+ *   · 부품 요청 줄 — 엔지니어가 그 부품을 지목했다(취소·반려는 뺀다).
+ *   · 사용 부품 줄(`repair_case_used_parts`) — 연락서에 그 부품이 적혀 있었다.
+ *     🔴 운영에 **1,222줄**이 들어 있고 2026-10-29 전까지 이 그래프에 **한 줄도** 안
+ *     들어왔다.
+ * 🔴 **갈아 끼운 것이 아니라 더한 것이다** — 요청 쪽 조회도 취소·반려를 빼는 규칙도
+ *    그대로다.
+ * 🔴 **합치는 일은 이 파일이 하지 않는다.** 두 입력을 「고객사 품명 (품번)」 한 글자로
+ *    만들어 섞는 자리는 `domain/product-model-fault-parts.ts` 이고(서버에서 돈다),
+ *    여기는 **이미 글자가 된 줄**을 받아 세기만 한다 — 그 글자를 만드는 규칙이 연락서
+ *    판독기를 물고 있어 화면 묶음에 들어오면 안 되기 때문이다(그 파일 머리말).
  *
  * ── 유/무상만 차례를 못 박고 접지 않는다 ────────────────────────────────
  * 고를 수 있는 값이 넷뿐이라 `기타`가 생기면 요약이 아니라 고장으로 보이고, 조각
@@ -69,16 +83,56 @@ export type ProductModelBreakdownCase = {
 /**
  * 요청 부품 한 줄 — 조회가 돌려주는 모양이다(db/queries/product-models.ts).
  *
- * 도메인에 두는 이유: 조회 파일은 `server-only` 이라 화면이 그 타입을 import 할 수
- * 없다. 서버와 화면이 같은 모양을 말하려면 타입이 둘 다 닿는 자리에 있어야 한다.
+ * 도메인에 두는 이유: 조회 파일은 `server-only` 이라 그 타입을 아무나 import 할 수
+ * 없다. 조회와 합치는 자리가 같은 모양을 말하려면 타입이 둘 다 닿는 자리에 있어야 한다.
  *
  * **요청 줄 하나가 한 개**다(수량이 아니다). 같은 건에서 같은 부품을 두 번 다른
- * 요청으로 올렸으면 두 줄이고, 그래프에서도 2 로 센다 — "몇 번 요청되었나"가 이
+ * 요청으로 올렸으면 두 줄이고, 그래프에서도 2 로 센다 — "몇 번 지목되었나"가 이
  * 그래프가 답하는 질문이라서다.
+ *
+ * 🔴 **품명 말고 세 칸이 더 있는 까닭** (2026-10-29): 이름표를 「고객사 품명 (품번)」으로
+ *    만들려면 그 줄의 **품번**을 알아야 하고, 그것이 어느 칸인지는 재고 관리에서 잰 차례가
+ *    정한다(`domain/used-part-display.ts` 의 `partIdentityText` — 도번이 먼저다). 🔴 A/S 의
+ *    `parts` 표에 **고객사 품명 칸은 없다** — 이름은 재고 관리에서 가져온다.
  */
 export type RequestedPartRow = {
   repairCaseId: string;
   partName: string;
+  partSpec: string | null;
+  kyosanPartNo: string | null;
+  drawingNo: string | null;
+};
+
+/**
+ * 사용 부품 한 줄 — 조회가 돌려주는 모양이다(db/queries/product-models.ts).
+ *
+ * 🔴 **적혀 있는 글자는 품번이다**(`repair_case_used_parts.part_name_text`). 2026-10-28 에
+ *    연락서 이식이 `型式`·`仕様書番号` 칸을 먼저 읽게 바뀌어서다
+ *    (`domain/used-part-display.ts` 머리말). 그래서 칸 이름이 `partNameText` 인데 들어
+ *    있는 것은 품명이 아니다 — 그 글자를 보여 줄 때만 이름을 앞에 붙인다.
+ *
+ * **줄 하나가 한 개**다. 위 요청 줄과 같은 셈법이고, `quantity` 는 보지 않는다 — 이
+ * 그래프가 묻는 것은 "어느 부품이 몇 번 나왔나"이지 "몇 개가 나갔나"가 아니다.
+ */
+export type UsedPartRow = {
+  repairCaseId: string;
+  partNameText: string;
+};
+
+/**
+ * 그래프가 실제로 세는 줄 — 🔴 **이름표가 이미 만들어져 있다.**
+ *
+ * 위 두 모양이 여기로 모인다(`domain/product-model-fault-parts.ts`). 두 입력의 글자
+ * 체계가 다르므로(요청은 부품 표의 칸들, 사용은 저장된 품번) **같은 규칙으로 만든 한
+ * 글자**로 바꿔 놓아야 같은 부품이 한 조각이 된다.
+ *
+ * 🔵 `repairCaseId` 가 남아 있는 까닭은 화면이 **부품 기록이 있는 건 수**를 적기 때문이다
+ *    (부품 개수와 다른 것이 정상이고, 화면은 둘을 나란히 적는다).
+ */
+export type FaultPartRow = {
+  repairCaseId: string;
+  /** 「고객사 품명 (품번)」. 이름을 못 얻었으면 품번 그대로다(그것도 열쇠가 된다). */
+  displayName: string;
 };
 
 /** 고장 증상 조각이 달고 다니는 것 — 그 증상 건들의 인수점검 결과. */
@@ -167,30 +221,36 @@ export function buildBillingBreakdown(
 
 export type FaultPartBreakdown = ProductModelPieBreakdown<null> & {
   /**
-   * 요청 부품이 붙어 있는 **접수 건 수**. total(부품 개수)과 다를 수 있고, 다른
-   * 것이 정상이다 — 화면이 두 숫자를 나란히 적어 그 차이를 먼저 말한다.
+   * 부품 줄이 하나라도 붙어 있는 **접수 건 수**(요청 · 사용을 가리지 않는다).
+   * total(부품 개수)과 다를 수 있고, 다른 것이 정상이다 — 화면이 두 숫자를 나란히
+   * 적어 그 차이를 먼저 말한다.
+   *
+   * 🔴 2026-10-29 전에는 이름이 `caseWithRequestCount` 였다. 사용 부품이 들어오면서
+   *    **요청만 세는 수가 아니게 되어** 이름을 바꿨다 — 그대로 두면 다음 사람이 그
+   *    이름을 믿고 "요청이 있는 건 수"로 읽는다.
    */
-  caseWithRequestCount: number;
+  caseWithPartRecordCount: number;
 };
 
 /**
- * ④ 고장 부품 — 요청된 부품 줄을 품명으로 묶는다.
+ * ④ 고장 부품 — 부품 줄을 **이름표 글자 그대로** 묶는다.
  *
- * **넘겨받는 것이 접수 건이 아니라 요청 부품 줄**이다(파일 헤더의 셋째 차이).
- * 부품 요청이 없는 건은 이 목록에 아예 오지 않으므로 `미입력` 조각이 생기지
- * 않는다 — 그것이 이 그래프에서 부품이 보이는 유일한 길이다.
+ * **넘겨받는 것이 접수 건이 아니라 부품 줄**이다(파일 헤더의 셋째 차이). 부품 줄이
+ * 없는 건은 이 목록에 아예 오지 않으므로 `미입력` 조각이 생기지 않는다 — 그것이 이
+ * 그래프에서 부품이 보이는 유일한 길이다.
  *
- * 품명이 공백뿐인 줄만 `미입력`으로 센다. 품명은 NOT NULL 이라 실무에서 거의
- * 없지만, 버리면 조각 합이 부품 개수와 어긋나므로 버리지 않는다.
+ * 🔴 **이름표를 여기서 만들지 않는다**(파일 헤더). 받은 글자로 묶을 뿐이라, 같은
+ *    부품이 한 조각이 되는지는 그 글자를 만든 자리가 정한다.
+ *
+ * 이름표가 공백뿐인 줄만 `미입력`으로 센다. 실무에서 거의 없지만, 버리면 조각 합이
+ * 부품 개수와 어긋나므로 버리지 않는다.
  */
-export function buildFaultPartBreakdown(
-  partRows: readonly RequestedPartRow[]
-): FaultPartBreakdown {
+export function buildFaultPartBreakdown(partRows: readonly FaultPartRow[]): FaultPartBreakdown {
   return {
     total: partRows.length,
-    caseWithRequestCount: new Set(partRows.map((row) => row.repairCaseId)).size,
+    caseWithPartRecordCount: new Set(partRows.map((row) => row.repairCaseId)).size,
     slices: buildPieSlices(partRows, {
-      labelOf: (row) => row.partName,
+      labelOf: (row) => row.displayName,
       unspecifiedLabel: FAULT_SYMPTOM_UNSPECIFIED_LABEL,
       fold: { topLimit: PRODUCT_MODEL_TOP_SLICE_LIMIT, otherLabel: PRODUCT_MODEL_OTHER_LABEL },
       detail: NO_PIE_DETAIL,
