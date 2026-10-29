@@ -23,6 +23,7 @@ import { toPartPickerOptions } from "@/lib/domain/inventory-gateway";
 import { toFaultPartRows } from "@/lib/domain/product-model-fault-parts";
 import { buildUsedPartNameIndex } from "@/lib/domain/used-part-display";
 import { fetchInventoryParts } from "@/lib/server/inventory-gateway";
+import { fetchIssuedFaultPartRows } from "@/lib/server/product-model-issued-parts";
 
 export const metadata: Metadata = {
   title: "제품 모델 상세 | DSS A/S 관리 시스템",
@@ -113,19 +114,34 @@ export default async function ProductModelDetailPage({
   // 🔵 **못 받아 와도 이 화면은 그대로 뜬다** — 아래 색인이 비고 모든 줄이 품번으로
   // 떨어질 뿐이다. 그래서 실패를 따로 다루지 않고 같은 묶음에 태운다(수리 건 상세가
   // 같은 통로를 같은 방식으로 부른다).
+  //
+  // 🔴 **그 통로와 달리 둘째 통로는 실패를 그냥 넘기면 안 된다**(2026-10-29).
+  // fetchIssuedFaultPartRows 는 그래프의 셋째 입력(반출 확인된 부품)을 **건마다** 물어
+  // 모은다. 위 부품 목록을 못 받으면 이름만 품번으로 떨어지지만, 이쪽을 못 받으면
+  // **줄 자체가 사라진다** — 그래서 「못 센 건이 몇인가」를 세어 화면까지 날라야 한다
+  // (아래 faultPartIssuedLookup).
+  //
+  // 🔴 **접수 건 목록만 먼저 읽는다**(2026-10-29). [고장 부품] 그래프의 셋째 입력
+  // (반출 확인된 부품)을 모으려면 **그 건들의 인수번호**가 먼저 있어야 하고, 그 모으는
+  // 일이 통로를 여러 번 두드리는 일이라 이 묶음에서 가장 오래 걸린다 —
+  // 묶음 **뒤에** 이어 붙이면 그 시간이 통째로 더해진다. 🔵 앞으로 빼면 DB 한 번
+  // (수십 ms)만 먼저 치르고 나머지와 **겹쳐서** 돈다.
+  // 🔴 **새 DB 조회를 만들지 않았다** — 인수번호는 이 목록이 이미 들고 있다.
+  const repairCases = await listRepairCasesByProductModelId(detail.id);
+
   const [
-    repairCases,
     requestedParts,
     usedParts,
+    issuedParts,
     inventoryParts,
     attachments,
     trashedAttachments,
     customerOptions,
     shareDocs,
   ] = await Promise.all([
-    listRepairCasesByProductModelId(detail.id),
     listRequestedPartsByProductModelId(detail.id),
     listUsedPartsByProductModelId(detail.id),
+    fetchIssuedFaultPartRows(repairCases),
     fetchInventoryParts(),
     listAttachmentsForProductModel(detail.id),
     listTrashedAttachmentsForProductModel(detail.id),
@@ -134,20 +150,34 @@ export default async function ProductModelDetailPage({
   ]);
 
   /**
-   * [고장 부품] 그래프가 셀 줄 — 🔴 **요청 부품과 사용 부품을 더한 것**이다
-   * (2026-10-29 사용자 요청: 「리페어 리포트에서 읽어들인 것들과 [a/s시스템]에서
-   * 부품요청 한 부품들을 **포함해서**」). 한쪽을 다른 쪽으로 갈아 끼운 것이 아니다.
+   * [고장 부품] 그래프가 셀 줄 — 🔴 **요청 부품 · 사용 부품 · 반출 확인된 부품을 더한
+   * 것**이다(2026-10-29 사용자 요청: 「리페어 리포트에서 읽어들인 것들과 [a/s시스템]에서
+   * 부품요청 한 부품들을 **포함해서**」, 그리고 같은 날 셋째로 「반출 확인된 부품」).
+   * 어느 하나를 다른 것으로 갈아 끼운 것이 아니다.
    *
    * 🔴 **합치는 일을 서버에서 한다.** 이름표를 만드는 규칙이 연락서 판독기를 물고
    *    있고 상세 화면은 "use client" 라, 화면에서 합치면 그 판독기가 통째로 브라우저
    *    묶음에 실린다(domain/product-model-fault-parts.ts 머리말). 화면에는
    *    **만들어진 글자**만 내려간다.
-   * 🔴 **겹치면 둘 다 센다** — 그 판단의 까닭도 저 파일 머리말에 있다.
+   * 🔴 **겹치면 다 센다** — 그 판단의 까닭도 저 파일 머리말에 있다.
    */
   const faultParts = toFaultPartRows(
-    { requested: requestedParts, used: usedParts },
+    { requested: requestedParts, used: usedParts, issued: issuedParts.rows },
     buildUsedPartNameIndex(toPartPickerOptions(inventoryParts))
   );
+
+  /**
+   * 🔴 **못 센 건이 몇인가**를 화면까지 나른다. 반출 쪽만 「일부만 받아 오는」 일이
+   * 생기는데(건마다 통로를 한 번씩 두드린다), 그 사실을 안 적으면 사람이 적은 수를
+   * 보고 **「이 모델은 이 부품이 적게 고장난다」**는 틀린 결론을 낸다.
+   * 🔵 줄(`rows`)은 위에서 이미 썼으므로 여기서는 **수만** 내려보낸다 — 상세 화면은
+   *    "use client" 라 넘긴 값이 그대로 브라우저까지 실려 간다.
+   */
+  const faultPartIssuedLookup = {
+    uncountedCaseCount: issuedParts.uncountedCaseCount,
+    skippedCaseCount: issuedParts.skippedCaseCount,
+    caseLimit: issuedParts.caseLimit,
+  };
 
   // `등록 장비` 표가 사라져 units 를 읽는 화면이 없다. 상세 화면은 "use client"
   // 라 여기서 넘긴 값이 그대로 브라우저까지 실려 가므로, 아무도 읽지 않는 배열은
@@ -158,6 +188,7 @@ export default async function ProductModelDetailPage({
       detail={toProductModelDetailForScreen(detail)}
       repairCases={repairCases}
       faultParts={faultParts}
+      faultPartIssuedLookup={faultPartIssuedLookup}
       canEdit={canEdit}
       customerOptions={customerOptions}
       attachments={attachments}

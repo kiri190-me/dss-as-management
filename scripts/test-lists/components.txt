@@ -453,6 +453,17 @@ src/components/repair-cases/detail/product-info-model-link.test.ts
 # 같은 방법으로 원본을 글자로 읽는다.
 src/components/product-models/product-model-file-modified-date.test.ts
 
+# 🔴 [고장 부품] 그래프의 **「못 센 건이 있습니다」 안내**(2026-10-29). 셋째 입력(반출
+# 확인된 부품)만 수리 건마다 재고 관리에 물어 모아서 **일부만 받아 오는 일**이 생기는데,
+# 그 사실을 안 적으면 사람이 적은 수를 보고 「이 모델은 이 부품이 적게 고장난다」는 틀린
+# 결론을 낸다. 문장과 수는 unit 목록의 product-model-breakdown.test.ts 가 값으로 보고,
+# 여기서 보는 것은 **그 문장이 그 카드까지 연결돼 있는가**다 — 🔴 안내가 붙은 카드가
+# 하나뿐인가 · 🔴 빈 그래프에서도 그리는가(「부품 기록이 없습니다」가 바로 그 거짓말이다)
+# · 설명 줄이 세 입력과 자 둘을 말하는가. 🔴 [고장 부품] 카드는 **처음에 꺼져 있고** 이
+# 환경에는 눌러 볼 도구가 없어(renderToStaticMarkup 뿐) 카드를 그려 볼 수 없다 —
+# 그래서 **주석을 걷어 낸 원본 글자**로 읽는다(주석 때문에 헛통과한 전례가 있다).
+src/components/product-models/product-model-fault-part-warning.test.tsx
+
 # 「고객 안내 현황」의 고객사 양식 보기(사용자 요청 2026-09-30). 값 판정은 unit 목록의
 # customer-portal-forms.test.ts 가 본다. 여기서 못 박는 것은 **화면과 저장 통로가 그
 # 값을 어떻게 쓰는가**다: 🔴 고객에게 나가는 것이 안 바뀌었는가 — 이 화면의 목록과

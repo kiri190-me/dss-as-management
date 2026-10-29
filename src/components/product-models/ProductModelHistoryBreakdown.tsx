@@ -10,6 +10,8 @@ import {
   buildEndUserBreakdown,
   buildFaultPartBreakdown,
   buildSymptomBreakdown,
+  faultPartIssuedWarning,
+  type FaultPartIssuedLookup,
   type FaultPartRow,
   type IntakeInspectionDetail,
   type ProductModelBreakdownCase,
@@ -41,10 +43,16 @@ import {
  * 숫자와 위쪽 `모델 통계`의 숫자가 같은 행 집합에서 나온다.
  *
  * ── 🔴 부품 이름표를 여기서 만들지 않는다 (2026-10-29) ──────────────────
- * [고장 부품] 줄은 **부품 요청 + 사용 부품**을 합친 것이고, 이름표는 서버가
- * 「고객사 품명 (품번)」으로 만들어 내려보낸다. 🔴 그 규칙이 연락서 판독기를 물고
- * 있어 이 파일("use client")에서 부르면 엑셀·zip 읽개가 통째로 브라우저 묶음에
- * 실린다(domain/product-model-fault-parts.ts 머리말).
+ * [고장 부품] 줄은 **부품 요청 + 사용 부품 + 반출 확인된 부품**을 합친 것이고,
+ * 이름표는 서버가 「고객사 품명 (품번)」으로 만들어 내려보낸다. 🔴 그 규칙이 연락서
+ * 판독기를 물고 있어 이 파일("use client")에서 부르면 엑셀·zip 읽개가 통째로 브라우저
+ * 묶음에 실린다(domain/product-model-fault-parts.ts 머리말).
+ *
+ * ── 🔴 **못 센 것이 있으면 그 사실을 그린다** (2026-10-29) ───────────────
+ * 셋째 입력만 **일부만 받아 오는 일**이 생긴다(수리 건마다 재고 관리에 한 번씩 묻는다).
+ * 그때 적은 수를 조용히 보여 주면 「이 모델은 이 부품이 적게 고장난다」는 **틀린 결론**이
+ * 나온다. 🔴 문장은 여기서 짓지 않는다 — faultPartIssuedWarning 이 수와 함께 들고 있고,
+ * 이 파일은 **그 글자를 눈에 띄는 자리에 놓는 일**만 한다.
  * ============================================================================
  */
 
@@ -66,9 +74,12 @@ const INITIAL_OPEN_CHARTS: ChartId[] = ["SYMPTOM"];
 export default function ProductModelHistoryBreakdown({
   resolved,
   faultParts,
+  faultPartIssuedLookup,
 }: {
   resolved: ResolvedRepairCase[];
   faultParts: FaultPartRow[];
+  /** 🔴 반출 확인된 부품을 **다 세었는가**. 서버가 센 값이다(위 머리말). */
+  faultPartIssuedLookup: FaultPartIssuedLookup;
 }) {
   // 배열이다(Set 이 아니다) — **고른 차례**가 곧 쌓이는 차례라서, 그 차례 자체가
   // 기억해야 할 값이다.
@@ -93,6 +104,8 @@ export default function ProductModelHistoryBreakdown({
   const endUser = useMemo(() => buildEndUserBreakdown(cases), [cases]);
   const billing = useMemo(() => buildBillingBreakdown(cases), [cases]);
   const faultPart = useMemo(() => buildFaultPartBreakdown(faultParts), [faultParts]);
+  // 🔴 다 셌으면 null 이고, 그때는 아무것도 안 그린다 — 늘 떠 있는 안내는 아무도 안 읽는다.
+  const faultPartWarning = faultPartIssuedWarning(faultPartIssuedLookup);
 
   if (resolved.length === 0) {
     // 단추 줄도 그리지 않는다 — 켤 그래프도 펼칠 목록도 없다.
@@ -180,10 +193,15 @@ export default function ProductModelHistoryBreakdown({
                 // 사람이 그래프 전체를 안 믿게 된다.
                 meta={`부품 ${faultPart.total}개 · 부품 기록이 있는 ${faultPart.caseWithPartRecordCount}건`}
                 // 🔴 **어디까지 센 수인지 적는다**(2026-10-29). 이 그래프는 부품 요청만
-                // 세던 때가 있었고, 지금은 연락서에서 읽은 사용 부품을 함께 센다 —
-                // 그 사실이 안 적혀 있으면 같은 모델의 수가 어느 날 갑자기 늘어난 것으로만
-                // 보인다.
-                note="부품 요청과 수리 건에 적힌 사용 부품을 함께 셉니다. 한 건에 여러 부품이 있을 수 있어 접수 건수와 합이 다릅니다. 취소·반려된 요청은 세지 않습니다."
+                // 세던 때가 있었고, 지금은 연락서에서 읽은 사용 부품과 재고 관리에서
+                // 반출 확인된 부품까지 함께 센다 — 그 사실이 안 적혀 있으면 같은 모델의
+                // 수가 어느 날 갑자기 늘어난 것으로만 보인다.
+                // 🔴 **자가 둘이라는 것도 적는다.** 부품 요청은 「요청한 의도」(대기·보류
+                // 포함, 취소·반려만 뺌)를 세고 반출은 「실제로 나간 줄」만 센다 —
+                // 사용자가 알고 고른 가름이라 화면도 그대로 말한다
+                // (domain/product-model-breakdown.ts 머리말의 「한 원 안에 자가 둘이다」).
+                note="부품 요청 · 수리 건에 적힌 사용 부품 · 재고 관리에서 반출 확인된 부품을 함께 셉니다. 한 건에 여러 부품이 있을 수 있어 접수 건수와 합이 다릅니다. 부품 요청은 취소·반려된 것을 빼고 세고, 반출 부품은 실제로 나간 줄만 셉니다."
+                warning={faultPartWarning}
                 emptyMessage="부품 기록이 없습니다."
                 countUnit="개"
                 slices={faultPart.slices}
@@ -240,6 +258,7 @@ function ChartCard<TDetail>({
   title,
   meta,
   note,
+  warning,
   emptyMessage,
   countUnit,
   slices,
@@ -251,6 +270,12 @@ function ChartCard<TDetail>({
   title: string;
   meta: string;
   note?: string;
+  /**
+   * 🔴 **이 그래프의 수가 실제보다 적다**는 말. `note`(늘 떠 있는 설명)와 **다른 것**이라
+   * 자리도 꾸밈도 가른다 — 설명 줄에 붙이면 늘 보던 회색 글이라 아무도 안 읽는다.
+   * 🔵 없으면 `null` 이고 아무것도 안 그린다.
+   */
+  warning?: string | null;
   emptyMessage: string;
   countUnit?: string;
   slices: PieSlice<TDetail>[];
@@ -269,6 +294,17 @@ function ChartCard<TDetail>({
         <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-50">{title}</h3>
         <span className="ml-auto text-sm text-zinc-600 dark:text-zinc-400">{meta}</span>
       </div>
+
+      {/* 🔴 **원보다 위, 그리고 조각이 하나도 없을 때도 그린다.** 셋째 입력을 통째로 못
+          받아 온 모델은 「부품 기록이 없습니다」만 뜨는데, 그 글이 바로 이 안내가 막으려는
+          거짓말이다 — 빈 갈래 안에 넣으면 정작 필요한 자리에서 안 뜬다.
+          🔵 색 말고도 갈린다: 테두리 + 바탕 + 굵은 글씨, 그리고 문장 자체가 「받아오지
+          못했습니다」·「세지 않았습니다」라고 말한다(반출 신청 배지와 같은 결). */}
+      {warning ? (
+        <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-relaxed font-semibold text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+          {warning}
+        </p>
+      ) : null}
 
       {slices.length === 0 ? (
         <p className="mt-4 text-sm text-zinc-500 dark:text-zinc-400">{emptyMessage}</p>

@@ -1,14 +1,18 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import type { PartPickerRow } from "@dss/core/ui/inventory/part-picker-rows";
-import type { InventoryResult } from "@/lib/domain/inventory-gateway";
+import type {
+  InventoryResult,
+  InventoryStockRequest,
+  InventoryStockRequestLine,
+} from "@/lib/domain/inventory-gateway";
 import { buildFaultPartBreakdown, type RequestedPartRow, type UsedPartRow } from "@/lib/domain/product-model-breakdown";
-import { toFaultPartRows } from "@/lib/domain/product-model-fault-parts";
+import { issuedPartRowsOf, toFaultPartRows } from "@/lib/domain/product-model-fault-parts";
 import { buildUsedPartNameIndex, type UsedPartNameIndex } from "@/lib/domain/used-part-display";
 
 /**
  * ============================================================================
- * [고장 부품] 그래프 — 요청 부품 + 사용 부품을 **한 글자로** 묶는다 (2026-10-29)
+ * [고장 부품] 그래프 — 요청 · 사용 · 반출을 **한 글자로** 묶는다 (2026-10-29)
  * ============================================================================
  * 🔴 **2026-10-29 전까지 이 그래프에는 사용 부품이 한 줄도 안 들어왔다.** 그런데 그
  *    사실을 막는 단언이 어디에도 없어서, 옛 설계가 초록 ✔ 로 통과하고 있었다. 여기서
@@ -18,8 +22,15 @@ import { buildUsedPartNameIndex, type UsedPartNameIndex } from "@/lib/domain/use
  *      · 겹치면 **둘 다** 센다
  *      · 재고 관리가 멈춰도(`unreachable`) 품번으로 묶이고 그래프가 **안 깨진다**
  *
- * 🔴 **부품 이름·품번은 전부 가짜다**(`AA000111` 꼴). 실제 고객사명·품번을 적으면
- *    공개 저장소에 박힌다.
+ * 🔴 **같은 날 셋째 입력(반출 확인된 부품)이 들어왔다.** 같은 함정이 한 번 더 있었다 —
+ *    2026-10-16 부터 반출 요청이 재고 관리로 올라가 A/S 옛 표에는 한 줄도 안 쌓이는데,
+ *    그래프는 그 옛 표만 보고 있었다. 아래 마지막 두 묶음이 못 박는 것:
+ *      · **실제로 나간 줄만** 센다(`issued >= 1`) — 🔴 **상태로는 거르지 않는다**
+ *      · 칸 이름을 옮겨 적는다(`name2` → 품명2, `name` → 품명)
+ *      · 세 입력이 같은 부품이면 **한 조각**이다
+ *
+ * 🔴 **부품 이름·품번·인수번호는 전부 가짜다**(`AA000111`·`D000111` 꼴). 실제 고객사명·
+ *    품번을 적으면 공개 저장소에 박힌다.
  *
  * 🔵 맞대기 시험은 **표본이 비면 공짜로 통과한다** — 그래서 묶음마다 지도가 실제로
  *    무엇을 담고 있는지를 먼저 단언한다.
@@ -62,6 +73,43 @@ function used(repairCaseId: string, partNameText: string): UsedPartRow {
   return { repairCaseId, partNameText };
 }
 
+/**
+ * 재고 관리가 돌려준 반출 신청 한 건. 🔴 **안 적은 칸은 저쪽 파서가 눕히는 값 그대로**다
+ * (빈 글자 · 0 · null) — 시험이 저쪽보다 너그러운 모양을 만들면 거기서만 통과한다.
+ * 🔴 `repairCaseId` 가 **없다**. 응답에는 인수번호만 있고, 짝은 부르는 쪽이 붙인다.
+ */
+function stockRequest(
+  statusCode: string,
+  lines: readonly Partial<InventoryStockRequestLine>[]
+): InventoryStockRequest {
+  return {
+    requestKey: null,
+    id: `req-${statusCode}`,
+    intakeNumber: "D000111",
+    status: { code: statusCode, label: statusCode },
+    closed: false,
+    requestedAt: "2026-10-29T01:00:00.000Z",
+    note: "",
+    lines: lines.map((line) => ({
+      no: null,
+      name: "",
+      quantity: 0,
+      issued: 0,
+      customerName: "",
+      name2: "",
+      kyosanPartNo: "",
+      drawingNo: "",
+      owner: null,
+      chargeType: null,
+      fromOhTemplate: false,
+      ...line,
+    })),
+    decision: null,
+    hold: null,
+    requester: null,
+  };
+}
+
 function labelsOf(rows: readonly { displayName: string }[]): string[] {
   return rows.map((row) => row.displayName);
 }
@@ -74,7 +122,7 @@ describe("고장 부품 — 사용 부품이 그래프에 들어온다", () => {
     assert.equal(index.byDrawingNo.size, 1, "지도가 비었으면 아래가 공짜로 통과한다");
 
     const rows = toFaultPartRows(
-      { requested: [], used: [used("case-A", "AA000111"), used("case-B", "AA000222")] },
+      { requested: [], used: [used("case-A", "AA000111"), used("case-B", "AA000222")], issued: [] },
       index
     );
     const breakdown = buildFaultPartBreakdown(rows);
@@ -95,14 +143,18 @@ describe("고장 부품 — 사용 부품이 그래프에 들어온다", () => {
       inventoryRow({ id: "1", drawingNo: "AA000111", customerPartName: "전원 퓨즈" }),
     ]);
     const rows = toFaultPartRows(
-      { requested: [requested("case-A", { partName: "FUSE 1A", drawingNo: "AA000111" })], used: [] },
+      {
+        requested: [requested("case-A", { partName: "FUSE 1A", drawingNo: "AA000111" })],
+        used: [],
+        issued: [],
+      },
       index
     );
     assert.deepEqual(labelsOf(rows), ["전원 퓨즈 (AA000111)"]);
   });
 
-  test("둘 다 비면 빈 그래프다 — 조각을 지어내지 않는다", () => {
-    const rows = toFaultPartRows({ requested: [], used: [] }, okIndex([]));
+  test("셋 다 비면 빈 그래프다 — 조각을 지어내지 않는다", () => {
+    const rows = toFaultPartRows({ requested: [], used: [], issued: [] }, okIndex([]));
     const breakdown = buildFaultPartBreakdown(rows);
     assert.deepEqual(rows, []);
     assert.equal(breakdown.total, 0);
@@ -119,6 +171,7 @@ describe("고장 부품 — 같은 부품이면 한 조각", () => {
       {
         requested: [requested("case-A", { partName: "FUSE 1A", drawingNo: "AA000111" })],
         used: [used("case-B", "AA000111")],
+        issued: [],
       },
       index
     );
@@ -142,6 +195,7 @@ describe("고장 부품 — 같은 부품이면 한 조각", () => {
       {
         requested: [requested("case-A", { partName: "FUSE 1A", drawingNo: "AA000111" })],
         used: [used("case-B", "AA000111")],
+        issued: [],
       },
       index
     );
@@ -161,6 +215,7 @@ describe("고장 부품 — 같은 부품이면 한 조각", () => {
       {
         requested: [requested("case-A", { drawingNo: "AA-000111" })],
         used: [used("case-B", "AA000111")],
+        issued: [],
       },
       index
     );
@@ -174,9 +229,10 @@ describe("고장 부품 — 겹치면 둘 다 센다", () => {
    * 🔴 **한 건에서 같은 부품이 요청 줄에도 있고 사용 부품 줄에도 있으면 2 다.**
    *
    * 지우지 않는 까닭은 `product-model-fault-parts.ts` 머리말에 적어 두었다 — 두 줄이
-   * 각각 일어난 일이고, 이 그래프의 셈법이 처음부터 「줄 하나가 한 개」다. 🔵 화면이
-   * 한 건의 부품 출처를 둘로 쪼개지 않아 지금 실질적으로 겹치지 않지만(운영 실측
-   * 2026-10-29, 백필 대상 463건 중 「부품 요청 있음」 0건), 앞으로 생길 수 있다.
+   * 각각 일어난 일이고, 이 그래프의 셈법이 처음부터 「줄 하나가 한 개」다. 🔵 요청 줄과
+   * 사용 줄 사이는 화면이 한 건의 부품 출처를 둘로 쪼개지 않아 지금 실질적으로 겹치지
+   * 않지만(운영 실측 2026-10-29, 백필 대상 463건 중 「부품 요청 있음」 0건), 🔴 **반출
+   * 줄과는 지금도 겹친다**(그 울타리가 보는 표가 2026-10-16 부터 멈춘 A/S 옛 표다).
    */
   test("🔴 같은 건에서 둘 다 나오면 2 로 센다 — 조용히 한쪽을 지우지 않는다", () => {
     const index = okIndex([
@@ -186,6 +242,7 @@ describe("고장 부품 — 겹치면 둘 다 센다", () => {
       {
         requested: [requested("case-A", { partName: "FUSE 1A", drawingNo: "AA000111" })],
         used: [used("case-A", "AA000111")],
+        issued: [],
       },
       index
     );
@@ -212,6 +269,7 @@ describe("고장 부품 — 재고 관리가 멈춰도 선다", () => {
       {
         requested: [requested("case-A", { partName: "FUSE 1A", drawingNo: "AA000111" })],
         used: [used("case-B", "AA000111"), used("case-C", "AA000222")],
+        issued: [],
       },
       index
     );
@@ -243,6 +301,7 @@ describe("고장 부품 — 요청 줄의 품번은 어느 칸인가", () => {
           }),
         ],
         used: [],
+        issued: [],
       },
       index
     );
@@ -259,6 +318,7 @@ describe("고장 부품 — 요청 줄의 품번은 어느 칸인가", () => {
           requested("case-C", { partName: "FUSE 1A" }),
         ],
         used: [],
+        issued: [],
       },
       index
     );
@@ -271,6 +331,7 @@ describe("고장 부품 — 요청 줄의 품번은 어느 칸인가", () => {
       {
         requested: [requested("case-A", { partName: "FUSE 1A", drawingNo: "-", kyosanPartNo: "－" })],
         used: [],
+        issued: [],
       },
       index
     );
@@ -278,7 +339,10 @@ describe("고장 부품 — 요청 줄의 품번은 어느 칸인가", () => {
   });
 
   test("네 칸이 다 비면 빈 글자이고, 그래프가 미입력 조각으로 센다 — 버리지 않는다", () => {
-    const rows = toFaultPartRows({ requested: [requested("case-A")], used: [] }, okIndex([]));
+    const rows = toFaultPartRows(
+      { requested: [requested("case-A")], used: [], issued: [] },
+      okIndex([])
+    );
     assert.deepEqual(labelsOf(rows), [""]);
 
     const breakdown = buildFaultPartBreakdown(rows);
@@ -293,7 +357,252 @@ describe("고장 부품 — 요청 줄의 품번은 어느 칸인가", () => {
     ]);
     assert.equal(index.byPartName.size, 1, "지도가 비었으면 아래가 공짜로 통과한다");
 
-    const rows = toFaultPartRows({ requested: [requested("case-A", { partName: "FUSE 1A" })], used: [] }, index);
+    const rows = toFaultPartRows(
+      { requested: [requested("case-A", { partName: "FUSE 1A" })], used: [], issued: [] },
+      index
+    );
     assert.deepEqual(labelsOf(rows), ["전원 퓨즈 (FUSE 1A)"]);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 반출 확인된 부품 — **실제로 나간 줄만** (2026-10-29 사용자 결정)
+ * ============================================================================
+ * 「반출 확인된」은 **물건이 실제로 나갔다**는 뜻이다. 🔴 상태로 거르지 않고 줄의
+ * `issued` 로 가른다 — `PARTIAL` 한 건 안에서도 나간 줄과 안 나간 줄이 섞여 있다.
+ * ============================================================================
+ */
+describe("반출 확인된 부품 — issued 로 가른다", () => {
+  test("🔴 issued 가 0 인 줄은 안 센다 — 신청만 하고 안 나간 부품은 고장 부품이 아니다", () => {
+    const rows = issuedPartRowsOf("case-A", [
+      stockRequest("PENDING", [
+        { drawingNo: "AA000111", issued: 0 },
+        { drawingNo: "AA000222", issued: 0 },
+      ]),
+    ]);
+    assert.deepEqual(rows, [], "🔴 대기 중인 신청의 줄이 한 줄이라도 세어지면 안 된다");
+  });
+
+  test("🔴 issued 가 1 이상이면 **상태가 무엇이든** 센다 — 여덟 상태를 다 본다", () => {
+    for (const statusCode of [
+      "PENDING",
+      "IN_APPROVAL",
+      "CONFIRMING",
+      "PARTIAL",
+      "CONFIRMED",
+      "REJECTED",
+      "CANCELLED",
+      "ON_HOLD",
+    ]) {
+      const rows = issuedPartRowsOf("case-A", [
+        stockRequest(statusCode, [{ drawingNo: "AA000111", issued: 1 }]),
+      ]);
+      assert.equal(rows.length, 1, `${statusCode} 에서 나간 줄이 빠졌다`);
+      assert.equal(rows[0].drawingNo, "AA000111");
+    }
+  });
+
+  test("🔴 PARTIAL 한 건 안에서 나간 줄만 센다 — 신청 단위로 가리면 반드시 한쪽을 틀린다", () => {
+    const rows = issuedPartRowsOf("case-A", [
+      stockRequest("PARTIAL", [
+        { drawingNo: "AA000111", quantity: 2, issued: 2 },
+        { drawingNo: "AA000222", quantity: 3, issued: 0 },
+        { drawingNo: "AA000333", quantity: 1, issued: 1 },
+      ]),
+    ]);
+    assert.deepEqual(
+      rows.map((row) => row.drawingNo),
+      ["AA000111", "AA000333"]
+    );
+  });
+
+  test("🔵 반려·취소는 **따로 빼지 않아도** 빠진다 — 나간 것이 없기 때문이다", () => {
+    const rows = issuedPartRowsOf("case-A", [
+      stockRequest("REJECTED", [{ drawingNo: "AA000111", quantity: 2, issued: 0 }]),
+      stockRequest("CANCELLED", [{ drawingNo: "AA000222", quantity: 1, issued: 0 }]),
+    ]);
+    assert.deepEqual(rows, []);
+  });
+
+  test("🔴 수량은 안 쓴다 — 5개가 나간 줄도 그래프에서는 한 개다", () => {
+    const rows = issuedPartRowsOf("case-A", [
+      stockRequest("CONFIRMED", [{ drawingNo: "AA000111", quantity: 5, issued: 5 }]),
+    ]);
+    assert.equal(rows.length, 1, "🔴 issued 를 수로 쓰면 여기가 5 가 된다");
+  });
+
+  test("신청이 여러 건이면 전부 모은다 — 건 하나에 신청이 여럿일 수 있다", () => {
+    const rows = issuedPartRowsOf("case-A", [
+      stockRequest("CONFIRMED", [{ drawingNo: "AA000111", issued: 1 }]),
+      stockRequest("PARTIAL", [{ drawingNo: "AA000222", issued: 1 }]),
+    ]);
+    assert.deepEqual(
+      rows.map((row) => row.drawingNo),
+      ["AA000111", "AA000222"]
+    );
+  });
+
+  test("🔴 repairCaseId 는 **부르는 쪽이 붙인다** — 응답에는 그 칸이 없다", () => {
+    const rows = issuedPartRowsOf("case-Z", [
+      stockRequest("CONFIRMED", [{ drawingNo: "AA000111", issued: 1 }]),
+    ]);
+    assert.deepEqual(
+      rows.map((row) => row.repairCaseId),
+      ["case-Z"]
+    );
+  });
+
+  test("신청이 하나도 없으면 빈 배열 — 「없다」와 「못 받아 왔다」는 부르는 쪽이 가른다", () => {
+    assert.deepEqual(issuedPartRowsOf("case-A", []), []);
+  });
+});
+
+describe("반출 확인된 부품 — 칸 이름을 옮겨 적는다", () => {
+  test("🔴 저쪽 `name2` 가 품명2, `name` 이 품명이다 — 넷이 그대로 넘어온다", () => {
+    const rows = issuedPartRowsOf("case-A", [
+      stockRequest("CONFIRMED", [
+        {
+          issued: 1,
+          name: "FUSE 1A",
+          name2: "AC100V",
+          kyosanPartNo: "KY000111",
+          drawingNo: "AA000111",
+        },
+      ]),
+    ]);
+    assert.deepEqual(rows, [
+      {
+        repairCaseId: "case-A",
+        partName: "FUSE 1A",
+        partSpec: "AC100V",
+        kyosanPartNo: "KY000111",
+        drawingNo: "AA000111",
+      },
+    ]);
+  });
+
+  test("🔴 품번 고르는 차례는 요청 줄과 **같은 자**다 — 도번이 먼저", () => {
+    const rows = toFaultPartRows(
+      {
+        requested: [],
+        used: [],
+        issued: issuedPartRowsOf("case-A", [
+          stockRequest("CONFIRMED", [
+            {
+              issued: 1,
+              name: "FUSE 1A",
+              name2: "AC100V",
+              kyosanPartNo: "KY000111",
+              drawingNo: "AA000111",
+            },
+          ]),
+        ]),
+      },
+      okIndex([])
+    );
+    assert.deepEqual(labelsOf(rows), ["AA000111"]);
+  });
+
+  test("도번이 비면 교산 품번 → 품명2 → 품명 차례로 내려간다 — 빈 글자는 없는 칸이다", () => {
+    const rows = toFaultPartRows(
+      {
+        requested: [],
+        used: [],
+        issued: issuedPartRowsOf("case-A", [
+          stockRequest("CONFIRMED", [
+            { issued: 1, name: "FUSE 1A", name2: "AC100V", kyosanPartNo: "KY000111" },
+            { issued: 1, name: "FUSE 1A", name2: "AC100V" },
+            { issued: 1, name: "FUSE 1A" },
+          ]),
+        ]),
+      },
+      okIndex([])
+    );
+    assert.deepEqual(labelsOf(rows), ["KY000111", "AC100V", "FUSE 1A"]);
+  });
+
+  test("반출 줄도 「고객사 품명 (품번)」이 된다 — 이름은 재고 관리에서 온다", () => {
+    const index = okIndex([
+      inventoryRow({ id: "1", drawingNo: "AA000111", customerPartName: "전원 퓨즈" }),
+    ]);
+    assert.equal(index.byDrawingNo.size, 1, "지도가 비었으면 아래가 공짜로 통과한다");
+
+    const rows = toFaultPartRows(
+      {
+        requested: [],
+        used: [],
+        issued: issuedPartRowsOf("case-A", [
+          stockRequest("CONFIRMED", [{ issued: 1, drawingNo: "AA000111" }]),
+        ]),
+      },
+      index
+    );
+    assert.deepEqual(labelsOf(rows), ["전원 퓨즈 (AA000111)"]);
+  });
+});
+
+describe("반출 확인된 부품 — 세 입력이 한 그래프에 모인다", () => {
+  test("🔴 세 출처가 같은 부품이면 **조각 하나**로 묶이고 3 으로 센다", () => {
+    const index = okIndex([
+      inventoryRow({ id: "1", drawingNo: "AA000111", customerPartName: "전원 퓨즈" }),
+    ]);
+    assert.equal(index.byDrawingNo.size, 1, "지도가 비었으면 아래가 공짜로 통과한다");
+
+    const rows = toFaultPartRows(
+      {
+        requested: [requested("case-A", { partName: "FUSE 1A", drawingNo: "AA000111" })],
+        used: [used("case-B", "AA000111")],
+        issued: issuedPartRowsOf("case-C", [
+          stockRequest("CONFIRMED", [{ issued: 1, name: "FUSE 1A", drawingNo: "AA000111" }]),
+        ]),
+      },
+      index
+    );
+    const breakdown = buildFaultPartBreakdown(rows);
+
+    assert.deepEqual(labelsOf(rows), [
+      "전원 퓨즈 (AA000111)",
+      "전원 퓨즈 (AA000111)",
+      "전원 퓨즈 (AA000111)",
+    ]);
+    assert.equal(breakdown.slices.length, 1, "🔴 세 조각으로 갈리면 안 된다");
+    assert.equal(breakdown.slices[0].count, 3);
+    assert.equal(breakdown.caseWithPartRecordCount, 3);
+  });
+
+  test("🔴 차례는 요청 → 사용 → 반출 — 같은 입력에 같은 배열이 나온다", () => {
+    const rows = toFaultPartRows(
+      {
+        requested: [requested("case-A", { drawingNo: "AA000111" })],
+        used: [used("case-B", "AA000222")],
+        issued: issuedPartRowsOf("case-C", [
+          stockRequest("CONFIRMED", [{ issued: 1, drawingNo: "AA000333" }]),
+        ]),
+      },
+      okIndex([])
+    );
+    assert.deepEqual(labelsOf(rows), ["AA000111", "AA000222", "AA000333"]);
+  });
+
+  test("🔴 반출 줄이 같은 건에서 사용 부품과 겹쳐도 **둘 다** 센다 (2026-10-16 뒤의 모양)", () => {
+    // 🔴 사용 부품 칸을 잠그는 판정이 보는 표는 A/S 옛 표라, 2026-10-16 뒤의 건은
+    //    **칸이 열려 있고 재고 관리에도 반출 기록이 있다.** 겹침이 가정이 아니다.
+    const rows = toFaultPartRows(
+      {
+        requested: [],
+        used: [used("case-A", "AA000111")],
+        issued: issuedPartRowsOf("case-A", [
+          stockRequest("CONFIRMED", [{ issued: 1, drawingNo: "AA000111" }]),
+        ]),
+      },
+      okIndex([])
+    );
+    const breakdown = buildFaultPartBreakdown(rows);
+
+    assert.equal(breakdown.total, 2, "🔴 겹친 줄을 지우면 1 이 된다");
+    assert.equal(breakdown.slices.length, 1);
+    assert.equal(breakdown.slices[0].count, 2);
+    assert.equal(breakdown.caseWithPartRecordCount, 1, "건은 하나다 — 줄이 둘일 뿐이다");
   });
 });

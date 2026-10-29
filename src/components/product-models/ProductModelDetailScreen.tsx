@@ -10,7 +10,7 @@ import type {
 import type { ProductModelCustomerOption } from "@/lib/db/queries/product-model-customers";
 import type { ProductModelDetail } from "@/lib/db/queries/product-models";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
-import type { FaultPartRow } from "@/lib/domain/product-model-breakdown";
+import type { FaultPartIssuedLookup, FaultPartRow } from "@/lib/domain/product-model-breakdown";
 import { mergeProductModelCustomers } from "@/lib/domain/product-model-customer-merge";
 import { productModelKindLabel } from "@/lib/domain/product-model-kind";
 import {
@@ -159,6 +159,7 @@ export default function ProductModelDetailScreen({
   detail,
   repairCases,
   faultParts,
+  faultPartIssuedLookup,
   canEdit,
   customerOptions,
   attachments,
@@ -170,10 +171,17 @@ export default function ProductModelDetailScreen({
   repairCases: ResolvedRepairCase[];
   /**
    * 고장 부품 그래프의 재료. 접수 건마다 한 줄이 아니다 — 여러 줄이거나 없다.
-   * 🔴 **부품 요청 줄과 사용 부품 줄이 이미 합쳐져** 있고, 이름표도 서버가
-   * 「고객사 품명 (품번)」으로 만들어 두었다(2026-10-29 — page.tsx 의 그 주석).
+   * 🔴 **부품 요청 줄 · 사용 부품 줄 · 반출 확인된 줄이 이미 합쳐져** 있고, 이름표도
+   * 서버가 「고객사 품명 (품번)」으로 만들어 두었다(2026-10-29 — page.tsx 의 그 주석).
    */
   faultParts: FaultPartRow[];
+  /**
+   * 🔴 **위 줄 가운데 못 센 것이 있는가.** 반출 확인된 부품은 수리 건마다 재고 관리에
+   * 한 번씩 물어 모으므로 **일부만 받아 오는 일**이 생긴다 — 그때 화면은 적은 수를
+   * 조용히 보여 주지 않고 그 사실을 적는다(domain/product-model-breakdown.ts 의
+   * faultPartIssuedWarning). 🔵 다 셌으면 세 값이 전부 0 쪽이고 아무것도 안 그린다.
+   */
+  faultPartIssuedLookup: FaultPartIssuedLookup;
   canEdit: boolean;
   /** 수정 폼의 고객사 콤보박스가 고를 수 있는 목록. canEdit 이 아닌 세션에는
    * 서버가 빈 배열을 넘긴다 — 폼 자체가 뜨지 않는 자리라 실어 보낼 이유가 없다. */
@@ -292,7 +300,11 @@ export default function ProductModelDetailScreen({
 
       <section className="flex flex-col gap-3">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">A/S 이력</h2>
-        <ProductModelHistoryBreakdown resolved={repairCases} faultParts={faultParts} />
+        <ProductModelHistoryBreakdown
+          resolved={repairCases}
+          faultParts={faultParts}
+          faultPartIssuedLookup={faultPartIssuedLookup}
+        />
       </section>
     </div>
   );

@@ -7,6 +7,7 @@ import {
   buildEndUserBreakdown,
   buildFaultPartBreakdown,
   buildSymptomBreakdown,
+  faultPartIssuedWarning,
   type FaultPartRow,
   type ProductModelBreakdownCase,
 } from "./product-model-breakdown";
@@ -272,4 +273,60 @@ test("고장 부품도 9종 이상이면 상위 8 + 기타로 접힌다", () => 
   assert.equal(breakdown.slices[8].foldedGroupCount, 2);
   assert.equal(breakdown.caseWithPartRecordCount, 10);
   assert.equal(sumCounts(breakdown.slices), breakdown.total);
+});
+
+/**
+ * ============================================================================
+ * 🔴 **못 센 건이 있으면 그 사실이 글자로 나와야 한다** (2026-10-29)
+ * ============================================================================
+ * 반출 확인된 부품만 「일부만 받아 오는」 일이 생긴다(수리 건마다 재고 관리에 한 번씩
+ * 묻는다 — `server/product-model-issued-parts.ts`). 조용히 적은 수를 보여 주면
+ * 「이 모델은 이 부품이 적게 고장난다」는 틀린 결론이 나온다.
+ *
+ * 🔵 **수가 글자에 실제로 박히는지**까지 본다 — 「문장이 있다」만 재면 상한을 30 으로
+ *    고쳐도 「40건」이라고 적힌 옛 문장이 영영 통과한다.
+ * ============================================================================
+ */
+test("🔴 다 셌으면 아무 말도 안 한다 — 늘 떠 있는 안내는 아무도 안 읽는다", () => {
+  assert.equal(
+    faultPartIssuedWarning({ uncountedCaseCount: 0, skippedCaseCount: 0, caseLimit: 40 }),
+    null
+  );
+  // 반출을 안 묻는 화면(또는 아직 안 물은 상태)도 조용하다.
+  assert.equal(faultPartIssuedWarning(null), null);
+});
+
+test("🔴 못 받아 온 건이 있으면 **그 수**와 「적다」는 말이 함께 나온다", () => {
+  const message = faultPartIssuedWarning({
+    uncountedCaseCount: 3,
+    skippedCaseCount: 0,
+    caseLimit: 40,
+  });
+  assert.ok(message, "못 센 건이 있는데 화면이 아무 말도 안 한다");
+  assert.ok(message.includes("3건"), `못 센 수가 글자에 없다: ${message}`);
+  assert.ok(message.includes("받아오지 못했습니다"), message);
+  // 🔴 「없다」로 읽히면 안 된다 — 수가 실제보다 적다는 말이 반드시 들어간다.
+  assert.ok(message.includes("적습니다"), message);
+});
+
+test("🔴 상한을 넘겨 아예 안 센 것은 **다른 말**이다 — 건수와 상한이 둘 다 적힌다", () => {
+  const message = faultPartIssuedWarning({
+    uncountedCaseCount: 0,
+    skippedCaseCount: 57,
+    caseLimit: 40,
+  });
+  assert.ok(message, "아예 안 셌는데 화면이 아무 말도 안 한다");
+  assert.ok(message.includes("57건"), `이 모델의 건수가 글자에 없다: ${message}`);
+  assert.ok(message.includes("40건"), `상한이 글자에 없다 — 상수를 고쳐도 안 바뀐다: ${message}`);
+  assert.ok(message.includes("세지 않았습니다"), message);
+});
+
+test("🔴 둘 다 0 이 아니면 **아예 안 셌다**는 쪽이 이긴다 — 더 큰 사실이 가려지면 안 된다", () => {
+  const message = faultPartIssuedWarning({
+    uncountedCaseCount: 2,
+    skippedCaseCount: 57,
+    caseLimit: 40,
+  });
+  assert.ok(message?.includes("세지 않았습니다"), message ?? "(없음)");
+  assert.equal(message?.includes("받아오지 못했습니다"), false, message ?? "(없음)");
 });
