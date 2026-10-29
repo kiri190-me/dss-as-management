@@ -41,8 +41,30 @@ const DEFAULT_SORT: SortState = { column: "receivedAt", direction: "desc" };
  * a distinct, per-case/workflow-derived fact that intentionally never
  * feeds back into product_models.kind (see ProductModelDetailScreen's own
  * doc comment and the canonicalization audit).
+ *
+ * ── 🔴 **비었을 때 할 말은 부르는 쪽이 안다** (2026-10-29 사용자 결정) ────
+ * 이 목록이 년/월로 걸리게 되면서(ProductModelHistoryBreakdown 의 기간 드롭다운)
+ * **빈 까닭이 둘**이 되었다: ㉠ 이 모델에 접수 건이 아예 없다 · ㉡ 고른 기간에 인수된
+ * 건이 없다. 여기서는 그 둘을 가릴 수 없다 — 넘어오는 것은 **이미 걸러진 배열**이고
+ * 기간이 무엇인지 모른다. 그래서 글자를 받는다.
+ * 🔵 **안 넘기면 예전 글자 그대로다**(㉠). 기본값을 둔 까닭이 그것이고, 이 화면에서
+ *    기간을 안 걸었을 때 한 글자도 안 바뀌어야 한다는 뜻이다.
  */
-export default function ProductModelRepairCaseHistory({ resolved }: { resolved: ResolvedRepairCase[] }) {
+
+/** 기간을 안 걸었을 때, 곧 **이 모델에 접수 건이 아예 없을 때**의 글자. */
+const NO_REPAIR_CASES_MESSAGE = "이 모델과 연결된 A/S 접수 건이 없습니다.";
+
+export default function ProductModelRepairCaseHistory({
+  resolved,
+  emptyMessage = NO_REPAIR_CASES_MESSAGE,
+}: {
+  resolved: ResolvedRepairCase[];
+  /**
+   * 🔴 **기간으로 걸러 비었을 때** 부르는 쪽이 넘기는 글자(위 머리말 ㉡). 안 넘기면
+   * 예전 글자다 — 「연결된 건이 없다」는 말은 기간 때문에 빈 날에는 **거짓말**이 된다.
+   */
+  emptyMessage?: string;
+}) {
   const [sort, setSort] = useState<SortState>(DEFAULT_SORT);
 
   const effectiveRows = useMemo(() => resolved.map((r) => applyWorkflowOverride(r, undefined)), [resolved]);
@@ -59,7 +81,7 @@ export default function ProductModelRepairCaseHistory({ resolved }: { resolved: 
   if (resolved.length === 0) {
     return (
       <p className="rounded-lg border border-zinc-200 bg-white p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-        이 모델과 연결된 A/S 접수 건이 없습니다.
+        {emptyMessage}
       </p>
     );
   }

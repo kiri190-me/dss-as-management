@@ -4,6 +4,7 @@ import {
   FAULT_SYMPTOM_UNSPECIFIED_LABEL,
   intakeInspectionDetail,
   toIntakeInspectionResultGroups,
+  type FaultSymptomPeriod,
   type IntakeInspectionResultGroup,
 } from "./fault-symptom-breakdown";
 import { buildPieSlices, NO_PIE_DETAIL, type PieSlice } from "./pie-slices";
@@ -70,6 +71,13 @@ import { BILLING_TYPE_CODES, billingTypeLabels, type BillingType } from "./types
  * 차례가 주마다 바뀌면 눈이 매번 다시 읽어야 한다. 차례는 types.ts 의
  * BILLING_TYPE_CODES 를 그대로 따른다 — 손으로 옮겨 적으면 값이 하나 늘었을 때
  * 이 그래프에서만 조용히 빠진다.
+ *
+ * ── 🔴 년/월로 좁히는 일은 **거의 다 남의 함수**다 (2026-10-29 사용자 요청) ──
+ * 네 그래프 모두 **인수일** 기준으로 걸린다. 그 거르는 자는 대시보드 [신고 증상별
+ * 현황]의 것을 **그대로** 쓴다(`domain/fault-symptom-breakdown.ts` 의
+ * `selectFaultSymptomPeriodCases` · `listFaultSymptomYears` · `FaultSymptomPeriod`).
+ * 이 파일이 따로 가진 것은 **고장 부품 줄을 id 집합으로 거르는 한 함수**뿐이다 — 그
+ * 줄에만 날짜 칸이 없기 때문이고, 까닭은 아래 selectProductModelPeriodFaultParts 에 있다.
  * ============================================================================
  */
 
@@ -359,4 +367,45 @@ export function buildFaultPartBreakdown(partRows: readonly FaultPartRow[]): Faul
       detail: NO_PIE_DETAIL,
     }),
   };
+}
+
+/**
+ * ============================================================================
+ * 🔴 **년/월로 좁힐 때 고장 부품만 길이 다르다** (2026-10-29 사용자 요청)
+ * ============================================================================
+ * 사용자 말: 「[제품 모델 상세]에 있는 [A/S 이력]에서 **[대시보드]의 [신고 증상별
+ * 현황]처럼** 년/월을 선택해서 확인할 수 있도록 해줘.」 그래서 **거르는 자를 새로 짓지
+ * 않는다** — 대시보드가 쓰는 `selectFaultSymptomPeriodCases`
+ * (`domain/fault-symptom-breakdown.ts`)를 그대로 가져다 쓴다. 그 함수가 제네릭이라
+ * `receivedAt` 칸만 있으면 어떤 배열이든 받는다. 🔴 같은 말을 두 벌로 적으면 한쪽만
+ * 고쳐지는 날이 온다 — 이 저장소에서 실제로 겪은 일이다.
+ *
+ * 그런데 네 그래프 가운데 **고장 부품만 입력 모양이 다르다**:
+ *   · 앞의 셋(고장 증상·End-User·유/무상)은 **접수 건 줄**이라 인수일이 그 줄에 있다 →
+ *     위 함수에 그대로 넘기면 걸린다.
+ *   · 🔴 **고장 부품 줄에는 날짜 칸이 아예 없다**(FaultPartRow — 요청·사용·반출 셋 다).
+ *     세 입력이 각기 다른 표에서 오고 그쪽 날짜의 뜻도 서로 다르다(요청일 · 연락서에
+ *     적힌 날 · 반출일). 그중 하나를 인수일인 척 쓰면 **네 그래프의 잣대가 갈린다**.
+ * 🔵 대신 그 줄에 `repairCaseId` 가 남아 있다(화면이 「부품 기록이 있는 건 수」를 세려고
+ *    남겨 둔 칸이다). 그래서 **그 기간에 인수된 건들의 id 집합**으로 거른다 — 네 그래프가
+ *    같은 잣대(인수일)로 걸리는 유일한 길이고, 🔴 **새 조회가 한 번도 필요 없다**
+ *    (화면이 접수 건 배열과 부품 줄 배열을 이미 둘 다 쥐고 있다).
+ * ============================================================================
+ */
+export function selectProductModelPeriodFaultParts<T extends { repairCaseId: string }>(
+  partRows: readonly T[],
+  period: FaultSymptomPeriod,
+  periodCases: readonly { id: string }[]
+): T[] {
+  // 🔴 **전체 기간이면 한 줄도 거르지 않는다.** 여기서도 id 집합을 타면, 접수 건 목록에
+  // 없는 건의 부품 줄이 **기간을 고르기도 전에** 사라진다. 2026-10-29 실측으로는 그런
+  // 줄이 없지만(부품 조회 셋이 전부 접수 건 목록과 같거나 더 좁게 걸러 온다 —
+  // `db/queries/product-models.ts` 의 두 조회는 `products.is_deleted = false` 를 하나 더
+  // 걸고, 반출 줄은 그 접수 건 목록 자체에서 만든다), 그것은 **조회가 바뀌면 같이 바뀌는
+  // 사실**이라 기대어 두지 않는다.
+  // 🔵 「전체면 한 건도 걸러지지 않는다」는 selectFaultSymptomPeriodCases 와 같은 규칙이다.
+  if (period.year === null) return partRows.slice();
+
+  const caseIds = new Set(periodCases.map((row) => row.id));
+  return partRows.filter((row) => caseIds.has(row.repairCaseId));
 }

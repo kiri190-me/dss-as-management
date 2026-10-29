@@ -218,6 +218,16 @@ src/lib/domain/product-model-breakdown.test.ts
 # 일은 여기서 본다 — 2026-10-29 전까지 사용 부품도, 2026-10-16 뒤에 올린 반출 요청도
 # 한 줄도 안 들어왔는데 그것을 막는 단언이 하나도 없었다.
 src/lib/domain/product-model-fault-parts.test.ts
+# 🔴 [제품 모델 상세] · [A/S 이력] 의 **년/월 거르기**(2026-10-29 사용자 요청: 「[대시보드]의
+# [신고 증상별 현황]처럼 년/월을 선택해서 확인할 수 있도록」). 거르는 자는 대시보드 것을
+# 그대로 쓰고(fault-symptom-breakdown.ts), 그 함수 자체의 성질은 이웃
+# fault-symptom-breakdown.test.ts 가 이미 본다 — 여기서 보는 것은 **네 그래프가 한 기간에
+# 걸렸을 때 서로 어긋나지 않는가**다: 연도만 → 그 해 전체 · 연도+월 → 그 달만 · 전체 → 다,
+# 그리고 🔴 **[고장 부품]만 줄에 날짜가 없어 id 집합으로 걸리는데** 그 결과가 앞의 셋과 같은
+# 건 집합인가. 🔵 화면 배선(드롭다운 둘·월 잠금·펼친 조각 초기화)은 components 목록의
+# product-model-history-period.test.tsx 가 본다 — 눌러 볼 도구가 없어 값으로 잴 것과
+# 글자로밖에 못 잴 것을 일부러 갈랐다.
+src/lib/domain/product-model-period-filter.test.ts
 src/lib/domain/intake-mail-body.test.ts
 src/lib/domain/mail-signature-html.test.ts
 src/lib/xlsx/service-report-choices.test.ts

@@ -464,6 +464,18 @@ src/components/product-models/product-model-file-modified-date.test.ts
 # 그래서 **주석을 걷어 낸 원본 글자**로 읽는다(주석 때문에 헛통과한 전례가 있다).
 src/components/product-models/product-model-fault-part-warning.test.tsx
 
+# 🔴 같은 구역의 **년/월 드롭다운 둘**(2026-10-29 사용자 요청). 고른 **뒤의 숫자**는 unit
+# 목록의 product-model-period-filter.test.ts 가 값으로 보고, 여기서 보는 것은 둘이다:
+# ㉠ 처음 화면에 실제로 그려지는 것 — 🔴 연도 선택지가 **자료에 있는 해만**인가(고정
+# 목록이 아니다) · 🔴 연도가 「전체」면 월 칸이 잠기는가 · 월 선택지는 1~12 고정인가 ·
+# 기간을 안 걸었을 때의 글자가 예전 그대로인가. ㉡ 배선 — 네 그래프가 다 걸러진 배열을
+# 받는가 · 기간을 바꾸면 펼친 조각이 초기화되는가 · 🔴 **주황 띠만 기간을 안 타는가**
+# (재고 관리에 못 물어본 것은 어느 달을 보든 못 물어본 것이다) · 🔴 거르는 자를 여기서
+# 다시 짓지 않았는가(대시보드 것을 그대로 쓴다 — 두 벌로 적으면 한쪽만 고쳐진다).
+# 🔴 이웃 product-model-fault-part-warning.test.tsx 와 같은 형편이라(눌러 볼 도구가 없다)
+# ㉡ 은 **주석을 걷어 낸 원본 글자**로 읽는다.
+src/components/product-models/product-model-history-period.test.tsx
+
 # 「고객 안내 현황」의 고객사 양식 보기(사용자 요청 2026-09-30). 값 판정은 unit 목록의
 # customer-portal-forms.test.ts 가 본다. 여기서 못 박는 것은 **화면과 저장 통로가 그
 # 값을 어떻게 쓰는가**다: 🔴 고객에게 나가는 것이 안 바뀌었는가 — 이 화면의 목록과

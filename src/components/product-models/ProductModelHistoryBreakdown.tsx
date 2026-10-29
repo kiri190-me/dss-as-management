@@ -11,11 +11,20 @@ import {
   buildFaultPartBreakdown,
   buildSymptomBreakdown,
   faultPartIssuedWarning,
+  selectProductModelPeriodFaultParts,
   type FaultPartIssuedLookup,
   type FaultPartRow,
   type IntakeInspectionDetail,
   type ProductModelBreakdownCase,
 } from "@/lib/domain/product-model-breakdown";
+import {
+  formatFaultSymptomPeriodLabel,
+  listFaultSymptomYears,
+  selectFaultSymptomPeriodCases,
+  FAULT_SYMPTOM_ALL_PERIOD,
+  FAULT_SYMPTOM_PERIOD_MONTHS,
+  type FaultSymptomPeriod,
+} from "@/lib/domain/fault-symptom-breakdown";
 
 /**
  * ============================================================================
@@ -53,6 +62,37 @@ import {
  * 그때 적은 수를 조용히 보여 주면 「이 모델은 이 부품이 적게 고장난다」는 **틀린 결론**이
  * 나온다. 🔴 문장은 여기서 짓지 않는다 — faultPartIssuedWarning 이 수와 함께 들고 있고,
  * 이 파일은 **그 글자를 눈에 띄는 자리에 놓는 일**만 한다.
+ *
+ * ── 🔴 **년/월 드롭다운 둘** (2026-10-29 사용자 요청) ───────────────────
+ * 「[대시보드]의 [신고 증상별 현황]처럼 년/월을 선택해서 확인」. 그래서 **그 화면의
+ * 것을 그대로 쓴다** — 타입(FaultSymptomPeriod) · 연도 목록(listFaultSymptomYears) ·
+ * 거르는 자(selectFaultSymptomPeriodCases) · 월 목록(FAULT_SYMPTOM_PERIOD_MONTHS) ·
+ * 이름표(formatFaultSymptomPeriodLabel)가 전부 domain/fault-symptom-breakdown.ts 의
+ * 것이다. 🔴 이름이 `FaultSymptom…` 이라 대시보드 전용처럼 보이지만 **옮기지 않았다** —
+ * 옮기면 대시보드가 함께 바뀌고, 여기에 같은 것을 다시 적으면 한쪽만 고쳐지는 날이 온다.
+ *
+ * 🔴 **거르는 날짜는 인수일 하나**이고 **네 그래프가 다 걸린다.** 앞의 셋은 접수 건을
+ * 먼저 거르고 그 뒤에 매핑하면 되지만(ProductModelBreakdownCase 에 인수일을 싣지 않는
+ * 것은 그대로 둔다 — 그래프가 읽지 않는 칸이다), [고장 부품] 줄에는 날짜가 없어
+ * **id 집합**으로 따로 건다(domain 의 selectProductModelPeriodFaultParts).
+ *
+ * 🔵 **새 조회를 하지 않는다**(위 「새 조회를 하지 않는다」와 같은 말이다). 거르기는
+ * 전부 이 화면 안의 계산이라 주소에도 남지 않는다 — 대시보드도 같다.
+ *
+ * 🔴 **주황 띠(못 센 건 안내)만 기간을 안 탄다.** 그것은 「재고 관리에 못 물어봤다」는
+ * 말이고, 어느 달을 보든 못 물어본 것은 못 물어본 것이다. 게다가 서버가 내려보내는 것은
+ * **수**뿐이라(faultPartIssuedLookup) 어느 건이 빠졌는지 알 수 없어, 기간에 맞춰 줄이면
+ * 「이 달은 다 셌다」는 **거짓말**이 된다. 그래서 그대로 둔다.
+ *
+ * 🔴 **아래 접수 건 목록도 같은 기간에 걸린다** (2026-10-29 사용자 결정). 처음에는 네
+ * 그래프만 걸고 목록은 전체를 두었는데, 그러면 「총 3건」 옆에 「목록 보기 (25건)」이
+ * 떠서 어느 쪽이 맞는지 알 수 없다. 🔵 그래서 **이 구역의 숫자는 전부 한 기간**이다 —
+ * 단추에 적히는 수도 걸러진 수이고(`periodResolved.length`), 목록이 기간 때문에 비면
+ * 그 사실을 **그래프 넷과 같은 문장**으로 말한다(emptyCaseMessage 를 그대로 넘긴다 —
+ * 한 화면에서 같은 뜻을 두 가지 말로 하면 안 된다).
+ * 🔵 **접수 건이 아예 없는 모델**은 그 앞에서 돌려보낸다(아래 `resolved.length === 0`).
+ *    그때의 글자는 예전 그대로 「이 모델과 연결된 A/S 접수 건이 없습니다」다 — 기간
+ *    때문에 빈 것과 **원래 없는 것**은 다른 말이다.
  * ============================================================================
  */
 
@@ -71,6 +111,15 @@ const CHART_IDS: ChartId[] = ["SYMPTOM", "PART", "END_USER", "BILLING"];
 /** 처음 화면. 넷 다 꺼두면 이 구역이 단추 줄만 남는다. */
 const INITIAL_OPEN_CHARTS: ChartId[] = ["SYMPTOM"];
 
+/**
+ * 고르는 칸 두 개가 같은 모양이어야 한 벌로 읽힌다. 🔴 대시보드 [신고 증상별 현황]의
+ * SELECT_CLASS 와 **같은 글자**다 — 같은 기능을 베낀 자리라 생김새까지 같아야 "그것과
+ * 같은 것"으로 읽힌다. 글자를 공유하지 않는 까닭은 그쪽이 내보내지 않는 상수이고,
+ * 꾸밈 하나 때문에 남의 화면 파일을 고칠 수는 없기 때문이다.
+ */
+const PERIOD_SELECT_CLASS =
+  "rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
+
 export default function ProductModelHistoryBreakdown({
   resolved,
   faultParts,
@@ -87,28 +136,64 @@ export default function ProductModelHistoryBreakdown({
   const [isListOpen, setIsListOpen] = useState(false);
   // 그래프마다 따로 기억한다 — 한쪽에서 고른 조각이 다른 원의 선택을 지우면 안 된다.
   const [selection, setSelection] = useState<Partial<Record<ChartId, string | null>>>({});
+  // 처음에는 **전체 기간**이다. 기간을 고르기 전 화면은 예전 그대로여야 한다.
+  const [period, setPeriod] = useState<FaultSymptomPeriod>(FAULT_SYMPTOM_ALL_PERIOD);
+
+  // 연도 목록은 걸린 기간과 무관하게 **원본** 배열에서 뽑는다. 걸러진 배열에서 뽑으면
+  // 2025년을 고르는 순간 목록에 2025년만 남아 다른 해로 돌아갈 수 없다(대시보드와 같다).
+  const years = useMemo(() => listFaultSymptomYears(resolved), [resolved]);
+
+  // 🔴 **거르고 나서 매핑한다.** ProductModelBreakdownCase 에는 인수일이 없고, 없는
+  //    것이 맞다 — 그래프가 읽지 않는 칸이다. 그래서 날짜가 아직 붙어 있는 이 자리에서
+  //    먼저 거른다.
+  const periodResolved = useMemo(
+    () => selectFaultSymptomPeriodCases(resolved, period),
+    [resolved, period]
+  );
 
   const cases: ProductModelBreakdownCase[] = useMemo(
     () =>
-      resolved.map((row) => ({
+      periodResolved.map((row) => ({
         id: row.id,
         reportedSymptom: row.reportedSymptom,
         intakeInspectionResult: row.intakeInspectionResult,
         endUserName: row.endUserName,
         billingType: row.billingType,
       })),
-    [resolved]
+    [periodResolved]
+  );
+
+  // 🔴 [고장 부품] 줄에는 날짜가 없어 **id 집합**으로 건다 — 넷째 그래프가 앞의 셋과
+  //    같은 잣대(인수일)로 걸리는 유일한 길이다(그 함수의 머리말).
+  const periodFaultParts = useMemo(
+    () => selectProductModelPeriodFaultParts(faultParts, period, cases),
+    [faultParts, period, cases]
   );
 
   const symptom = useMemo(() => buildSymptomBreakdown(cases), [cases]);
   const endUser = useMemo(() => buildEndUserBreakdown(cases), [cases]);
   const billing = useMemo(() => buildBillingBreakdown(cases), [cases]);
-  const faultPart = useMemo(() => buildFaultPartBreakdown(faultParts), [faultParts]);
+  const faultPart = useMemo(() => buildFaultPartBreakdown(periodFaultParts), [periodFaultParts]);
   // 🔴 다 셌으면 null 이고, 그때는 아무것도 안 그린다 — 늘 떠 있는 안내는 아무도 안 읽는다.
+  // 🔴 **기간을 타지 않는다**(파일 머리말). 서버가 내려보낸 것은 수뿐이라 어느 건이
+  //    빠졌는지 알 수 없고, 기간에 맞춰 줄이면 「이 달은 다 셌다」는 거짓말이 된다.
   const faultPartWarning = faultPartIssuedWarning(faultPartIssuedLookup);
 
+  const periodLabel = formatFaultSymptomPeriodLabel(period);
+  const isPeriodFiltered = period.year !== null;
+  // 기간 때문에 0건인 것과, 원래 그 모델에 건이 없는 것은 다른 말이다.
+  const emptyCaseMessage = isPeriodFiltered
+    ? `${periodLabel}에 인수된 접수 건이 없습니다.`
+    : "접수 건이 없습니다.";
+  const emptyPartMessage = isPeriodFiltered
+    ? `${periodLabel}에 인수된 건의 부품 기록이 없습니다.`
+    : "부품 기록이 없습니다.";
+
   if (resolved.length === 0) {
-    // 단추 줄도 그리지 않는다 — 켤 그래프도 펼칠 목록도 없다.
+    // 단추 줄도 그리지 않는다 — 켤 그래프도 펼칠 목록도 없다. 기간 고르는 칸도 마찬가지다
+    // (고를 연도가 한 해도 없다).
+    // 🔴 **여기만 원본 배열이고, 빈 글자도 안 넘긴다.** 이 갈래는 「고른 기간에 없다」가
+    //    아니라 「이 모델에 아예 없다」라서, 목록의 예전 글자가 그대로 맞는 말이다.
     return <ProductModelRepairCaseHistory resolved={resolved} />;
   }
 
@@ -121,8 +206,85 @@ export default function ProductModelHistoryBreakdown({
     setSelection((prev) => ({ ...prev, [id]: prev[id] === key ? null : key }));
   };
 
+  // 기간을 바꾸면 펼쳐 둔 조각을 **네 그래프 모두** 접는다 — 다른 기간에서 고른 조각이
+  // 그대로 펼쳐져 있으면 제목과 내용이 어긋난 채 남는다(대시보드와 같은 까닭).
+  const changeYear = (raw: string) => {
+    // 연도를 바꾸면 월은 언제나 '전체'로 되돌아간다. 2025년 3월을 보다 2024년으로
+    // 옮겼을 때 3월이 남아 있으면, 사람은 자기가 무엇을 보고 있는지 놓친다.
+    setPeriod(raw === "" ? FAULT_SYMPTOM_ALL_PERIOD : { year: Number(raw), month: null });
+    setSelection({});
+  };
+  const changeMonth = (raw: string) => {
+    // 연도가 전체면 월만 정해진 기간은 만들 수 없다(타입이 막는다). 칸도 잠겨 있어
+    // 여기까지 오지 않지만, 들어오더라도 아무 일이 없도록 그대로 돌려준다.
+    setPeriod((prev) =>
+      prev.year === null ? prev : { year: prev.year, month: raw === "" ? null : Number(raw) }
+    );
+    setSelection({});
+  };
+
   return (
     <div className="flex flex-col gap-4">
+      {/* 기간 고르는 줄 — 대시보드 [신고 증상별 현황]과 같은 모양이고, 쓰는 함수도 같은
+          것이다(파일 머리말). 그래프 고르는 단추 줄보다 **위**에 둔다: 기간이 네 그래프에
+          모두 걸리므로, 한 그래프에 딸린 설정으로 보이면 안 된다. */}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">기간</span>
+          <select
+            value={period.year ?? ""}
+            onChange={(e) => changeYear(e.target.value)}
+            aria-label="A/S 이력 연도"
+            className={PERIOD_SELECT_CLASS}
+          >
+            <option value="">전체</option>
+            {/* 접수 건이 있는 해만 나온다 — 자료에 없는 해는 골라 봐야 언제나 0건이다. */}
+            {years.map((year) => (
+              <option key={year} value={year}>
+                {year}년
+              </option>
+            ))}
+          </select>
+          <select
+            value={period.month ?? ""}
+            onChange={(e) => changeMonth(e.target.value)}
+            disabled={!isPeriodFiltered}
+            aria-label="A/S 이력 월"
+            title={isPeriodFiltered ? undefined : "연도를 먼저 고르면 월을 고를 수 있습니다."}
+            className={PERIOD_SELECT_CLASS}
+          >
+            <option value="">전체</option>
+            {/* 1~12월을 전부 보여 준다. 있는 달만 보여 주면 '그 달에 0건'과
+                '고를 수조차 없음'이 구별되지 않는다. */}
+            {FAULT_SYMPTOM_PERIOD_MONTHS.map((month) => (
+              <option key={month} value={month}>
+                {month}월
+              </option>
+            ))}
+          </select>
+          {/* 회색으로 잠가 두기만 하면 왜 못 고르는지 알 수 없다. 이유를 글로 적는다. */}
+          {isPeriodFiltered ? null : (
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              연도를 먼저 고르면 월을 고를 수 있습니다.
+            </span>
+          )}
+          {/* 그래프만 바뀌고 아무 말이 없으면 무엇이 걸려 있는지 알 수 없다. */}
+          <span className="ml-auto text-sm text-zinc-600 dark:text-zinc-400">
+            {periodLabel} · 접수 {periodResolved.length}건
+          </span>
+        </div>
+        {/* 🔵 기간을 걸었을 때만 적는다. 말해야 하는 것은 **무슨 날짜로** 걸렀는가다 —
+            접수일도 출하일도 아닌 **인수일**이고, 그 사실은 화면 어디에도 안 적혀 있다.
+            🔴 「무엇이 걸리는가」도 함께 적는다: 이 구역은 그래프 넷과 아래 목록까지
+            **전부** 한 기간이다(2026-10-29 사용자 결정, 파일 머리말). */}
+        {isPeriodFiltered ? (
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            기간은 인수일 기준이라 {periodLabel}에 인수된 건만 셉니다. 네 그래프와 아래 접수
+            건 목록이 모두 이 기간에 걸립니다.
+          </p>
+        ) : null}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-zinc-500 dark:text-zinc-400">그래프</span>
         {CHART_IDS.map((id) => {
@@ -150,7 +312,12 @@ export default function ProductModelHistoryBreakdown({
           onClick={() => setIsListOpen((prev) => !prev)}
           className="ml-auto rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
-          {isListOpen ? "접수 건 목록 숨기기" : `접수 건 목록 보기 (${resolved.length}건)`}
+          {/* 🔴 **열면 보일 수**를 적는다(`periodResolved`). 단추의 수와 펼친 목록의 수가
+              다르면 둘 중 어느 것을 믿어야 할지 알 수 없다 — 그래프의 「총 N건」과도 같은
+              수다. 🔵 기간을 안 걸었을 때는 걸러진 수가 곧 전체라 글자가 예전 그대로다. */}
+          {isListOpen
+            ? "접수 건 목록 숨기기"
+            : `접수 건 목록 보기 (${periodResolved.length}건)`}
         </button>
       </div>
 
@@ -174,9 +341,12 @@ export default function ProductModelHistoryBreakdown({
                 title={CHART_LABELS.SYMPTOM}
                 meta={`총 ${symptom.total}건`}
                 note="조각을 누르면 그 증상으로 접수된 건들의 인수점검 결과가 펼쳐집니다."
-                emptyMessage="접수 건이 없습니다."
+                emptyMessage={emptyCaseMessage}
                 slices={symptom.slices}
-                ariaLabel={`고장 증상별 건수 비율, 총 ${symptom.total}건`}
+                // 🔴 낭독기에는 **걸린 기간이 원과 함께 읽혀야** 한다. 기간 고르는 칸은
+                // 저 위에 따로 있어서, 원만 읽고 지나가면 어느 기간의 수인지 알 수 없다
+                // (대시보드의 같은 그래프도 ariaLabel 에 기간을 싣는다).
+                ariaLabel={`고장 증상별 건수 비율, ${periodLabel} 총 ${symptom.total}건`}
                 selectedKey={selectedKey}
                 onSelectSlice={onSelectSlice}
                 detail={(slice) => <IntakeInspectionDetailPanel slice={slice} />}
@@ -202,10 +372,10 @@ export default function ProductModelHistoryBreakdown({
                 // (domain/product-model-breakdown.ts 머리말의 「한 원 안에 자가 둘이다」).
                 note="부품 요청 · 수리 건에 적힌 사용 부품 · 재고 관리에서 반출 확인된 부품을 함께 셉니다. 한 건에 여러 부품이 있을 수 있어 접수 건수와 합이 다릅니다. 부품 요청은 취소·반려된 것을 빼고 세고, 반출 부품은 실제로 나간 줄만 셉니다."
                 warning={faultPartWarning}
-                emptyMessage="부품 기록이 없습니다."
+                emptyMessage={emptyPartMessage}
                 countUnit="개"
                 slices={faultPart.slices}
-                ariaLabel={`고장 부품별 요청 비율, 부품 ${faultPart.total}개`}
+                ariaLabel={`고장 부품별 요청 비율, ${periodLabel} 부품 ${faultPart.total}개`}
                 selectedKey={selectedKey}
                 onSelectSlice={onSelectSlice}
               />
@@ -218,9 +388,9 @@ export default function ProductModelHistoryBreakdown({
                 key={id}
                 title={CHART_LABELS.END_USER}
                 meta={`총 ${endUser.total}건`}
-                emptyMessage="접수 건이 없습니다."
+                emptyMessage={emptyCaseMessage}
                 slices={endUser.slices}
-                ariaLabel={`End-User 별 건수 비율, 총 ${endUser.total}건`}
+                ariaLabel={`End-User 별 건수 비율, ${periodLabel} 총 ${endUser.total}건`}
                 selectedKey={selectedKey}
                 onSelectSlice={onSelectSlice}
               />
@@ -232,9 +402,9 @@ export default function ProductModelHistoryBreakdown({
               key={id}
               title={CHART_LABELS.BILLING}
               meta={`총 ${billing.total}건`}
-              emptyMessage="접수 건이 없습니다."
+              emptyMessage={emptyCaseMessage}
               slices={billing.slices}
-              ariaLabel={`유/무상 별 건수 비율, 총 ${billing.total}건`}
+              ariaLabel={`유/무상 별 건수 비율, ${periodLabel} 총 ${billing.total}건`}
               selectedKey={selectedKey}
               onSelectSlice={onSelectSlice}
             />
@@ -242,7 +412,19 @@ export default function ProductModelHistoryBreakdown({
         })}
       </div>
 
-      {isListOpen ? <ProductModelRepairCaseHistory resolved={resolved} /> : null}
+      {/* 🔴 **걸러진 배열**을 넘긴다(2026-10-29 사용자 결정). 비었을 때 할 말도 함께
+          넘긴다 — 그 목록은 기간이 무엇인지 모르고, 제 기본 글자(「이 모델과 연결된 A/S
+          접수 건이 없습니다」)는 **기간 때문에 빈 날에는 거짓말**이 된다.
+          🔵 기간을 안 걸었으면 `undefined` 라 예전 글자 그대로다. 그 글자를 여기서 다시
+          적지 않는 까닭도 같다 — 두 벌로 적으면 한쪽만 고쳐진다.
+          🔵 그래프 넷이 쓰는 `emptyCaseMessage` 를 **그대로** 쓴다. 같은 기간이 비어서
+          나오는 말이라 문장이 갈리면 한 화면이 두 가지 말을 한다. */}
+      {isListOpen ? (
+        <ProductModelRepairCaseHistory
+          resolved={periodResolved}
+          emptyMessage={isPeriodFiltered ? emptyCaseMessage : undefined}
+        />
+      ) : null}
     </div>
   );
 }
