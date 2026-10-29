@@ -341,7 +341,7 @@ describe("[고장 부품] 펼친 자리 — 안 켠 카드로는 새지 않는�
         faultParts: [
           { repairCaseId: "case-01", displayName: "종단 증폭 기판 (DWG-AA1001)", matchKey: "dwgaa1001" },
         ],
-        faultPartIssuedLookup: { uncountedCaseCount: 0, skippedCaseCount: 0, caseLimit: 40 },
+        faultPartIssuedLookup: { uncountedCaseCount: 0, timedOutCaseCount: 0, timeBudgetMs: 5000 },
         faultPartInventory: INDEX,
       })
     );

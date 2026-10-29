@@ -192,8 +192,8 @@ export default async function ProductModelDetailPage({
    */
   const faultPartIssuedLookup = {
     uncountedCaseCount: issuedParts.uncountedCaseCount,
-    skippedCaseCount: issuedParts.skippedCaseCount,
-    caseLimit: issuedParts.caseLimit,
+    timedOutCaseCount: issuedParts.timedOutCaseCount,
+    timeBudgetMs: issuedParts.timeBudgetMs,
   };
 
   // `등록 장비` 표가 사라져 units 를 읽는 화면이 없다. 상세 화면은 "use client"

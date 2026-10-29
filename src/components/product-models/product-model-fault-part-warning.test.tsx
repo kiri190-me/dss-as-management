@@ -151,7 +151,7 @@ describe("[고장 부품] 안내 — 그려 보는 쪽", () => {
       createElement(ProductModelHistoryBreakdown, {
         resolved,
         faultParts: [],
-        faultPartIssuedLookup: { uncountedCaseCount: 0, skippedCaseCount: 0, caseLimit: 40 },
+        faultPartIssuedLookup: { uncountedCaseCount: 0, timedOutCaseCount: 0, timeBudgetMs: 5000 },
         // 🔴 2026-10-29 에 생긴 프롭 — 조각을 누르면 펼칠 재고 관리 줄. 여기서는 부품 줄이
         //    아예 없어 쓰이지 않지만 없으면 화면이 안 뜬다.
         faultPartInventory: { status: "ok", rowsByKey: {} },
@@ -162,7 +162,7 @@ describe("[고장 부품] 안내 — 그려 보는 쪽", () => {
   });
 
   test("🔴 안 켠 카드의 안내가 화면으로 새지 않는다 — 고장 증상만 켜져 있다", () => {
-    const lookup = { uncountedCaseCount: 3, skippedCaseCount: 0, caseLimit: 40 };
+    const lookup = { uncountedCaseCount: 3, timedOutCaseCount: 0, timeBudgetMs: 5000 };
     const warning = faultPartIssuedWarning(lookup);
     assert.ok(warning, "이 시험의 표본이 비었다 — 경고가 생기는 입력이어야 한다");
 

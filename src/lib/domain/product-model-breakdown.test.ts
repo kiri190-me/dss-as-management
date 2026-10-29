@@ -291,13 +291,18 @@ test("고장 부품도 9종 이상이면 상위 8 + 기타로 접힌다", () => 
  * 묻는다 — `server/product-model-issued-parts.ts`). 조용히 적은 수를 보여 주면
  * 「이 모델은 이 부품이 적게 고장난다」는 틀린 결론이 나온다.
  *
- * 🔵 **수가 글자에 실제로 박히는지**까지 본다 — 「문장이 있다」만 재면 상한을 30 으로
- *    고쳐도 「40건」이라고 적힌 옛 문장이 영영 통과한다.
+ * 🔵 **수가 글자에 실제로 박히는지**까지 본다 — 「문장이 있다」만 재면 예산을 3초로
+ *    고쳐도 「5초」라고 적힌 옛 문장이 영영 통과한다.
+ *
+ * ── 🔴 **2026-10-29: 끊는 자가 건수에서 시간으로 바뀌었다** ──────────────
+ * 전에는 「수리 건이 **상한(40건)**을 넘으면 한 건도 안 센다」였고 그 말이 아래 시험
+ * 이름에도 적혀 있었다. 사용자가 「상한 없이 불러올 수 있도록 해줘」로 정하면서 그 설계가
+ * 통째로 사라졌다 — 옛 이름은 아래 각 시험에 **인용**으로 남겨 둔다.
  * ============================================================================
  */
 test("🔴 다 셌으면 아무 말도 안 한다 — 늘 떠 있는 안내는 아무도 안 읽는다", () => {
   assert.equal(
-    faultPartIssuedWarning({ uncountedCaseCount: 0, skippedCaseCount: 0, caseLimit: 40 }),
+    faultPartIssuedWarning({ uncountedCaseCount: 0, timedOutCaseCount: 0, timeBudgetMs: 5000 }),
     null
   );
   // 반출을 안 묻는 화면(또는 아직 안 물은 상태)도 조용하다.
@@ -307,8 +312,8 @@ test("🔴 다 셌으면 아무 말도 안 한다 — 늘 떠 있는 안내는 �
 test("🔴 못 받아 온 건이 있으면 **그 수**와 「적다」는 말이 함께 나온다", () => {
   const message = faultPartIssuedWarning({
     uncountedCaseCount: 3,
-    skippedCaseCount: 0,
-    caseLimit: 40,
+    timedOutCaseCount: 0,
+    timeBudgetMs: 5000,
   });
   assert.ok(message, "못 센 건이 있는데 화면이 아무 말도 안 한다");
   assert.ok(message.includes("3건"), `못 센 수가 글자에 없다: ${message}`);
@@ -317,24 +322,57 @@ test("🔴 못 받아 온 건이 있으면 **그 수**와 「적다」는 말이
   assert.ok(message.includes("적습니다"), message);
 });
 
-test("🔴 상한을 넘겨 아예 안 센 것은 **다른 말**이다 — 건수와 상한이 둘 다 적힌다", () => {
+/**
+ * 🔴 옛 이름: 「상한을 넘겨 **아예 안 센** 것은 다른 말이다 — 건수와 **상한**이 둘 다
+ * 적힌다」. 지금은 상한이 없고, 같은 자리에 「**시간이 모자라 못 물어봤다**」가 선다.
+ */
+test("🔴 시간이 모자라 못 물어본 것은 **다른 말**이다 — 건수와 예산이 둘 다 적힌다", () => {
   const message = faultPartIssuedWarning({
     uncountedCaseCount: 0,
-    skippedCaseCount: 57,
-    caseLimit: 40,
+    timedOutCaseCount: 29,
+    timeBudgetMs: 5000,
   });
-  assert.ok(message, "아예 안 셌는데 화면이 아무 말도 안 한다");
-  assert.ok(message.includes("57건"), `이 모델의 건수가 글자에 없다: ${message}`);
-  assert.ok(message.includes("40건"), `상한이 글자에 없다 — 상수를 고쳐도 안 바뀐다: ${message}`);
-  assert.ok(message.includes("세지 않았습니다"), message);
+  assert.ok(message, "못 물어본 건이 있는데 화면이 아무 말도 안 한다");
+  assert.ok(message.includes("29건"), `못 물어본 건수가 글자에 없다: ${message}`);
+  assert.ok(message.includes("5초"), `예산이 글자에 없다 — 상수를 고쳐도 안 바뀐다: ${message}`);
+  // 🔴 사람이 **무엇을 하면 되는지**가 적혀 있어야 한다. 이 갈래는 저쪽이 늦은 것이라
+  //    조금 뒤에 다시 열면 채워진다 — 그 말이 없으면 「고장났다」로 읽는다.
+  assert.ok(message.includes("새로고침"), message);
+  assert.ok(message.includes("적습니다"), message);
+  // 🔴 「못 받아 왔다」와 섞이면 고칠 자리를 못 찾는다(저쪽이 늦은 것 ↔ 답을 못 준 것).
+  assert.equal(message.includes("받아오지 못했습니다"), false, message);
 });
 
-test("🔴 둘 다 0 이 아니면 **아예 안 셌다**는 쪽이 이긴다 — 더 큰 사실이 가려지면 안 된다", () => {
+test("🔵 예산이 떨어진 값이면 초도 떨어져 적힌다 — 밀리초를 그대로 적지 않는다", () => {
+  const message = faultPartIssuedWarning({
+    uncountedCaseCount: 0,
+    timedOutCaseCount: 1,
+    timeBudgetMs: 4500,
+  });
+  assert.ok(message?.includes("4.5초"), message ?? "(없음)");
+  assert.equal(message?.includes("4500"), false, message ?? "(없음)");
+});
+
+/**
+ * 🔴 **설계가 뒤집힌 자리다**(2026-10-29). 옛 이름은 「둘 다 0 이 아니면 **아예 안 셌다**는
+ * 쪽이 이긴다 — 더 큰 사실이 가려지면 안 된다」였고, 그때는 상한에 걸리면 한 건도 안
+ * 물어봐서 다른 쪽이 **반드시 0** 이었다(그래서 하나만 골라 적어도 잃는 것이 없었다).
+ * 시간으로 끊는 지금은 **몇 건이 실패한 뒤 예산이 끝나는 상태**가 실제로 생기므로, 하나를
+ * 고르면 나머지 하나가 조용히 사라진다.
+ */
+test("🔴 둘 다 0 이 아니면 **둘 다 적는다** — 하나를 고르면 나머지가 사라진다", () => {
   const message = faultPartIssuedWarning({
     uncountedCaseCount: 2,
-    skippedCaseCount: 57,
-    caseLimit: 40,
+    timedOutCaseCount: 29,
+    timeBudgetMs: 5000,
   });
-  assert.ok(message?.includes("세지 않았습니다"), message ?? "(없음)");
-  assert.equal(message?.includes("받아오지 못했습니다"), false, message ?? "(없음)");
+  assert.ok(message, "둘 다 못 셌는데 화면이 아무 말도 안 한다");
+  assert.ok(message.includes("29건"), message);
+  assert.ok(message.includes("2건"), message);
+  assert.ok(message.includes("받아오지 못했습니다"), message);
+  // 🔵 더 큰 사실(아예 못 물어본 건)이 앞에 선다.
+  assert.ok(
+    message.indexOf("물어보지 못했습니다") < message.indexOf("받아오지 못했습니다"),
+    message
+  );
 });

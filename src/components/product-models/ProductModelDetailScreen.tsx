@@ -181,7 +181,8 @@ export default function ProductModelDetailScreen({
    * 🔴 **위 줄 가운데 못 센 것이 있는가.** 반출 확인된 부품은 수리 건마다 재고 관리에
    * 한 번씩 물어 모으므로 **일부만 받아 오는 일**이 생긴다 — 그때 화면은 적은 수를
    * 조용히 보여 주지 않고 그 사실을 적는다(domain/product-model-breakdown.ts 의
-   * faultPartIssuedWarning). 🔵 다 셌으면 세 값이 전부 0 쪽이고 아무것도 안 그린다.
+   * faultPartIssuedWarning). 🔵 다 셌으면 **못 센 수 둘이 모두 0** 이고 아무것도 안
+   * 그린다(함께 실린 시간 예산은 안내에 적을 글자일 뿐이라 늘 값이 있다).
    */
   faultPartIssuedLookup: FaultPartIssuedLookup;
   /**
