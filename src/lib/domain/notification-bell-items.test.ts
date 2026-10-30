@@ -11,6 +11,7 @@ import {
   buildApprovalRejectedNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateNearNotification,
+  buildRepairCaseTargetShipmentMissingNotification,
   type NotificationItem,
 } from "./notifications";
 
@@ -42,6 +43,11 @@ function oneOfEachKind(): NotificationItem[] {
       intakeNumber: "D9705-400",
       dueDate: "2026-10-22",
       borrowed: true,
+    }),
+    buildRepairCaseTargetShipmentMissingNotification({
+      repairCaseId: "case-target-1",
+      intakeNumber: "D9705-401",
+      orderIssuedDate: "2026-10-21",
     }),
     buildApprovalGrantedNotification({
       source: "REPAIR_CASE",

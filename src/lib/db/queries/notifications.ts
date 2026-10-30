@@ -10,11 +10,13 @@ import {
   buildApprovalGrantedNotification,
   buildApprovalRejectedNotification,
   buildRepairCaseDueDateNearNotification,
+  buildRepairCaseTargetShipmentMissingNotification,
 } from "@/lib/domain/notifications";
 import type { Role } from "@/lib/domain/types";
 import { listQuoteApprovalsPendingMyApproval } from "./quote-approvals-pending";
 import { listMyGrantedApprovalOutcomes, listMyRejectedApprovalOutcomes } from "./approval-outcome-notifications";
 import { listRepairCasesWithDueDateNear } from "./repair-case-due-date-notifications";
+import { listRepairCasesMissingTargetShipmentDate } from "./repair-case-target-shipment-notifications";
 import { listAcknowledgedNotificationKeys } from "./notification-acknowledgements";
 
 /**
@@ -30,12 +32,19 @@ import { listAcknowledgedNotificationKeys } from "./notification-acknowledgement
  *       충분하다(repair-case-approvals-pending.ts). 견적서 결재 대기도 같은
  *       모양이다 — 결재선 지정(과 최고관리자 비상구)이 조회 안에서 정해진다
  *       (quote-approvals-pending.ts).
- *  (다) **아무도 거르지 않는다** — 납기 임박이 그렇다. 조회는 "지금 납기가
- *       다가온 건 전부"라 누가 봐도 같은 결과인데, **받을 사람을 가를 축이
- *       없다**: 납기가 다가온 건은 엔지니어·관리자·영업에게 각자 다른 모양으로
- *       걸린다(2026-10-19 사용자 결정 — 모두에게). 그래서 load 가 사용자 id 도
- *       역할도 받지 않는다. 좁히는 일은 알림 설정 화면이 한다 — 아래 「설정은
- *       윗단 필터다」 절 그대로다.
+ *  (다) **load 가 아무도 거르지 않는다** — 납기 임박과 사내 목표 출하일 미등록이
+ *       그렇다. 조회가 "지금 상태가 그러한 건 전부"를 내놓아 누가 봐도 같은
+ *       결과이고, load 가 사용자 id 도 역할도 받지 않는다. 🔴 **그렇다고 둘 다
+ *       모두에게 가는 것은 아니다** — 거기서 갈린다:
+ *        · 납기 임박은 **가를 축이 없어서** 전원이다(2026-10-19 사용자 결정 —
+ *          납기가 다가온 건은 엔지니어·관리자·영업에게 각자 다른 모양으로 걸린다).
+ *        · 사내 목표 출하일 미등록은 **A/S 엔지니어**다(2026-10-29 사용자 결정).
+ *          역할을 가르는 자리가 조회가 아니라 **알림 설정의 역할 기본값**이고
+ *          (domain/notification-settings.ts), 그 case 주석에 왜 (나)형으로 박지
+ *          않았는지가 적혀 있다 — 요약하면 인가 경계가 아니고, 박으면 설정 화면의
+ *          스위치가 죽은 단추가 되기 때문이다.
+ *       좁히고 넓히는 일은 알림 설정 화면이 한다 — 아래 「설정은 윗단 필터다」 절
+ *       그대로다.
  *
  * 🔴 **(나)형은 지금 하나도 없다 — 번호를 다시 매기지 않았다.** (나)는 「load 가
  *    **역할로** 먼저 걸러, 자격 없는 사람 앞에서는 그 조회가 아예 돌지 않는다」는
@@ -178,6 +187,37 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
           intakeNumber: row.intakeNumber,
           dueDate: row.dueDate,
           borrowed: row.borrowed,
+        })
+      );
+    },
+  },
+  {
+    kind: "REPAIR_CASE_TARGET_SHIPMENT_MISSING",
+    load: async () => {
+      // 🔴 **역할로 거르지 않는다 — 그런데 모두에게 가지도 않는다.** 받는 사람은
+      // A/S 엔지니어이고(2026-10-29 사용자 결정), 그 좁히기는 **설정 층의 역할
+      // 기본값**이 한다(domain/notification-settings.ts 의
+      // defaultRoleReceivesNotification — 지금 역할로 갈리는 유일한 종류다).
+      //
+      // 그래서 모양은 납기 임박과 같은 (다)형이다: load 가 사용자도 역할도 받지
+      // 않는다. 🔴 **(나)형으로 적지 않은 까닭 셋**(그 case 주석에 길게 적어 두었다):
+      //  1. 싣는 것이 인수번호와 날짜뿐이라 **인가 경계가 아니다** — 모든 역할이
+      //     이미 목록 화면에서 보는 자료이고, 납기 임박이 전원에게 가는 그 자료다.
+      //  2. 조회에 역할을 박으면 설정 화면의 역할 스위치가 **죽은 단추**가 된다
+      //     (켜도 아무 일이 없다). 「설정은 윗단 필터」가 그 자리에서 거짓이 된다.
+      //  3. 최고관리자 잠금이 화면에서 거짓말이 된다 — 「받음(잠김)」이라 적어 두고
+      //     실제로는 한 줄도 안 간다.
+      //
+      // 「무엇을 알릴 것인가」도 여기서 정하지 않는다 — 세 조건(PO발행일 있음 ·
+      // 목표 출하일 없음 · 아직 안 나감)은 전부 저 조회와 그 안의 도메인 함수에 있다
+      // (queries/repair-case-target-shipment-notifications.ts). 여기서 하는 일은
+      // 모양 변환뿐이다.
+      const missing = await listRepairCasesMissingTargetShipmentDate();
+      return missing.map((row) =>
+        buildRepairCaseTargetShipmentMissingNotification({
+          repairCaseId: row.repairCaseId,
+          intakeNumber: row.intakeNumber,
+          orderIssuedDate: row.orderIssuedDate,
         })
       );
     },

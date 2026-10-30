@@ -26,6 +26,7 @@
  */
 
 import { addCalendarDays, toKstDateOnly } from "./date-only";
+import { foldBlankToNull } from "./domestic-order-list";
 import { LABELS as APPROVAL_TYPE_LABELS, type ShipmentApprovalType } from "./local/workflow/shipment-approval-checklist";
 import { quoteEditHref } from "./quote-new-link";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
@@ -72,6 +73,7 @@ export const NOTIFICATION_KINDS = [
   "REPAIR_CASE_APPROVAL",
   "QUOTE_APPROVAL_PENDING",
   "REPAIR_CASE_DUE_DATE_NEAR",
+  "REPAIR_CASE_TARGET_SHIPMENT_MISSING",
   "APPROVAL_GRANTED",
   "APPROVAL_REJECTED",
 ] as const;
@@ -365,6 +367,165 @@ export function buildRepairCaseDueDateNearNotification(input: {
     detail: input.borrowed
       ? `${input.dueDate} · ${DUE_DATE_FROM_DOMESTIC_ORDER_LABEL}`
       : input.dueDate,
+    href: repairCaseDetailHrefs(input.repairCaseId).root,
+  };
+}
+
+// ══════════════ 사내 목표 출하일 미등록 — PO 는 나갔는데 우리 날짜가 아직 비었다
+
+/**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 2026-10-29 사용자 요구: 「PO발행일이 등록되면 엔지니어들에게 **사내 목표 출하일을
+ * 등록해 주세요** 라고 알림이 뜨도록」. 그리고 「이 알림은 승인용이야 — 해당 수리건에
+ * 사내 목표 출하일이 등록되기 전까지는 **눌러서 확인해도 사라지지 않아**」.
+ *
+ * 🔴 **그래서 이 종류는 ACKNOWLEDGEABLE_NOTIFICATION_KINDS 에 넣지 않는다.** 거기
+ * 들어가는 순간 종에 확인 단추가 생기고, 누르면 날짜를 안 적어도 사라진다 — 요구와
+ * 정반대다. 넣지 않으면 저절로 「할 일 알림」이 된다: 날짜를 적으면 다음 조회에서
+ * 빠지고, 안 적으면 계속 남는다(파일 머리말의 그 구조 그대로이고, 새 표는 하나도
+ * 필요 없다). 적는 쪽 문도 이 종류의 키를 거절한다
+ * (domain/notification-acknowledgement.ts 의 checkNotificationAcknowledgementKey).
+ *
+ * 🔵 **「지우기(✕)」는 그것과 다른 것이다.** 종의 ✕ 는 종류를 가리지 않고 모든 줄에
+ * 열려 있고(domain/notification-dismissal.ts — 2026-10-20 결정), 기록은 포털에 남는다.
+ * 그것으로 잠시 치울 수는 있지만 확인 기록처럼 영구가 아니다. 이번 조각에서 그 규칙을
+ * 건드리지 않았다.
+ *
+ * ── 🔴 뜨는 조건 셋(2026-10-29·30 사용자 결정) ──────────────────────────────
+ *   ① PO발행일이 있다            — domestic_orders.order_issued_date
+ *   ② 사내 목표 출하일이 없다     — repair_cases.internal_target_shipment_date
+ *   ③ 출하가 끝나지 않았다        — isRepairCaseShipmentFinished 가 거짓
+ * 셋 다 **지금 자료에서 매번 다시 계산**하므로 「지난 건도 함께 뜬다」가 공짜로 따라
+ * 온다 — PO발행일을 적는 자리가 셋(수리 건 상세 · A/S 내자 정리 · PO 쪽 내자 정리)인데
+ * 전부 같은 칸이라, 어느 자리에서 적었든 다음 조회에서 똑같이 걸린다. 적는 자리마다
+ * 훅을 걸었다면 하나는 반드시 빠뜨렸을 것이다.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+
+/**
+ * 이 건에 **PO발행일이 적혀 있는가** — 붙어 있는 내자 줄 가운데 하나라도 적혀 있으면 참.
+ *
+ * 한 수리 건에 내자 줄이 여럿일 수 있어서(분할 발주 — repair_case_id 에 유일 제약이
+ * 없다) 날짜를 **묶음으로** 받는다. 「하나라도」인 까닭은 이 알림이 묻는 것이 「PO 가
+ * 나가기 시작했는가」이기 때문이다 — 줄 하나라도 발행됐으면 그 건의 일정은 이미
+ * 움직이고 있고, 그때가 우리 쪽 목표일을 적어야 하는 때다.
+ *
+ * 공백만 적힌 값은 없는 것으로 접는다(domestic-order-list.ts 의 foldBlankToNull —
+ * 「납기 역전」·내자 목록이 같은 함수로 같은 판단을 한다). `date` 칸이라 실제로는
+ * 공백이 들어올 수 없지만, 조회가 저장을 거치지 않은 값도 읽는다는 그 함수의 전제를
+ * 여기서 뒤집지 않는다.
+ */
+export function hasDomesticOrderIssued(orderIssuedDates: readonly string[]): boolean {
+  return orderIssuedDates.some((issuedDate) => foldBlankToNull(issuedDate) !== null);
+}
+
+/**
+ * 그 건의 PO발행일 가운데 **가장 이른 하루**("YYYY-MM-DD"). 하나도 없으면 `null`.
+ *
+ * 알림 한 줄의 detail 에 실을 날짜다 — 「언제 나간 PO 인가」가 곧 「얼마나 오래 비워
+ * 두었는가」라서, 여럿이면 가장 이른 것이 사람에게 더 급한 사실을 말한다.
+ *
+ * 🔵 셈은 납기요청일의 pickEarliestDueDate(weekly-report-delivery.ts)와 같은 문자열
+ * min 이지만 **그 함수를 부르지 않는다.** 저쪽은 「입고 요청일을 고르는 규칙」이라는
+ * 이름과 주석을 달고 있고 이쪽은 발주발행일이다 — 함수 하나를 두 뜻으로 쓰면 저쪽
+ * 규칙이 바뀌는 날(예: 지난 날짜를 빼자) 이 알림의 날짜가 **아무 말 없이** 따라
+ * 바뀐다. "YYYY-MM-DD" 가 자리수 고정이라 사전순이 곧 날짜순인 것은 두 곳이 같다
+ * (domain/date-only.ts 머리말 — Date 로 파싱하면 한국에서 하루가 밀린다).
+ */
+export function earliestDomesticOrderIssuedDate(orderIssuedDates: readonly string[]): string | null {
+  let earliest: string | null = null;
+  for (const raw of orderIssuedDates) {
+    const issuedDate = foldBlankToNull(raw);
+    if (issuedDate === null) continue;
+    if (earliest === null || issuedDate < earliest) earliest = issuedDate;
+  }
+  return earliest;
+}
+
+/**
+ * 사내 목표 출하일이 **아직 비어 있는가**. 공백만 적힌 값도 「없음」이다 —
+ * 「납기 역전」이 같은 칸을 같은 함수로 접는다(due-date-inversion.ts 의
+ * isDueDateInverted). 한쪽이 공백을 값으로 치면 화면에는 빈칸인데 알림만 안 뜨는
+ * 건이 생긴다.
+ */
+export function isInternalTargetShipmentDateMissing(internalTargetShipmentDate: string | null): boolean {
+  return foldBlankToNull(internalTargetShipmentDate) === null;
+}
+
+/**
+ * 이 수리 건에 **「사내 목표 출하일을 등록해 주세요」가 뜨는가** — 위 세 조건의 곱.
+ *
+ * 조건을 조회(SQL) 안에 적지 않고 여기 둔 까닭은 「납기 임박」과 같다
+ * (isRepairCaseDueDateNear 의 주석): 같은 사실을 나중에 표·배지에서도 그리게 되면
+ * 그 자리마다 조건을 다시 적게 되고, 언젠가 한 곳만 고쳐져 **종과 표가 서로 다른
+ * 말을 한다.** 지금 이 함수를 부르는 곳은 조회 하나뿐이지만(queries/
+ * repair-case-target-shipment-notifications.ts), 자리를 미리 하나로 정해 둔다.
+ *
+ * 🔴 **출하 완료는 「납기 임박」·「납기 지연」·「납기 역전」이 쓰는 그 함수로 가른다**
+ * (isRepairCaseShipmentFinished). 넷이 「끝난 건」을 다르게 가르면 한쪽만 고쳐지는
+ * 날이 온다. 상태가 `null` 인 건은 그 함수의 결정대로 「아직 안 나갔다」로 둔다.
+ */
+export function needsInternalTargetShipmentDate(row: {
+  /** 붙어 있는 내자 줄의 PO발행일 전부(is_deleted = false 인 줄만). */
+  orderIssuedDates: readonly string[];
+  internalTargetShipmentDate: string | null;
+  /** 평탄화된 지금 상태(workflow_steps.repair_status). 모르면 `null`. */
+  status: RepairStatus | null;
+  actualShipmentDate: string | null;
+}): boolean {
+  if (!hasDomesticOrderIssued(row.orderIssuedDates)) return false;
+  if (!isInternalTargetShipmentDateMissing(row.internalTargetShipmentDate)) return false;
+  return !isRepairCaseShipmentFinished(row);
+}
+
+/**
+ * 사용자가 적어 준 그 문장 **그대로**(2026-10-29). 글자를 여기 한 곳에 두는 까닭은
+ * 종 한 줄과 알림 설정 화면의 설명이 같은 말을 해야 하기 때문이다 — 두 곳에 손으로
+ * 적으면 한쪽만 고쳐지는 날 「등록해 주세요」와 「등록 바랍니다」가 섞인다
+ * (due-date-inversion.ts 의 DUE_DATE_INVERSION_NOTE 와 같은 규율).
+ */
+export const INTERNAL_TARGET_SHIPMENT_REQUEST_MESSAGE = "사내 목표 출하일을 등록해 주세요";
+
+/**
+ * 「사내 목표 출하일을 등록해 주세요」 알림 한 줄.
+ *
+ * ── subject 는 인수번호다 ──────────────────────────────────────────────
+ * 접수 건을 가리키는 말 중 사람이 먼저 찾는 것이고, 결재 알림·납기 임박이 굵게
+ * 두는 것과 같은 값이다.
+ *
+ * ── 🔴 detail 에 부탁 문장을 **그대로** 싣는다 ─────────────────────────
+ * 다른 종류들은 종류 이름을 detail 에 다시 적지 않는다(잘리는 자리의 폭만 먹는다).
+ * 여기만 예외인 까닭은 사용자가 요구한 것이 **그 문장 자체**이기 때문이다 —
+ * 「[사내 목표 출하일을 등록해 주세요]라고 알림이 뜨도록」. 게다가 브라우저 알림창은
+ * 제목에 종류 이름을, **본문에 detail 만** 싣는다(components/layout/
+ * BrowserNotifications.tsx) — detail 에 없으면 알림창에서는 그 부탁이 아예 보이지
+ * 않는다. 종 패널의 상세 칸은 한 줄에서 잘리므로(CSS truncate) 부탁을 **앞에** 두고
+ * 날짜를 뒤에 붙인다.
+ *
+ * ── PO발행일을 함께 적는다 ─────────────────────────────────────────────
+ * 「왜 지금 적어야 하는가」가 그 날짜다. 여럿이면 가장 이른 하루이고
+ * (earliestDomesticOrderIssuedDate), 그래서 오래 비워 둔 건일수록 날짜가 멀어 보인다.
+ *
+ * ── href 는 상세 첫 화면이다 ──────────────────────────────────────────
+ * 사내 목표 출하일을 적는 자리가 거기다(상세정보 → 인수 정보 → [수정] —
+ * components/repair-cases/detail/edit/IntakeInfoEditForm.tsx 가 유일한 정상 편집
+ * 경로다). 주소는 직접 적지 않고 탭 헬퍼에서 가져온다.
+ *
+ * targetKey 는 접수 건 id 다. 한 건에 목표 출하일은 하나뿐이고, 사람에게도 「그 한
+ * 건」이다 — 내자 줄이 셋이어도 종에는 한 줄이다.
+ */
+export function buildRepairCaseTargetShipmentMissingNotification(input: {
+  repairCaseId: string;
+  intakeNumber: string;
+  /** 가장 이른 PO발행일("YYYY-MM-DD"). 조회가 이미 「있다」를 가린 값이다. */
+  orderIssuedDate: string;
+}): NotificationItem {
+  return {
+    id: `REPAIR_CASE_TARGET_SHIPMENT_MISSING:${input.repairCaseId}`,
+    kind: "REPAIR_CASE_TARGET_SHIPMENT_MISSING",
+    targetKey: input.repairCaseId,
+    subject: input.intakeNumber,
+    detail: `${INTERNAL_TARGET_SHIPMENT_REQUEST_MESSAGE} · PO발행일 ${input.orderIssuedDate}`,
     href: repairCaseDetailHrefs(input.repairCaseId).root,
   };
 }

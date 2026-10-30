@@ -14,6 +14,7 @@ import {
   buildApprovalRejectedNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateNearNotification,
+  buildRepairCaseTargetShipmentMissingNotification,
   type NotificationItem,
 } from "./notifications";
 
@@ -106,6 +107,13 @@ test("🔴 할 일 알림의 실제 id 는 형식이 맞아도 거절한다 — 
       intakeNumber: "D261012",
       dueDate: "2026-10-22",
       borrowed: false,
+    }),
+    // 🔴 사내 목표 출하일 미등록(2026-10-30)은 사용자가 「눌러서 확인해도 사라지지
+    // 않아」라고 못 박은 종류다. 거절되지 않으면 그 요구가 정반대가 된다.
+    buildRepairCaseTargetShipmentMissingNotification({
+      repairCaseId: randomUUID(),
+      intakeNumber: "D261015",
+      orderIssuedDate: "2026-10-21",
     }),
   ];
 
