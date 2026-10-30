@@ -13,6 +13,7 @@ import {
   buildApprovalNotification,
   buildApprovalRejectedNotification,
   buildQuoteApprovalNotification,
+  buildRepairCaseDueDateInvertedNotification,
   buildRepairCaseDueDateNearNotification,
   buildRepairCaseTargetShipmentMissingNotification,
   type NotificationItem,
@@ -114,6 +115,15 @@ test("🔴 할 일 알림의 실제 id 는 형식이 맞아도 거절한다 — 
       repairCaseId: randomUUID(),
       intakeNumber: "D261015",
       orderIssuedDate: "2026-10-21",
+    }),
+    // 🔴 납기 역전(2026-10-30)도 사용자가 「마찬가지로 승인용으로」라고 못 박은
+    // 종류다 — 두 날짜 중 하나가 바뀌기 전에는 눌러도 사라지지 않는다.
+    buildRepairCaseDueDateInvertedNotification({
+      repairCaseId: randomUUID(),
+      intakeNumber: "D261016",
+      internalTargetShipmentDate: "2026-11-05",
+      requestedDueDate: "2026-10-30",
+      borrowed: false,
     }),
   ];
 

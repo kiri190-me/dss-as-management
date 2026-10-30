@@ -43,10 +43,12 @@ import { ROLE_CODES, type Role } from "./types";
  * 없었다(전원 통과). 나머지는 그 뒤에 태어난 종류라 재현할 옛 동작이 없고,
  * **그때 내린 결정**을 여기 손으로 적는다.
  *
- * 🔴 **2026-10-30 부터 역할로 갈리는 종류가 하나 있다** —
- * REPAIR_CASE_TARGET_SHIPMENT_MISSING(사내 목표 출하일 미등록, A/S 엔지니어).
+ * 🔴 **2026-10-30 부터 역할로 갈리는 종류가 둘 있다** —
+ * REPAIR_CASE_TARGET_SHIPMENT_MISSING(사내 목표 출하일 미등록, A/S 엔지니어)과
+ * REPAIR_CASE_DUE_DATE_INVERTED(납기 역전, A/S 엔지니어·영업·관리자).
  * 2026-10-27(13-C4)에 재고 알림 둘이 사라진 뒤로 비어 있던 자리이고, 그래서 이
- * 함수가 다시 `role` 을 읽는다.
+ * 함수가 다시 `role` 을 읽는다. 🔵 **둘의 명단이 다른 것이 요점**이라, 한쪽을 베껴
+ * 적지 않고 각각 적는다.
  *
  * 모르는 종류는 계속 throw 한다. 종류만 늘리고 이 규칙을 적지 않으면, 아무도
  * 판정하지 않은 알림이 조용히 태어난다.
@@ -83,6 +85,18 @@ function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
     //    (roleReceivesNotification 의 isRoleEditableInNotificationSettings). 기본값에도
     //    같은 답을 적어야 화면이 아무도 안 만진 칸에 「기본값에서 바뀜」을 안 붙인다.
     return role === "AS_ENGINEER" || role === "SUPER_ADMIN";
+  }
+  if (kind === "REPAIR_CASE_DUE_DATE_INVERTED") {
+    // 새로 태어난 종류라 재현할 옛 동작이 없고, **그때 내린 결정**을 손으로 적는다 —
+    // 2026-10-30 사용자 결정 「대상은 (엔지니어, 영업, 관리자)」.
+    // 🔴 바로 위 사내 목표 출하일 미등록과 **명단이 다르다.** 저쪽은 빈칸을 적으면
+    //    끝나는 일이라 적는 사람 하나지만, 역전은 고객에게 전화를 걸어 약속을 다시
+    //    잡아야 끝난다 — 영업과 관리자가 당사자다. 두 줄이 같아지면 그 구별이 사라진
+    //    것이고, 그때는 한쪽을 넓히는 결정이 다른 쪽까지 조용히 연다.
+    // 🔴 최고관리자는 **종류를 가리지 않는 잠금**으로 어차피 받는다 — 위 종류와 같은
+    //    까닭으로 기본값에도 같은 답을 적는다.
+    // 🔵 재고 담당자만 기본 꺼짐이다(부품 수급은 이 협의의 당사자가 아니다).
+    return role === "AS_ENGINEER" || role === "SALES" || role === "ADMIN" || role === "SUPER_ADMIN";
   }
   if (kind === "APPROVAL_GRANTED" || kind === "APPROVAL_REJECTED") {
     // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로
@@ -218,15 +232,16 @@ test("🔴 toneClassName 의 색과 toneIndex 가 가리키는 칸의 색이 같
   }
 });
 
-test("🔴 여섯 종류가 **지정한** 칸에 앉는다 — 2026-10-19 사용자 결정", () => {
+test("🔴 일곱 종류가 **지정한** 칸에 앉는다 — 2026-10-19 사용자 결정", () => {
   // 일부러 표를 그대로 읽지 않고 손으로 다시 적는다 — NOTIFICATION_KIND_META 를
   // 읽어 비교하면 무엇을 고쳐도 늘 통과하는 시험이 된다.
   // satisfies 가 빠진 종류와 없는 종류를 둘 다 잡는다.
   // 🔵 2026-10-27(13-C4)에 재고 알림 셋이 빠져 여덟에서 다섯이 됐고, 2026-10-30 에
-  //    사내 목표 출하일 미등록이 들어와 여섯이다. 그 종류는 **주황 7**이다 —
-  //    갈래는 「내가 할 일」인데 색만 붉은 계열이다(2026-10-30 사용자 요청). 빨강
-  //    0(납기 임박)·장미 9(반려됨)와 한 패널에서 갈라지라고 그 둘에서 가장 먼
-  //    붉은 칸을 골랐다. 아직 비어 있는 칸: 호박 14 · 하늘 8 · 남보라 6.
+  //    사내 목표 출하일 미등록(주황 7)과 납기 역전(호박 14)이 들어와 일곱이다. 둘 다
+  //    갈래는 「내가 할 일」인데 색만 붉은 계열이다(2026-10-30 사용자 요청 — 「붉은
+  //    계열로」·「주황색 계열로」). 빨강 0(납기 임박)·장미 9(반려됨)와도, 서로도
+  //    갈라지라고 붉은 쪽에서 가장 먼 두 칸을 골랐다 — 둘은 같은 건에서 차례로 뜨는
+  //    짝이다. 아직 비어 있는 칸: 하늘 8 · 남보라 6.
   const 지정 = {
     REPAIR_CASE_DUE_DATE_NEAR: 0, // 빨강 — 급한 경고
     APPROVAL_GRANTED: 12, // 초록 — 결과(됐다)
@@ -234,6 +249,7 @@ test("🔴 여섯 종류가 **지정한** 칸에 앉는다 — 2026-10-19 사용
     REPAIR_CASE_APPROVAL: 15, // 파랑 — 내가 할 일
     QUOTE_APPROVAL_PENDING: 13, // 보라 — 내가 할 일
     REPAIR_CASE_TARGET_SHIPMENT_MISSING: 7, // 주황 — 내가 할 일(색은 사용자가 정했다)
+    REPAIR_CASE_DUE_DATE_INVERTED: 14, // 호박 — 내가 할 일(색은 사용자가 정했다)
   } satisfies Record<NotificationKind, number>;
 
   for (const kind of NOTIFICATION_KINDS) {
@@ -439,25 +455,30 @@ test("🔴 승인 완료·반려됨의 색은 남은 여섯 색과도, 서로도
 });
 
 /**
- * 🔴 **역할로 갈리는 종류는 지금 하나다 — 사내 목표 출하일 미등록(2026-10-30).**
+ * 🔴 **역할로 갈리는 종류는 지금 둘이다 — 사내 목표 출하일 미등록 · 납기 역전
+ * (둘 다 2026-10-30).**
  *
  * 2026-10-27(13-C4)에 부품 요청 대기·재고 부족이 사라지면서 역할마다 답이 갈리는
  * 종류가 **하나도 없게 됐고**, 그때 이 자리에는 「다섯 × 다섯이 전부 받음」이라는
  * 단언이 서 있었다. 역할로 갈리는 종류를 다시 붙이면 깨지도록 일부러 그렇게 적어
  * 둔 것이고(그래야 아래 보증을 다시 세우는 때를 놓치지 않는다), 2026-10-30 에
- * 실제로 깨졌다. 지금은 그 자리에 **명단을 손으로 적어** 둔다.
+ * 실제로 깨졌다 — 그날 둘이 함께 들어왔다. 지금은 그 자리에 **명단을 손으로 적어**
+ * 둔다.
  *
- * 그때 잃었던 보증 둘 가운데 하나가 돌아왔다:
+ * 그때 잃었던 보증 둘이 **다 돌아왔다**:
  *  · 「기본값이 거짓인 칸을 역할 스위치로 **열 수 있는가**」 → 아래 시험이 다시 잰다.
- *  · 「두 종류의 명단이 지금 같아도 **서로 다른 함수**로 답하는가」 → 🔴 **아직 못
- *    잰다.** 역할로 갈리는 종류가 둘이어야 재는 물음이고, 지금은 하나뿐이다. 둘째가
- *    생기는 날 그 시험을 다시 세워라(명단이 우연히 같다고 한쪽 함수를 부르면, 한쪽을
- *    넓히는 결정이 다른 쪽까지 조용히 연다 — 이 파일 머리말의 그 규칙이다).
+ *  · 「두 종류가 **서로 다른 답**을 들고 있는가」 → 둘째가 생겨 다시 잴 수 있게 됐다
+ *    (아래 「두 명단이 다르다」). 2026-10-30 전에는 이 자리에 「둘째가 생기는 날 다시
+ *    세워라」고만 적혀 있었다. 명단이 우연히 같다고 한쪽이 다른 쪽을 부르면, 한쪽을
+ *    넓히는 결정이 다른 쪽까지 조용히 연다 — 이 파일 머리말의 그 규칙이다.
  */
-test("🔴 역할로 갈리는 종류는 **하나**다 — 나머지는 다섯 역할 전부 받음이다", () => {
+test("🔴 역할로 갈리는 종류는 **둘**이다 — 나머지는 다섯 역할 전부 받음이다", () => {
   // 손으로 적는다. NOTIFICATION_KIND_META 나 판정 함수를 읽어 비교하면 무엇을 고쳐도
   // 늘 통과하는 시험이 된다.
-  const 역할로갈리는종류: readonly string[] = ["REPAIR_CASE_TARGET_SHIPMENT_MISSING"];
+  const 역할로갈리는종류: readonly string[] = [
+    "REPAIR_CASE_TARGET_SHIPMENT_MISSING",
+    "REPAIR_CASE_DUE_DATE_INVERTED",
+  ];
 
   for (const kind of NOTIFICATION_KINDS) {
     if (역할로갈리는종류.includes(kind)) continue;
@@ -470,12 +491,83 @@ test("🔴 역할로 갈리는 종류는 **하나**다 — 나머지는 다섯 �
     }
   }
 
-  // 🔴 그 하나는 **정말로 갈린다.** 이 짝이 없으면 위 목록에 아무 종류나 적어 두고
+  // 🔴 그 둘은 **정말로 갈린다.** 이 짝이 없으면 위 목록에 아무 종류나 적어 두고
   //    「전부 받음」 검사를 통째로 비껴갈 수 있다.
   for (const kind of 역할로갈리는종류) {
     const answers = ROLE_CODES.map((role) => defaultRoleReceivesNotification(kind as NotificationKind, role));
     assert.equal(new Set(answers).size, 2, `${kind} 가 역할마다 같은 답을 준다 — 갈리지 않는다`);
   }
+});
+
+test("🔴 역할로 갈리는 둘은 **명단이 서로 다르다** — 비슷하다고 한 질문으로 묶지 않았다", () => {
+  // 🔵 2026-10-27 ~ 10-30 사이에는 이 물음을 잴 표본이 없었다(위 머리말). 둘이 생기면서
+  //    다시 잰다. 재는 것은 「누가 받는가」가 아니라(그것은 각 종류의 시험이 쥔다)
+  //    **둘이 한 명단을 나눠 쓰고 있지 않은가**이다.
+  //
+  // 사내 목표 출하일 미등록은 빈칸을 **적으면** 끝나는 일이라 적는 사람(엔지니어)
+  // 하나이고, 납기 역전은 **고객과 협의해야** 끝나는 일이라 영업·관리자가 함께 받는다.
+  // 두 줄이 같아지는 날, 한쪽을 넓히는 결정이 다른 쪽까지 조용히 연 것이다.
+  const 명단 = (kind: NotificationKind) =>
+    ROLE_CODES.filter((role) => defaultRoleReceivesNotification(kind, role)).join(",");
+
+  const 미등록 = 명단("REPAIR_CASE_TARGET_SHIPMENT_MISSING");
+  const 역전 = 명단("REPAIR_CASE_DUE_DATE_INVERTED");
+  // 🔵 둘 다 비어 있지 않은지 먼저 본다 — 빈 명단 둘은 「다르다」를 재지 못한다.
+  assert.ok(미등록.length > 0, "사내 목표 출하일 미등록의 명단이 비었다");
+  assert.ok(역전.length > 0, "납기 역전의 명단이 비었다");
+  assert.notEqual(역전, 미등록, `두 종류의 명단이 같아졌다: ${역전}`);
+
+  // 갈리는 자리가 **영업·관리자**다(2026-10-30 사용자 결정 — 「대상은 (엔지니어,
+  // 영업, 관리자)」). 어느 역할에서 갈리는지까지 못 박아, 엉뚱한 역할 하나가
+  // 달라진 것으로 이 시험을 통과하지 못하게 한다.
+  for (const role of ["SALES", "ADMIN"] as const) {
+    assert.equal(defaultRoleReceivesNotification("REPAIR_CASE_DUE_DATE_INVERTED", role), true, role);
+    assert.equal(defaultRoleReceivesNotification("REPAIR_CASE_TARGET_SHIPMENT_MISSING", role), false, role);
+  }
+  // 겹치는 자리도 있다 — 날짜를 쥔 엔지니어는 둘 다 받고, 재고 담당자는 둘 다 안 받는다.
+  for (const kind of ["REPAIR_CASE_DUE_DATE_INVERTED", "REPAIR_CASE_TARGET_SHIPMENT_MISSING"] as const) {
+    assert.equal(defaultRoleReceivesNotification(kind, "AS_ENGINEER"), true, kind);
+    assert.equal(defaultRoleReceivesNotification(kind, "INVENTORY_MANAGER"), false, kind);
+  }
+});
+
+test("🔴 납기 역전은 엔지니어·영업·관리자가 받고, 닫힌 칸은 역할 스위치로 **열린다**", () => {
+  // 2026-10-30 사용자 결정. 여기가 그 명단을 손으로 적는 자리다.
+  assert.equal(defaultNotificationKindEnabled("REPAIR_CASE_DUE_DATE_INVERTED"), true, "켜진 채로 태어난다");
+  for (const role of ROLE_CODES) {
+    assert.equal(
+      defaultRoleReceivesNotification("REPAIR_CASE_DUE_DATE_INVERTED", role),
+      role !== "INVENTORY_MANAGER",
+      `${role} 의 기본값이 결정과 다르다`
+    );
+  }
+  // 🔵 최고관리자가 받는 것은 사용자 결정이 아니라 **종류를 가리지 않는 잠금**이다 —
+  //    위 종류와 같은 까닭으로 기본값에도 같은 답을 적어 둔다.
+  assert.equal(
+    deliversNotification("REPAIR_CASE_DUE_DATE_INVERTED", "SUPER_ADMIN", NO_NOTIFICATION_SETTINGS),
+    true
+  );
+  assert.equal(
+    deliversNotification("REPAIR_CASE_DUE_DATE_INVERTED", "INVENTORY_MANAGER", NO_NOTIFICATION_SETTINGS),
+    false
+  );
+
+  // 닫힌 칸이 열린다 — 설정이 윗단 필터라는 말이 참이려면 그래야 한다.
+  const opened: NotificationSettingsOverrides = {
+    kindEnabled: {},
+    roleReceives: { REPAIR_CASE_DUE_DATE_INVERTED: { INVENTORY_MANAGER: true } },
+  };
+  assert.equal(roleReceivesNotification("REPAIR_CASE_DUE_DATE_INVERTED", "INVENTORY_MANAGER", opened), true);
+  assert.equal(deliversNotification("REPAIR_CASE_DUE_DATE_INVERTED", "INVENTORY_MANAGER", opened), true);
+  // 🔴 **열린 칸이 닫히기도 해야 한다.** 이 종류는 기본이 참인 칸이 넷이라, 그쪽
+  //    방향을 못 닫으면 관리자가 영업을 빼 줄 수 없다(DB 값으로만 열리는 문이 된다).
+  const closed: NotificationSettingsOverrides = {
+    kindEnabled: {},
+    roleReceives: { REPAIR_CASE_DUE_DATE_INVERTED: { SALES: false } },
+  };
+  assert.equal(deliversNotification("REPAIR_CASE_DUE_DATE_INVERTED", "SALES", closed), false);
+  // 닫은 역할만 닫힌다 — 옆칸이 함께 닫히지 않는다.
+  assert.equal(deliversNotification("REPAIR_CASE_DUE_DATE_INVERTED", "ADMIN", closed), true);
 });
 
 test("🔴 사내 목표 출하일 미등록은 A/S 엔지니어만 받고, 닫힌 칸은 역할 스위치로 **열린다**", () => {

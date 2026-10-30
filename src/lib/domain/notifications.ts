@@ -27,6 +27,18 @@
 
 import { addCalendarDays, toKstDateOnly } from "./date-only";
 import { foldBlankToNull } from "./domestic-order-list";
+/**
+ * 🔴 **이 import 는 고리(circular import)다** — due-date-inversion.ts 가 아래
+ * isRepairCaseShipmentFinished 를 가져다 쓰고, 이쪽이 그 파일의 글자 상수를 가져다
+ * 쓴다. 고리를 받아들인 까닭은 「같은 사실은 한 말로」가 더 중요해서다: 화면에 뜨는
+ * 메모와 종에 뜨는 줄이 다른 글자면 사람이 둘을 다른 경보로 읽는다.
+ *
+ * 🔴 **그래서 이 상수를 모듈 최상위에서 읽지 마라.** 고리 때문에 저쪽이 먼저 실행되는
+ * 길이 있고(due-date-inversion.test.ts 가 바로 그 길이다), 그때 이 파일이 최상위에서
+ * 값을 읽으면 아직 초기화되지 않은 바인딩이라 ReferenceError 로 죽는다 — 앱이 통째로
+ * 안 선다. **함수 안에서만** 읽으면 부를 때는 이미 초기화가 끝나 있어 안전하다.
+ */
+import { DUE_DATE_INVERSION_NOTE } from "./due-date-inversion";
 import { LABELS as APPROVAL_TYPE_LABELS, type ShipmentApprovalType } from "./local/workflow/shipment-approval-checklist";
 import { quoteEditHref } from "./quote-new-link";
 import { repairCaseDetailHrefs } from "./repair-case-detail-tabs";
@@ -74,6 +86,7 @@ export const NOTIFICATION_KINDS = [
   "QUOTE_APPROVAL_PENDING",
   "REPAIR_CASE_DUE_DATE_NEAR",
   "REPAIR_CASE_TARGET_SHIPMENT_MISSING",
+  "REPAIR_CASE_DUE_DATE_INVERTED",
   "APPROVAL_GRANTED",
   "APPROVAL_REJECTED",
 ] as const;
@@ -526,6 +539,108 @@ export function buildRepairCaseTargetShipmentMissingNotification(input: {
     targetKey: input.repairCaseId,
     subject: input.intakeNumber,
     detail: `${INTERNAL_TARGET_SHIPMENT_REQUEST_MESSAGE} · PO발행일 ${input.orderIssuedDate}`,
+    href: repairCaseDetailHrefs(input.repairCaseId).root,
+  };
+}
+
+// ══════════════ 납기 역전 — 우리가 잡아 둔 날이 고객이 달라고 한 날보다 뒤다
+
+/**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 2026-10-30 사용자 요구: 「[납기 요청일 협의가 필요합니다]도 주황색 계열로 알림을
+ * 띄우도록 하자. 대상은 (엔지니어, 영업, 관리자)이고 마찬가지로 승인용으로 설정해 줘.
+ * 해당 알림을 클릭하면 수리건 상세로 넘어가지도록 해 줘.」
+ *
+ * ── 🔴 판정을 여기 적지 않는다. 한 줄도 ────────────────────────────────────
+ * 뜨는 조건은 **이미 있다** — domain/due-date-inversion.ts 의
+ * isRepairCaseDueDateInverted 다. 그 파일이 생긴 까닭 자체가 「네 자리(수리 건 상세 ·
+ * A/S 내자 정리 · PO 내자 정리 · 알림)가 같은 답을 내야 한다」이고, 이 알림이 그
+ * 넷째다. 조건을 여기 베껴 적으면 그 파일의 존재 이유가 그 자리에서 사라진다 —
+ * 빌려 온 날짜로 재는 규칙도, 같은 날은 역전이 아니라는 경계도, 출하가 끝난 건을
+ * 빼는 일도 전부 그 함수 안에 들어 있어 **공짜로 따라온다.** 그래서 이 절에는
+ * 판정 함수가 하나도 없고 아래 build 하나뿐이다(조건을 부르는 자리는 조회다:
+ * queries/repair-case-due-date-inverted-notifications.ts).
+ *
+ * 🔵 바로 위 「사내 목표 출하일 미등록」에는 판정 함수가 셋 있었다. 그쪽은 묻는
+ * 사실이 이 저장소에 없던 것이라 새로 지을 수밖에 없었고, 이쪽은 **이미 지어져
+ * 화면 셋이 쓰고 있다.** 이웃한 두 절의 모양이 다른 까닭이 그것뿐이다.
+ *
+ * ── 🔴 확인 단추를 달지 않는다(사용자가 말한 「승인용」) ────────────────────
+ * ACKNOWLEDGEABLE_NOTIFICATION_KINDS 에 넣지 **않는다.** 넣는 순간 종에 확인 단추가
+ * 생기고, 누르면 날짜를 그대로 둔 채 사라진다 — 「승인용」이라는 말이 뜻한 것과
+ * 정반대다. 넣지 않으면 저절로 할 일 알림이 된다: 두 날짜 중 하나를 고치거나(사내
+ * 목표 출하일을 당기거나, 고객과 협의해 요청일을 미루거나) 그 건이 나가면 다음
+ * 조회에서 빠진다. 적는 쪽 문도 이 종류의 키를 거절한다
+ * (domain/notification-acknowledgement.ts 의 checkNotificationAcknowledgementKey).
+ * 🔵 종의 ✕(지우기)는 그것과 다른 것이고, 종류를 가리지 않고 열려 있다
+ * (domain/notification-dismissal.ts — 2026-10-20 결정). 이번 조각에서 안 건드렸다.
+ *
+ * ── 받는 사람은 엔지니어 · 영업 · 관리자 ───────────────────────────────────
+ * 「사내 목표 출하일 미등록」이 **적는 사람**(엔지니어)에게만 가는 것과 갈린다 —
+ * 역전은 날짜를 고쳐서 끝나는 일이 아니라 **고객에게 전화를 걸어야** 끝나는 일이라
+ * 영업이 함께 받아야 한다. 가르는 자리는 여기가 아니라 알림 설정의 역할 기본값이다
+ * (domain/notification-settings.ts — 그 case 주석에 까닭 셋).
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+
+/**
+ * 「납기 요청일 협의가 필요합니다.」 알림 한 줄.
+ *
+ * ── subject 는 인수번호다 ──────────────────────────────────────────────
+ * 접수 건을 가리키는 말 중 사람이 먼저 찾는 것이고, 결재 알림·납기 임박·사내 목표
+ * 출하일 미등록이 굵게 두는 것과 같은 값이다.
+ *
+ * ── 🔴 detail 의 글자를 **여기서 짓지 않는다** ─────────────────────────
+ * 메모 문장은 화면 넷이 이미 쓰는 상수를 그대로 가져온다(due-date-inversion.ts 의
+ * DUE_DATE_INVERSION_NOTE). 같은 사실이 화면에서는 「협의가 필요합니다」, 종에서는
+ * 「협의 바랍니다」로 읽히면 사람은 둘을 다른 경보로 센다. 종류 이름을 detail 에 다시
+ * 적지 않는 다른 종류들과 갈리는 점도 바로 위 절(사내 목표 출하일 미등록)과 같다 —
+ * 사용자가 요구한 것이 **그 문장 자체**이고, 브라우저 알림창은 제목에 종류 이름을
+ * **본문에 detail 만** 싣는다(components/layout/BrowserNotifications.tsx).
+ * 종 패널의 상세 칸은 한 줄에서 잘리므로(CSS truncate) 그 문장을 **맨 앞**에 둔다.
+ *
+ * ── 🔴 두 날짜를 **각각 이름 붙여** 싣는다 ─────────────────────────────
+ * 「납기 임박」은 날짜가 하나뿐이라 숫자만 적어도 뜻이 분명하지만(그 build 함수),
+ * 역전은 **둘을 견준 결과**다. 이름 없이 둘을 나란히 적으면 어느 쪽이 우리 날짜인지
+ * 알 수 없고, 사람이 고쳐야 할 칸이 어느 것인지도 알 수 없다.
+ *
+ * ── 🔴 빌려 온 날짜에는 표시가 붙는다 ──────────────────────────────────
+ * 고객 요청 납기일 칸이 비면 연결된 내자 정리의 납기요청일 중 가장 이른 하루로 재는
+ * 것이 이 저장소의 규칙이고(requested-due-date-link.ts), 역전 판정도 그 값으로 한다.
+ * 표시가 없으면 사람은 그 날짜를 **이 건에 자기가 적어 둔 값**으로 읽는다 — 그러면
+ * 상세 화면에서 빈칸을 보고 「알림이 틀렸다」고 결론 낸다. 표시 글자는 새로 쓰지 않고
+ * 상세정보 화면이 이미 쓰는 것을 그대로 가져온다(DUE_DATE_FROM_DOMESTIC_ORDER_LABEL)
+ * — 「납기 임박」이 같은 자리에서 같은 상수를 쓴다. 날짜 뒤 괄호에 넣는 것은 내자
+ * 정리의 날짜 줄이 메모를 붙이는 모양 그대로다("2026-01-05 (1차분)").
+ *
+ * ── href 는 상세 첫 화면이다 ──────────────────────────────────────────
+ * 사용자가 「클릭하면 수리건 상세로 넘어가도록」이라고 못 박았고, 두 날짜를 고치는
+ * 자리도 거기다(상세정보 → 인수 정보 → [수정]). 주소는 직접 적지 않고 탭 헬퍼에서
+ * 가져온다 — 납기 임박·사내 목표 출하일 미등록과 같은 줄이다.
+ *
+ * targetKey 는 접수 건 id 다. 한 건에 역전은 하나뿐이고, 사람에게도 「그 한 건」이다.
+ */
+export function buildRepairCaseDueDateInvertedNotification(input: {
+  repairCaseId: string;
+  intakeNumber: string;
+  /** 그 건의 사내 목표 출하일("YYYY-MM-DD"). 조회가 이미 「적혀 있다」를 가린 값이다. */
+  internalTargetShipmentDate: string;
+  /** 화면에 보이는 그 고객 요청 납기일("YYYY-MM-DD"). 빌려 온 값일 수 있다. */
+  requestedDueDate: string;
+  /** 이 건의 칸이 아니라 연결된 내자 정리에서 빌려 온 날짜인가. */
+  borrowed: boolean;
+}): NotificationItem {
+  const requested = input.borrowed
+    ? `${input.requestedDueDate} (${DUE_DATE_FROM_DOMESTIC_ORDER_LABEL})`
+    : input.requestedDueDate;
+  return {
+    id: `REPAIR_CASE_DUE_DATE_INVERTED:${input.repairCaseId}`,
+    kind: "REPAIR_CASE_DUE_DATE_INVERTED",
+    targetKey: input.repairCaseId,
+    subject: input.intakeNumber,
+    detail:
+      `${DUE_DATE_INVERSION_NOTE} · 사내 목표 출하일 ${input.internalTargetShipmentDate} · ` +
+      `고객 요청 납기일 ${requested}`,
     href: repairCaseDetailHrefs(input.repairCaseId).root,
   };
 }

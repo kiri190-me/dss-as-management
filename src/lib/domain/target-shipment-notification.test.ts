@@ -314,15 +314,41 @@ test("🔴 역할 스위치로 **열 수 있다** — 기본값이 거짓인 칸
 
 test("🔴 역할을 가르는 자리는 **설정 한 곳**이다 — 다른 종류는 그대로다", () => {
   // 역할로 갈리는 첫 종류라, 그 결정이 남의 종류까지 조용히 좁히지 않았는지 본다.
+  //
+  // 🔵 2026-10-30 에 **둘째**가 생겼다 — REPAIR_CASE_DUE_DATE_INVERTED(납기 역전,
+  //    엔지니어·영업·관리자). 그 종류는 제 명단으로 갈리는 것이 맞으므로 이 고리에서
+  //    뺀다. 🔴 빼는 것이 곧 「그 둘이 같은 명단을 나눠 쓰지 않는가」를 안 보는 것은
+  //    아니다 — 그 물음은 notification-settings.test.ts 의 「두 명단이 서로 다르다」와
+  //    이 파일 아래 「이 종류만 좁다」가 양쪽에서 쥔다.
+  const 제명단으로갈리는종류 = new Set<string>([KIND, "REPAIR_CASE_DUE_DATE_INVERTED"]);
+  let checked = 0;
   for (const kind of NOTIFICATION_KINDS) {
-    if (kind === KIND) continue;
+    if (제명단으로갈리는종류.has(kind)) continue;
     for (const role of ROLE_CODES) {
       assert.equal(
         defaultRoleReceivesNotification(kind, role),
         true,
         `${kind} × ${role} 이 함께 좁혀졌다`
       );
+      checked += 1;
     }
+  }
+  // 🔵 빈 고리는 아무것도 재지 않고 통과한다 — 몇 칸을 봤는지 먼저 못 박는다.
+  assert.equal(checked, (NOTIFICATION_KINDS.length - 제명단으로갈리는종류.size) * ROLE_CODES.length);
+  assert.ok(checked > 0, "좁혀지지 않은 종류가 하나도 없다 — 이 시험이 아무것도 안 본다");
+});
+
+test("🔴 이 종류만 **엔지니어 하나**다 — 2026-10-30 의 납기 역전이 함께 넓히지 않았다", () => {
+  // 같은 날 들어온 납기 역전은 영업·관리자까지 받는다. 그 결정이 이쪽으로 번지면
+  // 「날짜를 적을 사람」과 「고객과 협의할 사람」이 한 질문이 되어 버린다 —
+  // domain/notification-settings.ts 머리말이 재고 알림 둘에서 이미 갈라 둔 구별이다.
+  for (const role of ["ADMIN", "SALES"] as const) {
+    assert.equal(defaultRoleReceivesNotification(KIND, role), false, `${role} 에게도 간다`);
+    assert.equal(
+      defaultRoleReceivesNotification("REPAIR_CASE_DUE_DATE_INVERTED", role),
+      true,
+      `${role}: 견줄 짝이 함께 좁혀졌다 — 이 시험이 무엇을 재는지 사라졌다`
+    );
   }
 });
 

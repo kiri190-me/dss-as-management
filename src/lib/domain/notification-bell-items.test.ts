@@ -10,6 +10,7 @@ import {
   buildApprovalNotification,
   buildApprovalRejectedNotification,
   buildQuoteApprovalNotification,
+  buildRepairCaseDueDateInvertedNotification,
   buildRepairCaseDueDateNearNotification,
   buildRepairCaseTargetShipmentMissingNotification,
   type NotificationItem,
@@ -48,6 +49,13 @@ function oneOfEachKind(): NotificationItem[] {
       repairCaseId: "case-target-1",
       intakeNumber: "D9705-401",
       orderIssuedDate: "2026-10-21",
+    }),
+    buildRepairCaseDueDateInvertedNotification({
+      repairCaseId: "case-inverted-1",
+      intakeNumber: "D9705-402",
+      internalTargetShipmentDate: "2026-11-05",
+      requestedDueDate: "2026-10-30",
+      borrowed: false,
     }),
     buildApprovalGrantedNotification({
       source: "REPAIR_CASE",

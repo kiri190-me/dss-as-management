@@ -11,12 +11,14 @@ import {
   buildApprovalRejectedNotification,
   buildRepairCaseDueDateNearNotification,
   buildRepairCaseTargetShipmentMissingNotification,
+  buildRepairCaseDueDateInvertedNotification,
 } from "@/lib/domain/notifications";
 import type { Role } from "@/lib/domain/types";
 import { listQuoteApprovalsPendingMyApproval } from "./quote-approvals-pending";
 import { listMyGrantedApprovalOutcomes, listMyRejectedApprovalOutcomes } from "./approval-outcome-notifications";
 import { listRepairCasesWithDueDateNear } from "./repair-case-due-date-notifications";
 import { listRepairCasesMissingTargetShipmentDate } from "./repair-case-target-shipment-notifications";
+import { listRepairCasesWithDueDateInverted } from "./repair-case-due-date-inverted-notifications";
 import { listAcknowledgedNotificationKeys } from "./notification-acknowledgements";
 
 /**
@@ -32,17 +34,21 @@ import { listAcknowledgedNotificationKeys } from "./notification-acknowledgement
  *       충분하다(repair-case-approvals-pending.ts). 견적서 결재 대기도 같은
  *       모양이다 — 결재선 지정(과 최고관리자 비상구)이 조회 안에서 정해진다
  *       (quote-approvals-pending.ts).
- *  (다) **load 가 아무도 거르지 않는다** — 납기 임박과 사내 목표 출하일 미등록이
- *       그렇다. 조회가 "지금 상태가 그러한 건 전부"를 내놓아 누가 봐도 같은
- *       결과이고, load 가 사용자 id 도 역할도 받지 않는다. 🔴 **그렇다고 둘 다
- *       모두에게 가는 것은 아니다** — 거기서 갈린다:
+ *  (다) **load 가 아무도 거르지 않는다** — 납기 임박 · 사내 목표 출하일 미등록 ·
+ *       납기 역전 셋이 그렇다. 조회가 "지금 상태가 그러한 건 전부"를 내놓아 누가
+ *       봐도 같은 결과이고, load 가 사용자 id 도 역할도 받지 않는다. 🔴 **그렇다고
+ *       셋 다 모두에게 가는 것은 아니다** — 거기서 갈린다:
  *        · 납기 임박은 **가를 축이 없어서** 전원이다(2026-10-19 사용자 결정 —
  *          납기가 다가온 건은 엔지니어·관리자·영업에게 각자 다른 모양으로 걸린다).
- *        · 사내 목표 출하일 미등록은 **A/S 엔지니어**다(2026-10-29 사용자 결정).
- *          역할을 가르는 자리가 조회가 아니라 **알림 설정의 역할 기본값**이고
- *          (domain/notification-settings.ts), 그 case 주석에 왜 (나)형으로 박지
- *          않았는지가 적혀 있다 — 요약하면 인가 경계가 아니고, 박으면 설정 화면의
- *          스위치가 죽은 단추가 되기 때문이다.
+ *        · 사내 목표 출하일 미등록은 **A/S 엔지니어**다(2026-10-29 사용자 결정) —
+ *          날짜를 적는 사람에게 가는 할 일이다.
+ *        · 납기 역전은 **A/S 엔지니어·영업·관리자**다(2026-10-30 사용자 결정) —
+ *          날짜를 고쳐서 끝나는 일이 아니라 고객과 협의해야 끝나는 일이라 영업이
+ *          함께 받는다.
+ *       뒤의 둘은 역할을 가르는 자리가 조회가 아니라 **알림 설정의 역할 기본값**이고
+ *       (domain/notification-settings.ts), 그 case 주석에 왜 (나)형으로 박지
+ *       않았는지가 적혀 있다 — 요약하면 인가 경계가 아니고, 박으면 설정 화면의
+ *       스위치가 죽은 단추가 되기 때문이다.
  *       좁히고 넓히는 일은 알림 설정 화면이 한다 — 아래 「설정은 윗단 필터다」 절
  *       그대로다.
  *
@@ -218,6 +224,37 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
           repairCaseId: row.repairCaseId,
           intakeNumber: row.intakeNumber,
           orderIssuedDate: row.orderIssuedDate,
+        })
+      );
+    },
+  },
+  {
+    kind: "REPAIR_CASE_DUE_DATE_INVERTED",
+    load: async () => {
+      // 🔴 바로 위와 같은 (다)형이다 — load 가 사용자도 역할도 받지 않고, 받는 사람을
+      // 가르는 자리는 **알림 설정의 역할 기본값**이다(A/S 엔지니어·영업·관리자,
+      // 2026-10-30 사용자 결정). (나)형으로 박지 않은 까닭 셋은 그 case 주석에 있고,
+      // 싣는 것이 인수번호와 날짜 둘뿐이라 인가 경계가 아니라는 것이 그 첫째다.
+      //
+      // 🔵 **받는 사람이 위 둘과 갈린다.** 사내 목표 출하일 미등록은 날짜를 적는
+      // 사람(엔지니어)에게만 가지만, 역전은 **고객에게 전화를 걸어야** 끝나는 일이라
+      // 영업과 관리자가 함께 받는다. 그 갈림이 조회가 아니라 설정 층에 있다는 것이
+      // 이 (다)형의 요점이다.
+      //
+      // 「무엇을 알릴 것인가」도 여기서 정하지 않는다 — 빌려 온 날짜로 재는 일, 같은
+      // 날은 역전이 아니라는 경계, 출하가 끝난 건을 빼는 일이 전부 화면 셋이 쓰는 그
+      // 도메인 함수 안에 있다(domain/due-date-inversion.ts 의
+      // isRepairCaseDueDateInverted — 조회가 그것을 부른다:
+      // queries/repair-case-due-date-inverted-notifications.ts). 여기서 하는 일은
+      // 모양 변환뿐이다.
+      const inverted = await listRepairCasesWithDueDateInverted();
+      return inverted.map((row) =>
+        buildRepairCaseDueDateInvertedNotification({
+          repairCaseId: row.repairCaseId,
+          intakeNumber: row.intakeNumber,
+          internalTargetShipmentDate: row.internalTargetShipmentDate,
+          requestedDueDate: row.requestedDueDate,
+          borrowed: row.borrowed,
         })
       );
     },

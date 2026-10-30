@@ -86,6 +86,26 @@ let approvalCaseId: string;
 let grantedForAdminApprovalId: string;
 let grantedForSuperAdminApprovalId: string;
 
+/**
+ * 이 스위트가 **아무것도 만들기 전에** 관리자 종에 이미 서 있던 종류들.
+ *
+ * 🔴 **왜 재어 두는가**(2026-10-30). 등록된 종류 가운데 셋은 사람이 아니라 **DB 의
+ * 지금 상태**가 띄운다 — 납기 임박 · 사내 목표 출하일 미등록 · 납기 역전(레지스트리
+ * 머리말의 (다)형). 시험 DB 에는 이 스위트가 만들지 않은 접수 건이 이미 잔뜩 있어서,
+ * 그중 하나가 그런 상태이면 그 종류가 **우리와 무관하게** 종에 선다.
+ *
+ * 실제로 그렇게 됐다: 납기 역전 알림을 붙인 날(2026-10-30) 아래 「1단계와 똑같다」가
+ * 깨졌는데, 샌 것이 아니라 시험 DB 의 옛 건 하나가 역전이었다. 그렇다고 그 종류들을
+ * 단언에서 빼 버리면 「남의 알림이 섞이지 않는다」는 보증이 통째로 사라진다. 그래서
+ * **빼는 대신 먼저 재어 둔다** — 아래 시험은 「이 스위트가 만든 자료가 더한 종류가
+ * 정확히 무엇인가」를 묻고, 재어 둔 것과의 차이만 본다.
+ *
+ * 🔵 우리 접수 건은 이 셋 중 하나도 띄우지 않는다(납기요청일 없음 · PO발행일 없음 ·
+ *    고객 요청 납기일 없음). 그게 달라지면 차이에 그 종류가 섞여 아래 단언이 깨진다 —
+ *    그때는 밑자락이 바뀐 것이니 여기 주석부터 다시 읽어야 한다.
+ */
+let ambientAdminKinds: Set<NotificationKind>;
+
 const createdCaseIds: string[] = [];
 
 async function findUserId(role: Role): Promise<string> {
@@ -239,6 +259,11 @@ before(async () => {
   assert.equal(existingKinds.length, 0, "이 테스트는 알림 설정이 비어 있는 상태를 전제로 합니다");
   assert.equal(existingRoles.length, 0, "이 테스트는 알림 설정이 비어 있는 상태를 전제로 합니다");
 
+  // 🔴 **밑자락을 깔기 전에** 지금 종에 무엇이 서 있는지 먼저 센다(위 ambientAdminKinds
+  //    주석). 설정 표가 비어 있다는 것은 바로 위에서 확인했으므로, 여기서 나오는 것은
+  //    전부 「시험 DB 의 지금 상태」다.
+  ambientAdminKinds = await kindsFor(adminId, "ADMIN");
+
   // ── 아직 결정되지 않은 검수 승인 요청 하나 ───────────────────────────
   // 최고관리자·관리자·A/S 엔지니어가 결재할 수 있는 종류다
   // (repair-case-approvals-pending.ts의 INSPECTION_DECIDE_ELIGIBLE_ROLES).
@@ -329,8 +354,22 @@ test("🔴 설정이 하나도 없으면 다섯 역할 × 두 종류가 1단계 
 
 test("🔴 설정이 하나도 없을 때 실제 종 알림이 1단계와 똑같다", async () => {
   // 규칙이 아니라 결과로 확인한다 — listMyNotifications를 그대로 태운다.
+  //
+  // 🔴 **「전부」가 아니라 「우리가 더한 것」을 본다**(2026-10-30 — ambientAdminKinds
+  //    주석). 시험 DB 의 옛 건이 띄우는 상태형 종류는 이 스위트의 몫이 아니다. 빼고
+  //    세는 것이 아니라 **미리 재어 둔 것과의 차이**를 보므로, 우리가 만들지 않은
+  //    종류가 새로 끼어들면 여전히 여기서 깨진다.
+  // 🔵 먼저 그 차이가 뜻을 갖는지부터 본다 — 두 종류가 이미 서 있었다면 아래
+  //    deepEqual 은 「우리 자료가 하나도 안 잡혀도」 통과한다.
+  for (const kind of ["REPAIR_CASE_APPROVAL", "APPROVAL_GRANTED"] as const) {
+    assert.equal(
+      ambientAdminKinds.has(kind),
+      false,
+      `${kind} 가 이 스위트 전에 이미 서 있었다 — 이 시험의 전제가 깨졌다(시험 DB 에 남의 결재 자료가 있다)`
+    );
+  }
   assert.deepEqual(
-    [...(await kindsFor(adminId, "ADMIN"))].sort(),
+    [...(await kindsFor(adminId, "ADMIN"))].filter((kind) => !ambientAdminKinds.has(kind)).sort(),
     ["APPROVAL_GRANTED", "REPAIR_CASE_APPROVAL"],
     "관리자는 둘 다 받는다 — 검수 결재자이면서, 결정이 끝난 결재를 올린 사람이다"
   );
