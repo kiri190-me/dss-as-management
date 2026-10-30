@@ -83,10 +83,24 @@ test("납기요청일은 표에서 눌러 고친다 — 못 고치는 사람에�
 test("납기요청일은 카드에서도 눌러 고친다 — 좁은 화면이라고 고칠 수 있던 칸이 사라지지 않는다", () => {
   // 납기요청일 칸 한 덩어리(다음 칸 묶음 `제품` 앞까지)에 편집이 달려 있다.
   const dueDateEntry = sliceBetween(cardGroups, 'label: "납기요청일",', 'label: "제품",');
-  assert.ok(dueDateEntry.includes("multiline: true"), "전제가 깨졌다 — 멀티라인 칸이 아니다");
+  // 🔵 2026-10-30 까지 이 칸은 `multiline: true` 인 글자 칸이었고 여기서 그것을
+  // 전제로 삼았다. 그날 카드가 표와 **같은 부품**을 쓰게 되면서(납기 역전 경보를
+  // 글자로는 같은 세기로 말할 수 없다 — 사용자 결정) 줄 나눔을 그 부품이 제 마디로
+  // 한다. 넘길 `\n` 이 없으니 pre-line 은 할 일이 없고, 접는 방식은 pre-line 이 빠진
+  // `<dd>`(break-words)와 결과가 같은 값이어야 한다. **이 시험이 지키는 것 둘은
+  // 그대로다** — 카드에서도 눌러 고칠 수 있는가, 접는 방식이 `<dd>` 와 같은가.
   assert.ok(
-    dueDateEntry.includes('dueDatesEdit: { wrapping: "break-words whitespace-pre-line" }'),
-    "카드의 납기요청일에 편집이 없거나, 멀티라인 <dd> 와 다른 접는 방식이다"
+    dueDateEntry.includes("of: (row) => <DueDateCellContent row={row} />"),
+    "전제가 깨졌다 — 카드가 표와 같은 부품을 쓰지 않는다"
+  );
+  assert.equal(
+    dueDateEntry.includes("multiline: true"),
+    false,
+    "마디를 그리는 칸에 pre-line 이 켜져 있다 — <dd> 와 편집칸의 접는 방식이 갈린다"
+  );
+  assert.ok(
+    dueDateEntry.includes('dueDatesEdit: { wrapping: "break-words whitespace-normal" }'),
+    "카드의 납기요청일에 편집이 없거나, <dd> 와 다른 접는 방식이다"
   );
   assert.match(
     cardRender,

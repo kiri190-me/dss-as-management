@@ -172,6 +172,43 @@ export function resolveDomesticOrderDueDateDisplay(row: {
 }
 
 /**
+ * 내자 정리 한 줄의 `납기요청일` 을 **견줄 수 있는 하루**로 접은 것 — 납기 역전
+ * 판정이 쓴다(due-date-inversion.ts 의 isDomesticOrderDueDateInverted, 2026-10-30).
+ *
+ * ── 🔴 바로 위 함수와 **같은 갈림**이어야 한다 ──────────────────────────────
+ * 이 줄에 날짜가 하나라도 있으면 그 날짜들, 하나도 없을 때만 수리 건에서 빌린다.
+ * 갈림을 다르게 적으면 **보이는 날짜와 판정이 본 날짜가 달라진다** — 그때 이 화면은
+ * 이 줄에 적힌 날짜를 그려 놓고 수리 건의 날짜로 재게 되고, 사람은 빨간 날짜를 보며
+ * 왜 빨간지 끝내 알 수 없다.
+ *
+ * 🔴 **위 함수를 불러서 쓸 수가 없다.** 그쪽이 내놓는 `lines` 는 이미 메모가 붙은
+ * 글자(`"2026-01-05 (1차분)"`)라 날짜로 견줄 수 없다. 그래서 갈림만 같은 모양으로
+ * 적고, **둘이 어긋나지 않는다는 사실 자체를 시험이 맞대어 본다**
+ * (requested-due-date-link.test.ts — 고른 하루가 언제나 그 칸에 보이는 줄 중 하나다).
+ *
+ * ── 여럿이면 **가장 이른 하루** ─────────────────────────────────────────────
+ * 분할 납품이라 한 줄에 날짜가 여럿일 수 있다. 고르는 규칙은 여기서 새로 정하지
+ * 않고 주간보고·수리 건 상세와 같은 함수를 그대로 부른다(pickEarliestDueDate) —
+ * 같은 자료를 세 화면이 다른 날짜로 재면 어느 쪽도 믿을 수 없게 된다.
+ *
+ * 🔵 가장 이른 날을 고르는 것은 경보 쪽에서도 **안전한 방향**이다: 우리가 잡아 둔
+ * 출하일이 그 줄의 **첫 약속**보다 늦으면 이미 어긋난 것이고, 뒤 회차가 아직
+ * 여유롭다는 사실이 그 어긋남을 지우지 못한다.
+ *
+ * 날짜가 양쪽 어디에도 없으면 null 이다 — 「아직 정해지지 않았다」이고, 그것으로
+ * 무엇을 재지는 않는다(부르는 쪽이 거짓으로 접는다).
+ */
+export function resolveDomesticOrderDueDateForComparison(row: {
+  dueDates: readonly { dueDate: string }[];
+  repairCaseCustomerRequestedDueDate: string | null;
+}): string | null {
+  if (row.dueDates.length > 0) {
+    return pickEarliestDueDate(row.dueDates.map((entry) => entry.dueDate));
+  }
+  return foldBlankToNull(row.repairCaseCustomerRequestedDueDate);
+}
+
+/**
  * 수리 건 상세정보의 `고객 요청 납기일` 칸에 그릴 것.
  *
  * `dueDate` 가 null 이면 양쪽 어디에도 날짜가 없다는 뜻이고, 화면이 "-"로

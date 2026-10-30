@@ -15,6 +15,7 @@ import {
   repairCaseIntakeSequences,
   repairCases,
   users,
+  workflowSteps,
 } from "../schema";
 import { createRepairCase } from "../mutations/repair-cases";
 import { createDomesticOrder, updateDomesticOrder } from "../mutations/domestic-orders";
@@ -31,6 +32,7 @@ import {
 } from "@/lib/validation/domestic-order-input";
 import type { QuoteFields } from "@/lib/validation/quote-input";
 import { buildDomesticOrderCellUpdateFields } from "@/lib/domain/domestic-order-cell-edit";
+import { isDomesticOrderDueDateInverted } from "@/lib/domain/due-date-inversion";
 
 /**
  * ============================================================================
@@ -108,7 +110,12 @@ function baseCreateInput(
    * 접수 때 적는 `고객 요청 납기일`. 인수일보다 이전이면 검증이 거절하므로
    * (validation/repair-case-input.ts) 넘길 때는 TEST_RECEIVED_AT 이후여야 한다.
    */
-  customerRequestedDueDate: string | null = null
+  customerRequestedDueDate: string | null = null,
+  /**
+   * 우리가 잡아 둔 `사내 목표 출하일`. 위 날짜보다 **늦으면** 「납기 역전」이고
+   * (domain/due-date-inversion.ts), 내자 목록의 `납기요청일` 칸이 붉어진다.
+   */
+  internalTargetShipmentDate: string | null = null
 ): ValidatedCreateRepairCaseInput {
   const suffix = randomUUID().slice(0, 8);
   return {
@@ -119,7 +126,7 @@ function baseCreateInput(
     assignedEngineerId: engineerId,
     receivedAt: TEST_RECEIVED_AT,
     customerRequestedDueDate,
-    internalTargetShipmentDate: null,
+    internalTargetShipmentDate,
     modelName: `${TEST_MODEL_PREFIX}${suffix}`,
     lotNumber: `LOT-${suffix}`,
     serialNumber: `SN-${suffix}`,
@@ -144,9 +151,12 @@ function baseCreateInput(
  */
 async function createTestCase(
   actualShipmentDate: string | null = null,
-  customerRequestedDueDate: string | null = null
+  customerRequestedDueDate: string | null = null,
+  internalTargetShipmentDate: string | null = null
 ): Promise<string> {
-  const created = await createRepairCase(baseCreateInput(customerRequestedDueDate));
+  const created = await createRepairCase(
+    baseCreateInput(customerRequestedDueDate, internalTargetShipmentDate)
+  );
   assert.equal(created.ok, true, `setup create failed: ${JSON.stringify(created)}`);
   if (!created.ok) throw new Error("unreachable");
   createdCaseIds.push(created.id);
@@ -685,6 +695,94 @@ test("연결이 없는 내자 줄의 날짜는 어느 건에도 붙지 않는다
   await insertDueDates(orphan, ["2096-01-05"]);
 
   assert.deepEqual(await listDomesticOrderDueDatesForRepairCase(caseId), []);
+});
+
+// ── 🔴 「납기 역전」을 재는 재료가 실제로 실려 오는가 (2026-10-30) ──────────
+//
+// 사내 목표 출하일이 `납기요청일` 칸에 보이는 날짜보다 늦으면 그 날짜가 굵은
+// 붉은색이 되고 「협의 필요」가 붙는다(사용자 요구). 판정 자체는 값으로 도는
+// 시험이 보고(domain/due-date-inversion.test.ts), 화면까지 닿는 사슬은 글자로 보는
+// 시험이 본다(components/domestic-orders/domestic-order-due-date-inversion.test.ts).
+//
+// 🔴 **여기서만 잡히는 결함이 따로 있다.** 재료는 셋이고(사내 목표 출하일 · 지금
+// 상태 · 실제 출하일) 셋 다 **연결된 수리 건**에서 오는데, 질의가 그중 하나를 안
+// 골라 오면 아무 오류 없이 null 이 내려온다 — 그러면 경보가 조용히 안 뜨거나(목표
+// 출하일이 빠진 경우) 이미 나간 건에까지 붉은 글이 남는다(상태가 빠진 경우). 화면
+// 시험은 손으로 만든 줄을 넘기므로 그 둘을 전부 통과시킨다.
+//
+// 🔵 상태는 **단계를 조인해야** 온다. 그 조인을 빠뜨려도 null 이 내려오므로, 아래
+// 첫 시험은 DB 가 말하는 그 건의 단계 상태와 **맞대어** 본다 — null 인지만 보면
+// 조인이 통째로 없어도 초록색이다.
+
+test("🔴 역전을 재는 재료 셋이 목록에 실려 온다 — 그리고 그 줄은 역전으로 판정된다", async () => {
+  // 고객이 8월 31일을 달라고 했는데 우리가 잡아 둔 출하일은 9월 10일이다.
+  const caseId = await createTestCase(null, "2096-08-31", "2096-09-10");
+  const orderId = await insertOrder({ repairCaseId: caseId });
+
+  const found = await loadOrder(orderId);
+  assert.equal(
+    found.repairCaseInternalTargetShipmentDate,
+    "2096-09-10",
+    "조인이 사내 목표 출하일을 안 골라 왔다 — 경보가 영영 안 뜬다"
+  );
+  assert.equal(found.repairCaseActualShipmentDate, null, "아직 안 나간 건이어야 한다");
+
+  // 🔴 상태는 DB 가 말하는 값과 맞대어 본다(null 인지만 보면 조인이 없어도 통과한다).
+  const [step] = await db
+    .select({ repairStatus: workflowSteps.repairStatus })
+    .from(repairCases)
+    .innerJoin(workflowSteps, eq(workflowSteps.id, repairCases.currentWorkflowStepId))
+    .where(eq(repairCases.id, caseId));
+  assert.ok(step, "표본 확인 — 방금 만든 건에 단계가 붙어 있어야 한다");
+  assert.notEqual(step.repairStatus, null, "표본이 비었다 — 그 단계에 상태가 없다");
+  assert.equal(found.repairCaseStatus, step.repairStatus, "단계 조인이 상태를 안 실어 온다");
+
+  // 재료가 다 왔으니 판정이 선다 — 이 줄에 날짜가 없어 수리 건의 8월 31일을 빌린다.
+  assert.equal(isDomesticOrderDueDateInverted(found), true);
+});
+
+test("🔴 이 줄에 적힌 납기요청일이 이긴다 — 그 날짜가 목표일보다 늦으면 역전이 아니다", async () => {
+  const caseId = await createTestCase(null, "2096-08-31", "2096-09-10");
+  const orderId = await insertOrder({ repairCaseId: caseId });
+  // 발주서에 적힌 날은 12월 1일이다. 수리 건의 8월 31일로 재면 역전이지만, 이 칸에
+  // 보이는 것은 12월 1일이고 그 날로 재면 역전이 아니다.
+  await insertDueDates(orderId, ["2096-12-01"]);
+
+  assert.equal(isDomesticOrderDueDateInverted(await loadOrder(orderId)), false);
+
+  // 대조 — 같은 줄의 날짜를 목표일보다 이르게 바꾸면 경보가 선다. 이것이 없으면 위
+  // 단언은 재료가 통째로 안 와도 초록색이다.
+  const second = await insertOrder({ repairCaseId: caseId });
+  await insertDueDates(second, ["2096-09-20", "2096-09-01"]);
+  assert.equal(
+    isDomesticOrderDueDateInverted(await loadOrder(second)),
+    true,
+    "가장 이른 9월 1일이 목표일 9월 10일보다 이른데 경보가 안 선다"
+  );
+});
+
+test("🔴 이미 나간 건에는 뜨지 않는다 — 이 화면에서도", async () => {
+  const caseId = await createTestCase("2096-09-11", "2096-08-31", "2096-09-10");
+  const orderId = await insertOrder({ repairCaseId: caseId });
+
+  const found = await loadOrder(orderId);
+  assert.equal(found.repairCaseActualShipmentDate, "2096-09-11", "출하일이 안 실려 왔다");
+  assert.equal(
+    isDomesticOrderDueDateInverted(found),
+    false,
+    "나간 건에 「협의 필요」가 남았다 — 할 일이 없는 말이다"
+  );
+});
+
+test("🔴 수리 건이 없는 줄(별도 건)은 역전을 재지 않는다 — 잴 재료가 없다", async () => {
+  // 분할 납품하는 별도 건이 이 모양이다(납기일은 여럿인데 사내 목표 출하일이 없다).
+  const orderId = await insertOrder({ repairCaseId: null });
+  await insertDueDates(orderId, ["2096-01-05", "2096-02-05"]);
+
+  const found = await loadOrder(orderId);
+  assert.equal(found.repairCaseInternalTargetShipmentDate, null);
+  assert.equal(found.repairCaseStatus, null, "연결이 없는데 단계 상태가 실려 왔다");
+  assert.equal(isDomesticOrderDueDateInverted(found), false);
 });
 
 // ── listQuoteInfoForRepairCases — 완료된 줄은 후보에서 빠진다 (2026-10-07) ──

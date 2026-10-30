@@ -25,6 +25,7 @@ import {
   resolveDomesticOrderValue,
 } from "@/lib/domain/domestic-order-list";
 import type { RepairCaseDomesticOrderIssueDateRow } from "@/lib/domain/domestic-order-issue-date-edit";
+import type { RepairStatus } from "@/lib/domain/types";
 
 /**
  * ============================================================================
@@ -91,6 +92,18 @@ import type { RepairCaseDomesticOrderIssueDateRow } from "@/lib/domain/domestic-
  * (지운 발주 줄은 세지 않는다)를 이 파일이 한 곳에서 갖는다. 저쪽 화면의
  * 조회 파일에 같은 SQL 을 한 벌 더 적으면, 언젠가 한쪽만 고쳐져 같은 자료가
  * 화면마다 다른 날짜로 보인다.
+ *
+ * ── 화면에 그리지 않는데도 실어 오는 칸이 셋 있다 ───────────────────────
+ * 연결된 수리 건의 **실제 출하일 · 사내 목표 출하일 · 지금 상태**다. 첫째는 위
+ * `납품일` 이 되지만, 뒤의 둘은 어느 칸으로도 그려지지 않는다 — 그 둘은
+ * `납기요청일` 칸의 **색과 메모**를 정하는 재료다(2026-10-30 「납기 역전」:
+ * 사내 목표 출하일이 그 칸에 보이는 날짜보다 늦으면 굵은 붉은색 + 「협의 필요」).
+ *
+ * 🔴 **셋을 한 묶음으로 본다.** 역전 경보는 이미 나간 건에 뜨지 않고, 「나갔는가」는
+ * 상태와 실제 출하일 둘을 함께 봐야 안다(domain/notifications.ts 의
+ * isRepairCaseShipmentFinished). 하나라도 빠지면 오류 없이 **지난 건에 붉은 글이
+ * 남거나** 살아 있는 건의 경보가 조용히 꺼진다 — 판정 자체는
+ * domain/due-date-inversion.ts 하나가 쥐고, 여기는 재료만 싣는다.
  *
  * ── PII ────────────────────────────────────────────────────────────────
  * progress_note · history_note · etc_note · delivered_by 는 사람이 자유롭게
@@ -208,6 +221,37 @@ export type DomesticOrderJoinRow = {
    * (mutations/workflow-transitions.ts 가 출하 완료 때 자동으로 적는다).
    */
   repairCaseActualShipmentDate: string | null;
+  /**
+   * 연결된 수리 건의 **사내 목표 출하일**. 화면에 그리는 값이 **아니다** — 내자
+   * 정리의 표에는 이 칸이 없고, 앞으로도 칼럼을 늘리지 않는다.
+   *
+   * 실어 오는 까닭은 **`납기요청일` 칸의 색을 정하는 재료**이기 때문이다(2026-10-30).
+   * 이 날짜가 그 칸에 보이는 날짜보다 늦으면 「납기 역전」이라 날짜가 굵은 붉은색이
+   * 되고 「협의 필요」가 붙는다(domain/due-date-inversion.ts 의
+   * isDomesticOrderDueDateInverted). 수리 건 상세가 같은 사실을 같은 함수로 재므로
+   * 두 화면이 갈라지지 않는다.
+   *
+   * ⚠️ **저장에 실리지 않는다.** 이 행의 칼럼이 아니라 수리 건의 칸이고, 내자 저장이
+   * 되실어 보내는 목록에 들어 있지 않다(domain/domestic-order-cell-edit.ts 의
+   * collectRowFields — 거기 적힌 이름만 나간다).
+   */
+  repairCaseInternalTargetShipmentDate: string | null;
+  /**
+   * 연결된 수리 건의 **평탄화된 지금 상태**(workflow_steps.repair_status). 연결이
+   * 없거나 단계에 상태가 안 적혀 있으면 null 이고, 그때는 「아직 안 나갔다」로 읽힌다.
+   *
+   * 바로 위 두 칸과 **한 묶음**이다 — 역전 경보는 이미 나간 건에는 뜨지 않고
+   * (2026-10-30 사용자 결정), 「나갔는가」는 상태와 실제 출하일 **둘**을 함께 봐야
+   * 안다(domain/notifications.ts 의 isRepairCaseShipmentFinished). 상태 하나만 보면
+   * 출하일은 찍혔는데 단계가 못 따라간 건에 경보가 남고, 날짜 하나만 보면 그 반대가
+   * 샌다.
+   *
+   * 단계 key 를 글자로 비교하지 않는 것은 워크플로마다 key 가 다르기 때문이고, 이
+   * 저장소가 「지금 출하 완료인가」를 묻는 다른 자리들과 같은 기준이다
+   * (아래 getDomesticOrderShipmentLink · queries/weekly-report.ts ·
+   * queries/repair-cases-mine.ts).
+   */
+  repairCaseStatus: RepairStatus | null;
   displayOrder: number | null;
   purchaseOrderNumber: string | null;
   projectName: string | null;
@@ -482,6 +526,11 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
       // 않는다** — 연결된 줄은 이것만, 연결 없는 줄은 delivered_date 만 본다
       // (파일 헤더의 '연결된 줄의 납품일은 수리 건의 실제 출하일 하나뿐이다').
       repairCaseActualShipmentDate: repairCases.actualShipmentDate,
+      // 「납기 역전」을 재는 재료 둘(2026-10-30). 화면에 그리는 값이 아니라
+      // `납기요청일` 칸의 **색과 메모**를 정하는 값이다 — 빠지면 그 칸은 오류 없이
+      // 영영 평범한 검은 글자로 남는다(위 타입 주석).
+      repairCaseInternalTargetShipmentDate: repairCases.internalTargetShipmentDate,
+      repairCaseStatus: workflowSteps.repairStatus,
       displayOrder: domesticOrders.displayOrder,
       purchaseOrderNumber: domesticOrders.purchaseOrderNumber,
       projectName: domesticOrders.projectName,
@@ -523,6 +572,12 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
     // 안 된다.
     .leftJoin(repairCases, eq(repairCases.id, domesticOrders.repairCaseId))
     .leftJoin(products, eq(products.id, repairCases.productId))
+    // 지금 단계. **LEFT 다** — 연결이 없는 줄도, 단계를 아직 못 찾은 건도 줄이
+    // 통째로 사라지면 안 된다(그 줄은 사람이 이어 붙여야 하는 줄이다). 그때
+    // repairCaseStatus 는 null 이고 「아직 안 나갔다」로 읽힌다(위 그 칸 주석).
+    // ⚠️ 줄이 복제되지 않는다 — workflow_steps.id 는 기본키라 짝이 많아야 하나다
+    // (납기요청일을 조인하지 않고 따로 읽는 까닭이 바로 그 복제다 — 파일 헤더).
+    .leftJoin(workflowSteps, eq(workflowSteps.id, repairCases.currentWorkflowStepId))
     // 두 고객사를 각각 데려온다. 어느 쪽을 쓸지는 아래 매퍼가 정한다
     // (파일 헤더의 '어느 쪽을 쓸지는 SQL 이 정하지 않는다').
     .leftJoin(orderCustomers, eq(orderCustomers.id, domesticOrders.customerId))

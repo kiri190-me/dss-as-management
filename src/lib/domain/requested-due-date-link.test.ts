@@ -9,6 +9,7 @@ import {
   DUE_DATE_FROM_REPAIR_CASE_LABEL,
   REPAIR_CASE_DUE_DATE_LINK_NOTE,
   resolveDomesticOrderDueDateDisplay,
+  resolveDomesticOrderDueDateForComparison,
   resolveRepairCaseRequestedDueDate,
 } from "./requested-due-date-link";
 import { buildDomesticOrderCellUpdateFields } from "./domestic-order-cell-edit";
@@ -29,6 +30,9 @@ import { pickEarliestDueDate } from "./weekly-report-delivery";
  *     같아야 한다. 그 사실을 시험이 직접 대조한다.
  *  5. **⚠️ 계산된 값은 저장 payload 에 실리지 않는다** — 빌려 온 날짜가
  *     dueDates 에 섞여 나가면 그 줄에 박제된다.
+ *  6. **내자 한 줄을 하루로 접는 쪽도 같은 갈림을 쓴다**(2026-10-30, ③-b) —
+ *     「납기 역전」이 그 하루로 재므로, 갈림이 ①과 어긋나면 화면은 이 줄의 날짜를
+ *     그려 놓고 수리 건의 날짜로 재게 된다.
  *
  * 여기서 확인하지 않는 것: 여러 날짜를 어떤 글자로 적는가(메모 괄호 · 차례)는
  * domestic-order-list.test.ts 가 이미 본다. 이 파일이 보는 것은 **어느 쪽 값을
@@ -211,6 +215,100 @@ test("양쪽 다 적혀 있으면 각자 자기 것을 본다 — 어느 쪽도 
   assert.equal(repairCase.dueDate, "2026-03-31");
   assert.equal(domestic.borrowed, false);
   assert.equal(repairCase.borrowed, false);
+});
+
+// ── ③-b 🔴 내자 한 줄을 **견줄 수 있는 하루**로 접기 (2026-10-30) ────────
+//
+// 「납기 역전」 판정이 쓰는 날짜다(due-date-inversion.ts). 여기서 지키는 것은
+// 하나뿐이다 — **그 칸에 보이는 날짜로 잰다.** 갈림이 위 그리기 함수와 어긋나는
+// 순간, 화면은 이 줄에 적힌 날짜를 그려 놓고 수리 건의 날짜로 재게 되고, 사람은
+// 빨간 날짜를 보며 왜 빨간지 끝내 알 수 없다.
+
+test("이 줄에 날짜가 있으면 그 날짜로 잰다 — 수리 건 날짜는 보지 않는다", () => {
+  assert.equal(
+    resolveDomesticOrderDueDateForComparison({
+      dueDates: [dueDate("2026-01-20")],
+      repairCaseCustomerRequestedDueDate: "2026-03-31",
+    }),
+    "2026-01-20"
+  );
+});
+
+test("🔴 날짜가 여럿이면 **가장 이른 하루** — 뒤 회차의 여유가 첫 약속을 지우지 못한다", () => {
+  // 🔴 가장 이른 날을 **가운데** 둔다. 끝에 두면 「마지막 줄을 고른다」로 바꿔도
+  // 시험이 초록색으로 남는다(실제로 한 번 그렇게 적었다가 일부러 깨뜨려 보고
+  // 잡았다 — 사람이 적는 차례는 1차분·2차분이라 보통 이르게 정렬돼 있다).
+  const picked = resolveDomesticOrderDueDateForComparison({
+    dueDates: [dueDate("2026-03-10", "2차분"), dueDate("2026-01-10", "1차분"), dueDate("2026-05-10")],
+    repairCaseCustomerRequestedDueDate: null,
+  });
+  assert.equal(picked, "2026-01-10");
+  // 고르는 일을 주간보고와 같은 함수에 맡겼다는 사실을 대조한다 — 규칙을 베껴
+  // 적으면 같은 자료를 두 화면이 다른 날짜로 재게 된다.
+  assert.equal(picked, pickEarliestDueDate(["2026-03-10", "2026-01-10", "2026-05-10"]));
+});
+
+test("이 줄이 비었을 때만 수리 건의 고객 요청 납기일을 빌린다", () => {
+  assert.equal(
+    resolveDomesticOrderDueDateForComparison({
+      dueDates: [],
+      repairCaseCustomerRequestedDueDate: "2026-03-31",
+    }),
+    "2026-03-31"
+  );
+});
+
+test("양쪽 어디에도 없으면 null — 「아직 정해지지 않았다」이고, 그것으로 재지 않는다", () => {
+  assert.equal(
+    resolveDomesticOrderDueDateForComparison({
+      dueDates: [],
+      repairCaseCustomerRequestedDueDate: null,
+    }),
+    null
+  );
+  // 공백만 적힌 값은 없는 것으로 접는다 — 화면에는 빈칸인데 경보만 켜지는 줄이
+  // 생기지 않게. 그리기 함수가 쓰는 규칙과 같다.
+  assert.equal(
+    resolveDomesticOrderDueDateForComparison({
+      dueDates: [],
+      repairCaseCustomerRequestedDueDate: "   ",
+    }),
+    null
+  );
+});
+
+test("🔴 고른 하루는 **언제나 그 칸에 보이는 날짜다** — 갈림이 그리기와 어긋나지 않는다", () => {
+  // 글자가 아니라 **갈림**을 맞대어 본다. 그리기 쪽 lines 는 메모가 붙은 글자라
+  // (`"2026-01-10 (1차분)"`) 날짜로 견줄 수 없으므로, 고른 하루로 시작하는 줄이
+  // 그 칸에 있는지를 본다.
+  const rows = [
+    { dueDates: [dueDate("2026-01-20")], repairCaseCustomerRequestedDueDate: "2026-03-31" },
+    {
+      dueDates: [dueDate("2026-03-10", "2차분"), dueDate("2026-01-10", "1차분"), dueDate("2026-05-10")],
+      repairCaseCustomerRequestedDueDate: "2026-02-01",
+    },
+    { dueDates: [], repairCaseCustomerRequestedDueDate: "2026-03-31" },
+    { dueDates: [], repairCaseCustomerRequestedDueDate: null },
+  ];
+  let compared = 0;
+  let borrowedSeen = 0;
+  for (const row of rows) {
+    const display = resolveDomesticOrderDueDateDisplay(row);
+    const picked = resolveDomesticOrderDueDateForComparison(row);
+    if (picked === null) {
+      assert.deepEqual(display.lines, [], `잴 날짜가 없는데 칸에는 보인다: ${JSON.stringify(row)}`);
+      continue;
+    }
+    compared += 1;
+    if (display.borrowed) borrowedSeen += 1;
+    assert.ok(
+      display.lines.some((line) => line.startsWith(picked)),
+      `판정이 보는 날(${picked})이 칸에 없다: ${JSON.stringify(display.lines)}`
+    );
+  }
+  // 표본이 비어 공짜로 통과하는 일을 막는다 — 빌려 온 줄도 한 번은 지나야 한다.
+  assert.equal(compared, 3, "견준 줄이 셋이어야 한다");
+  assert.equal(borrowedSeen, 1, "빌려 온 줄이 표본에 없다");
 });
 
 // ── ④ 표시 글자 ────────────────────────────────────────────────────────

@@ -4,10 +4,17 @@ import {
   DUE_DATE_INVERSION_NOTE,
   DUE_DATE_INVERSION_NOTE_CLASS,
   DUE_DATE_INVERSION_REASON_NOTE,
+  DUE_DATE_INVERSION_SHORT_NOTE,
+  DUE_DATE_INVERSION_SHORT_NOTE_TITLE,
+  isDomesticOrderDueDateInverted,
   isDueDateInverted,
   isRepairCaseDueDateInverted,
 } from "./due-date-inversion";
 import { isRepairCaseShipmentFinished } from "./notifications";
+import {
+  resolveDomesticOrderDueDateDisplay,
+  resolveDomesticOrderDueDateForComparison,
+} from "./requested-due-date-link";
 import type { RepairStatus } from "./types";
 
 /**
@@ -161,6 +168,26 @@ describe("납기 역전 — 날짜 둘만 본다", () => {
     assert.ok(
       !DUE_DATE_INVERSION_NOTE_CLASS.includes("font-bold"),
       "메모까지 굵으면 날짜와 한 덩어리로 보여 눈이 날짜를 먼저 찾지 못한다"
+    );
+  });
+
+  test("🔴 목록용 짧은 말은 짧고, 긴 문장은 title 로 **사라지지 않는다**(2026-10-30)", () => {
+    // 내자 정리의 그 칸은 22칼럼짜리 표의 한 칸이라 긴 문장을 넣으면 칼럼이 넓어진다.
+    // 그래서 짧은 말을 따로 두되, 사람이 읽어야 하는 문장은 마우스를 올리면 나온다.
+    assert.ok(
+      DUE_DATE_INVERSION_SHORT_NOTE.length < DUE_DATE_INVERSION_NOTE.length,
+      "짧은 말이 긴 문장보다 짧지 않다 — 표가 옆으로 길어진다"
+    );
+    assert.ok(DUE_DATE_INVERSION_SHORT_NOTE.length > 0, "짧은 말이 비어 있다");
+    // 🔴 title 은 두 상수를 **이어 붙인 것**이다. 베껴 적으면 상세 쪽 메모만 고쳐진 날
+    // 목록의 설명이 옛 말로 남는다.
+    assert.ok(
+      DUE_DATE_INVERSION_SHORT_NOTE_TITLE.includes(DUE_DATE_INVERSION_NOTE),
+      "짧은 말의 설명에 「무엇을 해야 하는가」가 없다"
+    );
+    assert.ok(
+      DUE_DATE_INVERSION_SHORT_NOTE_TITLE.includes(DUE_DATE_INVERSION_REASON_NOTE),
+      "짧은 말의 설명에 까닭이 없다"
     );
   });
 });
@@ -342,5 +369,225 @@ describe("납기 역전 — 이미 나간 건에는 안 뜬다", () => {
     }
     // 표본에 「끝난 건」이 하나도 없으면 위 단언은 아무것도 못 지킨다.
     assert.equal(finishedSeen, 3, "표본에서 끝난 건이 셋이어야 한다");
+  });
+});
+
+/**
+ * ── 🔴 내자 정리의 한 줄 (2026-10-30) ──────────────────────────────────────
+ * 같은 경보를 **같은 함수**로 재지만, 견주는 두 번째 날짜가 다르다 — 수리 건 상세는
+ * 그 건의 고객 요청 납기일을, 내자 정리는 **그 줄의 `납기요청일` 칸에 보이는 날짜**를
+ * 본다. 뜻이 다른 두 날짜라(발주서에 적힌 날 ↔ 고객이 접수 때 말한 날) 한 건을 두고
+ * 두 화면의 경보가 갈릴 수 있고, 그래도 **각 화면이 제가 그린 날짜로 재는 것**이 이
+ * 저장소의 규율이다(보이는 날짜와 판정이 본 날짜가 다르면 까닭을 찾을 수 없다).
+ *
+ * 여기서 못 박는 것 다섯
+ *  ① 이 줄에 적힌 날짜가 먼저고, 비었을 때만 수리 건에서 빌린다.
+ *  ② 날짜가 여럿인 줄(분할 납품)은 **가장 이른 하루**로 잰다.
+ *  ③ 이미 나간 건에는 안 뜬다 — 수리 건 쪽과 **같은 잣대**다.
+ *  ④ 🔴 수리 건이 없는 줄(별도 건)은 **언제나 거짓** — 잴 재료가 없다.
+ *  ⑤ 판정이 본 날은 언제나 그 칸에 보이는 날짜 중 하나다.
+ */
+describe("납기 역전 — 내자 정리는 그 칸에 보이는 날짜로 잰다", () => {
+  /**
+   * **아직 안 나간** 수리 건이 붙은 내자 줄 하나. 조회가 내려보내는 칸 이름 그대로다
+   * (DomesticOrderListItem). 위 liveCase 와 같은 까닭으로 출하 두 칸에 기본값을 둔다.
+   */
+  /**
+   * 분할 납품하는 한 줄의 날짜 셋. 🔴 **가장 이른 날이 가운데**다 — 끝에 두면
+   * 「첫 줄을 고른다」나 「마지막 줄을 고른다」로 바꿔도 아래 시험이 초록색으로
+   * 남는다(실제로 그렇게 적었다가 일부러 깨뜨려 보고 잡았다).
+   */
+  const SPLIT_DUE_DATES = ["2094-11-20", EARLIEST, "2094-12-20"];
+
+  function orderRow(row: {
+    dueDates?: readonly string[];
+    repairCaseInternalTargetShipmentDate: string | null;
+    repairCaseCustomerRequestedDueDate?: string | null;
+    repairCaseStatus?: RepairStatus | null;
+    repairCaseActualShipmentDate?: string | null;
+  }) {
+    return {
+      // 메모는 판정이 보지 않는 값이지만, 실제 줄이 들고 다니는 모양 그대로 넣어
+      // 둔다 — 날짜만 담은 배열로 재면 조회가 주는 것과 다른 것을 재게 된다.
+      dueDates: (row.dueDates ?? []).map((dueDate, index) => ({
+        dueDate,
+        note: index === 0 ? "1차분" : null,
+      })),
+      repairCaseInternalTargetShipmentDate: row.repairCaseInternalTargetShipmentDate,
+      repairCaseCustomerRequestedDueDate: row.repairCaseCustomerRequestedDueDate ?? null,
+      repairCaseStatus:
+        row.repairCaseStatus === undefined
+          ? ("IN_REPAIR" as RepairStatus | null)
+          : row.repairCaseStatus,
+      repairCaseActualShipmentDate: row.repairCaseActualShipmentDate ?? null,
+    };
+  }
+
+  test("🔴 이 줄에 적힌 납기요청일보다 사내 목표 출하일이 늦으면 역전이다", () => {
+    assert.equal(
+      isDomesticOrderDueDateInverted(
+        orderRow({
+          dueDates: [REQUESTED],
+          repairCaseInternalTargetShipmentDate: ONE_DAY_LATER,
+        })
+      ),
+      true
+    );
+  });
+
+  test("🔴 같은 날은 역전이 아니다 — 경계가 세 길에서 같다", () => {
+    assert.equal(
+      isDomesticOrderDueDateInverted(
+        orderRow({ dueDates: [REQUESTED], repairCaseInternalTargetShipmentDate: REQUESTED })
+      ),
+      false
+    );
+    assert.equal(
+      isDomesticOrderDueDateInverted(
+        orderRow({ dueDates: [REQUESTED], repairCaseInternalTargetShipmentDate: ONE_DAY_EARLIER })
+      ),
+      false
+    );
+  });
+
+  test("🔴 날짜가 여럿인 줄은 **가장 이른 하루**로 잰다(분할 납품)", () => {
+    // 목표일 11-01 은 가장 이른 10-20 보다 늦고, 늦은 쪽 11-20 보다는 이르다.
+    // 「마지막 날짜」나 「첫 줄」로 고르고 있으면 이 단언이 거짓으로 뒤집힌다.
+    assert.equal(
+      isDomesticOrderDueDateInverted(
+        orderRow({
+          dueDates: SPLIT_DUE_DATES,
+          repairCaseInternalTargetShipmentDate: "2094-11-01",
+        })
+      ),
+      true
+    );
+    // 대조 — 가장 이른 날보다도 이르면 어느 회차와도 어긋나지 않는다.
+    assert.equal(
+      isDomesticOrderDueDateInverted(
+        orderRow({
+          dueDates: SPLIT_DUE_DATES,
+          repairCaseInternalTargetShipmentDate: "2094-10-19",
+        })
+      ),
+      false
+    );
+  });
+
+  test("🔴 이 줄이 비어 있으면 수리 건의 고객 요청 납기일을 빌려 잰다 — 그 칸에 보이는 그 날짜다", () => {
+    assert.equal(
+      isDomesticOrderDueDateInverted(
+        orderRow({
+          dueDates: [],
+          repairCaseCustomerRequestedDueDate: REQUESTED,
+          repairCaseInternalTargetShipmentDate: ONE_DAY_LATER,
+        })
+      ),
+      true
+    );
+  });
+
+  test("🔴 이 줄에 날짜가 있으면 빌려 오지 않는다 — 빌려 온 값으로 재면 여기서 갈린다", () => {
+    // 이 줄의 날짜(12-01)로 재면 역전이 아니고, 수리 건의 10-20 으로 재면 역전이다.
+    assert.equal(
+      isDomesticOrderDueDateInverted(
+        orderRow({
+          dueDates: ["2094-12-01"],
+          repairCaseCustomerRequestedDueDate: REQUESTED,
+          repairCaseInternalTargetShipmentDate: ONE_DAY_LATER,
+        })
+      ),
+      false
+    );
+  });
+
+  test("🔴 수리 건이 없는 줄(별도 건)은 역전을 재지 않는다 — 잴 재료가 없다", () => {
+    // 분할 납품하는 별도 건이 이 모양이다(납기일은 여럿인데 사내 목표 출하일이
+    // 아예 없다). 날짜만 보고 칠하면 이런 줄이 전부 붉어진다.
+    assert.equal(
+      isDomesticOrderDueDateInverted(
+        orderRow({
+          dueDates: SPLIT_DUE_DATES,
+          repairCaseInternalTargetShipmentDate: null,
+          repairCaseCustomerRequestedDueDate: null,
+          repairCaseStatus: null,
+        })
+      ),
+      false
+    );
+  });
+
+  test("양쪽 어디에도 납기요청일이 없으면 거짓이다", () => {
+    assert.equal(
+      isDomesticOrderDueDateInverted(
+        orderRow({ dueDates: [], repairCaseInternalTargetShipmentDate: ONE_DAY_LATER })
+      ),
+      false
+    );
+  });
+
+  test("🔴 이미 나간 건에는 안 뜬다 — 수리 건 쪽과 **같은 잣대**다", () => {
+    const inverted = { dueDates: [REQUESTED], repairCaseInternalTargetShipmentDate: ONE_DAY_LATER };
+    // 표본 확인 — 이 짝이 애초에 역전이 아니어서 아래가 통과하는 일을 막는다.
+    assert.equal(isDomesticOrderDueDateInverted(orderRow(inverted)), true);
+
+    // 규칙(상태 or 출하일)을 베껴 적지 않고 **그 함수의 답과 맞대어** 본다 —
+    // 수리 건 쪽 시험이 쓰는 방법 그대로다.
+    const shipments: { status: RepairStatus | null; actualShipmentDate: string | null }[] = [
+      { status: "SHIPMENT_COMPLETED", actualShipmentDate: null },
+      { status: "IN_REPAIR", actualShipmentDate: "2094-10-25" },
+      { status: "IN_REPAIR", actualShipmentDate: null },
+      { status: null, actualShipmentDate: null },
+      // 공백만 적힌 출하일은 찍힌 것이 아니다.
+      { status: "IN_REPAIR", actualShipmentDate: "   " },
+    ];
+    let finishedSeen = 0;
+    for (const shipment of shipments) {
+      const finished = isRepairCaseShipmentFinished(shipment);
+      if (finished) finishedSeen += 1;
+      assert.equal(
+        isDomesticOrderDueDateInverted(
+          orderRow({
+            ...inverted,
+            repairCaseStatus: shipment.status,
+            repairCaseActualShipmentDate: shipment.actualShipmentDate,
+          })
+        ),
+        !finished,
+        `출하 판정(${finished})과 경보가 어긋난다: ${JSON.stringify(shipment)}`
+      );
+    }
+    assert.equal(finishedSeen, 2, "표본에서 끝난 건이 둘이어야 한다");
+  });
+
+  test("🔴 판정이 본 날은 언제나 그 칸에 보이는 날짜다 — 화면과 판정이 갈라지지 않는다", () => {
+    // 그리기 함수와 **같은 줄**을 두 길로 통과시켜 맞대어 본다. 둘의 갈림이
+    // 어긋나면 날짜만 빨갛고 까닭은 어디에도 없는 화면이 된다.
+    const rows = [
+      orderRow({ dueDates: [REQUESTED], repairCaseInternalTargetShipmentDate: ONE_DAY_LATER }),
+      orderRow({
+        dueDates: SPLIT_DUE_DATES,
+        repairCaseCustomerRequestedDueDate: "2094-12-01",
+        repairCaseInternalTargetShipmentDate: "2094-11-01",
+      }),
+      orderRow({
+        dueDates: [],
+        repairCaseCustomerRequestedDueDate: REQUESTED,
+        repairCaseInternalTargetShipmentDate: ONE_DAY_LATER,
+      }),
+    ];
+    let invertedSeen = 0;
+    for (const row of rows) {
+      if (!isDomesticOrderDueDateInverted(row)) continue;
+      invertedSeen += 1;
+      const display = resolveDomesticOrderDueDateDisplay(row);
+      const day = resolveDomesticOrderDueDateForComparison(row);
+      assert.ok(day !== null, "역전인데 잰 날짜가 없다");
+      assert.ok(
+        display.lines.some((line) => line.startsWith(day)),
+        `판정이 본 날(${day})이 칸에 없다: ${JSON.stringify(display.lines)}`
+      );
+    }
+    assert.equal(invertedSeen, 3, "표본의 세 줄이 모두 역전이어야 한다");
   });
 });

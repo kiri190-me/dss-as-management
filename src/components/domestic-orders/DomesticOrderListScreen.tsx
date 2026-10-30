@@ -40,6 +40,14 @@ import {
   DUE_DATE_FROM_REPAIR_CASE_LABEL,
   resolveDomesticOrderDueDateDisplay,
 } from "@/lib/domain/requested-due-date-link";
+// 「납기 역전」 — 말도 옷도 판정도 도메인 하나에서 온다. 수리 건 상세와 같은 자리다.
+import {
+  DUE_DATE_INVERSION_NOTE_CLASS,
+  DUE_DATE_INVERSION_SHORT_NOTE,
+  DUE_DATE_INVERSION_SHORT_NOTE_TITLE,
+  isDomesticOrderDueDateInverted,
+} from "@/lib/domain/due-date-inversion";
+import { DUE_DATE_NEAR_TEXT_CLASS } from "@/components/repair-cases/due-date-near";
 import {
   customerRowColorClass,
   customerRowColorInteractiveClass,
@@ -541,10 +549,34 @@ const borrowedBadgeClass =
  * 다 말할 수 없다.
  *
  * 날짜가 양쪽 다 없으면 다른 칸과 똑같이 "-"다.
+ *
+ * ── 🔴 「납기 역전」이면 날짜가 붉어지고 짧은 메모가 붙는다 (2026-10-30) ─────
+ * 사내 목표 출하일이 **이 칸에 보이는 날짜**보다 늦으면, 지금 고쳐야 하는 것은 일정이
+ * 아니라 고객과의 약속이라 사람이 전화를 걸어야 한다. 판정은 여기서 하지 않는다 —
+ * 수리 건 상세와 **같은 함수** 하나가 한다(domain/due-date-inversion.ts 의
+ * isDomesticOrderDueDateInverted). 화면이 날짜를 다시 견주면 같은 건이 화면마다 다른
+ * 말을 하게 된다.
+ *
+ * 🔴 **상자에 긴 문장을 넣지 않는다.** 수리 건 상세는 그 칸 아래에 「납기 요청일
+ * 협의가 필요합니다.」를 통째로 적지만, 여기는 22칼럼짜리 표의 한 칸이라 그 문장을
+ * 넣으면 **이 칼럼만 넓어져 표가 옆으로 길어진다**(파일 헤더 · 빌려 온 날짜의 꼬리표가
+ * 짧은 것과 같은 까닭). 그래서 보이는 것은 「협의 필요」 넉 자이고, 긴 문장과 까닭은
+ * 마우스를 올렸을 때 나온다(DUE_DATE_INVERSION_SHORT_NOTE_TITLE). 그 넉 자는 날짜
+ * 한 줄보다 좁아 칼럼 너비를 바꾸지 않는다.
+ *
+ * 🔴 **빌려 왔다는 꼬리표는 함께 붉어지지 않는다** — 그것은 경보가 아니라 값이 어디서
+ * 왔는지를 말하는 표시다(수리 건 상세가 같은 자리에서 같은 선을 긋는다).
+ *
+ * 🔴 **역전이 아니면 나오는 HTML 이 예전과 한 글자도 다르지 않다.** 날짜를 감싸는
+ * 마디도, 메모 줄도 참일 때만 더해진다 — 이 칸은 모든 줄이 함께 쓰므로 평소 모양이
+ * 바뀌면 표 전체가 한꺼번에 바뀐다.
  */
 function DueDateCellContent({ row }: { row: DomesticOrderListItem }) {
   const display = resolveDomesticOrderDueDateDisplay(row);
   if (display.lines.length === 0) return <>-</>;
+  // 그릴 날짜가 하나도 없는 줄은 위에서 이미 돌아갔다 — 견줄 것이 없는 줄에
+  // 경보만 서는 일이 없다(판정도 날짜가 비면 거짓이다).
+  const inverted = isDomesticOrderDueDateInverted(row);
   return (
     <>
       {display.lines.map((line, index) => (
@@ -556,7 +588,9 @@ function DueDateCellContent({ row }: { row: DomesticOrderListItem }) {
         // 구문 요소(phrasing content)만 둘 수 있다. 화면에서는 <div> 와 똑같이 한
         // 줄에 날짜 하나로 쌓인다.
         <span key={index} className="block">
-          {line}
+          {/* 역전이면 날짜만 굵은 붉은색이다 — 옆의 꼬리표는 그대로 둔다. 거짓일
+              때는 감싸는 마디 없이 글자 그대로라, 예전 HTML 과 같다. */}
+          {inverted ? <span className={DUE_DATE_NEAR_TEXT_CLASS}>{line}</span> : line}
           {display.borrowed && (
             <span className={borrowedBadgeClass} title={DOMESTIC_ORDER_DUE_DATE_LINK_NOTE}>
               {DUE_DATE_FROM_REPAIR_CASE_LABEL}
@@ -564,6 +598,15 @@ function DueDateCellContent({ row }: { row: DomesticOrderListItem }) {
           )}
         </span>
       ))}
+      {/* 날짜 줄들 **뒤**다 — 먼저 날짜를, 그다음 그것이 어디서 온 값인지를, 마지막에
+          무엇을 해야 하는지를 읽는다(수리 건 상세가 같은 차례로 쌓는다).
+          ⚠️ <div> 가 아니라 <span> 인 것은 윗줄들과 같은 까닭이다 — 고칠 수 있는
+          사람에게는 이 전부가 <button> 안에 들어간다(구문 요소만 둘 수 있다). */}
+      {inverted && (
+        <span className={DUE_DATE_INVERSION_NOTE_CLASS} title={DUE_DATE_INVERSION_SHORT_NOTE_TITLE}>
+          {DUE_DATE_INVERSION_SHORT_NOTE}
+        </span>
+      )}
     </>
   );
 }
@@ -979,7 +1022,23 @@ const CARD_FIELD_GROUPS: {
   label: string;
   fields: {
     label: string;
-    of: (row: DomesticOrderListItem) => string;
+    /**
+     * 이 칸에 그릴 것. **거의 모든 칸은 글자 하나를 돌려준다** — 그 글자가 눌러서
+     * 고치는 부품의 displayText 로도 그대로 들어가고(아래 edit · dueDatesEdit),
+     * 안 고칠 때는 `<dd>` 에 그대로 놓인다.
+     *
+     * 🔴 **마디를 돌려줘도 된다**(2026-10-30 — 지금은 납기요청일 하나가 그렇다).
+     * 그 칸은 표와 **같은 부품**을 쓴다(DueDateCellContent): 역전이면 날짜가 굵은
+     * 붉은색이 되고 「협의 필요」가 테두리 상자로 붙는 경보라, 글자로는 같은 세기로
+     * 말할 수 없다. 좁은 화면에서는 카드가 **세로로 서므로** 그 칸만 생김새가 달라도
+     * 옆줄이 밀리지 않는다(2026-10-30 사용자 결정 — 그 전까지는 카드에 배지도 색도
+     * 두지 않았다).
+     *
+     * ⚠️ 마디를 돌려주는 칸은 **multiline 을 켜지 않는다.** 줄 나눔을 `\n` 이 아니라
+     * 제 마디가 하므로 pre-line 은 할 일이 없는데, 켜 두면 접는 방식만 둘로 갈린다
+     * (아래 multiline 과 edit·dueDatesEdit 의 wrapping 은 늘 한 쌍이다).
+     */
+    of: (row: DomesticOrderListItem) => ReactNode;
     /**
      * 값에 든 줄바꿈을 진짜 줄바꿈으로 그릴 칸인가. 켠 칸만 whitespace-pre-line
      * 이 붙는다 — 줄 단위로 만들어 내는 칸(납기요청일)과 사람이 줄바꿈을 섞어
@@ -1068,23 +1127,25 @@ const CARD_FIELD_GROUPS: {
       // 도메인 함수가 정한다. 좁은 화면이라고 접거나 표시를 빼면 같은 자료가
       // 화면마다 다른 값으로 읽힌다(파일 헤더).
       //
-      // ⚠️ 표는 이 자리에 배지를 그리고 카드는 **글자를 한 줄 더** 적는다 —
-      // 발주발행일의 `발주일 미정` 과 똑같은 나눔이다(위 그 칸의 주석). 카드에는
-      // 원래 배지가 없고, 여기 새로 들이면 눌러서 고칠 수 없는 이 칸만 옆 칸들과
-      // 다른 생김새가 된다. 말하는 내용은 양쪽이 같은 상수 하나에서 나온다.
+      // 🔴 **이 칸만은 표와 똑같은 부품을 그대로 쓴다**(2026-10-30 사용자 결정).
+      // 바로 위 발주발행일은 아직 「표는 배지, 카드는 글자」로 갈라져 있지만, 이 칸에는
+      // 「납기 역전」 경보가 붙는다 — 날짜가 굵은 붉은색이 되고 「협의 필요」가 테두리
+      // 상자로 선다. 글자 한 줄로는 그 경보를 **같은 세기로 말할 수 없고**, 좁은
+      // 화면에서만 약한 경보가 되는 쪽이 생김새가 어긋나는 것보다 나쁘다.
+      //
+      // 🔵 그 생김새 문제는 **좁은 화면에서는 애초에 생기지 않는다** — 카드는 칸들이
+      // 세로로 서므로 이 칸이 조금 높아져도 옆줄이 밀리지 않는다(2026-10-30 사용자
+      // 지적). 한 부품을 같이 쓰게 되어 표와 카드가 갈라질 여지 자체가 없어졌다:
+      // 날짜·출처 꼬리표·경보가 셋 다 양쪽에서 같은 모양이다.
       {
         label: "납기요청일",
-        of: (row) => {
-          const display = resolveDomesticOrderDueDateDisplay(row);
-          if (display.lines.length === 0) return "-";
-          const body = display.lines.join("\n");
-          return display.borrowed ? `${body}\n${DUE_DATE_FROM_REPAIR_CASE_LABEL}` : body;
-        },
-        multiline: true,
+        of: (row) => <DueDateCellContent row={row} />,
         hint: DOMESTIC_ORDER_DUE_DATE_LINK_NOTE,
-        // 멀티라인 <dd> 의 접는 방식 그대로(위 multiline). 빌려 온 날짜가 보이는
-        // 줄이라도 편집 목록은 빈 목록으로 열린다(DomesticOrderDueDatesCell ②).
-        dueDatesEdit: { wrapping: "break-words whitespace-pre-line" },
+        // 줄 나눔은 이 부품이 제 마디로 한다(`<span className="block">`) — 넘길 `\n`
+        // 이 없으니 multiline 을 켜지 않고, 편집 목록도 `<dd>` 의 break-words 와
+        // 결과가 같은 값을 받는다(위 of 의 ⚠️). 빌려 온 날짜가 보이는 줄이라도 편집
+        // 목록은 빈 목록으로 열린다(DomesticOrderDueDatesCell ②).
+        dueDatesEdit: { wrapping: "break-words whitespace-normal" },
       },
     ],
   },

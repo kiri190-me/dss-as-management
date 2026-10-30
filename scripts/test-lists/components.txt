@@ -75,6 +75,16 @@ src/components/users/approval-route-section.test.ts
 src/components/quotes/quote-list-screen-source.test.ts
 src/components/domestic-orders/domestic-order-trash.test.ts
 src/components/domestic-orders/domestic-order-inline-cells.test.ts
+# 내자 정리 `납기요청일` 의 「납기 역전」 표시(2026-10-30 사용자 요구) — 사내 목표
+# 출하일이 그 칸에 보이는 날짜보다 늦으면 날짜가 굵은 붉은색이 되고 「협의 필요」가
+# 붙는다. 🔴 재는 것이 일곱이다: 판정을 화면이 다시 적지 않는가 · 말과 옷이 도메인
+# 상수인가 · 🔴 역전이 아닐 때 HTML 이 그대로인가 · 빌려 온 꼬리표가 함께 붉어지지
+# 않는가 · 표와 카드가 같은 말을 쓰는가 · 표에 긴 문장이 들어가 칼럼이 넓어지지
+# 않는가 · 조회가 재료 넷을 싣고 오는가. 값으로 도는 판정은 unit 목록의
+# domain/due-date-inversion.test.ts 가, 실제로 실려 오는지는 db 목록의
+# queries/domestic-orders.integration.test.ts 가 본다. 수리 건 상세 쪽 짝은
+# repair-cases/detail/due-date-inversion-note.test.ts 다.
+src/components/domestic-orders/domestic-order-due-date-inversion.test.ts
 src/components/quotes/quote-edit-work-scope-suppression.test.ts
 src/lib/domain/range-selection.test.ts
 src/lib/hooks/useShiftRangeSelection.test.ts

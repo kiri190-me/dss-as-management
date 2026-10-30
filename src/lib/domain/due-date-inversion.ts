@@ -1,6 +1,9 @@
 import { foldBlankToNull } from "./domestic-order-list";
 import { isRepairCaseShipmentFinished } from "./notifications";
-import { resolveRepairCaseRequestedDueDate } from "./requested-due-date-link";
+import {
+  resolveDomesticOrderDueDateForComparison,
+  resolveRepairCaseRequestedDueDate,
+} from "./requested-due-date-link";
 import type { RepairStatus } from "./types";
 
 /**
@@ -107,6 +110,40 @@ export const DUE_DATE_INVERSION_NOTE_CLASS =
   "mt-1 inline-block whitespace-nowrap rounded border border-red-300 bg-red-50 px-1.5 py-0.5 text-[10px] text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300";
 
 /**
+ * **목록**에서 그 메모 대신 적는 짧은 말 — 내자 정리의 표와 카드가 쓴다(2026-10-30).
+ *
+ * 🔴 위 DUE_DATE_INVERSION_NOTE("납기 요청일 협의가 필요합니다.")를 그대로 쓰지 않는
+ * 까닭은 **자리가 다르기** 때문이다. 수리 건 상세는 2열 격자라 칸 하나에 열다섯 글자가
+ * 들어가지만, 내자 정리의 `납기요청일` 은 **22칼럼짜리 표의 한 칸**이고 그 칸에 지금
+ * 그려지는 것은 길어야 `"2026-01-05 (1차분)"` 한 줄이다. 거기에 문장을 통째로 넣으면
+ * 그 칼럼만 넓어져 표가 옆으로 길어진다 — 이웃한 출처 표시가 목록용으로 짧은 말을
+ * 따로 둔 것과 **같은 판단이고 같은 까닭**이다
+ * (requested-due-date-link.ts 의 DUE_DATE_FROM_REPAIR_CASE_LABEL ·
+ * DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL).
+ *
+ * 🔴 **그래도 한 파일에 둔다.** 긴 것과 짧은 것이 서로 다른 파일에 흩어지면 언젠가
+ * 한쪽만 고쳐져, 같은 사실이 화면마다 다른 말로 설명된다. 긴 문장은 사라지지 않는다 —
+ * 아래 title 이 그대로 싣는다.
+ *
+ * 🔵 **표와 카드가 이 한 말을 같이 쓴다.** 좁은 화면이라고 다른 말로 적으면 같은
+ * 자료가 화면 크기에 따라 다른 경보로 읽힌다(DomesticOrderListScreen 파일 머리말의
+ * 표/카드 원칙).
+ */
+export const DUE_DATE_INVERSION_SHORT_NOTE = "협의 필요";
+
+/**
+ * 그 짧은 말에 마우스를 올렸을 때 나오는 설명(title).
+ *
+ * 🔴 **두 문장을 글자로 베껴 적지 않고 위 상수 둘을 이어 붙인다.** 베껴 적으면
+ * 상세 화면의 메모만 고쳐진 날 목록의 설명이 옛 말로 남고, 같은 경보가 화면마다 다른
+ * 말을 하게 된다(DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_NOTE 가 쓰는 규율과 같다).
+ *
+ * 긴 쪽(무엇을 해야 하는가)이 먼저이고 까닭이 뒤다 — 짧은 말을 보고 올린 손이
+ * 먼저 알아야 하는 것은 「무엇을 해야 하는가」이기 때문이다.
+ */
+export const DUE_DATE_INVERSION_SHORT_NOTE_TITLE = `${DUE_DATE_INVERSION_NOTE} ${DUE_DATE_INVERSION_REASON_NOTE}`;
+
+/**
  * 이 두 날짜가 **역전인가** — 사내 목표 출하일이 고객 요청 납기일보다 늦으면 참.
  *
  * ⚠️ **행 전체가 아니라 보는 두 칸만 받는다.** 수리 건 행도 내자 행도 아닌 날짜
@@ -132,9 +169,16 @@ export const DUE_DATE_INVERSION_NOTE_CLASS =
  *
  * 🔴 **이것만 보고 화면을 칠하지 마라.** 이 함수가 답하는 것은 「두 날짜가 어긋나
  * 있는가」뿐이고, **이미 나간 건을 빼는 일은 여기서 하지 않는다**(2026-10-30 결정 —
- * 파일 머리말). 수리 건을 쥐고 있다면 아래 isRepairCaseDueDateInverted 를 불러라.
- * 날짜 둘만 들고 오는 자리(내자 정리처럼)는 **출하 여부를 함께 구해 와야 한다** —
- * 그러지 않으면 그 화면에서만 끝난 건에도 붉은 글이 뜬다.
+ * 파일 머리말). 쥐고 있는 것에 맞는 껍데기를 불러라 — 수리 건이면 아래
+ * isRepairCaseDueDateInverted, 내자 정리의 한 줄이면 그 아래
+ * isDomesticOrderDueDateInverted 다. **둘 다 출하 완료를 제 안에서 거른다.**
+ *
+ * 🔵 2026-10-30 까지 여기에 「내자 정리는 날짜 둘만 들고 오므로 출하 여부를 함께
+ * 구해 와야 한다」고 적혀 있었다. 그날 내자 정리 쪽 껍데기가 생기면서 사실이
+ * 달라졌다 — 그 화면의 조회가 수리 건의 사내 목표 출하일·상태·실제 출하일을 함께
+ * 싣고 오고(db/queries/domestic-orders.ts), 거르는 일은 껍데기가 한다. 날짜 둘만
+ * 들고 오는 **새로운** 자리가 생긴다면 그때는 여전히 출하 여부를 함께 구해 와야
+ * 한다 — 그러지 않으면 그 화면에서만 끝난 건에도 붉은 글이 뜬다.
  */
 export function isDueDateInverted(dates: {
   internalTargetShipmentDate: string | null;
@@ -172,10 +216,10 @@ export function isDueDateInverted(dates: {
  * 자리에서 같은 방법을 쓴다(notifications.ts 의 isRepairCaseDueDateNear) — 묶는
  * 모양이 둘일 뿐 날짜를 고르는 함수는 하나도 다르지 않다.
  *
- * 🔵 날짜 둘을 이미 손에 쥔 쪽(내자 정리처럼 빌릴 것이 없는 화면)은 위
- * isDueDateInverted 를 바로 부를 수 있지만, 그때는 **출하 여부를 그 화면이 함께
- * 구해 와야 한다** — 이 함수는 빌려 오기와 출하 거르기 **두 겹**을 얹은 것이고,
- * 날짜 비교 자체는 전부 저 아래 한 줄에서 난다.
+ * 🔵 내자 정리의 한 줄에는 **짝이 되는 껍데기가 따로 있다**(아래
+ * isDomesticOrderDueDateInverted). 빌려 오는 방향이 반대라서다 — 이쪽은 자기 칸이
+ * 비면 내자에서 빌리고, 저쪽은 그 줄에 날짜가 없으면 수리 건에서 빌린다. 얹는
+ * 두 겹(빌려 오기 · 출하 거르기)과 맨 아래 한 줄은 똑같다.
  */
 export function isRepairCaseDueDateInverted(row: {
   internalTargetShipmentDate: string | null;
@@ -193,5 +237,63 @@ export function isRepairCaseDueDateInverted(row: {
   return isDueDateInverted({
     internalTargetShipmentDate: row.internalTargetShipmentDate,
     customerRequestedDueDate: dueDate,
+  });
+}
+
+/**
+ * 내자 정리의 **한 줄**에 역전 경보를 띄우는가 — 그 줄의 `납기요청일` 칸에 **보이는
+ * 그 날짜**로 재고, 이미 나간 건은 뺀다(2026-10-30).
+ *
+ * ── 🔴 무엇과 무엇을 견주는가 ──────────────────────────────────────────────
+ * 연결된 수리 건의 **사내 목표 출하일** 대 **그 칸에 보이는 납기요청일**이다. 두
+ * 번째가 위 함수와 다르다 — 수리 건 상세는 그 건의 고객 요청 납기일을 보지만, 이
+ * 화면의 그 칸에는 **발주서에 적힌 날짜**가 그려지고 그것이 비었을 때만 수리 건의
+ * 값을 빌린다. 뜻이 다른 두 날짜라 「같아야 할 이유가 없다」고 이 저장소가 못 박아
+ * 둔 짝이고(requested-due-date-link.ts 파일 머리말), 그래서 한 건을 두고 두 화면의
+ * 경보가 갈릴 수 있다. 그래도 **각 화면은 제가 그린 날짜로 재는 것**이 맞다 —
+ * 보이는 날짜 말고 다른 날짜로 재면 빨간 글을 보고도 까닭을 찾을 수 없다.
+ *
+ * 🔴 날짜가 여럿인 줄(분할 납품)은 **가장 이른 하루**로 잰다. 고르는 일도 빌려 오는
+ * 갈림도 여기서 적지 않고 그 화면이 쓰는 규칙 하나를 그대로 부른다
+ * (resolveDomesticOrderDueDateForComparison — 그 함수 주석에 까닭이 있다).
+ *
+ * 🔴 **맨 먼저 출하 완료를 거른다.** 위 함수와 **같은 함수**로 가른다
+ * (isRepairCaseShipmentFinished) — 경보마다 「끝난 건」을 다르게 가르면 같은 건이
+ * 화면마다 다른 말을 하게 되고, 언젠가 한쪽만 고쳐진다. 그래서 이 함수는 날짜만이
+ * 아니라 **상태와 실제 출하일까지** 받는다: 받는 칸을 줄이면 부르는 쪽이 재료를
+ * 빠뜨려도 아무 오류 없이 지난 건에까지 붉은 글이 뜬다.
+ *
+ * 🔴 **수리 건이 없는 줄(별도 건)은 언제나 거짓이다.** 사내 목표 출하일은 수리 건에만
+ * 있는 칸이라 연결이 없으면 null 로 오고, 「한쪽이라도 비면 거짓」이 그것을 받는다
+ * (isDueDateInverted) — 잴 재료가 없는 줄에 경보를 세우지 않는다. 납기일을 여럿
+ * 받는 줄의 대부분이 바로 그 줄이다(분할 납품하는 별도 건).
+ *
+ * 🔵 칸 이름이 전부 `repairCase…` 인 것은 **조회가 내려보내는 그 이름 그대로**이기
+ * 때문이다(db/queries/domestic-orders.ts 의 DomesticOrderListItem). 화면이 줄을
+ * 통째로 넘겨도 이 함수가 읽는 칸은 여기 적힌 다섯뿐이다.
+ */
+export function isDomesticOrderDueDateInverted(row: {
+  /** 이 줄에 적힌 납기요청일 전부. 비어 있으면 아래 빌려 온 날짜를 본다. */
+  dueDates: readonly { dueDate: string }[];
+  /** 연결된 수리 건의 사내 목표 출하일. 연결이 없으면 `null` 이고, 그러면 언제나 거짓이다. */
+  repairCaseInternalTargetShipmentDate: string | null;
+  /** 연결된 수리 건의 고객 요청 납기일 — 이 줄에 날짜가 하나도 없을 때만 쓰인다. */
+  repairCaseCustomerRequestedDueDate: string | null;
+  /** 그 건의 평탄화된 지금 상태(workflow_steps.repair_status). 모르면 `null` — 안 나간 것으로 본다. */
+  repairCaseStatus: RepairStatus | null;
+  /** 그 건의 실제 출하일. 찍혀 있으면 단계가 안 따라왔어도 나간 것으로 본다. */
+  repairCaseActualShipmentDate: string | null;
+}): boolean {
+  if (
+    isRepairCaseShipmentFinished({
+      status: row.repairCaseStatus,
+      actualShipmentDate: row.repairCaseActualShipmentDate,
+    })
+  ) {
+    return false;
+  }
+  return isDueDateInverted({
+    internalTargetShipmentDate: row.repairCaseInternalTargetShipmentDate,
+    customerRequestedDueDate: resolveDomesticOrderDueDateForComparison(row),
   });
 }
