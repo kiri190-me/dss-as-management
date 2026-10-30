@@ -67,8 +67,15 @@ import { pickEarliestDueDate } from "./weekly-report-delivery";
  */
 export const DUE_DATE_FROM_REPAIR_CASE_LABEL = "수리 건 요청일";
 
-/** 수리 건 상세정보의 `고객 요청 납기일` 아래에 붙는 표시. 위와 짝이다. */
-export const DUE_DATE_FROM_DOMESTIC_ORDER_LABEL = "내자 납기요청일";
+/**
+ * 수리 건 상세정보의 `고객 요청 납기일` 아래에 붙는 표시. 위와 짝이다.
+ *
+ * 🔵 **「어디서 왔는가」를 적는다**(2026-10-30 사용자 요청으로 「내자 납기요청일」에서
+ * 바꿨다). 칸 이름을 그대로 적으면 그 자체가 **또 하나의 값**처럼 읽힌다 — 바로 위에
+ * 날짜가 있어서 더 그렇다. 위 짝(`…FROM_REPAIR_CASE_LABEL`)은 표 안이라 짧아야 해서
+ * 칸 이름 그대로지만, 이쪽은 상세 화면이라 한 마디 더 들어갈 자리가 있다.
+ */
+export const DUE_DATE_FROM_DOMESTIC_ORDER_LABEL = "내자 정리에서 작성됨";
 
 /**
  * 내자 정리 쪽 설명. 표 머리말과 카드 이름표가 **같은 글자**를 title 로 나눠

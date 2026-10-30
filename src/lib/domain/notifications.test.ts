@@ -575,7 +575,9 @@ test("🔴 빌려 온 날짜에는 표시가 붙는다 — 상세정보 화면�
   });
   assert.equal(borrowed.detail, `2026-10-22 · ${DUE_DATE_FROM_DOMESTIC_ORDER_LABEL}`);
   // 글자를 새로 쓰면 같은 것을 두 말로 부르게 된다. 한쪽만 고쳐지면 여기서 깨져야 한다.
-  assert.ok(borrowed.detail.includes("내자 납기요청일"), borrowed.detail);
+  // 🔵 2026-10-30 에 「내자 납기요청일」에서 바꿨다 — 상수 한 곳을 고쳤고 이 줄이
+  //    그것을 따라왔다(그래서 이 장치가 제 일을 한 것이다. 깨지는 것이 맞았다).
+  assert.ok(borrowed.detail.includes("내자 정리에서 작성됨"), borrowed.detail);
 });
 
 test("납기 임박은 접수 건 단위로 센다 — 결재 배지를 건드리지 않는다", () => {

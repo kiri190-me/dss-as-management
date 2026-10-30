@@ -69,6 +69,7 @@ export default function RepairCaseDetailView({
   derivedServiceSummary,
   domesticOrderDueDates,
   isDueDateNear,
+  isDueDateInverted,
   domesticOrderIssueDates,
   canWriteDomesticOrderIssueDates,
   usedParts,
@@ -136,6 +137,20 @@ export default function RepairCaseDetailView({
    * prop 을 볼 수 없다 — 레이아웃과 탭은 서로 props 를 주고받지 않는다).
    */
   isDueDateNear: boolean;
+  /**
+   * 이 건이 「납기 역전」인가 — **사내 목표 출하일이 고객 요청 납기일보다 늦다**
+   * (2026-10-29). 같은 「인수 정보」의 고객 요청 납기일을 굵은 붉은색으로 만들고,
+   * 그 아래에 「납기 요청일 협의가 필요합니다.」를 한 줄 붙인다. 🔴 **이미 나간
+   * 건에는 뜨지 않는다**(2026-10-30 사용자 결정 — 할 일이 없는 말이고, 지난 건마다
+   * 붉은 글이 뜨면 살아 있는 경고가 묻힌다). 「납기 임박」이 빠지는 자리와 같다.
+   *
+   * 🔴 위 isDueDateNear 와 **다른 사실**이고 둘이 함께 참일 수 있다 — 겹치면 둘 다
+   * 보인다(사용자 결정). 🔴 **서버가 재 온다**([id]/page.tsx): 판정이 빌려 온 날짜까지
+   * 보므로(고객 요청 납기일이 비면 연결된 내자의 가장 이른 하루) 화면마다 다시
+   * 엮으면 같은 건이 화면마다 다른 날짜로 재진다. 머리 카드는 이 사실을 그리지
+   * 않는다 — 이번 요구는 날짜 칸에 대한 것이고, 배지는 더하지 않았다.
+   */
+  isDueDateInverted: boolean;
   /**
    * 「내자 정리 발행일」 구역의 재료 — 이 건에 연결된 내자 줄들의 **견적발행일 ·
    * 발주발행일**(지워지지 않은 줄만).
@@ -231,6 +246,7 @@ export default function RepairCaseDetailView({
           referenceData={referenceData}
           domesticOrderDueDates={domesticOrderDueDates}
           isDueDateNear={isDueDateNear}
+          isDueDateInverted={isDueDateInverted}
           onStartEdit={() => setEditingSection("INTAKE")}
           onDone={handleDone}
         />

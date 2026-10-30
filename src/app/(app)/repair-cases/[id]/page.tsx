@@ -34,6 +34,7 @@ import {
 } from "@/lib/db/queries/domestic-orders";
 import { getRepairCaseUsedPartsView } from "@/lib/db/queries/repair-case-used-parts";
 import { isRepairCaseDueDateNear } from "@/lib/domain/notifications";
+import { isRepairCaseDueDateInverted } from "@/lib/domain/due-date-inversion";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import RepairCaseDetailView from "@/components/repair-cases/detail/RepairCaseDetailView";
 
@@ -346,6 +347,35 @@ export default async function RepairCaseDetailPage({
     new Date()
   );
 
+  /**
+   * 「인수 정보」의 고객 요청 납기일이 **납기 역전**인가 — 사내 목표 출하일이 그
+   * 날짜보다 늦다(2026-10-29 사용자 요구). 위 「납기 임박」과 **다른 사실**이고 둘이
+   * 함께 참일 수 있다. 겹치면 둘 다 보인다(사용자 결정) — 화면이 색 하나를 나눠
+   * 쓰고, 메모와 배지가 갈라 말한다.
+   *
+   * 🔴 판정을 여기 적지 않는다 — 네 자리(이 화면 · A/S 내자 정리 · PO 내자 정리 ·
+   * 알림)가 같은 말을 해야 해서 domain/due-date-inversion.ts 하나로 둔다.
+   * 🔴 **빌려 온 날짜까지 보고 잰다**: 고객 요청 납기일이 비어 있으면 연결된 내자의
+   * 납기요청일 중 가장 이른 하루가 화면에 보이고, 사용자가 그 값도 비교 대상이라고
+   * 정했다. 빌려 오는 일은 그 함수 안에서 일어나므로 여기서는 재료만 넘긴다 —
+   * 화면에 그려지는 날짜와 판정이 본 날짜가 언제나 같은 하나다.
+   *
+   * 🔴 **이미 나간 건에는 안 뜬다**(2026-10-30 사용자 결정). 그래서 위 임박 판정과
+   * **같은 두 칸**(평탄화 상태 · 실제 출하일)을 함께 넘긴다 — 거르는 일은 세 경보가
+   * 같은 함수로 한다(isRepairCaseShipmentFinished). 여기서 빼먹으면 지난 건을 열
+   * 때마다 붉은 글이 떠서 정작 살아 있는 경고가 묻힌다.
+   *
+   * 🔵 「오늘」을 넘기지 않는 것은 isDueDateNear 와 다른 점이다. 역전은 두 날짜만
+   * 보면 되고, 내일이 된다고 답이 달라지지 않는다(그 파일 머리말).
+   */
+  const isDueDateInverted = isRepairCaseDueDateInverted({
+    internalTargetShipmentDate: resolved.internalTargetShipmentDate,
+    customerRequestedDueDate: resolved.customerRequestedDueDate,
+    domesticOrderDueDates,
+    status: resolved.status,
+    actualShipmentDate: resolved.actualShipmentDate,
+  });
+
   return (
     <RepairCaseDetailView
       resolved={resolved}
@@ -358,6 +388,7 @@ export default async function RepairCaseDetailPage({
       derivedServiceSummary={derivedServiceSummary}
       domesticOrderDueDates={domesticOrderDueDates}
       isDueDateNear={isDueDateNear}
+      isDueDateInverted={isDueDateInverted}
       domesticOrderIssueDates={domesticOrderIssueDates}
       canWriteDomesticOrderIssueDates={canWriteDomesticOrders}
       usedParts={usedParts}

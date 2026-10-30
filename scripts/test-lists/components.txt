@@ -701,3 +701,20 @@ src/components/users/approval-route-delegation-section.test.ts
 # 🔵 「실제로 열리는가」는 실제 DB 로 돈다(db 목록의
 # shipment-approval-routes.integration.test.ts).
 src/components/users/users-area-gate.test.ts
+
+# 「납기 역전」이 수리 건 상세 화면까지 닿는 사슬(2026-10-29 사용자 요구 — 사내 목표
+# 출하일이 고객 요청 납기일보다 늦으면 그 날짜를 빨간 볼드로, 옆에 「납기 요청일
+# 협의가 필요합니다.」). 판정 자체는 값으로 재는 unit 목록의 due-date-inversion.test.ts
+# 가 본다.
+# 🔴 렌더하지 않고 **주석을 걷어 낸 원본을 글자로** 읽는다 — IntakeInfoSection 이 편집
+# 폼 → 서버 액션 → `server-only` 를 물고 있어 이 목록의 플래그로는 import 자체가 던진다
+# (이웃 domestic-order-dates-section.test.ts 와 같은 방법·같은 까닭).
+# 🔴 못 박는 것: 메모 글자를 화면이 새로 짓지 않는가 · **겹침**(강조가
+# `isDueDateNear || isDueDateInverted` 라 역전이 임박을 덮지 않는가 — 겹치면 둘 다
+# 보인다는 사용자 결정) · 메모가 역전일 때만·「고객 요청 납기일」 칸에만 붙는가 ·
+# 읽는 차례(날짜 → 출처 표시 → 경보) · 🔴 서버가 **빌려 오기 재료까지** 넘기는가
+# (빠뜨리면 자기 칸이 빈 건에서 경보가 조용히 꺼진다) · 역전에 「오늘」을 안 넘기는가 ·
+# 🔴 **출하 두 칸을 임박과 같은 것으로** 넘기는가(2026-10-30 결정으로 이미 나간 건에는
+# 안 뜬다 — 두 경보가 다른 칸을 보면 같은 건에서 한쪽만 꺼지고, 그 어긋남은 화면에
+# 오류로 드러나지 않는다).
+src/components/repair-cases/detail/due-date-inversion-note.test.ts
