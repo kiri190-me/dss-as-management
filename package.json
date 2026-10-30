@@ -34,6 +34,7 @@
     "check:inventory-contract": "node --conditions=react-server --import tsx scripts/check-inventory-contract.ts",
     "check:part-name-overlap": "node --conditions=react-server --import tsx scripts/check-part-name-overlap.ts",
     "check:target-shipment-missing": "node --conditions=react-server --import tsx scripts/check-target-shipment-missing.ts",
+    "check:requested-due-date-sync": "node --conditions=react-server --import tsx scripts/check-requested-due-date-sync.ts",
     "sso:link": "tsx scripts/link-sso-subject.ts",
     "seed:customer-status": "tsx scripts/seed-customer-status-options.ts"
   },
