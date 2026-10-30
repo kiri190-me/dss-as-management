@@ -3,11 +3,9 @@ import "server-only";
 import { asc, eq } from "drizzle-orm";
 import { db } from "../client";
 import { repairCases, workflowSteps } from "../schema";
-import {
-  isRepairCaseDueDateWithinNotificationWindow,
-  isRepairCaseShipmentFinished,
-} from "@/lib/domain/notifications";
+import { isRepairCaseDueDateWithinNotificationWindow } from "@/lib/domain/notifications";
 import { resolveRepairCaseRequestedDueDate } from "@/lib/domain/requested-due-date-link";
+import { isRepairCaseShipmentFinished } from "@/lib/domain/shipment-finished";
 import {
   dueDateBorrowerIds,
   loadDomesticOrderDueDatesByCaseId,

@@ -7,9 +7,9 @@ import {
   earliestDomesticOrderIssuedDate,
   hasDomesticOrderIssued,
   isInternalTargetShipmentDateMissing,
-  isRepairCaseShipmentFinished,
   needsInternalTargetShipmentDate,
 } from "@/lib/domain/notifications";
+import { isRepairCaseShipmentFinished } from "@/lib/domain/shipment-finished";
 import type { RepairStatus } from "@/lib/domain/types";
 
 /**

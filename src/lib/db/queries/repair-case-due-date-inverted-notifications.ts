@@ -5,8 +5,8 @@ import { db } from "../client";
 import { repairCases, workflowSteps } from "../schema";
 import { foldBlankToNull } from "@/lib/domain/domestic-order-list";
 import { isDueDateInverted, isRepairCaseDueDateInverted } from "@/lib/domain/due-date-inversion";
-import { isRepairCaseShipmentFinished } from "@/lib/domain/notifications";
 import { resolveRepairCaseRequestedDueDate } from "@/lib/domain/requested-due-date-link";
+import { isRepairCaseShipmentFinished } from "@/lib/domain/shipment-finished";
 import type { RepairStatus } from "@/lib/domain/types";
 import {
   dueDateBorrowerIds,

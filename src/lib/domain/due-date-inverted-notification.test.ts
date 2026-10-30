@@ -2,11 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-// 🔴 **이 import 가 맨 앞에 있는 것은 일부러다.** due-date-inversion.ts 와
-//    notifications.ts 는 서로를 부르는 고리(circular import)이고, 어느 쪽이 먼저
-//    실행되느냐에 따라 깨질 수 있다. 저쪽을 먼저 들여와 **위험한 차례**로 돌린다 —
+// 🔵 **이 import 가 맨 앞에 있던 까닭은 2026-10-30 에 없어졌다.** 그날까지
+//    due-date-inversion.ts 와 notifications.ts 는 서로를 부르는 고리(circular
+//    import)였고, 저쪽을 먼저 들여와 **위험한 차례**로 돌리는 것이 이 줄의 일이었다 —
 //    notifications.ts 가 저 상수를 모듈 최상위에서 읽는 날 여기서 ReferenceError 로
-//    죽는다(그 import 에 적어 둔 그 함정이다).
+//    죽게 해서 함정을 드러내려던 것이다. 출하 판정이 domain/shipment-finished.ts 로
+//    나가면서 사슬이 한 방향이 됐고, 이제 어느 차례로 들여와도 깨지지 않는다.
+// 🔴 **그래도 차례를 바꾸지 않는다.** 고리가 돌아오면 이 차례가 다시 그것을 드러내는
+//    자리가 되기 때문이다. 고리 자체를 글자로 막는 일은 domain/shipment-finished.test.ts
+//    가 한다 — 이 줄은 그 시험이 놓칠 때를 위한 둘째 그물이다.
 import {
   DUE_DATE_INVERSION_NOTE,
   DUE_DATE_INVERSION_REASON_NOTE,

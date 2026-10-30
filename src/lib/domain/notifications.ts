@@ -28,15 +28,28 @@
 import { addCalendarDays, toKstDateOnly } from "./date-only";
 import { foldBlankToNull } from "./domestic-order-list";
 /**
- * 🔴 **이 import 는 고리(circular import)다** — due-date-inversion.ts 가 아래
- * isRepairCaseShipmentFinished 를 가져다 쓰고, 이쪽이 그 파일의 글자 상수를 가져다
- * 쓴다. 고리를 받아들인 까닭은 「같은 사실은 한 말로」가 더 중요해서다: 화면에 뜨는
- * 메모와 종에 뜨는 줄이 다른 글자면 사람이 둘을 다른 경보로 읽는다.
+ * 🔵 **이 import 는 한때 고리(circular import)였다 — 2026-10-30 에 풀렸다.**
+ * due-date-inversion.ts 가 이 파일의 isRepairCaseShipmentFinished 를 가져다 쓰고,
+ * 이쪽이 그 파일의 글자 상수를 가져다 써서 **서로를 보고 있었다.** 고리를 받아들인
+ * 까닭은 「같은 사실은 한 말로」가 더 중요해서였다: 화면에 뜨는 메모와 종에 뜨는 줄이
+ * 다른 글자면 사람이 둘을 다른 경보로 읽는다.
  *
- * 🔴 **그래서 이 상수를 모듈 최상위에서 읽지 마라.** 고리 때문에 저쪽이 먼저 실행되는
- * 길이 있고(due-date-inversion.test.ts 가 바로 그 길이다), 그때 이 파일이 최상위에서
- * 값을 읽으면 아직 초기화되지 않은 바인딩이라 ReferenceError 로 죽는다 — 앱이 통째로
- * 안 선다. **함수 안에서만** 읽으면 부를 때는 이미 초기화가 끝나 있어 안전하다.
+ * 🔴 **그 고리는 규율 하나로만 버티고 있었다** — 「이 상수를 모듈 최상위에서 읽지
+ * 마라」. 저쪽이 먼저 실행되는 길이 있어(due-date-inversion.test.ts 가 바로 그
+ * 길이다) 최상위에서 값을 읽으면 아직 초기화되지 않은 바인딩이라 ReferenceError 로
+ * 죽었다 — 앱이 통째로 안 섰다. 글자 한 줄을 함수 밖으로 올리기만 해도 깨지는데
+ * 그것을 막는 것이 사람의 기억뿐이라, 「상수 하나만 최상위로」로 언제든 되살아날 수
+ * 있는 함정이었다.
+ *
+ * 🔵 **푼 방법은 제3의 파일이다.** 저쪽이 쓰던 isRepairCaseShipmentFinished 를
+ * domain/shipment-finished.ts 로 옮겼다 — 「이 건이 나갔는가」는 애초에 알림의
+ * 개념이 아니고, 부르는 자리도 알림 밖이 더 많았다(화면 · 조회 · PO 사본). 그래서
+ * 사슬이 한 방향이 됐다: notifications → due-date-inversion → shipment-finished.
+ *
+ * 🔴 **고리를 되살리지 마라 — 이 파일에서 저 파일로 가는 화살표는 한 방향뿐이다.**
+ * due-date-inversion.ts 가 이 파일에서 무엇이든(상수 하나라도) 가져오는 순간 고리가
+ * 돌아오고, 그날부터 다시 「최상위에서 읽지 마라」라는 기억으로 버텨야 한다. 끊어져
+ * 있다는 사실은 이제 domain/shipment-finished.test.ts 가 **글자로** 지킨다.
  */
 import { DUE_DATE_INVERSION_NOTE } from "./due-date-inversion";
 import { LABELS as APPROVAL_TYPE_LABELS, type ShipmentApprovalType } from "./local/workflow/shipment-approval-checklist";
@@ -47,6 +60,7 @@ import {
   resolveRepairCaseRequestedDueDate,
 } from "./requested-due-date-link";
 import { SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS } from "./shipment-approval-route";
+import { isRepairCaseShipmentFinished } from "./shipment-finished";
 import type { RepairStatus } from "./types";
 
 /**
@@ -276,24 +290,12 @@ export function isRepairCaseDueDateWithinNotificationWindow(dueDate: string | nu
 }
 
 /**
- * 이 건은 이미 나갔는가 — **출하 완료된 건에는 「납기 임박」이 뜨지 않는다.**
- *
- * 보는 사실이 둘인 것은 isRepairCaseOverdue(types.ts)가 「납기 지연」을 가릴 때
- * 보는 바로 그 둘이기 때문이다. 상태 하나에만 기대면, 출하일은 찍혀 있는데
- * 워크플로 단계가 따라가지 못한 건에 「납기 임박」이 붙는 모순된 종이 된다. 두
- * 판정 다 역사적 기록이 아니라 **살아 있는 경보**라 같은 곳에서 빠져야 한다.
- *
- * `status` 가 `null` 일 수 있는 것은 workflow_steps.repair_status 가 아직
- * nullable 이기 때문이다(그 스키마 주석). 그런 건은 상태를 지어내지 않고 「아직
- * 안 나갔다」로 둔다 — 날짜가 임박했는데 조용히 빠지는 쪽보다 낫다.
+ * 🔵 **「이 건은 이미 나갔는가」(isRepairCaseShipmentFinished)는 여기 있었다.**
+ * 2026-10-30 에 domain/shipment-finished.ts 로 옮겼다 — 묻는 것이 출하 사실 하나라
+ * 알림의 개념이 아니고, 그 함수가 여기 있던 탓에 due-date-inversion.ts 와 고리가
+ * 져 있었다(파일 맨 위 import 주석). 부르는 쪽은 바뀐 것이 없다: 아래 두 판정도
+ * 조회 셋도 **같은 함수 하나**를 그대로 부른다.
  */
-export function isRepairCaseShipmentFinished(row: {
-  status: RepairStatus | null;
-  actualShipmentDate: string | null;
-}): boolean {
-  if (row.status === "SHIPMENT_COMPLETED") return true;
-  return row.actualShipmentDate !== null && row.actualShipmentDate.trim() !== "";
-}
 
 /**
  * 이 수리 건에 **「납기 임박」 표시를 붙이는가** — 종 알림이 뜨는 조건과 같다.
@@ -309,7 +311,8 @@ export function isRepairCaseShipmentFinished(row: {
  *      (자기 칸이 먼저, 비면 연결된 내자 정리에서 가장 이른 하루를 빌린다).
  *   2. 창을 잰다 — isRepairCaseDueDateWithinNotificationWindow
  *      (오늘 ≤ 날짜 ≤ 오늘 + 7일. 미기재도 지난 납기도 거짓이다).
- *   3. 🔴 이미 나간 건을 뺀다 — isRepairCaseShipmentFinished. 알림 조회가 빼고
+ *   3. 🔴 이미 나간 건을 뺀다 — isRepairCaseShipmentFinished
+ *      (domain/shipment-finished.ts — 경보 넷이 함께 쓰는 잣대다). 알림 조회가 빼고
  *      있으므로 배지도 빼야 한다. 안 그러면 출하가 끝난 건에 「납기 임박」이
  *      붙어 종에는 없는 경보가 표에만 선다.
  *
@@ -408,6 +411,7 @@ export function buildRepairCaseDueDateNearNotification(input: {
  *   ① PO발행일이 있다            — domestic_orders.order_issued_date
  *   ② 사내 목표 출하일이 없다     — repair_cases.internal_target_shipment_date
  *   ③ 출하가 끝나지 않았다        — isRepairCaseShipmentFinished 가 거짓
+ *                                   (domain/shipment-finished.ts)
  * 셋 다 **지금 자료에서 매번 다시 계산**하므로 「지난 건도 함께 뜬다」가 공짜로 따라
  * 온다 — PO발행일을 적는 자리가 셋(수리 건 상세 · A/S 내자 정리 · PO 쪽 내자 정리)인데
  * 전부 같은 칸이라, 어느 자리에서 적었든 다음 조회에서 똑같이 걸린다. 적는 자리마다

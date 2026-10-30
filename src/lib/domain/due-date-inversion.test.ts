@@ -10,7 +10,7 @@ import {
   isDueDateInverted,
   isRepairCaseDueDateInverted,
 } from "./due-date-inversion";
-import { isRepairCaseShipmentFinished } from "./notifications";
+import { isRepairCaseShipmentFinished } from "./shipment-finished";
 import {
   resolveDomesticOrderDueDateDisplay,
   resolveDomesticOrderDueDateForComparison,

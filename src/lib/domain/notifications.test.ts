@@ -17,12 +17,15 @@ import {
   countNotificationTargetsByKind,
   isRepairCaseDueDateNear,
   isRepairCaseDueDateWithinNotificationWindow,
-  isRepairCaseShipmentFinished,
   previewApprovalRejectionReason,
   repairCaseDueDateNotificationWindowEnd,
   type ApprovalOutcomeTarget,
   type NotificationItem,
 } from "./notifications";
+// 🔵 「이 건은 이미 나갔는가」는 2026-10-30 에 domain/shipment-finished.ts 로 나갔다
+//    (고리를 끊은 조각). 시험은 여기 그대로 둔다 — 아래 「납기 임박」 시험들이 바로 그
+//    판정으로 걸러지는지를 **같은 자리에서** 맞대어 보기 때문이다.
+import { isRepairCaseShipmentFinished } from "./shipment-finished";
 import { addCalendarDays, toKstDateOnly } from "./date-only";
 import {
   DUE_DATE_FROM_DOMESTIC_ORDER_LABEL,

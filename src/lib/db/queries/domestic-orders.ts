@@ -100,7 +100,7 @@ import type { RepairStatus } from "@/lib/domain/types";
  * 사내 목표 출하일이 그 칸에 보이는 날짜보다 늦으면 굵은 붉은색 + 「협의 필요」).
  *
  * 🔴 **셋을 한 묶음으로 본다.** 역전 경보는 이미 나간 건에 뜨지 않고, 「나갔는가」는
- * 상태와 실제 출하일 둘을 함께 봐야 안다(domain/notifications.ts 의
+ * 상태와 실제 출하일 둘을 함께 봐야 안다(domain/shipment-finished.ts 의
  * isRepairCaseShipmentFinished). 하나라도 빠지면 오류 없이 **지난 건에 붉은 글이
  * 남거나** 살아 있는 건의 경보가 조용히 꺼진다 — 판정 자체는
  * domain/due-date-inversion.ts 하나가 쥐고, 여기는 재료만 싣는다.
@@ -242,7 +242,7 @@ export type DomesticOrderJoinRow = {
    *
    * 바로 위 두 칸과 **한 묶음**이다 — 역전 경보는 이미 나간 건에는 뜨지 않고
    * (2026-10-30 사용자 결정), 「나갔는가」는 상태와 실제 출하일 **둘**을 함께 봐야
-   * 안다(domain/notifications.ts 의 isRepairCaseShipmentFinished). 상태 하나만 보면
+   * 안다(domain/shipment-finished.ts 의 isRepairCaseShipmentFinished). 상태 하나만 보면
    * 출하일은 찍혔는데 단계가 못 따라간 건에 경보가 남고, 날짜 하나만 보면 그 반대가
    * 샌다.
    *
