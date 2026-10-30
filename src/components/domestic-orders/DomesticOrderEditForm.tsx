@@ -221,6 +221,7 @@ export default function DomesticOrderEditForm({
   customerOptions,
   quoteOptions,
   onDone,
+  onRequestedDueDateNotLinked,
   onRequestDelete,
 }: {
   /** 고칠 줄. null 이면 새 줄을 추가하는 중이다. */
@@ -229,6 +230,12 @@ export default function DomesticOrderEditForm({
   customerOptions: CustomerOption[];
   quoteOptions: QuoteOption[];
   onDone: () => void;
+  /**
+   * 🔴 이 줄은 저장됐는데 **수리 건의 고객 요청 납기일이 못 따라갔을 때**(2026-10-30).
+   * 폼은 저장에 성공하면 닫히므로(onDone), 읽고 닫아야 하는 알림은 그보다 오래 사는
+   * 목록 화면이 띄운다 — 납기요청일 칸 편집과 같은 길이다(DomesticOrderDueDatesCell).
+   */
+  onRequestedDueDateNotLinked: (message: string) => void;
   /**
    * 이 줄을 휴지통으로 보내는 확인 창을 연다(2026-09-11). **지울 수 있는
    * 세션에서만** 부르는 쪽이 넘긴다 — 넘기지 않으면 버튼이 없고, 폼은 이 변경
@@ -693,6 +700,14 @@ export default function DomesticOrderEditForm({
 
       router.refresh();
       onDone();
+      // 🔴 「이 줄은 저장됐는데 수리 건이 못 따라갔다」는 **읽어야 하는 글**이다 —
+      // 0.5초 저장 팝업으로는 전할 수 없다(common/NoticePopup.tsx 머리말). 그 글
+      // 첫머리가 "저장했습니다"로 시작하므로 성공 알림까지 함께 전한다.
+      const link = result.requestedDueDateLink;
+      if (link && !link.linked) {
+        onRequestedDueDateNotLinked(link.message);
+        return;
+      }
       // 내자 목록 위의 폼이라 그 자리가 곧 목록이다 — 팝업만 띄운다(common/SavePopup.tsx).
       showSavePopup({ message: row ? "내자 줄을 저장했습니다." : "내자 줄을 등록했습니다.", redirectTo: null });
     } finally {

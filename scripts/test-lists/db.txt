@@ -171,6 +171,17 @@ src/lib/server/services/kyosan-used-parts-backfill.integration.test.ts
 # "DO-ISSUE-DATE-TEST-" · 계정 이메일 "doissuedate-test-" (다른 스위트와 겹치지 않는다).
 src/lib/db/mutations/domestic-order-issue-dates.integration.test.ts
 
+# ── 🔴 납기요청일 ↔ 고객 요청 납기일 — 어느 쪽에서 고쳐도 같은 날짜인가 (2026-10-30)
+# 사용자 요구로 두 칸이 **저장할 때 서로 따라간다.** 갈림(언제 묶고 언제 멈추는가)은
+# 순수 함수 한 벌이 가지고 unit 쪽 시험이 전부 보므로, 여기서는 **DB 에 정말 그렇게
+# 쓰이는가**만 본다: 날짜 칸이 바뀌는가 · 🔴 **반대쪽 version 까지 오르는가**(안 오르면
+# 열려 있던 상대 화면이 낡은 값으로 덮는다) · 🔴 행을 만들지도 지우지도 않고 **비고가
+# 살아남는가** · 🔴 날짜를 안 건드린 저장이 상대 칸을 덮지 않는가 · 🔴 CONFLICT 로 끝난
+# 저장이 상대 칸을 한 글자도 안 바꾸는가(한쪽만 써지는 길이 없다) · 못 묶었을 때 까닭이
+# 결과에 실려 나오는가(인수일보다 이른 날짜 · 줄이나 날짜가 여럿).
+# 🔴 격리 이름: 접수 월 "9608" · 고객사 "AS-TEST-DUE-LINK-" · 제품 모델 "DUE-LINK-TEST-".
+src/lib/db/mutations/requested-due-date-link.integration.test.ts
+
 # ── S/N 으로 등록된 장비 찾기 (명판을 글자로 읽을 때 쓴다) ──────────────────
 # 세 칸 가운데 S/N 이 제일 잘 읽히니(5장 중 4장) 그 한 칸으로 `products` 를 찾아
 # Model·L/N 을 **보여 준다**(🔴 채우지는 않는다 — 고르는 것은 사람이다).

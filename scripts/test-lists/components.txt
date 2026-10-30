@@ -75,6 +75,15 @@ src/components/users/approval-route-section.test.ts
 src/components/quotes/quote-list-screen-source.test.ts
 src/components/domestic-orders/domestic-order-trash.test.ts
 src/components/domestic-orders/domestic-order-inline-cells.test.ts
+# 🔴 내자 정리 쪽 「수리 건이 못 따라갔다」 알림(2026-10-30). 저장할 때 두 날짜를 묶는
+# 일은 서버가 하고(db/mutations/domestic-orders.ts), 화면이 할 일은 **못 맞췄다는 답을
+# 읽고 닫아야 하는 알림으로 띄우는 것** 하나다. 재는 것 넷: 두 저장 통로(납기요청일
+# 칸 · `줄 수정` 폼)가 **둘 다** 그 답을 읽는가 · 그때 0.5초 저장 팝업을 건너뛰는가
+# (두 상자가 겹치면 읽어야 하는 글이 가린다) · 🔴 팝업을 표 칸 안에서 그리지 않는가
+# (칸의 정렬·줄바꿈을 물려받는다) · 글자 칸 열둘은 이 길을 타지 않는가(날짜를 안 바꾼다).
+# 갈림 자체는 unit 의 domain/requested-due-date-link.test.ts 가, DB 에 정말 쓰이는지는
+# db 의 mutations/requested-due-date-link.integration.test.ts 가 본다.
+src/components/domestic-orders/requested-due-date-link-notice.test.ts
 # 내자 정리 `납기요청일` 의 「납기 역전」 표시(2026-10-30 사용자 요구) — 사내 목표
 # 출하일이 그 칸에 보이는 날짜보다 늦으면 날짜가 굵은 붉은색이 되고 「협의 필요」가
 # 붙는다. 🔴 재는 것이 일곱이다: 판정을 화면이 다시 적지 않는가 · 말과 옷이 도메인
@@ -728,3 +737,9 @@ src/components/users/users-area-gate.test.ts
 # 안 뜬다 — 두 경보가 다른 칸을 보면 같은 건에서 한쪽만 꺼지고, 그 어긋남은 화면에
 # 오류로 드러나지 않는다).
 src/components/repair-cases/detail/due-date-inversion-note.test.ts
+# 🔴 수리 건 상세 쪽 「내자가 못 따라갔다」 알림(2026-10-30). 위 내자 정리 쪽과 거울이다.
+# 재는 것 셋: 묶기 결과가 **훅 → 폼 → 구역 → 상세 화면**까지 끊기지 않는가(한 칸만
+# 빠져도 알림이 영영 안 뜬다) · 알림을 **상세 화면**이 띄우는가(저장에 성공하면 폼은
+# 닫히므로 그 안에서 그리면 뜨자마자 사라진다) · 같은 훅을 쓰는 다른 넷은 이 값을
+# 받지 않는가(고객 요청 납기일을 보내는 폼은 인수정보 하나뿐이다).
+src/components/repair-cases/detail/requested-due-date-link-notice.test.ts

@@ -234,9 +234,14 @@ test("A/S 상세의 섹션·칸 저장은 팝업만 띄우고 그 상세에 머�
   // 사라지므로, **저장이 성공한 경로에서**(실패·충돌은 그 위에서 return 한다) 화면을
   // 다시 읽어야 한다 — 안 그러면 고친 값이 안 보여 저장이 안 된 것처럼 보이고,
   // 묵은 version 이 그대로라 이어지는 저장이 충돌로 막힌다.
+  // 🔴 2026-10-30 에 그 사이로 **한 가지**가 들어왔다 — 고객 요청 납기일을 고쳤는데
+  //    내자 정리의 납기요청일이 못 따라간 경우다. 그때는 0.5초 저장 팝업 대신 읽어야
+  //    닫히는 알림으로 알리고(NoticePopup), 그래서 그 분기는 **return 으로 끝나야**
+  //    한다 — 안 그러면 두 상자가 겹쳐 뜨고 읽어야 하는 글이 성공 팝업에 가린다.
+  //    저장 자체는 성공했으므로 refresh·onDone 은 그 앞에서 그대로 먼저 돈다.
   assert.match(
     hook,
-    /if \(!result\.ok\) \{[\s\S]*?\}\s*router\.refresh\(\);\s*params\.onDone\(\);\s*if \(params\.savedPopup\) showSavePopup\(params\.savedPopup\);/
+    /if \(!result\.ok\) \{[\s\S]*?\}\s*router\.refresh\(\);\s*params\.onDone\(\);\s*(?:\/\/[^\n]*\n\s*)*const link = result\.requestedDueDateLink;\s*if \(link && !link\.linked && params\.onRequestedDueDateNotLinked\) \{\s*params\.onRequestedDueDateNotLinked\(link\.message\);\s*return;\s*\}\s*if \(params\.savedPopup\) showSavePopup\(params\.savedPopup\);/
   );
   // 빠뜨리면 타입이 막도록 필수다 — 새로 부르는 곳이 정하고 가야 한다.
   assert.match(hook, /savedPopup: SavePopupRequest \| null;/);

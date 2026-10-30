@@ -64,6 +64,14 @@ import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders"
  *  ③ 줄 전체가 `줄 수정` 폼을 여는 클릭 대상이라, 여는 버튼과 편집 중의 폼
  *    전체에 stopPropagation 을 건다(DomesticOrderTextCell 헤더 ③과 같다).
  *
+ * ── 🔴 저장은 **수리 건의 고객 요청 납기일까지 바꾼다** (2026-10-30) ───────
+ * 사용자 결정이다 — 「어느 쪽에서 수정하든 같은 날짜를 보고 있을 수 있도록」. 이 칸은
+ * 그 일을 하지 않는다: 보내는 값은 지금까지와 한 글자도 다르지 않고, 묶는 일은 저장
+ * 통로가 한다(db/mutations/domestic-orders.ts). 이 칸이 새로 하는 일은 하나뿐 —
+ * **못 맞췄다는 답을 받으면 저장 팝업 대신 알림을 띄우게 올려 보낸다**
+ * (onRequestedDueDateNotLinked). ② 와 어긋나지 않는다: 올라가는 것은 사람이 이 칸에
+ * 적은 날짜뿐이고, 빌려 온 날짜는 여전히 이 목록에 들어오지 않는다.
+ *
  * ── 검증은 다시 하지 않는다 ─────────────────────────────────────────────
  * 빈 줄 빼기 · 메모만 적은 줄 거절 · 없는 날짜 거절 · 스무 개 상한은 검증 한
  * 곳이 한다(validation/domestic-order-input.ts 의 normalizeDueDates) — `줄 수정`
@@ -141,6 +149,7 @@ export default function DomesticOrderDueDatesCell({
   displayText,
   wrapping,
   numeric,
+  onRequestedDueDateNotLinked,
 }: {
   /** 고칠 줄 **통째로**. 줄 전체를 실어 보내야 하고(파일 헤더 ①) version 도 여기서 나온다. */
   row: DomesticOrderListItem;
@@ -153,6 +162,13 @@ export default function DomesticOrderDueDatesCell({
   wrapping: InlineEditCellWrapping;
   /** 표에서만 넘긴다 — 그 `<td>` 의 tabular-nums 가 버튼 안까지 안 내려온다. */
   numeric?: InlineEditCellNumeric;
+  /**
+   * 🔴 이 줄은 저장됐는데 **수리 건의 고객 요청 납기일이 못 따라갔을 때**(2026-10-30).
+   * 띄우는 일은 화면 위쪽이 한다(DomesticOrderListScreen) — 이 칸은 표의 `<td>` 안에
+   * 살아서, 팝업이 여기서 태어나면 칸의 CSS(가운데·오른쪽 정렬, 줄바꿈 금지)를 그대로
+   * 물려받아 글이 한쪽으로 쏠린다. 완료 처리가 막혔을 때의 `onBlocked` 와 같은 길이다.
+   */
+  onRequestedDueDateNotLinked: (message: string) => void;
 }) {
   const router = useRouter();
   // 입력칸 id 의 앞머리. 카드 보기에서는 재기 위한 표가 함께 그려져 같은 줄의 이
@@ -256,6 +272,15 @@ export default function DomesticOrderDueDatesCell({
 
       router.refresh();
       setIsEditing(false);
+      // 🔴 「이 줄은 저장됐는데 수리 건이 못 따라갔다」는 **읽어야 하는 글**이다 —
+      // 0.5초 저장 팝업으로 띄우면 읽기 전에 사라지고, 그러면 두 화면이 다른 날짜를
+      // 보이는 채로 남는다(common/NoticePopup.tsx 머리말). 그 글 첫머리가
+      // "저장했습니다"로 시작하므로 성공 알림까지 함께 전한다.
+      const link = result.requestedDueDateLink;
+      if (link && !link.linked) {
+        onRequestedDueDateNotLinked(link.message);
+        return;
+      }
       showSavePopup({ message: "납기요청일을 저장했습니다.", redirectTo: null });
     } finally {
       setIsSubmitting(false);

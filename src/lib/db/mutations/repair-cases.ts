@@ -1,7 +1,9 @@
 import "server-only";
-import { and, eq, isNull, like, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, like, sql } from "drizzle-orm";
 import { db } from "../client";
 import {
+  domesticOrderDueDates,
+  domesticOrders,
   endUsers,
   inventoryPartIssueRequests,
   products,
@@ -23,6 +25,11 @@ import { formatIntakeNumber, yearMonthFromDate } from "@/lib/domain/local/intake
 import { nextReportNumber, reportNumberYearDigit } from "@/lib/domain/repair-case-report-number";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 import { isNotEarlierThan } from "@/lib/domain/local/validation";
+import {
+  resolveDomesticOrderDueDateWriteThrough,
+  type RequestedDueDateLinkOutcome,
+  type RequestedDueDateLinkPlan,
+} from "@/lib/domain/requested-due-date-link";
 import { deriveWorkflowType, workflowKindLabels, type WorkflowKind } from "@/lib/domain/workflow-kind";
 import type { BillingType, WorkflowType } from "@/lib/domain/types";
 import type {
@@ -585,7 +592,22 @@ export type UpdateRepairCaseResultCode =
   | "WORKFLOW_NOT_ALLOWED";
 
 export type UpdateRepairCaseResult =
-  | { ok: true; id: string; version: number }
+  | {
+      ok: true;
+      id: string;
+      version: number;
+      /**
+       * 🔴 이번 저장이 **내자 정리의 납기요청일까지 맞췄는가**(2026-10-30).
+       * 없으면 맞출 일이 없었다는 뜻이다(고객 요청 납기일을 안 건드렸거나,
+       * 연결된 내자 줄에 고칠 날짜 행이 없다 — 그때는 내자 쪽이 이 건의 날짜를
+       * 빌려 그리므로 보이는 날짜가 이미 같다).
+       *
+       * `linked: false` 는 **저장은 됐는데 상대가 안 따라갔다**는 뜻이고, 화면은
+       * 그 까닭을 읽어야 닫히는 알림으로 띄운다 — 조용히 버리면 사람은 양쪽이
+       * 맞춰진 줄 안다(domain/requested-due-date-link.ts 머리말 ④).
+       */
+      requestedDueDateLink?: RequestedDueDateLinkOutcome;
+    }
   | {
       ok: false;
       code: UpdateRepairCaseResultCode;
@@ -666,6 +688,87 @@ async function resolveTargetWorkflowVersionAndStep(
     };
   }
   return { ok: true, workflowVersionId: targetVersion.id, workflowStepId: targetInitialStep.id };
+}
+
+/**
+ * ============================================================================
+ * 🔴 고객 요청 납기일을 고치면 **내자 정리의 납기요청일도 함께** (2026-10-30)
+ * ============================================================================
+ * 무엇을 할지 정하는 규칙은 여기 없다 — domain/requested-due-date-link.ts 의
+ * resolveDomesticOrderDueDateWriteThrough 하나가 가지고, 거울 방향(내자 →
+ * 수리 건)도 그 파일의 짝을 부른다. 이 함수가 하는 일은 **재료를 읽어 와 넘기고,
+ * 고칠 행의 id 를 들고 돌아오는 것**뿐이다.
+ *
+ * ── 🔴 왜 여기서 **잠그는가** ───────────────────────────────────────────
+ * 거울 방향(mutations/domestic-orders.ts)은 내자 줄을 먼저 `FOR UPDATE` 로 잡고
+ * 그다음에 repair_cases 를 고친다. 이쪽이 repair_cases 를 먼저 고치고 내자 줄을
+ * 나중에 잡으면 **잠그는 차례가 정반대**가 되어, 두 사람이 같은 건을 동시에 고칠 때
+ * 교착이 난다. 그래서 이 함수는 repair_cases UPDATE **전에** 불리고, 실제로 날짜를
+ * 쓰는 일만 UPDATE 가 성공한 뒤로 미룬다(아래 호출부).
+ *
+ * ── 🔴 왜 **쓰기를 여기서 하지 않는가** ──────────────────────────────────
+ * 이 트랜잭션은 version 이 어긋나면 **결과를 돌려주며 끝난다**(예외를 던지지
+ * 않는다 — 그때 드리즐은 커밋한다). 그 길에서 날짜를 이미 바꿔 놓았으면, 수리 건은
+ * 안 바뀌었는데 내자 줄만 바뀐 상태가 남는다. 그래서 쓰기는 UPDATE 가 1행을
+ * 돌려준 뒤에만 한다(유·무상 이력을 그 뒤에 넣는 것과 같은 까닭).
+ * ============================================================================
+ */
+type DomesticOrderDueDateLinkWork = {
+  plan: RequestedDueDateLinkPlan;
+  /** 고칠 **납기요청일 행**의 id. WRITE 일 때만 있다. */
+  dueDateRowId: string | null;
+  /** 그 행이 달려 있는 **내자 줄**의 id. 그 줄의 version 도 함께 올려야 한다. */
+  domesticOrderId: string | null;
+};
+
+async function planDomesticOrderDueDateLink(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  params: { repairCaseId: string; previous: string | null; next: string | null }
+): Promise<DomesticOrderDueDateLinkWork> {
+  // 지워진 줄은 세지 않는다 — 화면 어디에도 없는 줄이 「여럿이라 못 묶는다」를
+  // 만들면 안 된다(domestic-order-issue-dates.ts 의 같은 판단).
+  const lines = await tx
+    .select({ id: domesticOrders.id })
+    .from(domesticOrders)
+    .where(
+      and(eq(domesticOrders.repairCaseId, params.repairCaseId), eq(domesticOrders.isDeleted, false))
+    )
+    .for("update");
+
+  const rows =
+    lines.length === 0
+      ? []
+      : await tx
+          .select({
+            id: domesticOrderDueDates.id,
+            domesticOrderId: domesticOrderDueDates.domesticOrderId,
+          })
+          .from(domesticOrderDueDates)
+          .where(
+            inArray(
+              domesticOrderDueDates.domesticOrderId,
+              lines.map((line) => line.id)
+            )
+          );
+
+  const plan = resolveDomesticOrderDueDateWriteThrough({
+    previousCustomerRequestedDueDate: params.previous,
+    nextCustomerRequestedDueDate: params.next,
+    lines: lines.map((line) => ({
+      dueDateCount: rows.filter((row) => row.domesticOrderId === line.id).length,
+    })),
+  });
+
+  if (plan.kind !== "WRITE") return { plan, dueDateRowId: null, domesticOrderId: null };
+
+  // WRITE 는 「줄 하나 · 날짜 하나」라는 뜻이라 rows 가 꼭 하나다(같은 수로 판정했다).
+  // 그래도 한 번 더 보는 것은, 여기서 틀리면 **엉뚱한 줄의 날짜**가 바뀌기 때문이다.
+  // 🔴 걸리면 **아무 일도 없었던 것으로** 돌려준다 — 결과는 「맞췄다」고 말하는데
+  // 실제로는 아무 행도 안 바뀐 상태가 제일 나쁘다(사람이 확인할 길이 없다).
+  if (rows.length !== 1) {
+    return { plan: { kind: "NONE" }, dueDateRowId: null, domesticOrderId: null };
+  }
+  return { plan, dueDateRowId: rows[0].id, domesticOrderId: rows[0].domesticOrderId };
 }
 
 /**
@@ -759,6 +862,12 @@ export async function updateRepairCase(
      * mutation(repair-case-billing-decision.ts)과 같은 이력을 남겨야 두
      * 경로 중 어느 쪽으로 바꿨든 "언제 누가 무엇을 무엇으로" 추적된다.
      */
+    /**
+     * 🔴 내자 정리의 납기요청일을 **이 저장과 함께 맞출 것인가**(2026-10-30).
+     * 고객 요청 납기일이 실제로 바뀔 때만 채워지고, 쓰는 일은 UPDATE 가 성공한
+     * 뒤에 일어난다 — 그 전까지는 **읽고 잠근 결과**일 뿐이다.
+     */
+    let requestedDueDateLink: DomesticOrderDueDateLinkWork | null = null;
     let billingReassignment:
       | {
           previousBillingType: BillingType;
@@ -855,6 +964,25 @@ export async function updateRepairCase(
           };
         }
         setValues.customerRequestedDueDate = due;
+
+        // 🔴 내자 정리의 납기요청일도 같은 날짜로 맞춘다(2026-10-30 사용자 결정 —
+        // 「어느 쪽에서 수정하든 같은 날짜를 보고 있을 수 있도록」). 여기서는
+        // **읽고 잠그기만** 하고, 쓰는 일은 아래 UPDATE 가 성공한 뒤다
+        // (planDomesticOrderDueDateLink 머리말의 두 까닭).
+        //
+        // 🔵 **안 바뀐 저장은 아무 일도 하지 않는다** — 이 폼은 고칠 수 있는 칸을
+        // 늘 함께 보내므로 날짜를 건드리지 않은 저장도 여기까지 온다. 그 판정은
+        // 도메인이 한다(전·후 값을 함께 넘기는 까닭).
+        //
+        // 🔵 **출하 잠금은 여기서 보지 않는다** — 이 경로 자체가 잠긴 건을 막지
+        // 않는다(auth/repair-case-edit-authorization.ts 의 isBlockedByShipmentLock
+        // 은 지금 언제나 거짓이다). 여기서만 막으면 수리 건 편집보다 좁은 규칙이
+        // 이 한 칸에만 생긴다.
+        requestedDueDateLink = await planDomesticOrderDueDateLink(tx, {
+          repairCaseId,
+          previous: current.customerRequestedDueDate,
+          next: due,
+        });
       }
 
       if ("internalTargetShipmentDate" in fields) {
@@ -1241,7 +1369,47 @@ export async function updateRepairCase(
       });
     }
 
-    return { ok: true, id: updated.id, version: updated.version };
+    // 🔴 내자 정리의 납기요청일 **한 행의 날짜만** 고친다(2026-10-30). 행을 지우지도
+    // 만들지도 않는다 — 지우면 그 행의 비고가 함께 사라지고(운영에 5행 있다), 만들면
+    // 「발주서에 적힌 날짜」가 아닌 것이 그 줄에 박제된다
+    // (domain/requested-due-date-link.ts 머리말 ③).
+    if (requestedDueDateLink?.plan.kind === "WRITE" && requestedDueDateLink.dueDateRowId) {
+      await tx
+        .update(domesticOrderDueDates)
+        .set({ dueDate: requestedDueDateLink.plan.dueDate, updatedAt: new Date() })
+        .where(eq(domesticOrderDueDates.id, requestedDueDateLink.dueDateRowId));
+      // 🔴 그 줄의 version 도 올린다. 안 올리면 **열려 있던 내자 정리 화면**이 낡은
+      // version 으로 저장해도 통과하고, 그 저장이 방금 맞춘 날짜를 제 옛 목록으로
+      // 되돌린다(그 화면은 칸 하나를 고쳐도 줄 전체를 다시 보낸다).
+      if (requestedDueDateLink.domesticOrderId) {
+        await tx
+          .update(domesticOrders)
+          .set({
+            version: sql`${domesticOrders.version} + 1`,
+            updatedAt: new Date(),
+            // 통합 테스트의 옛 호출부는 행위자를 넘기지 않는다(이 함수의 선택 인자).
+            // 그때는 마지막으로 고친 사람을 **지우지 않고** 그대로 둔다.
+            ...(actorUserId ? { updatedBy: actorUserId } : {}),
+          })
+          .where(eq(domesticOrders.id, requestedDueDateLink.domesticOrderId));
+      }
+    }
+
+    return {
+      ok: true,
+      id: updated.id,
+      version: updated.version,
+      // 할 일이 없었으면(NONE) 아예 싣지 않는다 — 화면이 「무슨 일이 있었다」로 읽지
+      // 않게. 맞췄을 때와 못 맞췄을 때만 말한다.
+      ...(requestedDueDateLink && requestedDueDateLink.plan.kind !== "NONE"
+        ? {
+            requestedDueDateLink:
+              requestedDueDateLink.plan.kind === "WRITE"
+                ? ({ linked: true } as const)
+                : requestedDueDateLink.plan.outcome,
+          }
+        : {}),
+    };
   });
 }
 

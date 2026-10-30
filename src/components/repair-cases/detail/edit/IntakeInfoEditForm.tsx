@@ -90,6 +90,7 @@ export default function IntakeInfoEditForm({
   editableFields,
   referenceData,
   borrowedRequestedDueDate,
+  onRequestedDueDateNotLinked,
   onDone,
 }: {
   resolved: EffectiveRepairCase;
@@ -109,6 +110,13 @@ export default function IntakeInfoEditForm({
    * 'placeholder 다. value 가 아니다').
    */
   borrowedRequestedDueDate: string | null;
+  /**
+   * 🔴 저장은 됐는데 **내자 정리의 납기요청일이 못 따라갔을 때**(2026-10-30).
+   * 띄우는 일은 이 폼이 하지 않는다 — 저장에 성공하면 폼은 닫히고(언마운트),
+   * 읽어야 닫히는 알림은 그보다 오래 떠 있어야 한다. 그래서 상세 화면이 띄운다
+   * (RepairCaseDetailView).
+   */
+  onRequestedDueDateNotLinked: (message: string) => void;
   onDone: () => void;
 }) {
   const canEdit = (field: string) => editableFields.includes(field);
@@ -158,6 +166,9 @@ export default function IntakeInfoEditForm({
       section: "INTAKE",
       onDone,
       savedPopup: REPAIR_CASE_SAVED_POPUP,
+      // 🔴 고객 요청 납기일을 보내는 폼은 이 하나다 — 서버가 그 칸을 받은 저장에서만
+      // 묶기 결과를 실어 보낸다(lib/db/mutations/repair-cases.ts).
+      onRequestedDueDateNotLinked,
     });
 
   const disabled = isSubmitting || isConflict;

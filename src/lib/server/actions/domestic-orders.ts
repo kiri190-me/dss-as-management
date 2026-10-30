@@ -29,6 +29,7 @@ import {
   validateDomesticOrderSheetHeadingInput,
   type DomesticOrderSheetHeadingFieldErrors,
 } from "@/lib/domain/domestic-order-sheet-heading";
+import type { RequestedDueDateLinkOutcome } from "@/lib/domain/requested-due-date-link";
 
 /**
  * ============================================================================
@@ -64,7 +65,18 @@ export type DomesticOrderActionResultCode =
   | "DATABASE_UNAVAILABLE";
 
 export type DomesticOrderActionResult =
-  | { ok: true; id: string; version: number }
+  | {
+      ok: true;
+      id: string;
+      version: number;
+      /**
+       * 🔴 이번 저장이 **수리 건의 고객 요청 납기일까지 맞췄는가**(2026-10-30).
+       * mutation 이 그대로 실어 보낸다(db/mutations/domestic-orders.ts). 화면은
+       * `linked: false` 일 때 **읽어야 닫히는 알림**을 띄운다 — 저장 팝업은 0.5초
+       * 뒤에 사라져 경고를 전할 수 없다(components/common/NoticePopup.tsx 머리말).
+       */
+      requestedDueDateLink?: RequestedDueDateLinkOutcome;
+    }
   | {
       ok: false;
       code: DomesticOrderActionResultCode;

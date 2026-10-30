@@ -113,6 +113,7 @@ export default function IntakeInfoSection({
   domesticOrderDueDates,
   isDueDateNear,
   isDueDateInverted,
+  onRequestedDueDateNotLinked,
   onStartEdit,
   onDone,
 }: {
@@ -153,6 +154,13 @@ export default function IntakeInfoSection({
    * 엮으면 네 화면이 서로 다른 날짜로 재게 되기 때문이다(domain/due-date-inversion.ts).
    */
   isDueDateInverted: boolean;
+  /**
+   * 🔴 고객 요청 납기일은 저장됐는데 **내자 정리의 납기요청일이 못 따라갔을 때**
+   * (2026-10-30). 이 구역은 알림을 띄우지 않고 위로 올려 보낸다 — 저장에 성공하면
+   * 편집 폼이 닫히므로, 읽어야 닫히는 알림은 그보다 오래 사는 자리에서 떠야 한다
+   * (RepairCaseDetailView).
+   */
+  onRequestedDueDateNotLinked: (message: string) => void;
   onStartEdit: () => void;
   onDone: () => void;
 }) {
@@ -194,6 +202,7 @@ export default function IntakeInfoSection({
             borrowedRequestedDueDate={
               requestedDueDate.borrowed ? requestedDueDate.dueDate : null
             }
+            onRequestedDueDateNotLinked={onRequestedDueDateNotLinked}
             onDone={onDone}
           />
         </div>

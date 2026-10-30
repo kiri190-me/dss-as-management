@@ -1,8 +1,12 @@
 import "server-only";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "../client";
 import { customers, domesticOrderDueDates, domesticOrders, repairCases } from "../schema";
+import {
+  resolveRepairCaseDueDateWriteThrough,
+  type RequestedDueDateLinkOutcome,
+} from "@/lib/domain/requested-due-date-link";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 
 /**
@@ -43,6 +47,13 @@ import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input"
  * domestic_orders.requested_due_date 는 **이제 쓰지 않는다.** 칸은 아직
  * 남아 있지만 toColumnValues 에 없다 — 그 이유는 그 자리의 주석에 있다.
  *
+ * ── 🔴 납기 요청일을 고치면 **수리 건의 고객 요청 납기일도 바뀐다** (2026-10-30)
+ * 사용자 결정이다 — 「어느 쪽에서 수정하든 같은 날짜를 보고 있을 수 있도록」.
+ * 이 파일이 고치는 표가 하나 늘었다는 뜻이라, 아래 applyRepairCaseDueDateLink 의
+ * 머리말을 함께 읽어야 한다. 묶지 않는 자리와 그 까닭은 전부
+ * domain/requested-due-date-link.ts 머리말에 있고, **판정은 그 파일 하나가**
+ * 가진다(거울 방향인 mutations/repair-cases.ts 도 같은 파일을 부른다).
+ *
  * ── 지워진 행은 고칠 수 없다 ────────────────────────────────────────────
  * is_deleted = true 인 행은 조회 목록에 없다(queries/domestic-orders.ts).
  * 화면에 없는 행을 고치려는 요청은 "찾을 수 없다"가 정확한 답이다 — 휴지통에서
@@ -62,7 +73,21 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type DomesticOrderMutationResultCode = "NOT_FOUND" | "CONFLICT" | "VALIDATION_ERROR";
 
 export type DomesticOrderMutationResult =
-  | { ok: true; id: string; version: number }
+  | {
+      ok: true;
+      id: string;
+      version: number;
+      /**
+       * 🔴 이번 저장이 **수리 건의 고객 요청 납기일까지 맞췄는가**(2026-10-30).
+       * 없으면 맞출 일이 없었다는 뜻이다(날짜가 안 바뀌었거나, 수리 건 쪽이 비어
+       * 있어 이 줄의 날짜를 빌려 그리는 중이라 보이는 날짜가 이미 같다).
+       *
+       * `linked: false` 는 **이 줄은 저장됐는데 수리 건이 안 따라갔다**는 뜻이다.
+       * 화면은 그 까닭을 읽어야 닫히는 알림으로 띄운다
+       * (domain/requested-due-date-link.ts 머리말 ④).
+       */
+      requestedDueDateLink?: RequestedDueDateLinkOutcome;
+    }
   | {
       ok: false;
       code: DomesticOrderMutationResultCode;
@@ -236,6 +261,119 @@ async function replaceDueDates(tx: Tx, domesticOrderId: string, fields: Domestic
   );
 }
 
+/**
+ * 그 줄에 **지금 적혀 있는** 납기요청일 날짜들. 비고도 차례도 읽지 않는다 —
+ * 묶기 판정이 보는 것은 날짜뿐이다(domain/requested-due-date-link.ts 의
+ * '차례와 비고는 보지 않는다').
+ *
+ * 🔴 **replaceDueDates 보다 먼저** 불러야 한다. 그 뒤에 부르면 방금 쓴 값이 나와
+ * 「안 바뀌었다」가 되고, 묶기가 영영 일어나지 않는다.
+ */
+async function readDueDateValues(tx: Tx, domesticOrderId: string): Promise<string[]> {
+  const rows = await tx
+    .select({ dueDate: domesticOrderDueDates.dueDate })
+    .from(domesticOrderDueDates)
+    .where(eq(domesticOrderDueDates.domesticOrderId, domesticOrderId));
+  return rows.map((row) => row.dueDate);
+}
+
+/**
+ * ============================================================================
+ * 🔴 납기요청일을 고치면 **수리 건의 고객 요청 납기일도 함께** (2026-10-30)
+ * ============================================================================
+ * 거울 방향(수리 건 → 내자)은 mutations/repair-cases.ts 에 있고, **무엇을 할지
+ * 정하는 규칙은 두 방향이 같은 파일 하나를 부른다**
+ * (domain/requested-due-date-link.ts 의 resolveRepairCaseDueDateWriteThrough).
+ * 이 함수가 하는 일은 재료를 읽어 와 넘기고, WRITE 면 그 한 칸을 고치는 것뿐이다.
+ *
+ * ── 🔴 잠그는 차례 ──────────────────────────────────────────────────────
+ * 부르는 쪽이 **이 줄을 이미 쥐고 있다**(고치기는 `FOR UPDATE` 로 잡아 두었고,
+ * 만들기는 방금 INSERT 한 줄이라 그 트랜잭션의 것이다). 그다음에 여기서 수리 건을
+ * 잠근다 — 거울 방향도 「내자 줄 먼저, 수리 건 나중」이라 차례가 같다. 반대로 적으면
+ * 두 사람이 같은 건을 동시에 고칠 때 교착이 난다.
+ *
+ * 🔵 **같은 건의 다른 줄들은 잠그지 않는다.** 거기서 읽는 것은 「날짜가 몇 개인가」
+ * 하나뿐이고, 그 줄들까지 잡으면 서로 다른 줄을 고치는 두 저장이 반대 차례로 잠그게
+ * 되어 교착이 생긴다.
+ *
+ * ── 🔴 수리 건을 **갈아 끼운 저장**은 묶지 않는다 ───────────────────────
+ * `줄 수정` 폼은 이 줄이 가리키는 수리 건 자체를 바꿀 수 있다. 그때 이 줄의 날짜를
+ * 새 수리 건에 밀어 넣으면, 사람이 고른 적 없는 날짜가 그 건에 적힌다(그리고 옛
+ * 건에서는 아무 일도 일어나지 않아 두 건이 동시에 어긋난다). 연결을 바꾼 저장은
+ * 날짜를 건드리지 않고, 다음에 날짜를 고칠 때 비로소 묶인다.
+ * ============================================================================
+ */
+async function applyRepairCaseDueDateLink(
+  tx: Tx,
+  params: {
+    /** 이 줄이 가리키는 수리 건. 연결이 없으면 null 이고 할 일도 없다. */
+    repairCaseId: string | null;
+    domesticOrderId: string;
+    previousDueDates: readonly string[];
+    nextDueDates: readonly string[];
+  }
+): Promise<RequestedDueDateLinkOutcome | null> {
+  if (params.repairCaseId === null) return null;
+
+  // 🔴 수리 건을 잠근 채 읽는다 — 읽고 쓰는 사이에 남이 그 칸을 고치면 낡은 값으로
+  // 판정한 저장이 남의 날짜를 덮는다. 휴지통에 든 건은 건드리지 않는다(화면 어디에도
+  // 없는 건의 칸을 이 저장이 바꾸면 안 된다).
+  const [target] = await tx
+    .select({
+      id: repairCases.id,
+      customerRequestedDueDate: repairCases.customerRequestedDueDate,
+      receivedAt: repairCases.receivedAt,
+    })
+    .from(repairCases)
+    .where(and(eq(repairCases.id, params.repairCaseId), eq(repairCases.isDeleted, false)))
+    .for("update");
+  if (!target) return null;
+
+  // 같은 건에 붙은 **다른** 살아 있는 줄들 — 날짜가 몇 개인지만 센다.
+  const otherLines = await tx
+    .select({
+      id: domesticOrders.id,
+      dueDateCount: sql<number>`(
+        select count(*) from ${domesticOrderDueDates}
+        where ${domesticOrderDueDates.domesticOrderId} = ${domesticOrders.id}
+      )`,
+    })
+    .from(domesticOrders)
+    .where(
+      and(
+        eq(domesticOrders.repairCaseId, params.repairCaseId),
+        eq(domesticOrders.isDeleted, false),
+        ne(domesticOrders.id, params.domesticOrderId)
+      )
+    );
+
+  const plan = resolveRepairCaseDueDateWriteThrough({
+    editedLine: {
+      previousDueDates: params.previousDueDates,
+      nextDueDates: params.nextDueDates,
+    },
+    // count(*) 는 드라이버에 따라 글자로 온다 — 숫자로 못 박아 넘긴다.
+    otherLines: otherLines.map((line) => ({ dueDateCount: Number(line.dueDateCount) })),
+    customerRequestedDueDate: target.customerRequestedDueDate,
+    receivedAt: target.receivedAt,
+  });
+
+  if (plan.kind === "NONE") return null;
+  if (plan.kind === "NOT_LINKED") return plan.outcome;
+
+  await tx
+    .update(repairCases)
+    .set({
+      customerRequestedDueDate: plan.dueDate,
+      // 🔴 version 을 올린다. 안 올리면 **열려 있던 수리 건 상세**가 낡은 version 으로
+      // 저장해도 통과하고, 그 저장이 방금 맞춘 날짜를 제 옛 값으로 되돌린다.
+      version: sql`${repairCases.version} + 1`,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(repairCases.id, params.repairCaseId));
+  return { linked: true };
+}
+
 /** 새 줄 하나. version 은 스키마 기본값 1로 시작한다. */
 export async function createDomesticOrder(params: {
   fields: DomesticOrderFields;
@@ -261,7 +399,22 @@ export async function createDomesticOrder(params: {
     // 보이는데 사람이 적은 납기일만 사라진 상태다.
     await replaceDueDates(tx, inserted.id, params.fields);
 
-    return { ok: true, id: inserted.id, version: inserted.version };
+    // 🔴 새 줄에 적은 납기요청일도 수리 건과 묶는다(2026-10-30). 앞 값은 빈 목록이다
+    // — 방금 생긴 줄이라 「고치기 전」이 없다. 수리 건 쪽이 비어 있으면 아무 일도
+    // 일어나지 않는다(그 건은 이 줄의 날짜를 빌려 그린다).
+    const link = await applyRepairCaseDueDateLink(tx, {
+      repairCaseId: params.fields.repairCaseId,
+      domesticOrderId: inserted.id,
+      previousDueDates: [],
+      nextDueDates: params.fields.dueDates.map((entry) => entry.dueDate),
+    });
+
+    return {
+      ok: true,
+      id: inserted.id,
+      version: inserted.version,
+      ...(link ? { requestedDueDateLink: link } : {}),
+    };
   });
 }
 
@@ -274,7 +427,13 @@ export async function updateDomesticOrder(params: {
 }): Promise<DomesticOrderMutationResult> {
   return db.transaction(async (tx): Promise<DomesticOrderMutationResult> => {
     const [current] = await tx
-      .select({ id: domesticOrders.id, version: domesticOrders.version })
+      .select({
+        id: domesticOrders.id,
+        version: domesticOrders.version,
+        // 🔴 묶기가 본다 — 이 저장이 **가리키는 수리 건 자체를 바꾸는 중**이면
+        // 날짜를 밀어 넣지 않는다(applyRepairCaseDueDateLink 머리말).
+        repairCaseId: domesticOrders.repairCaseId,
+      })
       .from(domesticOrders)
       .where(and(eq(domesticOrders.id, params.id), eq(domesticOrders.isDeleted, false)))
       .for("update");
@@ -291,6 +450,10 @@ export async function updateDomesticOrder(params: {
 
     const badReference = await checkReferences(tx, params.fields);
     if (badReference) return badReference;
+
+    // 🔴 **replaceDueDates 보다 먼저** 읽는다 — 묶기는 「이 저장이 날짜를 실제로
+    // 바꿨는가」를 전·후로 가른다(그 함수 머리말). 뒤에 읽으면 언제나 「안 바뀜」이다.
+    const previousDueDates = await readDueDateValues(tx, params.id);
 
     const [updated] = await tx
       .update(domesticOrders)
@@ -316,7 +479,25 @@ export async function updateDomesticOrder(params: {
     // version 을 보면, 충돌한 저장이 남의 날짜를 지운 채로 실패한다.
     await replaceDueDates(tx, params.id, params.fields);
 
-    return { ok: true, id: updated.id, version: updated.version };
+    // 🔴 수리 건의 고객 요청 납기일도 같은 날짜로 맞춘다(2026-10-30). 같은 트랜잭션
+    // 안이라 **한쪽만 써지는 일이 없다** — 수리 건 쪽이 실패하면 이 줄의 날짜도 함께
+    // 없던 일이 된다. 연결을 갈아 끼우는 저장이면 건드리지 않는다(아래 current 비교).
+    const link =
+      current.repairCaseId === params.fields.repairCaseId
+        ? await applyRepairCaseDueDateLink(tx, {
+            repairCaseId: params.fields.repairCaseId,
+            domesticOrderId: params.id,
+            previousDueDates,
+            nextDueDates: params.fields.dueDates.map((entry) => entry.dueDate),
+          })
+        : null;
+
+    return {
+      ok: true,
+      id: updated.id,
+      version: updated.version,
+      ...(link ? { requestedDueDateLink: link } : {}),
+    };
   });
 }
 

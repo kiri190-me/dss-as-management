@@ -1,26 +1,61 @@
 import { foldBlankToNull, formatDomesticOrderDueDateLines } from "./domestic-order-list";
+import { isNotEarlierThan } from "./local/validation";
 import { pickEarliestDueDate } from "./weekly-report-delivery";
 
 /**
  * ============================================================================
- * `납기요청일` ↔ `고객 요청 납기일` — 한쪽이 비었을 때 상대의 값을 보여 주는 규칙
+ * `납기요청일` ↔ `고객 요청 납기일` — **빌려 그리기**와 **묶기**
  * ============================================================================
  * DB 도 React 도 여기 들어오지 않는다. domestic-order-list.ts ·
  * weekly-report-delivery.ts 와 같은 자리의 파일이고, 같은 이유로 순수 함수만
- * 둔다 — 아래 두 규칙은 **화면 둘이 같은 답을 내야** 하는 종류라, 각 화면 안에
- * 두면 한쪽만 고쳐지는 날이 오고 그날 같은 자료가 두 날짜로 보인다.
+ * 둔다 — 아래 규칙들은 **화면 둘과 저장 통로 둘이 같은 답을 내야** 하는 종류라,
+ * 각자 안에 두면 한쪽만 고쳐지는 날이 오고 그날 같은 자료가 두 날짜로 보인다.
  *
- * ── ⚠️ 보여 주는 규칙일 뿐, 저장 구조는 그대로다 ────────────────────────
- * 두 값은 지금처럼 **각자 자기 자리에** 저장된다:
+ * 저장 구조는 예나 지금이나 **각자 자기 자리**다:
  *
  *   내자 정리 `납기요청일`   ← domestic_order_due_dates (날짜 + 비고, **여럿**)
  *   수리 건  `고객 요청 납기일` ← repair_cases.customer_requested_due_date (**하나**)
  *
- * 한쪽에서 고친 값이 다른 쪽 칼럼에 써지는 일은 없다. 이 파일의 함수가 내놓는
- * 것은 **그릴 값**이지 저장할 값이 아니다 — 계산된 값을 원본 칸에 옮겨 담으면
- * 자동으로 따라오던 날짜가 그 줄에 박제되고, 그때부터 "일부러 다르게 적었다"와
- * "그냥 안 건드렸다"를 구분할 수 없다(domestic-order-cell-edit.ts 헤더의 함정 ②).
- * 그래서 이 결과는 어느 저장 payload 타입에도 들어가지 않는다.
+ * ── 🔴 2026-10-30 **바뀐 것**: 저장할 때 서로 따라간다 ───────────────────
+ * 사용자 요구 원문: 「내자정리에서 납기 요청일을 적은 상태에서 수리건 상세에서
+ * 고객 요청 납기일을 수정하면 내자정리의 납기요청일도 따라서 바뀔 수 있도록 —
+ * **어느 쪽에서 수정하든 같은 날짜를 보고 있을 수 있도록**」. 그래서 이제
+ * **사람이 손으로 고쳐 저장한 날짜는 상대 칸에도 같이 적힌다**(이 파일 맨 아래
+ * '묶기' 묶음이 그 판정을 혼자 가진다 — 고치는 일은 mutation 둘이 한다).
+ *
+ * 🔴 **그 전까지 이 머리말은 정반대를 적고 있었다.** 「한쪽에서 고친 값이 다른 쪽
+ * 칼럼에 써지는 일은 없다 … 계산된 값을 원본 칸에 옮겨 담으면 자동으로 따라오던
+ * 날짜가 그 줄에 **박제**되고, 그때부터 "일부러 다르게 적었다"와 "그냥 안
+ * 건드렸다"를 구분할 수 없다」. 그 경고는 **틀린 말이 아니었고 지금도 살아 있다** —
+ * 다만 가리키는 것이 달라졌다. 박제가 되는 것은 **아무도 적지 않은 값**(화면이
+ * 빌려 그린 날짜)이 저장에 섞여 나갈 때이고, 사람이 그 칸을 열어 고쳐 적은 날짜는
+ * 그것이 아니다. 그래서 묶기는 **네 자리에서 여전히 멈춘다**:
+ *
+ *   ① **빌려 온 날짜는 상대로 보내지 않는다.** 이 파일의 함수가 내놓는 `borrowed`
+ *      값은 **그릴 값**이지 저장할 값이 아니다 — 어느 저장 payload 타입에도 들어가지
+ *      않는다(domestic-order-cell-edit.ts 헤더의 함정 ②, 그리고 그 파일의
+ *      domesticOrderDueDateEditDraft 가 받는 타입에 수리 건의 날짜가 아예 없다).
+ *   ② **안 바뀐 저장은 아무 일도 하지 않는다.** 내자 정리의 칸 편집은 어느 칸을
+ *      고쳐도 줄 전체를 다시 보내므로(그 파일 헤더), 날짜가 그대로인 저장까지 묶으면
+ *      발주서번호 하나 고친 저장이 수리 건의 날짜를 덮는다. 그래서 아래 두 함수는
+ *      **고치기 전 값과 뒤 값을 함께 받아** 같으면 멈춘다.
+ *   ③ **행을 만들지도 지우지도 않는다.** 내자 쪽은 날짜가 **행**이라 비고가 딸려
+ *      있다(운영 실측 2026-10-30: 비고가 적힌 행 5행). 행을 지우고 새로 만드는 방식은
+ *      그 비고를 말없이 지운다. 날짜 행이 **없는** 줄에 행을 만들지도 않는다 — 그 줄은
+ *      이미 수리 건의 날짜를 빌려 그리고 있어서 **화면에 보이는 날짜가 어차피 같고**,
+ *      거기에 행을 만들면 「발주서에 적힌 날짜」가 아닌 것이 그 줄에 박제된다.
+ *      같은 까닭으로 수리 건 쪽이 비어 있으면(빌려 그리는 중) 내자에서 고쳐도
+ *      그 칸을 채우지 않는다.
+ *   ④ **어느 날짜인지 말할 수 없으면 멈추고 사람에게 알린다.** 한 수리 건에 내자
+ *      줄이 여럿이거나(분할 발주) 한 줄에 날짜가 여럿이면(분할 납품) 어느 날짜를
+ *      맞춰야 하는지는 사람만 안다. 조용히 건너뛰지 않는다 — 저장 결과에 **왜 안
+ *      묶였는지**를 실어 보내고 화면이 읽어야 닫히는 알림으로 띄운다.
+ *
+ * 🔵 ③ 때문에 **「양쪽이 다른 날짜로 남는 경우」가 여전히 있다.** 그것은 고장이
+ * 아니라 위 넷의 결과다. 운영 실측(2026-10-30 `npm run check:requested-due-date-sync`)
+ * 에서 ③ 「양쪽 다 적혔는데 다름」은 0건, ④ 「내자에만 적힘」이 8건이었고 — 그 8건은
+ * 지금도 빌려 그리는 중이라 **화면에 보이는 날짜가 이미 같다.** 과거 건을 일괄로
+ * 묶는 일은 하지 않았다(운영 대량 변경이라 별도 승인이 필요하다).
  *
  * ── 자기 자리에 적힌 것이 먼저다 ────────────────────────────────────────
  * 승인된 결정이다. 내자에 날짜가 있으면 그것을 보여 주고, 없을 때만 수리 건의
@@ -34,12 +69,15 @@ import { pickEarliestDueDate } from "./weekly-report-delivery";
  * 왔든 문장의 뜻이 달라지지 않는다.
  *
  * 납기일은 그렇지 않다. 내자의 납기요청일은 **발주서에 적힌 날짜**이고, 수리
- * 건의 고객 요청 납기일은 **고객이 접수 때 말한 날짜**다 — 이 저장소가 원래
- * "같아야 할 이유가 없다"고 못 박아 두었던 두 값이다(queries/domestic-orders.ts
- * 의 그 칸 주석). 표시 없이 그냥 날짜만 그리면 "이 줄에 내가 적어 둔 값"으로
- * 읽히고, 나중에 상대 쪽이 바뀌면 아무도 안 건드렸는데 값이 달라진 것으로
- * 보인다. 그래서 아래 두 함수는 날짜만 내놓지 않고 **어디서 온 값인지**를 함께
- * 내놓는다(borrowed).
+ * 건의 고객 요청 납기일은 **고객이 접수 때 말한 날짜**다 — 뜻이 다른 두 값이라
+ * 「같아야 할 이유가 없다」고 이 저장소가 못 박아 두었다(due-date-inversion.ts 가
+ * 아직 같은 말을 적고 있다). 🔵 **2026-10-30 묶기는 그 사실을 뒤집지 않는다** —
+ * 사람이 한쪽을 고치면 다른 쪽도 그 뜻으로 고쳐 두겠다는 것이지, 두 칸이 같은
+ * 사실의 두 이름이 되었다는 말이 아니다. 묶이지 않는 자리(머리말의 ①~④)가
+ * 그대로 있는 까닭이고, 빌려 온 값에 표시가 붙는 까닭도 그대로다: 표시 없이 그냥
+ * 날짜만 그리면 "이 줄에 내가 적어 둔 값"으로 읽히고, 나중에 상대 쪽이 바뀌면
+ * 아무도 안 건드렸는데 값이 달라진 것으로 보인다. 그래서 아래 두 함수는 날짜만
+ * 내놓지 않고 **어디서 온 값인지**를 함께 내놓는다(borrowed).
  *
  * 다섯 칸과 어긋나는 것도 아니다 — 납기요청일은 `줄 수정` 폼에서도 이미 다섯
  * 칸과 다르게 다뤄진다. 다섯은 흐린 글씨(placeholder)로 힌트를 주지만 납기일
@@ -87,12 +125,19 @@ export const DUE_DATE_FROM_DOMESTIC_ORDER_LABEL = "내자 정리에서 작성됨
  */
 export const DOMESTIC_ORDER_DUE_DATE_LINK_NOTE =
   `납기요청일이 비어 있는 줄은 연결된 수리 건의 고객 요청 납기일을 대신 보여 줍니다. ` +
-  `그 값에는 '${DUE_DATE_FROM_REPAIR_CASE_LABEL}' 표시가 붙습니다.`;
+  `그 값에는 '${DUE_DATE_FROM_REPAIR_CASE_LABEL}' 표시가 붙습니다. ` +
+  // 🔴 2026-10-30 묶기 — 사람이 **여기서 처음 알게 되는** 사실이라 함께 적는다.
+  `납기요청일을 고쳐 저장하면 연결된 수리 건의 고객 요청 납기일도 같은 날짜로 맞춰집니다` +
+  `(그 건에 내자 줄이나 날짜가 여럿이면 맞추지 않고 알려 드립니다).`;
 
 /** 수리 건 상세정보 쪽 설명. 위와 같은 자리에 같은 이유로 있다. */
 export const REPAIR_CASE_DUE_DATE_LINK_NOTE =
   `고객 요청 납기일이 비어 있으면 연결된 내자 정리의 납기요청일 중 가장 이른 하루를 ` +
-  `대신 보여 줍니다. 그 값에는 '${DUE_DATE_FROM_DOMESTIC_ORDER_LABEL}' 표시가 붙습니다.`;
+  `대신 보여 줍니다. 그 값에는 '${DUE_DATE_FROM_DOMESTIC_ORDER_LABEL}' 표시가 붙습니다. ` +
+  // 🔴 위와 **거울이면서 같은 사실**이다. 한쪽만 적으면 그 화면만 보는 사람은 자기가
+  // 고친 날짜가 다른 화면도 바꾼다는 것을 끝내 모른다.
+  `고객 요청 납기일을 고쳐 저장하면 연결된 내자 정리의 납기요청일도 같은 날짜로 맞춰집니다` +
+  `(내자 줄이나 날짜가 여럿이면 맞추지 않고 알려 드립니다).`;
 
 /**
  * **목록**에서 빌려 온 날짜 옆에 붙는 표시 — 전체 A/S 현황 표·카드와 내 작업
@@ -242,4 +287,225 @@ export function resolveRepairCaseRequestedDueDate(row: {
   const borrowed = pickEarliestDueDate(row.domesticOrderDueDates);
   if (borrowed === null) return { dueDate: null, borrowed: false };
   return { dueDate: borrowed, borrowed: true };
+}
+
+/**
+ * ============================================================================
+ * 🔴 묶기 — 한쪽을 고쳐 저장하면 상대 칸도 같은 날짜가 된다 (2026-10-30)
+ * ============================================================================
+ * 여기부터는 **그릴 값이 아니라 저장할 값**을 정한다. 묶는 일을 실제로 하는 곳은
+ * mutation 둘이고(db/mutations/repair-cases.ts · db/mutations/domestic-orders.ts),
+ * **무엇을 할지 정하는 규칙은 이 묶음 하나뿐**이다 — 두 통로가 규칙을 베껴 적으면
+ * 언젠가 한쪽만 고쳐지고, 그날 「어느 쪽에서 고쳤느냐」에 따라 묶이기도 안 묶이기도
+ * 한다. 사용자가 고친 것은 정확히 그 어긋남이다.
+ *
+ * 두 방향의 모양은 같다. 받는 것은 **고치기 전 값 · 고친 뒤 값 · 그 수리 건에 붙은
+ * 살아 있는 내자 줄들의 모양** 셋이고, 내놓는 것은 셋 중 하나다:
+ *
+ *   NONE       — 할 일이 없다(안 바뀌었거나, 빌려 그리는 중이라 이미 같은 날짜다)
+ *   WRITE      — 상대 칸을 이 날짜로 고친다
+ *   NOT_LINKED — 묶을 수 없다. **까닭을 사람에게 말한다**(머리말 ④)
+ *
+ * ── 🔴 방향 하나에만 있는 잣대 ──────────────────────────────────────────
+ * 수리 건의 고객 요청 납기일에는 **인수일보다 이를 수 없다**는 잣대가 걸려 있고
+ * (mutations/repair-cases.ts 의 그 검증 — 날짜 넷이 같이 쓴다), 내자 납기요청일에는
+ * 그런 잣대가 없다(validation/domestic-order-input.ts 에 인수일이라는 말이 없다).
+ * 그래서 **내자 → 수리 건** 방향만 그 잣대에 걸릴 수 있다. 🔴 우회하지 않는다 —
+ * 그 건은 수리 건 쪽만 그대로 두고 사람에게 말한다. 잣대 자체는 베껴 적지 않고
+ * 저쪽이 부르는 함수를 그대로 부른다(isNotEarlierThan).
+ * ============================================================================
+ */
+
+/**
+ * 묶음이 **어느 날짜를 가리키는지 말할 수 있는 모양인가.** 두 방향이 이 하나로
+ * 판정한다.
+ *
+ * 보는 것은 **날짜 행의 수**뿐이다 — 날짜 값도, 비고도, 어느 줄의 것인지도 보지
+ * 않는다. 「고칠 날짜가 꼭 하나인가」만이 물음이기 때문이다.
+ *
+ * 🔴 **줄이 하나뿐이어도 그 줄의 날짜가 여럿이면 안 묶는다**(분할 납품). 반대로
+ * 줄이 여럿이면 날짜가 통틀어 하나뿐이어도 안 묶는다 — 수리 건 상세의 「내자 정리
+ * 발행일」이 줄이 여럿일 때 아예 막는 것과 **같은 자리에 같은 까닭으로** 선다
+ * (domestic-order-issue-date-edit.ts 의 resolveDomesticOrderIssueDateEditPlan).
+ * 어느 줄의 날짜를 고르는 규칙을 여기서 새로 만들면, 그 선택이 어느 화면에도 안
+ * 적힌 채 자료만 바뀐다.
+ */
+export type RequestedDueDateLinkLine = { dueDateCount: number };
+
+export type RequestedDueDateLinkShape =
+  /** 고칠 날짜 행이 없다 — 줄이 없거나, 줄은 있는데 날짜 행이 없다. */
+  | { kind: "NO_ROW" }
+  /** 줄 하나 · 날짜 하나. 가리킬 것이 분명하다. */
+  | { kind: "SINGLE" }
+  /** 줄이 여럿이거나 날짜가 여럿이다. 사람만 안다. */
+  | { kind: "AMBIGUOUS"; lineCount: number; dueDateCount: number };
+
+export function resolveRequestedDueDateLinkShape(
+  lines: readonly RequestedDueDateLinkLine[]
+): RequestedDueDateLinkShape {
+  const dueDateCount = lines.reduce((sum, line) => sum + line.dueDateCount, 0);
+  // 🔴 **날짜 행 수를 줄 수보다 먼저 본다.** 줄이 여럿이어도 날짜 행이 하나도 없으면
+  // 고를 것이 없으니 「여럿이라 못 맞췄다」가 아니다 — 그 줄들은 전부 수리 건의
+  // 날짜를 빌려 그리고 있어 **보이는 날짜가 이미 같다.** 차례를 뒤집으면 아무 일도
+  // 없었던 저장마다 알림이 떠, 진짜 경고가 그 소음에 묻힌다.
+  if (dueDateCount === 0) return { kind: "NO_ROW" };
+  if (lines.length > 1 || dueDateCount > 1) {
+    return { kind: "AMBIGUOUS", lineCount: lines.length, dueDateCount };
+  }
+  return { kind: "SINGLE" };
+}
+
+/**
+ * 묶지 못한 까닭 — **화면에 그대로 뜨는 글이다.**
+ *
+ * 두 문장이 같은 까닭을 말하면서 끝만 다른 것은 **무엇이 그대로인지**가 방향마다
+ * 다르기 때문이다. 「안 됐다」만 말하고 무엇이 안 됐는지 안 말하면, 사람은 저장
+ * 자체가 실패한 줄 안다(실제로는 지금 보고 있는 쪽은 저장됐다).
+ */
+const AMBIGUOUS_REASON =
+  "이 수리 건에는 내자 줄이 여럿이거나 한 줄에 납기요청일이 여럿입니다. 어느 날짜를 맞춰야 하는지는 사람만 알 수 있습니다.";
+
+/** 수리 건에서 고쳤는데 **내자 쪽이 못 따라갔다.** */
+export const DOMESTIC_ORDER_DUE_DATE_NOT_LINKED_MESSAGE =
+  `고객 요청 납기일은 저장했습니다. 다만 ${AMBIGUOUS_REASON} ` +
+  `내자 정리의 납기요청일은 그대로 두었으니, 내자 정리에서 직접 맞춰 주세요.`;
+
+/** 내자에서 고쳤는데 **수리 건 쪽이 못 따라갔다.** */
+export const REPAIR_CASE_DUE_DATE_NOT_LINKED_MESSAGE =
+  `납기요청일은 저장했습니다. 다만 ${AMBIGUOUS_REASON} ` +
+  `수리 건의 고객 요청 납기일은 그대로 두었으니, 수리 건 상세에서 직접 맞춰 주세요.`;
+
+/**
+ * 내자에서 고친 날짜가 **인수일보다 일러** 수리 건에 넣지 못했다.
+ *
+ * 🔴 여기서만 쓰는 잣대가 아니라 수리 건 저장이 날짜 넷에 똑같이 거는 잣대다.
+ * 우회하면 사람이 수리 건 상세에서는 적을 수 없는 날짜가 내자를 거쳐 들어간다.
+ */
+export const REPAIR_CASE_DUE_DATE_BLOCKED_BY_RECEIVED_AT_MESSAGE =
+  "납기요청일은 저장했습니다. 다만 그 날짜가 수리 건의 인수일보다 일러 " +
+  "수리 건의 고객 요청 납기일에는 반영하지 못했습니다(인수일보다 이른 날짜는 적을 수 없습니다).";
+
+/**
+ * 이번 저장이 **상대 쪽 날짜까지 맞췄는가.** 두 mutation 의 성공 결과에 실려
+ * 서버 액션을 그대로 지나 화면까지 간다.
+ *
+ * 🔴 `linked: false` 를 **조용히 버리지 마라.** 그때 사람이 보고 있는 화면은
+ * 「저장했습니다」만 떠 있고, 반대쪽은 옛 날짜 그대로다 — 다음에 그 화면을 열면
+ * 자기가 고친 적 없는 날짜가 거기 있다.
+ */
+export type RequestedDueDateLinkOutcome =
+  | { linked: true }
+  | { linked: false; reason: "AMBIGUOUS" | "BLOCKED_BY_RECEIVED_AT"; message: string };
+
+/** 무엇을 할 것인가 — 부르는 쪽(mutation)이 이 값만 보고 움직인다. */
+export type RequestedDueDateLinkPlan =
+  | { kind: "NONE" }
+  | { kind: "WRITE"; dueDate: string }
+  | { kind: "NOT_LINKED"; outcome: Extract<RequestedDueDateLinkOutcome, { linked: false }> };
+
+function notLinked(
+  reason: "AMBIGUOUS" | "BLOCKED_BY_RECEIVED_AT",
+  message: string
+): RequestedDueDateLinkPlan {
+  return { kind: "NOT_LINKED", outcome: { linked: false, reason, message } };
+}
+
+/**
+ * **수리 건 → 내자** — 고객 요청 납기일을 고쳐 저장할 때 내자의 납기요청일 행을
+ * 어떻게 할 것인가.
+ *
+ * 멈추는 자리가 셋이다(머리말 ②③④ 그대로):
+ *
+ *  · **안 바뀌었다** — 인수정보 폼은 고칠 수 있는 칸을 늘 함께 보내므로, 날짜를
+ *    건드리지 않은 저장도 이 함수까지 온다. 그때 묶으면 다른 칸 하나 고친 저장이
+ *    내자의 날짜를 덮는다. 공백만 적힌 값은 양쪽 다 「없음」으로 접는다 — 화면이
+ *    그렇게 읽기 때문이다(foldBlankToNull).
+ *  · **지웠다**(next 가 없음) — 🔴 **행을 지우지 않는다.** 비고가 함께 사라진다.
+ *    지운 뒤의 수리 건은 내자 날짜를 빌려 그리므로 두 화면에 보이는 날짜는 같다.
+ *  · **고칠 행이 없다**(NO_ROW) — 🔴 **행을 만들지 않는다.** 그 줄은 이미 수리 건의
+ *    날짜를 빌려 그리는 중이라 보이는 날짜가 같고, 행을 만들면 「발주서에 적힌
+ *    날짜」가 아닌 것이 박제된다.
+ */
+export function resolveDomesticOrderDueDateWriteThrough(input: {
+  /** 이 저장 **전에** 수리 건에 적혀 있던 값. */
+  previousCustomerRequestedDueDate: string | null;
+  /** 이 저장으로 수리 건에 적히는 값. null 이면 지웠다는 뜻이다. */
+  nextCustomerRequestedDueDate: string | null;
+  /** 그 수리 건에 붙은 **살아 있는** 내자 줄 전부(휴지통은 빠져 있다). */
+  lines: readonly RequestedDueDateLinkLine[];
+}): RequestedDueDateLinkPlan {
+  const previous = foldBlankToNull(input.previousCustomerRequestedDueDate);
+  const next = foldBlankToNull(input.nextCustomerRequestedDueDate);
+  if (previous === next) return { kind: "NONE" };
+  if (next === null) return { kind: "NONE" };
+
+  const shape = resolveRequestedDueDateLinkShape(input.lines);
+  if (shape.kind === "NO_ROW") return { kind: "NONE" };
+  if (shape.kind === "AMBIGUOUS") {
+    return notLinked("AMBIGUOUS", DOMESTIC_ORDER_DUE_DATE_NOT_LINKED_MESSAGE);
+  }
+  return { kind: "WRITE", dueDate: next };
+}
+
+/**
+ * **내자 → 수리 건** — 납기요청일 목록을 고쳐 저장할 때 수리 건의 고객 요청
+ * 납기일을 어떻게 할 것인가.
+ *
+ * 위 짝과 **거울**이고, 멈추는 자리도 같은 까닭으로 선다. 다른 점은 둘이다:
+ *
+ *  · **수리 건 쪽이 비어 있으면 채우지 않는다**(머리말 ③). 그 건은 지금 내자 날짜를
+ *    빌려 그리는 중이라 **화면에 보이는 날짜가 이미 같고**, 채워 넣으면 「고객이 말한
+ *    날짜」가 아닌 것이 그 건에 박제된다. 운영 실측에서 ④ 8건이 이 모양이었다.
+ *  · **인수일 잣대**(머리말). 같은 날은 통과한다.
+ *
+ * 🔴 **날짜가 바뀌었는지를 이 줄의 전·후로 본다.** 내자 정리의 칸 편집은 어느 칸을
+ * 고쳐도 줄 전체를 다시 보내므로, 「보낸 목록이 있다」만으로 묶으면 발주서번호 하나
+ * 고친 저장이 수리 건의 날짜를 덮는다(머리말 ②). 차례와 비고는 보지 않는다 — 1차분과
+ * 2차분의 순서를 바꾸거나 메모만 고친 저장은 **날짜가 안 바뀐 저장**이다.
+ */
+export function resolveRepairCaseDueDateWriteThrough(input: {
+  /** 이 저장이 고친 내자 줄의 날짜 — 고치기 전과 뒤. 새로 만든 줄이면 앞은 빈 목록이다. */
+  editedLine: { previousDueDates: readonly string[]; nextDueDates: readonly string[] };
+  /** 같은 수리 건에 붙은 **다른** 살아 있는 줄들. 없으면 빈 목록이다. */
+  otherLines: readonly RequestedDueDateLinkLine[];
+  /** 그 수리 건에 지금 적혀 있는 고객 요청 납기일. */
+  customerRequestedDueDate: string | null;
+  /** 그 수리 건의 인수일. 잣대는 저쪽 저장과 같은 함수로 잰다. */
+  receivedAt: string;
+}): RequestedDueDateLinkPlan {
+  if (sameDueDateSet(input.editedLine.previousDueDates, input.editedLine.nextDueDates)) {
+    return { kind: "NONE" };
+  }
+
+  const own = foldBlankToNull(input.customerRequestedDueDate);
+  if (own === null) return { kind: "NONE" };
+
+  const shape = resolveRequestedDueDateLinkShape([
+    { dueDateCount: input.editedLine.nextDueDates.length },
+    ...input.otherLines,
+  ]);
+  if (shape.kind === "NO_ROW") return { kind: "NONE" };
+  if (shape.kind === "AMBIGUOUS") {
+    return notLinked("AMBIGUOUS", REPAIR_CASE_DUE_DATE_NOT_LINKED_MESSAGE);
+  }
+
+  // SINGLE 이면 이 줄에 날짜가 꼭 하나다(다른 줄은 전부 비어 있다).
+  const dueDate = input.editedLine.nextDueDates[0];
+  if (dueDate === own) return { kind: "NONE" };
+  if (!isNotEarlierThan(dueDate, input.receivedAt)) {
+    return notLinked("BLOCKED_BY_RECEIVED_AT", REPAIR_CASE_DUE_DATE_BLOCKED_BY_RECEIVED_AT_MESSAGE);
+  }
+  return { kind: "WRITE", dueDate };
+}
+
+/**
+ * 두 날짜 묶음이 **같은 날짜들인가.** 차례는 보지 않는다(위 함수의 '차례와 비고는
+ * 보지 않는다'). 같은 날짜가 두 행에 적힌 줄도 있으므로 집합이 아니라 **센 것**으로
+ * 견준다 — 행 하나를 지운 저장을 「안 바뀜」으로 읽으면 안 된다.
+ */
+function sameDueDateSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return left.every((value, index) => value === right[index]);
 }

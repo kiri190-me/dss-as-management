@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import LoadingNotice from "@/components/domain/LoadingNotice";
+import NoticePopup from "@/components/common/NoticePopup";
 import ExceptionStatusNotice from "@/components/repair-cases/detail/ExceptionStatusNotice";
 import IntakeInfoSection from "@/components/repair-cases/detail/IntakeInfoSection";
 import ProductInfoSection from "@/components/repair-cases/detail/ProductInfoSection";
@@ -204,6 +205,13 @@ export default function RepairCaseDetailView({
 }) {
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
   const [editingSection, setEditingSection] = useState<RepairCaseEditSection | null>(null);
+  /**
+   * 🔴 고객 요청 납기일은 저장됐는데 **내자 정리의 납기요청일이 못 따라갔을 때**의
+   * 글(2026-10-30). 띄우는 자리가 인수 정보 구역이 아니라 여기인 까닭: 저장에
+   * 성공하면 편집 폼이 닫히면서 통째로 사라지는데(언마운트), 이 알림은 사람이 읽고
+   * 닫을 때까지 떠 있어야 한다.
+   */
+  const [requestedDueDateNotLinked, setRequestedDueDateNotLinked] = useState<string | null>(null);
 
   if (!isHydrated || !effective) {
     return <LoadingNotice />;
@@ -231,6 +239,17 @@ export default function RepairCaseDetailView({
           탭 줄보다 위에서 그린다. 여기서 한 번 더 그리면 「기본 정보」 탭에서만
           카드가 둘로 보인다. */}
       <ExceptionStatusNotice exceptionStatus={effective.exceptionStatus} />
+      {/* 🔴 저장은 됐는데 내자 정리의 납기요청일이 **그대로**인 경우(2026-10-30).
+          사람이 닫아야 닫히는 알림이라야 한다 — 0.5초 저장 팝업으로 띄우면 읽기 전에
+          사라지고, 그러면 두 화면이 다른 날짜를 보이는 채로 남는다. 서버가 돌려준
+          까닭을 그대로 적는다(domain/requested-due-date-link.ts 가 그 글의 주인이다). */}
+      {requestedDueDateNotLinked !== null && (
+        <NoticePopup
+          title="내자 정리의 납기요청일은 바뀌지 않았습니다"
+          lines={[requestedDueDateNotLinked]}
+          onClose={() => setRequestedDueDateNotLinked(null)}
+        />
+      )}
       {resolved.source === "DATABASE" && effective.billingType === "PENDING_DECISION" && (
         <PendingBillingDecisionCard
           repairCaseId={effective.id}
@@ -247,6 +266,7 @@ export default function RepairCaseDetailView({
           domesticOrderDueDates={domesticOrderDueDates}
           isDueDateNear={isDueDateNear}
           isDueDateInverted={isDueDateInverted}
+          onRequestedDueDateNotLinked={setRequestedDueDateNotLinked}
           onStartEdit={() => setEditingSection("INTAKE")}
           onDone={handleDone}
         />

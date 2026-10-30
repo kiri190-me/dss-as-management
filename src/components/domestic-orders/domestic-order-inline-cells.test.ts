@@ -74,9 +74,12 @@ test("금액(VAT별도)은 칸 편집이 없다 — 표시만 한다(사용자 �
 });
 
 test("납기요청일은 표에서 눌러 고친다 — 못 고치는 사람에게는 지금과 같은 글자만", () => {
+  // 🔴 2026-10-30 에 프롭이 하나 늘었다(onRequestedDueDateNotLinked) — 수리 건이 못
+  //    따라갔을 때의 알림을 **화면 위쪽**이 띄우게 올려 보내는 길이다. 여기 적어 두는
+  //    까닭: 빠뜨리면 타입이 막지만, **엉뚱한 상태에 묶는 것**은 타입이 안 막는다.
   assert.match(
     tableBody,
-    /\{canEdit \? \( <DomesticOrderDueDatesCell row=\{row\} displayText=\{<DueDateCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" numeric="tabular-nums" \/> \) : \( <DueDateCellContent row=\{row\} \/> \)\}/
+    /\{canEdit \? \( <DomesticOrderDueDatesCell row=\{row\} displayText=\{<DueDateCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" numeric="tabular-nums" onRequestedDueDateNotLinked=\{setRequestedDueDateNotLinked\} \/> \) : \( <DueDateCellContent row=\{row\} \/> \)\}/
   );
 });
 
@@ -102,9 +105,11 @@ test("납기요청일은 카드에서도 눌러 고친다 — 좁은 화면이�
     dueDateEntry.includes('dueDatesEdit: { wrapping: "break-words whitespace-normal" }'),
     "카드의 납기요청일에 편집이 없거나, <dd> 와 다른 접는 방식이다"
   );
+  // 🔴 표와 **같은 프롭**을 받아야 한다 — 카드에서 고친 저장만 알림이 안 뜨면,
+  //    좁은 화면에서는 수리 건이 안 따라간 것을 아무도 모른다(2026-10-30).
   assert.match(
     cardRender,
-    /\{canEdit && field\.dueDatesEdit \? \( (\/\/[^<]*)?<DomesticOrderDueDatesCell row=\{row\} displayText=\{field\.of\(row\)\} wrapping=\{field\.dueDatesEdit\.wrapping\} \/>/
+    /\{canEdit && field\.dueDatesEdit \? \( (\/\/[^<]*)?<DomesticOrderDueDatesCell row=\{row\} displayText=\{field\.of\(row\)\} wrapping=\{field\.dueDatesEdit\.wrapping\} onRequestedDueDateNotLinked=\{setRequestedDueDateNotLinked\} \/>/
   );
 });
 

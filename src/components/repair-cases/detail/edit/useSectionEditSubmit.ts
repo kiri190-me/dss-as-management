@@ -70,6 +70,21 @@ export function useSectionEditSubmit(params: {
    * 필수로 둔 것은 새로 부르는 곳이 정하고 가게 하려는 것이다 — 빠뜨리면 타입이 막는다.
    */
   savedPopup: SavePopupRequest | null;
+  /**
+   * 🔴 저장은 됐는데 **내자 정리의 납기요청일이 못 따라갔을 때**(2026-10-30).
+   * 고객 요청 납기일을 보내는 폼 하나만 넘긴다(IntakeInfoEditForm) — 서버가 그 칸을
+   * 받은 저장에서만 이 값을 실어 보내기 때문이다.
+   *
+   * 🔴 **넘기지 않아도 폼은 지금까지와 똑같이 동작한다.** 이 자리를 「알림을 띄울 때까지
+   * 폼을 닫지 않는다」로 만들지 않은 까닭이 그것이다 — 그랬으면 이 값을 안 받는 다섯
+   * 부르는 곳 중 하나가 언젠가 서버에서 그 값을 받는 날, 닫히지 않는 폼이 된다.
+   * 알림은 **폼 바깥**(RepairCaseDetailView)이 띄운다. 폼은 성공했으므로 닫힌다.
+   *
+   * 🔴 이때 저장 팝업은 띄우지 않는다. 0.5초 뒤 저절로 닫히는 팝업과 읽어야 닫히는
+   * 알림이 동시에 뜨면 어느 것이 위에 서는지 정할 수 없고, 무엇보다 읽어야 하는 글을
+   * 성공 팝업이 가린다(components/common/NoticePopup.tsx 머리말).
+   */
+  onRequestedDueDateNotLinked?: (message: string) => void;
 }) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -108,6 +123,14 @@ export function useSectionEditSubmit(params: {
 
       router.refresh();
       params.onDone();
+      // 🔴 「저장은 됐는데 내자가 못 따라갔다」는 **읽어야 하는 글**이다 — 그때는
+      // 성공 팝업 대신 알림을 띄운다(위 prop 주석). 그 글 첫머리가 "저장했습니다"로
+      // 시작하므로 성공 알림까지 함께 전한다(domain/requested-due-date-link.ts).
+      const link = result.requestedDueDateLink;
+      if (link && !link.linked && params.onRequestedDueDateNotLinked) {
+        params.onRequestedDueDateNotLinked(link.message);
+        return;
+      }
       if (params.savedPopup) showSavePopup(params.savedPopup);
     } finally {
       setIsSubmitting(false);

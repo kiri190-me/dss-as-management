@@ -1,4 +1,5 @@
 import { isValidDateString } from "@/lib/domain/local/validation";
+import type { RequestedDueDateLinkOutcome } from "@/lib/domain/requested-due-date-link";
 import { BILLING_TYPE_CODES, PRIORITY_CODES, type BillingType, type Priority } from "@/lib/domain/types";
 import { WORKFLOW_REASSIGNMENT_KIND_CODES, type WorkflowKind } from "@/lib/domain/workflow-kind";
 
@@ -407,7 +408,18 @@ export type UpdateRepairCaseActionResultCode =
   | "WORKFLOW_NOT_ALLOWED";
 
 export type UpdateRepairCaseActionResult =
-  | { ok: true; id: string; version: number }
+  | {
+      ok: true;
+      id: string;
+      version: number;
+      /**
+       * 🔴 이번 저장이 **내자 정리의 납기요청일까지 맞췄는가**(2026-10-30).
+       * mutation 이 그대로 실어 보낸다(db/mutations/repair-cases.ts). 화면은
+       * `linked: false` 일 때 **읽어야 닫히는 알림**을 띄운다 — 저장 팝업은 0.5초
+       * 뒤에 사라져 경고를 전할 수 없다(components/common/NoticePopup.tsx 머리말).
+       */
+      requestedDueDateLink?: RequestedDueDateLinkOutcome;
+    }
   | {
       ok: false;
       code: UpdateRepairCaseActionResultCode;

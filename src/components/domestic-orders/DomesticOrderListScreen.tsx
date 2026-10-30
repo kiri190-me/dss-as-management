@@ -1873,6 +1873,15 @@ export default function DomesticOrderListScreen({
    */
   const [revertBlockedReason, setRevertBlockedReason] = useState<string | null>(null);
   /**
+   * 🔴 납기요청일은 저장됐는데 **수리 건의 고객 요청 납기일이 못 따라갔을 때**의 글
+   * (2026-10-30, null 이면 안 떠 있다). 상태가 여기 있는 까닭은 위 둘과 같다 — 띄우는
+   * 쪽(납기요청일 칸 · `줄 수정` 폼)은 표의 `<td>` 안이거나 저장하면 닫히는 폼이다.
+   *
+   * 🔵 위 둘과 다른 점: 이 알림이 뜰 때 **이 줄의 저장은 성공했다.** 그래서 글이
+   * "납기요청일은 저장했습니다"로 시작한다(domain/requested-due-date-link.ts).
+   */
+  const [requestedDueDateNotLinked, setRequestedDueDateNotLinked] = useState<string | null>(null);
+  /**
    * [완료 해제] 확인 창이 묻고 있는 줄(null 이면 창이 닫혀 있다). 🔴 한 번의
    * 클릭으로 해제되지 않게 하는 장치다 — 단추는 이 상태를 세우기만 하고, 실제
    * 요청은 아래 releaseCompletion 이 보낸다(CompletionToggle 머리말).
@@ -2033,6 +2042,7 @@ export default function DomesticOrderListScreen({
             customerOptions={customerOptions}
             quoteOptions={quoteOptions}
             onDone={() => setEditTarget(null)}
+            onRequestedDueDateNotLinked={setRequestedDueDateNotLinked}
             onRequestDelete={
               canDelete && editingRow
                 ? () => trash.open("DELETE", [trashTarget(editingRow)])
@@ -2274,6 +2284,18 @@ export default function DomesticOrderListScreen({
             "그래서 내자 정리의 완료 표시도 그대로입니다. 수리 건 쪽을 먼저 확인한 뒤 [완료 해제]를 다시 눌러 주세요.",
           ]}
           onClose={() => setRevertBlockedReason(null)}
+        />
+      )}
+
+      {/* 🔴 납기요청일은 저장됐는데 **수리 건의 고객 요청 납기일이 그대로**인 경우
+          (2026-10-30). 위 둘과 달리 **이 줄의 저장은 성공했다** — 그래서 서버가 준 글이
+          "납기요청일은 저장했습니다"로 시작하고, 이 상자는 못 따라간 까닭과 어디서
+          맞춰야 하는지를 전한다. 0.5초 저장 팝업으로는 전할 수 없는 글이다. */}
+      {requestedDueDateNotLinked !== null && (
+        <NoticePopup
+          title="수리 건의 고객 요청 납기일은 바뀌지 않았습니다"
+          lines={[requestedDueDateNotLinked]}
+          onClose={() => setRequestedDueDateNotLinked(null)}
         />
       )}
 
@@ -2532,6 +2554,7 @@ export default function DomesticOrderListScreen({
                               displayText={<DueDateCellContent row={row} />}
                               wrapping="whitespace-nowrap"
                               numeric="tabular-nums"
+                              onRequestedDueDateNotLinked={setRequestedDueDateNotLinked}
                             />
                           ) : (
                             <DueDateCellContent row={row} />
@@ -2806,6 +2829,7 @@ export default function DomesticOrderListScreen({
                                           row={row}
                                           displayText={field.of(row)}
                                           wrapping={field.dueDatesEdit.wrapping}
+                                          onRequestedDueDateNotLinked={setRequestedDueDateNotLinked}
                                         />
                                       ) : canEdit && field.edit ? (
                                         <DomesticOrderTextCell
