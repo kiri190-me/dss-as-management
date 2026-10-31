@@ -94,6 +94,8 @@ const HEADER: Props["header"] = {
 };
 
 const NORMAL: QuotePrintData = {
+  // 장비 종류를 안 고른 장 = 제너레이터 양식. 여기서 보는 것은 단추라 양식 갈래와 상관이 없다.
+  laborEquipmentKind: null,
   quoteNumber: "Q-2026-0001",
   quoteDate: "2026-09-01",
   customerNameText: "주성 엔지니어링",

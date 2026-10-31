@@ -2308,6 +2308,14 @@ export default function QuoteEditForm({
            * 작업 범위 · 작업비 구역이 화면에만 뜬다.
            */
           kind,
+          /**
+           * 🔴 **장비 종류도 넘겨야 금액 칸이 맞는다** (2026-10-31). 양식은 장비 종류 ×
+           * 견적서 종류로 갈리는데(위 activePrintHeader 와 **같은 값**), 매쳐 양식에는
+           * `2) OH 부품 비용` 칸이 없다 — 안 넘기면 매쳐 O/H 견적서의 미리보기에 그 양식에
+           * 없는 칸이 뜬다. 머리말 문구만 매쳐 것이고 금액 칸은 제너레이터 모양인, 두
+           * 양식이 섞인 종이가 된다.
+           */
+          laborEquipmentKind: laborKind,
           quoteNumber,
           quoteDate,
           customerNameText,

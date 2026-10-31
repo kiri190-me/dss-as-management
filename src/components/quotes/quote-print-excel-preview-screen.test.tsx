@@ -43,6 +43,8 @@ const HEADER: Props["header"] = {
 
 /** 🔴 지어낸 자료다(저장소가 공개다). */
 const EXCEL_ONLY: QuotePrintData = {
+  // 장비 종류를 안 고른 장 = 제너레이터 양식. 엑셀 전용 장은 앱 양식을 아예 그리지 않는다.
+  laborEquipmentKind: null,
   quoteNumber: "Q-2026-0001",
   quoteDate: "2026-09-01",
   customerNameText: "가상 고객사",

@@ -78,6 +78,9 @@ const ITEM_LINES: ItemLine[] = [
 function cableQuote(over: Partial<QuotePrintData> = {}): QuotePrintData {
   return {
     kind: "CABLE",
+    // 🔴 케이블 양식은 장비 종류를 보지 않는다(quoteTemplateKey 가 `CABLE` 한 낱말로 답한다).
+    // 그래도 넘겨야 하는 칸이라 「안 고름」을 적는다 — 저장 쪽도 케이블이면 null 로 적는다.
+    laborEquipmentKind: null,
     quoteNumber: "DSS 2026-101",
     quoteDate: "2026-09-17",
     customerNameText: "주성 엔지니어링",
@@ -238,6 +241,8 @@ describe("㉣ 도구모음 · 내자 · OH 는 그대로", () => {
 
   test("🔴 종류를 안 넘긴 장은 예전 그대로다 — 내자 · OH 미리보기가 달라지면 안 된다", () => {
     const domestic: QuotePrintData = {
+      // 장비 종류를 안 고른 장 = 제너레이터 양식 — 여기가 보는 「예전 그대로」가 그것이다.
+      laborEquipmentKind: null,
       quoteNumber: "DSS 2026-077",
       quoteDate: "2026-09-01",
       customerNameText: "ICD",

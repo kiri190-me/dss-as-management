@@ -33,6 +33,8 @@ const HEADER: Props["header"] = {
 };
 
 const NORMAL: QuotePrintData = {
+  // 장비 종류를 안 고른 장 = 제너레이터 양식. 이 파일이 보는 것은 엑셀 전용 갈래라 상관이 없다.
+  laborEquipmentKind: null,
   quoteNumber: "Q-2026-0001",
   quoteDate: "2026-09-01",
   customerNameText: "주성 엔지니어링",

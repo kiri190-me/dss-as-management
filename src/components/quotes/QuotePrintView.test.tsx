@@ -46,6 +46,9 @@ const HEADER: Props["header"] = {
 };
 
 const QUOTE: QuotePrintData = {
+  // 장비 종류를 안 고른 장 = 제너레이터 양식(domain/quote-template-variant.ts) — 이 파일이
+  // 못 박아 둔 종이가 그것이다. 매쳐 양식의 금액 칸은 이웃 quote-print-cost-groups.test.tsx 가 본다.
+  laborEquipmentKind: null,
   quoteNumber: "Q-2026-0001",
   quoteDate: "2026-09-01",
   customerNameText: "주성 엔지니어링",
@@ -306,4 +309,113 @@ test("🔴 셋 다 빠지면 ① 서류작업만 남는다", () => {
 test("🔴 옛 견적서 — 조사작업 뺌을 주지 않으면 ① 인수 조사가 그대로다", () => {
   assert.ok(renderSections(false, false, false).includes("①　인수 조사"));
   assert.equal(renderSections(false, false), renderSections(false, false, false), "안 준 것과 꺼진 것은 같은 종이다");
+});
+
+// ─────────────── 🔴 매쳐 양식에는 「서류작업」 묶음이 아예 없다 (2026-10-31)
+
+/**
+ * ============================================================================
+ * 서류작업은 **제너레이터 양식에만 있고**, 번호 모양도 양식마다 다르다
+ * ============================================================================
+ * 사용자(2026-10-31): 「매쳐 oh 엑셀에는 [④　서류작업]가 없는데 미리보기에는 있어.
+ * 미리보기에서 없애줘.」 · 「다 고쳐」.
+ *
+ * 🔴 **양식 넷의 시트를 통째로 훑어 확인했다**(1~120행 D열): 「서류」가 든 줄이 제너레이터
+ * 내자 52행 · 제너레이터 O/H 69행에 하나씩 있고 **매쳐 둘에는 0개**다. 파일을 만드는 쪽도
+ * 같은 사실 위에 서 있다 — 매쳐 채우개만 번호를 당기는 `renumberPaperworkBlock` 을 부르지
+ * 않는다(xlsx/matcher-quote-template.ts 의 `powerTestExcluded` 주석).
+ *
+ * 🔴 **번호 모양도 갈린다**: 제너레이터 `① ② ③ ④`, 매쳐 `1) 2) 3)`(실측). 파일 쪽도 같은
+ * 두 벌을 들고 번호를 당긴다(quote-sheet-layout.ts 의 `renumberWorkScopeSectionMarks` 가
+ * `marks` 를 받고, 매쳐 채우개가 `MATCHER_SECTION_MARKS` 를 건넨다).
+ *
+ * 🔴 **매쳐 내자도 O/H 와 똑같다.** 사용자가 짚은 것은 O/H 장이지만 두 양식은 같은
+ * 판이라, O/H 에서만 고치면 매쳐 내자 미리보기에 제너레이터 모양이 그대로 남는다.
+ *
+ * ── 🔵 무엇을 재는가 ────────────────────────────────────────────────────────
+ *   · 매쳐 종이에 「서류작업」이 **한 글자도 없는가** · 번호가 `1) 2) 3)` 인가.
+ *   · 🔴 **번호가 자리에서 다시 뽑히는가** — 묶음이 하나 빠져도 남은 셋이 `1) 2) 3)` 이고
+ *     넷째 번호가 종이 어디에도 없는가. 번호를 손으로 적어 두었다면 여기서 틀어진다.
+ *   · 묶음을 빼는 기존 기능과 **함께** 도는가(통전작업 제외 · 셋 다 빠짐).
+ *   · 🔴 제너레이터는 `④ 서류작업` 과 동그라미 번호 그대로인가.
+ * ============================================================================
+ */
+
+/** 매쳐 양식에서 읽어 온 작업 내역 — 머리글이 제너레이터와 다르다(`조사작업`…). */
+const MATCHER_SECTIONS = {
+  INVESTIGATION: { label: "조사작업", items: ["외관 및 내부 검사"] },
+  REPAIR: { label: "수리작업", items: ["고정 콘덴서 교환"] },
+  POWER_TEST: { label: "통전작업", items: ["정격 출력 시험"] },
+};
+
+function renderMatcher(
+  over: Partial<QuotePrintData> = {},
+  laborEquipmentKind: QuotePrintData["laborEquipmentKind"] = "MATCHER"
+): string {
+  return renderToStaticMarkup(
+    <QuotePrintView
+      quote={{ ...QUOTE, kind: "OVERHAUL", laborEquipmentKind, ...over }}
+      header={HEADER}
+      workSections={MATCHER_SECTIONS}
+      quoteId="q-1"
+      onClose={() => {}}
+    />
+  );
+}
+
+test("🔴 매쳐 O/H: 「서류작업」이 종이 어디에도 없고 번호가 1) 2) 3) 이다", () => {
+  const html = renderMatcher();
+
+  // 🔵 먼저 「무엇을 재는지」 — 작업 내역 셋은 그려져 있다(표본이 빈 채로 통과하지 않도록).
+  assert.ok(html.includes("1)　조사작업"), "작업 내역이 아예 안 그려졌다");
+  assert.ok(html.includes("2)　수리작업") && html.includes("3)　통전작업"));
+
+  assert.ok(!html.includes("서류작업"), "매쳐 종이에 없는 묶음이 화면에 남았다");
+  assert.ok(!html.includes("④"), "묶음은 뺐는데 번호가 남았다");
+  for (const mark of ["①", "②", "③"]) {
+    assert.ok(!html.includes(mark), `${mark}: 매쳐 양식에 없는 번호 모양이 그려졌다`);
+  }
+});
+
+test("🔴 매쳐 내자도 같다 — 두 양식은 같은 판이다", () => {
+  const html = renderMatcher({ kind: "DOMESTIC" });
+  assert.ok(html.includes("1)　조사작업") && html.includes("3)　통전작업"));
+  assert.ok(!html.includes("서류작업"), "매쳐 내자 종이에도 그 묶음이 없다");
+});
+
+test("🔴 제너레이터는 ④ 서류작업과 동그라미 번호 그대로다 — 장비 종류가 매쳐일 때만 갈린다", () => {
+  for (const kind of ["GENERATOR", "TOTAL_CONTROLLER", null] as const) {
+    const html = renderMatcher({}, kind);
+    assert.ok(html.includes("④　서류작업"), `${kind}: 제너레이터 양식의 묶음이 사라졌다`);
+    assert.ok(html.includes("①　조사작업"), `${kind}: 동그라미 번호가 사라졌다`);
+  }
+});
+
+/**
+ * 🔴 **빼는 기능 둘이 겹칠 때** — 통전작업을 빼면 제너레이터는 서류작업이 ③ 으로 당겨지는데
+ * (위 그 시험), 매쳐는 당길 것이 없어 `1) 2)` 로 끝나야 한다. 파일 쪽도 그렇다
+ * (matcher-quote-template.ts 의 「번호를 당길 것이 없다」).
+ */
+test("🔴 매쳐 + 통전작업 제외: 1) 2) 로 끝난다 — 서류작업이 3) 으로 되살아나지 않는다", () => {
+  const html = renderMatcher({ powerTestExcluded: true });
+  assert.ok(html.includes("1)　조사작업") && html.includes("2)　수리작업"));
+  assert.ok(!html.includes("통전작업"), "하지 않은 시험이 남았다");
+  assert.ok(!html.includes("서류작업") && !html.includes("3)"), "뺀 자리에 없는 묶음이 들어왔다");
+});
+
+/**
+ * 🔵 제너레이터는 셋 다 빠지면 **① 서류작업만** 남는다(위 그 시험). 매쳐는 남을 것이
+ * 없어야 한다 — 「서류작업만 남은 매쳐 견적서」는 그 양식에 없는 종이다.
+ */
+test("🔴 매쳐 + 셋 다 빠짐: 작업 내역 묶음이 하나도 남지 않는다", () => {
+  const html = renderMatcher({
+    investigationExcluded: true,
+    repairSectionDropped: true,
+    powerTestExcluded: true,
+  });
+  for (const word of ["조사작업", "수리작업", "통전작업", "서류작업"]) {
+    assert.ok(!html.includes(word), `${word} 가 남았다`);
+  }
+  // 🔵 금액 묶음은 그대로다 — 작업 내역만 사라진 것이지 종이가 통째로 빈 것이 아니다.
+  assert.ok(html.includes("부품 비용") && html.includes("작업 비용"), "종이가 통째로 비었다");
 });

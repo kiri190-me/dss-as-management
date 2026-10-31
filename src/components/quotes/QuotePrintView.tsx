@@ -21,6 +21,11 @@ import {
   type QuoteExcelPreviewState,
 } from "@/components/quotes/quote-print-excel-preview";
 import { quoteSupplyAmountOf } from "@/lib/domain/quote-list";
+/* 🔴 **어느 양식으로 나가는 장인가**를 서버와 **같은 함수**로 고른다 — 금액 칸의 구성이
+   양식마다 다르기 때문이다(아래 buildCostGroups 머리말의 실측). 여기서 따로 셈하면
+   「장비 종류가 매쳐면…」 같은 규칙이 두 벌이 되고, 한쪽만 고쳐지는 날 화면과 받아 본
+   문서의 칸이 갈린다(server/services/quote-workbook.ts 도 이 함수로 고른다). */
+import { quoteTemplateKey, type QuoteTemplateKey } from "@/lib/domain/quote-template-variant";
 import {
   EXCEL_ONLY_NO_SIGNED_PDF_TEXT,
   quoteAttachmentDownloadUrl,
@@ -131,6 +136,26 @@ export type QuotePrintData = Pick<
   | "workCost"
   | "items"
 > & {
+  /**
+   * ==========================================================================
+   * 🔴 어느 양식으로 나가는 장인가 — **장비 종류** (2026-10-31)
+   * ==========================================================================
+   * 양식은 장비 종류 × 견적서 종류로 갈린다(domain/quote-template-variant.ts 의
+   * `quoteTemplateKey`). 미리보기가 이 값을 알아야 하는 까닭은 **양식마다 금액 칸의
+   * 구성이 다르기** 때문이다 — `2) OH 부품 비용` 칸은 제너레이터 O/H 양식에만 있고,
+   * 매쳐 양식 둘은 O/H 장도 부품이 한 목록이다(아래 buildCostGroups 머리말의 실측).
+   *
+   * 🔴 **선택 칸이 아니다.** 아래 `kind`·`powerTestExcluded` 처럼 「안 주면 예전
+   * 그대로」로 두면 넘기는 자리를 하나 빠뜨린 날 **매쳐 견적서가 조용히 제너레이터
+   * 모양으로** 그려진다 — 오류가 나지 않고 화면에만 있는 칸이 하나 생길 뿐이라 그
+   * 양식을 쓰는 사람이 말해 주기 전에는 아무도 모른다. 넘기는 자리는 둘뿐이고
+   * (`/quotes/{id}/print` 페이지 · QuoteEditForm 의 겹친 미리보기) 둘 다 이 값을 이미
+   * 들고 있다 — 빠뜨리면 컴파일이 막는 쪽이 싸다.
+   *
+   * 🔵 `null` 은 「장비 종류를 아직 안 골랐다」는 실제 값이고 제너레이터로 읽힌다
+   * (그 함수의 머리말). 모른다는 뜻으로 지어내 넣는 값이 아니다.
+   */
+  laborEquipmentKind: QuoteEditData["laborEquipmentKind"];
   /**
    * 통전작업을 빼고 청구하는 장인가. 켜면 **「③ 통전검사」 묶음을 그리지
    * 않고, 그 아래 서류작업이 ③ 이 된다** — 실제로 나가는 xlsx 가 그 구역을
@@ -350,11 +375,18 @@ export default function QuotePrintView({
     );
   }
 
-  const items = quote.items.map((item) => ({
-    name: item.partNameText,
-    quantity: item.quantity,
-    unitPrice: Number(item.unitPrice),
-  }));
+  /**
+   * ==========================================================================
+   * 🔴 이 장이 쓰는 **양식** — 어떤 묶음을 그릴지가 여기서 갈린다 (2026-10-31)
+   * ==========================================================================
+   * 서버가 파일을 만들 때 양식을 고르는 **그 함수 하나**로 고른다 — 「장비 종류가 매쳐면…」
+   * 을 여기 다시 적으면 규칙이 두 벌이 되고, 한쪽만 고쳐지는 날 화면과 받아 본 문서가 서로
+   * 다른 종이가 된다(server/services/quote-workbook.ts 의 같은 호출).
+   *
+   * 종류를 안 넘긴 옛 길은 내자로 읽어 지금까지와 똑같이 그린다. 케이블은 위에서 이미 갈라
+   * 나갔으므로 여기 오는 것은 제너레이터 둘 · 매쳐 둘뿐이다.
+   */
+  const shape = quoteSheetShapeOf(quoteTemplateKey(quote.laborEquipmentKind, quote.kind ?? "DOMESTIC"));
 
   /**
    * 부품은 **있는 그대로** 적는다.
@@ -364,8 +396,19 @@ export default function QuotePrintView({
    * 같아 보여야 해서 같은 규칙을 따랐다. 이제 파일이 담을 만큼 줄을 늘리므로
    * (xlsx/quote-sheet-layout.ts) 여기서도 합치지 않는다 — 합치면 미리보기에
    * 한 줄로 보이는데 파일에는 전부 적혀 나가서, 둘이 다른 문서가 된다.
+   *
+   * 🔴 **제너레이터 O/H 양식에서만 두 목록으로 갈린다.** 가르는 자도 나누는 기준도 파일
+   * 쪽과 한 벌이다 — `isOverhaulPart` 가 붙은 줄은 `2) OH 부품 비용` 칸으로 가고 나머지는
+   * `1) 부품 비용` 으로 간다(server/services/quote-workbook.ts 의 `parts` · `overhaulParts`).
+   * 내자 · 케이블 · **매쳐 둘**은 갈리지 않아 지금까지와 한 줄도 달라지지 않는다 — 매쳐
+   * 양식에는 그 칸이 없어 파일 쪽이 두 목록을 도로 합쳐 넘긴다(아래 양식 모양 표).
    */
-  const printed = items;
+  const printed = quote.items
+    .filter((item) => !(shape.hasOverhaulPartsBox && item.isOverhaulPart))
+    .map(printedPartOf);
+  const printedOverhaul = shape.hasOverhaulPartsBox
+    ? quote.items.filter((item) => item.isOverhaulPart).map(printedPartOf)
+    : [];
 
   // 서버가 금액을 셈하는 그 함수 하나로(domain/quote-list.ts 의 quoteSupplyAmountOf). 엑셀
   // 전용 장은 위에서 갈라 나갔으므로 여기서는 부품 줄 합 + 작업비이고, null 은 오지 않는다.
@@ -470,14 +513,17 @@ export default function QuotePrintView({
                   <td colSpan={9} />
                 </tr>
                 <tr>
+                  {/* 🔴 품명 줄 앞의 번호는 **제너레이터 양식에만** 있다(매쳐는 B열이 비어
+                      있다 — 아래 양식 모양 표의 `subjectMark`). 칸 자체는 양쪽 다 둔다 —
+                      없애면 그 아래 줄들과 열이 어긋난다. */}
                   <td className="qp-c-no" colSpan={2}>
-                    1.
+                    {shape.subjectMark}
                   </td>
                   <td className="qp-c-title" colSpan={7}>
                     {quote.subject}
                   </td>
                 </tr>
-                {productLine(quote) && (
+                {shape.showProductLine && productLine(quote) && (
                   <tr>
                     <td colSpan={2} />
                     <td className="qp-c-model" colSpan={7}>
@@ -486,57 +532,24 @@ export default function QuotePrintView({
                   </tr>
                 )}
 
-                <tr className="qp-group-row">
-                  <td colSpan={2} />
-                  <td className="qp-c-group" colSpan={7}>
-                    1)　부품 비용
-                  </td>
-                </tr>
-                {printed.length === 0 ? (
-                  <tr>
-                    <td colSpan={2} />
-                    <td className="qp-c-item qp-muted" colSpan={7}>
-                      (부품 없음)
-                    </td>
-                  </tr>
-                ) : (
-                  printed.map((part, index) => (
-                    <tr key={`${part.name}-${index}`}>
-                      <td colSpan={2} />
-                      <td className="qp-c-dash">-</td>
-                      <td className="qp-c-item" colSpan={3}>
-                        {part.name}
-                      </td>
-                      <td className="qp-c-qty">{part.quantity}</td>
-                      <td className="qp-c-money">{won(part.unitPrice)}</td>
-                      <td className="qp-c-money">{won(part.quantity * part.unitPrice)}</td>
-                    </tr>
-                  ))
-                )}
+                {buildCostGroups({
+                  shape,
+                  parts: printed,
+                  overhaulParts: printedOverhaul,
+                  workCost,
+                }).map((group) => (
+                  <CostGroupRows key={group.mark} group={group} />
+                ))}
 
-                <tr className="qp-group-row">
-                  <td colSpan={2} />
-                  <td className="qp-c-group" colSpan={4}>
-                    2)　작업비 (조사,수리,개조,통전,출하검사)
-                  </td>
-                  <td className="qp-c-qty">1</td>
-                  <td className="qp-c-money">{won(workCost)}</td>
-                  <td className="qp-c-money">{won(workCost)}</td>
-                </tr>
-                <tr>
-                  <td colSpan={2} />
-                  <td className="qp-c-dash">*</td>
-                  <td className="qp-c-fine" colSpan={6}>
-                    수리에 필요한 인건비, 유지관리비(계측기 유지관리, 전기 및 수도세등), 소모품등이
-                    포함되어 책정된 가격입니다.
-                  </td>
-                </tr>
-
-                {buildWorkSections(workSections, {
-                  investigation: quote.investigationExcluded === true,
-                  repair: quote.repairSectionDropped === true,
-                  powerTest: quote.powerTestExcluded === true,
-                }).map((section) => (
+                {buildWorkSections(
+                  workSections,
+                  {
+                    investigation: quote.investigationExcluded === true,
+                    repair: quote.repairSectionDropped === true,
+                    powerTest: quote.powerTestExcluded === true,
+                  },
+                  shape
+                ).map((section) => (
                   <SectionRows key={section.mark} section={section} />
                 ))}
               </tbody>
@@ -1153,6 +1166,294 @@ function excelOnlySheetStyles(plan: PaperPlan, sheetWidthPt: number, horizontall
 `;
 }
 
+/**
+ * ============================================================================
+ * 금액 묶음 — `1) 부품 비용` · `2) OH 부품 비용` · `3) 작업비 …` (2026-10-31)
+ * ============================================================================
+ * 품목 표 안의 돈이 적히는 묶음들이다. 아래 작업 내역 묶음(①②③④)과 **같은 규칙**으로
+ * 다룬다 — 그리는 것만 모아 두고 번호는 자리에서 뽑는다.
+ *
+ * ── 🔴 제너레이터 O/H 견적서는 부품 칸이 둘이다 ─────────────────────────────
+ * 양식에 `1) 부품 비용` 과 `2) OH 부품 비용` 이 따로 있고, 재고 관리의 O/H 템플릿에서
+ * 담아 온 줄(`isOverhaulPart`)이 뒤쪽 칸으로 간다(xlsx/oh-quote-template.ts). 파일은
+ * 처음부터 그렇게 나갔는데 **이 화면만 한 칸으로 그리고 있었다**(2026-10-31 사용자
+ * 지적) — 같은 견적서인데 화면과 받아 본 문서의 칸이 달랐다.
+ *
+ * ── 🔴 매쳐 양식에는 그 칸이 없다 — 종류만 보고 가르면 틀린다 (2026-10-31) ──
+ * 양식 넷을 열어 B · C · D열을 실측했다. 매쳐는 내자 · O/H 둘 다 부품 칸이 **하나**이고
+ * (`1. 부품 비용`), 그래서 파일을 만드는 쪽이 갈라 둔 두 목록을 매쳐 갈래에서 **도로 합쳐**
+ * 넘긴다(server/services/quote-workbook.ts 의 `templateKey.startsWith("MATCHER:")`). 가르는
+ * 기준을 「O/H 견적서인가」로 두면 **매쳐 O/H 견적서에 화면에만 있는 칸**이 생긴다 — 그래서
+ * 양식을 고르는 함수 하나로 가른다(위 `hasOverhaulPartsBox`).
+ *
+ * 🔴 **줄에 붙은 표시로 가르지도 않는다.** 파일을 만드는 쪽이 종류와 양식으로 가르므로,
+ * 내자 장에 OH 표시가 남은 줄이 있어도 — 종류를 OH 로 적다가 내자로 바꾼 장이 그렇다 —
+ * 그 문서에는 「2) OH 부품 비용」 칸 자체가 없다. 표시만 보고 가르면 화면에만 있는 칸이
+ * 생긴다.
+ *
+ * ── 🔴 매쳐는 **종이 모양이 통째로 다르다** (2026-10-31 사용자: 「다 고쳐」) ──
+ * 양식 넷을 열어 재고 그대로 맞췄다. 갈리는 것 전부를 **아래 양식 모양 표 한 자리**에
+ * 모아 둔 까닭이 이것이다 — 여섯 군데에 `if (매쳐)` 가 흩어지면 양식이 하나 더 생기는 날
+ * 다섯 군데만 고친다.
+ *
+ *                     제너레이터(실측)                     매쳐(실측)
+ *   품명 줄 앞       `1.`                                 없음(B열이 비어 있다)
+ *   제품 줄          `MODEL: …, S/N:…, L/N:…`             없음
+ *   금액 묶음 번호   `1)` `2)` `3)`                       `1.` `2.`
+ *   부품 칸          `부품 비용` (+O/H 는 `OH 부품 비용`)  `부품 비용` 하나
+ *   작업비 머리글    `작업비 (조사,수리,개조,통전,출하검사)` `작업 비용`
+ *   작업비 안내(`*`) 인건비·유지관리비·소모품… 긴 문장      「인건비 및 부대비용」 한 문장
+ *   작업 내역 번호   `①` `②` `③` (+`④ 서류작업`)          `1)` `2)` `3)` (서류작업 없음)
+ *
+ * 🔵 **작업 내역의 머리글 글자**(`인수 조사` ↔ `조사작업`)는 여기서 정하지 않는다 — 서버가
+ * 그 양식 파일에서 읽어 `workSections` 로 건네준다(storage/quote-template.ts). 번호만 갈린다.
+ *
+ * ── 🔴 OH 부품이 한 줄도 없어도 그 칸은 남는다 ─────────────────────────────
+ * 파일 쪽을 재어 맞춘 것이다: 줄 수를 맞추는 자리가 **머리글 바로 아래부터** 지운다 —
+ * oh-quote-template.ts 가 `resizeRowBlock` 에 `firstRow: overhaul.firstRow` 와
+ * `targetCount: input.overhaulParts.length` 를 주고, 그 `firstRow` 는 `headerRow + 1` 이다
+ * (quote-sheet-layout.ts 의 findItemBlock). 그래서 부품이 0개면 항목 줄만 사라지고 머리글
+ * `2) OH 부품 비용` 은 그대로 나간다. 부품 없이 작업비만 받는 O/H 견적이 실제로 있다(OhQuoteInput 의
+ * `overhaulParts`). 화면에서 칸을 숨기면 그 장에서 미리보기와 문서의 번호가 어긋난다 —
+ * 작업비가 화면에선 2), 문서에선 3) 이 된다.
+ *
+ * 🔵 대신 **「(부품 없음)」을 적지 않는다** — 그 글자는 `1) 부품 비용` 칸에만 있던 화면
+ * 쪽 표시이고 파일에는 안 적힌다. 새 칸에 베껴 두면 문서에 없는 글자가 하나 더 는다.
+ *
+ * ── 🔴 번호를 손으로 적지 않고 자리 순서에서 뽑는다 ─────────────────────────
+ * 아래 buildWorkSections 와 같은 까닭이다. 실제로 이 자리에서 당했다: OH 칸을 넣지 않은
+ * 채 작업비에 `2)` 가 글자로 박혀 있어서, 칸이 셋인데 번호는 둘까지밖에 없었다. 두 벌로
+ * 적어 두면 칸이 하나 늘거나 주는 날 또 어긋난다.
+ *
+ * 🔵 **양식 쪽도 같은 날 맞췄다**(2026-10-31). 제너레이터 O/H 양식은 그날 아침까지 B열에
+ * `2)` 가 두 번 적혀 있어서(`1) 부품 비용` · `2) OH 부품 비용` · `2) 작업비 …`) 파일만 번호가
+ * 겹쳐 나갔고, 사용자가 양식 파일을 고쳐 `3)` 이 되었다 — 채우개는 그 칸을 건드리지 않으므로
+ * (xlsx/oh-quote-template.ts 는 작업 내역 묶음과 서류작업의 번호만 당긴다) 양식에 적힌 값이
+ * 그대로 나간다. **지금은 화면과 파일이 둘 다 `3)` 이다**(양식을 채워 보고 확인).
+ * ============================================================================
+ */
+
+/** 품목 표에 적히는 한 줄. numeric 은 문자열로 오므로 여기서 한 번만 숫자로 바꾼다. */
+type PrintedPart = { name: string; quantity: number; unitPrice: number };
+
+function printedPartOf(item: {
+  partNameText: string;
+  quantity: number;
+  unitPrice: string;
+}): PrintedPart {
+  return { name: item.partNameText, quantity: item.quantity, unitPrice: Number(item.unitPrice) };
+}
+
+/** 부품 칸 — 머리글 한 줄과 그 아래 부품 줄들. */
+type PartsCostGroup = {
+  mark: string;
+  body: "PARTS";
+  label: string;
+  parts: readonly PrintedPart[];
+  /**
+   * 줄이 하나도 없을 때 적을 글. **null 이면 머리글만 그리고 아무것도 적지 않는다** —
+   * 파일이 그 모양이다(위 머리말의 「OH 부품이 한 줄도 없어도」).
+   */
+  emptyText: string | null;
+};
+
+/** 작업비 줄 — 수량 1 에 금액이 붙고, 바로 아래 작은 글씨 안내가 따라온다. */
+type LaborCostGroup = {
+  mark: string;
+  body: "LABOR";
+  label: string;
+  /** 바로 아래 `*` 줄. **양식마다 문장이 다르다**(아래 양식 모양 표). */
+  note: string;
+  workCost: number;
+};
+
+type CostGroup = PartsCostGroup | LaborCostGroup;
+
+/** 부품 줄이 하나도 없는 `1) 부품 비용` 칸에만 적는 화면 쪽 표시(위 머리말). */
+const NO_PARTS_TEXT = "(부품 없음)";
+
+/**
+ * 양식에 적힌 머리글 그대로다 — 번호만 빼고(번호는 자리에서 뽑는다).
+ *
+ * 🔵 **넷이 같은 글자라 여기 한 번만 적는다**(실측: 제너레이터 D26 · 매쳐 D27 둘 다
+ * `부품 비용`). 양식마다 갈리는 글자는 아래 양식 모양 표에 있다.
+ */
+const COST_GROUP_LABELS = {
+  parts: "부품 비용",
+  overhaulParts: "OH 부품 비용",
+} as const;
+
+/**
+ * ============================================================================
+ * 🔴 양식마다 갈리는 것 — **한 자리에 모아 둔다** (2026-10-31)
+ * ============================================================================
+ * 번호 모양 · 머리글 글자 · 있고 없는 줄까지 여섯 가지가 갈린다(위 머리말의 표). 그리는
+ * 자리마다 `if (매쳐)` 를 흩어 두면 **양식이 하나 더 생기는 날 다섯 군데만 고친다** — 그
+ * 누락은 오류가 아니라 「그 양식만 종이가 섞인다」로 나타나서, 그 양식을 쓰는 사람이
+ * 말해 주기 전에는 아무도 모른다.
+ *
+ * 🔴 **값은 전부 양식 파일 실측이다**(2026-10-31, 넷을 열어 A~D열을 훑었다). 지어낸 글자가
+ * 하나도 없어야 한다 — 받아 본 문서와 글자가 다르면 그것이 곧 다른 종이다.
+ */
+type QuoteSheetShape = {
+  /** 품명 줄 앞에 적는 번호. **null 이면 그 칸을 비운다**(매쳐 양식의 B25 가 비어 있다). */
+  subjectMark: string | null;
+  /** `MODEL: …, S/N:…, L/N:…` 줄을 그리는가. 매쳐 양식에는 그 줄이 없다. */
+  showProductLine: boolean;
+  /** 금액 묶음 번호. 자리 순서대로 쓴다 — 어느 묶음이 몇 번인지 따로 적지 않는다. */
+  costGroupMarks: readonly string[];
+  /** `OH 부품 비용` 칸이 있는가 — 제너레이터 O/H 하나뿐이다. */
+  hasOverhaulPartsBox: boolean;
+  /** 작업비 묶음의 머리글. */
+  laborLabel: string;
+  /** 작업비 바로 아래 `*` 줄. */
+  laborNote: string;
+  /** 작업 내역 묶음 번호. 역시 자리 순서대로 쓴다. */
+  sectionMarks: readonly string[];
+  /** 맨 아래 「서류작업」 묶음이 있는가 — 제너레이터 둘뿐이다. */
+  hasPaperworkSection: boolean;
+};
+
+/** 제너레이터 내자 · O/H 가 함께 쓰는 값(O/H 부품 칸만 갈린다). */
+const GENERATOR_SHEET_SHAPE: Omit<QuoteSheetShape, "hasOverhaulPartsBox"> = {
+  subjectMark: "1.",
+  showProductLine: true,
+  costGroupMarks: ["1)", "2)", "3)"],
+  laborLabel: "작업비 (조사,수리,개조,통전,출하검사)",
+  laborNote:
+    "수리에 필요한 인건비, 유지관리비(계측기 유지관리, 전기 및 수도세등), 소모품등이 포함되어 책정된 가격입니다.",
+  sectionMarks: ["①", "②", "③", "④"],
+  hasPaperworkSection: true,
+};
+
+/**
+ * 매쳐 내자 · O/H. **둘은 같은 판이고 줄 수만 다르다**(xlsx/matcher-quote-template.ts 머리말),
+ * 그래서 모양 값이 하나도 갈리지 않는다 — O/H 부품 칸도 둘 다 없다.
+ */
+const MATCHER_SHEET_SHAPE: Omit<QuoteSheetShape, "hasOverhaulPartsBox"> = {
+  subjectMark: null,
+  showProductLine: false,
+  costGroupMarks: ["1.", "2."],
+  laborLabel: "작업 비용",
+  laborNote: "수리에 필요한 인건비 및 부대비용이 포함되어 책정된 가격입니다.",
+  sectionMarks: ["1)", "2)", "3)"],
+  hasPaperworkSection: false,
+};
+
+/**
+ * 🔴 **표를 다 적어 둔다 — 새 양식이 생기면 컴파일러가 여기를 짚어 준다.** 「매쳐가 아니면
+ * 제너레이터」로 적어 두면 새 양식이 조용히 제너레이터 모양으로 흘러가고, 그런 종류의
+ * 누락은 그 양식의 문서가 나간 뒤에야 드러난다(xlsx/quote-sheet-layout.ts 의
+ * `WorkScopeExclusions` 가 집합 대신 Record 인 것과 같은 까닭).
+ */
+const SHEET_SHAPES: Record<Exclude<QuoteTemplateKey, "CABLE">, QuoteSheetShape> = {
+  "GENERATOR:DOMESTIC": { ...GENERATOR_SHEET_SHAPE, hasOverhaulPartsBox: false },
+  "GENERATOR:OVERHAUL": { ...GENERATOR_SHEET_SHAPE, hasOverhaulPartsBox: true },
+  "MATCHER:DOMESTIC": { ...MATCHER_SHEET_SHAPE, hasOverhaulPartsBox: false },
+  "MATCHER:OVERHAUL": { ...MATCHER_SHEET_SHAPE, hasOverhaulPartsBox: false },
+};
+
+function quoteSheetShapeOf(templateKey: QuoteTemplateKey): QuoteSheetShape {
+  /**
+   * 🔴 **케이블은 여기 오지 않는다** — 그 종이는 위에서 갈라져 CableQuoteSheet 가 그린다
+   * (금액 묶음도 작업 내역도 없는 다른 판이다). 표에 넣어 두면 쓰이지도 않는 값이 「그
+   * 양식의 모양」처럼 읽힌다. 만에 하나 흘러들면 지금까지와 같은 제너레이터 모양이다.
+   */
+  if (templateKey === "CABLE") return SHEET_SHAPES["GENERATOR:DOMESTIC"];
+  return SHEET_SHAPES[templateKey];
+}
+
+function buildCostGroups(input: {
+  shape: QuoteSheetShape;
+  parts: readonly PrintedPart[];
+  overhaulParts: readonly PrintedPart[];
+  workCost: number;
+}): CostGroup[] {
+  const drawn: (Omit<PartsCostGroup, "mark"> | Omit<LaborCostGroup, "mark">)[] = [
+    {
+      body: "PARTS",
+      label: COST_GROUP_LABELS.parts,
+      parts: input.parts,
+      emptyText: NO_PARTS_TEXT,
+    },
+    // 제너레이터 O/H 양식에만 있는 칸. 비어 있어도 머리글은 남는다(위 머리말).
+    ...(input.shape.hasOverhaulPartsBox
+      ? [
+          {
+            body: "PARTS" as const,
+            label: COST_GROUP_LABELS.overhaulParts,
+            parts: input.overhaulParts,
+            emptyText: null,
+          },
+        ]
+      : []),
+    {
+      body: "LABOR",
+      label: input.shape.laborLabel,
+      note: input.shape.laborNote,
+      workCost: input.workCost,
+    },
+  ];
+  return drawn.map((group, index) => ({ ...group, mark: input.shape.costGroupMarks[index] }));
+}
+
+function CostGroupRows({ group }: { group: CostGroup }) {
+  if (group.body === "LABOR") {
+    return (
+      <>
+        <tr className="qp-group-row">
+          <td colSpan={2} />
+          <td className="qp-c-group" colSpan={4}>
+            {group.mark}　{group.label}
+          </td>
+          <td className="qp-c-qty">1</td>
+          <td className="qp-c-money">{won(group.workCost)}</td>
+          <td className="qp-c-money">{won(group.workCost)}</td>
+        </tr>
+        <tr>
+          <td colSpan={2} />
+          <td className="qp-c-dash">*</td>
+          <td className="qp-c-fine" colSpan={6}>
+            {group.note}
+          </td>
+        </tr>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <tr className="qp-group-row">
+        <td colSpan={2} />
+        <td className="qp-c-group" colSpan={7}>
+          {group.mark}　{group.label}
+        </td>
+      </tr>
+      {group.parts.length === 0
+        ? group.emptyText !== null && (
+            <tr>
+              <td colSpan={2} />
+              <td className="qp-c-item qp-muted" colSpan={7}>
+                {group.emptyText}
+              </td>
+            </tr>
+          )
+        : group.parts.map((part, index) => (
+            <tr key={`${part.name}-${index}`}>
+              <td colSpan={2} />
+              <td className="qp-c-dash">-</td>
+              <td className="qp-c-item" colSpan={3}>
+                {part.name}
+              </td>
+              <td className="qp-c-qty">{part.quantity}</td>
+              <td className="qp-c-money">{won(part.unitPrice)}</td>
+              <td className="qp-c-money">{won(part.quantity * part.unitPrice)}</td>
+            </tr>
+          ))}
+    </>
+  );
+}
+
 type WorkSection = { mark: string; label: string; items: readonly string[] };
 
 /**
@@ -1188,14 +1489,26 @@ function SectionRows({ section }: { section: WorkSection }) {
   );
 }
 
-/** 묶음 번호. 자리 순서대로 쓴다 — 어느 묶음이 몇 번인지 따로 적지 않는다. */
-const SECTION_MARKS = ["①", "②", "③", "④"] as const;
-
 /**
  * 그려야 하는 묶음들.
  *
  * ①②③ 은 실제 작업 내역이고, **서류작업만 고정 문구**다 — 양식에도 그 아래
  * 줄이 없고 견적서마다 달라지는 값이 아니다.
+ *
+ * ── 🔴 서류작업은 **제너레이터 양식에만 있다** (2026-10-31 사용자 요구) ────
+ * 「매쳐 oh 엑셀에는 [④　서류작업]가 없는데 미리보기에는 있어」. 양식 넷의 시트를
+ * 통째로 훑어 확인했다 — 「서류」가 든 줄이 제너레이터 내자 52행 · 제너레이터 O/H
+ * 69행에 하나씩 있고 **매쳐 둘에는 0개**다. 그래서 매쳐 채우개만 번호를 당기는
+ * `renumberPaperworkBlock` 을 부르지 않는다(xlsx/matcher-quote-template.ts).
+ *
+ * 🔴 **빼면 번호가 저절로 맞는다.** 아래에서 번호를 자리 순서로 뽑으므로, 묶음이
+ * 하나 빠져도 남은 셋이 `1) 2) 3)` 그대로다 — 손으로 적어 두었다면 매쳐에서만 넷째
+ * 번호가 남아 틀어졌을 것이다. 이 패턴이 바로 그러라고 있는 것이다.
+ *
+ * ── 🔴 번호 **모양**도 양식마다 다르다 ─────────────────────────────────
+ * 제너레이터는 `① ② ③ ④`, 매쳐는 `1) 2) 3)` 이다(실측). 파일 쪽도 같은 두 벌을 들고
+ * 번호를 당긴다(xlsx/quote-sheet-layout.ts 의 `renumberWorkScopeSectionMarks` 가 `marks`
+ * 를 받는 그 까닭 — 매쳐 채우개는 `MATCHER_SECTION_MARKS` 를 건넨다).
  *
  * ── 통전작업을 뺀 장은 ③ 을 아예 그리지 않는다 ──────────────────────────
  * 하지 않은 시험을 했다고 적어 보내지 않기 위해서다. 🔴 **그러면 서류작업이
@@ -1214,16 +1527,24 @@ const SECTION_MARKS = ["①", "②", "③", "④"] as const;
  */
 function buildWorkSections(
   sections: QuoteWorkSections | undefined,
-  dropped: { investigation: boolean; repair: boolean; powerTest: boolean }
+  dropped: { investigation: boolean; repair: boolean; powerTest: boolean },
+  /**
+   * 번호 모양과 서류작업 유무 — 양식이 정한다(위 양식 모양 표).
+   *
+   * 🔴 **선택이 아니라 받아야 하는 값이다.** 「안 주면 제너레이터」로 두면 부르는 자리를
+   * 하나 빠뜨린 날 매쳐 종이에 그 양식에 없는 묶음과 동그라미 번호가 다시 뜬다 —
+   * 오류가 나지 않는다.
+   */
+  shape: Pick<QuoteSheetShape, "sectionMarks" | "hasPaperworkSection">
 ): WorkSection[] {
   const resolved = sections ?? FALLBACK_WORK_SECTIONS;
   const drawn = [
     ...(dropped.investigation ? [] : [resolved.INVESTIGATION]),
     ...(dropped.repair ? [] : [resolved.REPAIR]),
     ...(dropped.powerTest ? [] : [resolved.POWER_TEST]),
-    { label: "서류작업", items: [] as readonly string[] },
+    ...(shape.hasPaperworkSection ? [{ label: "서류작업", items: [] as readonly string[] }] : []),
   ];
-  return drawn.map((section, index) => ({ mark: SECTION_MARKS[index], ...section }));
+  return drawn.map((section, index) => ({ mark: shape.sectionMarks[index], ...section }));
 }
 
 /**

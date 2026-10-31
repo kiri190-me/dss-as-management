@@ -23,6 +23,14 @@ src/components/graph-editor-core/UndoRedoControls.test.tsx
 src/components/procedures/editor/EditHistoryList.test.tsx
 src/components/layout/NotificationBell.test.tsx
 src/components/quotes/QuotePrintView.test.tsx
+# 같은 화면의 **금액 묶음과 품목 표 머리** — 그리고 🔴 **양식(제너레이터 ↔ 매쳐)마다
+# 갈리는 모양**(2026-10-31). 위 이웃은 도구모음과 작업 내역 묶음(①②③④ · 서류작업)을
+# 보고, 여기서는 돈이 적히는 칸과 품명 줄을 본다 — OH 표시가 붙은 줄이 제 칸으로 가는가 ·
+# 매쳐는 칸이 둘이고 번호가 `1.` `2.` 인가 · 작업비 머리글과 `*` 안내가 그 양식 글자인가 ·
+# 품명 줄 앞 번호와 `MODEL:` 줄이 양식대로인가 · 번호가 자리에서 뽑히는가 · 갈라 그려도
+# 합계가 그대로인가. 파일 쪽 규칙은 unit 목록의 lib/xlsx/oh-quote-template.test.ts 와
+# matcher-quote-template.test.ts 가 본다.
+src/components/quotes/quote-print-cost-groups.test.tsx
 src/components/repair-cases/work-history/DatabaseWorkHistoryScreen.test.tsx
 src/components/procedures/procedure-publish-flow.test.tsx
 src/components/repair-cases/files/preview-backfill.test.ts

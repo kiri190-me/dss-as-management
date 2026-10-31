@@ -928,6 +928,9 @@ describe("④b 🔴 저장된 번호가 인쇄 · 엑셀로 나가지 않는다"
   };
 
   const printable = (over: Partial<QuotePrintData> = {}): QuotePrintData => ({
+    // 장비 종류를 안 고른 장 = 제너레이터 양식(domain/quote-template-variant.ts). 여기서
+    // 보는 것은 우리 품번이 종이로 새지 않는가이고, 양식 갈래와는 상관이 없다.
+    laborEquipmentKind: null,
     quoteNumber: "DSS 2026-904",
     quoteDate: "2026-10-16",
     customerNameText: "가상전자 주식회사",
