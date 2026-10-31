@@ -43,6 +43,7 @@ import {
   cloneRowMergeCells,
   parseSheetRows,
   readRowHeightAttribute,
+  removeRowMergeCells,
   resizeRowBlock,
   setRowHeightAttribute,
   shiftMergeCellRows,
@@ -122,16 +123,12 @@ import {
  *     라벨 칸이 우리가 아는 글자인지 확인하고, 아니면 던진다**(`assertLayout`).
  *     양식이 바뀌면 엉뚱한 칸에 `○` 를 찍는 대신 멈춘다.
  *
- * ── 🔴 세 구역은 **각자 정해진 자리에서** 시작한다 ──────────────────────
- * 발행본은 「확인내용」·「조치」·「정리」가 본문 안에서 서로 떨어진 자리에
- * 앉는다. 구역을 줄줄이 이어 붙이면 세 구역이 문서 위쪽에 몰리고 아래 20여
- * 줄이 통째로 빈다 — 같은 양식으로 만든 문서인데 우리 것만 모양이 다르다.
- *
- * 🔴 **그 자리도 코드에 박지 않는다.** 원본의 배치가 양식 안에 남아 있다:
- * 라벨 글상자(`Text Box 9`)의 문단이 그것이다. 「확　내」가 1번째, 「조  치」가
- * 14번째, 「정  리」가 27번째 문단이고, 사이는 빈 문단이다. 문단마다
- * `<a:lnSpc><a:spcPts val="1100"/></a:lnSpc>`(=11.00pt) 로 줄간격이 정확히
- * 박혀 있고, `<a:bodyPr … tIns="18288">` 가 위쪽 안쪽여백을, 앵커의
+ * ── 🔴 본문이 시작하는 줄은 **양식이 정한다** ───────────────────────────
+ * 「확인내용」이 어느 행에서 시작하는지는 코드에 박지 않는다. 원본의 배치가 양식
+ * 안에 남아 있다: 라벨 글상자(`Text Box 9`)의 문단이 그것이다. 「확　내」가
+ * 1번째, 「조  치」가 14번째, 「정  리」가 27번째 문단이고, 사이는 빈 문단이다.
+ * 문단마다 `<a:lnSpc><a:spcPts val="1100"/></a:lnSpc>`(=11.00pt) 로 줄간격이
+ * 정확히 박혀 있고, `<a:bodyPr … tIns="18288">` 가 위쪽 안쪽여백을, 앵커의
  * `<xdr:from>` 이 상자가 어느 행 어디쯤에서 시작하는지를 알려 준다. 그래서
  *
  *     N번째 문단의 세로 위치 = rowOff + tIns + (앞 문단들의 줄간격 합)
@@ -147,35 +144,48 @@ import {
  * 던진다** — `assertLayout` 과 같은 판단이다. 엉뚱한 자리에 그린 문서를
  * 고객사로 내보내는 것보다 멈추는 편이 낫다.
  *
- * ── 🔴 구역과 구역 사이에는 빈 줄이 한 줄 있다 ─────────────────────────
- * 내용이 배정된 자리 안에 들어가면 남는 줄이 저절로 사이를 벌린다. 그런데
- * 내용이 넘쳐 아래 구역을 밀어내면 **다음 구역이 마지막 줄 바로 아래에 딱
- * 붙어** 구분이 사라진다. 그래서 밀어낼 때는 한 줄을 더 띄운다
- * (`SERVICE_REPORT_SECTION_GAP_ROWS`·`planBodyLayout`). 내용이 없는 구역은
- * 건너뛰면서 빈 줄도 안 만든다 — 안 그러면 쓰이지도 않은 구역 때문에 두 줄이
- * 빈다.
+ * ── 🔴 2026-10-31 — 구역은 이제 **이어 붙는다**(설계가 뒤집힌 자리) ──────
+ * 그 전까지는 **세 구역이 각자 제 문단 자리에서** 시작했다(수리 32/41/51 ·
+ * 검사 32/43). 실제 발행본이 그 모양이었기 때문이고, 이어 붙이면 세 구역이
+ * 문서 위쪽에 몰려 우리 문서만 달라 보인다는 것이 그때의 판단이었다 — **틀린
+ * 말이 아니었다.** 대신 내용이 짧으면 구역 사이가 일곱 줄까지 벌어졌고, 그
+ * 사이는 건마다 달랐다(실측 1~9행).
  *
- * ── 🔴 맺음 표시의 위·아래에도 여백이 있다 ─────────────────────────────
- * 맺음 표시(`～이　상～`)는 **마지막 내용 줄에서 한 줄 띄운 자리**에 앉고, 그
- * 아래로 **두 줄**이 본문 블록 안에 남는다
- * (`SERVICE_REPORT_CLOSING_GAP_ROWS`·`SERVICE_REPORT_CLOSING_TRAILING_ROWS`,
- * 2026-09-02 사용자 결정). 셋 다 본문 용량을 먹으므로 자리가 모자라면 여느
- * 때처럼 `growBodyBlock` 이 줄을 끼워 넣는다.
+ * 🔴 **사용자가 그 설계를 알고 뒤집었다**(2026-10-31): 「각각의 본문내용이 끝나고
+ * 행을 한 칸만 띄운 다음에 다음 단락의 내용이 나오도록」. 지금은
+ *
+ *   · 본문의 **첫 줄**만 위 계산을 쓴다(「확인내용」의 자리 = 32행).
+ *   · 그 아래로는 구역이 차례로 이어 붙고, 사이는 **언제나 빈 줄 하나**
+ *     (`SERVICE_REPORT_SECTION_GAP_ROWS` · `planBodyLayout`).
+ *   · 내용이 없는 구역은 통째로 빠진다 — 자리도 빈 줄도 안 먹는다.
+ *
+ * 「조치」·「정리」의 문단 자리는 이제 **배치에 쓰이지 않는다.** 그래도 계속
+ * 읽는다 — 양식이 우리가 아는 모양인지 보는 검사로 남겨 둔 것이다(못 찾으면
+ * 던진다).
+ *
+ * ── 🔴 맺음 표시의 위·아래 — 세 줄씩 (2026-10-31) ───────────────────────
+ * 맺음 표시(`～이　상～`)는 **마지막 내용 줄에서 세 줄 띄운 자리**에 앉고, 그
+ * 아래로 **세 줄**이 남는다(`SERVICE_REPORT_CLOSING_GAP_ROWS` ·
+ * `SERVICE_REPORT_CLOSING_TRAILING_ROWS`). 2026-09-02 에는 한 줄·두 줄이었다.
+ *
+ * 🔴 아래 세 줄은 이제 **하한이 아니라 전부**다. 블록의 마지막 줄이 곧 세 줄째가
+ * 되도록 **블록을 늘리거나 줄인다** — 모자라면 `growBodyBlock` 이 끼워 넣고,
+ * 남으면 `shrinkBodyBlock` 이 걷어내 비고·담당·승인·문서번호가 그만큼 위로
+ * 올라온다(사용자: 「양식 아래에 비는 줄이 있다면 3행 정도를 제외하고 없애도 될
+ * 것 같아」 → 「그 칸을 위로 당기는 것이야」).
  *
  * ── 🔴 「확인내용」만 글상자보다 **한 줄 아래**다 ───────────────────────
  * 위 계산은 「확인내용」에 31행을 준다. 양식의 두 글상자(본문 상자·라벨 상자)가
  * 둘 다 31행을 가리키기 때문이고, 실측으로 확인한 것이다. **그런데 실제
- * 발행본은 32행에서 시작한다** — 2026-09-02 사용자 결정이다.
+ * 발행본은 32행에서 시작한다** — 2026-09-02 사용자 결정이고, 2026-10-31 에도
+ * **그대로 살아 있다**(본문의 첫 줄이 곧 「확인내용」의 자리다).
  *
  * 🔴 그러니 나중에 이 자리를 보고 "글상자 계산이 31을 주는데 왜 32지? 버그인가?"
  * 하고 되돌리지 말 것. **계산은 옳고, 그 위에 규칙이 하나 얹혀 있는 것**이다
- * (`SERVICE_REPORT_FINDINGS_ROW_OFFSET`·`shiftFindingsSectionDown`). 계산을
- * 왜곡해 32를 내놓게 만들지 않은 이유도 같다 — 그렇게 하면 양식의 글상자를
- * 따라간다는 성질이 죽고, 「조치」·「정리」까지 함께 밀린다.
+ * (`SERVICE_REPORT_FINDINGS_ROW_OFFSET`·`shiftFindingsSectionDown`).
  *
- * 결과적으로 31행은 비고, 「확인내용」 구역은 32~40행이다(수리 기준. 「조치」
- * 41행 · 「정리」 51행은 그대로다). 내용이 그보다 길면 여느 때처럼 아래 구역을
- * 밀어낸다.
+ * 결과적으로 31행은 비고, 본문은 32행에서 시작한다. 「조치」·「정리」는 앞
+ * 구역이 끝난 다음 한 줄을 띄운 자리다.
  *
  * ── 🔴 46행의 높이는 **실수다** — 먼저 고르게 편다 ─────────────────────
  * 본문 행은 전부 14.1pt 인데 **수리 양식의 46행만 75.6pt** 다. 같은 통합문서인
@@ -205,14 +215,17 @@ import {
  * (sheet-patch.ts 의 `setIsoDate`). 판단은 양식을 보고 한다 — 언젠가 양식이
  * 보통(transitional) 통합문서로 다시 저장되면 자동으로 일련번호로 돌아간다.
  *
- * ── 🔴 본문 줄 수에 상한이 없다 — 모자라면 줄을 끼워 넣는다 ────────────
- * 양식의 본문은 29줄이지만 그것이 상한은 아니다. 담을 것이 더 많으면 **행을
- * 끼워 넣는다.** 조용히 자르는 것은 「조치」의 마지막 줄이 아무 표시 없이
- * 사라진 문서를 고객사로 보내는 일이다.
+ * ── 🔴 본문 줄 수에 상한이 없다 — 모자라면 끼워 넣고 남으면 걷어낸다 ────
+ * 양식의 본문은 29줄이지만 그것이 상한도 하한도 아니다. 담을 것이 더 많으면
+ * **행을 끼워 넣고**(`growBodyBlock`), 남으면 **걷어낸다**
+ * (`shrinkBodyBlock`, 2026-10-31). 조용히 자르는 것은 「조치」의 마지막 줄이
+ * 아무 표시 없이 사라진 문서를 고객사로 보내는 일이고, 남는 줄을 그대로 두면
+ * 상자 안이 열 줄 넘게 빈 문서가 나간다.
  *
- * 끼워 넣는 자리는 본문 **마지막 줄의 바로 위**다. 마지막 줄에는 상자의
- * 밑변(아래 테두리)이 붙어 있어서, 그 아래에 넣으면 테두리가 문서 한가운데
- * 남는다. 본으로 복제하는 줄도 그래서 마지막 줄이 아니라 그 위의 줄이다.
+ * 끼워 넣고 걷어내는 자리는 둘 다 본문 **마지막 줄의 바로 위**다. 마지막 줄에는
+ * 상자의 밑변(아래 테두리)이 붙어 있어서, 그 아래에 넣으면 테두리가 문서
+ * 한가운데 남고 그 줄을 지우면 상자 바닥이 열린다. 본으로 복제하는 줄도 그래서
+ * 마지막 줄이 아니라 그 위의 줄이다.
  *
  * 행이 밀리면 **함께 밀려야 하는 것이 여섯**이고, 하나만 빠뜨려도 문서가
  * 깨진다. 이 파일이 여섯을 전부 맡는다:
@@ -221,6 +234,9 @@ import {
  *   2. 병합 칸 — 아래쪽을 밀고(`shiftMergeCellRows`), 새 줄에 새로
  *      만든다(`cloneRowMergeCells`). 이 양식의 병합은 221개고 본문 아래에
  *      비고(`C60:G63`)·담당/승인(`AG60:AU63`)·문서번호(`C64:I64`)가 있다.
+ *      🔴 **걷어낼 때는 지워질 줄의 병합을 먼저 없앤다**(`removeRowMergeCells`).
+ *      안 그러면 아래에서 올라온 병합과 범위가 겹치고, 겹친 병합은 Excel 이
+ *      파일 열기를 거부하는 사유다.
  *   3. **인쇄 영역** — `'Repair_Report (한글)'!$B$8:$AV$64`. 안 밀면 비고와
  *      도장이 인쇄에서 잘린다(견적서에서 실제로 겪었고 화면으로는 안 보인다).
  *   4. **공유 수식** — `<f t="shared" ref="BC31:BC59" si="0">LEN(H31)</f>`.
@@ -1051,10 +1067,16 @@ export function normalizeBodyRowHeights(
 /**
  * 🔴 구역마다 **시작 행**을 라벨 글상자에서 계산한다 — 코드에 박지 않는다.
  *
- * 머리말 '세 구역은 각자 정해진 자리에서' 참조. 라벨 글상자의 N번째 문단이
+ * 머리말 '본문이 시작하는 줄은 양식이 정한다' 참조. 라벨 글상자의 N번째 문단이
  * 몇 행에 앉는지를 앵커(`<xdr:from>`)·안쪽여백(`tIns`)·줄간격(`lnSpc`)과 본문
  * 행 높이로 훑어 내려가 구한다. 라벨 글자가 든 문단만 구역의 시작이고 빈 문단은
  * 건너뛴다.
+ *
+ * ⚠️ **2026-10-31 부터 배치에 쓰이는 것은 첫 값 하나뿐이다**(「확인내용」의 자리).
+ * 그 아래 구역은 이어 붙으므로(`planBodyLayout`) 「조치」·「정리」의 값은 쓰이지
+ * 않는다. 그래도 **계속 읽는다** — 못 찾거나 순서가 뒤집히면 던지는 이 검사가,
+ * 양식이 우리가 아는 모양인지 보는 자리로 남는다. 지우면 라벨 글상자가 통째로
+ * 바뀐 양식을 아무 말 없이 받아들이게 된다.
  *
  * ⚠️ **행 높이를 고르게 편 시트를 넘겨야 한다**(`normalizeBodyRowHeights`).
  * 75.6pt 짜리 손자국이 살아 있으면 그 아래 구역이 통째로 어긋난다.
@@ -1210,7 +1232,11 @@ function createRowHeightReader(sheetXml: string): (row: number) => number {
  * 하고 0 으로 되돌리지 말 것. `readSectionStartRows` 는 **옳은 값을 내놓고
  * 있고**, 그 위에 발행본의 관례가 한 줄 얹혀 있는 것이다.
  *
- * 「조치」·「정리」는 그대로 둔다 — 그쪽은 발행본과 글상자가 같은 자리다.
+ * 🔴 **2026-10-31 의 설계 반전에도 이 한 줄은 살아 있다.** 구역을 이어 붙이게
+ * 되면서 「조치」·「정리」의 글상자 자리는 안 쓰게 됐지만, 「확인내용」의 자리는
+ * 곧 **본문이 시작하는 줄**이고 발행본이 32행이라는 사실은 그대로다. 그래서
+ * 값도 함수도 그대로 둔다 — 다만 「조치」·「정리」를 그대로 둔다는 아래 문장은
+ * 이제 "그 둘은 애초에 밀 자리가 없다"는 뜻이다.
  */
 export const SERVICE_REPORT_FINDINGS_ROW_OFFSET = 1;
 
@@ -1219,7 +1245,10 @@ export const SERVICE_REPORT_FINDINGS_ROW_OFFSET = 1;
  * 않는다 — 왜곡하면 양식의 글상자를 따라간다는 성질이 통째로 죽는다.
  *
  * 구역은 라벨 글자로 가린다. 자리(index)로 가리면 「확인내용」이 없는 문서에서
- * 엉뚱한 구역이 밀린다.
+ * 엉뚱한 구역이 밀린다. ⚠️ 2026-10-31 부터 쓰이는 값은 첫 자리 하나뿐이지만
+ * (`planBodyLayout`), 가리는 방식은 그대로 둔다 — 목록 전체를 올바르게 유지하는
+ * 쪽이, 「첫 자리면 무조건 민다」로 바꿔 두고 구역 차례가 바뀌는 날 틀리는 것보다
+ * 낫다.
  */
 export function shiftFindingsSectionDown(
   sections: readonly { labelLines: readonly string[] }[],
@@ -1234,76 +1263,67 @@ export function shiftFindingsSectionDown(
 }
 
 /**
- * 🔴 구역을 **각자 정해진 자리에서** 시작시킨다 — 이 작업의 본체.
+ * 🔴 구역을 **이어 붙인다** — 이 작업의 본체 (2026-10-31 로 뒤집힌 자리).
  *
- *   · 한 구역이 차지하는 줄 수 = `max(배정된 줄 수, 실제 내용 줄 수)`.
- *     배정된 줄 수는 **다음 구역의 시작 행**에서 나온다. 내용이 짧아도 다음
- *     구역은 제자리에서 시작한다.
- *   · 내용이 배정된 자리보다 길면 그 구역이 늘어나고 **아래가 그만큼 밀린다.**
- *   · 🔴 **마지막으로 내용이 있는 구역은 늘리지 않는다.** 그 구역은 제 줄 수만
- *     쓰고 맺음 표시가 바로 다음 줄에 온다 — 안 그러면 두 줄짜리 보고서에서도
- *     블록이 꽉 차 맺음 표시가 블록 밖으로 밀린다.
- *   · 내용이 없는 구역은 라벨을 그리지 않되 **아래 구역의 자리는 그대로 둔다.**
+ *   · 본문이 시작하는 줄은 여전히 **양식이 정한다** — `startRows` 의 **첫 값**
+ *     하나다(「확인내용」의 자리 = 32행. `readSectionStartRows` ·
+ *     `shiftFindingsSectionDown`). 그 아래로는 양식의 자리를 쓰지 않는다.
+ *   · 한 구역이 차지하는 줄 수 = `max(내용 줄 수, 라벨 줄 수)`
+ *     (`sectionRowCount` — 「확인내용」 라벨이 두 줄이라 한 줄짜리도 두 줄을 먹는다).
+ *   · 구역과 구역 사이는 **언제나 빈 줄 하나**(`SERVICE_REPORT_SECTION_GAP_ROWS`).
+ *     본문이 길든 짧든 같다.
+ *   · 내용이 없는 구역은 **통째로 빠진다** — 자리도 빈 줄도 차지하지 않는다.
+ *     건너뛴 자리에 빈 줄이 둘로 보이면 안 된다.
+ *
+ * ── 🔴 예전 설계와, 그것이 틀린 말이 아니었다는 것 ──────────────────────
+ * 2026-10-31 전에는 구역마다 **양식의 라벨 글상자가 정한 시작 행**(수리
+ * 32/41/51 · 검사 32/43)이 있었고, 내용이 짧으면 다음 구역이 제자리에서 시작할
+ * 때까지 사이가 비었다(실측 7~9행). **버그가 아니라 설계였다** — 실제 발행본의
+ * 세 구역이 그 자리에 앉아 있어서, 이어 붙이면 우리 문서만 위쪽에 몰린 모양이
+ * 되기 때문이다. 그 판단은 지금도 틀린 말이 아니다.
+ *
+ * 🔴 **사용자가 그것을 알고 뒤집었다**(2026-10-31): 「각각의 본문내용이 끝나고
+ * 행을 한 칸만 띄운 다음에 다음 단락의 내용이 나오도록」. 발행본의 모양보다
+ * **읽기**를 고른 것이다 — 들쭉날쭉한 사이(건마다 1~9행)가 같은 양식으로 만든
+ * 문서를 건마다 다르게 보이게 했다. 되돌리지 말 것.
+ *
+ * 덤으로 작성 화면의 미리보기와 문서의 줄 차례가 **같아졌다**. 예전에는
+ * 미리보기가 「사이 한 줄」을 하한으로만 그릴 수 있었다
+ * (`domain/service-report-body-wrap.ts` 머리말의 '여기 없는 것').
  */
 function planBodyLayout(
   sections: readonly BodySection[],
   startRows: readonly number[],
   block: { firstRow: number; lastRow: number }
 ): BodyLayout {
-  let lastWithLines = -1;
-  sections.forEach((section, index) => {
-    if (section.lines.length > 0) lastWithLines = index;
-  });
+  const drawn = sections.filter((section) => section.lines.length > 0);
   // 입력 검사가 이미 막지만, 타입이 없는 곳에서 불릴 수 있다.
-  if (lastWithLines < 0) throw new Error("본문이 한 줄도 없습니다.");
+  if (drawn.length === 0) throw new Error("본문이 한 줄도 없습니다.");
+
+  /**
+   * 🔴 본문의 **첫 줄**. 구역 목록의 첫 자리(「확인내용」)가 받은 행이고, 그
+   * 구역에 내용이 없어도 같다 — 「조치」부터 시작하는 보고서가 문서 한가운데서
+   * 시작하면 위가 통째로 빈다.
+   */
+  const bodyStartRow = Math.max(startRows[0] ?? block.firstRow, block.firstRow);
 
   const placements: SectionPlacement[] = [];
-  let cursor = block.firstRow;
+  let cursor = bodyStartRow;
+  for (const section of drawn) {
+    // 첫 구역 앞에는 안 붙인다 — 사이가 아니라 본문의 시작이다.
+    if (placements.length > 0) cursor += SERVICE_REPORT_SECTION_GAP_ROWS;
 
-  for (const [index, section] of sections.entries()) {
-    const startRow = Math.max(startRows[index], cursor);
-    if (section.lines.length === 0) {
-      // 🔴 마지막 내용 구역 **뒤의** 빈 구역은 자리도 차지하지 않는다 —
-      //    차지하면 맺음 표시가 쓰이지도 않은 구역 아래로 밀려 내려간다.
-      //    🔴 빈 줄도 붙이지 않는다. 그리지도 않은 구역이 사이를 한 줄 더
-      //    벌리면, 건너뛴 자리에 빈 줄이 두 줄로 보인다.
-      if (index < lastWithLines) cursor = startRow;
-      continue;
-    }
-
-    const lines = sectionRowCount(section);
-    const allotted =
-      index + 1 < startRows.length
-        ? startRows[index + 1] - startRows[index]
-        : block.lastRow - startRows[index] + 1;
-
-    const rowCount = index === lastWithLines ? lines : Math.max(allotted, lines);
-    placements.push({ section, startRow, rowCount });
-
-    /**
-     * 🔴 다음 구역이 앉을 수 있는 가장 이른 줄.
-     *
-     *   · `startRow + rowCount` — 배정된 자리를 다 쓴 다음. 내용이 짧으면
-     *     이것이 곧 다음 구역의 제자리이고, 밀렸을 때는 밀린 만큼 함께 내려간다.
-     *   · `startRow + lines + 빈 줄` — **내용이 끝난 다음 한 줄을 띄운 자리.**
-     *     내용이 배정된 자리를 꽉 채우거나 넘칠 때 이쪽이 이겨서 사이가 벌어진다
-     *     (`SERVICE_REPORT_SECTION_GAP_ROWS`).
-     *
-     * 🔴 **마지막 내용 구역에는 안 붙인다.** 그 뒤의 여백은 구역 사이가 아니라
-     * 맺음 표시의 것이고(`SERVICE_REPORT_CLOSING_GAP_ROWS`), 아래에서 따로
-     * 더한다 — 두 규칙을 한 자리에서 뭉뚱그리면 한쪽만 바꿀 수 없게 된다.
-     */
-    cursor =
-      index === lastWithLines
-        ? startRow + rowCount
-        : Math.max(startRow + rowCount, startRow + lines + SERVICE_REPORT_SECTION_GAP_ROWS);
+    const rowCount = sectionRowCount(section);
+    placements.push({ section, startRow: cursor, rowCount });
+    cursor += rowCount;
   }
 
   /**
-   * 🔴 맺음 표시는 마지막 내용 줄에서 **한 줄 띄운** 자리다. `cursor` 는 마지막
-   * 내용 줄의 바로 다음이므로 거기에 여백을 더한 줄이 맺음 표시의 자리다.
+   * 🔴 맺음 표시는 마지막 내용 줄에서 **세 줄 띄운** 자리다
+   * (`SERVICE_REPORT_CLOSING_GAP_ROWS`, 2026-10-31). `cursor` 는 마지막 내용
+   * 줄의 바로 다음이므로 거기에 여백을 더한 줄이 맺음 표시의 자리다.
    *
-   * ⚠️ 아래로 남겨 둘 두 줄(`SERVICE_REPORT_CLOSING_TRAILING_ROWS`)은 여기서
+   * ⚠️ 아래로 남겨 둘 세 줄(`SERVICE_REPORT_CLOSING_TRAILING_ROWS`)은 여기서
    * 세지 않는다. 그것은 «무엇을 어디에 그리는가»가 아니라 «블록이 얼마나 커야
    * 하는가»의 문제라, 자리를 셈하는 `fillSheet` 가 맡는다.
    */
@@ -1388,9 +1408,9 @@ function fillSheet(
     block
   );
   /**
-   * 블록이 얼마나 커야 하는가. `closingRow` 에는 맺음 표시 **위**의 여백이 이미
-   * 들어 있고(`planBodyLayout`), 여기에 맺음 표시 **아래** 두 줄을 더한다 —
-   * 그 두 줄이 블록 밖으로 밀려나면 여백이 아니라 잘린 문서가 된다.
+   * 블록이 **얼마여야 하는가**. `closingRow` 에는 맺음 표시 **위**의 여백이 이미
+   * 들어 있고(`planBodyLayout`), 여기에 맺음 표시 **아래** 세 줄을 더한다 —
+   * 그 세 줄이 블록 밖으로 밀려나면 여백이 아니라 잘린 문서가 된다.
    */
   const neededRows =
     layout.closingRow + SERVICE_REPORT_CLOSING_TRAILING_ROWS - block.firstRow + 1;
@@ -1400,9 +1420,24 @@ function fillSheet(
     );
   }
   const capacity = block.lastRow - block.firstRow + 1;
-  const rowShift = Math.max(0, neededRows - capacity);
+  /**
+   * 🔴 **음수가 될 수 있다 — 그러면 블록을 당긴다**(2026-10-31 사용자 결정:
+   * 「양식 아래에 비는 줄이 있다면 3행 정도를 제외하고 없애도 될 것 같아」 →
+   * 되묻자 「[그 칸을 위로 당기는 것]이야」). 예전에는 `Math.max(0, …)` 라
+   * 모자랄 때만 늘렸고, 남는 줄은 상자 안에 열 줄 넘게 비어 있었다.
+   *
+   * 당기면 비고·담당·승인·문서번호와 그 위에 얹힌 도장 그림이 **통째로** 그만큼
+   * 올라온다(`shrinkBodyBlock` · `rewriteDrawing` · `shiftPrintArea`). 늘리는
+   * 쪽과 같은 것들이 같은 수만큼, 부호만 반대로 따라간다.
+   */
+  const rowShift = neededRows - capacity;
 
-  let xml = rowShift === 0 ? evened : growBodyBlock(evened, block, rowShift);
+  let xml =
+    rowShift === 0
+      ? evened
+      : rowShift > 0
+        ? growBodyBlock(evened, block, rowShift)
+        : shrinkBodyBlock(evened, block, -rowShift);
 
   const insertRow = block.lastRow;
   const shifted = (row: number): number => (row >= insertRow ? row + rowShift : row);
@@ -1582,7 +1617,7 @@ function alignBodyContentLeft(
 
 function fillBody(sheetXml: string, block: BodyBlock, layout: BodyLayout): string {
   const capacity = block.lastRow - block.firstRow + 1;
-  // 🔴 맺음 표시 **아래 두 줄까지** 블록 안이어야 한다 — 위의 여백은 이미
+  // 🔴 맺음 표시 **아래 세 줄까지** 블록 안이어야 한다 — 위의 여백은 이미
   //    `closingRow` 에 들어 있다.
   const needed = layout.closingRow + SERVICE_REPORT_CLOSING_TRAILING_ROWS - block.firstRow + 1;
   if (needed > capacity) {
@@ -1617,8 +1652,9 @@ function fillBody(sheetXml: string, block: BodyBlock, layout: BodyLayout): strin
     });
   }
 
-  // 🔴 맺음 표시는 **언제나 마지막 내용 줄에서 한 줄 띄운 줄**이다. 그 아래
-  //    두 줄은 위에서 통째로 비워 둔 그대로 남는다 — 따로 쓸 것이 없다.
+  // 🔴 맺음 표시는 **언제나 마지막 내용 줄에서 세 줄 띄운 줄**이다
+  //    (`SERVICE_REPORT_CLOSING_GAP_ROWS`). 그 아래 세 줄은 위에서 통째로 비워
+  //    둔 그대로 남는다 — 따로 쓸 것이 없다.
   xml = setInlineString(
     xml,
     `${block.contentColumn}${layout.closingRow}`,
@@ -1679,11 +1715,64 @@ function growBodyBlock(sheetXml: string, block: BodyBlock, delta: number): strin
 }
 
 /**
+ * 본문 구역에서 `delta` 줄을 **걷어낸다** — `growBodyBlock` 의 거울이다
+ * (2026-10-31. 왜 걷어내는지는 `fillSheet` 의 `rowShift` 머리말).
+ *
+ * 🔴 **걷어내는 자리는 본문 마지막 줄의 바로 위**다. 늘릴 때 끼워 넣는 그 자리와
+ * 같고, 까닭도 같다 — 마지막 줄에는 상자의 밑변이 붙어 있어서 그것까지 지우면
+ * 상자 바닥이 열린 채로 나간다. 지워지는 것은 맺음 표시 아래의 **빈 줄들**이다
+ * (`planBodyLayout` 이 블록 끝에 세 줄만 남기므로 그 위는 늘 비어 있다).
+ *
+ * ── 함께 따라와야 하는 것은 늘리는 쪽과 **같은 여섯**이다 ───────────────
+ * 다만 한 가지가 더 있다: 🔴 **지워질 줄의 병합을 먼저 걷어낸다**
+ * (`removeRowMergeCells`). 안 걷어내면 아래에서 올라온 병합과 범위가 겹치고,
+ * 겹친 병합은 Excel 이 파일 열기를 거부하는 사유다. 미는 것만으로 되는 늘리기와
+ * 다른 유일한 자리다.
+ *
+ * ⚠️ 그림·도형 앵커와 인쇄 영역은 여기서 안 민다 — 부호만 반대일 뿐 늘릴 때와
+ * 같은 자리(`rewriteDrawing` · `shiftPrintArea`)가 `rowShift` 를 그대로 받는다.
+ */
+function shrinkBodyBlock(sheetXml: string, block: BodyBlock, delta: number): string {
+  if (!(delta > 0)) throw new Error(`줄일 줄 수가 잘못됐습니다: ${delta}`);
+
+  const insertRow = block.lastRow;
+  const middleCount = block.lastRow - block.firstRow;
+  if (delta > middleCount) {
+    throw new Error(
+      `본문을 ${delta}줄 줄일 수 없습니다 — 양식의 본문 가운뎃줄이 ${middleCount}줄뿐입니다.`
+    );
+  }
+
+  // 늘릴 때와 같은 이유로 본다 — 단추가 아래로 내려온 양식이면 짐작하지 않는다.
+  assertControlsAreAboveBody(sheetXml, insertRow);
+
+  const rows = parseSheetRows(sheetXml);
+  const shrunk = resizeRowBlock(rows, {
+    firstRow: block.firstRow,
+    currentCount: middleCount,
+    targetCount: middleCount - delta,
+  });
+
+  let xml = writeSheetRows(sheetXml, shrunk.rows);
+  // 🔴 **먼저** 걷어내고 **그다음** 민다. 순서를 바꾸면 어느 병합이 지워진 줄의
+  //    것인지 가릴 수 없다(둘 다 같은 범위가 되어 있다).
+  xml = removeRowMergeCells(xml, block.lastRow - delta, block.lastRow - 1);
+  xml = shiftMergeCellRows(xml, insertRow, -delta);
+  xml = shiftSqrefRows(xml, insertRow, -delta);
+  xml = syncDimension(xml, shrunk.rows);
+  return replaceSharedHelperFormulas(xml, block, -delta);
+}
+
+/**
  * 🔴 **어긋난 공유 수식은 Excel 이 파일 열기를 거부하는 사유다.**
  *
  * 글자수 도우미는 `<f t="shared" ref="BC31:BC59" si="0">LEN(H31)</f>` 한 덩이와
  * 그 아래 `<f t="shared" si="0"/>` 스물여덟이다. 줄을 끼워 넣으면 마지막 딸림
  * 칸이 `ref` **밖으로** 밀려난다.
+ *
+ * ⚠️ `delta` 는 **음수일 수도 있다**(`shrinkBodyBlock`). 줄을 걷어내면 `ref` 가
+ * 가리키는 범위 안이 비는데, 그 역시 어긋난 공유 수식이다. 양쪽 다 **남은 본문
+ * 줄 전부**를 보통 수식으로 갈아 끼워 해결한다 — 덩이도 딸림 칸도 남지 않는다.
  *
  * `ref` 만 늘리는 길도 있지만 택하지 않았다. 복제한 줄에는 수식이 아예 없어서
  * (복제하면서 값을 비운다) "범위 안에 빈 칸이 섞인 공유 수식"이 되고, 그것을

@@ -272,6 +272,9 @@ export function resizeRowBlock(
  *
  * 지금 부르는 쪽(2026-10-31 실측):
  *   · 검사·수리 보고서 · 고객 포털 내보내기 — 병합·sqref 를 둘 다 민다.
+ *     🔴 보고서는 **당기기(줄이기)도 한다**(`shrinkBodyBlock`). 그쪽은
+ *     `removeRowMergeCells` 를 **먼저** 부른 다음 음수로 민다 — 지워진 줄의
+ *     병합을 안 걷어내면 아래에서 올라온 병합과 범위가 겹친다.
  *   · 제너레이터 O/H 견적서 — `shiftSqrefRows` 만 민다. 이 양식의 병합 넷은
  *     전부 부품 칸보다 **위**(A1:I1 · K7:K9 · D12:E12 · D20:F20)라 밀 것이 없다.
  *   · 매쳐 견적서(내자·O/H) — 부를 것이 없다. 조건부 서식도 유효성 검사도
@@ -374,6 +377,49 @@ export function cloneRowMergeCells(
     }
   }
   return writeMergeRefs(sheetXml, [...refs, ...added]);
+}
+
+/**
+ * 🔴 **지워질 줄에 걸린 병합을 걷어낸다** — 줄을 **당기기(줄이기)** 전에 부른다.
+ *
+ * `shiftMergeCellRows` 는 미는 일만 한다. 줄을 지울 때 그것만 부르면, 지워진 줄에
+ * 걸려 있던 한 줄짜리 병합(`H57:AU57`)이 그대로 남은 채 아래에서 올라온 병합
+ * (`H60:AU60` → `H57:AU57`)과 **같은 범위**가 된다. 겹친 병합은 Excel 이 파일
+ * 열기를 거부하는 사유다.
+ *
+ * 🔴 **걸치는 병합은 지우지도 밀지도 않고 던진다.** 위에서 시작해 지워지는 구간
+ * 안에서 끝나는(또는 그 반대의) 병합은 "어떻게 줄일 것인가"가 사람마다 다른
+ * 자리다. 검사·수리 보고서의 본문 줄에는 그런 병합이 하나도 없고(실측
+ * 2026-10-31: 본문 103개가 전부 한 줄짜리), 생기는 날에는 짐작한 문서를
+ * 고객사로 보내는 것보다 멈추는 편이 낫다.
+ */
+export function removeRowMergeCells(
+  sheetXml: string,
+  firstRow: number,
+  lastRow: number
+): string {
+  if (lastRow < firstRow) return sheetXml;
+  const refs = readMergeRefs(sheetXml);
+  if (refs === null) return sheetXml;
+
+  const kept: string[] = [];
+  for (const ref of refs) {
+    const rows = [...ref.matchAll(/\$?[A-Z]+\$?(\d+)/g)].map((match) => Number(match[1]));
+    if (rows.length === 0) continue;
+    const top = Math.min(...rows);
+    const bottom = Math.max(...rows);
+
+    const topInside = top >= firstRow && top <= lastRow;
+    const bottomInside = bottom >= firstRow && bottom <= lastRow;
+    if (topInside && bottomInside) continue; // 줄과 함께 사라진다.
+    if (topInside || bottomInside || (top < firstRow && bottom > lastRow)) {
+      throw new SheetRowError(
+        `병합 ${ref} 이(가) 지워질 줄(${firstRow}~${lastRow}행)을 걸칩니다. 줄을 줄일 수 없습니다.`
+      );
+    }
+    kept.push(ref);
+  }
+  return writeMergeRefs(sheetXml, kept);
 }
 
 /**

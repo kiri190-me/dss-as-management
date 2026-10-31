@@ -610,19 +610,24 @@ test("줄 안의 들여쓰기는 다듬지 않는다 — 사람이 뜻을 담아
 
 test("본문 줄 수 — 정형 문구·구역 사이 빈 줄·맺음 표시와 그 위아래 여백이 함께 든다", () => {
   const values = filledForm({ findings: "가\n나", actions: "다", summary: "라" });
-  // 확인내용 (2 + 정형 문구 1) + 조치 1 + 정리 1
-  //   + 구역 사이 빈 줄 2 + 맺음 표시 위 1 + 맺음 표시 1 + 맺음 표시 아래 2
-  assert.equal(bodyRowsOf(values), 11);
+  /**
+   * 확인내용 (2 + 정형 문구 1) + 조치 1 + 정리 1
+   *   + 구역 사이 빈 줄 2 + 맺음 표시 위 3 + 맺음 표시 1 + 맺음 표시 아래 3
+   *
+   * 🔴 2026-10-31 에 맺음 표시 위가 1 → 3, 아래가 2 → 3 이 되어 **셋이 늘었다**
+   * (11 → 14). 셈 자체는 그대로다 — 수만 상수를 따라 움직인다.
+   */
+  assert.equal(bodyRowsOf(values), 14);
 
   // 정형 문구를 지우면 그 한 줄이 빠진다.
-  assert.equal(bodyRowsOf({ ...values, findingsIntro: "" }), 10);
+  assert.equal(bodyRowsOf({ ...values, findingsIntro: "" }), 13);
 
   // 확인내용이 없으면 정형 문구도 안 들어가고, 그 구역이 통째로 빠지면서
   // 구역 사이 빈 줄도 하나 준다(2 → 1).
-  assert.equal(bodyRowsOf({ ...values, findings: "" }), 7);
+  assert.equal(bodyRowsOf({ ...values, findings: "" }), 10);
 
   // 검사 보고서에는 「정리」 구역이 없다 — 여기서도 빈 줄이 하나 준다.
-  assert.equal(bodyRowsOf({ ...values, kind: "INSPECTION" }), 9);
+  assert.equal(bodyRowsOf({ ...values, kind: "INSPECTION" }), 12);
 });
 
 test("🔴 「확인내용」 라벨이 두 줄이라 한 줄짜리 확인내용도 문서에서는 두 줄이다", () => {

@@ -419,8 +419,15 @@ describe("문서의 줄 차례로 편 미리보기", () => {
   );
 
   test("🔴 라벨·구역 사이 빈 줄·맺음 표시가 채우개와 같은 자리에 선다", () => {
+    /**
+     * 🔴 맺음 표시 **위**가 한 줄에서 **세 줄**이 되었다(2026-10-31 사용자 결정:
+     * 「본문의 가장 마지막 줄에서 3행을 띄우고」). 구역 사이는 그대로 한 줄이다 —
+     * 두 값은 따로 산다. 미리보기가 문서와 같은 모양을 그리는지가 이 시험의
+     * 요점이므로, 수를 상수에서 **읽어다 쓰지 않고 그대로 적는다**(둘 다 상수를
+     * 쓰면 상수를 잘못 바꿔도 통과한다).
+     */
     assert.equal(SERVICE_REPORT_SECTION_GAP_ROWS, 1);
-    assert.equal(SERVICE_REPORT_CLOSING_GAP_ROWS, 1);
+    assert.equal(SERVICE_REPORT_CLOSING_GAP_ROWS, 3);
     assert.deepEqual(serviceReportBodyPreviewRows(sections), [
       { label: "확　내", text: "인수품에 대하여 이하의 항목을 확인하였습니다.", closing: false },
       { label: "인　용", text: "외관 손상 없음", closing: false },
@@ -428,6 +435,8 @@ describe("문서의 줄 차례로 편 미리보기", () => {
       { label: "조  치", text: "퓨즈 교체", closing: false },
       { label: "", text: "", closing: false },
       { label: "정  리", text: "정상 동작을 확인하였습니다.", closing: false },
+      { label: "", text: "", closing: false },
+      { label: "", text: "", closing: false },
       { label: "", text: "", closing: false },
       { label: "", text: SERVICE_REPORT_CLOSING_MARK, closing: true },
     ]);
@@ -450,9 +459,12 @@ describe("문서의 줄 차례로 편 미리보기", () => {
       { findingsIntro: "", findings: ["외관 손상 없음"], actions: [], summary: [] },
       OLD_METRICS.bodyWrapWidth
     );
+    // 맺음 표시 위의 빈 줄은 셋이다(2026-10-31) — 라벨 두 줄 규칙과는 따로 산다.
     assert.deepEqual(serviceReportBodyPreviewRows(one), [
       { label: "확　내", text: "외관 손상 없음", closing: false },
       { label: "인　용", text: "", closing: false },
+      { label: "", text: "", closing: false },
+      { label: "", text: "", closing: false },
       { label: "", text: "", closing: false },
       { label: "", text: SERVICE_REPORT_CLOSING_MARK, closing: true },
     ]);

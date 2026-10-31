@@ -519,10 +519,26 @@ test("🔴 실제 양식: 병합이 colspan/rowspan 으로 바뀐다", { skip: s
   assert.equal(bodyLine.rowSpan, 1);
 });
 
+/**
+ * 「비　고」 라벨이 **몇 행에 있는가** — 재서 찾는다.
+ *
+ * 🔴 양식에서는 60행이지만 채워진 문서에서는 다르다(2026-10-31): 본문 블록이
+ * 내용에 맞춰 늘거나 줄고, 그만큼 비고·담당·승인이 함께 움직인다
+ * (`service-report-template.ts` 의 `shrinkBodyBlock`). 60 을 적어 두면 양식이
+ * 아니라 **그 표본의 본문 길이**를 시험하는 꼴이 된다.
+ */
+function remarkLabelRowOf(grid: SheetPrintGrid): number {
+  const found = grid.rows.find((entry) =>
+    entry.cells.some((cell) => cell.column === 3 && cell.text.startsWith("비　고"))
+  );
+  assert.ok(found, "채워진 문서에서 「비　고」 라벨을 찾지 못했습니다");
+  return found.row;
+}
+
 test("🔴 실제 양식: 후리가나가 섞이지 않는다 — 「비　고」", { skip: skipRepair }, () => {
   const { grid } = filledGrid();
 
-  const remarkLabel = cellAt(grid, 60, 3);
+  const remarkLabel = cellAt(grid, remarkLabelRowOf(grid), 3);
   assert.equal(remarkLabel.text, "비　고");
   // 「고　객」에도 `キャクサキ` 가 딸려 있다.
   assert.equal(cellAt(grid, 13, 3).text, "고　객");
@@ -541,19 +557,25 @@ test("🔴 실제 양식: 후리가나가 섞이지 않는다 — 「비　고�
 test("🔴 실제 양식: 본문 세 구역이 채워진 자리에 그대로 나온다", { skip: skipRepair }, () => {
   const { grid } = filledGrid();
 
-  // 채우개가 32·41·51행에 앉힌다(그 파일의 '세 구역은 각자 정해진 자리에서').
+  /**
+   * 채우개가 32행부터 **한 줄씩 띄워 이어 붙인다**(2026-10-31. 그 파일의 '구역은
+   * 이제 이어 붙는다'). 예전에는 양식이 정한 32·41·51행이었다.
+   *
+   *   확인내용 32~34(정형 문구 + 두 줄) · 빈 35 · 조치 36~37 · 빈 38 · 정리 39~40
+   */
   assert.equal(cellAt(grid, 32, 3).text, SERVICE_REPORT_BODY_LABELS.findings[0]);
   assert.equal(cellAt(grid, 33, 3).text, SERVICE_REPORT_BODY_LABELS.findings[1]);
-  assert.equal(cellAt(grid, 41, 3).text, SERVICE_REPORT_BODY_LABELS.actions[0]);
-  assert.equal(cellAt(grid, 51, 3).text, SERVICE_REPORT_BODY_LABELS.summary[0]);
+  assert.equal(cellAt(grid, 36, 3).text, SERVICE_REPORT_BODY_LABELS.actions[0]);
+  assert.equal(cellAt(grid, 39, 3).text, SERVICE_REPORT_BODY_LABELS.summary[0]);
 
   assert.equal(cellAt(grid, 32, 8).text, SERVICE_REPORT_FINDINGS_INTRO);
   assert.equal(cellAt(grid, 33, 8).text, SAMPLE.body.findings[0]);
   assert.equal(cellAt(grid, 34, 8).text, SAMPLE.body.findings[1]);
-  assert.equal(cellAt(grid, 41, 8).text, SAMPLE.body.actions[0]);
-  assert.equal(cellAt(grid, 42, 8).text, SAMPLE.body.actions[1]);
-  assert.equal(cellAt(grid, 51, 8).text, "조치후, 이하의 항목을 확인하였습니다.");
-  assert.equal(cellAt(grid, 52, 8).text, "• 정격출력 확인");
+  assert.equal(cellAt(grid, 35, 8).text, "", "구역 사이의 빈 줄이 없다");
+  assert.equal(cellAt(grid, 36, 8).text, SAMPLE.body.actions[0]);
+  assert.equal(cellAt(grid, 37, 8).text, SAMPLE.body.actions[1]);
+  assert.equal(cellAt(grid, 39, 8).text, "조치후, 이하의 항목을 확인하였습니다.");
+  assert.equal(cellAt(grid, 40, 8).text, "• 정격출력 확인");
 });
 
 test("🔴 실제 양식: 본문 상자의 오른쪽 변이 살아 있다", { skip: skipRepair }, () => {
