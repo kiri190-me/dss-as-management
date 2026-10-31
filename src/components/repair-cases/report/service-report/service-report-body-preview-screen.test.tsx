@@ -7,17 +7,20 @@ import {
   SERVICE_REPORT_BODY_LABEL_WIDTH,
   SERVICE_REPORT_BODY_LABELS,
   SERVICE_REPORT_CLOSING_MARK,
+  SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT,
   serviceReportBodyMetrics,
   type ServiceReportColumnWidths,
 } from "@/lib/domain/service-report-body-wrap";
 
 import { ServiceReportBodyPreview, ServiceReportRemarkPreview } from "./ServiceReportBodyPreview";
 import {
+  SERVICE_REPORT_GRID_CELL_PADDING_LEFT_PX,
   SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX,
   SERVICE_REPORT_GRID_REMARK_LINE_HEIGHT_PX,
   SERVICE_REPORT_GRID_ROW_CLASS,
   serviceReportGridDocumentBoxCss,
   serviceReportGridDocumentBoxPx,
+  serviceReportGridPreviewScaledCss,
 } from "./service-report-grid";
 
 /**
@@ -52,11 +55,14 @@ const OLD_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
   body: 40 * 1.875,
   remark: 25 * 1.875,
   label: 5 * 1.75,
+  // 🔴 본문 칸이 몇 열인가 — 맺음 표시의 왼쪽 여백이 여기서 나온다(H:AU = 40).
+  bodyColumns: 40,
 };
 const NEW_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
   body: 40 * 1.90625,
   remark: 25 * 1.90625,
   label: 5 * 1.7265625,
+  bodyColumns: 40,
 };
 const METRICS = serviceReportBodyMetrics(OLD_TEMPLATE_COLUMNS);
 const NEW_METRICS = serviceReportBodyMetrics(NEW_TEMPLATE_COLUMNS);
@@ -147,6 +153,68 @@ describe("본문 미리보기 — 발행본 모양", () => {
       .filter((match) => match[1].includes("text-center") && !match[1].includes("border-r"))
       .map((match) => match[2]);
     assert.deepEqual(centered, [SERVICE_REPORT_CLOSING_MARK]);
+  });
+
+  /**
+   * ==========================================================================
+   * 🔴 맺음 표시만 **왼쪽 여백이 더 붙는다** (2026-10-31)
+   * ==========================================================================
+   * 문서에서는 그 줄의 병합이 `H:AU` 가 아니라 `N:AU` 라 맺음 표시의 가운데가
+   * 세 열 오른쪽이다(사용자: 「~이상~을 지금 위치보다 3열정도 우측에」). 화면은
+   * 같은 자리를 **왼쪽 여백**으로 만든다 — 남은 폭에서 가운데 맞춤이므로 가운데가
+   * 여백의 절반만 간다.
+   * ==========================================================================
+   */
+  test("🔴 맺음 표시 줄만 왼쪽 여백이 더 붙는다 — 문서에서 세 열 오른쪽인 그만큼", () => {
+    const paddings = [...html.matchAll(/padding-left:([^;"]+)/g)].map((match) => match[1]);
+    const cellPadding = serviceReportGridPreviewScaledCss(SERVICE_REPORT_GRID_CELL_PADDING_LEFT_PX);
+    const closingPadding = `calc(${cellPadding} + ${serviceReportGridDocumentBoxCss(
+      METRICS.closingMarkIndentWidth
+    )})`;
+
+    // 🔵 재는 것이 있는지부터 — 줄마다 내용 칸이 하나씩 있어야 한다.
+    assert.ok(paddings.length >= 8, `여백을 ${paddings.length}개밖에 못 찾았다`);
+    assert.equal(
+      paddings.filter((padding) => padding === closingPadding).length,
+      1,
+      "맺음 표시 줄의 여백이 하나가 아니다"
+    );
+    assert.ok(
+      paddings.filter((padding) => padding === cellPadding).length >= 7,
+      "여느 줄의 여백이 함께 바뀌었다"
+    );
+    assert.equal(new Set(paddings).size, 2, "여백이 두 가지(여느 줄 · 맺음 줄)가 아니다");
+
+    /**
+     * 🔴 **값으로도 못 박는다.** 배율 1배에서 90px — 600px 상자의 15%(= 6/40 열)다.
+     * `SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT` 를 올리면 여기가 먼저 깨진다.
+     */
+    assert.equal(serviceReportGridDocumentBoxPx(METRICS.closingMarkIndentWidth), 90);
+    assert.equal(
+      serviceReportGridDocumentBoxPx(METRICS.closingMarkIndentWidth) /
+        serviceReportGridDocumentBoxPx(METRICS.columns.body),
+      0.15
+    );
+    // 그 여백이 가운데를 **세 열** 옮긴다(가운데 맞춤이라 절반).
+    const columnPx =
+      serviceReportGridDocumentBoxPx(METRICS.columns.body) / METRICS.columns.bodyColumns;
+    assert.equal(
+      serviceReportGridDocumentBoxPx(METRICS.closingMarkIndentWidth) / 2 / columnPx,
+      SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT
+    );
+  });
+
+  test("🔴 그 여백을 화면이 지어내지 않았다 — 양식에서 온 값이다", () => {
+    const previewCode = code(previewSource);
+    // 🔴 `15%`·`0.15`·`6/40` 중 하나라도 박혀 있으면, 상수를 올리는 날 화면만
+    //    옛 자리에 남는다. 그 거짓말은 **문서를 열어 보기 전까지** 안 보인다.
+    for (const forbidden of ["15%", "0.15", "6 / 40", "/ 40", "* 2"]) {
+      assert.ok(!previewCode.includes(forbidden), `미리보기에 「${forbidden}」 이 박혀 있다`);
+    }
+    assert.ok(
+      previewCode.includes("metrics.closingMarkIndentWidth"),
+      "맺음 표시 여백을 양식에서 온 값으로 안 쓰고 있다"
+    );
   });
 
   test("🔴 폭이 **문서의 칸 그 자체**다 — 라벨 `C:G` · 본문 `H:AU`", () => {

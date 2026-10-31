@@ -10,6 +10,7 @@ import {
   SERVICE_REPORT_BODY_LABELS,
   SERVICE_REPORT_CLOSING_GAP_ROWS,
   SERVICE_REPORT_CLOSING_MARK,
+  SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT,
   SERVICE_REPORT_CLOSING_TRAILING_ROWS,
   SERVICE_REPORT_SECTION_GAP_ROWS,
   serviceReportFindingsLines,
@@ -23,6 +24,7 @@ export {
   SERVICE_REPORT_BODY_LABELS,
   SERVICE_REPORT_CLOSING_GAP_ROWS,
   SERVICE_REPORT_CLOSING_MARK,
+  SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT,
   SERVICE_REPORT_CLOSING_TRAILING_ROWS,
   SERVICE_REPORT_SECTION_GAP_ROWS,
 };
@@ -44,6 +46,7 @@ import {
   parseSheetRows,
   readRowHeightAttribute,
   removeRowMergeCells,
+  replaceMergeCell,
   resizeRowBlock,
   setRowHeightAttribute,
   shiftMergeCellRows,
@@ -1540,9 +1543,9 @@ function fillSheet(
   /**
    * 🔴 본문 **내용 줄만** 왼쪽으로. 맺음 표시가 앉는 줄 바로 위까지가 내용
    * 자리다(구역 사이의 빈 줄도, 맺음 표시 **위**의 빈 줄도 여기 든다 — 언제
-   * 글자가 들어와도 모양이 같아야 한다). 맺음 표시와 그 **아래** 두 줄은 원본
-   * 서식 그대로 둔다 — 가운데 맞춤이고, 블록의 마지막 줄에는 상자의 아래
-   * 테두리가 그 서식에 걸려 있다.
+   * 글자가 들어와도 모양이 같아야 한다). 맺음 표시가 앉는 줄과 그 **아래** 세
+   * 줄은 건드리지 않는다 — 맺음 표시는 제 자리에서 가운데 맞춤이어야 하고,
+   * 블록의 마지막 줄에는 상자의 아래 테두리가 서식에 걸려 있다.
    */
   const aligned = alignBodyContentLeft(xml, stylesXml, {
     column: block.contentColumn,
@@ -1550,6 +1553,14 @@ function fillSheet(
     lastRow: layout.closingRow - 1,
   });
   xml = aligned.sheetXml;
+
+  /**
+   * 🔴 맺음 표시는 **본문 줄을 다 쓴 다음에** 앉힌다. 그 줄의 병합을 줄이고
+   * 서식 사본을 하나 더하므로, 위의 왼쪽 맞춤·본문 쓰기와 섞이면 어느 쪽이
+   * 어느 칸을 보는지 흐려진다.
+   */
+  const closing = placeClosingMark(xml, aligned.stylesXml, block, layout.closingRow);
+  xml = closing.sheetXml;
 
   // ── 비고 ──────────────────────────────────────────────────────────
   const remarkLines = input.remark ?? [];
@@ -1566,7 +1577,7 @@ function fillSheet(
 
   return {
     xml,
-    stylesXml: aligned.stylesXml,
+    stylesXml: closing.stylesXml,
     rowShift,
     insertRow,
     bodyFirstRow: block.firstRow,
@@ -1652,15 +1663,130 @@ function fillBody(sheetXml: string, block: BodyBlock, layout: BodyLayout): strin
     });
   }
 
-  // 🔴 맺음 표시는 **언제나 마지막 내용 줄에서 세 줄 띄운 줄**이다
-  //    (`SERVICE_REPORT_CLOSING_GAP_ROWS`). 그 아래 세 줄은 위에서 통째로 비워
-  //    둔 그대로 남는다 — 따로 쓸 것이 없다.
-  xml = setInlineString(
-    xml,
-    `${block.contentColumn}${layout.closingRow}`,
-    SERVICE_REPORT_CLOSING_MARK
-  );
+  /**
+   * 🔴 맺음 표시는 여기서 **안 쓴다** — `placeClosingMark` 가 쓴다(2026-10-31).
+   * 그 줄은 글자뿐 아니라 **병합과 서식까지** 함께 손봐야 하는 유일한 줄이라
+   * 따로 떼어 두었다. 위에서 통째로 비웠으므로 그 줄의 내용 칸(`H`)은 지금
+   * 비어 있고, **비어 있는 것이 맞다**(글자는 오른쪽 `N` 칸으로 간다).
+   */
   return xml;
+}
+
+/**
+ * ════════════════════════════════════════════════════════════════════════
+ * 🔴 맺음 표시를 **가운데 기준으로 세 열 오른쪽**에 앉힌다 (2026-10-31 사용자 결정)
+ * ════════════════════════════════════════════════════════════════════════
+ * 사용자: 「~이상~을 지금 위치보다 3열정도 우측에 위치하게 해줘.」
+ *
+ * ── 🔴 왜 열 수를 **두 배**로 미는가 ────────────────────────────────────
+ * 맺음 표시는 그 줄의 병합(`H:AU`, 40열) 안에서 **가운데 맞춤**이다. 그래서 눈에
+ * 보이는 자리는 병합의 **한가운데**이고, 병합의 왼쪽 끝을 `n` 열 오른쪽으로
+ * 당기면 한가운데는 **`n/2` 열**만 오른쪽으로 간다. 세 열을 옮기려면 왼쪽 끝을
+ * **여섯 열** 당겨야 한다 — `H`(8열) + 6 = `N`(14열), 한가운데가
+ * `(8+47)/2 = 27.5` 열에서 `(14+47)/2 = 30.5` 열로 간다.
+ *
+ * 🔴 그러니 이 곱하기 2 를 "버그 같다"며 지우지 말 것. 지우면 1.5열만 간다.
+ *
+ * ── 🔴 글자만 옮기면 **사라진다** ───────────────────────────────────────
+ * 병합 안에서 글자를 그리는 칸은 **왼쪽 위 칸 하나뿐**이다. 병합을 그대로 두고
+ * `N` 에만 쓰면 Excel 은 그 글자를 **화면에도 인쇄에도 안 그린다**(파일에는
+ * 남는다). 그래서 병합을 `N:AU` 로 갈아 끼우고(`replaceMergeCell` — 개수는
+ * 그대로), 그 칸에 쓴다. **둘은 같은 `column` 변수에서 나오고**, 끝나고 나서
+ * 「글자가 앉은 칸이 정말 그 병합의 왼쪽 위인가」를 다시 확인한다.
+ *
+ * ── 🔴 서식은 **가운데 맞춤만 더한다** ──────────────────────────────────
+ * `N` 칸이 양식에서 쓰던 서식은 글꼴이 본문과 같고(맑은 고딕 9pt · fontId 46)
+ * **테두리가 없다**(borderId 0 — 실측 2026-10-31). 가로 맞춤만 안 적혀 있어서
+ * 그대로 쓰면 글자가 왼쪽에 붙는다. 그래서 `addAlignedCellXfs` 로 **그 칸의
+ * 서식을 복제해 가운데 맞춤만 얹는다**:
+ *
+ *   · `H` 칸의 서식을 가져다 쓰면 안 된다 — 거기엔 상자의 **왼쪽 변**이 걸려
+ *     있어서(borderId 58 = `start thin`) 문서 한가운데 세로줄이 생긴다.
+ *   · 기존 `xf` 는 고치지 않는다 — 같은 번호를 쓰는 칸이 수십 개다.
+ *
+ * ⚠️ 병합에서 빠지는 `H`~`M` 여섯 칸은 **손대지 않는다.** `H` 는 상자의 왼쪽
+ * 변을 들고 있어야 하고(안 그러면 그 줄만 상자가 열린다), `I`~`M` 은 테두리가
+ * 아예 없어 그릴 것이 없다.
+ *
+ * ── 🔴 몇 열인가는 **화면과 한 벌**이다 ─────────────────────────────────
+ * `SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT` 는 `domain/service-report-body-wrap.ts`
+ * 에 있고 이 모듈은 같은 이름으로 **다시 내보낸다**(라벨·맺음 표시·여백과 같은
+ * 길이다). 작성 화면의 미리보기가 맺음 표시 줄에 주는 왼쪽 여백이 **그 상수에서
+ * 나오기 때문**이다 — 여기 따로 적어 두면 양쪽이 갈라지고, 그때 미리보기는
+ * 거짓말이 된다(2026-10-31 둘째 조각).
+ * ════════════════════════════════════════════════════════════════════════
+ */
+
+/**
+ * 맺음 표시가 앉는 **열** — 글자와 병합이 이 한 값을 함께 쓴다.
+ *
+ * 🔴 열 글자를 코드에 박지 않는다(`N` 이라고 적지 않는다). 양식이 본문 칸을
+ * 옮기거나 넓히면 따라가야 한다 — 양식에서 읽은 `contentColumn`·
+ * `contentEndColumn` 에서 셈한다.
+ */
+export function serviceReportClosingMarkColumn(block: {
+  contentColumn: string;
+  contentEndColumn: string;
+}): string {
+  const first = columnIndex(block.contentColumn);
+  const last = columnIndex(block.contentEndColumn);
+  // 가운데를 세 열 옮기려면 왼쪽 끝을 여섯 열 — 위 머리말의 '두 배'.
+  const start = first + SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT * 2;
+  if (start >= last) {
+    throw new Error(
+      `맺음 표시를 ${SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT}열 옮길 자리가 없습니다: ` +
+        `본문 칸이 ${block.contentColumn}:${block.contentEndColumn} 뿐입니다.`
+    );
+  }
+  return indexToColumn(start);
+}
+
+/**
+ * 맺음 표시를 그 줄에 앉힌다 — **병합을 줄이고 · 가운데 맞춤 서식을 더하고 ·
+ * 글자를 쓴다.** 셋이 같은 열을 가리키는지까지 여기서 확인한다.
+ */
+function placeClosingMark(
+  sheetXml: string,
+  stylesXml: string,
+  block: BodyBlock,
+  closingRow: number
+): { sheetXml: string; stylesXml: string } {
+  const column = serviceReportClosingMarkColumn(block);
+  const ref = `${column}${closingRow}`;
+  const narrowedMerge = `${ref}:${block.contentEndColumn}${closingRow}`;
+
+  // ① 병합을 글자가 앉을 칸에서 시작하게 갈아 끼운다(개수는 그대로).
+  let xml = replaceMergeCell(
+    sheetXml,
+    `${block.contentColumn}${closingRow}:${block.contentEndColumn}${closingRow}`,
+    narrowedMerge
+  );
+
+  // ② 그 칸의 서식을 복제해 **가운데 맞춤만** 얹는다.
+  const style = findCell(xml, ref).style;
+  const source = style === null ? 0 : Number(style);
+  if (!Number.isInteger(source) || source < 0) {
+    throw new Error(`${ref} 의 서식 번호를 읽지 못했습니다: "${String(style)}"`);
+  }
+  const aligned = addAlignedCellXfs(stylesXml, [source], "center");
+  const target = aligned.indexBySource.get(source);
+  if (target === undefined) {
+    throw new Error(`${ref} 의 가운데 맞춤 서식을 만들지 못했습니다(원본 ${source}번).`);
+  }
+  if (target !== source) xml = setCellStyle(xml, ref, target);
+
+  // ③ 글자.
+  xml = setInlineString(xml, ref, SERVICE_REPORT_CLOSING_MARK);
+
+  /**
+   * 🔴 ①과 ③이 **같은 칸을 가리키는지** 다시 확인한다. 어긋나면 글자가 병합
+   * 밖(= Excel 이 안 그리는 칸)에 떨어지는데, 그 상태는 **파일에는 글자가 있고
+   * 화면·인쇄에만 없어서** 아무 오류도 안 난다.
+   */
+  if (!new RegExp(`<mergeCell ref="${narrowedMerge}"`).test(xml)) {
+    throw new Error(`맺음 표시의 병합(${narrowedMerge})을 만들지 못했습니다.`);
+  }
+  return { sheetXml: xml, stylesXml: aligned.xml };
 }
 
 function writeText(sheetXml: string, ref: string, value: string | undefined): string {
@@ -2056,6 +2182,12 @@ export function serviceReportColumnWidthsFromSheet(sheetXml: string): ServiceRep
 
   return {
     body: readColumnRangeWidth(sheetXml, block.contentColumn, block.contentEndColumn),
+    /**
+     * 🔴 **몇 열인가**도 함께 넘긴다(2026-10-31). 미리보기가 맺음 표시 줄에 줄
+     * 왼쪽 여백이 「여섯 열」이라 — 길이로 바꾸려면 한 열이 얼마인지 알아야 하고,
+     * 브라우저에는 양식 파일이 없다(`serviceReportClosingMarkIndentWidth`).
+     */
+    bodyColumns: columnIndex(block.contentEndColumn) - columnIndex(block.contentColumn) + 1,
     // 라벨 칸은 내용 열 **바로 왼쪽**에서 끝난다 — 블록을 찾을 때 쓴 그 규칙이다.
     label: readColumnRangeWidth(
       sheetXml,

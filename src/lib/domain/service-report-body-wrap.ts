@@ -161,6 +161,15 @@ export type ServiceReportColumnWidths = {
   remark: number;
   /** 본문 라벨 칸(`확　내`/`인　용` 이 찍히는 칸). 지금 양식에서는 `C`~`G`. */
   label: number;
+  /**
+   * 🔴 본문 내용 칸이 **몇 열인가**(지금 양식에서는 `H`~`AU` = 40).
+   *
+   * 폭(`body`)만으로는 모자라서 2026-10-31 에 더했다. 맺음 표시가 가운데에서
+   * **세 열** 오른쪽에 앉는데(`SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT`), 그
+   * **열 수**를 길이로 바꾸려면 한 열이 얼마인지 알아야 한다 — 미리보기는 양식
+   * 파일을 못 읽으므로 서버가 세어 넘긴다.
+   */
+  bodyColumns: number;
 };
 
 /**
@@ -176,6 +185,14 @@ export type ServiceReportBodyMetrics = {
   bodyWrapWidth: number;
   /** 비고 한 줄에 들어가는 칸 수. 옛 양식 51 · 새 양식 52. */
   remarkWrapWidth: number;
+  /**
+   * 🔴 맺음 표시 앞에 비워 두는 **너비**(열 너비 단위 — `columns` 와 같은 자).
+   *
+   * 미리보기가 맺음 표시 줄에 줄 **왼쪽 여백**이고, 문서에서는 그 줄의 병합이
+   * `H:AU` 대신 `N:AU` 로 좁혀지는 것과 같은 뜻이다
+   * (`serviceReportClosingMarkIndentWidth` 머리말).
+   */
+  closingMarkIndentWidth: number;
 };
 
 /**
@@ -192,7 +209,55 @@ export function serviceReportBodyMetrics(
     columns,
     bodyWrapWidth: contentWrapWidth(columns.body),
     remarkWrapWidth: contentWrapWidth(columns.remark),
+    closingMarkIndentWidth: serviceReportClosingMarkIndentWidth(columns),
   };
+}
+
+/**
+ * ════════════════════════════════════════════════════════════════════════
+ * 🔴 맺음 표시는 **가운데에서 세 열 오른쪽**이다 (2026-10-31 사용자 결정)
+ * ════════════════════════════════════════════════════════════════════════
+ * 사용자: 「~이상~을 지금 위치보다 3열정도 우측에 위치하게 해줘.」 → 엑셀에서
+ * 눈으로 확인한 뒤 「이정도면 적당한 것 같아. 이제 미리보기도 고치도록 하자」.
+ *
+ * ── 🔴 왜 열 수를 **두 배**로 비우는가 ──────────────────────────────────
+ * 맺음 표시는 **가운데 맞춤**이다. 그래서 보이는 자리는 「앞을 얼마나 비웠나」의
+ * **절반**만 오른쪽으로 간다 — 세 열을 옮기려면 **여섯 열**을 비워야 한다.
+ *
+ *   문서  — 그 줄의 병합을 `H:AU`(40열)에서 `N:AU`(34열)로 좁힌다. 가운데가
+ *           `(8+47)/2 = 27.5` 열에서 `(14+47)/2 = 30.5` 열로 간다.
+ *   화면  — 맺음 표시 줄에 **왼쪽 여백**을 그 여섯 열만큼 준다. 글은 남은 폭에서
+ *           가운데 맞춤이므로 가운데가 `여백/2` 만큼, 즉 세 열 오른쪽으로 간다.
+ *
+ * 둘이 **같은 수에서 나온다.** 🔴 화면에 「15%」 같은 수를 따로 적지 말 것 —
+ * 그 15% 는 `6 ÷ 40` 이라서, 이 상수를 올리는 날 화면만 옛 자리에 남는다.
+ *
+ * ⚠️ 열이 고르다는 가정이 하나 들어 있다(여섯 열의 너비 = 전체 ÷ 40 × 6).
+ * 지금 양식 넷은 `<col min="8" max="47" width="1.90625"/>` 한 덩이라 고르다 —
+ * 어긋나는 날 채우개 시험(`readColumnRangeWidth` 로 잰 값과 맞춰 본다)이 먼저
+ * 깨진다.
+ * ════════════════════════════════════════════════════════════════════════
+ */
+export const SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT = 3;
+
+/** 맺음 표시 앞에 비워 두는 **열 수** — 가운데 맞춤이라 옮길 열 수의 두 배다. */
+export const SERVICE_REPORT_CLOSING_MARK_INDENT_COLUMNS =
+  SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT * 2;
+
+/**
+ * 비워 두는 열 수를 **너비**로 바꾼다 — 단위는 `ServiceReportColumnWidths` 와 같다.
+ *
+ * 🔴 **본문 칸보다 넓어질 수 없다.** 그러면 맺음 표시가 칸 밖으로 나가므로,
+ * 짐작해서 줄이는 대신 던진다(채우개도 같은 자리에서 던진다).
+ */
+export function serviceReportClosingMarkIndentWidth(columns: ServiceReportColumnWidths): number {
+  if (!(columns.bodyColumns > SERVICE_REPORT_CLOSING_MARK_INDENT_COLUMNS)) {
+    throw new Error(
+      `본문 칸이 ${columns.bodyColumns}열뿐이라 맺음 표시를 ` +
+        `${SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT}열 옮길 수 없습니다.`
+    );
+  }
+  return (columns.body * SERVICE_REPORT_CLOSING_MARK_INDENT_COLUMNS) / columns.bodyColumns;
 }
 
 /**
@@ -294,8 +359,17 @@ export const SERVICE_REPORT_BODY_LABEL_WIDTH = Math.max(
  * 자리는 **마지막 내용 줄에서 한 줄 띄운 줄**, 본문 내용 열이다
  * (`SERVICE_REPORT_CLOSING_GAP_ROWS`). 양식의 글상자는 이 글자를 상자 밑바닥에
  * 두었지만 상자는 크기가 고정이라 본문이 길어지면 어긋난다. 셀에 두면 본문이 몇
- * 줄이든 늘 끝에 붙는다. 가운데 맞춤은 양식이 이미 해 준다 — 본문 내용 칸의
- * 서식이 `horizontal="center"` 다(왼쪽 맞춤은 맺음 표시 **앞줄까지**만 얹는다).
+ * 줄이든 늘 끝에 붙는다.
+ *
+ * ── 🔴 문서에서는 **가로로도 조금 오른쪽**이다 (2026-10-31) ────────────
+ * 사용자가 「~이상~을 지금 위치보다 3열정도 우측에」로 정해서, 채우개는 그 줄의
+ * 병합을 `H:AU` 에서 `N:AU` 로 줄이고 거기에 쓴다(가운데 맞춤이라 보이는 자리가
+ * 세 열 오른쪽으로 간다 — `xlsx/service-report-template.ts` 의
+ * `serviceReportClosingMarkColumn`).
+ *
+ * ⚠️ **미리보기는 그 가로 치우침을 안 그린다** — 지금도 상자 한가운데다. 세로
+ * 차례(어느 줄에 오는가)는 문서와 같고, 가로만 다르다. 맞추려면 맺음 표시 줄에
+ * 왼쪽 여백 `6/40`(= 15%)을 주면 된다.
  */
 export const SERVICE_REPORT_CLOSING_MARK = "～이　상～";
 

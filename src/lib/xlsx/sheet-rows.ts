@@ -380,6 +380,38 @@ export function cloneRowMergeCells(
 }
 
 /**
+ * 병합 하나를 **다른 범위로 갈아 끼운다** — 개수는 그대로다.
+ *
+ * 맺음 표시를 오른쪽으로 옮기면서 생겼다(2026-10-31). 글자가 앉는 칸은 병합의
+ * **왼쪽 위 칸**이어야 하는데(아니면 Excel 이 그 글자를 아예 그리지 않는다),
+ * 양식의 그 줄은 `H:AU` 한 덩이라 글자만 옮길 수가 없다. 그래서 `H:AU` 를
+ * `N:AU` 로 갈아 끼우고 `N` 에 쓴다.
+ *
+ * 🔴 **찾는 범위가 없으면 던진다.** 양식이 바뀌어 그 줄의 병합이 다른 모양이면,
+ * 조용히 지나가는 순간 글자가 병합 밖(= 안 보이는 칸)에 떨어진다. 그 결함은
+ * **파일에는 글자가 있고 화면·인쇄에만 없어서** 시험으로도 눈으로도 늦게 잡힌다.
+ *
+ * 🔴 **갈아 끼울 범위가 이미 있어도 던진다.** 겹친 병합은 Excel 이 파일 열기를
+ * 거부하는 사유다.
+ */
+export function replaceMergeCell(sheetXml: string, from: string, to: string): string {
+  const refs = readMergeRefs(sheetXml);
+  if (refs === null) throw new SheetRowError("시트에 <mergeCells> 가 없습니다.");
+
+  const index = refs.indexOf(from);
+  if (index < 0) {
+    throw new SheetRowError(`양식에서 병합 ${from} 을(를) 찾지 못했습니다.`);
+  }
+  if (from !== to && refs.includes(to)) {
+    throw new SheetRowError(`병합 ${to} 이(가) 이미 있습니다 — 겹치게 둘 수 없습니다.`);
+  }
+
+  const next = [...refs];
+  next[index] = to;
+  return writeMergeRefs(sheetXml, next);
+}
+
+/**
  * 🔴 **지워질 줄에 걸린 병합을 걷어낸다** — 줄을 **당기기(줄이기)** 전에 부른다.
  *
  * `shiftMergeCellRows` 는 미는 일만 한다. 줄을 지울 때 그것만 부르면, 지워진 줄에

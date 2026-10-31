@@ -7,6 +7,8 @@ import {
   SERVICE_REPORT_BODY_LABELS,
   SERVICE_REPORT_CLOSING_GAP_ROWS,
   SERVICE_REPORT_CLOSING_MARK,
+  SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT,
+  SERVICE_REPORT_CLOSING_MARK_INDENT_COLUMNS,
   SERVICE_REPORT_SECTION_GAP_ROWS,
   contentWrapWidth,
   serviceReportBodyMetrics,
@@ -55,11 +57,14 @@ const OLD_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
   body: 40 * 1.875,
   remark: 25 * 1.875,
   label: 5 * 1.75,
+  // 🔴 본문 칸이 몇 열인가 — 맺음 표시의 왼쪽 여백이 여기서 나온다(H:AU = 40).
+  bodyColumns: 40,
 };
 const NEW_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
   body: 40 * 1.90625,
   remark: 25 * 1.90625,
   label: 5 * 1.7265625,
+  bodyColumns: 40,
 };
 const OLD_METRICS = serviceReportBodyMetrics(OLD_TEMPLATE_COLUMNS);
 const NEW_METRICS = serviceReportBodyMetrics(NEW_TEMPLATE_COLUMNS);
@@ -97,12 +102,15 @@ describe("열 너비 → 줄 폭 환산", () => {
       columns: OLD_TEMPLATE_COLUMNS,
       bodyWrapWidth: 84,
       remarkWrapWidth: 51,
+      // 🔴 맺음 표시 앞에 비우는 폭 — 75칸 × 6/40 (2026-10-31. 아래 전용 묶음).
+      closingMarkIndentWidth: 11.25,
     });
     // 🔴 새 양식(1.90625): **도장만 바꿔 저장했는데** 76.25칸 → 85칸이 되었다.
     assert.deepEqual(NEW_METRICS, {
       columns: NEW_TEMPLATE_COLUMNS,
       bodyWrapWidth: 85,
       remarkWrapWidth: 52,
+      closingMarkIndentWidth: 11.4375,
     });
   });
 
@@ -121,8 +129,13 @@ describe("열 너비 → 줄 폭 환산", () => {
     // 🔴 화면이 아니라 여기서 던지는 것이 요점이다 — 브라우저가 그리는 도중에
     //    던지면 작성 화면이 통째로 죽는다(`page.tsx` 의 try 가 이것을 받는다).
     assert.throws(
-      () => serviceReportBodyMetrics({ body: 1, remark: 1, label: 1 }),
+      () => serviceReportBodyMetrics({ body: 1, remark: 1, label: 1, bodyColumns: 40 }),
       /본문 칸이 너무 좁습니다/
+    );
+    // 🔴 **열 수가 모자란 양식도** 여기서 던진다 — 맺음 표시가 칸 밖으로 나간다.
+    assert.throws(
+      () => serviceReportBodyMetrics({ body: 75, remark: 46.875, label: 8.75, bodyColumns: 4 }),
+      /맺음 표시를 3열 옮길 수 없습니다/
     );
   });
 });
@@ -390,6 +403,47 @@ describe("열 너비 → 화면 픽셀", () => {
       assert.equal(
         contentWrapWidth(columnWidth),
         Math.floor((serviceReportColumnWidthPx(columnWidth) - 5 - 7) / 7)
+      );
+    }
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 맺음 표시의 **가로 자리** — 가운데에서 세 열 오른쪽 (2026-10-31)
+ * ============================================================================
+ * 문서에서는 그 줄의 병합을 `H:AU` 에서 `N:AU` 로 좁혀 옮기고(채우개), 화면은
+ * 같은 줄에 **왼쪽 여백**을 줘서 같은 자리를 만든다. 두 길이 **한 상수**에서
+ * 나오는지를 여기서 못 박는다 — 갈라지면 미리보기가 거짓말을 한다.
+ * ============================================================================
+ */
+describe("🔴 맺음 표시의 가로 자리", () => {
+  test("비워 두는 열 수는 옮길 열 수의 **두 배**다 — 가운데 맞춤이라 절반만 움직인다", () => {
+    assert.equal(SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT, 3);
+    assert.equal(SERVICE_REPORT_CLOSING_MARK_INDENT_COLUMNS, 6);
+    // 🔴 두 배라는 **관계**를 못 박는다 — 한쪽만 고치면 여기가 깨진다.
+    assert.equal(
+      SERVICE_REPORT_CLOSING_MARK_INDENT_COLUMNS,
+      SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT * 2
+    );
+  });
+
+  test("여백은 **그 양식의 폭**에서 나온다 — 옛 양식 11.25칸 · 새 양식 11.4375칸", () => {
+    // 6열 ÷ 40열 = 15%. 🔴 수를 적어 둔 것은 **시험의 기대값**이고, 화면에는
+    //    그런 수가 하나도 없다(아래 미리보기 시험이 소스로 본다).
+    assert.equal(OLD_METRICS.closingMarkIndentWidth, 11.25);
+    assert.equal(NEW_METRICS.closingMarkIndentWidth, 11.4375);
+    assert.equal(OLD_METRICS.closingMarkIndentWidth / OLD_METRICS.columns.body, 0.15);
+    assert.equal(NEW_METRICS.closingMarkIndentWidth / NEW_METRICS.columns.body, 0.15);
+  });
+
+  test("🔴 그 여백이 가운데를 **세 열** 오른쪽으로 옮긴다", () => {
+    for (const metrics of [OLD_METRICS, NEW_METRICS]) {
+      const columnWidth = metrics.columns.body / metrics.columns.bodyColumns;
+      // 가운데 맞춤이라 가운데는 여백의 **절반**만 간다.
+      assert.equal(
+        metrics.closingMarkIndentWidth / 2 / columnWidth,
+        SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT
       );
     }
   });

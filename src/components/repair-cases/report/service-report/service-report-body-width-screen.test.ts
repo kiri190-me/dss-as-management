@@ -112,11 +112,14 @@ const OLD_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
   body: 40 * 1.875,
   remark: 25 * 1.875,
   label: 5 * 1.75,
+  // 🔴 본문 칸이 몇 열인가 — 맺음 표시의 왼쪽 여백이 여기서 나온다(H:AU = 40).
+  bodyColumns: 40,
 };
 const NEW_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
   body: 40 * 1.90625,
   remark: 25 * 1.90625,
   label: 5 * 1.7265625,
+  bodyColumns: 40,
 };
 const METRICS = serviceReportBodyMetrics(OLD_TEMPLATE_COLUMNS);
 const NEW_METRICS = serviceReportBodyMetrics(NEW_TEMPLATE_COLUMNS);

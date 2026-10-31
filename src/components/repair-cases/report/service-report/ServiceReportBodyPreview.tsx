@@ -208,6 +208,17 @@ export function ServiceReportBodyPreview({
 
   const labelWidth = serviceReportGridDocumentBoxCss(metrics.columns.label);
   const contentWidth = serviceReportGridDocumentBoxCss(metrics.columns.body);
+  /** 여느 줄의 왼쪽 여백 — 엑셀이 칸 안쪽에 두는 그 2px(배율을 탄다). */
+  const cellPaddingLeft = serviceReportGridPreviewScaledCss(
+    SERVICE_REPORT_GRID_CELL_PADDING_LEFT_PX
+  );
+  /**
+   * 맺음 표시 줄의 왼쪽 여백 — 위의 안쪽 여백에 **비워 두는 여섯 열**을 더한다.
+   * 둘 다 같은 배율을 타므로 창이 커져도 자리가 그대로다.
+   */
+  const closingPaddingLeft = `calc(${cellPaddingLeft} + ${serviceReportGridDocumentBoxCss(
+    metrics.closingMarkIndentWidth
+  )})`;
 
   return (
     <PreviewBox caption="문서에서 이렇게 나옵니다">
@@ -241,13 +252,21 @@ export function ServiceReportBodyPreview({
                 글자가 칸막이에 붙지 않게 하는 것이고, 상자는 `border-box` 라 그만큼
                 글 놓이는 자리가 줄 뿐 상자 폭은 문서의 칸 그대로다. 🔴 이것도 **배율을
                 탄다** — 안 태우면 확대했을 때 글이 칸막이 쪽으로 붙어 보인다.
+
+                🔴 **맺음 표시 줄만 여백이 하나 더 붙는다**(2026-10-31). 문서에서는
+                그 줄의 병합이 `H:AU` 가 아니라 `N:AU` 라 가운데가 세 열 오른쪽인데,
+                화면에서 같은 자리를 만들려면 앞을 그 여섯 열만큼 비우면 된다 —
+                남은 폭에서 가운데 맞춤이므로 가운데가 여백의 **절반**만 움직인다.
+
+                🔴 수를 여기 적지 않는다. 여섯 열이 얼마인가는 그 건의 양식에서 나온
+                값(`metrics.closingMarkIndentWidth`)이고, 그 값은 채우개가 병합을
+                좁힐 때 쓰는 **같은 상수**에서 셈한 것이다
+                (`SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT`).
               */}
               <span
                 style={{
                   width: contentWidth,
-                  paddingLeft: serviceReportGridPreviewScaledCss(
-                    SERVICE_REPORT_GRID_CELL_PADDING_LEFT_PX
-                  ),
+                  paddingLeft: row.closing ? closingPaddingLeft : cellPaddingLeft,
                 }}
                 className={`shrink-0 whitespace-pre ${row.closing ? "text-center" : ""}`}
               >

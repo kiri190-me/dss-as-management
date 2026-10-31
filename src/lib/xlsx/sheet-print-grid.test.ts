@@ -576,6 +576,23 @@ test("🔴 실제 양식: 본문 세 구역이 채워진 자리에 그대로 나
   assert.equal(cellAt(grid, 37, 8).text, SAMPLE.body.actions[1]);
   assert.equal(cellAt(grid, 39, 8).text, "조치후, 이하의 항목을 확인하였습니다.");
   assert.equal(cellAt(grid, 40, 8).text, "• 정격출력 확인");
+
+  /**
+   * 🔴 **맺음 표시는 본문 칸보다 오른쪽에서 시작한다**(2026-10-31 사용자 결정 ·
+   * 가운데 기준 세 열). 이 그림표가 곧 미리보기 화면이 그리는 것이라, 사용자가
+   * 눈으로 보는 자리가 여기서 결정된다.
+   *
+   *   정리 마지막 줄 40 → 빈 41·42·43 → 맺음 44
+   */
+  const closing = 44;
+  const mark = cellAt(grid, closing, 14); // 14열 = `N`
+  assert.equal(mark.text, "～이　상～");
+  // 병합이 `N:AU` 라 34열을 덮는다(`H:AU` 였다면 40열이다).
+  assert.equal(mark.colSpan, 34, "맺음 표시 칸이 N:AU 가 아니다");
+  assert.equal(mark.rowSpan, 1);
+  // 🔴 옛 자리(8열 = `H`)는 **빈 칸**이고, 병합에 딸려 가지도 않는다.
+  assert.equal(cellAt(grid, closing, 8).text, "", "옛 자리에 맺음 표시가 남았다");
+  assert.equal(cellAt(grid, closing, 8).colSpan, 1, "옛 자리가 아직 병합돼 있다");
 });
 
 test("🔴 실제 양식: 본문 상자의 오른쪽 변이 살아 있다", { skip: skipRepair }, () => {
