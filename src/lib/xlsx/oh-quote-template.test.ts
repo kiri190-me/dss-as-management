@@ -4,12 +4,15 @@ import { test } from "node:test";
 
 import { ZipArchive } from "./zip-reader";
 import { findCell } from "./sheet-patch";
-import { resolveSheetTextCells } from "./sheet-text";
+import { createCellTextReader, resolveSheetTextCells } from "./sheet-text";
 import { resolveSheetPart } from "./workbook-parts";
+import { parseSheetRows } from "./sheet-rows";
+import { findItemBlock, findWorkScopeBlocks } from "./quote-sheet-layout";
 import {
   fillOhQuoteWorkbook,
   OH_QUOTE_CELLS,
   OH_QUOTE_SHEET_NAME,
+  OH_QUOTE_WORK_SCOPE_LABELS,
   type OhQuoteInput,
 } from "./oh-quote-template";
 
@@ -619,4 +622,211 @@ test("O/H 부품이 늘어나면 아래가 밀린다", { skip }, () => {
 
 test("잘못된 입력은 파일을 만들기 전에 던진다", { skip }, () => {
   assert.throws(() => fill({ ...BASE, subject: "  " }), /품명이 비어 있습니다/);
+});
+
+/**
+ * ============================================================================
+ * 🔴 조건부 서식이 행과 함께 옮겨가는가
+ * ============================================================================
+ * 이 양식의 **절사 줄은 「0이면 흰 글씨」 조건부 서식으로 숨겨진다.** 셀 서식이
+ * 아니라 `<sheetData>` **밖**에 따로 적힌 규칙이라, 줄 수를 맞추며 행을 밀어도
+ * 저절로 따라가지 않는다. 2026-10-31 까지 실제로 따라가지 않았고, 그 결과
+ * 절사가 0원인 견적서에 「0」 이 그대로 찍혀 나갔다.
+ *
+ * 🔴 아래 시험은 **부품 수를 여러 가지로** 쓴다. 양식과 같은 수(부품 8 · O/H 12)
+ * 만 쓰면 밀림이 0이라 「안 밀린다」와 「밀렸는데 따라갔다」가 같은 답을 낸다 —
+ * 고치기 전에도 통과한다.
+ * ============================================================================
+ */
+
+type CfBlock = { sqref: string; body: string };
+
+const CONDITIONAL_FORMATTING =
+  /<conditionalFormatting[^>]*\ssqref="([^"]+)"[^>]*>([\s\S]*?)<\/conditionalFormatting>/g;
+
+function conditionalFormattingBlocks(sheetXml: string): CfBlock[] {
+  return [...sheetXml.matchAll(CONDITIONAL_FORMATTING)].map((found) => ({
+    sqref: found[1],
+    body: found[2],
+  }));
+}
+
+function dataValidationSqrefs(sheetXml: string): string[] {
+  return [...sheetXml.matchAll(/<dataValidation\b[^>]*\ssqref="([^"]+)"/g)].map((m) => m[1]);
+}
+
+/** 그 규칙이 「0이면 숨김」인가. 빨간 바탕(`containsBlanks`) 규칙과 가른다. */
+function isHideWhenZero(block: CfBlock): boolean {
+  return (
+    /<cfRule[^>]*\btype="cellIs"/.test(block.body) &&
+    /<cfRule[^>]*\boperator="equal"/.test(block.body) &&
+    /<formula>0<\/formula>/.test(block.body)
+  );
+}
+
+/**
+ * 채워진 문서에서 **절사 줄**을 찾는다. 자리를 셈해서 맞추면 안 된다 — 코드와
+ * 같은 셈을 시험에서 되풀이하면 둘이 함께 틀려도 통과한다. I열에서 수식이
+ * `I{내림}` 꼴(다른 I칸 하나를 그대로 받아 적는 것)인 줄은 절사 줄 하나뿐이다.
+ */
+function writeOffRowOf(filled: Filled): number {
+  const found: number[] = [];
+  for (let row = 1; row <= 120; row += 1) {
+    if (/^I\d+$/.test(filled.formula(`I${row}`) ?? "")) found.push(row);
+  }
+  assert.equal(found.length, 1, `절사 줄을 하나로 집지 못했다: ${JSON.stringify(found)}`);
+  return found[0];
+}
+
+/**
+ * 부품·O/H 부품 수를 바꿔 가며 잰다. 🔵 **밀림이 0인 칸을 하나 넣어 둔다** —
+ * 그 칸만 통과하고 나머지가 깨지면 "따라가지 않는다" 이고, 그 칸까지 깨지면
+ * "엉뚱하게 민다" 다. 둘을 가르지 못하면 고친 자리를 못 짚는다.
+ */
+const WRITE_OFF_CASES: { label: string; input: OhQuoteInput }[] = [
+  { label: "부품 0 · O/H 0 (스무 줄 당겨진다)", input: { ...BASE } },
+  {
+    label: "부품 3 · O/H 2 (열다섯 줄 당겨진다)",
+    input: { ...BASE, parts: parts(3, "부품"), overhaulParts: parts(2, "OH부품") },
+  },
+  {
+    label: "부품 8 · O/H 12 (양식과 같은 수 — 밀림 0)",
+    input: { ...BASE, parts: parts(8, "부품"), overhaulParts: parts(12, "OH부품") },
+  },
+  {
+    label: "부품 14 · O/H 18 (열두 줄 밀린다)",
+    input: { ...BASE, parts: parts(14, "부품"), overhaulParts: parts(18, "OH부품") },
+  },
+  {
+    label: "통전검사 제외 — 작업 내역 쪽 밀림까지 섞인다",
+    input: {
+      ...BASE,
+      parts: parts(4, "부품"),
+      overhaulParts: parts(3, "OH부품"),
+      workScope: {
+        INVESTIGATION: ["조사 하나", "조사 둘"],
+        REPAIR: ["수리 하나", "수리 둘", "수리 셋"],
+        POWER_TEST: ["통전 하나"],
+      },
+      powerTestExcluded: true,
+    },
+  },
+];
+
+for (const item of WRITE_OFF_CASES) {
+  test(`🔴 절사 줄의 「0이면 숨김」 조건부 서식이 함께 옮겨간다 — ${item.label}`, { skip }, () => {
+    const filled = fill(item.input);
+    assertSheetIsSound(filled);
+
+    const blocks = conditionalFormattingBlocks(filled.sheetXml);
+    // 🔵 먼저 **무엇을 재는지** 단언한다. 규칙이 하나도 없는 문서에 대고
+    // "틀린 것이 없다"고 통과해 버리는 일이 없도록.
+    assert.equal(blocks.length, 3, "조건부 서식 규칙 개수가 양식과 다르다");
+
+    const hide = blocks.filter(isHideWhenZero);
+    assert.equal(hide.length, 1, "「0이면 숨김」 규칙을 하나로 집지 못했다");
+
+    const row = writeOffRowOf(filled);
+    assert.equal(
+      hide[0].sqref,
+      `I${row}`,
+      `숨김 규칙이 절사 줄(I${row})을 가리키지 않는다 — 0원일 때 「0」 이 찍힌다`
+    );
+  });
+}
+
+/**
+ * 🔴 **과하게 민 것**을 잡는다. 위 시험만으로는 `fromRow` 를 0으로 잡아 시트의
+ * 모든 sqref 를 밀어도 통과한다 — 절사 줄은 어차피 맞기 때문이다.
+ *
+ * 밀면 안 되는 것이 넷이다. 헤더 입력칸이 비었는지 보는 조건부 서식 둘,
+ * K11 의 드롭다운(`dataValidation`), 그리고 `<sheetView>` 의 커서 자리. 앞의
+ * 셋을 밀면 멀쩡한 입력 검증이 엉뚱한 빈 줄에 가서 붙는다.
+ */
+for (const item of WRITE_OFF_CASES) {
+  test(`🔴 부품 칸 위의 규칙은 한 줄도 안 밀린다 — ${item.label}`, { skip }, () => {
+    const filled = fill(item.input);
+
+    const blanks = conditionalFormattingBlocks(filled.sheetXml).filter(
+      (block) => !isHideWhenZero(block)
+    );
+    assert.deepEqual(
+      blanks.map((block) => block.sqref),
+      ["D10:D11 D13:D14", "K11"],
+      "헤더 입력칸 검증 서식이 밀렸다"
+    );
+    assert.deepEqual(dataValidationSqrefs(filled.sheetXml), ["K11"], "드롭다운 범위가 밀렸다");
+    assert.ok(
+      /<selection[^>]*\ssqref="G24"/.test(filled.sheetXml),
+      "시트를 열었을 때의 커서 자리가 밀렸다"
+    );
+  });
+}
+
+/**
+ * 🔴 **이 파일이 한 번에 `rowShift` 만큼 미는 근거**를 양식에 대고 다시 잰다.
+ *
+ * 구간마다 미는 양이 다르다(부품 → O/H 부품 → 조사 → 수리 → 통전검사). 그런데도
+ * `oh-quote-template.ts` 가 `sqref` 를 **전체 rowShift 한 번**으로 미는 것은,
+ * 양식을 전수로 세어 보니 밀려야 하는 sqref 가 **모든 구간보다 아래에 있는 절사
+ * 줄 하나뿐**이기 때문이다.
+ *
+ * 양식에 구간 사이(부품 칸 ~ 작업 내역 끝)의 조건부 서식이 하나라도 생기면 그
+ * 전제가 깨지고, 그때는 구간별로 나눠 밀어야 한다. 여기서 깨뜨려 알린다 —
+ * 안 그러면 그 규칙만 조용히 엉뚱한 줄로 간다.
+ */
+test("🔴 양식의 sqref 는 부품 칸보다 위이거나 작업 내역보다 아래다", { skip }, () => {
+  const archive = ZipArchive.fromBuffer(readFileSync(templatePath as string));
+  const sheetXml = archive.readText(resolveSheetPart(archive, OH_QUOTE_SHEET_NAME));
+  const read = createCellTextReader(sheetXml, archive.readTextOrNull("xl/sharedStrings.xml"));
+  const rows = parseSheetRows(sheetXml);
+
+  const partsBlock = findItemBlock(rows, read, "부품 비용");
+  const scope = findWorkScopeBlocks(rows, read, OH_QUOTE_WORK_SCOPE_LABELS);
+  const lastResizedRow = scope.POWER_TEST.firstRow + scope.POWER_TEST.count - 1;
+  assert.ok(partsBlock.firstRow < lastResizedRow, "구간 자리를 읽지 못했다");
+
+  const attributes = [...sheetXml.matchAll(/\ssqref="([^"]+)"/g)].map((found) => found[1]);
+  // 🔵 표본이 비어 공짜로 통과하지 않게. 실측 2026-10-31 기준 **sqref 는 다섯**
+  // 이다 — 커서 자리 · 헤더 검증 둘 · K11 드롭다운 · 절사 줄. 그중 하나
+  // (`D10:D11 D13:D14`)는 공백으로 나뉜 **범위 둘**이라 쪼개면 여섯이 된다.
+  assert.equal(attributes.length, 5, `양식의 sqref 개수가 달라졌다: ${JSON.stringify(attributes)}`);
+  const ranges = attributes.flatMap((value) => value.split(/\s+/));
+  assert.equal(ranges.length, 6, `양식의 sqref 범위 개수가 달라졌다: ${JSON.stringify(ranges)}`);
+
+  const between: string[] = [];
+  for (const range of ranges) {
+    for (const cell of range.matchAll(/\$?[A-Z]+\$?(\d+)/g)) {
+      const row = Number(cell[1]);
+      if (row >= partsBlock.firstRow && row <= lastResizedRow) between.push(range);
+    }
+  }
+  assert.deepEqual(
+    between,
+    [],
+    "구간 사이에 sqref 가 생겼다 — 전체 rowShift 한 번으로는 못 민다"
+  );
+});
+
+/**
+ * 「0이면 숨김」 규칙이 **흰 글씨**를 가리키는지 양식에서 확인한다. 우리가 미는
+ * 것은 `sqref` 뿐이고 `dxfs` 는 손대지 않지만, 양식에서 그 규칙이 빨간 바탕으로
+ * 바뀌면 위 시험들은 **이름만 「숨김」인 채로** 계속 통과한다.
+ */
+test("🔴 절사 줄의 규칙은 흰 글씨(테마 0) 다 — 빨간 바탕이 아니다", { skip }, () => {
+  const archive = ZipArchive.fromBuffer(readFileSync(templatePath as string));
+  const sheetXml = archive.readText(resolveSheetPart(archive, OH_QUOTE_SHEET_NAME));
+
+  const hide = conditionalFormattingBlocks(sheetXml).filter(isHideWhenZero);
+  assert.equal(hide.length, 1, "「0이면 숨김」 규칙을 하나로 집지 못했다");
+
+  const dxfId = /<cfRule[^>]*\bdxfId="(\d+)"/.exec(hide[0].body)?.[1];
+  assert.ok(dxfId !== undefined, "규칙에 dxfId 가 없다");
+
+  const dxfs = archive.readText("xl/styles.xml");
+  const items = [...(/<dxfs[^>]*>([\s\S]*?)<\/dxfs>/.exec(dxfs)?.[1] ?? "").matchAll(
+    /<dxf>([\s\S]*?)<\/dxf>/g
+  )].map((m) => m[1]);
+  assert.ok(items.length > Number(dxfId), "dxfs 에 그 번호가 없다");
+  assert.match(items[Number(dxfId)], /<font><color theme="0"\/><\/font>/);
 });

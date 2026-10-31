@@ -2,7 +2,13 @@ import { ZipArchive } from "./zip-reader";
 import { writeZip, type ZipEntryInput } from "./zip-writer";
 import { readCellInner, setDate, setFormula, setInlineString, setNumber } from "./sheet-patch";
 import { createCellTextReader } from "./sheet-text";
-import { parseSheetRows, resizeRowBlock, syncDimension, writeSheetRows } from "./sheet-rows";
+import {
+  parseSheetRows,
+  resizeRowBlock,
+  shiftSqrefRows,
+  syncDimension,
+  writeSheetRows,
+} from "./sheet-rows";
 import {
   assertAscending,
   clearCellIfPresent,
@@ -316,6 +322,39 @@ function fillSheet(
   };
 
   let xml = syncDimension(writeSheetRows(sheetXml, rows), rows);
+
+  /**
+   * ── 🔴 조건부 서식도 함께 민다 — `<sheetData>` 밖에 있다 ───────────────
+   * 이 양식의 **절사 줄은 「0이면 흰 글씨」 조건부 서식으로 숨겨진다.** 셀 서식이
+   * 아니라 규칙이고(`cellIs equal 0` → `<font><color theme="0"/></font>`), 규칙은
+   * `<sheetData>` 바깥에 `sqref="I71"` 로 따로 적혀 있다. `resizeRowBlock` 은
+   * `<sheetData>` 안만 다시 번호 매기므로 그 규칙은 **제자리에 남는다.**
+   *
+   * 그래서 절사 줄이 I71 에서 움직인 모든 건(실측: 부품 0개면 I51, 3+2면 I56,
+   * 14+18이면 I83)에서 숨김 규칙이 **엉뚱한 줄에** 걸려 있었고, 절사가 0원인
+   * 견적서에 「0」 이 그대로 찍혀 나갔다(2026-10-31 신고). 양식에서는 멀쩡한데
+   * 시스템이 만든 파일에서만 보이던 것이 이것이다.
+   *
+   * ── fromRow 는 **부품 칸의 첫 줄** ─────────────────────────────────────
+   * 이 양식에서 움직일 수 있는 가장 위의 줄이다. 더 작게 잡으면 그 위에 있는
+   * **밀면 안 되는 sqref 넷**까지 끌려 내려간다 — 헤더 입력칸이 비었는지 보는
+   * 조건부 서식 둘(`D10:D11 D13:D14` · `K11`), K11 의 드롭다운
+   * (`dataValidation`), 그리고 `<sheetView>` 의 커서 자리(`selection
+   * sqref="G24"`). 앞의 셋을 밀면 멀쩡한 입력 검증이 빈 줄에 가서 붙는다.
+   *
+   * ── delta 는 **전체 rowShift 한 번** ───────────────────────────────────
+   * 구간마다 미는 양이 다르지만(afterParts → afterOverhaul → afterInvestigation
+   * → afterRepair → rowShift), 양식을 전수로 세어 보니 **부품 칸 첫 줄과 절사 줄
+   * 사이에는 sqref 가 하나도 없다**(2026-10-31 실측: 시트 전체의 sqref 는 위 넷과
+   * I71, 모두 다섯뿐). 남는 것은 모든 구간보다 아래인 절사 줄 하나이고, 그 자리는
+   * 위에서 셈한 `at.writeOff`(= `writeOffRow + rowShift`)와 **반드시 같아야** 한다
+   * — 수식을 적는 칸과 서식이 걸리는 칸이 어긋나면 안 되므로 같은 값을 쓴다.
+   *
+   * 🔴 「사이에 아무것도 없다」는 전제는 시험이 지킨다. 양식에 구간 사이
+   * 조건부 서식이 생기면 oh-quote-template.test.ts 의 「양식의 sqref 는 부품 칸
+   * 위이거나 작업 내역 아래다」가 깨진다 — 그때는 구간별로 나눠 밀어야 한다.
+   */
+  xml = shiftSqrefRows(xml, parts.firstRow, rowShift);
 
   // ── 3) 값을 채운다 ────────────────────────────────────────────────
   xml = setDate(xml, OH_QUOTE_CELLS.quoteDate, input.quoteDate);
