@@ -139,6 +139,12 @@ src/lib/domain/target-shipment-notification.test.ts
 src/lib/domain/due-date-inverted-notification.test.ts
 src/lib/domain/notification-toast.test.ts
 src/lib/domain/save-popup.test.ts
+# 🔴 저장 안 된 내용을 두고 나가려 할 때 막는 **규칙**(2026-11-01). 브라우저에서 Alt+←
+# 를 눌러 볼 수 없는 자리라, 「눌렀을 때 무엇을 하기로 했는가」를 값으로 못 박는다 —
+# 안 바뀌었으면 세 갈래 전부 안 막는가 · 바뀌면 셋이 **함께** 막는가 · 발판을 언제 세우고
+# 언제 안 세우는가 · 남의 popstate 에 손대지 않는가 · 발판이 서 있으면 replace 인가.
+# 창을 띄우고 주소를 미는 쪽은 components 목록의 unsaved-leave-guard-screens.test.ts.
+src/lib/domain/unsaved-leave-guard.test.ts
 src/lib/domain/amount-input.test.ts
 src/lib/validation/amount-value.test.ts
 src/lib/validation/repair-task-input.test.ts
@@ -285,6 +291,11 @@ src/lib/domain/quote-new-link.test.ts
 # 🔵 금액 칸 목록이 스키마의 numeric 칸과 같은지 **원본을 글자로 읽어** 맞대어 본다
 # (서브모듈 안의 파일이라 import 하지 않는다 — 이웃 *-source.test.ts 들과 같은 규율).
 src/lib/domain/quote-change-detection.test.ts
+# 🔴 **이름이 비슷한 이웃과 재는 것이 다르다**(2026-11-01). 위 quote-change-detection 은
+# «DB 의 행 ↔ 저장 요청» 을 서버에서 견주고, 아래는 «화면이 열릴 때의 값 ↔ 지금 화면의 값» 을
+# 브라우저에서 견준다 — 「저장되지 않는 내용이 있습니다」 창을 띄울지가 그 값으로 갈린다.
+# 🔵 표본에 **바뀐 것과 안 바뀐 것을 둘 다** 넣는다(늘 참을 돌려주는 구현도 통과하지 않게).
+src/lib/domain/quote-form-changed.test.ts
 # 저장 결과 낱말 셋과, 그 셋에 붙는 **팝업 문구 둘**. 🔴 이력에 남는 자동 반려 사유와
 # 화면 팝업 글이 **다른 글자**인지 여기서 못 박는다(같아지면 종 알림이 「사람이 반려했다」로 읽힌다).
 src/lib/domain/quote-save-outcome.test.ts

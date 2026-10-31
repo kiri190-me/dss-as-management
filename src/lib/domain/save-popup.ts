@@ -41,11 +41,32 @@ export const SAVE_POPUP_VISIBLE_MS = 500;
  */
 export const SAVE_POPUP_NAVIGATION_TIMEOUT_MS = 5_000;
 
+/**
+ * 🔴 **히스토리에 어떻게 넘기는가** (2026-11-01). 적지 않으면 `"push"` 다 —
+ * 지금까지 팝업을 부르던 **모든 화면이 한 글자도 달라지지 않는다.**
+ *
+ * `"replace"` 를 적는 화면은 둘뿐이고(견적서 · 보고서), 까닭도 하나다: 그 둘은
+ * 「저장 안 된 내용을 두고 나가려 할 때」를 막으려고 **히스토리에 발판 한 칸을 쌓아
+ * 둔다**(domain/unsaved-leave-guard.ts). 그 위에서 `push` 로 넘기면 도착한 목록에서
+ * 뒤로가기를 **두 번** 눌러야 한다 — `replace` 가 그 발판 칸을 목적지로 바꿔
+ * 발판이 없던 때와 똑같은 쌓임으로 되돌린다.
+ */
+export type SavePopupHistoryMode = "push" | "replace";
+
 export type SavePopupRequest = {
   /** 팝업에 적을 한 줄. 예: "고객사를 등록했습니다." */
   message: string;
   /** 0.5초 뒤 넘어갈 목록 주소. null 이면 팝업만 띄우고 그 자리에 머문다. */
   redirectTo: string | null;
+  /** 🔴 생략하면 `"push"` — 지금까지의 모든 호출이 그대로다(위 타입 머리말). */
+  historyMode?: SavePopupHistoryMode;
+};
+
+/** 다듬고 난 요청 — 여기서는 `historyMode` 가 **반드시 있다**(없으면 `"push"` 로 채웠다). */
+export type NormalizedSavePopupRequest = {
+  message: string;
+  redirectTo: string | null;
+  historyMode: SavePopupHistoryMode;
 };
 
 /**
@@ -58,14 +79,19 @@ export type SavePopupRequest = {
  *
  * 주소가 이상하면 넘기지 않고 **팝업만** 띄운다 — 저장은 이미 끝났으므로
  * 끝났다는 알림까지 버리지는 않는다.
+ *
+ * 🔴 `historyMode` 는 **아는 글자 하나만** 받는다. 모르는 값이 오면 `"push"` 다 —
+ * 이 신호는 커스텀 이벤트로 오므로 무엇이든 실릴 수 있고, 기본값으로 기우는 쪽이
+ * 지금까지의 동작이다.
  */
-export function normalizeSavePopupRequest(value: unknown): SavePopupRequest | null {
+export function normalizeSavePopupRequest(value: unknown): NormalizedSavePopupRequest | null {
   if (typeof value !== "object" || value === null) return null;
-  const { message, redirectTo } = value as Record<string, unknown>;
+  const { message, redirectTo, historyMode } = value as Record<string, unknown>;
   if (typeof message !== "string" || message.trim() === "") return null;
   return {
     message: message.trim(),
     redirectTo: isInternalPath(redirectTo) ? redirectTo : null,
+    historyMode: historyMode === "replace" ? "replace" : "push",
   };
 }
 
@@ -124,8 +150,12 @@ function trimTrailingSlash(pathname: string): string {
 
 /** 진행 중 팝업에 보내는 신호 한 장. */
 export type SavePopupProgressSignal =
-  /** 띄운다. 넘어갈 곳은 여기서 정해져 끝까지 그대로다. */
-  | { phase: "start"; message: string; redirectTo: string | null }
+  /**
+   * 띄운다. 넘어갈 곳은 여기서 정해져 끝까지 그대로다 — 🔴 **어떻게 넘길지도** 같다
+   * (`historyMode`). 끝났을 때 다시 받지 않는 까닭이 둘 다 같다: 떠날 곳은 띄울 때
+   * 이미 정해져 있고, 다시 받으면 그 한 번을 또 걸러야 한다.
+   */
+  | { phase: "start"; message: string; redirectTo: string | null; historyMode: SavePopupHistoryMode }
   /** 끝났다 — 글자를 이것으로 바꾸고 그때부터 0.5초를 센다. */
   | { phase: "finish"; message: string }
   /** 그만둔다 — 닫고 아무 데도 가지 않는다. */
@@ -135,6 +165,7 @@ export type SavePopupProgressSignal =
 export type SavePopupProgressState = {
   message: string;
   redirectTo: string | null;
+  historyMode: SavePopupHistoryMode;
   /** 🔴 끝났다는 신호를 기다리는 중인가. 참인 동안은 0.5초 시계를 걸지 않는다. */
   awaitingFinish: boolean;
 };
@@ -151,7 +182,14 @@ export function normalizeSavePopupProgressSignal(value: unknown): SavePopupProgr
   if (phase === "cancel") return { phase: "cancel" };
   if (phase === "start") {
     const request = normalizeSavePopupRequest(value);
-    return request === null ? null : { phase: "start", message: request.message, redirectTo: request.redirectTo };
+    return request === null
+      ? null
+      : {
+          phase: "start",
+          message: request.message,
+          redirectTo: request.redirectTo,
+          historyMode: request.historyMode,
+        };
   }
   if (phase === "finish") {
     if (typeof message !== "string" || message.trim() === "") return null;
@@ -173,12 +211,23 @@ export function nextSavePopupOnProgress(
 ): SavePopupProgressState | null | undefined {
   // 띄우는 것은 떠 있던 것과 무관하다 — showSavePopup 도 늘 새로 띄운다.
   if (signal.phase === "start") {
-    return { message: signal.message, redirectTo: signal.redirectTo, awaitingFinish: true };
+    return {
+      message: signal.message,
+      redirectTo: signal.redirectTo,
+      historyMode: signal.historyMode,
+      awaitingFinish: true,
+    };
   }
   // 🔴 끝남 · 그만둠은 **기다리는 팝업**에만 닿는다.
   if (current === null || !current.awaitingFinish) return undefined;
   if (signal.phase === "cancel") return null;
-  return { message: signal.message, redirectTo: current.redirectTo, awaitingFinish: false };
+  // 넘어갈 곳도, **어떻게 넘길지도** 띄울 때의 것을 그대로 쓴다.
+  return {
+    message: signal.message,
+    redirectTo: current.redirectTo,
+    historyMode: current.historyMode,
+    awaitingFinish: false,
+  };
 }
 
 /**

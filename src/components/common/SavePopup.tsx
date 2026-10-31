@@ -12,6 +12,7 @@ import {
   normalizeSavePopupProgressSignal,
   normalizeSavePopupRequest,
   savePopupCountsDownToLeave,
+  type NormalizedSavePopupRequest,
   type SavePopupProgressSignal,
   type SavePopupRequest,
 } from "@/lib/domain/save-popup";
@@ -42,7 +43,13 @@ function sendSavePopupProgress(signal: SavePopupProgressSignal): void {
  * 넘어갈 곳은 **여기서** 정한다 — 끝났다는 신호는 글자만 들고 온다.
  */
 export function showSavePopupProgress(request: SavePopupRequest): void {
-  sendSavePopupProgress({ phase: "start", message: request.message, redirectTo: request.redirectTo });
+  sendSavePopupProgress({
+    phase: "start",
+    message: request.message,
+    redirectTo: request.redirectTo,
+    // 🔴 적지 않으면 "push" 다 — 다듬는 자리가 그렇게 채운다(domain/save-popup.ts).
+    historyMode: request.historyMode ?? "push",
+  });
 }
 
 /** 끝났다고 알린다 — 같은 팝업의 글자가 이것으로 바뀌고, **그때부터** 0.5초 뒤 넘어간다. */
@@ -57,7 +64,8 @@ export function cancelSavePopupProgress(): void {
 
 type ActivePopup = {
   id: number;
-  request: SavePopupRequest;
+  /** 🔴 **다듬고 난** 요청이다 — `historyMode` 가 반드시 들어 있다("push" 가 기본). */
+  request: NormalizedSavePopupRequest;
   /** 🔴 끝났다는 신호를 기다리는 중인가 — 참이면 0.5초를 세지 않는다(진행 중 팝업). */
   awaitingFinish: boolean;
   /** 0.5초가 지나 목록으로 넘기기 시작했는가. */
@@ -112,7 +120,11 @@ export default function SavePopupHost() {
         if (next === null) return null;
         return {
           id: startId ?? current?.id ?? 0,
-          request: { message: next.message, redirectTo: next.redirectTo },
+          request: {
+            message: next.message,
+            redirectTo: next.redirectTo,
+            historyMode: next.historyMode,
+          },
           awaitingFinish: next.awaitingFinish,
           navigating: false,
         };
@@ -129,12 +141,19 @@ export default function SavePopupHost() {
   useEffect(() => {
     if (!active || !savePopupCountsDownToLeave(active)) return;
     const timer = window.setTimeout(() => {
-      const { redirectTo } = active.request;
+      const { redirectTo, historyMode } = active.request;
       if (!redirectTo) {
         setActive(null);
         return;
       }
-      router.push(redirectTo);
+      /**
+       * 🔴 **거의 언제나 `push` 다**(2026-11-01 에 갈래가 하나 생기기 전까지는 그것뿐이었다).
+       * `replace` 를 부르는 쪽은 「저장 안 된 내용을 두고 나가기」를 막으려고 히스토리에
+       * **발판 한 칸을 쌓아 둔** 화면 둘뿐이고, 그 칸을 목적지로 바꿔야 도착한 목록에서
+       * 뒤로가기가 **한 번에** 된다(domain/save-popup.ts 의 SavePopupHistoryMode).
+       */
+      if (historyMode === "replace") router.replace(redirectTo);
+      else router.push(redirectTo);
       // 이미 그 화면이면 경로가 바뀌지 않아 도착을 알아챌 수 없다 — 바로 닫는다.
       setActive(isAlreadyAtSavePopupTarget(pathname, redirectTo) ? null : { ...active, navigating: true });
     }, SAVE_POPUP_VISIBLE_MS);

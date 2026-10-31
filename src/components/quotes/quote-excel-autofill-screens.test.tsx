@@ -193,7 +193,7 @@ describe("🔴 (c) 종류 변경은 한 길 — select 와 [엑셀 값으로 바
   });
 
   test("엑셀 값 넣기의 종류 칸은 changeKind, 공급처는 칸에 치는 것과 같은 editCustomerName", () => {
-    const apply = sliceBetween(form, "function applyExcelValue(", "function collectFields() {");
+    const apply = sliceBetween(form, "function applyExcelValue(", "function collectFields(): QuoteComparableFields {");
     assert.ok(apply.includes("if (next) changeKind(next);"), apply);
     assert.ok(apply.includes("customerNameText: editCustomerName,"), apply);
     assert.ok(apply.includes("manualSupplyAmount: setManualSupplyAmount,"), apply);
@@ -227,7 +227,7 @@ describe("🔴 발행일자의 「손댐」 — 새 견적서에서 손대지 �
     assert.equal(count(form, "setQuoteDateTouched("), 1, "손댐 표시를 끄거나 따로 켜는 곳이 생겼다");
     const dateInput = sliceBetween(form, 'label="발행일자"', "</Field>");
     assert.ok(dateInput.includes("onChange={(e) => editQuoteDate(e.target.value)}"), dateInput);
-    const apply = sliceBetween(form, "function applyExcelValue(", "function collectFields() {");
+    const apply = sliceBetween(form, "function applyExcelValue(", "function collectFields(): QuoteComparableFields {");
     assert.ok(apply.includes("quoteDate: editQuoteDate,"), apply);
   });
 });

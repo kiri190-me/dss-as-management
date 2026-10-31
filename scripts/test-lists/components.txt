@@ -111,6 +111,15 @@ src/components/users/UserDeletionParts.test.tsx
 src/components/repair-cases/detail/edit/engineer-select-options.test.ts
 src/components/common/SavePopup.test.tsx
 src/components/common/save-popup-screens.test.ts
+# 🔴 「저장되지 않는 내용이 있습니다」 창 한 벌(2026-11-01) — 견적서와 보고서가 **함께
+# 쓴다.** 글자와 단추 셋의 차례(사용자가 정했다) · 「사라진다」를 돌려 말하지 않는가 ·
+# 저장할 수 없을 때 [저장]을 잠근 채 두지 않고 **아예 안 그리는가** · 처음 초점이 가장
+# 안전한 쪽인가.
+src/components/common/UnsavedLeaveConfirmDialog.test.tsx
+# 그 창이 두 화면에 **실제로 꽂혀 있는가** — 나가는 문이 빠짐없이 같은 문을 지나는가 ·
+# 저장 팝업이 발판을 걷는가 · 🔴 **그 둘 말고는 아무 화면도** historyMode 를 안 적는가 ·
+# 저장에 성공하면 기준선을 곧바로 갱신하는가. 규칙 쪽은 unit 목록의 unsaved-leave-guard.
+src/components/common/unsaved-leave-guard-screens.test.ts
 src/components/common/AmountInput.test.tsx
 src/app/bookmark-icon.test.ts
 src/components/excel-imports/kyosan-import-view-model.test.ts
@@ -209,6 +218,9 @@ src/components/repair-cases/report/service-report/service-report-document-previe
 # [전체 미리보기]는 예외인가(창이라 폼 곁에 뜨고, 닫아도 적던 글이 그대로) ·
 # [취소]가 [저장] 바로 왼쪽인가 · 단추 줄이 「보고서 종류」 위인가 · [취소]가
 # 저장하지 않는가 · 고친 것이 있을 때만 묻고 그 글에 「사라집니다」가 들어 있는가.
+# 🔵 2026-11-01 에 ⑤절의 기대값이 바뀌었다 — 묻는 창이 **견적서와 같은 공용 한 벌**로
+# 옮겨 가고 단추가 둘에서 셋이 됐다([저장] · [저장없이 나가기] · [취소]). 지키던 보증은
+# 그대로 남고 ⑥절(뒤로가기 · 탭 닫기도 같은 판단 하나를 지난다)이 더해졌다.
 src/components/repair-cases/report/service-report/service-report-cancel-screen.test.tsx
 # [새 견적서]의 발행번호 칸에 **다음 번호를 미리 적어 둔다**(2026-10-06) — 🔴 제안이지
 # 채번이 아니다(승인된 결정): 새 견적서에서만 · 한 번만 묻고 · 빈 칸일 때만 채우고 ·

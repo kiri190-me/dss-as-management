@@ -5,11 +5,12 @@ import { describe, test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import ServiceReportActions from "./ServiceReportActions";
-import ServiceReportLeaveConfirmDialog from "./ServiceReportLeaveConfirmDialog";
+import UnsavedLeaveConfirmDialog from "@/components/common/UnsavedLeaveConfirmDialog";
 
 /**
  * ============================================================================
  * 🔴 **임시보관을 걷어내고 [취소]를 둔다** (2026-10-19)
+ *     — 그리고 **뒤로가기까지 막는다** (2026-11-01)
  * ============================================================================
  * 사용자 요구 둘:
  *
@@ -20,6 +21,17 @@ import ServiceReportLeaveConfirmDialog from "./ServiceReportLeaveConfirmDialog";
  *   ②「보고서에서 **[저장] 왼쪽에 [취소] 버튼**을 만들어줘. 그 버튼을 누르면 지금
  *      내용이 저장되지 않은 채 **보고서 탭으로 빠져나오게** 해줘. 그리고 **그
  *      버튼들을 [보고서 종류] 창 위에** 위치하도록 해줘.」
+ *
+ * 🔵 **2026-11-01 에 ⑤절의 기대값이 바뀌었다.** 사용자 요구가 하나 더 왔다:
+ *   ③「… 브라우저에서 뒤로가기를 누르거나 취소를 누르면 [저장되지 않는 내용이
+ *      있습니다. 저장하시겠습니까?] 라는 팝업이 뜨면서 … 선택할 수 있도록 해줘.
+ *      내가 원하는건 브라우저에서 **[alt + 왼쪽 화살표]** 를 하면 이전으로 돌아갈 때,
+ *      팝업이 떴으면 좋겠는거야.」
+ * 그래서 묻는 창이 **견적서와 같은 한 벌**로 옮겨 갔고(common/UnsavedLeaveConfirmDialog),
+ * 단추가 둘에서 **셋**이 됐다 — [저장] · [저장없이 나가기] · [취소].
+ * 🔴 **지키던 보증은 그대로 남아 있다**: 묻는 것은 고쳤을 때뿐 · 그만두면 글이 그대로 ·
+ * 가는 곳은 서버가 넘긴 주소 · 브라우저 기본 confirm 이 아니다 · 단추 자리와 차례 ·
+ * 임시보관이 없다. **빠진 것은 옛 단추 글자 둘뿐이고**, 그 자리를 새 글자 셋이 메운다.
  *
  * 여기서 못 박는 것:
  *
@@ -32,6 +44,7 @@ import ServiceReportLeaveConfirmDialog from "./ServiceReportLeaveConfirmDialog";
  *   4. 🔴 [취소]는 **저장하지 않는다.**
  *   5. 🔴 고친 것이 있으면 **묻고**, 그 글에 「사라집니다」가 들어 있다. 창에서
  *      그만두면 **적던 글이 그대로** 남는다.
+ *   6. 🔴 (2026-11-01) 나가는 길 **넷이 같은 판단 하나**를 지난다.
  *
  * `ServiceReportForm` 은 서버 액션을 부르는 클라이언트 컴포넌트라 이 시험 환경에서
  * 그려 볼 수 없다(`server-only`). 이웃들과 **같은 방법**으로 원본을 글자로 읽는다
@@ -149,7 +162,9 @@ describe("🔴 ② [전체 미리보기]는 예외 — 열고 닫아도 적던 �
     for (const forbidden of [
       "setEdited(",
       "setSavedValues(",
-      "setLeaveConfirmOpen(",
+      // 🔵 2026-11-01 에 이름이 바뀌었다 — 창의 상태는 이제 leaveGuard 가 들고 있다.
+      //    **미리보기가 그 창을 건드리지 않는다**는 보증은 그대로다.
+      "leaveGuard.",
       "router.",
       "createServiceReportAction",
       "updateServiceReportAction",
@@ -240,8 +255,12 @@ describe("🔴 ③ [취소]는 [저장] 바로 왼쪽, 단추 줄은 「보고�
 // ───────────────────────────── 4·5. 저장하지 않는다 · 묻는다
 
 describe("🔴 ④ [취소]는 저장하지 않는다", () => {
+  /**
+   * 🔵 2026-11-01 에 `handleLeave`/`leaveWithoutSaving` 두 함수가 **공용 훅 하나**로
+   * 옮겨 갔다(`useUnsavedLeaveGuard`). 재는 자리만 그 호출로 옮기고, 보증은 그대로다.
+   */
   const leave = code.slice(
-    indexOrFail(code, "function handleLeave()"),
+    indexOrFail(code, "const leaveGuard = useUnsavedLeaveGuard({"),
     indexOrFail(code, "const rowLimitErrors")
   );
 
@@ -260,13 +279,14 @@ describe("🔴 ④ [취소]는 저장하지 않는다", () => {
   });
 
   test("🔴 가는 곳은 서버가 넘긴 「보고서」 탭 주소다 — 화면이 짓지 않는다", () => {
-    assert.ok(leave.replace(/\s+/g, " ").includes("router.push(reportHref);"), leave);
-    assert.equal(/router\.push\(["`]/.test(leave), false, "주소를 손으로 적는다");
+    assert.ok(leave.replace(/\s+/g, " ").includes("leaveHref: reportHref,"), leave);
+    // 🔴 화면 어디에서도 나갈 주소를 손으로 적지 않는다(옛 `router.push("…")` 금지 그대로).
+    assert.equal(/router\.push\(["`]/.test(code), false, "주소를 손으로 적는다");
   });
 
   test("🔴 [취소]와 머리의 [보고서 탭으로]가 **같은 길**을 지난다", () => {
-    assert.ok(flat.includes("onCancel={handleLeave}"), "단추 줄이 handleLeave 를 안 쓴다");
-    assert.ok(flat.includes("onClick={handleLeave}"), "머리의 [보고서 탭으로]가 안 묻는다");
+    assert.ok(flat.includes("onCancel={leaveGuard.requestLeave}"), "단추 줄이 같은 문을 안 쓴다");
+    assert.ok(flat.includes("onClick={leaveGuard.requestLeave}"), "머리의 [보고서 탭으로]가 안 묻는다");
     // 머리의 길이 아직 링크면 묻지 않고 빠져나간다.
     assert.equal(/<Link[^>]*href=\{reportHref\}/.test(flat), false, "머리가 아직 링크다");
   });
@@ -278,42 +298,94 @@ describe("🔴 ⑤ 고친 것이 있으면 묻는다 — 그만두면 글이 그
       flat.includes("const dirty = serviceReportValuesChanged(savedValues ?? initialValues, values);"),
       flat
     );
-    assert.ok(
-      flat.includes("function handleLeave() { if (dirty) { setLeaveConfirmOpen(true); return; } leaveWithoutSaving(); }"),
-      flat
-    );
-  });
-
-  test("🔴 창에서 그만두면 **창만 닫힌다** — 적던 글에 손대지 않는다", () => {
+    /**
+     * 🔵 옛 모양은 `function handleLeave() { if (dirty) { setLeaveConfirmOpen(true); … } }`
+     * 였다. 그 if 문은 이제 훅 안에 한 번만 있고(domain/unsaved-leave-guard.ts 의
+     * `unsavedLeaveOnExitRequest`), 화면은 **같은 `dirty` 를 넘기는 것**으로 끝난다.
+     * 🔴 못 박는 것은 그대로다 — 넘기는 값이 그 `dirty` 하나여야 한다.
+     */
     assert.ok(
       flat.includes(
-        "<ServiceReportLeaveConfirmDialog isOpen={leaveConfirmOpen} onConfirm={leaveWithoutSaving} onCancel={() => setLeaveConfirmOpen(false)} />"
+        "const leaveGuard = useUnsavedLeaveGuard({ dirty, leaveHref: reportHref, onSave: () => void handleSave(), openedKey: saved?.id ?? null, });"
       ),
       flat
     );
   });
 
+  test("🔴 창에서 [취소]를 누르면 **창만 닫힌다** — 적던 글에 손대지 않는다", () => {
+    // 🔴 `dismiss` 는 창의 열림 여부만 내린다(useUnsavedLeaveGuard) — 값에 닿는 길이 없다.
+    assert.ok(flat.includes("onCancel={leaveGuard.dismiss}"), flat);
+    assert.ok(flat.includes("onLeave={leaveGuard.leaveWithoutSaving}"), flat);
+    assert.ok(flat.includes("onSave={leaveGuard.saveAndLeave}"), flat);
+    assert.ok(flat.includes("isOpen={leaveGuard.asking}"), flat);
+  });
+
   test("🔴 글에 「사라집니다」가 **그대로** 들어 있다 — 돌아올 길이 없기 때문이다", () => {
     const html = renderToStaticMarkup(
-      <ServiceReportLeaveConfirmDialog isOpen onConfirm={() => {}} onCancel={() => {}} />
+      <UnsavedLeaveConfirmDialog
+        isOpen
+        canSave
+        destinationLabel="「보고서」 탭"
+        onSave={() => {}}
+        onLeave={() => {}}
+        onCancel={() => {}}
+      />
     );
-    assert.ok(html.includes("지금 나가면 적은 내용이 사라집니다"), html);
+    assert.ok(html.includes("지금 적은 내용이 사라집니다"), html);
     assert.ok(html.includes("되살릴 수 없습니다"), html);
     assert.ok(html.includes("[저장]"), "남기는 길을 안 알려 준다");
+    // 🔴 어디로 나가는지를 화면이 넘긴 말로 적는다 — 「목록으로」로 뭉개지 않는다.
+    assert.ok(html.includes("「보고서」 탭"), html);
   });
 
   test("창은 브라우저 기본 팝업이 아니라 이 저장소의 모양이다", () => {
+    // 🔵 2026-11-01 에 견적서와 함께 쓰는 공용 조각으로 옮겨 갔다. 보는 것은 그대로다.
     const source = readFileSync(
-      new URL("./ServiceReportLeaveConfirmDialog.tsx", import.meta.url),
+      new URL("../../../common/UnsavedLeaveConfirmDialog.tsx", import.meta.url),
       "utf8"
     ).replace(/\/\*[\s\S]*?\*\//g, "");
     assert.equal(/\bconfirm\(/.test(source), false, "브라우저 기본 confirm 을 쓴다");
     assert.ok(source.includes("dialog.showModal()"), "휴지통 창들과 같은 native <dialog> 가 아니다");
 
     const html = renderToStaticMarkup(
-      <ServiceReportLeaveConfirmDialog isOpen onConfirm={() => {}} onCancel={() => {}} />
+      <UnsavedLeaveConfirmDialog
+        isOpen
+        canSave
+        destinationLabel="「보고서」 탭"
+        onSave={() => {}}
+        onLeave={() => {}}
+        onCancel={() => {}}
+      />
     );
-    // 나가는 쪽과 그만두는 쪽, 둘뿐이다.
-    assert.deepEqual(buttonLabels(html), ["돌아가서 계속 적기", "저장하지 않고 나가기"]);
+    // 🔴 **사용자가 정한 셋, 그 차례 그대로**(2026-11-01). 2026-10-19 에는 둘이었다:
+    //    ["돌아가서 계속 적기", "저장하지 않고 나가기"].
+    assert.deepEqual(buttonLabels(html), ["저장", "저장없이 나가기", "취소"]);
+  });
+});
+
+// ───────────────────────────── 6. 나가는 길 넷이 같은 판단을 지난다
+
+describe("🔴 ⑥ 뒤로가기 · 탭 닫기도 막는다 — 네 길이 같은 값 하나를 본다 (2026-11-01)", () => {
+  test("🔴 화면이 넘기는 판단은 `dirty` **하나**다 — 길마다 다시 재지 않는다", () => {
+    // 창을 여는 자리가 이 화면에 따로 없다 — 전부 훅이 가진다.
+    assert.equal(/setLeaveConfirmOpen|setAsking\(/.test(code), false, code.slice(0, 200));
+    // 뒤로가기 · 탭 닫기 장치도 이 화면에 없다 — 있으면 두 벌이 된다.
+    for (const forbidden of ["popstate", "beforeunload", "history.pushState"]) {
+      assert.equal(code.includes(forbidden), false, `화면이 ${forbidden} 를 따로 다룬다`);
+    }
+  });
+
+  test("🔴 저장에 성공하면 **기준선이 곧바로 갱신된다** — 안 하면 저장하고도 경고가 뜬다", () => {
+    // 2026-10-19 부터 있던 줄이다. 2026-11-01 에 그 값이 `beforeunload` 까지 가르게 됐다.
+    assert.ok(flat.includes("setEdited(values); setSaved({ id: result.id, version: result.version }); setSavedValues(values);"), flat);
+  });
+
+  test("🔴 저장 팝업이 **발판을 걷고** 넘어간다 — 안 그러면 뒤로가기를 두 번 눌러야 한다", () => {
+    // 이 화면의 저장 팝업 셋(저장 · 지우기 · PDF 변환 중)이 모두 같은 값을 싣는다.
+    assert.equal(
+      (flat.match(/historyMode: leaveGuard\.historyMode\(\)/g) ?? []).length,
+      3,
+      "팝업 가운데 발판을 안 걷는 것이 있다"
+    );
   });
 });

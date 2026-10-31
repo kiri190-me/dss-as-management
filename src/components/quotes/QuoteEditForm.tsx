@@ -9,6 +9,8 @@ import {
   showSavePopupProgress,
 } from "@/components/common/SavePopup";
 import NoticePopup from "@/components/common/NoticePopup";
+import UnsavedLeaveConfirmDialog from "@/components/common/UnsavedLeaveConfirmDialog";
+import { useUnsavedLeaveGuard } from "@/components/common/useUnsavedLeaveGuard";
 import AmountInput from "@/components/common/AmountInput";
 import {
   editErrorClass,
@@ -21,6 +23,10 @@ import {
   canRenderQuoteDocument,
 } from "@/lib/domain/quote-document-support";
 import { quoteSupplyAmountOf, type QuoteItemKind } from "@/lib/domain/quote-list";
+import {
+  quoteFormValuesChanged,
+  type QuoteComparableFields,
+} from "@/lib/domain/quote-form-changed";
 import { sumQuoteLaborCost } from "@/lib/domain/quote-labor-cost";
 import {
   MAX_REPAIR_TASK_QUANTITY,
@@ -1042,6 +1048,27 @@ export default function QuoteEditForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   /**
+   * ==========================================================================
+   * 🔴 **「고친 것이 있는가」의 기준선을 다시 뜨라는 신호** (2026-11-01)
+   * ==========================================================================
+   * 기준선은 «이 화면이 저장된 것으로 믿는 값»이다. 숫자가 오르면 **그다음 렌더의 값**이
+   * 새 기준선이 된다(아래 `baseline`). 올리는 자리는 셋뿐이다:
+   *
+   *   1. 저장에 **성공**했을 때 — 안 올리면 방금 저장한 그대로인데도 탭을 닫을 때
+   *      「저장되지 않은 내용이 있다」고 경고가 뜬다.
+   *   2. 새 견적서의 **자동 불러오기**가 끝났을 때(수리 건에서 들어온 길).
+   *   3. 새 견적서의 **발행번호 제안**이 칸에 들어갔을 때.
+   *
+   * 🔴 2·3 은 **사람이 친 글이 아니다.** 기계가 채운 값을 「고침」으로 세면, 수리 건에서
+   * 견적서를 열자마자 아무것도 안 하고 나가려 해도 창이 뜬다 — 그러면 사람은 읽지 않고
+   * 누르는 손을 배우고, 정작 글이 사라질 때도 그냥 넘긴다.
+   *
+   * 🔴 **[인수번호로 불러오기] 단추는 올리지 않는다** — 그것은 사람이 누른 것이고,
+   * 누른 결과로 칸이 바뀌었으면 그것이 바로 「고침」이다.
+   */
+  const [baselineToken, setBaselineToken] = useState(0);
+
+  /**
    * 엑셀 전용 견적서인가 · 손으로 적는 공급가액(2026-09-15 Q3). 저장된 장은 그때 값을 편다.
    * 공급가액 칸의 글자는 **꺼도 지우지 않는다** — 다시 켜면 그대로다. 보내는 것은 켜져 있을
    * 때뿐이다(collectFields).
@@ -1638,7 +1665,16 @@ export default function QuoteEditForm({
     const timer = setTimeout(() => {
       if (didAutoLookup.current) return;
       didAutoLookup.current = true;
-      void handleLookup();
+      /**
+       * 🔴 끝나면 **기준선을 다시 뜬다**(2026-11-01 — 위 baselineToken). 여기서 채워진
+       * 고객사 · 모델명 · L/N · S/N · 신고증상은 **사람이 친 글이 아니다.** 안 올리면
+       * 수리 건에서 견적서를 열자마자 「저장되지 않는 내용이 있습니다」가 뜬다.
+       *
+       * `finally` 인 것은 실패해도 올려야 하기 때문이다 — 못 불러왔으면 칸은
+       * 그대로이므로 기준선을 다시 떠도 값은 같고, 던져서 건너뛰면 그다음부터
+       * 영영 「고침 있음」으로 남는다.
+       */
+      void handleLookup().finally(() => setBaselineToken((token) => token + 1));
     }, 0);
     return () => clearTimeout(timer);
     // handleLookup 은 매 렌더 새로 만들어진다 — 넣으면 무한히 다시 불러온다.
@@ -1713,6 +1749,9 @@ export default function QuoteEditForm({
         if (suggested === null) return;
         setQuoteNumber((current) => fillQuoteNumberIfEmpty(current, suggested));
         setSuggestedQuoteNumber(suggested);
+        // 🔴 번호를 **기계가** 적어 넣었다 — 사람이 친 글이 아니므로 기준선을 다시 뜬다
+        //    (위 baselineToken). 안 올리면 빈 폼을 열자마자 나갈 때 창이 뜬다.
+        setBaselineToken((token) => token + 1);
       })();
     }, 0);
     return () => clearTimeout(timer);
@@ -1933,7 +1972,16 @@ export default function QuoteEditForm({
     setters[change.field](change.excelValue);
   }
 
-  function collectFields() {
+  /**
+   * 저장에 실어 보낼 값 한 벌.
+   *
+   * 🔴 **돌려주는 타입을 못 박아 두었다**(2026-11-01 — `QuoteComparableFields`). 저장
+   * 말고 한 군데가 더 이 값을 쓰기 때문이다: 「저장 안 된 고침이 있는가」를 재는 자리가
+   * **바로 이 모양**을 견준다(domain/quote-form-changed.ts). 칸을 하나 더하면 그쪽
+   * 타입에 없는 칸이라 **여기서 tsc 가 막고**, 타입에 더하면 견주는 칸 목록이 또 막는다 —
+   * 새 칸이 조용히 비교에서 빠져 「고쳤는데 묻지도 않고 나가는」 일이 없게 하는 이음새다.
+   */
+  function collectFields(): QuoteComparableFields {
     return {
       quoteNumber,
       kind,
@@ -2122,6 +2170,7 @@ export default function QuoteEditForm({
           showSavePopupProgress({
             message: QUOTE_SAVE_PDF_RUNNING_POPUP_TEXT,
             redirectTo: returnHref ?? "/quotes",
+            historyMode: leaveGuard.historyMode(),
           });
         },
       });
@@ -2179,6 +2228,17 @@ export default function QuoteEditForm({
         return;
       }
 
+      /**
+       * 🔴 **저장에 성공했다 — 기준선을 곧바로 다시 뜬다**(2026-11-01 · 위 baselineToken).
+       * 안 하면 방금 저장한 그대로인데도 「저장 안 된 고침이 있다」가 참으로 남아, 탭을
+       * 닫을 때 브라우저 경고가 뜨고 [목록으로]를 눌러도 창이 묻는다. 이 화면에 머무는
+       * 길이 실제로 있다(아래 UNCHANGED · PDF 변환 실패 · 못 올린 첨부).
+       *
+       * 🔴 `UNCHANGED`(한 글자도 안 바뀌었다) 갈래보다 **앞**이다 — 그때도 화면의 값은
+       * DB 와 같으므로 기준선으로 삼는 것이 맞다.
+       */
+      setBaselineToken((token) => token + 1);
+
       if (savedQuote) {
         /**
          * ──────────────────────────────────────────────────────────────────
@@ -2224,7 +2284,11 @@ export default function QuoteEditForm({
         // 고친 뒤에도 저장 팝업을 0.5초 띄우고 왔던 목록으로 넘어간다(2026-09-15
         // 사용자 요청). 떠날 화면이라 다시 읽지 않고, 넘어갈 때까지 단추를 잠가 둔다.
         leaving = true;
-        showSavePopup({ message: "견적서를 저장했습니다.", redirectTo: returnHref ?? "/quotes" });
+        showSavePopup({
+          message: "견적서를 저장했습니다.",
+          redirectTo: returnHref ?? "/quotes",
+          historyMode: leaveGuard.historyMode(),
+        });
         return;
       }
 
@@ -2283,7 +2347,11 @@ export default function QuoteEditForm({
       }
 
       leaving = true;
-      showSavePopup({ message: "견적서를 등록했습니다.", redirectTo: returnHref ?? "/quotes" });
+      showSavePopup({
+        message: "견적서를 등록했습니다.",
+        redirectTo: returnHref ?? "/quotes",
+        historyMode: leaveGuard.historyMode(),
+      });
     } catch (err) {
       // 액션이 대답을 못 하고 끊긴 자리(서버 재시작·네트워크 끊김). 아무 말도
       // 없이 단추만 되살아나면, 저장이 된 건지 만 건지 알 수 없다.
@@ -2315,10 +2383,61 @@ export default function QuoteEditForm({
     }
     // 바꾼 장은 **진행 중 팝업**이 「완료되었습니다」로 바뀌어 그 팝업이 넘긴다(2026-10-12).
     if (afterPdf === "POPUP") return;
-    showSavePopup({ message: "견적서를 저장했습니다.", redirectTo: returnHref ?? "/quotes" });
+    showSavePopup({
+      message: "견적서를 저장했습니다.",
+      redirectTo: returnHref ?? "/quotes",
+      historyMode: leaveGuard.historyMode(),
+    });
   }
 
   const disabled = isSubmitting || isConflict;
+
+  /**
+   * ==========================================================================
+   * 🔴 **저장 안 된 내용을 두고 나가려 할 때 막는다** (2026-11-01)
+   * ==========================================================================
+   * 사용자 요구: 「견적서나 보고서에서 내용을 수정하다가 브라우저에서 뒤로가기를
+   * 누르거나 취소를 누르면 [저장되지 않는 내용이 있습니다. 저장하시겠습니까?] 라는
+   * 팝업이 뜨면서 … 선택할 수 있도록 해줘.」
+   *
+   * ── 🔴 「바뀌었나」는 **이 한 줄**이다 ──────────────────────────────
+   * 나가는 길 셋([취소] · Alt+← · 탭 닫기)이 전부 아래 `dirty` 하나만 본다. 셋이 각자
+   * 재면 언젠가 한쪽만 고쳐져 **한 문만 묻는 화면**이 된다(useUnsavedLeaveGuard 머리말).
+   *
+   * 🔴 견주는 모양은 **저장에 실리는 값 그대로**다(`collectFields()`). 줄의 `key` ·
+   * `sourceKey` · 고르개의 기억 같은 화면 전용 값은 그 안에 애초에 없다 — 넣었으면
+   * 매 렌더 새 값이라 **늘 「바뀜」**이 됐을 것이다(domain/quote-form-changed.ts).
+   *
+   * 🔴 **새 견적서도 막는다** — 아직 한 번도 저장하지 않은 장이라 나가면 돌아올 길이
+   * 아예 없다. 그 대신 기준선이 «기계가 채우고 난 값»이라(위 baselineToken), 빈 폼을
+   * 열었다 그냥 나가는 길에는 묻지 않는다.
+   */
+  const fields = collectFields();
+  /**
+   * 🔴 기준선을 **그리는 도중에** 맞춘다 — props/신호가 바뀌었을 때 상태를 고치는
+   * React 의 권장 방식이고, 이 저장소가 이미 쓰는 모양이다(common/SavePopup.tsx 의
+   * `renderedPathname`). effect 로 하면 기준선이 한 렌더 늦어, 저장 직후 그 한 프레임에
+   * 「고침 있음」이 참으로 남는다.
+   */
+  const [baseline, setBaseline] = useState<{ token: number; fields: QuoteComparableFields }>(() => ({
+    token: baselineToken,
+    fields,
+  }));
+  if (baseline.token !== baselineToken) setBaseline({ token: baselineToken, fields });
+  const dirty = quoteFormValuesChanged(baseline.fields, fields);
+
+  /**
+   * 🔴 [저장]은 **지금 저장 흐름을 그대로 탄다** — 창이 저장을 따로 짓지 않는다.
+   * `requestSubmit()` 은 사람이 [저장] 단추를 누른 것과 똑같다: 같은 `handleSubmit`,
+   * 같은 필수 칸 검사, 같은 실패 처리. 🔴 **저장이 실패하면 나가지 않는다** — 이미 그렇게
+   * 돼 있다(`finally` 가 `leaving` 이 아니면 단추를 되살리고 이 화면에 머문다).
+   */
+  const formRef = useRef<HTMLFormElement>(null);
+  const leaveGuard = useUnsavedLeaveGuard({
+    dirty,
+    leaveHref: returnHref ?? "/quotes",
+    onSave: () => formRef.current?.requestSubmit(),
+  });
 
   /**
    * 지금 고른 장비 종류·견적서 종류에 맞는 양식의 문구.
@@ -2490,7 +2609,7 @@ export default function QuoteEditForm({
     ) : null;
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+    <form ref={formRef} onSubmit={handleSubmit} className="flex flex-col gap-6">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
           {savedQuote ? "견적서 수정" : "새 견적서"}
@@ -2532,10 +2651,13 @@ export default function QuoteEditForm({
             />
           )}
           {/* 취소도 왔던 곳으로 — 수리 건에서 들어왔으면 그 건의 「견적서」 탭,
-              아니면 지금까지와 같이 PO/내자 목록이다. */}
+              아니면 지금까지와 같이 PO/내자 목록이다.
+              🔴 2026-11-01 부터 **고친 것이 있으면 먼저 묻는다** — 나가는 길 셋이 같은
+              판단 하나를 지난다(아래 <UnsavedLeaveConfirmDialog> · leaveGuard).
+              🔴 `type="button"` 인 것이 중요하다 — 폼 안이라 빠뜨리면 [취소]가 저장이 된다. */}
           <button
             type="button"
-            onClick={() => router.push(returnHref ?? "/quotes")}
+            onClick={leaveGuard.requestLeave}
             className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm dark:border-zinc-700"
           >
             취소
@@ -2597,10 +2719,12 @@ export default function QuoteEditForm({
           }
         >
           <p>{attachmentNotice}</p>
+          {/* 🔴 여기도 같은 문을 쓴다(2026-11-01) — 저장은 끝났으니 보통은 묻지 않고 바로
+              나가지만, 못 올린 파일을 보고 **칸을 더 고쳤다면** 그것은 다시 잃을 글이다. */}
           {createdQuote && !isSubmitting && (
             <button
               type="button"
-              onClick={() => router.push(returnHref ?? "/quotes")}
+              onClick={leaveGuard.requestLeave}
               className="mt-2 rounded-md border border-amber-400 px-2 py-1 text-xs dark:border-amber-700"
             >
               목록으로
@@ -2630,11 +2754,31 @@ export default function QuoteEditForm({
         />
       )}
 
-      {/* 🔴 [저장] 뒤 엑셀 → PDF 변환의 **결과**(견적서는 이미 저장됐다). 도는 중은 팝업이 맡는다(2026-10-12). */}
-      <QuoteSavePdfNotice
-        lines={pdfNoticeLines}
-        busy={pdfConverting}
-        onLeave={() => router.push(returnHref ?? "/quotes")}
+      {/* 🔴 [저장] 뒤 엑셀 → PDF 변환의 **결과**(견적서는 이미 저장됐다). 도는 중은 팝업이 맡는다(2026-10-12).
+          나가는 단추는 위 [목록으로]와 같은 문을 쓴다(2026-11-01). */}
+      <QuoteSavePdfNotice lines={pdfNoticeLines} busy={pdfConverting} onLeave={leaveGuard.requestLeave} />
+
+      {/*
+        🔴 **저장 안 된 내용을 두고 나가려 할 때 묻는 창** (2026-11-01).
+        글자도 단추 셋도 사용자가 정한 것이고, **보고서와 같은 한 벌**을 쓴다
+        (common/UnsavedLeaveConfirmDialog.tsx 머리말 — 두 벌이면 한쪽만 고쳐진다).
+        [저장]은 이 폼의 `requestSubmit()` 을 불러 **지금 저장 흐름을 그대로** 탄다.
+      */}
+      <UnsavedLeaveConfirmDialog
+        isOpen={leaveGuard.asking}
+        canSave={!disabled}
+        cannotSaveReason={
+          isConflict
+            ? "다른 사람이 먼저 저장해서 지금은 저장할 수 없습니다. [취소]를 누르고 [다시 불러오기]로 최신 내용을 확인해 주세요."
+            : "저장이 도는 중입니다. [취소]를 눌러 끝날 때까지 기다려 주세요."
+        }
+        /* 🔴 어디로 나가는지는 화면이 정한다 — 수리 건에서 들어왔으면 그 건의 「견적서」
+           탭이라 「견적서 목록」이 거짓말이 된다. 주소를 글자로 풀 길이 여기 없어
+           「왔던 목록」으로 적는다(둘 다 견적서 목록이다). */
+        destinationLabel={returnHref === null ? "견적서 목록" : "왔던 목록"}
+        onSave={leaveGuard.saveAndLeave}
+        onLeave={leaveGuard.leaveWithoutSaving}
+        onCancel={leaveGuard.dismiss}
       />
 
 

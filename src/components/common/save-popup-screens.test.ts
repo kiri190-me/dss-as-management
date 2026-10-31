@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 
 /**
  * 화면마다 저장 뒤 어떤 팝업을 띄우고 어디로 넘기는지 붙잡는다(2026-09-15 사용자 요청).
@@ -489,6 +490,52 @@ test("메일 시험 발송 결과 · 계정 삭제 안내 · 위임 철회는 �
     "utf8"
   );
   assert.match(routeDelegation, /setListMessage\("결재권 위임을 되돌렸습니다\."\);/);
+});
+
+/**
+ * ============================================================================
+ * 🔴 **`historyMode` 를 적는 화면은 둘뿐이다** (2026-11-01)
+ * ============================================================================
+ * 저장 팝업이 넘어갈 때 `push` 대신 `replace` 를 쓰는 갈래가 그날 하나 생겼다
+ * (domain/save-popup.ts 의 SavePopupHistoryMode). 적는 화면은 **히스토리에 발판 한 칸을
+ * 쌓아 두는** 둘뿐이고(견적서 · 보고서), 그 밖의 수십 곳은 **한 글자도 달라지지 않았다.**
+ *
+ * 🔴 이 시험이 그 「한 글자도」를 지킨다. 누가 다른 화면에 이 칸을 베껴 넣으면 그 화면의
+ * 뒤로가기가 조용히 달라진다 — 발판이 없는 화면에서 `replace` 하면 **온 자리가 사라져**
+ * 뒤로가기가 한 칸을 건너뛴다. 오류가 나지 않아 아무도 신고하지 않는 종류의 결함이다.
+ */
+test("🔴 저장 팝업에 historyMode 를 적는 화면은 견적서 · 보고서 둘뿐이다", () => {
+  const allowed = new Set([
+    "src/components/quotes/QuoteEditForm.tsx",
+    "src/components/repair-cases/report/service-report/ServiceReportForm.tsx",
+    // 🔵 팝업 자리 자신과 발판 장치는 **이 칸을 다루는 쪽**이라 적는 것이 맞다.
+    "src/components/common/SavePopup.tsx",
+    "src/components/common/useUnsavedLeaveGuard.ts",
+  ]);
+
+  function walk(dir: string, found: string[] = []): string[] {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const next = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(next, found);
+        continue;
+      }
+      if (!/\.tsx?$/.test(entry.name) || entry.name.includes(".test.")) continue;
+      found.push(next.split(path.sep).join("/"));
+    }
+    return found;
+  }
+
+  const offenders = walk("src/components").filter((file) =>
+    readFileSync(file, "utf8").includes("historyMode")
+  );
+  // 표본이 비어서 공짜로 통과하지 않게 — 적는 곳이 **적어도 셋**은 있어야 한다.
+  assert.ok(offenders.length >= 3, `historyMode 를 적은 화면이 없다: ${offenders.join(", ")}`);
+  assert.deepEqual(
+    offenders.filter((file) => !allowed.has(file)),
+    [],
+    "발판을 쌓지 않는 화면이 historyMode 를 적고 있다"
+  );
 });
 
 test("승인 카드는 성공 문구를 팝업으로 옮기고, 거절 이유만 카드에 남긴다", () => {

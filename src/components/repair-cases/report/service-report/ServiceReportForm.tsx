@@ -9,6 +9,8 @@ import {
 } from "@/components/common/SavePopup";
 import { useState } from "react";
 import { MasterDataDeleteDialog } from "@/components/common/master-data-trash-dialogs";
+import UnsavedLeaveConfirmDialog from "@/components/common/UnsavedLeaveConfirmDialog";
+import { useUnsavedLeaveGuard } from "@/components/common/useUnsavedLeaveGuard";
 import type { QuoteIssueNoticeLine } from "@/components/quotes/quote-issue-messages";
 import { fileNameFromContentDisposition } from "@/lib/domain/content-disposition-file-name";
 import { SERVICE_REPORT_DRAFT_LABELS, buildDraftText } from "@/lib/domain/edit-draft-text";
@@ -37,7 +39,6 @@ import ServiceReportActions from "./ServiceReportActions";
 import ServiceReportDocumentPreviewDialog from "./ServiceReportDocumentPreviewDialog";
 import ServiceReportBodyFields from "./ServiceReportBodyFields";
 import ServiceReportConflictNotice from "./ServiceReportConflictNotice";
-import ServiceReportLeaveConfirmDialog from "./ServiceReportLeaveConfirmDialog";
 import ServiceReportDispositionFields from "./ServiceReportDispositionFields";
 import ServiceReportHeaderFields from "./ServiceReportHeaderFields";
 import { editInputClass, Field, ServiceReportSection } from "./ServiceReportField";
@@ -89,9 +90,10 @@ import {
  * 임시보관은 「저장 못 하고 나갔을 때 글을 지켜 주는」 장치였다. 없앴으므로 **실수로
  * 나가면 날아간다.** 그래서 **나가는 길마다 묻는다**:
  *
- *   1. [취소]와 머리의 [보고서 탭으로]가 **같은 `handleLeave` 하나**를 지난다 —
- *      고친 것이 있으면 「나가면 적은 내용이 사라집니다」를 묻는다
- *      (`ServiceReportLeaveConfirmDialog`). 문이 둘인데 한쪽만 묻는 일이 없게 한다.
+ *   1. [취소]와 머리의 [보고서 탭으로]가 **같은 문 하나**를 지난다 — 고친 것이 있으면
+ *      묻는다(`leaveGuard` · common/UnsavedLeaveConfirmDialog.tsx). 문이 둘인데 한쪽만
+ *      묻는 일이 없게 한다. 🔴 2026-11-01 부터 **브라우저 뒤로가기(Alt+←)와 탭 닫기**도
+ *      같은 판단 하나를 지난다(아래 leaveGuard 머리말).
  *   2. 저장 충돌로 얼릴 때는 적어 둔 글을 상자에 붙잡는다(`ServiceReportConflictNotice`).
  *   3. 저장하려던 장이 이미 지워져 있으면 **새 장으로 되돌린다**(아래 `NOT_FOUND`).
  *   4. 지우기는 **묻고 나서** 지운다(아래 `openDelete`·`confirmDelete`).
@@ -280,14 +282,6 @@ export default function ServiceReportForm({
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   /**
-   * 🔴 「저장하지 않고 나가시겠습니까」 창이 떠 있는가 (2026-10-19).
-   *
-   * 지우기 창과 같은 규칙이다 — 창은 자기 상태를 갖지 않고 여기가 소유한다. 다만
-   * **전송 중 깃발이 없다**: 나가는 일은 서버에 아무것도 보내지 않는다.
-   */
-  const [leaveConfirmOpen, setLeaveConfirmOpen] = useState(false);
-
-  /**
    * 지금 붙들고 있는 장. 서버가 넘긴 것으로 시작하고, **저장에 성공할 때마다
    * 갱신된다.**
    *
@@ -357,9 +351,11 @@ export default function ServiceReportForm({
     // 새 장이 되는 창을 남겨 두지 않는다.
     setDeleteOpen(false);
     setDeleteError(null);
-    // 🔴 「나가시겠습니까」도 닫는다 — 앞 장의 글을 두고 묻던 물음이라, 갈아 끼운
-    //    장에서 그대로 「나가기」를 누르면 묻지도 않은 것을 승낙한 꼴이 된다.
-    setLeaveConfirmOpen(false);
+    // 🔴 「저장되지 않는 내용이 있습니다」 창은 **갈이가 일어난 것을 보고 스스로 닫는다**
+    //    (아래 leaveGuard 의 `openedKey`) — 앞 장의 글을 두고 묻던 물음이라, 갈아 끼운
+    //    장에서 그대로 [저장없이 나가기]를 누르면 묻지도 않은 것을 승낙한 꼴이 된다.
+    //    🔴 여기서 닫지 않는 까닭은 **차례** 때문이다: 창의 상태는 저 아래 훅이 들고
+    //    있고(`dirty` 가 있어야 만들 수 있다), 여기서는 아직 그 값이 없다.
     // 🔴 떠 있던 미리보기 창도 닫는다 — 앞 장의 문서를 새 장의 화면 위에 띄워 두면
     //    사람은 그것을 **이 장의 문서**로 읽는다.
     setPreviewDocument(null);
@@ -399,31 +395,41 @@ export default function ServiceReportForm({
   const dirty = serviceReportValuesChanged(savedValues ?? initialValues, values);
 
   /**
-   * ── 🔴 [취소] · 머리의 [보고서 탭으로] — 저장하지 않고 나간다 (2026-10-19) ──
+   * ══ 🔴 저장하지 않고 나가는 **네 길** — 판단은 위 `dirty` 하나다 ═══════════
+   *
+   * ── 2026-10-19: [취소] · 머리의 [보고서 탭으로] ────────────────────────
    * 사용자 요구: 「[저장] 왼쪽에 [취소] 버튼을 만들어줘. 그 버튼을 누르면 지금
    * 내용이 저장되지 않은 채 보고서 탭으로 빠져나오게 해줘.」
    *
    *  · 🔴 **저장하지 않는다.** 서버 액션도, 통로도 부르지 않는다.
    *  · 🔴 **고친 것이 있으면 묻는다.** 같은 날 임시보관을 걷어내서 **돌아올 길이
-   *    없다** — 나가면 사라진다는 사실이 사람에게 보여야 한다
-   *    (`ServiceReportLeaveConfirmDialog`).
+   *    없다** — 나가면 사라진다는 사실이 사람에게 보여야 한다.
    *  · 🔴 **문이 둘인데 한쪽만 묻는 일이 없게** 머리의 [보고서 탭으로]도 같은 길을
    *    지난다. 그래서 그것은 이제 `<Link>` 가 아니라 단추다.
    *  · 가는 곳은 `reportHref` 다 — 주소를 여기서 짓지 않는다(서버 페이지가
    *    `repairCaseDetailHrefs` 로 만들어 넘긴다).
+   *
+   * ── 🔴 2026-11-01: **브라우저 뒤로가기(Alt+←)와 탭 닫기도 막는다** ─────
+   * 사용자 요구: 「… 브라우저에서 뒤로가기를 누르거나 취소를 누르면 [저장되지 않는
+   * 내용이 있습니다. 저장하시겠습니까?] 라는 팝업이 뜨면서 … 내가 원하는건
+   * 브라우저에서 **[alt + 왼쪽 화살표]** 를 하면 이전으로 돌아갈 때, 팝업이 떴으면.」
+   *
+   *  · 🔴 창이 **견적서와 같은 한 벌**이 됐다(common/UnsavedLeaveConfirmDialog.tsx).
+   *    단추가 둘에서 **셋**으로 늘었다 — [저장] · [저장없이 나가기] · [취소].
+   *    🔴 그중 [저장]이 새로 생긴 길이고, **지금 저장 흐름을 그대로 탄다**
+   *    (`handleSave` — 실패하면 그 자리에 머문다).
+   *  · 🔴 뒤로가기를 막는 장치(히스토리 발판)와 탭 닫기 경고는 전부
+   *    components/common/useUnsavedLeaveGuard.ts 에 있다. 이 화면은 **같은 `dirty`
+   *    하나만** 넘긴다 — 네 길이 각자 재면 언젠가 한쪽만 고쳐진다.
+   *  · `openedKey` 는 위 «장이 바뀌었다» 갈이와 짝이다 — 장이 갈리면 떠 있던 창이
+   *    스스로 닫힌다(앞 장의 글을 두고 묻던 물음이라).
    */
-  function handleLeave() {
-    if (dirty) {
-      setLeaveConfirmOpen(true);
-      return;
-    }
-    leaveWithoutSaving();
-  }
-
-  function leaveWithoutSaving() {
-    setLeaveConfirmOpen(false);
-    router.push(reportHref);
-  }
+  const leaveGuard = useUnsavedLeaveGuard({
+    dirty,
+    leaveHref: reportHref,
+    onSave: () => void handleSave(),
+    openedKey: saved?.id ?? null,
+  });
 
   const rowLimitErrors = serviceReportRowLimitErrors(values, limits);
   const bodyEmpty = isServiceReportBodyEmpty(values);
@@ -529,6 +535,7 @@ export default function ServiceReportForm({
           showSavePopupProgress({
             message: SERVICE_REPORT_SAVE_PDF_RUNNING_POPUP_TEXT,
             redirectTo: reportHref,
+            historyMode: leaveGuard.historyMode(),
           });
         },
       });
@@ -646,6 +653,7 @@ export default function ServiceReportForm({
       showSavePopup({
         message: saved ? "보고서를 저장했습니다." : "새 보고서를 저장했습니다.",
         redirectTo: reportHref,
+        historyMode: leaveGuard.historyMode(),
       });
     } catch {
       setFormError("서버에 닿지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.");
@@ -735,6 +743,7 @@ export default function ServiceReportForm({
       showSavePopup({
         message: "휴지통으로 이동되었습니다.",
         redirectTo: reportHref,
+        historyMode: leaveGuard.historyMode(),
       });
     } catch {
       setDeleteError("서버에 닿지 못했습니다. 네트워크 상태를 확인한 뒤 다시 시도해 주세요.");
@@ -893,11 +902,11 @@ export default function ServiceReportForm({
             {mode === "SAVED" ? "저장된 보고서를 고치는 중입니다." : "새 보고서를 적는 중입니다."}
           </p>
         </div>
-        {/* 🔴 `<Link>` 가 아니라 단추다 (2026-10-19) — [취소]와 **같은 `handleLeave`**
-            를 지나야 고친 것이 있을 때 묻는다. 링크로 두면 문이 둘인데 한쪽만 묻는다. */}
+        {/* 🔴 `<Link>` 가 아니라 단추다 (2026-10-19) — [취소]와 **같은 문**을 지나야
+            고친 것이 있을 때 묻는다. 링크로 두면 문이 둘인데 한쪽만 묻는다. */}
         <button
           type="button"
-          onClick={handleLeave}
+          onClick={leaveGuard.requestLeave}
           className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           보고서 탭으로
@@ -945,7 +954,9 @@ export default function ServiceReportForm({
       {/* 🔴 [저장] 뒤 연락서 폴더 · PDF 결과(2026-10-12). 도는 동안은 팝업이 말하므로
           여기 줄이 차는 때는 **끝난 뒤 · 사람이 읽을 것이 남았을 때**뿐이다. 첫 줄이
           「보고서는 저장되었습니다.」라 저장이 끝났다는 것이 먼저 읽힌다. */}
-      <ServiceReportSavePdfNotice lines={pdfNoticeLines} onLeave={() => router.push(reportHref)} />
+      {/* 나가는 단추는 [취소]와 **같은 문**을 쓴다(2026-11-01) — 저장은 끝났으니 보통은
+          묻지 않고 바로 나가지만, 안내를 보고 칸을 더 고쳤다면 그것은 다시 잃을 글이다. */}
+      <ServiceReportSavePdfNotice lines={pdfNoticeLines} onLeave={leaveGuard.requestLeave} />
 
       {/*
         🔴 **단추 줄이 「보고서 종류」 위다** (2026-10-19 사용자 요구: 「그 버튼들을
@@ -975,7 +986,7 @@ export default function ServiceReportForm({
             : null
         }
         // 🔴 저장하지 않고 「보고서」 탭으로. 고친 것이 있으면 아래 창이 먼저 묻는다.
-        onCancel={handleLeave}
+        onCancel={leaveGuard.requestLeave}
         onSave={() => void handleSave()}
         onPreview={() => void handlePreview()}
         onDownload={() => void handleDownload()}
@@ -1057,15 +1068,33 @@ export default function ServiceReportForm({
         />
       )}
 
-      {/* 🔴 [취소] · 머리의 [보고서 탭으로] 확인 창 (2026-10-19).
+      {/* 🔴 저장 안 된 내용을 두고 나가려 할 때 묻는 창 (2026-10-19 · 2026-11-01 에 모양이
+          바뀌었다).
 
-          **고친 것이 있을 때만** 뜬다(`dirty`). 여기서 [돌아가서 계속 적기]를 누르면
-          창만 닫힌다 — `setLeaveConfirmOpen(false)` 하나뿐이라 **적던 글은 한 글자도
-          건드리지 않는다.** 같은 날 임시보관을 걷어내서, 한 번 나가면 돌아올 길이 없다. */}
-      <ServiceReportLeaveConfirmDialog
-        isOpen={leaveConfirmOpen}
-        onConfirm={leaveWithoutSaving}
-        onCancel={() => setLeaveConfirmOpen(false)}
+          **고친 것이 있을 때만** 뜬다(`dirty`). 여기서 [취소]를 누르면 창만 닫힌다 —
+          `dismiss()` 하나뿐이라 **적던 글은 한 글자도 건드리지 않는다.** 2026-10-19 에
+          임시보관을 걷어내서, 한 번 나가면 돌아올 길이 없다.
+
+          🔴 2026-11-01: 창이 **견적서와 같은 한 벌**이 됐고 단추가 셋이 됐다 —
+          [저장] · [저장없이 나가기] · [취소](사용자가 정한 글자·차례).
+          🔴 [저장]은 **이 화면의 저장 흐름 그대로**다(`handleSave`) — 저장이 실패하면
+          나가지 않고, 창은 닫혀야 사람이 폼 안의 오류를 본다. */}
+      <UnsavedLeaveConfirmDialog
+        isOpen={leaveGuard.asking}
+        canSave={canSave}
+        cannotSaveReason={
+          frozen
+            ? "다른 사람이 먼저 저장해서 지금은 저장할 수 없습니다. [취소]를 누르고 위 상자의 [최신 내용 다시 불러오기]를 눌러 주세요."
+            : blocked
+              ? "보고서 양식을 읽지 못해 지금은 저장할 수 없습니다. [취소]를 누르고 화면 위의 안내를 확인해 주세요."
+              : busy
+                ? "저장 · 내려받기가 도는 중입니다. [취소]를 눌러 끝날 때까지 기다려 주세요."
+                : "이 보고서를 저장할 권한이 없습니다."
+        }
+        destinationLabel="「보고서」 탭"
+        onSave={leaveGuard.saveAndLeave}
+        onLeave={leaveGuard.leaveWithoutSaving}
+        onCancel={leaveGuard.dismiss}
       />
 
       {/* 🔴 지우기 확인 — 고객사·제품 모델·견적서가 쓰는 그 창이다. **보관 문구를

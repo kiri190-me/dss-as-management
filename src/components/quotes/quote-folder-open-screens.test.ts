@@ -75,7 +75,9 @@ describe("편집 화면 머리 — [미리보기 · PDF] 곁", () => {
     const header = sliceBetween(form, "<h1", "{/* [폴더 열기] 결과");
     const preview = indexOrFail(header, "onClick={() => setShowPreview(true)}");
     const folder = indexOrFail(header, "<QuoteFolderOpenButton");
-    const cancel = indexOrFail(header, "router.push(returnHref ?? \"/quotes\")");
+    // 🔵 2026-11-01 에 [취소]가 **묻는 문**을 지나게 됐다(common/useUnsavedLeaveGuard.ts).
+    //    여기서 재는 것은 자리뿐이라, 그 단추를 가리키는 글자만 바뀌었다.
+    const cancel = indexOrFail(header, "onClick={leaveGuard.requestLeave}");
     assert.ok(preview < folder && folder < cancel, "자리가 [미리보기 · PDF] 곁이 아니다");
     assert.ok(!header.includes("savedQuote.id}/xlsx"), "받기 링크가 되살아났다");
   });

@@ -168,7 +168,17 @@ describe("새 견적서 — [저장] 뒤에 파일을 올린다", () => {
   test("못 올렸을 때 안내 곁에 [목록으로] — 견적서는 이미 저장됐다", () => {
     const notice = sliceBetween(form, "{attachmentNotice && (", "</div> )}");
     assert.ok(notice.includes("{createdQuote && !isSubmitting && ("), notice);
-    assert.ok(notice.includes('onClick={() => router.push(returnHref ?? "/quotes")}'), notice);
+    /**
+     * 🔵 2026-11-01 에 **나가는 문이 하나로 모였다** — 그냥 미는 대신 「저장 안 된 고침이
+     * 있으면 묻는」 문을 지난다(common/useUnsavedLeaveGuard.ts). 가는 곳은 그대로
+     * `returnHref ?? "/quotes"` 다 — 주소는 그 훅에 넘겨 둔다.
+     * 🔴 여기서 못 박던 것(저장은 끝났고 **이 단추로 목록에 간다**)은 그대로다.
+     */
+    assert.ok(notice.includes("onClick={leaveGuard.requestLeave}"), notice);
+    assert.ok(
+      form.includes('leaveHref: returnHref ?? "/quotes",'),
+      "나갈 주소가 훅에 안 넘어간다"
+    );
   });
 });
 
@@ -208,7 +218,7 @@ describe("엑셀 전용 스위치", () => {
   });
 
   test("저장은 켜져 있을 때만 공급가액을 보낸다", () => {
-    const collect = sliceBetween(form, "function collectFields() {", "async function handleSubmit(");
+    const collect = sliceBetween(form, "function collectFields(): QuoteComparableFields {", "async function handleSubmit(");
     assert.ok(collect.includes("isExcelOnly, manualSupplyAmount: isExcelOnly ? manualSupplyAmount : null,"), collect);
   });
 

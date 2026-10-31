@@ -202,7 +202,7 @@ describe("폼에 붙은 자리 — 새 견적서에서만 · 한 번만 · 조�
   });
 
   test("🔴 저장 쪽은 이 값을 보지 않는다 — 견주어 거절하는 코드가 없다", () => {
-    const collect = sliceBetween(form, "function collectFields() {", "async function handleSubmit(");
+    const collect = sliceBetween(form, "function collectFields(): QuoteComparableFields {", "async function handleSubmit(");
     for (const name of ["suggestedQuoteNumber", "fetchSuggestedQuoteNumber", "fillQuoteNumberIfEmpty"]) {
       assert.ok(!collect.includes(name), `저장에 실리는 값 셈에 '${name}' 이 끼어 있다`);
     }

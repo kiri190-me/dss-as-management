@@ -200,7 +200,7 @@ describe("「조사작업 제외」 체크 상자 — 켜면 「1) 조사작업�
   });
 
   test("🔴 저장과 미리보기가 같은 상태를 받는다 — 기본 작업비 스냅숏은 셈한 그 값", () => {
-    const collect = sliceBetween(form, "function collectFields() {", "async function handleSubmit(");
+    const collect = sliceBetween(form, "function collectFields(): QuoteComparableFields {", "async function handleSubmit(");
     assert.ok(collect.includes("investigationExcluded,"), "저장에 조사작업 제외가 실리지 않는다");
     // 뺀 사실은 investigationExcluded 가 말하고, 기본 작업비는 근거로 **더한 그 금액**을 보낸다.
     // 🔴 repair_labor_settings.base_cost 는 2026-09-16 부터 계산의 근거가 아니다 — 그 칸을
@@ -249,7 +249,7 @@ describe("「조사작업 제외」 체크 상자 — 켜면 「1) 조사작업�
     );
     // 읽기 전용이던 옛 줄이 남아 있으면 체크 상자와 두 목소리가 된다.
     assert.ok(!form.includes("const documentExcluded = quote?.documentExcluded ?? false;"), "아직도 읽기만 한다");
-    const collect = sliceBetween(form, "function collectFields() {", "async function handleSubmit(");
+    const collect = sliceBetween(form, "function collectFields(): QuoteComparableFields {", "async function handleSubmit(");
     assert.ok(collect.includes("documentExcluded,"), "저장에 서류작업 제외가 실리지 않는다");
     // 🔴 조사·통전과 달리 **뺀 금액을 보내지 않는다** — 담을 칸이 없다(조사도 같다).
     assert.ok(!collect.includes("laborDocumentDeduction"), "서류용 차감 금액 칸이 생겼다 — 이번 결정이 아니다");
@@ -487,7 +487,7 @@ describe("🔴 감출 뿐 지우지 않는다", () => {
   });
 
   test("저장하는 작업 내역은 감춤과 무관하게 세 칸 모두 그대로 보낸다", () => {
-    const collect = sliceBetween(form, "function collectFields() {", "async function handleSubmit(");
+    const collect = sliceBetween(form, "function collectFields(): QuoteComparableFields {", "async function handleSubmit(");
     /**
      * 🔴 **감춤(suppressed)은 여전히 보지 않는다** — 통전 · 조사 · 수리 구역을 감춰도 적어 둔
      * 줄은 그대로 저장된다(체크를 풀면 돌아와야 한다).

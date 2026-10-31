@@ -78,7 +78,7 @@ describe("🔴 보고서 저장은 그대로다", () => {
   test("🔴 저장 팝업은 그대로다 — 넘어가도 되는 길에서만 뜬다", () => {
     assert.ok(
       save.includes(
-        'showSavePopup({ message: saved ? "보고서를 저장했습니다." : "새 보고서를 저장했습니다.", redirectTo: reportHref, });'
+        'showSavePopup({ message: saved ? "보고서를 저장했습니다." : "새 보고서를 저장했습니다.", redirectTo: reportHref, historyMode: leaveGuard.historyMode(), });'
       ),
       save
     );
@@ -96,7 +96,7 @@ describe("🔴 보고서 저장은 그대로다", () => {
     const del = sliceBetween(form, "async function confirmDelete() {", "function handleConflictReload() {");
     assert.equal(del.split("showSavePopup({").length - 1, 1, "지우기 흐름의 팝업이 하나가 아니다");
     assert.ok(
-      del.includes('showSavePopup({ message: "휴지통으로 이동되었습니다.", redirectTo: reportHref, });'),
+      del.includes('showSavePopup({ message: "휴지통으로 이동되었습니다.", redirectTo: reportHref, historyMode: leaveGuard.historyMode(), });'),
       del
     );
     // 🔴 **성공 갈래에서만 뜬다.** `if (!result.ok)` 보다 뒤에 있어야 한다 —
@@ -159,9 +159,12 @@ describe("🔴 폼은 주소를 만들지 않는다 · 분류를 고르지 않�
 
 describe("🔴 도는 중은 팝업이다", () => {
   test("팝업은 **변환이 시작될 때만** 뜬다 — 흐름이 알려 주는 그 자리에서", () => {
+    // 🔵 2026-11-01 에 칸이 하나 늘었다 — 「저장 안 된 내용을 두고 나가기」를 막느라 쌓아
+    //    둔 히스토리 발판을 **걷고** 넘어가야 하기 때문이다(domain/save-popup.ts 의
+    //    SavePopupHistoryMode). 띄우는 자리도 문구도 그대로다.
     assert.ok(
       helper.includes(
-        "onConvertStart: () => { converting = true; showSavePopupProgress({ message: SERVICE_REPORT_SAVE_PDF_RUNNING_POPUP_TEXT, redirectTo: reportHref, }); },"
+        "onConvertStart: () => { converting = true; showSavePopupProgress({ message: SERVICE_REPORT_SAVE_PDF_RUNNING_POPUP_TEXT, redirectTo: reportHref, historyMode: leaveGuard.historyMode(), }); },"
       ),
       helper
     );
@@ -190,12 +193,15 @@ describe("🔴 도는 중은 팝업이다", () => {
 describe("알림 칸을 그린다", () => {
   test("흐름이 낸 줄을 그대로 담고, 곁에 [보고서 탭으로]", () => {
     assert.ok(helper.includes("setPdfNoticeLines(canLeave ? [] : outcome.lines);"), helper);
+    // 🔵 2026-11-01 — 나가는 단추가 [취소]와 **같은 문**을 쓴다(묻고 나간다). 가는 곳은
+    //    그대로 `reportHref` 이고, 주소는 그 문에 넘겨 둔다.
     assert.ok(
       form.includes(
-        "<ServiceReportSavePdfNotice lines={pdfNoticeLines} onLeave={() => router.push(reportHref)} />"
+        "<ServiceReportSavePdfNotice lines={pdfNoticeLines} onLeave={leaveGuard.requestLeave} />"
       ),
       "알림 칸을 그리지 않는다"
     );
+    assert.ok(form.includes("leaveHref: reportHref,"), "나갈 주소가 그 문에 안 넘어간다");
     assert.equal(form.split("<ServiceReportSavePdfNotice ").length - 1, 1);
     // 🔴 줄을 폼이 짓지 않는다 — 흐름이 낸 것만 담는다.
     assert.equal(/setPdfNoticeLines\(\[\{ text:/.test(form), false, "폼이 줄을 짓는다");

@@ -43,7 +43,7 @@ const sliceBetween = (source: string, startMarker: string, endMarker: string) =>
 const form = flat(read("src/components/quotes/QuoteEditForm.tsx"));
 const newPage = flat(read("src/app/(app)/quotes/new/page.tsx"));
 const editPage = flat(read("src/app/(app)/quotes/[id]/page.tsx"));
-const collect = () => sliceBetween(form, "function collectFields() {", "async function handleSubmit(");
+const collect = () => sliceBetween(form, "function collectFields(): QuoteComparableFields {", "async function handleSubmit(");
 
 describe("㉠ 입구 — 케이블이 고를 수 있는 종류다", () => {
   test("🔴 종류 목록에 케이블이 있고 이름표가 붙어 있다", () => {

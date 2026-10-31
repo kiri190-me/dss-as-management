@@ -77,7 +77,10 @@ test("🔴 진행 중 팝업은 **다른 신호**로 간다 — 저장 팝업 �
     captured(SAVE_POPUP_PROGRESS_EVENT, () =>
       showSavePopupProgress({ message: "저장된 엑셀을 PDF 로 바꾸는 중입니다…", redirectTo: "/quotes" })
     ),
-    [{ phase: "start", message: "저장된 엑셀을 PDF 로 바꾸는 중입니다…", redirectTo: "/quotes" }]
+    // 🔵 `historyMode` 는 2026-11-01 에 생긴 칸이고, 적지 않은 호출은 **지금까지대로**
+    //    `"push"` 다(domain/save-popup.ts 의 SavePopupHistoryMode). 기대값에 박아 두는
+    //    것이 그 기본값을 지킨다 — 이 자리가 `"replace"` 로 읽히기 시작하면 터진다.
+    [{ phase: "start", message: "저장된 엑셀을 PDF 로 바꾸는 중입니다…", redirectTo: "/quotes", historyMode: "push" }]
   );
   assert.deepEqual(
     captured(SAVE_POPUP_EVENT, () =>

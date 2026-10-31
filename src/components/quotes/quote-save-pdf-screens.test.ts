@@ -92,8 +92,16 @@ describe("🔴 저장이 끝난 뒤에 부른다 — 저장을 막지 않는다"
 
   test("🔴 저장 팝업 두 개는 그대로다 — 넘기기 직전에 단추를 되살리지 않는다", () => {
     assert.equal(raw.match(/leaving = true;\s*showSavePopup\(/g)?.length, 2);
-    assert.ok(form.includes('showSavePopup({ message: "견적서를 저장했습니다.", redirectTo: returnHref ?? "/quotes" });'));
-    assert.ok(form.includes('showSavePopup({ message: "견적서를 등록했습니다.", redirectTo: returnHref ?? "/quotes" });'));
+    assert.ok(
+      form.includes(
+        'showSavePopup({ message: "견적서를 저장했습니다.", redirectTo: returnHref ?? "/quotes", historyMode: leaveGuard.historyMode(), });'
+      )
+    );
+    assert.ok(
+      form.includes(
+        'showSavePopup({ message: "견적서를 등록했습니다.", redirectTo: returnHref ?? "/quotes", historyMode: leaveGuard.historyMode(), });'
+      )
+    );
   });
 });
 
@@ -198,7 +206,10 @@ describe("🔴 도는 중은 팝업이다", () => {
   test("🔴 팝업은 **변환이 시작될 때만** 뜬다 — 흐름이 알려 주는 그 자리에서", () => {
     assert.ok(
       helper.includes(
-        'onConvertStart: () => { converting = true; showSavePopupProgress({ message: QUOTE_SAVE_PDF_RUNNING_POPUP_TEXT, redirectTo: returnHref ?? "/quotes", }); },'
+        // 🔵 2026-11-01 에 칸이 하나 늘었다 — 「저장 안 된 내용을 두고 나가기」를 막느라
+        //    쌓아 둔 히스토리 발판을 **걷고** 넘어가야 하기 때문이다(domain/save-popup.ts
+        //    의 SavePopupHistoryMode). 띄우는 자리도 문구도 그대로다.
+        'onConvertStart: () => { converting = true; showSavePopupProgress({ message: QUOTE_SAVE_PDF_RUNNING_POPUP_TEXT, redirectTo: returnHref ?? "/quotes", historyMode: leaveGuard.historyMode(), }); },'
       ),
       helper
     );
@@ -247,9 +258,11 @@ describe("🔴 도는 중은 팝업이다", () => {
 
 describe("알림 칸을 그린다", () => {
   test("흐름이 낸 줄을 그 조각에 넘긴다 — 곁에 [목록으로]", () => {
+    // 🔵 2026-11-01 — 나가는 단추가 [취소]와 **같은 문**을 쓴다(묻고 나간다). 넘기는 줄과
+    //    「도는 중」 표시는 그대로다.
     assert.ok(
       form.includes(
-        '<QuoteSavePdfNotice lines={pdfNoticeLines} busy={pdfConverting} onLeave={() => router.push(returnHref ?? "/quotes")} />'
+        "<QuoteSavePdfNotice lines={pdfNoticeLines} busy={pdfConverting} onLeave={leaveGuard.requestLeave} />"
       ),
       "알림 칸을 그리지 않는다"
     );
