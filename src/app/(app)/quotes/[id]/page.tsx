@@ -35,7 +35,11 @@ import {
 } from "@/lib/domain/quote-approval-rules";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
 import { toKstDateOnly } from "@/lib/domain/date-only";
-import { returnHrefForEditQuote, type SearchParamsInput } from "@/lib/domain/quote-new-link";
+import {
+  parseQuoteEditTab,
+  returnHrefForEditQuote,
+  type SearchParamsInput,
+} from "@/lib/domain/quote-new-link";
 
 export const metadata: Metadata = {
   title: "견적서 | DSS A/S 관리 시스템",
@@ -167,12 +171,31 @@ export default async function QuoteDetailPage({
     approvalHistory.flatMap((row) => (row.routeId ? [row.routeId] : []))
   );
 
+  // 🔴 주소는 **한 번만** 편다 — 두 값(돌아갈 건 · 처음 보일 탭)이 같은 주소에서
+  // 나온다. 두 번 await 하면 같은 것을 두 번 읽는 셈이고, 한쪽만 고치는 날이 온다.
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+
   // 돌아갈 곳은 **읽어 온 견적서의 건과 맞춰 본 뒤에** 정한다 — 주소만 보고
   // 정하면 손으로 바꾼 링크가 사람을 남의 건으로 보낸다.
-  const returnHref = returnHrefForEditQuote(searchParams ? await searchParams : undefined, quote);
+  const returnHref = returnHrefForEditQuote(resolvedSearchParams, quote);
+
+  /**
+   * 🔴 **처음 보일 탭**(2026-10-31 사용자 요구 — 「견적서 결재 알림을 누르면 해당
+   * 견적서의 [견적서 결재]탭이 뜨도록」). 결재 알림 셋(대기 · 승인 완료 · 반려됨)이
+   * 그 이름을 실어 보낸다(domain/notifications.ts).
+   *
+   * 🔴 판정을 여기 새로 적지 않는다 — 정해진 글자가 아니면 기본 탭이라는 규칙은
+   * domain/quote-new-link.ts 의 parseQuoteEditTab 한 곳에 있다. 손으로 바꾼 주소가
+   * 오류를 내지 않고 지금까지처럼 열리는 것도 그 함수가 지킨다.
+   */
+  const initialTab = parseQuoteEditTab(resolvedSearchParams);
 
   return (
     <QuoteEditTabs
+      /* 🔴 **첫 그림에만** 쓰인다 — 그 뒤 탭 전환은 여전히 브라우저 상태다. 주소를
+         따라다니게 만들면 편집 폼이 다시 그려져 적던 내용이 날아간다
+         (QuoteEditTabs 머리말의 마지막 절). */
+      initialTab={initialTab}
       /* 🔴 지금까지의 편집 폼 그대로다 — 탭이 생겼다고 이 조각이 달라지지 않는다.
          탭을 바꿔도 이 폼은 떼어지지 않는다(QuoteEditTabs 머리말). */
       editForm={

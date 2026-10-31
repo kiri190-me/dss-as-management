@@ -15,6 +15,12 @@ import {
   users,
 } from "../schema";
 import { createQuote, updateQuote } from "./quotes";
+/**
+ * 🔵 **결재를 건드리지 않고 판 번호만 올리는 길**(2026-10-31) — 고치기는 이제
+ * 결재를 자동으로 반려하므로, 「승인은 살아 있는데 판 번호가 어긋난」 상태를
+ * 만들려면 휴지통 왕복을 쓴다(아래 APPROVED_OUTDATED 시험의 주석).
+ */
+import { restoreQuote, softDeleteQuote } from "./quote-trash";
 import { recordQuoteExport } from "./quote-exports";
 import { decideQuoteApproval, requestQuoteApproval } from "./quote-approvals";
 import { saveShipmentApprovalRoute } from "./shipment-approval-routes";
@@ -149,7 +155,13 @@ async function createTestQuote(): Promise<TestQuote> {
   return { id: created.id, version: created.version, fields };
 }
 
-/** 그 장을 한 번 고쳐 판 번호를 올린다 — 「내용이 바뀌었다」를 만드는 유일한 길. */
+/**
+ * 그 장을 한 번 고쳐 판 번호를 올린다 — 「내용이 바뀌었다」를 만드는 길.
+ *
+ * 🔴 **2026-10-31 부터 이 길은 결재까지 건드린다**: 올라가 있던 결재(대기 중 ·
+ * 승인됨)가 **자동으로 반려된다**(mutations/quote-approval-auto-reject.ts).
+ * 결재를 건드리지 않고 판 번호만 올리려면 휴지통 왕복을 쓴다.
+ */
 async function bumpQuoteVersion(quote: TestQuote): Promise<number> {
   const fields = { ...quote.fields, subject: `고침 ${randomUUID().slice(0, 4)}` };
   const updated = await updateQuote({
@@ -492,7 +504,15 @@ describe("승인 — 결재선을 순서대로 밟고 마지막 단계에서 끝
     assert.equal((await getQuoteApprovalProgress(quote.id))?.state, "APPROVED");
   });
 
-  test("🔴 승인 뒤 견적서를 고치면 그 승인은 「지금 내용에 대한 것」이 아니다", async () => {
+  test("🔴 승인 뒤 판 번호가 어긋나면 그 승인은 「지금 내용에 대한 것」이 아니다", async () => {
+    /**
+     * 🔵 **2026-10-31 에 이 자리의 길이 하나 바뀌었다.** 그때까지는 「견적서를
+     * 한 번 고친다」가 이 상태를 만드는 길이었지만, 이제 고치기는 그 승인을
+     * **자동으로 반려**한다(사용자 요구 — 바로 아래 시험). 그래도
+     * APPROVED_OUTDATED 는 여전히 일어난다: 휴지통 두 길이 결재를 보지 않고
+     * version 을 +1 하기 때문이다(mutations/quote-trash.ts). 재는 것은 그때나
+     * 지금이나 같다 — **승인 줄은 그대로인데 판 번호가 어긋난 상태**.
+     */
     await saveQuoteRoute([stepAId]);
     const quote = await createTestQuote();
     assert.equal(
@@ -511,20 +531,72 @@ describe("승인 — 결재선을 순서대로 밟고 마지막 단계에서 끝
 
     const approved = await getQuoteApprovalProgress(quote.id);
     assert.equal(approved?.state, "APPROVED");
+    const versionAtApproval = quote.version;
 
-    // 금액이든 제목이든 한 칸만 바뀌어도 판 번호가 올라간다.
-    const newVersion = await bumpQuoteVersion(quote);
+    // 휴지통에 넣었다 되살린다 — 결재를 건드리지 않고 판 번호만 두 번 오른다.
+    const deleted = await softDeleteQuote({
+      quoteId: quote.id,
+      expectedVersion: quote.version,
+      actorUserId: requesterId,
+      reason: "판 번호만 올리기 위한 왕복",
+    });
+    assert.equal(deleted.ok, true, JSON.stringify(deleted));
+    if (!deleted.ok) return;
+    const restored = await restoreQuote({
+      quoteId: quote.id,
+      expectedVersion: deleted.version,
+      actorUserId: requesterId,
+    });
+    assert.equal(restored.ok, true, JSON.stringify(restored));
+    if (!restored.ok) return;
+    quote.version = restored.version;
+    const newVersion = restored.version;
+    assert.notEqual(newVersion, versionAtApproval, "🔵 판 번호가 실제로 어긋나야 잴 것이 생긴다");
 
     const stale = await getQuoteApprovalProgress(quote.id);
     assert.equal(
       stale?.state,
       "APPROVED_OUTDATED",
-      "🔴 고친 뒤에도 「승인 완료」로 보이면 금액을 바꾼 견적서가 승인받은 것처럼 남는다"
+      "🔴 어긋난 뒤에도 「승인 완료」로 보이면 바뀐 견적서가 승인받은 것처럼 남는다"
     );
     assert.equal(stale?.currentQuoteVersion, newVersion);
     // 행 자체는 고치지 않는다 — 「그때 그 판을 승인했다」는 사실은 그대로다.
     assert.equal(stale?.latest?.status, "APPROVED");
-    assert.equal(stale?.latest?.quoteVersionAtRequest, newVersion - 1);
+    assert.equal(stale?.latest?.quoteVersionAtRequest, versionAtApproval);
+  });
+
+  test("🔴 승인 뒤 견적서를 **고치면** 그 승인이 자동으로 반려된다 (2026-10-31)", async () => {
+    // 사용자 요구 — 「이미 승인된 건도 반려되도록 해줘」. 값과 줄 모양은
+    // mutations/quote-auto-reject-approval.integration.test.ts 가 자세히 잰다.
+    // 여기서는 **이 파일이 쓰는 bumpQuoteVersion 의 뜻이 달라졌다**는 사실을
+    // 같은 자리에 남겨 둔다 — 안 그러면 다음 사람이 위 시험을 보고 「고치면
+    // APPROVED_OUTDATED」로 읽는다.
+    await saveQuoteRoute([stepAId]);
+    const quote = await createTestQuote();
+    assert.equal(
+      (await requestQuoteApproval({ quoteId: quote.id, actorUserId: requesterId, requestReason: null })).ok,
+      true
+    );
+    assert.equal(
+      (await decideQuoteApproval({
+        quoteId: quote.id,
+        decision: "APPROVED",
+        actorUserId: stepAId,
+        decisionReason: null,
+      })).ok,
+      true
+    );
+    assert.equal((await getQuoteApprovalProgress(quote.id))?.state, "APPROVED");
+
+    await bumpQuoteVersion(quote);
+
+    assert.equal((await getQuoteApprovalProgress(quote.id))?.state, "REJECTED");
+    const rows = await approvalRows(quote.id);
+    assert.equal(rows.length, 2, "🔴 승인 줄 곁에 반려 줄이 한 줄 더 서야 한다");
+    assert.equal(rows[0].status, "APPROVED", "🔴 승인 줄을 덮어썼다 — 누가 승인했는지가 사라진다");
+    assert.equal(rows[0].decidedByUserId, stepAId);
+    assert.equal(rows[1].status, "REJECTED");
+    assert.equal(rows[1].decidedByUserId, requesterId, "반려자는 고친 사람이다");
   });
 
   test("지정된 사람이 아니면 결재할 수 없다 — 최고관리자 비상구만 열려 있다", async () => {
@@ -722,7 +794,9 @@ describe("🔴 발행을 막지 않는다", () => {
       actorUserId: requesterId,
     });
 
-    // ③ 결재가 걸려 있어도 견적서는 계속 고칠 수 있다(고치면 승인이 낡을 뿐이다).
+    // ③ 결재가 걸려 있어도 견적서는 계속 고칠 수 있다 — 저장은 막히지 않는다.
+    //    🔵 여기 마지막 줄은 이미 **반려**라 자동 반려가 할 일이 없다(반려를 또
+    //       반려할 것은 없다 — mutations/quote-approval-auto-reject.ts).
     const bumped = await bumpQuoteVersion(quote);
     assert.equal(bumped, 2);
   });

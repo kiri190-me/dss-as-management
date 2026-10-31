@@ -131,6 +131,16 @@ src/lib/server/services/kyosan-intake-import.integration.test.ts
 src/lib/server/services/quote-issue.integration.test.ts
 src/lib/db/mutations/repair-case-used-parts.integration.test.ts
 src/lib/db/mutations/quote-approvals.integration.test.ts
+# ── 견적서를 고쳐 저장하면 결재가 **자동으로 반려**된다 (2026-10-31) ─────
+# 사용자 요구 둘을 값으로 잰다: 🔴 **안 바뀐 저장은 판 번호를 올리지 않는다**(올리면
+# 승인이 APPROVED_OUTDATED 로 뒤집혀 반려와 같은 효과가 난다 — 「반려하지 않는다」는
+# 결정이 무의미해진다) · 🔴 **이미 승인된 건도 반려된다**. 그때 🔴 **승인 줄은 고쳐
+# 쓰지 않고 한 줄을 이어 쓴다** — 마지막 단계의 승인자가 그 줄에만 적혀 있어서, 덮으면
+# 누가 승인했는지가 영영 사라진다(표는 append 계열 — schema/quote-approvals.ts).
+# 품목만 바꾼 저장도 「바뀜」인가 · 금액의 소수 자리 차이는 「안 바뀜」인가도 함께 본다.
+# 🔴 격리 이름: 계정 "quoteautoreject-test-" · 견적서 "QAR-TEST-" · 발행일 2097-04-11.
+# ⚠️ 판·단계는 afterEach 로 반드시 걷는다 — 남으면 다른 파일이 갑자기 결재선을 탄다.
+src/lib/db/mutations/quote-auto-reject-approval.integration.test.ts
 src/lib/db/queries/quote-approvals-notifications.integration.test.ts
 src/lib/server/services/kyosan-report-import.integration.test.ts
 # 연락서 이식 **되돌리기**(scripts/revert-kyosan-import.ts · scripts/lib/kyosan-import-revert.ts).

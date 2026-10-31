@@ -18,6 +18,28 @@ import type { ShipmentApprovalRouteScope } from "./shipment-approval-route";
  * 값도 발행 통로(server/services/quote-issue.ts · api/quotes/[id]/…)의 문지기로
  * 쓰지 말 것 — 그것은 빠뜨린 것이 아니라 정해진 것이다.
  *
+ * ── 🔵 2026-10-31 에 더해진 것 — **막는 것이 아니다** ───────────────────
+ * 견적서를 고쳐 저장하면 올라가 있던 결재가 **자동으로 반려된다**(사용자 요구).
+ * 바로 위 2026-09-18 결정과 어긋나지 않는다 — 여기서 닫히는 문은 **없다**:
+ *
+ *  · **저장은 그대로 된다.** 결재가 걸려 있다고 수정이 막히지 않는다.
+ *  · **발행도 그대로 된다.** 발행 통로는 여전히 이 표를 한 번도 읽지 않는다.
+ *  · 달라지는 것은 **기록**뿐이다 — 내용이 바뀐 순간 그 승인·대기는 더 이상
+ *    이 내용에 대한 것이 아니므로 반려로 닫고, 다시 받으려면 새 요청을 올린다.
+ *
+ * 🔴 **다음 사람에게**: 그래서 「막지 말라더니 왜 결재를 건드리나」가 아니다.
+ * 2026-09-18 이 금지한 것은 **이 표를 보고 무언가를 거절하는 코드**이고,
+ * 2026-10-31 이 더한 것은 **저장이 끝난 뒤 이 표에 한 줄 적는 일**이다. 방향이
+ * 반대다. 자동 반려가 적히는 자리는 mutations/quote-approval-auto-reject.ts
+ * 하나이고, 사람이 반려하는 길(mutations/quote-approvals.ts 의
+ * decideQuoteApproval)은 그날 한 글자도 바뀌지 않았다.
+ *
+ * 🔴 **안 바뀐 저장은 아무것도 하지 않는다**(사용자 결정 — 반려하지 않는다).
+ * 그 판단은 여기가 아니라 domain/quote-change-detection.ts 에 있고, 그쪽이
+ * 「안 바뀜」이라고 답하면 판 번호조차 올라가지 않는다 — 올라가면 아래
+ * resolveQuoteApprovalState 가 그 승인을 APPROVED_OUTDATED 로 읽어, **반려한
+ * 것과 같은 효과**가 나 버린다.
+ *
  * ── 🔴 「다음에 결재할 단계가 누구인가」는 여기에 없다 ───────────────────
  * 이미 있는 순수 함수 하나가 쥐고 있다 — domain/shipment-approval-route.ts 의
  * `findNextRouteStepToApprove`(요청자 본인 단계는 건너뛴다). 출하 승인 · 부품
@@ -73,6 +95,45 @@ export function isQuoteApprovalRouteInForce<TRoute extends { steps: readonly unk
  */
 export const QUOTE_APPROVAL_STATUSES = ["REQUESTED", "APPROVED", "REJECTED"] as const;
 export type QuoteApprovalStatus = (typeof QUOTE_APPROVAL_STATUSES)[number];
+
+/**
+ * ============================================================================
+ * 🔴 견적서가 바뀌면 **자동으로 반려**된다 (2026-10-31 사용자 요구)
+ * ============================================================================
+ * 이력에 남는 **사유 글자**. 반려 행은 사유가 반드시 있어야 하고(표의
+ * quote_approvals_decision_metadata CHECK), 그 글은 종 알림의 「사유: …」로도
+ * 그대로 나간다(domain/notifications.ts 의 buildApprovalRejectedNotification).
+ *
+ * 🔴 **사람이 손으로 적은 사유와 한눈에 갈라져야 한다.** 자동 반려는
+ * `decided_by_user_id` 에 **견적서를 고친 사람**이 적히므로, 사유까지 사람 말투면
+ * 받는 쪽에는 「○○○ 님이 직접 반려했다」로 보인다 — 실제로는 아무도 반려
+ * 단추를 누르지 않았다.
+ *
+ * 🔴 **화면 팝업 문구와 다른 글이다.** 팝업은 그 자리에서 한 번 읽고 닫는 말이고
+ * (components/quotes/quote-approval-texts.ts 의 QUOTE_SAVE_NOTICE_LINES), 이쪽은
+ * **이력에 영영 남는 기록**이다. 한 글자로 합치면 둘 중 하나를 고칠 때마다 다른
+ * 하나가 따라 바뀐다.
+ */
+export const QUOTE_APPROVAL_AUTO_REJECT_REASON = "견적서가 수정되어 자동으로 반려되었습니다.";
+
+/**
+ * 견적서가 바뀌었을 때 **이 상태의 결재를 자동으로 반려하는가**.
+ *
+ *  · `REQUESTED` 아직 누군가의 결재를 기다리는 줄. 기다리는 그 내용이 이미
+ *    사라졌으므로 닫는다.
+ *  · `APPROVED`  🔴 **승인이 끝난 줄도 반려한다**(사용자 결정 2026-10-31 —
+ *    「이미 승인된 건도 반려되도록 해줘」). 이 갈래가 없으면 그 장은
+ *    APPROVED_OUTDATED 로만 보이는데, 그것은 「다시 받아야 한다」는 **표시**일 뿐
+ *    기록상으로는 승인이 아직 살아 있다.
+ *  · `REJECTED`  이미 닫힌 줄이다. 반려를 또 반려할 것은 없다.
+ *
+ * 🔴 **판정을 글자로 베껴 적지 말 것** — 저장 경로와 시험이 같은 함수를 본다.
+ */
+export function isQuoteApprovalAutoRejectedOnEdit(
+  status: QuoteApprovalStatus
+): status is Exclude<QuoteApprovalStatus, "REJECTED"> {
+  return status === "REQUESTED" || status === "APPROVED";
+}
 
 /**
  * 「이 결재가 **지금 이 내용**에 대한 것인가」 — 요청 시점의 판 번호와 지금 판

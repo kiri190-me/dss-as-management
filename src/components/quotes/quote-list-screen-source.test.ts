@@ -375,10 +375,13 @@ describe("부르는 쪽", () => {
 
   test("🔴 수정 화면은 읽어 온 견적서와 맞춰 본 뒤 돌아갈 곳을 폼에 넘긴다", () => {
     const body = flat(editPageSource);
-    assert.match(
-      body,
-      /const returnHref = returnHrefForEditQuote\(searchParams \? await searchParams : undefined, quote\);/
-    );
+    /**
+     * 🔵 2026-10-31 에 주소를 **한 번만 펴게** 바뀌었다 — 같은 주소에서 돌아갈 곳과
+     * 처음 보일 탭 둘을 읽기 때문이다(quotes/[id]/page.tsx). 재는 것은 그대로다:
+     * **읽어 온 견적서와 맞춰 보는 함수**에 그 주소를 넘기는가.
+     */
+    assert.match(body, /const resolvedSearchParams = searchParams \? await searchParams : undefined;/);
+    assert.match(body, /const returnHref = returnHrefForEditQuote\(resolvedSearchParams, quote\);/);
     assert.ok(body.includes("returnHref={returnHref}"), "폼에 돌아갈 곳이 넘어가지 않는다");
     // 견적서를 읽고(없으면 404) 난 **뒤에** 정한다 — 그 견적서의 건과 맞춰 봐야 하므로.
     const loaded = body.indexOf("if (!quote) notFound();");

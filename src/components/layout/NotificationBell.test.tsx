@@ -264,7 +264,12 @@ test("견적서 결재 대기도 화면을 고치지 않고 같은 한 줄로 �
       ]}
     />
   );
-  assert.ok(html.includes('href="/quotes/quote-7"'), "그 견적서 화면으로 가야 한다");
+  // 🔴 2026-10-31 — 그 견적서의 **[견적서 결재] 탭**으로 간다(사용자 요구). 누른
+  //    사람이 할 일이 바로 그 탭에 있다(domain/notifications.ts).
+  assert.ok(
+    html.includes('href="/quotes/quote-7?tab=approval"'),
+    "그 견적서의 결재 탭으로 가야 한다"
+  );
   assert.ok(html.includes(NOTIFICATION_KIND_META.QUOTE_APPROVAL_PENDING.label));
   assert.match(html, /class="dss-bell__kind" data-tone="\d+"/, "색 칸이 붙지 않았다");
   assert.ok(html.includes("Q-9705-007"));
@@ -536,7 +541,8 @@ test("승인 완료·반려됨도 화면을 고치지 않고 같은 한 줄로 �
   assert.ok(html.includes("최종 출하 승인 · 김결재"));
   // 🔵 반려 줄의 표본은 2026-10-27(13-C4)에 부품 불출 → 견적서로 바뀌었다
   //    (rejectedItem 주석). 재는 것은 「두 갈래가 각각 제 주소·제 글로 그려지는가」다.
-  assert.ok(html.includes('href="/quotes/quote-9"'));
+  // 🔴 2026-10-31 — 결과 알림도 그 장의 [견적서 결재] 탭으로 간다(다시 올리는 단추가 거기 있다).
+  assert.ok(html.includes('href="/quotes/quote-9?tab=approval"'));
   assert.ok(html.includes("견적서 승인 · 사유: 금액 근거 보완 요망"));
 });
 

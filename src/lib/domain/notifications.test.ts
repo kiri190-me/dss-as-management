@@ -194,7 +194,7 @@ function quoteApprovalItem(overrides: Partial<Parameters<typeof buildQuoteApprov
   });
 }
 
-test("견적서 결재 알림은 발행번호를 굵게, 결재선 단계와 요청자를 detail 에 내고, 그 견적서 화면으로 링크한다", () => {
+test("견적서 결재 알림은 발행번호를 굵게, 결재선 단계와 요청자를 detail 에 내고, 그 견적서의 [견적서 결재] 탭으로 링크한다", () => {
   const item = quoteApprovalItem();
   assert.equal(item.kind, "QUOTE_APPROVAL_PENDING");
   assert.equal(item.id, `QUOTE_APPROVAL_PENDING:${QUOTE_ID}`);
@@ -202,8 +202,13 @@ test("견적서 결재 알림은 발행번호를 굵게, 결재선 단계와 요
   assert.equal(item.subject, "Q-2609-001");
   assert.equal(item.detail, "결재선 2단계 · 요청자 박영업");
   // 🔴 주소를 손으로 적지 않는다 — 목록이 한 줄을 열 때 쓰는 헬퍼와 같은 값이어야 한다.
-  assert.equal(item.href, quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null }));
-  assert.equal(item.href, `/quotes/${QUOTE_ID}`);
+  assert.equal(item.href, quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null, tab: "approval" }));
+  /**
+   * 🔴 **글자까지 못 박는다**(2026-10-31 사용자 요구 — 「알림을 누르면 [견적서
+   * 결재]탭이 뜨도록」). 위 한 줄만 두면 헬퍼와 알림이 **함께** 틀려도 통과한다 —
+   * 둘 다 탭을 떨어뜨리면 양쪽이 `/quotes/{id}` 로 같아지기 때문이다.
+   */
+  assert.equal(item.href, `/quotes/${QUOTE_ID}?tab=approval`);
 });
 
 test("견적서 결재 알림의 detail 에는 종류 이름(「견적서 결재 대기」)을 다시 적지 않는다", () => {
@@ -746,23 +751,27 @@ test("견적서 결재의 이름은 용도 이름표 그대로다 — 「승인�
   assert.ok(!QUOTE_APPROVAL_LABEL.includes("승인 승인"));
 });
 
-test("승인 완료(견적서) — 발행번호를 굵게, 결재 이름·결정자를 detail 에, 그 견적서 화면으로 링크한다", () => {
+test("승인 완료(견적서) — 발행번호를 굵게, 결재 이름·결정자를 detail 에, 그 견적서의 [견적서 결재] 탭으로 링크한다", () => {
   const item = buildApprovalGrantedNotification({ ...quoteTarget(), decidedByName: "김결재" });
   assert.equal(item.kind, "APPROVAL_GRANTED");
   assert.equal(item.id, `APPROVAL_GRANTED:qa:${QUOTE_APPROVAL_ID}`);
   assert.equal(item.targetKey, item.id, "사건 하나가 한 건이다");
   assert.equal(item.subject, "Q-2609-001");
   assert.equal(item.detail, "견적서 승인 · 김결재");
-  assert.equal(item.href, quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null }));
+  assert.equal(item.href, quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null, tab: "approval" }));
+  // 🔴 글자까지 — 결과 알림도 2026-10-31 에 결재 탭으로 바뀌었다(위 대기 알림과 같은 까닭).
+  assert.equal(item.href, `/quotes/${QUOTE_ID}?tab=approval`);
 });
 
-test("반려됨(견적서) — 사유를 detail 에 적고, 고쳐서 다시 올리는 그 견적서 화면으로 링크한다", () => {
+test("반려됨(견적서) — 사유를 detail 에 적고, 다시 올리는 그 견적서의 [견적서 결재] 탭으로 링크한다", () => {
   const item = buildApprovalRejectedNotification({ ...quoteTarget(), decisionReason: "단가 근거 누락" });
   assert.equal(item.kind, "APPROVAL_REJECTED");
   assert.equal(item.id, `APPROVAL_REJECTED:qa:${QUOTE_APPROVAL_ID}`);
   assert.equal(item.subject, "Q-2609-001");
   assert.equal(item.detail, "견적서 승인 · 사유: 단가 근거 누락");
-  assert.equal(item.href, quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null }));
+  assert.equal(item.href, quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null, tab: "approval" }));
+  // 🔴 글자까지 — 다시 올리는 단추가 그 탭에 있다.
+  assert.equal(item.href, `/quotes/${QUOTE_ID}?tab=approval`);
 });
 
 test("두 표의 결재 행 id 가 우연히 같아도 결과 알림의 키는 겹치지 않는다", () => {

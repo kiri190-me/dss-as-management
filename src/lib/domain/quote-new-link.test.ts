@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  QUOTE_EDIT_DEFAULT_TAB,
+  QUOTE_EDIT_TABS,
   newQuoteHrefForRepairCase,
   newQuoteHrefWithStart,
   parseNewQuoteLink,
   parseNewQuoteStart,
+  parseQuoteEditTab,
   quoteEditHref,
   quotePrintHref,
   returnHrefForEditQuote,
@@ -355,4 +358,73 @@ test("🔴 되읽기 — 엑셀 전용은 `1` 하나만 참이다", () => {
   for (const array of [["1"], ["1", "1"], []]) {
     assert.equal(parseNewQuoteStart({ excelOnly: array }).excelOnly, false, `배열 ${JSON.stringify(array)} 가 통과했다`);
   }
+});
+
+/**
+ * ============================================================================
+ * 🔴 알림 → **[견적서 결재] 탭** (2026-10-31 사용자 요구)
+ * ============================================================================
+ * 「견적서 결재 알림을 누르면 해당 견적서의 [견적서 결재]탭이 뜨도록 해줘.」
+ *
+ * 🔴 여기서 못 박는 것 셋:
+ *  1. 기본 탭은 **주소에 싣지 않는다** — 목록 · 접수 건 탭이 만들던 주소가 한
+ *     글자도 달라지지 않는다.
+ *  2. 접수 건 id 와 **함께** 실릴 수 있다 — 하나가 떨어지면 [취소]가 엉뚱한
+ *     곳으로 간다.
+ *  3. 정해진 글자가 아니면 **없는 것으로 친다** — 오류가 아니다.
+ * ============================================================================
+ */
+
+test("🔴 결재 탭 주소 — 이름 하나만 붙는다", () => {
+  assert.equal(
+    quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null, tab: "approval" }),
+    `/quotes/${QUOTE_ID}?tab=approval`
+  );
+});
+
+test("🔴 기본 탭은 주소에 싣지 않는다 — 지금까지의 주소와 **글자 그대로** 같다", () => {
+  const before = `/quotes/${QUOTE_ID}`;
+  assert.equal(quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null }), before);
+  assert.equal(quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null, tab: "edit" }), before);
+  assert.equal(
+    quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: CASE_ID, tab: "edit" }),
+    `/quotes/${QUOTE_ID}?repairCaseId=${CASE_ID}`
+  );
+});
+
+test("🔴 접수 건 id 와 탭이 **함께** 실린다 — 하나라도 떨어지면 [취소]가 엉뚱한 곳으로 간다", () => {
+  const href = quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: CASE_ID, tab: "approval" });
+  const { pathname, searchParams } = editRoundTrip(href);
+  assert.equal(pathname, `/quotes/${QUOTE_ID}`);
+  assert.equal(searchParams.repairCaseId, CASE_ID);
+  assert.equal(searchParams.tab, "approval");
+  // 그리고 그 주소에서 돌아갈 곳이 그대로 살아 있다.
+  assert.equal(
+    returnHrefForEditQuote(searchParams, { repairCaseId: CASE_ID }),
+    repairCaseDetailHrefs(CASE_ID).quotes
+  );
+  assert.equal(parseQuoteEditTab(searchParams), "approval");
+});
+
+test("🔴 만든 주소를 다시 읽으면 같은 탭이 나온다 — 브라우저가 하는 일 그대로", () => {
+  for (const tab of QUOTE_EDIT_TABS) {
+    const { searchParams } = editRoundTrip(quoteEditHref({ quoteId: QUOTE_ID, repairCaseId: null, tab }));
+    assert.equal(parseQuoteEditTab(searchParams), tab, `${tab} 이 왕복에서 사라졌다`);
+  }
+});
+
+test("🔴 되읽기 — 정해지지 않은 글자 · 빈 값 · 배열 · 없음은 기본 탭이다", () => {
+  assert.equal(parseQuoteEditTab(undefined), QUOTE_EDIT_DEFAULT_TAB);
+  assert.equal(parseQuoteEditTab({}), QUOTE_EDIT_DEFAULT_TAB);
+  for (const odd of ["APPROVAL", "Approval", " approval", "approval ", "", "approvals", "__proto__", "toString"]) {
+    assert.equal(parseQuoteEditTab({ tab: odd }), QUOTE_EDIT_DEFAULT_TAB, `${JSON.stringify(odd)} 가 통과했다`);
+  }
+  for (const array of [["approval"], ["approval", "edit"], []]) {
+    assert.equal(parseQuoteEditTab({ tab: array }), QUOTE_EDIT_DEFAULT_TAB, `배열 ${JSON.stringify(array)} 가 통과했다`);
+  }
+});
+
+test("🔵 무엇을 재는지 — 기본 탭은 수정 쪽이고, 탭 이름은 둘뿐이다", () => {
+  assert.equal(QUOTE_EDIT_DEFAULT_TAB, "edit");
+  assert.deepEqual([...QUOTE_EDIT_TABS], ["edit", "approval"]);
 });

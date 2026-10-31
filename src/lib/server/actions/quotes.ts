@@ -11,6 +11,7 @@ import {
   type QuoteFields,
 } from "@/lib/validation/quote-input";
 import { createQuote, updateQuote } from "@/lib/db/mutations/quotes";
+import type { QuoteSaveOutcome } from "@/lib/domain/quote-save-outcome";
 import { permanentlyDeleteQuote, restoreQuote, softDeleteQuote } from "@/lib/db/mutations/quote-trash";
 import { loadQuoteIntakeLookup, type QuoteIntakeLookup } from "@/lib/server/quote-intake-lookup";
 import { archiveQuoteDocumentOnSave } from "@/lib/server/services/quote-issue";
@@ -56,6 +57,35 @@ export type QuoteActionResultCode =
 
 export type QuoteActionResult =
   | { ok: true; id: string; version: number }
+  | {
+      ok: false;
+      code: QuoteActionResultCode;
+      fieldErrors?: Record<string, string>;
+      message: string;
+    };
+
+/**
+ * 🔴 **만들기 · 고치기만의 결과**(2026-10-31). 위 `QuoteActionResult` 에 낱말
+ * 하나가 더 붙는다.
+ *
+ * 🔴 **휴지통 쪽(지우기 · 되살리기 · 완전 삭제)과 한 형으로 묶지 않는다.** 그
+ * 셋은 「무엇이 바뀌었는가」를 견주지도, 결재를 무르지도 않는다 — 한 형으로
+ * 합치면 그 셋도 `outcome` 을 들고 다녀야 하고, 그때 적을 수 있는 값은 뜻이
+ * 없는 글자뿐이다. 뜻 없는 값이 한 번 들어가면 그다음 사람은 그것을 **읽는다.**
+ */
+export type QuoteSaveActionResult =
+  | {
+      ok: true;
+      id: string;
+      version: number;
+      /**
+       * 🔴 **저장이 무슨 일을 했는가** — mutation 이 정한 낱말을 **그대로**
+       * 건넨다. 여기서 다시 판단하지 않는다: 「바뀌었는가」도 「결재가 올라가
+       * 있었는가」도 트랜잭션 안에서만 답할 수 있는 물음이다
+       * (domain/quote-save-outcome.ts).
+       */
+      outcome: QuoteSaveOutcome;
+    }
   | {
       ok: false;
       code: QuoteActionResultCode;
@@ -183,7 +213,7 @@ async function archiveDocumentAfterSave(quoteId: string, actorUserId: string): P
 
 export async function createQuoteAction(input: {
   fields: Record<string, unknown>;
-}): Promise<QuoteActionResult> {
+}): Promise<QuoteSaveActionResult> {
   const auth = await resolveActingUser("WRITE");
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
@@ -197,7 +227,7 @@ export async function createQuoteAction(input: {
     };
   }
 
-  let result: QuoteActionResult;
+  let result: QuoteSaveActionResult;
   try {
     result = await createQuote({ fields: validation.data, actorUserId: auth.actingUser.id });
   } catch (err) {
@@ -238,7 +268,7 @@ export async function updateQuoteAction(input: {
   id: string;
   expectedVersion: number;
   fields: Record<string, unknown>;
-}): Promise<QuoteActionResult> {
+}): Promise<QuoteSaveActionResult> {
   const auth = await resolveActingUser("WRITE");
   if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
 
@@ -259,7 +289,7 @@ export async function updateQuoteAction(input: {
     };
   }
 
-  let updated: QuoteActionResult;
+  let updated: QuoteSaveActionResult;
   try {
     updated = await updateQuote({
       id: input.id,
@@ -274,6 +304,12 @@ export async function updateQuoteAction(input: {
 
   // 🔴 고친 내용으로 견적서 엑셀을 다시 만들어 서류함의 그 한 장을 바꾼다(위 머리말).
   //    폴더 만들기는 여기 붙지 않는다 — 번호로 찾으므로 만들 때 선 폴더를 그대로 쓴다.
+  //
+  // 🔵 **「안 바뀜」(outcome === "UNCHANGED")에서도 그대로 부른다**(2026-10-31).
+  //    견적서를 한 글자도 안 고쳤어도 서류함의 그 한 장이 사람 손에 지워져 있을 수
+  //    있고, 그때 [저장]은 「다시 넣어 달라」는 뜻으로 쓰인다. 내용이 그대로면 공유폴더
+  //    쪽이 아예 쓰지 않으므로(storage/quote-archive.ts) 헛일도 아니다 — 여기서 건너뛰면
+  //    고치지 않고 되살릴 길이 화면에서 사라진다.
   if (updated.ok) {
     await archiveDocumentAfterSave(updated.id, auth.actingUser.id);
   }

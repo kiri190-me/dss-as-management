@@ -172,14 +172,81 @@ export function parseNewQuoteStart(searchParams: SearchParamsInput | undefined):
  */
 
 /**
+ * ============================================================================
+ * 🔴 주소로 **[견적서 결재] 탭을 열어 준다** (2026-10-31 사용자 요구)
+ * ============================================================================
+ * 「견적서 결재 알림을 누르면 해당 견적서의 [견적서 결재]탭이 뜨도록」. 그때까지
+ * 알림 셋(결재 대기 · 승인 완료 · 반려됨)은 전부 `/quotes/{id}` 에서 멈췄고, 그
+ * 화면은 늘 [견적서 수정] 탭으로 열렸다 — 누른 사람이 탭을 한 번 더 눌러야 했다.
+ *
+ * ── 🔴 **첫 그림의 기본값**일 뿐이다 ────────────────────────────────────
+ * 이 이름이 하는 일은 껍데기(components/quotes/QuoteEditTabs.tsx)의 `useState`
+ * **초깃값**을 정하는 것뿐이다. 그 뒤 사람이 탭을 누르는 일은 지금까지와 똑같이
+ * 브라우저 상태로 돌고, **주소는 다시 쓰이지 않는다.**
+ *
+ * 🔴 그렇게 정한 까닭이 그 파일의 불변식이다: **두 화면은 언제나 함께 그려진다.**
+ * 탭을 누를 때마다 주소를 갈아 끼우면 그 자리에서 화면이 다시 그려지고, 3000 줄
+ * 짜리 편집 폼이 떼어지는 순간 **적던 품목 · 금액이 통째로 사라진다.** 초깃값은
+ * 첫 그림에만 쓰이므로 그 일이 일어날 자리가 아예 없다.
+ *
+ * ── 정해진 글자만 받는다 ────────────────────────────────────────────────
+ * `approval` 하나다. 그 밖(대소문자가 다른 글자 · 빈 값 · 같은 이름 두 번 · 아예
+ * 없음)은 **없는 것으로 친다** — 오류가 아니다. 알림이 만든 주소는 늘 정확한
+ * 글자라서, 그 밖의 글자는 사람이 손으로 고친 주소다. 그때는 지금까지와 똑같이
+ * [견적서 수정] 으로 열린다. 위 팝업의 두 값(parseNewQuoteStart)과 같은 규율이다.
+ *
+ * 🔴 **기본 탭은 주소에 싣지 않는다** — `tab=edit` 을 적지 않으므로, 목록 · 접수
+ * 건 탭이 만들던 주소는 **한 글자도 달라지지 않는다.**
+ * ============================================================================
+ */
+
+export const QUOTE_EDIT_TAB_PARAM = "tab";
+
+/**
+ * 탭 이름 둘. 🔴 **이 목록이 탭 이름의 주인이다** — 껍데기(QuoteEditTabs)가 이
+ * 형을 가져다 쓴다. 두 곳에 적으면 주소가 가리키는 이름과 화면이 아는 이름이
+ * 갈라지고, 그때 증상은 「알림을 눌러도 결재 탭이 안 열린다」 하나뿐이다(오류가
+ * 나지 않는다).
+ */
+export const QUOTE_EDIT_TABS = ["edit", "approval"] as const;
+export type QuoteEditTab = (typeof QUOTE_EDIT_TABS)[number];
+
+/** 주소에 아무 말이 없을 때 열리는 탭 — 지금까지 그대로다. */
+export const QUOTE_EDIT_DEFAULT_TAB: QuoteEditTab = "edit";
+
+/**
  * 목록의 한 줄이 여는 수정 화면 주소. 접수 건이 없으면(null) **지금까지의 그
  * 주소 그대로**다 — PO/내자 목록은 한 글자도 달라지지 않는다. 접수 건 탭은 그 건의
  * id 를 실어 보내, 수정 화면이 돌아갈 곳을 알게 한다.
+ *
+ * `tab` 은 **알림이 쓴다**(위 머리말). 주지 않거나 기본 탭이면 이름 자체를 싣지
+ * 않으므로 지금까지의 주소와 같은 글자가 나온다.
  */
-export function quoteEditHref(input: { quoteId: string; repairCaseId: string | null }): string {
-  if (input.repairCaseId === null) return `/quotes/${input.quoteId}`;
-  const params = new URLSearchParams({ [QUOTE_NEW_REPAIR_CASE_PARAM]: input.repairCaseId });
-  return `/quotes/${input.quoteId}?${params.toString()}`;
+export function quoteEditHref(input: {
+  quoteId: string;
+  repairCaseId: string | null;
+  tab?: QuoteEditTab;
+}): string {
+  const params = new URLSearchParams();
+  if (input.repairCaseId !== null) params.set(QUOTE_NEW_REPAIR_CASE_PARAM, input.repairCaseId);
+  if (input.tab !== undefined && input.tab !== QUOTE_EDIT_DEFAULT_TAB) {
+    params.set(QUOTE_EDIT_TAB_PARAM, input.tab);
+  }
+  const query = params.toString();
+  return query === "" ? `/quotes/${input.quoteId}` : `/quotes/${input.quoteId}?${query}`;
+}
+
+/**
+ * 주소가 가리키는 탭. 정해진 글자가 아니면 기본 탭이다 — 오류가 아니다(머리말).
+ *
+ * 🔴 **다듬지 않는다**(exactValue) — 사람이 적는 값이 아니라 우리가 만든 주소의
+ * 정해진 글자다. 위 팝업의 두 값과 같은 규율이다.
+ */
+export function parseQuoteEditTab(searchParams: SearchParamsInput | undefined): QuoteEditTab {
+  const value = exactValue(searchParams?.[QUOTE_EDIT_TAB_PARAM]);
+  return (QUOTE_EDIT_TABS as readonly string[]).includes(value ?? "")
+    ? (value as QuoteEditTab)
+    : QUOTE_EDIT_DEFAULT_TAB;
 }
 
 /**

@@ -11,7 +11,18 @@ import {
   quotes,
   repairCases,
 } from "../schema";
-import { quoteExcelOnlyFieldErrors, type QuoteFields } from "@/lib/validation/quote-input";
+import {
+  quoteExcelOnlyFieldErrors,
+  type QuoteFields,
+  type QuoteItemInput,
+  type QuoteRepairTaskInput,
+} from "@/lib/validation/quote-input";
+import {
+  isQuoteContentUnchanged,
+  type QuoteContentSnapshot,
+} from "@/lib/domain/quote-change-detection";
+import type { QuoteSaveOutcome } from "@/lib/domain/quote-save-outcome";
+import { autoRejectQuoteApprovalAfterEdit } from "./quote-approval-auto-reject";
 
 /**
  * ============================================================================
@@ -51,6 +62,25 @@ import { quoteExcelOnlyFieldErrors, type QuoteFields } from "@/lib/validation/qu
  * 남아 있는 부품" 같은 모양으로 드러난다(mutations/domestic-orders.ts 의
  * replaceDueDates 와 같은 판단).
  *
+ * ── 🔴 **아무것도 안 바뀐 저장은 한 글자도 쓰지 않는다** (2026-10-31) ─────
+ * 고치기는 저장 전에 **DB 의 지금 내용과 들어온 내용을 견준다**. 같으면 UPDATE 도,
+ * 줄 갈아 끼우기도, **판 번호 올리기도** 하지 않고 `UNCHANGED` 로 끝낸다.
+ *
+ * 🔴 판 번호를 안 올리는 것이 요점이다. 전에는 내용과 무관하게 `version + 1` 이라,
+ * 아무것도 고치지 않고 [저장]만 눌러도 승인 건이 「승인 후 변경됨」
+ * (APPROVED_OUTDATED)으로 뒤집혔다 — 사용자가 「안 바뀐 저장은 반려하지 않는다」로
+ * 정한 그 결정이 그대로는 아무 뜻이 없다(domain/quote-save-outcome.ts).
+ *
+ * 견주는 규칙(어디까지 보는가 · 「같다」의 기준)은 여기 적지 않는다 —
+ * domain/quote-change-detection.ts 한 곳이다. 그래야 「`""` 과 `null` 이 같은가」
+ * 같은 물음 하나에 DB 를 띄우는 시험이 붙지 않는다.
+ *
+ * ── 🔴 **내용이 바뀌면 올라가 있던 결재가 자동으로 반려된다** (2026-10-31) ──
+ * 저장과 **같은 트랜잭션** 안에서 처리한다 — 저장이 되돌아가면 반려도 함께 없던
+ * 일이 되어야 한다. 하는 일은 mutations/quote-approval-auto-reject.ts 한 곳에
+ * 있고, 사람이 반려하는 길(decideQuoteApproval)은 건드리지 않았다. 2026-09-18 의
+ * 「이 표를 보고 발행을 막지 말 것」과 어긋나지 않는 까닭은 그 파일 머리말에 있다.
+ *
  * ── PII ─────────────────────────────────────────────────────────────────
  * subject · faultDescriptionText · validity · delivery · payment 는 사람이
  * 자유롭게 적는 값이라 고객사 사정이 섞일 수 있다(schema/quotes.ts 의 PII 항목).
@@ -64,7 +94,17 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type QuoteMutationResultCode = "NOT_FOUND" | "CONFLICT" | "VALIDATION_ERROR";
 
 export type QuoteMutationResult =
-  | { ok: true; id: string; version: number }
+  | {
+      ok: true;
+      id: string;
+      version: number;
+      /**
+       * 🔴 **저장이 무슨 일을 했는가**(2026-10-31). 화면이 이것을 보고 팝업을
+       * 고른다 — 화면은 결재 상태도, DB 에 지금 무엇이 들어 있는지도 모른다
+       * (domain/quote-save-outcome.ts 머리말).
+       */
+      outcome: QuoteSaveOutcome;
+    }
   | {
       ok: false;
       code: QuoteMutationResultCode;
@@ -256,6 +296,49 @@ async function checkReferences(tx: Tx, fields: QuoteFields): Promise<QuoteMutati
  * 어느 품목 묶음 위에 붙는지가 곧 뜻이므로, 종류별로 나눠 담지 않고 **받은 차례
  * 그대로** 넣는다. 수량 · 단가는 검증이 이미 null 로 못 박았다.
  */
+/**
+ * 품목 줄 하나가 표에 **실제로 적히는 값**. 차례(line_no)는 여기 없다 — 배열
+ * 순서가 곧 차례이고, 그것은 넣는 쪽이 정한다.
+ *
+ * 🔴 **따로 뽑아 둔 까닭**: 「안 바뀌었는가」를 견주는 쪽(updateQuote)이 **이 함수가
+ * 만든 값**으로 견준다. 두 곳에 같은 기본값(`?? "ITEM"` · `?? null`)을 적으면
+ * 언젠가 한쪽만 고쳐지고, 그때 증상은 「그 칸만 고치고 저장하면 아무 일도 안
+ * 일어난다」로 나타난다 — 오류가 아니라 침묵이다.
+ */
+function itemRowValues(item: QuoteItemInput) {
+  return {
+    // 종류를 안 보낸 줄은 품목 줄이다 — DB 칸의 DEFAULT 와 같은 규칙이고, 설명
+    // 줄이 잘못 끼면 CHECK 가 거절한다(schema/quotes.ts 의 quoteItemKindEnum).
+    kind: item.kind ?? "ITEM",
+    partId: item.partId,
+    partNameText: item.partNameText,
+    partSpecText: item.partSpecText ?? null,
+    isOverhaulPart: item.isOverhaulPart,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    /**
+     * 재고 관리의 부품 번호. 검증이 이미 정수로 재어 두었고, 설명 줄에서는 null 로
+     * 못 박았다(validation/quote-input.ts 의 그 항목 · CHECK
+     * quote_items_inventory_part_no_item_line_only).
+     *
+     * 🔴 **재고 연결(part_id)과 같은 줄에 둘 다 차는 일은 없다** — 화면이 집어 넣은 줄은
+     *    FK 쪽을 비우고 이 번호를 적는다(그 번호는 A/S parts.id 가 아니다). 두 칸을 한
+     *    칸으로 합칠 수 없는 까닭이 그것이다.
+     */
+    inventoryPartNo: item.inventoryPartNo ?? null,
+  };
+}
+
+/** 고른 수리 작업 한 줄이 표에 적히는 값. 위 itemRowValues 와 같은 까닭으로 뽑아 둔다. */
+function repairTaskRowValues(task: QuoteRepairTaskInput) {
+  return {
+    taskId: task.taskId,
+    taskNameText: task.taskName,
+    hours: task.hours,
+    hourlyRate: task.hourlyRate,
+  };
+}
+
 async function replaceItems(tx: Tx, quoteId: string, fields: QuoteFields) {
   await tx.delete(quoteItems).where(eq(quoteItems.quoteId, quoteId));
   if (fields.items.length === 0) return;
@@ -264,25 +347,7 @@ async function replaceItems(tx: Tx, quoteId: string, fields: QuoteFields) {
     fields.items.map((item, index) => ({
       quoteId,
       lineNo: index + 1,
-      // 종류를 안 보낸 줄은 품목 줄이다 — DB 칸의 DEFAULT 와 같은 규칙이고, 설명
-      // 줄이 잘못 끼면 CHECK 가 거절한다(schema/quotes.ts 의 quoteItemKindEnum).
-      kind: item.kind ?? "ITEM",
-      partId: item.partId,
-      partNameText: item.partNameText,
-      partSpecText: item.partSpecText ?? null,
-      isOverhaulPart: item.isOverhaulPart,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      /**
-       * 재고 관리의 부품 번호. 검증이 이미 정수로 재어 두었고, 설명 줄에서는 null 로
-       * 못 박았다(validation/quote-input.ts 의 그 항목 · CHECK
-       * quote_items_inventory_part_no_item_line_only).
-       *
-       * 🔴 **재고 연결(part_id)과 같은 줄에 둘 다 차는 일은 없다** — 화면이 집어 넣은 줄은
-       *    FK 쪽을 비우고 이 번호를 적는다(그 번호는 A/S parts.id 가 아니다). 두 칸을 한
-       *    칸으로 합칠 수 없는 까닭이 그것이다.
-       */
-      inventoryPartNo: item.inventoryPartNo ?? null,
+      ...itemRowValues(item),
     }))
   );
 }
@@ -324,12 +389,73 @@ async function replaceRepairTasks(tx: Tx, quoteId: string, fields: QuoteFields) 
     fields.repairTasks.map((task, index) => ({
       quoteId,
       lineNo: index + 1,
-      taskId: task.taskId,
-      taskNameText: task.taskName,
-      hours: task.hours,
-      hourlyRate: task.hourlyRate,
+      ...repairTaskRowValues(task),
     }))
   );
+}
+
+/**
+ * ============================================================================
+ * 🔴 「정말 바뀌었는가」를 견줄 한 벌 (2026-10-31)
+ * ============================================================================
+ * 들어온 쪽과 DB 쪽을 **같은 모양**으로 만들어 domain/quote-change-detection.ts 에
+ * 넘긴다. 규칙은 전부 그쪽에 있고, 여기서 하는 일은 모양을 맞추는 것뿐이다.
+ */
+function incomingSnapshot(fields: QuoteFields): QuoteContentSnapshot {
+  return {
+    // 🔴 **저장이 실제로 쓰는 묶음 그대로**다. 칸이 하나 늘면 비교도 저절로
+    //    따라 는다(quoteColumnsEqual 이 이 묶음의 키를 돈다).
+    columns: toColumnValues(fields),
+    items: fields.items.map(itemRowValues),
+    repairTasks: fields.repairTasks.map(repairTaskRowValues),
+    workScopeLines: fields.workScopeLines,
+  };
+}
+
+/**
+ * DB 에 지금 들어 있는 내용. 🔴 **같은 트랜잭션 안에서** 읽는다 — 견적서 행을
+ * 이미 FOR UPDATE 로 잡아 둔 뒤라, 견주는 동안 남이 끼어들 수 없다.
+ *
+ * 차례는 저장이 매긴 그대로 읽는다: 품목 · 수리 작업은 `line_no`, 작업 내역은
+ * **묶음 안의** `line_no` 다(replaceWorkScopeLines 가 묶음마다 1부터 매긴다).
+ */
+async function storedSnapshot(
+  tx: Tx,
+  quoteId: string,
+  storedColumns: Record<string, unknown>
+): Promise<QuoteContentSnapshot> {
+  const [items, repairTasks, workScopeLines] = await Promise.all([
+    tx
+      .select({
+        kind: quoteItems.kind,
+        partId: quoteItems.partId,
+        partNameText: quoteItems.partNameText,
+        partSpecText: quoteItems.partSpecText,
+        isOverhaulPart: quoteItems.isOverhaulPart,
+        quantity: quoteItems.quantity,
+        unitPrice: quoteItems.unitPrice,
+        inventoryPartNo: quoteItems.inventoryPartNo,
+      })
+      .from(quoteItems)
+      .where(eq(quoteItems.quoteId, quoteId))
+      .orderBy(quoteItems.lineNo),
+    tx
+      .select({
+        taskId: quoteRepairTasks.taskId,
+        taskNameText: quoteRepairTasks.taskNameText,
+        hours: quoteRepairTasks.hours,
+        hourlyRate: quoteRepairTasks.hourlyRate,
+      })
+      .from(quoteRepairTasks)
+      .where(eq(quoteRepairTasks.quoteId, quoteId))
+      .orderBy(quoteRepairTasks.lineNo),
+    tx
+      .select({ section: quoteWorkScopeLines.section, text: quoteWorkScopeLines.text })
+      .from(quoteWorkScopeLines)
+      .where(eq(quoteWorkScopeLines.quoteId, quoteId))
+      .orderBy(quoteWorkScopeLines.section, quoteWorkScopeLines.lineNo),
+  ]);
+  return { columns: storedColumns, items, repairTasks, workScopeLines };
 }
 
 /** 새 견적서 한 장. version 은 스키마 기본값 1로 시작한다. */
@@ -364,7 +490,8 @@ export async function createQuote(params: {
       await replaceRepairTasks(tx, inserted.id, params.fields);
       await replaceWorkScopeLines(tx, inserted.id, params.fields);
 
-      return { ok: true, id: inserted.id, version: inserted.version };
+      // 🔴 새 장에는 견줄 어제가 없고 결재도 아직 없다 — 언제나 `SAVED` 다.
+      return { ok: true, id: inserted.id, version: inserted.version, outcome: "SAVED" };
     });
   } catch (err) {
     // 미리 본 뒤 저장 사이에 남이 같은 번호를 쓴 경우. 위 '번호 중복' 항목 참조.
@@ -400,8 +527,18 @@ export async function updateQuote(params: {
 
   try {
     return await db.transaction(async (tx): Promise<QuoteMutationResult> => {
+      /**
+       * 🔴 **행을 통째로 읽는다**(2026-10-31). 고를 칸을 적어 두지 않는 것은
+       * 일부러다 — 아래에서 「바뀌었는가」를 견줄 때 `toColumnValues` 가 만든
+       * 묶음의 **이름으로** 이 행에서 값을 집어 오기 때문이다. 칸 목록을 여기
+       * 한 벌 더 적어 두면, 칸이 하나 늘어난 날 저장은 그 칸을 쓰는데 비교는
+       * 못 보는 상태가 되고 그때 그 칸의 수정은 **조용히 버려진다.**
+       *
+       * (drizzle 의 칸 이름이 곧 `toColumnValues` 의 키다 — 둘이 같은 스키마
+       * 객체에서 나온다.)
+       */
       const [existing] = await tx
-        .select({ id: quotes.id, version: quotes.version, isDeleted: quotes.isDeleted })
+        .select()
         .from(quotes)
         .where(eq(quotes.id, params.id))
         .limit(1)
@@ -423,6 +560,19 @@ export async function updateQuote(params: {
         return duplicateNumberResult();
       }
 
+      /**
+       * 🔴 **아무것도 안 바뀌었으면 여기서 끝난다** — UPDATE 도, 줄 갈아 끼우기도,
+       * 판 번호 올리기도, 결재 자동 반려도 하지 않는다(파일 머리말).
+       *
+       * 🔴 **검증을 모두 지난 뒤에** 본다. 번호가 겹치거나 가리키는 곳이 사라진
+       * 요청은 「안 바뀜」이 아니라 **잘못된 요청**이고, 그 답을 「바뀐 게 없습니다」로
+       * 덮으면 사람은 무엇이 문제인지 영영 모른다.
+       */
+      const stored = await storedSnapshot(tx, params.id, existing);
+      if (isQuoteContentUnchanged(incomingSnapshot(params.fields), stored)) {
+        return { ok: true, id: existing.id, version: existing.version, outcome: "UNCHANGED" };
+      }
+
       const [updated] = await tx
         .update(quotes)
         .set({
@@ -440,7 +590,25 @@ export async function updateQuote(params: {
       await replaceRepairTasks(tx, params.id, params.fields);
       await replaceWorkScopeLines(tx, params.id, params.fields);
 
-      return { ok: true, id: updated.id, version: updated.version };
+      /**
+       * 🔴 **내용이 바뀌었으니 올라가 있던 결재를 자동으로 반려한다**(2026-10-31
+       * 사용자 요구). 여기까지 온 것은 「정말 바뀌었다」가 확인된 길뿐이다.
+       *
+       * 🔴 **같은 트랜잭션 안**이다 — 저장이 뒤에서 되돌아가면(번호 중복 23505 등)
+       * 반려도 함께 없던 일이 되어야 한다. 되돌아가지 않으면 「견적서는 그대로인데
+       * 결재만 반려된」 장이 남고, 그 상태를 설명하는 화면이 어디에도 없다.
+       */
+      const autoRejected = await autoRejectQuoteApprovalAfterEdit(tx, {
+        quoteId: params.id,
+        actorUserId: params.actorUserId,
+      });
+
+      return {
+        ok: true,
+        id: updated.id,
+        version: updated.version,
+        outcome: autoRejected.rejected ? "APPROVAL_AUTO_REJECTED" : "SAVED",
+      };
     });
   } catch (err) {
     if (isUniqueViolation(err)) return duplicateNumberResult();

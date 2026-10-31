@@ -17,7 +17,7 @@ import {
 } from "../schema";
 import { createQuote, updateQuote } from "../mutations/quotes";
 import { decideQuoteApproval, requestQuoteApproval } from "../mutations/quote-approvals";
-import { softDeleteQuote } from "../mutations/quote-trash";
+import { restoreQuote, softDeleteQuote } from "../mutations/quote-trash";
 import { saveShipmentApprovalRoute } from "../mutations/shipment-approval-routes";
 import { getCurrentShipmentApprovalRoute } from "./shipment-approval-routes";
 import { listQuoteApprovalsPendingMyApproval } from "./quote-approvals-pending";
@@ -27,7 +27,10 @@ import {
   type ApprovalOutcome,
 } from "./approval-outcome-notifications";
 import { listMyNotifications } from "./notifications";
-import { QUOTE_APPROVAL_ROUTE_SCOPE } from "@/lib/domain/quote-approval-rules";
+import {
+  QUOTE_APPROVAL_AUTO_REJECT_REASON,
+  QUOTE_APPROVAL_ROUTE_SCOPE,
+} from "@/lib/domain/quote-approval-rules";
 import type { NotificationItem, NotificationKind } from "@/lib/domain/notifications";
 import type { Role } from "@/lib/domain/types";
 import type { QuoteFields } from "@/lib/validation/quote-input";
@@ -149,20 +152,62 @@ async function createTestQuote(actorUserId: string = requesterId): Promise<TestQ
   return { id: created.id, quoteNumber: fields.quoteNumber, version: created.version, fields };
 }
 
-/** 그 장을 한 번 고쳐 판 번호를 올린다 — 「내용이 바뀌었다」를 만드는 유일한 길. */
-async function bumpQuoteVersion(quote: TestQuote): Promise<number> {
+/**
+ * 그 장을 한 번 고쳐 판 번호를 올린다.
+ *
+ * 🔴 **2026-10-31 부터 이 길은 결재까지 건드린다** — 올라가 있던 결재(대기 중 ·
+ * 승인됨)가 **자동으로 반려된다**(mutations/quote-approval-auto-reject.ts).
+ * 「판 번호만 올리고 결재는 그대로 두는」 길이 필요하면 아래
+ * bumpQuoteVersionWithoutTouchingApproval 을 쓴다.
+ *
+ * `actorUserId` 를 받는 것은 **자동 반려의 반려자가 누구인가**가 결과 알림에
+ * 그대로 걸리기 때문이다 — 결과 조회는 결정자가 요청자 본인이면 알리지 않는다.
+ */
+async function bumpQuoteVersion(
+  quote: TestQuote,
+  actorUserId: string = requesterId
+): Promise<number> {
   const fields = { ...quote.fields, subject: `고침 ${randomUUID().slice(0, 4)}` };
   const updated = await updateQuote({
     id: quote.id,
     expectedVersion: quote.version,
     fields,
-    actorUserId: requesterId,
+    actorUserId,
   });
   assert.equal(updated.ok, true, `setup quote update failed: ${JSON.stringify(updated)}`);
   if (!updated.ok) throw new Error("unreachable");
   quote.fields = fields;
   quote.version = updated.version;
   return updated.version;
+}
+
+/**
+ * 🔴 **결재를 건드리지 않고** 판 번호만 올린다 — 휴지통에 넣었다 되살린다.
+ *
+ * 2026-10-31 전에는 「견적서를 한 번 고친다」가 그 일을 했지만, 이제 고치기는
+ * 결재를 자동으로 반려한다. 그런데 **「승인은 살아 있는데 판 번호가 다르다」**
+ * (APPROVED_OUTDATED)는 여전히 일어날 수 있는 상태이고, 그때 결과 알림이 어떻게
+ * 되는지를 재야 한다 — 휴지통 두 길이 결재를 보지 않고 version 을 +1 하므로
+ * (mutations/quote-trash.ts) 이 왕복이 그 상태를 만드는 길이다.
+ */
+async function bumpQuoteVersionWithoutTouchingApproval(quote: TestQuote): Promise<number> {
+  const deleted = await softDeleteQuote({
+    quoteId: quote.id,
+    expectedVersion: quote.version,
+    actorUserId: requesterId,
+    reason: "판 번호만 올리기 위한 왕복",
+  });
+  assert.equal(deleted.ok, true, `setup soft delete failed: ${JSON.stringify(deleted)}`);
+  if (!deleted.ok) throw new Error("unreachable");
+  const restored = await restoreQuote({
+    quoteId: quote.id,
+    expectedVersion: deleted.version,
+    actorUserId: requesterId,
+  });
+  assert.equal(restored.ok, true, `setup restore failed: ${JSON.stringify(restored)}`);
+  if (!restored.ok) throw new Error("unreachable");
+  quote.version = restored.version;
+  return restored.version;
 }
 
 async function saveQuoteRoute(approverUserIds: string[]): Promise<void> {
@@ -403,7 +448,9 @@ describe("견적서 결재 대기 — 지금 내 차례인 것만", () => {
     assert.equal(items[0].id, `QUOTE_APPROVAL_PENDING:${quote.id}`);
     assert.equal(items[0].subject, quote.quoteNumber);
     assert.equal(items[0].detail, "결재선 1단계 · 요청자 견적알림시험 요청자");
-    assert.equal(items[0].href, `/quotes/${quote.id}`);
+    // 🔴 2026-10-31 부터 **[견적서 결재] 탭**으로 간다(사용자 요구 — 「알림을 누르면
+    //    그 견적서의 [견적서 결재]탭이 뜨도록」). 할 일이 바로 그 탭에 있다.
+    assert.equal(items[0].href, `/quotes/${quote.id}?tab=approval`);
 
     assert.deepEqual(await bellItems(outsiderId, "SALES", "QUOTE_APPROVAL_PENDING"), []);
   });
@@ -458,29 +505,89 @@ describe("결과 알림 — 올린 사람에게", () => {
     assert.deepEqual(ofThisRun(await listMyGrantedApprovalOutcomes(superAdminId)), []);
   });
 
-  test("🔴 승인 뒤 견적서를 고쳐도 승인 사건은 그대로다 — 고칠 때마다 줄이 서지 않는다", async () => {
+  test("🔴 승인 뒤 **판 번호만** 올라가도 승인 사건은 그대로다 — 줄이 늘지도 사라지지도 않는다", async () => {
     // APPROVED_OUTDATED 는 **지금 상태**이고 그 장의 [견적서 결재] 탭이 말한다.
-    // 결과 알림은 **일어난 사건**이라 뒤에 내용이 바뀌었다고 하나 더 생기지도,
+    // 결과 알림은 **일어난 사건**이라 뒤에 판 번호가 바뀌었다고 하나 더 생기지도,
     // 있던 것이 사라지지도 않는다.
+    //
+    // 🔵 2026-10-31 부터 「견적서를 고친다」는 결재를 자동으로 반려하므로(아래 시험)
+    //    이 성질은 **결재를 건드리지 않고 판 번호만 올리는 길**로 잰다 — 휴지통 왕복.
+    //    재는 것은 그때나 지금이나 같다: 「사건은 상태를 따라 움직이지 않는다」.
     await saveQuoteRoute([stepAId]);
     const quote = await createTestQuote();
     await request(quote);
     await decide(quote, stepAId, "APPROVED");
     assert.equal(ofThisRun(await listMyGrantedApprovalOutcomes(requesterId)).length, 1);
 
-    await bumpQuoteVersion(quote);
+    await bumpQuoteVersionWithoutTouchingApproval(quote);
+    // 🔵 무엇을 재는지 — 승인은 여전히 APPROVED 이고 판 번호만 어긋났다.
+    const rows = await db
+      .select({ status: quoteApprovals.status })
+      .from(quoteApprovals)
+      .where(eq(quoteApprovals.quoteId, quote.id))
+      .orderBy(asc(quoteApprovals.requestedAt));
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].status, "APPROVED");
 
     assert.equal(
       ofThisRun(await listMyGrantedApprovalOutcomes(requesterId)).length,
       1,
-      "견적서를 고쳤다고 결과 알림이 늘거나 사라졌다"
+      "판 번호가 올랐다고 결과 알림이 늘거나 사라졌다"
     );
     assert.deepEqual(ofThisRun(await listMyRejectedApprovalOutcomes(requesterId)), []);
     // 🔴 「다시 올려야 한다」가 결재 대기로 둔갑하지도 않는다 — 열린 요청이 없다.
     assert.deepEqual(await listQuoteApprovalsPendingMyApproval(stepAId), []);
   });
 
-  test("🔴 종에 실린다 — 「승인 완료」 줄이 요청자에게, 그 견적서 화면 주소로", async () => {
+  test("🔴 승인 뒤 견적서를 **고치면** 승인 사건이 내려가고 반려가 대신 선다 (2026-10-31)", async () => {
+    // 고치기는 그 승인을 **자동으로 반려**한다(사용자 요구 — 이미 승인된 건도 반려).
+    // 그러면 「승인 완료」는 더 이상 참이 아니므로 종에서 내려가고, 올린 사람에게는
+    // 「반려됨」이 대신 간다 — 다음에 할 일이 「고쳐서 다시 올리기」이기 때문이다.
+    await saveQuoteRoute([stepAId]);
+    const quote = await createTestQuote();
+    await request(quote);
+    await decide(quote, stepAId, "APPROVED");
+    assert.equal(ofThisRun(await listMyGrantedApprovalOutcomes(requesterId)).length, 1);
+
+    // 🔴 **올린 사람이 아닌 사람**이 고친다 — 결과 알림은 결정자가 요청자 본인이면
+    //    알리지 않으므로(자기 행동을 자기 종으로 돌려받지 않게), 그 갈림까지 재려면
+    //    고친 사람이 달라야 한다. 아래에서 반대 경우도 본다.
+    await bumpQuoteVersion(quote, outsiderId);
+
+    assert.deepEqual(
+      ofThisRun(await listMyGrantedApprovalOutcomes(requesterId)),
+      [],
+      "🔴 반려된 승인이 「승인 완료」로 종에 남았다"
+    );
+    const rejected = ofThisRun(await listMyRejectedApprovalOutcomes(requesterId));
+    assert.equal(rejected.length, 1, "올린 사람에게 반려가 가지 않았다");
+    assert.equal(rejected[0].quoteId, quote.id);
+    assert.equal(
+      rejected[0].decisionReason,
+      QUOTE_APPROVAL_AUTO_REJECT_REASON,
+      "🔴 사람이 적은 사유와 구별되는 글이어야 한다"
+    );
+    // 🔴 결재 대기로 둔갑하지 않는다 — 열린 요청은 하나도 없다.
+    assert.deepEqual(await listQuoteApprovalsPendingMyApproval(stepAId), []);
+  });
+
+  test("🔴 고친 사람이 곧 올린 사람이면 **자기 종에는 뜨지 않는다**", async () => {
+    await saveQuoteRoute([stepAId]);
+    const quote = await createTestQuote();
+    await request(quote);
+    await decide(quote, stepAId, "APPROVED");
+
+    await bumpQuoteVersion(quote, requesterId);
+
+    assert.deepEqual(ofThisRun(await listMyGrantedApprovalOutcomes(requesterId)), []);
+    assert.deepEqual(
+      ofThisRun(await listMyRejectedApprovalOutcomes(requesterId)),
+      [],
+      "자기가 고쳐서 난 반려가 자기 종에 떴다"
+    );
+  });
+
+  test("🔴 종에 실린다 — 「승인 완료」 줄이 요청자에게, 그 견적서의 [견적서 결재] 탭으로", async () => {
     await saveQuoteRoute([stepAId]);
     const quote = await createTestQuote();
     await request(quote);
@@ -491,6 +598,7 @@ describe("결과 알림 — 올린 사람에게", () => {
     );
     assert.equal(items.length, 1);
     assert.equal(items[0].detail, "견적서 승인 · 견적알림시험 1단계");
-    assert.equal(items[0].href, `/quotes/${quote.id}`);
+    // 🔴 2026-10-31 — 결과를 되짚는 이력이 그 탭에 있다(대기 알림과 같은 자리).
+    assert.equal(items[0].href, `/quotes/${quote.id}?tab=approval`);
   });
 });

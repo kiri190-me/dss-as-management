@@ -221,10 +221,14 @@ export const QUOTE_APPROVAL_LABEL = SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.QUOTE;
  * 단계 번호를 `null` 로 받을 수 있게 두는 것은 불출 알림과 같은 이유다: 표의 CHECK 이
  * 「판과 단계는 한 쌍」만 요구하므로 둘 다 비어 있는 행을 타입이 막지 못한다.
  *
- * ── href 는 그 견적서 화면이다 ────────────────────────────────────────
- * 🔴 [견적서 결재] 탭까지 열지는 **못한다.** 그 탭은 브라우저 상태(useState)라
- * 주소로 가리킬 수 없다(components/quotes/QuoteEditTabs.tsx). 주소를 여기서 손으로
- * 적지도 않는다 — 목록이 한 줄을 열 때 쓰는 헬퍼 하나를 그대로 부른다.
+ * ── href 는 그 견적서의 **[견적서 결재] 탭**이다 (2026-10-31) ─────────────
+ * 🔵 예전에는 그 장의 [견적서 수정] 탭에서 멈췄다 — 탭이 브라우저 상태라 주소로
+ * 가리킬 수 없었기 때문이다. 2026-10-31 에 **첫 그림의 기본 탭**을 주소로 정할 수
+ * 있게 되면서(domain/quote-new-link.ts 의 QUOTE_EDIT_TAB_PARAM) 결재 대기 알림은
+ * 곧장 결재 화면으로 간다 — 누른 사람이 할 일이 바로 거기 있다.
+ *
+ * 🔴 주소를 여기서 손으로 적지 않는다 — 목록이 한 줄을 열 때 쓰는 헬퍼 하나를
+ * 그대로 부른다. 탭 이름도 글자로 적지 않는다(그 파일의 QUOTE_EDIT_TABS).
  *
  * targetKey 는 견적서 id 다. 한 견적서에 살아 있는 요청은 언제나 하나뿐이고
  * (quote_approvals_one_active_request 부분 유니크), 사람에게도 「그 한 장」이다.
@@ -243,7 +247,7 @@ export function buildQuoteApprovalNotification(input: {
     targetKey: input.quoteId,
     subject: input.quoteNumber,
     detail: `${step}요청자 ${input.requestedByName}`,
-    href: quoteEditHref({ quoteId: input.quoteId, repairCaseId: null }),
+    href: quoteEditHref({ quoteId: input.quoteId, repairCaseId: null, tab: "approval" }),
   };
 }
 
@@ -753,16 +757,18 @@ function approvalOutcomeName(target: ApprovalOutcomeTarget): string {
 }
 
 /**
- * 결과 알림을 누르면 갈 곳 — 견적서는 승인이든 반려든 그 장 하나이므로 한 주소다
- * (그 화면의 [견적서 결재] 탭에서 다시 올린다 — 탭은 주소로 열지 못한다:
- * buildQuoteApprovalNotification).
+ * 결과 알림을 누르면 갈 곳 — 견적서는 승인이든 반려든 그 장 하나이므로 한 주소다.
+ *
+ * 🔴 **[견적서 결재] 탭으로 연다**(2026-10-31). 결과를 되짚는 이력도, 반려 뒤
+ * 다시 올리는 단추도 그 탭에 있다 — 결재 대기 알림과 **같은 자리**다
+ * (buildQuoteApprovalNotification 의 href 절에 그 까닭이 적혀 있다).
  *
  * 🔵 예전에는 이 자리에 「승인 완료와 반려됨이 서로 다르다」는 단서가 붙어 있었다.
  * 승인은 「결과를 확인하는 자리」, 반려는 「다시 올리는 자리」로 갈리던 것이 **불출
  * 하나뿐**이었고, 그 갈래를 2026-10-27 에 들어내면서 두 함수의 href 가 같아졌다.
  */
 function approvalOutcomeQuoteHref(target: Extract<ApprovalOutcomeTarget, { source: "QUOTE" }>): string {
-  return quoteEditHref({ quoteId: target.quoteId, repairCaseId: null });
+  return quoteEditHref({ quoteId: target.quoteId, repairCaseId: null, tab: "approval" });
 }
 
 /**
@@ -781,8 +787,8 @@ function approvalOutcomeQuoteHref(target: Extract<ApprovalOutcomeTarget, { sourc
  *
  * ── href 는 결과를 확인하는 자리 ────────────────────────────────────────
  *  · 접수 건 결재 → 그 건의 검수/승인 화면(결재 대기 알림과 같은 헬퍼).
- *  · 견적서 → 그 견적서 화면. [견적서 결재] 탭에 결재 이력이 있지만 탭은 주소로
- *    열지 못한다(buildQuoteApprovalNotification 의 주석).
+ *  · 견적서 → 그 견적서의 **[견적서 결재] 탭** — 결재 이력이 거기 있다
+ *    (2026-10-31, approvalOutcomeQuoteHref).
  */
 export function buildApprovalGrantedNotification(
   input: ApprovalOutcomeTarget & { decidedByName: string }
@@ -813,7 +819,8 @@ export function buildApprovalGrantedNotification(
  *
  * href 는 다시 올리는 자리다:
  *  · 접수 건 결재 → 그 건의 검수/승인 화면(재요청 단추가 거기 있다).
- *  · 견적서 → 그 견적서 화면([견적서 수정]에서 고치고 [견적서 결재]에서 다시 올린다).
+ *  · 견적서 → 그 견적서의 **[견적서 결재] 탭** — 다시 올리는 단추가 거기 있다
+ *    (2026-10-31). 고칠 것이 있으면 그 화면에서 [견적서 수정] 탭으로 건너간다.
  */
 export function buildApprovalRejectedNotification(
   input: ApprovalOutcomeTarget & { decisionReason: string | null }

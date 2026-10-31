@@ -209,9 +209,18 @@ test("제품 모델 — 정보 수정은 목록으로, 파일 올리기는 머�
 
 test("견적서 — 만들기도 고치기도 왔던 목록으로 넘어간다", () => {
   const form = readFileSync("src/components/quotes/QuoteEditForm.tsx", "utf8");
+  /**
+   * 🔵 2026-10-31 에 **고치기 쪽 팝업이 하나 더 생겼다** — 결재가 자동으로
+   * 반려된 저장은 「승인요청이 반려되었습니다」를 먼저 읽히고, 사람이 그 알림을
+   * 닫은 뒤 **같은 저장 팝업**으로 마무리한다(finishSaveAfterNotice).
+   *
+   * 🔴 글자도 가는 곳도 위 고치기와 **똑같아야 한다** — 두 길이 다른 곳으로
+   * 보내면 같은 [저장]이 결재 상태에 따라 다른 화면으로 끝난다.
+   */
   assert.deepEqual(popupCalls("src/components/quotes/QuoteEditForm.tsx"), [
     ['"견적서를 저장했습니다."', 'returnHref ?? "/quotes"'],
     ['"견적서를 등록했습니다."', 'returnHref ?? "/quotes"'],
+    ['"견적서를 저장했습니다."', 'returnHref ?? "/quotes"'],
   ]);
   // 그 전에는 새 장의 수정 화면으로 갔다.
   assert.doesNotMatch(form, /router\.push\(returnHref \?\? `\/quotes\/\$\{result\.id\}`\)/);

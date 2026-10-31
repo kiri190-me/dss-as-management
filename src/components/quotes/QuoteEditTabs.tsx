@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useState, type ReactNode } from "react";
+import { QUOTE_EDIT_DEFAULT_TAB, type QuoteEditTab } from "@/lib/domain/quote-new-link";
 
 /**
  * ============================================================================
@@ -68,15 +69,35 @@ import { Fragment, useState, type ReactNode } from "react";
  * ⚠️ 슬롯을 하나 더 더하는 사람에게 — [견적서 수정] 칸이 지금 멀쩡한 것은 자식이
  * `editForm` **하나뿐**이라 목록이 아니기 때문이다. 어느 칸이든 서버가 넘긴 것을
  * 둘 이상 나란히 놓는 순간 같은 경고가 난다. 그때는 여기처럼 key 를 얹는다.
+ *
+ * ── 🔴 **첫 탭만** 주소가 정한다 (2026-10-31) ───────────────────────────
+ * 결재 알림을 누르면 [견적서 결재] 가 열려 있어야 한다는 사용자 요구가 생겼다.
+ * 그 요구를 **`useState` 의 초깃값 하나**로 받는다(`initialTab`) — 주소를 읽는 일은
+ * 서버 컴포넌트인 페이지가 하고, 여기는 그 값을 첫 그림에만 쓴다.
+ *
+ * 🔴 **주소를 따라다니지 않는다.** 탭을 누를 때 `router.replace` 로 주소를 갈아
+ * 끼우는 모양을 고르지 않은 까닭이 바로 위의 불변식이다 — 주소가 바뀌면 그 자리가
+ * 다시 그려지고, 편집 폼이 한 번이라도 떼어지는 순간 **적던 품목 · 금액이 통째로
+ * 사라진다.** 초깃값은 첫 그림에서만 읽히므로 그런 일이 일어날 자리가 없다.
+ *
+ * ⚠️ 그래서 **뒤로 가기로는 탭이 되돌아오지 않는다.** 그것은 빠뜨린 것이 아니라
+ * 위 불변식을 지키려고 고른 쪽이다 — 바꾸려면 「폼이 떼어지지 않는가」를 먼저
+ * 증명해야 한다.
  * ============================================================================
  */
 
-export type QuoteEditTab = "edit" | "approval";
+/**
+ * 🔴 탭 이름의 **주인은 도메인**이다(domain/quote-new-link.ts) — 알림이 만드는
+ * 주소와 이 껍데기가 같은 글자를 봐야 한다. 여기서 다시 내보내는 것은 이 조각을
+ * 그려 보는 시험들이 쓰던 이름을 그대로 두기 위해서다.
+ */
+export type { QuoteEditTab };
 
 export default function QuoteEditTabs({
   editForm,
   archiveFolderSection = null,
   approvalPanel,
+  initialTab = QUOTE_EDIT_DEFAULT_TAB,
 }: {
   /** [견적서 수정] — 지금까지의 편집 폼 그대로다. 서버가 그려 넘긴다. */
   editForm: ReactNode;
@@ -96,8 +117,17 @@ export default function QuoteEditTabs({
    * 편집 폼을 그대로 그린다 — 아직 저장되지 않아 결재를 걸 대상이 없다.
    */
   approvalPanel: ReactNode;
+  /**
+   * **처음 보일 탭**(2026-10-31). 주지 않으면 지금까지 그대로 [견적서 수정] 이다.
+   *
+   * 🔴 **첫 그림에만 쓰인다** — 그 뒤 사람이 누르는 탭은 여전히 이 조각의
+   * `useState` 가 쥔다. 값이 나중에 바뀌어도 화면은 따라가지 않는다(React 의
+   * `useState` 초깃값 규칙). 그것이 여기서 원하는 동작이다 — 머리말의 마지막 절.
+   */
+  initialTab?: QuoteEditTab;
 }) {
-  const [tab, setTab] = useState<QuoteEditTab>("edit");
+  // 🔴 초깃값으로만 받는다 — 주소가 바뀌어도 다시 읽지 않는다(머리말).
+  const [tab, setTab] = useState<QuoteEditTab>(initialTab);
 
   return (
     <div className="flex flex-col gap-4">

@@ -8,6 +8,7 @@ import {
   showSavePopup,
   showSavePopupProgress,
 } from "@/components/common/SavePopup";
+import NoticePopup from "@/components/common/NoticePopup";
 import AmountInput from "@/components/common/AmountInput";
 import {
   editErrorClass,
@@ -110,6 +111,13 @@ import {
   ExcelOnlySwitch,
   QuoteExcelAutofillNotice,
 } from "@/components/quotes/QuoteAttachmentParts";
+/* 🔴 저장 결과 알림 둘의 **글자만** 가져온다 — 이 폼은 결재 화면의 말도, 결재 상태도
+   물지 않는다(quote-save-texts.ts 머리말의 「왜 따로인가」). */
+import {
+  QUOTE_SAVE_NOTICE_LINES,
+  QUOTE_SAVE_NOTICE_TITLES,
+  type QuoteSaveNoticeKind,
+} from "@/components/quotes/quote-save-texts";
 import { takeNewQuoteExcelHandoff } from "@/components/quotes/new-quote-excel-handoff";
 import { createLatestQuoteExcelReader, type QuoteExcelReadFields } from "@/components/quotes/quote-excel-parse";
 import {
@@ -1066,6 +1074,19 @@ export default function QuoteEditForm({
    */
   const [pdfNoticeLines, setPdfNoticeLines] = useState<QuoteIssueNoticeLine[]>([]);
   const [pdfConverting, setPdfConverting] = useState(false);
+  /**
+   * ==========================================================================
+   * 🔴 [저장]이 **지금까지와 다르게 끝났을 때** 띄우는 알림 (2026-10-31)
+   * ==========================================================================
+   * 둘뿐이다 — 「아무것도 안 바뀌었다」와 「결재가 자동으로 반려됐다」. 무엇이
+   * 일어났는지는 **서버가 정해서 보내 준다**(`result.outcome`): 이 화면은 그
+   * 견적서의 결재가 올라가 있는지도, DB 에 지금 무엇이 들어 있는지도 모른다
+   * (lib/domain/quote-save-outcome.ts 머리말).
+   *
+   * 🔴 저장 팝업(0.5초 뒤 저절로 닫힌다)이 아니라 **읽고 닫는** 알림이다 —
+   * 둘 다 사람이 모르고 있던 사실이라, 읽기 전에 사라지면 모르는 채로 넘어간다.
+   */
+  const [saveNotice, setSaveNotice] = useState<QuoteSaveNoticeKind | null>(null);
   /** [폴더 열기](견적서 ④b)의 결과 — 머리의 단추들 아래에 보인다. 누르는 동안은 비운다(null). */
   const [folderOpenOutcome, setFolderOpenOutcome] = useState<QuoteFolderOpenOutcome | null>(null);
   /**
@@ -2159,6 +2180,37 @@ export default function QuoteEditForm({
       }
 
       if (savedQuote) {
+        /**
+         * ──────────────────────────────────────────────────────────────────
+         * 🔴 **지금까지와 다르게 끝난 저장 둘** (2026-10-31)
+         * ──────────────────────────────────────────────────────────────────
+         * 🔴 **PDF 변환보다 먼저 본다.** 변환이 실제로 돌면 그 진행 팝업이
+         * 「완료되었습니다」로 바뀐 뒤 스스로 목록으로 넘겨 버려서, 뒤에 두면 이
+         * 알림이 **한 번도 보이지 않는다**(그쪽이 정상 경로다 — 아래
+         * convertSavedQuoteToPdf 머리말).
+         */
+        if (result.outcome === "UNCHANGED") {
+          /**
+           * 🔴 **한 글자도 저장되지 않았다** — 판 번호도 그대로다. 그러니
+           * PDF 변환도 하지 않고 **이 화면에 머문다**: 사람이 고칠 것이 있어서
+           * 눌렀을 가능성이 높고, 넘어가 버리면 적던 자리를 다시 찾아야 한다.
+           * 단추는 아래 finally 가 되살린다(`leaving` 을 켜지 않는다).
+           */
+          setSaveNotice("UNCHANGED");
+          return;
+        }
+        if (result.outcome === "APPROVAL_AUTO_REJECTED") {
+          /**
+           * 🔴 **저장은 끝났고 결재가 물렸다.** 그 사실을 먼저 읽히고, 닫으면
+           * 지금까지의 마무리(PDF 변환 → 저장 팝업 → 넘어가기)를 그대로 잇는다
+           * (아래 finishSaveAfterNotice). 단추는 그 사이 잠가 둔다 — 열어 두면
+           * 사람이 한 번 더 눌러 같은 저장이 두 번 돈다.
+           */
+          leaving = true;
+          setSaveNotice("APPROVAL_AUTO_REJECTED");
+          return;
+        }
+
         // 🔴 저장이 끝난 **뒤** 엑셀을 PDF 로 바꾼다(2026-10-08). 사람이 읽을 것이 남으면
         //    넘어가지 않는다 — 견적서는 이미 저장됐고, 안내 곁에 [목록으로]가 있다.
         const afterPdf = await convertSavedQuoteToPdf(savedQuote.id);
@@ -2240,6 +2292,30 @@ export default function QuoteEditForm({
     } finally {
       if (!leaving) setIsSubmitting(false);
     }
+  }
+
+  /**
+   * ==========================================================================
+   * 🔴 「결재가 자동으로 반려됐다」 알림을 닫은 **뒤** (2026-10-31)
+   * ==========================================================================
+   * 저장은 이미 끝났다. 남은 것은 지금까지의 마무리 그대로다 — 엑셀을 PDF 로
+   * 바꾸고, 저장 팝업을 0.5초 띄우고, 왔던 목록으로 넘어간다.
+   *
+   * 🔴 **PDF 변환을 건너뛰지 않는다.** 건너뛰면 **내용이 바뀐 바로 그 장**의
+   * PDF 만 옛 판으로 남는다 — 하필 가장 새로 만들어야 하는 장이다.
+   *
+   * 🔴 변환 쪽에 읽을 것이 남으면(`STAY`) 이 화면에 머물고 **단추를 되살린다** —
+   * 그때는 넘어갈 수 없으므로 잠가 둔 채로 두면 사람이 갇힌다.
+   */
+  async function finishSaveAfterNotice(quoteId: string) {
+    const afterPdf = await convertSavedQuoteToPdf(quoteId);
+    if (afterPdf === "STAY") {
+      setIsSubmitting(false);
+      return;
+    }
+    // 바꾼 장은 **진행 중 팝업**이 「완료되었습니다」로 바뀌어 그 팝업이 넘긴다(2026-10-12).
+    if (afterPdf === "POPUP") return;
+    showSavePopup({ message: "견적서를 저장했습니다.", redirectTo: returnHref ?? "/quotes" });
   }
 
   const disabled = isSubmitting || isConflict;
@@ -2531,6 +2607,27 @@ export default function QuoteEditForm({
             </button>
           )}
         </div>
+      )}
+
+      {/*
+        🔴 [저장]이 지금까지와 다르게 끝났을 때의 **읽고 닫는 알림**(2026-10-31).
+           · 「바뀐 내용이 없습니다」  → 닫으면 이 화면에 그대로 머문다(저장되지 않았다).
+           · 「승인요청이 반려되었습니다」 → 닫으면 지금까지의 마무리를 이어 탄다
+             (PDF 변환 → 저장 팝업 → 왔던 곳으로). 그 사이 단추는 잠긴 채다.
+        🔴 저절로 닫히는 저장 팝업을 쓰지 않는다 — 읽기 전에 사라진다(NoticePopup 머리말).
+      */}
+      {saveNotice !== null && (
+        <NoticePopup
+          title={QUOTE_SAVE_NOTICE_TITLES[saveNotice]}
+          lines={[QUOTE_SAVE_NOTICE_LINES[saveNotice]]}
+          onClose={() => {
+            const closed = saveNotice;
+            setSaveNotice(null);
+            if (closed === "APPROVAL_AUTO_REJECTED" && savedQuote) {
+              void finishSaveAfterNotice(savedQuote.id);
+            }
+          }}
+        />
       )}
 
       {/* 🔴 [저장] 뒤 엑셀 → PDF 변환의 **결과**(견적서는 이미 저장됐다). 도는 중은 팝업이 맡는다(2026-10-12). */}

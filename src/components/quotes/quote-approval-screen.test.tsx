@@ -627,3 +627,144 @@ describe("🔴 결재 칸의 두 덩이는 key 를 갖는다 — 경고가 나�
     assert.match(tabsSource, /<Fragment key=/);
   });
 });
+
+/**
+ * ============================================================================
+ * 🔴 알림 → **[견적서 결재] 탭** (2026-10-31 사용자 요구)
+ * ============================================================================
+ * 「견적서 결재 알림을 누르면 해당 견적서의 [견적서 결재]탭이 뜨도록 해줘.」
+ *
+ * 🔴 여기서 가장 중요한 것은 **불변식이 그대로인가**다 — 주소로 탭을 열되,
+ * 두 화면은 여전히 **언제나 함께** 그려져야 한다. 그래서 받는 것은 `useState` 의
+ * **초깃값 하나**이고, 이 껍데기는 주소를 읽지도 쓰지도 않는다.
+ * ============================================================================
+ */
+describe("🔴 주소가 첫 탭을 정한다 — 그래도 두 화면은 함께 그려진다", () => {
+  const slots = {
+    editForm: <p>편집폼이있던자리</p>,
+    approvalPanel: <p>결재화면이있던자리</p>,
+  };
+
+  test("initialTab=\"approval\" 이면 결재 칸이 보이고 수정 칸이 감춰진다", () => {
+    const markup = renderToStaticMarkup(<QuoteEditTabs {...slots} initialTab="approval" />);
+    assert.match(
+      markup,
+      /<div id="quote-tab-panel-edit"[^>]*hidden[^>]*>/,
+      "결재 탭으로 열었는데 수정 칸이 감춰지지 않았다"
+    );
+    assert.doesNotMatch(
+      markup,
+      /<div id="quote-tab-panel-approval"[^>]*hidden[^>]*>/,
+      "결재 탭으로 열었는데 결재 칸이 감춰져 있다"
+    );
+  });
+
+  test("🔴 그래도 **두 칸 다** DOM 에 있다 — 불변식은 그대로다", () => {
+    const markup = renderToStaticMarkup(<QuoteEditTabs {...slots} initialTab="approval" />);
+    assert.ok(markup.includes("편집폼이있던자리"), "결재 탭으로 열었다고 편집 폼이 떼어졌다");
+    assert.ok(markup.includes("결재화면이있던자리"));
+  });
+
+  test("주지 않으면 지금까지 그대로 [견적서 수정] 이다", () => {
+    const markup = renderToStaticMarkup(<QuoteEditTabs {...slots} />);
+    assert.doesNotMatch(markup, /<div id="quote-tab-panel-edit"[^>]*hidden[^>]*>/);
+    assert.match(markup, /<div id="quote-tab-panel-approval"[^>]*hidden[^>]*>/);
+    // 글자 그대로도 못 박는다 — initialTab 을 주고 안 주고가 실제로 다른 그림이다.
+    assert.notEqual(markup, renderToStaticMarkup(<QuoteEditTabs {...slots} initialTab="approval" />));
+  });
+
+  test("🔴 **초깃값으로만** 받는다 — 주소를 따라다니면 폼이 다시 그려져 적던 내용이 날아간다", () => {
+    const flattened = flat(tabsSource);
+    assert.ok(
+      flattened.includes("useState<QuoteEditTab>(initialTab)"),
+      "initialTab 이 useState 의 초깃값이 아니다"
+    );
+    /**
+     * 🔴 주소를 읽거나 갈아 끼우는 길이 이 껍데기에 하나도 없다.
+     *
+     * 🔵 **부르는 자리(괄호)만 본다** — 이 파일의 머리말이 「`router.replace` 로
+     * 주소를 갈아 끼우지 않는 까닭」을 적고 있어서, 낱말만 세면 **주석 때문에**
+     * 영영 깨진다(이 저장소에서 실제로 겪은 일이다). import 줄은 따로 본다.
+     */
+    for (const forbidden of ["useSearchParams(", "router.replace(", "router.push(", "useRouter("]) {
+      assert.ok(
+        !flattened.includes(forbidden),
+        `껍데기가 ${forbidden} 를 쓴다 — 탭을 누를 때 화면이 다시 그려질 수 있다`
+      );
+    }
+    assert.doesNotMatch(tabsSource, /from "next\/navigation"/, "껍데기가 라우터를 가져온다");
+    // 🔴 `useEffect` 로 초깃값을 따라가게 만들어도 같은 사고가 난다.
+    assert.ok(!flattened.includes("useEffect("), "껍데기에 useEffect 가 생겼다");
+  });
+
+  test("까닭이 파일에 적혀 있다 — 지우면 다음 사람이 주소를 따라다니게 만든다", () => {
+    assert.match(tabsSource, /첫 그림/);
+    assert.match(tabsSource, /initialTab/);
+  });
+
+  test("🔴 페이지가 주소에서 탭을 읽어 내려보낸다 — 판정은 도메인 함수 하나가 한다", () => {
+    const flattened = flat(editPageSource);
+    assert.ok(flattened.includes("parseQuoteEditTab("), "페이지가 탭을 읽지 않는다");
+    assert.ok(flattened.includes("initialTab={initialTab}"), "읽은 탭을 껍데기에 넘기지 않는다");
+    // 판정을 페이지에 다시 적지 않는다 — 글자로 견주는 코드가 여기 있으면 안 된다.
+    assert.doesNotMatch(editPageSource, /=== "approval"/);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 [저장]의 두 갈래가 **PDF 변환보다 먼저** 갈린다 (2026-10-31)
+ * ============================================================================
+ * 뒤에 두면 변환의 진행 팝업이 「완료되었습니다」로 바뀐 뒤 스스로 목록으로
+ * 넘겨 버려서, 「승인요청이 반려되었습니다」가 **한 번도 보이지 않는다.** 그
+ * 순서가 이 기능의 전부라 원본 글자로 못 박는다.
+ * ============================================================================
+ */
+describe("🔴 저장 결과 팝업 둘", () => {
+  const unchangedAt = editFormSource.indexOf('result.outcome === "UNCHANGED"');
+  const rejectedAt = editFormSource.indexOf('result.outcome === "APPROVAL_AUTO_REJECTED"');
+  const pdfAt = editFormSource.indexOf("const afterPdf = await convertSavedQuoteToPdf(savedQuote.id)");
+
+  test("🔵 무엇을 재는지 — 세 자리를 원본에서 모두 찾았다", () => {
+    assert.ok(unchangedAt > 0, "「안 바뀜」 갈래를 찾지 못했다");
+    assert.ok(rejectedAt > 0, "「자동 반려」 갈래를 찾지 못했다");
+    assert.ok(pdfAt > 0, "PDF 변환을 부르는 자리를 찾지 못했다");
+  });
+
+  test("🔴 두 갈래가 PDF 변환보다 **먼저** 온다", () => {
+    assert.ok(unchangedAt < pdfAt, "「안 바뀜」이 PDF 변환 뒤에 있다");
+    assert.ok(rejectedAt < pdfAt, "「자동 반려」가 PDF 변환 뒤에 있다 — 알림이 안 보인다");
+  });
+
+  test("🔴 저절로 닫히는 저장 팝업이 아니라 **읽고 닫는** 알림이다", () => {
+    const flattened = flat(editFormSource);
+    assert.ok(flattened.includes("<NoticePopup"), "NoticePopup 을 쓰지 않는다");
+    assert.ok(flattened.includes("QUOTE_SAVE_NOTICE_LINES[saveNotice]"));
+    assert.ok(flattened.includes("QUOTE_SAVE_NOTICE_TITLES[saveNotice]"));
+  });
+
+  test("🔴 「안 바뀜」은 **머문다** — 넘어가지도, PDF 를 만들지도 않는다", () => {
+    const branch = editFormSource.slice(unchangedAt, rejectedAt);
+    assert.ok(!branch.includes("convertSavedQuoteToPdf"), "안 바뀐 저장이 PDF 를 만든다");
+    assert.ok(!branch.includes("showSavePopup("), "안 바뀐 저장이 저장 팝업을 띄운다");
+    assert.ok(!branch.includes("leaving = true"), "안 바뀐 저장이 화면을 떠난다");
+  });
+
+  test("🔴 폼은 **결재 상태를 읽지 않는다** — 서버가 돌려준 낱말 하나만 본다", () => {
+    // 위 「편집 폼이 결재를 아예 모른다」와 같은 울타리다(2026-09-18 — 발행은
+    // 결재에 잠기지 않는다). 2026-10-31 에 팝업이 생겼어도 폼이 보는 것은
+    // `result.outcome` 한 낱말뿐이고, 결재 조회·상태·패널은 여전히 모른다.
+    assert.doesNotMatch(editFormSource, /approvalProgress|QuoteApprovalState|quote-approval-rules/);
+    assert.ok(flat(editFormSource).includes("result.outcome ==="), "서버가 준 낱말을 보지 않는다");
+  });
+
+  test("🔴 「자동 반려」는 닫은 **뒤** 지금까지의 마무리를 잇는다 — PDF 를 건너뛰지 않는다", () => {
+    const flattened = flat(editFormSource);
+    assert.ok(flattened.includes("finishSaveAfterNotice(savedQuote.id)"), "닫은 뒤 이어지는 길이 없다");
+    const finishAt = editFormSource.indexOf("async function finishSaveAfterNotice");
+    assert.ok(finishAt > 0, "이어지는 함수를 찾지 못했다");
+    const body = editFormSource.slice(finishAt, finishAt + 1200);
+    assert.ok(body.includes("convertSavedQuoteToPdf"), "🔴 내용이 바뀐 그 장의 PDF 를 안 만든다");
+    assert.ok(body.includes("showSavePopup("), "저장 팝업으로 끝맺지 않는다");
+  });
+});

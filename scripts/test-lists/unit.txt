@@ -278,6 +278,16 @@ scripts/lib/db-connection-failure.test.ts
 src/lib/domain/service-report-list.test.ts
 src/lib/domain/work-record-flowchart.test.ts
 src/lib/domain/quote-new-link.test.ts
+# ── 견적서 저장 — 「정말 바뀌었는가」 (2026-10-31) ───────────────────────
+# 🔴 안 바뀐 저장은 판 번호를 올리지 않는다. 그 판정의 **규칙**이 여기 있다:
+# 금액은 값으로(`"100"` = `"100.00"` — 이게 없으면 기능이 통째로 꺼진다) · 글자 칸은
+# 글자로(`"0012"` ≠ `"12"` — L/N · S/N 이 걸려 있다) · 품목 · 수리 작업 · 작업 내역까지 본다.
+# 🔵 금액 칸 목록이 스키마의 numeric 칸과 같은지 **원본을 글자로 읽어** 맞대어 본다
+# (서브모듈 안의 파일이라 import 하지 않는다 — 이웃 *-source.test.ts 들과 같은 규율).
+src/lib/domain/quote-change-detection.test.ts
+# 저장 결과 낱말 셋과, 그 셋에 붙는 **팝업 문구 둘**. 🔴 이력에 남는 자동 반려 사유와
+# 화면 팝업 글이 **다른 글자**인지 여기서 못 박는다(같아지면 종 알림이 「사람이 반려했다」로 읽힌다).
+src/lib/domain/quote-save-outcome.test.ts
 src/lib/domain/ui-theme-tokens.test.ts
 src/lib/validation/ui-theme-token-input.test.ts
 src/lib/domain/ui-theme-templates.test.ts

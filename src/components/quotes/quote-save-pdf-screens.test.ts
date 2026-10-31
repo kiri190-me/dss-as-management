@@ -42,7 +42,15 @@ const raw = read("src/components/quotes/QuoteEditForm.tsx");
 const form = flat(raw);
 /** 주석을 뺀 코드 — 머리말이 까닭을 설명하느라 적은 낱말에 걸리지 않게. */
 const code = flat(raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, ""));
-const submit = sliceBetween(form, "async function handleSubmit(", "const disabled = isSubmitting || isConflict;");
+/**
+ * 🔴 **`handleSubmit` 몸통만** 자른다.
+ *
+ * 🔵 2026-10-31 에 그 바로 뒤로 함수가 하나 더 생겼다 — 「승인요청이 반려되었습니다」
+ * 팝업을 닫은 뒤 마무리를 잇는 `finishSaveAfterNotice`. 끝 표시를 `const disabled`
+ * 로 두면 그 함수까지 한 덩이로 묶여, 아래 「변환을 부르는 자리는 둘뿐」이 **셋**으로
+ * 읽힌다. 세 번째 자리는 아래 전용 묶음이 따로 잰다.
+ */
+const submit = sliceBetween(form, "async function handleSubmit(", "async function finishSaveAfterNotice(");
 
 describe("🔴 저장이 끝난 뒤에 부른다 — 저장을 막지 않는다", () => {
   test("저장 액션 호출은 한 글자도 바뀌지 않았다", () => {
@@ -86,6 +94,51 @@ describe("🔴 저장이 끝난 뒤에 부른다 — 저장을 막지 않는다"
     assert.equal(raw.match(/leaving = true;\s*showSavePopup\(/g)?.length, 2);
     assert.ok(form.includes('showSavePopup({ message: "견적서를 저장했습니다.", redirectTo: returnHref ?? "/quotes" });'));
     assert.ok(form.includes('showSavePopup({ message: "견적서를 등록했습니다.", redirectTo: returnHref ?? "/quotes" });'));
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 **세 번째 변환 자리** — 「승인요청이 반려되었습니다」를 닫은 뒤 (2026-10-31)
+ * ============================================================================
+ * 결재가 자동으로 반려된 저장은 그 사실을 **PDF 변환보다 먼저** 읽히고, 사람이
+ * 팝업을 닫으면 지금까지의 마무리(변환 → 저장 팝업 → 넘어가기)를 그대로 잇는다.
+ *
+ * 🔴 **이 자리가 변환을 건너뛰면 안 된다** — 하필 내용이 바뀐 바로 그 장이라,
+ * 건너뛰면 가장 새로 만들어야 할 PDF 만 옛 판으로 남는다.
+ * ============================================================================
+ */
+describe("🔴 자동 반려 알림을 닫은 뒤에도 변환은 돈다", () => {
+  const after = sliceBetween(form, "async function finishSaveAfterNotice(", "const disabled = isSubmitting || isConflict;");
+
+  test("🔵 무엇을 재는지 — 그 함수가 원본에 있다", () => {
+    assert.ok(after.length > 0);
+  });
+
+  test("🔴 변환을 부르고, 저장 팝업으로 끝맺는다", () => {
+    assert.ok(after.includes("await convertSavedQuoteToPdf(quoteId)"), after);
+    assert.ok(after.includes('showSavePopup({ message: "견적서를 저장했습니다."'), after);
+  });
+
+  test("🔴 변환 쪽에 읽을 것이 남으면 머물고 **단추를 되살린다** — 안 그러면 사람이 갇힌다", () => {
+    assert.ok(after.includes('if (afterPdf === "STAY") { setIsSubmitting(false); return; }'), after);
+  });
+
+  test("🔴 두 갈래는 변환보다 **먼저** 갈린다 — 뒤에 두면 알림이 한 번도 안 보인다", () => {
+    const unchanged = indexOrFail(submit, 'result.outcome === "UNCHANGED"');
+    const rejected = indexOrFail(submit, 'result.outcome === "APPROVAL_AUTO_REJECTED"');
+    const convert = indexOrFail(submit, "const afterPdf = await convertSavedQuoteToPdf(savedQuote.id);");
+    assert.ok(unchanged < convert, "「안 바뀜」이 변환 뒤에 있다");
+    assert.ok(rejected < convert, "「자동 반려」가 변환 뒤에 있다");
+  });
+
+  test("🔴 「안 바뀜」은 변환도 하지 않는다 — 한 글자도 저장되지 않았다", () => {
+    const branch = sliceBetween(
+      submit,
+      'result.outcome === "UNCHANGED"',
+      'result.outcome === "APPROVAL_AUTO_REJECTED"'
+    );
+    assert.equal(branch.includes("convertSavedQuoteToPdf"), false, branch);
   });
 });
 

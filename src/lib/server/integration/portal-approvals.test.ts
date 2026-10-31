@@ -145,7 +145,10 @@ describe("승인함 한 줄 만들기", () => {
     assert.equal(item.kindLabel, "견적서 결재");
     assert.equal(item.subject, "Q-2026-0001");
     assert.equal(item.detail, "결재선 1단계 · 요청자 김결재");
-    assert.equal(item.href, `${BASE}/quotes/${QUOTE_ID}`);
+    // 🔴 2026-10-31 — 종 알림과 **같은 주소**다(그 헬퍼를 그대로 쓴다). 누르면 그
+    //    견적서의 [견적서 결재] 탭이 열린다: 통합함에서 넘어온 사람이 할 일이 바로
+    //    그 탭에 있다(domain/notifications.ts 의 buildQuoteApprovalNotification).
+    assert.equal(item.href, `${BASE}/quotes/${QUOTE_ID}?tab=approval`);
   });
 
   test("결재선을 타지 않는 견적서 행은 단계 없이 요청자만 적는다", () => {
@@ -235,7 +238,8 @@ describe("buildPortalApprovalInbox — 목록", () => {
       byKind.get("FINAL_SHIPMENT")?.href,
       `${BASE}/repair-cases/${OTHER_CASE_ID}/approval`
     );
-    assert.equal(byKind.get("QUOTE_APPROVAL")?.href, `${BASE}/quotes/${QUOTE_ID}`);
+    // 🔴 견적서만 탭 이름이 붙는다(2026-10-31) — 접수 건 둘은 주소 자체가 결재 화면이다.
+    assert.equal(byKind.get("QUOTE_APPROVAL")?.href, `${BASE}/quotes/${QUOTE_ID}?tab=approval`);
     for (const item of inbox.items) {
       assert.equal(item.kindLabel, PORTAL_APPROVAL_KIND_LABELS[item.kind]);
     }
