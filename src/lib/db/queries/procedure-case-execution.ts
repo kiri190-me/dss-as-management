@@ -19,6 +19,7 @@ import {
   type TopologyEdge,
   type TopologyExecutionNode,
 } from "@/lib/domain/procedure-execution-topology";
+import { sortByProcedureExecutionOrder } from "@/lib/domain/procedure-execution-order";
 import { classifyProductRelation, type ProductIdentity } from "@/lib/domain/product-relation";
 import type { ProcedureNodeType, ProcedureBranchType, ProcedureEquipmentType } from "@/lib/domain/procedure-template-types";
 import type { ProcedureCaseExecutionNodeStatus, ProcedureCaseExecutionActionType } from "@/lib/domain/procedure-case-execution-types";
@@ -82,6 +83,15 @@ export type ExecutionOutgoingEdgeOption = {
 export type ExecutionNodeDetail = {
   id: string;
   procedureTemplateNodeId: string | null;
+  /**
+   * 1 부터 매긴 **절차상 번호** — 이 배열이 늘어선 차례 그대로다. 화면이
+   * 카드에 그리는 번호가 이것이고, 요약의 「N번째 / 전체」와 같은 자를 쓴다.
+   *
+   * 🔴 node_code 가 아니다. node_code 는 들여올 때의 도형 식별자
+   * (`s11-14`)이거나 손으로 만든 절차의 난수(`manual-<uuid>`)라 사람에게는
+   * 아무 뜻이 없다 — 자세한 까닭은 procedure-execution-order.ts 머리말에 있다.
+   */
+  orderIndex: number;
   nodeCode: string | null;
   nodeType: ProcedureNodeType | null;
   title: string;
@@ -158,6 +168,9 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
     .from(procedureCaseExecutionNodes)
     .where(eq(procedureCaseExecutionNodes.executionId, executionId));
 
+  // sortOrder 가 여기 끼어든 까닭은 아래 정렬이 쓰기 때문이다. ORDER BY 는
+  // 참고 문서 목록(referenceNodes)이 이 배열 차례를 그대로 쓰므로 함께 건다 —
+  // 그쪽도 전에는 DB 가 주는 대로였다.
   const templateNodes = await db
     .select({
       id: procedureTemplateNodes.id,
@@ -165,9 +178,11 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       nodeType: procedureTemplateNodes.nodeType,
       title: procedureTemplateNodes.title,
       instructions: procedureTemplateNodes.instructions,
+      sortOrder: procedureTemplateNodes.sortOrder,
     })
     .from(procedureTemplateNodes)
-    .where(eq(procedureTemplateNodes.procedureTemplateId, execution.procedureTemplateId));
+    .where(eq(procedureTemplateNodes.procedureTemplateId, execution.procedureTemplateId))
+    .orderBy(procedureTemplateNodes.sortOrder, procedureTemplateNodes.nodeCode);
   const templateNodeById = new Map(templateNodes.map((n) => [n.id, n]));
 
   const templateEdges = await db
@@ -179,7 +194,11 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       branchLabel: procedureTemplateEdges.branchLabel,
     })
     .from(procedureTemplateEdges)
-    .where(eq(procedureTemplateEdges.procedureTemplateId, execution.procedureTemplateId));
+    .where(eq(procedureTemplateEdges.procedureTemplateId, execution.procedureTemplateId))
+    // 판단 노드의 갈래 단추가 이 차례로 늘어선다(DecisionCompleteDialog).
+    // 전에는 DB 가 주는 대로라 새로고침할 때마다 「정상 / NG」가 자리를
+    // 바꿀 수 있었다 — sort_order 는 절차를 만든 사람이 매긴 차례다.
+    .orderBy(procedureTemplateEdges.sortOrder);
   const outgoingEdgesByFromNodeId = new Map<string, typeof templateEdges>();
   for (const edge of templateEdges) {
     const list = outgoingEdgesByFromNodeId.get(edge.fromNodeId) ?? [];
@@ -216,13 +235,33 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
   // could make the real first task suggested, but it must never reach any
   // user-facing list or progress count, so it's excluded here before the
   // rest of the mapping.
-  const nodes: ExecutionNodeDetail[] = execNodes
-    .filter((n) => {
-      const templateNode = n.procedureTemplateNodeId ? templateNodeById.get(n.procedureTemplateNodeId) : undefined;
-      return !templateNode || !isSystemEntryNodeType(templateNode.nodeType);
-    })
-    .map((n) => {
-      const templateNode = n.procedureTemplateNodeId ? templateNodeById.get(n.procedureTemplateNodeId) : undefined;
+  //
+  // 🔴 차례는 **여기 한 곳에서만** 정한다. 화면이 저마다 다시 정렬하면 같은
+  // 절차가 화면마다 다른 차례로 보인다(이 저장소에서 실제로 겪었다). 무엇으로
+  // 정렬하는지와 왜 그것인지는 procedure-execution-order.ts 머리말에 있다 —
+  // 요지는 node_code 에도 그래프에도 차례가 없고, 템플릿의 sort_order 만이
+  // 사람이 적은 차례라는 것.
+  //
+  const orderedEntries = sortByProcedureExecutionOrder(
+    execNodes
+      .map((n) => {
+        const templateNode = n.procedureTemplateNodeId ? templateNodeById.get(n.procedureTemplateNodeId) : undefined;
+        return {
+          id: n.id,
+          procedureSortOrder: templateNode?.sortOrder ?? null,
+          nodeCode: templateNode?.nodeCode ?? null,
+          addedAt: n.createdAt.toISOString(),
+          row: n,
+          templateNode,
+        };
+      })
+      .filter((entry) => !entry.templateNode || !isSystemEntryNodeType(entry.templateNode.nodeType))
+  );
+
+  const nodes: ExecutionNodeDetail[] = orderedEntries
+    .map((entry, index) => {
+      const n = entry.row;
+      const templateNode = entry.templateNode;
       const effectiveAssigneeId = n.assignedEngineerId ?? execution.caseAssignedEngineerId;
       const outgoingEdgeOptions: ExecutionOutgoingEdgeOption[] =
         templateNode?.nodeType === "DECISION"
@@ -238,6 +277,9 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       return {
         id: n.id,
         procedureTemplateNodeId: n.procedureTemplateNodeId,
+        // START 와 참고 문서가 이미 빠진 뒤의 1-based 번호 — 사람이 할 일만
+        // 센다. 그래서 요약의 「N번째 / 전체 N」과 자가 정확히 같다.
+        orderIndex: index + 1,
         nodeCode: templateNode?.nodeCode ?? null,
         nodeType: templateNode?.nodeType ?? null,
         title: templateNode?.title ?? n.extraTaskTitle ?? "-",

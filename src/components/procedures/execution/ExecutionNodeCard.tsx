@@ -131,6 +131,16 @@ export default function ExecutionNodeCard({
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="flex items-center gap-2">
+            {/* 절차상 번호. 카드가 네 구역(실행 가능·진행 중·차단됨·완료)으로
+                나뉘어 있어서, 번호가 없으면 지금 보는 카드가 절차의 어디쯤인지
+                알 길이 없다. 제목을 가리지 않도록 테두리만 두른 작은 칸으로
+                둔다. 번호가 안 매겨진 줄(0)은 자리를 비운다 — 「-」 같은 글자를
+                만들어 내지 않는다. */}
+            {node.orderIndex > 0 && (
+              <span className="shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
+                {node.orderIndex}
+              </span>
+            )}
             <span className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{node.title}</span>
             {node.nodeType && (
               <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">

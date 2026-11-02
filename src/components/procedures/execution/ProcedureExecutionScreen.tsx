@@ -5,6 +5,7 @@ import ExecutionHistoryTimeline from "./ExecutionHistoryTimeline";
 import RelatedRepairHistoryPanel from "./RelatedRepairHistoryPanel";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
+import { computeExecutionPosition, formatExecutionPositionLabel } from "@/lib/domain/procedure-execution-order";
 import type {
   ExecutableTemplateOption,
   ExecutionDetail,
@@ -22,6 +23,9 @@ function ProgressSummary({ detail }: { detail: ExecutionDetail }) {
   const inProgress = detail.nodes.filter((n) => n.status === "IN_PROGRESS").length;
   const pending = detail.nodes.filter((n) => n.status === "PENDING").length;
   const donePct = total > 0 ? Math.round(((completed + skipped) / total) * 100) : 0;
+  // 퍼센트와 개수만으로는 「지금 어디냐」가 안 읽힌다. 셈은 화면에서 하지 않고
+  // 도메인 함수가 한다 — 끝난 수 + 1 이고, 다 끝나면 1 을 더하지 않는다.
+  const positionLabel = formatExecutionPositionLabel(computeExecutionPosition(detail.nodes));
 
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
@@ -39,6 +43,9 @@ function ProgressSummary({ detail }: { detail: ExecutionDetail }) {
       <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
         <div className="h-full rounded-full bg-zinc-900 dark:bg-zinc-50" style={{ width: `${donePct}%` }} />
       </div>
+      {positionLabel && (
+        <p className="mt-2 text-xs font-semibold text-zinc-800 dark:text-zinc-200">{positionLabel}</p>
+      )}
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
         <span>전체 {total}</span>
         <span>대기 {pending}</span>
@@ -110,6 +117,12 @@ export default function ProcedureExecutionScreen({
     );
   }
 
+  // 네 구역 모두 getExecutionDetail 이 정한 **절차 차례**를 그대로 물려받는다
+  // (filter 는 차례를 안 바꾼다). 그래서 카드에 찍힌 번호가 구역 안에서 오름차순이다.
+  //
+  // 「실행 가능」만 예외로, 추천 노드를 앞으로 끌어올린다 — 전부터 있던 동작이다.
+  // Array.prototype.sort 는 안정 정렬이라 **추천끼리·추천 아닌 것끼리는 절차
+  // 차례가 그대로 남는다**. 바꾸려면 이 한 줄만 빼면 된다.
   const pendingNodes = executionDetail.nodes
     .filter((n) => n.status === "PENDING")
     .sort((a, b) => Number(b.isSuggestedNext) - Number(a.isSuggestedNext));

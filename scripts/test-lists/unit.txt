@@ -77,6 +77,7 @@ src/lib/graph-editor-core/axis-lock.test.ts
 src/lib/graph-editor-core/save-sequence.test.ts
 src/lib/domain/procedure-editor-save-state.test.ts
 src/lib/domain/procedure-execution-topology.test.ts
+src/lib/domain/procedure-execution-order.test.ts
 src/lib/domain/product-relation.test.ts
 src/lib/auth/inventory-authorization.test.ts
 # 🔵 2026-10-28(조각 13-D): `src/lib/domain/inventory-types.test.ts` 를 뺐다 — 재던

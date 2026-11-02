@@ -33,6 +33,7 @@ import {
   updateExecutionNodeMemo,
 } from "./procedure-case-execution";
 import { getExecutionDetail, getExecutionHistory, getRelatedRepairHistory } from "../queries/procedure-case-execution";
+import { computeExecutionPosition } from "@/lib/domain/procedure-execution-order";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -116,6 +117,22 @@ function makeExecutionTestTemplate(code: string, category: ExtractedTemplate["ca
   };
 }
 
+/**
+ * 노드·간선은 위 판과 **글자 하나 다르지 않고**, 적힌 차례만 뒤섞은 것.
+ *
+ * 들여오기는 이 배열 차례대로 insert 하므로, 이 판으로 만들면 「DB 에 들어간
+ * 차례」와 「절차의 차례(sort_order)」가 서로 어긋난다. getExecutionDetail 이
+ * 정말로 정렬하는지 재려면 둘이 어긋나 있어야 한다 — 똑같으면 정렬을 통째로
+ * 빼도 시험이 통과해 버린다.
+ */
+const SCRAMBLED_NODE_ORDER = ["n7", "n5", "n3", "n1", "n6", "n4", "n2"] as const;
+
+function makeScrambledExecutionTestTemplate(code: string): ExtractedTemplate {
+  const base = makeExecutionTestTemplate(code);
+  const byCode = new Map(base.nodes.map((n) => [n.nodeCode, n]));
+  return { ...base, nodes: SCRAMBLED_NODE_ORDER.map((nodeCode) => byCode.get(nodeCode)!) };
+}
+
 /** Phase 5C-5A — minimal REFERENCE-category fixture (no nodes/edges, isReferenceOnly=true), matching the shape the real importer's buildReferenceOnlyTemplate produces for main-page-index/qc-common-operations. */
 function makeReferenceTestTemplate(code: string): ExtractedTemplate {
   return {
@@ -144,8 +161,13 @@ async function loadEdges(templateId: string) {
   return db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.procedureTemplateId, templateId));
 }
 
-async function createPublishedTemplate(code: string, category: ExtractedTemplate["category"] = "FULL_SERVICE") {
-  const draftResult = await createDraftProcedureTemplateFromImport(makeExecutionTestTemplate(code, category), superAdminId, {
+async function createPublishedTemplate(
+  code: string,
+  category: ExtractedTemplate["category"] = "FULL_SERVICE",
+  /** 기본 판 대신 쓸 판. 차례를 뒤섞은 판을 넣을 때만 쓴다. */
+  template?: ExtractedTemplate
+) {
+  const draftResult = await createDraftProcedureTemplateFromImport(template ?? makeExecutionTestTemplate(code, category), superAdminId, {
     sourceFileName: "execution-fixture.xlsx",
     sourceFileHash: `hash-${code}`,
   });
@@ -966,6 +988,63 @@ describe("procedure-case-execution: read queries", () => {
     assert.equal(result.sameProduct[0].id, sameProductCase.id);
     assert.ok(result.sameModelReference.some((r) => r.id === sameModelOnlyCase.id));
     assert.equal(result.sameProduct.some((r) => r.id === sameModelOnlyCase.id), false, "a serial mismatch must never be promoted to SAME_PRODUCT");
+  });
+
+  test("26. getExecutionDetail 은 절차의 차례(sort_order)로 늘어놓고 1부터 번호를 매긴다 — DB 가 주는 차례가 아니다", async () => {
+    const code = uniqueCode("query-order");
+    // 표본 확인 — 판이 실제로 뒤섞여 있어야 이 시험이 무언가를 잰다.
+    assert.notDeepEqual(
+      [...SCRAMBLED_NODE_ORDER],
+      ["n1", "n2", "n3", "n4", "n5", "n6", "n7"],
+      "뒤섞은 판이 실은 차례대로라면 정렬을 통째로 빼도 통과한다"
+    );
+
+    const { templateId } = await createPublishedTemplate(code, "FULL_SERVICE", makeScrambledExecutionTestTemplate(code));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const detail = await getExecutionDetail(started.executionId);
+    assert.ok(detail);
+
+    // START(n1)와 DOCUMENT_REFERENCE(n6)는 사람이 할 일이 아니라 이미 빠져 있다.
+    assert.deepEqual(
+      detail!.nodes.map((n) => n.nodeCode),
+      ["n2", "n3", "n4", "n5", "n7"],
+      "절차를 적은 차례(sort_order 1·2·3·4·6)대로 나와야 한다"
+    );
+    assert.deepEqual(
+      detail!.nodes.map((n) => n.orderIndex),
+      [1, 2, 3, 4, 5],
+      "번호는 사람이 할 일만 세어 1부터 빈틈없이"
+    );
+    assert.equal(
+      detail!.nodes.length,
+      new Set(detail!.nodes.map((n) => n.orderIndex)).size,
+      "같은 번호가 두 장에 찍히면 안 된다"
+    );
+
+    // 참고 문서 목록도 같은 차례를 쓴다(전에는 DB 가 주는 대로였다).
+    assert.deepEqual(detail!.referenceNodes.map((r) => r.nodeCode), ["n6"]);
+
+    // 「몇 번째 / 전체」가 쓰는 셈과 같은 자인지 — 아직 아무것도 안 끝났으니 1번째.
+    const position = computeExecutionPosition(detail!.nodes);
+    assert.deepEqual(position, { total: 5, finished: 0, current: 1 });
+
+    // 하나 끝내면 번호는 그대로고 자리만 둘째로 간다.
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const n2 = byCode.get("n2")!;
+    const completed = await completeExecutionNode({ executionNodeId: n2.id, actorUserId: engineerId, expectedVersion: n2.version });
+    assert.equal(completed.ok, true, JSON.stringify(completed));
+
+    const afterOne = await getExecutionDetail(started.executionId);
+    assert.deepEqual(
+      afterOne!.nodes.map((n) => n.nodeCode),
+      ["n2", "n3", "n4", "n5", "n7"],
+      "완료했다고 카드 차례가 바뀌면 안 된다 — 차례는 절차가 정한다"
+    );
+    assert.deepEqual(computeExecutionPosition(afterOne!.nodes), { total: 5, finished: 1, current: 2 });
   });
 });
 
