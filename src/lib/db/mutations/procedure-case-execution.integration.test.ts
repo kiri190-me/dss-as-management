@@ -36,6 +36,7 @@ import {
 } from "./procedure-case-execution";
 import {
   getActiveExecutionForCase,
+  getExecutableTemplateOptions,
   getExecutionDetail,
   getExecutionHistory,
   getOtherExecutionsForCase,
@@ -2102,6 +2103,211 @@ describe("procedure-case-execution: 이 건의 다른 절차 목록", () => {
     // 🔴 내 건에는 큰 카드에 선 내 실행뿐이라 아래 줄이 없다. 남의 건에서 치운
     // 실행이 여기로 새어 들어오면 바로 걸린다.
     assert.equal(await panelFor(mine.repairCaseId, mine.executionId), null);
+  });
+});
+
+describe("procedure-case-execution: 절차 중간부터 시작", () => {
+  /** 고른 노드 하나로 실행을 시작하고, 코드별 실행 노드 지도를 돌려준다. */
+  async function startAt(templateId: string, repairCaseId: string, startAtTemplateNodeId: string | null) {
+    const result = await startProcedureExecution(repairCaseId, templateId, engineerId, startAtTemplateNodeId);
+    return result;
+  }
+
+  test("58. 🔴 고른 노드만 진행 중이고 나머지는 전부 대기다 — 앞의 것이 **건너뜀이 안 된다**", async () => {
+    const { templateId, nodes } = await createPublishedTemplate(uniqueCode("start-at-middle"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+
+    // n4(정상 작업)는 그래프상 n1 → n2 → n3 뒤에 오는 노드다 — 앞에 n2·n3 가 있다.
+    const result = await startAt(templateId, created.id, nodes.get("n4")!.id);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, result.executionId);
+    assert.equal(byCode.get("n4")!.status, "IN_PROGRESS", "고른 노드가 진행 중이어야 한다");
+    assert.equal(byCode.get("n4")!.startedBy, engineerId);
+    assert.notEqual(byCode.get("n4")!.startedAt, null);
+
+    // 🔴 앞의 것들 — 건너뜀이 아니라 **대기**다. 안 한 것을 했다고 적으면 안 된다.
+    for (const code of ["n2", "n3"]) {
+      assert.equal(byCode.get(code)!.status, "PENDING", `${code} 는 대기여야 한다`);
+      assert.equal(byCode.get(code)!.startedAt, null);
+    }
+    // 뒤의 것도 대기 그대로.
+    assert.equal(byCode.get("n5")!.status, "PENDING");
+    assert.equal(byCode.get("n7")!.status, "PENDING");
+    // START 는 전과 같이 시스템이 완료로 적는다.
+    assert.equal(byCode.get("n1")!.status, "COMPLETED");
+
+    // 🔵 표본 확인 — 어느 상태도 SKIPPED 가 아니다(하나라도 생기면 바로 걸린다).
+    assert.equal(
+      [...byCode.values()].filter((n) => n.status === "SKIPPED").length,
+      0,
+      "중간부터 시작했다고 해서 앞의 작업을 건너뛴 것으로 적으면 안 된다"
+    );
+  });
+
+  test("59. 🔴 「지금 할 일」이 **고른 그 노드**가 된다 — 새로 만든 규칙 없이 pickCurrentTask 가 고른다", async () => {
+    const { templateId, nodes } = await createPublishedTemplate(uniqueCode("start-at-focus"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+
+    const result = await startAt(templateId, created.id, nodes.get("n5")!.id);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+
+    const detail = await getExecutionDetail(result.executionId);
+    assert.ok(detail);
+    const current = pickCurrentTaskNode(detail.nodes, { isExecutionFinished: detail.completedAt !== null });
+    assert.ok(current, "지금 할 일이 없다");
+    assert.equal(current.nodeCode, "n5");
+    assert.equal(current.status, "IN_PROGRESS");
+
+    // 🔵 표본 확인 — 처음부터 시작했다면 절차 차례상 맨 앞(n2)이 섰을 것이다.
+    const created2 = await createTestCase({ assignedEngineerId: engineerId });
+    const plain = await startAt(templateId, created2.id, null);
+    assert.equal(plain.ok, true, JSON.stringify(plain));
+    if (!plain.ok) return;
+    const plainDetail = await getExecutionDetail(plain.executionId);
+    assert.equal(pickCurrentTaskNode(plainDetail!.nodes, { isExecutionFinished: false })!.nodeCode, "n2");
+  });
+
+  test("60. 🔴 **남의 절차 노드**를 보내면 거절한다 — 실행이 한 줄도 안 생긴다", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("start-at-foreign-a"));
+    const other = await createPublishedTemplate(uniqueCode("start-at-foreign-b"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+
+    const result = await startAt(templateId, created.id, other.nodes.get("n4")!.id);
+    assert.equal(result.ok, false, "남의 절차 노드가 통과했다");
+    if (result.ok) return;
+    assert.equal(result.code, "NOT_FOUND");
+
+    const executions = await db
+      .select({ id: procedureCaseExecutions.id })
+      .from(procedureCaseExecutions)
+      .where(eq(procedureCaseExecutions.repairCaseId, created.id));
+    assert.equal(executions.length, 0, "거절했는데 실행 행이 남았다 — 트랜잭션이 안 되감겼다");
+
+    // 🔵 표본 확인 — 같은 절차의 노드를 보내면 통과한다. 그래야 위 거절이
+    // 「어차피 다 거절한다」가 아님이 드러난다.
+    const ownNodes = await loadNodesByCode(templateId);
+    const okResult = await startAt(templateId, created.id, ownNodes.get("n4")!.id);
+    assert.equal(okResult.ok, true, JSON.stringify(okResult));
+  });
+
+  test("61. 🔴 실행 행이 없는 노드는 못 고른다 — START 와 참고 문서가 각각 다른 코드로 거절된다", async () => {
+    const { templateId, nodes } = await createPublishedTemplate(uniqueCode("start-at-unpickable"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+
+    const startNode = await startAt(templateId, created.id, nodes.get("n1")!.id);
+    assert.equal(startNode.ok, false, "START 를 출발점으로 받으면 안 된다");
+    if (!startNode.ok) assert.equal(startNode.code, "SYSTEM_MANAGED_NODE");
+
+    const referenceNode = await startAt(templateId, created.id, nodes.get("n6")!.id);
+    assert.equal(referenceNode.ok, false, "참고 문서를 출발점으로 받으면 안 된다");
+    if (!referenceNode.ok) assert.equal(referenceNode.code, "INVALID_INPUT");
+
+    const executions = await db
+      .select({ id: procedureCaseExecutions.id })
+      .from(procedureCaseExecutions)
+      .where(eq(procedureCaseExecutions.repairCaseId, created.id));
+    assert.equal(executions.length, 0, "거절했는데 실행 행이 남았다");
+  });
+
+  test("62. 아무것도 안 고르면 지금까지와 **똑같다** — 전부 대기이고 이력에 시작 지점 칸이 아예 없다", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("start-at-none"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+
+    const result = await startAt(templateId, created.id, null);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, result.executionId);
+    assert.equal(byCode.get("n1")!.status, "COMPLETED");
+    for (const code of ["n2", "n3", "n4", "n5", "n7"]) {
+      assert.equal(byCode.get(code)!.status, "PENDING", `${code} 는 대기여야 한다`);
+    }
+
+    const history = await db
+      .select()
+      .from(procedureCaseExecutionHistory)
+      .where(eq(procedureCaseExecutionHistory.executionId, result.executionId));
+    const startedRow = history.find((h) => h.actionType === "EXECUTION_STARTED")!;
+    // 🔴 null 을 적지 않는다 — 지금까지 쌓인 줄과 모양이 같아야 한다.
+    assert.deepEqual(startedRow.afterState, {
+      procedureTemplateId: templateId,
+      executableNodeCount: 6,
+      autoCompletedSystemNodeCount: 1,
+    });
+    assert.equal(history.filter((h) => h.actionType === "NODE_STARTED").length, 0, "아무도 안 눌렀는데 시작 이력이 생겼다");
+  });
+
+  test("63. 🔴 감사 이력 — 시작 지점이 적히고, **NODE_STARTED 한 줄**이 실행 시작 줄 뒤에 선다(새 action 값 없음)", async () => {
+    const { templateId, nodes } = await createPublishedTemplate(uniqueCode("start-at-audit"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const targetTemplateNodeId = nodes.get("n4")!.id;
+
+    const result = await startAt(templateId, created.id, targetTemplateNodeId);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+
+    const history = await db
+      .select()
+      .from(procedureCaseExecutionHistory)
+      .where(eq(procedureCaseExecutionHistory.executionId, result.executionId));
+    assert.equal(history.length, 2, "실행 시작 한 줄 + 중간부터 세운 한 줄");
+
+    const startedRow = history.find((h) => h.actionType === "EXECUTION_STARTED")!;
+    assert.deepEqual(startedRow.afterState, {
+      procedureTemplateId: templateId,
+      executableNodeCount: 6,
+      autoCompletedSystemNodeCount: 1,
+      startAtTemplateNodeId: targetTemplateNodeId,
+    });
+
+    const nodeStartedRow = history.find((h) => h.actionType === "NODE_STARTED")!;
+    assert.ok(nodeStartedRow, "중간부터 세운 줄이 없다 — 왜 이것이 진행 중인지 나중에 못 되짚는다");
+    assert.deepEqual(nodeStartedRow.afterState, {
+      startedMidProcedure: true,
+      procedureTemplateNodeId: targetTemplateNodeId,
+    });
+    const byCode = await loadExecutionNodesByCode(templateId, result.executionId);
+    assert.equal(nodeStartedRow.executionNodeId, byCode.get("n4")!.id, "이력이 엉뚱한 행에 붙었다");
+
+    // 🔴 차례 — 실행 시작이 먼저다. 같은 트랜잭션이라 now() 가 같아서 1밀리초를
+    // 더해 두었다(FOLLOWING_HISTORY_AT). 안 더하면 화면에서 둘의 차례가 흔들린다.
+    assert.ok(
+      nodeStartedRow.createdAt.getTime() > startedRow.createdAt.getTime(),
+      `뒤따르는 줄이 더 늦어야 한다 (시작=${startedRow.createdAt.toISOString()}, 세움=${nodeStartedRow.createdAt.toISOString()})`
+    );
+    // 화면의 이력 목록(최신 먼저)에서도 같은 차례가 나와야 한다.
+    const timeline = await getExecutionHistory(result.executionId);
+    assert.deepEqual(
+      timeline.map((r) => r.actionType),
+      ["NODE_STARTED", "EXECUTION_STARTED"]
+    );
+  });
+
+  test("64. 🔵 불러오기 목록이 **노드·간선까지** 싣는다 — 그리다 만 절차도 걸러 내지 않는다", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("start-at-options"), "TECHNICAL_TASK");
+    const options = await getExecutableTemplateOptions();
+    const mine = options.find((o) => o.id === templateId);
+    assert.ok(mine, "방금 게시한 절차가 불러오기 목록에 없다");
+    assert.equal(mine.nodes.length, 7, "참고 문서를 포함한 템플릿 노드 전부가 와야 그림이 그려진다");
+    assert.equal(mine.edges.length, 7);
+    assert.equal(mine.category, "TECHNICAL_TASK");
+
+    // 🔵 표본 확인 — 그림에 필요한 칸이 실제로 실려 있다(빈 값으로 채워져 있으면
+    // 노드가 전부 한 점에 겹친다).
+    const first = mine.nodes[0];
+    assert.equal(typeof first.positionX, "number");
+    assert.equal(typeof first.sortOrder, "number");
+    assert.ok(first.title.length > 0);
+
+    // 🔴 선이 하나도 안 닿은 노드도 그대로 온다 — 실측 「원복 검사 및 개선 작업」이
+    // 바로 그 모양이라(노드 23에 간선 8) 걸러 내면 그 절차에서 시작할 길이 없어진다.
+    const connected = new Set(mine.edges.flatMap((e) => [e.fromNodeId, e.toNodeId]));
+    const isolated = mine.nodes.filter((n) => !connected.has(n.id));
+    assert.ok(mine.nodes.length >= connected.size, "간선이 가리키는 노드가 목록에 없다");
+    void isolated;
   });
 });
 

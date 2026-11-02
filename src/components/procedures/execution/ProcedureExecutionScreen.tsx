@@ -18,7 +18,7 @@ import { assessExecutionFinish } from "@/lib/domain/procedure-execution-lifecycl
 import { formatProcedureTemplateTitle } from "@/lib/domain/procedure-template-title";
 import type { PastExecutionCandidate } from "@/lib/domain/procedure-execution-past-runs";
 import type {
-  ExecutableTemplateOption,
+  ExecutableTemplateGraph,
   ExecutionDetail,
   ExecutionHistoryRow,
   RelatedRepairHistory,
@@ -163,7 +163,12 @@ export default function ProcedureExecutionScreen({
   repairCaseId: string;
   actingUser: ActingUser;
   activeExecution: { id: string } | null;
-  templateOptions: ExecutableTemplateOption[];
+  /**
+   * 불러오기 창이 쓰는 재료 — 목록 한 줄에 **그 절차의 노드·간선**이 함께 실려
+   * 있다(2026-11-02, 조각 7). 창이 「모든 절차」에서 노드 이름을 찾고 그림을
+   * 그려야 하기 때문이다. 이 화면은 그대로 넘기기만 한다.
+   */
+  templateOptions: ExecutableTemplateGraph[];
   executionDetail: ExecutionDetail | null;
   history: ExecutionHistoryRow[];
   relatedHistory: RelatedRepairHistory;

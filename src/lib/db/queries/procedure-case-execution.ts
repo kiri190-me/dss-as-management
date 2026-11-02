@@ -22,7 +22,12 @@ import {
 import { sortByProcedureExecutionOrder } from "@/lib/domain/procedure-execution-order";
 import type { PastExecutionCandidate } from "@/lib/domain/procedure-execution-past-runs";
 import { classifyProductRelation, type ProductIdentity } from "@/lib/domain/product-relation";
-import type { ProcedureNodeType, ProcedureBranchType, ProcedureEquipmentType } from "@/lib/domain/procedure-template-types";
+import type {
+  ProcedureNodeType,
+  ProcedureBranchType,
+  ProcedureEquipmentType,
+  ProcedureTemplateCategory,
+} from "@/lib/domain/procedure-template-types";
 import type { ProcedureCaseExecutionNodeStatus, ProcedureCaseExecutionActionType } from "@/lib/domain/procedure-case-execution-types";
 
 /**
@@ -36,21 +41,70 @@ import type { ProcedureCaseExecutionNodeStatus, ProcedureCaseExecutionActionType
 
 // ---- 실행 시작 화면 (template selection) ----
 
+/**
+ * 불러오기 창의 플로우차트가 쓰는 **한 노드**. ProcedureFlowGraph 가 실제로 읽는
+ * 칸만 담는다 — 전체 행에 딸린 instructions·ngSymptoms 같은 긴 글은 그림에 안
+ * 쓰이면서 화면으로 내려가는 짐만 된다(실측 2026-11-02: 게시된 둘만 해도 57KB →
+ * 28KB). 자세한 까닭은 ProcedureFlowGraph 의 ProcedureFlowGraphNode 주석.
+ */
+export type ExecutableTemplateNode = {
+  id: string;
+  nodeCode: string;
+  nodeType: ProcedureNodeType;
+  title: string;
+  positionX: number;
+  positionY: number;
+  userPositionX: number | null;
+  userPositionY: number | null;
+  sortOrder: number;
+  sourceWorksheet: string | null;
+  sourceShapeId: string | null;
+};
+
+export type ExecutableTemplateEdge = {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  branchType: ProcedureBranchType;
+  branchLabel: string | null;
+  sortOrder: number;
+  sourceConnectorId: string | null;
+};
+
 export type ExecutableTemplateOption = {
   id: string;
   code: string;
   name: string;
   equipmentType: ProcedureEquipmentType;
+  category: ProcedureTemplateCategory;
+};
+
+/**
+ * 목록 한 줄 + **그 절차의 그림 재료 전부**(2026-11-02, 조각 7).
+ *
+ * 🔴 노드·간선을 함께 싣는 까닭: 불러오기 창의 기본값이 「모든 절차」이고, 그
+ * 상태에서 **게시된 절차 전부의 노드 이름**을 한 번에 찾을 수 있어야 한다. 절차를
+ * 고를 때마다 서버를 다시 부르는 길로는 그 검색 자체가 성립하지 않는다.
+ *
+ * 🔵 **그리다 만 절차도 그대로 싣는다.** 실측 「원복 검사 및 개선 작업 (3상 입력)」은
+ * 노드 23개에 간선이 8개뿐이고 15개가 아무 선에도 안 닿아 있다. 걸러 내면 그
+ * 절차에서는 그 노드들부터 시작할 길이 사라진다 — 절차가 미완성인 것과 그
+ * 작업부터 시작하고 싶은 것은 별개다.
+ */
+export type ExecutableTemplateGraph = ExecutableTemplateOption & {
+  nodes: ExecutableTemplateNode[];
+  edges: ExecutableTemplateEdge[];
 };
 
 /** PUBLISHED, non-reference-only templates only — the same "executable workflow source" filter DATABASE_DESIGN.md's isReferenceOnly comment anticipates. */
-export async function getExecutableTemplateOptions(): Promise<ExecutableTemplateOption[]> {
-  return db
+export async function getExecutableTemplateOptions(): Promise<ExecutableTemplateGraph[]> {
+  const templates = await db
     .select({
       id: procedureTemplates.id,
       code: procedureTemplates.code,
       name: procedureTemplates.name,
       equipmentType: procedureTemplates.equipmentType,
+      category: procedureTemplates.category,
     })
     .from(procedureTemplates)
     // 실행에 붙일 수 있는 절차 목록 — 휴지통에 있는 절차는 고를 수 없다.
@@ -61,6 +115,64 @@ export async function getExecutableTemplateOptions(): Promise<ExecutableTemplate
         eq(procedureTemplates.isDeleted, false)
       )
     );
+  if (templates.length === 0) return [];
+
+  const templateIds = templates.map((t) => t.id);
+
+  // 절차 수만큼 조회를 반복하지 않는다 — 두 번만 읽고 id 로 나눈다.
+  const nodeRows = await db
+    .select({
+      procedureTemplateId: procedureTemplateNodes.procedureTemplateId,
+      id: procedureTemplateNodes.id,
+      nodeCode: procedureTemplateNodes.nodeCode,
+      nodeType: procedureTemplateNodes.nodeType,
+      title: procedureTemplateNodes.title,
+      positionX: procedureTemplateNodes.positionX,
+      positionY: procedureTemplateNodes.positionY,
+      userPositionX: procedureTemplateNodes.userPositionX,
+      userPositionY: procedureTemplateNodes.userPositionY,
+      sortOrder: procedureTemplateNodes.sortOrder,
+      sourceWorksheet: procedureTemplateNodes.sourceWorksheet,
+      sourceShapeId: procedureTemplateNodes.sourceShapeId,
+    })
+    .from(procedureTemplateNodes)
+    .where(inArray(procedureTemplateNodes.procedureTemplateId, templateIds))
+    // 차례는 여기서 한 번만 정한다 — 창의 번호(indexStartPickerNodes)와 같은 열쇠다.
+    .orderBy(procedureTemplateNodes.sortOrder, procedureTemplateNodes.nodeCode);
+
+  const edgeRows = await db
+    .select({
+      procedureTemplateId: procedureTemplateEdges.procedureTemplateId,
+      id: procedureTemplateEdges.id,
+      fromNodeId: procedureTemplateEdges.fromNodeId,
+      toNodeId: procedureTemplateEdges.toNodeId,
+      branchType: procedureTemplateEdges.branchType,
+      branchLabel: procedureTemplateEdges.branchLabel,
+      sortOrder: procedureTemplateEdges.sortOrder,
+      sourceConnectorId: procedureTemplateEdges.sourceConnectorId,
+    })
+    .from(procedureTemplateEdges)
+    .where(inArray(procedureTemplateEdges.procedureTemplateId, templateIds))
+    .orderBy(procedureTemplateEdges.sortOrder);
+
+  const nodesByTemplateId = new Map<string, ExecutableTemplateNode[]>();
+  for (const { procedureTemplateId, ...node } of nodeRows) {
+    const list = nodesByTemplateId.get(procedureTemplateId) ?? [];
+    list.push(node);
+    nodesByTemplateId.set(procedureTemplateId, list);
+  }
+  const edgesByTemplateId = new Map<string, ExecutableTemplateEdge[]>();
+  for (const { procedureTemplateId, ...edge } of edgeRows) {
+    const list = edgesByTemplateId.get(procedureTemplateId) ?? [];
+    list.push(edge);
+    edgesByTemplateId.set(procedureTemplateId, list);
+  }
+
+  return templates.map((t) => ({
+    ...t,
+    nodes: nodesByTemplateId.get(t.id) ?? [],
+    edges: edgesByTemplateId.get(t.id) ?? [],
+  }));
 }
 
 export type ActiveExecutionSummary = {

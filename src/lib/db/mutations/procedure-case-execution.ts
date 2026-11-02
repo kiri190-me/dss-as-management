@@ -25,6 +25,7 @@ import {
   type AutoAdvanceDecision,
 } from "@/lib/domain/procedure-execution-focus";
 import { assessExecutionFinish } from "@/lib/domain/procedure-execution-lifecycle";
+import { classifyStartNode, type StartNodeRejectionReason } from "@/lib/domain/procedure-start-picker";
 import type { ProcedureCaseExecutionActionType } from "@/lib/domain/procedure-case-execution-types";
 import type { ProcedureNodeType } from "@/lib/domain/procedure-template-types";
 import type { Role } from "@/lib/domain/types";
@@ -187,14 +188,70 @@ async function insertHistory(
   });
 }
 
+/**
+ * 한 트랜잭션이 이력 **두 줄**을 쓸 때, 뒤따르는 줄에 더하는 아주 작은 양수.
+ * 까닭은 위 insertHistory 의 createdAt 주석에 있다 — Postgres 의 `now()` 는
+ * 트랜잭션 시작 시각이라 같은 트랜잭션의 두 줄은 created_at 이 글자 하나 다르지
+ * 않고, 이력 조회는 created_at 하나로만 정렬하므로 차례가 정해지지 않는다.
+ *
+ * 쓰는 자리는 둘이다:
+ *  - 자동 전진(advanceToNextNode) — 완료 줄 **뒤**에 「저절로 섰다」가 와야 한다.
+ *  - 중간부터 시작(startProcedureExecution) — 실행 시작 줄 **뒤**에 「거기서부터
+ *    세웠다」가 와야 한다.
+ *
+ * 앱 시계(`new Date()`)로 바꾸지 않는 까닭은, 이 표의 다른 줄이 전부 DB 시계로
+ * 적혀 있어서 한 줄만 다른 시계를 쓰면 **트랜잭션 사이의** 차례가 어긋날 수 있기
+ * 때문이다.
+ */
+const FOLLOWING_HISTORY_AT = sql`now() + interval '1 millisecond'`;
+
+/**
+ * 중간부터 시작할 때, 화면이 보낸 노드를 거절하는 까닭 ↔ 이 변이의 결과 코드.
+ *
+ * 🔴 **새 코드를 만들지 않았다** — 세 까닭이 전부 이미 있는 코드에 그대로 들어맞는다.
+ * (DB 의 action enum 도 마찬가지로 안 늘렸다 — 아래 NODE_STARTED 를 쓴다.)
+ */
+const START_AT_REJECTION_CODES: Record<StartNodeRejectionReason, ExecutionMutationResultCode> = {
+  NOT_IN_TEMPLATE: "NOT_FOUND",
+  SYSTEM_ENTRY: "SYSTEM_MANAGED_NODE",
+  NO_EXECUTION_ROW: "INVALID_INPUT",
+};
+
 // ---- 실행 시작 (start execution) ----
 
 export type StartExecutionResult = { ok: true; executionId: string } | Failure;
 
+/**
+ * `startAtTemplateNodeId` — **절차 중간부터 시작한다**(2026-11-02, 조각 7).
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 앞의 노드를 건너뜀(SKIPPED)으로 만들지 않는다
+ * ──────────────────────────────────────────────────────────────────────
+ * 고른 노드 **하나만** 진행 중(IN_PROGRESS)으로 세우고 나머지는 전부 대기
+ * (PENDING)다. 건너뜀은 「안 하기로 정했다」는 사람의 판정이고 사유가 따라붙는
+ * 기록인데, 중간부터 시작한다고 해서 앞의 작업을 **안 하기로 정한 것은 아니다** —
+ * 나중에 필요해지면 대기인 채로 남아 있어야 그때 할 수 있다. 안 한 것을 했다고
+ * 적으면 되돌릴 길이 없다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔵 「어디서 시작했는가」를 따로 적는 칸이 없다 — 필요가 없다
+ * ──────────────────────────────────────────────────────────────────────
+ * 고른 노드가 진행 중이면 pickCurrentTask 가 그것을 「지금 할 일」로 고른다(진행
+ * 중이 대기보다 먼저다). 흐름 띠도 거기를 가운데 둔다. 즉 **노드 상태만으로 다
+ * 드러나므로** 마이그레이션이 필요 없다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 화면이 보낸 노드를 믿지 않는다
+ * ──────────────────────────────────────────────────────────────────────
+ * 이 절차의 노드인지, 시작(START) 표식은 아닌지, 실행 행이 생기는 종류인지를
+ * **이 트랜잭션이 방금 읽은 템플릿 노드 목록**으로 다시 가른다(classifyStartNode —
+ * 창이 쓰는 것과 같은 함수). 남의 절차 노드를 보내면 NOT_FOUND 다.
+ */
 export async function startProcedureExecution(
   repairCaseId: string,
   procedureTemplateId: string,
-  actorUserId: string
+  actorUserId: string,
+  startAtTemplateNodeId: string | null = null
 ): Promise<StartExecutionResult> {
   try {
     return await db.transaction(async (tx) => {
@@ -226,6 +283,23 @@ export async function startProcedureExecution(
         fail("TEMPLATE_NOT_EXECUTABLE", "게시(PUBLISHED)된 실행 가능한 절차 템플릿만 실행을 시작할 수 있습니다.");
       }
 
+      // 🔴 노드 목록을 **실행 행을 만들기 전에** 읽는다 — 중간부터 시작할 때
+      // 고른 노드를 여기서 가려야 하기 때문이다. (거절하면 트랜잭션이 통째로
+      // 되감기므로 차례 자체가 결과를 바꾸지는 않는다. 다만 「쓰기 전에 검사한다」는
+      // 모양이 읽는 사람에게 분명하다.)
+      const templateNodes = await tx
+        .select({ id: procedureTemplateNodes.id, nodeType: procedureTemplateNodes.nodeType })
+        .from(procedureTemplateNodes)
+        .where(eq(procedureTemplateNodes.procedureTemplateId, procedureTemplateId));
+
+      if (startAtTemplateNodeId !== null) {
+        const target = templateNodes.find((n) => n.id === startAtTemplateNodeId);
+        // 🔴 못 찾았을 때 undefined 를 null 로 눕혀 넘긴다 — 「이 절차에 없다」도
+        // classifyStartNode 가 함께 가르는 한 가지다(NOT_IN_TEMPLATE).
+        const eligibility = classifyStartNode(target?.nodeType ?? null);
+        if (!eligibility.ok) fail(START_AT_REJECTION_CODES[eligibility.reason], eligibility.message);
+      }
+
       let executionId: string;
       try {
         // Phase 5C-5A — templateCategory is always this freshly-loaded DB
@@ -246,11 +320,6 @@ export async function startProcedureExecution(
         throw err;
       }
 
-      const templateNodes = await tx
-        .select({ id: procedureTemplateNodes.id, nodeType: procedureTemplateNodes.nodeType })
-        .from(procedureTemplateNodes)
-        .where(eq(procedureTemplateNodes.procedureTemplateId, procedureTemplateId));
-
       // Classification per the Phase 5A plan §1: only executable node types
       // (everything except DOCUMENT_REFERENCE) get an execution-state row.
       const executableNodes = templateNodes.filter((n) => isExecutableNodeType(n.nodeType));
@@ -258,20 +327,29 @@ export async function startProcedureExecution(
       const now = new Date();
       const nodeInsertValues = executableNodes.map((n) => {
         const isStart = n.nodeType === "START";
+        // 중간부터 시작 — 고른 그 한 줄만 진행 중이다. 🔴 앞의 줄들은 **대기
+        // 그대로** 둔다(이 함수 머리말의 까닭).
+        const isStartAt = startAtTemplateNodeId !== null && n.id === startAtTemplateNodeId;
         return {
           executionId,
           procedureTemplateNodeId: n.id,
-          status: (isStart ? "COMPLETED" : "PENDING") as "COMPLETED" | "PENDING",
-          startedBy: isStart ? actor.id : null,
-          startedAt: isStart ? now : null,
+          status: (isStart ? "COMPLETED" : isStartAt ? "IN_PROGRESS" : "PENDING") as "COMPLETED" | "IN_PROGRESS" | "PENDING",
+          startedBy: isStart || isStartAt ? actor.id : null,
+          startedAt: isStart || isStartAt ? now : null,
           completedBy: isStart ? actor.id : null,
           completedAt: isStart ? now : null,
         };
       });
 
-      if (nodeInsertValues.length > 0) {
-        await tx.insert(procedureCaseExecutionNodes).values(nodeInsertValues);
-      }
+      const insertedNodes =
+        nodeInsertValues.length > 0
+          ? await tx
+              .insert(procedureCaseExecutionNodes)
+              .values(nodeInsertValues)
+              // 되받는 까닭 하나뿐 — 중간부터 시작한 줄의 **실행 노드 id** 가 있어야
+              // 그 줄에 이력을 붙일 수 있다(아래 NODE_STARTED).
+              .returning({ id: procedureCaseExecutionNodes.id, procedureTemplateNodeId: procedureCaseExecutionNodes.procedureTemplateNodeId })
+          : [];
 
       // EXECUTION_STARTED alone documents system initialization — no
       // per-node NODE_COMPLETED row for the auto-completed START node(s).
@@ -286,9 +364,35 @@ export async function startProcedureExecution(
       await insertHistory(tx, {
         executionId,
         actionType: "EXECUTION_STARTED",
-        afterState: { procedureTemplateId, executableNodeCount: executableNodes.length, autoCompletedSystemNodeCount },
+        afterState: {
+          procedureTemplateId,
+          executableNodeCount: executableNodes.length,
+          autoCompletedSystemNodeCount,
+          // 🔵 처음부터 시작한 실행에는 **아예 안 적는다.** null 을 적어 두면 지금까지
+          // 쌓인 줄과 모양이 달라져서, 이력을 읽는 쪽이 「옛 줄은 왜 이 칸이 없지」를
+          // 다시 설명해야 한다. 없음이 곧 처음부터다.
+          ...(startAtTemplateNodeId === null ? {} : { startAtTemplateNodeId }),
+        },
         actorUserId: actor.id,
       });
+
+      // 🔴 새 action 값을 만들지 않는다 — enum 을 늘리는 것은 마이그레이션이다.
+      // 이 행에 실제로 일어난 일은 「대기 → 진행 중」이고 그것이 NODE_STARTED 의
+      // 뜻 그대로다(자동 전진이 쓴 것과 같은 판단). 사람이 [시작]을 눌러 선 것과
+      // 가려내야 하므로 afterState 에 **중간부터 세운 것**임을 적는다 — 사람이 누른
+      // NODE_STARTED 의 afterState 는 null 이거나 { assignedEngineerId } 뿐이고,
+      // 자동 전진은 { autoAdvanced: true, … } 라 셋이 섞이지 않는다.
+      const startedAtRow = insertedNodes.find((row) => row.procedureTemplateNodeId === startAtTemplateNodeId);
+      if (startAtTemplateNodeId !== null && startedAtRow) {
+        await insertHistory(tx, {
+          executionId,
+          executionNodeId: startedAtRow.id,
+          actionType: "NODE_STARTED",
+          afterState: { startedMidProcedure: true, procedureTemplateNodeId: startAtTemplateNodeId },
+          actorUserId: actor.id,
+          createdAt: FOLLOWING_HISTORY_AT,
+        });
+      }
 
       return { ok: true, executionId };
     });
@@ -621,15 +725,6 @@ export async function startExecutionNode(
 // ---- 자동 전진 (완료하면 다음 하나가 저절로 선다) ----
 
 /**
- * 완료 이력 바로 **뒤**에 오도록 1밀리초를 더한다 — 위 insertHistory 의
- * createdAt 주석에 까닭이 있다. `now()` 를 그대로 쓰면 완료 줄과 시각이 같아
- * 차례가 정해지지 않는다. 앱 시계(`new Date()`)로 바꾸지 않는 까닭은, 이 표의
- * 다른 줄이 전부 DB 시계로 적혀 있어서 한 줄만 다른 시계를 쓰면 **트랜잭션
- * 사이의** 차례가 어긋날 수 있기 때문이다.
- */
-const AUTO_ADVANCE_HISTORY_AT = sql`now() + interval '1 millisecond'`;
-
-/**
  * 노드 하나를 완료한 **같은 트랜잭션 안에서**, 다음 노드 하나를 진행 중으로
  * 세운다.
  *
@@ -754,7 +849,7 @@ async function advanceToNextNode(
       viaEdgeId: decision.viaEdgeId,
     },
     actorUserId: params.actorUserId,
-    createdAt: AUTO_ADVANCE_HISTORY_AT,
+    createdAt: FOLLOWING_HISTORY_AT,
   });
 
   return decision;

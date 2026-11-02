@@ -135,6 +135,21 @@ src/lib/domain/procedure-execution-past-runs.test.ts
 # 뒤엣것을 함께 재는 까닭: 둘 다 string 이라 한쪽이 옛 모양으로 돌아가도 컴파일러가
 # 침묵한다.
 src/lib/domain/procedure-template-title.test.ts
+# 🔵 「기술 절차 불러오기」 창의 판정 — 노드 이름 검색과 「여기서부터 시작」
+# (2026-11-02, 조각 7). 재는 것: 🔴 「모든 절차」에서 **여러 절차의** 노드가 나오고
+# 절차 이름이 붙는가 · 🔴 절차를 고르면 **그 안에서만** 걸리는가 · 🔴 같은 이름이
+# 여럿일 때 가려지는가(절차를 가로지르는 「MCU 기판 교환」은 절차 이름으로, 한 절차
+# 안에서 두 번 나오는 「FH-SEQ 신호 점검」은 번호로) · 🔴 고를 수 없는 노드(START ·
+# 참고 문서)가 **결과에는 나오되 까닭이 붙는가**(통째로 빼면 이름을 정확히 쳐도
+# 「없습니다」가 떠서 사람이 제 오타로 읽는다) · 🔴 node_code 는 **안 보는가**
+# (`manual-<uuid>` 라 아무 말이나 걸린다) · 제목의 줄바꿈을 접는가 · 🔴 단추 글자가
+# 「처음부터 시작」과 「여기서부터 시작」으로 **갈리는가**.
+# 🔴 지시서의 「MCU 신호 점검이 두 절차에 있다」는 실측과 달랐다 — 그 이름은 원복에만
+# 있고, 진짜로 겹치는 것은 「MCU 기판 교환」과 「일본 교산에 연락」이다. 표본은 개발 DB
+# 를 다시 세어 그 둘로 적었다. 서버가 정말 거절하는지는 db 목록의
+# procedure-case-execution.integration.test.ts 58~64번, 창이 그려지는 모습은
+# components 목록의 procedure-start-picker-panel.test.tsx.
+src/lib/domain/procedure-start-picker.test.ts
 src/lib/domain/product-relation.test.ts
 src/lib/auth/inventory-authorization.test.ts
 # 🔵 2026-10-28(조각 13-D): `src/lib/domain/inventory-types.test.ts` 를 뺐다 — 재던

@@ -177,8 +177,38 @@ export type LayoutMode = "SOURCE" | "USER" | "STAGE_SORTED";
 
 export type ProcedureFlowGraphOpenIssue = { nodeId: string; issueId: string; severity: "ERROR" | "WARNING" };
 
-/** Phase 5C-5B — ProcedureTemplateNodeRow itself now carries userPositionX/Y (previously editor-only, added to the read-only detail query's row shape too so both screens can resolve the same saved override — see this file's own layout-unification notes). EditorNodeRow (a structural superset) satisfies this type as-is. */
-type ProcedureFlowGraphNode = ProcedureTemplateNodeRow;
+/**
+ * Phase 5C-5B — ProcedureTemplateNodeRow itself now carries userPositionX/Y
+ * (previously editor-only, added to the read-only detail query's row shape
+ * too so both screens can resolve the same saved override — see this file's
+ * own layout-unification notes). EditorNodeRow (a structural superset)
+ * satisfies this type as-is.
+ *
+ * 2026-11-02(조각 7) — `ProcedureTemplateNodeRow` 통째가 아니라 **이 그림이
+ * 실제로 읽는 칸만** 받는다. 받는 칸을 줄인 것이라 기존 호출부(절차 상세 ·
+ * 편집기)는 그대로 통과한다 — 더 많이 가진 것을 넘기는 쪽은 언제나 맞다.
+ *
+ * 🔴 까닭은 **실행 화면이 절차를 고를 때 게시된 절차를 전부 실어 보내기**
+ * 때문이다(ExecutionStartCard). 전체 행에는 instructions·ngSymptoms 같은 긴 글이
+ * 딸려 있어서, 실측으로 게시된 둘만 해도 57KB 가 28KB 로 반이 된다. 지금은
+ * 23·28 노드라 어느 쪽이든 싸지만, 개발 DB 에는 **노드 403개짜리 초안**
+ * (「RF Generator 전체 표준 절차」)이 있다 — 그것이 게시되는 날 접수 건 화면이
+ * 매번 수백 KB 를 더 싣게 된다.
+ */
+type ProcedureFlowGraphNode = Pick<
+  ProcedureTemplateNodeRow,
+  | "id"
+  | "nodeCode"
+  | "nodeType"
+  | "title"
+  | "positionX"
+  | "positionY"
+  | "userPositionX"
+  | "userPositionY"
+  | "sortOrder"
+  | "sourceWorksheet"
+  | "sourceShapeId"
+>;
 
 /**
  * Flowchart viewer (Phase 3B: standardized visual language; Phase 4A:
@@ -215,6 +245,9 @@ export default function ProcedureFlowGraph({
   layoutMode: controlledLayoutMode,
   onLayoutModeChange,
   onInstanceReady,
+  showChrome = true,
+  highlightedNodeIds = null,
+  graphHeight,
 }: {
   templateId: string;
   nodes: ProcedureFlowGraphNode[];
@@ -285,6 +318,33 @@ export default function ProcedureFlowGraph({
   onLayoutModeChange?: (mode: LayoutMode) => void;
   /** 5C-6D-1D — forwards the live React Flow instance up to the editor screen (same purpose/timing as CaseFlowchartGraph's own onInstanceReady) so a sibling component (NodePropertyPanel, CreateNodePanel) can read each node's REAL measured dimensions (`instance.getInternalNode(id)?.measured`) for relative-position math, rather than a duplicated size estimate. Optional — ProcedureTemplateDetailScreen's read-only usage has no relative-position feature and never passes this. */
   onInstanceReady?: (instance: ReactFlowInstance) => void;
+  /**
+   * 2026-11-02(조각 7) — 그림 **둘레의 조작 줄**(시트 필터 · 배치 · 연결 표시 ·
+   * 검색 · 선택 단추)과 범례, 그리고 「읽기 전용 …」 안내 한 줄을 통째로 그릴지.
+   * 기본은 true — 지금까지의 두 호출부(절차 상세 · 편집기)는 아무것도 안 넘기고
+   * 글자 하나 안 바뀐다.
+   *
+   * 🔴 false 로 두는 자리는 **「기술 절차 불러오기」 창** 하나다. 그 창에는 이미
+   * 제 절차 드롭다운과 제 노드 검색이 있어서, 이 줄을 함께 그리면 **검색 칸이 둘**
+   * 나란히 서고 어느 쪽이 무엇을 하는지 사람이 알 수 없다.
+   *
+   * 조작 줄을 숨기면 배치는 「원본 배치」에 머문다 — 실측 두 절차는 노드마다
+   * user_position 이 전부 차 있어서(23/23 · 28/28) 그것이 사람이 그린 그대로다.
+   */
+  showChrome?: boolean;
+  /**
+   * 2026-11-02(조각 7) — **바깥에서 건 강조**. null 이면 지금까지와 똑같다(아무
+   * 영향 없음). 배열을 주면 **그 안에 없는 노드가 흐려진다** — 불러오기 창에서
+   * 노드 이름을 검색할 때, 맞는 노드가 그림 어디에 있는지 한눈에 보이게 하는 데
+   * 쓴다.
+   *
+   * 선택에 따른 흐리기(선택한 노드의 이웃만 환하게)와 **함께** 걸린다. 다만 고른
+   * 노드 자신은 어느 쪽으로도 안 흐려진다 — 고른 것이 흐려지면 무엇을 골랐는지
+   * 그림에서 사라진다.
+   */
+  highlightedNodeIds?: readonly string[] | null;
+  /** 2026-11-02(조각 7) — 캔버스 높이(px). 생략하면 GraphCanvas 의 기본값(600). 창 안에 들어갈 때는 화면이 좁아 더 낮게 잡는다. */
+  graphHeight?: number;
 }) {
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
   // Fires the camera fit exactly once, the first time the instance for the
@@ -606,9 +666,20 @@ export default function ProcedureFlowGraph({
     [bands, useAutoLayoutForUnpositionedNodes, layeredLayout]
   );
 
+  // 바깥에서 건 강조(highlightedNodeIds)를 빠른 조회로. null 이면 아예 안 만든다 —
+  // 「걸지 않았다」와 「하나도 안 걸렸다(빈 배열)」는 뜻이 정반대다: 전자는 아무것도
+  // 안 흐려지고, 후자는 전부 흐려진다(검색어는 쳤는데 맞는 것이 없는 상태).
+  const highlightedNodeIdSet = useMemo(
+    () => (highlightedNodeIds === null ? null : new Set(highlightedNodeIds)),
+    [highlightedNodeIds]
+  );
+
   const flowNodes = useMemo<Node[]>(() => {
     const result: Node[] = filteredNodeRows.map((n) => {
       const sourcePos = layoutMode === "STAGE_SORTED" ? (stageSortedLayout.positions.get(n.id) ?? { x: n.positionX, y: n.positionY }) : resolveBaselinePosition(n);
+      const isSelected = n.id === selectedNodeId;
+      const dimmedBySelection = selectedNodeId !== null && !connectedNodeIds.has(n.id);
+      const dimmedByHighlight = highlightedNodeIdSet !== null && !highlightedNodeIdSet.has(n.id);
       return {
         id: n.id,
         type: "procedureNode",
@@ -620,9 +691,9 @@ export default function ProcedureFlowGraph({
           sourceShapeId: n.sourceShapeId,
           templateId,
           issueBadge: issueBadgeByNodeId.get(n.id) ?? null,
-          isSelected: n.id === selectedNodeId,
-          isDimmed: selectedNodeId !== null && !connectedNodeIds.has(n.id),
-          isSeverelyDimmed: errorFocusMode && selectedNodeId !== null && !connectedNodeIds.has(n.id),
+          isSelected,
+          isDimmed: !isSelected && (dimmedBySelection || dimmedByHighlight),
+          isSeverelyDimmed: errorFocusMode && dimmedBySelection,
         } satisfies ProcedureNodeData,
       };
     });
@@ -664,6 +735,7 @@ export default function ProcedureFlowGraph({
     selectedNodeId,
     connectedNodeIds,
     errorFocusMode,
+    highlightedNodeIdSet,
   ]);
 
   const flowEdges = useMemo<Edge[]>(() => {
@@ -875,6 +947,7 @@ export default function ProcedureFlowGraph({
 
   return (
     <div className="flex flex-col gap-2">
+      {showChrome && (
       <div className="flex flex-wrap items-center gap-3 text-xs">
         {worksheets.length > 1 && (
           <div className="flex items-center gap-2">
@@ -986,17 +1059,21 @@ export default function ProcedureFlowGraph({
           </button>
         )}
       </div>
+      )}
 
-      <ProcedureGraphLegend />
+      {showChrome && <ProcedureGraphLegend />}
 
+      {showChrome && (
       <p className="text-xs text-zinc-500 dark:text-zinc-400">
         {editable
           ? "편집 모드 — 사용자 배치에서는 노드를 드래그해 위치를 조정하고, 분기를 선택한 뒤 경로점을 추가/이동/삭제해 연결선 경로를 조정할 수 있습니다 (명시적으로 저장하기 전까지 반영되지 않습니다). 노드/분기를 클릭하면 연결된 경로가 강조되고 나머지는 흐리게 표시됩니다."
           : "읽기 전용 — 마우스 휠로 확대/축소, 드래그로 이동, 노드를 클릭하면 연결된 경로가 강조되고 나머지는 흐리게 표시됩니다."}
       </p>
+      )}
 
       <GraphCanvas
         remountKey={`${worksheetFilter}-${layoutMode}`}
+        height={graphHeight}
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}

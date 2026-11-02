@@ -64,18 +64,31 @@ async function withErrorRedaction<T extends { ok: boolean }>(label: string, run:
   }
 }
 
+/**
+ * `startAtProcedureTemplateNodeId` — 중간부터 시작할 때 고른 **템플릿 노드**의 id
+ * (2026-11-02, 조각 7). 안 넘기거나 null 이면 지금까지와 똑같이 **처음부터** 시작한다.
+ *
+ * 🔴 여기서는 **모양만** 본다(UUID 인가). 「그 절차의 노드인가 · 고를 수 있는
+ * 종류인가」는 변이가 제 트랜잭션 안에서 템플릿을 다시 읽어 가른다 — 이 파일
+ * 머리말의 규약 그대로, 화면도 액션도 집행 경계가 아니다.
+ */
 export async function startProcedureExecutionAction(input: {
   repairCaseId: string;
   procedureTemplateId: string;
+  startAtProcedureTemplateNodeId?: string | null;
 }): Promise<StartExecutionResult | Forbidden> {
   const actorCheck = await resolveAuthorizedActorId();
   if (!actorCheck.ok) return actorCheck.result;
   if (!isValidUuid(input.repairCaseId) || !isValidUuid(input.procedureTemplateId)) {
     return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
   }
+  const startAt = input.startAtProcedureTemplateNodeId ?? null;
+  if (startAt !== null && !isValidUuid(startAt)) {
+    return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  }
 
   return withErrorRedaction("startProcedureExecutionAction", () =>
-    startProcedureExecution(input.repairCaseId, input.procedureTemplateId, actorCheck.userId)
+    startProcedureExecution(input.repairCaseId, input.procedureTemplateId, actorCheck.userId, startAt)
   );
 }
 

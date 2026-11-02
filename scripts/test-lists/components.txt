@@ -68,6 +68,22 @@ src/components/procedures/execution/execution-list-fold.test.tsx
 # 서버 쪽 동작은 db 목록의 procedure-case-execution.integration.test.ts 39~46번,
 # 묻는 규칙 자체는 unit 목록의 procedure-execution-lifecycle.test.ts 가 본다.
 src/components/procedures/execution/execution-lifecycle-actions.test.ts
+# 「기술 절차 불러오기」 창 — 절차 드롭다운 · 노드 이름 검색 · 플로우차트 · 중간부터
+# 시작(2026-11-02, 조각 7). 🔴 창의 **속**(ProcedureStartPickerPanel)은 상태도 서버
+# 액션도 DB 조회 타입도 안 물게 적어서 **그려서** 잰다. 재는 것: 🔴 드롭다운 기본값이
+# 「모든 절차」이고 그때는 그림 대신 **한 줄 안내**가 서는가 · 🔴 「모든 절차」 결과에
+# 절차 이름이 붙고 절차를 고르면 **안 붙는가** · 🔴 같은 이름 두 줄이 서로 갈리는가 ·
+# 🔴 고를 수 없는 노드 줄이 **나오되 비활성**이고 까닭이 적히는가(🔵 평범한 줄은 안
+# 막힌다는 표본 확인과 함께) · 🔴 단추 글자가 「처음부터 시작」↔「여기서부터 시작」으로
+# 바뀌는가 · 🔴 「모든 절차」에서는 못 누르고 까닭이 뜨는가.
+# 바깥(ExecutionStartCard)과 그림(ProcedureStartPickerGraph)은 서버 액션과
+# @xyflow/react 의 .css 를 끌고 와 import 가 던지므로 **원본 글자로** 확인한다 —
+# 🔴 그림에 편집용 상호작용(editable · 드래그 · 경로점)이 한 줄도 없는가 · 검색 결과를
+# 누르면 드롭다운이 그 절차로 바뀌는가 · 절차를 바꾸면 고른 노드를 비우는가 ·
+# 🔴 "use client" 가 안 늘었는가(주석을 걷어낸 글자로 센다).
+# 규칙 자체는 unit 목록의 procedure-start-picker.test.ts, 서버가 정말 거절하는지는
+# db 목록의 procedure-case-execution.integration.test.ts 58~64번이 본다.
+src/components/procedures/execution/procedure-start-picker-panel.test.tsx
 # 「이 건의 다른 절차」 묶음이 그리는 글자(2026-11-02, 조각 6). 🔴 이웃 묶음과 같이
 # **렌더해서** 잰다 — 서버 액션도 DB 조회 타입도 안 문다. 재는 것: 배지 넷이 글자와
 # data 속성으로 각각 갈리는가 · 🔴 넷 다 **경고색이 아닌가**(「중단 마침」도 「진행 중」도
