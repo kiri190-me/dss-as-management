@@ -90,6 +90,17 @@ src/lib/domain/procedure-execution-focus.test.ts
 # 🔴 unit 에 적은 이유: DB 도 React 도 안 무는 순수 함수다. 띠를 실제로 렌더해 보는
 # 시험은 components 목록의 execution-flow-strip.test.tsx 가 따로 본다.
 src/lib/domain/procedure-execution-minimap.test.ts
+# 🔵 실행 화면 **아래 목록**을 접을지 · 펼칠지 · 아예 안 그릴지(2026-11-02, 조각 4).
+# 재는 것: 기본은 접혀 있는가 · 🔴 남은 것이 있는데 지금 할 일이 없으면(전부 차단됨)
+# 「전체 단계 보기」가 펼쳐진 채로 서는가(큰 카드가 안 서는 자리라 접으면 손댈 것이
+# 하나도 안 보인다) · 차단됨이 있으면 펼쳐지고 제목 줄에 수가 남는가 ·
+# 🔴 **남은 것이 0장이면 「전체 단계 보기」를 아예 안 그리고 「지나온 길」을 펼치는가**
+# (빈 「(0)」을 펼쳐 「…없습니다」 세 줄을 보이던 것이 첫 판의 결함이었다) ·
+# 🔴 경계로 노드가 아예 0장이면 묶음 둘 다 안 그리는가 · 🔴 괄호 안 수가 화면 네 구역
+# 머릿수의 합인가(「지금 할 일」로 위에 올라간 한 장도 센다 — 점선 한 줄로 남아 있다).
+# 표본은 개발 DB 실측 분포를 그대로 옮겼다 — 「다 끝난 실행」도 「차단됨이 있는 실행」도
+# 지금 DB 에 실제로 있다. 접힌 모습 자체는 components 목록의 execution-list-fold.test.tsx.
+src/lib/domain/procedure-execution-list-fold.test.ts
 src/lib/domain/product-relation.test.ts
 src/lib/auth/inventory-authorization.test.ts
 # 🔵 2026-10-28(조각 13-D): `src/lib/domain/inventory-types.test.ts` 를 뺐다 — 재던

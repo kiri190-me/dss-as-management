@@ -2,6 +2,7 @@ import ExecutionStartCard from "./ExecutionStartCard";
 import ExecutionNodeCard from "./ExecutionNodeCard";
 import CurrentTaskCard from "./CurrentTaskCard";
 import ExecutionFlowStrip from "./ExecutionFlowStrip";
+import ExecutionFoldSection from "./ExecutionFoldSection";
 import ExecutionExtraTaskForm from "./ExecutionExtraTaskForm";
 import ExecutionHistoryTimeline from "./ExecutionHistoryTimeline";
 import RelatedRepairHistoryPanel from "./RelatedRepairHistoryPanel";
@@ -10,6 +11,7 @@ import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import { computeExecutionPosition, formatExecutionPositionLabel } from "@/lib/domain/procedure-execution-order";
 import { pickCurrentTask } from "@/lib/domain/procedure-execution-focus";
 import { buildProcedureExecutionMinimap } from "@/lib/domain/procedure-execution-minimap";
+import { buildExecutionListFold } from "@/lib/domain/procedure-execution-list-fold";
 import type {
   ExecutableTemplateOption,
   ExecutionDetail,
@@ -204,6 +206,18 @@ export default function ProcedureExecutionScreen({
     current: currentTask.kind === "NONE" ? null : currentTask.node,
   });
 
+  // 아래 목록을 접는 규칙. 🔴 「펼친 채로 둘 때」를 여기서 if 로 적지 않는다 —
+  // 까닭이 둘이고(지금 할 일이 없다 / 차단됨이 있다) 둘 다 개발 DB 에 실제로
+  // 있는 상태라, 화면에 흩어 두면 한쪽만 고치는 날이 온다.
+  //
+  // 🔴 네 구역과 **같은 배열**을 넘긴다. 위로 올라간 한 장을 걸러낸 배열을
+  // 넘기면 접힌 줄의 수가 실제로 보이는 줄 수보다 한 장 모자라진다 — 그 노드는
+  // 목록에서 사라지지 않고 점선 한 줄로 남아 있다(NodeSection).
+  const fold = buildExecutionListFold({
+    nodes: executionDetail.nodes,
+    hasCurrentTask: currentTask.kind !== "NONE",
+  });
+
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">기술 절차</h2>
@@ -219,34 +233,49 @@ export default function ProcedureExecutionScreen({
         <CurrentTaskCard node={currentTask.node} actingUser={actingUser} />
       )}
 
-      <NodeSection
-        title="실행 가능"
-        nodes={pendingNodes}
-        actingUser={actingUser}
-        emptyMessage="대기 중인 작업이 없습니다."
-        currentTaskNodeId={currentTaskNodeId}
-      />
-      <NodeSection
-        title="진행 중"
-        nodes={inProgressNodes}
-        actingUser={actingUser}
-        emptyMessage="진행 중인 작업이 없습니다."
-        currentTaskNodeId={currentTaskNodeId}
-      />
-      <NodeSection
-        title="차단됨"
-        nodes={blockedNodes}
-        actingUser={actingUser}
-        emptyMessage="차단된 작업이 없습니다."
-        currentTaskNodeId={currentTaskNodeId}
-      />
-      <NodeSection
-        title="완료 / 건너뜀"
-        nodes={doneNodes}
-        actingUser={actingUser}
-        emptyMessage="완료되거나 건너뛴 작업이 없습니다."
-        currentTaskNodeId={currentTaskNodeId}
-      />
+      {/* 네 구역은 그대로 두고 **담는 그릇만** 둘로 바꾼다. 구역마다 접으면
+          접는 줄이 넷 생겨, 줄인 길이만큼 줄 머리가 도로 늘어난다.
+
+          🔴 `fold.remaining &&` 는 「담을 카드가 없다」를 화면이 다시 판정하는
+          것이 아니다 — 도메인이 null 을 돌려주면 그릴 것이 없다는 뜻이고,
+          여기서는 그 결과를 그대로 따를 뿐이다. 머릿수를 화면에서 다시 세면
+          (fold.remaining.count > 0 같은 식) 판정이 두 벌이 된다. */}
+      {fold.remaining && (
+        <ExecutionFoldSection group={fold.remaining}>
+          <NodeSection
+            title="실행 가능"
+            nodes={pendingNodes}
+            actingUser={actingUser}
+            emptyMessage="대기 중인 작업이 없습니다."
+            currentTaskNodeId={currentTaskNodeId}
+          />
+          <NodeSection
+            title="진행 중"
+            nodes={inProgressNodes}
+            actingUser={actingUser}
+            emptyMessage="진행 중인 작업이 없습니다."
+            currentTaskNodeId={currentTaskNodeId}
+          />
+          <NodeSection
+            title="차단됨"
+            nodes={blockedNodes}
+            actingUser={actingUser}
+            emptyMessage="차단된 작업이 없습니다."
+            currentTaskNodeId={currentTaskNodeId}
+          />
+        </ExecutionFoldSection>
+      )}
+      {fold.done && (
+        <ExecutionFoldSection group={fold.done}>
+          <NodeSection
+            title="완료 / 건너뜀"
+            nodes={doneNodes}
+            actingUser={actingUser}
+            emptyMessage="완료되거나 건너뛴 작업이 없습니다."
+            currentTaskNodeId={currentTaskNodeId}
+          />
+        </ExecutionFoldSection>
+      )}
 
       {executionDetail.referenceNodes.length > 0 && (
         <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">

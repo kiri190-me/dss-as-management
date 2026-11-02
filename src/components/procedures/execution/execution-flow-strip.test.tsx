@@ -213,6 +213,12 @@ describe("실행 화면이 띠를 어디에 세우고 무엇을 넘기는가", (
       assert.ok(screen.includes(`title="${title}"`), `${title} 구역이 사라지면 안 된다`);
     }
     assert.ok(screen.includes("<CurrentTaskCard"), "「지금 할 일」 큰 카드는 그대로다");
-    assert.ok(!/<details/.test(screen), "목록 접기는 이 조각이 아니다");
+    // 🔵 2026-11-02(조각 4): 아래 목록은 이제 접힌다. 다만 접는 일은 전부
+    // ExecutionFoldSection 이 하고 **화면에는 <details> 가 없다** — 화면이 직접
+    // 접으면 「펼친 채로 둘 때」 판정이 두 자리에 생긴다. 접힌 모습 자체는
+    // 이웃 execution-list-fold.test.tsx 가 렌더해서 잰다.
+    assert.ok(!/<details/.test(screen), "접기는 ExecutionFoldSection 이 한다 — 화면에 <details> 를 다시 적지 않는다");
+    assert.match(flat, /<ExecutionFoldSection group=\{fold\.remaining\}>/);
+    assert.match(flat, /<ExecutionFoldSection group=\{fold\.done\}>/);
   });
 });

@@ -47,6 +47,15 @@ src/components/procedures/execution/execution-current-task.test.ts
 # 줄 자르기 · 갈래 이름 줄이 칸마다 늘 자리를 잡는가(섞여도 띠 높이가 안 흔들린다).
 # 어느 걸음을 고르는지는 unit 목록의 procedure-execution-minimap.test.ts 가 본다.
 src/components/procedures/execution/execution-flow-strip.test.tsx
+# 아래 목록을 담는 **접히는 묶음**(2026-11-02, 조각 4). 🔴 이웃 띠와 같이 **렌더해서**
+# 잰다 — 묶음은 서버 액션도 DB 조회 타입도 안 문다. 재는 것: open 속성이 실제로
+# 붙고 떨어지는가(🔵 접힌 것과 펼친 것이 서로 다르게 읽히는지 먼저 확인한다) ·
+# 접혀도 제목 줄의 머릿수와 「차단됨 2」가 남는가 · 🔴 "use client" 가 안 늘었는가
+# (주석을 걷어낸 글자로 센다) · 화면이 무엇을 접고 무엇을 안 접는가(큰 카드와 흐름
+# 띠는 늘 보인다) · 🔴 담을 카드가 없는 묶음을 화면이 **아예 안 그리는가**(도메인이
+# null 을 주면 따를 뿐, 머릿수를 화면에서 다시 세지 않는다). 접을지 말지의 규칙
+# 자체는 unit 목록의 procedure-execution-list-fold.test.ts 가 본다.
+src/components/procedures/execution/execution-list-fold.test.tsx
 src/components/repair-cases/files/preview-backfill.test.ts
 src/components/repair-cases/files/StoredAttachmentList.test.tsx
 src/components/repair-cases/files/AttachmentViewer.test.tsx
