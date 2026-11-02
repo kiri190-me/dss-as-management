@@ -848,3 +848,14 @@ src/components/repair-cases/detail/requested-due-date-link-notice.test.ts
 # 모달 위에 저장 팝업을 안 띄우는가(창 뒤로 가린다) · 두 번 누르기를 막는가.
 # 판정 자체는 unit 목록의 procedure-execution-jump.test.ts 가 본다.
 src/components/procedures/execution/execution-steps-panel.test.tsx
+
+# 🔵 **되돌리면서 지운 작업 메모가 실행 이력에서 보이는가**(2026-11-02, 조각 11 —
+# 사용자 결정: 「한번 지나갔던 노드로 다시 돌아오게 된다면 이전 기록(메모 등)은
+# 실행 이력에 남겠지만, [지금 할 일]에서는 … 새로 밟는 것처럼 되야 해」).
+# 재는 것: 🔴 지운 메모가 **글자 그대로** 뜨는가(쓰기 쪽이 beforeState 에 옮겨 적어도
+# 화면이 안 그리면 「남는다」가 거짓이 되고, 그 글은 영영 안 읽힌다) · 여러 줄이
+# 안 잘리는가 · 🔴 **표시가 없는 줄에는 안 붙는가**(JSON 칸의 이름만 보고 꺼내면
+# 나중에 엉뚱한 줄에 뜬다) · 기존 줄(사유 · action 이름)이 그대로인가.
+# 꺼내는 규칙 자체는 unit 목록의 procedure-execution-jump.test.ts, 서버가 정말
+# 옮겨 적는지는 db 목록의 procedure-case-execution.integration.test.ts 78번이 본다.
+src/components/procedures/execution/execution-history-reset-memo.test.tsx

@@ -8,6 +8,7 @@ import {
   findJumpTarget,
   findJumpTargetByTemplateNodeId,
   planNodeJump,
+  readJumpResetWorkMemo,
   resolveJumpButtonState,
   searchJumpTargets,
   toJumpStatusMark,
@@ -162,6 +163,263 @@ describe("옮기면 무엇이 바뀌는가", () => {
       if (plan.kind !== "REJECTED") return;
       assert.equal(plan.reason, reason);
       assert.ok(plan.message.length > 0, "까닭만 있고 할 말이 없으면 화면이 아무것도 못 적는다");
+    }
+  });
+});
+
+/**
+ * 🔴 **자리가 상태를 정한다**(2026-11-02, 조각 11 — 사용자 결정 둘:
+ * 「시작점 부터 그 노드까지의 경로에 있는 노드들만 [완료]처리」·「이전 노드로
+ * 옮겨가면 옮겨가는 노드 뒷부분에 배치되어 있는 노드들은 다시 [대기]상태가
+ * 되도록」).
+ *
+ * 어느 줄이 길 위인지는 최단 경로가 정하고(procedure-execution-path.ts), 여기서
+ * 재는 것은 **그 답을 받아 무엇을 건드리고 무엇을 그냥 두는가**다.
+ *
+ * 🔴 이 묶음에서 가장 무서운 단언은 「길을 못 찾았을 때」다 — 거기서 되돌리기가
+ * 돌면 **그리다 만 절차에서 끝낸 일이 통째로 대기가 된다.**
+ */
+describe("🔴 자리가 상태를 정한다 — 길 위는 완료", () => {
+  /** 길 위가 e1 → e2 → e3 이고 e4 가 고른 줄인 모습. */
+  const PATH = { found: true, executionNodeIds: ["e1", "e2", "e3"] };
+
+  test("길 위의 **대기**는 완료 대상이 된다 — 경로 차례 그대로", () => {
+    const nodes: JumpPlanNode[] = [
+      { id: "e1", status: "PENDING" },
+      { id: "e2", status: "PENDING" },
+      { id: "e3", status: "PENDING" },
+      { id: "e4", status: "PENDING" },
+    ];
+    const plan = planNodeJump({ nodes, targetExecutionNodeId: "e4", path: PATH });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.deepEqual(plan.completeOnPathExecutionNodeIds, ["e1", "e2", "e3"]);
+    assert.deepEqual(plan.reopenOffPathExecutionNodeIds, []);
+  });
+
+  test("🔴 길 위에 **이미 완료**인 줄은 다시 안 쓴다 — 한 사람의 이름이 덮인다", () => {
+    const nodes: JumpPlanNode[] = [
+      { id: "e1", status: "COMPLETED" },
+      { id: "e2", status: "SKIPPED" },
+      { id: "e3", status: "PENDING" },
+      { id: "e4", status: "PENDING" },
+    ];
+    const plan = planNodeJump({ nodes, targetExecutionNodeId: "e4", path: PATH });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.deepEqual(plan.completeOnPathExecutionNodeIds, ["e3"], "끝난 줄을 다시 쓰면 완료한 사람·시각이 덮인다");
+    assert.deepEqual(plan.reopenOffPathExecutionNodeIds, [], "길 위의 완료를 되돌리면 안 된다");
+  });
+
+  test("🔴 **차단됨**인 줄은 길 위에 있어도 그냥 둔다 — 사유 없이 푸는 길을 안 낸다", () => {
+    const nodes: JumpPlanNode[] = [
+      { id: "e1", status: "PENDING" },
+      { id: "e2", status: "BLOCKED" },
+      { id: "e3", status: "PENDING" },
+      { id: "e4", status: "PENDING" },
+    ];
+    const plan = planNodeJump({ nodes, targetExecutionNodeId: "e4", path: PATH });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.deepEqual(plan.completeOnPathExecutionNodeIds, ["e1", "e3"]);
+    assert.ok(!plan.standDownExecutionNodeIds.includes("e2"), "막힌 줄은 대기로도 안 내린다 — 막아 둔 뜻이 사라진다");
+  });
+
+  test("🔴 길 위의 **진행 중**은 완료가 되고, **대기로는 안 내려간다**", () => {
+    const nodes: JumpPlanNode[] = [
+      { id: "e1", status: "IN_PROGRESS" },
+      { id: "e2", status: "PENDING" },
+      { id: "e3", status: "PENDING" },
+      { id: "e4", status: "PENDING" },
+    ];
+    const plan = planNodeJump({ nodes, targetExecutionNodeId: "e4", path: PATH });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.ok(plan.completeOnPathExecutionNodeIds.includes("e1"));
+    assert.deepEqual(plan.standDownExecutionNodeIds, [], "완료된 줄 사이에 대기 한 줄이 끼어 남는다");
+  });
+
+  test("🔵 **경로 밖**의 진행 중은 전처럼 대기로 내려간다 — 조각 10 이 정한 것은 그대로다", () => {
+    const nodes: JumpPlanNode[] = [
+      { id: "e1", status: "PENDING" },
+      { id: "e2", status: "PENDING" },
+      { id: "e3", status: "PENDING" },
+      { id: "e4", status: "PENDING" },
+      { id: "밖", status: "IN_PROGRESS" },
+    ];
+    const plan = planNodeJump({ nodes, targetExecutionNodeId: "e4", path: PATH });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.deepEqual(plan.standDownExecutionNodeIds, ["밖"]);
+    assert.ok(!plan.completeOnPathExecutionNodeIds.includes("밖"), "길 밖인데 완료가 됐다");
+  });
+
+  test("🔴 고른 줄 자신은 길 목록에 섞여 있어도 **완료되지 않는다** — 그 줄은 진행 중이 된다", () => {
+    const nodes: JumpPlanNode[] = [
+      { id: "e1", status: "PENDING" },
+      { id: "e4", status: "PENDING" },
+    ];
+    const plan = planNodeJump({ nodes, targetExecutionNodeId: "e4", path: { found: true, executionNodeIds: ["e1", "e4"] } });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.deepEqual(plan.completeOnPathExecutionNodeIds, ["e1"]);
+  });
+});
+
+/**
+ * 🔴 **되돌아가면 그 뒤가 다시 대기가 된다**(2026-11-02 사용자 결정: 「노드의
+ * 연결선에 따라서 이전 단계의 노드로 돌아갈 수도 있으니까, 이전 노드로 옮겨가면
+ * 옮겨가는 노드 뒷부분에 배치되어 있는 노드들은 다시 [대기]상태가 되도록 해줘」).
+ *
+ * 까닭이 분명하다 — 「재측정」 갈래로 되돌아갔는데 그 뒤가 완료로 남아 있으면
+ * **다시 해야 할 일이 「이미 한 일」로 보인다.**
+ */
+describe("🔴 길 밖으로 밀려난 완료는 대기로 되돌아간다", () => {
+  test("🔴 되돌아간 자리의 **뒤**만 대기가 되고, 길 위의 완료는 그대로 남는다", () => {
+    // 길 위: e1 → e2. 고른 줄: e3. 길 밖: e4 · e5(둘 다 완료).
+    const nodes: JumpPlanNode[] = [
+      { id: "e1", status: "COMPLETED" },
+      { id: "e2", status: "COMPLETED" },
+      { id: "e3", status: "PENDING" },
+      { id: "e4", status: "COMPLETED" },
+      { id: "e5", status: "COMPLETED" },
+    ];
+    const plan = planNodeJump({
+      nodes,
+      targetExecutionNodeId: "e3",
+      path: { found: true, executionNodeIds: ["e1", "e2"] },
+    });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.deepEqual(plan.reopenOffPathExecutionNodeIds, ["e4", "e5"]);
+    assert.deepEqual(plan.completeOnPathExecutionNodeIds, [], "길 위는 이미 완료라 다시 안 쓴다");
+  });
+
+  test("🔴 **건너뜀·차단됨은 안 되돌린다** — 사람이 사유를 적어 고른 것이다", () => {
+    const nodes: JumpPlanNode[] = [
+      { id: "e1", status: "PENDING" },
+      { id: "e3", status: "PENDING" },
+      { id: "건너뜀", status: "SKIPPED" },
+      { id: "차단됨", status: "BLOCKED" },
+      { id: "완료", status: "COMPLETED" },
+    ];
+    const plan = planNodeJump({ nodes, targetExecutionNodeId: "e3", path: { found: true, executionNodeIds: ["e1"] } });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.deepEqual(plan.reopenOffPathExecutionNodeIds, ["완료"], "되돌리는 것은 완료뿐이다");
+    assert.ok(!plan.standDownExecutionNodeIds.includes("차단됨"), "막아 둔 뜻이 사라진다");
+  });
+
+  test("🔴 **START 의 실행 행은 안 건드린다** — 안 가리면 절차가 시작도 안 한 꼴이 된다", () => {
+    // START 는 실행 행이 **있고** 만들 때 바로 완료다. 경로 계산에서는 사람이 할
+    // 일이 아니라 빠지므로, 가리지 않으면 「길 밖의 완료」로 읽혀 대기로 되돌아간다.
+    const nodes: JumpPlanNode[] = [
+      { id: "시작", status: "COMPLETED", isSystemEntry: true },
+      { id: "e1", status: "PENDING" },
+      { id: "e2", status: "PENDING" },
+    ];
+    const plan = planNodeJump({ nodes, targetExecutionNodeId: "e2", path: { found: true, executionNodeIds: ["e1"] } });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.deepEqual(plan.reopenOffPathExecutionNodeIds, [], "START 가 대기로 내려갔다");
+  });
+
+  test("🔴 **길을 못 찾았으면 한 줄도 안 건드린다** — 되돌리기가 돌면 끝낸 일이 통째로 대기가 된다", () => {
+    const nodes: JumpPlanNode[] = [
+      { id: "e1", status: "COMPLETED" },
+      { id: "e2", status: "COMPLETED" },
+      { id: "e3", status: "IN_PROGRESS" },
+      { id: "e4", status: "PENDING" },
+    ];
+    const plan = planNodeJump({ nodes, targetExecutionNodeId: "e4" });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.deepEqual(plan.completeOnPathExecutionNodeIds, []);
+    assert.deepEqual(plan.reopenOffPathExecutionNodeIds, [], "그리다 만 절차에서 끝낸 일이 통째로 대기가 된다");
+    assert.deepEqual(plan.standDownExecutionNodeIds, ["e3"], "근거가 없을 때는 전처럼 자리만 옮긴다");
+  });
+
+  test("🔴 **빈 길과 못 찾은 길은 다르다** — 같게 읽으면 위의 보호가 통째로 풀린다", () => {
+    const nodes: JumpPlanNode[] = [
+      { id: "e1", status: "PENDING" },
+      { id: "완료", status: "COMPLETED" },
+    ];
+    // 길을 찾았는데 지날 줄이 없다(= 바로 첫 작업으로 옮겼다) → 길 밖의 완료는 되돌린다.
+    const found = planNodeJump({ nodes, targetExecutionNodeId: "e1", path: { found: true, executionNodeIds: [] } });
+    assert.equal(found.kind, "MOVE");
+    if (found.kind !== "MOVE") return;
+    assert.deepEqual(found.reopenOffPathExecutionNodeIds, ["완료"]);
+
+    // 길을 못 찾았다 → 아무것도 안 건드린다.
+    const notFound = planNodeJump({ nodes, targetExecutionNodeId: "e1", path: { found: false, executionNodeIds: [] } });
+    assert.equal(notFound.kind, "MOVE");
+    if (notFound.kind !== "MOVE") return;
+    assert.deepEqual(notFound.reopenOffPathExecutionNodeIds, []);
+  });
+
+  test("🔴 이미 거기 서 있어도 **길 위나 밖에 바꿀 줄이 남아 있으면** NO_CHANGE 가 아니다", () => {
+    const onPath: JumpPlanNode[] = [
+      { id: "e1", status: "PENDING" },
+      { id: "e4", status: "IN_PROGRESS" },
+    ];
+    assert.equal(
+      planNodeJump({ nodes: onPath, targetExecutionNodeId: "e4", path: { found: true, executionNodeIds: ["e1"] } }).kind,
+      "MOVE",
+      "아무것도 안 바뀐다고 해 버리면 지나온 길이 영영 대기로 남는다"
+    );
+
+    const offPath: JumpPlanNode[] = [
+      { id: "e4", status: "IN_PROGRESS" },
+      { id: "뒤", status: "COMPLETED" },
+    ];
+    assert.equal(
+      planNodeJump({ nodes: offPath, targetExecutionNodeId: "e4", path: { found: true, executionNodeIds: [] } }).kind,
+      "MOVE",
+      "되돌릴 줄이 남아 있는데 아무것도 안 한다고 하면 다시 할 일이 「한 일」로 남는다"
+    );
+  });
+
+  test("🔵 그 줄 하나만 진행 중이고 길 위도 밖도 바꿀 것이 없으면 — 그때는 NO_CHANGE 다", () => {
+    const nodes: JumpPlanNode[] = [
+      { id: "e1", status: "COMPLETED" },
+      { id: "e4", status: "IN_PROGRESS" },
+    ];
+    assert.equal(
+      planNodeJump({ nodes, targetExecutionNodeId: "e4", path: { found: true, executionNodeIds: ["e1"] } }).kind,
+      "NO_CHANGE"
+    );
+  });
+});
+
+/**
+ * 🔴 **비운 작업 메모가 이력에서 읽힌다**(2026-11-02 사용자 결정: 「이전
+ * 기록(메모 등)은 실행 이력에 남겠지만, [지금 할 일]에서는 기존 메모가 보이는
+ * 것이 아니라 그 노드를 새로 밟는 것처럼 되야 해」).
+ *
+ * 🔴 쓰기 쪽이 beforeState 에 옮겨 적어도 **읽는 함수가 없으면 화면이 못 그린다** —
+ * 그러면 「이력에 남는다」가 거짓이 되고, 사람이 쓴 글이 통째로 사라진 것과 같다.
+ */
+describe("🔴 되돌리면서 비운 작업 메모를 이력에서 꺼낸다", () => {
+  test("표시가 붙은 줄에서 그 글자를 꺼낸다", () => {
+    assert.equal(
+      readJumpResetWorkMemo({ status: "COMPLETED", clearedOnJump: true, workMemo: "440V 측정값 412V" }),
+      "440V 측정값 412V"
+    );
+  });
+
+  test("🔴 표시가 없으면 안 꺼낸다 — 다른 자리가 같은 이름을 적는 날 엉뚱한 줄에 뜬다", () => {
+    assert.equal(readJumpResetWorkMemo({ status: "COMPLETED", workMemo: "남의 글" }), null);
+  });
+
+  test("메모가 비었거나 없으면 null — 빈 줄을 화면에 세우지 않는다", () => {
+    assert.equal(readJumpResetWorkMemo({ clearedOnJump: true, workMemo: null }), null);
+    assert.equal(readJumpResetWorkMemo({ clearedOnJump: true, workMemo: "   " }), null);
+    assert.equal(readJumpResetWorkMemo({ clearedOnJump: true }), null);
+  });
+
+  test("JSON 칸이 무엇이든 안 터진다 — 이력의 beforeState 는 타입이 없다", () => {
+    for (const value of [null, undefined, 0, "글자", [], true]) {
+      assert.equal(readJumpResetWorkMemo(value), null);
     }
   });
 });

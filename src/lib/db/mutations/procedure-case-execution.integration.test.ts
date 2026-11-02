@@ -47,9 +47,14 @@ import {
 import { buildPastExecutionPanel } from "@/lib/domain/procedure-execution-past-runs";
 import { placeExecutionSummary } from "@/lib/domain/procedure-execution-summary-placement";
 import { computeExecutionPosition } from "@/lib/domain/procedure-execution-order";
+import {
+  computeExecutionProgress,
+  executionProgressPercent,
+  formatExecutionProgressLabel,
+} from "@/lib/domain/procedure-execution-path";
 import { pickCurrentTaskNode } from "@/lib/domain/procedure-execution-focus";
 import { buildProcedureExecutionMinimap } from "@/lib/domain/procedure-execution-minimap";
-import { buildJumpStatusMarks } from "@/lib/domain/procedure-execution-jump";
+import { buildJumpStatusMarks, readJumpResetWorkMemo } from "@/lib/domain/procedure-execution-jump";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -2688,13 +2693,13 @@ describe("procedure-case-execution: 지금 할 일 옮기기", () => {
     jumpCaseId = (await createTestCase({ assignedEngineerId: engineerId })).id;
   });
 
-  /** 실행 하나를 세우고, 템플릿 id · 접수 건 id · 실행 id 를 돌려준다. */
+  /** 실행 하나를 세우고, 템플릿 id · 간선 · 접수 건 id · 실행 id 를 돌려준다. */
   async function startExecution(code: string) {
-    const { templateId } = await createPublishedTemplate(uniqueCode(code), "TECHNICAL_TASK");
+    const { templateId, edges } = await createPublishedTemplate(uniqueCode(code), "TECHNICAL_TASK");
     const result = await startProcedureExecution(jumpCaseId, templateId, engineerId);
     assert.equal(result.ok, true, JSON.stringify(result));
     if (!result.ok) throw new Error("unreachable");
-    return { templateId, repairCaseId: jumpCaseId, executionId: result.executionId };
+    return { templateId, edges, repairCaseId: jumpCaseId, executionId: result.executionId };
   }
 
   async function executionVersion(executionId: string) {
@@ -2705,27 +2710,44 @@ describe("procedure-case-execution: 지금 할 일 옮기기", () => {
     return row.version;
   }
 
-  test("71. 🔴 뒤의 대기 노드로 옮기면 그 줄이 진행 중이 되고, 하던 진행 중은 **대기로 내려간다**", async () => {
+  test("71. 🔴 뒤의 노드로 옮기면 **지나온 길이 완료**가 되고, 경로 밖의 하던 진행 중은 대기로 내려간다", async () => {
     const { templateId, executionId } = await startExecution("jump-basic");
     let byCode = await loadExecutionNodesByCode(templateId, executionId);
 
-    // n2 를 사람이 직접 시작해 둔다 — 이것이 「하던 일」이다.
-    const started = await startExecutionNode(byCode.get("n2")!.id, engineerId, byCode.get("n2")!.version);
+    // n4 를 사람이 직접 시작해 둔다 — 이것이 「하던 일」이고, 아래에서 옮겨 갈
+    // n5 까지의 최단 경로(n1 → n2 → n3 → n5) **밖**에 있다.
+    const started = await startExecutionNode(byCode.get("n4")!.id, engineerId, byCode.get("n4")!.version);
     assert.equal(started.ok, true, JSON.stringify(started));
 
     byCode = await loadExecutionNodesByCode(templateId, executionId);
-    const n2Before = byCode.get("n2")!;
-    assert.equal(n2Before.status, "IN_PROGRESS", "표본 확인 — 옮기기 전에 진행 중이 하나 있다");
+    const n4Before = byCode.get("n4")!;
+    assert.equal(n4Before.status, "IN_PROGRESS", "표본 확인 — 옮기기 전에 진행 중이 하나 있다");
+    assert.equal(byCode.get("n2")!.status, "PENDING", "표본 확인 — 길 위의 두 줄이 아직 대기다");
+    assert.equal(byCode.get("n3")!.status, "PENDING", "표본 확인");
 
-    // 🔴 **절차 차례상 뒤**인 n4 로 옮긴다. 앞의 진행 중을 안 내리면 pickCurrentTask
-    // 가 그대로 n2 를 고르므로, 눌러도 아무 일이 안 일어난 화면이 된다.
-    const target = byCode.get("n4")!;
+    // 🔴 **절차 차례상 뒤**인 n5 로 옮긴다. 앞의 진행 중을 안 내리면 pickCurrentTask
+    // 가 그대로 n4 를 고르므로, 눌러도 아무 일이 안 일어난 화면이 된다.
+    const target = byCode.get("n5")!;
     const result = await jumpToExecutionNode(executionId, target.id, engineerId, target.version);
     assert.equal(result.ok, true, JSON.stringify(result));
 
     byCode = await loadExecutionNodesByCode(templateId, executionId);
-    assert.equal(byCode.get("n4")!.status, "IN_PROGRESS", "고른 줄이 진행 중이어야 한다");
-    assert.equal(byCode.get("n2")!.status, "PENDING", "하던 진행 중이 대기로 안 내려갔다");
+    assert.equal(byCode.get("n5")!.status, "IN_PROGRESS", "고른 줄이 진행 중이어야 한다");
+
+    // 🔴 **지나온 길이 완료다**(2026-11-02 사용자 결정, 조각 11 — 「그 노드 이전의
+    // 노드들은 [완료]처리되도록 해줘」). 시작점 n1 에서 n5 까지의 최단 경로는
+    // n1 → n2 → n3 → n5 다.
+    for (const code of ["n2", "n3"]) {
+      assert.equal(byCode.get(code)!.status, "COMPLETED", `${code} 가 길 위인데 완료가 안 됐다`);
+      assert.equal(byCode.get(code)!.completedBy, engineerId, "완료한 사람은 옮긴 사람이다");
+      assert.notEqual(byCode.get(code)!.completedAt, null);
+      assert.notEqual(byCode.get(code)!.startedAt, null, "한 번도 안 선 줄에도 시작 기록이 있어야 한다");
+      assert.equal(byCode.get(code)!.workMemo, null, "작업 메모는 비어 있다 — 안 한 말을 적지 않는다");
+    }
+    // 🔴 **길 밖은 안 바뀐다.** n7(END)은 n5 뒤에 있으므로 손대지 않는다.
+    assert.equal(byCode.get("n7")!.status, "PENDING", "경로 밖의 줄이 완료됐다");
+
+    assert.equal(byCode.get("n4")!.status, "PENDING", "경로 밖의 하던 진행 중이 대기로 안 내려갔다");
     assert.equal(
       [...byCode.values()].filter((n) => n.status === "IN_PROGRESS").length,
       1,
@@ -2733,32 +2755,34 @@ describe("procedure-case-execution: 지금 할 일 옮기기", () => {
     );
 
     // 🔴 내려간 줄의 **하던 자취는 그대로**다 — status 한 칸만 내린다.
-    assert.notEqual(byCode.get("n2")!.startedAt, null, "처음 손댄 때가 지워졌다");
-    assert.equal(byCode.get("n2")!.startedBy, engineerId);
-    assert.equal(byCode.get("n2")!.version, n2Before.version + 1, "바뀐 줄은 version 이 올라야 한다");
+    assert.notEqual(byCode.get("n4")!.startedAt, null, "처음 손댄 때가 지워졌다");
+    assert.equal(byCode.get("n4")!.startedBy, engineerId);
+    assert.equal(byCode.get("n4")!.version, n4Before.version + 1, "바뀐 줄은 version 이 올라야 한다");
 
     // 🔵 건너뜀으로 둔갑하지 않는다 — 안 한 일을 했다고 적으면 되돌릴 길이 없다.
     assert.equal([...byCode.values()].filter((n) => n.status === "SKIPPED").length, 0);
 
     // 🔴 그리고 **「지금 할 일」이 정말로 따라온다.** 옮기기는 노드 상태만
     // 건드리는데 pickCurrentTask 는 진행 중 가운데 절차 차례가 앞선 것을 고른다 —
-    // 위에서 n2 를 안 내렸다면 여기서 n2 가 나와 「눌렀는데 아무 일도 안 일어난」
+    // 위에서 n4 를 안 내렸다면 여기서 n4 가 나와 「눌렀는데 아무 일도 안 일어난」
     // 화면이 된다. 오류가 안 나는 종류라 반드시 여기서 잡아야 한다.
     const detail = await getExecutionDetail(executionId);
     const current = pickCurrentTaskNode(detail!.nodes, { isExecutionFinished: false });
     assert.ok(current, "지금 할 일이 없다");
-    assert.equal(current.nodeCode, "n4", "옮겼는데 지금 할 일이 안 따라왔다");
+    assert.equal(current.nodeCode, "n5", "옮겼는데 지금 할 일이 안 따라왔다");
     assert.equal(current.status, "IN_PROGRESS");
   });
 
-  test("72. 🔴 감사 이력 — **NODE_STARTED 한 줄**이고 새 action 값이 없다. 내려간 줄에는 안 붙는다", async () => {
+  test("72. 🔴 감사 이력 — 옮긴 줄 한 줄 + **함께 완료된 줄마다** 한 줄. 새 action 값이 없다", async () => {
     const { templateId, executionId } = await startExecution("jump-audit");
     let byCode = await loadExecutionNodesByCode(templateId, executionId);
-    await startExecutionNode(byCode.get("n2")!.id, engineerId, byCode.get("n2")!.version);
+    // n4 를 시작해 둔다 — n5 까지의 최단 경로 **밖**이라 대기로 내려간다.
+    await startExecutionNode(byCode.get("n4")!.id, engineerId, byCode.get("n4")!.version);
 
     byCode = await loadExecutionNodesByCode(templateId, executionId);
-    const standDownId = byCode.get("n2")!.id;
-    const target = byCode.get("n4")!;
+    const standDownId = byCode.get("n4")!.id;
+    const onPathIds = [byCode.get("n2")!.id, byCode.get("n3")!.id];
+    const target = byCode.get("n5")!;
     await jumpToExecutionNode(executionId, target.id, engineerId, target.version);
 
     const history = await getExecutionHistory(executionId);
@@ -2767,8 +2791,39 @@ describe("procedure-case-execution: 지금 할 일 옮기기", () => {
     );
     assert.equal(jumped.length, 1, "옮긴 줄이 이력에 딱 한 번 적혀야 한다");
     assert.equal(jumped[0].executionNodeId, target.id);
-    assert.deepEqual((jumped[0].afterState as { standDownExecutionNodeIds: string[] }).standDownExecutionNodeIds, [standDownId]);
+    const jumpedAfter = jumped[0].afterState as {
+      standDownExecutionNodeIds: string[];
+      completedOnPathExecutionNodeIds: string[];
+      reopenedOffPathExecutionNodeIds: string[];
+      pathFound: boolean;
+    };
+    assert.deepEqual(jumpedAfter.standDownExecutionNodeIds, [standDownId]);
+    assert.deepEqual(jumpedAfter.completedOnPathExecutionNodeIds, onPathIds, "지나온 길이 이력에 안 적혔다");
+    assert.deepEqual(jumpedAfter.reopenedOffPathExecutionNodeIds, []);
+    assert.equal(jumpedAfter.pathFound, true, "길을 찾았는지가 안 적히면 「없었다」와 「다 끝나 있었다」가 안 갈린다");
     assert.deepEqual(jumped[0].beforeState, { status: "PENDING" }, "옮기기 전 상태가 적혀야 「이번에 시작한 것」과 가려진다");
+
+    // 🔴 **함께 완료된 줄은 사람이 직접 완료한 것과 갈려야 한다**(2026-11-02, 조각 11).
+    // 새 action 값을 만들지 않고 NODE_COMPLETED 의 afterState 에 표시를 덧붙인다 —
+    // 사람이 누른 완료의 afterState 는 null 이거나 { selectedOutgoingEdgeId } 뿐이다.
+    const completedByJump = history.filter(
+      (h) => h.actionType === "NODE_COMPLETED" && (h.afterState as { completedByJump?: boolean } | null)?.completedByJump === true
+    );
+    assert.deepEqual(
+      completedByJump.map((h) => h.executionNodeId).sort(),
+      [...onPathIds].sort(),
+      "함께 완료된 줄마다 이력이 한 줄씩 있어야 한다"
+    );
+    for (const row of completedByJump) {
+      assert.equal((row.afterState as { jumpTargetExecutionNodeId: string }).jumpTargetExecutionNodeId, target.id);
+      // 🔴 옮긴 줄 **뒤**에 선다 — 같은 트랜잭션이라 간격을 안 주면 차례가 안 정해진다.
+      assert.ok(row.createdAt > jumped[0].createdAt, "함께 완료된 줄이 옮긴 줄보다 앞에 섰다");
+    }
+    assert.equal(
+      new Set(completedByJump.map((h) => h.createdAt)).size,
+      completedByJump.length,
+      "두 줄의 시각이 같으면 이력 차례가 새로고침할 때마다 바뀐다"
+    );
 
     // 🔴 **내려간 줄에는 이력이 안 붙는다** — 「진행 중 → 대기」에 들어맞는 action
     // 값이 없어서, 억지로 빌리면 이력 화면이 거짓말을 한다(그만두기와 같은 잣대).
@@ -2946,6 +3001,233 @@ describe("procedure-case-execution: 지금 할 일 옮기기", () => {
     }
     assert.ok(detail.templateNodes.some((n) => !marks.has(n.id)), "실행 줄이 없는 칸(START·참고 문서)에는 딱지가 없어야 한다");
     void templateId;
+  });
+
+  test("78. 🔴 경로 **밖**의 완료는 대기로 되돌아가고, 그 줄은 **새로 밟는 것처럼** 비워진다", async () => {
+    const { templateId, edges, executionId } = await startExecution("jump-reopen");
+    let byCode = await loadExecutionNodesByCode(templateId, executionId);
+
+    // n2 → n3(YES) → n4 까지 **실제로** 끝낸다. 자동 전진이 다음을 세운다.
+    await completeExecutionNode({ executionNodeId: byCode.get("n2")!.id, actorUserId: engineerId, expectedVersion: byCode.get("n2")!.version });
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    await completeExecutionNode({
+      executionNodeId: byCode.get("n3")!.id,
+      actorUserId: engineerId,
+      expectedVersion: byCode.get("n3")!.version,
+      selectedOutgoingEdgeId: edges.find((e) => e.branchType === "YES")!.id,
+    });
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const memo = "FH-CONT 전압 23.4V — 규격 하한";
+    const memoResult = await updateExecutionNodeMemo(byCode.get("n4")!.id, engineerId, byCode.get("n4")!.version, memo);
+    assert.equal(memoResult.ok, true, JSON.stringify(memoResult));
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    await completeExecutionNode({
+      executionNodeId: byCode.get("n4")!.id,
+      actorUserId: engineerId,
+      expectedVersion: byCode.get("n4")!.version,
+      reason: "교환 후 재측정 완료",
+    });
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const n4Before = byCode.get("n4")!;
+    assert.equal(n4Before.status, "COMPLETED", "표본 확인 — 되돌릴 완료가 있어야 한다");
+    assert.equal(n4Before.workMemo, memo, "표본 확인 — 비울 메모가 있어야 한다");
+    assert.notEqual(n4Before.startedAt, null, "표본 확인");
+    assert.equal(byCode.get("n7")!.status, "IN_PROGRESS", "표본 확인 — 자동 전진이 END 를 세웠다(참고 문서를 건너뛴다)");
+    const n2Before = byCode.get("n2")!;
+
+    // 🔴 NG 갈래의 n5 로 옮긴다. 시작점에서 n5 까지의 최단 경로는 n1 → n2 → n3 → n5
+    // 라서 **n4 와 n7 이 길 밖**이 된다.
+    const target = byCode.get("n5")!;
+    const result = await jumpToExecutionNode(executionId, target.id, engineerId, target.version);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const n4After = byCode.get("n4")!;
+    assert.equal(n4After.status, "PENDING", "길 밖의 완료가 대기로 안 돌아갔다 — 다시 할 일이 「한 일」로 남는다");
+    // 🔴 **새로 밟는 것처럼** 비운다(사용자 결정: 「기존 메모가 보이는 것이 아니라
+    // 그 노드를 새로 밟는 것처럼 되야 해」).
+    assert.equal(n4After.workMemo, null, "지난 메모가 「지금 할 일」에 그대로 뜬다");
+    assert.equal(n4After.startedAt, null);
+    assert.equal(n4After.startedBy, null);
+    assert.equal(n4After.completedAt, null);
+    assert.equal(n4After.completedBy, null);
+    assert.equal(n4After.lastActionReason, null);
+    assert.equal(n4After.selectedOutgoingEdgeId, null);
+    // 🔵 **담당은 안 비운다** — 「이번에 무엇을 했는가」가 아니라 「누가 맡는가」이고,
+    //    비우면 이 줄을 건드릴 수 있는 사람이 바뀐다(권한 문제다).
+    assert.equal(n4After.assignedEngineerId, n4Before.assignedEngineerId, "담당이 지워지면 유효 담당이 바뀐다");
+
+    // 🔴 **길 위의 완료는 그대로**다. 다시 쓰면 완료한 사람·시각이 덮인다.
+    assert.equal(byCode.get("n2")!.status, "COMPLETED");
+    assert.equal(byCode.get("n2")!.version, n2Before.version, "길 위의 완료를 건드렸다");
+    assert.deepEqual(byCode.get("n2")!.completedAt, n2Before.completedAt);
+
+    // 🔵 조각 10 의 **stand-down 과 다르다** — n7 은 완료가 아니라 진행 중이었으므로
+    //    자취를 그대로 둔 채 대기로만 내려간다(잠시 미뤄 둔 것이지 지나간 것이 아니다).
+    assert.equal(byCode.get("n7")!.status, "PENDING");
+    assert.notEqual(byCode.get("n7")!.startedAt, null, "미뤄 둔 줄까지 비우면 하던 자리로 못 돌아온다");
+
+    // 🔴 **START 의 실행 행은 안 건드린다** — 안 가리면 「길 밖의 완료」로 읽혀
+    //    절차가 시작도 안 한 꼴이 된다.
+    assert.equal(byCode.get("n1")!.status, "COMPLETED", "START 가 대기로 내려갔다");
+
+    // 🔴 **비우기 전 값이 이력에 남는다**(사용자 결정: 「이전 기록(메모 등)은 실행
+    //    이력에 남겠지만」). 칸을 그냥 비우면 그 글이 DB 어디에도 안 남는다.
+    const history = await getExecutionHistory(executionId);
+    const reopened = history.filter(
+      (h) => h.actionType === "NODE_REOPENED" && (h.afterState as { reopenedByJump?: boolean } | null)?.reopenedByJump === true
+    );
+    assert.equal(reopened.length, 1, "되돌린 줄이 이력에 딱 한 번 적혀야 한다");
+    assert.equal(reopened[0].executionNodeId, n4Before.id);
+    const beforeState = reopened[0].beforeState as { status: string; workMemo: string | null; lastActionReason: string | null; completedBy: string | null };
+    assert.equal(beforeState.status, "COMPLETED");
+    assert.equal(beforeState.workMemo, memo, "비운 메모가 이력에도 없으면 사람이 쓴 글이 통째로 사라진다");
+    assert.equal(beforeState.lastActionReason, "교환 후 재측정 완료");
+    assert.equal(beforeState.completedBy, engineerId);
+
+    // 🔴 그리고 **실행 이력 화면이 그 글자를 실제로 꺼낼 수 있어야** 한다 —
+    //    읽는 함수가 없으면 「이력에 남는다」가 거짓이 된다.
+    assert.equal(readJumpResetWorkMemo(reopened[0].beforeState), memo);
+
+    // 🔵 새 action 값이 안 생겼다.
+    for (const actionType of new Set(history.map((h) => h.actionType))) {
+      assert.ok(
+        ["EXECUTION_STARTED", "NODE_ADDED", "NODE_STARTED", "NODE_COMPLETED", "NODE_SKIPPED", "NODE_BLOCKED", "NODE_REOPENED", "NODE_MEMO_UPDATED"].includes(actionType),
+        `처음 보는 action 값: ${actionType}`
+      );
+    }
+  });
+
+  test("79. 🔴 갈래를 바꾸면 **안 가는 길의 완료**가 대기로 돌아간다 — 건너뜀·차단됨은 그대로", async () => {
+    const { templateId, edges, executionId } = await startExecution("jump-branch-switch");
+    let byCode = await loadExecutionNodesByCode(templateId, executionId);
+
+    // n2 완료 → n3 이 선다. n3 에서 **NG** 를 골라 n5 로 간 뒤 n5 까지 끝낸다.
+    await completeExecutionNode({ executionNodeId: byCode.get("n2")!.id, actorUserId: engineerId, expectedVersion: byCode.get("n2")!.version });
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    await completeExecutionNode({
+      executionNodeId: byCode.get("n3")!.id,
+      actorUserId: engineerId,
+      expectedVersion: byCode.get("n3")!.version,
+      selectedOutgoingEdgeId: edges.find((e) => e.branchType === "NG")!.id,
+    });
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    await completeExecutionNode({ executionNodeId: byCode.get("n5")!.id, actorUserId: engineerId, expectedVersion: byCode.get("n5")!.version });
+    // 🔵 n7(END)을 건너뛴다 — 사유가 붙는 사람의 판단이라 되돌리면 안 되는 표본이다.
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    await skipExecutionNode(byCode.get("n7")!.id, engineerId, byCode.get("n7")!.version, "이번 건은 여기서 끝낸다");
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    assert.equal(byCode.get("n5")!.status, "COMPLETED", "표본 확인 — NG 쪽 작업이 끝나 있다");
+    assert.equal(byCode.get("n7")!.status, "SKIPPED", "표본 확인");
+    const n5Before = byCode.get("n5")!;
+
+    // 🔴 이제 **YES 쪽 n4** 로 옮긴다. 최단 경로는 n1 → n2 → n3 → n4 라 n5 가 길 밖이다.
+    const target = byCode.get("n4")!;
+    const result = await jumpToExecutionNode(executionId, target.id, engineerId, target.version);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    assert.equal(byCode.get("n4")!.status, "IN_PROGRESS");
+    assert.equal(byCode.get("n5")!.status, "PENDING", "안 가는 길의 완료가 그대로 남으면 남은 수가 거짓이 된다");
+    assert.equal(byCode.get("n5")!.version, n5Before.version + 1);
+    // 🔴 **건너뜀은 안 되돌린다** — 사람이 사유를 적어 「안 한다」고 고른 것이다.
+    assert.equal(byCode.get("n7")!.status, "SKIPPED", "건너뜀을 되돌리면 사람의 판단과 사유가 말없이 지워진다");
+    assert.equal(byCode.get("n7")!.lastActionReason, "이번 건은 여기서 끝낸다");
+  });
+
+  test("80. 🔴 **차단됨**은 길 위에 있어도 완료로 안 바뀌고, 길 밖에 있어도 그대로다", async () => {
+    const { templateId, executionId } = await startExecution("jump-blocked-on-path");
+    let byCode = await loadExecutionNodesByCode(templateId, executionId);
+
+    await blockExecutionNode(byCode.get("n3")!.id, engineerId, byCode.get("n3")!.version, "계측기 교정 대기");
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const n3Before = byCode.get("n3")!;
+    assert.equal(n3Before.status, "BLOCKED", "표본 확인");
+
+    // n1 → n2 → n3 → n4 — 막힌 n3 이 **길 한가운데**에 있다.
+    const target = byCode.get("n4")!;
+    const result = await jumpToExecutionNode(executionId, target.id, engineerId, target.version);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    assert.equal(byCode.get("n2")!.status, "COMPLETED", "막힌 줄 **앞**은 그대로 완료가 된다");
+    assert.equal(byCode.get("n3")!.status, "BLOCKED", "사유 없이 푸는 길이 생겼다 — 막아 둔 뜻이 사라진다");
+    assert.equal(byCode.get("n3")!.version, n3Before.version, "막힌 줄을 건드렸다");
+    assert.equal(byCode.get("n3")!.lastActionReason, "계측기 교정 대기");
+  });
+
+  test("81. 🔴 **길이 없으면 한 줄도 안 건드린다** — 끝낸 일이 통째로 대기가 되면 안 된다", async () => {
+    const { templateId, executionId } = await startExecution("jump-no-path");
+    let byCode = await loadExecutionNodesByCode(templateId, executionId);
+    await completeExecutionNode({ executionNodeId: byCode.get("n2")!.id, actorUserId: engineerId, expectedVersion: byCode.get("n2")!.version });
+
+    // 사례별 추가 작업 — 절차 그림에 자리가 없어 「지나온 길」이 성립하지 않는다.
+    const added = await addExecutionExtraTask(executionId, engineerId, "임시 배선 정리", null);
+    assert.equal(added.ok, true, JSON.stringify(added));
+    if (!added.ok) return;
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const n2Before = byCode.get("n2")!;
+    assert.equal(n2Before.status, "COMPLETED", "표본 확인 — 되돌려지면 안 되는 완료가 있어야 한다");
+
+    const [extra] = await db
+      .select()
+      .from(procedureCaseExecutionNodes)
+      .where(and(eq(procedureCaseExecutionNodes.executionId, executionId), eq(procedureCaseExecutionNodes.extraTaskTitle, "임시 배선 정리")));
+    const result = await jumpToExecutionNode(executionId, extra.id, engineerId, extra.version);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    assert.equal(byCode.get("n2")!.status, "COMPLETED", "길을 못 찾았는데 완료가 통째로 대기가 됐다");
+    assert.equal(byCode.get("n2")!.version, n2Before.version, "길을 못 찾았는데 행을 건드렸다");
+    assert.equal(byCode.get("n3")!.status, "PENDING", "길을 못 찾았는데 완료로 바뀌었다");
+
+    const history = await getExecutionHistory(executionId);
+    const jumped = history.find((h) => h.actionType === "NODE_STARTED" && (h.afterState as { jumpedTo?: boolean } | null)?.jumpedTo === true);
+    assert.ok(jumped, "옮긴 줄의 이력이 없다");
+    assert.equal((jumped.afterState as { pathFound: boolean }).pathFound, false, "길을 못 찾았다는 사실이 이력에 남아야 한다");
+  });
+
+  test("82. 🔴 진행률이 **경로 기준**이다 — 같은 걸음인데 갈래에 따라 다른 수가 나온다", async () => {
+    const { templateId, executionId } = await startExecution("jump-progress");
+    const byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const detail = await getExecutionDetail(executionId);
+    assert.ok(detail);
+
+    // 🔵 먼저 표본 확인 — 이 절차에 시작점과 끝점이 **둘 다** 있어야 경로 기준이 선다.
+    assert.equal(detail.templateNodes.filter((n) => n.nodeType === "START").length, 1);
+    assert.equal(detail.templateNodes.filter((n) => n.nodeType === "END").length, 1);
+
+    function progressAt(code: string) {
+      return computeExecutionProgress({
+        nodes: detail!.nodes,
+        templateNodes: detail!.templateNodes,
+        edges: detail!.flowEdges,
+        currentExecutionNodeId: byCode.get(code)!.id,
+      });
+    }
+
+    // n4(YES 쪽)와 n5(NG 쪽)는 **둘 다 시작점에서 세 번째**인데, 남은 길이 다르다.
+    const yes = progressAt("n4");
+    const ng = progressAt("n5");
+    assert.deepEqual(yes, { basis: "PATH", current: 3, total: 4 }, "n1 → n2 → n3 → n4 → (참고) → n7");
+    assert.deepEqual(ng, { basis: "PATH", current: 3, total: 6 }, "NG 쪽은 n3 으로 되돌아가느라 길이 길다");
+    assert.ok(
+      executionProgressPercent(yes) > executionProgressPercent(ng),
+      "짧은 길로 갔는데 퍼센트가 더 낮으면 경로 기준이 아니다"
+    );
+
+    // 🔵 참고 문서는 길 위에 있어도 **안 센다** — 실행 줄이 없는 칸이다.
+    assert.equal(yes.basis === "PATH" ? yes.total : 0, 4, "참고 문서를 세면 5가 된다");
+
+    // 🔴 글자가 수치 줄의 「전체 N」과 **다른 말**을 쓴다 — 나란히 서면 같은 것을
+    //    재는 줄로 읽힌다.
+    const label = formatExecutionProgressLabel(yes);
+    assert.equal(label, "이 길에서 3번째 / 4단계");
+    assert.ok(!label?.includes("전체"));
+    assert.equal(detail.nodes.length, 5, "수치 줄의 「전체」는 5 — 경로의 4와 다른 수다");
   });
 });
 

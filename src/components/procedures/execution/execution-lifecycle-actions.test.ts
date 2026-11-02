@@ -465,7 +465,10 @@ describe("끝낸 뒤·그만둔 뒤의 화면", () => {
 
     // 🔴 상자 안의 차례 — 진행바와 수치가 **먼저**, 단추가 **나중**이다. 단추가
     //    위에 있으면 지금 눌러야 할 것처럼 보인다.
-    const barAt = summaryBody.indexOf('style={{ width: `${donePct}%` }}');
+    // 🔵 2026-11-02(조각 11)에 이름이 donePct → progressPct 로 바뀌었다. 재던 것은
+    //    「끝낸 비율」이었는데 이제는 **경로상 자리**라, 옛 이름을 그대로 두면 글자가
+    //    하는 일과 어긋난다(이 저장소가 주석·이름에 걸려 넘어진 자리다).
+    const barAt = summaryBody.indexOf('style={{ width: `${progressPct}%` }}');
     const countsAt = summaryBody.indexOf("<span>차단됨 {blocked}</span>");
     const buttonsAt = summaryBody.indexOf("<ExecutionLifecycleActions");
     assert.ok(barAt >= 0 && countsAt >= 0, "진행바나 수치 줄을 못 찾았다");
@@ -578,10 +581,13 @@ describe("㉣ 마친 실행은 위에 안 서고 「이 건의 다른 절차」�
       flatScreen,
       /const placement = placeExecutionSummary\(\{ executionId: executionDetail\.executionId, isExecutionFinished \}\);/
     );
-    assert.match(
-      flatScreen,
-      /\{placement\.slot === "TOP" && \( <ProgressSummary detail=\{executionDetail\} finish=\{finish\} eligible=\{ordinaryActionEligible\} \/> \)\}/
-    );
+    // 🔵 2026-11-02(조각 11)에 프롭이 하나 늘었다(currentTaskNodeId — 진행률을
+    //    「지금 할 일」을 경유하는 경로로 세기 때문이다). 재는 것은 그대로다 —
+    //    **자리 판정이 상자를 가린다**는 것. 프롭 목록까지 글자로 못 박으면
+    //    프롭이 늘 때마다 이 단언이 깨지면서 정작 재려던 것은 안 재게 된다.
+    assert.match(flatScreen, /\{placement\.slot === "TOP" && \( <ProgressSummary /);
+    assert.match(flatScreen, /<ProgressSummary [^>]*detail=\{executionDetail\}/);
+    assert.match(flatScreen, /<ProgressSummary [^>]*currentTaskNodeId=\{currentTaskNodeId\}/);
   });
 
   test("🔴 페이지의 **빼기**도 같은 함수가 정한다 — 두 벌로 갈라져 있지 않다", () => {

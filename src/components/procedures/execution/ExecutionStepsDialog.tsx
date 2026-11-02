@@ -205,9 +205,19 @@ export default function ExecutionStepsDialog({
         <h2 id="execution-steps-dialog-title" className="text-sm font-semibold">
           전체 단계 보기
         </h2>
+        {/* 🔴 2026-11-02(조각 11)에 **하는 일이 바뀌어** 글자를 고쳤다. 전에는
+            「앞의 작업들은 건너뛴 것이 아니라 대기로 남습니다」였는데, 이제는
+            경로 위가 완료가 되고 경로 밖의 완료는 대기로 되돌아간다. 글자를 안
+            고치면 화면이 **반대로 적힌 설명**을 달고 있게 된다.
+
+            🔴 되돌아가는 쪽을 반드시 적는다 — 되돌리면 그 노드의 작업 메모가
+            지워지므로(실행 이력에는 남는다), 누르기 전에 알아야 한다. */}
         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
           이 절차의 모든 단계와 지금 상태를 봅니다. 작업을 고르고 <span className="font-medium">[여기로 옮기기]</span> 를
-          누르면 「지금 할 일」이 그 작업이 됩니다 — 앞의 작업들은 건너뛴 것이 아니라 대기로 남습니다.
+          누르면 「지금 할 일」이 그 작업이 되고, <span className="font-medium">시작 지점에서 그 작업까지 이어지는 최단
+          경로 위의 앞 작업들이 완료로 바뀝니다</span>. 그 경로에서 벗어난 완료는{" "}
+          <span className="font-medium">다시 대기가 되고 그 작업의 메모는 지워집니다</span> — 지워진 메모는 「실행 이력」에
+          남습니다. 건너뛰거나 막아 둔 작업은 사유와 함께 그대로 둡니다.
         </p>
 
         <ExecutionStepsPanel

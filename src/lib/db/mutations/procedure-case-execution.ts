@@ -27,6 +27,7 @@ import {
 import { assessExecutionFinish } from "@/lib/domain/procedure-execution-lifecycle";
 import { classifyStartNode, type StartNodeRejectionReason } from "@/lib/domain/procedure-start-picker";
 import { planNodeJump, type JumpRejectionReason } from "@/lib/domain/procedure-execution-jump";
+import { resolveJumpPath } from "@/lib/domain/procedure-execution-path";
 import type { ProcedureCaseExecutionActionType } from "@/lib/domain/procedure-case-execution-types";
 import type { ProcedureNodeType } from "@/lib/domain/procedure-template-types";
 import type { Role } from "@/lib/domain/types";
@@ -212,6 +213,20 @@ async function insertHistory(
  * 때문이다.
  */
 const FOLLOWING_HISTORY_AT = sql`now() + interval '1 millisecond'`;
+
+/**
+ * 한 트랜잭션이 이력을 **셋 이상** 쓸 때 쓰는 것 — 줄마다 다른 간격을 준다
+ * (2026-11-02, 조각 11: 옮기기가 지나온 길의 줄 수만큼 NODE_COMPLETED 를 쓴다).
+ * 위 FOLLOWING_HISTORY_AT 과 같은 까닭이고, 다른 것은 **몇 번째인가**뿐이다.
+ *
+ * 🔴 값을 sql 템플릿의 자리(`${}`)로 끼우지 않는다 — drizzle 이 그것을 바인딩
+ * 자리($1)로 구워서, interval 글자 안에 들어가면 문장이 아예 안 선다. 그래서
+ * 정수인지 확인하고 **글자 그대로** 넣는다(sql.raw).
+ */
+function followingHistoryAt(stepsAfterFirst: number): SQL {
+  const safe = Math.max(0, Math.trunc(stepsAfterFirst));
+  return sql.raw(`now() + interval '${safe} milliseconds'`);
+}
 
 /**
  * 중간부터 시작할 때, 화면이 보낸 노드를 거절하는 까닭 ↔ 이 변이의 결과 코드.
@@ -921,6 +936,49 @@ const JUMP_REJECTION_CODES: Record<JumpRejectionReason, ExecutionMutationResultC
  * abandonProcedureExecution 이 같은 까닭으로 이력을 안 쓰는 것과 같은 잣대다.
  * 대신 내려간 줄의 id 를 **이 한 줄의 afterState 에** 남긴다 — 무엇이 함께
  * 바뀌었는지가 기록에서 사라지지는 않는다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **자리가 상태를 정한다**(2026-11-02, 조각 11)
+ * ──────────────────────────────────────────────────────────────────────
+ * 사용자 결정 — 「시작점 부터 그 노드까지의 경로에 있는 노드들만 [완료]처리」·
+ * 「이전 노드로 옮겨가면 옮겨가는 노드 뒷부분에 배치되어 있는 노드들은 다시
+ * [대기]상태가 되도록」. 합치면 한 규칙이다:
+ *
+ *   **「시작점 → 고른 노드」 최단 경로 위는 완료, 그 길에 없는 완료는 대기.**
+ *
+ * 어느 줄이 그 길 위인지는 resolveJumpPath 가 정하고, 무엇을 건드리고 무엇을
+ * 그냥 두는지는 전과 같이 **도메인이** 정한다(planNodeJump) — 쓰기 쪽에서 if 로
+ * 다시 적으면 시험이 쓰기 코드를 베껴 재게 된다.
+ *
+ * ⚠️ **권한 한 칸이 넓어졌다**(사용자 결정의 결과). reopenExecutionNode 는 완료를
+ * 되돌리는 것을 **관리 수준(MANAGE)** 으로 묶어 두는데, 이 길은 WRITE 만 가진
+ * 담당 엔지니어도 **경로 밖의 완료를 대기로 되돌리게** 한다. 그렇게 한 까닭은
+ * 고리가 있는 절차에서 되돌아갔을 때 그 뒤가 완료로 남아 있으면 **다시 할 일이
+ * 「이미 한 일」로 보이기** 때문이다. 다만 되돌리는 범위를 좁혀 둔다 —
+ * **완료만**, **사유를 적어 둔 건너뜀·차단됨은 안 건드린다**(planNodeJump 머리말).
+ *
+ * 🔴 **길을 못 찾으면 한 줄도 안 건드린다.** 실측 「원복 검사 및 개선 작업
+ * (3상 입력)」은 노드 23개에 간선 8개라 START 에서 닿는 노드가 9개뿐이다. 길이
+ * 없다는 것은 **지나왔다는 근거도, 「경로 밖」이라는 판정도 없다**는 뜻이다 —
+ * 근거 없이 완료로 적으면 안 한 일을 했다고 적는 것이고, 근거 없이 되돌리면
+ * 끝낸 일이 통째로 대기가 된다. 그때 옮기기는 조각 10 그대로 자리만 옮긴다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 함께 바뀐 줄의 이력 — **이미 있는 action 값에 표시를 덧붙인다**
+ * ──────────────────────────────────────────────────────────────────────
+ * 줄마다 한 줄씩 적는다 — 완료는 NODE_COMPLETED 에 `completedByJump: true`,
+ * 되돌림은 NODE_REOPENED 에 `reopenedByJump: true`. 사람이 [완료]를 눌러 적힌
+ * NODE_COMPLETED 의 afterState 는 null 이거나 { selectedOutgoingEdgeId } 뿐이고,
+ * [재개(되돌림)]가 적는 NODE_REOPENED 는 { status: "IN_PROGRESS" } 에 사유가
+ * 붙으므로 넷이 섞이지 않는다. 🔴 새 action 값을 만들지 않는다 — enum 을 늘리는
+ * 것은 마이그레이션이고, 이 행에 실제로 일어난 일이 그 값의 뜻 그대로다
+ * (조각 2·7·9·10 이 이미 있는 값에 표시를 덧붙인 것과 같은 판단).
+ *
+ * 🔵 **고른 갈래(selected_outgoing_edge_id)는 안 적는다.** 경로가 어느 간선을
+ * 탔는지는 알지만, 그 칸의 뜻은 「**사람이** 고른 갈래」다. 같은 길이의 길이
+ * 여럿일 때 우리가 고른 쪽을 사람의 판단으로 적어 두면, 나중에 그 기록을 근거로
+ * 읽는 사람이 틀린다 — 「여럿일 때 첫째를 고르는 것은 틀린 쪽을 1순위로 만드는
+ * 것」이라는 resolveAutoAdvanceTarget 의 판단과 같은 잣대다.
  */
 export async function jumpToExecutionNode(
   executionId: string,
@@ -955,13 +1013,71 @@ export async function jumpToExecutionNode(
       // 더 시작할 수 있다. id 차례로 잠가 두 사람이 동시에 옮길 때 서로를
       // 기다리는 자리가 어긋나지 않게 한다.
       const siblings = await tx
-        .select({ id: procedureCaseExecutionNodes.id, status: procedureCaseExecutionNodes.status, version: procedureCaseExecutionNodes.version, startedAt: procedureCaseExecutionNodes.startedAt })
+        .select({
+          id: procedureCaseExecutionNodes.id,
+          procedureTemplateNodeId: procedureCaseExecutionNodes.procedureTemplateNodeId,
+          status: procedureCaseExecutionNodes.status,
+          version: procedureCaseExecutionNodes.version,
+          startedBy: procedureCaseExecutionNodes.startedBy,
+          startedAt: procedureCaseExecutionNodes.startedAt,
+          assignedEngineerId: procedureCaseExecutionNodes.assignedEngineerId,
+          // 🔵 아래 다섯은 **되돌리면서 비우는 칸**이다(조각 11). 비우기 **전에**
+          // 이력 줄에 옮겨 적어야 해서 여기서 함께 읽는다 — 안 읽고 비우면 그
+          // 기록이 DB 어디에도 안 남는다.
+          completedBy: procedureCaseExecutionNodes.completedBy,
+          completedAt: procedureCaseExecutionNodes.completedAt,
+          workMemo: procedureCaseExecutionNodes.workMemo,
+          lastActionReason: procedureCaseExecutionNodes.lastActionReason,
+          selectedOutgoingEdgeId: procedureCaseExecutionNodes.selectedOutgoingEdgeId,
+        })
         .from(procedureCaseExecutionNodes)
         .where(eq(procedureCaseExecutionNodes.executionId, executionId))
         .orderBy(procedureCaseExecutionNodes.id)
         .for("update");
 
-      const plan = planNodeJump({ nodes: siblings, targetExecutionNodeId: executionNodeId });
+      // 🔴 **지나온 길**을 절차 그림에서 찾는다(조각 11). 간선·노드는 템플릿
+      // 전체를 읽는다 — 실측 템플릿의 간선이 8~42개라 한 번 더 읽어도 비용이
+      // 뜻있게 늘지 않고, 좁혀 읽으면 경로가 애초에 안 그려진다
+      // (advanceToNextNode 가 참고 문서를 건너뛰려고 전체를 읽는 것과 같은 사정).
+      const templateNodes = await tx
+        .select({ id: procedureTemplateNodes.id, nodeType: procedureTemplateNodes.nodeType })
+        .from(procedureTemplateNodes)
+        .where(eq(procedureTemplateNodes.procedureTemplateId, ctx.execution.procedureTemplateId));
+      const templateEdges = await tx
+        .select({
+          id: procedureTemplateEdges.id,
+          fromNodeId: procedureTemplateEdges.fromNodeId,
+          toNodeId: procedureTemplateEdges.toNodeId,
+          sortOrder: procedureTemplateEdges.sortOrder,
+        })
+        .from(procedureTemplateEdges)
+        .where(eq(procedureTemplateEdges.procedureTemplateId, ctx.execution.procedureTemplateId));
+
+      const jumpPath = resolveJumpPath({
+        templateNodes,
+        edges: templateEdges,
+        executionNodes: siblings,
+        targetExecutionNodeId: executionNodeId,
+      });
+
+      // 🔴 START 의 실행 행을 **가려서** 넘긴다. 그 줄은 만들 때 바로 완료로 차는데
+      // 경로 계산에서는 사람이 할 일이 아니라 빠지므로, 안 가리면 「경로 밖의
+      // 완료」로 읽혀 대기로 되돌아간다(JumpPlanNode.isSystemEntry 주석).
+      const systemEntryTemplateNodeIds = new Set(
+        templateNodes.filter((n) => isSystemEntryNodeType(n.nodeType)).map((n) => n.id)
+      );
+      const planNodes = siblings.map((s) => ({
+        id: s.id,
+        status: s.status,
+        isSystemEntry: s.procedureTemplateNodeId !== null && systemEntryTemplateNodeIds.has(s.procedureTemplateNodeId),
+      }));
+
+      const siblingById = new Map(siblings.map((s) => [s.id, s]));
+      const plan = planNodeJump({
+        nodes: planNodes,
+        targetExecutionNodeId: executionNodeId,
+        path: jumpPath,
+      });
       if (plan.kind === "REJECTED") fail(JUMP_REJECTION_CODES[plan.reason], plan.message);
       // 바꿀 것이 없으면 **아무것도 안 쓴다** — 값은 그대로인데 version 만 올리면
       // 같은 화면을 보던 다른 사람의 단추가 전부 CONFLICT 로 죽는다
@@ -985,7 +1101,7 @@ export async function jumpToExecutionNode(
         .where(eq(procedureCaseExecutionNodes.id, executionNodeId));
 
       for (const standDownId of plan.standDownExecutionNodeIds) {
-        const sibling = siblings.find((s) => s.id === standDownId);
+        const sibling = siblingById.get(standDownId);
         if (!sibling) continue;
         // 🔴 status 한 칸만 내린다. started_at · started_by · 작업 메모는 그대로
         // 둔다 — 하던 일을 없던 일로 만들지 않는다(도메인 머리말).
@@ -993,6 +1109,66 @@ export async function jumpToExecutionNode(
           .update(procedureCaseExecutionNodes)
           .set({ status: "PENDING", version: sibling.version + 1, updatedAt: now })
           .where(eq(procedureCaseExecutionNodes.id, standDownId));
+      }
+
+      // 지나온 길 — 경로 차례 그대로 완료로 바꾼다.
+      for (const passedId of plan.completeOnPathExecutionNodeIds) {
+        const sibling = siblingById.get(passedId);
+        if (!sibling) continue;
+        await tx
+          .update(procedureCaseExecutionNodes)
+          .set({
+            status: "COMPLETED",
+            // 한 번도 안 선 줄에도 시작 기록이 있어야 한다 — 이 모듈의 backfill
+            // 규약 그대로다(completeExecutionNode 가 같은 길을 쓴다).
+            startedBy: sibling.startedBy ?? actor.id,
+            startedAt: sibling.startedAt ?? now,
+            completedBy: actor.id,
+            completedAt: now,
+            version: sibling.version + 1,
+            updatedAt: now,
+          })
+          .where(eq(procedureCaseExecutionNodes.id, passedId));
+      }
+
+      // 경로 밖으로 밀려난 완료 — 대기로 되돌리고 **새로 밟는 것처럼 비운다**.
+      //
+      // 🔴 사용자 결정(2026-11-02) — 「한번 지나갔던 노드로 다시 돌아오게 된다면
+      // 이전 기록(메모 등)은 실행 이력에 남겠지만, [지금 할 일]에서는 기존 메모가
+      // 보이는 것이 아니라 그 노드를 새로 밟는 것처럼 되야 해.」
+      //
+      // 🔴 비우는 잣대는 **「다시 밟을 때 새 작업처럼 보이는가」** 다. 그래서
+      // **이번에 밟은 자취**(상태 · 시작 · 완료 · 작업 메모 · 마지막 사유 · 고른
+      // 갈래)는 비우고, **그 줄이 무엇인가**(절차 노드 · 추가 작업 제목·지시 ·
+      // 만든 때)는 그대로 둔다.
+      //
+      // 🔵 `assigned_engineer_id` 는 **안 비운다.** 그 칸은 「이번에 무엇을
+      // 했는가」가 아니라 「누가 맡는가」이고, 비우면 유효 담당이 접수 건의 담당
+      // 으로 떨어져 **누가 이 줄을 건드릴 수 있는지가 바뀐다** — 화면 글자 문제가
+      // 아니라 권한 문제다. 카드의 담당 줄은 비워도 접수 건 담당 이름이 그대로
+      // 뜨므로, 남겨 둔다고 「이미 손댄 줄」로 보이지도 않는다.
+      //
+      // 🔴 조각 10 의 **stand-down(진행 중 → 대기)과 다르다.** 그쪽은 「지나간」
+      // 것이 아니라 **잠시 미뤄 둔** 것이라 자취를 그대로 둔다 — 다시 오면 하던
+      // 자리로 돌아와야 한다. 이쪽은 **완료했던 것을 다시 하러** 돌아가는 길이다.
+      for (const reopenedId of plan.reopenOffPathExecutionNodeIds) {
+        const sibling = siblingById.get(reopenedId);
+        if (!sibling) continue;
+        await tx
+          .update(procedureCaseExecutionNodes)
+          .set({
+            status: "PENDING",
+            startedBy: null,
+            startedAt: null,
+            completedBy: null,
+            completedAt: null,
+            workMemo: null,
+            lastActionReason: null,
+            selectedOutgoingEdgeId: null,
+            version: sibling.version + 1,
+            updatedAt: now,
+          })
+          .where(eq(procedureCaseExecutionNodes.id, reopenedId));
       }
 
       await insertHistory(tx, {
@@ -1007,9 +1183,61 @@ export async function jumpToExecutionNode(
           jumpedTo: true,
           status: "IN_PROGRESS",
           standDownExecutionNodeIds: plan.standDownExecutionNodeIds,
+          // 🔴 길을 **찾았는지**까지 적는다. 함께 완료한 줄이 없는 까닭이 둘이라
+          // (길이 없었다 / 길은 있는데 이미 다 끝나 있었다) 빈 배열 하나로는
+          // 나중에 그 둘을 못 가른다.
+          pathFound: jumpPath.found,
+          completedOnPathExecutionNodeIds: plan.completeOnPathExecutionNodeIds,
+          reopenedOffPathExecutionNodeIds: plan.reopenOffPathExecutionNodeIds,
         },
         actorUserId: actor.id,
       });
+
+      // 함께 바뀐 줄마다 한 줄씩. 🔴 **옮긴 줄의 뒤**에 세운다 — 이력 조회는
+      // created_at 하나로만 정렬하므로(getExecutionHistory), 같은 트랜잭션의
+      // 줄들은 간격을 안 주면 차례가 아예 정해지지 않는다(insertHistory 주석).
+      const touchedOnJump = [
+        ...plan.completeOnPathExecutionNodeIds.map((id) => ({ id, actionType: "NODE_COMPLETED" as const, status: "COMPLETED" as const })),
+        ...plan.reopenOffPathExecutionNodeIds.map((id) => ({ id, actionType: "NODE_REOPENED" as const, status: "PENDING" as const })),
+      ];
+      for (const [index, touched] of touchedOnJump.entries()) {
+        const sibling = siblingById.get(touched.id);
+        // 🔴 되돌린 줄은 **비우기 전 값을 통째로** 이력에 옮겨 적는다. 칸을 그냥
+        // 비우면 그 기록이 DB 어디에도 안 남는다 — 사용자가 「이전 기록(메모 등)은
+        // 실행 이력에 남겠지만」이라고 한 그 「남는다」가 여기다. 조각 9 가
+        // completed_at 을 비우면서 beforeState 에 옮겨 적은 것과 같은 수법이다.
+        const clearedOnJump =
+          touched.actionType === "NODE_REOPENED" && sibling
+            ? {
+                clearedOnJump: true,
+                workMemo: sibling.workMemo,
+                lastActionReason: sibling.lastActionReason,
+                startedBy: sibling.startedBy,
+                startedAt: sibling.startedAt ? sibling.startedAt.toISOString() : null,
+                completedBy: sibling.completedBy,
+                completedAt: sibling.completedAt ? sibling.completedAt.toISOString() : null,
+                selectedOutgoingEdgeId: sibling.selectedOutgoingEdgeId,
+              }
+            : {};
+        await insertHistory(tx, {
+          executionId,
+          executionNodeId: touched.id,
+          // 🔴 새 action 값을 만들지 않는다. 되돌린 줄에 NODE_REOPENED 를 쓰는 것은
+          // 빌려 쓰는 것이 아니라 **그 값의 뜻 그대로**다 — reopenExecutionNode 가
+          // 완료를 되돌릴 때 적는 것과 같은 값이고, 이력 화면에도 「작업
+          // 재개(되돌림)」로 뜬다. 조각 10 이 「진행 중 → 대기」에 이 값을 안 쓴
+          // 것과 어긋나지 않는다: 그쪽은 **완료가 아니었던** 줄이라 재개라는 말이
+          // 거짓이 되지만, 이쪽은 실제로 완료를 되돌리는 것이다.
+          actionType: touched.actionType,
+          beforeState: { status: sibling?.status ?? null, ...clearedOnJump },
+          afterState:
+            touched.actionType === "NODE_COMPLETED"
+              ? { completedByJump: true, status: touched.status, jumpTargetExecutionNodeId: executionNodeId }
+              : { reopenedByJump: true, status: touched.status, jumpTargetExecutionNodeId: executionNodeId },
+          actorUserId: actor.id,
+          createdAt: followingHistoryAt(index + 1),
+        });
+      }
 
       return { ok: true, version: nextVersion };
     });
