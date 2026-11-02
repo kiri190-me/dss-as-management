@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { startProcedureExecutionAction } from "@/lib/server/actions/procedure-case-execution";
+import { formatProcedureTemplateTitle } from "@/lib/domain/procedure-template-title";
 import type { ExecutableTemplateOption } from "@/lib/db/queries/procedure-case-execution";
 
 const START_ELIGIBLE_ROLES = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const;
@@ -123,7 +124,11 @@ export default function ExecutionStartCard({
             >
               {templateOptions.map((t) => (
                 <option key={t.id} value={t.id}>
-                  {t.name} ({t.code})
+                  {/* 🔴 「이름 (코드)」를 여기서 이어 붙이지 않는다 — 코드 칸에
+                      이름이 그대로 들어간 절차가 있어서 같은 말이 두 번 늘어난
+                      줄이 떴다. 붙일지 말지는 formatProcedureTemplateTitle 한
+                      곳에서만 정한다. */}
+                  {formatProcedureTemplateTitle(t.name, t.code)}
                 </option>
               ))}
             </select>

@@ -114,6 +114,27 @@ src/lib/domain/procedure-execution-lifecycle.test.ts
 # 영영 안 나타났다 · 목록에 없는 id 를 기본값으로 쓰지 않는가(빈 값이 사람이 고른 것처럼
 # 서버로 간다) · 차례를 다시 매기지 않는가.
 src/lib/domain/procedure-execution-work-record-link.test.ts
+# 🔵 「이 건의 다른 절차」 — 큰 카드에 못 선 실행을 배지와 진행도로 적는다
+# (2026-11-02, 조각 6). 재는 것: 배지 넷(완주 · 중단 마침 · 그만둠 · 진행 중)이 각각
+# 갈리고 tone 이 서로 다른가 · 🔴 마침과 그만둠이 **둘 다 찬 행**을 그만둠으로 읽는가
+# (마친 뒤 그만두는 길은 일부러 열려 있다 — 잘못 끝냈을 때 되돌릴 유일한 길이라 드문
+# 자료가 아니다) · 🔴 「남은 노드」가 조각 4·5 와 **같은 수**인가
+# (assessExecutionFinish · 「전체 단계 보기 (N)」과 직접 맞댄다) · 진행도의 분모가
+# 사람이 할 일 수인가 · 🔴 차례가 **도는 것 먼저, 그다음 최근에 끝난 것**인가 ·
+# 🔴 **거르는 답이 없는가**(어떤 실행이든 배지 하나를 받는다 — 처음 판은 도는 실행을
+# 걸러 내서 둘째로 불러온 절차가 화면에서 통째로 사라졌다) · 🔴 접힌 줄에 「진행 중 N」
+# 딱지가 남는가 · 마친 줄에 사람 이름을 **안 빌려 쓰는가**(completed_by 칸이 없다).
+# 표본 넷은 개발 DB 에서 그대로 읽어 온 것이다. 그려지는 모습은 components 목록의
+# past-executions-section.test.tsx, 조회가 무엇을 싣는지는 db 목록의
+# procedure-case-execution.integration.test.ts.
+src/lib/domain/procedure-execution-past-runs.test.ts
+# 🔵 절차의 한 줄 이름 — 「이름 (코드)」를 붙일지 말지(2026-11-02, 조각 6). 코드 칸에
+# **이름이 그대로** 들어간 절차가 있어 요약 카드에 「이름 (이름)」이 떴다. 재는 것:
+# 같으면 안 붙이고 다르면 붙이는가 · 앞뒤 공백만 다른 것도 같게 보는가 · 🔴 쓰는 자리
+# 셋(요약 카드 · 불러오기 드롭다운 · 다른 절차 줄)이 **제 손으로 다시 조립하지 않는가**.
+# 뒤엣것을 함께 재는 까닭: 둘 다 string 이라 한쪽이 옛 모양으로 돌아가도 컴파일러가
+# 침묵한다.
+src/lib/domain/procedure-template-title.test.ts
 src/lib/domain/product-relation.test.ts
 src/lib/auth/inventory-authorization.test.ts
 # 🔵 2026-10-28(조각 13-D): `src/lib/domain/inventory-types.test.ts` 를 뺐다 — 재던

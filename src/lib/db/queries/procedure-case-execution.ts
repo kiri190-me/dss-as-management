@@ -20,6 +20,7 @@ import {
   type TopologyExecutionNode,
 } from "@/lib/domain/procedure-execution-topology";
 import { sortByProcedureExecutionOrder } from "@/lib/domain/procedure-execution-order";
+import type { PastExecutionCandidate } from "@/lib/domain/procedure-execution-past-runs";
 import { classifyProductRelation, type ProductIdentity } from "@/lib/domain/product-relation";
 import type { ProcedureNodeType, ProcedureBranchType, ProcedureEquipmentType } from "@/lib/domain/procedure-template-types";
 import type { ProcedureCaseExecutionNodeStatus, ProcedureCaseExecutionActionType } from "@/lib/domain/procedure-case-execution-types";
@@ -105,6 +106,114 @@ export async function getActiveExecutionForCase(repairCaseId: string): Promise<A
     .orderBy(sql`(${procedureCaseExecutions.completedAt} is null) desc`, desc(procedureCaseExecutions.startedAt))
     .limit(1);
   return row ? { ...row, completedAt: row.completedAt ? row.completedAt.toISOString() : null } : null;
+}
+
+/**
+ * 이 접수 건의 실행 가운데 **지금 화면에 선 것 말고 전부** — 「이 건의 다른
+ * 절차」 묶음의 재료다(2026-11-02, 조각 6).
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 왜 getActiveExecutionForCase 를 고치지 않고 **새 조회**를 두는가
+ * ──────────────────────────────────────────────────────────────────────
+ * 위 조회의 `is_deleted = false` 를 풀면 그만둔 실행이 **「도는 것」으로
+ * 되살아난다.** 화면이 그 실행의 큰 카드와 단추를 다시 그리고, 치운 뒤 다시
+ * 서야 할 「+ 기술 절차 불러오기」가 안 선다 — 그만두기가 통째로 무력해진다.
+ * 그래서 거르기는 그대로 두고, **읽기 전용으로 한 줄씩 적는** 길을 따로 낸다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **거르지 않고** 실어 보낸다
+ * ──────────────────────────────────────────────────────────────────────
+ * 「이 실행을 어느 배지로 그리는가」는 도메인 한 곳에서 정한다
+ * (classifyPastExecution — 완주 · 중단 마침 · 그만둠 · 진행 중). 상태로 미리
+ * 걸러 두면 같은 판정이 SQL 과 도메인 두 벌이 되고, 배지 규칙을 고치는 날 한쪽만
+ * 고치게 된다. 한 건의 실행은 많아야 몇 줄이라 다 읽어도 싸다.
+ *
+ * 🔴 **아직 도는 실행도 그대로 싣는다.** 기술 작업 절차는 한 건에 여럿을 나란히
+ * 돌릴 수 있는데 큰 카드는 하나뿐이라, 여기서 거르면 둘째로 불러온 절차가 화면
+ * 어디에도 안 떠서 사람 눈에는 「불러왔는데 사라졌다」가 된다.
+ *
+ * `excludeExecutionId` 만 SQL 에서 뺀다 — 그것은 「판정」이 아니라 **화면이 이미
+ * 그리고 있는 행**이라는 사실이고, 빼지 않으면 마친 실행이 큰 카드와 아래 줄에
+ * 두 번 뜬다.
+ */
+export async function getOtherExecutionsForCase(
+  repairCaseId: string,
+  excludeExecutionId: string | null
+): Promise<PastExecutionCandidate[]> {
+  const executions = await db
+    .select({
+      id: procedureCaseExecutions.id,
+      templateName: procedureTemplates.name,
+      templateCode: procedureTemplates.code,
+      startedAt: procedureCaseExecutions.startedAt,
+      startedBy: procedureCaseExecutions.startedBy,
+      completedAt: procedureCaseExecutions.completedAt,
+      isDeleted: procedureCaseExecutions.isDeleted,
+      deletedAt: procedureCaseExecutions.deletedAt,
+      deletedBy: procedureCaseExecutions.deletedBy,
+      deleteReason: procedureCaseExecutions.deleteReason,
+    })
+    .from(procedureCaseExecutions)
+    .innerJoin(procedureTemplates, eq(procedureCaseExecutions.procedureTemplateId, procedureTemplates.id))
+    .where(
+      and(
+        eq(procedureCaseExecutions.repairCaseId, repairCaseId),
+        excludeExecutionId ? ne(procedureCaseExecutions.id, excludeExecutionId) : undefined
+      )
+    );
+  if (executions.length === 0) return [];
+
+  const executionIds = executions.map((e) => e.id);
+
+  // 노드는 **상태만** 센다. 지나간 줄은 읽기 전용이라 제목도 메모도 안 그린다 —
+  // 실행마다 getExecutionDetail 을 다시 부르면 조회가 줄 수만큼 늘어난다.
+  const nodeRows = await db
+    .select({
+      executionId: procedureCaseExecutionNodes.executionId,
+      status: procedureCaseExecutionNodes.status,
+      nodeType: procedureTemplateNodes.nodeType,
+    })
+    .from(procedureCaseExecutionNodes)
+    .leftJoin(procedureTemplateNodes, eq(procedureCaseExecutionNodes.procedureTemplateNodeId, procedureTemplateNodes.id))
+    .where(inArray(procedureCaseExecutionNodes.executionId, executionIds));
+
+  const nodesByExecutionId = new Map<string, { status: ProcedureCaseExecutionNodeStatus }[]>();
+  for (const row of nodeRows) {
+    // 🔴 START 를 뺀다 — getExecutionDetail 이 목록·번호·요약을 만들 때 쓰는 것과
+    // **같은 잣대**(isSystemEntryNodeType). 안 빼면 지나간 줄의 분모만 1 이 더
+    // 커져서, 같은 실행인데 큰 카드는 「전체 22」인데 지나간 줄은 「/ 23」이 된다.
+    // 추가 작업(템플릿 노드가 없는 행)은 사람이 할 일이므로 그대로 센다.
+    if (row.nodeType && isSystemEntryNodeType(row.nodeType)) continue;
+    const list = nodesByExecutionId.get(row.executionId) ?? [];
+    list.push({ status: row.status });
+    nodesByExecutionId.set(row.executionId, list);
+  }
+
+  const userIds = new Set<string>();
+  for (const e of executions) {
+    userIds.add(e.startedBy);
+    if (e.deletedBy) userIds.add(e.deletedBy);
+  }
+  const userRows =
+    userIds.size > 0 ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, [...userIds])) : [];
+  const nameById = new Map(userRows.map((u) => [u.id, u.name]));
+
+  return executions.map((e) => ({
+    executionId: e.id,
+    templateName: e.templateName,
+    templateCode: e.templateCode,
+    nodes: nodesByExecutionId.get(e.id) ?? [],
+    startedAt: e.startedAt.toISOString(),
+    startedByName: nameById.get(e.startedBy) ?? null,
+    completedAt: e.completedAt ? e.completedAt.toISOString() : null,
+    isDeleted: e.isDeleted,
+    deletedAt: e.deletedAt ? e.deletedAt.toISOString() : null,
+    // 🔴 마친 사람은 여기 없다 — 이 표에 completed_by 칸이 아예 없다
+    // (finishProcedureExecution 의 ⚠️ 주석). 시작한 사람을 그 자리에 빌려 쓰지
+    // 않는다. 그러면 화면이 「이 사람이 마쳤다」로 읽히는 거짓을 적게 된다.
+    deletedByName: e.deletedBy ? (nameById.get(e.deletedBy) ?? null) : null,
+    deleteReason: e.deleteReason,
+  }));
 }
 
 // ---- 실행 상세 (execution detail — the primary list-based UI's data source) ----

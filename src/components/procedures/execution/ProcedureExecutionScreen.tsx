@@ -3,6 +3,7 @@ import ExecutionNodeCard from "./ExecutionNodeCard";
 import CurrentTaskCard from "./CurrentTaskCard";
 import ExecutionFlowStrip from "./ExecutionFlowStrip";
 import ExecutionFoldSection from "./ExecutionFoldSection";
+import PastExecutionsSection from "./PastExecutionsSection";
 import ExecutionExtraTaskForm from "./ExecutionExtraTaskForm";
 import ExecutionLifecycleActions from "./ExecutionLifecycleActions";
 import ExecutionHistoryTimeline from "./ExecutionHistoryTimeline";
@@ -14,6 +15,8 @@ import { pickCurrentTask, type NoCurrentTaskReason } from "@/lib/domain/procedur
 import { buildProcedureExecutionMinimap } from "@/lib/domain/procedure-execution-minimap";
 import { buildExecutionHistoryFold, buildExecutionListFold } from "@/lib/domain/procedure-execution-list-fold";
 import { assessExecutionFinish } from "@/lib/domain/procedure-execution-lifecycle";
+import { formatProcedureTemplateTitle } from "@/lib/domain/procedure-template-title";
+import type { PastExecutionCandidate } from "@/lib/domain/procedure-execution-past-runs";
 import type {
   ExecutableTemplateOption,
   ExecutionDetail,
@@ -39,8 +42,12 @@ function ProgressSummary({ detail }: { detail: ExecutionDetail }) {
     <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex items-center justify-between">
         <div>
+          {/* 🔴 「이름 (코드)」를 여기서 이어 붙이지 않는다 — 코드 칸에 이름이
+              그대로 들어간 절차가 있어서 「이름 (이름)」이 떴다. 붙일지 말지는
+              formatProcedureTemplateTitle 한 곳에서만 정한다(아래 「이 건의 다른
+              절차」 줄·불러오기 드롭다운이 같은 함수를 쓴다). */}
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-            {detail.templateName} ({detail.templateCode})
+            {formatProcedureTemplateTitle(detail.templateName, detail.templateCode)}
           </h2>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
             {detail.startedByName}님이 {new Date(detail.startedAt).toLocaleString("ko-KR")}에 시작
@@ -151,6 +158,7 @@ export default function ProcedureExecutionScreen({
   executionDetail,
   history,
   relatedHistory,
+  pastExecutions,
 }: {
   repairCaseId: string;
   actingUser: ActingUser;
@@ -159,12 +167,22 @@ export default function ProcedureExecutionScreen({
   executionDetail: ExecutionDetail | null;
   history: ExecutionHistoryRow[];
   relatedHistory: RelatedRepairHistory;
+  /**
+   * 지금 화면에 선 실행 **말고** 이 건에서 돌린 것들(마친 것 · 그만둔 것 ·
+   * 아직 도는 것 전부). 「이 건의 다른 절차」 묶음이 이것으로 선다 — 그릴지
+   * 말지·배지·차례는 전부 도메인이 정한다(PastExecutionsSection).
+   */
+  pastExecutions: PastExecutionCandidate[];
 }) {
   if (!activeExecution || !executionDetail) {
     return (
       <div className="flex flex-col gap-4">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">기술 절차</h2>
         <ExecutionStartCard repairCaseId={repairCaseId} actingUserRole={actingUser.role} templateOptions={templateOptions} />
+        {/* 🔴 큰 카드가 없을 때도 다른 절차는 있다 — 그만둔 뒤의 화면이 바로
+            그 모습이다. 여기에 안 그리면 그만둔 실행은 여전히 아무 데서도 안
+            보인다(이 조각이 고치려던 바로 그 상태). */}
+        <PastExecutionsSection candidates={pastExecutions} />
         <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">이전 수리 이력</h2>
           <div className="mt-2">
@@ -349,6 +367,12 @@ export default function ProcedureExecutionScreen({
           <ExecutionHistoryTimeline history={history} />
         </ExecutionFoldSection>
       )}
+
+      {/* 🔵 자리가 여기인 까닭 — 위는 전부 **지금 이 실행** 이야기고(요약·띠·
+          지금 할 일·목록·이력), 아래 「이전 수리 이력」은 **다른 접수 건** 이야기다.
+          「이 건에서 지난번에 돌린 절차」는 그 둘 사이에 있는 것이 읽는 차례와
+          맞는다. 접힌 채로 뜨므로 도는 실행의 화면을 밀어내지도 않는다. */}
+      <PastExecutionsSection candidates={pastExecutions} />
 
       <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">이전 수리 이력</h2>

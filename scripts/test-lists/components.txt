@@ -68,6 +68,19 @@ src/components/procedures/execution/execution-list-fold.test.tsx
 # 서버 쪽 동작은 db 목록의 procedure-case-execution.integration.test.ts 39~46번,
 # 묻는 규칙 자체는 unit 목록의 procedure-execution-lifecycle.test.ts 가 본다.
 src/components/procedures/execution/execution-lifecycle-actions.test.ts
+# 「이 건의 다른 절차」 묶음이 그리는 글자(2026-11-02, 조각 6). 🔴 이웃 묶음과 같이
+# **렌더해서** 잰다 — 서버 액션도 DB 조회 타입도 안 문다. 재는 것: 배지 넷이 글자와
+# data 속성으로 각각 갈리는가 · 🔴 넷 다 **경고색이 아닌가**(「중단 마침」도 「진행 중」도
+# 나무람이 아니다. 같은 화면의 [실행 그만두기] 단추가 red-*, 차단됨 딱지가 amber-* 라
+# 배지가 그 색을 쓰면 뜻이 섞인다) · 넷의 색이 서로 다른가(emerald·sky·zinc·violet) ·
+# 그만둔 줄에 **사유**가 보이는가 · 🔴 **도는 실행 하나만 있어도 그리는가**(처음 판은
+# 여기서 빈 글자라 둘째로 불러온 절차가 통째로 숨었다) · 🔴 접힌 줄에 「진행 중 1」
+# 딱지가 남는가 · 도는 줄이 **맨 위**인가 · 🔴 실행이 아예 없을 때만 빈 글자인가 ·
+# 🔴 누를 것이 하나도 없는가(단추·링크·입력 칸이 소스에도 그린 글자에도 없다 —
+# 되살리는 길은 이 조각에 없다) · 🔴 두 가지(도는 실행이 있을 때 · 그만둔 뒤 불러오기
+# 카드만 설 때)에 **둘 다** 섰는가 · 도는 실행의 화면을 안 밀어냈는가.
+# 배지를 **무엇으로 가르는가**는 unit 목록의 procedure-execution-past-runs.test.ts.
+src/components/procedures/execution/past-executions-section.test.tsx
 src/components/repair-cases/files/preview-backfill.test.ts
 src/components/repair-cases/files/StoredAttachmentList.test.tsx
 src/components/repair-cases/files/AttachmentViewer.test.tsx

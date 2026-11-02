@@ -15,6 +15,7 @@ import {
   getExecutionDetail,
   getExecutionHistory,
   getExecutableTemplateOptions,
+  getOtherExecutionsForCase,
   getRelatedRepairHistory,
 } from "@/lib/db/queries/procedure-case-execution";
 import { getWorkRecordCaseContext } from "@/lib/db/queries/repair-case-work-records";
@@ -94,6 +95,10 @@ export default async function RepairCaseExecutionPage({
   // 작업 기록을 붙일 절차 항목들과, 처음 골라져 있을 것. 빈 실행에서는 둘 다
   // 비어 있고, 그때 폼은 드롭다운 자체를 안 그린다.
   let procedureLink: WorkRecordProcedureLink = { options: [], defaultNodeId: null };
+  // 「이 건의 다른 절차」의 재료 — 🔴 **지금 화면에 선 실행을 빼고** 읽는다. 안
+  // 빼면 그 실행이 큰 카드와 아래 줄에 두 번 뜬다. 화면에 선 것이 없으면(그만둔
+  // 뒤) 뺄 것도 없어 이 건의 실행이 전부 재료가 된다.
+  const pastExecutions = await getOtherExecutionsForCase(resolved.id, activeExecution?.id ?? null);
   if (!activeExecution) {
     const templateOptions = await getExecutableTemplateOptions();
     procedureScreen = (
@@ -105,6 +110,7 @@ export default async function RepairCaseExecutionPage({
         executionDetail={null}
         history={[]}
         relatedHistory={{ sameProduct: [], sameModelReference: [] }}
+        pastExecutions={pastExecutions}
       />
     );
   } else {
@@ -128,6 +134,7 @@ export default async function RepairCaseExecutionPage({
         executionDetail={executionDetail}
         history={history}
         relatedHistory={relatedHistory}
+        pastExecutions={pastExecutions}
       />
     );
     // 🔴 「지금 할 일」을 여기서 다시 고르지 않는다 — 실행 화면이 쓰는 것과

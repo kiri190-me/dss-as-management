@@ -38,8 +38,10 @@ import {
   getActiveExecutionForCase,
   getExecutionDetail,
   getExecutionHistory,
+  getOtherExecutionsForCase,
   getRelatedRepairHistory,
 } from "../queries/procedure-case-execution";
+import { buildPastExecutionPanel } from "@/lib/domain/procedure-execution-past-runs";
 import { computeExecutionPosition } from "@/lib/domain/procedure-execution-order";
 import { pickCurrentTaskNode } from "@/lib/domain/procedure-execution-focus";
 import { buildProcedureExecutionMinimap } from "@/lib/domain/procedure-execution-minimap";
@@ -1906,6 +1908,200 @@ describe("procedure-case-execution: 실행 끝내기 · 그만두기", () => {
     // 「누구에게나 막힌다」도 통과한다).
     const allowed = await finishProcedureExecution(executionId, engineerId, row.version, true);
     assert.equal(allowed.ok, true, JSON.stringify(allowed));
+  });
+});
+
+/**
+ * 「이 건의 다른 절차」 목록(2026-11-02, 조각 6) — 큰 카드에 못 선 실행들을
+ * 배지와 진행도로 적는 재료가 제대로 나오는가.
+ *
+ * 🔴 여기서만 잴 수 있는 것이 셋이다. ① **그만둔 실행이 다시 보이는데 「도는
+ * 것」으로는 안 돌아온다**(두 조회가 같은 표를 서로 다른 눈으로 본다) ②
+ * **진행도의 분모에 START 가 안 끼는가** — START 는 실행 행이 실제로 생기므로
+ * 순수 함수 시험으로는 영영 안 걸린다 ③ **안 끝난 실행이 둘일 때 한 쪽이
+ * 「진행 중」 줄로 뜨는가** — 기술 작업 절차를 둘 불러와야 생기는 자리라
+ * 여기서만 만들 수 있다.
+ *
+ * 배지를 무엇으로 가르는지는 unit 목록의 procedure-execution-past-runs.test.ts 가
+ * 잰다.
+ */
+describe("procedure-case-execution: 이 건의 다른 절차 목록", () => {
+  async function startedExecution(category: ExtractedTemplate["category"] = "FULL_SERVICE", repairCaseId?: string) {
+    const { templateId } = await createPublishedTemplate(uniqueCode("past-runs"), category);
+    const caseId = repairCaseId ?? (await createTestCase({ assignedEngineerId: engineerId })).id;
+    const started = await startProcedureExecution(caseId, templateId, engineerId);
+    assert.equal(started.ok, true, JSON.stringify(started));
+    if (!started.ok) throw new Error("unreachable");
+    return { templateId, repairCaseId: caseId, executionId: started.executionId };
+  }
+
+  async function executionVersion(executionId: string) {
+    const [row] = await db
+      .select({ version: procedureCaseExecutions.version })
+      .from(procedureCaseExecutions)
+      .where(eq(procedureCaseExecutions.id, executionId));
+    return row.version;
+  }
+
+  /**
+   * 노드를 남김없이 건너뛴다 — 「남은 것이 0 인 실행」을 만드는 가장 짧은 길.
+   * 건너뜀도 **끝난 것**으로 세므로(assessExecutionFinish) 완주 조건을 채운다.
+   * START 는 서버가 거절하므로 건드리지 않는다.
+   */
+  async function skipEveryNode(executionId: string) {
+    const detail = await getExecutionDetail(executionId);
+    assert.ok(detail, "상세를 못 읽으면 아래가 전부 뜻을 잃는다");
+    for (const node of detail.nodes) {
+      const result = await skipExecutionNode(node.id, engineerId, node.version, "이 건에는 해당 없음");
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
+  }
+
+  /** 화면이 그리는 그대로 — 조회가 실어 온 재료를 도메인에 그대로 넘긴다. */
+  async function panelFor(repairCaseId: string, excludeExecutionId: string | null) {
+    return buildPastExecutionPanel(await getOtherExecutionsForCase(repairCaseId, excludeExecutionId));
+  }
+
+  test("52. 🔴 그만둔 실행이 아래 줄에 뜬다 — 그래도 **도는 것으로는 안 돌아온다**", async () => {
+    const { repairCaseId, executionId } = await startedExecution();
+    // 🔵 표본 확인 — 그 실행 하나뿐이고 그것이 큰 카드에 서 있으니, 아래 묶음은
+    // 아직 한 줄도 없다(묶음 자체가 안 선다).
+    assert.equal(await panelFor(repairCaseId, executionId), null);
+
+    const abandoned = await abandonProcedureExecution(
+      executionId,
+      engineerId,
+      await executionVersion(executionId),
+      "절차를 잘못 골랐습니다"
+    );
+    assert.equal(abandoned.ok, true, JSON.stringify(abandoned));
+
+    // 🔴 기존 조회의 거르기는 그대로다. 여기가 풀리면 그만둔 실행이 큰 카드로
+    // 되살아나고 「+ 기술 절차 불러오기」가 다시 안 선다 — 그만두기가 통째로
+    // 무력해진다.
+    assert.equal(await getActiveExecutionForCase(repairCaseId), null);
+
+    const panel = await panelFor(repairCaseId, null);
+    assert.ok(panel, "그만둔 실행이 아래 줄에도 안 뜨면 화면 어디에서도 못 본다");
+    assert.equal(panel.rows.length, 1);
+    assert.equal(panel.rows[0].executionId, executionId);
+    assert.equal(panel.rows[0].badge.label, "그만둠");
+    assert.equal(panel.rows[0].abandonReason, "절차를 잘못 골랐습니다");
+    assert.match(panel.rows[0].whenNote, /님이 그만둠$/, "누가 치웠는지가 조회에 실려야 한다");
+    assert.match(panel.rows[0].startedNote ?? "", /님이 시작$/);
+  });
+
+  test("53. 🔴 진행도의 분모는 **사람이 할 일 수**다 — START 가 안 낀다", async () => {
+    const { repairCaseId, executionId } = await startedExecution();
+    await skipEveryNode(executionId);
+
+    const finished = await finishProcedureExecution(executionId, engineerId, await executionVersion(executionId), false);
+    assert.equal(finished.ok, true, JSON.stringify(finished));
+
+    // 🔵 표본 확인 — 실행 행은 6개인데(START 포함) 사람이 할 일은 5개다. 둘이
+    // 같으면 이 시험이 아무것도 안 잰다.
+    const rows = await db
+      .select({ id: procedureCaseExecutionNodes.id })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.executionId, executionId));
+    const detail = await getExecutionDetail(executionId);
+    assert.equal(rows.length, 6);
+    assert.equal(detail?.nodes.length, 5);
+
+    const panel = await panelFor(repairCaseId, null);
+    assert.ok(panel);
+    assert.equal(panel.rows[0].totalCount, 5, "분모가 6 이면 아래 줄만 큰 카드와 다른 수를 적는다");
+    assert.equal(panel.rows[0].progressLabel, "진행 5 / 5");
+    assert.equal(panel.rows[0].badge.label, "완주", "남은 것이 0 인데 완주가 아니면 잣대가 어긋난 것이다");
+  });
+
+  test("54. 🔴 지금 화면에 선 실행은 **빼고** 준다 — 같은 실행이 두 번 안 뜬다", async () => {
+    const { repairCaseId, executionId } = await startedExecution();
+    const finished = await finishProcedureExecution(executionId, engineerId, await executionVersion(executionId), true);
+    assert.equal(finished.ok, true, JSON.stringify(finished));
+
+    // 끝낸 실행은 여전히 화면의 큰 카드로 선다(조회가 걸러내지 않는다).
+    const active = await getActiveExecutionForCase(repairCaseId);
+    assert.equal(active?.id, executionId);
+
+    assert.equal(await panelFor(repairCaseId, active?.id ?? null), null, "큰 카드에 선 실행이 아래 줄에도 뜨면 같은 것이 두 번이다");
+    // 🔵 빼지 않으면 분명히 담긴다 — 「빼기」가 실제로 듣는지 반대쪽으로 확인한다.
+    const unfiltered = await panelFor(repairCaseId, null);
+    assert.equal(unfiltered?.rows.length, 1);
+  });
+
+  test("55. 🔴 안 끝난 실행이 **둘**이면 하나는 큰 카드, 하나는 **「진행 중」 줄**이다", async () => {
+    // TECHNICAL_TASK 는 한 건에 여럿이 나란히 있어도 된다(유니크 색인은
+    // FULL_SERVICE 에만 걸린다) — 안 끝난 실행이 둘인 자리가 실제로 만들어진다.
+    // 🔴 사람 눈에는 「불러왔는데 사라졌다」로 보이던 자리다. 큰 카드는 하나뿐인데,
+    // 처음 판은 끝난 것만 담아서 둘째가 **화면 어디에도** 안 떴다.
+    const first = await startedExecution("TECHNICAL_TASK");
+    const second = await startedExecution("TECHNICAL_TASK", first.repairCaseId);
+    const active = await getActiveExecutionForCase(first.repairCaseId);
+    assert.equal(active?.id, second.executionId, "나중에 시작한 것이 큰 카드에 선다");
+
+    const panel = await panelFor(first.repairCaseId, active?.id ?? null);
+    assert.ok(panel, "큰 카드에 못 선 실행이 아래 줄에도 없으면 화면에서 통째로 사라진다");
+    // 🔴 같은 것이 두 번 뜨지 않는다 — 큰 카드에 선 둘째는 빠져 있다.
+    assert.deepEqual(
+      panel.rows.map((r) => [r.executionId, r.badge.label]),
+      [[first.executionId, "진행 중"]]
+    );
+    assert.equal(panel.rows[0].progressLabel, "진행 0 / 5");
+    assert.deepEqual(panel.fold.note, { text: "진행 중 1", tone: "MUTED" }, "접어 둔 채로도 알려야 한다");
+    assert.match(panel.rows[0].whenNote, /님이 시작$/, "끝난 때가 없으니 시작한 때를 적는다");
+
+    // 그 실행을 마치면 같은 줄이 배지만 바꿔 단다.
+    const finished = await finishProcedureExecution(first.executionId, engineerId, await executionVersion(first.executionId), true);
+    assert.equal(finished.ok, true, JSON.stringify(finished));
+    const after = await panelFor(first.repairCaseId, active?.id ?? null);
+    assert.equal(after?.rows.length, 1);
+    assert.equal(after?.rows[0].executionId, first.executionId);
+    assert.equal(after?.rows[0].badge.label, "중단 마침");
+    assert.equal(after?.fold.note, null, "도는 것이 없어지면 딱지도 없어진다");
+  });
+
+  test("56. 🔴 완주와 중단 마침이 **실제 자료로** 갈리고, 최근에 끝난 것이 위에 선다", async () => {
+    const first = await startedExecution("TECHNICAL_TASK");
+    await skipEveryNode(first.executionId);
+    const finishedAll = await finishProcedureExecution(first.executionId, engineerId, await executionVersion(first.executionId), false);
+    assert.equal(finishedAll.ok, true, JSON.stringify(finishedAll));
+
+    // 둘째는 **아무것도 안 하고** 끝낸다 — 남은 것이 그대로 남는다.
+    const second = await startedExecution("TECHNICAL_TASK", first.repairCaseId);
+    const finishedPartly = await finishProcedureExecution(second.executionId, engineerId, await executionVersion(second.executionId), true);
+    assert.equal(finishedPartly.ok, true, JSON.stringify(finishedPartly));
+
+    const panel = await panelFor(first.repairCaseId, null);
+    assert.ok(panel);
+    assert.equal(panel.fold.summary, "이 건의 다른 절차 (2)");
+    // 나중에 끝낸 둘째가 위다.
+    assert.deepEqual(
+      panel.rows.map((r) => [r.executionId, r.badge.label, r.progressLabel]),
+      [
+        [second.executionId, "중단 마침", "진행 0 / 5"],
+        [first.executionId, "완주", "진행 5 / 5"],
+      ]
+    );
+    assert.equal(panel.rows[0].remainingCount, 5, "남은 수가 0 이면 「중단 마침」이 될 수 없다");
+  });
+
+  test("57. 🔴 다른 접수 건의 실행은 안 섞인다", async () => {
+    const mine = await startedExecution();
+    const other = await startedExecution();
+    const abandoned = await abandonProcedureExecution(
+      other.executionId,
+      engineerId,
+      await executionVersion(other.executionId),
+      "남의 건에서 치운 것"
+    );
+    assert.equal(abandoned.ok, true, JSON.stringify(abandoned));
+
+    // 🔵 표본 확인 — 저쪽 건에서는 분명히 한 줄 뜬다.
+    assert.equal((await panelFor(other.repairCaseId, null))?.rows.length, 1);
+    // 🔴 내 건에는 큰 카드에 선 내 실행뿐이라 아래 줄이 없다. 남의 건에서 치운
+    // 실행이 여기로 새어 들어오면 바로 걸린다.
+    assert.equal(await panelFor(mine.repairCaseId, mine.executionId), null);
   });
 });
 
