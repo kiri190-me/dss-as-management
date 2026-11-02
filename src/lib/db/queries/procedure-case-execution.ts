@@ -401,6 +401,16 @@ export type ExecutionFlowEdge = {
   toNodeId: string;
   branchType: ProcedureBranchType;
   branchLabel: string | null;
+  /**
+   * 🔵 2026-11-02(조각 10)에 칸 둘이 늘었다 — sortOrder · sourceConnectorId.
+   * 「전체 단계 보기」 팝업의 플로우차트가 ProcedureFlowGraph 를 그대로 쓰는데,
+   * 그 그림이 받는 간선 모양(ProcedureTemplateEdgeRow)에 이 둘이 들어 있다.
+   *
+   * 간선을 **두 벌로 내려보내지 않으려고** 여기에 더했다 — 흐름 띠(minimap)가
+   * 쓰는 것과 같은 배열이고, 띠 쪽은 이 둘을 안 읽으므로 하는 일이 안 바뀐다.
+   */
+  sortOrder: number;
+  sourceConnectorId: string | null;
 };
 
 export type ExecutionDetail = {
@@ -422,6 +432,27 @@ export type ExecutionDetail = {
   nodes: ExecutionNodeDetail[];
   referenceNodes: ExecutionReferenceNode[];
   flowEdges: ExecutionFlowEdge[];
+  /**
+   * 이 실행이 붙어 있는 절차의 **갈래**(2026-11-02, 조각 10). 「전체 단계 보기」
+   * 팝업의 그림이 배치를 고를 때 쓴다 — 손으로 만든(TECHNICAL_TASK) 절차의
+   * position_x/y 는 만든 차례대로 쌓은 값이라 배치로서 뜻이 없다(불러오기 창의
+   * 그림이 쓰는 것과 **같은 조건**이다 — ProcedureStartPickerGraph).
+   */
+  templateCategory: ProcedureTemplateCategory;
+  /**
+   * 절차 **그림 재료**로서의 노드 — 「전체 단계 보기」 팝업의 플로우차트가
+   * 그린다(2026-11-02, 조각 10).
+   *
+   * 🔴 위의 `nodes`(실행 노드)와 **다른 것**이다. 이쪽은 START 와 참고 문서까지
+   * 전부 들어 있고(그림은 절차 전체를 그린다) 실행 상태가 없다. 상태는 실행
+   * 노드의 procedureTemplateNodeId 로 맞물려 그림에 얹는다
+   * (buildJumpStatusMarks).
+   *
+   * 🔵 받는 칸은 불러오기 창과 **같은 열한 개**다(ExecutableTemplateNode) —
+   * 그 그림이 실제로 읽는 칸만. instructions 같은 긴 글은 실행 노드 쪽에 이미
+   * 실려 있으므로 여기 또 실으면 같은 글이 두 번 내려간다.
+   */
+  templateNodes: ExecutableTemplateNode[];
 };
 
 export async function getExecutionDetail(executionId: string): Promise<ExecutionDetail | null> {
@@ -436,6 +467,8 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       version: procedureCaseExecutions.version,
       templateCode: procedureTemplates.code,
       templateName: procedureTemplates.name,
+      // 그림의 배치 규칙이 이 값으로 갈린다 — 조각 10 의 팝업이 쓴다.
+      templateCategory: procedureTemplates.category,
       isCaseLocked: repairCases.isLocked,
       caseAssignedEngineerId: repairCases.assignedEngineerId,
     })
@@ -465,6 +498,10 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
   // sortOrder 가 여기 끼어든 까닭은 아래 정렬이 쓰기 때문이다. ORDER BY 는
   // 참고 문서 목록(referenceNodes)이 이 배열 차례를 그대로 쓰므로 함께 건다 —
   // 그쪽도 전에는 DB 가 주는 대로였다.
+  //
+  // 🔵 2026-11-02(조각 10)에 **배치 칸 넷과 출처 칸 둘**이 늘었다. 「전체 단계
+  // 보기」 팝업이 이 목록으로 플로우차트를 그린다 — 조회를 하나 더 두지 않고
+  // 이미 읽는 이 줄에 칸만 보탠다(노드 수가 실측 23·28 이라 거의 공짜다).
   const templateNodes = await db
     .select({
       id: procedureTemplateNodes.id,
@@ -473,6 +510,12 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       title: procedureTemplateNodes.title,
       instructions: procedureTemplateNodes.instructions,
       sortOrder: procedureTemplateNodes.sortOrder,
+      positionX: procedureTemplateNodes.positionX,
+      positionY: procedureTemplateNodes.positionY,
+      userPositionX: procedureTemplateNodes.userPositionX,
+      userPositionY: procedureTemplateNodes.userPositionY,
+      sourceWorksheet: procedureTemplateNodes.sourceWorksheet,
+      sourceShapeId: procedureTemplateNodes.sourceShapeId,
     })
     .from(procedureTemplateNodes)
     .where(eq(procedureTemplateNodes.procedureTemplateId, execution.procedureTemplateId))
@@ -486,6 +529,10 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       toNodeId: procedureTemplateEdges.toNodeId,
       branchType: procedureTemplateEdges.branchType,
       branchLabel: procedureTemplateEdges.branchLabel,
+      // 🔵 2026-11-02(조각 10) — 팝업의 플로우차트가 받는 간선 모양에 이 둘이
+      // 들어 있다. 간선을 두 벌로 내려보내지 않으려고 같은 배열에 실어 보낸다.
+      sortOrder: procedureTemplateEdges.sortOrder,
+      sourceConnectorId: procedureTemplateEdges.sourceConnectorId,
     })
     .from(procedureTemplateEdges)
     .where(eq(procedureTemplateEdges.procedureTemplateId, execution.procedureTemplateId))
@@ -619,6 +666,26 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       toNodeId: e.toNodeId,
       branchType: e.branchType,
       branchLabel: e.branchLabel,
+      sortOrder: e.sortOrder,
+      sourceConnectorId: e.sourceConnectorId,
+    })),
+    templateCategory: execution.templateCategory,
+    // 🔴 **거르지 않는다.** 그림은 절차 전체를 그리므로 START 도 참고 문서도
+    // 그대로 들어간다 — 위의 `nodes`(실행 노드)가 START 를 빼는 것과 잣대가
+    // 다른 까닭이 그것이다. 그 둘을 못 고르게 막는 것은 판정 쪽의 일이다
+    // (classifyJumpTarget 이 실행 행이 없는 칸을 NOT_IN_EXECUTION 으로 가른다).
+    templateNodes: templateNodes.map((n) => ({
+      id: n.id,
+      nodeCode: n.nodeCode,
+      nodeType: n.nodeType,
+      title: n.title,
+      positionX: n.positionX,
+      positionY: n.positionY,
+      userPositionX: n.userPositionX,
+      userPositionY: n.userPositionY,
+      sortOrder: n.sortOrder,
+      sourceWorksheet: n.sourceWorksheet,
+      sourceShapeId: n.sourceShapeId,
     })),
   };
 }

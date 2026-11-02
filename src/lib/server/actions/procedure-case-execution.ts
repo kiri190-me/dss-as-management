@@ -8,6 +8,7 @@ import {
   resumeProcedureExecution,
   abandonProcedureExecution,
   startExecutionNode,
+  jumpToExecutionNode,
   completeExecutionNode,
   skipExecutionNode,
   blockExecutionNode,
@@ -162,6 +163,30 @@ export async function startExecutionNodeAction(input: {
 
   return withErrorRedaction("startExecutionNodeAction", () =>
     startExecutionNode(input.executionNodeId, actorCheck.userId, input.expectedVersion)
+  );
+}
+
+/**
+ * 「지금 할 일」을 **고른 노드로 옮긴다**(2026-11-02, 조각 10).
+ *
+ * 🔴 `executionId` 를 함께 받는 까닭: 변이가 **그 실행의 노드인지**를 맞대어 봐야
+ * 한다. 여기서는 **모양만** 본다(UUID 인가) — 그 실행이 도는 중인지, 옮길 수 있는
+ * 상태인지는 변이가 제 트랜잭션 안에서 잠근 행으로 다시 가른다(이 파일 머리말의
+ * 규약 그대로, 화면도 액션도 집행 경계가 아니다).
+ */
+export async function jumpToExecutionNodeAction(input: {
+  executionId: string;
+  executionNodeId: string;
+  expectedVersion: number;
+}): Promise<ExecutionNodeMutationResult | Forbidden> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.executionId) || !isValidUuid(input.executionNodeId)) {
+    return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  }
+
+  return withErrorRedaction("jumpToExecutionNodeAction", () =>
+    jumpToExecutionNode(input.executionId, input.executionNodeId, actorCheck.userId, input.expectedVersion)
   );
 }
 

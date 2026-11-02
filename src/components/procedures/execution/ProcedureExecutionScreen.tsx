@@ -4,7 +4,8 @@ import CurrentTaskCard from "./CurrentTaskCard";
 import ExecutionFlowStrip from "./ExecutionFlowStrip";
 import ExecutionFoldSection from "./ExecutionFoldSection";
 import PastExecutionsSection from "./PastExecutionsSection";
-import ExecutionExtraTaskForm from "./ExecutionExtraTaskForm";
+import ExecutionStepsDialog from "./ExecutionStepsDialog";
+import ExecutionExtraTaskDialog from "./ExecutionExtraTaskDialog";
 import ExecutionLifecycleActions from "./ExecutionLifecycleActions";
 import ExecutionAbandonButton from "./ExecutionAbandonButton";
 import ExecutionResumeButton from "./ExecutionResumeButton";
@@ -239,16 +240,20 @@ export default function ProcedureExecutionScreen({
     );
   }
 
-  // 네 구역 모두 getExecutionDetail 이 정한 **절차 차례**를 그대로 물려받는다
+  // 두 구역 다 getExecutionDetail 이 정한 **절차 차례**를 그대로 물려받는다
   // (filter 는 차례를 안 바꾼다). 그래서 카드에 찍힌 번호가 구역 안에서 오름차순이다.
   //
-  // 「실행 가능」만 예외로, 추천 노드를 앞으로 끌어올린다 — 전부터 있던 동작이다.
-  // Array.prototype.sort 는 안정 정렬이라 **추천끼리·추천 아닌 것끼리는 절차
-  // 차례가 그대로 남는다**. 바꾸려면 이 한 줄만 빼면 된다.
-  const pendingNodes = executionDetail.nodes
-    .filter((n) => n.status === "PENDING")
-    .sort((a, b) => Number(b.isSuggestedNext) - Number(a.isSuggestedNext));
-  const inProgressNodes = executionDetail.nodes.filter((n) => n.status === "IN_PROGRESS");
+  // 🔴 구역이 **넷에서 둘로** 줄었다(2026-11-02, 조각 10). 「실행 가능」과
+  // 「진행 중」을 담던 「전체 단계 보기」 묶음이 **팝업**이 됐다(사용자 결정 —
+  // 「[전체 단계 보기]는 지금같은 형태 말고, 누르면 팝업으로 플로우차드로
+  // 보여지도록」). 두 구역의 카드가 하던 일은 이제 셋이 나눠 한다: 지금 할 일은
+  // 맨 위 큰 카드가, 자리를 옮기는 것은 팝업이, 끝난 것은 「실행 이력」이.
+  //
+  // 🔴 **「차단됨」만은 남긴다.** 그 카드에만 붙는 단추가 하나 있다 —
+  // [재개(되돌림)]. 그것이 BLOCKED 를 푸는 **유일한 길**이고(팝업은 차단된 칸으로
+  // 못 옮긴다 — 사유 없이 푸는 길을 내지 않으려고 일부러 막았다), 이 구역까지
+  // 걷으면 막힌 절차를 다시 흐르게 할 방법이 화면 어디에도 안 남는다. 바로
+  // 아래 NoCurrentTaskCard 의 ALL_BLOCKED 안내가 가리키는 자리도 여기다.
   const doneNodes = executionDetail.nodes.filter((n) => n.status === "COMPLETED" || n.status === "SKIPPED");
   const blockedNodes = executionDetail.nodes.filter((n) => n.status === "BLOCKED");
 
@@ -294,12 +299,19 @@ export default function ProcedureExecutionScreen({
     current: currentTask.kind === "NONE" ? null : currentTask.node,
   });
 
-  // 아래 목록을 접는 규칙. 🔴 「접힌 채로 둘지」도 「아예 안 그릴지」도 여기서
-  // if 로 적지 않는다 — 도메인 함수가 정해서 group 에 담아 준다.
+  // 「아직 안 끝난 것」을 세는 자리. 🔴 **묶음으로 그리지는 않는다**
+  // (2026-11-02, 조각 10 — 그 묶음은 팝업이 됐다). 여기서 쓰는 것은 덧말 하나다:
+  // 「차단됨 N」.
   //
-  // 🔴 네 구역과 **같은 배열**을 넘긴다. 위로 올라간 한 장을 걸러낸 배열을
-  // 넘기면 접힌 줄의 수가 실제로 보이는 줄 수보다 한 장 모자라진다 — 그 노드는
-  // 목록에서 사라지지 않고 점선 한 줄로 남아 있다(NodeSection).
+  // 🔵 그래도 머릿수를 화면에서 다시 세지 않고 이 함수를 그대로 쓰는 까닭은,
+  // **「차단됨이 있는가」의 잣대가 한 벌이어야** 하기 때문이다 — 끝내기 확인 창
+  // (assessExecutionFinish)과 「이 건의 다른 절차」의 진행도가 같은 수를 쓰고,
+  // 셋이 같은 함수로 세는지를 시험이 직접 맞대어 본다
+  // (procedure-execution-lifecycle.test.ts · procedure-execution-past-runs.test.ts).
+  //
+  // 🔴 구역과 **같은 배열**을 넘긴다. 위로 올라간 한 장을 걸러낸 배열을 넘기면
+  // 수가 실제로 보이는 줄 수보다 한 장 모자라진다 — 그 노드는 목록에서
+  // 사라지지 않고 점선 한 줄로 남아 있다(NodeSection).
   const fold = buildExecutionListFold({ nodes: executionDetail.nodes, isExecutionFinished });
 
   // 「실행 이력」 묶음 — **「지나온 길」을 품은** 한 덩이다(2026-11-02 사용자 결정,
@@ -337,8 +349,36 @@ export default function ProcedureExecutionScreen({
       )}
 
       {/* 요약과 큰 카드 **사이**다. 위로 올리면 「몇 번째인가」와 「지금 할 일」이
-          멀어지고, 아래로 내리면 큰 카드가 띠에 밀려 내려간다. */}
-      <ExecutionFlowStrip minimap={minimap} />
+          멀어지고, 아래로 내리면 큰 카드가 띠에 밀려 내려간다.
+
+          🔴 상자 머리줄에 단추 둘이 선다(2026-11-02, 조각 10 — 사용자 결정:
+          「[전체 단계 보기]와 [추가 작업 등록]은 [절차 흐름] 상자에 버튼으로
+          만들어줘」). 🔴 **띠가 안 그려질 때도 단추는 남는다** — 그리다 만
+          절차에서는 띠가 늘 안 뜨는데, 그때야말로 전체를 보고 자리를 옮길 길이
+          필요하다(ExecutionFlowStrip 의 HIDDEN 가지).
+
+          🔵 단추를 띠가 직접 import 하지 않고 **슬롯으로** 넘기는 까닭은 띠를
+          그려서 재는 시험 때문이다 — 둘 다 서버 액션을 직접 부르는 부품이라
+          띠가 그것을 물면 import 에서 바로 던진다. */}
+      <ExecutionFlowStrip
+        minimap={minimap}
+        actions={
+          <>
+            <ExecutionStepsDialog
+              executionId={executionDetail.executionId}
+              procedureTemplateId={executionDetail.procedureTemplateId}
+              templateCategory={executionDetail.templateCategory}
+              nodes={executionDetail.nodes}
+              templateNodes={executionDetail.templateNodes}
+              flowEdges={executionDetail.flowEdges}
+              currentTaskNodeId={currentTaskNodeId}
+              isExecutionFinished={isExecutionFinished}
+              eligible={ordinaryActionEligible}
+            />
+            <ExecutionExtraTaskDialog executionId={executionDetail.executionId} eligible={ordinaryActionEligible} />
+          </>
+        }
+      />
 
       {/* 🔴 마친 실행에서는 이 자리가 **통째로 빈다.** 「지금 할 일」도, 그것이
           없을 때 서는 안내도 안 그린다 — 사람이 [절차 끝내기]를 눌렀으면 남은
@@ -354,29 +394,22 @@ export default function ProcedureExecutionScreen({
         <CurrentTaskCard node={currentTask.node} actingUser={actingUser} />
       )}
 
-      {/* 네 구역은 그대로 두고 **담는 그릇만** 둘로 바꾼다. 구역마다 접으면
-          접는 줄이 넷 생겨, 줄인 길이만큼 줄 머리가 도로 늘어난다.
+      {/* 🔴 「전체 단계 보기」 접는 묶음이 있던 자리다 — 그 묶음은 위 「절차
+          흐름」 상자의 **단추가 여는 팝업**이 됐다(2026-11-02 사용자 결정, 조각
+          10). 안에 있던 「실행 가능」·「진행 중」 구역도 함께 걷혔다: 지금 할 일은
+          맨 위 큰 카드가, 다른 자리로 넘어가는 것은 팝업이 맡는다.
 
-          🔴 `fold.remaining &&` 는 「담을 카드가 없다」를 화면이 다시 판정하는
-          것이 아니다 — 도메인이 null 을 돌려주면 그릴 것이 없다는 뜻이고,
-          여기서는 그 결과를 그대로 따를 뿐이다. 머릿수를 화면에서 다시 세면
-          (fold.remaining.count > 0 같은 식) 판정이 두 벌이 된다. */}
-      {fold.remaining && (
-        <ExecutionFoldSection group={fold.remaining}>
-          <NodeSection
-            title="실행 가능"
-            nodes={pendingNodes}
-            actingUser={actingUser}
-            emptyMessage="대기 중인 작업이 없습니다."
-            currentTaskNodeId={currentTaskNodeId}
-          />
-          <NodeSection
-            title="진행 중"
-            nodes={inProgressNodes}
-            actingUser={actingUser}
-            emptyMessage="진행 중인 작업이 없습니다."
-            currentTaskNodeId={currentTaskNodeId}
-          />
+          🔴 **「차단됨」만 접지 않고 그대로 남긴다.** 접는 묶음이 아니라 평면
+          구역이다 — 막힌 것이 있다는 사실은 한 번 더 눌러야 보이면 안 되고
+          (이 저장소가 전에 「차단됨 N」 딱지를 제목 줄에 남긴 것과 같은 요구),
+          그 카드의 [재개(되돌림)]가 BLOCKED 를 푸는 유일한 길이다.
+
+          🔴 `fold.remaining?.note &&` 는 「차단됨이 있는가」를 화면이 다시
+          판정하는 것이 아니다 — 도메인이 덧말을 만들어 준 그 조건이 곧 「차단됨이
+          하나 이상 있고 이 실행은 아직 도는 중이다」이다. 머릿수를 화면에서 다시
+          세면(blockedNodes.length > 0 같은 식) 판정이 두 벌이 된다. */}
+      {fold.remaining?.note && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3 dark:border-amber-900 dark:bg-amber-950/20">
           <NodeSection
             title="차단됨"
             nodes={blockedNodes}
@@ -384,7 +417,7 @@ export default function ProcedureExecutionScreen({
             emptyMessage="차단된 작업이 없습니다."
             currentTaskNodeId={currentTaskNodeId}
           />
-        </ExecutionFoldSection>
+        </div>
       )}
       {/* 🔵 「지나온 길」 묶음이 있던 자리다. 그 안의 카드는 그대로 두고 **담는
           그릇만** 아래 「실행 이력」과 합쳤다(2026-11-02 사용자 결정, 조각 8) —
@@ -434,7 +467,10 @@ export default function ProcedureExecutionScreen({
         </div>
       )}
 
-      <ExecutionExtraTaskForm executionId={executionDetail.executionId} eligible={ordinaryActionEligible} />
+      {/* 🔵 「추가 작업 등록」 폼이 점선 상자로 **늘 펼쳐져** 있던 자리다. 폼은
+          그대로이고 사는 자리만 위 「절차 흐름」 상자의 단추 안으로 옮겼다
+          (2026-11-02 사용자 결정, 조각 10). 폼의 속(노드 갈래 · 그림에 잇기)은
+          다음 조각에서 바뀐다. */}
 
       {/* 🔵 자리가 여기인 까닭 — 위는 전부 **지금 이 실행** 이야기고(요약·띠·
           지금 할 일·목록·이력), 아래 「이전 수리 이력」은 **다른 접수 건** 이야기다.

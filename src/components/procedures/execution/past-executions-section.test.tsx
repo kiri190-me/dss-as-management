@@ -416,7 +416,10 @@ describe("실행 화면 어디에 놓였는가", () => {
   test("🔴 도는 실행이 없을 때도 그린다 — 그만둔 뒤의 화면이 바로 그 모습이다", () => {
     // 🔵 자르는 자리는 **코드 한 줄**로 잡는다. 주석 글귀로 자르면 stripComments
     // 가 그것을 지워 indexOf 가 -1 이 되고, 자른 적이 없는데 통과한다.
-    const splitAt = source.indexOf("const pendingNodes");
+    // 🔵 2026-11-02(조각 10): 표지로 쓰던 `const pendingNodes` 가 없어졌다
+    //    (「실행 가능」 구역이 팝업으로 갔다). 같은 자리에 남아 있는 코드 한
+    //    줄로 바꾼다 — 🔴 표지가 -1 이 되면 자른 적이 없는데 통과한다.
+    const splitAt = source.indexOf("const doneNodes");
     assert.ok(splitAt > 0, "두 가지를 가르는 자리를 못 찾으면 아래가 아무것도 안 잰다");
     const startBranch = source.slice(0, splitAt);
     assert.ok(startBranch.includes("<ExecutionStartCard"), "표본 확인 — 불러오기 카드 가지를 제대로 잘랐다");
@@ -433,7 +436,10 @@ describe("실행 화면 어디에 놓였는가", () => {
       "<ProgressSummary",
       "<ExecutionFlowStrip",
       "<CurrentTaskCard",
-      "group={fold.remaining}",
+      // 🔵 2026-11-02(조각 10): 「전체 단계 보기」 묶음이 팝업이 되면서
+      //    `group={fold.remaining}` 이 없어졌다. 같은 자리에 남은 차단됨 구역을
+      //    대신 본다 — 재는 뜻은 그대로다(「이 건의 다른 절차」는 맨 아래다).
+      '<NodeSection title="차단됨"',
       "group={historyFold.fold}",
     ]) {
       const tagAt = source.indexOf(tag);
@@ -442,9 +448,13 @@ describe("실행 화면 어디에 놓였는가", () => {
     }
   });
 
-  test("🔴 도는 실행의 화면은 그대로다 — 이번 조각이 더하기만 했다", () => {
+  test("🔴 도는 실행의 화면이 이 조각 때문에 흔들리지 않았다", () => {
+    // 🔵 2026-11-02(조각 10): 구역이 넷에서 둘로 줄었다 — 「실행 가능」·「진행
+    //    중」이 「전체 단계 보기」 팝업으로 옮겨 갔다(사용자 결정). 이 묶음이
+    //    재는 것은 「이 건의 다른 절차」가 남의 자리를 안 밀어낸다는 것이라,
+    //    수만 지금 화면에 맞춘다.
     const sections = source.match(/<NodeSection[\s\S]*?\/>/g) ?? [];
-    assert.equal(sections.length, 4, "실행 가능·진행 중·차단됨·완료/건너뜀 넷 그대로");
+    assert.equal(sections.length, 2, "차단됨·완료/건너뜀 둘");
     assert.match(source, /const fold = buildExecutionListFold\(\{ nodes: executionDetail\.nodes, isExecutionFinished \}\);/);
     assert.match(source, /<ExecutionLifecycleActions/);
   });

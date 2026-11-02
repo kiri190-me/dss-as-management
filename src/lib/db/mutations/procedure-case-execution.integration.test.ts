@@ -28,6 +28,7 @@ import {
   resumeProcedureExecution,
   abandonProcedureExecution,
   startExecutionNode,
+  jumpToExecutionNode,
   completeExecutionNode,
   skipExecutionNode,
   blockExecutionNode,
@@ -48,6 +49,7 @@ import { placeExecutionSummary } from "@/lib/domain/procedure-execution-summary-
 import { computeExecutionPosition } from "@/lib/domain/procedure-execution-order";
 import { pickCurrentTaskNode } from "@/lib/domain/procedure-execution-focus";
 import { buildProcedureExecutionMinimap } from "@/lib/domain/procedure-execution-minimap";
+import { buildJumpStatusMarks } from "@/lib/domain/procedure-execution-jump";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -2655,6 +2657,295 @@ describe("procedure-case-execution: 절차 중간부터 시작", () => {
     const isolated = mine.nodes.filter((n) => !connected.has(n.id));
     assert.ok(mine.nodes.length >= connected.size, "간선이 가리키는 노드가 목록에 없다");
     void isolated;
+  });
+});
+
+/**
+ * 「지금 할 일」을 **고른 노드로 옮긴다**(2026-11-02, 조각 10 — 사용자 결정:
+ * 「노드를 선택하면 [지금 할 일]이 해당 노드의 작업으로 뛰어넘기 되도록 해줘」).
+ *
+ * 🔴 여기서 재는 핵심은 **서버가 무엇을 거절하는가**와 **무엇이 실제로 바뀌는가**
+ * 둘이다. 판정 자체(순수 함수)는 unit 목록의 procedure-execution-jump.test.ts 가
+ * 본다 — 그쪽은 「계획이 맞는가」를, 여기는 「그 계획대로 행이 바뀌는가」를 잰다.
+ */
+describe("procedure-case-execution: 지금 할 일 옮기기", () => {
+  /**
+   * 🔴 이 묶음은 접수 건을 **딱 하나만** 쓴다.
+   *
+   * 인수번호는 달마다 99개뿐이고(createRepairCase 의 INTAKE_SEQUENCE_EXHAUSTED)
+   * 이 시험 파일은 한 달치(9905)를 통째로 쓴다. 조각 10 을 더하면서 실제로 그
+   * 99개를 넘겼다 — 넘치면 **엉뚱한 시험**(마지막 쯤의 27번)이 깨져서, 까닭이
+   * 전혀 안 보이는 실패가 된다.
+   *
+   * 기술 작업 절차(TECHNICAL_TASK)는 한 건에 여럿을 나란히 돌릴 수 있으므로
+   * (스키마의 갈래별 유니크 색인) 여기 실행 아홉이 한 건 위에 선다. 실행끼리는
+   * 노드도 이력도 완전히 따로라, 이 묶음이 재는 것 가운데 접수 건을 함께 쓴다고
+   * 달라지는 것은 하나도 없다.
+   */
+  let jumpCaseId: string;
+
+  before(async () => {
+    jumpCaseId = (await createTestCase({ assignedEngineerId: engineerId })).id;
+  });
+
+  /** 실행 하나를 세우고, 템플릿 id · 접수 건 id · 실행 id 를 돌려준다. */
+  async function startExecution(code: string) {
+    const { templateId } = await createPublishedTemplate(uniqueCode(code), "TECHNICAL_TASK");
+    const result = await startProcedureExecution(jumpCaseId, templateId, engineerId);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) throw new Error("unreachable");
+    return { templateId, repairCaseId: jumpCaseId, executionId: result.executionId };
+  }
+
+  async function executionVersion(executionId: string) {
+    const [row] = await db
+      .select({ version: procedureCaseExecutions.version })
+      .from(procedureCaseExecutions)
+      .where(eq(procedureCaseExecutions.id, executionId));
+    return row.version;
+  }
+
+  test("71. 🔴 뒤의 대기 노드로 옮기면 그 줄이 진행 중이 되고, 하던 진행 중은 **대기로 내려간다**", async () => {
+    const { templateId, executionId } = await startExecution("jump-basic");
+    let byCode = await loadExecutionNodesByCode(templateId, executionId);
+
+    // n2 를 사람이 직접 시작해 둔다 — 이것이 「하던 일」이다.
+    const started = await startExecutionNode(byCode.get("n2")!.id, engineerId, byCode.get("n2")!.version);
+    assert.equal(started.ok, true, JSON.stringify(started));
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const n2Before = byCode.get("n2")!;
+    assert.equal(n2Before.status, "IN_PROGRESS", "표본 확인 — 옮기기 전에 진행 중이 하나 있다");
+
+    // 🔴 **절차 차례상 뒤**인 n4 로 옮긴다. 앞의 진행 중을 안 내리면 pickCurrentTask
+    // 가 그대로 n2 를 고르므로, 눌러도 아무 일이 안 일어난 화면이 된다.
+    const target = byCode.get("n4")!;
+    const result = await jumpToExecutionNode(executionId, target.id, engineerId, target.version);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    assert.equal(byCode.get("n4")!.status, "IN_PROGRESS", "고른 줄이 진행 중이어야 한다");
+    assert.equal(byCode.get("n2")!.status, "PENDING", "하던 진행 중이 대기로 안 내려갔다");
+    assert.equal(
+      [...byCode.values()].filter((n) => n.status === "IN_PROGRESS").length,
+      1,
+      "옮기고 나면 진행 중은 하나뿐이다"
+    );
+
+    // 🔴 내려간 줄의 **하던 자취는 그대로**다 — status 한 칸만 내린다.
+    assert.notEqual(byCode.get("n2")!.startedAt, null, "처음 손댄 때가 지워졌다");
+    assert.equal(byCode.get("n2")!.startedBy, engineerId);
+    assert.equal(byCode.get("n2")!.version, n2Before.version + 1, "바뀐 줄은 version 이 올라야 한다");
+
+    // 🔵 건너뜀으로 둔갑하지 않는다 — 안 한 일을 했다고 적으면 되돌릴 길이 없다.
+    assert.equal([...byCode.values()].filter((n) => n.status === "SKIPPED").length, 0);
+
+    // 🔴 그리고 **「지금 할 일」이 정말로 따라온다.** 옮기기는 노드 상태만
+    // 건드리는데 pickCurrentTask 는 진행 중 가운데 절차 차례가 앞선 것을 고른다 —
+    // 위에서 n2 를 안 내렸다면 여기서 n2 가 나와 「눌렀는데 아무 일도 안 일어난」
+    // 화면이 된다. 오류가 안 나는 종류라 반드시 여기서 잡아야 한다.
+    const detail = await getExecutionDetail(executionId);
+    const current = pickCurrentTaskNode(detail!.nodes, { isExecutionFinished: false });
+    assert.ok(current, "지금 할 일이 없다");
+    assert.equal(current.nodeCode, "n4", "옮겼는데 지금 할 일이 안 따라왔다");
+    assert.equal(current.status, "IN_PROGRESS");
+  });
+
+  test("72. 🔴 감사 이력 — **NODE_STARTED 한 줄**이고 새 action 값이 없다. 내려간 줄에는 안 붙는다", async () => {
+    const { templateId, executionId } = await startExecution("jump-audit");
+    let byCode = await loadExecutionNodesByCode(templateId, executionId);
+    await startExecutionNode(byCode.get("n2")!.id, engineerId, byCode.get("n2")!.version);
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const standDownId = byCode.get("n2")!.id;
+    const target = byCode.get("n4")!;
+    await jumpToExecutionNode(executionId, target.id, engineerId, target.version);
+
+    const history = await getExecutionHistory(executionId);
+    const jumped = history.filter(
+      (h) => h.actionType === "NODE_STARTED" && (h.afterState as { jumpedTo?: boolean } | null)?.jumpedTo === true
+    );
+    assert.equal(jumped.length, 1, "옮긴 줄이 이력에 딱 한 번 적혀야 한다");
+    assert.equal(jumped[0].executionNodeId, target.id);
+    assert.deepEqual((jumped[0].afterState as { standDownExecutionNodeIds: string[] }).standDownExecutionNodeIds, [standDownId]);
+    assert.deepEqual(jumped[0].beforeState, { status: "PENDING" }, "옮기기 전 상태가 적혀야 「이번에 시작한 것」과 가려진다");
+
+    // 🔴 **내려간 줄에는 이력이 안 붙는다** — 「진행 중 → 대기」에 들어맞는 action
+    // 값이 없어서, 억지로 빌리면 이력 화면이 거짓말을 한다(그만두기와 같은 잣대).
+    assert.equal(
+      history.filter((h) => h.executionNodeId === standDownId && h.createdAt > jumped[0].createdAt).length,
+      0,
+      "내려간 줄에 새 이력이 붙었다"
+    );
+
+    // 🔵 새 action 값이 안 생겼다 — 쓰인 것은 전부 이미 있던 값이다.
+    const used = new Set(history.map((h) => h.actionType));
+    for (const actionType of used) {
+      assert.ok(
+        ["EXECUTION_STARTED", "NODE_ADDED", "NODE_STARTED", "NODE_COMPLETED", "NODE_SKIPPED", "NODE_BLOCKED", "NODE_REOPENED", "NODE_MEMO_UPDATED"].includes(
+          actionType
+        ),
+        `처음 보는 action 값: ${actionType}`
+      );
+    }
+  });
+
+  test("73. 🔴 완료 · 건너뜀 · 차단됨으로는 못 옮긴다 — 한 줄도 안 바뀐다", async () => {
+    const { templateId, executionId } = await startExecution("jump-reject-status");
+    let byCode = await loadExecutionNodesByCode(templateId, executionId);
+
+    // 셋을 실제로 만든다 — 상태 글자를 손으로 쓰지 않고 그 길로 만든다.
+    await completeExecutionNode({
+      executionNodeId: byCode.get("n2")!.id,
+      actorUserId: engineerId,
+      expectedVersion: byCode.get("n2")!.version,
+    });
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    await skipExecutionNode(byCode.get("n4")!.id, engineerId, byCode.get("n4")!.version, "이번 건에는 해당 없음");
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    await blockExecutionNode(byCode.get("n5")!.id, engineerId, byCode.get("n5")!.version, "부품 입고 대기");
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    assert.equal(byCode.get("n2")!.status, "COMPLETED", "표본 확인");
+    assert.equal(byCode.get("n4")!.status, "SKIPPED", "표본 확인");
+    assert.equal(byCode.get("n5")!.status, "BLOCKED", "표본 확인");
+
+    const before = await snapshotExecutionNodes(executionId);
+    for (const code of ["n2", "n4", "n5"]) {
+      const node = byCode.get(code)!;
+      const result = await jumpToExecutionNode(executionId, node.id, engineerId, node.version);
+      assert.equal(result.ok, false, `${code} 로 옮기기가 통과했다`);
+      if (result.ok) return;
+      assert.equal(result.code, "INVALID_STATUS_TRANSITION");
+      assert.ok(result.message.length > 0);
+    }
+    assert.deepEqual(await snapshotExecutionNodes(executionId), before, "거절했는데 행이 바뀌었다");
+  });
+
+  test("74. 🔴 남의 실행 id · 남의 실행 노드 · 시작(START) 지점은 거절한다", async () => {
+    // 🔵 같은 접수 건 위의 **다른 실행** 둘이다(이 묶음의 접수 건은 하나뿐이다).
+    const mine = await startExecution("jump-foreign-a");
+    const other = await startExecution("jump-foreign-b");
+    const byCode = await loadExecutionNodesByCode(mine.templateId, mine.executionId);
+    const otherByCode = await loadExecutionNodesByCode(other.templateId, other.executionId);
+
+    // ㉠ 내 노드인데 **남의 실행 id** 를 실어 보냈다.
+    const mineTarget = byCode.get("n4")!;
+    const wrongExecution = await jumpToExecutionNode(other.executionId, mineTarget.id, engineerId, mineTarget.version);
+    assert.equal(wrongExecution.ok, false, "남의 실행 id 가 통과했다");
+    if (wrongExecution.ok) return;
+    assert.equal(wrongExecution.code, "NOT_FOUND");
+
+    // ㉡ 내 실행 id 에 **남의 실행 노드**를 실어 보냈다.
+    const otherTarget = otherByCode.get("n4")!;
+    const foreignNode = await jumpToExecutionNode(mine.executionId, otherTarget.id, engineerId, otherTarget.version);
+    assert.equal(foreignNode.ok, false, "남의 실행 노드가 통과했다");
+    if (foreignNode.ok) return;
+    assert.equal(foreignNode.code, "NOT_FOUND");
+
+    // ㉢ 시작(START) 표식 — 다른 변이들과 같은 관문에 걸린다.
+    const start = byCode.get("n1")!;
+    const systemNode = await jumpToExecutionNode(mine.executionId, start.id, engineerId, start.version);
+    assert.equal(systemNode.ok, false, "START 가 통과했다");
+    if (systemNode.ok) return;
+    assert.equal(systemNode.code, "SYSTEM_MANAGED_NODE");
+
+    // 셋 다 아무것도 안 바꿨다.
+    const after = await loadExecutionNodesByCode(mine.templateId, mine.executionId);
+    assert.equal(after.get("n4")!.version, mineTarget.version);
+    assert.equal(after.get("n4")!.status, "PENDING");
+  });
+
+  test("75. 🔴 **마친 실행**과 **그만둔 실행**은 거절한다", async () => {
+    const finished = await startExecution("jump-finished");
+    const finishResult = await finishProcedureExecution(
+      finished.executionId,
+      engineerId,
+      await executionVersion(finished.executionId),
+      true
+    );
+    assert.equal(finishResult.ok, true, JSON.stringify(finishResult));
+
+    const finishedByCode = await loadExecutionNodesByCode(finished.templateId, finished.executionId);
+    const finishedTarget = finishedByCode.get("n4")!;
+    const onFinished = await jumpToExecutionNode(finished.executionId, finishedTarget.id, engineerId, finishedTarget.version);
+    assert.equal(onFinished.ok, false, "마친 실행에서 옮기기가 통과했다");
+    if (onFinished.ok) return;
+    assert.equal(onFinished.code, "ALREADY_FINISHED", "새 코드를 만들지 않고 이미 있는 값을 쓴다");
+    assert.match(onFinished.message, /절차 다시 잇기/, "되돌릴 길을 안 적으면 막다른 길이 된다");
+
+    const abandoned = await startExecution("jump-abandoned");
+    const abandonResult = await abandonProcedureExecution(
+      abandoned.executionId,
+      engineerId,
+      await executionVersion(abandoned.executionId),
+      "잘못 불러옴"
+    );
+    assert.equal(abandonResult.ok, true, JSON.stringify(abandonResult));
+
+    const abandonedByCode = await loadExecutionNodesByCode(abandoned.templateId, abandoned.executionId);
+    const abandonedTarget = abandonedByCode.get("n4")!;
+    const onAbandoned = await jumpToExecutionNode(abandoned.executionId, abandonedTarget.id, engineerId, abandonedTarget.version);
+    assert.equal(onAbandoned.ok, false, "그만둔 실행에서 옮기기가 통과했다");
+    if (onAbandoned.ok) return;
+    assert.equal(onAbandoned.code, "NOT_FOUND", "치운 실행은 적재기가 아예 못 찾는다 — 따로 if 를 두지 않는다");
+  });
+
+  test("76. 🔴 버전이 어긋나면 CONFLICT, 이미 그 줄 하나만 진행 중이면 **아무것도 안 바뀐다**", async () => {
+    const { templateId, executionId } = await startExecution("jump-conflict");
+    let byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const stale = byCode.get("n4")!;
+
+    const conflict = await jumpToExecutionNode(executionId, stale.id, engineerId, stale.version + 5);
+    assert.equal(conflict.ok, false, "어긋난 version 이 통과했다");
+    if (conflict.ok) return;
+    assert.equal(conflict.code, "CONFLICT");
+
+    // 제 version 으로 한 번 옮긴 뒤, **같은 줄로 또** 옮겨 본다.
+    const first = await jumpToExecutionNode(executionId, stale.id, engineerId, stale.version);
+    assert.equal(first.ok, true, JSON.stringify(first));
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const after = byCode.get("n4")!;
+    const before = await snapshotExecutionNodes(executionId);
+    const again = await jumpToExecutionNode(executionId, after.id, engineerId, after.version);
+    assert.equal(again.ok, true, "이미 거기 서 있다고 거절하면 사람 눈에는 까닭 없는 실패가 된다");
+    if (!again.ok) return;
+    assert.equal(again.version, after.version, "값이 그대로인데 version 을 올리면 남의 단추가 전부 CONFLICT 로 죽는다");
+    assert.deepEqual(await snapshotExecutionNodes(executionId), before, "바꿀 것이 없는데 행을 건드렸다");
+  });
+
+  test("77. 🔵 조회가 **팝업 재료**를 싣는다 — 절차 노드 전부 · 갈래 · 간선의 차례", async () => {
+    const { templateId, executionId } = await startExecution("jump-detail");
+    const detail = await getExecutionDetail(executionId);
+    assert.ok(detail);
+
+    // 🔴 실행 줄은 START·참고 문서를 빼지만(사람이 할 일만 센다), **그림 재료는
+    // 절차 전체**다 — 그림은 절차를 통째로 그린다.
+    assert.equal(detail.nodes.length, 5, "실행 줄은 START·참고 문서를 뺀 다섯이다");
+    assert.equal(detail.templateNodes.length, 7, "그림 재료는 START·참고 문서까지 일곱이어야 한다");
+    const codes = new Set(detail.templateNodes.map((n) => n.nodeCode));
+    assert.ok(codes.has("n1") && codes.has("n6"), "START 와 참고 문서가 그림 재료에서 빠졌다");
+
+    // 🔵 그림이 읽는 칸이 실제로 실려 있다 — 빈 값이면 노드가 한 점에 겹친다.
+    const first = detail.templateNodes[0];
+    assert.equal(typeof first.positionX, "number");
+    assert.equal(typeof first.sortOrder, "number");
+    assert.equal(detail.templateCategory, "TECHNICAL_TASK", "그림의 배치 규칙이 이 값으로 갈린다");
+
+    // 🔵 간선에 그림이 받는 두 칸이 실려 있다(간선을 두 벌로 안 내려보낸다).
+    assert.equal(detail.flowEdges.length, 7);
+    assert.equal(typeof detail.flowEdges[0].sortOrder, "number");
+    assert.ok("sourceConnectorId" in detail.flowEdges[0]);
+
+    // 🔴 그림에 얹을 상태 지도가 **실행 줄과 맞물린다** — 템플릿 노드 id 로 찾힌다.
+    const marks = buildJumpStatusMarks(detail.nodes);
+    for (const node of detail.nodes) {
+      if (node.procedureTemplateNodeId === null) continue;
+      assert.ok(marks.has(node.procedureTemplateNodeId), `${node.nodeCode} 의 딱지가 지도에 없다`);
+    }
+    assert.ok(detail.templateNodes.some((n) => !marks.has(n.id)), "실행 줄이 없는 칸(START·참고 문서)에는 딱지가 없어야 한다");
+    void templateId;
   });
 });
 

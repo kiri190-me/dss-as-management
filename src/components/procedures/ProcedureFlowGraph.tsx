@@ -57,6 +57,29 @@ import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
 const LANE_BASE_GAP = 60;
 const LANE_WIDTH = 28;
 
+/**
+ * 2026-11-02(조각 10) — 노드 칸에 **바깥에서 붙이는 딱지** 하나. 이 그림은
+ * 무엇으로 쓰이는지 모르므로 세기만 받는다:
+ *
+ *  - STRONG … 지금 눈이 가야 하는 것
+ *  - PLAIN  … 보통
+ *  - MUTED  … 지나간 것(흐리게)
+ *  - WARN   … 막힌 것 · 손이 가야 하는 것
+ *
+ * 🔴 실행 상태 이름(진행 중·완료·차단됨)을 여기에 적지 않는다 — 그 낱말은 이
+ * 그림이 모르는 것이고, 절차 편집기에서도 같은 자리에 다른 뜻의 딱지를 붙이게
+ * 되는 날이 온다. 상태 → 세기로 옮기는 일은 쓰는 쪽이 한다
+ * (ExecutionStepsGraph — procedure-execution-jump.ts 의 JumpStatusTone).
+ */
+export type ProcedureFlowGraphNodeMark = { label: string; tone: "STRONG" | "PLAIN" | "MUTED" | "WARN" };
+
+const NODE_MARK_CLASS: Record<ProcedureFlowGraphNodeMark["tone"], string> = {
+  STRONG: "border-primary-900 bg-primary-900 text-white dark:border-primary-50 dark:bg-primary-50 dark:text-zinc-900",
+  PLAIN: "border-zinc-300 bg-white text-zinc-700 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300",
+  MUTED: "border-zinc-200 bg-zinc-100 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-400",
+  WARN: "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300",
+};
+
 type ProcedureNodeData = {
   title: string;
   nodeType: ProcedureNodeType;
@@ -64,6 +87,7 @@ type ProcedureNodeData = {
   sourceShapeId: string | null;
   templateId: string;
   issueBadge: NodeIssueBadge | null;
+  mark: ProcedureFlowGraphNodeMark | null;
   isSelected: boolean;
   isDimmed: boolean;
   isSeverelyDimmed: boolean;
@@ -113,6 +137,23 @@ function ProcedureNode({ data }: NodeProps & { data: ProcedureNodeData }) {
         isDimmed={data.isDimmed}
         isSeverelyDimmed={data.isSeverelyDimmed}
       />
+      {/* 딱지 층 — 모양 층(clip-path) 바깥이라 마름모·문서 꼴에서도 안 잘린다.
+          오류 배지가 오른쪽 위에 붙으므로 **왼쪽 위**에 세운다(둘이 한 노드에
+          함께 뜰 수 있다). 흐려진 노드에서는 딱지도 같이 흐려져야 한다 —
+          혼자 또렷하면 흐리기가 「무엇이 걸렸나」를 가리키는 뜻을 잃는다. */}
+      {data.mark && (
+        <span
+          data-node-mark
+          data-node-mark-tone={data.mark.tone}
+          className={[
+            "pointer-events-none absolute -top-2 -left-2 z-10 rounded-full border px-1.5 py-px text-[9px] font-semibold whitespace-nowrap",
+            NODE_MARK_CLASS[data.mark.tone],
+            data.isDimmed ? (data.isSeverelyDimmed ? "opacity-15" : "opacity-35") : "opacity-100",
+          ].join(" ")}
+        >
+          {data.mark.label}
+        </span>
+      )}
     </div>
   );
 }
@@ -247,6 +288,7 @@ export default function ProcedureFlowGraph({
   onInstanceReady,
   showChrome = true,
   highlightedNodeIds = null,
+  nodeMarks = null,
   graphHeight,
 }: {
   templateId: string;
@@ -343,6 +385,17 @@ export default function ProcedureFlowGraph({
    * 그림에서 사라진다.
    */
   highlightedNodeIds?: readonly string[] | null;
+  /**
+   * 2026-11-02(조각 10) — 노드 id → **그 칸에 붙일 딱지**. null 이거나 지도에
+   * 없는 노드에는 아무것도 안 붙는다(지금까지의 호출부 셋은 안 넘기므로 글자
+   * 하나 안 바뀐다).
+   *
+   * 🔴 쓰는 자리는 **「전체 단계 보기」 팝업** 하나다. 실행 중에는 같은 그림을
+   * 봐도 「이 노드가 지금 어떤 상태인가」가 함께 보여야 고를 수 있는데,
+   * highlightedNodeIds 만으로는 그게 안 된다 — 그쪽은 **환하냐 흐리냐** 둘뿐이라
+   * 다섯 상태(대기·진행 중·완료·건너뜀·차단됨)를 실을 칸이 없다.
+   */
+  nodeMarks?: ReadonlyMap<string, ProcedureFlowGraphNodeMark> | null;
   /** 2026-11-02(조각 7) — 캔버스 높이(px). 생략하면 GraphCanvas 의 기본값(600). 창 안에 들어갈 때는 화면이 좁아 더 낮게 잡는다. */
   graphHeight?: number;
 }) {
@@ -691,6 +744,7 @@ export default function ProcedureFlowGraph({
           sourceShapeId: n.sourceShapeId,
           templateId,
           issueBadge: issueBadgeByNodeId.get(n.id) ?? null,
+          mark: nodeMarks?.get(n.id) ?? null,
           isSelected,
           isDimmed: !isSelected && (dimmedBySelection || dimmedByHighlight),
           isSeverelyDimmed: errorFocusMode && dimmedBySelection,
@@ -736,6 +790,7 @@ export default function ProcedureFlowGraph({
     connectedNodeIds,
     errorFocusMode,
     highlightedNodeIdSet,
+    nodeMarks,
   ]);
 
   const flowEdges = useMemo<Edge[]>(() => {

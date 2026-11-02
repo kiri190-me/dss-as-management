@@ -31,11 +31,17 @@ import { formatFlowEdgeLabel } from "./execution-branch-choice";
  * 휴대폰에서는 쓰지도 못한다. 여기 있는 것은 읽기 전용 글상자 몇 개뿐이다.
  *
  * ──────────────────────────────────────────────────────────────────────
- * 🔴 눌러도 아무 일이 없다
+ * 🔴 **칸은** 눌러도 아무 일이 없다
  * ──────────────────────────────────────────────────────────────────────
- * 단추도 링크도 쓰지 않는다. 「눌러서 그 단계로 건너뛰기」는 쓸모 있어 보이지만
- * **절차를 건너뛰는 길**을 여는 일이라 따로 정해야 한다. 지금 자리를 옮기는
- * 길은 큰 카드의 [시작]·[완료]·갈래 단추뿐이다.
+ * 칸에는 단추도 링크도 없다. 「칸을 눌러서 그 단계로 건너뛰기」는 쓸모 있어
+ * 보이지만, 좁은 띠 안에서 **되돌릴 수 없어 보이는 일**이 한 번 누르면 일어나는
+ * 모양이 된다.
+ *
+ * 🔵 2026-11-02(조각 10)부터 자리를 옮기는 길이 생기기는 했다 — 다만 띠의 칸이
+ * 아니라 **상자 머리줄의 [전체 단계 보기]** 가 여는 창에서다(ExecutionStepsDialog).
+ * 거기서는 절차 전체와 상태를 보고, 고르고, 못 옮기면 까닭을 읽고 나서 누른다.
+ * 그 단추들은 이 파일이 만들지 않고 **슬롯(`actions`)으로 받는다** — 아래
+ * ExecutionFlowStrip 의 그 인자 주석에 까닭이 있다.
  *
  * ──────────────────────────────────────────────────────────────────────
  * 가로로 넘치고 세로로는 안 자란다
@@ -180,37 +186,73 @@ function CurrentColumn({ node }: { node: FlowStripNode }) {
   );
 }
 
-function StripShell({ children, note }: { children?: ReactNode; note?: string }) {
+function StripShell({ children, note, actions }: { children?: ReactNode; note?: string; actions?: ReactNode }) {
   return (
     <section
       data-execution-flow-strip
       className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900"
     >
-      <div className="flex items-baseline justify-between gap-2">
+      {/* 🔵 머리줄은 **접힌다**(flex-wrap). 폰 폭에서는 제목 한 줄, 단추 둘이 그
+          아래로 내려간다 — 단추를 한 줄에 억지로 끼우면 글자가 잘린다. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">절차 흐름</h3>
-        {!note && (
-          <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
-            지난 {MINIMAP_BACKWARD_STEPS}걸음 · 다음 {MINIMAP_FORWARD_STEPS}걸음까지
-          </span>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {!note && !actions && (
+            <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+              지난 {MINIMAP_BACKWARD_STEPS}걸음 · 다음 {MINIMAP_FORWARD_STEPS}걸음까지
+            </span>
+          )}
+          {actions}
+        </div>
       </div>
       {note ? <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">{note}</p> : children}
     </section>
   );
 }
 
-export default function ExecutionFlowStrip({ minimap }: { minimap: ProcedureExecutionMinimap<FlowStripNode> }) {
-  // 🔴 절차 전체에 이을 선이 없거나 지금 할 일 자체가 없으면 **통째로** 안
+/**
+ * 그림을 못 그릴 때 그 자리에 적는 한 줄. 🔴 까닭마다 글이 다르다 — 「이 절차가
+ * 안 이어져 있다」와 「지금 할 일이 없다」는 사람이 해야 할 다음 행동이 다르다.
+ */
+function hiddenNoteFor(reason: "NO_LINKED_STEPS_AT_ALL" | "NO_CURRENT_TASK"): string {
+  return reason === "NO_LINKED_STEPS_AT_ALL"
+    ? "이 절차는 단계끼리 선으로 이어져 있지 않아 흐름을 그릴 수 없습니다 — [전체 단계 보기]에서 전체를 보고 옮길 수 있습니다."
+    : "지금 할 일이 없어 흐름을 그릴 수 없습니다 — [전체 단계 보기]에서 전체를 보고 옮길 수 있습니다.";
+}
+
+export default function ExecutionFlowStrip({
+  minimap,
+  actions,
+}: {
+  minimap: ProcedureExecutionMinimap<FlowStripNode>;
+  /**
+   * 🔴 상자 머리줄에 서는 단추들(2026-11-02, 조각 10 — [전체 단계 보기] ·
+   * [추가 작업 등록]). **슬롯으로 받는** 까닭은 둘 다 서버 액션을 직접 부르는
+   * 클라이언트 부품이라, 여기서 import 하면 이 띠를 **그려서 재는** 시험이
+   * import 에서 바로 던지기 때문이다(조각 7 의 graphSlot 과 같은 수법).
+   */
+  actions?: ReactNode;
+}) {
+  // 🔴 절차 전체에 이을 선이 없거나 지금 할 일 자체가 없으면 **그림을** 안
   // 그린다. 빈 네모 하나를 세우는 것은 「그림이 있는데 비어 있다」는 거짓말이다.
-  if (minimap.kind === "HIDDEN") return null;
+  //
+  // 🔴 다만 **담을 단추가 있으면 상자는 남는다**(2026-11-02, 조각 10). 그 둘은
+  // 흐름이 안 그려질 때야말로 필요하다 — 그리다 만 절차(실측 「원복 검사」는 노드
+  // 22개에 선이 7개)에서는 띠가 늘 안 뜨는데, 그때 전체를 보고 자리를 옮길 길이
+  // 화면에서 통째로 사라지면 안 된다.
+  if (minimap.kind === "HIDDEN") {
+    if (!actions) return null;
+    return <StripShell actions={actions} note={hiddenNoteFor(minimap.reason)} />;
+  }
 
   if (minimap.kind === "NOTE") {
     return (
       <StripShell
+        actions={actions}
         note={
           minimap.reason === "CURRENT_IS_EXTRA_TASK"
             ? "이 작업은 절차 그림 밖에서 더해진 추가 작업이라 이어지는 단계가 없습니다."
-            : "이 절차는 단계끼리 선으로 이어져 있지 않습니다 — 아래 목록 차례대로 진행해 주세요."
+            : "이 절차는 단계끼리 선으로 이어져 있지 않습니다 — [전체 단계 보기]에서 전체를 볼 수 있습니다."
         }
       />
     );
@@ -220,7 +262,7 @@ export default function ExecutionFlowStrip({ minimap }: { minimap: ProcedureExec
   const backward = [...minimap.backward].reverse();
 
   return (
-    <StripShell>
+    <StripShell actions={actions}>
       <div className="mt-1 overflow-x-auto pb-1">
         <div className="flex w-max items-stretch">
           {backward.map((level, index) => (

@@ -292,7 +292,13 @@ describe("🔴 마친 실행에서는 「지금 할 일」이 안 그려진다",
   });
 
   test("🔴 화면이 completedAt 을 **다시 보지 않는다** — 도메인이 준 까닭을 따른다", () => {
-    const between = flatScreen.slice(flatScreen.indexOf("<ExecutionFlowStrip"), flatScreen.indexOf("{fold.remaining &&"));
+    // 🔵 2026-11-02(조각 10): 끝 표지가 바뀌었다. 「전체 단계 보기」 묶음이
+    //    팝업으로 옮겨 가면서 `{fold.remaining &&` 이 사라지고, 그 자리에
+    //    차단됨 구역의 `{fold.remaining?.note &&` 가 섰다. 🔴 표지를 안 고치면
+    //    indexOf 가 -1 이 되어 **화면 끝까지**를 자르고도 조용히 통과한다.
+    const endAt = flatScreen.indexOf("{fold.remaining?.note &&");
+    assert.ok(endAt > 0, "차단됨 구역을 못 찾았다 — 자르는 자리가 없으면 아래가 아무것도 안 잰다");
+    const between = flatScreen.slice(flatScreen.indexOf("<ExecutionFlowStrip"), endAt);
     assert.ok(between.length > 0, "큰 카드 자리를 못 찾았다");
     assert.ok(!between.includes("completedAt"), "이 자리에서 completedAt 을 또 보면 판정이 두 벌이 된다");
   });
@@ -301,15 +307,33 @@ describe("🔴 마친 실행에서는 「지금 할 일」이 안 그려진다",
     assert.match(flatScreen, /reason: Exclude<NoCurrentTaskReason, "EXECUTION_FINISHED">/);
   });
 
-  test("🔵 흐름 띠도 함께 물러난다 — 따로 숨기지 않아도 된다", () => {
+  test("🔵 **그림은** 함께 물러난다 — 따로 숨기지 않아도 된다", () => {
     // 띠는 「지금 할 일」을 받아 그린다. 마치면 그것이 null 이 되고, 도메인이
-    // HIDDEN 을 돌려주며, 띠는 HIDDEN 에서 아무것도 안 그린다(null). 셋이 한
-    // 사슬이라 화면에 조건을 더 붙이지 않았다 — 그 사슬을 여기서 못 박는다.
+    // HIDDEN 을 돌려준다. 셋이 한 사슬이라 화면에 조건을 더 붙이지 않았다 —
+    // 그 사슬을 여기서 못 박는다.
+    //
+    // 🔴 2026-11-02(조각 10)에 **물러나는 것이 그림뿐**이 됐다. 상자 머리줄의
+    // 단추 둘([전체 단계 보기]·[추가 작업 등록])은 남는다 — 흐름이 안 그려질
+    // 때야말로 전체를 보고 자리를 옮길 길이 필요하기 때문이다. 단추를 안 넘긴
+    // 호출부에서는 전과 같이 **통째로** 안 그린다.
     assert.match(flatScreen, /current: currentTask\.kind === "NONE" \? null : currentTask\.node,/);
     const strip = stripComments(read("src/components/procedures/execution/ExecutionFlowStrip.tsx"));
-    assert.match(strip, /if \(minimap\.kind === "HIDDEN"\) return null;/);
+    const flatStrip = flat(strip);
+    assert.match(flatStrip, /if \(minimap\.kind === "HIDDEN"\) \{ if \(!actions\) return null;/);
+    assert.ok(
+      !/<FlowChip|<CurrentColumn|<FlowLevel/.test(flatStrip.slice(flatStrip.indexOf('minimap.kind === "HIDDEN"'), flatStrip.indexOf('minimap.kind === "NOTE"'))),
+      "HIDDEN 가지가 칸을 그리면 「그림은 물러난다」가 깨진다"
+    );
     const minimapSource = stripComments(read("src/lib/domain/procedure-execution-minimap.ts"));
     assert.match(minimapSource, /if \(!input\.current\) return \{ kind: "HIDDEN", reason: "NO_CURRENT_TASK" \};/);
+  });
+
+  test("🔴 마친 실행에서는 **옮기기 단추가 까닭과 함께 흐려진다** — 눌리는데 반드시 실패하는 단추를 안 만든다", () => {
+    // 서버가 ALREADY_FINISHED 로 거절하므로(jumpToExecutionNode), 화면이 안
+    // 가리면 누를 수는 있는데 언제나 실패하는 단추가 된다.
+    assert.match(flatScreen, /isExecutionFinished=\{isExecutionFinished\}/);
+    const jump = stripComments(read("src/lib/domain/procedure-execution-jump.ts"));
+    assert.match(flat(jump), /if \(input\.isExecutionFinished\) \{ return \{ label: JUMP_BUTTON_LABEL, disabled: true,/);
   });
 
   test("「실행 이력」(지나온 길을 품은)은 마친 뒤에도 그려진다 — 조건이 안 붙어 있다", () => {
@@ -479,8 +503,17 @@ describe("끝낸 뒤·그만둔 뒤의 화면", () => {
     for (const tag of ["<ProgressSummary", "<ExecutionFlowStrip", "<CurrentTaskCard", "<NoCurrentTaskCard"]) {
       assert.ok(screen.includes(tag), `${tag} 이 화면에서 사라졌다`);
     }
-    for (const title of ["실행 가능", "진행 중", "차단됨", "완료 / 건너뜀"]) {
+    // 🔵 2026-11-02(조각 10)에 구역이 **넷에서 둘로** 줄었다(사용자 결정 —
+    //    「전체 단계 보기」가 팝업이 됐다). 「실행 가능」·「진행 중」 카드가 하던
+    //    일은 맨 위 큰 카드와 팝업이 나눠 맡는다. 🔴 지우지 않고 **남는 둘을
+    //    못 박도록** 고친다 — 둘 중 하나라도 사라지면 여기서 걸린다.
+    for (const title of ["차단됨", "완료 / 건너뜀"]) {
       assert.ok(screen.includes(`title="${title}"`), `${title} 구역이 사라지면 안 된다`);
+    }
+    // 🔴 걷힌 둘이 **몰래 돌아오지 않는지**도 함께 본다 — 돌아오면 팝업과 목록이
+    //    같은 일을 두 자리에서 하게 된다.
+    for (const title of ["실행 가능", "진행 중"]) {
+      assert.ok(!screen.includes(`title="${title}"`), `${title} 구역이 되살아났다 — 그 자리는 팝업이다`);
     }
   });
 });

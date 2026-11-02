@@ -5,12 +5,23 @@ import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
 import { addExecutionExtraTaskAction } from "@/lib/server/actions/procedure-case-execution";
 
+/**
+ * 🔵 2026-11-02(조각 10) — **폼 자체는 그대로**이고 사는 자리만 바뀌었다. 전에는
+ * 화면 아래에 점선 상자로 늘 펼쳐져 있었고, 이제 「절차 흐름」 상자의
+ * [추가 작업 등록] 단추가 여는 창 안에 들어간다(ExecutionExtraTaskDialog).
+ *
+ * 🔴 그래서 `onSaved` 하나가 늘었다. 모달 창은 브라우저의 top layer 에 서기
+ * 때문에, 등록이 끝나고 뜨는 저장 팝업이 **창 뒤로 가려진다** — 창을 닫아야
+ * 사람이 그 글자를 본다. 부르는 쪽이 안 넘기면 지금까지와 똑같이 동작한다.
+ */
 export default function ExecutionExtraTaskForm({
   executionId,
   eligible,
+  onSaved,
 }: {
   executionId: string;
   eligible: boolean;
+  onSaved?: () => void;
 }) {
   const router = useRouter();
   const [title, setTitle] = useState("");
@@ -32,6 +43,9 @@ export default function ExecutionExtraTaskForm({
     }
     setTitle("");
     setInstructions("");
+    // 🔴 저장 팝업보다 **먼저** 닫는다 — 모달 창이 떠 있으면 그 위의 팝업이
+    // 가려져서, 등록은 됐는데 아무 말도 못 본 화면이 된다.
+    onSaved?.();
     router.refresh();
     showSavePopup({ message: "추가 작업을 등록했습니다.", redirectTo: null });
   }

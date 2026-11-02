@@ -238,12 +238,40 @@ describe("🔴 자바스크립트 없이 접힌다 — 서버 컴포넌트가 �
 describe("실행 화면이 무엇을 접고 무엇을 안 접는가", () => {
   const screen = stripComments(readFileSync(new URL("./ProcedureExecutionScreen.tsx", import.meta.url), "utf8"));
   const source = flat(screen);
-  const remainingAt = source.indexOf("<ExecutionFoldSection group={fold.remaining}>");
+  const blockedAt = source.indexOf('<NodeSection title="차단됨"');
   const historyAt = source.indexOf("<ExecutionFoldSection group={historyFold.fold}>");
 
-  test("🔵 먼저 — 두 묶음이 실제로 화면에 적혀 있다", () => {
-    assert.ok(remainingAt >= 0 && historyAt >= 0, "둘을 못 찾으면 아래 자리 판정이 전부 뜻을 잃는다");
-    assert.ok(remainingAt < historyAt, "「전체 단계 보기」가 「실행 이력」보다 위다");
+  test("🔵 먼저 — 아래 두 구역이 실제로 화면에 적혀 있다", () => {
+    assert.ok(blockedAt >= 0 && historyAt >= 0, "둘을 못 찾으면 아래 자리 판정이 전부 뜻을 잃는다");
+    assert.ok(blockedAt < historyAt, "「차단됨」이 「실행 이력」보다 위다");
+  });
+
+  /**
+   * 🔴 2026-11-02(조각 10) — **묶음 하나가 화면에서 없어졌다.** 「전체 단계
+   * 보기」가 접는 묶음에서 **팝업**이 됐다(사용자 결정 — 「[전체 단계 보기]는
+   * 지금같은 형태 말고, 누르면 팝업으로 플로우차드로 보여지도록」).
+   *
+   * 그 묶음을 재던 단언은 지우지 않고 **반대를 재도록** 고쳤다 — 지우면
+   * 묶음이 슬그머니 되살아나도 아무 데서도 안 걸린다(조각 8 이 「지나온 길」을
+   * 옮길 때 쓴 것과 같은 방법).
+   */
+  test("🔴 「전체 단계 보기」 접는 묶음이 **화면에 없다** — 그 자리는 「절차 흐름」 상자의 단추다", () => {
+    assert.ok(
+      !source.includes("<ExecutionFoldSection group={fold.remaining}>"),
+      "접는 묶음이 되살아났다 — 지금 그 자리는 팝업이다"
+    );
+    for (const title of ["실행 가능", "진행 중"]) {
+      assert.ok(!source.includes(`title="${title}"`), `${title} 구역이 되살아났다 — 그 자리는 팝업이다`);
+    }
+    // 단추가 **「절차 흐름」 상자 안**에 있는가. 띠에 넘기는 슬롯이 그 상자다.
+    const stripAt = source.indexOf("<ExecutionFlowStrip");
+    const actionsAt = source.indexOf("actions={", stripAt);
+    const slotEnd = source.indexOf("</>", actionsAt);
+    assert.ok(stripAt >= 0 && actionsAt > stripAt && slotEnd > actionsAt, "단추를 「절차 흐름」 상자에 안 넘기고 있다");
+    const slot = source.slice(actionsAt, slotEnd);
+    assert.ok(slot.includes("<ExecutionStepsDialog"), "[전체 단계 보기]가 상자 밖에 있다");
+    assert.ok(slot.includes("<ExecutionExtraTaskDialog"), "[추가 작업 등록]이 상자 밖에 있다");
+    assert.ok(stripAt < blockedAt, "단추 상자는 아래 구역보다 위다");
   });
 
   test("🔴 판정은 도메인 함수 하나가 한다 — 화면에 if 로 흩어 두지 않았다", () => {
@@ -270,12 +298,16 @@ describe("실행 화면이 무엇을 접고 무엇을 안 접는가", () => {
   });
 
   test("🔴 「안 그린다」도 도메인이 정한다 — 화면은 null 을 따를 뿐 머릿수를 다시 세지 않는다", () => {
-    assert.match(source, /\{fold\.remaining && \( <ExecutionFoldSection group=\{fold\.remaining\}>/);
+    // 🔵 2026-11-02(조각 10): 묶음이 팝업으로 간 자리에 **차단됨 평면 구역**이
+    //    섰다. 그리는 조건은 여전히 도메인이 만든 값 하나다 — 「차단됨 덧말이
+    //    있는가」가 곧 「차단됨이 하나 이상 있고 이 실행은 아직 도는 중인가」다.
+    assert.match(source, /\{fold\.remaining\?\.note && \(/);
     assert.match(source, /\{historyFold && \( <ExecutionFoldSection group=\{historyFold\.fold\}>/);
     assert.match(source, /\{historyFold\.showsTrail && \( <NodeSection title="완료 \/ 건너뜀"/);
     assert.ok(
       !/fold\.(remaining|count)\.count/.test(screen) &&
         !/doneNodes\.length/.test(screen) &&
+        !/blockedNodes\.length/.test(screen) &&
         !/count > 0/.test(screen) &&
         !/count === 0/.test(screen),
       "화면이 머릿수로 다시 판정하면 「빈 묶음은 안 그린다」가 두 벌이 된다"
@@ -295,12 +327,15 @@ describe("실행 화면이 무엇을 접고 무엇을 안 접는가", () => {
     );
   });
 
-  test("아직 안 끝난 세 구역이 「전체 단계 보기」 안에 있다", () => {
-    const inside = source.slice(remainingAt, source.indexOf("</ExecutionFoldSection>", remainingAt));
-    for (const title of ["실행 가능", "진행 중", "차단됨"]) {
-      assert.ok(inside.includes(`title="${title}"`), `${title} 구역이 「전체 단계 보기」 밖에 있다`);
-    }
-    assert.ok(!inside.includes('title="완료 / 건너뜀"'), "끝난 것이 「전체 단계 보기」에 섞이면 머릿수가 어긋난다");
+  test("🔴 「차단됨」 구역은 **접지 않고** 남는다 — [재개(되돌림)]가 거기에만 붙는다", () => {
+    // 팝업은 차단된 칸으로 못 옮긴다(사유 없이 푸는 길을 안 낸다). 그래서 이
+    // 구역을 걷으면 막힌 절차를 다시 흐르게 할 방법이 화면 어디에도 안 남는다.
+    // 🔴 접는 묶음 **안이 아니다** — 막힌 것이 있다는 사실이 한 번 더 눌러야
+    // 보이면 안 된다.
+    assert.ok(blockedAt >= 0, "차단됨 구역이 사라졌다");
+    assert.ok(blockedAt < historyAt, "차단됨이 「실행 이력」 묶음 안으로 들어가면 접힌다");
+    const sectionTag = source.slice(blockedAt, source.indexOf("/>", blockedAt));
+    assert.ok(sectionTag.includes("nodes={blockedNodes}"), "차단됨 구역이 다른 배열을 그리고 있다");
   });
 
   test("🔴 끝난 구역과 시각 기록이 **한 묶음 안**에 있다 — 「지나온 길」 묶음은 없다", () => {
@@ -308,7 +343,7 @@ describe("실행 화면이 무엇을 접고 무엇을 안 접는가", () => {
     assert.ok(inside.includes('title="완료 / 건너뜀"'), "지나온 카드가 「실행 이력」 밖에 있다");
     assert.ok(inside.includes("<ExecutionHistoryTimeline history={history}"), "시각 기록이 같은 묶음 안에 없다");
     assert.ok(inside.includes("시각 기록 ({history.length})"), "한 묶음에 둘이 쌓이면 어디부터가 기록인지 적어야 한다");
-    assert.ok(!inside.includes('title="실행 가능"'));
+    assert.ok(!inside.includes('title="차단됨"'), "막힌 것이 접힌 묶음 안으로 들어가면 안 된다");
     // 🔴 묶음이 둘로 되돌아가면 여기서 걸린다.
     assert.ok(!source.includes("group={fold.done}"), "「지나온 길」 묶음이 되살아났다");
     assert.equal((source.match(/<ExecutionHistoryTimeline/g) ?? []).length, 1, "이력이 두 자리에 그려지면 안 된다");
@@ -318,7 +353,7 @@ describe("실행 화면이 무엇을 접고 무엇을 안 접는가", () => {
     for (const tag of ["<ExecutionFlowStrip", "<CurrentTaskCard", "<NoCurrentTaskCard", "<ProgressSummary"]) {
       const at = source.indexOf(tag);
       assert.ok(at >= 0, `${tag} 이 화면에서 사라졌다`);
-      assert.ok(at < remainingAt, `${tag} 이 접히는 묶음 아래로 내려갔다`);
+      assert.ok(at < historyAt, `${tag} 이 접히는 묶음 아래로 내려갔다`);
     }
   });
 
@@ -332,9 +367,11 @@ describe("실행 화면이 무엇을 접고 무엇을 안 접는가", () => {
     assert.ok(!/<h2[^>]*>실행 이력<\/h2>/.test(screen), "옛 제목 상자가 남아 있다");
   });
 
-  test("네 구역은 그대로다 — 이번 조각도 담는 그릇만 바꾼다", () => {
+  test("남은 두 구역과 작은 카드는 그대로다", () => {
+    // 🔵 2026-11-02(조각 10): 넷에서 둘로 줄었다(「실행 가능」·「진행 중」이
+    //    팝업으로 갔다). 카드 자체는 전과 같은 ExecutionNodeCard 다.
     const sections = source.match(/<NodeSection[\s\S]*?\/>/g) ?? [];
-    assert.equal(sections.length, 4, "실행 가능·진행 중·차단됨·완료/건너뜀 넷이어야 한다");
+    assert.equal(sections.length, 2, "차단됨·완료/건너뜀 둘이어야 한다");
     for (const section of sections) {
       assert.match(section, /currentTaskNodeId=\{currentTaskNodeId\}/);
     }

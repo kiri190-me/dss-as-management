@@ -26,6 +26,7 @@ import {
 } from "@/lib/domain/procedure-execution-focus";
 import { assessExecutionFinish } from "@/lib/domain/procedure-execution-lifecycle";
 import { classifyStartNode, type StartNodeRejectionReason } from "@/lib/domain/procedure-start-picker";
+import { planNodeJump, type JumpRejectionReason } from "@/lib/domain/procedure-execution-jump";
 import type { ProcedureCaseExecutionActionType } from "@/lib/domain/procedure-case-execution-types";
 import type { ProcedureNodeType } from "@/lib/domain/procedure-template-types";
 import type { Role } from "@/lib/domain/types";
@@ -66,7 +67,14 @@ export type ExecutionMutationResultCode =
   | "INVALID_INPUT"
   | "SYSTEM_MANAGED_NODE"
   | "BILLING_DECISION_REQUIRED"
-  /** 이미 끝낸 실행을 또 끝내려 했다. */
+  /**
+   * 이미 끝낸 실행을 또 끝내려 했다.
+   *
+   * 🔵 2026-11-02(조각 10)에 쓰는 자리가 하나 늘었다 — **마친 실행에서 「지금 할
+   * 일」을 옮기려 한 경우**(jumpToExecutionNode). 새 코드를 만들지 않은 까닭은
+   * 실제로 막은 사실이 둘 다 「이 실행은 이미 마쳤다」 하나이기 때문이다. 다시
+   * 이으려면 [절차 다시 잇기]가 따로 있다(resumeProcedureExecution).
+   */
   | "ALREADY_FINISHED"
   /**
    * 안 끝난 작업이 남았는데 「그래도 끝낸다」는 확인이 안 왔다.
@@ -714,7 +722,13 @@ export async function resumeProcedureExecution(
 
 type LoadedExecutionNode = {
   node: typeof procedureCaseExecutionNodes.$inferSelect;
-  execution: { id: string; repairCaseId: string; procedureTemplateId: string };
+  /**
+   * `completedAt` 은 2026-11-02(조각 10)에 늘었다 — 「지금 할 일 옮기기」가
+   * **마친 실행을 거절**해야 하기 때문이다. 🔴 다른 변이들의 뜻은 하나도 안
+   * 바뀐다: 그쪽은 이 칸을 안 읽고, 마친 실행에서도 노드를 계속 고칠 수 있다는
+   * 규칙은 그대로다(이 적재기의 머리말).
+   */
+  execution: { id: string; repairCaseId: string; procedureTemplateId: string; completedAt: Date | null };
   repairCase: { id: string; isLocked: boolean; assignedEngineerId: string | null; billingType: string | null };
   nodeType: ProcedureNodeType | null;
 };
@@ -740,6 +754,7 @@ async function loadExecutionNodeOrFail(tx: Tx, executionNodeId: string): Promise
       id: procedureCaseExecutions.id,
       repairCaseId: procedureCaseExecutions.repairCaseId,
       procedureTemplateId: procedureCaseExecutions.procedureTemplateId,
+      completedAt: procedureCaseExecutions.completedAt,
     })
     .from(procedureCaseExecutions)
     .where(and(eq(procedureCaseExecutions.id, node.executionId), eq(procedureCaseExecutions.isDeleted, false)));
@@ -837,6 +852,166 @@ export async function startExecutionNode(
       });
 
       return { ok: true, version: ctx.node.version + 1 };
+    });
+  } catch (err) {
+    if (err instanceof ExecutionMutationError) return err.result;
+    throw err;
+  }
+}
+
+// ---- 지금 할 일 옮기기 (jump — 사람이 고른 노드를 진행 중으로 세운다) ----
+
+/**
+ * 못 옮기는 까닭 ↔ 이 변이의 결과 코드.
+ *
+ * 🔴 **새 코드를 만들지 않았다** — 셋이 전부 이미 있는 코드에 그대로 들어맞는다.
+ * (DB 의 action enum 도 마찬가지로 안 늘렸다 — 아래 NODE_STARTED 를 쓴다.)
+ * 셋 가운데 둘이 같은 코드로 가지만 **메시지가 다르다** — 사람이 읽는 것은
+ * 메시지이고, 그 글자는 화면·서버가 같은 함수에서 가져온다(classifyJumpTarget).
+ */
+const JUMP_REJECTION_CODES: Record<JumpRejectionReason, ExecutionMutationResultCode> = {
+  NOT_IN_EXECUTION: "NOT_FOUND",
+  ALREADY_FINISHED: "INVALID_STATUS_TRANSITION",
+  BLOCKED: "INVALID_STATUS_TRANSITION",
+};
+
+/**
+ * 「지금 할 일」을 **사람이 고른 노드로 옮긴다**(2026-11-02, 조각 10).
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 하는 일 — 한 줄을 세우고, 다른 진행 중을 대기로 내린다
+ * ──────────────────────────────────────────────────────────────────────
+ * 무엇이 바뀌는지는 **도메인이 정한다**(planNodeJump). 여기서 if 로 다시 적지
+ * 않는다 — 시험이 같은 함수로 기대값을 만들기 때문에, 두 벌이 되면 시험이 쓰기
+ * 코드를 베껴 재게 된다.
+ *
+ * 🔴 다른 진행 중을 **대기로 되돌리는** 까닭은 procedure-execution-jump.ts 의
+ * 머리말에 있다 — 안 되돌리면 차례가 앞선 진행 중이 그대로 「지금 할 일」로
+ * 남아서, 눌러도 아무 일이 안 일어난 것처럼 보인다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 화면이 보낸 것을 하나도 안 믿는다
+ * ──────────────────────────────────────────────────────────────────────
+ *  - **그 실행의 노드인가** … 실행 id 를 함께 받아 잠근 행과 맞댄다. 남의 실행
+ *    노드를 보내면 NOT_FOUND 다(화면에는 창 하나뿐이지만, 오래 열어 둔 탭에서
+ *    남의 id 가 날아들 수 있다).
+ *  - **실행이 도는 중인가** … 그만둔 실행은 적재기가 아예 못 찾고(NOT_FOUND),
+ *    **마친 실행은 여기서 거절한다**(ALREADY_FINISHED). 마친 실행에서 자리를
+ *    옮기면 「마쳤다」는 사람의 판단을 서버가 뒤집는 꼴이다 — 다시 이으려면
+ *    [절차 다시 잇기]가 따로 있다.
+ *  - **옮길 수 있는 상태인가** … 완료·건너뜀·차단됨은 거절한다(까닭은 도메인
+ *    머리말 — 되살리는 길이 이미 따로 있고, 그 길이 요구하는 권한과 사유를 이
+ *    길이 건너뛰게 된다).
+ *  - **시작(START) 표식인가** … 다른 변이들과 같은 관문을 그대로 쓴다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 이력은 **한 줄**이고 새 action 값이 없다
+ * ──────────────────────────────────────────────────────────────────────
+ * 고른 노드에 NODE_STARTED 한 줄을 적는다. 실제로 일어난 일이 「대기 → 진행 중」
+ * 이고 그것이 그 값의 뜻 그대로다(조각 2 의 자동 전진 · 조각 7 의 중간부터
+ * 시작이 쓴 것과 같은 판단). 사람이 [시작]을 눌러 선 것과 가려내야 하므로
+ * afterState 에 **옮겨서 세운 것**임을 적는다 — 사람이 누른 NODE_STARTED 의
+ * afterState 는 null 이거나 { assignedEngineerId } 뿐이고, 자동 전진은
+ * { autoAdvanced: true, … }, 중간부터 시작은 { startedMidProcedure: true, … } 라
+ * 넷이 섞이지 않는다.
+ *
+ * 🔴 **대기로 내린 줄에는 이력을 안 적는다.** 「진행 중 → 대기」에 들어맞는
+ * action 값이 이 enum 에 없고, 억지로 NODE_REOPENED 를 빌리면 이력 화면에
+ * 「작업 재개(되돌림)」라고 뜬다 — 대기로 **내려간** 줄에 재개라고 적는 거짓말이다.
+ * abandonProcedureExecution 이 같은 까닭으로 이력을 안 쓰는 것과 같은 잣대다.
+ * 대신 내려간 줄의 id 를 **이 한 줄의 afterState 에** 남긴다 — 무엇이 함께
+ * 바뀌었는지가 기록에서 사라지지는 않는다.
+ */
+export async function jumpToExecutionNode(
+  executionId: string,
+  executionNodeId: string,
+  actorUserId: string,
+  expectedVersion: number
+): Promise<ExecutionNodeMutationResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, actorUserId);
+      const ctx = await loadExecutionNodeOrFail(tx, executionNodeId);
+      assertNotSystemEntryNode(ctx.nodeType);
+
+      // 🔴 「그 실행의 노드인가」. 적재기는 노드 → 실행 방향으로 찾으므로 이
+      // 맞대보기가 없으면 **아무 실행 id 나 보내도 통과**한다.
+      if (ctx.execution.id !== executionId) {
+        fail("NOT_FOUND", "이 작업은 해당 절차 실행의 항목이 아닙니다.");
+      }
+
+      await assertOrdinaryMutationAuthorized(actor, ctx.repairCase, ctx.node.assignedEngineerId);
+
+      // 버전을 상태보다 먼저 본다 — startExecutionNode 의 같은 주석 참고.
+      if (ctx.node.version !== expectedVersion) {
+        fail("CONFLICT", "다른 사용자가 이 작업을 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
+      }
+      if (ctx.execution.completedAt !== null) {
+        fail("ALREADY_FINISHED", "이미 마친 절차입니다. [절차 다시 잇기]로 다시 이은 뒤에 옮길 수 있습니다.");
+      }
+
+      // 🔴 **같은 실행의 모든 노드를 잠근다.** 대기로 내릴 줄이 어느 것인지는
+      // 지금 상태를 봐야 정해지는데, 잠그지 않고 읽으면 그 사이에 남이 하나를
+      // 더 시작할 수 있다. id 차례로 잠가 두 사람이 동시에 옮길 때 서로를
+      // 기다리는 자리가 어긋나지 않게 한다.
+      const siblings = await tx
+        .select({ id: procedureCaseExecutionNodes.id, status: procedureCaseExecutionNodes.status, version: procedureCaseExecutionNodes.version, startedAt: procedureCaseExecutionNodes.startedAt })
+        .from(procedureCaseExecutionNodes)
+        .where(eq(procedureCaseExecutionNodes.executionId, executionId))
+        .orderBy(procedureCaseExecutionNodes.id)
+        .for("update");
+
+      const plan = planNodeJump({ nodes: siblings, targetExecutionNodeId: executionNodeId });
+      if (plan.kind === "REJECTED") fail(JUMP_REJECTION_CODES[plan.reason], plan.message);
+      // 바꿀 것이 없으면 **아무것도 안 쓴다** — 값은 그대로인데 version 만 올리면
+      // 같은 화면을 보던 다른 사람의 단추가 전부 CONFLICT 로 죽는다
+      // (updateExecutionNodeMemo 의 같은 규약).
+      if (plan.kind === "NO_CHANGE") return { ok: true, version: ctx.node.version };
+
+      const now = new Date();
+      const nextVersion = ctx.node.version + 1;
+
+      await tx
+        .update(procedureCaseExecutionNodes)
+        .set({
+          status: "IN_PROGRESS",
+          // 처음 서는 줄만 채운다 — 이 모듈의 backfill 규약 그대로다. 되돌아온
+          // 줄은 **처음 손댄 때**를 그대로 간직한다.
+          startedBy: ctx.node.startedBy ?? actor.id,
+          startedAt: ctx.node.startedAt ?? now,
+          version: nextVersion,
+          updatedAt: now,
+        })
+        .where(eq(procedureCaseExecutionNodes.id, executionNodeId));
+
+      for (const standDownId of plan.standDownExecutionNodeIds) {
+        const sibling = siblings.find((s) => s.id === standDownId);
+        if (!sibling) continue;
+        // 🔴 status 한 칸만 내린다. started_at · started_by · 작업 메모는 그대로
+        // 둔다 — 하던 일을 없던 일로 만들지 않는다(도메인 머리말).
+        await tx
+          .update(procedureCaseExecutionNodes)
+          .set({ status: "PENDING", version: sibling.version + 1, updatedAt: now })
+          .where(eq(procedureCaseExecutionNodes.id, standDownId));
+      }
+
+      await insertHistory(tx, {
+        executionId,
+        executionNodeId,
+        actionType: "NODE_STARTED",
+        // 🔵 고른 줄이 **이미 진행 중**이었으면 여기에 그대로 적힌다 — 이력을
+        // 읽는 사람이 「이번에 시작한 것」과 「지금 할 일 자리만 옮긴 것」을
+        // 가릴 수 있어야 한다.
+        beforeState: { status: plan.targetWasInProgress ? "IN_PROGRESS" : "PENDING" },
+        afterState: {
+          jumpedTo: true,
+          status: "IN_PROGRESS",
+          standDownExecutionNodeIds: plan.standDownExecutionNodeIds,
+        },
+        actorUserId: actor.id,
+      });
+
+      return { ok: true, version: nextVersion };
     });
   } catch (err) {
     if (err instanceof ExecutionMutationError) return err.result;

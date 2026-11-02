@@ -153,15 +153,18 @@ describe("실행 화면 — 어느 하나를 세우고, 아래 목록을 어떻�
     );
   });
 
-  test("큰 카드는 요약과 네 구역 **사이**에 서고, 흐름 띠 바로 아래다", () => {
+  test("큰 카드는 요약과 아래 구역 **사이**에 서고, 흐름 띠 바로 아래다", () => {
     // 🔵 2026-11-02(조각 3): 전에는 「요약 **바로** 아래」였다. 그 사이에 작은
     // 흐름 띠(ExecutionFlowStrip)가 한 줄 들어왔으므로, 재는 것을 「무엇과
     // 무엇 사이인가」로 바꾼다. 단언을 약하게 한 것이 아니라 **차례를 셋으로**
     // 늘렸다 — 띠가 큰 카드 아래로 내려가면 여기서 깨진다.
-    const between = flat(screen).slice(
-      flat(screen).indexOf("<ProgressSummary"),
-      flat(screen).indexOf('<NodeSection title="실행 가능"')
-    );
+    //
+    // 🔵 2026-11-02(조각 10): 아래 첫 구역이 「실행 가능」에서 「차단됨」으로
+    // 바뀌었다(앞의 둘은 팝업으로 옮겨 갔다). 🔴 표지를 안 고치면 indexOf 가
+    // -1 이 되어 **화면 끝까지**를 자르고도 조용히 통과한다.
+    const firstSectionAt = flat(screen).indexOf('<NodeSection title="차단됨"');
+    assert.ok(firstSectionAt > 0, "아래 첫 구역을 못 찾았다 — 자르는 자리가 없으면 아래가 아무것도 안 잰다");
+    const between = flat(screen).slice(flat(screen).indexOf("<ProgressSummary"), firstSectionAt);
     assert.ok(between.length > 0, "요약 카드와 첫 구역 사이를 찾지 못했다");
     assert.match(between, /<CurrentTaskCard node=\{currentTask\.node\}/);
     assert.match(between, /<NoCurrentTaskCard reason=\{currentTask\.reason\}/);
@@ -190,9 +193,12 @@ describe("실행 화면 — 어느 하나를 세우고, 아래 목록을 어떻�
     assert.match(flat(screen), /\{title\} \(\{nodes\.length\}\)/);
   });
 
-  test("네 구역 모두 어느 노드가 위에 올라갔는지 전달받는다", () => {
+  test("남은 두 구역 모두 어느 노드가 위에 올라갔는지 전달받는다", () => {
+    // 🔵 2026-11-02(조각 10): 넷에서 둘로 줄었다 — 「실행 가능」·「진행 중」은
+    //    「전체 단계 보기」 팝업이 맡는다. 재는 뜻은 그대로다: **그리는 구역마다**
+    //    위로 올라간 한 장을 알아야 같은 카드를 두 번 그리지 않는다.
     const sections = flat(screen).match(/<NodeSection[\s\S]*?\/>/g) ?? [];
-    assert.equal(sections.length, 4, "실행 가능·진행 중·차단됨·완료/건너뜀 넷이어야 한다");
+    assert.equal(sections.length, 2, "차단됨·완료/건너뜀 둘이어야 한다");
     for (const section of sections) {
       assert.match(section, /currentTaskNodeId=\{currentTaskNodeId\}/);
     }
@@ -205,10 +211,18 @@ describe("실행 화면 — 어느 하나를 세우고, 아래 목록을 어떻�
     assert.match(flat(screen), /reason === "ALL_BLOCKED"/);
   });
 
-  test("기존 네 구역 목록은 그대로 남아 있다 — 이번 조각은 더하기만 한다", () => {
-    for (const title of ["실행 가능", "진행 중", "차단됨", "완료 / 건너뜀"]) {
+  test("남은 구역 목록과 작은 카드는 그대로다", () => {
+    // 🔵 2026-11-02(조각 10): 「실행 가능」·「진행 중」이 팝업으로 옮겨 갔다.
+    //    🔴 「차단됨」은 **남는다** — 그 카드의 [재개(되돌림)]가 BLOCKED 를 푸는
+    //    유일한 길이고(팝업은 차단된 칸으로 못 옮긴다), 걷으면 막힌 절차를 다시
+    //    흐르게 할 방법이 화면 어디에도 안 남는다.
+    for (const title of ["차단됨", "완료 / 건너뜀"]) {
       assert.ok(screen.includes(`title="${title}"`), `${title} 구역이 사라지면 안 된다`);
     }
     assert.match(screen, /<ExecutionNodeCard key=\{node\.id\}/, "작은 카드는 계속 쓴다");
+    // 🔴 「차단됨」 카드에 [재개(되돌림)]가 실제로 붙는지는 작은 카드 쪽에서 본다 —
+    //    그 단추가 BLOCKED 에 안 붙으면 위 구역이 남아도 아무 소용이 없다.
+    assert.match(smallCard, /node\.status === "BLOCKED"/);
+    assert.match(smallCard, /재개\(되돌림\)/);
   });
 });

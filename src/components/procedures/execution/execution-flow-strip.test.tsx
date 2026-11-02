@@ -130,6 +130,62 @@ describe("🔴 그릴 수 없을 때", () => {
   });
 });
 
+/**
+ * 🔴 2026-11-02(조각 10) — 상자 머리줄에 단추 둘이 선다([전체 단계 보기] ·
+ * [추가 작업 등록]). 단추는 서버 액션을 직접 부르는 클라이언트 부품이라 띠가
+ * 직접 import 하면 이 시험이 import 에서 던진다 — 그래서 **슬롯**으로 받는다.
+ * 여기서는 그 자리에 아무거나 넣어 **그려지는지**만 잰다.
+ *
+ * 재는 핵심은 하나다: **흐름이 안 그려질 때도 단추가 남는가.** 그리다 만 절차
+ * (실측 「원복 검사」는 노드 22개에 선이 7개)에서는 띠가 거의 늘 못 그려지는데,
+ * 그때 전체를 보고 자리를 옮길 길이 화면에서 통째로 사라지면 안 된다.
+ */
+describe("🔴 상자 머리줄의 단추 — 흐름이 안 그려져도 남는다", () => {
+  const actions = <button type="button">전체 단계 보기</button>;
+
+  function renderWithActions(nodes: Node[], edges: MinimapEdge[], currentOrderIndex: number | null): string {
+    const minimap = buildProcedureExecutionMinimap<Node>({
+      nodes,
+      edges,
+      current: currentOrderIndex === null ? null : (nodes.find((n) => n.orderIndex === currentOrderIndex) ?? null),
+    });
+    return renderToStaticMarkup(<ExecutionFlowStrip minimap={minimap} actions={actions} />);
+  }
+
+  test("🔵 먼저 — 단추를 안 넘기면 전과 똑같다(그림이 있는 경우)", () => {
+    const plain = renderStrip(makeNodes(4), [edge(1, 2), edge(2, 3), edge(3, 4)], 2);
+    assert.ok(!plain.includes("전체 단계 보기"), "표본 확인 — 안 넘기면 단추 글자가 없어야 아래가 뜻을 가진다");
+  });
+
+  test("그림이 그려지는 띠에도 단추가 함께 선다", () => {
+    const html = renderWithActions(makeNodes(4), [edge(1, 2), edge(2, 3), edge(3, 4)], 2);
+    assert.ok(html.includes("전체 단계 보기"));
+    assert.ok(html.includes("data-flow-chip"), "칸도 그대로 그려져야 한다");
+  });
+
+  test("🔴 절차 전체에 선이 없어도 상자와 단추가 남고, 왜 그림이 없는지 적힌다", () => {
+    const html = renderWithActions(makeNodes(5), [], 1);
+    assert.ok(html.includes("data-execution-flow-strip"), "상자가 통째로 사라지면 옮길 길이 없어진다");
+    assert.ok(html.includes("전체 단계 보기"));
+    assert.ok(html.includes("선으로 이어져 있지 않아"), "왜 그림이 없는지 한 줄이 있어야 한다");
+    assert.equal(chipTitles(html).length, 0, "그림은 안 그린다");
+  });
+
+  test("🔴 지금 할 일 자체가 없어도(마친 실행 등) 상자와 단추가 남는다 — 까닭은 다른 글이다", () => {
+    const html = renderWithActions(makeNodes(5), [edge(1, 2)], null);
+    assert.ok(html.includes("data-execution-flow-strip"));
+    assert.ok(html.includes("전체 단계 보기"));
+    assert.ok(html.includes("지금 할 일이 없어"), "「선이 없다」와 다음 행동이 다르므로 글도 달라야 한다");
+    assert.ok(!html.includes("선으로 이어져 있지 않아"));
+  });
+
+  test("「한 줄 안내」로 떨어지는 자리에서도 단추가 남는다", () => {
+    const html = renderWithActions(makeNodes(5), [edge(1, 2)], 4);
+    assert.ok(html.includes("단계끼리 선으로 이어져 있지 않습니다"));
+    assert.ok(html.includes("전체 단계 보기"));
+  });
+});
+
 describe("🔴 읽기 전용이고, 폰에서 안 깨진다", () => {
   const html = renderStrip(makeNodes(6), [edge(1, 2), edge(2, 3), edge(3, 4), edge(4, 5)], 3);
   const source = readFileSync(new URL("./ExecutionFlowStrip.tsx", import.meta.url), "utf8")
@@ -144,11 +200,15 @@ describe("🔴 읽기 전용이고, 폰에서 안 깨진다", () => {
     assert.ok(!source.includes("🔴"), "주석이 남으면 아래 「없어야 한다」가 주석만 보고 깨진다");
   });
 
-  test("🔴 눌러도 아무 일이 없다 — 단추도 링크도 없다", () => {
-    // 「눌러서 그 단계로 건너뛰기」는 절차를 건너뛰는 길을 여는 일이라 따로 정한다.
+  test("🔴 **칸은** 눌러도 아무 일이 없다 — 띠가 제 손으로 만든 단추도 링크도 없다", () => {
+    // 🔵 2026-11-02(조각 10): 자리를 옮기는 길이 생겼다 — 다만 띠의 칸이 아니라
+    //    상자 머리줄의 [전체 단계 보기]가 여는 창에서다. 여기서 재는 것은
+    //    **칸에는 여전히 누를 것이 없다**는 것과, 띠가 제 안에 누르는 길을
+    //    적어 두지 않았다(단추는 슬롯으로 받는다)는 것이다.
     assert.ok(!/<button/.test(html) && !/<a[\s>]/.test(html), "그려진 띠에 누를 것이 있다");
     assert.ok(!/onClick/.test(source) && !/href=/.test(source), "원본에 누르는 길이 적혀 있다");
     assert.ok(!/next\/link/.test(source));
+    assert.ok(!/ExecutionStepsDialog|ExecutionExtraTaskDialog/.test(source), "단추를 직접 import 하면 이 시험이 import 에서 던진다");
   });
 
   test("🔴 편집기 그림(React Flow)을 끌어들이지 않는다", () => {
@@ -160,7 +220,13 @@ describe("🔴 읽기 전용이고, 폰에서 안 깨진다", () => {
   test("가로로 넘치면 가로 스크롤이 되고, 칸은 접히지 않는다", () => {
     assert.ok(html.includes("overflow-x-auto"), "좁은 폰에서 칸이 잘리면 차례를 못 읽는다");
     assert.ok(html.includes("w-max"), "칸이 줄바꿈되면 띠가 세로로 자란다");
-    assert.ok(!html.includes("flex-wrap"));
+    // 🔴 **칸이 늘어선 자리**만 본다(2026-11-02, 조각 10). 상자 머리줄은 폰에서
+    //    일부러 접히게 했고(제목 한 줄 · 단추 둘이 그 아래), 띠 전체에서
+    //    flex-wrap 을 금지하면 그 머리줄 때문에 여기가 깨진다 — 재던 것은
+    //    머리줄이 아니라 칸 줄이다.
+    const stripAt = html.indexOf("overflow-x-auto");
+    assert.ok(stripAt > 0, "칸이 늘어선 자리를 못 찾으면 아래가 아무것도 안 잰다");
+    assert.ok(!html.slice(stripAt).includes("flex-wrap"), "칸이 줄바꿈되면 띠가 세로로 자란다");
   });
 
   test("🔴 세로로는 안 자란다 — 제목은 두 줄에서 자르고, 갈래 이름 줄은 늘 자리를 잡는다", () => {
@@ -205,23 +271,39 @@ describe("실행 화면이 띠를 어디에 세우고 무엇을 넘기는가", (
   test("🔴 「그릴 수 있는가」 판정을 화면이 다시 하지 않는다 — 도메인 함수 하나가 정한다", () => {
     assert.match(flat, /const minimap = buildProcedureExecutionMinimap\(\{/);
     assert.ok(!/flowEdges\.length === 0/.test(screen), "화면이 간선 수로 다시 판정하면 두 벌이 된다");
-    assert.match(flat, /<ExecutionFlowStrip minimap=\{minimap\} \/>/);
+    // 🔵 2026-11-02(조각 10): 단추 슬롯이 붙으면서 한 줄이 여러 줄이 됐다.
+    //    재는 뜻은 그대로다 — minimap 을 **그대로** 넘긴다(화면이 다시 가르지 않는다).
+    assert.match(flat, /<ExecutionFlowStrip minimap=\{minimap\} /);
   });
 
-  test("기존 것은 그대로 남아 있다 — 이번 조각은 더하기만 한다", () => {
-    for (const title of ["실행 가능", "진행 중", "차단됨", "완료 / 건너뜀"]) {
+  test("🔴 상자 머리줄에 단추 둘을 **슬롯으로** 넘긴다 — 띠가 그것을 직접 물지 않는다", () => {
+    // 사용자 결정(2026-11-02) — 「[전체 단계 보기]와 [추가 작업 등록]은
+    // [절차 흐름] 상자에 버튼으로 만들어줘」.
+    const stripAt = flat.indexOf("<ExecutionFlowStrip");
+    const actionsAt = flat.indexOf("actions={", stripAt);
+    const slotEnd = flat.indexOf("</>", actionsAt);
+    assert.ok(stripAt >= 0 && actionsAt > stripAt && slotEnd > actionsAt, "띠에 단추 슬롯을 안 넘기고 있다");
+    const slot = flat.slice(actionsAt, slotEnd);
+    assert.ok(slot.includes("<ExecutionStepsDialog"), "[전체 단계 보기]가 상자 안에 없다");
+    assert.ok(slot.includes("<ExecutionExtraTaskDialog"), "[추가 작업 등록]이 상자 안에 없다");
+  });
+
+  test("남은 것은 그대로다 — 큰 카드와 「실행 이력」 묶음", () => {
+    // 🔵 2026-11-02(조각 10): 「실행 가능」·「진행 중」 구역과 그것을 담던
+    //    「전체 단계 보기」 묶음이 **팝업으로 옮겨 갔다**(사용자 결정).
+    //    🔴 「차단됨」은 남는다 — [재개(되돌림)]가 거기에만 붙는다.
+    for (const title of ["차단됨", "완료 / 건너뜀"]) {
       assert.ok(screen.includes(`title="${title}"`), `${title} 구역이 사라지면 안 된다`);
     }
     assert.ok(screen.includes("<CurrentTaskCard"), "「지금 할 일」 큰 카드는 그대로다");
-    // 🔵 2026-11-02(조각 4): 아래 목록은 이제 접힌다. 다만 접는 일은 전부
+    // 🔵 2026-11-02(조각 4): 아래 목록은 접힌다. 다만 접는 일은 전부
     // ExecutionFoldSection 이 하고 **화면에는 <details> 가 없다** — 화면이 직접
     // 접으면 「펼친 채로 둘 때」 판정이 두 자리에 생긴다. 접힌 모습 자체는
     // 이웃 execution-list-fold.test.tsx 가 렌더해서 잰다.
     assert.ok(!/<details/.test(screen), "접기는 ExecutionFoldSection 이 한다 — 화면에 <details> 를 다시 적지 않는다");
-    assert.match(flat, /<ExecutionFoldSection group=\{fold\.remaining\}>/);
-    // 🔵 2026-11-02(조각 8): 둘째 묶음의 이름이 바뀌었다. 「지나온 길」의 카드가
-    //    「실행 이력」 안으로 들어가면서 group 이 historyFold.fold 가 됐다 —
-    //    재는 뜻은 그대로다(띠 아래에 접히는 묶음이 **둘** 있다).
+    assert.ok(!flat.includes("<ExecutionFoldSection group={fold.remaining}>"), "「전체 단계 보기」 묶음이 되살아났다");
+    // 🔵 2026-11-02(조각 8): 「지나온 길」의 카드가 「실행 이력」 안으로 들어가면서
+    //    group 이 historyFold.fold 가 됐다 — 그 묶음은 그대로 남는다.
     assert.match(flat, /<ExecutionFoldSection group=\{historyFold\.fold\}>/);
   });
 });
