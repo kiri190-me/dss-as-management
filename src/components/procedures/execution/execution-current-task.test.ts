@@ -150,7 +150,11 @@ describe("실행 화면 — 어느 하나를 세우고, 아래 목록을 어떻�
     );
   });
 
-  test("큰 카드는 요약 카드 **바로 아래**에 선다", () => {
+  test("큰 카드는 요약과 네 구역 **사이**에 서고, 흐름 띠 바로 아래다", () => {
+    // 🔵 2026-11-02(조각 3): 전에는 「요약 **바로** 아래」였다. 그 사이에 작은
+    // 흐름 띠(ExecutionFlowStrip)가 한 줄 들어왔으므로, 재는 것을 「무엇과
+    // 무엇 사이인가」로 바꾼다. 단언을 약하게 한 것이 아니라 **차례를 셋으로**
+    // 늘렸다 — 띠가 큰 카드 아래로 내려가면 여기서 깨진다.
     const between = flat(screen).slice(
       flat(screen).indexOf("<ProgressSummary"),
       flat(screen).indexOf('<NodeSection title="실행 가능"')
@@ -158,6 +162,11 @@ describe("실행 화면 — 어느 하나를 세우고, 아래 목록을 어떻�
     assert.ok(between.length > 0, "요약 카드와 첫 구역 사이를 찾지 못했다");
     assert.match(between, /<CurrentTaskCard node=\{currentTask\.node\}/);
     assert.match(between, /<NoCurrentTaskCard reason=\{currentTask\.reason\}/);
+    assert.ok(
+      between.indexOf("<ExecutionFlowStrip") >= 0 &&
+        between.indexOf("<ExecutionFlowStrip") < between.indexOf("<CurrentTaskCard"),
+      "흐름 띠는 큰 카드 **위**다 — 아래로 내려가면 큰 카드가 띠에 밀려 내려간다"
+    );
   });
 
   test("🔴 아래 목록에서 같은 카드를 두 번 그리지 않는다 — 자리는 남기고 위를 가리킨다", () => {

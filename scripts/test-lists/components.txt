@@ -37,6 +37,16 @@ src/components/procedures/procedure-publish-flow.test.tsx
 # 판단 갈래 단추가 창 없이 보이는가 · 아래 목록에서 같은 카드를 두 번 그리지 않는가.
 # 서버 쪽 자동 전진은 db 목록의 procedure-case-execution.integration.test.ts 30~38번이 본다.
 src/components/procedures/execution/execution-current-task.test.ts
+# 「지금 어디쯤인가」 작은 흐름 그림 한 띠(2026-11-02). 🔴 이웃과 달리 **렌더해서**
+# 잰다 — 띠는 서버 액션도 DB 조회 타입도 안 물게 좁은 프롭 타입으로 적었다.
+# 재는 것: 왼쪽에서 오른쪽으로 읽히는 차례 · 「지금」 칸이 하나뿐인가 · 갈래가 나란히
+# 묶이는가 · 🔴 **눌러도 아무 일이 없는가**(단추도 링크도 없다 — 「건너뛰기」는 따로
+# 정할 일이다) · 🔴 편집기 그림(React Flow)을 안 끌어들였는가 · 그릴 수 없을 때
+# 빈 네모 대신 한 줄인가 · 절차 전체에 선이 없으면 **빈 글자**를 돌려주는가.
+# 🔵 폰에서 안 깨지는 근거도 글자로 못 박는다 — 가로 스크롤 · 줄바꿈 없음 · 제목 두
+# 줄 자르기 · 갈래 이름 줄이 칸마다 늘 자리를 잡는가(섞여도 띠 높이가 안 흔들린다).
+# 어느 걸음을 고르는지는 unit 목록의 procedure-execution-minimap.test.ts 가 본다.
+src/components/procedures/execution/execution-flow-strip.test.tsx
 src/components/repair-cases/files/preview-backfill.test.ts
 src/components/repair-cases/files/StoredAttachmentList.test.tsx
 src/components/repair-cases/files/AttachmentViewer.test.tsx

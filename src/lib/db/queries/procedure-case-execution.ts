@@ -119,6 +119,26 @@ export type ExecutionReferenceNode = {
   instructions: string | null;
 };
 
+/**
+ * 템플릿 간선을 **그대로** 실은 것 — 실행 화면의 작은 흐름 그림이 쓴다
+ * (procedure-execution-minimap.ts).
+ *
+ * 🔴 노드마다 달린 outgoingEdgeOptions 로는 그림을 못 그린다. 그쪽은 **판단
+ * 노드에만** 채워지고(비판단 노드는 빈 배열), 들어오는 선은 아예 없다 —
+ * 「어디서 왔는가」가 그림의 절반인데 그 절반이 비어 있다.
+ *
+ * 양끝은 procedure_template_nodes.id 다. START·참고 문서처럼 실행 행이 없는
+ * 노드로 가는 선도 섞여 있고, 거르는 것은 받는 쪽 몫이다 — 여기서 미리 걸러
+ * 두면 「왜 간선 수가 편집 화면과 다른가」를 나중에 아무도 설명하지 못한다.
+ */
+export type ExecutionFlowEdge = {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  branchType: ProcedureBranchType;
+  branchLabel: string | null;
+};
+
 export type ExecutionDetail = {
   executionId: string;
   repairCaseId: string;
@@ -130,6 +150,7 @@ export type ExecutionDetail = {
   isCaseLocked: boolean;
   nodes: ExecutionNodeDetail[];
   referenceNodes: ExecutionReferenceNode[];
+  flowEdges: ExecutionFlowEdge[];
 };
 
 export async function getExecutionDetail(executionId: string): Promise<ExecutionDetail | null> {
@@ -315,6 +336,15 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
     isCaseLocked: execution.isCaseLocked,
     nodes,
     referenceNodes,
+    // 간선 차례는 위 orderBy(sortOrder) 가 정한 그대로 내려보낸다 — 흐름 그림의
+    // 갈래 차례가 「지금 할 일」 카드의 갈래 단추 차례와 같아야 한다.
+    flowEdges: templateEdges.map((e) => ({
+      id: e.id,
+      fromNodeId: e.fromNodeId,
+      toNodeId: e.toNodeId,
+      branchType: e.branchType,
+      branchLabel: e.branchLabel,
+    })),
   };
 }
 

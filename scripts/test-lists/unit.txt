@@ -79,6 +79,17 @@ src/lib/domain/procedure-editor-save-state.test.ts
 src/lib/domain/procedure-execution-topology.test.ts
 src/lib/domain/procedure-execution-order.test.ts
 src/lib/domain/procedure-execution-focus.test.ts
+# 🔵 실행 화면의 작은 흐름 그림이 **어느 걸음을 고르는가**(2026-11-02).
+# 🔴 재는 것 넷: 고리가 있어도 안 멈추는가(되돌아가는 갈래가 실제로 있다 — 무한
+# 반복은 실패가 아니라 **시험이 안 끝나는 것**으로 나타난다) · 선이 안 붙은 노드에서
+# 「한 줄」로 떨어지는가(실측한 절차는 22장 중 14장이 그렇다) · 절차 전체에 이을 선이
+# 없으면 띠를 통째로 안 그리는가 · 갈래 여럿이 한 걸음에 나란히 서는가.
+# 🔴 「간선이 있는가」는 **양끝이 다 칸이 되는 선**으로만 센다 — 실측한 절차의 간선 8개
+# 가운데 하나는 START 에서 나가는 선이고 START 는 사람이 할 일 목록에 없다. 원본 간선
+# 수로 재면 아무도 못 보는 빈 그림이 선다.
+# 🔴 unit 에 적은 이유: DB 도 React 도 안 무는 순수 함수다. 띠를 실제로 렌더해 보는
+# 시험은 components 목록의 execution-flow-strip.test.tsx 가 따로 본다.
+src/lib/domain/procedure-execution-minimap.test.ts
 src/lib/domain/product-relation.test.ts
 src/lib/auth/inventory-authorization.test.ts
 # 🔵 2026-10-28(조각 13-D): `src/lib/domain/inventory-types.test.ts` 를 뺐다 — 재던

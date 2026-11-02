@@ -34,6 +34,8 @@ import {
 } from "./procedure-case-execution";
 import { getExecutionDetail, getExecutionHistory, getRelatedRepairHistory } from "../queries/procedure-case-execution";
 import { computeExecutionPosition } from "@/lib/domain/procedure-execution-order";
+import { pickCurrentTaskNode } from "@/lib/domain/procedure-execution-focus";
+import { buildProcedureExecutionMinimap } from "@/lib/domain/procedure-execution-minimap";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -1101,6 +1103,51 @@ describe("procedure-case-execution: read queries", () => {
       "완료했다고 카드 차례가 바뀌면 안 된다 — 차례는 절차가 정한다"
     );
     assert.deepEqual(computeExecutionPosition(afterOne!.nodes), { total: 5, finished: 1, current: 2 });
+  });
+
+  test("27. getExecutionDetail 은 템플릿 간선을 그대로 싣고, 그것으로 지금 자리 둘레의 작은 흐름 그림이 선다", async () => {
+    const code = uniqueCode("query-edges");
+    const { templateId } = await createPublishedTemplate(code);
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const detail = await getExecutionDetail(started.executionId);
+    assert.ok(detail);
+
+    // 🔵 표본 확인 — 간선이 실제로 실려 와야 아래 판정이 무언가를 잰다. 판은
+    // n1(START)→n2 →n3 →{n4(YES) | n5(NG)} 이고 n5 →n3 으로 **되돌아간다**.
+    assert.equal(detail!.flowEdges.length, 7, "템플릿 간선 일곱 줄이 그대로 와야 한다");
+    assert.deepEqual(
+      detail!.flowEdges.map((e) => `${e.branchType}${e.branchLabel ? `/${e.branchLabel}` : ""}`),
+      ["DEFAULT", "DEFAULT", "YES/YES", "NG/NG", "RETRY/재측정", "DEFAULT", "DEFAULT"],
+      "갈래 차례는 sort_order 그대로 — 바로 아래 갈래 단추와 같은 차례여야 한다"
+    );
+
+    const current = pickCurrentTaskNode(detail!.nodes);
+    assert.equal(current?.nodeCode, "n2", "아직 아무것도 안 했으니 절차 차례상 첫 일이 지금 할 일이다");
+
+    const minimap = buildProcedureExecutionMinimap({ nodes: detail!.nodes, edges: detail!.flowEdges, current });
+    assert.equal(minimap.kind, "GRAPH");
+    if (minimap.kind !== "GRAPH") return;
+    // 🔴 START 에서 들어오는 선은 칸이 되지 않는다 — START 는 사람이 할 일
+    // 목록에서 이미 빠졌다(위 26번). 지난 쪽이 비는 것이 맞다.
+    assert.deepEqual(minimap.backward, []);
+    assert.deepEqual(
+      minimap.forward.map((level) => level.steps.map((s) => s.node.nodeCode)),
+      [["n3"], ["n4", "n5"]],
+      "한 걸음 뒤가 판단이고, 그 다음에 갈래 둘이 나란히 선다"
+    );
+
+    // 🔴 END(n7)로 들어오는 선은 참고 문서(n6)를 거친다 — 양끝이 다 칸이 되는
+    // 선이 아니므로 그릴 것이 없고, 빈 그림 대신 한 줄로 떨어져야 한다.
+    const endNode = detail!.nodes.find((n) => n.nodeCode === "n7");
+    assert.ok(endNode);
+    assert.deepEqual(buildProcedureExecutionMinimap({ nodes: detail!.nodes, edges: detail!.flowEdges, current: endNode! }), {
+      kind: "NOTE",
+      reason: "CURRENT_HAS_NO_LINKED_STEP",
+    });
   });
 });
 

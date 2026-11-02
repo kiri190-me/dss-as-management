@@ -1,6 +1,7 @@
 import ExecutionStartCard from "./ExecutionStartCard";
 import ExecutionNodeCard from "./ExecutionNodeCard";
 import CurrentTaskCard from "./CurrentTaskCard";
+import ExecutionFlowStrip from "./ExecutionFlowStrip";
 import ExecutionExtraTaskForm from "./ExecutionExtraTaskForm";
 import ExecutionHistoryTimeline from "./ExecutionHistoryTimeline";
 import RelatedRepairHistoryPanel from "./RelatedRepairHistoryPanel";
@@ -8,6 +9,7 @@ import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import { computeExecutionPosition, formatExecutionPositionLabel } from "@/lib/domain/procedure-execution-order";
 import { pickCurrentTask } from "@/lib/domain/procedure-execution-focus";
+import { buildProcedureExecutionMinimap } from "@/lib/domain/procedure-execution-minimap";
 import type {
   ExecutableTemplateOption,
   ExecutionDetail,
@@ -191,10 +193,25 @@ export default function ProcedureExecutionScreen({
   const currentTask = pickCurrentTask(executionDetail.nodes);
   const currentTaskNodeId = currentTask.kind === "NONE" ? null : currentTask.node.id;
 
+  // 지금 자리 둘레 몇 걸음만 담은 작은 흐름 그림. 「그릴 수 없다」는 판정까지
+  // 전부 도메인 함수가 한다(procedure-execution-minimap.ts) — 실측한 절차 하나가
+  // 노드 23개에 간선 8개뿐인 「그리다 만」 상태라, 선이 안 붙은 노드에서는
+  // 점 하나짜리 그림 대신 한 줄을 적고, 절차 전체에 선이 없으면 띠를 통째로
+  // 안 그린다.
+  const minimap = buildProcedureExecutionMinimap({
+    nodes: executionDetail.nodes,
+    edges: executionDetail.flowEdges,
+    current: currentTask.kind === "NONE" ? null : currentTask.node,
+  });
+
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">기술 절차</h2>
       <ProgressSummary detail={executionDetail} />
+
+      {/* 요약과 큰 카드 **사이**다. 위로 올리면 「몇 번째인가」와 「지금 할 일」이
+          멀어지고, 아래로 내리면 큰 카드가 띠에 밀려 내려간다. */}
+      <ExecutionFlowStrip minimap={minimap} />
 
       {currentTask.kind === "NONE" ? (
         <NoCurrentTaskCard reason={currentTask.reason} />
