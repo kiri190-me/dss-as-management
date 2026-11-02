@@ -21,13 +21,20 @@ export default function WorkRecordsSection({
   repairCaseId,
   currentStepLabel,
   currentStepOrder,
-  inProgressNodes,
+  procedureNodeOptions,
+  defaultProcedureNodeId,
   createDisabledReason,
 }: {
   repairCaseId: string;
   currentStepLabel: string;
   currentStepOrder: number | null;
-  inProgressNodes: { id: string; title: string }[];
+  /**
+   * 작업 기록을 붙일 수 있는 절차 항목들. 글자(label)까지 **도메인이 만들어**
+   * 온다(buildWorkRecordProcedureLink) — 여기서도 폼에서도 다시 꾸미지 않는다.
+   */
+  procedureNodeOptions: { id: string; label: string }[];
+  /** 처음 골라져 있을 것(= 「지금 할 일」). 없으면 null = 「연결 안 함」. */
+  defaultProcedureNodeId: string | null;
   createDisabledReason: string | null;
 }) {
   return (
@@ -38,7 +45,8 @@ export default function WorkRecordsSection({
           repairCaseId={repairCaseId}
           currentStepLabel={currentStepLabel}
           currentStepOrder={currentStepOrder}
-          inProgressNodes={inProgressNodes}
+          procedureNodeOptions={procedureNodeOptions}
+          defaultProcedureNodeId={defaultProcedureNodeId}
           disabledReason={createDisabledReason}
         />
       </div>

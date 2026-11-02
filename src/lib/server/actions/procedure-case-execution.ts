@@ -4,6 +4,8 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import {
   startProcedureExecution,
+  finishProcedureExecution,
+  abandonProcedureExecution,
   startExecutionNode,
   completeExecutionNode,
   skipExecutionNode,
@@ -13,6 +15,7 @@ import {
   updateExecutionNodeMemo,
   type StartExecutionResult,
   type ExecutionNodeMutationResult,
+  type ExecutionLifecycleResult,
   type AddExtraTaskResult,
 } from "@/lib/db/mutations/procedure-case-execution";
 import { isValidUuid, validateRequiredNote } from "@/lib/validation/procedure-validation-resolution-input";
@@ -73,6 +76,43 @@ export async function startProcedureExecutionAction(input: {
 
   return withErrorRedaction("startProcedureExecutionAction", () =>
     startProcedureExecution(input.repairCaseId, input.procedureTemplateId, actorCheck.userId)
+  );
+}
+
+/**
+ * 실행 끝내기. `confirmedRemaining` 은 **사람이 확인 창에서 「그래도 끝낸다」를
+ * 누른 경우에만** true 다 — 화면이 기본으로 켜서 보내면 묻는 의미가 사라진다.
+ * 안 끝난 것이 남았는데 이 값이 false 면 서버가 UNFINISHED_NODES_REMAIN 으로
+ * 돌려보내고, 화면은 그때 물어서 다시 부른다.
+ */
+export async function finishProcedureExecutionAction(input: {
+  executionId: string;
+  expectedVersion: number;
+  confirmedRemaining?: boolean;
+}): Promise<ExecutionLifecycleResult | Forbidden> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.executionId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+
+  return withErrorRedaction("finishProcedureExecutionAction", () =>
+    finishProcedureExecution(input.executionId, actorCheck.userId, input.expectedVersion, input.confirmedRemaining === true)
+  );
+}
+
+/** 실행 그만두기(소프트 삭제). 건너뛰기·차단과 같은 사유 검증을 쓴다. */
+export async function abandonProcedureExecutionAction(input: {
+  executionId: string;
+  expectedVersion: number;
+  reason: string;
+}): Promise<ExecutionLifecycleResult | Forbidden> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.executionId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  const reasonValidation = validateRequiredNote(input.reason);
+  if (!reasonValidation.ok) return { ok: false, code: "FORBIDDEN", message: reasonValidation.error };
+
+  return withErrorRedaction("abandonProcedureExecutionAction", () =>
+    abandonProcedureExecution(input.executionId, actorCheck.userId, input.expectedVersion, reasonValidation.note)
   );
 }
 

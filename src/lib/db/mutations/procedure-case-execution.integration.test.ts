@@ -24,6 +24,8 @@ import { createRepairCase } from "./repair-cases";
 import { createDraftProcedureTemplateFromImport, publishProcedureTemplate } from "./procedure-templates";
 import {
   startProcedureExecution,
+  finishProcedureExecution,
+  abandonProcedureExecution,
   startExecutionNode,
   completeExecutionNode,
   skipExecutionNode,
@@ -32,7 +34,12 @@ import {
   addExecutionExtraTask,
   updateExecutionNodeMemo,
 } from "./procedure-case-execution";
-import { getExecutionDetail, getExecutionHistory, getRelatedRepairHistory } from "../queries/procedure-case-execution";
+import {
+  getActiveExecutionForCase,
+  getExecutionDetail,
+  getExecutionHistory,
+  getRelatedRepairHistory,
+} from "../queries/procedure-case-execution";
 import { computeExecutionPosition } from "@/lib/domain/procedure-execution-order";
 import { pickCurrentTaskNode } from "@/lib/domain/procedure-execution-focus";
 import { buildProcedureExecutionMinimap } from "@/lib/domain/procedure-execution-minimap";
@@ -156,6 +163,74 @@ function makeFanOutExecutionTestTemplate(code: string): ExtractedTemplate {
     edges: [
       ...base.edges,
       { fromNodeCode: "n2", toNodeCode: "n5", branchType: "CUSTOM", branchLabel: "바로 조치", sortOrder: 7, sourceConnectorId: "c8" },
+    ],
+  };
+}
+
+/**
+ * 참고 문서를 **연달아 둘** 놓은 판 — n4 → n6(참고) → n8(참고) → n7(END).
+ *
+ * 꾸며낸 모양이 아니다. 실측(2026-11-02) rfg-full-lifecycle 에 참고 문서가 바로
+ * 이렇게 이어져 있다(s31-50 → s31-56). 하나만으로는 「한 번 건너뛴다」까지만
+ * 재고, 사슬을 끝까지 따라가는지는 못 잰다.
+ */
+function makeReferenceChainExecutionTestTemplate(code: string): ExtractedTemplate {
+  const base = makeExecutionTestTemplate(code);
+  const sheet = base.sourceWorksheets[0];
+  return {
+    ...base,
+    nodes: [
+      ...base.nodes,
+      { nodeCode: "n8", nodeType: "DOCUMENT_REFERENCE", title: "두 번째 참조 문서", positionX: 450, positionY: 0, sortOrder: 7, sourceWorksheet: sheet, sourceShapeId: "8" },
+    ],
+    edges: [
+      // c7(n6 → n7)을 걷어내고 그 자리에 참고 문서 하나를 더 끼운다.
+      ...base.edges.filter((e) => e.sourceConnectorId !== "c7"),
+      { fromNodeCode: "n6", toNodeCode: "n8", branchType: "DEFAULT", branchLabel: null, sortOrder: 6, sourceConnectorId: "c7" },
+      { fromNodeCode: "n8", toNodeCode: "n7", branchType: "DEFAULT", branchLabel: null, sortOrder: 7, sourceConnectorId: "c8" },
+    ],
+  };
+}
+
+/**
+ * 참고 문서에서 **나가는 선이 둘**인 판 — 실측 s31-50 이 이 모양이다(END 로도
+ * 가고 다음 참고 문서로도 간다). 건너뛴 끝에서 갈래가 벌어지면 세우면 안 된다.
+ *
+ * 🔴 분기 유형은 CUSTOM 이어야 한다 — YES/NO/NG/NORMAL 은 판단 노드에서만 쓸 수
+ * 있어 게시가 ERROR 로 거절된다(makeFanOutExecutionTestTemplate 과 같은 사정).
+ */
+function makeReferenceFanOutExecutionTestTemplate(code: string): ExtractedTemplate {
+  const base = makeExecutionTestTemplate(code);
+  return {
+    ...base,
+    edges: [
+      ...base.edges,
+      { fromNodeCode: "n6", toNodeCode: "n5", branchType: "CUSTOM", branchLabel: "실물 서류 확인", sortOrder: 7, sourceConnectorId: "c8" },
+    ],
+  };
+}
+
+/**
+ * 참고 문서 둘이 **서로를 가리키는** 판 — n6 ↔ n8. 본 것을 기억하지 않으면
+ * 건너뛰기가 영영 안 끝난다(실패가 아니라 **시험이 안 끝나는 것**으로 나타난다).
+ *
+ * END(n7)에는 n5 에서 따로 선을 이어 준다 — 들어오는 선이 하나도 없는 END 는
+ * 구조 검사에서 ERROR 라 게시가 안 된다.
+ */
+function makeReferenceLoopExecutionTestTemplate(code: string): ExtractedTemplate {
+  const base = makeExecutionTestTemplate(code);
+  const sheet = base.sourceWorksheets[0];
+  return {
+    ...base,
+    nodes: [
+      ...base.nodes,
+      { nodeCode: "n8", nodeType: "DOCUMENT_REFERENCE", title: "되돌아가는 참조 문서", positionX: 450, positionY: 100, sortOrder: 7, sourceWorksheet: sheet, sourceShapeId: "8" },
+    ],
+    edges: [
+      ...base.edges.filter((e) => e.sourceConnectorId !== "c7"),
+      { fromNodeCode: "n6", toNodeCode: "n8", branchType: "DEFAULT", branchLabel: null, sortOrder: 6, sourceConnectorId: "c7" },
+      { fromNodeCode: "n8", toNodeCode: "n6", branchType: "DEFAULT", branchLabel: null, sortOrder: 7, sourceConnectorId: "c8" },
+      { fromNodeCode: "n5", toNodeCode: "n7", branchType: "CUSTOM", branchLabel: "조치 후 종료", sortOrder: 8, sourceConnectorId: "c9" },
     ],
   };
 }
@@ -1125,7 +1200,7 @@ describe("procedure-case-execution: read queries", () => {
       "갈래 차례는 sort_order 그대로 — 바로 아래 갈래 단추와 같은 차례여야 한다"
     );
 
-    const current = pickCurrentTaskNode(detail!.nodes);
+    const current = pickCurrentTaskNode(detail!.nodes, { isExecutionFinished: false });
     assert.equal(current?.nodeCode, "n2", "아직 아무것도 안 했으니 절차 차례상 첫 일이 지금 할 일이다");
 
     const minimap = buildProcedureExecutionMinimap({ nodes: detail!.nodes, edges: detail!.flowEdges, current });
@@ -1391,7 +1466,18 @@ describe("procedure-case-execution: 완료하면 다음 하나가 저절로 선�
     assert.equal(n3After.lastActionReason, "부품 입고 대기");
   });
 
-  test("37. 갈 곳이 없거나(END) 다음이 참고 문서거나 추가 작업이면 아무 행도 안 바뀐다", async () => {
+  /**
+   * 🔴 2026-11-02(조각 5)에 **표본에서 n4 를 뺐다.** 전에는 「다음이 참고 문서면
+   * 아무것도 안 선다」가 이 시험의 일부였는데(n4 → n6 참고 문서), 그 멈춤이 바로
+   * 이번에 고친 결함이다. 지금 n4 는 참고 문서를 건너뛰어 n7 을 세운다 — 아래
+   * 39번이 그것을 잰다.
+   *
+   * 🔴 n4 를 그냥 두면 이 시험은 **틀린 설계인 채로도 통과한다**: 고리 차례상
+   * n7 이 먼저 완료돼 버려서, 건너뛴 끝이 이미 끝난 노드가 되고 결국
+   * 「아무 행도 안 바뀐다」가 그대로 성립한다. 단언을 약하게 한 것이 아니라
+   * **뜻이 달라진 표본을 덜어낸** 것이다.
+   */
+  test("37. 갈 곳이 없거나(END) 추가 작업이면 아무 행도 안 바뀐다", async () => {
     const { templateId } = await createPublishedTemplate(uniqueCode("advance-nowhere"));
     const created = await createTestCase({ assignedEngineerId: engineerId });
     const started = await startProcedureExecution(created.id, templateId, engineerId);
@@ -1403,9 +1489,8 @@ describe("procedure-case-execution: 완료하면 다음 하나가 저절로 선�
     assert.equal(extra.ok, true, JSON.stringify(extra));
     if (!extra.ok) return;
 
-    // n7 = END(나가는 간선 없음), n4 = 다음이 참고 문서(n6, 실행 행이 없다),
-    // 추가 작업 = 그래프에 자리가 없다. 셋 다 「세울 다음」이 없다.
-    for (const target of [byCode.get("n7")!.id, byCode.get("n4")!.id, extra.executionNodeId]) {
+    // n7 = END(나가는 간선 없음), 추가 작업 = 그래프에 자리가 없다.
+    for (const target of [byCode.get("n7")!.id, extra.executionNodeId]) {
       const before = await snapshotExecutionNodes(started.executionId);
       const current = before.find((r) => r.id === target)!;
       const result = await completeExecutionNode({ executionNodeId: target, actorUserId: engineerId, expectedVersion: current.version });
@@ -1437,6 +1522,390 @@ describe("procedure-case-execution: 완료하면 다음 하나가 저절로 선�
     const [n3After] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n3.id));
     assert.equal(n3After.status, "PENDING");
     assert.equal(n3After.version, n3.version);
+  });
+
+  test("39. 🔴 다음이 참고 문서면 **건너뛰어 그다음**이 선다 — 거기서 멈추지 않는다", async () => {
+    const { templateId, nodes, edges } = await createPublishedTemplate(uniqueCode("advance-skip-reference"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const n4 = byCode.get("n4")!;
+    const n7 = byCode.get("n7")!;
+
+    // 🔵 표본 확인 — 참고 문서 n6 에는 실행 행이 정말 없고, n4 가 바로 그것을
+    // 가리킨다. 둘 중 하나라도 아니면 이 시험은 건너뛰기를 재는 것이 아니다.
+    assert.equal(byCode.has("n6"), false, "참고 문서에 실행 행이 생기면 건너뛸 일 자체가 없다");
+    const n4ToN6 = edges.find((e) => e.sourceConnectorId === "c6")!;
+    assert.equal(n4ToN6.toNodeId, nodes.get("n6")!.id);
+    assert.equal(n7.status, "PENDING");
+
+    const result = await completeExecutionNode({ executionNodeId: n4.id, actorUserId: engineerId, expectedVersion: n4.version });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [after] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n7.id));
+    assert.equal(after.status, "IN_PROGRESS", "참고 문서에서 멈추면 게시하는 날 절차가 그 자리에서 끊긴다");
+    assert.equal(after.version, n7.version + 1);
+
+    // 🔴 이력의 viaEdgeId 는 **세운 노드로 들어가는** 간선(n6 → n7)이다.
+    // 사람이 밟은 첫 간선(n4 → n6)을 적으면 줄이 세운 노드를 안 가리킨다.
+    const autoRows = await historyFor(n7.id, "NODE_STARTED");
+    assert.equal(autoRows.length, 1);
+    const n6ToN7 = edges.find((e) => e.sourceConnectorId === "c7")!;
+    assert.deepEqual(autoRows[0].afterState, {
+      autoAdvanced: true,
+      fromExecutionNodeId: n4.id,
+      viaEdgeId: n6ToN7.id,
+    });
+  });
+
+  test("40. 🔴 참고 문서가 **연달아** 있어도 끝까지 건너뛴다", async () => {
+    const code = uniqueCode("advance-reference-chain");
+    const { templateId, edges } = await createPublishedTemplate(code, "FULL_SERVICE", makeReferenceChainExecutionTestTemplate(code));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const n4 = byCode.get("n4")!;
+    const n7 = byCode.get("n7")!;
+    // 🔵 표본 확인 — 참고 문서가 정말 둘이고 둘 다 실행 행이 없다.
+    assert.equal(byCode.has("n6"), false);
+    assert.equal(byCode.has("n8"), false);
+
+    const result = await completeExecutionNode({ executionNodeId: n4.id, actorUserId: engineerId, expectedVersion: n4.version });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [after] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n7.id));
+    assert.equal(after.status, "IN_PROGRESS");
+    const autoRows = await historyFor(n7.id, "NODE_STARTED");
+    const n8ToN7 = edges.find((e) => e.sourceConnectorId === "c8")!;
+    assert.deepEqual(autoRows[0].afterState, { autoAdvanced: true, fromExecutionNodeId: n4.id, viaEdgeId: n8ToN7.id });
+  });
+
+  test("41. 🔴 건너뛴 끝에서 갈래가 여럿이면 아무것도 안 세운다", async () => {
+    const code = uniqueCode("advance-reference-fanout");
+    const { templateId, nodes, edges } = await createPublishedTemplate(code, "FULL_SERVICE", makeReferenceFanOutExecutionTestTemplate(code));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const n4 = byCode.get("n4")!;
+    // 🔵 표본 확인 — 참고 문서 n6 에서 나가는 간선이 정말 둘이다(실측 s31-50).
+    assert.equal(edges.filter((e) => e.fromNodeId === nodes.get("n6")!.id).length, 2);
+
+    const before = await snapshotExecutionNodes(started.executionId);
+    const result = await completeExecutionNode({ executionNodeId: n4.id, actorUserId: engineerId, expectedVersion: n4.version });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const after = await snapshotExecutionNodes(started.executionId);
+    assert.deepEqual(
+      after.filter((r) => r.id !== n4.id),
+      before.filter((r) => r.id !== n4.id),
+      "갈래가 벌어졌는데 한쪽을 고르면 틀린 쪽이 1순위가 된다"
+    );
+  });
+
+  test("42. 🔴 참고 문서가 고리를 이뤄도 **끝난다** — 돌지 않고 아무것도 안 세운다", async () => {
+    // 이 시험이 깨지는 모습은 「실패」가 아니라 **시험이 안 끝나는 것**이다.
+    const code = uniqueCode("advance-reference-loop");
+    const { templateId } = await createPublishedTemplate(code, "FULL_SERVICE", makeReferenceLoopExecutionTestTemplate(code));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const n4 = byCode.get("n4")!;
+
+    const before = await snapshotExecutionNodes(started.executionId);
+    const result = await completeExecutionNode({ executionNodeId: n4.id, actorUserId: engineerId, expectedVersion: n4.version });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const after = await snapshotExecutionNodes(started.executionId);
+    assert.deepEqual(
+      after.filter((r) => r.id !== n4.id),
+      before.filter((r) => r.id !== n4.id),
+      "고리를 도는 동안 아무 행도 건드리면 안 된다"
+    );
+  });
+});
+
+/**
+ * 실행을 **끝내고 그만두는** 길(2026-11-02, 조각 5).
+ *
+ * 전에는 노드 단추 넷(시작·완료·건너뛰기·차단)뿐이라, 잘못 불러온 절차를 치울
+ * 수도 없고 다 해도 끝낼 수도 없었다. 여기서 재는 것은 **DB 에 무엇이 남는가**와
+ * **화면이 다시 무엇을 보는가** 둘이다 — 화면 쪽 모양은 components 목록의
+ * execution-lifecycle-actions.test.ts 가, 묻는 규칙 자체는 unit 목록의
+ * procedure-execution-lifecycle.test.ts 가 따로 본다.
+ */
+describe("procedure-case-execution: 실행 끝내기 · 그만두기", () => {
+  /** 실행 한 건을 세우고, 조회가 보는 모습까지 함께 돌려준다. */
+  async function startedExecution() {
+    const { templateId } = await createPublishedTemplate(uniqueCode("lifecycle"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true, JSON.stringify(started));
+    if (!started.ok) throw new Error("unreachable");
+    return { templateId, repairCaseId: created.id, executionId: started.executionId };
+  }
+
+  async function loadExecutionRow(executionId: string) {
+    const [row] = await db.select().from(procedureCaseExecutions).where(eq(procedureCaseExecutions.id, executionId));
+    return row;
+  }
+
+  /** 노드를 남김없이 끝낸다 — 「다 한 실행」 표본을 만드는 가장 짧은 길. */
+  async function completeEveryNode(executionId: string) {
+    const rows = await db
+      .select()
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.executionId, executionId));
+    for (const row of rows) {
+      if (row.status === "COMPLETED" || row.status === "SKIPPED") continue;
+      // 판단 노드는 갈래를 골라야 완료된다 — 아무 갈래나 하나 집는다.
+      const [fresh] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, row.id));
+      const outgoing = row.procedureTemplateNodeId
+        ? await db.select().from(procedureTemplateEdges).where(eq(procedureTemplateEdges.fromNodeId, row.procedureTemplateNodeId))
+        : [];
+      const [templateNode] = row.procedureTemplateNodeId
+        ? await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, row.procedureTemplateNodeId))
+        : [];
+      if (templateNode && templateNode.nodeType === "START") continue;
+      const result = await completeExecutionNode({
+        executionNodeId: row.id,
+        actorUserId: engineerId,
+        expectedVersion: fresh.version,
+        selectedOutgoingEdgeId: templateNode?.nodeType === "DECISION" ? (outgoing[0]?.id ?? null) : null,
+      });
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
+  }
+
+  test("43. 🔴 그만두면 조회가 그 실행을 **못 본다** — 그래서 불러오기 카드가 다시 선다", async () => {
+    const { repairCaseId, executionId } = await startedExecution();
+    // 🔵 표본 확인 — 그만두기 전에는 조회가 분명히 보고 있다.
+    assert.equal((await getActiveExecutionForCase(repairCaseId))?.id, executionId);
+
+    const before = await loadExecutionRow(executionId);
+    const result = await abandonProcedureExecution(executionId, engineerId, before.version, "절차를 잘못 골랐습니다");
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    assert.equal(await getActiveExecutionForCase(repairCaseId), null, "그만뒀는데 조회가 보면 화면이 그대로 막혀 있다");
+
+    const after = await loadExecutionRow(executionId);
+    assert.equal(after.isDeleted, true);
+    assert.ok(after.deletedAt, "언제 치웠는지가 비면 소프트 삭제 네 칸 규약이 반만 채워진다");
+    assert.equal(after.deletedBy, engineerId);
+    assert.equal(after.deleteReason, "절차를 잘못 골랐습니다", "사유가 없으면 「잘못 불러옴」과 「수리 취소」를 영영 못 가른다");
+    assert.equal(after.version, before.version + 1);
+  });
+
+  test("44. 🔴 그만둬도 노드와 이력은 **한 줄도 안 지워진다**", async () => {
+    const { templateId, executionId } = await startedExecution();
+    const byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const n2 = byCode.get("n2")!;
+    const worked = await completeExecutionNode({ executionNodeId: n2.id, actorUserId: engineerId, expectedVersion: n2.version });
+    assert.equal(worked.ok, true, JSON.stringify(worked));
+
+    const nodesBefore = await snapshotExecutionNodes(executionId);
+    const historyBefore = await db
+      .select()
+      .from(procedureCaseExecutionHistory)
+      .where(eq(procedureCaseExecutionHistory.executionId, executionId));
+    assert.ok(nodesBefore.length > 0 && historyBefore.length > 0, "표본이 비면 「안 지워진다」가 공짜로 통과한다");
+
+    const row = await loadExecutionRow(executionId);
+    const result = await abandonProcedureExecution(executionId, engineerId, row.version, "고객이 수리를 취소했습니다");
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    assert.deepEqual(await snapshotExecutionNodes(executionId), nodesBefore, "실제로 한 일이 사라지면 안 된다");
+    const historyAfter = await db
+      .select()
+      .from(procedureCaseExecutionHistory)
+      .where(eq(procedureCaseExecutionHistory.executionId, executionId));
+    assert.equal(historyAfter.length, historyBefore.length, "이력표는 append-only 다");
+  });
+
+  test("45. 그만두기는 사유를 요구하고, 버전이 어긋나면 거절하며, 두 번째는 못 찾는다", async () => {
+    const { executionId } = await startedExecution();
+    const row = await loadExecutionRow(executionId);
+
+    const blank = await abandonProcedureExecution(executionId, engineerId, row.version, "   ");
+    assert.equal(blank.ok, false);
+    if (!blank.ok) assert.equal(blank.code, "REASON_REQUIRED");
+
+    const stale = await abandonProcedureExecution(executionId, engineerId, row.version + 5, "버전이 틀린 요청");
+    assert.equal(stale.ok, false);
+    if (!stale.ok) assert.equal(stale.code, "CONFLICT");
+
+    const first = await abandonProcedureExecution(executionId, engineerId, row.version, "잘못 불러왔습니다");
+    assert.equal(first.ok, true, JSON.stringify(first));
+
+    // 🔴 두 번 누르기 — 이미 치운 것은 아예 안 보인다.
+    const second = await abandonProcedureExecution(executionId, engineerId, row.version + 1, "또 눌렀습니다");
+    assert.equal(second.ok, false);
+    if (!second.ok) assert.equal(second.code, "NOT_FOUND");
+  });
+
+  test("46. 🔴 그만둔 실행의 노드는 더 못 건드린다 — 화면에서 사라진 것이 저장되면 안 된다", async () => {
+    const { templateId, executionId } = await startedExecution();
+    const byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const n2 = byCode.get("n2")!;
+
+    const row = await loadExecutionRow(executionId);
+    const abandoned = await abandonProcedureExecution(executionId, engineerId, row.version, "잘못 불러왔습니다");
+    assert.equal(abandoned.ok, true, JSON.stringify(abandoned));
+
+    const late = await startExecutionNode(n2.id, engineerId, n2.version);
+    assert.equal(late.ok, false);
+    if (!late.ok) assert.equal(late.code, "NOT_FOUND");
+
+    const [unchanged] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n2.id));
+    assert.equal(unchanged.status, "PENDING");
+    assert.equal(unchanged.version, n2.version);
+  });
+
+  test("47. 🔴 다 끝낸 실행을 끝내면 completed_at 이 찬다 — 조회는 그대로 보여 준다", async () => {
+    const { repairCaseId, executionId } = await startedExecution();
+    await completeEveryNode(executionId);
+
+    const before = await loadExecutionRow(executionId);
+    // 🔵 표본 확인 — 채우기 전에는 정말 비어 있다(5A 내내 한 번도 안 찼다).
+    assert.equal(before.completedAt, null);
+
+    const result = await finishProcedureExecution(executionId, engineerId, before.version, false);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const after = await loadExecutionRow(executionId);
+    assert.ok(after.completedAt, "completed_at 이 안 차면 「마쳤습니다」를 그릴 재료가 없다");
+    assert.equal(after.isDeleted, false, "끝내기는 치우는 것이 아니다 — 기록은 그대로 보인다");
+    assert.equal(after.version, before.version + 1);
+
+    // 🔴 조회가 계속 보여 줘야 화면이 「절차를 마쳤습니다」와 불러오기 카드를
+    // 함께 그릴 수 있다. 여기서 걸러 버리면 다 끝낸 화면이 한 번도 실행한 적
+    // 없는 화면과 똑같아진다.
+    const active = await getActiveExecutionForCase(repairCaseId);
+    assert.equal(active?.id, executionId);
+    assert.ok(active?.completedAt, "끝낸 시각이 조회에 안 실리면 화면이 끝난 줄을 모른다");
+
+    const detail = await getExecutionDetail(executionId);
+    assert.ok(detail?.completedAt);
+    assert.equal(detail?.version, after.version);
+  });
+
+  test("48. 🔴 남은 것이 있으면 **확인 없이는 안 끝난다** — 확인을 실으면 끝난다", async () => {
+    const { templateId, executionId } = await startedExecution();
+    const byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const n5 = byCode.get("n5")!;
+    const blocked = await blockExecutionNode(n5.id, engineerId, n5.version, "부품 입고 대기");
+    assert.equal(blocked.ok, true, JSON.stringify(blocked));
+
+    const before = await loadExecutionRow(executionId);
+    const remaining = await db
+      .select()
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.executionId, executionId));
+    const remainingCount = remaining.filter((n) => n.status === "PENDING" || n.status === "IN_PROGRESS" || n.status === "BLOCKED").length;
+    // 🔵 표본 확인 — 남은 것이 정말 있어야 「묻는다」를 잰다.
+    assert.ok(remainingCount > 0, "남은 것이 없으면 이 시험은 아무것도 안 잰다");
+
+    const asked = await finishProcedureExecution(executionId, engineerId, before.version, false);
+    assert.equal(asked.ok, false, "확인 없이 끝나면 물어보는 뜻이 사라진다");
+    if (!asked.ok) {
+      assert.equal(asked.code, "UNFINISHED_NODES_REMAIN");
+      assert.match(asked.message, new RegExp(`${remainingCount}개`), "몇 개 남았는지가 글자에 있어야 사람이 판단한다");
+      assert.match(asked.message, /차단됨 1개/);
+    }
+    assert.equal((await loadExecutionRow(executionId)).completedAt, null, "거절했는데 칸이 차면 안 된다");
+    assert.equal((await loadExecutionRow(executionId)).version, before.version, "거절은 버전도 안 올린다");
+
+    const confirmed = await finishProcedureExecution(executionId, engineerId, before.version, true);
+    assert.equal(confirmed.ok, true, JSON.stringify(confirmed));
+    assert.ok((await loadExecutionRow(executionId)).completedAt);
+
+    // 🔴 남은 노드를 **건드리지 않는다** — 안 한 일을 「했다」로 적으면 지나온
+    // 길이 거짓이 된다.
+    const afterNodes = await db
+      .select()
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.executionId, executionId));
+    assert.equal(
+      afterNodes.filter((n) => n.status === "PENDING" || n.status === "IN_PROGRESS" || n.status === "BLOCKED").length,
+      remainingCount
+    );
+    const [blockedAfter] = afterNodes.filter((n) => n.id === n5.id);
+    assert.equal(blockedAfter.status, "BLOCKED");
+    assert.equal(blockedAfter.lastActionReason, "부품 입고 대기");
+  });
+
+  test("49. 이미 끝낸 것을 또 끝내려 하면 거절하고, 끝낸 뒤에도 그만둘 수는 있다", async () => {
+    const { repairCaseId, executionId } = await startedExecution();
+    const first = await loadExecutionRow(executionId);
+    const finished = await finishProcedureExecution(executionId, engineerId, first.version, true);
+    assert.equal(finished.ok, true, JSON.stringify(finished));
+
+    const again = await finishProcedureExecution(executionId, engineerId, first.version + 1, true);
+    assert.equal(again.ok, false);
+    if (!again.ok) assert.equal(again.code, "ALREADY_FINISHED");
+
+    // 잘못 끝냈을 때 되돌릴 길은 그만두기뿐이다(「다시 열기」는 없다) — 막으면
+    // 끝낸 사람이 또 갇힌다.
+    const row = await loadExecutionRow(executionId);
+    const abandoned = await abandonProcedureExecution(executionId, engineerId, row.version, "끝내기를 잘못 눌렀습니다");
+    assert.equal(abandoned.ok, true, JSON.stringify(abandoned));
+    assert.equal(await getActiveExecutionForCase(repairCaseId), null);
+  });
+
+  test("50. 🔴 끝낸 뒤 **다른 절차를 불러오면** 화면이 새로 불러온 쪽을 본다", async () => {
+    // TECHNICAL_TASK 는 한 건에 여럿이 나란히 있어도 된다(유니크 색인은
+    // FULL_SERVICE 에만 걸린다). 끝낸 실행에서도 불러오기 카드가 다시 서므로
+    // 「끝낸 것 + 새로 불러온 것」 둘이 함께 남는 자리가 이번에 처음 생겼다 —
+    // 차례를 안 정하면 아까 끝낸 절차가 다시 뜨는 화면이 된다.
+    const { repairCaseId, executionId } = await startedExecution();
+    const first = await loadExecutionRow(executionId);
+    const finished = await finishProcedureExecution(executionId, engineerId, first.version, true);
+    assert.equal(finished.ok, true, JSON.stringify(finished));
+
+    const { templateId: secondTemplateId } = await createPublishedTemplate(uniqueCode("lifecycle-second"), "TECHNICAL_TASK");
+    const restarted = await startProcedureExecution(repairCaseId, secondTemplateId, engineerId);
+    assert.equal(restarted.ok, true, JSON.stringify(restarted));
+    if (!restarted.ok) return;
+
+    // 🔵 표본 확인 — 안 치운 실행이 정말 둘이다(하나면 차례가 뜻이 없다).
+    const live = await db
+      .select({ id: procedureCaseExecutions.id })
+      .from(procedureCaseExecutions)
+      .where(and(eq(procedureCaseExecutions.repairCaseId, repairCaseId), eq(procedureCaseExecutions.isDeleted, false)));
+    assert.equal(live.length, 2);
+
+    const active = await getActiveExecutionForCase(repairCaseId);
+    assert.equal(active?.id, restarted.executionId, "새로 불러왔는데 끝낸 절차가 뜨면 「왜 안 바뀌지」가 된다");
+    assert.equal(active?.completedAt, null);
+  });
+
+  test("51. 담당이 아닌 엔지니어는 끝내지도 그만두지도 못한다", async () => {
+    const { executionId } = await startedExecution();
+    const row = await loadExecutionRow(executionId);
+
+    const finish = await finishProcedureExecution(executionId, engineer2Id, row.version, true);
+    assert.equal(finish.ok, false);
+    if (!finish.ok) assert.equal(finish.code, "FORBIDDEN");
+
+    const abandon = await abandonProcedureExecution(executionId, engineer2Id, row.version, "남의 건을 치우려 했다");
+    assert.equal(abandon.ok, false);
+    if (!abandon.ok) assert.equal(abandon.code, "FORBIDDEN");
+
+    // 🔵 표본 확인 — 같은 요청이 담당 엔지니어에게는 통한다(막히는 쪽만 재면
+    // 「누구에게나 막힌다」도 통과한다).
+    const allowed = await finishProcedureExecution(executionId, engineerId, row.version, true);
+    assert.equal(allowed.ok, true, JSON.stringify(allowed));
   });
 });
 

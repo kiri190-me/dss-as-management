@@ -24,6 +24,7 @@ import {
   resolveAutoAdvanceTarget,
   type AutoAdvanceDecision,
 } from "@/lib/domain/procedure-execution-focus";
+import { assessExecutionFinish } from "@/lib/domain/procedure-execution-lifecycle";
 import type { ProcedureCaseExecutionActionType } from "@/lib/domain/procedure-case-execution-types";
 import type { ProcedureNodeType } from "@/lib/domain/procedure-template-types";
 import type { Role } from "@/lib/domain/types";
@@ -63,7 +64,14 @@ export type ExecutionMutationResultCode =
   | "INVALID_DECISION_SELECTION"
   | "INVALID_INPUT"
   | "SYSTEM_MANAGED_NODE"
-  | "BILLING_DECISION_REQUIRED";
+  | "BILLING_DECISION_REQUIRED"
+  /** 이미 끝낸 실행을 또 끝내려 했다. */
+  | "ALREADY_FINISHED"
+  /**
+   * 안 끝난 작업이 남았는데 「그래도 끝낸다」는 확인이 안 왔다.
+   * 🔴 거절이 아니라 **물어보라는 신호**다 — 화면이 확인을 받고 다시 부른다.
+   */
+  | "UNFINISHED_NODES_REMAIN";
 
 type Failure = { ok: false; code: ExecutionMutationResultCode; message: string };
 
@@ -290,6 +298,192 @@ export async function startProcedureExecution(
   }
 }
 
+// ---- 실행 끝내기 · 그만두기 (finish / abandon — 실행 한 줄 자체를 다룬다) ----
+
+/**
+ * 실행 수준 조작(끝내기·그만두기)이 쓰는 적재기.
+ *
+ * 노드 쪽(loadExecutionNodeOrFail)과 **두 가지가 다르다**:
+ *
+ *  1. 유·무상 미확정(PENDING_DECISION) 을 막지 않는다. 그 관문은 「유·무상을
+ *     정하기 전에 **작업하지 마라**」는 뜻인데, 끝내기와 그만두기는 작업이
+ *     아니라 작업을 **멈추는** 일이다. 여기서 막으면 잘못 불러온 절차를 치우려
+ *     해도 유·무상부터 정해야 하는, 원래 불만(「바꿀 수가 없다」)과 똑같은
+ *     막다른 길이 하나 더 생긴다.
+ *  2. 이미 그만둔(is_deleted) 실행은 아예 못 찾는다 — 조회(getActiveExecution
+ *     ForCase)와 같은 잣대다. 치운 실행에 다시 손대는 길을 남기지 않는다.
+ *
+ * 잠그는 것은 **실행 행 자신**이다. 노드 쪽과 달리 이 조작들은 노드를 한 줄도
+ * 안 건드린다.
+ */
+async function loadExecutionForLifecycleOrFail(tx: Tx, executionId: string) {
+  const [execution] = await tx
+    .select()
+    .from(procedureCaseExecutions)
+    .where(and(eq(procedureCaseExecutions.id, executionId), eq(procedureCaseExecutions.isDeleted, false)))
+    .for("update");
+  if (!execution) fail("NOT_FOUND", "해당 실행을 찾을 수 없습니다.");
+
+  // repair_case_id 는 nullable 이다(접수 건 영구 삭제 기반 작업) — 접수 건이
+  // 사라진 과거 실행은 권한을 판정할 대상 자체가 없다. loadExecutionNodeOrFail
+  // 의 같은 관문과 같은 까닭으로 여기서 깨끗이 거절한다.
+  if (!execution.repairCaseId) fail("NOT_FOUND", "이 실행과 연결된 접수 건이 더 이상 존재하지 않습니다.");
+  const executionRepairCaseId = execution.repairCaseId;
+
+  const [repairCase] = await tx
+    .select({ id: repairCases.id, isLocked: repairCases.isLocked, assignedEngineerId: repairCases.assignedEngineerId })
+    .from(repairCases)
+    .where(and(eq(repairCases.id, executionRepairCaseId), eq(repairCases.isDeleted, false)));
+  if (!repairCase) fail("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
+
+  return { execution, repairCase };
+}
+
+export type ExecutionLifecycleResult = { ok: true; version: number } | Failure;
+
+/**
+ * 실행을 **끝낸다** — procedure_case_executions.completed_at 을 채운다.
+ *
+ * 그 칸은 Phase 5A 때 만들어 두고 한 번도 채운 적이 없다(스키마 주석에 「5A 에는
+ * 완료 기능이 없다」고 적혀 있다). 이 함수가 그것을 채우는 **첫 자리**다.
+ *
+ * 🔴 노드는 한 줄도 안 건드린다. 남은 대기 노드를 자동으로 완료·건너뜀으로
+ * 바꾸지 않는다 — 안 한 일을 「했다」로 적는 것이고, 판단이 8할인 이 절차들에서
+ * 안 가는 길의 노드는 원래 대기로 남는 것이 맞다. 「절차를 끝냈다」와 「그 노드를
+ * 했다」는 서로 다른 사실이고, 둘을 섞으면 지나온 길이 거짓이 된다.
+ *
+ * 🔴 **남은 것이 있어도 끝낼 수 있다.** 다만 그때는 부르는 쪽이 사람에게 물은
+ * 뒤 confirmedRemaining 을 실어 보내야 한다. 세는 자리는 화면과 공유한다
+ * (assessExecutionFinish) — 화면만 묻게 두면 화면을 거치지 않는 호출이 아무것도
+ * 안 묻고 끝낸다.
+ *
+ * ⚠️ **누가 끝냈는지는 안 남는다.** 이 표에는 completed_by 칸이 없고, 이력표의
+ * action 값에도 실행 완료에 해당하는 것이 없다(EXECUTION_COMPLETED 는 Phase 5A
+ * 에서 일부러 뺐다). 둘 중 하나라도 적으려면 마이그레이션이 필요하다 — 이 조각은
+ * **이미 있는 칸만** 쓰기로 했으므로, 거짓으로 들어맞는 action 값(NODE_COMPLETED
+ * 같은 것)을 빌려 쓰지 않는다. 빌려 쓰면 실행 이력에 「작업 완료」 한 줄이 노드
+ * 없이 떠서, 나중에 읽는 사람이 없는 작업을 찾게 된다.
+ */
+export async function finishProcedureExecution(
+  executionId: string,
+  actorUserId: string,
+  expectedVersion: number,
+  confirmedRemaining: boolean
+): Promise<ExecutionLifecycleResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, actorUserId);
+      const { execution, repairCase } = await loadExecutionForLifecycleOrFail(tx, executionId);
+
+      await assertOrdinaryMutationAuthorized(actor, repairCase, null);
+
+      // 버전을 상태보다 먼저 본다 — startExecutionNode 의 같은 주석 참고.
+      if (execution.version !== expectedVersion) {
+        fail("CONFLICT", "다른 사용자가 이 절차를 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
+      }
+      if (execution.completedAt !== null) {
+        fail("ALREADY_FINISHED", "이미 끝낸 절차입니다.");
+      }
+
+      const nodes = await tx
+        .select({ status: procedureCaseExecutionNodes.status })
+        .from(procedureCaseExecutionNodes)
+        .where(eq(procedureCaseExecutionNodes.executionId, executionId));
+
+      // 🔴 잠근 뒤에 **다시** 센다. 화면이 세어 보낸 수를 믿지 않는다 — 그 사이에
+      // 남이 노드를 끝냈거나 막았을 수 있고, 사람이 본 「3개 남았습니다」가 이미
+      // 옛말일 수 있다.
+      const assessment = assessExecutionFinish(nodes);
+      if (assessment.needsConfirmation && !confirmedRemaining) {
+        fail("UNFINISHED_NODES_REMAIN", assessment.confirmationMessage ?? "아직 끝내지 않은 작업이 있습니다.");
+      }
+
+      const now = new Date();
+      await tx
+        .update(procedureCaseExecutions)
+        .set({ completedAt: now, version: execution.version + 1, updatedAt: now })
+        .where(eq(procedureCaseExecutions.id, executionId));
+
+      return { ok: true, version: execution.version + 1 };
+    });
+  } catch (err) {
+    if (err instanceof ExecutionMutationError) return err.result;
+    throw err;
+  }
+}
+
+/**
+ * 실행을 **그만둔다** — 소프트 삭제 네 칸(is_deleted · deleted_at · deleted_by ·
+ * delete_reason)을 채운다. DATABASE_DESIGN.md #8 의 규약 그대로다.
+ *
+ * 왜 필요한가: 한 접수 건에 FULL_SERVICE 실행은 하나뿐이라(partial unique
+ * index), 절차를 잘못 고르면 **그 건에서는 바꿀 길이 아예 없었다.** 그래서 사람이
+ * 시험 삼아 눌러 보기를 무서워했다.
+ *
+ * 🔴 노드도 이력도 **한 줄도 지우지 않는다.** 실행 행만 치운다 — 실제로 한 일은
+ * 그대로 남아야 하고, 이력표는 append-only 다. 치운 뒤에는 조회가 이 실행을 못
+ * 보므로(getActiveExecutionForCase 가 is_deleted 로 거른다) 화면에 「+ 기술 절차
+ * 불러오기」가 다시 서고, 다른 절차를 고를 수 있게 된다.
+ *
+ * 🔴 **사유를 받는다.** 소프트 삭제 네 칸 가운데 delete_reason 을 비워 두면 나중에
+ * 「잘못 불러와서 치운 것」과 「고객이 수리를 취소해서 멈춘 것」을 구별할 수단이
+ * 아무 데도 없다 — 둘은 다음에 할 일이 정반대다. 같은 모듈의 건너뛰기·차단·재개가
+ * 이미 전부 사유를 받으므로 받는 창도 검증도 이미 있다.
+ *
+ * ⚠️ 이력표에는 줄을 안 쓴다. action 값에 실행 중단에 해당하는 것이 없고
+ * (EXECUTION_ABANDONED 는 Phase 5A 에서 일부러 뺐다), 억지로 다른 값을 빌리면
+ * 이력이 거짓이 된다. 누가·언제·왜 치웠는지는 **치운 행 자신의 네 칸**에 남는다 —
+ * 그것이 이 저장소의 소프트 삭제 규약이고, 치운 실행의 이력 화면은 어차피 더
+ * 열리지 않는다.
+ *
+ * 끝낸(completed_at 이 찬) 실행도 그만둘 수 있다. 되돌리는 길이 그것뿐이라
+ * (「다시 열기」는 없다) 막으면 잘못 끝낸 사람이 또 갇힌다.
+ */
+export async function abandonProcedureExecution(
+  executionId: string,
+  actorUserId: string,
+  expectedVersion: number,
+  reason: string
+): Promise<ExecutionLifecycleResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, actorUserId);
+      const { execution, repairCase } = await loadExecutionForLifecycleOrFail(tx, executionId);
+
+      // 🔵 시작할 수 있는 사람이 치울 수도 있어야 한다. 관리자 이상으로 올리면
+      // 「잘못 불러왔는데 바꿀 수가 없다」는 원래 불만이 담당 엔지니어에게는
+      // 그대로 남는다. 지우는 것이 아니라 **치우는 것**이고(행은 사유와 함께
+      // 남는다) 화면이 확인 창으로 한 번 더 묻는다.
+      await assertOrdinaryMutationAuthorized(actor, repairCase, null);
+
+      if (execution.version !== expectedVersion) {
+        fail("CONFLICT", "다른 사용자가 이 절차를 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
+      }
+      if (!reason || reason.trim().length === 0) {
+        fail("REASON_REQUIRED", "실행을 그만두는 사유를 입력해 주세요.");
+      }
+
+      const now = new Date();
+      await tx
+        .update(procedureCaseExecutions)
+        .set({
+          isDeleted: true,
+          deletedAt: now,
+          deletedBy: actor.id,
+          deleteReason: reason.trim(),
+          version: execution.version + 1,
+          updatedAt: now,
+        })
+        .where(eq(procedureCaseExecutions.id, executionId));
+
+      return { ok: true, version: execution.version + 1 };
+    });
+  } catch (err) {
+    if (err instanceof ExecutionMutationError) return err.result;
+    throw err;
+  }
+}
+
 // ---- shared node-context loader ----
 
 type LoadedExecutionNode = {
@@ -307,6 +501,14 @@ async function loadExecutionNodeOrFail(tx: Tx, executionNodeId: string): Promise
     .for("update");
   if (!node) fail("NOT_FOUND", "해당 실행 항목을 찾을 수 없습니다.");
 
+  // 🔴 그만둔(is_deleted) 실행의 노드는 더 못 건드린다 — 화면에서 사라진 실행에
+  // 직접 요청이 날아들 수 있다(오래된 탭). 조회가 그 실행을 안 보여 주므로
+  // (getActiveExecutionForCase) 서버 쪽도 같은 잣대를 써야 「화면에는 없는데
+  // 저장은 되는」 자리가 안 생긴다.
+  //
+  // 반대로 **끝낸(completed_at 이 찬) 실행은 막지 않는다.** 끝내기는 잠그는 일이
+  // 아니라 「여기까지」를 적는 일이고, 잘못 끝냈을 때 더 손댈 길까지 막으면
+  // 되돌릴 방법이 사라진다.
   const [execution] = await tx
     .select({
       id: procedureCaseExecutions.id,
@@ -314,7 +516,7 @@ async function loadExecutionNodeOrFail(tx: Tx, executionNodeId: string): Promise
       procedureTemplateId: procedureCaseExecutions.procedureTemplateId,
     })
     .from(procedureCaseExecutions)
-    .where(eq(procedureCaseExecutions.id, node.executionId));
+    .where(and(eq(procedureCaseExecutions.id, node.executionId), eq(procedureCaseExecutions.isDeleted, false)));
   if (!execution) fail("NOT_FOUND", "해당 실행을 찾을 수 없습니다.");
 
   // repair_case_id is nullable (repair-case permanent-delete schema
@@ -447,6 +649,13 @@ const AUTO_ADVANCE_HISTORY_AT = sql`now() + interval '1 millisecond'`;
  *    채우지 않는다. 앞 작업을 끝낸 사람이 다음 작업까지 맡는다는 근거가 없고,
  *    담당이 비어 있으면 접수 건의 담당 엔지니어가 그대로 쓰인다.
  *
+ * 🔵 **참고 문서는 건너뛴다**(2026-11-02). 참고 문서에는 실행 행이 없어서 전에는
+ * 거기서 멈췄는데, 실측 rfg-full-lifecycle 에 들어오는 선과 나가는 선을 다 가진
+ * 참고 문서가 둘 있다 — 게시하는 날 그 자리에서 절차가 조용히 멈춘다. 건너뛰는
+ * 규칙(갈래가 여럿이면 안 세운다 · 고리를 이루면 멈춘다)은 전부
+ * resolveAutoAdvanceTarget 안에 있고, 이 함수는 그러느라 **템플릿 전체의 간선과
+ * 노드 갈래**를 읽어 넘긴다.
+ *
  * 세우지 못한 경우에도 **던지지 않는다.** 완료 자체는 사람이 한 일이고 이미
  * 성공했다 — 다음 것을 못 세운 것은 절차 그림의 사정(갈 곳이 없다/여럿이다)
  * 이지 완료의 실패가 아니다. 까닭은 돌려주기만 하고 부르는 쪽이 삼킨다.
@@ -465,19 +674,24 @@ async function advanceToNextNode(
 ): Promise<AutoAdvanceDecision> {
   if (params.completedTemplateNodeId === null) return { kind: "SKIP", reason: "NOT_IN_GRAPH" };
 
-  const outgoingEdges = await tx
+  // 🔴 끝낸 노드에서 **나가는 간선만** 읽던 것을 템플릿 전체로 넓혔다. 참고
+  // 문서를 건너뛰려면 그 노드에서 나가는 선이 필요한데, 좁혀 읽으면 그 선이
+  // 애초에 결과에 없다(resolveAutoAdvanceTarget 머리말). 실측 템플릿의 간선은
+  // 8~60개라 한 번 더 읽어도 비용이 뜻있게 늘지 않는다.
+  const templateEdges = await tx
     .select({
       id: procedureTemplateEdges.id,
       fromNodeId: procedureTemplateEdges.fromNodeId,
       toNodeId: procedureTemplateEdges.toNodeId,
     })
     .from(procedureTemplateEdges)
-    .where(
-      and(
-        eq(procedureTemplateEdges.procedureTemplateId, params.procedureTemplateId),
-        eq(procedureTemplateEdges.fromNodeId, params.completedTemplateNodeId)
-      )
-    );
+    .where(eq(procedureTemplateEdges.procedureTemplateId, params.procedureTemplateId));
+
+  // 실행 행이 없는 노드가 **참고 문서라서** 없는 것인지 가리는 데 쓴다.
+  const templateNodes = await tx
+    .select({ id: procedureTemplateNodes.id, nodeType: procedureTemplateNodes.nodeType })
+    .from(procedureTemplateNodes)
+    .where(eq(procedureTemplateNodes.procedureTemplateId, params.procedureTemplateId));
 
   const siblings = await tx
     .select({
@@ -492,7 +706,8 @@ async function advanceToNextNode(
     completedTemplateNodeId: params.completedTemplateNodeId,
     isDecision: params.isDecision,
     selectedOutgoingEdgeId: params.selectedOutgoingEdgeId,
-    edges: outgoingEdges,
+    edges: templateEdges,
+    templateNodes,
     executionNodes: siblings,
   });
   if (decision.kind !== "ADVANCE") return decision;

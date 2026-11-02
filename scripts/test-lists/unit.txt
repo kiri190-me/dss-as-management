@@ -101,6 +101,19 @@ src/lib/domain/procedure-execution-minimap.test.ts
 # 표본은 개발 DB 실측 분포를 그대로 옮겼다 — 「다 끝난 실행」도 「차단됨이 있는 실행」도
 # 지금 DB 에 실제로 있다. 접힌 모습 자체는 components 목록의 execution-list-fold.test.tsx.
 src/lib/domain/procedure-execution-list-fold.test.ts
+# 🔵 실행을 **끝낼 때** 무엇을 물어야 하는가(2026-11-02, 조각 5). 재는 것: 남은 것이
+# 없으면 안 묻는가 · 🔴 남은 것이 있으면 묻고 확인 문구에 **수가 적히는가**(「정말요?」만
+# 묻는 창은 아무것도 안 알려 준다) · 건너뜀은 **끝난 것**으로 세는가 · 차단됨 수를 따로
+# 적는가 · 🔴 그 수가 「전체 단계 보기 (N)」의 N 과 같은가(두 자리가 다른 잣대로 세면
+# 화면에는 17, 창에는 15 가 뜬다). 서버가 정말 거절하는지는 db 목록의
+# procedure-case-execution.integration.test.ts 가 잰다.
+src/lib/domain/procedure-execution-lifecycle.test.ts
+# 🔵 작업 기록을 **어느 절차 항목에 붙이는가**(2026-11-02, 조각 5). 재는 것: 기본값이
+# 「지금 할 일」인가(전에는 늘 「연결 안 함」이라 대부분 안 이어졌다) · 🔴 담는 조건이
+# 넓어졌는가 — [시작] 없이 바로 **완료한** 노드와 **대기**인 지금 할 일은 전에 둘 다
+# 영영 안 나타났다 · 목록에 없는 id 를 기본값으로 쓰지 않는가(빈 값이 사람이 고른 것처럼
+# 서버로 간다) · 차례를 다시 매기지 않는가.
+src/lib/domain/procedure-execution-work-record-link.test.ts
 src/lib/domain/product-relation.test.ts
 src/lib/auth/inventory-authorization.test.ts
 # 🔵 2026-10-28(조각 13-D): `src/lib/domain/inventory-types.test.ts` 를 뺐다 — 재던

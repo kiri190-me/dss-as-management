@@ -4,14 +4,16 @@ import CurrentTaskCard from "./CurrentTaskCard";
 import ExecutionFlowStrip from "./ExecutionFlowStrip";
 import ExecutionFoldSection from "./ExecutionFoldSection";
 import ExecutionExtraTaskForm from "./ExecutionExtraTaskForm";
+import ExecutionLifecycleActions from "./ExecutionLifecycleActions";
 import ExecutionHistoryTimeline from "./ExecutionHistoryTimeline";
 import RelatedRepairHistoryPanel from "./RelatedRepairHistoryPanel";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import { computeExecutionPosition, formatExecutionPositionLabel } from "@/lib/domain/procedure-execution-order";
-import { pickCurrentTask } from "@/lib/domain/procedure-execution-focus";
+import { pickCurrentTask, type NoCurrentTaskReason } from "@/lib/domain/procedure-execution-focus";
 import { buildProcedureExecutionMinimap } from "@/lib/domain/procedure-execution-minimap";
-import { buildExecutionListFold } from "@/lib/domain/procedure-execution-list-fold";
+import { buildExecutionHistoryFold, buildExecutionListFold } from "@/lib/domain/procedure-execution-list-fold";
+import { assessExecutionFinish } from "@/lib/domain/procedure-execution-lifecycle";
 import type {
   ExecutableTemplateOption,
   ExecutionDetail,
@@ -119,8 +121,13 @@ function NodeSection({
  * 🔴 까닭을 갈라 적는다. 「다 끝났습니다」와 「남은 것이 전부 차단돼
  * 있습니다」는 사람이 해야 할 다음 행동이 정반대다 — 전자는 아무것도 안 해도
  * 되고, 후자는 차단을 풀어야 절차가 다시 흐른다.
+ *
+ * 🔴 마친 실행(EXECUTION_FINISHED)은 **이 카드 자체가 안 선다** — 그래서 prop
+ * 타입에서 아예 뺐다. 타입으로 빼 두면 「마쳤습니다」 자리에 또 다른 안내를
+ * 덧붙이려는 시도를 컴파일러가 막는다. 그 자리의 말은 위 ExecutionLifecycleActions
+ * 의 「절차를 마쳤습니다」 하나다.
  */
-function NoCurrentTaskCard({ reason }: { reason: "NO_NODES" | "ALL_FINISHED" | "ALL_BLOCKED" }) {
+function NoCurrentTaskCard({ reason }: { reason: Exclude<NoCurrentTaskReason, "EXECUTION_FINISHED"> }) {
   const message =
     reason === "ALL_FINISHED"
       ? "모든 작업이 끝났습니다(완료 또는 건너뜀)."
@@ -184,7 +191,12 @@ export default function ProcedureExecutionScreen({
   // Shipment-lock removal policy: role-only now — see isBlockedByCaseLock
   // (procedure-case-execution-authorization.ts), which the server
   // independently enforces regardless of this UI hint.
-  const extraTaskEligible = actorHasAllowedRole(actingUser, ORDINARY_ELIGIBLE_ROLES);
+  //
+  // 🔵 추가 작업 등록과 **실행 끝내기·그만두기**가 같은 문턱을 쓴다(2026-11-02).
+  // 서버도 셋 다 assertOrdinaryMutationAuthorized 하나로 판정한다 — 시작할 수
+  // 있는 사람이 끝내고 치울 수도 있어야, 「잘못 불러왔는데 바꿀 수가 없다」가
+  // 담당 엔지니어에게 그대로 남지 않는다.
+  const ordinaryActionEligible = actorHasAllowedRole(actingUser, ORDINARY_ELIGIBLE_ROLES);
 
   // 🔴 「지금 할 일」은 **절차 차례**로 고른다 — 추천(isSuggestedNext)으로
   // 고르지 않는다. 게시된 절차 하나가 노드 23개에 간선 8개뿐이라 거의 모든
@@ -192,7 +204,11 @@ export default function ProcedureExecutionScreen({
   //
   // 🔴 위의 pendingNodes 가 아니라 **원본 배열**을 넘긴다. pendingNodes 는
   // 추천을 앞으로 끌어올리려고 다시 정렬한 것이고, 대기만 담아 진행 중도 없다.
-  const currentTask = pickCurrentTask(executionDetail.nodes);
+  //
+  // 🔵 「마쳤는가」는 **사실 한 줄**로 뽑아 세 곳(큰 카드 · 흐름 띠 · 아래 목록)에
+  // 똑같이 넘긴다. 화면마다 completedAt 을 다시 보면 한 곳만 고치는 날이 온다.
+  const isExecutionFinished = executionDetail.completedAt !== null;
+  const currentTask = pickCurrentTask(executionDetail.nodes, { isExecutionFinished });
   const currentTaskNodeId = currentTask.kind === "NONE" ? null : currentTask.node.id;
 
   // 지금 자리 둘레 몇 걸음만 담은 작은 흐름 그림. 「그릴 수 없다」는 판정까지
@@ -206,29 +222,61 @@ export default function ProcedureExecutionScreen({
     current: currentTask.kind === "NONE" ? null : currentTask.node,
   });
 
-  // 아래 목록을 접는 규칙. 🔴 「펼친 채로 둘 때」를 여기서 if 로 적지 않는다 —
-  // 까닭이 둘이고(지금 할 일이 없다 / 차단됨이 있다) 둘 다 개발 DB 에 실제로
-  // 있는 상태라, 화면에 흩어 두면 한쪽만 고치는 날이 온다.
+  // 아래 목록을 접는 규칙. 🔴 「접힌 채로 둘지」도 「아예 안 그릴지」도 여기서
+  // if 로 적지 않는다 — 도메인 함수가 정해서 group 에 담아 준다.
   //
   // 🔴 네 구역과 **같은 배열**을 넘긴다. 위로 올라간 한 장을 걸러낸 배열을
   // 넘기면 접힌 줄의 수가 실제로 보이는 줄 수보다 한 장 모자라진다 — 그 노드는
   // 목록에서 사라지지 않고 점선 한 줄로 남아 있다(NodeSection).
-  const fold = buildExecutionListFold({
-    nodes: executionDetail.nodes,
-    hasCurrentTask: currentTask.kind !== "NONE",
-  });
+  const fold = buildExecutionListFold({ nodes: executionDetail.nodes, isExecutionFinished });
+
+  // 실행 이력도 **접힌 채로** 뜬다. 아래 목록과 같은 그릇을 쓰려고 머릿수·글자를
+  // 도메인에서 만들어 온다 — 화면이 제 모양으로 접으면 「펼치기/접기」가 두 벌이 된다.
+  const historyFold = buildExecutionHistoryFold(history.length);
+
+  // 끝내기 단추가 무엇을 물어야 하는지. 🔴 여기서 세지 않는다 — 서버가 잠근 뒤
+  // **같은 함수로 다시** 세고, 그래야 「물었는가」가 화면 밖에서도 성립한다.
+  const finish = assessExecutionFinish(executionDetail.nodes);
 
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">기술 절차</h2>
+
+      {/* 🔴 끝낸 실행에서는 불러오기 카드가 **다시 선다.** 그래야 다음 절차로
+          넘어갈 수 있다 — 이 카드가 없으면 「마쳤습니다」만 남고 화면이 다시
+          막힌다. 아직 도는 실행에서는 templateOptions 가 빈 배열이라 페이지가
+          목록을 읽지도 않는다. */}
+      {executionDetail.completedAt && (
+        <ExecutionStartCard repairCaseId={repairCaseId} actingUserRole={actingUser.role} templateOptions={templateOptions} />
+      )}
+
       <ProgressSummary detail={executionDetail} />
+
+      {/* 실행 하나를 통째로 다루는 단추 둘(끝내기 · 그만두기). 요약 **바로
+          아래**다 — 다 끝났을 때 「지금 할 일」 큰 카드가 안 서는 자리라, 그때
+          화면에서 할 일이 이 단추 하나다. */}
+      <ExecutionLifecycleActions
+        executionId={executionDetail.executionId}
+        executionVersion={executionDetail.version}
+        templateName={executionDetail.templateName}
+        completedAt={executionDetail.completedAt}
+        finish={finish}
+        eligible={ordinaryActionEligible}
+      />
 
       {/* 요약과 큰 카드 **사이**다. 위로 올리면 「몇 번째인가」와 「지금 할 일」이
           멀어지고, 아래로 내리면 큰 카드가 띠에 밀려 내려간다. */}
       <ExecutionFlowStrip minimap={minimap} />
 
+      {/* 🔴 마친 실행에서는 이 자리가 **통째로 빈다.** 「지금 할 일」도, 그것이
+          없을 때 서는 안내도 안 그린다 — 사람이 [절차 끝내기]를 눌렀으면 남은
+          작업이 있어도 마친 것이고, 그때 할 일을 띄우면 그 판단을 화면이
+          뒤집는 꼴이다. 「마쳤습니다」는 위 단추 묶음이 한 번만 말한다.
+
+          여기서 completedAt 을 다시 보지 않는다 — pickCurrentTask 가 돌려준
+          까닭을 그대로 따른다. */}
       {currentTask.kind === "NONE" ? (
-        <NoCurrentTaskCard reason={currentTask.reason} />
+        currentTask.reason === "EXECUTION_FINISHED" ? null : <NoCurrentTaskCard reason={currentTask.reason} />
       ) : (
         <CurrentTaskCard node={currentTask.node} actingUser={actingUser} />
       )}
@@ -291,14 +339,16 @@ export default function ProcedureExecutionScreen({
         </div>
       )}
 
-      <ExecutionExtraTaskForm executionId={executionDetail.executionId} eligible={extraTaskEligible} />
+      <ExecutionExtraTaskForm executionId={executionDetail.executionId} eligible={ordinaryActionEligible} />
 
-      <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">실행 이력</h2>
-        <div className="mt-2">
+      {/* 🔵 실행 이력도 **접힌 채로** 뜬다(2026-11-02). 「아까 뭘 했더라」를
+          되짚을 때만 여는 것이라 평소에는 자리만 차지했다. 아래 목록과 **같은
+          그릇**을 쓴다 — 접히는 모양이 화면에 둘 생기면 한쪽만 고치는 날이 온다. */}
+      {historyFold && (
+        <ExecutionFoldSection group={historyFold}>
           <ExecutionHistoryTimeline history={history} />
-        </div>
-      </div>
+        </ExecutionFoldSection>
+      )}
 
       <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">이전 수리 이력</h2>

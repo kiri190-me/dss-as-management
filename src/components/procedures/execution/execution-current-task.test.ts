@@ -143,7 +143,10 @@ describe("실행 화면 — 어느 하나를 세우고, 아래 목록을 어떻�
   test("🔴 「지금 할 일」은 추천이 아니라 절차 차례로 고른다", () => {
     // isSuggestedNext 는 들어오는 간선이 없으면 켜진다 — 그리다 만 절차에서는
     // 거의 전부가 추천이라 「고른 것」이 되지 않는다.
-    assert.match(flat(screen), /const currentTask = pickCurrentTask\(executionDetail\.nodes\);/);
+    // 🔵 2026-11-02(조각 5): 둘째 인자로 「마친 실행인가」가 붙었다. 재는 것은
+    // 그대로 — **원본 배열**을 넘기는가이고, 거기에 「마쳤으면 아무것도 안
+    // 고른다」가 더해졌다.
+    assert.match(flat(screen), /const currentTask = pickCurrentTask\(executionDetail\.nodes, \{ isExecutionFinished \}\);/);
     assert.ok(
       !/pickCurrentTask\(pendingNodes\)/.test(screen),
       "pendingNodes 는 추천을 앞으로 끌어올린 배열이고 진행 중이 빠져 있다"

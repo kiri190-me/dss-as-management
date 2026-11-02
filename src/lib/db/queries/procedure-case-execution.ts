@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../client";
 import {
   procedureCaseExecutions,
@@ -62,12 +62,49 @@ export async function getExecutableTemplateOptions(): Promise<ExecutableTemplate
     );
 }
 
-export async function getActiveExecutionForCase(repairCaseId: string): Promise<{ id: string; procedureTemplateId: string } | null> {
+export type ActiveExecutionSummary = {
+  id: string;
+  procedureTemplateId: string;
+  /**
+   * 끝낸 실행이면 그 시각. 아직 돌고 있으면 null.
+   *
+   * 🔴 **끝났다고 여기서 걸러내지 않는다.** 걸러내면 「절차를 마쳤습니다」를
+   * 그릴 재료가 사라져서, 다 끝낸 화면이 한 번도 실행한 적 없는 화면과 똑같이
+   * 보인다. 끝낸 뒤 화면이 무엇을 그리는지는 받는 쪽이 이 값으로 정한다.
+   */
+  completedAt: string | null;
+};
+
+/**
+ * 그만둔(is_deleted) 실행은 없는 것으로 친다 — 그래야 그만둔 뒤에 「+ 기술 절차
+ * 불러오기」가 다시 서고 다른 절차를 고를 수 있다(abandonProcedureExecution).
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 차례를 못 박는다 — 한 접수 건에 **안 치운 실행이 둘**일 수 있다
+ * ──────────────────────────────────────────────────────────────────────
+ * 「한 건에 하나」를 지키는 유니크 색인은 FULL_SERVICE 에만 걸려 있고,
+ * TECHNICAL_TASK 는 여러 건이 나란히 있어도 된다(스키마 주석). 전에는 화면이
+ * 실행이 **없을 때만** 불러오기 카드를 보여 줘서 둘째가 생길 길이 사실상
+ * 없었는데, 2026-11-02 부터 **끝낸 실행에서도 카드가 다시 선다.** 그러면
+ * 「끝낸 것 + 새로 불러온 것」 둘이 함께 남는다.
+ *
+ * 차례가 없으면 그때 DB 가 주는 대로 아무거나 하나가 뽑혀서, 새로 불러온 절차
+ * 대신 **아까 끝낸 절차가 다시 뜨는** 화면이 된다(오류가 아니라 「왜 안 바뀌지」로
+ * 나타나는 종류다). 그래서 **아직 안 끝난 것을 먼저**, 그중에서도 **나중에 시작한
+ * 것**을 고른다 — 사람이 방금 불러온 그것이다.
+ */
+export async function getActiveExecutionForCase(repairCaseId: string): Promise<ActiveExecutionSummary | null> {
   const [row] = await db
-    .select({ id: procedureCaseExecutions.id, procedureTemplateId: procedureCaseExecutions.procedureTemplateId })
+    .select({
+      id: procedureCaseExecutions.id,
+      procedureTemplateId: procedureCaseExecutions.procedureTemplateId,
+      completedAt: procedureCaseExecutions.completedAt,
+    })
     .from(procedureCaseExecutions)
-    .where(and(eq(procedureCaseExecutions.repairCaseId, repairCaseId), eq(procedureCaseExecutions.isDeleted, false)));
-  return row ?? null;
+    .where(and(eq(procedureCaseExecutions.repairCaseId, repairCaseId), eq(procedureCaseExecutions.isDeleted, false)))
+    .orderBy(sql`(${procedureCaseExecutions.completedAt} is null) desc`, desc(procedureCaseExecutions.startedAt))
+    .limit(1);
+  return row ? { ...row, completedAt: row.completedAt ? row.completedAt.toISOString() : null } : null;
 }
 
 // ---- 실행 상세 (execution detail — the primary list-based UI's data source) ----
@@ -147,6 +184,13 @@ export type ExecutionDetail = {
   templateName: string;
   startedByName: string;
   startedAt: string;
+  /** 끝낸 실행이면 그 시각(ISO). 아직 돌고 있으면 null. */
+  completedAt: string | null;
+  /**
+   * 실행 **행 자신의** 낙관적 동시성 토큰 — 노드마다 따로 있는 version 과 다른
+   * 값이다. 끝내기·그만두기가 이것을 보고 다툼을 가른다.
+   */
+  version: number;
   isCaseLocked: boolean;
   nodes: ExecutionNodeDetail[];
   referenceNodes: ExecutionReferenceNode[];
@@ -161,6 +205,8 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       procedureTemplateId: procedureCaseExecutions.procedureTemplateId,
       startedAt: procedureCaseExecutions.startedAt,
       startedBy: procedureCaseExecutions.startedBy,
+      completedAt: procedureCaseExecutions.completedAt,
+      version: procedureCaseExecutions.version,
       templateCode: procedureTemplates.code,
       templateName: procedureTemplates.name,
       isCaseLocked: repairCases.isLocked,
@@ -333,6 +379,8 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
     templateName: execution.templateName,
     startedByName: nameById.get(execution.startedBy) ?? "-",
     startedAt: execution.startedAt.toISOString(),
+    completedAt: execution.completedAt ? execution.completedAt.toISOString() : null,
+    version: execution.version,
     isCaseLocked: execution.isCaseLocked,
     nodes,
     referenceNodes,

@@ -316,6 +316,11 @@ test("A/S 건 안에 딸린 것·실행 동작은 팝업만 띄우고 머문다"
     ["src/components/repair-cases/work-records/WorkRecordForm.tsx", 1],
     ["src/components/procedures/execution/ExecutionExtraTaskForm.tsx", 1],
     ["src/components/procedures/execution/ExecutionNodeCard.tsx", 1],
+    // 🔵 2026-11-02(조각 5): 실행을 **끝내는** 단추와 **그만두는** 단추가 생겼다.
+    //    둘 다 누른 자리(작업내용 탭)에 머문다 — 끝내면 같은 화면이 「절차를
+    //    마쳤습니다」로 바뀌고, 그만두면 그 자리에 「+ 기술 절차 불러오기」가 다시
+    //    선다. 어느 쪽도 목록으로 넘어갈 일이 아니다.
+    ["src/components/procedures/execution/ExecutionLifecycleActions.tsx", 2],
     ["src/components/repair-cases/files/FilesScreen.tsx", 4],
     ["src/components/repair-cases/approval/DatabaseRepairInspectionCard.tsx", 1],
     ["src/components/repair-cases/approval/DatabaseFinalShipmentCard.tsx", 1],

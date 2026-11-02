@@ -18,6 +18,11 @@ import {
   getRelatedRepairHistory,
 } from "@/lib/db/queries/procedure-case-execution";
 import { getWorkRecordCaseContext } from "@/lib/db/queries/repair-case-work-records";
+import { pickCurrentTaskNode } from "@/lib/domain/procedure-execution-focus";
+import {
+  buildWorkRecordProcedureLink,
+  type WorkRecordProcedureLink,
+} from "@/lib/domain/procedure-execution-work-record-link";
 import { workRecordRequiresOwnAssignment } from "@/lib/auth/repair-case-work-record-authorization";
 import { actorMay } from "@/lib/auth/developer-promotion";
 import { hasPermission } from "@/lib/auth/permission-resolver";
@@ -86,7 +91,9 @@ export default async function RepairCaseExecutionPage({
   const isCaseLocked = workRecordCaseContext?.isLocked ?? true;
 
   let procedureScreen: React.ReactNode;
-  let inProgressNodes: { id: string; title: string }[] = [];
+  // 작업 기록을 붙일 절차 항목들과, 처음 골라져 있을 것. 빈 실행에서는 둘 다
+  // 비어 있고, 그때 폼은 드롭다운 자체를 안 그린다.
+  let procedureLink: WorkRecordProcedureLink = { options: [], defaultNodeId: null };
   if (!activeExecution) {
     const templateOptions = await getExecutableTemplateOptions();
     procedureScreen = (
@@ -101,27 +108,44 @@ export default async function RepairCaseExecutionPage({
       />
     );
   } else {
-    const [executionDetail, history, relatedHistory] = await Promise.all([
+    // 🔵 끝낸 실행에서는 **불러올 수 있는 절차 목록도 함께** 읽는다 — 끝낸 뒤
+    // 화면에 「+ 기술 절차 불러오기」가 다시 서기 때문이다. 아직 도는 실행에서는
+    // 그 카드가 안 서므로 목록을 읽지 않는다(쓰지도 않을 조회를 매번 하지 않게).
+    const [executionDetail, history, relatedHistory, templateOptions] = await Promise.all([
       getExecutionDetail(activeExecution.id),
       getExecutionHistory(activeExecution.id),
       resolved.productId
         ? getRelatedRepairHistory(resolved.id, resolved.productId)
         : Promise.resolve({ sameProduct: [], sameModelReference: [] }),
+      activeExecution.completedAt ? getExecutableTemplateOptions() : Promise.resolve([]),
     ]);
     procedureScreen = (
       <ProcedureExecutionScreen
         repairCaseId={resolved.id}
         actingUser={actingUser}
         activeExecution={activeExecution}
-        templateOptions={[]}
+        templateOptions={templateOptions}
         executionDetail={executionDetail}
         history={history}
         relatedHistory={relatedHistory}
       />
     );
-    inProgressNodes = executionDetail
-      ? executionDetail.nodes.filter((n) => n.status === "IN_PROGRESS").map((n) => ({ id: n.id, title: n.title }))
-      : [];
+    // 🔴 「지금 할 일」을 여기서 다시 고르지 않는다 — 실행 화면이 쓰는 것과
+    // **같은 함수**(pickCurrentTaskNode)로, **같은 인자**로 고른다. 두 벌로
+    // 두면 큰 카드에는 7번이 서 있는데 작업 기록은 8번에 붙는 날이 온다.
+    //
+    // 🔵 마친 실행에서는 고르는 것이 없다 → 기본값이 「연결 안 함」이 된다.
+    // 붙일 항목 목록 자체는 그대로 남으므로, 마친 뒤에 적는 기록도 손으로
+    // 골라 붙일 수 있다.
+    if (executionDetail) {
+      const currentTaskNode = pickCurrentTaskNode(executionDetail.nodes, {
+        isExecutionFinished: executionDetail.completedAt !== null,
+      });
+      procedureLink = buildWorkRecordProcedureLink({
+        nodes: executionDetail.nodes,
+        currentTaskNodeId: currentTaskNode?.id ?? null,
+      });
+    }
   }
 
   const isAssignedToCase = resolved.assignedEngineerId === actingUser.id;
@@ -188,7 +212,8 @@ export default async function RepairCaseExecutionPage({
         repairCaseId={resolved.id}
         currentStepLabel={currentStep?.label ?? resolved.currentWorkflowStepKey}
         currentStepOrder={currentStep?.order ?? null}
-        inProgressNodes={inProgressNodes}
+        procedureNodeOptions={procedureLink.options}
+        defaultProcedureNodeId={procedureLink.defaultNodeId}
         createDisabledReason={createDisabledReason}
       />
 

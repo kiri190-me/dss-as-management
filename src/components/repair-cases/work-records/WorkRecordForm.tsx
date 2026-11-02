@@ -12,13 +12,26 @@ export default function WorkRecordForm({
   repairCaseId,
   currentStepLabel,
   currentStepOrder,
-  inProgressNodes,
+  procedureNodeOptions,
+  defaultProcedureNodeId,
   disabledReason,
 }: {
   repairCaseId: string;
   currentStepLabel: string;
   currentStepOrder: number | null;
-  inProgressNodes: { id: string; title: string }[];
+  /**
+   * 붙일 수 있는 절차 항목들. 줄에 뜨는 글자까지 도메인이 만들어 온다
+   * (buildWorkRecordProcedureLink) — 번호·상태를 여기서 다시 꾸미지 않는다.
+   */
+  procedureNodeOptions: { id: string; label: string }[];
+  /**
+   * 처음 골라져 있을 것 = 「지금 할 일」 노드. null 이면 「연결 안 함」.
+   *
+   * 🔴 전에는 언제나 「연결 안 함」이 기본이라, 사람이 매번 손으로 바꿔야 이어졌고
+   * **대부분 안 이어졌다.** 절차를 밟으며 적은 기록인데 무엇을 하다 적었는지가
+   * 안 남았다.
+   */
+  defaultProcedureNodeId: string | null;
   /** Non-null when creation is currently disallowed (e.g. locked case, not the assigned engineer) — the form still renders, but input/submit are disabled and this reason is shown. Server re-checks regardless. */
   disabledReason: string | null;
 }) {
@@ -27,7 +40,7 @@ export default function WorkRecordForm({
   const uiText = useUiText();
   const [recordKind, setRecordKind] = useState<WorkRecordKind>("GENERAL");
   const [memo, setMemo] = useState("");
-  const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [selectedNodeId, setSelectedNodeId] = useState(defaultProcedureNodeId ?? "");
   const [clientRequestId, setClientRequestId] = useState(() => generateClientUuid());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -56,7 +69,11 @@ export default function WorkRecordForm({
     }
     setRecordKind("GENERAL");
     setMemo("");
-    setSelectedNodeId("");
+    // 🔴 저장한 뒤에도 기본값으로 **되돌린다** — 빈 값("연결 안 함")으로 비우면
+    // 둘째 기록부터 다시 손으로 골라야 하고, 그것이 바로 고치려던 증상이다.
+    // (router.refresh() 가 서버에서 새 「지금 할 일」을 받아 오면 이 칸은 폼이
+    // 다시 마운트될 때 그 값으로 선다.)
+    setSelectedNodeId(defaultProcedureNodeId ?? "");
     setClientRequestId(generateClientUuid());
     router.refresh();
     showSavePopup({ message: "작업 기록을 등록했습니다.", redirectTo: null });
@@ -97,10 +114,10 @@ export default function WorkRecordForm({
         className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
       />
 
-      {inProgressNodes.length > 0 && (
+      {procedureNodeOptions.length > 0 && (
         <div className="flex flex-col gap-1">
           <label htmlFor="work-record-node-select" className="text-xs text-zinc-500 dark:text-zinc-400">
-            관련 절차 항목 (선택)
+            관련 절차 항목
           </label>
           <select
             id="work-record-node-select"
@@ -109,10 +126,13 @@ export default function WorkRecordForm({
             disabled={disabled || isSubmitting}
             className="w-full max-w-sm rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
           >
+            {/* 🔴 「연결 안 함」은 **남겨 둔다** — 절차와 무관한 기록이 있다
+                (고객 통화, 입고 확인 같은 것). 없애면 그런 기록이 엉뚱한 노드에
+                붙고, 그쪽이 안 붙은 것보다 나쁘다. */}
             <option value="">연결 안 함</option>
-            {inProgressNodes.map((node) => (
-              <option key={node.id} value={node.id}>
-                {node.title}
+            {procedureNodeOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
               </option>
             ))}
           </select>

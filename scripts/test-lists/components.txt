@@ -56,6 +56,18 @@ src/components/procedures/execution/execution-flow-strip.test.tsx
 # null 을 주면 따를 뿐, 머릿수를 화면에서 다시 세지 않는다). 접을지 말지의 규칙
 # 자체는 unit 목록의 procedure-execution-list-fold.test.ts 가 본다.
 src/components/procedures/execution/execution-list-fold.test.tsx
+# 실행을 **끝내는·그만두는** 단추와 그것들이 선 화면(2026-11-02, 조각 5). 🔴 이웃
+# execution-current-task.test.ts 와 같이 **원본 글자로** 잰다 — 단추 쪽은 서버 액션을
+# 직접 import 하는 클라이언트 컴포넌트라 여기서 import 하면 던진다.
+# 재는 것: 그만두기가 🔴 **사유 창**을 거치는가(누르자마자 치우지 않는다) · 끝내기는
+# 사유를 **안** 받는가 · 🔴 남은 것이 있으면 확인을 받고 부르는가 · 서버가 「아직
+# 남았다」로 돌려보내도 삼키지 않고 다시 묻는가 · 확인 문구를 화면에서 다시 조립하지
+# 않는가 · 🔵 다 끝났을 때 단추가 눈에 띄는가 · 🔴 끝낸 뒤 「+ 기술 절차 불러오기」가
+# 다시 서는가 · 🔴 "use client" 가 안 늘었는가(주석을 걷어낸 글자로 센다) ·
+# 작업 기록 기본값이 「지금 할 일」이고 「연결 안 함」이 남아 있는가.
+# 서버 쪽 동작은 db 목록의 procedure-case-execution.integration.test.ts 39~46번,
+# 묻는 규칙 자체는 unit 목록의 procedure-execution-lifecycle.test.ts 가 본다.
+src/components/procedures/execution/execution-lifecycle-actions.test.ts
 src/components/repair-cases/files/preview-backfill.test.ts
 src/components/repair-cases/files/StoredAttachmentList.test.tsx
 src/components/repair-cases/files/AttachmentViewer.test.tsx
