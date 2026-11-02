@@ -315,7 +315,11 @@ test("A/S 건 안에 딸린 것·실행 동작은 팝업만 띄우고 머문다"
     ["src/components/repair-cases/workflow/DatabaseWorkflowControlPanel.tsx", 2],
     ["src/components/repair-cases/work-records/WorkRecordForm.tsx", 1],
     ["src/components/procedures/execution/ExecutionExtraTaskForm.tsx", 1],
-    ["src/components/procedures/execution/ExecutionNodeCard.tsx", 1],
+    // 🔵 2026-11-03(조각 12): 작업 메모 칸이 **제 파일로 갈라졌다**
+    //    (ExecutionMemoField). 쓰는 자리가 셋이 되어서다 — 「지금 할 일」 큰 카드 ·
+    //    「차단됨」의 작은 카드 · 「실행 이력」에서 끝난 작업의 마지막 줄. 팝업은
+    //    여전히 **메모 저장 하나**이고, 사는 집만 카드에서 그 칸으로 옮겼다.
+    ["src/components/procedures/execution/ExecutionMemoField.tsx", 1],
     // 🔵 2026-11-02(조각 5): 실행을 **끝내는** 단추와 **그만두는** 단추가 생겼다.
     //    둘 다 누른 자리(작업내용 탭)에 머문다 — 어느 쪽도 목록으로 넘어갈 일이
     //    아니다.

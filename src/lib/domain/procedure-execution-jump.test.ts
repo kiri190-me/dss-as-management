@@ -66,14 +66,23 @@ describe("옮길 수 있는가 — 참·거짓이 아니라 까닭", () => {
     assert.equal(classifyJumpTarget("IN_PROGRESS").ok, true);
   });
 
-  test("🔴 완료·건너뜀은 못 옮긴다 — 되살리는 길([재개(되돌림)])이 따로 있다", () => {
-    for (const status of ["COMPLETED", "SKIPPED"] as const) {
-      const result = classifyJumpTarget(status);
-      assert.equal(result.ok, false);
-      if (result.ok) return;
-      assert.equal(result.reason, "ALREADY_FINISHED");
-      assert.match(result.message, /재개\(되돌림\)/, "어디로 가야 하는지를 안 적으면 막다른 길이 된다");
-    }
+  /**
+   * 🔴 2026-11-03(조각 12)에 **완료가 열렸다**(사용자 결정 — 「[전체 단계 보기]에서는
+   * [완료]로 되어 있어도 선택할 수 있도록 해줘」). 시험을 지우지 않고 **갈라서**
+   * 고친다 — 완료는 열렸다는 것을, 건너뜀은 여전히 막혀 있다는 것을 각각 잰다.
+   * 지우면 완료가 슬그머니 다시 막혀도 아무 데서도 안 걸린다.
+   */
+  test("🔴 **완료는 옮길 수 있다** — 사용자 결정(조각 12)", () => {
+    assert.equal(classifyJumpTarget("COMPLETED").ok, true, "완료가 막히면 되돌아갈 길이 「딴 노드를 골라 그 바람에」뿐이 된다");
+  });
+
+  test("🔴 건너뜀은 못 옮긴다 — 사람이 **사유를 적어** 「안 한다」고 고른 것이다", () => {
+    const result = classifyJumpTarget("SKIPPED");
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.equal(result.reason, "SKIPPED");
+    assert.match(result.message, /재개\(되돌림\)/, "어디로 가야 하는지를 안 적으면 막다른 길이 된다");
+    assert.match(result.message, /사유/, "사유 없이 되돌리면 사람의 판단이 말없이 지워진다");
   });
 
   test("🔴 차단됨도 못 옮긴다 — 사유 없이 푸는 길을 내지 않는다", () => {
@@ -92,7 +101,7 @@ describe("옮길 수 있는가 — 참·거짓이 아니라 까닭", () => {
   });
 
   test("까닭 셋의 글이 서로 다르다 — 사람이 할 다음 행동이 다르다", () => {
-    const messages = (["COMPLETED", "BLOCKED", null] as const).map((status) => {
+    const messages = (["SKIPPED", "BLOCKED", null] as const).map((status) => {
       const result = classifyJumpTarget(status);
       return result.ok ? "" : result.message;
     });
@@ -111,7 +120,8 @@ describe("옮기면 무엇이 바뀌는가", () => {
     const plan = planNodeJump({ nodes, targetExecutionNodeId: "e4" });
     assert.equal(plan.kind, "MOVE");
     if (plan.kind !== "MOVE") return;
-    assert.equal(plan.targetWasInProgress, false);
+    assert.equal(plan.targetBeforeStatus, "PENDING");
+    assert.equal(plan.targetResetsTrail, false, "대기였던 줄에는 비울 자취가 없다");
     assert.deepEqual(plan.standDownExecutionNodeIds, ["e2"]);
   });
 
@@ -144,17 +154,18 @@ describe("옮기면 무엇이 바뀌는가", () => {
     const plan = planNodeJump({ nodes, targetExecutionNodeId: "e2" });
     assert.equal(plan.kind, "MOVE");
     if (plan.kind !== "MOVE") return;
-    assert.equal(plan.targetWasInProgress, true, "이력의 beforeState 가 이 값으로 적힌다");
+    assert.equal(plan.targetBeforeStatus, "IN_PROGRESS", "이력의 beforeState 가 이 값으로 적힌다");
+    assert.equal(plan.targetResetsTrail, false, "하던 줄을 비우면 하던 자리로 못 돌아온다");
     assert.deepEqual(plan.standDownExecutionNodeIds, ["e1"]);
   });
 
   test("🔴 못 옮기는 줄과 없는 줄은 거절한다 — 그 까닭 그대로", () => {
     const nodes: JumpPlanNode[] = [
-      { id: "e1", status: "COMPLETED" },
+      { id: "e1", status: "SKIPPED" },
       { id: "e2", status: "BLOCKED" },
     ];
     for (const [id, reason] of [
-      ["e1", "ALREADY_FINISHED"],
+      ["e1", "SKIPPED"],
       ["e2", "BLOCKED"],
       ["없는줄", "NOT_IN_EXECUTION"],
     ] as const) {
@@ -164,6 +175,94 @@ describe("옮기면 무엇이 바뀌는가", () => {
       assert.equal(plan.reason, reason);
       assert.ok(plan.message.length > 0, "까닭만 있고 할 말이 없으면 화면이 아무것도 못 적는다");
     }
+  });
+});
+
+/**
+ * 🔴 **완료된 작업으로도 옮길 수 있다**(2026-11-03, 조각 12 — 사용자 결정:
+ * 「[전체 단계 보기]에서는 [완료]로 되어 있어도 선택할 수 있도록 해줘」).
+ *
+ * 🔴 여기서 가장 중요한 단언은 **고른 줄이 비워진다**는 것이다. 안 비우면 「완료:
+ * 아무개 / 시각」이 붙은 채로 진행 중이 되어, 같은 카드가 서로 어긋난 말을 한다 —
+ * 조각 11 이 경로 밖의 완료에 이미 정한 규칙(「새로 밟는 것처럼」)과 같은 잣대다.
+ */
+describe("🔴 완료로 옮기기 — 고른 줄은 새로 밟는 것처럼 비워진다", () => {
+  const nodes: JumpPlanNode[] = [
+    { id: "e1", status: "COMPLETED" },
+    { id: "e2", status: "COMPLETED" },
+    { id: "e3", status: "IN_PROGRESS" },
+  ];
+
+  test("🔵 먼저 — 표본의 고른 줄이 **정말 완료**다(아니면 아래가 다른 것을 잰다)", () => {
+    assert.equal(nodes.find((n) => n.id === "e2")?.status, "COMPLETED");
+    assert.equal(classifyJumpTarget("COMPLETED").ok, true);
+  });
+
+  test("고른 줄이 진행 중이 되고 **비우기가 켜진다**", () => {
+    const plan = planNodeJump({ nodes, targetExecutionNodeId: "e2", path: { found: true, executionNodeIds: ["e1"] } });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.equal(plan.targetBeforeStatus, "COMPLETED", "이력의 beforeState 가 이 값으로 적힌다");
+    assert.equal(plan.targetResetsTrail, true, "안 비우면 완료 기록이 붙은 채로 진행 중이 된다");
+  });
+
+  test("🔴 고른 줄은 **되돌림 목록에도 완료 목록에도 안 들어간다** — 한 줄을 두 번 건드리면 version 이 어긋난다", () => {
+    const plan = planNodeJump({ nodes, targetExecutionNodeId: "e2", path: { found: true, executionNodeIds: ["e1", "e2"] } });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.ok(!plan.reopenOffPathExecutionNodeIds.includes("e2"));
+    assert.ok(!plan.completeOnPathExecutionNodeIds.includes("e2"));
+    assert.deepEqual(plan.completeOnPathExecutionNodeIds, [], "길 위의 e1 은 이미 완료라 다시 안 쓴다");
+    assert.deepEqual(plan.standDownExecutionNodeIds, ["e3"], "경로 밖의 하던 줄은 전처럼 대기로 내려간다");
+  });
+
+  test("🔴 **길 밖의 다른 완료**는 전처럼 되돌아간다 — 고른 줄만 예외다", () => {
+    const plan = planNodeJump({
+      nodes: [
+        { id: "e1", status: "COMPLETED" },
+        { id: "밖", status: "COMPLETED" },
+      ],
+      targetExecutionNodeId: "e1",
+      path: { found: true, executionNodeIds: [] },
+    });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    assert.deepEqual(plan.reopenOffPathExecutionNodeIds, ["밖"]);
+  });
+
+  test("🔴 **건너뜀·차단됨은 여전히 거절**이다 — 열린 것은 완료 하나뿐이다", () => {
+    const guarded: JumpPlanNode[] = [
+      { id: "건너뜀", status: "SKIPPED" },
+      { id: "차단됨", status: "BLOCKED" },
+    ];
+    for (const [id, reason] of [
+      ["건너뜀", "SKIPPED"],
+      ["차단됨", "BLOCKED"],
+    ] as const) {
+      const plan = planNodeJump({ nodes: guarded, targetExecutionNodeId: id });
+      assert.equal(plan.kind, "REJECTED", `${id} 이 통과했다 — 사유를 적어 정한 것을 사유 없이 뒤집게 된다`);
+      if (plan.kind !== "REJECTED") return;
+      assert.equal(plan.reason, reason);
+    }
+  });
+
+  test("🔴 그리고 **정말로 옮겨진다** — 계획을 적용하면 「지금 할 일」이 그 줄이다", () => {
+    const before = [node(1, "COMPLETED"), node(2, "COMPLETED"), node(3, "IN_PROGRESS")];
+    const nowAt = pickCurrentTask(before, { isExecutionFinished: false });
+    assert.equal(nowAt.kind === "NONE" ? null : nowAt.node.id, "e3", "표본 확인 — 지금은 3번이 서 있다");
+    const plan = planNodeJump({ nodes: before, targetExecutionNodeId: "e2" });
+    assert.equal(plan.kind, "MOVE");
+    if (plan.kind !== "MOVE") return;
+    const standDown = new Set(plan.standDownExecutionNodeIds);
+    const after = before.map((n) =>
+      n.id === "e2"
+        ? { ...n, status: "IN_PROGRESS" as const }
+        : standDown.has(n.id)
+          ? { ...n, status: "PENDING" as const }
+          : n
+    );
+    const picked = pickCurrentTask(after, { isExecutionFinished: false });
+    assert.equal(picked.kind === "NONE" ? null : picked.node.id, "e2", "완료였던 줄로 옮겼는데 지금 할 일이 안 따라왔다");
   });
 });
 

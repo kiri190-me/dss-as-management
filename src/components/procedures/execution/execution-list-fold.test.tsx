@@ -303,10 +303,17 @@ describe("실행 화면이 무엇을 접고 무엇을 안 접는가", () => {
     //    있는가」가 곧 「차단됨이 하나 이상 있고 이 실행은 아직 도는 중인가」다.
     assert.match(source, /\{fold\.remaining\?\.note && \(/);
     assert.match(source, /\{historyFold && \( <ExecutionFoldSection group=\{historyFold\.fold\}>/);
-    assert.match(source, /\{historyFold\.showsTrail && \( <NodeSection title="완료 \/ 건너뜀"/);
+    // 🔵 2026-11-03(조각 12): 「끝난 카드 구역을 그리는가」(showsTrail)가 없어졌다 —
+    //    그 구역 자체가 시간순 이력 줄로 바뀌었다. 대신 **목록이 무엇을 그리는지**를
+    //    도메인이 정한다는 것을 같은 잣대로 잰다.
+    assert.ok(!source.includes("showsTrail"), "없어진 칸을 화면이 아직 보고 있다");
+    assert.match(
+      source,
+      /const historyFeed = buildExecutionHistoryFeed\(\{ history, nodes: executionDetail\.nodes \}\);/
+    );
     assert.ok(
       !/fold\.(remaining|count)\.count/.test(screen) &&
-        !/doneNodes\.length/.test(screen) &&
+        !/doneNodes/.test(screen) &&
         !/blockedNodes\.length/.test(screen) &&
         !/count > 0/.test(screen) &&
         !/count === 0/.test(screen),
@@ -320,9 +327,13 @@ describe("실행 화면이 무엇을 접고 무엇을 안 접는가", () => {
       !/buildExecutionListFold\(\{ nodes: (pendingNodes|doneNodes|blockedNodes)/.test(source),
       "걸러낸 배열을 넘기면 접힌 줄의 수가 실제 줄 수와 어긋난다"
     );
+    // 🔴 2026-11-03(조각 12): 「실행 이력」의 괄호 안은 **목록이 그리는 줄 수**다
+    //    (feed.totalCount) — 조회가 돌려준 history.length 와 다를 수 있다. 끝났는데
+    //    이력 줄이 없는 작업에는 목록이 줄을 만들어 넣기 때문이다. 눈에 보이는 줄과
+    //    괄호 안 수가 어긋나면, 줄을 세어 본 사람이 자기 눈과 다른 수를 보게 된다.
     assert.match(
       source,
-      /buildExecutionHistoryFold\(\{ historyCount: history\.length, nodes: executionDetail\.nodes \}\)/,
+      /buildExecutionHistoryFold\(\{ historyCount: historyFeed\.totalCount, nodes: executionDetail\.nodes \}\)/,
       "덧말의 완료·건너뜀도 화면 구역과 같은 배열에서 나와야 한다"
     );
   });
@@ -338,15 +349,36 @@ describe("실행 화면이 무엇을 접고 무엇을 안 접는가", () => {
     assert.ok(sectionTag.includes("nodes={blockedNodes}"), "차단됨 구역이 다른 배열을 그리고 있다");
   });
 
-  test("🔴 끝난 구역과 시각 기록이 **한 묶음 안**에 있다 — 「지나온 길」 묶음은 없다", () => {
+  /**
+   * 🔴 2026-11-03(조각 12) — **묶음 안이 하나가 됐다.** 전에는 끝난 노드 카드
+   * 목록과 「시각 기록」 둘이 쌓여 있었는데, 사용자가 눈으로 보고 정했다:
+   * 「[실행 이력]이 시간순서대로 누적될 수 있도록 해줘. 지금은 노드 번호대로
+   * 정렬되어 있어.」 · 「[시각 기록]을 없애줘.」
+   *
+   * 단언은 지우지 않고 **반대를 재도록** 고쳤다 — 둘로 되돌아가면 여기서 걸린다.
+   */
+  test("🔴 묶음 안이 **시간순 목록 하나**다 — 「시각 기록」도 카드 구역도 없다", () => {
     const inside = source.slice(historyAt, source.indexOf("</ExecutionFoldSection>", historyAt));
-    assert.ok(inside.includes('title="완료 / 건너뜀"'), "지나온 카드가 「실행 이력」 밖에 있다");
-    assert.ok(inside.includes("<ExecutionHistoryTimeline history={history}"), "시각 기록이 같은 묶음 안에 없다");
-    assert.ok(inside.includes("시각 기록 ({history.length})"), "한 묶음에 둘이 쌓이면 어디부터가 기록인지 적어야 한다");
+    assert.ok(inside.includes("<ExecutionHistoryList"), "시간순 목록이 「실행 이력」 안에 없다");
+    assert.ok(inside.includes("feed={historyFeed}"), "목록이 도메인이 만든 줄을 안 받고 있다");
+    assert.ok(!inside.includes('title="완료 / 건너뜀"'), "노드 번호 차례의 카드 구역이 되살아났다");
+    assert.ok(!screen.includes("시각 기록"), "없앤 제목이 남아 있다");
+    assert.ok(!screen.includes("ExecutionHistoryTimeline"), "옛 부품이 되살아났다");
     assert.ok(!inside.includes('title="차단됨"'), "막힌 것이 접힌 묶음 안으로 들어가면 안 된다");
     // 🔴 묶음이 둘로 되돌아가면 여기서 걸린다.
     assert.ok(!source.includes("group={fold.done}"), "「지나온 길」 묶음이 되살아났다");
-    assert.equal((source.match(/<ExecutionHistoryTimeline/g) ?? []).length, 1, "이력이 두 자리에 그려지면 안 된다");
+    assert.equal((source.match(/<ExecutionHistoryList/g) ?? []).length, 1, "이력이 두 자리에 그려지면 안 된다");
+  });
+
+  test("🔴 끝난 작업의 **단추와 메모 칸**이 그 목록 안에 선다 — 카드가 없어졌으니 여기뿐이다", () => {
+    const inside = source.slice(historyAt, source.indexOf("</ExecutionFoldSection>", historyAt));
+    assert.ok(inside.includes("renderNodeActions={(node) =>"), "단추를 넘기는 슬롯이 없다");
+    assert.ok(inside.includes("<ExecutionMemoField"), "끝난 작업의 메모를 고칠 길이 화면에서 사라졌다");
+    assert.ok(inside.includes("<ExecutionNodeReopenButton"), "끝난 것을 되돌릴 길이 화면에서 사라졌다");
+    assert.ok(
+      inside.includes("isReopenEligible(actingUser, node.status, node.effectiveAssigneeId)"),
+      "되돌리기 문턱을 화면이 다시 적으면 두 벌이 된다"
+    );
   });
 
   test("🔴 「지금 할 일」 큰 카드와 흐름 띠는 **접지 않는다** — 설 때는 늘 보인다", () => {
@@ -360,18 +392,20 @@ describe("실행 화면이 무엇을 접고 무엇을 안 접는가", () => {
   test("🔴 실행 이력도 **같은 그릇**으로 접는다 — 접히는 모양이 둘 생기지 않았다", () => {
     assert.match(
       source,
-      /const historyFold = buildExecutionHistoryFold\(\{ historyCount: history\.length, nodes: executionDetail\.nodes \}\);/
+      /const historyFold = buildExecutionHistoryFold\(\{ historyCount: historyFeed\.totalCount, nodes: executionDetail\.nodes \}\);/
     );
     // 전에는 테두리 상자 + <h2>실행 이력</h2> 이었다. 그 모양이 남아 있으면
     // 접히는 줄과 안 접히는 상자가 한 화면에 섞인다.
     assert.ok(!/<h2[^>]*>실행 이력<\/h2>/.test(screen), "옛 제목 상자가 남아 있다");
   });
 
-  test("남은 두 구역과 작은 카드는 그대로다", () => {
+  test("남은 한 구역과 작은 카드는 그대로다", () => {
     // 🔵 2026-11-02(조각 10): 넷에서 둘로 줄었다(「실행 가능」·「진행 중」이
-    //    팝업으로 갔다). 카드 자체는 전과 같은 ExecutionNodeCard 다.
+    //    팝업으로 갔다). 🔵 2026-11-03(조각 12): 둘에서 하나가 됐다(「완료 /
+    //    건너뜀」이 시간순 이력 줄로 갔다). 카드 자체는 전과 같은
+    //    ExecutionNodeCard 다.
     const sections = source.match(/<NodeSection[\s\S]*?\/>/g) ?? [];
-    assert.equal(sections.length, 2, "차단됨·완료/건너뜀 둘이어야 한다");
+    assert.equal(sections.length, 1, "남은 카드 구역은 「차단됨」 하나다");
     for (const section of sections) {
       assert.match(section, /currentTaskNodeId=\{currentTaskNodeId\}/);
     }

@@ -41,16 +41,21 @@
  * 받아 **무엇을 건드리고 무엇을 그냥 두는지**만 정한다(아래 planNodeJump).
  *
  * ──────────────────────────────────────────────────────────────────────
- * 🔴 완료 · 건너뜀 · 차단됨으로는 **못 옮긴다**
+ * 🔴 **완료로는 옮길 수 있다**(2026-11-03, 조각 12) · 건너뜀 · 차단됨은 여전히 못 간다
  * ──────────────────────────────────────────────────────────────────────
- * 셋 다 되살리는 길이 이미 따로 있고 — [재개(되돌림)] — 그 길이 요구하는 것을 이
- * 길이 건너뛰게 되기 때문이다:
+ * 조각 10 은 셋 다 막았다. 그 가운데 **완료만** 사용자 결정으로 열렸다 —
+ * 「[전체 단계 보기]에서는 [완료]로 되어 있어도 선택할 수 있도록 해줘.」
  *
- *  - 완료 · 건너뜀을 되살리는 것은 **관리 수준(MANAGE)** 이다(reopenExecutionNode).
- *    옮기기를 허용하면 WRITE 만 가진 담당 엔지니어가 팝업에서 완료를 되돌릴 수
- *    있게 된다 — 화면 하나가 권한 한 칸을 조용히 넓히는 꼴이다.
- *  - 차단됨은 사람이 **사유를 적어** 막아 둔 것이다. 사유 없이 푸는 길을 내면
- *    막아 둔 뜻이 기록에서 사라진다.
+ * 막았던 까닭은 「완료를 되살리는 것은 관리 수준(MANAGE)이라, 옮기기를 허용하면
+ * WRITE 만 가진 담당 엔지니어가 팝업에서 완료를 되돌리게 된다」였다. 🔴 그 문은
+ * **조각 11 에서 이미 열렸다** — 옮기면 경로 밖의 완료가 WRITE 로 대기로
+ * 되돌아간다. 고른 줄 하나를 더 되돌리는 것이 그보다 작은 일이라, 지금 막아 두면
+ * 「되돌아가려면 **딴 노드**를 골라 그 바람에 되돌리라」는 뜻이 된다.
+ *
+ * 🔴 **둘은 그대로 막는다.** 사람이 **사유를 적어** 정한 것이기 때문이다:
+ *  - 건너뜀 … 「안 한다」고 고른 것이다. 사유 없이 되돌리면 그 판단이 말없이 지워진다.
+ *  - 차단됨 … 막아 둔 것이다. 사유 없이 푸는 길을 내면 막아 둔 뜻이 기록에서 사라진다.
+ * 둘 다 [재개(되돌림)]가 사유를 받아 푸는 길을 그대로 가지고 있다.
  *
  * 그래서 걸리게는 하되(그림에도 뜨고 검색에도 걸린다) **왜 못 옮기는지**를 함께
  * 돌려준다 — 참·거짓이 아니라 까닭을 돌려주는 이 묶음의 규약(classifyStartNode 와
@@ -96,10 +101,14 @@ export type JumpCandidateNode = {
  * 못 옮기는 까닭. 화면이 할 말도, 서버가 돌려줄 코드도 각각 다르다.
  *
  *  - NOT_IN_EXECUTION  — 이 실행의 작업이 아니다(START · 참고 문서 · 남의 절차 노드).
- *  - ALREADY_FINISHED  — 완료 또는 건너뜀.
+ *  - SKIPPED           — 사람이 사유를 적어 「안 한다」고 고른 것.
  *  - BLOCKED           — 사람이 사유를 적어 막아 둔 것.
+ *
+ * 🔴 전에는 건너뜀과 완료를 한 까닭(ALREADY_FINISHED)으로 묶었다. 조각 12 에서
+ * **완료가 열리면서** 그 이름은 거짓이 됐다 — 남은 하나가 무엇인지 이름이 그대로
+ * 말해야, 나중에 「끝난 것은 다 막힌다」로 잘못 읽고 완료를 다시 막는 일이 없다.
  */
-export type JumpRejectionReason = "NOT_IN_EXECUTION" | "ALREADY_FINISHED" | "BLOCKED";
+export type JumpRejectionReason = "NOT_IN_EXECUTION" | "SKIPPED" | "BLOCKED";
 
 export type JumpEligibility = { ok: true } | { ok: false; reason: JumpRejectionReason; message: string };
 
@@ -113,11 +122,11 @@ export function classifyJumpTarget(status: ProcedureCaseExecutionNodeStatus | nu
   if (status === null) {
     return { ok: false, reason: "NOT_IN_EXECUTION", message: "이 절차 그림의 칸 가운데 실행 항목이 없는 것입니다(시작 지점·참고 문서)." };
   }
-  if (status === "COMPLETED" || status === "SKIPPED") {
+  if (status === "SKIPPED") {
     return {
       ok: false,
-      reason: "ALREADY_FINISHED",
-      message: "이미 끝난 작업입니다. 다시 하려면 「실행 이력」에서 그 작업의 [재개(되돌림)]를 쓰세요.",
+      reason: "SKIPPED",
+      message: "건너뛴 작업입니다. 다시 하려면 「실행 이력」에서 그 작업의 [재개(되돌림)]로 사유와 함께 되살려야 합니다.",
     };
   }
   if (status === "BLOCKED") {
@@ -164,8 +173,24 @@ export type JumpPlan =
   | { kind: "NO_CHANGE" }
   | {
       kind: "MOVE";
-      /** 고른 노드가 **이미** 진행 중이었나. 이력의 beforeState 가 이것으로 적힌다. */
-      targetWasInProgress: boolean;
+      /**
+       * 고른 노드가 **옮기기 전에** 어떤 상태였나. 이력의 beforeState 가 이 값으로
+       * 적힌다 — 「이번에 처음 시작한 것」·「지금 할 일 자리만 옮긴 것」·「끝냈던
+       * 것을 다시 밟는 것」 셋이 이력에서 갈려야 한다.
+       */
+      targetBeforeStatus: ProcedureCaseExecutionNodeStatus;
+      /**
+       * 🔴 고른 줄의 **자취를 비우고 새로 밟게 하는가**(2026-11-03, 조각 12).
+       * 완료였던 줄로 옮길 때만 참이다.
+       *
+       * 까닭은 조각 11 의 사용자 결정 그대로다 — 「한번 지나갔던 노드로 다시
+       * 돌아오게 된다면 이전 기록(메모 등)은 실행 이력에 남겠지만, [지금 할
+       * 일]에서는 기존 메모가 보이는 것이 아니라 그 노드를 **새로 밟는 것처럼**
+       * 되야 해.」 경로 **밖**의 완료에 이미 적용하던 규칙인데, 사람이 직접 고른
+       * 완료라고 해서 다를 이유가 없다. 안 비우면 「완료: 아무개 / 시각」이 붙은
+       * 채로 진행 중이 되어, 화면이 서로 어긋난 말을 한다.
+       */
+      targetResetsTrail: boolean;
       /** 대기로 되돌릴 다른 진행 중 노드들(procedure_case_execution_nodes.id). */
       standDownExecutionNodeIds: string[];
       /**
@@ -283,9 +308,11 @@ export function planNodeJump(input: {
     )
     .map((n) => n.id);
 
-  const targetWasInProgress = target !== null && target.status === "IN_PROGRESS";
+  // target 은 위에서 classifyJumpTarget 을 통과했으므로 반드시 있다(없으면
+  // NOT_IN_EXECUTION 으로 이미 돌아갔다). 타입을 좁히려고 한 번 더 본다.
+  const targetBeforeStatus: ProcedureCaseExecutionNodeStatus = target?.status ?? "PENDING";
   if (
-    targetWasInProgress &&
+    targetBeforeStatus === "IN_PROGRESS" &&
     standDownExecutionNodeIds.length === 0 &&
     completeOnPathExecutionNodeIds.length === 0 &&
     reopenOffPathExecutionNodeIds.length === 0
@@ -295,7 +322,10 @@ export function planNodeJump(input: {
 
   return {
     kind: "MOVE",
-    targetWasInProgress,
+    targetBeforeStatus,
+    // 🔴 완료였던 줄만 비운다. 대기·진행 중은 **아직 지나가지 않은** 줄이라 비울
+    // 자취가 없고, 진행 중을 비우면 하던 자리로 못 돌아온다(조각 10 의 판단).
+    targetResetsTrail: targetBeforeStatus === "COMPLETED",
     standDownExecutionNodeIds,
     completeOnPathExecutionNodeIds,
     reopenOffPathExecutionNodeIds,

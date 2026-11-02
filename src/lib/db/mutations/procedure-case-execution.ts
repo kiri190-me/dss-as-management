@@ -886,7 +886,7 @@ export async function startExecutionNode(
  */
 const JUMP_REJECTION_CODES: Record<JumpRejectionReason, ExecutionMutationResultCode> = {
   NOT_IN_EXECUTION: "NOT_FOUND",
-  ALREADY_FINISHED: "INVALID_STATUS_TRANSITION",
+  SKIPPED: "INVALID_STATUS_TRANSITION",
   BLOCKED: "INVALID_STATUS_TRANSITION",
 };
 
@@ -914,9 +914,10 @@ const JUMP_REJECTION_CODES: Record<JumpRejectionReason, ExecutionMutationResultC
  *    **마친 실행은 여기서 거절한다**(ALREADY_FINISHED). 마친 실행에서 자리를
  *    옮기면 「마쳤다」는 사람의 판단을 서버가 뒤집는 꼴이다 — 다시 이으려면
  *    [절차 다시 잇기]가 따로 있다.
- *  - **옮길 수 있는 상태인가** … 완료·건너뜀·차단됨은 거절한다(까닭은 도메인
- *    머리말 — 되살리는 길이 이미 따로 있고, 그 길이 요구하는 권한과 사유를 이
- *    길이 건너뛰게 된다).
+ *  - **옮길 수 있는 상태인가** … 건너뜀·차단됨은 거절한다(사람이 **사유를 적어**
+ *    정한 것이라, 사유 없이 뒤집는 길을 내지 않는다). 🔴 **완료는 2026-11-03
+ *    (조각 12)부터 받는다** — 사용자 결정이고, 그 줄은 아래에서 **새로 밟는 것처럼**
+ *    비워진다(까닭은 도메인 머리말의 targetResetsTrail).
  *  - **시작(START) 표식인가** … 다른 변이들과 같은 관문을 그대로 쓴다.
  *
  * ──────────────────────────────────────────────────────────────────────
@@ -1087,14 +1088,25 @@ export async function jumpToExecutionNode(
       const now = new Date();
       const nextVersion = ctx.node.version + 1;
 
+      // 🔴 **완료였던 줄로 옮기면 그 줄을 새로 밟는 것처럼 비운다**(2026-11-03,
+      // 조각 12 — 사용자 결정으로 완료가 고를 수 있게 됐다). 비우는 칸은 경로
+      // 밖의 완료를 되돌릴 때와 **똑같다**(아래 reopenOffPath 의 주석) — 이번에
+      // 밟은 자취만 비우고, 그 줄이 무엇인가와 담당은 그대로 둔다.
+      //
+      // 🔵 그래서 start 기록도 **되읽지 않고 지금으로 채운다.** 비운 뒤의 줄은
+      // 「한 번도 안 선 줄」이고, 그 줄의 시작은 바로 이 옮기기다.
+      const targetSibling = siblingById.get(executionNodeId);
       await tx
         .update(procedureCaseExecutionNodes)
         .set({
           status: "IN_PROGRESS",
           // 처음 서는 줄만 채운다 — 이 모듈의 backfill 규약 그대로다. 되돌아온
           // 줄은 **처음 손댄 때**를 그대로 간직한다.
-          startedBy: ctx.node.startedBy ?? actor.id,
-          startedAt: ctx.node.startedAt ?? now,
+          startedBy: plan.targetResetsTrail ? actor.id : (ctx.node.startedBy ?? actor.id),
+          startedAt: plan.targetResetsTrail ? now : (ctx.node.startedAt ?? now),
+          ...(plan.targetResetsTrail
+            ? { completedBy: null, completedAt: null, workMemo: null, lastActionReason: null, selectedOutgoingEdgeId: null }
+            : {}),
           version: nextVersion,
           updatedAt: now,
         })
@@ -1175,10 +1187,30 @@ export async function jumpToExecutionNode(
         executionId,
         executionNodeId,
         actionType: "NODE_STARTED",
-        // 🔵 고른 줄이 **이미 진행 중**이었으면 여기에 그대로 적힌다 — 이력을
-        // 읽는 사람이 「이번에 시작한 것」과 「지금 할 일 자리만 옮긴 것」을
-        // 가릴 수 있어야 한다.
-        beforeState: { status: plan.targetWasInProgress ? "IN_PROGRESS" : "PENDING" },
+        // 🔵 고른 줄이 **옮기기 전에 어땠는지**가 그대로 적힌다 — 이력을 읽는
+        // 사람이 「이번에 시작한 것」·「지금 할 일 자리만 옮긴 것」·「끝냈던 것을
+        // 다시 밟는 것」을 가릴 수 있어야 한다.
+        //
+        // 🔴 비운 줄은 **비우기 전 값을 통째로** 같은 자리에 옮겨 적는다(아래
+        // 되돌린 줄과 같은 모양 · 같은 표시). 칸을 그냥 비우면 사람이 쓴 메모가
+        // DB 어디에도 안 남는다 — 「이전 기록(메모 등)은 실행 이력에 남겠지만」이
+        // 가리키는 자리가 여기다. 표시가 같아야 이력 화면이 한 규칙으로 그린다
+        // (readJumpResetWorkMemo).
+        beforeState: {
+          status: plan.targetBeforeStatus,
+          ...(plan.targetResetsTrail && targetSibling
+            ? {
+                clearedOnJump: true,
+                workMemo: targetSibling.workMemo,
+                lastActionReason: targetSibling.lastActionReason,
+                startedBy: targetSibling.startedBy,
+                startedAt: targetSibling.startedAt ? targetSibling.startedAt.toISOString() : null,
+                completedBy: targetSibling.completedBy,
+                completedAt: targetSibling.completedAt ? targetSibling.completedAt.toISOString() : null,
+                selectedOutgoingEdgeId: targetSibling.selectedOutgoingEdgeId,
+              }
+            : {}),
+        },
         afterState: {
           jumpedTo: true,
           status: "IN_PROGRESS",

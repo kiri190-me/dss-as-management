@@ -106,12 +106,15 @@ describe("지금 할 일 큰 카드", () => {
   });
 
   test("🔴 단추는 작은 카드와 **같은 서버 액션**을 부른다 — 새 통로를 만들지 않았다", () => {
+    // 🔵 2026-11-03(조각 12): 메모 통로(updateExecutionNodeMemoAction)가 이 목록에서
+    //    빠졌다 — **칸이 제 부품으로 갈라져**(ExecutionMemoField) 두 카드가 그것을
+    //    함께 쓴다. 통로는 여전히 하나이고, 「세 자리가 같은 부품을 쓰는가」는
+    //    execution-memo-field.test.tsx 가 본다.
     for (const action of [
       "startExecutionNodeAction",
       "completeExecutionNodeAction",
       "skipExecutionNodeAction",
       "blockExecutionNodeAction",
-      "updateExecutionNodeMemoAction",
     ]) {
       assert.ok(card.includes(action), `${action} 을 써야 한다`);
       assert.ok(smallCard.includes(action), `표본 확인 — 작은 카드도 ${action} 을 쓴다`);
@@ -123,9 +126,16 @@ describe("지금 할 일 큰 카드", () => {
     );
   });
 
-  test("작업 메모 칸이 있고, 고쳤을 때만 저장 단추가 뜬다", () => {
-    assert.match(flat(card), /<textarea/);
-    assert.match(flat(card), /\{isMemoDirty && \( <button/);
+  test("작업 메모 칸이 있고, **[수정]을 눌러야** 고쳐진다", () => {
+    // 🔵 2026-11-03(조각 12 — 사용자 결정: 「[수정]버튼을 누르고서 수정할 수
+    //    있도록 해줘」). 전에는 이 카드가 제 textarea 를 늘 열어 두고 「고쳤는가」
+    //    (isMemoDirty)로 저장 단추를 띄웠다. 지금은 칸이 한 벌로 갈라져 나갔고,
+    //    평소에는 글자만 보인다. 단언을 지우지 않고 **새 자리에서** 같은 것을
+    //    재도록 옮겼다 — 칸이 이 카드에 **있는가**와 **아무 때나 안 열리는가**.
+    assert.match(flat(card), /<ExecutionMemoField/);
+    assert.ok(!/<textarea/.test(card), "카드가 제 칸을 다시 만들면 두 벌이 된다");
+    assert.ok(!/isMemoDirty/.test(card), "「고쳤는가」로 단추를 띄우던 옛 방식이 남아 있다");
+    assert.match(flat(card), /savedMemo=\{node\.workMemo\}/, "저장된 메모를 안 넘기면 칸이 빈 채로 선다");
   });
 
   test("🔴 권한 판정은 작은 카드와 **한 곳**에서 나온다", () => {
@@ -193,12 +203,15 @@ describe("실행 화면 — 어느 하나를 세우고, 아래 목록을 어떻�
     assert.match(flat(screen), /\{title\} \(\{nodes\.length\}\)/);
   });
 
-  test("남은 두 구역 모두 어느 노드가 위에 올라갔는지 전달받는다", () => {
+  test("남은 구역이 어느 노드가 위에 올라갔는지 전달받는다", () => {
     // 🔵 2026-11-02(조각 10): 넷에서 둘로 줄었다 — 「실행 가능」·「진행 중」은
-    //    「전체 단계 보기」 팝업이 맡는다. 재는 뜻은 그대로다: **그리는 구역마다**
-    //    위로 올라간 한 장을 알아야 같은 카드를 두 번 그리지 않는다.
+    //    「전체 단계 보기」 팝업이 맡는다. 🔵 2026-11-03(조각 12): 둘에서 **하나**가
+    //    됐다 — 「완료 / 건너뜀」 카드 구역이 「실행 이력」의 시간순 줄로 바뀌었다
+    //    (노드 행은 하나뿐이라 다시 밟은 기록을 적을 자리가 없었다).
+    //    재는 뜻은 그대로다: **카드를 그리는 구역**은 위로 올라간 한 장을 알아야
+    //    같은 카드를 두 번 그리지 않는다.
     const sections = flat(screen).match(/<NodeSection[\s\S]*?\/>/g) ?? [];
-    assert.equal(sections.length, 2, "차단됨·완료/건너뜀 둘이어야 한다");
+    assert.equal(sections.length, 1, "남은 카드 구역은 「차단됨」 하나다");
     for (const section of sections) {
       assert.match(section, /currentTaskNodeId=\{currentTaskNodeId\}/);
     }
@@ -213,16 +226,22 @@ describe("실행 화면 — 어느 하나를 세우고, 아래 목록을 어떻�
 
   test("남은 구역 목록과 작은 카드는 그대로다", () => {
     // 🔵 2026-11-02(조각 10): 「실행 가능」·「진행 중」이 팝업으로 옮겨 갔다.
-    //    🔴 「차단됨」은 **남는다** — 그 카드의 [재개(되돌림)]가 BLOCKED 를 푸는
-    //    유일한 길이고(팝업은 차단된 칸으로 못 옮긴다), 걷으면 막힌 절차를 다시
-    //    흐르게 할 방법이 화면 어디에도 안 남는다.
-    for (const title of ["차단됨", "완료 / 건너뜀"]) {
-      assert.ok(screen.includes(`title="${title}"`), `${title} 구역이 사라지면 안 된다`);
-    }
+    //    🔵 2026-11-03(조각 12): 「완료 / 건너뜀」이 「실행 이력」의 시간순 줄로
+    //    갔다. 그 구역을 재던 단언은 지우지 않고 **새 자리에서** 재도록 옮겼다 —
+    //    끝난 작업의 [재개(되돌림)]가 그 줄에 붙는지는 아래에서 본다.
+    //    🔴 「차단됨」은 **남는다** — 팝업은 차단된 칸으로 못 옮기므로(사유 없이
+    //    푸는 길을 안 낸다), 걷으면 막힌 절차를 다시 흐르게 할 방법이 화면
+    //    어디에도 안 남는다.
+    assert.ok(screen.includes('title="차단됨"'), "차단됨 구역이 사라지면 안 된다");
+    assert.ok(!screen.includes('title="완료 / 건너뜀"'), "노드 번호 차례의 카드 구역이 되살아났다");
     assert.match(screen, /<ExecutionNodeCard key=\{node\.id\}/, "작은 카드는 계속 쓴다");
     // 🔴 「차단됨」 카드에 [재개(되돌림)]가 실제로 붙는지는 작은 카드 쪽에서 본다 —
     //    그 단추가 BLOCKED 에 안 붙으면 위 구역이 남아도 아무 소용이 없다.
     assert.match(smallCard, /node\.status === "BLOCKED"/);
-    assert.match(smallCard, /재개\(되돌림\)/);
+    assert.match(smallCard, /<ExecutionNodeReopenButton/);
+    // 🔴 끝난 작업 쪽은 **실행 이력의 줄**에 붙는다(조각 12). 화면에서 그 단추가
+    //    통째로 사라지면 끝난 것을 되돌릴 길이 아무 데도 안 남는다.
+    assert.match(flat(screen), /<ExecutionNodeReopenButton executionNodeId=\{node\.id\}/);
+    assert.match(flat(screen), /isReopenEligible\(actingUser, node\.status, node\.effectiveAssigneeId\)/);
   });
 });

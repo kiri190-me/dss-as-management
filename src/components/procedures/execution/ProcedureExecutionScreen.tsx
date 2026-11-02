@@ -9,8 +9,11 @@ import ExecutionExtraTaskDialog from "./ExecutionExtraTaskDialog";
 import ExecutionLifecycleActions from "./ExecutionLifecycleActions";
 import ExecutionAbandonButton from "./ExecutionAbandonButton";
 import ExecutionResumeButton from "./ExecutionResumeButton";
-import ExecutionHistoryTimeline from "./ExecutionHistoryTimeline";
+import ExecutionHistoryList from "./ExecutionHistoryList";
+import ExecutionMemoField from "./ExecutionMemoField";
+import ExecutionNodeReopenButton from "./ExecutionNodeReopenButton";
 import RelatedRepairHistoryPanel from "./RelatedRepairHistoryPanel";
+import { isOrdinaryActionEligible, isReopenEligible } from "./execution-node-eligibility";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import {
@@ -22,6 +25,7 @@ import {
 import { pickCurrentTask, type NoCurrentTaskReason } from "@/lib/domain/procedure-execution-focus";
 import { buildProcedureExecutionMinimap } from "@/lib/domain/procedure-execution-minimap";
 import { buildExecutionHistoryFold, buildExecutionListFold } from "@/lib/domain/procedure-execution-list-fold";
+import { buildExecutionHistoryFeed } from "@/lib/domain/procedure-execution-history-feed";
 import { placeExecutionSummary } from "@/lib/domain/procedure-execution-summary-placement";
 import { assessExecutionFinish, type ExecutionFinishAssessment } from "@/lib/domain/procedure-execution-lifecycle";
 import { formatProcedureTemplateTitle } from "@/lib/domain/procedure-template-title";
@@ -289,7 +293,13 @@ export default function ProcedureExecutionScreen({
   // 못 옮긴다 — 사유 없이 푸는 길을 내지 않으려고 일부러 막았다), 이 구역까지
   // 걷으면 막힌 절차를 다시 흐르게 할 방법이 화면 어디에도 안 남는다. 바로
   // 아래 NoCurrentTaskCard 의 ALL_BLOCKED 안내가 가리키는 자리도 여기다.
-  const doneNodes = executionDetail.nodes.filter((n) => n.status === "COMPLETED" || n.status === "SKIPPED");
+  //
+  // 🔴 **「완료 / 건너뜀」 구역도 없어졌다**(2026-11-03, 조각 12). 그 자리는 이제
+  // 「실행 이력」의 **시간순 줄**이다(사용자 결정 — 「[실행 이력]이 시간순서대로
+  // 누적될 수 있도록 … 이미 [완료]했던 노드에 다시 돌아오더라도 [실행 이력]이
+  // 남을 수 있도록」). 노드 행은 하나뿐이라 다시 밟은 기록을 적을 자리가 없었다.
+  // 그 카드가 가지고 있던 것(작업 메모 · 최근 사유 · 사람과 시각 · [재개(되돌림)])은
+  // 그 작업의 **가장 최근 이력 줄**로 옮겨 갔다(buildExecutionHistoryFeed).
   const blockedNodes = executionDetail.nodes.filter((n) => n.status === "BLOCKED");
 
   // Shipment-lock removal policy: role-only now — see isBlockedByCaseLock
@@ -349,13 +359,20 @@ export default function ProcedureExecutionScreen({
   // 사라지지 않고 점선 한 줄로 남아 있다(NodeSection).
   const fold = buildExecutionListFold({ nodes: executionDetail.nodes, isExecutionFinished });
 
-  // 「실행 이력」 묶음 — **「지나온 길」을 품은** 한 덩이다(2026-11-02 사용자 결정,
-  // 조각 8: 「[실행 이력]에 [지나온 길]의 내용을 넣자」). 둘이 같은 일을 각자
-  // 적고 있었다 — 카드 쪽은 작업 메모와 사유를, 이력 쪽은 누가 언제를.
+  // 「실행 이력」에 그릴 **시간순 목록**(2026-11-03, 조각 12). 줄 차례도, 어느 줄에
+  // 무엇을 적을지도, 끝난 작업의 단추가 **어느 줄에 붙는지**도 전부 도메인이
+  // 정한다 — 화면이 다시 고르면 단추가 두 줄에 뜨거나 한 줄도 안 뜬다.
   //
-  // 🔴 접힌 채로 뜨고, 머릿수·덧말·「끝난 카드를 그릴지」까지 전부 도메인이
-  // 정한다. 아래 목록과 같은 그릇을 쓰므로 「펼치기/접기」가 두 벌이 되지 않는다.
-  const historyFold = buildExecutionHistoryFold({ historyCount: history.length, nodes: executionDetail.nodes });
+  // 🔴 **같은 배열**(executionDetail.nodes)을 넘긴다. 걸러서 주면 줄에 적을
+  // 번호·제목을 못 찾고, 끝난 작업의 단추가 사라진다.
+  const historyFeed = buildExecutionHistoryFeed({ history, nodes: executionDetail.nodes });
+
+  // 「실행 이력」 묶음 — 접힌 채로 뜨고, 머릿수와 덧말을 도메인이 정한다.
+  //
+  // 🔴 괄호 안 수는 **화면이 그 묶음에 담는 줄 수**다 — 그래서 조회가 돌려준
+  // history.length 가 아니라 목록이 실제로 그리는 feed.totalCount 를 넘긴다
+  // (끝났는데 이력 줄이 없는 작업에는 줄을 만들어 넣기 때문에 둘이 다를 수 있다).
+  const historyFold = buildExecutionHistoryFold({ historyCount: historyFeed.totalCount, nodes: executionDetail.nodes });
 
   // 끝내기 단추가 무엇을 물어야 하는지. 🔴 여기서 세지 않는다 — 서버가 잠근 뒤
   // **같은 함수로 다시** 세고, 그래야 「물었는가」가 화면 밖에서도 성립한다.
@@ -459,37 +476,45 @@ export default function ProcedureExecutionScreen({
           />
         </div>
       )}
-      {/* 🔵 「지나온 길」 묶음이 있던 자리다. 그 안의 카드는 그대로 두고 **담는
-          그릇만** 아래 「실행 이력」과 합쳤다(2026-11-02 사용자 결정, 조각 8) —
-          끝난 노드 카드(작업 메모 · 건너뛴 사유)와 그 일들의 시각 기록은 같은
-          일을 두 각도에서 적은 것이라 한 묶음에 있는 편이 맞다.
+      {/* 🔴 「실행 이력」 — 묶음 **안이 하나**가 됐다(2026-11-03, 조각 12). 전에는
+          끝난 노드 카드 목록과 「시각 기록」 둘이 쌓여 있었는데, 사용자가 눈으로
+          보고 정했다 — 「[실행 이력]이 시간순서대로 누적될 수 있도록 해줘. 지금은
+          노드 번호대로 정렬되어 있어.」 · 「[시각 기록]을 없애줘.」
 
-          🔴 두 구역 다 **버리는 것 없이** 통째로 들어온다. 윗구역은 전과 같은
-          NodeSection 이고(같은 제목·같은 카드), 아랫구역은 전과 같은
-          ExecutionHistoryTimeline 이다. */}
+          🔴 **버린 것은 하나도 없다.** 카드가 가지고 있던 넷은 그 작업의 가장
+          최근 줄에 그대로 선다 — 아래 renderNodeActions 가 그 자리다.
+
+          🔵 단추와 메모 칸을 **슬롯으로** 넘기는 까닭은 목록을 그려서 재는 시험
+          때문이다 — 둘 다 서버 액션을 직접 부르는 부품이라 목록이 그것을 물면
+          import 에서 바로 던진다(「이 건의 다른 절차」와 같은 수법). */}
       {historyFold && (
         <ExecutionFoldSection group={historyFold.fold}>
-          {/* 끝낸 카드가 한 장도 없으면 이 구역을 아예 안 그린다 — 「(0)」과
-              「…없습니다」 한 줄이 접힌 묶음 안에 남지 않게. 그 판정도 도메인이
-              한다(historyFold.showsTrail) — 화면이 머릿수를 다시 세지 않는다. */}
-          {historyFold.showsTrail && (
-            <NodeSection
-              title="완료 / 건너뜀"
-              nodes={doneNodes}
-              actingUser={actingUser}
-              emptyMessage="완료되거나 건너뛴 작업이 없습니다."
-              currentTaskNodeId={currentTaskNodeId}
-            />
-          )}
-          <div>
-            {/* 🔵 제목을 다는 까닭 — 한 묶음 안에 종류가 다른 둘이 쌓이면 어디까지가
-                카드이고 어디부터가 기록인지 안 갈린다. 괄호 안 수는 바로 아래가
-                그리는 줄 수다(NodeSection 의 머릿수와 같은 잣대). */}
-            <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">시각 기록 ({history.length})</h3>
-            <div className="mt-2">
-              <ExecutionHistoryTimeline history={history} />
-            </div>
-          </div>
+          <ExecutionHistoryList
+            feed={historyFeed}
+            renderNodeActions={(node) => (
+              <div className="flex flex-col gap-2">
+                {/* 🔴 끝난 작업의 메모를 고치는 길이 여기 하나뿐이다 — 그 카드가
+                    없어졌으므로, 빼면 끝낸 뒤에는 메모를 영영 못 고친다. */}
+                <ExecutionMemoField
+                  executionNodeId={node.id}
+                  executionNodeVersion={node.version}
+                  savedMemo={node.workMemo}
+                  eligible={isOrdinaryActionEligible(actingUser, node.effectiveAssigneeId)}
+                  size="SM"
+                />
+                {/* 🔴 되돌리는 것은 **관리 수준**이다(isReopenEligible — 끝났다는
+                    판단을 뒤집는 일이라 문턱이 더 높다). 카드에서 쓰던 그 판정을
+                    그대로 쓴다 — 여기서 역할을 다시 비교하면 두 벌이 된다. */}
+                {isReopenEligible(actingUser, node.status, node.effectiveAssigneeId) && (
+                  <ExecutionNodeReopenButton
+                    executionNodeId={node.id}
+                    executionNodeVersion={node.version}
+                    nodeTitle={node.title}
+                  />
+                )}
+              </div>
+            )}
+          />
         </ExecutionFoldSection>
       )}
 

@@ -2,23 +2,22 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { showSavePopup } from "@/components/common/SavePopup";
 import ReasonPromptDialog from "./ReasonPromptDialog";
 import DecisionCompleteDialog from "./DecisionCompleteDialog";
+import ExecutionMemoField from "./ExecutionMemoField";
+import ExecutionNodeReopenButton from "./ExecutionNodeReopenButton";
 import {
   startExecutionNodeAction,
   completeExecutionNodeAction,
   skipExecutionNodeAction,
   blockExecutionNodeAction,
-  reopenExecutionNodeAction,
-  updateExecutionNodeMemoAction,
 } from "@/lib/server/actions/procedure-case-execution";
 import type { ExecutionNodeDetail } from "@/lib/db/queries/procedure-case-execution";
 import { procedureCaseExecutionNodeStatusLabels } from "@/lib/domain/procedure-case-execution-types";
 import { procedureNodeTypeLabels } from "@/lib/domain/procedure-template-types";
 import { isOrdinaryActionEligible, isReopenEligible } from "./execution-node-eligibility";
 
-type DialogState = "SKIP" | "BLOCK" | "REOPEN" | "DECISION_COMPLETE" | null;
+type DialogState = "SKIP" | "BLOCK" | "DECISION_COMPLETE" | null;
 
 export default function ExecutionNodeCard({
   node,
@@ -31,8 +30,6 @@ export default function ExecutionNodeCard({
   const [dialogState, setDialogState] = useState<DialogState>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [memoDraft, setMemoDraft] = useState(node.workMemo ?? "");
-  const [isMemoDirty, setIsMemoDirty] = useState(false);
 
   // Shipment-lock removal policy: eligibility is role/assignment-only now —
   // see isBlockedByCaseLock (procedure-case-execution-authorization.ts),
@@ -80,28 +77,6 @@ export default function ExecutionNodeCard({
 
   function handleBlockConfirm(reason: string) {
     void runAction(() => blockExecutionNodeAction({ executionNodeId: node.id, expectedVersion: node.version, reason }));
-  }
-
-  function handleReopenConfirm(reason: string) {
-    void runAction(() => reopenExecutionNodeAction({ executionNodeId: node.id, expectedVersion: node.version, reason }));
-  }
-
-  async function handleMemoSave() {
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    const result = await updateExecutionNodeMemoAction({
-      executionNodeId: node.id,
-      expectedVersion: node.version,
-      memo: memoDraft.trim() || null,
-    });
-    setIsSubmitting(false);
-    if (!result.ok) {
-      setErrorMessage(result.message);
-      return;
-    }
-    setIsMemoDirty(false);
-    router.refresh();
-    showSavePopup({ message: "메모를 저장했습니다.", redirectTo: null });
   }
 
   return (
@@ -184,44 +159,28 @@ export default function ExecutionNodeCard({
         </div>
       )}
 
+      {/* 🔴 단추도 메모 칸도 **한 벌을 나눠 쓴다**(2026-11-03, 조각 12). 같은 둘이
+          「실행 이력」에서 끝난 작업의 마지막 줄에도 서기 때문이다 — 두 벌로 두면
+          한쪽만 고치는 날이 오고, 타입이 같아 컴파일러는 아무 말도 안 한다. */}
       {(node.status === "COMPLETED" || node.status === "SKIPPED" || node.status === "BLOCKED") && reopenEligible && (
         <div className="mt-3">
-          <button
-            type="button"
-            onClick={() => setDialogState("REOPEN")}
-            disabled={isSubmitting}
-            className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            재개(되돌림)
-          </button>
+          <ExecutionNodeReopenButton
+            executionNodeId={node.id}
+            executionNodeVersion={node.version}
+            nodeTitle={node.title}
+          />
         </div>
       )}
 
       {ordinaryEligible && (
-        <div className="mt-3 flex flex-col gap-1">
-          <label htmlFor={`memo-${node.id}`} className="text-[11px] text-zinc-500 dark:text-zinc-400">
-            작업 메모
-          </label>
-          <textarea
-            id={`memo-${node.id}`}
-            rows={2}
-            value={memoDraft}
-            onChange={(event) => {
-              setMemoDraft(event.target.value);
-              setIsMemoDirty(true);
-            }}
-            className="w-full rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+        <div className="mt-3">
+          <ExecutionMemoField
+            executionNodeId={node.id}
+            executionNodeVersion={node.version}
+            savedMemo={node.workMemo}
+            eligible={ordinaryEligible}
+            size="SM"
           />
-          {isMemoDirty && (
-            <button
-              type="button"
-              onClick={() => void handleMemoSave()}
-              disabled={isSubmitting}
-              className="w-fit rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
-              메모 저장
-            </button>
-          )}
         </div>
       )}
 
@@ -239,14 +198,6 @@ export default function ExecutionNodeCard({
         title={`차단: ${node.title}`}
         isSubmitting={isSubmitting}
         onConfirm={handleBlockConfirm}
-        onCancel={() => setDialogState(null)}
-      />
-      <ReasonPromptDialog
-        isOpen={dialogState === "REOPEN"}
-        title={`재개(되돌림): ${node.title}`}
-        warningNote="이후 완료된 다른 작업들은 자동으로 되돌아가지 않습니다."
-        isSubmitting={isSubmitting}
-        onConfirm={handleReopenConfirm}
         onCancel={() => setDialogState(null)}
       />
       <DecisionCompleteDialog

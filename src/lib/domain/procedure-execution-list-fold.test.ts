@@ -68,7 +68,16 @@ function drawn(group: ExecutionFoldGroup | null, what: string): ExecutionFoldGro
   return group;
 }
 
-/** 위와 같은 뜻 — 「실행 이력」은 묶음 한 덩이에 `showsTrail` 이 함께 실려 온다. */
+/**
+ * 위와 같은 뜻 — 「실행 이력」 묶음 쪽.
+ *
+ * 🔵 2026-11-03(조각 12)에 이 그릇에서 `showsTrail` 이 빠졌다. 「끝난 노드 카드
+ * 구역을 그리는가」였는데 **그 구역 자체가 없어졌다**(그 자리는 이제 시간순
+ * 이력 목록이다). 그것을 재던 단언들은 지우지 않고 **새 자리에서 같은 것을
+ * 재도록** 옮겼다 — 「끝난 것이 저 안에 있다」는 이제 덧말(완료 N · 건너뜀 N)이
+ * 말하고, 그 줄이 정말 그려지는지는 procedure-execution-history-feed.test.ts 가
+ * 잰다.
+ */
 function drawnHistory(fold: ExecutionHistoryFold | null): ExecutionHistoryFold {
   if (fold === null) assert.fail("실행 이력 묶음이 null 이다 — 이 표본에서는 그려져야 한다");
   return fold;
@@ -182,8 +191,7 @@ describe("🔴 마친 실행에서는 「전체 단계 보기」를 아예 안 �
     // 🔴 이 묶음은 「마쳤는가」를 아예 안 본다 — 마쳐도 안 마쳐도 끝난 카드는 그대로
     // 담는다. 그래서 인자에 isExecutionFinished 가 없다.
     const history = drawnHistory(historyOf(11, halfDone));
-    assert.equal(history.showsTrail, true);
-    assert.deepEqual(history.fold.note, { text: "완료 8", tone: "MUTED" });
+    assert.deepEqual(history.fold.note, { text: "완료 8", tone: "MUTED" }, "끝난 것이 저 안에 있다는 말이 접힌 줄에서 사라졌다");
   });
 });
 
@@ -197,13 +205,12 @@ describe("🔴 담을 카드가 없는 묶음은 아예 안 그린다", () => {
     assert.equal(historyOf(0, []), null);
   });
 
-  test("거꾸로 — 끝낸 것이 0장이면 「실행 이력」 안의 카드 구역을 안 그린다(막 시작한 실행)", () => {
+  test("거꾸로 — 끝낸 것이 0장이면 「실행 이력」 줄에 그 덧말이 아예 안 뜬다(막 시작한 실행)", () => {
     // 같은 규칙을 두 자리에 똑같이 적용한다. 한쪽에만 두면 비대칭이 생긴다.
     const fresh = running(nodesOf({ PENDING: 22 }));
     assert.equal(drawn(fresh.remaining, "전체 단계 보기").summary, "전체 단계 보기 (22)");
 
     const history = drawnHistory(historyOf(1, nodesOf({ PENDING: 22 })));
-    assert.equal(history.showsTrail, false, "카드가 0장인데 구역을 그리면 「(0)」과 「…없습니다」가 남는다");
     assert.equal(history.fold.note, null, "「완료 0」은 읽을 가치가 없다");
     assert.equal(history.fold.summary, "실행 이력 (1)", "이력 줄은 있으므로 묶음 자체는 그려진다");
   });
@@ -285,7 +292,6 @@ describe("🔴 「실행 이력」 묶음 — 「지나온 길」을 품는다",
     // 전에 「지나온 길」의 덧말이 하던 일이다(건너뜀은 **안 한 일**이다).
     const history = drawnHistory(historyOf(9, MEASURED_RUNNING));
     assert.deepEqual(history.fold.note, { text: "완료 4 · 건너뜀 1", tone: "MUTED" });
-    assert.equal(history.showsTrail, true);
   });
 
   test("한쪽이 0 이면 그쪽은 아예 안 적는다", () => {
@@ -300,10 +306,14 @@ describe("🔴 「실행 이력」 묶음 — 「지나온 길」을 품는다",
     assert.equal(drawnHistory(historyOf(3, MEASURED_RUNNING)).fold.note?.tone, "MUTED");
   });
 
-  test("이력 줄이 한 줄도 없어도 끝난 카드가 있으면 그린다 — 카드가 통째로 사라지면 안 된다", () => {
+  test("이력 줄이 한 줄도 없어도 끝난 작업이 있으면 묶음을 그린다 — 통째로 사라지면 안 된다", () => {
+    // 🔵 실제로는 이 경우에 목록이 **줄을 만들어 넣으므로**(끝난 작업의 단추가 설
+    //    자리가 있어야 한다 — procedure-execution-history-feed.ts) 화면에서는
+    //    괄호 안이 0 으로 남지 않는다. 그래도 이 함수는 받은 수를 그대로 적어야
+    //    한다 — 세는 일은 목록의 몫이고, 여기서 또 세면 두 벌이 된다.
     const history = drawnHistory(historyOf(0, MEASURED_FINISHED));
-    assert.equal(history.showsTrail, true);
     assert.equal(history.fold.summary, "실행 이력 (0)");
+    assert.deepEqual(history.fold.note, { text: "완료 27", tone: "MUTED" });
   });
 
   test("둘 다 없으면 null — 화면이 그 자리에 아무것도 안 그린다", () => {

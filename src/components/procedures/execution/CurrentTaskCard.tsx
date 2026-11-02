@@ -2,14 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { showSavePopup } from "@/components/common/SavePopup";
 import ReasonPromptDialog from "./ReasonPromptDialog";
+import ExecutionMemoField from "./ExecutionMemoField";
 import {
   startExecutionNodeAction,
   completeExecutionNodeAction,
   skipExecutionNodeAction,
   blockExecutionNodeAction,
-  updateExecutionNodeMemoAction,
 } from "@/lib/server/actions/procedure-case-execution";
 import type { ExecutionNodeDetail } from "@/lib/db/queries/procedure-case-execution";
 import { procedureCaseExecutionNodeStatusLabels } from "@/lib/domain/procedure-case-execution-types";
@@ -51,8 +50,6 @@ export default function CurrentTaskCard({
   const [dialogState, setDialogState] = useState<"SKIP" | "BLOCK" | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [memoDraft, setMemoDraft] = useState(node.workMemo ?? "");
-  const [isMemoDirty, setIsMemoDirty] = useState(false);
 
   // 판정은 작은 카드와 한 곳에서 나온다(execution-node-eligibility.ts).
   // 서버가 같은 모양으로 다시 검사하므로 이것은 화면 편의일 뿐이다.
@@ -98,24 +95,6 @@ export default function CurrentTaskCard({
 
   function handleBlockConfirm(reason: string) {
     void runAction(() => blockExecutionNodeAction({ executionNodeId: node.id, expectedVersion: node.version, reason }));
-  }
-
-  async function handleMemoSave() {
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    const result = await updateExecutionNodeMemoAction({
-      executionNodeId: node.id,
-      expectedVersion: node.version,
-      memo: memoDraft.trim() || null,
-    });
-    setIsSubmitting(false);
-    if (!result.ok) {
-      setErrorMessage(result.message);
-      return;
-    }
-    setIsMemoDirty(false);
-    router.refresh();
-    showSavePopup({ message: "메모를 저장했습니다.", redirectTo: null });
   }
 
   return (
@@ -247,31 +226,17 @@ export default function CurrentTaskCard({
             </button>
           </div>
 
-          <div className="flex flex-col gap-1">
-            <label htmlFor={`current-task-memo-${node.id}`} className="text-xs text-zinc-500 dark:text-zinc-400">
-              작업 메모
-            </label>
-            <textarea
-              id={`current-task-memo-${node.id}`}
-              rows={3}
-              value={memoDraft}
-              onChange={(event) => {
-                setMemoDraft(event.target.value);
-                setIsMemoDirty(true);
-              }}
-              className="w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-            />
-            {isMemoDirty && (
-              <button
-                type="button"
-                onClick={() => void handleMemoSave()}
-                disabled={isSubmitting}
-                className="w-fit rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              >
-                메모 저장
-              </button>
-            )}
-          </div>
+          {/* 🔴 메모 칸은 **한 벌을 나눠 쓴다**(2026-11-03, 조각 12 —
+              ExecutionMemoField). 전에는 이 카드가 제 상태로 칸을 들고 있어서,
+              다른 노드로 옮겨도 **앞 노드에 적던 글자가 그대로 남았다**(사용자
+              지적). 그 규칙은 이제 값으로 옮겨 가 세 자리가 같은 함수를 쓴다. */}
+          <ExecutionMemoField
+            executionNodeId={node.id}
+            executionNodeVersion={node.version}
+            savedMemo={node.workMemo}
+            eligible={eligible}
+            size="MD"
+          />
         </div>
       )}
 

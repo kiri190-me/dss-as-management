@@ -2845,28 +2845,31 @@ describe("procedure-case-execution: 지금 할 일 옮기기", () => {
     }
   });
 
-  test("73. 🔴 완료 · 건너뜀 · 차단됨으로는 못 옮긴다 — 한 줄도 안 바뀐다", async () => {
+  /**
+   * 🔴 2026-11-03(조각 12)에 **완료가 이 목록에서 빠졌다** — 사용자 결정으로 고를
+   * 수 있게 됐다(「[전체 단계 보기]에서는 [완료]로 되어 있어도 선택할 수 있도록
+   * 해줘」). 시험을 지우지 않고 **갈랐다**: 여기서는 여전히 막히는 둘을 재고,
+   * 완료가 실제로 옮겨지는지는 바로 아래 83번이 잰다. 지우면 완료가 슬그머니 다시
+   * 막혀도, 건너뜀이 슬그머니 열려도 아무 데서도 안 걸린다.
+   *
+   * 🔵 **건너뜀·차단됨이 남은 까닭**은 하나다 — 둘 다 사람이 **사유를 적어** 정한
+   * 것이라, 사유 없이 뒤집는 길을 내지 않는다([재개(되돌림)]가 그 길이다).
+   */
+  test("73. 🔴 건너뜀 · 차단됨으로는 못 옮긴다 — 한 줄도 안 바뀐다", async () => {
     const { templateId, executionId } = await startExecution("jump-reject-status");
     let byCode = await loadExecutionNodesByCode(templateId, executionId);
 
-    // 셋을 실제로 만든다 — 상태 글자를 손으로 쓰지 않고 그 길로 만든다.
-    await completeExecutionNode({
-      executionNodeId: byCode.get("n2")!.id,
-      actorUserId: engineerId,
-      expectedVersion: byCode.get("n2")!.version,
-    });
-    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    // 둘을 실제로 만든다 — 상태 글자를 손으로 쓰지 않고 그 길로 만든다.
     await skipExecutionNode(byCode.get("n4")!.id, engineerId, byCode.get("n4")!.version, "이번 건에는 해당 없음");
     byCode = await loadExecutionNodesByCode(templateId, executionId);
     await blockExecutionNode(byCode.get("n5")!.id, engineerId, byCode.get("n5")!.version, "부품 입고 대기");
 
     byCode = await loadExecutionNodesByCode(templateId, executionId);
-    assert.equal(byCode.get("n2")!.status, "COMPLETED", "표본 확인");
     assert.equal(byCode.get("n4")!.status, "SKIPPED", "표본 확인");
     assert.equal(byCode.get("n5")!.status, "BLOCKED", "표본 확인");
 
     const before = await snapshotExecutionNodes(executionId);
-    for (const code of ["n2", "n4", "n5"]) {
+    for (const code of ["n4", "n5"]) {
       const node = byCode.get(code)!;
       const result = await jumpToExecutionNode(executionId, node.id, engineerId, node.version);
       assert.equal(result.ok, false, `${code} 로 옮기기가 통과했다`);
@@ -3228,6 +3231,92 @@ describe("procedure-case-execution: 지금 할 일 옮기기", () => {
     assert.equal(label, "이 길에서 3번째 / 4단계");
     assert.ok(!label?.includes("전체"));
     assert.equal(detail.nodes.length, 5, "수치 줄의 「전체」는 5 — 경로의 4와 다른 수다");
+  });
+
+  /**
+   * 🔴 **완료된 작업으로도 옮길 수 있다**(2026-11-03, 조각 12 — 사용자 결정:
+   * 「[전체 단계 보기]에서는 [완료]로 되어 있어도 선택할 수 있도록 해줘」).
+   *
+   * 🔴 여기서 가장 무서운 단언은 **비우기**다. 안 비우면 「완료: 아무개 / 시각」이
+   * 붙은 채로 진행 중이 되어 같은 카드가 서로 어긋난 말을 하고, 지난 메모가 「지금
+   * 할 일」에 그대로 뜬다 — 조각 11 이 경로 밖의 완료에 이미 정한 규칙과 같은
+   * 잣대다(「그 노드를 새로 밟는 것처럼」). 그리고 비운 값이 **이력에 남아야**
+   * 「이전 기록(메모 등)은 실행 이력에 남겠지만」이 거짓이 되지 않는다.
+   */
+  test("83. 🔴 **완료로 옮기면** 그 줄이 새로 밟는 것처럼 비워지고, 비운 값은 이력에 남는다", async () => {
+    const { templateId, executionId } = await startExecution("jump-to-completed");
+    let byCode = await loadExecutionNodesByCode(templateId, executionId);
+
+    // n2 에 메모를 적고 사유와 함께 완료한다 — 비워질 것이 실제로 있어야 한다.
+    const memo = "1차 측정 23.4V — 규격 하한";
+    const memoResult = await updateExecutionNodeMemo(byCode.get("n2")!.id, engineerId, byCode.get("n2")!.version, memo);
+    assert.equal(memoResult.ok, true, JSON.stringify(memoResult));
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    await completeExecutionNode({
+      executionNodeId: byCode.get("n2")!.id,
+      actorUserId: engineerId,
+      expectedVersion: byCode.get("n2")!.version,
+      reason: "1차 측정 완료",
+    });
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const n2Before = byCode.get("n2")!;
+    assert.equal(n2Before.status, "COMPLETED", "표본 확인 — 옮겨 갈 완료가 있어야 한다");
+    assert.equal(n2Before.workMemo, memo, "표본 확인 — 비울 메모가 있어야 한다");
+    assert.notEqual(n2Before.completedAt, null, "표본 확인");
+    assert.equal(byCode.get("n3")!.status, "IN_PROGRESS", "표본 확인 — 자동 전진이 다음을 세웠다");
+
+    // 🔴 **완료된 n2 로 되돌아간다.** 전에는 여기서 INVALID_STATUS_TRANSITION 이었다.
+    const result = await jumpToExecutionNode(executionId, n2Before.id, engineerId, n2Before.version);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const n2After = byCode.get("n2")!;
+    assert.equal(n2After.status, "IN_PROGRESS", "고른 줄이 진행 중이 안 됐다");
+    assert.equal(n2After.version, n2Before.version + 1);
+    // 🔴 **새로 밟는 것처럼** 비운다 — 경로 밖의 완료를 되돌릴 때와 같은 칸들이다.
+    assert.equal(n2After.workMemo, null, "지난 메모가 「지금 할 일」에 그대로 뜬다");
+    assert.equal(n2After.completedAt, null, "완료 기록이 붙은 채로 진행 중이 된다");
+    assert.equal(n2After.completedBy, null);
+    assert.equal(n2After.lastActionReason, null);
+    assert.equal(n2After.selectedOutgoingEdgeId, null);
+    assert.notEqual(n2After.startedAt, null, "다시 밟기 시작한 때가 없으면 언제부터 하는 일인지 모른다");
+    assert.equal(n2After.startedBy, engineerId);
+    // 🔵 **담당은 안 비운다** — 「누가 맡는가」이고, 비우면 이 줄을 건드릴 수 있는
+    //    사람이 바뀐다(78번과 같은 잣대).
+    assert.equal(n2After.assignedEngineerId, n2Before.assignedEngineerId);
+
+    // 🔵 하던 진행 중은 전처럼 대기로 내려가고, START 는 안 건드린다.
+    assert.equal(byCode.get("n3")!.status, "PENDING", "경로 밖의 하던 진행 중이 안 내려갔다");
+    assert.equal(byCode.get("n1")!.status, "COMPLETED", "START 가 대기로 내려갔다");
+    assert.equal([...byCode.values()].filter((n) => n.status === "IN_PROGRESS").length, 1, "진행 중은 하나뿐이다");
+
+    // 🔴 **「지금 할 일」이 정말로 따라온다** — 오류가 안 나는 종류라 여기서 잡는다.
+    const detail = await getExecutionDetail(executionId);
+    const current = pickCurrentTaskNode(detail!.nodes, { isExecutionFinished: false });
+    assert.equal(current?.nodeCode, "n2", "완료였던 줄로 옮겼는데 지금 할 일이 안 따라왔다");
+
+    // 🔴 **비운 값이 이력에 남는다.** 칸을 그냥 비우면 사람이 쓴 글이 DB 어디에도
+    //    안 남는다 — 그리고 화면이 꺼내 읽을 수 있어야 「남는다」가 참이 된다.
+    const history = await getExecutionHistory(executionId);
+    const jumped = history.filter(
+      (h) => h.actionType === "NODE_STARTED" && (h.afterState as { jumpedTo?: boolean } | null)?.jumpedTo === true
+    );
+    assert.equal(jumped.length, 1, "옮긴 줄이 이력에 딱 한 번 적혀야 한다");
+    const beforeState = jumped[0].beforeState as { status: string; workMemo: string | null; lastActionReason: string | null; completedBy: string | null };
+    assert.equal(beforeState.status, "COMPLETED", "옮기기 전 상태가 적혀야 「이번에 시작한 것」과 가려진다");
+    assert.equal(beforeState.workMemo, memo, "비운 메모가 이력에도 없으면 사람이 쓴 글이 통째로 사라진다");
+    assert.equal(beforeState.lastActionReason, "1차 측정 완료");
+    assert.equal(beforeState.completedBy, engineerId);
+    assert.equal(readJumpResetWorkMemo(jumped[0].beforeState), memo, "화면이 그 글자를 못 꺼내면 「이력에 남는다」가 거짓이다");
+
+    // 🔵 새 action 값이 안 생겼다 — enum 을 늘리는 것은 마이그레이션이다.
+    for (const actionType of new Set(history.map((h) => h.actionType))) {
+      assert.ok(
+        ["EXECUTION_STARTED", "NODE_ADDED", "NODE_STARTED", "NODE_COMPLETED", "NODE_SKIPPED", "NODE_BLOCKED", "NODE_REOPENED", "NODE_MEMO_UPDATED"].includes(actionType),
+        `처음 보는 action 값: ${actionType}`
+      );
+    }
   });
 });
 

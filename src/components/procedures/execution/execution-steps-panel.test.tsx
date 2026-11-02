@@ -82,6 +82,22 @@ function statusChips(html: string): string[] {
   return [...html.matchAll(/data-jump-status-chip[^>]*>([^<]*)</g)].map((m) => m[1]);
 }
 
+/**
+ * [여기로 옮기기] 단추가 흐려져 있는가.
+ *
+ * 🔴 `disabled` 를 **글자로 찾으면 안 된다** — class 에 `disabled:opacity-50` 이
+ * 늘 붙어 있어서 언제나 걸린다. **속성**으로만 센다.
+ *
+ * 🔵 2026-11-03(조각 12)에 묶음 밖으로 꺼냈다 — 「완료를 고를 수 있는가」를 재는
+ * 자리가 둘이 됐기 때문이다. 글자(「이미 끝난 작업입니다」)가 없다는 것만으로는
+ * 모자란다: 막는 글이 다른 말로 바뀌어도 그 단언은 그대로 통과한다.
+ */
+const jumpButtonTag = (html: string) => {
+  const at = html.lastIndexOf("여기로 옮기기");
+  return html.slice(html.lastIndexOf("<button", at), at);
+};
+const isJumpDisabled = (html: string) => /\sdisabled(=""|\s|>)/.test(jumpButtonTag(html));
+
 describe("🔵 먼저 — 렌더가 실제로 돌고 있다", () => {
   test("창의 속과 그림 자리가 그려진다", () => {
     const html = render();
@@ -144,10 +160,24 @@ describe("🔴 못 누를 때는 까닭이 **글자로** 적힌다", () => {
     assert.ok(html.includes("그림에서 작업을 누르거나"), "다음에 할 일을 안 적으면 「왜 안 눌리지」가 된다");
   });
 
-  test("완료된 줄을 고르면 [재개(되돌림)]를 가리킨다", () => {
+  /**
+   * 🔴 2026-11-03(조각 12)에 **완료가 열렸다**(사용자 결정 — 「[전체 단계
+   * 보기]에서는 [완료]로 되어 있어도 선택할 수 있도록 해줘」). 그래서 이 자리의
+   * 단언이 **뒤집혔다**: 완료를 고르면 까닭이 뜨는 것이 아니라 단추가 눌려야 한다.
+   * 지우지 않고 반대를 재도록 고친다 — 지우면 완료가 슬그머니 다시 막혀도 아무
+   * 데서도 안 걸린다. 건너뜀 쪽은 바로 아래에서 그대로 막혀 있는지를 잰다.
+   */
+  test("🔴 완료된 줄은 **고를 수 있다** — 단추가 눌리고 막던 글이 안 뜬다", () => {
     const html = render({ chosenId: "e1" });
     assert.ok(html.includes("MCU 기판 교환"), "고른 것이 줄에 적혀야 한다");
-    assert.ok(html.includes("이미 끝난 작업입니다"));
+    assert.ok(!html.includes("이미 끝난 작업입니다"), "완료를 막던 옛 글자가 남아 있다");
+    assert.equal(isJumpDisabled(html), false, "완료를 고르면 단추가 눌려야 한다");
+  });
+
+  test("건너뛴 줄을 고르면 **사유**와 [재개(되돌림)]를 가리킨다", () => {
+    const html = render({ chosenId: "e5" });
+    assert.ok(html.includes("외관 점검"), "고른 것이 줄에 적혀야 한다");
+    assert.ok(html.includes("건너뛴 작업입니다"));
     assert.ok(html.includes("재개(되돌림)"));
   });
 
@@ -168,16 +198,13 @@ describe("🔴 못 누를 때는 까닭이 **글자로** 적힌다", () => {
   });
 
   test("🔵 반대로 — 옮길 수 있으면 단추가 **안 흐려지고** 까닭도 안 적힌다", () => {
-    // 🔴 `disabled` 를 글자로 찾으면 안 된다 — class 에 `disabled:opacity-50` 이
-    //    늘 붙어 있어서 언제나 걸린다. **속성**으로만 센다.
-    const jumpButtonTag = (html: string) => {
-      const at = html.lastIndexOf("여기로 옮기기");
-      return html.slice(html.lastIndexOf("<button", at), at);
-    };
-    const isDisabled = (html: string) => /\sdisabled(=""|\s|>)/.test(jumpButtonTag(html));
-    assert.equal(isDisabled(render({ chosenId: "e4" })), true, "표본 확인 — 막힌 줄에서는 흐려진다");
-    assert.equal(isDisabled(render({ chosenId: "e3" })), false, "눌려야 하는데 흐려져 있으면 위 단언이 전부 공짜로 통과한다");
+    assert.equal(isJumpDisabled(render({ chosenId: "e4" })), true, "표본 확인 — 막힌 줄에서는 흐려진다");
+    assert.equal(isJumpDisabled(render({ chosenId: "e3" })), false, "눌려야 하는데 흐려져 있으면 위 단언이 전부 공짜로 통과한다");
     assert.ok(render({ chosenId: "e3" }).includes("MCU 신호 점검"), "고른 것이 줄에 적혀야 한다");
+    // 🔴 조각 12 에서 열린 자리 — **완료도 눌려야** 한다(사용자 결정).
+    assert.equal(isJumpDisabled(render({ chosenId: "e1" })), false, "완료가 막히면 되돌아갈 길이 「딴 노드를 골라 그 바람에」뿐이 된다");
+    // 🔴 그리고 **건너뜀은 여전히 흐려져야** 한다 — 사유를 적어 정한 것이다.
+    assert.equal(isJumpDisabled(render({ chosenId: "e5" })), true, "건너뜀이 열리면 사람의 판단이 사유 없이 뒤집힌다");
   });
 });
 
@@ -309,5 +336,9 @@ describe("🔴 절차 그림에 노드 상태가 붙는다 — 사슬을 글자�
     assert.match(dialog, /최단 경로 위의 앞 작업들이 완료로 바뀝니다/);
     assert.match(dialog, /다시 대기가 되고 그 작업의 메모는 지워집니다/);
     assert.match(dialog, /실행 이력/, "지워진 메모를 어디서 볼 수 있는지 안 적으면 사라진 것으로 읽힌다");
+    // 🔴 2026-11-03(조각 12): **완료도 고를 수 있다**는 것과, 그 줄도 비워진다는
+    //    것을 적는다. 안 적으면 누르는 사람은 완료 기록이 지워질 줄 모른다.
+    assert.match(dialog, /이미 완료한 작업도 고를 수 있습니다/);
+    assert.match(dialog, /그 둘로는 옮길 수 없습니다/, "건너뜀·차단됨이 여전히 막혀 있다는 말이 없다");
   });
 });
