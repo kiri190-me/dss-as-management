@@ -65,7 +65,14 @@ src/components/procedures/execution/execution-list-fold.test.tsx
 # 않는가 · 🔵 다 끝났을 때 단추가 눈에 띄는가 · 🔴 끝낸 뒤 「+ 기술 절차 불러오기」가
 # 다시 서는가 · 🔴 "use client" 가 안 늘었는가(주석을 걷어낸 글자로 센다) ·
 # 작업 기록 기본값이 「지금 할 일」이고 「연결 안 함」이 남아 있는가.
-# 서버 쪽 동작은 db 목록의 procedure-case-execution.integration.test.ts 39~46번,
+# 🔵 조각 9(2026-11-02)에 **[절차 다시 잇기]** 가 늘었다 — 마친 실행을 다시 돌게 하는
+# 단추다. 더 재는 것: 🔴 **확인 창이 없는가**(되돌릴 수 있는 일이다 — 그 자리에서 다시
+# 끝내면 그만이고, 창을 세우면 매번 두 번 누르게 된다) · 🔴 두 번 누르기를 막는가
+# (둘째 호출은 CONFLICT 로 「다른 사용자가」라는 거짓말을 한다) · 🔴 **제 까닭으로**
+# 가리는가(그만두기와 붙는 줄이 달라서, 답을 돌려 쓰면 도는 줄에 떠서 눌러도 아무 일이
+# 없다) · 차례가 잇기 → 그만두기인가(되돌릴 수 없는 쪽이 오른쪽 끝) · 🔴 누른 뒤
+# 글자가 「위에서 이어서」라고 **단정하지 않는가**(다른 실행이 돌면 큰 카드는 그쪽이다).
+# 서버 쪽 동작은 db 목록의 procedure-case-execution.integration.test.ts 39~46 · 65~70번,
 # 묻는 규칙 자체는 unit 목록의 procedure-execution-lifecycle.test.ts 가 본다.
 src/components/procedures/execution/execution-lifecycle-actions.test.ts
 # 「기술 절차 불러오기」 창 — 절차 드롭다운 · 노드 이름 검색 · 플로우차트 · 중간부터

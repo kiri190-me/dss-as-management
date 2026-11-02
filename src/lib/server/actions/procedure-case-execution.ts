@@ -5,6 +5,7 @@ import { getAuthSource } from "@/lib/config/auth-source";
 import {
   startProcedureExecution,
   finishProcedureExecution,
+  resumeProcedureExecution,
   abandonProcedureExecution,
   startExecutionNode,
   completeExecutionNode,
@@ -109,6 +110,28 @@ export async function finishProcedureExecutionAction(input: {
 
   return withErrorRedaction("finishProcedureExecutionAction", () =>
     finishProcedureExecution(input.executionId, actorCheck.userId, input.expectedVersion, input.confirmedRemaining === true)
+  );
+}
+
+/**
+ * 마친 실행을 **다시 잇는다**(2026-11-02, 조각 9) — completed_at 을 비운다.
+ *
+ * 🔵 받는 것이 **둘뿐**인 까닭: 사유를 안 받고(치우는 일이 아니라 되돌릴 수 있는
+ * 일이다), 확인 표시도 안 받는다(물어야 할 것이 없다 — 남은 작업이 있는 채로
+ * 마친 실행을 다시 돌게 하는 것이 사람이 바라는 바로 그것이다). 무엇을 거절하는지는
+ * 전부 변이가 제 트랜잭션 안에서 다시 판정한다 — 이 파일 머리말의 규약 그대로,
+ * 화면도 액션도 집행 경계가 아니다.
+ */
+export async function resumeProcedureExecutionAction(input: {
+  executionId: string;
+  expectedVersion: number;
+}): Promise<ExecutionLifecycleResult | Forbidden> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.executionId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+
+  return withErrorRedaction("resumeProcedureExecutionAction", () =>
+    resumeProcedureExecution(input.executionId, actorCheck.userId, input.expectedVersion)
   );
 }
 

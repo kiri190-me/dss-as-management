@@ -93,8 +93,9 @@ const render = (candidates: PastExecutionCandidate[]) => renderToStaticMarkup(<P
 
 /**
  * 줄마다 붙는 단추까지 함께 그린다(2026-11-02, 조각 8 보완). 실제로는 실행
- * 화면이 ExecutionAbandonButton 을 만들어 보내지만, 그것은 서버 액션을 직접
- * import 하는 클라이언트 컴포넌트라 여기서는 import 자체가 던진다
+ * 화면이 ExecutionAbandonButton 과 ExecutionResumeButton 을 만들어 보내지만,
+ * 둘 다 서버 액션을 직접 import 하는 클라이언트 컴포넌트라 여기서는 import
+ * 자체가 던진다
  * (execution-lifecycle-actions.test.ts 머리말의 같은 사정). **무엇이 오는지**가
  * 아니라 **어느 줄에 붙고 무엇을 쥐어 주는지**를 재는 자리이므로, 받은 줄의
  * 재료(실행 id · version)를 그대로 적어 두는 표시용 단추를 대신 넣는다.
@@ -241,10 +242,11 @@ describe("🔴 담을 줄이 없으면 **아무것도 안 그린다**", () => {
 
 /**
  * 🔴 2026-11-02(조각 8) — 마친 실행은 요약 상자가 위에 안 서고 이 묶음의 한 줄로
- * 내려온다. [실행 그만두기]는 잘못 끝낸 것을 **되돌리는 유일한 길**이라(「다시
- * 열기」는 없다), 상자가 내려오면서 단추까지 사라지면 안 된다.
+ * 내려온다. 그러면서 마친 실행에 손댈 길이 전부 이 줄로 모였으므로, 상자가
+ * 내려오면서 단추까지 사라지면 안 된다. 🔵 조각 9 에서 그 길이 둘이 됐다 —
+ * [실행 그만두기](치운다)와 [절차 다시 잇기](다시 돌게 한다).
  */
-describe("🔴 그만둘 수 있는 **줄마다** 단추가 붙는다", () => {
+describe("🔴 누를 것이 있는 **줄마다** 단추가 붙는다", () => {
   /** 네 갈래를 한 표본에 — 「둘만 붙는다」가 한눈에 보이게. */
   const ALL_FOUR = [COMPLETED_ALL, FINISHED_WITH_REMAINING, ABANDONED, STILL_RUNNING];
 
@@ -293,6 +295,35 @@ describe("🔴 그만둘 수 있는 **줄마다** 단추가 붙는다", () => {
     assert.ok(html.includes('data-test-row-action="run-b:12"'), html);
   });
 
+  /**
+   * 🔴 2026-11-02(조각 9) — 줄에 붙는 것이 **둘**이 됐다([절차 다시 잇기] ·
+   * [실행 그만두기]). 붙는 줄이 서로 달라서, 이 파일은 「하나라도 붙는 줄인가」만
+   * 가르고 **무엇을 붙일지는 받는 쪽이 같은 두 값으로** 가른다. 그러니 두 값이
+   * 줄마다 제대로 실려 가는지가 여기서 재야 하는 것이다.
+   */
+  test("🔴 줄의 **까닭 둘**을 그대로 쥐어 준다 — 받는 쪽이 단추를 가릴 수 있게", () => {
+    const html = renderToStaticMarkup(
+      <PastExecutionsSection
+        candidates={ALL_FOUR}
+        renderRowAction={(row) => (
+          <button
+            type="button"
+            data-test-row-reasons={`${row.badge.outcome}:${row.resumeBlockedReason ?? "-"}:${row.abandonBlockedReason ?? "-"}`}
+          >
+            단추
+          </button>
+        )}
+      />
+    );
+    const marks = (html.match(/data-test-row-reasons="([^"]*)"/g) ?? []).map((m) => m.slice('data-test-row-reasons="'.length, -1));
+    // 🔴 불린 줄은 둘뿐이고(완주·그만둠은 애초에 안 불린다), 그 둘에서 **두 답이
+    //    갈린다** — 중단 마침은 둘 다 붙고, 진행 중은 그만두기만 붙는다.
+    assert.deepEqual(marks.sort(), [
+      "FINISHED_WITH_REMAINING:-:-",
+      "STILL_RUNNING:ALREADY_RUNNING:-",
+    ]);
+  });
+
   test("줄의 글자는 그대로 남는다 — 단추가 배지·진행도·시각을 밀어내지 않는다", () => {
     const html = renderWithAction([FINISHED_WITH_REMAINING]);
     assert.ok(html.includes(">중단 마침<"));
@@ -334,7 +365,13 @@ describe("🔴 이 파일은 단추를 **만들지** 않는다 — 받아 온 �
   });
 
   test("🔴 어느 줄에 붙일지를 **도메인 답으로** 가른다 — 배지를 다시 보지 않는다", () => {
-    assert.match(flat(source), /row\.abandonBlockedReason === null && renderRowAction \? renderRowAction\(row\) : null/);
+    // 🔵 2026-11-02(조각 9)에 까닭이 **둘**이 됐다 — [절차 다시 잇기]와 [실행
+    //    그만두기]는 붙는 줄이 다르다. 이 파일은 **둘 중 하나라도** 붙을 줄이면
+    //    받아 온 것을 놓고, 무엇을 놓을지는 보는 쪽이 같은 두 값으로 또 가른다.
+    assert.match(
+      flat(source),
+      /\(row\.resumeBlockedReason === null \|\| row\.abandonBlockedReason === null\) && renderRowAction \? renderRowAction\(row\) : null/
+    );
     assert.ok(
       !/COMPLETED_ALL|ABANDONED|STILL_RUNNING|FINISHED_WITH_REMAINING/.test(source),
       "화면이 갈래 이름으로 다시 가르면 판정이 두 벌이 된다"

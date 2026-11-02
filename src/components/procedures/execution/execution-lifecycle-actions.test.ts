@@ -46,11 +46,19 @@ const actionsRaw = read("src/components/procedures/execution/ExecutionLifecycleA
  * 옮겼다.
  */
 const abandonRaw = read("src/components/procedures/execution/ExecutionAbandonButton.tsx");
+/**
+ * 🔵 2026-11-02(조각 9) — 마친 실행을 **다시 잇는** 단추가 하나 더 생겼다.
+ * 사용자 말: 「절차를 다 진행하지 않고 절차를 마친 경우는 마쳐진 노드부터 절차를
+ * 재개할 수 있도록 해주고.」 짝인 [실행 그만두기]와 **붙는 줄이 다르고**(중단
+ * 마침 하나) 하는 일이 정반대라, 둘을 나란히 두고 잰다.
+ */
+const resumeRaw = read("src/components/procedures/execution/ExecutionResumeButton.tsx");
 const screenRaw = read("src/components/procedures/execution/ProcedureExecutionScreen.tsx");
 const formRaw = read("src/components/repair-cases/work-records/WorkRecordForm.tsx");
 const pageRaw = read("src/app/(app)/repair-cases/[id]/execution/page.tsx");
 const actions = stripComments(actionsRaw);
 const abandon = stripComments(abandonRaw);
+const resume = stripComments(resumeRaw);
 const screen = stripComments(screenRaw);
 const form = stripComments(formRaw);
 const page = stripComments(pageRaw);
@@ -60,6 +68,7 @@ describe("🔵 먼저 — 주석 걷어내기가 실제로 돌고 있다", () =>
     for (const [name, raw, stripped] of [
       ["ExecutionLifecycleActions", actionsRaw, actions],
       ["ExecutionAbandonButton", abandonRaw, abandon],
+      ["ExecutionResumeButton", resumeRaw, resume],
       ["ProcedureExecutionScreen", screenRaw, screen],
       ["WorkRecordForm", formRaw, form],
     ] as const) {
@@ -190,6 +199,85 @@ describe("🔴 두 단추의 뜻이 **올려 두면 뜨는 글자**(title)에 �
   test("⚠️ 폰에는 올려 두기가 없다 — **창 안의 설명은 그대로** 남아 서로를 가리킨다", () => {
     assert.match(flatActions, /잘못 불러온 절차를 <span className="font-medium">치우려는<\/span> 것이라면 \[실행 그만두기\]입니다\./);
     assert.match(flatAbandon, /warningNote="[^"]*다 한 절차를 마무리하려는 것이라면 \[절차 끝내기\]입니다\./);
+  });
+});
+
+/**
+ * 🔴 2026-11-02(조각 9) — 마친 실행을 **다시 잇는** 단추.
+ *
+ * 조각 8 에서 마친 실행이 큰 카드에서 내려오면서, **남은 작업이 있는데 마친
+ * 실행**을 다시 이을 길이 화면에서 통째로 사라졌다. 그때 남은 단추가 [실행
+ * 그만두기] 하나였는데 그것은 **치우는 것**이지 잇는 것이 아니다.
+ *
+ * 서버가 정말 completed_at 을 비우는지·노드를 안 건드리는지는 db 목록의
+ * procedure-case-execution.integration.test.ts(65~70번)가, 어느 줄에 붙는지는
+ * unit 목록의 procedure-execution-past-runs.test.ts 가 잰다.
+ */
+describe("㉤ 마친 절차를 다시 잇는 길이 생겼다", () => {
+  const flatResume = flat(resume);
+  const RESUME_HINT = "마쳤다는 표시만 지웁니다 — 지나온 기록과 남은 작업은 그대로라, 마칠 때 하던 작업부터 다시 이어집니다.";
+
+  test("단추 글자는 「절차 다시 잇기」다", () => {
+    assert.match(resume, /절차 다시 잇기/);
+    assert.match(flatResume, /data-execution-resume/);
+    // 🔵 「재개」를 안 쓴다 — 노드 하나를 되돌리는 [재개(되돌림)]가 같은 화면에
+    //    이미 있어서, 같은 낱말이면 둘이 같은 일로 읽힌다.
+    assert.ok(!/재개/.test(resume), "노드 단추와 같은 낱말을 쓰면 둘이 섞인다");
+  });
+
+  test("🔴 **확인 창이 없다** — 짝인 [실행 그만두기]와 다른 점이 그것이다", () => {
+    // 그만두기는 되돌릴 수 없어 사유 창을 거치지만, 다시 잇기는 그 자리에서
+    // [절차 끝내기]를 다시 누르면 누르기 전과 같아진다. 되돌릴 수 있는 일에 창을
+    // 세우면 매번 두 번 누르게 될 뿐이다.
+    assert.ok(!/ReasonPromptDialog|<dialog|showModal/.test(resume), "되돌릴 수 있는 일에 창을 세우지 않는다");
+    assert.match(flatResume, /resumeProcedureExecutionAction\(\{ executionId, expectedVersion: executionVersion \}\)/);
+    // 🔵 사유도 안 받는다 — 끝내기가 사유를 안 받는 것과 같은 잣대다.
+    assert.ok(!/reason/.test(resume), "사유를 받으면 매번 「재개」 같은 빈말을 적게 된다");
+  });
+
+  test("🔴 두 번 누르기를 막는다 — 둘째 호출은 CONFLICT 로 거짓말을 한다", () => {
+    // 첫 호출이 성공하면 version 이 오르므로 둘째는 서버가 「다른 사용자가 먼저
+    // 변경했습니다」로 거절하는데, 혼자 두 번 누른 사람에게 그 글자는 거짓이다.
+    assert.match(flatResume, /if \(isSubmitting\) return;/);
+    assert.match(flatResume, /disabled=\{isSubmitting\}/);
+  });
+
+  test("🔴 **expectedVersion 은 받은 그대로** 넘긴다 — 줄마다 제 version 이다", () => {
+    assert.match(flatResume, /expectedVersion: executionVersion/);
+    assert.ok(!/version \+ 1|version - 1|\.version\b/.test(resume), "버전을 손보면 낙관적 잠금이 뜻을 잃는다");
+  });
+
+  test("🔵 **누가 누를 수 있는가는 여기서 안 가른다** — 받는 쪽이 정한다", () => {
+    assert.ok(!/eligible/.test(resume), "권한 판정이 두 자리에 생기면 한쪽만 고치는 날이 온다");
+  });
+
+  test("🔴 뜻이 **올려 두면 뜨는 글자**(title)에 있다 — 조각 5 의 두 단추와 같은 방식", () => {
+    assert.ok(resume.includes(RESUME_HINT), "글자가 바뀌었으면 아래가 뜻을 잃는다");
+    const at = flatResume.indexOf("data-execution-resume");
+    assert.ok(at >= 0, "단추를 못 찾았다");
+    assert.match(flatResume.slice(at, flatResume.indexOf("</button>", at)), /title=\{RESUME_HINT\}/);
+    // 평소에는 안 뜬다 — 글자가 소스에 나오는 자리가 선언 하나뿐이다.
+    assert.equal(resume.split(RESUME_HINT).length - 1, 1, "늘 보이는 줄이 되살아났는지 보라");
+    assert.ok(!/absolute|sr-only|group-hover/.test(resume), "직접 띄운 말풍선은 아래 줄을 가린다");
+  });
+
+  test("🔴 세 글자가 **서로 다른 말**을 한다 — 치운다 · 기록한다 · 그대로 둔다", () => {
+    // 한 화면에 셋이 함께 서므로(요약 상자의 둘, 줄의 둘) 글자가 겹치면 가르는 데
+    // 쓸모가 없다. 사람이 가장 궁금해하는 「지금까지 한 것이 날아가나」의 답이
+    // 이 글자에 있다.
+    assert.ok(RESUME_HINT.includes("그대로") && !RESUME_HINT.includes("치웁니다"));
+    assert.ok(!RESUME_HINT.includes("기록합니다"), "[절차 끝내기]와 같은 말을 하면 안 된다");
+  });
+
+  test("⚠️ 폰에는 올려 두기가 없다 — 누른 **뒤**에 같은 사실을 한 번 더 말한다", () => {
+    // 🔴 「위에서 이어서 하세요」라고는 **안 적는다** — 같은 건에 더 나중에 시작한
+    //    실행이 돌고 있으면 큰 카드는 그쪽이고, 그때 그 글자는 거짓이 된다.
+    assert.match(flatResume, /showSavePopup\(\{ message: "절차를 다시 이었습니다\. 마칠 때 하던 작업부터 이어서 하면 됩니다\.", redirectTo: null \}\)/);
+    assert.ok(!/맨 위|위에서/.test(resume), "큰 카드에 선다고 단정하면 다른 실행이 돌 때 거짓이 된다");
+  });
+
+  test("🔴 다시 이은 뒤 화면을 **다시 읽는다** — 안 읽으면 줄이 옛 배지 그대로다", () => {
+    assert.match(flatResume, /router\.refresh\(\);/);
   });
 });
 
@@ -480,11 +568,13 @@ describe("㉣ 마친 실행은 위에 안 서고 「이 건의 다른 절차」�
     );
   });
 
-  test("🔴 [실행 그만두기]가 **줄마다** 붙는다 — 되돌리는 유일한 길이다", () => {
+  test("🔴 [실행 그만두기]가 **줄마다** 붙는다 — 그 줄을 치우는 길이다", () => {
     // 🔴 2026-11-02 사용자 지적 — 「[실행 그만두기]가 [중단 마침]인 해당 건에
     //    대한 것인지 모든 [중단 마침]에 대한 것인지 모르겠어. 건별로 있도록
     //    해주고.」 처음 판은 **내려온 한 줄에만** 붙여서 그 모호함이 남았다.
-    assert.match(flatScreen, /renderRowAction=\{\(row\) => ordinaryActionEligible \? \( <ExecutionAbandonButton/);
+    // 🔵 조각 9 에서 줄에 붙는 것이 둘이 되면서, 단추마다 **제 까닭으로** 가린다.
+    assert.match(flatScreen, /renderRowAction=\{\(row\) => ordinaryActionEligible \? \( <>/);
+    assert.match(flatScreen, /\{row\.abandonBlockedReason === null && \( <ExecutionAbandonButton/);
     // 🔴 줄의 재료를 그대로 쥐어 준다 — 큰 카드 쪽 값을 돌려 쓰면 남의 실행을
     //    치우려 드는 호출이 된다.
     assert.match(flatScreen, /executionId=\{row\.executionId\} executionVersion=\{row\.version\} templateName=\{row\.title\}/);
@@ -494,17 +584,37 @@ describe("㉣ 마친 실행은 위에 안 서고 「이 건의 다른 절차」�
     );
   });
 
-  test("🔴 못 누르는 사람에게는 **까닭**이 그 자리에 뜬다 — 조용히 비우지 않는다", () => {
-    assert.match(flatScreen, /\) : \( <p className="text-xs text-zinc-500 dark:text-zinc-400">담당 엔지니어 또는 관리자만 그만둘 수 있습니다\.<\/p> \)/);
+  test("🔴 [절차 다시 잇기]는 **제 까닭**으로 가린다 — 그만두기 답을 돌려 쓰지 않는다", () => {
+    // 🔴 둘은 붙는 줄이 다르다(다시 잇기는 중단 마침 하나, 그만두기는 거기에
+    //    진행 중까지). 한 답을 돌려 쓰면 **도는 줄에 [절차 다시 잇기]가 뜨고**,
+    //    눌러도 서버가 거절만 하는 단추가 된다 — 사람 눈에는 「아무 일도 안
+    //    일어난다」로 보인다.
+    assert.match(flatScreen, /\{row\.resumeBlockedReason === null && \( <ExecutionResumeButton executionId=\{row\.executionId\} executionVersion=\{row\.version\} \/> \)\}/);
+    // 🔵 차례는 **잇기가 먼저**다 — 되돌릴 수 없는 쪽(그만두기)을 오른쪽 끝에 두면
+    //    잘못 누를 일이 준다. 요약 상자의 [절차 끝내기] → [실행 그만두기] 와 같은 잣대.
+    assert.ok(
+      flatScreen.indexOf("<ExecutionResumeButton") < flatScreen.indexOf("<ExecutionAbandonButton"),
+      "되돌릴 수 없는 단추가 앞에 서면 잘못 누르기 쉬워진다"
+    );
   });
 
-  test("🔴 단추 묶음은 **요약 상자 안 하나**뿐이다 — 줄에는 그만두기만 간다", () => {
+  test("🔴 못 누르는 사람에게는 **까닭**이 그 자리에 뜬다 — 조용히 비우지 않는다", () => {
+    // 🔵 조각 9 에서 글자가 늘었다 — 그 자리에서 막히는 일이 둘이 됐으므로
+    //    「그만둘 수 있습니다」만 적으면 다시 잇기가 왜 없는지를 아무도 안 알려 준다.
+    assert.match(
+      flatScreen,
+      /\) : \( <p className="text-xs text-zinc-500 dark:text-zinc-400"> 담당 엔지니어 또는 관리자만 절차를 다시 잇거나 그만둘 수 있습니다\. <\/p> \)/
+    );
+  });
+
+  test("🔴 단추 묶음은 **요약 상자 안 하나**뿐이다 — 줄에는 끝내기가 안 간다", () => {
     assert.equal(
       (flatScreen.match(/<ExecutionLifecycleActions/g) ?? []).length,
       1,
       "줄에까지 끝내기를 달면 보고 있지도 않은 절차를 끝내는 길이 생긴다"
     );
     assert.equal((flatScreen.match(/<ExecutionAbandonButton/g) ?? []).length, 1, "줄 쪽 단추를 만드는 자리는 한 곳이다");
+    assert.equal((flatScreen.match(/<ExecutionResumeButton/g) ?? []).length, 1, "줄 쪽 단추를 만드는 자리는 한 곳이다");
   });
 
   test("🔴 마친 실행이 **두 번 안 뜬다** — 위에 안 서고 줄에만 뜬다", () => {

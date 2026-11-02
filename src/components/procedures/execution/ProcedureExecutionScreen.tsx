@@ -7,6 +7,7 @@ import PastExecutionsSection from "./PastExecutionsSection";
 import ExecutionExtraTaskForm from "./ExecutionExtraTaskForm";
 import ExecutionLifecycleActions from "./ExecutionLifecycleActions";
 import ExecutionAbandonButton from "./ExecutionAbandonButton";
+import ExecutionResumeButton from "./ExecutionResumeButton";
 import ExecutionHistoryTimeline from "./ExecutionHistoryTimeline";
 import RelatedRepairHistoryPanel from "./RelatedRepairHistoryPanel";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
@@ -440,27 +441,45 @@ export default function ProcedureExecutionScreen({
           「이 건에서 지난번에 돌린 절차」는 그 둘 사이에 있는 것이 읽는 차례와
           맞는다. 접힌 채로 뜨므로 도는 실행의 화면을 밀어내지도 않는다.
 
-          🔴 **그만둘 수 있는 줄마다** [실행 그만두기]를 붙여 보낸다(2026-11-02
-          사용자 지적 — 「건별로 있도록 해주고」). 처음 판은 마쳐서 내려온 한 줄에만
-          붙였는데, 줄이 여럿일 때 그 단추가 어느 줄의 것인지 눈으로 안 갈렸다.
-          어느 줄에 붙일지는 도메인이 정한다(resolveAbandonBlockedReason — 중단
-          마침과 진행 중 둘뿐이고, 완주와 그만둠에는 안 붙는다). 여기서는 **그 줄의
-          재료로** 단추 하나를 만들어 줄 뿐이다 — 🔴 실행 id 도 version 도 줄마다
-          제 것이라, 한 벌을 돌려 쓰면 남의 실행을 치우려 드는 호출이 된다. */}
+          🔴 **줄마다** 단추를 붙여 보낸다(2026-11-02 사용자 지적 — 「건별로 있도록
+          해주고」). 처음 판은 마쳐서 내려온 한 줄에만 붙였는데, 줄이 여럿일 때 그
+          단추가 어느 줄의 것인지 눈으로 안 갈렸다.
+
+          🔴 **어느 줄에 어느 단추가 붙는지는 도메인이 정한다.** 둘의 답이 서로
+          달라서 까닭도 둘이다 — [절차 다시 잇기]는 **중단 마침 하나**
+          (resolveResumeBlockedReason), [실행 그만두기]는 **중단 마침 · 진행 중 둘**
+          (resolveAbandonBlockedReason). 여기서 배지를 다시 보고 가르지 않는다.
+
+          🔵 **차례는 잇기가 먼저**다 — 왼쪽이 더 많이 쓰는 쪽이고, 되돌릴 수 없는
+          쪽(그만두기)을 오른쪽 끝에 두면 잘못 누를 일이 준다. 요약 상자의
+          [절차 끝내기] → [실행 그만두기] 차례와도 같은 잣대다.
+
+          여기서는 **그 줄의 재료로** 단추를 만들어 줄 뿐이다 — 🔴 실행 id 도
+          version 도 줄마다 제 것이라, 한 벌을 돌려 쓰면 남의 실행을 건드리는
+          호출이 된다. */}
       <PastExecutionsSection
         candidates={pastExecutions}
         renderRowAction={(row) =>
           ordinaryActionEligible ? (
-            <ExecutionAbandonButton
-              executionId={row.executionId}
-              executionVersion={row.version}
-              templateName={row.title}
-            />
+            <>
+              {row.resumeBlockedReason === null && (
+                <ExecutionResumeButton executionId={row.executionId} executionVersion={row.version} />
+              )}
+              {row.abandonBlockedReason === null && (
+                <ExecutionAbandonButton
+                  executionId={row.executionId}
+                  executionVersion={row.version}
+                  templateName={row.title}
+                />
+              )}
+            </>
           ) : (
             /* 🔵 못 누르는 사람에게는 **까닭**을 그 자리에 적는다 — 단추만 조용히
                빼면 「왜 이 줄만 아무것도 없지」가 된다. 서버도 같은 문턱으로 다시
-               판정한다(assertOrdinaryMutationAuthorized). */
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">담당 엔지니어 또는 관리자만 그만둘 수 있습니다.</p>
+               판정한다(assertOrdinaryMutationAuthorized — 셋이 한 문턱이다). */
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              담당 엔지니어 또는 관리자만 절차를 다시 잇거나 그만둘 수 있습니다.
+            </p>
           )
         }
       />

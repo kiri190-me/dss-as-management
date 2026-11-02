@@ -402,18 +402,18 @@ export async function startProcedureExecution(
   }
 }
 
-// ---- 실행 끝내기 · 그만두기 (finish / abandon — 실행 한 줄 자체를 다룬다) ----
+// ---- 실행 끝내기 · 다시 잇기 · 그만두기 (finish / resume / abandon — 실행 한 줄 자체를 다룬다) ----
 
 /**
- * 실행 수준 조작(끝내기·그만두기)이 쓰는 적재기.
+ * 실행 수준 조작(끝내기·다시 잇기·그만두기)이 쓰는 적재기.
  *
  * 노드 쪽(loadExecutionNodeOrFail)과 **두 가지가 다르다**:
  *
  *  1. 유·무상 미확정(PENDING_DECISION) 을 막지 않는다. 그 관문은 「유·무상을
- *     정하기 전에 **작업하지 마라**」는 뜻인데, 끝내기와 그만두기는 작업이
- *     아니라 작업을 **멈추는** 일이다. 여기서 막으면 잘못 불러온 절차를 치우려
- *     해도 유·무상부터 정해야 하는, 원래 불만(「바꿀 수가 없다」)과 똑같은
- *     막다른 길이 하나 더 생긴다.
+ *     정하기 전에 **작업하지 마라**」는 뜻인데, 이 셋은 작업이 아니라 노드를 한
+ *     줄도 안 건드리고 **실행 행의 칸 하나**를 여닫는 일이다. 여기서 막으면 잘못
+ *     불러온 절차를 치우려 해도 유·무상부터 정해야 하는, 원래 불만(「바꿀 수가
+ *     없다」)과 똑같은 막다른 길이 하나 더 생긴다.
  *  2. 이미 그만둔(is_deleted) 실행은 아예 못 찾는다 — 조회(getActiveExecution
  *     ForCase)와 같은 잣대다. 치운 실행에 다시 손대는 길을 남기지 않는다.
  *
@@ -540,8 +540,13 @@ export async function finishProcedureExecution(
  * 그것이 이 저장소의 소프트 삭제 규약이고, 치운 실행의 이력 화면은 어차피 더
  * 열리지 않는다.
  *
- * 끝낸(completed_at 이 찬) 실행도 그만둘 수 있다. 되돌리는 길이 그것뿐이라
- * (「다시 열기」는 없다) 막으면 잘못 끝낸 사람이 또 갇힌다.
+ * 끝낸(completed_at 이 찬) 실행도 그만둘 수 있다. 막으면 잘못 끝낸 사람이 또
+ * 갇힌다.
+ *
+ * 🔵 2026-11-02(조각 9)에 되돌리는 길이 **하나 더 생겼다** —
+ * resumeProcedureExecution(「절차 다시 잇기」). 둘은 하는 일이 정반대다: 이쪽은
+ * 그 실행을 이 건에서 **치우고**, 저쪽은 마쳤다는 표시만 지워 **다시 돌게** 한다.
+ * 그래서 「치우려는 것이 아니라 더 하려는 것」이면 저쪽이 맞는 단추다.
  */
 export async function abandonProcedureExecution(
   executionId: string,
@@ -579,6 +584,123 @@ export async function abandonProcedureExecution(
           updatedAt: now,
         })
         .where(eq(procedureCaseExecutions.id, executionId));
+
+      return { ok: true, version: execution.version + 1 };
+    });
+  } catch (err) {
+    if (err instanceof ExecutionMutationError) return err.result;
+    throw err;
+  }
+}
+
+/**
+ * 마친 실행을 **다시 잇는다** — procedure_case_executions.completed_at 을 **비운다.**
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 왜 필요한가 (사용자 말 그대로, 2026-11-02)
+ * ──────────────────────────────────────────────────────────────────────
+ * 「절차를 다 진행하지 않고 절차를 마친 경우는 마쳐진 노드부터 절차를 재개할 수
+ * 있도록 해주고.」
+ *
+ * 조각 8 부터 마친 실행은 큰 카드에서 내려와 「이 건의 다른 절차」의 한 줄이
+ * 된다. 그래서 **남은 작업이 있는데 마친 실행**은 다시 손댈 길이 화면에서 통째로
+ * 사라졌다 — 그때 유일하게 남은 단추가 [실행 그만두기]였는데, 그것은 **치우는
+ * 것**이지 잇는 것이 아니다(치우면 그 줄이 화면에서 더 안 보이고 되돌릴 수 없다).
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 하는 일은 **칸 하나를 비우는 것**뿐이다 — 노드는 한 줄도 안 건드린다
+ * ──────────────────────────────────────────────────────────────────────
+ * 남은 대기·차단 노드를 되살리지도, 진행 중을 새로 세우지도 않는다. 그럴 필요가
+ * 없다 — 마칠 때의 노드 상태가 **그대로 남아 있기** 때문이다(끝내기도 노드를 안
+ * 건드린다 — finishProcedureExecution 의 같은 주석). completed_at 만 비우면
+ * pickCurrentTask 가 **진행 중을 먼저** 고르므로, 「지금 할 일」은 저절로 마칠 때
+ * 하던 그 노드가 된다. 사용자가 말한 「마쳐진 노드부터」가 그것이다.
+ *
+ * 여기서 노드를 건드리면 거꾸로 **마칠 때의 자리를 잃는다** — 어디까지 했는지를
+ * 적어 둔 칸이 그 상태들뿐이라, 한 번 덮으면 돌아올 수 없다.
+ *
+ * 그래서 **마이그레이션도 없다.** 새 칸도 새 action 값도 안 만든다(아래 이력 줄).
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 거절하는 둘 — **안 마친 실행**과 **그만둔 실행**
+ * ──────────────────────────────────────────────────────────────────────
+ *  - 안 마친 실행(completed_at 이 null) … 이을 것이 없다. 이미 돌고 있는 실행에
+ *    이 호출이 닿으면 **아무것도 안 바뀌는데 version 만 오르는** 쓰기가 되고,
+ *    그러면 같은 화면을 보던 다른 사람의 단추가 전부 CONFLICT 로 죽는다.
+ *    🔴 새 결과 코드를 만들지 않았다 — 실제로 일어난 일이 「지금 상태에서는 할
+ *    수 없는 전이」이고 그것이 INVALID_STATUS_TRANSITION 의 뜻 그대로다.
+ *  - 그만둔 실행(is_deleted) … loadExecutionForLifecycleOrFail 이 **아예 못
+ *    찾는다**(NOT_FOUND). 치운 실행에 다시 손대는 길을 안 남긴다는 같은 잣대다 —
+ *    여기에 따로 if 를 쓰지 않는 까닭이 그것이고, 두 벌로 두면 한쪽만 고치게 된다.
+ *
+ * 🔵 **완주한 실행은 막지 않는다**(2026-11-02 결정). 화면에서는 [절차 다시 잇기]가
+ * 완주 줄에 안 붙지만(resolveResumeBlockedReason), 그것은 **이어서 할 것이 한 장도
+ * 없어서 쓸모가 없다**는 화면 쪽 판단이지 금지가 아니다. 서버까지 막으면 셋이
+ * 곤란해진다:
+ *   1. 잘못 끝낸 것을 되돌릴 길이 다시 **그만두기(치우기)** 하나로 돌아간다.
+ *   2. 「완주인가」는 **노드 수를 세어야** 나오는 값이라, 세는 시점이 다르면
+ *      화면과 서버의 답이 갈린다(추가 작업이 한 장 늘면 그 순간 완주가 아니다).
+ *      그런 판정으로 거절하면 사람 눈에는 「눌렀는데 이유 없이 거절」로 보인다.
+ *   3. 다시 이어도 **잃는 것이 없다** — 노드를 안 건드리므로, 그 자리에서 바로
+ *      [절차 끝내기]를 다시 누르면 처음과 같은 상태로 돌아간다.
+ * 짝인 abandonProcedureExecution 도 같은 모양이다 — 화면만 완주 줄을 가리고 서버는
+ * 연다.
+ *
+ * 🔴 **사유를 안 받는다.** 그만두기가 사유를 받는 까닭은 치운 뒤에 「왜 치웠는지」를
+ * 알 수단이 그 글자뿐이기 때문인데, 다시 잇기는 치우는 일이 아니고 **되돌릴 수도
+ * 있다**([절차 끝내기]를 다시 누르면 된다). 매번 「재개」 같은 빈말을 적게 만들지
+ * 않는다 — 끝내기가 사유를 안 받는 것과 같은 잣대다.
+ */
+export async function resumeProcedureExecution(
+  executionId: string,
+  actorUserId: string,
+  expectedVersion: number
+): Promise<ExecutionLifecycleResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, actorUserId);
+      const { execution, repairCase } = await loadExecutionForLifecycleOrFail(tx, executionId);
+
+      // 🔵 끝내기·그만두기와 **같은 문턱**이다. 절차를 끝낸 사람이 그것을 다시
+      // 이을 수도 있어야, 「잘못 눌렀는데 바꿀 수가 없다」가 담당 엔지니어에게
+      // 그대로 남지 않는다.
+      await assertOrdinaryMutationAuthorized(actor, repairCase, null);
+
+      // 버전을 상태보다 먼저 본다 — startExecutionNode 의 같은 주석 참고.
+      if (execution.version !== expectedVersion) {
+        fail("CONFLICT", "다른 사용자가 이 절차를 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
+      }
+      if (execution.completedAt === null) {
+        fail("INVALID_STATUS_TRANSITION", "아직 마치지 않은 절차입니다. 이미 진행 중이라 다시 이을 것이 없습니다.");
+      }
+      const finishedAt = execution.completedAt;
+
+      const now = new Date();
+      // 🔴 비우는 칸은 **completed_at 하나**다. 노드도, 소프트 삭제 네 칸도,
+      // started_at 도 안 건드린다 — 시작한 때는 여전히 처음 시작한 그때다.
+      await tx
+        .update(procedureCaseExecutions)
+        .set({ completedAt: null, version: execution.version + 1, updatedAt: now })
+        .where(eq(procedureCaseExecutions.id, executionId));
+
+      // 🔴 **새 action 값을 만들지 않는다** — enum 을 늘리는 것은 마이그레이션이다.
+      // 이 실행에 실제로 일어난 일은 「다시 돌기 시작했다」이고, 실행 수준의 action
+      // 값으로 있는 것은 EXECUTION_STARTED 하나다(이력 화면에 「실행 시작」으로
+      // 뜬다). 그 줄은 원래 execution_node_id 가 비어 있어서, 노드 없는 줄을
+      // 이력 화면이 이미 제대로 그린다.
+      //
+      // 🔵 처음 시작한 줄과 가려내야 하므로 afterState 에 **다시 이은 것**임을
+      // 적는다 — 조각 2·7 이 NODE_STARTED 에 표시를 덧붙여 가린 방식 그대로다.
+      // 처음 시작의 afterState 는 { procedureTemplateId, executableNodeCount, … }
+      // 라 둘이 섞이지 않는다. beforeState 에는 **지워진 마친 시각**을 남긴다 —
+      // 칸을 비우고 나면 「언제 마쳤던 것인지」가 DB 어디에도 안 남기 때문이다.
+      await insertHistory(tx, {
+        executionId,
+        actionType: "EXECUTION_STARTED",
+        beforeState: { completedAt: finishedAt.toISOString() },
+        afterState: { resumed: true },
+        actorUserId: actor.id,
+      });
 
       return { ok: true, version: execution.version + 1 };
     });

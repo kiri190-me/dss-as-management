@@ -42,9 +42,9 @@
  * ──────────────────────────────────────────────────────────────────────
  * 그만두기는 completed_at 을 안 건드리므로 「그만두면서 마치는」 길은 없다.
  * 그런데 **마친 뒤에 그만두는** 길은 **일부러 열어 뒀다** —
- * abandonProcedureExecution 의 주석 그대로 「잘못 끝냈을 때 되돌릴 길이 그것뿐」
- * 이라(「다시 열기」는 없다), 끝낸 실행도 그만둘 수 있다. 그러니 둘 다 찬 행은
- * 드문 자료가 아니라 **되돌린 자국**이다.
+ * abandonProcedureExecution 의 주석 그대로 잘못 끝낸 절차를 치울 길이 그것이라,
+ * 끝낸 실행도 그만둘 수 있다. 그러니 둘 다 찬 행은 드문 자료가 아니라 **치운
+ * 자국**이다.
  *
  * 그래서 그만둠이 이긴다 — 사람이 **나중에** 내린 판단이 그것이고(시각으로도
  * deleted_at 이 completed_at 보다 뒤다), 그 행은 지금 「도는 것」에서 빠져 있다는
@@ -138,6 +138,21 @@ export type PastExecutionAbandonBlockedReason =
    */
   | "COMPLETED_ALL";
 
+/**
+ * 이 줄을 **다시 이을 수 없는** 까닭. 다시 이을 수 있으면 null.
+ *
+ * 🔴 위 그만두기와 **같은 규약**이다 — 참·거짓이 아니라 까닭이다. 셋이 서로 다른
+ * 까닭이라 한 값으로 뭉치지 않는다. 「왜 이 줄에만 단추가 없지」를 화면도 시험도
+ * 물을 수 있어야 한다.
+ */
+export type PastExecutionResumeBlockedReason =
+  /** 이미 그만둔 실행이다. 치운 것을 되살리는 길은 이 조각에 없다. */
+  | "ALREADY_ABANDONED"
+  /** 끝까지 다 한 기록이다(완주). 이어서 할 것이 한 장도 없다. */
+  | "COMPLETED_ALL"
+  /** 아직 안 마쳤다 — 지금 돌고 있는 실행이라 이을 것이 없다. */
+  | "ALREADY_RUNNING";
+
 export type PastExecutionRow = {
   executionId: string;
   badge: PastExecutionBadge;
@@ -171,6 +186,12 @@ export type PastExecutionRow = {
    * 가르는 규칙은 아래 resolveAbandonBlockedReason 한 곳에 있다.
    */
   abandonBlockedReason: PastExecutionAbandonBlockedReason | null;
+  /**
+   * 🔴 이 줄에 [절차 다시 잇기]를 붙일 수 있는가 — 못 붙이면 **까닭**(위 타입).
+   * 가르는 규칙은 아래 resolveResumeBlockedReason 한 곳에 있다. 붙는 줄은
+   * **중단 마침 하나뿐**이라 위 그만두기(둘)보다 좁다.
+   */
+  resumeBlockedReason: PastExecutionResumeBlockedReason | null;
 };
 
 export type PastExecutionPanel = {
@@ -241,6 +262,53 @@ export function resolveAbandonBlockedReason(badge: PastExecutionBadge): PastExec
   if (badge.outcome === "ABANDONED") return "ALREADY_ABANDONED";
   if (badge.outcome === "COMPLETED_ALL") return "COMPLETED_ALL";
   // 남는 둘 — 중단 마침(FINISHED_WITH_REMAINING) · 진행 중(STILL_RUNNING).
+  return null;
+}
+
+/**
+ * 이 줄에 [절차 다시 잇기]를 붙일 수 있는가 — 못 붙이면 **까닭**을 돌려준다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 왜 이 단추가 생겼는가 (사용자 말 그대로, 2026-11-02)
+ * ──────────────────────────────────────────────────────────────────────
+ * 「절차를 다 진행하지 않고 절차를 마친 경우는 마쳐진 노드부터 절차를 재개할 수
+ * 있도록 해주고.」
+ *
+ * 조각 8 에서 마친 실행은 큰 카드에서 내려와 이 묶음의 한 줄이 됐는데, 그러면서
+ * **남은 작업이 있는데 마친 실행**을 다시 이을 길이 화면에서 통째로 사라졌다.
+ * 그때 되돌리는 유일한 길이 [실행 그만두기]였는데 그것은 **치우는 것**이지 잇는
+ * 것이 아니다 — 치우면 지나온 기록이 화면에서 더 안 보이고 되돌릴 수도 없다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **붙는 것은 하나뿐이다 — 중단 마침**
+ * ──────────────────────────────────────────────────────────────────────
+ *   완주      … 🔴 **안 붙는다.** 끝까지 다 한 기록이라 **이어서 할 것이 한
+ *                장도 없다.** 다시 이어 봤자 「지금 할 일」 자리에 「모든 작업이
+ *                끝났습니다」만 서는 빈 화면이 된다.
+ *   중단 마침 … ✅ 붙는다. 이 단추가 생긴 까닭이 이 줄 하나다 — 남은 작업이
+ *                있는 채로 마친 실행이고, 사람이 다시 하려는 것이 그것이다.
+ *   진행 중   … 🔴 안 붙는다. **이미 돌고 있다.** 이을 것이 없고, 누를 수 있게
+ *                두면 아무 일도 안 일어나는 단추가 된다.
+ *   그만둠    … 🔴 안 붙는다. **치운 것**이다. 서버도 그만둔 실행은 아예 못
+ *                찾는다(loadExecutionForLifecycleOrFail 이 is_deleted 로 거른다).
+ *
+ * 🔴 짝인 [실행 그만두기]와 **붙는 줄이 다르다**(그쪽은 중단 마침 · 진행 중 둘).
+ * 그래서 한 함수로 합치지 않는다 — 합치면 둘 중 하나가 틀린 줄에 뜬다.
+ *
+ * `isDeleted`·`completedAt` 을 직접 보지 않고 **배지의 갈래**로 가르는 까닭은 위
+ * resolveAbandonBlockedReason 과 같다 — 「마친 뒤에 그만둔 행」처럼 두 칸이 다 찬
+ * 자료에서 배지와 단추가 따로 놀면 안 된다.
+ *
+ * 🔵 **서버가 막는 것이 아니다.** 완주한 실행도 서버는 다시 이을 수 있게 열어 두고
+ * 있다(resumeProcedureExecution 의 같은 주석 — 거기서 막는 것은 「안 마친 실행」과
+ * 「그만둔 실행」 둘뿐이다). 여기서 안 그리는 것은 **화면에 쓸모없는 단추를 안
+ * 두려는** 것이고, 되돌려야 하는 날이 오면 이 함수 한 줄이 그 결정 자리다.
+ */
+export function resolveResumeBlockedReason(badge: PastExecutionBadge): PastExecutionResumeBlockedReason | null {
+  if (badge.outcome === "ABANDONED") return "ALREADY_ABANDONED";
+  if (badge.outcome === "COMPLETED_ALL") return "COMPLETED_ALL";
+  if (badge.outcome === "STILL_RUNNING") return "ALREADY_RUNNING";
+  // 남는 하나 — 중단 마침(FINISHED_WITH_REMAINING).
   return null;
 }
 
@@ -374,6 +442,8 @@ export function buildPastExecutionPanel(candidates: readonly PastExecutionCandid
       // 🔴 붙는 줄은 둘뿐이다 — 중단 마침 · 진행 중. 가르는 규칙은 위 함수 하나에
       // 있고, 여기서는 배지를 그대로 넘길 뿐이다.
       abandonBlockedReason: resolveAbandonBlockedReason(badge),
+      // 🔴 이쪽은 **중단 마침 하나뿐**이다 — 둘의 답이 달라서 함수도 둘이다.
+      resumeBlockedReason: resolveResumeBlockedReason(badge),
     });
   }
 

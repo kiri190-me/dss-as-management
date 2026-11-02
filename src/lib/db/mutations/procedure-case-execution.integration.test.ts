@@ -25,6 +25,7 @@ import { createDraftProcedureTemplateFromImport, publishProcedureTemplate } from
 import {
   startProcedureExecution,
   finishProcedureExecution,
+  resumeProcedureExecution,
   abandonProcedureExecution,
   startExecutionNode,
   completeExecutionNode,
@@ -1859,8 +1860,9 @@ describe("procedure-case-execution: 실행 끝내기 · 그만두기", () => {
     assert.equal(again.ok, false);
     if (!again.ok) assert.equal(again.code, "ALREADY_FINISHED");
 
-    // 잘못 끝냈을 때 되돌릴 길은 그만두기뿐이다(「다시 열기」는 없다) — 막으면
-    // 끝낸 사람이 또 갇힌다.
+    // 잘못 끝냈을 때 그 절차를 **치울** 길은 그만두기다 — 막으면 끝낸 사람이 또
+    // 갇힌다. 🔵 치우지 않고 **다시 잇는** 길은 2026-11-02(조각 9)에 따로 생겼다
+    // (resumeProcedureExecution — 아래 65~70번).
     const row = await loadExecutionRow(executionId);
     const abandoned = await abandonProcedureExecution(executionId, engineerId, row.version, "끝내기를 잘못 눌렀습니다");
     assert.equal(abandoned.ok, true, JSON.stringify(abandoned));
@@ -1910,6 +1912,256 @@ describe("procedure-case-execution: 실행 끝내기 · 그만두기", () => {
     // 「누구에게나 막힌다」도 통과한다).
     const allowed = await finishProcedureExecution(executionId, engineerId, row.version, true);
     assert.equal(allowed.ok, true, JSON.stringify(allowed));
+  });
+});
+
+/**
+ * 마친 실행을 **다시 잇는** 길(2026-11-02, 조각 9).
+ *
+ * 사용자 말 그대로 — 「절차를 다 진행하지 않고 절차를 마친 경우는 마쳐진 노드부터
+ * 절차를 재개할 수 있도록 해주고.」
+ *
+ * 🔴 여기서만 잴 수 있는 것이 셋이다:
+ *  ① **노드가 한 줄도 안 바뀌는가** — 순수 함수 시험으로는 영영 못 잰다. 이
+ *     조각의 설계 전부가 「칸 하나만 비운다」에 걸려 있고, 노드를 건드리면 마칠
+ *     때의 자리를 **영영 잃는다**(어디까지 했는지를 적어 둔 칸이 그것뿐이다).
+ *  ② **다시 이은 뒤 「지금 할 일」이 마칠 때 그 노드인가** — 새 규칙을 하나도 안
+ *     만들고 pickCurrentTask 가 저절로 고르게 한 것이 이 조각의 핵심이라,
+ *     그 사슬(DB → 조회 → 도메인)이 실제로 이어지는지는 여기서만 보인다.
+ *  ③ **큰 카드에 서는가** — 다른 실행이 도는 중이면 차례가 그쪽을 고른다
+ *     (getActiveExecutionForCase). 사람 눈에는 「눌러도 아무 일이 없다」로 보이는
+ *     자리라, 어느 쪽이 서는지를 글자로 못 박는다.
+ *
+ * 어느 줄에 단추가 붙는지는 unit 목록의 procedure-execution-past-runs.test.ts 가,
+ * 화면이 그 답을 쓰는지는 components 목록의 execution-lifecycle-actions.test.ts 가
+ * 본다.
+ */
+describe("procedure-case-execution: 절차 다시 잇기", () => {
+  async function startedExecution(category: ExtractedTemplate["category"] = "FULL_SERVICE", repairCaseId?: string) {
+    const { templateId } = await createPublishedTemplate(uniqueCode("resume"), category);
+    const caseId = repairCaseId ?? (await createTestCase({ assignedEngineerId: engineerId })).id;
+    const started = await startProcedureExecution(caseId, templateId, engineerId);
+    assert.equal(started.ok, true, JSON.stringify(started));
+    if (!started.ok) throw new Error("unreachable");
+    return { templateId, repairCaseId: caseId, executionId: started.executionId };
+  }
+
+  async function loadExecutionRow(executionId: string) {
+    const [row] = await db.select().from(procedureCaseExecutions).where(eq(procedureCaseExecutions.id, executionId));
+    return row;
+  }
+
+  /**
+   * 「중단 마침」 표본을 만든다 — **n5 를 진행 중으로 세운 채** 끝낸다.
+   *
+   * 🔴 n5(절차 차례 넷째)를 고른 까닭: 절차의 **첫** 노드(n2)를 세우면 다시 이은
+   * 뒤의 「지금 할 일」이 n2 인데, 그것은 **아무 노드도 안 세웠어도** 나오는 답이다
+   * (대기 중 맨 앞). 그러면 「마칠 때 하던 그 노드로 돌아오는가」를 아무것도 안
+   * 재게 된다. 중간 노드라야 둘이 갈린다.
+   */
+  async function finishedWithNodeInProgress() {
+    const { templateId, repairCaseId, executionId } = await startedExecution();
+    const byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const n5 = byCode.get("n5")!;
+    const started = await startExecutionNode(n5.id, engineerId, n5.version);
+    assert.equal(started.ok, true, JSON.stringify(started));
+
+    const finished = await finishProcedureExecution(executionId, engineerId, (await loadExecutionRow(executionId)).version, true);
+    assert.equal(finished.ok, true, JSON.stringify(finished));
+    return { templateId, repairCaseId, executionId, inProgressNodeId: n5.id, firstPendingCode: "n2" };
+  }
+
+  test("65. 🔴 다시 이으면 completed_at 이 **비고**, 노드는 한 줄도 안 바뀐다", async () => {
+    const { repairCaseId, executionId } = await finishedWithNodeInProgress();
+
+    const before = await loadExecutionRow(executionId);
+    // 🔵 표본 확인 — 비우기 전에는 정말 차 있다(안 차 있으면 아래가 공짜로 통과한다).
+    assert.ok(before.completedAt, "마치지 않은 실행으로는 「비운다」를 잴 수 없다");
+    const nodesBefore = await snapshotExecutionNodes(executionId);
+    assert.ok(nodesBefore.length > 0, "표본이 비면 「안 바뀐다」가 공짜로 통과한다");
+
+    const result = await resumeProcedureExecution(executionId, engineerId, before.version);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const after = await loadExecutionRow(executionId);
+    assert.equal(after.completedAt, null, "안 비면 화면이 여전히 「마친 실행」으로 그린다");
+    assert.equal(after.version, before.version + 1);
+    assert.equal(after.isDeleted, false, "다시 잇기는 치우는 일이 아니다");
+    assert.deepEqual(after.startedAt, before.startedAt, "시작한 때는 처음 시작한 그때 그대로다");
+
+    // 🔴 이 조각의 설계 전부가 이 한 줄에 걸려 있다 — 노드를 건드리면 마칠 때의
+    // 자리를 영영 잃는다(어디까지 했는지를 적어 둔 칸이 그 상태들뿐이다).
+    assert.deepEqual(await snapshotExecutionNodes(executionId), nodesBefore, "노드가 한 줄이라도 바뀌면 안 된다");
+
+    // 조회도 「도는 실행」으로 다시 본다 — 큰 카드에 설 수 있다는 뜻이다.
+    const active = await getActiveExecutionForCase(repairCaseId);
+    assert.equal(active?.id, executionId);
+    assert.equal(active?.completedAt, null);
+    assert.equal(
+      placeExecutionSummary({ executionId, isExecutionFinished: active?.completedAt != null }).slot,
+      "TOP",
+      "다시 이었는데 아래 줄에 남으면 사람은 「눌러도 아무 일이 없다」로 읽는다"
+    );
+  });
+
+  test("66. 🔴 다시 이은 뒤 「지금 할 일」이 **마칠 때 그 노드**다 — 새 규칙 없이 저절로", async () => {
+    const { executionId, inProgressNodeId, firstPendingCode, templateId } = await finishedWithNodeInProgress();
+
+    // 🔵 표본 확인 — 마친 동안에는 「지금 할 일」이 **아예 없다**(조각 2·8).
+    const whileFinished = await getExecutionDetail(executionId);
+    assert.ok(whileFinished?.completedAt);
+    assert.equal(pickCurrentTaskNode(whileFinished.nodes, { isExecutionFinished: true }), null);
+
+    const resumed = await resumeProcedureExecution(executionId, engineerId, (await loadExecutionRow(executionId)).version);
+    assert.equal(resumed.ok, true, JSON.stringify(resumed));
+
+    const detail = await getExecutionDetail(executionId);
+    assert.ok(detail);
+    assert.equal(detail.completedAt, null);
+    // 🔴 화면이 쓰는 것과 **같은 함수·같은 인자**로 고른다 — 두 벌로 두면 여기서는
+    // 맞는데 화면에서는 다른 카드가 서는 날이 온다.
+    const current = pickCurrentTaskNode(detail.nodes, { isExecutionFinished: detail.completedAt !== null });
+    assert.equal(current?.id, inProgressNodeId, "마칠 때 하던 작업이 아니면 사람이 다시 찾아 헤맨다");
+    assert.equal(current?.status, "IN_PROGRESS");
+
+    // 🔴 **절차 맨 앞이 아니다** — 이 줄이 없으면 「아무 노드도 안 세운 실행」에서도
+    // 통과하는, 아무것도 안 재는 시험이 된다.
+    const byCode = await loadExecutionNodesByCode(templateId, executionId);
+    assert.notEqual(current?.id, byCode.get(firstPendingCode)!.id, "대기 맨 앞이 서면 「그 노드부터」가 아니다");
+    assert.equal(byCode.get(firstPendingCode)!.status, "PENDING", "표본 확인 — 앞의 것은 여전히 대기다");
+  });
+
+  test("67. 🔴 이력에 **새 enum 없이** 한 줄 남는다 — EXECUTION_STARTED + 다시 이었다는 표시", async () => {
+    const { executionId } = await finishedWithNodeInProgress();
+    const finishedAt = (await loadExecutionRow(executionId)).completedAt;
+    assert.ok(finishedAt);
+
+    const before = await getExecutionHistory(executionId);
+    const startedBefore = before.filter((h) => h.actionType === "EXECUTION_STARTED");
+    // 🔵 표본 확인 — 처음 시작한 줄이 하나 있다. 그래야 「늘었다」를 셀 수 있다.
+    assert.equal(startedBefore.length, 1, "시작 줄이 없으면 아래 셈이 뜻을 잃는다");
+
+    const resumed = await resumeProcedureExecution(executionId, engineerId, (await loadExecutionRow(executionId)).version);
+    assert.equal(resumed.ok, true, JSON.stringify(resumed));
+
+    const rows = await db
+      .select()
+      .from(procedureCaseExecutionHistory)
+      .where(eq(procedureCaseExecutionHistory.executionId, executionId));
+    const started = rows.filter((h) => h.actionType === "EXECUTION_STARTED");
+    assert.equal(started.length, 2, "다시 이은 사실이 이력에 안 남으면 나중에 아무도 되짚을 수 없다");
+
+    // 🔴 처음 시작한 줄과 **가려진다** — 표시가 없으면 둘이 똑같은 줄이 된다.
+    const resumedRow = started.find((h) => (h.afterState as { resumed?: boolean } | null)?.resumed === true);
+    assert.ok(resumedRow, "다시 이은 줄에 표시가 없다 — 처음 시작한 줄과 구별할 수단이 사라진다");
+    assert.equal(resumedRow.executionNodeId, null, "실행 수준의 일이라 노드에 안 붙는다");
+    assert.equal(resumedRow.actorUserId, engineerId);
+    // 🔴 지워진 마친 시각을 beforeState 가 쥐고 있다 — 칸을 비우고 나면 「언제
+    // 마쳤던 것인지」가 DB 어디에도 안 남는다.
+    assert.equal((resumedRow.beforeState as { completedAt?: string } | null)?.completedAt, finishedAt.toISOString());
+
+    // 🔵 처음 시작한 줄은 그대로다 — 표시가 거꾸로 붙지 않았다.
+    const firstRow = started.find((h) => h.id !== resumedRow.id)!;
+    assert.equal((firstRow.afterState as { resumed?: boolean } | null)?.resumed, undefined);
+    assert.ok((firstRow.afterState as { procedureTemplateId?: string } | null)?.procedureTemplateId);
+  });
+
+  test("68. 🔴 거절 셋 — 안 마친 실행 · 그만둔 실행 · 버전이 어긋난 요청", async () => {
+    // ① 아직 안 마쳤다 — 이을 것이 없다. 🔴 통과시키면 아무것도 안 바뀌는데
+    //    version 만 올라, 같은 화면을 보던 다른 사람의 단추가 전부 죽는다.
+    const running = await startedExecution();
+    const runningRow = await loadExecutionRow(running.executionId);
+    assert.equal(runningRow.completedAt, null, "표본 확인 — 정말 안 마친 실행이다");
+    const tooEarly = await resumeProcedureExecution(running.executionId, engineerId, runningRow.version);
+    assert.equal(tooEarly.ok, false, "안 마친 실행을 이으면 version 만 오르는 쓰기가 된다");
+    if (!tooEarly.ok) assert.equal(tooEarly.code, "INVALID_STATUS_TRANSITION");
+    assert.equal((await loadExecutionRow(running.executionId)).version, runningRow.version, "거절은 버전도 안 올린다");
+
+    // ② 버전이 어긋난다.
+    const { executionId } = await finishedWithNodeInProgress();
+    const row = await loadExecutionRow(executionId);
+    const stale = await resumeProcedureExecution(executionId, engineerId, row.version + 5);
+    assert.equal(stale.ok, false);
+    if (!stale.ok) assert.equal(stale.code, "CONFLICT");
+    assert.ok((await loadExecutionRow(executionId)).completedAt, "거절했는데 칸이 비면 안 된다");
+
+    // ③ 그만둔 실행은 **아예 못 찾는다** — 치운 것에 다시 손대는 길을 안 남긴다.
+    const abandoned = await abandonProcedureExecution(executionId, engineerId, row.version, "잘못 끝냈다 치웠습니다");
+    assert.equal(abandoned.ok, true, JSON.stringify(abandoned));
+    const gone = await resumeProcedureExecution(executionId, engineerId, row.version + 1);
+    assert.equal(gone.ok, false);
+    if (!gone.ok) assert.equal(gone.code, "NOT_FOUND");
+    const afterGone = await loadExecutionRow(executionId);
+    assert.equal(afterGone.isDeleted, true, "거절이 치운 자국을 건드리면 안 된다");
+    assert.ok(afterGone.completedAt, "그만둔 행의 마친 시각까지 비면 「되돌린 자국」이 사라진다");
+  });
+
+  test("69. 🔵 **완주한 실행은 서버가 안 막는다** — 막는 것은 화면뿐이다", async () => {
+    // 2026-11-02 결정. 화면에서는 완주 줄에 단추가 안 붙지만
+    // (resolveResumeBlockedReason), 그것은 「이어서 할 것이 없어 쓸모가 없다」는
+    // 화면 쪽 판단이지 금지가 아니다. 서버까지 막으면 ① 잘못 끝낸 것을 되돌릴 길이
+    // 다시 치우기 하나로 돌아가고 ② 「완주인가」는 노드를 세어야 나오는 값이라
+    // 세는 시점이 다르면 사람 눈에 「이유 없는 거절」이 된다.
+    const { templateId, repairCaseId, executionId } = await startedExecution();
+    const detail = await getExecutionDetail(executionId);
+    assert.ok(detail);
+    for (const node of detail.nodes) {
+      const skipped = await skipExecutionNode(node.id, engineerId, node.version, "이 건에는 해당 없음");
+      assert.equal(skipped.ok, true, JSON.stringify(skipped));
+    }
+    const finished = await finishProcedureExecution(executionId, engineerId, (await loadExecutionRow(executionId)).version, false);
+    assert.equal(finished.ok, true, JSON.stringify(finished));
+
+    // 🔵 표본 확인 — 정말 완주다(남은 것이 0). 그래야 「완주를 안 막는다」를 잰다.
+    const panel = buildPastExecutionPanel(await getOtherExecutionsForCase(repairCaseId, null));
+    assert.equal(panel?.rows[0].badge.label, "완주");
+    assert.equal(panel?.rows[0].resumeBlockedReason, "COMPLETED_ALL", "화면에서는 단추가 안 붙는다");
+
+    const resumed = await resumeProcedureExecution(executionId, engineerId, (await loadExecutionRow(executionId)).version);
+    assert.equal(resumed.ok, true, "서버가 막으면 잘못 끝낸 것을 되돌릴 길이 치우기 하나로 돌아간다");
+    assert.equal((await loadExecutionRow(executionId)).completedAt, null);
+
+    // 되돌려도 **잃는 것이 없다** — 그 자리에서 다시 끝내면 처음과 같아진다.
+    const byCode = await loadExecutionNodesByCode(templateId, executionId);
+    assert.equal(byCode.get("n2")!.status, "SKIPPED", "완주 상태의 노드가 그대로 남아 있어야 한다");
+    const again = await finishProcedureExecution(executionId, engineerId, (await loadExecutionRow(executionId)).version, false);
+    assert.equal(again.ok, true, JSON.stringify(again));
+  });
+
+  test("70. 🔴 다른 실행이 도는 중이면 큰 카드는 **그쪽**이고, 다시 이은 것은 「진행 중」 줄이다", async () => {
+    // 🔴 사람이 가장 헷갈리는 자리다 — 눌렀는데 큰 카드가 안 바뀌면 「아무 일도 안
+    // 일어났다」로 읽는다. 차례는 조각 5 가 정했다(안 끝난 것 먼저, 그중 **나중에
+    // 시작한 것** 먼저) — 그러니 나중에 불러온 실행이 이긴다.
+    const older = await startedExecution("TECHNICAL_TASK");
+    const finished = await finishProcedureExecution(older.executionId, engineerId, (await loadExecutionRow(older.executionId)).version, true);
+    assert.equal(finished.ok, true, JSON.stringify(finished));
+    const newer = await startedExecution("TECHNICAL_TASK", older.repairCaseId);
+
+    const resumed = await resumeProcedureExecution(older.executionId, engineerId, (await loadExecutionRow(older.executionId)).version);
+    assert.equal(resumed.ok, true, JSON.stringify(resumed));
+
+    const active = await getActiveExecutionForCase(older.repairCaseId);
+    assert.equal(active?.id, newer.executionId, "둘 다 도는 중이면 나중에 시작한 쪽이 큰 카드다");
+
+    // 🔵 그래도 **「진행 중」 배지 줄로는 반드시 보인다**(조각 6) — 여기까지 안 뜨면
+    //    다시 이은 실행이 화면 어디에도 없다.
+    const panel = buildPastExecutionPanel(await getOtherExecutionsForCase(older.repairCaseId, active!.id));
+    assert.ok(panel, "다시 이은 실행이 아래 줄에도 없으면 화면에서 통째로 사라진다");
+    assert.deepEqual(
+      panel.rows.map((r) => [r.executionId, r.badge.label]),
+      [[older.executionId, "진행 중"]]
+    );
+    // 도는 줄에는 다시 잇기가 안 붙고(이미 돌고 있다) 그만두기만 붙는다.
+    assert.equal(panel.rows[0].resumeBlockedReason, "ALREADY_RUNNING");
+    assert.equal(panel.rows[0].abandonBlockedReason, null);
+
+    // 🔵 반대쪽도 세어 본다 — 도는 것이 저 하나였다면 큰 카드에 **선다**.
+    const alone = await startedExecution("TECHNICAL_TASK");
+    const stopped = await finishProcedureExecution(alone.executionId, engineerId, (await loadExecutionRow(alone.executionId)).version, true);
+    assert.equal(stopped.ok, true, JSON.stringify(stopped));
+    const back = await resumeProcedureExecution(alone.executionId, engineerId, (await loadExecutionRow(alone.executionId)).version);
+    assert.equal(back.ok, true, JSON.stringify(back));
+    assert.equal((await getActiveExecutionForCase(alone.repairCaseId))?.id, alone.executionId);
   });
 });
 

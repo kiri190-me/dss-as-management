@@ -4,6 +4,7 @@ import {
   buildPastExecutionPanel,
   classifyPastExecution,
   resolveAbandonBlockedReason,
+  resolveResumeBlockedReason,
   type PastExecutionCandidate,
   type PastExecutionOutcome,
 } from "./procedure-execution-past-runs";
@@ -505,6 +506,103 @@ describe("🔴 어느 줄에 [실행 그만두기]가 붙는가", () => {
     );
     // 🔵 둘이 다른 값이어야 「돌려 쓴다」가 공짜로 통과하지 않는다.
     assert.notEqual(panel.rows[0].version, panel.rows[1].version);
+  });
+});
+
+/**
+ * 🔴 2026-11-02(조각 9) — 마친 실행을 **다시 잇는** 단추가 생겼다. 사용자 말:
+ * 「절차를 다 진행하지 않고 절차를 마친 경우는 마쳐진 노드부터 절차를 재개할 수
+ * 있도록 해주고.」
+ *
+ * 🔴 이 묶음이 잡아야 하는 고장은 **짝인 [실행 그만두기]와 붙는 줄이 다르다**는
+ * 것이다. 둘을 한 답으로 뭉치면 「이미 돌고 있는 실행에 다시 잇기」가 뜨거나(눌러도
+ * 아무 일이 없다) 「중단 마침에 그만두기가 사라진다」가 조용히 생긴다.
+ */
+describe("🔴 어느 줄에 [절차 다시 잇기]가 붙는가", () => {
+  /** 네 갈래를 **한 표본에** 담는다 — 「하나에만 붙는다」가 한눈에 보이게. */
+  const ALL_FOUR = [MEASURED_COMPLETED_ALL, MEASURED_FINISHED_WITH_REMAINING, MEASURED_ABANDONED, MEASURED_STILL_RUNNING];
+
+  test("🔵 먼저 — 표본에 네 갈래가 **다 들어 있다**", () => {
+    assert.equal(new Set(ALL_FOUR.map(outcomeOf)).size, 4, "갈래가 빠지면 아래가 그 갈래를 안 잰다");
+  });
+
+  test("🔴 붙는 것은 **중단 마침 하나**뿐이다", () => {
+    const panel = buildPastExecutionPanel(ALL_FOUR);
+    assert.ok(panel);
+    assert.deepEqual(
+      panel.rows.map((row) => [row.badge.label, row.resumeBlockedReason]),
+      [
+        ["진행 중", "ALREADY_RUNNING"],
+        ["완주", "COMPLETED_ALL"],
+        ["중단 마침", null],
+        ["그만둠", "ALREADY_ABANDONED"],
+      ]
+    );
+  });
+
+  test("🔴 짝인 [실행 그만두기]와 **붙는 줄이 다르다** — 한 답으로 뭉치면 안 된다", () => {
+    // 그만두기는 둘(중단 마침 · 진행 중), 다시 잇기는 하나(중단 마침)다. 🔴 「진행
+    // 중」 줄에서 둘의 답이 갈리는 것이 이 시험의 본체다 — 거기에 다시 잇기가
+    // 뜨면 눌러도 아무 일이 없는 단추가 된다(이미 돌고 있다).
+    const panel = buildPastExecutionPanel(ALL_FOUR);
+    assert.ok(panel);
+    const byLabel = new Map(panel.rows.map((row) => [row.badge.label, row]));
+    assert.equal(byLabel.get("진행 중")!.abandonBlockedReason, null, "그만두기는 붙는다");
+    assert.equal(byLabel.get("진행 중")!.resumeBlockedReason, "ALREADY_RUNNING", "다시 잇기는 안 붙는다");
+    // 나머지 셋에서는 두 답이 같다 — 그래서 「진행 중」 하나가 둘을 가르는 자리다.
+    for (const label of ["완주", "중단 마침", "그만둠"]) {
+      const row = byLabel.get(label)!;
+      assert.equal(
+        row.resumeBlockedReason === null,
+        row.abandonBlockedReason === null,
+        `${label} 줄에서 둘의 답이 갈렸다`
+      );
+    }
+  });
+
+  test("🔴 **완주에는 안 붙는다** — 이어서 할 것이 한 장도 없다", () => {
+    // 다시 이어 봤자 「지금 할 일」 자리에 「모든 작업이 끝났습니다」만 서는 빈
+    // 화면이 된다.
+    // 🔵 서버가 막는 것이 아니다 — 완주한 실행도 서버는 다시 이을 수 있게 열어 두고
+    //    있다(resumeProcedureExecution). 화면에 쓸모없는 단추를 안 두는 것이다.
+    assert.equal(resolveResumeBlockedReason(classifyPastExecution(MEASURED_COMPLETED_ALL)), "COMPLETED_ALL");
+  });
+
+  test("🔴 이미 그만둔 줄에도 안 붙는다 — 치운 것은 되살리지 않는다", () => {
+    assert.equal(resolveResumeBlockedReason(classifyPastExecution(MEASURED_ABANDONED)), "ALREADY_ABANDONED");
+  });
+
+  test("🔴 도는 줄에도 안 붙는다 — 이미 돌고 있다", () => {
+    assert.equal(resolveResumeBlockedReason(classifyPastExecution(MEASURED_STILL_RUNNING)), "ALREADY_RUNNING");
+  });
+
+  test("🔴 못 붙는 까닭 셋이 **서로 다른 값**이다 — 한 값으로 뭉치면 왜인지 못 묻는다", () => {
+    const blocked = ALL_FOUR.map((c) => resolveResumeBlockedReason(classifyPastExecution(c))).filter((r) => r !== null);
+    assert.equal(new Set(blocked).size, 3, blocked.join(" | "));
+  });
+
+  test("🔴 네 갈래 **어느 것도 빠뜨리지 않는다** — 판정이 전부 돌아간다", () => {
+    const outcomes: PastExecutionOutcome[] = ["COMPLETED_ALL", "FINISHED_WITH_REMAINING", "ABANDONED", "STILL_RUNNING"];
+    for (const outcome of outcomes) {
+      const reason = resolveResumeBlockedReason({ outcome, label: "x", tone: "MUTED" });
+      assert.equal(reason === null, outcome === "FINISHED_WITH_REMAINING", `${outcome} 의 답이 바뀌었다: ${reason}`);
+    }
+  });
+
+  test("🔴 **「마친 뒤에 그만둔 행」은 그만둠으로 읽는다** — 배지 하나를 따르므로 어긋날 길이 없다", () => {
+    // 두 칸이 다 찬 행에서 completed_at 만 보고 가르면 「다시 잇기」가 치운 줄에
+    // 뜬다 — 서버는 그 실행을 아예 못 찾으므로 눌러도 거절로만 끝난다.
+    const bothSet = candidate({
+      nodes: nodesOf({ PENDING: 5, COMPLETED: 2 }),
+      completedAt: "2026-11-02T06:02:10.922Z",
+      isDeleted: true,
+      deletedAt: "2026-11-02T06:40:00.000Z",
+      deletedByName: "홍길동",
+      deleteReason: "끝내기를 잘못 눌렀습니다",
+    });
+    assert.ok(bothSet.completedAt, "표본 확인 — 마친 칸이 정말 차 있다");
+    const panel = buildPastExecutionPanel([bothSet]);
+    assert.equal(panel?.rows[0].resumeBlockedReason, "ALREADY_ABANDONED");
   });
 });
 
