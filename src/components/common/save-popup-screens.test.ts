@@ -317,10 +317,16 @@ test("A/S 건 안에 딸린 것·실행 동작은 팝업만 띄우고 머문다"
     ["src/components/procedures/execution/ExecutionExtraTaskForm.tsx", 1],
     ["src/components/procedures/execution/ExecutionNodeCard.tsx", 1],
     // 🔵 2026-11-02(조각 5): 실행을 **끝내는** 단추와 **그만두는** 단추가 생겼다.
-    //    둘 다 누른 자리(작업내용 탭)에 머문다 — 끝내면 같은 화면이 「절차를
-    //    마쳤습니다」로 바뀌고, 그만두면 그 자리에 「+ 기술 절차 불러오기」가 다시
-    //    선다. 어느 쪽도 목록으로 넘어갈 일이 아니다.
-    ["src/components/procedures/execution/ExecutionLifecycleActions.tsx", 2],
+    //    둘 다 누른 자리(작업내용 탭)에 머문다 — 어느 쪽도 목록으로 넘어갈 일이
+    //    아니다.
+    //    🔵 조각 8 에서 끝낸 뒤의 화면이 바뀌었다 — 그 실행은 「이 건의 다른 절차」의
+    //    한 줄로 내려가고 위에는 「+ 기술 절차 불러오기」만 남는다. 그래서 **누른
+    //    직후의 저장 팝업**이 「마쳤습니다」를 말하는 유일한 자리다(화면 글로는
+    //    더 안 적는다 — 그 줄의 배지와 마친 시각이 같은 말을 한다).
+    //    🔵 같은 조각의 보완에서 **그만두기가 제 파일로 갈라졌다**(줄마다 붙어야
+    //    해서다). 그래서 팝업도 둘에서 하나씩으로 나뉘었다 — 합은 그대로 둘이다.
+    ["src/components/procedures/execution/ExecutionLifecycleActions.tsx", 1],
+    ["src/components/procedures/execution/ExecutionAbandonButton.tsx", 1],
     ["src/components/repair-cases/files/FilesScreen.tsx", 4],
     ["src/components/repair-cases/approval/DatabaseRepairInspectionCard.tsx", 1],
     ["src/components/repair-cases/approval/DatabaseFinalShipmentCard.tsx", 1],

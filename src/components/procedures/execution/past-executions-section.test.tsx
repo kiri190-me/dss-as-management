@@ -48,6 +48,7 @@ function candidate(overrides: Partial<PastExecutionCandidate> = {}): PastExecuti
     startedAt: "2026-11-02T01:00:00.000Z",
     startedByName: "홍길동",
     completedAt: "2026-11-02T02:00:00.000Z",
+    version: 1,
     isDeleted: false,
     deletedAt: null,
     deletedByName: null,
@@ -89,6 +90,26 @@ const STILL_RUNNING = candidate({
 });
 
 const render = (candidates: PastExecutionCandidate[]) => renderToStaticMarkup(<PastExecutionsSection candidates={candidates} />);
+
+/**
+ * 줄마다 붙는 단추까지 함께 그린다(2026-11-02, 조각 8 보완). 실제로는 실행
+ * 화면이 ExecutionAbandonButton 을 만들어 보내지만, 그것은 서버 액션을 직접
+ * import 하는 클라이언트 컴포넌트라 여기서는 import 자체가 던진다
+ * (execution-lifecycle-actions.test.ts 머리말의 같은 사정). **무엇이 오는지**가
+ * 아니라 **어느 줄에 붙고 무엇을 쥐어 주는지**를 재는 자리이므로, 받은 줄의
+ * 재료(실행 id · version)를 그대로 적어 두는 표시용 단추를 대신 넣는다.
+ */
+const renderWithAction = (candidates: PastExecutionCandidate[]) =>
+  renderToStaticMarkup(
+    <PastExecutionsSection
+      candidates={candidates}
+      renderRowAction={(row) => (
+        <button type="button" data-test-row-action={`${row.executionId}:${row.version}`}>
+          실행 그만두기
+        </button>
+      )}
+    />
+  );
 
 describe("🔵 먼저 — 렌더가 실제로 돌고 있다", () => {
   test("줄이 있을 때와 없을 때가 **서로 다르게** 읽힌다", () => {
@@ -184,12 +205,26 @@ describe("🔴 담을 줄이 없으면 **아무것도 안 그린다**", () => {
     assert.ok(html.includes("홍길동님이 시작"));
   });
 
-  test("🔴 접힌 줄에 **「진행 중 1」 딱지**가 남는다 — 안 펼쳐도 보여야 한다", () => {
+  test("🔴 접힌 줄에 **갈래별 수**가 다 적힌다 — 안 펼쳐도 보여야 한다", () => {
+    // 🔵 2026-11-02(조각 8 보완) 사용자 결정 — 「[이 건의 다른 절차]가 접혀 있을
+    //    때 완주 몇 중단 마침 몇, 그만둠 몇을 적어줘.」 전에는 「진행 중 N」
+    //    하나뿐이라 나머지 갈래가 접힌 줄에서 통째로 안 보였다.
     const html = render([STILL_RUNNING, ABANDONED, COMPLETED_ALL]);
     const summary = html.slice(html.indexOf("<summary"), html.indexOf("</summary>"));
     assert.ok(summary.includes("이 건의 다른 절차 (3)"));
-    assert.ok(summary.includes("진행 중 1"), "접어 두면 도는 줄이 숨는다 — 제목 줄에 적어야 안 사라진다");
+    // 🔴 글자를 **통째로** 잰다 — 「진행 중 1」만 보면 나머지가 빠져도 통과한다.
+    assert.ok(summary.includes("진행 중 1 · 완주 1 · 그만둠 1"), summary);
+    assert.ok(!summary.includes("중단 마침"), "없는 갈래는 아예 안 적는다");
     assert.ok(!summary.includes("amber"), "경고로 읽히면 안 된다 — 도는 실행은 고장이 아니다");
+  });
+
+  test("🔵 「실행 이력」 딱지와 **같은 모양**으로 그려진다 — 가름표도 색도", () => {
+    // 두 묶음이 다른 모양이면 읽는 사람이 둘을 다른 것으로 본다.
+    const html = render([STILL_RUNNING, ABANDONED, COMPLETED_ALL]);
+    const note = html.match(/data-fold-note[^>]*>([^<]*)</);
+    assert.ok(note, "딱지를 못 찾았다");
+    assert.match(note[1], / · /);
+    assert.ok(html.includes("bg-zinc-100"), "MUTED 딱지의 무채색이어야 한다(「실행 이력」과 같은 칠)");
   });
 
   test("도는 것과 끝난 것이 섞이면 줄이 둘 다 선다 — 도는 것이 위", () => {
@@ -204,7 +239,81 @@ describe("🔴 담을 줄이 없으면 **아무것도 안 그린다**", () => {
   });
 });
 
-describe("🔴 읽기 전용이다 — 누를 것이 하나도 없다", () => {
+/**
+ * 🔴 2026-11-02(조각 8) — 마친 실행은 요약 상자가 위에 안 서고 이 묶음의 한 줄로
+ * 내려온다. [실행 그만두기]는 잘못 끝낸 것을 **되돌리는 유일한 길**이라(「다시
+ * 열기」는 없다), 상자가 내려오면서 단추까지 사라지면 안 된다.
+ */
+describe("🔴 그만둘 수 있는 **줄마다** 단추가 붙는다", () => {
+  /** 네 갈래를 한 표본에 — 「둘만 붙는다」가 한눈에 보이게. */
+  const ALL_FOUR = [COMPLETED_ALL, FINISHED_WITH_REMAINING, ABANDONED, STILL_RUNNING];
+
+  /** 그 줄 하나만 잘라 본다 — 옆줄의 단추를 보고 통과하지 않게. */
+  function rowOf(html: string, outcome: string): string {
+    const rows = html.split('<li data-past-execution="true"').slice(1);
+    assert.equal(rows.length, 4, "표본 확인 — 네 줄이 다 그려져야 아래가 뜻을 가진다");
+    const found = rows.find((row) => row.includes(`data-past-execution-badge="${outcome}"`));
+    assert.ok(found, `${outcome} 줄을 못 찾았다`);
+    return found;
+  }
+
+  test("🔵 먼저 — 안 주면 줄에 아무것도 안 붙는다(전과 똑같다)", () => {
+    const plain = render(ALL_FOUR);
+    assert.ok(!plain.includes("data-test-row-action"), "안 줬는데 붙으면 아래가 아무것도 안 잰다");
+    assert.ok(!/<button/.test(plain), "받지 않으면 이 묶음에는 누를 것이 하나도 없다");
+  });
+
+  test("🔴 네 갈래 가운데 **둘에만** 붙는다 — 중단 마침 · 진행 중", () => {
+    const html = renderWithAction(ALL_FOUR);
+    assert.equal((html.match(/data-test-row-action/g) ?? []).length, 2, "붙는 줄 수가 둘이 아니다");
+    assert.ok(rowOf(html, "FINISHED_WITH_REMAINING").includes("data-test-row-action"), "중단 마침에 단추가 없다");
+    assert.ok(rowOf(html, "STILL_RUNNING").includes("data-test-row-action"), "진행 중에 단추가 없다");
+  });
+
+  test("🔴 **완주 줄에는 안 붙는다** — 끝까지 다 한 기록이라 치울 이유가 없다", () => {
+    const row = rowOf(renderWithAction(ALL_FOUR), "COMPLETED_ALL");
+    assert.ok(row.includes(">완주<"), "표본 확인 — 그 줄을 제대로 잘랐다");
+    assert.ok(!row.includes("data-test-row-action"), "완주 줄에 단추가 붙었다(2026-11-02 사용자 결정과 어긋난다)");
+  });
+
+  test("🔴 **그만둔 줄에도 안 붙는다** — 두 번 치울 수 없다", () => {
+    const row = rowOf(renderWithAction(ALL_FOUR), "ABANDONED");
+    assert.ok(row.includes(">그만둠<"));
+    assert.ok(!row.includes("data-test-row-action"));
+  });
+
+  test("🔴 줄마다 **제 실행 id 와 제 version** 을 쥔다 — 한 벌을 돌려 쓰지 않는다", () => {
+    const html = renderWithAction([
+      candidate({ executionId: "run-a", version: 7, completedAt: null, nodes: nodesOf({ PENDING: 2 }) }),
+      candidate({ executionId: "run-b", version: 12, completedAt: null, nodes: nodesOf({ PENDING: 2 }) }),
+    ]);
+    const marks = html.match(/data-test-row-action="([^"]*)"/g) ?? [];
+    assert.equal(marks.length, 2, "둘 다 진행 중이라 둘 다 붙어야 한다");
+    assert.ok(html.includes('data-test-row-action="run-a:7"'), html);
+    assert.ok(html.includes('data-test-row-action="run-b:12"'), html);
+  });
+
+  test("줄의 글자는 그대로 남는다 — 단추가 배지·진행도·시각을 밀어내지 않는다", () => {
+    const html = renderWithAction([FINISHED_WITH_REMAINING]);
+    assert.ok(html.includes(">중단 마침<"));
+    assert.ok(html.includes("진행 3 / 22"));
+    assert.ok(html.includes("마침"));
+    assert.ok(html.indexOf("마침") < html.indexOf("data-test-row-action"), "단추는 줄 글자 **아래**다");
+  });
+
+  test("🔴 단추가 **그 줄의 테두리 안**에 있다 — 묶음 전체의 것으로 읽히면 안 된다", () => {
+    // 사용자 지적의 본체가 이것이다 — 「해당 건에 대한 것인지 모든 [중단 마침]에
+    // 대한 것인지 모르겠어」. 줄이 닫힌 칸이어야 「이 칸 안의 단추」로 읽힌다.
+    const html = renderWithAction(ALL_FOUR);
+    const row = rowOf(html, "STILL_RUNNING");
+    assert.ok(row.slice(0, row.indexOf(">")).includes("rounded-md"), `줄에 테두리가 없다: ${row.slice(0, 200)}`);
+    assert.ok(row.slice(0, row.indexOf(">")).includes("border"), "줄 경계가 안 보이면 단추가 어느 줄의 것인지 안 갈린다");
+    // 단추가 그 <li> 가 닫히기 **전**에 있다(= 줄 안이다).
+    assert.ok(row.indexOf("data-test-row-action") < row.indexOf("</li>"), "단추가 줄 밖으로 나갔다");
+  });
+});
+
+describe("🔴 이 파일은 단추를 **만들지** 않는다 — 받아 온 것만 놓는다", () => {
   const raw = readFileSync(new URL("./PastExecutionsSection.tsx", import.meta.url), "utf8");
   const source = stripComments(raw);
 
@@ -213,12 +322,23 @@ describe("🔴 읽기 전용이다 — 누를 것이 하나도 없다", () => {
     assert.ok(!source.includes("🔴"), "주석이 남으면 아래 「없어야 한다」가 주석만 보고 깨진다");
   });
 
-  test("단추도 링크도 입력 칸도 없다 — 되살리는 길은 이 조각에 없다", () => {
+  test("단추도 링크도 입력 칸도 **이 파일에서는** 안 만든다", () => {
+    // 🔵 조각 8 에서 예외가 하나 생겼지만, 그것도 **받아 온 노드**(rowAction)라
+    //    이 파일이 만드는 것은 여전히 아무것도 없다. 여기서 직접 그리기 시작하면
+    //    눌러도 아무 일도 안 일어나는 자리가 생긴다(그만둔 줄·도는 줄).
     for (const forbidden of ["<button", "<a ", "<Link", "<form", "<input", "onClick", "href="]) {
       assert.ok(!source.includes(forbidden), `${forbidden} 이 있으면 눌러도 아무 일도 안 일어나는 자리가 생긴다`);
     }
     const html = render([COMPLETED_ALL, ABANDONED]);
     assert.ok(!/<button|<a\s|href=/.test(html), html.slice(0, 400));
+  });
+
+  test("🔴 어느 줄에 붙일지를 **도메인 답으로** 가른다 — 배지를 다시 보지 않는다", () => {
+    assert.match(flat(source), /row\.abandonBlockedReason === null && renderRowAction \? renderRowAction\(row\) : null/);
+    assert.ok(
+      !/COMPLETED_ALL|ABANDONED|STILL_RUNNING|FINISHED_WITH_REMAINING/.test(source),
+      "화면이 갈래 이름으로 다시 가르면 판정이 두 벌이 된다"
+    );
   });
 
   test('🔴 "use client" 가 늘지 않았다 — 서버 컴포넌트 그대로다', () => {
@@ -248,10 +368,12 @@ describe("실행 화면 어디에 놓였는가", () => {
   test("🔵 먼저 — 묶음이 화면에 실제로 적혀 있다", () => {
     assert.ok(screenRaw.includes("🔴") && !screen.includes("🔴"), "주석 걷어내기가 안 듣는다");
     assert.equal(
-      (source.match(/<PastExecutionsSection candidates=\{pastExecutions\} \/>/g) ?? []).length,
+      (source.match(/<PastExecutionsSection candidates=\{pastExecutions\}/g) ?? []).length,
       2,
       "🔴 두 번이어야 한다 — 도는 실행이 있을 때와, 그만둔 뒤 불러오기 카드만 설 때"
     );
+    // 🔵 둘 중 **실행이 없을 때** 가지는 그대로 읽기 전용이다 — 붙일 실행이 없다.
+    assert.match(source, /<PastExecutionsSection candidates=\{pastExecutions\} \/>/);
   });
 
   test("🔴 도는 실행이 없을 때도 그린다 — 그만둔 뒤의 화면이 바로 그 모습이다", () => {
@@ -270,7 +392,13 @@ describe("실행 화면 어디에 놓였는가", () => {
 
   test("도는 실행의 화면 **아래**다 — 큰 카드도 띠도 목록도 밀어내지 않는다", () => {
     const at = source.lastIndexOf("<PastExecutionsSection");
-    for (const tag of ["<ProgressSummary", "<ExecutionFlowStrip", "<CurrentTaskCard", "group={fold.remaining}", "group={fold.done}"]) {
+    for (const tag of [
+      "<ProgressSummary",
+      "<ExecutionFlowStrip",
+      "<CurrentTaskCard",
+      "group={fold.remaining}",
+      "group={historyFold.fold}",
+    ]) {
       const tagAt = source.indexOf(tag);
       assert.ok(tagAt >= 0, `${tag} 이 화면에서 사라졌다`);
       assert.ok(tagAt < at, `${tag} 이 「이 건의 다른 절차」 아래로 내려갔다`);

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import ExecutionFoldSection from "./ExecutionFoldSection";
 import {
   buildPastExecutionPanel,
@@ -11,18 +12,46 @@ import {
  * (2026-11-02, 조각 6).
  *
  * ──────────────────────────────────────────────────────────────────────
- * 🔴 읽기 전용이다 — 누를 것이 하나도 없다
+ * 🔴 이 파일은 **아무 단추도 안 그린다**
  * ──────────────────────────────────────────────────────────────────────
- * 단추도 링크도 안 그린다. 있는 것처럼 보이는 자리를 만들면 눌러 본 사람이 아무
- * 일도 안 일어나는 화면을 만난다.
+ * 단추도 링크도 여기서 만들지 않는다. 있는 것처럼 보이는 자리를 만들면 눌러 본
+ * 사람이 아무 일도 안 일어나는 화면을 만난다.
  *
- *  - 끝난 줄 — 되살리는 길이 이 조각에 없다. 그만둔 실행은 서버가 노드 수정을
- *    아예 거절하므로(「그만둔 실행의 노드는 더 못 건드린다」) 단추를 그려 봤자
- *    전부 거절로 끝난다.
+ *  - 그만둔 줄 — 되살리는 길이 아직 없다. 서버가 그 실행의 노드 수정을 아예
+ *    거절하므로(「그만둔 실행의 노드는 더 못 건드린다」) 단추를 그려 봤자 전부
+ *    거절로 끝난다.
  *  - ⚠️ **도는 줄** — 눌러서 큰 카드를 그쪽으로 옮기는 길도 **아직 없다.** 큰
  *    카드에 설 실행은 getActiveExecutionForCase 가 차례로 하나 고르고(안 끝난 것
  *    먼저, 나중에 시작한 것 먼저) 사람이 고를 수단이 없다. 여기 단추를 먼저
  *    그리면 누르는 곳만 있고 가는 곳이 없다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 예외는 **받아 온 것 하나**뿐이다 — renderRowAction(2026-11-02, 조각 8)
+ * ──────────────────────────────────────────────────────────────────────
+ * 마친 실행은 이제 화면 위에 요약 상자로 서지 않고 **이 묶음의 한 줄로 내려온다**
+ * (placeExecutionSummary). 그런데 [실행 그만두기]는 잘못 끝낸 것을 **되돌리는
+ * 유일한 길**이라(「다시 열기」는 없다), 상자가 내려오면서 그 단추까지 화면에서
+ * 사라지면 안 된다.
+ *
+ * 🔴 처음 판(같은 날)은 **내려온 그 한 줄에만** 붙였는데, 사용자가 눈으로 보고
+ * 바로잡았다 — 「[실행 그만두기]가 [중단 마침]인 해당 건에 대한 [실행 그만두기]
+ * 인지 모든 [중단 마침]에 대한 그만두기인지 모르겠어. [중단 마침] 건별로 [실행
+ * 그만두기]가 있도록 해주고.」 줄이 여럿일 때 **하나에만** 달려 있으면 그것이
+ * 그 줄의 것인지 묶음 전체의 것인지 눈으로 안 갈린다.
+ *
+ * 그래서 지금은 **그만둘 수 있는 줄마다** 하나씩 붙인다:
+ *
+ *  - **어느 줄에 붙는가**는 도메인이 정한다(row.abandonBlockedReason —
+ *    resolveAbandonBlockedReason). 붙는 것은 **중단 마침 · 진행 중** 둘이고
+ *    완주와 그만둠에는 안 붙는다(2026-11-02 사용자 결정 — 완주는 끝까지 다 한
+ *    기록이라 치울 이유가 없다). 여기서 배지를 다시 보고 가르지 않는다 —
+ *    잣대가 두 벌이 되면 「그만둔 줄에 또 그만두기」 같은 것이 조용히 생긴다.
+ *  - **무엇을 붙이는가**는 실행 화면이 만든다(renderRowAction). 버전·권한을
+ *    그쪽이 쥐고 있고, 이 파일은 서버 컴포넌트라 단추를 만들 수도 없다.
+ *  - 줄 하나를 **테두리 두른 칸**으로 그린다. 단추가 그 테두리 **안**에 있어야
+ *    「이 줄의 것」이 눈에 보인다 — 위 지적의 본체가 그것이다.
+ *
+ * 받지 않으면(renderRowAction 이 null) 이 묶음에는 누를 것이 하나도 없다.
  *
  * ──────────────────────────────────────────────────────────────────────
  * 🔴 판정을 **다시 하지 않는다**
@@ -58,9 +87,21 @@ function formatWhen(iso: string): string {
   return new Date(iso).toLocaleString("ko-KR");
 }
 
-function PastExecutionLine({ row }: { row: PastExecutionRow }) {
+/**
+ * 그 줄에 붙일 것을 **줄 하나를 받아** 만들어 주는 함수. 실행 화면이 내려보낸다 —
+ * 줄마다 다른 것(실행 id · 버전 · 이름)을 쥐어 줘야 하므로 통짜 노드 하나로는 안
+ * 된다. 🔴 「어느 줄에 붙일지」는 이 함수가 아니라 도메인이 정한다
+ * (row.abandonBlockedReason) — 아래 호출부 참조.
+ */
+export type PastExecutionRowActionRenderer = (row: PastExecutionRow) => ReactNode;
+
+function PastExecutionLine({ row, action }: { row: PastExecutionRow; action: ReactNode | null }) {
   return (
-    <li data-past-execution className="flex flex-col gap-1 border-t border-zinc-100 py-2 first:border-t-0 first:pt-0 dark:border-zinc-800">
+    // 🔴 줄마다 **제 테두리**를 두른다(2026-11-02, 조각 8 보완). 전에는 가는 구분선
+    // 하나로 나뉜 평평한 목록이었는데, 줄 안에 단추가 생기자 그 단추가 어느 줄의
+    // 것인지 눈으로 안 갈렸다 — 사용자가 바로 그것을 지적했다. 칸이 닫혀 있으면
+    // 「이 칸 안의 단추」로 읽힌다.
+    <li data-past-execution className="flex flex-col gap-1 rounded-md border border-zinc-200 p-2 dark:border-zinc-800">
       <div className="flex flex-wrap items-center gap-2">
         <span
           data-past-execution-badge={row.badge.outcome}
@@ -92,11 +133,24 @@ function PastExecutionLine({ row }: { row: PastExecutionRow }) {
           사유: {row.abandonReason}
         </p>
       )}
+      {/* 🔵 그만둘 수 있는 줄에만 뜬다 — 지금 그것은 [실행 그만두기] 하나다.
+          **줄 테두리 안**이고 줄 글자 아래라, 이 칸의 것임이 눈에 보인다. */}
+      {action && <div className="mt-1 flex flex-wrap items-center gap-2">{action}</div>}
     </li>
   );
 }
 
-export default function PastExecutionsSection({ candidates }: { candidates: PastExecutionCandidate[] }) {
+export default function PastExecutionsSection({
+  candidates,
+  renderRowAction = null,
+}: {
+  candidates: PastExecutionCandidate[];
+  /**
+   * 그만둘 수 있는 **줄마다** 불린다. 안 주면 이 묶음에는 누를 것이 하나도 없다.
+   * 🔴 「그만둘 수 있는가」는 이 함수가 아니라 도메인이 정한다 — 아래 호출부.
+   */
+  renderRowAction?: PastExecutionRowActionRenderer | null;
+}) {
   const panel = buildPastExecutionPanel(candidates);
   // 🔴 담을 줄이 한 줄도 없으면 묶음을 **아예 안 그린다**(조각 4 의 「담을 카드가
   // 없는 묶음은 안 그린다」 그대로). 도메인이 null 을 돌려주면 그릴 것이 없다는
@@ -105,9 +159,16 @@ export default function PastExecutionsSection({ candidates }: { candidates: Past
 
   return (
     <ExecutionFoldSection group={panel.fold}>
-      <ul className="flex flex-col">
+      <ul className="flex flex-col gap-2">
         {panel.rows.map((row) => (
-          <PastExecutionLine key={row.executionId} row={row} />
+          <PastExecutionLine
+            key={row.executionId}
+            row={row}
+            /* 🔴 「그만둘 수 있는가」를 배지로 다시 가르지 않는다 — 도메인이
+               까닭(abandonBlockedReason)을 돌려주면 그 답을 따를 뿐이다. 완주한
+               줄과 이미 그만둔 줄은 그 까닭이 차 있어 단추가 안 붙는다. */
+            action={row.abandonBlockedReason === null && renderRowAction ? renderRowAction(row) : null}
+          />
         ))}
       </ul>
     </ExecutionFoldSection>

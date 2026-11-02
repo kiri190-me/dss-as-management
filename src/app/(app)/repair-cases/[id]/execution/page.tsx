@@ -20,6 +20,7 @@ import {
 } from "@/lib/db/queries/procedure-case-execution";
 import { getWorkRecordCaseContext } from "@/lib/db/queries/repair-case-work-records";
 import { pickCurrentTaskNode } from "@/lib/domain/procedure-execution-focus";
+import { placeExecutionSummary } from "@/lib/domain/procedure-execution-summary-placement";
 import {
   buildWorkRecordProcedureLink,
   type WorkRecordProcedureLink,
@@ -95,10 +96,19 @@ export default async function RepairCaseExecutionPage({
   // 작업 기록을 붙일 절차 항목들과, 처음 골라져 있을 것. 빈 실행에서는 둘 다
   // 비어 있고, 그때 폼은 드롭다운 자체를 안 그린다.
   let procedureLink: WorkRecordProcedureLink = { options: [], defaultNodeId: null };
-  // 「이 건의 다른 절차」의 재료 — 🔴 **지금 화면에 선 실행을 빼고** 읽는다. 안
-  // 빼면 그 실행이 큰 카드와 아래 줄에 두 번 뜬다. 화면에 선 것이 없으면(그만둔
-  // 뒤) 뺄 것도 없어 이 건의 실행이 전부 재료가 된다.
-  const pastExecutions = await getOtherExecutionsForCase(resolved.id, activeExecution?.id ?? null);
+  // 「이 건의 다른 절차」의 재료 — 🔴 **화면 위에 상자로 서 있는 실행만** 빼고
+  // 읽는다. 안 빼면 그 실행이 상자와 아래 줄에 두 번 뜨고, 거꾸로 **마친
+  // 실행까지 빼면** 화면 어디에도 안 뜬다(마친 상자는 위에 안 서고 그 줄로
+  // 내려간다 — 2026-11-02, 조각 8).
+  //
+  // 🔴 그 판정을 여기서 다시 하지 않는다. 실행 화면이 상자를 세울 때 쓰는 것과
+  // **같은 함수**(placeExecutionSummary)로, **같은 사실**로 고른다 — 두 벌로
+  // 두면 한쪽만 고치는 날 「두 번 뜨거나 아예 안 뜨거나」가 되고, 둘 다 오류
+  // 없이 화면에서만 드러난다.
+  const summaryPlacement = placeExecutionSummary(
+    activeExecution ? { executionId: activeExecution.id, isExecutionFinished: activeExecution.completedAt !== null } : null
+  );
+  const pastExecutions = await getOtherExecutionsForCase(resolved.id, summaryPlacement.excludedFromOtherRuns);
   if (!activeExecution) {
     const templateOptions = await getExecutableTemplateOptions();
     procedureScreen = (

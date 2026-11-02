@@ -219,6 +219,9 @@ describe("실행 화면이 띠를 어디에 세우고 무엇을 넘기는가", (
     // 이웃 execution-list-fold.test.tsx 가 렌더해서 잰다.
     assert.ok(!/<details/.test(screen), "접기는 ExecutionFoldSection 이 한다 — 화면에 <details> 를 다시 적지 않는다");
     assert.match(flat, /<ExecutionFoldSection group=\{fold\.remaining\}>/);
-    assert.match(flat, /<ExecutionFoldSection group=\{fold\.done\}>/);
+    // 🔵 2026-11-02(조각 8): 둘째 묶음의 이름이 바뀌었다. 「지나온 길」의 카드가
+    //    「실행 이력」 안으로 들어가면서 group 이 historyFold.fold 가 됐다 —
+    //    재는 뜻은 그대로다(띠 아래에 접히는 묶음이 **둘** 있다).
+    assert.match(flat, /<ExecutionFoldSection group=\{historyFold\.fold\}>/);
   });
 });

@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   buildPastExecutionPanel,
   classifyPastExecution,
+  resolveAbandonBlockedReason,
   type PastExecutionCandidate,
+  type PastExecutionOutcome,
 } from "./procedure-execution-past-runs";
 import { assessExecutionFinish } from "./procedure-execution-lifecycle";
 import { buildExecutionListFold } from "./procedure-execution-list-fold";
@@ -42,6 +44,8 @@ function candidate(overrides: Partial<PastExecutionCandidate> = {}): PastExecuti
     startedAt: "2026-11-02T01:00:00.000Z",
     startedByName: "홍길동",
     completedAt: "2026-11-02T02:00:00.000Z",
+    // 실행 행 자신의 낙관적 잠금 토큰. 줄에 붙는 [실행 그만두기]가 그대로 넘긴다.
+    version: 1,
     isDeleted: false,
     deletedAt: null,
     deletedByName: null,
@@ -408,7 +412,10 @@ describe("🔴 담을 줄이 없으면 묶음을 **안 그린다**", () => {
     assert.equal(panel.fold.count, 2);
     assert.equal(panel.fold.open, false, "펼쳐져 있으면 지금 할 일이 아래로 밀린다");
     assert.equal(panel.fold.openReason, null);
-    assert.equal(panel.fold.note, null, "도는 것이 없으면 딱지도 없다");
+    // 🔵 2026-11-02(조각 8 보완)에 딱지가 **갈래별 수 전부**로 바뀌었다 — 전에는
+    //    「진행 중」이 없으면 딱지도 없었다. 사용자가 「완주 몇 중단 마침 몇,
+    //    그만둠 몇을 적어줘」라고 정했다. 시험은 지우지 않고 새 글자를 잰다.
+    assert.deepEqual(panel.fold.note, { text: "완주 1 · 그만둠 1", tone: "MUTED" });
   });
 
   test("🔴 도는 것이 섞이면 **제목 줄에 「진행 중 N」**이 남는다 — 접어 둔 채로도 보여야 한다", () => {
@@ -418,7 +425,171 @@ describe("🔴 담을 줄이 없으면 묶음을 **안 그린다**", () => {
     const panel = buildPastExecutionPanel([MEASURED_STILL_RUNNING, MEASURED_ABANDONED, MEASURED_COMPLETED_ALL]);
     assert.ok(panel);
     assert.equal(panel.fold.summary, "이 건의 다른 절차 (3)");
-    assert.deepEqual(panel.fold.note, { text: "진행 중 1", tone: "MUTED" });
+    // 🔵 조각 8 보완에서 딱지에 **나머지 갈래도 함께** 적게 됐다. 「진행 중」은
+    //    여전히 **맨 앞**이라 눈에 먼저 들어온다 — 재는 뜻은 그대로다.
+    assert.deepEqual(panel.fold.note, { text: "진행 중 1 · 완주 1 · 그만둠 1", tone: "MUTED" });
+    assert.match(panel.fold.note!.text, /^진행 중 1/, "도는 것이 뒤로 밀리면 찾으러 온 사람이 또 못 찾는다");
     assert.equal(panel.fold.open, false, "딱지로 알리기로 했으니 펼치지는 않는다");
+  });
+});
+
+/**
+ * 🔴 2026-11-02(조각 8 보완) — 줄마다 [실행 그만두기]가 붙는다. 사용자 말:
+ * 「[실행 그만두기]가 [중단 마침]인 해당 건에 대한 [실행 그만두기]인지 모든
+ * [중단 마침]에 대한 그만두기인지 모르겠어. [중단 마침] 건별로 [실행 그만두기]가
+ * 있도록 해주고.」 그리고 범위를 좁혀 — 「[중단 마침], [진행중]에만 붙이면 돼.」
+ */
+describe("🔴 어느 줄에 [실행 그만두기]가 붙는가", () => {
+  /** 네 갈래를 **한 표본에** 담는다 — 「둘만 붙는다」가 한눈에 보이게. */
+  const ALL_FOUR = [MEASURED_COMPLETED_ALL, MEASURED_FINISHED_WITH_REMAINING, MEASURED_ABANDONED, MEASURED_STILL_RUNNING];
+
+  test("🔵 먼저 — 표본에 네 갈래가 **다 들어 있다**", () => {
+    assert.deepEqual(new Set(ALL_FOUR.map(outcomeOf)).size, 4, "갈래가 빠지면 아래가 그 갈래를 안 잰다");
+  });
+
+  test("🔴 붙는 것은 **중단 마침 · 진행 중** 둘뿐이다", () => {
+    const panel = buildPastExecutionPanel(ALL_FOUR);
+    assert.ok(panel);
+    assert.deepEqual(
+      panel.rows.map((row) => [row.badge.label, row.abandonBlockedReason]),
+      [
+        ["진행 중", null],
+        ["완주", "COMPLETED_ALL"],
+        ["중단 마침", null],
+        ["그만둠", "ALREADY_ABANDONED"],
+      ]
+    );
+  });
+
+  test("🔴 **완주에는 안 붙는다** — 끝까지 다 한 기록이라 치울 이유가 없다", () => {
+    // 2026-11-02 사용자 결정. 그만두기는 「잘못 불러왔거나 안 쓰게 된 것을 치우는」
+    // 길인데(단추의 title 그대로), 완주한 절차는 그 어느 쪽도 아니다.
+    // 🔵 서버가 막는 것이 아니다 — 끝낸 실행도 서버는 그만둘 수 있게 열어 두고
+    //    있다. 화면에 쓸모없는 단추를 안 두는 것이고, 되돌리는 자리가 이 함수다.
+    assert.equal(resolveAbandonBlockedReason(classifyPastExecution(MEASURED_COMPLETED_ALL)), "COMPLETED_ALL");
+  });
+
+  test("🔴 이미 그만둔 줄에도 안 붙는다 — 두 번 치울 수 없다", () => {
+    assert.equal(resolveAbandonBlockedReason(classifyPastExecution(MEASURED_ABANDONED)), "ALREADY_ABANDONED");
+  });
+
+  test("🔴 못 붙는 까닭 둘이 **서로 다른 값**이다 — 한 값으로 뭉치면 왜인지 못 묻는다", () => {
+    const blocked = ALL_FOUR.map((c) => resolveAbandonBlockedReason(classifyPastExecution(c))).filter((r) => r !== null);
+    assert.equal(new Set(blocked).size, 2, blocked.join(" | "));
+  });
+
+  test("🔴 네 갈래 **어느 것도 빠뜨리지 않는다** — 판정이 전부 돌아간다", () => {
+    const outcomes: PastExecutionOutcome[] = ["COMPLETED_ALL", "FINISHED_WITH_REMAINING", "ABANDONED", "STILL_RUNNING"];
+    for (const outcome of outcomes) {
+      const reason = resolveAbandonBlockedReason({ outcome, label: "x", tone: "MUTED" });
+      assert.equal(
+        reason === null,
+        outcome === "FINISHED_WITH_REMAINING" || outcome === "STILL_RUNNING",
+        `${outcome} 의 답이 바뀌었다: ${reason}`
+      );
+    }
+  });
+
+  test("🔴 줄마다 **제 version** 을 싣는다 — 한 벌을 돌려 쓰면 남의 실행을 치우려 든다", () => {
+    const panel = buildPastExecutionPanel([
+      candidate({ executionId: "a", version: 7, completedAt: null, nodes: nodesOf({ PENDING: 2 }) }),
+      candidate({ executionId: "b", version: 12, completedAt: null, nodes: nodesOf({ PENDING: 2 }) }),
+    ]);
+    assert.ok(panel);
+    assert.deepEqual(
+      panel.rows.map((row) => [row.executionId, row.version]).sort(),
+      [
+        ["a", 7],
+        ["b", 12],
+      ]
+    );
+    // 🔵 둘이 다른 값이어야 「돌려 쓴다」가 공짜로 통과하지 않는다.
+    assert.notEqual(panel.rows[0].version, panel.rows[1].version);
+  });
+});
+
+/**
+ * 🔴 2026-11-02(조각 8 보완) — 사용자 말: 「[이 건의 다른 절차]가 접혀 있을 때
+ * 완주 몇 중단 마침 몇, 그만둠 몇을 적어줘.」 전에는 「진행 중 N」 하나뿐이었다.
+ */
+describe("🔴 접힌 줄의 딱지에 **갈래별 수**가 다 적힌다", () => {
+  /** 사용자가 적어 준 모습 그대로 — 완주 1 · 중단 마침 1 · 그만둠 2. */
+  const SECOND_ABANDONED = candidate({
+    executionId: "11111111-2222-3333-4444-555555555555",
+    nodes: nodesOf({ PENDING: 5 }),
+    startedAt: "2026-11-02T00:10:00.000Z",
+    completedAt: null,
+    isDeleted: true,
+    deletedAt: "2026-11-02T00:40:00.000Z",
+    deletedByName: "홍길동",
+    deleteReason: "다른 절차로 바꿨습니다",
+  });
+
+  /** 딱지 글자에서 수만 뽑아 더한다 — 괄호 안 수와 맞춰 보려고. */
+  function sumOfNote(text: string): number {
+    return (text.match(/\d+/g) ?? []).reduce((acc, n) => acc + Number(n), 0);
+  }
+
+  test("네 갈래가 다 있으면 **이 글자 그대로** 뜬다", () => {
+    const panel = buildPastExecutionPanel([
+      MEASURED_COMPLETED_ALL,
+      MEASURED_FINISHED_WITH_REMAINING,
+      MEASURED_ABANDONED,
+      MEASURED_STILL_RUNNING,
+    ]);
+    assert.ok(panel);
+    assert.deepEqual(panel.fold.note, { text: "진행 중 1 · 완주 1 · 중단 마침 1 · 그만둠 1", tone: "MUTED" });
+  });
+
+  test("사용자가 적어 준 모습 — 「완주 1 · 중단 마침 1 · 그만둠 2」", () => {
+    const panel = buildPastExecutionPanel([
+      MEASURED_COMPLETED_ALL,
+      MEASURED_FINISHED_WITH_REMAINING,
+      MEASURED_ABANDONED,
+      SECOND_ABANDONED,
+    ]);
+    assert.ok(panel);
+    assert.equal(panel.fold.summary, "이 건의 다른 절차 (4)");
+    assert.equal(panel.fold.note?.text, "완주 1 · 중단 마침 1 · 그만둠 2");
+  });
+
+  test("🔴 **0 은 안 적는다** — 없는 갈래는 글자에 아예 안 나온다", () => {
+    const panel = buildPastExecutionPanel([MEASURED_ABANDONED]);
+    assert.ok(panel);
+    assert.equal(panel.fold.note?.text, "그만둠 1");
+    for (const word of ["완주", "중단 마침", "진행 중", "0"]) {
+      assert.ok(!panel.fold.note!.text.includes(word), `${word} 가 적혔다: ${panel.fold.note!.text}`);
+    }
+  });
+
+  test("🔴 딱지 수의 **합 = 괄호 안 수**다 — 갈래가 늘면 조용히 안 맞게 된다", () => {
+    const samples = [
+      [MEASURED_ABANDONED],
+      [MEASURED_STILL_RUNNING, MEASURED_ABANDONED],
+      [MEASURED_COMPLETED_ALL, MEASURED_FINISHED_WITH_REMAINING, MEASURED_ABANDONED, SECOND_ABANDONED],
+      [MEASURED_COMPLETED_ALL, MEASURED_FINISHED_WITH_REMAINING, MEASURED_ABANDONED, MEASURED_STILL_RUNNING],
+    ];
+    for (const sample of samples) {
+      const panel = buildPastExecutionPanel(sample);
+      assert.ok(panel?.fold.note, "딱지가 없으면 접힌 줄에서 갈래가 통째로 안 보인다");
+      assert.equal(sumOfNote(panel.fold.note.text), panel.fold.count, panel.fold.note.text);
+      assert.equal(panel.fold.count, sample.length);
+    }
+  });
+
+  test("🔵 「실행 이력」 딱지와 **같은 모양**이다 — 가름표도 tone 도", () => {
+    // 두 묶음이 다른 모양이면 읽는 사람이 둘을 다른 것으로 본다. 거기는
+    // 「완료 4 · 건너뜀 1」이다(buildExecutionHistoryFold).
+    const panel = buildPastExecutionPanel([MEASURED_COMPLETED_ALL, MEASURED_ABANDONED]);
+    assert.ok(panel?.fold.note);
+    assert.match(panel.fold.note.text, / · /);
+    assert.equal(panel.fold.note.tone, "MUTED", "경고색을 쓰면 「고장」으로 읽힌다");
+  });
+
+  test("🔵 **진행 중이 맨 앞**이다 — 줄 차례와 같은 잣대(도는 것이 맨 위)", () => {
+    const panel = buildPastExecutionPanel([MEASURED_ABANDONED, MEASURED_STILL_RUNNING]);
+    assert.ok(panel?.fold.note);
+    assert.equal(panel.fold.note.text, "진행 중 1 · 그만둠 1");
+    assert.equal(panel.rows[0].badge.outcome, "STILL_RUNNING", "딱지 차례와 줄 차례가 어긋나면 서로를 설명하지 못한다");
   });
 });

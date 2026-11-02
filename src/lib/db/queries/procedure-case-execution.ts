@@ -260,6 +260,11 @@ export async function getOtherExecutionsForCase(
       startedAt: procedureCaseExecutions.startedAt,
       startedBy: procedureCaseExecutions.startedBy,
       completedAt: procedureCaseExecutions.completedAt,
+      // 🔴 줄마다 [실행 그만두기]가 붙으면서 필요해졌다(2026-11-02, 조각 8 보완).
+      // 낙관적 잠금이 **실행 행 자신의** version 을 expectedVersion 으로 받는데,
+      // 줄이 여럿일 때 한 값을 돌려 쓰면 남의 version 으로 남의 실행을 그만두려
+      // 들거나(엉뚱한 CONFLICT) 맞아떨어져 버린다. 줄마다 제 것을 싣는다.
+      version: procedureCaseExecutions.version,
       isDeleted: procedureCaseExecutions.isDeleted,
       deletedAt: procedureCaseExecutions.deletedAt,
       deletedBy: procedureCaseExecutions.deletedBy,
@@ -318,6 +323,7 @@ export async function getOtherExecutionsForCase(
     startedAt: e.startedAt.toISOString(),
     startedByName: nameById.get(e.startedBy) ?? null,
     completedAt: e.completedAt ? e.completedAt.toISOString() : null,
+    version: e.version,
     isDeleted: e.isDeleted,
     deletedAt: e.deletedAt ? e.deletedAt.toISOString() : null,
     // 🔴 마친 사람은 여기 없다 — 이 표에 completed_by 칸이 아예 없다

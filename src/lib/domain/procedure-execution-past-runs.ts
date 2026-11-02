@@ -73,7 +73,7 @@
 
 import { assessExecutionFinish } from "./procedure-execution-lifecycle";
 import { formatProcedureTemplateTitle } from "./procedure-template-title";
-import type { ExecutionFoldGroup } from "./procedure-execution-list-fold";
+import type { ExecutionFoldGroup, ExecutionFoldNote } from "./procedure-execution-list-fold";
 import type { ProcedureCaseExecutionNodeStatus } from "./procedure-case-execution-types";
 
 export type PastExecutionOutcome = "COMPLETED_ALL" | "FINISHED_WITH_REMAINING" | "ABANDONED" | "STILL_RUNNING";
@@ -110,11 +110,33 @@ export type PastExecutionCandidate = {
   startedAt: string;
   startedByName: string | null;
   completedAt: string | null;
+  /**
+   * 실행 **행 자신의** 낙관적 동시성 토큰(노드마다 따로 있는 version 과 다른 값).
+   * 줄에 붙는 [실행 그만두기]가 expectedVersion 으로 그대로 넘긴다 — 🔴 줄마다
+   * 제 것이어야 한다(2026-11-02, 조각 8 보완).
+   */
+  version: number;
   isDeleted: boolean;
   deletedAt: string | null;
   deletedByName: string | null;
   deleteReason: string | null;
 };
+
+/**
+ * 이 줄을 **그만둘 수 없는** 까닭. 그만둘 수 있으면 null.
+ *
+ * 🔴 참·거짓이 아니라 까닭이다 — 「왜 이 줄에만 단추가 없지」를 화면도 시험도
+ * 물을 수 있어야 한다. 둘이 서로 다른 까닭이라 한 값으로 뭉치지 않는다.
+ */
+export type PastExecutionAbandonBlockedReason =
+  /** 이미 그만둔 실행이다. 서버도 그 실행의 노드 수정을 아예 거절한다. */
+  | "ALREADY_ABANDONED"
+  /**
+   * 끝까지 다 한 기록이다(완주). 🔵 **치울 이유가 없다** — 그만두기는 「잘못
+   * 불러왔거나 이 절차를 안 쓰게 됐을 때 치우는」 길인데(단추의 title 그대로),
+   * 완주한 절차는 그 어느 쪽도 아니다. 2026-11-02 사용자 결정.
+   */
+  | "COMPLETED_ALL";
 
 export type PastExecutionRow = {
   executionId: string;
@@ -142,6 +164,13 @@ export type PastExecutionRow = {
   startedNote: string | null;
   /** 그만둔 사유. 그만둔 것이 아니면 null. */
   abandonReason: string | null;
+  /** 이 줄의 실행 행 version — [실행 그만두기]가 그대로 넘긴다. */
+  version: number;
+  /**
+   * 🔴 이 줄에 [실행 그만두기]를 붙일 수 있는가 — 못 붙이면 **까닭**(위 타입).
+   * 가르는 규칙은 아래 resolveAbandonBlockedReason 한 곳에 있다.
+   */
+  abandonBlockedReason: PastExecutionAbandonBlockedReason | null;
 };
 
 export type PastExecutionPanel = {
@@ -177,6 +206,45 @@ export function classifyPastExecution(
 }
 
 /**
+ * 이 줄에 [실행 그만두기]를 붙일 수 있는가 — 못 붙이면 **까닭**을 돌려준다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 왜 줄마다 붙는가 · 왜 **배지로** 가르는가
+ * ──────────────────────────────────────────────────────────────────────
+ * 사용자가 눈으로 보고 정했다(2026-11-02) — 「[실행 그만두기]가 [중단 마침]인
+ * 해당 건에 대한 [실행 그만두기]인지 모든 [중단 마침]에 대한 그만두기인지
+ * 모르겠어. [중단 마침] 건별로 [실행 그만두기]가 있도록 해주고.」 그래서 단추가
+ * **줄마다** 붙고, 어느 줄에 붙일지는 화면이 다시 가르지 않고 여기서 정한다.
+ *
+ * 🔴 **붙는 것은 둘뿐이다 — 중단 마침 · 진행 중**(2026-11-02 사용자 결정):
+ *
+ *   완주      … 🔴 **안 붙는다.** 끝까지 다 한 기록이라 치울 이유가 없다.
+ *                그만두기는 「잘못 불러왔거나 이 절차를 안 쓰게 됐을 때 치우는」
+ *                길인데(단추의 title 그대로), 완주한 절차는 그 어느 쪽도 아니다.
+ *   중단 마침 … ✅ 붙는다. 「여기까지가 이 건에 필요한 전부」로 끊은 것이라,
+ *                애초에 잘못 불러온 것이었을 수 있다.
+ *   진행 중   … ✅ 붙는다. 큰 카드에 못 선 둘째 절차가 여기 있고, 잘못 불러온
+ *                것을 치울 길이 이 줄뿐이다.
+ *   그만둠    … 🔴 안 붙는다. 이미 치운 것이다.
+ *
+ * `isDeleted`·`completedAt` 을 직접 보지 않고 **배지의 갈래**로 가르는 까닭:
+ * 「마친 뒤에 그만둔 행」처럼 두 칸이 다 찬 자료에서 배지와 단추가 따로 놀면
+ * 안 된다(그 행은 그만둠이 이긴다 — 위 머리말). 배지 하나를 따르면 어긋날 길이
+ * 없다.
+ *
+ * 🔵 **서버가 막는 것이 아니다.** 완주한 실행도 서버는 그만둘 수 있게 열어 두고
+ * 있다(loadExecutionNodeOrFail 의 「끝낸 실행은 막지 않는다」). 여기서 안 그리는
+ * 것은 **화면에 쓸모없는 단추를 안 두려는** 것이고, 되돌려야 하는 날이 오면
+ * 이 함수 한 줄이 그 결정 자리다.
+ */
+export function resolveAbandonBlockedReason(badge: PastExecutionBadge): PastExecutionAbandonBlockedReason | null {
+  if (badge.outcome === "ABANDONED") return "ALREADY_ABANDONED";
+  if (badge.outcome === "COMPLETED_ALL") return "COMPLETED_ALL";
+  // 남는 둘 — 중단 마침(FINISHED_WITH_REMAINING) · 진행 중(STILL_RUNNING).
+  return null;
+}
+
+/**
  * 시각 옆에 적을 한 마디. **아는 만큼만** 적는다.
  *
  * 🔴 마친 사람은 **적을 수가 없다.** procedure_case_executions 에 completed_by
@@ -193,6 +261,60 @@ function buildWhenNote(badge: PastExecutionBadge, candidate: PastExecutionCandid
   if (badge.outcome === "ABANDONED") return withName(candidate.deletedByName, "그만둠");
   if (badge.outcome === "STILL_RUNNING") return withName(candidate.startedByName, "시작");
   return "마침";
+}
+
+/**
+ * 접힌 줄에 적는 **갈래별 수**. 「완주 1 · 중단 마침 1 · 그만둠 2」.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 왜 전부 적는가
+ * ──────────────────────────────────────────────────────────────────────
+ * 전에는 「진행 중 N」 하나만 적었다. 사용자가 눈으로 보고 정했다(2026-11-02) —
+ * 「[이 건의 다른 절차]가 접혀 있을 때 완주 몇 중단 마침 몇, 그만둠 몇을 적어줘.」
+ * 묶음이 **접힌 채가 기본**이라, 펼치지 않고도 이 건에서 무엇이 어떻게 끝났는지
+ * 알 수 있어야 한다.
+ *
+ * 🔵 **한 딱지에 묶어** 적는다 — 「실행 이력」의 「완료 4 · 건너뜀 1」과 **똑같은
+ * 모양**(같은 가름표 ` · `, 같은 tone). 두 묶음이 다른 모양이면 읽는 사람이 둘을
+ * 다른 것으로 본다.
+ *
+ * 🔵 「진행 중」만 따로 떼어 눈에 띄게 둘 수도 있었는데(성격이 다르다 — 지금 손댈
+ * 수 있는 것이다), **같은 딱지 안에 두되 맨 앞에** 적는 것으로 갈음했다. 위
+ * 「같은 모양으로」가 더 센 요구이고, 맨 앞 자리는 **줄 차례와도 같다**(도는 것이
+ * 맨 위에 온다) — 딱지를 읽은 차례대로 줄이 서 있는 셈이라 둘이 서로를 설명한다.
+ *
+ * 🔴 **0 은 안 적는다**(「전체 단계 보기」의 차단됨 · 「실행 이력」의 건너뜀과 같은
+ * 규약) — 「완주 0」은 읽을 가치가 없다.
+ *
+ * 🔴 **딱지 수의 합은 괄호 안 수와 같아야 한다.** 그래서 세는 자리가 rows 하나다 —
+ * 줄에서 세지 않고 후보에서 따로 세면 갈래 하나를 빠뜨렸을 때 조용히 어긋난다.
+ * 갈래가 늘어나는 날에는 아래 Record 가 **컴파일 오류**로 알려 준다.
+ *
+ * 🔵 딱지에 적는 낱말은 **그 줄의 배지에서 그대로** 가져온다(badge.label) — 여기
+ * 다시 적으면 배지는 「중단 마침」인데 딱지는 옛 낱말인 날이 온다.
+ */
+const NOTE_OUTCOME_ORDER: Record<PastExecutionOutcome, number> = {
+  // 지금 손댈 수 있는 것이 맨 앞. 줄 차례(도는 것이 맨 위)와 같은 잣대다.
+  STILL_RUNNING: 0,
+  COMPLETED_ALL: 1,
+  FINISHED_WITH_REMAINING: 2,
+  ABANDONED: 3,
+};
+
+function buildOutcomeNote(rows: readonly PastExecutionRow[]): ExecutionFoldNote | null {
+  const countByOutcome = new Map<PastExecutionOutcome, { label: string; count: number }>();
+  for (const row of rows) {
+    const seen = countByOutcome.get(row.badge.outcome);
+    if (seen) seen.count += 1;
+    else countByOutcome.set(row.badge.outcome, { label: row.badge.label, count: 1 });
+  }
+  if (countByOutcome.size === 0) return null;
+
+  const text = [...countByOutcome.entries()]
+    .sort(([a], [b]) => NOTE_OUTCOME_ORDER[a] - NOTE_OUTCOME_ORDER[b])
+    .map(([, { label, count }]) => `${label} ${count}`)
+    .join(" · ");
+  return { text, tone: "MUTED" };
 }
 
 /**
@@ -248,6 +370,10 @@ export function buildPastExecutionPanel(candidates: readonly PastExecutionCandid
       // 없지만, 「그만둠이 이긴다」로 갈린 행(둘 다 찬 자료)에서는 사유가 있는
       // 것이 정상이다.
       abandonReason: badge.outcome === "ABANDONED" ? candidate.deleteReason : null,
+      version: candidate.version,
+      // 🔴 붙는 줄은 둘뿐이다 — 중단 마침 · 진행 중. 가르는 규칙은 위 함수 하나에
+      // 있고, 여기서는 배지를 그대로 넘길 뿐이다.
+      abandonBlockedReason: resolveAbandonBlockedReason(badge),
     });
   }
 
@@ -265,7 +391,6 @@ export function buildPastExecutionPanel(candidates: readonly PastExecutionCandid
   rows.sort(
     (a, b) => isRunning(b) - isRunning(a) || b.whenAt.localeCompare(a.whenAt) || a.executionId.localeCompare(b.executionId)
   );
-  const runningCount = rows.filter((row) => isRunning(row) === 1).length;
 
   return {
     fold: {
@@ -280,17 +405,12 @@ export function buildPastExecutionPanel(candidates: readonly PastExecutionCandid
       // 예외를 두기 시작하면 접기가 다시 거의 안 듣는다.
       open: false,
       openReason: null,
-      // 🔵 대신 **제목 줄에 적는다.** 「전체 단계 보기」의 차단됨 딱지와 **똑같은
-      // 수**다 — 접어 둔 채로도 알아야 할 사실은 펼치는 것이 아니라 줄 머리에
-      // 적는 것으로 지킨다(ExecutionFoldSection 머리말).
-      //
-      // 여기서 알려야 할 것은 「아직 도는 것이 이 안에 들어 있다」 하나다. 이
-      // 딱지가 없으면 둘째로 불러온 절차가 접힌 줄 뒤에 숨어, 고치려던
-      // 「사라졌다」가 그대로 남는다.
+      // 🔵 대신 **제목 줄에 적는다** — 접어 둔 채로도 알아야 할 사실은 펼치는
+      // 것이 아니라 줄 머리에 적는 것으로 지킨다(ExecutionFoldSection 머리말).
       //
       // 🔵 tone 은 MUTED 다 — ATTENTION(호박색)은 「사람이 막아 둔 것」을 뜻하고,
       // 이 조각의 글자에는 경고색을 안 쓰기로 했다. 도는 실행은 고장이 아니다.
-      note: runningCount > 0 ? { text: `진행 중 ${runningCount}`, tone: "MUTED" } : null,
+      note: buildOutcomeNote(rows),
     },
     rows,
   };
