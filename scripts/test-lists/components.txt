@@ -33,6 +33,10 @@ src/components/quotes/QuotePrintView.test.tsx
 src/components/quotes/quote-print-cost-groups.test.tsx
 src/components/repair-cases/work-history/DatabaseWorkHistoryScreen.test.tsx
 src/components/procedures/procedure-publish-flow.test.tsx
+# 「지금 할 일」 큰 카드와 실행 화면의 🔴 불변식(2026-11-02). 지시문을 펼쳐 그리는가 ·
+# 판단 갈래 단추가 창 없이 보이는가 · 아래 목록에서 같은 카드를 두 번 그리지 않는가.
+# 서버 쪽 자동 전진은 db 목록의 procedure-case-execution.integration.test.ts 30~38번이 본다.
+src/components/procedures/execution/execution-current-task.test.ts
 src/components/repair-cases/files/preview-backfill.test.ts
 src/components/repair-cases/files/StoredAttachmentList.test.tsx
 src/components/repair-cases/files/AttachmentViewer.test.tsx

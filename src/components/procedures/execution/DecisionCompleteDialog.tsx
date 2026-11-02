@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ExecutionOutgoingEdgeOption } from "@/lib/db/queries/procedure-case-execution";
+import { formatBranchChoiceLabel } from "./execution-branch-choice";
 
 /** DECISION-node completion — requires selecting exactly one of the node's own outgoing branches (plan §6); a plain confirm dialog is not enough since completing a DECISION always needs a selection. */
 export default function DecisionCompleteDialog({
@@ -73,7 +74,7 @@ export default function DecisionCompleteDialog({
               onChange={() => setSelectedEdgeId(edge.edgeId)}
             />
             <span>
-              {edge.branchLabel ?? edge.branchType} → {edge.toNodeTitle}
+              {formatBranchChoiceLabel(edge)} → {edge.toNodeTitle}
             </span>
           </label>
         ))}

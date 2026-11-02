@@ -133,6 +133,31 @@ function makeScrambledExecutionTestTemplate(code: string): ExtractedTemplate {
   return { ...base, nodes: SCRAMBLED_NODE_ORDER.map((nodeCode) => byCode.get(nodeCode)!) };
 }
 
+/**
+ * 위 판과 같은데 **TASK 노드 n2 에서 나가는 간선이 둘**인 것(n3, n5).
+ *
+ * 자동 전진은 「판단이 아니면 나가는 간선이 하나뿐일 때만」 세운다. 기본 판은
+ * 판단이 아닌 노드가 전부 간선 하나라서, 이 판이 없으면 「여럿이면 안 세운다」를
+ * 잴 표본 자체가 없다.
+ *
+ * 구조 검사에 걸리지 않는다 — 비판단 노드의 간선 개수를 제한하는 규칙은 없고
+ * (procedure-graph-structural-validation.ts), 시작/대상/분기 유형이 모두 같은
+ * 중복 간선(DUPLICATE_EDGE)도 아니다. 🔴 분기 유형은 CUSTOM 이어야 한다 —
+ * YES/NO/NG/NORMAL 은 **판단 노드에서만** 쓸 수 있어서(DECISION_ONLY_BRANCH_
+ * TYPES) TASK 에 붙이면 게시가 ERROR 로 거절된다. 실제로 NORMAL 로 적었다가
+ * HAS_STRUCTURAL_ERRORS 를 받았다.
+ */
+function makeFanOutExecutionTestTemplate(code: string): ExtractedTemplate {
+  const base = makeExecutionTestTemplate(code);
+  return {
+    ...base,
+    edges: [
+      ...base.edges,
+      { fromNodeCode: "n2", toNodeCode: "n5", branchType: "CUSTOM", branchLabel: "바로 조치", sortOrder: 7, sourceConnectorId: "c8" },
+    ],
+  };
+}
+
 /** Phase 5C-5A — minimal REFERENCE-category fixture (no nodes/edges, isReferenceOnly=true), matching the shape the real importer's buildReferenceOnlyTemplate produces for main-page-index/qc-common-operations. */
 function makeReferenceTestTemplate(code: string): ExtractedTemplate {
   return {
@@ -222,6 +247,21 @@ async function createTestCase(overrides: Partial<ValidatedCreateRepairCaseInput>
 
 async function lockCase(repairCaseId: string) {
   await db.update(repairCases).set({ isLocked: true }).where(eq(repairCases.id, repairCaseId));
+}
+
+/** 실행 노드 전체를 id 차례로 늘어놓은 스냅샷 — 「아무것도 안 바뀌었다」를 재는 데 쓴다. */
+async function snapshotExecutionNodes(executionId: string) {
+  const rows = await db
+    .select({
+      id: procedureCaseExecutionNodes.id,
+      status: procedureCaseExecutionNodes.status,
+      version: procedureCaseExecutionNodes.version,
+      startedBy: procedureCaseExecutionNodes.startedBy,
+      assignedEngineerId: procedureCaseExecutionNodes.assignedEngineerId,
+    })
+    .from(procedureCaseExecutionNodes)
+    .where(eq(procedureCaseExecutionNodes.executionId, executionId));
+  return rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
 async function loadExecutionNodesByCode(templateId: string, executionId: string) {
@@ -963,11 +1003,27 @@ describe("procedure-case-execution: read queries", () => {
 
     const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
     const n2 = byCode.get("n2")!;
+    const n3 = byCode.get("n3")!;
     await completeExecutionNode({ executionNodeId: n2.id, actorUserId: engineerId, expectedVersion: n2.version });
 
     const history = await getExecutionHistory(started.executionId);
-    assert.ok(history.length >= 2);
-    assert.equal(history[0].actionType, "NODE_COMPLETED", "most recent action must come first");
+    assert.ok(history.length >= 3);
+    // n2 를 완료하면 간선이 하나뿐인 다음 노드(n3)가 저절로 선다. 그래서 가장
+    // 최근 줄은 **자동으로 선 NODE_STARTED** 이고 그 바로 아래가 원인인
+    // NODE_COMPLETED 다.
+    //
+    // 🔴 이 두 줄은 **같은 트랜잭션**에서 쓰였다. Postgres 의 now() 는
+    // 트랜잭션 시작 시각이라 그냥 두면 created_at 이 똑같아져 차례가 정해지지
+    // 않는다(새로고침마다 원인과 결과가 자리를 바꾼다). 뒤따르는 줄에 1밀리초를
+    // 더해 못 박은 것을 여기서 잰다 — insertHistory 의 createdAt 주석.
+    assert.deepEqual(
+      history.slice(0, 2).map((h) => h.actionType),
+      ["NODE_STARTED", "NODE_COMPLETED"],
+      "원인(완료) 위에 결과(자동 시작)가 와야 한다 — 차례가 흔들리면 안 된다"
+    );
+    assert.equal(history[0].executionNodeId, n3.id, "자동으로 선 줄은 다음 노드의 것이다");
+    assert.equal(history[1].executionNodeId, n2.id);
+    assert.ok(new Date(history[0].createdAt).getTime() > new Date(history[1].createdAt).getTime());
     assert.ok(history.some((h) => h.actionType === "EXECUTION_STARTED"));
     assert.ok(history.every((h) => h.actorName && h.actorName.length > 0));
   });
@@ -1045,6 +1101,295 @@ describe("procedure-case-execution: read queries", () => {
       "완료했다고 카드 차례가 바뀌면 안 된다 — 차례는 절차가 정한다"
     );
     assert.deepEqual(computeExecutionPosition(afterOne!.nodes), { total: 5, finished: 1, current: 2 });
+  });
+});
+
+describe("procedure-case-execution: 완료하면 다음 하나가 저절로 선다 (자동 전진)", () => {
+  /** 완료 → 그 자리에서 쓰인 이력 줄들(완료한 노드 것 + 자동으로 선 노드 것). */
+  async function historyFor(executionNodeId: string, actionType: "NODE_STARTED" | "NODE_COMPLETED") {
+    return db
+      .select()
+      .from(procedureCaseExecutionHistory)
+      .where(
+        and(
+          eq(procedureCaseExecutionHistory.executionNodeId, executionNodeId),
+          eq(procedureCaseExecutionHistory.actionType, actionType)
+        )
+      );
+  }
+
+  test("30. 나가는 간선이 하나면 그 노드가 진행 중이 되고, 자동으로 섰다는 것이 이력에 남는다", async () => {
+    const { templateId, edges } = await createPublishedTemplate(uniqueCode("advance-single"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const n2 = byCode.get("n2")!;
+    const n3 = byCode.get("n3")!;
+    // 🔵 표본 확인 — 바뀌기 전에 정말 대기였어야 이 시험이 무언가를 잰다.
+    assert.equal(n3.status, "PENDING");
+
+    const result = await completeExecutionNode({ executionNodeId: n2.id, actorUserId: engineerId, expectedVersion: n2.version });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [after] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n3.id));
+    assert.equal(after.status, "IN_PROGRESS", "완료했는데 다음 것이 그대로 대기면 사람이 또 찾아야 한다");
+    assert.equal(after.version, n3.version + 1);
+    assert.ok(after.startedAt, "시작 시각이 비어 있으면 화면이 「시작: -」을 그린다");
+
+    // 🔴 담당을 가로채지 않는다 — 사람이 직접 [시작]을 눌렀을 때만 self-claim 한다.
+    assert.equal(after.assignedEngineerId, null, "자동으로 선 노드의 담당은 비워 둔다(접수 건의 담당이 쓰인다)");
+
+    // 🔴 새 action 값을 만들지 않았다. 이 행에 일어난 일은 「대기 → 진행 중」이고
+    // 그것이 NODE_STARTED 의 뜻 그대로다.
+    const autoRows = await historyFor(n3.id, "NODE_STARTED");
+    assert.equal(autoRows.length, 1);
+    const n2ToN3 = edges.find((e) => e.sourceConnectorId === "c2")!;
+    assert.deepEqual(autoRows[0].afterState, {
+      autoAdvanced: true,
+      fromExecutionNodeId: n2.id,
+      viaEdgeId: n2ToN3.id,
+    });
+  });
+
+  test("31. 🔴 판단은 **고른 갈래**가 가리키는 노드만 세운다 — 고르지 않은 갈래는 대기 그대로", async () => {
+    for (const branchType of ["YES", "NG"] as const) {
+      const { templateId, edges } = await createPublishedTemplate(uniqueCode(`advance-decision-${branchType}`));
+      const created = await createTestCase({ assignedEngineerId: engineerId });
+      const started = await startProcedureExecution(created.id, templateId, engineerId);
+      assert.equal(started.ok, true);
+      if (!started.ok) return;
+
+      const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+      const n3 = byCode.get("n3")!;
+      const n4 = byCode.get("n4")!;
+      const n5 = byCode.get("n5")!;
+      const chosen = edges.find((e) => e.branchType === branchType)!;
+      // YES 는 n4, NG 는 n5 로 간다 — 고른 쪽에 따라 답이 **갈려야** 한다.
+      const expectedStarted = branchType === "YES" ? n4 : n5;
+      const expectedUntouched = branchType === "YES" ? n5 : n4;
+
+      const result = await completeExecutionNode({
+        executionNodeId: n3.id,
+        actorUserId: engineerId,
+        expectedVersion: n3.version,
+        selectedOutgoingEdgeId: chosen.id,
+      });
+      assert.equal(result.ok, true, JSON.stringify(result));
+
+      const [startedNode] = await db
+        .select()
+        .from(procedureCaseExecutionNodes)
+        .where(eq(procedureCaseExecutionNodes.id, expectedStarted.id));
+      assert.equal(startedNode.status, "IN_PROGRESS", `${branchType} 를 골랐으면 그쪽이 서야 한다`);
+
+      const [untouched] = await db
+        .select()
+        .from(procedureCaseExecutionNodes)
+        .where(eq(procedureCaseExecutionNodes.id, expectedUntouched.id));
+      assert.equal(untouched.status, "PENDING", `${branchType} 를 골랐는데 다른 갈래까지 서면 안 된다`);
+      assert.equal(untouched.version, expectedUntouched.version);
+    }
+  });
+
+  test("32. 🔴 판단이 아닌데 나가는 간선이 여럿이면 아무것도 안 세운다 — 어느 쪽인지는 사람만 안다", async () => {
+    const code = uniqueCode("advance-fanout");
+    const { templateId, edges } = await createPublishedTemplate(code, "FULL_SERVICE", makeFanOutExecutionTestTemplate(code));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const n2 = byCode.get("n2")!;
+    // 🔵 표본 확인 — n2 에서 나가는 간선이 정말 둘이어야 이 시험이 무언가를 잰다.
+    const n2TemplateNodeId = n2.procedureTemplateNodeId!;
+    assert.equal(edges.filter((e) => e.fromNodeId === n2TemplateNodeId).length, 2);
+
+    const before = await snapshotExecutionNodes(started.executionId);
+    const result = await completeExecutionNode({ executionNodeId: n2.id, actorUserId: engineerId, expectedVersion: n2.version });
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const after = await snapshotExecutionNodes(started.executionId);
+    assert.deepEqual(
+      after.filter((r) => r.id !== n2.id),
+      before.filter((r) => r.id !== n2.id),
+      "완료한 노드 말고는 한 행도 바뀌면 안 된다"
+    );
+  });
+
+  test("33. 🔴 고리가 있는 절차 — 「재측정」으로 돌아가도 이미 완료된 판단을 되살리지 않는다", async () => {
+    const { templateId, edges } = await createPublishedTemplate(uniqueCode("advance-loop"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const n3 = byCode.get("n3")!;
+    const n5 = byCode.get("n5")!;
+    // 🔵 표본 확인 — n5 에서 판단 n3 로 돌아가는 간선이 정말 있다.
+    const retryEdge = edges.find((e) => e.branchType === "RETRY")!;
+    assert.equal(retryEdge.toNodeId, n3.procedureTemplateNodeId, "RETRY 가 판단으로 돌아가지 않으면 고리가 아니다");
+
+    // NG 를 골라 판단을 끝내면 n5(NG 조치)가 선다.
+    const ngEdge = edges.find((e) => e.branchType === "NG")!;
+    const decided = await completeExecutionNode({
+      executionNodeId: n3.id,
+      actorUserId: engineerId,
+      expectedVersion: n3.version,
+      selectedOutgoingEdgeId: ngEdge.id,
+    });
+    assert.equal(decided.ok, true, JSON.stringify(decided));
+
+    const [n3AfterDecision] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n3.id));
+    assert.equal(n3AfterDecision.status, "COMPLETED");
+    const [n5AfterDecision] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n5.id));
+    assert.equal(n5AfterDecision.status, "IN_PROGRESS");
+
+    // 그 n5 를 완료하면 간선 RETRY 가 **이미 완료된** n3 를 가리킨다.
+    const loopBack = await completeExecutionNode({
+      executionNodeId: n5.id,
+      actorUserId: engineerId,
+      expectedVersion: n5AfterDecision.version,
+    });
+    assert.equal(loopBack.ok, true, JSON.stringify(loopBack));
+
+    const [n3AfterLoop] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n3.id));
+    assert.equal(n3AfterLoop.status, "COMPLETED", "끝난 판단이 되살아나면 「지금 할 일」이 뒤로 돌아간다");
+    assert.equal(n3AfterLoop.version, n3AfterDecision.version, "버전도 그대로여야 한다 — 건드리지 않았다는 뜻");
+    // 되살아났다면 자동 시작 줄이 생겼을 것이다.
+    assert.equal((await historyFor(n3.id, "NODE_STARTED")).length, 0);
+  });
+
+  test("34. 🔴 남이 진행 중인 것을 끄지 않는다 — 진행 중이 둘이 되는 것은 괜찮다", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("advance-keeps-others"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const n2 = byCode.get("n2")!;
+    const n3 = byCode.get("n3")!;
+    const n4 = byCode.get("n4")!;
+
+    // 다른 사람이 절차 뒤쪽 작업(n4)을 먼저 붙잡고 있다.
+    const claimed = await startExecutionNode(n4.id, adminId, n4.version);
+    assert.equal(claimed.ok, true, JSON.stringify(claimed));
+    const [n4Claimed] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n4.id));
+    assert.equal(n4Claimed.status, "IN_PROGRESS");
+
+    const completed = await completeExecutionNode({ executionNodeId: n2.id, actorUserId: engineerId, expectedVersion: n2.version });
+    assert.equal(completed.ok, true, JSON.stringify(completed));
+
+    const [n4After] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n4.id));
+    assert.equal(n4After.status, "IN_PROGRESS", "남이 붙잡은 작업을 꺼 버리면 그 사람 작업이 사라진다");
+    assert.equal(n4After.version, n4Claimed.version, "건드리지 않았다 — 버전도 그대로");
+    assert.equal(n4After.assignedEngineerId, adminId, "담당도 그대로");
+
+    const [n3After] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n3.id));
+    assert.equal(n3After.status, "IN_PROGRESS", "그래도 다음 것은 선다 — 진행 중이 둘이어도 된다");
+  });
+
+  test("35. 🔴 다음 것이 이미 진행 중이면 그 행을 건드리지 않는다(버전도 안 올린다)", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("advance-target-busy"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const n2 = byCode.get("n2")!;
+    const n3 = byCode.get("n3")!;
+
+    const claimed = await startExecutionNode(n3.id, adminId, n3.version);
+    assert.equal(claimed.ok, true, JSON.stringify(claimed));
+    const [n3Claimed] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n3.id));
+
+    const completed = await completeExecutionNode({ executionNodeId: n2.id, actorUserId: engineerId, expectedVersion: n2.version });
+    assert.equal(completed.ok, true, JSON.stringify(completed));
+
+    const [n3After] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n3.id));
+    assert.equal(n3After.status, "IN_PROGRESS");
+    assert.equal(n3After.version, n3Claimed.version, "이미 서 있는 것을 또 세우면 남의 화면이 CONFLICT 로 막힌다");
+    assert.equal(n3After.assignedEngineerId, adminId);
+    // 이력도 한 줄뿐 — 사람이 누른 그 한 줄이다(자동 줄이 덧붙지 않는다).
+    assert.equal((await historyFor(n3.id, "NODE_STARTED")).length, 1);
+  });
+
+  test("36. 다음 것이 차단됨이면 자동으로 풀지 않는다", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("advance-target-blocked"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const n2 = byCode.get("n2")!;
+    const n3 = byCode.get("n3")!;
+
+    const blocked = await blockExecutionNode(n3.id, engineerId, n3.version, "부품 입고 대기");
+    assert.equal(blocked.ok, true, JSON.stringify(blocked));
+    const [n3Blocked] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n3.id));
+
+    const completed = await completeExecutionNode({ executionNodeId: n2.id, actorUserId: engineerId, expectedVersion: n2.version });
+    assert.equal(completed.ok, true, JSON.stringify(completed));
+
+    const [n3After] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n3.id));
+    assert.equal(n3After.status, "BLOCKED", "사람이 사유를 적어 막아 둔 것을 자동으로 풀면 막은 뜻이 사라진다");
+    assert.equal(n3After.version, n3Blocked.version);
+    assert.equal(n3After.lastActionReason, "부품 입고 대기");
+  });
+
+  test("37. 갈 곳이 없거나(END) 다음이 참고 문서거나 추가 작업이면 아무 행도 안 바뀐다", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("advance-nowhere"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const extra = await addExecutionExtraTask(started.executionId, engineerId, "이번 건만의 추가 작업", null);
+    assert.equal(extra.ok, true, JSON.stringify(extra));
+    if (!extra.ok) return;
+
+    // n7 = END(나가는 간선 없음), n4 = 다음이 참고 문서(n6, 실행 행이 없다),
+    // 추가 작업 = 그래프에 자리가 없다. 셋 다 「세울 다음」이 없다.
+    for (const target of [byCode.get("n7")!.id, byCode.get("n4")!.id, extra.executionNodeId]) {
+      const before = await snapshotExecutionNodes(started.executionId);
+      const current = before.find((r) => r.id === target)!;
+      const result = await completeExecutionNode({ executionNodeId: target, actorUserId: engineerId, expectedVersion: current.version });
+      assert.equal(result.ok, true, JSON.stringify(result));
+
+      const after = await snapshotExecutionNodes(started.executionId);
+      assert.deepEqual(
+        after.filter((r) => r.id !== target),
+        before.filter((r) => r.id !== target),
+        "완료한 노드 말고는 한 행도 바뀌면 안 된다"
+      );
+    }
+  });
+
+  test("38. 건너뛰기·차단은 전진시키지 않는다 — 이번 조각이 다루는 것은 **완료**뿐이다", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("advance-skip-only"));
+    const created = await createTestCase({ assignedEngineerId: engineerId });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const n2 = byCode.get("n2")!;
+    const n3 = byCode.get("n3")!;
+
+    const skipped = await skipExecutionNode(n2.id, engineerId, n2.version, "이번 제품에는 해당 없음");
+    assert.equal(skipped.ok, true, JSON.stringify(skipped));
+
+    const [n3After] = await db.select().from(procedureCaseExecutionNodes).where(eq(procedureCaseExecutionNodes.id, n3.id));
+    assert.equal(n3After.status, "PENDING");
+    assert.equal(n3After.version, n3.version);
   });
 });
 

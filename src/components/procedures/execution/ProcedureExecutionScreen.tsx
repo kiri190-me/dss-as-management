@@ -1,11 +1,13 @@
 import ExecutionStartCard from "./ExecutionStartCard";
 import ExecutionNodeCard from "./ExecutionNodeCard";
+import CurrentTaskCard from "./CurrentTaskCard";
 import ExecutionExtraTaskForm from "./ExecutionExtraTaskForm";
 import ExecutionHistoryTimeline from "./ExecutionHistoryTimeline";
 import RelatedRepairHistoryPanel from "./RelatedRepairHistoryPanel";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import { computeExecutionPosition, formatExecutionPositionLabel } from "@/lib/domain/procedure-execution-order";
+import { pickCurrentTask } from "@/lib/domain/procedure-execution-focus";
 import type {
   ExecutableTemplateOption,
   ExecutionDetail,
@@ -63,14 +65,19 @@ function NodeSection({
   nodes,
   actingUser,
   emptyMessage,
+  currentTaskNodeId,
 }: {
   title: string;
   nodes: ExecutionDetail["nodes"];
   actingUser: { id: string; role: string; isDeveloper: boolean };
   emptyMessage: string;
+  /** 「지금 할 일」로 위에 크게 서 있는 노드. 이 구역에 없으면 아무 일도 없다. */
+  currentTaskNodeId: string | null;
 }) {
   return (
     <div>
+      {/* 개수는 **빼지 않고 센다.** 위로 올라간 한 장도 이 구역에 속한 일이라,
+          「진행 중 (0)」인데 실제로는 하나 진행 중인 화면이 되면 안 된다. */}
       <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
         {title} ({nodes.length})
       </h3>
@@ -78,10 +85,50 @@ function NodeSection({
         {nodes.length === 0 ? (
           <p className="text-xs text-zinc-500 dark:text-zinc-400">{emptyMessage}</p>
         ) : (
-          nodes.map((node) => <ExecutionNodeCard key={node.id} node={node} actingUser={actingUser} />)
+          nodes.map((node) =>
+            node.id === currentTaskNodeId ? (
+              // 🔴 같은 카드를 두 번 그리지 않는다. 그렇다고 목록에서 통째로
+              // 지우면 「방금 보던 카드가 사라졌다」가 또 된다 — 이 화면의
+              // 원래 불만이 그것이었다. 그래서 자리는 남기고 **위를 가리키는
+              // 한 줄**로 바꾼다.
+              <p
+                key={node.id}
+                data-current-task-pointer
+                className="rounded-md border border-dashed border-zinc-300 px-3 py-2 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
+              >
+                {node.orderIndex > 0 && <span className="font-semibold tabular-nums">{node.orderIndex}. </span>}
+                {node.title} — 맨 위 「지금 할 일」에 있습니다.
+              </p>
+            ) : (
+              <ExecutionNodeCard key={node.id} node={node} actingUser={actingUser} />
+            )
+          )
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * 할 일이 하나도 안 남았을 때 「지금 할 일」 자리에 서는 안내.
+ *
+ * 🔴 까닭을 갈라 적는다. 「다 끝났습니다」와 「남은 것이 전부 차단돼
+ * 있습니다」는 사람이 해야 할 다음 행동이 정반대다 — 전자는 아무것도 안 해도
+ * 되고, 후자는 차단을 풀어야 절차가 다시 흐른다.
+ */
+function NoCurrentTaskCard({ reason }: { reason: "NO_NODES" | "ALL_FINISHED" | "ALL_BLOCKED" }) {
+  const message =
+    reason === "ALL_FINISHED"
+      ? "모든 작업이 끝났습니다(완료 또는 건너뜀)."
+      : reason === "ALL_BLOCKED"
+        ? "남은 작업이 모두 차단돼 있습니다. 아래 「차단됨」에서 [재개(되돌림)]로 풀어야 다음으로 넘어갑니다."
+        : "이 절차에는 진행할 작업이 없습니다.";
+
+  return (
+    <section className="rounded-lg border border-dashed border-zinc-300 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
+      <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">지금 할 일</span>
+      <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{message}</p>
+    </section>
   );
 }
 
@@ -135,34 +182,53 @@ export default function ProcedureExecutionScreen({
   // independently enforces regardless of this UI hint.
   const extraTaskEligible = actorHasAllowedRole(actingUser, ORDINARY_ELIGIBLE_ROLES);
 
+  // 🔴 「지금 할 일」은 **절차 차례**로 고른다 — 추천(isSuggestedNext)으로
+  // 고르지 않는다. 게시된 절차 하나가 노드 23개에 간선 8개뿐이라 거의 모든
+  // 노드가 추천으로 켜진다(까닭은 procedure-execution-focus.ts 머리말).
+  //
+  // 🔴 위의 pendingNodes 가 아니라 **원본 배열**을 넘긴다. pendingNodes 는
+  // 추천을 앞으로 끌어올리려고 다시 정렬한 것이고, 대기만 담아 진행 중도 없다.
+  const currentTask = pickCurrentTask(executionDetail.nodes);
+  const currentTaskNodeId = currentTask.kind === "NONE" ? null : currentTask.node.id;
+
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">기술 절차</h2>
       <ProgressSummary detail={executionDetail} />
+
+      {currentTask.kind === "NONE" ? (
+        <NoCurrentTaskCard reason={currentTask.reason} />
+      ) : (
+        <CurrentTaskCard node={currentTask.node} actingUser={actingUser} />
+      )}
 
       <NodeSection
         title="실행 가능"
         nodes={pendingNodes}
         actingUser={actingUser}
         emptyMessage="대기 중인 작업이 없습니다."
+        currentTaskNodeId={currentTaskNodeId}
       />
       <NodeSection
         title="진행 중"
         nodes={inProgressNodes}
         actingUser={actingUser}
         emptyMessage="진행 중인 작업이 없습니다."
+        currentTaskNodeId={currentTaskNodeId}
       />
       <NodeSection
         title="차단됨"
         nodes={blockedNodes}
         actingUser={actingUser}
         emptyMessage="차단된 작업이 없습니다."
+        currentTaskNodeId={currentTaskNodeId}
       />
       <NodeSection
         title="완료 / 건너뜀"
         nodes={doneNodes}
         actingUser={actingUser}
         emptyMessage="완료되거나 건너뛴 작업이 없습니다."
+        currentTaskNodeId={currentTaskNodeId}
       />
 
       {executionDetail.referenceNodes.length > 0 && (

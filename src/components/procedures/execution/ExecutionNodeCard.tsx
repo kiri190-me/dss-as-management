@@ -16,25 +16,9 @@ import {
 import type { ExecutionNodeDetail } from "@/lib/db/queries/procedure-case-execution";
 import { procedureCaseExecutionNodeStatusLabels } from "@/lib/domain/procedure-case-execution-types";
 import { procedureNodeTypeLabels } from "@/lib/domain/procedure-template-types";
-import { actorMay } from "@/lib/auth/developer-promotion";
+import { isOrdinaryActionEligible, isReopenEligible } from "./execution-node-eligibility";
 
 type DialogState = "SKIP" | "BLOCK" | "REOPEN" | "DECISION_COMPLETE" | null;
-
-function canActOrdinary(role: string, actorId: string, effectiveAssigneeId: string | null): boolean {
-  if (role === "SUPER_ADMIN" || role === "ADMIN") return true;
-  if (role === "AS_ENGINEER") return effectiveAssigneeId === actorId;
-  return false;
-}
-
-function canReopenCompletedOrSkipped(role: string): boolean {
-  return role === "SUPER_ADMIN" || role === "ADMIN";
-}
-
-function canReopenBlocked(role: string, actorId: string, effectiveAssigneeId: string | null): boolean {
-  if (role === "SUPER_ADMIN" || role === "ADMIN") return true;
-  if (role === "AS_ENGINEER") return effectiveAssigneeId === actorId;
-  return false;
-}
 
 export default function ExecutionNodeCard({
   node,
@@ -54,16 +38,10 @@ export default function ExecutionNodeCard({
   // see isBlockedByCaseLock (procedure-case-execution-authorization.ts),
   // which the server independently enforces regardless of this UI hint.
   //
-  // 개발자 표시는 **역할 축에만** 더한다(developer-promotion.ts). 배정 인자는
-  // 그대로다 — 서버도 같은 모양으로 판정하므로(mutations/procedure-case-
-  // execution.ts) 화면과 서버가 어긋나지 않는다.
-  const ordinaryEligible = actorMay(actingUser, (role) =>
-    canActOrdinary(role, actingUser.id, node.effectiveAssigneeId)
-  );
-  const reopenEligible =
-    node.status === "BLOCKED"
-      ? actorMay(actingUser, (role) => canReopenBlocked(role, actingUser.id, node.effectiveAssigneeId))
-      : actorMay(actingUser, canReopenCompletedOrSkipped);
+  // 판정은 execution-node-eligibility.ts 한 곳에 있다 — 「지금 할 일」 큰
+  // 카드(CurrentTaskCard)가 같은 노드를 같은 규칙으로 그려야 하기 때문이다.
+  const ordinaryEligible = isOrdinaryActionEligible(actingUser, node.effectiveAssigneeId);
+  const reopenEligible = isReopenEligible(actingUser, node.status, node.effectiveAssigneeId);
 
   async function runAction<T extends { ok: boolean; message?: string }>(run: () => Promise<T>) {
     setIsSubmitting(true);

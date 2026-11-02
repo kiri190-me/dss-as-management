@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "../client";
 import {
   procedureCaseExecutions,
@@ -19,6 +19,11 @@ import {
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { actorMay } from "@/lib/auth/developer-promotion";
 import { isExecutableNodeType, isSystemEntryNodeType } from "@/lib/domain/procedure-execution-topology";
+import {
+  classifyAutoAdvanceTarget,
+  resolveAutoAdvanceTarget,
+  type AutoAdvanceDecision,
+} from "@/lib/domain/procedure-execution-focus";
 import type { ProcedureCaseExecutionActionType } from "@/lib/domain/procedure-case-execution-types";
 import type { ProcedureNodeType } from "@/lib/domain/procedure-template-types";
 import type { Role } from "@/lib/domain/types";
@@ -34,8 +39,12 @@ import type { Role } from "@/lib/domain/types";
  *    a WHERE-clause race (same pattern as
  *    procedure-template-editor.ts's assertEditableDraft — the lock itself
  *    already serializes concurrent writers within the transaction window);
- *  - writes exactly one append-only procedure_case_execution_history row
- *    per mutation, in the same transaction as the state change;
+ *  - writes an append-only procedure_case_execution_history row for every
+ *    state change, in the same transaction as the change itself. 🔴 완료
+ *    (completeExecutionNode)만 **두 줄**이 될 수 있다 — 끝낸 줄
+ *    (NODE_COMPLETED)과, 저절로 선 다음 노드의 줄(NODE_STARTED). 자동으로
+ *    선 것도 사람이 나중에 「왜 이게 진행 중이지」를 되짚을 수 있어야 한다
+ *    (자세한 것은 advanceToNextNode);
  *  - locked-case behavior (repair_cases.is_locked) is unconditional for
  *    every role, including SUPER_ADMIN/ADMIN — no exception, no
  *    post-shipment correction path in Phase 5A (plan §11).
@@ -144,6 +153,18 @@ async function insertHistory(
     afterState?: unknown;
     reason?: string | null;
     actorUserId: string;
+    /**
+     * 비워 두면 칸의 기본값(`now()`)이 쓰인다 — 거의 모든 자리가 그렇다.
+     *
+     * 🔴 넘기는 자리가 하나 있다: **한 트랜잭션이 이력 두 줄을 쓸 때.**
+     * Postgres 의 `now()` 는 문장 시각이 아니라 **트랜잭션 시작 시각**이라,
+     * 같은 트랜잭션에서 쓴 두 줄은 created_at 이 **글자 하나 다르지 않다.**
+     * 이력 조회는 created_at 내림차순 하나로만 정렬하므로(getExecutionHistory),
+     * 그러면 둘의 차례가 **정해지지 않는다** — 화면의 실행 이력에서 원인과
+     * 결과가 새로고침할 때마다 자리를 바꿀 수 있다. 뒤따르는 줄에 아주 작은
+     * 양수를 더해 차례를 못 박는다.
+     */
+    createdAt?: Date | SQL;
   }
 ): Promise<void> {
   await tx.insert(procedureCaseExecutionHistory).values({
@@ -154,6 +175,7 @@ async function insertHistory(
     afterState: row.afterState ?? null,
     reason: row.reason ?? null,
     actorUserId: row.actorUserId,
+    ...(row.createdAt === undefined ? {} : { createdAt: row.createdAt }),
   });
 }
 
@@ -394,6 +416,135 @@ export async function startExecutionNode(
   }
 }
 
+// ---- 자동 전진 (완료하면 다음 하나가 저절로 선다) ----
+
+/**
+ * 완료 이력 바로 **뒤**에 오도록 1밀리초를 더한다 — 위 insertHistory 의
+ * createdAt 주석에 까닭이 있다. `now()` 를 그대로 쓰면 완료 줄과 시각이 같아
+ * 차례가 정해지지 않는다. 앱 시계(`new Date()`)로 바꾸지 않는 까닭은, 이 표의
+ * 다른 줄이 전부 DB 시계로 적혀 있어서 한 줄만 다른 시계를 쓰면 **트랜잭션
+ * 사이의** 차례가 어긋날 수 있기 때문이다.
+ */
+const AUTO_ADVANCE_HISTORY_AT = sql`now() + interval '1 millisecond'`;
+
+/**
+ * 노드 하나를 완료한 **같은 트랜잭션 안에서**, 다음 노드 하나를 진행 중으로
+ * 세운다.
+ *
+ * 왜 이것이 필요한가: 전에는 완료해도 다른 행을 하나도 건드리지 않아서, 사람이
+ * 카드 22장 중에서 다음 것을 **다시 찾아야** 했다. 판단 노드에서 갈래를 골라도
+ * 그 갈래가 가리키는 노드가 서지 않았다 — 고른 것이 화면에 아무 변화도 만들지
+ * 않았다.
+ *
+ * 🔴 무엇을 안 하는가:
+ *  - **다른 노드의 진행 중을 끄지 않는다.** 세우는 것은 언제나 한 행뿐이고,
+ *    그 한 행도 대기(PENDING)일 때만 건드린다. 진행 중이 여럿 있어도 괜찮다 —
+ *    사람이 둘을 동시에 할 수 있다.
+ *  - **이미 끝난(완료·건너뜀) 노드를 되살리지 않는다.** 「재측정」처럼 되돌아
+ *    가는 간선이 있는 절차에서 끝난 일이 다시 「지금 할 일」로 올라온다.
+ *  - **담당을 가로채지 않는다.** startExecutionNode 는 사람이 직접 [시작]을
+ *    누를 때 비어 있던 담당을 그 사람으로 채우지만(self-claim), 여기서는
+ *    채우지 않는다. 앞 작업을 끝낸 사람이 다음 작업까지 맡는다는 근거가 없고,
+ *    담당이 비어 있으면 접수 건의 담당 엔지니어가 그대로 쓰인다.
+ *
+ * 세우지 못한 경우에도 **던지지 않는다.** 완료 자체는 사람이 한 일이고 이미
+ * 성공했다 — 다음 것을 못 세운 것은 절차 그림의 사정(갈 곳이 없다/여럿이다)
+ * 이지 완료의 실패가 아니다. 까닭은 돌려주기만 하고 부르는 쪽이 삼킨다.
+ */
+async function advanceToNextNode(
+  tx: Tx,
+  params: {
+    executionId: string;
+    procedureTemplateId: string;
+    completedExecutionNodeId: string;
+    completedTemplateNodeId: string | null;
+    isDecision: boolean;
+    selectedOutgoingEdgeId: string | null;
+    actorUserId: string;
+  }
+): Promise<AutoAdvanceDecision> {
+  if (params.completedTemplateNodeId === null) return { kind: "SKIP", reason: "NOT_IN_GRAPH" };
+
+  const outgoingEdges = await tx
+    .select({
+      id: procedureTemplateEdges.id,
+      fromNodeId: procedureTemplateEdges.fromNodeId,
+      toNodeId: procedureTemplateEdges.toNodeId,
+    })
+    .from(procedureTemplateEdges)
+    .where(
+      and(
+        eq(procedureTemplateEdges.procedureTemplateId, params.procedureTemplateId),
+        eq(procedureTemplateEdges.fromNodeId, params.completedTemplateNodeId)
+      )
+    );
+
+  const siblings = await tx
+    .select({
+      id: procedureCaseExecutionNodes.id,
+      procedureTemplateNodeId: procedureCaseExecutionNodes.procedureTemplateNodeId,
+      status: procedureCaseExecutionNodes.status,
+    })
+    .from(procedureCaseExecutionNodes)
+    .where(eq(procedureCaseExecutionNodes.executionId, params.executionId));
+
+  const decision = resolveAutoAdvanceTarget({
+    completedTemplateNodeId: params.completedTemplateNodeId,
+    isDecision: params.isDecision,
+    selectedOutgoingEdgeId: params.selectedOutgoingEdgeId,
+    edges: outgoingEdges,
+    executionNodes: siblings,
+  });
+  if (decision.kind !== "ADVANCE") return decision;
+
+  // 위 siblings 조회는 **잠금 없이** 읽었다. 고를 대상이 정해진 뒤에 그 한 행만
+  // 잠그고 상태를 **다시** 본다 — 그 사이에 다른 사람이 그 노드를 시작했거나
+  // 막았을 수 있다. 잠근 뒤의 판정이 진짜이고, 잣대는 고를 때와 같은 함수다.
+  const [target] = await tx
+    .select()
+    .from(procedureCaseExecutionNodes)
+    .where(eq(procedureCaseExecutionNodes.id, decision.executionNodeId))
+    .for("update");
+  if (!target) return { kind: "SKIP", reason: "TARGET_NOT_EXECUTABLE" };
+  const racedReason = classifyAutoAdvanceTarget(target.status);
+  if (racedReason) return { kind: "SKIP", reason: racedReason };
+
+  const now = new Date();
+  await tx
+    .update(procedureCaseExecutionNodes)
+    .set({
+      status: "IN_PROGRESS",
+      // 되돌림을 거쳐 다시 대기가 된 행이라면 시작 기록이 이미 있다 — 처음
+      // 서는 행만 채운다(다른 변이들이 쓰는 backfill 규약과 같다).
+      startedBy: target.startedBy ?? params.actorUserId,
+      startedAt: target.startedAt ?? now,
+      version: target.version + 1,
+      updatedAt: now,
+    })
+    .where(eq(procedureCaseExecutionNodes.id, target.id));
+
+  // 새 action 값을 만들지 않는다 — enum 을 늘리는 것은 마이그레이션이다.
+  // 이 행에 실제로 일어난 일은 「대기 → 진행 중」이고 그것이 NODE_STARTED 의
+  // 뜻 그대로다. 사람이 누른 것과 가려내야 하므로 afterState 에 자동으로
+  // 섰다는 것과 **어느 노드의 어느 갈래를 타고 왔는지**를 적는다. 사람이 누른
+  // NODE_STARTED 의 afterState 는 null 이거나 { assignedEngineerId } 뿐이라
+  // 둘이 섞이지 않는다.
+  await insertHistory(tx, {
+    executionId: params.executionId,
+    executionNodeId: target.id,
+    actionType: "NODE_STARTED",
+    afterState: {
+      autoAdvanced: true,
+      fromExecutionNodeId: params.completedExecutionNodeId,
+      viaEdgeId: decision.viaEdgeId,
+    },
+    actorUserId: params.actorUserId,
+    createdAt: AUTO_ADVANCE_HISTORY_AT,
+  });
+
+  return decision;
+}
+
 // ---- 작업 완료 (complete a node — DECISION nodes require a branch selection) ----
 
 export type CompleteExecutionNodeInput = {
@@ -473,6 +624,18 @@ export async function completeExecutionNode(input: CompleteExecutionNodeInput): 
         actionType: "NODE_COMPLETED",
         afterState: isDecision ? { selectedOutgoingEdgeId } : null,
         reason: input.reason ?? null,
+        actorUserId: actor.id,
+      });
+
+      // 다음 하나를 세운다. 못 세워도 완료는 완료다 — advanceToNextNode 는
+      // 던지지 않고 까닭만 돌려준다.
+      await advanceToNextNode(tx, {
+        executionId: ctx.node.executionId,
+        procedureTemplateId: ctx.execution.procedureTemplateId,
+        completedExecutionNodeId: input.executionNodeId,
+        completedTemplateNodeId: ctx.node.procedureTemplateNodeId,
+        isDecision,
+        selectedOutgoingEdgeId,
         actorUserId: actor.id,
       });
 
