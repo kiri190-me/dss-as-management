@@ -4,10 +4,9 @@ import { after, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { eq } from "drizzle-orm";
 import { db, pgClient } from "../connection";
-import { workflowTemplates, workflowVersions } from "../schema";
+import { workflowSteps, workflowTemplates, workflowVersions } from "../schema";
 import { findTransitionInRules, loadWorkflowRules } from "./workflow-rules";
 import { findTransitionDefinition } from "@/lib/domain/local/workflow/transition-definitions";
-import { getStepCategory } from "@/lib/domain/local/workflow/step-category";
 import { getStepStatus } from "@/lib/domain/local/workflow/step-status-map";
 import { ACTION_CODES } from "@/lib/domain/local/workflow/workflow-types";
 import { WORKFLOW_TYPE_CODES, type WorkflowType } from "@/lib/domain/types";
@@ -26,6 +25,10 @@ import { WORKFLOW_TYPE_CODES, type WorkflowType } from "@/lib/domain/types";
  *
  * 전이가 없는 조합(대부분)도 함께 확인한다. "없어야 할 곳에 생긴 전이"는
  * "있어야 할 곳에 없는 전이"만큼 위험하다 — 없던 이동 경로가 열린다.
+ *
+ * 🔴 **단계 분류(category)만 이 대조에서 빠졌다**(2026-11-03). 그 값은 운영에서
+ * [워크플로 관리]로 바뀌므로 TS 표와 같을 이유가 없어졌다 — 대신 "로더가 DB 값을
+ * 그대로 싣는가"를 아래 별도 시험이 본다. 까닭은 그 시험의 주석에 적었다.
  * ============================================================================
  */
 
@@ -62,10 +65,13 @@ describe("loadWorkflowRules ↔ transition-definitions.ts 동등성", () => {
         if (step.status !== expectedStatus) {
           problems.push(`${workflowType}/${step.key} 상태: DB=${step.status} 표=${expectedStatus}`);
         }
-        const expectedCategory = getStepCategory(workflowType, step.key) ?? null;
-        if (step.category !== expectedCategory) {
-          problems.push(`${workflowType}/${step.key} 분류: DB=${step.category} 표=${expectedCategory}`);
-        }
+        // 🔴 분류(category)는 여기서 표와 맞대어 보지 않는다(2026-11-03).
+        // [워크플로 관리]가 단계의 담당 분류를 고쳐 새 판으로 게시할 수 있게 된
+        // 뒤로 **표가 아니라 DB 가 답**이고, 실제로 개발 DB 의 현행 판 98단계 중
+        // 35개가 표와 다르다. 여기서 계속 1:1을 요구하면 「사람이 고친 것」이
+        // 불일치로 보고된다. 대신 로더가 DB 값을 그대로 싣는지를 아래 별도
+        // 시험이 본다 — 이 파일이 원래 지키려던 것(행 → 객체로 되살리는 과정에서
+        // 값이 틀어지는 것)은 분류에서도 그대로 남는다.
 
         for (const actionCode of ACTION_CODES) {
           const fromDb = findTransitionInRules(rules, actionCode, step.key);
@@ -109,6 +115,62 @@ describe("loadWorkflowRules ↔ transition-definitions.ts 동등성", () => {
 
     assert.ok(compared > 0, "비교한 조합이 하나도 없으면 이 테스트는 의미가 없다");
     assert.deepEqual(problems.slice(0, 25), [], `불일치 ${problems.length}건 / 비교 ${compared}조합`);
+  });
+
+  /**
+   * 분류는 위 대조에서 빠졌다 — 표가 아니라 DB 가 답이기 때문이다. 그래서 그
+   * 값을 지키는 자리가 여기다: **로더가 DB 행의 분류를 그대로 싣는가.**
+   *
+   * 이 값 하나로 화면이 두 가지를 만든다(DatabaseWorkflowControlPanel) —
+   * 「담당: 관리자 또는 …」 글자와, 보류 시작/해제 단추의 표시 판정, 그리고
+   * 2026-11-03 부터는 그 밑의 안내 배너까지. 로더가 분류를 null 로 떨어뜨리면
+   * 화면은 「담당: 관리자(SUPER_ADMIN/ADMIN)」로 바뀌고 담당자가 제 단계에서
+   * 보류를 못 하게 된다 — 서버는 DB 를 직접 읽으므로 허용하는데 단추만 잠긴다.
+   * 오류가 나지 않는 종류의 고장이라 시험으로만 잡힌다.
+   */
+  test("로더가 단계의 category 를 DB 행 그대로 싣는다 (표가 아니라 DB 가 답이다)", async () => {
+    // 위 시험과 같은 기준으로 고른다 — current 판, 서비스가 아는 워크플로만.
+    const allVersions = await db
+      .select({ id: workflowVersions.id, workflowType: workflowTemplates.code })
+      .from(workflowVersions)
+      .innerJoin(workflowTemplates, eq(workflowTemplates.id, workflowVersions.workflowTemplateId))
+      .where(eq(workflowVersions.isCurrent, true));
+    const versions = allVersions.filter((v) => (WORKFLOW_TYPE_CODES as readonly string[]).includes(v.workflowType));
+    assert.ok(versions.length > 0, "current 워크플로 버전이 있어야 한다");
+
+    const problems: string[] = [];
+    let compared = 0;
+    let withCategory = 0;
+
+    for (const version of versions) {
+      const rules = await loadWorkflowRules(db as never, version.id);
+      assert.ok(rules, `${version.workflowType}: 규칙을 읽지 못했다`);
+      if (!rules) continue;
+
+      const rows = await db
+        .select({ key: workflowSteps.key, category: workflowSteps.category })
+        .from(workflowSteps)
+        .where(eq(workflowSteps.workflowVersionId, version.id));
+      const rawByKey = new Map(rows.map((row) => [row.key, row.category ?? null]));
+
+      for (const step of rules.steps) {
+        const raw = rawByKey.get(step.key);
+        if (raw === undefined) {
+          problems.push(`${version.workflowType}/${step.key} — 로더가 DB 에 없는 단계를 만들어 냈다`);
+          continue;
+        }
+        compared++;
+        if (raw !== null) withCategory++;
+        if (step.category !== raw) {
+          problems.push(`${version.workflowType}/${step.key} 분류: 로더=${step.category} DB행=${raw}`);
+        }
+      }
+    }
+
+    assert.ok(compared > 0, "비교한 단계가 하나도 없으면 이 시험은 의미가 없다");
+    // 🔵 분류가 전부 비어 있으면 null 끼리 맞춰 보고 통과한다 — 그건 재는 게 아니다.
+    assert.ok(withCategory > 0, `분류가 들어 있는 단계를 하나도 못 봤다 (비교 ${compared}개)`);
+    assert.deepEqual(problems.slice(0, 25), [], `불일치 ${problems.length}건 / 비교 ${compared}단계`);
   });
 
   test("없는 버전을 요청하면 null을 돌려준다 (빈 규칙으로 통과시키지 않는다)", async () => {

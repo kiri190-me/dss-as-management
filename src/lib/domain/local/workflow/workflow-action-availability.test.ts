@@ -7,6 +7,8 @@ import {
   LOCKED_CASE_MESSAGE,
 } from "./workflow-action-availability";
 import { SHIPMENT_WAITING_AUTO_ONLY_MESSAGE } from "../../shipment-waiting-auto-advance";
+// 🔵 배너가 더 이상 이 표를 보지 않는다는 것을 **표의 값으로** 재기 위해서만 부른다.
+import { getStepCategory } from "./step-category";
 import type { TransitionDefinition } from "./transition-definitions";
 import type { HoldState } from "./workflow-types";
 import type { ActingUser } from "../approval/transitions";
@@ -198,11 +200,13 @@ test("분류가 없는 단계(건별로 추가한 case_step_N 등)에서는 관�
 });
 
 // ------------------------------------------------------- explainUnavailableWorkflowActions
+//
+// 🔴 분류는 **인자로 들어온다**(2026-11-03). 아래 시험들이 단계 키 대신 분류를
+// 넘기는 까닭이고, 맨 끝의 두 시험이 「DB 가 표를 이긴다」를 직접 잰다.
 
 test("locked case: LOCKED explanation, takes priority over everything else", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "PAID_MATCHER",
-    currentStepKey: "repair_in_progress",
+    stepCategory: "TECHNICAL",
     actingRole: "AS_ENGINEER",
     isCaseLocked: true,
     isOnHold: true,
@@ -212,8 +216,7 @@ test("locked case: LOCKED explanation, takes priority over everything else", () 
 
 test("on hold (not locked): no explanation — the per-button hold reason is already specific enough", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "PAID_MATCHER",
-    currentStepKey: "waiting_po",
+    stepCategory: "BUSINESS",
     actingRole: "AS_ENGINEER",
     isCaseLocked: false,
     isOnHold: true,
@@ -223,8 +226,7 @@ test("on hold (not locked): no explanation — the per-button hold reason is alr
 
 test("AS_ENGINEER on a SALES-owned (BUSINESS) step: role-ownership explanation with the exact expected wording", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "PAID_MATCHER",
-    currentStepKey: "waiting_po",
+    stepCategory: "BUSINESS",
     actingRole: "AS_ENGINEER",
     isCaseLocked: false,
     isOnHold: false,
@@ -238,8 +240,7 @@ test("AS_ENGINEER on a SALES-owned (BUSINESS) step: role-ownership explanation w
 
 test("AS_ENGINEER on an INVENTORY_MANAGER-owned (PARTS_SHIPMENT) step: role-ownership explanation with the exact expected wording", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "PAID_MATCHER",
-    currentStepKey: "parts_supply",
+    stepCategory: "PARTS_SHIPMENT",
     actingRole: "AS_ENGINEER",
     isCaseLocked: false,
     isOnHold: false,
@@ -253,8 +254,7 @@ test("AS_ENGINEER on an INVENTORY_MANAGER-owned (PARTS_SHIPMENT) step: role-owne
 
 test("AS_ENGINEER on their own TECHNICAL step: no foreign-role message", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "PAID_MATCHER",
-    currentStepKey: "repair_in_progress",
+    stepCategory: "TECHNICAL",
     actingRole: "AS_ENGINEER",
     isCaseLocked: false,
     isOnHold: false,
@@ -264,8 +264,7 @@ test("AS_ENGINEER on their own TECHNICAL step: no foreign-role message", () => {
 
 test("SALES viewing a TECHNICAL (AS_ENGINEER-owned) step also gets a role-ownership message — not AS_ENGINEER-specific", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "PAID_MATCHER",
-    currentStepKey: "repair_in_progress",
+    stepCategory: "TECHNICAL",
     actingRole: "SALES",
     isCaseLocked: false,
     isOnHold: false,
@@ -279,8 +278,7 @@ test("SALES viewing a TECHNICAL (AS_ENGINEER-owned) step also gets a role-owners
 
 test("ADMIN never sees a role-ownership message, even on a step normally owned by another role", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "PAID_MATCHER",
-    currentStepKey: "waiting_po",
+    stepCategory: "BUSINESS",
     actingRole: "ADMIN",
     isCaseLocked: false,
     isOnHold: false,
@@ -290,8 +288,7 @@ test("ADMIN never sees a role-ownership message, even on a step normally owned b
 
 test("SUPER_ADMIN never sees a role-ownership message, even on a step normally owned by another role", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "PAID_MATCHER",
-    currentStepKey: "parts_supply",
+    stepCategory: "PARTS_SHIPMENT",
     actingRole: "SUPER_ADMIN",
     isCaseLocked: false,
     isOnHold: false,
@@ -299,10 +296,55 @@ test("SUPER_ADMIN never sees a role-ownership message, even on a step normally o
   assert.equal(result, null);
 });
 
-test("a step with no category entry (e.g. a terminal step): no explanation, never guessed", () => {
+test("분류가 없는 단계(종료 단계·건별로 끼워 넣은 단계): 설명 없음 — 담당을 지어내지 않는다", () => {
   const result = explainUnavailableWorkflowActions({
-    workflowType: "PAID_MATCHER",
-    currentStepKey: "shipment_completed",
+    stepCategory: null,
+    actingRole: "AS_ENGINEER",
+    isCaseLocked: false,
+    isOnHold: false,
+  });
+  assert.equal(result, null);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 🔴 분류의 정본은 DB 다 — TS 표(step-category.ts)와 달라도 DB 를 따른다
+// ────────────────────────────────────────────────────────────────────────────
+// [워크플로 관리]에서 단계 담당을 바꿔 새 판으로 게시하면 DB 의
+// workflow_steps.category 가 표와 달라진다(2026-11-03 실측 — 개발 DB 의 현행 판
+// 98단계 중 35개). 단추를 끄는 쪽과 서버 거절은 예전부터 DB 를 봤는데 이 배너만
+// 표를 봐서, 되돌리기·보류가 **되는** 사람에게 남의 담당이라고 말했다.
+//
+// 🔵 아래 두 시험은 먼저 **표가 실제로 다른 값을 말한다는 것**을 못 박는다.
+// 그 단언이 없으면 둘이 우연히 같은 값일 때 시험이 공짜로 통과하고, 누군가
+// 배너를 표로 되돌려도 초록으로 남는다.
+
+test("🔴 DB 분류가 표와 다르면 DB 를 따른다 — 표 BUSINESS, DB TECHNICAL 인 단계", () => {
+  // 실측에서 나온 그 단계다. 표를 고쳐 둘이 같아지면 이 단언이 먼저 터진다 —
+  // 그때는 표본을 아직 어긋나 있는 다른 단계로 바꿔야 한다.
+  assert.equal(getStepCategory("PAID_MATCHER", "waiting_kyosan_reply"), "BUSINESS");
+
+  const result = explainUnavailableWorkflowActions({
+    stepCategory: "TECHNICAL",
+    actingRole: "SALES",
+    isCaseLocked: false,
+    isOnHold: false,
+  });
+  // 표를 봤다면 SALES 는 제 담당 단계라 배너가 없었을 것이다.
+  assert.deepEqual(result, {
+    kind: "ROLE_OWNED_BY_OTHER",
+    owningRole: "AS_ENGINEER",
+    message: "현재 단계는 기술(수리) 담당 단계입니다. 다음 작업은 담당 엔지니어가 진행할 수 있습니다.",
+  });
+});
+
+test("🔴 제보된 화면 — 출하 승인 단계의 담당을 A/S 엔지니어로 바꾼 건에서는 배너가 뜨지 않는다", () => {
+  // 화면에 뜬 거짓말: 「담당: 관리자 또는 A/S 엔지니어」(DB 값) 바로 밑에
+  // 「재고/출하 담당자가 진행할 수 있습니다」(표 값). 같은 화면에서
+  // [이전 단계로 되돌리기]·[보류 시작]은 켜져 있었다 — 배너만 틀렸다.
+  assert.equal(getStepCategory("PAID_MATCHER", "waiting_kyosan_shipment_approval"), "PARTS_SHIPMENT");
+
+  const result = explainUnavailableWorkflowActions({
+    stepCategory: "TECHNICAL",
     actingRole: "AS_ENGINEER",
     isCaseLocked: false,
     isOnHold: false,

@@ -174,10 +174,14 @@ export default function DatabaseWorkflowControlPanel({
     isCaseLocked,
   });
 
+  // 안내 배너도 보류 판정과 **같은 분류**(DB 의 workflow_steps.category)를 쓴다.
+  // 예전에는 이 함수만 TS 표(step-category.ts)를 조회해서, 바로 윗줄의
+  // 「담당: …」 글자는 DB 값으로 맞게 적히는데 배너는 다른 역할을 말했다
+  // (2026-11-03 — 되돌리기·보류가 되는 A/S 엔지니어에게 「재고/출하 담당자가
+  // 진행할 수 있습니다」). 넘길 값이 이미 여기 있었다.
   const actionExplanation = actingUser
     ? explainUnavailableWorkflowActions({
-        workflowType: resolved.workflowType,
-        currentStepKey,
+        stepCategory: category,
         actingRole: actingUser.role,
         isCaseLocked,
         isOnHold: holdState.isOnHold,

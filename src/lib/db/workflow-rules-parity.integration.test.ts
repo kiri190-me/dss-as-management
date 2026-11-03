@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { db, pgClient } from "./connection";
 import { workflowSteps, workflowTemplates, workflowTransitions, workflowVersions } from "./schema";
 import { TRANSITION_DEFINITIONS } from "@/lib/domain/local/workflow/transition-definitions";
-import { getStepCategory } from "@/lib/domain/local/workflow/step-category";
+import { getStepCategory, STEP_CATEGORY_CODES } from "@/lib/domain/local/workflow/step-category";
 import { getStepStatus } from "@/lib/domain/local/workflow/step-status-map";
 import { WORKFLOW_TYPE_CODES, type WorkflowType } from "@/lib/domain/types";
 
@@ -26,6 +26,13 @@ import { WORKFLOW_TYPE_CODES, type WorkflowType } from "@/lib/domain/types";
  *
  * Phase 2에서 런타임이 DB만 보게 되면 TS 표는 로컬 데모 전용 기본값으로
  * 역할이 바뀌고, 그때 이 테스트의 의미도 함께 재정의해야 한다.
+ *
+ * 🔴 **분류(category)는 그 재정의가 2026-11-03 에 일어났다.** 런타임이 분류를
+ * DB 에서만 읽게 됐고([워크플로 관리]로 사람이 고칠 수 있다), 그래서 아래
+ * category 대조는 「운영 DB 가 표와 같아야 한다」가 아니라 「시드가 세우는
+ * 초기값이 표와 같아야 한다」로 뜻이 바뀌었다 — 그 시험의 주석에 적어 두었다.
+ * 상태(repair_status)와 전이는 아직 그 재정의를 하지 않았다(= 여전히 1:1을
+ * 요구한다).
  * ============================================================================
  */
 
@@ -100,7 +107,34 @@ describe("workflow rules parity (DB ↔ transition-definitions.ts)", () => {
     );
   });
 
-  test("모든 단계의 category가 step-category.ts와 일치한다 (분류 없음도 그대로)", () => {
+  /**
+   * 🔴 **분류(category)의 정본은 이제 DB 다**(2026-11-03). [워크플로 관리]
+   * 화면이 단계마다 담당 분류를 고쳐 새 판으로 게시할 수 있고
+   * (mutations/workflow-draft-steps.ts), 런타임은 단추 판정도 서버 거절도
+   * 화면의 안내 배너도 전부 DB 값을 읽는다
+   * (domain/local/workflow/workflow-action-availability.ts).
+   * 개발 DB 의 현행 판 98단계 중 35개가 이미 표와 다르다 — 그러니
+   * 「DB 와 표가 언제나 같다」는 **운영에서는 거짓**이고, 이 시험의 이름도
+   * 그렇게 읽히면 안 된다.
+   *
+   * 그래도 대조 자체를 지우지 않는 까닭: 이 파일은 시드로만 세워지는 시험
+   * DB 에서 돌고, 거기서 잡아 주던 것은 사람의 편집이 아니라
+   * **「step-category.ts 를 고쳐 놓고 시드·이관을 안 돌린 실수」**다. 그 실수는
+   * 지금도 그대로 실수다 — 새로 세운 DB 의 **초기값**이 코드와 다르면 신규
+   * 접수부터 어긋난 담당으로 돈다. 그래서 단언은 한 글자도 약하게 하지 않고
+   * 이름과 까닭만 다시 적는다.
+   *
+   * 🔴 **여기가 빨개져도 운영 DB 에 이관 스크립트를 돌려서 고치지 마라.**
+   * scripts/migrate-workflow-rules-to-db.ts 는 ARCHIVED 를 포함한 **모든 판**의
+   * 단계 컬럼을 표 값으로 덮어쓴다(그 파일 머리말) — 사람이 [워크플로 관리]에서
+   * 고친 분류가 통째로 사라진다. 고칠 곳은 표나 시드 쪽이다.
+   */
+  test("시드로 세운 DB 의 category 가 step-category.ts 와 같다 — 표는 **초기값**이고 운영의 정본은 DB 다", () => {
+    // 🔵 표본이 비어 공짜로 통과하지 않게 — 분류가 실제로 들어 있는 단계를 센다.
+    // 전부 null 인 DB 에서는 `null === null` 만 쌓이고 아무것도 재지 못한다.
+    const categorized = allSteps.filter((s) => s.category !== null);
+    assert.ok(categorized.length > 0, "분류가 들어 있는 단계가 하나도 없으면 이 대조는 아무것도 재지 않는다");
+
     const wrong: string[] = [];
     for (const step of allSteps) {
       const expected = getStepCategory(step.workflowType as WorkflowType, step.key) ?? null;
@@ -108,7 +142,33 @@ describe("workflow rules parity (DB ↔ transition-definitions.ts)", () => {
         wrong.push(`${step.workflowType}/${step.key}: DB=${step.category} 표=${expected}`);
       }
     }
-    assert.deepEqual(wrong, []);
+    assert.deepEqual(wrong, [], "시드·이관이 뒤처졌다는 뜻이다 — 운영 DB 를 덮어쓰는 쪽으로 고치지 마라");
+  });
+
+  /**
+   * 🔵 위의 대조가 시험 DB 안의 이야기라면, 이것은 **어느 DB 에서도** 깨지면 안
+   * 되는 약속이다: DB 가 돌려줄 수 있는 분류 값은 TS 가 이름을 아는 값이어야 한다.
+   *
+   * 화면은 DB 의 분류를 그대로 받아 roleForCategory 로 담당 역할을 뽑고 그 이름을
+   * 글자로 찍는다 — DatabaseWorkflowControlPanel 의 「담당: 관리자 또는 …」과,
+   * 2026-11-03 부터는 그 밑의 안내 배너까지. 둘 다 더 이상 TS 표를 거치지 않으므로
+   * DB 에만 있는 네 번째 분류가 생기면 오류가 나는 것이 아니라 화면에
+   * 「관리자 또는 undefined」가 찍힌다. pg enum 과 STEP_CATEGORY_CODES 는 서로 다른
+   * 저장소의 파일에서 따로 자라니(enum 은 vendor/dss-core) 맞대어 볼 곳이 여기뿐이다.
+   */
+  test("DB 의 분류 enum 값 집합이 STEP_CATEGORY_CODES 와 정확히 같다", async () => {
+    const labels = await pgClient<{ label: string }[]>`
+      select e.enumlabel as label
+      from pg_enum e
+      join pg_type t on t.oid = e.enumtypid
+      where t.typname = 'workflow_step_category'
+    `;
+    // enum 이름을 잘못 적으면 0행이 돌아오고, 빈 배열끼리는 아무것도 재지 못한다.
+    assert.ok(labels.length > 0, "workflow_step_category enum 을 읽지 못했다");
+    assert.deepEqual(
+      labels.map((row) => row.label).sort(),
+      [...STEP_CATEGORY_CODES].sort()
+    );
   });
 
   test("current 버전의 전이가 표와 개수·내용 모두 1:1이다", async () => {

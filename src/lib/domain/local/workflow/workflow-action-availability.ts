@@ -1,4 +1,4 @@
-import type { Role, WorkflowType } from "../../types";
+import type { Role } from "../../types";
 import type { ActingUser } from "../approval/transitions";
 import {
   isAdvanceIntoShipmentWaiting,
@@ -6,7 +6,7 @@ import {
 } from "../../shipment-waiting-auto-advance";
 import { actorMay } from "@/lib/auth/developer-promotion";
 import { checkHoldEligibilityForCategory, checkTransitionEligibility } from "./permissions";
-import { getStepCategory, roleForCategory, type StepCategory } from "./step-category";
+import { roleForCategory, type StepCategory } from "./step-category";
 import type { TransitionDefinition } from "./transition-definitions";
 import type { HoldState } from "./workflow-types";
 
@@ -26,8 +26,13 @@ import type { HoldState } from "./workflow-types";
  * No workflow ownership rule, transition definition, or backend semantic is
  * changed here — this file only decides what the UI *shows* for a state the
  * backend (workflow-transitions.ts) already independently computes and
- * enforces. checkTransitionEligibility/checkHoldEligibility/getStepCategory/
+ * enforces. checkTransitionEligibility/checkHoldEligibilityForCategory/
  * roleForCategory are reused verbatim, never duplicated.
+ *
+ * 🔴 이 파일은 **단계 분류(category)를 스스로 찾지 않는다** — 세 함수 모두
+ * 인자로 받는다. 분류의 정본은 그 접수 건의 workflow_steps.category(DB)이고,
+ * step-category.ts 의 TS 표는 이관 당시의 초기값일 뿐이다(2026-11-03). 여기서
+ * 표를 한 번이라도 조회하면 화면이 서버와 다른 답을 말한다.
  */
 
 export type ActionAvailability = { available: true } | { available: false; reason: string };
@@ -166,14 +171,26 @@ export type WorkflowActionExplanation =
   | null;
 
 /**
- * One summary explanation for why the action list may look entirely
- * unavailable, chosen by priority (locked > active hold > role-ownership
- * mismatch > no explanation) — never invented from counting disabled
- * buttons, always derived from the same authoritative
- * getStepCategory/roleForCategory table transition-definitions.ts and
- * permissions.ts already use for the real eligibility checks above, so
- * this can never drift into a second, competing workflow-step-to-role
- * source of truth.
+ * 「실행 가능한 작업」이 통째로 막혀 보이는 까닭을 한 줄로 설명하는 안내 배너.
+ * 꺼진 단추 수를 세어 지어내지 않고, 우선순위로 고른다 — 잠금 > 보류 중 >
+ * 단계 담당이 남의 것 > 설명 없음.
+ *
+ * 🔴 **단계 분류를 인자로 받는다(2026-11-03).** 예전에는 여기서만
+ * getStepCategory(step-category.ts)로 TS 표를 조회했다. 그 표는 스스로 머리말에
+ * 「Stage E-1 데모 전용 설정 … 운영 업무 규칙 확정이 아님」이라 적어 둔 **초기값**
+ * 이고, 운영에서는 [워크플로 관리] 화면이 단계마다 분류를 고쳐 새 판으로
+ * 게시한다. 개발 DB 의 현행 판 98단계 중 35개가 표와 달랐다(2026-11-03 실측 —
+ * 예: PAID_MATCHER/waiting_kyosan_reply 가 표 BUSINESS, DB TECHNICAL).
+ *
+ * 단추를 끄는 쪽(evaluateTransitionAvailability·evaluateHoldAvailabilityFor-
+ * Category)과 서버 거절(workflow-transitions.ts)은 이미 DB 의
+ * workflow_transitions.allowed_roles·workflow_steps.category 를 본다. 그래서
+ * 되돌리기·보류가 **실제로 되는** A/S 엔지니어에게 이 배너만
+ * 「재고/출하 담당자가 진행할 수 있습니다」라고 말했다. 판정이 아니라 설명이
+ * 거짓말을 하는 쪽이라 오류가 한 번도 안 났고, 그래서 오래 남았다.
+ *
+ * 분류→역할 변환(roleForCategory)은 그대로 쓴다. 그건 단계마다 달라지는 값이
+ * 아니라 고정 대응이고, 틀렸던 것은 **분류를 어디서 가져오는가**였다.
  *
  * Returns null (no banner) when:
  *  - the case is on hold: checkNotOnHold already attaches a specific,
@@ -184,13 +201,14 @@ export type WorkflowActionExplanation =
  *    (checkRoleEligibility/checkAssignedEngineer/checkHoldEligibility all
  *    special-case these two roles) means step ownership never actually
  *    blocks them, so the message would be false.
- *  - the step has no category entry (e.g. a genuinely terminal step) —
- *    ownership can't be determined, so nothing is claimed.
+ *  - 분류가 없는 단계(stepCategory === null): 담당을 알 수 없으므로 아무것도
+ *    주장하지 않는다. 종료 단계와, 건별로 끼워 넣어 DB 에만 있는 단계
+ *    (case_step_N)가 여기 해당한다 — 보류 판정이 그 둘을 다루는 방식과 같다.
  *  - the acting role's category already matches the step's category.
  */
 export function explainUnavailableWorkflowActions(params: {
-  workflowType: WorkflowType;
-  currentStepKey: string;
+  /** 그 접수 건의 현재 단계 분류 — 서버가 읽어 내려준 DB 값(WorkflowRulesDto.steps[].category). */
+  stepCategory: StepCategory | null;
   actingRole: Role;
   isCaseLocked: boolean;
   isOnHold: boolean;
@@ -205,10 +223,9 @@ export function explainUnavailableWorkflowActions(params: {
     return null;
   }
 
-  const category = getStepCategory(params.workflowType, params.currentStepKey);
-  if (!category) return null;
+  if (!params.stepCategory) return null;
 
-  const owningRole = roleForCategory(category);
+  const owningRole = roleForCategory(params.stepCategory);
   if (owningRole === params.actingRole) return null;
 
   return {
