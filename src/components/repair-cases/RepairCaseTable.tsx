@@ -176,7 +176,7 @@ function StatusRowOverdueBadge({ isOverdue }: { isOverdue: boolean }) {
  * silently substituting the target date. 고객 요청 납기일 stays as secondary
  * context (still sortable via the header's secondary button).
  * 머리글 「출하일」도 2026-10-19부터 누를 수 있다(SortColumn "actualShipmentDate").
- * 🔴 정렬도 본문과 같은 값으로 선다 — 널을 사내 목표 출하일로 대신 채우지
+ * 🔴 정렬도 본문과 같은 값으로 선다 — 널을 사내 목표 완료일로 대신 채우지
  * 않는다(repair-case-filters.ts 의 sortRows). 그렇지 않으면 "-"로 그려진 줄이
  * 날짜가 있는 줄 사이에 끼어 선다.
  *
@@ -246,7 +246,7 @@ export default function RepairCaseTable({
             <th scope="col" className={thBaseClass}>유·무상</th>
             <th scope="col" className={thBaseClass}>담당 엔지니어</th>
             <th scope="col" className={thBaseClass}>
-              {/* 실제 출하일(effectiveActualShipmentDate, primary — never substitutes 사내 목표 출하일 when null, in the body *and* in the sort) + 고객 요청 납기일 (secondary, still sortable) */}
+              {/* 실제 출하일(effectiveActualShipmentDate, primary — never substitutes 사내 목표 완료일 when null, in the body *and* in the sort) + 고객 요청 납기일 (secondary, still sortable) */}
               <div className="flex flex-col gap-0.5">
                 <PrimarySortButton column="actualShipmentDate" label="출하일" sort={sort} onSortChange={onSortChange} />
                 <SecondarySortButton column="customerRequestedDueDate" label="고객 요청 납기일" sort={sort} onSortChange={onSortChange} />
@@ -298,7 +298,7 @@ export default function RepairCaseTable({
                     <PriorityBadge priority={row.priority} />
                     <StatusRowOverdueBadge isOverdue={row.effectiveIsOverdue} />
                     {/* 「납기 지연」 바로 뒤다 — 둘은 다른 판정이지만(지연은 사내
-                        목표 출하일, 임박은 고객 요청 납기일) 사람이 같은 물음으로
+                        목표 완료일, 임박은 고객 요청 납기일) 사람이 같은 물음으로
                         읽는 자리라 나란히 선다. 색은 일부러 갈랐다(badges.tsx). */}
                     <DueDateNearBadge isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false} />
                     <HoldBadge isOnHold={row.holdState?.isOnHold ?? false} />

@@ -286,7 +286,7 @@ export function repairCaseDueDateNotificationWindowEnd(now: Date): string {
  *
  * 🔴 **이미 지난 납기는 창 밖이라 뜨지 않는다.** 이 알림은 「곧 온다」를 알리는
  * 것이고, 「지났다」는 이 저장소에 이미 따로 있다(types.ts 의 isRepairCaseOverdue —
- * 사내 목표 출하일로 재는 다른 판정이다). 둘을 섞지 않는다.
+ * 사내 목표 완료일로 재는 다른 판정이다). 둘을 섞지 않는다.
  */
 export function isRepairCaseDueDateWithinNotificationWindow(dueDate: string | null, now: Date): boolean {
   if (dueDate === null) return false;
@@ -391,13 +391,13 @@ export function buildRepairCaseDueDateNearNotification(input: {
   };
 }
 
-// ══════════════ 사내 목표 출하일 미등록 — PO 는 나갔는데 우리 날짜가 아직 비었다
+// ══════════════ 사내 목표 완료일 미등록 — PO 는 나갔는데 우리 날짜가 아직 비었다
 
 /**
  * ────────────────────────────────────────────────────────────────────────────
- * 2026-10-29 사용자 요구: 「PO발행일이 등록되면 엔지니어들에게 **사내 목표 출하일을
+ * 2026-10-29 사용자 요구: 「PO발행일이 등록되면 엔지니어들에게 **사내 목표 완료일을
  * 등록해 주세요** 라고 알림이 뜨도록」. 그리고 「이 알림은 승인용이야 — 해당 수리건에
- * 사내 목표 출하일이 등록되기 전까지는 **눌러서 확인해도 사라지지 않아**」.
+ * 사내 목표 완료일이 등록되기 전까지는 **눌러서 확인해도 사라지지 않아**」.
  *
  * 🔴 **그래서 이 종류는 ACKNOWLEDGEABLE_NOTIFICATION_KINDS 에 넣지 않는다.** 거기
  * 들어가는 순간 종에 확인 단추가 생기고, 누르면 날짜를 안 적어도 사라진다 — 요구와
@@ -413,7 +413,7 @@ export function buildRepairCaseDueDateNearNotification(input: {
  *
  * ── 🔴 뜨는 조건 셋(2026-10-29·30 사용자 결정) ──────────────────────────────
  *   ① PO발행일이 있다            — domestic_orders.order_issued_date
- *   ② 사내 목표 출하일이 없다     — repair_cases.internal_target_shipment_date
+ *   ② 사내 목표 완료일이 없다     — repair_cases.internal_target_shipment_date
  *   ③ 출하가 끝나지 않았다        — isRepairCaseShipmentFinished 가 거짓
  *                                   (domain/shipment-finished.ts)
  * 셋 다 **지금 자료에서 매번 다시 계산**하므로 「지난 건도 함께 뜬다」가 공짜로 따라
@@ -464,7 +464,7 @@ export function earliestDomesticOrderIssuedDate(orderIssuedDates: readonly strin
 }
 
 /**
- * 사내 목표 출하일이 **아직 비어 있는가**. 공백만 적힌 값도 「없음」이다 —
+ * 사내 목표 완료일이 **아직 비어 있는가**. 공백만 적힌 값도 「없음」이다 —
  * 「납기 역전」이 같은 칸을 같은 함수로 접는다(due-date-inversion.ts 의
  * isDueDateInverted). 한쪽이 공백을 값으로 치면 화면에는 빈칸인데 알림만 안 뜨는
  * 건이 생긴다.
@@ -474,7 +474,7 @@ export function isInternalTargetShipmentDateMissing(internalTargetShipmentDate: 
 }
 
 /**
- * 이 수리 건에 **「사내 목표 출하일을 등록해 주세요」가 뜨는가** — 위 세 조건의 곱.
+ * 이 수리 건에 **「사내 목표 완료일을 등록해 주세요」가 뜨는가** — 위 세 조건의 곱.
  *
  * 조건을 조회(SQL) 안에 적지 않고 여기 둔 까닭은 「납기 임박」과 같다
  * (isRepairCaseDueDateNear 의 주석): 같은 사실을 나중에 표·배지에서도 그리게 되면
@@ -505,10 +505,10 @@ export function needsInternalTargetShipmentDate(row: {
  * 적으면 한쪽만 고쳐지는 날 「등록해 주세요」와 「등록 바랍니다」가 섞인다
  * (due-date-inversion.ts 의 DUE_DATE_INVERSION_NOTE 와 같은 규율).
  */
-export const INTERNAL_TARGET_SHIPMENT_REQUEST_MESSAGE = "사내 목표 출하일을 등록해 주세요";
+export const INTERNAL_TARGET_SHIPMENT_REQUEST_MESSAGE = "사내 목표 완료일을 등록해 주세요";
 
 /**
- * 「사내 목표 출하일을 등록해 주세요」 알림 한 줄.
+ * 「사내 목표 완료일을 등록해 주세요」 알림 한 줄.
  *
  * ── subject 는 인수번호다 ──────────────────────────────────────────────
  * 접수 건을 가리키는 말 중 사람이 먼저 찾는 것이고, 결재 알림·납기 임박이 굵게
@@ -517,7 +517,7 @@ export const INTERNAL_TARGET_SHIPMENT_REQUEST_MESSAGE = "사내 목표 출하일
  * ── 🔴 detail 에 부탁 문장을 **그대로** 싣는다 ─────────────────────────
  * 다른 종류들은 종류 이름을 detail 에 다시 적지 않는다(잘리는 자리의 폭만 먹는다).
  * 여기만 예외인 까닭은 사용자가 요구한 것이 **그 문장 자체**이기 때문이다 —
- * 「[사내 목표 출하일을 등록해 주세요]라고 알림이 뜨도록」. 게다가 브라우저 알림창은
+ * 「[사내 목표 완료일을 등록해 주세요]라고 알림이 뜨도록」. 게다가 브라우저 알림창은
  * 제목에 종류 이름을, **본문에 detail 만** 싣는다(components/layout/
  * BrowserNotifications.tsx) — detail 에 없으면 알림창에서는 그 부탁이 아예 보이지
  * 않는다. 종 패널의 상세 칸은 한 줄에서 잘리므로(CSS truncate) 부탁을 **앞에** 두고
@@ -528,11 +528,11 @@ export const INTERNAL_TARGET_SHIPMENT_REQUEST_MESSAGE = "사내 목표 출하일
  * (earliestDomesticOrderIssuedDate), 그래서 오래 비워 둔 건일수록 날짜가 멀어 보인다.
  *
  * ── href 는 상세 첫 화면이다 ──────────────────────────────────────────
- * 사내 목표 출하일을 적는 자리가 거기다(상세정보 → 인수 정보 → [수정] —
+ * 사내 목표 완료일을 적는 자리가 거기다(상세정보 → 인수 정보 → [수정] —
  * components/repair-cases/detail/edit/IntakeInfoEditForm.tsx 가 유일한 정상 편집
  * 경로다). 주소는 직접 적지 않고 탭 헬퍼에서 가져온다.
  *
- * targetKey 는 접수 건 id 다. 한 건에 목표 출하일은 하나뿐이고, 사람에게도 「그 한
+ * targetKey 는 접수 건 id 다. 한 건에 목표 완료일은 하나뿐이고, 사람에게도 「그 한
  * 건」이다 — 내자 줄이 셋이어도 종에는 한 줄이다.
  */
 export function buildRepairCaseTargetShipmentMissingNotification(input: {
@@ -569,7 +569,7 @@ export function buildRepairCaseTargetShipmentMissingNotification(input: {
  * 판정 함수가 하나도 없고 아래 build 하나뿐이다(조건을 부르는 자리는 조회다:
  * queries/repair-case-due-date-inverted-notifications.ts).
  *
- * 🔵 바로 위 「사내 목표 출하일 미등록」에는 판정 함수가 셋 있었다. 그쪽은 묻는
+ * 🔵 바로 위 「사내 목표 완료일 미등록」에는 판정 함수가 셋 있었다. 그쪽은 묻는
  * 사실이 이 저장소에 없던 것이라 새로 지을 수밖에 없었고, 이쪽은 **이미 지어져
  * 화면 셋이 쓰고 있다.** 이웃한 두 절의 모양이 다른 까닭이 그것뿐이다.
  *
@@ -577,14 +577,14 @@ export function buildRepairCaseTargetShipmentMissingNotification(input: {
  * ACKNOWLEDGEABLE_NOTIFICATION_KINDS 에 넣지 **않는다.** 넣는 순간 종에 확인 단추가
  * 생기고, 누르면 날짜를 그대로 둔 채 사라진다 — 「승인용」이라는 말이 뜻한 것과
  * 정반대다. 넣지 않으면 저절로 할 일 알림이 된다: 두 날짜 중 하나를 고치거나(사내
- * 목표 출하일을 당기거나, 고객과 협의해 요청일을 미루거나) 그 건이 나가면 다음
+ * 목표 완료일을 당기거나, 고객과 협의해 요청일을 미루거나) 그 건이 나가면 다음
  * 조회에서 빠진다. 적는 쪽 문도 이 종류의 키를 거절한다
  * (domain/notification-acknowledgement.ts 의 checkNotificationAcknowledgementKey).
  * 🔵 종의 ✕(지우기)는 그것과 다른 것이고, 종류를 가리지 않고 열려 있다
  * (domain/notification-dismissal.ts — 2026-10-20 결정). 이번 조각에서 안 건드렸다.
  *
  * ── 받는 사람은 엔지니어 · 영업 · 관리자 ───────────────────────────────────
- * 「사내 목표 출하일 미등록」이 **적는 사람**(엔지니어)에게만 가는 것과 갈린다 —
+ * 「사내 목표 완료일 미등록」이 **적는 사람**(엔지니어)에게만 가는 것과 갈린다 —
  * 역전은 날짜를 고쳐서 끝나는 일이 아니라 **고객에게 전화를 걸어야** 끝나는 일이라
  * 영업이 함께 받아야 한다. 가르는 자리는 여기가 아니라 알림 설정의 역할 기본값이다
  * (domain/notification-settings.ts — 그 case 주석에 까닭 셋).
@@ -602,7 +602,7 @@ export function buildRepairCaseTargetShipmentMissingNotification(input: {
  * 메모 문장은 화면 넷이 이미 쓰는 상수를 그대로 가져온다(due-date-inversion.ts 의
  * DUE_DATE_INVERSION_NOTE). 같은 사실이 화면에서는 「협의가 필요합니다」, 종에서는
  * 「협의 바랍니다」로 읽히면 사람은 둘을 다른 경보로 센다. 종류 이름을 detail 에 다시
- * 적지 않는 다른 종류들과 갈리는 점도 바로 위 절(사내 목표 출하일 미등록)과 같다 —
+ * 적지 않는 다른 종류들과 갈리는 점도 바로 위 절(사내 목표 완료일 미등록)과 같다 —
  * 사용자가 요구한 것이 **그 문장 자체**이고, 브라우저 알림창은 제목에 종류 이름을
  * **본문에 detail 만** 싣는다(components/layout/BrowserNotifications.tsx).
  * 종 패널의 상세 칸은 한 줄에서 잘리므로(CSS truncate) 그 문장을 **맨 앞**에 둔다.
@@ -624,14 +624,14 @@ export function buildRepairCaseTargetShipmentMissingNotification(input: {
  * ── href 는 상세 첫 화면이다 ──────────────────────────────────────────
  * 사용자가 「클릭하면 수리건 상세로 넘어가도록」이라고 못 박았고, 두 날짜를 고치는
  * 자리도 거기다(상세정보 → 인수 정보 → [수정]). 주소는 직접 적지 않고 탭 헬퍼에서
- * 가져온다 — 납기 임박·사내 목표 출하일 미등록과 같은 줄이다.
+ * 가져온다 — 납기 임박·사내 목표 완료일 미등록과 같은 줄이다.
  *
  * targetKey 는 접수 건 id 다. 한 건에 역전은 하나뿐이고, 사람에게도 「그 한 건」이다.
  */
 export function buildRepairCaseDueDateInvertedNotification(input: {
   repairCaseId: string;
   intakeNumber: string;
-  /** 그 건의 사내 목표 출하일("YYYY-MM-DD"). 조회가 이미 「적혀 있다」를 가린 값이다. */
+  /** 그 건의 사내 목표 완료일("YYYY-MM-DD"). 조회가 이미 「적혀 있다」를 가린 값이다. */
   internalTargetShipmentDate: string;
   /** 화면에 보이는 그 고객 요청 납기일("YYYY-MM-DD"). 빌려 온 값일 수 있다. */
   requestedDueDate: string;
@@ -647,7 +647,7 @@ export function buildRepairCaseDueDateInvertedNotification(input: {
     targetKey: input.repairCaseId,
     subject: input.intakeNumber,
     detail:
-      `${DUE_DATE_INVERSION_NOTE} · 사내 목표 출하일 ${input.internalTargetShipmentDate} · ` +
+      `${DUE_DATE_INVERSION_NOTE} · 사내 목표 완료일 ${input.internalTargetShipmentDate} · ` +
       `고객 요청 납기일 ${requested}`,
     href: repairCaseDetailHrefs(input.repairCaseId).root,
   };

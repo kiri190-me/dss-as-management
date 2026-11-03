@@ -210,7 +210,7 @@ export type IntakeSectionUpdateFields = Partial<{
   newEndUserName: string;
   receivedAt: string;
   /**
-   * 실제 출하일 — 다른 선택 입력 날짜들(고객 요청 납기일/사내 목표 출하일)과
+   * 실제 출하일 — 다른 선택 입력 날짜들(고객 요청 납기일/사내 목표 완료일)과
    * 달리 `string | null`이 아니라 `string`이다. 비워서 지울 수 없기 때문이다
    * (출하 완료인데 날짜가 없으면 앞뒤가 안 맞는다) — 인수일과 같은 모양이고
    * 같은 normalizeRequiredDate를 쓴다. "이미 출하 완료된 건인가"는 DB에 저장된
@@ -232,7 +232,7 @@ export type IntakeSectionUpdateFields = Partial<{
    */
   priority: Priority;
   /**
-   * 사내 목표 출하일 — 인수정보가 이 값의 단일한 정상 편집 지점이다(고장 및
+   * 사내 목표 완료일 — 인수정보가 이 값의 단일한 정상 편집 지점이다(고장 및
    * 서비스 정보에는 더 이상 없다). 선택 입력이라 null로 지울 수 있다(고객
    * 요청 납기일과 같은 원칙).
    */
@@ -240,7 +240,7 @@ export type IntakeSectionUpdateFields = Partial<{
   /**
    * 사내 목표 검수 완료일 — 인수정보/A/S 접수 일정 체크포인트부터 이 섹션이
    * 단독 소관이다(고장 및 서비스 정보에는 더 이상 없다). 선택 입력이라
-   * null로 지울 수 있다(사내 목표 출하일과 같은 원칙).
+   * null로 지울 수 있다(사내 목표 완료일과 같은 원칙).
    */
   internalTargetInspectionCompletionDate: string | null;
   customerRequestedDueDate: string | null;
@@ -346,7 +346,7 @@ export function validateIntakeSectionFields(
   const internalTargetShipmentDate = normalizeNullableDate(
     raw,
     "internalTargetShipmentDate",
-    "사내 목표 출하일",
+    "사내 목표 완료일",
     fieldErrors
   );
   if (internalTargetShipmentDate !== undefined) data.internalTargetShipmentDate = internalTargetShipmentDate;

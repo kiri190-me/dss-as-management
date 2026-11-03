@@ -9,6 +9,7 @@ import type {
 } from "@/lib/domain/local/workflow/transition-definitions";
 import type { ActionCode } from "@/lib/domain/local/workflow/workflow-types";
 import type { RepairStatus, WorkflowType } from "@/lib/domain/types";
+import { SHIPMENT_WAITING_REPAIR_STATUS } from "@/lib/domain/shipment-waiting-auto-advance";
 import type { StepCategory } from "@/lib/domain/local/workflow/step-category";
 import type { WorkflowRuleStep, WorkflowRulesDto } from "@/lib/domain/workflow-rules-view";
 
@@ -171,23 +172,44 @@ export function findTransitionInRules(
 }
 
 /**
- * 단계를 직접 변경할 때 고를 수 있는 후보 목록. 규칙은 둘이다:
+ * 단계를 직접 변경할 때 고를 수 있는 후보 목록. 규칙은 셋이다:
  *   - 승인 게이트가 걸린 단계는 제외한다. 열어두면 최종 출하 승인·수리 검수
  *     승인을 건너뛰고 도달할 수 있어 승인 절차가 무력화된다. 제외 대상은
  *     하드코딩하지 않고 전이의 required_approval_type에서 매번 산출하므로,
  *     승인 요건이 바뀌면 후보 목록도 자동으로 따라간다.
+ *   - 🔴 **상태가 「출하 대기」인 단계는 제외한다**(2026-11-03 사용자 결정 —
+ *     「출하대기는 자동으로만 넘어가도록 해줘. [단계 직접 변경]에서 [출하대기]는
+ *     보이지 않도록 해줘」). 그 자리는 이제 **최종 출하 승인이 모두 끝날 때
+ *     시스템이 옮긴다**(db/mutations/shipment-waiting-auto-advance.ts).
+ *     🔴 **들어가는 길만 닫는다 — 나가는 길은 그대로다.** 이 목록은 「어디로
+ *     갈 수 있는가」이지 「어디에서 갈 수 있는가」가 아니라서, 출하 대기에 서 있는
+ *     건은 여전히 다른 아무 단계나 골라 빠져나올 수 있다(되돌리기·출하 완료도
+ *     그대로다). 그리고 정규 진행 [다음 단계] 로 들어가는 길도 막지 않는다 —
+ *     막으면 자동 전환이 못 닿은 건이 출하 완료까지 갈 길을 잃는다.
  *   - 상태가 없는 단계는 애초에 rules.steps에 들어오지 않는다(loadWorkflowRules).
  *
  * 예전에는 같은 규칙을 TS 표로 들고 있는 구현이 하나 더 있었고 둘이 갈라질
  * 위험이 있었지만, 지금은 이 함수가 유일한 실체다 — UI 목록도(execution
  * page -> ManualStepSetPanel), 서버 재검증도(isManuallySelectableStepInRules)
  * 모두 여기를 거친다.
+ *
+ * 🔴 **주간보고 상세표의 `현 상태` 고르개도 이 목록을 쓴다**
+ * (db/mutations/weekly-report-status.ts). 그래서 출하 대기 제외가 그쪽에도
+ * 함께 걸린다 — 의도한 것이다(「자동으로만 닿는 단계」는 문이 하나만 닫혀서는
+ * 성립하지 않는다). 🔵 그쪽 고르개의 「출하 대기」 칸이 죽지는 않는다: 그 칸은
+ * WAITING_SHIPMENT 와 WAITING_SHIPMENT_APPROVAL 을 함께 덮으므로
+ * (domain/weekly-report.ts 의 classifyWeeklyReportStatus), 고르면 가장 가까운
+ * 「출하 승인」 단계로 간다 — 실측(PAID_MATCHER, 인수점검에서 고를 때)으로는 이
+ * 변경 전에도 그 단계가 뽑히고 있었다.
  */
 export function listManuallySelectableStepsFromRules(rules: WorkflowRules): WorkflowRuleStep[] {
   const approvalGatedStepKeys = new Set(
     rules.transitions.filter((t) => t.requiredApprovalType !== null).map((t) => t.toStepKey)
   );
-  return rules.steps.filter((step) => !approvalGatedStepKeys.has(step.key));
+  return rules.steps.filter(
+    (step) =>
+      !approvalGatedStepKeys.has(step.key) && step.status !== SHIPMENT_WAITING_REPAIR_STATUS
+  );
 }
 
 /** 서버가 클라이언트가 보낸 단계 키를 다시 검증할 때 쓰는 술어. */

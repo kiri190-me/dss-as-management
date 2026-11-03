@@ -58,7 +58,7 @@ import { ROLE_CODES } from "./types";
  *  5. 조회가 **DB 에 아무것도 안 쓴다** — 글자로 잰다.
  *
  * 🔴 조회(db/queries/…)는 server-only 와 DB 를 끌고 들어와 단위 시험에서 부를 수
- * 없다. 그래서 「납기 임박」·「사내 목표 출하일 미등록」이 쓰는 방법 그대로, **소스를
+ * 없다. 그래서 「납기 임박」·「사내 목표 완료일 미등록」이 쓰는 방법 그대로, **소스를
  * 읽어** 계약을 붙잡는다(domain/target-shipment-notification.test.ts 와 같은 자리).
  *
  * 🔵 판정 자체(같은 날은 역전이 아니다 · 빌려 오기 · 출하 거르기)는
@@ -131,7 +131,7 @@ test("🔴 알림 글자에 「납기 요청일 협의가 필요합니다.」가
   assert.equal(item.subject, "D261015", "어느 건인지는 인수번호가 말한다");
   assert.equal(
     item.detail,
-    "납기 요청일 협의가 필요합니다. · 사내 목표 출하일 2094-11-05 · 고객 요청 납기일 2094-10-30"
+    "납기 요청일 협의가 필요합니다. · 사내 목표 완료일 2094-11-05 · 고객 요청 납기일 2094-10-30"
   );
   // 🔴 글자를 두 곳에 적지 않는다 — 화면 넷이 쓰는 상수 한 곳이 이 말을 쥔다.
   //    (상수 쪽이 바뀌면 이 단언이 깨지고, 그때 종의 글자도 함께 바뀐 것이다.)
@@ -139,7 +139,7 @@ test("🔴 알림 글자에 「납기 요청일 협의가 필요합니다.」가
   assert.ok(item.detail.startsWith(DUE_DATE_INVERSION_NOTE), item.detail);
   // 🔴 메모가 **앞**이다. 종 패널의 상세 칸은 한 줄에서 잘리므로(CSS truncate) 뒤에
   //    두면 사용자가 요구한 그 문장이 잘려 나갈 수 있다.
-  assert.ok(item.detail.indexOf("사내 목표 출하일") > 0, item.detail);
+  assert.ok(item.detail.indexOf("사내 목표 완료일") > 0, item.detail);
 });
 
 test("🔴 두 날짜가 **각각 이름을 달고** 들어간다 — 어느 쪽이 우리 날인지 알아야 고친다", () => {
@@ -150,12 +150,12 @@ test("🔴 두 날짜가 **각각 이름을 달고** 들어간다 — 어느 쪽
     requestedDueDate: "2094-10-30",
     borrowed: false,
   });
-  // 이름 없이 날짜만 둘 적으면 어느 쪽이 사내 목표 출하일인지 알 수 없다.
-  assert.ok(item.detail.includes("사내 목표 출하일 2094-11-05"), item.detail);
+  // 이름 없이 날짜만 둘 적으면 어느 쪽이 사내 목표 완료일인지 알 수 없다.
+  assert.ok(item.detail.includes("사내 목표 완료일 2094-11-05"), item.detail);
   assert.ok(item.detail.includes("고객 요청 납기일 2094-10-30"), item.detail);
   // 우리 날짜가 먼저다 — 사람이 고칠 수 있는 칸이 그쪽이다.
   assert.ok(
-    item.detail.indexOf("사내 목표 출하일") < item.detail.indexOf("고객 요청 납기일"),
+    item.detail.indexOf("사내 목표 완료일") < item.detail.indexOf("고객 요청 납기일"),
     item.detail
   );
 });
@@ -173,7 +173,7 @@ test("🔴 빌려 온 납기일에는 표시가 붙는다 — 「내가 적은 �
   assert.equal(DUE_DATE_FROM_DOMESTIC_ORDER_LABEL, "내자 정리에서 작성됨");
   assert.equal(
     borrowed.detail,
-    "납기 요청일 협의가 필요합니다. · 사내 목표 출하일 2094-11-05 · " +
+    "납기 요청일 협의가 필요합니다. · 사내 목표 완료일 2094-11-05 · " +
       "고객 요청 납기일 2094-10-30 (내자 정리에서 작성됨)"
   );
 
@@ -309,14 +309,14 @@ test("🔴 기본값은 엔지니어·영업·관리자가 받는다 — 재고 
 });
 
 test("🔴 이웃한 할 일 알림과 **명단이 다르다** — 둘을 한 질문으로 묶지 않았다", () => {
-  // 사내 목표 출하일 미등록은 빈칸을 **적으면** 끝나는 일이라 적는 사람(엔지니어)
+  // 사내 목표 완료일 미등록은 빈칸을 **적으면** 끝나는 일이라 적는 사람(엔지니어)
   // 하나이고, 역전은 **고객과 협의해야** 끝나는 일이라 영업·관리자가 함께 받는다
   // (2026-10-29 · 10-30 사용자 결정). 두 명단이 같아지면 그 구별이 사라진 것이다.
   for (const role of ["SALES", "ADMIN"] as const) {
     assert.equal(
       defaultRoleReceivesNotification("REPAIR_CASE_TARGET_SHIPMENT_MISSING", role),
       false,
-      `${role} 이 사내 목표 출하일 미등록까지 함께 열렸다`
+      `${role} 이 사내 목표 완료일 미등록까지 함께 열렸다`
     );
     assert.equal(defaultRoleReceivesNotification(KIND, role), true);
   }
@@ -392,7 +392,7 @@ test("이름·설명·색 — 관리자가 설명만 읽고 무엇을 끄는지 
 
   // 🔴 **주황 계열이다 — 2026-10-30 사용자 요청**(「주황색 계열로 알림을 띄우도록」).
   //    그런데 **남의 색을 쓰면 안 된다** — 빨강은 납기 임박, 장미는 반려됨, 주황은
-  //    바로 옆의 사내 목표 출하일 미등록이 이미 쓰고 있다. 그래서 호박이다.
+  //    바로 옆의 사내 목표 완료일 미등록이 이미 쓰고 있다. 그래서 호박이다.
   const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
   const others = NOTIFICATION_KINDS.filter((kind) => kind !== KIND).map((kind) =>
     hueOf(NOTIFICATION_KIND_META[kind].toneClassName)

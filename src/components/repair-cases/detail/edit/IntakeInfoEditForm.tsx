@@ -47,7 +47,7 @@ function ReadOnlyField({
  * `editableFields` grants this role that field, as read-only text otherwise,
  * so context is never lost mid-edit.
  *
- * 사내 목표 출하일/사내 목표 검수 완료일 모두 이 폼이 유일한 정상 편집
+ * 사내 목표 완료일/사내 목표 검수 완료일 모두 이 폼이 유일한 정상 편집
  * 지점이다(고장 및 서비스 정보의 편집 폼에는 더 이상 없다) — 둘 다 선택
  * 입력이라 비우면 null로 저장된다.
  *
@@ -60,12 +60,12 @@ function ReadOnlyField({
  * 남는다 — 권한만 보고 빈 입력칸을 세우면 사람이 거기 날짜를 적어 저장할
  * 수 있고, 서버는 그것을 거부한다(화면이 할 수 있다고 해 놓고 서버가 막는
  * 꼴이 된다). 같은 이유로 제출부도 "값이 원래 있었을 때만" 보낸다. 비우는
- * 길은 없다(사내 목표 출하일과 다른 점이다).
+ * 길은 없다(사내 목표 완료일과 다른 점이다).
  *
  * 우선순위(priority) — 인수 정보 priority-editing 체크포인트부터 이 폼이
  * 유일한 정상 편집 지점이다. domain/types.ts의 PRIORITY_CODES/priorityLabels
  * 를 그대로 재사용하며(새 enum을 정의하지 않는다), 일정 필드들(고객 요청
- * 납기일/사내 목표 출하일) 바로 옆에 배치해 "운영 계획 정보"라는 같은
+ * 납기일/사내 목표 완료일) 바로 옆에 배치해 "운영 계획 정보"라는 같은
  * 성격임을 드러낸다. 2026-10-23부터 SUPER_ADMIN/ADMIN에 더해 AS_ENGINEER도
  * 이 필드를 select로 얻는다 — SALES는 아니다(SECTION_FIELD_NAMES.INTAKE에는
  * 있지만 SALES_FIELDS에는 의도적으로 넣지 않았다 — repair-case-edit-
@@ -471,7 +471,7 @@ export default function IntakeInfoEditForm({
 
         {canEdit("internalTargetShipmentDate") ? (
           <div>
-            <label className={editLabelClass}>사내 목표 출하일</label>
+            <label className={editLabelClass}>사내 목표 완료일</label>
             <input
               type="date"
               className={editInputClass}
@@ -484,7 +484,7 @@ export default function IntakeInfoEditForm({
             )}
           </div>
         ) : (
-          <ReadOnlyField label="사내 목표 출하일" value={resolved.internalTargetShipmentDate ?? "-"} />
+          <ReadOnlyField label="사내 목표 완료일" value={resolved.internalTargetShipmentDate ?? "-"} />
         )}
 
         {canEdit("priority") ? (

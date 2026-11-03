@@ -6,6 +6,7 @@ import {
   explainUnavailableWorkflowActions,
   LOCKED_CASE_MESSAGE,
 } from "./workflow-action-availability";
+import { SHIPMENT_WAITING_AUTO_ONLY_MESSAGE } from "../../shipment-waiting-auto-advance";
 import type { TransitionDefinition } from "./transition-definitions";
 import type { HoldState } from "./workflow-types";
 import type { ActingUser } from "../approval/transitions";
@@ -307,4 +308,127 @@ test("a step with no category entry (e.g. a terminal step): no explanation, neve
     isOnHold: false,
   });
   assert.equal(result, null);
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 🔴 [출하 대기]는 [다음 단계로 진행]으로도 못 간다 (2026-11-03)
+// ────────────────────────────────────────────────────────────────────────────
+// 사용자 요구: 「[실행 가능한 작업]에서도 [다음 단계로 진행]을 통해서 출하대기로
+// 넘어가지 못하도록 해줘.」 그 자리는 최종 출하 승인이 모두 끝날 때 시스템이
+// 옮긴다 — 사람이 고르는 길은 전부 닫힌다.
+//
+// 🔴 **나가는 길은 그대로여야 한다.** 아래 마지막 둘이 그 못이다: 출하 대기에서
+// 되돌리는 전이와 출하 완료로 나가는 전이는 걸리지 않는다. 걸리면 잘못 넘어간
+// 건이 영영 갇힌다.
+
+test("🔴 다음 단계가 [출하 대기]면 진행 단추가 까닭과 함께 꺼진다", () => {
+  const result = evaluateTransitionAvailability({
+    transition: transition({
+      fromStepKey: "shipment_approved",
+      toStepKey: "waiting_shipment",
+      toStatus: "WAITING_SHIPMENT",
+      allowedRoles: ["SUPER_ADMIN", "ADMIN", "INVENTORY_MANAGER"],
+      requiresAssignedEngineer: false,
+    }),
+    actionCode: "STEP_ADVANCED",
+    actingUser: user("SUPER_ADMIN"),
+    assignedEngineerId: null,
+    holdState: NOT_ON_HOLD,
+    isCaseLocked: false,
+    approvalGateStatus: "SATISFIED",
+  });
+  assert.deepEqual(result, { available: false, reason: SHIPMENT_WAITING_AUTO_ONLY_MESSAGE });
+});
+
+test("표본 점검 — 같은 전이에서 도착 상태만 바꾸면 진행할 수 있다(막는 것이 도착 상태 하나인가)", () => {
+  const result = evaluateTransitionAvailability({
+    transition: transition({
+      fromStepKey: "shipment_approved",
+      toStepKey: "waiting_shipment",
+      toStatus: "WAITING_SHIPMENT_APPROVAL",
+      allowedRoles: ["SUPER_ADMIN", "ADMIN", "INVENTORY_MANAGER"],
+      requiresAssignedEngineer: false,
+    }),
+    actionCode: "STEP_ADVANCED",
+    actingUser: user("SUPER_ADMIN"),
+    assignedEngineerId: null,
+    holdState: NOT_ON_HOLD,
+    isCaseLocked: false,
+    approvalGateStatus: "SATISFIED",
+  });
+  assert.deepEqual(result, { available: true });
+});
+
+test("🔴 까닭이 역할·담당 안내보다 먼저 나온다 — 역할을 바꿔도 안 되는 까닭을 알 수 있어야 한다", () => {
+  const result = evaluateTransitionAvailability({
+    transition: transition({
+      fromStepKey: "shipment_approved",
+      toStepKey: "waiting_shipment",
+      toStatus: "WAITING_SHIPMENT",
+      allowedRoles: ["INVENTORY_MANAGER"],
+      requiresAssignedEngineer: true,
+    }),
+    actionCode: "STEP_ADVANCED",
+    // 역할도 담당도 맞지 않는 사람 — 그래도 「자동으로만 간다」가 먼저여야 한다.
+    actingUser: user("SALES"),
+    assignedEngineerId: "someone-else",
+    holdState: ON_HOLD,
+    isCaseLocked: false,
+    approvalGateStatus: "SATISFIED",
+  });
+  assert.deepEqual(result, { available: false, reason: SHIPMENT_WAITING_AUTO_ONLY_MESSAGE });
+});
+
+test("🔴 잠긴 건은 잠금이 먼저다 — 이 규칙이 더 먼저 말해야 할 것을 가리지 않는다", () => {
+  const result = evaluateTransitionAvailability({
+    transition: transition({ toStepKey: "waiting_shipment", toStatus: "WAITING_SHIPMENT" }),
+    actionCode: "STEP_ADVANCED",
+    actingUser: user("SUPER_ADMIN"),
+    assignedEngineerId: null,
+    holdState: NOT_ON_HOLD,
+    isCaseLocked: true,
+    approvalGateStatus: "SATISFIED",
+  });
+  assert.deepEqual(result, { available: false, reason: LOCKED_CASE_MESSAGE });
+});
+
+test("🔴 나가는 길 ① — 출하 대기에서 되돌리기는 막히지 않는다", () => {
+  const result = evaluateTransitionAvailability({
+    transition: transition({
+      actionCode: "STEP_RETURNED",
+      fromStepKey: "waiting_shipment",
+      toStepKey: "shipment_approved",
+      toStatus: "WAITING_SHIPMENT_APPROVAL",
+      requiresAssignedEngineer: false,
+    }),
+    actionCode: "STEP_RETURNED",
+    actingUser: user("SUPER_ADMIN"),
+    assignedEngineerId: null,
+    holdState: NOT_ON_HOLD,
+    isCaseLocked: false,
+    approvalGateStatus: "SATISFIED",
+  });
+  assert.deepEqual(result, { available: true });
+});
+
+test("🔴 나가는 길 ② — 출하 대기에서 출하 완료로 나가는 길은 막히지 않는다", () => {
+  const result = evaluateTransitionAvailability({
+    transition: transition({
+      actionCode: "SHIPMENT_COMPLETED",
+      fromStepKey: "waiting_shipment",
+      toStepKey: "shipment_completed",
+      toStatus: "SHIPMENT_COMPLETED",
+      allowedRoles: ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER", "SALES", "INVENTORY_MANAGER"],
+      requiresAssignedEngineer: false,
+      requiresReason: true,
+      requiredApprovalType: "FINAL_SHIPMENT",
+    }),
+    actionCode: "SHIPMENT_COMPLETED",
+    actingUser: user("SUPER_ADMIN"),
+    assignedEngineerId: null,
+    holdState: NOT_ON_HOLD,
+    isCaseLocked: false,
+    approvalGateStatus: "SATISFIED",
+  });
+  assert.deepEqual(result, { available: true });
 });

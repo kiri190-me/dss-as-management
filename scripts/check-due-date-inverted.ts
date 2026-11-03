@@ -64,7 +64,7 @@ async function main(): Promise<void> {
   const rows = await listRepairCasesWithDueDateInverted();
 
   console.log("\n─ 조건을 하나씩 걸면 (휴지통에 든 건은 처음부터 빠져 있다)");
-  console.log(`  ① 사내 목표 출하일 있음                     ${stages.withTargetDate}건`);
+  console.log(`  ① 사내 목표 완료일 있음                     ${stages.withTargetDate}건`);
   console.log(`  ② ① 그리고 고객 요청 납기일을 앎            ${stages.andRequestedKnown}건`);
   console.log(`  ③ ② 그리고 목표일이 더 늦음(같은 날은 제외)  ${stages.andInverted}건`);
   console.log(`  ④ ③ 그리고 출하 완료 아님  ← 실제로 뜰 수     ${stages.andNotShipped}건`);
@@ -96,7 +96,7 @@ async function main(): Promise<void> {
   );
 
   const shown = rows.slice(0, SAMPLE_LIMIT);
-  console.log(`\n─ 앞의 ${shown.length}건 (인수번호 · 사내 목표 출하일 > 고객 요청 납기일)`);
+  console.log(`\n─ 앞의 ${shown.length}건 (인수번호 · 사내 목표 완료일 > 고객 요청 납기일)`);
   for (const row of shown) {
     const mark = row.borrowed ? "  (내자에서 빌려 온 날짜)" : "";
     console.log(

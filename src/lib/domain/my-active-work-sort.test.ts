@@ -257,7 +257,7 @@ test("같은 열을 세 번 누르면 기본 정렬(급한 순)로 돌아온다"
 });
 
 test("작업기록 열을 더해도 기본 정렬의 뜻은 그대로다", () => {
-  // 기본 정렬은 목표 출하일 → 인수일 → 인수번호다. 작업기록 시각이 아무리
+  // 기본 정렬은 목표 완료일 → 인수일 → 인수번호다. 작업기록 시각이 아무리
   // 최근이어도 기본 상태의 순서를 흔들면 안 된다.
   const rows = [
     row({ id: "soon", intakeNumber: "D1", internalTargetShipmentDate: "2026-08-15", lastWorkRecordAt: null }),

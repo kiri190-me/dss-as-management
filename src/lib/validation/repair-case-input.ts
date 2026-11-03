@@ -227,12 +227,12 @@ export function validateCreateRepairCaseInput(
   const internalTargetShipmentDate = trimToNull(input.internalTargetShipmentDate);
   if (internalTargetShipmentDate) {
     if (!isValidDateString(internalTargetShipmentDate)) {
-      fieldErrors.internalTargetShipmentDate = "사내 목표 출하일을 올바른 날짜로 입력해 주세요.";
+      fieldErrors.internalTargetShipmentDate = "사내 목표 완료일을 올바른 날짜로 입력해 주세요.";
     } else if (
       isValidDateString(input.receivedAt) &&
       !isNotEarlierThan(internalTargetShipmentDate, input.receivedAt)
     ) {
-      fieldErrors.internalTargetShipmentDate = "사내 목표 출하일은 인수일보다 이전일 수 없습니다.";
+      fieldErrors.internalTargetShipmentDate = "사내 목표 완료일은 인수일보다 이전일 수 없습니다.";
     }
   }
 

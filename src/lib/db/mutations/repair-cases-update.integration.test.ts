@@ -662,7 +662,7 @@ describe("updateRepairCase", () => {
     assert.equal(row.billingType, "PAID", "billingType must be untouched when submitted through PRODUCT");
   });
 
-  test("38. internalTargetShipmentDate submitted via INTAKE (UI IA fix: 사내 목표 출하일 now editable under 인수정보) persists correctly", async () => {
+  test("38. internalTargetShipmentDate submitted via INTAKE (UI IA fix: 사내 목표 완료일 now editable under 인수정보) persists correctly", async () => {
     const created = await createTestCase();
     const before1 = await fetchRow(created.id);
     assert.equal(before1.internalTargetShipmentDate, TEST_SHIPMENT_DATE, "setup: creation already sets a value");

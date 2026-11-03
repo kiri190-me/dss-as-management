@@ -23,7 +23,7 @@ type ApprovalActionDialogProps = {
    */
   assigneeOptions?: ApprovalAssigneeOption[];
   /**
-   * 사내 목표 출하일(YYYY-MM-DD) — 판단에 참고하라고 **읽기 전용**으로 한 줄
+   * 사내 목표 완료일(YYYY-MM-DD) — 판단에 참고하라고 **읽기 전용**으로 한 줄
    * 보여 준다. 위 「처리할 사람」과 같은 방식으로 **주지 않으면 그 자리를 아예
    * 그리지 않는다**: 이 창은 검수 카드와 출하 카드가 함께 쓰는데, 이 날짜를
    * 보고 판단하는 것은 출하 승인 쪽(요청·승인·반려 셋 다)뿐이다. 검수 카드는
@@ -115,7 +115,7 @@ export default function ApprovalActionDialog({
       */}
       {internalTargetShipmentDate !== undefined && (
         <dl className="mt-3 rounded-md bg-zinc-50 px-3 py-2 dark:bg-zinc-800/60">
-          <dt className="text-xs text-zinc-500 dark:text-zinc-400">사내 목표 출하일 (읽기 전용)</dt>
+          <dt className="text-xs text-zinc-500 dark:text-zinc-400">사내 목표 완료일 (읽기 전용)</dt>
           <dd
             className={
               internalTargetShipmentDate

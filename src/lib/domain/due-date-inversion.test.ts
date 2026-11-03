@@ -19,9 +19,9 @@ import type { RepairStatus } from "./types";
 
 /**
  * ============================================================================
- * 「납기 역전」 — 사내 목표 출하일이 고객 요청 납기일보다 늦다 (2026-10-29)
+ * 「납기 역전」 — 사내 목표 완료일이 고객 요청 납기일보다 늦다 (2026-10-29)
  * ============================================================================
- * 사용자 요구: 「작성한 사내 목표 출하일이 고객 요청 납기일보다 늦으면 그 날짜를
+ * 사용자 요구: 「작성한 사내 목표 완료일이 고객 요청 납기일보다 늦으면 그 날짜를
  * 빨간 볼드로, 옆에 『납기 요청일 협의가 필요합니다.』 라는 메모를」.
  *
  * 🔴 여기서 못 박는 것 넷
@@ -50,7 +50,7 @@ const ONE_DAY_LATER = "2094-10-21";
 const ONE_DAY_EARLIER = "2094-10-19";
 
 describe("납기 역전 — 날짜 둘만 본다", () => {
-  test("🔴 사내 목표 출하일이 더 늦으면 역전이다", () => {
+  test("🔴 사내 목표 완료일이 더 늦으면 역전이다", () => {
     assert.equal(
       isDueDateInverted({
         internalTargetShipmentDate: ONE_DAY_LATER,
@@ -71,7 +71,7 @@ describe("납기 역전 — 날짜 둘만 본다", () => {
     );
   });
 
-  test("🔴 사내 목표 출하일이 더 이르면 역전이 아니다", () => {
+  test("🔴 사내 목표 완료일이 더 이르면 역전이 아니다", () => {
     assert.equal(
       isDueDateInverted({
         internalTargetShipmentDate: ONE_DAY_EARLIER,
@@ -127,7 +127,7 @@ describe("납기 역전 — 날짜 둘만 본다", () => {
           customerRequestedDueDate: REQUESTED,
         }),
         false,
-        `사내 목표 출하일이 ${JSON.stringify(blank)} 인데 역전이라고 했다`
+        `사내 목표 완료일이 ${JSON.stringify(blank)} 인데 역전이라고 했다`
       );
     }
     assert.equal(
@@ -159,7 +159,7 @@ describe("납기 역전 — 날짜 둘만 본다", () => {
   test("메모는 사용자가 준 글자 그대로이고, 옷은 붉되 굵지 않다", () => {
     assert.equal(DUE_DATE_INVERSION_NOTE, "납기 요청일 협의가 필요합니다.");
     assert.ok(
-      DUE_DATE_INVERSION_REASON_NOTE.includes("사내 목표 출하일"),
+      DUE_DATE_INVERSION_REASON_NOTE.includes("사내 목표 완료일"),
       "까닭 설명이 무엇과 무엇을 견준 것인지 말하지 않는다"
     );
     // 클래스 이름은 글자 그대로여야 Tailwind 가 CSS 로 만든다(조립하면 색만 사라진다).
@@ -279,7 +279,7 @@ describe("납기 역전 — 수리 건은 빌려 온 날짜로도 잰다", () =>
     );
   });
 
-  test("사내 목표 출하일이 비어 있으면 빌려 올 날짜가 있어도 거짓이다", () => {
+  test("사내 목표 완료일이 비어 있으면 빌려 올 날짜가 있어도 거짓이다", () => {
     assert.equal(
       isRepairCaseDueDateInverted(
         liveCase({
@@ -423,7 +423,7 @@ describe("납기 역전 — 내자 정리는 그 칸에 보이는 날짜로 잰�
     };
   }
 
-  test("🔴 이 줄에 적힌 납기요청일보다 사내 목표 출하일이 늦으면 역전이다", () => {
+  test("🔴 이 줄에 적힌 납기요청일보다 사내 목표 완료일이 늦으면 역전이다", () => {
     assert.equal(
       isDomesticOrderDueDateInverted(
         orderRow({
@@ -502,7 +502,7 @@ describe("납기 역전 — 내자 정리는 그 칸에 보이는 날짜로 잰�
   });
 
   test("🔴 수리 건이 없는 줄(별도 건)은 역전을 재지 않는다 — 잴 재료가 없다", () => {
-    // 분할 납품하는 별도 건이 이 모양이다(납기일은 여럿인데 사내 목표 출하일이
+    // 분할 납품하는 별도 건이 이 모양이다(납기일은 여럿인데 사내 목표 완료일이
     // 아예 없다). 날짜만 보고 칠하면 이런 줄이 전부 붉어진다.
     assert.equal(
       isDomesticOrderDueDateInverted(

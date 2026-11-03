@@ -112,7 +112,7 @@ function baseCreateInput(
    */
   customerRequestedDueDate: string | null = null,
   /**
-   * 우리가 잡아 둔 `사내 목표 출하일`. 위 날짜보다 **늦으면** 「납기 역전」이고
+   * 우리가 잡아 둔 `사내 목표 완료일`. 위 날짜보다 **늦으면** 「납기 역전」이고
    * (domain/due-date-inversion.ts), 내자 목록의 `납기요청일` 칸이 붉어진다.
    */
   internalTargetShipmentDate: string | null = null
@@ -699,12 +699,12 @@ test("연결이 없는 내자 줄의 날짜는 어느 건에도 붙지 않는다
 
 // ── 🔴 「납기 역전」을 재는 재료가 실제로 실려 오는가 (2026-10-30) ──────────
 //
-// 사내 목표 출하일이 `납기요청일` 칸에 보이는 날짜보다 늦으면 그 날짜가 굵은
+// 사내 목표 완료일이 `납기요청일` 칸에 보이는 날짜보다 늦으면 그 날짜가 굵은
 // 붉은색이 되고 「협의 필요」가 붙는다(사용자 요구). 판정 자체는 값으로 도는
 // 시험이 보고(domain/due-date-inversion.test.ts), 화면까지 닿는 사슬은 글자로 보는
 // 시험이 본다(components/domestic-orders/domestic-order-due-date-inversion.test.ts).
 //
-// 🔴 **여기서만 잡히는 결함이 따로 있다.** 재료는 셋이고(사내 목표 출하일 · 지금
+// 🔴 **여기서만 잡히는 결함이 따로 있다.** 재료는 셋이고(사내 목표 완료일 · 지금
 // 상태 · 실제 출하일) 셋 다 **연결된 수리 건**에서 오는데, 질의가 그중 하나를 안
 // 골라 오면 아무 오류 없이 null 이 내려온다 — 그러면 경보가 조용히 안 뜨거나(목표
 // 출하일이 빠진 경우) 이미 나간 건에까지 붉은 글이 남는다(상태가 빠진 경우). 화면
@@ -723,7 +723,7 @@ test("🔴 역전을 재는 재료 셋이 목록에 실려 온다 — 그리고 
   assert.equal(
     found.repairCaseInternalTargetShipmentDate,
     "2096-09-10",
-    "조인이 사내 목표 출하일을 안 골라 왔다 — 경보가 영영 안 뜬다"
+    "조인이 사내 목표 완료일을 안 골라 왔다 — 경보가 영영 안 뜬다"
   );
   assert.equal(found.repairCaseActualShipmentDate, null, "아직 안 나간 건이어야 한다");
 
@@ -775,7 +775,7 @@ test("🔴 이미 나간 건에는 뜨지 않는다 — 이 화면에서도", as
 });
 
 test("🔴 수리 건이 없는 줄(별도 건)은 역전을 재지 않는다 — 잴 재료가 없다", async () => {
-  // 분할 납품하는 별도 건이 이 모양이다(납기일은 여럿인데 사내 목표 출하일이 없다).
+  // 분할 납품하는 별도 건이 이 모양이다(납기일은 여럿인데 사내 목표 완료일이 없다).
   const orderId = await insertOrder({ repairCaseId: null });
   await insertDueDates(orderId, ["2096-01-05", "2096-02-05"]);
 

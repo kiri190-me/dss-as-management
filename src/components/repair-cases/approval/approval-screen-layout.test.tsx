@@ -1010,7 +1010,7 @@ describe("🔴 수리 검수 승인 카드 — 비상구 안내", () => {
 
 /**
  * ============================================================================
- * 🔴 확인 창 — 사내 목표 출하일은 **읽기 전용**으로 보인다
+ * 🔴 확인 창 — 사내 목표 완료일은 **읽기 전용**으로 보인다
  * ============================================================================
  * 출하 승인은 「언제까지 내보내야 하는가」를 보고 판단하는 일이다. 그 날짜가
  * repair_cases 에 이미 있는데 승인 창에는 없어서, 요청하는 사람도 결재하는
@@ -1024,7 +1024,7 @@ describe("🔴 수리 검수 승인 카드 — 비상구 안내", () => {
  * 카드와 달리 그대로 렌더해 검사한다.
  * ============================================================================
  */
-describe("🔴 승인 확인 창 — 사내 목표 출하일", () => {
+describe("🔴 승인 확인 창 — 사내 목표 완료일", () => {
   const baseDialogProps = {
     isOpen: true,
     title: "출하 승인 요청",
@@ -1038,7 +1038,7 @@ describe("🔴 승인 확인 창 — 사내 목표 출하일", () => {
     const html = renderToStaticMarkup(
       <ApprovalActionDialog {...baseDialogProps} internalTargetShipmentDate="2026-09-20" />
     );
-    assert.match(flat(html), /사내 목표 출하일/);
+    assert.match(flat(html), /사내 목표 완료일/);
     assert.match(flat(html), /2026-09-20/);
   });
 
@@ -1057,7 +1057,7 @@ describe("🔴 승인 확인 창 — 사내 목표 출하일", () => {
           internalTargetShipmentDate="2026-09-20"
         />
       );
-      assert.match(flat(html), /사내 목표 출하일/, `${title} 창에 날짜가 없다`);
+      assert.match(flat(html), /사내 목표 완료일/, `${title} 창에 날짜가 없다`);
       assert.match(flat(html), /2026-09-20/, `${title} 창에 날짜가 없다`);
     }
   });
@@ -1073,7 +1073,7 @@ describe("🔴 승인 확인 창 — 사내 목표 출하일", () => {
 
   test("🔴 프롭을 주지 않으면 그 자리를 아예 그리지 않는다 — 검수 승인 창이 그 경우다", () => {
     const html = renderToStaticMarkup(<ApprovalActionDialog {...baseDialogProps} title="검수 승인 요청" />);
-    assert.ok(!/사내 목표 출하일/.test(html), "검수 승인 창에까지 날짜가 끼어들었다");
+    assert.ok(!/사내 목표 완료일/.test(html), "검수 승인 창에까지 날짜가 끼어들었다");
     assert.ok(!/아직 정해지지 않았습니다/.test(html), "주지 않았는데 빈 값 안내가 나왔다");
   });
 
@@ -1115,7 +1115,7 @@ describe("🔴 승인 확인 창 — 사내 목표 출하일", () => {
     assert.match(flat(html), /지정하지 않음/);
     assert.match(flat(html), /김도윤 \(관리자\)/);
     assert.match(flat(html), /지정하면 그 사람만 처리할 수 있습니다\./);
-    assert.ok(!/사내 목표 출하일/.test(html), "검수 요청 창에 날짜가 끼어들었다");
+    assert.ok(!/사내 목표 완료일/.test(html), "검수 요청 창에 날짜가 끼어들었다");
 
     // 검수 카드가 그 자리를 요청에만 여는 조건도 그대로다.
     assert.match(
@@ -1139,7 +1139,7 @@ describe("🔴 승인 확인 창 — 사내 목표 출하일", () => {
   });
 });
 
-describe("🔴 사내 목표 출하일 — 출하 카드만 창에 넘기고, 읽기만 한다", () => {
+describe("🔴 사내 목표 완료일 — 출하 카드만 창에 넘기고, 읽기만 한다", () => {
   test("출하 카드가 확인 창에 그 값을 넘긴다 — 프롭이 빠지면 코드는 멀쩡한데 한 글자도 안 나온다", () => {
     assert.match(
       flat(renderBlock(shipmentCardSource)),
@@ -1176,7 +1176,7 @@ describe("🔴 사내 목표 출하일 — 출하 카드만 창에 넘기고, �
 
 /**
  * ============================================================================
- * 🔴 최종 출하 승인 카드 — 회색 상자의 사내 목표 출하일
+ * 🔴 최종 출하 승인 카드 — 회색 상자의 사내 목표 완료일
  * ============================================================================
  * 앞 커밋에서 카드는 이 값을 프롭으로 받아 **확인 창에만** 넘겼다. 그래서 창을
  * 열어야만 날짜가 보였는데, 「열어 볼까」를 정하는 것이 바로 그 날짜다. 이제
@@ -1189,7 +1189,7 @@ describe("🔴 사내 목표 출하일 — 출하 카드만 창에 넘기고, �
  * 회색 상자 갈래를 잘라 확인한다.
  * ============================================================================
  */
-describe("🔴 최종 출하 승인 카드 — 회색 상자의 사내 목표 출하일", () => {
+describe("🔴 최종 출하 승인 카드 — 회색 상자의 사내 목표 완료일", () => {
   const extraBlock = sliceBetween(shipmentCardSource, "const extra = (", "return (");
   /**
    * 값이 비었을 때의 문구는 **공용 파일 한 곳**에 적어 둔다 — 아래에서 카드와
@@ -1198,12 +1198,12 @@ describe("🔴 최종 출하 승인 카드 — 회색 상자의 사내 목표 �
   const UNSET_TEXT_DECLARATION = /const UNSET_TARGET_SHIPMENT_DATE_TEXT = "([^"]+)";/;
   const SHARED_TEXTS_IMPORT = /import \{[^}]*\bUNSET_TARGET_SHIPMENT_DATE_TEXT\b[^}]*\} from "\.\/approval-texts"/;
 
-  test("회색 상자에 「사내 목표 출하일」 칸이 있다", () => {
+  test("회색 상자에 「사내 목표 완료일」 칸이 있다", () => {
     // 상자 밖(카드 다른 자리)이 아니라 이 상자 안이라는 것은 slice 가 보장한다 —
     // extraBlock 은 `const extra = (` 부터다.
     assert.match(
       flat(extraBlock),
-      /<dt className="text-xs text-zinc-500 dark:text-zinc-400">사내 목표 출하일<\/dt>/,
+      /<dt className="text-xs text-zinc-500 dark:text-zinc-400">사내 목표 완료일<\/dt>/,
       "이름표가 없으면 날짜만 덩그러니 남는다"
     );
   });
@@ -1297,10 +1297,10 @@ describe("🔴 최종 출하 승인 카드 — 회색 상자의 사내 목표 �
         record={null}
         displayStatus="REQUESTED"
         actions={[]}
-        extra={<span>사내 목표 출하일 2026-09-20</span>}
+        extra={<span>사내 목표 완료일 2026-09-20</span>}
       />
     );
-    const shown = html.indexOf("사내 목표 출하일 2026-09-20");
+    const shown = html.indexOf("사내 목표 완료일 2026-09-20");
     assert.ok(shown >= 0, "회색 상자가 아예 그려지지 않았다");
     assert.ok(shown < html.indexOf("</section>"), "카드 밖으로 나가면 옆 카드가 밀린다");
   });
@@ -1333,7 +1333,7 @@ describe("🔴 최종 출하 승인 카드 — 회색 상자의 사내 목표 �
  */
 describe("🔴 최종 출하 승인 카드 — 한국어 문장은 어절 경계에서만 접힌다", () => {
   const extraBlock = sliceBetween(shipmentCardSource, "const extra = (", "return (");
-  /** 문장을 그리는 두 칸(사내 목표 출하일 · 처리 자격)만 — 미리보기는 예외다. */
+  /** 문장을 그리는 두 칸(사내 목표 완료일 · 처리 자격)만 — 미리보기는 예외다. */
   const sentenceCells = sliceBetween(extraBlock, '<dl className="', "{previewSteps.length > 0 &&");
 
   test("🔴 「처리 자격」 칸이 카드 폭을 다 쓴다", () => {
@@ -1346,10 +1346,10 @@ describe("🔴 최종 출하 승인 카드 — 한국어 문장은 어절 경계
     );
   });
 
-  test("사내 목표 출하일 칸도 같은 이유로 카드 폭을 다 쓴다", () => {
+  test("사내 목표 완료일 칸도 같은 이유로 카드 폭을 다 쓴다", () => {
     assert.match(
       flat(extraBlock),
-      /<div className="sm:col-span-2"> <dt className="[^"]*">사내 목표 출하일<\/dt>/,
+      /<div className="sm:col-span-2"> <dt className="[^"]*">사내 목표 완료일<\/dt>/,
       "빈 값 안내가 반 칸에 갇히면 두세 줄로 접힌다"
     );
   });

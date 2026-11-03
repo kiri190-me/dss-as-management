@@ -146,10 +146,14 @@ export function mapRepairCaseRow(
     internalTargetShipmentDate: row.internalTargetShipmentDate,
     actualShipmentDate: row.actualShipmentDate,
     createdAt: createdAtIso,
+    // 🔴 2026-11-03 부터 「납기 지연」은 **고객 요청 납기일**로 잰다(사내 목표
+    // 완료일이 아니다 — domain/types.ts 의 isRepairCaseOverdue 머리말).
+    // ⚠️ 여기서는 내자 정리에서 날짜를 빌려 오지 않는다. 위 domesticOrderDueDates
+    // 주석 그대로, 이 조인 한 줄에는 그 날짜가 들어 있지 않다.
     isOverdue: isRepairCaseOverdue(
       {
         status,
-        internalTargetShipmentDate: row.internalTargetShipmentDate,
+        customerRequestedDueDate: row.customerRequestedDueDate,
         actualShipmentDate: row.actualShipmentDate,
       },
       referenceDate

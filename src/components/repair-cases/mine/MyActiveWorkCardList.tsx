@@ -65,7 +65,7 @@ export default function MyActiveWorkCardList({
               <dd>{row.internalTargetInspectionCompletionDate ?? "-"}</dd>
             </div>
             <div>
-              <dt className="text-xs text-zinc-500 dark:text-zinc-500">사내 목표 출하일</dt>
+              <dt className="text-xs text-zinc-500 dark:text-zinc-500">사내 목표 완료일</dt>
               <dd>{row.internalTargetShipmentDate ?? "-"}</dd>
             </div>
             <div>

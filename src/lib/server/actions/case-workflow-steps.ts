@@ -5,6 +5,10 @@ import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { addCaseWorkflowStep } from "@/lib/db/mutations/case-workflow-steps";
 import { STEP_CATEGORY_CODES, type StepCategory } from "@/lib/domain/local/workflow/step-category";
+import {
+  SHIPMENT_WAITING_AUTO_ONLY_MESSAGE,
+  SHIPMENT_WAITING_REPAIR_STATUS,
+} from "@/lib/domain/shipment-waiting-auto-advance";
 import { REPAIR_STATUS_CODES, type RepairStatus } from "@/lib/domain/types";
 import { isValidExpectedVersion, isValidRepairCaseId } from "@/lib/validation/workflow-transition-input";
 
@@ -60,6 +64,18 @@ export async function addCaseWorkflowStepAction(
   }
   if (!(REPAIR_STATUS_CODES as readonly string[]).includes(input.status)) {
     return { ok: false, message: "진행 상태를 확인할 수 없습니다." };
+  }
+  // 🔴 [출하 대기] 상태의 단계는 **이 건에만 추가하는 길로도 만들 수 없다**
+  // (2026-11-03). 만들 수 있게 두면 그 단계가 **아무도 못 가는 자리**가 되어
+  // 수리 건이 거기서 멈춘다: 새 단계는 현재 단계 바로 뒤에 끼워지고 정방향
+  // 전이가 그리로 다시 걸리는데(mutations/case-workflow-steps.ts 의 「전이 재배선」),
+  // [다음 단계로 진행] 은 출하 대기로 들어가는 전이를 거절하고
+  // (mutations/workflow-transitions.ts) [단계 직접 변경] 목록에도 그 상태는 없다
+  // (queries/workflow-rules.ts). 들어갈 길이 하나도 남지 않는다.
+  // 🔵 화면(CaseWorkflowStepDialog)도 같은 상수로 그 칸을 목록에서 뺀다 — 여기만
+  // 막으면 고를 수는 있는데 저장이 거절하는 어긋남이 된다.
+  if (input.status === SHIPMENT_WAITING_REPAIR_STATUS) {
+    return { ok: false, message: SHIPMENT_WAITING_AUTO_ONLY_MESSAGE };
   }
   if (input.category !== null && !(STEP_CATEGORY_CODES as readonly string[]).includes(input.category)) {
     return { ok: false, message: "담당 구분을 확인할 수 없습니다." };

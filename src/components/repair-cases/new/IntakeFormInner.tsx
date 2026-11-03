@@ -97,12 +97,12 @@ function validateDraft(
 
   if (draft.internalTargetShipmentDate) {
     if (!isValidDateString(draft.internalTargetShipmentDate)) {
-      errors.internalTargetShipmentDate = "사내 목표 출하일을 올바른 날짜로 입력해 주세요.";
+      errors.internalTargetShipmentDate = "사내 목표 완료일을 올바른 날짜로 입력해 주세요.";
     } else if (
       isValidDateString(draft.receivedAt) &&
       !isNotEarlierThan(draft.internalTargetShipmentDate, draft.receivedAt)
     ) {
-      errors.internalTargetShipmentDate = "사내 목표 출하일은 인수일보다 이전일 수 없습니다.";
+      errors.internalTargetShipmentDate = "사내 목표 완료일은 인수일보다 이전일 수 없습니다.";
     }
   }
 
@@ -952,7 +952,7 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
           </div>
 
           <div>
-            <label htmlFor="internalTargetShipmentDate" className={labelClass}>사내 목표 출하일</label>
+            <label htmlFor="internalTargetShipmentDate" className={labelClass}>사내 목표 완료일</label>
             <input
               id="internalTargetShipmentDate"
               type="date"

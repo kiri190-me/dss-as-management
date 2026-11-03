@@ -603,7 +603,7 @@ test("해가 바뀌어도 글자 내림차순이 곧 시간 내림차순이다",
  * 세우는 값은 **실제 출하일**(effectiveActualShipmentDate)이다 — 워크플로
  * 재정의가 반영된 값이고, 표가 그 칸에 그대로 그리는 값이다.
  *
- * 🔴 아래 세 시험이 함께 지키는 것: 아직 출하 안 된 건(널)을 사내 목표 출하일
+ * 🔴 아래 세 시험이 함께 지키는 것: 아직 출하 안 된 건(널)을 사내 목표 완료일
  * (internalTargetShipmentDate)로 **대신 채워 세우지 않는다.** 그렇게 하면
  * 화면에 "-"로 그려진 줄이 날짜가 있는 줄 사이에 끼어 선다.
  */
@@ -634,10 +634,10 @@ test("출하일 오름차순은 이른 출하일이 먼저다", () => {
  * 올바른 차례는 고객 요청 납기일과 **같다**(compareNullableString) — 오름차순에
  * 널이 맨 앞, 내림차순에 맨 뒤다.
  */
-test("실제 출하일이 널인 줄은 사내 목표 출하일로 끼워지지 않는다", () => {
+test("실제 출하일이 널인 줄은 사내 목표 완료일로 끼워지지 않는다", () => {
   const rows = [
     row({ id: "nov", effectiveActualShipmentDate: "2026-11-01", internalTargetShipmentDate: "2026-11-01" }),
-    // 실제 출하일 없음 + 목표 출하일만 있음 — 끼워 넣으면 한가운데로 간다.
+    // 실제 출하일 없음 + 목표 완료일만 있음 — 끼워 넣으면 한가운데로 간다.
     row({ id: "not-shipped", effectiveActualShipmentDate: null, internalTargetShipmentDate: "2026-10-01" }),
     row({ id: "sep", effectiveActualShipmentDate: "2026-09-01", internalTargetShipmentDate: "2026-09-01" }),
   ];
@@ -645,12 +645,12 @@ test("실제 출하일이 널인 줄은 사내 목표 출하일로 끼워지지 
   assert.deepEqual(
     idsOf(sortRows(rows, { column: "actualShipmentDate", direction: "asc" })),
     ["not-shipped", "sep", "nov"],
-    "오름차순에서 출하 안 된 줄이 목표 출하일 자리(sep 과 nov 사이)로 끼어들었다"
+    "오름차순에서 출하 안 된 줄이 목표 완료일 자리(sep 과 nov 사이)로 끼어들었다"
   );
   assert.deepEqual(
     idsOf(sortRows(rows, { column: "actualShipmentDate", direction: "desc" })),
     ["nov", "sep", "not-shipped"],
-    "내림차순에서 출하 안 된 줄이 목표 출하일 자리로 끼어들었다"
+    "내림차순에서 출하 안 된 줄이 목표 완료일 자리로 끼어들었다"
   );
 });
 

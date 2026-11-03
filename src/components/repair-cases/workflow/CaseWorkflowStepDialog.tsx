@@ -3,8 +3,25 @@
 import { useEffect, useRef, useState } from "react";
 
 import { STEP_CATEGORY_CODES } from "@/lib/domain/local/workflow/step-category";
+import { SHIPMENT_WAITING_REPAIR_STATUS } from "@/lib/domain/shipment-waiting-auto-advance";
 import { REPAIR_STATUS_CODES } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
+
+/**
+ * 이 창에서 고를 수 있는 진행 상태.
+ *
+ * 🔴 [출하 대기] 하나만 뺀다(2026-11-03). 그 상태의 단계를 여기서 만들면 **아무도
+ * 못 가는 자리**가 생긴다: 새 단계는 현재 단계 바로 뒤에 끼워지고 정방향 전이가
+ * 그리로 다시 걸리는데, [다음 단계로 진행] 은 출하 대기로 들어가는 전이를 거절하고
+ * ([출하 대기]는 최종 출하 승인이 끝날 때 시스템만 옮긴다) [단계 직접 변경] 목록
+ * 에도 그 상태는 없다. 그러면 그 수리 건이 거기서 멈춘다.
+ *
+ * 🔴 같은 판정을 서버 액션(server/actions/case-workflow-steps.ts)이 **다시** 한다 —
+ * 화면에서만 빼면 손으로 만든 요청이 그대로 통과한다.
+ */
+const SELECTABLE_REPAIR_STATUS_CODES = REPAIR_STATUS_CODES.filter(
+  (code) => code !== SHIPMENT_WAITING_REPAIR_STATUS
+);
 
 const CATEGORY_LABELS: Record<string, string> = {
   TECHNICAL: "기술",
@@ -110,7 +127,7 @@ export default function CaseWorkflowStepDialog({
               disabled={isSubmitting}
               className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
             >
-              {REPAIR_STATUS_CODES.map((code) => (
+              {SELECTABLE_REPAIR_STATUS_CODES.map((code) => (
                 <option key={code} value={code}>
                   {uiText.repairStatus[code]}
                 </option>

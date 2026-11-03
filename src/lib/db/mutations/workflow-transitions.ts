@@ -12,6 +12,10 @@ import {
   isManuallySelectableStepInRules,
   loadWorkflowRules,
 } from "../queries/workflow-rules";
+import {
+  isAdvanceIntoShipmentWaiting,
+  SHIPMENT_WAITING_AUTO_ONLY_MESSAGE,
+} from "@/lib/domain/shipment-waiting-auto-advance";
 import type { HoldState } from "@/lib/domain/local/workflow/workflow-types";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { WorkflowActionCode } from "@/lib/validation/workflow-transition-input";
@@ -193,6 +197,30 @@ export async function transitionWorkflow(
                 : "현재 단계에서는 출하 완료 처리를 할 수 없습니다.";
           return { ok: false, code: "INVALID_TRANSITION", message };
         }
+        // 🔴 [출하 대기]로 들어가는 정규 진행은 **사람이 탈 수 없다**(2026-11-03
+        // 사용자 요구). 그 자리는 최종 출하 승인이 모두 끝날 때 시스템이 옮긴다
+        // (mutations/shipment-waiting-auto-advance.ts — 그쪽은 이 함수를 지나지
+        // 않고 직접 쓴다).
+        //
+        // 🔴 **화면만 가리면 막은 것이 아니다.** 실행 가능한 작업 패널은
+        // domain/local/workflow/workflow-action-availability.ts 가 같은 함수·같은
+        // 문장으로 단추를 끄지만, 낡은 탭이나 손으로 만든 요청은 그 화면을 거치지
+        // 않는다. 여기가 진짜 문이다.
+        //
+        // 🔴 **나가는 길은 걸리지 않는다** — 판정이 도착 상태만 보므로 출하
+        // 대기에서 되돌리거나 출하 완료로 나가는 전이는 그대로다.
+        // 🔵 **갇히는 경우가 하나 있다**: 자동 전환이 못 닿은 매쳐 건(예: 이 변경
+        // 전에 이미 승인이 끝나 있던 건, 보류 중에 승인이 끝난 건)은 출하 대기로
+        // 갈 길이 없어 출하 완료까지 못 간다. 그때 푸는 길은 **최종 출하 승인을
+        // 다시 받는 것**이다(승인이 끝나는 순간 시스템이 옮긴다).
+        if (isAdvanceIntoShipmentWaiting(actionCode, transition.toStatus)) {
+          return {
+            ok: false,
+            code: "INVALID_TRANSITION",
+            message: SHIPMENT_WAITING_AUTO_ONLY_MESSAGE,
+          };
+        }
+
         const eligibility = checkTransitionEligibility(transition, actingUser, current.assignedEngineerId, holdState);
         if (!eligibility.allowed) {
           return { ok: false, code: "FORBIDDEN", message: eligibility.reason };

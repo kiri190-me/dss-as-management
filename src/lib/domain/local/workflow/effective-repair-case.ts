@@ -47,10 +47,13 @@ export function applyWorkflowOverride(
   // 건이 화면에는 출하일이 찍힌 채 여전히 "납기 지연"으로 남는다.
   const effectiveActualShipmentDate =
     override.shipmentCompletedAt?.slice(0, 10) ?? resolved.actualShipmentDate;
+  // 🔴 2026-11-03 부터 지연 판정이 보는 날짜는 **고객 요청 납기일**이다(사내 목표
+  // 완료일이 아니다 — domain/types.ts 의 isRepairCaseOverdue 머리말). 워크플로
+  // 재정의는 그 날짜를 바꾸지 않으므로 원본 값을 그대로 넘긴다.
   const effectiveIsOverdue = isRepairCaseOverdue(
     {
       status: effectiveStatus,
-      internalTargetShipmentDate: resolved.internalTargetShipmentDate,
+      customerRequestedDueDate: resolved.customerRequestedDueDate,
       actualShipmentDate: effectiveActualShipmentDate,
     },
     referenceDate

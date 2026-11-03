@@ -29,7 +29,7 @@ import {
  * (domain/due-date-inversion.ts). 그 함수 안에 세 겹이 이미 들어 있다:
  *   ① 빌려 오기 — 고객 요청 납기일 칸이 비면 연결된 내자의 납기요청일 중 가장
  *      이른 하루로 잰다(resolveRepairCaseRequestedDueDate).
- *   ② 핵심 비교 — 사내 목표 출하일 > 고객 요청 납기일. 같은 날은 역전이 아니고,
+ *   ② 핵심 비교 — 사내 목표 완료일 > 고객 요청 납기일. 같은 날은 역전이 아니고,
  *      한쪽이라도 비면 거짓이다(isDueDateInverted).
  *   ③ 출하 완료 거르기 — 이미 나간 건에는 안 뜬다(isRepairCaseShipmentFinished).
  * 셋을 SQL 로 옮기면 화면 셋(수리 건 상세 · A/S 내자 정리 · PO 내자 정리)과 종이
@@ -52,10 +52,10 @@ import {
  *
  * ── 빼는 것 셋 ──────────────────────────────────────────────────────────
  *  · 휴지통에 든 건(`repair_cases.is_deleted`) — 목록에도 없는 건을 협의하라는
- *    알림은 할 일이 아니다. 결재 대기·납기 임박·사내 목표 출하일 미등록이 모두
+ *    알림은 할 일이 아니다. 결재 대기·납기 임박·사내 목표 완료일 미등록이 모두
  *    같은 조건을 건다.
  *  · 이미 나간 건 — 판정은 SQL 이 아니라 도메인이 한다(위 ③).
- *  · 사내 목표 출하일이 비어 있는 건 — 역전은 **두 날짜가 다 있어야** 성립한다.
+ *  · 사내 목표 완료일이 비어 있는 건 — 역전은 **두 날짜가 다 있어야** 성립한다.
  *    🔵 이 하나만 SQL 로도 좁힌다(`IS NOT NULL`). 규칙을 SQL 로 옮긴 것이 **아니고**
  *    (도메인이 공백까지 접어 다시 본다 — foldBlankToNull), 날짜를 아직 안 잡은 건이
  *    후보의 대부분이라 질의와 뒤이은 내자 읽기를 가볍게 하려는 것이다. 어긋날 수
@@ -87,7 +87,7 @@ import {
 export type RepairCaseDueDateInvertedRow = {
   repairCaseId: string;
   intakeNumber: string;
-  /** 그 건의 사내 목표 출하일("YYYY-MM-DD"). 「적혀 있다」를 이미 가린 값이다. */
+  /** 그 건의 사내 목표 완료일("YYYY-MM-DD"). 「적혀 있다」를 이미 가린 값이다. */
   internalTargetShipmentDate: string;
   /** 화면에 보이는 그 고객 요청 납기일("YYYY-MM-DD"). 빌려 온 값일 수 있다. */
   requestedDueDate: string;
@@ -108,7 +108,7 @@ type CandidateRow = {
 };
 
 /**
- * 사내 목표 출하일이 적힌 살아 있는 접수 건 전부 — 인수번호 오름차순. 역전 판정은
+ * 사내 목표 완료일이 적힌 살아 있는 접수 건 전부 — 인수번호 오름차순. 역전 판정은
  * 아직 하나도 하지 않는다(빌려 올 날짜까지 모아 주기만 한다).
  *
  * 🔴 **세는 도구와 알림이 같은 자료를 본다**(아래 두 export 가 이 함수 하나를 나눠
@@ -151,7 +151,7 @@ async function loadCandidates(): Promise<CandidateRow[]> {
 }
 
 /**
- * 사내 목표 출하일이 **고객 요청 납기일보다 늦은** 수리 건 전부 — 인수번호
+ * 사내 목표 완료일이 **고객 요청 납기일보다 늦은** 수리 건 전부 — 인수번호
  * 오름차순. 이미 나간 건은 빠져 있다.
  *
  * 인자를 받지 않는다 — 사람마다 결과가 달라지지 않고, 「오늘」도 보지 않는다
@@ -190,11 +190,11 @@ export async function listRepairCasesWithDueDateInverted(): Promise<RepairCaseDu
 
 /** 조건을 하나씩 걸었을 때 남는 건수 — 세는 도구가 찍는다. */
 export type DueDateInversionStageCounts = {
-  /** ① 사내 목표 출하일이 적힌 건(휴지통 제외). */
+  /** ① 사내 목표 완료일이 적힌 건(휴지통 제외). */
   withTargetDate: number;
   /** ② ① 가운데 고객 요청 납기일을 아는 건 — 자기 칸이거나 내자에서 빌려 온 것. */
   andRequestedKnown: number;
-  /** ③ ② 가운데 목표 출하일이 **더 늦은** 건(같은 날은 아니다). */
+  /** ③ ② 가운데 목표 완료일이 **더 늦은** 건(같은 날은 아니다). */
   andInverted: number;
   /** ④ ③ 가운데 아직 안 나간 건 — **실제로 종에 뜨는 수**. */
   andNotShipped: number;
@@ -223,7 +223,7 @@ export type DueDateInversionStageCounts = {
 export async function countDueDateInversionStages(): Promise<DueDateInversionStageCounts> {
   const candidates = await loadCandidates();
 
-  // ① 후보가 곧 「사내 목표 출하일이 적힌 살아 있는 건」이다. 그래도 도메인 쪽
+  // ① 후보가 곧 「사내 목표 완료일이 적힌 살아 있는 건」이다. 그래도 도메인 쪽
   //    접기를 한 번 더 거는 것은 SQL 의 IS NOT NULL 과 「적혀 있는가」가 어긋날 수
   //    있어서다(공백만 적힌 값). 어긋나면 ① 이 ② 보다 작아져 사람 눈에 바로 걸린다.
   const withTargetDate = candidates.filter(

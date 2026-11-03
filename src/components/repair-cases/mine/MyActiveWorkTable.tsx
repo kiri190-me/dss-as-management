@@ -91,7 +91,7 @@ function SecondarySortButton({
  *   고객사   ← End-User
  *   제품     ← 제품 구분 / 모델 / 유·무상, 그리고 S/N · L/N
  *   현재 단계 ← 마지막 작업
- *   출하일   ← 사내 목표 출하일(주), 고객 요청 납기일 / 목표 검수완료일
+ *   출하일   ← 사내 목표 완료일(주), 고객 요청 납기일 / 목표 검수완료일
  *
  * "제품" 칸의 두 줄 구성(첫 줄 제품구분/모델/유·무상, 둘째 줄 S/N·L/N)은
  * RepairCaseTable과 같다 — 사용자가 같은 자리에서 같은 것을 읽게 하는 것이
@@ -156,11 +156,13 @@ export default function MyActiveWorkTable({
               </div>
             </th>
             <th scope="col" className={thBaseClass}>
-              {/* 사내 목표 출하일(주) + 고객 요청 납기일(보조, 정렬 가능). 목표 검수완료일은 셋째 줄. */}
+              {/* 사내 목표 완료일(주) + 고객 요청 납기일(보조, 정렬 가능). 목표 검수완료일은 셋째 줄. */}
               <div className="flex flex-col gap-0.5">
                 <PrimarySortButton
+                  // 🔴 칸 이름은 그대로 두고 **화면 글자만** 바꿨다(2026-11-03 —
+                  // domain/types.ts 의 internalTargetShipmentDate 주석).
                   column="internalTargetShipmentDate"
-                  label="목표 출하일"
+                  label="목표 완료일"
                   sort={sort}
                   onSortChange={onSortChange}
                 />

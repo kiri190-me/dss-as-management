@@ -1,5 +1,9 @@
 import type { Role, WorkflowType } from "../../types";
 import type { ActingUser } from "../approval/transitions";
+import {
+  isAdvanceIntoShipmentWaiting,
+  SHIPMENT_WAITING_AUTO_ONLY_MESSAGE,
+} from "../../shipment-waiting-auto-advance";
 import { actorMay } from "@/lib/auth/developer-promotion";
 import { checkHoldEligibilityForCategory, checkTransitionEligibility } from "./permissions";
 import { getStepCategory, roleForCategory, type StepCategory } from "./step-category";
@@ -64,6 +68,23 @@ export function evaluateTransitionAvailability(params: {
             : "현재 단계에서는 출하 완료 처리를 할 수 없습니다.",
     };
   }
+  // 🔴 [출하 대기]는 **사람이 눌러서 들어갈 수 없다**(2026-11-03 사용자 요구 —
+  // 「[실행 가능한 작업]에서도 [다음 단계로 진행]을 통해서 출하대기로 넘어가지
+  // 못하도록」). 최종 출하 승인이 모두 끝나면 시스템이 옮긴다
+  // (db/mutations/shipment-waiting-auto-advance.ts).
+  //
+  // 🔵 **자리가 여기인 까닭** — 누가 누르든 같은 답이므로 역할·담당·승인 검사보다
+  // 앞이다. 뒤에 두면 담당 엔지니어가 아닌 사람에게는 「담당자만 진행할 수
+  // 있습니다」가 먼저 나와, 역할을 바꿔 봐도 안 되는 까닭을 끝내 모른다.
+  // 🔴 잠금·전이 없음보다는 **뒤**다: 그 둘은 이 단추가 아예 성립하지 않는 경우라
+  //    더 먼저 말해 주는 것이 맞다.
+  //
+  // 🔴 **단추를 숨기지 않고 까닭과 함께 끈다.** WorkflowActionList 가 reason 을
+  // 단추 밑에 그대로 그린다 — 조용히 사라지면 사람은 고장으로 읽는다.
+  if (isAdvanceIntoShipmentWaiting(params.actionCode, params.transition.toStatus)) {
+    return { available: false, reason: SHIPMENT_WAITING_AUTO_ONLY_MESSAGE };
+  }
+
   if (!params.actingUser) {
     return { available: false, reason: "로그인한 사용자 정보를 확인할 수 없습니다." };
   }

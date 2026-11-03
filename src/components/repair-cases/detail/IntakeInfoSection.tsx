@@ -137,7 +137,7 @@ export default function IntakeInfoSection({
    */
   isDueDateNear: boolean;
   /**
-   * 이 건이 「납기 역전」인가 — **사내 목표 출하일이 고객 요청 납기일보다 늦다**
+   * 이 건이 「납기 역전」인가 — **사내 목표 완료일이 고객 요청 납기일보다 늦다**
    * (2026-10-29 사용자 요구). 그러면 아래 「고객 요청 납기일」 칸이 굵은 붉은색이
    * 되고, 그 아래에 「납기 요청일 협의가 필요합니다.」가 한 줄 붙는다.
    * 🔴 **이미 나간 건에는 거짓으로 온다**(2026-10-30 사용자 결정) — 할 일이 없는
@@ -236,7 +236,7 @@ export default function IntakeInfoSection({
             value={resolved.internalTargetInspectionCompletionDate ?? "-"}
           />
           <Field
-            label="사내 목표 출하일"
+            label="사내 목표 완료일"
             value={resolved.internalTargetShipmentDate ?? "-"}
           />
           <Field label="실제 출하일" value={resolved.actualShipmentDate ?? "-"} />

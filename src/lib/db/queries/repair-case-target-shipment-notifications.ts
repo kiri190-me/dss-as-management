@@ -14,7 +14,7 @@ import type { RepairStatus } from "@/lib/domain/types";
 
 /**
  * ============================================================================
- * 사내 목표 출하일 미등록 — 종 알림 「사내 목표 출하일을 등록해 주세요」의 원본
+ * 사내 목표 완료일 미등록 — 종 알림 「사내 목표 완료일을 등록해 주세요」의 원본
  * ============================================================================
  * **SELECT 만 있다.** 이 파일은 아무것도 쓰지 않고, 쓸 표도 만들지 않는다 —
  * 알림은 저장되지 않고 매 요청마다 업무 데이터에서 다시 계산된다
@@ -32,7 +32,7 @@ import type { RepairStatus } from "@/lib/domain/types";
  * 사용자 id 도 역할도 받지 않고, 사용자별로 결과가 달라지지도 않는다.
  *
  * ── 판정을 여기서 새로 적지 않는다 ──────────────────────────────────────
- * 「PO발행일이 있는가」·「사내 목표 출하일이 비었는가」·「이미 나갔는가」 세
+ * 「PO발행일이 있는가」·「사내 목표 완료일이 비었는가」·「이미 나갔는가」 세
  * 판정은 전부 도메인의 순수 함수가 한다(needsInternalTargetShipmentDate 와 그
  * 안의 셋). SQL 의 `IS NULL` 로 접으면 공백만 적힌 값을 「있다」로 세는 날이 오고
  * (화면은 foldBlankToNull 로 빈칸으로 그린다), 무엇보다 시험할 자리가 사라진다 —
@@ -64,7 +64,7 @@ import type { RepairStatus } from "@/lib/domain/types";
  * 레지스트리는 각 load 를 try/catch 로 감싸지 않는다(queries/notifications.ts 의
  * listMyNotifications — Promise.all 그대로다). 여기서 던지면 종이 비는 것이 아니라
  * **그 화면이 통째로 못 그려진다.** 그래서 읽는 칸을 알림 한 줄에 필요한 것으로만
- * 묶고(접수 건 id · 인수번호 · 목표 출하일 · 실제 출하일 · 평탄화 상태 · 발주발행일),
+ * 묶고(접수 건 id · 인수번호 · 목표 완료일 · 실제 출하일 · 평탄화 상태 · 발주발행일),
  * 던질 수 있는 계산을 하지 않는다.
  *
  * ── PII ────────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ import type { RepairStatus } from "@/lib/domain/types";
  * ============================================================================
  */
 
-/** 종 알림 「사내 목표 출하일 미등록」 한 줄의 원본. */
+/** 종 알림 「사내 목표 완료일 미등록」 한 줄의 원본. */
 export type RepairCaseTargetShipmentMissingRow = {
   repairCaseId: string;
   intakeNumber: string;
@@ -155,7 +155,7 @@ async function loadCandidates(): Promise<CandidateRow[]> {
 }
 
 /**
- * PO발행일은 있는데 **사내 목표 출하일이 비어 있고 아직 안 나간** 수리 건 전부 —
+ * PO발행일은 있는데 **사내 목표 완료일이 비어 있고 아직 안 나간** 수리 건 전부 —
  * 인수번호 오름차순.
  *
  * 인자를 받지 않는다 — 사람마다 결과가 달라지지 않고(파일 머리말), 「오늘」도 보지
@@ -183,7 +183,7 @@ export async function listRepairCasesMissingTargetShipmentDate(): Promise<
 export type TargetShipmentMissingStageCounts = {
   /** ① PO발행일이 있는 건(휴지통 제외). */
   withOrderIssued: number;
-  /** ② ① 가운데 사내 목표 출하일이 비어 있는 건. */
+  /** ② ① 가운데 사내 목표 완료일이 비어 있는 건. */
   andTargetMissing: number;
   /** ③ ② 가운데 아직 안 나간 건 — **실제로 종에 뜨는 수**. */
   andNotShipped: number;

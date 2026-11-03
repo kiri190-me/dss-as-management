@@ -173,7 +173,7 @@ export default function DatabaseFinalShipmentCard({
    */
   actingApproverUserIds: readonly string[];
   /**
-   * 사내 목표 출하일 — **읽기 전용**으로 두 자리에 보여 준다: 카드의 회색 상자와
+   * 사내 목표 완료일 — **읽기 전용**으로 두 자리에 보여 준다: 카드의 회색 상자와
    * 확인 창. 창에만 있으면 창을 열어야 보이는데, 「열어 볼까」를 정하는 것이 바로
    * 그 날짜다. 요청하는 사람과 결재하는 사람이 같은 카드·같은 창을 쓰므로 양쪽이
    * 같은 날짜를 보고 판단한다.
@@ -390,7 +390,7 @@ export default function DatabaseFinalShipmentCard({
         머리말). 카드는 접수 건을 고치지 않는다.
       */}
       <div className="sm:col-span-2">
-        <dt className="text-xs text-zinc-500 dark:text-zinc-400">사내 목표 출하일</dt>
+        <dt className="text-xs text-zinc-500 dark:text-zinc-400">사내 목표 완료일</dt>
         <dd
           className={
             internalTargetShipmentDate ? "text-zinc-900 dark:text-zinc-50" : "text-zinc-500 dark:text-zinc-400"

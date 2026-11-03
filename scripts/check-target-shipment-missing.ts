@@ -8,7 +8,7 @@ import {
 
 /**
  * ============================================================================
- * 「사내 목표 출하일을 등록해 주세요」 알림이 **몇 건이나 뜨는가** (2026-10-30)
+ * 「사내 목표 완료일을 등록해 주세요」 알림이 **몇 건이나 뜨는가** (2026-10-30)
  * ============================================================================
  *
  *   npm run check:target-shipment-missing
@@ -49,7 +49,7 @@ const SAMPLE_LIMIT = 10;
 
 async function main(): Promise<void> {
   console.log("\n" + "─".repeat(72));
-  console.log("  사내 목표 출하일 미등록 — 종에 몇 줄이 뜨나 (읽기만 한다)");
+  console.log("  사내 목표 완료일 미등록 — 종에 몇 줄이 뜨나 (읽기만 한다)");
   console.log("─".repeat(72));
 
   const stages = await countTargetShipmentMissingStages();
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
 
   console.log("\n─ 조건을 하나씩 걸면 (휴지통에 든 건은 처음부터 빠져 있다)");
   console.log(`  ① PO발행일 있음                          ${stages.withOrderIssued}건`);
-  console.log(`  ② ① 그리고 사내 목표 출하일 없음          ${stages.andTargetMissing}건`);
+  console.log(`  ② ① 그리고 사내 목표 완료일 없음          ${stages.andTargetMissing}건`);
   console.log(`  ③ ② 그리고 출하 완료 아님  ← 실제로 뜰 수  ${stages.andNotShipped}건`);
 
   // 🔴 「세는 길」과 「뜨는 길」이 갈라지면 이 도구의 답은 쓸모가 없다. 둘은 같은 후보

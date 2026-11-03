@@ -511,7 +511,7 @@ const mockRepairCasesRaw: Omit<RepairCase, "billingType">[] = [
     assignedEngineerId: "u-004",
     receivedAt: "2026-07-10",
     customerRequestedDueDate: "2026-07-28",
-    // 오늘(2026-08-04) 기준으로 지난 목표 출하일 → isRepairCaseOverdue()가 true를 반환하는 데모 사례
+    // 오늘(2026-08-04) 기준으로 지난 목표 완료일 → isRepairCaseOverdue()가 true를 반환하는 데모 사례
     internalTargetShipmentDate: "2026-07-30",
     actualShipmentDate: null,
     isLocked: false,

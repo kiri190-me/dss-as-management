@@ -33,7 +33,7 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  *
  *  1. **앞 다섯 칸의 재료가 전부 따라온다** — 인수번호·형식·S/N·L/N·고객사.
  *     저장돼 있지 않은 값이라 조인이 끊기면 화면의 줄이 통째로 빈다.
- *  2. **`납입 예정`은 수리 건의 사내 목표 출하일**이고, 없으면 빈칸이다.
+ *  2. **`납입 예정`은 수리 건의 사내 목표 완료일**이고, 없으면 빈칸이다.
  *  3. **`입고 요청일`은 납기요청일 중 가장 이른 하루**다 — 한 발주 줄 안에서도,
  *     **여러 발주 줄에 걸쳐서도** 통틀어 가장 이른 것이고, 하나도 없으면 빈칸,
  *     **지운 발주 줄의 날짜는 세지 않는다.**
@@ -69,7 +69,7 @@ const WEEK_MAIN = "2096-05-07";
 const WEEK_OTHER = "2096-05-14";
 const WEEK_EMPTY = "2096-05-21";
 
-/** 사내 목표 출하일이 적힌 건. `납입 예정` 칸에 그대로 나와야 한다. */
+/** 사내 목표 완료일이 적힌 건. `납입 예정` 칸에 그대로 나와야 한다. */
 const TARGET_SHIPMENT_DATE = "2096-05-20";
 
 let actorUserId: string;
@@ -361,13 +361,13 @@ describe("listWeeklyReportDeliveries", () => {
 
   // ── 납입 예정 ──────────────────────────────────────────────────────────
 
-  test("`납입 예정`은 수리 건의 사내 목표 출하일이다", async () => {
+  test("`납입 예정`은 수리 건의 사내 목표 완료일이다", async () => {
     const rows = await listWeeklyReportDeliveries(WEEK_MAIN);
     const row = rows.find((item) => item.repairCaseId === caseThreeDates.id);
     assert.equal(row?.internalTargetShipmentDate, TARGET_SHIPMENT_DATE);
   });
 
-  test("사내 목표 출하일이 없으면 빈칸이다", async () => {
+  test("사내 목표 완료일이 없으면 빈칸이다", async () => {
     const rows = await listWeeklyReportDeliveries(WEEK_MAIN);
     const row = rows.find((item) => item.repairCaseId === caseNoOrder.id);
     assert.equal(row?.internalTargetShipmentDate, null);

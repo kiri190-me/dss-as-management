@@ -330,9 +330,9 @@ export function sortRows(rows: EffectiveRepairCase[], sort: SortState): Effectiv
       case "priority":
         return PRIORITY_CODES.indexOf(a.priority) - PRIORITY_CODES.indexOf(b.priority);
       case "actualShipmentDate":
-        // 🔴 널을 internalTargetShipmentDate(사내 목표 출하일)로 대신 채우지 않는다.
+        // 🔴 널을 internalTargetShipmentDate(사내 목표 완료일)로 대신 채우지 않는다.
         // 표는 아직 출하 안 된 건을 "-"로 그리는데(RepairCaseTable 의 출하일 셀),
-        // 정렬에서만 목표 출하일을 끼워 넣으면 "-"인 줄이 날짜가 있는 줄 사이에
+        // 정렬에서만 목표 완료일을 끼워 넣으면 "-"인 줄이 날짜가 있는 줄 사이에
         // 끼어 선다. 널 자리는 바로 아래 고객 요청 납기일과 **같은 함수**가 정한다
         // — 한 머리글 칸에 포개 놓은 두 차례가 서로 다르게 굴면 안 된다.
         return compareNullableString(a.effectiveActualShipmentDate, b.effectiveActualShipmentDate);

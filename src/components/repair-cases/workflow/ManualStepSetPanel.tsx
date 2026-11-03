@@ -33,8 +33,19 @@ export default function ManualStepSetPanel({
   repairCaseId: string;
   version: number;
   currentStepKey: string;
-  /** 승인 게이트 단계가 제외된 후보 목록 — db/queries/workflow-rules.ts의
-   *  listManuallySelectableStepsFromRules가 산출한다. */
+  /**
+   * 고를 수 있는 단계 목록 — db/queries/workflow-rules.ts의
+   * listManuallySelectableStepsFromRules가 산출한다. 승인 게이트 단계와
+   * 🔴 **[출하 대기]**(2026-11-03 — 최종 출하 승인이 끝나면 시스템이 옮긴다)가
+   * 빠져 있다.
+   *
+   * 🔴 **지금 서 있는 단계가 이 목록에 없을 수 있다.** 빠진 두 갈래에 서 있는
+   * 건이 그렇다(교산 출하 승인 대기 · 출하 대기). 그때 고르개는 아무것도 고르지
+   * 않은 채로 뜨고, selectedStepKey 는 현재 단계 그대로라 isUnchanged 가 참이어서
+   * [단계 변경] 은 꺼져 있다 — 다른 단계를 고르면 그때 켜진다. 즉 **나가는 길은
+   * 막히지 않는다**(들어가는 길만 닫은 것이다). 이 동작은 승인 게이트 단계가
+   * 처음 빠진 2026-08-18 부터 그대로이며, 출하 대기가 그 갈래에 하나 더해진 것뿐이다.
+   */
   options: WorkflowRuleStep[];
   actingUser: ActingUser | null;
   holdState: HoldState;
@@ -119,6 +130,10 @@ export default function ManualStepSetPanel({
           정규 워크플로 순서를 따르지 않고 현재 단계를 바로 지정합니다. 변경 이력에 &ldquo;단계 직접
           변경&rdquo;으로 따로 기록되며, 사유는 선택 입력입니다. 승인이 필요한 단계(출하 완료 등)는
           목록에 나오지 않습니다 — 승인 절차를 거쳐 진행해 주세요.
+        </p>
+        {/* 🔴 「왜 없는가」를 그 자리에 적는다. 까닭 없이 사라진 칸은 고장으로 읽힌다. */}
+        <p className="text-xs text-zinc-600 dark:text-zinc-400">
+          [출하 대기]도 목록에 없습니다 — 최종 출하 승인이 모두 끝나면 시스템이 그 단계로 옮깁니다.
         </p>
 
       {unavailableReason && (

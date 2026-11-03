@@ -29,14 +29,14 @@ import { ROLE_CODES } from "./types";
 
 /**
  * ============================================================================
- * 「사내 목표 출하일을 등록해 주세요」 — 뜨는 조건 · 받는 사람 · 안 사라짐
+ * 「사내 목표 완료일을 등록해 주세요」 — 뜨는 조건 · 받는 사람 · 안 사라짐
  * ============================================================================
- * 2026-10-29 사용자 요구: 「PO발행일이 등록되면 엔지니어들에게 [사내 목표 출하일을
+ * 2026-10-29 사용자 요구: 「PO발행일이 등록되면 엔지니어들에게 [사내 목표 완료일을
  * 등록해 주세요]라고 알림이 뜨도록 … 이 알림은 승인용이야, 해당 수리건에 [사내목표
  * 출하일]이 등록되기 전까지는 **눌러서 확인해도 사라지지 않아**」.
  *
  * 이 파일이 지키는 선이 넷이다:
- *  1. 뜨는 조건 셋(PO발행일 있음 · 목표 출하일 없음 · 출하 완료 아님)과 그 경계.
+ *  1. 뜨는 조건 셋(PO발행일 있음 · 목표 완료일 없음 · 출하 완료 아님)과 그 경계.
  *  2. 🔴 **눌러서 확인하는 종류가 아니다** — 확인 키가 거절된다. 이것이 깨지면
  *     「등록 전에는 안 사라진다」가 정반대가 된다.
  *  3. 🔴 **A/S 엔지니어에게 가고 관리자·영업·재고 담당자에게는 기본으로 안 간다.**
@@ -65,11 +65,11 @@ function missingRow(overrides: Partial<Parameters<typeof needsInternalTargetShip
 
 // ───────────────────────────────────────────────────────── 뜨는 조건 셋
 
-test("🔴 PO발행일이 있고 사내 목표 출하일이 없고 출하가 안 끝났으면 뜬다", () => {
+test("🔴 PO발행일이 있고 사내 목표 완료일이 없고 출하가 안 끝났으면 뜬다", () => {
   assert.equal(needsInternalTargetShipmentDate(missingRow()), true);
 });
 
-test("🔴 사내 목표 출하일이 있으면 안 뜬다 — 등록하는 순간 다음 조회에서 빠진다", () => {
+test("🔴 사내 목표 완료일이 있으면 안 뜬다 — 등록하는 순간 다음 조회에서 빠진다", () => {
   assert.equal(
     needsInternalTargetShipmentDate(missingRow({ internalTargetShipmentDate: "2026-11-05" })),
     false
@@ -146,7 +146,7 @@ test("PO발행일이 여럿이면 하나라도 적혀 있으면 「있다」이�
   assert.equal(earliestDomesticOrderIssuedDate(["2027-01-01", "2026-12-31"]), "2026-12-31");
 });
 
-test("사내 목표 출하일 미기재 판정은 공백을 없음으로 접는다", () => {
+test("사내 목표 완료일 미기재 판정은 공백을 없음으로 접는다", () => {
   assert.equal(isInternalTargetShipmentDateMissing(null), true);
   assert.equal(isInternalTargetShipmentDateMissing("   "), true);
   assert.equal(isInternalTargetShipmentDateMissing("2026-11-05"), false);
@@ -154,7 +154,7 @@ test("사내 목표 출하일 미기재 판정은 공백을 없음으로 접는�
 
 // ───────────────────────────────────────────────────── 알림 한 줄의 모양
 
-test("🔴 알림 글자에 「사내 목표 출하일을 등록해 주세요」가 그대로 들어 있다", () => {
+test("🔴 알림 글자에 「사내 목표 완료일을 등록해 주세요」가 그대로 들어 있다", () => {
   const item = buildRepairCaseTargetShipmentMissingNotification({
     repairCaseId: CASE_ID,
     intakeNumber: "D261015",
@@ -163,11 +163,11 @@ test("🔴 알림 글자에 「사내 목표 출하일을 등록해 주세요」
 
   assert.equal(item.kind, KIND);
   assert.equal(item.id, `REPAIR_CASE_TARGET_SHIPMENT_MISSING:${CASE_ID}`);
-  assert.equal(item.targetKey, CASE_ID, "한 건에 목표 출하일은 하나뿐이라 건 단위로 센다");
+  assert.equal(item.targetKey, CASE_ID, "한 건에 목표 완료일은 하나뿐이라 건 단위로 센다");
   assert.equal(item.subject, "D261015", "어느 건인지는 인수번호가 말한다");
-  assert.equal(item.detail, "사내 목표 출하일을 등록해 주세요 · PO발행일 2026-10-21");
+  assert.equal(item.detail, "사내 목표 완료일을 등록해 주세요 · PO발행일 2026-10-21");
   // 🔴 글자를 두 곳에 적지 않는다 — 상수 한 곳이 이 말을 쥔다.
-  assert.equal(INTERNAL_TARGET_SHIPMENT_REQUEST_MESSAGE, "사내 목표 출하일을 등록해 주세요");
+  assert.equal(INTERNAL_TARGET_SHIPMENT_REQUEST_MESSAGE, "사내 목표 완료일을 등록해 주세요");
   assert.ok(item.detail.startsWith(INTERNAL_TARGET_SHIPMENT_REQUEST_MESSAGE), item.detail);
   // 🔴 부탁이 **앞**이다. 종 패널의 상세 칸은 한 줄에서 잘리므로(CSS truncate) 뒤에
   //    두면 사용자가 요구한 그 문장이 잘려 나갈 수 있다.
@@ -354,7 +354,7 @@ test("🔴 이 종류만 **엔지니어 하나**다 — 2026-10-30 의 납기 �
 
 test("이름·설명·색 — 관리자가 설명만 읽고 무엇을 끄는지 알 수 있다", () => {
   const meta = NOTIFICATION_KIND_META[KIND];
-  assert.equal(meta.label, "사내 목표 출하일 미등록");
+  assert.equal(meta.label, "사내 목표 완료일 미등록");
   // 무엇으로 뜨는가 · 어떻게 사라지는가 · 누가 받는가 셋이 다 적혀 있어야 한다.
   assert.ok(meta.description.includes("PO발행일"), meta.description);
   assert.ok(meta.description.includes("눌러서 확인하는 알림이 아니"), meta.description);

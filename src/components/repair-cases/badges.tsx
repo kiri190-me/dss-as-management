@@ -61,6 +61,19 @@ export function SourceBadge({ source }: { source: "MOCK" | "LOCAL_DEMO" | "DATAB
   return null;
 }
 
+/**
+ * 「납기 지연」 — **고객 요청 납기일**이 지났고 아직 안 나간 건 (2026-11-03).
+ *
+ * 🔴 그 전까지 이 배지가 재던 것은 **사내 목표 완료일**(칸 이름은
+ * internalTargetShipmentDate 그대로)이었다. 사용자 결정으로 바뀌었다 — 「사내 목표
+ * 완료일을 지났다고 해서 납기 지연 배지가 뜨지 않도록 해줘. (고객 요청 납기일을
+ * 지났을 때만 [납기 지연]이 뜨도록 해줘.)」 사내 날짜는 우리가 스스로 잡은 일정이고,
+ * 그것을 넘긴 것은 고객과의 약속을 어긴 것이 아니다.
+ *
+ * 🔴 판정은 여기서 하지 않는다 — 받는 것은 불리언 하나뿐이고, 조건은
+ * domain/types.ts 의 isRepairCaseOverdue 하나에 있다(바로 아래 DueDateNearBadge 와
+ * 같은 규율).
+ */
 export function OverdueBadge({ isOverdue }: { isOverdue: boolean }) {
   if (!isOverdue) {
     return <span className="text-xs text-zinc-500 dark:text-zinc-400">정상</span>;
@@ -78,9 +91,13 @@ export function OverdueBadge({ isOverdue }: { isOverdue: boolean }) {
  * 「납기 임박」 — 고객 요청 납기일이 **오늘부터 7일 안**으로 다가온 건 (2026-10-19).
  *
  * ── 🔴 「납기 지연」(OverdueBadge)과 **다른 판정이고 다른 색**이다 ───────────
- * 바로 위의 OverdueBadge 가 재는 것은 **사내 목표 출하일**을 넘겼는가이고
- * (isRepairCaseOverdue), 이 배지가 재는 것은 **고객 요청 납기일**이 다가왔는가다.
- * 둘은 섞이지 않는다 — 한 건에 둘 다 붙을 수도 있다.
+ * 🔵 2026-11-03 부터 **둘이 같은 날짜를 본다** — 바로 위의 OverdueBadge 는 고객 요청
+ * 납기일을 **넘겼는가**(isRepairCaseOverdue), 이 배지는 그 날짜가 **다가왔는가**다.
+ * 그 전까지 지연 쪽은 사내 목표 완료일을 봤다. 날짜가 같아져도 **둘은 여전히 섞이지
+ * 않는다**: 두 창이 겹치지 않으므로(지났다 ↔ 오늘부터 7일) 한 건에 둘이 동시에
+ * 붙지는 않는다 — 날짜가 갈려 있던 동안에는 겹칠 수 있었다.
+ * ⚠️ 다만 **이 배지만 내자 정리에서 날짜를 빌려 온다**(자기 칸이 비면 연결된 줄의
+ * 가장 이른 하루 — resolveRepairCaseRequestedDueDate). 지연 쪽은 빌려 오지 않는다.
  *
  * 🔴 색을 red 가 아니라 rose 로 둔 것은 사용자 결정이다. 진한 빨강으로 하면 바로
  * 옆의 「납기 지연」과 **같은 색**이 되어 「이미 늦음」과 「곧 늦음」이 구별되지

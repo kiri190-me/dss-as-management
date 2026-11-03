@@ -17,6 +17,7 @@ import {
 } from "../queries/shipment-approval-routes";
 import { findNextRouteStepToApprove } from "@/lib/domain/shipment-approval-route";
 import { acquireShipmentApprovalRouteSharedLock } from "./shipment-approval-routes";
+import { autoAdvanceToShipmentWaitingInTx } from "./shipment-waiting-auto-advance";
 import type {
   ApprovalActionResult,
   RepairCaseApprovalType,
@@ -595,6 +596,12 @@ export async function decideRepairCaseApproval(
       // 인덱스가 곧 「한 번에 한 단계」의 보증이므로 우회하지 않고 순서로 푼다.
       //
       // 반려면 아무것도 만들지 않는다 — 사슬이 끊기고 처음부터 다시 요청한다.
+      //
+      // 🔴 **이 값이 「출하 승인이 모두 끝났는가」를 가른다**(2026-11-03). 아래
+      // 자동 전환이 이것을 그대로 받아 가는데, 다음 행이 열렸다면 결재선이 아직
+      // 남은 것이라 단계를 옮기면 안 된다. 결재선을 타지 않는 건은 여기 분기를
+      // 아예 지나지 않으므로 false 로 남고, 그때는 승인 한 번이 곧 마지막이다.
+      let openedNextRouteStep = false;
       if (decision === "APPROVED" && latest.routeId !== null && latest.routeStepOrder !== null) {
         // 「현재 판」이 아니라 **이 행에 적힌 판**으로 다음 단계를 찾는다.
         // 진행 중인 건은 관리자가 절차를 바꿔도 옛 판을 끝까지 따라간다.
@@ -641,8 +648,25 @@ export async function decideRepairCaseApproval(
             // 행은 아직 아무도 누르지 않았으므로 「누구 자리를 대신했는가」가 없다.
             // 이 단계를 위임받은 사람이 누르면 그때 위 지정 관문 뒤에서 채워진다.
           });
+          openedNextRouteStep = true;
         }
       }
+
+      // 🔴 **출하 승인이 모두 끝나면 단계를 [출하 대기]로** (2026-11-03 사용자 요구).
+      // 판정도 쓰기도 여기서 하지 않는다 — mutations/shipment-waiting-auto-advance.ts
+      // 하나가 맡고, 그 안의 규칙은 다시 domain/shipment-waiting-auto-advance.ts 의
+      // 순수 함수 하나다. 같은 트랜잭션 안이라 「승인은 됐는데 단계는 안 움직였다」가
+      // 존재할 수 없다.
+      //
+      // 🔴 **수리 검수 승인과 사슬 중간 결재는 그 함수가 접수 건을 읽기도 전에
+      // 돌아선다** — 이 한 줄이 늘었다고 결재 한 번에 드는 질의가 늘지 않는다.
+      await autoAdvanceToShipmentWaitingInTx(tx, {
+        repairCaseId,
+        actorUserId,
+        approvalType,
+        decision,
+        hasNextRouteStep: openedNextRouteStep,
+      });
 
       return { ok: true, id: updated[0].id };
     });

@@ -96,7 +96,7 @@ export type WeeklyReportDeliveryRow = {
   /** 어느 표인가 — 수리 건의 종류가 정한다(파일 헤더). */
   kind: WeeklyReportKind;
   /**
-   * `납입 예정` 칸 — 수리 건의 **사내 목표 출하일**(상세화면의 그 칸 그대로).
+   * `납입 예정` 칸 — 수리 건의 **사내 목표 완료일**(상세화면의 그 칸 그대로).
    * 아직 정하지 않은 건이 실제로 있어 null 이 온다. 그때 화면은 빈칸이다.
    */
   internalTargetShipmentDate: string | null;

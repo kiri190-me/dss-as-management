@@ -991,7 +991,7 @@ export async function updateRepairCase(
           return {
             ok: false,
             code: "VALIDATION_ERROR",
-            fieldErrors: { internalTargetShipmentDate: "사내 목표 출하일은 인수일보다 이전일 수 없습니다." },
+            fieldErrors: { internalTargetShipmentDate: "사내 목표 완료일은 인수일보다 이전일 수 없습니다." },
             message: "입력값을 확인해 주세요.",
           };
         }
