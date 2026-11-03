@@ -69,13 +69,13 @@
 <h1>진행현황 — 기술 작업 절차</h1>
 <p class="sub">마지막 갱신 <b>2026-11-03</b>
 &nbsp;·&nbsp; ✅ <b>줄기 A 끝 — 조각 14 · 커밋 14 · 전부 올림</b>
-&nbsp;·&nbsp; ✅ <b>줄기 B ① 되돌리기 끝</b>
+&nbsp;·&nbsp; ✅ <b>줄기 B ①·② 끝</b>
 &nbsp;·&nbsp; 🟢 마이그레이션 <b>2건 적용 완료</b></p>
 
 <div class="stats">
-  <div class="stat"><div class="l">커밋</div><div class="num grn">14 + 1</div><div class="l">줄기 A 는 전부 push</div></div>
+  <div class="stat"><div class="l">커밋</div><div class="num grn">14 + 2</div><div class="l">줄기 A 는 전부 push</div></div>
   <div class="stat"><div class="l">시험 (단위)</div><div class="num">8,045</div><div class="l">7,598 → <b>+447</b></div></div>
-  <div class="stat"><div class="l">시험 (화면 · DB)</div><div class="num">3,565 · 2,031</div><div class="l">절차 실행 DB <b>106</b></div></div>
+  <div class="stat"><div class="l">시험 (화면 · DB)</div><div class="num">3,585 · 2,031</div><div class="l">절차 실행 DB <b>106</b></div></div>
   <div class="stat"><div class="l">실패</div><div class="num grn">0</div><div class="l">tsc 0 · build 성공</div></div>
 </div>
 
@@ -225,10 +225,17 @@
 <td><span class="st done">✅ 끝</span></td></tr>
 
 <tr><td><b>②</b></td><td><b>팝업 없애기</b></td>
-<td class="red">🔴 <b>성공 알림이 아니라 「취소 / 추가」 확인창</b>입니다. 없애면 확인 단계가 사라집니다 —
-🔵 ①이 받쳐 주면 없애도 안전합니다
-<div class="note">🟢 <b>①이 끝났으니 이제 안전합니다</b> — 잘못 눌러도 [이전]로 돌아옵니다</div></td>
-<td><span class="st wait">다음 차례</span></td></tr>
+<td class="red">사용자가 본 팝업은 셋이었습니다 — <b>연결 추가 · 노드 유형 변경 · 분기 대상 변경</b>.
+<b>성공 알림이 아니라 확인창</b>이라 ①이 받쳐 준 뒤에 뺐습니다
+<div class="note">🟢 <b>뺀 것 둘</b>(연결 추가 · 재연결) · <b>기술 작업 절차에 한해 하나 더</b>(노드 유형 변경).
+<b>남긴 것 넷</b> — 이력 복원 · 편집기 나가기 · 게시(되돌릴 수 없다)</div>
+<div class="note">🔴 <b>지시서가 틀린 곳 둘.</b> ㉠ 「삭제 확인창은 남겨라」 → <b>남길 것이 애초에 없었다</b>
+(노드·분기 삭제는 <b>원래부터 확인창 없이</b> 바로 지워진다 — 더할지는 따로 판단할 일).
+㉡ 노드 유형 변경 창은 확인창이 아니라 <b>「사유」를 받는 입력칸</b>이었다 —
+통째로 없앴으면 기술 작업 절차 <b>밖의 분류에서 죽은 기능</b>이 됐다(서버가 사유를 요구한다)</div>
+<div class="note">🔵 <b>주석 함정이 또 났다</b> — 「왜 없앴는지」를 주석에 적으면서 <code>&lt;dialog&gt;</code> 글자가
+남아, 주석을 안 걷으면 「창이 없어졌는가」가 영영 통과할 뻔했다</div></td>
+<td><span class="st done">✅ 끝</span></td></tr>
 
 <tr><td><b>③</b></td><td><b>[검증] 오류를 누르면 짚어 주기</b></td>
 <td class="blue">🔵 <b>가장 쉽습니다.</b> 오류마다 <b>노드·연결선 번호가 이미 실려 있는데</b> 화면이 안 씁니다</td>
@@ -287,11 +294,17 @@
 <tr><td><b>자리를 옮긴 기록</b></td><td><b class="red">감사 이력에 안 남긴다</b> — 이력은 이 건에서 무슨 일을 했나이지 화면을 어떻게 꾸몄는지가 아니다</td></tr>
 </table>
 
-<h2>🔴 다음에 따로 다룰 것 — 마이그레이션이 필요합니다</h2>
+<h2>🔴 다음에 따로 다룰 것</h2>
 
 <table>
 <tr><th style="width:280px">무엇</th><th>왜 미뤘나</th></tr>
-<tr><td><b>「누가 끝냈는가」가 안 남는다</b></td>
+<tr><td class="red"><b>노드·분기 삭제에 확인창이 없다</b><br>
+<span class="note" style="margin:0">마이그레이션 아님 · 사용자 판단</span></td>
+<td>② 를 하다 드러났습니다 — <b>원래부터 없었고</b> 누르면 그대로 지워집니다.
+🟢 이제 <b>[이전]로 되돌릴 수는 있습니다</b>(①). 확인창을 <b>더할지 말지는 판단이 필요해</b>
+이 조각의 범위 밖으로 두었습니다 — 「없애 달라」는 요청만 있었지 「더해 달라」는 없었습니다</td></tr>
+<tr><td><b>「누가 끝냈는가」가 안 남는다</b><br>
+<span class="note" style="margin:0">마이그레이션 필요</span></td>
 <td>실행 표에 <code>completed_by</code> 칸이 없고 이력에도 값이 없습니다.
 🔵 <b>그만두기는 온전합니다</b>(누가·언제·왜 남습니다)</td></tr>
 <tr><td><b>「전체 표준 절차」는 끝낸 뒤 같은 것을 다시 못 불러온다</b></td>

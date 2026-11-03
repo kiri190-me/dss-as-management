@@ -1,28 +1,43 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { PROCEDURE_BRANCH_TYPE_CODES, procedureBranchTypeLabels, type ProcedureBranchType } from "@/lib/domain/procedure-template-types";
 import type { EditorNodeRow } from "@/lib/db/queries/procedure-template-editor";
 import { createProcedureTemplateEdgeAction } from "@/lib/server/actions/procedure-template-editor";
-import { buildNewEdgePreview, type NodeLookup } from "@/lib/domain/procedure-editor-client-state";
 import { pickDefaultTargetNodeId } from "@/lib/graph-editor-core/edge-default-target";
 import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-template-editor";
 
 /**
  * Add-connection panel (Phase 4A; form-reset behavior standardized in the
  * 5C-6D-1E follow-up) — only ever links two existing nodes (no node
- * creation), always requires an explicit reason and a preview confirmation
- * before the edge is persisted. A caller may pre-fill fromNodeId (e.g. "새
- * 연결 추가" invoked with a node already selected).
+ * creation). A caller may pre-fill fromNodeId (e.g. "새 연결 추가" invoked
+ * with a node already selected).
+ *
+ * 🔴 2026-11-03(줄기 B-②) — [연결 추가]를 누르면 **확인 창 없이 그 자리에서**
+ * 만든다. 예전에는 [연결 검토] → 미리보기 <dialog> → [추가] 로 두 걸음이었다.
+ * 없앤 까닭 둘: 사용자가 "추가/수정할 때마다 팝업이 뜬다"고 직접 말했고,
+ * 줄기 B-① 로 **구조 변경도 [이전]으로 되돌릴 수 있게** 됐다 — 되돌릴 수 있는
+ * 추가에 한 번 더 묻는 값이 없다. (삭제·게시처럼 되돌릴 수 없거나 값이 큰
+ * 조작의 확인은 그대로 남아 있다 — 이 조각이 없앤 것은 추가·수정뿐이다.)
+ *
+ * 🔴 됐다는 것을 사람이 아는 길은 **지도에 연결선이 나타나는 것**이다(onSaved →
+ * 화면의 router.refresh()). 따로 성공 알림을 띄우지 않는다 — 조각 13(「추가
+ * 작업 등록」)이 이미 같은 판단을 했다. 반대로 **실패는 반드시 보인다**:
+ * errorMessage 를 패널 안에 그대로 그린다. 예전에는 같은 글을 창 안에도 한 벌
+ * 더 그렸는데, 창이 없어진 지금은 이 한 자리가 **유일한** 통로다.
+ *
+ * 사유 입력칸은 원래부터 창이 아니라 패널에 있었으므로 그대로다 —
+ * FULL_SERVICE/REFERENCE 는 사유가 여전히 필수고(canAdd), TECHNICAL_TASK 만
+ * 선택이다. 즉 확인 창을 없앴다고 서버가 요구하는 입력이 사라지지 않았다.
  *
  * Not remounted via `key={selectedNodeId}` at the call site
  * (ProcedureTemplateEditorScreen) — the panel stays mounted and instead
  * resets its own fields via adjust-state-during-render whenever
  * `prefillFromNodeId` changes, i.e. whenever the canvas selection changes.
- * The whole form resets (FROM/TO/branch type/branch label/reason, and
- * closes any open review dialog) rather than only resyncing FROM, since an
- * in-progress draft for one FROM node isn't meaningful once the canvas
- * selection points at a different one. Mirrors CaseFlowchartCreateEdgePanel.
+ * The whole form resets (FROM/TO/branch type/branch label/reason) rather
+ * than only resyncing FROM, since an in-progress draft for one FROM node
+ * isn't meaningful once the canvas selection points at a different one.
+ * Mirrors CaseFlowchartCreateEdgePanel.
  */
 export default function CreateEdgePanel({
   templateId,
@@ -56,7 +71,6 @@ export default function CreateEdgePanel({
   /** Phase 5C-5B usability — true for TECHNICAL_TASK; relaxes the "추가 사유" from mandatory to optional (UI mirror of the mutation layer's own category-aware validation). FULL_SERVICE keeps requiring a reason, unchanged. */
   isTechnical: boolean;
 }) {
-  const nodesById = new Map<string, NodeLookup>(nodes.map((n) => [n.id, { id: n.id, title: n.title, nodeCode: n.nodeCode }]));
   // 노드 생성 시 sortOrder가 max+1로 매겨지므로(createProcedureTemplateNode),
   // sortOrder 오름차순이 곧 추가된 순서다 — nodes prop 자체의 배열 순서는
   // 쿼리에 orderBy가 없어 신뢰할 수 없다.
@@ -69,7 +83,6 @@ export default function CreateEdgePanel({
   const [branchType, setBranchType] = useState<ProcedureBranchType>("DEFAULT");
   const [branchLabel, setBranchLabel] = useState("");
   const [reason, setReason] = useState("");
-  const [confirming, setConfirming] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [prevMostRecentNodeId, setPrevMostRecentNodeId] = useState(mostRecentNodeId);
@@ -88,7 +101,6 @@ export default function CreateEdgePanel({
     setBranchType("DEFAULT");
     setBranchLabel("");
     setReason("");
-    setConfirming(false);
     setErrorMessage(null);
   } else if (mostRecentNodeId !== prevMostRecentNodeId) {
     // 노드를 새로 추가하면 그 노드가 곧 이어붙일 대상인 경우가 대부분이다 —
@@ -97,19 +109,23 @@ export default function CreateEdgePanel({
     setPrevMostRecentNodeId(mostRecentNodeId);
     setToNodeId(pickDefaultTargetNodeId(nodesOldestFirst, fromNodeId));
   }
-  const dialogRef = useRef<HTMLDialogElement>(null);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (confirming && !dialog.open) dialog.showModal();
-    else if (!confirming && dialog.open) dialog.close();
-  }, [confirming]);
 
   const labelRequired = branchType === "CUSTOM" && branchLabel.trim().length === 0;
-  const canReview = fromNodeId.length > 0 && toNodeId.length > 0 && fromNodeId !== toNodeId && !labelRequired && (isTechnical || reason.trim().length > 0);
+  /**
+   * 단추를 켤 조건. 확인 창이 있던 시절의 canReview 와 **같은 식**이다 — 창을
+   * 없앴을 뿐 "무엇이 갖춰져야 만들 수 있는가"는 바뀌지 않았다(특히 사유:
+   * FULL_SERVICE/REFERENCE 는 여전히 필수다).
+   */
+  const canAdd = fromNodeId.length > 0 && toNodeId.length > 0 && fromNodeId !== toNodeId && !labelRequired && (isTechnical || reason.trim().length > 0);
 
-  async function handleConfirm() {
+  /**
+   * [연결 추가] 의 본체. 🔴 onSaved 는 **실패 검사 뒤**에만 부른다 — 이 호출이
+   * 화면의 handleStructuralSaved → pushStructuralUndoStep() 으로 이어져
+   * 되돌리기 한 걸음을 쌓기 때문에, 실패한 호출까지 쌓으면 일어나지도 않은
+   * 일을 되돌리려 들어 바로 아래 있던 멀쩡한 변경이 대신 날아간다(줄기 B-①).
+   * 확인 창을 없애면서도 이 순서는 손대지 않았다.
+   */
+  async function handleAdd() {
     setIsSubmitting(true);
     setErrorMessage(null);
     const result = await createProcedureTemplateEdgeAction({
@@ -126,15 +142,12 @@ export default function CreateEdgePanel({
       setErrorMessage(result.message);
       return;
     }
-    setConfirming(false);
     setToNodeId("");
     setReason("");
     onSaved(result.updatedAt, result.structuralValidation);
   }
 
   if (!canEdit) return null;
-
-  const preview = buildNewEdgePreview({ fromNodeId, toNodeId, branchType, branchLabel: branchLabel.trim() || null }, nodesById);
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs dark:border-emerald-900 dark:bg-emerald-950">
@@ -208,58 +221,18 @@ export default function CreateEdgePanel({
       {fromNodeId && toNodeId && fromNodeId === toNodeId && <p className="text-red-600 dark:text-red-400">자기 자신으로의 분기는 지원하지 않습니다.</p>}
       <button
         type="button"
-        disabled={!canReview}
-        onClick={() => setConfirming(true)}
+        disabled={!canAdd || isSubmitting}
+        onClick={() => void handleAdd()}
         className="self-start rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
       >
-        연결 검토
+        {isSubmitting ? "추가 중..." : "연결 추가"}
       </button>
-      {errorMessage && !confirming && <p className="text-red-600 dark:text-red-400">{errorMessage}</p>}
-
-      <dialog
-        ref={dialogRef}
-        aria-labelledby="create-edge-confirm-title"
-        onCancel={(e) => {
-          e.preventDefault();
-          if (!isSubmitting) setConfirming(false);
-        }}
-        className="w-full max-w-md rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 backdrop:bg-black/40 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
-      >
-        <h2 id="create-edge-confirm-title" className="text-sm font-semibold">
-          새 연결 추가 확인
-        </h2>
-        <div className="mt-3 space-y-1 text-sm">
-          <p>
-            {preview.from.title} → {preview.to.title}
-          </p>
-          <p>
-            <span className="text-zinc-500 dark:text-zinc-400">분기 유형:</span> {procedureBranchTypeLabels[preview.branchType]}
-            {preview.branchLabel ? ` ("${preview.branchLabel}")` : ""}
-          </p>
-          <p className="whitespace-pre-wrap text-xs">
-            <span className="text-zinc-500 dark:text-zinc-400">사유:</span> {reason}
-          </p>
-        </div>
-        {errorMessage && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{errorMessage}</p>}
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => setConfirming(false)}
-            disabled={isSubmitting}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
-          >
-            취소
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleConfirm()}
-            disabled={isSubmitting}
-            className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
-          >
-            {isSubmitting ? "추가 중..." : "추가"}
-          </button>
-        </div>
-      </dialog>
+      {/*
+        🔴 실패를 알리는 **유일한** 자리다 — 확인 창이 있던 시절에는 같은 글을
+        창 안에도 한 벌 더 그렸다. 조용히 아무 일도 안 일어나면 사람은 고장으로
+        읽으므로, 성공 알림은 없애도 이것은 없애면 안 된다.
+      */}
+      {errorMessage && <p className="text-red-600 dark:text-red-400">{errorMessage}</p>}
     </div>
   );
 }

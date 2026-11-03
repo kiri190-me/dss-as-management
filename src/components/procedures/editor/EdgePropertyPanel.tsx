@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
   PROCEDURE_BRANCH_TYPE_CODES,
   procedureBranchTypeLabels,
@@ -15,7 +15,7 @@ import {
   deleteProcedureTemplateEdgeAction,
   insertProcedureTemplateNodeOnEdgeAction,
 } from "@/lib/server/actions/procedure-template-editor";
-import { buildEdgeRetargetPreview, type NodeLookup } from "@/lib/domain/procedure-editor-client-state";
+import type { NodeLookup } from "@/lib/domain/procedure-editor-client-state";
 import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-template-editor";
 import type { RoutePoint } from "@/lib/graph-editor-core/routing";
 import type { ProcedureEdgeFieldDraft } from "@/lib/domain/procedure-editor-save-state";
@@ -31,11 +31,21 @@ import type { ProcedureEdgeFieldDraft } from "@/lib/domain/procedure-editor-save
  * comparison: it has no persisted server-side baseline (write-only, sent
  * only as that save's history `reason`), so it can never be "dirty" or
  * "clean" against a baseline that doesn't exist. Retargeting stays its own
- * separate, IMMEDIATE action — it always shows a current-vs-proposed
- * preview inside a native <dialog> confirmation (same pattern as
- * BindConnectorForm) and always requires a reason (unless isTechnical) — it
- * must never silently replace an edge. 5C-6D-1C explicitly keeps this
- * untouched.
+ * separate, IMMEDIATE action and always requires a reason (unless
+ * isTechnical).
+ *
+ * 🔴 2026-11-03(줄기 B-②) — 재연결의 **확인 창을 없앴다.** 예전에는
+ * [변경 검토] → 현재/변경 후를 나란히 보여 주는 <dialog> → [적용] 이었다.
+ * 없앤 까닭은 사용자가 "추가/수정할 때마다 팝업이 뜬다"고 직접 말했고,
+ * 줄기 B-① 로 재연결도 [이전]으로 되돌릴 수 있게 됐기 때문이다. 미리보기가
+ * 들려주던 "무엇이 무엇으로 바뀌는가"는 이미 화면에 다 있다 — 패널 머리의
+ * `A → B` 가 현재이고, 바로 아래 두 드롭다운이 변경 후다. 그래서 창을 없애며
+ * buildEdgeRetargetPreview 호출도 함께 걷어냈다(그 함수와 제 시험은 그대로
+ * 둔다 — 이 조각의 일이 아니다).
+ *
+ * 🔴 됐다는 증거는 **지도에서 연결선이 옮겨 붙는 것**이고(onSaved →
+ * router.refresh()), 실패는 아래 errorMessage 한 자리가 유일한 통로다.
+ * 🟢 **삭제(분기 삭제)는 건드리지 않았다** — 사용자가 말한 것은 추가/수정이다.
  */
 export default function EdgePropertyPanel({
   edge,
@@ -91,9 +101,7 @@ export default function EdgePropertyPanel({
   const [newFromNodeId, setNewFromNodeId] = useState(edge.fromNodeId);
   const [newToNodeId, setNewToNodeId] = useState(edge.toNodeId);
   const [retargetReason, setRetargetReason] = useState("");
-  const [confirmingRetarget, setConfirmingRetarget] = useState(false);
   const [isRetargeting, setIsRetargeting] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement>(null);
 
   const [deleteReason, setDeleteReason] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
@@ -103,17 +111,18 @@ export default function EdgePropertyPanel({
   const [insertNodeTitle, setInsertNodeTitle] = useState("");
   const [isInsertingNode, setIsInsertingNode] = useState(false);
 
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (confirmingRetarget && !dialog.open) dialog.showModal();
-    else if (!confirmingRetarget && dialog.open) dialog.close();
-  }, [confirmingRetarget]);
-
   const hasRetarget = newFromNodeId !== edge.fromNodeId || newToNodeId !== edge.toNodeId;
   const labelRequired = draft.branchType === "CUSTOM" && draft.branchLabel.trim().length === 0;
 
-  async function handleConfirmRetarget() {
+  /**
+   * [대상 변경] 의 본체 — 확인 창 없이 그 자리에서 서버로 간다.
+   * 🔴 onSaved 는 **실패 검사 뒤**에만 부른다: 이 호출이 화면의
+   * handleStructuralSaved → pushStructuralUndoStep() 으로 이어져 되돌리기 한
+   * 걸음을 쌓으므로, 실패한 호출까지 쌓으면 일어나지도 않은 일을 되돌리려 들어
+   * 바로 아래 있던 멀쩡한 변경이 대신 날아간다(줄기 B-①). 창을 없애면서도 이
+   * 순서는 손대지 않았다.
+   */
+  async function handleRetarget() {
     setIsRetargeting(true);
     setErrorMessage(null);
     const result = await retargetProcedureTemplateEdgeAction({
@@ -128,7 +137,6 @@ export default function EdgePropertyPanel({
       setErrorMessage(result.message);
       return;
     }
-    setConfirmingRetarget(false);
     onSaved(result.updatedAt, result.structuralValidation);
   }
 
@@ -166,10 +174,6 @@ export default function EdgePropertyPanel({
     setInsertNodeTitle("");
     onSaved(result.updatedAt);
   }
-
-  const preview = hasRetarget
-    ? buildEdgeRetargetPreview({ fromNodeId: edge.fromNodeId, toNodeId: edge.toNodeId, branchType: edge.branchType, branchLabel: edge.branchLabel }, { fromNodeId: newFromNodeId, toNodeId: newToNodeId }, nodesById)
-    : null;
 
   return (
     <div className="flex flex-col gap-4 text-xs">
@@ -239,11 +243,11 @@ export default function EdgePropertyPanel({
           />
           <button
             type="button"
-            disabled={!hasRetarget || newFromNodeId === newToNodeId || (!isTechnical && retargetReason.trim().length === 0)}
-            onClick={() => setConfirmingRetarget(true)}
+            disabled={!hasRetarget || newFromNodeId === newToNodeId || (!isTechnical && retargetReason.trim().length === 0) || isRetargeting}
+            onClick={() => void handleRetarget()}
             className="self-start rounded-md border border-blue-400 px-3 py-1.5 text-sm font-medium text-blue-900 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900"
           >
-            변경 검토
+            {isRetargeting ? "변경 중..." : "대상 변경"}
           </button>
           {newFromNodeId === newToNodeId && <p className="text-red-600 dark:text-red-400">자기 자신으로의 분기는 지원하지 않습니다.</p>}
         </div>
@@ -376,59 +380,12 @@ export default function EdgePropertyPanel({
         </div>
       )}
 
+      {/*
+        🔴 재연결·노드 삽입·삭제 셋이 함께 쓰는 **유일한** 실패 통로다. 확인
+        창이 있던 시절에는 재연결 실패를 창 안에도 한 벌 더 그렸는데, 창이
+        없어진 지금은 이 한 자리뿐이다 — 지우면 실패가 조용해진다.
+      */}
       {errorMessage && <p className="text-red-600 dark:text-red-400">{errorMessage}</p>}
-
-      <dialog
-        ref={dialogRef}
-        aria-labelledby="retarget-confirm-title"
-        onCancel={(e) => {
-          e.preventDefault();
-          if (!isRetargeting) setConfirmingRetarget(false);
-        }}
-        className="w-full max-w-md rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 backdrop:bg-black/40 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
-      >
-        <h2 id="retarget-confirm-title" className="text-sm font-semibold">
-          분기 대상 변경 확인
-        </h2>
-        {preview && (
-          <div className="mt-3 space-y-2 text-sm">
-            <div>
-              <p className="text-zinc-500 dark:text-zinc-400">현재</p>
-              <p>
-                {preview.current.from.title} → {preview.current.to.title} ({procedureBranchTypeLabels[preview.current.branchType]})
-              </p>
-            </div>
-            <div>
-              <p className="text-zinc-500 dark:text-zinc-400">변경 후</p>
-              <p className="font-medium">
-                {preview.proposed.from.title} → {preview.proposed.to.title} ({procedureBranchTypeLabels[preview.proposed.branchType]})
-              </p>
-            </div>
-            <p className="whitespace-pre-wrap text-xs">
-              <span className="text-zinc-500 dark:text-zinc-400">사유:</span> {retargetReason}
-            </p>
-          </div>
-        )}
-        {errorMessage && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{errorMessage}</p>}
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => setConfirmingRetarget(false)}
-            disabled={isRetargeting}
-            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
-          >
-            취소
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleConfirmRetarget()}
-            disabled={isRetargeting}
-            className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
-          >
-            {isRetargeting ? "적용 중..." : "적용"}
-          </button>
-        </div>
-      </dialog>
     </div>
   );
 }

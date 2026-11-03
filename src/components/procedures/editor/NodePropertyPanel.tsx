@@ -38,17 +38,30 @@ const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;
  *
  * Node type is displayed as a normal `<select>` in the primary block (same
  * visual position/appearance as every other primary field), but it is NOT
- * part of `draft` — selecting a different type never mutates immediately
- * and never becomes a pending/deferred field. It still triggers the exact
- * same IMMEDIATE, individually-reasoned, re-validated changeProcedureTemplateNodeTypeAction
+ * part of `draft` — it never becomes a pending/deferred field. It triggers
+ * the exact same IMMEDIATE, re-validated changeProcedureTemplateNodeTypeAction
  * call this panel has always used (CHANGE_NODE_TYPE history action, not
- * UPDATE_NODE) — only now behind a compact confirm dialog (same pattern as
- * EdgePropertyPanel's retarget dialog) instead of a large permanent amber
- * box. `newNodeType` resyncs to `node.nodeType` via adjust-state-during-
- * render whenever the selected node itself changes (this panel is not
+ * UPDATE_NODE). `newNodeType` resyncs to `node.nodeType` via adjust-state-
+ * during-render whenever the selected node itself changes (this panel is not
  * remounted on selection change — see CreateEdgePanel's own doc comment for
  * the same convention) so the select never shows a stale type left over
  * from a previously-selected node.
+ *
+ * 🔴 2026-11-03(줄기 B-②) — 노드 유형 변경의 확인 창을 **TECHNICAL_TASK 에서만**
+ * 없앴다. 사용자가 "추가/수정할 때마다 팝업이 뜬다"고 한 그것이고, 줄기 B-① 로
+ * 유형 변경도 [이전]으로 되돌릴 수 있게 됐다 — 기술 작업 절차에서는 드롭다운을
+ * 고르는 순간 바로 적용되고, 됐다는 증거는 **지도에서 노드 모양이 바뀌는 것**이다.
+ *
+ * 🔴 그런데 FULL_SERVICE/REFERENCE 는 창을 **남겼다.** 그 둘은 서버가 사유를
+ * 필수로 요구하고(changeProcedureTemplateNodeType 의
+ * `template.category !== "TECHNICAL_TASK" && isBlank(reason)` → INVALID_INPUT),
+ * 사유를 받을 칸이 이 창 안에만 있기 때문이다. 창만 걷어내면 유형 변경이
+ * "눌러도 빨간 글씨만 뜨는" 죽은 기능이 된다. 즉 남긴 기준은 "삭제라서"가
+ * 아니라 **"그 창이 확인이 아니라 입력을 받고 있어서"**다. (연결 추가·재연결의
+ * 사유 칸은 원래부터 패널에 있어서 창을 통째로 없앨 수 있었다.)
+ *
+ * 🔴 바로 적용하는 갈래는 **실패하면 드롭다운을 되돌린다**(handleChangeType).
+ * 창이 없으니, 적용되지 않은 유형이 골라진 채로 남으면 화면이 거짓말을 한다.
  */
 export default function NodePropertyPanel({
   node,
@@ -143,11 +156,30 @@ export default function NodePropertyPanel({
     if (pickedReferenceNode.nodeId !== node.id) setReferenceNodeId(pickedReferenceNode.nodeId);
   }
 
-  /** Selecting a different type never mutates by itself — it only opens the confirm dialog. Re-selecting the current type again (or the dialog's own cancel) never calls the mutation. */
+  /**
+   * 드롭다운에서 유형을 고른 순간.
+   *
+   * 🔴 기술 작업 절차(TECHNICAL_TASK)는 **확인 창 없이 바로** 적용한다 —
+   * 줄기 B-② 가 없앤 그 팝업이다. 그 밖의 분류는 서버가 사유를 필수로 요구해
+   * 창을 열어 사유를 받는다(이 파일 머리말 참고).
+   *
+   * 어느 쪽이든 **같은 유형을 다시 고르면 아무 일도 일어나지 않는다** — 서버
+   * 호출도, 이력 한 줄도, 되돌리기 한 걸음도 생기지 않는다.
+   *
+   * 🔵 고른 값을 handleChangeType 에 **인자로** 넘긴다. setNewNodeType 은 다음
+   * 렌더에야 반영되므로, 같은 이벤트 안에서 state 를 읽으면 직전 유형을 보내게
+   * 된다(확인 창이 있던 시절에는 창을 띄우는 사이에 렌더가 한 번 돌아 이 문제가
+   * 드러나지 않았다).
+   */
   function handleSelectNodeType(value: ProcedureNodeType) {
     setNewNodeType(value);
     setErrorMessage(null);
-    if (value !== node.nodeType) setConfirmingTypeChange(true);
+    if (value === node.nodeType) return;
+    if (isTechnical) {
+      void handleChangeType(value);
+      return;
+    }
+    setConfirmingTypeChange(true);
   }
 
   function handleCancelTypeChange() {
@@ -159,18 +191,30 @@ export default function NodePropertyPanel({
 
   const canConfirmTypeChange = newNodeType !== node.nodeType && (isTechnical || typeChangeReason.trim().length > 0) && !isChangingType;
 
-  async function handleChangeType() {
+  /**
+   * 유형 변경의 본체. 들어오는 길이 둘이다 — 드롭다운에서 바로(TECHNICAL_TASK)와
+   * 확인 창의 [적용](그 밖의 분류). 어느 쪽이든 같은 함수를 지난다.
+   *
+   * 🔴 onSaved 는 **실패 검사 뒤**에만 부른다: 이 호출이 화면의
+   * handleStructuralSaved → pushStructuralUndoStep() 으로 이어져 되돌리기 한
+   * 걸음을 쌓으므로, 실패한 호출까지 쌓으면 일어나지도 않은 일을 되돌리려 들어
+   * 바로 아래 있던 멀쩡한 변경이 대신 날아간다(줄기 B-①).
+   */
+  async function handleChangeType(targetNodeType: ProcedureNodeType) {
     setIsChangingType(true);
     setErrorMessage(null);
     const result = await changeProcedureTemplateNodeTypeAction({
       nodeId: node.id,
-      newNodeType,
+      newNodeType: targetNodeType,
       reason: typeChangeReason,
       expectedTemplateUpdatedAt,
     });
     setIsChangingType(false);
     if (!result.ok) {
       setErrorMessage(result.message);
+      // 🔴 확인 창이 없는 갈래에서는 드롭다운이 유일한 표시다 — 적용되지 않은
+      // 유형이 골라진 채로 남으면 사람은 바뀐 줄 안다. 원래 유형으로 되돌린다.
+      setNewNodeType(node.nodeType);
       return;
     }
     setTypeChangeResult(result.structuralValidation);
@@ -293,11 +337,16 @@ export default function NodePropertyPanel({
         <textarea rows={3} value={draft.instructions} onChange={(e) => onDraftChange({ instructions: e.target.value })} disabled={!canEdit} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900" />
       </label>
       <label className="flex flex-col gap-1">
-        노드 유형
+        노드 유형{isChangingType ? " (변경 중...)" : ""}
+        {/*
+          🔴 변경이 도는 동안 잠근다. 확인 창이 있던 시절에는 창의 [적용]
+          단추가 그 일을 했다 — 창을 없앤 지금 잠그는 자리가 여기뿐이고,
+          잠그지 않으면 한 번 더 고르는 것으로 두 번째 호출이 나간다.
+        */}
         <select
           value={newNodeType}
           onChange={(e) => handleSelectNodeType(e.target.value as ProcedureNodeType)}
-          disabled={!canEdit}
+          disabled={!canEdit || isChangingType}
           className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900"
         >
           {PROCEDURE_NODE_TYPE_CODES.map((t) => (
@@ -412,6 +461,11 @@ export default function NodePropertyPanel({
 
       {errorMessage && <p className="text-red-600 dark:text-red-400">{errorMessage}</p>}
 
+      {/*
+        🟢 남긴 확인 창 — 사유가 **필수**인 분류(FULL_SERVICE/REFERENCE)에서만
+        열린다. 확인을 받으려고가 아니라 사유를 받으려고 남았다(파일 머리말).
+        TECHNICAL_TASK 에서는 handleSelectNodeType 이 여기를 열지 않는다.
+      */}
       <dialog
         ref={typeDialogRef}
         aria-labelledby="node-type-confirm-title"
@@ -450,7 +504,7 @@ export default function NodePropertyPanel({
           </button>
           <button
             type="button"
-            onClick={() => void handleChangeType()}
+            onClick={() => void handleChangeType(newNodeType)}
             disabled={!canConfirmTypeChange}
             className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
           >
