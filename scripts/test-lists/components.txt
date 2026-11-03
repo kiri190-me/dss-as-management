@@ -903,3 +903,26 @@ src/components/procedures/execution/execution-memo-field.test.tsx
 # 인가 · 안 넘겼을 때 칸에 draggable:false 를 안 박는가(편집기가 아무것도 못 끌게 된다) ·
 # 경로점 편집 관문(editable)이 그대로인가 · 끌기를 여는 화면이 **이 창 하나**인가.
 src/components/procedures/execution/execution-task-editor-panel.test.tsx
+
+# 🔴 **「기술 작업 절차」 편집기의 [이전]/[앞으로] 글루**(2026-11-03, 줄기 B-①).
+# 사용자가 스크린샷과 함께 두 번 신고한 것 — 노드·연결선 **삭제가 되돌려지지
+# 않았다.** 까닭은 되돌리기가 두 벌(저장 전 스냅샷 · 서버 이력)인데 화면이
+# 「스택에 뭐가 있으면 그것만 되돌리고 끝」으로 갈라 놓은 것이었다. 🔴 그 버그가
+# 살던 파일을 겨냥한 시험이 **0개**였다 — 그래서 아무도 못 잡았다.
+# 🔴 이웃들(execution-current-task.test.ts)과 같이 **원본 글자로** 본다:
+# ProcedureTemplateEditorScreen 은 @xyflow/react 의 .css 와 서버 액션을 물고 있어
+# 어느 목록에서도 import 가 바로 던진다.
+# 재는 것: 판정을 lib/domain 에서 가져다 쓰는가(옛 두 갈래 코드가 안 남았는가) ·
+# 🔴 되돌리기 조건에서 hasAnyPendingChanges 가 빠졌는가(그것이 삭제를 막던
+# 가드다) · 🔵 그러면서도 그 변수를 **지우지는 않았는가**([저장]·[취소]·나가기
+# 확인이 계속 쓴다) · 🔴 단추를 켜는 조건과 눌렀을 때 도는 코드가 **같은 계획
+# 하나**를 보는가(전에는 서로 다른 변수를 봐서 「문구는 떴는데 단추는 눌리는」
+# 화면이 코드상 가능했다) · 🔴 안내 문구가 사라졌는가(주석을 걷어낸 글자로
+# 센다 — 없앤 까닭을 그 자리 주석에 적어 두었다) · 🔴 서버 호출 **앞에** 빗장을
+# 거는가(state 는 다음 렌더에야 단추에 닿아 두 번 누르면 두 걸음이 날아간다) ·
+# 🔴 실패하면 스택을 안 건드리는가 · 🔴 구조 조작 여덟 자리가 전부 한 통로를
+# 지나는가 · 🔴 handleSaved **자신**은 아무것도 안 쌓는가(되돌리기도 그 통로를
+# 지나 영영 안 끝나게 된다) · 🔴 알리는 자리가 전부 성공 갈래 **안**인가 ·
+# 🔴 옆의 「진단 Flowchart 편집기」와 공용 단추를 안 깨뜨렸는가 · 상한 50 그대로인가.
+# 고르는 규칙 자체는 unit 목록의 lib/domain/procedure-editor-undo-plan.test.ts.
+src/components/procedures/procedure-template-editor-undo.test.ts

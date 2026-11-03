@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>진행현황 — 기술 작업 절차</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --line:#e3e6ea; --fg:#1d2126; --dim:#6b7280;
+    --b1:#b42318; --b2:#b54708; --b3:#175cd3; --b4:#5925dc; --b5:#475467; --b6:#0e7490;
+    --ask:#b42318; --ok:#067647;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 20px 64px;background:var(--bg);color:var(--fg);
+       font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;line-height:1.65;}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:25px;margin:0 0 6px}
+  .sub{color:var(--dim);font-size:14px;margin:0 0 22px}
+  h2{font-size:18px;margin:38px 0 10px;padding-bottom:8px;border-bottom:3px solid var(--line)}
+  h3{font-size:15.5px;margin:22px 0 8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+  .t{font-weight:700;font-size:15px}
+  .note{font-size:13px;color:var(--dim);margin-top:6px}
+  .red{color:var(--ask);font-weight:700}
+  .blue{color:var(--b3);font-weight:700}
+  .grn{color:var(--ok);font-weight:700}
+  .pur{color:var(--b4);font-weight:700}
+  .pill{display:inline-block;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 10px;color:#fff}
+  .p1{background:var(--b1)} .p2{background:var(--b2)} .p3{background:var(--b3)}
+  .p4{background:var(--b4)} .p5{background:var(--b5)} .p6{background:var(--b6)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f0f2f5;font-weight:700}
+  .st{font-size:12px;font-weight:700;border-radius:5px;padding:2px 8px;display:inline-block;background:#eef1f5;color:#475467}
+  .st.doing{background:#fffaeb;color:#93370d;border:1px solid #fedf89}
+  .st.done{background:#ecfdf3;color:#067647;border:1px solid #abefc6}
+  .st.wait{background:#f2f4f7;color:#475467;border:1px solid #d0d5dd}
+  .st.ask{background:#fef3f2;color:#b42318;border:1px solid #fecdca}
+  .st.later{background:#f8f9fb;color:#667085;border:1px dashed #d0d5dd}
+  .ask{background:#fef3f2;border:1px solid #fecdca;border-radius:9px;padding:14px 16px;margin:12px 0}
+  .tip{background:#eff8ff;border:1px solid #b2ddff;border-radius:9px;padding:14px 16px;margin:12px 0}
+  .ok{background:#ecfdf3;border:1px solid #abefc6;border-radius:9px;padding:14px 16px;margin:12px 0}
+  .vis{background:#f5f3ff;border:1px solid #ddd6fe;border-radius:9px;padding:14px 16px;margin:12px 0}
+  .warn{background:#fffaeb;border:1px solid #fedf89;border-radius:9px;padding:14px 16px;margin:12px 0}
+  ul{margin:6px 0 0;padding-left:20px} li{margin:4px 0}
+  ol{margin:6px 0 0;padding-left:22px} ol li{margin:6px 0}
+  code{background:#eef1f5;border-radius:4px;padding:1px 6px;font-size:12.5px}
+  pre{background:#1d2126;color:#e8eaed;border-radius:9px;padding:14px 16px;overflow-x:auto;
+      font-family:"D2Coding","Consolas","Courier New",monospace;font-size:12.5px;line-height:1.6;margin:10px 0}
+  .qh{font-weight:800;font-size:15.5px;margin-bottom:6px}
+  .big{font-size:27px;font-weight:800;line-height:1.25}
+  .stream{border:2px solid var(--line);border-radius:12px;padding:4px 18px 18px;margin:18px 0 30px}
+  .stream.a{border-color:#abefc6;background:#fbfffc}
+  .stream.b{border-color:#fedf89;background:#fffdf7}
+  .sh{display:inline-block;font-size:12px;font-weight:800;color:#fff;border-radius:0 0 8px 8px;
+      padding:3px 12px;margin-left:-6px}
+  .sh.a{background:#067647} .sh.b{background:#b54708}
+  .num{font-size:30px;font-weight:800;line-height:1.1}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;margin:10px 0}
+  .stat{flex:1 1 150px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .stat .l{font-size:12px;color:var(--dim)}
+  .path{font-size:13.5px;line-height:2.1;background:#fff;border:1px solid var(--line);
+        border-radius:10px;padding:14px 16px;margin:10px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>진행현황 — 기술 작업 절차</h1>
+<p class="sub">마지막 갱신 <b>2026-11-03</b>
+&nbsp;·&nbsp; ✅ <b>줄기 A 끝 — 조각 14 · 커밋 14 · 전부 올림</b>
+&nbsp;·&nbsp; ✅ <b>줄기 B ① 되돌리기 끝</b>
+&nbsp;·&nbsp; 🟢 마이그레이션 <b>2건 적용 완료</b></p>
+
+<div class="stats">
+  <div class="stat"><div class="l">커밋</div><div class="num grn">14 + 1</div><div class="l">줄기 A 는 전부 push</div></div>
+  <div class="stat"><div class="l">시험 (단위)</div><div class="num">8,045</div><div class="l">7,598 → <b>+447</b></div></div>
+  <div class="stat"><div class="l">시험 (화면 · DB)</div><div class="num">3,565 · 2,031</div><div class="l">절차 실행 DB <b>106</b></div></div>
+  <div class="stat"><div class="l">실패</div><div class="num grn">0</div><div class="l">tsc 0 · build 성공</div></div>
+</div>
+
+<div class="ok">
+<b class="grn">🟢 줄기 A 가 끝났습니다 — 「기능은 있는데 쓸 수가 없다」를 뚫었습니다</b>
+<p>시작은 <b>「기술 절차 불러오기 기능은 있는데 실제로 사용하려고 하면 직관적으로
+어떻게 진행될 것인지 파악하기가 어렵다」</b>였습니다. 크롬으로 직접 돌려 보니
+<b>기능이 모자란 게 아니라 화면이 「절차」가 아니라 「할 일 목록 22개」로 보여 주고</b> 있었습니다.</p>
+<p class="note">🔵 숫자 하나가 그것을 설명합니다 — <b>게시된 절차의 노드 중 판단(갈림길)이 76~82%</b>입니다.
+길이 갈리는 것이 본질인데 <b>길이 없는 평평한 목록</b>으로 그리고 있었습니다.</p>
+<div class="path">
+차례 세우기 → 「지금 할 일」 하나 크게 → 흐름 띠 → 접기 → 막힌 길 넷 → 배지<br>
+→ 검색·중간시작 → 상자 정리 → 재개 → 팝업·뛰어넘기 → <b>최단 경로 진행률</b><br>
+→ 이력 시간순 → 추가 작업 등록 → 자리 고르기·끌기
+</div>
+</div>
+
+<!-- ─────────────── 줄기 A ─────────────── -->
+<div class="stream a">
+<span class="sh a">줄기 A — 수리하는 사람이 보는 화면 &nbsp;·&nbsp; ✅ 열넷 전부 끝</span>
+
+<h2 style="margin-top:20px">✅ 끝난 조각 열넷</h2>
+
+<table>
+<tr><th style="width:42px"></th><th style="width:210px">조각</th><th>무엇이 달라졌나</th><th style="width:78px">커밋</th></tr>
+
+<tr><td><b>1</b></td><td><b>차례와 번호</b></td>
+<td>🔴 노드를 뽑는 쿼리에 <b>정렬이 한 줄도 없었습니다</b> — 「몇 번째」라는 말 자체가 성립하지 않았습니다.
+절차가 정한 차례로 줄을 세우고 번호와 <b>「N번째 / 전체 22」</b>를 붙였습니다
+<div class="note">🔵 덤으로 <b>판단 갈래 단추가 새로고침마다 자리를 바꾸던 것</b>도 고정됐습니다</div></td>
+<td><code>c0be4df</code></td></tr>
+
+<tr><td><b>2</b></td><td><b>「지금 할 일」 + 자동 전진</b></td>
+<td>카드 하나를 크게 세우고 <b>지시문을 펼쳐</b> 보입니다. 판단이면 <b>갈래 단추가 처음부터</b>.
+🔴 <b>완료하면 다음이 저절로 섭니다</b> — 전에는 갈래를 골라도 아무 일이 없었습니다
+<div class="note">🔴 「추천」은 근거로 안 씁니다 — 게시된 절차 하나가 간선 8개뿐이라 <b>거의 전부가 추천</b>이 됩니다</div></td>
+<td><code>37967e6</code></td></tr>
+
+<tr><td><b>3</b></td><td><b>흐름 띠</b></td>
+<td>요약 아래에 <b>지난 2걸음 · 지금 · 다음 3걸음</b>을 그립니다. 「만들 때는 그림, 쓸 때는 목록」이 사라졌습니다
+<div class="note">🔴 편집기 그림을 안 가져왔습니다 — 드래그가 딸려 오고 폰에서 못 씁니다</div></td>
+<td><code>3bada86</code></td></tr>
+
+<tr><td><b>4</b></td><td><b>접는 묶음</b></td>
+<td>카드 22장을 접었습니다. <b>자바스크립트 없이</b>(<code>details</code>) 접혀 서버 컴포넌트가 그대로 남습니다
+<div class="note">🔴 <b>담을 카드가 없는 묶음은 아예 안 그립니다</b> — 처음 판은 다 끝난 실행에서 빈 쪽이 펼쳐지고 내용이 든 쪽이 접혔습니다</div></td>
+<td><code>7258ad8</code></td></tr>
+
+<tr><td><b>5</b></td><td><b>막힌 길 넷</b></td>
+<td><b>그만두기</b>(사유와 함께) · <b>끝내기</b> · <b>작업 기록 기본값</b> · <b>참고 문서 건너뛰기</b>.
+전에는 <b>그만둘 길도 끝낼 길도 없어</b> 잘못 불러오면 바꿀 수가 없었습니다
+<div class="note">🔴 고리는 걸음 수가 아니라 <b>「지나온 집합이 자란다」</b>로 막습니다 — 깨뜨려 보니 시험이 끝나지 않았습니다</div></td>
+<td><code>83114fb</code></td></tr>
+
+<tr><td><b>6</b></td><td><b>지나간 절차 배지</b></td>
+<td>이 건에서 돌린 절차를 <b>배지 넷</b>으로 — ✅ 완주 · 🔵 중단 마침 · ⚪ 그만둠 · 🟣 진행 중
+<div class="note">🔵 「중단 마침」에 빨강을 안 씁니다 — <b>사람이 판단해서 끊은 것이지 잘못이 아닙니다</b></div></td>
+<td><code>a7993e0</code></td></tr>
+
+<tr><td><b>7</b></td><td><b>노드 검색 + 중간부터 시작</b></td>
+<td>불러오기 창을 <b>넓은 팝업</b>으로 — 드롭다운(기본 「모든 절차」) · <b>노드 이름 검색</b> · 플로우차트.
+검색하면 <b>맞는 노드만 환하게</b>. 🔴 <b>고른 노드부터 시작</b>할 수 있습니다
+<div class="note">🔵 앞의 것을 <b>건너뜀으로 만들지 않습니다</b> — 안 한 것을 했다고 기록하면 안 됩니다</div></td>
+<td><code>a0c776f</code></td></tr>
+
+<tr><td><b>8</b></td><td><b>상자를 하나로</b></td>
+<td>진행바 상자 안에 <b>「마쳤습니다」와 단추 둘</b>을 합쳤습니다. 마친 절차는 <b>「이 건의 다른 절차」로 내려가고</b>,
+접혀 있을 때 <b>완주 몇 · 중단 마침 몇 · 그만둠 몇</b>을 제목에 적습니다
+<div class="note">🔴 제 지시서가 <b>스스로 모순</b>이었습니다 — 「마쳤습니다를 상자 안에」와 「마치면 상자가 내려간다」를
+둘 다 지키면 <b>그 글자에 영영 안 닿습니다</b>. 그래서 <b>누른 직후의 저장 팝업</b>이 그 말을 하는 유일한 자리가 됐습니다</div>
+<div class="note">🔵 [실행 그만두기]는 <b>줄마다</b> 붙습니다 — 하나만 두니 「어느 건을 그만두는지」를 알 수 없었습니다(「진행중」·「중단 마침」에만)</div></td>
+<td><code>ce46b35</code></td></tr>
+
+<tr><td><b>9</b></td><td><b>마친 절차 재개</b></td>
+<td>다 진행하지 않고 마친 절차를 <b>그 자리부터 다시</b> 잇습니다
+<div class="note">🟢 <code>completed_at</code> 을 비우면 노드 상태가 그대로라 <b>「지금 할 일」이 저절로 그 노드</b>가 됩니다 — 마이그레이션 없음</div>
+<div class="note">🔴 조사 중에 <b>「차단됨」 구역이 [재개(되돌림)]의 유일한 집</b>이었던 것이 드러났습니다 — 없애려다 멈췄습니다</div></td>
+<td><code>150023f</code></td></tr>
+
+<tr><td><b>10</b></td><td><b>팝업과 뛰어넘기</b></td>
+<td>「전체 단계 보기」가 <b>플로우차트 팝업</b>이 되고, 거기서 노드를 고르면 <b>「지금 할 일」이 그리로 옮겨갑니다</b>.
+🔴 <b>앞 노드로 돌아가면 그 뒤의 노드들이 다시 「대기」</b>가 됩니다
+<div class="note">🔵 <b>완료한 노드도 고를 수 있습니다</b>(건너뜀·차단됨은 막습니다 — 사람이 사유를 적어 정한 것입니다)</div>
+<div class="note">🔴 감사 이력에 <b>새 enum 을 안 만들었습니다</b> — 기존 값에 <code>jumpedTo</code>·<code>clearedOnJump</code> 같은 표시를 붙여 가릅니다</div></td>
+<td><code>928e85c</code></td></tr>
+
+<tr><td><b>11</b></td><td><b>최단 경로 진행률</b></td>
+<td>시작점에서 지금 노드를 거쳐 끝점까지 <b>가장 짧은 길</b>을 찾고(너비 우선), 진행률을 <b>그 길 위의 자리</b>로 셉니다
+<div class="note">🟢 완료 수가 아니라 <b>경로상 위치</b>로 세니, 앞으로 옮기면 퍼센트가 저절로 줄어듭니다. 실측:
+<code>2번째/14단계 = 14%</code> 인데 다른 길로 가면 <code>2번째/7단계 = 29%</code></div></td>
+<td><code>f4aaef6</code></td></tr>
+
+<tr><td><b>12</b></td><td><b>이력을 시간순 누적으로</b></td>
+<td>노드 번호가 아니라 <b>일어난 차례</b>로 쌓습니다 — 같은 작업에 다시 돌아오면 <b>여러 줄로</b> 남습니다.
+메모는 [수정]을 눌러야 고쳐지고, 「시각 기록」은 이 목록이 품었습니다
+<div class="note">🔴 <b>메모 칸이 안 비워지던 까닭</b>을 찾았습니다 — 「지금 할 일」이 바뀌어도 React 가 같은 자리의 같은 부품이라
+인스턴스를 재사용해서, <b>앞 노드에 적던 글자가 다음 칸에 남는데 저장 단추도 안 떴습니다.</b> 오류가 안 나는 종류입니다</div></td>
+<td><code>0720ce9</code></td></tr>
+
+<tr><td><b>13</b></td><td><b>추가 작업 등록</b><br>
+<span class="note" style="margin:0">🔴 마이그레이션 0121</span></td>
+<td>편집기와 <b>같은 모양</b>으로 작업과 연결을 더하고 지웁니다. <b>원본 절차는 한 글자도 안 바뀝니다</b> —
+현장에서 더한 것은 이 건에만 삽니다
+<div class="note">🔵 이어 붙인 작업이 <b>맨 뒤가 아니라 앞 작업 바로 뒤</b>에 섭니다. 그래서 앞 조각 다섯이 코드를 거의 안 고치고 따라왔습니다</div>
+<div class="note">🔴 소프트 삭제 네 칸이 필요했습니다 — <b>감사 이력 FK 가 노드 삭제를 DB 에서 막고 있었습니다</b></div></td>
+<td><code>94dd0a6</code></td></tr>
+
+<tr><td><b>14</b></td><td><b>자리 고르기와 끌기</b><br>
+<span class="note" style="margin:0">🔴 마이그레이션 0122</span></td>
+<td>작업을 만들 때 <b>상·하·좌·우</b>를 고르고(기본 오른쪽), <b>끌어서</b> 옮깁니다. 연결 대상도 <b>지도에서 눌러</b> 고릅니다
+<div class="note">🔵 겹치면 <b>같은 방향으로 한 칸 더</b> 갑니다 — 옆으로 안 비킵니다. 사람이 고른 것이 방향이기 때문입니다</div>
+<div class="note">🔴 자리를 옮길 때 <b>version 을 안 올립니다.</b> 올리면 옆 사람이 열어 둔 화면의 [완료]가 막힙니다</div></td>
+<td><code>8a36a3a</code></td></tr>
+</table>
+
+<div class="ok">
+<b class="grn">🟢 마이그레이션 둘 다 적용됐고, 기존 자료가 안 다쳤습니다</b>
+<table>
+<tr><th style="width:150px">판</th><th>무엇</th><th style="width:230px">적용 뒤 실측</th></tr>
+<tr><td><code>0121</code> 조각 13</td><td>실행 전용 간선 표 + 노드 칸 다섯(갈래 · 소프트 삭제 넷)</td>
+<td class="grn">지우는 문장 <b>0</b> · 바인딩 자리 <b>0</b> · <code>SET NOT NULL</code> <b>0</b></td></tr>
+<tr><td><code>0122</code> 조각 14</td><td>노드에 <code>user_position_x</code> · <code>user_position_y</code></td>
+<td class="grn">작업 <b>252</b> · 실행 <b>10</b> · <b>자리 정해진 것 0</b><br>
+<span class="note" style="margin:0">= 전부 전처럼 자동 계산으로 흐릅니다</span></td></tr>
+</table>
+</div>
+
+</div>
+
+<!-- ─────────────── 줄기 B ─────────────── -->
+<div class="stream b">
+<span class="sh b">줄기 B — 절차를 만드는 사람이 보는 화면 &nbsp;·&nbsp; 🔄 지금 여기</span>
+
+<h2 style="margin-top:20px">수정 여덟 — ①번부터 시작했습니다</h2>
+
+<table>
+<tr><th style="width:46px">접수</th><th style="width:206px">요구</th><th>🔴 조사로 드러난 진짜 원인</th><th style="width:86px">상태</th></tr>
+
+<tr><td><b>①</b></td><td><b>[이전] 으로 되돌리기</b><br>
+<span class="note" style="margin:0">20번까지</span></td>
+<td class="red">되돌리기가 <b>두 벌</b>이었습니다 — 클라이언트 스냅샷(드래그·속성)과 서버 이력(<b>삭제</b>·생성·재연결)이
+<b>시간순으로 안 섞였습니다.</b> [이전]이 클라이언트 쪽을 무조건 먼저 비우느라 <b>서버 되돌리기에 도달을 못 했습니다</b>
+<div class="note">🟢 이제 <b>한 줄 스택</b>입니다 — 항목마다 종류(PENDING·STRUCTURAL)를 달고, 맨 위가 무엇인지 보고 갈라 부릅니다.
+서버 엔진은 <b>원래 멀쩡했습니다</b>(시험 21개가 「같은 id 로 되살아나는 것」까지 물고 있었습니다)</div>
+<div class="note">🔴 이 화면을 겨냥한 시험이 <b>0개</b>였습니다 — 버그가 사는 바로 그 코드가 무방비였고 그래서 못 잡혔습니다. <b>43개</b>를 세웠습니다</div>
+<div class="note">🔵 노란 경고 줄은 <b>없앴습니다.</b> 잠기는 상태 자체가 사라졌습니다</div></td>
+<td><span class="st done">✅ 끝</span></td></tr>
+
+<tr><td><b>②</b></td><td><b>팝업 없애기</b></td>
+<td class="red">🔴 <b>성공 알림이 아니라 「취소 / 추가」 확인창</b>입니다. 없애면 확인 단계가 사라집니다 —
+🔵 ①이 받쳐 주면 없애도 안전합니다
+<div class="note">🟢 <b>①이 끝났으니 이제 안전합니다</b> — 잘못 눌러도 [이전]로 돌아옵니다</div></td>
+<td><span class="st wait">다음 차례</span></td></tr>
+
+<tr><td><b>③</b></td><td><b>[검증] 오류를 누르면 짚어 주기</b></td>
+<td class="blue">🔵 <b>가장 쉽습니다.</b> 오류마다 <b>노드·연결선 번호가 이미 실려 있는데</b> 화면이 안 씁니다</td>
+<td><span class="st wait">대기</span></td></tr>
+
+<tr><td><b>④</b></td><td><b>다른 절차로 넘어가는 노드</b></td>
+<td>🔵 <b>모양 자리가 이미 예약돼 있습니다</b>. 🔴 다만 「어느 절차로 가는가」를 담을 칸이 없어 마이그레이션이 필요합니다</td>
+<td><span class="st later">마이그레이션</span></td></tr>
+
+<tr><td><b>⑤</b></td><td><b>배치는 「사용자 배치」만</b></td>
+<td>🔴 <b>새 DRAFT 를 만들 때마다 드래그해 둔 배치가 통째로 사라집니다</b> — 주석도 시험도 0인 자리입니다
+<div class="note">🔴 <b>①에서 떼어 냈습니다.</b> 「배치」 드롭다운이 편집기 전용이 아니라 <b>네 화면이 함께 쓰는 코드</b>라
+(편집기 · 절차 상세 · 실행 시작 고르기 · 「전체 단계 보기」 팝업) 옵션을 빼면 나머지 셋에 조용히 번집니다.
+그리고 <b>새 DRAFT 배치 복제 버그를 먼저 고쳐야</b> 합니다 — 안 고치고 「사용자 배치」만 남기면
+새 DRAFT 직후 <b>볼 수 있는 배치가 하나도 없는</b> 화면이 됩니다</div></td>
+<td><span class="st later">버그 선행</span></td></tr>
+
+<tr><td><b>⑥</b></td><td><b>버전 관리를 제대로</b></td>
+<td>[새 DRAFT] 가 <b>누르는 순간 행을 만들고</b>, 막을 때 <b>기존 초안으로 갈 길을 안 줍니다</b></td>
+<td><span class="st wait">대기</span></td></tr>
+
+<tr><td><b>⑦</b></td><td><b>DRAFT 게시 버튼</b></td>
+<td>🔵 게시하는 길은 있으나 <b>편집기 안이 아니라 상세 화면</b>에 있습니다</td>
+<td><span class="st wait">대기</span></td></tr>
+
+<tr><td><b class="pur">⑧</b></td><td><b class="pur">현장 단계를 희미하게 + 적용 묻기</b><br>
+<span class="note" style="margin:0">= 조각 15</span></td>
+<td class="pur">조각 13 이 만든 자료를 읽어, 새 DRAFT 를 만들 때
+<b>현장에서 더한 단계를 희미하게 보이고 「절차에 넣을까요?」를 묻습니다</b>
+<div class="note">🟢 <b>자료는 이미 쌓이고 있습니다</b> — 조각 13·14 가 끝나 읽을 것이 생겼습니다</div></td>
+<td><span class="st wait">13·14 끝남</span></td></tr>
+</table>
+
+<p class="note">🔴 <b>①(되돌리기)이 안 되는 건 그 사이에도 계속 아픕니다.</b>
+다른 편집 작업을 할 때마다 같은 자리에서 걸리므로 먼저 뚫습니다.</p>
+</div>
+
+<!-- ─────────────── 공통 ─────────────── -->
+
+<h2>결정된 것</h2>
+
+<table>
+<tr><th style="width:230px">무엇</th><th>결정</th></tr>
+<tr><td><b>실행 화면 모양</b></td><td><b class="blue">「지금 할 일」 하나만 크게</b> — 22개 나열을 걷고 흐름 그림과 갈래 단추</td></tr>
+<tr><td><b>어느 줄기 먼저</b></td><td><b class="blue">줄기 A(실행 화면) 먼저</b> — 모든 사람이 쓰는 쪽이 아프다. ✅ 끝남</td></tr>
+<tr><td><b>중간부터 시작</b></td><td>고른 노드만 진행 중, <b class="red">앞의 것을 건너뜀으로 만들지 않는다</b></td></tr>
+<tr><td><b>「전체 단계 보기」</b></td><td>조각 10 에서 <b class="blue">팝업</b>이 됐고, <b>완료한 노드도 고를 수 있다</b></td></tr>
+<tr><td><b>단추 뜻</b></td><td><b class="blue">올려 두면 뜨는 글자</b>로. 🔵 폰에는 「올려 두기」가 없어 <b>확인 창의 설명은 남긴다</b></td></tr>
+<tr><td><b>추가 작업을 담는 곳</b></td><td><b class="blue">이 수리 건에만</b> — 원본 절차는 안 바꾼다.
+<b>단, 편집할 때 희미하게 보이고 적용을 묻는다</b>(⑧)</td></tr>
+<tr><td><b>만들 수 있는 노드</b></td><td><b class="blue">판단 노드까지 전부</b>. 시작·종료·문서 참조·체크리스트·고장진단표는 뺐다 —
+각각 단추가 안 듣거나, 절차의 끝점을 다시 정하거나, 속을 채울 길이 없다</td></tr>
+<tr><td><b>앞 노드로 돌아가면</b></td><td><b class="red">그 뒤의 노드는 다시 「대기」</b>가 되고, <b>메모도 비운다</b> — 새로 밟는 것처럼.
+🔵 비우기 전 값은 이력에 남는다</td></tr>
+<tr><td><b>진행률을 세는 법</b></td><td><b class="blue">최단 경로 위의 자리</b>로 — 완료 수가 아니다</td></tr>
+<tr><td><b>자리를 옮긴 기록</b></td><td><b class="red">감사 이력에 안 남긴다</b> — 이력은 이 건에서 무슨 일을 했나이지 화면을 어떻게 꾸몄는지가 아니다</td></tr>
+</table>
+
+<h2>🔴 다음에 따로 다룰 것 — 마이그레이션이 필요합니다</h2>
+
+<table>
+<tr><th style="width:280px">무엇</th><th>왜 미뤘나</th></tr>
+<tr><td><b>「누가 끝냈는가」가 안 남는다</b></td>
+<td>실행 표에 <code>completed_by</code> 칸이 없고 이력에도 값이 없습니다.
+🔵 <b>그만두기는 온전합니다</b>(누가·언제·왜 남습니다)</td></tr>
+<tr><td><b>「전체 표준 절차」는 끝낸 뒤 같은 것을 다시 못 불러온다</b></td>
+<td>자리를 비우는 조건이 <b>「지웠는가」만 보고 「마쳤는가」를 안 봅니다.</b>
+🔵 지금은 그 갈래가 전부 초안이라 안 드러납니다</td></tr>
+<tr><td><b>도는 줄을 눌러 큰 카드로 올리기</b></td>
+<td>한 건에 절차를 둘 돌리면 <b>하나만 큰 카드에 섭니다.</b>
+🔵 나머지는 <b>보이기는 하는데 거기서 일할 수가 없습니다</b></td></tr>
+<tr><td><b>흐름 띠가 참고 문서에서 끊긴다</b></td>
+<td>자동 전진은 넘어가는데 <b>그림에는 그다음 칸이 안 보입니다</b></td></tr>
+</table>
+
+<h2>울타리</h2>
+
+<div class="card">
+<div class="body">
+<p>절차 관련 시험이 <b>시작 ~500개에서 크게 늘었습니다.</b>
+전체 단위 시험 <b>7,598 → 8,045</b>(+447), 화면 시험 <b>3,254 → 3,565</b>(+311),
+절차 실행 DB 시험 <b>36 → 106</b>. 전체 DB 시험 <b>2,031</b>.</p>
+<p class="note">🔴 <b>편집기 화면은 시험이 0개였습니다.</b> 줄기 B ① 에서 43개를 세웠는데, 그중 하나는
+<b>일부러 깨뜨려 보니 안 물었습니다</b>(<code>lastIndexOf</code> 라 뒤쪽 호출로 통과) — 고쳐서 이제 뭅니다.
+깨뜨려 보지 않았으면 그 단언은 영영 공짜로 통과했을 것입니다.</p>
+<p class="note">🔵 <b>조각마다 「일부러 깨뜨려 보기」</b>를 했습니다 — 가드를 빼면 시험이 실제로 무는지 확인한 것입니다.
+한 번은 <b>깨뜨리니 시험이 끝나지 않아</b>(무한 반복) 고리 보호가 제값을 한다는 것이 드러났습니다.</p>
+<p class="note">🔴 편집기 화면에 <b>lint 경고 4개</b>가 그대로 있습니다(2026-10-27 부터, 오류는 0).
+줄기 B 를 하면서 함께 봅니다.</p>
+<p class="note">🔴 <b>인수번호가 달마다 99개뿐입니다.</b> 조각 10 에서 시험이 접수 건 10개를 만들자
+<b>한참 뒤의 전혀 다른 시험</b>이 깨졌습니다. 접수 건 하나에 실행 여럿을 세워 풀었습니다.</p>
+</div>
+</div>
+
+<h2>🔵 줄기 A 에서 고쳐진 숨은 결함들</h2>
+
+<table>
+<tr><th style="width:320px">무엇</th><th>어떻게 드러났나</th></tr>
+<tr><td><b>노드 차례가 보장조차 안 됐다</b></td><td>조회에 <b>정렬이 한 줄도 없었습니다</b>(노드·간선 둘 다)</td></tr>
+<tr><td><b>판단 갈래 단추가 새로고침마다 자리를 바꿨다</b></td><td>간선에도 정렬이 없었습니다</td></tr>
+<tr><td><b>같은 트랜잭션의 이력 두 줄이 시각이 같았다</b></td><td>차례가 안 정해져 <b>원인과 결과가 뒤바뀌어</b> 보일 수 있었습니다</td></tr>
+<tr><td><b>그만둔 실행의 노드가 아직 저장됐다</b></td><td>오래된 탭이 직접 요청을 보내면 통했습니다</td></tr>
+<tr><td><b>실행이 둘일 때 어느 것이 뜰지 몰랐다</b></td><td>조회에 차례가 없었습니다 — 🔵 <b>사용자가 눌러 보신 덕에 실전에서 증명됐습니다</b></td></tr>
+<tr><td><b>줄 단추가 전부 남의 버전으로 불릴 뻔했다</b></td><td>조회에 <code>version</code> 이 없었습니다. 증상은 <b>「눌러도 아무 일이 없다」</b></td></tr>
+<tr><td class="red"><b>메모 칸에 앞 노드의 글이 남았다</b></td><td>React 가 같은 자리의 같은 부품이라 인스턴스를 재사용해 처음 값이 다시 안 읽혔습니다.
+<b>저장 단추도 안 떠서 남의 글인 줄 모른 채 이어 적게 됩니다</b></td></tr>
+<tr><td><b>확인창 id 가 전부터 겹쳤다</b></td><td>노드 카드마다 셋씩 수십 개가 같은 이름을 썼습니다</td></tr>
+<tr><td><b>감사 이력이 노드 삭제를 DB 에서 막고 있었다</b></td><td>외래키가 <code>restrict</code> 라, <b>추가 작업은 만들어지는 순간 지울 수 없는 몸</b>이 됐습니다</td></tr>
+<tr><td><b>가짜 시험 넷</b></td><td>하나는 소스를 <b>주석 줄로 자르는데</b> 그 시험이 주석을 먼저 걷어내 <b>영영 통과</b>했고,
+셋은 <code>indexOf</code> 가 −1 일 때 화면 끝까지 잘라서 통과했습니다</td></tr>
+</table>
+
+<h2>🔵 제 지시서가 틀렸던 다섯</h2>
+
+<div class="warn">
+<p class="note" style="margin-top:0">서브에이전트가 바로잡은 것들입니다. <b>그대로 갔으면 시험이 비어 공짜로 통과</b>할 뻔한 것이 섞여 있어 적어 둡니다.</p>
+<table>
+<tr><th style="width:330px">제가 적은 것</th><th>실제</th></tr>
+<tr><td>「노드 코드를 화면에 보여라」</td><td>코드가 <code>manual-&lt;uuid&gt;</code> 꼴이라 <b>뜻이 없습니다</b>(번호 꼴 0개) — <code>sort_order</code> 로 바로잡았습니다</td></tr>
+<tr><td class="red">「MCU 신호 점검이 두 절차에 겹친다」</td><td class="red">🔴 <b>틀렸습니다.</b> 겹치는 것은 「MCU 기판 교환」·「일본 교산에 연락」입니다.
+그대로 갔으면 <b>표본이 비어 시험이 공짜로 통과</b>했습니다</td></tr>
+<tr><td>「END 는 실행 행이 없다」</td><td><b>있습니다</b></td></tr>
+<tr><td>「그만두면서 마치는 일은 없다」</td><td><b>마친 뒤 그만두는 길이 일부러 열려 있습니다</b> — 되돌리는 유일한 길입니다</td></tr>
+<tr><td class="red">조각 8 지시서 ㉠·㉡</td><td class="red">🔴 <b>서로 모순</b>이었습니다 — 둘 다 지키면 그 글자에 영영 안 닿습니다</td></tr>
+</table>
+</div>
+
+<h2>🔵 같은 날 끝난 다른 일 — 밖에서 접속하기</h2>
+
+<div class="tip">
+<p><b>ipTIME AX3000Q 로 공유기를 바꾸고 WireGuard VPN 을 세웠습니다(2026-11-03).</b>
+이제 사내 와이파이가 아니어도 <code>dss21.co.kr</code> 가 그대로 열립니다.</p>
+<p class="note">🔴 중간에 <b>펌웨어를 올리자 설정이 통째로 초기화</b>돼 바꾼 계정으로 로그인이 안 됐습니다.
+인터넷은 계속 돼서 원인이 안 보였습니다 — <b>펌웨어를 먼저 올리고 설정은 그 뒤에</b> 해야 합니다.</p>
+<p class="note">🔵 사내망은 대역이 둘입니다 — 개발 PC 는 <code>192.168.1.x</code>, NAS 는 <code>192.168.0.222</code>.
+VPN 손님은 NAS 쪽에 들어옵니다.</p>
+</div>
+
+<p class="note" style="margin-top:28px">이 문서는 조각이 끝날 때마다 갱신합니다.
+🔵 끝난 조각은 지우지 않고 <b>상태만 고칩니다</b> — 무엇이 왜 그렇게 됐는지가 다음에 필요합니다.</p>
+
+</div>
+</body>
+</html>

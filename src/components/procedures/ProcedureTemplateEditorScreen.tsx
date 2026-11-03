@@ -13,14 +13,14 @@ import CreateNodePanel from "./editor/CreateNodePanel";
 import EditHistoryPanel from "./editor/EditHistoryPanel";
 import UndoRedoControls from "@/components/graph-editor-core/UndoRedoControls";
 import {
-  createUndoStack,
-  pushUndoStep,
-  undoStep,
-  redoStep,
-  canUndo as canUndoStack,
-  canRedo as canRedoStack,
-  type UndoStack,
-} from "@/lib/graph-editor-core/undo-stack";
+  createProcedureEditorUndoStack,
+  pushPendingUndoEntry,
+  pushStructuralUndoEntry,
+  planProcedureUndo,
+  planProcedureRedo,
+  canRunUndoPlan,
+  type ProcedureEditorUndoStack,
+} from "@/lib/domain/procedure-editor-undo-plan";
 import type { ProcedureTemplateForEditor, DraftParentComparisonResult, EditorNodeRow, EditorEdgeRow } from "@/lib/db/queries/procedure-template-editor";
 import type { TemplateHistoryView } from "@/lib/db/queries/procedure-template-history";
 import { resolveInitialGraphTarget, parseSourceReference } from "@/lib/domain/procedure-graph-navigation";
@@ -321,38 +321,46 @@ export default function ProcedureTemplateEditorScreen({
   /** The edge "검토자 메모" — a write-only per-save audit annotation (see procedure-editor-save-state.ts's own doc comment on why it's excluded from ProcedureEdgeFieldDraft entirely). Lifted here, alongside pendingEdgeFieldDraftsById, so it survives an edge-selection change (EdgePropertyPanel remounts via `key=`) until the deferred EDGE_FIELDS step actually runs. */
   const [pendingEdgeSaveNoteById, setPendingEdgeSaveNoteById] = useState<Map<string, string>>(new Map());
 
-  // ---- 저장 전 되돌리기(클라이언트 스냅샷 스택) ----
+  // ---- 되돌리기 스택(저장 전 스냅샷 + 서버 구조 변경 표시가 한 줄에 섞인다) ----
   //
-  // [이전]은 이제 두 체계를 순서대로 쓴다: 저장하지 않은 변경이 있으면 그것부터
-  // 한 단계씩 되돌리고, 다 되돌린 뒤에야 서버 이력을 되돌린다. 예전에는 저장 전
-  // 변경이 하나라도 있으면 버튼 자체가 꺼져 있어서, 노드를 옮긴 뒤에는 되돌릴
-  // 방법이 "모두 취소"밖에 없었다.
+  // 🔴 줄기 B-① 이전에는 체계가 **두 벌**이었고 서로 시간순으로 안 섞였다 —
+  // 클라이언트 스택에 뭐가 있으면 그것만 되돌리고 서버로는 가지도 않아서, 세션
+  // 중에 노드를 한 번이라도 드래그했으면 그 뒤에 무엇을 지워도 [이전]이 그 옛
+  // 스냅샷부터 되돌렸다(사용자가 스크린샷과 함께 두 번 신고한 그것).
+  //
+  // 지금은 스택 하나에 둘을 시간순으로 쌓는다. 무엇을 되돌릴지 고르는 규칙은
+  // 화면이 아니라 lib/domain/procedure-editor-undo-plan.ts 가 갖는다 — 왜 그렇게
+  // 갈랐는지와 STRUCTURAL 칸이 왜 비어 있는지는 그 파일 머리말에 적었다.
   //
   // 스냅샷은 저장 전 상태 다섯 가지를 통째로 담는다 — 조작마다 역연산을 따로
   // 만들면 조작이 늘 때마다 짝을 맞춰야 해서 어긋나기 쉽다(undo-stack.ts 주석 참고).
-  const [pendingUndoStack, setPendingUndoStack] = useState<UndoStack<PendingSnapshot>>(() => createUndoStack<PendingSnapshot>());
+  const [pendingUndoStack, setPendingUndoStack] = useState<ProcedureEditorUndoStack<PendingSnapshot>>(() =>
+    createProcedureEditorUndoStack<PendingSnapshot>()
+  );
+  /**
+   * 지금 화면에 떠 있는 저장 전 상태 한 묶음. 렌더 중에 읽어야 하는 쪽(되돌리기
+   * 계획 — 단추를 켤지 정한다)은 이 값을, 이벤트 핸들러 쪽은 아래 ref를 쓴다.
+   */
+  const currentPendingSnapshot: PendingSnapshot = useMemo(
+    () => ({
+      layoutMoves: pendingLayoutMoves,
+      edgeRouteMoves: pendingEdgeRouteMoves,
+      nodeFieldDrafts: pendingNodeFieldDraftsById,
+      edgeFieldDrafts: pendingEdgeFieldDraftsById,
+      edgeSaveNotes: pendingEdgeSaveNoteById,
+    }),
+    [pendingLayoutMoves, pendingEdgeRouteMoves, pendingNodeFieldDraftsById, pendingEdgeFieldDraftsById, pendingEdgeSaveNoteById]
+  );
   /**
    * 항상 "가장 최근에 렌더링된" 저장 전 상태를 가리킨다 — 스냅샷을 찍는 쪽은
    * 이벤트 핸들러(드래그 시작, 버튼 클릭)라 렌더 이후에 실행되므로 이 값이
    * 최신이다. 상태 다섯 개를 의존성으로 끌고 다니면 콜백 신원이 매번 바뀌어
    * 그래프의 선택 동기화 effect까지 흔들리므로 ref로 둔다.
    */
-  const pendingSnapshotRef = useRef<PendingSnapshot>({
-    layoutMoves: new Map(),
-    edgeRouteMoves: new Map(),
-    nodeFieldDrafts: new Map(),
-    edgeFieldDrafts: new Map(),
-    edgeSaveNotes: new Map(),
-  });
+  const pendingSnapshotRef = useRef<PendingSnapshot>(currentPendingSnapshot);
   useEffect(() => {
-    pendingSnapshotRef.current = {
-      layoutMoves: pendingLayoutMoves,
-      edgeRouteMoves: pendingEdgeRouteMoves,
-      nodeFieldDrafts: pendingNodeFieldDraftsById,
-      edgeFieldDrafts: pendingEdgeFieldDraftsById,
-      edgeSaveNotes: pendingEdgeSaveNoteById,
-    };
-  }, [pendingLayoutMoves, pendingEdgeRouteMoves, pendingNodeFieldDraftsById, pendingEdgeFieldDraftsById, pendingEdgeSaveNoteById]);
+    pendingSnapshotRef.current = currentPendingSnapshot;
+  }, [currentPendingSnapshot]);
 
   /** 드래그 중에는 프레임마다 스냅샷을 찍지 않는다 — 한 번의 드래그가 한 단계다(시작할 때만 찍는다). */
   const isNodeDraggingRef = useRef(false);
@@ -366,7 +374,25 @@ export default function ProcedureTemplateEditorScreen({
   const pushPendingUndoStep = useCallback((fieldEditKey: string | null = null) => {
     if (fieldEditKey !== null && lastFieldEditKeyRef.current === fieldEditKey) return;
     lastFieldEditKeyRef.current = fieldEditKey;
-    setPendingUndoStack((prev) => pushUndoStep(prev, pendingSnapshotRef.current, pendingSnapshotsEqual));
+    setPendingUndoStack((prev) => pushPendingUndoEntry(prev, pendingSnapshotRef.current, pendingSnapshotsEqual));
+  }, []);
+
+  /**
+   * 서버가 **이미 저장한** 구조 변경 한 걸음을 같은 스택에 쌓는다. 되돌릴 내용은
+   * 서버 이력이 들고 있으므로 여기서는 표시만 남긴다.
+   *
+   * 🔴 호출 자리는 전부 "서버 액션이 ok 를 돌려준 뒤"다 — 실패한 호출까지 쌓으면
+   * 일어나지도 않은 일을 되돌리려 들어, 바로 아래 있던 멀쩡한 변경이 대신 날아간다.
+   * 그래서 이 함수를 handleSaved 안에 숨기지 않았다: handleSaved 는 되돌리기
+   * 자신(handleUndo/handleRedo)도 부르는 공용 통로라, 거기 넣으면 되돌리기가 제
+   * 흔적을 다시 쌓아 [이전]이 영영 안 끝난다.
+   *
+   * 글자 입력 단계 끊기(lastFieldEditKeyRef)도 함께 푼다 — 구조 변경 뒤에 같은
+   * 칸을 다시 고치면 그때부터 새 단계여야 한다.
+   */
+  const pushStructuralUndoStep = useCallback(() => {
+    lastFieldEditKeyRef.current = null;
+    setPendingUndoStack((prev) => pushStructuralUndoEntry(prev));
   }, []);
 
   const applyPendingSnapshot = useCallback((snapshot: PendingSnapshot) => {
@@ -526,6 +552,19 @@ export default function ProcedureTemplateEditorScreen({
     router.refresh();
   }
 
+  /**
+   * 구조 변경(서버가 그 자리에서 저장하는 것)이 **성공했을 때** 지나는 통로.
+   * handleSaved 가 하던 일을 그대로 하고, 되돌리기 스택에 한 걸음을 더 쌓는다.
+   *
+   * 지나는 조작: 노드 생성 · 노드 유형 변경 · 연결선 생성 · 재연결 · 연결선 위
+   * 노드 삽입 · 템플릿 이름 변경 · 이력 복원. 삭제 둘은 지우개 뒤처리가 있어
+   * 제 함수(handleNodeDeleted/handleEdgeDeleted)에서 같은 것을 쌓는다.
+   */
+  function handleStructuralSaved(newUpdatedAt: string, structuralValidation?: StructuralValidationSummary) {
+    pushStructuralUndoStep();
+    handleSaved(newUpdatedAt, structuralValidation);
+  }
+
   // Phase 5C-5B — the new TECHNICAL_TASK-only node/edge structural CRUD.
   // canActorManageTechnicalTemplateGraph (the mutation layer's real
   // authorization boundary) is category-locked to TECHNICAL_TASK for every
@@ -537,72 +576,104 @@ export default function ProcedureTemplateEditorScreen({
 
   // Phase 5C-5C — Undo/Redo controls share canDeleteGraph's exact gate
   // (TECHNICAL_TASK + ADMIN/SUPER_ADMIN): FULL_SERVICE/REFERENCE never see
-  // these buttons, regardless of canEdit. canUndo/canRedo come from
-  // historyView (server-derived from the live 0018 fold model on every
-  // load/refresh) — never client-memory state that could diverge from the
-  // server. 5C-6D-1C adds a client-side guard on TOP of that: Undo/Redo is
-  // additionally disabled whenever any safe-to-defer draft is pending,
-  // since applying a historical Undo/Redo underneath an in-progress,
-  // unsaved local edit would silently rebase that edit against a state the
-  // user never asked it to apply to. No such guard existed before this
-  // checkpoint (audited directly — handleUndo/handleRedo had no
-  // hasPendingLayoutChanges check at all); this is a genuinely new, but
-  // explicitly requested, safety behavior, not a preserved one.
+  // these buttons, regardless of canEdit.
+  //
+  // 🔴 줄기 B-① 에서 바뀐 것: 예전에는 "저장 전 변경이 하나라도 있으면 서버
+  // 이력은 못 건드린다"는 가드(hasAnyPendingChanges)가 있었다. 통합 스택이
+  // 시간순이 된 지금은 그 가드가 **필요 없을 뿐 아니라 해롭다** — STRUCTURAL
+  // 차례가 왔다는 것은 그 위에 쌓여 있던 PENDING 이 이미 전부 되돌려졌다는
+  // 뜻이고, 순서는 스택이 보장한다. 가드를 남겨 두면 드래그 한 번에 삭제
+  // 되돌리기가 통째로 막힌다(사용자가 신고한 그 증상).
+  // hasAnyPendingChanges 자체는 [저장]/[취소] 단추와 나가기 확인이 계속 쓴다.
   const [isUndoing, setIsUndoing] = useState(false);
   const [isRedoing, setIsRedoing] = useState(false);
   const [undoRedoError, setUndoRedoError] = useState<string | null>(null);
+  /**
+   * 🔴 서버 되돌리기가 도는 동안 둘째 호출을 막는 빗장. isUndoing/isRedoing 만으로는
+   * 모자란다 — 그 둘은 state 라 다음 렌더에서야 단추에 닿고, 같은 틱에 두 번
+   * 누르면 둘 다 false 를 본 채로 통과해 **두 걸음이 한꺼번에 날아간다.**
+   * ("두 번 누르기"는 이 저장소에서 실제로 났던 결함이다.)
+   */
+  const undoRedoInFlightRef = useRef(false);
 
   /**
-   * [이전] — 저장하지 않은 변경이 남아 있으면 그것부터 한 단계씩 되돌리고,
-   * 다 되돌린 뒤에야 서버 이력을 되돌린다. 사용자에게는 버튼 하나로 보이지만
-   * 대상이 둘이며, 순서가 뒤바뀌면 아직 저장도 안 된 화면 상태 위에 서버
-   * 되돌리기가 겹쳐 무엇이 남았는지 알 수 없게 된다 — 그래서 저장 전 변경이
-   * 하나라도 남아 있는 동안에는 서버 이력에 손대지 않는다.
+   * 되돌리기 계획 — 단추를 켤지와 눌렀을 때 무엇을 할지를 **한 번에** 정한다.
+   * 렌더 중에 계산해 두 쓰임이 같은 답을 보게 한다(고치기 전에는 안내 문구와
+   * 단추가 서로 다른 변수를 봐서, 문구는 "쓸 수 없습니다"인데 단추는 눌리는
+   * 화면이 코드상 가능했다).
+   */
+  const undoPlan = planProcedureUndo({
+    stack: pendingUndoStack,
+    currentPending: currentPendingSnapshot,
+    serverHasHistory: historyView.canUndo,
+    canUseHistory: canDeleteGraph,
+    isRunning: isUndoing || isRedoing,
+    pendingEquals: pendingSnapshotsEqual,
+  });
+  const redoPlan = planProcedureRedo({
+    stack: pendingUndoStack,
+    currentPending: currentPendingSnapshot,
+    serverHasHistory: historyView.canRedo,
+    canUseHistory: canDeleteGraph,
+    isRunning: isUndoing || isRedoing,
+    pendingEquals: pendingSnapshotsEqual,
+  });
+
+  /**
+   * [이전] — 저장 전 스냅샷이든 서버 이력이든, **쌓인 역순 그대로** 한 걸음씩
+   * 되돌린다. 어느 쪽인지 고르는 일은 이미 undoPlan 이 끝냈으므로 여기서 다시
+   * 판정하지 않는다.
    */
   async function handleUndo() {
-    if (canUndoStack(pendingUndoStack)) {
-      const result = undoStep(pendingUndoStack, pendingSnapshotRef.current, pendingSnapshotsEqual);
-      setPendingUndoStack(result.stack);
-      if (result.restored) {
-        applyPendingSnapshot(result.restored);
-        return;
-      }
+    if (undoPlan.action === "NONE" || undoRedoInFlightRef.current) return;
+    if (undoPlan.action === "RESTORE_PENDING") {
+      setPendingUndoStack(undoPlan.nextStack);
+      applyPendingSnapshot(undoPlan.snapshot);
+      return;
     }
-    if (hasAnyPendingChanges) return;
+    undoRedoInFlightRef.current = true;
     setIsUndoing(true);
     setUndoRedoError(null);
     const result = await undoProcedureTemplateChangeAction({ templateId: template.id, expectedTemplateUpdatedAt: currentUpdatedAt });
+    undoRedoInFlightRef.current = false;
     setIsUndoing(false);
     if (!result.ok) {
+      // 🔴 실패하면 스택을 건드리지 않는다 — 일어나지 않은 되돌리기를 스택에서
+      // 빼면 그 걸음을 다시는 되돌릴 수 없다.
       setUndoRedoError(result.message);
       return;
     }
+    setPendingUndoStack(undoPlan.nextStack);
     handleSaved(result.updatedAt);
   }
 
-  /** [앞으로] — handleUndo와 정확히 대칭이다(저장 전 단계를 먼저, 그다음 서버 이력). */
+  /** [앞으로] — handleUndo와 정확히 대칭이다(계획도 반대 방향 한 벌을 그대로 쓴다). */
   async function handleRedo() {
-    if (canRedoStack(pendingUndoStack)) {
-      const result = redoStep(pendingUndoStack, pendingSnapshotRef.current, pendingSnapshotsEqual);
-      setPendingUndoStack(result.stack);
-      if (result.restored) {
-        applyPendingSnapshot(result.restored);
-        return;
-      }
+    if (redoPlan.action === "NONE" || undoRedoInFlightRef.current) return;
+    if (redoPlan.action === "RESTORE_PENDING") {
+      setPendingUndoStack(redoPlan.nextStack);
+      applyPendingSnapshot(redoPlan.snapshot);
+      return;
     }
-    if (hasAnyPendingChanges) return;
+    undoRedoInFlightRef.current = true;
     setIsRedoing(true);
     setUndoRedoError(null);
     const result = await redoProcedureTemplateChangeAction({ templateId: template.id, expectedTemplateUpdatedAt: currentUpdatedAt });
+    undoRedoInFlightRef.current = false;
     setIsRedoing(false);
     if (!result.ok) {
       setUndoRedoError(result.message);
       return;
     }
+    setPendingUndoStack(redoPlan.nextStack);
     handleSaved(result.updatedAt);
   }
 
   function handleNodeDeleted(newUpdatedAt: string) {
+    // 🔴 삭제는 서버가 이미 저장했다 — 되돌리기 스택에 한 걸음을 쌓아야
+    // [이전]이 이 자리에서 서버 이력으로 넘어간다. 이것이 없어서, 드래그 뒤의
+    // 삭제가 되돌려지지 않았다.
+    pushStructuralUndoStep();
     if (selectedNodeId) {
       setPendingNodeFieldDraftsById((prev) => {
         if (!prev.has(selectedNodeId)) return prev;
@@ -621,6 +692,8 @@ export default function ProcedureTemplateEditorScreen({
     handleSaved(newUpdatedAt);
   }
   function handleEdgeDeleted(newUpdatedAt: string) {
+    // 노드 삭제와 같은 까닭으로 한 걸음을 쌓는다(바로 위 주석 참고).
+    pushStructuralUndoStep();
     if (selectedEdgeId) {
       setPendingEdgeFieldDraftsById((prev) => {
         if (!prev.has(selectedEdgeId)) return prev;
@@ -682,7 +755,8 @@ export default function ProcedureTemplateEditorScreen({
       return;
     }
     setIsEditingName(false);
-    handleSaved(result.updatedAt);
+    // 이름 변경도 서버 이력에 남는 구조 변경이다 — RENAME_TEMPLATE 한 걸음을 쌓는다.
+    handleStructuralSaved(result.updatedAt);
   }
 
   /** Reads a route's current *working* points (pending override if this session touched it, else the last-saved value) — the one baseline every waypoint mutation below builds its next array from. Unchanged from before 1C. */
@@ -841,9 +915,10 @@ export default function ProcedureTemplateEditorScreen({
     setSelectedWaypoint(null);
     setGlobalSaveStatus("saved");
     // 저장에 성공한 변경은 이제 서버 이력의 몫이다 — 클라이언트 스택을 비워
-    // 같은 변경이 두 체계에 중복으로 남지 않게 한다([이전]을 누르면 서버
-    // 이력으로 곧바로 넘어간다).
-    setPendingUndoStack(createUndoStack<PendingSnapshot>());
+    // 같은 변경이 두 체계에 중복으로 남지 않게 한다. 비워도 되돌리기가 막히지
+    // 않는다: 스택이 빈 채로 [이전]을 누르면 계획이 "스택이 비었고 서버 이력에
+    // 남은 것이 있다" 갈래로 가 서버 이력을 그대로 거슬러 올라간다.
+    setPendingUndoStack(createProcedureEditorUndoStack<PendingSnapshot>());
     lastFieldEditKeyRef.current = null;
     router.refresh();
   }
@@ -1202,9 +1277,11 @@ export default function ProcedureTemplateEditorScreen({
             </>
           )}
           {canDeleteGraph && (
+            // 🔴 단추를 켤 조건도 계획 하나에서만 나온다 — 눌렀을 때 도는 코드와
+            // 같은 판정이라, "흐려 보이는데 눌리는" 또는 그 반대가 생길 수 없다.
             <UndoRedoControls
-              canUndo={canUndoStack(pendingUndoStack) || (historyView.canUndo && !hasAnyPendingChanges)}
-              canRedo={canRedoStack(pendingUndoStack) || (historyView.canRedo && !hasAnyPendingChanges)}
+              canUndo={canRunUndoPlan(undoPlan)}
+              canRedo={canRunUndoPlan(redoPlan)}
               isUndoing={isUndoing}
               isRedoing={isRedoing}
               onUndo={() => void handleUndo()}
@@ -1224,9 +1301,11 @@ export default function ProcedureTemplateEditorScreen({
       </div>
       {globalSaveStatus === "failed" && globalSaveError && <p className="text-xs text-red-600 dark:text-red-400">{globalSaveError}</p>}
       {undoRedoError && <p className="text-xs text-red-600 dark:text-red-400">{undoRedoError}</p>}
-      {canDeleteGraph && hasAnyPendingChanges && (historyView.canUndo || historyView.canRedo) && (
-        <p className="text-xs text-amber-700 dark:text-amber-400">저장하지 않은 변경사항이 있어 실행 취소/다시 실행을 사용할 수 없습니다. 먼저 저장하거나 취소하세요.</p>
-      )}
+      {/*
+        여기 있던 "저장하지 않은 변경사항이 있어 실행 취소/다시 실행을 사용할 수
+        없습니다" 안내는 없앴다(줄기 B-①). 잠기는 상태 자체가 사라져서 할 말이
+        없어졌다 — 저장 전 변경이 있어도 [이전]은 쌓인 역순 그대로 계속 돈다.
+      */}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-2">
@@ -1295,7 +1374,7 @@ export default function ProcedureTemplateEditorScreen({
               onDraftChange={(patch) => updateNodeFieldDraft(selectedNode.id, patch)}
               onPositionDraftChange={(position) => setPendingPosition(selectedNode.id, position)}
               resolveNodeDimensions={resolveNodeDimensions}
-              onSaved={handleSaved}
+              onSaved={handleStructuralSaved}
               canDelete={canDeleteGraph}
               onDeleted={handleNodeDeleted}
               canPosition={canDeleteGraph}
@@ -1312,7 +1391,7 @@ export default function ProcedureTemplateEditorScreen({
               onDraftChange={(patch) => updateEdgeFieldDraft(selectedEdge.id, patch)}
               note={edgeSaveNote(selectedEdge.id)}
               onNoteChange={(note) => updateEdgeSaveNote(selectedEdge.id, note)}
-              onSaved={handleSaved}
+              onSaved={handleStructuralSaved}
               routePoints={workingEdgeRoutes.get(selectedEdge.id) ?? null}
               selectedWaypointIndex={selectedWaypointIndex}
               onAddWaypoint={handleAddWaypoint}
@@ -1344,13 +1423,19 @@ export default function ProcedureTemplateEditorScreen({
                 setIsPickingEdgeTarget(false);
               }}
               pickedTarget={pickedEdgeTarget}
-              onSaved={handleSaved}
+              onSaved={handleStructuralSaved}
               isTechnical={isTechnical}
             />
           )}
 
           {rightPanelTab === "addNode" && canDeleteGraph && (
-            <CreateNodePanel templateId={template.id} expectedTemplateUpdatedAt={currentUpdatedAt} onSaved={handleSaved} selectedNode={selectedNode} resolveNodeDimensions={resolveNodeDimensions} />
+            <CreateNodePanel
+              templateId={template.id}
+              expectedTemplateUpdatedAt={currentUpdatedAt}
+              onSaved={handleStructuralSaved}
+              selectedNode={selectedNode}
+              resolveNodeDimensions={resolveNodeDimensions}
+            />
           )}
 
           {rightPanelTab === "validation" && (
@@ -1398,7 +1483,12 @@ export default function ProcedureTemplateEditorScreen({
           )}
 
           {rightPanelTab === "history" && (
-            <EditHistoryPanel templateId={template.id} historyView={historyView} canManage={canDeleteGraph} expectedTemplateUpdatedAt={currentUpdatedAt} onRestored={handleSaved} />
+            // 복원도 서버 이력에 새 걸음으로 기록된다(이 패널의 확인 문구가
+            // "복원 후에도 [이전] 버튼으로 이번 복원을 되돌릴 수 있습니다"라고
+            // 약속한다) — 지시서 목록에는 없었지만 같은 통로를 써야 그 약속이
+            // 지켜진다. 안 쌓으면 저장 전 변경이 하나라도 있을 때 [이전]이
+            // 복원 대신 그 스냅샷을 먼저 되돌린다.
+            <EditHistoryPanel templateId={template.id} historyView={historyView} canManage={canDeleteGraph} expectedTemplateUpdatedAt={currentUpdatedAt} onRestored={handleStructuralSaved} />
           )}
 
           {rightPanelTab === "compare" && comparison && comparison.ok && (
