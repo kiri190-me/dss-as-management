@@ -22,15 +22,16 @@ import type { ProcedureBranchType } from "./procedure-template-types";
  * 멈춤으로 나타난다.
  */
 
-type TestNode = { id: string; procedureTemplateNodeId: string | null; orderIndex: number; title: string };
+type TestNode = { id: string; graphNodeId: string; orderIndex: number; title: string; isAddedInCase: boolean };
 
 /** 1..count 번 노드. 실행 행 id 는 e·템플릿 노드 id 는 t 로 갈라 둔다 — 둘을 뒤바꿔 써도 시험이 통과하는 일이 없게. */
 function makeNodes(count: number): TestNode[] {
   return Array.from({ length: count }, (_, i) => ({
     id: `e${i + 1}`,
-    procedureTemplateNodeId: `t${i + 1}`,
+    graphNodeId: `t${i + 1}`,
     orderIndex: i + 1,
     title: `작업 ${i + 1}`,
+    isAddedInCase: false,
   }));
 }
 
@@ -106,11 +107,23 @@ describe("🔴 안 그리는 경우", () => {
     assert.deepEqual(minimap, { kind: "NOTE", reason: "CURRENT_HAS_NO_LINKED_STEP" });
   });
 
-  test("지금 노드가 사례별 추가 작업이면 까닭이 다르다 — 그래프에 자리 자체가 없다", () => {
+  test("🔴 아직 아무 데도 안 이은 추가 작업이면 까닭이 다르다 — 할 말이 다르기 때문", () => {
     const nodes = makeNodes(3);
-    const extra: TestNode = { id: "e99", procedureTemplateNodeId: null, orderIndex: 4, title: "추가 작업" };
+    // 🔵 자리는 있다(제 실행 노드 id). 다른 것은 선이 하나도 안 붙었다는 사실뿐이다.
+    const extra: TestNode = { id: "e99", graphNodeId: "e99", orderIndex: 4, title: "추가 작업", isAddedInCase: true };
     const minimap = buildProcedureExecutionMinimap({ nodes: [...nodes, extra], edges: chainEdges(3), current: extra });
     assert.deepEqual(minimap, { kind: "NOTE", reason: "CURRENT_IS_EXTRA_TASK" });
+  });
+
+  test("🔴 이어 붙인 추가 작업은 **그림이 나온다** — 템플릿 칸과 같은 잣대", () => {
+    const nodes = makeNodes(3);
+    const extra: TestNode = { id: "e99", graphNodeId: "e99", orderIndex: 4, title: "추가 세척", isAddedInCase: true };
+    const added: MinimapEdge = { id: "x1", fromNodeId: "t2", toNodeId: "e99", branchType: "DEFAULT", branchLabel: null };
+    const minimap = expectGraph(
+      buildProcedureExecutionMinimap({ nodes: [...nodes, extra], edges: [...chainEdges(3), added], current: extra })
+    );
+    assert.deepEqual(levelNumbers(minimap.backward), [[2], [1]], "앞 칸이 2번 작업이고 그 앞이 1번이어야 한다");
+    assert.deepEqual(levelNumbers(minimap.forward), []);
   });
 
   test("선이 한 쪽에만 붙어 있으면 그린다 — 한 줄로 떨어뜨리지 않는다", () => {

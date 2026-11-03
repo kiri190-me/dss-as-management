@@ -9,8 +9,8 @@ import {
   findShortestTemplatePath,
   formatExecutionProgressLabel,
   resolveJumpPath,
-  type PathTemplateEdge,
-  type PathTemplateNode,
+  type PathGraphEdge,
+  type PathGraphNode,
   type ProgressExecutionNode,
 } from "./procedure-execution-path";
 
@@ -40,7 +40,7 @@ import {
  * 들어가되 세지는 않는다**. 둘을 한 표본에서 같이 재지 않으면 「경로에서 빼
  * 버리는」 잘못된 구현이 그대로 통과한다.
  */
-const NODES: PathTemplateNode[] = [
+const NODES: PathGraphNode[] = [
   { id: "s", nodeType: "START" },
   { id: "a", nodeType: "TASK" },
   { id: "b", nodeType: "DECISION" },
@@ -51,7 +51,7 @@ const NODES: PathTemplateNode[] = [
   { id: "end", nodeType: "END" },
 ];
 
-const EDGES: PathTemplateEdge[] = [
+const EDGES: PathGraphEdge[] = [
   { id: "e0", fromNodeId: "s", toNodeId: "a", sortOrder: 0 },
   { id: "e1", fromNodeId: "a", toNodeId: "b", sortOrder: 1 },
   { id: "e2", fromNodeId: "b", toNodeId: "c", sortOrder: 2 },
@@ -68,7 +68,7 @@ const EDGES: PathTemplateEdge[] = [
 function execNodes(overrides: Record<string, ProgressExecutionNode["status"]> = {}): ProgressExecutionNode[] {
   return ["a", "b", "c", "d", "x", "end"].map((templateNodeId) => ({
     id: `exec-${templateNodeId}`,
-    procedureTemplateNodeId: templateNodeId,
+    graphNodeId: templateNodeId,
     status: overrides[templateNodeId] ?? "PENDING",
   }));
 }
@@ -83,7 +83,7 @@ describe("🔵 표본이 재려는 모양인가 — 먼저 확인한다", () => 
   });
 
   test("실행 줄은 여섯 — START 와 참고 문서는 줄이 없다", () => {
-    const ids = execNodes().map((n) => n.procedureTemplateNodeId);
+    const ids = execNodes().map((n) => n.graphNodeId);
     assert.deepEqual(ids, ["a", "b", "c", "d", "x", "end"]);
     assert.ok(!ids.includes("s") && !ids.includes("ref"));
   });
@@ -110,7 +110,7 @@ describe("최단 경로를 찾는다", () => {
 
     // 🔵 고리만 있고 끝점으로 나가는 길이 없을 때도 끝난다 — 「없다」로 끝나야지
     //    영영 돌면 안 된다.
-    const loopOnly: PathTemplateEdge[] = [
+    const loopOnly: PathGraphEdge[] = [
       { id: "l1", fromNodeId: "a", toNodeId: "b", sortOrder: 0 },
       { id: "l2", fromNodeId: "b", toNodeId: "a", sortOrder: 1 },
       { id: "l3", fromNodeId: "s", toNodeId: "a", sortOrder: 2 },
@@ -145,7 +145,7 @@ describe("최단 경로를 찾는다", () => {
  * 간선 id).
  */
 describe("🔴 최단 경로가 여럿일 때 — 늘 같은 하나를 고른다", () => {
-  const diamond: PathTemplateNode[] = [
+  const diamond: PathGraphNode[] = [
     { id: "s", nodeType: "START" },
     { id: "p", nodeType: "TASK" },
     { id: "q", nodeType: "TASK" },
@@ -153,7 +153,7 @@ describe("🔴 최단 경로가 여럿일 때 — 늘 같은 하나를 고른다
   ];
 
   /** s → p → r 과 s → q → r 이 **둘 다 2걸음**이다. */
-  function diamondEdges(firstHop: "p" | "q"): PathTemplateEdge[] {
+  function diamondEdges(firstHop: "p" | "q"): PathGraphEdge[] {
     return [
       { id: "d-sp", fromNodeId: "s", toNodeId: "p", sortOrder: firstHop === "p" ? 0 : 1 },
       { id: "d-sq", fromNodeId: "s", toNodeId: "q", sortOrder: firstHop === "q" ? 0 : 1 },
@@ -185,7 +185,7 @@ describe("🔴 최단 경로가 여럿일 때 — 늘 같은 하나를 고른다
   });
 
   test("sortOrder 가 겹치면 **간선 id** 가 가른다 — sort_order 에는 유니크 제약이 없다", () => {
-    const tied: PathTemplateEdge[] = [
+    const tied: PathGraphEdge[] = [
       { id: "zzz", fromNodeId: "s", toNodeId: "p", sortOrder: 0 },
       { id: "aaa", fromNodeId: "s", toNodeId: "q", sortOrder: 0 },
       { id: "d-pr", fromNodeId: "p", toNodeId: "r", sortOrder: 1 },
@@ -202,7 +202,7 @@ describe("🔴 최단 경로가 여럿일 때 — 늘 같은 하나를 고른다
 describe("옮기면 지나온 길이 어느 줄인가", () => {
   test("🔴 고른 줄 자신은 빠진다 — 그 줄은 진행 중이 된다", () => {
     const result = resolveJumpPath({
-      templateNodes: NODES,
+      graphNodes: NODES,
       edges: EDGES,
       executionNodes: execNodes(),
       targetExecutionNodeId: "exec-c",
@@ -216,14 +216,14 @@ describe("옮기면 지나온 길이 어느 줄인가", () => {
     // 실행의 모든 줄을 그대로 읽어 넘기므로, 그 줄이 섞인 모습으로 재야 한다 —
     // 화면이 보는 배열(START 가 빠진 것)로만 재면 걸러내기가 돌지 않아도 통과한다.
     const withSystemRows: ProgressExecutionNode[] = [
-      { id: "exec-s", procedureTemplateNodeId: "s", status: "COMPLETED" },
+      { id: "exec-s", graphNodeId: "s", status: "COMPLETED" },
       ...execNodes(),
     ];
     // 지름길(b → x)을 걷어 **참고 문서를 지나는 길**이 최단이 되게 한다.
     const throughRef = EDGES.filter((e) => e.id !== "e6" && e.id !== "e7");
 
     const result = resolveJumpPath({
-      templateNodes: NODES,
+      graphNodes: NODES,
       edges: throughRef,
       executionNodes: withSystemRows,
       targetExecutionNodeId: "exec-end",
@@ -236,7 +236,7 @@ describe("옮기면 지나온 길이 어느 줄인가", () => {
 
   test("🔴 상태는 안 본다 — 끝난 줄을 가리는 것은 planNodeJump 의 몫이다", () => {
     const result = resolveJumpPath({
-      templateNodes: NODES,
+      graphNodes: NODES,
       edges: EDGES,
       executionNodes: execNodes({ a: "COMPLETED", b: "BLOCKED" }),
       targetExecutionNodeId: "exec-c",
@@ -245,20 +245,33 @@ describe("옮기면 지나온 길이 어느 줄인가", () => {
   });
 
   test("🔴 길을 못 찾으면 **found: false** 이고 한 줄도 안 돌려준다", () => {
-    const noEdges = resolveJumpPath({ templateNodes: NODES, edges: [], executionNodes: execNodes(), targetExecutionNodeId: "exec-c" });
+    const noEdges = resolveJumpPath({ graphNodes: NODES, edges: [], executionNodes: execNodes(), targetExecutionNodeId: "exec-c" });
     assert.equal(noEdges.found, false);
     assert.deepEqual(noEdges.executionNodeIds, []);
   });
 
-  test("🔵 사례별 추가 작업으로 옮기면 길이라는 말이 성립하지 않는다", () => {
-    const withExtra = [...execNodes(), { id: "exec-extra", procedureTemplateNodeId: null, status: "PENDING" as const }];
-    const result = resolveJumpPath({ templateNodes: NODES, edges: EDGES, executionNodes: withExtra, targetExecutionNodeId: "exec-extra" });
+  test("🔵 아무 선에도 안 닿은 추가 작업으로 옮기면 길이라는 말이 성립하지 않는다", () => {
+    // 🔵 자리는 있다(제 실행 노드 id). BFS 가 시작점에서 못 닿을 뿐이다.
+    const withExtra = [...execNodes(), { id: "exec-extra", graphNodeId: "exec-extra", status: "PENDING" as const }];
+    const result = resolveJumpPath({ graphNodes: NODES, edges: EDGES, executionNodes: withExtra, targetExecutionNodeId: "exec-extra" });
     assert.equal(result.found, false);
     assert.deepEqual(result.executionNodeIds, []);
   });
 
+  test("🔴 이어 붙인 추가 작업으로 옮기면 **지나온 길이 나온다**", () => {
+    const withExtra = [...execNodes(), { id: "exec-extra", graphNodeId: "exec-extra", status: "PENDING" as const }];
+    const result = resolveJumpPath({
+      graphNodes: [...NODES, { id: "exec-extra", nodeType: "TASK" as const }],
+      edges: [...EDGES, { id: "added-1", fromNodeId: "b", toNodeId: "exec-extra", sortOrder: 0 }],
+      executionNodes: withExtra,
+      targetExecutionNodeId: "exec-extra",
+    });
+    assert.equal(result.found, true, "시작점에서 그 작업까지 길이 실제로 있다");
+    assert.deepEqual(result.executionNodeIds, ["exec-a", "exec-b"], "지나온 줄에 고른 줄 자신은 안 들어간다");
+  });
+
   test("🔵 바로 첫 작업으로 옮기면 길은 **찾았는데** 지날 줄이 없다", () => {
-    const result = resolveJumpPath({ templateNodes: NODES, edges: EDGES, executionNodes: execNodes(), targetExecutionNodeId: "exec-a" });
+    const result = resolveJumpPath({ graphNodes: NODES, edges: EDGES, executionNodes: execNodes(), targetExecutionNodeId: "exec-a" });
     assert.equal(result.found, true, "「길이 없다」와 「지날 줄이 없다」는 다른 일이다");
     assert.deepEqual(result.executionNodeIds, []);
   });
@@ -268,7 +281,7 @@ describe("🔴 진행률을 경로 기준으로 센다", () => {
   function progressOf(templateNodeId: string, overrides: Record<string, ProgressExecutionNode["status"]> = {}) {
     return computeExecutionProgress({
       nodes: execNodes(overrides),
-      templateNodes: NODES,
+      graphNodes: NODES,
       edges: EDGES,
       currentExecutionNodeId: `exec-${templateNodeId}`,
     });
@@ -331,7 +344,7 @@ describe("🔴 경로를 못 찾으면 옛 방식으로 떨어진다", () => {
   test("지금 할 일이 없으면 끝낸 수 기준", () => {
     const progress = computeExecutionProgress({
       nodes: COUNT_NODES,
-      templateNodes: NODES,
+      graphNodes: NODES,
       edges: EDGES,
       currentExecutionNodeId: null,
     });
@@ -344,7 +357,7 @@ describe("🔴 경로를 못 찾으면 옛 방식으로 떨어진다", () => {
     const noEnd = NODES.filter((n) => n.nodeType !== "END");
     const progress = computeExecutionProgress({
       nodes: COUNT_NODES,
-      templateNodes: noEnd,
+      graphNodes: noEnd,
       edges: EDGES,
       currentExecutionNodeId: "exec-c",
     });
@@ -352,15 +365,15 @@ describe("🔴 경로를 못 찾으면 옛 방식으로 떨어진다", () => {
   });
 
   test("선이 하나도 없으면 — 그리다 만 절차", () => {
-    const progress = computeExecutionProgress({ nodes: COUNT_NODES, templateNodes: NODES, edges: [], currentExecutionNodeId: "exec-c" });
+    const progress = computeExecutionProgress({ nodes: COUNT_NODES, graphNodes: NODES, edges: [], currentExecutionNodeId: "exec-c" });
     assert.equal(progress.basis, "COUNT");
   });
 
-  test("지금 할 일이 **사례별 추가 작업**이면 — 그림에 자리가 없다", () => {
-    const withExtra = [...execNodes(), { id: "exec-extra", procedureTemplateNodeId: null, status: "IN_PROGRESS" as const }];
+  test("지금 할 일이 **아무 선에도 안 닿은 추가 작업**이면 — 지나갈 길이 없다", () => {
+    const withExtra = [...execNodes(), { id: "exec-extra", graphNodeId: "exec-extra", status: "IN_PROGRESS" as const }];
     const progress = computeExecutionProgress({
       nodes: withExtra,
-      templateNodes: NODES,
+      graphNodes: NODES,
       edges: EDGES,
       currentExecutionNodeId: "exec-extra",
     });
@@ -370,7 +383,7 @@ describe("🔴 경로를 못 찾으면 옛 방식으로 떨어진다", () => {
   test("🔵 떨어진 퍼센트는 **전과 똑같다** — 완료+건너뜀 / 전체", () => {
     const progress = computeExecutionProgress({
       nodes: execNodes({ a: "COMPLETED", b: "SKIPPED", c: "COMPLETED" }),
-      templateNodes: NODES,
+      graphNodes: NODES,
       edges: [],
       currentExecutionNodeId: "exec-d",
     });

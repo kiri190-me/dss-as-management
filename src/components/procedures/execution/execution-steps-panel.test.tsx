@@ -29,7 +29,7 @@ function node(
   status: ProcedureCaseExecutionNodeStatus,
   extra: Partial<JumpCandidateNode> = {}
 ): JumpCandidateNode {
-  return { id: `e${n}`, procedureTemplateNodeId: `t${n}`, orderIndex: n, title: `작업 ${n}`, status, version: 1, ...extra };
+  return { id: `e${n}`, graphNodeId: `t${n}`, orderIndex: n, title: `작업 ${n}`, status, version: 1, ...extra };
 }
 
 /** 실측을 닮은 한 실행 — 끝난 것 · 도는 것 · 남은 것 · 막힌 것이 다 있다. */

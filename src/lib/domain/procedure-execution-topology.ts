@@ -76,10 +76,14 @@ export type TopologyEdge = {
 export type TopologyExecutionNode = {
   /** procedure_case_execution_nodes.id — the identity returned in the suggested set. */
   id: string;
-  /** null for a case-specific extra task (no template node, no edges). */
-  procedureTemplateNodeId: string | null;
+  /**
+   * **그림 위 자리 id** — 템플릿에서 온 줄은 그 템플릿 노드 id, 이 건에서 더한
+   * 작업은 **제 실행 노드 id** 다(2026-11-03, 조각 13). 전에는 추가 작업이
+   * null 이었고 그것이 「그림에 자리도 선도 없다」는 뜻이었다.
+   */
+  graphNodeId: string;
   status: ProcedureCaseExecutionNodeStatus;
-  /** Only meaningful when the underlying template node is DECISION. */
+  /** Only meaningful when the underlying node is DECISION. */
   selectedOutgoingEdgeId: string | null;
 };
 
@@ -94,18 +98,14 @@ export function computeSuggestedNextNodes(
   edges: TopologyEdge[],
   executionNodes: TopologyExecutionNode[]
 ): Set<string> {
-  const nodeTypeByTemplateNodeId = new Map(nodes.map((n) => [n.id, n.nodeType]));
-  const executionNodeByTemplateNodeId = new Map(
-    executionNodes
-      .filter((en): en is TopologyExecutionNode & { procedureTemplateNodeId: string } => en.procedureTemplateNodeId !== null)
-      .map((en) => [en.procedureTemplateNodeId, en])
-  );
+  const nodeTypeByGraphNodeId = new Map(nodes.map((n) => [n.id, n.nodeType]));
+  const executionNodeByGraphNodeId = new Map(executionNodes.map((en) => [en.graphNodeId, en]));
 
-  const incomingEdgesByTargetTemplateNodeId = new Map<string, TopologyEdge[]>();
+  const incomingEdgesByTargetGraphNodeId = new Map<string, TopologyEdge[]>();
   for (const edge of edges) {
-    const list = incomingEdgesByTargetTemplateNodeId.get(edge.toNodeId) ?? [];
+    const list = incomingEdgesByTargetGraphNodeId.get(edge.toNodeId) ?? [];
     list.push(edge);
-    incomingEdgesByTargetTemplateNodeId.set(edge.toNodeId, list);
+    incomingEdgesByTargetGraphNodeId.set(edge.toNodeId, list);
   }
 
   const suggested = new Set<string>();
@@ -113,13 +113,12 @@ export function computeSuggestedNextNodes(
   for (const en of executionNodes) {
     if (en.status !== "PENDING") continue;
 
-    // Extra case-specific task — no template node, no edges, always suggested.
-    if (en.procedureTemplateNodeId === null) {
-      suggested.add(en.id);
-      continue;
-    }
-
-    const incoming = incomingEdgesByTargetTemplateNodeId.get(en.procedureTemplateNodeId) ?? [];
+    // 🔵 2026-11-03(조각 13)에 **가지 하나가 사라졌다.** 전에는 「추가 작업은
+    //    간선이 없으니 무조건 추천」이라는 줄이 따로 있었는데, 이제 추가 작업도
+    //    들어오는 선을 가질 수 있어서 **아래 규칙에 그대로 들어맞는다** — 선이
+    //    없으면 incoming.length === 0 으로 추천되고(결과가 전과 같다), 선이
+    //    있으면 템플릿 노드와 똑같은 잣대로 판정된다.
+    const incoming = incomingEdgesByTargetGraphNodeId.get(en.graphNodeId) ?? [];
 
     if (incoming.length === 0) {
       suggested.add(en.id);
@@ -127,11 +126,11 @@ export function computeSuggestedNextNodes(
     }
 
     const anySourceReady = incoming.some((edge) => {
-      const sourceExecutionNode = executionNodeByTemplateNodeId.get(edge.fromNodeId);
+      const sourceExecutionNode = executionNodeByGraphNodeId.get(edge.fromNodeId);
       if (!sourceExecutionNode) return false;
       if (sourceExecutionNode.status !== "COMPLETED" && sourceExecutionNode.status !== "SKIPPED") return false;
 
-      const sourceNodeType = nodeTypeByTemplateNodeId.get(edge.fromNodeId);
+      const sourceNodeType = nodeTypeByGraphNodeId.get(edge.fromNodeId);
       if (sourceNodeType === "DECISION") {
         // An unselected branch off a completed DECISION never counts as available.
         return sourceExecutionNode.selectedOutgoingEdgeId === edge.id;

@@ -43,7 +43,7 @@ export default function ExecutionStepsGraph({
   /** procedure_templates.id — 그림이 오류 배지 링크를 만드는 데 쓴다. */
   templateId: string;
   templateCategory: ExecutionDetail["templateCategory"];
-  nodes: ExecutionDetail["templateNodes"];
+  nodes: ExecutionDetail["graphNodes"];
   edges: ExecutionDetail["flowEdges"];
   /** 다시 태어날 때 골라져 있을 **절차 노드** id. 없으면 아무것도 안 골라진 채로 뜬다. */
   focusNodeId: string | null;

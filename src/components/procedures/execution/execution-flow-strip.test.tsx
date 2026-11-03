@@ -25,10 +25,11 @@ type Node = FlowStripNode;
 function makeNodes(count: number, statusByOrder: Partial<Record<number, ProcedureCaseExecutionNodeStatus>> = {}): Node[] {
   return Array.from({ length: count }, (_, i) => ({
     id: `e${i + 1}`,
-    procedureTemplateNodeId: `t${i + 1}`,
+    graphNodeId: `t${i + 1}`,
     orderIndex: i + 1,
     title: `작업 ${i + 1}`,
     status: statusByOrder[i + 1] ?? "PENDING",
+    isAddedInCase: false,
   }));
 }
 
@@ -113,12 +114,28 @@ describe("🔴 그릴 수 없을 때", () => {
     assert.ok(html.includes("단계끼리 선으로 이어져 있지 않습니다"));
   });
 
-  test("사례별 추가 작업 — 까닭이 다르면 문구도 달라야 한다", () => {
+  test("🔴 아직 아무 데도 안 이은 추가 작업 — 까닭이 다르면 문구도 달라야 한다", () => {
     const nodes = makeNodes(3);
-    const extra: Node = { id: "e99", procedureTemplateNodeId: null, orderIndex: 4, title: "추가 작업", status: "PENDING" };
+    // 🔵 더한 작업도 그림에 자리가 있다(graphNodeId = 제 실행 노드 id). 다른 것은
+    //    선이 하나도 안 붙었다는 사실뿐이고, 할 말은 그래서 달라진다.
+    const extra: Node = { id: "e99", graphNodeId: "e99", orderIndex: 4, title: "추가 작업", status: "PENDING", isAddedInCase: true };
     const minimap = buildProcedureExecutionMinimap<Node>({ nodes: [...nodes, extra], edges: [edge(1, 2)], current: extra });
     const html = renderToStaticMarkup(<ExecutionFlowStrip minimap={minimap} />);
-    assert.ok(html.includes("추가 작업이라 이어지는 단계가 없습니다"));
+    assert.ok(html.includes("아직 아무 단계와도 이어져 있지 않습니다"), "템플릿 노드와 다른 글이 떠야 한다");
+    assert.ok(html.includes("[추가 작업 등록]"), "할 일을 짚어 줘야 한다");
+  });
+
+  test("🔴 이어 붙인 추가 작업은 **띠에 칸으로 그려진다**", () => {
+    const nodes = makeNodes(3);
+    const extra: Node = { id: "e99", graphNodeId: "e99", orderIndex: 4, title: "추가 세척", status: "PENDING", isAddedInCase: true };
+    const added: MinimapEdge = { id: "x1", fromNodeId: "t2", toNodeId: "e99", branchType: "DEFAULT", branchLabel: null };
+    // 표본 확인 — 선이 없으면 칸이 안 그려진다(위 시험).
+    const without = buildProcedureExecutionMinimap<Node>({ nodes: [...nodes, extra], edges: [edge(1, 2)], current: extra });
+    assert.equal(without.kind, "NOTE");
+
+    const minimap = buildProcedureExecutionMinimap<Node>({ nodes: [...nodes, extra], edges: [edge(1, 2), added], current: extra });
+    const html = renderToStaticMarkup(<ExecutionFlowStrip minimap={minimap} />);
+    assert.deepEqual(chipTitles(html), ["작업 1", "작업 2", "추가 세척"], "지난 두 걸음과 함께 띠에 선다");
   });
 
   test("🔴 절차 전체에 이을 선이 없으면 **아무것도 안 그린다** — 빈 띠조차 안 남긴다", () => {

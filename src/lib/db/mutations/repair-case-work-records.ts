@@ -253,11 +253,17 @@ export async function createWorkRecordInTx(
         id: procedureCaseExecutionNodes.id,
         executionRepairCaseId: procedureCaseExecutions.repairCaseId,
         executionIsDeleted: procedureCaseExecutions.isDeleted,
+        // 🔴 2026-11-03(조각 13) — 노드에도 소프트 삭제가 생겼다. 치운 추가
+        // 작업에는 **새로 묶을 수 없다**(화면 목록에 없는 줄이라 고를 길도 없고,
+        // 고를 길이 없는 것을 받아 주면 오래된 탭에서 조용히 들어온다).
+        // 🔵 이미 묶여 있던 기록은 그대로 둔다 — 그때 있었던 일이고, 조회는
+        // leftJoin 이라 제목도 계속 읽힌다.
+        nodeIsDeleted: procedureCaseExecutionNodes.isDeleted,
       })
       .from(procedureCaseExecutionNodes)
       .innerJoin(procedureCaseExecutions, eq(procedureCaseExecutions.id, procedureCaseExecutionNodes.executionId))
       .where(eq(procedureCaseExecutionNodes.id, params.relatedProcedureExecutionNodeId));
-    if (!node || node.executionIsDeleted || node.executionRepairCaseId !== params.repairCaseId) {
+    if (!node || node.nodeIsDeleted || node.executionIsDeleted || node.executionRepairCaseId !== params.repairCaseId) {
       failCreate("INVALID_INPUT", "선택한 절차 항목을 확인할 수 없습니다.");
     }
   }

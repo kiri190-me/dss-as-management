@@ -89,7 +89,7 @@ function ProgressSummary({
   // 수가 뜨는 까닭을 사람이 알 수 있어야 한다.
   const progress = computeExecutionProgress({
     nodes: detail.nodes,
-    templateNodes: detail.templateNodes,
+    graphNodes: detail.graphNodes,
     edges: detail.flowEdges,
     currentExecutionNodeId: currentTaskNodeId,
   });
@@ -426,13 +426,26 @@ export default function ProcedureExecutionScreen({
               procedureTemplateId={executionDetail.procedureTemplateId}
               templateCategory={executionDetail.templateCategory}
               nodes={executionDetail.nodes}
-              templateNodes={executionDetail.templateNodes}
+              graphNodes={executionDetail.graphNodes}
               flowEdges={executionDetail.flowEdges}
               currentTaskNodeId={currentTaskNodeId}
               isExecutionFinished={isExecutionFinished}
               eligible={ordinaryActionEligible}
             />
-            <ExecutionExtraTaskDialog executionId={executionDetail.executionId} eligible={ordinaryActionEligible} />
+            {/* 🔵 2026-11-03(조각 13) — 창 안이 **편집기 모양**이 되면서 받는
+                것이 늘었다. 🔴 **「전체 단계 보기」와 같은 재료**를 넘긴다(같은
+                nodes · graphNodes · flowEdges) — 두 창이 서로 다른 그림을 그리면
+                한쪽에서 그은 선이 다른 쪽에 안 보인다. */}
+            <ExecutionExtraTaskDialog
+              executionId={executionDetail.executionId}
+              procedureTemplateId={executionDetail.procedureTemplateId}
+              templateCategory={executionDetail.templateCategory}
+              nodes={executionDetail.nodes}
+              graphNodes={executionDetail.graphNodes}
+              flowEdges={executionDetail.flowEdges}
+              currentTaskNodeId={currentTaskNodeId}
+              eligible={ordinaryActionEligible}
+            />
           </>
         }
       />

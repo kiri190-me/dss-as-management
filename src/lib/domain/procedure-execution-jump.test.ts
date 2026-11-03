@@ -6,7 +6,7 @@ import {
   buildJumpStatusMarks,
   classifyJumpTarget,
   findJumpTarget,
-  findJumpTargetByTemplateNodeId,
+  findJumpTargetByGraphNodeId,
   planNodeJump,
   readJumpResetWorkMemo,
   resolveJumpButtonState,
@@ -37,7 +37,7 @@ function node(
 ): JumpCandidateNode {
   return {
     id: `e${n}`,
-    procedureTemplateNodeId: `t${n}`,
+    graphNodeId: `t${n}`,
     orderIndex: n,
     title: `작업 ${n}`,
     status,
@@ -578,7 +578,8 @@ describe("검색", () => {
     node(2, "IN_PROGRESS", { title: "FH-CONT VCC 입력 케이블 탈거 후\n전원 기동 및 MCU VCC 공급 확인" }),
     node(3, "PENDING", { title: "조정 작업 실시" }),
     node(4, "BLOCKED", { title: "MCU 신호 점검" }),
-    node(5, "PENDING", { title: "현장 추가 작업", procedureTemplateNodeId: null }),
+    // 🔵 이 건에서 더한 작업 — 그림 위 자리 id 가 **제 실행 노드 id** 다(조각 13).
+    node(5, "PENDING", { title: "현장 추가 작업", graphNodeId: "e5" }),
   ];
 
   test("🔵 먼저 — 빈 검색어는 아무것도 안 돌려준다(공짜 통과 막기)", () => {
@@ -609,11 +610,14 @@ describe("검색", () => {
     assert.equal(blocked.mark.label, "차단됨");
   });
 
-  test("추가 작업(그림에 자리가 없는 줄)도 검색에는 걸린다", () => {
+  test("이 건에서 더한 작업도 검색에 걸린다", () => {
     const result = searchJumpTargets(nodes, "현장");
     assert.equal(result.matchCount, 1);
-    assert.equal(result.hits[0].node.procedureTemplateNodeId, null);
-    assert.equal(result.hits[0].eligibility.ok, true, "그림에 자리가 없다고 못 옮기면 추가 작업이 영영 막힌다");
+    // 🔵 2026-11-03(조각 13) — 더한 작업도 그림의 한 칸이고, 그 자리 id 는 **제
+    //    실행 노드 id** 다. 전에는 이 자리가 null 이었고 「그림에 자리가 없다」는
+    //    뜻이었다.
+    assert.equal(result.hits[0].node.graphNodeId, "e5");
+    assert.equal(result.hits[0].eligibility.ok, true, "더한 작업으로도 옮길 수 있어야 한다");
   });
 
   test("많이 걸리면 잘라 내되 **맞는 수는 그대로** 센다", () => {
@@ -626,17 +630,23 @@ describe("검색", () => {
 });
 
 describe("그림에 얹는 상태 지도", () => {
-  const nodes = [node(1, "COMPLETED"), node(2, "IN_PROGRESS"), node(3, "PENDING", { procedureTemplateNodeId: null })];
+  const nodes = [node(1, "COMPLETED"), node(2, "IN_PROGRESS"), node(3, "PENDING", { graphNodeId: "e3" })];
 
-  test("절차 노드 id 로 찾히고, 딱지가 그 줄의 상태다", () => {
+  test("그림 위 자리 id 로 찾히고, 딱지가 그 줄의 상태다", () => {
     const marks = buildJumpStatusMarks(nodes);
     assert.equal(marks.get("t1")?.label, "완료");
     assert.equal(marks.get("t2")?.tone, "CURRENT");
   });
 
-  test("🔴 추가 작업은 지도에 안 들어간다 — 얹을 칸이 없다", () => {
+  /**
+   * 🔴 2026-11-03(조각 13)에 **뜻이 뒤집힌 시험**이다. 전에는 이름이 「추가
+   * 작업은 지도에 안 들어간다 — 얹을 칸이 없다」였다. 이제 추가 작업도 그림의 한
+   * 칸이라 **얹을 칸이 있고**, 안 얹으면 그 칸만 상태 없이 떠 있게 된다.
+   */
+  test("🔴 이 건에서 더한 작업도 지도에 들어간다 — 그림에 칸이 생겼다", () => {
     const marks = buildJumpStatusMarks(nodes);
-    assert.equal(marks.size, 2);
+    assert.equal(marks.size, 3, "세 줄 전부에 딱지가 있어야 한다");
+    assert.equal(marks.get("e3")?.label, "대기", "제 실행 노드 id 가 열쇠다");
   });
 });
 
@@ -654,9 +664,9 @@ describe("고른 것 되찾기", () => {
   });
 
   test("그림이 준 **절차 노드** id 로도 되찾는다 — 실행 줄이 없으면 null", () => {
-    assert.equal(findJumpTargetByTemplateNodeId(nodes, "t1")?.id, "e1");
-    assert.equal(findJumpTargetByTemplateNodeId(nodes, "t99"), null, "시작 지점·참고 문서가 여기로 떨어진다");
-    assert.equal(findJumpTargetByTemplateNodeId(nodes, null), null);
+    assert.equal(findJumpTargetByGraphNodeId(nodes, "t1")?.id, "e1");
+    assert.equal(findJumpTargetByGraphNodeId(nodes, "t99"), null, "시작 지점·참고 문서가 여기로 떨어진다");
+    assert.equal(findJumpTargetByGraphNodeId(nodes, null), null);
   });
 });
 

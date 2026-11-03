@@ -1507,3 +1507,15 @@ src/lib/domain/procedure-execution-history-feed.test.ts
 # 그려지는 모습은 components 목록의 execution-memo-field.test.tsx 가 본다.
 # 🔴 unit 에 적은 이유: DB 도 React 도 안 무는 순수 함수다. 격리 이름 없음(DB 안 씀).
 src/lib/domain/procedure-execution-memo-field.test.ts
+
+# 🔵 **「추가 작업 등록」 창이 무엇을 지울 수 있는가**(2026-11-03, 조각 13 — 사용자
+# 결정: 「[기술작업절차]편집기에 있는 노드 추가/제거, 연결선 추가/제거 ui대로」).
+# 재는 것: 🔴 이 건에서 더한 것만 지워지고 **원본 절차에서 온 것은 까닭이 글자로**
+# 나오는가(둘 다 재야 한다 — 한쪽만 재면 늘 false 를 돌려줘도 통과한다) · 🔴 「아직
+# 안 골랐다」와 「못 지운다」가 **다른 말**인가(사람이 해야 할 다음 행동이 다르다) ·
+# 그림에서 누른 칸이 템플릿·추가 어느 쪽이든 되찾히는가 · 🔴 연결 목록에 **원본도
+# 싣되** 못 지우는 까닭이 그 줄에 붙는가 · 양끝이 작업 줄로 안 풀리는 선(시작 지점·
+# 참고 문서)은 빠지는가 · 갈래 이름표에서 기본(DEFAULT)은 안 적히는가.
+# 그려지는 모습은 components 목록의 execution-task-editor-panel.test.tsx 가 본다.
+# 🔴 unit 에 적은 이유: DB 도 React 도 안 무는 순수 함수다. 격리 이름 없음(DB 안 씀).
+src/lib/domain/procedure-execution-case-edit.test.ts

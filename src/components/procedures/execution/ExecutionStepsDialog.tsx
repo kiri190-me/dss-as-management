@@ -6,7 +6,7 @@ import { jumpToExecutionNodeAction } from "@/lib/server/actions/procedure-case-e
 import {
   buildJumpStatusMarks,
   findJumpTarget,
-  findJumpTargetByTemplateNodeId,
+  findJumpTargetByGraphNodeId,
   resolveJumpButtonState,
   searchJumpTargets,
   type JumpCandidateNode,
@@ -46,7 +46,7 @@ export default function ExecutionStepsDialog({
   procedureTemplateId,
   templateCategory,
   nodes,
-  templateNodes,
+  graphNodes,
   flowEdges,
   currentTaskNodeId,
   isExecutionFinished,
@@ -57,8 +57,8 @@ export default function ExecutionStepsDialog({
   templateCategory: ExecutionDetail["templateCategory"];
   /** 실행 줄 전부 — 절차 차례 그대로다(getExecutionDetail 이 정렬해서 내려준다). */
   nodes: readonly JumpCandidateNode[];
-  /** 절차 **그림 재료**(START·참고 문서까지 전부). */
-  templateNodes: ExecutionDetail["templateNodes"];
+  /** 그림 재료 — START·참고 문서·이 건에서 더한 작업까지 전부. */
+  graphNodes: ExecutionDetail["graphNodes"];
   flowEdges: ExecutionDetail["flowEdges"];
   /** 지금 「지금 할 일」로 서 있는 실행 줄. 🔴 화면이 다시 고르지 않는다 — pickCurrentTask 의 답을 그대로 받는다. */
   currentTaskNodeId: string | null;
@@ -98,13 +98,12 @@ export default function ExecutionStepsDialog({
   // 그림에서 환하게 남길 노드. 🔴 검색어가 **비어 있으면 null** — 빈 배열을 넘기면
   // 「하나도 안 걸렸다」는 뜻이 되어 아직 검색도 안 했는데 그림이 통째로 흐려진다.
   //
-  // 🔵 사례별 추가 작업은 그림에 자리가 없으므로 여기서 빠진다(목록에는 그대로
-  // 걸린다 — 둘을 같은 규칙으로 묶으면 추가 작업으로는 영영 못 옮긴다).
+  // 🔵 2026-11-03(조각 13)부터 **이 건에서 더한 작업도 그림에 칸이 있다** —
+  // 전에는 자리가 없어 여기서 걸러 냈다. 이제 걸러 내면 검색에 걸린 추가 작업만
+  // 그림에서 흐려져, 「찾았는데 그림에서는 사라졌다」가 된다.
   const highlightedNodeIds = useMemo(() => {
     if (query.trim() === "") return null;
-    return search.hits
-      .map((hit) => hit.node.procedureTemplateNodeId)
-      .filter((id): id is string => id !== null);
+    return search.hits.map((hit) => hit.node.graphNodeId);
   }, [query, search]);
 
   const nodeMarks = useMemo(() => buildJumpStatusMarks(nodes), [nodes]);
@@ -124,7 +123,7 @@ export default function ExecutionStepsDialog({
     // 🔵 창을 열면 **지금 할 일**이 골라진 채로 뜨고 카메라가 거기로 간다 —
     // 「내가 지금 어디에 있고 어디로 갈 수 있나」가 이 창을 여는 까닭이다.
     setChosenNodeId(currentTaskNodeId);
-    setFocusNodeId(nodes.find((n) => n.id === currentTaskNodeId)?.procedureTemplateNodeId ?? null);
+    setFocusNodeId(nodes.find((n) => n.id === currentTaskNodeId)?.graphNodeId ?? null);
     setFocusSeq((seq) => seq + 1);
     setIsOpen(true);
   }
@@ -136,7 +135,7 @@ export default function ExecutionStepsDialog({
 
   function handleHitSelect(hit: JumpNodeHit) {
     setChosenNodeId(hit.node.id);
-    setFocusNodeId(hit.node.procedureTemplateNodeId);
+    setFocusNodeId(hit.node.graphNodeId);
     setFocusSeq((seq) => seq + 1);
     setErrorMessage(null);
   }
@@ -145,10 +144,10 @@ export default function ExecutionStepsDialog({
   // 의존으로 쓴다. 매 렌더 새 함수를 넘기면 그 효과가 매번 다시 돌아 같은 값을
   // 되풀이해 올려 보낸다.
   const handlePickedNodeChange = useCallback(
-    (templateNodeId: string | null) => {
-      // 그림이 주는 것은 **절차 노드** id 다. 실행 줄이 없는 칸(시작 지점·참고
+    (graphNodeId: string | null) => {
+      // 그림이 주는 것은 **그림 위 자리 id** 다. 실행 줄이 없는 칸(시작 지점·참고
       // 문서)을 누르면 null 이 되고, 그러면 단추가 까닭과 함께 흐려진다.
-      const node = findJumpTargetByTemplateNodeId(nodes, templateNodeId);
+      const node = findJumpTargetByGraphNodeId(nodes, graphNodeId);
       setChosenNodeId(node?.id ?? null);
       setErrorMessage(null);
     },
@@ -241,7 +240,7 @@ export default function ExecutionStepsDialog({
             <ExecutionStepsGraph
               templateId={procedureTemplateId}
               templateCategory={templateCategory}
-              nodes={templateNodes}
+              nodes={graphNodes}
               edges={flowEdges}
               focusNodeId={focusNodeId}
               focusSeq={focusSeq}

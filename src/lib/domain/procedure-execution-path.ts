@@ -72,16 +72,27 @@ import { computeExecutionPosition, formatExecutionPositionLabel, type ExecutionP
 import type { ProcedureCaseExecutionNodeStatus } from "./procedure-case-execution-types";
 import type { ProcedureNodeType } from "./procedure-template-types";
 
-/** 절차 그림의 한 칸 — 경로 찾기에 필요한 것만. */
-export type PathTemplateNode = {
-  /** procedure_template_nodes.id */
+/**
+ * 절차 그림의 한 칸 — 경로 찾기에 필요한 것만.
+ *
+ * 🔵 2026-11-03(조각 13)부터 **이 건에서 더한 작업도 한 칸**이다. 그때 `id` 는
+ * 그 작업의 실행 노드 id 이고, `nodeType` 은 사람이 고른 갈래
+ * (extra_task_node_type)다. 템플릿에서 온 칸은 전과 같다.
+ */
+export type PathGraphNode = {
+  /** 그림 위 자리 id — procedure_template_nodes.id 또는 추가 작업의 실행 노드 id. */
   id: string;
   nodeType: ProcedureNodeType;
 };
 
-/** 절차 그림의 한 선 — 차례를 못 박는 데 sortOrder 가 필요하다(위 머리말). */
-export type PathTemplateEdge = {
-  /** procedure_template_edges.id */
+/**
+ * 절차 그림의 한 선 — 차례를 못 박는 데 sortOrder 가 필요하다(위 머리말).
+ *
+ * 🔵 2026-11-03(조각 13)부터 템플릿 간선과 **이 건에서 그은 간선**이 섞여
+ * 들어온다. 양끝은 어느 쪽이든 PathGraphNode.id 와 같은 열쇠다.
+ */
+export type PathGraphEdge = {
+  /** procedure_template_edges.id 또는 procedure_case_execution_edges.id */
   id: string;
   fromNodeId: string;
   toNodeId: string;
@@ -92,15 +103,19 @@ export type PathTemplateEdge = {
 export type PathExecutionNode = {
   /** procedure_case_execution_nodes.id */
   id: string;
-  /** 사례별 추가 작업은 null — 절차 그림에 자리가 없다. */
-  procedureTemplateNodeId: string | null;
+  /**
+   * **그림 위 자리 id**. 템플릿에서 온 줄은 그 템플릿 노드 id, 이 건에서 더한
+   * 작업은 **제 실행 노드 id** 다(2026-11-03, 조각 13 — 전에는 추가 작업이
+   * null 이었고 그것이 「그림에 자리가 없다」는 뜻이었다).
+   */
+  graphNodeId: string;
 };
 
-export function collectStartNodeIds(nodes: readonly PathTemplateNode[]): string[] {
+export function collectStartNodeIds(nodes: readonly PathGraphNode[]): string[] {
   return nodes.filter((n) => n.nodeType === "START").map((n) => n.id);
 }
 
-export function collectEndNodeIds(nodes: readonly PathTemplateNode[]): string[] {
+export function collectEndNodeIds(nodes: readonly PathGraphNode[]): string[] {
   return nodes.filter((n) => n.nodeType === "END").map((n) => n.id);
 }
 
@@ -115,8 +130,8 @@ export function collectEndNodeIds(nodes: readonly PathTemplateNode[]): string[] 
  * 「길이 0인 경로」와 섞인다.
  */
 export function findShortestTemplatePath(input: {
-  nodes: readonly PathTemplateNode[];
-  edges: readonly PathTemplateEdge[];
+  nodes: readonly PathGraphNode[];
+  edges: readonly PathGraphEdge[];
   fromNodeIds: readonly string[];
   toNodeIds: readonly string[];
 }): string[] | null {
@@ -127,7 +142,7 @@ export function findShortestTemplatePath(input: {
 
   // 차례를 **여기서 한 번만** 정한다 — 부르는 쪽이 정렬해 줬는지에 기대면 호출
   // 자리마다 답이 달라질 수 있다(머리말의 「같은 입력이면 같은 답」).
-  const outgoing = new Map<string, PathTemplateEdge[]>();
+  const outgoing = new Map<string, PathGraphEdge[]>();
   const ordered = input.edges
     .filter((e) => knownNodeIds.has(e.fromNodeId) && knownNodeIds.has(e.toNodeId))
     .slice()
@@ -173,25 +188,24 @@ export function findShortestTemplatePath(input: {
  */
 function toExecutionNodeIdsOnPath<T extends PathExecutionNode>(
   path: readonly string[],
-  templateNodes: readonly PathTemplateNode[],
+  graphNodes: readonly PathGraphNode[],
   executionNodes: readonly T[]
 ): string[] {
-  const nodeTypeById = new Map(templateNodes.map((n) => [n.id, n.nodeType]));
-  const executionNodeByTemplateNodeId = new Map<string, T>();
+  const nodeTypeById = new Map(graphNodes.map((n) => [n.id, n.nodeType]));
+  const executionNodeByGraphNodeId = new Map<string, T>();
   for (const node of executionNodes) {
-    if (node.procedureTemplateNodeId === null) continue;
     // 먼저 나온 것을 남긴다 — 입력이 절차 차례이므로 「앞선 것이 이긴다」가 되고,
     // 같은 입력이면 언제나 같은 답이 나온다(minimap 과 같은 규약).
-    if (!executionNodeByTemplateNodeId.has(node.procedureTemplateNodeId)) {
-      executionNodeByTemplateNodeId.set(node.procedureTemplateNodeId, node);
+    if (!executionNodeByGraphNodeId.has(node.graphNodeId)) {
+      executionNodeByGraphNodeId.set(node.graphNodeId, node);
     }
   }
 
   const ids: string[] = [];
-  for (const templateNodeId of path) {
-    const nodeType = nodeTypeById.get(templateNodeId);
+  for (const graphNodeId of path) {
+    const nodeType = nodeTypeById.get(graphNodeId);
     if (nodeType !== undefined && isSystemEntryNodeType(nodeType)) continue;
-    const executionNode = executionNodeByTemplateNodeId.get(templateNodeId);
+    const executionNode = executionNodeByGraphNodeId.get(graphNodeId);
     if (!executionNode) continue;
     ids.push(executionNode.id);
   }
@@ -216,27 +230,30 @@ export type JumpPathResult = {
  * (procedure-execution-jump.ts). 여기서도 가리면 「무엇이 바뀌는가」가 두 벌이 되고,
  * 쓰기 쪽과 시험이 서로 다른 잣대로 세게 된다.
  *
- * 🔵 사례별 추가 작업으로 옮기면 언제나 `found: false` 다 — 절차 그림에 자리가
- * 없어서 「지나온 길」이라는 말 자체가 성립하지 않는다.
+ * 🔵 2026-11-03(조각 13) — **이 건에서 더한 작업으로도 길이 날 수 있다.** 전에는
+ * 추가 작업이면 무조건 `found: false` 였는데, 이제 추가 간선으로 이어 붙이면
+ * 시작점에서 그 작업까지 이어지는 길이 실제로 있다. 아무 선에도 안 닿은 추가
+ * 작업은 BFS 가 못 닿으므로 전과 똑같이 `found: false` 다 — 같은 결과가 **까닭
+ * 하나로** 나오게 된 것이고, 「추가 작업이라서」라는 따로 난 가지는 없앴다.
  */
 export function resolveJumpPath<T extends PathExecutionNode>(input: {
-  templateNodes: readonly PathTemplateNode[];
-  edges: readonly PathTemplateEdge[];
+  graphNodes: readonly PathGraphNode[];
+  edges: readonly PathGraphEdge[];
   executionNodes: readonly T[];
   targetExecutionNodeId: string;
 }): JumpPathResult {
   const target = input.executionNodes.find((n) => n.id === input.targetExecutionNodeId) ?? null;
-  if (target === null || target.procedureTemplateNodeId === null) return { found: false, executionNodeIds: [] };
+  if (target === null) return { found: false, executionNodeIds: [] };
 
   const path = findShortestTemplatePath({
-    nodes: input.templateNodes,
+    nodes: input.graphNodes,
     edges: input.edges,
-    fromNodeIds: collectStartNodeIds(input.templateNodes),
-    toNodeIds: [target.procedureTemplateNodeId],
+    fromNodeIds: collectStartNodeIds(input.graphNodes),
+    toNodeIds: [target.graphNodeId],
   });
   if (path === null) return { found: false, executionNodeIds: [] };
 
-  const ids = toExecutionNodeIdsOnPath(path, input.templateNodes, input.executionNodes).filter(
+  const ids = toExecutionNodeIdsOnPath(path, input.graphNodes, input.executionNodes).filter(
     (id) => id !== input.targetExecutionNodeId
   );
   return { found: true, executionNodeIds: ids };
@@ -296,8 +313,11 @@ export type ExecutionProgress =
  * ──────────────────────────────────────────────────────────────────────
  *  - 지금 할 일이 없다(다 끝남 · 전부 차단 · 마친 실행). 경유할 노드가 없으니
  *    경로라는 말이 성립하지 않는다.
- *  - 지금 할 일이 **사례별 추가 작업**이다 — 절차 그림에 자리가 없다.
  *  - 시작점에서 지금 작업까지, 또는 지금 작업에서 끝점까지 **길이 없다.**
+ *    🔵 2026-11-03(조각 13)부터 **아무 선에도 안 닿은 추가 작업**이 여기로
+ *    떨어진다 — 전에는 「추가 작업이라서」라는 따로 난 가지였는데, 이제 추가
+ *    작업도 선을 가질 수 있어서 가지를 하나로 합쳤다. 이은 추가 작업은 경로에
+ *    그대로 들어가고 분모에도 센다.
  *    실측(2026-11-02): 「원복 검사 및 개선 작업 (3상 입력)」은 END 가 아예 없어
  *    언제나 여기로 떨어지고, 「기본 통전 검사 (3상 입력)」도 할 일 27개 가운데
  *    **4개**는 END 로 가는 길이 없다.
@@ -308,9 +328,9 @@ export type ExecutionProgress =
 export function computeExecutionProgress(input: {
   /** 사람이 할 일 전부 — getExecutionDetail 이 내려준 배열 그대로(START 는 이미 빠져 있다). */
   nodes: readonly ProgressExecutionNode[];
-  /** 절차 **그림 재료** — START · 참고 문서까지 전부. */
-  templateNodes: readonly PathTemplateNode[];
-  edges: readonly PathTemplateEdge[];
+  /** 절차 **그림 재료** — START · 참고 문서 · 이 건에서 더한 작업까지 전부. */
+  graphNodes: readonly PathGraphNode[];
+  edges: readonly PathGraphEdge[];
   /** pickCurrentTask 가 고른 「지금 할 일」. 🔴 화면이 다시 고르지 않는다. */
   currentExecutionNodeId: string | null;
 }): ExecutionProgress {
@@ -318,26 +338,26 @@ export function computeExecutionProgress(input: {
   if (input.currentExecutionNodeId === null) return fallback;
 
   const current = input.nodes.find((n) => n.id === input.currentExecutionNodeId) ?? null;
-  if (current === null || current.procedureTemplateNodeId === null) return fallback;
+  if (current === null) return fallback;
 
   const head = findShortestTemplatePath({
-    nodes: input.templateNodes,
+    nodes: input.graphNodes,
     edges: input.edges,
-    fromNodeIds: collectStartNodeIds(input.templateNodes),
-    toNodeIds: [current.procedureTemplateNodeId],
+    fromNodeIds: collectStartNodeIds(input.graphNodes),
+    toNodeIds: [current.graphNodeId],
   });
   if (head === null) return fallback;
 
   const tail = findShortestTemplatePath({
-    nodes: input.templateNodes,
+    nodes: input.graphNodes,
     edges: input.edges,
-    fromNodeIds: [current.procedureTemplateNodeId],
-    toNodeIds: collectEndNodeIds(input.templateNodes),
+    fromNodeIds: [current.graphNodeId],
+    toNodeIds: collectEndNodeIds(input.graphNodes),
   });
   if (tail === null) return fallback;
 
-  const headIds = toExecutionNodeIdsOnPath(head, input.templateNodes, input.nodes);
-  const tailIds = toExecutionNodeIdsOnPath(tail, input.templateNodes, input.nodes);
+  const headIds = toExecutionNodeIdsOnPath(head, input.graphNodes, input.nodes);
+  const tailIds = toExecutionNodeIdsOnPath(tail, input.graphNodes, input.nodes);
   // 두 토막의 **이음매가 지금 작업**이라 한 번씩 들어 있다 — 그래서 1 을 뺀다.
   //
   // 🔵 앞 토막과 뒤 토막에 **같은 줄이 또 나올 수 있다**(고리가 있는 절차에서

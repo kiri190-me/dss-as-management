@@ -4,6 +4,7 @@ import { db } from "../client";
 import {
   procedureCaseExecutions,
   procedureCaseExecutionNodes,
+  procedureCaseExecutionEdges,
   procedureCaseExecutionHistory,
   procedureTemplates,
   procedureTemplateNodes,
@@ -19,7 +20,11 @@ import {
   type TopologyEdge,
   type TopologyExecutionNode,
 } from "@/lib/domain/procedure-execution-topology";
-import { sortByProcedureExecutionOrder } from "@/lib/domain/procedure-execution-order";
+import {
+  resolveAddedTaskAnchors,
+  sortByProcedureExecutionOrder,
+  type AddedTaskAnchor,
+} from "@/lib/domain/procedure-execution-order";
 import type { PastExecutionCandidate } from "@/lib/domain/procedure-execution-past-runs";
 import { classifyProductRelation, type ProductIdentity } from "@/lib/domain/product-relation";
 import type {
@@ -292,7 +297,15 @@ export async function getOtherExecutionsForCase(
     })
     .from(procedureCaseExecutionNodes)
     .leftJoin(procedureTemplateNodes, eq(procedureCaseExecutionNodes.procedureTemplateNodeId, procedureTemplateNodes.id))
-    .where(inArray(procedureCaseExecutionNodes.executionId, executionIds));
+    // 🔴 치운 추가 작업은 안 센다(2026-11-03, 조각 13). 안 거르면 「이 건의 다른
+    // 절차」 줄의 분모만 커져서, 같은 실행인데 큰 카드는 「전체 22」인데 이 줄은
+    // 「/ 23」이 된다 — 바로 아래 START 를 빼는 것과 같은 까닭이다.
+    .where(
+      and(
+        inArray(procedureCaseExecutionNodes.executionId, executionIds),
+        eq(procedureCaseExecutionNodes.isDeleted, false)
+      )
+    );
 
   const nodesByExecutionId = new Map<string, { status: ProcedureCaseExecutionNodeStatus }[]>();
   for (const row of nodeRows) {
@@ -348,6 +361,17 @@ export type ExecutionNodeDetail = {
   id: string;
   procedureTemplateNodeId: string | null;
   /**
+   * **그림 위 자리 id**(2026-11-03, 조각 13) — 템플릿에서 온 줄은
+   * `procedureTemplateNodeId`, 이 건에서 더한 작업은 **제 실행 노드 id** 다.
+   *
+   * 🔴 도메인 함수들이 전부 이 열쇠로 그림을 걷는다(흐름 띠 · 최단 경로 · 자동
+   * 전진 · 옮기기 딱지). 추가 작업에 자리를 안 주면 그 넷이 추가 작업 앞에서
+   * 통째로 멈춘다 — 조각 12 까지가 그 상태였다.
+   */
+  graphNodeId: string;
+  /** 이 건에서 더한 작업인가(= procedureTemplateNodeId 가 비었는가). 치울 수 있는 줄이 이것뿐이다. */
+  isAddedInCase: boolean;
+  /**
    * 1 부터 매긴 **절차상 번호** — 이 배열이 늘어선 차례 그대로다. 화면이
    * 카드에 그리는 번호가 이것이고, 요약의 「N번째 / 전체」와 같은 자를 쓴다.
    *
@@ -357,12 +381,25 @@ export type ExecutionNodeDetail = {
    */
   orderIndex: number;
   nodeCode: string | null;
+  /**
+   * 🔵 2026-11-03(조각 13)부터 **추가 작업도 갈래를 가진다**(extra_task_node_type).
+   * 읽는 차례는 「템플릿 노드의 갈래 → 추가 작업의 갈래」이고, 둘 다 없는 줄
+   * (칸이 생기기 전에 등록된 옛 추가 작업)만 null 이다. 판단 노드인지 가리는
+   * 자리가 이 값 하나를 본다 — 화면도(CurrentTaskCard) 쓰기 쪽도 같다.
+   */
   nodeType: ProcedureNodeType | null;
   title: string;
   instructions: string | null;
   status: ProcedureCaseExecutionNodeStatus;
   selectedOutgoingEdgeId: string | null;
-  /** Only populated for DECISION nodes — the choices completeExecutionNode's selectedOutgoingEdgeId accepts. */
+  /**
+   * Only populated for DECISION nodes — the choices completeExecutionNode's
+   * selectedOutgoingEdgeId accepts.
+   *
+   * 🔵 2026-11-03(조각 13) — **이 건에서 그은 갈래도 들어 있다.** 판단 노드에서
+   * 나가는 선이면 템플릿 것이든 더한 것이든 고를 수 있어야, 「추가 작업으로
+   * 가는 NG 갈래」가 단추로 선다.
+   */
   outgoingEdgeOptions: ExecutionOutgoingEdgeOption[];
   effectiveAssigneeId: string | null;
   effectiveAssigneeName: string | null;
@@ -384,16 +421,27 @@ export type ExecutionReferenceNode = {
 };
 
 /**
- * 템플릿 간선을 **그대로** 실은 것 — 실행 화면의 작은 흐름 그림이 쓴다
- * (procedure-execution-minimap.ts).
+ * 흐름 그림의 선 하나 — 실행 화면의 작은 흐름 띠
+ * (procedure-execution-minimap.ts), 「전체 단계 보기」 팝업의 플로우차트, 최단
+ * 경로, 자동 전진이 **전부 이 한 목록**을 쓴다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **합치는 자리가 여기 한 곳**이다(2026-11-03, 조각 13)
+ * ──────────────────────────────────────────────────────────────────────
+ * procedure_template_edges(원본 절차의 선)와 procedure_case_execution_edges
+ * (이 건에서 그은 선)를 getExecutionDetail 이 **한 배열로** 내려보낸다. 받는
+ * 쪽 넷은 두 표가 있다는 것을 몰라도 되고, 그래서 「추가 간선을 어디에 더
+ * 반영해야 하나」를 자리마다 다시 묻지 않아도 된다 — 그중 하나를 빠뜨리면
+ * 「흐름 띠에는 보이는데 진행률에는 안 세는」 식의 어긋남이 조용히 생긴다.
  *
  * 🔴 노드마다 달린 outgoingEdgeOptions 로는 그림을 못 그린다. 그쪽은 **판단
  * 노드에만** 채워지고(비판단 노드는 빈 배열), 들어오는 선은 아예 없다 —
  * 「어디서 왔는가」가 그림의 절반인데 그 절반이 비어 있다.
  *
- * 양끝은 procedure_template_nodes.id 다. START·참고 문서처럼 실행 행이 없는
- * 노드로 가는 선도 섞여 있고, 거르는 것은 받는 쪽 몫이다 — 여기서 미리 걸러
- * 두면 「왜 간선 수가 편집 화면과 다른가」를 나중에 아무도 설명하지 못한다.
+ * 양끝은 **그림 위 자리 id** 다(ExecutionNodeDetail.graphNodeId 와 같은 열쇠).
+ * START·참고 문서처럼 실행 행이 없는 노드로 가는 선도 섞여 있고, 거르는 것은
+ * 받는 쪽 몫이다 — 여기서 미리 걸러 두면 「왜 간선 수가 편집 화면과 다른가」를
+ * 나중에 아무도 설명하지 못한다.
  */
 export type ExecutionFlowEdge = {
   id: string;
@@ -401,6 +449,12 @@ export type ExecutionFlowEdge = {
   toNodeId: string;
   branchType: ProcedureBranchType;
   branchLabel: string | null;
+  /**
+   * 이 건에서 그은 선인가. 🔴 **지울 수 있는 선이 이것뿐**이라 창이 이 값으로
+   * 단추를 가른다(템플릿 선을 고르면 까닭이 적힌다). 쓰기 쪽도 같은 사실을
+   * 제 손으로 다시 확인한다 — 화면 값을 믿고 지우지 않는다.
+   */
+  isAddedInCase: boolean;
   /**
    * 🔵 2026-11-02(조각 10)에 칸 둘이 늘었다 — sortOrder · sourceConnectorId.
    * 「전체 단계 보기」 팝업의 플로우차트가 ProcedureFlowGraph 를 그대로 쓰는데,
@@ -411,6 +465,23 @@ export type ExecutionFlowEdge = {
    */
   sortOrder: number;
   sourceConnectorId: string | null;
+};
+
+/**
+ * 그림의 한 칸. 불러오기 창이 쓰는 ExecutableTemplateNode 와 **같은 열한
+ * 칸**에, 이 건에서 더한 작업인지 한 칸만 보탠 모양이다.
+ *
+ * 🔴 더한 작업에는 저장된 칸이 없다 — 아래 값들은 조회가 **만들어** 넣는다:
+ *  - `id`        … 그 작업의 실행 노드 id(= 그림 위 자리 id).
+ *  - `nodeCode`  … `extra-<실행 노드 id>`. 손으로 만든 절차 노드가 쓰는
+ *                  `manual-<uuid>` 와 같은 꼴이라 눈으로도 갈린다.
+ *  - `nodeType`  … 사람이 고른 갈래(extra_task_node_type). 칸이 생기기 전에
+ *                  등록된 옛 줄은 비어 있어 TASK 로 읽는다.
+ *  - 좌표        … **바로 앞 칸의 오른쪽**에 세운다(아래 placeAddedGraphNodes).
+ *                  저장하지 않는다 — 다음에 열어도 같은 규칙으로 같은 자리다.
+ */
+export type ExecutionGraphNode = ExecutableTemplateNode & {
+  isAddedInCase: boolean;
 };
 
 export type ExecutionDetail = {
@@ -440,19 +511,22 @@ export type ExecutionDetail = {
    */
   templateCategory: ProcedureTemplateCategory;
   /**
-   * 절차 **그림 재료**로서의 노드 — 「전체 단계 보기」 팝업의 플로우차트가
-   * 그린다(2026-11-02, 조각 10).
+   * **그림 재료**로서의 칸 — 「전체 단계 보기」 팝업과 「추가 작업 등록」 창의
+   * 플로우차트가 그린다.
+   *
+   * 🔴 2026-11-03(조각 13)에 이름이 `templateNodes` 에서 바뀌었다. 이제 **이
+   * 건에서 더한 작업도 한 칸**이라 「템플릿 노드」라는 이름이 거짓이 됐기
+   * 때문이다 — 이 저장소가 「주석이 실측과 어긋나면 안 된다」로 적어 둔 그것이다.
    *
    * 🔴 위의 `nodes`(실행 노드)와 **다른 것**이다. 이쪽은 START 와 참고 문서까지
    * 전부 들어 있고(그림은 절차 전체를 그린다) 실행 상태가 없다. 상태는 실행
-   * 노드의 procedureTemplateNodeId 로 맞물려 그림에 얹는다
-   * (buildJumpStatusMarks).
+   * 노드의 graphNodeId 로 맞물려 그림에 얹는다(buildJumpStatusMarks).
    *
-   * 🔵 받는 칸은 불러오기 창과 **같은 열한 개**다(ExecutableTemplateNode) —
-   * 그 그림이 실제로 읽는 칸만. instructions 같은 긴 글은 실행 노드 쪽에 이미
+   * 🔵 받는 칸은 불러오기 창과 **같은 열한 개 + 하나**다 — 그 그림이 실제로 읽는
+   * 칸에 `isAddedInCase` 만 보탰다. instructions 같은 긴 글은 실행 노드 쪽에 이미
    * 실려 있으므로 여기 또 실으면 같은 글이 두 번 내려간다.
    */
-  templateNodes: ExecutableTemplateNode[];
+  graphNodes: ExecutionGraphNode[];
 };
 
 export async function getExecutionDetail(executionId: string): Promise<ExecutionDetail | null> {
@@ -490,10 +564,14 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
   // getRepairCaseById gate.
   if (!execution.repairCaseId) return null;
 
+  // 🔴 치운 추가 작업은 **읽지 않는다**(2026-11-03, 조각 13). 행은 그대로 남는다 —
+  // 감사 이력이 그 행을 가리키고 있어서 진짜로 지울 수 없기 때문이다(스키마의
+  // is_deleted 주석). 여기서 안 거르면 「지웠는데 그대로 있다」가 되고, 그것은
+  // 오류를 하나도 안 내므로 눈으로만 드러난다.
   const execNodes = await db
     .select()
     .from(procedureCaseExecutionNodes)
-    .where(eq(procedureCaseExecutionNodes.executionId, executionId));
+    .where(and(eq(procedureCaseExecutionNodes.executionId, executionId), eq(procedureCaseExecutionNodes.isDeleted, false)));
 
   // sortOrder 가 여기 끼어든 까닭은 아래 정렬이 쓰기 때문이다. ORDER BY 는
   // 참고 문서 목록(referenceNodes)이 이 배열 차례를 그대로 쓰므로 함께 건다 —
@@ -540,8 +618,82 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
     // 전에는 DB 가 주는 대로라 새로고침할 때마다 「정상 / NG」가 자리를
     // 바꿀 수 있었다 — sort_order 는 절차를 만든 사람이 매긴 차례다.
     .orderBy(procedureTemplateEdges.sortOrder);
-  const outgoingEdgesByFromNodeId = new Map<string, typeof templateEdges>();
-  for (const edge of templateEdges) {
+  // ────────────────────────────────────────────────────────────────────
+  // 🔴 **두 표를 여기서 한 목록으로 합친다**(2026-11-03, 조각 13)
+  // ────────────────────────────────────────────────────────────────────
+  // 이 건에서 그은 선(procedure_case_execution_edges)의 양끝은 **실행 노드**
+  // id 다. 그림·경로·띠·자동 전진은 전부 **그림 위 자리 id** 로 걷게 되어
+  // 있으므로, 여기서 한 번만 옮겨 적는다 — 템플릿에서 온 줄은 그 템플릿 노드
+  // id, 더한 작업은 제 실행 노드 id.
+  //
+  // 🔵 합치는 자리를 하나로 둔 덕에 앞 조각 다섯(차례 · 자동 전진 · 흐름 띠 ·
+  // 최단 경로 · 옮기기 팝업)이 **고칠 것 없이** 추가 간선을 따라간다.
+  const executionEdgeRows = await db
+    .select({
+      id: procedureCaseExecutionEdges.id,
+      fromNodeId: procedureCaseExecutionEdges.fromNodeId,
+      toNodeId: procedureCaseExecutionEdges.toNodeId,
+      branchType: procedureCaseExecutionEdges.branchType,
+      branchLabel: procedureCaseExecutionEdges.branchLabel,
+      sortOrder: procedureCaseExecutionEdges.sortOrder,
+    })
+    .from(procedureCaseExecutionEdges)
+    .where(
+      and(eq(procedureCaseExecutionEdges.executionId, executionId), eq(procedureCaseExecutionEdges.isDeleted, false))
+    )
+    // 템플릿 간선과 같은 잣대로 줄 세운다 — 판단 노드의 갈래 단추 차례가 이것이다.
+    .orderBy(procedureCaseExecutionEdges.sortOrder, procedureCaseExecutionEdges.createdAt);
+
+  const execNodeById = new Map(execNodes.map((n) => [n.id, n]));
+  /** 실행 줄 하나의 **그림 위 자리 id**. 이 규칙이 이 파일에 단 한 번만 적힌다. */
+  const graphNodeIdOf = (n: { id: string; procedureTemplateNodeId: string | null }): string =>
+    n.procedureTemplateNodeId ?? n.id;
+
+  const addedNodeRows = execNodes.filter((n) => n.procedureTemplateNodeId === null);
+
+  const flowEdges: ExecutionFlowEdge[] = [
+    // 간선 차례는 위 orderBy(sortOrder) 가 정한 그대로다 — 흐름 그림의 갈래
+    // 차례가 「지금 할 일」 카드의 갈래 단추 차례와 같아야 한다.
+    ...templateEdges.map((e) => ({
+      id: e.id,
+      fromNodeId: e.fromNodeId,
+      toNodeId: e.toNodeId,
+      branchType: e.branchType,
+      branchLabel: e.branchLabel,
+      isAddedInCase: false,
+      sortOrder: e.sortOrder,
+      sourceConnectorId: e.sourceConnectorId,
+    })),
+    ...executionEdgeRows
+      // 🔴 치운 작업에 걸린 선은 뺀다. 치우기가 제 선도 함께 치우므로 보통은
+      // 걸릴 것이 없지만, 걸러 두지 않으면 한쪽만 남은 선이 그림에 **끝이 없는
+      // 화살표**로 그려진다(ReactFlow 는 모르는 노드를 가리키는 선을 그냥 버린다 —
+      // 버려진다는 사실이 화면 어디에도 안 적힌다).
+      .filter((e) => execNodeById.has(e.fromNodeId) && execNodeById.has(e.toNodeId))
+      .map((e) => ({
+        id: e.id,
+        fromNodeId: graphNodeIdOf(execNodeById.get(e.fromNodeId)!),
+        toNodeId: graphNodeIdOf(execNodeById.get(e.toNodeId)!),
+        branchType: e.branchType,
+        branchLabel: e.branchLabel,
+        isAddedInCase: true,
+        sortOrder: e.sortOrder,
+        // 엑셀 도형 연결자는 원본 절차에만 있는 것이다 — 손으로 그은 선에는 없다.
+        sourceConnectorId: null,
+      })),
+  ];
+
+  // 🔵 **이어 붙인 작업이 목록의 어디에 서는가.** 그림을 걸어 앞 칸을 찾는 일은
+  // 도메인이 한다(resolveAddedTaskAnchors) — 차례도 그림의 자리도 같은 답에서
+  // 나와야 목록과 플로우차트가 같은 「앞 작업」을 가리킨다.
+  const anchorByGraphNodeId: ReadonlyMap<string, AddedTaskAnchor> = resolveAddedTaskAnchors({
+    templateNodes: templateNodes.map((n) => ({ graphNodeId: n.id, sortOrder: n.sortOrder })),
+    addedGraphNodeIds: addedNodeRows.map((n) => n.id),
+    edges: flowEdges,
+  });
+
+  const outgoingEdgesByFromNodeId = new Map<string, ExecutionFlowEdge[]>();
+  for (const edge of flowEdges) {
     const list = outgoingEdgesByFromNodeId.get(edge.fromNodeId) ?? [];
     list.push(edge);
     outgoingEdgesByFromNodeId.set(edge.fromNodeId, list);
@@ -559,12 +711,39 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
   const userRows = userIds.size > 0 ? await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, [...userIds])) : [];
   const nameById = new Map(userRows.map((u) => [u.id, u.name]));
 
+  // ────────────────────────────────────────────────────────────────────
+  // 그림 재료 — 템플릿 칸 + 이 건에서 더한 칸
+  // ────────────────────────────────────────────────────────────────────
+  // 🔴 **거르지 않는다.** 그림은 절차 전체를 그리므로 START 도 참고 문서도
+  // 그대로 들어간다 — 아래 `nodes`(실행 노드)가 START 를 빼는 것과 잣대가 다른
+  // 까닭이 그것이다. 그 둘을 못 고르게 막는 것은 판정 쪽의 일이다
+  // (classifyJumpTarget 이 실행 행이 없는 칸을 NOT_IN_EXECUTION 으로 가른다).
+  const graphNodes: ExecutionGraphNode[] = templateNodes.map((n) => ({
+    id: n.id,
+    nodeCode: n.nodeCode,
+    nodeType: n.nodeType,
+    title: n.title,
+    positionX: n.positionX,
+    positionY: n.positionY,
+    userPositionX: n.userPositionX,
+    userPositionY: n.userPositionY,
+    sortOrder: n.sortOrder,
+    sourceWorksheet: n.sourceWorksheet,
+    sourceShapeId: n.sourceShapeId,
+    isAddedInCase: false,
+  }));
+  graphNodes.push(...placeAddedGraphNodes(addedNodeRows, graphNodes, anchorByGraphNodeId));
+
   // Suggested-next computation (plan §7) — guidance only, never a gate.
-  const topologyNodes: TopologyNode[] = templateNodes.map((n) => ({ id: n.id, nodeType: n.nodeType }));
-  const topologyEdges: TopologyEdge[] = templateEdges.map((e) => ({ id: e.id, fromNodeId: e.fromNodeId, toNodeId: e.toNodeId }));
+  //
+  // 🔵 2026-11-03(조각 13) — 합친 그림을 그대로 넘긴다. 더한 작업이 「들어오는
+  // 선이 없어 무조건 추천」이던 가지가 사라지고, 이은 작업은 템플릿 노드와 같은
+  // 잣대로 판정된다(computeSuggestedNextNodes 의 그 자리 주석).
+  const topologyNodes: TopologyNode[] = graphNodes.map((n) => ({ id: n.id, nodeType: n.nodeType }));
+  const topologyEdges: TopologyEdge[] = flowEdges.map((e) => ({ id: e.id, fromNodeId: e.fromNodeId, toNodeId: e.toNodeId }));
   const topologyExecutionNodes: TopologyExecutionNode[] = execNodes.map((n) => ({
     id: n.id,
-    procedureTemplateNodeId: n.procedureTemplateNodeId,
+    graphNodeId: graphNodeIdOf(n),
     status: n.status,
     selectedOutgoingEdgeId: n.selectedOutgoingEdgeId,
   }));
@@ -583,13 +762,19 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
   // 요지는 node_code 에도 그래프에도 차례가 없고, 템플릿의 sort_order 만이
   // 사람이 적은 차례라는 것.
   //
+  // 🔵 2026-11-03(조각 13) — 이어 붙인 추가 작업은 **맨 뒤가 아니라 그 앞 작업
+  // 바로 뒤**에 선다(anchorByGraphNodeId). 아무 선에도 안 닿은 추가 작업은
+  // 전처럼 맨 뒤다.
+  const graphNodeTitleById = new Map(graphNodes.map((n) => [n.id, n.title]));
   const orderedEntries = sortByProcedureExecutionOrder(
     execNodes
       .map((n) => {
         const templateNode = n.procedureTemplateNodeId ? templateNodeById.get(n.procedureTemplateNodeId) : undefined;
+        const anchor = anchorByGraphNodeId.get(n.id);
         return {
           id: n.id,
-          procedureSortOrder: templateNode?.sortOrder ?? null,
+          procedureSortOrder: templateNode?.sortOrder ?? anchor?.procedureSortOrder ?? null,
+          insertionDepth: anchor?.insertionDepth ?? 0,
           nodeCode: templateNode?.nodeCode ?? null,
           addedAt: n.createdAt.toISOString(),
           row: n,
@@ -603,13 +788,18 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
     .map((entry, index) => {
       const n = entry.row;
       const templateNode = entry.templateNode;
+      const graphNodeId = graphNodeIdOf(n);
+      // 🔴 갈래는 「템플릿 노드 → 추가 작업」 차례로 한 번만 읽는다. 화면도 쓰기
+      // 쪽도 이 값을 보고 판단 노드인지 가르므로, 자리마다 다시 ?? 로 이으면
+      // 한쪽만 고치는 날이 온다(타입이 같아 컴파일러는 침묵한다).
+      const nodeType = templateNode?.nodeType ?? n.extraTaskNodeType;
       const effectiveAssigneeId = n.assignedEngineerId ?? execution.caseAssignedEngineerId;
       const outgoingEdgeOptions: ExecutionOutgoingEdgeOption[] =
-        templateNode?.nodeType === "DECISION"
-          ? (outgoingEdgesByFromNodeId.get(templateNode.id) ?? []).map((e) => ({
+        nodeType === "DECISION"
+          ? (outgoingEdgesByFromNodeId.get(graphNodeId) ?? []).map((e) => ({
               edgeId: e.id,
               toNodeId: e.toNodeId,
-              toNodeTitle: templateNodeById.get(e.toNodeId)?.title ?? "-",
+              toNodeTitle: graphNodeTitleById.get(e.toNodeId) ?? "-",
               branchType: e.branchType,
               branchLabel: e.branchLabel,
             }))
@@ -618,11 +808,13 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       return {
         id: n.id,
         procedureTemplateNodeId: n.procedureTemplateNodeId,
+        graphNodeId,
+        isAddedInCase: n.procedureTemplateNodeId === null,
         // START 와 참고 문서가 이미 빠진 뒤의 1-based 번호 — 사람이 할 일만
         // 센다. 그래서 요약의 「N번째 / 전체 N」과 자가 정확히 같다.
         orderIndex: index + 1,
         nodeCode: templateNode?.nodeCode ?? null,
-        nodeType: templateNode?.nodeType ?? null,
+        nodeType,
         title: templateNode?.title ?? n.extraTaskTitle ?? "-",
         instructions: templateNode?.instructions ?? n.extraTaskInstructions,
         status: n.status,
@@ -658,36 +850,110 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
     isCaseLocked: execution.isCaseLocked,
     nodes,
     referenceNodes,
-    // 간선 차례는 위 orderBy(sortOrder) 가 정한 그대로 내려보낸다 — 흐름 그림의
-    // 갈래 차례가 「지금 할 일」 카드의 갈래 단추 차례와 같아야 한다.
-    flowEdges: templateEdges.map((e) => ({
-      id: e.id,
-      fromNodeId: e.fromNodeId,
-      toNodeId: e.toNodeId,
-      branchType: e.branchType,
-      branchLabel: e.branchLabel,
-      sortOrder: e.sortOrder,
-      sourceConnectorId: e.sourceConnectorId,
-    })),
+    flowEdges,
     templateCategory: execution.templateCategory,
-    // 🔴 **거르지 않는다.** 그림은 절차 전체를 그리므로 START 도 참고 문서도
-    // 그대로 들어간다 — 위의 `nodes`(실행 노드)가 START 를 빼는 것과 잣대가
-    // 다른 까닭이 그것이다. 그 둘을 못 고르게 막는 것은 판정 쪽의 일이다
-    // (classifyJumpTarget 이 실행 행이 없는 칸을 NOT_IN_EXECUTION 으로 가른다).
-    templateNodes: templateNodes.map((n) => ({
-      id: n.id,
-      nodeCode: n.nodeCode,
-      nodeType: n.nodeType,
-      title: n.title,
-      positionX: n.positionX,
-      positionY: n.positionY,
-      userPositionX: n.userPositionX,
-      userPositionY: n.userPositionY,
-      sortOrder: n.sortOrder,
-      sourceWorksheet: n.sourceWorksheet,
-      sourceShapeId: n.sourceShapeId,
-    })),
+    graphNodes,
   };
+}
+
+// ---- 더한 작업을 그림의 **어디에** 그리는가 ----
+
+/** 앞 칸에서 오른쪽으로 띄우는 거리. 절차 편집기의 「상대 위치로 이동」과 같은 눈금이다. */
+const ADDED_NODE_GAP_X = 300;
+/** 같은 앞 칸에 여럿이 붙었을 때 아래로 쌓는 간격. 편집기의 세로 간격과 같다. */
+const ADDED_NODE_GAP_Y = 150;
+
+/**
+ * 이 건에서 더한 작업의 **그림 좌표**를 만든다.
+ *
+ * 🔴 저장하지 않는다. 추가 작업에는 position_x/y 칸이 없고(일부러 안 만들었다 —
+ * 조각 13 의 표 신설은 선만 담는다), 그래서 **볼 때마다 같은 규칙으로 다시
+ * 센다.** 같은 입력이면 같은 자리라 새로고침해도 칸이 안 움직인다.
+ *
+ * 규칙은 둘뿐이다:
+ *  - 앞 칸이 있으면 **그 칸 오른쪽**, 같은 앞 칸에 여럿이면 아래로 쌓는다.
+ *  - 앞 칸이 없으면(아무 선에도 안 닿은 작업) 그림 **오른쪽 바깥**에 한 줄로
+ *    세운다. 겹쳐 놓으면 칸 하나처럼 보여서 「등록했는데 안 생겼다」가 된다.
+ *
+ * 🔴 **깊이 차례로** 센다. 사슬(앞 칸도 더한 작업인 경우)에서 부모 자리가 먼저
+ * 정해져 있어야 자식이 그 옆에 선다 — 차례를 안 지키면 부모가 아직 (0,0) 일 때
+ * 자식이 (300,0) 에 서고, 나중에 부모가 옮겨 가 둘이 멀어진다.
+ *
+ * 🔵 좌표는 **보이는 것**이라 시험으로 지키지 않는다(이 저장소의 「세는 화면의
+ * 결함은 눈으로만 잡힌다」). 대신 겹치거나 사라지지 않을 근거를 규칙으로 못 박아
+ * 둔다 — 같은 앞 칸의 형제는 서로 다른 y 를, 앞 칸 없는 것은 서로 다른 y 를 받는다.
+ */
+function placeAddedGraphNodes(
+  addedRows: readonly (typeof procedureCaseExecutionNodes.$inferSelect)[],
+  placedNodes: readonly ExecutionGraphNode[],
+  anchorByGraphNodeId: ReadonlyMap<string, AddedTaskAnchor>
+): ExecutionGraphNode[] {
+  const effectivePosition = new Map<string, { x: number; y: number }>();
+  let rightmostX = 0;
+  let maxSortOrder = 0;
+  for (const node of placedNodes) {
+    const x = node.userPositionX ?? node.positionX;
+    const y = node.userPositionY ?? node.positionY;
+    effectivePosition.set(node.id, { x, y });
+    if (x > rightmostX) rightmostX = x;
+    if (node.sortOrder > maxSortOrder) maxSortOrder = node.sortOrder;
+  }
+
+  const siblingCountByAnchor = new Map<string, number>();
+  let floatingCount = 0;
+
+  // 깊이 오름차순, 같으면 만들어진 차례 — 같은 입력이면 언제나 같은 자리다.
+  const ordered = [...addedRows].sort((a, b) => {
+    const da = anchorByGraphNodeId.get(a.id)?.insertionDepth ?? Number.MAX_SAFE_INTEGER;
+    const db2 = anchorByGraphNodeId.get(b.id)?.insertionDepth ?? Number.MAX_SAFE_INTEGER;
+    if (da !== db2) return da - db2;
+    const ta = a.createdAt.getTime();
+    const tb = b.createdAt.getTime();
+    if (ta !== tb) return ta - tb;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+
+  const made: ExecutionGraphNode[] = [];
+  for (const row of ordered) {
+    const anchor = anchorByGraphNodeId.get(row.id);
+    let x: number;
+    let y: number;
+    if (anchor) {
+      const base = effectivePosition.get(anchor.anchorGraphNodeId) ?? { x: rightmostX, y: 0 };
+      const sibling = siblingCountByAnchor.get(anchor.anchorGraphNodeId) ?? 0;
+      siblingCountByAnchor.set(anchor.anchorGraphNodeId, sibling + 1);
+      x = base.x + ADDED_NODE_GAP_X;
+      y = base.y + sibling * ADDED_NODE_GAP_Y;
+    } else {
+      x = rightmostX + ADDED_NODE_GAP_X;
+      y = floatingCount * ADDED_NODE_GAP_Y;
+      floatingCount += 1;
+    }
+    effectivePosition.set(row.id, { x, y });
+
+    made.push({
+      id: row.id,
+      // 손으로 만든 절차 노드가 쓰는 `manual-<uuid>` 와 같은 꼴 — 눈으로도 갈린다.
+      nodeCode: `extra-${row.id}`,
+      // 🔵 칸이 생기기 전에 등록된 옛 추가 작업은 갈래가 비어 있다. 그림은 갈래가
+      //    있어야 모양을 고르므로 작업(TASK)으로 읽는다 — 그 줄들이 실제로 하던
+      //    일이 그것이다(단추도 완료 하나뿐이었다).
+      nodeType: row.extraTaskNodeType ?? "TASK",
+      title: row.extraTaskTitle ?? "-",
+      positionX: x,
+      positionY: y,
+      // 🔴 사용자 배치로도 **같은 값**을 적어 둔다. 그림은 사용자 배치가 있으면
+      //    그쪽을 쓰고(resolveEffectiveNodePosition), 없으면 절차 갈래에 따라
+      //    자동 배치로 흘러갈 수 있다 — 그러면 방금 센 자리가 버려진다.
+      userPositionX: x,
+      userPositionY: y,
+      sortOrder: anchor ? anchor.procedureSortOrder : maxSortOrder + 1,
+      sourceWorksheet: null,
+      sourceShapeId: null,
+      isAddedInCase: true,
+    });
+  }
+  return made;
 }
 
 // ---- 실행 이력 (execution history timeline) ----

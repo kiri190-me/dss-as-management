@@ -126,8 +126,12 @@ export function pickCurrentTaskNode<T extends FocusCandidate>(
 
 // ---- 하나를 끝냈을 때 설 「다음 하나」 ----
 
+/**
+ * 선 하나. 🔵 2026-11-03(조각 13)부터 템플릿 간선과 **이 건에서 그은 간선**이
+ * 섞여 들어온다 — 양끝은 어느 쪽이든 AutoAdvanceGraphNode.id 와 같은 열쇠다.
+ */
 export type AutoAdvanceEdge = {
-  /** procedure_template_edges.id */
+  /** procedure_template_edges.id 또는 procedure_case_execution_edges.id */
   id: string;
   fromNodeId: string;
   toNodeId: string;
@@ -136,21 +140,30 @@ export type AutoAdvanceEdge = {
 export type AutoAdvanceCandidate = {
   /** procedure_case_execution_nodes.id — 세울 대상의 식별자. */
   id: string;
-  /** 사례별 추가 작업은 null(템플릿 노드가 없다). */
-  procedureTemplateNodeId: string | null;
+  /**
+   * **그림 위 자리 id**. 템플릿에서 온 줄은 그 템플릿 노드 id, 이 건에서 더한
+   * 작업은 **제 실행 노드 id** 다(2026-11-03, 조각 13).
+   */
+  graphNodeId: string;
   status: ProcedureCaseExecutionNodeStatus;
 };
 
-export type AutoAdvanceTemplateNode = {
-  /** procedure_template_nodes.id */
+export type AutoAdvanceGraphNode = {
+  /** 그림 위 자리 id — procedure_template_nodes.id 또는 추가 작업의 실행 노드 id. */
   id: string;
   nodeType: ProcedureNodeType;
 };
 
 export type AutoAdvanceSkipReason =
-  /** 끝낸 것이 사례별 추가 작업이라 그래프에 자리가 없다 — 다음이라는 개념이 없다. */
-  | "NOT_IN_GRAPH"
-  /** 나가는 간선이 없다(END, 또는 그리다 만 가지). */
+  /**
+   * 나가는 간선이 없다(END, 그리다 만 가지, **또는 아직 아무 데도 안 이은 추가
+   * 작업**).
+   *
+   * 🔴 2026-11-03(조각 13)에 마지막 하나가 여기로 합쳐졌다. 전에는
+   * NOT_IN_GRAPH 라는 까닭이 따로 있었고 뜻이 「추가 작업이라 그래프에 자리가
+   * 없다」였는데, 추가 작업이 선을 가질 수 있게 되면서 그 말이 거짓이 됐다 —
+   * 자리는 언제나 있고 없는 것은 선뿐이다.
+   */
   | "NO_OUTGOING_EDGE"
   /** 판단 노드인데 고른 갈래가 이 노드에서 나가는 간선이 아니다. */
   | "SELECTED_BRANCH_MISSING"
@@ -188,7 +201,7 @@ export type AutoAdvanceDecision =
       kind: "ADVANCE";
       executionNodeId: string;
       /**
-       * 세운 노드로 **들어가는** 간선(procedure_template_edges.id).
+       * 세운 노드로 **들어가는** 간선(템플릿 간선 또는 이 건에서 그은 간선의 id).
        *
        * 🔴 참고 문서를 건너뛴 경우 이것은 사람이 고른 갈래가 아니라 **사슬의
        * 마지막 간선**이다 — 참고 문서에서 나와 이 노드로 들어가는 선. 이력에
@@ -252,30 +265,31 @@ export function classifyAutoAdvanceTarget(status: ProcedureCaseExecutionNodeStat
  *    걸음 수로는 안 끝난다. 조각 3 의 흐름 띠(minimap 의 walk)가 같은 문제를
  *    같은 방법으로 푼다 — 본 것을 기억한다.
  *
- * `edges` 에는 **템플릿 전체**를 준다. 끝낸 노드에서 나가는 것만 주면 참고 문서
- * 너머를 볼 수 없다 — 그 노드에서 나가는 선이 거기 없기 때문이다. 끝낸 노드
- * 것만 골라 쓰는 첫 단계는 fromNodeId 로 한 번 더 거르므로, 전체를 줘도 틀리지
- * 않는다.
+ * `edges` 에는 **그림 전체**를 준다(템플릿 간선 + 이 건에서 그은 간선). 끝낸
+ * 노드에서 나가는 것만 주면 참고 문서 너머를 볼 수 없다 — 그 노드에서 나가는
+ * 선이 거기 없기 때문이다. 끝낸 노드 것만 골라 쓰는 첫 단계는 fromNodeId 로 한
+ * 번 더 거르므로, 전체를 줘도 틀리지 않는다.
+ *
+ * 🔵 2026-11-03(조각 13) — **이 건에서 그은 선으로도 다음이 선다.** 합치는 일은
+ * 조회가 하고(getExecutionDetail), 이 함수는 받은 한 목록을 그대로 걷는다.
  */
 export function resolveAutoAdvanceTarget(input: {
-  /** 끝낸 노드의 procedure_template_nodes.id. 추가 작업이면 null. */
-  completedTemplateNodeId: string | null;
+  /** 끝낸 노드의 **그림 위 자리 id**(템플릿 노드 id 또는 추가 작업의 실행 노드 id). */
+  completedGraphNodeId: string;
   isDecision: boolean;
-  /** 판단일 때 사람이 고른 갈래(procedure_template_edges.id). 아니면 null. */
+  /** 판단일 때 사람이 고른 갈래(간선 id). 아니면 null. */
   selectedOutgoingEdgeId: string | null;
-  /** 🔴 템플릿 **전체**의 간선(위 머리말 참고). */
+  /** 🔴 그림 **전체**의 간선(위 머리말 참고). */
   edges: readonly AutoAdvanceEdge[];
   /**
-   * 템플릿 노드의 갈래. 실행 행이 없는 노드가 **참고 문서라서** 없는 것인지,
+   * 그림 칸의 갈래. 실행 행이 없는 노드가 **참고 문서라서** 없는 것인지,
    * 있어야 하는데 없는 것인지를 이것으로만 가를 수 있다.
    */
-  templateNodes: readonly AutoAdvanceTemplateNode[];
+  graphNodes: readonly AutoAdvanceGraphNode[];
   /** 같은 실행에 속한 실행 노드 전부(끝낸 것 자신이 섞여 있어도 된다). */
   executionNodes: readonly AutoAdvanceCandidate[];
 }): AutoAdvanceDecision {
-  if (input.completedTemplateNodeId === null) return { kind: "SKIP", reason: "NOT_IN_GRAPH" };
-
-  const outgoing = input.edges.filter((e) => e.fromNodeId === input.completedTemplateNodeId);
+  const outgoing = input.edges.filter((e) => e.fromNodeId === input.completedGraphNodeId);
 
   let edge: AutoAdvanceEdge | undefined;
   if (input.isDecision) {
@@ -292,7 +306,7 @@ export function resolveAutoAdvanceTarget(input: {
     edge = outgoing[0];
   }
 
-  const nodeTypeById = new Map(input.templateNodes.map((n) => [n.id, n.nodeType]));
+  const nodeTypeById = new Map(input.graphNodes.map((n) => [n.id, n.nodeType]));
   // 🔴 **지나온 참고 문서만** 기억한다. 끝낸 노드 자신을 미리 넣어 두지 않는
   // 까닭: 자기 자신으로 돌아오는 간선이 있으면 그 행은 방금 완료라
   // TARGET_ALREADY_FINISHED 로 갈려야 하고, 그것이 고리를 막는 기존 규칙이다
@@ -304,27 +318,27 @@ export function resolveAutoAdvanceTarget(input: {
   // 끝난다 — 끝나는 근거가 걸음 수가 아니라 **집합이 자란다**는 것이다.
   let hop: AutoAdvanceEdge = edge;
   for (;;) {
-    const targetTemplateNodeId = hop.toNodeId;
-    const target = input.executionNodes.find((n) => n.procedureTemplateNodeId === targetTemplateNodeId);
+    const targetGraphNodeId = hop.toNodeId;
+    const target = input.executionNodes.find((n) => n.graphNodeId === targetGraphNodeId);
     if (target) {
       const blockedReason = classifyAutoAdvanceTarget(target.status);
       if (blockedReason) return { kind: "SKIP", reason: blockedReason };
       return { kind: "ADVANCE", executionNodeId: target.id, viaEdgeId: hop.id };
     }
 
-    const targetNodeType = nodeTypeById.get(targetTemplateNodeId);
+    const targetNodeType = nodeTypeById.get(targetGraphNodeId);
     // 갈래를 모르거나(템플릿에 없는 노드) 실행 행이 있어야 할 갈래인데 없다 —
     // 둘 다 건너뛸 근거가 없다. 건너뛰면 **없는 줄 알고 지나친 일**이 생긴다.
     if (targetNodeType === undefined || isExecutableNodeType(targetNodeType)) {
       return { kind: "SKIP", reason: "TARGET_NOT_EXECUTABLE" };
     }
 
-    if (passedReferenceNodeIds.has(targetTemplateNodeId)) {
+    if (passedReferenceNodeIds.has(targetGraphNodeId)) {
       return { kind: "SKIP", reason: "REFERENCE_CHAIN_LOOPS" };
     }
-    passedReferenceNodeIds.add(targetTemplateNodeId);
+    passedReferenceNodeIds.add(targetGraphNodeId);
 
-    const beyond = input.edges.filter((e) => e.fromNodeId === targetTemplateNodeId);
+    const beyond = input.edges.filter((e) => e.fromNodeId === targetGraphNodeId);
     if (beyond.length === 0) return { kind: "SKIP", reason: "NO_OUTGOING_EDGE" };
     if (beyond.length > 1) return { kind: "SKIP", reason: "AMBIGUOUS_OUTGOING_EDGES" };
     hop = beyond[0];

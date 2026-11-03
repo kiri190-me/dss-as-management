@@ -59,10 +59,13 @@ import { formatFlowEdgeLabel } from "./execution-branch-choice";
  */
 export type FlowStripNode = {
   id: string;
-  procedureTemplateNodeId: string | null;
+  /** 그림 위 자리 id — 더한 작업은 제 실행 노드 id 다(2026-11-03, 조각 13). */
+  graphNodeId: string;
   orderIndex: number;
   title: string;
   status: ProcedureCaseExecutionNodeStatus;
+  /** 이 건에서 더한 작업인가. 띠가 못 그릴 때 **무엇이라고 적을지**가 이 값으로 갈린다. */
+  isAddedInCase: boolean;
 };
 
 type ChipTone = "CURRENT" | "DONE" | "BLOCKED" | "AHEAD";
@@ -251,7 +254,10 @@ export default function ExecutionFlowStrip({
         actions={actions}
         note={
           minimap.reason === "CURRENT_IS_EXTRA_TASK"
-            ? "이 작업은 절차 그림 밖에서 더해진 추가 작업이라 이어지는 단계가 없습니다."
+            ? // 🔵 2026-11-03(조각 13)에 **할 말이 바뀌었다.** 전에는 「절차 그림
+              //   밖이라 이어지는 단계가 없다」였는데, 이제 이을 수 있다 — 사람이
+              //   할 일을 적어 준다.
+              "이 작업은 이 건에서 더한 작업인데 아직 아무 단계와도 이어져 있지 않습니다 — [추가 작업 등록]에서 연결을 더하면 흐름에 나타납니다."
             : "이 절차는 단계끼리 선으로 이어져 있지 않습니다 — [전체 단계 보기]에서 전체를 볼 수 있습니다."
         }
       />

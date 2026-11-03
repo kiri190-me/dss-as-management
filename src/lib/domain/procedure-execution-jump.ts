@@ -81,8 +81,12 @@ export const JUMP_RESULT_LIMIT = 30;
 export type JumpCandidateNode = {
   /** procedure_case_execution_nodes.id — 서버로 보내는 것이 이 값이다. */
   id: string;
-  /** 절차 그림의 노드 id. 사례별 추가 작업은 null(그림에 자리가 없다). */
-  procedureTemplateNodeId: string | null;
+  /**
+   * **그림 위 자리 id**. 템플릿에서 온 줄은 그 템플릿 노드 id, 이 건에서 더한
+   * 작업은 **제 실행 노드 id** 다(2026-11-03, 조각 13 — 전에는 추가 작업이
+   * null 이었고 그것이 「그림에 자리가 없다」는 뜻이었다).
+   */
+  graphNodeId: string;
   /** 1 부터 매긴 절차상 번호. 0 이면 번호가 없는 줄이다. */
   orderIndex: number;
   title: string;
@@ -383,18 +387,16 @@ export function toJumpStatusMark(status: ProcedureCaseExecutionNodeStatus): Jump
 }
 
 /**
- * 절차 그림에 얹을 딱지 지도 — **절차 노드 id** → 그 노드의 상태 딱지.
+ * 절차 그림에 얹을 딱지 지도 — **그림 위 자리 id** → 그 칸의 상태 딱지.
  *
- * 🔴 사례별 추가 작업(procedureTemplateNodeId 가 null)은 지도에 안 들어간다.
- * 그림에 자리가 없는 줄이라 얹을 칸이 없다 — 대신 검색 목록에는 그대로 걸린다
- * (아래 searchJumpTargets). 둘을 같은 규칙으로 묶으면 추가 작업으로는 영영 못
- * 옮기게 된다.
+ * 🔵 2026-11-03(조각 13)부터 **이 건에서 더한 작업도 지도에 들어간다.** 전에는
+ * 「그림에 자리가 없다」며 건너뛰었는데, 추가 작업이 그림의 한 칸이 되면서 그
+ * 말이 거짓이 됐다 — 딱지를 안 얹으면 그림에서 그 칸만 상태 없이 떠 있게 된다.
  */
 export function buildJumpStatusMarks(nodes: readonly JumpCandidateNode[]): Map<string, JumpStatusMark> {
   const marks = new Map<string, JumpStatusMark>();
   for (const node of nodes) {
-    if (node.procedureTemplateNodeId === null) continue;
-    marks.set(node.procedureTemplateNodeId, toJumpStatusMark(node.status));
+    marks.set(node.graphNodeId, toJumpStatusMark(node.status));
   }
   return marks;
 }
@@ -466,15 +468,16 @@ export function findJumpTarget(nodes: readonly JumpCandidateNode[], executionNod
 }
 
 /**
- * 그림에서 누른 **절차 노드**가 어느 실행 줄인지 되찾는다. 없으면 null —
+ * 그림에서 누른 **칸**이 어느 실행 줄인지 되찾는다. 없으면 null —
  * 시작(START) 지점과 참고 문서가 그렇다(실행 행 자체가 안 생긴다).
+ * 아무 칸도 안 골랐을 때도 null 이 들어온다.
  */
-export function findJumpTargetByTemplateNodeId(
+export function findJumpTargetByGraphNodeId(
   nodes: readonly JumpCandidateNode[],
-  procedureTemplateNodeId: string | null
+  graphNodeId: string | null
 ): JumpCandidateNode | null {
-  if (procedureTemplateNodeId === null) return null;
-  return nodes.find((n) => n.procedureTemplateNodeId === procedureTemplateNodeId) ?? null;
+  if (graphNodeId === null) return null;
+  return nodes.find((n) => n.graphNodeId === graphNodeId) ?? null;
 }
 
 // ---- 옮기기 단추 ----

@@ -121,7 +121,7 @@ export function indexStartPickerNodes<T extends StartPickerNode>(nodes: readonly
   const ordered = sortByProcedureExecutionOrder(
     nodes
       .filter((n) => classifyStartNode(n.nodeType).ok)
-      .map((n) => ({ id: n.id, procedureSortOrder: n.sortOrder, nodeCode: n.nodeCode, addedAt: null }))
+      .map((n) => ({ id: n.id, procedureSortOrder: n.sortOrder, insertionDepth: 0, nodeCode: n.nodeCode, addedAt: null }))
   );
   const byId = new Map<string, number>();
   ordered.forEach((entry, index) => byId.set(entry.id, index + 1));
@@ -193,7 +193,7 @@ export function searchStartNodes<T extends StartPickerNode>(
     // 정렬 열쇠에는 제 sort_order 를 그대로 쓴다 — 번호 유무와 상관없이 그린
     // 차례대로 늘어선다.
     const orderedNodes = sortByProcedureExecutionOrder(
-      template.nodes.map((n) => ({ id: n.id, procedureSortOrder: n.sortOrder, nodeCode: n.nodeCode, addedAt: null }))
+      template.nodes.map((n) => ({ id: n.id, procedureSortOrder: n.sortOrder, insertionDepth: 0, nodeCode: n.nodeCode, addedAt: null }))
     );
     const nodeById = new Map(template.nodes.map((n) => [n.id, n]));
     for (const entry of orderedNodes) {

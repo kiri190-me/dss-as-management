@@ -96,10 +96,23 @@ export type ProcedureExecutionOrderKey = {
   /** procedure_case_execution_nodes.id — 마지막 흔들림 방지용. */
   id: string;
   /**
-   * 템플릿이 정한 차례(procedure_template_nodes.sort_order).
-   * 사례별 추가 작업은 템플릿 노드가 없으므로 null 이다.
+   * 이 줄이 **절차 차례의 어디**인가(procedure_template_nodes.sort_order).
+   *
+   * 🔵 2026-11-03(조각 13)에 **뜻이 한 겹 넓어졌다.** 전에는 「템플릿 노드의
+   * sort_order, 추가 작업은 null」이었는데, 이제 추가 작업도 **이어 붙은 자리**가
+   * 있으면 그 앞 작업의 값을 물려받는다(resolveAddedTaskAnchors). 여전히 null 인
+   * 것은 **아무 선에도 안 닿은 추가 작업**뿐이고, 그것은 전처럼 맨 뒤로 간다.
    */
   procedureSortOrder: number | null;
+  /**
+   * 같은 `procedureSortOrder` 안에서 **몇 걸음 뒤에 끼워 넣은 줄인가**
+   * (2026-11-03, 조각 13). 템플릿에서 온 줄은 언제나 0 이고, 그 줄 뒤에 이어 붙인
+   * 추가 작업이 1, 그 뒤에 또 이어 붙인 것이 2 … 이다.
+   *
+   * 🔴 이 칸이 없으면 「3번 작업 뒤에 끼운 추가 작업」이 3번 **앞**에 설 수 있다 —
+   * 둘의 sort_order 가 같아서 그다음 열쇠(번호·id)가 차례를 정해 버리기 때문이다.
+   */
+  insertionDepth: number;
   /** 겹칠 때만 쓰는 보조 열쇠. 추가 작업은 null, 빈 글자일 수도 있다. */
   nodeCode: string | null;
   /** 추가 작업끼리의 차례 — 더해진 때(ISO 문자열). */
@@ -107,27 +120,39 @@ export type ProcedureExecutionOrderKey = {
 };
 
 /**
- * 절차 차례 비교. 네 단계로 내려간다:
+ * 절차 차례 비교. 다섯 단계로 내려간다:
  *
- *   1. 템플릿이 정한 차례(sort_order). 템플릿에 없는 **추가 작업은 언제나 뒤**다
- *      — 절차 중간에 끼워 넣을 자리가 없고, 사람이 나중에 더한 일이므로
- *      「절차 다음에 더 한 일」로 읽히는 쪽이 맞다.
- *   2. 추가 작업끼리는 더해진 차례(addedAt).
- *   3. 번호(node_code). 자릿수가 들쭉날쭉해도 사람이 읽는 차례로.
+ *   1. 절차 차례(sort_order). **아무 선에도 안 닿은 추가 작업은 언제나 뒤**다 —
+ *      끼워 넣을 자리가 그림에 없으니 「절차 다음에 더 한 일」로 읽히는 쪽이 맞다.
+ *   2. 같은 자리 안에서는 **끼워 넣은 깊이**(insertionDepth). 템플릿에서 온 줄(0)이
+ *      언제나 먼저이고, 그 뒤에 이어 붙인 추가 작업이 1 · 2 … 로 따라붙는다.
+ *   3. 깊이까지 같은 추가 작업끼리는 더해진 차례(addedAt).
+ *   4. 번호(node_code). 자릿수가 들쭉날쭉해도 사람이 읽는 차례로.
  *      번호가 없는 쪽(null·빈 글자)은 뒤로 보낸다.
- *   4. id. 여기까지 와도 갈리지 않으면 **입력이 같으면 결과도 같게** 한다 —
+ *   5. id. 여기까지 와도 갈리지 않으면 **입력이 같으면 결과도 같게** 한다 —
  *      새로고침할 때마다 카드 차례가 바뀌는 일이 없어야 한다.
  */
 export function compareProcedureExecutionOrder(a: ProcedureExecutionOrderKey, b: ProcedureExecutionOrderKey): number {
-  const aFromTemplate = a.procedureSortOrder !== null;
-  const bFromTemplate = b.procedureSortOrder !== null;
-  if (aFromTemplate !== bFromTemplate) return aFromTemplate ? -1 : 1;
+  const aPlaced = a.procedureSortOrder !== null;
+  const bPlaced = b.procedureSortOrder !== null;
+  if (aPlaced !== bPlaced) return aPlaced ? -1 : 1;
 
-  if (aFromTemplate && bFromTemplate && a.procedureSortOrder !== b.procedureSortOrder) {
+  if (aPlaced && bPlaced && a.procedureSortOrder !== b.procedureSortOrder) {
     return (a.procedureSortOrder as number) - (b.procedureSortOrder as number);
   }
 
-  if (!aFromTemplate && !bFromTemplate) {
+  if (a.insertionDepth !== b.insertionDepth) return a.insertionDepth - b.insertionDepth;
+
+  // 🔵 깊이가 같으면서 **둘 다 끼워 넣은 줄**일 때만 더해진 차례를 본다. 템플릿
+  //    줄끼리는 깊이가 둘 다 0 이고 addedAt 도 전부 차 있어서, 여기서 재면
+  //    sort_order 가 겹칠 때 **만든 날짜**가 번호를 이겨 버린다.
+  if (a.insertionDepth > 0 && b.insertionDepth > 0) {
+    const aAdded = a.addedAt ?? "";
+    const bAdded = b.addedAt ?? "";
+    if (aAdded !== bAdded) return aAdded < bAdded ? -1 : 1;
+  }
+
+  if (!aPlaced && !bPlaced) {
     const aAdded = a.addedAt ?? "";
     const bAdded = b.addedAt ?? "";
     if (aAdded !== bAdded) return aAdded < bAdded ? -1 : 1;
@@ -143,6 +168,117 @@ export function compareProcedureExecutionOrder(a: ProcedureExecutionOrderKey, b:
   }
 
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+// ---- 이어 붙인 추가 작업이 **어디에** 끼는가 ----
+
+/**
+ * 「이 건에서 더한 작업」이 목록의 **어느 자리**에 서는지 정한다(2026-11-03,
+ * 조각 13).
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 왜 필요한가 — 사용자 결정(2026-11-02)
+ * ──────────────────────────────────────────────────────────────────────
+ * 조각 12 까지 추가 작업은 **언제나 맨 뒤**였다. 끼워 넣을 자리가 그림에 없었기
+ * 때문이다. 조각 13 에서 선을 그을 수 있게 되면서 자리가 생겼다 — 「3번 작업
+ * 다음에 이것도 한다」고 이었으면 목록에서도 3번 바로 뒤에 서야, 큰 카드가
+ * 고르는 「지금 할 일」(절차 차례가 앞선 대기)이 사람이 그린 그림과 맞는다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 어떻게 정하는가
+ * ──────────────────────────────────────────────────────────────────────
+ * 템플릿에서 온 칸을 **출발점**으로 삼아 선을 따라 나아가면서, 처음 닿는
+ * 추가 작업에 그 출발점의 sort_order 와 걸음 수를 적어 준다. 추가 작업에서 또
+ * 이어진 추가 작업은 같은 sort_order 에 걸음 수만 하나 더 깊다.
+ *
+ * 🔴 **본 칸을 기억한다.** 되돌아가는 선이 실제로 있고(실측 42개 중 14개),
+ * 기억하지 않으면 이 걷기가 영영 안 끝난다 — 실패가 아니라 「화면이 안
+ * 돌아온다」로 나타나서 나중에 아무도 못 찾는다(procedure-execution-path.ts ·
+ * minimap 의 walk 가 같은 문제를 같은 방법으로 푼다).
+ *
+ * 🔴 **차례를 못 박는다.** 출발점은 (sort_order, 칸 id) 오름차순, 선은
+ * (sort_order, 선 id) 오름차순으로 따라간다. 추가 작업에 들어오는 선이 둘이면
+ * **먼저 닿은 쪽**이 자리를 정하는데, 그 「먼저」가 흔들리면 같은 화면을 두 번
+ * 열 때 목록 차례가 달라진다 — 오류를 안 내고 아무도 신고하지 않는 종류다.
+ *
+ * 🔵 들어오는 선이 **추가 작업에서만** 오고 그 추가 작업도 자리가 없으면, 끝내
+ * 자리를 못 얻어 맨 뒤로 간다. 그것이 전과 같은 동작이다.
+ */
+export type AddedTaskAnchorEdge = {
+  /** 간선 id — 차례를 못 박는 마지막 열쇠. */
+  id: string;
+  /** 그림 위 자리 id(템플릿 노드 id 또는 추가 작업의 실행 노드 id). */
+  fromNodeId: string;
+  toNodeId: string;
+  sortOrder: number;
+};
+
+export type AddedTaskAnchor = {
+  procedureSortOrder: number;
+  insertionDepth: number;
+  /**
+   * **바로 앞 칸**의 그림 위 자리 id. 목록 차례에는 안 쓰이고, 그림이 이 칸을
+   * 어디에 그릴지 정하는 데 쓴다(추가 작업에는 저장된 좌표가 없다 — 앞 칸 옆에
+   * 세운다). 차례를 정하는 값과 같은 걷기에서 나와야 **목록과 그림이 같은 앞
+   * 칸을 가리킨다.**
+   */
+  anchorGraphNodeId: string;
+};
+
+export function resolveAddedTaskAnchors(input: {
+  /** 템플릿에서 온 칸 — 그림 위 자리 id 와 그 칸의 sort_order. */
+  templateNodes: readonly { graphNodeId: string; sortOrder: number }[];
+  /** 이 건에서 더한 작업의 **그림 위 자리 id**(= 실행 노드 id). */
+  addedGraphNodeIds: readonly string[];
+  /** 템플릿 간선과 추가 간선을 **합친** 목록. */
+  edges: readonly AddedTaskAnchorEdge[];
+}): Map<string, AddedTaskAnchor> {
+  const added = new Set(input.addedGraphNodeIds);
+  if (added.size === 0) return new Map();
+
+  const outgoing = new Map<string, AddedTaskAnchorEdge[]>();
+  const orderedEdges = [...input.edges].sort(
+    (a, b) => a.sortOrder - b.sortOrder || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  );
+  for (const edge of orderedEdges) {
+    const list = outgoing.get(edge.fromNodeId);
+    if (list) list.push(edge);
+    else outgoing.set(edge.fromNodeId, [edge]);
+  }
+
+  const anchors = new Map<string, AddedTaskAnchor>();
+  const seen = new Set<string>();
+  const queue: { graphNodeId: string; procedureSortOrder: number; insertionDepth: number }[] = [];
+
+  const sources = [...input.templateNodes].sort(
+    (a, b) => a.sortOrder - b.sortOrder || (a.graphNodeId < b.graphNodeId ? -1 : a.graphNodeId > b.graphNodeId ? 1 : 0)
+  );
+  for (const node of sources) {
+    if (seen.has(node.graphNodeId)) continue;
+    seen.add(node.graphNodeId);
+    queue.push({ graphNodeId: node.graphNodeId, procedureSortOrder: node.sortOrder, insertionDepth: 0 });
+  }
+
+  for (let i = 0; i < queue.length; i += 1) {
+    const current = queue[i];
+    for (const edge of outgoing.get(current.graphNodeId) ?? []) {
+      const next = edge.toNodeId;
+      // 🔴 템플릿 칸은 제 sort_order 를 이미 가지고 있다 — 선을 타고 왔다고 해서
+      //    덮어쓰지 않는다. 덮어쓰면 되돌아가는 선 하나가 절차 전체의 차례를
+      //    뒤집는다.
+      if (!added.has(next) || seen.has(next)) continue;
+      seen.add(next);
+      const anchor: AddedTaskAnchor = {
+        procedureSortOrder: current.procedureSortOrder,
+        insertionDepth: current.insertionDepth + 1,
+        anchorGraphNodeId: current.graphNodeId,
+      };
+      anchors.set(next, anchor);
+      queue.push({ graphNodeId: next, ...anchor });
+    }
+  }
+
+  return anchors;
 }
 
 /** 원본 배열을 건드리지 않고 절차 차례로 늘어놓는다. */

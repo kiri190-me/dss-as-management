@@ -63,7 +63,10 @@ test("isUserFacingExecutionNodeType: executable minus START minus DOCUMENT_REFER
 });
 
 function execNode(overrides: Partial<TopologyExecutionNode> & { id: string }): TopologyExecutionNode {
-  return { procedureTemplateNodeId: null, status: "PENDING", selectedOutgoingEdgeId: null, ...overrides };
+  // 🔵 그림 위 자리 id 의 기본값은 **제 실행 노드 id** 다(2026-11-03, 조각 13) —
+  //    이 건에서 더한 작업이 그렇게 들어온다. 템플릿에서 온 줄은 부르는 쪽이
+  //    템플릿 노드 id 를 넘긴다.
+  return { graphNodeId: overrides.id, status: "PENDING", selectedOutgoingEdgeId: null, ...overrides };
 }
 
 test("computeSuggestedNextNodes: a simple linear chain suggests only the node right after the completed one", () => {
@@ -77,9 +80,9 @@ test("computeSuggestedNextNodes: a simple linear chain suggests only the node ri
     { id: "e2", fromNodeId: "n2", toNodeId: "n3" },
   ];
   const executionNodes: TopologyExecutionNode[] = [
-    execNode({ id: "en1", procedureTemplateNodeId: "n1", status: "COMPLETED" }),
-    execNode({ id: "en2", procedureTemplateNodeId: "n2", status: "PENDING" }),
-    execNode({ id: "en3", procedureTemplateNodeId: "n3", status: "PENDING" }),
+    execNode({ id: "en1", graphNodeId: "n1", status: "COMPLETED" }),
+    execNode({ id: "en2", graphNodeId: "n2", status: "PENDING" }),
+    execNode({ id: "en3", graphNodeId: "n3", status: "PENDING" }),
   ];
   const suggested = computeSuggestedNextNodes(nodes, edges, executionNodes);
   assert.deepEqual([...suggested].sort(), ["en2"]);
@@ -96,9 +99,9 @@ test("computeSuggestedNextNodes: a DECISION's unselected branch target is never 
     { id: "e-no", fromNodeId: "d1", toNodeId: "no-target" },
   ];
   const executionNodes: TopologyExecutionNode[] = [
-    execNode({ id: "en-d1", procedureTemplateNodeId: "d1", status: "COMPLETED", selectedOutgoingEdgeId: "e-yes" }),
-    execNode({ id: "en-yes", procedureTemplateNodeId: "yes-target", status: "PENDING" }),
-    execNode({ id: "en-no", procedureTemplateNodeId: "no-target", status: "PENDING" }),
+    execNode({ id: "en-d1", graphNodeId: "d1", status: "COMPLETED", selectedOutgoingEdgeId: "e-yes" }),
+    execNode({ id: "en-yes", graphNodeId: "yes-target", status: "PENDING" }),
+    execNode({ id: "en-no", graphNodeId: "no-target", status: "PENDING" }),
   ];
   const suggested = computeSuggestedNextNodes(nodes, edges, executionNodes);
   assert.deepEqual([...suggested].sort(), ["en-yes"]);
@@ -111,8 +114,8 @@ test("computeSuggestedNextNodes: a DECISION completed without any selection sugg
   ];
   const edges: TopologyEdge[] = [{ id: "e-yes", fromNodeId: "d1", toNodeId: "yes-target" }];
   const executionNodes: TopologyExecutionNode[] = [
-    execNode({ id: "en-d1", procedureTemplateNodeId: "d1", status: "COMPLETED", selectedOutgoingEdgeId: null }),
-    execNode({ id: "en-yes", procedureTemplateNodeId: "yes-target", status: "PENDING" }),
+    execNode({ id: "en-d1", graphNodeId: "d1", status: "COMPLETED", selectedOutgoingEdgeId: null }),
+    execNode({ id: "en-yes", graphNodeId: "yes-target", status: "PENDING" }),
   ];
   const suggested = computeSuggestedNextNodes(nodes, edges, executionNodes);
   assert.deepEqual([...suggested], []);
@@ -129,8 +132,8 @@ test("computeSuggestedNextNodes: a LOOP_BACK-style edge resurfaces its target on
     { id: "e-loopback", fromNodeId: "aging-test", toNodeId: "stage4-start" },
   ];
   const executionNodes: TopologyExecutionNode[] = [
-    execNode({ id: "en-start", procedureTemplateNodeId: "stage4-start", status: "PENDING" }),
-    execNode({ id: "en-aging", procedureTemplateNodeId: "aging-test", status: "COMPLETED" }),
+    execNode({ id: "en-start", graphNodeId: "stage4-start", status: "PENDING" }),
+    execNode({ id: "en-aging", graphNodeId: "aging-test", status: "COMPLETED" }),
   ];
   const suggested = computeSuggestedNextNodes(nodes, edges, executionNodes);
   assert.deepEqual([...suggested], ["en-start"]);
@@ -139,16 +142,37 @@ test("computeSuggestedNextNodes: a LOOP_BACK-style edge resurfaces its target on
 test("computeSuggestedNextNodes: a node with zero incoming edges is always suggested while PENDING", () => {
   const nodes: TopologyNode[] = [{ id: "standalone-checklist", nodeType: "CHECKLIST" }];
   const executionNodes: TopologyExecutionNode[] = [
-    execNode({ id: "en-checklist", procedureTemplateNodeId: "standalone-checklist", status: "PENDING" }),
+    execNode({ id: "en-checklist", graphNodeId: "standalone-checklist", status: "PENDING" }),
   ];
   const suggested = computeSuggestedNextNodes(nodes, [], executionNodes);
   assert.deepEqual([...suggested], ["en-checklist"]);
 });
 
-test("computeSuggestedNextNodes: a case-specific extra task (no template node) is always suggested while PENDING", () => {
-  const executionNodes: TopologyExecutionNode[] = [execNode({ id: "en-extra", procedureTemplateNodeId: null, status: "PENDING" })];
+test("computeSuggestedNextNodes: a case-specific extra task with no incoming edge is still suggested while PENDING", () => {
+  // 🔵 2026-11-03(조각 13) — 「추가 작업이라서 무조건 추천」이라는 따로 난 가지는
+  //    없어졌다. 들어오는 선이 없어서 추천되는 것이고, 결과는 전과 같다.
+  const executionNodes: TopologyExecutionNode[] = [execNode({ id: "en-extra", graphNodeId: "en-extra", status: "PENDING" })];
   const suggested = computeSuggestedNextNodes([], [], executionNodes);
   assert.deepEqual([...suggested], ["en-extra"]);
+});
+
+test("🔴 computeSuggestedNextNodes: 이어 붙인 추가 작업은 **앞 작업이 끝나야** 추천된다 — 템플릿 노드와 같은 잣대", () => {
+  const nodes: TopologyNode[] = [
+    { id: "n1", nodeType: "TASK" },
+    { id: "en-extra", nodeType: "TASK" },
+  ];
+  const edges: TopologyEdge[] = [{ id: "added-1", fromNodeId: "n1", toNodeId: "en-extra" }];
+  const pending = [
+    execNode({ id: "en1", graphNodeId: "n1", status: "PENDING" }),
+    execNode({ id: "en-extra", graphNodeId: "en-extra", status: "PENDING" }),
+  ];
+  assert.deepEqual([...computeSuggestedNextNodes(nodes, edges, pending)], ["en1"], "앞 작업이 안 끝났으면 추천 안 된다");
+
+  const done = [
+    execNode({ id: "en1", graphNodeId: "n1", status: "COMPLETED" }),
+    execNode({ id: "en-extra", graphNodeId: "en-extra", status: "PENDING" }),
+  ];
+  assert.deepEqual([...computeSuggestedNextNodes(nodes, edges, done)], ["en-extra"]);
 });
 
 test("computeSuggestedNextNodes: DOCUMENT_REFERENCE nodes never appear since they never receive an execution-node row", () => {
@@ -158,7 +182,7 @@ test("computeSuggestedNextNodes: DOCUMENT_REFERENCE nodes never appear since the
     { id: "ref1", nodeType: "DOCUMENT_REFERENCE" },
   ];
   const edges: TopologyEdge[] = [{ id: "e1", fromNodeId: "n1", toNodeId: "ref1" }];
-  const executionNodes: TopologyExecutionNode[] = [execNode({ id: "en-n1", procedureTemplateNodeId: "n1", status: "COMPLETED" })];
+  const executionNodes: TopologyExecutionNode[] = [execNode({ id: "en-n1", graphNodeId: "n1", status: "COMPLETED" })];
   const suggested = computeSuggestedNextNodes(nodes, edges, executionNodes);
   assert.deepEqual([...suggested], [], "no execution-node row exists for ref1, so nothing can be suggested for it");
 });
@@ -171,8 +195,8 @@ test("computeSuggestedNextNodes: a node already IN_PROGRESS/COMPLETED/SKIPPED/BL
   const edges: TopologyEdge[] = [{ id: "e1", fromNodeId: "n1", toNodeId: "n2" }];
   for (const status of ["IN_PROGRESS", "COMPLETED", "SKIPPED", "BLOCKED"] as const) {
     const executionNodes: TopologyExecutionNode[] = [
-      execNode({ id: "en1", procedureTemplateNodeId: "n1", status: "COMPLETED" }),
-      execNode({ id: "en2", procedureTemplateNodeId: "n2", status }),
+      execNode({ id: "en1", graphNodeId: "n1", status: "COMPLETED" }),
+      execNode({ id: "en2", graphNodeId: "n2", status }),
     ];
     const suggested = computeSuggestedNextNodes(nodes, edges, executionNodes);
     assert.deepEqual([...suggested], [], `status ${status} must not be suggested`);
@@ -193,10 +217,10 @@ test("computeSuggestedNextNodes: multiple incoming edges are ANY not ALL — one
     { id: "e-b", fromNodeId: "b", toNodeId: "converge" },
   ];
   const executionNodes: TopologyExecutionNode[] = [
-    execNode({ id: "en-start", procedureTemplateNodeId: "start", status: "COMPLETED" }),
-    execNode({ id: "en-a", procedureTemplateNodeId: "a", status: "COMPLETED" }),
-    execNode({ id: "en-b", procedureTemplateNodeId: "b", status: "PENDING" }),
-    execNode({ id: "en-converge", procedureTemplateNodeId: "converge", status: "PENDING" }),
+    execNode({ id: "en-start", graphNodeId: "start", status: "COMPLETED" }),
+    execNode({ id: "en-a", graphNodeId: "a", status: "COMPLETED" }),
+    execNode({ id: "en-b", graphNodeId: "b", status: "PENDING" }),
+    execNode({ id: "en-converge", graphNodeId: "converge", status: "PENDING" }),
   ];
   const suggested = computeSuggestedNextNodes(nodes, edges, executionNodes);
   // "converge" is suggested via its completed "a" source even though "b" (its other source) is still pending.

@@ -314,7 +314,12 @@ test("A/S 건 안에 딸린 것·실행 동작은 팝업만 띄우고 머문다"
     ["src/components/repair-cases/workflow/ManualStepSetPanel.tsx", 1],
     ["src/components/repair-cases/workflow/DatabaseWorkflowControlPanel.tsx", 2],
     ["src/components/repair-cases/work-records/WorkRecordForm.tsx", 1],
-    ["src/components/procedures/execution/ExecutionExtraTaskForm.tsx", 1],
+    // 🔴 2026-11-03(조각 13): ExecutionExtraTaskForm.tsx 가 **없어졌다.** 제목·
+    //    내용 두 칸짜리 그 폼이 편집기 모양의 창으로 바뀌면서, 그 창은 저장
+    //    팝업을 **일부러 안 띄운다** — 모달 창은 브라우저의 top layer 에 서므로
+    //    팝업이 창 뒤로 가려져 아무도 못 읽는다(조각 10 이 이미 겪은 그것). 대신
+    //    창을 연 채로 지도와 목록이 그 자리에서 바뀌는 것이 저장됐다는 증거다.
+    //    그래서 이 목록에 이어받을 줄이 없다 — 지운 것이지 옮긴 것이 아니다.
     // 🔵 2026-11-03(조각 12): 작업 메모 칸이 **제 파일로 갈라졌다**
     //    (ExecutionMemoField). 쓰는 자리가 셋이 되어서다 — 「지금 할 일」 큰 카드 ·
     //    「차단됨」의 작은 카드 · 「실행 이력」에서 끝난 작업의 마지막 줄. 팝업은

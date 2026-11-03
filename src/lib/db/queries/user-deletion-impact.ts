@@ -473,6 +473,11 @@ export async function collectUserDeletionImpact(
         and(
           eq(procedureCaseExecutionNodes.assignedEngineerId, targetId),
           inArray(procedureCaseExecutionNodes.status, [...OPEN_NODE_STATUSES]),
+          // 🔴 치운 추가 작업은 안 센다(2026-11-03, 조각 13 — 노드에도 소프트
+          // 삭제 네 칸이 생겼다). 안 거르면 삭제 영향 미리보기가 **화면 어디에도
+          // 없는 줄**을 「잡고 있는 작업」으로 세어, 사람이 확인할 길이 없는 수를
+          // 보여 준다.
+          eq(procedureCaseExecutionNodes.isDeleted, false),
           eq(procedureCaseExecutions.isDeleted, false),
           eq(repairCases.isDeleted, false),
           eq(repairCases.isLocked, false)

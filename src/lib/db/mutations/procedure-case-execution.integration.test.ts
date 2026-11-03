@@ -18,6 +18,7 @@ import {
   procedureTemplateValidationIssues,
   procedureCaseExecutions,
   procedureCaseExecutionNodes,
+  procedureCaseExecutionEdges,
   procedureCaseExecutionHistory,
 } from "../schema";
 import { createRepairCase } from "./repair-cases";
@@ -34,6 +35,9 @@ import {
   blockExecutionNode,
   reopenExecutionNode,
   addExecutionExtraTask,
+  removeExecutionExtraTask,
+  addExecutionEdge,
+  removeExecutionEdge,
   updateExecutionNodeMemo,
 } from "./procedure-case-execution";
 import {
@@ -445,6 +449,10 @@ after(async () => {
     const executionIds = executions.map((e) => e.id);
     if (executionIds.length > 0) {
       await db.delete(procedureCaseExecutionHistory).where(inArray(procedureCaseExecutionHistory.executionId, executionIds));
+      // 🔴 2026-11-03(조각 13) — 간선이 노드를 `ON DELETE restrict` 로 가리키므로
+      //    **노드보다 먼저** 치워야 한다. 안 그러면 뒷정리가 통째로 실패해서 다음
+      //    실행의 시험들이 남은 찌꺼기 위에서 돈다.
+      await db.delete(procedureCaseExecutionEdges).where(inArray(procedureCaseExecutionEdges.executionId, executionIds));
       await db.delete(procedureCaseExecutionNodes).where(inArray(procedureCaseExecutionNodes.executionId, executionIds));
       await db.delete(procedureCaseExecutions).where(inArray(procedureCaseExecutions.id, executionIds));
     }
@@ -627,7 +635,14 @@ describe("procedure-case-execution: node actions and DECISION branch selection (
       .from(procedureCaseExecutionHistory)
       .where(and(eq(procedureCaseExecutionHistory.executionNodeId, n3.id), eq(procedureCaseExecutionHistory.actionType, "NODE_COMPLETED")));
     assert.equal(history.length, 1);
-    assert.deepEqual(history[0].afterState, { selectedOutgoingEdgeId: yesEdge.id });
+    // 🔵 selectedEdgeIsAddedInCase 는 2026-11-03(조각 13)에 늘었다. 이 건에서 그은 선을
+    //    고른 경우 selected_outgoing_edge_id 칸에 못 넣으므로(FK 가 템플릿 간선을 가리킨다)
+    //    「칸에 적혔는가」와 별개로 **어느 쪽 선을 골랐는지**를 이력이 들고 있어야 한다.
+    //    여기는 템플릿 간선을 고른 판이라 false 여야 한다 — true 면 칸과 이력이 어긋난다.
+    assert.deepEqual(history[0].afterState, {
+      selectedOutgoingEdgeId: yesEdge.id,
+      selectedEdgeIsAddedInCase: false,
+    });
   });
 
   test("9. a selectedOutgoingEdgeId provided for a non-DECISION node is rejected with INVALID_INPUT", async () => {
@@ -2981,12 +2996,12 @@ describe("procedure-case-execution: 지금 할 일 옮기기", () => {
     // 🔴 실행 줄은 START·참고 문서를 빼지만(사람이 할 일만 센다), **그림 재료는
     // 절차 전체**다 — 그림은 절차를 통째로 그린다.
     assert.equal(detail.nodes.length, 5, "실행 줄은 START·참고 문서를 뺀 다섯이다");
-    assert.equal(detail.templateNodes.length, 7, "그림 재료는 START·참고 문서까지 일곱이어야 한다");
-    const codes = new Set(detail.templateNodes.map((n) => n.nodeCode));
+    assert.equal(detail.graphNodes.length, 7, "그림 재료는 START·참고 문서까지 일곱이어야 한다");
+    const codes = new Set(detail.graphNodes.map((n) => n.nodeCode));
     assert.ok(codes.has("n1") && codes.has("n6"), "START 와 참고 문서가 그림 재료에서 빠졌다");
 
     // 🔵 그림이 읽는 칸이 실제로 실려 있다 — 빈 값이면 노드가 한 점에 겹친다.
-    const first = detail.templateNodes[0];
+    const first = detail.graphNodes[0];
     assert.equal(typeof first.positionX, "number");
     assert.equal(typeof first.sortOrder, "number");
     assert.equal(detail.templateCategory, "TECHNICAL_TASK", "그림의 배치 규칙이 이 값으로 갈린다");
@@ -3002,7 +3017,7 @@ describe("procedure-case-execution: 지금 할 일 옮기기", () => {
       if (node.procedureTemplateNodeId === null) continue;
       assert.ok(marks.has(node.procedureTemplateNodeId), `${node.nodeCode} 의 딱지가 지도에 없다`);
     }
-    assert.ok(detail.templateNodes.some((n) => !marks.has(n.id)), "실행 줄이 없는 칸(START·참고 문서)에는 딱지가 없어야 한다");
+    assert.ok(detail.graphNodes.some((n) => !marks.has(n.id)), "실행 줄이 없는 칸(START·참고 문서)에는 딱지가 없어야 한다");
     void templateId;
   });
 
@@ -3200,13 +3215,13 @@ describe("procedure-case-execution: 지금 할 일 옮기기", () => {
     assert.ok(detail);
 
     // 🔵 먼저 표본 확인 — 이 절차에 시작점과 끝점이 **둘 다** 있어야 경로 기준이 선다.
-    assert.equal(detail.templateNodes.filter((n) => n.nodeType === "START").length, 1);
-    assert.equal(detail.templateNodes.filter((n) => n.nodeType === "END").length, 1);
+    assert.equal(detail.graphNodes.filter((n) => n.nodeType === "START").length, 1);
+    assert.equal(detail.graphNodes.filter((n) => n.nodeType === "END").length, 1);
 
     function progressAt(code: string) {
       return computeExecutionProgress({
         nodes: detail!.nodes,
-        templateNodes: detail!.templateNodes,
+        graphNodes: detail!.graphNodes,
         edges: detail!.flowEdges,
         currentExecutionNodeId: byCode.get(code)!.id,
       });
@@ -3482,5 +3497,290 @@ describe("procedure-case-execution: real-data safety", () => {
     assert.equal(realNodeCounts?.count ?? 0, realTemplateBaseline.nodeCount);
     assert.equal(realEdgeCounts?.count ?? 0, realTemplateBaseline.edgeCount);
     assert.equal(realErrorIssueCounts?.count ?? 0, realTemplateBaseline.errorIssueCount);
+  });
+});
+
+/**
+ * 🔵 **조각 13 — 실행 중에 작업을 만들고 이어 붙인다**(2026-11-03).
+ *
+ * 🔴 이 묶음은 **마이그레이션 0121 을 적용한 뒤에야 돈다.** 새 칸
+ * (extra_task_node_type · 소프트 삭제 넷)과 새 표(procedure_case_execution_edges)를
+ * 쓰기 때문이다. 적용 전에 돌리면 「칸이 없다」로 떨어진다 — 그 실패 자체가 이
+ * 묶음이 재는 첫째다(스키마가 실제로 올라갔는가).
+ *
+ * 재는 것:
+ *  - 노드 갈래가 저장되고 읽히는가 · 허용 목록 바깥은 거절하는가
+ *  - 🔴 **원본 절차가 한 글자도 안 바뀌는가**(노드·간선 수를 앞뒤로 센다)
+ *  - 이어 붙이면 목록 **차례가 그 앞 작업 바로 뒤**가 되는가
+ *  - 이어 붙인 선으로 **자동 전진**이 되는가
+ *  - 치우면 목록에서 **사라지는가**, 그 선도 함께 치워지는가, 행은 남는가
+ *  - 🔴 원본에서 온 것은 **못 치우는가**(NOT_REMOVABLE)
+ */
+describe("procedure-case-execution: 이 건에서 더한 작업과 연결 (조각 13)", () => {
+  test("28. 추가 작업에 노드 갈래가 저장되고, 허용 목록 바깥은 거절된다", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("extra-node-type"));
+    const created = await createTestCase();
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const added = await addExecutionExtraTask(started.executionId, engineerId, "추가 세척", null, "DECISION");
+    assert.equal(added.ok, true, `add failed: ${JSON.stringify(added)}`);
+    if (!added.ok) return;
+
+    const [row] = await db
+      .select({ nodeType: procedureCaseExecutionNodes.extraTaskNodeType })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, added.executionNodeId));
+    assert.equal(row.nodeType, "DECISION");
+
+    const detail = await getExecutionDetail(started.executionId);
+    const shown = detail!.nodes.find((n) => n.id === added.executionNodeId);
+    assert.equal(shown!.nodeType, "DECISION", "화면도 그 갈래로 읽어야 갈래 단추가 선다");
+    assert.equal(shown!.isAddedInCase, true);
+
+    // 🔴 화면이 네 가지만 보여 주지만 서버가 그것을 믿지 않는다.
+    const rejected = await addExecutionExtraTask(started.executionId, engineerId, "시작점", null, "START" as never);
+    assert.equal(rejected.ok, false);
+    if (!rejected.ok) assert.equal(rejected.code, "INVALID_INPUT");
+  });
+
+  test("29. 🔴 더하고 이어도 **원본 절차는 한 글자도 안 바뀐다**", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("extra-no-template-write"));
+    const created = await createTestCase();
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    async function countTemplate() {
+      const [n] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(procedureTemplateNodes)
+        .where(eq(procedureTemplateNodes.procedureTemplateId, templateId));
+      const [e] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(procedureTemplateEdges)
+        .where(eq(procedureTemplateEdges.procedureTemplateId, templateId));
+      return { nodes: n.count, edges: e.count };
+    }
+    const before = await countTemplate();
+    assert.ok(before.nodes > 0 && before.edges > 0, "표본이 비어 있으면 이 시험은 아무것도 안 잰다");
+
+    const added = await addExecutionExtraTask(started.executionId, engineerId, "추가 세척", null, "TASK");
+    assert.equal(added.ok, true);
+    if (!added.ok) return;
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const edge = await addExecutionEdge({
+      executionId: started.executionId,
+      fromExecutionNodeId: byCode.get("n2")!.id,
+      toExecutionNodeId: added.executionNodeId,
+      branchType: "DEFAULT",
+      branchLabel: null,
+      actorUserId: engineerId,
+    });
+    assert.equal(edge.ok, true, `edge failed: ${JSON.stringify(edge)}`);
+
+    assert.deepEqual(await countTemplate(), before, "원본 절차의 노드·간선 수가 바뀌면 안 된다");
+  });
+
+  test("30. 이어 붙인 작업은 목록에서 **그 앞 작업 바로 뒤**에 선다", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("extra-order"));
+    const created = await createTestCase();
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const added = await addExecutionExtraTask(started.executionId, engineerId, "추가 세척", null, "TASK");
+    assert.equal(added.ok, true);
+    if (!added.ok) return;
+
+    // 🔵 표본 확인 — 잇기 전에는 맨 뒤다(조각 12 까지의 동작).
+    const beforeDetail = await getExecutionDetail(started.executionId);
+    assert.equal(beforeDetail!.nodes[beforeDetail!.nodes.length - 1].id, added.executionNodeId);
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const edge = await addExecutionEdge({
+      executionId: started.executionId,
+      fromExecutionNodeId: byCode.get("n2")!.id,
+      toExecutionNodeId: added.executionNodeId,
+      branchType: "DEFAULT",
+      branchLabel: null,
+      actorUserId: engineerId,
+    });
+    assert.equal(edge.ok, true);
+
+    const detail = await getExecutionDetail(started.executionId);
+    const ids = detail!.nodes.map((n) => n.id);
+    const anchorIndex = ids.indexOf(byCode.get("n2")!.id);
+    assert.equal(ids[anchorIndex + 1], added.executionNodeId, "앞 작업 바로 다음 자리여야 한다");
+    assert.notEqual(ids[ids.length - 1], added.executionNodeId, "더 이상 맨 뒤가 아니다");
+  });
+
+  test("31. 🔴 이어 붙인 선으로도 **자동 전진**이 된다", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("extra-advance"));
+    const created = await createTestCase();
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const added = await addExecutionExtraTask(started.executionId, engineerId, "추가 세척", null, "TASK");
+    assert.equal(added.ok, true);
+    if (!added.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    // n7 은 템플릿에서 나가는 선이 없는 끝 작업이다 — 거기에 선 하나만 붙인다.
+    const tail = byCode.get("n7")!;
+    const edge = await addExecutionEdge({
+      executionId: started.executionId,
+      fromExecutionNodeId: tail.id,
+      toExecutionNodeId: added.executionNodeId,
+      branchType: "DEFAULT",
+      branchLabel: null,
+      actorUserId: engineerId,
+    });
+    assert.equal(edge.ok, true, `edge failed: ${JSON.stringify(edge)}`);
+
+    const completed = await completeExecutionNode({
+      executionNodeId: tail.id,
+      actorUserId: engineerId,
+      expectedVersion: tail.version,
+    });
+    assert.equal(completed.ok, true, `complete failed: ${JSON.stringify(completed)}`);
+
+    const [after] = await db
+      .select({ status: procedureCaseExecutionNodes.status })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, added.executionNodeId));
+    assert.equal(after.status, "IN_PROGRESS", "이은 작업이 저절로 서야 한다");
+  });
+
+  test("32. 치우면 목록에서 사라지고 **그 선도 함께** 치워진다 — 행은 남는다", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("extra-remove"));
+    const created = await createTestCase();
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const added = await addExecutionExtraTask(started.executionId, engineerId, "잘못 만든 작업", null, "TASK");
+    assert.equal(added.ok, true);
+    if (!added.ok) return;
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const edge = await addExecutionEdge({
+      executionId: started.executionId,
+      fromExecutionNodeId: byCode.get("n2")!.id,
+      toExecutionNodeId: added.executionNodeId,
+      branchType: "DEFAULT",
+      branchLabel: null,
+      actorUserId: engineerId,
+    });
+    assert.equal(edge.ok, true);
+
+    const beforeDetail = await getExecutionDetail(started.executionId);
+    assert.ok(
+      beforeDetail!.nodes.some((n) => n.id === added.executionNodeId),
+      "표본 확인 — 치우기 전에는 목록에 있어야 한다"
+    );
+    assert.equal(beforeDetail!.flowEdges.filter((e) => e.isAddedInCase).length, 1);
+
+    const [row] = await db
+      .select({ version: procedureCaseExecutionNodes.version })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, added.executionNodeId));
+    const removed = await removeExecutionExtraTask(added.executionNodeId, engineerId, row.version, null);
+    assert.equal(removed.ok, true, `remove failed: ${JSON.stringify(removed)}`);
+
+    const detail = await getExecutionDetail(started.executionId);
+    assert.equal(detail!.nodes.some((n) => n.id === added.executionNodeId), false, "치운 줄이 목록에 남으면 안 된다");
+    assert.equal(detail!.flowEdges.filter((e) => e.isAddedInCase).length, 0, "그 선도 함께 사라져야 한다");
+
+    // 🔴 행은 남아 있다 — 감사 이력이 가리키고 있어 진짜로는 못 지운다.
+    const [stillThere] = await db
+      .select({ isDeleted: procedureCaseExecutionNodes.isDeleted, deletedBy: procedureCaseExecutionNodes.deletedBy })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, added.executionNodeId));
+    assert.equal(stillThere.isDeleted, true);
+    assert.equal(stillThere.deletedBy, engineerId);
+  });
+
+  test("33. 🔴 원본 절차에서 온 작업은 **못 치운다**", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("extra-remove-guard"));
+    const created = await createTestCase();
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const target = byCode.get("n2")!;
+    const result = await removeExecutionExtraTask(target.id, engineerId, target.version, null);
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "NOT_REMOVABLE");
+      assert.match(result.message, /건너뛰기/, "대신 할 수 있는 일을 짚어 줘야 한다");
+    }
+
+    const [unchanged] = await db
+      .select({ isDeleted: procedureCaseExecutionNodes.isDeleted, version: procedureCaseExecutionNodes.version })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, target.id));
+    assert.equal(unchanged.isDeleted, false);
+    assert.equal(unchanged.version, target.version, "거절된 요청은 version 도 안 올린다");
+  });
+
+  test("34. 같은 두 작업 사이에 **같은 선을 두 번** 긋지 않는다 · 자기 자신으로도 못 긋는다 · 치운 뒤에는 다시 그을 수 있다", async () => {
+    const { templateId } = await createPublishedTemplate(uniqueCode("extra-edge-guard"));
+    const created = await createTestCase();
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const from = byCode.get("n2")!;
+    const to = byCode.get("n5")!;
+
+    const first = await addExecutionEdge({
+      executionId: started.executionId,
+      fromExecutionNodeId: from.id,
+      toExecutionNodeId: to.id,
+      branchType: "DEFAULT",
+      branchLabel: null,
+      actorUserId: engineerId,
+    });
+    assert.equal(first.ok, true, `first edge failed: ${JSON.stringify(first)}`);
+
+    const second = await addExecutionEdge({
+      executionId: started.executionId,
+      fromExecutionNodeId: from.id,
+      toExecutionNodeId: to.id,
+      branchType: "NG",
+      branchLabel: null,
+      actorUserId: engineerId,
+    });
+    assert.equal(second.ok, false);
+    if (!second.ok) assert.equal(second.code, "INVALID_INPUT");
+
+    const self = await addExecutionEdge({
+      executionId: started.executionId,
+      fromExecutionNodeId: from.id,
+      toExecutionNodeId: from.id,
+      branchType: "DEFAULT",
+      branchLabel: null,
+      actorUserId: engineerId,
+    });
+    assert.equal(self.ok, false);
+
+    // 치운 뒤에는 다시 그을 수 있다 — 소프트 삭제가 자리를 영영 차지하면 안 된다.
+    if (first.ok) {
+      const gone = await removeExecutionEdge(first.edgeId, engineerId, null);
+      assert.equal(gone.ok, true);
+    }
+    const again = await addExecutionEdge({
+      executionId: started.executionId,
+      fromExecutionNodeId: from.id,
+      toExecutionNodeId: to.id,
+      branchType: "DEFAULT",
+      branchLabel: null,
+      actorUserId: engineerId,
+    });
+    assert.equal(again.ok, true, `re-add failed: ${JSON.stringify(again)}`);
   });
 });

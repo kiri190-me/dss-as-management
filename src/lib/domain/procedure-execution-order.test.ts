@@ -4,6 +4,7 @@ import {
   compareHumanNumberedCode,
   computeExecutionPosition,
   formatExecutionPositionLabel,
+  resolveAddedTaskAnchors,
   sortByProcedureExecutionOrder,
   type ProcedureExecutionOrderKey,
 } from "./procedure-execution-order";
@@ -20,6 +21,9 @@ import type { ProcedureCaseExecutionNodeStatus } from "./procedure-case-executio
 function key(overrides: Partial<ProcedureExecutionOrderKey> & { id: string }): ProcedureExecutionOrderKey {
   return {
     procedureSortOrder: null,
+    // 🔵 0 = 템플릿에서 온 줄(또는 아무 선에도 안 닿은 추가 작업). 끼워 넣은
+    //    줄만 1 이상이다(2026-11-03, 조각 13).
+    insertionDepth: 0,
     nodeCode: null,
     addedAt: null,
     ...overrides,
@@ -108,6 +112,62 @@ test("sortByProcedureExecutionOrder: 템플릿에 없는 추가 작업은 언제
   assert.deepEqual(ids(sortByProcedureExecutionOrder(nodes)), ["first-step", "last-step", "extra-early", "extra-late"]);
 });
 
+// ---- 이어 붙인 추가 작업의 자리 (2026-11-03, 조각 13) ----
+
+test("🔴 sortByProcedureExecutionOrder: 이어 붙인 추가 작업은 **그 앞 작업 바로 뒤**에 낀다 — 맨 뒤가 아니다", () => {
+  const nodes = [
+    key({ id: "step-3", procedureSortOrder: 3, nodeCode: "n-3" }),
+    // 3번 작업 뒤에 이어 붙인 추가 작업 — 같은 자리에 깊이 1.
+    key({ id: "extra-after-3", procedureSortOrder: 3, insertionDepth: 1, addedAt: "2026-11-03T10:00:00.000Z" }),
+    key({ id: "step-4", procedureSortOrder: 4, nodeCode: "n-4" }),
+    key({ id: "step-1", procedureSortOrder: 1, nodeCode: "n-1" }),
+  ];
+  assert.notDeepEqual(
+    ids(nodes),
+    ["step-1", "step-3", "extra-after-3", "step-4"],
+    "입력이 이미 정답 차례면 이 시험은 아무것도 재지 않는다"
+  );
+
+  assert.deepEqual(ids(sortByProcedureExecutionOrder(nodes)), ["step-1", "step-3", "extra-after-3", "step-4"]);
+});
+
+test("🔴 sortByProcedureExecutionOrder: 같은 자리에서 템플릿 줄이 **언제나 먼저** — 깊이가 차례를 정한다", () => {
+  const nodes = [
+    key({ id: "extra-2", procedureSortOrder: 5, insertionDepth: 2, addedAt: "2026-11-03T09:00:00.000Z" }),
+    key({ id: "extra-1", procedureSortOrder: 5, insertionDepth: 1, addedAt: "2026-11-03T11:00:00.000Z" }),
+    key({ id: "step", procedureSortOrder: 5, nodeCode: "n-5" }),
+  ];
+  // 🔵 더해진 때로만 재면 extra-2 가 extra-1 앞에 선다 — 깊이가 이겨야 한다.
+  assert.deepEqual(ids(sortByProcedureExecutionOrder(nodes)), ["step", "extra-1", "extra-2"]);
+});
+
+test("🔴 sortByProcedureExecutionOrder: 같은 깊이의 추가 작업끼리는 더해진 차례", () => {
+  const nodes = [
+    key({ id: "late", procedureSortOrder: 7, insertionDepth: 1, addedAt: "2026-11-03T12:00:00.000Z" }),
+    key({ id: "early", procedureSortOrder: 7, insertionDepth: 1, addedAt: "2026-11-03T08:00:00.000Z" }),
+  ];
+  assert.deepEqual(ids(sortByProcedureExecutionOrder(nodes)), ["early", "late"]);
+});
+
+test("🔴 sortByProcedureExecutionOrder: sort_order 가 겹치는 템플릿 줄끼리는 여전히 **번호**가 차례를 정한다 — 더해진 때가 아니라", () => {
+  // 실측: sort_order 에는 유니크 제약이 없고 기본값이 0 이라 전부 0 인 절차가
+  // 들어올 수 있다. 그때 addedAt(= 실행 줄이 만들어진 때)으로 재면 번호가 진다.
+  const nodes = [
+    key({ id: "ten", procedureSortOrder: 0, nodeCode: "N-10", addedAt: "2026-11-01T00:00:00.000Z" }),
+    key({ id: "one", procedureSortOrder: 0, nodeCode: "N-1", addedAt: "2026-11-09T00:00:00.000Z" }),
+  ];
+  assert.deepEqual(ids(sortByProcedureExecutionOrder(nodes)), ["one", "ten"]);
+});
+
+test("🔴 sortByProcedureExecutionOrder: 아무 선에도 안 닿은 추가 작업은 **전처럼 맨 뒤**", () => {
+  const nodes = [
+    key({ id: "floating", addedAt: "2026-11-03T10:00:00.000Z" }),
+    key({ id: "wired", procedureSortOrder: 1, insertionDepth: 1, addedAt: "2026-11-03T11:00:00.000Z" }),
+    key({ id: "last-step", procedureSortOrder: 99, nodeCode: "n-99" }),
+  ];
+  assert.deepEqual(ids(sortByProcedureExecutionOrder(nodes)), ["wired", "last-step", "floating"]);
+});
+
 test("🔴 sortByProcedureExecutionOrder: 번호가 비어 있어도(null·빈 글자) 깨지지 않고 뒤로 간다", () => {
   const nodes = [
     key({ id: "blank", procedureSortOrder: 0, nodeCode: "" }),
@@ -153,6 +213,105 @@ test("sortByProcedureExecutionOrder: 실제 절차 크기(22개)에서 처음부
   const sorted = sortByProcedureExecutionOrder(shuffled);
   assert.equal(sorted.length, 22);
   assert.deepEqual(ids(sorted), expected);
+});
+
+// ---- 이어 붙인 자리 찾기 (resolveAddedTaskAnchors) ----
+
+function edge(id: string, from: string, to: string, sortOrder = 0) {
+  return { id, fromNodeId: from, toNodeId: to, sortOrder };
+}
+
+test("resolveAddedTaskAnchors: 템플릿 칸에서 나간 선이 닿는 추가 작업은 그 칸의 자리에 깊이 1 로 선다", () => {
+  const anchors = resolveAddedTaskAnchors({
+    templateNodes: [
+      { graphNodeId: "t1", sortOrder: 1 },
+      { graphNodeId: "t2", sortOrder: 2 },
+    ],
+    addedGraphNodeIds: ["x"],
+    edges: [edge("e1", "t2", "x")],
+  });
+  assert.deepEqual(anchors.get("x"), { procedureSortOrder: 2, insertionDepth: 1, anchorGraphNodeId: "t2" });
+  assert.equal(anchors.size, 1, "템플릿 칸에는 자리를 적지 않는다 — 제 sort_order 가 이미 있다");
+});
+
+test("resolveAddedTaskAnchors: 추가 작업에서 또 이어 붙이면 같은 자리에 깊이만 는다", () => {
+  const anchors = resolveAddedTaskAnchors({
+    templateNodes: [{ graphNodeId: "t1", sortOrder: 5 }],
+    addedGraphNodeIds: ["x", "y"],
+    edges: [edge("e1", "t1", "x"), edge("e2", "x", "y")],
+  });
+  assert.deepEqual(anchors.get("x"), { procedureSortOrder: 5, insertionDepth: 1, anchorGraphNodeId: "t1" });
+  assert.deepEqual(anchors.get("y"), { procedureSortOrder: 5, insertionDepth: 2, anchorGraphNodeId: "x" });
+});
+
+test("🔴 resolveAddedTaskAnchors: 아무 선에도 안 닿은 추가 작업은 자리를 못 얻는다(맨 뒤로 간다)", () => {
+  const anchors = resolveAddedTaskAnchors({
+    templateNodes: [{ graphNodeId: "t1", sortOrder: 1 }],
+    addedGraphNodeIds: ["lonely"],
+    edges: [],
+  });
+  assert.equal(anchors.has("lonely"), false);
+});
+
+test("🔴 resolveAddedTaskAnchors: 추가 작업 **에서 나가는** 선만 있으면 자리를 못 얻는다 — 들어오는 선이 자리를 정한다", () => {
+  const anchors = resolveAddedTaskAnchors({
+    templateNodes: [{ graphNodeId: "t1", sortOrder: 1 }],
+    addedGraphNodeIds: ["x"],
+    edges: [edge("e1", "x", "t1")],
+  });
+  assert.equal(anchors.has("x"), false);
+});
+
+test("🔴 resolveAddedTaskAnchors: 들어오는 선이 둘이면 **앞선 칸**이 자리를 정한다 — 같은 입력이면 같은 답", () => {
+  const input = {
+    templateNodes: [
+      { graphNodeId: "t1", sortOrder: 1 },
+      { graphNodeId: "t9", sortOrder: 9 },
+    ],
+    addedGraphNodeIds: ["x"],
+    // 간선 차례를 일부러 뒤집어 넣는다 — 출발점 차례가 이겨야 한다.
+    edges: [edge("e-late", "t9", "x", 0), edge("e-early", "t1", "x", 5)],
+  };
+  assert.deepEqual(resolveAddedTaskAnchors(input).get("x"), { procedureSortOrder: 1, insertionDepth: 1, anchorGraphNodeId: "t1" });
+  assert.deepEqual(
+    resolveAddedTaskAnchors({ ...input, edges: [...input.edges].reverse() }).get("x"),
+    { procedureSortOrder: 1, insertionDepth: 1, anchorGraphNodeId: "t1" },
+    "입력 차례를 바꿔도 같은 답"
+  );
+});
+
+test("🔴 resolveAddedTaskAnchors: 고리가 있어도 끝난다 — 추가 작업끼리 서로를 가리켜도", () => {
+  const anchors = resolveAddedTaskAnchors({
+    templateNodes: [{ graphNodeId: "t1", sortOrder: 3 }],
+    addedGraphNodeIds: ["x", "y"],
+    edges: [edge("e1", "t1", "x"), edge("e2", "x", "y"), edge("e3", "y", "x")],
+  });
+  assert.deepEqual(anchors.get("x"), { procedureSortOrder: 3, insertionDepth: 1, anchorGraphNodeId: "t1" });
+  assert.deepEqual(anchors.get("y"), { procedureSortOrder: 3, insertionDepth: 2, anchorGraphNodeId: "x" });
+});
+
+test("🔴 resolveAddedTaskAnchors: 되돌아가는 선이 템플릿 칸의 자리를 덮어쓰지 않는다", () => {
+  const anchors = resolveAddedTaskAnchors({
+    templateNodes: [
+      { graphNodeId: "t1", sortOrder: 1 },
+      { graphNodeId: "t2", sortOrder: 2 },
+    ],
+    addedGraphNodeIds: ["x"],
+    edges: [edge("e1", "t2", "x"), edge("e2", "x", "t1")],
+  });
+  assert.equal(anchors.has("t1"), false, "템플릿 칸은 결과에 아예 없다");
+  assert.equal(anchors.has("t2"), false);
+});
+
+test("resolveAddedTaskAnchors: 더한 작업이 하나도 없으면 빈 지도", () => {
+  assert.equal(
+    resolveAddedTaskAnchors({
+      templateNodes: [{ graphNodeId: "t1", sortOrder: 1 }],
+      addedGraphNodeIds: [],
+      edges: [edge("e1", "t1", "t1")],
+    }).size,
+    0
+  );
 });
 
 // ---- 「몇 번째 / 전체」 ----

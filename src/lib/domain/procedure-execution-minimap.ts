@@ -70,12 +70,18 @@ export const MINIMAP_FORWARD_STEPS = 3;
  */
 export const MINIMAP_MAX_STEPS_PER_LEVEL = 4;
 
+/**
+ * 선 하나. 🔵 2026-11-03(조각 13)부터 **두 표가 섞여 들어온다** —
+ * procedure_template_edges 와 procedure_case_execution_edges 를 조회가 한
+ * 목록으로 합쳐 내려보낸다(getExecutionDetail). 양끝은 어느 쪽이든 **그림 위
+ * 자리 id**(MinimapNode.graphNodeId 와 같은 열쇠)로 적혀 있다.
+ */
 export type MinimapEdge = {
-  /** procedure_template_edges.id */
+  /** procedure_template_edges.id 또는 procedure_case_execution_edges.id */
   id: string;
-  /** procedure_template_nodes.id */
+  /** 그림 위 자리 id(MinimapNode.graphNodeId). */
   fromNodeId: string;
-  /** procedure_template_nodes.id */
+  /** 그림 위 자리 id(MinimapNode.graphNodeId). */
   toNodeId: string;
   branchType: ProcedureBranchType;
   branchLabel: string | null;
@@ -84,14 +90,29 @@ export type MinimapEdge = {
 export type MinimapNode = {
   /** procedure_case_execution_nodes.id */
   id: string;
-  /** 사례별 추가 작업은 null — 템플릿 그래프에 자리가 없다. */
-  procedureTemplateNodeId: string | null;
+  /**
+   * **그림 위 자리 id**. 템플릿에서 온 줄은 procedure_template_nodes.id 이고,
+   * 이 건에서 더한 작업은 **제 실행 노드 id** 다(2026-11-03, 조각 13).
+   *
+   * 🔴 전에는 이 칸이 `string | null` 이었고 null 이 「그림에 자리가 없다」는
+   * 뜻이었다. 조각 13 에서 추가 작업도 선을 가지게 되면서 그 뜻이 **거짓이
+   * 됐다** — 자리는 언제나 있고, 없을 수 있는 것은 **이어진 선**뿐이다.
+   */
+  graphNodeId: string;
   /** 1 부터 매긴 절차상 번호(getExecutionDetail 의 orderIndex). 칸에 적는다. */
   orderIndex: number;
+  /**
+   * 이 건에서 **더한** 작업인가(procedure_template_node_id 가 비어 있는 줄).
+   *
+   * 🔴 그릴 수 없을 때 **무엇이라고 적을지**가 이 값으로 갈린다 — 「절차가 안
+   * 이어져 있다」와 「방금 더한 작업이라 아직 아무 데도 안 이었다」는 사람이 해야
+   * 할 다음 행동이 다르다(뒤쪽은 「추가 작업 등록」 창에서 선을 그으면 된다).
+   */
+  isAddedInCase: boolean;
 };
 
 export type MinimapVia = {
-  /** procedure_template_edges.id */
+  /** procedure_template_edges.id 또는 procedure_case_execution_edges.id */
   edgeId: string;
   branchType: ProcedureBranchType;
   branchLabel: string | null;
@@ -124,9 +145,17 @@ export type ProcedureExecutionMinimap<T> =
   | {
       kind: "NOTE";
       reason:
-        /** 지금 할 일이 사례별 추가 작업이다 — 템플릿 그래프에 자리가 없다. */
+        /**
+         * 지금 할 일이 **이 건에서 더한 작업**인데 아직 아무 선에도 안 이어져
+         * 있다.
+         *
+         * 🔵 2026-11-03(조각 13)에 **뜻이 바뀌었다.** 전에는 「추가 작업은
+         * 그림에 자리가 아예 없다」였는데, 이제 자리는 있고 **선이 없을 뿐**이다.
+         * 아래 CURRENT_HAS_NO_LINKED_STEP 과 일어나는 상황은 같고 **할 말이
+         * 다르다** — 여기는 「창에서 선을 그으면 된다」로 이어진다.
+         */
         | "CURRENT_IS_EXTRA_TASK"
-        /** 그래프에는 있는데 이을 선이 한 쪽도 없다(그리다 만 절차). */
+        /** 템플릿에서 온 줄인데 이을 선이 한 쪽도 없다(그리다 만 절차). */
         | "CURRENT_HAS_NO_LINKED_STEP";
     }
   | {
@@ -140,37 +169,37 @@ export type ProcedureExecutionMinimap<T> =
 
 type Direction = "BACKWARD" | "FORWARD";
 
-type Found<T> = { templateNodeId: string; step: MinimapStep<T> };
+type Found<T> = { graphNodeId: string; step: MinimapStep<T> };
 
 function walk<T extends MinimapNode>(
   direction: Direction,
-  startTemplateNodeId: string,
+  startGraphNodeId: string,
   maxSteps: number,
   adjacency: ReadonlyMap<string, MinimapEdge[]>,
-  nodeByTemplateNodeId: ReadonlyMap<string, T>
+  nodeByGraphNodeId: ReadonlyMap<string, T>
 ): MinimapLevel<T>[] {
   const levels: MinimapLevel<T>[] = [];
   // 🔴 고리가 있다 — 본 노드를 기억하지 않으면 같은 칸이 몇 번이고 되풀이된다.
   // 출발점을 미리 넣어 두는 것도 그 때문이다: 지금 자리로 되돌아오는 갈래가
   // 있으면 「지금 할 일」 칸이 띠 안에 두 번 생긴다.
-  const seen = new Set<string>([startTemplateNodeId]);
-  let frontier: string[] = [startTemplateNodeId];
+  const seen = new Set<string>([startGraphNodeId]);
+  let frontier: string[] = [startGraphNodeId];
 
   for (let step = 0; step < maxSteps; step += 1) {
     const found: Found<T>[] = [];
     const foundIds = new Set<string>();
 
-    for (const fromTemplateNodeId of frontier) {
-      for (const edge of adjacency.get(fromTemplateNodeId) ?? []) {
-        const nextTemplateNodeId = direction === "FORWARD" ? edge.toNodeId : edge.fromNodeId;
-        if (seen.has(nextTemplateNodeId) || foundIds.has(nextTemplateNodeId)) continue;
-        const node = nodeByTemplateNodeId.get(nextTemplateNodeId);
+    for (const fromGraphNodeId of frontier) {
+      for (const edge of adjacency.get(fromGraphNodeId) ?? []) {
+        const nextGraphNodeId = direction === "FORWARD" ? edge.toNodeId : edge.fromNodeId;
+        if (seen.has(nextGraphNodeId) || foundIds.has(nextGraphNodeId)) continue;
+        const node = nodeByGraphNodeId.get(nextGraphNodeId);
         // 실행 행이 없는 노드(START·참고 문서)는 칸을 만들지 않는다 — 사람이
         // 할 일이 아니고, 번호도 상태도 없어 칸에 적을 것이 없다.
         if (!node) continue;
-        foundIds.add(nextTemplateNodeId);
+        foundIds.add(nextGraphNodeId);
         found.push({
-          templateNodeId: nextTemplateNodeId,
+          graphNodeId: nextGraphNodeId,
           step: { node, via: { edgeId: edge.id, branchType: edge.branchType, branchLabel: edge.branchLabel } },
         });
       }
@@ -190,7 +219,7 @@ function walk<T extends MinimapNode>(
     // 걸음마다 칸이 곱해져 띠가 터진다. 갈라진다는 사실 자체가 알려 줄 것의
     // 거의 전부이기도 하다.
     if (found.length > 1) break;
-    frontier = [found[0].templateNodeId];
+    frontier = [found[0].graphNodeId];
   }
 
   return levels;
@@ -210,13 +239,12 @@ export function buildProcedureExecutionMinimap<T extends MinimapNode>(input: {
   /** pickCurrentTask 가 고른 「지금 할 일」. 없으면 null. */
   current: T | null;
 }): ProcedureExecutionMinimap<T> {
-  const nodeByTemplateNodeId = new Map<string, T>();
+  const nodeByGraphNodeId = new Map<string, T>();
   for (const node of input.nodes) {
-    if (node.procedureTemplateNodeId === null) continue;
     // 먼저 나온 것을 남긴다 — 입력이 절차 차례이므로 「앞선 것이 이긴다」가 되고,
     // 같은 입력이면 언제나 같은 그림이 나온다.
-    if (!nodeByTemplateNodeId.has(node.procedureTemplateNodeId)) {
-      nodeByTemplateNodeId.set(node.procedureTemplateNodeId, node);
+    if (!nodeByGraphNodeId.has(node.graphNodeId)) {
+      nodeByGraphNodeId.set(node.graphNodeId, node);
     }
   }
 
@@ -228,7 +256,7 @@ export function buildProcedureExecutionMinimap<T extends MinimapNode>(input: {
   const incoming = new Map<string, MinimapEdge[]>();
   let linkedEdgeCount = 0;
   for (const edge of input.edges) {
-    if (!nodeByTemplateNodeId.has(edge.fromNodeId) || !nodeByTemplateNodeId.has(edge.toNodeId)) continue;
+    if (!nodeByGraphNodeId.has(edge.fromNodeId) || !nodeByGraphNodeId.has(edge.toNodeId)) continue;
     linkedEdgeCount += 1;
     const out = outgoing.get(edge.fromNodeId);
     if (out) out.push(edge);
@@ -241,14 +269,19 @@ export function buildProcedureExecutionMinimap<T extends MinimapNode>(input: {
   if (linkedEdgeCount === 0) return { kind: "HIDDEN", reason: "NO_LINKED_STEPS_AT_ALL" };
   if (!input.current) return { kind: "HIDDEN", reason: "NO_CURRENT_TASK" };
 
-  const currentTemplateNodeId = input.current.procedureTemplateNodeId;
-  if (currentTemplateNodeId === null) return { kind: "NOTE", reason: "CURRENT_IS_EXTRA_TASK" };
+  const currentGraphNodeId = input.current.graphNodeId;
 
-  const backward = walk("BACKWARD", currentTemplateNodeId, MINIMAP_BACKWARD_STEPS, incoming, nodeByTemplateNodeId);
-  const forward = walk("FORWARD", currentTemplateNodeId, MINIMAP_FORWARD_STEPS, outgoing, nodeByTemplateNodeId);
+  const backward = walk("BACKWARD", currentGraphNodeId, MINIMAP_BACKWARD_STEPS, incoming, nodeByGraphNodeId);
+  const forward = walk("FORWARD", currentGraphNodeId, MINIMAP_FORWARD_STEPS, outgoing, nodeByGraphNodeId);
 
   // 양쪽 다 비었으면 칸이 「지금」 하나뿐이다 — 점 하나를 그리느니 한 줄로 적는다.
-  if (backward.length === 0 && forward.length === 0) return { kind: "NOTE", reason: "CURRENT_HAS_NO_LINKED_STEP" };
+  //
+  // 🔴 까닭을 **무엇이 안 이어졌는가**로 가른다(2026-11-03, 조각 13). 방금 더한
+  // 작업은 선을 긋기 전이 보통이라, 「이 절차가 안 이어져 있다」고 적으면 사람이
+  // 절차를 탓하게 된다 — 해야 할 일은 그 창에서 선을 긋는 것이다.
+  if (backward.length === 0 && forward.length === 0) {
+    return { kind: "NOTE", reason: input.current.isAddedInCase ? "CURRENT_IS_EXTRA_TASK" : "CURRENT_HAS_NO_LINKED_STEP" };
+  }
 
   return { kind: "GRAPH", backward, current: input.current, forward };
 }

@@ -7,7 +7,7 @@ import {
   resolveAutoAdvanceTarget,
   type AutoAdvanceCandidate,
   type AutoAdvanceEdge,
-  type AutoAdvanceTemplateNode,
+  type AutoAdvanceGraphNode,
 } from "./procedure-execution-focus";
 import { PROCEDURE_CASE_EXECUTION_NODE_STATUS_CODES, type ProcedureCaseExecutionNodeStatus } from "./procedure-case-execution-types";
 
@@ -152,7 +152,7 @@ const EDGES: AutoAdvanceEdge[] = [
  * 여기 다섯은 전부 실행 가능한 갈래다(참고 문서는 아래 REFERENCE_* 판에서 따로
  * 세운다).
  */
-const TEMPLATE_NODES: AutoAdvanceTemplateNode[] = [
+const TEMPLATE_NODES: AutoAdvanceGraphNode[] = [
   { id: "t1", nodeType: "START" },
   { id: "t2", nodeType: "TASK" },
   { id: "t3", nodeType: "DECISION" },
@@ -160,8 +160,8 @@ const TEMPLATE_NODES: AutoAdvanceTemplateNode[] = [
   { id: "t5", nodeType: "CORRECTIVE_ACTION" },
 ];
 
-function execNodes(...spec: [string, string | null, ProcedureCaseExecutionNodeStatus][]): AutoAdvanceCandidate[] {
-  return spec.map(([id, procedureTemplateNodeId, status]) => ({ id, procedureTemplateNodeId, status }));
+function execNodes(...spec: [string, string, ProcedureCaseExecutionNodeStatus][]): AutoAdvanceCandidate[] {
+  return spec.map(([id, graphNodeId, status]) => ({ id, graphNodeId, status }));
 }
 
 const ALL_PENDING = execNodes(
@@ -180,11 +180,11 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
   test("판단 — 고른 갈래가 가리키는 노드를 세운다(NG 를 고르면 NG 쪽)", () => {
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: "t3",
+        completedGraphNodeId: "t3",
         isDecision: true,
         selectedOutgoingEdgeId: "e4",
         edges: EDGES,
-        templateNodes: TEMPLATE_NODES,
+        graphNodes: TEMPLATE_NODES,
         executionNodes: ALL_PENDING,
       }),
       { kind: "ADVANCE", executionNodeId: "x5", viaEdgeId: "e4" }
@@ -193,11 +193,11 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
 
   test("🔴 판단 — 다른 갈래(YES)를 고르면 다른 노드가 선다. 같은 입력에서 답이 갈려야 한다", () => {
     const yes = resolveAutoAdvanceTarget({
-      completedTemplateNodeId: "t3",
+      completedGraphNodeId: "t3",
       isDecision: true,
       selectedOutgoingEdgeId: "e3",
       edges: EDGES,
-      templateNodes: TEMPLATE_NODES,
+      graphNodes: TEMPLATE_NODES,
       executionNodes: ALL_PENDING,
     });
     assert.deepEqual(yes, { kind: "ADVANCE", executionNodeId: "x4", viaEdgeId: "e3" });
@@ -207,11 +207,11 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
     for (const selectedOutgoingEdgeId of [null, "e1", "없는-간선"]) {
       assert.deepEqual(
         resolveAutoAdvanceTarget({
-          completedTemplateNodeId: "t3",
+          completedGraphNodeId: "t3",
           isDecision: true,
           selectedOutgoingEdgeId,
           edges: EDGES,
-          templateNodes: TEMPLATE_NODES,
+          graphNodes: TEMPLATE_NODES,
           executionNodes: ALL_PENDING,
         }),
         { kind: "SKIP", reason: "SELECTED_BRANCH_MISSING" },
@@ -223,11 +223,11 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
   test("판단이 아니고 나가는 간선이 하나면 그 노드를 세운다", () => {
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: "t2",
+        completedGraphNodeId: "t2",
         isDecision: false,
         selectedOutgoingEdgeId: null,
         edges: EDGES,
-        templateNodes: TEMPLATE_NODES,
+        graphNodes: TEMPLATE_NODES,
         executionNodes: ALL_PENDING,
       }),
       { kind: "ADVANCE", executionNodeId: "x3", viaEdgeId: "e2" }
@@ -237,11 +237,11 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
   test("🔴 판단이 아닌데 나가는 간선이 여럿이면 아무것도 안 세운다 — 첫째를 고르면 틀린 쪽이 1순위가 된다", () => {
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: "t3",
+        completedGraphNodeId: "t3",
         isDecision: false,
         selectedOutgoingEdgeId: null,
         edges: EDGES,
-        templateNodes: TEMPLATE_NODES,
+        graphNodes: TEMPLATE_NODES,
         executionNodes: ALL_PENDING,
       }),
       { kind: "SKIP", reason: "AMBIGUOUS_OUTGOING_EDGES" }
@@ -251,28 +251,79 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
   test("나가는 간선이 없으면(END·그리다 만 가지) 안 세운다", () => {
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: "t4",
+        completedGraphNodeId: "t4",
         isDecision: false,
         selectedOutgoingEdgeId: null,
         edges: EDGES,
-        templateNodes: TEMPLATE_NODES,
+        graphNodes: TEMPLATE_NODES,
         executionNodes: ALL_PENDING,
       }),
       { kind: "SKIP", reason: "NO_OUTGOING_EDGE" }
     );
   });
 
-  test("끝낸 것이 사례별 추가 작업이면 그래프에 자리가 없다", () => {
+  /**
+   * 🔴 2026-11-03(조각 13)에 **뜻이 바뀐 시험**이다. 전에는 이름이 「끝낸 것이
+   * 사례별 추가 작업이면 그래프에 자리가 없다」였고 까닭이 NOT_IN_GRAPH 였다 —
+   * 그 까닭 자체가 없어졌다. 이제 추가 작업도 그림의 한 칸이고, 아무 데도 안
+   * 이었으면 **나가는 선이 없는 것**일 뿐이다(템플릿의 END 와 같은 자리).
+   */
+  test("🔴 아직 아무 데도 안 이은 추가 작업은 **나가는 선이 없는 것**으로 읽는다", () => {
+    const withExtra: AutoAdvanceCandidate[] = [...ALL_PENDING, { id: "x9", graphNodeId: "x9", status: "PENDING" }];
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: null,
+        completedGraphNodeId: "x9",
         isDecision: false,
         selectedOutgoingEdgeId: null,
         edges: EDGES,
-        templateNodes: TEMPLATE_NODES,
-        executionNodes: ALL_PENDING,
+        graphNodes: [...TEMPLATE_NODES, { id: "x9", nodeType: "TASK" }],
+        executionNodes: withExtra,
       }),
-      { kind: "SKIP", reason: "NOT_IN_GRAPH" }
+      { kind: "SKIP", reason: "NO_OUTGOING_EDGE" }
+    );
+  });
+
+  test("🔴 이어 붙인 추가 작업을 끝내면 **그 선을 따라** 다음이 선다", () => {
+    const withExtra: AutoAdvanceCandidate[] = [...ALL_PENDING, { id: "x9", graphNodeId: "x9", status: "PENDING" }];
+    // 표본 확인 — 선을 안 주면 아무것도 안 선다(바로 위 시험).
+    assert.deepEqual(
+      resolveAutoAdvanceTarget({
+        completedGraphNodeId: "x9",
+        isDecision: false,
+        selectedOutgoingEdgeId: null,
+        edges: EDGES,
+        graphNodes: [...TEMPLATE_NODES, { id: "x9", nodeType: "TASK" }],
+        executionNodes: withExtra,
+      }).kind,
+      "SKIP"
+    );
+
+    assert.deepEqual(
+      resolveAutoAdvanceTarget({
+        completedGraphNodeId: "x9",
+        isDecision: false,
+        selectedOutgoingEdgeId: null,
+        edges: [...EDGES, { id: "added-1", fromNodeId: "x9", toNodeId: "t4" }],
+        graphNodes: [...TEMPLATE_NODES, { id: "x9", nodeType: "TASK" }],
+        executionNodes: withExtra,
+      }),
+      { kind: "ADVANCE", executionNodeId: "x4", viaEdgeId: "added-1" }
+    );
+  });
+
+  test("🔴 템플릿 작업을 끝냈을 때도 **이 건에서 그은 선**을 따라간다", () => {
+    const withExtra: AutoAdvanceCandidate[] = [...ALL_PENDING, { id: "x9", graphNodeId: "x9", status: "PENDING" }];
+    // t4 는 EDGES 에 나가는 선이 없다 — 거기에 이 건에서 그은 선 하나만 붙인다.
+    assert.deepEqual(
+      resolveAutoAdvanceTarget({
+        completedGraphNodeId: "t4",
+        isDecision: false,
+        selectedOutgoingEdgeId: null,
+        edges: [...EDGES, { id: "added-2", fromNodeId: "t4", toNodeId: "x9" }],
+        graphNodes: [...TEMPLATE_NODES, { id: "x9", nodeType: "TASK" }],
+        executionNodes: withExtra,
+      }),
+      { kind: "ADVANCE", executionNodeId: "x9", viaEdgeId: "added-2" }
     );
   });
 
@@ -288,12 +339,12 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
   test("🔴 실행 행이 없는데 참고 문서도 아니면 안 세운다 — 건너뛸 근거가 없다", () => {
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: "t2",
+        completedGraphNodeId: "t2",
         isDecision: false,
         selectedOutgoingEdgeId: null,
         edges: EDGES,
         // t3 는 판단(DECISION)이라 실행 행이 **있어야 한다.** 그런데 없다.
-        templateNodes: TEMPLATE_NODES,
+        graphNodes: TEMPLATE_NODES,
         executionNodes: execNodes(["x2", "t2", "PENDING"], ["x4", "t4", "PENDING"]),
       }),
       { kind: "SKIP", reason: "TARGET_NOT_EXECUTABLE" }
@@ -303,11 +354,11 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
   test("갈래를 모르는 노드로 가는 간선도 안 세운다 — 템플릿에 없는 id 를 건너뛰면 아무 데나 흘러간다", () => {
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: "t2",
+        completedGraphNodeId: "t2",
         isDecision: false,
         selectedOutgoingEdgeId: null,
         edges: EDGES,
-        templateNodes: TEMPLATE_NODES.filter((n) => n.id !== "t3"),
+        graphNodes: TEMPLATE_NODES.filter((n) => n.id !== "t3"),
         executionNodes: execNodes(["x2", "t2", "PENDING"], ["x4", "t4", "PENDING"]),
       }),
       { kind: "SKIP", reason: "TARGET_NOT_EXECUTABLE" }
@@ -325,11 +376,11 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
     );
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: "t5",
+        completedGraphNodeId: "t5",
         isDecision: false,
         selectedOutgoingEdgeId: null,
         edges: EDGES,
-        templateNodes: TEMPLATE_NODES,
+        graphNodes: TEMPLATE_NODES,
         executionNodes: afterLoop,
       }),
       { kind: "SKIP", reason: "TARGET_ALREADY_FINISHED" }
@@ -339,11 +390,11 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
   test("🔴 건너뛴 노드도 되살리지 않는다 — 건너뜀은 사람이 「안 한다」고 정한 것이다", () => {
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: "t2",
+        completedGraphNodeId: "t2",
         isDecision: false,
         selectedOutgoingEdgeId: null,
         edges: EDGES,
-        templateNodes: TEMPLATE_NODES,
+        graphNodes: TEMPLATE_NODES,
         executionNodes: execNodes(["x2", "t2", "COMPLETED"], ["x3", "t3", "SKIPPED"]),
       }),
       { kind: "SKIP", reason: "TARGET_ALREADY_FINISHED" }
@@ -353,11 +404,11 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
   test("🔴 다음 것이 차단됨이면 자동으로 풀지 않는다", () => {
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: "t2",
+        completedGraphNodeId: "t2",
         isDecision: false,
         selectedOutgoingEdgeId: null,
         edges: EDGES,
-        templateNodes: TEMPLATE_NODES,
+        graphNodes: TEMPLATE_NODES,
         executionNodes: execNodes(["x2", "t2", "COMPLETED"], ["x3", "t3", "BLOCKED"]),
       }),
       { kind: "SKIP", reason: "TARGET_BLOCKED" }
@@ -367,11 +418,11 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
   test("🔴 다음 것이 이미 진행 중이면 건드리지 않는다 — 남이 하고 있는 일이다", () => {
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: "t2",
+        completedGraphNodeId: "t2",
         isDecision: false,
         selectedOutgoingEdgeId: null,
         edges: EDGES,
-        templateNodes: TEMPLATE_NODES,
+        graphNodes: TEMPLATE_NODES,
         executionNodes: execNodes(["x2", "t2", "COMPLETED"], ["x3", "t3", "IN_PROGRESS"]),
       }),
       { kind: "SKIP", reason: "TARGET_ALREADY_IN_PROGRESS" }
@@ -383,11 +434,11 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
     // 말고는 아무것도 돌려주지 않으므로, 부르는 쪽이 다른 행을 건드릴 재료가
     // 애초에 없다.
     const decision = resolveAutoAdvanceTarget({
-      completedTemplateNodeId: "t2",
+      completedGraphNodeId: "t2",
       isDecision: false,
       selectedOutgoingEdgeId: null,
       edges: EDGES,
-      templateNodes: TEMPLATE_NODES,
+      graphNodes: TEMPLATE_NODES,
       executionNodes: execNodes(["x2", "t2", "COMPLETED"], ["x3", "t3", "PENDING"], ["x4", "t4", "IN_PROGRESS"]),
     });
     assert.deepEqual(decision, { kind: "ADVANCE", executionNodeId: "x3", viaEdgeId: "e2" });
@@ -398,11 +449,11 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
     const extra: AutoAdvanceEdge[] = [...EDGES, { id: "e9", fromNodeId: "t9", toNodeId: "t4" }];
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: "t2",
+        completedGraphNodeId: "t2",
         isDecision: false,
         selectedOutgoingEdgeId: null,
         edges: extra,
-        templateNodes: TEMPLATE_NODES,
+        graphNodes: TEMPLATE_NODES,
         executionNodes: ALL_PENDING,
       }),
       { kind: "ADVANCE", executionNodeId: "x3", viaEdgeId: "e2" }
@@ -422,7 +473,7 @@ describe("완료하면 다음 하나가 저절로 선다", () => {
  * 둘이고, 그중 하나는 나가는 선이 **둘**이며, 둘이 **연달아** 붙어 있다.
  * 지금은 그 절차가 초안이라 안 터지지만 게시하는 날 그 자리에서 멈춘다.
  */
-const REF_NODES: AutoAdvanceTemplateNode[] = [
+const REF_NODES: AutoAdvanceGraphNode[] = [
   { id: "p45", nodeType: "TASK" },
   { id: "p50", nodeType: "DOCUMENT_REFERENCE" },
   { id: "p56", nodeType: "DOCUMENT_REFERENCE" },
@@ -466,11 +517,11 @@ const REF_EXEC_NODES: AutoAdvanceCandidate[] = execNodes(
 
 function advanceFromP45(edges: AutoAdvanceEdge[], executionNodes: AutoAdvanceCandidate[] = REF_EXEC_NODES) {
   return resolveAutoAdvanceTarget({
-    completedTemplateNodeId: "p45",
+    completedGraphNodeId: "p45",
     isDecision: false,
     selectedOutgoingEdgeId: null,
     edges,
-    templateNodes: REF_NODES,
+    graphNodes: REF_NODES,
     executionNodes,
   });
 }
@@ -479,7 +530,7 @@ describe("🔴 참고 문서를 만나면 멈추지 말고 건너뛴다", () => 
   test("🔵 표본 확인 — 참고 문서에는 실행 행이 정말 없다", () => {
     for (const referenceNodeId of ["p50", "p56"]) {
       assert.equal(
-        REF_EXEC_NODES.some((n) => n.procedureTemplateNodeId === referenceNodeId),
+        REF_EXEC_NODES.some((n) => n.graphNodeId === referenceNodeId),
         false,
         `${referenceNodeId} 에 실행 행이 있으면 「건너뛴다」를 재는 것이 아니다`
       );
@@ -547,11 +598,11 @@ describe("🔴 참고 문서를 만나면 멈추지 말고 건너뛴다", () => 
   test("판단에서 고른 갈래가 참고 문서를 가리켜도 건너뛴다", () => {
     assert.deepEqual(
       resolveAutoAdvanceTarget({
-        completedTemplateNodeId: "p45",
+        completedGraphNodeId: "p45",
         isDecision: true,
         selectedOutgoingEdgeId: "r1",
         edges: REF_CHAIN_EDGES,
-        templateNodes: REF_NODES,
+        graphNodes: REF_NODES,
         executionNodes: REF_EXEC_NODES,
       }),
       { kind: "ADVANCE", executionNodeId: "y58", viaEdgeId: "r2" }

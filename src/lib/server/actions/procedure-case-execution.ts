@@ -14,12 +14,19 @@ import {
   blockExecutionNode,
   reopenExecutionNode,
   addExecutionExtraTask,
+  removeExecutionExtraTask,
+  addExecutionEdge,
+  removeExecutionEdge,
   updateExecutionNodeMemo,
   type StartExecutionResult,
   type ExecutionNodeMutationResult,
   type ExecutionLifecycleResult,
   type AddExtraTaskResult,
+  type AddExecutionEdgeResult,
+  type RemoveExecutionEdgeResult,
 } from "@/lib/db/mutations/procedure-case-execution";
+import { isExtraTaskNodeType } from "@/lib/domain/procedure-case-execution-types";
+import { PROCEDURE_BRANCH_TYPE_CODES, type ProcedureBranchType } from "@/lib/domain/procedure-template-types";
 import { isValidUuid, validateRequiredNote } from "@/lib/validation/procedure-validation-resolution-input";
 
 /**
@@ -262,10 +269,17 @@ export async function reopenExecutionNodeAction(input: {
   );
 }
 
+/**
+ * `nodeType` — 🔵 2026-11-03(조각 13). 안 넘기면 전과 똑같이 갈래 없이 만든다.
+ *
+ * 🔴 여기서는 **허용 목록 안인가**만 본다. 「만들어도 되는 사람인가」는 변이가
+ * 제 트랜잭션 안에서 다시 가른다(이 파일 머리말의 규약).
+ */
 export async function addExecutionExtraTaskAction(input: {
   executionId: string;
   title: string;
   instructions?: string | null;
+  nodeType?: string | null;
 }): Promise<AddExtraTaskResult | Forbidden> {
   const actorCheck = await resolveAuthorizedActorId();
   if (!actorCheck.ok) return actorCheck.result;
@@ -273,9 +287,79 @@ export async function addExecutionExtraTaskAction(input: {
   if (typeof input.title !== "string" || input.title.trim().length === 0) {
     return { ok: false, code: "FORBIDDEN", message: "작업 제목을 입력해 주세요." };
   }
+  const nodeType = input.nodeType ?? null;
+  if (nodeType !== null && !isExtraTaskNodeType(nodeType)) {
+    return { ok: false, code: "FORBIDDEN", message: "이 창에서 만들 수 없는 노드 유형입니다." };
+  }
 
   return withErrorRedaction("addExecutionExtraTaskAction", () =>
-    addExecutionExtraTask(input.executionId, actorCheck.userId, input.title, input.instructions?.trim() || null)
+    addExecutionExtraTask(input.executionId, actorCheck.userId, input.title, input.instructions?.trim() || null, nodeType)
+  );
+}
+
+/**
+ * 이 건에서 더한 작업을 치운다(2026-11-03, 조각 13).
+ *
+ * 🔴 사유는 **안 받는다**. 절차 편집기의 노드 삭제도 사유가 선택이고, 여기서
+ * 굳이 요구하면 「잘못 만들었다」를 지울 때마다 글을 써야 한다. 누가 언제 치웠는지는
+ * 칸에 남는다(deleted_by · deleted_at).
+ */
+export async function removeExecutionExtraTaskAction(input: {
+  executionNodeId: string;
+  expectedVersion: number;
+  reason?: string | null;
+}): Promise<ExecutionNodeMutationResult | Forbidden> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.executionNodeId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+
+  return withErrorRedaction("removeExecutionExtraTaskAction", () =>
+    removeExecutionExtraTask(input.executionNodeId, actorCheck.userId, input.expectedVersion, input.reason?.trim() || null)
+  );
+}
+
+export async function addExecutionEdgeAction(input: {
+  executionId: string;
+  fromExecutionNodeId: string;
+  toExecutionNodeId: string;
+  branchType: string;
+  branchLabel?: string | null;
+}): Promise<AddExecutionEdgeResult | Forbidden> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (
+    !isValidUuid(input.executionId) ||
+    !isValidUuid(input.fromExecutionNodeId) ||
+    !isValidUuid(input.toExecutionNodeId)
+  ) {
+    return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  }
+  if (!PROCEDURE_BRANCH_TYPE_CODES.includes(input.branchType as ProcedureBranchType)) {
+    return { ok: false, code: "FORBIDDEN", message: "분기 유형을 다시 선택해 주세요." };
+  }
+
+  return withErrorRedaction("addExecutionEdgeAction", () =>
+    addExecutionEdge({
+      executionId: input.executionId,
+      fromExecutionNodeId: input.fromExecutionNodeId,
+      toExecutionNodeId: input.toExecutionNodeId,
+      branchType: input.branchType as ProcedureBranchType,
+      branchLabel: input.branchLabel?.trim() || null,
+      actorUserId: actorCheck.userId,
+    })
+  );
+}
+
+export async function removeExecutionEdgeAction(input: {
+  edgeId: string;
+  reason?: string | null;
+}): Promise<RemoveExecutionEdgeResult | Forbidden> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.edgeId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+
+  return withErrorRedaction("removeExecutionEdgeAction", () =>
+    removeExecutionEdge(input.edgeId, actorCheck.userId, input.reason?.trim() || null)
   );
 }
 

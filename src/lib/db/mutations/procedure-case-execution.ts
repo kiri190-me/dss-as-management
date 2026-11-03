@@ -1,9 +1,10 @@
 import "server-only";
-import { and, eq, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "../client";
 import {
   procedureCaseExecutions,
   procedureCaseExecutionNodes,
+  procedureCaseExecutionEdges,
   procedureCaseExecutionHistory,
   procedureTemplates,
   procedureTemplateNodes,
@@ -28,8 +29,16 @@ import { assessExecutionFinish } from "@/lib/domain/procedure-execution-lifecycl
 import { classifyStartNode, type StartNodeRejectionReason } from "@/lib/domain/procedure-start-picker";
 import { planNodeJump, type JumpRejectionReason } from "@/lib/domain/procedure-execution-jump";
 import { resolveJumpPath } from "@/lib/domain/procedure-execution-path";
-import type { ProcedureCaseExecutionActionType } from "@/lib/domain/procedure-case-execution-types";
-import type { ProcedureNodeType } from "@/lib/domain/procedure-template-types";
+import {
+  isExtraTaskNodeType,
+  type ExtraTaskNodeType,
+  type ProcedureCaseExecutionActionType,
+} from "@/lib/domain/procedure-case-execution-types";
+import {
+  PROCEDURE_BRANCH_TYPE_CODES,
+  type ProcedureBranchType,
+  type ProcedureNodeType,
+} from "@/lib/domain/procedure-template-types";
 import type { Role } from "@/lib/domain/types";
 
 /**
@@ -81,7 +90,15 @@ export type ExecutionMutationResultCode =
    * 안 끝난 작업이 남았는데 「그래도 끝낸다」는 확인이 안 왔다.
    * 🔴 거절이 아니라 **물어보라는 신호**다 — 화면이 확인을 받고 다시 부른다.
    */
-  | "UNFINISHED_NODES_REMAIN";
+  | "UNFINISHED_NODES_REMAIN"
+  /**
+   * **원본 절차에서 온 것**을 치우려 했다(2026-11-03, 조각 13).
+   *
+   * 🔴 INVALID_INPUT 과 가르는 까닭: 「보낸 값이 틀렸다」가 아니라 **규칙상 못
+   * 하는 일**이다. 화면이 그 둘에 적는 글이 달라야 한다 — 앞은 「다시 입력하세요」,
+   * 여기는 「원본 절차의 단계·연결은 이 창에서 지울 수 없습니다」이다.
+   */
+  | "NOT_REMOVABLE";
 
 type Failure = { ok: false; code: ExecutionMutationResultCode; message: string };
 
@@ -226,6 +243,110 @@ const FOLLOWING_HISTORY_AT = sql`now() + interval '1 millisecond'`;
 function followingHistoryAt(stepsAfterFirst: number): SQL {
   const safe = Math.max(0, Math.trunc(stepsAfterFirst));
   return sql.raw(`now() + interval '${safe} milliseconds'`);
+}
+
+// ---- 합친 그림 (템플릿 + 이 건에서 그은 선) ----
+
+/**
+ * 실행 줄 하나의 **그림 위 자리 id**. 템플릿에서 온 줄은 그 템플릿 노드 id,
+ * 이 건에서 더한 작업은 **제 실행 노드 id** 다(2026-11-03, 조각 13).
+ *
+ * 🔴 조회 쪽(getExecutionDetail)의 graphNodeIdOf 와 **같은 규칙**이어야 한다.
+ * 둘이 어긋나면 화면이 그린 그림과 서버가 걷는 그림이 달라지는데, 그 어긋남은
+ * 타입이 같아서 컴파일러가 아무 말도 안 한다.
+ */
+function graphNodeIdOfExecutionNode(node: { id: string; procedureTemplateNodeId: string | null }): string {
+  return node.procedureTemplateNodeId ?? node.id;
+}
+
+type MergedExecutionGraph = {
+  /** 그림의 칸 — 템플릿 노드 + 이 건에서 더한 작업. */
+  nodes: { id: string; nodeType: ProcedureNodeType }[];
+  /** 그림의 선 — 템플릿 간선 + 이 건에서 그은 간선. 양끝이 **그림 위 자리 id** 다. */
+  edges: { id: string; fromNodeId: string; toNodeId: string; sortOrder: number }[];
+};
+
+/**
+ * 「자동 전진」과 「지금 할 일 옮기기」가 걷는 **그림 한 벌**을 읽는다
+ * (2026-11-03, 조각 13).
+ *
+ * 🔴 **둘이 같은 그림을 봐야 한다.** 전에는 각자 템플릿 노드·간선을 따로 읽었고,
+ * 추가 간선이 생기면서 한쪽만 고치면 「완료하면 다음이 서는데 옮기기는 그 길을
+ * 모르는」 식으로 갈린다. 읽는 자리를 하나로 둔다.
+ *
+ * 🔵 조회 쪽(getExecutionDetail)과는 **일부러 함수를 나눠 둔다** — 그쪽은 제목·
+ * 좌표까지 싣는 화면 재료이고 여기는 걷는 데 필요한 칸만이다. 공통인 것은
+ * **자리 id 를 정하는 규칙 하나**이고 그것은 위 graphNodeIdOfExecutionNode 에
+ * 적혀 있다.
+ */
+async function loadMergedExecutionGraph(
+  tx: Tx,
+  params: {
+    executionId: string;
+    procedureTemplateId: string;
+    /** 이 실행의 **안 치운** 실행 줄 전부. 부르는 쪽이 이미 읽어 둔 것을 넘긴다. */
+    executionNodes: readonly {
+      id: string;
+      procedureTemplateNodeId: string | null;
+      extraTaskNodeType: ProcedureNodeType | null;
+    }[];
+  }
+): Promise<MergedExecutionGraph> {
+  const templateNodes = await tx
+    .select({ id: procedureTemplateNodes.id, nodeType: procedureTemplateNodes.nodeType })
+    .from(procedureTemplateNodes)
+    .where(eq(procedureTemplateNodes.procedureTemplateId, params.procedureTemplateId));
+
+  const templateEdges = await tx
+    .select({
+      id: procedureTemplateEdges.id,
+      fromNodeId: procedureTemplateEdges.fromNodeId,
+      toNodeId: procedureTemplateEdges.toNodeId,
+      sortOrder: procedureTemplateEdges.sortOrder,
+    })
+    .from(procedureTemplateEdges)
+    .where(eq(procedureTemplateEdges.procedureTemplateId, params.procedureTemplateId));
+
+  const addedEdges = await tx
+    .select({
+      id: procedureCaseExecutionEdges.id,
+      fromNodeId: procedureCaseExecutionEdges.fromNodeId,
+      toNodeId: procedureCaseExecutionEdges.toNodeId,
+      sortOrder: procedureCaseExecutionEdges.sortOrder,
+    })
+    .from(procedureCaseExecutionEdges)
+    .where(
+      and(
+        eq(procedureCaseExecutionEdges.executionId, params.executionId),
+        eq(procedureCaseExecutionEdges.isDeleted, false)
+      )
+    );
+
+  const byId = new Map(params.executionNodes.map((n) => [n.id, n]));
+
+  return {
+    nodes: [
+      ...templateNodes,
+      ...params.executionNodes
+        .filter((n) => n.procedureTemplateNodeId === null)
+        // 🔵 칸이 생기기 전에 등록된 옛 추가 작업은 갈래가 비어 있다 — 작업(TASK)
+        //    으로 읽는다(조회 쪽 placeAddedGraphNodes 와 같은 잣대).
+        .map((n) => ({ id: n.id, nodeType: n.extraTaskNodeType ?? ("TASK" as ProcedureNodeType) })),
+    ],
+    edges: [
+      ...templateEdges,
+      // 🔴 치운 작업에 걸린 선은 뺀다 — 한쪽만 남은 선을 따라가면 없는 노드로
+      //    전진하려 든다.
+      ...addedEdges
+        .filter((e) => byId.has(e.fromNodeId) && byId.has(e.toNodeId))
+        .map((e) => ({
+          id: e.id,
+          fromNodeId: graphNodeIdOfExecutionNode(byId.get(e.fromNodeId)!),
+          toNodeId: graphNodeIdOfExecutionNode(byId.get(e.toNodeId)!),
+          sortOrder: e.sortOrder,
+        })),
+    ],
+  };
 }
 
 /**
@@ -515,7 +636,10 @@ export async function finishProcedureExecution(
       const nodes = await tx
         .select({ status: procedureCaseExecutionNodes.status })
         .from(procedureCaseExecutionNodes)
-        .where(eq(procedureCaseExecutionNodes.executionId, executionId));
+        // 🔴 치운 추가 작업은 안 센다(2026-11-03, 조각 13). 안 거르면 「안 끝난
+        // 작업이 남았습니다」 확인 창이 **화면에 없는 줄** 때문에 뜬다 — 사람이
+        // 아무리 찾아도 그 작업을 못 찾는다.
+        .where(and(eq(procedureCaseExecutionNodes.executionId, executionId), eq(procedureCaseExecutionNodes.isDeleted, false)));
 
       // 🔴 잠근 뒤에 **다시** 센다. 화면이 세어 보낸 수를 믿지 않는다 — 그 사이에
       // 남이 노드를 끝냈거나 막았을 수 있고, 사람이 본 「3개 남았습니다」가 이미
@@ -755,6 +879,12 @@ async function loadExecutionNodeOrFail(tx: Tx, executionNodeId: string): Promise
     .where(eq(procedureCaseExecutionNodes.id, executionNodeId))
     .for("update");
   if (!node) fail("NOT_FOUND", "해당 실행 항목을 찾을 수 없습니다.");
+
+  // 🔴 치운 추가 작업은 더 못 건드린다(2026-11-03, 조각 13). 행은 감사 이력
+  // 때문에 남아 있지만 화면에서는 사라진 줄이라, 오래된 탭에서 날아든 요청이
+  // 「화면에는 없는데 저장은 되는」 자리를 만들면 안 된다 — 아래 그만둔 실행을
+  // 막는 것과 같은 잣대다.
+  if (node.isDeleted) fail("NOT_FOUND", "이미 치운 추가 작업입니다.");
 
   // 🔴 그만둔(is_deleted) 실행의 노드는 더 못 건드린다 — 화면에서 사라진 실행에
   // 직접 요청이 날아들 수 있다(오래된 탭). 조회가 그 실행을 안 보여 주므로
@@ -1030,34 +1160,29 @@ export async function jumpToExecutionNode(
           workMemo: procedureCaseExecutionNodes.workMemo,
           lastActionReason: procedureCaseExecutionNodes.lastActionReason,
           selectedOutgoingEdgeId: procedureCaseExecutionNodes.selectedOutgoingEdgeId,
+          // 🔵 2026-11-03(조각 13) — 더한 작업의 갈래. 합친 그림의 칸을 만드는 데 쓴다.
+          extraTaskNodeType: procedureCaseExecutionNodes.extraTaskNodeType,
         })
         .from(procedureCaseExecutionNodes)
-        .where(eq(procedureCaseExecutionNodes.executionId, executionId))
+        // 🔴 치운 추가 작업은 안 건드린다 — 화면에 없는 줄을 대기로 되돌리거나
+        //    완료로 바꾸면 치우기가 무력해진다.
+        .where(and(eq(procedureCaseExecutionNodes.executionId, executionId), eq(procedureCaseExecutionNodes.isDeleted, false)))
         .orderBy(procedureCaseExecutionNodes.id)
         .for("update");
 
-      // 🔴 **지나온 길**을 절차 그림에서 찾는다(조각 11). 간선·노드는 템플릿
-      // 전체를 읽는다 — 실측 템플릿의 간선이 8~42개라 한 번 더 읽어도 비용이
-      // 뜻있게 늘지 않고, 좁혀 읽으면 경로가 애초에 안 그려진다
-      // (advanceToNextNode 가 참고 문서를 건너뛰려고 전체를 읽는 것과 같은 사정).
-      const templateNodes = await tx
-        .select({ id: procedureTemplateNodes.id, nodeType: procedureTemplateNodes.nodeType })
-        .from(procedureTemplateNodes)
-        .where(eq(procedureTemplateNodes.procedureTemplateId, ctx.execution.procedureTemplateId));
-      const templateEdges = await tx
-        .select({
-          id: procedureTemplateEdges.id,
-          fromNodeId: procedureTemplateEdges.fromNodeId,
-          toNodeId: procedureTemplateEdges.toNodeId,
-          sortOrder: procedureTemplateEdges.sortOrder,
-        })
-        .from(procedureTemplateEdges)
-        .where(eq(procedureTemplateEdges.procedureTemplateId, ctx.execution.procedureTemplateId));
+      // 🔴 **지나온 길**을 그림에서 찾는다(조각 11). 🔵 2026-11-03(조각 13)부터
+      // **이 건에서 그은 선도 그 그림에 들어 있다** — 읽는 자리를 자동 전진과
+      // 하나로 묶어 둔 까닭이 그것이다(loadMergedExecutionGraph).
+      const graph = await loadMergedExecutionGraph(tx, {
+        executionId,
+        procedureTemplateId: ctx.execution.procedureTemplateId,
+        executionNodes: siblings,
+      });
 
       const jumpPath = resolveJumpPath({
-        templateNodes,
-        edges: templateEdges,
-        executionNodes: siblings,
+        graphNodes: graph.nodes,
+        edges: graph.edges,
+        executionNodes: siblings.map((s) => ({ id: s.id, graphNodeId: graphNodeIdOfExecutionNode(s) })),
         targetExecutionNodeId: executionNodeId,
       });
 
@@ -1065,7 +1190,7 @@ export async function jumpToExecutionNode(
       // 경로 계산에서는 사람이 할 일이 아니라 빠지므로, 안 가리면 「경로 밖의
       // 완료」로 읽혀 대기로 되돌아간다(JumpPlanNode.isSystemEntry 주석).
       const systemEntryTemplateNodeIds = new Set(
-        templateNodes.filter((n) => isSystemEntryNodeType(n.nodeType)).map((n) => n.id)
+        graph.nodes.filter((n) => isSystemEntryNodeType(n.nodeType)).map((n) => n.id)
       );
       const planNodes = siblings.map((s) => ({
         id: s.id,
@@ -1318,49 +1443,49 @@ async function advanceToNextNode(
     executionId: string;
     procedureTemplateId: string;
     completedExecutionNodeId: string;
-    completedTemplateNodeId: string | null;
+    /** 끝낸 줄의 **그림 위 자리 id**(2026-11-03, 조각 13 — 전에는 템플릿 노드 id 였고 추가 작업이면 null 이었다). */
+    completedGraphNodeId: string;
     isDecision: boolean;
     selectedOutgoingEdgeId: string | null;
     actorUserId: string;
   }
 ): Promise<AutoAdvanceDecision> {
-  if (params.completedTemplateNodeId === null) return { kind: "SKIP", reason: "NOT_IN_GRAPH" };
-
-  // 🔴 끝낸 노드에서 **나가는 간선만** 읽던 것을 템플릿 전체로 넓혔다. 참고
-  // 문서를 건너뛰려면 그 노드에서 나가는 선이 필요한데, 좁혀 읽으면 그 선이
-  // 애초에 결과에 없다(resolveAutoAdvanceTarget 머리말). 실측 템플릿의 간선은
-  // 8~60개라 한 번 더 읽어도 비용이 뜻있게 늘지 않는다.
-  const templateEdges = await tx
-    .select({
-      id: procedureTemplateEdges.id,
-      fromNodeId: procedureTemplateEdges.fromNodeId,
-      toNodeId: procedureTemplateEdges.toNodeId,
-    })
-    .from(procedureTemplateEdges)
-    .where(eq(procedureTemplateEdges.procedureTemplateId, params.procedureTemplateId));
-
-  // 실행 행이 없는 노드가 **참고 문서라서** 없는 것인지 가리는 데 쓴다.
-  const templateNodes = await tx
-    .select({ id: procedureTemplateNodes.id, nodeType: procedureTemplateNodes.nodeType })
-    .from(procedureTemplateNodes)
-    .where(eq(procedureTemplateNodes.procedureTemplateId, params.procedureTemplateId));
-
   const siblings = await tx
     .select({
       id: procedureCaseExecutionNodes.id,
       procedureTemplateNodeId: procedureCaseExecutionNodes.procedureTemplateNodeId,
+      extraTaskNodeType: procedureCaseExecutionNodes.extraTaskNodeType,
       status: procedureCaseExecutionNodes.status,
     })
     .from(procedureCaseExecutionNodes)
-    .where(eq(procedureCaseExecutionNodes.executionId, params.executionId));
+    // 🔴 치운 추가 작업으로는 전진하지 않는다 — 화면에 없는 줄이 「지금 할 일」로 선다.
+    .where(and(eq(procedureCaseExecutionNodes.executionId, params.executionId), eq(procedureCaseExecutionNodes.isDeleted, false)));
+
+  // 🔴 끝낸 노드에서 **나가는 간선만** 읽던 것을 그림 전체로 넓혔다. 참고 문서를
+  // 건너뛰려면 그 노드에서 나가는 선이 필요한데, 좁혀 읽으면 그 선이 애초에
+  // 결과에 없다(resolveAutoAdvanceTarget 머리말). 실측 템플릿의 간선은 8~60개라
+  // 한 번 더 읽어도 비용이 뜻있게 늘지 않는다.
+  //
+  // 🔵 2026-11-03(조각 13) — 「그림 전체」에 **이 건에서 그은 선**이 들어왔다.
+  // 옮기기와 **같은 함수**로 읽는다(loadMergedExecutionGraph) — 둘이 서로 다른
+  // 그림을 보면 「완료하면 다음이 서는데 옮기기는 그 길을 모르는」 화면이 된다.
+  const graph = await loadMergedExecutionGraph(tx, {
+    executionId: params.executionId,
+    procedureTemplateId: params.procedureTemplateId,
+    executionNodes: siblings,
+  });
 
   const decision = resolveAutoAdvanceTarget({
-    completedTemplateNodeId: params.completedTemplateNodeId,
+    completedGraphNodeId: params.completedGraphNodeId,
     isDecision: params.isDecision,
     selectedOutgoingEdgeId: params.selectedOutgoingEdgeId,
-    edges: templateEdges,
-    templateNodes,
-    executionNodes: siblings,
+    edges: graph.edges,
+    graphNodes: graph.nodes,
+    executionNodes: siblings.map((s) => ({
+      id: s.id,
+      graphNodeId: graphNodeIdOfExecutionNode(s),
+      status: s.status,
+    })),
   });
   if (decision.kind !== "ADVANCE") return decision;
 
@@ -1439,14 +1564,24 @@ export async function completeExecutionNode(input: CompleteExecutionNodeInput): 
         fail("INVALID_STATUS_TRANSITION", "대기 또는 진행 중인 작업만 완료할 수 있습니다.");
       }
 
-      const isDecision = ctx.nodeType === "DECISION";
+      // 🔵 2026-11-03(조각 13) — **더한 작업도 판단일 수 있다.** 갈래를 읽는
+      // 차례가 조회(getExecutionDetail)와 같아야 화면의 갈래 단추와 서버의 요구가
+      // 어긋나지 않는다.
+      const isDecision = (ctx.nodeType ?? ctx.node.extraTaskNodeType) === "DECISION";
       const selectedOutgoingEdgeId = input.selectedOutgoingEdgeId ?? null;
+
+      // 🔴 고른 갈래가 **이 건에서 그은 선**일 수 있다(조각 13). 그러면 아래
+      // selected_outgoing_edge_id 칸에는 **못 적는다** — 그 칸의 외래키가
+      // procedure_template_edges 를 가리키기 때문이다. 고른 사실 자체는 이력
+      // 줄에 적어 남긴다(아래 insertHistory).
+      let selectedTemplateEdgeId: string | null = null;
+      let selectedAddedEdgeId: string | null = null;
 
       if (isDecision) {
         if (!selectedOutgoingEdgeId) {
           fail("DECISION_SELECTION_REQUIRED", "판단(DECISION) 작업을 완료하려면 분기를 선택해야 합니다.");
         }
-        const [edge] = await tx
+        const [templateEdge] = await tx
           .select({
             id: procedureTemplateEdges.id,
             procedureTemplateId: procedureTemplateEdges.procedureTemplateId,
@@ -1454,12 +1589,33 @@ export async function completeExecutionNode(input: CompleteExecutionNodeInput): 
           })
           .from(procedureTemplateEdges)
           .where(eq(procedureTemplateEdges.id, selectedOutgoingEdgeId));
-        if (
-          !edge ||
-          edge.procedureTemplateId !== ctx.execution.procedureTemplateId ||
-          edge.fromNodeId !== ctx.node.procedureTemplateNodeId
-        ) {
-          fail("INVALID_DECISION_SELECTION", "선택한 분기가 이 판단 노드에서 시작하는 유효한 분기가 아닙니다.");
+        if (templateEdge) {
+          if (
+            templateEdge.procedureTemplateId !== ctx.execution.procedureTemplateId ||
+            templateEdge.fromNodeId !== ctx.node.procedureTemplateNodeId
+          ) {
+            fail("INVALID_DECISION_SELECTION", "선택한 분기가 이 판단 노드에서 시작하는 유효한 분기가 아닙니다.");
+          }
+          selectedTemplateEdgeId = templateEdge.id;
+        } else {
+          const [addedEdge] = await tx
+            .select({
+              id: procedureCaseExecutionEdges.id,
+              executionId: procedureCaseExecutionEdges.executionId,
+              fromNodeId: procedureCaseExecutionEdges.fromNodeId,
+              isDeleted: procedureCaseExecutionEdges.isDeleted,
+            })
+            .from(procedureCaseExecutionEdges)
+            .where(eq(procedureCaseExecutionEdges.id, selectedOutgoingEdgeId));
+          if (
+            !addedEdge ||
+            addedEdge.isDeleted ||
+            addedEdge.executionId !== ctx.node.executionId ||
+            addedEdge.fromNodeId !== ctx.node.id
+          ) {
+            fail("INVALID_DECISION_SELECTION", "선택한 분기가 이 판단 노드에서 시작하는 유효한 분기가 아닙니다.");
+          }
+          selectedAddedEdgeId = addedEdge.id;
         }
       } else if (selectedOutgoingEdgeId) {
         fail("INVALID_INPUT", "판단(DECISION) 노드가 아닌 작업에는 분기를 선택할 수 없습니다.");
@@ -1478,7 +1634,13 @@ export async function completeExecutionNode(input: CompleteExecutionNodeInput): 
           status: "COMPLETED",
           completedBy: actor.id,
           completedAt: new Date(),
-          selectedOutgoingEdgeId: isDecision ? selectedOutgoingEdgeId : null,
+          // 🔴 **템플릿 갈래일 때만** 적는다. 이 칸의 외래키가
+          // procedure_template_edges 를 가리키므로, 이 건에서 그은 선의 id 를
+          // 넣으면 저장 자체가 실패한다. 그 경우 고른 사실은 바로 아래 이력
+          // 줄에만 남는다 — 되짚어 볼 수는 있고, 다만 새로고침한 뒤의 추천
+          // (computeSuggestedNextNodes)이 「갈래를 안 골랐다」로 읽는다. 추천은
+          // 안내일 뿐 문이 아니므로 하는 일은 안 바뀐다.
+          selectedOutgoingEdgeId: isDecision ? selectedTemplateEdgeId : null,
           lastActionReason: input.reason ?? null,
           version: ctx.node.version + 1,
           updatedAt: new Date(),
@@ -1489,7 +1651,11 @@ export async function completeExecutionNode(input: CompleteExecutionNodeInput): 
         executionId: ctx.node.executionId,
         executionNodeId: input.executionNodeId,
         actionType: "NODE_COMPLETED",
-        afterState: isDecision ? { selectedOutgoingEdgeId } : null,
+        // 🔵 고른 갈래가 어느 표의 것인지를 함께 적는다 — 노드 행에 못 적는
+        //    경우가 있어서(바로 위), 이 줄이 「무엇을 골랐나」의 마지막 집이다.
+        afterState: isDecision
+          ? { selectedOutgoingEdgeId, selectedEdgeIsAddedInCase: selectedAddedEdgeId !== null }
+          : null,
         reason: input.reason ?? null,
         actorUserId: actor.id,
       });
@@ -1500,7 +1666,7 @@ export async function completeExecutionNode(input: CompleteExecutionNodeInput): 
         executionId: ctx.node.executionId,
         procedureTemplateId: ctx.execution.procedureTemplateId,
         completedExecutionNodeId: input.executionNodeId,
-        completedTemplateNodeId: ctx.node.procedureTemplateNodeId,
+        completedGraphNodeId: graphNodeIdOfExecutionNode(ctx.node),
         isDecision,
         selectedOutgoingEdgeId,
         actorUserId: actor.id,
@@ -1705,11 +1871,25 @@ export async function reopenExecutionNode(
 
 export type AddExtraTaskResult = { ok: true; executionNodeId: string } | Failure;
 
+/**
+ * `nodeType` — 🔵 2026-11-03(조각 13)에 늘었다. 「추가 작업 등록」 창이 절차
+ * 편집기처럼 **노드 갈래를 고르게** 됐기 때문이다(사용자 결정 — 「[추가 작업
+ * 등록]에서의 팝업은 플로우차트 편집화면에서처럼 노드종류를 선택하고, 만들고,
+ * 잇는 기능들이 포함되도록 해줘」).
+ *
+ * 🔴 **허용 목록 밖은 거절한다**(EXTRA_TASK_NODE_TYPE_CODES). 화면이 네 가지만
+ * 보여 주지만 서버가 그것을 믿지 않는다 — START 를 받아 주면 사람이 아무 단추도
+ * 못 누르는 작업이 목록에 선다(assertNotSystemEntryNode 가 막는 그 자리).
+ *
+ * 🔵 안 넘기면 **전과 똑같이** 갈래 없이 만든다 — 칸이 생기기 전 줄들과 같은
+ * 모양이고, 읽는 쪽은 작업(TASK)으로 그린다.
+ */
 export async function addExecutionExtraTask(
   executionId: string,
   actorUserId: string,
   title: string,
-  instructions: string | null
+  instructions: string | null,
+  nodeType?: ExtraTaskNodeType | null
 ): Promise<AddExtraTaskResult> {
   try {
     return await db.transaction(async (tx) => {
@@ -1747,6 +1927,10 @@ export async function addExecutionExtraTask(
       if (trimmedTitle.length === 0) {
         fail("INVALID_INPUT", "작업 제목을 입력해 주세요.");
       }
+      // 🔴 화면이 보낸 갈래를 믿지 않는다 — 허용 목록 바깥이면 거절한다.
+      if (nodeType != null && !isExtraTaskNodeType(nodeType)) {
+        fail("INVALID_INPUT", "이 창에서 만들 수 없는 노드 유형입니다.");
+      }
 
       const [inserted] = await tx
         .insert(procedureCaseExecutionNodes)
@@ -1755,6 +1939,7 @@ export async function addExecutionExtraTask(
           procedureTemplateNodeId: null,
           extraTaskTitle: trimmedTitle,
           extraTaskInstructions: instructions,
+          extraTaskNodeType: nodeType ?? null,
           status: "PENDING",
         })
         .returning({ id: procedureCaseExecutionNodes.id });
@@ -1763,11 +1948,289 @@ export async function addExecutionExtraTask(
         executionId,
         executionNodeId: inserted.id,
         actionType: "NODE_ADDED",
-        afterState: { title: trimmedTitle, instructions },
+        afterState: { title: trimmedTitle, instructions, nodeType: nodeType ?? null },
         actorUserId: actor.id,
       });
 
       return { ok: true, executionNodeId: inserted.id };
+    });
+  } catch (err) {
+    if (err instanceof ExecutionMutationError) return err.result;
+    throw err;
+  }
+}
+
+// ---- 추가 작업 치우기 / 연결 긋기 · 치우기 (2026-11-03, 조각 13) ----
+
+/**
+ * 이 건에서 더한 작업을 **치운다**(화면에서 사라지게 한다).
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **이 건에서 더한 것만** 치운다
+ * ──────────────────────────────────────────────────────────────────────
+ * 원본 절차에서 온 줄은 거절한다(NOT_REMOVABLE). 그 줄을 치우면 같은 절차를
+ * 돌리는 다른 건과 모양이 달라지고, 되살릴 길도 화면에 없다 — 안 할 작업은
+ * [건너뛰기]로 사유를 남기는 길이 따로 있다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **행은 안 지운다** — 감사 이력이 가리키고 있다
+ * ──────────────────────────────────────────────────────────────────────
+ * 추가 작업은 만들어지는 순간 NODE_ADDED 이력 한 줄을 갖고, 그 줄의 외래키가
+ * `ON DELETE restrict` 다. 그래서 「치운다」를 is_deleted 로 적는다(스키마의 그
+ * 주석에 자세히 있다). 읽는 자리가 전부 그 칸을 거른다.
+ *
+ * 🔵 **상태를 가리지 않는다.** 이미 완료한 추가 작업도 치울 수 있다 — 잘못
+ * 만들었다는 것은 나중에도 알 수 있고, 그때 「완료했으니 못 치운다」가 되면
+ * 잘못 만든 줄이 영영 목록에 남는다. 치운 뒤 진행률의 분모가 줄어드는 것은
+ * 맞는 동작이다(그 작업이 이 건의 할 일이 아니게 됐다).
+ *
+ * 🔴 **그 작업에 걸린 선도 함께 치운다.** 한쪽 끝이 사라진 선을 남기면 그림이
+ * 끝 없는 화살표를 그리거나(조회가 걸러 내기는 한다) 자동 전진이 없는 노드로
+ * 가려 든다. 같은 트랜잭션에서 함께 치운다.
+ */
+export async function removeExecutionExtraTask(
+  executionNodeId: string,
+  actorUserId: string,
+  expectedVersion: number,
+  reason: string | null
+): Promise<ExecutionNodeMutationResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, actorUserId);
+      const ctx = await loadExecutionNodeOrFail(tx, executionNodeId);
+
+      if (ctx.node.procedureTemplateNodeId !== null) {
+        fail("NOT_REMOVABLE", "원본 절차에서 온 작업은 이 창에서 지울 수 없습니다. 하지 않을 작업이면 [건너뛰기]로 사유를 남겨 주세요.");
+      }
+
+      await assertOrdinaryMutationAuthorized(actor, ctx.repairCase, ctx.node.assignedEngineerId);
+
+      // 버전을 먼저 본다 — startExecutionNode 의 같은 주석 참고.
+      if (ctx.node.version !== expectedVersion) {
+        fail("CONFLICT", "다른 사용자가 이 작업을 먼저 변경했습니다. 최신 정보를 다시 불러온 후 다시 시도해 주세요.");
+      }
+
+      const now = new Date();
+      const trimmedReason = reason === null ? null : reason.trim() || null;
+
+      await tx
+        .update(procedureCaseExecutionNodes)
+        .set({
+          isDeleted: true,
+          deletedAt: now,
+          deletedBy: actor.id,
+          deleteReason: trimmedReason,
+          version: ctx.node.version + 1,
+          updatedAt: now,
+        })
+        .where(eq(procedureCaseExecutionNodes.id, executionNodeId));
+
+      // 양끝 어느 쪽이든 이 작업에 걸린 선을 함께 치운다.
+      await tx
+        .update(procedureCaseExecutionEdges)
+        .set({ isDeleted: true, deletedAt: now, deletedBy: actor.id, deleteReason: "연결된 추가 작업을 치웠습니다." })
+        .where(
+          and(
+            eq(procedureCaseExecutionEdges.executionId, ctx.node.executionId),
+            eq(procedureCaseExecutionEdges.isDeleted, false),
+            or(
+              eq(procedureCaseExecutionEdges.fromNodeId, executionNodeId),
+              eq(procedureCaseExecutionEdges.toNodeId, executionNodeId)
+            )
+          )
+        );
+
+      return { ok: true, version: ctx.node.version + 1 };
+    });
+  } catch (err) {
+    if (err instanceof ExecutionMutationError) return err.result;
+    throw err;
+  }
+}
+
+export type AddExecutionEdgeResult = { ok: true; edgeId: string } | Failure;
+
+/**
+ * 이 건에서만 쓰는 **연결 하나**를 긋는다.
+ *
+ * 🔴 **원본 절차는 한 글자도 안 바뀐다** — 새 표에만 쓴다(스키마 머리말).
+ *
+ * 🔵 **확인 창이 없다.** 절차 편집기의 [연결 검토] → 「취소 / 추가」는 사용자가
+ * 없애 달라고 한 그것이고(2026-11-02 결정), 여기서는 누르는 즉시 저장한다.
+ * 잘못 그었으면 [연결 제거]로 지우면 된다.
+ *
+ * 🔴 양끝은 **같은 실행의 안 치운 작업**이어야 한다. 남의 실행 줄을 섞으면
+ * 그림이 두 건에 걸쳐 그려진다 — 화면에서는 고를 수 없지만 오래된 탭에서
+ * 날아들 수 있다.
+ */
+export async function addExecutionEdge(input: {
+  executionId: string;
+  fromExecutionNodeId: string;
+  toExecutionNodeId: string;
+  branchType: ProcedureBranchType;
+  branchLabel: string | null;
+  actorUserId: string;
+}): Promise<AddExecutionEdgeResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, input.actorUserId);
+
+      const [execution] = await tx
+        .select({ id: procedureCaseExecutions.id, repairCaseId: procedureCaseExecutions.repairCaseId })
+        .from(procedureCaseExecutions)
+        .where(and(eq(procedureCaseExecutions.id, input.executionId), eq(procedureCaseExecutions.isDeleted, false)));
+      if (!execution) fail("NOT_FOUND", "해당 실행을 찾을 수 없습니다.");
+      if (!execution.repairCaseId) fail("NOT_FOUND", "이 실행과 연결된 접수 건이 더 이상 존재하지 않습니다.");
+      const executionRepairCaseId = execution.repairCaseId;
+
+      const [repairCase] = await tx
+        .select({
+          id: repairCases.id,
+          isLocked: repairCases.isLocked,
+          assignedEngineerId: repairCases.assignedEngineerId,
+          billingType: repairCases.billingType,
+        })
+        .from(repairCases)
+        .where(and(eq(repairCases.id, executionRepairCaseId), eq(repairCases.isDeleted, false)));
+      if (!repairCase) fail("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
+      if (repairCase.billingType === "PENDING_DECISION") {
+        fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Procedure 작업을 추가할 수 있습니다.");
+      }
+      await assertOrdinaryMutationAuthorized(actor, repairCase, null);
+
+      if (input.fromExecutionNodeId === input.toExecutionNodeId) {
+        fail("INVALID_INPUT", "자기 자신으로의 연결은 만들 수 없습니다.");
+      }
+      if (!PROCEDURE_BRANCH_TYPE_CODES.includes(input.branchType)) {
+        fail("INVALID_INPUT", "분기 유형을 다시 선택해 주세요.");
+      }
+      const branchLabel = input.branchLabel === null ? null : input.branchLabel.trim() || null;
+      if (input.branchType === "CUSTOM" && branchLabel === null) {
+        fail("INVALID_INPUT", "사용자 정의 분기는 이름표가 필요합니다.");
+      }
+
+      const endpoints = await tx
+        .select({ id: procedureCaseExecutionNodes.id, executionId: procedureCaseExecutionNodes.executionId })
+        .from(procedureCaseExecutionNodes)
+        .where(
+          and(
+            inArray(procedureCaseExecutionNodes.id, [input.fromExecutionNodeId, input.toExecutionNodeId]),
+            eq(procedureCaseExecutionNodes.executionId, input.executionId),
+            eq(procedureCaseExecutionNodes.isDeleted, false)
+          )
+        );
+      if (endpoints.length !== 2) {
+        fail("NOT_FOUND", "연결할 작업을 찾을 수 없습니다. 화면을 새로 고친 뒤 다시 시도해 주세요.");
+      }
+
+      // 같은 양끝에 이미 선이 있으면 **또 긋지 않는다.** 그림에 겹쳐 그려져 한
+      // 줄처럼 보이는데 지울 때는 두 번 눌러야 한다 — 사람 눈에는 안 지워진다.
+      const [existing] = await tx
+        .select({ id: procedureCaseExecutionEdges.id })
+        .from(procedureCaseExecutionEdges)
+        .where(
+          and(
+            eq(procedureCaseExecutionEdges.executionId, input.executionId),
+            eq(procedureCaseExecutionEdges.fromNodeId, input.fromExecutionNodeId),
+            eq(procedureCaseExecutionEdges.toNodeId, input.toExecutionNodeId),
+            eq(procedureCaseExecutionEdges.isDeleted, false)
+          )
+        );
+      if (existing) {
+        fail("INVALID_INPUT", "두 작업 사이에는 이미 연결이 있습니다.");
+      }
+
+      // 차례는 이 실행에서 그은 선들 가운데 **맨 뒤**. 템플릿 간선의 sort_order
+      // 와 한 목록에서 비교되므로, 큰 값을 줘서 원본 갈래 뒤에 서게 한다.
+      const [{ nextSortOrder } = { nextSortOrder: 0 }] = await tx
+        .select({ nextSortOrder: sql<number>`coalesce(max(${procedureCaseExecutionEdges.sortOrder}), 0) + 1` })
+        .from(procedureCaseExecutionEdges)
+        .where(eq(procedureCaseExecutionEdges.executionId, input.executionId));
+
+      const [inserted] = await tx
+        .insert(procedureCaseExecutionEdges)
+        .values({
+          executionId: input.executionId,
+          fromNodeId: input.fromExecutionNodeId,
+          toNodeId: input.toExecutionNodeId,
+          branchType: input.branchType,
+          branchLabel,
+          sortOrder: Number(nextSortOrder),
+          createdBy: actor.id,
+        })
+        .returning({ id: procedureCaseExecutionEdges.id });
+
+      return { ok: true, edgeId: inserted.id };
+    });
+  } catch (err) {
+    if (err instanceof ExecutionMutationError) return err.result;
+    throw err;
+  }
+}
+
+export type RemoveExecutionEdgeResult = { ok: true } | Failure;
+
+/**
+ * 이 건에서 그은 연결 하나를 치운다.
+ *
+ * 🔴 **원본 절차의 간선은 애초에 이 표에 없다** — 그래서 화면이 템플릿 선을
+ * 고르면 아예 여기까지 오지 않고 까닭만 적는다. 그래도 실행 id 가 안 맞는
+ * 요청은 여기서 거절한다(오래된 탭).
+ */
+export async function removeExecutionEdge(
+  edgeId: string,
+  actorUserId: string,
+  reason: string | null
+): Promise<RemoveExecutionEdgeResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, actorUserId);
+
+      const [edge] = await tx
+        .select({
+          id: procedureCaseExecutionEdges.id,
+          executionId: procedureCaseExecutionEdges.executionId,
+          isDeleted: procedureCaseExecutionEdges.isDeleted,
+        })
+        .from(procedureCaseExecutionEdges)
+        .where(eq(procedureCaseExecutionEdges.id, edgeId))
+        .for("update");
+      if (!edge || edge.isDeleted) fail("NOT_FOUND", "해당 연결을 찾을 수 없습니다.");
+
+      const [execution] = await tx
+        .select({ id: procedureCaseExecutions.id, repairCaseId: procedureCaseExecutions.repairCaseId })
+        .from(procedureCaseExecutions)
+        .where(and(eq(procedureCaseExecutions.id, edge.executionId), eq(procedureCaseExecutions.isDeleted, false)));
+      if (!execution) fail("NOT_FOUND", "해당 실행을 찾을 수 없습니다.");
+      if (!execution.repairCaseId) fail("NOT_FOUND", "이 실행과 연결된 접수 건이 더 이상 존재하지 않습니다.");
+      const executionRepairCaseId = execution.repairCaseId;
+
+      const [repairCase] = await tx
+        .select({
+          id: repairCases.id,
+          isLocked: repairCases.isLocked,
+          assignedEngineerId: repairCases.assignedEngineerId,
+          billingType: repairCases.billingType,
+        })
+        .from(repairCases)
+        .where(and(eq(repairCases.id, executionRepairCaseId), eq(repairCases.isDeleted, false)));
+      if (!repairCase) fail("NOT_FOUND", "해당 접수 건을 찾을 수 없습니다.");
+      if (repairCase.billingType === "PENDING_DECISION") {
+        fail("BILLING_DECISION_REQUIRED", "유·무상을 확정한 후 Procedure 작업을 변경할 수 있습니다.");
+      }
+      await assertOrdinaryMutationAuthorized(actor, repairCase, null);
+
+      await tx
+        .update(procedureCaseExecutionEdges)
+        .set({
+          isDeleted: true,
+          deletedAt: new Date(),
+          deletedBy: actor.id,
+          deleteReason: reason === null ? null : reason.trim() || null,
+        })
+        .where(eq(procedureCaseExecutionEdges.id, edgeId));
+
+      return { ok: true };
     });
   } catch (err) {
     if (err instanceof ExecutionMutationError) return err.result;
