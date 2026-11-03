@@ -18,6 +18,7 @@ export default function PublishTemplateButton({
   templateId,
   templateName,
   isReferenceOnly = false,
+  disabledReason = null,
 }: {
   templateId: string;
   templateName: string;
@@ -28,6 +29,19 @@ export default function PublishTemplateButton({
    * 막는 대신 확인 창에서 무엇이 달라지는지 다르게 말해 준다.
    */
   isReferenceOnly?: boolean;
+  /**
+   * 지금 게시하면 안 되는 까닭(줄기 B-④). null 이면 막지 않는다 — **기본값이
+   * null 이라 이 프롭을 안 넘기는 호출부(절차 상세 화면)는 전과 똑같다.**
+   *
+   * 🔴 까닭을 **문장으로** 받는 까닭: 흐린 단추만 두면 사람은 고장으로 읽는다.
+   * 이 저장소는 막을 때 늘 그 자리에 왜 막혔는지를 적는다(편집기의 [저장]
+   * 단추가 "저장할 변경 없음"으로 바뀌는 것과 같은 규약).
+   *
+   * 🔴 막는 자리가 **단추와 창 둘 다**여야 한다. 단추만 흐리게 하고 창을 안
+   * 막으면 키보드나 다른 길로 열릴 수 있고, 그러면 "흐린데 게시되는" 일이
+   * 생긴다 — 게시는 되돌릴 수 없다.
+   */
+  disabledReason?: string | null;
 }) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -43,6 +57,9 @@ export default function PublishTemplateButton({
   }, [isOpen]);
 
   function openDialog() {
+    // 🔴 단추를 흐리게 하는 판정과 창이 열리는 판정이 **같은 값 하나**다.
+    //    둘로 갈리면 "흐린데 열리는 창"이 생기고, 게시는 되돌릴 수 없다.
+    if (disabledReason) return;
     setErrorMessage(null);
     setIsOpen(true);
   }
@@ -73,10 +90,13 @@ export default function PublishTemplateButton({
       <button
         type="button"
         onClick={openDialog}
+        disabled={disabledReason !== null}
+        title={disabledReason ?? undefined}
         className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
       >
         게시
       </button>
+      {disabledReason && <span className="text-xs text-amber-700 dark:text-amber-400">{disabledReason}</span>}
 
       <dialog
         ref={dialogRef}

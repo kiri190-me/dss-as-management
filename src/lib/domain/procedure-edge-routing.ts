@@ -215,3 +215,35 @@ export function computeEdgeVisibility(mode: GraphVisibilityMode, ctx: EdgeVisibi
       return { opacity: 0.45, hidden: false };
   }
 }
+
+/** 바깥에서 건 연결선 강조가 **이 선 하나**에 무엇을 하는가. */
+export type ExternalEdgeHighlight = {
+  /** 짚힌 선 — 굵게·위로 올라오고, 어떤 흐리기도 걸리지 않는다. */
+  pinned: boolean;
+  /** 짚기 밖의 선 — 흐려진다. */
+  muted: boolean;
+};
+
+/**
+ * 2026-11-03(줄기 B-③) — ProcedureFlowGraph 의 `highlightedEdgeIds` 가 선
+ * 하나에 끼치는 영향. 노드 쪽 `highlightedNodeIds` 와 **같은 약속**을 쓴다:
+ *
+ *   null       → 아무 영향 없음. `{ pinned: false, muted: false }`
+ *   빈 배열    → **전부** 흐려진다(강조는 걸었는데 맞는 것이 하나도 없는 상태).
+ *   id 목록    → 그 안의 선만 짚히고 나머지는 흐려진다.
+ *
+ * 🔴 null 갈래가 이 함수의 핵심이다. 이 프롭을 안 넘기는 화면 셋(절차 상세 ·
+ * 실행 시작 고르기 · 「전체 단계 보기」 팝업)이 **글자 하나 안 바뀐다**는 보장이
+ * 여기 한 줄에 모여 있다 — 그림 쪽에 흩어 두면 시험이 못 잰다(그 파일은
+ * @xyflow/react 의 .css 를 물고 있어 import 가 바로 던진다).
+ *
+ * 🔵 「흐리기를 얼마나」는 여기서 정하지 않는다. 배치마다 기준값이 다르기
+ * 때문이다 — 원본/사용자 배치는 선택 흐리기와 같은 값(0.25, 오류 집중 보기에선
+ * 0.08)을 쓰고, 단계별 정렬은 computeEdgeVisibility 가 이미 정해 둔 값을
+ * 한 번 더 누른다. 여기서는 **흐려지는가 아닌가**만 말한다.
+ */
+export function resolveExternalEdgeHighlight(edgeId: string, highlightedEdgeIds: ReadonlySet<string> | null): ExternalEdgeHighlight {
+  if (highlightedEdgeIds === null) return { pinned: false, muted: false };
+  const pinned = highlightedEdgeIds.has(edgeId);
+  return { pinned, muted: !pinned };
+}

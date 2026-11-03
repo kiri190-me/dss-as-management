@@ -33,6 +33,7 @@ import {
   assignEdgeLanes,
   buildOuterLanePath,
   computeEdgeVisibility,
+  resolveExternalEdgeHighlight,
   GRAPH_VISIBILITY_MODES,
   GRAPH_VISIBILITY_MODE_LABELS,
   type GraphVisibilityMode,
@@ -293,6 +294,7 @@ export default function ProcedureFlowGraph({
   onInstanceReady,
   showChrome = true,
   highlightedNodeIds = null,
+  highlightedEdgeIds = null,
   nodeMarks = null,
   draggableNodeIds = null,
   graphHeight,
@@ -391,6 +393,23 @@ export default function ProcedureFlowGraph({
    * 그림에서 사라진다.
    */
   highlightedNodeIds?: readonly string[] | null;
+  /**
+   * 2026-11-03(줄기 B-③) — **연결선 쪽의 같은 것.** null 이면 지금까지와
+   * 똑같다(아무 영향 없음). 배열을 주면 **그 안에 없는 연결선이 흐려지고**,
+   * 안에 있는 연결선은 선택으로 강조될 때와 **같은 모양**(굵기 +1.5, 위로
+   * 올라옴)이 된다 — 사람이 새로 배울 것이 없게 위의 highlightedNodeIds 와
+   * 짝을 맞춘 것이다.
+   *
+   * 🔴 쓰는 자리는 **편집기 [검증] 탭**이다. 오류·경고 줄을 누르면 그 줄이
+   * 가리키는 노드·연결선만 환하게 남는다. 그 전까지 이 그림에는 「바깥에서
+   * 연결선 하나를 짚는」 길이 아예 없었다 — 노드 쪽만 있었다.
+   *
+   * 🔵 빈 배열은 **전부 흐려진다**는 뜻이다(노드 쪽과 같은 약속). 그래서
+   * 「노드만 가리키는 오류」는 이 프롭을 null 로 넘겨야 한다 —
+   * procedure-validation-issue-focus.ts 의 focusHighlightProps 가 그 접기를
+   * 한 곳에서 한다.
+   */
+  highlightedEdgeIds?: readonly string[] | null;
   /**
    * 2026-11-02(조각 10) — 노드 id → **그 칸에 붙일 딱지**. null 이거나 지도에
    * 없는 노드에는 아무것도 안 붙는다(지금까지의 호출부 셋은 안 넘기므로 글자
@@ -761,6 +780,12 @@ export default function ProcedureFlowGraph({
     [highlightedNodeIds]
   );
 
+  // 연결선 쪽의 같은 것(줄기 B-③). 위와 똑같이 null 과 빈 배열이 다른 뜻이다.
+  const highlightedEdgeIdSet = useMemo(
+    () => (highlightedEdgeIds === null ? null : new Set(highlightedEdgeIds)),
+    [highlightedEdgeIds]
+  );
+
   // 끌 수 있는 칸(조각 14). null 이면 아예 안 만든다 — 그래야 아래에서
   // 「안 넘겼다」와 「하나도 못 끈다(빈 배열)」가 갈린다. 앞은 React Flow 의
   // 전역 설정(nodesDraggable)에 맡기는 것이고, 뒤는 **전부 못 끄게** 하는 것이다.
@@ -871,16 +896,23 @@ export default function ProcedureFlowGraph({
         const isHighlighted = connectedEdgeIds.has(e.id);
         const isDimmed = selectedNodeId !== null && !isHighlighted;
         const dimOpacity = errorFocusMode ? 0.08 : 0.25;
+        // 바깥에서 건 강조(줄기 B-③) — 선택에 따른 강조/흐리기와 **함께** 걸린다.
+        // 🔴 짚힌 선은 어느 쪽으로도 안 흐려진다. 노드 쪽에서 "고른 것은 안
+        //    흐려진다"로 이미 정해 둔 규칙과 같다 — 짚어 준 것이 흐려지면
+        //    무엇을 짚었는지가 그림에서 사라진다.
+        const external = resolveExternalEdgeHighlight(e.id, highlightedEdgeIdSet);
+        const isEmphasized = isHighlighted || external.pinned;
+        const isFaded = !external.pinned && (isDimmed || external.muted);
         const effectiveRoute = resolveEffectiveEdgeRoute({ userRoutePoints: edgeRoutesByEdgeId?.get(e.id) ?? null }, layoutMode);
 
         const style = {
           stroke: config.strokeLight,
-          strokeWidth: isHighlighted ? config.strokeWidth + 1.5 : config.strokeWidth,
+          strokeWidth: isEmphasized ? config.strokeWidth + 1.5 : config.strokeWidth,
           strokeDasharray: config.dashPattern,
-          opacity: isDimmed ? dimOpacity : 1,
+          opacity: isFaded ? dimOpacity : 1,
         };
         const labelStyle = { fill: config.strokeLight, fontWeight: 700, fontSize: 10 };
-        const labelBgStyle = { fill: "#ffffff", fillOpacity: isDimmed ? (errorFocusMode ? 0.15 : 0.3) : 1 };
+        const labelBgStyle = { fill: "#ffffff", fillOpacity: isFaded ? (errorFocusMode ? 0.15 : 0.3) : 1 };
         const label = e.branchLabel ?? (config.defaultLabel ? procedureBranchTypeLabels[e.branchType] : undefined);
         const markerEnd = { type: config.markerShape === "arrow-open" ? MarkerType.Arrow : MarkerType.ArrowClosed, color: config.strokeLight };
 
@@ -907,7 +939,7 @@ export default function ProcedureFlowGraph({
             style,
             markerEnd,
             animated: config.animated,
-            zIndex: isHighlighted ? 10 : 0,
+            zIndex: isEmphasized ? 10 : 0,
           } satisfies Edge;
         }
 
@@ -941,7 +973,7 @@ export default function ProcedureFlowGraph({
           style,
           markerEnd,
           animated: config.animated,
-          zIndex: isHighlighted ? 10 : 0,
+          zIndex: isEmphasized ? 10 : 0,
         } satisfies Edge;
       });
     }
@@ -968,13 +1000,24 @@ export default function ProcedureFlowGraph({
       });
       if (visibility.hidden) continue;
 
+      // 바깥에서 건 강조(줄기 B-③). 위 분기와 같은 규칙이되, 이 배치에서는
+      // 흐리기의 기준값을 「연결 표시」 모드가 이미 정해 두었다(visibility.opacity).
+      // 🔴 그래서 짚힌 선은 그 값을 **덮어쓰고** 1 로 올린다 — 그 모드가 흐리게
+      //    잡아 놓은 선이라도 짚어 준 이상 보여야 한다. 반대로 짚기 밖의 선은
+      //    모드가 정한 값보다 더 흐려지기만 한다(더 진해지지 않는다).
+      // 🔵 visibility.hidden 은 건드리지 않는다. 그건 사람이 직접 고른 「연결
+      //    표시」 필터이고, 여기서 되살리면 고른 적 없는 선이 되살아난다.
+      const external = resolveExternalEdgeHighlight(e.id, highlightedEdgeIdSet);
+      const isEmphasized = isHighlighted || external.pinned;
+      const effectiveOpacity = external.pinned ? 1 : external.muted ? Math.min(visibility.opacity, 0.25) : visibility.opacity;
+
       const style = {
         stroke: config.strokeLight,
-        strokeWidth: isHighlighted ? config.strokeWidth + 1.5 : config.strokeWidth,
+        strokeWidth: isEmphasized ? config.strokeWidth + 1.5 : config.strokeWidth,
         strokeDasharray: config.dashPattern,
-        opacity: visibility.opacity,
+        opacity: effectiveOpacity,
       };
-      const labelBgStyle = { fill: "#ffffff", fillOpacity: visibility.opacity < 1 ? Math.max(visibility.opacity, 0.3) : 1 };
+      const labelBgStyle = { fill: "#ffffff", fillOpacity: effectiveOpacity < 1 ? Math.max(effectiveOpacity, 0.3) : 1 };
       const label = e.branchLabel ?? (config.defaultLabel ? procedureBranchTypeLabels[e.branchType] : undefined);
       const markerEnd = { type: config.markerShape === "arrow-open" ? MarkerType.Arrow : MarkerType.ArrowClosed, color: config.strokeLight };
 
@@ -1003,7 +1046,7 @@ export default function ProcedureFlowGraph({
           style,
           markerEnd,
           animated: config.animated,
-          zIndex: isHighlighted ? 10 : 5,
+          zIndex: isEmphasized ? 10 : 5,
         } satisfies Edge);
         continue;
       }
@@ -1022,7 +1065,7 @@ export default function ProcedureFlowGraph({
         style,
         markerEnd,
         animated: config.animated,
-        zIndex: isHighlighted ? 10 : 0,
+        zIndex: isEmphasized ? 10 : 0,
       } satisfies Edge);
     }
     return result;
@@ -1046,6 +1089,7 @@ export default function ProcedureFlowGraph({
     selectedWaypointIndex,
     onWaypointSelectionChange,
     onWaypointMove,
+    highlightedEdgeIdSet,
   ]);
 
   if (nodeRows.length === 0) return null;

@@ -6,6 +6,7 @@ import {
   assignEdgeLanes,
   buildOuterLanePath,
   computeEdgeVisibility,
+  resolveExternalEdgeHighlight,
   type RoutableNode,
   type RoutableEdge,
 } from "./procedure-edge-routing";
@@ -156,4 +157,36 @@ test("computeEdgeVisibility: selecting a node dims unrelated edges much more str
   const noSelection = computeEdgeVisibility("ALL", { ...base, hasSelection: false, isConnectedToSelected: false });
   const withSelectionUnrelated = computeEdgeVisibility("ALL", { ...base, hasSelection: true, isConnectedToSelected: false });
   assert.ok(withSelectionUnrelated.opacity < noSelection.opacity);
+});
+
+// ---- 2026-11-03(줄기 B-③) — 바깥에서 건 연결선 강조 ----
+//
+// 🔴 이 네 시험이 「프롭을 안 넘기는 화면 셋(절차 상세 · 실행 시작 고르기 ·
+// 「전체 단계 보기」 팝업)이 전과 똑같다」를 지키는 자리다. 그림
+// (ProcedureFlowGraph)은 @xyflow/react 의 .css 를 물고 있어 어느 목록에서도
+// import 가 바로 던지므로, 그 판정을 여기 순수 함수로 꺼내 두었다.
+
+test("resolveExternalEdgeHighlight: 안 넘겼으면(null) 아무 영향이 없다 — 이 프롭을 안 쓰는 화면 셋이 전과 똑같아야 한다", () => {
+  assert.deepEqual(resolveExternalEdgeHighlight("e1", null), { pinned: false, muted: false });
+  assert.deepEqual(resolveExternalEdgeHighlight("무슨-id-든", null), { pinned: false, muted: false });
+});
+
+test("resolveExternalEdgeHighlight: 목록에 든 선은 짚히고, 나머지는 흐려진다", () => {
+  const set = new Set(["e2"]);
+  assert.deepEqual(resolveExternalEdgeHighlight("e2", set), { pinned: true, muted: false });
+  assert.deepEqual(resolveExternalEdgeHighlight("e1", set), { pinned: false, muted: true });
+});
+
+test("🔴 resolveExternalEdgeHighlight: 빈 배열은 null 과 뜻이 정반대다 — 전부 흐려진다", () => {
+  const empty: ReadonlySet<string> = new Set();
+  assert.deepEqual(resolveExternalEdgeHighlight("e1", empty), { pinned: false, muted: true });
+  assert.deepEqual(resolveExternalEdgeHighlight("e2", empty), { pinned: false, muted: true });
+});
+
+test("🔴 resolveExternalEdgeHighlight: 짚힌 선은 동시에 흐려지지 않는다 — 짚어 준 것이 흐려지면 무엇을 짚었는지 그림에서 사라진다", () => {
+  for (const id of ["e1", "e2", "e3"]) {
+    const state = resolveExternalEdgeHighlight(id, new Set([id]));
+    assert.equal(state.pinned, true, id);
+    assert.equal(state.muted, false, id);
+  }
 });

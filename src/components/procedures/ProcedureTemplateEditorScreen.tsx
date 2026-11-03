@@ -11,6 +11,7 @@ import EdgePropertyPanel from "./editor/EdgePropertyPanel";
 import CreateEdgePanel from "./editor/CreateEdgePanel";
 import CreateNodePanel from "./editor/CreateNodePanel";
 import EditHistoryPanel from "./editor/EditHistoryPanel";
+import PublishTemplateButton from "./editor/PublishTemplateButton";
 import UndoRedoControls from "@/components/graph-editor-core/UndoRedoControls";
 import {
   createProcedureEditorUndoStack,
@@ -24,6 +25,15 @@ import {
 import type { ProcedureTemplateForEditor, DraftParentComparisonResult, EditorNodeRow, EditorEdgeRow } from "@/lib/db/queries/procedure-template-editor";
 import type { TemplateHistoryView } from "@/lib/db/queries/procedure-template-history";
 import { resolveInitialGraphTarget, parseSourceReference } from "@/lib/domain/procedure-graph-navigation";
+import {
+  buildValidationIssueFocusMap,
+  describeValidationIssueTarget,
+  focusHighlightProps,
+  resolveFocusFitNodeIds,
+  structuralIssueFocusKey,
+  importedIssueFocusKey,
+  toggleIssueFocusKey,
+} from "@/lib/domain/procedure-validation-issue-focus";
 import { resolveEffectiveNodePosition, resolveEffectiveNodeDimensions, computeStraightenedConnectedNodePosition } from "@/lib/graph-editor-core/layout";
 import { NODE_VISUAL_CONFIG, getNodeChipVisual, computeNodeDimensions } from "@/lib/domain/procedure-visual-language";
 import {
@@ -34,7 +44,7 @@ import {
 } from "@/lib/server/actions/procedure-template-editor";
 import { renameTechnicalProcedureTemplateAction } from "@/lib/server/actions/procedure-templates";
 import { undoProcedureTemplateChangeAction, redoProcedureTemplateChangeAction } from "@/lib/server/actions/procedure-template-undo-redo";
-import { procedureValidationIssueTypeLabels, procedureValidationSeverityLabels, procedureBranchTypeLabels, procedureNodeTypeLabels, procedureTemplateStatusLabels } from "@/lib/domain/procedure-template-types";
+import { procedureValidationIssueTypeLabels, procedureValidationSeverityLabels, procedureBranchTypeLabels, procedureNodeTypeLabels, procedureTemplateStatusLabels, type ProcedureValidationSeverity } from "@/lib/domain/procedure-template-types";
 import type { StructuralValidationSummary, EdgeRouteInput } from "@/lib/db/mutations/procedure-template-editor";
 import { addWaypointAtDefaultPosition, moveWaypoint, removeWaypoint, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import {
@@ -141,11 +151,24 @@ export default function ProcedureTemplateEditorScreen({
   historyView,
   comparison,
   canEdit,
+  canPublish = false,
 }: {
   template: ProcedureTemplateForEditor;
   historyView: TemplateHistoryView;
   comparison: DraftParentComparisonResult | null;
   canEdit: boolean;
+  /**
+   * 편집기 안에서 게시할 수 있는가(줄기 B-④).
+   *
+   * 🔴 **기본값이 false 다** — 넘기는 것을 잊은 호출부는 단추가 아예 없다.
+   * 절차 상세 화면의 같은 단추가 쓰는 규약 그대로다(권한은 fail-closed).
+   *
+   * 🔵 값은 edit/page.tsx 가 **상세 page.tsx 와 똑같은 세 관문**으로 계산해서
+   * 넘긴다. 화면이 제 나름대로 다시 판정하지 않는 까닭은, 서버
+   * (publishProcedureTemplate)가 거절할 단추를 내면 "보이는데 늘 실패"가
+   * 되기 때문이다.
+   */
+  canPublish?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -221,6 +244,17 @@ export default function ProcedureTemplateEditorScreen({
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>(navigationTarget.nodeId ? "properties" : "validation");
   const [lastStructuralValidation, setLastStructuralValidation] = useState<StructuralValidationSummary | null>(null);
   const [isValidating, setIsValidating] = useState(false);
+  /**
+   * 2026-11-03(줄기 B-③) — [검증] 탭에서 **지금 짚고 있는 오류 줄**.
+   *
+   * 줄 자체가 아니라 줄의 **이름**만 들고 있다(procedure-validation-issue-focus.ts
+   * 의 키). 가리키는 곳은 매 렌더에 issueFocusByKey 에서 다시 뽑는다 — 그래야
+   * 그 사이에 노드·연결선이 지워졌거나 [검증]을 다시 돌려 목록이 바뀌었을 때
+   * 짚기가 **저절로 풀린다.** 가리키던 대상을 state 에 복사해 두면 사라진 id 를
+   * 계속 그림에 넘기게 되고, 그러면 전부 흐려지고 환한 것이 하나도 없는 화면이
+   * 된다(그 접기의 까닭은 helper 의 keepOnlyExisting 주석에 적어 두었다).
+   */
+  const [focusedIssueKey, setFocusedIssueKey] = useState<string | null>(null);
 
   // 5C-6D-1D — the live React Flow instance, captured once via
   // ProcedureFlowGraph's onInstanceReady (same mechanism/timing as
@@ -530,6 +564,64 @@ export default function ProcedureTemplateEditorScreen({
       }),
     [template.edges, serverEdgesById, pendingEdgeFieldDraftsById, pendingEdgeRouteMoves]
   );
+
+  // ---- [검증] 탭의 오류 줄 → 그림에서 짚기 (줄기 B-③) ----
+  //
+  // 🔴 **이 지도에 없는 줄이 곧 "누를 수 없는 줄"**이다. 판정이 한 곳에만
+  //    있어야 "흐려 보이는데 눌리는" 또는 그 반대가 생기지 않는다 — 되돌리기
+  //    단추를 켜는 조건과 눌렀을 때 도는 계획을 하나로 묶은 것과 같은 길이다.
+  // 🔵 두 목록을 한꺼번에 넣는다. 탭에는 「구조 검증 결과」와 「가져오기 시점
+  //    검증 이슈」가 함께 있고, 뒤쪽은 nodeId/edgeId 칸이 아예 없어 시트·도형
+  //    번호로 풀어야 한다(그 풀이는 helper 가 가진다).
+  const issueFocusByKey = useMemo(
+    () =>
+      buildValidationIssueFocusMap({
+        structuralIssues: lastStructuralValidation?.issues ?? [],
+        importedIssues: template.unresolvedIssues,
+        nodes: renderedNodes,
+        edges: renderedEdges,
+      }),
+    [lastStructuralValidation, template.unresolvedIssues, renderedNodes, renderedEdges]
+  );
+  const focusedIssue = focusedIssueKey === null ? null : issueFocusByKey.get(focusedIssueKey) ?? null;
+  const { highlightedNodeIds: focusHighlightedNodeIds, highlightedEdgeIds: focusHighlightedEdgeIds } = focusHighlightProps(focusedIssue);
+
+  // ---- 오류 줄에 **이름**을 함께 보인다 (줄기 B-④) ----
+  //
+  // 🔴 실측(2026-11-03): 사용자 화면에서 경고 13건이 전부 같은 문장이었다
+  //    (「다른 노드와 연결되지 않은 고립된 노드입니다」). 목록에서 서로 구분이
+  //    안 돼 어느 노드인지 알려면 13줄을 하나씩 눌러 봐야 했다.
+  // 🔵 **짚기 지도에서 그대로 뽑는다.** 줄이 누를 수 있는지(지도에 있는가)와
+  //    줄에 보일 이름이 같은 출처라, 「이름은 붙었는데 눌리지 않는」 줄이 생길
+  //    수 없다. 지도에 없는 줄은 이름도 없다 — 가리키는 곳이 없으니 당연하다.
+  const issueTargetLabelByKey = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const [key, focus] of issueFocusByKey) {
+      const label = describeValidationIssueTarget(focus, renderedNodes, renderedEdges);
+      if (label) labels.set(key, label);
+    }
+    return labels;
+  }, [issueFocusByKey, renderedNodes, renderedEdges]);
+
+  /**
+   * 오류·경고 줄 누르기. 같은 줄을 다시 누르면 풀리고 다른 줄을 누르면 그쪽으로
+   * 옮겨간다 — 그 규칙은 toggleIssueFocusKey 하나가 갖는다.
+   *
+   * 🔵 카메라를 함께 옮기는 것은 **새로 만든 장치가 아니다.** 이 화면은 이미
+   *    onInstanceReady 로 React Flow 인스턴스를 들고 있고(노드 실측 크기를 읽는
+   *    데 쓴다), 그림 안의 노드 검색도 똑같은 fitView 한 줄로 옮긴다. 짚어 준
+   *    곳이 화면 밖에 있으면 아무리 환하게 해도 안 보인다.
+   * 🔴 fitView 는 **노드 목록만** 받는다 — 연결선만 가리키는 오류는 그 선의 양
+   *    끝 칸으로 바꿔 넘긴다(resolveFocusFitNodeIds).
+   */
+  function handleIssueRowFocus(key: string) {
+    const next = toggleIssueFocusKey(focusedIssueKey, key);
+    setFocusedIssueKey(next);
+    if (next === null) return;
+    const fitNodeIds = resolveFocusFitNodeIds(issueFocusByKey.get(next) ?? null, renderedEdges);
+    if (fitNodeIds.length === 0) return;
+    reactFlowInstanceRef.current?.fitView({ nodes: fitNodeIds.map((id) => ({ id })), duration: 300, padding: 1.5 });
+  }
 
   // Unsaved-navigation guard (Phase 4A, widened Phase 4B, extended 5C-6D-1C
   // to every safe-to-defer category, not just layout/route) — covers
@@ -946,6 +1038,10 @@ export default function ProcedureTemplateEditorScreen({
     setIsValidating(false);
     if (result.ok) {
       setLastStructuralValidation(result.structuralValidation);
+      // 🔴 새로 검증하면 짚기를 푼다(줄기 B-③). 구조 검증 결과에는 id 가 없어
+      //    줄의 이름이 **목록 안 자리**인데, 다시 돌리면 그 자리의 오류가 다른
+      //    것으로 바뀔 수 있다 — 안 풀면 사람이 고른 적 없는 곳이 짚혀 있다.
+      setFocusedIssueKey(null);
       switchRightPanelTab("validation");
       router.refresh();
     }
@@ -1294,6 +1390,37 @@ export default function ProcedureTemplateEditorScreen({
           <button type="button" onClick={() => switchRightPanelTab("compare")} disabled={!comparison} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
             부모 버전과 비교
           </button>
+          {/*
+            [게시] — 줄기 B-④. 전까지 게시하는 길은 **절차 상세 화면에만** 있어서,
+            초안을 다 고친 사람이 편집기를 나갔다가 상세로 들어가야 했다. 막는
+            까닭이 적힌 자리는 없었다(상세에만 둔 것이 의도라는 주석도 시험도
+            없다 — 09d16d8 은 그때 편집기 쪽을 아예 다루지 않았다).
+
+            🔵 부품은 상세 화면이 쓰던 것 그대로다. 확인 창(되돌릴 수 없다는
+            설명)과 서버 실패 이유를 보이는 자리가 이미 그 안에 있고,
+            procedure-publish-flow.test.tsx 가 그것을 지키고 있다 — 여기서
+            새로 만들면 한쪽만 고쳐지는 날이 온다.
+
+            🔴 **저장하지 않은 변경이 있으면 막는다.** 편집기의 안전 보류
+            (safe-to-defer) 변경은 [저장]을 눌러야 서버로 간다. 그대로 게시하면
+            게시된 내용은 **화면에 보이는 것이 아니라 마지막으로 저장된 것**이
+            되어, 사람이 본 것과 현장에 나간 것이 달라진다. 흐린 단추만 두지
+            않고 까닭을 함께 적는다.
+
+            🔵 게시 뒤 화면: PublishTemplateButton 이 router.refresh() 를 부르고,
+            이 경로(/procedures/<id>/edit)의 page.tsx 는 PUBLISHED 상태를 보면
+            편집기 대신 "게시된 템플릿은 직접 편집할 수 없습니다 — 새 DRAFT
+            버전을 만드세요" 안내를 그린다. 이미 게시된 초안 위에 편집기가 남는
+            일이 구조적으로 없다.
+          */}
+          {template.status === "DRAFT" && canPublish && (
+            <PublishTemplateButton
+              templateId={template.id}
+              templateName={template.name}
+              isReferenceOnly={template.isReferenceOnly}
+              disabledReason={hasAnyPendingChanges ? `저장하지 않은 변경 ${totalPendingCount}건이 있어 게시할 수 없습니다 — [저장] 먼저` : null}
+            />
+          )}
           <button type="button" onClick={handleExit} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300">
             편집기 나가기
           </button>
@@ -1317,6 +1444,8 @@ export default function ProcedureTemplateEditorScreen({
             initialWorksheet={navigationTarget.worksheetFilter}
             initialSelectedNodeId={navigationTarget.nodeId}
             errorFocusMode={errorFocusMode}
+            highlightedNodeIds={focusHighlightedNodeIds}
+            highlightedEdgeIds={focusHighlightedEdgeIds}
             editable={canEdit}
             useAutoLayoutForUnpositionedNodes={isTechnical}
             onNodeSelectionChange={handleNodeSelectionChange}
@@ -1440,20 +1569,47 @@ export default function ProcedureTemplateEditorScreen({
 
           {rightPanelTab === "validation" && (
             <div className="flex flex-col gap-3 text-xs">
+              {/*
+                줄기 B-③ — 짚기가 걸려 있는 동안만 보이는 줄. 🔴 푸는 길이
+                "같은 줄 다시 누르기" 하나뿐이면, 고른 줄이 스크롤 밖으로
+                밀려났을 때 돌아갈 방법이 없다. 그림이 왜 흐린지도 여기서
+                한 번 말해 준다 — 안 말하면 고장으로 읽힌다.
+              */}
+              {focusedIssue && (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-blue-200 bg-blue-50 px-2 py-1.5 dark:border-blue-900 dark:bg-blue-950">
+                  <span className="text-blue-800 dark:text-blue-300">
+                    고른 오류가 가리키는 곳만 그림에서 환하게 표시 중입니다 (노드 {focusedIssue.nodeIds.length}개 · 연결선 {focusedIssue.edgeIds.length}개).
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setFocusedIssueKey(null)}
+                    className="shrink-0 rounded-md border border-blue-300 px-2 py-0.5 font-medium text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900"
+                  >
+                    표시 해제
+                  </button>
+                </div>
+              )}
               <div>
                 <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">가져오기 시점 검증 이슈 (미해결)</h3>
                 {template.unresolvedIssues.length === 0 ? (
                   <p className="mt-1 text-zinc-400 dark:text-zinc-600">없음</p>
                 ) : (
                   <ul className="mt-1 flex flex-col gap-1">
-                    {template.unresolvedIssues.map((i) => (
-                      <li key={i.id} className="rounded border border-zinc-100 p-1.5 dark:border-zinc-800">
-                        <span className={i.severity === "ERROR" ? "font-medium text-red-600 dark:text-red-400" : "font-medium text-amber-600 dark:text-amber-400"}>
-                          {procedureValidationSeverityLabels[i.severity]}
-                        </span>{" "}
-                        {procedureValidationIssueTypeLabels[i.issueType] ?? i.issueType}
-                      </li>
-                    ))}
+                    {template.unresolvedIssues.map((i) => {
+                      const focusKey = importedIssueFocusKey(i.id);
+                      return (
+                        <ValidationIssueRow
+                          key={i.id}
+                          focusKey={focusKey}
+                          canFocus={issueFocusByKey.has(focusKey)}
+                          isFocused={focusedIssueKey === focusKey}
+                          onFocus={handleIssueRowFocus}
+                          severity={i.severity}
+                          targetLabel={issueTargetLabelByKey.get(focusKey) ?? null}
+                          message={procedureValidationIssueTypeLabels[i.issueType] ?? i.issueType}
+                        />
+                      );
+                    })}
                   </ul>
                 )}
               </div>
@@ -1467,14 +1623,21 @@ export default function ProcedureTemplateEditorScreen({
                     </p>
                     {lastStructuralValidation.errorCount > 0 && <p className="mt-1 text-red-600 dark:text-red-400">오류가 있으면 이 초안을 게시할 수 없습니다.</p>}
                     <ul className="mt-1 flex flex-col gap-1">
-                      {lastStructuralValidation.issues.map((issue, idx) => (
-                        <li key={idx} className="rounded border border-zinc-100 p-1.5 dark:border-zinc-800">
-                          <span className={issue.severity === "ERROR" ? "font-medium text-red-600 dark:text-red-400" : "font-medium text-amber-600 dark:text-amber-400"}>
-                            {procedureValidationSeverityLabels[issue.severity]}
-                          </span>{" "}
-                          {issue.message}
-                        </li>
-                      ))}
+                      {lastStructuralValidation.issues.map((issue, idx) => {
+                        const focusKey = structuralIssueFocusKey(idx);
+                        return (
+                          <ValidationIssueRow
+                            key={idx}
+                            focusKey={focusKey}
+                            canFocus={issueFocusByKey.has(focusKey)}
+                            isFocused={focusedIssueKey === focusKey}
+                            onFocus={handleIssueRowFocus}
+                            severity={issue.severity}
+                            targetLabel={issueTargetLabelByKey.get(focusKey) ?? null}
+                            message={issue.message}
+                          />
+                        );
+                      })}
                     </ul>
                   </>
                 )}
@@ -1553,6 +1716,114 @@ export default function ProcedureTemplateEditorScreen({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * [검증] 탭의 오류·경고 한 줄(줄기 B-③, 줄기 B-④ 에서 모양을 다듬었다).
+ *
+ * 🔴 **짚을 대상이 있는 줄만 단추가 된다.** 눌리는데 아무 일도 안 일어나면
+ * 사람은 고장으로 읽는다 — 그래서 못 짚는 줄은 아예 단추로 만들지 않고, 왜
+ * 못 누르는지를 그 자리에 적는다(까닭이 없으면 그것도 고장으로 읽힌다).
+ * 실제로 못 짚는 줄이 있다: 「가져오기 시점 검증 이슈」에는 노드·연결선 칸이
+ * 아예 없어 `shape#…`/`connector#…` 로 풀어야 하는데, 그 번호가 비었거나
+ * 지금 그래프에 남아 있지 않은 건이 섞인다.
+ *
+ * 🔵 눌리는 줄과 안 눌리는 줄은 **보기에도 다르다** — 눌리는 쪽만 테두리가
+ * 마우스에 반응하고, 오른쪽 딱지의 색이 다르다. 색만으로 가르지 않은 까닭은
+ * 심각도(빨강/노랑)가 이미 색을 쓰고 있어서다.
+ *
+ * ── 🔴 꼬리말이 본문에 붙어 있으면 글자가 한가운데서 잘린다 (줄기 B-④) ────
+ * B-③ 에서는 안내 글(「— 누르면 그림에서 표시」)을 본문 **뒤에 그대로 이어**
+ * 붙였다. 사용자가 본 화면에서 그 글이 320px 짜리 오른쪽 패널의 줄 끝에서
+ * 접혀 「— 누 / 르면 그림에서 표시」가 됐다. 사용자가 말한 것: "[누르면
+ * 그림에서 표시]가 다음 줄로 가던가 작은 버튼으로 표시되던가 아에 없던가 해도
+ * 될 것 같아."
+ *
+ * 그래서 **본문과 꼬리말을 가로로 가른다**: 줄 전체가 flex 이고, 본문은
+ * `min-w-0 flex-1` 로 제 안에서 몇 줄이든 접히고, 딱지는 `shrink-0
+ * whitespace-nowrap` 이라 **본문이 몇 줄이 되든 제자리에서 안 깨진다.**
+ * 글은 「표시」/「표시 중」/「짚을 곳 없음」으로 줄이고, 원래 길게 적던 설명은
+ * title 로 옮겼다 — 딱지만 보고 뜻이 안 잡히는 사람에게는 마우스를 올리면
+ * 한 문장이 그대로 나온다. 🔴 까닭을 **없애지는 않았다**: 왜 못 누르는지
+ * 모르면 그 줄은 고장으로 읽힌다.
+ */
+function ValidationIssueRow({
+  focusKey,
+  canFocus,
+  isFocused,
+  onFocus,
+  severity,
+  targetLabel,
+  message,
+}: {
+  focusKey: string;
+  canFocus: boolean;
+  isFocused: boolean;
+  onFocus: (focusKey: string) => void;
+  severity: ProcedureValidationSeverity;
+  /**
+   * 이 줄이 가리키는 노드·연결선의 이름. 짚을 곳이 없으면 null 이다.
+   *
+   * 🔴 같은 문장이 열 줄 넘게 늘어서는 일이 실제로 있었다(고립된 노드 13건).
+   * 이름이 없으면 그 줄들은 서로 구분이 안 되고, 어느 칸인지 알려면 하나씩
+   * 눌러 봐야 한다.
+   */
+  targetLabel: string | null;
+  message: string;
+}) {
+  const body = (
+    <span className="min-w-0 flex-1">
+      <span className={severity === "ERROR" ? "font-medium text-red-600 dark:text-red-400" : "font-medium text-amber-600 dark:text-amber-400"}>
+        {procedureValidationSeverityLabels[severity]}
+      </span>
+      {targetLabel && (
+        <>
+          {" · "}
+          <span className="font-medium text-zinc-900 dark:text-zinc-100">{targetLabel}</span>
+        </>
+      )}
+      {" · "}
+      <span className="text-zinc-600 dark:text-zinc-400">{message}</span>
+    </span>
+  );
+
+  if (!canFocus) {
+    return (
+      <li className="flex items-start gap-1.5 rounded border border-zinc-100 p-1.5 dark:border-zinc-800">
+        {body}
+        <span
+          title="그림에서 짚을 노드·연결선이 없습니다"
+          className="shrink-0 whitespace-nowrap rounded bg-zinc-100 px-1 py-0.5 text-[10px] text-zinc-400 dark:bg-zinc-800 dark:text-zinc-600"
+        >
+          짚을 곳 없음
+        </span>
+      </li>
+    );
+  }
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onFocus(focusKey)}
+        aria-pressed={isFocused}
+        className={`flex w-full items-start gap-1.5 rounded border p-1.5 text-left ${
+          isFocused
+            ? "border-blue-400 bg-blue-50 dark:border-blue-700 dark:bg-blue-950"
+            : "border-zinc-100 hover:border-blue-300 hover:bg-blue-50 dark:border-zinc-800 dark:hover:border-blue-800 dark:hover:bg-blue-950"
+        }`}
+      >
+        {body}
+        <span
+          title={isFocused ? "그림에서 표시 중 (다시 누르면 해제)" : "누르면 그림에서 표시"}
+          className={`shrink-0 whitespace-nowrap rounded px-1 py-0.5 text-[10px] font-medium ${
+            isFocused ? "bg-blue-600 text-white dark:bg-blue-500" : "bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400"
+          }`}
+        >
+          {isFocused ? "표시 중" : "표시"}
+        </span>
+      </button>
+    </li>
   );
 }
 

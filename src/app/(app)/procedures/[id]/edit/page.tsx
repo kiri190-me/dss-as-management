@@ -18,7 +18,12 @@ import {
 import {
   mayEditTemplateOfCategory,
   mayCreateDraftVersionOfCategory,
+  mayPublishTemplateOfCategory,
 } from "@/lib/auth/technical-procedure-capabilities";
+import {
+  canManageTechnicalTemplates,
+  canActorPublishTemplateOfCategory,
+} from "@/lib/auth/technical-procedure-template-authorization";
 
 export const metadata: Metadata = {
   title: "기술 절차 편집기 | DSS A/S 관리 시스템",
@@ -117,11 +122,25 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
 
   // status === "DRAFT" from here on.
   const canEdit = await mayEditTemplateOfCategory(actingUser, template.category);
+
+  // ── 게시 단추의 노출 판정 (줄기 B-④) ──────────────────────────────────
+  // 🔴 상세 화면 page.tsx 의 canPublish 와 **글자 그대로 같은 세 관문**이다.
+  // 한 글자라도 달라지면 "상세에서는 보이는데 편집기에서는 안 보이는"(또는
+  // 그 반대의) 단추가 생기고, 사람은 권한이 오락가락한다고 읽는다. 왜 셋을
+  // 모두 보는지(역할 고정 둘 + 설정 하나가 서로 다른 답을 낼 수 있다)는
+  // src/app/(app)/procedures/[id]/page.tsx 의 같은 자리 주석에 적혀 있다 —
+  // 그 어긋남을 어느 쪽으로 정리할지는 아직 결정되지 않았고, 이 조각도
+  // 정하지 않는다. 둘 다 만족할 때만 내면 서버가 거절할 단추는 보이지 않는다.
+  const canPublish =
+    actorMay(actingUser, canManageTechnicalTemplates) &&
+    actorMay(actingUser, (role) => canActorPublishTemplateOfCategory(role, template.category)) &&
+    (await mayPublishTemplateOfCategory(actingUser, template.category));
+
   const [historyView, comparison] = await Promise.all([getProcedureTemplateHistoryView(template.id), compareDraftWithParent(template.id)]);
 
   return (
     <Suspense fallback={null}>
-      <ProcedureTemplateEditorScreen template={template} historyView={historyView} comparison={comparison} canEdit={canEdit} />
+      <ProcedureTemplateEditorScreen template={template} historyView={historyView} comparison={comparison} canEdit={canEdit} canPublish={canPublish} />
     </Suspense>
   );
 }

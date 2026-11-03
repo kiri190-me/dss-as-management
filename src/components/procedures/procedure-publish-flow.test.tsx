@@ -59,9 +59,14 @@ const executionStartCard = read("src/components/procedures/execution/ExecutionSt
 const executionQueries = read("src/lib/db/queries/procedure-case-execution.ts");
 
 describe("절차 상세 — [게시] 단추가 보이는 조건", () => {
-  test("게시 단추는 화면에 딱 한 자리에만 있다", () => {
+  test("게시 단추는 **이 화면 안에** 딱 한 자리에만 있다", () => {
+    // 🔴 2026-11-03(줄기 B-④)에 게시하는 길이 **편집기에도** 생겼다. 그래서
+    // "앱 전체에 한 자리"는 더 이상 참이 아니다 — 참인 것은 "한 화면 안에 한
+    // 자리"다. 같은 화면 안에 둘이면 한쪽만 고쳐지는 날이 오고, 화면이 다르면
+    // 조건식도 각자 가져야 한다. 편집기 쪽의 같은 불변식은
+    // procedure-editor-publish-and-issue-row.test.ts 가 잰다.
     const occurrences = detailScreen.match(/<PublishTemplateButton\b/g) ?? [];
-    assert.equal(occurrences.length, 1, "게시 자리가 둘이면 한쪽만 고쳐지는 날이 온다");
+    assert.equal(occurrences.length, 1, "한 화면에 게시 자리가 둘이면 한쪽만 고쳐지는 날이 온다");
   });
 
   test("🔴 초안(DRAFT)이고 권한(canPublish)이 있을 때에만 그린다", () => {
