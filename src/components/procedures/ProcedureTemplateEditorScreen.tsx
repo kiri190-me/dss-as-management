@@ -72,6 +72,24 @@ import {
 type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge" | "addNode";
 
 /**
+ * 2026-11-03(줄기 B-⑤) — **편집기의 「배치」는 「사용자 배치」 하나뿐이다.**
+ * 사용자가 말한 것: "[배치]도 [사용자 배치]만 있으면 될 것 같아."
+ *
+ * 🔴 셋이 뜨던 것이 뜻을 잃은 까닭은 **고를 것이 실제로 하나**이기 때문이다.
+ * 「원본 배치」는 노드가 그려지는 자리가 「사용자 배치」와 똑같고
+ * (resolveBaselinePosition 이 두 모드를 한 줄기로 합쳤다), 편집기에서 갈리는
+ * 것은 끌 수 있느냐·경로점이 보이느냐뿐이라 **편집기에서는 언제나 열려 있어야
+ * 하는 쪽**이다. 「단계별 정렬」은 끌 수도 저장할 수도 없는 미리보기다.
+ *
+ * 🔵 읽기 전용 화면들은 이 상수를 안 쓴다 — 거기서는 셋 그대로다(특히
+ * 「단계별 정렬」은 노드가 많은 절차를 좁게 보는 유일한 모드라 남겨야 한다).
+ *
+ * 🔴 모듈 바깥에 두는 까닭: 렌더마다 새 배열을 만들면 아래 그림의 프롭이 매번
+ * 바뀐 것이 된다.
+ */
+const EDITOR_LAYOUT_MODES: readonly LayoutMode[] = ["USER"];
+
+/**
  * The Phase 4A controlled workflow editor — deliberately a thin shell
  * around the exact same ProcedureFlowGraph/ProcedureGraphLegend Phase 3B
  * built (node shapes, edge routing, layout modes, error-focus, selection
@@ -240,7 +258,15 @@ export default function ProcedureTemplateEditorScreen({
   // 추가" button — a completely separate component from the graph — had no
   // way to request that switch, permanently blocking "이 위치에 노드 추가"
   // for anyone starting from the default 원본 배치 view.
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>("SOURCE");
+  //
+  // 🔴 2026-11-03(줄기 B-⑤) — **편집기의 기본 배치가 「사용자 배치」가 됐다.**
+  // 고를 수 있는 것을 그 하나로 좁혔으므로(EDITOR_LAYOUT_MODES), 기본값을
+  // 그대로 두면 **고를 수 없는 모드로 떠 있는** 화면이 된다.
+  // 🔵 노드가 그려지는 자리는 안 바뀐다 — resolveBaselinePosition 이
+  // "SOURCE"/"USER" 를 한 줄기로 합쳐 두어서, 저장된 자리 값은 전부터 양쪽에서
+  // 똑같이 이겼다. 달라지는 것은 **처음부터 끌 수 있고 경로점이 보인다**는 것
+  // 하나다(전에는 드롭다운을 한 번 바꿔야 열렸다).
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>("USER");
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>(navigationTarget.nodeId ? "properties" : "validation");
   const [lastStructuralValidation, setLastStructuralValidation] = useState<StructuralValidationSummary | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -1462,6 +1488,7 @@ export default function ProcedureTemplateEditorScreen({
             onEdgeDoubleClick={handleEdgeDoubleClick}
             layoutMode={layoutMode}
             onLayoutModeChange={setLayoutMode}
+            layoutModeOptions={EDITOR_LAYOUT_MODES}
             onInstanceReady={(instance) => {
               reactFlowInstanceRef.current = instance;
             }}

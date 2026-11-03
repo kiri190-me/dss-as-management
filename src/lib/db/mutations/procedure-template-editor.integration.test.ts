@@ -894,16 +894,35 @@ describe("procedure-template-editor: manual edge routes (Phase 4B)", () => {
     assert.deepEqual(row.afterState, [{ edgeId: edge.id, points: [{ x: 7, y: 7 }] }]);
   });
 
-  test("32. createNewDraftVersion clones edges with userRoutePoints reset to null, even if the parent had a manual route", async () => {
-    const code = uniqueCode("route-clone-reset");
+  /**
+   * 🔴 2026-11-03(줄기 B-⑤)에 **기대값이 뒤집혔다.** 이 시험은 전에
+   * "새 초안은 부모의 수동 경로를 절대 물려받지 않는다"를 지켰고, 그때는 그것이
+   * 맞았다 — createNewDraftVersion 이 노드의 자리 값(user_position_x/y)도 안
+   * 싣고 있었기 때문이다. 경로점은 노드 자리를 기준으로 찍은 절대 좌표라서,
+   * 노드가 원본 좌표로 떨어진 그림에 부모의 경로만 얹히면 엉뚱한 데를 지나는
+   * 선이 된다.
+   *
+   * 같은 조각에서 자리 값을 함께 싣게 되면서 그 전제가 사라졌다. 이제는 자리와
+   * 경로가 **짝으로** 따라온다 — 한쪽만 오면 사람이 펴 둔 선이 자동 경로로
+   * 되돌아가 "게시된 그림과 다른 초안"이 된다. 까닭은 복제 목록의 주석에도
+   * 적어 두었다(procedure-templates.ts).
+   */
+  test("32. createNewDraftVersion clones the parent's manual edge route along with the node layout it was drawn against", async () => {
+    const code = uniqueCode("route-clone-inherit");
     const templateId = await createDraft(code);
     const nodes = await loadNodesByCode(templateId);
     const edges = await loadEdges(templateId);
     const templateRow = await loadTemplateRow(templateId);
     const edge = edges.find((e) => e.fromNodeId === nodes.get("n1")!.id)!;
 
-    const saveResult = await saveProcedureTemplateLayout(templateId, superAdminId, [], [{ edgeId: edge.id, points: [{ x: 2, y: 2 }] }], templateRow.updatedAt.toISOString());
-    assert.equal(saveResult.ok, true);
+    const saveResult = await saveProcedureTemplateLayout(
+      templateId,
+      superAdminId,
+      [{ nodeId: nodes.get("n1")!.id, x: 2, y: 2 }],
+      [{ edgeId: edge.id, points: [{ x: 2, y: 2 }] }],
+      templateRow.updatedAt.toISOString()
+    );
+    assert.equal(saveResult.ok, true, JSON.stringify(saveResult));
 
     const published = await publishProcedureTemplate(templateId, superAdminId);
     assert.equal(published.ok, true);
@@ -917,7 +936,14 @@ describe("procedure-template-editor: manual edge routes (Phase 4B)", () => {
     const clonedEdges = await loadEdges(newDraft.id);
     const clonedEdge = clonedEdges.find((e) => e.clonedFromEdgeId === edge.id)!;
     assert.ok(clonedEdge, "the cloned edge must carry clonedFromEdgeId lineage");
-    assert.equal(clonedEdge.userRoutePoints, null, "a new DRAFT clone must never inherit the parent's manual route");
+    assert.deepEqual(clonedEdge.userRoutePoints, [{ x: 2, y: 2 }], "the parent's manual route must arrive with the new DRAFT");
+
+    // 🔴 짝이 함께 왔는지를 같은 시험에서 본다 — 경로만 오고 자리가 안 오면
+    // 선이 엉뚱한 데를 지나고, 그것이 이 기대값을 뒤집기 전의 바로 그 상태다.
+    const clonedNodes = await loadNodesByCode(newDraft.id);
+    const clonedN1 = clonedNodes.get("n1")!;
+    assert.equal(clonedN1.userPositionX, 2, "the node layout the route was drawn against must arrive too");
+    assert.equal(clonedN1.userPositionY, 2);
   });
 });
 

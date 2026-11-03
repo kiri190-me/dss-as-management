@@ -266,7 +266,16 @@ describe("🔴 그림 부품에 더한 것이 **다른 화면을 안 바꾼다**
     // 경로점/「연결선 펴기」/사용자 배치 선택지는 여전히 editable 하나로만 열린다.
     assert.ok(graph.includes('if (!editable || layoutMode !== "USER") return;'), "「연결선 펴기」 관문이 바뀌었다");
     assert.ok(graph.includes('nodesDraggable={editable && layoutMode === "USER"}'), "전역 끌기 관문이 바뀌었다");
-    assert.ok(graph.includes('{editable && <option value="USER">사용자 배치</option>}'), "배치 선택지 관문이 바뀌었다");
+    // 🔴 2026-11-03(줄기 B-⑤) — 배치 선택지가 **바깥에서 정해지는 목록**
+    // (layoutModeOptions)으로 바뀌면서, 전까지 여기서 글자로 재던
+    // `{editable && <option value="USER">…}` 가 없어졌다. 재는 뜻은 그대로다:
+    // 「사용자 배치」는 여전히 **editable 일 때만** 목록에 선다 — 목록에 적어
+    // 넣는 것만으로는 읽기 전용 그림에서 안 열린다. 단언을 약하게 만들지 않으려고
+    // 관문 식을 통째로 맞댄다.
+    assert.ok(
+      graph.includes('const selectableLayoutModes = layoutModeOptions.filter((mode) => mode !== "USER" || editable);'),
+      "배치 선택지 관문이 바뀌었다"
+    );
   });
 
   test("🔴 끌기를 여는 화면은 **「추가 작업 등록」 창 하나**다", () => {

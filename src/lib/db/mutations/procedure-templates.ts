@@ -614,6 +614,18 @@ export async function archiveProcedureTemplate(
  * slate, matching the (out-of-Phase-2-scope) editor's expectation that a
  * draft gets re-validated as it's edited, not pre-seeded with its
  * predecessor's already-resolved findings.
+ *
+ * 🔴 2026-11-03(줄기 B-⑤) — **배치도 전부 포함이다.** 노드의 사용자 자리
+ * (user_position_x/y)와 연결선의 수동 경로(user_route_points)까지 복제한다.
+ * 그 전까지 이 셋만 빠져 있어서 새 초안이 「처음 가져왔을 때의 모양」으로
+ * 되돌아갔다. 이제 **내용** 쪽에서 일부러 안 옮기는 것은 검증 이슈 하나뿐이다
+ * (위 문단). 이력 두 표(procedure_template_edit_history ·
+ * procedure_validation_resolution_history)는 애초에 내용이 아니라 그 판에
+ * 무슨 일이 있었는지의 기록이라 여기 대상이 아니다.
+ *
+ * 칸을 새로 더할 때 복제 목록에 적는 것을 잊으면 그 칸은 판이 올라갈 때마다
+ * 조용히 사라진다 — procedure-template-clone-columns.test.ts 가 스키마의 칸
+ * 목록과 이 목록을 맞대어 그것을 막는다.
  */
 export async function createNewDraftVersion(
   publishedTemplateId: string,
@@ -729,6 +741,25 @@ export async function createNewDraftVersion(
               workerMayAddNextTask: n.workerMayAddNextTask,
               positionX: n.positionX,
               positionY: n.positionY,
+              // 2026-11-03(줄기 B-⑤) — **사람이 끌어 놓은 자리도 함께 복제한다.**
+              // 그 전까지 이 두 칸만 복제 목록에서 빠져 있어서, 게시된 절차로
+              // 새 초안을 만들면 **배치가 통째로 사라졌다**(실측: 「기본 통전
+              // 검사」 v1 은 28/28 노드에 자리 값이 있는데 거기서 나온 v2 초안은
+              // 0/28 이었다). 원본 좌표(position_x/y)는 Excel 에서 읽은 값이거나
+              // 손으로 만든 절차에서는 만든 차례대로 쌓은 값이라, 자리 값이
+              // 떨어져 나가면 사람이 그려 둔 그림이 아니라 **처음 가져왔을 때의
+              // 모양**으로 되돌아간다.
+              //
+              // 🔵 null 은 null 그대로 온다 — 한 번도 안 옮긴 노드에 자리를
+              // 만들어 주지 않는다. 자리 값이 없는 노드는 전과 똑같이
+              // position_x/y(또는 기술 절차의 자동 배치)로 떨어진다.
+              //
+              // 🔴 곁다리로 **초안↔부모 비교**(compareDraftAndParentGraphs)도
+              // 바로잡힌다. 그 비교는 양쪽의 **유효 좌표**(자리 값 우선)를 맞대
+              // 므로, 자리 값을 안 싣던 때에는 새 초안을 만든 **직후** 손도 안 댄
+              // 노드 전부가 「이동함」으로 올라왔다.
+              userPositionX: n.userPositionX,
+              userPositionY: n.userPositionY,
               sortOrder: n.sortOrder,
               sourceWorksheet: n.sourceWorksheet,
               sourceShapeId: n.sourceShapeId,
@@ -762,6 +793,17 @@ export async function createNewDraftVersion(
             // fresh id on every clone; unlike nodes there is no other
             // stable cross-version identity to rely on).
             clonedFromEdgeId: e.id,
+            // 2026-11-03(줄기 B-⑤) — 연결선의 **손으로 꺾은 경로**도 함께
+            // 복제한다. 노드 자리와 **짝**이라 따로 갈 수 없다: 경로점은 노드
+            // 자리를 기준으로 찍은 절대 좌표라서, 자리는 따라오는데 경로만
+            // 떨어지면 사람이 펴 둔 선이 자동 경로로 되돌아간다.
+            //
+            // 🔴 바로 이 짝 때문에 **전에는 안 싣는 쪽이 맞았다** — 자리 값을
+            // 안 싣던 때에 경로만 실으면, 원본 좌표로 떨어진 노드 옆을 엉뚱한
+            // 경로가 지나갔다. 그 시절의 판단이 procedure-template-editor
+            // .integration.test.ts 32번에 「절대 물려받지 않는다」로 적혀 있었고,
+            // 자리 값을 싣는 지금은 그 시험도 함께 뒤집었다.
+            userRoutePoints: e.userRoutePoints,
           }))
         );
       }

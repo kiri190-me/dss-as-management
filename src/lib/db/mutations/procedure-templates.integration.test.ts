@@ -587,6 +587,60 @@ describe("createNewDraftVersion", () => {
     }
     assert.equal(new Set(newEdges.map((e) => e.clonedFromEdgeId)).size, newEdges.length, "each cloned edge must map to a distinct parent edge, never shared");
   });
+
+  /**
+   * 2026-11-03(줄기 B-⑤) — **사람이 끌어 놓은 배치가 새 초안으로 따라온다.**
+   *
+   * 그 전까지 user_position_x/y 가 복제 목록에서 빠져 있어서, 게시된 절차로 새
+   * 초안을 만들면 배치가 통째로 사라졌다(개발 DB 실측: 「기본 통전 검사」 v1 은
+   * 28/28 노드에 자리 값이 있는데 v2 초안은 0/28). 화면에서는 「원본 배치」로
+   * 봐야만 모양이 맞고 「사용자 배치」가 텅 비는 것으로 드러났다.
+   *
+   * 🔴 두 쪽을 함께 잰다: 자리 값이 **있던** 노드는 값 그대로, **없던** 노드는
+   * null 그대로. 한쪽만 재면 「전부 복사」도 「전부 0으로 채우기」도 통과한다.
+   */
+  test("3-B. a new DRAFT inherits the parent's saved user layout — and a node that never had one still arrives with null", async () => {
+    const code = uniqueCode("new-version-layout");
+    const imported = await importTemplate({ code, includeErrorIssue: false });
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+
+    const parentNodes = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.procedureTemplateId, imported.id));
+    assert.ok(parentNodes.length >= 2, "표본이 비었다 — 자리 값이 있는 노드와 없는 노드가 둘 다 필요하다");
+    const [placed, ...untouched] = [...parentNodes].sort((a, b) => a.nodeCode.localeCompare(b.nodeCode));
+    assert.ok(parentNodes.every((n) => n.userPositionX === null), "가져온 직후에는 자리 값이 하나도 없어야 한다");
+
+    // 편집기의 [저장]이 쓰는 바로 그 두 칸. 여기서는 레이아웃 저장 mutation 을
+    // 거치지 않고 직접 적는다 — 이 시험이 재는 것은 "저장"이 아니라 "복제"다.
+    await db.update(procedureTemplateNodes).set({ userPositionX: 135, userPositionY: -246 }).where(eq(procedureTemplateNodes.id, placed.id));
+
+    const published = await publishProcedureTemplate(imported.id, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+
+    const result = await createNewDraftVersion(imported.id, superAdminId);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) return;
+    createdTemplateIds.push(result.id);
+
+    const clonedNodes = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.procedureTemplateId, result.id));
+    assert.equal(clonedNodes.length, parentNodes.length);
+    const clonedByCode = new Map(clonedNodes.map((n) => [n.nodeCode, n]));
+
+    const clonedPlaced = clonedByCode.get(placed.nodeCode);
+    assert.ok(clonedPlaced, "node_code 는 판이 올라가도 그대로다");
+    assert.equal(clonedPlaced!.userPositionX, 135, "사람이 끌어 놓은 자리가 새 초안으로 따라와야 한다");
+    assert.equal(clonedPlaced!.userPositionY, -246);
+    // 원본 좌표는 건드리지 않는다 — 자리 값과 완전히 별개의 칸이다.
+    assert.equal(clonedPlaced!.positionX, placed.positionX);
+    assert.equal(clonedPlaced!.positionY, placed.positionY);
+
+    for (const parent of untouched) {
+      const clone = clonedByCode.get(parent.nodeCode);
+      assert.ok(clone);
+      assert.equal(clone!.userPositionX, null, "한 번도 안 옮긴 노드에 자리를 만들어 주면 안 된다");
+      assert.equal(clone!.userPositionY, null);
+    }
+  });
 });
 
 describe("Phase 5C-5A: procedure_templates.category foundation", () => {

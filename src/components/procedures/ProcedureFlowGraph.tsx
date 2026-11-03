@@ -217,6 +217,13 @@ const ALL_WORKSHEETS = "ALL";
 /** Exported for reuse by ProcedureTemplateEditorScreen.tsx, which lifts and controls this value — see this component's own layoutMode/onLayoutModeChange prop doc comment for why. */
 export type LayoutMode = "SOURCE" | "USER" | "STAGE_SORTED";
 
+/**
+ * 2026-11-03(줄기 B-⑤) — 「배치」 드롭다운의 **기본 목록**. 지금까지 이 드롭다운에
+ * 들어 있던 셋을 그대로 적은 것이라, layoutModeOptions 를 안 넘기는 호출부
+ * (절차 상세 · 실행 쪽 둘)는 글자 하나 안 바뀐다.
+ */
+const DEFAULT_LAYOUT_MODE_OPTIONS: readonly LayoutMode[] = ["SOURCE", "USER", "STAGE_SORTED"];
+
 export type ProcedureFlowGraphOpenIssue = { nodeId: string; issueId: string; severity: "ERROR" | "WARNING" };
 
 /**
@@ -291,6 +298,7 @@ export default function ProcedureFlowGraph({
   onEdgeDoubleClick,
   layoutMode: controlledLayoutMode,
   onLayoutModeChange,
+  layoutModeOptions = DEFAULT_LAYOUT_MODE_OPTIONS,
   onInstanceReady,
   showChrome = true,
   highlightedNodeIds = null,
@@ -366,6 +374,29 @@ export default function ProcedureFlowGraph({
    */
   layoutMode?: LayoutMode;
   onLayoutModeChange?: (mode: LayoutMode) => void;
+  /**
+   * 2026-11-03(줄기 B-⑤) — **「배치」로 고를 수 있는 것을 바깥에서 정한다.**
+   * 안 넘기면 지금까지의 셋 그대로다(DEFAULT_LAYOUT_MODE_OPTIONS) — 이 프롭을
+   * 안 넘기는 호출부 셋(절차 상세 · 실행 시작 노드 고르기 · 「전체 단계 보기」)은
+   * 글자 하나 안 바뀐다.
+   *
+   * 🔴 쓰는 자리는 **편집기** 하나이고, 거기서는 `["USER"]` 를 넘긴다. 사용자가
+   * 말한 것: "[배치]도 [사용자 배치]만 있으면 될 것 같아." 편집기에서 셋이 다
+   * 뜨는 것이 뜻이 없어진 까닭은 **고를 것이 실제로 하나뿐이기 때문**이다:
+   *  - 「원본 배치」와 「사용자 배치」는 **노드 자리가 같다**(resolveBaselinePosition
+   *    이 두 모드를 한 줄기로 합쳤다 — 저장된 자리 값이 양쪽에서 똑같이 이긴다).
+   *    갈리는 것은 끌 수 있느냐·경로점이 보이느냐뿐이고, 편집기는 언제나 그쪽이
+   *    열려 있어야 한다.
+   *  - 「단계별 정렬」은 **미리보기**다(끌 수 없고 저장되지 않는다). 읽기 전용
+   *    화면에서는 그대로 남는다 — 노드가 많은 절차를 좁게 보는 유일한 모드라
+   *    없애면 들어갈 길이 사라진다.
+   *
+   * 🔴 `editable` 이 아닌 그림에서는 "USER" 가 여기 적혀 있어도 안 뜬다. 그
+   * 관문은 이 프롭보다 뒤에 있다(읽기 전용 화면에서 끌기를 여는 길이 되면 안
+   * 된다). 그래서 둘 다 통과한 것이 **하나뿐이면 드롭다운 대신 글자**로 그린다 —
+   * 고를 것이 없는 드롭다운은 눌러도 아무 일이 안 일어나 고장으로 읽힌다.
+   */
+  layoutModeOptions?: readonly LayoutMode[];
   /** 5C-6D-1D — forwards the live React Flow instance up to the editor screen (same purpose/timing as CaseFlowchartGraph's own onInstanceReady) so a sibling component (NodePropertyPanel, CreateNodePanel) can read each node's REAL measured dimensions (`instance.getInternalNode(id)?.measured`) for relative-position math, rather than a duplicated size estimate. Optional — ProcedureTemplateDetailScreen's read-only usage has no relative-position feature and never passes this. */
   onInstanceReady?: (instance: ReactFlowInstance) => void;
   /**
@@ -1094,6 +1125,21 @@ export default function ProcedureFlowGraph({
 
   if (nodeRows.length === 0) return null;
 
+  /**
+   * 「배치」에 실제로 세울 수 있는 모드(줄기 B-⑤). 관문이 둘이다 — 바깥이 준
+   * 목록(layoutModeOptions)과, 그 전부터 있던 `editable` 관문. 뒤쪽을 그대로
+   * 둔 까닭: "USER" 는 끌기·경로점이 함께 열리는 모드라, 읽기 전용 그림에
+   * 목록만으로 열리면 안 된다.
+   */
+  const selectableLayoutModes = layoutModeOptions.filter((mode) => mode !== "USER" || editable);
+
+  /** 「단계별 정렬」만 편집기에서 이름이 다르다(미리보기 — 끌 수 없고 저장되지 않는다). 전까지 option 에 직접 적혀 있던 글자 그대로다. */
+  function layoutModeLabel(mode: LayoutMode): string {
+    if (mode === "SOURCE") return "원본 배치";
+    if (mode === "USER") return "사용자 배치";
+    return `단계별 정렬 ${editable ? "미리보기" : "(컴팩트)"}`;
+  }
+
   return (
     <div className="flex flex-col gap-2">
       {showChrome && (
@@ -1125,19 +1171,33 @@ export default function ProcedureFlowGraph({
           </div>
         )}
         <div className="flex items-center gap-2">
-          <label htmlFor="procedure-flow-layout-mode" className="text-zinc-500 dark:text-zinc-400">
-            배치:
-          </label>
-          <select
-            id="procedure-flow-layout-mode"
-            value={layoutMode}
-            onChange={(e) => setLayoutMode(e.target.value as LayoutMode)}
-            className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-          >
-            <option value="SOURCE">원본 배치</option>
-            {editable && <option value="USER">사용자 배치</option>}
-            <option value="STAGE_SORTED">단계별 정렬 {editable ? "미리보기" : "(컴팩트)"}</option>
-          </select>
+          {selectableLayoutModes.length > 1 ? (
+            <>
+              <label htmlFor="procedure-flow-layout-mode" className="text-zinc-500 dark:text-zinc-400">
+                배치:
+              </label>
+              <select
+                id="procedure-flow-layout-mode"
+                value={layoutMode}
+                onChange={(e) => setLayoutMode(e.target.value as LayoutMode)}
+                className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+              >
+                {selectableLayoutModes.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {layoutModeLabel(mode)}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : (
+            // 고를 것이 하나뿐이면 **지금 무엇으로 보고 있는지만** 적는다.
+            // 이름까지 지우지는 않는다 — 아래 안내 줄("사용자 배치에서는 노드를
+            // 드래그해…")이 그 이름을 그대로 부르는데, 화면 어디에도 그 글자가
+            // 없으면 사람이 자기가 거기 있는지 알 길이 없다.
+            <span className="text-zinc-500 dark:text-zinc-400">
+              배치: <span className="font-medium text-zinc-700 dark:text-zinc-300">{layoutModeLabel(layoutMode)}</span>
+            </span>
+          )}
         </div>
         {layoutMode === "STAGE_SORTED" && (
           <div className="flex items-center gap-2">
