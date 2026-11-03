@@ -855,6 +855,13 @@
       "when": 1793665113645,
       "tag": "0121_harsh_rattler",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1793671466800,
+      "tag": "0122_clumsy_blindfold",
+      "breakpoints": true
     }
   ]
 }

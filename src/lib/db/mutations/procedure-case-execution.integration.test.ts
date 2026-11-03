@@ -36,6 +36,7 @@ import {
   reopenExecutionNode,
   addExecutionExtraTask,
   removeExecutionExtraTask,
+  moveExecutionExtraTask,
   addExecutionEdge,
   removeExecutionEdge,
   updateExecutionNodeMemo,
@@ -3782,5 +3783,258 @@ describe("procedure-case-execution: 이 건에서 더한 작업과 연결 (조�
       actorUserId: engineerId,
     });
     assert.equal(again.ok, true, `re-add failed: ${JSON.stringify(again)}`);
+  });
+});
+
+/**
+ * 🔵 **조각 14 — 추가한 작업의 자리를 사람이 정한다**(2026-11-03).
+ *
+ * 🔴 이 묶음은 **마이그레이션 0122 를 적용한 뒤에야 돈다.** 새 칸 둘
+ * (user_position_x · user_position_y)을 쓰기 때문이다. 적용 전에 돌리면
+ * 「칸이 없다」로 떨어진다 — 그 실패 자체가 이 묶음이 재는 첫째다(스키마가
+ * 실제로 올라갔는가).
+ *
+ * 🔴 **접수 건을 하나만 만든다.** 인수번호가 달마다 99개뿐이라, 시험마다 건을
+ * 새로 만들면 이 파일 전체가 INTAKE_SEQUENCE_EXHAUSTED 로 떨어진다(실제로
+ * 그렇게 떨어뜨려 봤다). 절차는 TECHNICAL_TASK 로 만든다 — 그 갈래만 한 건에
+ * 여러 실행이 함께 설 수 있다(procedure_case_executions 의 부분 유니크 인덱스).
+ *
+ * 재는 것:
+ *  - 자리를 **보내면 그대로** 저장되고 그림도 그 자리로 그리는가
+ *  - 🔴 **안 보내면 비어 있고**, 그때는 조각 13 까지와 똑같이 저절로 세는가
+ *    (이 칸이 생기기 전에 등록된 줄들이 그대로 돌아야 한다)
+ *  - 🔴 끌어다 놓으면 저장되는가, 그리고 **version 이 안 오르는가** — 그 때문에
+ *    옆 사람의 다음 작업이 안 막히는가 · 이력도 안 쌓이는가
+ *  - 🔴 원본 절차에서 온 작업은 **못 옮기는가**, 원본 노드의 자리가 그대로인가
+ *  - 🔴 말이 안 되는 좌표는 **거절하는가**(그리고 칸이 안 바뀌는가)
+ *  - 치운 작업은 못 옮기는가
+ */
+describe("procedure-case-execution: 더한 작업의 자리 (조각 14)", () => {
+  /** 🔴 이 묶음이 함께 쓰는 접수 건 하나 — 까닭은 위 머리말(인수번호 99개). */
+  let sharedCaseId: string | null = null;
+
+  async function startTechnicalExecution(codeSuffix: string) {
+    if (!sharedCaseId) sharedCaseId = (await createTestCase()).id;
+    const { templateId } = await createPublishedTemplate(uniqueCode(codeSuffix), "TECHNICAL_TASK");
+    const started = await startProcedureExecution(sharedCaseId, templateId, engineerId);
+    assert.equal(started.ok, true, `start failed: ${JSON.stringify(started)}`);
+    if (!started.ok) throw new Error("unreachable");
+    return { templateId, executionId: started.executionId };
+  }
+
+  test("84. 자리를 고르면 **그 자리에** 저장되고, 안 고르면 비어 있다", async () => {
+    const { executionId } = await startTechnicalExecution("extra-position");
+
+    const placed = await addExecutionExtraTask(executionId, engineerId, "오른쪽에 둔 작업", null, "TASK", {
+      x: 1234,
+      y: -567,
+    });
+    assert.equal(placed.ok, true, `add failed: ${JSON.stringify(placed)}`);
+    if (!placed.ok) return;
+
+    const [placedRow] = await db
+      .select({ x: procedureCaseExecutionNodes.userPositionX, y: procedureCaseExecutionNodes.userPositionY })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, placed.executionNodeId));
+    assert.equal(placedRow.x, 1234);
+    assert.equal(placedRow.y, -567);
+
+    // 🔵 안 넘기면 **비어 있다** — 그것이 「아직 아무도 안 정했다」는 사실이다.
+    const auto = await addExecutionExtraTask(executionId, engineerId, "자리를 안 고른 작업", null, "TASK");
+    assert.equal(auto.ok, true);
+    if (!auto.ok) return;
+    const [autoRow] = await db
+      .select({ x: procedureCaseExecutionNodes.userPositionX, y: procedureCaseExecutionNodes.userPositionY })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, auto.executionNodeId));
+    assert.equal(autoRow.x, null);
+    assert.equal(autoRow.y, null);
+
+    // 그림이 두 줄을 각각 어떻게 그리는가 — 정한 쪽은 그 자리, 안 정한 쪽은 저절로.
+    const detail = await getExecutionDetail(executionId);
+    const placedGraph = detail!.graphNodes.find((n) => n.id === placed.executionNodeId);
+    assert.ok(placedGraph, "정한 자리의 칸이 그림 재료에 없다");
+    assert.equal(placedGraph.positionX, 1234, "정한 자리를 다시 세면 새로고침할 때마다 칸이 돌아간다");
+    assert.equal(placedGraph.positionY, -567);
+    assert.equal(placedGraph.userPositionX, 1234, "그림은 사용자 배치를 먼저 본다");
+    assert.equal(placedGraph.userPositionY, -567);
+
+    const autoGraph = detail!.graphNodes.find((n) => n.id === auto.executionNodeId);
+    assert.ok(autoGraph, "안 정한 칸이 그림 재료에서 사라지면 안 된다");
+    assert.notEqual(autoGraph.positionX, 1234, "안 정한 칸이 정한 칸과 같은 자리에 서면 안 된다");
+    assert.ok(Number.isFinite(autoGraph.positionX) && Number.isFinite(autoGraph.positionY), "저절로 센 자리도 수여야 한다");
+  });
+
+  test("85. 🔴 끌어다 놓으면 저장되고, **version 은 안 오른다** — 옆 사람의 다음 작업이 안 막힌다", async () => {
+    const { executionId } = await startTechnicalExecution("extra-move");
+
+    const added = await addExecutionExtraTask(executionId, engineerId, "끌어 옮길 작업", null, "TASK");
+    assert.equal(added.ok, true);
+    if (!added.ok) return;
+
+    const [before] = await db
+      .select({ version: procedureCaseExecutionNodes.version, x: procedureCaseExecutionNodes.userPositionX })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, added.executionNodeId));
+    assert.equal(before.x, null, "표본 확인 — 옮기기 전에는 비어 있어야 한다");
+
+    const moved = await moveExecutionExtraTask({
+      executionNodeId: added.executionNodeId,
+      actorUserId: engineerId,
+      position: { x: 900, y: 150 },
+    });
+    assert.equal(moved.ok, true, `move failed: ${JSON.stringify(moved)}`);
+
+    const [after] = await db
+      .select({
+        version: procedureCaseExecutionNodes.version,
+        x: procedureCaseExecutionNodes.userPositionX,
+        y: procedureCaseExecutionNodes.userPositionY,
+      })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, added.executionNodeId));
+    assert.equal(after.x, 900);
+    assert.equal(after.y, 150);
+    assert.equal(after.version, before.version, "좌표 때문에 낙관적 잠금 토큰이 오르면 안 된다");
+
+    // 🔴 이것이 토큰을 안 올린 **까닭**이다 — 옮기기 전에 화면을 연 사람이
+    //    그대로 다음 일을 할 수 있어야 한다.
+    const memo = await updateExecutionNodeMemo(added.executionNodeId, engineerId, before.version, "옆 탭에서 적은 메모");
+    assert.equal(memo.ok, true, `옛 토큰으로 한 다음 작업이 막혔다: ${JSON.stringify(memo)}`);
+
+    // 🔵 이력은 안 쌓인다 — 자리는 「한 일」이 아니다.
+    const history = await getExecutionHistory(executionId);
+    const actionTypes = history
+      .filter((h) => h.executionNodeId === added.executionNodeId)
+      .map((h) => h.actionType);
+    assert.deepEqual(
+      [...new Set(actionTypes)].sort(),
+      ["NODE_ADDED", "NODE_MEMO_UPDATED"],
+      `자리 옮기기가 이력을 남겼다: ${JSON.stringify(actionTypes)}`
+    );
+
+    // 여러 번 끌면 **마지막에 놓은 자리**가 남는다.
+    const again = await moveExecutionExtraTask({
+      executionNodeId: added.executionNodeId,
+      actorUserId: engineerId,
+      position: { x: -40.5, y: 0 },
+    });
+    assert.equal(again.ok, true);
+    const [last] = await db
+      .select({ x: procedureCaseExecutionNodes.userPositionX, y: procedureCaseExecutionNodes.userPositionY })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, added.executionNodeId));
+    assert.equal(last.x, -40.5);
+    assert.equal(last.y, 0);
+  });
+
+  test("86. 🔴 원본 절차에서 온 작업은 **못 옮긴다** — 원본 노드의 자리가 그대로다", async () => {
+    const { templateId, executionId } = await startTechnicalExecution("extra-move-guard");
+
+    const byCode = await loadExecutionNodesByCode(templateId, executionId);
+    const target = byCode.get("n2")!;
+    const templateNodeId = target.procedureTemplateNodeId!;
+    async function templateNodePosition() {
+      const [row] = await db
+        .select({
+          x: procedureTemplateNodes.positionX,
+          y: procedureTemplateNodes.positionY,
+          ux: procedureTemplateNodes.userPositionX,
+          uy: procedureTemplateNodes.userPositionY,
+        })
+        .from(procedureTemplateNodes)
+        .where(eq(procedureTemplateNodes.id, templateNodeId));
+      return row;
+    }
+    const templateBefore = await templateNodePosition();
+    assert.ok(Number.isFinite(templateBefore.x), "표본이 비어 있으면 이 시험은 아무것도 안 잰다");
+
+    const result = await moveExecutionExtraTask({
+      executionNodeId: target.id,
+      actorUserId: engineerId,
+      position: { x: 7777, y: 7777 },
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "NOT_REMOVABLE");
+      assert.match(result.message, /이 건에서 더한 작업만/, "무엇은 되는지를 짚어 줘야 한다");
+    }
+
+    const [execAfter] = await db
+      .select({
+        x: procedureCaseExecutionNodes.userPositionX,
+        y: procedureCaseExecutionNodes.userPositionY,
+        version: procedureCaseExecutionNodes.version,
+      })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, target.id));
+    assert.equal(execAfter.x, null, "템플릿에서 온 줄의 자리 칸은 영원히 비어 있어야 한다");
+    assert.equal(execAfter.y, null);
+    assert.equal(execAfter.version, target.version);
+
+    assert.deepEqual(
+      await templateNodePosition(),
+      templateBefore,
+      "🔴 원본 절차의 배치가 바뀌면 같은 절차를 쓰는 다른 건의 그림까지 함께 움직인다"
+    );
+  });
+
+  test("87. 🔴 말이 안 되는 좌표는 거절한다 — 만들 때도, 옮길 때도", async () => {
+    const { executionId } = await startTechnicalExecution("extra-position-guard");
+
+    const added = await addExecutionExtraTask(executionId, engineerId, "자리 울타리", null, "TASK", { x: 10, y: 20 });
+    assert.equal(added.ok, true);
+    if (!added.ok) return;
+
+    for (const bad of [
+      { x: Number.NaN, y: 0 },
+      { x: 0, y: Number.POSITIVE_INFINITY },
+      { x: 1e12, y: 0 },
+    ]) {
+      const result = await moveExecutionExtraTask({
+        executionNodeId: added.executionNodeId,
+        actorUserId: engineerId,
+        position: bad,
+      });
+      assert.equal(result.ok, false, `거절해야 할 좌표를 받았다: ${JSON.stringify(bad)}`);
+      if (!result.ok) assert.equal(result.code, "INVALID_INPUT");
+    }
+
+    const [unchanged] = await db
+      .select({ x: procedureCaseExecutionNodes.userPositionX, y: procedureCaseExecutionNodes.userPositionY })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, added.executionNodeId));
+    assert.equal(unchanged.x, 10, "거절된 요청이 칸을 건드리면 안 된다");
+    assert.equal(unchanged.y, 20);
+
+    const rejectedCreate = await addExecutionExtraTask(executionId, engineerId, "못 만들 작업", null, "TASK", {
+      x: 0,
+      y: Number.NaN,
+    });
+    assert.equal(rejectedCreate.ok, false);
+    if (!rejectedCreate.ok) assert.equal(rejectedCreate.code, "INVALID_INPUT");
+  });
+
+  test("88. 치운 작업은 못 옮긴다 — 화면에 없는 줄이 저장되면 안 된다", async () => {
+    const { executionId } = await startTechnicalExecution("extra-move-removed");
+
+    const added = await addExecutionExtraTask(executionId, engineerId, "치울 작업", null, "TASK");
+    assert.equal(added.ok, true);
+    if (!added.ok) return;
+
+    const [row] = await db
+      .select({ version: procedureCaseExecutionNodes.version })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, added.executionNodeId));
+    const removed = await removeExecutionExtraTask(added.executionNodeId, engineerId, row.version, null);
+    assert.equal(removed.ok, true);
+
+    const moved = await moveExecutionExtraTask({
+      executionNodeId: added.executionNodeId,
+      actorUserId: engineerId,
+      position: { x: 5, y: 5 },
+    });
+    assert.equal(moved.ok, false);
+    if (!moved.ok) assert.equal(moved.code, "NOT_FOUND");
   });
 });

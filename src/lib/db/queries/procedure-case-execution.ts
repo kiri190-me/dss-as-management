@@ -25,6 +25,9 @@ import {
   sortByProcedureExecutionOrder,
   type AddedTaskAnchor,
 } from "@/lib/domain/procedure-execution-order";
+// 🔴 눈금은 도메인에 한 벌만 있다 — 화면도 같은 값으로 「고른 작업의 오른쪽」을
+// 센다(procedure-execution-layout.ts 머리말).
+import { ADDED_NODE_GAP_X, ADDED_NODE_GAP_Y } from "@/lib/domain/procedure-execution-layout";
 import type { PastExecutionCandidate } from "@/lib/domain/procedure-execution-past-runs";
 import { classifyProductRelation, type ProductIdentity } from "@/lib/domain/product-relation";
 import type {
@@ -858,22 +861,27 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
 
 // ---- 더한 작업을 그림의 **어디에** 그리는가 ----
 
-/** 앞 칸에서 오른쪽으로 띄우는 거리. 절차 편집기의 「상대 위치로 이동」과 같은 눈금이다. */
-const ADDED_NODE_GAP_X = 300;
-/** 같은 앞 칸에 여럿이 붙었을 때 아래로 쌓는 간격. 편집기의 세로 간격과 같다. */
-const ADDED_NODE_GAP_Y = 150;
-
 /**
- * 이 건에서 더한 작업의 **그림 좌표**를 만든다.
+ * 이 건에서 더한 작업의 **그림 좌표**를 정한다.
  *
- * 🔴 저장하지 않는다. 추가 작업에는 position_x/y 칸이 없고(일부러 안 만들었다 —
- * 조각 13 의 표 신설은 선만 담는다), 그래서 **볼 때마다 같은 규칙으로 다시
- * 센다.** 같은 입력이면 같은 자리라 새로고침해도 칸이 안 움직인다.
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔵 2026-11-03(조각 14) — **사람이 정한 자리가 있으면 그것이 이긴다**
+ * ──────────────────────────────────────────────────────────────────────
+ * user_position_x/y 가 찬 줄은 사람이 끌어다 놓았거나 등록할 때 방향을 고른
+ * 줄이다. 그 자리를 그대로 쓰고 **아무것도 다시 세지 않는다** — 다시 세면
+ * 새로고침할 때마다 칸이 원래 자리로 돌아가고, 사람은 「드래그가 저장이 안
+ * 된다」고 읽는다.
  *
- * 규칙은 둘뿐이다:
+ * 🔴 **비어 있는 줄은 조각 13 까지와 글자 하나 다르지 않게** 센다. 칸이 생기기
+ * 전에 등록된 추가 작업이 그대로 남아 있고(개발 DB 실측 2026-11-03: 실행 노드
+ * 250줄), 그 줄들의 자리가 이 판에서 움직이면 안 된다. 규칙은 그대로 둘이다:
  *  - 앞 칸이 있으면 **그 칸 오른쪽**, 같은 앞 칸에 여럿이면 아래로 쌓는다.
  *  - 앞 칸이 없으면(아무 선에도 안 닿은 작업) 그림 **오른쪽 바깥**에 한 줄로
  *    세운다. 겹쳐 놓으면 칸 하나처럼 보여서 「등록했는데 안 생겼다」가 된다.
+ *
+ * 🔵 **형제 자리는 저절로 센 줄끼리만 센다.** 한 앞 칸에 둘이 붙었는데 하나를
+ * 사람이 끌어갔다면, 남은 하나는 비워진 첫 칸을 쓴다 — 끌려간 줄이 자리를 계속
+ * 잡고 있으면 아무도 안 쓰는 빈칸이 그림에 생긴다.
  *
  * 🔴 **깊이 차례로** 센다. 사슬(앞 칸도 더한 작업인 경우)에서 부모 자리가 먼저
  * 정해져 있어야 자식이 그 옆에 선다 — 차례를 안 지키면 부모가 아직 (0,0) 일 때
@@ -918,7 +926,13 @@ function placeAddedGraphNodes(
     const anchor = anchorByGraphNodeId.get(row.id);
     let x: number;
     let y: number;
-    if (anchor) {
+    // 🔴 사람이 정한 자리가 먼저다 — 있으면 세지 않는다(이 함수 머리말).
+    //    두 칸을 **함께** 봐야 한다: 한쪽만 찬 줄은 자리가 아니라 반쪽이라
+    //    그릴 수 없다(절차 노드 쪽의 hasUserLayoutOverride 와 같은 잣대).
+    if (row.userPositionX !== null && row.userPositionY !== null) {
+      x = row.userPositionX;
+      y = row.userPositionY;
+    } else if (anchor) {
       const base = effectivePosition.get(anchor.anchorGraphNodeId) ?? { x: rightmostX, y: 0 };
       const sibling = siblingCountByAnchor.get(anchor.anchorGraphNodeId) ?? 0;
       siblingCountByAnchor.set(anchor.anchorGraphNodeId, sibling + 1);

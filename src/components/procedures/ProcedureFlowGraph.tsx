@@ -257,7 +257,12 @@ type ProcedureFlowGraphNode = Pick<
  * editing (no onNodesChange/onEdgesChange wired up, nodes/edges are not
  * draggable-and-persisted) unless `editable` is set, in which case node
  * drag is allowed only in the 사용자 배치 layout and only ever reported
- * back via callbacks; this component itself never persists anything. Node
+ * back via callbacks; this component itself never persists anything.
+ *
+ * 🔵 2026-11-03(조각 14) — 끌기를 여는 길이 하나 더 있다: `draggableNodeIds`
+ * 는 **그 칸들만** 배치 모드와 무관하게 끌리게 한다. `editable` 과 달리 경로점
+ * 편집·배치 드롭다운·「연결선 펴기」는 **같이 안 열린다** — 그 프롭의 주석에
+ * 까닭이 있다. 여기서도 저장은 안 한다(onNodeDragStop 으로 알려 줄 뿐이다). Node
  * shape/color/icon, edge style, and layout spacing come entirely from
  * procedure-visual-language.ts, the same config every other screen
  * (validation-resolution, editor) reuses — never invented locally here.
@@ -289,6 +294,7 @@ export default function ProcedureFlowGraph({
   showChrome = true,
   highlightedNodeIds = null,
   nodeMarks = null,
+  draggableNodeIds = null,
   graphHeight,
 }: {
   templateId: string;
@@ -396,6 +402,30 @@ export default function ProcedureFlowGraph({
    * 다섯 상태(대기·진행 중·완료·건너뜀·차단됨)를 실을 칸이 없다.
    */
   nodeMarks?: ReadonlyMap<string, ProcedureFlowGraphNodeMark> | null;
+  /**
+   * 2026-11-03(조각 14) — **이 칸들만 끌 수 있다.** null 이면 지금까지와 똑같다
+   * (끌 수 있는지는 `editable && layoutMode === "USER"` 하나가 정한다). 그래서
+   * 이 프롭을 안 넘기는 호출부 셋(절차 상세 · 편집기 · 「전체 단계 보기」 팝업)은
+   * 동작이 글자 하나 안 바뀐다.
+   *
+   * ──────────────────────────────────────────────────────────────────
+   * 🔴 왜 `editable` 로는 안 되는가
+   * ──────────────────────────────────────────────────────────────────
+   * `editable` 하나가 **드래그와 경로점 편집을 함께** 연다(배치 드롭다운의
+   * 「사용자 배치」, 분기 더블클릭의 「연결선 펴기」, 선택한 분기의 경로점
+   * 손잡이). 「추가 작업 등록」 창이 필요한 것은 **끌기 하나**다 — 거기서 경로점을
+   * 손대면 그 값은 procedure_template_edges.user_route_points 로 가서 **원본
+   * 절차가 바뀐다.** 이 창의 전제가 「원본은 한 글자도 안 바꾼다」이므로, 끌기만
+   * 따로 열 길이 있어야 한다.
+   *
+   * 🔵 배치 모드도 안 건드린다. 이 프롭만으로는 layoutMode 가 그대로 "SOURCE"
+   * 이고, 거기서도 저장된 사용자 배치는 그대로 이긴다(resolveBaselinePosition).
+   *
+   * 🔴 끌 수 있는 **칸을 목록으로** 받는 까닭: 그림 위에서 원본 절차의 칸과 이
+   * 건에서 더한 칸은 **똑같이 생겼다.** 전부 끌리게 열면 사람이 원본 칸을 끌고,
+   * 서버가 거절하는 그 순간까지 화면에서는 움직인 것으로 보인다.
+   */
+  draggableNodeIds?: readonly string[] | null;
   /** 2026-11-02(조각 7) — 캔버스 높이(px). 생략하면 GraphCanvas 의 기본값(600). 창 안에 들어갈 때는 화면이 좁아 더 낮게 잡는다. */
   graphHeight?: number;
 }) {
@@ -408,10 +438,14 @@ export default function ProcedureFlowGraph({
 
   // 5C-6D-1D — Shift+drag axis lock, ported verbatim from CaseFlowchartGraph
   // (graph-editor-core/axis-lock.ts's own pure resolveDragAxis/applyAxisLock,
-  // no second implementation here). Only ever receives drag events at all
-  // when nodesDraggable is true below (editable && layoutMode === "USER") —
-  // SOURCE/STAGE_SORTED never become draggable just to support this, so no
-  // extra mode gating is needed in these handlers themselves.
+  // no second implementation here).
+  //
+  // 🔵 2026-11-03(조각 14)에 **드래그가 들어오는 길이 둘**이 됐다: 전역 설정
+  // (editable && layoutMode === "USER")과, 칸마다 열어 주는 draggableNodeIds 다.
+  // 뒤쪽은 어느 배치 모드에서도 열릴 수 있으므로 **이 손잡이들이 모드를 가린다고
+  // 적어 두면 거짓**이 된다 — 전에는 앞쪽 하나뿐이라 그렇게 적혀 있었다.
+  // 그래도 여기서 모드를 다시 가릴 일은 없다: 축 잠금은 끌 수 있는 칸이면
+  // 어디서나 똑같이 들어야 하는 보조 조작이다.
   const activeDragRef = useRef<{ nodeId: string; start: Point; axis: DragAxis; shiftHeld: boolean } | null>(null);
 
   function handleNodeDragStart(nodeId: string, position: Point, shiftKey: boolean) {
@@ -727,6 +761,14 @@ export default function ProcedureFlowGraph({
     [highlightedNodeIds]
   );
 
+  // 끌 수 있는 칸(조각 14). null 이면 아예 안 만든다 — 그래야 아래에서
+  // 「안 넘겼다」와 「하나도 못 끈다(빈 배열)」가 갈린다. 앞은 React Flow 의
+  // 전역 설정(nodesDraggable)에 맡기는 것이고, 뒤는 **전부 못 끄게** 하는 것이다.
+  const draggableNodeIdSet = useMemo(
+    () => (draggableNodeIds === null ? null : new Set(draggableNodeIds)),
+    [draggableNodeIds]
+  );
+
   const flowNodes = useMemo<Node[]>(() => {
     const result: Node[] = filteredNodeRows.map((n) => {
       const sourcePos = layoutMode === "STAGE_SORTED" ? (stageSortedLayout.positions.get(n.id) ?? { x: n.positionX, y: n.positionY }) : resolveBaselinePosition(n);
@@ -737,6 +779,13 @@ export default function ProcedureFlowGraph({
         id: n.id,
         type: "procedureNode",
         position: sourcePos,
+        // 🔴 React Flow 는 **칸마다 적힌 draggable 이 전역 설정보다 먼저**다.
+        //    그래서 nodesDraggable 이 false 인 읽기 전용 그림에서도 여기 적힌
+        //    칸만 끌 수 있다(바로 아래 단계 머리띠가 draggable: false 로
+        //    고정돼 있는 것과 같은 길이다). 안 넘겼으면 undefined 를 둬서
+        //    전역 설정이 그대로 정하게 한다 — false 를 넣으면 편집기에서
+        //    아무것도 못 끌게 된다.
+        draggable: draggableNodeIdSet === null ? undefined : draggableNodeIdSet.has(n.id),
         data: {
           title: n.title,
           nodeType: n.nodeType,
@@ -791,6 +840,7 @@ export default function ProcedureFlowGraph({
     errorFocusMode,
     highlightedNodeIdSet,
     nodeMarks,
+    draggableNodeIdSet,
   ]);
 
   const flowEdges = useMemo<Edge[]>(() => {

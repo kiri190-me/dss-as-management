@@ -15,6 +15,7 @@ import {
   reopenExecutionNode,
   addExecutionExtraTask,
   removeExecutionExtraTask,
+  moveExecutionExtraTask,
   addExecutionEdge,
   removeExecutionEdge,
   updateExecutionNodeMemo,
@@ -22,10 +23,12 @@ import {
   type ExecutionNodeMutationResult,
   type ExecutionLifecycleResult,
   type AddExtraTaskResult,
+  type MoveExecutionExtraTaskResult,
   type AddExecutionEdgeResult,
   type RemoveExecutionEdgeResult,
 } from "@/lib/db/mutations/procedure-case-execution";
 import { isExtraTaskNodeType } from "@/lib/domain/procedure-case-execution-types";
+import { isUsableGraphPoint } from "@/lib/domain/procedure-execution-layout";
 import { PROCEDURE_BRANCH_TYPE_CODES, type ProcedureBranchType } from "@/lib/domain/procedure-template-types";
 import { isValidUuid, validateRequiredNote } from "@/lib/validation/procedure-validation-resolution-input";
 
@@ -272,14 +275,19 @@ export async function reopenExecutionNodeAction(input: {
 /**
  * `nodeType` — 🔵 2026-11-03(조각 13). 안 넘기면 전과 똑같이 갈래 없이 만든다.
  *
- * 🔴 여기서는 **허용 목록 안인가**만 본다. 「만들어도 되는 사람인가」는 변이가
- * 제 트랜잭션 안에서 다시 가른다(이 파일 머리말의 규약).
+ * `position` — 🔵 2026-11-03(조각 14). 사람이 **상·하·좌·우**를 골랐을 때만
+ * 온다. 안 넘기면(= 기준이 될 작업을 안 골랐을 때) 자리를 비워 두고, 조회가
+ * 전과 똑같이 센다.
+ *
+ * 🔴 여기서는 **허용 목록 안인가 · 쓸 수 있는 수인가**만 본다. 「만들어도 되는
+ * 사람인가」는 변이가 제 트랜잭션 안에서 다시 가른다(이 파일 머리말의 규약).
  */
 export async function addExecutionExtraTaskAction(input: {
   executionId: string;
   title: string;
   instructions?: string | null;
   nodeType?: string | null;
+  position?: { x: number; y: number } | null;
 }): Promise<AddExtraTaskResult | Forbidden> {
   const actorCheck = await resolveAuthorizedActorId();
   if (!actorCheck.ok) return actorCheck.result;
@@ -291,9 +299,50 @@ export async function addExecutionExtraTaskAction(input: {
   if (nodeType !== null && !isExtraTaskNodeType(nodeType)) {
     return { ok: false, code: "FORBIDDEN", message: "이 창에서 만들 수 없는 노드 유형입니다." };
   }
+  // 🔵 **안 보낸 것**과 **이상한 값**을 가른다 — 앞은 「방향을 안 골랐다」는
+  //    정상이고, 뒤는 거절할 일이다.
+  const position = input.position ?? null;
+  if (position !== null && !isUsableGraphPoint(position)) {
+    return { ok: false, code: "FORBIDDEN", message: "작업을 놓을 자리를 확인할 수 없습니다." };
+  }
 
   return withErrorRedaction("addExecutionExtraTaskAction", () =>
-    addExecutionExtraTask(input.executionId, actorCheck.userId, input.title, input.instructions?.trim() || null, nodeType)
+    addExecutionExtraTask(
+      input.executionId,
+      actorCheck.userId,
+      input.title,
+      input.instructions?.trim() || null,
+      nodeType,
+      position
+    )
+  );
+}
+
+/**
+ * 이 건에서 더한 작업을 **그림에서 옮긴다**(2026-11-03, 조각 14) — 놓는 순간
+ * 저장한다.
+ *
+ * 🔴 **expectedVersion 을 안 받는다.** 이 파일에서 낙관적 잠금 토큰을 안 받는
+ * 유일한 통로이고, 까닭은 변이 쪽 머리말에 적어 두었다(요지: 좌표는 다툴 것이
+ * 없는데 토큰을 올리면 옆 사람의 탭이 **다음 작업에서** CONFLICT 로 튕긴다).
+ */
+export async function moveExecutionExtraTaskAction(input: {
+  executionNodeId: string;
+  position: { x: number; y: number };
+}): Promise<MoveExecutionExtraTaskResult | Forbidden> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.executionNodeId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  if (!isUsableGraphPoint(input.position)) {
+    return { ok: false, code: "FORBIDDEN", message: "작업을 놓을 자리를 확인할 수 없습니다." };
+  }
+
+  return withErrorRedaction("moveExecutionExtraTaskAction", () =>
+    moveExecutionExtraTask({
+      executionNodeId: input.executionNodeId,
+      actorUserId: actorCheck.userId,
+      position: input.position,
+    })
   );
 }
 

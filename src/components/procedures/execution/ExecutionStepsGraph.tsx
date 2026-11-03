@@ -28,6 +28,13 @@ import type { ExecutionDetail } from "@/lib/db/queries/procedure-case-execution"
  *
  * 둘을 한 부품으로 합치면 저 셋이 전부 조건이 되어, 지금 열여덟 줄짜리 감싸개가
  * if 네 개를 품은 것이 된다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔵 2026-11-03(조각 14) — **쓰는 창이 둘**이 됐고, 손잡이 셋이 늘었다
+ * ──────────────────────────────────────────────────────────────────────
+ * 「전체 단계 보기」 팝업과 「추가 작업 등록」 창이 이 감싸개를 함께 쓴다. 뒤쪽만
+ * 필요한 것 셋(끌 수 있는 칸 · 놓은 자리 알림 · 누름 가로채기)은 **전부 선택**
+ * 이고 기본값이 「없음」이라, 안 넘기는 앞쪽은 동작이 글자 하나 안 바뀐다.
  */
 export default function ExecutionStepsGraph({
   templateId,
@@ -39,6 +46,9 @@ export default function ExecutionStepsGraph({
   highlightedNodeIds,
   nodeMarks,
   onPickedNodeChange,
+  draggableNodeIds = null,
+  onNodeDragStop,
+  onNodeClickIntercept,
 }: {
   /** procedure_templates.id — 그림이 오류 배지 링크를 만드는 데 쓴다. */
   templateId: string;
@@ -55,6 +65,25 @@ export default function ExecutionStepsGraph({
   nodeMarks: ReadonlyMap<string, { label: string; tone: JumpStatusTone }>;
   /** 그림에서 고른 **절차 노드** id. 창이 그것으로 실행 줄을 되찾는다. */
   onPickedNodeChange: (nodeId: string | null) => void;
+  /**
+   * 2026-11-03(조각 14) — **끌 수 있는 칸**(그림 위 자리 id). 생략하면 아무것도
+   * 안 끌린다, 즉 「전체 단계 보기」 팝업은 전과 똑같다.
+   *
+   * 🔴 쓰는 자리는 「추가 작업 등록」 창 하나이고, 넘기는 것은 **이 건에서 더한
+   * 작업의 자리 id 뿐**이다 — 원본 절차의 칸을 끌면 원본 배치가 바뀐다.
+   */
+  draggableNodeIds?: readonly string[] | null;
+  /** 끌기가 끝난 자리. 🔵 끄는 중에는 안 부른다 — 놓을 때 한 번이다. */
+  onNodeDragStop?: (nodeId: string, position: { x: number; y: number }) => void;
+  /**
+   * 칸을 누른 순간, **고름이 바뀌기 전에** 그 자리 id 를 그대로 받는다. true 를
+   * 돌려주면 「이 누름은 내가 썼다」는 뜻이고 고름은 안 바뀐다.
+   *
+   * 🔴 「대상으로 고르기」가 이 길을 쓴다. 연결의 **시작**은 그림의 고름이 정하고
+   * **대상**은 이 가로채기가 정한다 — 둘 다 고름으로 받으면 한 번 누른 것이
+   * 시작인지 대상인지 알 길이 없다.
+   */
+  onNodeClickIntercept?: (nodeId: string) => boolean;
 }) {
   // 실행 상태의 세기(네 이름)를 그림이 아는 세기로 옮긴다. 🔴 그림은 「진행 중」
   // 이라는 낱말을 몰라야 한다 — 같은 자리에 다른 뜻의 딱지를 붙이는 날이 온다
@@ -82,6 +111,11 @@ export default function ExecutionStepsGraph({
       // 사용자 배치가 있으면 그쪽이 언제나 이긴다(resolveBaselinePosition).
       useAutoLayoutForUnpositionedNodes={templateCategory === "TECHNICAL_TASK"}
       onNodeSelectionChange={onPickedNodeChange}
+      // 🔵 셋 다 안 넘기면 지금까지와 똑같다 — 「전체 단계 보기」 팝업은 이
+      //    조각에서 글자 하나 안 바뀐다(조각 7·10 이 쓴 방식 그대로다).
+      draggableNodeIds={draggableNodeIds}
+      onNodeDragStop={onNodeDragStop}
+      onNodeClickIntercept={onNodeClickIntercept}
     />
   );
 }

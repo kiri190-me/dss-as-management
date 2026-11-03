@@ -1,0 +1,2 @@
+ALTER TABLE "procedure_case_execution_nodes" ADD COLUMN "user_position_x" double precision;--> statement-breakpoint
+ALTER TABLE "procedure_case_execution_nodes" ADD COLUMN "user_position_y" double precision;

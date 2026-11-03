@@ -1519,3 +1519,15 @@ src/lib/domain/procedure-execution-memo-field.test.ts
 # 그려지는 모습은 components 목록의 execution-task-editor-panel.test.tsx 가 본다.
 # 🔴 unit 에 적은 이유: DB 도 React 도 안 무는 순수 함수다. 격리 이름 없음(DB 안 씀).
 src/lib/domain/procedure-execution-case-edit.test.ts
+
+# 🔵 **더한 작업의 자리를 사람이 정한다**(2026-11-03, 조각 14).
+# 재는 것: 네 방향이 각각 어느 축으로 움직이는가 · 🔴 「아래」가 +y 인가(화면
+# 좌표라 아래로 갈수록 커진다 — 수학 좌표로 착각하면 위로 간다) · 🔴 겹치면
+# **같은 방향으로 더 가는가**(옆으로 비키면 사람이 고른 쪽과 다른 답이 된다) ·
+# 「딱 같은 자리」가 아니라 **간격의 절반 안**이면 포개진 것으로 보는가(원본
+# 절차의 좌표는 눈금에 안 맞는 엑셀 도형 자리다) · 안 멈추는 고리가 없는가 ·
+# 🔴 화면에서 온 수를 **울타리 안의 유한한 수**로만 받는가.
+# 🔴 눈금(300·150)이 조각 13 이 쓰던 값 그대로인지도 여기서 못 박는다 — 조회와
+# 화면이 같은 상수를 쓰므로, 숫자가 바뀌면 두 곳이 함께 바뀐다.
+# 🔴 unit 에 적은 이유: DB 도 React 도 안 무는 순수 함수다. 격리 이름 없음(DB 안 씀).
+src/lib/domain/procedure-execution-layout.test.ts

@@ -34,6 +34,7 @@ import {
   type ExtraTaskNodeType,
   type ProcedureCaseExecutionActionType,
 } from "@/lib/domain/procedure-case-execution-types";
+import { isUsableGraphPoint, type GraphPoint } from "@/lib/domain/procedure-execution-layout";
 import {
   PROCEDURE_BRANCH_TYPE_CODES,
   type ProcedureBranchType,
@@ -1883,13 +1884,29 @@ export type AddExtraTaskResult = { ok: true; executionNodeId: string } | Failure
  *
  * 🔵 안 넘기면 **전과 똑같이** 갈래 없이 만든다 — 칸이 생기기 전 줄들과 같은
  * 모양이고, 읽는 쪽은 작업(TASK)으로 그린다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * `position` — 🔵 2026-11-03(조각 14). 사람이 **상·하·좌·우**를 골랐을 때만 찬다
+ * ──────────────────────────────────────────────────────────────────────
+ * 화면이 「고른 작업의 어느 쪽」을 **제 눈에 보이는 좌표로** 계산해 보낸다
+ * (placeExtraTaskByDirection). 서버가 다시 세지 않는 까닭: 기준이 되는 앞 칸의
+ * 자리는 그림이 배치 방식(원본 배치 · 자동 배치 · 사용자 배치)을 거쳐 정하는
+ * 값이라, 서버가 혼자 다시 세면 **사람이 화면에서 본 그 자리**가 아니게 된다.
+ * 절차 편집기의 배치 저장도 같은 길이다(화면이 끌어다 놓은 좌표를 보낸다).
+ *
+ * 🔴 그렇다고 믿지는 않는다 — 유한하고 울타리 안의 수인지 여기서 다시 본다
+ * (isUsableGraphPoint). 화면은 집행 경계가 아니다.
+ *
+ * 🔵 **안 넘기면 비워 둔다.** 그러면 조회가 전과 똑같이 자리를 센다(앞 칸
+ * 오른쪽, 형제는 아래로) — 고른 작업이 없을 때가 바로 그 경우다.
  */
 export async function addExecutionExtraTask(
   executionId: string,
   actorUserId: string,
   title: string,
   instructions: string | null,
-  nodeType?: ExtraTaskNodeType | null
+  nodeType?: ExtraTaskNodeType | null,
+  position?: GraphPoint | null
 ): Promise<AddExtraTaskResult> {
   try {
     return await db.transaction(async (tx) => {
@@ -1931,6 +1948,11 @@ export async function addExecutionExtraTask(
       if (nodeType != null && !isExtraTaskNodeType(nodeType)) {
         fail("INVALID_INPUT", "이 창에서 만들 수 없는 노드 유형입니다.");
       }
+      // 좌표도 마찬가지다. 🔵 **안 보낸 것**(null·undefined)과 **이상한 값**을
+      // 가른다 — 앞은 「방향을 안 골랐다」는 정상이고, 뒤는 거절할 일이다.
+      if (position != null && !isUsableGraphPoint(position)) {
+        fail("INVALID_INPUT", "작업을 놓을 자리를 확인할 수 없습니다.");
+      }
 
       const [inserted] = await tx
         .insert(procedureCaseExecutionNodes)
@@ -1940,10 +1962,15 @@ export async function addExecutionExtraTask(
           extraTaskTitle: trimmedTitle,
           extraTaskInstructions: instructions,
           extraTaskNodeType: nodeType ?? null,
+          userPositionX: position?.x ?? null,
+          userPositionY: position?.y ?? null,
           status: "PENDING",
         })
         .returning({ id: procedureCaseExecutionNodes.id });
 
+      // 🔵 **좌표는 이력에 안 적는다**(조각 14). 이력은 「이 건에서 무슨 일을
+      //    했나」를 되짚는 기록이고, 칸이 그림의 어디에 섰는지는 한 일이 아니다 —
+      //    옮기기(moveExecutionExtraTask)도 같은 까닭으로 이력을 안 남긴다.
       await insertHistory(tx, {
         executionId,
         executionNodeId: inserted.id,
@@ -2041,6 +2068,88 @@ export async function removeExecutionExtraTask(
         );
 
       return { ok: true, version: ctx.node.version + 1 };
+    });
+  } catch (err) {
+    if (err instanceof ExecutionMutationError) return err.result;
+    throw err;
+  }
+}
+
+export type MoveExecutionExtraTaskResult = { ok: true } | Failure;
+
+/**
+ * 이 건에서 더한 작업을 **그림에서 옮긴다**(2026-11-03, 조각 14) — 놓는 순간
+ * 저장한다. 사용자 결정 — 「노드를 드래그로 옮길 수 있도록 해줘.」
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **이 건에서 더한 것만** 옮긴다
+ * ──────────────────────────────────────────────────────────────────────
+ * 원본 절차에서 온 줄은 거절한다(NOT_REMOVABLE — 치우기와 같은 코드다. 막은
+ * 사실이 「원본에서 온 것은 이 창에서 못 건드린다」 하나로 같다). 그 줄의 자리는
+ * procedure_template_nodes 가 들고 있고, 여기서 바꾸면 **같은 절차를 돌리는
+ * 다른 건의 그림까지** 함께 움직인다 — 원본을 안 바꾸는 것이 이 창의 전제다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **낙관적 잠금 토큰(version)을 안 받고, 안 올린다**
+ * ──────────────────────────────────────────────────────────────────────
+ * 이웃 변이들은 전부 expectedVersion 을 받아 다투면 CONFLICT 로 돌려보낸다.
+ * 여기만 다르고, 까닭이 둘이다:
+ *
+ *  1. **옮기기는 다툴 것이 없다.** 두 사람이 같은 칸을 끌면 나중에 놓은 자리가
+ *     남으면 그만이고, 그 결과가 **두 사람의 화면에 그대로 보인다.** 「먼저 끈
+ *     사람이 이긴다」를 지켜 봐야 아무도 못 알아본다.
+ *  2. 🔴 **version 을 올리면 남의 탭이 다음 일에서 튕긴다.** 토큰은 노드 하나에
+ *     한 벌뿐이라, 자리를 옮긴 것만으로 토큰이 오르면 옆 사람이 열어 둔 화면의
+ *     [완료]·[건너뛰기]가 CONFLICT 가 된다 — **아무도 일을 안 바꿨는데**
+ *     「다른 사용자가 먼저 변경했습니다」를 보게 된다. 자리 때문에 일이 막히는
+ *     것은 바꾼 값에 견주어 너무 큰 대가다.
+ *
+ * 🔵 그 대신 **잠그고 다시 읽는 것은 그대로 한다**(loadExecutionNodeOrFail 의
+ * `for update`). 치운 줄·그만둔 실행·잠긴 접수 건·권한은 전부 여기서 다시 가른다.
+ *
+ * 🔵 **감사 이력도 안 남긴다.** 쓸 수 있는 action_type 이 없고(새 enum 은 이
+ * 조각에서 금지다), 만들 수 있었더라도 안 남겼을 것이다 — 이력은 「이 건에서
+ * 무슨 일을 했나」를 되짚는 기록이지 화면을 어떻게 꾸몄는지가 아니다. 끌 때마다
+ * 한 줄씩 쌓이면 실행 이력이 좌표로 뒤덮여 **정작 되짚을 줄이 묻힌다**(조각 12
+ * 가 이력을 시간순으로 쌓게 만든 바로 그 화면이다). 누가 마지막으로 옮겼는지는
+ * 되짚을 수 없지만, 그것을 되짚어야 했던 일은 없다.
+ */
+export async function moveExecutionExtraTask(input: {
+  executionNodeId: string;
+  actorUserId: string;
+  position: GraphPoint;
+}): Promise<MoveExecutionExtraTaskResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireActor(tx, input.actorUserId);
+      const ctx = await loadExecutionNodeOrFail(tx, input.executionNodeId);
+
+      if (ctx.node.procedureTemplateNodeId !== null) {
+        fail("NOT_REMOVABLE", "원본 절차에서 온 작업은 이 창에서 옮길 수 없습니다. 이 건에서 더한 작업만 옮길 수 있습니다.");
+      }
+
+      await assertOrdinaryMutationAuthorized(actor, ctx.repairCase, ctx.node.assignedEngineerId);
+
+      // 🔴 화면이 보낸 수를 믿지 않는다 — 유한하고 울타리 안이어야 한다.
+      //    오래된 탭이나 손으로 만든 요청이 터무니없는 수를 보내면 그림이 한 점으로
+      //    쪼그라들어 **사람이 화면에서 되돌릴 길이 없다**(그 칸을 다시 끌어야 하는데
+      //    보이질 않는다).
+      if (!isUsableGraphPoint(input.position)) {
+        fail("INVALID_INPUT", "작업을 놓을 자리를 확인할 수 없습니다.");
+      }
+
+      await tx
+        .update(procedureCaseExecutionNodes)
+        .set({
+          userPositionX: input.position.x,
+          userPositionY: input.position.y,
+          // 🔵 version 은 **그대로 둔다**(위 머리말). updated_at 만 적어 「언제
+          //    마지막으로 손댔나」가 사실과 맞게 한다.
+          updatedAt: new Date(),
+        })
+        .where(eq(procedureCaseExecutionNodes.id, input.executionNodeId));
+
+      return { ok: true };
     });
   } catch (err) {
     if (err instanceof ExecutionMutationError) return err.result;
