@@ -13,6 +13,7 @@ import CreateNodePanel from "./editor/CreateNodePanel";
 import EditHistoryPanel from "./editor/EditHistoryPanel";
 import FieldAddedStepsPanel from "./editor/FieldAddedStepsPanel";
 import PublishTemplateButton from "./editor/PublishTemplateButton";
+import DiscardDraftButton from "./editor/DiscardDraftButton";
 import UndoRedoControls from "@/components/graph-editor-core/UndoRedoControls";
 import {
   createProcedureEditorUndoStack,
@@ -178,6 +179,7 @@ export default function ProcedureTemplateEditorScreen({
   comparison,
   canEdit,
   canPublish = false,
+  canDiscardDraft = false,
   fieldAddedSteps = [],
 }: {
   template: ProcedureTemplateForEditor;
@@ -196,6 +198,17 @@ export default function ProcedureTemplateEditorScreen({
    * 되기 때문이다.
    */
   canPublish?: boolean;
+  /**
+   * 잘못 만든 이 초안을 **그 자리에서 버릴 수 있는가**(2026-11-04, 줄기 B-⑥).
+   *
+   * 🔴 **기본값이 false 다** — canPublish 와 같은 fail-closed 규약이다.
+   *
+   * 🔵 값은 edit/page.tsx 가 **서버가 실제로 보는 관문 그대로** 계산해 넘긴다
+   * (역할 고정 canDeleteTechnicalTemplates + 설정
+   * technicalProcedures.lifecycle). 화면이 제 나름대로 판정하지 않는다 —
+   * 서버가 거절할 단추를 내면 "보이는데 늘 실패"가 된다.
+   */
+  canDiscardDraft?: boolean;
   /**
    * 이 초안의 줄기(같은 `code` 의 모든 판본)를 돌리다 **현장에서 더한 단계**
    * (2026-11-03, 줄기 B-⑧). 사용자 결정 — 「원본 절차를 편집할 때, 이번에
@@ -495,6 +508,42 @@ export default function ProcedureTemplateEditorScreen({
     return () => clearTimeout(timer);
   }, [globalSaveStatus]);
 
+  /**
+   * ==========================================================================
+   * 🔴 구조 변경이 「저장됐다」고 말하는 자리(2026-11-04, 줄기 B-⑦)
+   * ==========================================================================
+   * 사용자가 신고한 것: "노드, 연결선등을 추가/제거 하기만 했을 때는 [저장]이
+   * 활성화가 안되더라고, 노드, 연결선에 대해서는 수정된 사항이라고 인식을 안하고
+   * 있는 것 같아."
+   *
+   * 실제로는 **인식을 안 한 것이 아니라 이미 저장한 것**이다. 노드·연결선의
+   * 추가·삭제·재연결·유형 변경·이름 변경은 그 자리에서 서버로 가고(handleSaved
+   * 가 그 성공 통로다), 그래서 [저장]이 맡은 저장 대기(safe-to-defer) 목록은
+   * 비어 있는 것이 맞다. 다만 **그렇게 말해 주는 자리가 한 곳도 없었다** —
+   * 화면에 남는 글자는 [저장] 단추의 "저장할 변경 없음" 하나뿐이고, 그 문구는
+   * 「아직 아무것도 안 건드렸다」와 「방금 저장이 끝났다」를 똑같이 말한다.
+   * 특히 삭제는 "사라짐"이 유일한 증거라 신호가 가장 약하다.
+   *
+   * ── 🔴 globalSaveStatus 를 같이 쓰지 않는 까닭 ──────────────────────────
+   * 거기에 "saved" 를 꽂으면 가장 짧은 길이지만, 바로 아래 "변경사항 N건 저장
+   * 대기 중" 문구가 globalSaveStatus === "idle" 을 조건으로 쓴다 — 저장 대기가
+   * 있는 채로 노드를 하나 지우면 그 안내가 **2.5초 사라졌다 돌아온다.** 지금
+   * 고치려는 것이 바로 "화면이 저장 상태를 두고 두 말을 한다"는 오해인데,
+   * 깜빡임을 하나 더 만들면 고친 자리에서 다시 생긴다. 그래서 제 타이머를 가진
+   * 별도 상태를 둔다. 둘은 동시에 떠도 서로 반대말을 하지 않는다(하나는 방금
+   * 저장된 구조 변경, 다른 하나는 아직 안 보낸 칸·배치 변경이다).
+   *
+   * 0 이면 안 뜬 것이고, 성공할 때마다 1씩 올린다 — 불린으로 두면 표시가 떠
+   * 있는 동안 둘째 변경이 들어왔을 때 state 값이 그대로라 효과가 다시 돌지
+   * 않고, 타이머가 **첫 변경 기준으로** 끝나 버린다.
+   */
+  const [structuralSaveNoticeId, setStructuralSaveNoticeId] = useState(0);
+  useEffect(() => {
+    if (structuralSaveNoticeId === 0) return;
+    const timer = setTimeout(() => setStructuralSaveNoticeId(0), 2500);
+    return () => clearTimeout(timer);
+  }, [structuralSaveNoticeId]);
+
   // ---- rendered graph (server baseline + justSaved shadow + pending drafts, merged) ----
 
   const serverNodesById = useMemo(() => {
@@ -746,9 +795,23 @@ export default function ProcedureTemplateEditorScreen({
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [hasAnyPendingChanges]);
 
+  /**
+   * 서버가 **그 자리에서 이미 저장한** 변경 하나가 돌아오는 통로.
+   *
+   * 🔴 여기 닿는 길은 전부 "액션이 ok 를 돌려준 뒤"다 — 패널들은 예외 없이
+   * `if (!result.ok) { setErrorMessage(...); return; }` 를 지나서야 부르고,
+   * procedure-editor-confirm-dialogs.test.ts ⑤절이 그 순서를 지키고 있다.
+   * 그래서 아래 "저장됨" 표시는 **실패했을 때 뜰 수가 없다**(실패는 각 패널이
+   * 제자리에 빨간 글로 알린다 — 그 동작은 그대로다).
+   *
+   * 🔵 되돌리기([이전]/[앞으로])도 이 통로를 지나고, 거기서도 뜨는 것이 맞다:
+   * 되돌리기 역시 **서버에 쓰는 조작**이라 실패하면 undoRedoError 가 같은 줄에
+   * 빨갛게 뜬다. 실패만 말하고 성공은 말하지 않으면 짝이 안 맞는다.
+   */
   function handleSaved(newUpdatedAt: string, structuralValidation?: StructuralValidationSummary) {
     setCurrentUpdatedAt(newUpdatedAt);
     if (structuralValidation) setLastStructuralValidation(structuralValidation);
+    setStructuralSaveNoticeId((id) => id + 1);
     router.refresh();
   }
 
@@ -1478,6 +1541,34 @@ export default function ProcedureTemplateEditorScreen({
               </button>
               {globalSaveStatus === "saved" && <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">저장 완료</span>}
               {hasAnyPendingChanges && globalSaveStatus === "idle" && <span className="text-xs text-zinc-500 dark:text-zinc-400">변경사항 {totalPendingCount}건 저장 대기 중</span>}
+              {/*
+                🔴 줄기 B-⑦ — 구조 변경이 끝났다고 말하는 자리. 왜 별도 상태인지는
+                structuralSaveNoticeId 선언부의 주석에 있다.
+
+                🔵 문구를 "저장 완료"로 하지 않았다. 바로 왼쪽의 [저장] 단추가
+                그때 "저장할 변경 없음"이라 적혀 있어서, 같은 낱말 둘이 나란히
+                서면 "완료라면서 왜 변경이 없다고 하지"가 된다 — 이번 오해의
+                실체가 정확히 그 충돌이었다. 그래서 **무엇이** 저장됐는지를
+                말한다: 방금 한 그 변경은 [저장]을 거치지 않고 바로 갔다.
+
+                🔵 저장 대기 안내와 동시에 떠도 괜찮다. 둘은 서로 다른 것을
+                가리킨다 — 이쪽은 방금 서버로 간 구조 변경, 저쪽은 아직 안 보낸
+                칸·배치 변경이다.
+              */}
+              {structuralSaveNoticeId > 0 && (
+                <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">방금 변경은 바로 저장됐습니다</span>
+              )}
+              {/*
+                🔵 아무 일도 없을 때 서 있는 안내. 띄우는 표시는 2.5초면 사라지는데,
+                사용자가 막힌 지점은 **그 뒤에도 남아 있는 화면**이었다("저장할 변경
+                없음" 한 줄만 보고 "인식을 못 한다"고 읽었다). [저장]이 무엇을 맡고
+                무엇을 안 맡는지는 상태가 아니라 이 편집기의 구조라, 상태가 아니라
+                상시 문구로 적는다. globalSaveStatus 가 idle 일 때만 — "저장 완료"와
+                한 줄에 겹쳐 서지 않게 한다.
+              */}
+              {!hasAnyPendingChanges && structuralSaveNoticeId === 0 && globalSaveStatus === "idle" && (
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">노드·연결선 추가·삭제·재연결은 [저장] 없이 바로 저장됩니다</span>
+              )}
             </>
           )}
           {canDeleteGraph && (
@@ -1527,6 +1618,24 @@ export default function ProcedureTemplateEditorScreen({
               templateName={template.name}
               isReferenceOnly={template.isReferenceOnly}
               disabledReason={hasAnyPendingChanges ? `저장하지 않은 변경 ${totalPendingCount}건이 있어 게시할 수 없습니다 — [저장] 먼저` : null}
+            />
+          )}
+          {/*
+            [초안 버리기] — 줄기 B-⑥. [새 DRAFT 버전 만들기]를 잘못 눌러 생긴
+            초안을 **떨어진 그 자리에서** 치운다. 버리는 길 자체는 전부터
+            있었지만(/procedures/technical 의 [삭제 모드] → 휴지통), 여기서
+            나가 목록으로 가 같은 이름의 여러 판 중 하나를 골라야 했다.
+
+            🔴 **[게시] 옆에 둔다.** 이 둘이 초안이 끝나는 두 길이다 — 올리거나,
+            버리거나. 저장하지 않은 변경이 있어도 막지 않는다: 게시와 달리
+            버리기는 "화면에 보이는 것"과 "저장된 것"이 달라서 생기는 사고가
+            없다(둘 다 휴지통으로 간다).
+          */}
+          {template.status === "DRAFT" && canDiscardDraft && (
+            <DiscardDraftButton
+              templateId={template.id}
+              templateName={template.name}
+              templateVersion={template.version}
             />
           )}
           <button type="button" onClick={handleExit} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300">

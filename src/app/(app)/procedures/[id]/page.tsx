@@ -6,7 +6,10 @@ import ProcedureTemplateDetailScreen from "@/components/procedures/ProcedureTemp
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { getProcedureTemplateDetail } from "@/lib/db/queries/procedure-templates";
+import {
+  getProcedureTemplateDetail,
+  listProcedureTemplateVersions,
+} from "@/lib/db/queries/procedure-templates";
 import {
   canViewAllProcedureTemplateStatuses,
   canViewPublishedProcedureTemplates,
@@ -70,9 +73,20 @@ export default async function ProcedureTemplateDetailPage({
   // AS_ENGINEER (view-published-only) must never see a DRAFT/ARCHIVED
   // template just by knowing/guessing its id — the list already hides
   // these rows, this is the direct-URL backstop.
-  if (template.status !== "PUBLISHED" && !actorMay(actingUser, canViewAllProcedureTemplateStatuses)) {
+  //
+  // 🔴 이 한 식이 **이 화면에서 "초안을 볼 수 있는가"의 유일한 답**이다. 아래
+  // [버전 목록]도 같은 값을 쓴다 — 두 자리에 각각 적으면 어긋나는 날이 오고,
+  // 어긋나는 방향은 둘 다 나쁘다: 느슨하면 못 여는 판이 목록에 떠서 누르는 족족
+  // 404 가 되고, 빡빡하면 지금 보고 있는 판이 제 목록에서 사라진다.
+  const mayViewEveryStatus = actorMay(actingUser, canViewAllProcedureTemplateStatuses);
+  if (template.status !== "PUBLISHED" && !mayViewEveryStatus) {
     notFound();
   }
+
+  // 같은 code 줄기의 판 전부(볼 수 있는 것만). 상세에서 판을 갈아타는 길이다 —
+  // 목록 화면이 줄기당 한 줄로 접혔으므로(2026-11-04), 판을 고르는 자리는 여기
+  // 하나뿐이다.
+  const versions = await listProcedureTemplateVersions(template.code, template.category, mayViewEveryStatus);
 
   // ── 게시 단추의 노출 판정 ──────────────────────────────────────────────
   // 서버(publishProcedureTemplate)가 트랜잭션 안에서 실제로 보는 두 관문을
@@ -102,6 +116,7 @@ export default async function ProcedureTemplateDetailPage({
     <Suspense fallback={null}>
       <ProcedureTemplateDetailScreen
         template={template}
+        versions={versions}
         canManageValidation={await hasPermission(actingUser, "technicalProcedures.validation", "READ")}
         canCreateDraftVersion={await mayCreateDraftVersionOfCategory(actingUser, template.category)}
         canEditDraft={await mayEditTemplateOfCategory(actingUser, template.category)}

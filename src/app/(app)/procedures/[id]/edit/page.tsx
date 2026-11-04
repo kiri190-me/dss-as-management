@@ -23,7 +23,9 @@ import {
 import {
   canManageTechnicalTemplates,
   canActorPublishTemplateOfCategory,
+  canDeleteTechnicalTemplates,
 } from "@/lib/auth/technical-procedure-template-authorization";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 
 export const metadata: Metadata = {
   title: "기술 절차 편집기 | DSS A/S 관리 시스템",
@@ -136,6 +138,19 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
     actorMay(actingUser, (role) => canActorPublishTemplateOfCategory(role, template.category)) &&
     (await mayPublishTemplateOfCategory(actingUser, template.category));
 
+  // ── [초안 버리기]의 노출 판정 (줄기 B-⑥) ───────────────────────────────
+  // 게시 단추와 **같은 모양**으로 둘을 모두 본다:
+  //  ① 역할 고정 canDeleteTechnicalTemplates — softDeleteProcedureTemplate 이
+  //     트랜잭션 안에서 실제로 보는 관문 그대로다(분류까지 본다:
+  //     TECHNICAL_TASK 가 아니면 어떤 역할로도 통과하지 못한다).
+  //  ② 설정 technicalProcedures.lifecycle — 목록 화면(/procedures/technical)의
+  //     [삭제 모드]가 쓰는 그 값. 관리자가 설정에서 좁히면 두 화면이 함께 닫혀야
+  //     한다. 한쪽만 보면 "목록에서는 안 보이는데 편집기에서는 보이는" 단추가 생긴다.
+  // 둘 다 만족할 때만 내므로, 서버가 거절할 단추는 보이지 않는다.
+  const canDiscardDraft =
+    actorMay(actingUser, (role) => canDeleteTechnicalTemplates(role, template.category)) &&
+    (await hasPermission(actingUser, "technicalProcedures.lifecycle", "MANAGE"));
+
   // 🔵 현장에서 더한 단계(줄기 B-⑧)는 **여기서 읽는다** — 화면이 제 손으로 다시
   //    묻지 않는다. 조회 자체가 「이 초안이 DRAFT 인가」와 「같은 줄기인가」를
   //    보므로(getFieldAddedStepsForDraft), 게시된 절차나 남의 줄기에서는 빈
@@ -154,6 +169,7 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
         comparison={comparison}
         canEdit={canEdit}
         canPublish={canPublish}
+        canDiscardDraft={canDiscardDraft}
         fieldAddedSteps={fieldAddedSteps}
       />
     </Suspense>

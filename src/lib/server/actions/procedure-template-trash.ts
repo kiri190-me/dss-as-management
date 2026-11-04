@@ -25,6 +25,19 @@ export type ProcedureTemplateTrashItemResult = {
   ok: boolean;
   code?: string;
   message?: string;
+  /**
+   * 2026-11-04(줄기 B-⑥) — 복원이 "같은 줄기에 살아 있는 초안이 있다"로 막혔을
+   * 때 **그 초안의 id**. 휴지통 창(useMasterDataTrash → master-data-trash-dialogs)
+   * 은 지금 message 만 그리므로 사람이 읽는 까닭은 글 쪽에 들어 있다. 이 칸은
+   * 그 글이 가리키는 초안으로 **링크를 낼 수 있게** 서버가 미리 실어 두는 것이다
+   * — 막는 자리에 갈 길을 함께 내는 것이 이 줄기의 규약이고,
+   * createNewDraftVersion 쪽은 이미 그 모양으로 돌려주고 있다.
+   *
+   * 🔵 다른 두 조작(삭제·완전삭제)에서는 영영 undefined 다. 공용 훅의
+   * MasterDataTrashItemResult 에 없는 칸이지만, 선택 칸이 하나 더 있는 것은
+   * 그 자리에 그대로 들어간다.
+   */
+  existingDraftId?: string;
 };
 
 export type ProcedureTemplateTrashActionResult =
@@ -47,7 +60,10 @@ export type ProcedureTemplateTrashActionResult =
  * ============================================================================
  */
 async function resolveActorId(): Promise<
-  { ok: true; userId: string } | { ok: false; result: ProcedureTemplateTrashActionResult }
+  | { ok: true; userId: string }
+  // 실패 갈래만 담는다 — discardProcedureTemplateDraftAction 처럼 결과 모양이
+  // 다른(일괄이 아닌) 액션도 이 실패를 그대로 되돌려 줄 수 있어야 한다.
+  | { ok: false; result: Extract<ProcedureTemplateTrashActionResult, { ok: false }> }
 > {
   if (getAuthSource() !== "database") {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "데이터베이스 저장 모드가 아닙니다." } };
@@ -100,7 +116,17 @@ async function runEach(
     try {
       const result = await run(item);
       results.push(
-        result.ok ? { id: item.id, ok: true } : { id: item.id, ok: false, code: result.code, message: result.message }
+        result.ok
+          ? { id: item.id, ok: true }
+          : {
+              id: item.id,
+              ok: false,
+              code: result.code,
+              message: result.message,
+              // 있을 때만 싣는다 — 없는 갈래에서 undefined 를 적어 두면 "보낼
+              // 곳이 있다"와 "없다"를 받는 쪽이 구분하지 못한다.
+              ...(result.existingDraftId ? { existingDraftId: result.existingDraftId } : {}),
+            }
       );
     } catch (err) {
       const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: string }).code : undefined;
@@ -139,7 +165,62 @@ export async function deleteProcedureTemplatesAction(input: {
   return { ok: true, results };
 }
 
-/** 휴지통의 절차를 되살린다. */
+/**
+ * 2026-11-04(줄기 B-⑥) — 편집기에서 **이 초안 하나를** 버린다.
+ *
+ * 일괄 액션(deleteProcedureTemplatesAction)과 같은 mutation 을 부르되 두 가지가
+ * 다르다:
+ *  1. **DRAFT 만 지운다**(requireStatus). 잘못 만든 초안을 그 자리에서 치우는
+ *     길이라, 게시된 판이 이 길로 사라지면 안 된다. 판정은 화면이 아니라
+ *     mutation 의 트랜잭션 안에서 난다.
+ *  2. 사유를 받지 않는다. 15일 동안 휴지통에 남아 복원할 수 있는 조작이고,
+ *     편집기 한복판에서 사유 칸을 받는 창을 세울 자리도 아니다. 일괄 삭제도
+ *     사유는 선택 입력이다.
+ *
+ * 결과 모양이 일괄 액션과 다르다 — 한 건이므로 results 배열이 아니라 그 한 건의
+ * 성패를 그대로 돌려준다. 화면이 실패 이유를 그 자리에 적을 수 있어야 한다.
+ */
+export type ProcedureTemplateDiscardResult =
+  | { ok: true; id: string }
+  | { ok: false; code: string; message: string };
+
+export async function discardProcedureTemplateDraftAction(input: {
+  templateId: string;
+}): Promise<ProcedureTemplateDiscardResult> {
+  const actor = await resolveActorId();
+  if (!actor.ok) return actor.result;
+
+  if (!isValidUuid(input?.templateId)) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "요청 정보를 확인할 수 없습니다." };
+  }
+
+  try {
+    return await softDeleteProcedureTemplate({
+      templateId: input.templateId,
+      actorUserId: actor.userId,
+      reason: null,
+      requireStatus: "DRAFT",
+    });
+  } catch (err) {
+    const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: string }).code : undefined;
+    console.error("discardProcedureTemplateDraftAction: unexpected DB error", { id: input.templateId, code });
+    return {
+      ok: false,
+      code: "DATABASE_UNAVAILABLE",
+      message: "일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+    };
+  }
+}
+
+/**
+ * 휴지통의 절차를 되살린다.
+ *
+ * 🔴 2026-11-04(줄기 B-⑥) — **초안은 막힐 수 있다.** 같은 줄기에 이미 살아 있는
+ * 초안이 있으면 mutation 이 CONFLICT 로 거절한다(왜 그래야 하는지는
+ * restoreProcedureTemplate 의 주석에 있다). 여기서 달라진 것은 없다 — runEach 가
+ * 건마다 제 트랜잭션을 **순서대로** 돌리고 건마다 제 결과를 담으므로, 막힌 건은
+ * 뒤 건을 멈추지 않고 창에는 성공한 수와 막힌 까닭이 함께 뜬다.
+ */
 export async function restoreProcedureTemplatesAction(input: {
   items: ProcedureTemplateTrashItem[];
 }): Promise<ProcedureTemplateTrashActionResult> {

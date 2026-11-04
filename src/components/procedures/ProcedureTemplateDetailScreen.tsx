@@ -9,6 +9,7 @@ import ProcedureReferenceItemsViewer from "./ProcedureReferenceItemsViewer";
 import ProcedureValidationIssuePanel from "./ProcedureValidationIssuePanel";
 import CreateDraftVersionButton from "./editor/CreateDraftVersionButton";
 import PublishTemplateButton from "./editor/PublishTemplateButton";
+import ProcedureVersionList, { type ProcedureVersionListRow } from "./ProcedureVersionList";
 import {
   procedureEquipmentTypeLabels,
   procedureTemplateSourceTypeLabels,
@@ -39,12 +40,18 @@ function formatDate(iso: string | null): string {
  */
 export default function ProcedureTemplateDetailScreen({
   template,
+  versions = [],
   canManageValidation,
   canCreateDraftVersion = false,
   canEditDraft = false,
   canPublish = false,
 }: {
   template: ProcedureTemplateDetail;
+  /**
+   * 같은 code 줄기의 판 전부 — 판 번호 내림차순. **볼 수 있는 것만** 넘어온다
+   * (페이지가 거른다). 빈 배열이면 [버전 목록]을 아예 안 그린다.
+   */
+  versions?: ProcedureVersionListRow[];
   canManageValidation: boolean;
   /** Phase 4A — "새 DRAFT 버전 만들기" from a PUBLISHED template. */
   canCreateDraftVersion?: boolean;
@@ -212,6 +219,11 @@ export default function ProcedureTemplateDetailScreen({
           </div>
         </dl>
       </div>
+
+      {/* 플로우차트보다 **위**다 — 지금 보고 있는 것이 어느 판인지를 그림을
+          보기 전에 알아야 한다. 판을 잘못 보고 있는 줄 모르고 그림을 읽는 것이
+          이 화면의 가장 비싼 오독이다. */}
+      <ProcedureVersionList versions={versions} currentTemplateId={template.id} />
 
       <section>
         <h2 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">검증 이슈</h2>

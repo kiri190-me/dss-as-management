@@ -218,6 +218,77 @@ export async function listTechnicalProcedureTemplates(includeAllStatuses: boolea
   }));
 }
 
+export type ProcedureTemplateVersionRow = {
+  id: string;
+  name: string;
+  version: number;
+  status: ProcedureTemplateStatus;
+  createdAt: string;
+  publishedAt: string | null;
+};
+
+/**
+ * 한 줄기(`code`)의 모든 판 — [절차 상세]의 [버전 목록]이 쓴다.
+ *
+ * ── 왜 `code` 로 묶는가 ─────────────────────────────────────────────────
+ * 스키마가 그렇게 정하고 있다. procedure_templates 의 유니크 인덱스는
+ * (code, version) 이고 그 자리 주석이 "code identifies a template lineage
+ * across versions" 라고 적는다. supersedes_template_id 로 사슬을 거슬러 올라갈
+ * 수도 있지만, 그 길은 **끊어진 사슬을 못 본다** — 줄기의 첫 판은 null 이고,
+ * 초안을 버렸다가 다시 만든 가지는 사슬이 갈라진다. 목록은 "이 code 의 판 전부"를
+ * 보여 주는 자리이므로 code 로 한 번에 읽는 쪽이 맞다.
+ *
+ * ── 🔴 분류도 함께 본다 ─────────────────────────────────────────────────
+ * (code, version) 은 분류를 가리지 않는 유니크다. 한 줄기는 분류가 바뀌지 않지만
+ * (createNewDraftVersion 이 부모의 category 를 그대로 베낀다), 어쩌다 다른 분류의
+ * 행이 같은 code 를 쓰면 남의 절차가 이 목록에 섞인다. 조건 한 줄로 막는다.
+ *
+ * ── 🔴 includeAllStatuses ───────────────────────────────────────────────
+ * 초안·보관본을 볼 수 있는가는 **부르는 쪽(페이지)**이 판정해서 넘긴다. 이웃
+ * listProcedureTemplates·listTechnicalProcedureTemplates 와 같은 규약이고,
+ * 기본값을 두지 않는 것도 같다 — 깜빡한 호출부가 초안을 흘리는 일이 없도록
+ * 인자를 반드시 적게 한다. 상세 페이지는 **그 화면이 직접 쓰는 관문과 같은 식**을
+ * 넘긴다(그쪽 주석 참조). 다른 값을 넘기면 "목록에는 있는데 눌러도 404" 이거나
+ * 그 반대가 된다.
+ */
+export async function listProcedureTemplateVersions(
+  code: string,
+  category: ProcedureTemplateCategory,
+  includeAllStatuses: boolean
+): Promise<ProcedureTemplateVersionRow[]> {
+  const rows = await db
+    .select({
+      id: procedureTemplates.id,
+      name: procedureTemplates.name,
+      version: procedureTemplates.version,
+      status: procedureTemplates.status,
+      createdAt: procedureTemplates.createdAt,
+      publishedAt: procedureTemplates.publishedAt,
+    })
+    .from(procedureTemplates)
+    .where(
+      and(
+        eq(procedureTemplates.code, code),
+        eq(procedureTemplates.category, category),
+        // 휴지통에 있는 판은 버전 목록에도 안 나온다 — 눌러도 상세가 열리지
+        // 않으므로(getProcedureTemplateDetail 이 같은 조건으로 막는다) 그려 봐야
+        // 죽은 줄이 된다.
+        eq(procedureTemplates.isDeleted, false),
+        includeAllStatuses ? undefined : eq(procedureTemplates.status, "PUBLISHED")
+      )
+    )
+    .orderBy(desc(procedureTemplates.version));
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    version: row.version,
+    status: row.status,
+    createdAt: row.createdAt.toISOString(),
+    publishedAt: row.publishedAt ? row.publishedAt.toISOString() : null,
+  }));
+}
+
 export type ProcedureTemplateNodeRow = {
   id: string;
   nodeCode: string;

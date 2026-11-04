@@ -247,14 +247,43 @@ describe("절차 편집기 확인 창 — ④ 실패하면 사람이 안다", ()
     assert.equal(flat(edgeProperty).match(/\{errorMessage && </g)?.length, 1);
   });
 
-  test("🔵 성공 알림은 따로 띄우지 않는다 — 지도에 나타나는 것이 증거다(조각 13 과 같은 판단)", () => {
+  /**
+   * 🔴 2026-11-04(줄기 B-⑦) — 이 시험의 이름이 예전에는 「성공 알림은 따로
+   * 띄우지 않는다 — 지도에 나타나는 것이 증거다」였고, 그 판단은 **절반이
+   * 뒤집혔다.** 사용자가 신고한 것: "노드, 연결선등을 추가/제거 하기만 했을
+   * 때는 [저장]이 활성화가 안되더라고 ... 수정된 사항이라고 인식을 안하고 있는
+   * 것 같아." 지도는 바뀌었는데도 **저장됐다는 말을 아무도 안 했기** 때문에
+   * 고장으로 읽힌 것이다(삭제는 "사라짐"이 유일한 증거라 더 약하다).
+   *
+   * 뒤집힌 것과 그대로인 것을 갈라 둔다:
+   *  - 그대로: **창은 안 띄운다.** SavePopup 도 window.alert 도 여전히 없다 —
+   *    확인 창을 걷어낸 줄기 B-② 의 까닭(조작마다 창이 뜨면 손이 막힌다)은
+   *    성공 알림에도 똑같이 적용된다.
+   *  - 뒤집힌 것: 도구막대에 **저절로 꺼지는 한 줄**이 뜬다. 창이 아니라
+   *    글자고, 아무것도 막지 않는다.
+   * 이 주석이 없으면 다음 사람이 옛 이름만 보고 그 한 줄을 도로 걷어낸다.
+   */
+  test("🔵 성공을 알리되 창은 안 띄운다 — 도구막대의 꺼지는 한 줄이다(줄기 B-⑦ 에서 반만 뒤집혔다)", () => {
     for (const source of [createEdge, edgeProperty, nodeProperty, createNode]) {
       assert.ok(!/SavePopup/.test(source), "SavePopup 은 0.5초 뒤 저절로 닫히는 성공 전용 창이다 — 여기 쓸 자리가 아니다");
       assert.ok(!/window\.alert\(/.test(source));
     }
     // 지도가 다시 그려지는 길: 패널의 onSaved → 화면의 handleStructuralSaved →
     // handleSaved → router.refresh(). 그 끝단이 살아 있는지만 본다.
-    assert.ok(functionBody(screen, "function handleSaved(").includes("router.refresh();"));
+    const saved = functionBody(screen, "function handleSaved(");
+    assert.ok(saved.includes("router.refresh();"));
+    // 🔴 알리는 자리도 **같은 함수 안**이어야 한다. 패널마다 따로 두면 새 패널이
+    //    생긴 날 그 하나만 조용히 말을 안 한다.
+    assert.ok(
+      saved.includes("setStructuralSaveNoticeId((id) => id + 1);"),
+      "구조 변경이 저장됐다고 말하는 자리가 handleSaved 에서 사라졌다 — 사용자가 신고한 그 침묵으로 되돌아간다"
+    );
+    // 🔴 그러면서 globalSaveStatus 는 **안 건드린다.** 거기에 끼면 "변경사항 N건
+    //    저장 대기 중" 안내가 2.5초 깜빡인다(그 문구가 idle 일 때만 뜬다).
+    assert.ok(
+      !saved.includes("setGlobalSaveStatus"),
+      "handleSaved 가 globalSaveStatus 를 건드리면 저장 대기 안내가 깜빡인다 — 별도 상태로 둔 까닭이 그것이다"
+    );
   });
 });
 

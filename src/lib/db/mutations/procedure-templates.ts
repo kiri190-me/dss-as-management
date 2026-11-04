@@ -27,7 +27,12 @@ import {
 import { actorMay } from "@/lib/auth/developer-promotion";
 import { insertAuditLog } from "./audit-logs";
 import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
-import { PROCEDURE_EQUIPMENT_TYPE_CODES, type ProcedureEquipmentType } from "@/lib/domain/procedure-template-types";
+import {
+  PROCEDURE_EQUIPMENT_TYPE_CODES,
+  procedureTemplateStatusLabels,
+  type ProcedureEquipmentType,
+  type ProcedureTemplateStatus,
+} from "@/lib/domain/procedure-template-types";
 import type { Role } from "@/lib/domain/types";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 
@@ -55,7 +60,23 @@ export type ProcedureTemplateResultCode =
 
 export type ProcedureTemplateResult =
   | { ok: true; id: string; alreadyImported?: boolean }
-  | { ok: false; code: ProcedureTemplateResultCode; message: string };
+  | {
+      ok: false;
+      code: ProcedureTemplateResultCode;
+      message: string;
+      /**
+       * 2026-11-04(줄기 B-⑥) — createNewDraftVersion 이 "이미 진행 중인 초안
+       * 버전이 있습니다"로 막을 때 **그 초안의 id**. 막는 자리에 까닭만 적고
+       * 갈 곳을 안 주면, 사람은 그 초안이 어디 있는지 목록을 뒤져야 한다
+       * (같은 code 의 다른 판이라 이름까지 같다). 이 저장소는 막을 때 늘 그
+       * 자리에 갈 길을 함께 낸다 — 편집기의 [저장] 단추가 "저장할 변경 없음"
+       * 으로 바뀌는 것과 같은 규약이다.
+       *
+       * 🔵 이 한 갈래에서만 찬다. 다른 실패(권한·상태·없음)에는 보낼 곳이
+       * 없으므로 undefined 로 남고, 화면은 값이 있을 때만 링크를 그린다.
+       */
+      existingDraftId?: string;
+    };
 
 class ProcedureTemplateMutationError extends Error {
   result: ProcedureTemplateResult & { ok: false };
@@ -65,8 +86,12 @@ class ProcedureTemplateMutationError extends Error {
   }
 }
 
-function fail(code: ProcedureTemplateResultCode, message: string): never {
-  throw new ProcedureTemplateMutationError({ ok: false, code, message });
+function fail(
+  code: ProcedureTemplateResultCode,
+  message: string,
+  extra?: { existingDraftId?: string }
+): never {
+  throw new ProcedureTemplateMutationError({ ok: false, code, message, ...extra });
 }
 
 type EligibleActor = { id: string; role: Role; isDeveloper: boolean };
@@ -670,8 +695,38 @@ export async function createNewDraftVersion(
         )
         .limit(1);
       if (existingDraft) {
-        fail("CONFLICT", "이미 진행 중인 초안 버전이 있습니다.");
+        // 🔴 2026-11-04(줄기 B-⑥) — 막으면서 **그 초안의 id 를 함께 돌려준다.**
+        //    그 전에는 "이미 진행 중인 초안 버전이 있습니다" 한 줄뿐이라, 사람은
+        //    어느 초안인지도 어디 있는지도 모른 채 목록으로 돌아가야 했다(같은
+        //    code 의 다른 판이라 이름까지 똑같다).
+        fail("CONFLICT", "이미 진행 중인 초안 버전이 있습니다.", { existingDraftId: existingDraft.id });
       }
+
+      /**
+       * 🔴 2026-11-04(줄기 B-⑥) — 판 번호는 **부모 + 1 이 아니라 이 줄기에서
+       * 아직 쓰지 않은 다음 번호**다. 바뀐 까닭은 초안을 버릴 수 있게 되었기
+       * 때문이다:
+       *
+       *   v1 게시 → v2 초안 → v2 를 휴지통에 버림 → 다시 새 초안
+       *
+       * 이때 부모(v1) + 1 로 세면 다시 v2 가 나오는데, 휴지통의 v2 행이
+       * (code, version) 자리를 **계속 차지하고 있다** —
+       * procedure_templates_code_version_unique 는 부분 인덱스가 아니다(그
+       * 칸의 주석에 왜 일부러 그렇게 두었는지가 적혀 있다: 복원이 이름 충돌로
+       * 막히지 않게 하려고). 그래서 그대로 두면 새 초안 만들기가 23505 로
+       * 터지고, 액션은 그것을 "일시적으로 처리할 수 없습니다"로 바꿔 보여 준다
+       * — 15일(자동 완전삭제)이 지나기 전에는 영영 풀리지 않는 거짓말이다.
+       *
+       * 🔵 그래서 삭제된 행도 **함께 센다**. 버린 번호는 돌아오지 않고 줄기에
+       * 구멍이 남는다(v1 → v3). 일부러 그렇게 둔다 — 그 구멍이 "여기서 초안
+       * 하나를 버렸다"는 기록이고, 번호를 다시 쓰면 휴지통의 v2 와 새 v2 가
+       * 같은 이름으로 나란히 서게 된다.
+       */
+      const [versionCeiling] = await tx
+        .select({ highest: sql<number>`max(${procedureTemplates.version})::int` })
+        .from(procedureTemplates)
+        .where(eq(procedureTemplates.code, published.code));
+      const nextVersion = Math.max(published.version, versionCeiling?.highest ?? published.version) + 1;
 
       const [newDraft] = await tx
         .insert(procedureTemplates)
@@ -685,7 +740,7 @@ export async function createNewDraftVersion(
           category: published.category,
           description: published.description,
           status: "DRAFT",
-          version: published.version + 1,
+          version: nextVersion,
           sourceType: published.sourceType,
           sourceFileName: published.sourceFileName,
           sourceFileHash: published.sourceFileHash,
@@ -1062,12 +1117,33 @@ export async function replaceDraftProcedureTemplates(
  * ── 분류로 먼저 막는다 ──────────────────────────────────────────────────
  * canDeleteTechnicalTemplates는 TECHNICAL_TASK 전용이다. 전체 서비스·참고자료
  * 절차는 어떤 역할로도 이 함수들을 통과하지 못한다.
+ *
+ * ── 들어오는 문이 둘이다(2026-11-04, 줄기 B-⑥) ──────────────────────────
+ * ① 목록 화면(/procedures/technical)의 [삭제 모드] — 여러 건을 한꺼번에,
+ *    **상태를 묻지 않는다**. 휴지통의 「삭제 당시 상태」 칸이 그 전제 위에 있다.
+ * ② 편집기의 [초안 버리기] — 한 건을, requireStatus="DRAFT" 로.
+ * ②는 ①을 좁힌 길이지 ①을 대신하는 길이 아니다. ①의 동작은 한 글자도 바뀌지
+ * 않았다.
  * ============================================================================
  */
 
 export type ProcedureTemplateTrashResult =
   | { ok: true; id: string }
-  | { ok: false; code: ProcedureTemplateResultCode; message: string };
+  | {
+      ok: false;
+      code: ProcedureTemplateResultCode;
+      message: string;
+      /**
+       * 2026-11-04(줄기 B-⑥) — restoreProcedureTemplate 이 "같은 줄기에 이미
+       * 살아 있는 초안이 있다"로 막을 때 **그 초안의 id**. createNewDraftVersion
+       * 이 같은 상황에서 쓰는 칸과 **일부러 같은 이름·같은 뜻**이다(이 파일 위쪽
+       * ProcedureTemplateResult 의 주석 참고) — 두 길이 막는 까닭이 같으니
+       * 돌려주는 모양도 같아야, 받는 쪽이 한 가지 규칙만 알면 된다.
+       *
+       * 🔵 이 한 갈래에서만 찬다. 다른 실패(권한·없음·참조)에는 보낼 곳이 없다.
+       */
+      existingDraftId?: string;
+    };
 
 /** 이 절차를 붙잡고 있는 것의 수 — 수행 기록과 이어받은 버전을 합쳐 센다. */
 async function countProcedureTemplateReferences(tx: Tx, templateId: string): Promise<number> {
@@ -1127,10 +1203,31 @@ export async function softDeleteProcedureTemplate(input: {
   templateId: string;
   actorUserId: string;
   reason: string | null;
+  /**
+   * 2026-11-04(줄기 B-⑥) — 이 상태일 때만 지운다. 넘기지 않으면 상태를 보지
+   * 않는다(목록 화면의 일괄 삭제가 쓰던 그대로다 — 그쪽은 수행 기록·후속
+   * 버전만 보고 상태는 묻지 않았고, 휴지통의 「삭제 당시 상태」 칸이 그 사실을
+   * 전제로 서 있다).
+   *
+   * 🔴 **편집기의 [초안 버리기]만 "DRAFT" 를 넘긴다.** 그 단추는 잘못 만든
+   * 초안 하나를 그 자리에서 치우는 길이라, 게시된 판이 그 길로 사라지는 일은
+   * 없어야 한다. 화면도 DRAFT 일 때만 단추를 내지만, 화면에서 감추는 것은
+   * 편의일 뿐 경계가 아니다 — 경계는 여기, 행을 잠근 트랜잭션 안이다.
+   */
+  requireStatus?: ProcedureTemplateStatus;
 }): Promise<ProcedureTemplateTrashResult> {
   try {
     return await db.transaction(async (tx) => {
       const { template } = await requireDeletableTemplate(tx, input.templateId, input.actorUserId, false);
+
+      // 상태를 먼저 본다 — 게시본을 참조 수로 거절하면 "지금은 참조가 없으니
+      // 지울 수 있다"로 읽힌다. 거절하는 까닭이 상태라면 상태를 말해야 한다.
+      if (input.requireStatus && template.status !== input.requireStatus) {
+        fail(
+          "CONFLICT",
+          `${procedureTemplateStatusLabels[input.requireStatus]} 상태의 절차만 이 길로 지울 수 있습니다 — 이 절차는 ${procedureTemplateStatusLabels[template.status]} 상태입니다.`
+        );
+      }
 
       const references = await countProcedureTemplateReferences(tx, input.templateId);
       if (references > 0) fail("CONFLICT", templateReferencedMessage(references));
@@ -1174,10 +1271,38 @@ export async function softDeleteProcedureTemplate(input: {
 /**
  * 휴지통의 절차를 되살린다.
  *
- * 이름 충돌 검사가 없다 — procedure_templates_code_version_unique는 부분
- * 인덱스가 아니라서 삭제된 행도 (code, version) 자리를 계속 지킨다. 즉
- * 휴지통에 있는 동안 같은 code+version이 새로 생길 수 없고, 복원이 막힐
- * 이유도 없다(고객사·제품 모델은 부분 인덱스라 그 검사가 필요했다).
+ * ── 이름(code, version) 충돌은 보지 않는다 ──────────────────────────────
+ * procedure_templates_code_version_unique는 부분 인덱스가 아니라서 삭제된
+ * 행도 (code, version) 자리를 계속 지킨다. 즉 휴지통에 있는 동안 같은
+ * code+version이 새로 생길 수 없고, 복원이 **그 이름 때문에** 막힐 일도 없다
+ * (고객사·제품 모델은 부분 인덱스라 그 검사가 필요했다).
+ *
+ * ── 🔴 그러나 「살아 있는 초안」은 본다(2026-11-04, 줄기 B-⑥) ────────────
+ * 이름이 안 부딪힌다는 것과 **줄기에 초안이 하나뿐이라는 것**은 다른 약속이다.
+ * 그 둘을 한 문장으로 묶어 읽은 탓에 여기엔 DRAFT 를 세는 줄이 하나도 없었고,
+ * 다음 길이 조용히 열려 있었다:
+ *
+ *   v1 게시 → 새 초안 v2 → v2 를 [초안 버리기] → 다시 새 초안 v3
+ *   → 휴지통에서 v2 를 [복원]  ⇒ 🔴 v2·v3 가 **둘 다 살아 있다**
+ *
+ * 개발 DB 에서 실제로 그렇게 됐다(한 줄기에 살아 있는 DRAFT 가 둘, 78초 차이).
+ * createNewDraftVersion 은 "이미 진행 중인 초안이 있다"로 막지만 **버린 초안은
+ * 일부러 안 센다**(목록에 안 보이는 행이 새 초안 만들기를 막으면 안 된다) —
+ * 그 판단은 그대로 옳고, 구멍은 되살아나는 쪽에 있었다. 그래서 막는 자리를
+ * 여기 하나 더 둔다.
+ *
+ * 🔴 줄기 B-⑥ 의 앞 조각이 이 구멍을 **넓혔다**. 판 번호를 "아직 안 쓴 다음
+ * 번호"로 바꾸면서 「버리고 다시 만들기」가 자연스러운 길이 됐기 때문이다 —
+ * 그 전에는 같은 번호를 다시 쓰려다 유니크 위반으로 터져, 위 경로의 셋째
+ * 걸음이 애초에 성립하지 않았다.
+ *
+ * 🔴 **초안에만 건다.** 게시본·보관본을 되살리는 것은 이 약속과 무관하다
+ * (한 줄기에 게시본이 여럿인 것은 판 이력 그 자체다) — 거기까지 막으면 멀쩡한
+ * 복원이 죽는다.
+ *
+ * 🔵 일괄 복원(restoreProcedureTemplatesAction)은 건마다 **제 트랜잭션을
+ * 순서대로** 돌린다. 그래서 한 번에 같은 줄기의 초안 둘을 골라도 둘째가 첫째의
+ * 결과를 보고 막히고, 막힌 건이 나머지를 멈추지 않는다(runEach).
  */
 export async function restoreProcedureTemplate(input: {
   templateId: string;
@@ -1186,6 +1311,32 @@ export async function restoreProcedureTemplate(input: {
   try {
     return await db.transaction(async (tx) => {
       const { template } = await requireDeletableTemplate(tx, input.templateId, input.actorUserId, true);
+
+      if (template.status === "DRAFT") {
+        // 되살릴 행은 아직 is_deleted = true 라 자기 자신은 여기 안 걸린다.
+        const [liveDraft] = await tx
+          .select({ id: procedureTemplates.id, version: procedureTemplates.version })
+          .from(procedureTemplates)
+          .where(
+            and(
+              eq(procedureTemplates.code, template.code),
+              eq(procedureTemplates.status, "DRAFT"),
+              eq(procedureTemplates.isDeleted, false)
+            )
+          )
+          .limit(1);
+        if (liveDraft) {
+          // 막는 자리에 **갈 곳을 함께 낸다** — 같은 code 의 다른 판이라 이름까지
+          // 똑같아서, 까닭만 적으면 "그 초안"이 어느 줄인지 사람이 목록에서
+          // 손으로 찾아야 한다. 휴지통 창은 message 만 그리므로 판 번호도 글에
+          // 싣는다(id 는 화면이 링크를 낼 때 쓴다).
+          fail(
+            "CONFLICT",
+            `같은 절차에 이미 진행 중인 초안(v${liveDraft.version})이 있어 이 초안은 복원할 수 없습니다. 그 초안을 게시하거나 버린 뒤에 다시 복원해 주세요.`,
+            { existingDraftId: liveDraft.id }
+          );
+        }
+      }
 
       await tx
         .update(procedureTemplates)

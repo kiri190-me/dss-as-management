@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
-import { ListCard } from "@/components/common/list-card";
 import SelectAllCheckbox from "@/components/common/select-all-checkbox";
 import MasterDataTrashRetentionBadge from "@/components/common/master-data-trash-retention-badge";
 import {
@@ -29,6 +28,8 @@ import type {
   DeletedProcedureTemplateRow,
   TechnicalProcedureTemplateListRow,
 } from "@/lib/db/queries/procedure-templates";
+import { groupProcedureTemplatesByCode } from "@/lib/domain/procedure-template-series";
+import TechnicalProcedureSeriesList from "./TechnicalProcedureSeriesList";
 import CreateTechnicalTemplateForm from "./editor/CreateTechnicalTemplateForm";
 
 const STATUS_BADGE: Record<string, string> = {
@@ -64,6 +65,20 @@ function formatDate(iso: string | null): string {
  *  2. **수행 기록이나 후속 버전이 있으면 고를 수 없다.** 서버도 같은 기준으로
  *     다시 막지만(mutations/procedure-templates.ts), 고를 수 있게 해 놓고
  *     나중에 거절하면 "왜 안 되는지"를 한 번 더 눌러 봐야 알게 된다.
+ *
+ * ── 🔴 계열당 한 줄 — 그런데 삭제 모드에서는 판 단위로 되돌린다 ─────────
+ * 2026-11-04 사용자 신고: "같은 이름의 절차들이 버전만 다르게 있으면 오히려
+ * 버전 관리가 어려워진다." 그래서 평소 목록은 code 줄기당 한 줄이다
+ * (TechnicalProcedureSeriesList).
+ *
+ * 삭제는 그렇게 접을 수 없다. 삭제의 단위는 **행 하나(= 판 하나)**이고,
+ * 지울 수 있는지도 판마다 다르다 — 수행 기록이 있는 판은 막히고 같은 줄기의
+ * 다른 판은 열린다. 접어 놓고 체크박스를 하나 두면 "이 줄기를 지운다"가 무슨
+ * 뜻인지 사람도 서버도 다르게 읽는다(전부? 대표만? 지울 수 있는 것만?).
+ *
+ * 그래서 [삭제 모드]에 들어가면 **묶음을 푼다.** 같은 화면에서 모든 판이 한 줄씩
+ * 다시 서고, 고르는 손(체크박스·Shift 범위)·막히는 조건·확인 창·휴지통은 전과
+ * 한 글자도 다르지 않다. 휴지통 탭도 원래부터 판 단위다(code · v1 로 적는다).
  */
 export default function TechnicalProcedureTemplateListScreen({
   templates,
@@ -88,6 +103,16 @@ export default function TechnicalProcedureTemplateListScreen({
   const [trashSelectedIds, setTrashSelectedIds] = useState<Set<string>>(new Set());
 
   const undeletable = useMemo(() => new Set(undeletableIds), [undeletableIds]);
+
+  /**
+   * 평소 목록이 그리는 것 — code 줄기당 하나.
+   *
+   * 🔴 권한 거르기는 이미 끝나 있다. templates 는 서버가
+   * listTechnicalProcedureTemplates(mayEditDraft) 로 읽어 넘긴 것이라, 초안을
+   * 볼 수 없는 역할에게는 초안 행이 애초에 들어 있지 않다. 그래서 접는 함수도
+   * 이 화면도 권한을 다시 보지 않는다 — 보는 곳이 둘이 되면 어긋난다.
+   */
+  const series = useMemo(() => groupProcedureTemplatesByCode(templates), [templates]);
 
   function leaveDeleteMode() {
     setIsDeleteMode(false);
@@ -191,7 +216,9 @@ export default function TechnicalProcedureTemplateListScreen({
                 : "-mb-px border-b-2 border-transparent px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200"
             }
           >
-            사용중 ({templates.length})
+            {/* 세는 것은 **줄기**다 — 화면에 실제로 서는 줄 수와 같아야 한다.
+                판 수는 각 줄의 [판 수] 칸과 상세의 [버전 목록]이 말한다. */}
+            사용중 ({series.length})
           </button>
           <button
             type="button"
@@ -258,14 +285,15 @@ export default function TechnicalProcedureTemplateListScreen({
               </div>
               {selectableIds.length === 0 ? (
                 <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
-                  지금 목록에는 삭제할 수 있는 절차가 없습니다 — {templates.length}개 모두 접수 건에서 수행된 기록이
+                  지금 목록에는 삭제할 수 있는 절차가 없습니다 — {templates.length}판 모두 접수 건에서 수행된 기록이
                   있거나 후속 버전이 이어받았습니다. 수행 기록은 실제 수리 작업의 기록이라 지우지 않습니다.
                 </p>
               ) : (
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {templates.length}개 중{" "}
-                  <strong className="font-medium text-zinc-700 dark:text-zinc-200">{selectableIds.length}개</strong>를
-                  삭제할 수 있습니다. 흐리게 표시된 절차는 수행 기록·후속 버전이 있어 선택할 수 없습니다. 삭제해도 15일
+                  삭제는 <strong className="font-medium text-zinc-700 dark:text-zinc-200">판(버전) 단위</strong>라
+                  계열 묶음을 풀고 모든 판을 한 줄씩 보여 줍니다. {templates.length}판 중{" "}
+                  <strong className="font-medium text-zinc-700 dark:text-zinc-200">{selectableIds.length}판</strong>을
+                  삭제할 수 있습니다. 흐리게 표시된 판은 수행 기록·후속 버전이 있어 선택할 수 없습니다. 삭제해도 15일
                   동안은 휴지통에서 복원할 수 있습니다.
                 </p>
               )}
@@ -276,7 +304,10 @@ export default function TechnicalProcedureTemplateListScreen({
             <p className="rounded-lg border border-zinc-200 bg-white p-6 text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
               표시할 기술 절차가 없습니다.
             </p>
-          ) : (
+          ) : isDeleteMode ? (
+            // 🔴 삭제 모드 — 묶음을 푼 **판 단위** 목록. 머리말의 "삭제는 그렇게
+            // 접을 수 없다" 항목이 까닭이고, 이 가지 안의 손잡이는 묶기 전과
+            // 한 글자도 다르지 않다.
             <ResponsiveList
               listId="technical-procedures"
               measureKey={[templates.length, isDeleteMode]}
@@ -284,16 +315,14 @@ export default function TechnicalProcedureTemplateListScreen({
                 <table className="w-full min-w-[720px] text-left text-sm">
                   <thead>
                     <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                      {isDeleteMode && (
-                        <th className="w-10 px-3 py-2">
-                          <SelectAllCheckbox
-                            selectableCount={selectableIds.length}
-                            selectedCount={selectedSelectableCount}
-                            onChange={toggleSelectAll}
-                            ariaLabel="절차 전체 선택"
-                          />
-                        </th>
-                      )}
+                      <th className="w-10 px-3 py-2">
+                        <SelectAllCheckbox
+                          selectableCount={selectableIds.length}
+                          selectedCount={selectedSelectableCount}
+                          onChange={toggleSelectAll}
+                          ariaLabel="절차 전체 선택"
+                        />
+                      </th>
                       <th className="px-3 py-2 font-medium">이름</th>
                       <th className="px-3 py-2 font-medium">설비 유형</th>
                       <th className="px-3 py-2 font-medium">버전</th>
@@ -309,23 +338,21 @@ export default function TechnicalProcedureTemplateListScreen({
                         <tr
                           key={t.id}
                           className={`border-b border-zinc-100 last:border-0 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50 ${
-                            isDeleteMode && blocked ? "opacity-50" : ""
+                            blocked ? "opacity-50" : ""
                           }`}
                         >
-                          {isDeleteMode && (
-                            <td className="px-3 py-2">
-                              <input
-                                type="checkbox"
-                                checked={selectedIds.has(t.id)}
-                                disabled={blocked}
-                                onChange={(event) => toggleSelected(t.id, shiftKeyOf(event))}
-                                onMouseDown={preventShiftClickTextSelection}
-                                aria-label={blocked ? `${t.name} — ${UNDELETABLE_REASON}` : `${t.name} 선택`}
-                                title={blocked ? UNDELETABLE_REASON : undefined}
-                                className="h-4 w-4 disabled:cursor-not-allowed disabled:opacity-40"
-                              />
-                            </td>
-                          )}
+                          <td className="px-3 py-2">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(t.id)}
+                              disabled={blocked}
+                              onChange={(event) => toggleSelected(t.id, shiftKeyOf(event))}
+                              onMouseDown={preventShiftClickTextSelection}
+                              aria-label={blocked ? `${t.name} — ${UNDELETABLE_REASON}` : `${t.name} 선택`}
+                              title={blocked ? UNDELETABLE_REASON : undefined}
+                              className="h-4 w-4 disabled:cursor-not-allowed disabled:opacity-40"
+                            />
+                          </td>
                           <td className="px-3 py-2">
                             <Link
                               href={`/procedures/${t.id}`}
@@ -362,37 +389,6 @@ export default function TechnicalProcedureTemplateListScreen({
                 <ul className={LIST_CARD_GRID}>
                   {templates.map((t) => {
                     const blocked = undeletable.has(t.id);
-                    if (!isDeleteMode) {
-                      return (
-                        <ListCard
-                          key={t.id}
-                          href={`/procedures/${t.id}`}
-                          title={t.name}
-                          badge={
-                            <span
-                              className={`inline-flex shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[t.status]}`}
-                            >
-                              {procedureTemplateStatusLabels[t.status]}
-                            </span>
-                          }
-                          fields={[
-                            { label: "코드", value: <span className="font-mono">{t.code}</span> },
-                            { label: "설비", value: procedureEquipmentTypeLabels[t.equipmentType] },
-                            { label: "버전", value: `v${t.version}` },
-                            {
-                              label: "노드/분기",
-                              value: (
-                                <span className="tabular-nums">
-                                  {t.nodeCount} / {t.edgeCount}
-                                </span>
-                              ),
-                            },
-                            { label: "생성", value: formatDate(t.createdAt) },
-                            { label: "게시", value: formatDate(t.publishedAt) },
-                          ]}
-                        />
-                      );
-                    }
                     // 삭제 모드에서는 카드가 링크가 아니다 — 고르려고 누른
                     // 손가락이 상세 화면으로 넘어가 버리면 안 된다.
                     return (
@@ -417,13 +413,19 @@ export default function TechnicalProcedureTemplateListScreen({
                             <span
                               className={`ml-auto inline-flex shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[t.status]}`}
                             >
-                              {procedureTemplateStatusLabels[t.status]}
+                              {procedureTemplateStatusLabels[t.status]} v{t.version}
                             </span>
                           </span>
                           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
                             <div className="col-span-2">
                               <dt className="text-xs text-zinc-500 dark:text-zinc-500">코드</dt>
-                              <dd className="font-mono break-all">{t.code}</dd>
+                              {/* 🔴 판 번호를 배지와 여기 둘 다 적는다 — 같은
+                                  이름·같은 코드의 판이 여러 장 나란히 서는 유일한
+                                  자리라, 무엇을 고르고 있는지 가릴 것이 판 번호뿐이다
+                                  (휴지통 카드도 같은 모양으로 적는다). */}
+                              <dd className="font-mono break-all">
+                                {t.code} · v{t.version}
+                              </dd>
                             </div>
                             <div>
                               <dt className="text-xs text-zinc-500 dark:text-zinc-500">설비</dt>
@@ -443,6 +445,8 @@ export default function TechnicalProcedureTemplateListScreen({
                 </ul>
               }
             />
+          ) : (
+            <TechnicalProcedureSeriesList series={series} />
           )}
         </>
       )}
