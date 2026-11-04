@@ -38,7 +38,15 @@ const STATUS_BADGE: Record<string, string> = {
   ARCHIVED: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500",
 };
 
-const UNDELETABLE_REASON = "수행 기록이나 후속 버전이 있어 삭제할 수 없습니다";
+/**
+ * 🔴 2026-11-04(줄기 B ④) — 붙잡는 까닭이 **셋**이 됐다(수행 기록 · 후속 버전 ·
+ * 다른 절차의 이어가기). 짧은 글에 셋을 나열하면 체크박스 옆 안내가 길어지므로
+ * 「다른 곳에서 쓰이고 있다」로 묶고, 무엇이 붙잡는지는 괄호가 센다.
+ * [버전 목록]의 같은 글(domain/procedure-version-deletion.ts)과 **같은 말**이어야
+ * 한다 — 두 화면이 같은 상태를 다르게 부르면 같은 절차를 두고 사람이 헷갈린다.
+ */
+const UNDELETABLE_REASON =
+  "다른 곳에서 쓰이고 있어 삭제할 수 없습니다 (수행 기록 · 후속 버전 · 다른 절차의 이어가기)";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "-";
@@ -62,7 +70,8 @@ function formatDate(iso: string | null): string {
  *  1. **보관과 다른 일이다.** 보관은 발행된 절차를 "이제 안 씀"으로 내리는
  *     것이고, 삭제는 쓰인 적 없는 절차를 치우는 것이다. 둘은 대상이 겹치지
  *     않으므로 이 화면에는 두 조작이 함께 있을 수 있다.
- *  2. **수행 기록이나 후속 버전이 있으면 고를 수 없다.** 서버도 같은 기준으로
+ *  2. **다른 곳에서 쓰이고 있으면 고를 수 없다**(수행 기록 · 후속 버전 ·
+ *     다른 절차의 이어가기). 서버도 같은 기준으로
  *     다시 막지만(mutations/procedure-templates.ts), 고를 수 있게 해 놓고
  *     나중에 거절하면 "왜 안 되는지"를 한 번 더 눌러 봐야 알게 된다.
  *
@@ -93,7 +102,7 @@ export default function TechnicalProcedureTemplateListScreen({
   canDelete?: boolean;
   /** 휴지통 행. canDelete인 세션에서만 서버가 채워 넘긴다. */
   trashTemplates?: DeletedProcedureTemplateRow[];
-  /** 수행 기록·후속 버전이 있어 지금 지울 수 없는 절차. */
+  /** 다른 곳에서 쓰이고 있어 지금 지울 수 없는 절차(수행 기록 · 후속 버전 · 다른 절차의 이어가기). */
   undeletableIds?: string[];
 }) {
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -293,8 +302,8 @@ export default function TechnicalProcedureTemplateListScreen({
                   삭제는 <strong className="font-medium text-zinc-700 dark:text-zinc-200">판(버전) 단위</strong>라
                   계열 묶음을 풀고 모든 판을 한 줄씩 보여 줍니다. {templates.length}판 중{" "}
                   <strong className="font-medium text-zinc-700 dark:text-zinc-200">{selectableIds.length}판</strong>을
-                  삭제할 수 있습니다. 흐리게 표시된 판은 수행 기록·후속 버전이 있어 선택할 수 없습니다. 삭제해도 15일
-                  동안은 휴지통에서 복원할 수 있습니다.
+                  삭제할 수 있습니다. 흐리게 표시된 판은 다른 곳에서 쓰이고 있어 선택할 수 없습니다(수행 기록 ·
+                  후속 버전 · 다른 절차의 이어가기). 삭제해도 15일 동안은 휴지통에서 복원할 수 있습니다.
                 </p>
               )}
             </div>

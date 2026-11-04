@@ -753,20 +753,25 @@ export async function listDeletedTechnicalProcedureTemplates(): Promise<DeletedP
 }
 
 /**
- * 지금 삭제할 수 없는 기술 절차의 id — 수행 기록이 있거나 후속 버전이
- * 이어받은 것.
+ * 지금 삭제할 수 없는 기술 절차의 id — 수행 기록이 있거나, 후속 버전이
+ * 이어받았거나, **다른 절차의 END 가 가리키고 있는** 것.
  *
  * 목록에서 체크박스를 비활성으로 만드는 근거다. 서버도 같은 기준으로 다시
  * 막지만(softDeleteProcedureTemplate), 고를 수 있게 해 놓고 나중에 거절하는
  * 것은 "왜 안 되는지"를 한 번 더 눌러 봐야 알게 만드는 일이다.
  *
- * 두 질의 모두 절차 단위로 접어서 읽으므로, 수행 기록이 아무리 쌓여도 결과
+ * 🔴 **셋째 갈래를 2026-11-04 에 더했다**(줄기 B ④). 세 갈래 모두 FK 가
+ * `ON DELETE restrict` 라, 안 세면 화면에서는 지워지는 것처럼 보이고 15일 뒤
+ * 완전삭제가 DB 에서 거부되어 **휴지통에서 영영 안 사라지는 행**이 생긴다.
+ * 오류가 사람 눈에 닿는 자리가 없어 아무도 신고하지 않는다.
+ *
+ * 세 질의 모두 절차 단위로 접어서 읽으므로, 수행 기록이 아무리 쌓여도 결과
  * 크기가 절차 수를 넘지 않는다.
  */
 export async function listUndeletableProcedureTemplateIds(): Promise<Set<string>> {
   const successor = alias(procedureTemplates, "successor_template");
 
-  const [executed, superseded] = await Promise.all([
+  const [executed, superseded, pointedByEnd] = await Promise.all([
     db
       .select({ templateId: procedureCaseExecutions.procedureTemplateId })
       .from(procedureCaseExecutions)
@@ -776,10 +781,15 @@ export async function listUndeletableProcedureTemplateIds(): Promise<Set<string>
       .from(successor)
       .where(isNotNull(successor.supersedesTemplateId))
       .groupBy(successor.supersedesTemplateId),
+    db
+      .select({ templateId: procedureTemplateNodes.nextProcedureTemplateId })
+      .from(procedureTemplateNodes)
+      .where(isNotNull(procedureTemplateNodes.nextProcedureTemplateId))
+      .groupBy(procedureTemplateNodes.nextProcedureTemplateId),
   ]);
 
   return new Set(
-    [...executed, ...superseded]
+    [...executed, ...superseded, ...pointedByEnd]
       .map((row) => row.templateId)
       .filter((id): id is string => id !== null)
   );

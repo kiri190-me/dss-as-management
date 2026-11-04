@@ -56,8 +56,13 @@ describe("버전 삭제 — ② 못 지우는 까닭이 둘로 갈린다", () =>
   test("🔴 쓰이고 있음 — **다른 글**이다. 할 일이 다르기 때문이다", () => {
     const block = resolveProcedureVersionDeleteBlock({ status: "ARCHIVED", isReferenced: true });
     assert.ok(block);
-    assert.match(block.reason, /수행 기록·후속 버전이 있어 삭제할 수 없습니다/);
+    assert.match(block.reason, /다른 곳에서 쓰이고 있어 삭제할 수 없습니다/);
     assert.match(block.detail, /지난 수리의 근거/);
+    // 🔴 2026-11-04(줄기 B ④) — 붙잡는 까닭이 셋이 됐다. 짧은 글은 셋을 묶고,
+    //    긴 글이 **무엇이 붙잡고 있는지**와 **푸는 길**을 센다. 이어가기만은
+    //    사람이 풀 수 있으므로 그 길이 반드시 적혀 있어야 한다 — 「영영 안 됨」
+    //    으로만 적으면 풀 수 있는 사람이 포기한다.
+    assert.match(block.detail, /이어가기는 그 절차의 \[종료\] 노드에서 지정을 지우면 풀립니다/);
 
     // 🔴 두 까닭이 같은 글이면 사람은 할 일을 못 고른다 — 앞은 다른 판을
     //    게시하면 풀리고, 뒤는 영영 안 풀린다.
@@ -82,7 +87,7 @@ describe("버전 삭제 — ② 못 지우는 까닭이 둘로 갈린다", () =>
   test("🔴 초안도 쓰이고 있으면 막힌다 — 후속 버전이 이어받았을 수 있다", () => {
     const block = resolveProcedureVersionDeleteBlock({ status: "DRAFT", isReferenced: true });
     assert.ok(block, "상태만 보고 통과시키면 15일 뒤 완전삭제가 DB 에서 거부된다");
-    assert.match(block.reason, /수행 기록·후속 버전/);
+    assert.match(block.reason, /다른 곳에서 쓰이고 있어/);
   });
 
   test("🔵 막는 글은 어느 상태에서도 빈 글자가 아니다", () => {

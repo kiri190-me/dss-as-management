@@ -913,6 +913,14 @@ export async function createNewDraftVersion(
               recommendedCorrectiveAction: n.recommendedCorrectiveAction,
               acceptanceCriteria: n.acceptanceCriteria,
               workerMayAddNextTask: n.workerMayAddNextTask,
+              // 2026-11-04(줄기 B ④) — **이어가기 지정도 함께 복제한다.**
+              // 안 실으면 절차를 개정할 때마다 END 의 「다음 절차」가 조용히
+              // 사라진다 — 바로 위 배치 칸이 겪은 것과 같은 고장이고, 오류가
+              // 안 나서 개정한 사람이 알아챌 자리가 없다.
+              // 🔵 가리키는 값이 **판의 id** 라서 옛 판을 가리킨 채 복제되지만,
+              // 읽는 쪽이 그 판의 계열로 지금 게시본을 찾으므로(
+              // domain/procedure-next-procedure-link.ts) 가리키는 곳은 안 낡는다.
+              nextProcedureTemplateId: n.nextProcedureTemplateId,
               positionX: n.positionX,
               positionY: n.positionY,
               // 2026-11-03(줄기 B-⑤) — **사람이 끌어 놓은 자리도 함께 복제한다.**
@@ -1264,7 +1272,17 @@ export type ProcedureTemplateTrashResult =
       existingDraftId?: string;
     };
 
-/** 이 절차를 붙잡고 있는 것의 수 — 수행 기록과 이어받은 버전을 합쳐 센다. */
+/**
+ * 이 절차를 붙잡고 있는 것의 수 — 수행 기록 · 이어받은 버전 · **다른 절차의
+ * END 가 가리킨 것**을 합쳐 센다.
+ *
+ * 🔴 셋째 갈래를 2026-11-04 에 더했다(줄기 B ④). 셋 다 FK 가
+ * `ON DELETE restrict` 다. 하나라도 빠뜨리면 소프트 삭제는 통과하고 15일 뒤
+ * 완전삭제가 DB 에서 거부되어 휴지통에서 영영 안 사라진다.
+ *
+ * 🔴 여기와 조회(listUndeletableProcedureTemplateIds)가 **같은 셋을 세야 한다** —
+ * 한쪽만 늘리면 화면에는 단추가 있는데 서버는 거절하는 날이 온다.
+ */
 async function countProcedureTemplateReferences(tx: Tx, templateId: string): Promise<number> {
   const [executions] = await tx
     .select({ total: sql<number>`count(*)::int` })
@@ -1276,11 +1294,16 @@ async function countProcedureTemplateReferences(tx: Tx, templateId: string): Pro
     .from(procedureTemplates)
     .where(eq(procedureTemplates.supersedesTemplateId, templateId));
 
-  return executions.total + successors.total;
+  const [pointedByEnd] = await tx
+    .select({ total: sql<number>`count(*)::int` })
+    .from(procedureTemplateNodes)
+    .where(eq(procedureTemplateNodes.nextProcedureTemplateId, templateId));
+
+  return executions.total + successors.total + pointedByEnd.total;
 }
 
 function templateReferencedMessage(count: number): string {
-  return `이 절차를 참조하는 수행 기록·후속 버전이 ${count}건 있어 삭제할 수 없습니다.`;
+  return `이 절차를 참조하는 수행 기록·후속 버전·이어가기가 ${count}건 있어 삭제할 수 없습니다.`;
 }
 
 /** 삭제·복원·완전삭제가 공통으로 통과하는 관문. 분류까지 보고 판정한다. */

@@ -1,0 +1,3 @@
+ALTER TABLE "procedure_template_nodes" ADD COLUMN "next_procedure_template_id" uuid;--> statement-breakpoint
+ALTER TABLE "procedure_template_nodes" ADD CONSTRAINT "procedure_template_nodes_next_procedure_template_id_procedure_templates_id_fk" FOREIGN KEY ("next_procedure_template_id") REFERENCES "public"."procedure_templates"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "procedure_template_nodes_next_template_idx" ON "procedure_template_nodes" USING btree ("next_procedure_template_id") WHERE "procedure_template_nodes"."next_procedure_template_id" IS NOT NULL;

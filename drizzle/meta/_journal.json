@@ -862,6 +862,13 @@
       "when": 1793671466800,
       "tag": "0122_clumsy_blindfold",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1793776134135,
+      "tag": "0123_slow_slapstick",
+      "breakpoints": true
     }
   ]
 }

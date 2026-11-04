@@ -29,6 +29,7 @@ import {
 import {
   listDeletedTechnicalProcedureTemplates,
   listTechnicalProcedureTemplates,
+  listUndeletableProcedureTemplateIds,
 } from "../queries/procedure-templates";
 import { MASTER_DATA_TRASH_RETENTION_DAYS } from "@/lib/domain/master-data-trash-retention";
 import { PROCEDURE_DELETABLE_VERSION_STATUSES } from "@/lib/domain/procedure-version-deletion";
@@ -1146,5 +1147,132 @@ describe("[버전 목록]의 [삭제] — 초안·만료본만, 게시본은 못
     const back = await readTemplate(template.id);
     assert.equal(back.isDeleted, false);
     assert.equal(back.status, "ARCHIVED", "되살아난 판의 상태는 그대로다 — 복원이 게시 상태를 바꾸면 안 된다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 줄기 B ④ 조각 ① — **이어가기로 가리켜진 절차는 못 지운다**
+ * ============================================================================
+ * 2026-11-04 에 `procedure_template_nodes.next_procedure_template_id` 가 생겼다
+ * (END 에서 다른 절차로 이어가기). FK 가 `ON DELETE restrict` 라, 세는 쪽이
+ * 이것을 모르면 **소프트 삭제는 통과하고 15일 뒤 완전삭제가 DB 에서 거부된다** —
+ * 그 행은 휴지통에서 영영 안 사라지고, 오류가 사람 눈에 닿는 자리가 없어
+ * 아무도 신고하지 않는다. 그 조용한 고장을 여기서 잡는다.
+ *
+ * 🔴 **두 쪽을 다 잰다**: 세는 쪽(mutation 이 미리 거절하는가)과 DB 쪽(그 거절이
+ * 없었다면 정말로 FK 가 막았을 것인가). 앞만 재면 「세는 쪽이 지나치게 깐깐한
+ * 것 아닌가」를 구별할 수 없고, 뒤만 재면 사람이 받는 글이 없다.
+ * ============================================================================
+ */
+describe("줄기 B ④ — 다른 절차의 [종료]가 가리키면 삭제가 막힌다", () => {
+  /** A 의 END 가 B 를 가리키게 만든다. 돌려주는 것은 [가리키는 쪽, 가리켜진 쪽]. */
+  async function linkEndToNext(suffix: string) {
+    const from = await createTestTemplate(`${suffix}-FROM`, { nodeCount: 0 });
+    const to = await createTestTemplate(`${suffix}-TO`, { nodeCount: 0 });
+
+    const [endNode] = await db
+      .insert(procedureTemplateNodes)
+      .values({
+        procedureTemplateId: from.id,
+        nodeCode: "END1",
+        nodeType: "END",
+        title: "종료",
+        nextProcedureTemplateId: to.id,
+        sourceWorksheet: "TEST",
+      })
+      .returning();
+
+    // 🔵 먼저 표본 — 칸에 값이 정말 들어갔다. 안 들어갔으면 아래가 공짜로 통과한다.
+    assert.equal(endNode.nextProcedureTemplateId, to.id);
+    return { from, to, endNode };
+  }
+
+  test("🔴 가리켜진 절차는 지워지지 않는다 — 세는 쪽이 미리 거절한다", async () => {
+    const { to } = await linkEndToNext("NEXT-BLOCK");
+
+    const result = await softDeleteProcedureTemplate({
+      templateId: to.id,
+      actorUserId: adminId,
+      reason: null,
+      requireStatus: PROCEDURE_DELETABLE_VERSION_STATUSES,
+    });
+
+    assert.equal(result.ok, false, "여기서 통과하면 15일 뒤 완전삭제가 DB 에서 거부된다");
+    if (!result.ok) {
+      assert.equal(result.code, "CONFLICT");
+      assert.match(result.message, /이어가기/, "셋을 합쳐 세므로 거절하는 글도 셋을 말해야 한다");
+      assert.match(result.message, /1건/, "몇 건이 붙잡고 있는지가 글에 들어간다");
+    }
+    assert.equal((await readTemplate(to.id)).isDeleted, false);
+  });
+
+  test("🔴 가리키는 쪽(END 를 가진 절차)은 그대로 지워진다 — 방향이 거꾸로다", async () => {
+    const { from } = await linkEndToNext("NEXT-FROM-OK");
+
+    const result = await softDeleteProcedureTemplate({
+      templateId: from.id,
+      actorUserId: adminId,
+      reason: null,
+      requireStatus: PROCEDURE_DELETABLE_VERSION_STATUSES,
+    });
+
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal((await readTemplate(from.id)).isDeleted, true);
+  });
+
+  test("🔴 지정을 지우면 풀린다 — 막는 글이 약속한 길이 실제로 통한다", async () => {
+    const { to, endNode } = await linkEndToNext("NEXT-UNLINK");
+
+    // 막혀 있는 것을 먼저 확인한다.
+    const blocked = await softDeleteProcedureTemplate({
+      templateId: to.id,
+      actorUserId: adminId,
+      reason: null,
+      requireStatus: PROCEDURE_DELETABLE_VERSION_STATUSES,
+    });
+    assert.equal(blocked.ok, false);
+
+    await db
+      .update(procedureTemplateNodes)
+      .set({ nextProcedureTemplateId: null })
+      .where(eq(procedureTemplateNodes.id, endNode.id));
+
+    const after = await softDeleteProcedureTemplate({
+      templateId: to.id,
+      actorUserId: adminId,
+      reason: null,
+      requireStatus: PROCEDURE_DELETABLE_VERSION_STATUSES,
+    });
+    assert.equal(after.ok, true, "막는 글이 적은 길로 풀리지 않으면 사람이 포기한다");
+  });
+
+  test("🔴 DB 도 같은 것을 막는다 — 세는 쪽이 없었다면 FK 가 거부한다", async () => {
+    const { to } = await linkEndToNext("NEXT-FK");
+
+    // 🔴 drizzle 이 DB 오류를 한 겹 감싼다 — 겉의 message 는 "Failed query: …" 라
+    //    정규식을 그대로 걸면 **막혔는데도 시험이 실패한다**(2026-11-04 실제로 났다).
+    //    까닭(cause)까지 펴서 읽는다.
+    await assert.rejects(
+      () => db.delete(procedureTemplates).where(eq(procedureTemplates.id, to.id)),
+      (error: unknown) => {
+        const cause = (error as { cause?: { message?: string } }).cause;
+        const text = `${(error as Error).message} ${cause?.message ?? ""}`;
+        assert.match(
+          text,
+          /violates foreign key constraint/i,
+          "FK 가 RESTRICT 가 아니면 완전삭제가 노드의 지정을 조용히 끊는다"
+        );
+        return true;
+      }
+    );
+  });
+
+  test("🔵 목록이 「못 지움」으로 세는 것과 같은 판정이다 — 화면과 서버가 안 어긋난다", async () => {
+    const { from, to } = await linkEndToNext("NEXT-LIST");
+
+    const undeletable = await listUndeletableProcedureTemplateIds();
+    assert.equal(undeletable.has(to.id), true, "화면에 단추가 있는데 서버가 거절하는 날이 온다");
+    assert.equal(undeletable.has(from.id), false, "가리키는 쪽까지 막으면 지울 수 있는 것을 못 지운다");
   });
 });

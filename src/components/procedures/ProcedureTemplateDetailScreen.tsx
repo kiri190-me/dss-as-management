@@ -80,7 +80,7 @@ export default function ProcedureTemplateDetailScreen({
    * 한 곳에 있다. 🔵 기본값이 false 라 안 넘기는 호출부에는 삭제 자리가 없다.
    */
   canDeleteVersion?: boolean;
-  /** 수행 기록·후속 버전이 붙어 있어 지울 수 없는 판의 id 들(서버가 세어 넘긴다). */
+  /** 다른 곳에서 쓰이고 있어 지울 수 없는 판의 id 들(서버가 세어 넘긴다 — 수행 기록 · 후속 버전 · 이어가기). */
   referencedVersionIds?: string[];
 }) {
   // 이번 게시에 딸려 [만료됨]으로 내려갈 판 번호들 — 확인 창이 "무엇이

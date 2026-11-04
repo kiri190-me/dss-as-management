@@ -554,7 +554,7 @@ describe("버전 목록 — ⑨ [삭제] 단추 (2026-11-04)", () => {
     // 🔵 먼저 표본 — 같은 표본에서 v1 은 여전히 지워진다(막기가 전부에 걸린 것이 아니다).
     assert.ok(html.includes("삭제:v1"));
     assert.ok(!html.includes("삭제:v2"), "수행 기록이 붙은 만료본에 단추가 섰다");
-    assert.ok(html.includes("수행 기록·후속 버전이 있어 삭제할 수 없습니다"));
+    assert.ok(html.includes("다른 곳에서 쓰이고 있어 삭제할 수 없습니다"));
     assert.ok(html.includes("지난 수리의 근거"), "왜 영영 못 지우는지가 title 에 있어야 한다");
     // 두 까닭이 한 화면에 함께 떠도 서로 다른 글이다.
     assert.ok(html.includes("게시됨 상태라 삭제할 수 없습니다"));
