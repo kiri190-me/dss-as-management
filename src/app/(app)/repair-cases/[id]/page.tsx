@@ -33,6 +33,8 @@ import {
   listDomesticOrderIssueDatesForRepairCase,
 } from "@/lib/db/queries/domestic-orders";
 import { getRepairCaseUsedPartsView } from "@/lib/db/queries/repair-case-used-parts";
+import { loadWorkflowRulesForCase } from "@/lib/db/queries/workflow-rules";
+import { db } from "@/lib/db/client";
 import { isRepairCaseDueDateNear } from "@/lib/domain/notifications";
 import { isRepairCaseDueDateInverted } from "@/lib/domain/due-date-inversion";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
@@ -273,6 +275,7 @@ export default async function RepairCaseDetailPage({
     relatedSummaryByCaseId,
     usedParts,
     usedPartInventory,
+    workflowRules,
   ] = await Promise.all([
     resolved.source === "DATABASE" ? getDerivedServiceSummaryForCase(resolved.id) : null,
     resolved.source === "DATABASE" ? listDomesticOrderDueDatesForRepairCase(resolved.id) : [],
@@ -293,6 +296,24 @@ export default async function RepairCaseDetailPage({
         // null 이다). 🔵 그래서 이 빈 목록은 **실패를 접은 것이 아니다** — 부를 일이
         // 없는 자리에 놓는 값이다.
         ({ status: "ok", value: [] } satisfies InventoryResult<InventoryPart[]>),
+    /**
+     * 「워크플로 진행」 칸이 그릴 단계 목록의 재료(2026-11-04).
+     *
+     * 🔴 **새 조회를 만들지 않는다** — 작업내용 탭(execution/page.tsx)이 이미 같은
+     * 함수로 같은 건의 규칙을 읽는다. 두 벌이 되면 같은 건의 단계 목록이 탭마다
+     * 달라질 수 있고, 그게 바로 이번에 고치는 결함의 모양이다.
+     * 🔴 **판본으로 읽는다**(loadWorkflowRulesForCase → repair_cases.workflow_version_id).
+     * 진행 중인 건이 접수 시점의 판본에 머무르고 [기존 접수 건을 현재 버전으로 적용]
+     * 을 눌러야 새 판본을 보는 것은 **의도된 정책**이다(DATABASE_DESIGN.md #13).
+     *
+     * 🔵 같은 묶음에 태우는 까닭은 위 형제 조회들과 같다 — 이 건 하나만 보는 작은
+     * 인덱스 조회라 왕복을 하나 더 만들 까닭이 없다.
+     * 🔵 `resolved.source` 를 먼저 묻는 것은 방어다. 지금 이 화면에 닿는 건은 전부
+     * DATABASE 건이지만(repair-case-resolver.ts 머리말 — 데모 읽기 경로는 없어졌다)
+     * 타입은 아직 MOCK/LOCAL_DEMO 를 허용하고, 그 id 는 uuid 가 아니라 조회가
+     * 그냥 던진다. 거짓이면 화면은 null 을 받아 까닭을 적은 글을 띄운다.
+     */
+    resolved.source === "DATABASE" ? loadWorkflowRulesForCase(db, resolved.id) : null,
   ]);
 
   const usedPartOptions = toPartPickerOptions(usedPartInventory);
@@ -319,6 +340,21 @@ export default async function RepairCaseDetailPage({
     usedParts?.rows ?? [],
     buildUsedPartNameIndex(usedPartOptions)
   );
+
+  /**
+   * 「워크플로 진행」이 그리는 **세 칸만** 브라우저로 보낸다 — 규칙에는 전이 목록 ·
+   * 허용 역할 · 승인 종류가 함께 들어 있는데 이 칸은 하나도 안 그린다(작업내용 탭은
+   * 그것들을 쓰므로 그쪽은 toWorkflowRulesDto 로 통째로 넘긴다).
+   *
+   * 🔴 **`isActive` 로 거르지 않는다.** 단계 삭제는 행을 실제로 지우고
+   * (db/mutations/workflow-draft-steps.ts 의 removeWorkflowDraftStep), 이 칸을 끄는
+   * 화면은 아직 없다 — 거르면 「지우지도 않았는데 사라진 단계」를 만들 수 있다.
+   * 같은 규칙을 읽는 listManuallySelectableStepsFromRules 도 이 칸을 안 본다.
+   * 🔴 **null 을 빈 배열로 바꾸지 않는다** — 판본을 못 읽은 것과 단계가 없는 것은
+   * 화면이 다른 글로 갈라 말한다(RepairCaseDetailView 의 그 prop 주석).
+   */
+  const workflowProgressSteps =
+    workflowRules?.steps.map((step) => ({ key: step.key, label: step.label, order: step.order })) ?? null;
 
   // 화면에는 이력 줄이 실제로 그리는 한 칸(조치 내용)만 건 id 로 찾을 수 있게
   // 넘긴다 — 요약의 나머지 두 칸까지 클라이언트로 실어 보낼 이유가 없다.
@@ -394,6 +430,7 @@ export default async function RepairCaseDetailPage({
       usedParts={usedParts}
       usedPartOptions={usedPartOptions}
       usedPartDisplayNames={usedPartDisplayNames}
+      workflowProgressSteps={workflowProgressSteps}
     />
   );
 }

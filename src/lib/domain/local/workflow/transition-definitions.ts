@@ -8,7 +8,11 @@ import type { ActionCode, ApprovalTypeForTransition } from "./workflow-types";
  * 이 표가 "합법적인 전이"의 유일한 출처다. 런타임의 어떤 함수도 order/order+1/
  * order-1 연산으로 다음·이전 단계를 계산하지 않는다 — 오직 이 배열을
  * (workflowType, actionCode, fromStepKey) 키로 조회할 뿐이다. order는
- * workflowSteps(mock-data.ts)의 표시/정렬 용도로만 쓰인다(WorkflowProgress.tsx).
+ * workflowSteps(mock-data.ts)의 표시/정렬 용도로만 쓰인다.
+ * 🔴 2026-11-04: 그 표시처를 「WorkflowProgress.tsx」로 적어 두었으나 그 화면은
+ * 더 이상 이 배열을 읽지 않는다(DB 의 workflow_steps 를 그린다). 지금 이 배열을
+ * 읽는 곳은 local/ 아래 셋(activity/adapters.ts · validation.ts ·
+ * workflow/validation.ts)과 workflow-foundation.test.ts 다.
  *
  * 183개 행 = 정방향(STEP_ADVANCED) 88 + 교정 반환(STEP_RETURNED) 88 +
  * 출하 완료(SHIPMENT_COMPLETED) 7(워크플로당 1개, 7종). product_intake는 어떤 시드

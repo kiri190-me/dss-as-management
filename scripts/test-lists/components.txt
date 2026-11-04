@@ -1025,3 +1025,23 @@ src/components/repair-cases/internal-target-completion-date-label.test.ts
 #    배치**가 그 하나와 같은가(갈리면 고를 수 없는 모드로 떠 있게 된다) · 읽기 전용
 #    화면 셋이 이 프롭을 안 넘기는가.
 src/components/procedures/procedure-editor-layout-mode.test.ts
+
+# 2026-11-03(줄기 B-⑧) 현장에서 더한 단계를 희미하게 보이고 「절차에 넣을까요?」 묻는다.
+#    재는 것: 유령 프롭 둘의 기본값이 null 인가(= 나머지 화면 셋이 안 바뀌는 근거) ·
+#    🔴 유령이 **자동 배치에만 섞이는가**(시트 띠·단계별 정렬에 넣으면 오히려 채택 뒤와
+#    달라진다 — 2026-11-04 「A로 가자」로 뒤집힌 불변식이다. 자리가 정말 같아지는지는
+#    값으로 재는 쪽이 따로 있다: src/lib/domain/procedure-auto-layout.test.ts) ·
+#    유령이 없을 때 간선 배열의 **신원까지** 그대로인가 · 🔴 패널이 **창이 아닌가**
+#    (「안 넣기로 했다」를 기억하지 않으므로 창이면 열 때마다 가로막는다) ·
+#    보내는 것이 id 둘뿐인가 · 탭 딱지가 **안 넣은 것**만 세는가 ·
+#    🔴 [현장 단계 표시] 체크표시가 **탭 안**에 있고 그림 위에는 없는가(2026-11-04).
+src/components/procedures/procedure-editor-field-steps-ui.test.ts
+
+# 2026-11-04 — [기본정보] 탭의 「워크플로 진행」이 DB 의 단계 목록을 그린다.
+#    재는 것: 🔴 **알맹이** — mock 과 일부러 다른 라벨을 넘겼을 때 그쪽이 그려지고
+#    옛 라벨은 한 글자도 안 보이는가(렌더해서 잰다) · mock 에 없는 단계도 그리는가 ·
+#    진행도 셈(완료/현재/예정)이 화면에 그대로 나오는가 · 🔴 **빈 목록**과 **null**
+#    에서 서로 다른 까닭을 적은 글이 보이는가(빈 상자 금지) · 🔴 **주석을 걷어낸**
+#    원본에서 mock-data import 가 사라졌는가 · 서버 페이지 → 화면 → 칸으로
+#    내려주는 길이 이어져 있는가.
+src/components/repair-cases/detail/workflow-progress-db-steps.test.tsx

@@ -4,7 +4,9 @@ import type { RepairStatus, WorkflowType } from "../../types";
  * ============================================================================
  * Stage E-1 데모 전용 설정 — 단계 → 상태 매핑
  * ============================================================================
- * mock-data.ts의 workflowSteps(45개 단계, 3개 워크플로)에는 어떤 단계가 어떤
+ * mock-data.ts의 workflowSteps(🔴 2026-11-04 실측 96개 단계, 9개 워크플로 —
+ * 적혀 있던 「45개 단계, 3개 워크플로」는 워크플로가 셋이던 시절의 수다)에는
+ * 어떤 단계가 어떤
  * RepairStatus에 해당하는지를 알려주는 기존 코드/스키마가 전혀 없다
  * (workflow-progress.ts 주석 참고: "currentWorkflowStepKey는 RepairStatus로부터
  * 역산하지 않는다"). 이 파일은 그 공백을 메우기 위해 Stage E-1이 새로 도입하는

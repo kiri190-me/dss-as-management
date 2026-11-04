@@ -1604,3 +1604,21 @@ src/lib/db/queries/workflow-rules-manual-steps.test.ts
 #    스키마의 칸 목록과 맞댄다 — 칸이 느는 날 적는 것을 잊으면 여기서 먼저 깨진다.
 #    실제 INSERT 결과를 보는 시험은 db 목록에 있다.
 src/lib/db/mutations/procedure-template-clone-columns.test.ts
+
+# 2026-11-03(줄기 B-⑧) 현장에서 더한 단계를 고르고 · 유령 칸 자리를 세고 · 셈한다.
+#    순수 함수라 DB 없이 돈다. 「넣었다」를 기억하는 node_code(`field-<실행노드 id>`)도
+#    여기서 정의하므로, 조회·뮤테이션·화면이 같은 열쇠를 쓰는지가 이 파일로 지켜진다.
+src/lib/domain/procedure-field-added-steps.test.ts
+
+# 2026-11-04(A 안) 자리 값이 없는 노드의 **자동 배치** — 그리고 유령을 거기 함께 세운다.
+#    🔴 「유령을 켠 그림」과 「채택 뒤 그림」이 노드 전부에서 **같은 값**인지를 잰다.
+#    유령을 안 넘기면 전과 똑같은 값이 나오는지(화면 셋의 근거)와, 켤 때 둘레가
+#    얼마나 움직이는지도 값으로 적어 둔다.
+src/lib/domain/procedure-auto-layout.test.ts
+
+# 2026-11-04 — [기본정보] 탭의 「워크플로 진행」이 DB 의 단계 목록을 그린다.
+#    재는 것: 🔴 **알맹이** — 넘긴 목록(mock 과 일부러 다른 라벨·mock 에 없는 key)이
+#    그대로 나오는가 · 🔴 진행도 셈(완료/현재/예정 · 마지막 단계의 전체 완료)이
+#    그대로인가 · order 로 다시 정렬하는가 · 넘긴 배열을 안 바꾸는가 ·
+#    빈 목록/없는 key 의 갈래. 순수 함수라 DB 없이 돈다.
+src/lib/domain/workflow-progress.test.ts

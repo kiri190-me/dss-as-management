@@ -9,6 +9,7 @@ import ProductInfoSection from "@/components/repair-cases/detail/ProductInfoSect
 import DomesticOrderDatesSection from "@/components/repair-cases/detail/DomesticOrderDatesSection";
 import FaultServiceSection from "@/components/repair-cases/detail/FaultServiceSection";
 import WorkflowProgress from "@/components/repair-cases/detail/WorkflowProgress";
+import type { WorkflowProgressStep } from "@/lib/domain/workflow-progress";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { useEffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
@@ -76,6 +77,7 @@ export default function RepairCaseDetailView({
   usedParts,
   usedPartOptions,
   usedPartDisplayNames,
+  workflowProgressSteps,
 }: {
   resolved: ResolvedRepairCase;
   related: RelatedMatch[];
@@ -202,6 +204,21 @@ export default function RepairCaseDetailView({
    * 수정 폼은 그 글자를 칸에 넣는다.
    */
   usedPartDisplayNames: Record<string, string>;
+  /**
+   * 「워크플로 진행」 칸이 그릴 단계 목록 — 이 건의 **workflow_version_id** 에
+   * 달린 단계를 `key · label · order` 세 칸으로 좁혀 받는다(2026-11-04).
+   *
+   * 🔴 **예전에는 안 받았다.** 그 칸이 mock-data.ts 의 코드 표를 직접 import 해서,
+   * [워크플로 관리]에서 단계를 고쳐도 한 글자도 안 바뀌었다(사용자 신고). 조회는
+   * `server-only` 라 클라이언트 컴포넌트인 이 화면도 그 아래 칸도 직접 부를 수
+   * 없으므로, [id]/page.tsx 가 읽어 여기로 흘려보낸다.
+   *
+   * 🔴 **null 과 빈 배열은 다른 뜻이다** — 판본을 못 읽은 것과 판본에 단계가 없는
+   * 것이고, 칸이 서로 다른 글을 띄운다(WorkflowProgress.tsx 의 prop 주석).
+   * 🔴 세 칸만 내려보낸다 — 규칙의 나머지(전이 목록 · 역할 · 승인 종류)는 이
+   * 칸이 안 그리고, 그릴 일 없는 자료를 브라우저로 실어 보내지 않는다.
+   */
+  workflowProgressSteps: readonly WorkflowProgressStep[] | null;
 }) {
   const { effective, isHydrated } = useEffectiveRepairCase(resolved);
   const [editingSection, setEditingSection] = useState<RepairCaseEditSection | null>(null);
@@ -303,7 +320,7 @@ export default function RepairCaseDetailView({
         onStartEdit={() => setEditingSection("FAULT_SERVICE")}
         onDone={handleDone}
       />
-      <WorkflowProgress workflowType={effective.workflowType} currentWorkflowStepKey={effective.effectiveWorkflowStepKey} />
+      <WorkflowProgress steps={workflowProgressSteps} currentWorkflowStepKey={effective.effectiveWorkflowStepKey} />
       {usedParts && (
         <UsedPartsSection
           repairCaseId={effective.id}
