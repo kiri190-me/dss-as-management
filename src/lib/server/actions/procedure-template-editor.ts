@@ -18,6 +18,8 @@ import {
   deleteProcedureTemplateNode,
   deleteProcedureTemplateEdge,
   insertProcedureTemplateNodeOnEdge,
+  adoptFieldAddedStep,
+  type AdoptFieldStepResult,
   type UpdateNodePatch,
   type UpdateEdgePatch,
   type LayoutPosition,
@@ -339,5 +341,34 @@ export async function insertProcedureTemplateNodeOnEdgeAction(input: {
 
   return withErrorRedaction("insertProcedureTemplateNodeOnEdgeAction", () =>
     insertProcedureTemplateNodeOnEdge(input.edgeId, actorCheck.userId, { nodeType: input.nodeType, title: input.title, position: input.position }, input.expectedTemplateUpdatedAt)
+  );
+}
+
+/**
+ * 현장에서 더한 단계 하나를 이 초안에 넣는다 (2026-11-03, 줄기 B-⑧).
+ *
+ * 🔴 **넘어오는 것이 id 둘과 토큰뿐**이다 — 제목도 갈래도 자리도 안 받는다.
+ * 그 값들은 전부 실행 쪽 행에 적혀 있고, 뮤테이션이 제 손으로 읽는다. 화면이
+ * 보낸 제목을 쓰면 「현장이 적은 것」이 아니라 「누군가 화면에서 고쳐 보낸 것」이
+ * 절차에 들어간다 — 그 둘은 같아 보여도 전혀 다른 일이다.
+ *
+ * 🔵 관문은 노드 만들기와 **같은 것**(resolveTechnicalGraphActorId)이다. 이
+ * 조작이 하는 일이 결국 「기술 절차 초안에 노드·간선을 더하는 것」이라, 다른
+ * 잣대를 쓰면 「노드 추가는 되는데 현장 단계 넣기는 안 되는」(또는 그 반대의)
+ * 사람이 생긴다.
+ */
+export async function adoptFieldAddedStepAction(input: {
+  templateId: string;
+  executionNodeId: string;
+  expectedTemplateUpdatedAt: string;
+}): Promise<AdoptFieldStepResult | Forbidden> {
+  const actorCheck = await resolveTechnicalGraphActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.templateId) || !isValidUuid(input.executionNodeId)) {
+    return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  }
+
+  return withErrorRedaction("adoptFieldAddedStepAction", () =>
+    adoptFieldAddedStep(input.templateId, actorCheck.userId, input.executionNodeId, input.expectedTemplateUpdatedAt)
   );
 }

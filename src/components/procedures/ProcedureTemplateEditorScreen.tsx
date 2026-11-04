@@ -11,6 +11,7 @@ import EdgePropertyPanel from "./editor/EdgePropertyPanel";
 import CreateEdgePanel from "./editor/CreateEdgePanel";
 import CreateNodePanel from "./editor/CreateNodePanel";
 import EditHistoryPanel from "./editor/EditHistoryPanel";
+import FieldAddedStepsPanel from "./editor/FieldAddedStepsPanel";
 import PublishTemplateButton from "./editor/PublishTemplateButton";
 import UndoRedoControls from "@/components/graph-editor-core/UndoRedoControls";
 import {
@@ -68,8 +69,15 @@ import {
   type ProcedureSaveStepResult,
   type Position,
 } from "@/lib/domain/procedure-editor-save-state";
+import {
+  buildFieldStepGhostGraph,
+  pendingFieldSteps,
+  EMPTY_FIELD_STEP_GHOST_GRAPH,
+  type FieldAddedStep,
+} from "@/lib/domain/procedure-field-added-steps";
+import { useFieldStepGhostVisibility } from "./editor/use-field-step-ghost-visibility";
 
-type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge" | "addNode";
+type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge" | "addNode" | "fieldSteps";
 
 /**
  * 2026-11-03(줄기 B-⑤) — **편집기의 「배치」는 「사용자 배치」 하나뿐이다.**
@@ -170,6 +178,7 @@ export default function ProcedureTemplateEditorScreen({
   comparison,
   canEdit,
   canPublish = false,
+  fieldAddedSteps = [],
 }: {
   template: ProcedureTemplateForEditor;
   historyView: TemplateHistoryView;
@@ -187,6 +196,15 @@ export default function ProcedureTemplateEditorScreen({
    * 되기 때문이다.
    */
   canPublish?: boolean;
+  /**
+   * 이 초안의 줄기(같은 `code` 의 모든 판본)를 돌리다 **현장에서 더한 단계**
+   * (2026-11-03, 줄기 B-⑧). 사용자 결정 — 「원본 절차를 편집할 때, 이번에
+   * 만들었던 단계를 희미하게 표시해주고, 적용할 것인지 묻도록 하자」.
+   *
+   * 🔴 **기본값이 빈 목록이다** — 넘기는 것을 잊은 호출부는 탭도 유령도 없다.
+   * 이 저장소의 fail-closed 규약 그대로다(canPublish 와 같은 길).
+   */
+  fieldAddedSteps?: readonly FieldAddedStep[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -590,6 +608,70 @@ export default function ProcedureTemplateEditorScreen({
       }),
     [template.edges, serverEdgesById, pendingEdgeFieldDraftsById, pendingEdgeRouteMoves]
   );
+
+  // ---- 현장에서 더한 단계를 **희미하게** 얹는다 (줄기 B-⑧) ----
+  //
+  // 🔴 유령 칸·선은 renderedNodes/renderedEdges 에 **안 섞는다.** 그 둘은 저장·
+  //    검증·짚기·되돌리기가 전부 읽는 「이 초안의 진짜 내용」이다. 유령을 섞으면
+  //    [저장]이 없는 노드를 저장하려 들고, [검증]이 없는 노드를 세고, 부모 비교가
+  //    「새로 추가된 노드」로 올린다 — 어느 것도 사람이 시킨 적 없는 일이다.
+  //    그림에만 따로 넘기는 길(ghostNodes/ghostEdges)이 그래서 생겼다.
+  //
+  // 🔵 **받침 자리**의 기준은 지금 그려지고 있는 자리(workingLayoutPositions —
+  //    저장된 자리 + 끌고 있는 자리)다.
+  //
+  // 🔴 **「받침」인 까닭**(2026-11-04 에 뜻이 바뀌었다): workingLayoutPositions 는
+  //    저장된 자리(position_x/y · user_position_x/y)를 읽는데, 자리 값이 없는
+  //    노드를 그림은 **제 나름의 자동 배치**로 그린다(ProcedureFlowGraph 의
+  //    useAutoLayoutForUnpositionedNodes — 이 화면은 기술작업절차에 그것을 켠다).
+  //    개발 DB 실측으로 초안 "7"(원복 검사 및 개선 작업)은 노드 22개 중 **0개**,
+  //    "기본 통전 검사"는 28개 중 1개만 자리 값이 차 있다 — 드문 경우가 아니라
+  //    기본값이다. 그래서 전에는 유령만 「저장 좌표계」에, 둘레는 「자동 배치
+  //    좌표계」에 서서 미리 보기가 엉뚱한 자리였다.
+  //
+  //    실제로 났던 일(2026-11-04 사용자 보고): 유령은 (-1716.0, 162.5)에 섰고 채택
+  //    뒤의 진짜 노드도 **같은 (-1716.0, 162.5)** 에 섰지만, 채택하는 순간 자리 값
+  //    없는 22개가 자동 배치에서 110~140px 씩 움직여 이웃과의 간격이 8.5 → 148.5px
+  //    로 벌어졌다. 「유령 자리가 틀렸다」로 보이지만 움직인 것은 **둘레**였다.
+  //
+  //    🔴 사용자 결정(「A로 가자」)으로 **유령을 자동 배치에 함께 세운다.** 그래서
+  //    이제 유령을 켠 그림이 채택 뒤와 같은 좌표이고, 넣어도 아무것도 안 움직인다.
+  //    대신 **켜는 순간** 둘레가 한 번 움직인다 — 그것이 이 결정의 값이고, 방해되면
+  //    [현장 단계] 탭의 스위치로 끈다. 여기서 세는 x/y 는 그때의 받침이 된다
+  //    (자동 배치를 안 쓰는 절차 · 현장에서 사람이 끌어다 놓은 자리).
+  //
+  // 🔵 **끄면 그림에서만 사라진다**(2026-11-04 사용자 요청 — 「편집기에서 [현장
+  //    단계]를 모두 비가시 처리할 수 있는 기능을 넣어줘」). 끈 상태는 이 브라우저에만
+  //    남는다(use-field-step-ghost-visibility). 🔴 탭도 딱지 숫자도 패널의 [절차에
+  //    넣기]도 **그대로 남는다** — 숨기는 것은 그림의 유령이지 「현장 단계가 있다는
+  //    사실」이 아니다. 아래 pendingFieldStepCount 가 이 설정을 안 보는 것이 그 증거다.
+  // 🔴 껐을 때 **빈 한 벌(EMPTY_FIELD_STEP_GHOST_GRAPH)을 돌려준다** — 매번 새 빈
+  //    배열을 만들면 그림의 「유령이 없으면 간선 배열의 신원까지 그대로」 보증이
+  //    깨진다(ProcedureFlowGraph 의 flowEdgesWithGhosts).
+  const { ghostsVisible, setGhostsVisible } = useFieldStepGhostVisibility();
+  /**
+   * 🔴 채택이 첫 노드에 적을 **sort_order**(이 초안 최댓값 + 1 — adoptFieldAddedStep
+   * 과 같은 셈). 자동 배치에서 들어오는 선이 없는 칸은 뿌리로 서고 그 가로 차례를
+   * 이 번호가 정하므로, 유령이 **채택이 줄 번호 그대로**를 들고 있어야 켠 그림과
+   * 넣은 뒤 그림이 안 갈린다.
+   * 🔵 노드가 하나도 없으면 0 이다(채택 쪽의 `(max ?? -1) + 1` 과 같은 값).
+   */
+  const nextFieldStepSortOrder = useMemo(
+    () => renderedNodes.reduce((max, n) => (n.sortOrder > max ? n.sortOrder : max), -1) + 1,
+    [renderedNodes]
+  );
+  const fieldStepGhostGraph = useMemo(
+    () =>
+      ghostsVisible
+        ? buildFieldStepGhostGraph({
+            steps: fieldAddedSteps,
+            anchorPositions: workingLayoutPositions,
+            nextSortOrder: nextFieldStepSortOrder,
+          })
+        : EMPTY_FIELD_STEP_GHOST_GRAPH,
+    [ghostsVisible, fieldAddedSteps, workingLayoutPositions, nextFieldStepSortOrder]
+  );
+  const pendingFieldStepCount = useMemo(() => pendingFieldSteps(fieldAddedSteps).length, [fieldAddedSteps]);
 
   // ---- [검증] 탭의 오류 줄 → 그림에서 짚기 (줄기 B-③) ----
   //
@@ -1462,6 +1544,23 @@ export default function ProcedureTemplateEditorScreen({
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-2">
+          {/*
+            「현장 단계 표시」 스위치는 **[현장 단계] 탭 안**에 있다(2026-11-04
+            사용자 결정 — 「기능은 좋은데 [현장단계]안에 체크표시가 있도록 해줘.
+            설명은 필요없다」). 전에는 이 자리, 곧 그림 바로 위에 설명 한 줄과 함께
+            서 있었다.
+
+            🔵 **그때 적어 둔 까닭을 지운 것이 아니라 덮은 것이다.** 당시 판단은
+            「끄면 그림만 달라지는데, 그 까닭을 보려면 탭을 열어야 하는 단추가
+            된다」였다. 사용자 결정이 그것을 덮었고, 바뀐 자리에서도 꺼 둔 사람이
+            길을 잃지 않도록 **패널 맨 위 안내가 상태 둘을 갈라** 말한다
+            (FieldAddedStepsPanel — 꺼 둔 사람에게 「그림에 그려집니다」는 거짓말이다).
+
+            🔴 스위치가 서는 조건은 그대로 **아직 안 넣은 것이 있는가**다(패널의
+            pending.length). 탭이 서는 조건(fieldAddedSteps.length)과 일부러 다르다 —
+            다 넣고 나면 끌 유령이 없고, 끌 것 없는 스위치는 「껐는데 왜 그대로지」를
+            낳는다. 탭은 그대로 남아 「이미 넣은 단계」를 확인할 길이 된다.
+          */}
           <ProcedureFlowGraph
             templateId={template.id}
             nodes={renderedNodes}
@@ -1486,6 +1585,8 @@ export default function ProcedureTemplateEditorScreen({
             onWaypointMove={handleWaypointMove}
 
             onEdgeDoubleClick={handleEdgeDoubleClick}
+            ghostNodes={fieldStepGhostGraph.nodes}
+            ghostEdges={fieldStepGhostGraph.edges}
             layoutMode={layoutMode}
             onLayoutModeChange={setLayoutMode}
             layoutModeOptions={EDITOR_LAYOUT_MODES}
@@ -1498,14 +1599,42 @@ export default function ProcedureTemplateEditorScreen({
 
         <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
           <div className="flex flex-wrap gap-1 border-b border-zinc-200 pb-2 text-xs dark:border-zinc-800">
-            {(["properties", "validation", "history", "createEdge", ...(canDeleteGraph ? (["addNode"] as const) : [])] as RightPanelTab[]).map((tab) => (
+            {/*
+              🔴 「현장 단계」 탭은 **현장에서 더한 것이 실제로 있을 때만** 선다
+              (줄기 B-⑧). 늘 떠 있으면 거의 언제나 빈 탭이라, 누르면 아무것도
+              없는 자리가 된다 — 「짚을 곳 없는 줄은 아예 단추로 만들지 않는다」와
+              같은 길이다.
+              🔵 숫자는 **아직 안 넣은 것**만 센다. 알림은 할 일의 수여야 한다 —
+              이미 넣은 것까지 세면 다 처리한 뒤에도 딱지가 안 사라진다.
+              🔴 창을 띄우지 않는 까닭은 FieldAddedStepsPanel 머리말에 있다.
+            */}
+            {(
+              [
+                "properties",
+                "validation",
+                "history",
+                "createEdge",
+                ...(canDeleteGraph ? (["addNode"] as const) : []),
+                ...(fieldAddedSteps.length > 0 ? (["fieldSteps"] as const) : []),
+              ] as RightPanelTab[]
+            ).map((tab) => (
               <button
                 key={tab}
                 type="button"
                 onClick={() => switchRightPanelTab(tab)}
                 className={`rounded-md px-2 py-1 ${rightPanelTab === tab ? "bg-primary-900 text-white dark:bg-primary-50 dark:text-zinc-900" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
               >
-                {tab === "properties" ? "속성" : tab === "validation" ? "검증" : tab === "history" ? "이력" : tab === "createEdge" ? "연결 추가" : "노드 추가"}
+                {tab === "properties"
+                  ? "속성"
+                  : tab === "validation"
+                    ? "검증"
+                    : tab === "history"
+                      ? "이력"
+                      : tab === "createEdge"
+                        ? "연결 추가"
+                        : tab === "addNode"
+                          ? "노드 추가"
+                          : `현장 단계${pendingFieldStepCount > 0 ? ` ${pendingFieldStepCount}` : ""}`}
               </button>
             ))}
           </div>
@@ -1591,6 +1720,22 @@ export default function ProcedureTemplateEditorScreen({
               onSaved={handleStructuralSaved}
               selectedNode={selectedNode}
               resolveNodeDimensions={resolveNodeDimensions}
+            />
+          )}
+
+          {rightPanelTab === "fieldSteps" && (
+            // 🔴 넣기는 서버가 그 자리에서 저장하는 **구조 변경**이다 —
+            //    handleStructuralSaved 를 지나야 [이전]이 이 걸음에서 서버 이력으로
+            //    넘어간다. handleSaved 만 부르면 되돌리기가 이 걸음을 건너뛴다
+            //    (노드 삭제에서 실제로 났던 결함과 같은 자리).
+            <FieldAddedStepsPanel
+              templateId={template.id}
+              steps={fieldAddedSteps}
+              canEdit={canDeleteGraph}
+              ghostsVisible={ghostsVisible}
+              onGhostsVisibleChange={setGhostsVisible}
+              expectedTemplateUpdatedAt={currentUpdatedAt}
+              onAdopted={handleStructuralSaved}
             />
           )}
 

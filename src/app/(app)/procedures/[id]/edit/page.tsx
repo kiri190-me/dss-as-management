@@ -9,7 +9,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { actorMay } from "@/lib/auth/developer-promotion";
-import { getProcedureTemplateForEditor, compareDraftWithParent } from "@/lib/db/queries/procedure-template-editor";
+import { getProcedureTemplateForEditor, compareDraftWithParent, getFieldAddedStepsForDraft } from "@/lib/db/queries/procedure-template-editor";
 import { getProcedureTemplateHistoryView } from "@/lib/db/queries/procedure-template-history";
 import {
   canViewAllProcedureTemplateStatuses,
@@ -136,11 +136,26 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
     actorMay(actingUser, (role) => canActorPublishTemplateOfCategory(role, template.category)) &&
     (await mayPublishTemplateOfCategory(actingUser, template.category));
 
-  const [historyView, comparison] = await Promise.all([getProcedureTemplateHistoryView(template.id), compareDraftWithParent(template.id)]);
+  // 🔵 현장에서 더한 단계(줄기 B-⑧)는 **여기서 읽는다** — 화면이 제 손으로 다시
+  //    묻지 않는다. 조회 자체가 「이 초안이 DRAFT 인가」와 「같은 줄기인가」를
+  //    보므로(getFieldAddedStepsForDraft), 게시된 절차나 남의 줄기에서는 빈
+  //    목록이 돌아오고 탭도 안 선다. 셋을 함께 받는 것은 서로 안 기대기 때문이다.
+  const [historyView, comparison, fieldAddedSteps] = await Promise.all([
+    getProcedureTemplateHistoryView(template.id),
+    compareDraftWithParent(template.id),
+    getFieldAddedStepsForDraft(template.id),
+  ]);
 
   return (
     <Suspense fallback={null}>
-      <ProcedureTemplateEditorScreen template={template} historyView={historyView} comparison={comparison} canEdit={canEdit} canPublish={canPublish} />
+      <ProcedureTemplateEditorScreen
+        template={template}
+        historyView={historyView}
+        comparison={comparison}
+        canEdit={canEdit}
+        canPublish={canPublish}
+        fieldAddedSteps={fieldAddedSteps}
+      />
     </Suspense>
   );
 }

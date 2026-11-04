@@ -73,29 +73,43 @@
 &nbsp;·&nbsp; 🟢 마이그레이션 <b>2건 적용 완료</b></p>
 
 <div class="stats">
-  <div class="stat"><div class="l">커밋</div><div class="num grn">14 + 6</div><div class="l">줄기 A 14개만 push</div></div>
-  <div class="stat"><div class="l">시험 (단위)</div><div class="num">8,132</div><div class="l">7,598 → <b>+534</b></div></div>
-  <div class="stat"><div class="l">시험 (화면 · DB)</div><div class="num">3,640 · 2,032</div><div class="l">절차 실행 DB <b>106</b></div></div>
+  <div class="stat"><div class="l">커밋</div><div class="num grn">14 + 9</div><div class="l">줄기 A 14개만 push</div></div>
+  <div class="stat"><div class="l">시험 (단위)</div><div class="num">8,134</div><div class="l">7,598 → <b>+536</b></div></div>
+  <div class="stat"><div class="l">시험 (화면 · DB)</div><div class="num">3,640 · 2,041</div><div class="l">절차 실행 DB <b>106</b></div></div>
   <div class="stat"><div class="l">실패</div><div class="num grn">0</div><div class="l">tsc 0 · build 성공</div></div>
 </div>
 
 <div class="warn">
-<b>🔄 지금 돌고 있는 것 둘</b>
+<b>🔄 지금 돌고 있는 것 하나</b>
 <table>
-<tr><th style="width:230px">무엇</th><th>왜</th></tr>
-<tr><td class="red"><b>워크플로 담당 설정이 안 먹힌다</b><br>
-<span class="note" style="margin:0">조사 중 · 아직 안 고침</span></td>
-<td>🔴 [워크플로 관리]에서 담당을 바꿔도 <b>실제 권한이 안 바뀝니다.</b> 사용자가 <b>운영에서도</b> 확인했습니다.
-까닭은 찾았습니다 — <code>step-category.ts</code> 가 <b>코드에 박힌 표</b>이고 DB 를 한 줄도 안 봅니다.
-그 파일 스스로 <b>「Stage E-1 데모 전용 설정 … 운영 업무 규칙 확정이 아님」</b>이라 적고 있습니다.
-🔴 안내 문구만이 아니라 <b>실제 권한 검사도 같은 표</b>를 씁니다.
-<b>권한 경계라 고치기 전에 「실제로 달라지는 단계」를 먼저 셉니다</b></td></tr>
-<tr><td><b>출하 자동 전환의 DB 시험</b><br>
-<span class="note" style="margin:0">메우는 중</span></td>
-<td>그 기능이 <b>DB 시험 없이</b> 들어갔습니다(옆 세션과 <code>test:db</code> 가 겹쳐 못 돌렸습니다).
-🔴 특히 <b>「자동 전환 뒤에 [출하 완료]가 실제로 되는가」</b> — <code>version</code> 이 오르면 방금 받은 승인이
-무효가 되어 영영 막히는데, 그걸 막는 장치를 <b>아무 시험도 안 지키고</b> 있었습니다</td></tr>
+<tr><th style="width:230px">무엇</th><th>어디까지</th></tr>
+<tr><td><b>줄기 B ⑧ 현장 단계를 절차에</b><br>
+<span class="note" style="margin:0">결정 받고 구현 중</span></td>
+<td>수리 건에서 현장이 더한 작업을 <b>원본 절차 편집기에 희미하게</b> 보이고 「절차에 넣을까요?」를 묻습니다.
+<div class="note">🔵 <b>사용자 결정 둘</b>(2026-11-03): <b>「안 넣기」는 기억하지 않는다</b>(스키마 0) ·
+후보는 <b>같은 줄기의 모든 판본</b>에서 긁는다</div>
+<div class="note">🟢 <b>「넣었다」는 스키마 없이 됩니다</b> — 채택한 노드 코드에 <code>field-&lt;실행노드id&gt;</code> 표식을 박으면
+<b>DB 유니크 제약이 두 번 채택을 막고</b>, 판본을 넘어 따라갑니다(손으로 만든 노드가 이미 쓰는 방식)</div>
+<div class="note">🔴 <b>모달로 띄우면 안 됩니다</b> — 안 넣은 단계는 열 때마다 남아 있어, 창이 뜨면 그게 「두 번 묻는」 것이 됩니다.
+접힌 패널 + 탭 딱지로만 알립니다</div>
+<div class="note">🔵 개발 DB 에 <b>살아 있는 현장 단계는 0건</b>입니다(작업 4 · 연결 2 가 만들어졌다 전부 치워졌습니다)</div></td></tr>
 </table>
+</div>
+
+<div class="ok">
+<b class="grn">✅ 방금 끝난 것 — 단계 담당 안내가 거짓말을 하고 있었다</b>
+<p>[워크플로 관리]에서 담당을 바꿔도 <b>안내 배너만 옛 값</b>을 말했습니다.
+크롬으로 재현한 화면 — A/S 엔지니어로 「18. 사내 출하 승인 요청」을 열면
+<b>「담당: 관리자 또는 A/S 엔지니어」(DB) 바로 밑에 「재고/출하 담당자가 진행할 수 있습니다」(코드 표)</b> 가 떴고,
+같은 화면의 <b>[이전 단계로 되돌리기]·[보류 시작]은 켜져</b> 있었습니다.</p>
+<p class="note">🟢 <b>판정은 멀쩡했습니다.</b> 단추도 서버 거절도 이미 DB 를 봅니다 — 설명을 만드는 함수 하나만 코드 표를 조회했습니다.
+그래서 <b>오류가 한 번도 안 났습니다</b>. 판정이 아니라 설명이 틀리면 아무것도 실패하지 않고 사람만 「내 설정이 안 먹히나」로 읽습니다.
+실측: 지금 쓰이는 판 <b>98단계 중 35개</b>가 어긋나 있었습니다.</p>
+<p class="note">🔴 <b>제 조사가 한 번 더 틀렸습니다</b> — 「코드 표를 쓰는 살아 있는 소비자가 이 배너 하나뿐」이라고 했는데
+<b>보류 판정이 여전히 그 표를 탑니다</b>. 「지우지 마라」고 못 박아 둔 것이 맞았습니다.</p>
+<p class="note">🔵 <b>parity 시험 둘은 풀지 않고 뜻을 다시 정했습니다</b> — 단언 본문은 그대로 두고
+「<b>시드로 세운 DB 의 초기값</b>이 표와 같다」로 바꿨습니다. 그 시험이 도는 곳은 매번 새로 세우는 시험 DB 라
+「표를 고쳐 놓고 시드를 안 돌린 실수」는 지금도 잡습니다. 버린 것은 <b>「운영 DB 도 표와 같다」는 주장뿐</b>입니다.</p>
 </div>
 
 <div class="ok">
@@ -339,6 +353,15 @@
 
 <table>
 <tr><th style="width:280px">무엇</th><th>왜 미뤘나</th></tr>
+<tr><td class="red"><b>이관 스크립트가 운영 설정을 덮어쓴다</b><br>
+<span class="note" style="margin:0">🔴 위험 · 사용자 판단</span></td>
+<td><code>scripts/migrate-workflow-rules-to-db.ts</code> 가 스스로 적고 있습니다 —
+<b>모든 버전의 단계 분류를 코드 표 값으로 덮어쓴다</b>. 즉 [워크플로 관리]에서 손으로 고친
+<b>35건이 한 번 실행에 전부 사라집니다</b>.
+<div class="note">🔵 지금 당장 위험하지는 않습니다 — <code>APPLY=1</code> 을 줘야 돌고 개발 DB 이름 안전장치도 걸려 있습니다.
+🔴 다만 <b>「이관 스크립트를 다시 돌리면 되겠네」가 가장 자연스러운 생각</b>이라 위험합니다.
+parity 시험 주석에 경고를 박아 두었습니다</div></td></tr>
+
 <tr><td class="red"><b>노드·분기 삭제에 확인창이 없다</b><br>
 <span class="note" style="margin:0">마이그레이션 아님 · 사용자 판단</span></td>
 <td>② 를 하다 드러났습니다 — <b>원래부터 없었고</b> 누르면 그대로 지워집니다.

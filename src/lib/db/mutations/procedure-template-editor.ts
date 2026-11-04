@@ -8,7 +8,9 @@ import {
   procedureTemplateEdges,
   procedureChecklistSections,
   procedureTroubleshootingEntries,
+  procedureCaseExecutions,
   procedureCaseExecutionNodes,
+  procedureCaseExecutionEdges,
   procedureTemplateEditHistory,
   procedureTemplateEditActionTypeEnum,
 } from "../schema";
@@ -31,6 +33,7 @@ import {
   type ManualTechnicalNodeType,
 } from "@/lib/domain/procedure-template-types";
 import { sanitizeRoutePoints, routePointsEqual, type RoutePoint } from "@/lib/graph-editor-core/routing";
+import { fieldStepNodeCode } from "@/lib/domain/procedure-field-added-steps";
 import type { PermissionActor } from "@/lib/auth/permission-resolver";
 import type { ProcedureTemplateEditHistoryOrigin as EditHistoryOrigin } from "@/lib/domain/procedure-template-edit-history-fold";
 
@@ -86,7 +89,11 @@ export type EditorMutationResultCode =
   | "EDGE_HAS_CLONE_DEPENDENTS"
   | "NODE_HAS_CONNECTED_EDGES"
   | "NODE_HAS_DEPENDENT_CONTENT"
-  | "EXECUTION_REFERENCE_CONFLICT";
+  | "EXECUTION_REFERENCE_CONFLICT"
+  // 줄기 B-⑧ — 현장 단계를 **이미 넣어 둔** 초안에 또 넣으려 했다. 오류가 아니라
+  // 「먼저 다녀간 사람이 있다」는 사실이라, 화면은 이것을 빨간 글씨 대신 새로고침
+  // 안내로 받는다. INVALID_INPUT 에 섞으면 그 구분이 사라진다.
+  | "FIELD_STEP_ALREADY_ADOPTED";
 
 export type StructuralValidationSummary = {
   errorCount: number;
@@ -1569,6 +1576,348 @@ export async function insertProcedureTemplateNodeOnEdge(
 
       const updatedAt = await touchTemplate(tx, edge.procedureTemplateId);
       return { ok: true, nodeId: insertedNode.id, firstEdgeId: edge.id, secondEdgeId: secondEdge.id, updatedAt };
+    });
+  } catch (err) {
+    if (err instanceof EditorMutationError) return err.result;
+    throw err;
+  }
+}
+
+// ---- 현장에서 더한 단계를 절차에 넣기 (2026-11-03, 줄기 B-⑧) ----
+
+export type AdoptFieldStepResult =
+  | {
+      ok: true;
+      nodeId: string;
+      /** 함께 그어진 연결선 수. */
+      createdEdgeCount: number;
+      /** 이 초안에 상대가 없어 **못 그은** 연결선 수 — 화면이 그대로 말해 준다. */
+      skippedEdgeCount: number;
+      updatedAt: string;
+      structuralValidation: StructuralValidationSummary;
+    }
+  | Failure;
+
+/**
+ * 수리 건에서 더한 작업 하나를 **이 초안의 정식 노드**로 만든다.
+ *
+ * 사용자 결정(2026-11-02): 「원본 절차를 편집할 때, 이번에 만들었던 단계를
+ * 희미하게 표시해주고, 적용할 것인지 묻도록 하자」.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **더하기만 한다 — 기존 노드·간선에 UPDATE 가 한 줄도 없다**
+ * ──────────────────────────────────────────────────────────────────────
+ * 이 함수가 쓰는 문장은 INSERT 둘(노드 하나 + 간선 N)과, 모든 편집이 공통으로
+ * 올리는 touchTemplate 뿐이다. 「원본 절차의 기존 노드는 한 글자도 안 바뀐다」가
+ * 이 조각의 전제라, 분기를 끊어 끼우는 길(insertProcedureTemplateNodeOnEdge 의
+ * RETARGET_EDGE)을 **일부러 안 쓴다** — 현장이 「A 다음에 B 도 했다」고 한 것이지
+ * 「A→C 를 끊어라」고 한 것이 아니다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **node_code 가 「넣었다」의 기억**이다 — 새 표를 안 만들었다
+ * ──────────────────────────────────────────────────────────────────────
+ * `field-<실행 노드 id>`(fieldStepNodeCode). unique(template_id, node_code) 가
+ * 같은 단계를 두 번 넣는 일을 **DB 에서** 막으므로, 아래의 미리 보기 검사는
+ * 사람에게 고운 말을 하기 위한 것이지 마지막 방어선이 아니다. 왜 표 대신
+ * node_code 인지는 procedure-field-added-steps.ts 머리말에 적었다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **남의 절차의 단계는 못 넣는다**
+ * ──────────────────────────────────────────────────────────────────────
+ * 실행이 매달린 절차 판본의 `code` 가 이 초안의 `code` 와 같아야 한다. 안 보면
+ * 화면에서 온 id 하나로 **아무 절차의 작업이나** 이 초안에 꽂을 수 있다 —
+ * 조회가 같은 줄기만 긁는다는 사실은 집행 경계가 아니다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔵 선은 **그을 수 있는 것만** 긋고, 못 그은 수를 돌려준다
+ * ──────────────────────────────────────────────────────────────────────
+ * 상대가 ① 이 초안에 있는 절차 노드이거나 ② 이미 넣어 둔 다른 현장 단계일 때만
+ * 긋는다. 그 상대가 이 초안에서 지워졌거나 아직 안 넣은 현장 단계면 **건너뛴다** —
+ * 넣기 자체를 막지는 않는다(작업만 들어오고 선은 사람이 다시 긋는 것이 맞다).
+ * 건너뛴 수를 안 돌려주면 「연결도 같이 올 줄 알았는데 안 왔다」가 된다.
+ */
+export async function adoptFieldAddedStep(
+  templateId: string,
+  actorUserId: string,
+  executionNodeId: string,
+  expectedTemplateUpdatedAt: string
+): Promise<AdoptFieldStepResult> {
+  try {
+    return await db.transaction(async (tx) => {
+      const actor = await requireEditor(tx, actorUserId);
+      const template = await assertTechnicalGraphEditable(tx, templateId, expectedTemplateUpdatedAt, actor);
+
+      // ── 현장 단계 행과 그 실행 · 그 실행이 매달린 절차 판본 ──────────────
+      const [fieldStep] = await tx
+        .select({
+          id: procedureCaseExecutionNodes.id,
+          executionId: procedureCaseExecutionNodes.executionId,
+          title: procedureCaseExecutionNodes.extraTaskTitle,
+          instructions: procedureCaseExecutionNodes.extraTaskInstructions,
+          nodeType: procedureCaseExecutionNodes.extraTaskNodeType,
+          userPositionX: procedureCaseExecutionNodes.userPositionX,
+          userPositionY: procedureCaseExecutionNodes.userPositionY,
+          templateNodeId: procedureCaseExecutionNodes.procedureTemplateNodeId,
+          isDeleted: procedureCaseExecutionNodes.isDeleted,
+        })
+        .from(procedureCaseExecutionNodes)
+        .where(eq(procedureCaseExecutionNodes.id, executionNodeId));
+      if (!fieldStep || fieldStep.isDeleted) fail("NOT_FOUND", "해당 현장 단계를 찾을 수 없습니다.");
+      // 템플릿에서 온 줄은 「현장에서 더한 것」이 아니다 — 그것을 넣으면 같은
+      // 노드가 절차에 두 번 선다.
+      if (fieldStep.templateNodeId !== null) fail("INVALID_INPUT", "원본 절차에서 온 작업은 넣을 것이 없습니다.");
+
+      const [sourceTemplate] = await tx
+        .select({ code: procedureTemplates.code })
+        .from(procedureTemplates)
+        .innerJoin(procedureCaseExecutions, eq(procedureCaseExecutions.procedureTemplateId, procedureTemplates.id))
+        .where(and(eq(procedureCaseExecutions.id, fieldStep.executionId), eq(procedureCaseExecutions.isDeleted, false)));
+      if (!sourceTemplate) fail("NOT_FOUND", "이 현장 단계가 나온 실행을 찾을 수 없습니다.");
+      if (sourceTemplate.code !== template.code) {
+        fail("CROSS_TEMPLATE", "다른 절차에서 만들어진 단계는 이 초안에 넣을 수 없습니다.");
+      }
+
+      const nodeCode = fieldStepNodeCode(fieldStep.id);
+      const [already] = await tx
+        .select({ id: procedureTemplateNodes.id })
+        .from(procedureTemplateNodes)
+        .where(and(eq(procedureTemplateNodes.procedureTemplateId, templateId), eq(procedureTemplateNodes.nodeCode, nodeCode)));
+      if (already) {
+        fail("FIELD_STEP_ALREADY_ADOPTED", "이 현장 단계는 이미 이 초안에 들어 있습니다. 화면을 새로 고치세요.");
+      }
+
+      const title = (fieldStep.title ?? "").trim();
+      if (title.length === 0) fail("INVALID_INPUT", "제목이 없는 단계는 넣을 수 없습니다.");
+      // 🔴 실행 쪽 허용 목록(EXTRA_TASK_NODE_TYPE_CODES)은 절차 쪽 허용 목록의
+      //    부분집합이라 실제로는 언제나 통과한다. 그래도 본다 — 어느 한쪽이 늘어난
+      //    날 조용히 어긋나면, 사람이 아무 단추도 못 누르는 노드가 절차에 선다.
+      const nodeType = (fieldStep.nodeType ?? "TASK") as ProcedureNodeType;
+      if (!(MANUAL_TECHNICAL_NODE_TYPE_CODES as readonly string[]).includes(nodeType)) {
+        fail("INVALID_INPUT", "이 갈래의 작업은 절차에 넣을 수 없습니다.");
+      }
+
+      // ── 자리 ────────────────────────────────────────────────────────────
+      // 🔵 현장에서 사람이 끌어다 놓은 자리가 있으면 **그대로** 쓴다(두 칸이 함께
+      //    차 있을 때만 — 반쪽은 자리가 아니다). 없으면 createProcedureTemplateNode
+      //    가 쓰는 기본과 같다(맨 아래에 150 띄워 쌓기).
+      let positionX = 0;
+      let positionY = 0;
+      let userPositionX: number | null = null;
+      let userPositionY: number | null = null;
+      if (fieldStep.userPositionX !== null && fieldStep.userPositionY !== null) {
+        positionX = fieldStep.userPositionX;
+        positionY = fieldStep.userPositionY;
+        userPositionX = fieldStep.userPositionX;
+        userPositionY = fieldStep.userPositionY;
+      } else {
+        const [maxPositionYRow] = await tx
+          .select({ positionY: procedureTemplateNodes.positionY })
+          .from(procedureTemplateNodes)
+          .where(eq(procedureTemplateNodes.procedureTemplateId, templateId))
+          .orderBy(desc(procedureTemplateNodes.positionY))
+          .limit(1);
+        positionY = maxPositionYRow ? maxPositionYRow.positionY + 150 : 0;
+      }
+
+      const [maxSortRow] = await tx
+        .select({ sortOrder: procedureTemplateNodes.sortOrder })
+        .from(procedureTemplateNodes)
+        .where(eq(procedureTemplateNodes.procedureTemplateId, templateId))
+        .orderBy(desc(procedureTemplateNodes.sortOrder))
+        .limit(1);
+
+      const nodeId = randomUUID();
+      const [insertedNode] = await tx
+        .insert(procedureTemplateNodes)
+        .values({
+          id: nodeId,
+          procedureTemplateId: templateId,
+          nodeCode,
+          nodeType,
+          title,
+          instructions: fieldStep.instructions,
+          positionX,
+          positionY,
+          userPositionX,
+          userPositionY,
+          sortOrder: (maxSortRow?.sortOrder ?? -1) + 1,
+          sourceWorksheet: null,
+          sourceShapeId: null,
+          sourceCellRange: null,
+          isActive: true,
+        })
+        .returning();
+
+      // ── 선 ──────────────────────────────────────────────────────────────
+      const executionEdges = await tx
+        .select({
+          fromNodeId: procedureCaseExecutionEdges.fromNodeId,
+          toNodeId: procedureCaseExecutionEdges.toNodeId,
+          branchType: procedureCaseExecutionEdges.branchType,
+          branchLabel: procedureCaseExecutionEdges.branchLabel,
+        })
+        .from(procedureCaseExecutionEdges)
+        .where(
+          and(
+            eq(procedureCaseExecutionEdges.executionId, fieldStep.executionId),
+            eq(procedureCaseExecutionEdges.isDeleted, false),
+            or(
+              eq(procedureCaseExecutionEdges.fromNodeId, fieldStep.id),
+              eq(procedureCaseExecutionEdges.toNodeId, fieldStep.id)
+            )
+          )
+        );
+
+      const counterpartIds = [
+        ...new Set(executionEdges.flatMap((e) => [e.fromNodeId, e.toNodeId]).filter((id) => id !== fieldStep.id)),
+      ];
+      /** 실행 노드 id → 이 초안에서의 노드 id. 못 건너간 것은 지도에 없다. */
+      const draftNodeIdByExecutionNodeId = new Map<string, string>();
+      if (counterpartIds.length > 0) {
+        const counterparts = await tx
+          .select({
+            id: procedureCaseExecutionNodes.id,
+            templateNodeId: procedureCaseExecutionNodes.procedureTemplateNodeId,
+            isDeleted: procedureCaseExecutionNodes.isDeleted,
+          })
+          .from(procedureCaseExecutionNodes)
+          .where(inArray(procedureCaseExecutionNodes.id, counterpartIds));
+
+        // 템플릿에서 온 상대는 **node_code** 로 건너간다 — 초안은 판본을 복제한
+        // 다른 행이라 id 가 다르고, 둘을 잇는 것은 그 값 하나뿐이다
+        // (createNewDraftVersion 이 옛 id → 새 id 를 node_code 로 맞춘다).
+        const templateNodeIds = counterparts.map((c) => c.templateNodeId).filter((id): id is string => id !== null);
+        const codeByTemplateNodeId = new Map<string, string>();
+        if (templateNodeIds.length > 0) {
+          const codeRows = await tx
+            .select({ id: procedureTemplateNodes.id, nodeCode: procedureTemplateNodes.nodeCode })
+            .from(procedureTemplateNodes)
+            .where(inArray(procedureTemplateNodes.id, templateNodeIds));
+          for (const row of codeRows) codeByTemplateNodeId.set(row.id, row.nodeCode);
+        }
+
+        // 상대가 **또 다른 현장 단계**면 그쪽의 node_code(field-<id>)로 찾는다 —
+        // 이미 넣어 둔 것만 걸리고, 아직 안 넣은 것은 안 걸린다(그쪽을 먼저
+        // 넣으면 그때 이어진다).
+        const wantedCodes = counterparts
+          .map((c) => (c.templateNodeId ? codeByTemplateNodeId.get(c.templateNodeId) : fieldStepNodeCode(c.id)))
+          .filter((code): code is string => code !== undefined);
+        const draftNodeIdByCode = new Map<string, string>();
+        if (wantedCodes.length > 0) {
+          const draftRows = await tx
+            .select({ id: procedureTemplateNodes.id, nodeCode: procedureTemplateNodes.nodeCode })
+            .from(procedureTemplateNodes)
+            .where(
+              and(eq(procedureTemplateNodes.procedureTemplateId, templateId), inArray(procedureTemplateNodes.nodeCode, wantedCodes))
+            );
+          for (const row of draftRows) draftNodeIdByCode.set(row.nodeCode, row.id);
+        }
+
+        for (const counterpart of counterparts) {
+          // 🔴 치워진 상대에는 안 잇는다 — 현장에서 「그 작업은 아니었다」고 치운
+          //    것을 절차가 되살리는 셈이 된다.
+          if (counterpart.isDeleted) continue;
+          const code = counterpart.templateNodeId
+            ? codeByTemplateNodeId.get(counterpart.templateNodeId)
+            : fieldStepNodeCode(counterpart.id);
+          const draftNodeId = code ? draftNodeIdByCode.get(code) : undefined;
+          if (draftNodeId) draftNodeIdByExecutionNodeId.set(counterpart.id, draftNodeId);
+        }
+      }
+
+      const changeGroupId = randomUUID();
+      const adoptionReason = `현장에서 더한 단계를 절차에 넣었습니다 (${nodeCode}).`;
+
+      await insertEditHistory(tx, {
+        procedureTemplateId: templateId,
+        actionType: "CREATE_NODE",
+        nodeId: insertedNode.id,
+        beforeState: null,
+        afterState: serializeNodeSnapshot(insertedNode),
+        reason: adoptionReason,
+        actorUserId: actor.id,
+        // 노드와 선들이 **한 걸음**이다 — [이전]이 노드만 남기고 선을 지우면
+        // 절차에 떠 있는 섬이 생긴다(insertProcedureTemplateNodeOnEdge 와 같은 길).
+        changeGroupId,
+      });
+
+      let createdEdgeCount = 0;
+      let skippedEdgeCount = 0;
+      for (const executionEdge of executionEdges) {
+        const isOutgoing = executionEdge.fromNodeId === fieldStep.id;
+        const counterpartId = isOutgoing ? executionEdge.toNodeId : executionEdge.fromNodeId;
+        const counterpartDraftNodeId = draftNodeIdByExecutionNodeId.get(counterpartId);
+        if (!counterpartDraftNodeId) {
+          skippedEdgeCount += 1;
+          continue;
+        }
+        const fromNodeId = isOutgoing ? nodeId : counterpartDraftNodeId;
+        const toNodeId = isOutgoing ? counterpartDraftNodeId : nodeId;
+        // 자기 자신으로 가는 선은 DB CHECK 도 편집기도 막는다. 여기까지 오는 길은
+        // 사실상 없지만, 생기면 트랜잭션 전체가 깨지므로 조용히 건너뛴다.
+        if (fromNodeId === toNodeId) {
+          skippedEdgeCount += 1;
+          continue;
+        }
+        const [duplicate] = await tx
+          .select({ id: procedureTemplateEdges.id })
+          .from(procedureTemplateEdges)
+          .where(
+            and(
+              eq(procedureTemplateEdges.procedureTemplateId, templateId),
+              eq(procedureTemplateEdges.fromNodeId, fromNodeId),
+              eq(procedureTemplateEdges.toNodeId, toNodeId),
+              eq(procedureTemplateEdges.branchType, executionEdge.branchType)
+            )
+          );
+        if (duplicate) {
+          skippedEdgeCount += 1;
+          continue;
+        }
+
+        const [maxEdgeSortRow] = await tx
+          .select({ sortOrder: procedureTemplateEdges.sortOrder })
+          .from(procedureTemplateEdges)
+          .where(and(eq(procedureTemplateEdges.procedureTemplateId, templateId), eq(procedureTemplateEdges.fromNodeId, fromNodeId)))
+          .orderBy(desc(procedureTemplateEdges.sortOrder))
+          .limit(1);
+
+        const [insertedEdge] = await tx
+          .insert(procedureTemplateEdges)
+          .values({
+            procedureTemplateId: templateId,
+            fromNodeId,
+            toNodeId,
+            branchType: executionEdge.branchType,
+            branchLabel: executionEdge.branchLabel,
+            sortOrder: (maxEdgeSortRow?.sortOrder ?? -1) + 1,
+            sourceConnectorId: null,
+            clonedFromEdgeId: null,
+          })
+          .returning({ id: procedureTemplateEdges.id });
+
+        await insertEditHistory(tx, {
+          procedureTemplateId: templateId,
+          actionType: "CREATE_EDGE",
+          edgeId: insertedEdge.id,
+          beforeState: null,
+          afterState: {
+            id: insertedEdge.id,
+            fromNodeId,
+            toNodeId,
+            branchType: executionEdge.branchType,
+            branchLabel: executionEdge.branchLabel,
+          },
+          reason: adoptionReason,
+          actorUserId: actor.id,
+          changeGroupId,
+        });
+        createdEdgeCount += 1;
+      }
+
+      const updatedAt = await touchTemplate(tx, templateId);
+      const structuralValidation = await runStructuralValidation(tx, templateId);
+      return { ok: true, nodeId: insertedNode.id, createdEdgeCount, skippedEdgeCount, updatedAt, structuralValidation };
     });
   } catch (err) {
     if (err instanceof EditorMutationError) return err.result;

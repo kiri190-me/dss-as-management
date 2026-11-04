@@ -43,11 +43,11 @@ import {
 import {
   resolveEffectiveNodePosition,
   hasUserLayoutOverride,
-  computeLayeredGraphLayout,
   resolveConnectionHandles,
   HORIZONTAL_HANDLE_IDS,
   type ConnectedNodeGeometry,
 } from "@/lib/graph-editor-core/layout";
+import { computeProcedureAutoLayout, toAutoLayoutGhostNode } from "@/lib/domain/procedure-auto-layout";
 import { resolveEffectiveEdgeRoute, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import { resolveDragAxis, applyAxisLock, type DragAxis, type Point } from "@/lib/graph-editor-core/axis-lock";
 import { DefaultStraightOrStepEdge, ManualRouteEdge, type ManualRouteEdgeData } from "@/components/graph-editor-core/GraphEdges";
@@ -92,6 +92,15 @@ type ProcedureNodeData = {
   isSelected: boolean;
   isDimmed: boolean;
   isSeverelyDimmed: boolean;
+  /**
+   * 2026-11-03(줄기 B-⑧) — **아직 이 절차에 없는 칸**인가. 희미하게 그리고 점선
+   * 테두리를 두른다.
+   *
+   * 🔴 흐리기(isDimmed)와 **다른 뜻**이라 칸을 따로 둔다. 흐리기는 「지금 고른
+   * 것과 상관없다」는 한때의 상태이고, 이것은 「절차에 아직 안 들어왔다」는
+   * 그 칸의 사실이다. 한 칸에 섞으면 유령을 고를 때마다 유령이 또렷해진다.
+   */
+  isGhost: boolean;
 };
 
 /** Every named handle a node can be wired up through (Problem 1 revision) — always present, always invisible (a read-only chart has no reason to show connection dots), so an edge can attach at whichever specific side its route classification calls for. See procedure-edge-routing.ts for how an edge picks a source/target pair from these ids. */
@@ -121,10 +130,23 @@ function ProcedureNodeHandles() {
 }
 
 /** Real graph nodes — reuses the shared ProcedureNodeChip so this is visually identical to every other screen that shows a node (Phase 3B). */
+/**
+ * 유령 칸의 점선 테두리 (2026-11-03, 줄기 B-⑧).
+ *
+ * 🔴 **인라인 style 로 적는다.** 색 이름(zinc-400 같은 것)은 사이트마다 다르게
+ * 풀려 투명이 된 적이 있고, 그 어긋남은 오류를 하나도 안 내고 화면에서만
+ * 드러난다. 여기서는 한 색만 쓰므로 값으로 박는 것이 안전하다.
+ *
+ * 🔵 테두리를 **칸 바깥의 안 잘리는 상자**에 그린다 — 모양 층은 clip-path 로
+ * 잘려 있어서, 거기에 두르면 마름모·문서 꼴에서 테두리가 통째로 잘려 나간다
+ * (오류 배지가 바깥 상자로 옮겨진 것과 같은 까닭 — ProcedureNodeChip 주석).
+ */
+const GHOST_NODE_OUTLINE_STYLE = { outline: "2px dashed #a1a1aa", outlineOffset: 3, borderRadius: 8 } as const;
+
 function ProcedureNode({ data }: NodeProps & { data: ProcedureNodeData }) {
   const { semanticType, iconKey } = getNodeChipVisual(data.nodeType);
   return (
-    <div className="relative">
+    <div className={data.isGhost ? "relative opacity-50" : "relative"} style={data.isGhost ? GHOST_NODE_OUTLINE_STYLE : undefined}>
       <ProcedureNodeHandles />
       <ProcedureNodeChip
         semanticType={semanticType}
@@ -227,6 +249,65 @@ const DEFAULT_LAYOUT_MODE_OPTIONS: readonly LayoutMode[] = ["SOURCE", "USER", "S
 export type ProcedureFlowGraphOpenIssue = { nodeId: string; issueId: string; severity: "ERROR" | "WARNING" };
 
 /**
+ * ──────────────────────────────────────────────────────────────────────────
+ * 2026-11-03(줄기 B-⑧) — **유령 칸·선**: 이 절차에 아직 없는 것을 희미하게
+ * ──────────────────────────────────────────────────────────────────────────
+ * 사용자 결정: 「원본 절차를 편집할 때, 이번에 만들었던 단계를 희미하게
+ * 표시해주고, 적용할 것인지 묻도록 하자」.
+ *
+ * 🔴 **nodes/edges 프롭에 섞어 넣지 않는다.** 그 둘은 부르는 쪽이 저장·검증·비교에
+ * 함께 쓰는 「이 절차의 진짜 내용」이고, 섞으면 [저장]이 없는 노드를 저장하려 든다.
+ * 유령은 따로 받아 그리기 층에서만 합쳐진다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **자리 계산 가운데 「자동 배치」 하나에는 함께 센다** (2026-11-04)
+ * ──────────────────────────────────────────────────────────────────────
+ * 줄기 B-⑧(2026-11-03)에는 여기에 「자리를 세는 계산 셋 어디에도 안 섞는다 —
+ * 섞으면 자리 값 없는 기존 노드가 유령 때문에 움직인다」고 적혀 있었다. **그
+ * 전제가 틀렸다**(2026-11-04 실측): 움직이는 것은 유령 탓이 아니라 노드가 하나
+ * 느는 것 자체여서, 유령을 빼 두면 같은 움직임이 「넣기」를 누른 뒤로 미뤄질
+ * 뿐이었다. 사용자 결정(「A로 가자」)으로 뒤집었다 — 까닭과 대가는
+ * procedure-auto-layout.ts 머리말에.
+ *
+ * 그래서 지금은 셋 가운데 **자동 배치(computeProcedureAutoLayout)에만** 섞는다:
+ *  - 시트 띠(groupNodesByWorksheet) · 단계별 정렬(computeStageSortedLayout) 에는
+ *    **안 섞는다.** 채택이 만드는 노드도 그 둘을 안 바꾸기 때문이다(채택 노드의
+ *    source_worksheet 가 null 이고, 단계별 정렬은 편집기에서 고를 수 없다).
+ *  - 그래서 유령을 켠 그림이 **채택 뒤와 같은 좌표**가 된다. 대신 켜는 순간
+ *    둘레가 한 번 움직인다 — 그것이 이 결정의 값이다.
+ *
+ * 🔵 유령의 **받침 자리**(x/y)와 sortOrder·hasUserPosition 을 세는 일은 부르는
+ * 쪽(procedure-field-added-steps.ts 의 buildFieldStepGhostGraph)이 한다 — 순수
+ * 함수라 시험으로 잴 수 있다.
+ *
+ * 🔴 고를 수 없고 끌 수 없다(selectable/draggable/connectable 전부 false).
+ * 고를 수 있게 두면 유령을 누르는 순간 이 그림이 「그 노드의 이웃만 환하게」로
+ * 들어가 **절차 전체가 흐려진다** — 유령에게는 이웃으로 셀 간선이 없기 때문이다.
+ * 단계 머리띠(stage-header)가 같은 까닭으로 같은 셋을 쓰고 있다.
+ */
+export type ProcedureFlowGraphGhostNode = {
+  id: string;
+  nodeType: ProcedureNodeType;
+  title: string;
+  subtitle: string | null;
+  /** 🔵 **받침 자리**다 — 자동 배치를 켠 절차에서는 아래 두 칸이 정한 자리가 이긴다(resolveGhostPosition). */
+  x: number;
+  y: number;
+  /** 채택하면 받게 될 sort_order. 자동 배치에서 **뿌리의 가로 차례**가 이 번호로 정해진다. */
+  sortOrder: number;
+  /** 현장에서 사람이 끌어다 놓은 자리가 있는가. 참이면 위 x/y 가 그 자리이고 자동 배치가 그 칸을 안 민다. */
+  hasUserPosition: boolean;
+};
+
+export type ProcedureFlowGraphGhostEdge = {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  branchType: ProcedureTemplateEdgeRow["branchType"];
+  branchLabel: string | null;
+};
+
+/**
  * Phase 5C-5B — ProcedureTemplateNodeRow itself now carries userPositionX/Y
  * (previously editor-only, added to the read-only detail query's row shape
  * too so both screens can resolve the same saved override — see this file's
@@ -305,6 +386,8 @@ export default function ProcedureFlowGraph({
   highlightedEdgeIds = null,
   nodeMarks = null,
   draggableNodeIds = null,
+  ghostNodes = null,
+  ghostEdges = null,
   graphHeight,
 }: {
   templateId: string;
@@ -476,6 +559,15 @@ export default function ProcedureFlowGraph({
    * 서버가 거절하는 그 순간까지 화면에서는 움직인 것으로 보인다.
    */
   draggableNodeIds?: readonly string[] | null;
+  /**
+   * 2026-11-03(줄기 B-⑧) — **이 절차에 아직 없는 칸**을 희미하게 얹는다. null
+   * 이면 지금까지와 똑같다(아무것도 안 얹힌다) — 그래서 이 프롭을 안 넘기는
+   * 호출부 셋(절차 상세 · 실행 시작 노드 고르기 · 「전체 단계 보기」 팝업)은
+   * 동작이 글자 하나 안 바뀐다. 까닭과 좌표를 누가 세는지는 위 타입 머리말에.
+   */
+  ghostNodes?: readonly ProcedureFlowGraphGhostNode[] | null;
+  /** 유령 칸에 붙는 선. 양끝 가운데 **그림에 없는 것**이 있으면 조용히 안 그린다(아래). */
+  ghostEdges?: readonly ProcedureFlowGraphGhostEdge[] | null;
   /** 2026-11-02(조각 7) — 캔버스 높이(px). 생략하면 GraphCanvas 의 기본값(600). 창 안에 들어갈 때는 화면이 좁아 더 낮게 잡는다. */
   graphHeight?: number;
 }) {
@@ -595,37 +687,30 @@ export default function ProcedureFlowGraph({
    * instead. Only computed when actually needed (guarded, not just
    * memoized) — this is graph-editor-core's own concern, no reason to pay
    * for it on a 400+ node FULL_SERVICE template that will never use it.
+   *
+   * 🔵 2026-11-04 — 셈 자체(폭 · pinnedX · 눈금)는 한 줄도 안 바뀐 채
+   * procedure-auto-layout.ts 로 옮겨졌다. 꺼낸 까닭은 **유령과 진짜 노드가 같은
+   * 자로 재어지는지를 값으로 시험**하기 위해서다(이 파일은 .css 를 물고 있어
+   * 시험에서 import 할 수 없다).
+   *
+   * 🔴 그리고 **유령을 함께 센다**(사용자 결정 「A로 가자」) — 그래야 켠 그림이
+   * 채택 뒤와 같은 좌표가 된다. 유령을 안 넘기는 화면 셋은 빈 목록이 들어가
+   * 전과 똑같은 값이 나온다(procedure-auto-layout.test.ts 가 값으로 지킨다).
    */
   const layeredLayout = useMemo(
     () =>
       useAutoLayoutForUnpositionedNodes
-        ? computeLayeredGraphLayout(
-            nodeRows.map((n) => ({
-              id: n.id,
-              sortOrder: n.sortOrder,
-              // Round-3 usability fix — center-based alignment: a
-              // multiline title can make one node wider than its neighbor,
-              // so aligning by left-edge x (the old behavior) no longer
-              // guarantees the same CENTER x, which is what actually
-              // determines whether the bottom/top handles line up into a
-              // straight connector. computeLayeredGraphLayout now needs
-              // each node's real width to align by center instead.
-              width: computeNodeDimensions({ title: n.title, shape: NODE_VISUAL_CONFIG[getNodeChipVisual(n.nodeType).semanticType].shape }).width,
-              // Round-2 usability fix — "layout and line geometry must
-              // agree": an unpositioned child under a manually-dragged
-              // parent must center on the parent's REAL rendered x, not a
-              // synthetic depth-based one this function would otherwise
-              // invent for it in isolation (see computeLayeredGraphLayout's
-              // own doc comment on pinnedX).
-              pinnedX: hasUserLayoutOverride({ userPositionX: n.userPositionX, userPositionY: n.userPositionY })
-                ? resolveEffectiveNodePosition({ positionX: n.positionX, positionY: n.positionY, userPositionX: n.userPositionX, userPositionY: n.userPositionY }, "USER").x
-                : undefined,
-            })),
-            edgeRows.map((e) => ({ fromNodeId: e.fromNodeId, toNodeId: e.toNodeId })),
-            { horizontal: 280, vertical: 150 }
-          )
+        ? computeProcedureAutoLayout({
+            nodes: nodeRows,
+            edges: edgeRows,
+            // 🔴 옮기는 규칙(사람이 정한 자리만 못 박는다)을 여기 적지 않는다 —
+            //    시험이 같은 함수를 써야 「시험은 통과하는데 화면만 어긋나는」
+            //    자리가 안 생긴다.
+            ghostNodes: (ghostNodes ?? []).map(toAutoLayoutGhostNode),
+            ghostEdges: ghostEdges ?? [],
+          })
         : new Map<string, { x: number; y: number }>(),
-    [useAutoLayoutForUnpositionedNodes, nodeRows, edgeRows]
+    [useAutoLayoutForUnpositionedNodes, nodeRows, edgeRows, ghostNodes, ghostEdges]
   );
 
   // Problem 1 revision — semantic edge routing, computed only for the
@@ -803,6 +888,27 @@ export default function ProcedureFlowGraph({
     [bands, useAutoLayoutForUnpositionedNodes, layeredLayout]
   );
 
+  /**
+   * 2026-11-04 — 유령 칸의 자리. **위 resolveBaselinePosition 과 같은 차례**다:
+   * ① 사람이 정한 자리가 있으면 그것 ② 아니면 자동 배치 ③ 그것도 없으면 받아 온
+   * 받침 값. 채택이 만드는 노드가 ①②③ 가운데 어디로 떨어지든 유령이 같은 칸으로
+   * 떨어져야 「켠 그림 = 채택 뒤 그림」이 성립한다.
+   *
+   * 🔵 「단계별 정렬」에서는 진짜 노드가 이 자동 배치가 아니라 제 배치를 쓰므로 그
+   * 모드의 유령 자리는 둘레와 좌표계가 다르다. 고치지 않았다 — 유령을 넘기는
+   * 화면은 편집기 하나이고, 거기서는 그 모드를 고를 수 없다
+   * (layoutModeOptions={["USER"]}). 닿을 수 없는 가지를 미리 적으면 아무도 그것이
+   * 맞는지 확인하지 못한다.
+   */
+  const resolveGhostPosition = useCallback(
+    (ghost: ProcedureFlowGraphGhostNode): { x: number; y: number } => {
+      if (ghost.hasUserPosition) return { x: ghost.x, y: ghost.y };
+      if (useAutoLayoutForUnpositionedNodes) return layeredLayout.get(ghost.id) ?? { x: ghost.x, y: ghost.y };
+      return { x: ghost.x, y: ghost.y };
+    },
+    [useAutoLayoutForUnpositionedNodes, layeredLayout]
+  );
+
   // 바깥에서 건 강조(highlightedNodeIds)를 빠른 조회로. null 이면 아예 안 만든다 —
   // 「걸지 않았다」와 「하나도 안 걸렸다(빈 배열)」는 뜻이 정반대다: 전자는 아무것도
   // 안 흐려지고, 후자는 전부 흐려진다(검색어는 쳤는데 맞는 것이 없는 상태).
@@ -853,9 +959,41 @@ export default function ProcedureFlowGraph({
           isSelected,
           isDimmed: !isSelected && (dimmedBySelection || dimmedByHighlight),
           isSeverelyDimmed: errorFocusMode && dimmedBySelection,
+          isGhost: false,
         } satisfies ProcedureNodeData,
       };
     });
+
+    // 유령 칸 (줄기 B-⑧) — 맨 마지막에 얹는다.
+    // 🔴 **자리는 진짜 노드와 같은 규칙으로 고른다**(2026-11-04, resolveGhostPosition)
+    //    — 그래야 켠 그림이 채택 뒤와 같은 좌표가 된다. 전에는 받아 온 x/y 를
+    //    그대로 썼고, 그 값은 **저장 좌표계**라 자동 배치로 그려진 둘레와 아무
+    //    관계가 없었다.
+    for (const ghost of ghostNodes ?? []) {
+      result.push({
+        id: ghost.id,
+        type: "procedureNode",
+        position: resolveGhostPosition(ghost),
+        selectable: false,
+        draggable: false,
+        connectable: false,
+        data: {
+          title: ghost.title,
+          nodeType: ghost.nodeType,
+          sourceWorksheet: ghost.subtitle,
+          sourceShapeId: null,
+          templateId,
+          issueBadge: null,
+          mark: null,
+          isSelected: false,
+          // 🔵 흐리기는 **안 건다.** 유령은 isGhost 로 이미 희미하고, 둘을 겹치면
+          //    고른 노드가 있을 때 거의 안 보인다(0.5 × 0.25).
+          isDimmed: false,
+          isSeverelyDimmed: false,
+          isGhost: true,
+        } satisfies ProcedureNodeData,
+      });
+    }
 
     // SUBPROCESS_OR_STAGE band headers — only meaningful across multiple
     // worksheets; a single-worksheet filtered view already has its own
@@ -897,6 +1035,8 @@ export default function ProcedureFlowGraph({
     highlightedNodeIdSet,
     nodeMarks,
     draggableNodeIdSet,
+    ghostNodes,
+    resolveGhostPosition,
   ]);
 
   const flowEdges = useMemo<Edge[]>(() => {
@@ -1123,6 +1263,56 @@ export default function ProcedureFlowGraph({
     highlightedEdgeIdSet,
   ]);
 
+  /**
+   * 유령 선 (줄기 B-⑧) — 위 memo 의 **바깥**에 따로 둔다.
+   *
+   * 🔴 안에 넣으면 두 갈래(원본/사용자 배치 · 단계별 정렬)의 return 두 곳을 다
+   * 고쳐야 하고, 그 둘은 이 파일에서 가장 손대기 조심스러운 코드다. 유령 선은
+   * 라우팅·레인·가시성 규칙을 하나도 안 쓰므로 섞을 까닭도 없다 — 언제나 아래→위
+   * 로 곧게 긋는다.
+   *
+   * 🔴 **양끝이 지금 그림에 있는 것만** 그린다. React Flow 는 한쪽 끝이 없는 선을
+   * 받으면 경고만 내고 조용히 안 그려서, 안 거르면 「패널은 연결 2개라는데 그림엔
+   * 1개」가 된다 — 그리고 그 어긋남은 콘솔에만 남는다.
+   */
+  const ghostFlowEdges = useMemo<Edge[]>(() => {
+    if (!ghostEdges || ghostEdges.length === 0) return [];
+    const drawableIds = new Set<string>([...filteredNodeRows.map((n) => n.id), ...(ghostNodes ?? []).map((g) => g.id)]);
+    return ghostEdges
+      .filter((e) => drawableIds.has(e.fromNodeId) && drawableIds.has(e.toNodeId))
+      .map((e) => {
+        const config = EDGE_VISUAL_CONFIG[e.branchType];
+        return {
+          id: e.id,
+          source: e.fromNodeId,
+          target: e.toNodeId,
+          sourceHandle: "bottom-out",
+          targetHandle: "top-in",
+          type: "procedureDefault",
+          label: e.branchLabel ?? (config.defaultLabel ? procedureBranchTypeLabels[e.branchType] : undefined),
+          labelStyle: { fill: config.strokeLight, fontWeight: 700, fontSize: 10 },
+          labelBgStyle: { fill: "#ffffff", fillOpacity: 0.45 },
+          labelBgPadding: [3, 2] as [number, number],
+          // 점선 + 흐리게 — 유령 칸과 **같은 말**을 해야 한다("아직 절차에 없다").
+          // 갈래 색은 그대로 쓴다: NG 가 빨강인 것은 그 선의 뜻이라, 유령이 됐다고
+          // 색까지 바뀌면 무슨 갈래였는지 알 수 없다.
+          style: { stroke: config.strokeLight, strokeWidth: config.strokeWidth, strokeDasharray: "4 4", opacity: 0.5 },
+          markerEnd: { type: MarkerType.Arrow, color: config.strokeLight },
+          animated: false,
+          zIndex: 0,
+        } satisfies Edge;
+      });
+  }, [ghostEdges, ghostNodes, filteredNodeRows]);
+
+  /**
+   * 🔵 유령이 하나도 없으면 **위 memo 가 만든 그 배열 그대로** 넘어간다(신원까지
+   * 같다). 이 프롭을 안 넘기는 화면 셋이 전과 똑같다는 근거가 여기다.
+   */
+  const flowEdgesWithGhosts = useMemo<Edge[]>(
+    () => (ghostFlowEdges.length === 0 ? flowEdges : [...flowEdges, ...ghostFlowEdges]),
+    [flowEdges, ghostFlowEdges]
+  );
+
   if (nodeRows.length === 0) return null;
 
   /**
@@ -1284,7 +1474,7 @@ export default function ProcedureFlowGraph({
         remountKey={`${worksheetFilter}-${layoutMode}`}
         height={graphHeight}
         nodes={flowNodes}
-        edges={flowEdges}
+        edges={flowEdgesWithGhosts}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         nodesDraggable={editable && layoutMode === "USER"}
