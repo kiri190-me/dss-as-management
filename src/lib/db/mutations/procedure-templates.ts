@@ -27,6 +27,7 @@ import {
 import { actorMay } from "@/lib/auth/developer-promotion";
 import { insertAuditLog } from "./audit-logs";
 import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
+import { loadNextProcedureLinkContext } from "./procedure-next-procedure-link-context";
 import {
   PROCEDURE_EQUIPMENT_TYPE_CODES,
   procedureTemplateStatusLabels,
@@ -639,14 +640,29 @@ export async function publishProcedureTemplate(
       // without needing to persist/dedupe validator findings into
       // procedure_template_validation_issues.
       const templateNodes = await tx
-        .select({ id: procedureTemplateNodes.id, nodeType: procedureTemplateNodes.nodeType })
+        .select({
+          id: procedureTemplateNodes.id,
+          nodeType: procedureTemplateNodes.nodeType,
+          // 2026-11-04(줄기 B ④ 조각 ③) — [종료]의 「다음 절차」도 이 관문이 본다.
+          nextProcedureTemplateId: procedureTemplateNodes.nextProcedureTemplateId,
+        })
         .from(procedureTemplateNodes)
         .where(eq(procedureTemplateNodes.procedureTemplateId, templateId));
       const templateEdges = await tx
         .select({ id: procedureTemplateEdges.id, fromNodeId: procedureTemplateEdges.fromNodeId, toNodeId: procedureTemplateEdges.toNodeId, branchType: procedureTemplateEdges.branchType })
         .from(procedureTemplateEdges)
         .where(eq(procedureTemplateEdges.procedureTemplateId, templateId));
-      const structuralIssues = validateProcedureGraphStructure(templateNodes, templateEdges);
+      /**
+       * 🔴 **맥락을 넘겨야 이어가기 갈래가 돈다.** 안 넘기면 검증이 그 갈래를
+       * 통째로 건너뛰고, 편집기 [검증]에는 빨간 줄이 뜨는데 **게시는 그냥
+       * 통과한다.** 이 조각을 만들다 실제로 그 상태를 한 번 거쳤다 — 맥락을
+       * 만드는 쪽이 편집기 파일에만 있었기 때문이다. 그래서 제 파일로 떼어
+       * 두 곳이 같은 것을 부르게 했다.
+       */
+      const nextProcedureLinks = await loadNextProcedureLinkContext(tx, templateId, templateNodes);
+      const structuralIssues = validateProcedureGraphStructure(templateNodes, templateEdges, {
+        nextProcedureLinks,
+      });
       if (structuralIssues.some((i) => i.severity === "ERROR")) {
         fail("HAS_STRUCTURAL_ERRORS", "그래프 구조 오류(ERROR)가 있어 게시할 수 없습니다. 편집기에서 검증을 확인하세요.");
       }

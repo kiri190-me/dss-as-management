@@ -1604,3 +1604,91 @@ describe("listTechnicalProcedureTemplates", () => {
     assert.equal(rowBefore.edgeCount, 0);
   });
 });
+
+/**
+ * ============================================================================
+ * 줄기 B ④ 조각 ③ — **게시 관문이 이어가기 검증을 실제로 본다**
+ * ============================================================================
+ * 🔴 이 절이 지키는 것은 「규칙이 맞는가」가 아니라 **「게시 관문이 그 규칙을
+ * 부르기는 하는가」**다. 규칙 자체는 단위 시험이 값으로 잰다.
+ *
+ * 이 조각을 만들다 실제로 한 번 어긋났다 — 게시가 검증을 **맥락 없이** 부르고
+ * 있어서, 편집기 [검증]에는 빨간 줄이 뜨는데 게시는 그냥 통과했다. 맥락을
+ * 만드는 쪽이 편집기 파일에만 있었기 때문이다. 단위 시험은 그 어긋남을 영영
+ * 못 잡는다(규칙은 멀쩡했다). 그래서 여기서 **진짜 게시를 불러** 잰다.
+ *
+ * 🔴 그리고 **막지 말아야 할 것이 안 막히는지**도 함께 잰다. 「가리킨 쪽에
+ * 게시본이 없다」를 ERROR 로 올리면, 서로를 가리킨 두 절차가 **어느 쪽도 먼저
+ * 게시할 수 없어** 영영 막힌다.
+ * ============================================================================
+ */
+describe("줄기 B ④ 조각 ③ — 게시 관문과 이어가기", () => {
+  /** 이 절차의 END 노드에 「다음 절차」를 심는다(편집기를 거치지 않고 바로). */
+  async function pointEndTo(templateId: string, targetId: string) {
+    const [endNode] = await db
+      .select()
+      .from(procedureTemplateNodes)
+      .where(
+        and(
+          eq(procedureTemplateNodes.procedureTemplateId, templateId),
+          eq(procedureTemplateNodes.nodeType, "END")
+        )
+      );
+    assert.ok(endNode, "표본 확인 — 이 밑자락에 END 노드가 있어야 이 시험에 뜻이 있다");
+    await db
+      .update(procedureTemplateNodes)
+      .set({ nextProcedureTemplateId: targetId })
+      .where(eq(procedureTemplateNodes.id, endNode.id));
+    return endNode.id;
+  }
+
+  test("🔴 자기 계열을 가리키면 **게시가 막힌다** — 관문이 이 갈래를 부르고 있다는 증거다", async () => {
+    const imported = await importTemplate({ code: uniqueCode("next-self-loop"), includeErrorIssue: false });
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+
+    await pointEndTo(imported.id, imported.id);
+
+    const result = await publishProcedureTemplate(imported.id, superAdminId);
+    assert.equal(result.ok, false, "맥락을 안 넘기면 이 갈래가 통째로 안 돌아 그냥 통과한다");
+    if (result.ok) return;
+    assert.equal(result.code, "HAS_STRUCTURAL_ERRORS");
+
+    const [row] = await db
+      .select({ status: procedureTemplates.status })
+      .from(procedureTemplates)
+      .where(eq(procedureTemplates.id, imported.id));
+    assert.equal(row.status, "DRAFT");
+  });
+
+  test("🔴 가리킨 쪽에 게시본이 없어도 **게시는 된다** — ERROR 면 서로 가리킨 둘이 영영 못 나간다", async () => {
+    const a = await importTemplate({ code: uniqueCode("next-pair-a"), includeErrorIssue: false });
+    const b = await importTemplate({ code: uniqueCode("next-pair-b"), includeErrorIssue: false });
+    assert.equal(a.ok, true);
+    assert.equal(b.ok, true);
+    if (!a.ok || !b.ok) return;
+
+    // A→B · B→A, 둘 다 아직 초안이다. 「게시본이 있어야 한다」가 막는 조건이면
+    // 여기서 어느 쪽도 나갈 수 없다.
+    await pointEndTo(a.id, b.id);
+    await pointEndTo(b.id, a.id);
+
+    const published = await publishProcedureTemplate(a.id, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+
+    const [row] = await db
+      .select({ status: procedureTemplates.status })
+      .from(procedureTemplates)
+      .where(eq(procedureTemplates.id, a.id));
+    assert.equal(row.status, "PUBLISHED", "한쪽이 나가야 나머지도 따라 나갈 수 있다");
+  });
+
+  test("🔵 지정이 없으면 게시는 전과 똑같다 — 새 갈래가 멀쩡한 절차를 막지 않는다", async () => {
+    const imported = await importTemplate({ code: uniqueCode("next-none"), includeErrorIssue: false });
+    assert.equal(imported.ok, true);
+    if (!imported.ok) return;
+
+    const result = await publishProcedureTemplate(imported.id, superAdminId);
+    assert.equal(result.ok, true, JSON.stringify(result));
+  });
+});

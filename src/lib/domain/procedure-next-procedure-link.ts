@@ -123,3 +123,157 @@ export function resolveNextProcedureTarget(input: {
   const chosen = published.reduce((best, row) => (row.version > best.version ? row : best));
   return { ok: true, templateId: chosen.id, version: chosen.version };
 }
+
+/**
+ * ============================================================================
+ * 이어가기 **검증** (2026-11-04, 줄기 B ④ 조각 ③)
+ * ============================================================================
+ * 여기서 내는 결과는 편집기의 [검증]과 게시 관문이 쓴다. 규칙을 위 resolve 와
+ * **같은 파일**에 두는 까닭은, 「실행할 때 무엇이 막히는가」와 「게시 전에 무엇을
+ * 알려 주는가」가 어긋나면 안 되기 때문이다 — 막히는데 안 알려 주거나, 안 막히는데
+ * 막는다고 적는 일이 생긴다.
+ *
+ * ── 🔴 무엇이 ERROR 이고 무엇이 WARNING 인가 ───────────────────────────
+ * **ERROR(게시를 막는다)** — 사람이 고칠 길이 이 절차 안에 있고, 그냥 두면 실행이
+ * 반드시 깨지는 것:
+ *   · END 가 아닌 노드에 지정이 남아 있다(화면에 고치는 칸이 안 그려지는 상태).
+ *   · 가리킨 판이 사라졌다.
+ *   · 자기 계열을 가리킨다 — 끝나자마자 같은 절차가 다시 열려 빠져나올 수 없다.
+ *
+ * **WARNING(알리되 막지 않는다)** — 지금 이 절차만으로는 고칠 수 없는 것:
+ *   · 가리킨 계열에 게시본이 없다.
+ *   · 다른 절차를 거쳐 이 절차로 **돌아오는 고리**가 있다(A→B→A).
+ *
+ * 🔴 **둘을 ERROR 로 올리면 안 된다.** A 의 END 가 B 를, B 의 END 가 A 를
+ * 가리키고 둘 다 아직 초안이면, 「가리킨 쪽에 게시본이 있어야 한다」가 ERROR 일 때
+ * **어느 쪽도 먼저 게시할 수 없다.** 서로를 기다리며 영영 막힌다. 고리도 마찬가지로
+ * 서버가 무한 반복에 빠지는 종류가 아니다 — 사람이 매번 작업을 진행해야 다음
+ * 실행이 생긴다. 다만 되풀이하면 실행 행이 쌓이므로 알리기는 한다.
+ * ============================================================================
+ */
+
+/** 가리킨 판 하나에 대해 검증이 알아야 하는 것. 조회가 채워서 넘긴다. */
+export type NextProcedureTargetInfo = {
+  /** 그 판이 속한 계열. 자기 계열인지 · 고리인지를 이 값으로 가른다. */
+  code: string;
+  /** 사람에게 보일 이름. 「어느 절차가 문제인지」를 글에 적는다. */
+  name: string;
+  /** 그 계열에 지금 게시본이 있는가. 없으면 실행이 그 자리에서 막힌다. */
+  hasPublishedVersion: boolean;
+};
+
+export type NextProcedureLinkValidationContext = {
+  /** 지금 검증하는 절차의 계열 코드. */
+  thisCode: string;
+  /** key 는 노드에 담긴 next_procedure_template_id 값 그대로. */
+  targets: Map<string, NextProcedureTargetInfo>;
+  /**
+   * 계열과 계열 사이의 이어가기 **전부**. 고리를 찾는 데만 쓴다.
+   * 🔵 이 절차에서 나가는 것만 넘기면 A→B→A 를 못 본다 — B→A 는 B 의 노드에
+   * 적혀 있기 때문이다. 그래서 조회가 전부를 모아 넘긴다.
+   */
+  seriesLinks: readonly { fromCode: string; toCode: string }[];
+};
+
+export type NextProcedureLinkIssue = {
+  severity: "ERROR" | "WARNING";
+  nodeId: string;
+  message: string;
+};
+
+/**
+ * 이 절차에서 나가는 계열을 따라가, **이 절차로 돌아오는지** 본다.
+ * 🔵 이미 본 계열을 다시 안 밟으므로 고리가 있어도 멈춘다.
+ */
+function reachesBack(
+  fromCode: string,
+  thisCode: string,
+  seriesLinks: readonly { fromCode: string; toCode: string }[]
+): boolean {
+  const seen = new Set<string>([fromCode]);
+  const queue: string[] = [fromCode];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const link of seriesLinks) {
+      if (link.fromCode !== current) continue;
+      if (link.toCode === thisCode) return true;
+      if (seen.has(link.toCode)) continue;
+      seen.add(link.toCode);
+      queue.push(link.toCode);
+    }
+  }
+  return false;
+}
+
+/**
+ * 검증이 노드에서 보는 것 — **id · 유형 · 지정** 셋뿐이다.
+ * 🔵 `nodeCode` 를 요구하지 않는다: 구조 검증이 읽는 노드 행에는 그 칸이 없고,
+ * 있어야 할 까닭도 없다(문제를 짚을 때 쓰는 것은 id 다).
+ */
+export type NextProcedureLinkValidationNode = {
+  id: string;
+  nodeType: ProcedureNodeType;
+  nextProcedureTemplateId: string | null;
+};
+
+export function validateNextProcedureLinks<T extends NextProcedureLinkValidationNode>(
+  nodes: readonly T[],
+  context: NextProcedureLinkValidationContext
+): NextProcedureLinkIssue[] {
+  const issues: NextProcedureLinkIssue[] = [];
+
+  for (const node of nodes) {
+    const targetId = node.nextProcedureTemplateId;
+    if (targetId === null) continue;
+
+    if (!isNextProcedureLinkAllowedOn(node.nodeType)) {
+      issues.push({
+        severity: "ERROR",
+        nodeId: node.id,
+        message:
+          "「다음 절차」는 [종료] 노드에만 지정할 수 있습니다. 이 노드의 유형을 [종료]로 되돌리거나, 지정을 지우세요.",
+      });
+      continue;
+    }
+
+    const target = context.targets.get(targetId);
+    if (!target) {
+      issues.push({
+        severity: "ERROR",
+        nodeId: node.id,
+        message: "「다음 절차」로 지정된 절차를 찾을 수 없습니다 — 삭제되었을 수 있습니다. 다시 지정하세요.",
+      });
+      continue;
+    }
+
+    if (target.code === context.thisCode) {
+      issues.push({
+        severity: "ERROR",
+        nodeId: node.id,
+        message:
+          "「다음 절차」가 이 절차 자신을 가리킵니다. 끝나자마자 같은 절차가 다시 열려 빠져나올 수 없습니다.",
+      });
+      continue;
+    }
+
+    if (!target.hasPublishedVersion) {
+      issues.push({
+        severity: "WARNING",
+        nodeId: node.id,
+        message: `「다음 절차」로 지정한 "${target.name}"에 게시본이 없습니다 — 그 절차를 게시하기 전까지는 여기서 이어지지 않습니다.`,
+      });
+    }
+
+    if (reachesBack(target.code, context.thisCode, context.seriesLinks)) {
+      issues.push({
+        severity: "WARNING",
+        nodeId: node.id,
+        // 🔵 사람이 읽는 글이다 — 별표 같은 꾸밈 글자를 넣지 않는다. 이 글은
+        //    화면에 그대로 찍히므로 별표가 별표로 보인다.
+        message: `"${target.name}"을(를) 따라가면 이 절차로 되돌아옵니다. 되풀이해도 저절로 멈추지는 않습니다 — 사람이 매번 진행해야 다음이 열립니다.`,
+      });
+    }
+  }
+
+  return issues;
+}

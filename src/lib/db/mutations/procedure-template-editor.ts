@@ -35,6 +35,7 @@ import {
 import { sanitizeRoutePoints, routePointsEqual, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import { fieldStepNodeCode } from "@/lib/domain/procedure-field-added-steps";
 import { isNextProcedureLinkAllowedOn } from "@/lib/domain/procedure-next-procedure-link";
+import { loadNextProcedureLinkContext } from "./procedure-next-procedure-link-context";
 import type { PermissionActor } from "@/lib/auth/permission-resolver";
 import type { ProcedureTemplateEditHistoryOrigin as EditHistoryOrigin } from "@/lib/domain/procedure-template-edit-history-fold";
 
@@ -252,7 +253,11 @@ export async function touchTemplate(tx: Tx, templateId: string): Promise<string>
 
 async function runStructuralValidation(tx: Tx, templateId: string): Promise<StructuralValidationSummary> {
   const nodes = await tx
-    .select({ id: procedureTemplateNodes.id, nodeType: procedureTemplateNodes.nodeType })
+    .select({
+      id: procedureTemplateNodes.id,
+      nodeType: procedureTemplateNodes.nodeType,
+      nextProcedureTemplateId: procedureTemplateNodes.nextProcedureTemplateId,
+    })
     .from(procedureTemplateNodes)
     .where(eq(procedureTemplateNodes.procedureTemplateId, templateId));
   const edges = await tx
@@ -278,7 +283,13 @@ async function runStructuralValidation(tx: Tx, templateId: string): Promise<Stru
     for (const e of entries) nodeIdsWithTroubleshootingContent.add(e.nodeId);
   }
 
-  const issues = validateProcedureGraphStructure(nodes, edges, { nodeIdsWithChecklistContent, nodeIdsWithTroubleshootingContent });
+  const nextProcedureLinks = await loadNextProcedureLinkContext(tx, templateId, nodes);
+
+  const issues = validateProcedureGraphStructure(nodes, edges, {
+    nodeIdsWithChecklistContent,
+    nodeIdsWithTroubleshootingContent,
+    nextProcedureLinks,
+  });
   return { ...countBySeverity(issues), issues };
 }
 

@@ -188,6 +188,10 @@ export const PROCEDURE_VALIDATION_ISSUE_TYPES = [
   "INVALID_BRANCH_TYPE_FOR_NODE",
   "REFERENCE_NODE_IN_EXECUTABLE_PATH",
   "INVALID_CHECKLIST_OR_TROUBLESHOOTING_REFERENCE",
+  // 2026-11-04(줄기 B ④ 조각 ③) — [종료]의 「다음 절차」 지정이 성립하지 않는 경우.
+  // 위 갈래들과 같이 **DB 에 안 쓴다**(구조 검증은 편집기의 [검증]과 게시 관문이
+  // 그 자리에서 만들어 보여 줄 뿐이다). 그래서 enum 마이그레이션이 필요 없다.
+  "INVALID_NEXT_PROCEDURE_LINK",
 ] as const;
 export type ProcedureValidationIssueType = (typeof PROCEDURE_VALIDATION_ISSUE_TYPES)[number];
 export const procedureValidationIssueTypeLabels: Record<ProcedureValidationIssueType, string> = {
@@ -213,6 +217,7 @@ export const procedureValidationIssueTypeLabels: Record<ProcedureValidationIssue
   INVALID_BRANCH_TYPE_FOR_NODE: "노드 유형에 맞지 않는 분기 유형",
   REFERENCE_NODE_IN_EXECUTABLE_PATH: "실행 경로 내 참조 노드",
   INVALID_CHECKLIST_OR_TROUBLESHOOTING_REFERENCE: "체크리스트/고장 진단표 참조 오류",
+  INVALID_NEXT_PROCEDURE_LINK: "이어가기 지정 오류",
 };
 
 export const PROCEDURE_VALIDATION_RESOLUTION_STATUS_CODES = [

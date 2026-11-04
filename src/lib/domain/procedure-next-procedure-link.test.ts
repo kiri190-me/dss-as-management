@@ -6,9 +6,12 @@ import {
   findMisplacedNextProcedureLinks,
   isNextProcedureLinkAllowedOn,
   resolveNextProcedureTarget,
+  validateNextProcedureLinks,
+  type NextProcedureLinkValidationContext,
+  type NextProcedureTargetInfo,
   type ProcedureSeriesCandidate,
 } from "./procedure-next-procedure-link";
-import { PROCEDURE_NODE_TYPE_CODES } from "./procedure-template-types";
+import { PROCEDURE_NODE_TYPE_CODES, type ProcedureNodeType } from "./procedure-template-types";
 
 /**
  * ============================================================================
@@ -134,5 +137,169 @@ describe("이어가기 — ③ 열 수 없을 때 조용히 넘어가지 않는�
       ],
     });
     assert.deepEqual(결과, { ok: true, templateId: "t-5", version: 5 });
+  });
+});
+
+/**
+ * ============================================================================
+ * 검증 (조각 ③) — **무엇이 게시를 막고 무엇이 알리기만 하는가**
+ * ============================================================================
+ * 🔴 여기서 가장 비싼 오답은 「게시본이 있어야 한다」와 「고리」를 ERROR 로
+ * 올리는 것이다. A↔B 가 서로를 가리킨 채 둘 다 초안이면 **어느 쪽도 먼저 게시할
+ * 수 없어** 영영 막힌다. 그래서 갈림 자체를 값으로 잰다.
+ * ============================================================================
+ */
+
+function 검증노드(over: Partial<{ id: string; nodeType: ProcedureNodeType; nextProcedureTemplateId: string | null }> = {}) {
+  return { id: "node-1", nodeType: "END" as ProcedureNodeType, nextProcedureTemplateId: null, ...over };
+}
+
+function 대상(over: Partial<NextProcedureTargetInfo> = {}): NextProcedureTargetInfo {
+  return { code: "mb-repair", name: "(MB) 수리", hasPublishedVersion: true, ...over };
+}
+
+function 맥락(over: Partial<NextProcedureLinkValidationContext> = {}): NextProcedureLinkValidationContext {
+  return {
+    thisCode: "power-check",
+    targets: new Map([["t-9", 대상()]]),
+    seriesLinks: [],
+    ...over,
+  };
+}
+
+describe("이어가기 검증 — ④ 게시를 막는 것(ERROR)", () => {
+  test("🔴 END 가 아닌 노드에 지정이 남아 있으면 막는다 — 화면에 고칠 칸이 없는 상태다", () => {
+    const issues = validateNextProcedureLinks(
+      [검증노드({ nodeType: "TASK", nextProcedureTemplateId: "t-9" })],
+      맥락()
+    );
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0].severity, "ERROR");
+    assert.match(issues[0].message, /\[종료\] 노드에만/);
+  });
+
+  test("🔴 가리킨 판이 사라졌으면 막는다", () => {
+    const issues = validateNextProcedureLinks(
+      [검증노드({ nextProcedureTemplateId: "없는-id" })],
+      맥락()
+    );
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0].severity, "ERROR");
+  });
+
+  test("🔴 자기 계열을 가리키면 막는다 — 끝나자마자 같은 절차가 다시 열린다", () => {
+    const issues = validateNextProcedureLinks(
+      [검증노드({ nextProcedureTemplateId: "t-9" })],
+      맥락({ targets: new Map([["t-9", 대상({ code: "power-check" })]]) })
+    );
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0].severity, "ERROR");
+    assert.match(issues[0].message, /이 절차 자신/);
+  });
+});
+
+describe("이어가기 검증 — ⑤ 알리되 막지 않는 것(WARNING)", () => {
+  test("🔴 가리킨 계열에 게시본이 없으면 **WARNING 이다** — ERROR 면 서로 가리킨 둘이 영영 못 나간다", () => {
+    const issues = validateNextProcedureLinks(
+      [검증노드({ nextProcedureTemplateId: "t-9" })],
+      맥락({ targets: new Map([["t-9", 대상({ hasPublishedVersion: false })]]) })
+    );
+    assert.equal(issues.length, 1);
+    assert.equal(
+      issues[0].severity,
+      "WARNING",
+      "ERROR 로 올리면 A→B · B→A 가 둘 다 초안일 때 어느 쪽도 먼저 게시할 수 없다"
+    );
+    assert.match(issues[0].message, /게시본이 없습니다/);
+  });
+
+  test("🔴 돌아오는 고리도 **WARNING 이다** — 서버가 무한 반복에 빠지는 종류가 아니다", () => {
+    const issues = validateNextProcedureLinks(
+      [검증노드({ nextProcedureTemplateId: "t-9" })],
+      맥락({ seriesLinks: [{ fromCode: "mb-repair", toCode: "power-check" }] })
+    );
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0].severity, "WARNING");
+    assert.match(issues[0].message, /되돌아옵니다/);
+  });
+
+  test("🔴 한 다리 건너 돌아오는 것도 찾는다 (A→B→C→A)", () => {
+    const issues = validateNextProcedureLinks(
+      [검증노드({ nextProcedureTemplateId: "t-9" })],
+      맥락({
+        seriesLinks: [
+          { fromCode: "mb-repair", toCode: "cleaning" },
+          { fromCode: "cleaning", toCode: "power-check" },
+        ],
+      })
+    );
+    assert.equal(issues.length, 1);
+    assert.equal(issues[0].severity, "WARNING");
+  });
+
+  test("🔵 남의 고리는 내 문제가 아니다 — B↔C 가 돌아도 나로 안 오면 조용하다", () => {
+    const issues = validateNextProcedureLinks(
+      [검증노드({ nextProcedureTemplateId: "t-9" })],
+      맥락({
+        seriesLinks: [
+          { fromCode: "mb-repair", toCode: "cleaning" },
+          { fromCode: "cleaning", toCode: "mb-repair" },
+        ],
+      })
+    );
+    assert.deepEqual(issues, [], "남의 고리까지 내 절차의 경고로 적으면 고칠 수 없는 경고가 쌓인다");
+  });
+
+  test("🔵 고리를 따라가다 **멈춘다** — 멈추지 않으면 이 시험이 끝나지 않는다", () => {
+    const issues = validateNextProcedureLinks(
+      [검증노드({ nextProcedureTemplateId: "t-9" })],
+      맥락({
+        seriesLinks: [
+          { fromCode: "mb-repair", toCode: "cleaning" },
+          { fromCode: "cleaning", toCode: "mb-repair" },
+          { fromCode: "mb-repair", toCode: "mb-repair" },
+        ],
+      })
+    );
+    assert.deepEqual(issues, []);
+  });
+});
+
+describe("이어가기 검증 — ⑥ 조용해야 할 때 조용하다", () => {
+  test("🔵 지정이 없으면 아무 말도 안 한다 — 지금 운영의 END 전부가 이 자리다", () => {
+    assert.deepEqual(validateNextProcedureLinks([검증노드()], 맥락()), []);
+  });
+
+  test("🔵 제대로 지정한 END 는 조용하다 — 늘 뭔가 뱉는 것이 아닌지 확인한다", () => {
+    assert.deepEqual(validateNextProcedureLinks([검증노드({ nextProcedureTemplateId: "t-9" })], 맥락()), []);
+  });
+
+  test("🔴 한 노드가 두 가지에 걸리면 **둘 다** 적는다 — 게시본도 없고 고리도 있다", () => {
+    const issues = validateNextProcedureLinks(
+      [검증노드({ nextProcedureTemplateId: "t-9" })],
+      맥락({
+        targets: new Map([["t-9", 대상({ hasPublishedVersion: false })]]),
+        seriesLinks: [{ fromCode: "mb-repair", toCode: "power-check" }],
+      })
+    );
+    assert.equal(issues.length, 2, "하나만 적으면 고친 뒤에야 나머지를 알게 된다");
+    assert.deepEqual(new Set(issues.map((i) => i.severity)), new Set(["WARNING"]));
+  });
+
+  test("🔵 사람이 읽는 글에 꾸밈 글자(별표)가 안 섞인다 — 화면에 그대로 찍힌다", () => {
+    const all = [
+      ...validateNextProcedureLinks([검증노드({ nodeType: "TASK", nextProcedureTemplateId: "t-9" })], 맥락()),
+      ...validateNextProcedureLinks([검증노드({ nextProcedureTemplateId: "없는-id" })], 맥락()),
+      ...validateNextProcedureLinks(
+        [검증노드({ nextProcedureTemplateId: "t-9" })],
+        맥락({ targets: new Map([["t-9", 대상({ hasPublishedVersion: false })]]) })
+      ),
+      ...validateNextProcedureLinks(
+        [검증노드({ nextProcedureTemplateId: "t-9" })],
+        맥락({ seriesLinks: [{ fromCode: "mb-repair", toCode: "power-check" }] })
+      ),
+    ];
+    assert.equal(all.length, 4);
+    for (const issue of all) assert.ok(!issue.message.includes("**"), `별표가 섞였다: ${issue.message}`);
   });
 });

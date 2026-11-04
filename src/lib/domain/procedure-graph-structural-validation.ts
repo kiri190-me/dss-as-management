@@ -1,4 +1,8 @@
 import type { ProcedureBranchType, ProcedureNodeType, ProcedureValidationIssueType, ProcedureValidationSeverity } from "./procedure-template-types";
+import {
+  validateNextProcedureLinks,
+  type NextProcedureLinkValidationContext,
+} from "./procedure-next-procedure-link";
 
 /**
  * Phase 4A — deterministic structural validation over an already-imported
@@ -20,6 +24,12 @@ import type { ProcedureBranchType, ProcedureNodeType, ProcedureValidationIssueTy
 export type StructuralValidationNode = {
   id: string;
   nodeType: ProcedureNodeType;
+  /**
+   * [종료]의 「다음 절차」(2026-11-04, 줄기 B ④ 조각 ③).
+   * 🔵 **선택이다** — 이 값을 안 넘기는 호출부에서는 이어가기 갈래가 아예 안
+   * 돌고, 나머지 구조 검증은 한 치도 달라지지 않는다.
+   */
+  nextProcedureTemplateId?: string | null;
 };
 
 export type StructuralValidationEdge = {
@@ -34,6 +44,16 @@ export type StructuralValidationContext = {
   nodeIdsWithChecklistContent?: Set<string>;
   /** node ids that already have at least one procedure_troubleshooting_entries row — only TROUBLESHOOTING nodes are checked against this. */
   nodeIdsWithTroubleshootingContent?: Set<string>;
+  /**
+   * [종료]의 「다음 절차」를 함께 검증하기 위한 바깥 사실들 (2026-11-04, 줄기 B ④ 조각 ③).
+   *
+   * 🔵 **안 넘기면 그 갈래를 아예 안 돈다.** 이 검증만 다른 절차의 행을 봐야 해서
+   * 조회가 채워 넘겨야 하는데, 부르는 곳이 여럿이고 전부가 그 조회를 할 수 있는
+   * 것은 아니다. 없으면 「문제 없음」이 아니라 **「안 봄」**이다 — 그 둘을 섞지
+   * 않으려고 선택으로 두고, 게시 관문이 쓰는 길(runStructuralValidation)에서는
+   * 반드시 채운다.
+   */
+  nextProcedureLinks?: NextProcedureLinkValidationContext;
 };
 
 export type StructuralValidationIssue = {
@@ -206,6 +226,32 @@ export function validateProcedureGraphStructure(
     const hasAnyEdge = (incomingByNode.get(n.id)?.length ?? 0) > 0 || (outgoingByNode.get(n.id)?.length ?? 0) > 0;
     if (hasAnyEdge && !reachable.has(n.id)) {
       issues.push({ severity: "WARNING", issueType: "UNREACHABLE_NODE", message: "시작 노드로부터 도달할 수 없는 노드입니다.", nodeId: n.id });
+    }
+  }
+
+  // [종료]의 「다음 절차」 (2026-11-04, 줄기 B ④ 조각 ③).
+  //
+  // 🔵 **맨 끝에 둔다.** 이 갈래만 다른 절차의 행을 봐야 해서 바깥 사실
+  //    (nextProcedureLinks)이 있어야 돌고, 없으면 통째로 건너뛴다. 앞의 규칙들은
+  //    이 그래프 안의 값만으로 판정하므로 여기 넣고 빼도 한 글자도 안 바뀐다.
+  // 🔴 규칙 자체는 여기 적지 않는다 — 실행할 때 무엇이 막히는지를 정하는 곳과
+  //    **같은 모듈**에 둔다(procedure-next-procedure-link.ts). 두 벌로 적으면
+  //    「막히는데 안 알려 주거나, 안 막히는데 막는다고 적는」 날이 온다.
+  if (context.nextProcedureLinks) {
+    for (const issue of validateNextProcedureLinks(
+      nodes.map((n) => ({
+        id: n.id,
+        nodeType: n.nodeType,
+        nextProcedureTemplateId: n.nextProcedureTemplateId ?? null,
+      })),
+      context.nextProcedureLinks
+    )) {
+      issues.push({
+        severity: issue.severity,
+        issueType: "INVALID_NEXT_PROCEDURE_LINK",
+        message: issue.message,
+        nodeId: issue.nodeId,
+      });
     }
   }
 
