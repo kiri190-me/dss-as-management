@@ -9,6 +9,7 @@ import {
   type ProcedureTemplateTrashResult,
 } from "@/lib/db/mutations/procedure-templates";
 import { isValidUuid } from "@/lib/validation/procedure-validation-resolution-input";
+import { PROCEDURE_DELETABLE_VERSION_STATUSES } from "@/lib/domain/procedure-version-deletion";
 
 const MAX_BULK_ITEMS = 200;
 const MAX_REASON_LENGTH = 2000;
@@ -204,6 +205,51 @@ export async function discardProcedureTemplateDraftAction(input: {
   } catch (err) {
     const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: string }).code : undefined;
     console.error("discardProcedureTemplateDraftAction: unexpected DB error", { id: input.templateId, code });
+    return {
+      ok: false,
+      code: "DATABASE_UNAVAILABLE",
+      message: "일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+    };
+  }
+}
+
+/**
+ * 2026-11-04 — [절차 상세] > [버전 목록]의 **[삭제]**. 한 판을 휴지통으로 보낸다.
+ *
+ * ── 🔴 왜 [초안 버리기] 액션을 그대로 안 쓰는가 ─────────────────────────
+ * 허용하는 상태가 다르다. 그쪽은 `requireStatus: "DRAFT"` 하나이고, 그 좁음이
+ * 그 액션의 약속이다("게시된 판이 그 길로 사라지는 일은 없어야 한다" — 바로 위
+ * 주석). 여기서 만료본을 받으려고 그 약속을 넓히면, 편집기의 단추까지 함께
+ * 넓어진다. 그래서 **같은 mutation 을 다른 상태 묶음으로** 부르는 얇은 액션을
+ * 하나 더 둔다 — 지우는 규칙(참조 검사·권한·분류)은 전부 그 mutation 한 곳이다.
+ *
+ * ── 🔴 상태 묶음을 여기 적지 않는다 ─────────────────────────────────────
+ * 화면이 「어느 줄에 단추를 내는가」를 정할 때 쓰는 것과 **같은 상수**를 넘긴다
+ * (PROCEDURE_DELETABLE_VERSION_STATUSES). 두 벌로 적으면 화면에는 단추가 있는데
+ * 누르면 늘 거절되는 날이 온다.
+ *
+ * 사유는 받지 않는다 — [초안 버리기]와 같은 까닭이다(그쪽 주석 2번).
+ */
+export async function deleteProcedureTemplateVersionAction(input: {
+  templateId: string;
+}): Promise<ProcedureTemplateDiscardResult> {
+  const actor = await resolveActorId();
+  if (!actor.ok) return actor.result;
+
+  if (!isValidUuid(input?.templateId)) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "요청 정보를 확인할 수 없습니다." };
+  }
+
+  try {
+    return await softDeleteProcedureTemplate({
+      templateId: input.templateId,
+      actorUserId: actor.userId,
+      reason: null,
+      requireStatus: PROCEDURE_DELETABLE_VERSION_STATUSES,
+    });
+  } catch (err) {
+    const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: string }).code : undefined;
+    console.error("deleteProcedureTemplateVersionAction: unexpected DB error", { id: input.templateId, code });
     return {
       ok: false,
       code: "DATABASE_UNAVAILABLE",

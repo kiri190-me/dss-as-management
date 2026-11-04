@@ -31,6 +31,7 @@ import {
   listTechnicalProcedureTemplates,
 } from "../queries/procedure-templates";
 import { MASTER_DATA_TRASH_RETENTION_DAYS } from "@/lib/domain/master-data-trash-retention";
+import { PROCEDURE_DELETABLE_VERSION_STATUSES } from "@/lib/domain/procedure-version-deletion";
 
 /**
  * 기술 절차 휴지통 — 실제 DB 통합 테스트.
@@ -1014,5 +1015,136 @@ describe("줄기 B-⑦ 가 — 복원이 초안을 겹치게 하지 않는다", 
     assert.equal(secondResult.code, "CONFLICT");
     assert.equal(secondResult.existingDraftId, base.id);
     assert.deepEqual(await liveDraftIdsOf(base.code), [base.id]);
+  });
+});
+
+/**
+ * ============================================================================
+ * [버전 목록]의 [삭제] — 상태 묶음으로 막는 길 (2026-11-04)
+ * ============================================================================
+ * 사용자가 말한 것: "[버전 목록]에 [삭제]버튼도 만들어줘."
+ *
+ * 그 길은 새 mutation 을 만들지 않았다. 같은 softDeleteProcedureTemplate 을
+ * **상태 묶음**(초안 · 만료됨)으로 부를 뿐이다. 여기서 재는 것은 그 묶음이
+ * 진짜 행에 어떻게 걸리는가다 — 규칙 자체는 unit 목록의
+ * procedure-version-deletion.test.ts 가, 화면은 components 목록의
+ * procedure-series-and-version-list.test.tsx 가 잰다.
+ *
+ * 🔴 상수를 그대로 쓴다. 여기에 ["DRAFT","ARCHIVED"] 라고 다시 적으면, 화면과
+ * 서버가 다른 묶음을 쓰기 시작해도 이 시험은 계속 통과한다.
+ * ============================================================================
+ */
+describe("[버전 목록]의 [삭제] — 초안·만료본만, 게시본은 못 지운다", () => {
+  async function templateWithStatus(suffix: string, status: "DRAFT" | "PUBLISHED" | "ARCHIVED") {
+    const template = await createTestTemplate(suffix, { nodeCount: 1 });
+    if (status !== "DRAFT") {
+      await db
+        .update(procedureTemplates)
+        .set({
+          status,
+          publishedByUserId: adminId,
+          publishedAt: new Date(),
+          ...(status === "ARCHIVED" ? { archivedByUserId: adminId, archivedAt: new Date() } : {}),
+        })
+        .where(eq(procedureTemplates.id, template.id));
+    }
+    // 🔵 표본 확인 — 세운 상태가 정말 그 상태다. 안 서면 아래가 공짜로 통과한다.
+    assert.equal((await readTemplate(template.id)).status, status);
+    return template;
+  }
+
+  const deleteAsVersionList = (templateId: string) =>
+    softDeleteProcedureTemplate({
+      templateId,
+      actorUserId: adminId,
+      reason: null,
+      requireStatus: PROCEDURE_DELETABLE_VERSION_STATUSES,
+    });
+
+  test("🔴 지금 게시 중인 판은 못 지운다 — 현장에서 쓰이는 절차다", async () => {
+    const template = await templateWithStatus("VERSION-DELETE-PUBLISHED", "PUBLISHED");
+
+    const result = await deleteAsVersionList(template.id);
+    assert.equal(result.ok, false, "게시본이 이 길로 사라지면 현장에서 절차가 없어진다");
+    if (!result.ok) {
+      assert.equal(result.code, "CONFLICT");
+      assert.match(result.message, /게시됨 상태입니다/, "거절하는 까닭이 상태라면 상태를 말해야 한다");
+      assert.match(result.message, /초안 · 만료됨 상태의 절차만/, "무엇은 지울 수 있는지도 함께 말한다");
+    }
+    assert.equal((await readTemplate(template.id)).isDeleted, false);
+  });
+
+  test("만료본은 지워진다 — 더 이상 쓰이지 않는 판이다", async () => {
+    const template = await templateWithStatus("VERSION-DELETE-ARCHIVED", "ARCHIVED");
+
+    const result = await deleteAsVersionList(template.id);
+    assert.equal(result.ok, true, `만료본을 못 지웠다: ${JSON.stringify(result)}`);
+    const deleted = await readTemplate(template.id);
+    assert.equal(deleted.isDeleted, true);
+    assert.equal(deleted.deletedBy, adminId);
+    assert.ok(deleted.deletedAt, "소프트 삭제 네 칸이 반만 채워지면 안 된다");
+  });
+
+  test("초안도 그대로 지워진다 — 편집기의 [초안 버리기]와 같은 잣대", async () => {
+    const template = await templateWithStatus("VERSION-DELETE-DRAFT", "DRAFT");
+
+    const result = await deleteAsVersionList(template.id);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal((await readTemplate(template.id)).isDeleted, true);
+  });
+
+  test("🔴 수행 기록이 붙은 만료본은 막히고, 그 까닭이 「게시 중」과 **다른 글**이다", async () => {
+    const template = await templateWithStatus("VERSION-DELETE-EXECUTED", "ARCHIVED");
+
+    const [repairCase] = await db.select({ id: repairCases.id }).from(repairCases).limit(1);
+    assert.ok(repairCase, "expected at least one repair case in the test DB");
+    const [execution] = await db
+      .insert(procedureCaseExecutions)
+      .values({
+        repairCaseId: repairCase.id,
+        procedureTemplateId: template.id,
+        templateCategory: "TECHNICAL_TASK",
+        startedBy: adminId,
+      })
+      .returning({ id: procedureCaseExecutions.id });
+    touchedExecutionIds.push(execution.id);
+
+    try {
+      const result = await deleteAsVersionList(template.id);
+      assert.equal(result.ok, false, "지난 수리의 근거가 사라지면 안 된다");
+      if (!result.ok) {
+        assert.equal(result.code, "CONFLICT");
+        assert.match(result.message, /수행 기록/, "쓰이고 있다는 까닭이어야 한다");
+        assert.ok(
+          !/상태의 절차만 이 길로/.test(result.message),
+          "만료본인데 상태를 탓하면 사람이 할 일을 못 고른다"
+        );
+      }
+      assert.equal((await readTemplate(template.id)).isDeleted, false);
+    } finally {
+      // 🔴 남의 수리 건에 꽂은 줄이다 — 단언이 깨져도 반드시 치운다.
+      await db.delete(procedureCaseExecutions).where(eq(procedureCaseExecutions.id, execution.id));
+    }
+  });
+
+  test("🔵 지운 판은 휴지통에 보이고 되살릴 수 있다", async () => {
+    const template = await templateWithStatus("VERSION-DELETE-RESTORE", "ARCHIVED");
+
+    // 🔵 먼저 표본 — 지우기 전에는 휴지통에 없다.
+    const trashBefore = await listDeletedTechnicalProcedureTemplates();
+    assert.ok(!trashBefore.some((row) => row.id === template.id));
+
+    assert.equal((await deleteAsVersionList(template.id)).ok, true);
+
+    const trash = await listDeletedTechnicalProcedureTemplates();
+    const trashed = trash.find((row) => row.id === template.id);
+    assert.ok(trashed, "휴지통에 안 보이면 되살릴 길이 없다");
+    assert.equal(trashed.status, "ARCHIVED", "삭제 당시 상태가 그대로 보여야 어느 판이었는지 안다");
+
+    const restored = await restoreProcedureTemplate({ templateId: template.id, actorUserId: adminId });
+    assert.equal(restored.ok, true, JSON.stringify(restored));
+    const back = await readTemplate(template.id);
+    assert.equal(back.isDeleted, false);
+    assert.equal(back.status, "ARCHIVED", "되살아난 판의 상태는 그대로다 — 복원이 게시 상태를 바꾸면 안 된다");
   });
 });

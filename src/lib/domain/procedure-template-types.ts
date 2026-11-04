@@ -13,10 +13,21 @@ export const PROCEDURE_TEMPLATE_STATUS_CODES = [
   "ARCHIVED",
 ] as const;
 export type ProcedureTemplateStatus = (typeof PROCEDURE_TEMPLATE_STATUS_CODES)[number];
+/**
+ * 🔴 ARCHIVED 의 화면 글자는 2026-11-04 에 "보관됨" → "만료됨" 으로 바뀌었다.
+ * **enum 값은 한 글자도 안 바뀌었다** — 사용자가 말한 [만료됨]과 ARCHIVED 의
+ * 뜻이 같아서(스키마 주석: "발행된 절차를 '이제 안 씀'으로 내리는 수명주기의
+ * 다음 단계") 값을 늘리지 않고 글자만 옮겼다. 까닭과 그때 센 것(개발 DB 의
+ * ARCHIVED 행 0개)은 procedure-template-publish-policy.ts 머리말에 있다.
+ *
+ * ⚠️ 이 표는 **기술 절차(procedure_templates)** 전용이다. 워크플로 쪽에도 같은
+ * 이름의 상태가 따로 있고(app/(app)/workflows/[code]/page.tsx 의 제 표),
+ * 그쪽은 여전히 "보관됨"이다 — 다른 시스템이라 함께 바꾸지 않는다.
+ */
 export const procedureTemplateStatusLabels: Record<ProcedureTemplateStatus, string> = {
   DRAFT: "초안",
   PUBLISHED: "게시됨",
-  ARCHIVED: "보관됨",
+  ARCHIVED: "만료됨",
 };
 
 export const PROCEDURE_TEMPLATE_SOURCE_TYPE_CODES = ["MANUAL", "EXCEL_IMPORT"] as const;

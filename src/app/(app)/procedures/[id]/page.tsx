@@ -9,6 +9,7 @@ import { getAuthSource } from "@/lib/config/auth-source";
 import {
   getProcedureTemplateDetail,
   listProcedureTemplateVersions,
+  listUndeletableProcedureTemplateIds,
 } from "@/lib/db/queries/procedure-templates";
 import {
   canViewAllProcedureTemplateStatuses,
@@ -22,6 +23,7 @@ import {
 import {
   canManageTechnicalTemplates,
   canActorPublishTemplateOfCategory,
+  canDeleteTechnicalTemplates,
 } from "@/lib/auth/technical-procedure-template-authorization";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { actorMay } from "@/lib/auth/developer-promotion";
@@ -112,6 +114,24 @@ export default async function ProcedureTemplateDetailPage({
     actorMay(actingUser, (role) => canActorPublishTemplateOfCategory(role, template.category)) &&
     (await mayPublishTemplateOfCategory(actingUser, template.category));
 
+  // ── [버전 목록]의 [삭제] 노출 판정 (2026-11-04 사용자 요청) ────────────
+  // 🔴 편집기의 [초안 버리기]와 **글자 그대로 같은 두 관문**이다
+  //    (/procedures/[id]/edit/page.tsx 의 canDiscardDraft). 한쪽만 고치면
+  //    "편집기에서는 되는데 상세에서는 안 되는" 단추가 생긴다.
+  //     ① 역할 고정 canDeleteTechnicalTemplates — softDeleteProcedureTemplate 이
+  //        트랜잭션 안에서 보는 관문 그대로다(분류까지 본다: TECHNICAL_TASK 가
+  //        아니면 어떤 역할로도 통과하지 못한다).
+  //     ② 설정 technicalProcedures.lifecycle — 목록 화면의 [삭제 모드]가 쓰는 값.
+  const canDeleteVersion =
+    actorMay(actingUser, (role) => canDeleteTechnicalTemplates(role, template.category)) &&
+    (await hasPermission(actingUser, "technicalProcedures.lifecycle", "MANAGE"));
+
+  // 🔴 「쓰이고 있어 못 지우는 판」은 **서버가 센다.** 목록 화면의 [삭제 모드]가
+  //    쓰는 것과 **같은 조회**다 — 세는 잣대가 둘이 되면 화면에는 단추가 있는데
+  //    서버는 거절하는 날이 온다.
+  //    🔵 권한이 없으면 아예 읽지 않는다(쓸 데가 없는 조회를 매번 하지 않게).
+  const referencedVersionIds = canDeleteVersion ? [...(await listUndeletableProcedureTemplateIds())] : [];
+
   return (
     <Suspense fallback={null}>
       <ProcedureTemplateDetailScreen
@@ -121,6 +141,8 @@ export default async function ProcedureTemplateDetailPage({
         canCreateDraftVersion={await mayCreateDraftVersionOfCategory(actingUser, template.category)}
         canEditDraft={await mayEditTemplateOfCategory(actingUser, template.category)}
         canPublish={canPublish}
+        canDeleteVersion={canDeleteVersion}
+        referencedVersionIds={referencedVersionIds}
       />
     </Suspense>
   );

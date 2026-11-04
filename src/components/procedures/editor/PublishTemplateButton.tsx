@@ -13,12 +13,19 @@ import { publishProcedureTemplateAction } from "@/lib/server/actions/procedure-t
  * <dialog> 인 이유는 이 저장소의 다른 확인 창(InvalidateWorkRecordDialog)과
  * 같다 — 브라우저 기본 창은 화면 언어·모양을 맞출 수 없고, 무엇이 왜
  * 되돌릴 수 없는지 설명할 자리도 없다.
+ *
+ * 🔴 2026-11-04 — **만료본을 다시 올리는 길도 이 단추 하나다.** 초안 게시와
+ * 서버 함수가 같으므로(publishProcedureTemplateAction), 확인 창도 검증도 실패
+ * 이유를 보이는 자리도 저절로 같다. 다른 단추를 새로 만들었다면 한쪽만 고쳐지는
+ * 날이 왔을 것이다. 달라지는 것은 **글자뿐**이다(isRepublish).
  */
 export default function PublishTemplateButton({
   templateId,
   templateName,
   isReferenceOnly = false,
   disabledReason = null,
+  isRepublish = false,
+  expiringPublishedVersions = [],
 }: {
   templateId: string;
   templateName: string;
@@ -42,6 +49,20 @@ export default function PublishTemplateButton({
    * 생긴다 — 게시는 되돌릴 수 없다.
    */
   disabledReason?: string | null;
+  /**
+   * 🔴 2026-11-04 — 지금 [만료됨](ARCHIVED) 상태인 판을 **다시 올리는** 길이다.
+   * 단추 글자가 [게시]에서 [다시 게시]로 바뀌고, 창이 "이 판이 다시 현재
+   * 게시본이 된다"고 말한다. 서버 길은 초안 게시와 **같은 함수**다 —
+   * 확인 창도 검증도 이미 그 길 안에 있고, 새로 만들면 한쪽만 고쳐지는 날이 온다.
+   */
+  isRepublish?: boolean;
+  /**
+   * 이번 게시에 딸려 [만료됨]으로 내려갈 판 번호들. 비어 있으면 내려갈 것이
+   * 없다는 뜻이거나, **부르는 쪽이 그 사실을 모른다는 뜻**이다(편집기는 계열의
+   * 다른 판을 읽지 않는다). 그래서 창은 번호를 모를 때도 규칙 자체는 늘 적는다 —
+   * 모른다고 아무 말도 안 하면, 사람은 옛 게시본이 그대로 남는 줄 안다.
+   */
+  expiringPublishedVersions?: number[];
 }) {
   const router = useRouter();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -94,7 +115,7 @@ export default function PublishTemplateButton({
         title={disabledReason ?? undefined}
         className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
       >
-        게시
+        {isRepublish ? "다시 게시" : "게시"}
       </button>
       {disabledReason && <span className="text-xs text-amber-700 dark:text-amber-400">{disabledReason}</span>}
 
@@ -111,8 +132,34 @@ export default function PublishTemplateButton({
           기술 절차 게시
         </h2>
         <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-          &ldquo;{templateName}&rdquo; 을(를) 게시합니다.
+          &ldquo;{templateName}&rdquo; 을(를) {isRepublish ? "다시 " : ""}게시합니다.
         </p>
+        {/*
+          🔴 "한 절차에 게시본은 하나" 는 **번호를 몰라도 늘 적는다.** 편집기는
+          계열의 다른 판을 읽지 않아 expiringPublishedVersions 가 비어 있는데,
+          그때 아무 말도 안 하면 사람은 옛 게시본이 그대로 남는 줄 안다 —
+          실제로 2026-11-04 전까지는 그랬다.
+        */}
+        <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+          한 절차에 게시본은 하나입니다 — 같은 절차의 다른 게시본은 게시와 동시에{" "}
+          <span className="font-medium">[만료됨]</span>으로 내려갑니다.
+          {expiringPublishedVersions.length > 0 && (
+            <>
+              {" "}
+              지금 게시본{" "}
+              <span className="font-medium">
+                {expiringPublishedVersions.map((version) => `v${version}`).join(" · ")}
+              </span>
+              이(가) 내려갑니다.
+            </>
+          )}
+        </p>
+        {isRepublish && (
+          <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
+            이 판은 지금 <span className="font-medium">[만료됨]</span> 상태입니다. 다시 게시하면 이 판이 현재 게시본이
+            되고, 만료된 판도 언제든 다시 게시할 수 있습니다.
+          </p>
+        )}
         {isReferenceOnly ? (
           <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
             이 절차는 <span className="font-medium">참고용</span>이라, 게시해도 A/S 접수 건의{" "}

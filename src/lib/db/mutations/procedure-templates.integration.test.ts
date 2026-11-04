@@ -15,6 +15,7 @@ import {
   procedureTemplateValidationIssues,
   procedureReferenceItems,
   procedureTemplateEditHistory,
+  auditLogs,
   users,
 } from "../schema";
 import {
@@ -253,6 +254,13 @@ after(async () => {
     // this was never exercised; renameTechnicalProcedureTemplate now writes
     // UPDATE_TEMPLATE_METADATA on every successful rename.
     await db.delete(procedureTemplateEditHistory).where(inArray(procedureTemplateEditHistory.procedureTemplateId, allIds));
+    // 2026-11-04 — 게시가 옛 게시본을 [만료됨]으로 내리면서 **감사 이력을
+    // 남기기 시작했다.** FK 가 없어서(audit_logs 는 polymorphic 참조) 지우지
+    // 않아도 템플릿 삭제는 성공하지만, 그러면 시험이 돌 때마다 이력이 쌓인다.
+    // 이웃 시험(procedure-templates-trash.integration.test.ts)이 쓰는 그 방식 그대로다.
+    await db
+      .delete(auditLogs)
+      .where(and(eq(auditLogs.targetEntity, "procedure_templates"), inArray(auditLogs.targetRecordId, allIds)));
     await db.delete(procedureTemplates).where(inArray(procedureTemplates.id, allIds));
   }
 
@@ -1000,6 +1008,245 @@ describe("archiveProcedureTemplate", () => {
     const doubleArchive = await archiveProcedureTemplate(imported.id, superAdminId);
     assert.equal(doubleArchive.ok, false);
     if (!doubleArchive.ok) assert.equal(doubleArchive.code, "CONFLICT");
+  });
+});
+
+/**
+ * ============================================================================
+ * 한 계열(code)에 게시본은 하나 — 게시하면 옛 게시본이 [만료됨]이 된다 (2026-11-04)
+ * ============================================================================
+ * 사용자가 말한 것: "지금 게시된 것이 있다면 그 다른 버전은 [만료됨]이 되고,
+ * 만료됨 에도 [게시]를 둬서 다시 게시할 수 있도록 … 한 제목 안에서 한개의
+ * 버전만 게시상태로."
+ *
+ * 🔵 재는 것을 나눠 두었다 — 고르는 **규칙**은 unit 목록의
+ * procedure-template-publish-policy.test.ts 가 값으로, 화면 배선과 "한
+ * 트랜잭션인가"의 **구조**는 components 목록의 procedure-publish-flow.test.tsx 가
+ * 원본 글자로 잰다. 여기서는 **진짜 행이 그렇게 바뀌는가**만 본다.
+ *
+ * 🔴 모든 단언 앞에 "그 게시본이 정말 있었는가"를 먼저 세운다. 안 그러면
+ * "옛 게시본이 만료됐다"가 **게시본이 애초에 없어서** 공짜로 통과한다.
+ * ============================================================================
+ */
+describe("publishProcedureTemplate — 한 계열에 게시본은 하나", () => {
+  /** 한 계열의 (판 번호 → 상태) — 단언을 한 줄로 읽히게 한다. */
+  async function statusByVersion(code: string): Promise<Record<number, string>> {
+    const rows = await db
+      .select({ version: procedureTemplates.version, status: procedureTemplates.status })
+      .from(procedureTemplates)
+      .where(and(eq(procedureTemplates.code, code), eq(procedureTemplates.isDeleted, false)));
+    return Object.fromEntries(rows.map((r) => [r.version, r.status as string]));
+  }
+
+  async function rowOf(templateId: string) {
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, templateId));
+    return row;
+  }
+
+  /** 그 판을 내린 감사 이력 — 없으면 null. */
+  async function expiryAuditFor(templateId: string) {
+    const rows = await db
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.targetEntity, "procedure_templates"), eq(auditLogs.targetRecordId, templateId)));
+    return rows.filter((r) => r.actionType === "STATUS_CHANGE");
+  }
+
+  /** v1 을 게시해 둔 계열 하나. 돌려주는 것은 code 와 v1 의 id. */
+  async function publishedV1(suffix: string) {
+    const code = uniqueCode(suffix);
+    const imported = await importTemplate({ code, includeErrorIssue: false });
+    assert.equal(imported.ok, true, JSON.stringify(imported));
+    if (!imported.ok) throw new Error("unreachable");
+    const published = await publishProcedureTemplate(imported.id, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+    return { code, v1Id: imported.id };
+  }
+
+  /** 지금 게시본에서 새 초안을 떠서 그 id 를 돌려준다. */
+  async function draftFrom(publishedId: string) {
+    const next = await createNewDraftVersion(publishedId, superAdminId);
+    assert.equal(next.ok, true, JSON.stringify(next));
+    if (!next.ok) throw new Error("unreachable");
+    createdTemplateIds.push(next.id);
+    return next.id;
+  }
+
+  test("34. 🔴 가: 게시하면 같은 계열의 옛 게시본이 [만료됨](ARCHIVED)으로 내려간다", async () => {
+    const { code, v1Id } = await publishedV1("expire-on-publish");
+    const v2Id = await draftFrom(v1Id);
+
+    // 🔵 먼저 표본 — 내려갈 게시본이 **정말 있었다.**
+    assert.deepEqual(await statusByVersion(code), { 1: "PUBLISHED", 2: "DRAFT" });
+
+    const published = await publishProcedureTemplate(v2Id, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+
+    assert.deepEqual(await statusByVersion(code), { 1: "ARCHIVED", 2: "PUBLISHED" });
+
+    const v1 = await rowOf(v1Id);
+    assert.ok(v1.archivedAt, "언제 내려갔는지가 비면 수명주기 칸이 반만 채워진다");
+    assert.equal(v1.archivedByUserId, superAdminId, "게시를 누른 사람이 들어간다");
+    // 게시된 판의 내용은 한 칸도 안 건드린다 — 내려간 것은 상태뿐이다.
+    assert.equal(v1.publishedByUserId, superAdminId);
+    assert.ok(v1.publishedAt, "게시 자국은 그대로 남는다 — 언제 쓰였던 판인지가 사라지면 안 된다");
+  });
+
+  test("35. 🔴 가: 다른 계열은 한 줄도 안 건드린다", async () => {
+    const other = await publishedV1("other-lineage");
+    const { code, v1Id } = await publishedV1("expire-scope");
+    const v2Id = await draftFrom(v1Id);
+
+    // 🔵 먼저 표본 — 이웃 계열이 게시 상태로 서 있다.
+    assert.deepEqual(await statusByVersion(other.code), { 1: "PUBLISHED" });
+
+    const published = await publishProcedureTemplate(v2Id, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+
+    assert.deepEqual(await statusByVersion(code), { 1: "ARCHIVED", 2: "PUBLISHED" });
+    assert.deepEqual(await statusByVersion(other.code), { 1: "PUBLISHED" }, "남의 계열이 내려갔다");
+    assert.deepEqual(await expiryAuditFor(other.v1Id), [], "남의 계열에 이력이 남았다");
+  });
+
+  test("36. 🔴 가: 감사 이력에 '게시에 딸려 내려갔다'는 표시가 남는다", async () => {
+    const { v1Id } = await publishedV1("expire-audit");
+    const v2Id = await draftFrom(v1Id);
+
+    // 🔵 먼저 표본 — 내리기 전에는 이 판에 상태 변경 이력이 없다.
+    assert.deepEqual(await expiryAuditFor(v1Id), []);
+
+    const published = await publishProcedureTemplate(v2Id, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+
+    const audits = await expiryAuditFor(v1Id);
+    assert.equal(audits.length, 1, "내려간 판마다 한 줄이어야 한다");
+    const [audit] = audits;
+    assert.equal(audit.actorUserId, superAdminId);
+    const before = audit.previousValue as Record<string, unknown>;
+    const after = audit.newValue as Record<string, unknown>;
+    assert.equal(before.status, "PUBLISHED", "무엇이었는지");
+    assert.equal(after.status, "ARCHIVED", "무엇이 되었는지");
+    // 🔴 사람이 손으로 내린 것과 가르는 열쇠. 이것이 없으면 둘 다 그냥
+    //    STATUS_CHANGE 라 영영 구분되지 않는다.
+    assert.equal(after.expiredByPublish, true);
+    assert.equal(
+      after.reason,
+      "같은 절차의 다른 판이 게시되어 시스템이 [만료됨]으로 내렸습니다.",
+      "처리자 칸에는 게시를 누른 사람이 서 있다 — 이 문장이 없으면 그 사람이 손으로 내린 것으로 읽힌다"
+    );
+    assert.equal(after.publishedTemplateId, v2Id, "무엇에 딸려 내려갔는지");
+    assert.equal(after.publishedVersion, 2);
+
+    // 🔵 견줄 쪽 — 올라간 판에는 이 이력이 안 붙는다.
+    assert.deepEqual(await expiryAuditFor(v2Id), []);
+  });
+
+  test("37. 🔴 가: 게시가 거절되면 **옛 게시본도 그대로다** — 한 트랜잭션이다", async () => {
+    const { code, v1Id } = await publishedV1("expire-rollback");
+    const v2Id = await draftFrom(v1Id);
+    // 새 초안에 미해결 ERROR 를 하나 심는다. createNewDraftVersion 은 검증
+    // 이슈를 일부러 안 옮기므로(그 함수의 주석), 여기서 직접 넣어야 한다.
+    await db.insert(procedureTemplateValidationIssues).values({
+      procedureTemplateId: v2Id,
+      severity: "ERROR",
+      issueType: "DANGLING_CONNECTOR",
+      message: "통합 시험용 미해결 오류",
+      sourceWorksheet: "(TEST) 가상 시트",
+      sourceReference: "A1",
+    });
+
+    // 🔵 먼저 표본 — 막히기 전의 모습.
+    assert.deepEqual(await statusByVersion(code), { 1: "PUBLISHED", 2: "DRAFT" });
+
+    const blocked = await publishProcedureTemplate(v2Id, superAdminId);
+    assert.equal(blocked.ok, false);
+    if (!blocked.ok) assert.equal(blocked.code, "HAS_UNRESOLVED_ERRORS");
+
+    // 🔴 둘 다 안 바뀌어야 한다. v1 만 내려가고 v2 는 안 올라가면, 그 계열은
+    //    게시본이 **하나도 없는** 상태로 남는다(현장에서 불러올 수 없게 된다).
+    assert.deepEqual(await statusByVersion(code), { 1: "PUBLISHED", 2: "DRAFT" });
+    const v1 = await rowOf(v1Id);
+    assert.equal(v1.archivedAt, null, "거절된 게시가 옛 판에 만료 자국을 남겼다");
+    assert.equal(v1.archivedByUserId, null);
+    assert.deepEqual(await expiryAuditFor(v1Id), [], "거절됐는데 이력만 남으면 거짓 기록이다");
+  });
+
+  test("38. 🔴 나: [만료됨]에서 다시 게시할 수 있고, 그때 지금 게시본이 내려간다", async () => {
+    const { code, v1Id } = await publishedV1("republish");
+    const v2Id = await draftFrom(v1Id);
+    assert.equal((await publishProcedureTemplate(v2Id, superAdminId)).ok, true);
+
+    // 🔵 먼저 표본 — v1 이 정말 만료 상태이고 v2 가 지금 게시본이다.
+    assert.deepEqual(await statusByVersion(code), { 1: "ARCHIVED", 2: "PUBLISHED" });
+
+    const republished = await publishProcedureTemplate(v1Id, superAdminId);
+    assert.equal(republished.ok, true, `만료본을 다시 게시하지 못했다: ${JSON.stringify(republished)}`);
+
+    assert.deepEqual(await statusByVersion(code), { 1: "PUBLISHED", 2: "ARCHIVED" }, "다시 게시해도 계열당 하나여야 한다");
+    const v1 = await rowOf(v1Id);
+    assert.equal(v1.archivedAt, null, "다시 올라간 판에 만료 자국이 남으면 '게시됐는데 만료된' 행이 된다");
+    assert.equal(v1.archivedByUserId, null);
+    assert.ok(v1.publishedAt);
+    assert.equal(v1.version, 1, "다시 게시는 판 번호를 올리지 않는다 — 같은 내용이다");
+  });
+
+  test("39. 🔴 나: 만료본에서 다시 게시할 때도 **검증을 그대로 거친다**", async () => {
+    const { code, v1Id } = await publishedV1("republish-validation");
+    const v2Id = await draftFrom(v1Id);
+    assert.equal((await publishProcedureTemplate(v2Id, superAdminId)).ok, true);
+    assert.deepEqual(await statusByVersion(code), { 1: "ARCHIVED", 2: "PUBLISHED" });
+
+    // 만료된 v1 에 미해결 ERROR 가 생겼다고 치자(그 사이 검증 규칙이 바뀌었거나,
+    // 그 판에 달려 있던 이슈가 다시 열렸거나).
+    await db.insert(procedureTemplateValidationIssues).values({
+      procedureTemplateId: v1Id,
+      severity: "ERROR",
+      issueType: "MISSING_OUTGOING_PATH",
+      message: "통합 시험용 미해결 오류(재게시)",
+      sourceWorksheet: "(TEST) 가상 시트",
+      sourceReference: "B2",
+    });
+
+    const blocked = await publishProcedureTemplate(v1Id, superAdminId);
+    assert.equal(blocked.ok, false, "한 번 게시됐던 판이라는 이유로 검증을 건너뛰면 안 된다");
+    if (!blocked.ok) assert.equal(blocked.code, "HAS_UNRESOLVED_ERRORS");
+    assert.deepEqual(await statusByVersion(code), { 1: "ARCHIVED", 2: "PUBLISHED" }, "막혔으면 둘 다 그대로다");
+  });
+
+  test("40. 🔴 이미 게시된 판은 또 게시할 수 없다 (CONFLICT)", async () => {
+    const { code, v1Id } = await publishedV1("double-publish");
+    const again = await publishProcedureTemplate(v1Id, superAdminId);
+    assert.equal(again.ok, false);
+    if (!again.ok) assert.equal(again.code, "CONFLICT");
+    assert.deepEqual(await statusByVersion(code), { 1: "PUBLISHED" }, "거절이 제 행을 건드리면 안 된다");
+    assert.deepEqual(await expiryAuditFor(v1Id), [], "자기 자신을 내리고 올리는 일이 있으면 안 된다");
+  });
+
+  test("41. 🔴 게시본이 둘이던 옛 계열 — 한 번 게시하면 **둘 다** 내려간다", async () => {
+    // 개발 DB 의 code "7"(v1·v2 둘 다 PUBLISHED)과 같은 모양을 만든다. 그 상태는
+    // 이제 mutation 으로는 만들 수 없으므로(이 조각이 막았다) **직접 UPDATE** 로
+    // 세운다 — 이미 있는 행을 고치는 길이 없으면 이 경우를 영영 못 잰다.
+    const { code, v1Id } = await publishedV1("legacy-double");
+    const v2Id = await draftFrom(v1Id);
+    await db
+      .update(procedureTemplates)
+      .set({ status: "PUBLISHED", publishedByUserId: superAdminId, publishedAt: new Date() })
+      .where(eq(procedureTemplates.id, v2Id));
+
+    // 🔵 먼저 표본 — 게시본이 정말 둘이다.
+    assert.deepEqual(await statusByVersion(code), { 1: "PUBLISHED", 2: "PUBLISHED" });
+
+    const v3Id = await draftFrom(v2Id);
+    const published = await publishProcedureTemplate(v3Id, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+
+    assert.deepEqual(
+      await statusByVersion(code),
+      { 1: "ARCHIVED", 2: "ARCHIVED", 3: "PUBLISHED" },
+      "한 판만 내리면 게시본이 둘로 남는다"
+    );
+    assert.equal((await expiryAuditFor(v1Id)).length, 1, "내려간 판마다 이력이 한 줄씩");
+    assert.equal((await expiryAuditFor(v2Id)).length, 1);
   });
 });
 

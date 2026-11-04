@@ -237,10 +237,22 @@ describe("줄기 B-④ 나 — 편집기에서 게시할 수 있다", () => {
     assert.ok(!flat(editor).includes("<dialog"), "확인 창은 편집기 화면에 다시 생기지 않았다");
   });
 
-  test("🟢 상세 화면의 기존 게시 길은 한 글자도 안 바뀌었다 — 옮긴 것이 아니라 더한 것이다", () => {
+  test("🟢 상세 화면의 게시 자리는 여전히 **한 곳**이다 — 편집기에 더한 것이 옮긴 것이 아니다", () => {
     const occurrences = detailScreen.match(/<PublishTemplateButton\b/g) ?? [];
     assert.equal(occurrences.length, 1);
-    assert.match(flat(detailScreen), /\{template\.status === "DRAFT" && canPublish && \( <PublishTemplateButton templateId=\{template\.id\} templateName=\{template\.name\} isReferenceOnly=\{template\.isReferenceOnly\} \/> \)\}/);
+    // 🔴 2026-11-04 — 상세 쪽 조건이 `template.status === "DRAFT"` 에서
+    //    `canPublishFromProcedureStatus(template.status)` 로 바뀌었다(만료본
+    //    재게시). 그래서 **조건식을 글자 그대로** 못 박던 단언을 거둔다 —
+    //    그 조건이 무엇이어야 하는지는 procedure-publish-flow.test.tsx 가
+    //    전담하고, 여기서 두 벌로 적으면 상세 쪽을 고칠 때마다 두 파일이 깨진다.
+    //    이 파일이 지켜야 하는 것은 **편집기에 더한 것이 상세를 옮겨 온 것이
+    //    아니라는 사실**이므로, 상세에 게시 자리가 그대로 하나 남아 있고 그것이
+    //    여전히 상태와 권한을 함께 본다는 것만 본다.
+    assert.match(
+      flat(detailScreen),
+      /\(template\.status\) && canPublish && \( <PublishTemplateButton templateId=\{template\.id\} templateName=\{template\.name\}/,
+      "상세의 게시 단추가 상태와 권한을 함께 보지 않게 됐다"
+    );
   });
 
   test("🔵 게시 뒤 편집기에 머물지 않는다 — 같은 경로가 PUBLISHED 를 보면 편집기를 아예 안 그린다", () => {

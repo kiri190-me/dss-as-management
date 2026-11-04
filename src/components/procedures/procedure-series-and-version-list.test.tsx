@@ -115,13 +115,28 @@ function renderSeriesList(rows: TechnicalProcedureSeriesRow[]): string {
   );
 }
 
-function renderVersionList(versions: ProcedureVersionListRow[], currentTemplateId: string): string {
+function renderVersionList(
+  versions: ProcedureVersionListRow[],
+  currentTemplateId: string,
+  deleteProps: {
+    referencedVersionIds?: string[];
+    renderDeleteAction?: (row: ProcedureVersionListRow) => React.ReactNode;
+  } = {}
+): string {
   return renderToStaticMarkup(
     <AppRouterContext.Provider value={noopRouter}>
-      <ProcedureVersionList versions={versions} currentTemplateId={currentTemplateId} />
+      <ProcedureVersionList versions={versions} currentTemplateId={currentTemplateId} {...deleteProps} />
     </AppRouterContext.Provider>
   );
 }
+
+/**
+ * 진짜 [삭제] 단추(DeleteProcedureVersionButton)는 서버 액션을 직접 import 해서
+ * 사슬 끝에 `server-only` 가 있다 — 여기서 import 하면 시험이 통째로 던진다.
+ * 그래서 **그 자리에 무엇이 서는지**만 가짜 조각으로 잰다. 진짜 단추가 그
+ * 자리에 꽂히는지는 아래 ⑩절이 원본 글자로 본다.
+ */
+const fakeDeleteAction = (row: ProcedureVersionListRow) => <button type="button">삭제:{row.id}</button>;
 
 const countOf = (haystack: string, needle: string) => haystack.split(needle).length - 1;
 const trCount = (html: string) => (html.match(/<tr\b/g) ?? []).length;
@@ -217,13 +232,21 @@ describe("계열 목록 — ③ 게시본이 둘인 계열 · 없는 계열", ()
     assert.ok(html.includes("2판"), "통전 검사 계열은 두 판이다");
   });
 
-  test("보관본이 있을 때만 그 수를 덧붙인다", () => {
+  test("만료본이 있을 때만 그 수를 덧붙인다", () => {
+    // 🔴 2026-11-04 에 ARCHIVED 의 화면 글자가 "보관됨" → "만료됨" 으로 바뀌었다
+    //    (enum 은 그대로다 — procedure-template-publish-policy.ts 머리말).
+    //    옛 글자가 어딘가에 남아 있으면 같은 상태가 화면마다 다른 이름으로
+    //    보이므로, 그것까지 함께 못 박는다.
     const withArchived = renderSeriesList([
       listRow("tech-old", 2, "ARCHIVED", "옛 절차"),
       listRow("tech-old", 1, "ARCHIVED", "옛 절차"),
     ]);
-    assert.ok(withArchived.includes("보관됨 2"));
-    assert.ok(!html.includes("보관됨"), "보관본이 없는 표본에는 안 나와야 한다");
+    assert.ok(withArchived.includes("만료됨 2"));
+    assert.ok(!withArchived.includes("보관됨"), "옛 글자가 남아 있으면 안 된다");
+    // 🔵 맨 낱말 "만료됨"으로 재면 안 된다 — 게시본이 둘인 줄기의 호박색 표시가
+    //    제 설명(title)에 "[만료됨]으로 내려갑니다"를 달고 있어서, 만료본이
+    //    하나도 없는 표본에도 그 글자는 있다. **개수 칸**의 모양으로 잰다.
+    assert.ok(!/만료됨 \d/.test(html), "만료본이 없는 표본에는 개수가 안 나와야 한다");
   });
 });
 
@@ -320,10 +343,10 @@ describe("버전 목록 — ⑥ 그 계열의 모든 판이 나온다", () => {
     { id: "v2", name: "옛 이름 통전 검사", version: 2, status: "ARCHIVED", createdAt: "2026-09-01T00:00:00.000Z", publishedAt: "2026-09-05T00:00:00.000Z" },
   ];
 
-  test("🔴 게시본·초안·보관본이 전부 한 줄씩 나온다", () => {
+  test("🔴 게시본·초안·만료본이 전부 한 줄씩 나온다", () => {
     const html = renderVersionList(VERSIONS, "v3");
     assert.equal((html.match(/<li\b/g) ?? []).length, 3);
-    for (const label of ["초안", "게시됨", "보관됨"]) {
+    for (const label of ["초안", "게시됨", "만료됨"]) {
       assert.ok(html.includes(label), `${label} 줄이 없다`);
     }
     assert.ok(html.includes("(3판)"), "몇 판인지 머리글이 말한다");
@@ -352,7 +375,7 @@ describe("버전 목록 — ⑥ 그 계열의 모든 판이 나온다", () => {
     assert.equal(countOf(html, "기본 통전 검사"), 0, "지금 보는 판과 같은 이름은 세로로 반복하지 않는다");
   });
 
-  test("🔴 게시본이 둘이면 그 사실을 적는다", () => {
+  test("🔴 게시본이 둘이면 그 사실과 **치우는 길**을 적는다", () => {
     const html = renderVersionList(
       [
         { id: "v2", name: "원복 검사", version: 2, status: "PUBLISHED", createdAt: "2026-10-01T00:00:00.000Z", publishedAt: "2026-10-02T00:00:00.000Z" },
@@ -361,6 +384,11 @@ describe("버전 목록 — ⑥ 그 계열의 모든 판이 나온다", () => {
       "v2"
     );
     assert.ok(html.includes("게시본이 2개입니다"));
+    // 🔴 2026-11-04 — 게시가 옛 게시본을 [만료됨]으로 내리게 바뀌었으므로,
+    //    "게시는 이전 게시본을 자동으로 내리지 않습니다" 는 이제 **거짓**이다.
+    //    그 글자가 돌아오면 여기서 걸린다.
+    assert.ok(!html.includes("자동으로 내리지 않습니다"), "이제 자동으로 내린다 — 옛 설명이 남으면 안 된다");
+    assert.ok(html.includes("[만료됨]"), "치우는 길(한 번 더 게시)을 그 자리에 적는다");
   });
 
   test("🔴 넘어오지 않은 판은 그릴 수 없다 — 권한 거르기는 서버가 한다", () => {
@@ -400,7 +428,11 @@ describe("버전 목록 — ⑦ 서버가 거르고 화면까지 내려준다", 
     const painted = flat(detailPage);
     assert.ok(painted.includes("versions={versions}"), "계산해 놓고 안 넘기면 목록이 영영 안 보인다");
     const painted2 = flat(detailScreen);
-    assert.ok(painted2.includes("<ProcedureVersionList versions={versions} currentTemplateId={template.id} />"));
+    // 🔵 2026-11-04 에 프롭이 넷으로 늘었다([삭제] 배선). 그래서 통째로 한 줄을
+    //    비교하지 않고 **꼭 있어야 하는 둘**을 각각 본다 — 통째로 비교하면 프롭이
+    //    늘 때마다 깨지면서 정작 무엇을 지키는 단언인지가 흐려진다.
+    assert.ok(painted2.includes("<ProcedureVersionList versions={versions}"));
+    assert.ok(painted2.includes("currentTemplateId={template.id}"));
     assert.ok(
       painted2.indexOf("<ProcedureVersionList") < painted2.indexOf("플로우차트"),
       "어느 판을 보고 있는지는 그림을 읽기 전에 알아야 한다"
@@ -426,5 +458,229 @@ describe("버전 목록 — ⑦ 서버가 거르고 화면까지 내려준다", 
       "조회가 판 행을 그대로 내보내야 삭제 모드가 판 단위로 돌 수 있다"
     );
     assert.ok(!queries.includes("groupProcedureTemplatesByCode"), "접기를 조회로 옮기면 삭제 모드가 쓸 행이 없어진다");
+  });
+});
+
+// ════════════════════════════════════ ⑧ [절차 상세]에서 목록으로 나가는 길
+
+describe("절차 상세 — ⑧ 목록으로 빠져나오는 길 (2026-11-04)", () => {
+  const painted = flat(detailScreen);
+
+  test("🔵 먼저 표본 — 그 전에는 나가는 길이 **하나도 없었다**", () => {
+    // 이 화면의 Link 는 넷이었다: 검증 이슈에서 들어왔을 때만 뜨는 셋
+    // (오류 상세로 · 검토/처리 화면 · 전체 워크플로우 보기)과 [검증 문제 검토].
+    // 전부 **이 절차 안**으로 가는 길이고, 목록으로 나가는 것은 없었다.
+    // 그 넷이 그대로 있는지도 함께 본다 — 길을 더하면서 있던 길을 지우면 안 된다.
+    for (const inner of ["← 오류 상세로 돌아가기", "검토/처리 화면 열기", "전체 워크플로우 보기", "검증 문제 검토"]) {
+      assert.ok(painted.includes(inner), `있던 길 '${inner}' 이 사라졌다`);
+    }
+  });
+
+  test("🔴 가는 곳을 화면이 **직접 적지 않는다** — 분류로 정하는 함수를 부른다", () => {
+    assert.ok(
+      painted.includes("const listLink = resolveProcedureListLink(template.category);"),
+      "어디서 왔는지(뒤로·referrer)가 아니라 분류로 정해야 어디서 들어왔든 맞는 곳으로 간다"
+    );
+    assert.ok(
+      detailScreen.includes('from "@/lib/domain/procedure-list-navigation"'),
+      "규칙은 순수 함수 한 곳에 있고, 값으로 재는 쪽은 unit 목록의 procedure-list-navigation.test.ts 다"
+    );
+    // 🔴 주소를 화면에 박으면 목록이 옮겨 가는 날 고칠 자리를 못 찾는다.
+    assert.ok(
+      !painted.includes('href="/procedures/technical"'),
+      "주소를 직접 적으면 분류별 갈림이 둘이 된다"
+    );
+  });
+
+  test("🔴 글자가 **가는 곳의 이름**이고, 주소도 그 함수가 준 것이다", () => {
+    assert.ok(painted.includes("href={listLink.href}"));
+    assert.ok(painted.includes("← {listLink.label}"), "어느 목록인지가 단추에 적혀야 한다");
+  });
+
+  test("🔴 자리 — 제목보다 위, 되돌릴 수 없는 단추들과는 떨어져 있다", () => {
+    const backAt = painted.indexOf("href={listLink.href}");
+    const titleAt = painted.indexOf("<h1 className=");
+    const publishAt = painted.indexOf("<PublishTemplateButton");
+    const versionListAt = painted.indexOf("<ProcedureVersionList");
+    assert.ok(backAt > 0 && titleAt > 0 && publishAt > 0 && versionListAt > 0, "네 자리를 다 찾아야 한다");
+    assert.ok(backAt < titleAt, "나가는 길은 제목 위다");
+    assert.ok(backAt < publishAt, "되돌릴 수 없는 단추(게시) 사이에 끼면 안 된다");
+    assert.ok(backAt < versionListAt, "이 조각에서 생긴 [버전 목록]과도 안 부딪힌다 — 그보다 위다");
+  });
+});
+
+// ══════════════════════════════════════ ⑨ [버전 목록]의 [삭제] — 어느 줄에 서나
+
+describe("버전 목록 — ⑨ [삭제] 단추 (2026-11-04)", () => {
+  const VERSIONS: ProcedureVersionListRow[] = [
+    { id: "v4", name: "기본 통전 검사", version: 4, status: "DRAFT", createdAt: "2026-11-01T00:00:00.000Z", publishedAt: null },
+    { id: "v3", name: "기본 통전 검사", version: 3, status: "PUBLISHED", createdAt: "2026-10-01T00:00:00.000Z", publishedAt: "2026-10-05T00:00:00.000Z" },
+    { id: "v2", name: "기본 통전 검사", version: 2, status: "ARCHIVED", createdAt: "2026-09-01T00:00:00.000Z", publishedAt: "2026-09-05T00:00:00.000Z" },
+    { id: "v1", name: "기본 통전 검사", version: 1, status: "ARCHIVED", createdAt: "2026-08-01T00:00:00.000Z", publishedAt: "2026-08-05T00:00:00.000Z" },
+  ];
+
+  test("🔵 먼저 표본 — 표본에 네 판이 있고 상태 셋이 다 들어 있다", () => {
+    // 상태가 한 가지뿐인 표본이면 아래 "게시본만 막힌다"가 공짜로 통과한다.
+    assert.deepEqual(VERSIONS.map((v) => v.status), ["DRAFT", "PUBLISHED", "ARCHIVED", "ARCHIVED"]);
+  });
+
+  test("🔴 권한이 없으면 삭제 자리가 **아예 없다** — 막힌 까닭조차 안 샌다", () => {
+    const html = renderVersionList(VERSIONS, "v3");
+    assert.ok(!html.includes("삭제"), "슬롯을 안 넘기면 단추도 까닭도 그리면 안 된다");
+    // 🔵 견줄 쪽 — 같은 조각이 슬롯을 받으면 그 글자가 실제로 나타난다.
+    const withSlot = renderVersionList(VERSIONS, "v3", { renderDeleteAction: fakeDeleteAction });
+    assert.ok(withSlot.includes("삭제"));
+  });
+
+  test("🔴 초안·만료본에는 단추가 서고, **게시본에는 안 선다**", () => {
+    const html = renderVersionList(VERSIONS, "v3", { renderDeleteAction: fakeDeleteAction });
+    assert.ok(html.includes("삭제:v4"), "초안은 지울 수 있어야 한다");
+    assert.ok(html.includes("삭제:v2"), "만료본은 지울 수 있어야 한다");
+    assert.ok(html.includes("삭제:v1"));
+    assert.ok(!html.includes("삭제:v3"), "지금 게시 중인 판에 삭제 단추가 섰다");
+  });
+
+  test("🔴 게시본 줄에는 **까닭과 풀리는 길**이 적힌다", () => {
+    const html = renderVersionList(VERSIONS, "v3", { renderDeleteAction: fakeDeleteAction });
+    assert.ok(html.includes("게시됨 상태라 삭제할 수 없습니다"), "흐린 단추만 두면 사람은 고장으로 읽는다");
+    assert.ok(html.includes("다른 판을 게시하면"), "무엇을 하면 풀리는지가 title 에 있어야 한다");
+  });
+
+  test("🔴 쓰이고 있는 판은 막히고, 그 글이 「게시 중」과 **다르다**", () => {
+    const html = renderVersionList(VERSIONS, "v3", {
+      renderDeleteAction: fakeDeleteAction,
+      referencedVersionIds: ["v2"],
+    });
+    // 🔵 먼저 표본 — 같은 표본에서 v1 은 여전히 지워진다(막기가 전부에 걸린 것이 아니다).
+    assert.ok(html.includes("삭제:v1"));
+    assert.ok(!html.includes("삭제:v2"), "수행 기록이 붙은 만료본에 단추가 섰다");
+    assert.ok(html.includes("수행 기록·후속 버전이 있어 삭제할 수 없습니다"));
+    assert.ok(html.includes("지난 수리의 근거"), "왜 영영 못 지우는지가 title 에 있어야 한다");
+    // 두 까닭이 한 화면에 함께 떠도 서로 다른 글이다.
+    assert.ok(html.includes("게시됨 상태라 삭제할 수 없습니다"));
+  });
+
+  test("🔴 삭제 자리는 **줄 링크 바깥**이다 — a 안에 button 이 들어가면 안 된다", () => {
+    const html = renderVersionList(VERSIONS, "v3", { renderDeleteAction: fakeDeleteAction });
+    // v4(초안)는 지금 보는 판이 아니라 줄 전체가 링크다. 그 링크가 닫힌 **뒤에**
+    // 단추가 와야 한다 — 안에 있으면 눌러도 상세로 이동해 창이 뜨지 않는다.
+    const linkAt = html.indexOf('href="/procedures/v4"');
+    const buttonAt = html.indexOf("삭제:v4");
+    assert.ok(linkAt >= 0 && buttonAt > linkAt, "두 자리를 다 찾아야 한다");
+    assert.ok(html.slice(linkAt, buttonAt).includes("</a>"), "단추가 링크 안에 들어 있다");
+  });
+
+  test("지금 보는 판도 지울 수 있다 — 그 줄은 링크가 아니라 단추만 선다", () => {
+    const html = renderVersionList(VERSIONS, "v4", { renderDeleteAction: fakeDeleteAction });
+    assert.ok(html.includes('aria-current="page"'));
+    assert.ok(html.includes("삭제:v4"), "지금 보는 초안을 그 자리에서 못 지우면 편집기로 돌아가야 한다");
+  });
+});
+
+// ═══════════════════════════════ ⑩ 삭제 배선 — 화면·액션·권한이 한 줄로 이어진다
+
+describe("버전 목록 — ⑩ [삭제] 배선", () => {
+  const deleteButton = read("src/components/procedures/editor/DeleteProcedureVersionButton.tsx");
+  const deleteButtonCode = stripComments(deleteButton);
+  const trashActions = stripComments(read("src/lib/server/actions/procedure-template-trash.ts"));
+  const versionList = read("src/components/procedures/ProcedureVersionList.tsx");
+  const editPage = stripComments(read("src/app/(app)/procedures/[id]/edit/page.tsx"));
+
+  test("🔵 먼저 표본 — 읽으려는 파일이 다 읽혔다", () => {
+    for (const [name, source] of Object.entries({ deleteButton, trashActions, versionList, editPage })) {
+      assert.ok(source.length > 500, `${name} 이 비었다 — 아래가 전부 공짜로 통과한다`);
+    }
+  });
+
+  test("🔴 진짜 단추는 **부모가 슬롯으로** 꽂는다 — 목록이 서버 액션을 물면 안 된다", () => {
+    // 🔴 **주석을 걷어낸 뒤에** 센다. 목록 파일의 주석이 "왜 import 하지
+    //    않는가"를 설명하면서 그 이름을 적고 있어서, 날것으로 재면 멀쩡한
+    //    코드가 깨진다(이 저장소에서 여러 번 걸린 쪽이다).
+    const versionListCode = stripComments(versionList);
+    assert.ok(versionList.includes("DeleteProcedureVersionButton"), "주석에 그 설명이 있어야 한다(걷어내기가 일하는 증거)");
+    assert.ok(
+      !versionListCode.includes("DeleteProcedureVersionButton"),
+      "목록이 단추를 직접 import 하면 이 시험 파일이 import 에서 통째로 던진다"
+    );
+    assert.ok(!versionListCode.includes("@/lib/server/actions"), "목록은 서버 액션을 물지 않는다");
+    assert.ok(flat(detailScreen).includes("<DeleteProcedureVersionButton"), "부모가 꽂아야 한다");
+  });
+
+  test("🔴 권한이 없으면 슬롯 자체를 안 넘긴다 (fail-closed)", () => {
+    const painted = flat(detailScreen);
+    assert.ok(painted.includes("renderDeleteAction={ canDeleteVersion ?"), "권한이 슬롯을 가른다");
+    assert.ok(painted.includes(": undefined }"), "권한이 없으면 undefined 여야 삭제 자리가 사라진다");
+    assert.ok(painted.includes("canDeleteVersion = false,"), "기본값은 fail-closed");
+  });
+
+  test("🔴 상세 화면의 권한 판정이 편집기의 [초안 버리기]와 **같은 두 관문**이다", () => {
+    const gates = [
+      "actorMay(actingUser, (role) => canDeleteTechnicalTemplates(role, template.category))",
+      'await hasPermission(actingUser, "technicalProcedures.lifecycle", "MANAGE")',
+    ];
+    for (const gate of gates) {
+      assert.ok(flat(detailPage).includes(gate), `상세 쪽에 없다: ${gate}`);
+      assert.ok(flat(editPage).includes(gate), `편집기 쪽에 없다: ${gate}`);
+    }
+  });
+
+  test("🔴 「쓰이고 있다」는 목록 화면과 **같은 조회**로 센다", () => {
+    const painted = flat(detailPage);
+    assert.ok(painted.includes("await listUndeletableProcedureTemplateIds()"), "세는 잣대가 둘이면 어긋난다");
+    assert.ok(painted.includes("canDeleteVersion ? ["), "권한이 없으면 읽지도 않는다");
+    assert.ok(painted.includes("referencedVersionIds={referencedVersionIds}"));
+  });
+
+  test("🔴 서버 액션은 상태 묶음을 **화면과 같은 상수**로 넘긴다", () => {
+    const painted = flat(trashActions);
+    assert.ok(painted.includes("export async function deleteProcedureTemplateVersionAction"));
+    assert.ok(
+      painted.includes("requireStatus: PROCEDURE_DELETABLE_VERSION_STATUSES,"),
+      "상태 목록을 액션에 적으면 화면에는 단추가 있는데 늘 거절되는 날이 온다"
+    );
+    assert.ok(painted.includes('from "@/lib/domain/procedure-version-deletion"'), "화면이 쓰는 그 모듈이어야 한다");
+    // 🔴 [초안 버리기]의 좁음은 그대로여야 한다 — 넓히면 편집기 단추까지 넓어진다.
+    assert.ok(painted.includes('requireStatus: "DRAFT",'), "[초안 버리기]가 DRAFT 전용이 아니게 됐다");
+  });
+
+  test("🔴 지운 뒤 갈 곳이 두 갈래 — 지금 보는 판이면 목록으로, 아니면 새로고침", () => {
+    const painted = flat(deleteButtonCode);
+    assert.ok(painted.includes("if (isCurrentlyViewing) {"), "두 경우를 갈라야 한다");
+    assert.ok(painted.includes("router.replace(listHref);"), "죽은 화면으로 [뒤로] 가지 않게 replace 다");
+    assert.ok(painted.includes("router.refresh();"), "남의 판을 지웠으면 화면은 그대로 있고 목록만 다시 읽는다");
+    assert.ok(
+      flat(detailScreen).includes("listHref={listLink.href}"),
+      "[목록으로] 단추와 **같은 주소**로 보내야 한다"
+    );
+    assert.ok(flat(detailScreen).includes("isCurrentlyViewing={row.id === template.id}"));
+  });
+
+  test("🔴 확인 창이 있고, [취소]는 아무 일도 안 한다", () => {
+    assert.match(deleteButton, /<dialog/, "되돌리는 자리가 다른 화면이라 확인 창을 둔다");
+    assert.match(deleteButton, /버전 삭제/, "창 제목");
+    assert.match(deleteButton, /휴지통/, "소프트 삭제임을 말해 준다");
+    assert.match(deleteButton, /15일/);
+    assert.ok(
+      !/(^|[^.\w])(confirm|alert|prompt)\s*\(/m.test(deleteButton),
+      "window.confirm / alert / prompt 를 쓰지 않는다"
+    );
+    const painted = flat(deleteButtonCode);
+    // [취소]는 창만 닫는다 — 지우는 길로 가는 것은 handleDelete 하나뿐이다.
+    assert.ok(painted.includes("function closeDialog() { if (isDeleting) return; setIsOpen(false); }"));
+    assert.equal(
+      (painted.match(/deleteProcedureTemplateVersionAction\(/g) ?? []).length,
+      1,
+      "지우는 길은 하나여야 한다"
+    );
+    assert.ok(painted.includes("onClick={closeDialog} disabled={isDeleting}"), "[취소] 단추가 그 함수를 부른다");
+  });
+
+  test("서버가 준 실패 이유를 그 자리에 보인다 — 창을 닫지 않는다", () => {
+    const painted = flat(deleteButtonCode);
+    assert.ok(painted.includes("setErrorMessage(result.message);"));
+    assert.ok(
+      !painted.includes("setIsOpen(false); setErrorMessage(result.message)"),
+      "닫으면 아무 일도 안 한 것처럼 보인다"
+    );
   });
 });

@@ -9,6 +9,7 @@ import ProcedureReferenceItemsViewer from "./ProcedureReferenceItemsViewer";
 import ProcedureValidationIssuePanel from "./ProcedureValidationIssuePanel";
 import CreateDraftVersionButton from "./editor/CreateDraftVersionButton";
 import PublishTemplateButton from "./editor/PublishTemplateButton";
+import DeleteProcedureVersionButton from "./editor/DeleteProcedureVersionButton";
 import ProcedureVersionList, { type ProcedureVersionListRow } from "./ProcedureVersionList";
 import {
   procedureEquipmentTypeLabels,
@@ -17,6 +18,11 @@ import {
 } from "@/lib/domain/procedure-template-types";
 import type { ProcedureTemplateDetail } from "@/lib/db/queries/procedure-templates";
 import { resolveInitialGraphTarget } from "@/lib/domain/procedure-graph-navigation";
+import {
+  canPublishFromProcedureStatus,
+  pickPublishedSiblingsToExpire,
+} from "@/lib/domain/procedure-template-publish-policy";
+import { resolveProcedureListLink } from "@/lib/domain/procedure-list-navigation";
 
 const STATUS_BADGE: Record<string, string> = {
   DRAFT: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
@@ -45,6 +51,8 @@ export default function ProcedureTemplateDetailScreen({
   canCreateDraftVersion = false,
   canEditDraft = false,
   canPublish = false,
+  canDeleteVersion = false,
+  referencedVersionIds = [],
 }: {
   template: ProcedureTemplateDetail;
   /**
@@ -61,11 +69,34 @@ export default function ProcedureTemplateDetailScreen({
    * "게시" — DRAFT 를 게시해 A/S 접수 건의 "기술 절차 불러오기" 목록에 올린다.
    *
    * 이 값은 페이지가 **서버가 실제로 보는 관문 그대로** 계산해서 넘긴다
-   * (page.tsx 의 canPublish 주석 참조). 여기서 상태만 다시 본다 — 이미
-   * 게시된(PUBLISHED) 것이나 보관된(ARCHIVED) 것에 또 뜨면 안 되기 때문이다.
+   * (page.tsx 의 canPublish 주석 참조). 🔵 이 값은 **권한만** 말한다 — 상태로
+   * 가리는 일은 아래 canPublishFromProcedureStatus 가 한다. 2026-11-04 부터
+   * 만료본(ARCHIVED)도 올릴 수 있으므로, 막히는 상태는 PUBLISHED 하나다.
    */
   canPublish?: boolean;
+  /**
+   * [버전 목록]의 [삭제] — **권한만** 말한다(2026-11-04). 어느 줄에 단추가
+   * 서는지는 상태와 참조가 정하고, 그 규칙은 domain/procedure-version-deletion.ts
+   * 한 곳에 있다. 🔵 기본값이 false 라 안 넘기는 호출부에는 삭제 자리가 없다.
+   */
+  canDeleteVersion?: boolean;
+  /** 수행 기록·후속 버전이 붙어 있어 지울 수 없는 판의 id 들(서버가 세어 넘긴다). */
+  referencedVersionIds?: string[];
 }) {
+  // 이번 게시에 딸려 [만료됨]으로 내려갈 판 번호들 — 확인 창이 "무엇이
+  // 내려가는지"를 번호로 말할 수 있게 한다. 🔴 고르는 규칙은 서버가 쓰는 것과
+  // **같은 함수**다(pickPublishedSiblingsToExpire). 여기서 따로 걸러 적으면
+  // 창에 적힌 판과 실제로 내려가는 판이 다른 날이 온다.
+  //
+  // 🔵 versions 는 **볼 수 있는 판만** 넘어오지만(페이지가 거른다), 게시본은
+  // 어느 역할이든 볼 수 있으므로 이 목록은 비어서 모자라지 않는다.
+  const expiringPublishedVersions = pickPublishedSiblingsToExpire(versions, template.id).map(
+    (row) => row.version
+  );
+
+  // 목록으로 나가는 길 — 분류가 정한다(아래 Link 의 주석).
+  const listLink = resolveProcedureListLink(template.category);
+
   const hasGraph = template.edges.length > 0 || template.nodes.some((n) => n.nodeType !== "CHECKLIST" && n.nodeType !== "TROUBLESHOOTING");
   const hasChecklist = template.checklistSections.length > 0;
   const hasTroubleshooting = template.troubleshootingEntries.length > 0;
@@ -133,6 +164,26 @@ export default function ProcedureTemplateDetailScreen({
         </div>
       )}
       <div>
+        {/*
+          🔴 목록으로 빠져나오는 길(2026-11-04 사용자 요청). 그 전까지 이 화면에는
+          나가는 길이 **하나도 없었다** — 검증 이슈에서 들어왔을 때만 "← 오류
+          상세로"가 떴고, 그건 목록이 아니라 이슈로 간다.
+
+          자리를 제목 **위 왼쪽**에 둔 까닭 둘:
+           · 오른쪽에는 [게시]·[새 DRAFT 버전 만들기]·[편집 시작]이 모여 있다.
+             나가는 길이 그 사이에 끼면 되돌릴 수 없는 단추 옆에서 눌리게 된다.
+           · 편집 화면의 "← …상세로"와 **같은 모양·같은 자리**다. 두 화면을
+             오가는 사람이 같은 곳에서 같은 것을 찾게 된다.
+
+          가는 곳은 분류가 정한다(resolveProcedureListLink) — 어디서 들어왔는지에
+          기대면 주소를 직접 치고 온 사람에게는 갈 곳이 없다.
+        */}
+        <Link
+          href={listLink.href}
+          className="mb-2 inline-block text-xs text-blue-700 hover:underline dark:text-blue-400"
+        >
+          ← {listLink.label}
+        </Link>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">{template.name}</h1>
@@ -157,11 +208,21 @@ export default function ProcedureTemplateDetailScreen({
                 검증 문제 검토
               </Link>
             )}
-            {template.status === "DRAFT" && canPublish && (
+            {/*
+              🔴 2026-11-04 — 조건이 "DRAFT 인가" 에서 **"올릴 수 있는 상태인가"**
+              로 바뀌었다(DRAFT + ARCHIVED). 상태 목록을 여기 적지 않고 서버가
+              쓰는 것과 **같은 함수**를 부른다 — 두 벌로 적으면 화면과 서버가
+              어긋나고, 그건 이 저장소가 이미 한 번 겪은 사고다(커밋 af6da9b).
+              PUBLISHED 가 빠져 있는 것이 알맹이다: 이미 올라간 것에 또 뜨면
+              사람은 눌린 것이 안 먹혔다고 읽는다.
+            */}
+            {canPublishFromProcedureStatus(template.status) && canPublish && (
               <PublishTemplateButton
                 templateId={template.id}
                 templateName={template.name}
                 isReferenceOnly={template.isReferenceOnly}
+                isRepublish={template.status === "ARCHIVED"}
+                expiringPublishedVersions={expiringPublishedVersions}
               />
             )}
             {!template.isReferenceOnly && template.status === "PUBLISHED" && canCreateDraftVersion && <CreateDraftVersionButton templateId={template.id} />}
@@ -223,7 +284,33 @@ export default function ProcedureTemplateDetailScreen({
       {/* 플로우차트보다 **위**다 — 지금 보고 있는 것이 어느 판인지를 그림을
           보기 전에 알아야 한다. 판을 잘못 보고 있는 줄 모르고 그림을 읽는 것이
           이 화면의 가장 비싼 오독이다. */}
-      <ProcedureVersionList versions={versions} currentTemplateId={template.id} />
+      {/*
+        🔴 [삭제] 단추는 **여기서** 끼워 넣는다. ProcedureVersionList 가 직접
+        import 하면 사슬 끝의 `server-only` 때문에 그 목록을 렌더해서 재는 시험이
+        import 에서 통째로 던진다(그 파일의 renderDeleteAction 주석).
+
+        🔵 권한이 없으면 슬롯을 **아예 안 넘긴다** — 그러면 삭제 자리도,
+        「왜 못 지우는가」도 화면에 안 나온다.
+      */}
+      <ProcedureVersionList
+        versions={versions}
+        currentTemplateId={template.id}
+        referencedVersionIds={referencedVersionIds}
+        renderDeleteAction={
+          canDeleteVersion
+            ? (row) => (
+                <DeleteProcedureVersionButton
+                  templateId={row.id}
+                  templateName={row.name}
+                  templateVersion={row.version}
+                  templateStatus={row.status}
+                  isCurrentlyViewing={row.id === template.id}
+                  listHref={listLink.href}
+                />
+              )
+            : undefined
+        }
+      />
 
       <section>
         <h2 className="mb-2 text-sm font-semibold text-zinc-900 dark:text-zinc-50">검증 이슈</h2>

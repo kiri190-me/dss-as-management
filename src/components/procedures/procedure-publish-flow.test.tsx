@@ -36,6 +36,24 @@ const read = (relativePath: string) => readFileSync(new URL(relativePath, repoUr
 const flat = (source: string) => source.replace(/\s+/g, " ");
 
 /**
+ * 🔴 **주석을 걷어낸 뒤에 센다.** 이 저장소는 주석 속 낱말 때문에 소스 글자
+ * 검사가 틀린 적이 여러 번 있다 — "있어야 한다" 쪽은 주석만으로 영영 통과하고,
+ * "없어야 한다" 쪽은 설명문 때문에 멀쩡한 코드가 깨진다. 2026-11-04 에 게시
+ * 단추 앞에 그 판정의 까닭을 적은 JSX 주석이 생기면서 실제로 필요해졌다.
+ *
+ * 🔵 **없어야 한다** 쪽(옛 이름이 남지 않았는가)은 일부러 **날것**으로 잰다 —
+ * 주석에 옛 이름이 남아 있으면 그것도 찾을 수 있어야 한다.
+ * 같은 함수가 이웃 시험(procedure-series-and-version-list.test.tsx)에도 있다.
+ */
+const stripComments = (source: string) =>
+  source
+    .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, " ") // JSX 주석 {/* ... */}
+    .replace(/\/\*[\s\S]*?\*\//g, " ") // 블록 주석
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*\/\//.test(line)) // 줄 주석
+    .join("\n");
+
+/**
  * 원본에서 **함수 하나의 본문만** 잘라낸다.
  *
  * 같은 관문(예: `actorMay(actor, canManageTechnicalTemplates)`)이 이웃 함수에도
@@ -51,7 +69,10 @@ const sliceFunction = (source: string, startMarker: string, endMarker: string) =
 };
 
 const detailScreen = read("src/components/procedures/ProcedureTemplateDetailScreen.tsx");
+/** 판정 구조를 재는 자리는 전부 이쪽을 쓴다(위 stripComments 의 까닭). */
+const detailScreenCode = stripComments(detailScreen);
 const publishButton = read("src/components/procedures/editor/PublishTemplateButton.tsx");
+const publishButtonCode = stripComments(publishButton);
 const detailPage = read("src/app/(app)/procedures/[id]/page.tsx");
 const templateActions = read("src/lib/server/actions/procedure-templates.ts");
 const templateMutations = read("src/lib/db/mutations/procedure-templates.ts");
@@ -59,31 +80,70 @@ const executionStartCard = read("src/components/procedures/execution/ExecutionSt
 const executionQueries = read("src/lib/db/queries/procedure-case-execution.ts");
 
 describe("절차 상세 — [게시] 단추가 보이는 조건", () => {
+  test("🔵 먼저 표본 — 주석 걷어내기가 실제로 일을 한다", () => {
+    // 2026-11-04 에 게시 단추 앞에 판정의 까닭을 적은 JSX 주석이 생겼다. 그
+    // 주석에만 있는 글자로 잰다 — 걷어내기가 멈추면 아래 구조 단언들이 주석을
+    // 함께 세기 시작하고, 그 순간 시험이 조용히 느슨해진다.
+    assert.ok(detailScreen.includes("눌린 것이 안 먹혔다고 읽는다"), "그 주석이 원본에 있어야 한다");
+    assert.ok(!detailScreenCode.includes("눌린 것이 안 먹혔다고 읽는다"), "걷어낸 쪽에는 없어야 한다");
+  });
+
   test("게시 단추는 **이 화면 안에** 딱 한 자리에만 있다", () => {
     // 🔴 2026-11-03(줄기 B-④)에 게시하는 길이 **편집기에도** 생겼다. 그래서
     // "앱 전체에 한 자리"는 더 이상 참이 아니다 — 참인 것은 "한 화면 안에 한
     // 자리"다. 같은 화면 안에 둘이면 한쪽만 고쳐지는 날이 오고, 화면이 다르면
     // 조건식도 각자 가져야 한다. 편집기 쪽의 같은 불변식은
     // procedure-editor-publish-and-issue-row.test.ts 가 잰다.
-    const occurrences = detailScreen.match(/<PublishTemplateButton\b/g) ?? [];
+    //
+    // 🔵 2026-11-04 — 만료본에서의 [다시 게시]도 **이 한 자리**로 간다. 새
+    // 단추를 만들었다면 이 수가 2 가 되어 여기서 걸린다.
+    const occurrences = detailScreenCode.match(/<PublishTemplateButton\b/g) ?? [];
     assert.equal(occurrences.length, 1, "한 화면에 게시 자리가 둘이면 한쪽만 고쳐지는 날이 온다");
   });
 
-  test("🔴 초안(DRAFT)이고 권한(canPublish)이 있을 때에만 그린다", () => {
+  test("🔴 올릴 수 있는 상태이고 권한(canPublish)이 있을 때에만 그린다", () => {
     assert.match(
-      flat(detailScreen),
-      /\{template\.status === "DRAFT" && canPublish && \( <PublishTemplateButton/,
-      "게시 단추의 조건은 'DRAFT 이고 권한이 있을 때'여야 한다"
+      flat(detailScreenCode),
+      /\{canPublishFromProcedureStatus\(template\.status\) && canPublish && \( <PublishTemplateButton/,
+      "게시 단추의 조건은 '올릴 수 있는 상태이고 권한이 있을 때'여야 한다"
     );
   });
 
-  test("🔴 이미 게시된(PUBLISHED)·보관된(ARCHIVED) 절차에는 조건이 성립하지 않는다", () => {
-    // 조건이 상태를 DRAFT 로 **동등 비교**하므로 PUBLISHED/ARCHIVED 는 구조적으로
-    // 걸러진다. 조건이 `!== "ARCHIVED"` 같은 배제형으로 바뀌면(그러면 PUBLISHED 에
-    // 또 뜬다) 여기서 깨진다.
-    const guard = flat(detailScreen).match(/\{(template\.status[^&]*) && canPublish &&/);
+  test("🔴 상태 목록을 화면이 제 손으로 적지 않는다 — 서버가 쓰는 **같은 함수**를 부른다", () => {
+    // 2026-11-04 전에는 여기에 `template.status === "DRAFT"` 라고 **적혀 있었다.**
+    // 만료본 재게시가 생기면서 올릴 수 있는 상태가 둘이 되었는데, 그 목록을
+    // 화면에도 적으면 서버와 어긋나는 날이 온다(화면이 느슨하면 누를 때마다
+    // 실패하는 단추, 빡빡하면 서버는 되는데 길이 없는 기능).
+    const guard = flat(detailScreenCode).match(/\{([^{}]*?) && canPublish && \( <PublishTemplateButton/);
     assert.ok(guard, "게시 단추 앞의 상태 조건을 찾지 못했다");
-    assert.equal(guard[1].trim(), 'template.status === "DRAFT"');
+    assert.equal(guard[1].trim(), "canPublishFromProcedureStatus(template.status)");
+    assert.ok(
+      detailScreenCode.includes('from "@/lib/domain/procedure-template-publish-policy"'),
+      "그 함수는 서버(mutation)와 같은 모듈에서 와야 한다"
+    );
+  });
+
+  test("🔴 이미 게시된(PUBLISHED) 절차에는 여전히 조건이 성립하지 않는다", () => {
+    // 이 줄은 **결정이 뒤집히지 않은 부분**이다. 만료본은 올릴 수 있게 됐지만
+    // 게시본은 아니다 — 판정 함수를 값으로 재는 쪽은 unit 목록의
+    // procedure-template-publish-policy.test.ts 가 들고 있고, 여기서는 화면이
+    // 정말 그 함수에 맡겼는지만 본다(위 단언). 화면이 제 손으로 다시 적는 순간
+    // 이 불변식은 두 곳이 된다.
+    assert.ok(
+      !flat(detailScreenCode).includes('template.status !== "PUBLISHED" && canPublish'),
+      "배제형으로 바뀌면 새 상태가 생길 때마다 조용히 게시가 열린다"
+    );
+  });
+
+  test("🔴 만료본에서 열 때는 [다시 게시]로, 내려갈 판 번호를 창에 넘긴다", () => {
+    const painted = flat(detailScreenCode);
+    assert.match(painted, /isRepublish=\{template\.status === "ARCHIVED"\}/);
+    assert.match(painted, /expiringPublishedVersions=\{expiringPublishedVersions\}/);
+    assert.match(
+      painted,
+      /const expiringPublishedVersions = pickPublishedSiblingsToExpire\(versions, template\.id\)\.map\( \(row\) => row\.version \);/,
+      "내려갈 판을 고르는 규칙도 서버와 같은 함수여야 한다 — 창에 적힌 판과 실제로 내려가는 판이 달라지면 안 된다"
+    );
   });
 
   test("🔴 canPublish 의 기본값은 false — 넘기는 것을 잊은 호출부는 단추가 없다", () => {
@@ -103,6 +163,125 @@ describe("절차 상세 — [게시] 단추가 보이는 조건", () => {
 
   test("서버가 준 실패 이유를 그대로 화면에 보인다 (권한·미해결 오류·구조 오류가 구분돼야 한다)", () => {
     assert.match(flat(publishButton), /if \(!result\.ok\) \{[^}]*setErrorMessage\(result\.message\);/);
+  });
+});
+
+describe("🔴 확인 창이 '옛 게시본이 내려간다'고 말한다", () => {
+  test("🔵 먼저 표본 — 주석 걷어내기가 이 파일에서도 일을 한다", () => {
+    assert.ok(publishButton.includes("달라지는 것은 **글자뿐**이다"), "그 주석이 원본에 있어야 한다");
+    assert.ok(!publishButtonCode.includes("달라지는 것은 **글자뿐**이다"), "걷어낸 쪽에는 없어야 한다");
+  });
+
+  test("🔴 판 번호를 **몰라도** 규칙 자체는 늘 적는다", () => {
+    // 편집기 호출부는 계열의 다른 판을 읽지 않아 expiringPublishedVersions 가
+    // 빈 배열이다. 그때 아무 말도 안 하면 사람은 옛 게시본이 그대로 남는 줄
+    // 안다 — 2026-11-04 전까지 실제로 그랬다. 그래서 이 문장은 조건 바깥에 있다.
+    const painted = flat(publishButtonCode);
+    assert.match(painted, /한 절차에 게시본은 하나입니다/);
+    assert.match(painted, /게시와 동시에\{" "\} <span className="font-medium">\[만료됨\]<\/span>으로 내려갑니다\./);
+    const ruleAt = painted.indexOf("한 절차에 게시본은 하나입니다");
+    const conditionAt = painted.indexOf("expiringPublishedVersions.length > 0 &&");
+    assert.ok(ruleAt >= 0 && conditionAt > ruleAt, "규칙 문장이 조건 안으로 들어가면 모를 때 아무 말도 안 하게 된다");
+  });
+
+  test("알 때는 내려갈 판 번호를 함께 적는다", () => {
+    const painted = flat(publishButtonCode);
+    assert.match(painted, /expiringPublishedVersions\.map\(\(version\) => `v\$\{version\}`\)\.join\(" · "\)/);
+  });
+
+  test("🔴 만료본에서 열면 단추와 창의 글자가 [다시 게시]로 바뀐다 — 길은 그대로다", () => {
+    const painted = flat(publishButtonCode);
+    assert.match(painted, /\{isRepublish \? "다시 게시" : "게시"\}/, "단추 글자");
+    assert.match(painted, /\{isRepublish \? "다시 " : ""\}게시합니다/, "창의 첫 줄");
+    assert.match(painted, /이 판은 지금 <span className="font-medium">\[만료됨\]<\/span> 상태입니다\./);
+    // 🔴 서버로 가는 길은 초안 게시와 **같은 액션 하나**여야 한다. 둘이 되면
+    // 검증·확인 창 가운데 한쪽만 고쳐지는 날이 온다.
+    assert.equal(
+      (publishButtonCode.match(/publishProcedureTemplateAction\(/g) ?? []).length,
+      1,
+      "다시 게시가 제 길을 따로 내면 여기서 걸린다"
+    );
+  });
+
+  test("🔴 기본값은 '예전 그대로' — 프롭을 안 넘기는 호출부(편집기)가 달라지지 않는다", () => {
+    const painted = flat(publishButtonCode);
+    assert.match(painted, /isRepublish = false,/);
+    assert.match(painted, /expiringPublishedVersions = \[\],/);
+  });
+});
+
+describe("🔴 게시와 만료는 **한 트랜잭션**이다", () => {
+  const publishBody = sliceFunction(
+    stripComments(templateMutations),
+    "export async function publishProcedureTemplate",
+    "export async function archiveProcedureTemplate"
+  );
+
+  test("🔵 먼저 표본 — 잘라낸 본문에 두 쓰기가 다 들어 있다", () => {
+    assert.ok(publishBody.length > 500, "본문을 못 잘랐으면 아래가 전부 공짜로 통과한다");
+    assert.match(publishBody, /status: "ARCHIVED"/, "내리는 쓰기");
+    assert.match(publishBody, /status: "PUBLISHED"/, "올리는 쓰기");
+  });
+
+  test("🔴 두 쓰기가 전부 트랜잭션 핸들(tx)로 간다 — 최상위 db 로 새는 것이 없다", () => {
+    assert.equal((publishBody.match(/db\.transaction\(/g) ?? []).length, 1, "트랜잭션은 하나다");
+    const writes = publishBody.match(/\b(?:tx|db)\n?\s*\.update\(procedureTemplates\)/g) ?? [];
+    assert.equal(writes.length, 2, "쓰기는 둘(내리기·올리기)이다");
+    for (const write of writes) {
+      assert.ok(write.startsWith("tx"), `트랜잭션 밖으로 새는 쓰기가 있다: ${write}`);
+    }
+    // 🔵 `await db.transaction(` 하나는 당연히 최상위 db 다 — 그것만 빼고 센다.
+    //    빼지 않으면 이 단언은 **언제나 실패**해서 아무것도 못 지킨다.
+    const topLevelDbUses = (publishBody.match(/\bdb\.\w+\(/g) ?? []).filter((use) => use !== "db.transaction(");
+    assert.deepEqual(topLevelDbUses, [], "본문 안에서 최상위 db 를 쓰면 롤백이 반만 듣는다");
+  });
+
+  test("🔴 내리는 쪽이 0행이면 **던진다** — 조용히 지나가면 게시본이 둘로 남는다", () => {
+    assert.match(
+      flat(publishBody),
+      /if \(expired\.length === 0\) \{ fail\("CONFLICT"/,
+      "fail 은 throw 라서 뒤따르는 게시 UPDATE 까지 함께 사라진다"
+    );
+    assert.match(flat(publishBody), /if \(published\.length === 0\) \{ fail\("CONFLICT"/);
+  });
+
+  test("🔴 계열을 통째로 잠근다 — id 하나만 잠그면 동시 게시를 못 막는다", () => {
+    const painted = flat(publishBody);
+    assert.match(painted, /eq\(procedureTemplates\.code, lineage\.code\)/, "잠그는 범위가 계열이다");
+    assert.match(painted, /\.orderBy\(procedureTemplates\.version\) \.for\("update"\)/, "두 트랜잭션이 같은 차례로 잠가야 교착이 없다");
+  });
+
+  test("🔴 내려간 판마다 감사 이력이 남고, 사람이 누른 것과 구분되는 표시가 붙는다", () => {
+    const painted = flat(publishBody);
+    assert.match(painted, /actionType: "STATUS_CHANGE"/, "enum 을 늘리지 않고 기존 값을 쓴다");
+    assert.match(painted, /\.\.\.PROCEDURE_EXPIRED_BY_PUBLISH_MARKER,/, "표시가 없으면 손으로 내린 것과 영영 못 가른다");
+    assert.match(painted, /reason: PROCEDURE_EXPIRED_BY_PUBLISH_REASON,/);
+    assert.match(painted, /publishedTemplateId: templateId,/, "무엇에 딸려 내려갔는지가 없으면 까닭을 복원할 수 없다");
+    // 이력 쓰기가 내리는 쓰기와 같은 반복문 안이어야 한다 — 밖으로 나가면
+    // 판이 둘일 때 한 줄만 남는다.
+    assert.ok(
+      painted.indexOf("insertAuditLog(tx") > painted.indexOf('status: "ARCHIVED"'),
+      "이력은 내린 뒤에 적는다"
+    );
+    assert.ok(
+      painted.indexOf("insertAuditLog(tx") < painted.indexOf('status: "PUBLISHED",'),
+      "이력이 올리는 쓰기 뒤로 가면 내린 판이 둘일 때 반복문 밖으로 나간 것이다"
+    );
+  });
+
+  test("🔴 게시 전 검증은 상태와 무관하게 **먼저** 돈다 — 만료본 재게시에도 같은 잣대", () => {
+    const painted = flat(publishBody);
+    const unresolvedAt = painted.indexOf('fail("HAS_UNRESOLVED_ERRORS"');
+    const structuralAt = painted.indexOf('fail("HAS_STRUCTURAL_ERRORS"');
+    const firstWriteAt = painted.indexOf('status: "ARCHIVED"');
+    assert.ok(unresolvedAt > 0 && structuralAt > 0 && firstWriteAt > 0, "셋 다 본문에 있어야 한다");
+    assert.ok(unresolvedAt < firstWriteAt, "미해결 오류 검사가 쓰기보다 앞이다");
+    assert.ok(structuralAt < firstWriteAt, "구조 검사가 쓰기보다 앞이다");
+    // 검사가 "DRAFT 일 때만" 같은 가지 안에 들어가면 재게시가 샛길을 탄다.
+    assert.ok(
+      !/if \(template\.status === "DRAFT"\)/.test(painted),
+      "상태로 가른 가지 안에 검증이 들어가면 만료본 재게시가 검증을 건너뛴다"
+    );
   });
 });
 

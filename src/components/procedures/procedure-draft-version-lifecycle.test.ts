@@ -196,12 +196,36 @@ describe("초안 판 관리 — ③ 나: 새 초안 만들기에는 확인 창�
     assert.ok(flat(createDraft).includes("disabled={isCreating}"), "두 번 눌러도 두 번 나가면 안 된다");
   });
 
-  test("🔴 창을 안 두는 대신 **누르기 전에** 되돌리는 길을 말해 준다", () => {
-    // 창을 없앴다는 이유로 아무 말도 없는 단추가 되면, "잘못 눌렀다"는 사람은
-    // 여전히 갈 곳을 모른다. 그 한 줄이 이 판단의 대가다.
+  test("🔴 안내 글은 걷혔다 — 그래도 **되돌리는 길이 화면에 둘** 있다", () => {
+    // ── 이 시험은 2026-11-04 에 **뒤집혔다** ─────────────────────────────
+    // 전에는 "그 한 줄이 이 판단의 대가다" 라며 안내 문장이 **있는지**를 쟀다.
+    // 같은 날 사용자가 "[새 DRAFT 버전 만들기] 아래에 있는 설명들을 없애줘"
+    // 라고 해서 걷었다. 지우지 않고 뒤집어 적는 까닭은, 걷어낸 자리에 아무
+    // 단언도 없으면 다음 사람이 그 글을 되살리거나(사용자가 싫다고 한 것)
+    // 확인 창을 도로 넣기 때문이다.
+    //
+    // 🔴 창을 안 두는 근거는 **글이 아니라 길**이다: 잘못 눌러 생긴 초안을
+    //    치우는 자리가 화면에 둘 있다 — 편집기의 [초안 버리기]와,
+    //    [절차 상세] > [버전 목록]의 [삭제](같은 날 생겼다). 그 둘이 사라지면
+    //    여기서 먼저 깨져야 한다.
     const painted = flat(createDraft);
-    assert.ok(painted.includes("게시된 판은 그대로 두고 새 초안을 하나 만듭니다."), "무엇이 일어나는지");
-    assert.ok(painted.includes("[초안 버리기]로 치울 수 있습니다."), "어떻게 되돌리는지");
+    assert.ok(!painted.includes("게시된 판은 그대로 두고 새 초안을 하나 만듭니다."), "걷어낸 안내가 돌아왔다");
+    assert.ok(!painted.includes("[초안 버리기]로 치울 수 있습니다."), "걷어낸 안내가 돌아왔다");
+    assert.ok(!createDraft.includes("<dialog"), "설명이 없다고 확인 창을 도로 넣으면 안 된다");
+
+    // 🔵 되돌리는 길 둘이 실제로 있다 — 없으면 위 단언들이 "말도 길도 없는
+    //    단추"를 지키는 꼴이 된다.
+    assert.ok(discardDraft.includes("초안 버리기"), "편집기의 되돌리는 길");
+    const deleteVersionButton = read("src/components/procedures/editor/DeleteProcedureVersionButton.tsx");
+    assert.ok(deleteVersionButton.includes("deleteProcedureTemplateVersionAction"), "[버전 목록]의 되돌리는 길");
+  });
+
+  test("🟢 함께 걷지 않은 둘 — 막혔을 때의 까닭과 갈 곳은 그대로다", () => {
+    // 이쪽이 더 중요하다. 함께 걷히면 눌러도 아무 일이 없는 화면이 된다.
+    const painted = flat(createDraft);
+    assert.ok(painted.includes("{errorMessage && ("), "왜 안 됐는지");
+    assert.ok(painted.includes("{existingDraftId && ("), "그때 갈 곳");
+    assert.ok(painted.includes("진행 중인 초안 편집기로 이동"));
   });
 });
 
@@ -234,15 +258,27 @@ describe("초안 판 관리 — ④ 다: 초안 버리기", () => {
     assert.ok(action.includes("isValidUuid(input?.templateId)"));
 
     // 🔵 그 값을 받는 쪽이 실제로 상태를 본다 — 넘기기만 하고 안 보면 아무 일도 안 한다.
+    //
+    // 🔴 2026-11-04 — requireStatus 가 **여럿도 받게** 넓어졌다([버전 목록]의
+    //    [삭제]가 초안·만료본 둘을 허용한다). 글자 하나를 넘기는 이 길의
+    //    동작은 한 글자도 안 바뀌었다 — 아래가 그것을 값의 모양으로 못 박는다:
+    //    문자열이면 배열 하나로 감싸고, 그 묶음에 없으면 거절한다.
     const mutation = flat(topLevelFunction(templateMutations, "export async function softDeleteProcedureTemplate("));
     assert.match(
       mutation,
-      /if \(input\.requireStatus && template\.status !== input\.requireStatus\) \{ fail\( "CONFLICT",/,
+      /if \(input\.requireStatus !== undefined\) \{ const allowed = typeof input\.requireStatus === "string" \? \[input\.requireStatus\] : input\.requireStatus; if \(!allowed\.includes\(template\.status\)\) \{ fail\( "CONFLICT",/,
       "mutation 이 requireStatus 를 안 보면 화면만 막는 셈이다"
     );
+    // 🔴 "안 넘기면 상태를 안 본다"가 그대로여야 한다 — 참 검사(`&&`)로
+    //    되돌아가면 빈 배열이 "아무 상태나 통과"로 뒤집힌다.
+    assert.ok(
+      !mutation.includes("if (input.requireStatus &&"),
+      "빈 묶음이 '전부 허용'으로 읽히는 모양으로 돌아갔다"
+    );
     // 상태 검사가 참조 검사보다 **앞**이어야 한다 — 게시본을 참조 수로 거절하면
-    // "지금은 참조가 없으니 지울 수 있다"로 읽힌다.
-    const statusCheck = mutation.indexOf("input.requireStatus &&");
+    // "지금은 참조가 없으니 지울 수 있다"로 읽힌다. 화면도 같은 차례로 까닭을
+    // 고른다(domain/procedure-version-deletion.ts).
+    const statusCheck = mutation.indexOf("allowed.includes(template.status)");
     const referenceCheck = mutation.indexOf("countProcedureTemplateReferences(");
     assert.ok(statusCheck !== -1 && referenceCheck !== -1 && statusCheck < referenceCheck);
   });

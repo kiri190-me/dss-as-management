@@ -3,6 +3,7 @@ import {
   procedureTemplateStatusLabels,
   type ProcedureTemplateStatus,
 } from "@/lib/domain/procedure-template-types";
+import { resolveProcedureVersionDeleteBlock } from "@/lib/domain/procedure-version-deletion";
 
 /**
  * ============================================================================
@@ -67,10 +68,27 @@ function dateLabel(row: ProcedureVersionListRow): string {
 export default function ProcedureVersionList({
   versions,
   currentTemplateId,
+  referencedVersionIds = [],
+  renderDeleteAction,
 }: {
   /** 이 줄기에서 볼 수 있는 모든 판. 판 번호 내림차순으로 넘어온다. */
   versions: ProcedureVersionListRow[];
   currentTemplateId: string;
+  /**
+   * 수행 기록이 있거나 다음 판이 이어받은 판들 — 지울 수 없는 쪽이다. 서버가
+   * listUndeletableProcedureTemplateIds 로 세어 넘긴다. 🔴 여기서 다시 세지
+   * 않는다: 세는 잣대가 둘이 되면 화면에는 단추가 있는데 서버는 거절하는 날이 온다.
+   */
+  referencedVersionIds?: string[];
+  /**
+   * 한 줄의 [삭제] 자리. 🔴 **이 파일이 삭제 단추를 import 하지 않는 까닭**은
+   * DeleteProcedureVersionButton 의 머리말에 있다 — 서버 액션을 물면 이 조각을
+   * 렌더해서 재는 시험이 import 에서 던진다.
+   *
+   * 🔵 안 넘기면 삭제 자리 자체가 없다(fail-closed). 권한이 없는 사람에게는
+   * 부모가 아예 안 넘기므로, 막힌 까닭조차 화면에 흘러나가지 않는다.
+   */
+  renderDeleteAction?: (row: ProcedureVersionListRow) => React.ReactNode;
 }) {
   // 페이지가 넘기는 것을 잊었거나(기본값 []), 조회가 빈손으로 왔을 때 빈 상자를
   // 남기지 않는다 — 지금 보고 있는 판 자신은 언제나 그 목록에 들어 있어야
@@ -79,6 +97,7 @@ export default function ProcedureVersionList({
 
   const current = versions.find((row) => row.id === currentTemplateId) ?? null;
   const publishedCount = versions.filter((row) => row.status === "PUBLISHED").length;
+  const referenced = new Set(referencedVersionIds);
 
   return (
     <section>
@@ -87,15 +106,31 @@ export default function ProcedureVersionList({
       </h2>
       <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
         같은 절차(코드)의 모든 판입니다. 누르면 그 판의 상세로 이동합니다.
+        {/*
+          🔴 2026-11-04 에 글이 바뀌었다. 전에는 "게시는 이전 게시본을 자동으로
+          내리지 않습니다" 였고 그게 사실이었다. 지금은 게시가 같은 트랜잭션에서
+          옛 게시본을 [만료됨]으로 내린다 — 그러니 이 표시가 떠 있다는 것은
+          **그 규칙이 생기기 전에 만들어진 줄기**라는 뜻이다(개발 DB 의 code "7").
+          치우는 길도 그 자리에 적는다: 아무 판이나 한 번 게시하면 나머지가
+          내려간다.
+        */}
         {publishedCount > 1 && (
           <span className="ml-1 font-medium text-amber-700 dark:text-amber-400">
-            게시본이 {publishedCount}개입니다 — 게시는 이전 게시본을 자동으로 내리지 않습니다.
+            게시본이 {publishedCount}개입니다 — 지금은 한 절차에 게시본이 하나뿐이어야 합니다. 쓸 판을 한 번 더
+            게시하면 나머지가 [만료됨]으로 내려갑니다.
           </span>
         )}
       </p>
       <ul className="divide-y divide-zinc-100 rounded-lg border border-zinc-200 bg-white dark:divide-zinc-800 dark:border-zinc-800 dark:bg-zinc-900">
         {versions.map((row) => {
           const isCurrent = row.id === currentTemplateId;
+          // 🔴 못 지우는 줄에 **흐린 단추만** 두지 않는다. 까닭이 둘(게시 중 ·
+          //    쓰이고 있음)이고 할 일이 다르다 — 앞은 다른 판을 게시하면 풀리고
+          //    뒤는 영영 안 풀린다. 고르는 규칙과 차례는 서버와 같은 한 곳에 있다
+          //    (domain/procedure-version-deletion.ts).
+          const deleteBlock = renderDeleteAction
+            ? resolveProcedureVersionDeleteBlock({ status: row.status, isReferenced: referenced.has(row.id) })
+            : null;
           const body = (
             <span className="flex flex-wrap items-center gap-2">
               <span className="w-10 shrink-0 font-mono text-sm text-zinc-700 dark:text-zinc-300">v{row.version}</span>
@@ -117,18 +152,35 @@ export default function ProcedureVersionList({
           );
 
           return (
-            <li key={row.id}>
+            // 🔴 [삭제] 자리는 **링크 바깥**이다. 안에 두면 <a> 안에 <button> 이
+            //    들어가 하이드레이션이 깨지고, 줄을 누르면 상세로 이동해 버려
+            //    삭제 창이 뜨지도 않는다(계열 목록의 카드가 같은 함정을 적어 두었다).
+            <li key={row.id} className={`flex items-center gap-2 ${isCurrent ? "bg-blue-50/40 dark:bg-blue-950/30" : ""}`}>
               {isCurrent ? (
-                <div aria-current="page" className="bg-blue-50/40 px-3 py-2 dark:bg-blue-950/30">
+                <div aria-current="page" className="min-w-0 flex-1 px-3 py-2">
                   {body}
                 </div>
               ) : (
                 <Link
                   href={`/procedures/${row.id}`}
-                  className="block px-3 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                  className="min-w-0 flex-1 px-3 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                 >
                   {body}
                 </Link>
+              )}
+              {renderDeleteAction && (
+                <span className="shrink-0 pr-3">
+                  {deleteBlock ? (
+                    <span
+                      title={deleteBlock.detail}
+                      className="whitespace-nowrap text-xs text-zinc-400 dark:text-zinc-600"
+                    >
+                      {deleteBlock.reason}
+                    </span>
+                  ) : (
+                    renderDeleteAction(row)
+                  )}
+                </span>
               )}
             </li>
           );

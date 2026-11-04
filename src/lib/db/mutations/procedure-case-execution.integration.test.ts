@@ -3,7 +3,7 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, like, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, like, ne, or, sql } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
   customers,
@@ -22,7 +22,7 @@ import {
   procedureCaseExecutionHistory,
 } from "../schema";
 import { createRepairCase } from "./repair-cases";
-import { createDraftProcedureTemplateFromImport, publishProcedureTemplate } from "./procedure-templates";
+import { createDraftProcedureTemplateFromImport, createNewDraftVersion, publishProcedureTemplate } from "./procedure-templates";
 import {
   startProcedureExecution,
   finishProcedureExecution,
@@ -82,6 +82,22 @@ const TEST_MODEL_PREFIX = "EXECUTION-TEST-";
 const TEST_YEAR_MONTH = "9905";
 const TEST_RECEIVED_AT = "2099-05-10";
 const TEST_SHIPMENT_DATE = "2099-05-20";
+
+/**
+ * 🔴 2026-11-04 — **둘째 달이 생겼다.** 인수번호는 한 달에 99건이 한도인데
+ * (INTAKE_SEQUENCE_EXHAUSTED), 이 파일의 9905 가 그 한도에 **닿아 있었다** —
+ * 접수 건을 하나 더 만드는 시험을 더하자마자 그 시험이 "setup create failed"
+ * 로 깨졌다(까닭이 제 일과 아무 상관 없어 보이는 종류의 실패다).
+ *
+ * 그래서 새로 더하는 시험은 **제 달**을 쓴다. 9909 를 고른 까닭은 저장소 전체를
+ * 뒤져(D99xx) 쓰이지 않는 유일한 자리였기 때문이다(9901~9908 · 9910~9912 · 9999
+ * 가 이미 임자가 있다). 🔴 뒷정리도 함께 넓혔다 — 달을 늘리고 지우는 쪽을
+ * 안 늘리면 그 건들이 DB 에 영영 남는다.
+ */
+const TEST_YEAR_MONTH_SECOND = "9909";
+const TEST_RECEIVED_AT_SECOND = "2099-09-10";
+const TEST_SHIPMENT_DATE_SECOND = "2099-09-20";
+const TEST_YEAR_MONTHS = [TEST_YEAR_MONTH, TEST_YEAR_MONTH_SECOND];
 
 let superAdminId: string;
 let adminId: string;
@@ -442,7 +458,12 @@ after(async () => {
   const allTestTemplates = await db.select({ id: procedureTemplates.id }).from(procedureTemplates).where(like(procedureTemplates.code, `${TEST_CODE_PREFIX}%`));
   const allTemplateIds = [...new Set([...createdTemplateIds, ...allTestTemplates.map((t) => t.id)])];
 
-  const testCases = await db.select({ id: repairCases.id }).from(repairCases).where(like(repairCases.intakeNumber, "D9905%"));
+  // 🔴 이 파일이 만든 접수 건은 **달 둘**에 흩어져 있다(TEST_YEAR_MONTHS 주석).
+  //    한 달만 지우면 나머지 달의 건이 DB 에 남고, 다음 실행은 찌꺼기 위에서 돈다.
+  const testCaseIntakeFilter = or(
+    ...TEST_YEAR_MONTHS.map((yearMonth) => like(repairCases.intakeNumber, `D${yearMonth}%`))
+  );
+  const testCases = await db.select({ id: repairCases.id }).from(repairCases).where(testCaseIntakeFilter);
   const testCaseIds = testCases.map((c) => c.id);
 
   if (testCaseIds.length > 0) {
@@ -459,9 +480,9 @@ after(async () => {
     }
   }
 
-  await db.delete(repairCases).where(like(repairCases.intakeNumber, "D9905%"));
+  await db.delete(repairCases).where(testCaseIntakeFilter);
   await db.delete(products).where(like(products.modelName, `${TEST_MODEL_PREFIX}%`));
-  await db.delete(repairCaseIntakeSequences).where(eq(repairCaseIntakeSequences.yearMonth, TEST_YEAR_MONTH));
+  await db.delete(repairCaseIntakeSequences).where(inArray(repairCaseIntakeSequences.yearMonth, TEST_YEAR_MONTHS));
 
   if (allTemplateIds.length > 0) {
     await db.delete(procedureTemplateEditHistory).where(inArray(procedureTemplateEditHistory.procedureTemplateId, allTemplateIds));
@@ -4036,5 +4057,101 @@ describe("procedure-case-execution: 더한 작업의 자리 (조각 14)", () => 
     });
     assert.equal(moved.ok, false);
     if (!moved.ok) assert.equal(moved.code, "NOT_FOUND");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 게시본이 [만료됨]이 되어도 **돌고 있는 실행은 계속 돈다** (2026-11-04)
+ * ============================================================================
+ * 이날 게시가 바뀌었다 — 올리면 같은 계열의 옛 게시본이 같은 트랜잭션 안에서
+ * ARCHIVED 로 내려간다(mutations/procedure-templates.ts). 🔴 그 옛 판을 **지금
+ * 수리 건이 물고 있을 수 있다.** 개발 DB 실측(2026-11-04)으로 code "7" 의 v1 에
+ * 수행 6건, v2 에 1건이 걸려 있었다 — 내리는 순간 그 7건이 멈추면 현장이 선다.
+ *
+ * 멈추지 않는 까닭은 읽는 길이 상태를 안 보기 때문이다: getExecutionDetail 은
+ * procedure_case_executions → procedure_templates 를 id 로 조인할 뿐 status 를
+ * 거르지 않고, 진행 mutation 들도 상태를 다시 보지 않는다. 상태를 보는 곳은
+ * **시작하는 길 하나뿐**이다(startProcedureExecution 의 TEMPLATE_NOT_EXECUTABLE).
+ *
+ * 그 "까닭"은 주석일 뿐이라 여기서 **실제로 한 단계를 진행해** 확인한다 —
+ * 조회가 된다는 것만으로는 쓰기가 막히는지 알 수 없다.
+ *
+ * 🔵 접수 건은 **한 건**만 만든다(인수번호 한 자리). 판은 둘 뜨지만 접수는 하나다.
+ * ============================================================================
+ */
+describe("절차 판본이 만료돼도 돌고 있는 실행", () => {
+  test("89. 🔴 물고 있던 게시본이 만료돼도 실행은 보이고 **진행까지 된다**", async () => {
+    const code = uniqueCode("expire-running");
+    const { templateId } = await createPublishedTemplate(code);
+    // 🔴 **둘째 달**을 쓴다 — 9905 는 이미 99건 한도에 닿아 있다
+    //    (TEST_YEAR_MONTHS 주석). 이 시험이 쓰는 인수번호는 **한 자리**다.
+    const created = await createTestCase({
+      assignedEngineerId: engineerId,
+      receivedAt: TEST_RECEIVED_AT_SECOND,
+      internalTargetShipmentDate: TEST_SHIPMENT_DATE_SECOND,
+    });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true, JSON.stringify(started));
+    if (!started.ok) throw new Error("unreachable");
+
+    // 🔵 먼저 표본 — 물고 있는 판이 **정말 게시 상태**이고, 실행이 서 있다.
+    const [beforeTemplate] = await db
+      .select({ status: procedureTemplates.status })
+      .from(procedureTemplates)
+      .where(eq(procedureTemplates.id, templateId));
+    assert.equal(beforeTemplate.status, "PUBLISHED");
+    const detailBefore = await getExecutionDetail(started.executionId);
+    assert.ok(detailBefore, "실행 상세가 비면 아래가 전부 공짜로 통과한다");
+    assert.ok(detailBefore.nodes.length > 0, "노드가 0개면 '그대로다'가 아무것도 안 잰다");
+
+    // 새 판을 떠서 게시 — 이것이 물고 있던 판을 [만료됨]으로 내린다.
+    const nextDraft = await createNewDraftVersion(templateId, superAdminId);
+    assert.equal(nextDraft.ok, true, JSON.stringify(nextDraft));
+    if (!nextDraft.ok) throw new Error("unreachable");
+    createdTemplateIds.push(nextDraft.id);
+    const republished = await publishProcedureTemplate(nextDraft.id, superAdminId);
+    assert.equal(republished.ok, true, JSON.stringify(republished));
+
+    const [afterTemplate] = await db
+      .select({ status: procedureTemplates.status })
+      .from(procedureTemplates)
+      .where(eq(procedureTemplates.id, templateId));
+    assert.equal(afterTemplate.status, "ARCHIVED", "만료가 안 됐으면 아래 단언이 아무것도 안 잰다");
+
+    // 🔴 ① 화면이 그 실행을 여전히 본다.
+    const active = await getActiveExecutionForCase(created.id);
+    assert.equal(active?.id, started.executionId, "만료된 판을 물었다고 실행이 사라지면 안 된다");
+
+    // 🔴 ② 상세가 그대로 온다 — 노드 수도 이름도 그 판의 것이다.
+    const detailAfter = await getExecutionDetail(started.executionId);
+    assert.ok(detailAfter);
+    assert.equal(detailAfter.nodes.length, detailBefore.nodes.length);
+    assert.equal(detailAfter.templateName, detailBefore.templateName);
+    assert.equal(detailAfter.templateCode, code);
+
+    // 🔴 ③ **쓰기까지 된다.** 조회만 재면 "보이는데 눌리지 않는" 경우를 놓친다.
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const task = byCode.get("n2");
+    assert.ok(task, "표본 판의 n2(TASK)를 못 찾았다");
+    assert.notEqual(task.status, "COMPLETED", "이미 끝난 노드를 고르면 '진행된다'가 공짜로 통과한다");
+    const completed = await completeExecutionNode({
+      executionNodeId: task.id,
+      actorUserId: engineerId,
+      expectedVersion: task.version,
+      selectedOutgoingEdgeId: null,
+    });
+    assert.equal(completed.ok, true, `만료된 판의 실행이 진행되지 않았다: ${JSON.stringify(completed)}`);
+    const [taskAfter] = await db
+      .select({ status: procedureCaseExecutionNodes.status })
+      .from(procedureCaseExecutionNodes)
+      .where(eq(procedureCaseExecutionNodes.id, task.id));
+    assert.equal(taskAfter.status, "COMPLETED");
+
+    // 🔵 견줄 쪽 — **새로 불러오는** 길은 새 판으로 바뀐다. 만료된 판은 목록에서
+    //    빠진다(이 둘이 함께 참이라야 "계속 돈다"가 '아무것도 안 바뀌었다'와 다르다).
+    const options = await getExecutableTemplateOptions();
+    assert.ok(options.some((o) => o.id === nextDraft.id), "새 게시본이 불러오기 목록에 있어야 한다");
+    assert.ok(!options.some((o) => o.id === templateId), "만료된 판이 아직 불러오기 목록에 있다");
   });
 });

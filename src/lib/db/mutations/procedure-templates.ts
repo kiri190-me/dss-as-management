@@ -33,6 +33,10 @@ import {
   type ProcedureEquipmentType,
   type ProcedureTemplateStatus,
 } from "@/lib/domain/procedure-template-types";
+import {
+  canPublishFromProcedureStatus,
+  pickPublishedSiblingsToExpire,
+} from "@/lib/domain/procedure-template-publish-policy";
 import type { Role } from "@/lib/domain/types";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
 
@@ -513,6 +517,53 @@ async function insertTemplateContent(
   }
 }
 
+/**
+ * 이력에 붙는 표시 — 🔴 이력을 읽는 쪽이 **사람이 누른 보관과 가르는 열쇠**다.
+ *
+ * action_type 은 **새 값을 만들지 않고** STATUS_CHANGE 를 쓴다. 그 칸은 enum 이라
+ * 값을 늘리려면 마이그레이션이 필요하고, 뜻이 맞는 값이 이미 있다. 평범한 상태
+ * 변경과 가르는 열쇠는 new_value 에 붙이는 이 표시이며, 이것은 출하 대기 자동
+ * 전환이 쓰는 방식과 **같은 관례**다
+ * (shipment-waiting-auto-advance.ts 의 SHIPMENT_WAITING_AUTO_ADVANCE_METADATA).
+ *
+ * 🔴 actor_user_id 에는 **게시를 누른 사람**이 들어간다. 그 사람이 이 판을 손으로
+ * 내린 것처럼 읽히면 안 되므로 아래 사유 문장을 함께 남기고, 새로 게시된 판이
+ * 무엇인지(publishedTemplateId · publishedVersion)도 같은 줄에 적는다 — "무엇에
+ * 딸려 내려갔는가"가 없으면 표시만으로는 까닭을 복원할 수 없다.
+ */
+export const PROCEDURE_EXPIRED_BY_PUBLISH_MARKER = { expiredByPublish: true } as const;
+
+/** 위 표시와 함께 이력에 남는 사유 문장. */
+export const PROCEDURE_EXPIRED_BY_PUBLISH_REASON =
+  "같은 절차의 다른 판이 게시되어 시스템이 [만료됨]으로 내렸습니다.";
+
+/**
+ * 초안을 게시한다. 🔴 2026-11-04 — **같은 계열(code)의 옛 게시본을 같은
+ * 트랜잭션 안에서 [만료됨](ARCHIVED)으로 내린다.**
+ *
+ * ── 🔴 왜 계열 전체를 한 문장으로 잠그는가 ──────────────────────────────
+ * 전에는 `WHERE id = ? FOR UPDATE` 로 **내 행 하나만** 잠갔다. 그 모양으로
+ * 형제를 내리면 두 사람이 같은 순간에 서로 다른 판을 게시할 때 막히지 않는다:
+ * 둘 다 "지금 게시본은 v2" 로 읽고, 한쪽이 v2 를 내리고 v3 를 올린 뒤에도 다른
+ * 쪽은 **제 스냅샷에 보이던 v2** 만 내리고 v4 를 올린다 → 게시본이 둘이 된다.
+ * READ COMMITTED 의 FOR UPDATE 재평가는 **잠근 행**에만 일어나므로, 상대가
+ * 새로 올린 v3 는 끝내 보이지 않는다.
+ *
+ * 그래서 `WHERE code = ? AND is_deleted = false ORDER BY version FOR UPDATE` 로
+ * **계열의 모든 판을 한 번에** 잠근다. 두 번째 트랜잭션은 첫째가 끝날 때까지
+ * 여기서 멈추고, 풀린 뒤 같은 행들을 다시 읽어 상대가 올린 판을 본다. 차례를
+ * version 으로 고정하는 것은 두 트랜잭션이 같은 차례로 잠가 교착(deadlock)을
+ * 만들지 않기 위해서다.
+ *
+ * 🔵 code 는 **잠그기 전에** 따로 읽는다. 이 칸은 행이 만들어진 뒤 어떤
+ * mutation 도 바꾸지 않으므로(이름 변경은 name 만 건드린다) 잠금 없이 읽어도
+ * 낡을 수 없다.
+ *
+ * ── 🔴 검증은 만료본에서 다시 게시할 때도 똑같이 거친다 ────────────────
+ * 미해결 ERROR 검사와 그래프 구조 검사는 **상태와 무관하게** 아래에서 한 번씩
+ * 돈다. 재게시에만 통하는 샛길이 생기면, 한 번 게시됐던 판이라는 이유로 지금은
+ * 깨진 그래프가 현장에 다시 나간다.
+ */
 export async function publishProcedureTemplate(
   templateId: string,
   actorUserId: string
@@ -527,11 +578,28 @@ export async function publishProcedureTemplate(
         fail("FORBIDDEN", "게시 권한이 없습니다.");
       }
 
-      const [template] = await tx
-        .select({ id: procedureTemplates.id, status: procedureTemplates.status, category: procedureTemplates.category })
+      // 계열을 고를 열쇠부터 읽는다(위 머리말 — code 는 바뀌지 않는 칸이다).
+      const [lineage] = await tx
+        .select({ code: procedureTemplates.code })
         .from(procedureTemplates)
-        .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)))
+        .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)));
+      if (!lineage) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
+
+      const series = await tx
+        .select({
+          id: procedureTemplates.id,
+          version: procedureTemplates.version,
+          status: procedureTemplates.status,
+          category: procedureTemplates.category,
+        })
+        .from(procedureTemplates)
+        .where(and(eq(procedureTemplates.code, lineage.code), eq(procedureTemplates.isDeleted, false)))
+        .orderBy(procedureTemplates.version)
         .for("update");
+
+      // 잠근 뒤 **다시 찾는다** — 잠기기를 기다리는 사이 이 판이 휴지통으로
+      // 갔다면 여기서 사라진다.
+      const template = series.find((row) => row.id === templateId);
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
       // Fine-grained, category-specific boundary — FULL_SERVICE/REFERENCE
       // fall through to canPublishProcedureTemplates unchanged (SUPER_ADMIN
@@ -539,8 +607,8 @@ export async function publishProcedureTemplate(
       if (!actorMay(actor, (role) => canActorPublishTemplateOfCategory(role, template.category))) {
         fail("FORBIDDEN", "게시 권한이 없습니다.");
       }
-      if (template.status !== "DRAFT") {
-        fail("CONFLICT", "초안(DRAFT) 상태의 템플릿만 게시할 수 있습니다.");
+      if (!canPublishFromProcedureStatus(template.status)) {
+        fail("CONFLICT", "초안(DRAFT) 또는 만료된 절차만 게시할 수 있습니다.");
       }
 
       // Phase 3A: resolution_status, not resolved_at nullity, is the
@@ -583,10 +651,61 @@ export async function publishProcedureTemplate(
         fail("HAS_STRUCTURAL_ERRORS", "그래프 구조 오류(ERROR)가 있어 게시할 수 없습니다. 편집기에서 검증을 확인하세요.");
       }
 
-      await tx
+      const now = new Date();
+
+      // ── 🔴 옛 게시본을 먼저 내린다 ────────────────────────────────────
+      // 올리기 **전에** 내린다. 순서가 반대면 그 사이(같은 트랜잭션 안이라
+      // 밖에서는 안 보이지만) 게시본이 둘인 상태를 거치게 되고, 나중에 이
+      // 블록에 부분 유니크 인덱스가 걸리면 그 순간 DB 가 거절한다.
+      for (const sibling of pickPublishedSiblingsToExpire(series, templateId)) {
+        const expired = await tx
+          .update(procedureTemplates)
+          .set({ status: "ARCHIVED", archivedByUserId: actor.id, archivedAt: now, updatedAt: now })
+          .where(and(eq(procedureTemplates.id, sibling.id), eq(procedureTemplates.status, "PUBLISHED")))
+          .returning({ id: procedureTemplates.id });
+        // 계열을 통째로 잠근 뒤라 정상적으로는 0행이 나올 수 없다. 그래도
+        // 조용히 지나가면 "게시본 둘"이 그대로 남으므로 트랜잭션을 되돌린다 —
+        // 🔴 이 fail 은 throw 라서 아래 게시 UPDATE 도 함께 사라진다.
+        if (expired.length === 0) {
+          fail("CONFLICT", "같은 절차의 게시 상태가 방금 바뀌었습니다. 다시 시도해 주세요.");
+        }
+        await insertAuditLog(tx, {
+          actorUserId: actor.id,
+          actionType: "STATUS_CHANGE",
+          targetEntity: "procedure_templates",
+          targetRecordId: sibling.id,
+          previousValue: { code: lineage.code, version: sibling.version, status: "PUBLISHED" },
+          newValue: {
+            code: lineage.code,
+            version: sibling.version,
+            status: "ARCHIVED",
+            reason: PROCEDURE_EXPIRED_BY_PUBLISH_REASON,
+            publishedTemplateId: templateId,
+            publishedVersion: template.version,
+            ...PROCEDURE_EXPIRED_BY_PUBLISH_MARKER,
+          },
+        });
+      }
+
+      const published = await tx
         .update(procedureTemplates)
-        .set({ status: "PUBLISHED", publishedByUserId: actor.id, publishedAt: new Date(), updatedAt: new Date() })
-        .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.status, "DRAFT")));
+        .set({
+          status: "PUBLISHED",
+          publishedByUserId: actor.id,
+          publishedAt: now,
+          updatedAt: now,
+          // 🔴 만료본을 다시 게시하는 길에서 지난번에 내려갈 때 찍힌 보관 자국을
+          //    지운다. 안 지우면 "게시됐는데 만료 시각이 있는" 행이 되어, 그 칸을
+          //    읽는 화면이 생기는 날 거짓을 그린다. 초안을 처음 게시할 때는 둘 다
+          //    이미 null 이라 아무 일도 아니다.
+          archivedAt: null,
+          archivedByUserId: null,
+        })
+        .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.status, template.status)))
+        .returning({ id: procedureTemplates.id });
+      if (published.length === 0) {
+        fail("CONFLICT", "같은 절차의 게시 상태가 방금 바뀌었습니다. 다시 시도해 주세요.");
+      }
 
       return { ok: true, id: templateId };
     });
@@ -1213,8 +1332,15 @@ export async function softDeleteProcedureTemplate(input: {
    * 초안 하나를 그 자리에서 치우는 길이라, 게시된 판이 그 길로 사라지는 일은
    * 없어야 한다. 화면도 DRAFT 일 때만 단추를 내지만, 화면에서 감추는 것은
    * 편의일 뿐 경계가 아니다 — 경계는 여기, 행을 잠근 트랜잭션 안이다.
+   *
+   * 🔴 2026-11-04 — **여럿도 받는다.** [버전 목록]의 [삭제]가 초안과 만료본
+   * 둘을 허용하기 때문이다(게시본은 여전히 안 된다 —
+   * domain/procedure-version-deletion.ts). 한 값만 받던 때의 호출부는 한 글자도
+   * 안 바뀌었다: 글자 하나를 넘기면 전과 똑같이 그 한 상태만 통과한다.
+   * 🔵 "안 넘기면 상태를 안 본다"도 그대로다 — 빈 배열을 넘기는 것과는 다르다
+   *    (빈 배열이면 어떤 상태도 통과하지 못한다).
    */
-  requireStatus?: ProcedureTemplateStatus;
+  requireStatus?: ProcedureTemplateStatus | readonly ProcedureTemplateStatus[];
 }): Promise<ProcedureTemplateTrashResult> {
   try {
     return await db.transaction(async (tx) => {
@@ -1222,11 +1348,16 @@ export async function softDeleteProcedureTemplate(input: {
 
       // 상태를 먼저 본다 — 게시본을 참조 수로 거절하면 "지금은 참조가 없으니
       // 지울 수 있다"로 읽힌다. 거절하는 까닭이 상태라면 상태를 말해야 한다.
-      if (input.requireStatus && template.status !== input.requireStatus) {
-        fail(
-          "CONFLICT",
-          `${procedureTemplateStatusLabels[input.requireStatus]} 상태의 절차만 이 길로 지울 수 있습니다 — 이 절차는 ${procedureTemplateStatusLabels[template.status]} 상태입니다.`
-        );
+      // 🔵 화면(domain/procedure-version-deletion.ts)도 **같은 차례**로 까닭을
+      //    고른다. 뒤집히면 "화면은 수행 기록이라는데 서버는 게시 중이라 한다".
+      if (input.requireStatus !== undefined) {
+        const allowed = typeof input.requireStatus === "string" ? [input.requireStatus] : input.requireStatus;
+        if (!allowed.includes(template.status)) {
+          fail(
+            "CONFLICT",
+            `${allowed.map((s) => procedureTemplateStatusLabels[s]).join(" · ")} 상태의 절차만 이 길로 지울 수 있습니다 — 이 절차는 ${procedureTemplateStatusLabels[template.status]} 상태입니다.`
+          );
+        }
       }
 
       const references = await countProcedureTemplateReferences(tx, input.templateId);
