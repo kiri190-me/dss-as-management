@@ -389,9 +389,21 @@ describe("줄기 B-⑧ 뒷정리 — 끄기: 그림에서만 사라진다", () =
 });
 
 describe("줄기 B-⑧ — 페이지: 서버에서 읽어 넘긴다", () => {
-  test("🔴 세 조회를 함께 받고, 그중 하나가 현장 단계다", () => {
+  /**
+   * 🔴 2026-11-04 — 이 시험의 이름이 「세 조회」였다. 줄기 B ④ 조각 ② 가
+   * 「다음 절차」 후보를 **넷째로** 더하면서 깨졌다 — 깨진 것이 맞다.
+   * 재려던 것은 **개수**가 아니라 「한 Promise.all 로 **함께** 받는가」와
+   * 「현장 단계가 그 안에 있고 화면까지 넘어가는가」였다. 그래서 묶음의
+   * 글자를 통째로 박는 대신 그 둘을 따로 잰다 — 다섯째가 더해져도 이 시험은
+   * 제 할 일만 지키고, 차례가 바뀌어도 안 깨진다.
+   */
+  test("🔴 조회를 한 번에 함께 받고, 그중 하나가 현장 단계다", () => {
     const f = flat(page);
-    assert.ok(f.includes("const [historyView, comparison, fieldAddedSteps] = await Promise.all(["));
+    assert.ok(f.includes("await Promise.all(["), "하나씩 await 하면 화면이 뜨기까지 왕복이 쌓인다");
+    assert.ok(
+      /const \[[^\]]*\bfieldAddedSteps\b[^\]]*\] = await Promise\.all\(\[/.test(f),
+      "현장 단계가 그 묶음 안에서 함께 읽혀야 한다"
+    );
     assert.ok(f.includes("getFieldAddedStepsForDraft(template.id),"));
     assert.ok(f.includes("fieldAddedSteps={fieldAddedSteps}"), "읽어 놓고 안 넘기면 탭이 영영 안 선다");
   });

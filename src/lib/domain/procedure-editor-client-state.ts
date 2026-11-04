@@ -17,6 +17,15 @@ export type EditableNodeFields = {
   sortOrder: number;
   isActive: boolean;
   nodeType: ProcedureNodeType;
+  /**
+   * 2026-11-04(줄기 B ④ 조각 ②) — [종료] 노드의 「다음 절차」.
+   *
+   * 🔴 **다른 칸과 똑같이 「저장 안 됨」으로 세어져야 한다.** 아래
+   * NODE_FIELD_KEYS 에 안 넣으면 고르기만 하고 저장을 안 눌러도 화면이
+   * 「바뀐 것 없음」이라고 말하고, 떠날 때 **묻지도 않고 날아간다.**
+   * END 가 아닌 노드에서는 늘 null 이다.
+   */
+  nextProcedureTemplateId: string | null;
 };
 
 export type EditableEdgeFields = {
@@ -26,7 +35,15 @@ export type EditableEdgeFields = {
   branchLabel: string | null;
 };
 
-const NODE_FIELD_KEYS = ["title", "description", "instructions", "sortOrder", "isActive", "nodeType"] as const;
+const NODE_FIELD_KEYS = [
+  "title",
+  "description",
+  "instructions",
+  "sortOrder",
+  "isActive",
+  "nodeType",
+  "nextProcedureTemplateId",
+] as const;
 const EDGE_FIELD_KEYS = ["fromNodeId", "toNodeId", "branchType", "branchLabel"] as const;
 
 function shallowFieldsEqual<T extends object>(a: T, b: T, keys: readonly (keyof T)[]): boolean {

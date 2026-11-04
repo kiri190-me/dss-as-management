@@ -104,6 +104,16 @@ export async function updateProcedureTemplateNodeAction(input: {
   const actorCheck = await resolveAuthorizedActorId();
   if (!actorCheck.ok) return actorCheck.result;
   if (!isValidUuid(input.nodeId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  // 🔴 「다음 절차」는 id 아니면 null 이다(줄기 B ④ 조각 ②). 모양을 여기서 먼저
+  //    본다 — 안 보면 빈 글자나 쓰레기 값이 FK 까지 가서 DB 오류로 터지고,
+  //    사람에게는 뜻을 알 수 없는 글이 뜬다.
+  if (
+    input.patch.nextProcedureTemplateId !== undefined &&
+    input.patch.nextProcedureTemplateId !== null &&
+    !isValidUuid(input.patch.nextProcedureTemplateId)
+  ) {
+    return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  }
 
   return withErrorRedaction("updateProcedureTemplateNodeAction", () =>
     updateProcedureTemplateNode(input.nodeId, actorCheck.userId, input.patch, input.expectedTemplateUpdatedAt, input.reason?.trim() || null)

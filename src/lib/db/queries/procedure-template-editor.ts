@@ -50,6 +50,8 @@ export type EditorNodeRow = {
   recommendedCorrectiveAction: string | null;
   acceptanceCriteria: string | null;
   workerMayAddNextTask: boolean;
+  /** [종료]의 「다음 절차」(2026-11-04, 줄기 B ④ 조각 ②). END 가 아니면 늘 null. */
+  nextProcedureTemplateId: string | null;
   positionX: number;
   positionY: number;
   userPositionX: number | null;
@@ -136,6 +138,7 @@ async function loadNodesWithContentMarkers(templateId: string): Promise<EditorNo
     recommendedCorrectiveAction: n.recommendedCorrectiveAction,
     acceptanceCriteria: n.acceptanceCriteria,
     workerMayAddNextTask: n.workerMayAddNextTask,
+    nextProcedureTemplateId: n.nextProcedureTemplateId,
     positionX: n.positionX,
     positionY: n.positionY,
     userPositionX: n.userPositionX,

@@ -68,6 +68,15 @@ export type ProcedureNodeFieldDraft = {
   instructions: string;
   sortOrder: number;
   isActive: boolean;
+  /**
+   * 2026-11-04(줄기 B ④ 조각 ②) — [종료]의 「다음 절차」.
+   *
+   * 🔴 **빈 글자가 아니라 `null` 이 「안 고름」이다.** 이웃 description·
+   * instructions 는 빈 글자를 null 로 바꿔 싣지만, 이 칸은 처음부터 id 아니면
+   * null 이라 그 변환이 없다. 빈 글자를 섞으면 FK 에 빈 글자가 날아가 DB 가
+   * 거절한다.
+   */
+  nextProcedureTemplateId: string | null;
 };
 
 export type Position = { x: number; y: number };
@@ -96,6 +105,8 @@ export type ProcedureServerNodeSnapshot = {
   instructions: string | null;
   sortOrder: number;
   isActive: boolean;
+  /** [종료]의 「다음 절차」 — 서버에 저장돼 있는 값(2026-11-04, 줄기 B ④). */
+  nextProcedureTemplateId: string | null;
   positionX: number;
   positionY: number;
 };
@@ -122,6 +133,12 @@ export function mergeProcedureNodeForRender(
     instructions: pendingFieldDraft ? (pendingFieldDraft.instructions.length > 0 ? pendingFieldDraft.instructions : null) : server.instructions,
     sortOrder: pendingFieldDraft?.sortOrder ?? server.sortOrder,
     isActive: pendingFieldDraft?.isActive ?? server.isActive,
+    // 🔴 `??` 를 쓰면 안 된다 — 초안이 **일부러 null 로 지운** 상태와 「초안이
+    //    없음」이 구별되지 않아, 지정을 지우고 저장하기 전까지 화면이 옛 값을
+    //    계속 그린다(연결선의 pendingRoutePoints 가 같은 함정을 적어 두었다).
+    nextProcedureTemplateId: pendingFieldDraft
+      ? pendingFieldDraft.nextProcedureTemplateId
+      : server.nextProcedureTemplateId,
     positionX: pendingPosition?.x ?? server.positionX,
     positionY: pendingPosition?.y ?? server.positionY,
   };
@@ -156,7 +173,10 @@ export function isProcedureNodeFieldDraftDirty(draft: ProcedureNodeFieldDraft, s
     draft.description !== (server.description ?? "") ||
     draft.instructions !== (server.instructions ?? "") ||
     draft.sortOrder !== server.sortOrder ||
-    draft.isActive !== server.isActive
+    draft.isActive !== server.isActive ||
+    // 🔴 이 줄이 없으면 「다음 절차」만 고친 노드가 **저장 대상에서 빠진다** —
+    //    [저장]이 멀쩡히 끝났다고 말하고 값은 안 올라간다.
+    draft.nextProcedureTemplateId !== server.nextProcedureTemplateId
   );
 }
 

@@ -41,6 +41,14 @@ export type ReplayNodeState = {
   recommendedCorrectiveAction: string | null;
   acceptanceCriteria: string | null;
   workerMayAddNextTask: boolean;
+  /**
+   * [종료]의 「다음 절차」(2026-11-04, 줄기 B ④ 조각 ②).
+   *
+   * 🔴 **선택 칸인 까닭**: 이 칸이 생기기 전에 쌓인 이력 행의 afterState 에는
+   * 이 열쇠가 아예 없다. 필수로 적으면 옛 이력을 되살릴 때마다 타입이 거짓말을
+   * 하게 되고, 읽는 쪽이 `undefined` 를 만나는 것을 모르게 된다.
+   */
+  nextProcedureTemplateId?: string | null;
   positionX: number;
   positionY: number;
   userPositionX: number | null;
@@ -178,7 +186,18 @@ export function reconstructStateAtSequenceNumber(rows: ReplayHistoryRow[], cutof
         if (!id) throw new ReplayError(`cannot resolve node identity for UPDATE_NODE row ${row.id} — node_id is null`);
         const existing = nodes.get(id);
         if (!existing) throw new ReplayError(`UPDATE_NODE row ${row.id} targets node ${id}, which does not exist at this point in history`);
-        const patch = row.afterState as { title: string; description: string | null; instructions: string | null; sortOrder: number; isActive: boolean };
+        // 🔵 nextProcedureTemplateId 는 **선택**이다 — 그 칸이 생기기 전에 쌓인
+        //    행에는 열쇠 자체가 없고, 없으면 펼치기가 건드리지 않아 앞 상태가
+        //    그대로 남는다(없는 것을 null 로 덮어쓰면 옛 이력을 되살릴 때마다
+        //    지정이 지워진다).
+        const patch = row.afterState as {
+          title: string;
+          description: string | null;
+          instructions: string | null;
+          sortOrder: number;
+          isActive: boolean;
+          nextProcedureTemplateId?: string | null;
+        };
         nodes.set(id, { ...existing, ...patch });
         break;
       }
@@ -187,8 +206,17 @@ export function reconstructStateAtSequenceNumber(rows: ReplayHistoryRow[], cutof
         if (!id) throw new ReplayError(`cannot resolve node identity for CHANGE_NODE_TYPE row ${row.id} — node_id is null`);
         const existing = nodes.get(id);
         if (!existing) throw new ReplayError(`CHANGE_NODE_TYPE row ${row.id} targets node ${id}, which does not exist at this point in history`);
-        const { nodeType } = row.afterState as { nodeType: string };
-        nodes.set(id, { ...existing, nodeType });
+        // 🔵 유형이 [종료]에서 바뀌면 mutation 이 「다음 절차」를 함께 지우고
+        //    그 사실을 afterState 에 싣는다(줄기 B ④). 그 열쇠가 있을 때만
+        //    따라 지운다 — 안 실린 행은 지정을 건드리지 않는다.
+        const after = row.afterState as { nodeType: string; nextProcedureTemplateId?: string | null };
+        nodes.set(id, {
+          ...existing,
+          nodeType: after.nodeType,
+          ...("nextProcedureTemplateId" in after
+            ? { nextProcedureTemplateId: after.nextProcedureTemplateId }
+            : {}),
+        });
         break;
       }
       case "CREATE_EDGE": {

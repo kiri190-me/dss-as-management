@@ -14,7 +14,16 @@ import {
 } from "./procedure-editor-client-state";
 
 function nodeFields(overrides: Partial<EditableNodeFields> = {}): EditableNodeFields {
-  return { title: "제목", description: null, instructions: null, sortOrder: 0, isActive: true, nodeType: "TASK", ...overrides };
+  return {
+    title: "제목",
+    description: null,
+    instructions: null,
+    sortOrder: 0,
+    isActive: true,
+    nodeType: "TASK",
+    nextProcedureTemplateId: null,
+    ...overrides,
+  };
 }
 function edgeFields(overrides: Partial<EditableEdgeFields> = {}): EditableEdgeFields {
   return { fromNodeId: "a", toNodeId: "b", branchType: "DEFAULT", branchLabel: null, ...overrides };

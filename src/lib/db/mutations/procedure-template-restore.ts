@@ -94,6 +94,9 @@ function toNodeSnapshot(templateId: string, n: ReplayNodeState): NodeSnapshot {
     recommendedCorrectiveAction: n.recommendedCorrectiveAction,
     acceptanceCriteria: n.acceptanceCriteria,
     workerMayAddNextTask: n.workerMayAddNextTask,
+    // 🔵 그 칸이 생기기 전의 이력에는 값이 없다 — null 로 떨어뜨린다(되살린
+    //    노드에 undefined 를 실으면 insert 가 칸을 통째로 빼 버린다).
+    nextProcedureTemplateId: n.nextProcedureTemplateId ?? null,
     positionX: n.positionX,
     positionY: n.positionY,
     userPositionX: n.userPositionX,

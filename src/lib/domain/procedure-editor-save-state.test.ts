@@ -38,6 +38,7 @@ const serverNode: ProcedureServerNodeSnapshot = {
   instructions: "원래 작업 지시",
   sortOrder: 10,
   isActive: true,
+  nextProcedureTemplateId: null,
   positionX: 500,
   positionY: 300,
 };
@@ -50,6 +51,7 @@ function unchangedNodeDraft(): ProcedureNodeFieldDraft {
     instructions: serverNode.instructions ?? "",
     sortOrder: serverNode.sortOrder,
     isActive: serverNode.isActive,
+    nextProcedureTemplateId: serverNode.nextProcedureTemplateId,
   };
 }
 function unchangedEdgeDraft(): ProcedureEdgeFieldDraft {
@@ -183,7 +185,14 @@ test("render merge: no pending draft/position renders the node baseline unchange
 });
 
 test("render merge: pending node field draft overrides the baseline", () => {
-  const draft: ProcedureNodeFieldDraft = { title: "Driver Board 점검", description: "", instructions: "", sortOrder: 1, isActive: false };
+  const draft: ProcedureNodeFieldDraft = {
+    title: "Driver Board 점검",
+    description: "",
+    instructions: "",
+    sortOrder: 1,
+    isActive: false,
+    nextProcedureTemplateId: null,
+  };
   const rendered = mergeProcedureNodeForRender(serverNode, draft, undefined);
   assert.equal(rendered.title, "Driver Board 점검");
   assert.equal(rendered.isActive, false);

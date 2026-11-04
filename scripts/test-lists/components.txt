@@ -1077,3 +1077,14 @@ src/components/procedures/procedure-series-and-version-list.test.tsx
 #    🔴 일괄 복원이 한 건에 멈추지 않는 모양 그대로인가.
 #    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
 src/components/procedures/procedure-structural-save-notice.test.ts
+
+# 2026-11-04 — [종료]의 **「다음 절차」 고르는 칸**(줄기 B ④ 조각 ②).
+#    재는 것: 🔴 칸이 `node.nodeType === "END"` 로 가려지는가, 그리고 **아직
+#    서버에 안 간 `newNodeType` 으로 가리지 않는가**(그러면 고른 값이 저장
+#    단계에서 END 가 아니라는 이유로 거절된다) · 지정을 지우는 길(「이어가지
+#    않음」)이 화면에 있는가 · 🔴 후보에 없는 지정(만료·삭제·참고용)을 따로 세어
+#    **글자로 밝히는가**(안 밝히면 「이어가지 않음」으로 보여 다음 저장에서 조용히
+#    지워진다) · 🔴 고른 값이 [저장]의 patch 에 실리는가, 빈 글자로 안 떨어지는가 ·
+#    후보 목록이 페이지 → 화면 → 패널로 이어지고 기본값이 빈 배열인가.
+#    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
+src/components/procedures/procedure-next-procedure-picker.test.ts

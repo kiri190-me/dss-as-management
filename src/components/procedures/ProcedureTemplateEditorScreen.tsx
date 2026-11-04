@@ -25,6 +25,7 @@ import {
   type ProcedureEditorUndoStack,
 } from "@/lib/domain/procedure-editor-undo-plan";
 import type { ProcedureTemplateForEditor, DraftParentComparisonResult, EditorNodeRow, EditorEdgeRow } from "@/lib/db/queries/procedure-template-editor";
+import type { NextProcedureLinkCandidate } from "@/lib/db/queries/procedure-templates";
 import type { TemplateHistoryView } from "@/lib/db/queries/procedure-template-history";
 import { resolveInitialGraphTarget, parseSourceReference } from "@/lib/domain/procedure-graph-navigation";
 import {
@@ -181,6 +182,7 @@ export default function ProcedureTemplateEditorScreen({
   canPublish = false,
   canDiscardDraft = false,
   fieldAddedSteps = [],
+  nextProcedureCandidates = [],
 }: {
   template: ProcedureTemplateForEditor;
   historyView: TemplateHistoryView;
@@ -218,6 +220,18 @@ export default function ProcedureTemplateEditorScreen({
    * 이 저장소의 fail-closed 규약 그대로다(canPublish 와 같은 길).
    */
   fieldAddedSteps?: readonly FieldAddedStep[];
+  /**
+   * [종료] 노드의 「다음 절차」로 고를 수 있는 절차들(2026-11-04, 줄기 B ④ 조각 ②).
+   *
+   * 🔵 **기본값이 빈 배열이다.** 안 넘기는 호출부에서는 고르는 칸에
+   * 「이어가지 않음」만 서고, 이미 지정된 값이 있으면 「목록에 없습니다」로
+   * 밝혀진다 — 조용히 지워지지 않는다.
+   *
+   * 🔴 거르는 일은 **서버가 한다**(listNextProcedureLinkCandidates): 게시본 ·
+   * 기술작업 · 참고용 아님 · 자기 계열 제외. 화면이 다시 거르지 않는 까닭은,
+   * 거르는 잣대가 둘이 되면 고를 수 있는데 저장이 거절하는 날이 오기 때문이다.
+   */
+  nextProcedureCandidates?: NextProcedureLinkCandidate[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -557,6 +571,7 @@ export default function ProcedureTemplateEditorScreen({
         instructions: n.instructions,
         sortOrder: n.sortOrder,
         isActive: n.isActive,
+        nextProcedureTemplateId: n.nextProcedureTemplateId,
         positionX: effectivePos.x,
         positionY: effectivePos.y,
       };
@@ -583,7 +598,16 @@ export default function ProcedureTemplateEditorScreen({
     const pending = pendingNodeFieldDraftsById.get(nodeId);
     if (pending) return pending;
     const server = serverNodesById.get(nodeId);
-    return { title: server?.title ?? "", description: server?.description ?? "", instructions: server?.instructions ?? "", sortOrder: server?.sortOrder ?? 0, isActive: server?.isActive ?? true };
+    return {
+      title: server?.title ?? "",
+      description: server?.description ?? "",
+      instructions: server?.instructions ?? "",
+      sortOrder: server?.sortOrder ?? 0,
+      isActive: server?.isActive ?? true,
+      // 🔵 이웃 글자 칸들과 달리 **빈 글자로 떨어뜨리지 않는다** — 이 값은
+      //    id 아니면 null 이고, 빈 글자를 섞으면 FK 에 빈 글자가 날아간다.
+      nextProcedureTemplateId: server?.nextProcedureTemplateId ?? null,
+    };
   }
   function updateNodeFieldDraft(nodeId: string, patch: Partial<ProcedureNodeFieldDraft>) {
     pushPendingUndoStep(`node:${nodeId}:${Object.keys(patch).sort().join(",")}`);
@@ -1055,7 +1079,16 @@ export default function ProcedureTemplateEditorScreen({
         const draft = nodeFieldDraft(step.nodeId);
         const result = await updateProcedureTemplateNodeAction({
           nodeId: step.nodeId,
-          patch: { title: draft.title, description: draft.description.trim() || null, instructions: draft.instructions.trim() || null, sortOrder: draft.sortOrder, isActive: draft.isActive },
+          patch: {
+            title: draft.title,
+            description: draft.description.trim() || null,
+            instructions: draft.instructions.trim() || null,
+            sortOrder: draft.sortOrder,
+            isActive: draft.isActive,
+            // 🔵 이웃 글자 칸처럼 `|| null` 로 떨어뜨리지 않는다 — 이 값은 이미
+            //    id 아니면 null 이고, 빈 글자가 섞일 자리가 없다.
+            nextProcedureTemplateId: draft.nextProcedureTemplateId,
+          },
           expectedTemplateUpdatedAt: expectedUpdatedAt,
         });
         return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
@@ -1769,6 +1802,7 @@ export default function ProcedureTemplateEditorScreen({
               onPositionDraftChange={(position) => setPendingPosition(selectedNode.id, position)}
               resolveNodeDimensions={resolveNodeDimensions}
               onSaved={handleStructuralSaved}
+              nextProcedureCandidates={nextProcedureCandidates}
               canDelete={canDeleteGraph}
               onDeleted={handleNodeDeleted}
               canPosition={canDeleteGraph}

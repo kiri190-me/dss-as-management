@@ -20,6 +20,7 @@ import {
   type ColumnSnapCandidate,
 } from "@/lib/graph-editor-core/layout";
 import type { ProcedureNodeFieldDraft } from "@/lib/domain/procedure-editor-save-state";
+import type { NextProcedureLinkCandidate } from "@/lib/db/queries/procedure-templates";
 
 /** Phase 5C-5B — fixed spacing for "상대 위치로 이동": vertical reuses createProcedureTemplateNode's own default node-stacking gap (150) for consistency; horizontal is a fixed step between columns. 노드 폭에 상한이 없어진 뒤로는 "가장 넓은 노드를 비켜갈 만큼"이라는 기준이 성립하지 않으므로, 폭이 아니라 사람이 보기 좋은 열 간격으로 정한다(겹치는 경우 열 스냅과 직접 드래그로 조정). */
 const RELATIVE_POSITION_SPACING = { horizontal: 140, vertical: 150 } as const;
@@ -81,6 +82,7 @@ export default function NodePropertyPanel({
   onDeleted,
   canPosition,
   isTechnical,
+  nextProcedureCandidates = [],
 }: {
   node: EditorNodeRow;
   /** Phase 5C-5B — every node in the template, for "상대 위치로 이동"'s reference-node picker. 5C-6D-1D — also every OTHER node's current visible position/dimensions feed column-snap candidacy, so this must be the screen's rendered (baseline + pending-draft-merged) list, never the raw server rows alone. */
@@ -113,6 +115,13 @@ export default function NodePropertyPanel({
   canPosition: boolean;
   /** Phase 5C-5B usability — true for TECHNICAL_TASK (any status/role — purely a UI relaxation of the mandatory-reason requirement, matching the mutation layer's own category-aware validation). FULL_SERVICE keeps requiring a reason for node-type changes, unchanged. */
   isTechnical: boolean;
+  /**
+   * [종료]의 「다음 절차」로 고를 수 있는 절차들(2026-11-04, 줄기 B ④ 조각 ②).
+   * 서버가 거른 것을 그대로 그린다 — 게시본 · 기술작업 · 자기 계열 제외
+   * (queries/procedure-templates.ts 의 listNextProcedureLinkCandidates).
+   * 🔵 기본값이 빈 배열이라, 안 넘기는 호출부에서는 「이어가지 않음」만 보인다.
+   */
+  nextProcedureCandidates?: NextProcedureLinkCandidate[];
 }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -147,6 +156,18 @@ export default function NodePropertyPanel({
   const [isDeleting, setIsDeleting] = useState(false);
 
   const otherNodes = allNodes.filter((n) => n.id !== node.id);
+
+  /**
+   * 지금 지정된 「다음 절차」가 **고를 수 있는 목록에 없을 때** 그 id.
+   * 가리킨 절차가 만료·삭제됐거나 참고용으로 바뀌면 이렇게 된다. 이 값을
+   * 따로 세어 두지 않으면 `<select>` 가 값을 못 찾아 「이어가지 않음」으로
+   * 보이고, 사람이 아무것도 안 건드려도 다음 저장에서 지정이 조용히 지워진다.
+   */
+  const orphanedNextProcedureId =
+    draft.nextProcedureTemplateId !== null &&
+    !nextProcedureCandidates.some((c) => c.id === draft.nextProcedureTemplateId)
+      ? draft.nextProcedureTemplateId
+      : null;
   const [referenceNodeId, setReferenceNodeId] = useState(otherNodes[0]?.id ?? "");
   // 캔버스에서 고른 기준 노드를 받아 반영한다 — 같은 노드를 다시 골라도 반영되도록
   // 화면이 seq를 함께 올려 보낸다. 자기 자신은 기준이 될 수 없으므로 무시한다.
@@ -360,6 +381,53 @@ export default function NodePropertyPanel({
         <p className="text-[11px] text-zinc-500 dark:text-zinc-600">
           재검증 결과: 오류 {typeChangeResult.errorCount}건 · 경고 {typeChangeResult.warningCount}건
         </p>
+      )}
+
+      {/*
+        ── 「다음 절차」 — [종료] 노드에만 (2026-11-04, 줄기 B ④ 조각 ②) ──────
+        🔴 `node.nodeType` 을 본다. 위 드롭다운의 `newNodeType` 이 아니다 —
+        그 값은 아직 서버에 안 간 「고르는 중」일 수 있고, 그때 이 칸을 그리면
+        사람이 고른 값이 저장 단계에서 END 가 아니라는 이유로 거절당한다.
+
+        🔵 **고르는 칸만 둔다.** 저장은 화면 상단의 [저장]이 다른 변경과 함께
+        한다(이웃 정렬 순서·활성 상태와 같은 규약) — 여기만 즉시 저장하면
+        「저장 안 함」으로 떠난 사람의 다른 수정과 이 값이 어긋난다.
+      */}
+      {node.nodeType === "END" && (
+        <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
+          다음 절차
+          <select
+            value={draft.nextProcedureTemplateId ?? ""}
+            onChange={(e) =>
+              onDraftChange({ nextProcedureTemplateId: e.target.value === "" ? null : e.target.value })
+            }
+            disabled={!canEdit}
+            className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900"
+          >
+            <option value="">이어가지 않음</option>
+            {nextProcedureCandidates.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} (v{c.version})
+              </option>
+            ))}
+            {/*
+              🔴 저장된 값이 후보에 없을 때 — 가리킨 절차가 만료됐거나 휴지통에
+              갔거나 참고용으로 바뀐 경우다. 이 줄이 없으면 select 가 값을 못 찾아
+              **「이어가지 않음」으로 보이고**, 사람이 아무것도 안 건드려도 다음
+              저장에서 지정이 조용히 지워진다. 글자로 「목록에 없다」고 밝혀,
+              그대로 둘지 바꿀지를 사람이 고르게 한다.
+            */}
+            {orphanedNextProcedureId && (
+              <option value={orphanedNextProcedureId}>
+                지금 지정된 절차 — 고를 수 있는 목록에 없습니다(만료·삭제·참고용)
+              </option>
+            )}
+          </select>
+          <span className="text-[11px] text-zinc-400 dark:text-zinc-600">
+            이 절차가 끝나면 고른 절차를 이어서 엽니다. 고른 절차가 나중에 개정되면{" "}
+            <span className="font-medium">그때의 게시본</span>을 따라가므로 여기를 다시 고치지 않아도 됩니다.
+          </span>
+        </label>
       )}
       <details className="rounded-md border border-zinc-200 p-2 text-[11px] text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
         <summary className="cursor-pointer select-none font-medium text-zinc-600 dark:text-zinc-300">고급 설정</summary>

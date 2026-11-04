@@ -1342,6 +1342,7 @@ describe("createProcedureTemplateNode", () => {
       recommendedCorrectiveAction: node.recommendedCorrectiveAction,
       acceptanceCriteria: node.acceptanceCriteria,
       workerMayAddNextTask: node.workerMayAddNextTask,
+      nextProcedureTemplateId: node.nextProcedureTemplateId,
       positionX: node.positionX,
       positionY: node.positionY,
       userPositionX: node.userPositionX,
@@ -1564,6 +1565,7 @@ describe("deleteProcedureTemplateNode", () => {
       recommendedCorrectiveAction: node.recommendedCorrectiveAction,
       acceptanceCriteria: node.acceptanceCriteria,
       workerMayAddNextTask: node.workerMayAddNextTask,
+      nextProcedureTemplateId: node.nextProcedureTemplateId,
       positionX: node.positionX,
       positionY: node.positionY,
       userPositionX: node.userPositionX,
@@ -2239,5 +2241,154 @@ describe("Phase 5C-5B usability item 4: multiline node titles", () => {
     const [row] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, n3.id));
     assert.equal(row.title, n3.title, "title must remain exactly what it was — omitted from the patch entirely");
     assert.equal(row.isActive, false);
+  });
+});
+
+/**
+ * ============================================================================
+ * 줄기 B ④ 조각 ② — [종료]의 **「다음 절차」** 가 서버에서 지켜지는가
+ * ============================================================================
+ * 화면은 END 일 때만 고르는 칸을 그린다. 그래도 서버가 다시 봐야 하는 까닭은,
+ * **노드 유형을 먼저 바꾸고 저장하는 순서**에서 화면의 관문을 지나쳐 올 수
+ * 있기 때문이다(그 길은 사람이 일부러 노리지 않아도 생긴다 — 유형 변경은 즉시
+ * 저장되고 칸 수정은 [저장]까지 미뤄지므로, 둘 사이에 틈이 있다).
+ *
+ * 🔴 **지우는 쪽(null)은 언제나 통과해야 한다.** 유형이 END 에서 바뀐 뒤 남아
+ * 있던 값을 치우는 길이 막히면, 사람이 풀 수 없는 상태가 굳는다.
+ * ============================================================================
+ */
+describe("줄기 B ④ 조각 ② — [종료]의 「다음 절차」", () => {
+  /** 가리킬 대상 절차 하나를 따로 만든다(FK 가 실재하는 행을 요구한다). */
+  async function makeTargetTemplate() {
+    return createDraft(uniqueCode("next-target"));
+  }
+
+  test("🔴 [종료] 노드에는 지정할 수 있다", async () => {
+    const templateId = await createDraft(uniqueCode("next-on-end"));
+    const targetId = await makeTargetTemplate();
+    const nodes = await loadNodesByCode(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+
+    // 🔵 먼저 표본 — n4 가 정말 END 다. 아니면 아래가 뜻 없는 통과가 된다.
+    assert.equal(nodes.get("n4")!.nodeType, "END");
+
+    const result = await updateProcedureTemplateNode(
+      nodes.get("n4")!.id,
+      superAdminId,
+      { nextProcedureTemplateId: targetId },
+      templateRow.updatedAt.toISOString(),
+      null
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const after = await loadNodesByCode(templateId);
+    assert.equal(after.get("n4")!.nextProcedureTemplateId, targetId);
+  });
+
+  test("🔴 [종료]가 아닌 노드에는 거절된다 — 화면 관문만으로는 못 막는 길이다", async () => {
+    const templateId = await createDraft(uniqueCode("next-on-task"));
+    const targetId = await makeTargetTemplate();
+    const nodes = await loadNodesByCode(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+
+    assert.equal(nodes.get("n3")!.nodeType, "TASK");
+
+    const result = await updateProcedureTemplateNode(
+      nodes.get("n3")!.id,
+      superAdminId,
+      { nextProcedureTemplateId: targetId },
+      templateRow.updatedAt.toISOString(),
+      null
+    );
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.equal(result.code, "INVALID_INPUT");
+      assert.match(result.message, /\[종료\] 노드에만/, "거절하는 까닭이 어디에 달 수 있는지를 말해야 한다");
+    }
+
+    const after = await loadNodesByCode(templateId);
+    assert.equal(after.get("n3")!.nextProcedureTemplateId, null, "거절했는데 값이 들어갔으면 트랜잭션이 샌 것이다");
+  });
+
+  test("🔵 [종료]가 아닌 노드도 **지우는 것(null)은 통과한다** — 안 그러면 못 푸는 상태가 굳는다", async () => {
+    const templateId = await createDraft(uniqueCode("next-clear-on-task"));
+    const nodes = await loadNodesByCode(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+
+    const result = await updateProcedureTemplateNode(
+      nodes.get("n3")!.id,
+      superAdminId,
+      { nextProcedureTemplateId: null },
+      templateRow.updatedAt.toISOString(),
+      null
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+  });
+
+  test("🔴 유형이 [종료]에서 바뀌면 지정이 **함께 지워진다** — 안 그러면 사람이 치울 칸이 없다", async () => {
+    const templateId = await createDraft(uniqueCode("next-type-change"));
+    const targetId = await makeTargetTemplate();
+    const nodes = await loadNodesByCode(templateId);
+    let templateRow = await loadTemplateRow(templateId);
+
+    const set = await updateProcedureTemplateNode(
+      nodes.get("n4")!.id,
+      superAdminId,
+      { nextProcedureTemplateId: targetId },
+      templateRow.updatedAt.toISOString(),
+      null
+    );
+    assert.equal(set.ok, true, JSON.stringify(set));
+    // 🔵 먼저 표본 — 지워지는 것을 재려면 지우기 전에 값이 있어야 한다.
+    assert.equal((await loadNodesByCode(templateId)).get("n4")!.nextProcedureTemplateId, targetId);
+
+    templateRow = await loadTemplateRow(templateId);
+    const changed = await changeProcedureTemplateNodeType(
+      nodes.get("n4")!.id,
+      superAdminId,
+      "TASK",
+      "종료가 아니라 작업이었다",
+      templateRow.updatedAt.toISOString()
+    );
+    assert.equal(changed.ok, true, JSON.stringify(changed));
+
+    const after = await loadNodesByCode(templateId);
+    assert.equal(after.get("n4")!.nodeType, "TASK");
+    assert.equal(
+      after.get("n4")!.nextProcedureTemplateId,
+      null,
+      "END 가 아닌 노드에 값이 남으면 그 노드에는 고르는 칸이 안 그려져 사람이 치울 수 없다"
+    );
+  });
+
+  test("🔵 지정이 없던 노드의 유형 변경은 이력에 「지웠음」을 남기지 않는다", async () => {
+    const templateId = await createDraft(uniqueCode("next-type-change-noop"));
+    const nodes = await loadNodesByCode(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+
+    const changed = await changeProcedureTemplateNodeType(
+      nodes.get("n4")!.id,
+      superAdminId,
+      "TASK",
+      "값 없는 종료 노드",
+      templateRow.updatedAt.toISOString()
+    );
+    assert.equal(changed.ok, true, JSON.stringify(changed));
+
+    const [history] = await db
+      .select()
+      .from(procedureTemplateEditHistory)
+      .where(
+        and(
+          eq(procedureTemplateEditHistory.nodeId, nodes.get("n4")!.id),
+          eq(procedureTemplateEditHistory.actionType, "CHANGE_NODE_TYPE")
+        )
+      );
+    assert.ok(history, "유형 변경은 이력을 남긴다");
+    assert.equal(
+      "nextProcedureTemplateId" in (history.afterState as Record<string, unknown>),
+      false,
+      "바뀐 것 없는 칸이 이력에 뜨면 읽는 사람이 무슨 일이 있었나 되짚게 된다"
+    );
   });
 });

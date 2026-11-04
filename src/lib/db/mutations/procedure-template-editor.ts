@@ -34,6 +34,7 @@ import {
 } from "@/lib/domain/procedure-template-types";
 import { sanitizeRoutePoints, routePointsEqual, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import { fieldStepNodeCode } from "@/lib/domain/procedure-field-added-steps";
+import { isNextProcedureLinkAllowedOn } from "@/lib/domain/procedure-next-procedure-link";
 import type { PermissionActor } from "@/lib/auth/permission-resolver";
 import type { ProcedureTemplateEditHistoryOrigin as EditHistoryOrigin } from "@/lib/domain/procedure-template-edit-history-fold";
 
@@ -372,6 +373,12 @@ export type UpdateNodePatch = {
   instructions?: string | null;
   sortOrder?: number;
   isActive?: boolean;
+  /**
+   * 2026-11-04(줄기 B ④ 조각 ②) — [종료] 노드의 「다음 절차」.
+   * null 을 보내면 **지정을 지운다**(그 자리가 「이어가지 않음」으로 돌아간다).
+   * 🔴 END 가 아닌 노드에 값을 보내면 아래에서 거절한다.
+   */
+  nextProcedureTemplateId?: string | null;
 };
 
 export type NodeMutationResult = { ok: true; updatedAt: string } | Failure;
@@ -411,6 +418,24 @@ export async function updateProcedureTemplateNode(
       // node_id (the FK column) is later nulled by an eventual delete
       // (ON DELETE SET NULL, migration 0017) — never rely on the FK
       // column alone for a row that outlives the entity it describes.
+      /**
+       * 🔴 「다음 절차」는 **[종료] 노드에만** 달 수 있다(줄기 B ④).
+       * 화면은 END 일 때만 고르는 칸을 그리지만, 여기서 다시 본다 — 화면이
+       * 유일한 관문이면 노드 유형을 먼저 바꾸고 저장하는 순서에서 빠져나간다.
+       * 🔵 **지우는 것(null)은 언제나 통과시킨다.** 유형이 END 에서 바뀐 뒤
+       * 남아 있던 값을 치우는 길이 막히면, 사람이 풀 수 없는 상태가 굳는다.
+       */
+      if (
+        normalizedPatch.nextProcedureTemplateId !== undefined &&
+        normalizedPatch.nextProcedureTemplateId !== null &&
+        !isNextProcedureLinkAllowedOn(node.nodeType)
+      ) {
+        fail(
+          "INVALID_INPUT",
+          "「다음 절차」는 [종료] 노드에만 지정할 수 있습니다."
+        );
+      }
+
       const beforeState = {
         id: nodeId,
         title: node.title,
@@ -418,6 +443,9 @@ export async function updateProcedureTemplateNode(
         instructions: node.instructions,
         sortOrder: node.sortOrder,
         isActive: node.isActive,
+        // 🔵 이어가기 지정이 바뀐 것도 편집 이력에 남아야 한다 — 안 실으면
+        //    [편집 이력]에 "노드 수정"만 뜨고 무엇이 바뀌었는지 알 길이 없다.
+        nextProcedureTemplateId: node.nextProcedureTemplateId,
       };
       const afterState = { ...beforeState, ...normalizedPatch };
 
@@ -478,11 +506,39 @@ export async function changeProcedureTemplateNodeType(
       }
       const storedReason = isBlank(reason) ? null : reason!.trim();
 
-      // Phase 5C-5C — see updateProcedureTemplateNode's own comment on `id`.
-      const beforeState = { id: nodeId, nodeType: node.nodeType };
-      const afterState = { id: nodeId, nodeType: newNodeType };
+      /**
+       * 🔴 [종료]에서 다른 유형으로 바뀌면 **「다음 절차」 지정을 함께 지운다**
+       * (2026-11-04, 줄기 B ④ 조각 ②). 그냥 두면 END 가 아닌 노드에 값이
+       * 남는데, 그 노드에는 고르는 칸이 안 그려져 **사람이 치울 수가 없다.**
+       * 게다가 그 값이 가리킨 절차는 계속 삭제가 막힌다 — 까닭이 화면 어디에도
+       * 안 보이는 채로.
+       *
+       * 🔵 지우는 것은 **값이 있을 때만** 적는다. 늘 쓰면 바뀐 것 없는 노드의
+       * 이력에 「지웠음」이 남아 읽는 사람이 무슨 일이 있었나 되짚게 된다.
+       */
+      const clearsNextProcedure =
+        node.nextProcedureTemplateId !== null && !isNextProcedureLinkAllowedOn(newNodeType);
 
-      await tx.update(procedureTemplateNodes).set({ nodeType: newNodeType, updatedAt: new Date() }).where(eq(procedureTemplateNodes.id, nodeId));
+      // Phase 5C-5C — see updateProcedureTemplateNode's own comment on `id`.
+      const beforeState = {
+        id: nodeId,
+        nodeType: node.nodeType,
+        ...(clearsNextProcedure ? { nextProcedureTemplateId: node.nextProcedureTemplateId } : {}),
+      };
+      const afterState = {
+        id: nodeId,
+        nodeType: newNodeType,
+        ...(clearsNextProcedure ? { nextProcedureTemplateId: null } : {}),
+      };
+
+      await tx
+        .update(procedureTemplateNodes)
+        .set({
+          nodeType: newNodeType,
+          ...(clearsNextProcedure ? { nextProcedureTemplateId: null } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(procedureTemplateNodes.id, nodeId));
 
       await insertEditHistory(tx, {
         procedureTemplateId: node.procedureTemplateId,
@@ -968,6 +1024,8 @@ export type NodeSnapshot = {
   recommendedCorrectiveAction: string | null;
   acceptanceCriteria: string | null;
   workerMayAddNextTask: boolean;
+  /** [종료]의 「다음 절차」(2026-11-04, 줄기 B ④). END 가 아니면 늘 null 이다. */
+  nextProcedureTemplateId: string | null;
   positionX: number;
   positionY: number;
   userPositionX: number | null;
@@ -1000,6 +1058,7 @@ export function serializeNodeSnapshot(node: typeof procedureTemplateNodes.$infer
     recommendedCorrectiveAction: node.recommendedCorrectiveAction,
     acceptanceCriteria: node.acceptanceCriteria,
     workerMayAddNextTask: node.workerMayAddNextTask,
+    nextProcedureTemplateId: node.nextProcedureTemplateId,
     positionX: node.positionX,
     positionY: node.positionY,
     userPositionX: node.userPositionX,

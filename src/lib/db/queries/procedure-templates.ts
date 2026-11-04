@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import {
@@ -793,4 +793,55 @@ export async function listUndeletableProcedureTemplateIds(): Promise<Set<string>
       .map((row) => row.templateId)
       .filter((id): id is string => id !== null)
   );
+}
+
+/** [종료] 노드에서 고를 수 있는 「다음 절차」 한 줄. 고르는 칸이 쓰는 최소한만 싣는다. */
+export type NextProcedureLinkCandidate = {
+  id: string;
+  code: string;
+  name: string;
+  version: number;
+};
+
+/**
+ * [종료] 노드의 **「다음 절차」 후보** (2026-11-04, 줄기 B ④ 조각 ②).
+ *
+ * 🔴 **게시본만 고르게 한다.** 초안은 아직 현장에서 못 쓰고, 만료본은 더 이상
+ * 안 쓴다. 담기는 값은 판의 id 지만 읽는 쪽이 그 판의 계열로 지금 게시본을
+ * 다시 찾으므로(domain/procedure-next-procedure-link.ts), 고를 때 게시본을
+ * 집어 두면 **고른 그 순간부터 가리키는 곳이 맞는다.**
+ *
+ * 🔴 **기술작업 절차만**이다. 다른 분류는 「건당 하나」 제약과 부딪혀 이어서
+ * 열 수가 없다(줄기 B ④ 설계에서 정한 것).
+ *
+ * 🔴 **자기 계열은 뺀다.** 자기 자신(또는 같은 줄기의 다른 판)을 가리키면 끝나자마자
+ * 같은 절차가 다시 열려 사람이 빠져나올 수 없다. 절차 **사이**의 더 긴 고리
+ * (A→B→A)를 막는 일은 조각 ③ 이 한다 — 여기서는 한 걸음짜리만 막는다.
+ * 🔵 고를 수 없게 **목록에서 빼는 것**으로 막는다. 넣어 두고 거절하면 왜 안 되는지
+ * 한 번 더 눌러 봐야 알게 된다.
+ */
+export async function listNextProcedureLinkCandidates(
+  excludeCode: string
+): Promise<NextProcedureLinkCandidate[]> {
+  const rows = await db
+    .select({
+      id: procedureTemplates.id,
+      code: procedureTemplates.code,
+      name: procedureTemplates.name,
+      version: procedureTemplates.version,
+    })
+    .from(procedureTemplates)
+    .where(
+      and(
+        eq(procedureTemplates.category, "TECHNICAL_TASK"),
+        eq(procedureTemplates.status, "PUBLISHED"),
+        eq(procedureTemplates.isDeleted, false),
+        // 참고용은 실행할 노드가 없다 — 이어서 열어도 할 일이 없는 화면이 뜬다.
+        eq(procedureTemplates.isReferenceOnly, false),
+        ne(procedureTemplates.code, excludeCode)
+      )
+    )
+    .orderBy(procedureTemplates.name);
+
+  return rows;
 }

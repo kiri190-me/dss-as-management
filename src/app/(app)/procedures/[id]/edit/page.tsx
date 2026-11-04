@@ -11,6 +11,7 @@ import { getAuthSource } from "@/lib/config/auth-source";
 import { actorMay } from "@/lib/auth/developer-promotion";
 import { getProcedureTemplateForEditor, compareDraftWithParent, getFieldAddedStepsForDraft } from "@/lib/db/queries/procedure-template-editor";
 import { getProcedureTemplateHistoryView } from "@/lib/db/queries/procedure-template-history";
+import { listNextProcedureLinkCandidates } from "@/lib/db/queries/procedure-templates";
 import {
   canViewAllProcedureTemplateStatuses,
   canViewPublishedProcedureTemplates,
@@ -155,10 +156,15 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
   //    묻지 않는다. 조회 자체가 「이 초안이 DRAFT 인가」와 「같은 줄기인가」를
   //    보므로(getFieldAddedStepsForDraft), 게시된 절차나 남의 줄기에서는 빈
   //    목록이 돌아오고 탭도 안 선다. 셋을 함께 받는 것은 서로 안 기대기 때문이다.
-  const [historyView, comparison, fieldAddedSteps] = await Promise.all([
+  // 🔵 [종료]의 「다음 절차」 후보(줄기 B ④ 조각 ②) — 거르는 일은 조회가 한다
+  //    (게시본 · 기술작업 · 참고용 아님 · 자기 계열 제외). 화면이 다시 거르지
+  //    않는 까닭은, 잣대가 둘이 되면 고를 수 있는데 저장이 거절하는 날이 오기
+  //    때문이다. 자기 계열을 빼려면 code 가 필요해 template 을 읽은 뒤에 부른다.
+  const [historyView, comparison, fieldAddedSteps, nextProcedureCandidates] = await Promise.all([
     getProcedureTemplateHistoryView(template.id),
     compareDraftWithParent(template.id),
     getFieldAddedStepsForDraft(template.id),
+    listNextProcedureLinkCandidates(template.code),
   ]);
 
   return (
@@ -171,6 +177,7 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
         canPublish={canPublish}
         canDiscardDraft={canDiscardDraft}
         fieldAddedSteps={fieldAddedSteps}
+        nextProcedureCandidates={nextProcedureCandidates}
       />
     </Suspense>
   );
