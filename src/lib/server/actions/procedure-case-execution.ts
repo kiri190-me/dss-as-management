@@ -28,6 +28,7 @@ import {
   type RemoveExecutionEdgeResult,
 } from "@/lib/db/mutations/procedure-case-execution";
 import { isExtraTaskNodeType } from "@/lib/domain/procedure-case-execution-types";
+import { resolveNextProcedureForExecutionNode } from "@/lib/db/queries/procedure-case-execution";
 import { isUsableGraphPoint } from "@/lib/domain/procedure-execution-layout";
 import { PROCEDURE_BRANCH_TYPE_CODES, type ProcedureBranchType } from "@/lib/domain/procedure-template-types";
 import { isValidUuid, validateRequiredNote } from "@/lib/validation/procedure-validation-resolution-input";
@@ -423,5 +424,104 @@ export async function updateExecutionNodeMemoAction(input: {
 
   return withErrorRedaction("updateExecutionNodeMemoAction", () =>
     updateExecutionNodeMemo(input.executionNodeId, actorCheck.userId, input.expectedVersion, input.memo?.trim() || null)
+  );
+}
+
+/**
+ * ============================================================================
+ * [종료]를 완료하고 **다음 절차를 이어서 시작**한다 (2026-11-04, 줄기 B ④ 조각 ④)
+ * ============================================================================
+ * 사용자 결정(2026-11-04): **넘어가는 순간 한 번 묻는다**, 그리고 **지금 절차는
+ * 안 끝난 채로 둔다**. 그래서 이 통로는 끝내기(finishProcedureExecution)를
+ * 부르지 않는다 — 끝내기는 사람이 따로 누르는 별개의 조작 그대로다.
+ *
+ * ── 🔴 왜 한 트랜잭션이 아닌가, 그리고 왜 그래도 안전한가 ───────────────
+ * 완료와 시작은 **서로 다른 트랜잭션**이다(startProcedureExecution 이 제
+ * 트랜잭션을 열고, 권한·건 잠금·유무상 확정 검사를 그 안에서 한다. 그것을
+ * 쪼개 가져오면 검사가 두 벌이 된다).
+ *
+ * 🔵 그래서 중간 상태가 **뜻이 있는 상태**가 되도록 차례를 잡았다. 완료는
+ * 됐는데 시작이 실패하면, 그것은 사람이 창에서 [완료만 하기]를 고른 것과
+ * **똑같은 상태**다 — 망가진 중간이 아니다. 그리고 실행 화면이 「이어집니다 —
+ * [이어서 시작]」 카드를 계속 띄우므로 다시 누를 길이 남는다.
+ *
+ * 🔴 **그래서 결과가 「무엇까지 됐는지」를 반드시 말해야 한다.** 그냥
+ * `ok: false` 로 뭉개면 사람은 완료도 안 된 줄 알고 [완료]를 다시 누른다
+ * (그때는 이미 완료된 노드라 또 다른 오류가 뜬다).
+ * ============================================================================
+ */
+export type CompleteAndStartNextProcedureResult =
+  | { ok: true; startedExecutionId: string }
+  /** 완료는 됐지만 이어서 시작하지 못했다 — 사람이 [완료만 하기]를 고른 것과 같은 상태다. */
+  | { ok: false; completed: true; message: string }
+  /** 완료 자체가 안 됐다 — 아무것도 안 바뀌었다. */
+  | { ok: false; completed: false; message: string };
+
+export async function completeAndStartNextProcedureAction(input: {
+  executionNodeId: string;
+  expectedVersion: number;
+}): Promise<CompleteAndStartNextProcedureResult> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) {
+    return { ok: false, completed: false, message: actorCheck.result.message };
+  }
+  if (!isValidUuid(input.executionNodeId)) {
+    return { ok: false, completed: false, message: "요청 정보를 확인할 수 없습니다." };
+  }
+
+  // 🔴 **시작할 곳을 먼저 푼다.** 완료부터 하면, 이어갈 곳이 없는 것이 드러났을
+  //    때 이미 노드가 완료된 뒤다 — 사람은 「이어서 시작」을 눌렀는데 완료만
+  //    일어난 까닭을 알 수 없다. 화면이 보낸 값은 쓰지 않는다(서버가 제 눈으로
+  //    다시 읽는다 — resolveNextProcedureForExecutionNode 머리말).
+  const target = await resolveNextProcedureForExecutionNode(input.executionNodeId);
+  if (!target.ok) {
+    return { ok: false, completed: false, message: target.reason };
+  }
+
+  const completed = await withErrorRedaction("completeAndStartNextProcedureAction:complete", () =>
+    completeExecutionNode({
+      executionNodeId: input.executionNodeId,
+      actorUserId: actorCheck.userId,
+      expectedVersion: input.expectedVersion,
+      selectedOutgoingEdgeId: null,
+      reason: null,
+    })
+  );
+  if (!completed.ok) {
+    return { ok: false, completed: false, message: completed.message };
+  }
+
+  const started = await withErrorRedaction("completeAndStartNextProcedureAction:start", () =>
+    startProcedureExecution(target.repairCaseId, target.templateId, actorCheck.userId)
+  );
+  if (!started.ok) {
+    return {
+      ok: false,
+      completed: true,
+      message: `이 단계는 완료했지만 다음 절차를 시작하지 못했습니다 — ${started.message} 아래 [이어서 시작]으로 다시 시도할 수 있습니다.`,
+    };
+  }
+
+  return { ok: true, startedExecutionId: started.executionId };
+}
+
+/**
+ * 완료는 건드리지 않고 **다음 절차만 시작**한다 — 창에서 [완료만 하기]를 고른
+ * 뒤, 또는 위에서 시작이 실패한 뒤 다시 누르는 길이다(줄기 B ④ 조각 ④).
+ */
+export async function startNextProcedureAction(input: {
+  executionNodeId: string;
+}): Promise<StartExecutionResult | Forbidden> {
+  const actorCheck = await resolveAuthorizedActorId();
+  if (!actorCheck.ok) return actorCheck.result;
+  if (!isValidUuid(input.executionNodeId)) {
+    return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  }
+
+  const target = await resolveNextProcedureForExecutionNode(input.executionNodeId);
+  if (!target.ok) return { ok: false, code: "NOT_FOUND", message: target.reason };
+
+  return withErrorRedaction("startNextProcedureAction", () =>
+    startProcedureExecution(target.repairCaseId, target.templateId, actorCheck.userId)
   );
 }

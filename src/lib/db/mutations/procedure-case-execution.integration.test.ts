@@ -45,6 +45,7 @@ import {
   getActiveExecutionForCase,
   getExecutableTemplateOptions,
   getExecutionDetail,
+  resolveNextProcedureForExecutionNode,
   getExecutionHistory,
   getOtherExecutionsForCase,
   getRelatedRepairHistory,
@@ -4153,5 +4154,159 @@ describe("절차 판본이 만료돼도 돌고 있는 실행", () => {
     const options = await getExecutableTemplateOptions();
     assert.ok(options.some((o) => o.id === nextDraft.id), "새 게시본이 불러오기 목록에 있어야 한다");
     assert.ok(!options.some((o) => o.id === templateId), "만료된 판이 아직 불러오기 목록에 있다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 줄기 B ④ 조각 ④ — **[종료]에서 다음 절차로 넘어가기**
+ * ============================================================================
+ * 🔴 여기서 재는 알맹이는 **「계열을 따라간다」가 실행에서도 지켜지는가**다
+ * (2026-11-04 사용자 결정). END 에 담긴 값은 판 하나지만, 실행은 그 판의
+ * 계열에서 **지금 게시본**을 연다. 그래야 다음 절차가 개정돼도 가리키는 END 를
+ * 손으로 다시 고치지 않는다.
+ *
+ * 단위 시험이 규칙을 값으로 재고, 여기서는 **진짜 행으로** 잰다 — 가리킨 판을
+ * 만료시키고 새 판을 게시한 뒤, 풀린 값이 새 판인지 본다.
+ * ============================================================================
+ */
+describe("줄기 B ④ 조각 ④ — [종료]에서 다음 절차 풀기", () => {
+  /**
+   * 🔴 **접수 건을 하나만 만든다.** 인수번호가 달마다 99개뿐이라, 시험이 건을
+   * 많이 만들면 **한참 뒤 남의 시험이 까닭 없이 깨진다**
+   * (INTAKE_SEQUENCE_EXHAUSTED — 이 절을 쓰다 실제로 났다).
+   * 🔵 TECHNICAL_TASK 는 **건당 여러 실행**을 허용하므로(스키마의 부분 유니크
+   * 인덱스는 FULL_SERVICE 에만 걸린다) 한 건에 넷을 세워도 된다.
+   */
+  let sharedCaseId: string | null = null;
+  async function sharedCase() {
+    // 🔴 **둘째 달로 만든다.** 이 파일이 첫째 달(9905)의 인수번호 99개를 이미
+    //    다 쓰고 있어서, 거기서 하나만 더 만들어도 INTAKE_SEQUENCE_EXHAUSTED 가
+    //    난다(실제로 났다). 달을 옮기면 번호가 다시 1부터다.
+    if (sharedCaseId === null) {
+      sharedCaseId = (
+        await createTestCase({ receivedAt: TEST_RECEIVED_AT_SECOND, internalTargetShipmentDate: TEST_SHIPMENT_DATE_SECOND })
+      ).id;
+    }
+    return sharedCaseId;
+  }
+
+  /** 이 절차의 END 노드가 대상 절차를 가리키게 한다. */
+  async function pointEndTo(templateId: string, targetTemplateId: string) {
+    const [endNode] = await db
+      .select()
+      .from(procedureTemplateNodes)
+      .where(
+        and(
+          eq(procedureTemplateNodes.procedureTemplateId, templateId),
+          eq(procedureTemplateNodes.nodeType, "END")
+        )
+      );
+    assert.ok(endNode, "표본 확인 — 이 밑자락에 END 노드가 있어야 한다");
+    await db
+      .update(procedureTemplateNodes)
+      .set({ nextProcedureTemplateId: targetTemplateId })
+      .where(eq(procedureTemplateNodes.id, endNode.id));
+  }
+
+  /** 실행을 세우고 그 END 에 해당하는 **실행 노드** id 를 돌려준다. */
+  async function startAndFindEndExecutionNode(templateId: string, repairCaseId: string) {
+    const started = await startProcedureExecution(repairCaseId, templateId, engineerId);
+    assert.equal(started.ok, true, JSON.stringify(started));
+    if (!started.ok) throw new Error("unreachable");
+
+    const byCode = await loadExecutionNodesByCode(templateId, started.executionId);
+    const endExecNode = byCode.get("n7");
+    assert.ok(endExecNode, "표본 확인 — END(n7)의 실행 노드가 있어야 한다");
+    return { executionId: started.executionId, endExecutionNodeId: endExecNode.id };
+  }
+
+  test("🔴 가리킨 판이 만료돼도 **그 계열의 지금 게시본**이 풀린다 — 결정의 알맹이다", async () => {
+    const target = await createPublishedTemplate(uniqueCode("next-target-v1"), "TECHNICAL_TASK");
+    const source = await createPublishedTemplate(uniqueCode("next-source"), "TECHNICAL_TASK");
+    const caseId = await sharedCase();
+
+    await pointEndTo(source.templateId, target.templateId);
+    const { endExecutionNodeId } = await startAndFindEndExecutionNode(source.templateId, caseId);
+
+    // 🔵 먼저 표본 — 아직 v1 이 게시본이라 v1 이 풀린다.
+    const before = await resolveNextProcedureForExecutionNode(endExecutionNodeId);
+    assert.equal(before.ok, true, JSON.stringify(before));
+    if (!before.ok) return;
+    assert.equal(before.templateId, target.templateId);
+
+    // 같은 계열의 새 판을 만들어 게시한다 — 게시가 옛 게시본을 [만료됨]으로
+    // 내린다(줄기 B ⑥). 그래도 END 는 **한 글자도 안 고친다.**
+    const draft = await createNewDraftVersion(target.templateId, superAdminId);
+    assert.equal(draft.ok, true, JSON.stringify(draft));
+    if (!draft.ok) return;
+    createdTemplateIds.push(draft.id);
+    const republished = await publishProcedureTemplate(draft.id, superAdminId);
+    assert.equal(republished.ok, true, JSON.stringify(republished));
+
+    const after = await resolveNextProcedureForExecutionNode(endExecutionNodeId);
+    assert.equal(after.ok, true, JSON.stringify(after));
+    if (!after.ok) return;
+    assert.equal(
+      after.templateId,
+      draft.id,
+      "가리킨 판을 그대로 열면, 그 판이 만료되는 날 이어가기가 통째로 막힌다"
+    );
+  });
+
+  test("🔴 게시본이 없으면 **까닭을 돌려준다** — 빈손이면 「원래 없음」과 구별이 안 된다", async () => {
+    const target = await createPublishedTemplate(uniqueCode("next-unpublished"), "TECHNICAL_TASK");
+    const source = await createPublishedTemplate(uniqueCode("next-src-unpub"), "TECHNICAL_TASK");
+    const caseId = await sharedCase();
+
+    await pointEndTo(source.templateId, target.templateId);
+    const { endExecutionNodeId } = await startAndFindEndExecutionNode(source.templateId, caseId);
+
+    // 가리킨 계열을 통째로 내린다.
+    await db
+      .update(procedureTemplates)
+      .set({ status: "ARCHIVED" })
+      .where(eq(procedureTemplates.id, target.templateId));
+
+    const resolved = await resolveNextProcedureForExecutionNode(endExecutionNodeId);
+    assert.equal(resolved.ok, false);
+    if (resolved.ok) return;
+    assert.match(resolved.reason, /게시본이 없습니다/);
+  });
+
+  test("🔵 지정이 없으면 까닭이 그렇게 말한다 — 지금 운영의 END 전부가 이 자리다", async () => {
+    const source = await createPublishedTemplate(uniqueCode("next-none-set"), "TECHNICAL_TASK");
+    const caseId = await sharedCase();
+
+    const { endExecutionNodeId } = await startAndFindEndExecutionNode(source.templateId, caseId);
+
+    const resolved = await resolveNextProcedureForExecutionNode(endExecutionNodeId);
+    assert.equal(resolved.ok, false);
+    if (resolved.ok) return;
+    assert.match(resolved.reason, /지정되어 있지 않습니다/);
+  });
+
+  test("🔴 실행 화면이 END 줄에 이어갈 절차를 싣는다 — 안 실으면 창이 뜰 근거가 없다", async () => {
+    const target = await createPublishedTemplate(uniqueCode("next-detail-target"), "TECHNICAL_TASK");
+    const source = await createPublishedTemplate(uniqueCode("next-detail-src"), "TECHNICAL_TASK");
+    const caseId = await sharedCase();
+
+    await pointEndTo(source.templateId, target.templateId);
+    const { executionId } = await startAndFindEndExecutionNode(source.templateId, caseId);
+
+    const detail = await getExecutionDetail(executionId);
+    assert.ok(detail);
+    const endNode = detail.nodes.find((n) => n.nodeType === "END");
+    assert.ok(endNode, "표본 확인 — 상세에 END 줄이 있어야 한다");
+    assert.ok(endNode.nextProcedure, "null 이면 화면이 「안 가리킴」으로 읽는다");
+    assert.equal(endNode.nextProcedure.ok, true);
+
+    // 🔵 다른 줄에는 안 실린다 — 모든 노드에 창이 뜨면 안 된다.
+    const others = detail.nodes.filter((n) => n.nodeType !== "END");
+    assert.ok(others.length > 0, "표본 확인 — 비교할 다른 줄이 있어야 한다");
+    assert.deepEqual(
+      others.map((n) => n.nextProcedure),
+      others.map(() => null)
+    );
   });
 });

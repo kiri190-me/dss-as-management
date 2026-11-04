@@ -27,6 +27,7 @@ import {
 } from "@/lib/domain/procedure-execution-order";
 // 🔴 눈금은 도메인에 한 벌만 있다 — 화면도 같은 값으로 「고른 작업의 오른쪽」을
 // 센다(procedure-execution-layout.ts 머리말).
+import { resolveNextProcedureTarget } from "@/lib/domain/procedure-next-procedure-link";
 import { ADDED_NODE_GAP_X, ADDED_NODE_GAP_Y } from "@/lib/domain/procedure-execution-layout";
 import type { PastExecutionCandidate } from "@/lib/domain/procedure-execution-past-runs";
 import { classifyProductRelation, type ProductIdentity } from "@/lib/domain/product-relation";
@@ -414,7 +415,20 @@ export type ExecutionNodeDetail = {
   lastActionReason: string | null;
   version: number;
   isSuggestedNext: boolean;
+  /**
+   * [종료]의 「다음 절차」 (2026-11-04, 줄기 B ④ 조각 ④).
+   *
+   * 🔵 **null 은 「안 가리킴」이다.** 가리켰는데 못 여는 경우는 null 이 아니라
+   * `{ ok: false, reason }` 으로 온다 — 그 둘이 화면에서 같아 보이면, 지정해
+   * 놓고 안 열린 것을 사람이 「원래 없는 기능」으로 읽는다.
+   */
+  nextProcedure: ExecutionNextProcedure | null;
 };
+
+/** [종료]에서 이어 열 절차 — 계열에서 지금 게시본을 푼 결과다. */
+export type ExecutionNextProcedure =
+  | { ok: true; templateId: string; name: string; version: number }
+  | { ok: false; reason: string };
 
 export type ExecutionReferenceNode = {
   id: string;
@@ -597,11 +611,77 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       userPositionY: procedureTemplateNodes.userPositionY,
       sourceWorksheet: procedureTemplateNodes.sourceWorksheet,
       sourceShapeId: procedureTemplateNodes.sourceShapeId,
+      // 2026-11-04(줄기 B ④ 조각 ④) — [종료]의 「다음 절차」. 이미 읽는 줄에
+      // 칸만 보탠다.
+      nextProcedureTemplateId: procedureTemplateNodes.nextProcedureTemplateId,
     })
     .from(procedureTemplateNodes)
     .where(eq(procedureTemplateNodes.procedureTemplateId, execution.procedureTemplateId))
     .orderBy(procedureTemplateNodes.sortOrder, procedureTemplateNodes.nodeCode);
   const templateNodeById = new Map(templateNodes.map((n) => [n.id, n]));
+
+  /**
+   * ── [종료]의 「다음 절차」 풀기 (2026-11-04, 줄기 B ④ 조각 ④) ──────────
+   *
+   * 🔴 **가리킨 판을 그대로 열지 않는다.** 그 판의 계열(code)에서 **지금
+   * 게시본**을 찾아 연다 — 절차는 계속 개정되고, 판을 콕 집으면 그 판이
+   * 만료되는 날 이어가기가 통째로 막힌다(사용자 결정, 2026-11-04).
+   * 푸는 규칙은 domain/procedure-next-procedure-link.ts 한 곳에 있다.
+   *
+   * 🔵 **못 열 때도 null 로 넘기지 않는다.** 「원래 안 가리킴」과 「가리켜 놨는데
+   * 못 엶」은 화면에서 구별되지 않는다 — 뒤쪽은 까닭을 적어 사람에게 보인다.
+   *
+   * 🔵 지정이 하나도 없으면 바깥 조회를 아예 안 한다(지금 운영의 END 전부가
+   * 그 자리다).
+   */
+  const pointedIds = [
+    ...new Set(templateNodes.map((n) => n.nextProcedureTemplateId).filter((id): id is string => id !== null)),
+  ];
+  const nextProcedureByTemplateNodeId = new Map<string, ExecutionNextProcedure>();
+  if (pointedIds.length > 0) {
+    const pointedRows = await db
+      .select({ id: procedureTemplates.id, code: procedureTemplates.code })
+      .from(procedureTemplates)
+      .where(inArray(procedureTemplates.id, pointedIds));
+    const pointedCodes = [...new Set(pointedRows.map((r) => r.code))];
+
+    // 그 계열들의 **살아 있는 판 전부**. 지워진 행은 여기서 걸러 넘긴다 —
+    // resolveNextProcedureTarget 은 받은 후보를 다시 거르지 않는다.
+    const seriesRows =
+      pointedCodes.length === 0
+        ? []
+        : await db
+            .select({
+              id: procedureTemplates.id,
+              code: procedureTemplates.code,
+              name: procedureTemplates.name,
+              version: procedureTemplates.version,
+              status: procedureTemplates.status,
+            })
+            .from(procedureTemplates)
+            .where(and(inArray(procedureTemplates.code, pointedCodes), eq(procedureTemplates.isDeleted, false)));
+    const seriesById = new Map(seriesRows.map((r) => [r.id, r]));
+
+    for (const templateNode of templateNodes) {
+      const pointedId = templateNode.nextProcedureTemplateId;
+      if (pointedId === null) continue;
+      const resolved = resolveNextProcedureTarget({
+        pointedTemplate: seriesById.get(pointedId) ?? null,
+        candidates: seriesRows,
+      });
+      nextProcedureByTemplateNodeId.set(
+        templateNode.id,
+        resolved.ok
+          ? {
+              ok: true,
+              templateId: resolved.templateId,
+              version: resolved.version,
+              name: seriesById.get(resolved.templateId)?.name ?? "-",
+            }
+          : { ok: false, reason: resolved.reason }
+      );
+    }
+  }
 
   const templateEdges = await db
     .select({
@@ -833,6 +913,9 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
         lastActionReason: n.lastActionReason,
         version: n.version,
         isSuggestedNext: suggestedNextIds.has(n.id),
+        // 🔵 이 건에서 더한 작업(템플릿 노드가 없는 줄)에는 지정이 있을 수 없다 —
+        //    칸이 템플릿 노드에만 있기 때문이다. 그래서 자연히 null 이 된다.
+        nextProcedure: templateNode ? (nextProcedureByTemplateNodeId.get(templateNode.id) ?? null) : null,
       };
     });
 
@@ -1075,4 +1158,80 @@ export async function getRelatedRepairHistory(currentRepairCaseId: string, curre
   sameModelReference.sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
 
   return { sameProduct, sameModelReference };
+}
+
+/**
+ * ============================================================================
+ * 이 실행 노드([종료])에서 **이어 열 절차**를 서버가 다시 푼다 (2026-11-04, 줄기 B ④ 조각 ④)
+ * ============================================================================
+ * 🔴 **화면이 보낸 templateId 를 믿지 않는다.** 화면에도 같은 값이 가 있지만
+ * (ExecutionNodeDetail.nextProcedure), 그 값은 화면이 그려진 뒤로 낡았을 수
+ * 있고 — 그 사이에 새 판이 게시되었거나 가리킨 절차가 지워졌을 수 있다 —
+ * 무엇보다 **보내는 쪽이 고칠 수 있는 값**이다. 그래서 시작하기 직전에 서버가
+ * 제 눈으로 다시 읽는다.
+ *
+ * 🔵 「못 연다」를 빈손이 아니라 **까닭으로** 돌려준다. 빈손이면 부르는 쪽이
+ * 「원래 안 가리킴」과 구별할 수 없고, 사람에게는 아무 일도 안 일어난 것으로 보인다.
+ * ============================================================================
+ */
+export async function resolveNextProcedureForExecutionNode(
+  executionNodeId: string
+): Promise<{ ok: true; repairCaseId: string; templateId: string } | { ok: false; reason: string }> {
+  const [row] = await db
+    .select({
+      repairCaseId: procedureCaseExecutions.repairCaseId,
+      isExecutionDeleted: procedureCaseExecutions.isDeleted,
+      nextProcedureTemplateId: procedureTemplateNodes.nextProcedureTemplateId,
+    })
+    .from(procedureCaseExecutionNodes)
+    .innerJoin(
+      procedureCaseExecutions,
+      eq(procedureCaseExecutionNodes.executionId, procedureCaseExecutions.id)
+    )
+    .innerJoin(
+      procedureTemplateNodes,
+      eq(procedureCaseExecutionNodes.procedureTemplateNodeId, procedureTemplateNodes.id)
+    )
+    .where(eq(procedureCaseExecutionNodes.id, executionNodeId));
+
+  if (!row || row.isExecutionDeleted) {
+    return { ok: false, reason: "해당 단계를 찾을 수 없습니다." };
+  }
+  // 🔴 접수 건이 지워지면 이 칸이 비워진다(FK 가 ON DELETE SET NULL). 그러면
+  //    이어 열 자리 자체가 없다 — 타입을 맞추려고 넘기면 아래가 빈 건에
+  //    실행을 만든다.
+  if (row.repairCaseId === null) {
+    return { ok: false, reason: "이 실행이 속한 접수 건을 찾을 수 없습니다." };
+  }
+  if (row.nextProcedureTemplateId === null) {
+    return { ok: false, reason: "이 단계에는 이어갈 절차가 지정되어 있지 않습니다." };
+  }
+
+  const [pointed] = await db
+    .select({ code: procedureTemplates.code })
+    .from(procedureTemplates)
+    .where(eq(procedureTemplates.id, row.nextProcedureTemplateId));
+  if (!pointed) {
+    return { ok: false, reason: "이어갈 절차를 찾을 수 없습니다 — 가리킨 절차가 삭제되었을 수 있습니다." };
+  }
+
+  const seriesRows = await db
+    .select({
+      id: procedureTemplates.id,
+      code: procedureTemplates.code,
+      version: procedureTemplates.version,
+      status: procedureTemplates.status,
+    })
+    .from(procedureTemplates)
+    .where(and(eq(procedureTemplates.code, pointed.code), eq(procedureTemplates.isDeleted, false)));
+
+  const resolved = resolveNextProcedureTarget({
+    pointedTemplate: seriesRows.find((r) => r.id === row.nextProcedureTemplateId) ?? null,
+    candidates: seriesRows,
+  });
+  if (!resolved.ok) return { ok: false, reason: resolved.reason };
+
+  // 🔵 여기까지 왔으면 가리킨 값이 null 이 아님은 위에서 걸렀다 — 그 사실을
+  //    타입에도 적어 둔다(아래 find 가 null 을 받을 수 있는 모양이라서).
+  return { ok: true, repairCaseId: row.repairCaseId, templateId: resolved.templateId };
 }

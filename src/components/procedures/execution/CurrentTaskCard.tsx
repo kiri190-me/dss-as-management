@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import ReasonPromptDialog from "./ReasonPromptDialog";
+import NextProcedureConfirmDialog from "./NextProcedureConfirmDialog";
 import ExecutionMemoField from "./ExecutionMemoField";
 import {
   startExecutionNodeAction,
   completeExecutionNodeAction,
+  completeAndStartNextProcedureAction,
   skipExecutionNodeAction,
   blockExecutionNodeAction,
 } from "@/lib/server/actions/procedure-case-execution";
@@ -50,6 +52,18 @@ export default function CurrentTaskCard({
   const [dialogState, setDialogState] = useState<"SKIP" | "BLOCK" | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [nextProcedureDialogOpen, setNextProcedureDialogOpen] = useState(false);
+
+  /**
+   * 이 단계에서 **이어 열 수 있는** 절차가 실제로 있는가 (2026-11-04, 줄기 B ④).
+   *
+   * 🔴 `node.nextProcedure` 가 null 인 것과 `{ ok: false }` 인 것은 **다르다**.
+   * 앞은 「안 가리킴」이고 뒤는 「가리켰는데 못 엶」이다 — 뒤쪽은 묻는 창을
+   * 띄우지 않되 **까닭을 글로 보여야** 한다. 섞으면 지정해 놓은 사람이
+   * 「원래 없는 기능」으로 읽는다.
+   */
+  const canStartNextProcedure = node.nextProcedure?.ok === true;
+  const nextProcedureBlockedReason = node.nextProcedure?.ok === false ? node.nextProcedure.reason : null;
 
   // 판정은 작은 카드와 한 곳에서 나온다(execution-node-eligibility.ts).
   // 서버가 같은 모양으로 다시 검사하므로 이것은 화면 편의일 뿐이다.
@@ -81,6 +95,39 @@ export default function CurrentTaskCard({
 
   function handleComplete() {
     void runAction(() => completeExecutionNodeAction({ executionNodeId: node.id, expectedVersion: node.version }));
+  }
+
+  /**
+   * [완료하고 이어서 시작] (2026-11-04, 줄기 B ④ 조각 ④).
+   *
+   * 🔴 **runAction 을 쓰지 않는다.** 이 통로는 결과가 둘이 아니라 **셋**이다 —
+   * 다 됨 · 완료는 됐는데 시작 실패 · 완료도 안 됨. 가운데를 그냥 실패로
+   * 뭉개면 사람은 완료도 안 된 줄 알고 [완료]를 다시 누르고, 그때는 이미
+   * 완료된 노드라 또 다른 오류가 뜬다. 그래서 가운데에서는 **창을 닫고
+   * 화면을 새로 읽는다**(완료는 반영돼야 한다) — 메시지는 그대로 남긴다.
+   */
+  function handleCompleteAndStartNext() {
+    void (async () => {
+      setIsSubmitting(true);
+      setErrorMessage(null);
+      const result = await completeAndStartNextProcedureAction({
+        executionNodeId: node.id,
+        expectedVersion: node.version,
+      });
+      setIsSubmitting(false);
+      if (result.ok) {
+        setNextProcedureDialogOpen(false);
+        router.refresh();
+        return;
+      }
+      setErrorMessage(result.message);
+      if (result.completed) {
+        // 완료는 일어났다 — 창을 닫고 화면을 다시 읽는다. 안 그러면 화면이
+        // 아직 안 끝난 단계를 그리고 있어 사람이 또 누른다.
+        setNextProcedureDialogOpen(false);
+        router.refresh();
+      }
+    })();
   }
 
   function handleBranchComplete(selectedOutgoingEdgeId: string) {
@@ -206,7 +253,15 @@ export default function CurrentTaskCard({
             {!isDecision && (
               <button
                 type="button"
-                onClick={handleComplete}
+                /*
+                  🔴 [종료]에 「다음 절차」가 지정돼 있으면 **바로 완료하지 않고
+                  한 번 묻는다**(2026-11-04 사용자 결정). 누르면 다른 절차의
+                  실행이 생기므로, 이 저장소가 확인창을 두는 기준
+                  (「되돌릴 수 있으면 묻지 않는다」)의 반대쪽이다.
+                  🔵 지정이 없으면 글자 하나 안 바뀐다 — 지금 운영의 END 전부가
+                  그 자리다.
+                */
+                onClick={canStartNextProcedure ? () => setNextProcedureDialogOpen(true) : handleComplete}
                 disabled={isSubmitting}
                 className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
               >
@@ -251,7 +306,34 @@ export default function CurrentTaskCard({
         </p>
       )}
 
+      {/*
+        🔴 「가리켜 놨는데 못 연다」는 **글로 보인다**(2026-11-04, 줄기 B ④).
+        조용히 안 묻고 넘어가면, 지정해 둔 사람은 이어가기가 **원래 없는
+        기능**인 줄 안다. 지정이 아예 없을 때는 이 줄도 안 뜬다.
+      */}
+      {nextProcedureBlockedReason && (
+        <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
+          이어갈 절차가 지정되어 있지만 지금은 열 수 없습니다 — {nextProcedureBlockedReason}
+        </p>
+      )}
+
       {errorMessage && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{errorMessage}</p>}
+
+      {canStartNextProcedure && node.nextProcedure?.ok === true && (
+        <NextProcedureConfirmDialog
+          isOpen={nextProcedureDialogOpen}
+          nodeTitle={node.title}
+          nextProcedureName={node.nextProcedure.name}
+          nextProcedureVersion={node.nextProcedure.version}
+          isSubmitting={isSubmitting}
+          onCompleteAndStart={handleCompleteAndStartNext}
+          onCompleteOnly={() => {
+            setNextProcedureDialogOpen(false);
+            handleComplete();
+          }}
+          onCancel={() => setNextProcedureDialogOpen(false)}
+        />
+      )}
 
       <ReasonPromptDialog
         isOpen={dialogState === "SKIP"}
