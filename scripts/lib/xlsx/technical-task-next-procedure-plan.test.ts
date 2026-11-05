@@ -1,8 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { PENDING_NEXT_PROCEDURE_MEMO_MARKER } from "./extract-technical-task-graph";
 import {
+  formatBlockingReferences,
+  outcomeNeedsPendingMemoCleanup,
   planNextProcedureLinks,
+  planNextProcedureUnlinks,
   resolveNextProcedureLinks,
+  selectStalePendingLinkMemoIds,
   summarizeNextProcedureLinks,
   type DbNodeFact,
   type DbTemplateFact,
@@ -189,6 +194,148 @@ test("🔴 **모든 요청이 한 줄씩 나온다** — 조용히 빠지는 것
 
   assert.equal(outcomes.length, requests.length);
   assert.deepEqual(outcomes.map((o) => o.request.nodeCode), ["rfg8-9", "rfg8-10", "rfg8-11"]);
+});
+
+// ── 이은 뒤 거짓이 된 메모 치우기 (2026-11-05) ───────────────────────────
+
+/**
+ * 🔴 사용자가 [검증 이슈] 화면에서 발견했다 — **이미 이어져 있는데** 「이어갈 절차를
+ * 아직 비워 두었습니다」가 떠 있었다. 잇기가 그 메모를 안 지웠기 때문이다.
+ * 🔵 표식 글자는 지어내지 않고 **메모를 만드는 쪽의 상수**를 그대로 쓴다 — 두 벌로
+ * 적으면 한쪽만 바뀌는 날 이 시험이 조용히 공짜 통과가 된다.
+ */
+const MARKER = PENDING_NEXT_PROCEDURE_MEMO_MARKER;
+
+function memo(id: string, sourceReference: string | null, message: string, issueType = "INVALID_NEXT_PROCEDURE_LINK") {
+  return { id, issueType, sourceReference, message };
+}
+
+test("🔴 이은 노드의 「아직 비워 뒀다」 메모를 고른다", () => {
+  const ids = selectStalePendingLinkMemoIds({
+    memos: [memo("m1", "node:rfg8-23", `종료 노드 "가나다"의 이어갈 절차((11)번)를 ${MARKER} — …`)],
+    nodeCode: "rfg8-23",
+    pendingMarker: MARKER,
+  });
+  assert.deepEqual(ids, ["m1"]);
+});
+
+test("🔴 같은 노드·같은 갈래라도 **다른 뜻의 메모는 남긴다** — 그건 영구히 참이다", () => {
+  // 「대괄호 안에 번호가 둘이라 첫 번째를 썼다」는 이어도 계속 참이다.
+  const ids = selectStalePendingLinkMemoIds({
+    memos: [
+      memo("m1", "node:rfg8-23", `…를 ${MARKER} — …`),
+      memo("m2", "node:rfg8-23", '"가나다"의 대괄호 안에 절차 번호가 2개 있습니다 (9, 10) — …'),
+    ],
+    nodeCode: "rfg8-23",
+    pendingMarker: MARKER,
+  });
+  assert.deepEqual(ids, ["m1"], "뜻이 다른 메모까지 쓸어 담았다");
+});
+
+test("🔴 **다른 노드**의 메모와 연결선을 가리키는 메모는 안 건드린다", () => {
+  const ids = selectStalePendingLinkMemoIds({
+    memos: [
+      memo("m1", "node:rfg8-27", `…를 ${MARKER} — …`),
+      // 분기를 버렸다는 기록은 connector# 를 가리킨다 — 아예 다른 자리다.
+      memo("m2", "connector#28", `…를 버렸습니다 … ${MARKER}`),
+      memo("m3", null, `…를 ${MARKER} — …`),
+    ],
+    nodeCode: "rfg8-23",
+    pendingMarker: MARKER,
+  });
+  assert.deepEqual(ids, []);
+});
+
+test("갈래가 다르면 안 고른다 — 표식만 맞아도", () => {
+  const ids = selectStalePendingLinkMemoIds({
+    memos: [memo("m1", "node:rfg8-23", `…를 ${MARKER} — …`, "UNSUPPORTED_OBJECT")],
+    nodeCode: "rfg8-23",
+    pendingMarker: MARKER,
+  });
+  assert.deepEqual(ids, []);
+});
+
+test("🔴 **이미 이어져 있던 건도** 치운다 — 못 이은 건은 그대로 둔다", () => {
+  // 🔴 「방금 이은 것」만 치우면, 중간에 끊겼다 다시 이은 건의 메모가 샌다.
+  const linked = resolveOne();
+  assert.equal(linked.status, "LINK");
+  assert.equal(outcomeNeedsPendingMemoCleanup(linked), true);
+
+  const already = resolveOne({ nodes: [dbNode("n-1", "rfg8-9", { nextProcedureTemplateId: "t-target" })] });
+  assert.equal(already.status, "ALREADY_LINKED");
+  assert.equal(outcomeNeedsPendingMemoCleanup(already), true, "이미 이어진 건의 메모가 샌다");
+
+  // 🔵 못 이은 건의 메모는 **아직 참**이다.
+  const skipped = resolveOne({ request: { targetTemplateName: null } });
+  assert.equal(skipped.status, "SKIPPED");
+  assert.equal(outcomeNeedsPendingMemoCleanup(skipped), false, "아직 참인 메모를 지우려 한다");
+});
+
+// ── 지우기 전에 이어가기 끊기 (2026-11-05) ───────────────────────────────
+
+/**
+ * 🔴 `--replace` 가 외래키에 막혀 한 번 멈췄다(실측). `next_procedure_template_id`
+ * 는 `onDelete: "restrict"` 라 가리켜지는 절차는 삭제가 거부된다 — 의도된 보호다.
+ * 그래서 지우기 전에 끊되, **끊어도 되는 것만** 끊어야 한다.
+ */
+function reference(nodeCode: string, ownerId: string, targetId: string) {
+  return {
+    nodeId: `node-${nodeCode}`,
+    nodeCode,
+    ownerTemplateId: ownerId,
+    ownerTemplateName: `[RFG] ${ownerId}`,
+    targetTemplateId: targetId,
+    targetTemplateName: `[RFG] ${targetId}`,
+  };
+}
+
+test("🔴 지울 목록 **안**에서 가리키면 끊어도 된다 — 어차피 같이 지워지고 다시 만들어진다", () => {
+  const plan = planNextProcedureUnlinks({
+    references: [reference("rfg8-23", "가나다", "라마바")],
+    victimTemplateIds: ["가나다", "라마바"],
+  });
+
+  assert.deepEqual(plan.blocking, []);
+  assert.equal(plan.toUnlink.length, 1);
+  assert.equal(plan.toUnlink[0].nodeCode, "rfg8-23");
+});
+
+test("🔴 지울 목록 **밖**에서 가리키면 끊지 않고 **막는다** — 남의 절차가 망가진다", () => {
+  // 🔴 이쪽을 안 재면 「전부 끊기」로 바뀌어도 위 시험이 통과한다.
+  const plan = planNextProcedureUnlinks({
+    references: [reference("rfg8-23", "남의절차", "라마바")],
+    victimTemplateIds: ["라마바"],
+  });
+
+  assert.deepEqual(plan.toUnlink, []);
+  assert.equal(plan.blocking.length, 1);
+
+  // 막는 글에 **무엇이 무엇을 가리키는지 이름으로** 적혀야 한다.
+  const message = formatBlockingReferences(plan.blocking);
+  assert.ok(message.includes("[RFG] 남의절차"));
+  assert.ok(message.includes("rfg8-23"));
+  assert.ok(message.includes("[RFG] 라마바"));
+  assert.ok(message.includes("지울 수 없습니다"));
+});
+
+test("섞여 있으면 **안쪽만** 끊을 것으로 고르고 바깥쪽은 막는다", () => {
+  const plan = planNextProcedureUnlinks({
+    references: [
+      reference("in-1", "가나다", "라마바"),
+      reference("out-1", "남의절차", "라마바"),
+      // 가리켜지는 쪽이 지울 목록에 없으면 애초에 막을 일이 없다 — 둘 다 아니다.
+      reference("none-1", "가나다", "상관없음"),
+    ],
+    victimTemplateIds: ["가나다", "라마바"],
+  });
+
+  assert.deepEqual(plan.toUnlink.map((r) => r.nodeCode), ["in-1"]);
+  assert.deepEqual(plan.blocking.map((r) => r.nodeCode), ["out-1"]);
+});
+
+test("가리키는 것이 하나도 없으면 끊을 것도 막을 것도 없다", () => {
+  const plan = planNextProcedureUnlinks({ references: [], victimTemplateIds: ["가나다"] });
+  assert.deepEqual(plan, { toUnlink: [], blocking: [] });
 });
 
 test("🔴 세어서 찍는다 — 「다 했다」와 「0건을 했다」가 구별된다", () => {

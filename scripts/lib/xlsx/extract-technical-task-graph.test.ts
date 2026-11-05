@@ -539,6 +539,117 @@ test("🔴 같은 도형 번호가 두 번 나오면 뒤엣것을 버리고 오�
   assert.ok(result.issues.some((i) => i.issueType === "DUPLICATE_NODE_CODE" && i.severity === "ERROR"));
 });
 
+// ── 끊어진 선 끝을 좌표로 이어 붙이기 (2026-11-05 사용자 지적) ────────────
+
+/**
+ * 세로로 선 상자 셋을 선 둘로 잇되, **둘째 선의 시작을 비워 둔다**(엑셀에서 끝만
+ * 도형에 붙이고 시작은 허공에 그린 꼴). 실측으로 한 시트의 연결선 6개 중 넷이
+ * 그랬고, 받는 쪽이 전부 뿌리가 되어 시작에서 흩어지는 그림이 나왔다.
+ */
+function buildDanglingStartFixture(): TechnicalTaskGraphInput {
+  return {
+    sheetName: "(TEST) 시작이 끊긴 선",
+    nodeCodePrefix: "r1",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 작업", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+      shape("3", "사아자 작업", { x: 400000, y: 5000000, cx: 2000000, cy: 500000 }),
+    ],
+    connectors: [
+      connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 }),
+      // 🔴 시작이 비었다. 선은 상자 2 의 아래 가장자리에서 시작해 상자 3 으로 간다.
+      connector("c2", null, "3", { x: 1400000, y: 3500000, cx: 0, cy: 1500000 }),
+    ],
+  };
+}
+
+test("🔴 끊어진 **시작**을 좌표로 이어 붙인다 — 안 그러면 받는 쪽이 뿌리가 된다", () => {
+  const result = extractTechnicalTaskGraph(buildDanglingStartFixture());
+
+  const rebound = result.reboundEndpoints;
+  assert.equal(rebound.length, 1);
+  assert.equal(rebound[0].connectorId, "c2");
+  assert.equal(rebound[0].side, "START");
+  assert.equal(rebound[0].shapeId, "2", "엉뚱한 상자에 붙였다");
+  assert.ok(rebound[0].confident);
+
+  // 흐름이 한 줄기로 선다 — 시작 노드에서 나가는 분기가 **하나**다.
+  const startEdges = result.edges.filter((e) => e.fromNodeCode === "r1-start");
+  assert.deepEqual(startEdges.map((e) => e.toNodeCode), ["r1-1"]);
+  assert.deepEqual(
+    excelEdges(result).map((e) => [e.fromNodeCode, e.toNodeCode]),
+    [
+      ["r1-1", "r1-2"],
+      ["r1-2", "r1-3"],
+    ]
+  );
+});
+
+test("🔴 끊어진 **끝**도 이어 붙인다 — 한쪽만 다루면 절반이 그대로 남는다", () => {
+  const result = extractTechnicalTaskGraph({
+    sheetName: "(TEST) 끝이 끊긴 선",
+    nodeCodePrefix: "r2",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 작업", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+    ],
+    connectors: [connector("c1", "1", null, { x: 1400000, y: 1500000, cx: 0, cy: 1500000 })],
+  });
+
+  assert.equal(result.reboundEndpoints[0]?.side, "END");
+  assert.equal(result.reboundEndpoints[0]?.shapeId, "2");
+  assert.deepEqual(
+    excelEdges(result).map((e) => [e.fromNodeCode, e.toNodeCode]),
+    [["r2-1", "r2-2"]]
+  );
+});
+
+test("🔴 **너무 먼** 끝은 안 붙인다 — 가까우면 무엇이든 붙이면 흐름이 조용히 엉뚱해진다", () => {
+  const result = extractTechnicalTaskGraph({
+    sheetName: "(TEST) 멀리 떨어진 끝",
+    nodeCodePrefix: "r3",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 작업", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+    ],
+    // 상자들에서 한참 떨어진 곳에 떠 있는 선.
+    connectors: [connector("c9", null, null, { x: 40000000, y: 40000000, cx: 0, cy: 500000 })],
+  });
+
+  assert.deepEqual(result.reboundEndpoints, []);
+  assert.equal(result.droppedConnectors[0]?.reason, "UNRESOLVED_ENDPOINT");
+});
+
+test("🔴 **자기 자신**으로는 안 붙인다", () => {
+  // 반대쪽 끝이 이미 상자 1 이면, 끊어진 끝을 상자 1 에 붙여 자기 고리를 만들면 안 된다.
+  const result = extractTechnicalTaskGraph({
+    sheetName: "(TEST) 자기 고리 위험",
+    nodeCodePrefix: "r4",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 3000000 }),
+      shape("2", "라마바 작업", { x: 400000, y: 5000000, cx: 2000000, cy: 500000 }),
+    ],
+    // 끝은 상자 1 에 묶여 있고, 시작이 상자 1 **안쪽**에서 비어 있다.
+    connectors: [connector("c1", null, "1", { x: 1400000, y: 2000000, cx: 0, cy: 500000 })],
+  });
+
+  assert.equal(result.reboundEndpoints.every((r) => r.shapeId !== "1"), true, "자기 자신에 붙였다");
+});
+
+test("🔴 이어 붙인 사실이 **메모로 남는다** — 엑셀에 적힌 연결과 믿음의 정도가 다르다", () => {
+  const result = extractTechnicalTaskGraph(buildDanglingStartFixture());
+  const note = result.issues.find((i) => i.sourceReference === "connector#c2");
+
+  assert.ok(note, "좌표로 추측한 연결인데 아무 말도 안 남겼다");
+  assert.equal(note.issueType, "DANGLING_CONNECTOR");
+  assert.ok(note.message.includes("좌표로"));
+  assert.ok(note.message.includes("라마바 작업"), "어느 도형에 붙였는지가 메모에 없다");
+});
+
 // ── 흐름에 닿지 않는 도형 (2026-11-05 사용자 지적) ────────────────────────
 
 /**
@@ -630,8 +741,11 @@ test("🔴 연결선이 **닿는** 도형은 이 규칙으로 안 버려진다 �
 function buildSheetWithIsolatedShape(unbound: boolean): TechnicalTaskGraphInput {
   const connectors = [connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 })];
   if (unbound) {
-    // 도형에 안 붙여 그린 선 — `stCxn` 이 비어 있다.
-    connectors.push(connector("c2", null, "2", { x: 2600000, y: 1500000, cx: 0, cy: 1500000 }));
+    // 🔴 도형에서 **한참 떨어진 곳**에 그려진 선이다. 2026-11-05 부터 끊어진 끝은
+    //    좌표로 이어 붙이므로(rebindDanglingEndpoints), 가까이 두면 그 자리에서
+    //    묶여 버려 이 시험이 재려던 상황이 아예 안 생긴다 — 「이어 붙이지도 못한
+    //    끝이 남았다」가 고립 규칙을 끄는 조건이다.
+    connectors.push(connector("c2", null, "2", { x: 50000000, y: 50000000, cx: 0, cy: 1500000 }));
   }
   return {
     sheetName: unbound ? "(TEST) 안 묶인 선 있음" : "(TEST) 안 묶인 선 없음",
@@ -862,6 +976,58 @@ test("🔴 뿌리가 하나도 없으면(모두 순환 안) 시작 노드를 **�
     ),
     "못 만들었다는 사실을 안 알렸다"
   );
+});
+
+/**
+ * 문서 제출/보관 글자가 든 상자 하나를 **나가는 분기만 바꿔** 두 번 읽는다.
+ * `hasOutgoing` 이 true 면 그 상자에서 다음 상자로 선이 하나 나간다.
+ */
+function buildDocumentWordingFixture(hasOutgoing: boolean): TechnicalTaskGraphInput {
+  const shapes = [
+    shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+    shape("2", "라마바 자료실에 마지막 판 업로드", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+  ];
+  const connectors = [connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 })];
+  if (hasOutgoing) {
+    shapes.push(shape("3", "사아자 작업", { x: 400000, y: 5000000, cx: 2000000, cy: 500000 }));
+    connectors.push(connector("c2", "2", "3", { x: 1400000, y: 3500000, cx: 0, cy: 1500000 }));
+  }
+  return {
+    sheetName: hasOutgoing ? "(TEST) 문서 글자 + 뒷 단계" : "(TEST) 문서 글자 + 끝",
+    nodeCodePrefix: hasOutgoing ? "d1" : "d0",
+    startNodeTitle: "가상 절차",
+    shapes,
+    connectors,
+  };
+}
+
+test("🔴 문서 글자가 있어도 **다음 단계로 이어지면** 문서 참조가 아니다 (2026-11-05 결정)", () => {
+  // 🔴 까닭이 가볍지 않다: DOCUMENT_REFERENCE 는 실행 가능한 유형에서 빠져 있어
+  //    (procedure-execution-topology.ts) 그 유형이 된 노드는 **기사의 실행 목록에
+  //    아예 안 뜬다.** 흐름 한가운데의 진짜 작업이 그리로 가면 조용히 사라진다.
+  const result = extractTechnicalTaskGraph(buildDocumentWordingFixture(true));
+  const node = result.nodes.find((n) => n.sourceShapeId === "2");
+
+  assert.notEqual(node?.nodeType, "DOCUMENT_REFERENCE");
+  // 무엇이 되는지도 값으로 — 「아니다」만 재면 어디로 떨어지든 통과한다.
+  assert.equal(node?.nodeType, "TASK");
+  assert.equal(node?.nodeTypeReason, "위 규칙에 걸리지 않는다");
+});
+
+test("🔴 문서 글자가 있고 **흐름이 거기서 끝나면** 문서 참조 그대로다", () => {
+  // 🔴 이쪽을 안 재면 규칙을 통째로 없애도 위 시험이 통과한다.
+  const result = extractTechnicalTaskGraph(buildDocumentWordingFixture(false));
+  const node = result.nodes.find((n) => n.sourceShapeId === "2");
+
+  assert.equal(node?.nodeType, "DOCUMENT_REFERENCE");
+  assert.ok(node?.nodeTypeReason.includes("나가는 선이 없다"), `근거에 조건이 안 적혔다: ${node?.nodeTypeReason}`);
+});
+
+test("🔴 문서 글자가 **없으면** 끝나는 노드는 그대로 종료다", () => {
+  // 위 두 시험이 「나가는 선이 없으면 무조건 문서 참조」로 바뀌어도 통과하지
+  // 않게, 반대쪽 표본을 함께 둔다.
+  const result = extractTechnicalTaskGraph(buildMainFixture());
+  assert.equal(result.nodes.find((n) => n.sourceShapeId === "12")?.nodeType, "END");
 });
 
 test("노드 코드는 앞가지로 갈린다 — 같은 시트에서 복제한 절차끼리 섞이지 않는다", () => {

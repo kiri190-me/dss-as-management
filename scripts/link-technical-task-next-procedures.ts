@@ -1,9 +1,12 @@
 import "./load-env";
 
 import { buildProceduresForSheets, planWorkbook } from "./lib/xlsx/technical-task-workbook";
+import { PENDING_NEXT_PROCEDURE_MEMO_MARKER } from "./lib/xlsx/extract-technical-task-graph";
 import {
+  outcomeNeedsPendingMemoCleanup,
   planNextProcedureLinks,
   resolveNextProcedureLinks,
+  selectStalePendingLinkMemoIds,
   summarizeNextProcedureLinks,
   type DbNodeFact,
   type DbTemplateFact,
@@ -121,7 +124,8 @@ async function main(): Promise<void> {
   //    APPLY 에도 그대로 들고 간다. 쓰기 모듈은 APPLY 갈래 안에서 처음 부른다.
   const { sql, and, eq, inArray } = await import("drizzle-orm");
   const { db, pgClient } = await import("../src/lib/db/connection");
-  const { procedureTemplates, procedureTemplateNodes, users } = await import("../src/lib/db/schema");
+  const { procedureTemplates, procedureTemplateNodes, procedureTemplateValidationIssues, users } =
+    await import("../src/lib/db/schema");
 
   try {
     const identity = await db.execute(sql`select current_database() as name`);
@@ -233,9 +237,47 @@ async function main(): Promise<void> {
       .limit(1);
     if (!actor) throw new Error("승인된 활성 SUPER_ADMIN 계정이 없어 이을 수 없습니다.");
 
+    /**
+     * 🔴 이어 놓고 **「아직 비워 뒀다」 메모를 안 지우면 그 메모가 거짓이 된다.**
+     * 사용자가 [검증 이슈] 화면에서 발견했다 — 이미 이어져 있는데 그 글이 떠 있었다.
+     * 묶음을 거듭할수록 거짓 메모만 쌓인다.
+     *
+     * 🔴 **「이미 이어져 있었음」도 함께 치운다.** 이번처럼 중간에 끊겼다가 다시 이은
+     * 경우, 참조는 채워져 있고 메모만 남아 있다 — 「방금 이은 것」만 치우면 샌다.
+     */
+    let memosCleared = 0;
+    async function clearStalePendingMemo(templateId: string, nodeCode: string): Promise<void> {
+      const memos = await db
+        .select({
+          id: procedureTemplateValidationIssues.id,
+          issueType: procedureTemplateValidationIssues.issueType,
+          sourceReference: procedureTemplateValidationIssues.sourceReference,
+          message: procedureTemplateValidationIssues.message,
+        })
+        .from(procedureTemplateValidationIssues)
+        .where(eq(procedureTemplateValidationIssues.procedureTemplateId, templateId));
+      const staleIds = selectStalePendingLinkMemoIds({
+        memos,
+        nodeCode,
+        pendingMarker: PENDING_NEXT_PROCEDURE_MEMO_MARKER,
+      });
+      if (staleIds.length === 0) return;
+      await db
+        .delete(procedureTemplateValidationIssues)
+        .where(inArray(procedureTemplateValidationIssues.id, staleIds));
+      memosCleared += staleIds.length;
+      console.log(`      거짓이 된 검증 메모 ${staleIds.length}건을 지웠습니다 (${nodeCode}).`);
+    }
+
     let linked = 0;
     let failed = 0;
     for (const outcome of outcomes) {
+      // 이미 이어져 있던 건은 쓸 것이 없고 **메모만** 치운다.
+      if (outcome.status === "ALREADY_LINKED" && outcomeNeedsPendingMemoCleanup(outcome)) {
+        const templateId = templatesByName.get(outcome.request.templateName)?.id;
+        if (templateId) await clearStalePendingMemo(templateId, outcome.request.nodeCode);
+        continue;
+      }
       if (outcome.status !== "LINK" || !outcome.action) continue;
       /**
        * 🔴 `updatedAt` 을 **한 건마다 다시 읽는다.** 노드를 한 번 고치면 그 절차의
@@ -264,6 +306,7 @@ async function main(): Promise<void> {
       if (result.ok) {
         linked += 1;
         console.log(`  → 이었습니다: ${outcome.request.templateName} / ${outcome.request.nodeCode}`);
+        await clearStalePendingMemo(outcome.action.templateId, outcome.request.nodeCode);
       } else {
         // 🔴 하나가 실패해도 멈추지 않는다 — 나머지가 다 막히면 안 된다.
         failed += 1;
@@ -274,8 +317,10 @@ async function main(): Promise<void> {
     console.log(`\n${"=".repeat(74)}`);
     console.log(
       `결과: 이었음 ${linked} · 이미 이어져 있었음 ${planned.alreadyLinked} · ` +
-        `못 이음 ${planned.skipped + failed} (계획에서 ${planned.skipped} · 쓰다가 ${failed})`
+        `못 이음 ${planned.skipped + failed} (계획에서 ${planned.skipped} · 쓰다가 ${failed}) · ` +
+        `메모 지움 ${memosCleared}`
     );
+    console.log(`  🔵 치운 메모는 「이어갈 절차를 아직 비워 뒀다」뿐입니다 — 못 이은 건의 메모는 그대로 둡니다(아직 참입니다).`);
     console.log("=".repeat(74));
     if (failed > 0) process.exitCode = 1;
   } finally {

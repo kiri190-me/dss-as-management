@@ -15,6 +15,10 @@ import {
   type SheetDrawing,
 } from "./lib/xlsx/technical-task-workbook";
 import {
+  formatBlockingReferences,
+  planNextProcedureUnlinks,
+} from "./lib/xlsx/technical-task-next-procedure-plan";
+import {
   checkDevelopmentWriteTarget,
   formatDatabaseTarget,
   formatWriteGuardBlockMessage,
@@ -73,17 +77,27 @@ const APPLY = process.env.APPLY === "1";
  * `--sheet` 를 안 주면 만드는 **이번 묶음**.
  *
  * 🔴 **끊어서 간다**(2026-11-05 사용자 결정). 규칙이 틀린 채로 열넷을 한꺼번에
- * 만들면 열넷이 전부 못 쓸 물건이 된다. 1차는 **작은 것 셋** — 셋 다 참조 노드가
- * 없어서 잇기 단계 없이 끝나고, 사람이 화면에서 바로 눈으로 가릴 수 있다.
- * 2차·3차는 이 목록을 갈아 끼우거나 `--sheet` 로 지정한다.
+ * 만들면 열넷이 전부 못 쓸 물건이 된다. 묶음마다 사람이 화면에서 눈으로 가린 뒤
+ * 다음으로 넘어간다 — 이 목록을 갈아 끼우거나 `--sheet` 로 지정한다.
  *
- * 🔵 `(1)고장 접수 확인` 이 여기 다시 들어 있는 것은, 1단계에서 만들려 했으나
- * 실제로는 DB 에 안 들어갔기 때문이다(명령이 안 돌았다).
+ * ── 지나온 묶음 ────────────────────────────────────────────────────────
+ * **1·2차 아홉 장**(끝남 · 사용자 눈 확인 「플로우차트에는 문제 없다」):
+ * `(1)` `(3)` `(6)` `(2)` `(8)` `(11)` `(12)` `(MB) 고장 접수 확인` `(MB) 통전검사`.
+ * 🔴 **다시 만들지 않는다** — 이미 DB 에 있고 사람이 확인했다(그래서 `--replace`
+ * 도 이번엔 필요 없다).
+ *
+ * ── 지금 묶음(3차) — **처음으로 큰 시트 둘** ───────────────────────────
+ * `(4)` 는 도형 118·선 112, `(5)` 는 143·132 다. 노드가 78·88개라 드라이런이
+ * 매우 길어진다 — 그래서 노드 목록은 **유형별 집계로 줄여** 찍는다
+ * (`NODE_LIST_PRINT_LIMIT`). 사람이 볼 알맹이는 버린 것·이어 붙인 선·메모·구조
+ * 문제 쪽이고, 그것들은 **전부** 그대로 찍는다.
+ *
+ * 🔵 둘 다 **참조 노드가 하나씩** 있다: `(4)` → `(5)` · `(5)` → `(6)`.
+ * `(6)` 은 이미 DB 에 있으므로 만든 직후 잇기를 돌리면 그 자리에서 이어진다.
  */
 const CURRENT_BATCH_SHEET_NAMES = [
-  "(RFG) (1)고장 접수 확인",
-  "(RFG) (6)개선 사항 확인",
-  "(RFG) (3)안전검사",
+  "(RFG) (4)기본 정전 검사",
+  "(RFG) (5)통전검사(3상입력)",
 ];
 
 function parseArgs(): { file: string; sheetNames: string[]; includeExcluded: boolean; replace: boolean } {
@@ -118,6 +132,12 @@ function parseArgs(): { file: string; sheetNames: string[]; includeExcluded: boo
     replace: args.includes("--replace"),
   };
 }
+
+/**
+ * 노드가 이보다 많으면 목록을 줄여 찍는다. 🔵 이 값 자체에 뜻이 있지는 않다 —
+ * 「한 화면에 들어오는가」가 기준이고, 1·2차에서 가장 컸던 시트가 15개였다.
+ */
+const NODE_LIST_PRINT_LIMIT = 25;
 
 function px(emu: number): string {
   return `${Math.round(emu / EMU_PER_PIXEL)}px`;
@@ -177,7 +197,33 @@ function printSheetResult(
   }
 
   console.log(`\n  ── 노드 ${result.nodes.length}개 ${"─".repeat(40)}`);
-  for (const node of result.nodes) {
+  /**
+   * 🔴 큰 시트는 **노드를 전부 찍지 않는다.** `(7)원복 검사` 는 155개라 목록만
+   * 수백 줄이 되고, 그 더미에 파묻혀 **정작 봐야 할 것**(버린 도형·이어 붙인 선·
+   * 구조 문제)을 아무도 안 읽는다 — 실패 메시지가 그렇게 파묻혀 한 번 놓쳤다.
+   *
+   * 🔵 줄여 찍어도 **유형별 집계**와 **참조 노드**는 반드시 남긴다. 집계는
+   * 「이 절차가 무엇으로 이루어졌나」를 한 줄로 말해 주고, 참조 노드는 다른 절차와
+   * 이어지는 자리라 수가 적고 뜻이 크다.
+   */
+  const nodeTally = new Map<string, number>();
+  for (const node of result.nodes) nodeTally.set(node.nodeType, (nodeTally.get(node.nodeType) ?? 0) + 1);
+  console.log(
+    `   유형별: ${[...nodeTally]
+      .map(([type, count]) => `${procedureNodeTypeLabels[type as keyof typeof procedureNodeTypeLabels]} ${count}`)
+      .join(" · ")}`
+  );
+  const condensed = result.nodes.length > NODE_LIST_PRINT_LIMIT;
+  const listedNodes = condensed
+    ? result.nodes.filter((n) => n.origin === "AUTO_START" || n.nextProcedureStageNumber !== null)
+    : result.nodes;
+  if (condensed) {
+    console.log(
+      `   🔵 노드가 ${result.nodes.length}개라 목록을 줄입니다 — 시작 노드와 다른 절차를 ` +
+        `가리키는 노드 ${listedNodes.length}개만 찍습니다(나머지는 화면에서 보세요).`
+    );
+  }
+  for (const node of listedNodes) {
     console.log(
       `   #${node.sortOrder} ${node.nodeCode.padEnd(10)} [${procedureNodeTypeLabels[node.nodeType]}] ` +
         `(${node.nodeType})  "${node.title}"`
@@ -201,7 +247,24 @@ function printSheetResult(
   }
 
   console.log(`\n  ── 분기 ${result.edges.length}개 ${"─".repeat(40)}`);
-  for (const edge of result.edges) {
+  // 분기도 같은 까닭으로 줄인다 — 113줄짜리 목록이 뒤의 알맹이를 덮는다.
+  // 🔵 **이름이 붙은 분기**(NG·YES·NO·정상)는 줄여도 남긴다. 기본 분기는 흐름을
+  //    따라가는 줄이고, 이름이 붙은 쪽이 사람이 눈으로 맞대어 볼 자리다.
+  const edgeTally = new Map<string, number>();
+  for (const edge of result.edges) edgeTally.set(edge.branchType, (edgeTally.get(edge.branchType) ?? 0) + 1);
+  console.log(
+    `   갈래별: ${[...edgeTally]
+      .map(([type, count]) => `${procedureBranchTypeLabels[type as keyof typeof procedureBranchTypeLabels]} ${count}`)
+      .join(" · ")}`
+  );
+  const condensedEdges = result.edges.length > NODE_LIST_PRINT_LIMIT;
+  const listedEdges = condensedEdges ? result.edges.filter((e) => e.branchLabel !== null) : result.edges;
+  if (condensedEdges) {
+    console.log(
+      `   🔵 분기가 ${result.edges.length}개라 목록을 줄입니다 — 이름이 붙은 ${listedEdges.length}개만 찍습니다.`
+    );
+  }
+  for (const edge of listedEdges) {
     const label = edge.branchLabel ? `"${edge.branchLabel}"` : "(이름 없음)";
     console.log(
       `   ${edge.fromNodeCode} --[${procedureBranchTypeLabels[edge.branchType]} ${label}]--> ` +
@@ -224,6 +287,18 @@ function printSheetResult(
       `   "${binding.labelText}" (shape#${binding.labelShapeId}) → connector#${binding.connectorId}  ` +
         `거리 ${emu(binding.distance)} EMU / 차점 ${binding.runnerUpDistance === null ? "-" : emu(binding.runnerUpDistance)} (${ratio})  ` +
         `${binding.confident ? "확실" : "🔴 거의 비김"}`
+    );
+  }
+
+  // 🔴 엑셀에 **안 적혀 있던** 연결이다. 적혀 있던 것과 믿음의 정도가 달라서
+  //    따로 보여 준다 — 사람이 이 목록만 훑어 검산할 수 있어야 한다.
+  console.log(`\n  ── 🔴 좌표로 이어 붙인 선 끝 ${result.reboundEndpoints.length}건 ${"─".repeat(20)}`);
+  for (const rebound of result.reboundEndpoints) {
+    console.log(
+      `   connector#${rebound.connectorId} 의 ${rebound.side === "START" ? "시작" : "끝"} → ` +
+        `shape#${rebound.shapeId} "${rebound.shapeText}"  거리 ${emu(rebound.distance)} EMU / ` +
+        `차점 ${rebound.runnerUpDistance === null ? "-" : emu(rebound.runnerUpDistance)}  ` +
+        `${rebound.confident ? "확실" : "🔴 거의 비김"}`
     );
   }
 
@@ -261,14 +336,50 @@ function printSheetResult(
   );
   console.log(`\n  ── 편집기 [검증]이 볼 구조 문제 ${structural.length}건 ${"─".repeat(20)}`);
   for (const issue of structural) {
-    console.log(`   [${issue.severity}] ${issue.issueType}: ${issue.message} ${issue.nodeId ?? issue.edgeId ?? ""}`);
+    // 🔴 **어느 노드인지 글자로** 보여 준다. 노드 코드만 찍으면 큰 시트에서는
+    //    그 코드를 찾으러 다시 화면을 열어야 한다 — 사람이 그 자리에서 판단해야 한다.
+    const node = issue.nodeId ? result.nodes.find((n) => n.nodeCode === issue.nodeId) : undefined;
+    console.log(
+      `   [${issue.severity}] ${issue.issueType}: ${issue.message} ` +
+        `${issue.nodeId ?? issue.edgeId ?? ""}${node ? ` "${node.title.split("\n")[0]}"` : ""}`
+    );
+    if (node) {
+      const outgoing = result.edges.filter((e) => e.fromNodeCode === node.nodeCode);
+      console.log(
+        `        나가는 분기 ${outgoing.length}개: ` +
+          (outgoing.length === 0
+            ? "(없음)"
+            : outgoing
+                .map(
+                  (e) =>
+                    `${procedureBranchTypeLabels[e.branchType]}→"${(result.nodes.find((n) => n.nodeCode === e.toNodeCode)?.title ?? e.toNodeCode).split("\n")[0]}"`
+                )
+                .join(" · "))
+      );
+    }
   }
 }
+
+/**
+ * 쓰기가 실제로 무엇을 했는가. 🔴 **맨 끝에 한 줄로 요약해 찍는다** — 2026-11-05 에
+ * 실패 메시지가 수백 줄짜리 드라이런 뒤에 한 줄로 섞여 **사용자가 못 봤다.** 화면을
+ * 보고 나서야 「아직 옛 모양이다」로 알아챘다.
+ */
+type ApplySummary = {
+  unlinked: number;
+  deleted: number;
+  created: number;
+  /** 이미 있어서 안 만든 것. */
+  skipped: number;
+  /** 만들기가 거절당한 것(권한·충돌 등). */
+  failed: number;
+};
 
 async function applyToDatabase(
   wb: LoadedWorkbook,
   built: readonly BuiltProcedure[],
-  replace: boolean
+  replace: boolean,
+  summary: ApplySummary
 ): Promise<void> {
   // 🔴 1차 — **붙기 전에** 가린다. 접속 URL 만 보는 순수 검사라 여기서 막히면
   //    운영 DB 에 TCP 연결조차 열리지 않는다. 2차(서버가 말한 이름 대조)는 아래에.
@@ -278,9 +389,10 @@ async function applyToDatabase(
   // 🔴 쓰기 경로의 모듈은 여기서 **처음** 불러온다. 드라이런에서는 이 줄에 닿지
   //    않으므로 DB 연결도 server-only 조건도 필요 없다.
   const { sql, and, eq, inArray } = await import("drizzle-orm");
+  const { alias } = await import("drizzle-orm/pg-core");
   const { db, pgClient } = await import("../src/lib/db/connection");
-  const { procedureTemplates, users } = await import("../src/lib/db/schema");
-  const { createDraftProcedureTemplateFromImport, replaceDraftProcedureTemplates } = await import(
+  const { procedureTemplates, procedureTemplateNodes, users } = await import("../src/lib/db/schema");
+  const { createDraftProcedureTemplateFromImport } = await import(
     "../src/lib/db/mutations/procedure-templates"
   );
   const { generateProcedureTemplateCode } = await import("@/lib/domain/procedure-template-code");
@@ -321,8 +433,8 @@ async function applyToDatabase(
     //
     // 🔴 **좁히는 잣대 넷**: 이번에 만들 이름 · 같은 원본 파일 해시 · TECHNICAL_TASK ·
     //    아직 안 지워짐. 그래서 사람이 손으로 만든 절차(파일 해시가 없다)나 다른
-    //    워크북에서 온 절차는 애초에 안 걸린다. 🔵 지우는 함수 자체도 **DRAFT 만**
-    //    건드린다(replaceDraftProcedureTemplates) — 게시본은 거기서 한 번 더 막힌다.
+    //    워크북에서 온 절차는 애초에 안 걸린다. 🔵 치우는 함수 자체도 `requireStatus:
+    //    "DRAFT"` 로 한 번 더 막는다 — 게시본은 그 트랜잭션 안에서 거절된다.
     if (replace) {
       const names = built.map((b) => b.plan.name);
       const victims = await db
@@ -340,15 +452,107 @@ async function applyToDatabase(
       console.log(`\n--replace — 같은 자리의 옛 초안 ${victims.length}개를 치웁니다.`);
       for (const victim of victims) console.log(`  지울 것: "${victim.name}" (code=${victim.code})`);
       if (victims.length > 0) {
-        const outcome = await replaceDraftProcedureTemplates(
-          victims.map((v) => v.code),
-          actor.id
-        );
-        if (!outcome.ok) throw new Error(`옛 초안을 치우지 못했습니다: [${outcome.code}] ${outcome.message}`);
-        for (const deleted of outcome.deleted) {
-          console.log(
-            `  -> 지웠습니다: code=${deleted.code} (노드 ${deleted.nodeCount} · 분기 ${deleted.edgeCount} · 검증메모 ${deleted.issueCount})`
+        /**
+         * 🔴 **지우기 전에 이어가기를 끊는다.** `next_procedure_template_id` 는
+         * `onDelete: "restrict"` 라, 가리켜지는 절차는 삭제가 **거부된다**(실측으로
+         * 여기서 한 번 멈췄다). 그 막음은 결함이 아니라 의도된 보호다 — 조용히
+         * 지워졌다면 그 참조가 깨진 채 남는다.
+         *
+         * 🔴 **끊어도 되는 것만** 끊는다 — 가리키는 노드가 이번에 함께 지울 절차
+         * 안에 있을 때만이다. 밖에서 가리키면 **지우지 않고 멈춘다**(아래 함수).
+         */
+        const victimIds = victims.map((v) => v.id);
+        const owner = alias(procedureTemplates, "owner");
+        const target = alias(procedureTemplates, "target");
+        const referenceRows = await db
+          .select({
+            nodeId: procedureTemplateNodes.id,
+            nodeCode: procedureTemplateNodes.nodeCode,
+            ownerTemplateId: owner.id,
+            ownerTemplateName: owner.name,
+            targetTemplateId: target.id,
+            targetTemplateName: target.name,
+          })
+          .from(procedureTemplateNodes)
+          .innerJoin(owner, eq(owner.id, procedureTemplateNodes.procedureTemplateId))
+          .innerJoin(target, eq(target.id, procedureTemplateNodes.nextProcedureTemplateId))
+          .where(inArray(procedureTemplateNodes.nextProcedureTemplateId, victimIds));
+
+        const { toUnlink, blocking } = planNextProcedureUnlinks({
+          references: referenceRows,
+          victimTemplateIds: victimIds,
+        });
+        // 🔴 하나라도 밖에서 가리키면 **아무것도 안 지우고** 멈춘다.
+        if (blocking.length > 0) throw new Error(formatBlockingReferences(blocking));
+
+        if (toUnlink.length > 0) {
+          console.log(`  이어가기 ${toUnlink.length}건을 먼저 끊습니다(전부 이번에 함께 지울 절차 안입니다).`);
+          const { updateProcedureTemplateNode } = await import(
+            "../src/lib/db/mutations/procedure-template-editor"
           );
+          for (const reference of toUnlink) {
+            // 🔴 한 건마다 `updatedAt` 을 다시 읽는다 — 앞 건이 그 절차의 값을 바꾼다.
+            const [fresh] = await db
+              .select({ updatedAt: procedureTemplates.updatedAt })
+              .from(procedureTemplates)
+              .where(eq(procedureTemplates.id, reference.ownerTemplateId))
+              .limit(1);
+            if (!fresh) throw new Error(`"${reference.ownerTemplateName}" 를 다시 찾지 못했습니다.`);
+            const unlinked = await updateProcedureTemplateNode(
+              reference.nodeId,
+              actor.id,
+              { nextProcedureTemplateId: null },
+              fresh.updatedAt.toISOString(),
+              "--replace 로 다시 만들기 전에 이어가기를 끊음"
+            );
+            if (!unlinked.ok) {
+              throw new Error(
+                `이어가기를 끊지 못했습니다: "${reference.ownerTemplateName}" / ${reference.nodeCode} ` +
+                  `[${unlinked.code}] ${unlinked.message}`
+              );
+            }
+            summary.unlinked += 1;
+            console.log(`    끊음: "${reference.ownerTemplateName}" / ${reference.nodeCode} → "${reference.targetTemplateName}"`);
+          }
+        }
+
+        /**
+         * 🔴 **진짜 삭제가 아니라 휴지통으로 보낸다** — 화면의 [초안 버리기]와
+         * **같은 길**이다(`softDeleteProcedureTemplate`, `requireStatus: "DRAFT"`).
+         *
+         * ── 왜 `replaceDraftProcedureTemplates` 를 안 쓰는가 (2026-11-05 실측) ──
+         * 그 함수는 행을 **물리적으로 지우는데**, `procedure_templates` 를 가리키는
+         * 외래키 가운데 **편집 이력(`procedure_template_edit_history`)을 안 지운다.**
+         * 그래서 편집 이력이 한 줄이라도 있는 초안은 그 함수로 **영영 못 지운다.**
+         *
+         * 🔵 그것은 **의도된 차이였다** — `purgeProcedureTemplateContent` 의 주석이
+         * 적고 있다: 「그쪽은 갓 가져온 초안만 지우므로 그 두 표에 행이 있을 수
+         * 없었다」. 🔴 **그 전제를 우리가 깨뜨렸다.** 잇기 단계와 바로 위의 끊기
+         * 단계가 `updateProcedureTemplateNode` 로 편집 이력을 남기기 때문이다.
+         *
+         * ── 휴지통이 더 나은 까닭 ───────────────────────────────────────
+         * ① 아무것도 물리적으로 안 지우므로 **어떤 외래키도 막지 않는다.**
+         * ② **되돌릴 수 있다** — 다시 만든 결과가 잘못돼도 15일 안에는 옛 아홉이
+         *    휴지통에 남아 있다. 다시 만들기에 딱 맞는 성질이다.
+         * ③ 사람이 화면에서 손으로 할 때와 **같은 일**이 된다.
+         *
+         * 🔵 그래도 바로 위의 **끊기 단계는 여전히 필요하다** —
+         * `softDeleteProcedureTemplate` 도 `countProcedureTemplateReferences` 로
+         * 이어가기를 세어 막는다(실측: 그 함수의 `pointedByEnd`).
+         */
+        const { softDeleteProcedureTemplate } = await import("../src/lib/db/mutations/procedure-templates");
+        for (const victim of victims) {
+          const outcome = await softDeleteProcedureTemplate({
+            templateId: victim.id,
+            actorUserId: actor.id,
+            reason: "--replace 로 같은 시트를 다시 들여오면서 옛 초안을 치움",
+            requireStatus: "DRAFT",
+          });
+          if (!outcome.ok) {
+            throw new Error(`옛 초안을 치우지 못했습니다: "${victim.name}" [${outcome.code}] ${outcome.message}`);
+          }
+          summary.deleted += 1;
+          console.log(`  -> 휴지통으로 보냈습니다: "${victim.name}" (code=${victim.code})`);
         }
       }
     }
@@ -383,6 +587,7 @@ async function applyToDatabase(
         )
         .limit(1);
       if (existing) {
+        summary.skipped += 1;
         console.log(`  -> 이미 있음: "${plan.name}" (code=${existing.code}, id=${existing.id}) — 건너뜁니다.`);
         continue;
       }
@@ -413,6 +618,8 @@ async function applyToDatabase(
         actor.id,
         { sourceFileName: wb.sourceFileName, sourceFileHash: wb.sourceFileHash }
       );
+      if (outcome.ok) summary.created += 1;
+      else summary.failed += 1;
       console.log(
         outcome.ok
           ? `  -> DRAFT 로 만들었습니다: "${plan.name}" id=${outcome.id}` +
@@ -451,7 +658,7 @@ async function main(): Promise<void> {
     //    찍는다 — 제외 판정의 「흐름도가 없다」 갈래가 바로 이 숫자를 보고 정해진다.
     const sheet = wb.sheets.find((s) => s.name === sheetName);
     const { shapeCount, connectorCount } = sheet
-      ? drawingCountsOf(sheet)
+      ? drawingCountsOf(workbookPlan.zip, sheet)
       : { shapeCount: 0, connectorCount: 0 };
     for (const plan of sheetPlans) {
       console.log(
@@ -549,7 +756,45 @@ async function main(): Promise<void> {
     console.log("=".repeat(74));
     return;
   }
-  await applyToDatabase(wb, built, replace);
+  /**
+   * 🔴 **결과를 맨 끝에 한 줄로.** 2026-11-05 에 실패 메시지가 수백 줄짜리 드라이런
+   * 뒤에 섞여 사용자가 못 봤고, 화면을 보고 나서야 「아직 옛 모양이다」로 알아챘다.
+   * 성공이든 실패든 **마지막 줄이 결과를 말해야** 한다(`tail` 로 잘라 봐도 드러나게).
+   */
+  const summary: ApplySummary = { unlinked: 0, deleted: 0, created: 0, skipped: 0, failed: 0 };
+  try {
+    await applyToDatabase(wb, built, replace, summary);
+  } catch (error) {
+    printApplySummary(summary, error);
+    process.exitCode = 1;
+    return;
+  }
+  printApplySummary(summary, null);
+  if (summary.failed > 0) process.exitCode = 1;
+}
+
+function printApplySummary(summary: ApplySummary, error: unknown): void {
+  console.log(`\n${"=".repeat(74)}`);
+  if (error) {
+    console.log("🔴 쓰기 실패 — DB 가 **반만** 바뀌었을 수 있습니다.");
+    console.log("=".repeat(74));
+    console.log(error instanceof Error ? (error.stack ?? error.message) : String(error));
+    console.log("-".repeat(74));
+  }
+  console.log(
+    `결과: 만듦 ${summary.created} · 지움 ${summary.deleted} · 건너뜀 ${summary.skipped} · ` +
+      `실패 ${summary.failed} · 끊은 이어가기 ${summary.unlinked}`
+  );
+  if (error && summary.unlinked > 0) {
+    // 🔴 끊어 놓고 중간에 멈추면 **끊긴 채로 남는다.** 다시 만들면 복원되지만,
+    //    여기서 멈췄으면 사람이 잇기 단계를 손수 돌려야 한다.
+    console.log(
+      `🔴 이어가기 ${summary.unlinked}건을 끊은 뒤 멈췄습니다 — 그 참조는 **지금 비어 있습니다.**\n` +
+        "   다시 만든 뒤 잇기 단계(link-technical-task-next-procedures.ts)를 꼭 돌리세요."
+    );
+  }
+  console.log(error ? "🔴 실패했습니다." : "✅ 끝났습니다.");
+  console.log("=".repeat(74));
 }
 
 main().catch((error) => {

@@ -50,6 +50,8 @@ export type Point = { x: number; y: number };
 /** EMU → 픽셀(96 DPI). 노드의 화면 좌표를 만들 때 쓴다. */
 export const EMU_PER_PIXEL = 9525;
 
+import { decodeXmlEntities } from "@/lib/xlsx/xml-entities";
+
 const ANCHOR_RE = /<xdr:(twoCellAnchor|oneCellAnchor|absoluteAnchor)(?:[^>]*)>([\s\S]*?)<\/xdr:\1>/g;
 const CNVPR_ID_RE = /<xdr:cNvPr id="(\d+)"/;
 /**
@@ -59,40 +61,159 @@ const CNVPR_ID_RE = /<xdr:cNvPr id="(\d+)"/;
 const XFRM_RE =
   /<a:xfrm([^>]*)>\s*<a:off x="(-?\d+)" y="(-?\d+)"\s*\/>\s*<a:ext cx="(-?\d+)" cy="(-?\d+)"\s*\/>/;
 
+/** 묶음 안의 자식 좌표를 바깥 좌표로 옮기는 변환(아래 `GROUP_XFRM_RE` 참고). */
+type GroupTransform = { offX: number; offY: number; chOffX: number; chOffY: number; sx: number; sy: number };
+
 /**
- * drawing XML 한 장에서 **도형 번호 → 절대 좌표** 표를 만든다.
- *
- * 🔵 그림(`xdr:pic`)도 함께 담는다. 흐름도 옆에 붙은 설명 그림이 본문 영역 계산에
- * 끼면 안 되므로 거르는 일은 부르는 쪽이 하지만, 「거기에 무엇이 있었는지」를
- * 보고하려면 좌표가 있어야 한다.
- *
- * 🔴 `<a:xfrm>` 이 없는 앵커는 **표에 안 담는다**(빈 좌표로 0,0 에 두면 모든 거리
- * 계산이 조용히 틀린다). 부르는 쪽이 「좌표를 못 읽은 도형」으로 보고해야 한다.
+ * 묶음(`<xdr:grpSp>`)의 `<a:xfrm>` — 바깥 자리(`off`·`ext`)와 **자식 좌표계**
+ * (`chOff`·`chExt`)가 함께 적힌다.
  */
-export function parseDrawingGeometry(xml: string | null): Map<string, DrawingGeometry> {
-  const byId = new Map<string, DrawingGeometry>();
-  if (!xml) return byId;
+const GROUP_XFRM_RE =
+  /<a:xfrm[^>]*>\s*<a:off x="(-?\d+)" y="(-?\d+)"\s*\/>\s*<a:ext cx="(-?\d+)" cy="(-?\d+)"\s*\/>\s*<a:chOff x="(-?\d+)" y="(-?\d+)"\s*\/>\s*<a:chExt cx="(-?\d+)" cy="(-?\d+)"\s*\/>/;
+
+/** `<xdr:sp>`·`<xdr:cxnSp>`·`<xdr:pic>` 한 덩이(묶음 안이든 밖이든). */
+const OBJECT_RE = /<xdr:(sp|cxnSp|pic)(?:\s[^>]*)?>([\s\S]*?)<\/xdr:\1>/g;
+
+/** 그림판 위의 도형 하나 — 글자·연결 정보까지 함께. */
+export type DrawingObject = DrawingGeometry & {
+  kind: "shape" | "connector" | "picture";
+  /** `<a:prstGeom prst>` — 곧은 선인지 꺾인 선인지 가릴 때 쓴다. */
+  geom: string | null;
+  /** 도형 안의 글자. 문단(`<a:p>`) 사이가 줄바꿈이고 조각(`<a:r>`) 사이는 아니다. */
+  text: string;
+  /** `<a:stCxn id>` — 이 선이 나가는 도형 번호. 비어 있을 수 있다(손으로 그린 선). */
+  stCxnId: string | null;
+  /** `<a:endCxn id>` — 이 선이 닿는 도형 번호. 비어 있을 수 있다. */
+  endCxnId: string | null;
+  /** 🔵 묶음 안에 있던 것인가 — 드라이런이 「묶음을 풀었다」를 보여 줄 수 있게. */
+  inGroup: boolean;
+};
+
+export type DrawingObjects = {
+  objects: DrawingObject[];
+  /** `<a:xfrm>` 이 없어 좌표를 못 읽은 것들. 그래프에 못 올리므로 보고해야 한다. */
+  missingGeometryIds: string[];
+  /** 푼 묶음의 개수. */
+  groupCount: number;
+};
+
+function textOf(body: string): string {
+  const txBody = body.match(/<xdr:txBody>([\s\S]*?)<\/xdr:txBody>/);
+  if (!txBody) return "";
+  const paragraphs = txBody[1].match(/<a:p>[\s\S]*?<\/a:p>/g) ?? [];
+  return paragraphs
+    .map((p) =>
+      (p.match(/<a:t>([\s\S]*?)<\/a:t>/g) ?? [])
+        .map((t) => decodeXmlEntities(t.replace(/<a:t>|<\/a:t>/g, "")))
+        .join("")
+    )
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
+function readObject(
+  tag: "sp" | "cxnSp" | "pic",
+  body: string,
+  transform: GroupTransform | null,
+  out: DrawingObject[],
+  missing: string[]
+): void {
+  const idMatch = body.match(CNVPR_ID_RE);
+  if (!idMatch) return;
+  const xfrmMatch = body.match(XFRM_RE);
+  if (!xfrmMatch) {
+    missing.push(`${tag === "cxnSp" ? "connector" : tag === "pic" ? "picture" : "shape"}#${idMatch[1]}`);
+    return;
+  }
+  const attrs = xfrmMatch[1] ?? "";
+  const rawX = Number(xfrmMatch[2]);
+  const rawY = Number(xfrmMatch[3]);
+  const rawCx = Number(xfrmMatch[4]);
+  const rawCy = Number(xfrmMatch[5]);
+  // 🔴 묶음 안의 좌표는 **자식 좌표계**에 적혀 있다. 바깥으로 옮기지 않으면 거리
+  //    계산이 통째로 틀린다(실측: 한 시트에서 1.03배·0.95배 어긋났다).
+  const x = transform ? transform.offX + (rawX - transform.chOffX) * transform.sx : rawX;
+  const y = transform ? transform.offY + (rawY - transform.chOffY) * transform.sy : rawY;
+  const cx = transform ? rawCx * transform.sx : rawCx;
+  const cy = transform ? rawCy * transform.sy : rawCy;
+
+  out.push({
+    id: idMatch[1],
+    kind: tag === "cxnSp" ? "connector" : tag === "pic" ? "picture" : "shape",
+    x,
+    y,
+    cx,
+    cy,
+    flipH: /\bflipH="(?:1|true)"/.test(attrs),
+    flipV: /\bflipV="(?:1|true)"/.test(attrs),
+    geom: body.match(/<a:prstGeom prst="([^"]+)"/)?.[1] ?? null,
+    text: textOf(body),
+    stCxnId: body.match(/<a:stCxn id="(\d+)"/)?.[1] ?? null,
+    endCxnId: body.match(/<a:endCxn id="(\d+)"/)?.[1] ?? null,
+    inGroup: transform !== null,
+  });
+}
+
+/**
+ * drawing XML 한 장의 **모든 도형·연결선**을 절대 좌표로 읽는다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **묶음(`<xdr:grpSp>`)을 푼다** — 2026-11-05 에 이것 때문에 흐름이 틀렸다
+ * ──────────────────────────────────────────────────────────────────────
+ * 엑셀에서 도형 몇 개를 묶어 두면 앵커 하나 안에 **여러 도형과 연결선**이 들어간다.
+ * `ooxml-parser.ts` 의 `parseDrawing` 은 그 앵커를 **하나짜리로** 읽어 안의 것들을
+ * 통째로 잃는다. 실측으로 `(MB) 통전검사` 가 그랬다 — 묶음 하나에 연결선 둘과 분기
+ * 이름 둘("O.K."·"N.G.")이 들어 있었고, 그 넷이 전부 사라져 **분기 이름이 붙을 선이
+ * 없고 노드 둘이 어디서도 안 이어진** 그림이 나왔다.
+ *
+ * 🔵 그래서 **연결선 셈이 달랐다** — 묶음 안의 둘을 못 세어 4개로 보였다(실제 6개).
+ *
+ * 🔵 묶음은 워크북 전체에 두 장(`(MB) 통전검사` · `(MB) 외관 및 내부 검사`)뿐이고,
+ * 뒤엣것은 만들지 않기로 한 시트다.
+ *
+ * 🔴 `<a:xfrm>` 이 없는 것은 **안 담고 따로 돌려준다**(빈 좌표로 0,0 에 두면 모든
+ * 거리 계산이 조용히 틀린다).
+ */
+export function parseDrawingObjects(xml: string | null): DrawingObjects {
+  const objects: DrawingObject[] = [];
+  const missingGeometryIds: string[] = [];
+  let groupCount = 0;
+  if (!xml) return { objects, missingGeometryIds, groupCount };
 
   let anchorMatch: RegExpExecArray | null;
   ANCHOR_RE.lastIndex = 0;
   while ((anchorMatch = ANCHOR_RE.exec(xml))) {
     const body = anchorMatch[2];
-    const idMatch = body.match(CNVPR_ID_RE);
-    if (!idMatch) continue;
-    const xfrmMatch = body.match(XFRM_RE);
-    if (!xfrmMatch) continue;
-    const attrs = xfrmMatch[1] ?? "";
-    byId.set(idMatch[1], {
-      id: idMatch[1],
-      x: Number(xfrmMatch[2]),
-      y: Number(xfrmMatch[3]),
-      cx: Number(xfrmMatch[4]),
-      cy: Number(xfrmMatch[5]),
-      flipH: /\bflipH="(?:1|true)"/.test(attrs),
-      flipV: /\bflipV="(?:1|true)"/.test(attrs),
-    });
+    const group = body.match(/<xdr:grpSp>([\s\S]*)<\/xdr:grpSp>/);
+    if (group) {
+      groupCount += 1;
+      const g = group[1].match(GROUP_XFRM_RE);
+      // chExt 가 0 이면 나눌 수 없다 — 변환 없이(배율 1) 읽는다. 자리가 조금
+      // 어긋날 수는 있어도 도형을 통째로 잃는 것보다 낫다.
+      const transform: GroupTransform | null = g
+        ? {
+            offX: Number(g[1]),
+            offY: Number(g[2]),
+            chOffX: Number(g[5]),
+            chOffY: Number(g[6]),
+            sx: Number(g[7]) === 0 ? 1 : Number(g[3]) / Number(g[7]),
+            sy: Number(g[8]) === 0 ? 1 : Number(g[4]) / Number(g[8]),
+          }
+        : null;
+      OBJECT_RE.lastIndex = 0;
+      let child: RegExpExecArray | null;
+      while ((child = OBJECT_RE.exec(group[1]))) {
+        readObject(child[1] as "sp" | "cxnSp" | "pic", child[2], transform, objects, missingGeometryIds);
+      }
+      continue;
+    }
+    OBJECT_RE.lastIndex = 0;
+    const single = OBJECT_RE.exec(body);
+    if (single) {
+      readObject(single[1] as "sp" | "cxnSp" | "pic", single[2], null, objects, missingGeometryIds);
+    }
   }
-  return byId;
+  return { objects, missingGeometryIds, groupCount };
 }
 
 export function geometryCenter(g: Pick<DrawingGeometry, "x" | "y" | "cx" | "cy">): Point {

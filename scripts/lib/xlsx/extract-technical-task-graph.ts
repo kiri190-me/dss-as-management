@@ -153,6 +153,11 @@ export type TechnicalTaskGraphResult = {
   droppedConnectors: DroppedConnector[];
   labelBindings: BranchLabelBinding[];
   /**
+   * 🔴 엑셀에 **안 적혀 있던** 연결 — 끊어진 선 끝을 좌표로 이어 붙인 것들.
+   * 적혀 있던 연결과 **믿음의 정도가 다르므로** 드라이런이 따로 보여 준다.
+   */
+  reboundEndpoints: ReboundEndpoint[];
+  /**
    * 「흐름에 닿지 않는 도형은 노드가 아니다」 규칙을 **껐다면** 그 까닭. 안 껐으면 null.
    * 🔴 끈 사실이 조용하면, 그 시트에 진짜 사진 캡션이 생겨도 아무도 모른다.
    */
@@ -195,6 +200,32 @@ const EMPTY_BOX_TEXT_RE = /^[\s*·ㆍ・]*$/;
  */
 const NEXT_PROCEDURE_REF_LEADING_RE = /^\s*\(\s*(\d+)\s*\)/;
 const NEXT_PROCEDURE_REF_BRACKETED_RE = /\[\s*\(\s*(\d+)\s*\)/;
+/**
+ * 문서를 **내거나 보관하는** 일이라고 읽히는 글자.
+ *
+ * 🔵 상수로 뺀 까닭은 `classifyTechnicalNodeType` 안에서 쓰는 자리가 「나가는 선이
+ * 없을 때」 하나로 옮겨 갔기 때문이다 — 규칙 본문과 그 조건을 한눈에 맞대어 보게.
+ */
+const DOCUMENT_REFERENCE_TEXT_RE =
+  /(보고서|리포트|report)[^\n]{0,12}(제출|업로드|송부)|업로드|클라우드\s*BOX|파일철에\s*보관/i;
+
+/**
+ * 「이어갈 절차를 **아직 비워 뒀다**」는 메모를 **알아보는 표식**.
+ *
+ * 🔴 잇기 단계가 그 참조를 채우면 이 메모는 **거짓이 된다.** 그래서 잇는 쪽이 같은
+ * 노드의 이 메모를 함께 지운다 — 안 지우면 「초록 ✔ 옆의 글이 거짓」인 상태가 되고,
+ * 묶음을 거듭할수록 거짓 메모만 쌓인다(2026-11-05 사용자가 [검증 이슈] 화면에서
+ * 발견했다).
+ *
+ * 🔴 **같은 노드·같은 갈래(`INVALID_NEXT_PROCEDURE_LINK`)의 다른 메모는 남겨야 한다** —
+ * 「대괄호 안에 번호가 둘이라 첫 번째를 썼다」 같은 것은 **영구히 참**이다. 그래서
+ * 갈래와 노드 코드만으로는 못 가르고 이 표식이 필요하다.
+ *
+ * 🔵 글자를 **두 벌로 적지 않으려고** 상수로 뺐다 — 메모를 만드는 쪽과 지울 것을
+ * 고르는 쪽이 이 한 값을 함께 본다.
+ */
+export const PENDING_NEXT_PROCEDURE_MEMO_MARKER = "아직 비워 두었습니다";
+
 /** 한 대괄호 덩어리 안의 번호를 모두 센다 — 둘 이상이면 모호하다. */
 const BRACKET_GROUP_RE = /\[([^\]]*)\]/g;
 const BRACKET_NUMBER_RE = /\(\s*(\d+)\s*\)/g;
@@ -387,6 +418,33 @@ function classifyTechnicalNodeType(params: {
       reason: `글자가 (${nextProcedureStageNumber})번 절차를 가리킨다 — 다른 절차로 이어가는 종료`,
     };
   }
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * 🔴 문서 제출/보관은 **흐름이 거기서 끝날 때만** 「문서 참조」다 (2026-11-05)
+   * ──────────────────────────────────────────────────────────────────────
+   * 글자에 「업로드」·「파일철에 보관」이 있어도, **다음 단계로 이어지는** 노드라면
+   * 그것은 작업자가 **해야 하는 일**이다. 낱말이 아니라 자리가 정한다.
+   *
+   * 🔴 왜 이 구분이 가벼운 문제가 아닌가: `DOCUMENT_REFERENCE` 는
+   * `procedure-execution-topology.ts` 의 `EXECUTABLE_NODE_TYPES` 에서 **빠져 있는
+   * 유일한 유형**이다("always informational/satellite"). 그래서 그 유형이 된 노드는
+   * **기사의 실행 목록에 아예 안 뜬다.** 흐름 한가운데의 진짜 작업이 그리로 가면
+   * 그 작업은 조용히 사라진다 — 실측으로 `(12)출하 완료` 의 「…업로드」·「…보관」
+   * 두 단계가 그렇게 되고 있었다(편집기 [검증]이 그 둘을 경고로 잡아 드러났다).
+   *
+   * 🔴 **차례가 알맹이다.** 이 검사는 바로 아래 「나가는 선이 없으면 종료」보다
+   * **먼저** 와야 한다. 뒤에 두면 나가는 선이 없는 노드는 이미 종료로 빠져 나가서
+   * 이 가지가 **영영 안 걸린다**(조건만 덧붙이면 죽은 코드가 된다).
+   *
+   * 🔵 실측: 이 글자 규칙에 걸리는 도형은 워크북 전체에 셋뿐이고, 그중 둘이 위의
+   * `(12)` 노드(나가는 선 있음)다. 나머지 하나는 주석 영역으로 이미 걸러진다.
+   */
+  if (outgoingBranchTypes.length === 0 && DOCUMENT_REFERENCE_TEXT_RE.test(text)) {
+    return {
+      nodeType: "DOCUMENT_REFERENCE",
+      reason: "글자에 문서 제출/보관 표현이 있고 나가는 선이 없다 — 흐름이 여기서 끝난다",
+    };
+  }
   if (outgoingBranchTypes.length === 0) {
     return { nodeType: "END", reason: "나가는 선이 없다" };
   }
@@ -403,9 +461,8 @@ function classifyTechnicalNodeType(params: {
     };
   }
 
-  if (/(보고서|리포트|report)[^\n]{0,12}(제출|업로드|송부)|업로드|클라우드\s*BOX|파일철에\s*보관/i.test(text)) {
-    return { nodeType: "DOCUMENT_REFERENCE", reason: "글자에 문서 제출/보관 표현이 있다" };
-  }
+  // 🔵 문서 제출/보관 글자는 **위에서** 이미 봤다(나가는 선이 없을 때만 걸린다).
+  //    여기까지 온 노드는 나가는 선이 있으므로 아래 규칙들이 제 일을 한다.
   if (/교환|교체|조정\s*작업|재\s*측정|재\s*확인\s*후|부품\s*교환|재\s*진행|재\s*실시/.test(text)) {
     return { nodeType: "CORRECTIVE_ACTION", reason: "글자에 조치/재작업 표현이 있다" };
   }
@@ -413,6 +470,117 @@ function classifyTechnicalNodeType(params: {
     return { nodeType: "INSPECTION", reason: "글자에 확인/점검/검사/측정이 있다" };
   }
   return { nodeType: "TASK", reason: "위 규칙에 걸리지 않는다" };
+}
+
+/** 끊어져 있던 선 끝을 좌표로 이어 붙인 결과 한 건. 드라이런이 따로 보여 준다. */
+export type ReboundEndpoint = {
+  connectorId: string;
+  /** 어느 쪽 끝이 비어 있었나. */
+  side: "START" | "END";
+  shapeId: string;
+  shapeText: string;
+  /** 그 끝점에서 붙인 도형까지의 거리(EMU). 상자 안이면 0. */
+  distance: number;
+  runnerUpDistance: number | null;
+  confident: boolean;
+};
+
+/**
+ * 끊어진 선 끝을 **제 끝점에서 가장 가까운 도형**에 이어 붙일 때 쓰는 여유.
+ * 레이블 붙이기와 같은 자(상자의 반 둘레)를 쓴다 — 시트마다 글꼴·배율이 달라
+ * 고정 EMU 값은 한쪽에서 반드시 틀린다.
+ */
+function maxRebindDistance(shape: TechnicalTaskShapeInput): number {
+  return shape.cx + shape.cy;
+}
+
+/**
+ * ============================================================================
+ * 🔴 끊어진 선 끝을 **좌표로** 이어 붙인다 (2026-11-05)
+ * ============================================================================
+ * 엑셀에서 선을 그릴 때 **끝만 도형에 붙이고 시작은 허공에 두는** 일이 있다. 그러면
+ * `<a:stCxn>`(또는 `<a:endCxn>`)이 통째로 비고, 그 선은 「어디서 오는지 모르는 선」이
+ * 된다. 실측으로 `(MB) 통전검사` 는 연결선 6개 중 **넷**이 그랬고, 그 탓에 받는 쪽
+ * 노드들이 전부 뿌리가 되어 **시작에서 다섯 갈래로 흩어진** 그림이 나왔다(사용자가
+ * 엑셀과 나란히 놓고 잡아냈다).
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 **가까우면 무엇이든 붙이지 않는다**
+ * ──────────────────────────────────────────────────────────────────────
+ * 잘못 이으면 흐름이 **조용히** 엉뚱해진다. 그래서 분기 이름 붙이기와 같은 조심성을
+ * 쓴다 — ① 거리 상한(상자의 반 둘레) ② 차점과의 배수 ③ 반대쪽 끝의 도형은 제외
+ * (자기 자신으로 가는 선을 만들지 않는다). 못 미더우면 **안 붙이고** 그대로 둔다.
+ *
+ * 🔵 붙일 후보는 **글자가 있고 분기 어휘가 아닌 도형**이다. 「노드인가」로 고르면
+ * 그 판정이 연결선에 기대고 있어 서로 물고 도는 순환이 된다 — 글자만 보면 안 돈다.
+ */
+function rebindDanglingEndpoints(
+  shapes: readonly TechnicalTaskShapeInput[],
+  rawConnectors: readonly TechnicalTaskConnectorInput[],
+  sheetName: string
+): {
+  connectors: TechnicalTaskConnectorInput[];
+  reboundEndpoints: ReboundEndpoint[];
+  reboundIssues: ExtractedValidationIssue[];
+} {
+  const candidates = shapes.filter((s) => !EMPTY_BOX_TEXT_RE.test(s.text) && !isBranchLabelText(s.text));
+  const reboundEndpoints: ReboundEndpoint[] = [];
+  const reboundIssues: ExtractedValidationIssue[] = [];
+
+  const connectors = rawConnectors.map((connector) => {
+    if (connector.fromShapeId && connector.toShapeId) return connector;
+    const { start, end } = connectorSegment(connector);
+    let next = connector;
+
+    for (const side of ["START", "END"] as const) {
+      const alreadyBound = side === "START" ? next.fromShapeId : next.toShapeId;
+      if (alreadyBound) continue;
+      const point = side === "START" ? start : end;
+      const otherEnd = side === "START" ? next.toShapeId : next.fromShapeId;
+
+      const ranked = candidates
+        .filter((s) => s.id !== otherEnd)
+        .map((s) => ({ shape: s, distance: distancePointToRect(point, s) }))
+        .sort((a, b) => a.distance - b.distance);
+      const best = ranked[0];
+      if (!best || best.distance > maxRebindDistance(best.shape)) continue;
+
+      const runnerUpDistance = ranked[1]?.distance ?? null;
+      const confident =
+        runnerUpDistance === null || runnerUpDistance >= best.distance * CONFIDENT_MARGIN_RATIO;
+      reboundEndpoints.push({
+        connectorId: connector.id,
+        side,
+        shapeId: best.shape.id,
+        shapeText: firstLine(best.shape.text),
+        distance: best.distance,
+        runnerUpDistance,
+        confident,
+      });
+      next =
+        side === "START"
+          ? { ...next, fromShapeId: best.shape.id }
+          : { ...next, toShapeId: best.shape.id };
+
+      reboundIssues.push({
+        // 🔴 **엑셀에 적혀 있던 연결과 믿음의 정도가 다르다.** 사람이 이 목록만
+        //    훑어 검산할 수 있어야 하므로 한 건도 조용히 넘기지 않는다.
+        severity: confident ? "INFO" : "WARNING",
+        issueType: "DANGLING_CONNECTOR",
+        message:
+          `연결선(connector#${connector.id})의 ${side === "START" ? "시작" : "끝"}이 어떤 도형에도 ` +
+          `묶여 있지 않아 **좌표로** "${firstLine(best.shape.text)}"(shape#${best.shape.id})에 이어 붙였습니다 ` +
+          `(거리 ${Math.round(best.distance)} EMU` +
+          `${runnerUpDistance === null ? "" : ` / 차점 ${Math.round(runnerUpDistance)}`})` +
+          `${confident ? "." : " — 🔴 차점과 거의 비겨 확신이 낮습니다."}`,
+        sourceWorksheet: sheetName,
+        sourceReference: `connector#${connector.id}`,
+      });
+    }
+    return next;
+  });
+
+  return { connectors, reboundEndpoints, reboundIssues };
 }
 
 /** 레이블 가운데에서 연결선까지의 거리. 곧은 선은 선분, 꺾인 선은 제 상자로 잰다. */
@@ -454,8 +622,12 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
     shapes.push(shape);
   }
 
+  // ── 0-2. 🔴 **끊어진 선 끝을 좌표로 이어 붙인다** (2026-11-05) ──────────
+  const { connectors, reboundEndpoints, reboundIssues } = rebindDanglingEndpoints(shapes, input.connectors, sheetName);
+  issues.push(...reboundIssues);
+
   const endpointIds = new Set<string>();
-  for (const c of input.connectors) {
+  for (const c of connectors) {
     if (c.fromShapeId) endpointIds.add(c.fromShapeId);
     if (c.toShapeId) endpointIds.add(c.toShapeId);
   }
@@ -496,7 +668,7 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
    * ──────────────────────────────────────────────────────────────────────
    * 🔴 이 규칙을 **끄는 자리 둘** — 끄는 까닭이 서로 다르다
    * ──────────────────────────────────────────────────────────────────────
-   * ① **끝이 안 묶인 연결선이 하나라도 있는 시트** (2026-11-05 사용자 결정)
+   * ① **이어 붙이지도 못하고 끝이 남은 연결선이 있는 시트** (2026-11-05 사용자 결정)
    *
    *    「끝이 안 묶인 선」은 그 흐름도가 **손으로 그려져 연결 정보가 불완전하다**는
    *    신호다. 엑셀의 연결선은 도형에 붙여 그리면 `stCxn`/`endCxn` 에 상대 도형
@@ -504,10 +676,13 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
    *    그려 놓았다**는 뜻이다. 그런 시트에서는 「이 도형에 선이 안 닿는다」를
    *    믿을 수 없다 — 사람 눈에는 닿아 있는데 파일에 기록이 없을 뿐일 수 있다.
    *
-   *    🔴 실측이 그랬다: `(MB) 통전검사` 는 연결선 6개 중 **4개가 안 묶여** 있고,
-   *    그 탓에 「내부 검사 이행」·「출하 준비」 두 **진짜 작업 단계**가 고립으로
-   *    읽혀 버려졌다(사용자가 센 7 이 5 가 됐다). 반면 사용자가 정답을 확인해 준
-   *    `(2)외관 검사` 는 안 묶인 선이 **0개**라 규칙이 그대로 돌아 일곱이 나온다.
+   *    🔴 **여기서 세는 것은 위 0-2 에서 이어 붙이고도 남은 끝**이다. 좌표로 이어
+   *    붙일 수 있었던 끝은 이미 묶였으므로 이 조건에 안 걸린다 — 그만큼 이 안전장치가
+   *    발동하는 일이 드물어졌다.
+   *    🔵 실제로 `(MB) 통전검사` 가 그 예다. 전에는 안 묶인 선 넷 때문에 이 규칙이
+   *    꺼졌고(그 덕에 「내부 검사 이행」·「출하 준비」가 살아남았다), 지금은 그 넷이
+   *    **전부 제 도형에 이어 붙어** 규칙이 그대로 돌면서도 일곱이 유지된다.
+   *    사용자가 정답을 확인해 준 `(2)외관 검사` 는 애초에 안 묶인 선이 0개다.
    *
    * ② **어떤 도형에도 연결선이 닿지 않는 시트**
    *    그대로 쓰면 도형이 전부 버려져 **빈 절차**가 된다. 애초에 흐름도가 아니다.
@@ -518,7 +693,7 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
    * 🔴 **끈 사실을 반드시 남긴다.** 끈 시트에 나중에 진짜 사진 캡션이 생기면 안
    * 걸리는데, 그것이 조용하면 아무도 모른다.
    */
-  const unboundConnectorCount = input.connectors.filter((c) => !c.fromShapeId || !c.toShapeId).length;
+  const unboundConnectorCount = connectors.filter((c) => !c.fromShapeId || !c.toShapeId).length;
   const everyShapeIsolated = shapes.length > 0 && isolatedShapeIds.size + labelShapeIds.size === shapes.length;
 
   let isolationRuleSkippedReason: string | null = null;
@@ -536,7 +711,7 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
     });
   } else if (everyShapeIsolated) {
     isolationRuleSkippedReason =
-      `어떤 도형에도 연결선이 닿지 않습니다(도형 ${shapes.length} · 연결선 ${input.connectors.length}) — ` +
+      `어떤 도형에도 연결선이 닿지 않습니다(도형 ${shapes.length} · 연결선 ${connectors.length}) — ` +
       "「흐름에 닿지 않는 도형은 노드가 아니다」 규칙을 적용하지 않았습니다. 적용하면 빈 절차가 됩니다.";
     issues.push({
       severity: "WARNING",
@@ -549,7 +724,7 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
   if (isolationRuleSkippedReason) isolatedShapeIds.clear();
 
   // ── 4. 주석 영역 ───────────────────────────────────────────────────────
-  const { boundaryX, reason: annotationBoundaryReason } = findAnnotationBoundary(shapes, input.connectors);
+  const { boundaryX, reason: annotationBoundaryReason } = findAnnotationBoundary(shapes, connectors);
   const annotationShapeIds = new Set(
     boundaryX === null ? [] : shapes.filter((s) => s.x >= boundaryX).map((s) => s.id)
   );
@@ -612,7 +787,7 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
 
   // ── 4. 연결선 → 분기 ───────────────────────────────────────────────────
   const keptConnectors: TechnicalTaskConnectorInput[] = [];
-  for (const connector of input.connectors) {
+  for (const connector of connectors) {
     if (!connector.fromShapeId || !connector.toShapeId) {
       droppedConnectors.push({
         connectorId: connector.id,
@@ -860,7 +1035,7 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
         issueType: "INVALID_NEXT_PROCEDURE_LINK",
         message:
           `종료 노드 "${shortLabel(shape.text)}"의 이어갈 절차((${nextProcedureStageNumber})번)를 ` +
-          `아직 비워 두었습니다 — 절차들을 다 만든 뒤 잇기 단계에서 채웁니다.`,
+          `${PENDING_NEXT_PROCEDURE_MEMO_MARKER} — 절차들을 다 만든 뒤 잇기 단계에서 채웁니다.`,
         sourceWorksheet: sheetName,
         sourceReference: `node:${nodeCode}`,
       });
@@ -1020,6 +1195,7 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
     droppedShapes,
     droppedConnectors,
     labelBindings,
+    reboundEndpoints,
     isolationRuleSkippedReason,
     annotationBoundaryX: boundaryX,
     annotationBoundaryReason,

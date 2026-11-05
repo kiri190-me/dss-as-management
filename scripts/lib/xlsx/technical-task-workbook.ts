@@ -1,7 +1,6 @@
 import { ZipArchive } from "./zip-reader";
 import { loadWorkbook, type LoadedSheet, type LoadedWorkbook } from "./workbook-loader";
-import type { DrawingConnector, DrawingShape } from "./ooxml-parser";
-import { parseDrawingGeometry } from "./drawing-geometry";
+import { parseDrawingObjects } from "./drawing-geometry";
 import {
   extractTechnicalTaskGraph,
   type TechnicalTaskConnectorInput,
@@ -47,57 +46,58 @@ export function titleTextOf(sheet: LoadedSheet): string | null {
   return sheet.worksheet.cells["A1"] ?? null;
 }
 
-/** 그림층의 도형·연결선 수 — 「흐름도인가」를 재는 자다(제외 판정에 쓴다). */
-export function drawingCountsOf(sheet: LoadedSheet): { shapeCount: number; connectorCount: number } {
-  const anchors = sheet.drawing ?? [];
-  return {
-    shapeCount: anchors.filter((a) => a.kind === "shape").length,
-    connectorCount: anchors.filter((a) => a.kind === "connector").length,
-  };
-}
-
 /**
- * `parseDrawing`(칸 좌표 · 글자 · 연결 정보)과 `parseDrawingGeometry`(절대 좌표)를
- * 도형 번호로 맞붙인다. 둘을 나눠 둔 까닭은 drawing-geometry.ts 머리말에 있다 —
- * 기존 파서를 안 건드리려고 좌표만 따로 읽는다.
+ * 그림판 한 장을 **우리 길로** 읽는다.
+ *
+ * 🔴 `ooxml-parser.ts` 의 `parseDrawing` 을 **안 쓴다**(기존 들여오기 경로는 그대로
+ * 그것을 쓴다). 까닭 둘: ① 그쪽은 칸(col/row) 좌표만 주는데 우리는 EMU 가 필요하고,
+ * ② **묶음(`<xdr:grpSp>`)을 풀지 못해** 그 안의 도형·연결선을 통째로 잃는다
+ * (drawing-geometry.ts 머리말 — 실측으로 흐름이 틀어졌다).
  */
 export function readSheetDrawing(zip: ZipArchive, sheet: LoadedSheet): SheetDrawing {
-  const anchors = sheet.drawing ?? [];
-  const geometry = parseDrawingGeometry(sheet.drawingPath ? zip.readTextOrNull(sheet.drawingPath) : null);
-  const missingGeometryIds: string[] = [];
+  const { objects, missingGeometryIds, groupCount } = parseDrawingObjects(
+    sheet.drawingPath ? zip.readTextOrNull(sheet.drawingPath) : null
+  );
 
-  const shapes: TechnicalTaskShapeInput[] = [];
-  for (const anchor of anchors.filter((a): a is DrawingShape => a.kind === "shape")) {
-    const g = anchor.id ? geometry.get(anchor.id) : undefined;
-    if (!anchor.id || !g) {
-      missingGeometryIds.push(anchor.id ? `shape#${anchor.id}` : "shape#(번호 없음)");
-      continue;
-    }
-    shapes.push({ ...g, text: anchor.text });
-  }
+  const shapes: TechnicalTaskShapeInput[] = objects
+    .filter((o) => o.kind === "shape")
+    .map((o) => ({ id: o.id, x: o.x, y: o.y, cx: o.cx, cy: o.cy, flipH: o.flipH, flipV: o.flipV, text: o.text }));
 
-  const connectors: TechnicalTaskConnectorInput[] = [];
-  for (const anchor of anchors.filter((a): a is DrawingConnector => a.kind === "connector")) {
-    const g = anchor.id ? geometry.get(anchor.id) : undefined;
-    if (!anchor.id || !g) {
-      missingGeometryIds.push(anchor.id ? `connector#${anchor.id}` : "connector#(번호 없음)");
-      continue;
-    }
-    connectors.push({
-      ...g,
-      fromShapeId: anchor.stCxnId,
-      toShapeId: anchor.endCxnId,
-      isStraight: /^(straightConnector\d*|line)$/i.test(anchor.geom ?? ""),
-    });
-  }
+  const connectors: TechnicalTaskConnectorInput[] = objects
+    .filter((o) => o.kind === "connector")
+    .map((o) => ({
+      id: o.id,
+      x: o.x,
+      y: o.y,
+      cx: o.cx,
+      cy: o.cy,
+      flipH: o.flipH,
+      flipV: o.flipV,
+      fromShapeId: o.stCxnId,
+      toShapeId: o.endCxnId,
+      isStraight: /^(straightConnector\d*|line)$/i.test(o.geom ?? ""),
+    }));
 
   return {
     shapes,
     connectors,
-    pictureCount: anchors.filter((a) => a.kind === "picture").length,
-    groupCount: anchors.filter((a) => a.kind === "group").length,
+    pictureCount: objects.filter((o) => o.kind === "picture").length,
+    groupCount,
     missingGeometryIds,
   };
+}
+
+/**
+ * 그림층의 도형·연결선 수 — 「흐름도인가」를 재는 자다(제외 판정에 쓴다).
+ * 🔵 위와 **같은 파서**로 센다 — 묶음을 푸는 쪽과 세는 쪽이 다르면 「도형 0」 판정이
+ * 어긋난다.
+ */
+export function drawingCountsOf(
+  zip: ZipArchive,
+  sheet: LoadedSheet
+): { shapeCount: number; connectorCount: number } {
+  const drawing = readSheetDrawing(zip, sheet);
+  return { shapeCount: drawing.shapes.length, connectorCount: drawing.connectors.length };
 }
 
 export type BuiltProcedure = {
@@ -125,7 +125,7 @@ export function planWorkbook(filePath: string): WorkbookPlan {
   const plans: TechnicalTaskProcedurePlan[] = [];
   const plansBySheetName = new Map<string, TechnicalTaskProcedurePlan[]>();
   for (const sheet of workbook.sheets) {
-    const sheetPlans = planProceduresForSheet(sheet.name, titleTextOf(sheet), drawingCountsOf(sheet));
+    const sheetPlans = planProceduresForSheet(sheet.name, titleTextOf(sheet), drawingCountsOf(zip, sheet));
     if (sheetPlans.length === 0) continue;
     plansBySheetName.set(sheet.name, sheetPlans);
     plans.push(...sheetPlans);
