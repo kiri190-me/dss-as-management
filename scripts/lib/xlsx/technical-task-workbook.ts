@@ -12,6 +12,11 @@ import {
   planProceduresForSheet,
   type TechnicalTaskProcedurePlan,
 } from "./technical-task-sheet-plan";
+import { readCellGridFlowchart, type CellGridBlock, type CellGridFlowchart } from "./cell-grid-flowchart";
+import {
+  extractCellGridTaskGraph,
+  type CellGridCounts,
+} from "./extract-cell-grid-task-graph";
 
 /**
  * ============================================================================
@@ -102,6 +107,12 @@ export type BuiltProcedure = {
   sheet: LoadedSheet;
   drawing: SheetDrawing;
   result: TechnicalTaskGraphResult;
+  /**
+   * 🔵 **셀 격자 길로 읽었을 때만** 채워진다(도형 길이면 null). 드라이런이 블록별
+   * 상자·이음 수를 찍어 사람이 합계를 검산하는 자리다 — 그 셈은 도형 길의
+   * `droppedShapes`/`labelBindings` 에 대응하는 것이 없어 `result` 만으로는 안 보인다.
+   */
+  cellGrid: { block: CellGridBlock; counts: CellGridCounts } | null;
 };
 
 export type WorkbookPlan = {
@@ -110,6 +121,15 @@ export type WorkbookPlan = {
   /** 머리말이 붙은 모든 시트의 계획. 제외된 것도 **줄째로** 들어 있다. */
   plans: TechnicalTaskProcedurePlan[];
   plansBySheetName: Map<string, TechnicalTaskProcedurePlan[]>;
+  /**
+   * 🔴 **셀 격자로 읽어 본 결과**(시트 전부). 블록이 0개면 「셀 격자 흐름도가
+   * 아니다」라는 뜻이고, 그 판정이 곧 시트 제외 판정에 쓰인다.
+   *
+   * 🔵 **한 번만 읽어 여기 담아 둔다.** 계획을 세울 때와 절차를 만들 때가 서로 다른
+   * 결과를 보면 블록과 계획이 어긋나는데, 그 어긋남은 「절차 하나가 엉뚱한 증상의
+   * 상자를 담는」 꼴로 조용히 드러난다.
+   */
+  cellGridBySheetName: Map<string, CellGridFlowchart>;
   /** 단계 번호 → 절차. `(번호)` 참조를 풀 때 쓴다. */
   stageIndex: Map<string, TechnicalTaskProcedurePlan>;
   stageNumberConflicts: string[];
@@ -121,8 +141,24 @@ export function planWorkbook(filePath: string): WorkbookPlan {
 
   const plans: TechnicalTaskProcedurePlan[] = [];
   const plansBySheetName = new Map<string, TechnicalTaskProcedurePlan[]>();
+  const cellGridBySheetName = new Map<string, CellGridFlowchart>();
   for (const sheet of workbook.sheets) {
-    const sheetPlans = planProceduresForSheet(sheet.name, titleTextOf(sheet), drawingCountsOf(zip, sheet));
+    /**
+     * 🔴 **어느 읽개를 쓸지 고르는 자리가 여기다.** 두 읽개는 서로를 모른다.
+     *
+     * 모든 시트에 셀 격자를 **재 본다** — 손으로 적은 시트 이름 목록을 두면 엑셀이
+     * 개정될 때 조용히 어긋난다(이 파일이 시트 이름 표를 안 두는 것과 같은 까닭).
+     * 🔵 재는 값이 싸다: 블록이 0개면 `readCellGridFlowchart` 가 병합 모양을 세어
+     * 보고 바로 돌아선다.
+     */
+    const cellGrid = readCellGridFlowchart(sheet.worksheet);
+    cellGridBySheetName.set(sheet.name, cellGrid);
+    const sheetPlans = planProceduresForSheet(
+      sheet.name,
+      titleTextOf(sheet),
+      drawingCountsOf(zip, sheet),
+      cellGrid.blocks
+    );
     if (sheetPlans.length === 0) continue;
     plansBySheetName.set(sheet.name, sheetPlans);
     plans.push(...sheetPlans);
@@ -133,6 +169,7 @@ export function planWorkbook(filePath: string): WorkbookPlan {
     zip,
     plans,
     plansBySheetName,
+    cellGridBySheetName,
     stageIndex: byStageNumber,
     stageNumberConflicts: conflicts,
   };
@@ -165,7 +202,28 @@ export function buildProceduresForSheets(
       continue;
     }
     const drawing = readSheetDrawing(workbookPlan.zip, sheet);
+    const cellGrid = workbookPlan.cellGridBySheetName.get(sheet.name) ?? null;
     for (const plan of sheetPlans) {
+      // 🔴 **읽개를 고르는 두 번째(이자 마지막) 자리.** 고르는 잣대는 `plan.cellBlock`
+      //    하나뿐이고, 그 값은 계획을 세울 때 이미 측정으로 정해졌다 — 여기서 다시
+      //    재면 두 판정이 어긋날 수 있다.
+      const block = plan.cellBlock
+        ? (cellGrid?.blocks.find((b) => b.headerRef === plan.cellBlock!.headerRef) ?? null)
+        : null;
+      if (plan.cellBlock && block && cellGrid?.geometry) {
+        const { result, counts } = extractCellGridTaskGraph({
+          sheetName: sheet.name,
+          nodeCodePrefix: plan.nodeCodePrefix,
+          startNodeTitle: plan.label,
+          block,
+          geometry: cellGrid.geometry,
+          // 🔵 시트 전체 경고(블록을 못 정한 것)는 **여기 안 담는다** — 어느 절차의
+          //    이야기도 아니기 때문이다. 드라이런이 시트 머리에서 따로 찍는다.
+          warnings: cellGrid.warnings.filter((w) => w.blockHeaderRef === block.headerRef),
+        });
+        built.push({ plan, sheet, drawing, result, cellGrid: { block, counts } });
+        continue;
+      }
       built.push({
         plan,
         sheet,
@@ -178,6 +236,7 @@ export function buildProceduresForSheets(
           shapes: drawing.shapes,
           connectors: drawing.connectors,
         }),
+        cellGrid: null,
       });
     }
   }

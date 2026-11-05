@@ -61,6 +61,10 @@ scripts/lib/xlsx/combine-shape-graph-sheets.test.ts
 scripts/lib/xlsx/extract-plain-instruction.test.ts
 scripts/lib/xlsx/extract-reference-index.test.ts
 scripts/lib/xlsx/extract-technical-task-graph.test.ts
+# 셀 격자로 그린 흐름도(`(MB) 수리`) — 도형 읽개와 **나란히 서는 세 번째 길**이다.
+# 격자를 재는 쪽과 그것을 절차로 옮기는 쪽이 파일이 갈려 있다.
+scripts/lib/xlsx/cell-grid-flowchart.test.ts
+scripts/lib/xlsx/extract-cell-grid-task-graph.test.ts
 scripts/lib/xlsx/technical-task-sheet-plan.test.ts
 scripts/lib/xlsx/technical-task-next-procedure-plan.test.ts
 scripts/lib/xlsx/technical-task-replace-path.test.ts

@@ -13,6 +13,7 @@ import {
   planWorkbook,
   type BuiltProcedure,
   type SheetDrawing,
+  type WorkbookPlan,
 } from "./lib/xlsx/technical-task-workbook";
 import {
   formatBlockingReferences,
@@ -85,24 +86,28 @@ const APPLY = process.env.APPLY === "1";
  * `(1)` `(3)` `(6)` `(2)` `(8)` `(11)` `(12)` `(MB) 고장 접수 확인` `(MB) 통전검사`.
  * **3차 두 장**(처음으로 큰 시트): `(4)` 도형 118·선 112 · `(5)` 143·132.
  *
- * ── 지금 묶음(5차) — **열하나를 다시 만들고, `(7)` 을 처음 만든다** ────────
- * 🔴 이번에는 **다시 만들기와 새로 만들기가 섞여 있다.** 4차까지는 일부러 안 섞었는데
- * (화면에서 무엇을 봐야 하는지 흐려진다), 이번 변경이 **열한 장에도 닿기 때문에**
- * 함께 갈 수밖에 없다 — 연결선이 실제로 그려지는 자리를 고쳤고(`connectorPath`,
- * `<a:xfrm rot>` 과 꺾임점), 그래서 `(5)통전검사` 의 정상/NG 한 쌍이 제자리를 찾고
- * `(8)고객 연락` 의 「NO」 하나가 되살아난다(2026-11-05 사용자 「받아들일께」).
+ * **5차 열두 장**(도형 시트 전부 · 절차 열넷): `(1)` `(2)` `(3)` `(4)` `(5)` `(6)`
+ * `(7)`(겸임 복제본 `(9)`·`(10)` 포함) `(8)` `(11)` `(12)` `(MB) 고장 접수 확인`
+ * `(MB) 통전검사`. 🔵 그 열넷은 **이미 만들어져 있다.**
  *
- * 🔵 `(7)원복 검사 및 개선 작업` 한 장이 **절차 셋**을 만든다 — `(9)수리 작업` 과
- * `(10)출하 검사` 가 같은 시트의 겸임 복제본이다(사용자: 「9, 10을 7번과 같은
- * 플로우차트 내용을 가진 별도의 절차로」). 이 셋이 생기면 잇기 단계의 「못 이음 8」이
- * 0 이 된다 — 여덟이 전부 그 둘을 가리키고 있었다.
+ * ── 지금 묶음(6차) — **셀 격자 시트 한 장**(절차 11개) ───────────────────
+ * 🔴 `(MB) 수리` 는 도형이 아니라 **셀을 병합해 그린 흐름도**다. 읽는 길이 아예
+ * 달라서(`cell-grid-flowchart.ts`) 이번 묶음은 **이 한 장뿐**이다 — 도형 읽개는 한
+ * 줄도 안 바뀌었고, 앞의 열넷은 드라이런 결과가 **한 글자도 안 달라진다**(기준선과
+ * 맞대어 확인했다).
  *
- * 🔴 **`(MB) 수리` 는 아직이다.** 그쪽은 도형이 아니라 **셀 테두리**로 그린 흐름도라
- * 읽는 방식 자체가 다르다 — 별도 조각이다.
+ * 🔵 이 한 장이 **절차 11개**를 만든다. 한 시트가 절차 여럿을 만드는 길은 `(7)` 의
+ * 겸임 복제본이 처음이었는데, 그쪽은 **내용이 같은 사본 셋**이고 이쪽은 증상마다
+ * **내용이 다른 블록 열하나**다(technical-task-sheet-plan.ts 의
+ * `planCellGridProcedures` 머리말).
  *
- * 🔴 **보고 넘어갈 것**: `(7)` 에 구조 문제 **4건**이 남는다. 우리가 잘못 읽는 것이
- * 아니라 **원본 엑셀에 선이 안 그려져 있어서**다(셋은 나가는 화살표가 NG 하나뿐이고,
- * 하나는 `shape#406` 이음목에 빠져나가는 선이 없다). 지어내지 않았다.
+ * 🔴 **보고 넘어갈 것**: 이 시트에는 「나가는 화살표가 N.G. 하나뿐인 상자」가 있다.
+ * 그런 상자는 판단이 되고 편집기 [검증]이 「출력 경로 누락」으로 잡는다 — 우리가
+ * 잘못 읽는 것이 아니라 **원본 엑셀에 정상 쪽 화살표가 안 그려져 있어서**다.
+ * 지어내지 않았다.
+ *
+ * 🔵 앞 묶음을 **다시** 만들 일이 있으면 아래 목록을 그때 갈아 끼운다. `--sheet` 로
+ * 지정하는 길이 늘 열려 있다(여러 번 줄 수 있다).
  *
  * 🔴 **다시 만들면 절차끼리의 이어가기가 비워진다**(`--replace` 가 지우기 전에
  * 끊는다). 끝난 뒤 `link-technical-task-next-procedures.ts` 를 **한 번 더** 돌려야
@@ -113,19 +118,8 @@ const APPLY = process.env.APPLY === "1";
  * 이어 붙인 선·메모·구조 문제 쪽이고, 그것들은 **전부** 그대로 찍는다.
  */
 const CURRENT_BATCH_SHEET_NAMES = [
-  "(RFG) (1)고장 접수 확인",
-  "(RFG) (2)외관 검사",
-  "(RFG) (3)안전검사",
-  "(RFG) (4)기본 정전 검사",
-  "(RFG) (5)통전검사(3상입력)",
-  "(RFG) (6)개선 사항 확인",
-  // 🔵 이 한 줄이 절차 셋을 만든다 — `(9)수리 작업`·`(10)출하 검사` 가 겸임 복제본이다.
-  "(RFG) (7)원복 검사 및 개선 작업",
-  "(RFG) (8)고객 연락",
-  "(RFG) (11)출하 준비",
-  "(RFG) (12)출하 완료",
-  "(MB) 고장 접수 확인",
-  "(MB) 통전검사",
+  // 🔵 이 한 줄이 절차 11개를 만든다 — 시트 안의 증상 블록마다 하나씩.
+  "(MB) 수리",
 ];
 
 function parseArgs(): { file: string; sheetNames: string[]; includeExcluded: boolean; replace: boolean } {
@@ -196,7 +190,8 @@ function printSheetResult(
   drawing: SheetDrawing,
   plan: TechnicalTaskProcedurePlan,
   result: TechnicalTaskGraphResult,
-  stageIndex: Map<string, TechnicalTaskProcedurePlan>
+  stageIndex: Map<string, TechnicalTaskProcedurePlan>,
+  cellGrid: BuiltProcedure["cellGrid"]
 ): void {
   console.log(`\n${"=".repeat(74)}`);
   console.log(`[시트] ${sheet.name}`);
@@ -209,16 +204,33 @@ function printSheetResult(
     `  장비 유형 : ${plan.equipmentType} (${procedureEquipmentTypeLabels[plan.equipmentType]})` +
       `   단계 번호: ${plan.stageNumber ?? "없음"}   노드코드 앞가지: ${plan.nodeCodePrefix}`
   );
-  console.log(
-    `  그림층    : 도형 ${drawing.shapes.length} · 연결선 ${drawing.connectors.length} · ` +
-      `그림 ${drawing.pictureCount} · 묶음 ${drawing.groupCount}` +
-      (drawing.missingGeometryIds.length > 0
-        ? `   🔴 좌표 미확보 ${drawing.missingGeometryIds.length}개: ${drawing.missingGeometryIds.join(", ")}`
-        : "   (좌표 미확보 0)")
-  );
-  console.log(
-    `  본문/주석 : ${result.annotationBoundaryX === null ? "경계 없음" : `경계 x=${px(result.annotationBoundaryX)}`} — ${result.annotationBoundaryReason}`
-  );
+  /**
+   * 🔴 **셀 격자로 읽은 절차는 그림층 이야기를 안 찍는다.** 도형이 0개인 것은 결함이
+   * 아니라 그 시트의 성질이고, 「도형 0 · 연결선 0」을 보여 주면 읽는 사람이 바로
+   * 「흐름도가 없는데 왜 절차가 생겼지?」로 빠진다. 대신 **블록의 상자·이음 수**를
+   * 찍는다 — 그것이 이 길에서 사람이 검산해야 할 숫자다.
+   */
+  if (cellGrid) {
+    const { block, counts } = cellGrid;
+    console.log(
+      `  셀 격자   : 블록 "${block.rawHeaderText}" (${block.headerRef} · ${block.headerRow}~${block.endRow}줄)`
+    );
+    console.log(
+      `              상자 ${counts.boxes} · 이음 ${counts.links}(정상 ${counts.normalLinks} · NG ${counts.ngLinks}) ` +
+        `+ 자동 시작 분기 ${counts.startEdges} = 노드 ${counts.nodes} · 분기 ${counts.edges}`
+    );
+  } else {
+    console.log(
+      `  그림층    : 도형 ${drawing.shapes.length} · 연결선 ${drawing.connectors.length} · ` +
+        `그림 ${drawing.pictureCount} · 묶음 ${drawing.groupCount}` +
+        (drawing.missingGeometryIds.length > 0
+          ? `   🔴 좌표 미확보 ${drawing.missingGeometryIds.length}개: ${drawing.missingGeometryIds.join(", ")}`
+          : "   (좌표 미확보 0)")
+    );
+    console.log(
+      `  본문/주석 : ${result.annotationBoundaryX === null ? "경계 없음" : `경계 x=${px(result.annotationBoundaryX)}`} — ${result.annotationBoundaryReason}`
+    );
+  }
   // 🔴 규칙을 **껐다면** 머리에 바로 찍는다. 끈 사실이 조용하면, 그 시트에 진짜
   //    사진 캡션이 섞여 들어와도 사람이 그 까닭을 찾을 자리가 없다.
   if (result.isolationRuleSkippedReason) {
@@ -299,8 +311,19 @@ function printSheetResult(
     console.log(
       `   ${edge.fromNodeCode} --[${procedureBranchTypeLabels[edge.branchType]} ${label}]--> ` +
         // 자동으로 더한 시작 분기는 엑셀의 연결선에서 온 것이 아니다 — 섞어 찍지 않는다.
-        `${edge.toNodeCode}   ${edge.sourceConnectorId ? `(connector#${edge.sourceConnectorId})` : "(자동으로 더한 분기)"}`
+        // 🔵 셀 격자에서 온 분기는 연결선 번호가 없고 **이름표 칸 주소**가 출처다.
+        `${edge.toNodeCode}   ${edgeSourceLabel(edge.sourceConnectorId ?? null)}`
     );
+  }
+
+  /**
+   * 🔴 아래 넷은 **도형 길에만 있는 이야기**다. 셀 격자 절차에서는 언제나 0건이고,
+   * 「버린 도형 0개」를 보여 주면 읽는 사람이 「도형이 있었는데 하나도 안 버렸구나」로
+   * 잘못 읽는다 — 애초에 도형이 없었다. 그래서 찍지 않는다.
+   */
+  if (cellGrid) {
+    printIssuesAndStructure(result);
+    return;
   }
 
   console.log(`\n  ── 분기 이름 붙이기 ${result.labelBindings.length}건 ${"─".repeat(28)}`);
@@ -348,6 +371,22 @@ function printSheetResult(
     );
   }
 
+  printIssuesAndStructure(result);
+}
+
+/** 셀 격자 길에 쓰이는 출처 글자 — 연결선 번호가 없고 **이름표 칸 주소**가 출처다. */
+function edgeSourceLabel(sourceConnectorId: string | null): string {
+  if (!sourceConnectorId) return "(자동으로 더한 분기)";
+  if (sourceConnectorId.startsWith("cell:")) return `(이름표 칸 ${sourceConnectorId.slice("cell:".length)})`;
+  return `(connector#${sourceConnectorId})`;
+}
+
+/**
+ * 메모와 구조 문제 — **두 길이 함께 쓴다.**
+ * 🔵 밖으로 뺀 까닭: 셀 격자 절차는 중간의 도형 전용 절(버린 도형·이어 붙인 선…)을
+ * 건너뛰고 바로 여기로 온다. 베껴 두면 한쪽만 고쳐지는 날이 온다.
+ */
+function printIssuesAndStructure(result: TechnicalTaskGraphResult): void {
   console.log(`\n  ── 들여오기가 남긴 메모 ${result.issues.length}건 ${"─".repeat(28)}`);
   for (const issue of result.issues) {
     console.log(`   [${issue.severity}] ${issue.issueType}: ${issue.message}`);
@@ -385,6 +424,97 @@ function printSheetResult(
                     `${procedureBranchTypeLabels[e.branchType]}→"${(result.nodes.find((n) => n.nodeCode === e.toNodeCode)?.title ?? e.toNodeCode).split("\n")[0]}"`
                 )
                 .join(" · "))
+      );
+    }
+  }
+}
+
+/**
+ * ============================================================================
+ * 🔴 셀 격자 시트의 **잰 격자 · 블록별 셈 · 합계 검산 · 시트 전체 경고**
+ * ============================================================================
+ * 이 길에는 도형 길의 「버린 도형 N개」에 해당하는 것이 없다. 사람이 **엑셀을 옆에
+ * 놓고 맞대어 볼 숫자**가 여기 찍히는 이 표 하나다 — 그래서 합계를 **스스로 검산해**
+ * 보여 준다.
+ *
+ * 🔴 **합계가 안 맞으면 고치려 들지 말 것.** 숫자가 어긋나는 것은 ① 우리가 잘못
+ * 읽었거나 ② 엑셀이 바뀌었거나 ③ 세는 쪽 기대가 틀린 것인데, 셋을 가르는 일은
+ * 사람이 원본을 보고 한다.
+ *
+ * 🔵 검산의 뿌리: 블록 하나가 **나무**이면 `상자 수 - 1 = 이음 수` 다(뿌리 하나에
+ * 모두가 한 번씩 이어진다). 그래서 `상자 합 - 블록 수 = 이음 합` 이 되고, 뿌리가
+ * 둘 이상인 블록이 있으면 그만큼 어긋나면서 자동 시작 분기 수가 늘어난다.
+ */
+function printCellGridSheets(workbookPlan: WorkbookPlan, candidates: readonly BuiltProcedure[]): void {
+  const sheetNames = [
+    ...new Set(candidates.filter((c) => c.cellGrid !== null).map((c) => c.sheet.name)),
+  ];
+  for (const sheetName of sheetNames) {
+    const flowchart = workbookPlan.cellGridBySheetName.get(sheetName);
+    if (!flowchart) continue;
+    const mine = candidates.filter((c) => c.sheet.name === sheetName && c.cellGrid !== null);
+
+    console.log(`\n${"=".repeat(74)}`);
+    console.log(`[셀 격자 시트] ${sheetName} — 블록 ${flowchart.blocks.length}개`);
+    console.log("=".repeat(74));
+    console.log(`  잰 격자 : ${flowchart.geometry?.reason ?? "🔴 격자를 못 쟀습니다."}`);
+    if (flowchart.geometry) {
+      console.log(
+        `            상자 ${flowchart.geometry.boxWidth}칸×${flowchart.geometry.boxHeight}줄 · ` +
+          `간격 가로 ${flowchart.geometry.colStep}칸 · 세로 ${flowchart.geometry.rowStep}줄`
+      );
+    }
+    console.log(
+      `  칸 셈   : 글자 있는 칸 ${flowchart.textCellCount}개 중 ${flowchart.usedCellCount}개를 읽었습니다 ` +
+        `(못 읽은 ${flowchart.textCellCount - flowchart.usedCellCount}개는 아래 경고에 전부 있습니다).`
+    );
+
+    console.log(`\n  ── 블록별 셈 ${"─".repeat(56)}`);
+    console.log("   #  | 상자 | 이음 | 정상 | NG  | 시작 | 노드 | 분기 | 블록");
+    const total = { boxes: 0, links: 0, normal: 0, ng: 0, start: 0, nodes: 0, edges: 0 };
+    for (const { plan, cellGrid } of mine) {
+      const { block, counts } = cellGrid!;
+      total.boxes += counts.boxes;
+      total.links += counts.links;
+      total.normal += counts.normalLinks;
+      total.ng += counts.ngLinks;
+      total.start += counts.startEdges;
+      total.nodes += counts.nodes;
+      total.edges += counts.edges;
+      console.log(
+        `   ${block.blockNumber.padStart(2)} | ${String(counts.boxes).padStart(4)} | ${String(counts.links).padStart(4)} | ` +
+          `${String(counts.normalLinks).padStart(4)} | ${String(counts.ngLinks).padStart(3)} | ` +
+          `${String(counts.startEdges).padStart(4)} | ${String(counts.nodes).padStart(4)} | ` +
+          `${String(counts.edges).padStart(4)} | ${plan.name}`
+      );
+    }
+    console.log(
+      `   합계| ${String(total.boxes).padStart(4)} | ${String(total.links).padStart(4)} | ` +
+        `${String(total.normal).padStart(4)} | ${String(total.ng).padStart(3)} | ` +
+        `${String(total.start).padStart(4)} | ${String(total.nodes).padStart(4)} | ${String(total.edges).padStart(4)} |`
+    );
+
+    // 🔴 스스로 검산한다 — 사람이 머릿속으로 더하다 틀리면 그 틀림이 결론이 된다.
+    const expectedLinks = total.boxes - mine.length;
+    console.log(
+      `   검산  : 정상 ${total.normal} + NG ${total.ng} = ${total.normal + total.ng} ` +
+        `${total.normal + total.ng === total.links ? "✓" : "🔴"} 이음 ${total.links}  /  ` +
+        `상자 ${total.boxes} − 블록 ${mine.length} = ${expectedLinks} ` +
+        `${expectedLinks === total.links ? "✓ 블록마다 뿌리가 하나다" : `🔴 이음 ${total.links} 와 다르다 — 뿌리가 ${total.start}개다`}  /  ` +
+        `노드 ${total.boxes} + 시작 ${total.start} = ${total.boxes + total.start} ` +
+        `${total.boxes + total.start === total.nodes ? "✓" : "🔴"} ${total.nodes}`
+    );
+
+    console.log(`\n  ── 격자를 읽으며 남긴 경고 ${flowchart.warnings.length}건 ${"─".repeat(30)}`);
+    if (flowchart.warnings.length === 0) {
+      console.log("   없습니다 — 글자가 있는 칸을 하나도 남김없이 읽었습니다.");
+    }
+    for (const warning of flowchart.warnings) {
+      // 🔵 블록에 붙은 경고는 그 절차의 [메모] 절에도 그대로 다시 찍힌다. 여기서
+      //    한 번 더 보여 주는 까닭은 **시트 전체를 한눈에** 훑는 자리가 필요해서다.
+      console.log(
+        `   [${warning.severity}] ${warning.code}${warning.ref ? ` (${warning.ref})` : ""}` +
+          `${warning.blockHeaderRef ? ` [블록 ${warning.blockHeaderRef}]` : " [시트 전체]"}: ${warning.message}`
       );
     }
   }
@@ -690,11 +820,21 @@ async function main(): Promise<void> {
     const { shapeCount, connectorCount } = sheet
       ? drawingCountsOf(workbookPlan.zip, sheet)
       : { shapeCount: 0, connectorCount: 0 };
+    const cellGrid = workbookPlan.cellGridBySheetName.get(sheetName) ?? null;
     for (const plan of sheetPlans) {
+      // 🔵 셀 격자에서 온 계획은 **그 블록의 상자·이음 수**를 찍는다. 그 시트는 도형이
+      //    0개라 「도형 0·선 0」만 보이면 「흐름도가 없는데 왜 절차가 있지?」가 된다.
+      const block = plan.cellBlock
+        ? (cellGrid?.blocks.find((b) => b.headerRef === plan.cellBlock!.headerRef) ?? null)
+        : null;
+      const geometryColumn = block
+        ? `격자 ${String(block.boxes.length).padStart(3)}·이음 ${String(block.links.length).padStart(3)}`
+        : `도형 ${String(shapeCount).padStart(3)}·선 ${String(connectorCount).padStart(3)}`;
       console.log(
         `  ${plan.excluded ? "✗" : "✓"} ${(plan.stageNumber ?? "-").padStart(3)} | ${plan.name.padEnd(26)} | ` +
-          `도형 ${String(shapeCount).padStart(3)}·선 ${String(connectorCount).padStart(3)} | ${plan.sourceWorksheet}` +
-          (plan.duplicateOfStageNumber ? `  ← 겸임 복제본 (원문 "${plan.rawCoNumberedLabel}")` : "")
+          `${geometryColumn} | ${plan.sourceWorksheet}` +
+          (plan.duplicateOfStageNumber ? `  ← 겸임 복제본 (원문 "${plan.rawCoNumberedLabel}")` : "") +
+          (block ? `  ← 셀 격자 블록 ${block.blockNumber} (${block.headerRef})` : "")
       );
       // 🔴 줄을 지우지 않고 **까닭 갈래와 함께** 남긴다. 조용히 빠지면 「왜 저 시트는
       //    절차가 없지?」에 아무도 답을 못 하고, 특히 「아직 안 한 것」은 영영 안 찾는다.
@@ -730,9 +870,15 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   }
 
+  // 🔴 **셀 격자 시트는 시트 머리에서 한 번** — 잰 격자와 시트 전체 경고를 먼저
+  //    보여 준다. 블록마다 되풀이하면 11번 같은 글이 찍히고, 거기 섞인 시트 전체
+  //    경고(블록 밖 상자·읽다 만 칸)는 **어느 절차의 이야기도 아니라** 블록 절에
+  //    넣을 자리가 없다.
+  printCellGridSheets(workbookPlan, candidates);
+
   const built: BuiltProcedure[] = [];
   for (const candidate of candidates) {
-    const { plan, sheet, drawing, result } = candidate;
+    const { plan, sheet, drawing, result, cellGrid } = candidate;
     // 🔴 제외된 시트는 **만들지 않는다.** `--include-excluded` 를 주면 들여다볼
     //    수는 있지만(드라이런 전용), APPLY 에서는 그 깃발도 안 듣는다 —
     //    「보려고 켠 깃발」이 「쓰기」로 넘어가면 결정이 깃발 하나로 뒤집힌다.
@@ -744,7 +890,7 @@ async function main(): Promise<void> {
       );
       continue;
     }
-    printSheetResult(sheet, drawing, plan, result, byStageNumber);
+    printSheetResult(sheet, drawing, plan, result, byStageNumber, cellGrid);
     built.push(candidate);
   }
 

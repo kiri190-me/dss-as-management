@@ -326,7 +326,7 @@ function shortLabel(text: string): string {
  * `*` 로 시작하는 줄은 주의사항이라는 이 워크북의 표기(extract-shape-graph.ts 와 같은
  * 규칙 · Phase 1 보고서 §2/§6)를 따라 본문과 주의를 가른다.
  */
-function splitInstructionsAndCaution(text: string): { instructions: string; caution: string | null } {
+export function splitInstructionsAndCaution(text: string): { instructions: string; caution: string | null } {
   const lines = text.split("\n");
   const cautionLines = lines.filter((l) => l.trim().startsWith("*"));
   const instructionLines = lines.filter((l) => !l.trim().startsWith("*"));
@@ -426,8 +426,14 @@ function findAnnotationBoundary(
  * 🔵 CHECKLIST·TROUBLESHOOTING 도 안 만든다. 그 둘은 자식 표(체크 항목 · 진단 항목)가
  * 있어야 뜻이 서는 **담는 그릇**이고, 도형 흐름도에는 그 자식이 없다. 수동 작성에
  * 열린 일곱 유형(MANUAL_TECHNICAL_NODE_TYPE_CODES)과 같은 범위다.
+ *
+ * 🔴 **밖으로 꺼내 둔 까닭**(2026-11-05): 셀 격자 흐름도 읽개
+ * (`extract-cell-grid-task-graph.ts`)가 **이 함수를 그대로 부른다.** 노드 유형을
+ * 정하는 규칙이 두 벌이 되면 같은 글자가 길에 따라 다른 유형이 되고, 그 어긋남은
+ * 오류가 아니라 **화면에서만** 드러난다(상자 모양과 색이 달라질 뿐이다).
+ * 🔵 함수 본문은 한 줄도 안 바뀌었다 — `export` 만 붙었다.
  */
-function classifyTechnicalNodeType(params: {
+export function classifyTechnicalNodeType(params: {
   text: string;
   outgoingBranchTypes: ProcedureBranchType[];
   nextProcedureStageNumber: string | null;
