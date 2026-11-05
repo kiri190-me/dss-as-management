@@ -69,6 +69,9 @@ scripts/lib/xlsx/technical-task-sheet-plan.test.ts
 scripts/lib/xlsx/technical-task-next-procedure-plan.test.ts
 scripts/lib/xlsx/technical-task-replace-path.test.ts
 scripts/lib/dev-database-write-guard.test.ts
+# 개발에서 만든 절차를 **떠서 운영에 넣는** 길(export-/import-procedure-bundle.ts)의
+# 머리. 들여오기와 달리 넣는 쪽이 운영에서 돌아서, 멈출 까닭을 값으로 재는 자리다.
+scripts/lib/procedure-template-bundle.test.ts
 scripts/lib/attachment-backup-plan.test.ts
 src/lib/domain/procedure-validation-known-issues.test.ts
 src/lib/domain/procedure-visual-language.test.ts
