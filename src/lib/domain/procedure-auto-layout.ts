@@ -6,7 +6,7 @@ import {
   type LayeredLayoutNode,
 } from "@/lib/graph-editor-core/layout";
 import { NODE_VISUAL_CONFIG, computeNodeDimensions, getNodeChipVisual } from "./procedure-visual-language";
-import type { ProcedureNodeType } from "./procedure-template-types";
+import type { ProcedureBranchType, ProcedureNodeType } from "./procedure-template-types";
 
 /**
  * ============================================================================
@@ -38,9 +38,16 @@ import type { ProcedureNodeType } from "./procedure-template-types";
  * 그래서 뒤집었다. 유령을 함께 세우면:
  *  - 🟢 유령을 켠 그림이 **채택 뒤와 글자 그대로 같은 좌표**가 된다. 넣어도 더는
  *    아무것도 안 움직인다 — 미리 보기가 진짜 미리 보기가 된다.
- *  - 🔴 대신 **유령을 켜는 순간** 둘레가 한 번 움직인다. 이것이 의도다: 움직임을
+ *  - 🔴 대신 **유령을 켜는 순간** 둘레가 한 번 움직인다. 이것이 의도였다: 움직임을
  *    「넣는 순간」에서 「켜는 순간」으로 앞당긴 것이고, 방해되면 [현장 단계 표시]를
  *    끄면 된다(끄면 유령을 하나도 안 넘기므로 아래 계산이 전과 똑같아진다).
+ *
+ * 🟢 **그 대가가 2026-11-05 오후에 사라졌다.** 자동 배치가 한 부모 밑 자식을
+ * 「줄기 하나는 부모의 열에 그대로, 나머지는 오른쪽으로 한 칸씩」으로 세우게
+ * 바뀌면서(computeLayeredGraphLayout 의 「줄기 하나」 절 — 그 「한 칸」의 크기는
+ * 이웃한 두 노드의 크기가 정한다, 같은 함수의 「크기만큼 벌린다」 절), 새 칸은
+ * **언제나 맨 오른쪽**에만 붙고 앞선 형제의 열이 안 바뀐다. 그래서 유령을 켜도
+ * 둘레가 한 픽셀도 안 움직인다 — procedure-auto-layout.test.ts 가 값으로 지킨다.
  *
  * 🔴 **섞는 것은 이 자동 배치 하나뿐이다.** 시트 띠(groupNodesByWorksheet)와
  * 단계별 정렬(computeStageSortedLayout)에는 넣지 않는다 — 게으름이 아니라
@@ -51,8 +58,28 @@ import type { ProcedureNodeType } from "./procedure-template-types";
  * ============================================================================
  */
 
-/** 자동 배치의 눈금. 전에 ProcedureFlowGraph 안에 인라인으로 적혀 있던 값 그대로다. */
-export const PROCEDURE_AUTO_LAYOUT_SPACING = { horizontal: 280, vertical: 150 } as const;
+/**
+ * 자동 배치의 눈금. `horizontal`/`vertical` 은 전에 ProcedureFlowGraph 안에
+ * 인라인으로 적혀 있던 값 그대로다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 빈자리 둘은 2026-11-05 오후에 더했다 — **포개짐을 막는 값**이다
+ * ──────────────────────────────────────────────────────────────────────
+ * 눈금은 고정인데 노드 크기는 제목이 정한다(실측: 폭 132 ~ 527 · 높이 52 ~ 97 —
+ * 폭 상한이 없고, 판단 노드는 거기에 1.25배가 더 붙는다). 그래서 눈금만으로는
+ * **넓은 노드끼리 포개진다**: 폭 527 짜리 둘이 280 간격으로 서면 247px 이 겹친다.
+ * 2026-11-05 에 제목을 원본 전문(줄바꿈 포함)으로 바꾸면서 드러났다.
+ *
+ * 🔴 **값의 근거** — 지금 가장 흔한 노드는 폭 132 · 높이 52(MIN_WIDTH ·
+ * MIN_HEIGHT 에 걸린 짧은 제목)다. 그 둘이 눈금대로 나란히 서면 모서리 사이에
+ * `280 − 132 = 148` · `150 − 52 = 98` 의 빈자리가 남는다. **그 빈자리를 모든
+ * 크기의 노드가 똑같이 누리게** 한 값이 아래 148 · 98 이다. 그래서
+ *  - 가장 흔한 크기(132×52)끼리는 **전과 글자 그대로 같은 자리**에 선다
+ *    (`max(280, 132+148) = 280` · `max(150, 52+98) = 150`).
+ *  - 더 넓거나 높은 노드가 끼면 **딱 그만큼만** 벌어진다.
+ * 아무 숫자나 고르면 흔한 노드의 간격이 바뀌어 기존 그림이 통째로 흔들린다.
+ */
+export const PROCEDURE_AUTO_LAYOUT_SPACING = { horizontal: 280, vertical: 150, horizontalGap: 148, verticalGap: 98 } as const;
 
 /** 자동 배치가 읽는 **진짜 노드**의 칸들. 더 많이 가진 행을 넘기는 쪽은 언제나 맞다. */
 export type ProcedureAutoLayoutNode = {
@@ -87,7 +114,61 @@ export type ProcedureAutoLayoutGhostNode = {
   pinnedX: number | null;
 };
 
-export type ProcedureAutoLayoutEdge = { fromNodeId: string; toNodeId: string };
+/**
+ * 🔴 `branchType` 은 **선택이 아니라 필수**다(2026-11-05 오후). 자동 배치는 이
+ * 값으로 「이 선이 주 흐름의 계속인가」를 가르고, 그 자식 하나가 부모의 열을 그대로
+ * 잇는다. 안 넘겨도 되게 두면 안 넘긴 자리에서 **오류 없이 조용히 그림이 비뚤어
+ * 진다** — 그것도 전보다 더 나쁘게. 측정(판단 20개가 연달아 서고 각자 NG 가지를
+ * 하나씩 내는 표본, 눈금 280, 🔵 **폭을 0 으로 두고** 줄기가 어디로 가는지만 본
+ * 값이다 — 폭을 넣으면 간격이 더 벌어져 숫자가 커진다): 갈래를 제대로 넘기면 가로
+ * 폭 280, 안 넘기면 5600 이었다(고치기 전은 2940). 넘기지 않으면 **첫 자식**이
+ * 줄기가 되는데, 엑셀에서 들여온 선의 차례는 NG 가지가 먼저인 일이 흔하기 때문이다.
+ */
+export type ProcedureAutoLayoutEdge = { fromNodeId: string; toNodeId: string; branchType: ProcedureBranchType };
+
+/**
+ * 어떤 갈래의 선이 **주 흐름의 계속**인가 — 참인 선의 자식이 부모의 중심 열을
+ * 그대로 잇는다(computeLayeredGraphLayout 의 continuesMainFlow).
+ *
+ * 🔴 갈래를 나누는 자가 **이미 이 저장소에 있다**: procedure-edge-routing.ts 의
+ * decisionBranchSourceHandle 이 「YES/NORMAL/DEFAULT 는 오른쪽, NO/NG 는 왼쪽,
+ * RETRY/LOOP_BACK 은 되돌아가는 쪽」으로 가른다(단계별 정렬에서 선이 노드의 어느
+ * 면에 붙는지). 여기서 전혀 다른 잣대를 새로 세우면 같은 절차가 배치 모드에 따라
+ * 다른 쪽으로 뻗으므로, **그 셋(DEFAULT·NORMAL·YES)을 그대로 가져왔다.**
+ *
+ * 🔵 **딱 하나 다르다 — CUSTOM.** 저쪽은 남은 것을 전부 오른쪽으로 보내는
+ * `else` 라 CUSTOM 도 YES 무리에 들어가지만, 여기서는 거짓이다. 사람이 적은
+ * 이름표(예: 「유상」·「무상」)는 어느 쪽도 「계속」이 아닌 **진짜 갈림**이라,
+ * 참으로 치면 선의 차례에 따라 「무상」이 줄기가 되는 일이 생긴다. 거짓이면 그런
+ * 노드는 아무도 안 걸려 **첫 선**이 줄기가 되고, 그것이 더 설명하기 쉽다.
+ * 🔵 RETRY/LOOP_BACK 도 거짓이다. 되돌아가는 선이라 대개 이미 다녀온 노드를
+ * 가리켜 배치의 부모–자식이 되지도 않지만, 되는 드문 경우에도 줄기는 아니다.
+ */
+export function procedureBranchContinuesMainFlow(branchType: ProcedureBranchType): boolean {
+  return branchType === "DEFAULT" || branchType === "NORMAL" || branchType === "YES";
+}
+
+/**
+ * 어떤 갈래의 자식을 **부모와 같은 줄**(수평)에 세우는가 — 아래로 한 칸 내려가는
+ * 대신 부모의 오른쪽에 나란히 선다(computeLayeredGraphLayout 의 sameRowBranch).
+ *
+ * 🔴 사용자 지시(2026-11-05): 「**[NG]로 연결되는 노드는 수평으로 배치**되도록
+ * 해줘」. 그리고 그 모양이 **원본 엑셀 그대로**임을 실측으로 확인했다 — 열한 시트의
+ * 분기 193개를 도형 좌표로 세니
+ *  - **NG 97개**: 오른쪽 94 · 왼쪽 2 · 같은 열 1, 그 가운데 **같은 줄이 87**
+ *  - **정상 96개**: 오른쪽 2 · 왼쪽 35 · 같은 열 59, **같은 줄은 0**
+ * 왼쪽 2 · 같은 열 1 은 손으로 그린 흔들림이라 **전부 오른쪽·같은 줄로 통일**한다.
+ *
+ * 🔵 **NO 도 함께 친다.** 실제 데이터에 NG 93 · NO 4 로 둘 다 있고, 선이 노드의
+ * 어느 면에 붙는지를 정하는 기존 규칙(decisionBranchSourceHandle)도 이 둘을 한
+ * 무리로 묶는다. 둘을 갈라 두면 같은 「아니다」 갈래가 화면에서 다르게 선다.
+ * 🔵 RETRY/LOOP_BACK 은 아니다 — 되돌아가는 선이라 애초에 아래로도 옆으로도 안 간다.
+ * 🔵 CUSTOM 도 아니다. 사람이 적은 이름표라 「아니다」 갈래라고 단정할 수 없고,
+ * 원본 실측에도 안 잡힌 갈래다.
+ */
+export function procedureBranchSitsOnParentRow(branchType: ProcedureBranchType): boolean {
+  return branchType === "NG" || branchType === "NO";
+}
 
 /**
  * 그림이 들고 다니는 유령 칸(ProcedureFlowGraphGhostNode ·
@@ -150,9 +231,15 @@ export function procedureAutoLayoutNodeWidth(node: { nodeType: ProcedureNodeType
  * 이 프롭을 안 넘기는 화면 셋(절차 상세 · 실행 시작 노드 고르기 · 「전체 단계
  * 보기」)이 안 바뀐다는 근거가 거기 있다 — 시험이 값으로 지킨다.
  *
- * 🔴 **유령 선은 맨 뒤에 붙인다.** 선의 차례가 한 부모 밑 형제들의 좌우 차례를
- * 정하기 때문이다(computeLayeredGraphLayout 은 넘어온 차례대로 자식을 쌓는다).
- * 채택이 만드는 선도 표의 맨 뒤에 붙으므로 그쪽과 같은 차례가 된다.
+ * 🔴 **유령 선은 맨 뒤에 붙인다.** 선의 차례가 한 부모 밑 **가지들의** 좌우
+ * 차례를 정하기 때문이다(computeLayeredGraphLayout 은 줄기를 뺀 나머지를 넘어온
+ * 차례대로 오른쪽에 쌓는다). 채택이 만드는 선도 표의 맨 뒤에 붙으므로 그쪽과 같은
+ * 차례가 된다.
+ *
+ * 🔵 **줄기가 누구인지는 차례가 아니라 갈래가 정한다**(2026-11-05 오후,
+ * procedureBranchContinuesMainFlow). 그래서 맨 뒤에 붙은 유령이 「기본」 선으로
+ * 들어오면서 앞선 형제를 밀어내는 일은 없다 — 앞선 형제 중에 이미 줄기가 있으면
+ * 그쪽이 부모의 열을 지킨다.
  */
 export function computeProcedureAutoLayout(params: {
   nodes: readonly ProcedureAutoLayoutNode[];
@@ -180,9 +267,18 @@ export function computeProcedureAutoLayout(params: {
     });
   }
 
-  const layoutEdges: LayeredLayoutEdge[] = params.edges.map((e) => ({ fromNodeId: e.fromNodeId, toNodeId: e.toNodeId }));
+  // 🔴 유령 선도 **같은 함수**로 갈래를 가른다 — 채택(adoptFieldAddedStep)이
+  //    실행 쪽 선의 branch_type 을 한 글자도 안 바꾸고 베껴 적으므로, 여기서
+  //    갈래를 다르게 읽으면 「켠 그림 = 채택 뒤 그림」이 조용히 깨진다.
+  const toLayoutEdge = (e: ProcedureAutoLayoutEdge): LayeredLayoutEdge => ({
+    fromNodeId: e.fromNodeId,
+    toNodeId: e.toNodeId,
+    continuesMainFlow: procedureBranchContinuesMainFlow(e.branchType),
+    sameRowBranch: procedureBranchSitsOnParentRow(e.branchType),
+  });
+  const layoutEdges: LayeredLayoutEdge[] = params.edges.map(toLayoutEdge);
   for (const ghostEdge of params.ghostEdges ?? []) {
-    layoutEdges.push({ fromNodeId: ghostEdge.fromNodeId, toNodeId: ghostEdge.toNodeId });
+    layoutEdges.push(toLayoutEdge(ghostEdge));
   }
 
   return computeLayeredGraphLayout(layoutNodes, layoutEdges, PROCEDURE_AUTO_LAYOUT_SPACING);
