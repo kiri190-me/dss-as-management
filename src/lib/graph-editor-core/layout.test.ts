@@ -1886,7 +1886,37 @@ test("computeLayeredGraphLayout: 같은 줄 가지가 **제 가지를 거느리�
   assert.equal(countOverlappingPairs(result, nodes), 0);
 });
 
-test("computeLayeredGraphLayout: 같은 줄로 **안 올리는 셋** — 합류점 · 외동 · 못 박힌 칸", () => {
+/**
+ * 🔴 2026-11-05 밤(둘째 판) — 「**외동**은 안 올린다」를 **걷어냈다.**
+ *
+ * 원래 까닭은 「올릴 자리가 곧 줄기 자리라 부모와 **같은 열**이 되어 포갠다」였다.
+ * 그 까닭은 **열**에 관한 것이지 **줄**에 관한 것이 아니었다 — 오른쪽으로 세우면
+ * 같은 줄이어도 안 포갠다. 그래서 걸개를 빼고 **줄기 없는 묶음**을 허용했다.
+ *
+ * 🔴 **값으로 재어 보니 이 걸개가 가장 컸다.** `[RFG] 원복 검사 및 개선 작업`
+ * (노드 156)에서 안 올라간 NG 45개를 걸개별로 가르니:
+ *   36개 ← 이 걸개(그 중 **32개는 실제로 나가는 선이 2개 이상**이었다 — 형제가
+ *          이미 다른 데서 발견돼 **나무 자식**에서 빠졌을 뿐이다)
+ *    5개 ← 그 NG 선이 나무 선이 아님 · 2개 ← 합류점 · 2개 ← 묶음이 쪼개져 홀로 남음
+ * 걷어낸 뒤 그 절차의 NG 수평이 **47/92 → 85/92**, 줄이 **107 → 71** 이 됐다.
+ */
+test("computeLayeredGraphLayout: **외동 NG 도 올린다** — 줄은 부모와 같게, 열은 오른쪽으로", () => {
+  const nodes = ["d", "ng", "after"].map((id, i) => ({ id, sortOrder: i, width: NARROW_W, height: CHIP_H }));
+  const edges = [
+    { fromNodeId: "d", toNodeId: "ng", sameRowBranch: true }, // d 의 나무 자식은 ng 하나뿐이다
+    { fromNodeId: "ng", toNodeId: "after", continuesMainFlow: true },
+  ];
+  const result = computeLayeredGraphLayout(nodes, edges, SIZED_SPACING);
+  const cx = (id: string) => result.get(id)!.x + NARROW_W / 2;
+  const cy = (id: string) => result.get(id)!.y + CHIP_H / 2;
+  assert.equal(cy("ng"), cy("d"), "외동이어도 부모와 같은 줄");
+  assert.equal(cx("ng"), cx("d") + SIZED_SPACING.horizontal, "🔴 그리고 **오른쪽**으로 — 부모의 열에 두면 같은 줄·같은 열이라 포갠다");
+  assert.equal(cy("after"), cy("d") + V, "그 아래는 평소대로");
+  assert.equal(cx("after"), cx("ng"), "NG 의 열을 잇는다");
+  assert.equal(countOverlappingPairs(result, nodes), 0);
+});
+
+test("computeLayeredGraphLayout: 같은 줄로 **안 올리는 둘** — 합류점 · 못 박힌 칸", () => {
   const base = (extra: { pinnedX?: number } = {}) => ["d", "ng", "ok", "other"].map((id, i) => ({ id, sortOrder: i, width: NARROW_W, height: CHIP_H, ...(id === "ng" ? extra : {}) }));
 
   // ① 합류점 — ng 로 들어오는 선이 둘이면 부모 줄로 안 올린다.
@@ -1902,19 +1932,7 @@ test("computeLayeredGraphLayout: 같은 줄로 **안 올리는 셋** — 합류�
   );
   assert.notEqual(merge.get("ng")!.y, merge.get("d")!.y, "합류점은 안 올린다 — 다른 부모보다 위로 올라가면 선이 거슬러 올라간다");
 
-  // ② 외동 — 그 부모의 자식이 하나뿐이면 그 칸이 곧 줄기라 안 올린다(올리면 같은 열·같은 줄).
-  const onlyChild = computeLayeredGraphLayout(
-    [
-      { id: "d", sortOrder: 0, width: NARROW_W, height: CHIP_H },
-      { id: "ng", sortOrder: 1, width: NARROW_W, height: CHIP_H },
-    ],
-    [{ fromNodeId: "d", toNodeId: "ng", sameRowBranch: true }],
-    SIZED_SPACING
-  );
-  assert.notEqual(onlyChild.get("ng")!.y, onlyChild.get("d")!.y, "외동은 안 올린다");
-  assert.equal(onlyChild.get("ng")!.x, onlyChild.get("d")!.x, "외동은 부모의 열을 그대로 잇는 줄기다");
-
-  // ③ 못 박힌 칸 — 사람이 끌어다 놓은 자리가 가장 세다.
+  // ② 못 박힌 칸 — 사람이 끌어다 놓은 자리가 가장 세다.
   const pinnedResult = computeLayeredGraphLayout(
     base({ pinnedX: 900 }),
     [

@@ -915,7 +915,10 @@ describe("🔴 주 흐름 사이가 가지만큼 벌어진다", () => {
      *    길어지는 것은 가지가 **두 단계 이상**일 때뿐이다.
      */
     assert.equal(nodes.length, 41);
-    assert.equal(height, 3202);
+    // 🔴 2026-11-05 밤(둘째 판) — 3202 → **3052**. 「외동 NG 는 안 올린다」 걸개를
+    //    걷어내면서 이 표본의 NG 가 **전부** 부모 줄로 올라갔다. 공교롭게도 세로를
+    //    깊이로 정하던 때(3052)와 **같은 값**이 됐다 — 줄 수가 21로 같아져서다.
+    assert.equal(height, 3052);
     // 🔵 가로는 이번 변경이 안 건드렸다 — 셈이 폭과 선만 보고 세로를 아예 안 읽기
     //    때문이다(layout.ts 의 centerXById 는 centerYById 를 한 번도 안 쓴다).
     //    값을 못 박아 두어, 세로를 고치다 가로가 새면 여기서 걸리게 한다.
@@ -954,7 +957,7 @@ describe("🔴 주 흐름 사이가 가지만큼 벌어진다", () => {
      */
     const rows = new Set(boxes.map((b) => (b.top + b.bottom) / 2)).size;
     assert.equal(nodes.length, 61);
-    assert.equal(rows, 42, "줄을 나눠 쓰는 칸이 생겼다 — NG 를 부모 줄로 올린 결과다");
+    assert.equal(rows, 41, "줄을 나눠 쓰는 칸이 생겼다 — NG 를 부모 줄로 올린 결과다. 🔵 밤 둘째 판에서 42 → 41 (외동 걸개를 걷으며 한 칸이 더 올라갔다)");
     assert.ok(rows < nodes.length, "표본에 같은 줄 쌍이 하나도 없으면 가로 근거를 안 재고 있다");
   });
 });

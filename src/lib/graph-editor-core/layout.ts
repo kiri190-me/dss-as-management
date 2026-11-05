@@ -793,7 +793,6 @@ export function computeLayeredGraphLayout(
         const lifted = edges.some((e) => e.sameRowBranch === true && e.fromNodeId === parentId && e.toNodeId === childId);
         if (!lifted) continue;
         if ((parentsOf.get(childId) ?? []).length !== 1) continue;
-        if (children.length < 2) continue;
         if (pinnedXById.has(childId)) continue;
         sameRowBranchParentById.set(childId, parentId);
         takenByParent.add(parentId);
@@ -887,21 +886,32 @@ export function computeLayeredGraphLayout(
       // 🔴 그리고 **부모와 같은 줄에 설 가지는 줄기로 안 뽑는다** — 줄기는 부모의
       //    **열**을 그대로 쓰므로, 같은 줄로까지 끌어올리면 **같은 열·같은 줄**이
       //    되어 부모와 포갠다(퍼즈에서 실제로 났다).
+      /**
+       * 🔴 **줄기가 없는 묶음이 있을 수 있다** (2026-11-05 밤 둘째 판). 묶음의 칸이
+       * **전부 같은 줄 가지**면 아무도 부모의 열을 안 잇는다 — 그래도 억지로 하나를
+       * 줄기로 만들면 그 칸이 **부모와 같은 줄·같은 열**이 되어 포갠다.
+       *
+       * 🔵 그런 묶음은 **반드시 한 칸짜리**다. 묶음은 「알려진 부모 집합」이 같은
+       * 칸들이고, 끌어올리기는 **한 부모에 하나**이므로 둘 이상이 함께 올라갈 수 없다.
+       * 그 한 칸은 아래 가지 셈에서 부모의 열 **오른쪽**에 선다.
+       *
+       * 🔴 전에는 마지막 받침이 `?? ids[0]` 이었고, 그 뒤에서 그 칸의 끌어올리기를
+       * **취소**했다. 실제 절차에서 그 길로 빠진 NG 가 둘 있었다(`[RFG] 원복 검사 및
+       * 개선 작업` 실측) — 형제가 **다른 부모 묶음**에 속해 이 묶음이 한 칸만 남은
+       * 경우다. 그 둘은 자식이 전부 가지인 것이 아니라 **묶음이 쪼개진 것**이라,
+       * 취소가 아니라 오른쪽으로 세우는 것이 맞다.
+       */
       const trunkId =
         ids.find((id) => mainChainIds.has(id) && !sameRowBranchParentById.has(id)) ??
         ids.find((id) => mainFlowParentIds.has(id) && !sameRowBranchParentById.has(id)) ??
-        ids.find((id) => !sameRowBranchParentById.has(id)) ??
-        ids[0];
-      // 🔵 자식이 **전부** 같은 줄 가지인 드문 경우에만 마지막 받침(ids[0])으로 온다.
-      //    그때는 그 칸의 끌어올리기를 취소한다 — 줄기 자리가 먼저다.
-      sameRowBranchParentById.delete(trunkId);
+        ids.find((id) => !sameRowBranchParentById.has(id));
       // 세로 셈이 **가로와 똑같은 줄기 판정**을 쓰도록 여기서 적어 둔다. 따로
       // 고르면 「가로로는 가지인데 세로로는 줄기」인 칸이 생긴다.
-      trunkNodeIds.add(trunkId);
+      if (trunkId !== undefined) trunkNodeIds.add(trunkId);
       // 🔴 부모가 여럿인 칸(가지가 줄기로 **되돌아오는 합류점**)의 기준 열 —
       //    줄기 선으로 들어온 부모가 있으면 **그 부모의 열**이다. 평균을 쓰면
       //    합류할 때마다 눈금의 절반씩 밀린다(머리말의 다이아몬드 참고).
-      const trunkParent = parents.find((p) => mainFlowParentIds.get(trunkId)?.has(p));
+      const trunkParent = trunkId === undefined ? undefined : parents.find((p) => mainFlowParentIds.get(trunkId)?.has(p));
       const baseX =
         parents.length === 0
           ? 0
@@ -910,7 +920,7 @@ export function computeLayeredGraphLayout(
             : parents.reduce((sum, p) => sum + (centerXById.get(p) ?? 0), 0) / parents.length;
       // 🔵 가지는 줄기에서 시작해 **왼쪽 이웃과의 거리를 하나씩 더해** 간다 —
       //    눈금의 배수가 아니라 **그 쌍의 폭**이 한 칸의 크기다(머리말 참고).
-      let previousSiblingId = trunkId;
+      let previousSiblingId: string | undefined = trunkId;
       let branchCenterX = baseX;
       for (const id of ids) {
         if (id === trunkId) {
@@ -919,7 +929,9 @@ export function computeLayeredGraphLayout(
         }
         // 🔴 **오른쪽으로만.** 왼쪽에 형제를 두면 충돌 풀기가 그 형제를 통해
         //    줄기를 오른쪽으로 밀어낸다(머리말 참고).
-        branchCenterX += minCenterDistanceX(previousSiblingId, id);
+        // 🔵 줄기가 없는 묶음(위 참고)은 **부모의 열에서 시작**한다 — 바로 아래
+        //    「부모와도 거리를 지킨다」가 그 칸을 오른쪽으로 밀어낸다.
+        branchCenterX = previousSiblingId === undefined ? baseX : branchCenterX + minCenterDistanceX(previousSiblingId, id);
         // 🔴 **부모와 같은 줄에 설 가지는 부모와도 거리를 지켜야 한다**
         //    (2026-11-05 밤). 위 거리는 **형제**와만 잰 것이라 부모의 폭을 안 본다 —
         //    폭 527 짜리 부모가 제 NG 자식과 그대로 포갠다. 같은 줄에 세우는 순간
