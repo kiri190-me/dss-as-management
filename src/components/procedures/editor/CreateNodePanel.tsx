@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { MANUAL_TECHNICAL_NODE_TYPE_CODES, procedureNodeTypeLabels, type ManualTechnicalNodeType } from "@/lib/domain/procedure-template-types";
 import { createProcedureTemplateNodeAction } from "@/lib/server/actions/procedure-template-editor";
-import { resolveEffectiveNodePosition, computeRelativePosition } from "@/lib/graph-editor-core/layout";
+import { resolveEffectiveNodePosition, computeCenterAlignedRelativePosition } from "@/lib/graph-editor-core/layout";
 import { NODE_VISUAL_CONFIG, getNodeChipVisual, computeNodeDimensions } from "@/lib/domain/procedure-visual-language";
 import type { EditorNodeRow } from "@/lib/db/queries/procedure-template-editor";
 
@@ -22,12 +22,17 @@ const BELOW_SELECTED_SPACING = { horizontal: 280, vertical: 150 } as const;
  * comment).
  *
  * Phase 5C-5B usability — when a node is selected in the graph at the time
- * "노드 추가" is used, the new node is placed directly below it, center-
- * aligned (same x), as an explicit user-position override so it survives a
- * refresh regardless of the auto-layout fallback. With no selection, the
- * call omits `position` entirely and the mutation falls back to its
- * original default stacking — unchanged. This is placement only — it never
- * creates an edge between the selected node and the new one.
+ * "노드 추가" is used, the new node is placed directly below it, as an
+ * explicit user-position override so it survives a refresh regardless of
+ * the auto-layout fallback. With no selection, the call omits `position`
+ * entirely and the mutation falls back to its original default stacking —
+ * unchanged. This is placement only — it never creates an edge between the
+ * selected node and the new one.
+ *
+ * 🔴 2026-11-05 — 「바로 아래」가 **중심점 기준**이 됐다: 가로는 두 노드의
+ * 중심 x 를 맞추고, 세로는 두 중심 사이가 눈금(150)이다. 그리고 기준으로 삼는
+ * 자리가 저장된 position_x/y 가 아니라 **화면에 그려진 자리**다 — 아래
+ * handleCreate 의 주석에 어긋났던 실측값이 있다.
  */
 export default function CreateNodePanel({
   templateId,
@@ -35,13 +40,20 @@ export default function CreateNodePanel({
   onSaved,
   selectedNode,
   resolveNodeDimensions,
+  renderedPositions,
 }: {
   templateId: string;
   expectedTemplateUpdatedAt: string;
   onSaved: (newUpdatedAt: string) => void;
   selectedNode: EditorNodeRow | null;
-  /** 5C-6D-1D — the screen's single, already-composed effective-dimension resolver (measured-first, estimate-fallback; same instance NodePropertyPanel's own relative-position math uses). Used ONLY for `selectedNode`'s width below — the about-to-be-created node itself has no rendered instance to measure yet, so its own width still comes from the plain computeNodeDimensions estimate, unchanged. */
+  /** 5C-6D-1D — the screen's single, already-composed effective-dimension resolver (measured-first, estimate-fallback; same instance NodePropertyPanel's own relative-position math uses). Used ONLY for `selectedNode`'s size below — the about-to-be-created node itself has no rendered instance to measure yet, so its own size still comes from the plain computeNodeDimensions estimate, unchanged. */
   resolveNodeDimensions: (n: EditorNodeRow) => { width: number; height: number };
+  /**
+   * **그림이 실제로 그린 자리**, 노드 id 마다(2026-11-05). NodePropertyPanel 이
+   * 받는 것과 같은 한 벌이고, 같은 까닭으로 여기서 다시 세지 않는다.
+   * 🔵 지도에 없으면 저장된 자리로 떨어진다(전 동작).
+   */
+  renderedPositions?: ReadonlyMap<string, { x: number; y: number }>;
 }) {
   const [nodeType, setNodeType] = useState<ManualTechnicalNodeType>("TASK");
   const [title, setTitle] = useState("");
@@ -51,30 +63,43 @@ export default function CreateNodePanel({
   async function handleCreate() {
     setIsSubmitting(true);
     setErrorMessage(null);
-    // Round-2 alignment fix — computeRelativePosition needs both nodes'
-    // ACTUAL rendered widths to center the new node under the selected
-    // one; a plain left-edge copy silently breaks the moment the two
-    // titles produce different widths. 5C-6D-1D — selectedNode's width now
-    // comes from resolveNodeDimensions (measured-first: React Flow's own
-    // rendered size when available, the same estimate as before only as a
-    // fallback) instead of the estimate alone, since selectedNode already
-    // exists on screen and can actually be measured; the new node being
-    // created has no rendered instance yet, so its own width is still the
-    // plain estimate — there is nothing to measure it against.
-    const position = selectedNode
-      ? computeRelativePosition(
-          {
-            ...resolveEffectiveNodePosition(
-              { positionX: selectedNode.positionX, positionY: selectedNode.positionY, userPositionX: selectedNode.userPositionX, userPositionY: selectedNode.userPositionY },
-              "USER"
-            ),
-            width: resolveNodeDimensions(selectedNode).width,
-          },
-          "DOWN",
-          BELOW_SELECTED_SPACING,
-          computeNodeDimensions({ title, shape: NODE_VISUAL_CONFIG[getNodeChipVisual(nodeType).semanticType].shape }).width
+    // Round-2 alignment fix — the placement math needs both nodes' ACTUAL
+    // rendered sizes to center the new node under the selected one; a plain
+    // left-edge copy silently breaks the moment the two titles produce
+    // different widths. 5C-6D-1D — selectedNode's size comes from
+    // resolveNodeDimensions (measured-first: React Flow's own rendered size
+    // when available, the same estimate as before only as a fallback)
+    // instead of the estimate alone, since selectedNode already exists on
+    // screen and can actually be measured; the new node being created has
+    // no rendered instance yet, so its own size is still the plain
+    // estimate — there is nothing to measure it against.
+    //
+    // 🔴 2026-11-05 — **중심점 기준으로** 고친 두 가지.
+    //  ① 함수를 computeCenterAlignedRelativePosition 으로 갈아탔다. 그쪽의
+    //     DOWN 은 세로 간격을 **중심 간 간격**으로 잡는다 — 제목 줄 수가 달라
+    //     높이가 다른 노드 아래에 붙일 때 전에는 간격이 150 이 아니었다.
+    //  ② 기준 노드의 자리를 **화면에 그려진 자리**로 읽는다. 전에는 저장된
+    //     position_x/y 였고, 기술 작업 절차에서 그 값은 「만든 차례대로 쌓은
+    //     숫자」(x 가 전부 0)다. 실측으로, 화면 x = −346 에 있는 노드를 골라
+    //     만든 노드가 저장 좌표 (0, 150) 아래인 (−177.5, 300)에 꽂혔다.
+    // 🔵 받침(지도에 없을 때)은 전과 같은 저장 좌표다.
+    const selectedPosition = selectedNode
+      ? renderedPositions?.get(selectedNode.id) ??
+        resolveEffectiveNodePosition(
+          { positionX: selectedNode.positionX, positionY: selectedNode.positionY, userPositionX: selectedNode.userPositionX, userPositionY: selectedNode.userPositionY },
+          "USER"
         )
       : null;
+    const newNodeDimensions = computeNodeDimensions({ title, shape: NODE_VISUAL_CONFIG[getNodeChipVisual(nodeType).semanticType].shape });
+    const position =
+      selectedNode && selectedPosition
+        ? computeCenterAlignedRelativePosition(
+            { ...selectedPosition, ...resolveNodeDimensions(selectedNode) },
+            "DOWN",
+            BELOW_SELECTED_SPACING,
+            { width: newNodeDimensions.width, height: newNodeDimensions.height }
+          )
+        : null;
     const result = await createProcedureTemplateNodeAction({ templateId, nodeType, title, position, expectedTemplateUpdatedAt });
     setIsSubmitting(false);
     if (!result.ok) {

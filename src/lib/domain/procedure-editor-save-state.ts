@@ -89,14 +89,23 @@ export type ProcedureEdgeFieldDraft = {
 // ==================== server baselines ====================
 
 /**
- * `positionX`/`positionY` are the node's current EFFECTIVE position
- * (i.e. `resolveEffectiveNodePosition(node, "USER")`'s result — the saved
- * `user_position_x/y` override if present, else the source/layered-layout
- * fallback), already resolved by the caller — same convention
- * NodePropertyPanel's own "상대 위치로 이동" and ProcedureFlowGraph's
- * `resolveBaselinePosition` already use as "the current position" today.
- * This module never reads the raw nullable `user_position_x/y` column
- * itself.
+ * `positionX`/`positionY` are `resolveEffectiveNodePosition(node, "USER")`'s
+ * result — the saved `user_position_x/y` override if present, else the raw
+ * `position_x/position_y` column — already resolved by the caller. This
+ * module never reads the raw nullable `user_position_x/y` column itself.
+ *
+ * 🔴 **이것은 「화면에 그려지는 자리」가 아니다**(2026-11-05 에 바로잡았다).
+ * 전에는 이 주석이 「else the source/layered-layout fallback」이라고 적어
+ * 자동 배치가 센 자리까지 여기 들어오는 것처럼 읽혔는데, 그런 적이 없다 —
+ * `resolveEffectiveNodePosition` 은 자동 배치를 아예 모른다. 기술 작업 절차의
+ * 노드는 저장된 자리가 없는 것이 기본이라, 그런 칸에서 이 값은 「만든 차례대로
+ * 쌓은 숫자」(x 가 전부 0)다.
+ *
+ * 🔵 **그래도 여기서는 이 값이 맞다.** 이 스냅숏이 하는 일은 「서버에 저장된
+ * 값과 달라졌는가」(computeDirtyProcedurePositionNodeIds)를 재는 것이고, 그
+ * 잣대는 반드시 **저장된 값**이어야 한다 — 그림이 그리는 자리로 재면 아무도 안
+ * 건드린 노드가 매번 「바뀜」으로 올라와 [저장]이 없는 변경을 쓰게 된다.
+ * 화면 자리가 필요한 쪽은 아래 resolveCurrentRenderedNodePosition 을 쓴다.
  */
 export type ProcedureServerNodeSnapshot = {
   id: string;
@@ -163,6 +172,49 @@ export function mergeProcedureEdgeForRender(
     branchLabel: pendingFieldDraft ? (pendingFieldDraft.branchLabel.length > 0 ? pendingFieldDraft.branchLabel : null) : server.branchLabel,
     routePoints: pendingRoutePoints !== undefined ? pendingRoutePoints : server.routePoints,
   };
+}
+
+// ==================== 「지금 화면에 그려져 있는 자리」 ====================
+
+/**
+ * 어떤 노드가 **지금 그림의 어디에 그려져 있는가**. 자리를 바꾸는 조작
+ * (「연결선 곧게 펴기」 등)이 기준으로 삼아야 하는 값이다.
+ *
+ * ── 🔴 왜 저장된 자리로는 안 되는가 ────────────────────────────────────
+ * 기술 작업 절차의 노드는 `position_x/position_y` 가 「만든 차례대로 쌓은
+ * 숫자」다(개발 DB 실측: x 가 전부 0). 그래서 그림은 그 값을 안 쓰고 제 나름의
+ * 자동 배치로 그린다. 저장된 자리로 「곧게 펴기」를 세면, 화면에서 −486 에 서
+ * 있는 노드를 0 에 있다고 믿고 맞추게 된다.
+ *
+ * ── 🔴 차례는 셋, **덧셈이 아니라 고르기**다 ──────────────────────────
+ * 세 값 모두 **완성된 자리 하나**이고, 이기는 하나만 돌려준다 — 그래서 끌어
+ * 놓은 값이 두 번 더해질 수가 없다(쌓는 것이 아니다).
+ *
+ *  ① `pendingLayoutMoves` — 이번 세션에서 끌어 놓았지만 **아직 그림이 올려보내기
+ *     전**인 자리. ②가 한 렌더 늦게 오므로(그림의 useEffect) 그 틈을 메운다.
+ *     🔵 ②에도 같은 값이 **이미 들어 있다**: 화면이 넘기는 행(renderedNodes)에
+ *     끌고 있는 자리를 user_position 으로 실어 보내고, 그림의 우선순위 ①이 그것을
+ *     그대로 돌려주기 때문이다. 그래서 이 칸이 실제로 이기는 때는 그 한 틈뿐이다.
+ *     🔵 저장이 끝나면 이 지도에서 그 id 가 지워지므로(화면의 저장 뒤처리) 낡은
+ *     값이 영영 이기는 일은 없다.
+ *  ② `renderedPositions` — 그림이 **제가 그린 자리**로 올려보낸 지도
+ *     (ProcedureFlowGraph 의 onRenderedPositionsChange). 자리를 정하는 규칙은
+ *     거기 한 곳에만 있다.
+ *  ③ `savedPositions` — 저장된 자리. 첫 렌더처럼 ②가 아직 비어 있을 때의 받침이다.
+ *     없으면 기능이 통째로 죽으므로 반드시 남긴다.
+ *
+ * 돌려주는 값이 `undefined` 인 것은 **셋 어디에도 없는 노드**(막 지워졌거나
+ * 거르기 밖)뿐이다 — 부르는 쪽이 그때 아무 일도 안 하도록 그대로 넘긴다.
+ */
+export function resolveCurrentRenderedNodePosition(
+  nodeId: string,
+  sources: {
+    pendingLayoutMoves: ReadonlyMap<string, Position>;
+    renderedPositions: ReadonlyMap<string, Position>;
+    savedPositions: ReadonlyMap<string, Position>;
+  }
+): Position | undefined {
+  return sources.pendingLayoutMoves.get(nodeId) ?? sources.renderedPositions.get(nodeId) ?? sources.savedPositions.get(nodeId);
 }
 
 // ==================== DIRTY (rendered draft vs baseline) ====================

@@ -366,6 +366,7 @@ export default function ProcedureFlowGraph({
   errorFocusMode = false,
   editable = false,
   useAutoLayoutForUnpositionedNodes = false,
+  onRenderedPositionsChange,
   onNodeSelectionChange,
   onNodeClickIntercept,
   onEdgeSelectionChange,
@@ -421,6 +422,31 @@ export default function ProcedureFlowGraph({
    * position_x/position_y).
    */
   useAutoLayoutForUnpositionedNodes?: boolean;
+  /**
+   * **이 그림이 지금 실제로 그린 자리**를 노드 id 마다 올려보낸다(2026-11-05).
+   * 안 넘기면 아무 일도 안 한다 — 지도를 만들지도 않는다.
+   *
+   * 🔴 까닭: 편집기의 패널들(「상대 위치로 이동」· 「선택한 노드 아래 추가」)이
+   * 기준 노드의 자리를 **저장된 position_x/y 로 읽고 있었다.** 기술작업절차에서는
+   * 그 값이 「만든 차례대로 쌓은 숫자」(x 는 전부 0)여서, 화면에 x = −486 으로
+   * 그려진 노드의 「아래」를 눌렀는데 새 노드가 x = 0 에 — **다른 노드 위에
+   * 완전히 포개져** 꽂혔다(2026-11-05 브라우저 실측).
+   *
+   * 🔴 **계산을 패널 쪽에 복제하지 않으려고** 값을 올려보내는 길을 골랐다.
+   * 복제하면 「시험은 통과하는데 화면만 어긋나는」 자리가 생기고, 그건 아무도
+   * 못 잡는다. 자리를 정하는 규칙(resolveBaselinePosition 의 ①②③ 우선순위와
+   * 자동 배치의 입력 조립)은 이 파일 한 곳에만 남는다.
+   *
+   * 🔵 **거르기 전 전체 노드**를 담는다(filteredNodeRows 가 아니라 nodeRows).
+   * 패널의 기준 노드 고르개는 시트 거르기와 무관하게 절차의 모든 노드를
+   * 늘어놓기 때문이다 — 거른 목록으로 보내면 거르는 순간 기준 노드의 자리가
+   * 조용히 「모름」이 된다.
+   *
+   * 🔵 그리기가 끝난 뒤(useEffect) 한 번 올라가므로 **한 렌더 늦다.** 읽는 쪽이
+   * 사람이 단추를 누른 순간이라 문제가 안 된다. 아직 안 올라온 id 는 받는 쪽이
+   * 전 동작(저장된 자리)으로 떨어진다.
+   */
+  onRenderedPositionsChange?: (positions: ReadonlyMap<string, { x: number; y: number }>) => void;
   /** Fires whenever the selected node changes (including deselection), in addition to this component's own path-highlight/dim behavior — lets the editor open/close its node property panel in lockstep. */
   onNodeSelectionChange?: (nodeId: string | null) => void;
   /** 노드를 누른 순간, 선택 토글이 일어나기 전에 그 id를 그대로 받는다. true를 돌려주면 "이 클릭은 내가 썼다"는 뜻이며 선택 상태는 바뀌지 않는다(편집기의 "화면에서 선택" 모드용). */
@@ -909,6 +935,39 @@ export default function ProcedureFlowGraph({
     [useAutoLayoutForUnpositionedNodes, layeredLayout]
   );
 
+  /**
+   * 🔴 **이 그림이 한 노드를 실제로 어디에 그리는가** — 한 곳에서만 센다.
+   *
+   * 아래 flowNodes 가 쓰던 삼항을 그대로 꺼낸 것이다(배치 모드에 따라 단계별
+   * 정렬의 자리 또는 resolveBaselinePosition). 꺼낸 까닭은 하나다 — 편집기의
+   * 패널들이 **같은 값**을 읽어야 하는데, 복제하면 두 곳이 조용히 갈린다
+   * (onRenderedPositionsChange 프롭 주석).
+   */
+  const resolveRenderedPosition = useCallback(
+    (n: ProcedureFlowGraphNode): { x: number; y: number } =>
+      layoutMode === "STAGE_SORTED" ? (stageSortedLayout.positions.get(n.id) ?? { x: n.positionX, y: n.positionY }) : resolveBaselinePosition(n),
+    [layoutMode, stageSortedLayout, resolveBaselinePosition]
+  );
+
+  /**
+   * 올려보낼 지도. 🔵 **안 받겠다고 한 화면에서는 아예 안 만든다**(null) —
+   * 노드 403개짜리 초안을 들고 있는 읽기 전용 화면이 쓰지도 않을 지도를 매번
+   * 세게 두지 않는다. 그 화면들은 이 프롭을 안 넘긴다.
+   */
+  const renderedPositionsByNodeId = useMemo(() => {
+    if (!onRenderedPositionsChange) return null;
+    const map = new Map<string, { x: number; y: number }>();
+    for (const n of nodeRows) map.set(n.id, resolveRenderedPosition(n));
+    return map;
+  }, [onRenderedPositionsChange, nodeRows, resolveRenderedPosition]);
+
+  // 🔴 그리는 중(렌더 중)에 부르면 안 된다 — 받는 쪽이 state 에 담으므로 끝없이
+  //    다시 그린다. 지도의 신원은 위 useMemo 가 지켜 주므로, 자리가 정말 다시
+  //    세어졌을 때만 이 effect 가 한 번 돈다.
+  useEffect(() => {
+    if (renderedPositionsByNodeId) onRenderedPositionsChange?.(renderedPositionsByNodeId);
+  }, [renderedPositionsByNodeId, onRenderedPositionsChange]);
+
   // 바깥에서 건 강조(highlightedNodeIds)를 빠른 조회로. null 이면 아예 안 만든다 —
   // 「걸지 않았다」와 「하나도 안 걸렸다(빈 배열)」는 뜻이 정반대다: 전자는 아무것도
   // 안 흐려지고, 후자는 전부 흐려진다(검색어는 쳤는데 맞는 것이 없는 상태).
@@ -933,7 +992,7 @@ export default function ProcedureFlowGraph({
 
   const flowNodes = useMemo<Node[]>(() => {
     const result: Node[] = filteredNodeRows.map((n) => {
-      const sourcePos = layoutMode === "STAGE_SORTED" ? (stageSortedLayout.positions.get(n.id) ?? { x: n.positionX, y: n.positionY }) : resolveBaselinePosition(n);
+      const sourcePos = resolveRenderedPosition(n);
       const isSelected = n.id === selectedNodeId;
       const dimmedBySelection = selectedNodeId !== null && !connectedNodeIds.has(n.id);
       const dimmedByHighlight = highlightedNodeIdSet !== null && !highlightedNodeIdSet.has(n.id);
@@ -1024,7 +1083,7 @@ export default function ProcedureFlowGraph({
     bands,
     layoutMode,
     stageSortedLayout,
-    resolveBaselinePosition,
+    resolveRenderedPosition,
     worksheetFilter,
     worksheets,
     templateId,

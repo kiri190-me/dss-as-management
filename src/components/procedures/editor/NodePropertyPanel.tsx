@@ -77,6 +77,7 @@ export default function NodePropertyPanel({
   onDraftChange,
   onPositionDraftChange,
   resolveNodeDimensions,
+  renderedPositions,
   onSaved,
   canDelete,
   onDeleted,
@@ -107,6 +108,17 @@ export default function NodePropertyPanel({
   onPositionDraftChange: (position: { x: number; y: number }) => void;
   /** 5C-6D-1D — the screen's single, already-composed effective-dimension resolver (measured-first via ReactFlowInstance.getInternalNode, estimate-fallback) — see this file's own DIMENSION SOURCE doc comment below for why this must be the SAME function instance the screen composes once, not a locally re-derived copy. */
   resolveNodeDimensions: (n: EditorNodeRow) => { width: number; height: number };
+  /**
+   * **그림이 실제로 그린 자리**, 노드 id 마다(2026-11-05). 위
+   * resolveNodeDimensions 의 자리 쪽 짝이고, 같은 까닭으로 화면이 한 벌만
+   * 들고 있는 것을 그대로 받는다 — 여기서 다시 세면 두 곳이 조용히 갈린다.
+   * 자리를 정하는 규칙은 그림(ProcedureFlowGraph 의 resolveBaselinePosition)에만
+   * 있다.
+   *
+   * 🔵 안 넘기거나 아직 안 들어온 노드는 아래 currentPosition 이 **전 동작**
+   * (저장된 자리)으로 떨어진다. 프롭을 안 넘기는 호출부는 지금 없다.
+   */
+  renderedPositions?: ReadonlyMap<string, { x: number; y: number }>;
   onSaved: (newUpdatedAt: string, structuralValidation?: StructuralValidationSummary) => void;
   /** Phase 5C-5B — true only for a TECHNICAL_TASK DRAFT (see ProcedureTemplateEditorScreen); always false for FULL_SERVICE/REFERENCE, which never gained this new structural-delete capability. */
   canDelete: boolean;
@@ -244,8 +256,26 @@ export default function NodePropertyPanel({
     onSaved(result.updatedAt, result.structuralValidation);
   }
 
-  /** Current visible position (5C-6D-1D) — `n`'s own effective position, which for a node this session has dragged/relative-positioned is already the pending value, not the stale server one: `node`/`allNodes` are the screen's RENDERED rows, and 1C's own render pipeline injects a pending-or-just-saved position into userPositionX/Y whenever one exists for that node. Never reads raw positionX/positionY directly — resolveEffectiveNodePosition is the one shared priority rule the canvas itself uses too. */
+  /**
+   * **화면에 실제로 그려져 있는 자리** — 그림이 올려보낸 값을 그대로 쓴다.
+   *
+   * 🔴 2026-11-05 에 고쳤다. 전에는 이 함수가 `resolveEffectiveNodePosition(…,
+   * "USER")` 하나였고, 주석에 "Current visible position" 이라고 적혀 있었다 —
+   * **사실이 아니었다.** 기술 작업 절차의 노드는 저장된 자리가 없는 것이
+   * 기본이고(개발 DB 실측: 초안 하나는 22개 중 0개), 그런 노드를 그림은 제
+   * 나름의 자동 배치로 그린다. 그래서 그 함수는 「만든 차례대로 쌓은 숫자」
+   * (x 가 전부 0)를 돌려줬다. 실측으로, 화면 x = −486 에 서 있는 노드를 기준
+   * 삼아 [아래]를 누르면 대상이 x = 0 으로 가 **다른 노드 위에 완전히
+   * 포개졌고**, [오른쪽]은 758px 어긋났다.
+   *
+   * 🔵 받침은 전 동작 그대로다 — 지도에 없는 노드(아직 안 올라왔거나 프롭을
+   * 안 받은 호출부)는 저장된 자리로 떨어진다. 이 화면의 rendered 행은 1C 의
+   * 그리기 길이 끌고 있는·방금 저장한 자리를 이미 userPositionX/Y 에 실어
+   * 두므로, 그 받침도 「서버의 낡은 값」은 아니다.
+   */
   function currentPosition(n: EditorNodeRow): { x: number; y: number } {
+    const rendered = renderedPositions?.get(n.id);
+    if (rendered) return rendered;
     return resolveEffectiveNodePosition({ positionX: n.positionX, positionY: n.positionY, userPositionX: n.userPositionX, userPositionY: n.userPositionY }, "USER");
   }
 
@@ -267,6 +297,12 @@ export default function NodePropertyPanel({
    *      rule than the others.
    * A LOCAL pending-position update only (onPositionDraftChange) — no
    * server call here; [저장] persists it later, exactly like a canvas drag.
+   *
+   * 🔴 2026-11-05 — 네 방향이 **전부 중심점 기준**이 됐다. UP/DOWN 의 세로
+   * 간격이 윗변 간격에서 **중심 간 간격**으로 바뀌었고(그 함수 주석에 까닭과
+   * 실측값), 기준 노드의 자리는 저장 좌표가 아니라 **화면에 그려진 자리**를
+   * 쓴다(위 currentPosition). 두 고침이 함께 있어야 뜻이 있다 — 기준 자리가
+   * 틀린 채로 간격만 맞추면 어긋난 자리에서 정확히 150 을 세게 된다.
    */
   function handleRelativePosition(direction: RelativeDirection) {
     const reference = otherNodes.find((n) => n.id === referenceNodeId);

@@ -116,14 +116,28 @@ export function toAutoLayoutGhostNode(ghost: {
 }
 
 /**
- * 자동 배치가 쓰는 **노드 폭**. 가운데 맞춤이 폭에 걸려 있어서(같은 x 라도 폭이
- * 다르면 가운데가 어긋난다), 유령과 진짜 노드가 **같은 함수**로 재어져야 한다.
- * 제목과 갈래가 같으면 같은 값이 나오고, 채택은 그 둘을 한 글자도 안 바꾸고
- * 옮긴다 — 그래서 유령의 폭이 곧 채택 뒤의 폭이다.
+ * 자동 배치가 쓰는 **노드 크기**(폭과 높이). 가운데 맞춤이 둘 다에 걸려 있어서
+ * — 같은 x 라도 폭이 다르면 가로 중심이, 같은 y 라도 높이가 다르면 세로 중심이
+ * 어긋난다 — 유령과 진짜 노드가 **같은 함수**로 재어져야 한다. 제목과 갈래가
+ * 같으면 같은 값이 나오고, 채택은 그 둘을 한 글자도 안 바꾸고 옮긴다 — 그래서
+ * 유령의 크기가 곧 채택 뒤의 크기다.
+ *
+ * 🔴 높이는 2026-11-05 에 더했다. 그 전까지 자동 배치는 폭만 받아서 세로를
+ * **윗변**으로 맞췄고, 제목이 세 줄이라 높이가 82 인 노드가 52 인 이웃과 같은
+ * 줄에 서면 혼자 아래로 삐져나왔다(실측: 윗변은 셋 다 0, 중심은 26 · 26 · 41).
+ */
+export function procedureAutoLayoutNodeDimensions(node: { nodeType: ProcedureNodeType; title: string }): { width: number; height: number } {
+  const { semanticType } = getNodeChipVisual(node.nodeType);
+  const { width, height } = computeNodeDimensions({ title: node.title, shape: NODE_VISUAL_CONFIG[semanticType].shape });
+  return { width, height };
+}
+
+/**
+ * 위의 폭만 꺼내 보는 길. 🔵 **계산을 따로 들고 있지 않다** — 한 글자라도
+ * 갈라지면 「유령과 진짜 노드를 같은 자로 잰다」가 폭에서만 조용히 깨진다.
  */
 export function procedureAutoLayoutNodeWidth(node: { nodeType: ProcedureNodeType; title: string }): number {
-  const { semanticType } = getNodeChipVisual(node.nodeType);
-  return computeNodeDimensions({ title: node.title, shape: NODE_VISUAL_CONFIG[semanticType].shape }).width;
+  return procedureAutoLayoutNodeDimensions(node).width;
 }
 
 /**
@@ -149,7 +163,7 @@ export function computeProcedureAutoLayout(params: {
   const layoutNodes: LayeredLayoutNode[] = params.nodes.map((n) => ({
     id: n.id,
     sortOrder: n.sortOrder,
-    width: procedureAutoLayoutNodeWidth(n),
+    ...procedureAutoLayoutNodeDimensions(n),
     // 저장된 자리가 있는 칸은 그 자리에 못 박는다 — 「배치와 선이 어긋나면 안
     // 된다」(computeLayeredGraphLayout 의 pinnedX 주석). 두 칸이 다 차 있을
     // 때만이다(반쪽은 자리가 아니다 — hasUserLayoutOverride).
@@ -159,7 +173,9 @@ export function computeProcedureAutoLayout(params: {
     layoutNodes.push({
       id: ghost.id,
       sortOrder: ghost.sortOrder,
-      width: procedureAutoLayoutNodeWidth(ghost),
+      // 🔴 유령도 **같은 함수**로 잰다 — 폭만 그랬던 것을 높이까지 넓혔다.
+      //    한쪽만 중심으로 서면 켠 그림과 채택 뒤 그림이 세로로 갈린다.
+      ...procedureAutoLayoutNodeDimensions(ghost),
       pinnedX: ghost.pinnedX ?? undefined,
     });
   }

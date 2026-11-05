@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   PROCEDURE_AUTO_LAYOUT_SPACING,
   computeProcedureAutoLayout,
+  procedureAutoLayoutNodeDimensions,
   procedureAutoLayoutNodeWidth,
   toAutoLayoutGhostNode,
   type ProcedureAutoLayoutEdge,
@@ -52,6 +53,18 @@ function node(id: string, sortOrder: number, overrides: Partial<ProcedureAutoLay
 
 function edge(fromNodeId: string, toNodeId: string): ProcedureAutoLayoutEdge {
   return { fromNodeId, toNodeId };
+}
+
+/**
+ * 어떤 칸의 **중심 y**. 자동 배치가 2026-11-05 부터 세로도 중심으로 맞추므로
+ * (`y = 깊이 × 눈금 - 높이/2`), 깊이를 재려면 높이를 되더해야 한다.
+ *
+ * 🔴 높이를 상수로 적지 않고 **그림이 쓰는 바로 그 함수**로 잰다 — 숫자를 베껴
+ * 두면 제목 한 글자에 높이가 바뀌는 날 시험이 이유 없이 깨지고, 더 나쁘게는
+ * 「52 라고 적었으니 52 겠지」로 틀린 값을 지키게 된다.
+ */
+function centerY(positions: Map<string, { x: number; y: number }>, id: string, node: { nodeType: ProcedureAutoLayoutNode["nodeType"]; title: string }): number {
+  return positions.get(id)!.y + procedureAutoLayoutNodeDimensions(node).height / 2;
 }
 
 /**
@@ -171,10 +184,14 @@ describe("A 안 — ① 먼저 표본 확인", () => {
     const positions = computeProcedureAutoLayout(draft);
     assert.equal(positions.size, 5, "지도가 비면 아래 「같다」 단언이 전부 공짜로 통과한다");
     assert.deepEqual({ ...SPACING }, { horizontal: 280, vertical: 150 }, "눈금이 바뀌면 옮기면서 셈이 바뀐 것이다");
-    // y 는 오로지 깊이다 — n1(0) → n2(1) → n3(2) → n4(3).
-    assert.equal(positions.get("n1")!.y, 0);
-    assert.equal(positions.get("n2")!.y, SPACING.vertical);
-    assert.equal(positions.get("n4")!.y, SPACING.vertical * 3);
+    // 🔴 **중심** y 가 오로지 깊이다 — n1(0) → n2(1) → n3(2) → n4(3).
+    //    2026-11-05 전에는 여기에 좌상단 y 가 그대로 적혀 있었다(윗변 기준).
+    //    높이가 다른 노드가 한 줄에 섞이면 그 셈은 중심을 어긋나게 한다.
+    assert.equal(centerY(positions, "n1", node("n1", 0)), 0);
+    assert.equal(centerY(positions, "n2", node("n2", 1)), SPACING.vertical);
+    assert.equal(centerY(positions, "n4", node("n4", 3)), SPACING.vertical * 3);
+    // 🔵 좌상단 y 는 중심에서 높이의 절반만큼 위다 — 깊이 0 이 음수가 되는 것이 정상이다.
+    assert.ok(positions.get("n1")!.y < 0, "깊이 0 의 좌상단 y 는 -높이/2 다");
   });
 
   test("🔵 노드 폭은 **제목마다 다르다** — 폭이 상수면 「같은 자로 잰다」가 아무것도 안 지킨다", () => {
@@ -378,7 +395,9 @@ describe("A 안 — 🔴 유령이 들고 가는 값이 틀리면 **조용히 �
 
     const withEdges = computeProcedureAutoLayout({ ...draft, ghostNodes, ghostEdges: [{ fromNodeId: "n2", toNodeId: ghostId }] });
     const withoutEdges = computeProcedureAutoLayout({ ...draft, ghostNodes, ghostEdges: [] });
-    assert.equal(withEdges.get(ghostId)!.y, SPACING.vertical * 2, "n2(깊이 1) 의 자식이므로 깊이 2 다");
-    assert.equal(withoutEdges.get(ghostId)!.y, 0, "선이 없으면 뿌리라 깊이 0 이다");
+    // 🔵 깊이는 **중심** y 로 읽는다(2026-11-05) — 좌상단 y 에는 높이의 절반이 섞여 있다.
+    const ghostShape = { nodeType: step.nodeType, title: step.title };
+    assert.equal(centerY(withEdges, ghostId, ghostShape), SPACING.vertical * 2, "n2(깊이 1) 의 자식이므로 깊이 2 다");
+    assert.equal(centerY(withoutEdges, ghostId, ghostShape), 0, "선이 없으면 뿌리라 깊이 0 이다");
   });
 });

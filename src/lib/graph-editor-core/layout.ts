@@ -51,11 +51,19 @@ export type RelativeDirection = "LEFT" | "RIGHT" | "UP" | "DOWN";
 
 /**
  * Computes a target coordinate near a reference node, in one of the four
- * cardinal directions — the pure math behind "상대 위치로 이동"
- * (NodePropertyPanel) and "새 노드를 선택된 노드 아래에 추가" (CreateNodePanel).
- * Domain-free: takes an already-resolved reference position (the caller
- * decides whether that's a node's source or user-overridden position), no
- * procedure/node-type concept here at all.
+ * cardinal directions — the pure math behind "상대 위치로 이동" and
+ * "새 노드를 선택된 노드 아래에 추가". Domain-free: takes an already-resolved
+ * reference position (the caller decides whether that's a node's source or
+ * user-overridden position), no procedure/node-type concept here at all.
+ *
+ * 🔴 2026-11-05 — 이 함수를 부르는 곳은 이제 **수리건 플로우차트의
+ * CaseFlowchartCreateNodePanel 하나뿐**이다. 절차 편집기의 두 패널
+ * (NodePropertyPanel · CreateNodePanel)은 아래
+ * computeCenterAlignedRelativePosition 으로 옮겨 갔다 — 높이가 다른 노드의
+ * UP/DOWN 을 **중심 간 간격**으로 잡아야 하기 때문이다(그쪽 주석 참고).
+ * 🔵 **그래서 이 함수는 안 고쳤다.** 수리건 플로우차트는 저장 좌표가 곧 화면
+ * 자리라 지금 멀쩡히 동작하고, 여기를 고치면 이번 조각의 범위 밖인 그 화면까지
+ * 조용히 바뀐다.
  *
  * Round-2 fix — this used to take/return only `{x, y}` (left-edge,
  * React Flow's own position convention) and never knew either node's
@@ -170,21 +178,28 @@ export function computeStraightenedConnectedNodePosition(source: ConnectedNodeGe
 // ---- center-aligned relative positioning (5C-6D follow-up #3) ----
 
 /**
- * Same LEFT/RIGHT/UP/DOWN math as computeRelativePosition, except LEFT/RIGHT
- * now also align by vertical CENTER, not raw top-left y — two nodes of
- * different height (a multiline title, a different node shape) must still
- * share the same center y once placed side by side, or their connecting
- * edge visibly kinks even though "y" superficially matched. UP/DOWN are
- * unchanged (computeRelativePosition already center-aligns those by x);
- * reproduced here rather than delegating, so this function is a complete,
- * self-contained replacement a caller can switch to on its own.
+ * Same LEFT/RIGHT/UP/DOWN math as computeRelativePosition, except **네 방향
+ * 전부를 노드의 중심점으로 잰다** — 사각형 대각선의 교차점, 곧
+ * `(x + width/2, y + height/2)` 이다.
+ *
+ * LEFT/RIGHT: 세로 CENTER 를 맞춘다(raw top-left y 가 아니다) — 높이가 다른 두
+ * 노드(여러 줄 제목, 다른 모양)를 나란히 놓았을 때 "y" 는 같아 보여도 중심이
+ * 어긋나 연결선이 꺾인다.
+ *
+ * UP/DOWN: 가로 CENTER 를 맞추고, **세로 간격도 중심 간 간격**으로 잡는다 —
+ * `targetCenterY = referenceCenterY ± spacing.vertical`.
+ *
+ * 🔴 2026-11-05 — UP/DOWN 의 세로가 전에는 `reference.y ± spacing.vertical`
+ * (윗변 간 간격)이었다. 이름이 "center aligned" 인데 UP/DOWN 만 윗변 기준인 것이
+ * 오히려 불일치였고, 실제로 어긋났다: 제목이 세 줄이라 높이가 82 인 노드와 52 인
+ * 노드를 세로로 이으면 중심 간 거리가 150 이 아니라 165 가 됐다(브라우저 실측).
+ * 🔵 **높이가 같으면 값이 한 픽셀도 안 바뀐다** — `ref.y + h/2 + v - h/2 =
+ * ref.y + v`. 그래서 같은 모양·같은 줄 수의 노드만 쓰던 화면은 그대로다
+ * (layout.test.ts 가 값으로 지킨다).
  *
  * Deliberately a NEW function, not a change to computeRelativePosition in
- * place — that function is still called by the Procedure editor
- * (NodePropertyPanel.tsx/CreateNodePanel.tsx), and changing its LEFT/RIGHT
- * behavior there was explicitly out of scope for this checkpoint (5C-6D-1
- * will decide whether to standardize this across both editors). Case
- * Flowchart is the only caller of this function today.
+ * place — see that function's own doc comment for who still calls it and
+ * why it stays as-is.
  */
 export function computeCenterAlignedRelativePosition(
   reference: { x: number; y: number; width: number; height: number },
@@ -200,9 +215,9 @@ export function computeCenterAlignedRelativePosition(
     case "RIGHT":
       return { x: reference.x + reference.width + spacing.horizontal, y: referenceCenterY - target.height / 2 };
     case "UP":
-      return { x: referenceCenterX - target.width / 2, y: reference.y - spacing.vertical };
+      return { x: referenceCenterX - target.width / 2, y: referenceCenterY - spacing.vertical - target.height / 2 };
     case "DOWN":
-      return { x: referenceCenterX - target.width / 2, y: reference.y + spacing.vertical };
+      return { x: referenceCenterX - target.width / 2, y: referenceCenterY + spacing.vertical - target.height / 2 };
   }
 }
 
@@ -349,24 +364,44 @@ export function packNodesIntoRows(nodes: PackableNode[], options: PackNodesIntoR
  * comment for why this must be threaded through rather than letting the
  * algorithm invent its own x for every node independently.
  *
- * `width` is the node's actual rendered width (e.g. from
- * computeNodeDimensions — nodes can differ in width because a multiline
- * title needs more horizontal room). Required so this function can align
- * nodes by CENTER x rather than left-edge x — React Flow's `position` is
- * top-left-based, so two nodes sharing the same `position.x` do NOT share
- * the same center once their widths differ, and their bottom/top handles
- * (computed from each node's own center) would then disagree too,
- * producing a visibly bent connector despite `position.x` matching.
+ * `width`/`height` are the node's actual rendered size (e.g. from
+ * computeNodeDimensions — nodes differ in both because a multiline title
+ * needs more horizontal room AND more lines). Required so this function can
+ * align nodes by their CENTER point — 사각형 대각선의 교차점, 곧
+ * `(x + width/2, y + height/2)` — rather than by left edge / top edge.
+ * React Flow's `position` is top-left-based, so two nodes sharing the same
+ * `position.x` do NOT share the same center once their widths differ, and
+ * their bottom/top handles (computed from each node's own center) would then
+ * disagree too, producing a visibly bent connector despite `position.x`
+ * matching. The same holds on the other axis for `position.y`.
+ *
+ * 🔴 `height` 는 **선택이 아니라 필수**다(2026-11-05). 안 넘겨도 되게 두면
+ * 안 넘긴 자리에서 중심 정렬이 **오류 없이 조용히 안 된다** — 그것이 바로
+ * 2026-11-05 에 고친 결함의 모양이었다(같은 줄에 선 높이 52 · 52 · 82 의 노드
+ * 셋이 윗변만 0 으로 같고 중심은 26 · 26 · 41 로 갈려 있었다).
  */
-export type LayeredLayoutNode = { id: string; sortOrder: number; width: number; pinnedX?: number | null };
+export type LayeredLayoutNode = { id: string; sortOrder: number; width: number; height: number; pinnedX?: number | null };
 export type LayeredLayoutEdge = { fromNodeId: string; toNodeId: string };
 export type LayeredLayoutSpacing = { horizontal: number; vertical: number };
 
 /**
- * A minimal layered/hierarchical DAG layout: `y` is purely BFS depth from
- * each root (a node with no incoming edge among the given set) times
- * `spacing.vertical`; the returned `x` follows one rule, computed by
- * CENTER — a node with exactly one parent inherits that parent's CENTER x
+ * A minimal layered/hierarchical DAG layout. **자리는 두 축 모두 노드의
+ * 중심점으로 센다**(사각형 대각선의 교차점) — 돌려주는 `x`/`y` 만 React Flow 의
+ * 규약대로 좌상단으로 되돌린다.
+ *
+ * `y`: 그 노드의 **중심 y** 가 `BFS 깊이 × spacing.vertical` 이다(뿌리 = 깊이 0).
+ * 돌려주는 값은 `깊이 × spacing.vertical - height / 2`.
+ *
+ * 🔴 2026-11-05 전에는 `y` 가 곧 `깊이 × spacing.vertical`(= **윗변** 기준)
+ * 이었다. 높이가 모두 같을 때는 멀쩡해 보이지만, 제목이 여러 줄이라 높이가 다른
+ * 노드가 한 줄에 섞이는 순간 중심이 갈린다 — 실측으로 같은 줄의 셋이 윗변은 전부
+ * 0 인데 중심은 26 · 26 · 41 이었다. 🔵 깊이 0 의 `y` 가 음수(`-height/2`)가 되는
+ * 것은 정상이다. `x` 는 전부터 음수가 나왔고 React Flow 는 음수 좌표를 문제없이
+ * 다룬다. 높이가 모두 같은 그래프는 **전체가 `height/2` 만큼 위로 평행이동**할
+ * 뿐 서로의 관계가 안 바뀐다.
+ *
+ * `x` 는 한 규칙을 따른다, 역시 CENTER 로 — a node with exactly one parent
+ * inherits that parent's CENTER x
  * exactly (`childCenterX = parentCenterX`, converted back to the returned
  * top-left `x = childCenterX - childWidth / 2`) UNLESS it has siblings
  * (other children of the same parent), in which case siblings fan out
@@ -395,6 +430,31 @@ export type LayeredLayoutSpacing = { horizontal: number; vertical: number };
  * regardless of how many independent root chains share that depth — a
  * pinned node is never itself pushed (a persisted manual position must
  * never move), only unpinned siblings are shifted clear of it.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 깊이 0(뿌리)의 가로 자리는 **왼쪽부터 한 칸씩**이다 (2026-11-05)
+ * ──────────────────────────────────────────────────────────────────────
+ * `centerX = i * spacing.horizontal` — `i` 는 그 노드가 뿌리 가운데 몇 번째로
+ * 발견됐는가(= `sortOrder` 차례)다.
+ *
+ * 전에는 **가운데 대칭**이었다: `(i - (뿌리수 - 1) / 2) * spacing.horizontal`.
+ * 뿌리가 하나 늘 때마다 분모가 바뀌어 **손도 안 댄 기존 뿌리가 전부
+ * `spacing.horizontal / 2` 만큼 옆으로 밀렸다.** 브라우저 실측(눈금 280):
+ * A 만 있을 때 A 의 x 는 −66, B 를 더하니 A 가 −206, C 를 더하니 −346 이 됐고,
+ * A→C 선을 잇자(C 가 깊이 0 에서 빠지자) A 가 −206 으로 되돌아왔다. 사용자가
+ * 「노드를 만들면 이상한 위치에 생기고, 연결선을 이으면 원래 자리로 돌아온다」고
+ * 신고한 것이 이 한 줄이다.
+ *
+ * 왼쪽부터 쌓으면 새 노드는 `sortOrder` 가 가장 커서 맨 뒤에 붙고, **앞선
+ * 노드들의 `i` 가 안 바뀌므로 아무도 안 움직인다.**
+ *
+ * 🔵 **남는 것 하나** — 선을 이어 어떤 노드가 깊이 0 에서 빠지면, 그 **뒤쪽**
+ * 뿌리들의 `i` 가 하나씩 줄어 한 칸(`spacing.horizontal`)씩 당겨진다. 순수
+ * 함수라 이전 배치를 기억할 수 없어서 그렇다 — 고치지 않았고, 시험이 「이렇게
+ * 동작한다」를 값으로 적어 두고 있다.
+ *
+ * 🔵 대가: 기존 절차의 그림이 **통째로 오른쪽으로 한 번 이동**한다(서로의 위치
+ * 관계는 그대로다). 2026-11-05 에 받아들이기로 한 값이다.
  *
  * `pinnedX` (usability fix — "layout and line geometry must agree"): a
  * node the caller marks pinned (its actual persisted userPositionX, i.e.
@@ -464,6 +524,11 @@ export function computeLayeredGraphLayout(
   const widthById = new Map<string, number>();
   for (const n of nodes) widthById.set(n.id, Number.isFinite(n.width) ? n.width : 0);
 
+  // 높이도 폭과 똑같이 「모르면 0」이다 — 0 이면 중심 보정이 0 이라 윗변 기준과
+  // 같은 값이 나온다. 즉 못 재어 온 칸만 전처럼 서고, 나머지는 중심으로 선다.
+  const heightById = new Map<string, number>();
+  for (const n of nodes) heightById.set(n.id, Number.isFinite(n.height) ? n.height : 0);
+
   // Pinned CENTER x, not the raw (left-edge) pinnedX — every downstream
   // comparison/inheritance in this function operates in center-x space.
   const pinnedXById = new Map<string, number>();
@@ -484,7 +549,10 @@ export function computeLayeredGraphLayout(
   }
 
   const centerXById = new Map<string, number>();
-  nodesByDepth[0].forEach((id, i) => centerXById.set(id, (i - (nodesByDepth[0].length - 1) / 2) * spacing.horizontal));
+  // 🔴 **왼쪽부터 한 칸씩.** 가운데 대칭(`(i - (뿌리수 - 1) / 2) * 눈금`)이면
+  //    뿌리가 하나 늘 때마다 기존 뿌리가 전부 눈금의 절반만큼 밀린다 —
+  //    까닭과 실측값은 이 함수의 머리말에.
+  nodesByDepth[0].forEach((id, i) => centerXById.set(id, i * spacing.horizontal));
   for (const [id, x] of pinnedXById) if (depthById.get(id) === 0) centerXById.set(id, x);
   resolveCollisions(nodesByDepth[0]);
 
@@ -522,7 +590,12 @@ export function computeLayeredGraphLayout(
   for (const id of discoveryOrder) {
     const centerX = centerXById.get(id) ?? 0;
     const width = widthById.get(id) ?? 0;
-    result.set(id, { x: centerX - width / 2, y: depthById.get(id)! * spacing.vertical });
+    // 🔴 세로도 가로와 **같은 자**다: 깊이가 정하는 것은 그 노드의 **중심 y**
+    //    이고, 돌려주는 값만 React Flow 의 좌상단 규약으로 되돌린다. 윗변을
+    //    맞추면 높이가 다른 이웃과 중심이 갈린다(머리말의 26 · 26 · 41).
+    const centerY = depthById.get(id)! * spacing.vertical;
+    const height = heightById.get(id) ?? 0;
+    result.set(id, { x: centerX - width / 2, y: centerY - height / 2 });
   }
   return result;
 }

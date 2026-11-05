@@ -363,9 +363,11 @@ describe("줄기 B-⑧ 뒷정리 — 유령 자리와 **채택이 적는 자리*
    */
   test("🔴 자리 값이 없는 절차에서는 **그려지는 자리 ≠ 저장된 자리**다 — 유령을 자동 배치에 함께 세운 까닭", () => {
     const nodes = [
-      { id: "n1", sortOrder: 0, width: 191 },
-      { id: "n2", sortOrder: 1, width: 191 },
-      { id: "n3", sortOrder: 2, width: 191 },
+      // 🔵 height 는 2026-11-05 에 필수 칸이 되면서 더해졌다 — 자동 배치가 세로도
+      //    중심으로 맞추기 때문이다. 이 시험이 재는 것(두 좌표계가 다르다)은 그대로다.
+      { id: "n1", sortOrder: 0, width: 191, height: 52 },
+      { id: "n2", sortOrder: 1, width: 191, height: 52 },
+      { id: "n3", sortOrder: 2, width: 191, height: 52 },
     ];
     const drawn = computeLayeredGraphLayout(nodes, [{ fromNodeId: "n1", toNodeId: "n2" }], { horizontal: 280, vertical: 150 });
     assert.equal(drawn.size, 3, "표본 확인 — 자동 배치가 비어 있으면 아래가 공짜로 통과한다");

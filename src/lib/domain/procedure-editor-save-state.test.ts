@@ -7,6 +7,7 @@ import {
   computeDirtyProcedureEdgeFieldEntries,
   computeDirtyProcedurePositionNodeIds,
   computeDirtyProcedureRouteEdgeIds,
+  resolveCurrentRenderedNodePosition,
   planProcedureSaveSteps,
   runProcedureSaveSequence,
   succeededProcedureNodeFieldIds,
@@ -19,7 +20,10 @@ import {
   type ProcedureServerEdgeSnapshot,
   type ProcedureSaveStep,
   type ProcedureSaveStepResult,
+  type Position,
 } from "./procedure-editor-save-state";
+import { computeStraightenedConnectedNodePosition } from "../graph-editor-core/layout";
+import { addWaypointAtDefaultPosition } from "../graph-editor-core/routing";
 
 /**
  * Targeted pure tests for the Procedure editor's save-state model
@@ -384,4 +388,153 @@ test("success clearing: never mutates its inputs (steps array, draft maps)", asy
   await runProcedureSaveSequence(steps, "t0", makeSuccessExecutor());
   assert.deepEqual(JSON.parse(JSON.stringify(input)), inputCopy);
   assert.deepEqual(JSON.parse(JSON.stringify(steps)), stepsCopy);
+});
+
+// ==================== resolveCurrentRenderedNodePosition ====================
+/**
+ * 🔴 「연결선 곧게 펴기」가 **화면에 그려진 자리**를 쓰는가 (2026-11-05)
+ *
+ * 아래 숫자는 꾸며 낸 것이 아니다. 기술 작업 절차의 노드는 position_x/position_y
+ * 가 「만든 차례대로 쌓은 숫자」라 x 가 전부 0 이고(개발 DB 실측), 그런 노드를
+ * 그림은 제 나름의 자동 배치로 그린다 — 2026-11-05 브라우저 실측에서 한 노드의
+ * 화면 x 가 −486, 그 아래 노드가 −346 이었다.
+ *
+ * 🔵 「자리를 고른다」만 재면 약하다. 그래서 고른 자리를 실제 곧게 펴기 셈
+ * (computeStraightenedConnectedNodePosition)에 **먹여서** 결과가 달라지는 것까지
+ * 잰다 — 저장 좌표로 세면 방향 판정부터 뒤집힌다.
+ */
+
+/** 화면에서 위아래로 놓여 있는 두 노드. 실측 폭·높이를 쓴다. */
+const STRAIGHTEN_SOURCE_SIZE = { width: 487, height: 52 };
+const STRAIGHTEN_TARGET_SIZE = { width: 132, height: 52 };
+
+/** 저장된 자리 — 「만든 차례대로 쌓은 숫자」. x 가 둘 다 0 인 것이 그 증거다. */
+const STORED_POSITIONS = new Map<string, Position>([
+  ["a", { x: 0, y: 0 }],
+  ["b", { x: 0, y: 150 }],
+]);
+
+/** 그림이 올려보낸 자리 — 자동 배치가 센 값(중심 기준이라 y 가 −26 부터 시작한다). */
+const RENDERED_POSITIONS = new Map<string, Position>([
+  ["a", { x: -486, y: -26 }],
+  ["b", { x: -346, y: 124 }],
+]);
+
+const NO_PENDING = new Map<string, Position>();
+
+test("resolveCurrentRenderedNodePosition: 🔵 표본 확인 — 저장된 자리와 화면 자리가 **정말 다르다**", () => {
+  for (const id of ["a", "b"]) {
+    assert.notDeepEqual(STORED_POSITIONS.get(id), RENDERED_POSITIONS.get(id), `${id} 의 두 자리가 같으면 아래 단언이 전부 공짜로 통과한다`);
+  }
+  // 저장 좌표의 x 가 둘 다 0 인 것이 「사람이 그린 자리가 아니다」의 모양이다.
+  assert.equal(STORED_POSITIONS.get("a")!.x, 0);
+  assert.equal(STORED_POSITIONS.get("b")!.x, 0);
+});
+
+test("resolveCurrentRenderedNodePosition: 🔴 자리 값이 없는(자동 배치로 그려지는) 노드는 **화면 자리**를 돌려준다 — 저장된 자리가 아니라", () => {
+  const sources = { pendingLayoutMoves: NO_PENDING, renderedPositions: RENDERED_POSITIONS, savedPositions: STORED_POSITIONS };
+  assert.deepEqual(resolveCurrentRenderedNodePosition("a", sources), { x: -486, y: -26 });
+  assert.deepEqual(resolveCurrentRenderedNodePosition("b", sources), { x: -346, y: 124 });
+});
+
+test("resolveCurrentRenderedNodePosition: 🔴 그 차이가 **곧게 펴기의 결과를 바꾼다** — 저장 좌표로 세면 방향 판정까지 뒤집힌다", () => {
+  const sources = { pendingLayoutMoves: NO_PENDING, renderedPositions: RENDERED_POSITIONS, savedPositions: STORED_POSITIONS };
+  const geom = (pos: Position, size: { width: number; height: number }) => ({ x: pos.x, y: pos.y, ...size });
+
+  // 지금(고친 뒤) — 화면 자리로 센다.
+  const withRendered = computeStraightenedConnectedNodePosition(
+    geom(resolveCurrentRenderedNodePosition("a", sources)!, STRAIGHTEN_SOURCE_SIZE),
+    geom(resolveCurrentRenderedNodePosition("b", sources)!, STRAIGHTEN_TARGET_SIZE)
+  );
+  // 화면에서 둘은 위아래로 놓여 있다 → 세로로 펴고, 대상의 **중심 x** 를 기준의 중심 x 에 맞춘다.
+  assert.equal(withRendered.orientation, "VERTICAL");
+  assert.equal(withRendered.position.x + STRAIGHTEN_TARGET_SIZE.width / 2, -486 + 487 / 2);
+  assert.equal(withRendered.position.y, 124, "세로로 펼 때 대상의 y 는 안 움직인다");
+
+  // 전(고치기 전) — 저장 좌표로 세면 이렇게 됐다.
+  const withStored = computeStraightenedConnectedNodePosition(
+    geom(STORED_POSITIONS.get("a")!, STRAIGHTEN_SOURCE_SIZE),
+    geom(STORED_POSITIONS.get("b")!, STRAIGHTEN_TARGET_SIZE)
+  );
+  // 🔴 좌표만 어긋난 것이 아니라 **방향 판정이 뒤집혔다** — 저장 좌표에서는
+  //    가로 거리(177.5)가 세로 거리(150)보다 커서 가로로 편다. 화면에서는
+  //    분명히 위아래인데 노드가 옆으로 간다.
+  assert.equal(withStored.orientation, "HORIZONTAL");
+  assert.notDeepEqual(withStored.position, withRendered.position, "두 결과가 같으면 이 시험은 아무것도 안 재고 있다");
+});
+
+test("resolveCurrentRenderedNodePosition: ① 아직 안 올려보낸 **이번 끌기**가 가장 세다", () => {
+  const dragged = new Map<string, Position>([["b", { x: -900, y: 400 }]]);
+  const resolved = resolveCurrentRenderedNodePosition("b", {
+    pendingLayoutMoves: dragged,
+    renderedPositions: RENDERED_POSITIONS,
+    savedPositions: STORED_POSITIONS,
+  });
+  assert.deepEqual(resolved, { x: -900, y: 400 });
+  // 끌지 않은 칸은 그대로 화면 자리다 — 끌기가 지도 전체를 덮지 않는다.
+  assert.deepEqual(
+    resolveCurrentRenderedNodePosition("a", { pendingLayoutMoves: dragged, renderedPositions: RENDERED_POSITIONS, savedPositions: STORED_POSITIONS }),
+    { x: -486, y: -26 }
+  );
+});
+
+test("resolveCurrentRenderedNodePosition: 🔴 **덧셈이 아니라 고르기**다 — 세 지도에 다 있어도 이기는 하나를 그대로 돌려준다", () => {
+  const dragged = new Map<string, Position>([["b", { x: 10, y: 20 }]]);
+  const resolved = resolveCurrentRenderedNodePosition("b", {
+    pendingLayoutMoves: dragged,
+    renderedPositions: new Map([["b", { x: 1000, y: 2000 }]]),
+    savedPositions: new Map([["b", { x: 100, y: 200 }]]),
+  });
+  assert.deepEqual(resolved, { x: 10, y: 20 });
+  // 셋을 더했다면 (1110, 2220) 이 나왔을 것이다. 끌어 놓은 값이 두 번 반영되는 모양이 이것이다.
+  assert.notDeepEqual(resolved, { x: 1110, y: 2220 });
+});
+
+test("resolveCurrentRenderedNodePosition: 🔵 그림이 아직 아무것도 안 올려보낸 첫 렌더에서는 **저장된 자리**로 떨어진다 — 기능이 죽지 않는다", () => {
+  const resolved = resolveCurrentRenderedNodePosition("b", {
+    pendingLayoutMoves: NO_PENDING,
+    renderedPositions: new Map(),
+    savedPositions: STORED_POSITIONS,
+  });
+  assert.deepEqual(resolved, { x: 0, y: 150 });
+});
+
+test("resolveCurrentRenderedNodePosition: 셋 어디에도 없는 노드는 undefined — 부르는 쪽이 아무 일도 안 하도록", () => {
+  assert.equal(
+    resolveCurrentRenderedNodePosition("없는노드", { pendingLayoutMoves: NO_PENDING, renderedPositions: RENDERED_POSITIONS, savedPositions: STORED_POSITIONS }),
+    undefined
+  );
+});
+
+test("resolveCurrentRenderedNodePosition: 넘긴 지도를 하나도 안 건드린다", () => {
+  const dragged = new Map<string, Position>([["b", { x: -900, y: 400 }]]);
+  const sizes = [dragged.size, RENDERED_POSITIONS.size, STORED_POSITIONS.size];
+  resolveCurrentRenderedNodePosition("b", { pendingLayoutMoves: dragged, renderedPositions: RENDERED_POSITIONS, savedPositions: STORED_POSITIONS });
+  resolveCurrentRenderedNodePosition("없는노드", { pendingLayoutMoves: dragged, renderedPositions: RENDERED_POSITIONS, savedPositions: STORED_POSITIONS });
+  assert.deepEqual([dragged.size, RENDERED_POSITIONS.size, STORED_POSITIONS.size], sizes);
+});
+
+/**
+ * 🔴 「경로점 추가」도 **같은 출처**를 쓰는가 (2026-11-05)
+ *
+ * 곧게 펴기와 같은 종류의 결함이었다. 여기서 꽂는 점은 **선의 중점**이라
+ * (addWaypointAtDefaultPosition), 양 끝 자리가 거짓이면 화면에 보이는 선을
+ * 한참 벗어난 곳에 점이 생긴다 — 그리고 그 점은 「선택된 경로점 위치에 새
+ * 노드를 삽입」의 자리가 되므로 노드까지 엉뚱한 곳에 생긴다.
+ */
+test("resolveCurrentRenderedNodePosition: 🔴 「경로점 추가」의 중점이 **화면 자리**로 세어진다 — 저장 좌표로 센 중점과 실제로 다른 점이다", () => {
+  const sources = { pendingLayoutMoves: NO_PENDING, renderedPositions: RENDERED_POSITIONS, savedPositions: STORED_POSITIONS };
+
+  // 지금(고친 뒤) — 화면 자리로 센다. 경로점이 아직 하나도 없는 선이다.
+  const fromRendered = addWaypointAtDefaultPosition([], resolveCurrentRenderedNodePosition("a", sources)!, resolveCurrentRenderedNodePosition("b", sources)!);
+  // 전(고치기 전) — 저장 좌표로 세면 이렇게 됐다.
+  const fromStored = addWaypointAtDefaultPosition([], STORED_POSITIONS.get("a")!, STORED_POSITIONS.get("b")!);
+
+  assert.equal(fromRendered.length, 1, "표본 확인 — 점이 하나도 안 꽂히면 아래가 공짜로 통과한다");
+  assert.equal(fromStored.length, 1);
+  // 화면에서 a(−486,−26) ↔ b(−346,124) 를 잇는 선의 중점.
+  assert.deepEqual(fromRendered[0], { x: -416, y: 49 });
+  // 저장 좌표에서는 x 가 둘 다 0 이라 중점이 세로축 위에 선다 — 화면의 선과 416px 떨어져 있다.
+  assert.deepEqual(fromStored[0], { x: 0, y: 75 });
+  assert.notDeepEqual(fromRendered[0], fromStored[0], "두 중점이 같으면 이 시험은 아무것도 안 재고 있다");
 });

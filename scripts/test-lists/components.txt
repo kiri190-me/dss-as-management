@@ -1100,3 +1100,16 @@ src/components/procedures/procedure-next-procedure-picker.test.ts
 #    읽는가 · 🔴 시작할 곳을 **완료보다 먼저** 푸는가, 화면이 보낸 절차 id 를 안 쓰는가.
 #    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
 src/components/procedures/execution/next-procedure-handoff.test.ts
+
+# 2026-11-05 — 노드 자리를 **중심점 기준**으로(사용자 지시 「대각선 꼭지점을 이은
+#    교차점을 중심점으로 삼아 정렬해」). 셈 자체는 값으로 재는 쪽이 따로 있다
+#    (src/lib/graph-editor-core/layout.test.ts · src/lib/domain/procedure-auto-layout.test.ts).
+#    여기서 재는 것은 **그 셈에 무엇을 먹이는가**다: 🔴 그림이 제가 그린 자리를
+#    올려보내고 그 계산이 **한 곳에만** 적혀 있는가(복제하면 시험은 통과하는데
+#    화면만 어긋난다) · 🔴 「상대 위치로 이동」과 「선택한 노드 아래 추가」가
+#    저장된 position_x/y 가 아니라 **화면 자리**를 읽는가(기술 작업 절차의 그 값은
+#    「만든 차례대로 쌓은 숫자」라 실측으로 486px·758px 어긋났다) · 🔴 거짓이 된 옛
+#    주석("Current visible position")이 지워졌는가 · 🔵 두 패널이 네 방향 모두
+#    computeCenterAlignedRelativePosition 을 쓰는가.
+#    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
+src/components/procedures/procedure-editor-center-point-placement.test.ts

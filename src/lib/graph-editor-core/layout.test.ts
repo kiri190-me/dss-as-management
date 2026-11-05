@@ -229,14 +229,35 @@ test("computeCenterAlignedRelativePosition: RIGHT alignment with different-heigh
   assert.notEqual(target.y, ref.y, "a naive copy of reference.y would NOT produce equal centers here, since heights differ");
 });
 
-test("computeCenterAlignedRelativePosition: UP/DOWN behavior is unchanged from computeRelativePosition (center-x, y offset by vertical spacing)", () => {
+/**
+ * 🔴 2026-11-05 — 이 자리에는 「UP/DOWN 은 computeRelativePosition 과 **언제나**
+ * 같다」가 적혀 있었다. 그 단언이 통과하고 있었기 때문에, 높이가 다른 두 노드를
+ * 세로로 이으면 중심 간 거리가 눈금이 아니게 되는 결함이 영영 안 드러났다.
+ * 참인 것은 **높이가 같을 때만** 같다는 것이고, 아래 두 시험이 그 둘을 갈라 적는다.
+ */
+test("computeCenterAlignedRelativePosition: UP/DOWN — 높이가 같으면 computeRelativePosition 과 한 픽셀도 다르지 않다", () => {
   const ref = { x: 100, y: 200, width: 240, height: 90 };
   const oldDown = computeRelativePosition(ref, "DOWN", SPACING, 132);
-  const newDown = computeCenterAlignedRelativePosition(ref, "DOWN", SPACING, { width: 132, height: 50 });
+  const newDown = computeCenterAlignedRelativePosition(ref, "DOWN", SPACING, { width: 132, height: 90 });
   assert.deepEqual(newDown, oldDown);
   const oldUp = computeRelativePosition(ref, "UP", SPACING, 132);
-  const newUp = computeCenterAlignedRelativePosition(ref, "UP", SPACING, { width: 132, height: 50 });
+  const newUp = computeCenterAlignedRelativePosition(ref, "UP", SPACING, { width: 132, height: 90 });
   assert.deepEqual(newUp, oldUp);
+});
+
+test("computeCenterAlignedRelativePosition: UP/DOWN — 높이가 다르면 **중심 간** 거리가 눈금이다(윗변 간 거리가 아니다)", () => {
+  const ref = { x: 100, y: 200, width: 240, height: 90 }; // 중심 y = 245
+  const target = { width: 132, height: 50 };
+  const down = computeCenterAlignedRelativePosition(ref, "DOWN", SPACING, target);
+  const up = computeCenterAlignedRelativePosition(ref, "UP", SPACING, target);
+  const refCenterY = ref.y + ref.height / 2;
+  assert.equal(down.y + target.height / 2 - refCenterY, SPACING.vertical);
+  assert.equal(refCenterY - (up.y + target.height / 2), SPACING.vertical);
+  // 윗변 기준(옛 셈)이었다면 이 값이 나왔을 것이다 — 같아지면 이 시험은 아무것도 안 재고 있다.
+  assert.notEqual(down.y, ref.y + SPACING.vertical, "윗변 간 간격으로 돌아가면 높이 차이만큼 중심이 어긋난다");
+  // 가로는 전과 같은 규칙이다 — 기준의 중심 x 에 대상의 중심 x 를 맞춘다.
+  assert.equal(down.x + target.width / 2, ref.x + ref.width / 2);
+  assert.equal(up.x, down.x);
 });
 
 test("computeCenterAlignedRelativePosition: different node widths still produce correct center-x for UP/DOWN and correct bounding-box placement for LEFT/RIGHT", () => {
@@ -546,11 +567,19 @@ test("computeStraightenedConnectedNodePosition: an already horizontally-aligned 
 
 const LAYERED_SPACING = { horizontal: 280, vertical: 150 };
 
+/**
+ * 🔵 아래 묶음의 `height` 는 2026-11-05 에 **필수 칸이 되면서** 더해졌다. 값이
+ * 다 같은 52 인 것은 일부러다 — 높이가 같으면 전체가 26(=52/2)만큼 위로 평행
+ * 이동할 뿐 **서로의 관계가 하나도 안 바뀐다**는 것을 이 시험들이 그대로 통과함
+ * 으로써 보인다. 높이가 **다를** 때의 중심 맞춤은 아래 따로 모아 둔 묶음이 잰다.
+ */
+const CHIP_H = 52;
+
 test("computeLayeredGraphLayout: a straight A->B->C chain stays at the same x (vertical continuation), one depth per hop", () => {
   const nodes = [
-    { id: "a", sortOrder: 0, width: 0 },
-    { id: "b", sortOrder: 1, width: 0 },
-    { id: "c", sortOrder: 2, width: 0 },
+    { id: "a", sortOrder: 0, width: 0, height: CHIP_H },
+    { id: "b", sortOrder: 1, width: 0, height: CHIP_H },
+    { id: "c", sortOrder: 2, width: 0, height: CHIP_H },
   ];
   const edges = [
     { fromNodeId: "a", toNodeId: "b" },
@@ -568,9 +597,9 @@ test("computeLayeredGraphLayout: a straight A->B->C chain stays at the same x (v
 
 test("computeLayeredGraphLayout: a DECISION's two children (branch) fan out symmetrically left/right of the parent, at the same depth", () => {
   const nodes = [
-    { id: "d", sortOrder: 0, width: 0 },
-    { id: "yes", sortOrder: 1, width: 0 },
-    { id: "no", sortOrder: 2, width: 0 },
+    { id: "d", sortOrder: 0, width: 0, height: CHIP_H },
+    { id: "yes", sortOrder: 1, width: 0, height: CHIP_H },
+    { id: "no", sortOrder: 2, width: 0, height: CHIP_H },
   ];
   const edges = [
     { fromNodeId: "d", toNodeId: "yes" },
@@ -587,22 +616,24 @@ test("computeLayeredGraphLayout: a DECISION's two children (branch) fan out symm
 
 test("computeLayeredGraphLayout: two independent root chains never overlap at the same depth", () => {
   const nodes = [
-    { id: "r1", sortOrder: 0, width: 0 },
-    { id: "r2", sortOrder: 1, width: 0 },
+    { id: "r1", sortOrder: 0, width: 0, height: CHIP_H },
+    { id: "r2", sortOrder: 1, width: 0, height: CHIP_H },
   ];
   const result = computeLayeredGraphLayout(nodes, [], LAYERED_SPACING);
   const r1 = result.get("r1")!;
   const r2 = result.get("r2")!;
-  assert.equal(r1.y, 0);
-  assert.equal(r2.y, 0);
+  // 깊이 0 이 정하는 것은 **중심 y** 가 0 이라는 것이다(2026-11-05) — 돌려주는
+  // y 는 좌상단이라 높이의 절반만큼 위다. 전에는 이 자리에 `=== 0` 이 적혀 있었다.
+  assert.equal(r1.y + CHIP_H / 2, 0);
+  assert.equal(r2.y + CHIP_H / 2, 0);
   assert.notEqual(r1.x, r2.x);
 });
 
 test("computeLayeredGraphLayout: a LOOP_BACK cycle (C -> A) never infinite-loops and every node still gets a position", () => {
   const nodes = [
-    { id: "a", sortOrder: 0, width: 0 },
-    { id: "b", sortOrder: 1, width: 0 },
-    { id: "c", sortOrder: 2, width: 0 },
+    { id: "a", sortOrder: 0, width: 0, height: CHIP_H },
+    { id: "b", sortOrder: 1, width: 0, height: CHIP_H },
+    { id: "c", sortOrder: 2, width: 0, height: CHIP_H },
   ];
   const edges = [
     { fromNodeId: "a", toNodeId: "b" },
@@ -619,11 +650,12 @@ test("computeLayeredGraphLayout: empty input returns an empty map", () => {
 });
 
 test("computeLayeredGraphLayout: an edge referencing an unknown node id is ignored, never throws", () => {
-  const nodes = [{ id: "a", sortOrder: 0, width: 0 }];
+  const nodes = [{ id: "a", sortOrder: 0, width: 0, height: CHIP_H }];
   const edges = [{ fromNodeId: "a", toNodeId: "ghost" }];
   const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
   assert.equal(result.size, 1);
-  assert.deepEqual(result.get("a"), { x: 0, y: 0 });
+  // 중심이 (0, 0) — 폭 0 이라 x 는 그대로 0 이고, y 만 높이의 절반만큼 위다.
+  assert.deepEqual(result.get("a"), { x: 0, y: -CHIP_H / 2 });
 });
 
 /**
@@ -634,8 +666,8 @@ test("computeLayeredGraphLayout: an edge referencing an unknown node id is ignor
  */
 test("computeLayeredGraphLayout: an unpinned single child centers on its pinned parent's REAL x, not a synthetic one", () => {
   const nodes = [
-    { id: "a", sortOrder: 0, width: 0, pinnedX: 9999 }, // manually dragged far from where the algorithm would otherwise seed it
-    { id: "b", sortOrder: 1, width: 0 },
+    { id: "a", sortOrder: 0, width: 0, height: CHIP_H, pinnedX: 9999 }, // manually dragged far from where the algorithm would otherwise seed it
+    { id: "b", sortOrder: 1, width: 0, height: CHIP_H },
   ];
   const edges = [{ fromNodeId: "a", toNodeId: "b" }];
   const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
@@ -645,9 +677,9 @@ test("computeLayeredGraphLayout: an unpinned single child centers on its pinned 
 
 test("computeLayeredGraphLayout: a pinned node's own x is never overwritten by the synthetic fan-out formula", () => {
   const nodes = [
-    { id: "d", sortOrder: 0, width: 0 },
-    { id: "yes", sortOrder: 1, width: 0, pinnedX: 500 },
-    { id: "no", sortOrder: 2, width: 0 },
+    { id: "d", sortOrder: 0, width: 0, height: CHIP_H },
+    { id: "yes", sortOrder: 1, width: 0, height: CHIP_H, pinnedX: 500 },
+    { id: "no", sortOrder: 2, width: 0, height: CHIP_H },
   ];
   const edges = [
     { fromNodeId: "d", toNodeId: "yes" },
@@ -659,8 +691,8 @@ test("computeLayeredGraphLayout: a pinned node's own x is never overwritten by t
 
 test("computeLayeredGraphLayout: the same-depth collision pass never pushes a pinned node, only its unpinned neighbor", () => {
   const nodes = [
-    { id: "r1", sortOrder: 0, width: 0, pinnedX: 100 },
-    { id: "r2", sortOrder: 1, width: 0 }, // unpinned root; would synthetically seed very close to r1
+    { id: "r1", sortOrder: 0, width: 0, height: CHIP_H, pinnedX: 100 },
+    { id: "r2", sortOrder: 1, width: 0, height: CHIP_H }, // unpinned root; would synthetically seed very close to r1
   ];
   const result = computeLayeredGraphLayout(nodes, [], LAYERED_SPACING);
   assert.equal(result.get("r1")!.x, 100, "the pinned node's x must never move, even to resolve a collision");
@@ -669,9 +701,9 @@ test("computeLayeredGraphLayout: the same-depth collision pass never pushes a pi
 
 test("computeLayeredGraphLayout: a grandchild with no override still chains correctly under a pinned grandparent", () => {
   const nodes = [
-    { id: "a", sortOrder: 0, width: 0, pinnedX: -400 },
-    { id: "b", sortOrder: 1, width: 0 },
-    { id: "c", sortOrder: 2, width: 0 },
+    { id: "a", sortOrder: 0, width: 0, height: CHIP_H, pinnedX: -400 },
+    { id: "b", sortOrder: 1, width: 0, height: CHIP_H },
+    { id: "c", sortOrder: 2, width: 0, height: CHIP_H },
   ];
   const edges = [
     { fromNodeId: "a", toNodeId: "b" },
@@ -684,9 +716,9 @@ test("computeLayeredGraphLayout: a grandchild with no override still chains corr
 
 test("computeLayeredGraphLayout: pinnedX of null/undefined/non-finite is treated as unpinned (falls back to the synthetic formula)", () => {
   const nodes = [
-    { id: "a", sortOrder: 0, width: 0, pinnedX: null },
-    { id: "b", sortOrder: 1, width: 0, pinnedX: undefined },
-    { id: "c", sortOrder: 2, width: 0, pinnedX: NaN },
+    { id: "a", sortOrder: 0, width: 0, height: CHIP_H, pinnedX: null },
+    { id: "b", sortOrder: 1, width: 0, height: CHIP_H, pinnedX: undefined },
+    { id: "c", sortOrder: 2, width: 0, height: CHIP_H, pinnedX: NaN },
   ];
   const result = computeLayeredGraphLayout(nodes, [], LAYERED_SPACING);
   assert.equal(result.size, 3);
@@ -704,8 +736,8 @@ test("computeLayeredGraphLayout: pinnedX of null/undefined/non-finite is treated
  */
 test("computeLayeredGraphLayout: a single child centers on its parent even when the child is much wider (different node widths)", () => {
   const nodes = [
-    { id: "a", sortOrder: 0, width: 132 }, // narrow parent
-    { id: "b", sortOrder: 1, width: 240 }, // much wider child (e.g. a multiline title)
+    { id: "a", sortOrder: 0, width: 132, height: CHIP_H }, // narrow parent
+    { id: "b", sortOrder: 1, width: 240, height: CHIP_H }, // much wider child (e.g. a multiline title)
   ];
   const edges = [{ fromNodeId: "a", toNodeId: "b" }];
   const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
@@ -719,9 +751,9 @@ test("computeLayeredGraphLayout: a single child centers on its parent even when 
 
 test("computeLayeredGraphLayout: a 3-node vertical chain has identical center x throughout, even with three different widths", () => {
   const nodes = [
-    { id: "a", sortOrder: 0, width: 132 },
-    { id: "b", sortOrder: 1, width: 240 },
-    { id: "c", sortOrder: 2, width: 180 },
+    { id: "a", sortOrder: 0, width: 132, height: CHIP_H },
+    { id: "b", sortOrder: 1, width: 240, height: CHIP_H },
+    { id: "c", sortOrder: 2, width: 180, height: CHIP_H },
   ];
   const edges = [
     { fromNodeId: "a", toNodeId: "b" },
@@ -736,12 +768,201 @@ test("computeLayeredGraphLayout: a 3-node vertical chain has identical center x 
 
 test("computeLayeredGraphLayout: an unpinned child centers on a pinned parent's real center, accounting for the pinned parent's own width", () => {
   const nodes = [
-    { id: "a", sortOrder: 0, width: 200, pinnedX: 1000 }, // pinned top-left x=1000, width 200 -> real center = 1100
-    { id: "b", sortOrder: 1, width: 132 },
+    { id: "a", sortOrder: 0, width: 200, height: CHIP_H, pinnedX: 1000 }, // pinned top-left x=1000, width 200 -> real center = 1100
+    { id: "b", sortOrder: 1, width: 132, height: CHIP_H },
   ];
   const edges = [{ fromNodeId: "a", toNodeId: "b" }];
   const result = computeLayeredGraphLayout(nodes, edges, LAYERED_SPACING);
   assert.equal(result.get("b")!.x + 132 / 2, 1100, "the child's center must equal the pinned parent's REAL center (1000 + 200/2), not its raw pinnedX");
+});
+
+/**
+ * ────────────────────────────────────────────────────────────────────────
+ * 🔴 세로도 **중심점 기준**이다 (2026-11-05)
+ * ────────────────────────────────────────────────────────────────────────
+ * 사용자 지시: 「노드의 대각선 꼭지점들을 가상의 선으로 잇고, 그 교차점을 그
+ * 노드의 중심점으로 삼아서 정렬해」.
+ *
+ * 가로는 전부터 중심이었는데 세로만 **윗변**이었다. 브라우저 실측(2026-11-05)으로
+ * 같은 줄에 선 노드 셋의 윗변이 전부 0 인데 중심은 26 · 26 · 41 이었다 — 제목이
+ * 세 줄이라 높이가 82 인 노드 하나만 아래로 삐져나와 보였다. 아래 숫자 52 · 82 가
+ * 그 실측값이다.
+ */
+test("computeLayeredGraphLayout: 같은 깊이에 높이가 다른 노드가 섞여도 **중심 y 가 같다**", () => {
+  const nodes = [
+    { id: "a", sortOrder: 0, width: 0, height: 52 },
+    { id: "b", sortOrder: 1, width: 0, height: 52 },
+    { id: "h", sortOrder: 2, width: 0, height: 82 }, // 제목이 세 줄이라 혼자 높다
+  ];
+  const result = computeLayeredGraphLayout(nodes, [], LAYERED_SPACING);
+  const centerY = (id: string, height: number) => result.get(id)!.y + height / 2;
+  assert.equal(centerY("a", 52), 0);
+  assert.equal(centerY("b", 52), 0);
+  assert.equal(centerY("h", 82), 0, "높이가 달라도 중심은 같은 줄에 선다");
+  // 🔴 표본 확인 — 좌상단 y 는 **반드시 달라야** 한다. 같다면 중심이 어긋난
+  //    것이고, 그것이 2026-11-05 에 고친 결함의 모양이다(윗변만 맞아 있었다).
+  assert.notEqual(result.get("h")!.y, result.get("a")!.y, "좌상단까지 같으면 중심이 어긋난 것이다");
+  assert.deepEqual([result.get("a")!.y, result.get("b")!.y, result.get("h")!.y], [-26, -26, -41]);
+});
+
+test("computeLayeredGraphLayout: 세로로 이어진 부모–자식의 **중심 y 간격이 눈금**이다 — 높이가 서로 달라도", () => {
+  const nodes = [
+    { id: "p", sortOrder: 0, width: 0, height: 82 },
+    { id: "c", sortOrder: 1, width: 0, height: 52 },
+  ];
+  const result = computeLayeredGraphLayout(nodes, [{ fromNodeId: "p", toNodeId: "c" }], LAYERED_SPACING);
+  const pCenterY = result.get("p")!.y + 82 / 2;
+  const cCenterY = result.get("c")!.y + 52 / 2;
+  assert.equal(cCenterY - pCenterY, LAYERED_SPACING.vertical);
+  // 윗변 간 간격은 눈금이 아니다 — 165 다. 이것이 같아지면 높이가 같은 표본을 쓴 것이다.
+  assert.notEqual(result.get("c")!.y - result.get("p")!.y, LAYERED_SPACING.vertical);
+});
+
+test("computeLayeredGraphLayout: 높이가 모두 같으면 **전체가 height/2 만큼 위로 평행이동**할 뿐, 서로의 관계가 하나도 안 바뀐다", () => {
+  // 🔵 height 0 의 결과가 곧 **2026-11-05 이전의 셈**이다(중심 보정이 0 이므로).
+  //    그래서 이 비교가 「전과 상대적으로 같다」를 값으로 말한다.
+  const shape = (height: number) => [
+    { id: "r1", sortOrder: 0, width: 132, height },
+    { id: "r2", sortOrder: 1, width: 240, height },
+    { id: "c1", sortOrder: 2, width: 180, height },
+    { id: "c2", sortOrder: 3, width: 96, height },
+    { id: "g1", sortOrder: 4, width: 132, height },
+  ];
+  const edges = [
+    { fromNodeId: "r1", toNodeId: "c1" },
+    { fromNodeId: "r1", toNodeId: "c2" },
+    { fromNodeId: "c1", toNodeId: "g1" },
+  ];
+  const H = 52;
+  const before = computeLayeredGraphLayout(shape(0), edges, LAYERED_SPACING);
+  const after = computeLayeredGraphLayout(shape(H), edges, LAYERED_SPACING);
+  assert.equal(before.size, 5, "표본 확인 — 지도가 비면 아래가 공짜로 통과한다");
+  assert.equal(after.size, 5);
+  for (const n of shape(H)) {
+    assert.equal(after.get(n.id)!.x, before.get(n.id)!.x, `${n.id} 의 x 는 높이와 무관해야 한다`);
+    assert.equal(after.get(n.id)!.y, before.get(n.id)!.y - H / 2, `${n.id} 이 정확히 높이의 절반만큼만 위로 간다`);
+  }
+  // 🔵 깊이가 정말 여럿인 표본인가 — 전부 한 줄이면 "평행이동"을 안 재고 있다.
+  assert.equal(new Set([...after.values()].map((p) => p.y)).size, 3);
+});
+
+test("computeLayeredGraphLayout: height 가 비유한 값이면 0 으로 친다 — width 와 같은 규칙이다", () => {
+  const nodes = [
+    { id: "a", sortOrder: 0, width: 0, height: Number.NaN },
+    { id: "b", sortOrder: 1, width: 0, height: Number.POSITIVE_INFINITY },
+  ];
+  const result = computeLayeredGraphLayout(nodes, [], LAYERED_SPACING);
+  assert.equal(result.get("a")!.y, 0);
+  assert.equal(result.get("b")!.y, 0);
+});
+
+/**
+ * ────────────────────────────────────────────────────────────────────────
+ * 🔴 깊이 0 은 **왼쪽부터 한 칸씩** (2026-11-05)
+ * ────────────────────────────────────────────────────────────────────────
+ * 사용자 신고: 「노드를 만들면 이상한 위치에 만들어지고, 연결선을 이으면 원래
+ * 자리로 돌아온다」. 가운데 대칭으로 펴던 옛 셈에서는 뿌리가 하나 늘 때마다
+ * 손도 안 댄 기존 뿌리가 전부 눈금의 절반(140px)씩 밀렸다 — 브라우저 실측으로
+ * A 의 x 가 −66 → −206 → −346 으로 갔다가, A→C 선을 잇자 −206 으로 돌아왔다.
+ */
+test("computeLayeredGraphLayout: 깊이 0 에 노드를 더해도 **기존 뿌리의 x 가 한 픽셀도 안 바뀐다**", () => {
+  const root = (id: string, sortOrder: number) => ({ id, sortOrder, width: 0, height: 52 });
+  const one = computeLayeredGraphLayout([root("a", 0)], [], LAYERED_SPACING);
+  const two = computeLayeredGraphLayout([root("a", 0), root("b", 1)], [], LAYERED_SPACING);
+  const three = computeLayeredGraphLayout([root("a", 0), root("b", 1), root("c", 2)], [], LAYERED_SPACING);
+
+  assert.equal(one.get("a")!.x, 0);
+  assert.equal(two.get("a")!.x, 0, "B 를 더해도 A 는 안 움직인다");
+  assert.equal(three.get("a")!.x, 0, "C 를 더해도 A 는 안 움직인다");
+  assert.equal(two.get("b")!.x, LAYERED_SPACING.horizontal);
+  assert.equal(three.get("b")!.x, LAYERED_SPACING.horizontal, "C 를 더해도 B 는 안 움직인다");
+  assert.equal(three.get("c")!.x, LAYERED_SPACING.horizontal * 2, "새 뿌리는 맨 뒤에만 붙는다");
+});
+
+test("computeLayeredGraphLayout: 🔵 **남는 것** — 선을 이어 어떤 뿌리가 깊이 0 에서 빠지면 그 뒤쪽 뿌리들이 한 칸 당겨진다", () => {
+  // 순수 함수라 이전 배치를 기억할 수 없다. 고치지 않기로 한 동작이라 값으로 적어 둔다.
+  const nodes = [
+    { id: "a", sortOrder: 0, width: 0, height: 52 },
+    { id: "b", sortOrder: 1, width: 0, height: 52 },
+    { id: "c", sortOrder: 2, width: 0, height: 52 },
+    { id: "d", sortOrder: 3, width: 0, height: 52 },
+  ];
+  const H = LAYERED_SPACING.horizontal;
+  const allRoots = computeLayeredGraphLayout(nodes, [], LAYERED_SPACING);
+  assert.deepEqual([allRoots.get("a")!.x, allRoots.get("b")!.x, allRoots.get("c")!.x, allRoots.get("d")!.x], [0, H, H * 2, H * 3]);
+
+  // A→B 를 이으면 B 가 깊이 1 로 내려가고, 뒤에 있던 C·D 의 차례가 하나씩 줄어든다.
+  const linked = computeLayeredGraphLayout(nodes, [{ fromNodeId: "a", toNodeId: "b" }], LAYERED_SPACING);
+  assert.equal(linked.get("b")!.x, 0, "B 는 외동이라 부모 A 의 중심을 그대로 물려받는다");
+  assert.equal(linked.get("c")!.x, H, "C 가 한 칸 당겨진다 — 2026-11-05 에 남기기로 한 동작");
+  assert.equal(linked.get("d")!.x, H * 2);
+  assert.equal(linked.get("a")!.x, 0, "앞쪽(A)은 그대로다 — 당겨지는 것은 빠진 노드의 뒤쪽뿐이다");
+});
+
+test("computeLayeredGraphLayout: 왼쪽부터 쌓아도 **pinned 노드는 제 x 를 그대로** 지킨다", () => {
+  // 🔴 왼쪽부터 쌓으면 좌표가 전부 0 이상으로 옮겨가므로, 0 근처에 못 박힌 칸이
+  //    있을 때 충돌 양상이 달라진다. 그래도 못 박힌 칸은 안 밀려야 한다.
+  const atZero = computeLayeredGraphLayout(
+    [
+      { id: "r1", sortOrder: 0, width: 0, height: 52, pinnedX: 0 },
+      { id: "r2", sortOrder: 1, width: 0, height: 52 },
+      { id: "r3", sortOrder: 2, width: 0, height: 52 },
+    ],
+    [],
+    LAYERED_SPACING
+  );
+  assert.equal(atZero.get("r1")!.x, 0, "못 박힌 칸은 충돌을 풀려고도 안 움직인다");
+  assert.equal(atZero.get("r2")!.x, LAYERED_SPACING.horizontal);
+  assert.equal(atZero.get("r3")!.x, LAYERED_SPACING.horizontal * 2);
+
+  // 옛 대칭 좌표계에서 끌어다 놓아 **음수**로 저장된 자리도 그대로 남아야 한다.
+  const atNegative = computeLayeredGraphLayout(
+    [
+      { id: "r1", sortOrder: 0, width: 0, height: 52 },
+      { id: "r2", sortOrder: 1, width: 200, height: 52, pinnedX: -500 },
+    ],
+    [],
+    LAYERED_SPACING
+  );
+  assert.equal(atNegative.get("r2")!.x, -500, "저장된 자리는 좌표계를 옮겨도 그 값 그대로다");
+  assert.equal(atNegative.get("r1")!.x, 0);
+});
+
+test("computeLayeredGraphLayout: 같은 깊이의 두 노드는 여전히 안 겹친다 — 충돌 풀기가 듣는다", () => {
+  const minGap = (result: Map<string, { x: number; y: number }>, ids: string[]) => {
+    const xs = ids.map((id) => result.get(id)!.x).sort((a, b) => a - b);
+    return xs.slice(1).reduce((min, x, i) => Math.min(min, x - xs[i]), Infinity);
+  };
+
+  // 뿌리 다섯 — 왼쪽부터 쌓는 것만으로 이미 눈금만큼 떨어진다.
+  const roots = computeLayeredGraphLayout(
+    Array.from({ length: 5 }, (_, i) => ({ id: `r${i}`, sortOrder: i, width: 0, height: 52 })),
+    [],
+    LAYERED_SPACING
+  );
+  assert.ok(minGap(roots, ["r0", "r1", "r2", "r3", "r4"]) >= LAYERED_SPACING.horizontal);
+
+  // 깊이 1 — 부모가 둘이고 한쪽 부채꼴이 옆 줄기와 겹치러 간다.
+  const nodes = [
+    { id: "p1", sortOrder: 0, width: 0, height: 52 },
+    { id: "p2", sortOrder: 1, width: 0, height: 52 },
+    { id: "c1", sortOrder: 2, width: 0, height: 52 },
+    { id: "c2", sortOrder: 3, width: 0, height: 52 },
+    { id: "c3", sortOrder: 4, width: 0, height: 52 },
+  ];
+  const result = computeLayeredGraphLayout(
+    nodes,
+    [
+      { fromNodeId: "p1", toNodeId: "c1" },
+      { fromNodeId: "p1", toNodeId: "c2" },
+      { fromNodeId: "p2", toNodeId: "c3" },
+    ],
+    LAYERED_SPACING
+  );
+  // 🔵 표본 확인 — 충돌 풀기가 **정말 일을 했는가**. 부채꼴만 보면 c3 는 부모
+  //    p2 의 중심(280)에 서야 하는데, c2(140)와 140px 밖에 안 떨어져 밀려난다.
+  assert.notEqual(result.get("c3")!.x, LAYERED_SPACING.horizontal, "밀리지 않았다면 이 시험은 충돌 풀기를 안 재고 있다");
+  assert.ok(minGap(result, ["c1", "c2", "c3"]) >= LAYERED_SPACING.horizontal);
 });
 
 test("isAlignedVerticalConnection: identical centers are aligned", () => {

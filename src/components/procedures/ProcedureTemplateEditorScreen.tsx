@@ -57,6 +57,7 @@ import {
   computeDirtyProcedureEdgeFieldEntries,
   computeDirtyProcedurePositionNodeIds,
   computeDirtyProcedureRouteEdgeIds,
+  resolveCurrentRenderedNodePosition,
   planProcedureSaveSteps,
   runProcedureSaveSequence,
   succeededProcedureNodeFieldIds,
@@ -355,6 +356,31 @@ export default function ProcedureTemplateEditorScreen({
     return resolveEffectiveNodeDimensions(resolveMeasuredNodeDimensions(n.id), estimatedNodeDimensions(n));
   }
 
+  /**
+   * 🔴 **그림이 실제로 그린 자리**를 노드 id 마다(2026-11-05).
+   *
+   * 크기(resolveNodeDimensions)의 **자리 쪽 짝**이다. 전까지 두 패널은 기준
+   * 노드의 자리를 저장된 position_x/y 로 읽었는데, 기술작업절차의 그 값은
+   * 「만든 차례대로 쌓은 숫자」(x 가 전부 0)일 뿐 사람이 그린 자리가 아니다 —
+   * 노드를 그림은 제 나름의 자동 배치로 그린다. 그래서 화면에서 x = −486 에
+   * 서 있는 노드의 「아래」를 눌러도 새 노드가 x = 0 에, 다른 노드 위로
+   * 포개져 꽂혔다(브라우저 실측).
+   *
+   * 🔴 **자리를 여기서 다시 세지 않는다.** 그림이 제가 그린 값을 올려보내고
+   * (ProcedureFlowGraph 의 onRenderedPositionsChange) 이 화면은 그대로 들고
+   * 있다가 패널에 넘길 뿐이다. 같은 계산이 두 벌이 되면 「시험은 통과하는데
+   * 화면만 어긋나는」 자리가 생긴다.
+   *
+   * 🔵 ref 가 아니라 state 다 — 패널은 이 값을 **렌더 중에** 읽을 수 있어야
+   * 한다(단추를 누르는 순간이 아니라 그려 둔 함수 안에서 읽는다). 올려보내는
+   * 쪽이 effect 한 번에 한 번만 부르고 지도의 신원이 안정적이라, 이 setState 가
+   * 끝없는 되그리기로 번지지 않는다.
+   */
+  const [renderedNodePositions, setRenderedNodePositions] = useState<ReadonlyMap<string, { x: number; y: number }>>(() => new Map());
+  const handleRenderedPositionsChange = useCallback((positions: ReadonlyMap<string, { x: number; y: number }>) => {
+    setRenderedNodePositions(positions);
+  }, []);
+
   // Same sourceWorksheet+sourceShapeId matching technique
   // getProcedureTemplateDetail's openIssuesByNodeId already uses — the
   // editor's read-model doesn't pre-join this since not every caller of
@@ -386,11 +412,46 @@ export default function ProcedureTemplateEditorScreen({
     return map;
   }, [template.nodes]);
   const [pendingLayoutMoves, setPendingLayoutMoves] = useState<Map<string, Position>>(new Map());
+  /**
+   * 저장된 자리 + 이번 세션의 끌기. **「화면에 그려지는 자리」가 아니다** —
+   * 자리 값이 없는 노드를 그림은 제 나름의 자동 배치로 그린다.
+   *
+   * 🔴 2026-11-05 현재 이것을 읽는 곳은 **유령 칸의 받침(anchorPositions) 하나
+   * 뿐**이고, 그것은 **일부러 남긴 것**이다(그 자리의 주석에 까닭 둘). 자리를
+   * 바꾸는 조작 셋 — 「상대 위치로 이동」· 「선택한 노드 아래 추가」· 「연결선
+   * 곧게 펴기」· 「경로점 추가」 — 은 전부 아래 resolveCurrentPosition 으로
+   * 옮겨 갔다. 🔵 **여기에 쓰임을 새로 더하지 마라**: 자리를 읽는 일이면
+   * 십중팔구 resolveCurrentPosition 쪽이 맞다.
+   */
   const workingLayoutPositions = useMemo(() => {
     const map = new Map(savedLayoutPositions);
     for (const [id, pos] of pendingLayoutMoves) map.set(id, pos);
     return map;
   }, [savedLayoutPositions, pendingLayoutMoves]);
+
+  /**
+   * 🔴 **자리를 바꾸는 조작이 기준으로 삼아야 하는 값** — 그림에 그려져 있는
+   * 자리다. 위 두 지도와 **다르다**: 저 둘은 저장된 값(+이번 세션의 끌기)이고,
+   * 자리 값이 없는 노드를 그림은 제 나름의 자동 배치로 그린다.
+   *
+   * 차례 셋과 「덧셈이 아니라 고르기」인 까닭은 resolveCurrentRenderedNodePosition
+   * 의 주석에 있다 — 셈을 여기 다시 적지 않는 것은 그래야 값으로 시험할 수
+   * 있기 때문이다(procedure-editor-save-state.test.ts).
+   *
+   * 🔵 받침이 `savedLayoutPositions`(끌기를 안 섞은 쪽)인 것은 일부러다 —
+   * 끌기는 ①이 이미 맡고 있어서, 여기에 workingLayoutPositions 를 넣으면 같은
+   * 값이 두 칸에 걸쳐 「두 번 반영되나?」를 읽는 사람이 매번 따져야 한다.
+   * 세 칸의 뜻이 서로 안 겹치게 둔다.
+   */
+  const resolveCurrentPosition = useCallback(
+    (nodeId: string): Position | undefined =>
+      resolveCurrentRenderedNodePosition(nodeId, {
+        pendingLayoutMoves,
+        renderedPositions: renderedNodePositions,
+        savedPositions: savedLayoutPositions,
+      }),
+    [pendingLayoutMoves, renderedNodePositions, savedLayoutPositions]
+  );
 
   // Phase 4B — 사용자 배치 manual edge-route (waypoint) pending state, the
   // edge-level sibling of pendingLayoutMoves above. A map *entry with
@@ -690,8 +751,35 @@ export default function ProcedureTemplateEditorScreen({
   //    「새로 추가된 노드」로 올린다 — 어느 것도 사람이 시킨 적 없는 일이다.
   //    그림에만 따로 넘기는 길(ghostNodes/ghostEdges)이 그래서 생겼다.
   //
-  // 🔵 **받침 자리**의 기준은 지금 그려지고 있는 자리(workingLayoutPositions —
-  //    저장된 자리 + 끌고 있는 자리)다.
+  // 🔵 **받침 자리**의 기준은 workingLayoutPositions(저장된 자리 + 끌고 있는
+  //    자리)다.
+  //
+  // 🔴 **「지금 그려지고 있는 자리」가 아니다**(2026-11-05 에 바로잡았다). 이
+  //    주석에 그렇게 적혀 있었는데 사실이 아니다 — 바로 아래 문단이 설명하듯
+  //    자리 값이 없는 노드를 그림은 자동 배치로 그리고, workingLayoutPositions
+  //    는 그 값을 모른다. 같은 거짓말이 「연결선 곧게 펴기」에도 적혀 있었고
+  //    거기서는 실제로 노드를 엉뚱한 곳으로 보냈다(handleEdgeDoubleClick).
+  //
+  // 🔴 **그런데 여기만은 그대로 두었다**(2026-11-05 판단). 고치려면 그림이
+  //    올려보낸 지도(renderedNodePositions)를 여기 넣어야 하는데, 그러면 고리가
+  //    닫힌다: 유령 받침이 바뀜 → ghostNodes 의 신원이 바뀜 → 그림의
+  //    layeredLayout memo 가 다시 돎 → resolveBaselinePosition 이 바뀜 →
+  //    올려보낼 지도가 **새 Map** 으로 다시 만들어짐 → effect 가 또 돎 →
+  //    유령 받침이 또 바뀜. 값이 수렴하더라도 **신원이 수렴하지 않아** 렌더가
+  //    멈추지 않는다(buildFieldStepGhostGraph 도 매번 새 객체를 낸다).
+  //    useAutoLayoutForUnpositionedNodes 가 꺼진 절차에서도 똑같이 닫힌다 —
+  //    그쪽 가지도 ghostNodes 를 의존 목록에 두고 매번 새 빈 Map 을 낸다.
+  //
+  // 🔵 **게다가 여기서는 고칠 것이 없다.** 유령이 실제로 그려지는 자리는 이
+  //    받침이 아니라 자동 배치가 센 값이다(ProcedureFlowGraph 의
+  //    resolveGhostPosition 차례 ②, 그리고 buildFieldStepGhostGraph 머리말의
+  //    「②③ 이 센 x/y 는 그 절차에서는 안 쓰인다」). 현장에서 사람이 끌어다
+  //    놓은 자리가 있는 유령(차례 ①)은 그 값을 **단계 자신**이 들고 오지
+  //    anchorPositions 에서 읽지 않는다. 즉 이 지도가 화면에 닿는 길은
+  //    자동 배치를 안 켠 절차 하나뿐이고, 거기서는 자리 값이 다 차 있어
+  //    workingLayoutPositions 가 곧 화면 자리다.
+  //
+  // 🔴 **「빠뜨린 것」으로 보고 고치지 마라** — 위 고리가 그대로 살아난다.
   //
   // 🔴 **「받침」인 까닭**(2026-11-04 에 뜻이 바뀌었다): workingLayoutPositions 는
   //    저장된 자리(position_x/y · user_position_x/y)를 읽는데, 자리 값이 없는
@@ -1379,11 +1467,16 @@ export default function ProcedureTemplateEditorScreen({
    * (canStraighten below) — one function, no duplicated math, no
    * duplicated save path, called identically from either entry point.
    *
-   * Position/dimension sources match 1D exactly: workingLayoutPositions
+   * 🔴 2026-11-05 — **자리의 출처를 바꿨다.** 여기에는 「workingLayoutPositions
    * (server baseline + pendingLayoutMoves merged — the CURRENT visible
-   * position, including any unsaved drag) and resolveNodeDimensions
-   * (measured-first via the React Flow instance, estimate-fallback) on
-   * renderedNodes (baseline + pending-draft-merged rows). No no-op
+   * position)」이라고 적혀 있었는데 **사실이 아니었다.** 그 지도는
+   * `resolveEffectiveNodePosition(n, "USER")` 로 만들어진다 — 저장된 자리가
+   * 없는 노드에서는 「만든 차례대로 쌓은 숫자」(x 가 전부 0)이고, 기술 작업
+   * 절차에서는 그것이 **기본**이다(그런 노드를 그림은 자동 배치로 그린다).
+   * 그래서 곧게 펴기가 화면에 안 보이는 좌표로 노드를 보냈다. 지금은
+   * resolveCurrentPosition — 그림이 올려보낸 **화면 자리**를 쓴다(아래 그 함수의
+   * 주석에 차례 셋과 받침). 크기 쪽(resolveNodeDimensions: 측정값 우선, 추정값
+   * 받침)은 1D 그대로다. No no-op
    * position guard here — matching Case's own precedent exactly:
    * computeStraightenedConnectedNodePosition already returns the target's
    * unchanged position when already aligned, and
@@ -1399,8 +1492,8 @@ export default function ProcedureTemplateEditorScreen({
       if (!edge) return;
       const sourceNode = renderedNodes.find((n) => n.id === edge.fromNodeId);
       const targetNode = renderedNodes.find((n) => n.id === edge.toNodeId);
-      const sourcePos = workingLayoutPositions.get(edge.fromNodeId);
-      const targetPos = workingLayoutPositions.get(edge.toNodeId);
+      const sourcePos = resolveCurrentPosition(edge.fromNodeId);
+      const targetPos = resolveCurrentPosition(edge.toNodeId);
       if (!sourceNode || !targetNode || !sourcePos || !targetPos) return;
 
       const sourceDims = resolveNodeDimensions(sourceNode);
@@ -1420,7 +1513,7 @@ export default function ProcedureTemplateEditorScreen({
         });
       }
     },
-    [template.edges, renderedNodes, workingLayoutPositions, pendingEdgeRouteMoves, savedEdgeRoutes, setPendingPosition, resolveNodeDimensions]
+    [template.edges, renderedNodes, resolveCurrentPosition, pendingEdgeRouteMoves, savedEdgeRoutes, setPendingPosition, resolveNodeDimensions]
   );
 
   /**
@@ -1429,14 +1522,22 @@ export default function ProcedureTemplateEditorScreen({
    * current segment. Forces USER (사용자 배치) mode — the newly-added point
    * is otherwise invisible/unclickable (see this file's own layoutMode
    * doc comment), silently blocking the very next step the side panel
-   * asks for ("선택된 경로점 위치에 새 노드를 삽입"). Unchanged from before 1C.
+   * asks for ("선택된 경로점 위치에 새 노드를 삽입").
+   *
+   * 🔴 양 끝의 자리는 **곧게 펴기와 같은 출처**다(resolveCurrentPosition —
+   * 그림이 올려보낸 화면 자리). 둘의 출처가 갈리면 안 되는 까닭은, 둘 다
+   * 「화면에 보이는 그 선」을 기준으로 삼는 조작이기 때문이다: 여기서 꽂는
+   * 점은 **그 선의 중점**인데(addWaypointAtDefaultPosition), 끝점이 저장된
+   * 자리면 자동 배치로 그려지는 절차에서 보이는 선을 한참 벗어난 곳에 점이
+   * 생긴다. 2026-11-05 까지 여기만 workingLayoutPositions 를 읽고 있었다 —
+   * 곧게 펴기와 **같은 종류의 결함**이었고, 거기를 고치면서 함께 고쳤다.
    */
   const handleAddWaypoint = useCallback(() => {
     if (!selectedEdgeId) return;
     pushPendingUndoStep();
     const edge = template.edges.find((e) => e.id === selectedEdgeId);
-    const source = edge ? workingLayoutPositions.get(edge.fromNodeId) : undefined;
-    const target = edge ? workingLayoutPositions.get(edge.toNodeId) : undefined;
+    const source = edge ? resolveCurrentPosition(edge.fromNodeId) : undefined;
+    const target = edge ? resolveCurrentPosition(edge.toNodeId) : undefined;
     if (!edge || !source || !target) return;
     setLayoutMode("USER");
     setPendingEdgeRouteMoves((prev) => {
@@ -1444,7 +1545,7 @@ export default function ProcedureTemplateEditorScreen({
       next.set(selectedEdgeId, addWaypointAtDefaultPosition(currentWorkingRoutePoints(prev, selectedEdgeId), source, target));
       return next;
     });
-  }, [selectedEdgeId, template.edges, workingLayoutPositions, savedEdgeRoutes, pushPendingUndoStep]);
+  }, [selectedEdgeId, template.edges, resolveCurrentPosition, savedEdgeRoutes, pushPendingUndoStep]);
 
   /** "선택 경로점 삭제" (button and Delete/Backspace) — removing the last remaining point restores automatic routing, per removeWaypoint's own semantics. Unchanged from before 1C. */
   const handleRemoveSelectedWaypoint = useCallback(() => {
@@ -1715,6 +1816,7 @@ export default function ProcedureTemplateEditorScreen({
             highlightedEdgeIds={focusHighlightedEdgeIds}
             editable={canEdit}
             useAutoLayoutForUnpositionedNodes={isTechnical}
+            onRenderedPositionsChange={handleRenderedPositionsChange}
             onNodeSelectionChange={handleNodeSelectionChange}
             onNodeClickIntercept={handleNodeClickIntercept}
             onEdgeSelectionChange={handleEdgeSelectionChange}
@@ -1801,6 +1903,7 @@ export default function ProcedureTemplateEditorScreen({
               onDraftChange={(patch) => updateNodeFieldDraft(selectedNode.id, patch)}
               onPositionDraftChange={(position) => setPendingPosition(selectedNode.id, position)}
               resolveNodeDimensions={resolveNodeDimensions}
+              renderedPositions={renderedNodePositions}
               onSaved={handleStructuralSaved}
               nextProcedureCandidates={nextProcedureCandidates}
               canDelete={canDeleteGraph}
@@ -1863,6 +1966,7 @@ export default function ProcedureTemplateEditorScreen({
               onSaved={handleStructuralSaved}
               selectedNode={selectedNode}
               resolveNodeDimensions={resolveNodeDimensions}
+              renderedPositions={renderedNodePositions}
             />
           )}
 
