@@ -144,12 +144,208 @@ test("🔴 분기 이름이 **제 선**에 붙는다 — 선분까지의 거리�
   assert.ok(yes.confident, "YES 가 차점과 거의 비겼다고 나왔다");
   assert.ok(no.confident, "NO 가 차점과 거의 비겼다고 나왔다");
 
+  // 🔴 엑셀 글자는 `YES`·`NO` 지만 분기에 실리는 이름은 「정상」·「NG」로 통일된다
+  //    (2026-11-05 사용자 결정). 어느 선에 붙었는지는 위에서 원본 글자로 재고,
+  //    무엇이 실리는지는 여기서 통일된 값으로 잰다 — 둘은 다른 질문이다.
   const edgeToInspection = result.edges.find((e) => e.toNodeCode === "t1-11");
   const edgeToRecheck = result.edges.find((e) => e.toNodeCode === "t1-12");
-  assert.equal(edgeToInspection?.branchType, "YES");
-  assert.equal(edgeToInspection?.branchLabel, "YES");
-  assert.equal(edgeToRecheck?.branchType, "NO");
-  assert.equal(edgeToRecheck?.branchLabel, "NO");
+  assert.equal(edgeToInspection?.branchType, "NORMAL");
+  assert.equal(edgeToInspection?.branchLabel, "정상");
+  assert.equal(edgeToRecheck?.branchType, "NG");
+  assert.equal(edgeToRecheck?.branchLabel, "NG");
+});
+
+test("🔴 분기 이름은 「정상」·「NG」 둘뿐이다 — 이름 없는 분기에는 이름이 안 생긴다", () => {
+  const input = buildMainFixture();
+  const result = extractTechnicalTaskGraph(input);
+
+  // ① 본보기가 비어 있지 않다 — 이름이 붙은 선 둘과 안 붙은 선 셋이 **둘 다** 있다.
+  //    🔴 한쪽이 0이면 아래 단언이 공짜로 통과한다.
+  const named = result.edges.filter((e) => e.branchLabel !== null);
+  const unnamed = result.edges.filter((e) => e.branchLabel === null);
+  assert.equal(named.length, 2, "이름이 붙은 분기가 둘이 아니다 — 본보기가 바뀌었다");
+  assert.ok(unnamed.length >= 3, "이름 없는 분기가 없다 — 아래 단언이 아무것도 안 잰다");
+
+  // ② 쓰이는 이름은 그 둘뿐이다.
+  assert.deepEqual([...new Set(named.map((e) => e.branchLabel))].sort(), ["NG", "정상"]);
+  // ③ 갈래도 이름과 어긋나지 않는다 — 어긋나면 화면이 「정상」을 파란 선으로 그린다.
+  assert.deepEqual([...new Set(named.map((e) => e.branchType))].sort(), ["NG", "NORMAL"]);
+
+  // ④ 🔴 **이름 없는 분기는 그대로 둔다.** 이것까지 안 재면 「전부 정상/NG 로
+  //    뭉개기」로 바뀌어도 ②·③이 통과한다.
+  //    🔵 이 본보기의 판단 상자(10)는 나가는 선 둘에 **이름이 다 붙어 있어서**
+  //    「NG 의 짝인 이름 없는 선」 예외(5-3 절 · 아래 시험들)가 안 걸린다. 여기 남은
+  //    이름 없는 넷은 시작 노드와 TASK·조치에서 그냥 다음 단계로 가는 선이다.
+  for (const edge of unnamed) {
+    assert.equal(edge.branchType, "DEFAULT", `이름 없는 분기에 갈래가 생겼다: ${edge.fromNodeCode}`);
+  }
+});
+
+test("🔴 사람이 적은 이름(CUSTOM)은 통일에 안 휩쓸린다 — 다만 이 길로는 아직 안 들어온다", () => {
+  // 🔴 「유상」 같은 글자가 든 작은 상자는 **분기 이름으로 안 읽힌다** —
+  //    `isBranchLabelText` 가 NG·YES·NO·OK·정상 어휘만 분기 이름으로 치기 때문이다
+  //    (글자 한 줄짜리 진짜 작업 상자를 이름으로 먹지 않으려고 일부러 그렇게 뒀다).
+  //    그래서 선에 안 붙고, 어떤 연결선도 안 닿으므로 「흐름에 안 닿음」으로 버려진다.
+  //    🔵 실측(열한 시트)에서도 CUSTOM 은 0건이고, 고립 도형 13개는 전부 사진 캡션이었다.
+  const input = buildMainFixture();
+  input.shapes.push(shape("22", "유상", { x: 1500000, y: 2600000, cx: 400000, cy: 300000 }));
+  const result = extractTechnicalTaskGraph(input);
+
+  assert.equal(
+    result.labelBindings.some((b) => b.labelText === "유상"),
+    false,
+    "분기 어휘가 아닌 글자가 분기 이름으로 붙었다"
+  );
+  assert.equal(result.droppedShapes.find((d) => d.shapeId === "22")?.reason, "NOT_IN_FLOW");
+  assert.equal(
+    result.edges.some((e) => e.branchLabel === "유상"),
+    false
+  );
+});
+
+/**
+ * ============================================================================
+ * 🔴 판단에서 **NG 와 짝지어 갈라지는 이름 없는 선** (2026-11-05 사용자 지시)
+ * ============================================================================
+ * 엑셀 흐름도는 갈림길에 **NG 쪽에만** 이름을 적는다 — 정상 쪽은 그냥 아래로
+ * 내려가는 선이라 글자가 없다. 실측으로 열한 시트의 판단 노드 **90곳**이 그 모양이다.
+ *
+ * 본보기가 담은 것:
+ *   - 판단 상자(1)에서 **「NG」가 붙은 선**(→2)과 **이름 없는 선**(→3)이 나간다.
+ *   - 그 아래에 **판단이 아닌** 평범한 이어짐(3 →4)이 하나 더 있다.
+ *   - 들어오는 선이 없는 1 에 시작 노드가 자동으로 붙는다(그 분기도 이름이 없다).
+ *
+ * 🔴 **뒤의 둘이 알맹이다.** 「이름 없는 선을 정상으로」만 재면 「전부 정상으로
+ * 뭉개기」가 통과한다 — 판단이 아닌 자리의 이름 없는 선이 그대로인지를 함께 잰다.
+ */
+function buildNgPairFixture(): TechnicalTaskGraphInput {
+  return {
+    sheetName: "(TEST) NG 의 짝",
+    nodeCodePrefix: "p1",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 상태 확인", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 부품 교환", { x: 100000, y: 3000000, cx: 1000000, cy: 500000 }),
+      shape("3", "사아자 작업", { x: 1500000, y: 3000000, cx: 1200000, cy: 500000 }),
+      shape("4", "아자차 작업", { x: 1500000, y: 5000000, cx: 1200000, cy: 500000 }),
+      // 분기 이름은 **NG 쪽에만** 붙어 있다 — 워크북의 실제 표기가 이렇다.
+      shape("9", "NG", { x: 650000, y: 2000000, cx: 300000, cy: 300000 }),
+    ],
+    connectors: [
+      connector("cNG", "1", "2", { x: 600000, y: 1500000, cx: 0, cy: 1500000 }),
+      connector("cPair", "1", "3", { x: 2000000, y: 1500000, cx: 0, cy: 1500000 }),
+      // 판단이 아닌 노드에서 그냥 다음 단계로 가는 선.
+      connector("cChain", "3", "4", { x: 2100000, y: 3500000, cx: 0, cy: 1500000 }),
+    ],
+  };
+}
+
+test("🔴 본보기가 비어 있지 않다 — 판단 하나에 NG 선과 이름 없는 선이 **하나씩** 나간다", () => {
+  const result = extractTechnicalTaskGraph(buildNgPairFixture());
+
+  // 「NG」가 엉뚱한 선에 붙으면 아래 시험들이 전부 딴것을 재게 된다 — 먼저 못 박는다.
+  const ng = result.labelBindings.find((b) => b.labelText === "NG");
+  assert.equal(ng?.connectorId, "cNG", "NG 가 제 선에 안 붙었다 — 본보기가 바뀌었다");
+  assert.ok(ng?.confident, "NG 가 차점과 거의 비겼다 — 본보기 좌표를 다시 봐야 한다");
+
+  // 판단 상자가 **판단으로** 읽혔는지. 아니면 이 본보기는 다른 것을 재고 있다.
+  assert.equal(result.nodes.find((n) => n.sourceShapeId === "1")?.nodeType, "DECISION");
+  assert.equal(result.nodes.find((n) => n.sourceShapeId === "3")?.nodeType, "TASK");
+  assert.equal(excelEdges(result).length, 3);
+});
+
+test("🔴 판단에서 NG 와 짝지어 나가는 **이름 없는 선**이 「정상」이 된다 (사용자 지시)", () => {
+  const result = extractTechnicalTaskGraph(buildNgPairFixture());
+
+  const pair = result.edges.find((e) => e.sourceConnectorId === "cPair");
+  assert.equal(pair?.branchType, "NORMAL", "NG 의 짝이 이름 없는 채로 남았다");
+  assert.equal(pair?.branchLabel, "정상");
+
+  // NG 쪽은 그대로다 — 짝을 올리면서 제 이름을 잃으면 안 된다.
+  const ng = result.edges.find((e) => e.sourceConnectorId === "cNG");
+  assert.equal(ng?.branchType, "NG");
+  assert.equal(ng?.branchLabel, "NG");
+
+  // 🔵 이름이 생겨도 **노드 유형은 그대로**다(이미 NG 를 내보내 판단이었다).
+  assert.equal(result.nodes.find((n) => n.sourceShapeId === "1")?.nodeType, "DECISION");
+});
+
+test("🔴 판단이 **아닌** 곳의 이름 없는 선은 그대로다 — 없으면 「전부 정상으로 뭉개기」가 통과한다", () => {
+  const result = extractTechnicalTaskGraph(buildNgPairFixture());
+
+  // ① 작업 → 작업. 갈림이 아니라 그냥 다음 단계다.
+  const chain = result.edges.find((e) => e.sourceConnectorId === "cChain");
+  assert.equal(chain?.branchType, "DEFAULT", "판단이 아닌 곳의 선에 갈래가 생겼다");
+  assert.equal(chain?.branchLabel, null);
+
+  // ② 자동으로 더한 시작 분기. 엑셀에 없던 선이라 더더욱 이름을 지어내면 안 된다.
+  const fromStart = result.edges.find((e) => e.sourceConnectorId === null);
+  assert.ok(fromStart, "시작 분기가 없다 — 이 시험이 아무것도 안 잰다");
+  assert.equal(fromStart.branchType, "DEFAULT");
+  assert.equal(fromStart.branchLabel, null);
+
+  // ③ 이름이 생긴 선은 **딱 둘**이다(NG 하나와 그 짝 하나).
+  assert.equal(result.edges.filter((e) => e.branchLabel !== null).length, 2);
+});
+
+test("🔴 이름 없는 선이 **둘**이면 안 올린다 — 어느 쪽이 정상인지 우리가 못 가린다", () => {
+  const input = buildNgPairFixture();
+  input.connectors.push(connector("cPair2", "1", "4", { x: 2300000, y: 1500000, cx: 900000, cy: 3500000 }));
+  const result = extractTechnicalTaskGraph(input);
+
+  // 본보기가 실제로 그 모양이 됐는지 먼저 본다 — 아니면 아래가 공짜로 통과한다.
+  const fromDecision = result.edges.filter((e) => e.fromNodeCode === "p1-1");
+  assert.equal(fromDecision.length, 3, "판단에서 나가는 선이 셋이 아니다");
+
+  for (const connectorId of ["cPair", "cPair2"]) {
+    const edge = result.edges.find((e) => e.sourceConnectorId === connectorId);
+    assert.equal(edge?.branchType, "DEFAULT", `${connectorId} 를 찍어서 정상으로 올렸다`);
+    assert.equal(edge?.branchLabel, null);
+  }
+});
+
+test("🔴 「정상」이 **이미 따로** 있으면 안 올린다 — 한 판단에 정상이 둘 생긴다", () => {
+  const input = buildNgPairFixture();
+  // cPair 에 「O.K.」를 붙이고(= 통일되어 정상), 이름 없는 선을 하나 더 낸다.
+  input.shapes.push(shape("10", "O.K.", { x: 2050000, y: 2000000, cx: 300000, cy: 300000 }));
+  input.connectors.push(connector("cPair2", "1", "4", { x: 2300000, y: 1500000, cx: 900000, cy: 3500000 }));
+  const result = extractTechnicalTaskGraph(input);
+
+  assert.equal(
+    result.labelBindings.find((b) => b.labelText === "O.K.")?.connectorId,
+    "cPair",
+    "O.K. 가 제 선에 안 붙었다 — 본보기가 바뀌었다"
+  );
+  assert.equal(result.edges.find((e) => e.sourceConnectorId === "cPair")?.branchLabel, "정상");
+
+  const extra = result.edges.find((e) => e.sourceConnectorId === "cPair2");
+  assert.equal(extra?.branchType, "DEFAULT", "정상이 이미 있는데 또 올렸다 — 한 판단에 정상이 둘이다");
+  assert.equal(extra?.branchLabel, null);
+});
+
+test("🔴 NG 가 **없으면** 안 올린다 — 이름 없는 선 둘은 갈림이 아니다", () => {
+  // 실측에서 이 모양이 두 곳 있다(나가는 선 둘인데 이름이 하나도 없음). 조건 ①이
+  // 없으면 여기서 아무 선이나 「정상」이 되고, 갈림이 아닌 것에 갈래 이름이 생긴다.
+  const result = extractTechnicalTaskGraph({
+    sheetName: "(TEST) NG 가 없는 갈림",
+    nodeCodePrefix: "p2",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 작업", { x: 100000, y: 3000000, cx: 1000000, cy: 500000 }),
+      shape("3", "사아자 작업", { x: 1500000, y: 3000000, cx: 1200000, cy: 500000 }),
+    ],
+    connectors: [
+      connector("cL", "1", "2", { x: 600000, y: 1500000, cx: 0, cy: 1500000 }),
+      connector("cR", "1", "3", { x: 2000000, y: 1500000, cx: 0, cy: 1500000 }),
+    ],
+  });
+
+  assert.equal(excelEdges(result).length, 2, "본보기가 바뀌었다 — 나가는 선이 둘이 아니다");
+  for (const edge of result.edges) {
+    assert.equal(edge.branchType, "DEFAULT", `NG 가 없는데 갈래가 생겼다: ${edge.sourceConnectorId}`);
+    assert.equal(edge.branchLabel, null);
+  }
 });
 
 test("🔴 선의 **상자 가운데**로 재면 YES 가 엉뚱한 선을 고른다 — 그래서 선분 거리를 쓴다", () => {
@@ -648,6 +844,280 @@ test("🔴 이어 붙인 사실이 **메모로 남는다** — 엑셀에 적힌 
   assert.equal(note.issueType, "DANGLING_CONNECTOR");
   assert.ok(note.message.includes("좌표로"));
   assert.ok(note.message.includes("라마바 작업"), "어느 도형에 붙였는지가 메모에 없다");
+});
+
+// ── 글자 없는 「이음목」 (2026-11-05) ──────────────────────────────────────
+//
+// 🔴 **고친 결함**: 글자 없는 작은 네모가 EMPTY_BOX 로 버려지면서 거기 닿던 선이
+//    전부 함께 버려져, `(5)통전검사(3상입력)` 의 **NG 가지 넷이 통째로 사라졌다.**
+//    네 점검 상자가 「아래로 선 하나뿐」인 INSPECTION 이 되고, 갈 곳 잃은 「NG」
+//    글자 셋이 경고로 남고, 하나는 엉뚱한 선에 붙어 MISSING_OUTGOING_PATH 를 냈다.
+
+/**
+ * 이음목 본보기 — 실측 `(5)통전검사(3상입력)` 의 모양을 줄여 옮겼다(글자는 가짜).
+ *
+ *   점검 상자(1) ──아래──▶ 다음 작업(2)          ← 이름 없는 기본 선 c1
+ *        └──오른쪽──▶ **글자 없는 네모(90)** ──▶ …  ← NG 선 c2 (그 위에 「NG」 글자 80)
+ *
+ * 🔵 이음목 건너편의 배선만 시험마다 갈아 끼운다 — 한 줄로 이어지는지, 연달아
+ * 있는지, 둘로 갈라지는지, 고리를 이루는지가 이 규칙의 네 갈래 전부다.
+ */
+function buildPassThroughFixture(options: {
+  sheetName: string;
+  nodeCodePrefix: string;
+  junctionShapes: TechnicalTaskShapeInput[];
+  junctionConnectors: TechnicalTaskConnectorInput[];
+}): TechnicalTaskGraphInput {
+  return {
+    sheetName: options.sheetName,
+    nodeCodePrefix: options.nodeCodePrefix,
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 전원 점검", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 작업 실시", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+      shape("3", "사아자 기판 교환", { x: 400000, y: 5000000, cx: 2000000, cy: 500000 }),
+      // 🔴 분기 이름은 **c2 선분 위**에 떠 있다. 이어 붙인 뒤에도 선이 그려진 자리가
+      //    그대로여야 이 글자가 제 선을 찾는다 — 그 자리를 옮기면 지금 고치는 결함이
+      //    모양만 바꿔 되살아난다(「NG」가 엉뚱한 선으로 간다).
+      shape("80", "NG", { x: 3000000, y: 1050000, cx: 400000, cy: 300000 }),
+      ...options.junctionShapes,
+    ],
+    connectors: [
+      connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 }),
+      connector("c2", "1", "90", { x: 2400000, y: 1200000, cx: 1600000, cy: 0 }),
+      ...options.junctionConnectors,
+    ],
+  };
+}
+
+/** 글자 없는 작은 네모 하나. 이음목이 되는지는 **닿는 선의 모양**이 정한다. */
+function emptyJunction(id: string, y: number): TechnicalTaskShapeInput {
+  return shape(id, "", { x: 4000000, y, cx: 200000, cy: 200000 });
+}
+
+test("🔴 본보기가 비어 있지 않다 — 이음목 시험이 무엇을 재는지 먼저 못 박는다", () => {
+  const input = buildPassThroughFixture({
+    sheetName: "(TEST) 이음목 본보기",
+    nodeCodePrefix: "j0",
+    junctionShapes: [emptyJunction("90", 1100000)],
+    junctionConnectors: [connector("c3", "90", "3", { x: 1400000, y: 1300000, cx: 2700000, cy: 3700000, })],
+  });
+
+  // ① 빈 네모가 **진짜 비어 있다**(이 글자가 차 있으면 아래 시험이 전부 공짜로 통과한다)
+  assert.equal(input.shapes.find((s) => s.id === "90")?.text, "");
+  // ② 그 네모에 선이 **들어오고 나간다**
+  assert.deepEqual(
+    input.connectors.filter((c) => c.toShapeId === "90").map((c) => c.id),
+    ["c2"]
+  );
+  assert.deepEqual(
+    input.connectors.filter((c) => c.fromShapeId === "90").map((c) => c.id),
+    ["c3"]
+  );
+  // ③ 「NG」 글자가 **c2 선분 위**에 있다 — 다른 선보다 압도적으로 가깝다
+  const c2 = input.connectors.find((c) => c.id === "c2")!;
+  const c1 = input.connectors.find((c) => c.id === "c1")!;
+  const label = input.shapes.find((s) => s.id === "80")!;
+  assert.ok(
+    distanceToConnectorBoxCenter(label, c2) < distanceToConnectorBoxCenter(label, c1),
+    "본보기의 「NG」가 애초에 c2 쪽이 아니다"
+  );
+});
+
+test("🔴 이음목은 **노드가 되지 않고**, 들어오던 선이 건너편으로 이어 붙는다", () => {
+  const result = extractTechnicalTaskGraph(
+    buildPassThroughFixture({
+      sheetName: "(TEST) 이음목 하나",
+      nodeCodePrefix: "j1",
+      junctionShapes: [emptyJunction("90", 1100000)],
+      junctionConnectors: [connector("c3", "90", "3", { x: 1400000, y: 1300000, cx: 2700000, cy: 3700000 })],
+    })
+  );
+
+  // 🔴 노드는 **엑셀 상자 셋 그대로**다 — 이음목이 노드로 둔갑하면 안 된다.
+  assert.deepEqual(excelNodes(result).map((n) => n.nodeCode), ["j1-1", "j1-2", "j1-3"]);
+
+  // 🔴 NG 가지가 살아났다. 도착지는 이음목 **건너편**이다.
+  assert.deepEqual(
+    excelEdges(result).map((e) => [e.fromNodeCode, e.toNodeCode, e.branchType]),
+    [
+      // 짝 규칙이 이름 없는 쪽을 「정상」으로 올린다(NG 형제가 생겼으므로).
+      ["j1-1", "j1-2", "NORMAL"],
+      ["j1-1", "j1-3", "NG"],
+    ]
+  );
+
+  // 🔴 그 결과 점검 상자가 **판단**이 된다 — 고치기 전에는 선이 아래로 하나뿐이라
+  //    INSPECTION 이었다.
+  assert.equal(result.nodes.find((n) => n.nodeCode === "j1-1")?.nodeType, "DECISION");
+
+  // 이음목에서 **나가던** 선은 소비된다 — 따로 분기가 되지 않는다.
+  const consumed = result.droppedConnectors.find((d) => d.connectorId === "c3");
+  assert.equal(consumed?.reason, "PASS_THROUGH_JUNCTION");
+  assert.ok(consumed!.detail.includes("두 번 그려진다"));
+
+  // 버린 도형에 그 사실이 남는다 — 상자는 버렸지만 흐름은 살아 있다.
+  const droppedJunction = result.droppedShapes.find((d) => d.shapeId === "90");
+  assert.equal(droppedJunction?.reason, "EMPTY_BOX");
+  assert.ok(droppedJunction!.detail.includes("이음목"), "건너뛴 사실이 조용히 사라졌다");
+
+  // 메모 한 줄 — 어느 선이 어느 이음목을 지나 어디로 갔는지.
+  const note = result.issues.find(
+    (i) => i.sourceReference === "connector#c2" && i.message.includes("이음목")
+  );
+  assert.equal(note?.severity, "INFO");
+  assert.equal(note?.issueType, "DANGLING_CONNECTOR");
+  assert.ok(note!.message.includes("shape#90"));
+  assert.ok(note!.message.includes("사아자 기판 교환"), "어디로 이었는지가 메모에 없다");
+});
+
+test("🔴 **들어오기만 하는** 빈 도형은 그대로 버린다 — 사진 꼬리표이지 이음목이 아니다", () => {
+  /**
+   * 🔴 이 시험이 없으면 「빈 도형이면 전부 잇는다」라는 **더 넓은 규칙도 통과한다.**
+   * 실측으로 빈 도형은 여섯 시트에 있는데 다섯 시트(`(12)` 12개 · `(2)` 5개 · `(1)`
+   * `(6)` `(MB)고장 접수` 각 1개)의 것은 **나가는 선이 없는 사진 꼬리표**이고, 그
+   * 시트들의 노드 수는 사용자가 눈으로 확인해 준 확정값이다.
+   */
+  const input: TechnicalTaskGraphInput = {
+    sheetName: "(TEST) 사진 꼬리표",
+    nodeCodePrefix: "j2",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 전원 점검", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 작업 실시", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+      // 본문 상자들과 같은 x 띠에 둔다 — 주석 영역 규칙이 먼저 걷어 가지 않도록.
+      shape("90", "", { x: 1000000, y: 5000000, cx: 800000, cy: 800000 }),
+    ],
+    connectors: [
+      connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 }),
+      // 본문에서 사진 상자를 **짚는** 선. 거기서 나가는 선은 없다.
+      connector("c2", "2", "90", { x: 1400000, y: 3500000, cx: 0, cy: 1500000 }),
+    ],
+  };
+  // 재는 대상이 실제로 「들어오기만 하는 빈 도형」인지 먼저 못 박는다.
+  assert.equal(input.shapes.find((s) => s.id === "90")?.text, "");
+  assert.equal(input.connectors.filter((c) => c.toShapeId === "90").length, 1);
+  assert.equal(input.connectors.filter((c) => c.fromShapeId === "90").length, 0);
+
+  const result = extractTechnicalTaskGraph(input);
+
+  assert.deepEqual(excelNodes(result).map((n) => n.nodeCode), ["j2-1", "j2-2"]);
+  assert.deepEqual(
+    excelEdges(result).map((e) => [e.fromNodeCode, e.toNodeCode]),
+    [["j2-1", "j2-2"]]
+  );
+
+  const droppedBox = result.droppedShapes.find((d) => d.shapeId === "90");
+  assert.equal(droppedBox?.reason, "EMPTY_BOX");
+  assert.ok(!droppedBox!.detail.includes("이음목"), "사진 꼬리표를 이음목으로 읽었다");
+
+  // 🔴 그 선은 **지금까지와 똑같이** 버려진다 — 이음목 갈래로 새지 않는다.
+  const droppedConnector = result.droppedConnectors.find((d) => d.connectorId === "c2");
+  assert.equal(droppedConnector?.reason, "POINTS_AT_DROPPED_SHAPE");
+  assert.equal(
+    result.droppedConnectors.filter((d) => d.reason === "PASS_THROUGH_JUNCTION").length,
+    0
+  );
+});
+
+test("🔴 이음목이 **연달아** 있어도 끝까지 따라간다 — 실측 74 → 77 → 12", () => {
+  const result = extractTechnicalTaskGraph(
+    buildPassThroughFixture({
+      sheetName: "(TEST) 연달은 이음목",
+      nodeCodePrefix: "j3",
+      junctionShapes: [emptyJunction("90", 1100000), emptyJunction("91", 2200000)],
+      junctionConnectors: [
+        connector("c3", "90", "91", { x: 4000000, y: 1300000, cx: 100000, cy: 900000 }),
+        connector("c4", "91", "3", { x: 1400000, y: 2400000, cx: 2700000, cy: 2600000 }),
+      ],
+    })
+  );
+
+  assert.deepEqual(excelNodes(result).map((n) => n.nodeCode), ["j3-1", "j3-2", "j3-3"]);
+  assert.deepEqual(
+    excelEdges(result).map((e) => [e.fromNodeCode, e.toNodeCode, e.branchType]),
+    [
+      ["j3-1", "j3-2", "NORMAL"],
+      ["j3-1", "j3-3", "NG"],
+    ]
+  );
+  // 이음목에서 나가던 선 **둘 다** 소비된다.
+  assert.deepEqual(
+    result.droppedConnectors.filter((d) => d.reason === "PASS_THROUGH_JUNCTION").map((d) => d.connectorId),
+    ["c3", "c4"]
+  );
+  // 메모에 **지나온 이음목이 차례대로** 적힌다 — 하나만 적으면 가운데가 숨는다.
+  const note = result.issues.find((i) => i.sourceReference === "connector#c2")!;
+  assert.ok(note.message.includes("shape#90 → shape#91"), note.message);
+});
+
+test("🔴 나가는 선이 **둘인** 이음목은 안 건드린다 — 어느 쪽으로 이을지 못 정한다", () => {
+  const result = extractTechnicalTaskGraph(
+    buildPassThroughFixture({
+      sheetName: "(TEST) 갈라지는 이음목",
+      nodeCodePrefix: "j4",
+      junctionShapes: [emptyJunction("90", 1100000)],
+      junctionConnectors: [
+        connector("c3", "90", "3", { x: 1400000, y: 1300000, cx: 2700000, cy: 3700000 }),
+        connector("c4", "90", "2", { x: 1400000, y: 1300000, cx: 2700000, cy: 1700000 }),
+      ],
+    })
+  );
+
+  // 🔴 **고치기 전 그대로**다. 찍어서 한쪽을 고르면 흐름이 조용히 틀린다.
+  assert.deepEqual(
+    excelEdges(result).map((e) => [e.fromNodeCode, e.toNodeCode, e.branchType]),
+    [["j4-1", "j4-2", "DEFAULT"]]
+  );
+  assert.equal(
+    result.droppedConnectors.filter((d) => d.reason === "PASS_THROUGH_JUNCTION").length,
+    0,
+    "이을 수 없는 이음목을 이었다"
+  );
+  assert.deepEqual(
+    result.droppedConnectors.filter((d) => d.reason === "POINTS_AT_DROPPED_SHAPE").map((d) => d.connectorId),
+    ["c2", "c3", "c4"]
+  );
+
+  // 🔴 그래도 **조용하지는 않다** — 들어오던 흐름이 사라진다는 사실을 올린다.
+  const warning = result.issues.find((i) => i.sourceReference === "shape#90");
+  assert.equal(warning?.severity, "WARNING");
+  assert.equal(warning?.issueType, "UNSUPPORTED_OBJECT");
+  assert.ok(warning!.message.includes("정할 수 없어"), warning!.message);
+});
+
+test("🔴 이음목끼리 **고리**를 이루면 멈추고 버리고 알린다 — 조용히 사라지면 안 된다", () => {
+  const result = extractTechnicalTaskGraph(
+    buildPassThroughFixture({
+      sheetName: "(TEST) 이음목 고리",
+      nodeCodePrefix: "j5",
+      junctionShapes: [emptyJunction("90", 1100000), emptyJunction("91", 2200000)],
+      junctionConnectors: [
+        connector("c3", "90", "91", { x: 4000000, y: 1300000, cx: 100000, cy: 900000 }),
+        // 🔴 되돌아간다 — 따라가는 것을 안 멈추면 영영 돈다.
+        connector("c4", "91", "90", { x: 4100000, y: 1300000, cx: 100000, cy: 900000 }),
+        // 상자 3 이 흐름 밖으로 떨어지지 않게 본문에서 이어 둔다.
+        connector("c5", "2", "3", { x: 1400000, y: 3500000, cx: 0, cy: 1500000 }),
+      ],
+    })
+  );
+
+  assert.deepEqual(
+    excelEdges(result).map((e) => [e.fromNodeCode, e.toNodeCode]),
+    [
+      ["j5-1", "j5-2"],
+      ["j5-2", "j5-3"],
+    ]
+  );
+  const dropped = result.droppedConnectors.find((d) => d.connectorId === "c2");
+  assert.equal(dropped?.reason, "PASS_THROUGH_JUNCTION");
+  assert.ok(dropped!.detail.includes("고리"), dropped!.detail);
+
+  const warning = result.issues.find(
+    (i) => i.sourceReference === "connector#c2" && i.message.includes("고리")
+  );
+  assert.equal(warning?.severity, "WARNING");
+  assert.ok(warning!.message.includes("사라집니다"), warning!.message);
 });
 
 // ── 흐름에 닿지 않는 도형 (2026-11-05 사용자 지적) ────────────────────────

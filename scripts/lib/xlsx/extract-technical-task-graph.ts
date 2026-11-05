@@ -1,4 +1,4 @@
-import { classifyBranchLabel } from "./branch-classification";
+import { classifyBranchLabel, classifyUnifiedBranchLabel, unifiedBranch } from "./branch-classification";
 import {
   connectorSegment,
   distancePointToRect,
@@ -108,7 +108,18 @@ export type DroppedConnectorReason =
    * 종료가 되고, 종료는 나가는 분기를 가질 수 없어 버린다(2026-11-05 사용자 결정).
    * **원본 흐름도에는 있던 흐름이 절차에서는 사라진다** — 그래서 조용히 못 버린다.
    */
-  | "ABANDONED_FOR_NEXT_PROCEDURE";
+  | "ABANDONED_FOR_NEXT_PROCEDURE"
+  /**
+   * 🔴 글자 없는 **이음목**(지나가는 점)과 얽힌 선 (2026-11-05). 두 경우가 한 갈래에
+   * 들어 있고, 어느 쪽인지는 `detail` 이 가른다:
+   *   ① **소비된 선** — 이음목에서 **나가던** 선. 들어오던 선들의 도착지를 이 선
+   *      너머로 옮겨 붙였으므로, 이 선까지 분기로 만들면 같은 흐름이 두 번 그려진다.
+   *   ② **못 이은 선** — 이음목을 향해 들어왔지만 건너편을 못 정한 선(이음목끼리
+   *      고리를 이루거나, 건너간 끝이 노드가 아니거나, 제자리로 돌아오는 경우).
+   * 🔴 ②는 **흐름이 실제로 사라지는 쪽**이라 경고도 함께 올린다 — 조용히 버리면
+   * 지금 고치고 있는 바로 그 결함(NG 가지 넷이 통째로 사라진 일)이 되풀이된다.
+   */
+  | "PASS_THROUGH_JUNCTION";
 
 export type DroppedConnector = {
   connectorId: string;
@@ -121,7 +132,14 @@ export type DroppedConnector = {
 export type BranchLabelBinding = {
   connectorId: string;
   labelShapeId: string;
+  /**
+   * 🔴 **엑셀 도형에 적힌 글자 그대로**다(`O.K.`·`N.G.`·`YES`). 분기에 실제로
+   * 실리는 이름은 「정상」·「NG」로 통일되므로(2026-11-05) 이 값과 **다를 수 있다** —
+   * 사람이 드라이런에서 「엑셀의 이 글자가 이 선에 붙었다」를 맞대어 보는 자리라
+   * 여기서는 원본을 그대로 보여 준다.
+   */
   labelText: string;
+  /** 🔵 이쪽은 **통일된** 갈래다(`classifyUnifiedBranchLabel`) — 분기에 실리는 값과 같다. */
   branchType: ProcedureBranchType;
   /** EMU 단위 거리 — 레이블 상자 가운데에서 선까지. */
   distance: number;
@@ -583,6 +601,146 @@ function rebindDanglingEndpoints(
   return { connectors, reboundEndpoints, reboundIssues };
 }
 
+/**
+ * ============================================================================
+ * 🔴 글자 없는 **이음목**을 건너뛴다 — 노드로 만들지 않고 **선을 이어 붙인다** (2026-11-05)
+ * ============================================================================
+ * 흐름도는 선 여럿을 한 곳에 모아 한 줄로 내보낼 때, 글자 없는 작은 네모를 놓고
+ * 거기로 모은 뒤 그 네모에서 한 줄을 뽑는다. 그 네모는 **그림을 정리하는 표식**이지
+ * 작업이 아니다 — 노드가 되어서도 안 되고, 그렇다고 버려져서도 안 된다.
+ *
+ * ── 안 고치면 무슨 일이 나는가 (실측 · `(5)통전검사(3상입력)`) ──────────────
+ * 글자가 없으니 그 네모는 `EMPTY_BOX` 로 버려지고, **거기 닿는 선 여섯이 전부**
+ * `POINTS_AT_DROPPED_SHAPE` 로 함께 버려졌다. 그 바람에 점검 상자 넷의 **NG 가지가
+ * 통째로 사라져** 넷 다 「아래로 선 하나뿐」인 `INSPECTION` 이 됐고, 갈 곳을 잃은
+ * 「NG」 글자 셋은 「붙일 연결선을 못 찾았다」 경고로 남았으며, 나머지 하나는
+ * **엉뚱한 선**(되돌아오는 선)에 가서 붙어 그 노드에 `MISSING_OUTGOING_PATH` 오류를
+ * 달아 놓았다. 오류 한 건이 아니라 **흐름 넷이 통째로 없어진** 일이다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 왜 「빈 도형이면 전부」가 아니라 **들어오고 나가는 것만**인가
+ * ──────────────────────────────────────────────────────────────────────
+ * 2026-11-05 워크북 전수 조사에서 빈 도형은 여섯 시트에 있었는데, **통전검사만
+ * 성격이 다르다.**
+ *   · `(12)출하 완료` 12개 · `(2)외관 검사` 5개 · `(1)고장 접수` `(6)개선 사항`
+ *     `(MB)고장 접수` 각 1개 → **들어오는 선만 있고 나가는 선이 없다.**
+ *   · `(5)통전검사` 2개 → **들어오고 나간다.**
+ *
+ * 🔴 **들어오기만 하는 빈 도형은 지금처럼 그대로 버린다.** 그것은 본문에서 선을 그어
+ * 캡처 그림을 짚는 **사진 꼬리표**이고(「사진이 들어가 있는 박스는 첨부파일일 뿐이고
+ * 노드가 아니야」 — 2026-11-05 사용자), 나가는 선이 없으니 이어 붙일 건너편 자체가
+ * 없다. 🔴 게다가 그 시트들의 **노드 수는 사용자가 이미 눈으로 확인해 준 확정값**이다 —
+ * 「빈 도형이면 전부 잇는다」로 규칙을 넓히면 그 확정값이 소리 없이 깨진다.
+ *
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 이어 붙일 때 지키는 것 셋
+ * ──────────────────────────────────────────────────────────────────────
+ * ① **도착지만 바꾼다.** 선이 그려진 자리(x·y·cx·cy·flip)는 한 값도 안 건드린다.
+ *    분기 이름(「NG」 글자)은 **선분까지의 거리**로 붙으므로(5절), 자리를 옮기면
+ *    제자리를 찾아가던 이름이 엉뚱한 선으로 간다.
+ * ② **이음목에서 나가던 선은 소비한다.** 들어오던 선들을 이미 건너편에 붙였으므로,
+ *    그 선까지 분기로 만들면 같은 흐름이 두 번 그려진다.
+ * ③ **연달아 있을 수 있다**(실측: 74 →  77 → 12). 진짜 도형이 나올 때까지 따라간다.
+ *    🔴 다만 이음목끼리 고리를 이루면 **멈추고 버리고 경고한다** — 안 멈추면 무한히 돈다.
+ */
+type PassThroughWalk =
+  | { status: "RESOLVED"; targetShapeId: string; via: string[] }
+  | { status: "CYCLE"; via: string[] };
+
+/**
+ * 이음목을 타고 **진짜 도형**에 닿을 때까지 따라간다.
+ *
+ * `passThroughNextByShapeId` 의 **열쇠는 이음목뿐**이다 — 그래서 열쇠가 아닌 것에
+ * 닿는 순간이 곧 「다 왔다」이고, 그 판정을 따로 할 필요가 없다.
+ */
+function walkPassThroughChain(
+  firstJunctionShapeId: string,
+  passThroughNextByShapeId: ReadonlyMap<string, string>
+): PassThroughWalk {
+  const via: string[] = [];
+  const seen = new Set<string>();
+  let current = firstJunctionShapeId;
+  while (passThroughNextByShapeId.has(current)) {
+    // 🔴 **들어서기 전에** 본다. 뒤에서 보면 고리의 마지막 한 바퀴가 `via` 에 두 번
+    //    실려, 사람이 읽는 경고에 같은 도형이 겹쳐 찍힌다.
+    if (seen.has(current)) return { status: "CYCLE", via };
+    seen.add(current);
+    via.push(current);
+    current = passThroughNextByShapeId.get(current)!;
+  }
+  return { status: "RESOLVED", targetShapeId: current, via };
+}
+
+/** 한 분기가 실제로 지닐 갈래와 이름. 연결선 번호로 찾는다. */
+type ResolvedBranch = { branchType: ProcedureBranchType; branchLabel: string | null };
+
+/**
+ * ============================================================================
+ * 🔴 판단에서 **NG 와 짝지어 갈라지는 이름 없는 선**을 「정상」으로 올린다 (2026-11-05)
+ * ============================================================================
+ * 사용자 원문: 「**판단에서 분기가 되는 연결선은** [정상]혹은 [NG]를 사용하도록 해줘.」
+ *
+ * ── 무엇이 문제였나 (실측) ─────────────────────────────────────────────
+ * 엑셀의 흐름도는 갈림길에 **NG 쪽에만 이름을 적는다.** 정상 쪽은 그냥 아래로
+ * 내려가는 선이라 글자를 안 붙인다. 그 결과 들여온 그림에서 판단 마름모 90곳이
+ * **빨간 NG 선 하나 + 아무 글자도 없는 회색 선 하나**로 그려졌다. 글자를 그대로만
+ * 옮기면 사용자가 없애 달라고 한 그 상태가 그대로 남는다.
+ *
+ * ── 🔴 왜 `classifyUnifiedBranchLabel` 이 아니라 여기인가 ──────────────
+ * 그 함수는 **글자 하나**만 받는다. 「이 선에 NG 형제가 있는가」는 글자로는 영영 알
+ * 수 없고, **형제 분기를 다 아는 자리**는 여기뿐이다. 그래서 「이름 없는 분기에
+ * 이름을 안 붙인다」는 원칙은 그 함수에 그대로 두고, 예외를 이 한 곳에 모았다.
+ *
+ * ── 🔴 조건 넷을 **모두** 만족할 때만 올린다 ───────────────────────────
+ * ① 같은 도형에서 나가는 분기에 **NG 가 하나 이상** 있다
+ * ② 같은 도형에서 나가는 분기 중 **이름 없는 것이 정확히 하나**다
+ * ③ 같은 도형에서 나가는 분기에 **`NORMAL` 이 하나도 없다**
+ * ④ 그 선이 바로 그 「이름 없는 하나」다
+ *
+ * 🔴 **넷이 다 필요하다.** 실측으로 하나라도 빠지면 엉뚱한 선이 끌려 들어간다:
+ *   · ① 없이 → START·TASK·INSPECTION·CORRECTIVE_ACTION 에서 그냥 다음 단계로 가는
+ *     선 113개가 통째로 「정상」이 된다. 갈림이 아닌 것에 갈래 이름이 생긴다.
+ *   · ② 없이 → 이름 없는 선이 둘인 판단에서 **어느 쪽이 정상인지 우리가 못 가린다.**
+ *     찍어서 하나를 고르면 흐름이 조용히 틀린다(실측 2곳).
+ *   · ③ 없이 → 「정상」이 이미 따로 적혀 있는 판단에 **정상이 둘** 생긴다(실측 1곳).
+ *
+ * 🔵 **`node_type` 을 안 본다.** 조건 ①이 곧 판단 노드의 정의(`classifyTechnicalNodeType`
+ * 의 `hasConditional`)와 같은 집합이고, 유형은 **나가는 분기로부터** 정해지므로
+ * 유형을 보면 서로 물고 도는 순서 의존이 된다.
+ *
+ * 🔵 **이름이 생겨도 노드 유형은 안 바뀐다.** 바꾸는 선은 DEFAULT → NORMAL 뿐이고,
+ * 그 도형은 조건 ①에 따라 이미 NG 를 내보내 `hasConditional` 이 참이다 — 판단이던
+ * 것은 판단 그대로다.
+ */
+function resolveBranchesWithDecisionPairs(
+  graphConnectors: readonly TechnicalTaskConnectorInput[],
+  labelByConnectorId: ReadonlyMap<string, BranchLabelBinding>
+): Map<string, ResolvedBranch> {
+  const resolved = new Map<string, ResolvedBranch>();
+  const siblingsByFromShapeId = new Map<string, TechnicalTaskConnectorInput[]>();
+  for (const connector of graphConnectors) {
+    // 🔴 여기서 **통일**한다 — 엑셀의 `YES`·`O.K.` 는 「정상」으로, `NO`·`N.G.` 는
+    //    「NG」로. 사람이 적은 이름(CUSTOM)은 그대로 둔다.
+    resolved.set(
+      connector.id,
+      classifyUnifiedBranchLabel(labelByConnectorId.get(connector.id)?.labelText ?? null)
+    );
+    const siblings = siblingsByFromShapeId.get(connector.fromShapeId!) ?? [];
+    siblings.push(connector);
+    siblingsByFromShapeId.set(connector.fromShapeId!, siblings);
+  }
+
+  for (const siblings of siblingsByFromShapeId.values()) {
+    const branchTypes = siblings.map((c) => resolved.get(c.id)!.branchType);
+    const unnamed = siblings.filter((c) => resolved.get(c.id)!.branchType === "DEFAULT");
+    if (!branchTypes.includes("NG")) continue; // ①
+    if (unnamed.length !== 1) continue; // ②
+    if (branchTypes.includes("NORMAL")) continue; // ③
+    resolved.set(unnamed[0].id, unifiedBranch("NORMAL")); // ④
+  }
+  return resolved;
+}
+
 /** 레이블 가운데에서 연결선까지의 거리. 곧은 선은 선분, 꺾인 선은 제 상자로 잰다. */
 function distanceToConnector(labelCenter: Point, connector: TechnicalTaskConnectorInput): number {
   if (!connector.isStraight) return distancePointToRect(labelCenter, connector);
@@ -644,6 +802,62 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
   const emptyShapeIds = new Set(
     shapes.filter((s) => !labelShapeIds.has(s.id) && EMPTY_BOX_TEXT_RE.test(s.text)).map((s) => s.id)
   );
+
+  // ── 2-2. 🔴 빈 상자 가운데 **이음목**을 가려낸다 (2026-11-05) ────────────
+  //
+  // 까닭과 「왜 들어오기만 하는 빈 도형은 그대로 버리는가」는 `walkPassThroughChain`
+  // 머리말에 적었다. 여기서는 **고르기만** 하고, 실제로 잇는 일은 4절(연결선 → 분기)
+  // 에서 한다 — 거기서야 「무엇이 진짜 노드인가」(`nodeShapeIds`)가 정해진다.
+  //
+  // 🔴 **세는 바탕은 0-2 절까지의 연결선 그대로**다. 아래 3·4 절(고립 도형 · 주석
+  //    영역)은 「엑셀에 적힌 선이 어느 도형에 닿는가」로 판정하는데, 이음목을 먼저
+  //    지워 버리면 그 셈이 달라져 **다른 시트의 노드 수가 흔들린다.** 이 절은 세기만
+  //    하고 `connectors` 를 한 줄도 바꾸지 않는다.
+  const allOutgoingByShapeId = new Map<string, TechnicalTaskConnectorInput[]>();
+  const incomingCountByShapeId = new Map<string, number>();
+  for (const connector of connectors) {
+    // 🔵 끝이 안 묶인 선과 자기 자신으로 가는 선은 애초에 분기가 못 되므로(4절)
+    //    이음목의 들어오고/나감을 셀 때도 빼 둔다 — 넣으면 「나가는 선이 둘」로
+    //    잘못 읽혀 이을 수 있는 이음목을 못 잇는다.
+    if (!connector.fromShapeId || !connector.toShapeId) continue;
+    if (connector.fromShapeId === connector.toShapeId) continue;
+    const outgoing = allOutgoingByShapeId.get(connector.fromShapeId) ?? [];
+    outgoing.push(connector);
+    allOutgoingByShapeId.set(connector.fromShapeId, outgoing);
+    incomingCountByShapeId.set(
+      connector.toShapeId,
+      (incomingCountByShapeId.get(connector.toShapeId) ?? 0) + 1
+    );
+  }
+
+  /** 이음목 → 그 **하나뿐인** 나가는 선이 닿는 도형. 이음목이 아닌 것은 열쇠가 아니다. */
+  const passThroughNextByShapeId = new Map<string, string>();
+  /** 이음목에서 **나가던** 선 — 이어 붙이면서 소비된다(따로 분기가 되지 않는다). */
+  const consumedConnectorIds = new Set<string>();
+  for (const shapeId of emptyShapeIds) {
+    const incomingCount = incomingCountByShapeId.get(shapeId) ?? 0;
+    const outgoing = allOutgoingByShapeId.get(shapeId) ?? [];
+    // 🔴 들어오기만 하는 빈 도형(사진 꼬리표)과 흐름 밖의 빈 도형은 **그대로 둔다.**
+    if (incomingCount === 0 || outgoing.length === 0) continue;
+    if (outgoing.length > 1) {
+      // 🔴 **어느 쪽으로 이을지 우리가 못 정한다.** 찍어서 하나를 고르면 흐름이
+      //    조용히 틀린다 — 지금처럼 버리되, 버렸다는 사실을 사람에게 올린다.
+      //    (실측 0건이다. 통전검사의 둘은 나가는 선이 각각 하나뿐이다.)
+      issues.push({
+        severity: "WARNING",
+        issueType: "UNSUPPORTED_OBJECT",
+        message:
+          `글자 없는 도형(shape#${shapeId})에 선이 ${incomingCount}개 들어오고 ${outgoing.length}개 나갑니다 — ` +
+          `이음목으로 보이지만 **어느 쪽으로 이을지 정할 수 없어** 그대로 버렸습니다. ` +
+          `들어오던 선 ${incomingCount}개의 흐름이 이 절차에서는 사라집니다.`,
+        sourceWorksheet: sheetName,
+        sourceReference: `shape#${shapeId}`,
+      });
+      continue;
+    }
+    passThroughNextByShapeId.set(shapeId, outgoing[0].toShapeId!);
+    consumedConnectorIds.add(outgoing[0].id);
+  }
 
   // ── 3. 흐름에 닿지 않는 도형 ───────────────────────────────────────────
   //
@@ -736,7 +950,12 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
         shapeId: shape.id,
         text: firstLine(shape.text),
         reason: "EMPTY_BOX",
-        detail: "글자가 없거나 주의 기호뿐이다 — 노드의 제목이 될 글자가 없다.",
+        // 🔴 같은 「빈 상자」라도 **사라지는 것과 이어지는 것**은 사람이 할 일이 다르다.
+        //    이음목은 버려졌지만 그 자리의 흐름은 살아 있다 — 그 사실을 여기 적는다.
+        detail: passThroughNextByShapeId.has(shape.id)
+          ? `글자가 없는데 선이 들어왔다 나간다 — 노드가 아니라 **지나가는 이음목**으로 보고, ` +
+            `들어오던 선의 도착지를 이 도형 건너편(shape#${passThroughNextByShapeId.get(shape.id)})으로 이어 붙였다.`
+          : "글자가 없거나 주의 기호뿐이다 — 노드의 제목이 될 글자가 없다.",
       });
       continue;
     }
@@ -815,6 +1034,67 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
       });
       continue;
     }
+    // ── 4-1. 🔴 **이음목을 건너뛴다** (2026-11-05 · walkPassThroughChain 머리말) ──
+    if (consumedConnectorIds.has(connector.id)) {
+      droppedConnectors.push({
+        connectorId: connector.id,
+        fromShapeId: connector.fromShapeId,
+        toShapeId: connector.toShapeId,
+        reason: "PASS_THROUGH_JUNCTION",
+        detail:
+          `글자 없는 이음목(shape#${connector.fromShapeId})에서 **나가던** 선이다. 거기로 들어오던 선들의 ` +
+          `도착지를 이 선 건너편으로 이미 옮겨 붙였으므로, 이 선까지 분기로 만들면 같은 흐름이 두 번 그려진다.`,
+      });
+      continue;
+    }
+    if (passThroughNextByShapeId.has(connector.toShapeId)) {
+      const walk = walkPassThroughChain(connector.toShapeId, passThroughNextByShapeId);
+      const chain = walk.via.map((id) => `shape#${id}`).join(" → ");
+      const target = walk.status === "RESOLVED" ? walk.targetShapeId : null;
+      // 🔴 **건너간 끝이 노드일 때만** 잇는다. 이음목 너머가 주석 상자거나(노드가
+      //    아니다) 제자리로 돌아오면(자기 자신으로 가는 분기가 된다) 이을 수 없다.
+      if (target !== null && nodeShapeIds.has(target) && target !== connector.fromShapeId) {
+        // 🔴 **도착지만 바꾼다** — 선이 그려진 자리는 한 값도 안 건드린다. 분기 이름은
+        //    선분까지의 거리로 붙으므로(5절), 자리를 옮기면 이름이 엉뚱한 선에 간다.
+        keptConnectors.push({ ...connector, toShapeId: target });
+        issues.push({
+          // 🔵 엑셀에 적혀 있던 연결을 **우리가 고쳐 읽은** 자리다 — 끊어진 끝을 좌표로
+          //    이어 붙인 일(0-2절)과 같은 갈래로 올려, 사람이 한 목록에서 검산한다.
+          severity: "INFO",
+          issueType: "DANGLING_CONNECTOR",
+          message:
+            `연결선(connector#${connector.id})이 글자 없는 이음목(${chain})을 지나갑니다 — 이음목은 노드로 ` +
+            `만들지 않고, 도착지를 건너편 "${shortLabel(shapes.find((s) => s.id === target)?.text ?? "")}"` +
+            `(shape#${target})(으)로 이어 붙였습니다(선이 그려진 자리는 그대로).`,
+          sourceWorksheet: sheetName,
+          sourceReference: `connector#${connector.id}`,
+        });
+        continue;
+      }
+      const why =
+        walk.status === "CYCLE"
+          ? `이음목끼리 고리를 이룬다(${chain})`
+          : target === connector.fromShapeId
+            ? `건너간 끝이 이 선의 출발 도형(shape#${target})이라 자기 자신으로 가는 분기가 된다`
+            : `건너간 끝(shape#${target})이 노드가 아니다`;
+      droppedConnectors.push({
+        connectorId: connector.id,
+        fromShapeId: connector.fromShapeId,
+        toShapeId: connector.toShapeId,
+        reason: "PASS_THROUGH_JUNCTION",
+        detail: `글자 없는 이음목(shape#${connector.toShapeId})으로 들어가는 선인데 ${why} — 이어 붙이지 못하고 버렸다.`,
+      });
+      issues.push({
+        severity: "WARNING",
+        issueType: "DANGLING_CONNECTOR",
+        message:
+          `연결선(connector#${connector.id})이 글자 없는 이음목(shape#${connector.toShapeId})으로 들어가는데 ` +
+          `${why} — 이어 붙이지 못했습니다. 원본 흐름도에 있던 이 흐름이 절차에서는 사라집니다.`,
+        sourceWorksheet: sheetName,
+        sourceReference: `connector#${connector.id}`,
+      });
+      continue;
+    }
     if (!nodeShapeIds.has(connector.fromShapeId) || !nodeShapeIds.has(connector.toShapeId)) {
       const missing = !nodeShapeIds.has(connector.fromShapeId)
         ? connector.fromShapeId
@@ -879,7 +1159,7 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
       connectorId: pair.connector.id,
       labelShapeId: pair.label.id,
       labelText: pair.label.text.replace(/\n/g, " ").trim(),
-      branchType: classifyBranchLabel(pair.label.text.replace(/\n/g, " ").trim()).branchType,
+      branchType: classifyUnifiedBranchLabel(pair.label.text.replace(/\n/g, " ").trim()).branchType,
       distance: pair.distance,
       runnerUpDistance,
       confident: runnerUpDistance === null || runnerUpDistance >= pair.distance * CONFIDENT_MARGIN_RATIO,
@@ -912,6 +1192,18 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
     keptConnectors.filter((c) => nextProcedureRefShapeIds.has(c.fromShapeId!)).map((c) => c.id)
   );
   const graphConnectors = keptConnectors.filter((c) => !abandonedConnectorIds.has(c.id));
+
+  // ── 5-3. 🔴 분기의 갈래·이름을 여기서 **한 번에** 정한다 ────────────────
+  // 엑셀 글자 통일(YES·O.K.→정상 / NO·N.G.→NG)과, 판단에서 NG 와 짝지어 나가는
+  // 이름 없는 선을 「정상」으로 올리는 일(조건 넷)이 **같은 한 자리**에서 끝난다.
+  //
+  // 🔴 **아래 두 곳이 이 한 값을 함께 본다** — 노드 유형을 정하는 `outgoingByShapeId`
+  //    와 실제로 만드는 분기(7절). 두 벌로 재면 「유형 근거는 DEFAULT 라는데 그림에는
+  //    정상이라 적힌」 어긋남이 생기고, 그 어긋남은 오류가 아니라 **글자로만** 드러난다.
+  const resolvedBranchByConnectorId = resolveBranchesWithDecisionPairs(
+    graphConnectors,
+    labelByConnectorId
+  );
 
   for (const label of labelShapes) {
     const bound = usedLabelIds.has(label.id);
@@ -950,7 +1242,11 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
 
   const outgoingByShapeId = new Map<string, ProcedureBranchType[]>();
   for (const connector of graphConnectors) {
-    const branchType = labelByConnectorId.get(connector.id)?.branchType ?? "DEFAULT";
+    // 🔵 5-3 절이 정한 값을 그대로 쓴다 — 유형 근거에 찍히는 갈래 이름이 실제로
+    //    만들어지는 분기와 같아야 한다. 🔴 이 바꿈으로 **유형이 달라지지는 않는다**:
+    //    올라가는 선은 DEFAULT → NORMAL 뿐이고, 그 도형은 조건 ①에 따라 이미 NG 를
+    //    내보내 `hasConditional` 이 참이다(판단이던 것은 판단 그대로).
+    const branchType = resolvedBranchByConnectorId.get(connector.id)!.branchType;
     const list = outgoingByShapeId.get(connector.fromShapeId!) ?? [];
     list.push(branchType);
     outgoingByShapeId.set(connector.fromShapeId!, list);
@@ -1167,13 +1463,14 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
   const sortOrderByNodeCode = new Map(nodes.map((n) => [n.nodeCode, n.sortOrder]));
   const edges: ExtractedEdge[] = [...startEdges, ...graphConnectors
     .map((connector) => {
-      const binding = labelByConnectorId.get(connector.id);
-      const classified = classifyBranchLabel(binding?.labelText ?? null);
+      // 🔵 갈래와 이름은 위 5-3 절이 이미 정해 두었다 — 엑셀 글자 통일과 「NG 의 짝인
+      //    이름 없는 선을 정상으로」가 거기 함께 들어 있다. 여기서 다시 가르지 않는다.
+      const resolved = resolvedBranchByConnectorId.get(connector.id)!;
       return {
         fromNodeCode: nodeCodeByShapeId.get(connector.fromShapeId!)!,
         toNodeCode: nodeCodeByShapeId.get(connector.toShapeId!)!,
-        branchType: classified.branchType,
-        branchLabel: classified.branchLabel,
+        branchType: resolved.branchType,
+        branchLabel: resolved.branchLabel,
         sortOrder: 0,
         sourceConnectorId: connector.id,
       };
