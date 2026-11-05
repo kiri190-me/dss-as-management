@@ -12,6 +12,7 @@ import NoticePopup from "@/components/common/NoticePopup";
 import UnsavedLeaveConfirmDialog from "@/components/common/UnsavedLeaveConfirmDialog";
 import { useUnsavedLeaveGuard } from "@/components/common/useUnsavedLeaveGuard";
 import AmountInput from "@/components/common/AmountInput";
+import { DATE_INPUT_MAX } from "@/components/common/date-input-limits";
 import {
   editErrorClass,
   editInputClass,
@@ -2872,6 +2873,9 @@ export default function QuoteEditForm({
         <Field label="발행일자" error={fieldErrors.quoteDate} required>
           <input
             type="date"
+            // 연도를 네 자리로 묶는다(date-input-limits.ts) — 없으면 연도 칸이
+            // 여섯 자리를 받아 월로 넘어가지 않는다.
+            max={DATE_INPUT_MAX}
             value={quoteDate}
             // 사람이 고치면 「손댐」이 켜진다 — 엑셀 자동 채우기가 그 날짜를 덮지 않는다(editQuoteDate).
             onChange={(e) => editQuoteDate(e.target.value)}

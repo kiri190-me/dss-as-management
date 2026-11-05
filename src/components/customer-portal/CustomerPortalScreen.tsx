@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import NoticePopup from "@/components/common/NoticePopup";
 import { showSavePopup } from "@/components/common/SavePopup";
+import { DATE_INPUT_MAX } from "@/components/common/date-input-limits";
 import type { CustomerPortalItem } from "@/lib/db/queries/customer-portal";
 import {
   findPortalFormById,
@@ -995,6 +996,22 @@ function FormItemRow({
                   <>
                     <input
                       type={column.valueKind === "date" ? "date" : "text"}
+                      // 연도를 네 자리로 묶는다(date-input-limits.ts) — 없으면
+                      // 연도 칸이 여섯 자리를 받아 월로 넘어가지 않는다.
+                      //
+                      // 🔴 **type 과 같은 조건으로 갈라야 한다.** 글자 칸에
+                      // max 는 아무 뜻이 없지만(브라우저가 무시한다) DOM 에는
+                      // 그대로 남아, 나중에 이 칸을 읽는 사람이 글자 칸에 상한이
+                      // 걸린 줄로 읽는다. 날짜일 때만 붙인다.
+                      //
+                      // 🔵 이 칸은 type 을 글자가 아니라 **식**으로 적어서, 날짜
+                      // 칸을 글자로 찾는 grep 에 안 걸린다 — 그래서 빠뜨리기 쉽다.
+                      // date-input-max-screens.test.ts 가 글자가 아니라 type 에
+                      // 적힌 식을 보고 이 자리도 함께 세는 까닭이다.
+                      // (그 글자를 여기 주석에 적지 않는 것도 일부러다 — 적으면
+                      //  「이 파일엔 글자로 적힌 날짜 칸이 없다」를 재는 쪽이
+                      //  주석 때문에 틀린다. 실제로 한 번 그렇게 터졌다.)
+                      max={column.valueKind === "date" ? DATE_INPUT_MAX : undefined}
                       value={value}
                       disabled={!canEdit}
                       maxLength={PORTAL_MANUAL_VALUE_MAX_LENGTH}

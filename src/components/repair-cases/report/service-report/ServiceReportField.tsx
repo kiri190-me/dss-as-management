@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { DATE_INPUT_MAX } from "@/components/common/date-input-limits";
 import {
   editErrorClass,
   editInputClass,
@@ -158,6 +159,9 @@ export function DateField({
     <Field label={label} error={error} hint={hint} required={required}>
       <input
         type="date"
+        // 연도를 네 자리로 묶는다(date-input-limits.ts) — 없으면 연도 칸이 여섯
+        // 자리를 받아 월로 넘어가지 않는다.
+        max={DATE_INPUT_MAX}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         disabled={disabled}

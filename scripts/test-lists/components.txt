@@ -1113,3 +1113,19 @@ src/components/procedures/execution/next-procedure-handoff.test.ts
 #    computeCenterAlignedRelativePosition 을 쓰는가.
 #    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
 src/components/procedures/procedure-editor-center-point-placement.test.ts
+
+# 2026-11-05 — 날짜 칸의 **연도를 네 자리로** 묶는다(사용자 지시 「년도가 6글자
+#    들어가는데 4글자만 들어가게, 4글자를 치면 월로 넘어가게」). 고친 것은
+#    `<input type="date">` 스물에 붙인 `max={DATE_INPUT_MAX}` 한 줄씩과,
+#    `<input type="datetime-local">` 넷에 붙인 `max={DATETIME_LOCAL_INPUT_MAX}` 다.
+#    월→일 넘어가기는 브라우저가 이미 하고 있어 건드리지 않았다.
+#    여기서 재는 것은 🔴 **빠뜨린 칸이 없는가**다 — 빠뜨려도 오류가 안 나고 그 칸만
+#    조용히 여섯 자리를 받는다. 곁들여: 🔴 주석에 적힌 `type="date"` 를 세지 않는가
+#    (주석에만 있는 파일에서 0개 · 섞인 파일에서 진짜 수만) · 🔴 글자가 아니라
+#    `type=` 에 적힌 **식**을 보는가(삼항으로 적힌 칸 하나는 grep 에 안 걸린다) ·
+#    🔴 두 갈래가 **서로 다른 상수**를 드는가(뒤바꿔 주면 브라우저가 상한을 통째로
+#    무시해 오류 없이 고치기 전으로 돌아간다) · 🔵 상수가 업무 상한으로 안 좁혀졌는가.
+#    🔴 파일마다 **갈래별로 몇 개**인지까지 못 박는다 — 읽개가 조용히 0개를 찾는 날에
+#    터지게. 🔵 처음엔 `datetime-local` 을 「범위 밖」으로 두고 **안 집는다**고 단언해
+#    초록으로 통과하고 있었다(그 설명이 곧 거짓이 됐다). 지우지 않고 뒤집었다.
+src/components/common/date-input-max-screens.test.ts

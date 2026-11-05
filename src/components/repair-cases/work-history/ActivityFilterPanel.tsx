@@ -7,6 +7,7 @@ import {
   activitySourceTypeLabels,
 } from "@/lib/domain/local/activity/activity-types";
 import type { ActivityFilters, ActorOption, DateRangeValidation } from "@/lib/domain/local/activity/filters";
+import { DATE_INPUT_MAX } from "@/components/common/date-input-limits";
 
 const inputClass =
   "w-full rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50";
@@ -123,6 +124,9 @@ export default function ActivityFilterPanel({
           <input
             id="activity-date-from"
             type="date"
+            // 연도를 네 자리로 묶는다(date-input-limits.ts) — 없으면 연도 칸이
+            // 여섯 자리를 받아 월로 넘어가지 않는다. 시작일 · 종료일 둘 다 같다.
+            max={DATE_INPUT_MAX}
             value={filters.dateFrom}
             onChange={(event) => onDateFromChange(event.target.value)}
             aria-invalid={Boolean(dateValidation.fromError)}
@@ -142,6 +146,7 @@ export default function ActivityFilterPanel({
           <input
             id="activity-date-to"
             type="date"
+            max={DATE_INPUT_MAX}
             value={filters.dateTo}
             onChange={(event) => onDateToChange(event.target.value)}
             aria-invalid={Boolean(dateValidation.toError)}

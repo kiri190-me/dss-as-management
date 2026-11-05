@@ -7,6 +7,7 @@ import {
   type ServiceReportFormValues,
   type ServiceReportOccurredOnMode,
 } from "@/lib/domain/service-report-form";
+import { DATE_INPUT_MAX } from "@/components/common/date-input-limits";
 import {
   DateField,
   editInputClass,
@@ -370,6 +371,9 @@ function OccurredOnField({
       {values.occurredOnMode === "DATE" ? (
         <input
           type="date"
+          // 연도를 네 자리로 묶는다(date-input-limits.ts) — 없으면 연도 칸이
+          // 여섯 자리를 받아 월로 넘어가지 않는다.
+          max={DATE_INPUT_MAX}
           value={values.occurredOnDate}
           onChange={(event) => onChange({ occurredOnDate: event.target.value })}
           disabled={disabled}

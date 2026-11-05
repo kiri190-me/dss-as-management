@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent } from "react";
 import { normalizeEntityName, rankSimilarNames } from "@/lib/domain/entity-name-match";
 import { BILLING_TYPE_CODES, billingTypeLabels, PRIORITY_CODES, type BillingType, type Priority } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
+import { DATE_INPUT_MAX } from "@/components/common/date-input-limits";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { DUE_DATE_FROM_DOMESTIC_ORDER_LABEL } from "@/lib/domain/requested-due-date-link";
@@ -281,6 +282,10 @@ export default function IntakeInfoEditForm({
             <label className={editLabelClass}>인수일</label>
             <input
               type="date"
+              // 연도를 네 자리로 묶는다(date-input-limits.ts) — 없으면 연도 칸이
+              // 여섯 자리를 받아 월로 넘어가지 않는다. 이 폼의 날짜 칸 다섯이
+              // 모두 같은 값을 쓴다.
+              max={DATE_INPUT_MAX}
               className={editInputClass}
               value={receivedAt}
               disabled={disabled}
@@ -421,6 +426,7 @@ export default function IntakeInfoEditForm({
             <label className={editLabelClass}>고객 요청 납기일</label>
             <input
               type="date"
+              max={DATE_INPUT_MAX}
               className={editInputClass}
               value={customerRequestedDueDate}
               disabled={disabled}
@@ -453,6 +459,7 @@ export default function IntakeInfoEditForm({
             <label className={editLabelClass}>사내 목표 검수 완료일</label>
             <input
               type="date"
+              max={DATE_INPUT_MAX}
               className={editInputClass}
               value={internalTargetInspectionCompletionDate}
               disabled={disabled}
@@ -474,6 +481,7 @@ export default function IntakeInfoEditForm({
             <label className={editLabelClass}>사내 목표 완료일</label>
             <input
               type="date"
+              max={DATE_INPUT_MAX}
               className={editInputClass}
               value={internalTargetShipmentDate}
               disabled={disabled}
@@ -515,6 +523,7 @@ export default function IntakeInfoEditForm({
             <label className={editLabelClass}>실제 출하일</label>
             <input
               type="date"
+              max={DATE_INPUT_MAX}
               className={editInputClass}
               value={actualShipmentDate}
               disabled={disabled}

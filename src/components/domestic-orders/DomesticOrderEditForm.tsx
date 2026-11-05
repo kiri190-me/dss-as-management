@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
+import { DATE_INPUT_MAX } from "@/components/common/date-input-limits";
 import EditSectionActions, {
   editErrorClass,
   editInputClass,
@@ -965,6 +966,9 @@ export default function DomesticOrderEditForm({
                         <input
                           id={dueDateInputId(entry.key)}
                           type="date"
+                          // 연도를 네 자리로 묶는다(date-input-limits.ts) — 없으면
+                          // 연도 칸이 여섯 자리를 받아 월로 넘어가지 않는다.
+                          max={DATE_INPUT_MAX}
                           className={editInputClass}
                           value={entry.dueDate}
                           disabled={disabled}

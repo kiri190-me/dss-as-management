@@ -5,6 +5,7 @@ import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-l
 import { ListCard } from "@/components/common/list-card";
 import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
+import { DATETIME_LOCAL_INPUT_MAX } from "@/components/common/date-input-limits";
 import { createShipmentDelegationAction, revokeShipmentDelegationAction } from "@/lib/server/actions/shipment-delegations";
 import type { RepresentativeManagementUserRow, ShipmentDelegationRow } from "@/lib/db/queries/shipment-delegations";
 import { deriveDelegationDisplayStatus } from "@/lib/domain/shipment-delegation-status";
@@ -212,6 +213,12 @@ export default function DelegationSection({
               시작 일시
               <input
                 type="datetime-local"
+                // 연도를 네 자리로 묶는다(date-input-limits.ts) — 없으면 연도
+                // 칸이 여섯 자리를 받는다. 바로 옆 탭의 결재권 위임 칸과 같은
+                // 모양이다(거기서 2026-11-05 에 실측했다).
+                // 🔴 날짜 칸의 DATE_INPUT_MAX 를 여기 주면 안 된다 — 시각이 없는
+                //    값은 이 칸이 안 받아 상한이 통째로 무시된다.
+                max={DATETIME_LOCAL_INPUT_MAX}
                 required
                 value={startsAt}
                 onChange={(e) => setStartsAt(e.target.value)}
@@ -223,6 +230,7 @@ export default function DelegationSection({
               종료 일시
               <input
                 type="datetime-local"
+                max={DATETIME_LOCAL_INPUT_MAX}
                 required
                 value={endsAt}
                 onChange={(e) => setEndsAt(e.target.value)}

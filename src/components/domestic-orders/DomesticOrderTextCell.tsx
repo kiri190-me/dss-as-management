@@ -3,6 +3,7 @@
 import { useState, type FormEvent, type MouseEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
+import { DATE_INPUT_MAX } from "@/components/common/date-input-limits";
 import EditSectionActions, {
   editInputClass,
 } from "@/components/repair-cases/detail/edit/EditSectionActions";
@@ -488,8 +489,13 @@ export default function DomesticOrderTextCell({
         //
         // autoComplete 를 끄지 않는 것은 `줄 수정` 폼의 날짜 칸들과 맞춘 것이다 —
         // 브라우저는 달력 입력에 엉뚱한 값을 채워 넣지 않는다.
+        //
+        // max 는 연도를 네 자리로 묶는다(date-input-limits.ts). 없으면 연도 칸이
+        // 여섯 자리를 받아 월로 넘어가지 않는다 — `줄 수정` 폼의 같은 셋도 같은
+        // 값을 쓴다. 한쪽만 주면 같은 칸이 여는 길에 따라 다르게 입력된다.
         <input
           type="date"
+          max={DATE_INPUT_MAX}
           className={editInputClass}
           value={value}
           disabled={disabled}

@@ -9,6 +9,7 @@ import {
 } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
 import { showSavePopup } from "@/components/common/SavePopup";
+import { DATE_INPUT_MAX } from "@/components/common/date-input-limits";
 import {
   ATTACHMENT_EXTENSION_RULES,
   MAX_ATTACHMENT_SIZE_BYTES,
@@ -889,6 +890,10 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
             <input
               id="receivedAt"
               type="date"
+              // 연도를 네 자리로 묶는다(date-input-limits.ts) — 없으면 연도 칸이
+              // 여섯 자리를 받아 월로 넘어가지 않는다. 이 화면의 날짜 칸 넷이
+              // 모두 같은 값을 쓴다.
+              max={DATE_INPUT_MAX}
               ref={(el) => {
                 fieldRefs.current.receivedAt = el;
               }}
@@ -906,6 +911,7 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
             <input
               id="customerRequestedDueDate"
               type="date"
+              max={DATE_INPUT_MAX}
               ref={(el) => {
                 fieldRefs.current.customerRequestedDueDate = el;
               }}
@@ -931,6 +937,7 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
             <input
               id="internalTargetInspectionCompletionDate"
               type="date"
+              max={DATE_INPUT_MAX}
               ref={(el) => {
                 fieldRefs.current.internalTargetInspectionCompletionDate = el;
               }}
@@ -956,6 +963,7 @@ export default function IntakeFormInner({ referenceData, canRegisterProductModel
             <input
               id="internalTargetShipmentDate"
               type="date"
+              max={DATE_INPUT_MAX}
               ref={(el) => {
                 fieldRefs.current.internalTargetShipmentDate = el;
               }}
