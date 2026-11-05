@@ -59,6 +59,9 @@ scripts/lib/xlsx/extract-troubleshooting-matrix.test.ts
 scripts/lib/xlsx/combine-shape-graph-sheets.test.ts
 scripts/lib/xlsx/extract-plain-instruction.test.ts
 scripts/lib/xlsx/extract-reference-index.test.ts
+scripts/lib/xlsx/extract-technical-task-graph.test.ts
+scripts/lib/xlsx/technical-task-sheet-plan.test.ts
+scripts/lib/dev-database-write-guard.test.ts
 scripts/lib/attachment-backup-plan.test.ts
 src/lib/domain/procedure-validation-known-issues.test.ts
 src/lib/domain/procedure-visual-language.test.ts
@@ -1670,3 +1673,14 @@ src/lib/domain/procedure-next-procedure-link.test.ts
 #    안 보인다) · 🔴 [저장]이 이 노드를 집어 드는가(빠지면 건너뛰고도 성공이라
 #    말한다) · 셋 다 「안 바뀌면 안 잡힌다」로 공짜 통과를 막는다.
 src/lib/domain/procedure-next-procedure-draft.test.ts
+
+# 2026-11-05 — 절차 **코드를 서버가 짓는다**(사용자 요구 「코드를 적는 칸을 없애줘」).
+#    사람이 코드를 안 적게 됐지만 `UNIQUE (code, version)` 은 그대로라 누군가는
+#    지어야 하고, 지은 값이 겹치면 **코드 칸이 없는 화면에서는 고칠 거리가 없다**
+#    (「만들기가 안 된다」로만 보이고 까닭이 안 남는다). 재는 것: 🔴 같은 시각으로
+#    백 개를 지어도 전부 다른가(그리고 날짜 부분은 전부 같은가 — 유일성이 꼬리에서
+#    오는지 시계에서 오는지 가른다) · 🔴 무작위가 정말 crypto 에서 오는가(가짜를
+#    꽂아 바이트→글자 접기까지 값으로) · 🔴 날짜가 KST 인가(UTC 로 재면 새벽에
+#    만든 절차가 전날로 적힌다) · 🔴 mutation 배선 — 받아 온 코드는 그대로 쓰고
+#    (들여오기가 제 코드를 잃으면 안 된다) 안 받았을 때만 짓는가, 유일 제약에
+#    걸리면 **트랜잭션을 새로 열어** 다시 지어 재시도하는가. 🔵 주석을 안 세는지도
