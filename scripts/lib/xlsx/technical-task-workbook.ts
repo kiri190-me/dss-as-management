@@ -1,6 +1,6 @@
 import { ZipArchive } from "./zip-reader";
 import { loadWorkbook, type LoadedSheet, type LoadedWorkbook } from "./workbook-loader";
-import { parseDrawingObjects } from "./drawing-geometry";
+import { connectorPath, parseDrawingObjects } from "./drawing-geometry";
 import {
   extractTechnicalTaskGraph,
   type TechnicalTaskConnectorInput,
@@ -67,15 +67,12 @@ export function readSheetDrawing(zip: ZipArchive, sheet: LoadedSheet): SheetDraw
     .filter((o) => o.kind === "connector")
     .map((o) => ({
       id: o.id,
-      x: o.x,
-      y: o.y,
-      cx: o.cx,
-      cy: o.cy,
-      flipH: o.flipH,
-      flipV: o.flipV,
       fromShapeId: o.stCxnId,
       toShapeId: o.endCxnId,
-      isStraight: /^(straightConnector\d*|line)$/i.test(o.geom ?? ""),
+      // 🔴 **상자가 아니라 경로를 넘긴다**(2026-11-05). 그래프 쪽은 선의 바깥 상자를
+      //    한 번도 안 본다 — 꺾인 선의 상자는 시트 절반을 덮고, 돌아간 선의 상자는
+      //    가로·세로가 뒤바뀌어 있다(drawing-geometry.ts 의 `connectorPath` 머리말).
+      path: connectorPath(o),
     }));
 
   return {

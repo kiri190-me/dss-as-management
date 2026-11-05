@@ -52,6 +52,7 @@ src/lib/auth/permission-features.test.ts
 src/lib/auth/developer-flag.test.ts
 src/lib/db/migration-safety.test.ts
 src/lib/client-uuid.test.ts
+scripts/lib/xlsx/drawing-geometry.test.ts
 scripts/lib/xlsx/branch-classification.test.ts
 scripts/lib/xlsx/extract-shape-graph.test.ts
 scripts/lib/xlsx/extract-checklist-form.test.ts

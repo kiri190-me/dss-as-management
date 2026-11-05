@@ -1,8 +1,7 @@
 import { classifyBranchLabel, classifyUnifiedBranchLabel, unifiedBranch } from "./branch-classification";
 import {
-  connectorSegment,
+  distancePointToPolyline,
   distancePointToRect,
-  distancePointToSegment,
   geometryCenter,
   EMU_PER_PIXEL,
   type DrawingGeometry,
@@ -48,16 +47,25 @@ export type TechnicalTaskShapeInput = DrawingGeometry & {
   text: string;
 };
 
-export type TechnicalTaskConnectorInput = DrawingGeometry & {
+export type TechnicalTaskConnectorInput = {
+  /** `<xdr:cNvPr id>`. */
+  id: string;
   /** `<a:stCxn id>` — 이 선이 **나가는** 도형 번호. */
   fromShapeId: string | null;
   /** `<a:endCxn id>` — 이 선이 **닿는** 도형 번호. */
   toShapeId: string | null;
   /**
-   * 곧은 선인가(`straightConnector1`·`line`). 꺾인 선은 제 상자 안에서 ㄱ 자로
-   * 돌기 때문에 선분 하나로 못 잰다 — drawing-geometry.ts 의 거리 함수가 갈린다.
+   * 🔴 선이 **실제로 그려지는 경로**(그림판 절대 좌표 · `connectorPath`).
+   *
+   * 2026-11-05 전에는 여기에 바깥 상자(`x`·`y`·`cx`·`cy`·뒤집기)와 「곧은 선인가」를
+   * 받아, 곧은 선은 상자의 대각선으로 꺾인 선은 **상자 자체**로 쟀다. 꺾인 선과
+   * 돌아간 선이 많은 시트에서 그 어림이 무너졌다 — 까닭과 실측값은
+   * drawing-geometry.ts 의 `connectorPath` 머리말에 있다.
+   *
+   * 🔵 그 뒤로 이 모듈은 선의 상자를 **한 번도 안 본다.** 그래서 아예 안 받는다 —
+   * 받아 두면 언젠가 누가 다시 상자로 재고, 그 틀림은 오류가 아니라 그림으로만 드러난다.
    */
-  isStraight: boolean;
+  path: readonly Point[];
 };
 
 export type TechnicalTaskGraphInput = {
@@ -547,7 +555,11 @@ function rebindDanglingEndpoints(
 
   const connectors = rawConnectors.map((connector) => {
     if (connector.fromShapeId && connector.toShapeId) return connector;
-    const { start, end } = connectorSegment(connector);
+    // 🔵 경로의 **첫 점·끝 점**이 곧 선의 시작과 끝이다. 전에는 바깥 상자의 마주
+    //    보는 두 귀퉁이를 썼는데, 돌아간 선에서는 그 귀퉁이가 선 위에 있지도 않다.
+    const start = connector.path[0];
+    const end = connector.path[connector.path.length - 1];
+    if (!start || !end) return connector;
     let next = connector;
 
     for (const side of ["START", "END"] as const) {
@@ -741,11 +753,15 @@ function resolveBranchesWithDecisionPairs(
   return resolved;
 }
 
-/** 레이블 가운데에서 연결선까지의 거리. 곧은 선은 선분, 꺾인 선은 제 상자로 잰다. */
+/**
+ * 레이블 가운데에서 연결선까지의 거리 — **실제로 그려지는 꺾은선**까지로 잰다.
+ *
+ * 🔴 전에는 곧은 선과 꺾인 선에 **다른 자**를 댔다(선분 vs 바깥 상자). 자가 둘이면
+ * 「0 으로 나오는 쪽」이 언제나 이기는데, 그 0 은 가깝다는 뜻이 아니라 **잴 줄 모른다**는
+ * 뜻이었다. 이제 자가 하나다 — drawing-geometry.ts 의 `connectorPath` 머리말 참고.
+ */
 function distanceToConnector(labelCenter: Point, connector: TechnicalTaskConnectorInput): number {
-  if (!connector.isStraight) return distancePointToRect(labelCenter, connector);
-  const { start, end } = connectorSegment(connector);
-  return distancePointToSegment(labelCenter, start, end);
+  return distancePointToPolyline(labelCenter, connector.path);
 }
 
 export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): TechnicalTaskGraphResult {

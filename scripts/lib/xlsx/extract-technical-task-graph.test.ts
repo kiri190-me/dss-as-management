@@ -6,6 +6,7 @@ import {
   type TechnicalTaskGraphInput,
   type TechnicalTaskShapeInput,
 } from "./extract-technical-task-graph";
+import { connectorPath, distancePointToPolyline, distancePointToRect } from "./drawing-geometry";
 import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
 
 /**
@@ -27,21 +28,44 @@ function shape(
   return { id, text, ...box, flipH: false, flipV: false };
 }
 
+/**
+ * 연결선 하나.
+ *
+ * 🔴 **경로를 손으로 적지 않고 `connectorPath` 로 세운다**(2026-11-05). 그래프가
+ * 받는 값이 경로로 바뀌었는데(`TechnicalTaskConnectorInput.path`), 시험이 그 경로를
+ * 제 손으로 적으면 **엑셀을 읽는 쪽이 아무리 틀려도 시험은 영영 초록**이다.
+ * 본보기는 엑셀이 적는 것과 같은 꼴(상자 + 뒤집기 + 돌리기 + 프리셋)로 쓰고,
+ * 경로는 실제 코드가 세운다.
+ */
 function connector(
   id: string,
   from: string | null,
   to: string | null,
   box: { x: number; y: number; cx: number; cy: number },
-  options: { flipH?: boolean; flipV?: boolean; isStraight?: boolean } = {}
+  options: {
+    flipH?: boolean;
+    flipV?: boolean;
+    /** `<a:prstGeom prst>`. 안 주면 곧은 선. */
+    geom?: string;
+    /** `<a:xfrm rot>` — 1/60000 도. */
+    rot?: number;
+    /** `<a:gd name="adjN">` — 꺾임점 조절값(10만분율). */
+    adjustValues?: number[];
+  } = {}
 ): TechnicalTaskConnectorInput {
   return {
     id,
     fromShapeId: from,
     toShapeId: to,
-    ...box,
-    flipH: options.flipH ?? false,
-    flipV: options.flipV ?? false,
-    isStraight: options.isStraight ?? true,
+    path: connectorPath({
+      id,
+      ...box,
+      flipH: options.flipH ?? false,
+      flipV: options.flipV ?? false,
+      rot: options.rot ?? 0,
+      geom: options.geom ?? "straightConnector1",
+      adjustValues: options.adjustValues ?? [],
+    }),
   };
 }
 
@@ -61,12 +85,19 @@ function excelEdges(result: ReturnType<typeof extractTechnicalTaskGraph>) {
   return result.edges.filter((e) => e.sourceConnectorId !== null);
 }
 
-/** 선의 **바깥 상자 가운데**까지의 거리 — 고치기 전에 쓰던 자(아래 시험이 이것과 견준다). */
+/**
+ * 선의 **바깥 상자 가운데**까지의 거리 — 고치기 전에 쓰던 자(아래 시험이 이것과 견준다).
+ * 🔵 상자는 경로를 감싸는 네모로 되돌려 센다 — 연결선 입력이 상자를 더는 안 들고 다닌다.
+ */
 function distanceToConnectorBoxCenter(
   label: TechnicalTaskShapeInput,
   c: TechnicalTaskConnectorInput
 ): number {
-  return Math.hypot(label.x + label.cx / 2 - (c.x + c.cx / 2), label.y + label.cy / 2 - (c.y + c.cy / 2));
+  const xs = c.path.map((p) => p.x);
+  const ys = c.path.map((p) => p.y);
+  const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const centerY = (Math.min(...ys) + Math.max(...ys)) / 2;
+  return Math.hypot(label.x + label.cx / 2 - centerX, label.y + label.cy / 2 - centerY);
 }
 
 /**
@@ -1515,4 +1546,145 @@ test("노드 코드는 앞가지로 갈린다 — 같은 시트에서 복제한 
     first.nodes.map((n) => [n.title, n.nodeType, n.sortOrder]),
     second.nodes.map((n) => [n.title, n.nodeType, n.sortOrder])
   );
+});
+
+/**
+ * ============================================================================
+ * 🔴 **되돌아가는 긴 선이 옆 선의 분기 이름을 빼앗던 자리** (2026-11-05)
+ * ============================================================================
+ * 실제로 일어난 일: `(7)원복 검사 및 개선 작업`(도형 250·선 225)에서 「판단 노드에
+ * 정상/기본 진행 경로가 없습니다」 오류가 **28건** 났다. 까닭은 흐름도가 이상해서가
+ * 아니라 **우리가 선의 자리를 틀리게 읽어서**였다.
+ *
+ * 아래 본보기는 그 모양을 그대로 줄인 것이다:
+ *   「점검」 --NG--> 「교환」 --(이름 없음)--> 「다음 점검」
+ * 「교환 → 다음 점검」은 멀리 돌아가는 **꺾이고 돌아간** 선이라, 적힌 상자가
+ * 「점검 → 교환」의 짧은 곧은 선과 그 옆의 "NG" 글자를 **통째로 덮는다.**
+ *
+ * 옛 자로 재면 "NG" 가 그 덮는 선에 붙어(거리 0) 「교환」이 **NG 만 내보내는
+ * 판단**이 되고, 동시에 「점검」은 제 NG 를 잃는다. 오류 한 건이 아니라 **흐름의
+ * 뜻이 뒤집히는** 일이다.
+ */
+function buildLoopBackLabelTheftFixture(): TechnicalTaskGraphInput {
+  return {
+    sheetName: "(TEST) 되돌아가는 선",
+    nodeCodePrefix: "lb",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 신호 점검", { x: 4000000, y: 5000000, cx: 2000000, cy: 400000 }),
+      shape("2", "라마바 기판 교환", { x: 7000000, y: 5000000, cx: 2000000, cy: 400000 }),
+      shape("3", "사아자 신호 점검", { x: 4000000, y: 8000000, cx: 2000000, cy: 400000 }),
+      // "NG" 는 「점검 → 교환」 선 바로 아래에 떠 있다(선까지 100000 EMU).
+      shape("8", "NG", { x: 6400000, y: 5250000, cx: 200000, cy: 100000 }),
+    ],
+    connectors: [
+      // 점검 → 교환 (오른쪽으로 가는 짧은 곧은 선)
+      connector("cNG", "1", "2", { x: 6000000, y: 5200000, cx: 1000000, cy: 0 }),
+      // 점검 → 다음 점검 (아래로 내려가는 곧은 선 · 이름 없음)
+      connector("cDown", "1", "3", { x: 5000000, y: 5400000, cx: 0, cy: 2600000 }),
+      /**
+       * 교환 → 다음 점검. 엑셀은 이것을 **90° 돌린 `bentConnector3`** 로 적는다.
+       * 적힌 상자는 (5200000,5200000)~(7800000,8200000) 이라 "NG" 글자를 품지만,
+       * 실제로 그려지는 경로는 (8000000,5400000) → (8000000,6700000) →
+       * (5000000,6700000) → (5000000,8000000) 으로 그 글자를 멀찍이 비껴간다.
+       */
+      connector("cLoop", "2", "3", { x: 5200000, y: 5200000, cx: 2600000, cy: 3000000 }, {
+        geom: "bentConnector3",
+        rot: 5400000,
+      }),
+    ],
+  };
+}
+
+test("🔴 못 — 본보기가 「옛 자로는 틀리는」 모양이 맞다(적힌 상자가 NG 글자를 품는다)", () => {
+  // 이 못이 없으면 본보기가 밋밋해졌을 때 아래 시험들이 **무뎌진 줄도 모르고** 통과한다.
+  const input = buildLoopBackLabelTheftFixture();
+  const label = input.shapes.find((s) => s.text === "NG")!;
+  const labelCenter = { x: label.x + label.cx / 2, y: label.y + label.cy / 2 };
+  // 엑셀 파일에 **적혀 있는** 상자(= 2026-11-05 전에 거리를 재던 바로 그 네모).
+  const writtenBox = { x: 5200000, y: 5200000, cx: 2600000, cy: 3000000 };
+
+  assert.equal(
+    distancePointToRect(labelCenter, writtenBox),
+    0,
+    "적힌 상자가 더 이상 NG 글자를 안 품는다 — 시험이 무뎌졌다"
+  );
+  const cNG = input.connectors.find((c) => c.id === "cNG")!;
+  assert.equal(distancePointToPolyline(labelCenter, cNG.path), 100000);
+  // 실제 경로로 재면 되돌아가는 선은 **열네 배** 멀다.
+  const cLoop = input.connectors.find((c) => c.id === "cLoop")!;
+  assert.equal(distancePointToPolyline(labelCenter, cLoop.path), 1400000);
+});
+
+test("🔴 NG 는 **옆의 짧은 곧은 선**에 붙는다 — 덮고 지나가는 선이 아니라", () => {
+  const result = extractTechnicalTaskGraph(buildLoopBackLabelTheftFixture());
+  const binding = result.labelBindings.find((b) => b.labelText === "NG");
+  assert.equal(binding?.connectorId, "cNG");
+  assert.equal(binding?.confident, true);
+});
+
+test("🔴 그래서 「교환」은 판단이 되지 않고, 「점검」이 제 NG 를 되찾는다", () => {
+  const result = extractTechnicalTaskGraph(buildLoopBackLabelTheftFixture());
+  const inspection = result.nodes.find((n) => n.sourceShapeId === "1");
+  const action = result.nodes.find((n) => n.sourceShapeId === "2");
+
+  assert.equal(inspection?.nodeType, "DECISION");
+  assert.equal(action?.nodeType, "CORRECTIVE_ACTION");
+
+  assert.deepEqual(
+    excelEdges(result).map((e) => [e.sourceConnectorId, e.branchType]),
+    [
+      ["cNG", "NG"],
+      ["cDown", "NORMAL"],
+      ["cLoop", "DEFAULT"],
+    ]
+  );
+});
+
+test("🔴 구조 검증의 MISSING_OUTGOING_PATH 가 사라진다 — 28건이 난 바로 그 오류다", () => {
+  const result = extractTechnicalTaskGraph(buildLoopBackLabelTheftFixture());
+  const issues = validateProcedureGraphStructure(
+    result.nodes.map((n) => ({ id: n.nodeCode, nodeType: n.nodeType })),
+    result.edges.map((e, index) => ({
+      id: `e${index}`,
+      fromNodeId: e.fromNodeCode,
+      toNodeId: e.toNodeCode,
+      branchType: e.branchType,
+    }))
+  );
+  assert.deepEqual(
+    issues.filter((i) => i.issueType === "MISSING_OUTGOING_PATH"),
+    []
+  );
+});
+
+test("🔴 끊어진 끝은 **실제 경로의 끝**으로 이어 붙는다 — 적힌 상자의 귀퉁이가 아니라", () => {
+  /**
+   * 90° 돌아간 곧은 선 하나. 적힌 상자의 귀퉁이는 (3000000,1000000)·(4000000,5000000)
+   * 이지만, 실제로 그려지는 선은 (5500000,2500000) → (1500000,3500000) 이다.
+   * 상자 귀퉁이 쪽에는 **엉뚱한 상자**를 세워 두었다 — 옛 방법이면 그쪽으로 붙는다.
+   */
+  const input: TechnicalTaskGraphInput = {
+    sheetName: "(TEST) 돌아간 선의 끊어진 끝",
+    nodeCodePrefix: "rb",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 작업", { x: 5300000, y: 2300000, cx: 400000, cy: 400000 }),
+      shape("2", "라마바 작업", { x: 1300000, y: 3300000, cx: 400000, cy: 400000 }),
+      shape("9", "사아자 엉뚱한 상자", { x: 2800000, y: 800000, cx: 400000, cy: 400000 }),
+    ],
+    connectors: [
+      connector("c1", null, "2", { x: 3000000, y: 1000000, cx: 1000000, cy: 4000000 }, { rot: 5400000 }),
+    ],
+  };
+
+  // ① 못 — 적힌 상자의 시작 귀퉁이는 「엉뚱한 상자」 안에 있다(옛 방법의 답).
+  assert.equal(distancePointToRect({ x: 3000000, y: 1000000 }, input.shapes[2]), 0);
+  // ② 실제 경로의 시작점은 「가나다 작업」 안에 있다.
+  assert.equal(distancePointToRect(input.connectors[0].path[0], input.shapes[0]), 0);
+
+  const result = extractTechnicalTaskGraph(input);
+  const rebound = result.reboundEndpoints.find((r) => r.connectorId === "c1" && r.side === "START");
+  assert.equal(rebound?.shapeId, "1");
+  assert.equal(result.edges.some((e) => e.sourceConnectorId === "c1" && e.fromNodeCode === "rb-1"), true);
 });
