@@ -236,7 +236,9 @@ export default function ProcedureTemplateDetailScreen({
             )}
           </div>
         </div>
-        <p className="mt-1 font-mono text-xs text-zinc-400 dark:text-zinc-600">{template.code}</p>
+        {/* 🔴 2026-11-05 — 제목 아래에 코드를 적던 줄을 걷었다(사용자 결정).
+            걷어낸 것은 보여 주기뿐이고 `procedure_templates.code` 는 그대로다 —
+            아래 [버전 목록]이 바로 그 값으로 같은 계열의 판을 모은다. */}
         {template.description && (
           <p className="mt-2 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">{template.description}</p>
         )}

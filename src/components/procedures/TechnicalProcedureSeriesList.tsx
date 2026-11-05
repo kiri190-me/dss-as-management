@@ -35,6 +35,16 @@ import type {
  * 호박색 표시를 달고 판 번호를 전부 적으며, 치우는 길(한 번 더 게시)을 함께
  * 적는다.
  *
+ * ── 🔴 2026-11-05 — 계열을 **코드로 묶되 코드를 안 적는다** ─────────────
+ * 사용자 결정으로 화면에서 코드를 걷었다("코드가 필요하다고 못 느끼겠어"). 그런데
+ * 이 목록이 줄을 묶는 기준은 **여전히 code** 이고 `key={s.code}` 도 그대로다 —
+ * React key 는 사람이 보는 글자가 아니라 같은 줄을 알아보는 내부 이름이라 바꿀
+ * 까닭이 없다. 걷어낸 것은 이름 아래 한 줄과 카드의 「코드」 항목 둘뿐이다.
+ * 🔵 걷어도 줄이 서로 안 헷갈리는 까닭: 계열마다 이름이 있고, **이름이 겹치는
+ * 계열은 0건**이다(실측 2026-11-05). 겹치는 날이 오면 가를 수단을 다시 정해야
+ * 한다 — 그때 코드를 되살리지 말고 설비 유형·만든 날처럼 사람이 읽을 수 있는
+ * 것을 먼저 보라.
+ *
  * ── 🔴 초안은 받은 것만 그린다 ──────────────────────────────────────────
  * 초안을 볼 수 없는 역할에게는 조회가 초안 행을 아예 안 준다. 그래서 여기서
  * 권한을 다시 보지 않는다 — draftMember 가 null 이면 칸은 "-" 이고, "초안이
@@ -167,7 +177,6 @@ export default function TechnicalProcedureSeriesList({
                   >
                     {s.representative.name}
                   </Link>
-                  <div className="font-mono text-[10px] text-zinc-400 dark:text-zinc-600">{s.code}</div>
                 </td>
                 <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
                   {procedureEquipmentTypeLabels[s.representative.equipmentType]}
@@ -205,7 +214,6 @@ export default function TechnicalProcedureSeriesList({
                 </span>
               }
               fields={[
-                { label: "코드", value: <span className="font-mono">{s.code}</span> },
                 { label: "설비", value: procedureEquipmentTypeLabels[s.representative.equipmentType] },
                 // 🔴 카드 제목이 이미 링크다. 그 안에 또 링크를 두면 <a> 가
                 // 겹쳐 하이드레이션이 깨지므로, 카드에서는 판 번호를 글자로만

@@ -61,7 +61,8 @@ export default function ValidationIssueListScreen({ result }: { result: Validati
           ← {template.name} 상세로
         </Link>
         <h1 className="mt-2 text-lg font-semibold text-zinc-900 dark:text-zinc-50">검증 문제 검토 — {template.name}</h1>
-        <p className="mt-1 font-mono text-xs text-zinc-400 dark:text-zinc-600">{template.code}</p>
+        {/* 🔴 2026-11-05 — 제목 아래에 적던 코드를 걷었다(사용자 결정). 이 화면은
+            절차 **하나**를 다루므로 어느 절차인지는 위 제목이 이미 말하고 있다. */}
       </div>
 
       <div className="flex flex-wrap gap-4 rounded-lg border border-zinc-200 bg-white p-3 text-xs dark:border-zinc-800 dark:bg-zinc-900">

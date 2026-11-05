@@ -99,6 +99,11 @@ export async function publishProcedureTemplateAction(input: { templateId: string
  * createManualTechnicalProcedureTemplate itself — this action only forwards
  * the four caller-supplied fields (code/name/equipmentType/description),
  * never a category or any other server-authoritative value.
+ *
+ * 🔴 2026-11-05 — `code` 는 **화면에서 안 온다.** 만들기 창에 코드 칸이 없어져
+ * `input.code` 가 undefined 로 넘어오고, mutation 이 제 손으로 짓는다. 그 자리를
+ * 여기서 대신 메우지 마라 — 지은 값이 부딪혔을 때 다시 지어 재시도하는 길이
+ * mutation 안에 있고, 여기서 미리 지으면 그 길이 통째로 죽는다.
  */
 export async function createManualTechnicalProcedureTemplateAction(
   input: CreateManualTechnicalTemplateInput

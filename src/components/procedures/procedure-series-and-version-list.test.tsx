@@ -297,9 +297,18 @@ describe("계열 목록 — ⑤ 삭제 모드는 여전히 판 단위로 돈다"
   test("🔴 삭제 모드에서는 묶음을 풀고 평소에는 계열 목록을 그린다", () => {
     const painted = flat(listScreen);
     assert.ok(painted.includes(") : isDeleteMode ? ("), "삭제 모드가 제 가지를 가진다");
+    // 🔴 2026-11-05 — 전에는 `series={series}` 였다. 이름 검색·설비 유형 거르개가
+    //    생기면서 평소 목록이 그리는 것은 **거른 뒤의 계열**이다. 단언을 지우지
+    //    않고 그쪽으로 옮겼다 — 재는 알맹이는 그대로다(계열 목록은 삭제 모드가
+    //    아닐 때 그린다). 🔵 접기 자체는 여전히 거르기 **전** 전체로 한다는 것은
+    //    ④절 마지막 단언(groupProcedureTemplatesByCode(templates))이 지킨다.
     assert.ok(
-      painted.includes(") : ( <TechnicalProcedureSeriesList series={series} /> )}"),
-      "계열 목록은 삭제 모드가 **아닐 때** 그려야 한다"
+      painted.includes(") : ( <TechnicalProcedureSeriesList series={visibleSeries} /> )}"),
+      "계열 목록은 삭제 모드가 **아닐 때**, 거른 뒤의 계열로 그려야 한다"
+    );
+    assert.ok(
+      painted.includes("const visibleSeries = useMemo(() => filterTechnicalProcedureSeries(series, filter), [series, filter]);"),
+      "거르기는 접은 **뒤**에 한다 — 거른 뒤에 접으면 검색어에 따라 계열의 대표가 바뀐다"
     );
   });
 
@@ -313,8 +322,20 @@ describe("계열 목록 — ⑤ 삭제 모드는 여전히 판 단위로 돈다"
 
   test("🔴 고르는 단위는 계열이 아니라 **판**이다", () => {
     const painted = flat(listScreen);
-    assert.ok(painted.includes("orderedIds: templates.map((t) => t.id),"), "범위 고르기는 판 목록 차례를 쓴다");
-    assert.ok(painted.includes("isSelectable: (id) => !undeletable.has(id),"), "막히는 조건도 판마다다");
+    // 🔴 2026-11-05 — 전에는 `templates` · `!undeletable.has(id)` 였다. 거르개가
+    //    생기면서 **고르는 범위가 「거른 뒤 보이는 판」으로 좁아졌다.** 재는
+    //    알맹이(고르는 단위가 계열이 아니라 판이다)는 그대로이므로 지우지 않고
+    //    옮겼다 — 좁아진 쪽을 값으로 재는 것은
+    //    technical-procedure-list-filter(-ui) 두 시험이다.
+    assert.ok(
+      painted.includes("orderedIds: visibleTemplates.map((t) => t.id),"),
+      "범위 고르기는 **거른 뒤** 판 목록 차례를 쓴다"
+    );
+    assert.ok(painted.includes("isSelectable: (id) => selectableVisibleIdSet.has(id),"), "막히는 조건도 판마다다");
+    assert.ok(
+      painted.includes("const selectableVisibleIds = useMemo( () => visibleTemplates.filter((t) => !undeletable.has(t.id)).map((t) => t.id),"),
+      "고를 수 있는 판은 **보이는 판** 중 막히지 않은 것이다 — 막히는 조건은 판마다 그대로다"
+    );
     assert.ok(
       painted.includes("trash.open(\"DELETE\", targetsFrom(selectedIds, templates))"),
       "지우라고 넘기는 것도 판 행이다 — series 를 넘기면 어느 판인지가 사라진다"
@@ -326,9 +347,14 @@ describe("계열 목록 — ⑤ 삭제 모드는 여전히 판 단위로 돈다"
     assert.ok(flat(listScreen).includes("판(버전) 단위"));
   });
 
-  test("🔴 휴지통 탭은 손대지 않았다 — 원래부터 판 단위다", () => {
+  test("🔴 휴지통 탭은 여전히 판 단위다 — 줄마다 판 번호가 적힌다", () => {
     const painted = flat(listScreen);
-    assert.ok(painted.includes("{row.code} · v{row.version}"), "휴지통 표가 판 번호를 적는 자리");
+    // 🔴 2026-11-05 — 전에는 「{row.code} · v{row.version}」이었고, 이름이
+    //    「휴지통 탭은 **손대지 않았다**」였다. 그날 코드를 화면에서 걷으면서 앞의
+    //    코드가 빠졌으니 그 이름도 거짓이 됐다 — 지우지 않고 고쳤다. 재는 알맹이는
+    //    그대로다: 휴지통은 계열이 아니라 **판**을 줄 세운다.
+    assert.ok(painted.includes("<div className=\"font-mono text-[10px] text-zinc-400 dark:text-zinc-600\">v{row.version}</div>"), "휴지통 표가 판 번호를 적는 자리");
+    assert.ok(!painted.includes("{row.code}"), "휴지통에 코드가 다시 붙었다");
     assert.ok(painted.includes("휴지통 ({trashTemplates.length})"), "휴지통 수는 계열이 아니라 판 수 그대로");
     assert.ok(painted.includes("function ProcedureTrashTab("));
   });

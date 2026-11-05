@@ -27,6 +27,7 @@ import {
 import { actorMay } from "@/lib/auth/developer-promotion";
 import { insertAuditLog } from "./audit-logs";
 import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
+import { generateProcedureTemplateCode } from "@/lib/domain/procedure-template-code";
 import { loadNextProcedureLinkContext } from "./procedure-next-procedure-link-context";
 import {
   PROCEDURE_EQUIPMENT_TYPE_CODES,
@@ -217,11 +218,35 @@ export async function createDraftProcedureTemplateFromImport(
 }
 
 export type CreateManualTechnicalTemplateInput = {
-  code: string;
+  /**
+   * 🔴 2026-11-05 — **선택으로 바뀌었다.** 안 넘어오면(undefined·null) 서버가
+   * 짓는다(generateProcedureTemplateCode). 사용자 요구로 새 기술 절차 만들기
+   * 창에서 코드 칸을 걷어냈고, 화면이 코드를 지으면 `UNIQUE (code, version)` 의
+   * 유일성을 보장할 길이 없기 때문이다.
+   *
+   * 🔵 **그래도 빼지 않고 남겼다.** 제 코드를 그대로 줘야 하는 부르는 쪽이 남아
+   * 있다 — 통합 시험이 그렇다. 시험은 코드를 `TEST…` 로 시작하게 지어 두고
+   * 뒷정리와 「진짜 행인가」 판정을 그 글자로 한다(`code not like 'TEST%'`).
+   * 서버가 지은 코드로 바뀌면 시험이 만든 줄이 운영 행처럼 세어져, 이름에
+   * 그 기능 글자가 하나도 없는 남의 시험이 까닭 없이 깨진다.
+   *
+   * 🔴 **빈 글자를 주는 것은 「안 준 것」과 다르다.** 빈 글자는 코드를 제 손으로
+   * 정하겠다고 해 놓고 값을 빠뜨린 것이라 INVALID_INPUT 으로 막는다. 둘을
+   * 뭉개 함께 짓게 하면 빠뜨린 쪽이 조용히 성공해 버린다.
+   */
+  code?: string | null;
   name: string;
   equipmentType: ProcedureEquipmentType;
   description?: string | null;
 };
+
+/**
+ * 서버가 코드를 지을 때 **몇 번까지 다시 해 보는가.** 한 번 부딪힐 확률부터가
+ * 사실상 0 이라(32^6 ≈ 10.7억) 두 번째 시도까지 간 적은 아직 없다. 그래도 길을
+ * 두는 까닭은, 없으면 그 희박한 한 번이 사람에게 「만들기가 안 된다」로만 보이고
+ * 까닭이 화면 어디에도 안 남기 때문이다.
+ */
+const GENERATED_CODE_ATTEMPTS = 5;
 
 /**
  * Phase 5C-5B-1 — the first template-creation path that does not go
@@ -235,56 +260,90 @@ export type CreateManualTechnicalTemplateInput = {
  * createDraftProcedureTemplateFromImport's own coarse-actor-check +
  * unique-violation-translation shape rather than introducing a third
  * pattern.
+ *
+ * ── 🔴 2026-11-05 — 코드는 **여기서 짓는다** ────────────────────────────
+ * 사용자 요구로 만들기 창에서 코드 칸이 사라졌다("코드가 필요하다고 못 느끼겠어").
+ * 짓는 자리를 화면이 아니라 여기로 둔 까닭은 하나다 — `UNIQUE (code, version)` 의
+ * 유일성은 **DB 만이** 보장할 수 있다. 화면이 지으면 두 사람이 같은 순간에 누른
+ * 날 한쪽이 까닭 없이 막히고, 그 까닭은 화면 어디에도 안 남는다.
+ *
+ * 그래서 「미리 SELECT 해서 비었는지 본다」가 아니라 **유일 제약 위반(23505)을 잡아
+ * 코드를 다시 지어 재시도**한다. 앞엣것은 조회와 INSERT 사이에 남이 끼어들 수 있어
+ * 경합을 못 막으면서 질의만 한 번 늘고, 「확인했으니 안전하다」는 틀린 안심을 남긴다.
+ * 🔵 재시도마다 **트랜잭션을 새로 연다** — 유일 제약에 걸린 트랜잭션은 그 자리에서
+ * 중단되어, 같은 트랜잭션 안에서 다시 INSERT 할 수 없기 때문이다.
  */
 export async function createManualTechnicalProcedureTemplate(
   input: CreateManualTechnicalTemplateInput,
   actorUserId: string
 ): Promise<ProcedureTemplateResult> {
-  const code = typeof input.code === "string" ? input.code.trim() : "";
+  // 🔴 「안 준 것」과 「빈 글자를 준 것」을 가른다 — 뜻이 정반대다(입력 타입의 주석).
+  const codeWasSupplied = input.code !== undefined && input.code !== null;
+  const suppliedCode = typeof input.code === "string" ? input.code.trim() : "";
   const name = typeof input.name === "string" ? input.name.trim() : "";
   const description = typeof input.description === "string" ? input.description.trim() : null;
 
-  if (code.length === 0) return { ok: false, code: "INVALID_INPUT", message: "코드를 입력해야 합니다." };
+  if (codeWasSupplied && suppliedCode.length === 0) {
+    return { ok: false, code: "INVALID_INPUT", message: "코드를 입력해야 합니다." };
+  }
   if (name.length === 0) return { ok: false, code: "INVALID_INPUT", message: "이름을 입력해야 합니다." };
   if (!(PROCEDURE_EQUIPMENT_TYPE_CODES as readonly string[]).includes(input.equipmentType)) {
     return { ok: false, code: "INVALID_INPUT", message: "지원되지 않는 장비 유형입니다." };
   }
 
-  try {
-    return await db.transaction(async (tx) => {
-      const actor = await resolveEligibleActor(tx, actorUserId);
-      if (!actorMay(actor, canManageTechnicalTemplates)) {
-        fail("FORBIDDEN", "기술 절차 템플릿 생성 권한이 없습니다.");
-      }
+  // Deliberately generic — must never disclose the category (or any other
+  // detail) of whichever existing template already holds this (code,
+  // version=1) pair.
+  //
+  // 🔵 지은 코드가 부딪힌 경우에는 **다른 글을 준다.** "이미 사용 중인 코드입니다"는
+  //    사람에게 고칠 거리를 주는 글인데, 코드 칸이 없는 화면에서는 고칠 수가 없다 —
+  //    그 자리에서 할 수 있는 일은 다시 눌러 보는 것뿐이다.
+  const conflict = (): ProcedureTemplateResult => ({
+    ok: false,
+    code: "CONFLICT",
+    message: codeWasSupplied ? "이미 사용 중인 코드입니다." : "절차를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.",
+  });
 
-      const [template] = await tx
-        .insert(procedureTemplates)
-        .values({
-          code,
-          name,
-          equipmentType: input.equipmentType,
-          category: "TECHNICAL_TASK",
-          description: description && description.length > 0 ? description : null,
-          status: "DRAFT",
-          version: 1,
-          sourceType: "MANUAL",
-          isReferenceOnly: false,
-          createdByUserId: actor.id,
-        })
-        .returning({ id: procedureTemplates.id });
+  const attempts = codeWasSupplied ? 1 : GENERATED_CODE_ATTEMPTS;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const code = codeWasSupplied ? suppliedCode : generateProcedureTemplateCode();
+    try {
+      return await db.transaction(async (tx) => {
+        const actor = await resolveEligibleActor(tx, actorUserId);
+        if (!actorMay(actor, canManageTechnicalTemplates)) {
+          fail("FORBIDDEN", "기술 절차 템플릿 생성 권한이 없습니다.");
+        }
 
-      return { ok: true, id: template.id };
-    });
-  } catch (err) {
-    if (err instanceof ProcedureTemplateMutationError) return err.result;
-    if (isPgUniqueViolation(err)) {
-      // Deliberately generic — must never disclose the category (or any
-      // other detail) of whichever existing template already holds this
-      // (code, version=1) pair.
-      return { ok: false, code: "CONFLICT", message: "이미 사용 중인 코드입니다." };
+        const [template] = await tx
+          .insert(procedureTemplates)
+          .values({
+            code,
+            name,
+            equipmentType: input.equipmentType,
+            category: "TECHNICAL_TASK",
+            description: description && description.length > 0 ? description : null,
+            status: "DRAFT",
+            version: 1,
+            sourceType: "MANUAL",
+            isReferenceOnly: false,
+            createdByUserId: actor.id,
+          })
+          .returning({ id: procedureTemplates.id });
+
+        return { ok: true, id: template.id };
+      });
+    } catch (err) {
+      if (err instanceof ProcedureTemplateMutationError) return err.result;
+      if (!isPgUniqueViolation(err)) throw err;
+      // 코드를 받아 온 경우에는 attempts 가 1 이라 여기서 바로 끝난다 — 남이 정한
+      // 코드를 서버가 몰래 바꿔 주면 들여오기의 멱등성이 통째로 무너진다.
+      if (attempt === attempts) return conflict();
     }
-    throw err;
   }
+
+  // for 는 반드시 return 으로 끝나므로 닿지 않는다. 컴파일러에게 돌려줄 값을 주되,
+  // attempts 를 0 으로 만드는 날이 오면 조용히 성공하지 않고 CONFLICT 로 떨어진다.
+  return conflict();
 }
 
 export type RenameTechnicalTemplateResult =

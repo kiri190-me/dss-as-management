@@ -18,6 +18,14 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString("ko-KR", { dateStyle: "medium" });
 }
 
+/**
+ * 🔴 2026-11-05 — 이 화면에는 **절차 코드가 안 나온다.** 표의 이름 아래 한 줄과
+ * 카드의 「코드」 항목을 그날 함께 걷었다(사용자 결정: "코드가 필요하다고 못
+ * 느끼겠어"). 걷어낸 것은 **보여 주기뿐**이다 — `procedure_templates.code` 는
+ * `UNIQUE (code, version)` 으로 판본을 묶는 열쇠라 칸도 값도 그대로 있고,
+ * 판본 목록 · 게시 · 다음 판 번호 · 「다음 절차」 후보 고르기가 전부 그 값으로 돈다.
+ * 다시 그리고 싶어지면 그 전에 procedure-template-code.ts 머리말을 읽을 것.
+ */
 export default function ProcedureTemplateListScreen({ templates }: { templates: ProcedureTemplateListRow[] }) {
   return (
     <div className="flex flex-col gap-6">
@@ -58,7 +66,6 @@ export default function ProcedureTemplateListScreen({ templates }: { templates: 
                     <Link href={`/procedures/${t.id}`} className="font-medium text-blue-700 hover:underline dark:text-blue-400">
                       {t.name}
                     </Link>
-                    <div className="font-mono text-[10px] text-zinc-400 dark:text-zinc-600">{t.code}</div>
                   </td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{procedureEquipmentTypeLabels[t.equipmentType]}</td>
                   <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">v{t.version}</td>
@@ -121,7 +128,6 @@ export default function ProcedureTemplateListScreen({ templates }: { templates: 
                     </span>
                   }
                   fields={[
-                    { label: "코드", value: <span className="font-mono">{t.code}</span> },
                     { label: "설비", value: procedureEquipmentTypeLabels[t.equipmentType] },
                     { label: "버전", value: `v${t.version}` },
                     { label: "원본", value: `${t.sourceWorksheetCount}개 시트` },

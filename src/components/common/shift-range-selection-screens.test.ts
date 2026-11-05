@@ -99,8 +99,11 @@ for (const { file, sites, why } of TOGGLE_SITES) {
   });
 }
 
-/** 선택 상태를 가진 화면: 훅을 몇 번 쓰고, 범위를 어떤 순서·기준으로 잡는가. */
-const OWNERS: { file: string; hooks: number; expects: string[] }[] = [
+/**
+ * 선택 상태를 가진 화면: 훅을 몇 번 쓰고, 범위를 어떤 순서·기준으로 잡는가.
+ * `forbidden` 은 **다시 나타나면 안 되는 모양**이다(거르기 전 목록으로 범위를 잡는 것).
+ */
+const OWNERS: { file: string; hooks: number; expects: string[]; forbidden?: RegExp[] }[] = [
   {
     file: "src/components/repair-cases/RepairCaseListPage.tsx",
     hooks: 2,
@@ -134,13 +137,23 @@ const OWNERS: { file: string; hooks: number; expects: string[] }[] = [
   {
     file: "src/components/procedures/TechnicalProcedureTemplateListScreen.tsx",
     hooks: 2,
+    // 🔴 2026-11-05 — 이 목록에 **이름 검색 · 설비 유형 거르개가 생겼다.** 전에는
+    //    `orderedIds: templates.map(...)` · `isSelectable: (id) => !undeletable.has(id)`
+    //    였고, 그때는 "보이는 것 = templates 전부"라 그것이 맞았다. 거르개가 생긴
+    //    지금 그대로 두면 **가려진 판이 Shift 범위에 섞인다** — 머리말 3번("범위의
+    //    순서는 지금 보이는 순서")이 바로 그 금지다. 그래서 단언을 지우지 않고
+    //    고객사·제품 모델 목록과 **같은 모양**으로 옮겼다(세 화면이 같은 글자여야
+    //    한 곳이 어긋났을 때 눈에 띈다).
     expects: [
-      "orderedIds: templates.map((t) => t.id)",
-      // 체크박스의 disabled={blocked} 와 같은 기준이다.
-      "isSelectable: (id) => !undeletable.has(id)",
+      "orderedIds: visibleTemplates.map((t) => t.id)",
+      // 체크박스의 disabled={blocked} 와 같은 기준이고, 거기에 "지금 보이는 판"이 겹친다.
+      "isSelectable: (id) => selectableVisibleIdSet.has(id)",
       "orderedIds: trashTemplates.map((t) => t.id)",
       "onToggleSelected={trashRangeSelection.toggle}",
     ],
+    // 🔴 거르기 전의 목록이 범위에 다시 들어오면 안 된다. `visibleTemplates.map(`
+    //    가 `templates.map(` 를 품고 있어 글자 포함으로는 못 가르므로, 앞 글자까지 본다.
+    forbidden: [/(?<![A-Za-z])templates\.map\(/],
   },
   {
     file: "src/components/repair-cases/files/StoredAttachmentList.tsx",
@@ -163,12 +176,15 @@ const OWNERS: { file: string; hooks: number; expects: string[] }[] = [
   },
 ];
 
-for (const { file, hooks, expects } of OWNERS) {
+for (const { file, hooks, expects, forbidden = [] } of OWNERS) {
   test(`${file} — 범위는 지금 보이는 순서, 고를 수 있는지는 체크박스와 같은 기준`, () => {
     const code = readCode(file);
     assert.equal(count(code, "useShiftRangeSelection({"), hooks, "선택 상태마다 훅이 하나씩");
     for (const needle of expects) {
       assert.ok(code.includes(needle), `빠졌다: ${needle}`);
+    }
+    for (const pattern of forbidden) {
+      assert.equal(code.match(pattern), null, `거르기 전 목록으로 범위를 잡고 있다: ${pattern}`);
     }
     // 옛 손수 토글 몸통이 남아 있지 않다 — 남아 있으면 그쪽을 부르는 자리가 생긴다.
     assert.ok(!code.includes("if (next.has(id)) next.delete(id);"), "옛 한 개 토글이 남아 있다");

@@ -168,7 +168,11 @@ describe("한 줄에 무엇이 적히는가", () => {
   test("배지 · 절차 이름 · 진행도 · 날짜가 한 줄에 함께 있다", () => {
     const html = render([FINISHED_WITH_REMAINING]);
     assert.ok(html.includes(">중단 마침<"));
-    assert.ok(html.includes("원복 검사 및 개선 작업 (3상 입력) (7)"));
+    // 🔵 2026-11-05 — 전에는 「원복 … (7)」이었다. 코드를 화면에서 걷은 결정으로
+    //    이름만 적힌다. 표본의 templateCode 는 여전히 "7" 이라(fixture) 아래 짝이
+    //    「안 적힌다」를 실제로 재고 있다.
+    assert.ok(html.includes("원복 검사 및 개선 작업 (3상 입력)"));
+    assert.ok(!html.includes("원복 검사 및 개선 작업 (3상 입력) (7)"), "코드가 다시 붙었다");
     assert.ok(html.includes("진행 3 / 22"), "진행도가 안 보이면 「어디까지 했나」가 안 읽힌다");
     assert.ok(/2026\.?\s*11\.?\s*2/.test(html), `날짜가 안 보인다: ${html}`);
     assert.ok(html.includes("마침"));

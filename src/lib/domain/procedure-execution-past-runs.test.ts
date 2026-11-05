@@ -282,15 +282,18 @@ describe("한 줄에 적히는 것", () => {
     assert.equal(panelOf.rows[0].progressLabel, "진행 5 / 10");
   });
 
-  test("🔴 코드가 이름과 같으면 괄호를 안 붙인다 — 실측 절차 하나가 그렇다", () => {
+  test("🔴 줄에 적히는 것은 **절차 이름뿐**이다 — 코드는 안 붙는다(2026-11-05)", () => {
     assert.ok(panel);
     const byId = new Map(panel.rows.map((r) => [r.executionId, r]));
     assert.equal(byId.get(MEASURED_COMPLETED_ALL.executionId)?.title, "기본 통전 검사 (3상 입력)");
-    assert.equal(
-      byId.get(MEASURED_ABANDONED.executionId)?.title,
-      "원복 검사 및 개선 작업 (3상 입력) (7)",
-      "코드가 다르면 괄호로 붙는다 — 같은 이름의 절차가 둘일 때 가를 수단이 그것뿐이다"
-    );
+    // 🔴 전에는 "원복 검사 및 개선 작업 (3상 입력) (7)" 이었다 — 코드가 이름과
+    //    다르면 괄호로 붙었다. 사용자 결정으로 화면에서 코드를 걷으면서 뒤집혔다.
+    //    표본의 templateCode 는 여전히 "7" 이라(MEASURED_ABANDONED) 이 줄은
+    //    「안 붙는가」를 실제로 재고 있다 — 빈 코드였다면 공짜로 통과한다.
+    const abandoned = byId.get(MEASURED_ABANDONED.executionId);
+    assert.equal(MEASURED_ABANDONED.templateCode, "7", "표본이 바뀌었다 — 이 시험이 재는 것이 사라졌다");
+    assert.equal(abandoned?.title, "원복 검사 및 개선 작업 (3상 입력)");
+    assert.ok(!abandoned?.title.includes("(7)"), "코드가 다시 붙었다");
   });
 
   test("🔴 마친 줄에는 **사람 이름이 안 붙는다** — 누가 마쳤는지는 DB 에 없다", () => {

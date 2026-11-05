@@ -111,7 +111,12 @@ describe("🔴 드롭다운 기본값은 「모든 절차」다", () => {
   });
 
   test("게시된 절차가 모두 줄로 서고, 이름은 formatProcedureTemplateTitle 모양이다", () => {
-    assert.match(html, /원복 검사 및 개선 작업 \(3상 입력\) \(7\)/, "코드가 이름과 다르면 괄호로 붙는다");
+    // 🔴 2026-11-05 — 전에는 여기서 「원복 … (7)」을 쟀다(코드가 이름과 다르면
+    //    괄호로 붙었다). 사용자 결정으로 코드를 화면에서 걷으면서 뒤집혔다.
+    //    표본의 code 는 여전히 "7" 이라(TEMPLATES 머리의 fixture) 이 짝은
+    //    「안 나온다」를 실제로 재고 있다.
+    assert.match(html, /원복 검사 및 개선 작업 \(3상 입력\)/, "절차 이름이 줄로 선다");
+    assert.ok(!html.includes("원복 검사 및 개선 작업 (3상 입력) (7)"), "코드가 다시 붙었다");
     assert.ok(!html.includes("기본 통전 검사 (3상 입력) (기본 통전 검사 (3상 입력))"), "「이름 (이름)」이 떴다");
   });
 
@@ -125,13 +130,16 @@ describe("🔴 검색 결과 — 절차 이름은 「모든 절차」에서만 �
   test("「모든 절차」에서 MCU 를 찾으면 **두 절차의** 노드가 절차 이름과 함께 나온다", () => {
     const html = renderPanel({ query: "MCU" });
     assert.match(html, /맞는 노드 4개/, "표본 확인 — 실제로 네 줄이 걸린다");
-    assert.match(flat(html), /원복 검사 및 개선 작업 \(3상 입력\) \(7\) › /);
+    // 🔵 2026-11-05 — 앞 줄의 꼬리 「 (7)」이 빠졌다(코드를 화면에서 걷은 결정).
+    assert.match(flat(html), /원복 검사 및 개선 작업 \(3상 입력\) › /);
     assert.match(flat(html), /기본 통전 검사 \(3상 입력\) › /);
   });
 
   test("🔴 같은 이름 「MCU 기판 교환」이 두 줄인데 **서로 갈린다**", () => {
     const html = flat(renderPanel({ query: "MCU 기판 교환" }));
-    assert.match(html, /원복 검사 및 개선 작업 \(3상 입력\) \(7\) › <\/span><span class="font-medium">2\. MCU 기판 교환/);
+    // 🔵 2026-11-05 — 코드가 빠져도 **두 줄은 여전히 갈린다**. 가르는 것은 코드가
+    //    아니라 절차 이름이라는 것이 이 시험의 알맹이다.
+    assert.match(html, /원복 검사 및 개선 작업 \(3상 입력\) › <\/span><span class="font-medium">2\. MCU 기판 교환/);
     assert.match(html, /기본 통전 검사 \(3상 입력\) › <\/span><span class="font-medium">2\. MCU 기판 교환/);
   });
 

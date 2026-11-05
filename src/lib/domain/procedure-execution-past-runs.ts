@@ -156,7 +156,11 @@ export type PastExecutionResumeBlockedReason =
 export type PastExecutionRow = {
   executionId: string;
   badge: PastExecutionBadge;
-  /** 절차 이름. 코드가 이름과 **다를 때만** 괄호로 덧붙는다(formatProcedureTemplateTitle). */
+  /**
+   * 절차 이름. 🔵 2026-11-05 부터 **이름 그대로**다(formatProcedureTemplateTitle) —
+   * 전에는 코드가 이름과 다를 때 괄호로 덧붙었다. 코드를 화면에서 걷기로 한
+   * 사용자 결정이고, 까닭은 그 함수의 머리말에 있다.
+   */
   title: string;
   /** 「진행 3 / 22」 — 분모는 사람이 할 일 수다. */
   progressLabel: string;

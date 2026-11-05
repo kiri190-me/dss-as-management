@@ -139,9 +139,13 @@ describe("🔴 「모든 절차」에서 검색하면 여러 절차의 노드가
   test("🔴 줄마다 절차 이름이 실린다 — formatProcedureTemplateTitle 로 만든 그것", () => {
     const restoreHit = result.hits.find((h) => h.templateId === "tpl-restore")!;
     const powerHit = result.hits.find((h) => h.templateId === "tpl-power")!;
-    // 코드가 이름과 다르면 괄호로 붙고,
-    assert.equal(restoreHit.templateTitle, "원복 검사 및 개선 작업 (3상 입력) (7)");
-    // 🔴 코드가 이름과 **같으면 안 붙는다** — 「이름 (이름)」이 다시 생기면 안 된다.
+    // 🔴 2026-11-05 — 전에는 앞엣것이 "원복 검사 및 개선 작업 (3상 입력) (7)" 이었다
+    //    (코드가 이름과 다르면 괄호로 붙었다). 코드를 화면에서 걷기로 한 사용자
+    //    결정으로 **이름만** 실린다. 표본의 code 는 여전히 "7" 이라(TEMPLATES)
+    //    이 줄은 「코드를 안 붙인다」를 실제로 재고 있다.
+    assert.equal(restoreHit.templateTitle, "원복 검사 및 개선 작업 (3상 입력)");
+    assert.ok(!restoreHit.templateTitle.includes("(7)"), "코드가 다시 붙었다");
+    // 🔴 코드 칸에 이름이 그대로 들어간 절차에서도 「이름 (이름)」이 안 생긴다.
     assert.equal(powerHit.templateTitle, "기본 통전 검사 (3상 입력)");
   });
 });
@@ -168,8 +172,11 @@ describe("🔴 같은 이름 노드가 여럿일 때 구별된다", () => {
     assert.equal(new Set(titles).size, 2, "두 줄이 글자까지 똑같으면 사람이 못 고른다");
     // 🔵 번호는 **이 표본 안에서의** 차례다(실제 절차는 22·27장이라 번호가 더 크다).
     // 여기서 재는 것은 「두 줄이 서로 갈리는가」이지 실제 번호가 몇인가가 아니다.
+    // 🔵 2026-11-05 — 앞 줄의 꼬리 「 (7)」이 빠졌다(코드를 화면에서 걷은 결정).
+    //    두 줄이 **여전히 서로 갈린다**는 것이 이 시험의 알맹이이고, 가르는 것은
+    //    코드가 아니라 절차 이름이다.
     assert.deepEqual(titles, [
-      "원복 검사 및 개선 작업 (3상 입력) (7) › 6. MCU 기판 교환",
+      "원복 검사 및 개선 작업 (3상 입력) › 6. MCU 기판 교환",
       "기본 통전 검사 (3상 입력) › 4. MCU 기판 교환",
     ]);
   });
@@ -255,7 +262,9 @@ describe("고른 것 되찾기", () => {
     const hit = findStartNode(TEMPLATES, "tpl-restore", target.id);
     assert.ok(hit);
     assert.equal(hit.title, "MCU 신호 점검");
-    assert.equal(hit.templateTitle, "원복 검사 및 개선 작업 (3상 입력) (7)");
+    // 🔵 2026-11-05 — 코드 「7」이 더는 안 붙는다. 검색 결과와 **같은 모양**인지를
+    //    재는 시험이라, 위 검색 쪽 단언과 짝으로 함께 바뀌어야 한다.
+    assert.equal(hit.templateTitle, "원복 검사 및 개선 작업 (3상 입력)");
     assert.equal(hit.orderIndex, 5);
     assert.equal(hit.eligibility.ok, true);
   });

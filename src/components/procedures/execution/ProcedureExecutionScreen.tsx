@@ -100,10 +100,12 @@ function ProgressSummary({
     <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex items-center justify-between">
         <div>
-          {/* 🔴 「이름 (코드)」를 여기서 이어 붙이지 않는다 — 코드 칸에 이름이
-              그대로 들어간 절차가 있어서 「이름 (이름)」이 떴다. 붙일지 말지는
+          {/* 🔴 절차 이름을 여기서 **조립하지 않는다.** 어떻게 보일지는
               formatProcedureTemplateTitle 한 곳에서만 정한다(아래 「이 건의 다른
-              절차」 줄·불러오기 드롭다운이 같은 함수를 쓴다). */}
+              절차」 줄·불러오기 드롭다운이 같은 함수를 쓴다).
+              🔵 2026-11-05 부터 그 함수는 이름만 돌려준다 — 코드를 화면에서 걷기로
+              한 사용자 결정이고, 바뀐 것은 그 파일 한 줄뿐이라 이 줄도 그날 함께
+              바뀌었다. 여기서 이어 붙였더라면 이 화면만 옛 모양으로 남았을 것이다. */}
           <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
             {formatProcedureTemplateTitle(detail.templateName, detail.templateCode)}
           </h2>

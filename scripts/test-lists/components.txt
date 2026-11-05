@@ -1129,3 +1129,29 @@ src/components/procedures/procedure-editor-center-point-placement.test.ts
 #    터지게. 🔵 처음엔 `datetime-local` 을 「범위 밖」으로 두고 **안 집는다**고 단언해
 #    초록으로 통과하고 있었다(그 설명이 곧 거짓이 됐다). 지우지 않고 뒤집었다.
 src/components/common/date-input-max-screens.test.ts
+
+# 2026-11-05 — 절차 「코드」가 **사람 눈에서 사라졌다**(사용자 결정). DB 칸은 그대로다 —
+#    `UNIQUE (code, version)` 으로 판본을 묶는 열쇠라 판본 목록·게시·다음 판 번호·
+#    「다음 절차」 후보 고르기가 전부 그 값으로 돈다. 그래서 재는 것은 「값이 없는가」가
+#    아니라 **「글자로 그려지는가」**다: 🔴 걷어낸 화면 일곱에 「코드」 글자도 `{….code}`
+#    도 없는가 · 🔴 절차 화면 **전부**를 훑어 새 화면이 다시 그리는 것도 막는가 ·
+#    🔵 `key={s.code}` 는 **남아 있어야** 하는가(화면 글자가 아니다 — 걷으면 줄이
+#    깜빡인다) · 🔴 상세·편집기가 여전히 code 로 계열을 모으는가 · 🔴 만들기 창이
+#    코드를 적지도 **액션에 싣지도** 않는가(화면이 지으면 유일성을 보장할 길이 없다).
+#    🔴 주석을 세면 고쳐 놓고도 빨개진다 — 걷어낸 자리마다 까닭을 주석으로 적었고,
+#    그 주석에 `procedure_templates.code` · `key={s.code}` 가 그대로 들어 있다.
+#    걸러내기가 **무는지**도 옛 모양을 그대로 먹여 값으로 확인한다.
+src/components/procedures/procedure-code-hidden-screens.test.ts
+
+# 2026-11-05 — 거르개가 **화면에 서고, 목록 화면이 그 규칙을 문다**. 규칙 자체는 unit 목록의
+#    lib/domain/technical-procedure-list-filter.test.ts 가 값으로 잰다. 여기서 재는 것:
+#    🔴 설비 유형 고르개가 「전체」+셋이고 글자가 **공용 표**(procedureEquipmentTypeLabels)에서
+#    오는가(손으로 적으면 이름이 바뀌는 날 거르개만 옛 글자로 남는다) · 🔴 **표와 카드 둘 다**
+#    거른 목록을 그리는가(ResponsiveList 가 폭을 재서 하나를 고르므로 한쪽만이면 창 크기에 따라
+#    듣다 안 듣다 한다 — 슬롯 **자리**로 못 박는다) · 🔴 거르기 전 목록을 그리는 자리가 하나도
+#    안 남았는가(`visibleTemplates.map(` 가 `templates.map(` 를 품어 글자 포함으로는 못 가른다) ·
+#    🔴 [전체 선택]의 대상이 두 자리 모두 **보이는 것**인가 · 🔴 거르개를 바꾸는 길이 하나뿐이고
+#    그 길이 고르기를 추리는가(setFilter 를 바로 꽂으면 추리기를 건너뛰는 조용한 길이 생긴다) ·
+#    🔵 0건의 두 까닭을 다른 말로 하는가 · 🔵 휴지통 쪽은 한 글자도 안 바뀌었는가.
+#    🔴 주석을 걷어낸 뒤에 센다 — 이 화면의 머리말에 그 이름들이 그대로 적혀 있다.
+src/components/procedures/technical-procedure-list-filter-ui.test.tsx

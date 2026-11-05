@@ -105,7 +105,10 @@ export default function ProcedureVersionList({
         버전 목록 <span className="font-normal text-zinc-500 dark:text-zinc-400">({versions.length}판)</span>
       </h2>
       <p className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">
-        같은 절차(코드)의 모든 판입니다. 누르면 그 판의 상세로 이동합니다.
+        {/* 🔵 2026-11-05 — 전에는 「같은 절차(코드)의 모든 판입니다」였다. 묶는
+            기준이 code 인 것은 그대로지만(서버의 listProcedureTemplateVersions),
+            그 낱말을 화면에서 걷기로 했으므로 괄호를 뗐다. */}
+        같은 절차의 모든 판입니다. 누르면 그 판의 상세로 이동합니다.
         {/*
           🔴 2026-11-04 에 글이 바뀌었다. 전에는 "게시는 이전 게시본을 자동으로
           내리지 않습니다" 였고 그게 사실이었다. 지금은 게시가 같은 트랜잭션에서
