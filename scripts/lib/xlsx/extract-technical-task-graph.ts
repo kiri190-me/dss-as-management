@@ -64,6 +64,11 @@ export type TechnicalTaskGraphInput = {
   sheetName: string;
   /** 노드 코드의 앞가지 — technical-task-sheet-plan.ts 가 정한다. */
   nodeCodePrefix: string;
+  /**
+   * **자동으로 더하는 시작 노드의 제목**(2026-11-05 사용자 결정 — 절차 이름을 쓴다).
+   * 🔵 머리말을 뗀 이름을 받는다(`technical-task-sheet-plan.ts` 의 `label`).
+   */
+  startNodeTitle: string;
   shapes: TechnicalTaskShapeInput[];
   connectors: TechnicalTaskConnectorInput[];
 };
@@ -76,6 +81,12 @@ export type TechnicalTaskGraphInput = {
 export type DroppedShapeReason =
   | "BRANCH_LABEL"
   | "EMPTY_BOX"
+  /**
+   * 🔴 연결선이 **하나도 닿지 않는** 도형 (2026-11-05 사용자 지적).
+   * 「(2)외관검사에서 사진이 들어가 있는 박스는 첨부파일일 뿐이고 노드가 아니야.」
+   * 그 시트의 고립 도형 15개 가운데 13개가 사진 캡션이었다.
+   */
+  | "NOT_IN_FLOW"
   | "ANNOTATION_REGION"
   | "DUPLICATE_SHAPE_ID";
 
@@ -125,6 +136,14 @@ export type TechnicalTaskNode = ExtractedNode & {
   nodeTypeReason: string;
   /** 글자가 `(번호)` 로 시작하면 그 번호. 다른 절차로 이어가기 후보다. */
   nextProcedureStageNumber: string | null;
+  /**
+   * 🔴 **엑셀에서 읽은 노드인가, 우리가 더한 노드인가.**
+   *
+   * 시작 노드는 엑셀에 없는 것을 더하는 것이다(2026-11-05 사용자 결정). 그 사실이
+   * 값으로 남아 있어야 ① 드라이런이 섞어 찍지 않고 ② 「노드 수 + 버린 도형 수 =
+   * 입력 도형 수」라는 셈이 어긋나지 않는다.
+   */
+  origin: "EXCEL_SHAPE" | "AUTO_START";
 };
 
 export type TechnicalTaskGraphResult = {
@@ -133,6 +152,11 @@ export type TechnicalTaskGraphResult = {
   droppedShapes: DroppedShape[];
   droppedConnectors: DroppedConnector[];
   labelBindings: BranchLabelBinding[];
+  /**
+   * 「흐름에 닿지 않는 도형은 노드가 아니다」 규칙을 **껐다면** 그 까닭. 안 껐으면 null.
+   * 🔴 끈 사실이 조용하면, 그 시트에 진짜 사진 캡션이 생겨도 아무도 모른다.
+   */
+  isolationRuleSkippedReason: string | null;
   /** 본문/주석 경계가 선 x 좌표(EMU). 경계를 못 세웠으면 null. */
   annotationBoundaryX: number | null;
   /** 경계를 그렇게 정한(또는 못 정한) 까닭 — 드라이런이 그대로 찍는다. */
@@ -150,8 +174,48 @@ export type TechnicalTaskGraphResult = {
  */
 const EMPTY_BOX_TEXT_RE = /^[\s*·ㆍ・]*$/;
 
-/** `(12) 출하 완료` 처럼 **다른 절차의 번호**로 시작하는 글자. */
-const NEXT_PROCEDURE_REF_RE = /^\s*\(\s*(\d+)\s*\)/;
+/**
+ * ──────────────────────────────────────────────────────────────────────
+ * 🔴 다른 절차를 가리키는 글자 — **두 꼴**만 인정한다
+ * ──────────────────────────────────────────────────────────────────────
+ * ① `(12) 출하 완료` — 글자 **맨 앞**이 번호인 꼴
+ * ② `…확인후[(7) 원복 작업 및 개선 작업] 실시` — 번호를 **대괄호로 감싼** 꼴
+ *
+ * 🔴 **「글자 아무 데나 `(숫자)`」로 넓히면 안 된다.** 2026-11-05 에 워크북 전수
+ * 조사를 했고, 번호가 글자 가운데 있는 도형은 셋뿐인데 그중 **둘이 항목 번호**였다
+ * (「… 확인(1)…」 꼴로 한 상자 안에서 소항목을 세는 표기). 넓게 잡으면 그 둘이
+ * 참조로 둔갑해 **엉뚱한 절차로 이어진다** — 오류는 안 나고 화면에서만 틀린다.
+ * 대괄호를 요구하면 셋 중 진짜 하나만 걸린다.
+ *
+ * 🔵 **시트 머리글 칸의 겸임 표기**(`[(9) …, (10) …]`)와 모양이 겹치지만, 읽는
+ * 자리가 다르다 — 그쪽은 **셀** 글자를 technical-task-sheet-plan.ts 가 읽고,
+ * 이쪽은 **도형** 글자를 여기서 읽는다. 같은 문자열을 둘이 보는 일이 없다.
+ * 그래도 한 도형 안에 번호가 둘 이상 묶인 대괄호가 있으면 어느 쪽인지 못 가리므로
+ * 아래에서 **첫 번째를 쓰고 그 사실을 경고로 올린다**(실측 0건).
+ */
+const NEXT_PROCEDURE_REF_LEADING_RE = /^\s*\(\s*(\d+)\s*\)/;
+const NEXT_PROCEDURE_REF_BRACKETED_RE = /\[\s*\(\s*(\d+)\s*\)/;
+/** 한 대괄호 덩어리 안의 번호를 모두 센다 — 둘 이상이면 모호하다. */
+const BRACKET_GROUP_RE = /\[([^\]]*)\]/g;
+const BRACKET_NUMBER_RE = /\(\s*(\d+)\s*\)/g;
+
+/** 이 글자가 가리키는 절차의 단계 번호. 둘 다 아니면 null. */
+export function matchNextProcedureStageNumber(text: string): string | null {
+  return (
+    text.match(NEXT_PROCEDURE_REF_LEADING_RE)?.[1] ??
+    text.match(NEXT_PROCEDURE_REF_BRACKETED_RE)?.[1] ??
+    null
+  );
+}
+
+/** 한 대괄호 덩어리 안에 번호가 둘 이상 들어 있는가(모호한 참조). */
+function bracketedStageNumbers(text: string): string[] {
+  const numbers: string[] = [];
+  for (const group of text.matchAll(BRACKET_GROUP_RE)) {
+    for (const item of group[1].matchAll(BRACKET_NUMBER_RE)) numbers.push(item[1]);
+  }
+  return numbers;
+}
 
 /**
  * 레이블이 선에서 **제 상자 크기만큼**보다 더 떨어져 있으면 그 선의 레이블이 아니다.
@@ -185,14 +249,20 @@ function firstLine(text: string): string {
  * 붙이므로, 줄마다 다른 작업이 적힌 여러 줄짜리 상자는 첫 줄 그대로다.
  */
 function nodeTitle(text: string, shapeId: string): string {
-  const lines = text.split("\n").map((l) => l.trim());
-  const parts = [lines[0] ?? ""];
-  for (let i = 1; i < lines.length; i++) {
-    if (!/^[(（[]/.test(lines[i])) break;
-    parts.push(lines[i]);
-  }
-  const title = parts.join("").trim() || text.trim();
+  const title = text.trim();
   return title.length > 0 ? title : `(제목 없음 · shape#${shapeId})`;
+}
+
+/**
+ * 메모·까닭 글에 끼워 넣을 **짧은 이름**.
+ *
+ * 🔴 제목이 아니다. 2026-11-05 부터 노드 제목은 도형 글자 **전문**(여러 줄)이라,
+ * 그대로 문장에 끼우면 메모 한 줄이 통째로 무너진다. 사람이 읽는 산문에는 첫 줄만
+ * 넣고, 전문은 노드의 제목·설명에 그대로 들어 있다.
+ */
+function shortLabel(text: string): string {
+  const line = firstLine(text);
+  return line.length > 0 ? line : "(글자 없음)";
 }
 
 /**
@@ -310,9 +380,11 @@ function classifyTechnicalNodeType(params: {
   // 🔴 참조 노드는 **언제나** 종료다. 나가는 분기는 부르는 쪽이 이 함수에 오기 전에
   //    이미 버렸다(ABANDONED_FOR_NEXT_PROCEDURE) — 그래서 여기서 또 따지지 않는다.
   if (nextProcedureStageNumber !== null) {
+    // 🔵 「시작한다」고 적으면 안 된다 — 2026-11-05 에 대괄호 꼴
+    //    (`…확인후[(7) …] 실시`)까지 넓혔으므로 글자 가운데 있는 경우가 생겼다.
     return {
       nodeType: "END",
-      reason: `글자가 (${nextProcedureStageNumber}) 로 시작한다 — 다른 절차로 이어가는 종료`,
+      reason: `글자가 (${nextProcedureStageNumber})번 절차를 가리킨다 — 다른 절차로 이어가는 종료`,
     };
   }
   if (outgoingBranchTypes.length === 0) {
@@ -351,7 +423,7 @@ function distanceToConnector(labelCenter: Point, connector: TechnicalTaskConnect
 }
 
 export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): TechnicalTaskGraphResult {
-  const { sheetName, nodeCodePrefix } = input;
+  const { sheetName, nodeCodePrefix, startNodeTitle } = input;
   const issues: ExtractedValidationIssue[] = [];
   const droppedShapes: DroppedShape[] = [];
   const droppedConnectors: DroppedConnector[] = [];
@@ -401,7 +473,82 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
     shapes.filter((s) => !labelShapeIds.has(s.id) && EMPTY_BOX_TEXT_RE.test(s.text)).map((s) => s.id)
   );
 
-  // ── 3. 주석 영역 ───────────────────────────────────────────────────────
+  // ── 3. 흐름에 닿지 않는 도형 ───────────────────────────────────────────
+  //
+  // 🔴 **연결선이 하나도 닿지 않는 도형은 노드가 아니다**(2026-11-05 사용자 지적:
+  //    「사진이 들어가 있는 박스는 첨부파일일 뿐이고 노드가 아니야」). 실측으로
+  //    (2)외관 검사의 고립 도형 15개 가운데 13개가 **사진 캡션**이었다.
+  //
+  // 🔴 「닿는다」는 **엑셀에 적힌 연결선 전부**를 기준으로 본다 — 우리가 나중에
+  //    버릴 선(주석선·포기한 분기)도 닿은 것으로 센다. 까닭은 둘이다:
+  //    ① 선을 버리는 판정이 「어떤 도형이 노드인가」에 **기대고 있어서**, 남은
+  //       선으로 다시 재면 서로 물고 도는 순환이 된다.
+  //    ② 주석선이 가리키는 상자는 사람이 **일부러 흐름에 붙인** 것이라 캡션과
+  //       성격이 다르다 — 그 상자는 아래 빈 상자/주석 영역 규칙이 제 까닭으로 가린다.
+  //
+  // 🔵 분기 레이블은 **위 1번에서 이미 갈라져** 여기 안 들어온다(레이블의 조건
+  //    자체가 「연결선이 안 닿는 것」이라 그냥 두면 전부 이 갈래로 샌다).
+  const isolatedShapeIds = new Set(
+    shapes.filter((s) => !labelShapeIds.has(s.id) && !endpointIds.has(s.id)).map((s) => s.id)
+  );
+
+  /**
+   * ──────────────────────────────────────────────────────────────────────
+   * 🔴 이 규칙을 **끄는 자리 둘** — 끄는 까닭이 서로 다르다
+   * ──────────────────────────────────────────────────────────────────────
+   * ① **끝이 안 묶인 연결선이 하나라도 있는 시트** (2026-11-05 사용자 결정)
+   *
+   *    「끝이 안 묶인 선」은 그 흐름도가 **손으로 그려져 연결 정보가 불완전하다**는
+   *    신호다. 엑셀의 연결선은 도형에 붙여 그리면 `stCxn`/`endCxn` 에 상대 도형
+   *    번호가 적히는데, 그 칸이 비어 있다는 것은 **선을 도형에 안 붙이고 그 옆에
+   *    그려 놓았다**는 뜻이다. 그런 시트에서는 「이 도형에 선이 안 닿는다」를
+   *    믿을 수 없다 — 사람 눈에는 닿아 있는데 파일에 기록이 없을 뿐일 수 있다.
+   *
+   *    🔴 실측이 그랬다: `(MB) 통전검사` 는 연결선 6개 중 **4개가 안 묶여** 있고,
+   *    그 탓에 「내부 검사 이행」·「출하 준비」 두 **진짜 작업 단계**가 고립으로
+   *    읽혀 버려졌다(사용자가 센 7 이 5 가 됐다). 반면 사용자가 정답을 확인해 준
+   *    `(2)외관 검사` 는 안 묶인 선이 **0개**라 규칙이 그대로 돌아 일곱이 나온다.
+   *
+   * ② **어떤 도형에도 연결선이 닿지 않는 시트**
+   *    그대로 쓰면 도형이 전부 버려져 **빈 절차**가 된다. 애초에 흐름도가 아니다.
+   *
+   * 🔵 둘을 한 갈래로 뭉치지 않는다. ①은 「읽을 수는 있는데 이 판정만 못 믿는다」
+   * (INFO)이고, ②는 「이 시트가 흐름도가 맞나」(WARNING)다 — 사람이 할 일이 다르다.
+   *
+   * 🔴 **끈 사실을 반드시 남긴다.** 끈 시트에 나중에 진짜 사진 캡션이 생기면 안
+   * 걸리는데, 그것이 조용하면 아무도 모른다.
+   */
+  const unboundConnectorCount = input.connectors.filter((c) => !c.fromShapeId || !c.toShapeId).length;
+  const everyShapeIsolated = shapes.length > 0 && isolatedShapeIds.size + labelShapeIds.size === shapes.length;
+
+  let isolationRuleSkippedReason: string | null = null;
+  if (isolatedShapeIds.size > 0 && unboundConnectorCount > 0) {
+    isolationRuleSkippedReason =
+      `끝이 안 묶인 연결선이 ${unboundConnectorCount}개 있습니다 — 이 흐름도는 연결 정보가 불완전해서 ` +
+      `「선이 안 닿는다」를 믿을 수 없습니다. 「흐름에 닿지 않는 도형은 노드가 아니다」 규칙을 껐고, ` +
+      `고립된 도형 ${isolatedShapeIds.size}개를 노드로 남겼습니다(사진 캡션이 섞여 있을 수 있습니다).`;
+    issues.push({
+      severity: "INFO",
+      issueType: "UNSUPPORTED_OBJECT",
+      message: isolationRuleSkippedReason,
+      sourceWorksheet: sheetName,
+      sourceReference: null,
+    });
+  } else if (everyShapeIsolated) {
+    isolationRuleSkippedReason =
+      `어떤 도형에도 연결선이 닿지 않습니다(도형 ${shapes.length} · 연결선 ${input.connectors.length}) — ` +
+      "「흐름에 닿지 않는 도형은 노드가 아니다」 규칙을 적용하지 않았습니다. 적용하면 빈 절차가 됩니다.";
+    issues.push({
+      severity: "WARNING",
+      issueType: "UNSUPPORTED_OBJECT",
+      message: isolationRuleSkippedReason,
+      sourceWorksheet: sheetName,
+      sourceReference: null,
+    });
+  }
+  if (isolationRuleSkippedReason) isolatedShapeIds.clear();
+
+  // ── 4. 주석 영역 ───────────────────────────────────────────────────────
   const { boundaryX, reason: annotationBoundaryReason } = findAnnotationBoundary(shapes, input.connectors);
   const annotationShapeIds = new Set(
     boundaryX === null ? [] : shapes.filter((s) => s.x >= boundaryX).map((s) => s.id)
@@ -415,6 +562,15 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
         text: firstLine(shape.text),
         reason: "EMPTY_BOX",
         detail: "글자가 없거나 주의 기호뿐이다 — 노드의 제목이 될 글자가 없다.",
+      });
+      continue;
+    }
+    if (isolatedShapeIds.has(shape.id)) {
+      droppedShapes.push({
+        shapeId: shape.id,
+        text: firstLine(shape.text),
+        reason: "NOT_IN_FLOW",
+        detail: "연결선이 하나도 닿지 않는다 — 사진 캡션이나 설명 상자로 본다.",
       });
       continue;
     }
@@ -438,7 +594,11 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
   }
 
   const nodeShapes = shapes.filter(
-    (s) => !labelShapeIds.has(s.id) && !emptyShapeIds.has(s.id) && !annotationShapeIds.has(s.id)
+    (s) =>
+      !labelShapeIds.has(s.id) &&
+      !emptyShapeIds.has(s.id) &&
+      !isolatedShapeIds.has(s.id) &&
+      !annotationShapeIds.has(s.id)
   );
   const nodeShapeIds = new Set(nodeShapes.map((s) => s.id));
 
@@ -447,7 +607,7 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
    * 아래에서 이 노드들에서 나가던 분기를 버린다(2026-11-05 사용자 결정).
    */
   const nextProcedureRefShapeIds = new Set(
-    nodeShapes.filter((s) => NEXT_PROCEDURE_REF_RE.test(s.text.trim())).map((s) => s.id)
+    nodeShapes.filter((s) => matchNextProcedureStageNumber(s.text.trim()) !== null).map((s) => s.id)
   );
 
   // ── 4. 연결선 → 분기 ───────────────────────────────────────────────────
@@ -625,8 +785,8 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
   for (const connector of keptConnectors) {
     if (!abandonedConnectorIds.has(connector.id)) continue;
     const fromShape = nodeShapes.find((s) => s.id === connector.fromShapeId)!;
-    const stageNumber = fromShape.text.trim().match(NEXT_PROCEDURE_REF_RE)?.[1] ?? "?";
-    const toTitle = nodeTitle(nodeShapes.find((s) => s.id === connector.toShapeId)?.text ?? "", connector.toShapeId!);
+    const stageNumber = matchNextProcedureStageNumber(fromShape.text.trim()) ?? "?";
+    const toTitle = shortLabel(nodeShapes.find((s) => s.id === connector.toShapeId)?.text ?? "");
     const labelText = labelByConnectorId.get(connector.id)?.labelText;
     const branchName = labelText ? `"${labelText}" 분기` : "이름 없는 분기";
     droppedConnectors.push({
@@ -635,14 +795,14 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
       toShapeId: connector.toShapeId,
       reason: "ABANDONED_FOR_NEXT_PROCEDURE",
       detail:
-        `"${nodeTitle(fromShape.text, fromShape.id)}"은(는) (${stageNumber})번 절차로 이어가는 종료 노드가 되므로 ` +
+        `"${shortLabel(fromShape.text)}"은(는) (${stageNumber})번 절차로 이어가는 종료 노드가 되므로 ` +
         `나가는 분기를 가질 수 없다. 🔴 원본 흐름도에 있던 ${branchName}(→ "${toTitle}")가 이 절차에서는 사라진다.`,
     });
     issues.push({
       severity: "WARNING",
       issueType: "INVALID_NEXT_PROCEDURE_LINK",
       message:
-        `"${nodeTitle(fromShape.text, fromShape.id)}"을(를) (${stageNumber})번 절차로 이어가는 종료 노드로 만들면서, ` +
+        `"${shortLabel(fromShape.text)}"을(를) (${stageNumber})번 절차로 이어가는 종료 노드로 만들면서, ` +
         `원본 흐름도에 있던 ${branchName}(→ "${toTitle}")를 버렸습니다 — 종료 노드는 나가는 분기를 가질 수 없습니다. ` +
         `이 절차에서는 그 되돌아가는 흐름이 사라집니다(2026-11-05 결정).`,
       sourceWorksheet: sheetName,
@@ -654,38 +814,79 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
   let sortOrder = 0;
   for (const shape of orderedNodeShapes) {
     const text = shape.text.trim();
-    const nextProcedureStageNumber = text.match(NEXT_PROCEDURE_REF_RE)?.[1] ?? null;
+    const nextProcedureStageNumber = matchNextProcedureStageNumber(text);
     const outgoingBranchTypes = outgoingByShapeId.get(shape.id) ?? [];
     const { nodeType, reason } = classifyTechnicalNodeType({
       text,
       outgoingBranchTypes,
       nextProcedureStageNumber,
     });
-    if (nextProcedureStageNumber !== null && outgoingBranchTypes.length > 0) {
-      // 이어가기는 **종료 노드만** 가질 수 있다(procedure-next-procedure-link.ts).
-      // 나가는 선이 있으면 종료로 못 만들고, 그래서 이어가기도 못 건다.
+    const nodeCode = nodeCodeByShapeId.get(shape.id)!;
+    if (nextProcedureStageNumber !== null) {
+      // 🔴 한 대괄호 안에 번호가 둘 이상이면 **어느 절차인지 못 가린다.** 칸은 하나라
+      //    하나만 담을 수 있다 — 첫 번째를 쓰되 그 사실을 사람에게 올린다.
+      //    (실측 0건이다. 머리글 칸의 겸임 표기가 그 모양인데, 그것은 셀이라 여기 안 온다.)
+      const bracketed = bracketedStageNumbers(text);
+      if (bracketed.length > 1) {
+        issues.push({
+          severity: "WARNING",
+          issueType: "INVALID_NEXT_PROCEDURE_LINK",
+          message:
+            `"${shortLabel(shape.text)}"의 대괄호 안에 절차 번호가 ${bracketed.length}개 있습니다 ` +
+            `(${bracketed.join(", ")}) — 이어갈 절차는 하나만 담을 수 있어 첫 번째((${nextProcedureStageNumber})번)를 썼습니다.`,
+          sourceWorksheet: sheetName,
+          sourceReference: `node:${nodeCode}`,
+        });
+      }
+      /**
+       * 🔴 **이어가기는 여기서 안 건다 — 빈 채로 만들고 나중에 잇는다.**
+       *
+       * 절차끼리 가리키는 관계가 **순환해서**(technical-task-workbook.ts 머리말)
+       * 「가리켜지는 것부터 만든다」는 차례가 아예 없다. 그래서 만들기 단계는
+       * `next_procedure_template_id` 를 **비운 채** 두고, 다 만든 뒤 잇기 단계가
+       * 채운다(`link-technical-task-next-procedures.ts`).
+       *
+       * 🔴 **비워 뒀다는 사실이 DB 에 남아야 한다.** 이 메모는
+       * `procedure_template_validation_issues` 한 행이 되고, 사람은 절차 화면의
+       * [검증 결과]에서 그대로 본다 — 안 남기면 「원래 안 이어지는 절차」와
+       * 구별되지 않고, 그러면 아무도 안 잇는다.
+       *
+       * 🔵 `sourceReference` 는 **노드 코드**다(`shape#`·`connector#` 와 다른 앞가지).
+       * 잇기 단계가 노드를 되찾는 열쇠가 바로 그 값이기 때문이다 —
+       * `procedure_template_nodes` 의 유일키가 (템플릿, 노드코드)다.
+       */
       issues.push({
-        severity: "ERROR",
+        severity: "WARNING",
         issueType: "INVALID_NEXT_PROCEDURE_LINK",
         message:
-          `"${firstLine(text)}"은(는) (${nextProcedureStageNumber})번 절차를 가리키지만 나가는 분기가 ` +
-          `${outgoingBranchTypes.length}개라 종료 노드로 만들 수 없습니다 — 이어가기를 걸지 않았습니다.`,
+          `종료 노드 "${shortLabel(shape.text)}"의 이어갈 절차((${nextProcedureStageNumber})번)를 ` +
+          `아직 비워 두었습니다 — 절차들을 다 만든 뒤 잇기 단계에서 채웁니다.`,
         sourceWorksheet: sheetName,
-        sourceReference: `shape#${shape.id}`,
+        sourceReference: `node:${nodeCode}`,
       });
     }
 
     const { instructions, caution } = splitInstructionsAndCaution(shape.text);
     nodes.push({
-      nodeCode: nodeCodeByShapeId.get(shape.id)!,
+      nodeCode,
       nodeType,
       nodeTypeReason: reason,
-      nextProcedureStageNumber: outgoingBranchTypes.length === 0 ? nextProcedureStageNumber : null,
+      // 🔵 참조 노드는 나가는 분기가 이미 버려져 있으므로(위 5-2) 여기서 또 따지지 않는다.
+      nextProcedureStageNumber,
+      origin: "EXCEL_SHAPE",
       title: nodeTitle(shape.text, shape.id),
       description: text || null,
       instructions,
       safetyCaution: caution,
-      // EMU → 픽셀. 엑셀에서 보던 자리 그대로 편집기 화면에 선다.
+      /**
+       * EMU → 픽셀. 엑셀에서 보던 자리를 그대로 옮긴다.
+       *
+       * 🔴 **다만 화면이 이 값으로 그리지는 않는다**(2026-11-05 실측).
+       * `ProcedureFlowGraph.resolveBaselinePosition` 의 차례는 ① `user_position_x/y`
+       * 둘 다 있으면 그것 ② 기술 작업 절차는 **자동 배치**(computeProcedureAutoLayout)
+       * ③ 그것도 없을 때만 이 칸이다. 우리는 ①을 안 쓰므로 실제 배치는 ②가 정한다.
+       * 그래도 채워 두는 까닭: ③이 받침이고, 편집 이력·판본 비교가 이 값을 읽는다.
+       */
       positionX: Math.round(shape.x / EMU_PER_PIXEL),
       positionY: Math.round(shape.y / EMU_PER_PIXEL),
       sortOrder: sortOrder++,
@@ -695,12 +896,101 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
     });
   }
 
+  // ── 6-2. 🔴 **시작 노드를 자동으로 더한다** (2026-11-05 사용자 결정) ─────
+  //
+  // 🔴 **엑셀에 없는 것을 더하는 일이다.** 1단계에서는 그래서 안 만들었고, 대신
+  //    「시작 노드가 없다」를 알렸다. 그 판단 자체는 옳았지만 결과가 못 쓸 물건이었다 —
+  //    시작점이 없으니 편집기의 [검증]이 **모든 노드를 도달 불가**로 표시했다.
+  //    사용자가 「절차 제목을 시작 노드의 내용으로 해서 자동으로 붙여」로 정했다.
+  //
+  // 🔴 **만들기만 해서는 아무것도 안 바뀐다.** 도달 불가의 까닭은 시작점이 없어서이므로
+  //    시작 노드에서 **실제로 선이 나가야** 한다. 들어오는 선이 하나도 없는 노드
+  //    (= 뿌리) **전부**에 잇는다 — 하나만 이으면 나머지 뿌리가 그대로 남는다.
+  //
+  // 🔵 분기 이름은 **안 붙인다**(기본 분기). 엑셀에 없는 이름을 지어내는 일이다.
+  const incomingNodeCodes = new Set(
+    graphConnectors.map((c) => nodeCodeByShapeId.get(c.toShapeId!)!).filter(Boolean)
+  );
+  const rootNodes = nodes.filter((n) => !incomingNodeCodes.has(n.nodeCode));
+  const startNodeCode = `${nodeCodePrefix}-start`;
+  const startEdges: ExtractedEdge[] = [];
+
+  if (nodes.length > 0 && rootNodes.length > 0) {
+    // 자리는 뿌리들의 **가로 중심**에 맞춰 그 위에 세운다. 왼쪽 모서리를 맞추면
+    // 폭이 다를 때 삐뚤어진다(2026-11-05 에 이 저장소의 배치가 중심점 기준이 됐다).
+    // 🔵 다만 위 positionX 주석대로 화면은 자동 배치를 쓴다 — 이 값은 받침이다.
+    const rootShapes = rootNodes
+      .map((n) => shapes.find((s) => s.id === n.sourceShapeId))
+      .filter((s): s is TechnicalTaskShapeInput => s !== undefined);
+    const averageOf = (values: number[]): number =>
+      values.length === 0 ? 0 : values.reduce((a, b) => a + b, 0) / values.length;
+    const rootCenterX = averageOf(rootShapes.map((s) => s.x + s.cx / 2));
+    const startWidth = averageOf(rootShapes.map((s) => s.cx));
+    const startHeight = averageOf(rootShapes.map((s) => s.cy));
+    const topY = Math.min(...nodeShapes.map((s) => s.y));
+
+    nodes.unshift({
+      nodeCode: startNodeCode,
+      nodeType: "START",
+      nodeTypeReason: "엑셀에 없는 시작 노드를 자동으로 더했다 (2026-11-05 결정)",
+      nextProcedureStageNumber: null,
+      origin: "AUTO_START",
+      title: startNodeTitle,
+      description: null,
+      instructions: null,
+      safetyCaution: null,
+      positionX: Math.round((rootCenterX - startWidth / 2) / EMU_PER_PIXEL),
+      // 한 상자 높이만큼 띄워 그 위에 세운다 — 고정 픽셀 대신 그 시트의 상자 크기로 잰다.
+      positionY: Math.round((topY - startHeight * 2) / EMU_PER_PIXEL),
+      sortOrder: 0,
+      sourceWorksheet: sheetName,
+      sourceShapeId: null,
+      sourceCellRange: null,
+    });
+    // 시작 노드가 맨 앞에 섰으므로 나머지 차례를 한 칸씩 민다.
+    for (const [index, n] of nodes.entries()) n.sortOrder = index;
+
+    for (const root of rootNodes) {
+      startEdges.push({
+        fromNodeCode: startNodeCode,
+        toNodeCode: root.nodeCode,
+        branchType: "DEFAULT",
+        branchLabel: null,
+        sortOrder: 0,
+        sourceConnectorId: null,
+      });
+    }
+
+    issues.push({
+      severity: "INFO",
+      issueType: "INVALID_START_STRUCTURE",
+      message:
+        `시작(START) 노드 "${startNodeTitle}"을(를) **자동으로 더했습니다** — 엑셀에는 시작 표식이 없습니다. ` +
+        `들어오는 분기가 없던 노드 ${rootNodes.length}개에 기본 분기로 이었습니다. ` +
+        `(2026-11-05 사용자 결정. 그전에는 더하지 않았고, 그 탓에 [검증]이 모든 노드를 도달 불가로 표시했습니다.)`,
+      sourceWorksheet: sheetName,
+      sourceReference: `node:${startNodeCode}`,
+    });
+  } else if (nodes.length > 0) {
+    // 🔴 뿌리가 하나도 없다 = 모든 노드가 어딘가에서 들어오는 선을 받는다(순환).
+    //    시작 노드를 만들면 나가는 분기가 없어 구조 검증이 ERROR 를 낸다 — 안 만들고 알린다.
+    issues.push({
+      severity: "WARNING",
+      issueType: "INVALID_START_STRUCTURE",
+      message:
+        "들어오는 분기가 없는 노드가 하나도 없어(모두 순환 안에 있음) 시작 노드를 더하지 못했습니다 — " +
+        "편집기에서 시작점을 직접 정해야 합니다.",
+      sourceWorksheet: sheetName,
+      sourceReference: null,
+    });
+  }
+
   // ── 7. 분기 ────────────────────────────────────────────────────────────
   // 차례는 **노드의 읽기 순서**를 따른다. 노드 코드 글자로 정렬하면 `…-14` 가
   // `…-7` 보다 앞서는(글자 비교라) 뒤죽박죽이 되고, 그 차례가 DB 의 sort_order 로
   // 그대로 굳는다.
   const sortOrderByNodeCode = new Map(nodes.map((n) => [n.nodeCode, n.sortOrder]));
-  const edges: ExtractedEdge[] = graphConnectors
+  const edges: ExtractedEdge[] = [...startEdges, ...graphConnectors
     .map((connector) => {
       const binding = labelByConnectorId.get(connector.id);
       const classified = classifyBranchLabel(binding?.labelText ?? null);
@@ -717,23 +1007,12 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
       (a, b) =>
         (sortOrderByNodeCode.get(a.fromNodeCode) ?? 0) - (sortOrderByNodeCode.get(b.fromNodeCode) ?? 0) ||
         (sortOrderByNodeCode.get(a.toNodeCode) ?? 0) - (sortOrderByNodeCode.get(b.toNodeCode) ?? 0)
-    )
-    .map((edge, index) => ({ ...edge, sortOrder: index }));
+    ),
+  ].map((edge, index) => ({ ...edge, sortOrder: index }));
 
-  // ── 8. 시작 노드가 없다는 사실을 보고한다 ──────────────────────────────
-  // 만들지는 않는다(모듈 머리말 3번). 다만 편집기의 [검증]이 모든 노드를
-  // 「도달 불가」로 잡을 것이므로, 사람이 그 까닭을 여기서 먼저 알아야 한다.
-  if (nodes.length > 0) {
-    issues.push({
-      severity: "INFO",
-      issueType: "INVALID_START_STRUCTURE",
-      message:
-        "이 시트에는 시작(START) 노드가 없습니다 — 엑셀에 시작 표식이 없어 만들지 않았습니다. " +
-        "편집기에서 시작 노드를 더하기 전까지 [검증]은 모든 노드를 도달 불가로 표시합니다.",
-      sourceWorksheet: sheetName,
-      sourceReference: null,
-    });
-  }
+  // 🔵 시작 노드에 대한 메모는 위 6-2 에서 올린다(더했는지 못 더했는지에 따라 글이
+  //    갈린다). 2026-11-05 전에는 여기서 「없습니다」를 알렸는데, 이제 **만들므로**
+  //    그 글은 거짓이 되어 옮기고 고쳤다.
 
   return {
     nodes,
@@ -741,6 +1020,7 @@ export function extractTechnicalTaskGraph(input: TechnicalTaskGraphInput): Techn
     droppedShapes,
     droppedConnectors,
     labelBindings,
+    isolationRuleSkippedReason,
     annotationBoundaryX: boundaryX,
     annotationBoundaryReason,
     issues,

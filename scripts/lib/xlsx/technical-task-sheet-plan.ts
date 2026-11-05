@@ -143,6 +143,14 @@ export type TechnicalTaskProcedurePlan = {
   stageNumber: string | null;
   /** `[RFG] 고장 접수 확인` — 목록에 그대로 뜨는 이름. */
   name: string;
+  /**
+   * 머리말을 뗀 이름(`고장 접수 확인`).
+   *
+   * 🔵 **자동으로 더하는 시작 노드의 제목**이 이 값이다. 노드 상자 안에 들어가는
+   * 글이라 길이가 곧 상자 크기이고, `[RFG]` 는 그 절차를 연 사람이 이미 화면 위에서
+   * 보고 있는 글자다 — 상자 안에서 한 번 더 읽을 까닭이 없다.
+   */
+  label: string;
   equipmentType: ProcedureEquipmentType;
   sourceWorksheet: string;
   /**
@@ -194,6 +202,7 @@ export function planProceduresForSheet(
   const primary: TechnicalTaskProcedurePlan = {
     stageNumber,
     name: `[${prefix}] ${label}`,
+    label,
     equipmentType,
     sourceWorksheet: sheetName,
     // 번호가 없는 시트(MB 쪽이 전부 그렇다)는 이름을 줄여 쓴다 — 전부 `mbx` 로 두면
@@ -217,9 +226,11 @@ export function planProceduresForSheet(
       seenNumbers.add(number);
       const raw = item[2].trim();
       if (raw.length === 0) continue;
+      const coLabel = trimCoNumberedLabel(raw);
       plans.push({
         stageNumber: number,
-        name: `[${prefix}] ${trimCoNumberedLabel(raw)}`,
+        name: `[${prefix}] ${coLabel}`,
+        label: coLabel,
         equipmentType,
         sourceWorksheet: sheetName,
         nodeCodePrefix: `${prefix.toLowerCase()}${number}`,

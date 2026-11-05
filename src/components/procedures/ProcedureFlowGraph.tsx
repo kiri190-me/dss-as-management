@@ -152,7 +152,22 @@ function ProcedureNode({ data }: NodeProps & { data: ProcedureNodeData }) {
         semanticType={semanticType}
         iconKey={iconKey}
         title={data.title}
-        subtitle={data.sourceShapeId ? `${data.sourceWorksheet} · shape#${data.sourceShapeId}` : data.sourceWorksheet}
+        /**
+         * 🔴 2026-11-05 — **노드 상자에서 도형 번호를 뺐다**(사용자 요구:
+         * "노드에 [shape#nn]은 표시되지 않도록 해줘"). 시트 이름은 그대로 둔다 —
+         * 사용자가 말한 것은 도형 번호다.
+         *
+         * 걷어낸 글은 이것이었다:
+         *   `${data.sourceWorksheet} · shape#${data.sourceShapeId}`
+         *
+         * 🔵 **값이 사라진 것이 아니다.** 번호를 보는 길이 둘 남아 있다:
+         *   - 노드를 고르면 옆 패널(editor/NodePropertyPanel.tsx)이 그대로 보여 준다
+         *     — 「이 노드가 엑셀 어디서 왔나」를 아는 유일한 자리라 거기는 안 건드렸다.
+         *   - 위 찾기 칸이 여전히 `shape#` 로 찾는다.
+         * 그리고 검증 이슈가 `shape#50` 꼴로 노드를 되찾으므로(procedure-graph-navigation.ts)
+         * `sourceShapeId` 칸 자체는 절대 지우면 안 된다.
+         */
+        subtitle={data.sourceWorksheet}
         size="graph"
         issueBadge={data.issueBadge}
         issueHref={data.issueBadge ? `/procedures/${data.templateId}/validation/${data.issueBadge.issueId}` : undefined}

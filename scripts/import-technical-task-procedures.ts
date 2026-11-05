@@ -1,27 +1,30 @@
 import "./load-env";
 
-import { ZipArchive } from "./lib/xlsx/zip-reader";
-import { loadWorkbook, type LoadedSheet, type LoadedWorkbook } from "./lib/xlsx/workbook-loader";
-import type { DrawingConnector, DrawingShape } from "./lib/xlsx/ooxml-parser";
-import { EMU_PER_PIXEL, parseDrawingGeometry } from "./lib/xlsx/drawing-geometry";
+import type { LoadedSheet, LoadedWorkbook } from "./lib/xlsx/workbook-loader";
+import { EMU_PER_PIXEL } from "./lib/xlsx/drawing-geometry";
+import type { TechnicalTaskGraphResult } from "./lib/xlsx/extract-technical-task-graph";
 import {
-  extractTechnicalTaskGraph,
-  type TechnicalTaskConnectorInput,
-  type TechnicalTaskGraphResult,
-  type TechnicalTaskShapeInput,
-} from "./lib/xlsx/extract-technical-task-graph";
-import {
-  buildStageNumberIndex,
-  planProceduresForSheet,
   sheetExclusionCategoryLabels,
   type TechnicalTaskProcedurePlan,
 } from "./lib/xlsx/technical-task-sheet-plan";
+import {
+  buildProceduresForSheets,
+  drawingCountsOf,
+  planWorkbook,
+  type BuiltProcedure,
+  type SheetDrawing,
+} from "./lib/xlsx/technical-task-workbook";
 import {
   checkDevelopmentWriteTarget,
   formatDatabaseTarget,
   formatWriteGuardBlockMessage,
 } from "./lib/dev-database-write-guard";
 import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
+import {
+  computeNodeDimensions,
+  getNodeChipVisual,
+  NODE_VISUAL_CONFIG,
+} from "@/lib/domain/procedure-visual-language";
 import {
   procedureBranchTypeLabels,
   procedureEquipmentTypeLabels,
@@ -67,13 +70,23 @@ import {
 const APPLY = process.env.APPLY === "1";
 
 /**
- * 1단계(2026-11-05)의 대상 시트 **하나**. 가장 단순해서 규칙이 맞는지 사람이 눈으로
- * 가릴 수 있다. 나머지 시트는 이 결과를 사람이 확인한 뒤 2단계에서 한다 —
- * 규칙이 틀린 채로 스물몇 개를 만들면 스물몇 개가 전부 못 쓸 물건이 된다.
+ * `--sheet` 를 안 주면 만드는 **이번 묶음**.
+ *
+ * 🔴 **끊어서 간다**(2026-11-05 사용자 결정). 규칙이 틀린 채로 열넷을 한꺼번에
+ * 만들면 열넷이 전부 못 쓸 물건이 된다. 1차는 **작은 것 셋** — 셋 다 참조 노드가
+ * 없어서 잇기 단계 없이 끝나고, 사람이 화면에서 바로 눈으로 가릴 수 있다.
+ * 2차·3차는 이 목록을 갈아 끼우거나 `--sheet` 로 지정한다.
+ *
+ * 🔵 `(1)고장 접수 확인` 이 여기 다시 들어 있는 것은, 1단계에서 만들려 했으나
+ * 실제로는 DB 에 안 들어갔기 때문이다(명령이 안 돌았다).
  */
-const PHASE_1_SHEET_NAME = "(RFG) (1)고장 접수 확인";
+const CURRENT_BATCH_SHEET_NAMES = [
+  "(RFG) (1)고장 접수 확인",
+  "(RFG) (6)개선 사항 확인",
+  "(RFG) (3)안전검사",
+];
 
-function parseArgs(): { file: string; sheetNames: string[]; includeExcluded: boolean } {
+function parseArgs(): { file: string; sheetNames: string[]; includeExcluded: boolean; replace: boolean } {
   const args = process.argv.slice(2);
   const fileIndex = args.indexOf("--file");
   const file = fileIndex >= 0 ? args[fileIndex + 1] : undefined;
@@ -89,67 +102,20 @@ function parseArgs(): { file: string; sheetNames: string[]; includeExcluded: boo
   }
   return {
     file,
-    sheetNames: sheetNames.length > 0 ? sheetNames : [PHASE_1_SHEET_NAME],
+    sheetNames: sheetNames.length > 0 ? sheetNames : CURRENT_BATCH_SHEET_NAMES,
     // 제외된 시트를 **드라이런으로 들여다보기만** 하는 깃발. 만들지는 못한다.
     includeExcluded: args.includes("--include-excluded"),
-  };
-}
-
-/** 시트 머리글 칸 — 겸임 번호 표기가 여기에만 있다(technical-task-sheet-plan.ts). */
-function titleTextOf(sheet: LoadedSheet): string | null {
-  return sheet.worksheet.cells["A1"] ?? null;
-}
-
-type SheetDrawing = {
-  shapes: TechnicalTaskShapeInput[];
-  connectors: TechnicalTaskConnectorInput[];
-  pictureCount: number;
-  groupCount: number;
-  /** 절대 좌표(`<a:xfrm>`)를 못 읽어 그래프에 못 올린 도형/연결선 번호. */
-  missingGeometryIds: string[];
-};
-
-/**
- * `parseDrawing`(칸 좌표 · 글자 · 연결 정보)과 `parseDrawingGeometry`(절대 좌표)를
- * 도형 번호로 맞붙인다. 둘을 나눠 둔 까닭은 drawing-geometry.ts 머리말에 있다 —
- * 기존 파서를 안 건드리려고 좌표만 따로 읽는다.
- */
-function readSheetDrawing(zip: ZipArchive, sheet: LoadedSheet): SheetDrawing {
-  const anchors = sheet.drawing ?? [];
-  const geometry = parseDrawingGeometry(sheet.drawingPath ? zip.readTextOrNull(sheet.drawingPath) : null);
-  const missingGeometryIds: string[] = [];
-
-  const shapes: TechnicalTaskShapeInput[] = [];
-  for (const anchor of anchors.filter((a): a is DrawingShape => a.kind === "shape")) {
-    const g = anchor.id ? geometry.get(anchor.id) : undefined;
-    if (!anchor.id || !g) {
-      missingGeometryIds.push(anchor.id ? `shape#${anchor.id}` : "shape#(번호 없음)");
-      continue;
-    }
-    shapes.push({ ...g, text: anchor.text });
-  }
-
-  const connectors: TechnicalTaskConnectorInput[] = [];
-  for (const anchor of anchors.filter((a): a is DrawingConnector => a.kind === "connector")) {
-    const g = anchor.id ? geometry.get(anchor.id) : undefined;
-    if (!anchor.id || !g) {
-      missingGeometryIds.push(anchor.id ? `connector#${anchor.id}` : "connector#(번호 없음)");
-      continue;
-    }
-    connectors.push({
-      ...g,
-      fromShapeId: anchor.stCxnId,
-      toShapeId: anchor.endCxnId,
-      isStraight: /^(straightConnector\d*|line)$/i.test(anchor.geom ?? ""),
-    });
-  }
-
-  return {
-    shapes,
-    connectors,
-    pictureCount: anchors.filter((a) => a.kind === "picture").length,
-    groupCount: anchors.filter((a) => a.kind === "group").length,
-    missingGeometryIds,
+    /**
+     * 🔴 **이미 만든 것을 지우고 다시 만든다.** 규칙이 바뀌면 옛 절차는 옛 규칙의
+     * 결과라 그대로 두면 안 된다(2026-11-05 에 노드 제목 규칙이 바뀌었다).
+     *
+     * 🔴 **기본값이 아니다 — 명시적으로 켜야 한다.** 실수로 돌렸을 때 남의 작업이
+     * 사라지면 안 되고, 깃발을 손으로 치는 것은 실수로 되는 일이 아니다.
+     *
+     * 🔴 지우는 범위는 아래 applyToDatabase 가 **이름 · 원본 파일 해시 · 분류 ·
+     * 상태(DRAFT)** 넷으로 좁힌다. 사람이 손으로 만든 절차나 게시본은 애초에 안 걸린다.
+     */
+    replace: args.includes("--replace"),
   };
 }
 
@@ -164,6 +130,7 @@ function emu(value: number): string {
 const DROPPED_SHAPE_REASON_LABELS: Record<string, string> = {
   BRANCH_LABEL: "분기 이름",
   EMPTY_BOX: "빈 상자",
+  NOT_IN_FLOW: "흐름에 안 닿음",
   ANNOTATION_REGION: "주석 영역",
   DUPLICATE_SHAPE_ID: "도형 번호 중복",
 };
@@ -174,31 +141,6 @@ const DROPPED_CONNECTOR_REASON_LABELS: Record<string, string> = {
   SELF_EDGE: "자기 자신",
   ABANDONED_FOR_NEXT_PROCEDURE: "🔴 이어가기 때문에 포기한 분기",
 };
-
-/** 그림층의 도형·연결선 수 — 「흐름도인가」를 재는 자다(제외 판정에 쓴다). */
-function drawingCountsOf(sheet: LoadedSheet): { shapeCount: number; connectorCount: number } {
-  const anchors = sheet.drawing ?? [];
-  return {
-    shapeCount: anchors.filter((a) => a.kind === "shape").length,
-    connectorCount: anchors.filter((a) => a.kind === "connector").length,
-  };
-}
-
-/** 워크북 전체의 단계 번호 표 — 노드의 `(번호)` 참조를 풀 때 쓴다. */
-function planWholeWorkbook(wb: LoadedWorkbook): {
-  plans: TechnicalTaskProcedurePlan[];
-  bySheetName: Map<string, TechnicalTaskProcedurePlan[]>;
-} {
-  const plans: TechnicalTaskProcedurePlan[] = [];
-  const bySheetName = new Map<string, TechnicalTaskProcedurePlan[]>();
-  for (const sheet of wb.sheets) {
-    const sheetPlans = planProceduresForSheet(sheet.name, titleTextOf(sheet), drawingCountsOf(sheet));
-    if (sheetPlans.length === 0) continue;
-    bySheetName.set(sheet.name, sheetPlans);
-    plans.push(...sheetPlans);
-  }
-  return { plans, bySheetName };
-}
 
 function printSheetResult(
   sheet: LoadedSheet,
@@ -228,6 +170,11 @@ function printSheetResult(
   console.log(
     `  본문/주석 : ${result.annotationBoundaryX === null ? "경계 없음" : `경계 x=${px(result.annotationBoundaryX)}`} — ${result.annotationBoundaryReason}`
   );
+  // 🔴 규칙을 **껐다면** 머리에 바로 찍는다. 끈 사실이 조용하면, 그 시트에 진짜
+  //    사진 캡션이 섞여 들어와도 사람이 그 까닭을 찾을 자리가 없다.
+  if (result.isolationRuleSkippedReason) {
+    console.log(`  🔴 고립 규칙 : 껐습니다 — ${result.isolationRuleSkippedReason}`);
+  }
 
   console.log(`\n  ── 노드 ${result.nodes.length}개 ${"─".repeat(40)}`);
   for (const node of result.nodes) {
@@ -235,7 +182,14 @@ function printSheetResult(
       `   #${node.sortOrder} ${node.nodeCode.padEnd(10)} [${procedureNodeTypeLabels[node.nodeType]}] ` +
         `(${node.nodeType})  "${node.title}"`
     );
-    console.log(`        자리=(${node.positionX},${node.positionY})  유형 근거: ${node.nodeTypeReason}`);
+    // 🔵 제목이 **도형 글자 전문**이 되면서(2026-11-05) 상자가 커졌다. 자동 배치가
+    //    폭·높이를 제목에서 계산하므로 그림이 달라진다 — 얼마나 커지는지 값으로 보인다.
+    const { semanticType } = getNodeChipVisual(node.nodeType);
+    const dims = computeNodeDimensions({ title: node.title, shape: NODE_VISUAL_CONFIG[semanticType].shape });
+    console.log(
+      `        자리=(${node.positionX},${node.positionY})  상자=${dims.width}×${dims.height}px` +
+        `(${dims.visibleLines}줄${dims.isTruncated ? " · 🔴 잘림" : ""})  유형 근거: ${node.nodeTypeReason}`
+    );
     if (node.safetyCaution) console.log(`        주의: ${node.safetyCaution}`);
     if (node.nextProcedureStageNumber) {
       const target = stageIndex.get(node.nextProcedureStageNumber);
@@ -251,7 +205,8 @@ function printSheetResult(
     const label = edge.branchLabel ? `"${edge.branchLabel}"` : "(이름 없음)";
     console.log(
       `   ${edge.fromNodeCode} --[${procedureBranchTypeLabels[edge.branchType]} ${label}]--> ` +
-        `${edge.toNodeCode}   (connector#${edge.sourceConnectorId})`
+        // 자동으로 더한 시작 분기는 엑셀의 연결선에서 온 것이 아니다 — 섞어 찍지 않는다.
+        `${edge.toNodeCode}   ${edge.sourceConnectorId ? `(connector#${edge.sourceConnectorId})` : "(자동으로 더한 분기)"}`
     );
   }
 
@@ -312,7 +267,8 @@ function printSheetResult(
 
 async function applyToDatabase(
   wb: LoadedWorkbook,
-  built: { plan: TechnicalTaskProcedurePlan; sheet: LoadedSheet; result: TechnicalTaskGraphResult }[]
+  built: readonly BuiltProcedure[],
+  replace: boolean
 ): Promise<void> {
   // 🔴 1차 — **붙기 전에** 가린다. 접속 URL 만 보는 순수 검사라 여기서 막히면
   //    운영 DB 에 TCP 연결조차 열리지 않는다. 2차(서버가 말한 이름 대조)는 아래에.
@@ -321,10 +277,10 @@ async function applyToDatabase(
 
   // 🔴 쓰기 경로의 모듈은 여기서 **처음** 불러온다. 드라이런에서는 이 줄에 닿지
   //    않으므로 DB 연결도 server-only 조건도 필요 없다.
-  const { sql, and, eq } = await import("drizzle-orm");
+  const { sql, and, eq, inArray } = await import("drizzle-orm");
   const { db, pgClient } = await import("../src/lib/db/connection");
   const { procedureTemplates, users } = await import("../src/lib/db/schema");
-  const { createDraftProcedureTemplateFromImport } = await import(
+  const { createDraftProcedureTemplateFromImport, replaceDraftProcedureTemplates } = await import(
     "../src/lib/db/mutations/procedure-templates"
   );
   const { generateProcedureTemplateCode } = await import("@/lib/domain/procedure-template-code");
@@ -357,19 +313,59 @@ async function applyToDatabase(
       .limit(1);
     if (!actor) throw new Error("승인된 활성 SUPER_ADMIN 계정이 없어 들여올 수 없습니다.");
 
-    for (const { plan, sheet, result } of built) {
-      // 🔴 이어가기(`(번호)` 참조)는 **2단계 일**이다. 지금 쓰기 경로
-      //    (createDraftProcedureTemplateFromImport → insertTemplateContent)는
-      //    next_procedure_template_id 칸을 아예 안 쓴다 — 그대로 밀어 넣으면 참조가
-      //    조용히 사라진 반쪽 절차가 남는다. 반쪽을 만드느니 멈춘다.
-      const refs = result.nodes.filter((n) => n.nextProcedureStageNumber !== null);
-      if (refs.length > 0) {
-        console.log(
-          `  -> 건너뜀: "${plan.name}" 에 다른 절차를 가리키는 노드가 ${refs.length}개 있습니다 ` +
-            `(이어가기 연결은 2단계에서 붙인다).`
+    // ── `--replace` — 이번에 만들 것과 **같은 자리**의 옛 초안을 먼저 치운다 ──
+    //
+    // 🔴 규칙이 바뀌면 옛 절차는 옛 규칙의 결과다. 그런데 아래의 「이미 있으면
+    //    건너뜀」 때문에 그냥 다시 돌리면 **아무 일도 안 일어난다** — 다시 만들 길이
+    //    필요하다. 명시적으로 켜야만 돈다(기본값 아님).
+    //
+    // 🔴 **좁히는 잣대 넷**: 이번에 만들 이름 · 같은 원본 파일 해시 · TECHNICAL_TASK ·
+    //    아직 안 지워짐. 그래서 사람이 손으로 만든 절차(파일 해시가 없다)나 다른
+    //    워크북에서 온 절차는 애초에 안 걸린다. 🔵 지우는 함수 자체도 **DRAFT 만**
+    //    건드린다(replaceDraftProcedureTemplates) — 게시본은 거기서 한 번 더 막힌다.
+    if (replace) {
+      const names = built.map((b) => b.plan.name);
+      const victims = await db
+        .select({ id: procedureTemplates.id, code: procedureTemplates.code, name: procedureTemplates.name })
+        .from(procedureTemplates)
+        .where(
+          and(
+            inArray(procedureTemplates.name, names),
+            eq(procedureTemplates.category, "TECHNICAL_TASK"),
+            eq(procedureTemplates.sourceFileHash, wb.sourceFileHash),
+            eq(procedureTemplates.status, "DRAFT"),
+            eq(procedureTemplates.isDeleted, false)
+          )
         );
-        continue;
+      console.log(`\n--replace — 같은 자리의 옛 초안 ${victims.length}개를 치웁니다.`);
+      for (const victim of victims) console.log(`  지울 것: "${victim.name}" (code=${victim.code})`);
+      if (victims.length > 0) {
+        const outcome = await replaceDraftProcedureTemplates(
+          victims.map((v) => v.code),
+          actor.id
+        );
+        if (!outcome.ok) throw new Error(`옛 초안을 치우지 못했습니다: [${outcome.code}] ${outcome.message}`);
+        for (const deleted of outcome.deleted) {
+          console.log(
+            `  -> 지웠습니다: code=${deleted.code} (노드 ${deleted.nodeCount} · 분기 ${deleted.edgeCount} · 검증메모 ${deleted.issueCount})`
+          );
+        }
       }
+    }
+
+    for (const { plan, sheet, result } of built) {
+      /**
+       * 🔴 참조 노드가 있어도 **이제는 만든다**(2026-11-05, 2단계 설계).
+       *
+       * 전에는 「반쪽을 만드느니 멈춘다」며 건너뛰었다. 그 규칙을 그대로 두면 참조가
+       * 있는 절차는 **영원히 못 만든다** — 가리키는 관계가 순환해서 「가리켜지는 것부터」
+       * 라는 차례가 존재하지 않기 때문이다(technical-task-workbook.ts 머리말).
+       *
+       * 대신 이어가기를 **비운 채** 만들고, 비웠다는 사실을 `procedure_template_
+       * validation_issues` 한 줄로 남긴다(extract-technical-task-graph.ts). 다 만든 뒤
+       * `link-technical-task-next-procedures.ts` 가 그 줄들을 채운다.
+       */
+      const refs = result.nodes.filter((n) => n.nextProcedureStageNumber !== null);
 
       // 같은 원본 파일에서 같은 이름의 기술 절차를 이미 만들었으면 또 만들지 않는다.
       // 🔴 코드를 서버가 짓기 때문에(2026-11-05) 원래의 (code, 파일 해시) 멱등 검사가
@@ -419,7 +415,10 @@ async function applyToDatabase(
       );
       console.log(
         outcome.ok
-          ? `  -> DRAFT 로 만들었습니다: "${plan.name}" id=${outcome.id}`
+          ? `  -> DRAFT 로 만들었습니다: "${plan.name}" id=${outcome.id}` +
+              (refs.length > 0
+                ? `   🔴 이어가기 ${refs.length}건은 비워 뒀습니다 — 잇기 단계를 돌리세요.`
+                : "")
           : `  -> 실패: [${outcome.code}] ${outcome.message}`
       );
     }
@@ -430,9 +429,9 @@ async function applyToDatabase(
 }
 
 async function main(): Promise<void> {
-  const { file, sheetNames, includeExcluded } = parseArgs();
-  const wb = loadWorkbook(file);
-  const zip = ZipArchive.fromFile(file);
+  const { file, sheetNames, includeExcluded, replace } = parseArgs();
+  const workbookPlan = planWorkbook(file);
+  const wb = workbookPlan.workbook;
 
   console.log("=".repeat(74));
   console.log("엑셀 도형 흐름도 → 기술 작업 절차 (TECHNICAL_TASK)");
@@ -442,8 +441,8 @@ async function main(): Promise<void> {
   console.log(`시트      : ${wb.sheets.length}개 중 대상 ${sheetNames.length}개 — ${sheetNames.join(" / ")}`);
   console.log(`모드      : ${APPLY ? "APPLY (DB 에 쓴다)" : "DRY RUN (DB 를 한 글자도 안 바꾼다)"}`);
 
-  const { plans, bySheetName } = planWholeWorkbook(wb);
-  const { byStageNumber, conflicts } = buildStageNumberIndex(plans);
+  const { plans, plansBySheetName: bySheetName, stageIndex: byStageNumber } = workbookPlan;
+  const conflicts = workbookPlan.stageNumberConflicts;
   console.log(`\n${"=".repeat(74)}`);
   console.log(`워크북 전체 절차 계획 ${plans.length}개 (이번에 만드는 것은 아래 「대상」뿐)`);
   console.log("=".repeat(74));
@@ -481,42 +480,66 @@ async function main(): Promise<void> {
     console.log(`  🔴 같은 단계 번호가 둘 이상인 것: ${conflicts.join(", ")} — 참조를 풀 수 없어 표에서 뺐습니다.`);
   }
 
-  const built: { plan: TechnicalTaskProcedurePlan; sheet: LoadedSheet; result: TechnicalTaskGraphResult }[] = [];
-  for (const sheetName of sheetNames) {
-    const sheet = wb.sheets.find((s) => s.name === sheetName);
-    if (!sheet) {
-      console.log(`\n🔴 시트를 찾을 수 없습니다: "${sheetName}"`);
-      process.exitCode = 1;
+  const { built: candidates, missingSheetNames, unplannedSheetNames } = buildProceduresForSheets(
+    workbookPlan,
+    sheetNames
+  );
+  for (const sheetName of missingSheetNames) {
+    console.log(`\n🔴 시트를 찾을 수 없습니다: "${sheetName}"`);
+    process.exitCode = 1;
+  }
+  for (const sheetName of unplannedSheetNames) {
+    console.log(`\n🔴 "${sheetName}" 은(는) 장비 머리말이 없어 절차 계획을 세울 수 없습니다.`);
+    process.exitCode = 1;
+  }
+
+  const built: BuiltProcedure[] = [];
+  for (const candidate of candidates) {
+    const { plan, sheet, drawing, result } = candidate;
+    // 🔴 제외된 시트는 **만들지 않는다.** `--include-excluded` 를 주면 들여다볼
+    //    수는 있지만(드라이런 전용), APPLY 에서는 그 깃발도 안 듣는다 —
+    //    「보려고 켠 깃발」이 「쓰기」로 넘어가면 결정이 깃발 하나로 뒤집힌다.
+    if (plan.excluded && !(includeExcluded && !APPLY)) {
+      console.log(
+        `\n✗ "${plan.name}" (${sheet.name}) — 만들지 않습니다 ` +
+          `[${sheetExclusionCategoryLabels[plan.excluded.category]}] ${plan.excluded.detail}` +
+          (APPLY ? "" : `\n   들여다보려면 --include-excluded 를 주세요(드라이런 전용).`)
+      );
       continue;
     }
-    const sheetPlans = bySheetName.get(sheet.name);
-    if (!sheetPlans || sheetPlans.length === 0) {
-      console.log(`\n🔴 "${sheet.name}" 은(는) 장비 머리말이 없어 절차 계획을 세울 수 없습니다.`);
-      process.exitCode = 1;
-      continue;
+    printSheetResult(sheet, drawing, plan, result, byStageNumber);
+    built.push(candidate);
+  }
+
+  // 🔴 이어가기를 **비워 두고** 만드는 것들을 한곳에 모아 보여 준다. 절차마다 흩어진
+  //    메모만으로는 「다 만든 뒤에 잇기를 돌려야 한다」가 눈에 안 들어온다.
+  const pendingLinks = built.flatMap(({ plan, result }) =>
+    result.nodes
+      .filter((n) => n.nextProcedureStageNumber !== null)
+      .map((n) => ({ plan, node: n }))
+  );
+  console.log(`\n${"=".repeat(74)}`);
+  console.log(`이어가기를 비워 두고 만드는 노드 ${pendingLinks.length}개`);
+  console.log("=".repeat(74));
+  if (pendingLinks.length === 0) {
+    console.log("  없습니다 — 이번 대상에는 다른 절차를 가리키는 노드가 하나도 없습니다.");
+  } else {
+    for (const { plan, node } of pendingLinks) {
+      const target = byStageNumber.get(node.nextProcedureStageNumber!);
+      // 🔵 제목이 **여러 줄**이 될 수 있다(2026-11-05) — 요약 줄에는 첫 줄만 넣는다.
+      //    전문은 바로 위의 노드 목록에 줄바꿈까지 그대로 찍혀 있다.
+      const oneLine = node.title.split("\n")[0];
+      console.log(
+        `  ${plan.name} / ${node.nodeCode} "${oneLine}${node.title.includes("\n") ? " …" : ""}" ` +
+          `→ (${node.nextProcedureStageNumber}) ` +
+          (target ? `"${target.name}"` : "🔴 그 번호의 절차가 계획에 없다")
+      );
     }
-    const drawing = readSheetDrawing(zip, sheet);
-    for (const plan of sheetPlans) {
-      // 🔴 제외된 시트는 **만들지 않는다.** `--include-excluded` 를 주면 들여다볼
-      //    수는 있지만(드라이런 전용), APPLY 에서는 그 깃발도 안 듣는다 —
-      //    「보려고 켠 깃발」이 「쓰기」로 넘어가면 결정이 깃발 하나로 뒤집힌다.
-      if (plan.excluded && !(includeExcluded && !APPLY)) {
-        console.log(
-          `\n✗ "${plan.name}" (${sheet.name}) — 만들지 않습니다 ` +
-            `[${sheetExclusionCategoryLabels[plan.excluded.category]}] ${plan.excluded.detail}` +
-            (APPLY ? "" : `\n   들여다보려면 --include-excluded 를 주세요(드라이런 전용).`)
-        );
-        continue;
-      }
-      const result = extractTechnicalTaskGraph({
-        sheetName: sheet.name,
-        nodeCodePrefix: plan.nodeCodePrefix,
-        shapes: drawing.shapes,
-        connectors: drawing.connectors,
-      });
-      printSheetResult(sheet, drawing, plan, result, byStageNumber);
-      built.push({ plan, sheet, result });
-    }
+    console.log(
+      `  🔴 절차끼리 가리키는 관계가 **순환**해서 만들면서 동시에 이을 수 없습니다.\n` +
+        `     다 만든 뒤 잇기 단계를 돌리세요: scripts/link-technical-task-next-procedures.ts\n` +
+        `     비워 뒀다는 사실은 절차마다 [검증 결과] 한 줄(sourceReference = node:<노드코드>)로 DB 에 남습니다.`
+    );
   }
 
   if (!APPLY) {
@@ -526,7 +549,7 @@ async function main(): Promise<void> {
     console.log("=".repeat(74));
     return;
   }
-  await applyToDatabase(wb, built);
+  await applyToDatabase(wb, built, replace);
 }
 
 main().catch((error) => {

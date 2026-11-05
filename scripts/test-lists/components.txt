@@ -1143,6 +1143,15 @@ src/components/common/date-input-max-screens.test.ts
 #    걸러내기가 **무는지**도 옛 모양을 그대로 먹여 값으로 확인한다.
 src/components/procedures/procedure-code-hidden-screens.test.ts
 
+# 2026-11-05 — **노드 상자에서 도형 번호를 뺀다**(사용자 요구 「노드에 [shape#nn]은
+#    표시되지 않도록 해줘」). 🔴 칸을 지우는 일이 아니다 — 검증 이슈가 그 번호로 노드를
+#    되찾고 찾기 칸도 그 번호로 고른다. 재는 것: 🔴 캔버스의 노드 상자가 그 번호를
+#    글자로 안 그리는가 · 시트 이름은 남는가 · 🔴 **노드 상세 패널은 계속 보여 주는가**
+#    (「shape# 를 지워라」로만 읽은 다음 사람이 거기까지 걷으면, 검증 이슈에서 넘어온
+#    사람이 어느 도형인지 영영 못 본다). 🔴 주석을 세면 고쳐 놓고도 빨개진다 — 걷어낸
+#    자리에 옛 글을 그대로 적어 두었고, 걸러내기가 무는지를 그 글로 값으로 확인한다.
+src/components/procedures/node-chip-shape-id-hidden.test.ts
+
 # 2026-11-05 — 거르개가 **화면에 서고, 목록 화면이 그 규칙을 문다**. 규칙 자체는 unit 목록의
 #    lib/domain/technical-procedure-list-filter.test.ts 가 값으로 잰다. 여기서 재는 것:
 #    🔴 설비 유형 고르개가 「전체」+셋이고 글자가 **공용 표**(procedureEquipmentTypeLabels)에서

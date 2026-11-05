@@ -61,6 +61,7 @@ scripts/lib/xlsx/extract-plain-instruction.test.ts
 scripts/lib/xlsx/extract-reference-index.test.ts
 scripts/lib/xlsx/extract-technical-task-graph.test.ts
 scripts/lib/xlsx/technical-task-sheet-plan.test.ts
+scripts/lib/xlsx/technical-task-next-procedure-plan.test.ts
 scripts/lib/dev-database-write-guard.test.ts
 scripts/lib/attachment-backup-plan.test.ts
 src/lib/domain/procedure-validation-known-issues.test.ts

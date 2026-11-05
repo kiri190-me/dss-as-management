@@ -6,6 +6,7 @@ import {
   type TechnicalTaskGraphInput,
   type TechnicalTaskShapeInput,
 } from "./extract-technical-task-graph";
+import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
 
 /**
  * 🔴 **지어낸 값만 쓴다.** 이 저장소는 공개(public)이고 원본 워크북은 사내 업무
@@ -42,6 +43,22 @@ function connector(
     flipV: options.flipV ?? false,
     isStraight: options.isStraight ?? true,
   };
+}
+
+/**
+ * 🔴 **엑셀에서 온 것만** 골라 센다.
+ *
+ * 2026-11-05 부터 시작(START) 노드를 **자동으로 더한다**(사용자 결정). 그래서
+ * 「노드 수 + 버린 도형 수 = 입력 도형 수」 같은 셈을 그냥 `result.nodes` 로 재면
+ * 하나씩 어긋난다 — 더한 것과 읽은 것을 갈라서 센다.
+ */
+function excelNodes(result: ReturnType<typeof extractTechnicalTaskGraph>) {
+  return result.nodes.filter((n) => n.origin === "EXCEL_SHAPE");
+}
+
+/** 엑셀의 연결선에서 온 분기만. 자동으로 더한 시작 분기는 `sourceConnectorId` 가 없다. */
+function excelEdges(result: ReturnType<typeof extractTechnicalTaskGraph>) {
+  return result.edges.filter((e) => e.sourceConnectorId !== null);
 }
 
 /** 선의 **바깥 상자 가운데**까지의 거리 — 고치기 전에 쓰던 자(아래 시험이 이것과 견준다). */
@@ -86,7 +103,13 @@ function buildMainFixture(): TechnicalTaskGraphInput {
     // 주석선 — 본문 노드에서 설명 상자로 간다.
     connector("cF", "10", "30", { x: 3400000, y: 1200000, cx: 5600000, cy: 300000 }),
   ];
-  return { sheetName: "(TEST) 가상 흐름도", nodeCodePrefix: "t1", shapes, connectors };
+  return {
+    sheetName: "(TEST) 가상 흐름도",
+    nodeCodePrefix: "t1",
+    startNodeTitle: "가상 절차",
+    shapes,
+    connectors,
+  };
 }
 
 test("🔴 본보기가 비어 있지 않다 — 아래 시험이 무엇을 재는지 먼저 못 박는다", () => {
@@ -95,11 +118,15 @@ test("🔴 본보기가 비어 있지 않다 — 아래 시험이 무엇을 재�
   assert.equal(input.connectors.length, 6);
 
   const result = extractTechnicalTaskGraph(input);
-  assert.equal(result.nodes.length, 6);
-  assert.equal(result.edges.length, 5);
+  assert.equal(excelNodes(result).length, 6);
+  assert.equal(excelEdges(result).length, 5);
+  // 자동으로 더한 시작 노드 하나와 그 분기 하나가 더 있다.
+  assert.equal(result.nodes.length, 7);
+  assert.equal(result.edges.length, 6);
   // 🔴 조용히 사라지는 도형이 없다 — 들어온 도형은 노드가 되거나 까닭과 함께 버려진다.
-  assert.equal(result.nodes.length + result.droppedShapes.length, input.shapes.length);
-  assert.equal(result.edges.length + result.droppedConnectors.length, input.connectors.length);
+  //    🔵 더한 시작 노드는 이 셈에 끼면 안 된다(엑셀에서 온 것이 아니다).
+  assert.equal(excelNodes(result).length + result.droppedShapes.length, input.shapes.length);
+  assert.equal(excelEdges(result).length + result.droppedConnectors.length, input.connectors.length);
 });
 
 test("🔴 분기 이름이 **제 선**에 붙는다 — 선분까지의 거리로 재고, 한 선에 하나씩만", () => {
@@ -171,6 +198,7 @@ test("🔴 오른쪽 덩어리가 **연결선을 내보내면** 주석이 아니
   const result = extractTechnicalTaskGraph({
     sheetName: "(TEST) 오른쪽에도 본문",
     nodeCodePrefix: "t2",
+    startNodeTitle: "가상 절차",
     shapes: [
       shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
       shape("2", "라마바 작업", { x: 9000000, y: 1000000, cx: 2000000, cy: 500000 }),
@@ -184,11 +212,11 @@ test("🔴 오른쪽 덩어리가 **연결선을 내보내면** 주석이 아니
 
   assert.equal(result.annotationBoundaryX, null);
   assert.ok(result.annotationBoundaryReason.includes("시트 전체가 본문"));
-  assert.equal(result.nodes.length, 3);
+  assert.equal(excelNodes(result).length, 3);
   assert.equal(result.droppedShapes.length, 0);
 });
 
-test("🔴 `(숫자)` 로 시작하는 상자는 다음 절차 참조로 읽힌다 — 나가는 선이 없을 때만", () => {
+test("🔴 `(숫자)` 로 시작하는 상자는 다음 절차 참조로 읽힌다", () => {
   const result = extractTechnicalTaskGraph(buildMainFixture());
 
   const reference = result.nodes.find((n) => n.sourceShapeId === "14");
@@ -200,6 +228,120 @@ test("🔴 `(숫자)` 로 시작하는 상자는 다음 절차 참조로 읽힌�
   assert.equal(result.nodes.find((n) => n.sourceShapeId === "11")?.nextProcedureStageNumber, null);
 });
 
+test("🔴 **대괄호로 감싼** 번호도 다음 절차 참조다 — 글자 가운데 있어도", () => {
+  // 2026-11-05 결정. 실제 워크북에 「…확인후[(7) …] 실시」 꼴이 한 건 있고,
+  // 그 노드는 다음 절차로 이어져야 한다.
+  const result = extractTechnicalTaskGraph({
+    sheetName: "(TEST) 대괄호 참조",
+    nodeCodePrefix: "b1",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 확인", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 없는지 확인후[(7) 사아자 작업 및 개선 작업] 실시", {
+        x: 400000,
+        y: 3000000,
+        cx: 2000000,
+        cy: 500000,
+      }),
+    ],
+    connectors: [connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 })],
+  });
+
+  const reference = result.nodes.find((n) => n.sourceShapeId === "2");
+  assert.equal(reference?.nextProcedureStageNumber, "7");
+  assert.equal(reference?.nodeType, "END");
+  assert.ok(result.issues.some((i) => i.sourceReference === `node:${reference!.nodeCode}`));
+});
+
+test("🔴 대괄호 **없이** 글자 가운데 있는 `(숫자)` 는 참조가 아니다 — 항목 번호다", () => {
+  // 🔴 이것이 이 규칙의 알맹이다. 「걸린다」만 재면 가짜 양성을 영영 못 잡는다.
+  //    실제 워크북에서 글자 가운데 번호가 있는 도형 셋 중 **둘이 항목 번호**였다
+  //    (한 상자 안에서 소항목을 세는 「… 확인(1)…」 꼴). 넓게 잡으면 그 둘이
+  //    참조로 둔갑해 엉뚱한 절차로 이어지고, 오류는 한 번도 안 난다.
+  const result = extractTechnicalTaskGraph({
+    sheetName: "(TEST) 항목 번호",
+    nodeCodePrefix: "b2",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "2. 가나다 확인(1)6면 확인 판금 및 나사 이상 유무", {
+        x: 400000,
+        y: 1000000,
+        cx: 2000000,
+        cy: 500000,
+      }),
+      shape("2", "2. 가나다 확인(2)냉각수 라인 및 인터페이스 라인", {
+        x: 400000,
+        y: 3000000,
+        cx: 2000000,
+        cy: 500000,
+      }),
+    ],
+    connectors: [connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 })],
+  });
+
+  assert.equal(excelNodes(result).length, 2, "본보기가 노드 둘을 안 만들었다 — 시험이 공짜로 통과한다");
+  for (const node of excelNodes(result)) {
+    assert.equal(
+      node.nextProcedureStageNumber,
+      null,
+      `항목 번호를 참조로 읽었다: "${node.title}"`
+    );
+  }
+  // 이어가기 메모도 하나도 안 남아야 한다 — 남으면 할 일이 아닌 것이 할 일로 센다.
+  assert.equal(
+    result.issues.some((i) => i.issueType === "INVALID_NEXT_PROCEDURE_LINK"),
+    false
+  );
+  // 분기도 그대로다 — 참조로 읽혔다면 1→2 분기가 버려졌을 것이다.
+  assert.equal(excelEdges(result).length, 1);
+});
+
+test("🔴 대괄호 안에 번호가 둘이면 첫 번째를 쓰되 **모호하다고 알린다**", () => {
+  const result = extractTechnicalTaskGraph({
+    sheetName: "(TEST) 번호 둘",
+    nodeCodePrefix: "b3",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 확인", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 뒤[(9) 사아자 작업, (10) 아자차 검사] 실시", {
+        x: 400000,
+        y: 3000000,
+        cx: 2000000,
+        cy: 500000,
+      }),
+    ],
+    connectors: [connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 })],
+  });
+
+  assert.equal(result.nodes.find((n) => n.sourceShapeId === "2")?.nextProcedureStageNumber, "9");
+  assert.ok(
+    result.issues.some((i) => i.message.includes("절차 번호가 2개")),
+    "어느 쪽인지 못 가린다는 사실을 안 알렸다"
+  );
+});
+
+test("🔴 이어가기를 **비워 뒀다는 사실**이 노드 코드로 되찾을 수 있게 남는다", () => {
+  // 🔴 절차끼리 가리키는 관계가 순환해서, 만들 때는 이어가기를 비워 두고 나중에
+  //    잇는다. 비웠다는 사실이 안 남으면 「원래 안 이어지는 절차」와 구별되지
+  //    않고, 그러면 아무도 안 잇는다.
+  const result = extractTechnicalTaskGraph(buildMainFixture());
+  const reference = result.nodes.find((n) => n.sourceShapeId === "14")!;
+
+  const note = result.issues.find((i) => i.sourceReference === `node:${reference.nodeCode}`);
+  assert.ok(note, `노드 코드로 되찾을 메모가 없다 (${reference.nodeCode})`);
+  assert.equal(note.issueType, "INVALID_NEXT_PROCEDURE_LINK");
+  assert.equal(note.severity, "WARNING");
+  assert.ok(note.message.includes("비워 두었습니다"));
+  assert.ok(note.message.includes("(5)"), "몇 번 절차를 이어야 하는지가 메모에 없다");
+
+  // 🔵 참조가 아닌 노드에는 이 메모가 안 붙는다 — 붙으면 할 일이 아닌 것이 할 일로 센다.
+  const plainNode = result.nodes.find((n) => n.sourceShapeId === "11")!;
+  assert.equal(
+    result.issues.some((i) => i.sourceReference === `node:${plainNode.nodeCode}`),
+    false
+  );
+});
+
 test("🔴 `(숫자)` 상자에 나가는 선이 있으면 **그 분기를 포기하고** 이어가기를 건다 (2026-11-05 결정)", () => {
   // 🔴 2026-11-04~05 에 설계가 뒤집혔다. 그전에는 「나가는 선이 있으면 이어가기를
   //    못 건다(ERROR)」였고, 지금은 「이어가기를 걸고 그 분기를 버린다」다.
@@ -209,6 +351,7 @@ test("🔴 `(숫자)` 상자에 나가는 선이 있으면 **그 분기를 포�
   const result = extractTechnicalTaskGraph({
     sheetName: "(TEST) 참조에 나가는 선",
     nodeCodePrefix: "t3",
+    startNodeTitle: "가상 절차",
     shapes: [
       shape("2", "라마바 작업", { x: 400000, y: 400000, cx: 2000000, cy: 500000 }),
       shape("1", "(7) 가나다 절차 실시", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
@@ -230,7 +373,7 @@ test("🔴 `(숫자)` 상자에 나가는 선이 있으면 **그 분기를 포�
   assert.equal(reference?.nextProcedureStageNumber, "7");
   // ③ 그 분기가 분기 목록에서 빠진다
   assert.equal(result.edges.some((e) => e.sourceConnectorId === "c1"), false);
-  assert.deepEqual(result.edges.map((e) => e.sourceConnectorId), ["c0"]);
+  assert.deepEqual(excelEdges(result).map((e) => e.sourceConnectorId), ["c0"]);
   // ④ 🔴 버린 목록에 **까닭과 함께** 들어간다 — ③만 재면 「조용히 사라지는 것」과
   //    구별이 안 된다.
   const dropped = result.droppedConnectors.find((d) => d.connectorId === "c1");
@@ -261,26 +404,53 @@ test("노드 유형 — 판단 · 검사 · 조치 · 작업 · 종료가 각각
   assert.equal(typeByShapeId.get("15"), "TASK"); // 어디에도 안 걸린다
   assert.equal(typeByShapeId.get("14"), "END");
 
-  // 🔴 맨 위 상자를 START 로 바꾸지 않는다 — START 는 실행이 시작되는 순간 자동으로
-  //    완료 처리되는 표식이라, 진짜 작업이 그리로 가면 실행 목록에서 사라진다.
-  assert.equal(result.nodes.some((n) => n.nodeType === "START"), false);
-  assert.ok(
-    result.issues.some((i) => i.issueType === "INVALID_START_STRUCTURE" && i.severity === "INFO"),
-    "시작 노드가 없다는 사실을 안 알렸다"
-  );
+  // 🔴 **엑셀에서 읽은 상자는 하나도 START 가 되지 않는다.** START 는 실행이
+  //    시작되는 순간 자동으로 완료 처리되는 표식이라, 진짜 작업이 그리로 가면
+  //    실행 목록에서 통째로 사라진다. 시작 노드는 **따로 더한다**(아래 전용 시험).
+  assert.equal(excelNodes(result).some((n) => n.nodeType === "START"), false);
 });
 
-test("노드 제목 — 이어지는 괄호 줄은 붙여 읽고, 별표 줄은 주의로 뗀다", () => {
+test("🔴 노드 제목 = **엑셀 도형 글자 그대로**, 줄바꿈까지 (2026-11-05 사용자 요구)", () => {
+  // 사용자: "원본 엑셀에서의 내용과 노드의 제목의 내용이 같도록 하는게 목표야.
+  //          원본에서 줄바꿈이 되어 있다면 노드에서도 줄바꿈이 되어 있어야 해."
+  //
+  // 🔴 **두 줄짜리 표본으로 잰다.** 한 줄짜리로만 재면 줄바꿈을 공백으로 합쳐도
+  //    통과해 버린다 — 그러면 이 시험은 아무것도 안 무는 것이다.
   const result = extractTechnicalTaskGraph(buildMainFixture());
 
-  assert.equal(result.nodes.find((n) => n.sourceShapeId === "13")?.title, "사아자 부품 교환(마바사 기준)");
+  const multiline = result.nodes.find((n) => n.sourceShapeId === "13");
+  assert.equal(multiline?.title, "사아자 부품 교환\n(마바사 기준)");
+  assert.ok(multiline!.title.includes("\n"), "줄바꿈이 사라졌다");
+  assert.equal(multiline!.title.split("\n").length, 2, "줄이 합쳐졌거나 늘었다");
 
+  // 🔴 「설명과 같다」 — 둘이 어긋나면 같은 노드가 자리마다 다르게 읽힌다.
+  assert.equal(multiline?.title, multiline?.description);
+});
+
+test("🔴 `*` 로 시작하는 줄도 **제목에 그대로 남는다** — 원본 글자의 일부다", () => {
+  const result = extractTechnicalTaskGraph(buildMainFixture());
   const task = result.nodes.find((n) => n.sourceShapeId === "15");
-  assert.equal(task?.title, "타파하 준비");
+
+  assert.equal(task?.title, "타파하 준비\n*아아 주의");
+  assert.equal(task?.title, task?.description);
+  // 🔵 `safetyCaution` 은 그 줄을 **따로 복사해** 담는다(빼는 것이 아니라 더하는
+  //    것이라 「원본과 같다」가 안 깨진다).
   assert.equal(task?.safetyCaution, "*아아 주의");
+  // 🔵 `instructions` 는 주의 줄을 뺀 본문이다 — 제목·설명과 뜻이 다른 칸이라
+  //    여기만 다듬는다(이 조각에서 바꾸지 않은 기존 동작).
   assert.equal(task?.instructions, "타파하 준비");
-  // 전문은 그대로 남는다 — 제목이 줄였다고 내용이 사라지면 안 된다.
-  assert.equal(task?.description, "타파하 준비\n*아아 주의");
+});
+
+test("🔴 모든 노드에서 제목과 설명이 글자 그대로 같다", () => {
+  // 하나만 재면 다른 갈래(빈 글자 · 한 줄 · 여러 줄)에서 어긋나도 안 잡힌다.
+  for (const input of [buildMainFixture(), buildCaptionHeavyFixture()]) {
+    const result = extractTechnicalTaskGraph(input);
+    const fromExcel = excelNodes(result);
+    assert.ok(fromExcel.length > 0, `${input.sheetName}: 표본이 비었다`);
+    for (const node of fromExcel) {
+      assert.equal(node.title, node.description, `${node.nodeCode}: 제목과 설명이 다르다`);
+    }
+  }
 });
 
 test("🔴 분기 어휘가 적혔어도 **연결선이 가리키는** 도형이면 노드다", () => {
@@ -289,6 +459,7 @@ test("🔴 분기 어휘가 적혔어도 **연결선이 가리키는** 도형이
   const result = extractTechnicalTaskGraph({
     sheetName: "(TEST) 분기 어휘를 쓴 노드",
     nodeCodePrefix: "t4",
+    startNodeTitle: "가상 절차",
     shapes: [
       shape("1", "가나다 확인", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
       shape("2", "정상", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
@@ -296,7 +467,7 @@ test("🔴 분기 어휘가 적혔어도 **연결선이 가리키는** 도형이
     connectors: [connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 })],
   });
 
-  assert.equal(result.nodes.length, 2);
+  assert.equal(excelNodes(result).length, 2);
   assert.equal(result.nodes.find((n) => n.sourceShapeId === "2")?.title, "정상");
   assert.equal(result.labelBindings.length, 0);
 });
@@ -305,6 +476,7 @@ test("🔴 똑같이 떨어진 선이 둘이면 「거의 비김」으로 올린
   const result = extractTechnicalTaskGraph({
     sheetName: "(TEST) 비긴 라벨",
     nodeCodePrefix: "t5",
+    startNodeTitle: "가상 절차",
     shapes: [
       shape("1", "가나다 판단", { x: 400000, y: 100000, cx: 1600000, cy: 300000 }),
       shape("2", "라마바 작업", { x: 200000, y: 1500000, cx: 1000000, cy: 300000 }),
@@ -329,6 +501,7 @@ test("🔴 붙일 선을 못 찾은 분기 이름은 버리되 경고로 남긴�
   const result = extractTechnicalTaskGraph({
     sheetName: "(TEST) 떠 있는 라벨",
     nodeCodePrefix: "t6",
+    startNodeTitle: "가상 절차",
     shapes: [
       shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
       shape("2", "라마바 작업", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
@@ -344,14 +517,15 @@ test("🔴 붙일 선을 못 찾은 분기 이름은 버리되 경고로 남긴�
   assert.ok(dropped?.detail.includes("못 찾았다"));
   assert.ok(result.issues.some((i) => i.issueType === "AMBIGUOUS_LABEL_EDGE_MATCH"));
   // 이름을 못 받은 분기는 기본 경로로 남는다 — 분기 자체가 사라지지는 않는다.
-  assert.equal(result.edges.length, 1);
-  assert.equal(result.edges[0].branchType, "DEFAULT");
+  assert.equal(excelEdges(result).length, 1);
+  assert.equal(excelEdges(result)[0].branchType, "DEFAULT");
 });
 
 test("🔴 같은 도형 번호가 두 번 나오면 뒤엣것을 버리고 오류로 올린다", () => {
   const result = extractTechnicalTaskGraph({
     sheetName: "(TEST) 번호 중복",
     nodeCodePrefix: "t7",
+    startNodeTitle: "가상 절차",
     shapes: [
       shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
       shape("1", "라마바 작업", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
@@ -359,10 +533,335 @@ test("🔴 같은 도형 번호가 두 번 나오면 뒤엣것을 버리고 오�
     connectors: [],
   });
 
-  assert.equal(result.nodes.length, 1);
-  assert.equal(result.nodes[0].title, "가나다 작업");
+  assert.equal(excelNodes(result).length, 1);
+  assert.equal(excelNodes(result)[0].title, "가나다 작업");
   assert.equal(result.droppedShapes[0]?.reason, "DUPLICATE_SHAPE_ID");
   assert.ok(result.issues.some((i) => i.issueType === "DUPLICATE_NODE_CODE" && i.severity === "ERROR"));
+});
+
+// ── 흐름에 닿지 않는 도형 (2026-11-05 사용자 지적) ────────────────────────
+
+/**
+ * 사용자: 「사진이 들어가 있는 박스는 첨부파일일 뿐이고 노드가 아니야.」
+ *
+ * 🔴 **구조만 베낀 본보기**다 — 실제 시트의 모양(연결선이 닿는 상자 7 + 사진 캡션
+ * 13 + 분기 이름 2 = 도형 22)을 그대로 옮기되 글자는 전부 지어냈다. 그 시트는
+ * 사람이 「노드는 일곱뿐」이라고 직접 확인해 준 자리라, 숫자를 여기 박아 둔다.
+ */
+function buildCaptionHeavyFixture(): TechnicalTaskGraphInput {
+  const shapes: TechnicalTaskShapeInput[] = [];
+  const connectors: TechnicalTaskConnectorInput[] = [];
+
+  // 흐름 — 작업 넷이 한 줄로 이어지고, 판단 하나에서 YES/NO 로 갈린다 (= 일곱).
+  const flowTitles = ["가나다 확인", "라마바 확인", "사아자 확인", "아자차 확인"];
+  flowTitles.forEach((title, i) => {
+    shapes.push(shape(`f${i}`, title, { x: 400000, y: 1000000 + i * 1000000, cx: 2000000, cy: 500000 }));
+    if (i > 0) {
+      connectors.push(
+        connector(`e${i}`, `f${i - 1}`, `f${i}`, {
+          x: 1400000,
+          y: 1500000 + (i - 1) * 1000000,
+          cx: 0,
+          cy: 500000,
+        })
+      );
+    }
+  });
+  shapes.push(shape("d", "차카타 문제 발견시 진행 여부", { x: 400000, y: 5000000, cx: 2000000, cy: 500000 }));
+  shapes.push(shape("y", "타파하 그대로 진행", { x: 100000, y: 6200000, cx: 1200000, cy: 500000 }));
+  shapes.push(shape("n", "파하가 교환 후 진행", { x: 1800000, y: 6200000, cx: 1200000, cy: 500000 }));
+  connectors.push(connector("e4", "f3", "d", { x: 1400000, y: 4500000, cx: 0, cy: 500000 }));
+  connectors.push(connector("ey", "d", "y", { x: 700000, y: 5500000, cx: 0, cy: 700000 }, { flipH: true }));
+  connectors.push(connector("en", "d", "n", { x: 1400000, y: 5500000, cx: 1000000, cy: 700000 }));
+  // 분기 이름 둘 — 각 선 옆에.
+  shapes.push(shape("lblY", "YES", { x: 500000, y: 5700000, cx: 300000, cy: 300000 }));
+  shapes.push(shape("lblN", "NO", { x: 1900000, y: 5700000, cx: 300000, cy: 300000 }));
+
+  // 사진 캡션 13개 — 어떤 연결선도 안 닿는다. 글자 길이는 한 글자부터 긴 것까지
+  // 섞여 있다(길이로는 못 가른다는 뜻이기도 하다).
+  const captions = ["가", "나", "다", "라", "마", "바", "사", "아", "자", "차카 라인", "타파 파손 유무 확인", "하거", "너더러 장착품 및 지그"];
+  captions.forEach((text, i) => {
+    shapes.push(shape(`cap${i}`, text, { x: 5000000 + (i % 3) * 900000, y: 1000000 + Math.floor(i / 3) * 700000, cx: 800000, cy: 400000 }));
+  });
+
+  return { sheetName: "(TEST) 캡션 많은 시트", nodeCodePrefix: "cap", startNodeTitle: "가상 절차", shapes, connectors };
+}
+
+test("🔴 사진 캡션 상자는 노드가 아니다 — 도형 22개에서 **엑셀 노드는 일곱**", () => {
+  const input = buildCaptionHeavyFixture();
+  assert.equal(input.shapes.length, 22, "본보기 모양이 바뀌었다 — 시험이 무엇을 재는지 다시 봐야 한다");
+
+  const result = extractTechnicalTaskGraph(input);
+  assert.equal(excelNodes(result).length, 7, "사람이 확인해 준 숫자(일곱)와 다르다");
+  assert.equal(result.droppedShapes.filter((d) => d.reason === "NOT_IN_FLOW").length, 13);
+  // 🔵 분기 이름 둘은 **그보다 먼저** 걸러져 이 갈래로 안 샌다.
+  assert.equal(result.droppedShapes.filter((d) => d.reason === "BRANCH_LABEL").length, 2);
+  // 아무것도 조용히 안 사라진다.
+  assert.equal(excelNodes(result).length + result.droppedShapes.length, input.shapes.length);
+});
+
+test("🔴 연결선이 **닿는** 도형은 이 규칙으로 안 버려진다 — 버려진 선이 닿은 것도 닿은 것이다", () => {
+  // 주석선이 가리키는 상자는 사람이 **일부러 흐름에 붙인** 것이라 캡션과 다르다.
+  // 그 상자는 제 까닭(빈 상자)으로 가려져야지, 「흐름에 안 닿음」이 되면 안 된다.
+  const result = extractTechnicalTaskGraph({
+    sheetName: "(TEST) 주석선이 닿는 빈 상자",
+    nodeCodePrefix: "n1",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 확인", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 확인", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+      shape("9", "", { x: 6000000, y: 1000000, cx: 2000000, cy: 2000000 }),
+    ],
+    connectors: [
+      connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 }),
+      connector("c2", "1", "9", { x: 2400000, y: 1200000, cx: 3600000, cy: 300000 }),
+    ],
+  });
+
+  assert.equal(result.droppedShapes.find((d) => d.shapeId === "9")?.reason, "EMPTY_BOX");
+  assert.equal(result.droppedShapes.some((d) => d.reason === "NOT_IN_FLOW"), false);
+  assert.equal(excelNodes(result).length, 2);
+});
+
+/**
+ * 고립 도형 하나가 든 똑같은 시트를, 「끝이 안 묶인 선」만 넣고 빼서 두 번 읽는다.
+ * `unbound` 가 true 면 끝이 한쪽만 묶인 선을 하나 더한다.
+ */
+function buildSheetWithIsolatedShape(unbound: boolean): TechnicalTaskGraphInput {
+  const connectors = [connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 })];
+  if (unbound) {
+    // 도형에 안 붙여 그린 선 — `stCxn` 이 비어 있다.
+    connectors.push(connector("c2", null, "2", { x: 2600000, y: 1500000, cx: 0, cy: 1500000 }));
+  }
+  return {
+    sheetName: unbound ? "(TEST) 안 묶인 선 있음" : "(TEST) 안 묶인 선 없음",
+    nodeCodePrefix: unbound ? "u1" : "u0",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 작업", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+      // 어떤 선도 안 닿는 상자 하나. 🔵 **본문과 같은 가로 자리**에 둔다 — 오른쪽
+      //    멀리 두면 「주석 영역」 규칙이 먼저 집어 가서 이 시험이 그쪽을 재게 된다.
+      shape("9", "사아자 상자", { x: 400000, y: 6000000, cx: 2000000, cy: 400000 }),
+    ],
+    connectors,
+  };
+}
+
+test("🔴 끝이 안 묶인 선이 **없으면** 고립 도형을 버린다", () => {
+  const result = extractTechnicalTaskGraph(buildSheetWithIsolatedShape(false));
+
+  assert.equal(result.isolationRuleSkippedReason, null);
+  assert.equal(result.droppedShapes.find((d) => d.shapeId === "9")?.reason, "NOT_IN_FLOW");
+  assert.equal(excelNodes(result).length, 2);
+});
+
+test("🔴 끝이 안 묶인 선이 **있으면** 고립 도형을 노드로 남긴다 (2026-11-05 결정)", () => {
+  // 안 묶인 선은 **연결 정보가 불완전하다**는 신호다 — 사람 눈에는 닿아 있는데
+  // 파일에 기록이 없을 뿐일 수 있다. 그런 시트에서 「안 닿는다」를 믿으면 진짜
+  // 작업 단계가 사라진다(실측: (MB) 통전검사에서 둘이 사라졌다).
+  const result = extractTechnicalTaskGraph(buildSheetWithIsolatedShape(true));
+
+  assert.equal(result.droppedShapes.some((d) => d.reason === "NOT_IN_FLOW"), false);
+  assert.equal(excelNodes(result).length, 3, "고립 도형이 노드로 안 남았다");
+  assert.ok(excelNodes(result).some((n) => n.sourceShapeId === "9"));
+});
+
+test("🔴 **끈 사실을 남긴다** — 조용히 끄면 진짜 캡션이 섞여도 아무도 모른다", () => {
+  const result = extractTechnicalTaskGraph(buildSheetWithIsolatedShape(true));
+
+  assert.ok(result.isolationRuleSkippedReason, "껐는데 까닭이 안 남았다");
+  assert.ok(result.isolationRuleSkippedReason.includes("끝이 안 묶인 연결선이 1개"));
+  const note = result.issues.find((i) => i.message === result.isolationRuleSkippedReason);
+  assert.ok(note, "DB 에 남을 메모가 없다");
+  // 🔵 갈래가 갈린다 — 이쪽은 「이 판정만 못 믿는다」(INFO)이고,
+  //    아래 「연결선이 하나도 없다」는 「흐름도가 맞나」(WARNING)다.
+  assert.equal(note.severity, "INFO");
+});
+
+test("🔴 고립 도형이 **없으면** 안 묶인 선이 있어도 끄지 않는다 — 끌 일이 없다", () => {
+  // (4)·(5)·(6) 이 이 경우다. 괜히 「껐다」고 찍으면 사람이 없는 문제를 찾는다.
+  const result = extractTechnicalTaskGraph({
+    sheetName: "(TEST) 고립 없음 + 안 묶인 선",
+    nodeCodePrefix: "u2",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 작업", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+    ],
+    connectors: [
+      connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 }),
+      connector("c2", null, "2", { x: 2600000, y: 1500000, cx: 0, cy: 1500000 }),
+    ],
+  });
+
+  assert.equal(result.isolationRuleSkippedReason, null);
+  assert.equal(excelNodes(result).length, 2);
+});
+
+test("🔴 확정값을 지킨다 — 캡션 많은 시트는 안 묶인 선이 0이라 **일곱 그대로**", () => {
+  // 🔴 이 규칙이 「사람이 확인해 준 일곱」을 건드리면 안 된다. 안 묶인 선이
+  //    하나라도 생기면 캡션 13개가 전부 노드로 되살아나 20이 된다.
+  const input = buildCaptionHeavyFixture();
+  assert.equal(
+    input.connectors.filter((c) => !c.fromShapeId || !c.toShapeId).length,
+    0,
+    "본보기에 안 묶인 선이 생겼다 — 아래 단언이 무엇을 재는지 달라진다"
+  );
+
+  const result = extractTechnicalTaskGraph(input);
+  assert.equal(result.isolationRuleSkippedReason, null);
+  assert.equal(excelNodes(result).length, 7);
+});
+
+test("🔴 연결선이 **하나도 없는** 시트에서는 규칙을 적용하지 않는다 — 빈 절차가 된다", () => {
+  const result = extractTechnicalTaskGraph({
+    sheetName: "(TEST) 선이 없는 시트",
+    nodeCodePrefix: "n2",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 항목", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 항목", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+    ],
+    connectors: [],
+  });
+
+  // 전부 버려졌다면 노드가 0이 되고, 그 절차는 **빈 껍데기**로 만들어진다.
+  assert.equal(excelNodes(result).length, 2, "연결선이 없다고 도형을 전부 버렸다");
+  assert.equal(result.droppedShapes.some((d) => d.reason === "NOT_IN_FLOW"), false);
+  assert.ok(
+    result.issues.some((i) => i.message.includes("빈 절차가 됩니다")),
+    "규칙을 건너뛰었다는 사실을 안 알렸다"
+  );
+});
+
+// ── 자동으로 더하는 시작 노드 (2026-11-05 사용자 결정) ────────────────────
+
+/**
+ * 🔴 엑셀에 **없는 것을 더하는** 일이다. 1단계에서는 그래서 안 만들었고, 그 탓에
+ * 편집기의 [검증]이 **모든 노드를 도달 불가**로 표시했다. 사용자가 「절차 제목을
+ * 시작노드의 내용으로 해서 자동으로 붙여」로 정했다.
+ */
+test("🔴 시작 노드를 더하고, 제목은 절차 이름이다", () => {
+  const result = extractTechnicalTaskGraph(buildMainFixture());
+
+  const start = result.nodes.find((n) => n.nodeType === "START");
+  assert.ok(start, "시작 노드를 안 만들었다");
+  assert.equal(start.title, "가상 절차");
+  assert.equal(start.nodeCode, "t1-start");
+  assert.equal(start.origin, "AUTO_START", "엑셀에서 온 것으로 섞였다");
+  assert.equal(start.sourceShapeId, null, "있지도 않은 도형 번호가 붙었다");
+  assert.equal(start.sortOrder, 0, "시작 노드가 맨 앞이 아니다");
+
+  // 🔴 「더했다」는 사실이 메모로 남아야 한다 — 엑셀에 없는 것을 넣는 일이다.
+  const note = result.issues.find((i) => i.sourceReference === "node:t1-start");
+  assert.ok(note, "엑셀에 없는 노드를 더하면서 아무 말도 안 남겼다");
+  assert.equal(note.issueType, "INVALID_START_STRUCTURE");
+  assert.ok(note.message.includes("자동으로 더했습니다"));
+});
+
+test("🔴 시작 노드에서 **뿌리 전부**로 분기가 나간다 — 이름 없는 기본 분기로", () => {
+  const result = extractTechnicalTaskGraph(buildMainFixture());
+
+  const startEdges = result.edges.filter((e) => e.fromNodeCode === "t1-start");
+  assert.equal(startEdges.length, 1, "본보기의 뿌리는 하나다");
+  assert.equal(startEdges[0].toNodeCode, "t1-10");
+  // 🔵 엑셀에 없는 분기 이름을 지어내지 않는다.
+  assert.equal(startEdges[0].branchType, "DEFAULT");
+  assert.equal(startEdges[0].branchLabel, null);
+  assert.equal(startEdges[0].sourceConnectorId, null);
+});
+
+test("🔴 뿌리가 **여럿**이면 전부 잇는다 — 하나만 이으면 나머지가 도달 불가로 남는다", () => {
+  // 서로 안 닿는 줄기 둘(1→2, 3→4). 뿌리는 1 과 3.
+  const result = extractTechnicalTaskGraph({
+    sheetName: "(TEST) 뿌리 둘",
+    nodeCodePrefix: "s2",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 작업", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+      shape("3", "사아자 작업", { x: 4000000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("4", "아자차 작업", { x: 4000000, y: 3000000, cx: 2000000, cy: 500000 }),
+    ],
+    connectors: [
+      connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 }),
+      connector("c2", "3", "4", { x: 5000000, y: 1500000, cx: 0, cy: 1500000 }),
+    ],
+  });
+
+  const startEdges = result.edges.filter((e) => e.fromNodeCode === "s2-start");
+  assert.deepEqual(
+    startEdges.map((e) => e.toNodeCode).sort(),
+    ["s2-1", "s2-3"],
+    "뿌리 둘 가운데 하나만 이었다"
+  );
+});
+
+test("🔴 그 결과 **도달 불가 경고가 사라진다** — 이것이 시작 노드를 더하는 목적이다", () => {
+  // 편집기의 [검증]·게시 관문이 쓰는 바로 그 함수로 잰다. 「START 를 만들었다」만
+  // 재면 선을 안 이어도 통과한다 — 그때 화면은 전과 똑같이 전부 도달 불가다.
+  for (const input of [
+    buildMainFixture(),
+    {
+      sheetName: "(TEST) 뿌리 둘",
+      nodeCodePrefix: "s3",
+      startNodeTitle: "가상 절차",
+      shapes: [
+        shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+        shape("2", "라마바 작업", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+        shape("3", "사아자 작업", { x: 4000000, y: 1000000, cx: 2000000, cy: 500000 }),
+        shape("4", "아자차 작업", { x: 4000000, y: 3000000, cx: 2000000, cy: 500000 }),
+      ],
+      connectors: [
+        connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 }),
+        connector("c2", "3", "4", { x: 5000000, y: 1500000, cx: 0, cy: 1500000 }),
+      ],
+    },
+  ]) {
+    const result = extractTechnicalTaskGraph(input);
+    const structural = validateProcedureGraphStructure(
+      result.nodes.map((n) => ({ id: n.nodeCode, nodeType: n.nodeType })),
+      result.edges.map((e, i) => ({
+        id: `e${i}`,
+        fromNodeId: e.fromNodeCode,
+        toNodeId: e.toNodeCode,
+        branchType: e.branchType,
+      }))
+    );
+    const unreachable = structural.filter((i) => i.issueType === "UNREACHABLE_NODE");
+    assert.deepEqual(unreachable, [], `${input.sheetName}: 도달 불가가 남았다`);
+    // 시작 노드 자체의 구조 오류도 없어야 한다(들어오는 분기 0 · 나가는 분기 ≥ 1).
+    assert.deepEqual(
+      structural.filter((i) => i.issueType === "INVALID_START_STRUCTURE"),
+      []
+    );
+  }
+});
+
+test("🔴 뿌리가 하나도 없으면(모두 순환 안) 시작 노드를 **안 만들고 알린다**", () => {
+  // 만들면 나가는 분기가 없어 구조 검증이 ERROR 를 낸다 — 반쪽을 만드느니 알린다.
+  const result = extractTechnicalTaskGraph({
+    sheetName: "(TEST) 순환뿐",
+    nodeCodePrefix: "s4",
+    startNodeTitle: "가상 절차",
+    shapes: [
+      shape("1", "가나다 작업", { x: 400000, y: 1000000, cx: 2000000, cy: 500000 }),
+      shape("2", "라마바 작업", { x: 400000, y: 3000000, cx: 2000000, cy: 500000 }),
+    ],
+    connectors: [
+      connector("c1", "1", "2", { x: 1400000, y: 1500000, cx: 0, cy: 1500000 }),
+      connector("c2", "2", "1", { x: 1600000, y: 1500000, cx: 0, cy: 1500000 }),
+    ],
+  });
+
+  assert.equal(result.nodes.some((n) => n.nodeType === "START"), false);
+  assert.ok(
+    result.issues.some(
+      (i) => i.issueType === "INVALID_START_STRUCTURE" && i.message.includes("더하지 못했습니다")
+    ),
+    "못 만들었다는 사실을 안 알렸다"
+  );
 });
 
 test("노드 코드는 앞가지로 갈린다 — 같은 시트에서 복제한 절차끼리 섞이지 않는다", () => {
@@ -372,7 +871,7 @@ test("노드 코드는 앞가지로 갈린다 — 같은 시트에서 복제한 
 
   assert.deepEqual(
     first.nodes.map((n) => n.nodeCode),
-    ["t1-10", "t1-12", "t1-11", "t1-13", "t1-15", "t1-14"]
+    ["t1-start", "t1-10", "t1-12", "t1-11", "t1-13", "t1-15", "t1-14"]
   );
   assert.equal(second.nodes.every((n) => n.nodeCode.startsWith("t9-")), true);
   // 내용은 글자 그대로 같아야 한다 — 복제본은 「같은 절차」다.
