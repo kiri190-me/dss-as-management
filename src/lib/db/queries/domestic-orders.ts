@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
@@ -479,20 +480,19 @@ export function mapDomesticOrderRow(
 }
 
 /**
- * 안 지워진 내자 정리 줄 전부.
+ * 내자 정리 한 줄을 읽는 **단 하나의 조인**. `where` 도 `orderBy` 도 붙이지
+ * 않은 채로 돌려준다 — 거르는 조건은 부르는 쪽이 정한다.
  *
- * `WHERE is_deleted = false` 를 그대로 적는다 — 이 모양이어야 부분 인덱스
- * (domestic_orders_repair_case_id_not_deleted_idx)와 같은 조건이 되고, 나중에
- * 휴지통이 생겨도 이 조회는 그대로 둘 수 있다.
+ * 🔴 **떼어 둔 까닭**(2026-11-06): 「기타건 상세」가 같은 줄 **하나**를 읽어야
+ * 하는데, 그 자리에 select 목록을 한 벌 더 적으면 칸이 하나 늘 때마다 두 곳을
+ * 고쳐야 하고 — 한쪽을 빠뜨려도 tsc 가 아니라 **화면의 빈칸**으로만 드러난다.
+ * 목록이 그리는 값과 상세가 그리는 값이 갈라지면 [형식]을 눌러 들어온 사람이
+ * 방금 본 줄과 다른 값을 보게 된다. 그래서 조인도 매퍼도 한 벌이다.
  *
- * 정렬은 순번(display_order) 오름차순, 그다음 등록순이다. 순번은 사람이 시트에
- * 적던 표시 순서라서 화면도 그 순서를 그대로 따라야 하고, 비어 있는 줄은
- * Postgres 의 ASC 기본값대로 뒤로 밀린다(NULLS LAST). 순번이 겹치거나 비어
- * 있을 때 순서가 매번 달라지지 않도록 created_at 을 두 번째 기준으로 둔다 —
- * 기준이 하나뿐이면 같은 화면을 새로 고칠 때마다 줄 순서가 바뀔 수 있다.
+ * 떼면서 select 목록은 **한 글자도 바꾸지 않았다.**
  */
-export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
-  const rows = await db
+function selectDomesticOrderJoinRows() {
+  return db
     .select({
       id: domesticOrders.id,
       // 수정 폼이 저장할 때 되돌려 보낼 값이다. 목록에 그리지는 않지만,
@@ -585,10 +585,19 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
     .leftJoin(
       linkedQuotes,
       and(eq(linkedQuotes.id, domesticOrders.quoteId), eq(linkedQuotes.isDeleted, false))
-    )
-    .where(eq(domesticOrders.isDeleted, false))
-    .orderBy(asc(domesticOrders.displayOrder), asc(domesticOrders.createdAt));
+    );
+}
 
+/**
+ * 조인이 내놓은 납작한 줄들에 **딸린 표와 견적서 금액을 붙여** 화면용 줄로 만든다.
+ *
+ * 질의 둘을 더 돌리는 자리이고, 둘 다 **줄 수와 무관하게 한 번씩**이다 — 줄마다
+ * 읽으면 N+1 이다. 목록(수백 줄)과 상세(한 줄)가 같은 길을 쓰므로, 상세에서는
+ * 결국 값 하나짜리 `IN (…)` 질의가 된다.
+ */
+async function attachDomesticOrderExtras(
+  rows: DomesticOrderJoinRow[]
+): Promise<DomesticOrderListItem[]> {
   const dueDatesByOrderId = await loadDueDatesByOrderId(rows.map((row) => row.id));
   // 연결된 견적서의 금액도 **질의 한 번으로** 걷어 온다 — 줄마다 읽으면 N+1 이다.
   const quoteAmounts = await loadQuoteAmounts(
@@ -603,6 +612,66 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
     )
   );
 }
+
+/**
+ * 안 지워진 내자 정리 줄 전부.
+ *
+ * `WHERE is_deleted = false` 를 그대로 적는다 — 이 모양이어야 부분 인덱스
+ * (domestic_orders_repair_case_id_not_deleted_idx)와 같은 조건이 되고, 나중에
+ * 휴지통이 생겨도 이 조회는 그대로 둘 수 있다.
+ *
+ * 정렬은 순번(display_order) 오름차순, 그다음 등록순이다. 순번은 사람이 시트에
+ * 적던 표시 순서라서 화면도 그 순서를 그대로 따라야 하고, 비어 있는 줄은
+ * Postgres 의 ASC 기본값대로 뒤로 밀린다(NULLS LAST). 순번이 겹치거나 비어
+ * 있을 때 순서가 매번 달라지지 않도록 created_at 을 두 번째 기준으로 둔다 —
+ * 기준이 하나뿐이면 같은 화면을 새로 고칠 때마다 줄 순서가 바뀔 수 있다.
+ */
+export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
+  const rows = await selectDomesticOrderJoinRows()
+    .where(eq(domesticOrders.isDeleted, false))
+    .orderBy(asc(domesticOrders.displayOrder), asc(domesticOrders.createdAt));
+
+  return attachDomesticOrderExtras(rows);
+}
+
+/**
+ * 잘못된 모양의 id 는 질의로 보내지 않는다 — `uuid` 칸에 아무 글자나 비교시키면
+ * Postgres 가 `invalid input syntax for type uuid` 로 **던지고**, 주소를 손으로
+ * 친 사람에게 「없는 줄」이 아니라 오류 화면이 나온다. id 를 받는 이 저장소의 다른
+ * 조회들과 같은 모양이다(queries/attachments.ts).
+ */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * 「기타건 상세」가 읽는 **한 줄**. 없거나 휴지통에 있으면 null 이고, 그때 화면은
+ * notFound() 로 간다.
+ *
+ * 🔴 **목록과 같은 조인 · 같은 매퍼**다(selectDomesticOrderJoinRows ·
+ * attachDomesticOrderExtras). 고객사·형식이 어느 쪽에서 오는지, 견적서번호 ·
+ * 견적발행일 · 금액이 연결된 견적서에 지는지 — 그 판단을 여기서 한 줄도 다시 적지
+ * 않는다. 한 벌 더 적으면 [형식]을 눌러 들어온 화면이 방금 본 줄과 다른 값을
+ * 보여 주는 날이 온다.
+ *
+ * 🔴 **휴지통에 든 줄은 읽지 않는다**(`is_deleted = false`). 목록이 쓰는 것과 같은
+ * 조건이고, 그래서 휴지통 화면에는 이 상세로 가는 링크를 세우지 않는다
+ * (domain/domestic-order-detail-link.ts 의 「휴지통은 이 함수를 부르지 않는다」).
+ *
+ * 🔵 **cache() 로 감싼다** — 한 요청 안에서 레이아웃(머리 카드)과 탭 페이지가 같은
+ * id 를 읽으므로, 감싸지 않으면 화면 한 장에 질의가 두 벌 돈다. 요청 하나에만 걸리는
+ * 메모라 요청 사이로 새지 않는다(queries/repair-case-references.ts 의 같은 장치).
+ */
+export const getDomesticOrderDetail = cache(async function getDomesticOrderDetail(
+  id: string
+): Promise<DomesticOrderListItem | null> {
+  if (!UUID_PATTERN.test(id)) return null;
+
+  const rows = await selectDomesticOrderJoinRows()
+    .where(and(eq(domesticOrders.id, id), eq(domesticOrders.isDeleted, false)))
+    .limit(1);
+
+  const [row] = await attachDomesticOrderExtras(rows);
+  return row ?? null;
+});
 
 /**
  * 연결된 견적서들의 공급가(부품 줄 합 + 작업비)를 **질의 한 번으로** 구한다.

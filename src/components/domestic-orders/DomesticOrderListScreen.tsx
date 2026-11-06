@@ -25,6 +25,22 @@ import type {
   DomesticOrderListItem,
   RepairCaseLinkOption,
 } from "@/lib/db/queries/domestic-orders";
+/**
+ * 🔴 빈 값 표시 · 금액 서식 · 입금 여부 · 안내 두 줄은 **이 파일에 있던 것**을
+ * 2026-11-06 에 중립 자리로 내린 것이다(한 글자도 안 바꿨다). 「기타건 상세」가
+ * 같은 줄을 그리는데, 이 파일은 `"use client"` 라 서버 컴포넌트가 여기서 내보낸
+ * 함수를 부를 수 없다 — 그 사정과 왜 이름을 그대로 뒀는지는 그 파일 머리말에 있다.
+ */
+import {
+  dash,
+  DELIVERED_DATE_NOTE,
+  formatAmount,
+  formatMinorUnits,
+  NO_ORDER_DATE_LABEL,
+  paymentLabel,
+  toMinorUnits,
+} from "@/lib/domain/domestic-order-display";
+import { resolveDomesticOrderModelLink } from "@/lib/domain/domestic-order-detail-link";
 import {
   collectDomesticOrderYears,
   countDomesticOrdersWithoutOrderYear,
@@ -392,12 +408,6 @@ import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
  * ============================================================================
  */
 
-/**
- * 발주일이 아직 없는 줄의 발주발행일 칸에 적는 말. "-"(그냥 빈 값)와 구분한다 —
- * 이 줄이 년도와 상관없이 늘 보이는 이유가 바로 이 칸이기 때문이다.
- */
-const NO_ORDER_DATE_LABEL = "발주일 미정";
-
 /** 표의 칼럼 수. 고객사 소제목 줄이 표 전체 폭을 덮는 데 쓴다. */
 const TABLE_COLUMN_COUNT = 22;
 
@@ -424,71 +434,6 @@ const SEARCH_PLACEHOLDER = "고객사 · 인수번호 · 발주서번호 · 견�
 const SEARCH_FIELDS_HINT =
   "고객사 · 인수번호 · 발주서번호 · 견적서번호 · PJT · 형식 · S/N · L/N 에서 찾습니다";
 
-/**
- * `납품일` 칸이 무엇이고 왜 비어 있을 수 있는지. **한 글자를 세 곳이 나눠
- * 쓴다** — 표 위의 한 줄, 표 머리말의 title, 카드 이름표의 title. 따로 적으면
- * 언젠가 한쪽만 고쳐져 같은 칸이 화면마다 다른 규칙으로 설명된다
- * (SEARCH_FIELDS_HINT 가 도메인의 검색 칸 목록과 같아야 하는 것과 같은 이유).
- *
- * 말투는 이 화면의 다른 안내(`발주일 미정 N건은 … 함께 보입니다`)와 맞춘다.
- */
-const DELIVERED_DATE_NOTE =
-  "납품일은 연결된 수리 건의 실제 출하일입니다. 연결이 없는 줄은 직접 적은 날짜이고, 아직 출하되지 않은 줄은 비어 있습니다.";
-
-/** 빈 값의 표시. 이 화면의 모든 칸이 같은 글자를 쓴다. */
-function dash(value: string | number | null | undefined): string {
-  if (value === null || value === undefined) return "-";
-  if (typeof value === "number") return String(value);
-  return value.trim() === "" ? "-" : value;
-}
-
-/**
- * "1234567.00" → 123456700(전 단위 정수). 형식이 어긋나면 null 이고, 그 행은
- * 합계에서 조용히 빠지는 대신 화면에 원문 그대로 보인다 — 잘못된 값을 0으로
- * 세면 합계가 맞는 것처럼 보이기만 한다.
- *
- * BigInt 를 쓰지 않는 이유는 tsconfig 의 target 이 ES2017 이라 BigInt 리터럴이
- * 컴파일되지 않아서다. 대신 **정수만 다룬다** — 소수점을 없애 놓고 더하므로
- * 0.1 + 0.2 류의 오차가 애초에 생기지 않는다. 자바스크립트의 number 는
- * 2^53-1(약 90조 전 = 9000억 원)까지 정수를 정확히 담으므로 이 표의 금액에는
- * 남는다. 그 위로 넘어가면 정확성을 보장할 수 없으므로 null 로 돌려보내
- * 합계에서 빼고 화면에는 원문을 보여 준다.
- */
-function toMinorUnits(value: string): number | null {
-  const matched = /^(-?)(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
-  if (!matched) return null;
-  const sign = matched[1] === "-" ? -1 : 1;
-  const whole = Number(matched[2]);
-  const fraction = Number((matched[3] ?? "0").padEnd(2, "0"));
-  const minor = sign * (whole * 100 + fraction);
-  return Number.isSafeInteger(minor) ? minor : null;
-}
-
-function groupDigits(digits: string): string {
-  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
-
-/** 전 단위 정수를 사람이 읽는 금액으로. 소수점 이하가 0이면 적지 않는다. */
-function formatMinorUnits(minor: number): string {
-  const isNegative = minor < 0;
-  const absolute = Math.abs(minor);
-  const whole = Math.floor(absolute / 100);
-  const fraction = absolute % 100;
-  const body =
-    fraction === 0
-      ? groupDigits(String(whole))
-      : `${groupDigits(String(whole))}.${String(fraction).padStart(2, "0")}`;
-  return isNegative ? `-${body}` : body;
-}
-
-function formatAmount(value: string | null): string {
-  if (value === null) return "-";
-  const minor = toMinorUnits(value);
-  // 파싱에 실패하면 원문을 그대로 보여 준다. 숨기면 이상한 값이 들어와 있다는
-  // 사실 자체가 화면에서 사라진다.
-  return minor === null ? value : formatMinorUnits(minor);
-}
-
 function sumAmounts(rows: DomesticOrderListItem[]): { total: string; skipped: number } {
   let total = 0;
   let skipped = 0;
@@ -506,11 +451,6 @@ function sumAmounts(rows: DomesticOrderListItem[]): { total: string; skipped: nu
     total += minor;
   }
   return { total: formatMinorUnits(total), skipped };
-}
-
-/** 입금완료 여부 — boolean 을 시트의 말로 되돌린다. */
-function paymentLabel(completed: boolean): string {
-  return completed ? "완료" : "미완료";
 }
 
 /**
@@ -1152,7 +1092,14 @@ const CARD_FIELD_GROUPS: {
   {
     label: "제품",
     fields: [
-      { label: "형식", of: (row) => dash(row.modelName) },
+      // 🔴 표와 **같은 조각**이다(2026-11-06) — 수리 건이 안 붙은 줄에서는 이 칸이
+      // 「기타건 상세」로 가는 링크다. 좁은 화면이라고 눌리던 칸이 글자가 되면 같은
+      // 줄이 화면 폭에 따라 다르게 굴러간다(파일 헤더의 표/카드 원칙 · 인수번호가
+      // 양쪽에서 IntakeNumberLink 를 같이 쓰는 것과 같다).
+      //
+      // ⚠️ 마디를 돌려주는 둘째 칸이다 — 그래서 **multiline 을 켜지 않는다**(위
+      // `of` 의 주석). 링크 글자 하나라 접는 방식은 `<dd>` 의 break-words 그대로다.
+      { label: "형식", of: (row) => <ModelNameLink row={row} /> },
       { label: "L/N", of: (row) => dash(row.lotNumber) },
       { label: "S/N", of: (row) => dash(row.serialNumber) },
       // ⚠️ 보여 주는 것은 **계산된 값**(reportedSymptom)이고 고쳐 보내는 것은
@@ -1409,6 +1356,43 @@ function IntakeNumberLink({ row }: { row: DomesticOrderListItem }) {
 }
 
 /**
+ * 형식 칸(2026-11-06). **수리 건이 붙지 않은 줄에서만** 「기타건 상세」로 가는
+ * 링크이고, 붙은 줄에서는 예전 그대로 글자다.
+ *
+ * 🔴 **어느 줄에 링크가 서는지 여기서 정하지 않는다** — 규칙은 전부 도메인 하나에
+ * 있다(domain/domestic-order-detail-link.ts 의 resolveDomesticOrderModelLink).
+ * 그 파일에 「왜 붙은 줄에는 안 서는가」(인수번호가 이미 수리 건으로 가는 링크라
+ * 한 줄에 서로 다른 곳으로 가는 링크가 둘이 된다)와 「형식이 비면 무엇을 누르는가」
+ * (`(형식 없음)` — 빈 칸을 못 누르면 그 줄은 상세로 갈 길이 없다)가 적혀 있다.
+ *
+ * 🔴 **표와 카드가 이 한 조각을 같이 쓴다.** 두 자리에 각각 적으면 한쪽만 고쳐져
+ * 같은 줄이 화면 폭에 따라 눌리기도 안 눌리기도 한다 — 이 화면이 IntakeNumberLink
+ * 를 양쪽에서 같이 쓰는 것과 같은 까닭이다. 휴지통은 이것을 쓰지 않는다(지운 줄은
+ * 상세 조회가 읽지 않아 전부 404 가 되고, 휴지통 행에는 `repairCaseId` 가 아예
+ * 없어 위 규칙을 판정할 재료도 없다 — 그 파일 머리말).
+ *
+ * 생김새와 ⚠️ relative 는 바로 위 IntakeNumberLink 와 **한 글자도 다르지 않다** —
+ * 같은 표의 같은 성격의 링크라 한쪽만 고쳐지지 않게 맞춰 둔다(그 주석에 실측이
+ * 있다. 떼면 sr-only 가 표 껍데기의 스크롤을 빠져나가 페이지가 아래로 굴러간다).
+ */
+function ModelNameLink({ row }: { row: DomesticOrderListItem }) {
+  const link = resolveDomesticOrderModelLink(row);
+  if (link.kind === "TEXT") return <>{link.label}</>;
+  return (
+    <Link
+      href={link.href}
+      // 줄(카드) 아무 데나 누르면 수정 폼이 열린다 — 여기서 막지 않으면 상세로
+      // 넘어가면서 폼도 함께 열린다.
+      onClick={(event) => event.stopPropagation()}
+      className="relative text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+    >
+      {link.label}
+      <span className="sr-only"> 기타건 상세로 이동</span>
+    </Link>
+  );
+}
+
+/**
  * 완료 처리 · 완료 해제 버튼. 고칠 수 있는 사람에게만 그려지지만, 그것은
  * 편의일 뿐 경계가 아니다 — 서버 액션이 매번 다시 검사한다.
  *
@@ -1612,6 +1596,16 @@ function formatDeletedAt(iso: string | null): string {
  * 배지는 지운 시각이 있을 때만 그린다 — 없는 줄은 정상 경로로는 생기지 않지만
  * (queries 의 DeletedDomesticOrderRow.deletedAt 주석), 지어낸 시각으로 배지를
  * 그리면 거짓말이 된다.
+ *
+ * ── 🔴 여기의 [형식]은 링크가 **아니다** (2026-11-06) ──────────────────────
+ * 목록의 같은 칸은 수리 건이 안 붙은 줄에서 「기타건 상세」로 가는 링크가 됐지만,
+ * 휴지통은 ModelNameLink 를 쓰지 않는다. 까닭 둘:
+ *  · 휴지통 줄은 `is_deleted = true` 이고 상세 조회는 살아 있는 줄만 읽는다
+ *    (queries 의 getDomesticOrderDetail) — 링크를 세우면 **전부 404** 다.
+ *  · 이 표가 받는 행(DeletedDomesticOrderRow)에는 `repairCaseId` 가 아예 없다.
+ *    「수리 건이 붙었는가」를 가를 재료가 없어, 억지로 세우면 붙은 줄까지 링크가
+ *    되어 그 줄에 서로 다른 곳으로 가는 링크가 둘 생긴다.
+ * [복원]을 누르면 목록에서 링크가 다시 선다.
  */
 function DomesticOrderTrashPanel({
   rows,
@@ -2566,7 +2560,16 @@ export default function DomesticOrderListScreen({
                         <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-50">
                           <IntakeNumberLink row={row} />
                         </td>
-                        <td className="px-3 py-2">{dash(row.modelName)}</td>
+                        {/* 🔴 수리 건이 **안 붙은** 줄에서는 이 칸이 「기타건 상세」로
+                            가는 링크다(2026-11-06 사용자 요구). 붙은 줄에서는 글자
+                            그대로 — 그 줄은 바로 왼쪽 인수번호가 이미 수리 건으로
+                            가는 링크라, 한 줄에 서로 다른 곳으로 가는 링크를 둘 두지
+                            않는다. 가르는 일은 ModelNameLink 가 도메인에 묻는다.
+                            🔵 **눌러 고치는 칸이 아니다** — 이 조각에서 편집을 더하지
+                            않았다(옆 고장내역에는 있다). */}
+                        <td className="px-3 py-2">
+                          <ModelNameLink row={row} />
+                        </td>
                         <td className="px-3 py-2">{dash(row.lotNumber)}</td>
                         <td className="px-3 py-2">{dash(row.serialNumber)}</td>
                         {/* ⚠️ 보여 주는 것은 **계산된 값**(reportedSymptom),
