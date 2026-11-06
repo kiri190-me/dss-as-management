@@ -23,6 +23,12 @@ import {
 } from "@/lib/domain/quote-change-detection";
 import type { QuoteSaveOutcome } from "@/lib/domain/quote-save-outcome";
 import { autoRejectQuoteApprovalAfterEdit } from "./quote-approval-auto-reject";
+/* 🔴 기타 견적서(CABLE)를 **만들 때만** 내자 정리에 줄 하나를 함께 세운다
+   (2026-11-06 — 아래 머리말의 그 항목). 고치기는 이것을 부르지 않는다. */
+import {
+  createDomesticOrderLineForQuote,
+  type QuoteDomesticOrderLineOutcome,
+} from "./quote-domestic-order-line";
 /* 🔴 공급처를 고객사 마스터에 세우는 일은 **접수 화면이 쓰는 그 함수**를 그대로 부른다
    (2026-11-06). 이름을 접는 자(normalizeEntityName)도, 같은 이름이 동시에 들어왔을 때
    23505 를 받아 다시 찾는 처리도 저쪽에 이미 있다 — 여기에 한 벌 더 적으면 두 화면이
@@ -92,6 +98,17 @@ import { resolveOrCreateCustomerByName } from "./intake-master-resolution";
  * 아무것도 만들지 않는다** — 그 판단은 화면이 이미 끝내고 오고, 그 규칙은
  * components/quotes/quote-customer-pick.ts 한 곳에 있다.
  *
+ * ── 🔴 **기타 견적서를 만들면 내자 정리에 줄이 하나 선다** (2026-11-06) ──
+ * 사용자 요구다 — 「[기타 견적서]로 견적서를 만들면 [내자정리]에 해당 내용으로 줄이
+ * 생기도록」. 🔴 **만들 때 한 번뿐이고**(그 뒤 고쳐도 줄은 안 따라간다 — 내자 정리는
+ * 사람이 손으로 고치는 표라, 따라가면 사람이 고쳐 둔 값을 저장이 말없이 덮는다)
+ * 🔴 **종류가 CABLE 일 때만**이다. 그래서 아래 createQuote 에만 한 줄이 있고
+ * updateQuote 에는 없다.
+ *
+ * 🔴 **저장과 같은 트랜잭션 안**이다 — 번호가 겹쳐 저장이 되돌아가면 그 줄도 함께
+ * 없던 일이 되어야 한다. 하는 일과 그 까닭은 mutations/quote-domestic-order-line.ts
+ * 한 곳에 있고, 규칙은 domain/quote-domestic-order-line.ts 가 가진다.
+ *
  * ── PII ─────────────────────────────────────────────────────────────────
  * subject · faultDescriptionText · validity · delivery · payment 는 사람이
  * 자유롭게 적는 값이라 고객사 사정이 섞일 수 있다(schema/quotes.ts 의 PII 항목).
@@ -115,6 +132,15 @@ export type QuoteMutationResult =
        * (domain/quote-save-outcome.ts 머리말).
        */
       outcome: QuoteSaveOutcome;
+      /**
+       * 🔴 **기타 견적서에 딸려 선 내자 줄**(2026-11-06). 없으면 그럴 일이 아니었다는
+       * 뜻이다 — 고치기(updateQuote)는 **언제나** 이 칸이 없다.
+       *
+       * 🔵 「안 만들었다」도 값으로 돌려준다(`created: false` + 까닭). 조용히 건너뛰는
+       * 것과 아무도 모르는 것은 다르다 — 까닭이 없으면 「CABLE 만」이 깨진 날에도
+       * 증상이 「줄이 안 생겼다」 하나로만 보여 시험이 가려내지 못한다.
+       */
+      domesticOrderLine?: QuoteDomesticOrderLineOutcome;
     }
   | {
       ok: false;
@@ -564,8 +590,32 @@ export async function createQuote(params: {
       await replaceRepairTasks(tx, inserted.id, fields);
       await replaceWorkScopeLines(tx, inserted.id, fields);
 
+      /**
+       * 🔴 **기타 견적서(CABLE)면 내자 정리에 줄 하나를 함께 세운다**(2026-11-06 —
+       * 파일 머리말의 그 항목). 다른 종류면 아무 일도 없다(`KIND_NOT_CABLE`).
+       *
+       * 🔴 **같은 트랜잭션 안**이다. 뒤에서 번호 중복(23505)이 올라오면 견적서와
+       * 함께 이 줄도 없던 일이 된다 — 견적서 없이 그 번호를 적은 내자 줄만 남으면,
+       * 화면은 어디에도 없는 견적서를 가리키는 줄을 그리게 된다.
+       *
+       * 🔵 **줄 넣기를 다 마친 뒤**에 부른다. 순서가 뜻을 바꾸지는 않지만(어느 쪽이
+       * 실패해도 같은 트랜잭션이 통째로 되돌아간다), 이 줄이 보는 것은 견적서 **행**
+       * 하나라 품목·작업과 섞일 일이 없다 — 읽는 사람에게 「견적서 한 장이 다 선
+       * 뒤에 딸린 일」로 보이는 자리가 여기다.
+       */
+      const domesticOrderLine = await createDomesticOrderLineForQuote(tx, {
+        quoteId: inserted.id,
+        actorUserId: params.actorUserId,
+      });
+
       // 🔴 새 장에는 견줄 어제가 없고 결재도 아직 없다 — 언제나 `SAVED` 다.
-      return { ok: true, id: inserted.id, version: inserted.version, outcome: "SAVED" };
+      return {
+        ok: true,
+        id: inserted.id,
+        version: inserted.version,
+        outcome: "SAVED",
+        domesticOrderLine,
+      };
     });
   } catch (err) {
     // 미리 본 뒤 저장 사이에 남이 같은 번호를 쓴 경우. 위 '번호 중복' 항목 참조.

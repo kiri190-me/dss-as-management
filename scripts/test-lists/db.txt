@@ -425,3 +425,18 @@ src/lib/db/mutations/shipment-waiting-auto-advance.integration.test.ts
 # 접수 건은 **하나**만 만든다(인수번호는 한 달에 99개가 한도다) — 시나리오마다 그 한 건
 # 위에 TECHNICAL_TASK 실행을 새로 세운다.
 src/lib/db/mutations/procedure-field-step-adoption.integration.test.ts
+
+# 2026-11-06 — 🔴 **기타 견적서를 만들면 내자 정리에 줄이 하나 선다**(사용자 요구).
+# 규칙은 domain/quote-domestic-order-line.test.ts 가, 끼운 자리는
+# mutations/quote-domestic-order-line-source.test.ts 가 DB 없이 본다. 여기서만 재는 것:
+# 🔴 줄이 **실제로** 서고 품명이 형식에 · 번호 · 견적발행일 · 공급처가 들어가며 **나머지
+# 칸(순번 · 수리 건 연결 · 발주발행일 …)은 비어 있는가** · 🔴 고쳐 저장하면 **줄이 안 생기고
+# 있는 줄은 한 칸도 안 바뀌는가**(내자 정리는 사람이 손으로 고치는 표다 — 따라가면 저장이
+# 사람 값을 말없이 덮는다) · 🔴 내자 · OH 에서는 안 서는가(그 둘은 수리 건에서 출발해 줄이
+# 이미 있고, 하나를 더 세우면 그 건의 발행일 저장이 통째로 막힌다) · 🔴 **두 번 불러도 하나**
+# 인가(`quote_id` 에 유일 제약이 없다 — 막는 것은 견적서 행 잠금뿐이라 실제로 두 번 부른다) ·
+# 🔵 휴지통에 든 줄은 안 세는가 · 🔴 **기존 두 길**([행 추가] · 수리 건 발행일 저장)이 그대로인가.
+# 🔴 격리 이름: 접수 월 "9105" · 고객사 "AS-TEST-QDOL-" · 제품 모델 "QDOL-TEST-" ·
+# 발행번호는 실행마다 다른 토큰. 접수 건은 **하나**만 만든다(인수번호는 한 달에 99개가 한도다).
+# 계정은 하나도 만들지 않는다 — 씨앗 계정(승인된 A/S 엔지니어)을 고른다.
+src/lib/db/mutations/quote-domestic-order-line.integration.test.ts

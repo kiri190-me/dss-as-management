@@ -8,6 +8,7 @@ import { and, asc, eq, inArray, like } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
   customers,
+  domesticOrders,
   products,
   quoteItems,
   quoteRepairTasks,
@@ -210,6 +211,13 @@ after(async () => {
   // quotes 가 먼저다 — customers 를 RESTRICT 로 가리키고 있다.
   // quote_items 는 CASCADE 라 함께 사라진다.
   if (createdQuoteIds.length > 0) {
+    /**
+     * 🔴 **기타 견적서(CABLE)를 만들면 내자 정리에 줄이 하나 선다**(2026-11-06 —
+     * mutations/quote-domestic-order-line.ts). 이 스위트에도 케이블 장이 있으므로
+     * 그 줄을 **quotes 보다 먼저** 걷는다: `domestic_orders.quote_id` 는 ON DELETE
+     * SET NULL 이라, 견적서를 먼저 지우면 연결이 끊긴 줄만 시험 DB 에 남는다.
+     */
+    await db.delete(domesticOrders).where(inArray(domesticOrders.quoteId, createdQuoteIds));
     await db.delete(quotes).where(inArray(quotes.id, createdQuoteIds));
   }
   // 이 스위트가 만든 수리 작업 카탈로그 줄. quotes 뒤다 — quote_repair_tasks 가

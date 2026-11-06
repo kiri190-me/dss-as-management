@@ -10,7 +10,7 @@ import { after, before, describe, test } from "node:test";
 import { and, eq, inArray, like } from "drizzle-orm";
 
 import { db, pgClient } from "../../db/connection";
-import { attachments, auditLogs, quotes, users } from "../../db/schema";
+import { attachments, auditLogs, domesticOrders, quotes, users } from "../../db/schema";
 import { QUOTE_ATTACHMENT_REPLACED_REASON, createAttachmentRecord } from "../../db/mutations/attachments";
 import { createQuote, updateQuote } from "../../db/mutations/quotes";
 import { softDeleteQuote } from "../../db/mutations/quote-trash";
@@ -325,6 +325,16 @@ after(async () => {
     await db
       .delete(auditLogs)
       .where(and(eq(auditLogs.targetEntity, "quotes"), inArray(auditLogs.targetRecordId, touchedQuoteIds)));
+    /**
+     * 🔴 **케이블 장을 만들면 내자 정리에 줄이 하나 선다**(2026-11-06 —
+     * db/mutations/quote-domestic-order-line.ts). 이 스위트는 기타 견적서를 두 장
+     * 만들므로 그 줄도 함께 걷는다.
+     *
+     * 🔴 **quotes 를 지우기 전이다.** `domestic_orders.quote_id` 는 ON DELETE SET
+     * NULL 이라, 견적서를 먼저 지우면 연결이 끊긴 줄만 시험 DB 에 남고 그다음부터는
+     * 이 번호로도 저 id 로도 찾을 수 없다.
+     */
+    await db.delete(domesticOrders).where(inArray(domesticOrders.quoteId, touchedQuoteIds));
   }
   await db.delete(quotes).where(like(quotes.quoteNumber, `${QUOTE_NUMBER_PREFIX}%`));
   for (const root of tempRoots) {
