@@ -116,7 +116,13 @@ describe("buildPortalNotificationFeed", () => {
     assert.deepEqual(seen, [{ userId: LOCAL_ID, role: "AS_ENGINEER" }]);
   });
 
-  test("🔴 링크가 절대 주소로 나가고, 개수는 대상 기준으로 센다", async () => {
+  // 🔴 **2026-11-06 에 개수의 뜻이 뒤집혔다 — 이 시험의 이름도 함께 뒤집었다.**
+  //    「개수는 대상 기준으로 센다」였고 단언은 `feed.count === 1` 이었다. 그 단언은
+  //    **맞아서 영영 통과했을 것**이다 — 틀린 것은 셈이 아니라 설계였다. 사용자가
+  //    「종을 눌렀을 때 나오는 알림의 수와 알림종의 숫자가 동일했으면 좋겠어」로
+  //    뒤집으면서 밖으로 내보내는 수도 줄 수가 됐다(domain/notification-links.ts 의
+  //    externalNotificationCount 머리말 — 낡은 포털에 대고도 맞게 하려는 것이다).
+  test("🔴 링크가 절대 주소로 나가고, 개수는 **줄 수**다", async () => {
     const repairCaseId = "55555555-5555-4555-8555-555555555555";
     const feed = await buildPortalNotificationFeed({
       subject: SUBJECT,
@@ -131,7 +137,10 @@ describe("buildPortalNotificationFeed", () => {
     for (const item of feed.items) {
       assert.ok(item.href.startsWith(`${BASE}/`), `상대경로가 그대로 나갔다: ${item.href}`);
     }
-    assert.equal(feed.count, 1);
+    // 🔵 「무엇을 재는지」를 먼저 세운다 — 두 줄이 **같은 접수 건**이어야 건 단위(1)와
+    //    줄 단위(2)가 갈린다. 대상이 다르면 어느 규칙이든 2 라 공짜로 통과한다.
+    assert.equal(feed.items[0].targetKey, feed.items[1].targetKey, "두 줄이 같은 대상이 아니다");
+    assert.equal(feed.count, 2, "🔴 건으로 세어 내보내고 있다 — 받는 종의 줄 수와 어긋난다");
   });
 });
 

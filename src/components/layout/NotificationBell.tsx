@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { NotificationBell as SharedNotificationBell, isSafeNotificationHref } from "@dss/ui";
 import type { NotificationBellItem } from "@dss/ui";
-import { countNotificationTargets, type NotificationItem } from "@/lib/domain/notifications";
+// 🔴 **countNotificationTargets 는 2026-11-06 에 이 파일에서 빠졌다.** 종 배지는
+//    더 이상 「같은 대상은 한 번만」으로 세지 않는다(아래 selectVisibleNotifications
+//    의 그 절). 그 함수는 **사이드바 결재 배지**가 그대로 쓴다 — 지우지도 고치지도
+//    않았다.
+import type { NotificationItem } from "@/lib/domain/notifications";
 import {
   notificationBellKey,
   toNotificationBellItems,
@@ -242,8 +246,12 @@ export function handlePortalRowPicked(
  *  - 이 줄의 주소는 **다른 시스템의 절대 주소**라 누르면 이 페이지를 통째로
  *    떠난다(포트가 다르면 브라우저가 보는 출처가 달라 새 페이지 로드다).
  *    감췄다 되살릴 틈이 없고, 「감춘 채 영영 안 돌아온다」가 될 일도 없다.
- *  - 포털이 센 개수는 줄 수와 다를 수 있어(selectVisibleNotifications 주석)
- *    감춘 줄을 그 셈에 끌어들이면 배지가 잠깐 어긋난다.
+ *  - 🔵 **둘째 까닭은 2026-11-06 에 사라졌다.** 여기에는 「포털이 센 개수는 줄
+ *    수와 다를 수 있어 감춘 줄을 그 셈에 끌어들이면 배지가 잠깐 어긋난다」고
+ *    적혀 있었다. 배지가 이제 **보이는 줄 수**라(selectVisibleNotifications
+ *    머리말) 줄을 감추면 숫자도 함께 줄어 어긋날 일이 없다. 그래도 감추지 않는
+ *    것은 위 첫째 까닭 하나로 충분하기 때문이다 — 되살릴 틈이 없는 자리에
+ *    되살리는 장치를 두면 그것이 또 하나의 틀릴 거리가 된다.
  *
  * 결과를 기다리지 않고 곧바로 돌아온다 — 이동을 붙잡지 않기 위해서다. 🔴 두
  * 갈래를 다 받아 거절을 삼킨다: 안 삼키면 「처리되지 않은 거절」이 모든 화면의
@@ -328,21 +336,43 @@ const NO_KEYS: ReadonlySet<string> = new Set();
  * 🔵 ⓒ 도 ⓑ 와 같이 **이 사이트 몫만** 온다 — 받은 줄(`inbox.items`)과는 접두사가
  * 달라 애초에 맞지 않으므로, 같은 기준으로 받은 줄까지 걸러도 두 번 빠지지 않는다.
  *
- * 🔴 **개수는 두 쪽이 다른 방식으로 센다.**
- *  - 자기 것: 「같은 대상은 한 번만」 센다(countNotificationTargets — 한 건에
- *    결재가 둘 걸려 있어도 1). 사이드바 배지와 같은 헬퍼라 둘이 갈릴 수 없다.
- *    🔴 세는 것은 **지운 줄이 빠진 뒤의 목록**이라(아래 `items`) 줄과 숫자가
- *    저절로 함께 줄어든다 — 따로 빼는 셈이 없다.
- *  - 받은 것: **포털이 센 값 그대로** 더한다. 세는 규칙이 시스템마다 달라서
- *    줄 수로 다시 세면 그 시스템의 종과 이 종이 다른 숫자를 말한다.
- *    다만 **지운 줄만큼은 뺀다** — 안 빼면 사라진 줄이 배지에 남는다. 저쪽의
- *    세는 규칙을 모르므로 「지운 줄 수」를 빼는 것이 할 수 있는 전부이고(한
- *    대상에 두 줄이 걸려 저쪽이 1로 셌다면 2가 빠질 수 있다), 0 아래로는
- *    내려가지 않게 막는다.
+ * ── 🔴 개수는 **보이는 줄 수**다. 2026-11-06 에 뜻이 뒤집혔다 ───────────────
+ * 사용자 결정: 「종을 눌렀을 때 나오는 알림의 수와 알림종의 숫자가 동일했으면
+ * 좋겠어.」 그래서 배지는 이 함수가 **고르고 남긴 줄을 그대로 센다** —
+ * `items.length + inboxItems.length`.
  *
- * 🔴 ⓒ 로 빠진 줄도 **똑같이 배지에서 줄어야 한다.** 줄만 빼고 숫자를 그대로
- *    두면 「열면 비었는데 빨간 점만 붙은 종」이 된다 — 자기 줄은 걸러진 뒤의
- *    목록을 다시 세어 저절로 줄고, 받은 줄은 지움과 같은 셈에 함께 들어간다.
+ * 🔵 **그 전에는 두 쪽이 서로 다른 방식으로 셌고, 둘 다 줄 수가 아니었다.** 자기
+ * 것은 「같은 대상은 한 번만」(countNotificationTargets — 한 건에 결재가 둘 걸려
+ * 있어도 1), 받은 것은 포털이 센 값에서 지운 줄 수만 뺀 값이었다. 그래서 같은
+ * 시각 같은 사람의 화면에서 숫자 셋이 다 달랐다 — 드롭다운 **5줄**, A/S 자기 종
+ * 배지 **4**(제 줄을 건으로 셌다), 다른 사이트의 종 배지 **3**(포털이 건 수에서
+ * 줄 수를 뺐다).
+ *
+ * 🔴 **countNotificationTargets 를 고치거나 지워서 푼 것이 아니다.** 그 함수는
+ * **사이드바의 결재 배지**가 그대로 쓴다((app)/layout.tsx 의
+ * countNotificationTargetsByKind · queries/repair-case-approvals-pending.ts 의
+ * countRepairCasesPendingMyApproval). 사이드바는 「처리할 **건**이 몇인가」를
+ * 말하는 자리라 건 단위가 맞다 — 바뀐 것은 **종 하나**다. 🔴 그래서 이제 두 배지가
+ * 서로 다른 것을 세고, 한 접수 건에 결재가 둘 걸린 사람의 화면에서 **사이드바 1 ·
+ * 종 2** 가 정상이다. 예전에는 둘이 같아야 한다고 이 자리에 적혀 있었다.
+ *
+ * 🔴 **받은 줄도 `inbox.count` 가 아니라 줄 수로 센다.** 포털도 같은 날 줄 수로
+ * 바꿨지만(dss-auth 의 parseSourceFeed — 이제 사이트가 보낸 `count` 를 아예 읽지
+ * 않는다), 여기서 `inbox.count` 를 그대로 쓰면 **포털이 먼저 올라가야만** 맞는
+ * 숫자가 된다. 줄을 세면 저쪽 판이 무엇이든 늘 맞고, 숫자가 안 실려 온 경우
+ * (`count` 가 0 으로 접히는 길이 정규화에 둘 있다)에도 **보이는 줄이 배지에서
+ * 빠지지 않는다.**
+ * 🔵 덤으로 뺄셈이 통째로 사라졌다 — 지운 줄도 확인한 줄도 이미 아래 두 목록에서
+ * 빠진 뒤라, 「지운 만큼 빼고 0 아래로 안 내려가게 막는」 셈이 필요 없다. ⓐⓑⓒ 가
+ * 무엇을 빼든 줄과 숫자가 **한 값에서** 나오므로 갈라질 수가 없다.
+ *
+ * 🔴 **어긋날 수 있는 자리가 하나 남아 있다**: 묶음은 **그릴 수 없는 주소**
+ * (`javascript:` 등)의 줄을 안 그리는데(그쪽 `drawable`) 이 셈은 그 줄도 센다.
+ * 지금은 그런 줄이 여기까지 올 길이 없다 — 받은 줄은 포털 JSON 이 화면 안으로
+ * 들어오는 유일한 문(domain/portal-notification-inbox.ts 의
+ * normalizePortalNotificationFeed)이 **같은 검사로** 미리 버리고, 자기 줄의 주소는
+ * 이 저장소의 빌더 여덟이 만드는 사이트 상대경로뿐이다. 🔴 그 전제가 깨지는
+ * 날에는(포털 줄을 안 거르는 새 길이 생기면) 여기서도 같은 기준으로 걸러야 한다.
  */
 export function selectVisibleNotifications(input: {
   items: readonly NotificationItem[];
@@ -398,12 +428,12 @@ export function selectVisibleNotifications(input: {
           (row) => !dismissedKeys.has(row.key) && !portalAcknowledgedKeys.has(row.key)
         );
 
-  // 🔴 지움으로 빠졌든 포털 확인으로 빠졌든 **같은 수만큼** 배지에서 뺀다 —
-  //    줄 수의 차이로 세므로 한 줄이 둘 다에 들어도 두 번 세지 않는다.
-  const hiddenInboxCount = input.inbox.items.length - inboxItems.length;
-  const count =
-    countNotificationTargets(items.map((item) => item.targetKey)) +
-    Math.max(0, input.inbox.count - hiddenInboxCount);
+  // 🔴 **배지 = 종을 열었을 때 보이는 줄 수**(2026-11-06 사용자 결정 — 위 머리말).
+  //    자기 줄이든 받은 줄이든 **한 줄은 1** 이고, 지움(ⓐⓑ)·확인(ⓒ·제 표)으로
+  //    빠진 줄은 위 두 목록에서 이미 사라진 뒤라 따로 빼는 셈이 없다.
+  //    🔴 여기에 `targetKey`(건 단위)나 `input.inbox.count`(저쪽이 센 값)를 다시
+  //    들이지 마라 — 그 둘이 바로 종에 보이는 줄 수와 배지를 갈라 놓았던 값이다.
+  const count = items.length + inboxItems.length;
 
   return { items, inboxItems, count };
 }
@@ -942,9 +972,14 @@ export function NotificationBellWithInbox({
       //    할 일이 먼저 보여야 하고, 받은 목록은 **다시 섞지 않는다** — 포털이
       //    정한 차례가 있다(시스템 순서 · 그 안의 차례).
       items={bellItems}
-      // 🔴 **세는 규칙은 묶음이 모른다** — 받은 숫자를 그대로 찍는다. 자기 것은
-      //    옮겨 담기 전 원본에서 「같은 대상은 한 번만」 세고, 받은 것은 포털이
-      //    센 값에서 지운 줄만큼만 뺀다(selectVisibleNotifications 주석).
+      // 🔴 **세는 규칙은 묶음이 모른다** — 받은 숫자를 그대로 찍는다. 그 숫자는
+      //    바로 위 `items` 에 실리는 **줄 수**다(2026-11-06 사용자 결정 — 「종을
+      //    눌렀을 때 나오는 알림의 수와 알림종의 숫자가 동일했으면 좋겠어」).
+      //    자기 것을 건으로 세고 받은 것은 포털이 센 값을 쓰던 자리였고, 그 경위는
+      //    selectVisibleNotifications 머리말에 있다.
+      //
+      // 🔴 **여기서 다시 세지 마라.** 거르는 일과 세는 일이 한 함수에서 나와야
+      //    「열면 비었는데 숫자만 붙은 종」이 생기지 않는다.
       count={visible.count}
       // 🔴 `ml-auto shrink-0` 은 묶음 종에 **그대로** 건넨다. TopBar 에 래퍼를
       //    하나 더 두면 펼침 패널의 기준(position: relative)이 두 겹이 된다

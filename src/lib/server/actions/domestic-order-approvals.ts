@@ -11,6 +11,11 @@ import {
   requestDomesticOrderApproval,
   type DomesticOrderApprovalFailureCode,
 } from "@/lib/db/mutations/domestic-order-approvals";
+import { resolveActingDelegateUserIds } from "@/lib/db/queries/approval-route-delegations";
+import { getDomesticOrderApprovalProgress } from "@/lib/db/queries/domestic-order-approvals";
+import { getSsoSubjectForUser } from "@/lib/db/queries/users";
+import { notifyDomesticOrderApprovalCreated } from "@/lib/server/integration/approval-created-notice";
+import { notifyPortalApprovalCreated } from "@/lib/server/integration/portal-inbox";
 import { isValidDomesticOrderId } from "@/lib/validation/domestic-order-input";
 import {
   isValidApprovalDecision,
@@ -39,14 +44,23 @@ import {
  *    요구하면 **결재선에 올릴 수 있는 사람과 결재할 수 있는 사람이 갈라져**,
  *    관리자가 아무도 처리할 수 없는 절차를 만들 수 있게 된다.
  *
- * ── 🔵 포털에 알리지 않는다 — 이번 조각이 아니다 ────────────────────────
- * 견적서·접수 건 결재는 저장 **뒤에** 포털을 한 번 쿡 찔러 「지금 차례」인 사람에게
- * 메일이 나가게 한다(notifyPortalApprovalCreated). 🔴 **기타건은 그 줄을 일부러
- * 넣지 않았다** — 2026-11-06 지시서가 알림을 다음 조각으로 떼어 놓았고, 그쪽은
- * 포털(`dss-auth`)의 `sources.ts` 에 한 줄이 없으면 부르러 오지도 않는다
- * (그 목록은 clients 등록과 별개다). 🔴 그러니 지금은 **종에도 통합 승인함에도
- * 기타건 결재가 뜨지 않는다** — 결재자는 기타건 상세의 [승인] 탭에서만 본다.
- * 빠뜨린 것이 아니라 정해진 것이고, 다음 조각에서 한 몸으로 붙인다.
+ * ── 🔴 포털을 찌르는 자리가 **둘**이다 (2026-11-06) ─────────────────────
+ * 견적서·접수 건 결재와 같은 모양으로, 저장 **뒤에** 포털을 한 번 쿡 찔러 「지금
+ * 차례」인 사람에게 결재 메일이 나가게 한다(notifyDomesticOrderApprovalCreated).
+ * 요청 자리뿐 아니라 **결정 자리에도** 단다 — 한 단계를 승인하면 저장 경로가 다음
+ * 단계 요청 행을 이어 만들어(mutations 의 「사슬을 잇는다」) 그 순간 **다른 사람에게
+ * 새 차례**가 생기기 때문이다. 사슬이 끝났거나 반려면 가장 최근 행이 REQUESTED 가
+ * 아니라서 아무것도 나가지 않는다 — 그 판단은 부르는 쪽이 아니라 그 함수 안에 있다.
+ *
+ * 🔴 **그 신호만으로는 알림이 가지 않는다.** 몸통에는 포털 번호 하나뿐이고, 포털은
+ * A/S 에 되물어(`GET /api/integration/approvals`) 내용을 가져간다 — 그 통로가 기타건을
+ * 내주는 자리는 app/api/integration/approvals/route.ts 의 세 번째 조회다. 미는 쪽만
+ * 달면 포털이 202 를 주고 로그도 깨끗한데 알림은 영영 안 간다.
+ *
+ * 🔵 종과 통합 승인함은 이 호출과 **무관하다** — 둘 다 A/S 가 그때그때 파생시키는
+ * 목록이라(queries/domestic-order-approvals-pending.ts) 포털을 찌르지 않아도 뜬다.
+ * 여기서 찌르는 것이 바꾸는 것은 **결재 메일이 언제 나가는가** 하나다(2026-10-24 의
+ * 그 조각 — 안 찌르면 밤의 주기 작업 때까지 밀린다).
  * ============================================================================
  */
 
@@ -122,6 +136,34 @@ function revalidateDomesticOrderApprovalSurfaces(domesticOrderId: string): void 
   revalidatePath(`/domestic-orders/${domesticOrderId}`, "layout");
 }
 
+/**
+ * 「이 줄의 결재가 지금 누구 차례인가」를 **다시 읽어** 포털에 한 번 알린다.
+ *
+ * 🔴 **방금 넣은 행을 넘기지 않는다.** 그래야 세 자리가 이 함수 하나로 끝난다 —
+ * 처음 요청 · 반려 뒤 재요청 · 결재선이 다음 단계로 나아간 자리. 판단(가장 최근 행이
+ * REQUESTED 인가, 누구에게 가는가)은 전부 notifyDomesticOrderApprovalCreated 안에 있고,
+ * 여기서 하는 일은 **진짜 조회를 꽂는 것**뿐이다.
+ *
+ * 🔴 **어떤 일이 있어도 던지지 않는다** — 반환형이 `Promise<void>` 이고, 그 함수 안의
+ * try 와 portal-inbox.ts 의 그물이 포털 쪽 실패까지 삼킨다. 부르는 자리는 결재가 이미
+ * 저장된 뒤라, 여기서 던지면 저장된 결재가 사람에게 **실패로 보인다.**
+ *
+ * 🔵 `getDomesticOrderApprovalProgress` 는 `cache()` 로 감싸여 있지만 괜찮다 — 서버
+ * 액션은 자기 요청에서 먼저 돌고, 이 호출은 **커밋 뒤**라 그때 담기는 값이 새 값이다.
+ *
+ * 위임 조회를 그대로 못 꽂고 감싸는 까닭은 접수 건·견적서 쪽 같은 도우미와 같다 —
+ * 그 조회가 「지금」을 인자로 받는다(트랜잭션 안에서 읽는 자리와 같은 함수라서다).
+ */
+async function notifyPortalOfDomesticOrderApprovalTurn(domesticOrderId: string): Promise<void> {
+  await notifyDomesticOrderApprovalCreated(domesticOrderId, {
+    readDomesticOrderProgress: getDomesticOrderApprovalProgress,
+    listRouteDelegatesFor: (approverUserId) =>
+      resolveActingDelegateUserIds(approverUserId, new Date()),
+    readPortalSubject: getSsoSubjectForUser,
+    notifyPortal: notifyPortalApprovalCreated,
+  });
+}
+
 export async function requestDomesticOrderApprovalAction(
   input: RequestDomesticOrderApprovalActionInput
 ): Promise<DomesticOrderApprovalActionResult> {
@@ -157,7 +199,11 @@ export async function requestDomesticOrderApprovalAction(
   }
 
   // 성사됐을 때만 — 실패한 요청은 바뀐 것이 없으므로 캐시를 버릴 이유가 없다.
-  if (result.ok) revalidateDomesticOrderApprovalSurfaces(input.domesticOrderId);
+  if (result.ok) {
+    revalidateDomesticOrderApprovalSurfaces(input.domesticOrderId);
+    // 결재가 **새로 생긴** 자리다 — 처음 요청과 반려 뒤 재요청이 둘 다 여기로 온다.
+    await notifyPortalOfDomesticOrderApprovalTurn(input.domesticOrderId);
+  }
   return result;
 }
 
@@ -196,7 +242,15 @@ export async function decideDomesticOrderApprovalAction(
 
   // 승인·반려가 성사되면 결재자 자신의 화면에서 그 건이 곧바로 빠져야 한다 —
   // 눌렀는데 그대로면 처리가 안 된 줄 알고 다시 누르게 된다.
-  if (result.ok) revalidateDomesticOrderApprovalSurfaces(input.domesticOrderId);
+  if (result.ok) {
+    revalidateDomesticOrderApprovalSurfaces(input.domesticOrderId);
+    // 🔴 **결재가 생기는 자리는 여기도다.** 한 단계가 승인되면 저장 경로가 **다음
+    // 단계 요청 행을 이어 만든다**(mutations 의 「사슬을 잇는다」). 그 순간 다음
+    // 사람에게 **새로** 차례가 오므로 그 사람도 메일을 받아야 한다. 사슬이
+    // 끝났거나(마지막 단계 승인) 반려면 가장 최근 행이 REQUESTED 가 아니라서
+    // 아무것도 나가지 않는다 — 그 판단은 notifyDomesticOrderApprovalCreated 안에 있다.
+    await notifyPortalOfDomesticOrderApprovalTurn(input.domesticOrderId);
+  }
   return result.ok ? { ok: true, id: result.id } : result;
 }
 

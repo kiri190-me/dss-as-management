@@ -105,7 +105,16 @@ describe("toExternalNotificationItems", () => {
 });
 
 describe("externalNotificationCount", () => {
-  test("같은 대상은 한 번만 센다 — A/S 의 종과 같은 규칙", () => {
+  /**
+   * 🔴 **2026-11-06 에 뜻이 뒤집혔다. 이 시험의 이름도 함께 뒤집었다.**
+   *
+   * 여기에는 「같은 대상은 한 번만 센다 — A/S 의 종과 같은 규칙」이라고 적혀 있었고
+   * 단언은 `1` 이었다. 그 단언은 **맞아서 영영 통과했을 것**이다 — 바뀐 것은 「A/S 의
+   * 종이 무엇을 세는가」이기 때문이다. 사용자 결정으로 종이 **보이는 줄**을 세게 되어
+   * (「종을 눌렀을 때 나오는 알림의 수와 알림종의 숫자가 동일했으면 좋겠어」), 「종과
+   * 같은 규칙」을 지키는 모양이 줄 수가 됐다.
+   */
+  test("🔴 내보내는 개수는 **줄 수**다 — 한 건에 결재가 둘이면 2 다", () => {
     const repairCaseId = "22222222-2222-4222-8222-222222222222";
     const items = toExternalNotificationItems(
       [
@@ -114,7 +123,34 @@ describe("externalNotificationCount", () => {
       ],
       BASE
     );
+    // 🔵 「무엇을 재는지」를 먼저 세운다 — 두 줄이 **같은 대상**이어야 이 시험이
+    //    건 단위(1)와 줄 단위(2)를 가른다. 대상이 다르면 둘 다 2 라 공짜로 통과한다.
     assert.equal(items.length, 2);
-    assert.equal(externalNotificationCount(items), 1);
+    assert.equal(items[0].targetKey, items[1].targetKey, "두 줄이 같은 대상이 아니면 아무것도 못 가른다");
+    assert.equal(
+      externalNotificationCount(items),
+      2,
+      "🔴 건으로 세고 있다 — 다른 사이트의 종이 보이는 줄보다 적은 숫자를 찍는다"
+    );
+  });
+
+  test("빈 목록은 0 · 대상이 다른 두 줄도 2 다", () => {
+    assert.equal(externalNotificationCount([]), 0);
+    const items = toExternalNotificationItems(
+      [
+        buildApprovalNotification({
+          repairCaseId: "33333333-3333-4333-8333-333333333333",
+          intakeNumber: "DSS-2",
+          approvalType: "REPAIR_INSPECTION",
+        }),
+        buildApprovalNotification({
+          repairCaseId: "44444444-4444-4444-8444-444444444444",
+          intakeNumber: "DSS-3",
+          approvalType: "REPAIR_INSPECTION",
+        }),
+      ],
+      BASE
+    );
+    assert.equal(externalNotificationCount(items), 2);
   });
 });

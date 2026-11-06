@@ -2,7 +2,16 @@ import "server-only";
 import { and, desc, eq, gt, gte, ne, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
-import { quoteApprovals, quotes, repairCaseApprovals, repairCases, users } from "../schema";
+import {
+  domesticOrders,
+  products,
+  quoteApprovals,
+  quotes,
+  repairCaseApprovals,
+  repairCases,
+  users,
+} from "../schema";
+import { resolveDomesticOrderValue } from "@/lib/domain/domestic-order-list";
 import { approvalOutcomeNotificationWindowStart, type ApprovalOutcomeTarget } from "@/lib/domain/notifications";
 import { isValidApprovalType } from "@/lib/validation/repair-case-approval-input";
 
@@ -10,13 +19,22 @@ import { isValidApprovalType } from "@/lib/validation/repair-case-approval-input
  * ============================================================================
  * 내가 요청한 결재의 결과 — 종 알림 「승인 완료」·「반려됨」의 원본
  * ============================================================================
- * 결재를 **요청한 사람**에게 그 결과를 알리는 조회 둘이다. 대상 결재는 세 가지고
+ * 결재를 **요청한 사람**에게 그 결과를 알리는 조회 둘이다. 대상 결재는 네 가지고
  * 표는 둘이다:
  *   · repair_case_approvals           — 수리 검수 승인 · 최종 출하 승인
+ *   · repair_case_approvals (기타건)  — 기타건 최종 출하 승인 (2026-11-06)
  *   · quote_approvals                 — 견적서 승인
  * 두 표 모두 「단계마다 요청 행 하나, 앞 행을 결정한 뒤 다음 행을 넣는」 사슬 모양이고
- * (mutations/repair-case-approvals.ts · mutations/quote-approvals.ts 의 사슬 잇는 자리),
- * 요청자(`requested_by_user_id`)는 사슬 내내 처음 올린 사람 그대로다.
+ * (mutations/repair-case-approvals.ts · mutations/quote-approvals.ts ·
+ * mutations/domestic-order-approvals.ts 의 사슬 잇는 자리), 요청자
+ * (`requested_by_user_id`)는 사슬 내내 처음 올린 사람 그대로다.
+ *
+ * 🔴 **접수 건과 기타건은 같은 표인데 조회가 둘이다.** 한 조회에 담지 않은 까닭은
+ * 조인이 갈리기 때문이다 — 접수 건은 `repair_cases` 에, 기타건은 `domestic_orders` 에
+ * INNER JOIN 한다. 그 조인이 곧 「어느 갈래인가」이고, 누르면 갈 화면도 거기서 갈린다
+ * (`/repair-cases/{id}/approval` ↔ `/domestic-orders/{id}/approval`). 한 조회에
+ * LEFT JOIN 둘로 담으면 갈래를 행마다 다시 가려야 하고, 그 가름이 한 번 틀리면
+ * **포털 화면에서만** 404 가 난다.
  *
  * 🔴 **셋째 표(`inventory_part_issue_approvals`, 부품 불출 승인)를 읽던 갈래는
  * 2026-10-27(조각 13-C4)에 들어냈다.** 누르면 갈 주소가 13-A 에서 404 가 됐고,
@@ -87,6 +105,7 @@ import { isValidApprovalType } from "@/lib/validation/repair-case-approval-input
 const decider = alias(users, "outcome_decider");
 const laterCaseApproval = alias(repairCaseApprovals, "later_case_approval");
 const laterQuoteApproval = alias(quoteApprovals, "later_quote_approval");
+const laterDomesticApproval = alias(repairCaseApprovals, "later_domestic_approval");
 
 /** 결재 결과 한 건 — 종 알림 한 줄의 원본. */
 export type ApprovalOutcome = ApprovalOutcomeTarget & {
@@ -173,7 +192,8 @@ async function listRepairCaseApprovalOutcomes(
     // 섞여 있다('DOMESTIC_ORDER_FINAL_SHIPMENT'). 그 행은 repair_case_id 가 언제나
     // NULL 이라 위 INNER JOIN 에서 이미 떨어지므로 여기 올 수 없지만, 조인 하나가
     // 바뀌는 날 **접수 건 알림 자리에 기타건 결재가 조용히 섞이지 않게** 타입으로도
-    // 못 박는다(기타건 알림은 별도 조각이다).
+    // 못 박는다. 🔵 기타건 결과는 이 아래 listDomesticOrderApprovalOutcomes 가 따로
+    // 내놓는다 — 누르면 갈 화면이 달라서 갈래를 나눴다(파일 머리말).
     row.decidedAt === null || !isValidApprovalType(row.approvalType)
       ? []
       : [
@@ -280,10 +300,112 @@ async function listQuoteApprovalOutcomes(
   );
 }
 
+// ─────────────────────────────────────────────────────────────────── 기타건
+
+/**
+ * 기타건 최종 출하 승인의 결과(2026-11-06). 접수 건 결재와 **같은 표의 행**이지만
+ * 조인이 다르다 — `domestic_orders` 에 INNER JOIN 하고 휴지통(`is_deleted`)을 뺀다.
+ *
+ * 🔴 **그 조인 하나가 갈래를 정한다.** `domestic_order_id` 는 접수 건 행에서 언제나
+ * NULL 이고(표의 CHECK) NULL 은 조인에 걸릴 수 없다. 그래서 승인 종류로 한 번 더
+ * 좁히지 않는다 — 조건을 둘 두면 둘 중 하나만 고쳐지는 날이 온다
+ * (queries/domestic-order-approvals.ts 가 같은 판단을 같은 말로 적어 두었다).
+ *
+ * 🔴 「최종 승인」의 묶음은 **내자 줄 하나**다. 접수 건 결재는 (건, 결재 종류)로
+ * 묶지만 기타건은 그 줄에 붙는 결재가 한 가지뿐이라 가를 것이 없다 — 견적서 쪽과
+ * 같은 모양이고, 표의 부분 유니크도 줄 단위다
+ * (repair_case_approvals_one_active_domestic_request).
+ *
+ * 🔴 **완료 처리(`completed_at`)된 줄도 빼지 않는다.** 그 칸은 접수 건의 `is_locked`
+ * 같은 잠금이 아니고(완료한 뒤에도 고칠 수 있다), 납품을 마치고 나서 승인 기록을
+ * 남기는 것이 정상 업무라 빼면 기타건 승인 완료가 거의 알려지지 않는다 — 접수 건
+ * 쪽에서 `is_locked` 를 빼지 않는 것과 같은 까닭이다(파일 머리말).
+ *
+ * 🔵 **품명은 비어 올 수 있다.** 굵게 그릴 글자를 메우는 자리는 알림 빌더 하나다
+ * (domain/notifications.ts 의 domesticOrderApprovalSubject) — 여기서 메우면 같은
+ * 규칙이 두 벌이 된다.
+ */
+async function listDomesticOrderApprovalOutcomes(
+  requesterUserId: string,
+  status: CaseOutcomeStatus,
+  since: Date
+): Promise<ApprovalOutcome[]> {
+  const rows = await db
+    .select({
+      approvalId: repairCaseApprovals.id,
+      domesticOrderId: domesticOrders.id,
+      // 「이 줄에 적힌 값이 먼저, 없으면 연결된 수리 건의 값」 — 목록·상세·대기
+      // 알림이 쓰는 그 규칙 그대로다(queries/domestic-order-approvals-pending.ts).
+      modelNameText: domesticOrders.modelNameText,
+      repairCaseModelName: products.modelName,
+      decidedByName: decider.name,
+      decidedAt: repairCaseApprovals.decidedAt,
+      decisionReason: repairCaseApprovals.decisionReason,
+    })
+    .from(repairCaseApprovals)
+    // INNER JOIN — 이 한 줄이 「기타건 행만」이다. 접수 건 행과 완전 삭제로
+    // domestic_order_id 가 NULL 이 된 행이 여기서 떨어진다.
+    .innerJoin(domesticOrders, eq(domesticOrders.id, repairCaseApprovals.domesticOrderId))
+    .leftJoin(repairCases, eq(repairCases.id, domesticOrders.repairCaseId))
+    .leftJoin(products, eq(products.id, repairCases.productId))
+    .leftJoin(decider, eq(decider.id, repairCaseApprovals.decidedByUserId))
+    .where(
+      and(
+        // 🔴 요청자 본인 — 이 조건이 빠지면 남의 결재 결과가 내 종에 뜬다. 결재 행의
+        // 요청자는 사슬 내내 처음 올린 사람 그대로다(mutations/domestic-order-
+        // approvals.ts 가 다음 단계 행에 물려준다).
+        eq(repairCaseApprovals.requestedByUserId, requesterUserId),
+        eq(repairCaseApprovals.status, status),
+        // 🔴 결정자가 요청자 본인이면 알리지 않는다. 기타건 결재에서는 요청 경로가
+        // 요청자 본인 단계를 건너뛰므로(findNextRouteStepToApprove) 정상적으로는
+        // 최고관리자가 비상구로 자기 요청을 스스로 결정한 경우뿐이다.
+        ne(repairCaseApprovals.decidedByUserId, requesterUserId),
+        gte(repairCaseApprovals.decidedAt, since),
+        eq(domesticOrders.isDeleted, false),
+        ...(status === "APPROVED"
+          ? [
+              // 🔴 최종 승인 — 같은 내자 줄에 이 행보다 늦게 요청된 행이 없다.
+              // getDomesticOrderApprovalProgress 의 「가장 최근 행」과 같은 정의다
+              // (그쪽은 한 줄을 requested_at 내림차순으로 읽어 맨 앞 행을 고른다).
+              notExists(
+                db
+                  .select({ one: sql`1` })
+                  .from(laterDomesticApproval)
+                  .where(
+                    and(
+                      eq(laterDomesticApproval.domesticOrderId, repairCaseApprovals.domesticOrderId),
+                      gt(laterDomesticApproval.requestedAt, repairCaseApprovals.requestedAt)
+                    )
+                  )
+              ),
+            ]
+          : [])
+      )
+    )
+    .orderBy(desc(repairCaseApprovals.decidedAt), desc(repairCaseApprovals.id));
+
+  return rows.flatMap((row) =>
+    // 결정된 행은 decided_at 이 언제나 있다(표 CHECK). 타입을 좁히려는 것뿐이다.
+    row.decidedAt === null
+      ? []
+      : [
+          {
+            source: "DOMESTIC_ORDER" as const,
+            approvalId: row.approvalId,
+            domesticOrderId: row.domesticOrderId,
+            modelName: resolveDomesticOrderValue(row.modelNameText, row.repairCaseModelName),
+            decidedByName: row.decidedByName ?? "",
+            decidedAt: row.decidedAt,
+            decisionReason: row.decisionReason,
+          },
+        ]
+  );
+}
+
 // ──────────────────────────────────────────────────────────────── 바깥 입구
 
 /**
- * 내가 요청한 결재 중 **최근 창 안에 최종 승인된** 것 — 세 결재 모두, 결정이 늦은
+ * 내가 요청한 결재 중 **최근 창 안에 최종 승인된** 것 — 네 결재 모두, 결정이 늦은
  * 것부터.
  */
 export async function listMyGrantedApprovalOutcomes(
@@ -291,15 +413,16 @@ export async function listMyGrantedApprovalOutcomes(
   options: OutcomeOptions = {}
 ): Promise<ApprovalOutcome[]> {
   const since = approvalOutcomeNotificationWindowStart(options.now ?? new Date());
-  const [cases, quoteOutcomes] = await Promise.all([
+  const [cases, quoteOutcomes, domesticOutcomes] = await Promise.all([
     listRepairCaseApprovalOutcomes(requesterUserId, "APPROVED", since),
     listQuoteApprovalOutcomes(requesterUserId, "APPROVED", since),
+    listDomesticOrderApprovalOutcomes(requesterUserId, "APPROVED", since),
   ]);
-  return [...cases, ...quoteOutcomes].sort(byDecisionNewestFirst);
+  return [...cases, ...quoteOutcomes, ...domesticOutcomes].sort(byDecisionNewestFirst);
 }
 
 /**
- * 내가 요청한 결재 중 **최근 창 안에 반려된** 것 — 어느 단계에서든, 세 결재 모두,
+ * 내가 요청한 결재 중 **최근 창 안에 반려된** 것 — 어느 단계에서든, 네 결재 모두,
  * 결정이 늦은 것부터. 내가 스스로 결정한 것은 빠진다.
  */
 export async function listMyRejectedApprovalOutcomes(
@@ -307,9 +430,10 @@ export async function listMyRejectedApprovalOutcomes(
   options: OutcomeOptions = {}
 ): Promise<ApprovalOutcome[]> {
   const since = approvalOutcomeNotificationWindowStart(options.now ?? new Date());
-  const [cases, quoteOutcomes] = await Promise.all([
+  const [cases, quoteOutcomes, domesticOutcomes] = await Promise.all([
     listRepairCaseApprovalOutcomes(requesterUserId, "REJECTED", since),
     listQuoteApprovalOutcomes(requesterUserId, "REJECTED", since),
+    listDomesticOrderApprovalOutcomes(requesterUserId, "REJECTED", since),
   ]);
-  return [...cases, ...quoteOutcomes].sort(byDecisionNewestFirst);
+  return [...cases, ...quoteOutcomes, ...domesticOutcomes].sort(byDecisionNewestFirst);
 }

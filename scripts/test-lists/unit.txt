@@ -245,6 +245,10 @@ src/lib/domain/notifications.test.ts
 src/lib/domain/notification-settings.test.ts
 src/lib/domain/target-shipment-notification.test.ts
 src/lib/domain/due-date-inverted-notification.test.ts
+# 🔴 기타건 결재 알림(2026-11-06) — 종 한 줄 · 결과 두 줄 · **주소가 어디로 가는가**.
+# 접수 건 결재와 같은 표의 행이라 주소 헬퍼를 베끼기 쉬운데, 베끼면 포털 화면에서만
+# 404 가 난다(A/S 안에서는 그 주소를 아무도 안 써서 화면도 시험도 조용하다).
+src/lib/domain/domestic-order-approval-notifications.test.ts
 src/lib/domain/notification-toast.test.ts
 src/lib/domain/save-popup.test.ts
 # 🔴 저장 안 된 내용을 두고 나가려 할 때 막는 **규칙**(2026-11-01). 브라우저에서 Alt+←

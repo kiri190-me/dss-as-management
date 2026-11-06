@@ -42,6 +42,9 @@
  *    함수가 한다 — 좁으면 안 된다.
  *  · 지정이 없는 견적서 결재는 **생길 수 없다**(절차가 없으면 요청 자체가
  *    ROUTE_NOT_CONFIGURED 로 거절된다). 그래도 길을 막아 두고 로그만 남긴다.
+ *  · 지정이 없는 **기타건** 결재도 같다(2026-11-06). 🔴 거기에 출하 대표·옛 위임
+ *    조회를 꽂지 않는 것이 중요하다 — 기타건에는 「출하 대표」가 없고, 꽂으면
+ *    수리 건 출하 대표에게 기타건 결재 메일이 간다.
  *
  * 🔴 **같은 판정을 베껴 적으면 안 된다.** 잘못 좁힌 쪽은 화면에 아무 표시도
  *    남기지 않는다 — 그 사람은 그냥 메일을 못 받고, 아무도 신고하지 않는다.
@@ -61,6 +64,7 @@
  */
 
 import "server-only";
+import type { DomesticOrderApprovalType } from "@/lib/domain/domestic-order-approval-rules";
 import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approval-input";
 
 /** 결재 행에서 이 파일이 보는 것은 둘뿐이다 — 살아 있는 요청인가, 누구에게인가. */
@@ -138,6 +142,20 @@ export type QuoteApprovalNoticeDeps = ApprovalNoticeSendDeps &
   };
 
 /**
+ * 기타건 결재(2026-11-06). 🔵 **모양이 견적서 쪽과 글자 그대로 같다** — 둘 다
+ * 「언제나 결재선을 타고, 그래서 지정이 언제나 있다」는 갈래라서 지정이 없는 길을
+ * 위한 조회 넷을 들고 다닐 까닭이 없다(아래 notifyDomesticOrderApprovalCreated 가
+ * 그 넷을 빈 함수로 채운다).
+ */
+export type DomesticOrderApprovalNoticeDeps = ApprovalNoticeSendDeps &
+  ApprovalRouteDelegateDeps & {
+    /** queries/domestic-order-approvals.ts 의 getDomesticOrderApprovalProgress. */
+    readDomesticOrderProgress: (
+      domesticOrderId: string
+    ) => Promise<{ latest: ApprovalRowForNotice | null } | null>;
+  };
+
+/**
  * 사람 번호 목록 → 포털 번호 목록 → 한 번의 왕복.
  *
  * 🔴 **포털 번호가 없는 사람은 부르지 않고 로그에 남긴다.** 이 집은 포털과
@@ -207,7 +225,7 @@ async function readRouteDelegates(
  * 없으면 자격 있는 사람 모두다(파일 머리말의 「판정을 새로 짓지 않는다」).
  */
 async function resolveRecipients(
-  kind: RepairCaseApprovalType | "QUOTE_APPROVAL",
+  kind: RepairCaseApprovalType | "QUOTE_APPROVAL" | DomesticOrderApprovalType,
   assignedApproverUserId: string | null,
   deps: ApprovalNoticeRecipientDeps & ApprovalRouteDelegateDeps
 ): Promise<string[]> {
@@ -258,11 +276,20 @@ async function resolveRecipients(
     return decided.filter((one) => one.allowed).map((one) => one.userId);
   }
 
-  // 🔴 지정 없는 견적서 결재는 생길 수 없다 — 절차(결재선)가 없으면 요청 자체가
-  //    거절되고, 절차가 있으면 지정이 언제나 채워진다(mutations/quote-approvals.ts).
-  //    그래도 조용히 넘기지 않고 적어 둔다: 그런 행이 실제로 생겼다면 저장 경로가
-  //    깨진 것이고, 그때 눈에 띄는 유일한 자리가 이 줄이다.
-  console.warn("[sso] 지정이 없는 견적서 결재 행이 있어 결재 메일 대상을 정할 수 없습니다.");
+  if (kind === "QUOTE_APPROVAL") {
+    // 🔴 지정 없는 견적서 결재는 생길 수 없다 — 절차(결재선)가 없으면 요청 자체가
+    //    거절되고, 절차가 있으면 지정이 언제나 채워진다(mutations/quote-approvals.ts).
+    //    그래도 조용히 넘기지 않고 적어 둔다: 그런 행이 실제로 생겼다면 저장 경로가
+    //    깨진 것이고, 그때 눈에 띄는 유일한 자리가 이 줄이다.
+    console.warn("[sso] 지정이 없는 견적서 결재 행이 있어 결재 메일 대상을 정할 수 없습니다.");
+    return [];
+  }
+
+  // 🔴 기타건 결재도 지정 없는 행이 생길 수 없다 — 판이 없거나 단계가 0개면 요청
+  //    자체가 ROUTE_NOT_CONFIGURED 로 거절된다(mutations/domestic-order-approvals.ts).
+  //    🔵 **견적서와 한 줄로 묶지 않는다**: 로그만 보고 어느 갈래가 깨졌는지 알아야
+  //    쫓아갈 수 있고, 둘이 쓰는 저장 경로도 다른 파일이다.
+  console.warn("[sso] 지정이 없는 기타건 결재 행이 있어 결재 메일 대상을 정할 수 없습니다.");
   return [];
 }
 
@@ -335,6 +362,57 @@ export async function notifyQuoteApprovalCreated(
   } catch (error) {
     console.error(
       "[sso] 견적서 결재 생성 알림을 준비하지 못했습니다:",
+      error instanceof Error ? error.name : "unknown"
+    );
+  }
+}
+
+/**
+ * 기타건 결재가 생긴 뒤 포털을 찌른다(2026-11-06). 견적서 쪽과 **같은 규칙**이다 —
+ * 지금 상태를 다시 읽고, 가장 최근 행이 REQUESTED 일 때만 알린다(그래서 처음 요청 ·
+ * 반려 뒤 재요청 · 다음 단계가 한 함수로 끝난다).
+ *
+ * 🔴 **이것만으로는 알림이 가지 않는다.** 나가는 몸통에는 포털 번호 말고 아무것도
+ * 없고, 포털은 그 신호를 받고 **A/S 에 되물어**(GET /api/integration/approvals) 내용을
+ * 가져간다. 그 통로가 기타건을 내주지 않으면 여기서 보낸 신호는 202 만 받고 끝난다 —
+ * app/api/integration/approvals/route.ts 의 세 번째 조회가 짝이다.
+ */
+export async function notifyDomesticOrderApprovalCreated(
+  domesticOrderId: string,
+  deps: DomesticOrderApprovalNoticeDeps
+): Promise<void> {
+  try {
+    const progress = await deps.readDomesticOrderProgress(domesticOrderId);
+    const latest = progress?.latest ?? null;
+    if (!latest || latest.status !== "REQUESTED") return;
+
+    // 기타건 결재는 언제나 지정이 있다. 없으면 resolveRecipients 가 빈 목록과 로그
+    // 한 줄을 돌려준다 — 그래서 여기에 가를 것이 없다.
+    const recipients = await resolveRecipients(
+      "DOMESTIC_ORDER_FINAL_SHIPMENT",
+      latest.assignedApproverUserId,
+      {
+        // 🔴 **이것만은 진짜로 불린다.** 기타건 결재는 언제나 지정이 있으므로 위임
+        //    조회가 도는 길이 확실하다 — 비워 두면 그 단계를 위임받은 대리인은 영영
+        //    메일을 못 받는다(종·승인함에는 그때도 뜬다. 모자란 것은 생길 때 나가는
+        //    알림뿐이라는 점이 2026-10-26 과 같은 사정이다).
+        listRouteDelegatesFor: deps.listRouteDelegatesFor,
+        // 🔴 기타건 결재는 지정 없는 길이 없으므로 아래 넷은 **불릴 수 없다.** 그래도
+        //    자리를 비워 두지 않고 「불리면 빈 목록」으로 채운다 — 견적서 쪽과 같은
+        //    까닭이다(그러면 위의 경고가 로그에 남는다).
+        //    🔵 특히 대표·위임 넷을 **진짜 조회로 채우면 안 된다**: 기타건에는
+        //    「출하 대표」가 없고(domain/domestic-order-approval-rules.ts 의 근거 셋),
+        //    꽂으면 수리 건 출하 대표에게 기타건 결재 메일이 간다.
+        listInspectionApprovers: async () => [],
+        listRepresentativeCandidates: async () => [],
+        listDelegations: async () => [],
+        resolveShipmentDecide: async () => ({ allowed: false }),
+      }
+    );
+    await sendToUsers(recipients, deps);
+  } catch (error) {
+    console.error(
+      "[sso] 기타건 결재 생성 알림을 준비하지 못했습니다:",
       error instanceof Error ? error.name : "unknown"
     );
   }

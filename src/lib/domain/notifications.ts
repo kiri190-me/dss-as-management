@@ -51,6 +51,9 @@ import { foldBlankToNull } from "./domestic-order-list";
  * 돌아오고, 그날부터 다시 「최상위에서 읽지 마라」라는 기억으로 버텨야 한다. 끊어져
  * 있다는 사실은 이제 domain/shipment-finished.test.ts 가 **글자로** 지킨다.
  */
+import { DOMESTIC_ORDER_APPROVAL_LABEL } from "./domestic-order-approval-rules";
+import { DOMESTIC_ORDER_NO_MODEL_LINK_LABEL } from "./domestic-order-detail-link";
+import { domesticOrderDetailHrefs } from "./domestic-order-detail-tabs";
 import { DUE_DATE_INVERSION_NOTE } from "./due-date-inversion";
 import { LABELS as APPROVAL_TYPE_LABELS, type ShipmentApprovalType } from "./local/workflow/shipment-approval-checklist";
 import { quoteEditHref } from "./quote-new-link";
@@ -98,6 +101,7 @@ import type { RepairStatus } from "./types";
 export const NOTIFICATION_KINDS = [
   "REPAIR_CASE_APPROVAL",
   "QUOTE_APPROVAL_PENDING",
+  "DOMESTIC_ORDER_APPROVAL_PENDING",
   "REPAIR_CASE_DUE_DATE_NEAR",
   "REPAIR_CASE_TARGET_SHIPMENT_MISSING",
   "REPAIR_CASE_DUE_DATE_INVERTED",
@@ -118,7 +122,18 @@ export type NotificationItem = {
   kind: NotificationKind;
   /**
    * 개수를 셀 때 묶는 단위. 결재 알림에서는 접수 건 id다 — 한 건에 두 종류의
-   * 결재가 걸려 있어도 사람에게는 "그 한 건"이므로 배지에 2로 세면 안 된다.
+   * 결재가 걸려 있어도 사람에게는 "그 한 건"이다.
+   *
+   * 🔴 **이 값을 읽는 것은 사이드바의 결재 배지다** — 아래 두 세는 함수를 거쳐
+   * (app)/layout.tsx 와 queries/repair-case-approvals-pending.ts 로 간다.
+   *
+   * 🔴 **종 배지는 2026-11-06 부터 이 값을 쓰지 않는다.** 이 자리에는 「배지에
+   * 2로 세면 안 된다」고 적혀 있었다. 사용자가 그 설계를 뒤집었다 — 「종을
+   * 눌렀을 때 나오는 알림의 수와 알림종의 숫자가 동일했으면 좋겠어」. 종은 이제
+   * **보이는 줄**을 센다(components/layout/NotificationBell.tsx 의
+   * selectVisibleNotifications 머리말에 그날 실제로 어긋난 숫자 셋이 적혀 있다).
+   * 🔵 그래서 한 건에 결재가 둘 걸린 사람의 화면에서 **사이드바 1 · 종 2** 가
+   * 정상이다. 두 숫자가 다르다는 신고를 받으면 먼저 이 갈림을 확인하라.
    */
   targetKey: string;
   /** 왼쪽에 굵게 오는 대상 식별자(인수번호 등). */
@@ -132,18 +147,34 @@ export type NotificationItem = {
 /**
  * 알림 개수 — 같은 대상은 한 번만 센다.
  *
- * 사이드바의 결재 배지(countRepairCasesPendingMyApproval)와 종 배지가 **이
- * 함수 하나**를 쓴다. 두 곳에 `new Set(...).size`를 각각 적어 두면 한쪽만
- * 고쳐졌을 때 같은 화면의 두 숫자가 서로 다른 말을 하게 된다.
+ * 🔴 **이 함수를 쓰는 것은 사이드바의 결재 배지뿐이다**(queries/
+ * repair-case-approvals-pending.ts 의 countRepairCasesPendingMyApproval 과 바로
+ * 아래 countNotificationTargetsByKind → (app)/layout.tsx). 사이드바가 말하는 것은
+ * 「처리할 **건**이 몇인가」라, 한 건에 결재가 둘 걸려 있어도 1 이 맞다.
+ *
+ * 🔴 **종 배지는 2026-11-06 부터 이 함수를 쓰지 않는다.** 여기에는 「사이드바의
+ * 결재 배지와 **종 배지**가 이 함수 하나를 쓴다」고 적혀 있었고 그것이 설계였다.
+ * 사용자가 뒤집었다 — 「종을 눌렀을 때 나오는 알림의 수와 알림종의 숫자가
+ * 동일했으면 좋겠어」. 종은 이제 **보이는 줄**을 센다(components/layout/
+ * NotificationBell.tsx 의 selectVisibleNotifications).
+ *
+ * 🔴 **그래도 이 함수를 줄 수로 고치지 마라.** 고치면 사이드바의 「결재 N건」이
+ * 한 건에 걸린 결재 둘을 2로 세기 시작하는데, 눌러서 가는 목록에는 그 건이
+ * 하나뿐이라 숫자와 화면이 어긋난다. 종만 바뀌었다.
  */
 export function countNotificationTargets(targetKeys: readonly string[]): number {
   return new Set(targetKeys).size;
 }
 
 /**
- * 종류별 개수. 종 배지는 전체를 세지만, 사이드바 결재 배지처럼 **한 종류만**
- * 가리키는 자리도 있어서 나눠서 돌려준다 — 종류가 늘었을 때 결재 배지가 조용히
- * 남의 알림까지 세게 두지 않기 위한 것이다.
+ * 종류별 개수. 🔴 **쓰는 곳은 사이드바의 결재 배지다** — (app)/layout.tsx 가
+ * `.REPAIR_CASE_APPROVAL` 하나만 뽑아 쓴다. 종류가 늘었을 때 그 배지가 조용히
+ * 남의 알림까지 세지 않게 하려고 종류별로 갈라서 돌려준다.
+ *
+ * 🔵 여기에는 「**종 배지는 전체를 세지만**, 사이드바 결재 배지처럼 한 종류만
+ * 가리키는 자리도 있어서」라고 적혀 있었다. 2026-11-06 부터 종은 이 표도 위
+ * countNotificationTargets 도 쓰지 않는다 — **보이는 줄**을 센다
+ * (components/layout/NotificationBell.tsx 의 selectVisibleNotifications).
  */
 export function countNotificationTargetsByKind(
   items: readonly NotificationItem[]
@@ -248,6 +279,105 @@ export function buildQuoteApprovalNotification(input: {
     subject: input.quoteNumber,
     detail: `${step}요청자 ${input.requestedByName}`,
     href: quoteEditHref({ quoteId: input.quoteId, repairCaseId: null, tab: "approval" }),
+  };
+}
+
+// ════════════════════════ 기타건 결재 대기 — 수리 건이 안 붙은 내자 줄의 출하 결재
+
+/**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 2026-11-06 사용자 요구: 「승인요청이 있을 때 **승인건에 있는 사람에게 알림이
+ * 가도록**」. 기타건 최종 출하 승인(domain/domestic-order-approval-rules.ts)이
+ * 2026-11-06 에 생겼는데 그때는 알림을 일부러 떼어 두었고, 이 절이 그 몫이다.
+ *
+ * ── 🔴 왜 `REPAIR_CASE_APPROVAL` 을 다시 쓰지 않았나 ────────────────────────
+ * 기타건 결재 행은 **접수 건 결재와 같은 표**에 쌓이지만(`repair_case_approvals`),
+ * 종에서는 갈래를 따로 둔다. 까닭 셋:
+ *  1. 🔴 **주소가 다른 화면으로 간다** — 접수 건은 `/repair-cases/{id}/approval`,
+ *     기타건은 `/domestic-orders/{id}/approval` 이다. 한 갈래에 두 주소를 담으면
+ *     빌더 안에 분기가 생기고, 그 분기를 한 번 잘못 타면 **포털 화면에서만** 404 가
+ *     난다(A/S 시험으로는 안 잡힌다 — server/integration/portal-approvals.ts 의
+ *     그 경고).
+ *  2. 🔴 **사이드바의 결재 배지가 조용히 늘어난다.** (app)/layout.tsx 는
+ *     `countNotificationTargetsByKind(...).REPAIR_CASE_APPROVAL` 하나로 그 숫자를
+ *     뽑는다 — 같은 갈래로 섞으면 「접수 건 결재 N건」 배지가 기타건까지 세고,
+ *     눌러서 가는 곳에는 그 건이 없다.
+ *  3. 종 패널은 갈래마다 이름표와 색을 따로 그린다. 견적서 결재가 이미 제 갈래를
+ *     가진 것과 같은 자리다 — 「무엇에 대한 결재인가」가 한 줄에서 보여야 한다.
+ * 🔵 접수 건 승인 종류 목록(`REPAIR_CASE_APPROVAL_TYPES`)은 **한 글자도 안 넓혔다.**
+ *    그 보증은 db/schema/domestic-order-approval-safety.test.ts 가 지킨다.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+
+/**
+ * 기타건 한 줄을 가리키는 **굵은 글자** — 품명이고, 비어 있으면 `(형식 없음)`.
+ *
+ * 🔴 **빈 글자를 내보내면 그 줄이 통합 승인함에서 통째로 사라진다.** 승인함은 받은
+ * 열 칸 가운데 `detail` 말고 하나라도 비면 그 줄을 빼고 「N건을 그리지 못했습니다」
+ * 라고만 적는다(포털 lib/approvals/screen-inbox.ts 머리말에 그 계약이 있다). 기타건은
+ * 품명이 실제로 비어 올 수 있는 줄이라(손으로 [행 추가] 한 줄 — 개발 DB 13건 중 품명이
+ * 적힌 줄은 2건이다) 여기서 반드시 메운다.
+ *
+ * 🔴 **메우는 글자를 새로 짓지 않는다.** 내자 정리의 [형식] 칸과 기타건 현황의 [품명]
+ * 칸이 이미 같은 자리에서 쓰는 글자를 그대로 가져온다
+ * (domain/domestic-order-detail-link.ts 의 DOMESTIC_ORDER_NO_MODEL_LINK_LABEL). 알림만
+ * 다른 말로 비어 있으면, 종을 눌러 들어간 사람이 방금 본 줄과 다른 줄이라고 읽는다.
+ *
+ * 공백만 적힌 값은 없는 것으로 접는다 — 목록·링크 판정이 쓰는 그 함수다(foldBlankToNull).
+ */
+export function domesticOrderApprovalSubject(modelName: string | null): string {
+  return foldBlankToNull(modelName) ?? DOMESTIC_ORDER_NO_MODEL_LINK_LABEL;
+}
+
+/**
+ * 「지금 내 차례인 기타건 결재」 알림 한 줄.
+ *
+ * ── subject 는 품명이다 ────────────────────────────────────────────────
+ * 기타건 상세의 머리 카드가 **품명 · 공급처 · 발행일자 · 발행번호** 넷이고(2026-11-06
+ * 사용자 지정), 기타건 현황 목록도 품명이 첫 칸이자 상세로 가는 링크다. 사람이 그 줄을
+ * 찾을 때 먼저 보는 값이 품명이라는 판단을 두 화면이 이미 한 번 했으므로, 같은 값을
+ * 쓴다. 접수 건 결재가 인수번호를, 견적서 결재가 발행번호를 굵게 두는 것과 같은 갈림이다.
+ * 🔵 공급처·발행번호를 고르지 않은 까닭: 둘 다 **품명보다 더 자주 비어 있고**(개발 DB
+ *    실측 2026-11-06 — 공급처 3/13 · 발행번호는 견적서를 안 이은 줄에서 빈다), 비면
+ *    위 함수의 메우는 글자가 「(형식 없음)」이라 뜻이 어긋난다.
+ *
+ * ── detail 은 몇 단계의 결재인가 + 요청자 ──────────────────────────────
+ * 「기타건 결재 대기」라는 종류 이름은 종 패널이 이 줄 **위에** 따로 적는다
+ * (NOTIFICATION_KIND_META). 여기 또 적으면 잘리는 자리의 폭만 먹는다 — 견적서 결재
+ * 대기와 같은 갈림이고, 말의 모양도 그쪽과 글자 그대로 맞춘다.
+ *
+ * 🔴 **기타건 결재는 언제나 결재선을 탄다** — 판이 없거나 단계가 0개면 요청 자체가
+ * 거절된다(domain/domestic-order-approval-rules.ts 의
+ * isDomesticOrderApprovalRouteInForce). 그래도 단계 번호를 `null` 로 받을 수 있게 두는
+ * 것은 견적서 쪽과 같은 이유다: 표의 CHECK 이 「판과 단계는 한 쌍」만 요구하므로 둘 다
+ * 비어 있는 행을 타입이 막지 못한다.
+ *
+ * ── 🔴 href 는 `/domestic-orders/{id}/approval` 이다 ────────────────────
+ * 접수 건 헬퍼(`repairCaseDetailHrefs`)를 그대로 베끼면 `/repair-cases/{uuid}/approval`
+ * 로 나가 **404** 다. 그 실패는 **포털 화면에서만** 보이고 A/S 안에서는 아무 표시도
+ * 남지 않는다. 그래서 주소를 손으로 적지 않고 기타건 상세의 탭 헬퍼 하나를 부른다
+ * (domain/domestic-order-detail-tabs.ts).
+ *
+ * targetKey 는 내자 줄 id 다. 한 줄에 살아 있는 요청은 언제나 하나뿐이고
+ * (repair_case_approvals_one_active_domestic_request 부분 유니크), 사람에게도 「그 한
+ * 줄」이다.
+ */
+export function buildDomesticOrderApprovalNotification(input: {
+  domesticOrderId: string;
+  /** 그 줄의 품명. 비어 있어도 된다 — 위 subject 함수가 메운다. */
+  modelName: string | null;
+  /** 몇 번째 단계인가(1부터). 결재선을 타지 않는 행이면 `null`. */
+  routeStepOrder: number | null;
+  requestedByName: string;
+}): NotificationItem {
+  const step = input.routeStepOrder !== null ? `결재선 ${input.routeStepOrder}단계 · ` : "";
+  return {
+    id: `DOMESTIC_ORDER_APPROVAL_PENDING:${input.domesticOrderId}`,
+    kind: "DOMESTIC_ORDER_APPROVAL_PENDING",
+    targetKey: input.domesticOrderId,
+    subject: domesticOrderApprovalSubject(input.modelName),
+    detail: `${step}요청자 ${input.requestedByName}`,
+    href: domesticOrderDetailHrefs(input.domesticOrderId).approval,
   };
 }
 
@@ -704,6 +834,11 @@ export function previewApprovalRejectionReason(reason: string | null): string {
  *  · QUOTE — `quote_approvals` 의 한 행(견적서 승인). 견적서가 없거나 휴지통에 간
  *    결재는 조회가 애초에 내놓지 않으므로 발행번호가 언제나 있다(접수 건 결재와
  *    같은 처리다 — 누르면 갈 화면이 없는 결재는 알리지 않는다).
+ *  · DOMESTIC_ORDER — `repair_case_approvals` 의 한 행인데 **기타건** 쪽이다
+ *    (2026-11-06, approval_type = 'DOMESTIC_ORDER_FINAL_SHIPMENT'). 🔴 REPAIR_CASE 와
+ *    **같은 표**인데 갈래를 나눈 까닭은 누르면 갈 화면이 다르기 때문이다
+ *    (`/domestic-orders/{id}/approval`). 품명은 비어 올 수 있어 조회가 들고 온 값을
+ *    그대로 받고, 굵게 그릴 글자는 domesticOrderApprovalSubject 가 메운다.
  *
  * 🔴 **셋째 갈래 PART_ISSUE(`inventory_part_issue_approvals`, 부품 불출 승인)는
  * 2026-10-27(조각 13-C4)에 들어냈다.** 누르면 갈 세 주소(`/inventory` ·
@@ -727,6 +862,13 @@ export type ApprovalOutcomeTarget =
       approvalId: string;
       quoteId: string;
       quoteNumber: string;
+    }
+  | {
+      source: "DOMESTIC_ORDER";
+      approvalId: string;
+      domesticOrderId: string;
+      /** 그 줄의 품명. 🔵 **`null` 이 정상이다** — 굵은 글자는 아래에서 메운다. */
+      modelName: string | null;
     };
 
 /**
@@ -742,6 +884,11 @@ export type ApprovalOutcomeTarget =
 const APPROVAL_OUTCOME_KEY_TABLE_TAG: Record<ApprovalOutcomeTarget["source"], string> = {
   REPAIR_CASE: "rca",
   QUOTE: "qa",
+  // 🔴 `rca` 와 **같은 표**의 행인데 딱지를 가른다(2026-11-06). 행 id 가 uuid 라
+  //    같은 딱지를 써도 열쇠가 겹치지는 않지만, 딱지가 갈려 있으면 확인 기록
+  //    (`APPROVAL_GRANTED:doa:<uuid>`)만 보고도 어느 화면으로 가는 결재인지 알 수
+  //    있다. 🔵 빠진 `pia`(불출 결재) 자리는 여전히 비워 둔다 — 위 주석 참조.
+  DOMESTIC_ORDER: "doa",
 };
 
 function approvalOutcomeKeySuffix(target: ApprovalOutcomeTarget): string {
@@ -749,11 +896,38 @@ function approvalOutcomeKeySuffix(target: ApprovalOutcomeTarget): string {
 }
 
 function approvalOutcomeSubject(target: ApprovalOutcomeTarget): string {
-  return target.source === "REPAIR_CASE" ? target.intakeNumber : target.quoteNumber;
+  if (target.source === "REPAIR_CASE") return target.intakeNumber;
+  if (target.source === "QUOTE") return target.quoteNumber;
+  // 🔴 기타건만 비어 올 수 있다 — 메우는 자리는 한 곳이다(domesticOrderApprovalSubject).
+  return domesticOrderApprovalSubject(target.modelName);
 }
 
 function approvalOutcomeName(target: ApprovalOutcomeTarget): string {
-  return target.source === "REPAIR_CASE" ? APPROVAL_TYPE_LABELS[target.approvalType] : QUOTE_APPROVAL_LABEL;
+  if (target.source === "REPAIR_CASE") return APPROVAL_TYPE_LABELS[target.approvalType];
+  if (target.source === "QUOTE") return QUOTE_APPROVAL_LABEL;
+  // 🔴 글자를 여기서 새로 적지 않는다 — 결재선 용도 이름표 한 곳에서 온다
+  //    (domain/domestic-order-approval-rules.ts 의 DOMESTIC_ORDER_APPROVAL_LABEL).
+  return DOMESTIC_ORDER_APPROVAL_LABEL;
+}
+
+/**
+ * 기타건 결재 결과를 누르면 갈 곳 — 승인이든 반려든 그 줄의 [승인] 탭 하나다.
+ *
+ * 🔴 **접수 건 헬퍼를 쓰면 `/repair-cases/{uuid}/approval` 로 나가 404 다.** 같은 표의
+ * 행이라 베끼기 쉬운 자리인데, 그 실패는 포털 화면에서만 보인다(위 대기 알림 빌더의
+ * 같은 경고).
+ */
+function approvalOutcomeDomesticOrderHref(
+  target: Extract<ApprovalOutcomeTarget, { source: "DOMESTIC_ORDER" }>
+): string {
+  return domesticOrderDetailHrefs(target.domesticOrderId).approval;
+}
+
+/** 결과 알림 한 줄이 누르면 갈 곳 — 세 갈래가 각자 제 화면으로 간다. */
+function approvalOutcomeHref(target: ApprovalOutcomeTarget): string {
+  if (target.source === "REPAIR_CASE") return repairCaseDetailHrefs(target.repairCaseId).approval;
+  if (target.source === "QUOTE") return approvalOutcomeQuoteHref(target);
+  return approvalOutcomeDomesticOrderHref(target);
 }
 
 /**
@@ -789,6 +963,8 @@ function approvalOutcomeQuoteHref(target: Extract<ApprovalOutcomeTarget, { sourc
  *  · 접수 건 결재 → 그 건의 검수/승인 화면(결재 대기 알림과 같은 헬퍼).
  *  · 견적서 → 그 견적서의 **[견적서 결재] 탭** — 결재 이력이 거기 있다
  *    (2026-10-31, approvalOutcomeQuoteHref).
+ *  · 🔴 기타건 → **그 내자 줄의 [승인] 탭**(2026-11-06). 접수 건과 같은 표의 행이라
+ *    헬퍼를 베끼기 쉬운데, 베끼면 404 다(approvalOutcomeDomesticOrderHref).
  */
 export function buildApprovalGrantedNotification(
   input: ApprovalOutcomeTarget & { decidedByName: string }
@@ -800,10 +976,7 @@ export function buildApprovalGrantedNotification(
     targetKey: id,
     subject: approvalOutcomeSubject(input),
     detail: `${approvalOutcomeName(input)} · ${input.decidedByName}`,
-    href:
-      input.source === "REPAIR_CASE"
-        ? repairCaseDetailHrefs(input.repairCaseId).approval
-        : approvalOutcomeQuoteHref(input),
+    href: approvalOutcomeHref(input),
   };
 }
 
@@ -821,6 +994,8 @@ export function buildApprovalGrantedNotification(
  *  · 접수 건 결재 → 그 건의 검수/승인 화면(재요청 단추가 거기 있다).
  *  · 견적서 → 그 견적서의 **[견적서 결재] 탭** — 다시 올리는 단추가 거기 있다
  *    (2026-10-31). 고칠 것이 있으면 그 화면에서 [견적서 수정] 탭으로 건너간다.
+ *  · 기타건 → 그 내자 줄의 **[승인] 탭** — 반려 뒤 다시 올리는 단추가 거기 있다
+ *    (2026-11-06, DOMESTIC_ORDER_APPROVAL_REQUESTABLE_STATES 에 REJECTED 가 있다).
  */
 export function buildApprovalRejectedNotification(
   input: ApprovalOutcomeTarget & { decisionReason: string | null }
@@ -834,9 +1009,6 @@ export function buildApprovalRejectedNotification(
     targetKey: id,
     subject: approvalOutcomeSubject(input),
     detail: reason.length > 0 ? `${name} · 사유: ${reason}` : name,
-    href:
-      input.source === "REPAIR_CASE"
-        ? repairCaseDetailHrefs(input.repairCaseId).approval
-        : approvalOutcomeQuoteHref(input),
+    href: approvalOutcomeHref(input),
   };
 }

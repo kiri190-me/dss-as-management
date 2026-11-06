@@ -7,14 +7,16 @@ import { readFileSync } from "node:fs";
  * 결재가 생기는 **자리 전부**에서 포털을 찌르는가 · 그것이 트랜잭션 **밖**인가
  * ============================================================================
  * 2026-10-24. 결재 알림 메일을 「생기자마자」 보내려면 결재가 새로 생기는 자리를
- * 하나도 빠뜨리면 안 된다. 이 집에서 그 자리는 **넷**이고, 그중 둘은 쉽게
- * 빠뜨린다:
+ * 하나도 빠뜨리면 안 된다. 이 집에서 그 자리는 **여섯**이고(2026-11-06 에 기타건
+ * 둘이 늘었다), 그중 셋은 쉽게 빠뜨린다:
  *
  *  ① requestRepairCaseApprovalAction  — 접수 건 결재 요청 (**재요청도 여기**다)
  *  ② decideRepairCaseApprovalAction   — 🔴 승인하면 결재선의 **다음 단계 행이
  *                                        새로 생긴다**(다음 사람의 차례다)
  *  ③ requestQuoteApprovalAction       — 견적서 결재 요청 (재요청도 여기)
  *  ④ decideQuoteApprovalAction        — 🔴 ②와 같은 까닭
+ *  ⑤ requestDomesticOrderApprovalAction — 기타건 결재 요청 (재요청도 여기)
+ *  ⑥ decideDomesticOrderApprovalAction  — 🔴 ②와 같은 까닭
  *
  * ── 🔴 왜 글자로 재나 ───────────────────────────────────────────────────
  * 이 두 파일은 `"use server"` 에 세션·DB 사슬을 물고 있어 값으로 부를 수 없다
@@ -37,8 +39,17 @@ import { readFileSync } from "node:fs";
 
 const 접수건액션 = new URL("./repair-case-approvals.ts", import.meta.url);
 const 견적서액션 = new URL("./quote-approvals.ts", import.meta.url);
+const 기타건액션 = new URL("./domestic-order-approvals.ts", import.meta.url);
 const 접수건저장 = new URL("../../db/mutations/repair-case-approvals.ts", import.meta.url);
 const 견적서저장 = new URL("../../db/mutations/quote-approvals.ts", import.meta.url);
+const 기타건저장 = new URL("../../db/mutations/domestic-order-approvals.ts", import.meta.url);
+
+/** 액션 파일 전부 — 파일 단위로 보는 시험들이 함께 훑는다. */
+const 액션파일들 = [
+  ["접수 건 액션", 접수건액션],
+  ["견적서 액션", 견적서액션],
+  ["기타건 액션", 기타건액션],
+] as const;
 
 /**
  * 주석을 걷어낸 **코드만**. 🔴 이 파일들의 주석에는 함수 이름이 설명으로 적혀
@@ -63,8 +74,8 @@ function 액션몸통(url: URL, 이름: string, 다음이름: string | null): st
   return 몸통;
 }
 
-/** 네 자리를 (이름, 몸통, 저장 함수 이름, 알림 도우미 이름)으로 돌려준다. */
-function 네자리() {
+/** 여섯 자리를 (이름, 몸통, 저장 함수 이름, 알림 도우미 이름)으로 돌려준다. */
+function 여섯자리() {
   return [
     {
       이름: "requestRepairCaseApprovalAction",
@@ -90,13 +101,32 @@ function 네자리() {
       저장: "decideQuoteApproval(",
       알림: "notifyPortalOfQuoteApprovalTurn(",
     },
+    // 🔴 2026-11-06 — 기타건 둘. 요청 자리뿐 아니라 **결정 자리에도** 달아야 한다:
+    //    한 단계를 승인하면 저장 경로가 다음 단계 요청 행을 이어 만든다
+    //    (mutations/domestic-order-approvals.ts 의 「사슬을 잇는다」).
+    {
+      이름: "requestDomesticOrderApprovalAction",
+      몸통: 액션몸통(
+        기타건액션,
+        "requestDomesticOrderApprovalAction",
+        "decideDomesticOrderApprovalAction"
+      ),
+      저장: "requestDomesticOrderApproval(",
+      알림: "notifyPortalOfDomesticOrderApprovalTurn(",
+    },
+    {
+      이름: "decideDomesticOrderApprovalAction",
+      몸통: 액션몸통(기타건액션, "decideDomesticOrderApprovalAction", null),
+      저장: "decideDomesticOrderApproval(",
+      알림: "notifyPortalOfDomesticOrderApprovalTurn(",
+    },
   ];
 }
 
-test("🔴 결재가 생기는 **네 자리 전부**에서 포털을 찌른다", () => {
-  const 자리들 = 네자리();
-  // 🔴 표본이 비어서 공짜로 통과하지 않게 — 네 자리를 다 잘라 냈는지 먼저 센다.
-  assert.equal(자리들.length, 4, "자리 목록이 줄었다");
+test("🔴 결재가 생기는 **여섯 자리 전부**에서 포털을 찌른다", () => {
+  const 자리들 = 여섯자리();
+  // 🔴 표본이 비어서 공짜로 통과하지 않게 — 여섯 자리를 다 잘라 냈는지 먼저 센다.
+  assert.equal(자리들.length, 6, "자리 목록이 줄었다");
 
   for (const { 이름, 몸통, 알림 } of 자리들) {
     assert.ok(몸통.includes(알림), `🔴 ${이름} 에서 포털을 안 찌른다 — 그 사람은 밤까지 메일을 못 받는다`);
@@ -104,7 +134,7 @@ test("🔴 결재가 생기는 **네 자리 전부**에서 포털을 찌른다",
 });
 
 test("🔴 찌르는 자리가 저장이 **끝난 뒤**다 — 트랜잭션 안이 아니다", () => {
-  for (const { 이름, 몸통, 저장, 알림 } of 네자리()) {
+  for (const { 이름, 몸통, 저장, 알림 } of 여섯자리()) {
     const 저장자리 = 몸통.indexOf(`await ${저장}`);
     const 알림자리 = 몸통.indexOf(알림);
     assert.ok(저장자리 > 0, `${이름}: 저장 호출을 못 찾았다 — 이 시험이 아무것도 안 본다`);
@@ -118,11 +148,8 @@ test("🔴 찌르는 자리가 저장이 **끝난 뒤**다 — 트랜잭션 안�
   }
 });
 
-test("🔴 액션 두 파일에 **트랜잭션이 없다** — 포털 왕복이 트랜잭션에 갇힐 자리가 없다", () => {
-  for (const [이름, url] of [
-    ["접수 건 액션", 접수건액션],
-    ["견적서 액션", 견적서액션],
-  ] as const) {
+test("🔴 액션 세 파일에 **트랜잭션이 없다** — 포털 왕복이 트랜잭션에 갇힐 자리가 없다", () => {
+  for (const [이름, url] of 액션파일들) {
     const 코드 = 코드만(url);
     assert.ok(코드.trim().length > 0, `${이름}: 파일이 비었다 — 이 시험이 아무것도 안 본다`);
     assert.ok(!코드.includes("db.transaction"), `🔴 ${이름}: 액션이 트랜잭션을 열었다`);
@@ -134,6 +161,7 @@ test("🔴 **저장 계층은 알림 모듈을 모른다** — 그래야 트랜�
   for (const [이름, url] of [
     ["접수 건 저장", 접수건저장],
     ["견적서 저장", 견적서저장],
+    ["기타건 저장", 기타건저장],
   ] as const) {
     const 코드 = 코드만(url);
     // 🔴 자른 자리가 진짜 저장 계층인지 먼저 — 트랜잭션을 여는 파일이어야 한다.
@@ -170,9 +198,31 @@ test("🔴 알림에 꽂는 조회가 **이미 있는 판정 그대로**다 — 
   ]) {
     assert.ok(견적서.includes(꽂은것), `🔴 견적서 액션이 ${꽂은것} 을 안 꽂는다`);
   }
+
+  // 🔴 기타건(2026-11-06). 견적서와 같은 셋만 꽂는다 — 대표·옛 위임 조회를 꽂으면
+  //    **수리 건 출하 대표에게 기타건 결재 메일이 간다**(기타건에는 출하 대표가 없다 —
+  //    domain/domestic-order-approval-rules.ts 의 근거 셋).
+  const 기타건 = 코드만(기타건액션);
+  for (const 꽂은것 of [
+    "readDomesticOrderProgress: getDomesticOrderApprovalProgress,",
+    "readPortalSubject: getSsoSubjectForUser,",
+    "notifyPortal: notifyPortalApprovalCreated,",
+  ]) {
+    assert.ok(기타건.includes(꽂은것), `🔴 기타건 액션이 ${꽂은것} 을 안 꽂는다`);
+  }
+  for (const 안꽂는것 of [
+    "listRepresentativeCandidates:",
+    "listShipmentDelegations",
+    "resolveShipmentDecideAuthorization",
+  ]) {
+    assert.ok(
+      !기타건.includes(안꽂는것),
+      `🔴 기타건 액션이 ${안꽂는것} 을 꽂았다 — 수리 건 출하 대표에게 기타건 결재 메일이 간다`
+    );
+  }
 });
 
-test("🔴 **두 갈래 다** 결재선 단계 위임 조회를 꽂는다 — 안 꽂으면 대리인이 메일을 못 받는다", () => {
+test("🔴 **세 갈래 다** 결재선 단계 위임 조회를 꽂는다 — 안 꽂으면 대리인이 메일을 못 받는다", () => {
   // 2026-10-26. 결재선 단계를 위임받은 사람도 그 단계를 누를 수 있게 됐는데, 즉시
   // 알림은 지정된 한 사람에게만 가고 있었다 — **자리를 비운 사람이 메일을 받고 대신
   // 눌러야 할 사람은 못 받는** 꼴이다. 넓힌 뒤 가장 쉽게 되돌아가는 자리가 여기라
@@ -181,10 +231,7 @@ test("🔴 **두 갈래 다** 결재선 단계 위임 조회를 꽂는다 — �
   //
   // 🔴 다른 dep 들과 달리 함수를 **그대로** 꽂지 않는다. 그 조회가 「지금」을 인자로
   //    받기 때문이고(트랜잭션 안에서 읽는 자리와 같은 함수다), 그래서 이름만 센다.
-  for (const [이름, url] of [
-    ["접수 건 액션", 접수건액션],
-    ["견적서 액션", 견적서액션],
-  ] as const) {
+  for (const [이름, url] of 액션파일들) {
     const 코드 = 코드만(url);
     assert.ok(코드.trim().length > 0, `${이름}: 파일이 비었다 — 이 시험이 아무것도 안 본다`);
     assert.ok(
@@ -217,7 +264,22 @@ test("🔴 포털로 넘기는 값에 **결재의 내용이 없다** — 건 번
   assert.ok(!/reason/i.test(도우미), "🔴 사유가 알림 쪽으로 넘어간다");
   assert.ok(!/decision/i.test(도우미), "🔴 결정 종류가 알림 쪽으로 넘어간다");
 
-  for (const { 이름, 몸통, 알림 } of 네자리()) {
+  // 기타건도 같은 자리를 잰다(2026-11-06) — 도우미가 받는 것이 줄 번호 하나뿐이다.
+  const 기타건알림 = 코드만(기타건액션);
+  const 기타건시작 = 기타건알림.indexOf("async function notifyPortalOfDomesticOrderApprovalTurn");
+  assert.ok(기타건시작 > 0, "기타건 도우미를 못 찾았다 — 이 시험이 아무것도 안 본다");
+  const 기타건도우미 = 기타건알림.slice(
+    기타건시작,
+    기타건알림.indexOf("export async function", 기타건시작)
+  );
+  assert.ok(
+    기타건도우미.includes("notifyDomesticOrderApprovalCreated("),
+    "자른 토막이 엉뚱한 자리다"
+  );
+  assert.ok(!/reason/i.test(기타건도우미), "🔴 사유가 알림 쪽으로 넘어간다");
+  assert.ok(!/decision/i.test(기타건도우미), "🔴 결정 종류가 알림 쪽으로 넘어간다");
+
+  for (const { 이름, 몸통, 알림 } of 여섯자리()) {
     const 호출 = 몸통.slice(몸통.indexOf(알림));
     const 끝 = 호출.indexOf(";");
     assert.ok(끝 > 0, `${이름}: 호출 한 줄을 못 잘랐다`);

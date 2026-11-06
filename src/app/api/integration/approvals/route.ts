@@ -10,6 +10,7 @@ import { getRepairCaseReadSource } from "@/lib/config/read-source";
 import { getUserBySsoSubject } from "@/lib/db/queries/users";
 import { listRepairCasesPendingMyApproval } from "@/lib/db/queries/repair-case-approvals-pending";
 import { listQuoteApprovalsPendingMyApproval } from "@/lib/db/queries/quote-approvals-pending";
+import { listDomesticOrderApprovalsPendingMyApproval } from "@/lib/db/queries/domestic-order-approvals-pending";
 import { buildPortalApprovalInbox } from "@/lib/server/integration/portal-approvals";
 
 /**
@@ -80,10 +81,14 @@ export async function GET(request: NextRequest) {
     baseUrl: getAppBaseUrl(),
     findActor: getUserBySsoSubject,
     // 🔴 자격 판정을 새로 짓지 않는다 — 사이드바 배지 · 종이 이미 쓰고 통합
-    // 시험으로 못 박아 둔 조회 둘을 그대로 넘긴다. 견적서 쪽은 A/S 와 PO 가 같은
+    // 시험으로 못 박아 둔 조회 셋을 그대로 넘긴다. 견적서 쪽은 A/S 와 PO 가 같은
     // 표를 보므로 **이 통로가 유일한 입구**다(portal-approvals.ts 의 그 주석).
     listRepairCaseApprovals: listRepairCasesPendingMyApproval,
     listQuoteApprovals: listQuoteApprovalsPendingMyApproval,
+    // 🔴 **이 한 줄이 기타건 결재를 승인함에 세우는 전부다**(2026-11-06). 포털은
+    // 「누구에게 생겼다」만 받고 내용은 이 통로로 **되물어** 가져가므로, 미는 쪽만
+    // 달고 여기를 빠뜨리면 포털이 202 를 주고 로그도 깨끗한데 알림은 영영 안 간다.
+    listDomesticOrderApprovals: listDomesticOrderApprovalsPendingMyApproval,
   });
 
   // 🔴 이 시스템에 계정이 없는 사람은 빈 목록이다 — 오류가 아니다(설계서 F-3).

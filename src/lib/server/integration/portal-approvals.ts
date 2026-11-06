@@ -28,10 +28,12 @@
  *
  * ── 자격 판정을 새로 짓지 않는다 ────────────────────────────────────────
  * 「이 사람이 지금 이 건을 결재할 차례인가」는 **한 줄도 여기 적지 않는다.**
- * 조회 둘을 **인자로 받아** 그대로 부른다:
+ * 조회 셋을 **인자로 받아** 그대로 부른다:
  *   · queries/repair-case-approvals-pending.ts 의 listRepairCasesPendingMyApproval
  *   · queries/quote-approvals-pending.ts 의 listQuoteApprovalsPendingMyApproval
- * 그 둘이 결재선 지정자 · **그 단계를 위임받은 사람**(결재선 단계 위임, 2026-10-26) ·
+ *   · queries/domestic-order-approvals-pending.ts 의
+ *     listDomesticOrderApprovalsPendingMyApproval (기타건 — 2026-11-06)
+ * 그 셋이 결재선 지정자 · **그 단계를 위임받은 사람**(결재선 단계 위임, 2026-10-26) ·
  * 출하 대표/옛 위임 · 최고관리자 비상구(mayDecideAssignedApproval)까지 이미 가른다. 판정이 두 벌이 되면 한쪽만 고쳐지는 날이 오고, 그것은 권한
  * 구멍이다 — 그리고 **잘못 좁힌 쪽은 화면에 아무 표시도 남기지 않는다.**
  *
@@ -42,7 +44,12 @@
  */
 
 import {
+  DOMESTIC_ORDER_APPROVAL_TYPE,
+  type DomesticOrderApprovalType,
+} from "@/lib/domain/domestic-order-approval-rules";
+import {
   buildApprovalNotification,
+  buildDomesticOrderApprovalNotification,
   buildQuoteApprovalNotification,
 } from "@/lib/domain/notifications";
 import { absoluteNotificationHref } from "@/lib/domain/notification-links";
@@ -55,8 +62,17 @@ import { portalActorCanWork, type FindActorBySsoSubject } from "./portal-notific
  * 접수 건 쪽 둘은 `RepairCaseApprovalType` 에서 그대로 온다 — 글자를 다시 적지
  * 않는다. 접수 건 결재 종류가 하나 늘면 아래 이름표 Record 에서 컴파일러가
  * 빠진 자리를 잡는다(이름표 없는 갈래가 코드 값 그대로 포털 화면에 찍히지 않게).
+ *
+ * 🔴 **기타건은 `RepairCaseApprovalType` 에서 오지 않는다**(2026-11-06). 결재 행은
+ * 같은 표에 쌓이지만 그 타입은 **정확히 둘**이어야 하고, 그 보증을
+ * db/schema/domestic-order-approval-safety.test.ts 가 못 박고 있다 — 넓히면 열려
+ * 있던 기타건 결재가 접수 건 종·배지·승인함에 조용히 섞인다. 그래서 갈래 글자를
+ * 도메인 상수에서 따로 가져와 유니온에 더한다.
  */
-export type PortalApprovalKind = RepairCaseApprovalType | "QUOTE_APPROVAL";
+export type PortalApprovalKind =
+  | RepairCaseApprovalType
+  | "QUOTE_APPROVAL"
+  | DomesticOrderApprovalType;
 
 /**
  * 사람이 읽는 갈래 이름. 받는 쪽은 A/S 의 코드가 무슨 뜻인지 모른다 — 어휘의
@@ -77,6 +93,11 @@ export const PORTAL_APPROVAL_KIND_LABELS: Record<PortalApprovalKind, string> = {
   REPAIR_INSPECTION: "접수건 검수 결재",
   FINAL_SHIPMENT: "접수건 최종 출하 결재",
   QUOTE_APPROVAL: "견적서 결재",
+  // 🔴 A/S 안에서는 「기타건 최종 출하 **승인**」이고(domain/shipment-approval-route.ts
+  //    의 SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS) 여기서는 「…결재」다. 위 둘이 갈리는
+  //    것과 같은 까닭이고, 포털의 메일 갈래 표도 이 글자로 적혀 있다
+  //    (dss-auth 의 lib/approvals/kinds.ts — 저장소가 둘이라 컴파일러가 못 잡는다).
+  DOMESTIC_ORDER_FINAL_SHIPMENT: "기타건 최종 출하 결재",
 };
 
 /**
@@ -170,6 +191,21 @@ export type PendingQuoteApprovalRow = {
 };
 
 /**
+ * 기타건 결재 한 줄의 입력. queries/domestic-order-approvals-pending.ts 의
+ * `PendingDomesticOrderApprovalItem` 이 구조적으로 그대로 들어맞는다.
+ *
+ * 🔴 `modelName` 이 **`null` 일 수 있다** — 기타건은 품명이 비어 있는 줄이 흔하다.
+ * 빈 글자를 그대로 내보내면 승인함이 그 줄을 통째로 뺀다(아래 빌더 주석).
+ */
+export type PendingDomesticOrderApprovalRow = {
+  domesticOrderId: string;
+  modelName: string | null;
+  routeStepOrder: number | null;
+  requestedByName: string;
+  requestedAt: string;
+};
+
+/**
  * 접수 건 결재 한 줄 → 승인함 한 줄.
  *
  * 🔴 열쇠 · 제목 · 주소를 **새로 적지 않는다** — 종이 쓰는 빌더를 그대로 부르고
@@ -236,6 +272,47 @@ export function buildQuoteApprovalItem(
 }
 
 /**
+ * 기타건 결재 한 줄 → 승인함 한 줄 (2026-11-06).
+ *
+ * 열쇠 · 제목 · 보탬 · 주소를 새로 적지 않는 것은 위 둘과 같다.
+ *
+ * ── 🔴 주소를 접수 건에서 베끼면 404 다 ────────────────────────────────
+ * 기타건 결재 행은 접수 건 결재와 **같은 표**에 있어 `repairCaseDetailHrefs` 를
+ * 그대로 쓰고 싶어지는 자리다. 그러면 `/repair-cases/{내자줄 uuid}/approval` 로
+ * 나가고, 그 주소는 없다. 🔴 **그 실패는 포털 화면에서만 보인다** — A/S 안에서는
+ * 아무 데서도 그 주소가 쓰이지 않아 시험도 화면도 조용하다. 그래서 종이 쓰는 빌더
+ * (buildDomesticOrderApprovalNotification)를 그대로 부른다. 그 빌더가 기타건 상세의
+ * 탭 헬퍼로 `/domestic-orders/{id}/approval` 을 만든다.
+ *
+ * ── 🔴 제목이 비면 그 줄이 승인함에서 사라진다 ─────────────────────────
+ * 승인함은 받은 열 칸 가운데 `detail` 말고 하나라도 비면 그 줄을 빼고 「N건을 그리지
+ * 못했습니다」만 띄운다(포털 lib/approvals/screen-inbox.ts 머리말의 계약). 기타건은
+ * 품명이 실제로 비어 오는 줄이라, 메우는 일을 그 빌더 하나가 한다
+ * (domain/notifications.ts 의 domesticOrderApprovalSubject → `(형식 없음)`).
+ */
+export function buildDomesticOrderApprovalItem(
+  row: PendingDomesticOrderApprovalRow,
+  baseUrl: string
+): PortalApprovalItem {
+  const bell = buildDomesticOrderApprovalNotification({
+    domesticOrderId: row.domesticOrderId,
+    modelName: row.modelName,
+    routeStepOrder: row.routeStepOrder,
+    requestedByName: row.requestedByName,
+  });
+  return {
+    id: bell.id,
+    kind: DOMESTIC_ORDER_APPROVAL_TYPE,
+    kindLabel: PORTAL_APPROVAL_KIND_LABELS[DOMESTIC_ORDER_APPROVAL_TYPE],
+    // 품명. 종이 굵게 적는 값 그대로이고, 비면 `(형식 없음)` 이 들어 있다.
+    subject: bell.subject,
+    detail: bell.detail,
+    requestedAt: row.requestedAt,
+    href: absoluteNotificationHref(bell.href, baseUrl),
+  };
+}
+
+/**
  * 오래 기다린 것부터. 같은 시각이면 열쇠로 동점을 깬다 — 순서가 실행마다 흔들리면
  * 통합함의 줄이 새로고침할 때마다 자리를 바꾼다.
  *
@@ -274,6 +351,14 @@ export async function buildPortalApprovalInbox(params: {
     actorUserId: string
   ) => Promise<readonly PendingRepairCaseApprovalRow[]>;
   listQuoteApprovals: (actorUserId: string) => Promise<readonly PendingQuoteApprovalRow[]>;
+  /**
+   * 🔴 **셋째 조회는 선택이 아니다**(2026-11-06). 비워 둘 수 있게 만들면 라우트에서
+   * 빠뜨려도 tsc 가 침묵하고, 그러면 포털은 202 를 받고 로그도 깨끗한데 기타건
+   * 결재는 승인함에 영영 안 뜬다 — 이 기능에서 가장 비싼 실패의 모양이다.
+   */
+  listDomesticOrderApprovals: (
+    actorUserId: string
+  ) => Promise<readonly PendingDomesticOrderApprovalRow[]>;
 }): Promise<PortalApprovalInbox> {
   const actor = await params.findActor(params.subject);
   // 「지금 이 계정으로 일할 수 있는가」(승인됨 · 활성 · 잠기지 않음)는 알림 통로와
@@ -281,19 +366,22 @@ export async function buildPortalApprovalInbox(params: {
   // 정지된 사람의 밀린 결재가 승인함에 계속 서 있으면 안 된다.
   if (!actor || !portalActorCanWork(actor)) return EMPTY_INBOX;
 
-  // 서로를 모르는 두 조회라 나란히 보낸다.
-  const [repairCaseRows, quoteRows] = await Promise.all([
+  // 서로를 모르는 세 조회라 나란히 보낸다.
+  const [repairCaseRows, quoteRows, domesticOrderRows] = await Promise.all([
     params.listRepairCaseApprovals(actor.id),
     params.listQuoteApprovals(actor.id),
+    params.listDomesticOrderApprovals(actor.id),
   ]);
 
   const items = sortPortalApprovalItems([
     ...repairCaseRows.map((row) => buildRepairCaseApprovalItem(row, params.baseUrl)),
     ...quoteRows.map((row) => buildQuoteApprovalItem(row, params.baseUrl)),
+    ...domesticOrderRows.map((row) => buildDomesticOrderApprovalItem(row, params.baseUrl)),
   ]);
 
   // 🔴 겹친 열쇠를 여기서 **접지 않는다.** 한 견적서에 열려 있는 결재 행은 표의
-  // 부분 유니크(quote_approvals_one_active_request)가 하나로 못 박고, 접수 건은
+  // 부분 유니크(quote_approvals_one_active_request)가 하나로 못 박고, 기타건도 같은
+  // 모양의 색인이 있다(repair_case_approvals_one_active_domestic_request). 접수 건은
   // 조회가 (건, 갈래)별 가장 최근 행 하나로 접은 뒤 내준다. 그래서 같은 열쇠가
   // 두 줄로 나오면 그것은 **표나 조회가 깨졌다는 뜻**이고, 여기서 조용히 접으면
   // 그 사실이 영영 드러나지 않는다.

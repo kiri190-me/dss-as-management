@@ -17,11 +17,20 @@ import type { NotificationItem } from "./notifications";
  * 다시 검사하지 않아도 된다.
  *
  * ── 🔴 개수는 여기서 세지 않는다 ─────────────────────────────────────────
- * 묶음 타입에는 `targetKey` 가 **없다**. 그것은 「같은 대상은 한 번만 센다」는
- * A/S 안쪽 규칙의 재료인데(한 건에 결재가 둘 걸려 있어도 1), 묶음 종은 받은
- * 숫자를 그대로 찍을 뿐 다시 세지 않기 때문이다. 그래서 배지 숫자는 **옮겨
- * 담기 전 원본**에서 countNotificationTargets 로 세어 따로 넘긴다
- * (components/layout/NotificationBell.tsx).
+ * 묶음 종은 **받은 숫자를 그대로 찍을 뿐** 다시 세지 않는다. 그래서 배지 숫자는
+ * 옮겨 담기와 따로 화면이 세어 넘긴다(components/layout/NotificationBell.tsx 의
+ * selectVisibleNotifications — 2026-11-06 부터 **보이는 줄 수**다).
+ *
+ * 🔵 **그 셈이 한때 `targetKey` 를 썼다.** 이 자리에는 「묶음 타입에 targetKey 가
+ * 없다 — 그것은 「같은 대상은 한 번만 센다」는 A/S 안쪽 규칙의 재료인데(한 건에
+ * 결재가 둘 걸려 있어도 1), 배지는 옮겨 담기 **전** 원본에서
+ * countNotificationTargets 로 세어 넘긴다」고 적혀 있었다. 사용자가 「종을 눌렀을
+ * 때 나오는 알림의 수와 알림종의 숫자가 동일했으면 좋겠어」로 그 설계를 뒤집으면서
+ * 그 재료가 필요 없어졌다.
+ *
+ * 🔴 **그래도 targetKey 를 실어 보내면 안 되는 것은 그대로다.** 묶음이 그 값으로
+ * **다시 셀 길**이 열리는 순간 종에 보이는 줄 수와 배지가 또 갈린다. 칸이 열
+ * 개라는 선은 notification-bell-items.test.ts 가 글자로 지킨다.
  *
  * ── 🔴 색 **클래스**는 옮기지 않는다. 대신 **칸 번호**를 넘긴다 ──────────
  * NOTIFICATION_KIND_META 에는 toneClassName 이 함께 있지만 그것은 Tailwind 클래스

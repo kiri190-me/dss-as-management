@@ -41,10 +41,20 @@ import { isSafeNotificationHref, type NotificationBellItem } from "@dss/ui";
 export type PortalNotificationInbox = {
   items: NotificationBellItem[];
   /**
-   * 배지에 더할 숫자. 🔴 **포털이 센 값 그대로** 나른다 — 줄 수로 다시 세지
-   * 않는다. 세는 규칙은 시스템마다 다르고(A/S 는 같은 대상을 한 번만 센다 —
-   * domain/notifications.ts 의 countNotificationTargets), 여기서 다시 세면 그
-   * 시스템의 종과 이 종이 서로 다른 숫자를 말하게 된다.
+   * 포털이 센 숫자. 🔴 **2026-11-06 부터 종 배지는 이 값을 쓰지 않는다.**
+   *
+   * 여기에는 「배지에 **더할** 숫자 — 포털이 센 값 그대로 나른다. 세는 규칙은
+   * 시스템마다 다르니 줄 수로 다시 세면 그 시스템의 종과 이 종이 서로 다른 숫자를
+   * 말한다」고 적혀 있었다. 사용자 결정(「종을 눌렀을 때 나오는 알림의 수와
+   * 알림종의 숫자가 동일했으면 좋겠어」)으로 배지가 **보이는 줄 수**가 되면서,
+   * 받은 몫도 `items` 의 줄 수로 센다(components/layout/NotificationBell.tsx 의
+   * selectVisibleNotifications). 🔵 포털도 같은 날 줄 수로 바꿨지만 이 값을 쓰면
+   * **포털이 먼저 올라가야만** 맞는 숫자가 된다 — 줄을 세면 저쪽 판과 무관하다.
+   *
+   * 🔴 **그래도 칸과 검사를 걷어내지 않았다.** 이 모양은 포털 응답의 거울이고(위
+   * 머리말), 못 믿을 값을 거르는 자리를 지우면 나중에 다시 읽기로 할 때 검사 없이
+   * 들어온다. 🔵 지금 이 값을 읽는 화면은 **하나도 없다** — 되살리려면 「포털이
+   * 낡은 판이어도 맞는가」에 먼저 답해야 한다.
    */
   count: number;
   /**
@@ -176,7 +186,9 @@ export function normalizePortalNotificationFeed(body: unknown): PortalNotificati
   }
 
   // 🔴 숫자가 아니면 **0** 이다(줄 수로 대신 세지 않는다 — 위 count 주석).
-  // 0 이면 배지에 더해지는 것이 없을 뿐 목록은 그대로 보인다.
+  // 🔵 2026-11-06 부터 이 값은 배지로 가지 않으므로 0 이 되어도 **보이는 줄은
+  //    그대로 세어진다.** 그 전에는 이 0 이 곧 「받은 몫이 배지에서 통째로
+  //    빠진다」였다 — 줄은 보이는데 숫자에만 안 들던 자리다.
   const count =
     typeof answer.count === "number" && Number.isFinite(answer.count) && answer.count > 0
       ? answer.count

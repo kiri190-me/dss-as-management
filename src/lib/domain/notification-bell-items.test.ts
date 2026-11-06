@@ -9,6 +9,7 @@ import {
   buildApprovalGrantedNotification,
   buildApprovalNotification,
   buildApprovalRejectedNotification,
+  buildDomesticOrderApprovalNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateInvertedNotification,
   buildRepairCaseDueDateNearNotification,
@@ -36,6 +37,14 @@ function oneOfEachKind(): NotificationItem[] {
     buildQuoteApprovalNotification({
       quoteId: "quote-1",
       quoteNumber: "Q-9705-001",
+      routeStepOrder: 1,
+      requestedByName: "박영업",
+    }),
+    // 🔴 기타건 결재 대기(2026-11-06) — **다른 표의 줄**이라 주소가
+    //    `/domestic-orders/` 로 간다. 묶음 종은 그 글자를 그대로 나른다.
+    buildDomesticOrderApprovalNotification({
+      domesticOrderId: "order-1",
+      modelName: "시험용 품명",
       routeStepOrder: 1,
       requestedByName: "박영업",
     }),
@@ -161,9 +170,13 @@ test("🔴 없는 값은 `undefined` 가 아니라 **빈 문자열**이다 — �
 });
 
 test("🔴 칸은 열 개다 — targetKey 를 실어 보내지 않는다", () => {
-  // 실어 보내면 묶음이 그것으로 개수를 다시 셀 길이 열린다. 세는 규칙은 A/S
-  // 안쪽 것이고(같은 대상은 한 번만), 두 곳이 세면 종과 배지가 다른 숫자를
-  // 말하게 된다 — 개수는 옮겨 담기 **전** 원본에서 세어 따로 넘긴다(아래).
+  // 실어 보내면 묶음이 그것으로 개수를 **다시 셀 길**이 열린다. 세는 일은 A/S 가
+  // 한 자리에서 하고(components/layout/NotificationBell.tsx 의
+  // selectVisibleNotifications), 두 곳이 세면 종에 보이는 줄 수와 배지가 다른 말을
+  // 하게 된다.
+  // 🔵 여기에는 「세는 규칙은 A/S 안쪽 것이고(**같은 대상은 한 번만**) … 개수는
+  //    옮겨 담기 **전** 원본에서 세어 따로 넘긴다」고 적혀 있었다. 2026-11-06 부터
+  //    종은 **보이는 줄**을 세므로 그 재료 자체가 필요 없다 — 그래도 금지는 같다.
   //
   // 🔴 2026-10-19 에 `tone`(색 칸 번호) 하나가 늘어 아홉에서 열이 됐다. 늘어난
   //    것이 **그 하나뿐**이라는 것이 이 목록의 뜻이다 — 묶음 타입에 없는 칸이
@@ -186,9 +199,20 @@ test("🔴 칸은 열 개다 — targetKey 를 실어 보내지 않는다", () =
   }
 });
 
-test("🔴 옮겨 담은 뒤로는 「같은 대상은 한 번만」을 셀 수 없다 — 개수는 원본에서 센다", () => {
+test("🔴 옮겨 담은 뒤로는 「같은 대상은 한 번만」을 셀 수 없다 — 그 값은 사이드바가 쓴다", () => {
   // 한 건에 결재가 둘 걸리면 사람에게는 「그 한 건」이다. 그 정보(targetKey)는
-  // 묶음으로 건너가지 않으므로, 배지 숫자는 반드시 이쪽에서 세어 넘겨야 한다.
+  // 묶음으로 건너가지 않는다.
+  //
+  // 🔵 **2026-11-06 에 이 시험이 적고 있던 까닭 하나가 거짓이 됐다.** 이름이
+  //    「…개수는 원본에서 센다」였고 마지막 단언에 「이 값이 **배지로 간다**」고
+  //    적혀 있었다. 사용자 결정으로 종 배지가 **보이는 줄 수**가 되면서(「종을
+  //    눌렀을 때 나오는 알림의 수와 알림종의 숫자가 동일했으면 좋겠어」 —
+  //    components/layout/NotificationBell.tsx 의 selectVisibleNotifications) 그 값은
+  //    더 이상 종으로 가지 않는다. 건으로 세는 그 함수는 이제 **사이드바의 결재
+  //    배지**가 쓴다.
+  //
+  // 🔴 **그래도 금지는 그대로다**: targetKey 를 실어 보내면 묶음이 그 값으로 **다시
+  //    셀 길**이 열리고, 그 순간 종에 보이는 줄 수와 배지가 또 갈린다(바로 위 시험).
   const items = [
     buildApprovalNotification({
       repairCaseId: "case-1",
@@ -207,7 +231,14 @@ test("🔴 옮겨 담은 뒤로는 「같은 대상은 한 번만」을 셀 수 
   assert.equal(
     countNotificationTargets(items.map((item) => item.targetKey)),
     1,
-    "원본에서 세면 1이다 — 이 값이 배지로 간다"
+    "원본에서 세면 1이다 — 이 값이 가는 곳은 **사이드바**의 결재 배지다"
+  );
+  // 🔴 **그리고 종 배지는 그 1 이 아니라 줄 수(2) 다.** 둘이 서로 다른 것이 정상이고,
+  //    「같아야 한다」로 되돌리면 2026-11-06 사용자 결정이 그 자리에서 사라진다.
+  assert.notEqual(
+    mapped.length,
+    countNotificationTargets(items.map((item) => item.targetKey)),
+    "둘이 같으면 이 시험이 갈림을 못 본다"
   );
 });
 

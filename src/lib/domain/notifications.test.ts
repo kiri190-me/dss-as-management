@@ -83,9 +83,18 @@ test("같은 접수 건에 두 종류가 걸리면 알림은 두 줄이지만 id
   assert.equal(inspection.targetKey, shipment.targetKey, "세는 단위는 접수 건 하나여야 한다");
 });
 
-test("개수는 대상 단위로 센다 — 한 건에 두 종류가 걸려도 1이다", () => {
-  // 사이드바 배지(countRepairCasesPendingMyApproval)와 종 배지가 이 함수를
-  // 함께 쓴다. 규칙이 바뀌면 두 숫자가 함께 바뀌어야 한다.
+test("🔴 개수는 대상 단위로 센다 — 한 건에 두 종류가 걸려도 1이다(사이드바 배지)", () => {
+  // 🔴 **이 함수를 쓰는 곳은 사이드바의 결재 배지뿐이다** —
+  //    queries/repair-case-approvals-pending.ts 의 countRepairCasesPendingMyApproval
+  //    과 (app)/layout.tsx 의 countNotificationTargetsByKind. 사이드바가 말하는 것은
+  //    「처리할 **건**이 몇인가」이고, 눌러서 가는 곳도 접수 건 목록이라 이 규칙이 맞다.
+  //
+  // 🔵 여기에는 「사이드바 배지와 **종 배지**가 이 함수를 함께 쓴다. 규칙이 바뀌면 두
+  //    숫자가 함께 바뀌어야 한다」고 적혀 있었다. 2026-11-06 사용자 결정으로 종은
+  //    **보이는 줄**을 센다(「종을 눌렀을 때 나오는 알림의 수와 알림종의 숫자가
+  //    동일했으면 좋겠어」). 🔴 **이 함수를 줄 수로 고쳐서 푼 것이 아니라 종이 이
+  //    함수를 안 쓰게 바꾼 것이다** — 여기를 고치면 사이드바가 조용히 따라 바뀐다.
+  //    그 갈림은 components/layout/NotificationBell.test.tsx 가 따로 지킨다.
   assert.equal(countNotificationTargets([]), 0);
   assert.equal(countNotificationTargets(["case-1"]), 1);
   assert.equal(countNotificationTargets(["case-1", "case-1"]), 1);
@@ -117,7 +126,7 @@ test("등록된 모든 종류가 개수 표에 키로 들어 있다", () => {
   }
 });
 
-test("등록된 알림 종류는 결재 요청·견적서 결재 대기·납기 임박·사내 목표 완료일 미등록·납기 역전·승인 완료·반려됨 일곱이다", () => {
+test("등록된 알림 종류는 결재 요청·견적서 결재 대기·기타건 결재 대기·납기 임박·사내 목표 완료일 미등록·납기 역전·승인 완료·반려됨 여덟이다", () => {
   // 종류를 늘리는 것은 "누구에게 보여도 되는가"를 다시 판정해야 하는 일이라
   // 별도 작업으로 다룬다. 늘어난 것을 여기서 알아차리게 둔다 — 그래서 목록
   // 전체를 그대로 못 박는다(있는지만 보는 검사로 무르게 만들지 않는다).
@@ -166,11 +175,19 @@ test("등록된 알림 종류는 결재 요청·견적서 결재 대기·납기 
   // 이미 쓰는 domain/due-date-inversion.ts 의 isRepairCaseDueDateInverted 를 조회가
   // 그대로 부른다(그 파일이 생긴 까닭이 「네 자리가 같은 답을 내야 한다」이고 이 알림이
   // 그 넷째다). 자세한 것은 domain/due-date-inverted-notification.test.ts.
+  //
+  // 🔴 DOMESTIC_ORDER_APPROVAL_PENDING(「기타건 결재 대기」)은 2026-11-06 에 **더했다**
+  // (사용자 요구 — 「승인요청이 있을 때 승인건에 있는 사람에게 알림이 가도록」). 결재 행은
+  // 접수 건 결재와 **같은 표**에 쌓이지만 갈래를 따로 둔다: 누르면 갈 화면이 다르고
+  // (`/domestic-orders/{id}/approval`), 같은 갈래로 섞으면 사이드바의 접수 건 결재 배지가
+  // 조용히 늘어난다. 🔵 접수 건 승인 종류 목록(REPAIR_CASE_APPROVAL_TYPES)은 **한 글자도
+  // 안 넓혔다.** 자세한 것은 domain/domestic-order-approval-notifications.test.ts.
   assert.deepEqual(
     [...NOTIFICATION_KINDS],
     [
       "REPAIR_CASE_APPROVAL",
       "QUOTE_APPROVAL_PENDING",
+      "DOMESTIC_ORDER_APPROVAL_PENDING",
       "REPAIR_CASE_DUE_DATE_NEAR",
       "REPAIR_CASE_TARGET_SHIPMENT_MISSING",
       "REPAIR_CASE_DUE_DATE_INVERTED",

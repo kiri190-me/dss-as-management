@@ -178,9 +178,17 @@ describe("통합 승인함 통로", () => {
     }
   });
 
-  test("🔴 자격 판정을 새로 쓰지 않는다 — 기존 조회 둘을 그대로 넘긴다", () => {
+  test("🔴 자격 판정을 새로 쓰지 않는다 — 기존 조회 셋을 그대로 넘긴다", () => {
     assert.match(approvals, /listRepairCaseApprovals: listRepairCasesPendingMyApproval/);
     assert.match(approvals, /listQuoteApprovals: listQuoteApprovalsPendingMyApproval/);
+    // 🔴 **이 한 줄이 기타건 결재를 통합 승인함에 세우는 전부다**(2026-11-06).
+    //    포털은 「누구에게 생겼다」만 받고 내용은 이 통로로 **되물어** 간다 — 미는 쪽만
+    //    달고 여기를 빠뜨리면 포털이 202 를 주고 로그도 깨끗한데 알림은 영영 안 간다.
+    //    그 실패는 A/S 안에서 아무 표시도 남기지 않으므로 글자로 못 박는다.
+    assert.match(
+      approvals,
+      /listDomesticOrderApprovals: listDomesticOrderApprovalsPendingMyApproval/
+    );
     // 라우트가 스스로 SQL 을 쓰거나 역할을 비교하면 판정이 두 벌이 된다.
     for (const forbidden of ["db.select", "drizzle-orm", '=== "ADMIN"', '=== "SUPER_ADMIN"', "role ==="]) {
       assert.ok(!approvals.includes(forbidden), `라우트가 직접 판정한다: ${forbidden}`);

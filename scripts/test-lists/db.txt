@@ -454,6 +454,22 @@ src/lib/db/mutations/quote-domestic-order-line.integration.test.ts
 # ⚠️ 판·단계는 afterEach 로 반드시 걷는다 — 남으면 다른 파일이 갑자기 결재선을 탄다.
 src/lib/db/mutations/domestic-order-approvals.integration.test.ts
 
+# ── 기타건 결재가 종·통합 승인함·결과 알림에 뜨는가 (2026-11-06) ────────
+# 🔴 **이 조각의 본체는 「되묻는 통로」다.** 포털로 나가는 신호에는 `approverSub` 하나뿐
+# 이라, 포털은 A/S 에 `GET /api/integration/approvals` 로 되물어 내용을 가져간다 — 미는
+# 쪽만 달면 포털이 202 를 주고 로그도 깨끗한데 알림은 영영 안 간다. 그래서 여기서는
+# 라우트가 꽂는 조회 셋을 그대로 꽂아 **buildPortalApprovalInbox 를 진짜 DB 위에서** 돌린다.
+# 재는 것: 🔴 1단계 지정자에게만 뜨는가(요청자·제삼자·다음 단계에는 0건) · 승인하면
+# 다음 단계로 넘어가는가 · 반려·휴지통이면 사라지는가 · 🔴 **품명이 비어도 줄이 서고
+# 제목이 비지 않는가**(빈 칸은 승인함이 줄을 통째로 빼는 조건이다) · 🔴 **접수 건 결재
+# 대기 목록에 섞이지 않는가**(그 행이 실제로 열려 있다를 먼저 단언한다) · 🔴 주소가
+# `/domestic-orders/` 로 가는가 · 🔴 **종(listMyNotifications)에 실제로 한 줄이 뜨는가** ·
+# 🔴 승인·반려 결과가 **요청자에게만** 가는가(중간 단계 승인은 아니다).
+# 🔴 격리 이름: 계정 "domesticpending-test-" · 발주서번호 "DOP-TEST-{토큰}-".
+# 🔵 접수 건은 **하나도 만들지 않는다**(인수번호는 한 달에 99개가 한도다).
+# ⚠️ 판·단계는 afterEach 로 반드시 걷는다 — 남으면 다른 파일이 갑자기 결재선을 탄다.
+src/lib/db/queries/domestic-order-approvals-pending.integration.test.ts
+
 # ── 기타건 현황이 읽는 줄 (2026-11-06) ──────────────────────────────────
 # 「기타건」의 정의는 조회의 where 한 줄이다(repair_case_id IS NULL AND is_deleted = false).
 # 재는 것: 🔴 수리 건이 붙은 줄이 **안 섞이는가**(그런 줄이 실제로 있다를 먼저 단언한다 —

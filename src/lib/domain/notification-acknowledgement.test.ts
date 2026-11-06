@@ -12,6 +12,7 @@ import {
   buildApprovalGrantedNotification,
   buildApprovalNotification,
   buildApprovalRejectedNotification,
+  buildDomesticOrderApprovalNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateInvertedNotification,
   buildRepairCaseDueDateNearNotification,
@@ -100,6 +101,14 @@ test("🔴 할 일 알림의 실제 id 는 형식이 맞아도 거절한다 — 
     buildQuoteApprovalNotification({
       quoteId: randomUUID(),
       quoteNumber: "Q-2609-001",
+      routeStepOrder: 1,
+      requestedByName: "홍길동",
+    }),
+    // 🔴 기타건 결재 대기(2026-11-06)도 할 일 알림이다 — 결재를 처리해야 빠진다.
+    // 확인 단추를 달면 결재를 안 해도 종에서 사라진다.
+    buildDomesticOrderApprovalNotification({
+      domesticOrderId: randomUUID(),
+      modelName: "시험용 품명",
       routeStepOrder: 1,
       requestedByName: "홍길동",
     }),

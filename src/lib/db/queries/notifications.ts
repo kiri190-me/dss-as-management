@@ -6,6 +6,7 @@ import {
   buildApprovalNotification,
   type NotificationItem,
   type NotificationKind,
+  buildDomesticOrderApprovalNotification,
   buildQuoteApprovalNotification,
   buildApprovalGrantedNotification,
   buildApprovalRejectedNotification,
@@ -14,6 +15,7 @@ import {
   buildRepairCaseDueDateInvertedNotification,
 } from "@/lib/domain/notifications";
 import type { Role } from "@/lib/domain/types";
+import { listDomesticOrderApprovalsPendingMyApproval } from "./domestic-order-approvals-pending";
 import { listQuoteApprovalsPendingMyApproval } from "./quote-approvals-pending";
 import { listMyGrantedApprovalOutcomes, listMyRejectedApprovalOutcomes } from "./approval-outcome-notifications";
 import { listRepairCasesWithDueDateNear } from "./repair-case-due-date-notifications";
@@ -165,6 +167,33 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
         buildQuoteApprovalNotification({
           quoteId: item.quoteId,
           quoteNumber: item.quoteNumber,
+          routeStepOrder: item.routeStepOrder,
+          requestedByName: item.requestedByName,
+        })
+      );
+    },
+  },
+  {
+    kind: "DOMESTIC_ORDER_APPROVAL_PENDING",
+    load: async (actorUserId) => {
+      // 견적서 결재 대기와 같은 모양 (가) — 대상이 역할이 아니라 **사람**이다.
+      // 역할로 먼저 거르지 않는다: 기타건 최종 출하 승인의 결재선에도 역할 제한이
+      // 없어서(listSelectableApproverCandidates), 여기서 역할을 보는 순간 자기
+      // 차례인 결재자가 알림을 못 받는다. 결재를 실제로 막는
+      // decideDomesticOrderApproval 도 같은 이유로 권한 영역을 묻지 않는다.
+      //
+      // 🔴 **올리는 쪽의 열쇠(`domesticOrders` WRITE)로도 거르지 않는다.** 올리는
+      // 자격과 결재하는 자격은 이 기능에서 일부러 갈라 두었다
+      // (mutations/domestic-order-approvals.ts 의 「인가」).
+      //
+      // 판정도 새로 적지 않는다 — 지정 관문(지정된 사람 + 그 단계를 위임받은 사람 +
+      // 최고관리자 비상구)을 그대로 쓰는 조회 하나를 부르고, 여기서 하는 일은 모양
+      // 변환뿐이다.
+      const pending = await listDomesticOrderApprovalsPendingMyApproval(actorUserId);
+      return pending.map((item) =>
+        buildDomesticOrderApprovalNotification({
+          domesticOrderId: item.domesticOrderId,
+          modelName: item.modelName,
           routeStepOrder: item.routeStepOrder,
           requestedByName: item.requestedByName,
         })

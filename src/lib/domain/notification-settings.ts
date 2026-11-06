@@ -46,9 +46,9 @@ import { ROLE_CODES, type Role } from "./types";
  *  · REPAIR_CASE_DUE_DATE_INVERTED(납기 역전)는 **A/S 엔지니어·영업·관리자**
  *    (2026-10-30 사용자 결정).
  * 둘 다 거기에 종류를 가리지 않는 잠금으로 최고관리자가 더해진다. 아래 두 규칙 중
- * **「명단을 여기 적는다」** 쪽을 골랐고 까닭은 각 case 에 적어 두었다. 나머지 다섯은
- * 여전히 「모든 역할이 받고, 실제로 누구에게 가는지는 그 종류의 원래 판정이 정한다」
- * 쪽이다.
+ * **「명단을 여기 적는다」** 쪽을 골랐고 까닭은 각 case 에 적어 두었다. 나머지 여섯은
+ * (2026-11-06 에 기타건 결재 대기가 들어와 다섯에서 여섯이 됐다) 여전히 「모든 역할이
+ * 받고, 실제로 누구에게 가는지는 그 종류의 원래 판정이 정한다」 쪽이다.
  * 🔵 둘의 명단이 **다른** 것이 중요하다. 비슷한 두 알림이라고 한 명단으로 묶으면,
  *    「날짜를 적을 사람」과 「고객과 협의할 사람」이 같은 질문이 되어 버린다 — 아래
  *    재고 알림 둘에서 이미 한 번 갈라 두었던 그 구별이다.
@@ -108,10 +108,11 @@ import { ROLE_CODES, type Role } from "./types";
  *      나쁨이 한눈에 갈려야 한다. 초록이 「됐다」, 붉은 쪽이 「안 됐다」다.
  *      반려에 빨강을 주지 않는 것은 그 자리를 급한 경고가 쓰기 때문이다 —
  *      한 칸 비켜선 장미다.
- *   3. **내가 할 일 넷** — 결재 대기(파랑 15) · 견적서 결재 대기(보라 13) ·
- *      사내 목표 완료일 미등록(주황 7) · 납기 역전(호박 14).
- *      앞의 둘은 「눌러 처리하면 없어지는 대기 줄」이라 **파랑 계열로 묶어** 한
- *      덩어리로 읽히게 했다.
+ *   3. **내가 할 일 다섯** — 결재 대기(파랑 15) · 견적서 결재 대기(보라 13) ·
+ *      기타건 결재 대기(남보라 6) · 사내 목표 완료일 미등록(주황 7) ·
+ *      납기 역전(호박 14).
+ *      앞의 셋은 「눌러 처리하면 없어지는 대기 줄」이라 **파랑 계열로 묶어** 한
+ *      덩어리로 읽히게 했다(2026-11-06 에 기타건 결재 대기가 셋째로 들어왔다).
  *      🔴 **뒤의 둘은 그 묶음에서 벗어난다 — 2026-10-30 사용자 요청으로 붉은
  *      계열이다**(「알림 제목 색을 붉은 계열로 해줘」 · 「[납기 요청일 협의가
  *      필요합니다]도 주황색 계열로」). 그래서 「파랑 계열 = 내가 할 일」은 이제
@@ -122,7 +123,9 @@ import { ROLE_CODES, type Role } from "./types";
  *      PO발행일이 적히고 목표 완료일이 비면 앞엣것이 뜨고, 날짜를 적는 순간 그것이
  *      빠지면서 이것이 뜬다. 주황 7(red-orange 쪽)과 호박 14(yellow-orange 쪽)가
  *      붉은 계열 안에서 가장 멀리 떨어진 짝이다.
- *      🔵 비어 있는 칸: 하늘 8(부품 요청 대기) · 남보라 6(불출 승인 대기).
+ *      🔵 비어 있는 칸: 하늘 8(부품 요청 대기). 남보라 6(불출 승인 대기)은
+ *      2026-11-06 에 기타건 결재 대기가 가져갔다 — 갈래가 같은 「대기 줄」이라
+ *      자리뿐 아니라 뜻도 이어받았다.
  *
  * ⚠️ 그래서 2026-09 ~ 2026-10 에 적어 두었던 고른 까닭들(「amber 는 밀린 일」·
  *    「승인 완료는 lime」·「납기 임박은 teal」·「fuchsia 가 가장 멀다」)은 더
@@ -172,7 +175,7 @@ export const NOTIFICATION_KIND_META: Record<
     label: "결재 대기",
     description:
       "내가 결재해야 할 검수·출하 승인 요청입니다. 실제로 누구에게 가는지는 그 건의 결재자(대표 자격·위임)가 정하고, 여기 역할 설정은 그 위에 덧씌우는 필터입니다.",
-    // 내가 할 일 — 파랑 계열 넷의 기준색.
+    // 내가 할 일 — 파랑 계열 다섯의 기준색.
     toneClassName: "text-blue-700 dark:text-blue-400",
     toneIndex: 15,
   },
@@ -183,6 +186,22 @@ export const NOTIFICATION_KIND_META: Record<
     // 내가 할 일.
     toneClassName: "text-violet-700 dark:text-violet-400",
     toneIndex: 13,
+  },
+  DOMESTIC_ORDER_APPROVAL_PENDING: {
+    label: "기타건 결재 대기",
+    description:
+      "내가 결재해야 할 기타건(수리 건이 연결되지 않은 내자 정리 줄)의 최종 출하 승인입니다. " +
+      "실제로 누구에게 가는지는 기타건 최종 출하 승인 절차에서 지금 단계의 승인자로 지정된 사람이 정하고, " +
+      "지정된 사람이 자리를 비워도 결재가 멈추지 않도록 그 단계를 위임받은 사람과 최고관리자도 받습니다. " +
+      "기타건 최종 출하 승인 절차가 없으면 결재를 올릴 수 없으므로 이 알림도 뜨지 않습니다. " +
+      "누르면 그 기타건 상세의 [승인] 탭이 열리고, 승인하거나 반려하면 다음 조회에서 저절로 사라집니다. " +
+      "여기 역할 설정은 그 위에 덧씌우는 필터입니다.",
+    // 🔴 **내가 할 일 — 파랑 계열 묶음의 셋째**다(위 머리말의 셋째 갈래). 「눌러 처리하면
+    // 없어지는 대기 줄」 셋이 한 덩어리로 읽혀야 해서 파랑 15(결재 대기)·보라 13(견적서
+    // 결재 대기) 사이의 남보라를 골랐다. 그 칸은 2026-10-27 에 불출 승인 대기를 걷어내며
+    // 비워 둔 자리이고, 결재 대기 셋 가운데 서로 가장 덜 섞인다.
+    toneClassName: "text-indigo-700 dark:text-indigo-400",
+    toneIndex: 6,
   },
   REPAIR_CASE_DUE_DATE_NEAR: {
     label: "납기 임박",
@@ -238,7 +257,10 @@ export const NOTIFICATION_KIND_META: Record<
   },
   APPROVAL_GRANTED: {
     label: "승인 완료",
-    description: `내가 요청한 결재(수리 검수 승인·최종 출하 승인·견적서 승인)가 마지막 단계까지 승인된 것입니다. 요청한 사람 본인에게만 가고, 결정된 지 ${APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS}일이 지난 것은 뜨지 않습니다. 할 일이 아니라 알려 드리는 것이라 눌러서 확인하면 사라집니다(다른 기기에서도).`,
+    // 🔵 2026-11-06 에 기타건 최종 출하 승인이 넷째 갈래로 들어왔다(조회가 세 벌이다 —
+    //    queries/approval-outcome-notifications.ts). 설명에 적지 않으면 관리자는 이
+    //    스위치가 기타건까지 끈다는 것을 모른다.
+    description: `내가 요청한 결재(수리 검수 승인·최종 출하 승인·견적서 승인·기타건 최종 출하 승인)가 마지막 단계까지 승인된 것입니다. 요청한 사람 본인에게만 가고, 결정된 지 ${APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS}일이 지난 것은 뜨지 않습니다. 할 일이 아니라 알려 드리는 것이라 눌러서 확인하면 사라집니다(다른 기기에서도).`,
     // 결과 — 초록이 「됐다」다.
     toneClassName: "text-green-700 dark:text-green-400",
     toneIndex: 12,
@@ -281,6 +303,7 @@ export function defaultNotificationKindEnabled(kind: NotificationKind): boolean 
   switch (kind) {
     case "REPAIR_CASE_APPROVAL":
     case "QUOTE_APPROVAL_PENDING":
+    case "DOMESTIC_ORDER_APPROVAL_PENDING":
     case "REPAIR_CASE_DUE_DATE_NEAR":
     case "REPAIR_CASE_TARGET_SHIPMENT_MISSING":
     case "REPAIR_CASE_DUE_DATE_INVERTED":
@@ -303,7 +326,7 @@ export function defaultNotificationKindEnabled(kind: NotificationKind): boolean 
  * 이 역할이 이 종류를 받는가 — 저장된 설정이 없을 때의 답.
  *
  * 여기가 "지금과 같음"을 지키는 자리다. 종류마다 흩어져 있던 지금 규칙을 이 함수
- * 하나로 모은다. 🔵 일곱 중 다섯은 **전부 참**이고, 사내 목표 완료일 미등록과 납기
+ * 하나로 모은다. 🔵 여덟 중 여섯은 **전부 참**이고, 사내 목표 완료일 미등록과 납기
  * 역전만 역할로 갈린다(2026-10-30 — 이 파일 머리말). switch 를 if 로 접지 않는 것은
  * 다음에 붙는 종류가 참이라는 보장이 없어서다.
  */
@@ -328,6 +351,18 @@ export function defaultRoleReceivesNotification(kind: NotificationKind, role: Ro
       // 결재를 막는 decideQuoteApproval 은 아예 권한 영역을 묻지 않는다 — 여기서
       // 어느 역할을 빼면 관리자가 「지정은 됐는데 알림은 못 받는」 결재자를 만들 수
       // 있게 되고, 그 실패는 화면에 아무 표시도 남기지 않는다.
+      return true;
+
+    case "DOMESTIC_ORDER_APPROVAL_PENDING":
+      // 🔴 2026-11-06 — 바로 위 견적서 결재 대기와 **글자 그대로 같은 까닭**으로 다섯
+      // 역할 전부다. 누가 받는지는 역할이 아니라 기타건 최종 출하 승인 결재선의 지정
+      // (그 단계를 위임받은 사람과 최고관리자 비상구 포함)이 정하고, 그 판정은 조회
+      // 안의 지정 관문이 한다(queries/domestic-order-approvals-pending.ts). 결재선에
+      // 올릴 수 있는 사람에 역할 제한이 없고(listSelectableApproverCandidates),
+      // decideDomesticOrderApproval 도 권한 영역을 묻지 않는다.
+      // 🔵 **올리는 쪽(`domesticOrders` WRITE)으로 좁히지 않는다.** 올리는 자격과
+      //    결재하는 자격은 이 기능에서 일부러 갈라 두었다(그 mutation 머리말) — 여기서
+      //    올리는 쪽 역할로 좁히면 결재선에 세워 둔 사람이 알림을 못 받는다.
       return true;
 
     case "REPAIR_CASE_DUE_DATE_NEAR":

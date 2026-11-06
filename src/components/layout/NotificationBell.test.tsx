@@ -26,10 +26,16 @@ import {
   buildApprovalGrantedNotification,
   buildApprovalNotification,
   buildApprovalRejectedNotification,
+  buildDomesticOrderApprovalNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateInvertedNotification,
   buildRepairCaseDueDateNearNotification,
   buildRepairCaseTargetShipmentMissingNotification,
+  // 🔴 종 배지는 2026-11-06 부터 이 둘을 쓰지 않는다. 그래도 여기서 가져오는 것은
+  //    **사이드바 결재 배지가 그대로 건으로 센다**는 것을 이 파일이 재기 위해서다
+  //    (맨 아래 「사이드바 결재 배지는 한 글자도 안 바뀐다」).
+  countNotificationTargets,
+  countNotificationTargetsByKind,
   type NotificationItem,
 } from "@/lib/domain/notifications";
 import { toNotificationBellItems } from "@/lib/domain/notification-bell-items";
@@ -71,6 +77,14 @@ function oneOfEachKind() {
     buildQuoteApprovalNotification({
       quoteId: "quote-1",
       quoteNumber: "Q-9705-001",
+      routeStepOrder: 1,
+      requestedByName: "박영업",
+    }),
+    // 기타건 결재 대기(2026-11-06) — 🔴 **다른 표의 줄**이라 주소가
+    // `/domestic-orders/` 로 간다. 그 보증은 domain 쪽 시험이 따로 본다.
+    buildDomesticOrderApprovalNotification({
+      domesticOrderId: "order-1",
+      modelName: "시험용 품명",
       routeStepOrder: 1,
       requestedByName: "박영업",
     }),
@@ -147,20 +161,32 @@ test("1건 이상이면 개수 배지를 그리고 낭독기가 읽는 이름에
   assert.match(html, /class="dss-bell__badge"[^>]*>1</, "배지에 숫자가 찍혀야 한다");
 });
 
-test("🔴 배지 숫자는 접수 건 단위다 — 한 건에 두 종류가 걸려도 1건이다", () => {
-  // 사이드바 결재 배지와 같은 숫자여야 한다. 두 배지가 다른 수를 말하면
-  // 어느 쪽도 믿지 않게 된다. 🔴 묶음은 **받은 숫자를 그대로** 찍으므로,
-  // 「같은 대상은 한 번만」 세는 일은 이쪽이 해서 넘겨야 한다.
-  const html = renderToStaticMarkup(
-    <NotificationBell
-      items={[
-        approval("case-1", "D9705-012", "REPAIR_INSPECTION"),
-        approval("case-1", "D9705-012", "FINAL_SHIPMENT"),
-      ]}
-    />
+test("🔴 배지 숫자는 **줄 수**다 — 한 건에 두 종류가 걸리면 2다", () => {
+  // ── 🔴 2026-11-06 에 이 시험의 뜻이 뒤집혔다 ─────────────────────────────
+  // 이름이 「배지 숫자는 접수 건 단위다 — 한 건에 두 종류가 걸려도 1건이다」였고
+  // 단언은 `1` 이었다. 까닭도 함께 적혀 있었다: 「사이드바 결재 배지와 같은 숫자여야
+  // 한다. 두 배지가 다른 수를 말하면 어느 쪽도 믿지 않게 된다.」
+  //
+  // 🔴 사용자가 그 설계를 뒤집었다: 「종을 눌렀을 때 나오는 알림의 수와 알림종의
+  //    숫자가 동일했으면 좋겠어.」 사람이 눈으로 세는 것은 **줄**이고, 운영에서
+  //    실제로 종을 열면 다섯 줄인데 배지는 4 인 화면이 나왔다.
+  // 🔵 그래서 이제 **사이드바와 종이 서로 다른 것을 센다** — 사이드바는 건
+  //    (countNotificationTargets), 종은 줄이다. 그 갈림은 아래 「사이드바 결재
+  //    배지는 한 글자도 안 바뀐다」가 따로 지킨다.
+  const mine = [
+    approval("case-1", "D9705-012", "REPAIR_INSPECTION"),
+    approval("case-1", "D9705-012", "FINAL_SHIPMENT"),
+  ];
+  // 🔵 「무엇을 재는지」를 먼저 세운다 — 두 줄이 **같은 대상**이어야 건 단위(1)와
+  //    줄 단위(2)가 갈린다. 대상이 다르면 어느 규칙이든 2 라 공짜로 통과한다.
+  assert.equal(mine[0].targetKey, mine[1].targetKey, "두 줄이 같은 접수 건이 아니면 아무것도 못 가른다");
+
+  const html = renderToStaticMarkup(<NotificationBell items={mine} />);
+  assert.ok(
+    html.includes(">알림 2건</span>"),
+    "🔴 같은 접수 건을 한 번만 세고 있다 — 종에는 두 줄이 보이는데 배지는 1 이다"
   );
-  assert.ok(html.includes(">알림 1건</span>"), "같은 접수 건은 한 번만 센다");
-  assert.match(html, /class="dss-bell__badge"[^>]*>1</);
+  assert.match(html, /class="dss-bell__badge"[^>]*>2</);
   assert.equal((html.match(/class="dss-bell__item"/g) ?? []).length, 2, "줄은 둘 그대로 그린다");
 });
 
@@ -736,9 +762,18 @@ test("🔴 자기 알림이 앞, 포털에서 온 것이 뒤 — 차례가 섞�
   assert.ok(html.includes("DSS 계측기"));
 });
 
-test("🔴 배지는 자기 개수 + 받은 개수다 — 받은 값을 다시 세지 않는다", () => {
-  // 받은 줄은 둘인데 포털이 센 값은 7 이다(세는 규칙이 시스템마다 다르다).
-  // 배지는 자기 1건 + 7 = 8 이어야 한다 — 줄 수(2)로 다시 세면 3이 된다.
+test("🔴 배지는 자기 줄 + 받은 줄이다 — **포털이 센 값을 안 읽는다**", () => {
+  // ── 🔴 2026-11-06 에 뒤집혔다 ───────────────────────────────────────────
+  // 이름이 「배지는 자기 개수 + 받은 개수다 — 받은 값을 다시 세지 않는다」였고
+  // 단언은 `1 + 7 = 8` 이었다. 까닭은 「세는 규칙이 시스템마다 달라, 줄 수로 다시
+  // 세면 그 시스템의 종과 이 종이 다른 숫자를 말한다」였다.
+  //
+  // 🔴 이제는 **반대로 간다**: 배지는 보이는 줄 수라, 받은 몫도 줄로 센다. 포털도
+  //    같은 날 줄 수로 바꿨지만(dss-auth 의 parseSourceFeed) 여기서 `inbox.count`
+  //    를 읽으면 **포털이 먼저 올라가야만** 맞는 숫자가 된다 — 그래서 아예 안 읽는다.
+  //
+  // 🔵 그 선을 재려면 `count` 가 줄 수와 **달라야** 한다. 7 을 그대로 둔 까닭이
+  //    그것이다 — 읽고 있으면 8, 안 읽으면 1 + 2 = 3 이다.
   const html = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={[approval("case-1", "D9705-012", "REPAIR_INSPECTION")]}
@@ -751,17 +786,21 @@ test("🔴 배지는 자기 개수 + 받은 개수다 — 받은 값을 다시 �
       }}
     />
   );
-  assert.ok(html.includes(">알림 8건</span>"), "배지가 자기 개수 + 받은 개수가 아니다");
+  assert.ok(html.includes(">알림 3건</span>"), "🔴 포털이 센 값(7)을 아직 읽고 있다");
+  // 그리고 그 수는 **실제로 그려진 줄 수**다 — 자기 하나 + 받은 둘.
+  assert.equal((html.match(/class="dss-bell__item"/g) ?? []).length, 3);
 });
 
 test("자기 알림이 없어도 받은 것만으로 배지가 선다 — 반대도 같다", () => {
+  // 🔵 2026-11-06 까지는 포털이 센 값(3)이 그대로 배지였다. 이제는 받은 **줄**을
+  //    세므로 한 줄이면 1 이다 — `count: 3` 은 그 둘을 가르려고 일부러 남겨 둔다.
   const onlyReceived = renderToStaticMarkup(
     <NotificationBellWithInbox
       items={[]}
       inbox={{ items: [portalRow()], count: 3, degraded: false, dismissed: [], acknowledged: [] }}
     />
   );
-  assert.ok(onlyReceived.includes(">알림 3건</span>"));
+  assert.ok(onlyReceived.includes(">알림 1건</span>"), "🔴 포털이 센 값(3)이 배지에 그대로 찍혔다");
   assert.ok(onlyReceived.includes("IMP-2026-0031"));
 
   const onlyMine = renderToStaticMarkup(
@@ -1299,8 +1338,11 @@ test("🔴 줄을 누르는 길에 **지움이 한 글자도 없다** — 동작
 });
 
 test("🔴 포털 확인은 **기다리지 않고 감추지도 않는다** — 이동을 붙잡으면 안 된다", () => {
-  // 이 줄의 주소는 다른 시스템의 절대 주소라 누르면 페이지를 통째로 떠난다.
-  // 감췄다 되살릴 틈이 없고, 포털이 센 개수는 줄 수와 달라 감추면 배지가 어긋난다.
+  // 이 줄의 주소는 다른 시스템의 절대 주소라 누르면 페이지를 통째로 떠난다 —
+  // 감췄다 되살릴 틈이 없다.
+  // 🔵 여기에는 둘째 까닭이 적혀 있었다: 「포털이 센 개수는 줄 수와 달라 감추면
+  //    배지가 어긋난다.」 2026-11-06 부터 배지가 **보이는 줄 수**라 그 말은 거짓이
+  //    됐다(감추면 숫자도 함께 준다). 감추지 않는 까닭은 위 하나로 충분하다.
   const 보낸것: string[] = [];
   // 영영 안 풀리는 약속을 돌려준다 — 기다린다면 여기서 멈춘다.
   const 결과 = acknowledgePortalInBackground(
@@ -1509,8 +1551,10 @@ test("🔴 지운 줄은 목록에서도 **배지에서도** 빠진다", () => {
   // 상태는 눌러야 생기므로 정적 렌더로 만들 수 없다 — 값으로 본다.
   const mine = [approval("case-1", "D9705-012", "REPAIR_INSPECTION"), grantedItem()];
   const inbox = {
+    // 🔵 포털이 센 값(7)은 줄 수(2)와 **일부러 다르게** 둔다 — 2026-11-06 부터
+    //    배지는 이 값을 읽지 않는다. 읽고 있으면 아래 단언이 곧바로 빨개진다.
     items: [portalRow(), portalRow({ key: "njlee:CAL:3", sourceId: "njlee", subject: "NJ-3" })],
-    count: 7, // 🔴 줄은 둘인데 포털이 센 값은 7 이다(세는 규칙이 시스템마다 다르다).
+    count: 7,
     degraded: false,
     dismissed: [],
     acknowledged: [],
@@ -1524,7 +1568,9 @@ test("🔴 지운 줄은 목록에서도 **배지에서도** 빠진다", () => {
   });
   assert.equal(그대로.items.length, 2);
   assert.equal(그대로.inboxItems.length, 2);
-  assert.equal(그대로.count, 2 + 7, "지우기 전 배지가 예전과 다르다");
+  // 🔴 2026-11-06 뒤집음: 예전 단언은 `2 + 7` 이었다(자기 것은 건, 받은 것은 포털이
+  //    센 값). 이제는 **보이는 줄**이라 2 + 2 다.
+  assert.equal(그대로.count, 2 + 2, "🔴 배지가 보이는 줄 수가 아니다");
 
   const 지운뒤 = selectVisibleNotifications({
     items: mine,
@@ -1535,12 +1581,23 @@ test("🔴 지운 줄은 목록에서도 **배지에서도** 빠진다", () => {
   });
   assert.deepEqual(지운뒤.items.map((item) => item.id), [mine[0].id]);
   assert.deepEqual(지운뒤.inboxItems.map((row) => row.key), [portalRow().key]);
-  assert.equal(지운뒤.count, 1 + 6, "🔴 지운 줄이 배지에 남았다");
+  // 예전 단언은 `1 + 6` 이었다(포털이 센 7 에서 지운 줄 하나를 뺀 값).
+  assert.equal(지운뒤.count, 1 + 1, "🔴 지운 줄이 배지에 남았다");
 });
 
-test("🔴 배지는 0 아래로 내려가지 않는다 — 포털의 세는 규칙을 우리가 모른다", () => {
-  // 한 대상에 두 줄이 걸려 저쪽이 1로 셌다면 둘을 지울 때 2가 빠진다.
+test("🔴 줄을 다 지우면 0 이다 — 뺄셈이 없어 음수가 될 길 자체가 없다", () => {
+  // ── 🔵 2026-11-06 에 **지키는 것이 달라졌다** ────────────────────────────
+  // 이름이 「배지는 0 아래로 내려가지 않는다 — 포털의 세는 규칙을 우리가 모른다」
+  // 였다. 그때는 배지가 `포털이 센 값 − 지운 줄 수` 라, 한 대상에 두 줄이 걸려
+  // 저쪽이 1 로 셌다면 둘을 지울 때 2 가 빠져 **음수**가 될 수 있었다. 그래서
+  // `Math.max(0, …)` 가 있었다.
+  //
+  // 🔴 이제 배지는 남은 줄을 세기만 한다 — 빼는 셈이 아예 없으므로 음수가 나올
+  //    길이 사라졌다. 그 `Math.max` 도 함께 없앴다. 그래도 이 시험을 지우지 않는
+  //    까닭은 「다 지우면 0」이 여전히 지켜야 할 결과이기 때문이다.
   const inbox = {
+    // 🔵 저쪽이 센 값(1)이 줄 수(2)와 다르다 — 그 값을 다시 읽기 시작하면
+    //    아래에서 음수가 나와 곧바로 드러난다.
     items: [portalRow(), portalRow({ key: "x:2" })],
     count: 1,
     degraded: false,
@@ -1554,7 +1611,7 @@ test("🔴 배지는 0 아래로 내려가지 않는다 — 포털의 세는 규
     dismissedKeys: new Set([portalRow().key, "x:2"]),
   });
 
-  assert.equal(지운뒤.count, 0, "음수 배지가 나왔다");
+  assert.equal(지운뒤.count, 0, "줄이 하나도 없는데 배지가 남았다");
   assert.deepEqual(지운뒤.inboxItems, []);
 });
 
@@ -1657,9 +1714,10 @@ test("🔴 포털이 돌려준 지움으로 **제 줄**이 빠진다 — 두 목
 
   assert.deepEqual(보이는것.items.map((item) => item.id), [mine[0].id], "🔴 포털의 지움이 안 들었다");
   assert.deepEqual(보이는것.inboxItems, inbox.items, "남의 줄까지 건드렸다");
-  // 🔴 **개수도 함께 줄어든다.** 자기 몫은 걸러진 목록에서 다시 세고(1), 포털이
-  //    센 값(3)은 그대로 더한다 — 저쪽 몫은 이미 저쪽에서 빠져 있다.
-  assert.equal(보이는것.count, 1 + 3, "🔴 지운 줄이 배지에 남았다");
+  // 🔴 **개수도 함께 줄어든다.** 2026-11-06 뒤집음: 예전 단언은 `1 + 3` 이었다
+  //    (자기 몫은 걸러진 목록을 건으로 다시 세고, 포털이 센 값 3 은 그대로 더했다).
+  //    이제는 양쪽 다 **남은 줄**이라 1 + 1 이다 — 저쪽 몫은 이미 저쪽에서 빠져 있다.
+  assert.equal(보이는것.count, 1 + 1, "🔴 지운 줄이 배지에 남았다");
 });
 
 test("🔴 두 지움 목록이 **함께** 든다 — 방금 누른 것과 포털이 돌려준 것", () => {
@@ -1740,9 +1798,10 @@ test("🔴 포털이 돌려준 **확인**으로 제 줄이 빠진다 — 배지�
     "🔴 다른 집에서 누른 확인이 안 들었다"
   );
   assert.deepEqual(보이는것.inboxItems, inbox.items, "남의 줄까지 건드렸다");
-  // 🔴 줄만 빼고 숫자를 그대로 두면 「없는데 빨간 점」이 된다. 자기 몫은 걸러진
-  //    목록에서 다시 세고(1), 포털이 센 값(3)은 그대로 더한다.
-  assert.equal(보이는것.count, 1 + 3, "🔴 확인한 줄이 배지에 남았다");
+  // 🔴 줄만 빼고 숫자를 그대로 두면 「없는데 빨간 점」이 된다. 2026-11-06 뒤집음:
+  //    예전 단언은 `1 + 3` 이었다(자기 몫은 건으로 다시 세고 포털이 센 3 을 더했다).
+  //    이제는 양쪽 다 **남은 줄**이라 1 + 1 이다.
+  assert.equal(보이는것.count, 1 + 1, "🔴 확인한 줄이 배지에 남았다");
 });
 
 test("🔴 제 표로 거르는 길과 **나란히** 돈다 — 둘 다 걸러진다", () => {
@@ -1969,4 +2028,250 @@ test("🔴 머리말이 종까지 client_id 를 실제로 날라 준다 — 빠�
   const config = readFileSync(new URL("../../lib/config/sso.ts", import.meta.url), "utf8");
   const reader = config.slice(config.indexOf("export function getSsoClientIdOrEmpty"));
   assert.match(reader, /try \{\s*return getSsoClientId\(\);\s*\} catch \{\s*return "";/);
+});
+
+/* ─────────────────────────────────────────────────────────────────────────
+   🔴 배지 = 종을 열었을 때 보이는 줄 수 (2026-11-06 사용자 결정)
+
+   「나는 **종을 눌렀을 때 나오는 알림의 수**와 **알림종의 숫자**가 **동일했으면
+   좋겠어.**」
+
+   🔴 **이것은 그 전까지 이 저장소에 글자로 적혀 있던 설계를 뒤집은 것이다.** 종
+   배지는 자기 줄을 「같은 대상은 한 번만」(countNotificationTargets) 세고 받은 줄은
+   포털이 센 값을 그대로 더했다. 그래서 같은 시각 한 사람의 화면에서 숫자 셋이 달랐다:
+
+       드롭다운 목록       5줄   ← 「보이는 알림 지우기 5건」
+       A/S 자기 종 배지     4    ← 제 줄을 **건**으로 셌다
+       다른 사이트 종 배지   3    ← 포털이 「건 수」에서 「줄 수」를 뺐다
+
+   포털(dss-auth)은 같은 날 제 쪽을 고쳤다(parseSourceFeed 가 사이트의 `count` 를
+   아예 안 읽는다). 아래 시험들이 지키는 것은 **A/S 몫**이다.
+
+   🔴 **사이드바의 결재 배지는 바뀌지 않았다** — 거기는 「처리할 **건**이 몇인가」를
+   말하는 자리라 건 단위가 맞다. 맨 아래 시험이 그 갈림을 따로 지킨다.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/**
+ * 🔴 **운영에서 신고된 그 화면의 표본**(2026-11-06). 제 줄 **여섯**이고 그중 둘이
+ * **같은 접수 건**이라, 옛 셈(건)으로는 5 · 줄로는 6 이다.
+ *
+ * 🔵 값은 이 파일이 이미 쓰는 가짜 번호·가짜 이름 그대로다 — 공개 저장소라 실제
+ * 고객사·사람 이름을 시험에 넣지 않는다.
+ */
+function 운영표본여섯줄(): NotificationItem[] {
+  return [
+    // ①② **같은 접수 건**에 걸린 결재 둘. 옛 셈이 1 로 접던 자리다.
+    approval("case-1", "D9705-012", "REPAIR_INSPECTION"),
+    approval("case-1", "D9705-012", "FINAL_SHIPMENT"),
+    // ③~⑥ 서로 다른 대상 넷.
+    approval("case-2", "D9705-013", "REPAIR_INSPECTION"),
+    buildQuoteApprovalNotification({
+      quoteId: "quote-1",
+      quoteNumber: "Q-9705-001",
+      routeStepOrder: 1,
+      requestedByName: "박영업",
+    }),
+    buildRepairCaseDueDateNearNotification({
+      repairCaseId: "case-due-1",
+      intakeNumber: "D9705-400",
+      dueDate: "2026-11-10",
+      borrowed: false,
+    }),
+    grantedItem(),
+  ];
+}
+
+/** 아무것도 못 받은 받은함 — 포털을 아직 못 물어본 상태와 같은 값이다. */
+function 빈받은함() {
+  return { items: [], count: 0, degraded: false, dismissed: [], acknowledged: [] };
+}
+
+test("🔴 운영 표본 — 여섯 줄에서 하나를 지우면 배지가 **5** 다", () => {
+  const mine = 운영표본여섯줄();
+
+  // 🔵 **무엇을 재는지 먼저 세운다.** 줄 여섯에 대상 다섯이어야 「줄」과 「건」이
+  //    갈린다. 표본이 이 모양이 아니면 아래 두 경우가 같은 답을 내 공짜로 통과한다.
+  assert.equal(mine.length, 6, "표본이 여섯 줄이 아니다");
+  assert.equal(
+    new Set(mine.map((item) => item.targetKey)).size,
+    5,
+    "표본에 **같은 건 두 줄**이 없다 — 이러면 건으로 세든 줄로 세든 답이 같다"
+  );
+
+  const 지우기전 = selectVisibleNotifications({
+    items: mine,
+    inbox: 빈받은함(),
+    acknowledgedIds: new Set(),
+    dismissedKeys: new Set(),
+    clientId: CLIENT_ID,
+  });
+  assert.equal(지우기전.count, 6, "🔴 지우기 전부터 건으로 세고 있다 — 옛 셈이면 5 다");
+
+  // ── 경우 ① **그 건의 유일한 줄**을 지웠다 — 운영에서 난 바로 그 화면 ───────
+  // 🔴 옛 셈이면 여기서 **4** 가 나온다(대상이 다섯에서 넷으로 준다). 두 경우 가운데
+  //    옛 설계와 새 설계를 **실제로 갈라 주는** 쪽이 이것이다.
+  const 유일한줄지움 = selectVisibleNotifications({
+    items: mine,
+    inbox: 빈받은함(),
+    acknowledgedIds: new Set(),
+    dismissedKeys: new Set([`${CLIENT_ID}:${grantedItem().id}`]),
+    clientId: CLIENT_ID,
+  });
+  assert.equal(유일한줄지움.items.length, 5, "지운 줄이 목록에 남았다");
+  assert.equal(유일한줄지움.count, 5, "🔴 배지가 보이는 줄 수(5)가 아니다 — 옛 셈이면 4 다");
+
+  // ── 경우 ② **같은 건에 걸린 두 줄 가운데 하나**를 지웠다 ──────────────────
+  // 🔴 여기서는 **옛 셈도 5** 를 낸다(남은 대상 수가 그대로다). 이 경우만 재면 한
+  //    글자도 안 고쳐도 통과한다 — 그래서 두 경우를 **함께** 잰다.
+  const 쌍중하나지움 = selectVisibleNotifications({
+    items: mine,
+    inbox: 빈받은함(),
+    acknowledgedIds: new Set(),
+    dismissedKeys: new Set([`${CLIENT_ID}:${mine[1].id}`]),
+    clientId: CLIENT_ID,
+  });
+  assert.equal(쌍중하나지움.items.length, 5);
+  assert.equal(쌍중하나지움.count, 5, "🔴 배지가 보이는 줄 수(5)가 아니다");
+  // 🔵 남은 한 줄은 **그대로 선다** — 같은 건이라고 함께 사라지면 안 된다.
+  assert.ok(
+    쌍중하나지움.items.some((item) => item.id === mine[0].id),
+    "같은 건의 다른 줄까지 사라졌다"
+  );
+});
+
+/** 배지에 찍힌 숫자. 배지가 아예 없으면(0건) 0. */
+function 배지숫자(html: string): number {
+  const found = /class="dss-bell__badge"[^>]*>(\d+)</.exec(html);
+  return found === null ? 0 : Number(found[1]);
+}
+
+test("🔴 **그린 종에서도** 「목록 줄 수 == 배지」다 — 사용자가 말한 그 요구", () => {
+  // 값 시험(위)만으로는 그리는 쪽이 그 값을 안 쓰게 바뀌어도 통과한다. 사람이
+  // 보는 것은 마크업이므로 **그려진 줄**과 **찍힌 숫자**를 맞대어 본다.
+  //
+  // 🔵 표본을 여럿 세우는 까닭: 한 가지만 재면 「언제나」가 아니다. 같은 건 두 줄 ·
+  //    받은 줄이 섞인 경우 · 포털이 센 값이 줄 수와 다른 경우 · 지움과 확인으로
+  //    줄이 빠진 경우를 함께 돌린다.
+  const 표본들: { 이름: string; html: string }[] = [
+    {
+      이름: "자기 줄만 — 같은 건 두 줄이 섞여 있다",
+      html: renderToStaticMarkup(
+        <NotificationBellWithInbox items={운영표본여섯줄()} notificationClientId={CLIENT_ID} />
+      ),
+    },
+    {
+      이름: "자기 줄 + 받은 줄 — 포털이 센 값(7)이 줄 수(2)와 다르다",
+      html: renderToStaticMarkup(
+        <NotificationBellWithInbox
+          items={운영표본여섯줄()}
+          notificationClientId={CLIENT_ID}
+          inbox={{
+            items: [portalRow(), portalRow({ key: "njlee:CAL:3", sourceId: "njlee", subject: "NJ-3" })],
+            count: 7,
+            degraded: false,
+            dismissed: [],
+            acknowledged: [],
+          }}
+        />
+      ),
+    },
+    {
+      이름: "지움 하나 · 다른 집에서 누른 확인 하나로 줄이 빠졌다",
+      html: renderToStaticMarkup(
+        <NotificationBellWithInbox
+          items={운영표본여섯줄()}
+          notificationClientId={CLIENT_ID}
+          inbox={{
+            items: [portalRow(), portalRow({ key: "njlee:CAL:3", sourceId: "njlee", subject: "NJ-3" })],
+            count: 7,
+            degraded: false,
+            dismissed: ["njlee:CAL:3"],
+            acknowledged: [`${CLIENT_ID}:${grantedItem().id}`],
+          }}
+        />
+      ),
+    },
+    {
+      이름: "한 줄도 없다 — 배지가 아예 안 그려진다",
+      html: renderToStaticMarkup(<NotificationBellWithInbox items={[]} />),
+    },
+  ];
+
+  for (const { 이름, html } of 표본들) {
+    const 줄수 = 그려진줄열쇠들(html).length;
+    assert.equal(
+      배지숫자(html),
+      줄수,
+      `${이름}: 🔴 종에 보이는 줄은 ${줄수} 인데 배지는 ${배지숫자(html)} 이다`
+    );
+  }
+
+  // 🔵 **표본이 비어서 공짜로 통과하지 않게** — 숫자가 실제로 여럿이었는지 본다.
+  //    전부 0 줄이면 위 반복문은 아무것도 재지 않는다.
+  const 센수들 = 표본들.map(({ html }) => 그려진줄열쇠들(html).length);
+  assert.deepEqual(센수들, [6, 8, 6, 0], "표본의 줄 수가 달라졌다 — 무엇을 재는지 다시 보라");
+
+  // 🔴 그리고 그 수는 묶음이 **일괄 지우기 단추에 적는 수**와도 같아야 한다.
+  //    사용자가 「5건」이라고 읽은 그 글자가 바로 이것이다.
+  const 지울수있는종 = renderToStaticMarkup(
+    <NotificationBellWithInbox
+      items={운영표본여섯줄()}
+      notificationClientId={CLIENT_ID}
+      dismiss={지움()}
+    />
+  );
+  assert.equal(일괄글자(지울수있는종), "보이는 알림 지우기 6건");
+  assert.equal(배지숫자(지울수있는종), 6, "🔴 단추에 적힌 수와 배지가 다르다");
+});
+
+test("🔴 사이드바 결재 배지는 **한 글자도 안 바뀐다** — 건으로 센다", () => {
+  // 🔴 이 조각에서 가장 조용한 사고가 「종을 고치면서 사이드바까지 따라 바뀌는
+  //    것」이다. 사이드바의 「결재 N건」을 누르면 가는 곳은 **접수 건 목록**이라,
+  //    한 건에 걸린 결재 둘을 2 로 세기 시작하면 숫자와 화면이 어긋난다.
+  const mine = 운영표본여섯줄();
+
+  // ① 세는 함수 자체는 그대로 **건**이다 — 같은 건 두 줄이 1 로 접힌다.
+  assert.equal(
+    countNotificationTargets(mine.map((item) => item.targetKey)),
+    5,
+    "🔴 countNotificationTargets 가 줄을 세기 시작했다 — 사이드바가 함께 바뀐다"
+  );
+  // ② 사이드바가 실제로 읽는 칸(종류별 표)도 그대로다. 접수 건 결재 줄 셋 가운데
+  //    둘이 같은 건이므로 **2** 다(case-1 · case-2).
+  assert.equal(
+    countNotificationTargetsByKind(mine).REPAIR_CASE_APPROVAL,
+    2,
+    "🔴 사이드바 결재 배지가 건이 아니라 줄을 세고 있다"
+  );
+
+  // ③ 🔴 **그래서 두 숫자가 다르다.** 같은 화면에서 사이드바 2 · 종 6 이 정상이다 —
+  //    이것이 이 조각이 일부러 만든 갈림이고, 「둘이 같아야 한다」로 되돌리지 마라.
+  const html = renderToStaticMarkup(
+    <NotificationBellWithInbox items={mine} notificationClientId={CLIENT_ID} />
+  );
+  assert.equal(배지숫자(html), 6, "종 배지가 줄 수가 아니다");
+  assert.notEqual(
+    배지숫자(html),
+    countNotificationTargetsByKind(mine).REPAIR_CASE_APPROVAL,
+    "둘이 같으면 이 시험이 갈림을 못 본다"
+  );
+
+  // ④ 사이드바가 그 값을 뽑는 자리가 그대로인지 원본으로 본다 — 여기가 종과 같은
+  //    셈으로 바뀌면 값 시험으로는 안 드러난다(둘 다 통과하는 숫자가 있다).
+  const 레이아웃 = readFileSync(new URL("../../app/(app)/layout.tsx", import.meta.url), "utf8");
+  assert.match(
+    레이아웃,
+    /const myPendingApprovalCount = countNotificationTargetsByKind\(notifications\)\.REPAIR_CASE_APPROVAL;/,
+    "🔴 사이드바 배지를 뽑는 자리가 바뀌었다"
+  );
+  // 🔴 종은 그 함수를 **더 이상 안 가져온다**. 가져오는 순간 건으로 되돌릴 길이 열린다.
+  //    🔵 주석은 빼고 본다 — 걷어낸 경위를 적어 둔 주석에 그 이름이 그대로 적혀 있다.
+  const 종코드만 = readLayoutSource("NotificationBell.tsx")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^[ \t]*\/\/.*$/gm, "");
+  assert.ok(
+    !/countNotificationTargets/.test(종코드만),
+    "🔴 종이 건으로 세는 함수를 다시 가져왔다"
+  );
+  assert.match(종코드만, /const count = items\.length \+ inboxItems\.length;/, "종이 줄을 세지 않는다");
 });

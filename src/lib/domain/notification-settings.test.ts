@@ -68,6 +68,15 @@ function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
     // 받는」 결재자가 생긴다.
     return true;
   }
+  if (kind === "DOMESTIC_ORDER_APPROVAL_PENDING") {
+    // 2026-11-06 에 태어난 종류다. 답도 까닭도 바로 위 견적서 결재 대기와 같다 —
+    // 누가 받는지는 기타건 최종 출하 승인 결재선의 지정(그 단계를 위임받은 사람과
+    // 최고관리자 비상구 포함)이 정하고, 그 결재선에도 역할 제한이 없다.
+    // 🔴 **올리는 쪽의 열쇠(`domesticOrders` WRITE)로 좁히고 싶어지는 자리인데,
+    //    그러면 안 된다.** 올리는 자격과 결재하는 자격은 이 기능에서 일부러 갈라
+    //    두었다 — 좁히면 결재선에 세워 둔 사람이 알림을 못 받는다.
+    return true;
+  }
   if (kind === "REPAIR_CASE_DUE_DATE_NEAR") {
     // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로
     // 적는다 — 다섯 역할 전부(2026-10-19 사용자 결정 「모두에게 보인다」).
@@ -232,7 +241,7 @@ test("🔴 toneClassName 의 색과 toneIndex 가 가리키는 칸의 색이 같
   }
 });
 
-test("🔴 일곱 종류가 **지정한** 칸에 앉는다 — 2026-10-19 사용자 결정", () => {
+test("🔴 여덟 종류가 **지정한** 칸에 앉는다 — 2026-10-19 사용자 결정", () => {
   // 일부러 표를 그대로 읽지 않고 손으로 다시 적는다 — NOTIFICATION_KIND_META 를
   // 읽어 비교하면 무엇을 고쳐도 늘 통과하는 시험이 된다.
   // satisfies 가 빠진 종류와 없는 종류를 둘 다 잡는다.
@@ -241,13 +250,18 @@ test("🔴 일곱 종류가 **지정한** 칸에 앉는다 — 2026-10-19 사용
   //    갈래는 「내가 할 일」인데 색만 붉은 계열이다(2026-10-30 사용자 요청 — 「붉은
   //    계열로」·「주황색 계열로」). 빨강 0(납기 임박)·장미 9(반려됨)와도, 서로도
   //    갈라지라고 붉은 쪽에서 가장 먼 두 칸을 골랐다 — 둘은 같은 건에서 차례로 뜨는
-  //    짝이다. 아직 비어 있는 칸: 하늘 8 · 남보라 6.
+  //    짝이다.
+  // 🔵 2026-11-06 에 기타건 결재 대기가 **남보라 6** 을 가져가 여덟이 됐다. 그 칸은
+  //    2026-10-27 에 불출 승인 대기를 걷어내며 비워 둔 자리이고, 갈래가 같은 「대기
+  //    줄」이라 파랑 계열 묶음(파랑 15 · 보라 13) 사이에 앉는다. 아직 비어 있는 칸:
+  //    하늘 8.
   const 지정 = {
     REPAIR_CASE_DUE_DATE_NEAR: 0, // 빨강 — 급한 경고
     APPROVAL_GRANTED: 12, // 초록 — 결과(됐다)
     APPROVAL_REJECTED: 9, // 장미 — 결과(안 됐다)
     REPAIR_CASE_APPROVAL: 15, // 파랑 — 내가 할 일
     QUOTE_APPROVAL_PENDING: 13, // 보라 — 내가 할 일
+    DOMESTIC_ORDER_APPROVAL_PENDING: 6, // 남보라 — 내가 할 일(결재 대기 셋의 막내)
     REPAIR_CASE_TARGET_SHIPMENT_MISSING: 7, // 주황 — 내가 할 일(색은 사용자가 정했다)
     REPAIR_CASE_DUE_DATE_INVERTED: 14, // 호박 — 내가 할 일(색은 사용자가 정했다)
   } satisfies Record<NotificationKind, number>;

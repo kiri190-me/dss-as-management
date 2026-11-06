@@ -5,8 +5,10 @@ import {
   type ApprovalRouteDelegationPeriod,
 } from "@/lib/domain/approval-route-delegation";
 import {
+  notifyDomesticOrderApprovalCreated,
   notifyQuoteApprovalCreated,
   notifyRepairCaseApprovalCreated,
+  type DomesticOrderApprovalNoticeDeps,
   type QuoteApprovalNoticeDeps,
   type RepairCaseApprovalNoticeDeps,
 } from "./approval-created-notice";
@@ -602,4 +604,108 @@ test("🔴 견적서 쪽도 던지지 않는다", async () => {
   const { logged } = await captureLogs(() => notifyQuoteApprovalCreated("quote-1", d));
 
   assert.match(logged, /견적서 결재 생성 알림을 준비하지 못했습니다/);
+});
+
+/* -------------------------------------------------------------------------- */
+/* 기타건 결재 — 언제나 지정이 있고, **출하 대표는 끼지 않는다** (2026-11-06)   */
+/* -------------------------------------------------------------------------- */
+
+function domesticDeps(overrides: Partial<DomesticOrderApprovalNoticeDeps> = {}) {
+  const calls = { notified: [] as string[][], routeDelegatesAskedFor: [] as string[] };
+  const base: DomesticOrderApprovalNoticeDeps = {
+    readDomesticOrderProgress: async () => null,
+    listRouteDelegatesFor: async (approverUserId) => {
+      calls.routeDelegatesAskedFor.push(approverUserId);
+      return [];
+    },
+    readPortalSubject: async (userId) => `portal-${userId}`,
+    notifyPortal: async (subjects) => {
+      calls.notified.push([...subjects]);
+      return true;
+    },
+  };
+  return { deps: { ...base, ...overrides }, calls };
+}
+
+test("기타건 결재 — 지정된 그 사람에게 간다(대리인이 없을 때)", async () => {
+  const { deps: d, calls } = domesticDeps({
+    readDomesticOrderProgress: async () => ({
+      latest: { status: "REQUESTED", assignedApproverUserId: "user-step-2" },
+    }),
+  });
+
+  await notifyDomesticOrderApprovalCreated("order-1", d);
+
+  assert.deepEqual(calls.notified, [["portal-user-step-2"]]);
+  assert.deepEqual(calls.routeDelegatesAskedFor, ["user-step-2"]);
+});
+
+test("🔴 기타건 결재도 **대리인에게 간다** — 전부 결재선을 타므로 이 길이 확실하다", async () => {
+  // 🔴 기타건 결재는 판이 없거나 단계가 0개면 요청 자체가 거절되므로 **언제나 지정이
+  //    있다.** 곧 전부 결재선을 탄다는 뜻이고, 그 단계를 대신 누르라고 세운 사람이
+  //    결재선 단계 위임의 대리인이다(2026-10-26 의 그 기능).
+  const { deps: d, calls } = domesticDeps({
+    readDomesticOrderProgress: async () => ({
+      latest: { status: "REQUESTED", assignedApproverUserId: "user-step-2" },
+    }),
+    listRouteDelegatesFor: 위임조회([
+      위임({ delegatorUserId: "user-step-2", delegateUserId: "user-stand-in" }),
+      // 남의 줄 — 섞여 있어도 안 실린다.
+      위임({ delegatorUserId: "user-step-1", delegateUserId: "user-other" }),
+    ]),
+  });
+
+  await notifyDomesticOrderApprovalCreated("order-1", d);
+
+  assert.deepEqual(calls.notified, [["portal-user-step-2", "portal-user-stand-in"]]);
+});
+
+test("기타건 결재 — 사슬이 끝났거나(승인) 끊겼으면(반려) 아무것도 안 나간다", async () => {
+  for (const status of ["APPROVED", "REJECTED"]) {
+    const { deps: d, calls } = domesticDeps({
+      readDomesticOrderProgress: async () => ({
+        latest: { status, assignedApproverUserId: "user-1" },
+      }),
+    });
+
+    await notifyDomesticOrderApprovalCreated("order-1", d);
+
+    assert.deepEqual(calls.notified, [], `${status} 인데 포털을 불렀다`);
+  }
+});
+
+test("기타건 줄이 없거나 한 번도 올린 적이 없으면 부르지 않는다", async () => {
+  for (const progress of [null, { latest: null }]) {
+    const { deps: d, calls } = domesticDeps({ readDomesticOrderProgress: async () => progress });
+    await notifyDomesticOrderApprovalCreated("order-1", d);
+    assert.deepEqual(calls.notified, []);
+  }
+});
+
+test("🔴 지정 없는 기타건 결재 행은 생길 수 없다 — 생겼다면 **견적서와 다른 말로** 적는다", async () => {
+  const { deps: d, calls } = domesticDeps({
+    readDomesticOrderProgress: async () => ({
+      latest: { status: "REQUESTED", assignedApproverUserId: null },
+    }),
+  });
+
+  const { logged } = await captureLogs(() => notifyDomesticOrderApprovalCreated("order-1", d));
+
+  assert.deepEqual(calls.notified, [], "누구에게 보낼지 모르는데 포털을 불렀다");
+  // 🔴 **출하 대표에게 떠넘기지 않는다.** 기타건에는 「출하 대표」가 없어서, 그 길로
+  //    빠지면 수리 건 출하 대표에게 기타건 결재 메일이 간다.
+  assert.match(logged, /지정이 없는 기타건 결재/);
+  assert.ok(!logged.includes("견적서"), "견적서 쪽 로그로 빠졌다 — 어느 갈래가 깨졌는지 모른다");
+});
+
+test("🔴 기타건 쪽도 던지지 않는다", async () => {
+  const { deps: d } = domesticDeps({
+    readDomesticOrderProgress: async () => {
+      throw new Error("DB 가 죽었다");
+    },
+  });
+
+  const { logged } = await captureLogs(() => notifyDomesticOrderApprovalCreated("order-1", d));
+
+  assert.match(logged, /기타건 결재 생성 알림을 준비하지 못했습니다/);
 });
