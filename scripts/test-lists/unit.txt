@@ -1753,3 +1753,22 @@ src/lib/domain/domestic-order-detail-link.test.ts
 #    🔴 빌려 온 납기요청일에 꼬리표가 붙는가. 🔵 못 둘을 먼저 박는다 — 빈 값에도 머리 알약이
 #    넷 그대로인가(사라지면 「덜 그려졌다」로 읽힌다), 모든 칸의 lines 가 비어 있지 않은가.
 src/lib/domain/domestic-order-basic-info.test.ts
+
+# 2026-11-06 — **기타건의 견적서 공유폴더를 무엇으로 찾는가**(사용자 지시 「내자정리에 적힌
+#    견적서 번호로 [견적서]탭의 공유폴더를 찾아서 띄워줘」). 재는 것: 🔴 견적발행일이 **먼저**
+#    이고(해를 넘긴 건은 번호의 연도가 아니라 발행일 쪽 폴더에 있다) 비었을 때만 번호의 연도로
+#    때우는가 · 🔴 때운 날짜도 **기존 규칙(quoteArchiveYearFromDate)이 받는 값**인가(연도 범위
+#    판정을 베껴 적지 않았다 — 1999 는 「못 정함」이다) · 🔴 「번호가 없다」와 「연도를 못
+#    정한다」를 갈라 답하는가(안내 문장이 다르다) · 던지지 않는가. 🔴 마지막 describe 가
+#    저장소 전체를 훑어 **폴더 이름을 견주는 두 함수를 부르는 파일**이 이름 규칙과 저장소
+#    모듈뿐임을 못 박는다(주석을 걷어낸 뒤에 센다 — 이번에 더한 셋이 주석에 그 이름을 적는다).
+src/lib/domain/domestic-order-quote-archive.test.ts
+# 그 번호로 폴더 안을 읽어 주는 통로(2026-11-06). 🔴 **받는 것은 내자 줄의 id 하나**이고
+#    번호는 서버가 그 줄에서 꺼낸다(요청에 번호를 실으면 아무 번호나 넣어 남의 폴더를 본다 —
+#    searchParams · 본문 읽기가 아예 없음을 글자로 본다) · 🔴 권한이 **두 겹**(domesticOrders
+#    READ → quotes READ)이고 조회보다 앞인가 · 🔴 찾아볼 수 없는 줄은 디스크를 보지 않는가
+#    (no-quote-number · no-quote-date 가 저장소 호출보다 앞, 단 공유폴더 설정 판정은 그보다 앞) ·
+#    🔴 아무것도 만들지 않고 파일 바이트를 중계하지 않으며 응답에 절대 경로가 없는가 ·
+#    🔴 맞는 폴더가 여럿이면 목록도 경로도 내지 않는가 · 🔴 폴더 찾는 규칙을 제 손으로 쓰지
+#    않는가. 읽기 자체는 lib/storage/quote-archive-entries.test.ts 가 본다.
+src/app/api/domestic-orders/*/quote-archive-folder/entries/route-source.test.ts

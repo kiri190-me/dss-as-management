@@ -182,7 +182,7 @@ describe("🔴 기본정보 탭 — 내자 정리의 내용이 화면에 나온�
   });
 });
 
-describe("🔴 탭 틀 — 기본정보가 첫 화면이고, 셋은 자리만 서 있다", () => {
+describe("🔴 탭 틀 — 기본정보가 첫 화면이고, 아직 안 만든 둘만 자리표시다", () => {
   test("탭 넷의 차례가 기본정보 · 견적서 · 발주서 · 승인이다", () => {
     const list = flat(tabs.slice(indexOrFail(tabs, "const tabs = ["), indexOrFail(tabs, "const activeHref")));
     assert.ok(list.includes('{ label: "기본정보", href: hrefs.root },'), list);
@@ -200,9 +200,8 @@ describe("🔴 탭 틀 — 기본정보가 첫 화면이고, 셋은 자리만 �
     assert.equal(tabs.includes("canViewPurchaseOrders"), false, "안 쓰는 프롭이 생겼다");
   });
 
-  test("🔴 안 만든 탭 셋은 빈 화면이 아니라 「다음 조각에서 채웁니다」가 선다", () => {
+  test("🔴 아직 안 만든 탭 둘은 빈 화면이 아니라 「다음 조각에서 채웁니다」가 선다", () => {
     for (const [name, source] of [
-      ["견적서", quotesPage],
       ["발주서", purchaseOrdersPage],
       ["승인", approvalPage],
     ] as const) {
@@ -212,6 +211,21 @@ describe("🔴 탭 틀 — 기본정보가 첫 화면이고, 셋은 자리만 �
     // 기본정보 탭은 자리표시가 아니다 — 진짜 내용을 그린다.
     assert.equal(basicInfoPage.includes("다음 조각에서 채웁니다"), false, basicInfoPage);
     assert.ok(basicInfoPage.includes("<DomesticOrderBasicInfoView row={row} />"), basicInfoPage);
+  });
+
+  /**
+   * 🔴 **견적서 탭은 2026-11-06 에 채워졌다** — 이 시험은 그날 「셋」에서 「둘」로 줄었다.
+   * 줄이기만 하면 그 탭이 다시 자리표시로 돌아가도 아무도 모르므로, **채워졌다는 사실**을
+   * 여기서 못 박는다(탭이 무엇을 그리는지는 domestic-order-quote-tab-screens.test.tsx 가 본다).
+   */
+  test("🔴 견적서 탭은 자리표시가 아니다 — 갈래 둘을 실제로 그린다", () => {
+    assert.equal(quotesPage.includes("다음 조각에서 채웁니다"), false, quotesPage);
+    // ① 시스템 견적서가 있는 줄 → 수리 건 탭과 같은 공용 목록
+    assert.ok(quotesPage.includes("<QuoteListSlots rows={rows}"), quotesPage);
+    // ② 없는 줄 → 내자 정리에 적힌 번호로 공유폴더만(사용자 결정 2026-11-06)
+    assert.ok(quotesPage.includes("<DomesticOrderQuoteArchiveFolderSection domesticOrderId={row.id}"), quotesPage);
+    // 🔴 안내 상자는 그대로 쓴다 — 번호도 없는 줄에 **조용한 빈 화면**을 내밀지 않는다.
+    assert.ok(quotesPage.includes("<DomesticOrderDetailNotice"), quotesPage);
   });
 });
 

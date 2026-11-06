@@ -148,7 +148,26 @@ export async function listQuotesForRepairCase(repairCaseId: string): Promise<Quo
 }
 
 /**
- * 위 둘의 공통 몸통. `narrow` 는 `is_deleted = false` 에 **더해지는** 조건이다 —
+ * **이 내자 줄에 연결된 견적서.** 기타건 상세의 「견적서」 탭이 쓴다(2026-11-06).
+ *
+ * 받는 것은 내자 줄의 `quote_id` 다 — 한 줄이 가리키는 견적서는 많아야 한 장이라
+ * 결과는 **0 또는 1 줄**이다. 그런데도 **목록 모양**으로 돌려주는 까닭은 그 탭이
+ * 수리 건 탭과 **같은 공용 목록 화면**을 그리기 때문이다(QuoteListSlots). 한 장짜리
+ * 전용 조회를 따로 만들면 금액 · 요약 줄 · 파일 딱지를 거기서 다시 짜게 되고, 그것이
+ * 바로 「같은 견적서의 다른 금액」이 생기는 길이다.
+ *
+ * 🔴 **휴지통에 든 장은 빈 목록이다**(`is_deleted = false` — 위 둘과 같다). 연결은
+ * 남아 있어도 보여 줄 장이 없다는 뜻이고, 그때 그 탭은 **내자 줄에 손으로 적힌
+ * 견적서번호로 공유폴더만 찾는 갈래**로 간다(그 줄의 displayQuoteNumber 가 이미 손
+ * 번호로 되돌아와 있다 — queries/domestic-orders.ts 의 매퍼).
+ */
+export async function listQuotesForDomesticOrder(quoteId: string | null): Promise<QuoteListItem[]> {
+  if (quoteId === null || !UUID_PATTERN.test(quoteId)) return [];
+  return selectQuoteList(eq(quotes.id, quoteId));
+}
+
+/**
+ * 위 셋의 공통 몸통. `narrow` 는 `is_deleted = false` 에 **더해지는** 조건이다 —
  * 대신하지 않는다. 지운 장을 되살리는 통로가 이 함수를 통해 열리면 안 된다.
  */
 async function selectQuoteList(narrow?: SQL): Promise<QuoteListItem[]> {
