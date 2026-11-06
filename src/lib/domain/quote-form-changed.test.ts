@@ -32,6 +32,9 @@ function sample(): QuoteComparableFields {
     intakeNumberText: "D260101",
     customerId: "cust-1",
     customerNameText: "보기 고객사",
+    // 「새 고객사로 등록」을 눌러 둔 이름(2026-11-06). 아래 「칸마다 하나씩」 묶음이
+    // 이 칸도 흔들어 본다 — 비교에서 빠지면 거기서 터진다.
+    newCustomerName: null,
     modelNameText: "MODEL-X",
     lotNumberText: "LN-0000",
     serialNumberText: "SN-0000",

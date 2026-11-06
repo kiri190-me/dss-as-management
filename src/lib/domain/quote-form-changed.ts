@@ -85,6 +85,13 @@ export type QuoteComparableFields = {
   intakeNumberText: string;
   customerId: string | null;
   customerNameText: string;
+  /**
+   * 🔴 「새 고객사로 등록」을 눌러 둔 이름(2026-11-06). **저장에 실리는 값이라 여기
+   * 들어온다** — 글자는 그대로 둔 채 단추만 눌렀다 껐다 하는 자리가 실제로 있고
+   * (옛 견적서를 열어 공급처만 이어 붙이는 길), 그때 나가면 묻지 않는다면
+   * 「눌러 둔 것」이 말없이 사라진다.
+   */
+  newCustomerName: string | null;
   modelNameText: string;
   lotNumberText: string;
   serialNumberText: string;
@@ -124,6 +131,7 @@ const QUOTE_COMPARABLE_FIELD_KEYS: Record<keyof QuoteComparableFields, true> = {
   intakeNumberText: true,
   customerId: true,
   customerNameText: true,
+  newCustomerName: true,
   modelNameText: true,
   lotNumberText: true,
   serialNumberText: true,

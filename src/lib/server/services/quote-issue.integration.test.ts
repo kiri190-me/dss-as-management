@@ -106,6 +106,8 @@ function quoteFields(suffix: string, overrides: Partial<QuoteFields> = {}): Quot
     intakeNumberText: null,
     customerId: null,
     customerNameText: "시험 공급처",
+    // 「새 고객사로 등록」을 누르지 않은 장(2026-11-06) — 고객사를 만들지 않는다.
+    newCustomerName: null,
     modelNameText: "MODEL-T1",
     lotNumberText: null,
     serialNumberText: null,

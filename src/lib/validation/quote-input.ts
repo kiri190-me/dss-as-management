@@ -27,6 +27,11 @@ function isWorkflowKind(value: unknown): value is WorkflowKind {
  * 연결일 뿐이고, 종이에 찍히는 것은 customerNameText 다. 마스터에 없는
  * 거래처로 한 장 내는 일이 있어서 id 는 비어도 된다.
  *
+ * 🔴 2026-11-06 에 **칸이 하나 더 붙었다 — newCustomerName.** 화면이 공급처 칸을
+ * 고르개로 바꾸면서(components/quotes/quote-customer-pick.ts), 목록에 없는 이름은
+ * 「새 고객사로 등록」을 눌러 마스터에 세울 수 있게 됐다. 🔴 **위 한 줄은 그대로다** —
+ * 누르지 않고 저장하면 지금까지처럼 글자만 남고 id 는 빈다.
+ *
  * ── 유효기간·납기·결재조건은 비어 있는 것이 기본이다 ────────────────────
  * null 이면 양식에 이미 적힌 문구("발행일로부터 4주" 등)가 그대로 나간다
  * (quote-template.ts). 기본값을 여기서 채워 넣으면 양식의 문구를 고쳤을 때
@@ -201,6 +206,22 @@ export type QuoteFields = {
   intakeNumberText: string | null;
   customerId: string | null;
   customerNameText: string;
+  /**
+   * 🔴 **이 이름으로 고객사를 찾거나 새로 만들어 달라**(2026-11-06 — 공급처 고르개).
+   * 화면에서 「새 고객사로 등록」을 **눌렀을 때만** 실려 온다
+   * (components/quotes/quote-customer-pick.ts 의 `quoteCustomerSaveFields`).
+   *
+   * 🔴 **글자를 쳤다는 것만으로는 절대 오지 않는다.** 매 키 입력마다 오면 오타 한 번에
+   * 고객사 마스터가 늘고, 그것을 지울 수 있는 사람은 관리자뿐이다.
+   *
+   * 🔴 **`customerId` 가 이긴다** — 둘 다 오면 아래 검증이 이 칸을 null 로 접는다.
+   * 이미 이어 붙은 장에 이름으로 한 번 더 만들러 가면, 대소문자만 다른 이름이
+   * 고유 제약에 걸려 저장 자체가 터진다.
+   *
+   * 실제로 찾거나 만드는 일은 **저장 트랜잭션 안**에서 한 번만 일어난다
+   * (mutations/quotes.ts → resolveOrCreateCustomerByName). 여기서는 형식만 본다.
+   */
+  newCustomerName: string | null;
   modelNameText: string | null;
   lotNumberText: string | null;
   serialNumberText: string | null;
@@ -409,6 +430,16 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
   const remarks = optionalText("remarks", "특이사항", MAX_LONG_TEXT);
   const repairCaseId = optionalId("repairCaseId", "수리 건");
   const customerId = optionalId("customerId", "고객사");
+  /**
+   * 「새 고객사로 등록」(2026-11-06). 공급처 글자와 **같은 폭**으로 본다 — 어차피 같은
+   * 칸의 글자이고, 들어갈 자리도 `customers.name` 한 줄이다.
+   *
+   * 🔴 **연결이 이미 있으면 접어 버린다.** 화면은 둘을 함께 보내지 않지만(고르개가
+   * 가른다), 검증은 화면이 무엇을 보냈든 혼자 서 있어야 한다 — 둘 다 받아 넘기면
+   * mutation 이 「id 도 있는데 이름으로 또 만들라」는 뜻 모를 요청을 받는다.
+   */
+  const newCustomerNameText = optionalText("newCustomerName", "새 고객사", MAX_SHORT_TEXT);
+  const newCustomerName = customerId === null ? newCustomerNameText : null;
   const workCost = normalizeAmount("workCost", "작업비", raw.workCost, fieldErrors) ?? "0";
   const items = normalizeItems(raw.items, fieldErrors);
 
@@ -480,6 +511,7 @@ export function validateQuoteFields(raw: Record<string, unknown>): ValidateQuote
       intakeNumberText: shortTexts.intakeNumberText,
       customerId,
       customerNameText,
+      newCustomerName,
       modelNameText: shortTexts.modelNameText,
       lotNumberText: shortTexts.lotNumberText,
       serialNumberText: shortTexts.serialNumberText,

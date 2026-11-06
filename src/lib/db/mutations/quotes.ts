@@ -23,6 +23,11 @@ import {
 } from "@/lib/domain/quote-change-detection";
 import type { QuoteSaveOutcome } from "@/lib/domain/quote-save-outcome";
 import { autoRejectQuoteApprovalAfterEdit } from "./quote-approval-auto-reject";
+/* 🔴 공급처를 고객사 마스터에 세우는 일은 **접수 화면이 쓰는 그 함수**를 그대로 부른다
+   (2026-11-06). 이름을 접는 자(normalizeEntityName)도, 같은 이름이 동시에 들어왔을 때
+   23505 를 받아 다시 찾는 처리도 저쪽에 이미 있다 — 여기에 한 벌 더 적으면 두 화면이
+   서로 다른 자로 「같은 이름」을 재는 날이 온다. */
+import { resolveOrCreateCustomerByName } from "./intake-master-resolution";
 
 /**
  * ============================================================================
@@ -80,6 +85,12 @@ import { autoRejectQuoteApprovalAfterEdit } from "./quote-approval-auto-reject";
  * 일이 되어야 한다. 하는 일은 mutations/quote-approval-auto-reject.ts 한 곳에
  * 있고, 사람이 반려하는 길(decideQuoteApproval)은 건드리지 않았다. 2026-09-18 의
  * 「이 표를 보고 발행을 막지 말 것」과 어긋나지 않는 까닭은 그 파일 머리말에 있다.
+ *
+ * ── 🔴 **공급처가 고객사 마스터를 만들 수 있다** (2026-11-06) ───────────────
+ * 화면에서 「새 고객사로 등록」을 누른 장에 한해, 저장 트랜잭션 안에서 그 이름으로
+ * 고객사를 찾거나 만든다(아래 withResolvedCustomer). 🔴 **글자를 쳤다는 것만으로는
+ * 아무것도 만들지 않는다** — 그 판단은 화면이 이미 끝내고 오고, 그 규칙은
+ * components/quotes/quote-customer-pick.ts 한 곳에 있다.
  *
  * ── PII ─────────────────────────────────────────────────────────────────
  * subject · faultDescriptionText · validity · delivery · payment 는 사람이
@@ -186,6 +197,59 @@ function toColumnValues(fields: QuoteFields) {
     isExcelOnly: fields.isExcelOnly,
     manualSupplyAmount: fields.manualSupplyAmount,
   };
+}
+
+/**
+ * ============================================================================
+ * 🔴 **공급처를 고객사 마스터에 잇는다** (2026-11-06)
+ * ============================================================================
+ * 화면에서 「새 고객사로 등록」을 누른 장만 `newCustomerName` 을 싣고 온다
+ * (components/quotes/quote-customer-pick.ts). 그때 이름으로 **찾거나 만들어** 그
+ * id 를 `customerId` 에 끼워 넣고, 그 뒤로는 사람이 목록에서 고른 것과 완전히 같은
+ * 길을 간다.
+ *
+ * 🔴 **저장과 같은 트랜잭션 안이다.** 번호가 겹쳐 저장이 되돌아가면 방금 만든
+ * 고객사도 함께 없던 일이 되어야 한다 — 바깥에서 먼저 만들어 두면, 실패한 저장이
+ * 마스터에 이름만 남기고 사라진다(접수 화면이 resolveOrCreateCustomerByName 을
+ * 트랜잭션 안에서 부르는 것과 같은 까닭이다 — mutations/repair-cases.ts).
+ *
+ * 🔴 **`customerId` 가 있으면 아무 일도 하지 않는다.** 검증이 이미 그 짝을 접었고
+ * (validation/quote-input.ts), 여기서 한 번 더 보는 것은 이 계층이 검증을 거치지
+ * 않은 호출에도 혼자 서야 하기 때문이다.
+ *
+ * 🔵 대소문자 · 가운데 공백만 다른 이름은 **만들지 않고 있는 것에 붙는다** — 저쪽
+ * 함수가 `isExactNormalizedMatch` 로 먼저 찾기 때문이고, 그 자가 곧 DB 의
+ * `customers_normalized_name_unique` 식이다(drizzle/0022).
+ * ============================================================================
+ */
+const CUSTOMER_CREATE_FAILED_MESSAGE = "공급처를 고객사로 등록하지 못했습니다. 이름을 확인해 주세요.";
+
+type ResolvedCustomerFields =
+  | { ok: true; fields: QuoteFields }
+  | { ok: false; result: QuoteMutationResult };
+
+async function withResolvedCustomer(tx: Tx, fields: QuoteFields): Promise<ResolvedCustomerFields> {
+  const name = fields.newCustomerName;
+  if (fields.customerId !== null || name === null) return { ok: true, fields };
+
+  const resolved = await resolveOrCreateCustomerByName(tx, name);
+  if (!resolved.ok) {
+    /**
+     * 🔴 저쪽의 실패는 접수 폼의 칸 이름(`customerId`)으로 적혀 오는데, **이 화면에는
+     * 그 칸이 없다** — 그대로 넘기면 오류 문장이 어디에도 안 붙는다. 그래서 견적서
+     * 화면이 실제로 그리는 칸(`customerNameText`)으로 옮겨 적는다.
+     */
+    return {
+      ok: false,
+      result: {
+        ok: false,
+        code: "VALIDATION_ERROR",
+        fieldErrors: { customerNameText: CUSTOMER_CREATE_FAILED_MESSAGE },
+        message: CUSTOMER_CREATE_FAILED_MESSAGE,
+      },
+    };
+  }
+  return { ok: true, fields: { ...fields, customerId: resolved.customerId } };
 }
 
 function duplicateNumberResult(): QuoteMutationResult {
@@ -472,10 +536,20 @@ export async function createQuote(params: {
       if (badReference) return badReference;
       if (await quoteNumberTaken(tx, params.fields.quoteNumber)) return duplicateNumberResult();
 
+      /**
+       * 🔴 「새 고객사로 등록」을 누른 장이면 **여기서** 마스터에 세우고 id 를 받는다
+       * (위 withResolvedCustomer). 🔴 **거절할 것을 다 거절한 뒤**다 — 번호가 겹쳐
+       * 돌아가는 길에서 고객사만 만들어 두면, 사람은 저장에 실패했는데 마스터에는
+       * 이름이 생긴다(트랜잭션이 되돌리긴 하지만, 안 만드는 편이 읽기 쉽다).
+       */
+      const withCustomer = await withResolvedCustomer(tx, params.fields);
+      if (!withCustomer.ok) return withCustomer.result;
+      const fields = withCustomer.fields;
+
       const [inserted] = await tx
         .insert(quotes)
         .values({
-          ...toColumnValues(params.fields),
+          ...toColumnValues(fields),
           createdBy: params.actorUserId,
           // 만든 사람이 곧 마지막으로 고친 사람이다. 비워 두면 "누가 마지막으로
           // 손댔는가"가 첫 수정 전까지 빈칸으로 남는다.
@@ -486,9 +560,9 @@ export async function createQuote(params: {
       // 같은 트랜잭션 안이다 — 부품을 넣다 실패하면 방금 만든 장도 함께 없던
       // 일이 된다. 부품만 빠진 견적서가 남는 편이 더 나쁘다: 화면에는 정상으로
       // 보이는데 금액이 작업비뿐인 장이 된다.
-      await replaceItems(tx, inserted.id, params.fields);
-      await replaceRepairTasks(tx, inserted.id, params.fields);
-      await replaceWorkScopeLines(tx, inserted.id, params.fields);
+      await replaceItems(tx, inserted.id, fields);
+      await replaceRepairTasks(tx, inserted.id, fields);
+      await replaceWorkScopeLines(tx, inserted.id, fields);
 
       // 🔴 새 장에는 견줄 어제가 없고 결재도 아직 없다 — 언제나 `SAVED` 다.
       return { ok: true, id: inserted.id, version: inserted.version, outcome: "SAVED" };
@@ -561,6 +635,19 @@ export async function updateQuote(params: {
       }
 
       /**
+       * 🔴 「새 고객사로 등록」을 누른 장이면 **여기서** 마스터에 세우고 id 를 받는다
+       * (위 withResolvedCustomer).
+       *
+       * 🔴 **「안 바뀜」을 재기 전이다.** 이 장이 바뀐 것은 `customer_id` 하나뿐일 수
+       * 있는데(옛 견적서를 열어 공급처만 이어 붙인 경우), 뒤에 두면 비교가 아직 null 인
+       * 값을 보고 「한 글자도 안 바뀌었다」로 끝낸다 — 그러면 사람은 단추를 누르고
+       * 저장했는데 **아무 일도 일어나지 않는다.** 오류가 아니라 침묵이다.
+       */
+      const withCustomer = await withResolvedCustomer(tx, params.fields);
+      if (!withCustomer.ok) return withCustomer.result;
+      const fields = withCustomer.fields;
+
+      /**
        * 🔴 **아무것도 안 바뀌었으면 여기서 끝난다** — UPDATE 도, 줄 갈아 끼우기도,
        * 판 번호 올리기도, 결재 자동 반려도 하지 않는다(파일 머리말).
        *
@@ -569,14 +656,14 @@ export async function updateQuote(params: {
        * 덮으면 사람은 무엇이 문제인지 영영 모른다.
        */
       const stored = await storedSnapshot(tx, params.id, existing);
-      if (isQuoteContentUnchanged(incomingSnapshot(params.fields), stored)) {
+      if (isQuoteContentUnchanged(incomingSnapshot(fields), stored)) {
         return { ok: true, id: existing.id, version: existing.version, outcome: "UNCHANGED" };
       }
 
       const [updated] = await tx
         .update(quotes)
         .set({
-          ...toColumnValues(params.fields),
+          ...toColumnValues(fields),
           version: sql`${quotes.version} + 1`,
           updatedAt: new Date(),
           updatedBy: params.actorUserId,
@@ -586,9 +673,9 @@ export async function updateQuote(params: {
 
       // version 대조를 통과한 뒤에만 부품을 건드린다 — CONFLICT 로 끝난 저장은
       // 부품을 한 줄도 지우지 않는다(같은 트랜잭션이므로 위에서 이미 반환됐다).
-      await replaceItems(tx, params.id, params.fields);
-      await replaceRepairTasks(tx, params.id, params.fields);
-      await replaceWorkScopeLines(tx, params.id, params.fields);
+      await replaceItems(tx, params.id, fields);
+      await replaceRepairTasks(tx, params.id, fields);
+      await replaceWorkScopeLines(tx, params.id, fields);
 
       /**
        * 🔴 **내용이 바뀌었으니 올라가 있던 결재를 자동으로 반려한다**(2026-10-31

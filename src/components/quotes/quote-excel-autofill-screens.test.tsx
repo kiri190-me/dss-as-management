@@ -199,8 +199,13 @@ describe("🔴 (c) 종류 변경은 한 길 — select 와 [엑셀 값으로 바
     assert.ok(apply.includes("manualSupplyAmount: setManualSupplyAmount,"), apply);
     const customerInput = sliceBetween(form, 'label="공급처"', "</Field>");
     assert.ok(customerInput.includes("onChange={(e) => editCustomerName(e.target.value)}"), customerInput);
-    const edit = sliceBetween(form, "function editCustomerName(", "function taskNamesOf(");
-    assert.ok(edit.includes("setCustomerNameText(value); setCustomerId(null);"), edit);
+    const edit = sliceBetween(form, "function editCustomerName(", "function toggleCustomerCreateNew(");
+    /* 🔴 **2026-11-06 에 이 함수의 속이 바뀌었다** — 전에는 글자를 고치면 무조건 연결을
+       끊었고(`setCustomerNameText(value); setCustomerId(null);`), 이제는 고르개의 규칙이
+       다시 재어 **정확히 맞으면 붙고 아니면 풀린다**(components/quotes/quote-customer-pick.ts).
+       여기서 재는 것은 지금까지와 같다: 엑셀 값 넣기가 **칸에 치는 그 길 하나**를 탄다는 것.
+       무엇이 붙고 무엇이 안 붙는가는 quote-customer-pick.test.ts 가 값으로 잰다. */
+    assert.ok(edit.includes("applyCustomerPick(quoteCustomerNameEditPatch(value, customerOptions));"), edit);
   });
 
   test("다른 칸 목록의 단추도 같은 applyExcelValue 를 부른다", () => {

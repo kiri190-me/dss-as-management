@@ -1164,3 +1164,24 @@ src/components/procedures/node-chip-shape-id-hidden.test.ts
 #    🔵 0건의 두 까닭을 다른 말로 하는가 · 🔵 휴지통 쪽은 한 글자도 안 바뀌었는가.
 #    🔴 주석을 걷어낸 뒤에 센다 — 이 화면의 머리말에 그 이름들이 그대로 적혀 있다.
 src/components/procedures/technical-procedure-list-filter-ui.test.tsx
+
+# 2026-11-06 — **견적서의 공급처를 고르개로**(사용자 요구 「고르거나 새로 적을 수 있게 —
+#    지금은 자유 입력이라 고객사 마스터와 안 이어진다」). 규칙은 전부
+#    components/quotes/quote-customer-pick.ts 한 곳에 있고, 이 파일이 그것을 **값으로** 잰다:
+#    🔴 정확히 맞을 때만 잇는다(앞머리만 같은 이름에 끌려가지 않는다) · 🔴 글자를 치는 것만으로는
+#    고객사를 만들자고 보내지 않는다(한 글자씩 끝까지 재 본다) · 🔴 단추를 눌러야 실리고 취소된다 ·
+#    🔴 **인수번호로 불러온 연결이 이긴다**(고를 수 있는 목록에 없는 — 휴지통에 든 — 고객사여도
+#    id 가 살아남는다) · 🔴 「같다」의 자가 DB 의 customers_normalized_name_unique 와 **같은 자**
+#    인가를 0022 의 식을 읽어 맞대어 본다(다르면 「새로 등록」을 눌러 저장하는 순간 제약에 걸린다).
+#    🔵 표본이 비어 공짜로 통과하지 않도록 못을 먼저 박는다.
+src/components/quotes/quote-customer-pick.test.ts
+
+# 2026-11-06 — 위 규칙을 **화면이 제자리에서 쓰는가**. QuoteEditForm 은 서버 액션을 직접
+#    import 하는 클라이언트 컴포넌트라 이 환경에서 그려 볼 수 없어(이웃 시험들과 같은 사정)
+#    원본을 글자로 읽는다. 재는 것: 🔴 공급처 칸이 datalist + 제안을 그리는가 · 🔴 칸에 치는
+#    길이 editCustomerName 하나이고 그 함수가 규칙을 부르는가 · 🔴 **인수번호 불러오기 갈래가
+#    그 규칙(intake 쪽)을 쓰고 이름 편집 길을 타지 않는가**(타면 휴지통에 든 고객사의 연결이
+#    조용히 풀린다) · 🔴 저장에 싣는 자리가 quoteCustomerSaveFields 하나인가 · 🔴 저장 쪽이
+#    「안 바뀜」을 재기 **전에** 고객사를 해소하는가(뒤면 단추를 누르고 저장해도 아무 일도 안
+#    일어난다) · 🔴 고객사를 만드는 곳이 저장 트랜잭션 안 한 곳뿐인가.
+src/components/quotes/quote-customer-pick-screens.test.ts

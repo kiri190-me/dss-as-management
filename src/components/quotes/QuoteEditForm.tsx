@@ -77,6 +77,19 @@ import {
 /* 🔴 고른 값을 줄에 붓는 일은 **견적서 쪽 규칙**을 한 번 거친다(2026-10-16 요청 ①·②) —
    부품이 바뀌면 단가가 따라가고, 고른 부품을 줄이 기억한다. 고르개(PO/내자와 한 벌)에는
    그 사정을 박지 않는다. 규칙과 까닭은 전부 quote-part-pick.ts 머리말에 있다. */
+/* 🔴 공급처 칸의 규칙은 **전부 저기 하나**에 있다(2026-11-06) — 정확히 맞을 때만 잇고,
+   없는 이름은 단추를 눌러야 만들고, 인수번호로 들어온 연결이 이긴다. 그 판단을 이 폼에
+   흩어 적으면 「엑셀 값으로 바꾸기」·「불러오기」·칸 입력 셋이 서로 다른 규칙으로 굴러간다. */
+import {
+  quoteCustomerCreateNewPatch,
+  quoteCustomerIntakePatch,
+  quoteCustomerNameEditPatch,
+  quoteCustomerPickState,
+  quoteCustomerSaveFields,
+  quoteCustomerSuggestions,
+  type QuoteCustomerOption,
+  type QuoteCustomerPick,
+} from "@/components/quotes/quote-customer-pick";
 import {
   QUOTE_PICKED_PART_PREFIX,
   quotePartNameEditPatch,
@@ -652,6 +665,7 @@ export default function QuoteEditForm({
   repairLabor,
   partOptions,
   partPrices,
+  customerOptions,
   cableMaxLines,
   printHeaders,
   workScopeDefaults,
@@ -699,6 +713,25 @@ export default function QuoteEditForm({
    * (part-picker.tsx 의 partPickUnitPrice).
    */
   partPrices: PartPickerPriceRow[];
+  /**
+   * 공급처 칸에서 고를 수 있는 **고객사 마스터**(2026-11-06).
+   *
+   * 🔴 조회는 `queries/domestic-orders.ts` 의 `listCustomerOptions` 를 쓴다 — 저장소에
+   * 같은 이름의 함수가 두 벌이지만(`queries/customers.ts` 에도 있다), **세 벌로 늘리지
+   * 않으려고 이미 지목돼 있던 쪽**을 그대로 부른다: `queries/quotes.ts` 가 「공급처
+   * 드롭다운 목록도 새로 만들지 않는다 — queries/domestic-orders.ts 의
+   * listCustomerOptions 가 이미 같은 일을 한다」고 적어 두고 있었다. 다른 쪽을 고르면
+   * 그 주석이 거짓이 된다.
+   *
+   * 🔴 **휴지통에 든 고객사는 오지 않는다**(저 조회의 `is_deleted = false`). 그래서
+   * **이 목록으로 연결을 되짚지 않는다** — 지워진 고객사에 이어져 있던 옛 견적서를
+   * 열었을 때 그 연결이 조용히 풀리면 안 된다(quote-customer-pick.ts 의
+   * `quoteCustomerIntakePatch`).
+   *
+   * 🔵 이름 · id 두 칸뿐이다. 이 값은 브라우저로 그대로 실려 가므로 연락처 같은 칸을
+   * 내보내지 않는다.
+   */
+  customerOptions: QuoteCustomerOption[];
   /**
    * 케이블 견적서 한 장에 담을 수 있는 줄 수 — **품목 줄 + 설명 줄을 합쳐서**다
    * (xlsx/cable-quote-template.ts 의 `CABLE_QUOTE_MAX_LINES`). 넘치면 생성기가
@@ -822,6 +855,13 @@ export default function QuoteEditForm({
   const [repairCaseId, setRepairCaseId] = useState<string | null>(quote?.repairCaseId ?? null);
   const [customerId, setCustomerId] = useState<string | null>(quote?.customerId ?? null);
   const [customerNameText, setCustomerNameText] = useState(quote?.customerNameText ?? "");
+  /**
+   * 「새 고객사로 등록」을 **눌렀는가**(2026-11-06 — quote-customer-pick.ts).
+   *
+   * 🔴 저장된 값이 아니라 **이번 편집에서의 의사**다. 그래서 저장된 장을 열 때는 늘
+   * 꺼진 채로 시작한다 — 그 장은 이미 저장됐고, 이어져 있으면 `customerId` 가 말한다.
+   */
+  const [customerCreateNew, setCustomerCreateNew] = useState(false);
   const [modelNameText, setModelNameText] = useState(quote?.modelNameText ?? "");
   const [lotNumberText, setLotNumberText] = useState(quote?.lotNumberText ?? "");
   const [serialNumberText, setSerialNumberText] = useState(quote?.serialNumberText ?? "");
@@ -1467,12 +1507,55 @@ export default function QuoteEditForm({
   }
 
   /**
+   * 공급처 칸의 값 셋을 한 벌로 — 규칙 함수들이 받고 돌려주는 모양이다
+   * (quote-customer-pick.ts 의 `QuoteCustomerPick`).
+   */
+  const customerPick: QuoteCustomerPick = { customerId, customerNameText, customerCreateNew };
+
+  /**
+   * 칸에 내밀 제안 여덟 줄. 🔴 **거르는 일은 브라우저에서 한다** — 고객사는 수십 줄이라
+   * 글자마다 서버를 부를 까닭이 없다(부품 고르개가 수백 줄을 같은 방식으로 다룬다).
+   */
+  const customerSuggestions = useMemo(
+    () => quoteCustomerSuggestions(customerNameText, customerOptions),
+    [customerNameText, customerOptions]
+  );
+
+  /** 칸 아래에 무엇을 보일지 — 화면이 가르지 않고 규칙 함수가 답한다. */
+  const customerPickState = quoteCustomerPickState(customerPick);
+
+  /**
+   * 규칙이 정한 다음 상태를 칸 셋에 **한 번에** 붓는다 — 공급처를 바꾸는 길이 이 함수
+   * 하나다. 셋을 따로 건드리는 자리가 생기면 「이름은 바뀌었는데 연결은 옛 회사를
+   * 가리키는」 중간 상태가 만들어진다.
+   */
+  function applyCustomerPick(next: QuoteCustomerPick) {
+    setCustomerId(next.customerId);
+    setCustomerNameText(next.customerNameText);
+    setCustomerCreateNew(next.customerCreateNew);
+  }
+
+  /**
    * 공급처 이름을 바꾼다 — 칸에 치는 것과 [엑셀 값으로 바꾸기](견적서 ①b)가 같은 길이다.
-   * 이름을 바꾸면 고객사 연결은 끊는다 — 이름과 id 가 서로 다른 곳을 가리키는 상태를 만들지 않는다.
+   *
+   * 🔴 2026-11-06 부터 **끊기만 하지 않는다.** 전에는 글자를 고치면 무조건
+   * `setCustomerId(null)` 이었고(이름과 id 가 서로 다른 곳을 가리키지 않게), 그래서 고객사
+   * 마스터와 이어질 길이 인수번호 불러오기 하나뿐이었다. 이제 **정규화해서 정확히 맞으면
+   * 다시 붙고**, 맞지 않으면 전처럼 풀린다 — 가르는 자는 전부 quote-customer-pick.ts 에 있다.
    */
   function editCustomerName(value: string) {
-    setCustomerNameText(value);
-    setCustomerId(null);
+    applyCustomerPick(quoteCustomerNameEditPatch(value, customerOptions));
+  }
+
+  /**
+   * 「새 고객사로 등록: 'X'」를 눌렀다 · 그 곁의 [취소]를 눌렀다.
+   *
+   * 🔴 **여기서는 아무것도 만들지 않는다** — 켜 두기만 하고, 실제로 마스터에 서는 것은
+   * [저장]이 도는 트랜잭션 안이다(mutations/quotes.ts). 그래서 저장하지 않고 나가면
+   * 고객사도 생기지 않는다.
+   */
+  function toggleCustomerCreateNew(on: boolean) {
+    applyCustomerPick(quoteCustomerCreateNewPatch(customerPick, on));
   }
 
   /**
@@ -1605,8 +1688,23 @@ export default function QuoteEditForm({
 
       const found = result.found;
       setRepairCaseId(found.repairCaseId);
-      setCustomerId(found.customerId);
-      if (found.customerName) setCustomerNameText(found.customerName);
+      /**
+       * 🔴 **접수 건이 가리키는 고객사를 그대로 받는다 — 이 길이 이긴다**(2026-11-06).
+       * 공급처 칸이 고르개가 된 뒤에도 여기는 **고를 수 있는 목록을 보지 않는다**: 그
+       * 목록에는 휴지통에 든 고객사가 없어서, 이름으로 되짚으면 지워진 고객사에 걸린
+       * 옛 접수 건의 연결이 조용히 풀린다. 이름은 받아 온 것이 있을 때만 바꾸는 것도
+       * 지금까지 그대로다(규칙은 quote-customer-pick.ts 의 quoteCustomerIntakePatch).
+       */
+      const intakeCustomer = quoteCustomerIntakePatch({
+        customerId: found.customerId,
+        customerName: found.customerName,
+      });
+      setCustomerId(intakeCustomer.customerId);
+      setCustomerCreateNew(intakeCustomer.customerCreateNew);
+      // 🔵 **지금 칸에 적힌 값**을 넘겨받아 접는다(함수꼴 setState) — 불러오기를 누른
+      //    뒤 대답이 오기까지 사람이 칸을 고칠 수 있고, 그 사이의 글자를 옛 값으로
+      //    되돌리면 안 된다.
+      setCustomerNameText((current) => intakeCustomer.customerNameText ?? current);
       setModelNameText(found.modelName ?? "");
       setLotNumberText(found.lotNumber ?? "");
       setSerialNumberText(found.serialNumber ?? "");
@@ -1989,8 +2087,13 @@ export default function QuoteEditForm({
       quoteDate,
       repairCaseId,
       intakeNumberText,
-      customerId,
-      customerNameText,
+      /**
+       * 🔴 공급처 셋은 **규칙이 한 벌로 내준다**(quote-customer-pick.ts 의
+       * `quoteCustomerSaveFields`) — 여기서 손으로 풀어 적지 않는다. 특히
+       * `newCustomerName` 은 **「새 고객사로 등록」을 눌러 둔 장에만** 실린다:
+       * 글자를 칠 때마다 실리면 저장 한 번에 오타가 고객사 마스터로 들어간다.
+       */
+      ...quoteCustomerSaveFields(customerPick),
       modelNameText,
       lotNumberText,
       serialNumberText,
@@ -2883,15 +2986,77 @@ export default function QuoteEditForm({
             disabled={disabled}
           />
         </Field>
-        <Field label="공급처" error={fieldErrors.customerNameText} required>
+        {/* ── 공급처 — 고르거나 새로 적는다 (2026-11-06) ─────────────────────
+            🔴 **자유 입력을 막지 않는다.** `<datalist>` 라 목록에 없는 글자도 그대로
+            쳐진다 — 마스터에 없는 거래처로 한 장 내는 일이 있고, 그 결정은 지금도
+            그대로다(validation/quote-input.ts 의 「id 는 비어도 된다」).
+
+            🔴 **견적서 갈래 셋이 이 칸 하나를 똑같이 쓴다**(내자 · OH · 기타). 갈래로
+            가르지 않는 것은 일부러다: 한 칸이 화면마다 다르게 굴면 사람은 어디서 무엇이
+            일어나는지 외워야 한다. 특히 **기타 견적서에는 인수번호로 불러오기 구역이
+            없어서**, 이 고르개가 그 갈래가 고객사 마스터와 이어지는 **유일한 길**이다.
+
+            고르개의 규칙(정확히 맞을 때만 잇는다 · 단추를 눌러야 만든다 · 취소된다)은
+            전부 quote-customer-pick.ts 에 있다 — 여기서는 그 답을 그리기만 한다. */}
+        <Field
+          label="공급처"
+          /* 🔴 서버가 돌려줄 수 있는 공급처 칸의 오류 셋을 **한 자리에** 보인다 — 이 화면에는
+             고객사 id 를 고르는 칸이 따로 없어서, `customerId` · `newCustomerName` 쪽 문장을
+             그대로 두면 어디에도 안 붙고 사람은 왜 저장이 안 되는지 모른다. */
+          error={fieldErrors.customerNameText ?? fieldErrors.newCustomerName ?? fieldErrors.customerId}
+          required
+        >
           <input
+            list="quoteCustomerName-suggestions"
+            /* 브라우저가 기억한 옛 입력이 제안 목록을 덮지 않게 — 접수 폼의 같은 칸과 같다. */
+            autoComplete="off"
             value={customerNameText}
-            // 이름을 손으로 고치면 고객사 연결은 끊는다(editCustomerName — [엑셀 값으로 바꾸기]도 같은 길).
+            // 이름을 고치면 고객사 연결도 따라간다(editCustomerName — [엑셀 값으로 바꾸기]도 같은 길).
             onChange={(e) => editCustomerName(e.target.value)}
             placeholder="ICD Co.,Ltd"
             className={editInputClass}
             disabled={disabled}
           />
+          <datalist id="quoteCustomerName-suggestions">
+            {customerSuggestions.map((option) => (
+              <option key={option.id} value={option.name} />
+            ))}
+          </datalist>
+          {customerPickState === "LINKED" && (
+            <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
+              ✓ 등록된 고객사와 연결됩니다.
+            </p>
+          )}
+          {customerPickState === "CREATE_NEW" && (
+            <p className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
+              ✓ 새 고객사 &apos;{customerNameText.trim()}&apos;로 등록됩니다.{" "}
+              <button
+                type="button"
+                onClick={() => toggleCustomerCreateNew(false)}
+                disabled={disabled}
+                className="underline disabled:opacity-50"
+              >
+                취소
+              </button>
+            </p>
+          )}
+          {customerPickState === "UNLINKED" && (
+            <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+              <button
+                type="button"
+                onClick={() => toggleCustomerCreateNew(true)}
+                disabled={disabled}
+                className="underline hover:text-zinc-900 disabled:opacity-50 dark:hover:text-zinc-100"
+              >
+                새 고객사로 등록: &apos;{customerNameText.trim()}&apos;
+              </button>
+              {/* 🔴 **누르지 않아도 저장된다**는 것을 말해 둔다 — 안 적으면 사람은 이 단추를
+                  저장의 전제 조건으로 읽고, 한 장 내려던 거래처를 마스터에 올리게 된다. */}
+              <p className="mt-0.5 text-zinc-500 dark:text-zinc-500">
+                누르지 않아도 저장됩니다 — 그때는 적은 글자만 남고 고객사 마스터와 이어지지 않습니다.
+              </p>
+            </div>
+          )}
         </Field>
         <Field label="품명(건명)" error={fieldErrors.subject} required>
           <input

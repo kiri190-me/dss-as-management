@@ -89,6 +89,9 @@ function fields(overrides: Partial<QuoteFields> = {}): QuoteFields {
     intakeNumberText: null,
     customerId: null,
     customerNameText: "테스트 공급처",
+    // 「새 고객사로 등록」을 누르지 않은 장(2026-11-06). null 이면 저장은 고객사를
+    // 찾지도 만들지도 않는다 — 이 칸이 생기기 전과 **똑같은** 상태다.
+    newCustomerName: null,
     modelNameText: null,
     lotNumberText: null,
     serialNumberText: null,

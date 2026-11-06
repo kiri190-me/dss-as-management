@@ -90,6 +90,8 @@ function quoteFields(suffix: string, overrides: Partial<QuoteFields> = {}): Quot
     intakeNumberText: `D9603-${suffix}`,
     customerId: null,
     customerNameText: `고객사 ${PII_MARKER}`,
+    // 「새 고객사로 등록」을 누르지 않은 장(2026-11-06) — 고객사를 만들지 않는다.
+    newCustomerName: null,
     modelNameText: "CFK300FH-IC2",
     lotNumberText: "WU8042",
     serialNumberText: "1612027",

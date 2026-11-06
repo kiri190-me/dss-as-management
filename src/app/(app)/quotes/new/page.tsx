@@ -2,6 +2,12 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import QuoteEditForm from "@/components/quotes/QuoteEditForm";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
+/* 🔴 공급처 고르개의 목록(2026-11-06). 저장소에 같은 이름의 조회가 두 벌이지만
+   (queries/customers.ts 에도 있다) **세 벌로 늘리지 않으려고 이미 지목돼 있던 쪽**을
+   부른다 — queries/quotes.ts 가 「공급처 드롭다운 목록도 새로 만들지 않는다.
+   queries/domestic-orders.ts 의 listCustomerOptions 가 이미 같은 일을 한다」고 적어
+   두고 있었다. 다른 쪽을 고르면 그 주석이 거짓이 된다. */
+import { listCustomerOptions } from "@/lib/db/queries/domestic-orders";
 import { fetchInventoryParts } from "@/lib/server/inventory-gateway";
 import { toPartPickerOptions, toPartPickerPriceRows } from "@/lib/domain/inventory-gateway";
 import {
@@ -89,12 +95,16 @@ export default async function NewQuotePage({
   //    「없습니다」가 아니라 「확인하지 못했습니다」로 말하게 한다(같은 파일 머리말).
   // 단가는 **부품을 고를 때 단가 칸까지 채우는** 데 쓴다. 같은 응답의 견적가 · O/H 견적가를
   // 옮겨 담을 뿐이라 통로를 한 번 더 두드리지 않는다(toPartPickerPriceRows 머리말).
-  const [repairLabor, printHeaders, workScopeDefaults, inventoryParts] = await Promise.all([
-    listRepairLabor(),
-    readAllQuoteTemplateHeaders(),
-    readAllQuoteWorkSectionDefaults(),
-    fetchInventoryParts(),
-  ]);
+  // 공급처 칸에서 고를 고객사 — 이미 나란히 도는 Promise.all 에 태워 왕복을 늘리지 않는다
+  // (부품 목록과 같은 자리). 🔴 휴지통에 든 고객사는 이 조회가 이미 빼고 온다.
+  const [repairLabor, printHeaders, workScopeDefaults, inventoryParts, customerOptions] =
+    await Promise.all([
+      listRepairLabor(),
+      readAllQuoteTemplateHeaders(),
+      readAllQuoteWorkSectionDefaults(),
+      fetchInventoryParts(),
+      listCustomerOptions(),
+    ]);
 
   const partOptions = toPartPickerOptions(inventoryParts);
   // 🔵 못 받아 왔으면 단가 목록도 비어 있다 — 그때는 고를 수조차 없고, 빈 목록은 고르개에
@@ -112,6 +122,9 @@ export default async function NewQuotePage({
       repairLabor={repairLabor}
       partOptions={partOptions}
       partPrices={partPrices}
+      /* 공급처 칸의 고르개 목록 — 고르면 `customer_id` 가 채워지고, 없는 이름은 칸 아래
+         단추를 눌러야 새 고객사가 된다(components/quotes/quote-customer-pick.ts). */
+      customerOptions={customerOptions}
       /**
        * 케이블 견적서의 줄 수 상한 — **채우개의 상수를 그대로 내려보낸다**(케이블 ③).
        * 그 파일은 `node:fs`·`node:zlib` 를 끌고 와 클라이언트 번들에 들어갈 수 없어서,

@@ -335,6 +335,39 @@ test("id 형식", () => {
 
 /**
  * ============================================================================
+ * 공급처를 고객사로 등록하라 — newCustomerName (2026-11-06)
+ * ============================================================================
+ * 화면에서 「새 고객사로 등록」을 **눌렀을 때만** 실려 온다. 여기서 재는 것은 검증이
+ * 그 칸을 어떻게 읽는가이고, 무엇이 실리는가는 고르개 쪽
+ * (components/quotes/quote-customer-pick.test.ts)이 값으로 잰다.
+ */
+test("🔴 안 보내면 null 이다 — 이 칸이 생기기 전의 요청이 그대로 동작한다", () => {
+  assert.equal(ok(MINIMAL).newCustomerName, null);
+  assert.equal(ok({ ...MINIMAL, newCustomerName: null }).newCustomerName, null);
+  // 공백만 적힌 값도 「없음」이다 — 이름이 빈 고객사를 만들러 가면 안 된다.
+  assert.equal(ok({ ...MINIMAL, newCustomerName: "   " }).newCustomerName, null);
+});
+
+test("보내면 앞뒤를 떼고 그대로 둔다 — 가운데 글자는 건드리지 않는다", () => {
+  assert.equal(ok({ ...MINIMAL, newCustomerName: "  사아 정밀  " }).newCustomerName, "사아 정밀");
+});
+
+test("🔴 customerId 가 있으면 접는다 — 이어진 장에 같은 이름을 한 번 더 만들러 가지 않는다", () => {
+  const data = ok({ ...MINIMAL, customerId: VALID_UUID, newCustomerName: "사아 정밀" });
+  assert.equal(data.customerId, VALID_UUID);
+  assert.equal(data.newCustomerName, null);
+  // 🔵 **접는 것은 id 가 실제로 읽혔을 때뿐**이다 — 형식이 틀린 id 는 오류로 거절되므로
+  //    「틀린 id 를 보내 새로 만들기를 되살리는」 길은 없다.
+  assert.match(errors({ ...MINIMAL, customerId: "nope", newCustomerName: "사아 정밀" }).customerId, /고객사/);
+});
+
+test("공급처 글자와 같은 폭을 넘으면 거절한다 — customers.name 한 줄에 들어갈 값이다", () => {
+  assert.match(errors({ ...MINIMAL, newCustomerName: "가".repeat(201) }).newCustomerName, /새 고객사/);
+  assert.equal(ok({ ...MINIMAL, newCustomerName: "가".repeat(200) }).newCustomerName, "가".repeat(200));
+});
+
+/**
+ * ============================================================================
  * 엑셀 전용 견적서 (2026-09-15 Q2) — 줄은 비어야 하고, 공급가액은 필수다
  * ============================================================================
  */

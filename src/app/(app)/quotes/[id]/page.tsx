@@ -5,6 +5,10 @@ import QuoteEditTabs from "@/components/quotes/QuoteEditTabs";
 import QuoteApprovalPanel from "@/components/quotes/QuoteApprovalPanel";
 import QuoteArchiveFolderSection from "@/components/quotes/QuoteArchiveFolderSection";
 import { listRepairLabor } from "@/lib/db/queries/repair-labor";
+/* 🔴 공급처 고르개의 목록(2026-11-06) — 새 견적서 페이지의 같은 항목이다. 같은 이름의
+   조회가 두 벌이지만 queries/quotes.ts 가 지목해 둔 쪽 하나만 쓴다(그 파일의 「공급처
+   드롭다운 목록도 새로 만들지 않는다」). */
+import { listCustomerOptions } from "@/lib/db/queries/domestic-orders";
 import { fetchInventoryParts } from "@/lib/server/inventory-gateway";
 import { toPartPickerOptions, toPartPickerPriceRows } from "@/lib/domain/inventory-gateway";
 import {
@@ -135,6 +139,8 @@ export default async function QuoteDetailPage({
   // 수 있는 자리들」이다. 🔴 화면에 주는 것은 **힌트**이고, 실제 승인·반려는
   // decideQuoteApproval 이 자기 트랜잭션 안에서 같은 목록을 다시 읽어 판정한다
   // (그래야 읽은 직후 되돌려진 위임으로 결재가 통과하지 않는다).
+  // 공급처 칸에서 고를 고객사 — 새 견적서 페이지와 같은 조회이고, 같은 까닭으로 이미
+  // 나란히 도는 Promise.all 에 태운다.
   const [
     repairLabor,
     printHeaders,
@@ -145,6 +151,7 @@ export default async function QuoteDetailPage({
     approvalHistory,
     currentApprovalRoute,
     actingApproverUserIds,
+    customerOptions,
   ] = await Promise.all([
     listRepairLabor(),
     readAllQuoteTemplateHeaders(),
@@ -155,6 +162,7 @@ export default async function QuoteDetailPage({
     getQuoteApprovalHistory(quote.id),
     getCurrentShipmentApprovalRoute(QUOTE_APPROVAL_ROUTE_SCOPE),
     resolveActingApproverUserIds(actingUser.id, new Date()),
+    listCustomerOptions(),
   ]);
 
   const partOptions = toPartPickerOptions(inventoryParts);
@@ -205,6 +213,8 @@ export default async function QuoteDetailPage({
           repairLabor={repairLabor}
           partOptions={partOptions}
           partPrices={partPrices}
+          /* 공급처 칸의 고르개 목록 — 새 견적서 페이지의 같은 항목이다. */
+          customerOptions={customerOptions}
           /* 케이블 견적서의 줄 수 상한 — 채우개의 상수를 그대로 내려보낸다(새 견적서 페이지의 같은 항목). */
           cableMaxLines={CABLE_QUOTE_MAX_LINES}
           printHeaders={printHeaders}
