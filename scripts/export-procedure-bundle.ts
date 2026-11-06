@@ -59,8 +59,39 @@ import {
 
 const DEFAULT_NAME_PREFIXES = ["[RFG]", "[MB]"] as const;
 
-function parseArgs(): { out: string } {
+/**
+ * 🔴 **`--prefix` 로 한 갈래만 뜰 수 있다** (2026-11-06).
+ *
+ * 까닭: 넣는 쪽은 `--actor` 를 **하나만** 받고, 그 한 사람이 짐 전체의 「만든 사람」이
+ * 된다. 그런데 사용자가 **RFG 는 정영빈 · MB 는 이남준**으로 적기로 했다(2026-11-06).
+ *
+ * 🔵 **넣는 쪽을 고치지 않는 쪽을 골랐다.** 그 도구는 이미 운영 이미지
+ * (`dss-as-tools:12`)에 구워져 있어서, 고치면 이미지를 다시 굽고 배포를 또 해야 한다.
+ * 뜨는 쪽은 **개발 PC 에서만** 도니 고쳐도 배포가 필요 없다 — 짐을 둘로 떠서
+ * 넣는 쪽을 **두 번** 부르면 같은 결과가 된다.
+ *
+ * 🔴 **쪼개도 안전한 까닭은 재서 알았다**: 절차끼리의 이어가기 12건이 **전부
+ * `RFG → RFG`** 다(2026-11-06 실측). RFG 와 MB 를 가로지르는 연결이 하나도 없어서,
+ * 갈라 담아도 넣는 쪽의 「짐 밖을 가리킨다」(INTERNAL_INCONSISTENT) 검사에 안 걸린다.
+ * 🔴 **가로지르는 연결이 생기는 날 이 전제가 깨진다** — 그때는 쪼개면 안 되고,
+ * 넣는 쪽이 작성자를 여럿 받도록 고쳐야 한다.
+ */
+function parseArgs(): { out: string; prefixes: readonly string[] } {
   const args = process.argv.slice(2);
+  const prefixIndex = args.indexOf("--prefix");
+  if (prefixIndex >= 0 && !args[prefixIndex + 1]) {
+    console.error("--prefix 뒤에 이름 앞가지를 적어 주세요 (예: \"[RFG]\").");
+    process.exit(1);
+  }
+  const wanted = prefixIndex >= 0 ? args[prefixIndex + 1] : null;
+  if (wanted !== null && !DEFAULT_NAME_PREFIXES.includes(wanted as (typeof DEFAULT_NAME_PREFIXES)[number])) {
+    // 🔴 아무 글자나 받지 않는다 — 오타 하나로 **0개짜리 짐**이 조용히 떠지면
+    //    그것을 넣어도 「만듦 0」으로 끝나고 아무도 왜인지 모른다.
+    console.error(`🔴 모르는 앞가지: ${wanted}`);
+    console.error(`   고를 수 있는 것: ${DEFAULT_NAME_PREFIXES.join(" · ")}`);
+    process.exit(1);
+  }
+  const prefixes = wanted === null ? DEFAULT_NAME_PREFIXES : [wanted];
   const outIndex = args.indexOf("--out");
   if (outIndex >= 0 && !args[outIndex + 1]) {
     console.error("--out 뒤에 파일 경로를 적어 주세요.");
@@ -75,7 +106,7 @@ function parseArgs(): { out: string } {
     outIndex >= 0
       ? path.resolve(args[outIndex + 1])
       : path.join(tmpdir(), `dss-as-procedure-bundle-${stamp}.json`);
-  return { out };
+  return { out, prefixes };
 }
 
 /**
@@ -100,7 +131,7 @@ function assertOutsideRepository(outPath: string): void {
 }
 
 async function main(): Promise<void> {
-  const { out } = parseArgs();
+  const { out, prefixes } = parseArgs();
   assertOutsideRepository(out);
 
   const target = describeDatabaseTarget(process.env.DATABASE_URL);
@@ -111,7 +142,7 @@ async function main(): Promise<void> {
   console.log(`쓸 파일 : ${out}`);
 
   try {
-    const nameFilter = or(...DEFAULT_NAME_PREFIXES.map((prefix) => like(procedureTemplates.name, `${prefix}%`)));
+    const nameFilter = or(...prefixes.map((prefix) => like(procedureTemplates.name, `${prefix}%`)));
 
     /**
      * 🔴 **차례를 못 박는다.** 두 번 떠서 맞대어 볼 수 있어야 하고(사람이 diff 로
@@ -308,7 +339,7 @@ async function main(): Promise<void> {
       exportedAt: new Date().toISOString(),
       // 🔴 호스트:포트/DB이름 까지다 — 비밀번호도 사용자명도 파일에 안 들어간다.
       exportedFrom: formatDatabaseTarget(target),
-      selection: `category=TECHNICAL_TASK · is_deleted=false · name LIKE ${DEFAULT_NAME_PREFIXES.map((p) => `"${p}%"`).join(" 또는 ")}`,
+      selection: `category=TECHNICAL_TASK · is_deleted=false · name LIKE ${prefixes.map((p) => `"${p}%"`).join(" 또는 ")}`,
       counts: {
         templates: templates.length,
         nodes: nodes.length,
