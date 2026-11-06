@@ -200,14 +200,43 @@ describe("🔴 탭 틀 — 기본정보가 첫 화면이고, 아직 안 만든 �
     assert.equal(tabs.includes("canViewPurchaseOrders"), false, "안 쓰는 프롭이 생겼다");
   });
 
-  test("🔴 아직 안 만든 탭 하나는 빈 화면이 아니라 「다음 조각에서 채웁니다」가 선다", () => {
-    for (const [name, source] of [["승인", approvalPage]] as const) {
-      assert.ok(source.includes("다음 조각에서 채웁니다"), `${name} 탭이 빈 화면이다`);
-      assert.ok(source.includes("<DomesticOrderDetailNotice"), `${name} 탭에 안내 상자가 없다`);
+  /**
+   * 🔴 **2026-11-06 으로 자리표시 탭이 하나도 남지 않았다** — 견적서 · 발주서 · 승인이
+   * 차례로 채워졌다. 그래서 이 시험은 「빈 탭이 안내를 단다」가 아니라 **「어느 탭도
+   * 자리표시가 아니다」**를 재는 쪽으로 뒤집혔다. 그냥 지우면 탭 하나가 자리표시로
+   * 되돌아가도 아무도 모른다.
+   */
+  test("🔴 자리표시로 남은 탭이 하나도 없다", () => {
+    for (const [name, source] of [
+      ["기본정보", basicInfoPage],
+      ["견적서", quotesPage],
+      ["발주서", purchaseOrdersPage],
+      ["승인", approvalPage],
+    ] as const) {
+      assert.equal(
+        source.includes("다음 조각에서 채웁니다"),
+        false,
+        `${name} 탭이 아직 자리표시다`
+      );
     }
-    // 기본정보 탭은 자리표시가 아니다 — 진짜 내용을 그린다.
-    assert.equal(basicInfoPage.includes("다음 조각에서 채웁니다"), false, basicInfoPage);
+    // 기본정보 탭은 진짜 내용을 그린다.
     assert.ok(basicInfoPage.includes("<DomesticOrderBasicInfoView row={row} />"), basicInfoPage);
+  });
+
+  /**
+   * 🔴 **승인 탭도 2026-11-06 에 채워졌다**(기타건 최종 출하 승인). 위 둘과 같은
+   * 까닭으로 **채워졌다는 사실**을 여기서 못 박는다 — 탭이 무엇을 그리는지는
+   * domestic-order-approval-tab-screens.test.tsx 가 본다.
+   */
+  test("🔴 승인 탭은 자리표시가 아니다 — 승인 패널을 그린다", () => {
+    assert.ok(approvalPage.includes("<DomesticOrderApprovalPanel"), approvalPage);
+    // 🔴 결재선 갈래를 **글자로 적지 않는다** — 도메인 상수 하나를 본다.
+    assert.ok(approvalPage.includes("DOMESTIC_ORDER_APPROVAL_ROUTE_SCOPE"), approvalPage);
+    assert.equal(
+      approvalPage.includes('"DOMESTIC_ORDER_FINAL_SHIPMENT"'),
+      false,
+      "갈래를 글자로 박았다 — 오타 하나가 「판이 없다」로 조용히 보인다"
+    );
   });
 
   /**

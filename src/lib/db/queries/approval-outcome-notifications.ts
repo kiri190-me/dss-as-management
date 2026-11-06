@@ -4,6 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { quoteApprovals, quotes, repairCaseApprovals, repairCases, users } from "../schema";
 import { approvalOutcomeNotificationWindowStart, type ApprovalOutcomeTarget } from "@/lib/domain/notifications";
+import { isValidApprovalType } from "@/lib/validation/repair-case-approval-input";
 
 /**
  * ============================================================================
@@ -167,7 +168,13 @@ async function listRepairCaseApprovalOutcomes(
 
   return rows.flatMap((row) =>
     // 결정된 행은 decided_at 이 언제나 있다(표 CHECK). 타입을 좁히려는 것뿐이다.
-    row.decidedAt === null
+    //
+    // 🔴 승인 종류도 함께 좁힌다 — 2026-11-06 부터 같은 표에 **기타건** 결재 행이
+    // 섞여 있다('DOMESTIC_ORDER_FINAL_SHIPMENT'). 그 행은 repair_case_id 가 언제나
+    // NULL 이라 위 INNER JOIN 에서 이미 떨어지므로 여기 올 수 없지만, 조인 하나가
+    // 바뀌는 날 **접수 건 알림 자리에 기타건 결재가 조용히 섞이지 않게** 타입으로도
+    // 못 박는다(기타건 알림은 별도 조각이다).
+    row.decidedAt === null || !isValidApprovalType(row.approvalType)
       ? []
       : [
           {

@@ -32,7 +32,7 @@ const ENGINEER = "44444444-4444-4444-8444-444444444444";
 function zeroImpact(overrides: Partial<UserDeletionPreviewImpact> = {}): UserDeletionPreviewImpact {
   return {
     routeSlots: [],
-    pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 0 },
+    pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 0, domesticOrderFinalShipment: 0 },
     chainsToRepin: 0,
     isRepresentative: false,
     isLastRepresentative: false,
@@ -106,7 +106,7 @@ describe("영향 건수 문장", () => {
           { scope: "FINAL_SHIPMENT", routeVersion: 3, stepOrder: 2 },
           { scope: "PART_ISSUE", routeVersion: 1, stepOrder: 1 },
         ],
-        pendingApprovals: { finalShipment: 2, repairInspection: 0, quote: 0 },
+        pendingApprovals: { finalShipment: 2, repairInspection: 0, quote: 0, domesticOrderFinalShipment: 0 },
         openAssignedCases: 4,
       })
     );
@@ -128,7 +128,7 @@ describe("영향 건수 문장", () => {
     // 갈래와 합계가 어긋나거나, 갈래마저 없이 사라졌다.
     // 🔵 넷째 갈래(부품 불출)는 2026-10-27(13-C4)에 세는 대상에서 빠졌다.
     const text = describeUserDeletionImpact(
-      zeroImpact({ pendingApprovals: { finalShipment: 1, repairInspection: 1, quote: 1 } })
+      zeroImpact({ pendingApprovals: { finalShipment: 1, repairInspection: 1, quote: 1, domesticOrderFinalShipment: 0 } })
     );
     assert.deepEqual(text.changes, [
       "결재 이어받을 사람에게 대기 결재 3건(최종 출하 승인 1건, 수리 검수 승인 1건, 견적서 승인 1건)을 넘깁니다.",
@@ -137,15 +137,42 @@ describe("영향 건수 문장", () => {
 
   test("🔴 견적서 결재만 있어도 문장이 나온다", () => {
     const text = describeUserDeletionImpact(
-      zeroImpact({ pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 2 } })
+      zeroImpact({ pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 2, domesticOrderFinalShipment: 0 } })
     );
     assert.deepEqual(text.changes, ["결재 이어받을 사람에게 대기 결재 2건(견적서 승인 2건)을 넘깁니다."]);
+  });
+
+  /**
+   * 🔴 **합계는 칸을 훑어 세고 괄호는 손으로 적는다** — 그래서 칸이 늘었을 때
+   * 괄호만 조용히 빠질 수 있다(타입 오류가 나지 않는다). 그때 확인 창은 「대기 결재
+   * 1건()」처럼 **무엇이 걸렸는지 말하지 않는 문장**을 내민다. 2026-11-06 에 기타건
+   * 칸이 늘면서 실제로 그 자리가 생겼다.
+   */
+  test("🔴 기타건 결재도 합계와 **괄호 안**에 함께 들어간다", () => {
+    const only = describeUserDeletionImpact(
+      zeroImpact({
+        pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 0, domesticOrderFinalShipment: 2 },
+      })
+    );
+    assert.deepEqual(only.changes, [
+      "결재 이어받을 사람에게 대기 결재 2건(기타건 최종 출하 승인 2건)을 넘깁니다.",
+    ]);
+
+    // 접수 건 출하 승인과 **갈라져** 적힌다 — 둘은 같은 표에 쌓이는 서로 다른 종류다.
+    const both = describeUserDeletionImpact(
+      zeroImpact({
+        pendingApprovals: { finalShipment: 1, repairInspection: 0, quote: 0, domesticOrderFinalShipment: 1 },
+      })
+    );
+    assert.deepEqual(both.changes, [
+      "결재 이어받을 사람에게 대기 결재 2건(최종 출하 승인 1건, 기타건 최종 출하 승인 1건)을 넘깁니다.",
+    ]);
   });
 
   test("대표 · 위임 · 개발자 표시 · 메일 수신 · 절차 노드 · 옮기는 결재", () => {
     const text = describeUserDeletionImpact(
       zeroImpact({
-        pendingApprovals: { finalShipment: 0, repairInspection: 1, quote: 0 },
+        pendingApprovals: { finalShipment: 0, repairInspection: 1, quote: 0, domesticOrderFinalShipment: 0 },
         isRepresentative: true,
         isLastRepresentative: true,
         chainsToRepin: 2,

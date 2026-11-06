@@ -440,3 +440,16 @@ src/lib/db/mutations/procedure-field-step-adoption.integration.test.ts
 # 발행번호는 실행마다 다른 토큰. 접수 건은 **하나**만 만든다(인수번호는 한 달에 99개가 한도다).
 # 계정은 하나도 만들지 않는다 — 씨앗 계정(승인된 A/S 엔지니어)을 고른다.
 src/lib/db/mutations/quote-domestic-order-line.integration.test.ts
+
+# ── 기타건 최종 출하 승인 (2026-11-06) ──────────────────────────────────
+# mutations/quote-approvals.integration.test.ts 를 본떴다. 🔴 판이 0개면 요청 자체가
+# 거절되고 그 말이 화면과 같은 한 줄인가 · 요청 시점의 `domestic_orders.version` 이
+# 실리는가 · 사슬이 순서대로 가고 요청자·사유·판 번호를 물려받는가 · 반려 사유 필수와
+# 재요청 · 🔴 한 줄에 살아 있는 요청 하나 · 지정 관문과 최고관리자 비상구 ·
+# 🔴 올리는 열쇠는 domesticOrders WRITE 인가 · 🔴 **접수 건 결재 대기 목록에 섞이지
+# 않는가**(표본이 비지 않게 「그 행이 실제로 열려 있다」를 먼저 단언한다) ·
+# 🔴 CHECK 넷과 부분 유니크 둘이 실제로 DB 에 서 있는가.
+# 🔴 격리 이름: 계정 "domesticapproval-test-" · 발주서번호 "DOA-TEST-{토큰}-".
+# 🔵 접수 건은 **하나도 만들지 않는다**(인수번호는 한 달에 99개가 한도다).
+# ⚠️ 판·단계는 afterEach 로 반드시 걷는다 — 남으면 다른 파일이 갑자기 결재선을 탄다.
+src/lib/db/mutations/domestic-order-approvals.integration.test.ts

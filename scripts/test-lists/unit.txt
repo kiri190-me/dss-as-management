@@ -1818,3 +1818,13 @@ src/lib/storage/purchase-order-number-archive-source.test.ts
 # `[id]` 는 `*` 로 적는다 — 대괄호를 그대로 적으면 node 가 글롭 문자클래스로 읽어 tests 0 으로
 # 조용히 지나간다.
 src/app/api/domestic-orders/*/purchase-order-folder/entries/route-source.test.ts
+
+# ── 기타건 최종 출하 승인의 바탕 (2026-11-06, 0124) ─────────────────────
+# 0105(견적서 결재)의 안전 시험과 같은 자리다 — DB 에 붙지 않고 마이그레이션 글자와
+# 스키마 모듈만 읽는다. 🔴 가장 중요한 한 줄은 **CHECK 이 `approval_type::text` 로
+# 견주는가**다: enum 리터럴로 되돌아가면 drizzle 이 밀린 마이그레이션을 트랜잭션
+# 하나에 넣기 때문에 `unsafe use of new value` 로 **적용 자체가 안 된다**(운영 배포도
+# 같은 명령을 쓴다). 그 밖에 🔴 XOR 가 아닌가(둘 다 NULL 인 기존 행 18건이 거절된다) ·
+# 🔴 접수 건 승인 종류 목록에 기타건이 들어가지 않았는가(들어가면 종·배지·승인함에
+# 조용히 섞인다)를 함께 잰다.
+src/lib/db/schema/domestic-order-approval-safety.test.ts

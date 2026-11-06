@@ -12,6 +12,7 @@ import type { RepairStatus, WorkflowType } from "@/lib/domain/types";
 import { SHIPMENT_WAITING_REPAIR_STATUS } from "@/lib/domain/shipment-waiting-auto-advance";
 import type { StepCategory } from "@/lib/domain/local/workflow/step-category";
 import type { WorkflowRuleStep, WorkflowRulesDto } from "@/lib/domain/workflow-rules-view";
+import { isValidApprovalType } from "@/lib/validation/repair-case-approval-input";
 
 /**
  * 트랜잭션 핸들과 최상위 db 양쪽을 받는다 — mutation은 트랜잭션 안에서,
@@ -133,7 +134,14 @@ export async function loadWorkflowRules(tx: Tx, workflowVersionId: string): Prom
       allowedRoles: row.allowedRoles,
       requiresAssignedEngineer: row.requiresAssignedEngineer,
       requiresReason: row.requiresReason,
-      requiredApprovalType: row.requiredApprovalType,
+      // 🔴 접수 건 결재 종류만 전이 조건이 될 수 있다. 2026-11-06 부터 그 enum 에
+      // **기타건** 결재 종류가 하나 더 있는데(같은 표를 쓰므로 같은 enum 이다),
+      // 기타건에는 워크플로 자체가 없어 전이 조건으로 설 자리가 없다. 정상 경로로는
+      // 그 값이 여기 들어올 수 없지만, 들어왔다면 **조건 없음**으로 본다 —
+      // 전이 게이트가 영영 열리지 않는 단계를 만들지 않기 위해서다.
+      requiredApprovalType: isValidApprovalType(row.requiredApprovalType)
+        ? row.requiredApprovalType
+        : null,
     });
   }
 

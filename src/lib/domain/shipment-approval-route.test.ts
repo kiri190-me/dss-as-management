@@ -520,9 +520,32 @@ describe("용도(scope)", () => {
  * ============================================================================
  */
 describe("🔴 고칠 수 있는 용도 — 부품 불출은 빠졌다", () => {
-  test("고르는 목록에 부품 불출이 없다", () => {
-    assert.deepEqual([...EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES], ["FINAL_SHIPMENT", "QUOTE"]);
+  test("고르는 목록에 부품 불출이 없다 — 그리고 기타건은 있다", () => {
+    // 🔴 **이 목록이 곧 [사용자 관리] › [승인 절차] 탭의 고르개다.** 2026-11-06 에
+    //    「기타건 최종 출하 승인」이 더해졌다(사용자 지시 — 「승인 종류에 [기타건
+    //    최종 출하 승인]을 넣어두는거야」). 여기 없으면 그 절차의 판을 만들 길이
+    //    없고, 판이 없으면 기타건 승인은 요청 자체가 거절되므로 기능이 통째로 꺼진다.
+    assert.deepEqual(
+      [...EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES],
+      ["FINAL_SHIPMENT", "QUOTE", "DOMESTIC_ORDER_FINAL_SHIPMENT"]
+    );
     assert.equal(isEditableShipmentApprovalRouteScope("PART_ISSUE"), false);
+    assert.equal(isEditableShipmentApprovalRouteScope("DOMESTIC_ORDER_FINAL_SHIPMENT"), true);
+  });
+
+  test("🔴 기타건 이름표는 사용자가 정한 글자 그대로다", () => {
+    // 🔴 글자를 줄이면 고르개에서 「최종 출하 승인」과 구별되지 않는다 — 둘이 나란히
+    //    서는 자리이고, 앞의 「기타건」이 유일한 구분이다.
+    assert.equal(
+      SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.DOMESTIC_ORDER_FINAL_SHIPMENT,
+      "기타건 최종 출하 승인"
+    );
+    // 받침 있는 말로 끝난다 — 편집 화면의 설명 문장이 뒤에 조사 「을」을 붙인다.
+    assert.ok(/[가-힣]$/.test(SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.DOMESTIC_ORDER_FINAL_SHIPMENT));
+    assert.ok(
+      SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.DOMESTIC_ORDER_FINAL_SHIPMENT.startsWith("기타건"),
+      "접수 건 쪽 이름표와 구별되는 앞말이 사라졌다"
+    );
   });
 
   test("🔴 그래도 표에 넣을 수 있는 값에는 그대로 있다 — 값을 지운 것이 아니다", () => {

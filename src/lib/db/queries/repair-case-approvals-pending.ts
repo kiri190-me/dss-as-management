@@ -12,7 +12,10 @@ import {
   NO_ROUTE_DELEGATIONS,
 } from "@/lib/auth/approval-assignment";
 import { resolveActingApproverUserIds } from "./approval-route-delegations";
-import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approval-input";
+import {
+  isValidApprovalType,
+  type RepairCaseApprovalType,
+} from "@/lib/validation/repair-case-approval-input";
 
 /**
  * ============================================================================
@@ -344,9 +347,16 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
     }
   >();
   for (const row of approvalRows) {
+    // 🔴 접수 건 결재 종류만 — 2026-11-06 부터 같은 표에 **기타건** 결재 행이 섞여
+    // 있다('DOMESTIC_ORDER_FINAL_SHIPMENT'). 그 행은 두 겹으로 이미 걸러져 있다:
+    // repair_case_id 가 언제나 NULL 이라 위 INNER JOIN 에서 떨어지고, 위 `inArray`
+    // 의 `types` 에도 그 값이 들어가지 않는다. 그래도 한 줄을 두는 까닭은 **조건
+    // 하나가 바뀌는 날 기타건 결재가 접수 건 배지·종에 조용히 섞이지 않게** 하려는
+    // 것이다(그 실패는 화면에 「왜 이게 여기 있지」로만 보인다).
+    if (!isValidApprovalType(row.approvalType)) continue;
     const key = `${row.repairCaseId}::${row.approvalType}`;
     if (latestByCaseAndType.has(key)) continue;
-    latestByCaseAndType.set(key, row);
+    latestByCaseAndType.set(key, { ...row, approvalType: row.approvalType });
   }
 
   const items: PendingApprovalItem[] = [];

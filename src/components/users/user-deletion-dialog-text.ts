@@ -104,6 +104,12 @@ export function describeUserDeletionImpact(impact: UserDeletionPreviewImpact): U
       //    의 OPEN_APPROVAL_KINDS 주석. 이름표(…SCOPE_LABELS.PART_ISSUE)는 그대로 살아
       //    있다 — 결재선 **자리**(위 routeSlots)가 아직 그것으로 적힌다.
       pending.quote > 0 ? `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.QUOTE} ${pending.quote}건` : null,
+      // 🔴 2026-11-06 에 더해진 칸. **이 줄이 없으면 합계만 늘고 괄호 안이 비어** 「대기
+      //    결재 1건()」이 된다 — 위 pendingTotal 이 칸을 훑어 세기 때문에 합계 쪽은
+      //    저절로 맞고, 그래서 빠뜨려도 타입 오류가 나지 않는다.
+      pending.domesticOrderFinalShipment > 0
+        ? `${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.DOMESTIC_ORDER_FINAL_SHIPMENT} ${pending.domesticOrderFinalShipment}건`
+        : null,
     ].filter((part): part is string => part !== null);
     approvalItems.push(`대기 결재 ${pendingTotal}건(${parts.join(", ")})`);
   }

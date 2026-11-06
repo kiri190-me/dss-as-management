@@ -56,6 +56,15 @@
  * 승인했나」라는 기록뿐이다. 견적서 결재선을 출하와 갈라 둔 까닭은 **결재하는
  * 사람이 다를 수 있기 때문**이다.
  *
+ * 'DOMESTIC_ORDER_FINAL_SHIPMENT' 는 **기타건 최종 출하 승인**이 쓴다(2026-11-06
+ * 사용자 결정 — 「승인절차는 [기타건 최종 출하승인]으로 절차를 따로 만들자」).
+ * 기타건 = 내자 정리의 한 줄(`domestic_orders`)이고, 결재 기록은 수리 건과 **같은
+ * 표**(`repair_case_approvals`)에 쌓인다. 갈래를 따로 둔 까닭은 'QUOTE' 와 같다 —
+ * **결재하는 사람이 다를 수 있기 때문**이다.
+ * 🔴 이 용도는 'QUOTE'·'PART_ISSUE' 처럼 **판이 없으면 요청 자체가 거절된다.**
+ * 'FINAL_SHIPMENT' 만이 판 없이도 도는데, 그쪽에는 「출하 대표」라는 대신할 결재자가
+ * 있기 때문이다. 기타건에는 그 자리가 없다(domain/domestic-order-approval-rules.ts).
+ *
  * 🔴 **새 용도는 맨 끝에 적는다** — 표의 enum 은 ALTER TYPE ... ADD VALUE 로
  * 뒤에 붙고, 이 파일의 시험이 순서까지 맞대어 본다.
  */
@@ -63,6 +72,7 @@ export const SHIPMENT_APPROVAL_ROUTE_SCOPES = [
   "FINAL_SHIPMENT",
   "PART_ISSUE",
   "QUOTE",
+  "DOMESTIC_ORDER_FINAL_SHIPMENT",
 ] as const;
 export type ShipmentApprovalRouteScope = (typeof SHIPMENT_APPROVAL_ROUTE_SCOPES)[number];
 
@@ -107,6 +117,11 @@ export const PART_ISSUE_APPROVAL_ROUTE_SCOPE: ShipmentApprovalRouteScope = "PART
 export const EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES = [
   "FINAL_SHIPMENT",
   "QUOTE",
+  // 2026-11-06 — 기타건 최종 출하 승인. **고를 수 있어야 하는 것이 이 기능의 전부다**
+  // (사용자 지시: 「[사용자 관리] [승인절차]에서 승인 종류에 [기타건 최종 출하 승인]을
+  // 넣어두는거야」). 🔴 이 줄이 빠지면 판을 만들 길이 없고, 판이 없으면 기타건 승인은
+  // 요청 자체가 거절되므로 기능이 통째로 꺼진 것과 같다.
+  "DOMESTIC_ORDER_FINAL_SHIPMENT",
 ] as const satisfies readonly ShipmentApprovalRouteScope[];
 export type EditableShipmentApprovalRouteScope =
   (typeof EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES)[number];
@@ -162,6 +177,11 @@ export const SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS: Record<ShipmentApprovalRouteS
   // 조사 「을」을 붙인다(`${scopeLabel}을 여러 사람이 순서대로 결재하도록…`).
   // 받침 없는 말로 끝나면 그 자리에서 「견적서 결재을」이 된다.
   QUOTE: "견적서 승인",
+  // 🔴 사용자가 **글자까지 정한 이름**이다(2026-11-06 — 「승인 종류에 [기타건 최종 출하
+  // 승인]을 넣어두는거야」). 바로 위 「승인」 끝맺기 규칙에도 맞는다.
+  // 🔵 바로 위 FINAL_SHIPMENT 와 **네 글자만 다르다** — 고르개에 둘이 나란히 서므로
+  // 앞의 「기타건」이 유일한 구분이다. 줄이지 말 것.
+  DOMESTIC_ORDER_FINAL_SHIPMENT: "기타건 최종 출하 승인",
 };
 
 /**
@@ -193,6 +213,13 @@ export const SHIPMENT_APPROVAL_ROUTE_EMPTY_NOTICES: Record<ShipmentApprovalRoute
   // 「무엇이 대신 처리하는가」가 아니라 「무엇이 남지 않는가」를 말한다 —
   // 절차가 비면 승인 기록 자체가 생기지 않는다.
   QUOTE: "지금은 결재 없이 견적서를 발행하며, 승인 기록도 남지 않습니다.",
+  // 🔴 **이 용도만 「아무 일도 일어나지 않는다」가 아니라 「요청이 막힌다」이다.**
+  // 출하는 대표가, 불출은 재고 담당자가 대신 처리하고, 견적서는 결재 없이 그냥
+  // 발행된다 — 기타건에는 그 **대신할 사람도, 그냥 지나갈 길도 없다.** 지정이 비어
+  // 있는 요청 행을 하나 두면 「아무나 눌러도 되는 승인」이 되어 기록으로서 뜻이
+  // 없으므로, 저장 경로가 요청 자체를 거절한다(ROUTE_NOT_CONFIGURED).
+  DOMESTIC_ORDER_FINAL_SHIPMENT:
+    "지금은 기타건 최종 출하 승인을 요청할 수 없습니다. 이 절차를 만들어야 승인을 올릴 수 있습니다.",
 };
 
 /**

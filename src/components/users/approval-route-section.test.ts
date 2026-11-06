@@ -100,8 +100,13 @@ describe("용도 고르기", () => {
     // 🔴 이름표가 **글자로 박혀 있지 않은지**는 위 「이름표는 한 곳에서만 온다」가
     // 이미 본다(따옴표까지 맞춰서). 여기서 주석의 낱말까지 금지하면 「왜 뺐는지」를
     // 적을 자리가 없어진다 — 다음 사람이 반드시 묻는 그 까닭이다.
-    // 고를 수 있는 값이 실제로 둘뿐인지는 값으로 본다(원본 글자가 아니라).
-    assert.deepEqual([...EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES], ["FINAL_SHIPMENT", "QUOTE"]);
+    // 고를 수 있는 값이 실제로 무엇인지는 값으로 본다(원본 글자가 아니라).
+    // 🔴 2026-11-06 에 「기타건 최종 출하 승인」이 더해졌다 — 이 고르개에 뜨는 것이
+    //    그 조각의 완료 기준 첫 줄이다(사용자 지시).
+    assert.deepEqual(
+      [...EDITABLE_SHIPMENT_APPROVAL_ROUTE_SCOPES],
+      ["FINAL_SHIPMENT", "QUOTE", "DOMESTIC_ORDER_FINAL_SHIPMENT"]
+    );
   });
 
   test("🔴 저장된 부품 불출 판은 이 화면까지 내려오지도 않는다 — 안 보이는 것과 안 나가는 것은 다르다", () => {

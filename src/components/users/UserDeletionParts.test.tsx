@@ -44,7 +44,7 @@ function renderButton(canDeleteUserAccounts: boolean, rowUserId: string): string
 function impact(overrides: Partial<UserDeletionPreviewImpact> = {}): UserDeletionPreviewImpact {
   return {
     routeSlots: [],
-    pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 0 },
+    pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 0, domesticOrderFinalShipment: 0 },
     chainsToRepin: 0,
     isRepresentative: false,
     isLastRepresentative: false,

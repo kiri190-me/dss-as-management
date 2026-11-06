@@ -563,7 +563,7 @@ describe("건수 · 필요한 이어받을 사람", () => {
     });
     assert.deepEqual(result.impact, {
       routeSlots: [],
-      pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 0 },
+      pendingApprovals: { finalShipment: 0, repairInspection: 0, quote: 0, domesticOrderFinalShipment: 0 },
       chainsToRepin: 0,
       isRepresentative: false,
       isLastRepresentative: false,
@@ -723,6 +723,8 @@ describe("건수 · 필요한 이어받을 사람", () => {
       finalShipment: 1,
       repairInspection: 1,
       quote: 1,
+      // 🔵 이 시험은 기타건 결재를 하나도 만들지 않았다 — 0 이 맞다(칸은 2026-11-06 에 늘었다).
+      domesticOrderFinalShipment: 0,
     });
     // 수집 단계에서부터 빠진다 — 넘김/옮김 대상에 들어가면 삭제가 그 행을 고친다.
     const snapshot = await collectUserDeletionImpact(db, target, { lock: false });
@@ -830,7 +832,8 @@ describe("건수 · 필요한 이어받을 사람", () => {
     assert.deepEqual(result.impact.pendingApprovals, {
       finalShipment: 0,
       repairInspection: 0,
-           quote: 1,
+      quote: 1,
+      domesticOrderFinalShipment: 0,
     });
     assert.deepEqual(result.requires, {
       approvalSuccessor: true,

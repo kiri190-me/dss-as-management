@@ -78,12 +78,20 @@ test("🔴 0105 가 용도에 더하는 값은 'QUOTE' 하나다", () => {
   assert.deepEqual(added, ["QUOTE"]);
 });
 
-test("🔴 용도 목록에서 'QUOTE' 는 맨 끝에 한 번만 있다", () => {
+test("🔴 용도 목록에서 'QUOTE' 는 0105 가 넣은 자리에 한 번만 있다", () => {
   // ADD VALUE 는 기존 값 **뒤에** 붙는다. 배열에서 가운데에 끼워 넣으면 코드와
   // 실제 DB 의 순서가 어긋나고, 다음 db:generate 가 있지도 않은 차이를 만든다.
+  //
+  // 🔴 **목록 전체를 여기서 못 박지 않는다**(2026-11-06). 0124 가 끝에
+  // 'DOMESTIC_ORDER_FINAL_SHIPMENT' 를 더했는데, 그것은 0105 의 안전 시험이 지킬
+  // 일이 아니다 — 여기서 재는 것은 「0105 가 넣은 'QUOTE' 가 **그때 그 자리에**
+  // 그대로 있는가」다. 앞 셋을 자리까지 못 박고, 뒤에 무엇이 붙는지는 그 조각의
+  // 시험이 본다(domain/shipment-approval-route.test.ts 가 표 enum 과 도메인 목록을
+  // 글자까지 맞대어 본다).
   const values = [...shipmentApprovalRouteScopeEnum.enumValues];
-  assert.deepEqual(values, ["FINAL_SHIPMENT", "PART_ISSUE", "QUOTE"]);
+  assert.deepEqual(values.slice(0, 3), ["FINAL_SHIPMENT", "PART_ISSUE", "QUOTE"]);
   assert.equal(values.filter((value) => value === "QUOTE").length, 1);
+  assert.equal(values.indexOf("QUOTE"), 2, "0105 가 넣은 자리에서 밀려났다");
 });
 
 // ── 결재 상태 셋 ─────────────────────────────────────────────────────────

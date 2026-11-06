@@ -1230,3 +1230,13 @@ src/components/domestic-orders/detail/domestic-order-quote-tab-screens.test.tsx
 #    없는 조건을 설명하게 된다) · 🔴 폴더가 여럿이면 목록 · 경로 · 단추가 다 없는가 ·
 #    🔴 탭 페이지가 번호 유무로 갈라지고 열쇠를 제자리에서 다시 보는가 · print:hidden.
 src/components/domestic-orders/detail/domestic-order-purchase-order-tab-screens.test.tsx
+
+# ── 기타건 상세 [승인] 탭 (2026-11-06) ──────────────────────────────────
+# 패널 자체는 서버 액션을 물어 그려 볼 수 없다 — 배지 · 이력 · 문구만 실제로 그리고
+# 패널 · 페이지 · 저장 경로는 **주석을 걷어낸 원본 글자**로 읽는다. 재는 것:
+# 🔴 결재선 판이 0개일 때 화면이 **누르기 전에** 말하고 그 글자가 서버가 거절할 때의
+# 말과 **같은 상수**인가 · 🔴 재승인 필요가 승인 완료와 다른 색인가 · 🔴 「n/m단계」를
+# 그 줄에 적힌 판으로 세는가 · 🔴 지정 관문 · 위임 판정을 화면이 새로 적지 않는가 ·
+# 🔴 올리기는 domesticOrders WRITE 이고 결재는 영역을 묻지 않는가 ·
+# 🔴 워크플로 자동 전환을 부르지 않는가(기타건에는 옮길 단계가 없다).
+src/components/domestic-orders/detail/domestic-order-approval-tab-screens.test.tsx

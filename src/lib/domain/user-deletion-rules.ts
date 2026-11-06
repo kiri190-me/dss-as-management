@@ -165,6 +165,8 @@ export type UserDeletionPendingApprovalCounts = {
   finalShipment: number;
   repairInspection: number;
   quote: number;
+  /** 기타건(내자 정리의 한 줄) 최종 출하 승인 — 2026-11-06. */
+  domesticOrderFinalShipment: number;
 };
 
 /**
@@ -251,8 +253,25 @@ export function resolveUserDeletionRequirements(facts: UserDeletionRequirementFa
  * 과거 결재 기록이 그 값을 쓰고, 지울 사람이 **현재 불출 결재선 판에 올라 있으면**
  * 지금도 이어받을 사람이 필요하다(routeSlotCount). 여기서 뺀 것은 「열린 결재 **행**」
  * 한 가지뿐이다.
+ *
+ * ── 🔵 2026-11-06: **기타건 최종 출하 승인**이 하나 늘었다 ────────────────
+ * 'DOMESTIC_ORDER_FINAL_SHIPMENT' 는 내자 정리의 한 줄(기타건)에 대한 결재다. 넣은
+ * 까닭은 바로 위 PART_ISSUE 를 뺀 까닭의 **정확히 반대**다: 그 결재를 처리하는 화면이
+ * 실제로 있고(기타건 상세의 [승인] 탭), 새로 생기는 길도 있고, 넘겨받으면 바로 누를
+ * 수 있다. 빼 두면 지울 사람에게 지정된 기타건 결재가 **아무에게도 넘어가지 않은 채
+ * 남아** 최고관리자 비상구로만 풀리게 된다.
+ *
+ * 🔴 **기타건 결재는 접수 건과 같은 표에 쌓인다**(repair_case_approvals, 2026-11-06
+ * 설계). 그래서 아래 삭제 조회가 그 행을 **이미 집어 들고 있었다** — 종류를 여기 더하지
+ * 않으면 tsc 가 그 자리에서 멈춘다. 그것이 이 목록을 「승인 종류의 유일한 목록」으로
+ * 둔 보람이다.
  */
-export const OPEN_APPROVAL_KINDS = ["FINAL_SHIPMENT", "REPAIR_INSPECTION", "QUOTE"] as const;
+export const OPEN_APPROVAL_KINDS = [
+  "FINAL_SHIPMENT",
+  "REPAIR_INSPECTION",
+  "QUOTE",
+  "DOMESTIC_ORDER_FINAL_SHIPMENT",
+] as const;
 export type OpenApprovalKind = (typeof OPEN_APPROVAL_KINDS)[number];
 
 /**
@@ -268,6 +287,11 @@ const ROUTE_SCOPE_BY_APPROVAL_KIND: Record<OpenApprovalKind, ShipmentApprovalRou
   // (schema/quote-approvals.ts 머리말) — 여기서 보는 것은 「이 행의 뒤 단계가 지울
   // 사람에게 가는가」뿐이고, 그 판정은 다른 둘과 글자 그대로 같다.
   QUOTE: "QUOTE",
+  // 🔴 기타건은 **결재선이 유일한 길**이다(판이 없으면 요청 자체가 거절된다 —
+  // domain/domestic-order-approval-rules.ts). 그래서 이 값이 null 이 아니라는 것이
+  // 다른 셋보다 더 단단하다. 갈래 이름이 승인 종류와 글자가 같지만 **서로 다른
+  // enum** 이라, 여기서 둘을 이어 주는 것이 이 표의 일이다.
+  DOMESTIC_ORDER_FINAL_SHIPMENT: "DOMESTIC_ORDER_FINAL_SHIPMENT",
 };
 
 export function routeScopeForApprovalKind(kind: OpenApprovalKind): ShipmentApprovalRouteScope | null {
@@ -411,6 +435,7 @@ const COUNT_KEY_BY_APPROVAL_KIND: Record<OpenApprovalKind, keyof UserDeletionPen
   FINAL_SHIPMENT: "finalShipment",
   REPAIR_INSPECTION: "repairInspection",
   QUOTE: "quote",
+  DOMESTIC_ORDER_FINAL_SHIPMENT: "domesticOrderFinalShipment",
 };
 
 /** 지울 사람에게 지정된 결재 대기를 승인 종류별로 센다. */
@@ -423,6 +448,7 @@ export function countPendingApprovalsAssignedTo(
     finalShipment: 0,
     repairInspection: 0,
     quote: 0,
+    domesticOrderFinalShipment: 0,
   };
   for (const row of rows) {
     if (row.assignedApproverUserId !== targetUserId) continue;

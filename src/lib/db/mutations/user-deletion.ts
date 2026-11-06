@@ -204,7 +204,15 @@ type OpenApprovalWriteTarget = {
   write: (tx: TransactionExecutor, params: OpenApprovalWrite) => Promise<number>;
 };
 
-/** 접수 건 결재는 최종 출하 · 수리 검수가 **같은 표**를 쓴다(approval_type 으로 갈린다). */
+/**
+ * 접수 건 결재는 최종 출하 · 수리 검수가 **같은 표**를 쓴다(approval_type 으로 갈린다).
+ *
+ * 🔵 2026-11-06 부터 **기타건 최종 출하 승인도 같은 표**다(repair_case_approvals 에
+ * domestic_order_id 가 붙었다). 그래서 쓰는 자리가 글자 그대로 같고, 아래 Record 가
+ * 그 갈래에도 이것을 그대로 가리킨다 — 바구니(`repairCase`)와 감사 이름(표 이름)까지
+ * 같다. 🔴 「접수 건」이라는 이름에 끌려 갈래를 하나 더 만들지 말 것: 쓰는 표가
+ * 하나이므로 쓰는 코드도 하나여야 한다.
+ */
 const REPAIR_CASE_APPROVAL_WRITE_TARGET: OpenApprovalWriteTarget = {
   targetEntity: "repair_case_approvals",
   bucket: "repairCase",
@@ -240,6 +248,8 @@ const REPAIR_CASE_APPROVAL_WRITE_TARGET: OpenApprovalWriteTarget = {
 const OPEN_APPROVAL_WRITE_TARGETS: Record<OpenApprovalKind, OpenApprovalWriteTarget> = {
   FINAL_SHIPMENT: REPAIR_CASE_APPROVAL_WRITE_TARGET,
   REPAIR_INSPECTION: REPAIR_CASE_APPROVAL_WRITE_TARGET,
+  // 🔵 기타건도 같은 표다(2026-11-06) — 바로 위 상수의 주석 참조.
+  DOMESTIC_ORDER_FINAL_SHIPMENT: REPAIR_CASE_APPROVAL_WRITE_TARGET,
   QUOTE: {
     targetEntity: "quote_approvals",
     bucket: "quote",

@@ -3,6 +3,7 @@ import { and, asc, eq, gt, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "../client";
 import {
   approvalRouteDelegations,
+  domesticOrders,
   intakeMailRecipients,
   inventoryPartIssueRequests,
   inventoryPartRequests,
@@ -130,6 +131,12 @@ export type UserDeletionOpenApproval = {
   plan: OpenApprovalPlan;
   subject: {
     repairCaseId: string | null;
+    /**
+     * 기타건 결재면 그 내자 줄(2026-11-06). 줄이 영구 삭제되면 결재 행에서 연결이
+     * 끊겨(SET NULL) null 이다. 🔴 접수 건 결재와 **함께 차는 일이 없다** — 표의
+     * CHECK 가 두 칸을 갈라 둔다.
+     */
+    domesticOrderId: string | null;
     /** 부품 불출이면 그 신청. */
     issueRequestId: string | null;
     /** 견적서 결재면 그 장. 견적서가 영구 삭제되면 결재 행에서 연결이 끊겨(SET NULL) null 이다. */
@@ -184,13 +191,24 @@ function nonNull<T>(value: T | null | undefined): value is T {
 
 function approvalLabel(
   kind: OpenApprovalKind,
-  subject: { intakeNumber?: string | null; quoteNumber?: string | null }
+  subject: {
+    intakeNumber?: string | null;
+    quoteNumber?: string | null;
+    domesticOrderLabel?: string | null;
+  }
 ): string {
   if (kind === "QUOTE") {
     // 견적서 번호는 사람이 손으로 적는 값이라 그대로가 가장 알아보기 쉽다
     // (「DSS 2026-077」). 견적서가 영구 삭제되면 결재 행의 연결이 끊기므로
     // (quote_approvals.quote_id 는 ON DELETE SET NULL) 그때는 접수 건과 같은 말을 쓴다.
     return `${subject.quoteNumber ?? "(영구 삭제된 견적서)"} ${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.QUOTE}`;
+  }
+  if (kind === "DOMESTIC_ORDER_FINAL_SHIPMENT") {
+    // 🔴 기타건은 **번호가 비어 있을 수 있다** — 발주만 들어오고 견적서가 없는 줄이
+    // 실제로 있다(schema/domestic-orders.ts). 그래서 이름표를 못 찾았을 때도
+    // 「(번호 없는 기타건)」으로 말한다. 「-」 하나로 두면 확인 창에서 무엇이
+    // 걸렸는지 전혀 알 수 없다.
+    return `${subject.domesticOrderLabel ?? "(번호 없는 기타건)"} ${SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS.DOMESTIC_ORDER_FINAL_SHIPMENT}`;
   }
   const caseLabel = subject.intakeNumber ?? "(영구 삭제된 접수 건)";
   return kind === "FINAL_SHIPMENT"
@@ -252,6 +270,13 @@ export async function collectUserDeletionImpact(
   );
 
   // 3. 접수 건 결재 대기 — 지울 사람에게 지정됐거나, 지울 사람이 있는 판을 따라가는 것.
+  //
+  // 🔴 **2026-11-06 부터 이 조회에는 기타건 결재도 함께 걸린다.** 같은 표를 쓰기
+  //    때문이고(repair_case_approvals 에 domestic_order_id 가 붙었다), 그것이 맞다 —
+  //    지울 사람에게 지정된 기타건 결재도 이어받을 사람에게 넘어가야 한다. 종류는
+  //    아래에서 행의 approval_type 을 그대로 싣는다(OPEN_APPROVAL_KINDS 가 그 값을
+  //    받아들이도록 함께 넓혔다). 🔵 변수 이름은 `repair…` 그대로 두었다 — 바꾸면
+  //    이 블록 전체의 diff 가 이름 바꾸기로 묻히고, 표 이름이 이미 같은 사정이다.
   const repairCondition =
     routeIdsWithTarget.length > 0
       ? or(
@@ -264,6 +289,7 @@ export async function collectUserDeletionImpact(
       id: repairCaseApprovals.id,
       approvalType: repairCaseApprovals.approvalType,
       repairCaseId: repairCaseApprovals.repairCaseId,
+      domesticOrderId: repairCaseApprovals.domesticOrderId,
       assignedApproverUserId: repairCaseApprovals.assignedApproverUserId,
       requestedByUserId: repairCaseApprovals.requestedByUserId,
       routeId: repairCaseApprovals.routeId,
@@ -320,6 +346,30 @@ export async function collectUserDeletionImpact(
       .where(inArray(repairCases.id, caseIds));
     for (const row of rows) intakeById.set(row.id, row.intakeNumber);
   }
+  // 6b. 기타건의 이름표 — 2026-11-06. 🔴 **번호가 비어 있을 수 있다**(발주만 있고
+  //     견적서가 없는 줄). 그래서 발행번호 → 발주서번호 → 품명 순으로 찾고, 셋 다
+  //     비면 지도에 넣지 않는다 — 그때 approvalLabel 이 「(번호 없는 기타건)」이라고
+  //     말한다. 휴지통에 든 줄도 그대로 읽는다(결재는 줄이 지워져도 남는다 —
+  //     견적서 쪽과 같은 처리).
+  const domesticOrderIds = unique(repairRows.map((row) => row.domesticOrderId).filter(nonNull));
+  const domesticOrderLabelById = new Map<string, string>();
+  if (domesticOrderIds.length > 0) {
+    const rows = await executor
+      .select({
+        id: domesticOrders.id,
+        quoteNumber: domesticOrders.quoteNumber,
+        purchaseOrderNumber: domesticOrders.purchaseOrderNumber,
+        modelNameText: domesticOrders.modelNameText,
+      })
+      .from(domesticOrders)
+      .where(inArray(domesticOrders.id, domesticOrderIds));
+    for (const row of rows) {
+      const label = [row.quoteNumber, row.purchaseOrderNumber, row.modelNameText]
+        .map((value) => value?.trim() ?? "")
+        .find((value) => value.length > 0);
+      if (label) domesticOrderLabelById.set(row.id, label);
+    }
+  }
   // 견적서번호 — 휴지통에 있는 장도 그대로 읽는다. 결재는 그 장이 지워져도 남으므로
   // (quote_approvals 에는 소프트삭제 칸이 없다) 여기서 걸러 내면 이름표만 사라진다.
   const quoteIds = unique(quoteRows.map((row) => row.quoteId).filter(nonNull));
@@ -339,6 +389,9 @@ export async function collectUserDeletionImpact(
   };
   for (const row of repairRows) {
     const intakeNumber = row.repairCaseId ? (intakeById.get(row.repairCaseId) ?? null) : null;
+    const domesticOrderLabel = row.domesticOrderId
+      ? (domesticOrderLabelById.get(row.domesticOrderId) ?? null)
+      : null;
     pushIfRelevant({
       approvalId: row.id,
       facts: {
@@ -349,8 +402,14 @@ export async function collectUserDeletionImpact(
         routeStepOrder: row.routeStepOrder,
         routeSteps: row.routeId ? (stepsByRoute.get(row.routeId) ?? []) : [],
       },
-      subject: { repairCaseId: row.repairCaseId, issueRequestId: null, quoteId: null, intakeNumber },
-      label: approvalLabel(row.approvalType, { intakeNumber }),
+      subject: {
+        repairCaseId: row.repairCaseId,
+        domesticOrderId: row.domesticOrderId,
+        issueRequestId: null,
+        quoteId: null,
+        intakeNumber,
+      },
+      label: approvalLabel(row.approvalType, { intakeNumber, domesticOrderLabel }),
     });
   }
   for (const row of quoteRows) {
@@ -367,7 +426,13 @@ export async function collectUserDeletionImpact(
       },
       // 견적서 결재는 접수 건에 매이지 않는다(수리 없이 부품만 파는 장이 있다) —
       // repairCaseId · intakeNumber 는 싣지 않는다.
-      subject: { repairCaseId: null, issueRequestId: null, quoteId: row.quoteId, intakeNumber: null },
+      subject: {
+        repairCaseId: null,
+        domesticOrderId: null,
+        issueRequestId: null,
+        quoteId: row.quoteId,
+        intakeNumber: null,
+      },
       label: approvalLabel("QUOTE", { quoteNumber }),
     });
   }

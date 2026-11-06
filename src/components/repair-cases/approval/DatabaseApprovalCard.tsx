@@ -25,12 +25,38 @@ function formatTimestamp(iso: string | null): string | null {
 }
 
 /**
+ * 이 껍데기가 **실제로 읽는 칸만** 추린 모양.
+ *
+ * 🔴 2026-11-06 에 `ApprovalRecordRow` 에서 이 모양으로 좁혔다. 까닭은 **기타건
+ * 최종 출하 승인 카드가 같은 껍데기를 쓰기 때문**이다(사용자 지정 — 수리 건의
+ * 승인 카드 모양 그대로). 그쪽 행은 같은 표에 쌓이지만 조회 타입이 따로이고
+ * (queries/domestic-order-approvals.ts), 판 번호 칸의 이름이 다르다.
+ *
+ * 🔴 **베껴서 두 벌을 만들지 않는다.** 껍데기를 하나 더 만들면 두 화면이 같은
+ * 승인을 서로 다른 배치로 보여 주게 되고, 한쪽만 고쳐지는 날이 온다.
+ *
+ * 🔵 좁히는 것이라 접수 건 쪽 호출부는 한 글자도 바뀌지 않는다 —
+ * `ApprovalRecordRow` 가 이 모양을 그대로 만족한다.
+ */
+export type ApprovalCardRecord = Pick<
+  ApprovalRecordRow,
+  | "requestedByName"
+  | "decidedByName"
+  | "delegatedFromName"
+  | "assignedApproverName"
+  | "requestedAt"
+  | "decidedAt"
+  | "requestReason"
+  | "decisionReason"
+>;
+
+/**
  * delegatedFromName is only ever non-null on a FINAL_SHIPMENT row (schema
  * CHECK constraint), so this branch never fires for REPAIR_INSPECTION —
  * safe to compute unconditionally here rather than needing an
  * approvalType prop.
  */
-function decidedByLabel(record: ApprovalRecordRow | null): string | null {
+function decidedByLabel(record: ApprovalCardRecord | null): string | null {
   if (!record?.decidedByName) return null;
   if (!record.delegatedFromName) return record.decidedByName;
   return `${record.decidedByName} (${record.delegatedFromName}를 대신하여 승인)`;
@@ -45,7 +71,7 @@ export type DatabaseApprovalActionButton = {
 
 type DatabaseApprovalCardProps = {
   title: string;
-  record: ApprovalRecordRow | null;
+  record: ApprovalCardRecord | null;
   displayStatus: DatabaseDisplayApprovalStatus;
   extra?: ReactNode;
   blockedNotice?: string | null;

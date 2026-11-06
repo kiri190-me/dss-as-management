@@ -48,6 +48,17 @@ const flat = (source: string) => source.replace(/\s+/g, " ");
 
 const inspectionCardSource = read("src/components/repair-cases/approval/DatabaseRepairInspectionCard.tsx");
 const shipmentCardSource = read("src/components/repair-cases/approval/DatabaseFinalShipmentCard.tsx");
+/**
+ * 🔴 **결재선 그림은 2026-11-06 에 공용 모듈로 옮겨 갔다** —
+ * components/approvals/ApprovalRouteDiagram.tsx. 기타건 최종 출하 승인 카드가 **같은
+ * 그림**을 쓰기 때문이고(사용자 지정), 베껴 두 벌을 만들지 않았다.
+ *
+ * 🔴 **이 파일의 못은 하나도 약해지지 않았다 — 자리만 옮겨 겨눴다.** 그리는 글자도
+ * 판정 순서도 그대로이고, 아래 시험들이 그것을 옮겨 간 원본에서 그대로 확인한다.
+ * 🔵 「그 그림이 카드 <section> 안에 들어가는가」는 여전히 **이 카드 쪽**에서 본다 —
+ * extra 로 넘기는 자리가 그대로여야 2열 격자가 안 밀린다.
+ */
+const routeDiagramSource = read("src/components/approvals/ApprovalRouteDiagram.tsx");
 const approvalScreenSource = read("src/components/repair-cases/approval/DatabaseApprovalScreen.tsx");
 const dialogSource = read("src/components/repair-cases/approval/ApprovalActionDialog.tsx");
 /** 두 자리가 같은 말을 해야 하는 문구를 모아 둔 순수 파일(문자열 상수만). */
@@ -617,34 +628,54 @@ describe("🔴 최종 출하 승인 카드 — 진행 미리보기", () => {
   test("🔴 가로로 길어져도 그 상자 안에서만 밀린다", () => {
     // 카드 바깥이 밀리면 옆 카드까지 못 쓰게 된다 — 관리자 화면의 미리보기가
     // 같은 이유로 같은 처리를 하고 있다.
-    assert.match(flat(extraBlock), /className="mt-2 overflow-x-auto pb-1"/);
-    assert.match(flat(extraBlock), /className="flex min-w-max items-start gap-2"/);
+    assert.match(flat(routeDiagramSource), /className="mt-2 overflow-x-auto pb-1"/);
+    assert.match(flat(routeDiagramSource), /className="flex min-w-max items-start gap-2"/);
   });
 
   test("상자들 사이에 ▶ 가 있고 상자 아래에 「n단계」가 있다 — 관리자 화면과 같은 모양", () => {
-    assert.match(flat(extraBlock), /index > 0 &&/, "첫 칸 앞에도 화살표가 붙는다");
-    assert.match(flat(extraBlock), /▶/);
-    assert.match(flat(extraBlock), /\{step\.stepOrder\}단계 · \{step\.stateLabel\}/);
-    assert.match(flat(extraBlock), /\{step\.approverName\}/);
+    assert.match(flat(routeDiagramSource), /index > 0 &&/, "첫 칸 앞에도 화살표가 붙는다");
+    assert.match(flat(routeDiagramSource), /▶/);
+    assert.match(flat(routeDiagramSource), /\{step\.stepOrder\}단계 · \{step\.stateLabel\}/);
+    assert.match(flat(routeDiagramSource), /\{step\.approverName\}/);
   });
 
   test("🔴 색만으로 상태를 구분하지 않는다 — 칸마다 글자가 함께 붙는다", () => {
     // UI_GUIDELINE 7절(색약 사용자). 상태 이름은 판정 함수 한 곳에서 색과 함께 나온다.
     for (const label of ["완료", "대기", "지금 차례", "반려", "재승인 필요"]) {
-      assert.ok(shipmentCardSource.includes(`stateLabel: "${label}"`), `상태 글자가 없다: ${label}`);
+      assert.ok(routeDiagramSource.includes(`stateLabel: "${label}"`), `상태 글자가 없다: ${label}`);
     }
   });
 
   test("🔴 끝난 단계 / 지금 차례 / 아직 안 온 단계가 갈린다", () => {
-    const mark = sliceBetween(shipmentCardSource, "function markForRouteStep(", "const extra = (");
+    const mark = sliceBetween(routeDiagramSource, "export function markForRouteStep(", "/** 그림 한 칸");
     assert.match(flat(mark), /stepOrder < currentStepOrder\) return DONE_MARK/, "앞 단계가 완료로 안 보인다");
     assert.match(flat(mark), /stepOrder > currentStepOrder\) return UPCOMING_MARK/, "뒷 단계가 대기로 안 보인다");
     // 이미 처리된 단계가 「지금 차례」라고 말하면 안 된다.
     assert.match(flat(mark), /displayStatus === "APPROVED"\) return DONE_MARK/);
   });
 
+  test("🔴 색·글자 짝과 그림이 **공용 모듈 한 곳**에만 있다", () => {
+    // 2026-11-06 에 기타건 최종 출하 승인이 같은 그림을 쓰게 되면서 옮겼다.
+    // 카드에 한 벌 더 생기면 한쪽만 고쳐지는 날 같은 사슬이 두 화면에서 다르게 보인다.
+    assert.match(
+      flat(shipmentCardSource),
+      /import ApprovalRouteDiagram, \{ markForRouteStep \} from "@\/components\/approvals\/ApprovalRouteDiagram"/,
+      "카드가 공용 그림을 쓰지 않는다"
+    );
+    assert.ok(!shipmentCardSource.includes("const DONE_MARK"), "카드가 색·글자 짝을 또 적었다");
+    assert.ok(
+      !shipmentCardSource.includes("function markForRouteStep("),
+      "카드가 판정을 또 적었다"
+    );
+    assert.ok(
+      shipmentCardSource.includes("<ApprovalRouteDiagram steps={previewSteps} />"),
+      "카드가 그림을 그리지 않는다"
+    );
+  });
+
   test("🔴 그래프 라이브러리를 쓰지 않는다 — 일렬이라 상자와 화살표 글자로 충분하다", () => {
     assert.ok(!/reactflow|d3|mermaid/i.test(shipmentCardSource));
+    assert.ok(!/reactflow|d3|mermaid/i.test(routeDiagramSource), "옮겨 간 그림이 라이브러리를 들였다");
   });
 
   test("🔴 미리보기도 카드 <section> **안**에 들어간다", () => {
@@ -679,8 +710,10 @@ describe("🔴 최종 출하 승인 카드 — 진행 미리보기", () => {
  * ============================================================================
  */
 describe("🔴 최종 출하 승인 카드 — 건너뛴 단계", () => {
-  const mark = sliceBetween(shipmentCardSource, "function markForRouteStep(", "const extra = (");
-  const extraBlock = sliceBetween(shipmentCardSource, "const extra = (", "return (");
+  // 🔵 2026-11-06 에 `extraBlock` 슬라이스가 여기서 빠졌다 — 그 블록을 보던 둘(상자
+  //    색·글자가 판정에서 오는가, 이름 상자의 한 줄 처리)이 **옮겨 간 그림 원본**을
+  //    보도록 바뀌었기 때문이다. 단언은 한 글자도 약해지지 않았다.
+  const mark = sliceBetween(routeDiagramSource, "export function markForRouteStep(", "/** 그림 한 칸");
 
   test("🔴 건너뜀을 「앞이면 완료」보다 **먼저** 본다 — 순서가 뒤집히면 거짓말이 된다", () => {
     const skipped = mark.indexOf("return SKIPPED_MARK");
@@ -701,11 +734,11 @@ describe("🔴 최종 출하 승인 카드 — 건너뛴 단계", () => {
   test("🔴 색만으로 구분하지 않는다 — 「건너뜀 · 요청자 본인」이 글자로 붙는다", () => {
     // UI_GUIDELINE 7절. 상태 이름은 판정 함수 한 곳에서 색과 함께 나온다.
     assert.ok(
-      shipmentCardSource.includes('stateLabel: "건너뜀 · 요청자 본인"'),
+      routeDiagramSource.includes('stateLabel: "건너뜀 · 요청자 본인"'),
       "글자가 없으면 색약 사용자에게는 대기 칸과 구분되지 않는다"
     );
     assert.match(
-      flat(shipmentCardSource),
+      flat(routeDiagramSource),
       /const SKIPPED_MARK: RouteStepMark = \{ toneClass: "[^"]+", stateLabel: "건너뜀 · 요청자 본인", \};/,
       "색과 글자를 한 자리에서 함께 정하지 않으면 한쪽만 늘어난다"
     );
@@ -748,9 +781,12 @@ describe("🔴 최종 출하 승인 카드 — 건너뛴 단계", () => {
   test("건너뛴 칸도 같은 상자에 그려진다 — 새 자리를 만들지 않는다", () => {
     // 달라지는 것은 상자 색과 아래 글자뿐이라, 미리보기의 배치는 그대로다.
     // (새 markup 이 생기면 카드 <section> 밖으로 나갈 길이 열린다.)
-    const preview = sliceBetween(extraBlock, "{previewSteps.length > 0 &&", "</dl>");
-    assert.match(flat(preview), /\$\{step\.toneClass\}/, "상자 색이 판정에서 오지 않는다");
-    assert.match(flat(preview), /\{step\.stepOrder\}단계 · \{step\.stateLabel\}/, "글자가 판정에서 오지 않는다");
+    assert.match(flat(routeDiagramSource), /\$\{step\.toneClass\}/, "상자 색이 판정에서 오지 않는다");
+    assert.match(
+      flat(routeDiagramSource),
+      /\{step\.stepOrder\}단계 · \{step\.stateLabel\}/,
+      "글자가 판정에서 오지 않는다"
+    );
   });
 });
 
@@ -1373,9 +1409,16 @@ describe("🔴 최종 출하 승인 카드 — 한국어 문장은 어절 경계
   });
 
   test("결재선 미리보기의 이름 상자는 예외다 — 한 줄로 두고 가로 스크롤로 처리한다", () => {
-    const preview = sliceBetween(extraBlock, "{previewSteps.length > 0 &&", "</dl>");
-    assert.match(flat(preview), /whitespace-nowrap rounded-md border/, "이름 상자의 한 줄 처리가 사라졌다");
-    assert.match(flat(preview), /className="mt-2 overflow-x-auto pb-1"/, "넘치는 만큼 그 상자 안에서 밀려야 한다");
+    assert.match(
+      flat(routeDiagramSource),
+      /whitespace-nowrap rounded-md border/,
+      "이름 상자의 한 줄 처리가 사라졌다"
+    );
+    assert.match(
+      flat(routeDiagramSource),
+      /className="mt-2 overflow-x-auto pb-1"/,
+      "넘치는 만큼 그 상자 안에서 밀려야 한다"
+    );
   });
 
   test("결재선을 타는 요청의 「결재선 진행」과 미리보기는 그대로다", () => {

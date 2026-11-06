@@ -5,7 +5,10 @@ import { db } from "../client";
 import { repairCaseApprovals, users } from "../schema";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import { INSPECTION_DECIDE_ELIGIBLE_ROLES } from "../mutations/repair-case-approvals";
-import type { RepairCaseApprovalType } from "@/lib/validation/repair-case-approval-input";
+import {
+  isValidApprovalType,
+  type RepairCaseApprovalType,
+} from "@/lib/validation/repair-case-approval-input";
 
 const requester = alias(users, "requester");
 const decider = alias(users, "decider");
@@ -80,12 +83,28 @@ function baseQuery() {
     .leftJoin(assignedApprover, eq(repairCaseApprovals.assignedApproverUserId, assignedApprover.id));
 }
 
-function toRow(row: Awaited<ReturnType<typeof baseQuery>>[number]): ApprovalRecordRow {
-  return {
-    ...row,
-    requestedAt: row.requestedAt.toISOString(),
-    decidedAt: row.decidedAt ? row.decidedAt.toISOString() : null,
-  };
+/**
+ * 읽어 온 행들을 화면이 쓰는 모양으로 — 그리고 **접수 건 결재 행만** 남긴다.
+ *
+ * 🔴 2026-11-06 부터 `repair_case_approvals` 에는 **기타건**(내자 정리의 한 줄) 결재
+ * 행도 쌓인다('DOMESTIC_ORDER_FINAL_SHIPMENT'). 그 행은 `repair_case_id` 가 언제나
+ * NULL 이고(표의 CHECK) 아래 두 조회는 전부 `repair_case_id = ?` 로 좁히므로 여기
+ * 올 수 없다 — 그래도 한 겹을 두는 까닭은 **그 조건이 바뀌는 날 기타건 결재가 접수
+ * 건 승인 화면에 조용히 섞이지 않게** 하려는 것이다. 섞이면 카드가 종류를 모르는 행을
+ * 받아 아무 카드에도 그려지지 않고, 그 실패는 화면에 아무 표시도 남기지 않는다.
+ */
+function toRepairCaseRows(rows: Awaited<ReturnType<typeof baseQuery>>): ApprovalRecordRow[] {
+  const result: ApprovalRecordRow[] = [];
+  for (const row of rows) {
+    if (!isValidApprovalType(row.approvalType)) continue;
+    result.push({
+      ...row,
+      approvalType: row.approvalType,
+      requestedAt: row.requestedAt.toISOString(),
+      decidedAt: row.decidedAt ? row.decidedAt.toISOString() : null,
+    });
+  }
+  return result;
 }
 
 /**
@@ -99,7 +118,7 @@ export async function getApprovalHistoryForCase(repairCaseId: string): Promise<A
   const rows = await baseQuery()
     .where(eq(repairCaseApprovals.repairCaseId, repairCaseId))
     .orderBy(desc(repairCaseApprovals.requestedAt));
-  return rows.map(toRow);
+  return toRepairCaseRows(rows);
 }
 
 export type CurrentApprovalState = {
@@ -122,10 +141,10 @@ export async function getCurrentApprovalsForCase(repairCaseId: string): Promise<
 
   const seen = new Set<RepairCaseApprovalType>();
   const latestByType = new Map<RepairCaseApprovalType, ApprovalRecordRow>();
-  for (const row of rows) {
-    if (seen.has(row.approvalType)) continue;
-    seen.add(row.approvalType);
-    latestByType.set(row.approvalType, toRow(row));
+  for (const record of toRepairCaseRows(rows)) {
+    if (seen.has(record.approvalType)) continue;
+    seen.add(record.approvalType);
+    latestByType.set(record.approvalType, record);
   }
 
   return (["REPAIR_INSPECTION", "FINAL_SHIPMENT"] as const).map((approvalType) => ({
