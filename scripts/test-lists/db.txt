@@ -453,3 +453,14 @@ src/lib/db/mutations/quote-domestic-order-line.integration.test.ts
 # 🔵 접수 건은 **하나도 만들지 않는다**(인수번호는 한 달에 99개가 한도다).
 # ⚠️ 판·단계는 afterEach 로 반드시 걷는다 — 남으면 다른 파일이 갑자기 결재선을 탄다.
 src/lib/db/mutations/domestic-order-approvals.integration.test.ts
+
+# ── 기타건 현황이 읽는 줄 (2026-11-06) ──────────────────────────────────
+# 「기타건」의 정의는 조회의 where 한 줄이다(repair_case_id IS NULL AND is_deleted = false).
+# 재는 것: 🔴 수리 건이 붙은 줄이 **안 섞이는가**(그런 줄이 실제로 있다를 먼저 단언한다 —
+# 개발/시험 DB 에는 지워진 기타건이 0건이라 표본을 일부러 만든다) · 🔴 지운 줄이 안 섞이는가 ·
+# 🔴 기타건은 **들어오는가**(이것이 없으면 「늘 빈 목록」도 통과한다) · 🔴 차례가 발행일자
+# 내림차순이고 날짜 없는 줄이 뒤인가 · 🔵 내자 정리 목록이 달라지지 않았는가(같은 조인을 쓴다).
+# 🔴 격리 이름: 발주서번호 "MISC-CASE-QUERY-TEST-{토큰}-".
+# 🔵 접수 건은 **하나도 만들지 않는다** — 시험 DB 에 있는 건을 빌려 읽기만 한다
+#    (인수번호는 한 달에 99개가 한도다).
+src/lib/db/queries/misc-domestic-orders.integration.test.ts

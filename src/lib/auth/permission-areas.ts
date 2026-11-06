@@ -246,6 +246,27 @@ export const PERMISSION_AREAS: readonly PermissionArea[] = [
     maxMeaningfulLevel: "MANAGE",
   },
   {
+    key: "miscCases",
+    label: "기타건 현황",
+    /**
+     * 기타건 = **수리 건이 붙지 않은 내자 정리의 줄**(2026-11-06). 그 줄들만 모아
+     * 보는 목록이라 **같은 표를 읽는다** — 그래서 금액·입금 경고를 내자 정리와 같이
+     * 적는다. 여기만 열어 두고 내자 정리를 닫으면 금액을 가린 것이 아니다.
+     *
+     * 🔴 **상한이 읽기다.** 이 화면에는 쓰기가 하나도 없다 — 고치는 일도 지우는 일도
+     * 전부 내자 정리 쪽에 있다. 쓰기·관리를 내밀면 고른 사람은 무언가 열었다고
+     * 믿지만 실제로는 아무것도 달라지지 않는다(이 파일이 maxMeaningfulLevel 을 두는
+     * 바로 그 까닭).
+     *
+     * 🔵 **기본값은 내자 정리와 같은 술어**가 정한다(permission-baseline.ts 의
+     * canViewDomesticOrders). 설정을 아무도 건드리지 않은 상태에서는 내자 정리를 보는
+     * 사람이 정확히 이 메뉴도 본다.
+     */
+    description:
+      "수리 건이 연결되지 않은 내자 줄(기타건) 목록. 내자 정리와 같은 자료라 금액과 입금 정보가 있습니다",
+    maxMeaningfulLevel: "READ",
+  },
+  {
     key: "quotes",
     label: "견적서",
     // 삭제·휴지통이 생기면서 상한을 관리까지 올렸다 — 위 주석이 예고했던 그

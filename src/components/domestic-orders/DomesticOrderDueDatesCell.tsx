@@ -62,8 +62,9 @@ import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders"
  *    domesticOrderDueDateEditDraft 로만 채운다 — 그 함수가 받는 타입에 수리 건의
  *    날짜가 없다. 대신 빈 목록으로 열리는 순간이 생기므로 편집칸 아래에 무엇이
  *    보이게 되는지 한 줄로 적는다(아래 BorrowHint).
- *  ③ 줄 전체가 `줄 수정` 폼을 여는 클릭 대상이라, 여는 버튼과 편집 중의 폼
- *    전체에 stopPropagation 을 건다(DomesticOrderTextCell 헤더 ③과 같다).
+ *  ③ 이 칸의 조작은 위로 퍼지지 않는다 — 여는 버튼과 편집 중의 폼 전체에
+ *    stopPropagation 을 건다(DomesticOrderTextCell 헤더 ③과 같다. 줄 전체를
+ *    누르는 동작은 2026-11-06 에 없어졌고, 다시 붙을 날을 위해 남겨 둔다).
  *
  * ── 🔴 저장은 **수리 건의 고객 요청 납기일까지 바꾼다** (2026-10-30) ───────
  * 사용자 결정이다 — 「어느 쪽에서 수정하든 같은 날짜를 보고 있을 수 있도록」. 이 칸은
@@ -202,7 +203,7 @@ export default function DomesticOrderDueDatesCell({
   }, [lines, idPrefix]);
 
   function openEditor(event: MouseEvent<HTMLButtonElement>) {
-    // ③ 줄 전체가 `줄 수정` 폼을 여는 클릭 대상이다(파일 헤더).
+    // ③ 위로 퍼지지 않게 막는다(파일 헤더 — 줄 누르기는 없어졌고 그래도 남겨 둔다).
     event.stopPropagation();
     // 열 때마다 서버가 방금 그려 준 목록에서 다시 시작한다 — 취소하고 다시 여는
     // 사이에 목록이 새로 그려졌을 수 있다. ② 빌려 온 날짜는 여기 들어오지 않는다.

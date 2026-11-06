@@ -1240,3 +1240,13 @@ src/components/domestic-orders/detail/domestic-order-purchase-order-tab-screens.
 # 🔴 올리기는 domesticOrders WRITE 이고 결재는 영역을 묻지 않는가 ·
 # 🔴 워크플로 자동 전환을 부르지 않는가(기타건에는 옮길 단계가 없다).
 src/components/domestic-orders/detail/domestic-order-approval-tab-screens.test.tsx
+
+# ── 기타건 현황 (2026-11-06) ────────────────────────────────────────────
+# 표와 카드는 실제로 그려 보고, 페이지(서버 컴포넌트)는 **주석을 걷어낸 원본 글자**로
+# 읽는다. 재는 것: 🔴 품명 칸이 **그 줄의 id** 로 가는 링크인가(빈 품명 줄도 누를 것이
+# 있고 그 글자가 내자 정리와 **같은 상수**인가) · 🔴 표에 나온 값과 이름표가 카드에도
+# 그대로 나오는가(한 벌에서 오는가) · 🔴 0건일 때 **말을 하는가**(자료가 없는 것과
+# 검색에 안 걸리는 것을 가른다) · 🔴 가드가 **조회보다 앞**이고 열쇠가 메뉴 열쇠와
+# 같은 글자인가 · 🔴 내자 정리 전체 목록 조회를 부르지 않는가 · 메뉴 주소와 실제
+# 경로가 같은가(갈리면 눌러서 404 다).
+src/components/misc-cases/misc-case-list-screens.test.tsx

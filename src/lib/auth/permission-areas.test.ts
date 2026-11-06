@@ -126,6 +126,10 @@ test("지금 볼 수 있는 화면은 상한이 최소 읽기다", () => {
     if (canViewMyActiveWork(role)) assertCeilingAllows("myActiveWork", role, "READ", "내 담당 제품 보기");
     if (canViewWorkflowTemplates(role)) assertCeilingAllows("workflows", role, "READ", "워크플로 보기");
     if (canViewDomesticOrders(role)) assertCeilingAllows("domesticOrders", role, "READ", "내자 정리 보기");
+    // 🔴 기타건 현황(2026-11-06)은 **내자 정리와 같은 줄을 읽는다** — 같은 술어를
+    // 그대로 쓴다. 여기 상한이 낮으면 내자 정리를 보는 사람이 그 줄들을 모아서는 못
+    // 보게 되고, 그 차이를 설명할 근거가 어디에도 없다.
+    if (canViewDomesticOrders(role)) assertCeilingAllows("miscCases", role, "READ", "기타건 현황 보기");
   }
 });
 
@@ -174,6 +178,8 @@ test("지금 못 보는 화면은 상한이 접근 불가다", () => {
     // "못 보는 역할에게는 상한도 없다"는 불변식만 지킨다.
     if (!canViewDomesticOrders(role)) {
       assert.equal(baselinePermissionLevel("domesticOrders", role), "NONE", `${role} 내자 정리`);
+      // 🔴 기타건 현황도 같은 자료다 — 한쪽만 닫아 두면 금액·입금을 가린 것이 아니다.
+      assert.equal(baselinePermissionLevel("miscCases", role), "NONE", `${role} 기타건 현황`);
     }
     /*
      * 🔴 2026-10-28(조각 13-D)에 **방향이 뒤집힌 자리**다. 그전까지 재고 메뉴는
@@ -204,6 +210,48 @@ test("상한은 그 영역에서 의미 있는 최고 수준을 넘지 않는다
         `${area.key}/${role}: 상한 ${ceiling}이 의미 있는 최고 수준 ${area.maxMeaningfulLevel}을 넘는다`
       );
     }
+  }
+});
+
+/**
+ * ============================================================================
+ * 🔴 기타건 현황 — **막히는 사람과 들어가는 사람** (2026-11-06)
+ * ============================================================================
+ * 화면(app/(app)/misc-cases/page.tsx)은 `requireAreaAccessForCurrentUser("miscCases")`
+ * 한 줄로 막는다. 그 한 줄이 실제로 **무엇을 막고 무엇을 열어 주는지**는 이 영역의
+ * 기본값이 정하므로, 「막힌다」만 재면 **아무도 못 들어가는 화면**도 그대로 통과한다.
+ * 그래서 둘을 한자리에서 잰다.
+ *
+ * 🔵 역할 이름을 적지 않고 술어(canViewDomesticOrders)를 그대로 쓴다 — 정책이 또
+ * 바뀌어도(2026-09-29 에 엔지니어가 열렸다) 「내자 정리와 같은 사람이 본다」는
+ * 불변식만 지킨다.
+ */
+test("🔴 기타건 현황 — 내자 정리를 보는 사람은 들어가고, 못 보는 사람은 막힌다", () => {
+  const open = ROLE_CODES.filter((role) => baselinePermissionLevel("miscCases", role) !== "NONE");
+  const shut = ROLE_CODES.filter((role) => baselinePermissionLevel("miscCases", role) === "NONE");
+
+  // 🔵 못 — 양쪽 표본이 비어 있으면 아래 두 단언이 공짜로 통과한다.
+  assert.ok(open.length > 0, "들어가는 역할이 하나도 없다 — 아무에게도 안 보이는 메뉴다");
+  assert.ok(shut.length > 0, "막히는 역할이 하나도 없다 — 이 시험은 아무것도 재지 않는다");
+
+  assert.deepEqual(
+    open,
+    ROLE_CODES.filter((role) => canViewDomesticOrders(role)),
+    "기타건 현황을 보는 역할이 내자 정리와 갈렸다"
+  );
+  for (const role of shut) {
+    assert.equal(canViewDomesticOrders(role), false, `${role} 는 내자 정리를 보는데 기타건은 막혔다`);
+  }
+});
+
+test("🔴 기타건 현황의 상한은 읽기다 — 쓰기·관리를 내밀어도 달라질 것이 없다", () => {
+  const area = PERMISSION_AREAS.find((candidate) => candidate.key === "miscCases");
+  assert.ok(area, "miscCases 영역이 없다");
+  assert.equal(area.maxMeaningfulLevel, "READ");
+  // 이 화면에는 저장하는 조작이 하나도 없다 — 고치고 지우는 길은 내자 정리 쪽이다.
+  for (const role of ROLE_CODES) {
+    const level = baselinePermissionLevel("miscCases", role);
+    assert.ok(level === "NONE" || level === "READ", `${role} 의 기타건 현황 상한이 ${level} 이다`);
   }
 });
 

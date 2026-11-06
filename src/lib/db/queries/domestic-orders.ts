@@ -1,7 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
-import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import {
@@ -630,6 +630,54 @@ export async function listDomesticOrders(): Promise<DomesticOrderListItem[]> {
   const rows = await selectDomesticOrderJoinRows()
     .where(eq(domesticOrders.isDeleted, false))
     .orderBy(asc(domesticOrders.displayOrder), asc(domesticOrders.createdAt));
+
+  return attachDomesticOrderExtras(rows);
+}
+
+/**
+ * 「기타건 현황」이 읽는 줄 — **수리 건이 붙지 않은, 안 지워진 내자 줄 전부**
+ * (2026-11-06).
+ *
+ * 🔴 **「기타건」의 정의가 이 `where` 한 줄이다.** 수리 건이 붙었는지는
+ * `repair_case_id` 로만 가른다 — 인수번호 글자(`intake_number_text`)가 아니다.
+ * 그 글자는 **연결을 못 찾은 줄에도 남아 있어서**(schema/domestic-orders.ts 의
+ * 그 칸 주석), 그것으로 가르면 수리 건과 이어지지 않은 줄이 조용히 사라진다.
+ * 목록의 [형식] 링크를 세우는 규칙도 같은 칸 하나를 본다
+ * (domain/domestic-order-detail-link.ts) — 두 곳이 같은 기준이라야 「링크가 선
+ * 줄」과 「이 목록에 뜨는 줄」이 같아진다.
+ *
+ * 🔴 **휴지통에 든 줄은 섞이지 않는다**(`is_deleted = false`). 내자 정리 목록 ·
+ * 기타건 상세가 쓰는 것과 같은 조건이고, 지운 줄에 링크를 세우면 전부 404 다
+ * (getDomesticOrderDetail 의 같은 주석).
+ *
+ * ── 🔴 차례는 **발행일자 내림차순**이고, 화면도 같은 차례로 다시 세운다 ──────
+ * `coalesce` 로 세우는 까닭: 화면의 `발행일자` 칸은 **연결된 견적서가 이긴 값**
+ * (displayQuoteIssuedDate = linked_quotes.quote_date ?? quote_issued_date)이다.
+ * 원본 칸(quote_issued_date)만으로 세우면 견적서가 연결된 줄에서 **서버가 그린
+ * 차례와 화면이 다시 세운 차례가 달라진다** — 그것은 눈에 띄는 깜빡임이 아니라
+ * React 의 hydration 어긋남이다. 매퍼가 접는 그 식을 SQL 에도 같은 모양으로 적어
+ * 둔다.
+ *
+ * 🔵 날짜가 없는 줄은 **뒤로**(`nulls last`). 화면이 "-"로 그리는 줄이 맨 위에
+ * 서면 첫 화면이 빈 칸으로 시작한다. 화면 쪽 기본 차례도 같은 규칙이다
+ * (domain/misc-case-list.ts 의 MISC_CASE_DEFAULT_SORT · sortMiscCases).
+ *
+ * 🔵 둘째 기준이 등록순(created_at 내림차순)인 것은 listDomesticOrders 와 같은
+ * 까닭이다 — 기준이 하나뿐이면 같은 날짜의 줄들이 새로 고칠 때마다 자리를 바꾼다.
+ * 화면의 정렬은 **안정 정렬**이라 같은 값끼리는 이 차례가 그대로 남는다.
+ *
+ * 🔵 `순번(display_order)` 으로 세우지 않는다. 그 값은 **내자 정리 시트에서 사람이
+ * 매긴 표시 순서**이고 이 화면에는 그 칸이 없다 — 보이지 않는 값으로 줄을 세우면
+ * 왜 그 차례인지 화면만 봐서는 답할 수 없다. 13건 중 9건만 채워져 있기도 하다
+ * (개발 DB 실측 2026-11-06).
+ */
+export async function listMiscDomesticOrders(): Promise<DomesticOrderListItem[]> {
+  const rows = await selectDomesticOrderJoinRows()
+    .where(and(eq(domesticOrders.isDeleted, false), isNull(domesticOrders.repairCaseId)))
+    .orderBy(
+      sql`coalesce(${linkedQuotes.quoteDate}, ${domesticOrders.quoteIssuedDate}) desc nulls last`,
+      desc(domesticOrders.createdAt)
+    );
 
   return attachDomesticOrderExtras(rows);
 }

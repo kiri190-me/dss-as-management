@@ -89,6 +89,16 @@ export const navItems: NavItem[] = [
   // 까닭과 그때 읽을 글은 위 NavItem.hiddenFromMenu 에 적었다.
   { key: "inventory", href: "/inventory", label: "재고 관리", hiddenFromMenu: true },
   { key: "domesticOrders", href: "/domestic-orders", label: "내자 정리" },
+  // 「기타건」 = 내자 정리의 줄 중 **수리 건이 붙지 않은 줄**(2026-11-06 사용자가 붙인
+  // 이름). 그 줄들만 모아 보는 목록이라 내자 정리 **바로 뒤**가 자리다 — 같은 표를
+  // 보는 화면이고, 사람은 내자 정리에서 [형식]을 눌러 기타건 상세로 들어가다가 「그
+  // 줄들만 모아서」를 찾게 된다.
+  //
+  // 🔴 열쇠가 `domesticOrders` 와 **따로**인 까닭은 고르고 말고가 아니다 — 이 파일의
+  // filterNavItemsForAccess 가 `item.key` 로 거르므로, 권한 영역에 같은 글자가 없는
+  // 항목은 아무에게도 안 보인다(permission-areas.ts 에 짝이 있다). 기본 노출은 내자
+  // 정리와 한 사람도 다르지 않게 맞춰 두었다(permission-baseline.ts).
+  { key: "miscCases", href: "/misc-cases", label: "기타건 현황" },
   { key: "quotes", href: "/quotes", label: "견적서" },
   // 견적서의 **작업비가 나오는 근거**다. 견적서 바로 옆에 두는 것은 견적을 내다가
   // "이 작업이 몇 시간이었지"를 확인하러 가는 일이 잦기 때문이다. 보는 권한은
@@ -256,7 +266,9 @@ export const navGroups: NavGroup[] = [
   // 안에서 견적은 내자 진행 상황표 바로 앞에 오는 일이고, 두 화면을 오가는
   // 사람이 같다. `내자 정리`의 하위메뉴로 두지 않은 것은 딸린 화면이 아니라
   // 나란한 화면이기 때문이다 — 내자 줄 없이 견적서만 내는 경우가 있다.
-  { key: "poDomestic", label: "PO / 내자", itemKeys: ["domesticOrders", "quotes", "repairLabor"] },
+  // 기타건 현황이 내자 정리 바로 뒤에 붙었다(2026-11-06) — 같은 표의 한 갈래를 모아
+  // 보는 화면이라 그 줄 다음이 자리다(위 항목 주석).
+  { key: "poDomestic", label: "PO / 내자", itemKeys: ["domesticOrders", "miscCases", "quotes", "repairLabor"] },
   { key: "admin", label: "관리", itemKeys: ["customers", "productModels"] },
   // 사용자 관리와 시스템 설정이 '관리'에서 여기로 내려왔다(2026-08-28, 사용자 요청).
   // '관리'는 업무를 하면서 들여다보는 **마스터 자료**(고객사·제품 모델)를 다루는

@@ -31,6 +31,17 @@ const read = (relativePath: string) =>
 /** 줄바꿈·들여쓰기 차이로 시험이 깨지지 않도록 공백을 하나로 접는다. */
 const flat = (source: string) => source.replace(/\s+/g, " ");
 
+/**
+ * 🔴 **세기 전에 주석을 걷는다.** 이 저장소의 파일들은 「왜 그렇게 했는가」를 길게
+ * 적고 그 글에 함수 이름이 그대로 들어 있다 — `EditRowButton` 은 주석째 세면 여덟,
+ * 실제로 쓰이는 자리는 셋이다(선언 · 표 · 카드).
+ */
+const stripComments = (source: string) =>
+  source
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/^[ \t]*\/\/[^\n]*$/gm, " ")
+    .replace(/\/\/[^\n]*$/gm, " ");
+
 const sliceBetween = (source: string, startMarker: string, endMarker: string) => {
   const start = source.indexOf(startMarker);
   assert.ok(start >= 0, `원본에서 '${startMarker}' 를 찾지 못했다`);
@@ -49,6 +60,61 @@ const tableBody = flat(sliceBetween(listScreen, "{group.rows.map((row) => {", "c
 const cardGroups = flat(sliceBetween(listScreen, "label: \"발주\",", "function CompletedBadge"));
 /** 카드가 칸 하나를 그리는 자리. */
 const cardRender = flat(sliceBetween(listScreen, "{fieldGroup.fields.map((field) => (", "</dl>"));
+
+/**
+ * ============================================================================
+ * 🔴 `줄 수정` 은 **[수정] 버튼으로만** 열린다 (2026-11-06 사용자 결정)
+ * ============================================================================
+ * 「내자정리의 표에서 줄을 클릭했을때 [줄 수정]창이 뜨는 기능을 없애줘. [줄 수정]은
+ * 표에서 [수정] 버튼을 눌렀을 때만 뜨도록 해줘」.
+ *
+ * 🔴 **세 가지를 함께 잰다.** 줄 누르기를 걷다가 **[형식] 링크(기타건 상세로 가는
+ * 길)** 나 **[수정] 버튼**까지 죽이면, 걷은 것은 맞는데 화면이 못 쓰게 된다. 하나만
+ * 재면 그 사고가 통과한다.
+ *
+ * 🔵 「줄을 누르면 수정창이 뜬다」를 재던 **기존 시험은 없었다**(2026-11-06 실측 —
+ * `openRow` · `cursor-pointer` 를 재는 시험이 저장소에 하나도 없었다). 그래서
+ * 뒤집을 단언이 아니라 **새로 박는 못**이다.
+ */
+test("🔴 표의 줄과 카드에 누르기가 없다 — 눌러도 `줄 수정` 이 열리지 않는다", () => {
+  for (const [name, source] of [
+    ["표의 줄", tableBody],
+    ["카드", flat(sliceBetween(listScreen, "{group.rows.map((row) => {", "</dl>"))],
+  ] as const) {
+    assert.equal(
+      source.includes("onClick={canEdit ? () => openRow(row.id) : undefined}"),
+      false,
+      `${name} 에 줄 전체 누르기가 남아 있다`
+    );
+    // 손 모양만 남으면 「눌러도 아무 일이 없는 줄」이 되어 고장으로 읽힌다.
+    assert.equal(
+      source.includes('canEdit ? "cursor-pointer" : ""'),
+      false,
+      `${name} 에 cursor-pointer 가 남아 있다`
+    );
+  }
+});
+
+test("🔴 그런데 [수정] 버튼은 표와 카드 **둘 다** 그대로 있다", () => {
+  const screen = flat(stripComments(listScreen));
+  // 선언 1 + 표 1 + 카드 1 = 3. 줄면 한쪽에서 여는 길이 통째로 사라진 것이다.
+  // 🔵 주석을 걷은 뒤에 센다 — 안 걷으면 여덟이다(위 stripComments).
+  assert.equal(screen.split("EditRowButton").length - 1, 3, "EditRowButton 이 셋이 아니다");
+  assert.match(screen, /<EditRowButton row=\{row\} onOpen=\{openRow\} \/>/);
+  // 누르면 실제로 그 줄의 폼을 연다 — 버튼만 남고 아무 일도 안 하면 같은 고장이다.
+  const button = flat(sliceBetween(listScreen, "function EditRowButton(", "function IntakeNumberLink("));
+  assert.match(button, /onOpen\(row\.id\);/);
+});
+
+test("🔴 [형식]을 누르면 기타건 상세로 가는 길도 그대로다", () => {
+  // 줄 누르기를 걷다가 이 링크까지 죽이면 기타건 상세로 갈 길이 목록에서 사라진다
+  // (조각 3 에서 만든 것이다. 규칙은 domain/domestic-order-detail-link.ts).
+  assert.match(tableBody, /<ModelNameLink row=\{row\} \/>/);
+  assert.match(cardGroups, /\{ label: "형식", of: \(row\) => <ModelNameLink row=\{row\} \/> \}/);
+  const component = flat(sliceBetween(listScreen, "function ModelNameLink(", "function CompletionToggle("));
+  assert.match(component, /const link = resolveDomesticOrderModelLink\(row\);/);
+  assert.match(component, /href=\{link\.href\}/);
+});
 
 test("세금계산서발행일은 표와 카드 둘 다 눌러 고친다", () => {
   assert.match(
@@ -166,7 +232,9 @@ test("견적서를 따르는 칸의 막음은 편집 여부보다 먼저 본다"
   const editingAt = textCell.indexOf("if (!isEditing) {");
   assert.ok(lockAt > 0, "견적서 연결 막음 판정이 없다");
   assert.ok(editingAt > lockAt, "막음 판정이 편집 여부보다 뒤에 있다 — 열려 있던 편집칸이 남는다");
-  // 막힌 칸은 버튼이 아니다 — 누르면 줄 전체로 올라가 `줄 수정` 이 열린다.
+  // 막힌 칸은 버튼이 아니라 글자다(왜 못 고치는지는 title 로 띄운다). 🔴 2026-11-06
+  // 전에는 그 글자를 누르면 줄 전체로 올라가 `줄 수정` 이 열렸는데, 줄 누르기가
+  // 없어지면서 그 길도 함께 사라졌다 — 연결을 푸는 길은 [수정] 버튼이다.
   const lockedBranch = flat(textCell.slice(lockAt, editingAt));
   assert.match(lockedBranch, /<span title=\{quoteLock\}/);
   assert.equal(lockedBranch.includes("<button"), false);

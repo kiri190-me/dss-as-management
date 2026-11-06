@@ -1,5 +1,6 @@
 import "server-only";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
+import { cache } from "react";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { domesticOrders, repairCaseApprovals, users } from "../schema";
@@ -139,6 +140,64 @@ function toRow(
 }
 
 /**
+ * 여러 기타건의 **지금 승인 상태**를 한 번에 — 「기타건 현황」 목록의 상태 배지가
+ * 쓴다(2026-11-06).
+ *
+ * 🔴 **줄마다 getDomesticOrderApprovalProgress 를 부르지 않는다.** 그러면 줄 수만큼
+ * 질의가 두 번씩 돈다(N+1). 여기서는 **질의 하나**로 그 줄들의 결재 행을 통째로 걷어
+ * 와 각 줄의 최신 한 건만 남긴다.
+ *
+ * 🔴 **「최신」의 정의가 저쪽과 같아야 한다** — `requested_at` 내림차순의 첫 행이다.
+ * 갈리면 같은 줄이 목록과 상세에서 다른 상태로 보인다. 그래서 정렬을 SQL 에 걸고
+ * **먼저 온 것이 이기게** 담는다(아래 `if (map.has(...)) continue`).
+ *
+ * 🔴 **판 번호는 부르는 쪽이 준다.** 목록이 이미 그 줄들을 읽어 왔고(`version` 이
+ * 거기 실려 있다), 여기서 다시 읽으면 같은 표를 한 요청에 두 번 훑는다. 낡은 값을
+ * 넘길 위험은 같은 요청 안에서 방금 읽은 줄을 그대로 넘기는 한 없다.
+ *
+ * 결재 기록이 한 줄도 없는 기타건은 **지도에 넣지 않는다** — 「없음」을 돌려주지
+ * 않고 아예 빼므로, 받는 쪽이 `?? null` 로 메우면 그것이 곧 NOT_REQUESTED 다
+ * (domain/misc-case-status.ts 가 그 둘을 같게 다룬다).
+ */
+export async function loadDomesticOrderApprovalStates(
+  orders: readonly { id: string; version: number }[]
+): Promise<Map<string, ShipmentApprovalState>> {
+  const states = new Map<string, ShipmentApprovalState>();
+  if (orders.length === 0) return states;
+
+  const versionById = new Map(orders.map((order) => [order.id, order.version]));
+
+  const rows = await db
+    .select({
+      domesticOrderId: repairCaseApprovals.domesticOrderId,
+      status: repairCaseApprovals.status,
+      versionAtRequest: repairCaseApprovals.repairCaseVersionAtRequest,
+    })
+    .from(repairCaseApprovals)
+    .where(inArray(repairCaseApprovals.domesticOrderId, [...versionById.keys()]))
+    .orderBy(desc(repairCaseApprovals.requestedAt));
+
+  for (const row of rows) {
+    // 이 칸이 찬 행만 걸러 왔으므로 null 일 수 없지만, 타입이 그것을 모른다.
+    if (row.domesticOrderId === null) continue;
+    // 🔴 **먼저 온 것이 이긴다** — 위 정렬이 최신을 맨 앞에 둔다.
+    if (states.has(row.domesticOrderId)) continue;
+    const version = versionById.get(row.domesticOrderId);
+    if (version === undefined) continue;
+    states.set(
+      row.domesticOrderId,
+      // 🔴 판정은 여기 새로 적지 않는다 — 상세가 쓰는 그 함수 하나다.
+      resolveApprovalState(
+        { status: row.status, repairCaseVersionAtRequest: row.versionAtRequest },
+        version
+      )
+    );
+  }
+
+  return states;
+}
+
+/**
  * 그 기타건의 결재 이력 전부 — **최신이 먼저**다.
  *
  * 줄은 고쳐 쓰지 않으므로(append 계열, 스키마 머리말) 이 한 번의 조회가 곧 완전한
@@ -179,8 +238,14 @@ export type DomesticOrderApprovalProgress = {
  * 사슬의 지금 상태는 언제나 마지막 행이 말한다. 「가장 최근」의 정의는 `requested_at`
  * 내림차순이고, 사슬을 잇는 저장 경로가 requested_at 을 물려받지 않는 이유가 바로 이
  * 조회를 정해지게 하기 위해서다.
+ *
+ * 🔵 **cache() 로 감쌌다**(2026-11-06). 상세의 머리 카드가 상태 배지를 그리면서 이
+ * 함수를 부르게 되어(사용자 요구), 레이아웃과 [승인] 탭이 한 요청 안에서 같은 id 를
+ * 두 번 묻는 자리가 생겼다 — 감싸지 않으면 화면 한 장에 질의가 네 벌 돈다. 요청
+ * 하나에만 걸리는 메모라 요청 사이로 새지 않고, 승인을 누른 직후의 다음 요청은 새
+ * 값을 읽는다(queries/domestic-orders.ts 의 getDomesticOrderDetail 과 같은 장치).
  */
-export async function getDomesticOrderApprovalProgress(
+export const getDomesticOrderApprovalProgress = cache(async function getDomesticOrderApprovalProgress(
   domesticOrderId: string
 ): Promise<DomesticOrderApprovalProgress | null> {
   const [order] = await db
@@ -209,4 +274,4 @@ export async function getDomesticOrderApprovalProgress(
     currentVersion: order.version,
     latest,
   };
-}
+});

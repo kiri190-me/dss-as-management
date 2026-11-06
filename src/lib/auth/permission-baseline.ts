@@ -282,6 +282,23 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
         read: canViewDomesticOrders(role),
       });
 
+    case "miscCases":
+      // 「기타건 현황」(2026-11-06) — 수리 건이 붙지 않은 내자 줄을 모아 보는 목록이다.
+      //
+      // 🔴 **보는 권한은 내자 정리와 같다.** 같은 표의 같은 줄을 읽으므로, 저쪽을 볼 수
+      // 있는 사람이 여기를 못 보거나 그 반대가 되면 같은 자료에 두 정책이 생긴다. 여기서도
+      // 역할 목록을 옮겨 적지 않고 *-authorization.ts 를 **호출해서** 구한다(이 파일 맨 위
+      // 주석) — 2026-09-29 에 엔지니어가 열린 것처럼 정책이 또 바뀌면 이 칸도 함께 따라온다.
+      //
+      // 🔴 쓰기·관리를 두지 않는다. 이 화면에는 저장하는 조작이 하나도 없다 — 고치고
+      // 지우는 일은 전부 내자 정리 쪽이고, 그 판정은 `domesticOrders` 가 한다. 여기를
+      // 넓혀도 아무것도 달라지지 않는 칸을 내밀지 않는다(permission-areas.ts 의
+      // miscCases.maxMeaningfulLevel 이 READ 라 어차피 한 번 더 잘린다).
+      //
+      // 🔴 여기를 빠뜨리면 아래 default 로 떨어져 NONE 이 되고, **최고관리자까지 막힌다** —
+      // 이 파일이 mailSettings 에 적어 둔 그 함정이다.
+      return ladder({ read: canViewDomesticOrders(role) });
+
     case "quotes":
       // 내자 정리와 같은 모양이다 — 만들기·고치기는 서버 액션이 실제로 저장하고
       // (4단계), 삭제·복원은 관리자 이상이다. 여기서도 역할 목록을 옮겨 적지 않고

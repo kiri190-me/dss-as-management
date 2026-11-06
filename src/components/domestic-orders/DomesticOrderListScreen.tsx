@@ -167,11 +167,19 @@ import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
  * 바뀌지 않는 조작이 되어 그쪽이 고장으로 읽힌다. 고른 값(selectedYear)은
  * 상태에 그대로 남아 있어, 검색어를 지우면 보던 해로 그대로 돌아온다.
  *
+ * ── 🔴 `줄 수정` 은 **[수정] 버튼으로만** 열린다 (2026-11-06) ───────────
+ * 사용자 결정 그대로다: 「내자정리의 표에서 줄을 클릭했을때 [줄 수정]창이 뜨는
+ * 기능을 없애줘. [줄 수정]은 표에서 [수정] 버튼을 눌렀을 때만 뜨도록 해줘」.
+ * 표의 `<tr>` 과 카드의 바깥 상자에서 `onClick` 과 `cursor-pointer` 를 함께 걷었다.
+ *
+ * 걷은 까닭은 그 동작이 **다른 조작과 자리를 다퉜기** 때문이다 — 이 표에는 칸을
+ * 눌러 그 자리에서 고치는 열두 칸과 링크 둘(인수번호 · 형식)이 있어서, 줄 전체가
+ * 누르기 대상이면 어디를 눌러도 무언가 열리는 표가 된다.
+ *
  * ── 인수번호는 링크, 수정은 버튼 ───────────────────────────────────────
- * 연결된 줄의 인수번호를 누르면 그 수리 건 상세로 넘어간다. 그 링크에는
- * stopPropagation 을 건다 — 줄 전체가 '수정 폼 열기'라서 그대로 두면 이동과
- * 폼 열기가 함께 일어난다. 연결이 없는 줄은 시트에 적혀 있던 글자뿐이라
- * 링크가 아니다(갈 곳이 없다).
+ * 연결된 줄의 인수번호를 누르면 그 수리 건 상세로 넘어간다. 연결이 없는 줄은
+ * 시트에 적혀 있던 글자뿐이라 링크가 아니다(갈 곳이 없다). 그 링크들의
+ * stopPropagation 은 **지금 막는 것이 없다** — 남겨 둔 까닭은 그 자리에 적었다.
  *
  * 그 대신 **수정 버튼을 순번 칸으로 옮겼다.** 예전에는 인수번호 칸이 폼을 여는
  * <button> 이었다 — <tr> 은 키보드 포커스를 받지 못해서, 22칼럼을 늘리지 않고
@@ -1276,13 +1284,12 @@ const rowActionButtonClass =
 const noteCellContentClass = "whitespace-pre";
 
 /**
- * 수정 폼을 여는 버튼. **키보드로 이 표를 고칠 수 있는 유일한 길**이다 —
- * <tr> 은 포커스를 받지 못하고, 인수번호는 이제 수리 건으로 가는 링크다
- * (파일 헤더의 '인수번호는 링크, 수정은 버튼').
+ * 수정 폼을 여는 버튼. 🔴 **2026-11-06 부터 이 표에서 `줄 수정` 을 여는 유일한
+ * 길**이다(사용자 결정 — 파일 헤더). 그전에도 **키보드로는** 유일한 길이었다:
+ * <tr> 은 포커스를 받지 못하고, 인수번호는 수리 건으로 가는 링크다.
  *
- * 줄 전체가 같은 일을 하는 클릭 대상이라 stopPropagation 을 한다. 없어도 결과는
- * 같지만(같은 줄의 폼이 열린다), 눌린 것이 무엇인지 화면과 코드가 같은 말을
- * 하도록 명시해 둔다.
+ * stopPropagation 은 남겨 둔다. 지금은 올라갈 곳이 없어 없어도 결과가 같지만,
+ * 줄에 누르기가 다시 붙는 날 이 버튼이 두 가지 일을 하게 되는 것을 막는다.
  *
  * 이름표에 인수번호를 함께 읽히는 이유: 이 버튼은 한 화면에 열두 개가 있고,
  * "수정" 한 마디만으로는 화면 낭독기가 어느 줄의 것인지 말할 수 없다.
@@ -1338,8 +1345,10 @@ function IntakeNumberLink({ row }: { row: DomesticOrderListItem }) {
   return (
     <Link
       href={`/repair-cases/${row.repairCaseId}`}
-      // 줄 아무 데나 누르면 수정 폼이 열린다 — 여기서 막지 않으면 수리 건으로
-      // 넘어가면서 폼도 함께 열린다.
+      // 🔵 **줄 전체를 누르는 동작은 2026-11-06 에 없어졌다**(사용자 결정 — 위 `<tr>`
+      // 주석). 그래서 지금은 막을 것이 없지만 이 한 줄은 남겨 둔다: 줄에 누르기가 다시
+      // 붙는 날, 이 링크가 조용히 두 가지 일을 하게 되는 것을 막는다. 떼어도 지금
+      // 화면은 똑같다 — 「지금 막고 있다」가 아니라 「다시 붙어도 안전하다」가 까닭이다.
       onClick={(event) => event.stopPropagation()}
       // ⚠️ **relative 를 떼지 말 것.** 아래 sr-only 는 position:absolute 라,
       // 기준이 되는 조상이 없으면 표 껍데기의 세로 스크롤을 빠져나가 문서에
@@ -1381,8 +1390,8 @@ function ModelNameLink({ row }: { row: DomesticOrderListItem }) {
   return (
     <Link
       href={link.href}
-      // 줄(카드) 아무 데나 누르면 수정 폼이 열린다 — 여기서 막지 않으면 상세로
-      // 넘어가면서 폼도 함께 열린다.
+      // 🔵 위 IntakeNumberLink 와 **같은 사정**이다 — 줄(카드) 전체를 누르는 동작은
+      // 2026-11-06 에 없어졌고, 이 한 줄은 다시 붙을 날을 위해 남겨 둔다.
       onClick={(event) => event.stopPropagation()}
       className="relative text-blue-700 underline underline-offset-2 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
     >
@@ -1396,9 +1405,9 @@ function ModelNameLink({ row }: { row: DomesticOrderListItem }) {
  * 완료 처리 · 완료 해제 버튼. 고칠 수 있는 사람에게만 그려지지만, 그것은
  * 편의일 뿐 경계가 아니다 — 서버 액션이 매번 다시 검사한다.
  *
- * 줄 전체가 '수정 폼 열기' 버튼이라 여기서 stopPropagation 을 한다. 하지
- * 않으면 완료를 누르는 순간 폼이 함께 열려, 방금 바뀐 값이 아니라 낡은 값을
- * 담은 폼이 뜬다.
+ * stopPropagation 은 남겨 둔다 — 줄 전체를 누르는 동작은 2026-11-06 에 없어져
+ * (파일 헤더) 지금은 막을 것이 없지만, 다시 붙으면 완료를 누르는 순간 폼이 함께
+ * 열려 방금 바뀐 값이 아니라 낡은 값을 담은 폼이 뜬다.
  *
  * 실패는 조용히 넘기지 않고 부르는 쪽에 올린다. 특히 CONFLICT 는 그 사이 남이
  * 이 줄을 고쳤다는 뜻이라, 아무 일도 없었던 것처럼 두면 사람은 완료가 된 줄
@@ -2433,22 +2442,29 @@ export default function DomesticOrderListScreen({
                     return (
                       <tr
                         key={row.id}
-                        // 줄 아무 데나 눌러도 열린다. 다만 이것만으로는 키보드로
-                        // 닿을 수 없으므로, 순번 칸에 진짜 <button>을 둔다
-                        // (EditRowButton) — 칼럼을 하나 더 만들지 않고 22칼럼을
-                        // 지키면서 포커스 가능한 조작을 주는 방법이다. 완료
-                        // 버튼도 같은 이유로 같은 칸에 있다.
-                        onClick={canEdit ? () => openRow(row.id) : undefined}
+                        // 🔴 **줄 아무 데나 눌러도 `줄 수정` 이 열리던 것을 걷었다**
+                        // (2026-11-06 사용자 결정: 「줄을 클릭했을때 [줄 수정]창이 뜨는
+                        // 기능을 없애줘. [줄 수정]은 [수정] 버튼을 눌렀을 때만」).
+                        //
+                        // 여는 길은 순번 칸의 진짜 <button> 하나다(EditRowButton) —
+                        // 그것은 원래부터 있었고(키보드로 닿을 수 있는 유일한 길이라
+                        // 두었다), 이제 **유일한** 길이 됐다. 완료 버튼도 같은 칸이다.
+                        //
+                        // 🔵 이 줄에는 이제 누르기 동작이 없다. 그래서 `cursor-pointer`
+                        // 도 함께 뗐다 — 손 모양만 남으면 「눌러도 아무 일이 없는 줄」이
+                        // 되고, 그것은 고장으로 읽힌다.
                         className={`border-b border-zinc-100 whitespace-nowrap last:border-0 dark:border-zinc-800 ${
                           // 완료된 줄은 회색이지만 **글자를 흐리게 하지 않는다** —
-                          // 흐리게 하면 못 누르는 줄로 읽힌다. hover 도 그대로
-                          // 살아 있어서 여전히 누를 수 있다는 것이 보인다.
+                          // 흐리게 하면 다룰 수 없는 줄로 읽힌다. hover 색도 그대로
+                          // 둔다: 줄을 눌러 여는 길은 없어졌지만, 22칼럼을 옆으로
+                          // 밀어 보는 표라 **지금 어느 줄을 보고 있는지** 짚어 주는
+                          // 일은 여전히 필요하다.
                           completed
                             ? "bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700"
                             : rowColorClass === ""
                               ? "hover:bg-zinc-50 dark:hover:bg-zinc-800/60"
                               : rowColorClass
-                        } ${canEdit ? "cursor-pointer" : ""}`}
+                        }`}
                         // 완료된 줄은 고객사 색 클래스를 받지 않으므로 변수도 싣지 않는다.
                         style={completed ? undefined : rowColorStyle}
                       >
@@ -2760,14 +2776,18 @@ export default function DomesticOrderListScreen({
                       return (
                         <div
                           key={row.id}
-                          onClick={canEdit ? () => openRow(row.id) : undefined}
+                          // 🔴 표의 줄과 **같이** 걷었다(2026-11-06) — 카드를 아무 데나
+                          // 눌러도 `줄 수정` 이 열리던 동작이다. 좁은 화면이라고 조작이
+                          // 달라지면 같은 자료가 다른 화면처럼 읽힌다(아래 원칙 그대로).
+                          // `cursor-pointer` 도 함께 뗐다: 누를 것이 없는데 손 모양만
+                          // 남으면 고장으로 읽힌다.
                           className={`flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800 ${
                             completed
                               ? "bg-zinc-200 dark:bg-zinc-800"
                               : rowColorClass === ""
                                 ? "bg-white dark:bg-zinc-900"
                                 : rowColorClass
-                          } ${canEdit ? "cursor-pointer" : ""}`}
+                          }`}
                           style={completed ? undefined : rowColorStyle}
                         >
                           {/* 표와 같은 원칙이다 — 인수번호는 수리 건으로 가는

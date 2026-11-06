@@ -6,7 +6,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import DomesticOrderBasicInfoView from "./DomesticOrderBasicInfoView";
 import DomesticOrderDetailHeader from "./DomesticOrderDetailHeader";
 import DomesticOrderDetailNotice from "./DomesticOrderDetailNotice";
+import MiscCaseStatusBadge from "@/components/misc-cases/MiscCaseStatusBadge";
 import type { DomesticOrderBasicInfoRow } from "@/lib/domain/domestic-order-basic-info";
+import { MISC_CASE_STATUS_LABELS } from "@/lib/domain/misc-case-status";
 
 /**
  * ============================================================================
@@ -136,6 +138,55 @@ describe("🔴 머리 — 품명 · 공급처 · 발행일자 · 발행번호가
     );
     assert.equal(count(notice, "<h1"), 0, notice);
     assert.equal(count(notice, "<h2"), 1, notice);
+  });
+});
+
+describe("🔴 머리 — 상태 배지 (2026-11-06 사용자 요구)", () => {
+  /**
+   * 「[기타건 최종 출하 승인]요청을 누르면 **[출하 승인 대기]** 베찌가 뜨도록 해줘
+   * (기타건 상세의 헤드와 기타건 현황 목록에) 그리고 출하 승인이 모두 완료되면
+   * **[출하 대기]**로 베찌가 바뀌도록 해줘」.
+   *
+   * 🔴 **접는 규칙은 여기서 재지 않는다** — 값으로 재는 자리는 도메인 시험이다
+   * (lib/domain/misc-case-status.test.ts). 여기서 보는 것은 **그 답이 이 카드에
+   * 실제로 나오는가**와, 레이아웃이 그 값을 **실제로 넘기는가**다. 둘 중 하나만
+   * 맞으면 배지는 영영 안 뜬다.
+   */
+  test("요청 중이면 「출하 승인 대기」, 승인이 끝나면 「출하 대기」", () => {
+    const pending = renderToStaticMarkup(
+      <DomesticOrderDetailHeader row={ROW} status="SHIPMENT_APPROVAL_PENDING" />
+    );
+    assert.ok(pending.includes(MISC_CASE_STATUS_LABELS.SHIPMENT_APPROVAL_PENDING), pending);
+    assert.equal(pending.includes(MISC_CASE_STATUS_LABELS.SHIPMENT_READY), false, pending);
+
+    const ready = renderToStaticMarkup(
+      <DomesticOrderDetailHeader row={ROW} status="SHIPMENT_READY" />
+    );
+    assert.ok(ready.includes(MISC_CASE_STATUS_LABELS.SHIPMENT_READY), ready);
+    assert.equal(ready.includes(MISC_CASE_STATUS_LABELS.SHIPMENT_APPROVAL_PENDING), false, ready);
+  });
+
+  test("🔴 목록과 **같은 배지 조각**을 쓴다 — 두 화면이 같은 말을 한다", () => {
+    const fromHeader = renderToStaticMarkup(
+      <DomesticOrderDetailHeader row={ROW} status="SHIPMENT_READY" />
+    );
+    const badge = renderToStaticMarkup(<MiscCaseStatusBadge status="SHIPMENT_READY" />);
+    assert.ok(fromHeader.includes(badge), `머리의 배지가 목록의 것과 다르다: ${fromHeader}`);
+  });
+
+  test("🔵 상태를 안 넘기면 배지가 아예 없다 — 값만 보는 자리에서 승인 조회를 세우지 않는다", () => {
+    const plain = renderToStaticMarkup(<DomesticOrderDetailHeader row={ROW} />);
+    for (const label of Object.values(MISC_CASE_STATUS_LABELS)) {
+      assert.equal(plain.includes(label), false, `${label} 이 그려졌다`);
+    }
+  });
+
+  test("🔴 레이아웃이 그 값을 **실제로 넘긴다** — 안 넘기면 배지는 영영 안 뜬다", () => {
+    assert.ok(layout.includes("getDomesticOrderApprovalProgress(id)"), layout);
+    assert.ok(layout.includes("resolveMiscCaseStatus({"), layout);
+    assert.match(layout, /<DomesticOrderDetailHeader row=\{row\} status=\{status\} \/>/);
+    // 🔴 판정을 레이아웃이 다시 적지 않는다 — 목록과 같은 함수 하나에 묻는다.
+    assert.equal(count(layout, "completedAt !== null"), 0, layout);
   });
 });
 
@@ -299,7 +350,8 @@ describe("🔴 인가 — 감추는 것은 막은 것이 아니다", () => {
   });
 
   test("🔴 머리 카드는 탭 줄 **위**다 — 어느 탭을 눌러도 같은 카드가 남는다", () => {
-    const header = indexOrFail(layout, "<DomesticOrderDetailHeader row={row} />");
+    // 2026-11-06 에 상태 배지가 붙으면서 `status` 인자가 늘었다 — 자리는 그대로다.
+    const header = indexOrFail(layout, "<DomesticOrderDetailHeader row={row}");
     const tabBar = indexOrFail(layout, "<DomesticOrderDetailTabs id={id}");
     const children = indexOrFail(layout, "{children}");
     assert.ok(header < tabBar, layout);

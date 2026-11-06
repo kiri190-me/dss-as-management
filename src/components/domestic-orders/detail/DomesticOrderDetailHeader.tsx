@@ -1,7 +1,9 @@
+import MiscCaseStatusBadge from "@/components/misc-cases/MiscCaseStatusBadge";
 import {
   domesticOrderDetailHeadFacts,
   type DomesticOrderDetailHeadRow,
 } from "@/lib/domain/domestic-order-basic-info";
+import type { MiscCaseStatus } from "@/lib/domain/misc-case-status";
 
 /**
  * 「기타건 상세」의 머리 카드 — 🔴 **품명 · 공급처 · 발행일자 · 발행번호**
@@ -26,14 +28,40 @@ import {
  *
  * 🔵 **서버 컴포넌트다**(`"use client"` 가 없다). 상태도 훅도 없는 표시 전용이라
  * 클라이언트 경계를 새로 긋지 않는다 — 레이아웃이 그대로 그린다.
+ *
+ * ── 🔴 상태 배지 (2026-11-06 사용자 요구) ──────────────────────────────
+ * 「[기타건 최종 출하 승인]요청을 누르면 [출하 승인 대기] 베찌가 뜨도록 해줘(기타건
+ * 상세의 헤드와 기타건 현황 목록에) 그리고 출하 승인이 모두 완료되면 [출하 대기]로
+ * 베찌가 바뀌도록 해줘」.
+ *
+ * 🔴 **그 판정도 글자도 여기 없다** — 기타건 현황 목록이 쓰는 **같은 배지**를 그린다
+ * (components/misc-cases/MiscCaseStatusBadge · domain/misc-case-status.ts). 두 곳에
+ * 적으면 같은 줄이 목록과 상세에서 다른 말을 하게 된다.
+ *
+ * ⚠️ [승인] 탭 안의 배지와는 **일부러 말이 다르다**(거기는 「승인 대기 · 승인 완료」).
+ * 그쪽은 **결재 기록 자체**의 상태이고 이것은 **기타건**의 상태다 — 까닭은
+ * domain/misc-case-status.ts 머리말에 적었다.
+ *
+ * 🔵 `status` 는 **선택 인자**다. 넘기지 않으면 배지를 아예 그리지 않는다 — 이 카드를
+ * 값만 보려고 그려 보는 자리(시험)에서 승인 조회까지 세우게 만들지 않기 위해서다.
  */
-export default function DomesticOrderDetailHeader({ row }: { row: DomesticOrderDetailHeadRow }) {
+export default function DomesticOrderDetailHeader({
+  row,
+  status,
+}: {
+  row: DomesticOrderDetailHeadRow;
+  status?: MiscCaseStatus;
+}) {
   const facts = domesticOrderDetailHeadFacts(row);
 
   return (
     <div className="rounded-lg border border-zinc-200 bg-white px-4 py-2.5 dark:border-zinc-800 dark:bg-zinc-900">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">기타건 상세</h1>
+        {/* 🔴 제목 **바로 옆**이다 — 값 알약 넷보다 앞에 둔다. 이 줄에서 사람이 가장
+            먼저 묻는 것이 「이 건이 지금 어디까지 왔나」이고, 알약 사이에 섞어 두면
+            품명·공급처와 같은 무게의 또 하나의 값으로 읽힌다. */}
+        {status !== undefined && <MiscCaseStatusBadge status={status} />}
         {/* 값 알약 묶음 — 가운뎃점 구분자는 두지 않는다(알약의 테두리가 가른다).
             좁은 화면에서는 묶음 안에서 줄바꿈된다. */}
         <div className="flex flex-wrap items-baseline gap-1.5">

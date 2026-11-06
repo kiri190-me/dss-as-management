@@ -179,12 +179,17 @@ test("navigation: 설정을 건드리지 않은 기본 상태의 역할별 노�
       (k) =>
         !["myActiveWork", "technicalProcedures", "workflows", "mailSettings", "kyosanIntakeImport", "developerMode"].includes(k)
     ),
+    // 🔴 2026-11-06 — `miscCases`(기타건 현황)가 이 줄에 **하나 늘었다.** 그 메뉴의
+    // 기본값은 내자 정리와 **같은 술어**(canViewDomesticOrders)로 정해지므로
+    // (permission-baseline.ts), domesticOrders 가 빠지는 이 역할에서만 함께 빠진다.
+    // 다른 네 역할에서는 아무것도 달라지지 않는다 — 그 사실이 이 표의 다른 줄들이
+    // 그대로인 것으로 드러난다.
     INVENTORY_MANAGER: menuKeys()
       .filter(
         (k) =>
           ![
             "myActiveWork", "technicalProcedures", "customers", "productModels", "workflows",
-            "domesticOrders", "quotes", "repairLabor", "customerPortal", "mailSettings",
+            "domesticOrders", "miscCases", "quotes", "repairLabor", "customerPortal", "mailSettings",
             "kyosanIntakeImport", "developerMode",
           ].includes(k)
       ),
@@ -328,6 +333,53 @@ test("🔴 개발자 모드 항목은 「설정」 그룹에 있고, 주소는 /
 
   const owning = navGroups.filter((g) => g.itemKeys.includes("developerMode")).map((g) => g.key);
   assert.deepEqual(owning, ["systemSettings"]);
+});
+
+/**
+ * 🔴 「기타건 현황」 항목 (2026-11-06) — 사용자 요구는 **「[PO/내자] … 에
+ * [기타건 현황]이라고 만들고」** 였다. 글자와 자리를 값으로 못 박아 둔다: 이름표가
+ * 바뀌면 사용자가 말한 메뉴가 사라진 것이고, 자리가 바뀌면 IA 변경이다.
+ */
+test("🔴 기타건 현황은 [PO / 내자] 묶음의 내자 정리 바로 뒤이고, 주소는 /misc-cases 다", () => {
+  const item = navItems.find((candidate) => candidate.key === "miscCases");
+  assert.ok(item, "메뉴에 기타건 현황이 없다");
+  assert.equal(item.href, "/misc-cases");
+  assert.equal(item.label, "기타건 현황");
+  // 하위메뉴가 아니다 — 내자 정리에 딸린 화면이 아니라 나란한 화면이다(견적서와 같다).
+  assert.equal(item.parentKey, undefined);
+  // 감춘 항목이 아니다 — 감추면 어느 길로도 나오지 않는다.
+  assert.equal(item.hiddenFromMenu, undefined);
+
+  const owning = navGroups.filter((group) => group.itemKeys.includes("miscCases"));
+  assert.deepEqual(owning.map((group) => group.key), ["poDomestic"]);
+  assert.equal(
+    owning[0].itemKeys.indexOf("miscCases"),
+    owning[0].itemKeys.indexOf("domesticOrders") + 1,
+    "내자 정리 바로 뒤가 아니다"
+  );
+
+  // 🔴 설정으로 열고 닫을 수 있는 항목이다 — 권한 영역에 같은 글자가 있어야 한다.
+  //    없으면 listAccessibleAreaKeys 가 이 열쇠를 내놓는 일이 없어 **아무에게도**
+  //    안 보인다(개발자 모드가 일부러 그렇게 돼 있는 그 자리다).
+  assert.ok(PERMISSION_AREAS.some((area) => area.key === "miscCases"));
+  assert.ok(PERMISSION_LEAF_KEYS.includes("miscCases"), "하위 기능이 없는 메뉴는 자기 키가 잎이다");
+});
+
+test("🔴 기타건 현황은 내자 정리를 보는 역할에게 **함께** 보인다", () => {
+  for (const role of ALL_ROLES) {
+    const visible = filterNavItemsForRole(navItems, role).map((item) => item.key);
+    assert.equal(
+      visible.includes("miscCases"),
+      visible.includes("domesticOrders"),
+      `${role}: 내자 정리와 기타건 현황의 노출이 갈렸다`
+    );
+  }
+  // 🔵 못 — 양쪽이 다 빈 답이면 위 단언은 공짜로 통과한다. 실제로 보는 역할과
+  //    못 보는 역할이 둘 다 있어야 「함께」가 뜻을 갖는다.
+  const seeing = ALL_ROLES.filter((role) =>
+    filterNavItemsForRole(navItems, role).some((item) => item.key === "miscCases")
+  );
+  assert.ok(seeing.length > 0 && seeing.length < ALL_ROLES.length, `보는 역할: ${seeing.join()}`);
 });
 
 test("navigation: no 'procedures' (all-category list) entry exists", () => {
@@ -605,7 +657,16 @@ test("navGroups: matches the approved A/S 업무 / 기술 / 자원 / PO / 내자
   // 나란한 항목이다 — 내자 줄 없이 견적서만 내는 경우가 있다(navigation.ts 주석).
   // 수리 작업 비용이 셋째로 붙었다(2026-08-31). 견적서 옆인 것은 견적을 내다가
   // "이 작업이 몇 시간이었지"를 확인하러 가는 일이 잦기 때문이다.
-  assert.deepEqual(byKey.get("poDomestic")?.itemKeys, ["domesticOrders", "quotes", "repairLabor"]);
+  // 🔴 기타건 현황이 내자 정리 **바로 뒤**에 붙었다(2026-11-06). 같은 표의 한 갈래
+  // (수리 건이 붙지 않은 줄)를 모아 보는 화면이라 그 줄 다음이 자리다 — 견적서 앞인
+  // 것도 일부러다: 견적서는 기타건을 **만드는** 쪽이고, 모아 보는 화면은 내자 정리와
+  // 짝이다(navigation.ts 의 그 항목 주석).
+  assert.deepEqual(byKey.get("poDomestic")?.itemKeys, [
+    "domesticOrders",
+    "miscCases",
+    "quotes",
+    "repairLabor",
+  ]);
   // 사용자 관리·시스템 설정은 2026-08-28 에 '설정' 그룹으로 내려갔다 — '관리'에는
   // 업무용 마스터 자료만 남는다(navigation.ts 주석).
   assert.deepEqual(byKey.get("admin")?.itemKeys, ["customers", "productModels"]);
@@ -670,7 +731,11 @@ test("filterNavItemsForRole: unrestricted items remain visible to every role", (
     // 고객 안내 현황(2026-08-28)은 접수를 만들 수 있는 넷에게 보인다. 재고
     // 담당자만 빠지므로 그 줄에서만 감춰지는 항목이 하나 늘었다 — 고객에게
     // 나갈 안내를 정하는 화면인데 그 역할에는 접수를 만들 수단이 없다.
-    INVENTORY_MANAGER: 12, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders + quotes + repairLabor + customerPortal + mailSettings + kyosanIntakeImport + developerMode
+    // 🔴 2026-11-06 — 기타건 현황(miscCases)이 생기면서 **이 줄만 12 에서 13 으로**
+    // 늘었다. 그 메뉴는 내자 정리와 같은 술어로 열리고 닫히므로, domesticOrders 가
+    // 감춰지는 이 역할에서만 함께 감춰진다. 다른 네 줄이 그대로인 것이 「다른 역할에는
+    // 그냥 하나 더 보인다」는 뜻이다(보이는 항목 수는 menuKeys() 가 함께 늘어 맞는다).
+    INVENTORY_MANAGER: 13, // myActiveWork + technicalProcedures + customers + productModels + workflows + domesticOrders + miscCases + quotes + repairLabor + customerPortal + mailSettings + kyosanIntakeImport + developerMode
   };
   for (const role of ALL_ROLES) {
     const visible = filterNavItemsForRole(navItems, role);
