@@ -1219,3 +1219,14 @@ src/components/domestic-orders/detail/domestic-order-detail-screens.test.tsx
 #    **같은 글자**로 난다) · 🔴 이 구역에만 있는 상태 둘이 「읽지 못했습니다」로 바뀌지 않는가 ·
 #    서버에서 공유폴더를 읽지 않는가 · print:hidden · 네트워크 없이 값으로 본다.
 src/components/domestic-orders/detail/domestic-order-quote-tab-screens.test.tsx
+# 2026-11-06 — 그 **발주서 탭의 속**(사용자 지시 「[발주서]는 내자정리에 적힌 [발주서 번호]를
+#    통해서 … 같은 발주서 번호를 가진 폴더와 연결시켜줘」). 재는 것: 🔴 머리에 그 번호가 적히고
+#    상태마다 무엇이 보이는가 · 🔴 **수리 건 쪽 문장 셋이 오지 않는가**(「이 **장비**의」 ·
+#    「같은 **날짜**의」 · 「이 장비(L/N · S/N)의 …」 — 장비도 날짜도 쓰지 않는 화면이라 그
+#    글자는 거짓말이다. 그 셋이 실제로 그 낱말을 담고 있다는 것도 함께 센다) · 🔴 공용 상태
+#    셋(불러오는 중 · 빈 폴더 · 읽지 못했습니다)은 **같은 글자**인가(줄 읽기 · 공통 문장은 한
+#    벌이다) · 🔴 통로가 받는 것이 **줄 id 하나**인가(주소에 번호가 실리지 않는다) ·
+#    🔴 `no-order-date` 가 **모르는 모양**인가(이 통로가 내지 않는 상태다 — 그리면 이 화면에
+#    없는 조건을 설명하게 된다) · 🔴 폴더가 여럿이면 목록 · 경로 · 단추가 다 없는가 ·
+#    🔴 탭 페이지가 번호 유무로 갈라지고 열쇠를 제자리에서 다시 보는가 · print:hidden.
+src/components/domestic-orders/detail/domestic-order-purchase-order-tab-screens.test.tsx

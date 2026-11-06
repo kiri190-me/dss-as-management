@@ -182,7 +182,7 @@ describe("🔴 기본정보 탭 — 내자 정리의 내용이 화면에 나온�
   });
 });
 
-describe("🔴 탭 틀 — 기본정보가 첫 화면이고, 아직 안 만든 둘만 자리표시다", () => {
+describe("🔴 탭 틀 — 기본정보가 첫 화면이고, 아직 안 만든 하나만 자리표시다", () => {
   test("탭 넷의 차례가 기본정보 · 견적서 · 발주서 · 승인이다", () => {
     const list = flat(tabs.slice(indexOrFail(tabs, "const tabs = ["), indexOrFail(tabs, "const activeHref")));
     assert.ok(list.includes('{ label: "기본정보", href: hrefs.root },'), list);
@@ -200,11 +200,8 @@ describe("🔴 탭 틀 — 기본정보가 첫 화면이고, 아직 안 만든 �
     assert.equal(tabs.includes("canViewPurchaseOrders"), false, "안 쓰는 프롭이 생겼다");
   });
 
-  test("🔴 아직 안 만든 탭 둘은 빈 화면이 아니라 「다음 조각에서 채웁니다」가 선다", () => {
-    for (const [name, source] of [
-      ["발주서", purchaseOrdersPage],
-      ["승인", approvalPage],
-    ] as const) {
+  test("🔴 아직 안 만든 탭 하나는 빈 화면이 아니라 「다음 조각에서 채웁니다」가 선다", () => {
+    for (const [name, source] of [["승인", approvalPage]] as const) {
       assert.ok(source.includes("다음 조각에서 채웁니다"), `${name} 탭이 빈 화면이다`);
       assert.ok(source.includes("<DomesticOrderDetailNotice"), `${name} 탭에 안내 상자가 없다`);
     }
@@ -226,6 +223,23 @@ describe("🔴 탭 틀 — 기본정보가 첫 화면이고, 아직 안 만든 �
     assert.ok(quotesPage.includes("<DomesticOrderQuoteArchiveFolderSection domesticOrderId={row.id}"), quotesPage);
     // 🔴 안내 상자는 그대로 쓴다 — 번호도 없는 줄에 **조용한 빈 화면**을 내밀지 않는다.
     assert.ok(quotesPage.includes("<DomesticOrderDetailNotice"), quotesPage);
+  });
+
+  /**
+   * 🔴 **발주서 탭도 2026-11-06 에 채워졌다** — 이 시험은 그날 「둘」에서 「하나」로 줄었다
+   * (견적서 탭이 바로 앞 조각에서 그랬던 것과 같은 사정). 줄이기만 하면 그 탭이 다시
+   * 자리표시로 돌아가도 아무도 모르므로, **채워졌다는 사실**을 여기서 못 박는다 — 탭이
+   * 무엇을 그리는지는 domestic-order-purchase-order-tab-screens.test.tsx 가 본다.
+   */
+  test("🔴 발주서 탭은 자리표시가 아니다 — 내자에 적힌 번호로 공유폴더를 그린다", () => {
+    assert.equal(purchaseOrdersPage.includes("다음 조각에서 채웁니다"), false, purchaseOrdersPage);
+    // 번호가 있는 줄 → 그 번호의 발주 건 폴더(사용자 결정 2026-11-06)
+    assert.ok(
+      purchaseOrdersPage.includes("<DomesticOrderPurchaseOrderFolderSection domesticOrderId={row.id}"),
+      purchaseOrdersPage
+    );
+    // 번호가 없는 줄 → **조용한 빈 화면이 아니라** 까닭을 적은 안내 상자다.
+    assert.ok(purchaseOrdersPage.includes("<DomesticOrderDetailNotice"), purchaseOrdersPage);
   });
 });
 
