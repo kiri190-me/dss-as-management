@@ -70,9 +70,19 @@ export function SourceBadge({ source }: { source: "MOCK" | "LOCAL_DEMO" | "DATAB
  * 지났을 때만 [납기 지연]이 뜨도록 해줘.)」 사내 날짜는 우리가 스스로 잡은 일정이고,
  * 그것을 넘긴 것은 고객과의 약속을 어긴 것이 아니다.
  *
+ * 🔴 **2026-11-07 — 그 칸이 비면 연결된 내자 정리의 납기요청일을 빌려 잰다.** 사용자
+ * 요구: 「고객 요청 납기일이 **내자정리에서 읽어온 경우 [납기지연]이 안뜨는** 것
+ * 같아. … **수리건 상세에서 적은 것과 같은 취급**을 해주도록 해줘」. 그 전까지 이
+ * 배지만 제 칸 하나를 봐서, 바로 아래 「납기 임박」·「납기 역전」은 빌려 온 날짜로
+ * 뜨는데 이것만 안 뜨고 있었다.
+ * 🔵 꼬리표(「내자 정리에서 작성됨」) 표시는 그대로다 — 넓힌 것은 판정뿐이다
+ * (2026-10-30 「동기화해도 출처 표시는 남긴다」 결정).
+ *
  * 🔴 판정은 여기서 하지 않는다 — 받는 것은 불리언 하나뿐이고, 조건은
- * domain/types.ts 의 isRepairCaseOverdue 하나에 있다(바로 아래 DueDateNearBadge 와
- * 같은 규율).
+ * domain/repair-case-overdue.ts 의 isRepairCaseOverdue 하나에 있다(바로 아래
+ * DueDateNearBadge 와 같은 규율). 🔵 종 알림 「납기 지연」도 **그 함수 하나**를 쓴다
+ * (2026-11-07 — queries/repair-case-overdue-notifications.ts). 글자도 나눠 쓰지 않고
+ * 종류 이름표가 이 배지와 같은 말을 적는다(NOTIFICATION_KIND_META).
  */
 export function OverdueBadge({ isOverdue }: { isOverdue: boolean }) {
   if (!isOverdue) {
@@ -96,8 +106,9 @@ export function OverdueBadge({ isOverdue }: { isOverdue: boolean }) {
  * 그 전까지 지연 쪽은 사내 목표 완료일을 봤다. 날짜가 같아져도 **둘은 여전히 섞이지
  * 않는다**: 두 창이 겹치지 않으므로(지났다 ↔ 오늘부터 7일) 한 건에 둘이 동시에
  * 붙지는 않는다 — 날짜가 갈려 있던 동안에는 겹칠 수 있었다.
- * ⚠️ 다만 **이 배지만 내자 정리에서 날짜를 빌려 온다**(자기 칸이 비면 연결된 줄의
- * 가장 이른 하루 — resolveRepairCaseRequestedDueDate). 지연 쪽은 빌려 오지 않는다.
+ * 🔵 **2026-11-07 부터 빌려 오기도 같다** — 둘 다 자기 칸이 비면 연결된 내자 줄의
+ * 가장 이른 하루를 본다(resolveRepairCaseRequestedDueDate). 그 전까지는 이 배지만
+ * 빌려 왔고, 그 어긋남이 사용자가 신고한 결함이었다.
  *
  * 🔴 색을 red 가 아니라 rose 로 둔 것은 사용자 결정이다. 진한 빨강으로 하면 바로
  * 옆의 「납기 지연」과 **같은 색**이 되어 「이미 늦음」과 「곧 늦음」이 구별되지

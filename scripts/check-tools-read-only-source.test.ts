@@ -47,6 +47,9 @@ const KNOWN_COUNTING_TOOLS = [
   "check-part-name-overlap.ts",
   "check-target-shipment-missing.ts",
   "check-due-date-inverted.ts",
+  // 🔵 2026-11-07 에 늘었다 — 「납기 지연」이 빌려 온 날짜로도 뜨게 되면서, 그 변경으로
+  //    경보가 몇 건 새로 켜지는지를 올리기 전에 세려고 만들었다.
+  "check-due-date-overdue.ts",
   "check-requested-due-date-sync.ts",
   THIS_TOOL,
 ];

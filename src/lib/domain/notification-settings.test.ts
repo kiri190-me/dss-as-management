@@ -85,6 +85,15 @@ function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
     // 다가온 건은 네 역할에게 각자 다른 모양으로 걸린다.
     return true;
   }
+  if (kind === "REPAIR_CASE_DUE_DATE_OVERDUE") {
+    // 2026-11-07 에 태어난 종류다 — 다섯 역할 전부. 바로 위 납기 임박과 **답은 같지만
+    // 까닭이 하나 더 있다**: 지연은 임박의 **바로 다음 순간**이고(같은 칸을 창만
+    // 달리해 본다), 명단이 갈리면 어제까지 임박으로 보이던 건이 하루 지나는 순간
+    // 어떤 사람의 종에서 **말없이 사라진다.** 그 사람은 「해결됐나 보다」로 읽는다.
+    // 🔴 이웃한 둘(사내 목표 완료일 미등록 · 납기 역전)이 역할로 갈린다고 해서 이것도
+    //    갈라서는 안 된다 — 그 둘에는 짝이 되는 경보가 없다.
+    return true;
+  }
   if (kind === "REPAIR_CASE_TARGET_SHIPMENT_MISSING") {
     // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로 적는다 —
     // 2026-10-29 사용자 결정 「엔지니어들에게」. 앞의 넷과 답이 갈리는 유일한 종류다:
@@ -253,10 +262,14 @@ test("🔴 여덟 종류가 **지정한** 칸에 앉는다 — 2026-10-19 사용
   //    짝이다.
   // 🔵 2026-11-06 에 기타건 결재 대기가 **남보라 6** 을 가져가 여덟이 됐다. 그 칸은
   //    2026-10-27 에 불출 승인 대기를 걷어내며 비워 둔 자리이고, 갈래가 같은 「대기
-  //    줄」이라 파랑 계열 묶음(파랑 15 · 보라 13) 사이에 앉는다. 아직 비어 있는 칸:
-  //    하늘 8.
+  //    줄」이라 파랑 계열 묶음(파랑 15 · 보라 13) 사이에 앉는다.
+  // 🔵 2026-11-07 에 납기 지연이 **분홍 2** 를 가져가 아홉이 됐다. 「급한 경고」 갈래는
+  //    이제 둘이다(빨강 0 납기 임박 · 분홍 2 납기 지연) — 같은 칸을 창만 달리해 보는
+  //    짝이라 이웃한 색이 뜻에 맞고, 두 창이 겹치지 않아 한 건에 둘이 서지 않는다.
+  //    아직 비어 있는 칸: 하늘 8.
   const 지정 = {
     REPAIR_CASE_DUE_DATE_NEAR: 0, // 빨강 — 급한 경고
+    REPAIR_CASE_DUE_DATE_OVERDUE: 2, // 분홍 — 급한 경고(임박의 다음 순간)
     APPROVAL_GRANTED: 12, // 초록 — 결과(됐다)
     APPROVAL_REJECTED: 9, // 장미 — 결과(안 됐다)
     REPAIR_CASE_APPROVAL: 15, // 파랑 — 내가 할 일
@@ -417,6 +430,60 @@ test("납기 임박의 이름·설명·색 — 창의 날짜 수는 상수에서
   // 🔴 초록(green·emerald·lime)은 고르지 않는다 — 「됐다」로 읽혀 경보가
   // 「괜찮다」로 보인다. 승인 완료에 초록을 준 바로 그 이유의 반대편이다.
   assert.ok(hue !== "green" && hue !== "emerald" && hue !== "lime", `납기 임박이 초록(${hue})이다`);
+});
+
+test("🔴 납기 지연의 기본값은 켜짐·다섯 역할 전부 받음이다 — 임박과 같은 명단이어야 한다", () => {
+  // 2026-11-07. 🔴 **임박과 명단이 갈리면 안 된다**는 것이 이 종류의 요점이라, 답을
+  // 따로 적지 않고 **납기 임박의 답과 맞대어 본다** — 어느 한쪽만 좁혀지는 날 여기서
+  // 걸린다(둘 다 손으로 적어 두면 한쪽만 고친 날 둘 다 통과한다).
+  assert.equal(defaultNotificationKindEnabled("REPAIR_CASE_DUE_DATE_OVERDUE"), true, "켜진 채로 태어난다");
+  for (const role of ROLE_CODES) {
+    assert.equal(
+      defaultRoleReceivesNotification("REPAIR_CASE_DUE_DATE_OVERDUE", role),
+      defaultRoleReceivesNotification("REPAIR_CASE_DUE_DATE_NEAR", role),
+      `${role}: 납기 지연과 납기 임박의 기본값이 갈렸다 — 하루가 지나는 순간 종에서 건이 사라진다`
+    );
+    assert.equal(
+      deliversNotification("REPAIR_CASE_DUE_DATE_OVERDUE", role, NO_NOTIFICATION_SETTINGS),
+      true,
+      role
+    );
+  }
+});
+
+test("납기 지연의 이름·설명·색 — 표의 배지와 같은 말이고, 색은 남은 여덟과 갈라진다", () => {
+  const meta = NOTIFICATION_KIND_META.REPAIR_CASE_DUE_DATE_OVERDUE;
+  // 🔴 표·카드·상세의 배지와 **같은 글자**여야 한다(components/repair-cases/badges.tsx).
+  assert.equal(meta.label, "납기 지연");
+  // 관리자가 이 설명만 읽고 무엇을 끄는지 알아야 한다 — 어느 날짜인가, 날짜가 어디서
+  // 오는가, 언제 안 뜨는가, 배지와 같은 판정인가.
+  assert.ok(meta.description.includes("고객 요청 납기일"), meta.description);
+  assert.ok(meta.description.includes("내자"), meta.description);
+  assert.ok(meta.description.includes("배지"), meta.description);
+  assert.ok(meta.description.includes("뜨지 않습니다"), meta.description);
+  // 🔴 **사내 목표 완료일을 설명에 적지 않는다** — 2026-11-03 에 그 날짜를 기준에서
+  //    뺀 결정이고, 설명에 남으면 관리자가 그 칸으로 뜨는 줄 안다.
+  assert.equal(
+    meta.description.includes("사내 목표 완료일"),
+    false,
+    "설명이 사내 목표 완료일을 가리킨다 — 2026-11-03 결정과 어긋난다"
+  );
+
+  // 색상 이름까지 달라야 한다(전체 유일성은 위 시험이 본다). 손으로 적은 목록은
+  // 낡으므로 지금 표에서 뽑는다(위 견적서 시험의 그 자리 주석).
+  const hueOf = (tone: string) => tone.match(/^text-([a-z]+)-/)?.[1];
+  const others = NOTIFICATION_KINDS.filter((kind) => kind !== "REPAIR_CASE_DUE_DATE_OVERDUE").map(
+    (kind) => hueOf(NOTIFICATION_KIND_META[kind].toneClassName)
+  );
+  const hue = hueOf(meta.toneClassName);
+  assert.ok(hue, meta.toneClassName);
+  assert.ok(!others.includes(hue), `납기 지연이 남의 색(${hue})을 쓴다`);
+  // 🔴 초록(green·emerald·lime·teal)은 고르지 않는다 — 「됐다」로 읽혀 경보가
+  //    「괜찮다」로 보인다. 납기 임박이 같은 자리에서 같은 못을 박고 있다.
+  assert.ok(
+    !["green", "emerald", "lime", "teal"].includes(hue),
+    `납기 지연이 초록 쪽이다(${hue}) — 이미 늦은 건이 「괜찮다」로 읽힌다`
+  );
 });
 
 test("🔴 승인 완료·반려됨의 기본값은 켜짐·다섯 역할 전부 받음이다 — 요청자 본인에게만 가는 알림이다", () => {

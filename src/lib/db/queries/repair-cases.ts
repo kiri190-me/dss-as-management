@@ -170,6 +170,13 @@ function selectRepairCaseTrashJoin() {
  * 🔴 싣는 것은 **고르기 전의 날짜 목록**이지 계산한 날짜가 아니다. 무엇을 그릴지는
  * 그리는 자리에서 domain/requested-due-date-link.ts 가 정한다 — 그 파일 머리말의
  * "이 결과는 어느 저장 payload 타입에도 들어가지 않는다" 그대로다.
+ *
+ * ── 🔴 날짜를 **매퍼에 넘긴다 — 뒤에서 덧씌우지 않는다**(2026-11-07) ────────
+ * 2026-11-07 까지 이 함수는 매퍼가 내놓은 줄에 `domesticOrderDueDates` 를 **덧씌웠다.**
+ * 그런데 「납기 지연」(isOverdue)은 매퍼 **안에서** 계산되므로, 그 판정은 덧씌우기
+ * 전의 **빈 배열**을 보고 있었다 — 표에는 빌려 온 날짜가 보이는데 그 옆의 배지만
+ * 옛 규칙으로 도는 모양이었다(사용자 신고). 그래서 매퍼의 인자로 바꿨고, 재료를 안
+ * 넘기면 tsc 가 멈춘다(mappers/repair-case.ts 의 그 인자 주석).
  */
 export async function listRepairCases(): Promise<ResolvedRepairCase[]> {
   const rows = await selectRepairCaseJoin()
@@ -178,12 +185,7 @@ export async function listRepairCases(): Promise<ResolvedRepairCase[]> {
 
   const dueDatesByCaseId = await loadDomesticOrderDueDatesByCaseId(dueDateBorrowerIds(rows));
 
-  return rows.map((row) => ({
-    ...mapRepairCaseRow(row),
-    // 매퍼는 빈 배열을 내놓는다(조인 한 줄에는 없는 값이다 — mappers/repair-case.ts).
-    // 실제 날짜를 얹는 자리는 여기 하나뿐이다.
-    domesticOrderDueDates: dueDatesByCaseId.get(row.id) ?? [],
-  }));
+  return rows.map((row) => mapRepairCaseRow(row, dueDatesByCaseId.get(row.id) ?? []));
 }
 
 /**
@@ -213,7 +215,11 @@ export async function listRepairCasesByCustomerId(customerId: string): Promise<R
     .where(and(eq(repairCases.isDeleted, false), eq(repairCases.customerId, customerId)))
     .orderBy(desc(repairCases.receivedAt));
 
-  return rows.map((row) => mapRepairCaseRow(row));
+  // 🔵 빌려 올 내자 날짜를 읽지 않는다 — 이 목록(고객사 상세의 A/S 이력)은 「납기 지연」
+  // 배지도 고객 요청 납기일 칸도 그리지 않는다(components/customers/
+  // CustomerRepairCaseHistory). 그 화면에 그 둘이 생기는 날에는 listRepairCases 처럼
+  // 공용 조각으로 한 번 더 읽어 넘겨야 한다.
+  return rows.map((row) => mapRepairCaseRow(row, []));
 }
 
 /**
@@ -228,7 +234,9 @@ export async function listRepairCasesByProductModelId(productModelId: string): P
     .where(and(eq(repairCases.isDeleted, false), eq(products.productModelId, productModelId)))
     .orderBy(desc(repairCases.receivedAt));
 
-  return rows.map((row) => mapRepairCaseRow(row));
+  // 바로 위 고객사 A/S 이력과 같다 — 이 화면도 「납기 지연」 배지를 그리지 않는다
+  // (components/product-models/ProductModelRepairCaseHistory).
+  return rows.map((row) => mapRepairCaseRow(row, []));
 }
 
 /**
@@ -250,7 +258,9 @@ export async function listRepairCasesByProductId(productId: string): Promise<Res
     .where(and(eq(repairCases.isDeleted, false), eq(repairCases.productId, productId)))
     .orderBy(desc(repairCases.receivedAt));
 
-  return rows.map((row) => mapRepairCaseRow(row));
+  // 위 둘과 같다 — 「이 제품의 과거 A/S 이력」 표에는 「납기 지연」 배지가 없다
+  // (components/repair-cases/detail/ProductInfoSection 의 이력 펼침).
+  return rows.map((row) => mapRepairCaseRow(row, []));
 }
 
 // Deliberately permissive UUID matcher (any RFC-4122-shaped hex string, not
@@ -259,6 +269,28 @@ export async function listRepairCasesByProductId(productId: string): Promise<Res
 // clean `null` instead of a raw "invalid input syntax for type uuid" error.
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * ── 🔴 내자 납기요청일을 **따로 한 번 더** 읽는다 (2026-11-07) ──────────────
+ * 수리 건 상세의 머리 카드에 붙는 「납기 지연」 배지가 이 줄의 `isOverdue` 로 그려지고
+ * (layout.tsx → DetailHeader → useEffectiveRepairCase), 2026-11-07 부터 그 판정은
+ * 고객 요청 납기일 칸이 비면 **연결된 내자 정리의 납기요청일을 빌려 잰다**
+ * (domain/repair-case-overdue.ts). 재료를 안 실어 보내면 같은 화면의 「납기 임박」·
+ * 「납기 역전」은 빌려 온 날짜로 뜨는데 「납기 지연」만 안 뜨는, 사용자가 신고한 바로
+ * 그 모양이 된다 — 그쪽 둘은 레이아웃과 탭이 날짜를 **따로 읽어** 판정을 직접 부르고
+ * 있어서 멀쩡했다.
+ *
+ * 🔵 **빌릴 건이 아니면 질의가 아예 돌지 않는다** — 자기 칸에 날짜가 적혀 있으면
+ * dueDateBorrowerIds 가 빈 목록을 주고, 공용 조각은 빈 목록에 질의를 걸지 않는다
+ * (queries/repair-case-domestic-order-due-dates.ts). 목록 둘과 **같은 조각**을 쓰는
+ * 까닭도 그 파일 머리말 그대로다: 네 곳이 각자 SQL 을 들면 한 곳만 고쳐지는 날
+ * 같은 건이 화면마다 다른 날짜로 보인다.
+ *
+ * ⚠️ `[id]/page.tsx` 와 `[id]/layout.tsx` 는 지금도 날짜를 **자기들이 한 번 더** 읽는다
+ * (listDomesticOrderDueDatesForRepairCase). 거기서 읽는 것은 「빌릴 건인가」를 가리지
+ * 않은 **전부**이고 화면에 그리는 데도 쓰이므로, 이 조회의 좁혀진 목록으로 대신할 수
+ * 없다. 두 값이 어긋날 길은 없다 — 자기 칸이 빈 건에서는 둘이 같은 목록이고, 차 있는
+ * 건에서는 **어느 쪽도 쓰이지 않는다**(자기 자리에 적힌 것이 먼저).
+ */
 export async function getRepairCaseById(id: string): Promise<ResolvedRepairCase | null> {
   if (!UUID_PATTERN.test(id)) {
     return null;
@@ -269,7 +301,10 @@ export async function getRepairCaseById(id: string): Promise<ResolvedRepairCase 
     .limit(1);
 
   const row = rows[0];
-  return row ? mapRepairCaseRow(row) : null;
+  if (!row) return null;
+
+  const dueDatesByCaseId = await loadDomesticOrderDueDatesByCaseId(dueDateBorrowerIds([row]));
+  return mapRepairCaseRow(row, dueDatesByCaseId.get(row.id) ?? []);
 }
 
 /**

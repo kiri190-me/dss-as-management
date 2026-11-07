@@ -103,6 +103,10 @@ export const NOTIFICATION_KINDS = [
   "QUOTE_APPROVAL_PENDING",
   "DOMESTIC_ORDER_APPROVAL_PENDING",
   "REPAIR_CASE_DUE_DATE_NEAR",
+  // 🔵 「납기 임박」 바로 뒤에 둔다 — 같은 날짜 하나를 창만 달리해 보는 짝이라
+  //    (오늘~+7일 ↔ 지났다) 종 패널에서도 나란히 서는 것이 읽기 쉽다. 기존 종류들의
+  //    상대 차례는 한 칸도 바꾸지 않았다.
+  "REPAIR_CASE_DUE_DATE_OVERDUE",
   "REPAIR_CASE_TARGET_SHIPMENT_MISSING",
   "REPAIR_CASE_DUE_DATE_INVERTED",
   "APPROVAL_GRANTED",
@@ -415,8 +419,14 @@ export function repairCaseDueDateNotificationWindowEnd(now: Date): string {
  * 그 함수가 `null` 을 주는 것이 곧 「화면에도 날짜가 안 보인다」는 뜻이다.
  *
  * 🔴 **이미 지난 납기는 창 밖이라 뜨지 않는다.** 이 알림은 「곧 온다」를 알리는
- * 것이고, 「지났다」는 이 저장소에 이미 따로 있다(types.ts 의 isRepairCaseOverdue —
- * 사내 목표 완료일로 재는 다른 판정이다). 둘을 섞지 않는다.
+ * 것이고, 「지났다」는 이 저장소에 이미 따로 있다 —
+ * domain/repair-case-overdue.ts 의 isRepairCaseOverdue 다. 둘을 섞지 않는다.
+ * 🔵 **2026-11-03 까지 그 판정은 사내 목표 완료일로 쟀고**, 그때는 「다른 날짜를 보는
+ *    다른 판정」이라는 것이 둘을 가르는 말이었다. 지금은 **같은 날짜를 보고 창만
+ *    다르다**(오늘 ≤ 날짜 ≤ 오늘+7 ↔ 날짜 < 오늘). 그래서 두 창은 겹치지 않고,
+ *    한 건에 임박과 지연이 동시에 뜨지 않는다. 🔴 이 절에 「사내 목표 완료일로 재는
+ *    다른 판정」이라고 적혀 있던 문장은 2026-11-03 부터 거짓이었다(2026-11-07 에
+ *    고쳤다).
  */
 export function isRepairCaseDueDateWithinNotificationWindow(dueDate: string | null, now: Date): boolean {
   if (dueDate === null) return false;
@@ -512,6 +522,89 @@ export function buildRepairCaseDueDateNearNotification(input: {
   return {
     id: `REPAIR_CASE_DUE_DATE_NEAR:${input.repairCaseId}`,
     kind: "REPAIR_CASE_DUE_DATE_NEAR",
+    targetKey: input.repairCaseId,
+    subject: input.intakeNumber,
+    detail: input.borrowed
+      ? `${input.dueDate} · ${DUE_DATE_FROM_DOMESTIC_ORDER_LABEL}`
+      : input.dueDate,
+    href: repairCaseDetailHrefs(input.repairCaseId).root,
+  };
+}
+
+// ════════════════════ 납기 지연 — 고객 요청 납기일이 이미 지났고 아직 안 나갔다
+
+/**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 2026-11-07 사용자 요구: 「[납기 지연]도 종으로 알림이 뜨도록」.
+ *
+ * ── 🔴 판정을 여기 적지 않는다. 한 줄도 ────────────────────────────────────
+ * 뜨는 조건은 **이미 있다** — domain/repair-case-overdue.ts 의 isRepairCaseOverdue,
+ * 곧 전체 A/S 현황의 표·카드와 수리 건 상세 머리 카드에 「납기 지연」 배지를 세우는
+ * 바로 그 함수다. 같은 말을 두 벌로 적으면 **배지는 떴는데 종은 조용하거나 그 반대인**
+ * 날이 온다. 그래서 이 절에는 판정 함수가 하나도 없고 아래 build 하나뿐이다(조건을
+ * 부르는 자리는 조회다: queries/repair-case-overdue-notifications.ts).
+ * 🔵 「납기 역전」이 같은 자리에서 같은 모양을 택했다(그 절의 그 문단).
+ *
+ * 🔴 **사내 목표 완료일이 아니다.** 2026-11-03 사용자 결정으로 이 경보의 기준은 고객
+ * 요청 납기일 하나다 — 「사내 목표 완료일을 지났다고 해서 납기 지연 배지가 뜨지
+ * 않도록 해줘」. 그 결정을 종에서 되살리면 같은 말이 화면과 종에서 두 뜻이 된다.
+ * 🔵 그 칸이 비면 **연결된 내자 정리의 납기요청일을 빌려** 재는 것도 그 함수 안에
+ * 들어 있다(2026-11-07 같은 요구의 앞 절반) — 여기서는 공짜로 따라온다.
+ *
+ * ── 🔴 확인 단추를 달지 않는다 ─────────────────────────────────────────────
+ * ACKNOWLEDGEABLE_NOTIFICATION_KINDS 에 넣지 **않는다.** 넣으면 종에 확인 단추가 생기고,
+ * 누르면 물건이 아직 안 나갔는데도 사라진다 — 「사과할 일」을 숨기는 길을 내는 셈이다.
+ * 넣지 않으면 저절로 할 일 알림이 된다: 그 건이 나가거나(실제 출하일·출하 완료) 고객과
+ * 협의해 날짜를 다시 잡으면 다음 조회에서 빠진다. 「납기 임박」·「납기 역전」·「사내 목표
+ * 완료일 미등록」 셋이 모두 같은 자리에 선다.
+ *
+ * ── 받는 사람은 **전원**이다 ───────────────────────────────────────────────
+ * 이웃한 둘(사내 목표 완료일 미등록 = 엔지니어, 납기 역전 = 엔지니어·영업·관리자)과
+ * 갈린다. 까닭 둘을 알림 설정의 그 case 에 적어 두었고, 요점은 **지연이 임박의 바로
+ * 다음 순간**이라는 것이다 — 같은 날짜를 창만 달리해 보므로, 명단이 갈리면 어제까지
+ * 임박으로 보이던 건이 하루 지나는 순간 어떤 사람의 종에서 **말없이 사라진다.**
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+
+/**
+ * 「납기 지연」 알림 한 줄.
+ *
+ * ── subject 는 인수번호다 ──────────────────────────────────────────────
+ * 접수 건을 가리키는 말 중 사람이 먼저 찾는 것이고, 다른 종류들이 굵게 두는 것과
+ * 같은 값이다.
+ *
+ * ── 🔴 detail 은 **「납기 임박」과 같은 모양**이다 ──────────────────────
+ * 날짜 하나, 빌려 온 값이면 그 표시. 두 알림은 같은 칸(고객 요청 납기일)을 창만
+ * 달리해 보는 짝이라, 종에서 모양이 다르면 사람이 둘을 다른 자료로 읽는다. 종류
+ * 이름(「납기 지연」)은 종 패널이 이 줄 **위에** 따로 적으므로 여기 다시 적지
+ * 않는다 — 잘리는 자리의 폭만 먹는다.
+ *
+ * 🔴 「며칠 지났는가」를 적지 않는다. 그 수를 내려면 「오늘」이 이 순수 함수로
+ * 들어와야 하는데, 그러면 같은 알림이 **부르는 시각에 따라 다른 글자**가 되어 종과
+ * 브라우저 알림창이 어긋날 수 있다(창을 재는 일은 조회가 한다). 날짜만 적어도 사람은
+ * 오늘을 알고 있다.
+ *
+ * 표시 글자는 새로 쓰지 않고 상세정보 화면이 이미 쓰는 것을 그대로 가져온다
+ * (requested-due-date-link.ts 의 DUE_DATE_FROM_DOMESTIC_ORDER_LABEL) — 「납기 임박」·
+ * 「납기 역전」이 같은 자리에서 같은 상수를 쓴다.
+ *
+ * ── href 는 상세 첫 화면이다 ──────────────────────────────────────────
+ * 고객 요청 납기일이 그 화면의 「인수 정보」에 있고, 날짜를 고치는 자리도 거기다.
+ * 주소는 직접 적지 않고 탭 헬퍼에서 가져온다 — 이웃 셋과 같은 줄이다.
+ *
+ * targetKey 는 접수 건 id 다. 한 건에 납기일은 하나뿐이고, 사람에게도 「그 한 건」이다.
+ */
+export function buildRepairCaseDueDateOverdueNotification(input: {
+  repairCaseId: string;
+  intakeNumber: string;
+  /** 화면에 보이는 그 날짜("YYYY-MM-DD"). 이미 지났다고 조회가 가린 값이다. */
+  dueDate: string;
+  /** 이 건의 칸이 아니라 연결된 내자 정리에서 빌려 온 날짜인가. */
+  borrowed: boolean;
+}): NotificationItem {
+  return {
+    id: `REPAIR_CASE_DUE_DATE_OVERDUE:${input.repairCaseId}`,
+    kind: "REPAIR_CASE_DUE_DATE_OVERDUE",
     targetKey: input.repairCaseId,
     subject: input.intakeNumber,
     detail: input.borrowed

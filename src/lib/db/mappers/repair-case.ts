@@ -1,6 +1,5 @@
 import {
   billingTypeLabels,
-  isRepairCaseOverdue,
   productCategoryLabels,
   type BillingType,
   type ExceptionStatus,
@@ -8,6 +7,8 @@ import {
   type RepairStatus,
   type WorkflowType,
 } from "@/lib/domain/types";
+// 🔴 types.ts 가 아니다 — 2026-11-07 에 고리를 끊느라 분가했다(그 파일 머리말).
+import { isRepairCaseOverdue } from "@/lib/domain/repair-case-overdue";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import { resolveRepairStatusFromStep } from "./repair-status";
 
@@ -110,6 +111,21 @@ export type TrashedRepairCase = ResolvedRepairCase & {
  */
 export function mapRepairCaseRow(
   row: RepairCaseJoinRow,
+  /**
+   * 그 건이 **내자 정리에서 빌려 올 납기요청일 전부**(빌릴 것이 없으면 빈 배열).
+   *
+   * 🔴 **선택 인자가 아니다 — 부르는 자리마다 한 번씩 정하게 한다.** 2026-11-07
+   * 까지 이 값은 매퍼가 늘 빈 배열로 내놓고 **조회가 나중에 덧씌우는** 것이었는데,
+   * 그 사이에 계산되는 isOverdue 는 덧씌우기 전의 빈 배열로 판정하고 있었다. 그래서
+   * 상세 화면에 날짜가 **보이는데도** 「납기 지연」이 안 뜨는 건이 생겼다(사용자
+   * 신고). 기본값을 두면 그 모양이 아무 오류 없이 되살아난다.
+   *
+   * 🔵 조인해 온 한 줄에는 들어 있을 수 없는 값이다 — 한 건에 내자 줄이 여럿이고
+   * 줄마다 날짜가 또 여럿이라, 이 join 에 끌어다 붙이면 그 건이 날짜 수만큼
+   * 복제된다(queries/repair-case-domestic-order-due-dates.ts 머리말). 그래서
+   * **따로 읽어** 여기로 넘긴다.
+   */
+  domesticOrderDueDates: readonly string[],
   referenceDate: Date = new Date()
 ): ResolvedRepairCase {
   const status = resolveRepairStatusFromStep({
@@ -135,25 +151,24 @@ export function mapRepairCaseRow(
     currentWorkflowStepKey: row.currentWorkflowStepKey,
     receivedAt: row.receivedAt,
     customerRequestedDueDate: row.customerRequestedDueDate,
-    // 🔴 조인해 온 한 줄에는 들어 있지 않다 — 들어 있을 수 없다. 한 건에 내자
-    // 줄이 여럿이고 줄마다 날짜가 또 여럿이라, 이 join 에 끌어다 붙이면 그 건이
-    // 날짜 수만큼 복제된다(queries/repair-case-domestic-order-due-dates.ts 머리말).
-    // 그래서 **따로 읽어 덧씌우고**, 그 일을 하는 곳은 목록 조회
-    // (queries/repair-cases.ts 의 listRepairCases) 하나다. 나머지 조회가 받는
-    // 줄은 빈 배열 그대로이고, 그 화면들은 이 칸을 그리지 않는다.
-    domesticOrderDueDates: [],
+    // 조인이 아니라 **따로 읽어 받은** 값이다(위 인자 주석). 2026-11-07 까지는
+    // 여기서 빈 배열을 내놓고 조회가 뒤에서 덧씌웠는데, 그러면 바로 아래 isOverdue
+    // 가 덧씌우기 전의 빈 배열로 판정한다.
+    domesticOrderDueDates,
     internalTargetInspectionCompletionDate: row.internalTargetInspectionCompletionDate,
     internalTargetShipmentDate: row.internalTargetShipmentDate,
     actualShipmentDate: row.actualShipmentDate,
     createdAt: createdAtIso,
     // 🔴 2026-11-03 부터 「납기 지연」은 **고객 요청 납기일**로 잰다(사내 목표
-    // 완료일이 아니다 — domain/types.ts 의 isRepairCaseOverdue 머리말).
-    // ⚠️ 여기서는 내자 정리에서 날짜를 빌려 오지 않는다. 위 domesticOrderDueDates
-    // 주석 그대로, 이 조인 한 줄에는 그 날짜가 들어 있지 않다.
+    // 완료일이 아니다 — domain/repair-case-overdue.ts 머리말).
+    // 🔴 2026-11-07 부터 그 칸이 비면 **내자 정리에서 빌려 온 날짜**로 잰다. 빌려
+    // 오는 일은 그 함수 안에서 일어나므로 여기서는 재료만 넘긴다 — 화면에 그려지는
+    // 날짜와 판정이 본 날짜가 언제나 같은 하나다.
     isOverdue: isRepairCaseOverdue(
       {
         status,
         customerRequestedDueDate: row.customerRequestedDueDate,
+        domesticOrderDueDates,
         actualShipmentDate: row.actualShipmentDate,
       },
       referenceDate
@@ -187,13 +202,21 @@ export function mapRepairCaseRow(
   };
 }
 
-/** Maps one joined trash-list DB row (see RepairCaseTrashJoinRow) to TrashedRepairCase. */
+/**
+ * Maps one joined trash-list DB row (see RepairCaseTrashJoinRow) to TrashedRepairCase.
+ *
+ * 🔵 빌려 올 내자 날짜를 **받지 않는다 — 휴지통에는 그 자리가 없다.** 휴지통 화면은
+ * 「납기 지연」 배지를 그리지 않고(components/repair-cases/trash/ 의 표·카드), 지워진
+ * 건을 두고 살아 있는 경보를 세는 일 자체가 뜻이 없다. 종 알림 셋도 모두
+ * `is_deleted = false` 로 휴지통을 먼저 뺀다. 그래서 아래 호출은 **일부러** 빈
+ * 배열이다 — 재료를 빠뜨린 것이 아니다.
+ */
 export function mapRepairCaseTrashRow(
   row: RepairCaseTrashJoinRow,
   referenceDate: Date = new Date()
 ): TrashedRepairCase {
   return {
-    ...mapRepairCaseRow(row, referenceDate),
+    ...mapRepairCaseRow(row, [], referenceDate),
     // Non-null invariant: this row only ever reaches here via the trash
     // list's is_deleted=true filter, and softDeleteRepairCase always sets
     // deleted_at in that same update — see this file's RepairCaseTrashJoinRow

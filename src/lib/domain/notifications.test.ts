@@ -126,7 +126,7 @@ test("등록된 모든 종류가 개수 표에 키로 들어 있다", () => {
   }
 });
 
-test("등록된 알림 종류는 결재 요청·견적서 결재 대기·기타건 결재 대기·납기 임박·사내 목표 완료일 미등록·납기 역전·승인 완료·반려됨 여덟이다", () => {
+test("등록된 알림 종류는 결재 요청·견적서 결재 대기·기타건 결재 대기·납기 임박·납기 지연·사내 목표 완료일 미등록·납기 역전·승인 완료·반려됨 아홉이다", () => {
   // 종류를 늘리는 것은 "누구에게 보여도 되는가"를 다시 판정해야 하는 일이라
   // 별도 작업으로 다룬다. 늘어난 것을 여기서 알아차리게 둔다 — 그래서 목록
   // 전체를 그대로 못 박는다(있는지만 보는 검사로 무르게 만들지 않는다).
@@ -182,6 +182,18 @@ test("등록된 알림 종류는 결재 요청·견적서 결재 대기·기타�
   // (`/domestic-orders/{id}/approval`), 같은 갈래로 섞으면 사이드바의 접수 건 결재 배지가
   // 조용히 늘어난다. 🔵 접수 건 승인 종류 목록(REPAIR_CASE_APPROVAL_TYPES)은 **한 글자도
   // 안 넓혔다.** 자세한 것은 domain/domestic-order-approval-notifications.test.ts.
+  //
+  // 🔴 REPAIR_CASE_DUE_DATE_OVERDUE(「납기 지연」)는 2026-11-07 에 **더했다**(사용자 요구 —
+  // 「[납기 지연]도 종으로」). 앞의 셋(사내 목표 완료일 미등록 · 납기 역전 · 기타건 결재)과
+  // 갈리는 점이 둘이다:
+  //  · **판정을 새로 세우지 않았다.** 표·카드·수리 건 상세의 「납기 지연」 배지를 세우는
+  //    domain/repair-case-overdue.ts 의 isRepairCaseOverdue 를 조회가 그대로 부른다.
+  //    같은 날 그 판정이 **내자에서 빌려 온 날짜도 보도록** 넓어졌고(같은 요구의 앞 절반),
+  //    이 알림은 그 넓어진 판정을 그대로 물려받는다.
+  //  · **역할로 갈리지 않는다 — 다섯 전부다.** 납기 임박과 같은 답이고, 까닭이 하나 더
+  //    있다: 둘은 같은 칸을 창만 달리해 보는 짝이라 명단이 갈리면 하루가 지나는 순간
+  //    어떤 사람의 종에서 그 건이 말없이 사라진다. 자세한 것은
+  //    domain/repair-case-overdue-notification.test.ts.
   assert.deepEqual(
     [...NOTIFICATION_KINDS],
     [
@@ -189,6 +201,7 @@ test("등록된 알림 종류는 결재 요청·견적서 결재 대기·기타�
       "QUOTE_APPROVAL_PENDING",
       "DOMESTIC_ORDER_APPROVAL_PENDING",
       "REPAIR_CASE_DUE_DATE_NEAR",
+      "REPAIR_CASE_DUE_DATE_OVERDUE",
       "REPAIR_CASE_TARGET_SHIPMENT_MISSING",
       "REPAIR_CASE_DUE_DATE_INVERTED",
       "APPROVAL_GRANTED",

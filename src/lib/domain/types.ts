@@ -1,4 +1,3 @@
-import { toKstDateOnly } from "./date-only";
 
 export const ROLE_CODES = [
   "SUPER_ADMIN",
@@ -290,8 +289,13 @@ export type RepairCase = {
   /**
    * 고객이 요청한 희망 납기일.
    *
-   * 🔴 **2026-11-03 부터 「납기 지연」 배지의 기준이 이 칸이다**(아래
-   * isRepairCaseOverdue). 그 전에는 internalTargetShipmentDate 였다.
+   * 🔴 **2026-11-03 부터 「납기 지연」 배지의 기준이 이 칸이다**
+   * (domain/repair-case-overdue.ts 의 isRepairCaseOverdue). 그 전에는
+   * internalTargetShipmentDate 였다.
+   *
+   * 🔴 **2026-11-07 부터 이 칸이 비면 연결된 내자 정리의 납기요청일을 빌려 잰다** —
+   * 그 판정이 더 이상 이 칸 하나만 보지 않는다(그 파일 머리말). 화면이 이미 그렇게
+   * 그리고 있었고, 「납기 임박」·「납기 역전」도 이미 그렇게 재고 있었다.
    */
   customerRequestedDueDate: string | null;
   /**
@@ -384,62 +388,20 @@ export type WorkflowStep = {
 };
 
 /**
- * "납기 지연"은 저장된 상태값이 아니라 계산된 조건이다(**고객 요청 납기일**이
- * 지났고 아직 출하 완료되지 않은 경우). RepairStatus/exception status에
- * 포함하지 않는다.
+ * 🔵 **「납기 지연」 판정(isRepairCaseOverdue)은 여기 있었다 — 2026-11-07 에
+ * domain/repair-case-overdue.ts 로 옮겼다.**
  *
- * ── 🔴 2026-11-03 — 기준 날짜가 바뀌었다 ────────────────────────────────
- * 사용자 결정: 「사내 목표 완료일을 지났다고 해서 납기 지연 배지가 뜨지 않도록
- * 해줘. (고객 요청 납기일을 지났을 때만 [납기 지연]이 뜨도록 해줘.)」 그 전까지
- * 이 함수가 보던 날짜는 internalTargetShipmentDate(화면 이름: 사내 목표 완료일)
- * 였다. 사내 날짜는 **우리가 스스로 잡은 일정**이라, 그것을 넘긴 것은 고객과의
- * 약속을 어긴 것이 아니다 — 「지연」이라는 말이 두 가지 다른 일을 가리키고 있었다.
+ * 옮긴 까닭은 **고리(circular import)** 하나다. 사용자 요구로 그 판정이 「이 칸이
+ * 비면 연결된 내자 정리의 납기요청일을 빌려 온다」를 하게 되면서
+ * requested-due-date-link.ts 가 필요해졌는데, 그 파일은 local/validation.ts 를 보고
+ * 그쪽이 다시 **이 파일**을 본다. 여기에 그 import 를 더하면 types.ts 가 제 자신을
+ * 거쳐 초기화되는 길이 생기고, 그 고리는 앱이 통째로 안 서는 모양으로 터진다
+ * (domain/shipment-finished.ts 머리말에 이 저장소가 실제로 겪은 전말이 있다 — 그
+ * 파일도 똑같은 까닭으로 똑같이 분가한 것이다).
  *
- * 🔴 **사내 날짜를 보던 다른 표시는 건드리지 않았다.** 「납기 역전」(사내 목표
- * 완료일이 고객 요청 납기일보다 늦다 — domain/due-date-inversion.ts)과 「사내 목표
- * 완료일 미등록」 알림은 그대로다. 없앤 것은 **배지** 하나다.
- *
- * 🔴 **고객 요청 납기일이 비어 있으면 뜨지 않는다**(아래 null 분기). 사내 날짜가
- * 비었을 때 안 뜨던 것과 같은 규율이며, 「납기 임박」도 날짜가 없으면 안 뜬다
- * (2026-10-19 사용자 결정 — domain/notifications.ts). 없는 약속을 어겼다고 말할
- * 수는 없다.
- * ⚠️ 다만 「납기 임박」·「납기 역전」은 이 칸이 비었을 때 **연결된 내자 정리의
- * 납기요청일을 빌려 온다**(domain/requested-due-date-link.ts 의
- * resolveRepairCaseRequestedDueDate). 이 판정은 빌려 오지 않는다 — 부르는 자리
- * (db/mappers/repair-case.ts)가 그 재료를 손에 쥐고 있지 않기 때문이다. 빌려 오게
- * 하려면 목록 조회가 내자 날짜를 붙인 **뒤에** 다시 계산해야 한다.
- *
- * "출하 완료"는 두 가지 사실 중 하나로 확인한다 — 워크플로 상태
- * (SHIPMENT_COMPLETED)와 실제 출하일(actualShipmentDate)이다. 상태값 하나에만
- * 기대면, 출하일은 찍혀 있는데 워크플로 단계가 따라가지 못한 건이 "출하일이
- * 적혀 있는데 그 옆에 납기 지연 배지가 붙는" 모순된 화면이 된다. 출하일이
- * 찍혀 있으면 그 물건은 이미 나간 것이고, 납기일보다 늦게 나갔더라도 지금
- * 조치가 필요한 건은 아니다 — 이 판정은 역사적 기록이 아니라 살아 있는
- * 경보이므로 경보에서 빠지는 것이 맞다. actualShipmentDate는 여기서
- * 납기일 대용이 아니라 오직 *빼는 조건*으로만 쓴다.
- *
- * 비교는 반드시 한국 달력 날짜("YYYY-MM-DD" 문자열)끼리 한다.
- * customerRequestedDueDate는 PostgreSQL `date` 컬럼에서 온 날짜 문자열이라
- * new Date()로 파싱하면 UTC 자정이 되는데, 여기에 실제 시각을 그대로 비교하면
- * 한국시간 오전 9시(=UTC 0시)부터 "납기일이 바로 오늘"인 건이 지연으로
- * 뒤집힌다. "지연"은 납기일이 *지난* 것이지 납기일 *당일*이 아니므로,
- * 납기일 == 오늘(한국)은 지연이 아니다. "YYYY-MM-DD"는 사전순 비교가 곧
- * 날짜순 비교이므로 문자열 비교로 충분하다.
- *
- * `now`는 테스트 주입용이다(기본값은 실제 현재 시각).
+ * 🔴 **편의로라도 여기서 다시 export 하지 마라** — 한 줄만 다시 내보내도 끊어 놓은
+ * 고리가 그 자리에서 되살아난다. 부르는 쪽이 그 파일을 직접 들여온다(지금 넷이다:
+ * db/mappers/repair-case.ts · domain/local/resolved-repair-case.ts ·
+ * domain/local/workflow/effective-repair-case.ts · db/queries/repair-case-overdue-
+ * notifications.ts).
  */
-export function isRepairCaseOverdue(
-  repairCase: Pick<RepairCase, "status" | "customerRequestedDueDate" | "actualShipmentDate">,
-  now: Date = new Date()
-): boolean {
-  if (repairCase.status === "SHIPMENT_COMPLETED") {
-    return false;
-  }
-  if (repairCase.actualShipmentDate) {
-    return false;
-  }
-  if (!repairCase.customerRequestedDueDate) {
-    return false;
-  }
-  return repairCase.customerRequestedDueDate.slice(0, 10) < toKstDateOnly(now);
-}

@@ -29,6 +29,7 @@ import {
   buildDomesticOrderApprovalNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateInvertedNotification,
+  buildRepairCaseDueDateOverdueNotification,
   buildRepairCaseDueDateNearNotification,
   buildRepairCaseTargetShipmentMissingNotification,
   // 🔴 종 배지는 2026-11-06 부터 이 둘을 쓰지 않는다. 그래도 여기서 가져오는 것은
@@ -92,6 +93,14 @@ function oneOfEachKind() {
       repairCaseId: "case-due-1",
       intakeNumber: "D9705-400",
       dueDate: "2026-10-22",
+      borrowed: true,
+    }),
+    // 납기 지연(2026-11-07) — 🔴 바로 위 납기 임박과 **같은 칸을 창만 달리해 보는**
+    // 짝이라, 둘이 색 칸과 이름으로 갈라지는지가 이 파일에서 걸린다.
+    buildRepairCaseDueDateOverdueNotification({
+      repairCaseId: "case-overdue-1",
+      intakeNumber: "D9705-403",
+      dueDate: "2026-10-18",
       borrowed: true,
     }),
     buildRepairCaseTargetShipmentMissingNotification({
@@ -975,7 +984,7 @@ test("🔴 지우는 서버 액션을 안 넘기면 지우기가 아예 없다 �
   assert.ok(!예전.includes("<button"), "스크립트 없이 못 쓰는 종이 되었다");
 });
 
-test("🔴 지우기 단추는 **8종류 전부**에 선다 — 할 일 알림에도(2026-10-20)", () => {
+test("🔴 지우기 단추는 **등록된 종류 전부**에 선다 — 할 일 알림에도(2026-10-20)", () => {
   // 가리는 규칙은 도메인 한 곳이고(canDismissNotification) 화면은 그것을 묶음에
   // 넘기기만 한다. 옛 규칙은 결재 결과 둘에만 ✕ 를 세웠는데, 같은 줄이 포털을
   // 거쳐 간 다른 사이트에서는 이미 전부 지워지고 있었다 — A/S 안에서만 막혀

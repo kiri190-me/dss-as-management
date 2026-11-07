@@ -304,6 +304,15 @@ src/lib/domain/text-wrap.test.ts
 # 결과물처럼」 보이려면 그 글자가 필요한데 화면이 지어내면 두 벌이 된다 — 채우개는 여기서
 # 가져다 쓰고 같은 이름으로 다시 내보낸다(한 벌인지는 template 시험이 본다).
 src/lib/domain/service-report-body-wrap.test.ts
+# 🔴 2026-11-07 — 이 판정이 **빌려 온 날짜로도** 켜진다(사용자 요구: 「고객 요청 납기일이
+# 내자정리에서 읽어온 경우에도 수리건 상세에서 적은 것과 같은 취급을」). 사용자가 본 그
+# 모양(제 칸이 비었고 · 내자 줄에 지난 날짜가 있고 · 출하일이 없다)과 반대쪽 넷(출하일 있음 ·
+# 출하 완료 · 안 지남 · 제 칸이 이김)을 함께 본다.
+# 🔴 **표본 점검 둘을 먼저 박는다** — 사내 날짜가 늘 지나 있는가(2026-11-03 이전의 옛 규칙이
+# 되살아나면 걸린다) · 그 표본이 **정말 빌려 오는 모양인가**(아니면 제 칸으로 통과해
+# 아무것도 안 잰다).
+# 🔵 판정 자체가 2026-11-07 에 domain/types.ts 에서 domain/repair-case-overdue.ts 로 분가했다 —
+#    빌려 오기를 넣으려면 requested-due-date-link.ts 가 필요한데 types.ts 에서는 고리가 된다.
 src/lib/domain/repair-case-overdue.test.ts
 src/lib/domain/dashboard-metrics.test.ts
 src/lib/domain/domestic-order-list.test.ts
@@ -1887,3 +1896,17 @@ src/lib/domain/misc-case-status.test.ts
 # 셋이 그대로인가. 🔴 주석을 걷어낸 뒤에 센다(머리말이 그 함수 이름을 적고 있다).
 # 🔵 서버가 실제로 막는가는 db.txt 쪽(mutations/misc-case-completion-approval…)이 본다.
 src/lib/domain/misc-case-completion-gate.test.ts
+
+# 🔴 「납기 지연」 판정이 **매퍼까지 닿는가** — 2026-11-07 이전의 결함이 정확히 이 자리였다:
+# 판정은 매퍼 **안에서** 돌고 내자 날짜는 조회가 매퍼 **뒤에서** 덧씌워서, 배지는 언제나
+# 빈 배열을 보고 있었다. 값으로 재고, 「덧씌우는 모양」이 되살아나지 않는지는 조회 원본
+# 글자로 본다(목록 조회와 건 하나 조회 둘 다).
+src/lib/db/mappers/repair-case-overdue.test.ts
+
+# 🔴 「납기 지연」 종 알림(2026-11-07 사용자 요구 — 「종으로」). 등록 · **기본값 두 칸이 다
+# 채워졌는가**(하나만 빠져도 default: false 로 떨어져 한 줄도 안 뜬다) · 받는 명단이 **납기
+# 임박과 같은가**(갈리면 하루 지나는 순간 종에서 건이 사라진다) · 알림 한 줄의 글자와
+# **주소**(탭 헬퍼가 내놓는 값과 맞대어 본다 — 어제 그 함정을 한 번 밟았다) · 확인 단추가
+# 없는가 · 조회가 판정을 베껴 적지 않고 사내 목표 완료일을 아예 안 읽는가 · 세는 도구가
+# 그 조회를 부르는가.
+src/lib/domain/repair-case-overdue-notification.test.ts

@@ -12,6 +12,7 @@ import {
   buildDomesticOrderApprovalNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateInvertedNotification,
+  buildRepairCaseDueDateOverdueNotification,
   buildRepairCaseDueDateNearNotification,
   buildRepairCaseTargetShipmentMissingNotification,
   type NotificationItem,
@@ -52,6 +53,14 @@ function oneOfEachKind(): NotificationItem[] {
       repairCaseId: "case-due-1",
       intakeNumber: "D9705-400",
       dueDate: "2026-10-22",
+      borrowed: true,
+    }),
+    // 🔴 납기 지연(2026-11-07) — 바로 위 납기 임박과 **같은 칸을 창만 달리해 보는**
+    //    짝이라, 묶음 종에서 둘이 **다른 색 칸**에 앉는지가 여기서도 걸린다.
+    buildRepairCaseDueDateOverdueNotification({
+      repairCaseId: "case-overdue-1",
+      intakeNumber: "D9705-403",
+      dueDate: "2026-10-18",
       borrowed: true,
     }),
     buildRepairCaseTargetShipmentMissingNotification({

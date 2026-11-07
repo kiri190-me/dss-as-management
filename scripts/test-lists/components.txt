@@ -1257,3 +1257,14 @@ src/components/misc-cases/misc-case-list-screens.test.tsx
 # 그리는가 · 🔴 그 상자가 **수리 건 이야기를 하지 않는가**(기타건에는 수리 건이 없다 —
 # 옆 상자의 글을 그대로 쓰면 거짓말이 된다). 🔵 두 길이 함께 있는지를 먼저 못 박는다.
 src/components/domestic-orders/misc-case-completion-blocked-notice.test.ts
+
+# 🔴 「납기 지연」 배지가 **빌려 온 날짜로도** 켜지는가 — 화면 쪽 길(2026-11-07 사용자 신고
+# 「내자정리에서 읽어온 경우 [납기지연]이 안뜨는 것 같아」). 화면 쪽에는 길이 둘이고 둘 다
+# 눈이 멀어 있었다: 재정의가 **없는** 건은 서버가 재 둔 값을 그대로 쓰고, 재정의가 **있는**
+# 건은 어댑터(applyWorkflowOverride)가 그 자리에서 **다시 잰다** — 재료를 안 넘기면 재정의가
+# 걸린 건만 안 떠서 「가끔 안 뜬다」로 보인다. 🔴 표와 카드 **둘 다** 글자가 서는지도 본다
+# (표에만 넣으면 창 크기에 따라 보이는 사람이 갈린다). 🔵 표본 점검을 먼저 박는다 — 제 칸이
+# 비었고 빌려 올 날짜도 사내 날짜도 지나 있어야 이 파일이 무언가를 잰다.
+# 🔵 판정 자체는 unit 의 domain/repair-case-overdue.test.ts, 서버 매퍼 쪽은
+#    unit 의 db/mappers/repair-case-overdue.test.ts 가 본다.
+src/components/repair-cases/repair-case-overdue-badge.test.tsx

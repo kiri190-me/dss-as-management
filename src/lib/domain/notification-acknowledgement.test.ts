@@ -15,6 +15,7 @@ import {
   buildDomesticOrderApprovalNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateInvertedNotification,
+  buildRepairCaseDueDateOverdueNotification,
   buildRepairCaseDueDateNearNotification,
   buildRepairCaseTargetShipmentMissingNotification,
   type NotificationItem,
@@ -133,6 +134,15 @@ test("🔴 할 일 알림의 실제 id 는 형식이 맞아도 거절한다 — 
       internalTargetShipmentDate: "2026-11-05",
       requestedDueDate: "2026-10-30",
       borrowed: false,
+    }),
+    // 🔴 납기 지연(2026-11-07)도 할 일 알림이다 — **물건이 아직 안 나갔다.** 확인
+    // 단추를 달면 사과할 일을 눌러서 치울 수 있게 된다. 그 건이 나가거나 날짜를
+    // 다시 잡으면 다음 조회에서 저절로 빠진다.
+    buildRepairCaseDueDateOverdueNotification({
+      repairCaseId: randomUUID(),
+      intakeNumber: "D261017",
+      dueDate: "2026-10-30",
+      borrowed: true,
     }),
   ];
 

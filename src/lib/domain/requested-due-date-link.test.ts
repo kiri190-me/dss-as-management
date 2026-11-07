@@ -453,9 +453,21 @@ test("🔴 전체 A/S 현황 목록 조회가 내자 납기요청일을 묶어 �
   );
   // 🔴 읽기만 하고 줄에 얹지 않으면 화면에는 아무 변화가 없다. 위 단언만으로는
   // 초록색으로 남는 자리다.
+  //
+  // 🔴 **2026-11-07 — 얹는 방법이 바뀌었다.** 그 전까지는 매퍼가 내놓은 줄에
+  // `domesticOrderDueDates: dueDatesByCaseId.get(row.id)` 로 **덧씌웠고**, 이 단언도
+  // 그 글자를 찾고 있었다. 그런데 「납기 지연」(isOverdue)은 매퍼 **안에서** 계산되므로
+  // 그 판정은 덧씌우기 전의 **빈 배열**을 보고 있었다 — 표에는 빌려 온 날짜가 보이는데
+  // 그 옆의 배지만 안 뜨는, 사용자가 신고한 바로 그 모양이다. 그래서 **매퍼의 인자로**
+  // 넘긴다. 단언을 무르게 바꾼 것이 아니다: 덧씌우는 모양으로 되돌아가면 여기서 걸린다.
   assert.ok(
-    source.includes("domesticOrderDueDates: dueDatesByCaseId.get(row.id)"),
-    "읽어 온 날짜를 줄에 얹지 않는다 — 화면에 닿지 않는다"
+    source.includes("mapRepairCaseRow(row, dueDatesByCaseId.get(row.id) ?? [])"),
+    "읽어 온 날짜를 매퍼에 넘기지 않는다 — 화면에도 배지 판정에도 닿지 않는다"
+  );
+  assert.equal(
+    source.includes("...mapRepairCaseRow(row),"),
+    false,
+    "매퍼 결과에 날짜를 덧씌운다 — 매퍼 안에서 도는 isOverdue 가 그 값을 못 본다"
   );
   // 🔵 「빌릴 건만」 좁혀 묻는다. 목록은 수백 건이라 이 좁히기가 곧 질의 크기다.
   assert.ok(

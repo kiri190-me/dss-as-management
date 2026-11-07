@@ -35,6 +35,7 @@
     "check:part-name-overlap": "node --conditions=react-server --import tsx scripts/check-part-name-overlap.ts",
     "check:target-shipment-missing": "node --conditions=react-server --import tsx scripts/check-target-shipment-missing.ts",
     "check:due-date-inverted": "node --conditions=react-server --import tsx scripts/check-due-date-inverted.ts",
+    "check:due-date-overdue": "node --conditions=react-server --import tsx scripts/check-due-date-overdue.ts",
     "check:requested-due-date-sync": "node --conditions=react-server --import tsx scripts/check-requested-due-date-sync.ts",
     "check:delivered-date-sync": "node --conditions=react-server --import tsx scripts/check-delivered-date-sync.ts",
     "sso:link": "tsx scripts/link-sso-subject.ts",

@@ -8,7 +8,6 @@ import {
 } from "../mock-data";
 import {
   billingTypeLabels,
-  isRepairCaseOverdue,
   productCategoryLabels,
   type BillingType,
   type ExceptionStatus,
@@ -17,6 +16,8 @@ import {
   type RepairStatus,
   type WorkflowType,
 } from "../types";
+// 🔴 types.ts 가 아니다 — 2026-11-07 에 고리를 끊느라 분가했다(그 파일 머리말).
+import { isRepairCaseOverdue } from "../repair-case-overdue";
 import { type LocalRepairCase } from "./local-types";
 
 /**
@@ -67,10 +68,15 @@ export type ResolvedRepairCase = {
    * 함수는 "빌릴 것이 없다"로 답하므로, 그 화면들은 예전과 똑같이 자기 칸만
    * 그린다.
    *
-   * 🔴 DATABASE 소스라고 언제나 차 있는 것도 아니다 — 싣는 쪽은 **목록 조회
-   * 둘**(queries/repair-cases.ts 의 listRepairCases, queries/repair-cases-mine.ts)
-   * 뿐이고, 나머지 조회(고객사·제품 이력, 휴지통 등)는 빈 배열로 둔다. 그 화면들은
-   * 이 칸을 그리지 않는다.
+   * 🔴 DATABASE 소스라고 언제나 차 있는 것도 아니다 — 싣는 쪽은 **셋**이다:
+   * 목록 둘(queries/repair-cases.ts 의 listRepairCases, queries/repair-cases-mine.ts)
+   * 과 **건 하나 조회**(같은 파일의 getRepairCaseById — 2026-11-07 에 늘었다. 수리 건
+   * 상세의 「납기 지연」 배지가 이 값으로 판정되기 때문이다). 나머지 조회(고객사·제품
+   * 이력, 휴지통)는 빈 배열로 둔다 — 그 화면들은 이 칸도 그 배지도 그리지 않는다.
+   *
+   * 🔵 **빌릴 필요가 있는 건만** 차 있다(queries/repair-case-domestic-order-due-dates.ts
+   * 의 dueDateBorrowerIds). 자기 칸에 날짜가 적힌 건은 어차피 내자를 보지 않으므로
+   * (자기 자리에 적힌 것이 먼저), 그런 건은 날짜가 붙어 있어도 빈 배열이다.
    */
   domesticOrderDueDates: readonly string[];
   /** Not carried by mock/local demo data (Stage G-3R column) — always null there. */
@@ -140,7 +146,9 @@ export function toResolvedFromMock(
     internalTargetShipmentDate: repairCase.internalTargetShipmentDate,
     actualShipmentDate: repairCase.actualShipmentDate,
     createdAt: repairCase.createdAt,
-    isOverdue: isRepairCaseOverdue(repairCase, referenceDate),
+    // 🔵 빌릴 날짜가 **없는** 자리다(바로 위 주석) — 빈 배열은 재료를 빠뜨린 것이
+    // 아니라 「이 소스에는 내자 정리가 없다」는 사실이다.
+    isOverdue: isRepairCaseOverdue({ ...repairCase, domesticOrderDueDates: [] }, referenceDate),
     productCategory: productCategoryLabels[repairCase.workflowType],
     paidOrWarranty: repairCase.billingType ? billingTypeLabels[repairCase.billingType] : "-",
     billingType: repairCase.billingType,
@@ -192,7 +200,9 @@ export function toResolvedFromLocal(
     internalTargetShipmentDate: localCase.internalTargetShipmentDate,
     actualShipmentDate: localCase.actualShipmentDate,
     createdAt: localCase.createdAt,
-    isOverdue: isRepairCaseOverdue(localCase, referenceDate),
+    // 브라우저에만 있는 건이라 내자 정리에 붙을 자리가 없다(위 toResolvedFromMock 과
+    // 같은 까닭).
+    isOverdue: isRepairCaseOverdue({ ...localCase, domesticOrderDueDates: [] }, referenceDate),
     productCategory: productCategoryLabels[localCase.workflowType],
     paidOrWarranty: billingTypeLabels[localCase.billingType],
     billingType: localCase.billingType,

@@ -11,6 +11,7 @@ import {
   buildApprovalGrantedNotification,
   buildApprovalRejectedNotification,
   buildRepairCaseDueDateNearNotification,
+  buildRepairCaseDueDateOverdueNotification,
   buildRepairCaseTargetShipmentMissingNotification,
   buildRepairCaseDueDateInvertedNotification,
 } from "@/lib/domain/notifications";
@@ -19,6 +20,7 @@ import { listDomesticOrderApprovalsPendingMyApproval } from "./domestic-order-ap
 import { listQuoteApprovalsPendingMyApproval } from "./quote-approvals-pending";
 import { listMyGrantedApprovalOutcomes, listMyRejectedApprovalOutcomes } from "./approval-outcome-notifications";
 import { listRepairCasesWithDueDateNear } from "./repair-case-due-date-notifications";
+import { listRepairCasesOverdue } from "./repair-case-overdue-notifications";
 import { listRepairCasesMissingTargetShipmentDate } from "./repair-case-target-shipment-notifications";
 import { listRepairCasesWithDueDateInverted } from "./repair-case-due-date-inverted-notifications";
 import { listAcknowledgedNotificationKeys } from "./notification-acknowledgements";
@@ -36,12 +38,15 @@ import { listAcknowledgedNotificationKeys } from "./notification-acknowledgement
  *       충분하다(repair-case-approvals-pending.ts). 견적서 결재 대기도 같은
  *       모양이다 — 결재선 지정(과 최고관리자 비상구)이 조회 안에서 정해진다
  *       (quote-approvals-pending.ts).
- *  (다) **load 가 아무도 거르지 않는다** — 납기 임박 · 사내 목표 완료일 미등록 ·
- *       납기 역전 셋이 그렇다. 조회가 "지금 상태가 그러한 건 전부"를 내놓아 누가
- *       봐도 같은 결과이고, load 가 사용자 id 도 역할도 받지 않는다. 🔴 **그렇다고
- *       셋 다 모두에게 가는 것은 아니다** — 거기서 갈린다:
+ *  (다) **load 가 아무도 거르지 않는다** — 납기 임박 · 납기 지연 · 사내 목표 완료일
+ *       미등록 · 납기 역전 넷이 그렇다. 조회가 "지금 상태가 그러한 건 전부"를 내놓아
+ *       누가 봐도 같은 결과이고, load 가 사용자 id 도 역할도 받지 않는다. 🔴 **그렇다고
+ *       넷 다 모두에게 가는 것은 아니다** — 거기서 갈린다:
  *        · 납기 임박은 **가를 축이 없어서** 전원이다(2026-10-19 사용자 결정 —
  *          납기가 다가온 건은 엔지니어·관리자·영업에게 각자 다른 모양으로 걸린다).
+ *        · 납기 지연도 전원인데 **까닭이 하나 더 있다**(2026-11-07) — 임박과 같은
+ *          날짜를 창만 달리해 보는 짝이라, 명단이 갈리면 하루가 지나는 순간 어떤
+ *          사람의 종에서 그 건이 말없이 사라진다.
  *        · 사내 목표 완료일 미등록은 **A/S 엔지니어**다(2026-10-29 사용자 결정) —
  *          날짜를 적는 사람에게 가는 할 일이다.
  *        · 납기 역전은 **A/S 엔지니어·영업·관리자**다(2026-10-30 사용자 결정) —
@@ -218,6 +223,32 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
       const soon = await listRepairCasesWithDueDateNear();
       return soon.map((row) =>
         buildRepairCaseDueDateNearNotification({
+          repairCaseId: row.repairCaseId,
+          intakeNumber: row.intakeNumber,
+          dueDate: row.dueDate,
+          borrowed: row.borrowed,
+        })
+      );
+    },
+  },
+  {
+    kind: "REPAIR_CASE_DUE_DATE_OVERDUE",
+    load: async () => {
+      // 🔴 바로 위 납기 임박과 같은 (다)형이고, 받는 사람도 **같은 전원**이다
+      // (2026-11-07 사용자 요구로 종에 붙였다). 까닭 둘은 알림 설정의 그 case 주석에
+      // 있고, 요점은 **지연이 임박의 바로 다음 순간**이라는 것이다 — 같은 날짜를 창만
+      // 달리해 보므로 명단이 갈리면 하루가 지나는 순간 어떤 사람의 종에서 그 건이
+      // 말없이 사라진다. 그래서 load 가 역할을 **받지도** 않는다.
+      //
+      // 「무엇을 알릴 것인가」도 여기서 정하지 않는다 — 빌려 온 날짜로 재는 일,
+      // 납기일 당일은 아직 아니라는 경계, 출하가 끝난 건과 휴지통을 빼는 일이 전부 저
+      // 조회와 그 안의 도메인 함수에 있다(domain/repair-case-overdue.ts 의
+      // isRepairCaseOverdue — **표·카드·상세의 「납기 지연」 배지를 세우는 바로 그
+      // 함수**다. 조회가 그것을 부른다:
+      // queries/repair-case-overdue-notifications.ts). 여기서 하는 일은 모양 변환뿐이다.
+      const overdue = await listRepairCasesOverdue();
+      return overdue.map((row) =>
+        buildRepairCaseDueDateOverdueNotification({
           repairCaseId: row.repairCaseId,
           intakeNumber: row.intakeNumber,
           dueDate: row.dueDate,

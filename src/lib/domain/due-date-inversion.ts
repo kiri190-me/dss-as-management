@@ -34,8 +34,10 @@ import type { RepairStatus } from "./types";
  * 이 저장소에는 납기를 보는 판정이 이미 둘 있고, 셋을 섞으면 아무도 어느 경보가
  * 무슨 뜻인지 모르게 된다:
  *
- *   납기 지연(types.ts 의 isRepairCaseOverdue)
- *     사내 목표 완료일 **대 오늘** — 우리가 잡아 둔 날이 지났는데 아직 안 나갔다.
+ *   납기 지연(repair-case-overdue.ts 의 isRepairCaseOverdue)
+ *     고객 요청 납기일 **대 오늘** — 고객이 달라고 한 날이 지났는데 아직 안 나갔다.
+ *     🔵 2026-11-03 까지는 **사내 목표 완료일**을 봤다(사용자 결정으로 바뀌었다 —
+ *     그 파일 머리말). 이 절에 그렇게 적혀 있던 문장은 그날부터 거짓이었다.
  *   납기 임박(notifications.ts 의 isRepairCaseDueDateNear)
  *     고객 요청 납기일 **대 오늘+7일** — 고객이 달라고 한 날이 코앞이다.
  *   납기 역전(이 파일)

@@ -23,6 +23,13 @@ import { foldBlankToNull } from "@/lib/domain/domestic-order-list";
  * 언젠가 한 곳만 고쳐지고, 그때 **같은 건이 화면마다 다른 날짜로** 보인다
  * (바로 그 어긋남이 이번 결함이었다 — 알림엔 날짜가 뜨는데 표에는 "-" 였다).
  *
+ * 🔵 지금 부르는 곳은 **여섯**이다 — 위 셋에 2026-10-30 의 「납기 역전」 알림
+ * (queries/repair-case-due-date-inverted-notifications.ts)과 2026-11-07 의 둘이
+ * 더해졌다: 「납기 지연」 알림(queries/repair-case-overdue-notifications.ts)과
+ * **건 하나 조회**(queries/repair-cases.ts 의 getRepairCaseById). 마지막 것이 늘어난
+ * 까닭은 수리 건 상세의 「납기 지연」 배지가 그 조회의 isOverdue 로 그려지기
+ * 때문이다. 여섯이 각자 SQL 을 들었다면 지금쯤 여섯 날짜가 돌아다녔을 것이다.
+ *
  * ── 🔴 조인하지 않고 따로 읽는다 ────────────────────────────────────────
  * 한 수리 건에 내자 줄이 여럿이고(분할 발주 — repair_case_id 에 유일 제약이
  * 없다) 줄 하나에 날짜가 또 여럿이다(분할 납품). 접수 건 조회에 그대로 조인하면

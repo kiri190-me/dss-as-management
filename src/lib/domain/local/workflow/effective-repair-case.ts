@@ -2,7 +2,9 @@
 
 import { useMemo } from "react";
 import { mockRepairCases } from "../../mock-data";
-import { isRepairCaseOverdue, type RepairStatus } from "../../types";
+import type { RepairStatus } from "../../types";
+// 🔴 types.ts 가 아니다 — 2026-11-07 에 고리를 끊느라 분가했다(그 파일 머리말).
+import { isRepairCaseOverdue } from "../../repair-case-overdue";
 import { toResolvedFromLocal, toResolvedFromMock, type ResolvedRepairCase } from "../resolved-repair-case";
 import { useLocalRepairCases } from "../use-local-repair-cases";
 import { useWorkflowStore } from "./use-workflow-data";
@@ -48,12 +50,17 @@ export function applyWorkflowOverride(
   const effectiveActualShipmentDate =
     override.shipmentCompletedAt?.slice(0, 10) ?? resolved.actualShipmentDate;
   // 🔴 2026-11-03 부터 지연 판정이 보는 날짜는 **고객 요청 납기일**이다(사내 목표
-  // 완료일이 아니다 — domain/types.ts 의 isRepairCaseOverdue 머리말). 워크플로
-  // 재정의는 그 날짜를 바꾸지 않으므로 원본 값을 그대로 넘긴다.
+  // 완료일이 아니다 — domain/repair-case-overdue.ts 머리말). 워크플로 재정의는 그
+  // 날짜를 바꾸지 않으므로 원본 값을 그대로 넘긴다.
+  // 🔴 2026-11-07 — **빌려 온 날짜도 함께 넘긴다.** 그 칸이 비면 판정이 연결된 내자
+  // 정리의 납기요청일로 재는데, 재료는 서버가 실어 보낸 이 칸에만 있다
+  // (ResolvedRepairCase.domesticOrderDueDates). 여기서 빠뜨리면 **재정의가 걸린 건만**
+  // 빌려 오지 못해, 같은 화면에서 어떤 건은 배지가 뜨고 어떤 건은 안 뜬다.
   const effectiveIsOverdue = isRepairCaseOverdue(
     {
       status: effectiveStatus,
       customerRequestedDueDate: resolved.customerRequestedDueDate,
+      domesticOrderDueDates: resolved.domesticOrderDueDates,
       actualShipmentDate: effectiveActualShipmentDate,
     },
     referenceDate
