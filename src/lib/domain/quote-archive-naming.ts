@@ -225,6 +225,51 @@ export function quoteArchiveBaseNumber(quoteNumber: string): string {
   return match ? match[1] : number;
 }
 
+/**
+ * 번호의 **글자 머리와 네 자리 연도 사이의 공백** — 그 한 칸이 있는 꼴과 없는 꼴.
+ * `DSS 2026-072` 의 `DSS` 와 `2026` 사이가 그 자리다.
+ *
+ * 🔴 **연도 바로 앞이 글자일 때만** 본다. `Q-2026-0001` · `QT-2024-115` ·
+ * `DEMO-QT-2026-001` 처럼 연도 앞이 하이픈인 번호에는 공백이 끼어들 자리가 없다 —
+ * 거기까지 건드리면 아무도 적지 않는 `Q- 2026-0001` 같은 후보가 생긴다.
+ * 연도 뒤에 `-숫자` 가 따라오는지도 함께 본다(이름 어딘가의 네 자리 숫자가 아니라
+ * **번호의 연도**라는 표시다 — domain/domestic-order-quote-archive.ts 의 연도 읽기와 같은 결).
+ */
+const LETTERS_SPACE_YEAR = /^(\S*\p{L}) (\d{4}-\d)/u;
+const LETTERS_YEAR = /^(\S*\p{L})(\d{4}-\d)/u;
+
+/**
+ * 폴더를 맞대 볼 **후보 번호들** — 적힌 그대로가 늘 첫째이고, 글자 머리와 연도 사이의
+ * 공백을 **넣은 꼴 · 뺀 꼴**이 다르면 뒤에 붙는다. 같은 글자는 한 번만 들어간다.
+ *
+ * ── 🔴 왜 필요한가 (2026-11-07 실측) ──────────────────────────────────────
+ * 기타건(내자 정리 한 줄)의 견적서번호는 **사람이 손으로 적는 칸**이다. 운영에 `DSS2026-072`
+ * 로 적힌 줄이 있는데 공유폴더의 폴더는 `DSS 2026-072 …` 였다 — 띄어쓰기 한 칸 때문에
+ * 「아직 폴더가 없습니다」가 떴다. 반대로 폴더 쪽이 공백을 빠뜨리는 일도 막을 길이 없다
+ * (폴더도 사람이 탐색기에서 만든다). 그래서 **양쪽 모두** 후보로 본다.
+ *
+ * ── 🔴 공백을 통째로 지워 맞대지 **않는다** ───────────────────────────────
+ * 지워서 맞대면 「다음 글자는 공백이거나 끝」이라는 경계 규칙이 사라져
+ * `DSS 2026-0891 …` 이 `DSS 2026-089` 의 폴더가 된다(남의 서류에 이번 자료를 넣게 된다).
+ * 후보를 **온전한 번호로** 만들어 그 경계 규칙을 **후보마다 그대로** 지나게 한다.
+ *
+ * ── 🔵 두 후보가 다른 견적서일 수는 없다 ─────────────────────────────────
+ * `DSS 2026-072` 와 `DSS2026-072` 는 **같은 번호를 두 가지로 적은 것**이지 두 장이 아니다.
+ * 한 번호가 둘로 늘어나도 서로 다른 건이 섞이지 않는 까닭이 이것이다.
+ *
+ * 🔴 **대소문자는 접지 않는다** — 이번에 바꾸지 않았다(아래 matchesQuoteArchiveFolder).
+ */
+export function quoteArchiveFolderNumberCandidates(baseNumber: string): string[] {
+  const candidates = [baseNumber];
+  for (const candidate of [
+    baseNumber.replace(LETTERS_SPACE_YEAR, "$1$2"),
+    baseNumber.replace(LETTERS_YEAR, "$1 $2"),
+  ]) {
+    if (!candidates.includes(candidate)) candidates.push(candidate);
+  }
+  return candidates;
+}
+
 function requireNumber(quoteNumber: string): string {
   const number = sanitizeShareFolderNamePiece(quoteNumber);
   if (number.length === 0) {
@@ -266,10 +311,20 @@ export function quoteArchiveFolderName(input: QuoteArchiveNamingInput): string {
  * 이미 있는 폴더가 이 견적서의 폴더인가 — 다듬은 이름이 **본 번호로 시작하고 바로 뒤가
  * 공백**이면 맞다(`DSS 2026-0891 …` 은 `DSS 2026-089` 가 아니다). 이름이 본 번호 그 자체인
  * 폴더도 맞는 것으로 본다 — 뒤에 아무것도 없으니 다른 번호일 수 없다.
+ *
+ * 🔴 **후보 번호마다** 그 경계 규칙을 지난다(2026-11-07). 글자 머리와 연도 사이의 띄어쓰기
+ * 하나만 너그럽게 보려고 후보를 만든다 — `DSS2026-072` 로 적힌 줄이 `DSS 2026-072 …` 폴더를
+ * 찾고, 그 반대도 찾는다. 까닭과 경계가 그대로 서는 이유는 위 quoteArchiveFolderNumberCandidates 에 있다.
+ *
+ * 🔴 **이름을 새로 짓는 쪽(quoteArchiveFolderName)은 바뀌지 않았다** — 적힌 번호 그대로
+ * 짓는다. 찾기가 먼저라(storage/quote-archive.ts 의 findOrCreateFolder) 띄어쓰기가 다른
+ * 폴더가 이미 있으면 **그것을 쓰고 새로 만들지 않는다.** 그래서 같은 건에 폴더가 둘 생기지 않는다.
  */
 export function matchesQuoteArchiveFolder(existingName: string, quoteNumber: string): boolean {
   // 🔴 견적서 번호는 **대소문자를 접지 않는다** — 지금 동작 그대로다(연락서 쪽은 접는다).
-  return matchesShareFolderPrefix(existingName, quoteArchiveBaseNumber(quoteNumber));
+  return quoteArchiveFolderNumberCandidates(quoteArchiveBaseNumber(quoteNumber)).some((candidate) =>
+    matchesShareFolderPrefix(existingName, candidate)
+  );
 }
 
 /** 확장자: 앞의 점을 떼고 소문자로. 영숫자 1~10 자가 아니면 던진다. */

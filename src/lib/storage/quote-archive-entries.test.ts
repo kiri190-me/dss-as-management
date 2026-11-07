@@ -352,3 +352,75 @@ test("빈 폴더도 `found` 다 — 줄이 없을 뿐이다", async () => {
   assert.equal(result.totalCount, 0);
   assert.equal(result.truncated, false);
 });
+
+/*
+ * ============================================================================
+ * 🔴 기타건이 지나는 그 길 — 띄어쓰기 한 칸이 다른 번호로도 찾는다 (2026-11-07)
+ * ============================================================================
+ * 기타건(내자 정리 한 줄) 「견적서」 탭의 공유폴더 구역이 부르는 통로
+ * (api/domestic-orders/[id]/quote-archive-folder/entries)가 **이 함수 그대로**를 쓴다 —
+ * 번호 하나와 `kind: "DOMESTIC"` · 빈 공급처만 채워서 넘긴다(그 통로의 주석대로 찾기가
+ * 실제로 보는 칸은 번호 하나다). 그래서 운영에서 난 고장을 여기서 **디스크까지** 재현한다.
+ *
+ * 운영(2026-11-07): 내자 정리에 손으로 적힌 번호는 `DSS2026-072`(공백 없음)인데 공유폴더의
+ * 폴더는 `DSS 2026-072 …`(공백 있음)라 「아직 폴더가 없습니다」가 떴다.
+ *
+ * 🔴 **아래 이름은 전부 가짜다** — 모양만 베꼈다(저장소가 공개다).
+ * ============================================================================
+ */
+
+/** 기타건 통로가 넘기는 모양 그대로 — 번호 하나뿐이고 나머지는 타입이 요구해 채우는 칸이다. */
+function listByNumberOnly(root: string, quoteNumber: string): Promise<QuoteArchiveEntriesResult> {
+  return listQuoteArchiveEntries({
+    root,
+    quoteDate: QUOTE_DATE,
+    naming: { quoteNumber, kind: "DOMESTIC", customerName: "" },
+  });
+}
+
+test("🔴 기타건 — 공백 없이 적힌 번호가 공백 있는 폴더를 찾는다(그 반대도)", async () => {
+  const spacedFolderName = "DSS 2026-072 가나상사 다라전자향 부속케이블 30kW(3세트_A+B)";
+  const { root, folder } = await makeQuoteFolder(spacedFolderName);
+  await writeFile(path.join(folder, "DSS 2026-072 가나상사 수리 견적서.xlsx"), "가나다");
+  const before = await snapshot(root);
+
+  // 🔵 못 — 먼저 **무엇을 재는지**부터 박는다: 디스크에 선 폴더는 공백이 있는 그 이름 하나다.
+  assert.deepEqual(before, [
+    `${YEAR_2026}/`,
+    `${YEAR_2026}/${spacedFolderName}/`,
+    `${YEAR_2026}/${spacedFolderName}/DSS 2026-072 가나상사 수리 견적서.xlsx`,
+  ]);
+
+  const found = foundOrFail(await listByNumberOnly(root, "DSS2026-072"));
+  // 🔴 이은 경로는 **디스크의 실제 이름**이다 — 적힌 번호의 꼴로 지어내지 않는다.
+  assert.equal(found.relativePath, `${YEAR_2026}/${spacedFolderName}`);
+  assert.deepEqual(found.entries.map((entry) => entry.name), ["DSS 2026-072 가나상사 수리 견적서.xlsx"]);
+  // 공백을 적은 번호도 전부터 그대로 찾는다.
+  assert.equal(foundOrFail(await listByNumberOnly(root, "DSS 2026-072")).relativePath, `${YEAR_2026}/${spacedFolderName}`);
+  // 🔴 읽기만 했다 — 폴더도 파일도 하나 늘거나 줄지 않았다.
+  assert.deepEqual(await snapshot(root), before);
+
+  // 반대 방향 — 폴더 쪽이 공백을 빠뜨렸고 번호에는 공백이 있다.
+  const squeezedFolderName = "DSS2026-072 가나상사 다라전자향 부속케이블 30kW(3세트_A+B)";
+  const other = await makeQuoteFolder(squeezedFolderName);
+  assert.equal(
+    foundOrFail(await listByNumberOnly(other.root, "DSS 2026-072")).relativePath,
+    `${YEAR_2026}/${squeezedFolderName}`
+  );
+});
+
+test("🔴 기타건 — 경계는 그대로다: `DSS 2026-0891` 폴더는 `DSS2026-089` 로도 안 열린다", async () => {
+  for (const folderName of ["DSS 2026-0891 가나상사 수리 견적서", "DSS2026-0891 가나상사 수리 견적서"]) {
+    const { root, folder } = await makeQuoteFolder(folderName);
+    await writeFile(path.join(folder, "남의견적서.pdf"), "저쪽");
+    const before = await snapshot(root);
+
+    for (const number of ["DSS 2026-089", "DSS2026-089"]) {
+      const result = await listByNumberOnly(root, number);
+      assert.deepEqual(result, { status: "not-found" }, `${folderName} ← ${number}`);
+      // 🔴 남의 폴더 이름도 그 안의 파일도 한 글자 새어 나오지 않는다.
+      assert.equal(JSON.stringify(result).includes("남의견적서"), false);
+    }
+    assert.deepEqual(await snapshot(root), before, "읽기가 디스크를 건드렸다");
+  }
+});

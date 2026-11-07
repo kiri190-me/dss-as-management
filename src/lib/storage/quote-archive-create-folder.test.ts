@@ -156,6 +156,71 @@ test("🔴 본 번호의 폴더가 이미 있으면 **만들지 않는다** — 
   ]);
 });
 
+/*
+ * ────────────────────────────────────────────────────────────────────────────
+ * 🔴 띄어쓰기만 다른 폴더가 있어도 **둘째 폴더를 만들지 않는다** (2026-11-07)
+ * ────────────────────────────────────────────────────────────────────────────
+ * 2026-11-07 에 폴더를 **찾는** 판정이 글자 머리와 연도 사이의 띄어쓰기 한 칸을 너그럽게
+ * 보게 됐다(domain/quote-archive-naming.ts). 🔴 여기서 못 박는 것은 **만드는 쪽도 함께
+ * 맞았는가**다 — 만들기는 늘 찾기 뒤에 오므로(findOrCreateFolder), 띄어쓰기가 다른 폴더가
+ * 이미 서 있으면 그것을 쓰고 새 이름을 짓지 않아야 한다. 안 그러면 같은 건의 서류가
+ * `DSS 2026-072 …` 와 `DSS2026-072 …` 두 폴더로 갈라진다.
+ *
+ * 🔴 **새로 짓는 이름은 적힌 번호 그대로다**(아래 둘째 시험) — 찾을 폴더가 아예 없을 때의
+ * 이야기이고, 그쪽은 이번에 바꾸지 않았다.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+test("🔴 공백만 다른 폴더가 이미 있으면 **만들지 않는다** — 같은 건에 폴더가 둘 서지 않는다", async () => {
+  const root = await makeRoot();
+  const yearDirectory = path.join(root, YEAR_2026);
+  await mkdir(yearDirectory);
+  // 사람이 손으로 만들어 둔 폴더 — 번호에 공백이 있다.
+  const existing = "DSS 2026-072 가나상사 다라전자향 부속케이블 30kW(3세트_A+B)";
+  await mkdir(path.join(yearDirectory, existing));
+  // 🔵 못 — 디스크에 선 폴더가 그 하나뿐임을 **먼저** 박는다.
+  assert.deepEqual(await snapshot(root), [`${YEAR_2026}/`, `${YEAR_2026}/${existing}/`]);
+
+  // 견적서 번호는 공백 없이 적혀 있다.
+  const result = await create(root, { quoteNumber: "DSS2026-072" });
+
+  assert.deepEqual(result, {
+    status: "found",
+    // 🔴 디스크의 **실제 이름**으로 잇는다 — 적힌 번호의 꼴로 지어내지 않는다.
+    relativePath: `${YEAR_2026}/${existing}`,
+    multipleFolderMatches: false,
+  });
+  assert.deepEqual(await snapshot(root), [`${YEAR_2026}/`, `${YEAR_2026}/${existing}/`], "폴더가 둘 생겼다");
+
+  // 반대 방향 — 폴더 쪽이 공백을 빠뜨렸고 번호에는 공백이 있다.
+  const other = await makeRoot();
+  const otherYear = path.join(other, YEAR_2026);
+  await mkdir(otherYear);
+  const squeezed = "DSS2026-072 가나상사 다라전자향 부속케이블 30kW(3세트_A+B)";
+  await mkdir(path.join(otherYear, squeezed));
+
+  const back = await create(other, { quoteNumber: "DSS 2026-072" });
+
+  assert.equal(back.status, "found");
+  assert.deepEqual(await snapshot(other), [`${YEAR_2026}/`, `${YEAR_2026}/${squeezed}/`], "폴더가 둘 생겼다");
+});
+
+test("🔴 찾을 폴더가 없으면 새 이름은 **적힌 번호 그대로**다 — 꼴을 고쳐 짓지 않는다", async () => {
+  const root = await makeRoot();
+
+  const result = await create(root, { quoteNumber: "DSS2026-072", faultDescription: null });
+
+  if (result.status !== "created") throw new Error(`만들지 않았다: ${result.status}`);
+  assert.equal(result.relativePath, `${YEAR_2026}/DSS2026-072 가나상사 MODEL-X1 L123 S456 수리 견적서`);
+  // 🔴 그렇게 선 폴더는 공백을 적은 번호로도 찾힌다 — 다음에 누가 `DSS 2026-072` 로 적어도
+  //    둘째 폴더가 서지 않는다.
+  const again = await create(root, { quoteNumber: "DSS 2026-072", faultDescription: null });
+  assert.equal(again.status, "found");
+  assert.deepEqual(await snapshot(root), [
+    `${YEAR_2026}/`,
+    `${YEAR_2026}/DSS2026-072 가나상사 MODEL-X1 L123 S456 수리 견적서/`,
+  ]);
+});
+
 test("가지 번호 견적서도 **본 번호 폴더** 하나로 모인다", async () => {
   const root = await makeRoot();
 

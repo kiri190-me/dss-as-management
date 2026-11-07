@@ -10,6 +10,7 @@ import {
   quoteArchiveBaseNumber,
   quoteArchiveFileName,
   quoteArchiveFolderName,
+  quoteArchiveFolderNumberCandidates,
   quoteArchiveSignedPdfFileName,
   quoteArchiveYearFolderName,
   quoteArchiveYearFromDate,
@@ -347,4 +348,100 @@ test("번호 붙인 후보 — 1 이면 그대로, 2 부터 확장자 앞에 ` (
   assert.equal(numberedQuoteArchiveName("이름", 2), "이름 (2)");
   assert.throws(() => numberedQuoteArchiveName(file, 0));
   assert.throws(() => numberedQuoteArchiveName(file, 1.5));
+});
+
+/*
+ * ============================================================================
+ * 🔴 글자 머리와 연도 사이의 **띄어쓰기 한 칸**만 너그럽게 본다 (2026-11-07)
+ * ============================================================================
+ * 운영에서 기타건 「견적서」 탭이 있는 폴더를 못 찾았다. 내자 정리에 손으로 적힌 번호는
+ * `DSS2026-072`(공백 없음)인데 공유폴더의 폴더는 `DSS 2026-072 …`(공백 있음)였다.
+ *
+ * 🔴 **아래 이름 · 공급처는 전부 가짜다** — 이 저장소는 공개다(위 DOMESTIC 과 같은 규율).
+ * 운영에서 본 **모양**(번호 + 고객사 + 내용 + 괄호 안 구성)만 그대로 베낀다.
+ *
+ * 🔴 **공백을 지워 맞대지 않는다.** 지우면 「다음 글자는 공백이거나 끝」이라는 경계가
+ * 사라져 `DSS 2026-0891 …` 이 `DSS 2026-089` 의 폴더가 된다 — 그래서 아래 경계 시험이 함께 선다.
+ * ============================================================================
+ */
+
+/** 운영에서 본 폴더와 **같은 모양**으로 지은 가짜 이름. */
+const SPACED_FOLDER = "DSS 2026-072 가나상사 다라전자향 부속케이블 30kW(3세트_A+B)";
+/** 같은 건을 사람이 공백 없이 만들었을 때의 폴더 이름. */
+const SQUEEZED_FOLDER = "DSS2026-072 가나상사 다라전자향 부속케이블 30kW(3세트_A+B)";
+
+test("🔵 못 — 후보 번호가 **정말로 둘**이다(표본이 비어 공짜로 통과하지 않게)", () => {
+  // 공백이 있는 꼴 · 없는 꼴 **둘 다** 나오고, 적힌 그대로가 늘 첫째다.
+  assert.deepEqual(quoteArchiveFolderNumberCandidates("DSS2026-072"), ["DSS2026-072", "DSS 2026-072"]);
+  assert.deepEqual(quoteArchiveFolderNumberCandidates("DSS 2026-072"), ["DSS 2026-072", "DSS2026-072"]);
+  // 한글로 적힌 머리도 글자다.
+  assert.deepEqual(quoteArchiveFolderNumberCandidates("견적 2026-089"), ["견적 2026-089", "견적2026-089"]);
+
+  // 🔴 연도 앞이 **하이픈**인 번호에는 공백이 끼어들 자리가 없다 — 후보를 지어내지 않는다.
+  assert.deepEqual(quoteArchiveFolderNumberCandidates("Q-2026-0001"), ["Q-2026-0001"]);
+  assert.deepEqual(quoteArchiveFolderNumberCandidates("QT-2024-115"), ["QT-2024-115"]);
+  assert.deepEqual(quoteArchiveFolderNumberCandidates("DEMO-QT-2026-001"), ["DEMO-QT-2026-001"]);
+  // 연도 모양이 아예 없는 번호도 그대로 하나다(개발 DB 에 실제로 있다).
+  assert.deepEqual(quoteArchiveFolderNumberCandidates("Q-7"), ["Q-7"]);
+  assert.deepEqual(quoteArchiveFolderNumberCandidates(""), [""]);
+});
+
+test("🔴 운영에서 본 그 짝 — `DSS2026-072` 로 적힌 줄이 `DSS 2026-072 …` 폴더를 찾는다", () => {
+  assert.equal(matchesQuoteArchiveFolder(SPACED_FOLDER, "DSS2026-072"), true);
+  // 🔴 **반대 방향도 걸린다.** 폴더도 사람이 탐색기에서 만드는 것이라 그쪽이 공백을
+  //    빠뜨릴 수도 있다 — 한 방향만 받으면 그날 같은 고장이 거울처럼 되돌아온다.
+  //    저장이 폴더를 **새로 짓기 전에 찾는** 쪽도 이 방향을 함께 써야 폴더가 둘로 갈라지지 않는다.
+  assert.equal(matchesQuoteArchiveFolder(SQUEEZED_FOLDER, "DSS 2026-072"), true);
+  // 적힌 꼴과 폴더의 꼴이 같은 길은 전부터 그대로다.
+  assert.equal(matchesQuoteArchiveFolder(SPACED_FOLDER, "DSS 2026-072"), true);
+  assert.equal(matchesQuoteArchiveFolder(SQUEEZED_FOLDER, "DSS2026-072"), true);
+  // 가지 번호도 양쪽 꼴에서 본 번호 폴더로 간다.
+  assert.equal(matchesQuoteArchiveFolder(SPACED_FOLDER, "DSS2026-072-1"), true);
+  assert.equal(matchesQuoteArchiveFolder(SQUEEZED_FOLDER, "DSS 2026-072-1"), true);
+});
+
+test("🔴 경계는 그대로 선다 — 공백을 넣은 꼴에서도 뺀 꼴에서도 `0891` 은 `089` 가 아니다", () => {
+  const spaced0891 = "DSS 2026-0891 가나상사 수리 견적서";
+  const squeezed0891 = "DSS2026-0891 가나상사 수리 견적서";
+  for (const folder of [spaced0891, squeezed0891]) {
+    for (const number of ["DSS 2026-089", "DSS2026-089", "DSS 2026-089-1", "DSS2026-089-1"]) {
+      assert.equal(matchesQuoteArchiveFolder(folder, number), false, `${folder} ← ${number}`);
+    }
+  }
+  // 앞머리를 덜 적은 번호 · 이웃 번호도 여전히 아니다(양쪽 꼴 모두).
+  assert.equal(matchesQuoteArchiveFolder(SPACED_FOLDER, "DSS2026-07"), false);
+  assert.equal(matchesQuoteArchiveFolder(SPACED_FOLDER, "DSS 2026-073"), false);
+  assert.equal(matchesQuoteArchiveFolder(SQUEEZED_FOLDER, "DSS 2026-07"), false);
+  assert.equal(matchesQuoteArchiveFolder(SQUEEZED_FOLDER, "DSS2026-073"), false);
+  // 🔴 하이픈으로 이어진 번호는 후보가 하나뿐이라 이웃 번호와 섞일 길이 애초에 없다.
+  assert.equal(matchesQuoteArchiveFolder("Q-2026-0001 가나상사 수리 견적서", "Q-2026-0002"), false);
+});
+
+/*
+ * ────────────────────────────────────────────────────────────────────────────
+ * 🔴 수리 건 쪽은 **무엇이 달라지는가** (2026-11-07)
+ * ────────────────────────────────────────────────────────────────────────────
+ * 이 판정은 공용이라 수리 건 견적서 폴더 찾기 · 저장 · 「지난 견적서」 거르기도 함께
+ * 지난다. 달라지는 것은 **딱 한 가지**다: 띄어쓰기만 다른 폴더를 이제 같은 폴더로 본다.
+ * 수리 건의 번호는 시스템이 만든 값이라 늘 `DSS 2026-073` 꼴이고(실측 2026-11-07),
+ * 사람이 공백 없이 만들어 둔 폴더가 있으면 **전에는 못 찾아 폴더를 하나 더 만들던 자리**다.
+ * 🔴 그 밖의 판정은 한 글자도 달라지지 않는다 — 아래가 그것을 하나씩 짚는다.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+test("🔴 수리 건 — 달라지는 것은 띄어쓰기뿐, 나머지 판정은 그대로다", () => {
+  // 달라지는 자리: 시스템 번호(공백 있음)가 공백 없는 폴더를 이제 찾는다.
+  assert.equal(matchesQuoteArchiveFolder("DSS2026-089 가나상사 수리 견적서", "DSS 2026-089"), true);
+
+  // 🔵 전부터 그대로인 것들 — 위 기존 시험과 같은 표본을 한 번 더 지난다.
+  assert.equal(matchesQuoteArchiveFolder(STEM, "DSS 2026-089"), true);
+  assert.equal(matchesQuoteArchiveFolder(STEM, "DSS 2026-089-12"), true);
+  assert.equal(matchesQuoteArchiveFolder(STEM, "DSS 2026-090"), false);
+  assert.equal(matchesQuoteArchiveFolder(STEM, "DSS 2026-08"), false);
+  // 가지 번호로 시작하는 폴더는 여전히 본 번호 폴더가 아니다.
+  assert.equal(matchesQuoteArchiveFolder(BRANCH_STEM, "DSS 2026-089"), false);
+  // 공백 두 칸 · NFD 는 전부터 접혔다.
+  assert.equal(matchesQuoteArchiveFolder("DSS  2026-089 가나상사 수리 견적서", "DSS 2026-089"), true);
+  // 🔴 **대소문자는 이번에도 접지 않는다** — 한 번에 한 가지만 바꾼다.
+  assert.equal(matchesQuoteArchiveFolder("dss 2026-089 가나상사 수리 견적서", "DSS 2026-089"), false);
+  assert.equal(matchesQuoteArchiveFolder("dss2026-089 가나상사 수리 견적서", "DSS 2026-089"), false);
 });
