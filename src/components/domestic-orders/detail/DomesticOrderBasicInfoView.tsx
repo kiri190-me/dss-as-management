@@ -1,5 +1,5 @@
 import {
-  domesticOrderBasicInfoGroups,
+  domesticOrderBasicInfoBoxes,
   type DomesticOrderBasicInfoRow,
 } from "@/lib/domain/domestic-order-basic-info";
 
@@ -8,11 +8,16 @@ import {
  * (2026-11-06 사용자 지정: 「견적서 번호, 내자정리의 내용들을 한눈에 볼 수
  * 있도록」 · 「기본정보를 첫화면으로」).
  *
- * 🔴 **무엇을 어떤 글자로 적는지는 여기서 정하지 않는다** — 묶음·칸·글자를 전부
- * 도메인 하나가 내놓는다(domesticOrderBasicInfoGroups). 이 파일이 하는 일은 그것을
- * 늘어놓는 것뿐이다. 까닭은 그 파일 머리말에 있다: 「어느 칸이 어느 묶음에 몇 개
+ * 🔴 **무엇을 어떤 글자로 적는지는 여기서 정하지 않는다** — 박스·칸·글자를 전부
+ * 도메인 하나가 내놓는다(domesticOrderBasicInfoBoxes). 이 파일이 하는 일은 그것을
+ * 늘어놓는 것뿐이다. 까닭은 그 파일 머리말에 있다: 「어느 칸이 어느 박스에 몇 개
  * 들어가는가」는 값으로 잴 수 있는 사실인데, JSX 안에 늘어놓으면 칸 하나가 빠져도
  * 아무 데서도 티가 나지 않는다.
+ *
+ * 🔴 **상자는 둘이다**(2026-11-07 사용자 지정 — 「[제품, 견적. 납품]을 한 박스
+ * [줄, 발주, 정산, 기타]를 한 박스로 해서 간결하게」). 하루 전까지는 여섯이었고,
+ * 그리는 코드는 **한 글자도 바뀌지 않았다** — 도메인이 돌려주는 상자 수가 줄었을
+ * 뿐이다. 안의 소제목을 없앤 것도 같은 자리의 결정이라 여기에 그릴 것이 없다.
  *
  * 🔵 **서버 컴포넌트다**(`"use client"` 가 없다). 표시 전용이고, 여기서 클라이언트
  * 경계를 그으면 이 줄 전체가 브라우저로 한 번 더 실려 간다.
@@ -21,23 +26,23 @@ import {
  * (칸을 눌러 그 자리에서 · 줄 수정 폼), 이 화면은 읽기 전용이다 — 같은 값을 고칠 수
  * 있는 자리를 둘로 늘리면 낙관적 잠금이 두 화면에서 서로를 밀어낸다.
  *
- * 묶음마다 `<section>` 과 `<h2>` 를 둔다 — 화면 낭독기가 「지금 어느 묶음의 칸을
+ * 박스마다 `<section>` 과 `<h2>` 를 둔다 — 화면 낭독기가 「지금 어느 묶음의 칸을
  * 읽고 있는지」 말할 수 있어야 한다(목록의 표가 고객사 소제목에 scope="rowgroup"
  * 을 두는 것과 같은 까닭).
  */
 export default function DomesticOrderBasicInfoView({ row }: { row: DomesticOrderBasicInfoRow }) {
-  const groups = domesticOrderBasicInfoGroups(row);
+  const boxes = domesticOrderBasicInfoBoxes(row);
 
   return (
     <div className="flex flex-col gap-4">
-      {groups.map((group) => (
+      {boxes.map((box) => (
         <section
-          key={group.label}
+          key={box.label}
           className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900"
         >
-          <h2 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{group.label}</h2>
+          <h2 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{box.label}</h2>
           <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-            {group.fields.map((field) => (
+            {box.fields.map((field) => (
               <div key={field.label}>
                 {/* 설명이 있는 칸은 목록의 표 머리말과 **같은 글자**를 title 로 받는다
                     (field.hint) — 화면이 달라졌다고 설명이 사라지면 같은 칸이 화면마다

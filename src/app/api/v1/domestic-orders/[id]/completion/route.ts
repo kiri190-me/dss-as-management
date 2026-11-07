@@ -80,7 +80,7 @@ import {
  *   401  { error: "unauthorized" }          토큰이 없거나 틀림
  *   403  { ok: false, code: "FORBIDDEN", message }   사람을 못 찾음 · 권한 없음
  *   404  { ok: false, code: "NOT_FOUND", message }
- *   409  { ok: false, code: "CONFLICT" | "SHIPMENT_COMPLETION_BLOCKED", message }
+ *   409  { ok: false, code: "CONFLICT" | "SHIPMENT_COMPLETION_BLOCKED" | "APPROVAL_REQUIRED", message }
  *   503  { error: "api_closed" } · { ok: false, code: "DATABASE_UNAVAILABLE", message }
  *
  * 설명서: `API_FOR_INTERNAL_SYSTEMS.md`.
@@ -112,6 +112,11 @@ function statusForCode(code: CompletionResultCode): number {
       return 404;
     case "CONFLICT":
     case "SHIPMENT_COMPLETION_BLOCKED":
+    // 🔴 **기타건인데 [기타건 최종 출하 승인]이 유효하지 않다**(2026-11-07). 앞의 둘과
+    //    같은 409 다 — 셋 다 「지금 상태라서 안 된다」이고, 무엇이 막았는지는 `code` 가
+    //    말한다. 🔴 `message` 를 숨기지 않는 자리이기도 하다(위 머리말): PO 화면이 그
+    //    문장을 띄워야 사람이 [승인] 탭으로 갈 줄 안다.
+    case "APPROVAL_REQUIRED":
       return 409;
     case "DATABASE_UNAVAILABLE":
       return 503;

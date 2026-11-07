@@ -11,6 +11,7 @@ import {
   domesticOrderDueDates,
   domesticOrders,
   products,
+  repairCaseApprovals,
   repairCaseIntakeSequences,
   repairCases,
   users,
@@ -120,6 +121,32 @@ async function readOrder(id: string) {
 }
 
 /**
+ * 🔴 **그 줄에 「지금 판에 대한 승인」을 하나 박는다** — 2026-11-07 부터 기타건
+ * (수리 건이 붙지 않은 줄)은 승인이 유효해야 완료되기 때문이다(사용자 결정,
+ * mutations/domestic-orders.ts 의 setDomesticOrderCompletion). 이 파일이 만드는 줄은
+ * 전부 `repairCaseId: null` 이라 **완료를 재는 시험마다** 이 한 줄이 필요하다.
+ *
+ * 🔵 **승인 경로(요청 → 결재)를 거치지 않고 행을 직접 넣는다.** 여기서 재는 것은
+ * 승인 절차가 아니라 완료가 **두 칸을 어떻게 움직이는가**이고, 결재선 판·결재자·
+ * 지정 관문을 끌어오면 그 작은 사실이 큰 밑자락에 묻힌다. 절차 자체는
+ * misc-case-completion-approval.integration.test.ts 가 **진짜 경로로** 본다.
+ *
+ * 🔴 `repair_case_version_at_request` 가 **지금 version 이어야** 유효한 승인이다 —
+ * 완료는 version 을 올리므로, 같은 줄을 두 번 완료하려면 두 번 불러야 한다.
+ */
+async function grantMiscCaseApproval(orderId: string, version: number): Promise<void> {
+  await db.insert(repairCaseApprovals).values({
+    domesticOrderId: orderId,
+    approvalType: "DOMESTIC_ORDER_FINAL_SHIPMENT",
+    status: "APPROVED",
+    requestedByUserId: actorUserId,
+    decidedByUserId: actorUserId,
+    decidedAt: new Date(),
+    repairCaseVersionAtRequest: version,
+  });
+}
+
+/**
  * 그 줄의 납기 요청일을 **차례대로**. 조회(queries/domestic-orders.ts)가 쓰는
  * 것과 같은 순서라, 여기서 본 차례가 곧 화면에 보이는 차례다.
  */
@@ -192,6 +219,12 @@ before(async () => {
 after(async () => {
   // domestic_orders 가 먼저다 — customers 를 RESTRICT 로 가리키고 있다.
   if (createdOrderIds.length > 0) {
+    // 🔴 결재 행이 그보다 **더 먼저**다. 내자 줄을 지우면 그 칸이 NULL 로 풀릴 뿐
+    //    행은 남는다(표의 ON DELETE SET NULL) — 걷지 않으면 시험 DB 에 주인 없는
+    //    결재 기록이 쌓인다.
+    await db
+      .delete(repairCaseApprovals)
+      .where(inArray(repairCaseApprovals.domesticOrderId, createdOrderIds));
     await db.delete(domesticOrders).where(inArray(domesticOrders.id, createdOrderIds));
   }
   await db.delete(repairCases).where(like(repairCases.intakeNumber, `D${TEST_YEAR_MONTH}%`));
@@ -649,11 +682,22 @@ describe("updateDomesticOrder", () => {
  * 수정과 똑같다 — 잠금 · version 대조 · 지워진 행 거절. 여기서 따로 확인하는
  * 것은 **두 칸(completed_at · completed_by)이 언제나 함께 움직이는가**다.
  * 한쪽만 남으면 그 행이 완료인지 아닌지 답할 방법이 없어진다.
+ *
+ * 🔴 **2026-11-07 부터 완료에는 승인이 필요하다**(사용자 결정) — 이 파일이 만드는
+ * 줄은 전부 기타건이라, 완료를 재는 시험은 먼저 grantMiscCaseApproval 로 「지금 판에
+ * 대한 승인」을 박아 둔다. 🔵 **관문 자체는 여기서 재지 않는다** — 승인이 없을 때
+ * 막히는가 · 무슨 말을 하는가는 misc-case-completion-approval.integration.test.ts 가
+ * 본다. 여기서 재는 것은 그 관문을 지난 뒤의 **두 칸**이다.
+ *
+ * 🔵 아래 CONFLICT · NOT_FOUND 셋에는 승인을 박지 않는다 — **일부러**다. 관문이
+ * version 대조 **뒤**에 서는 덕분에 그 셋의 답은 예전 그대로이고, 승인을 박아 두면
+ * 그 차례가 바뀌어도 시험이 모른다.
  */
 describe("setDomesticOrderCompletion", () => {
   test("완료 처리하면 시각과 사람이 함께 남고 version이 오른다", async () => {
     const created = await createOrder({ progressNote: "완료 전" });
     if (!created.ok) return;
+    await grantMiscCaseApproval(created.id, created.version);
 
     const result = await setDomesticOrderCompletion({
       id: created.id,
@@ -677,6 +721,7 @@ describe("setDomesticOrderCompletion", () => {
   test("완료 해제하면 두 칸이 함께 NULL이 된다", async () => {
     const created = await createOrder();
     if (!created.ok) return;
+    await grantMiscCaseApproval(created.id, created.version);
 
     const completed = await setDomesticOrderCompletion({
       id: created.id,
@@ -708,6 +753,10 @@ describe("setDomesticOrderCompletion", () => {
 
     let version = created.version;
     for (const completed of [true, false, true]) {
+      // 🔴 완료마다 **그때의 version 에 대한** 승인이 하나씩 필요하다 — 앞 전환이
+      //    version 을 올려 두어서, 한 번만 박으면 두 번째 완료는 STALE 로 막힌다.
+      //    그 되묻기가 곧 2026-11-07 의 규칙이다.
+      if (completed) await grantMiscCaseApproval(created.id, version);
       const result = await setDomesticOrderCompletion({
         id: created.id,
         expectedVersion: version,
@@ -799,6 +848,7 @@ describe("setDomesticOrderCompletion", () => {
   test("완료된 줄도 여전히 고칠 수 있다 — 회색은 잠금이 아니다", async () => {
     const created = await createOrder({ progressNote: "완료 전" });
     if (!created.ok) return;
+    await grantMiscCaseApproval(created.id, created.version);
 
     const completed = await setDomesticOrderCompletion({
       id: created.id,
@@ -1082,6 +1132,7 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
       dueDates: [{ dueDate: "2096-01-20", note: "완료 전에 적은 날짜" }],
     });
     if (!created.ok) return;
+    await grantMiscCaseApproval(created.id, created.version);
 
     const completed = await setDomesticOrderCompletion({
       id: created.id,

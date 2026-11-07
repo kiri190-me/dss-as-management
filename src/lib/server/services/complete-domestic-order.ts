@@ -2,7 +2,7 @@ import "server-only";
 
 import {
   setDomesticOrderCompletion,
-  type DomesticOrderMutationResultCode,
+  type DomesticOrderCompletionMutationResultCode,
 } from "@/lib/db/mutations/domestic-orders";
 import { transitionWorkflow } from "@/lib/db/mutations/workflow-transitions";
 import { getDomesticOrderShipmentLink } from "@/lib/db/queries/domestic-orders";
@@ -32,7 +32,11 @@ import { getDomesticOrderShipmentLink } from "@/lib/db/queries/domestic-orders";
  * transitionWorkflow 가 트랜잭션 안에서 본다.
  *
  * ── 네 갈래 ─────────────────────────────────────────────────────────────
- *  1. 붙은 수리 건이 없다            → 내자 줄만 완료한다(예전과 같다).
+ *  1. 붙은 수리 건이 없다            → 내자 줄만 완료한다.
+ *     🔴 **그 줄이 곧 「기타건」이고, 2026-11-07 부터 거기에도 관문이 있다** —
+ *     [기타건 최종 출하 승인]이 유효해야 완료된다. 이 파일은 그 판정을 하지 않는다:
+ *     관문은 mutation 안(setDomesticOrderCompletion)이고, 막히면
+ *     `APPROVAL_REQUIRED` 가 그대로 올라온다. 즉 이 갈래도 이제 **거절될 수 있다.**
  *  2. 그 건이 이미 출하 완료 단계다  → 건너뛰고 내자 줄만 완료한다.
  *  3. 그 밖                          → 수리 건을 **먼저** 출하 완료로 넘기고,
  *                                       성공했을 때만 내자 줄을 완료한다.
@@ -82,7 +86,16 @@ export const DOMESTIC_ORDER_SHIPMENT_COMPLETION_REASON =
   "내자 정리에서 [완료 처리]를 눌러 자동으로 출하 완료 처리되었습니다.";
 
 export type CompleteDomesticOrderResultCode =
-  | DomesticOrderMutationResultCode
+  /**
+   * 🔴 `APPROVAL_REQUIRED` 가 여기 들어 있다 — **기타건은 [기타건 최종 출하 승인]이
+   * 있어야 완료된다**(2026-11-07). 판정도 거절도 mutation 안이고(그 파일의
+   * setDomesticOrderCompletion), 이 서비스는 그 답을 그대로 올려 보낼 뿐이다.
+   *
+   * 🔵 **아래 SHIPMENT_COMPLETION_BLOCKED 와 뜻이 다르다.** 그쪽은 「붙어 있는 수리
+   * 건을 넘기지 못했다」이고, 이쪽은 수리 건이 **아예 없는** 줄의 승인 이야기다.
+   * 한 코드로 합치면 화면이 「수리 건 쪽을 먼저 처리하세요」라고 거짓말을 한다.
+   */
+  | DomesticOrderCompletionMutationResultCode
   /**
    * 붙어 있는 수리 건을 출하 완료로 넘기지 못했다 — 그래서 내자 줄도 완료되지
    * 않았다. NOT_FOUND·CONFLICT·VALIDATION_ERROR 어느 것도 아니라 코드를 따로

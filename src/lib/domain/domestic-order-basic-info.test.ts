@@ -2,7 +2,7 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  domesticOrderBasicInfoGroups,
+  domesticOrderBasicInfoBoxes,
   domesticOrderDetailHeadFacts,
   type DomesticOrderBasicInfoRow,
 } from "./domestic-order-basic-info";
@@ -18,7 +18,10 @@ import { DUE_DATE_FROM_REPAIR_CASE_LABEL } from "./requested-due-date-link";
  *    display* 둘이라, 견적서가 연결된 줄에서는 그 견적서의 값이 그대로 보인다.
  *  · 🔴 **견적서 없이 손으로 더한 줄에서도 머리가 선다** — 넷이 하나도 빠지지 않고,
  *    품명·공급처는 그 줄에 적은 값이 그대로 나온다.
- *  · 🔴 기본정보 탭에 내자 정리의 칸들이 한눈에 들어간다(묶음 여섯).
+ *  · 🔴 기본정보 탭에 내자 정리의 칸들이 한눈에 들어간다 — **박스 둘**로(2026-11-07).
+ *  · 🔴 **사용자가 뺀 다섯 칸이 이 탭에 안 보인다** — 순번 · 인수번호 · L/N · S/N ·
+ *    고장내역. 🔵 그 단언은 **값이 실제로 들어 있는 줄**로 해야 한다(아래 WITH_PRODUCT
+ *    표본) — 전부 null 인 줄로 재면 「안 보인다」는 공짜로 통과한다.
  *  · 🔴 빌려 온 납기요청일에는 꼬리표가 붙는다 — 「내가 적은 값」으로 읽히지 않게.
  *
  * 🔵 **못 먼저** — 머리 알약이 빈 값에 사라지지 않는가(언제나 넷), 그리고 모든 칸의
@@ -76,6 +79,22 @@ const HAND_ADDED: DomesticOrderBasicInfoRow = {
   completedAt: "2026-11-01T00:00:00.000Z",
 };
 
+/**
+ * 🔵 **「안 보인다」를 재기 위한 표본** — 사용자가 뺀 다섯 칸에 값이 **실제로 들어
+ * 있는** 줄이다. 위 둘은 그 칸들이 전부 비어 있어서, 그 줄로 「안 보인다」를 재면
+ * 값이 없어서 안 보이는 것인지 빼서 안 보이는 것인지 가를 수 없다.
+ *
+ * 🔴 값은 전부 지어낸 것이다 — 이 저장소는 공개된다(실제 고객사·L/N·S/N 금지).
+ */
+const WITH_PRODUCT: DomesticOrderBasicInfoRow = {
+  ...QUOTE_BORN,
+  displayOrder: 12,
+  displayIntakeNumber: "D990101",
+  lotNumber: "LN-0001",
+  serialNumber: "SN-0001",
+  reportedSymptom: "전원이 들어오지 않음",
+};
+
 const labelsOf = (row: DomesticOrderBasicInfoRow) =>
   domesticOrderDetailHeadFacts(row).map((fact) => fact.label);
 
@@ -96,9 +115,9 @@ test("🔵 못 — 머리 알약은 빈 값에도 사라지지 않는다(언제�
 });
 
 test("🔵 못 — 기본정보의 모든 칸이 적어도 한 줄을 갖는다", () => {
-  for (const row of [QUOTE_BORN, HAND_ADDED]) {
-    const fields = domesticOrderBasicInfoGroups(row).flatMap((group) => group.fields);
-    assert.ok(fields.length >= 20, `칸이 너무 적다(${fields.length})`);
+  for (const row of [QUOTE_BORN, HAND_ADDED, WITH_PRODUCT]) {
+    const fields = domesticOrderBasicInfoBoxes(row).flatMap((box) => box.fields);
+    assert.ok(fields.length >= 18, `칸이 너무 적다(${fields.length})`);
     for (const field of fields) {
       assert.ok(field.lines.length > 0, `${field.label} 칸이 빈 배열이다`);
       for (const line of field.lines) assert.notEqual(line, "", `${field.label} 칸에 빈 글자가 있다`);
@@ -136,15 +155,41 @@ describe("🔴 머리 넷 — 품명 · 공급처 · 발행일자 · 발행번�
 });
 
 describe("🔴 기본정보 탭 — 내자 정리의 내용이 한눈에", () => {
-  const groups = domesticOrderBasicInfoGroups(QUOTE_BORN);
+  const boxes = domesticOrderBasicInfoBoxes(QUOTE_BORN);
   const byLabel = new Map(
-    groups.flatMap((group) => group.fields.map((field) => [field.label, field] as const))
+    boxes.flatMap((box) => box.fields.map((field) => [field.label, field] as const))
   );
 
-  test("묶음은 여섯이고 차례가 목록 카드와 같다(맨 앞의 `줄` 만 더 있다)", () => {
+  test("🔴 박스는 **둘**이고 이름이 사용자가 쓴 낱말 그대로다 (2026-11-07)", () => {
     assert.deepEqual(
-      groups.map((group) => group.label),
-      ["줄", "발주", "제품", "견적 · 납품", "정산", "기타"]
+      boxes.map((box) => box.label),
+      ["제품 · 견적 · 납품", "줄 · 발주 · 정산 · 기타"]
+    );
+  });
+
+  test("🔴 칸이 어느 박스에 서는지가 사용자가 말한 묶음 그대로다", () => {
+    assert.deepEqual(
+      boxes[0].fields.map((field) => field.label),
+      // 제품(형식 하나) + 견적 · 납품 다섯.
+      ["형식", "견적발행일", "견적서번호", "현황", "납품일", "납품자"]
+    );
+    assert.deepEqual(
+      boxes[1].fields.map((field) => field.label),
+      // 줄 둘 + 발주 넷 + 정산 넷 + 기타 둘. 차례는 예전 묶음 차례 그대로다.
+      [
+        "고객사",
+        "완료 여부",
+        "발주서번호",
+        "PJT",
+        "발주발행일",
+        "납기요청일",
+        "세금계산서발행일",
+        "금액(VAT별도)",
+        "입금완료 여부",
+        "일본 송금",
+        "이력",
+        "기타",
+      ]
     );
   });
 
@@ -153,10 +198,39 @@ describe("🔴 기본정보 탭 — 내자 정리의 내용이 한눈에", () =>
     assert.deepEqual(byLabel.get("견적발행일")?.lines, ["2026-09-30"]);
   });
 
-  test("내자 정리의 칸들이 빠짐없이 들어 있다", () => {
+  /**
+   * 🔴 **사용자가 뺀 다섯 칸**(2026-11-07) — 「[제품]에서 L/N, S/N, 고장내역은 없어도
+   * 돼」 · 「[줄]에서 순번, 인수번호는 없어도 돼」.
+   *
+   * 🔵 **값이 들어 있는 줄로 잰다.** 전부 비어 있는 줄로 재면 「안 보인다」가 공짜로
+   * 통과하므로, 먼저 그 줄에 값이 **실제로 있다**를 단언하고 나서 말한다.
+   */
+  test("🔴 뺀 다섯 칸이 이 탭에 **안 보인다** — 값이 있는 줄에서도", () => {
+    // ① 표본에 값이 정말 들어 있다.
+    assert.equal(WITH_PRODUCT.displayOrder, 12);
+    assert.equal(WITH_PRODUCT.displayIntakeNumber, "D990101");
+    assert.equal(WITH_PRODUCT.lotNumber, "LN-0001");
+    assert.equal(WITH_PRODUCT.serialNumber, "SN-0001");
+    assert.equal(WITH_PRODUCT.reportedSymptom, "전원이 들어오지 않음");
+
+    const fields = domesticOrderBasicInfoBoxes(WITH_PRODUCT).flatMap((box) => box.fields);
+    // ② 그런데 이름표가 없다.
+    for (const label of ["순번", "인수번호", "L/N", "S/N", "고장내역"]) {
+      assert.ok(
+        !fields.some((field) => field.label === label),
+        `${label} 칸이 아직 기본정보 탭에 있다`
+      );
+    }
+    // ③ 그리고 **값 글자도** 어느 칸에도 안 섞여 있다(이름표만 지우고 다른 칸에
+    //    붙여 두는 일이 없게).
+    const printed = fields.flatMap((field) => field.lines).join("");
+    for (const value of ["D990101", "LN-0001", "SN-0001", "전원이 들어오지 않음"]) {
+      assert.ok(!printed.includes(value), `${value} 가 아직 화면에 그려진다`);
+    }
+  });
+
+  test("남은 칸들은 빠짐없이 들어 있다", () => {
     for (const label of [
-      "순번",
-      "인수번호",
       "고객사",
       "완료 여부",
       "발주서번호",
@@ -164,9 +238,6 @@ describe("🔴 기본정보 탭 — 내자 정리의 내용이 한눈에", () =>
       "발주발행일",
       "납기요청일",
       "형식",
-      "L/N",
-      "S/N",
-      "고장내역",
       "견적발행일",
       "견적서번호",
       "현황",
@@ -189,8 +260,8 @@ describe("🔴 기본정보 탭 — 내자 정리의 내용이 한눈에", () =>
     assert.deepEqual(byLabel.get("완료 여부")?.lines, ["진행 중"]);
 
     const done = new Map(
-      domesticOrderBasicInfoGroups(HAND_ADDED)
-        .flatMap((group) => group.fields)
+      domesticOrderBasicInfoBoxes(HAND_ADDED)
+        .flatMap((box) => box.fields)
         .map((field) => [field.label, field] as const)
     );
     assert.deepEqual(done.get("입금완료 여부")?.lines, ["미완료"]);
@@ -199,8 +270,8 @@ describe("🔴 기본정보 탭 — 내자 정리의 내용이 한눈에", () =>
   });
 
   test("발주일이 없는 줄은 \"-\" 가 아니라 목록과 같은 말을 쓴다", () => {
-    const hand = domesticOrderBasicInfoGroups(HAND_ADDED)
-      .flatMap((group) => group.fields)
+    const hand = domesticOrderBasicInfoBoxes(HAND_ADDED)
+      .flatMap((box) => box.fields)
       .find((field) => field.label === "발주발행일");
     assert.deepEqual(hand?.lines, ["발주일 미정"]);
     assert.deepEqual(byLabel.get("발주발행일")?.lines, ["2026-10-02"]);
@@ -213,20 +284,20 @@ describe("🔴 기본정보 탭 — 내자 정리의 내용이 한눈에", () =>
   });
 
   test("🔴 빌려 온 납기요청일에는 꼬리표가 붙는다", () => {
-    const borrowed = domesticOrderBasicInfoGroups({
+    const borrowed = domesticOrderBasicInfoBoxes({
       ...QUOTE_BORN,
       dueDates: [],
       repairCaseCustomerRequestedDueDate: "2026-12-24",
     })
-      .flatMap((group) => group.fields)
+      .flatMap((box) => box.fields)
       .find((field) => field.label === "납기요청일");
     assert.deepEqual(borrowed?.lines, ["2026-12-24"]);
     assert.equal(borrowed?.note, DUE_DATE_FROM_REPAIR_CASE_LABEL);
   });
 
   test("양쪽 다 없으면 빈 칸이고 꼬리표도 없다", () => {
-    const none = domesticOrderBasicInfoGroups(HAND_ADDED)
-      .flatMap((group) => group.fields)
+    const none = domesticOrderBasicInfoBoxes(HAND_ADDED)
+      .flatMap((box) => box.fields)
       .find((field) => field.label === "납기요청일");
     assert.deepEqual(none?.lines, ["-"]);
     assert.equal(none?.note, undefined);

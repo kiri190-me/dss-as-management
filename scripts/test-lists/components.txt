@@ -1250,3 +1250,10 @@ src/components/domestic-orders/detail/domestic-order-approval-tab-screens.test.t
 # 같은 글자인가 · 🔴 내자 정리 전체 목록 조회를 부르지 않는가 · 메뉴 주소와 실제
 # 경로가 같은가(갈리면 눌러서 404 다).
 src/components/misc-cases/misc-case-list-screens.test.tsx
+
+# 🔴 기타건이 **승인 때문에 완료되지 않았을 때** 사람이 아는가(2026-11-07). 서버가 준
+# APPROVAL_REQUIRED 를 읽어 **읽고 닫아야 하는 알림**으로 올려 보내는가 · 저장 팝업보다
+# 앞에서 돌아가는가 · 표와 카드 **둘 다** 그 통로를 넘겨받는가 · 상자를 표 칸 밖에서
+# 그리는가 · 🔴 그 상자가 **수리 건 이야기를 하지 않는가**(기타건에는 수리 건이 없다 —
+# 옆 상자의 글을 그대로 쓰면 거짓말이 된다). 🔵 두 길이 함께 있는지를 먼저 못 박는다.
+src/components/domestic-orders/misc-case-completion-blocked-notice.test.ts

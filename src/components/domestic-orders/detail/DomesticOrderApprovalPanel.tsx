@@ -12,7 +12,7 @@ import type { DatabaseDisplayApprovalStatus } from "@/components/repair-cases/ap
 import DomesticOrderApprovalDialog from "./DomesticOrderApprovalDialog";
 import DomesticOrderApprovalHistory from "./DomesticOrderApprovalHistory";
 import {
-  DOMESTIC_ORDER_APPROVAL_DOES_NOT_BLOCK_NOTICE,
+  DOMESTIC_ORDER_APPROVAL_BLOCKS_COMPLETION_NOTICE,
   DOMESTIC_ORDER_APPROVAL_STALE_NOTICE,
 } from "./domestic-order-approval-texts";
 import {
@@ -344,12 +344,13 @@ export default function DomesticOrderApprovalPanel({
   return (
     <div className="flex flex-col gap-4">
       {/*
-        🔴 이 탭에 온 사람이 가장 먼저 오해하는 것 — 「승인을 받아야 완료 처리가 되나」.
-        카드 위에 한 줄로 못 박는다(견적서 결재 탭이 같은 자리에 같은 종류의 한 줄을
-        두는 것과 같다).
+        🔴 이 탭에 온 사람이 가장 먼저 묻는 것 — 「승인을 받아야 완료 처리가 되나」.
+        2026-11-07 부터 답이 **그렇다**로 바뀌었으므로(사용자 결정) 카드 위에 한 줄로
+        못 박는다. 글자는 texts 파일 하나에 있고, 거기 머리말에 **어제까지 정반대의
+        말이 서 있었다**는 사실과 까닭이 적혀 있다.
       */}
       <p className="break-keep rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-        {DOMESTIC_ORDER_APPROVAL_DOES_NOT_BLOCK_NOTICE}
+        {DOMESTIC_ORDER_APPROVAL_BLOCKS_COMPLETION_NOTICE}
       </p>
 
       <DatabaseApprovalCard

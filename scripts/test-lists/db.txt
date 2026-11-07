@@ -480,3 +480,12 @@ src/lib/db/queries/domestic-order-approvals-pending.integration.test.ts
 # 🔵 접수 건은 **하나도 만들지 않는다** — 시험 DB 에 있는 건을 빌려 읽기만 한다
 #    (인수번호는 한 달에 99개가 한도다).
 src/lib/db/queries/misc-domestic-orders.integration.test.ts
+
+# 🔴 기타건은 **승인이 끝나야 [완료]** 가 되는가(2026-11-07 사용자 결정). 승인이 없으면
+# 서버가 막고 **줄이 한 글자도 안 바뀌는가**(completed_at·version) · 🔴 승인을 받으면
+# 되는가(「되는 경우」가 없으면 전부 막는 함수도 통과한다) · 🔴 옆 줄의 승인으로는 안
+# 되는가 · 🔴 수리 건이 붙은 줄은 **안 막히는가** · 결재선 판이 0개(없음·단계 0개)일 때
+# 「절차를 먼저 만들라」고 말하는가 · 🔴 승인 없이 완료된 옛 줄이 깨지지 않는가 ·
+# 완료 해제는 되는가 · 화면과 PO 통로가 거쳐 가는 서비스로도 같은 답이 오는가.
+# 🔵 승인은 **진짜 경로**(요청 → 결재)로 받는다. 접수 건은 만들지 않고 빌린다.
+src/lib/db/mutations/misc-case-completion-approval.integration.test.ts

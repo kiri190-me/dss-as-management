@@ -1427,6 +1427,17 @@ function ModelNameLink({ row }: { row: DomesticOrderListItem }) {
  * 가르는 기준은 **코드**(SHIPMENT_COMPLETION_BLOCKED)다 — 메시지 글자를
  * 비교하지 않는다. 막히는 까닭마다 서버가 돌려주는 문장이 다르다.
  *
+ * ── 🔴 기타건은 **승인이 없으면 완료되지 않는다** (2026-11-07) ──────────
+ * 수리 건이 붙지 않은 줄(= 기타건)은 [기타건 최종 출하 승인]이 유효해야 완료된다
+ * (사용자 결정). 막히면 서버가 `APPROVAL_REQUIRED` 를 돌려주고, 그때도 **아무것도
+ * 저장되지 않는다** — 그래서 위와 같은 길로 읽고 닫아야 하는 알림을 띄운다. 길이
+ * 하나 더 생긴 까닭은 **할 말이 다르기 때문**이다(그 상태 변수 주석).
+ *
+ * 🔴 **단추를 미리 잠그지 않는다.** 그러려면 목록이 줄마다 승인 상태를 싣고 와야
+ * 하는데, 이 화면의 표에는 수리 건이 붙은 줄과 기타건이 섞여 있고 한 해치가 수백
+ * 줄이다. 수리 건 쪽도 **눌러야 막힌 까닭을 안다**(그쪽 관문은 전이 안에 있다) —
+ * 두 종류가 같게 동작하는 편이 「왜 이 줄만 단추가 흐린가」보다 읽기 쉽다.
+ *
  * 🔴 팝업을 이 안에서 그리지 않고 화면 위쪽으로 올리는 이유: 이 단추는 표의
  * `<td>` 안에 산다. 팝업이 거기서 태어나면 칸의 CSS(가운데·오른쪽 정렬 등)를
  * 그대로 물려받아 글이 한쪽으로 쏠린다.
@@ -1443,12 +1454,19 @@ function CompletionToggle({
   row,
   onError,
   onBlocked,
+  onApprovalBlocked,
   onRequestRelease,
 }: {
   row: DomesticOrderListItem;
   onError: (message: string | null) => void;
   /** 출하 완료가 막혀 아무것도 저장되지 않았다 — 서버가 돌려준 까닭 한 줄. */
   onBlocked: (reason: string) => void;
+  /**
+   * 🔴 **기타건의 승인이 없어** 완료 처리가 막혔다 — 그때도 아무것도 저장되지
+   * 않았다(2026-11-07). 위 `onBlocked` 와 나눈 까닭은 사람에게 할 말이 다르기
+   * 때문이다(부모의 상태 변수 주석).
+   */
+  onApprovalBlocked: (reason: string) => void;
   /** [완료 해제]를 눌렀다. 보내지 않고 **확인 창을 열어 달라**는 뜻이다. */
   onRequestRelease: (row: DomesticOrderListItem) => void;
 }) {
@@ -1477,6 +1495,11 @@ function CompletionToggle({
       if (!result.ok) {
         if (result.code === "SHIPMENT_COMPLETION_BLOCKED") {
           onBlocked(result.message);
+          return;
+        }
+        // 🔴 기타건인데 승인이 유효하지 않다 — 이때도 이 줄은 한 글자도 안 바뀌었다.
+        if (result.code === "APPROVAL_REQUIRED") {
+          onApprovalBlocked(result.message);
           return;
         }
         onError(result.message);
@@ -1867,6 +1890,17 @@ export default function DomesticOrderListScreen({
    * 적었다 — 표 칸 안에서 팝업을 그리면 칸의 CSS 를 물려받는다.
    */
   const [shipmentBlockedReason, setShipmentBlockedReason] = useState<string | null>(null);
+  /**
+   * 🔴 **기타건인데 승인이 없어** 완료 처리가 막혔을 때의 까닭 한 줄(2026-11-07,
+   * null 이면 안 떠 있다). 서버가 지금 어느 상태라서 막혔고 무엇을 해야 하는지까지
+   * 담아 보낸다(domain/domestic-order-approval-rules.ts 의 관문).
+   *
+   * 🔴 **위 `shipmentBlockedReason` 과 상태를 나눈 까닭**은 할 말이 다르기 때문이다 —
+   * 그쪽은 「연결된 수리 건을 넘기지 못했다」인데, 여기서 막힌 줄에는 **수리 건이 아예
+   * 없다.** 한 상태로 합치면 기타건에 「수리 건 쪽을 먼저 처리하세요」라는 거짓말이
+   * 뜬다. 둘은 동시에 뜨지 않는다(서버가 코드 하나만 돌려준다).
+   */
+  const [approvalBlockedReason, setApprovalBlockedReason] = useState<string | null>(null);
   /**
    * 되돌리기가 막혀 **아무것도 저장되지 않았을 때**의 까닭 한 줄(2026-10-18).
    * 위 완료 처리 쪽과 **상태를 나눈 이유**는 팝업의 글이 다르기 때문이다 —
@@ -2275,6 +2309,21 @@ export default function DomesticOrderListScreen({
         />
       )}
 
+      {/* 🔴 **기타건인데 [기타건 최종 출하 승인]이 유효하지 않아** 완료 처리가 막힌
+          경우(2026-11-07). 위 상자와 같은 까닭으로 사람이 닫아야 닫히는 알림이다 —
+          읽기 전에 사라지면 "완료된 줄 알고" 넘어간다.
+
+          🔵 가운뎃줄(서버가 준 까닭)에 **지금 어느 상태라서 막혔고 어디로 가야
+          하는지**가 이미 들어 있다. 그래서 여기서 다음 행동을 또 적지 않는다 — 두
+          곳에 적으면 상태마다 달라야 하는 안내가 한 문장으로 굳는다. */}
+      {approvalBlockedReason !== null && (
+        <NoticePopup
+          title="완료 처리를 하지 못했습니다"
+          lines={[approvalBlockedReason, "그래서 내자 정리의 완료 처리도 되지 않았습니다."]}
+          onClose={() => setApprovalBlockedReason(null)}
+        />
+      )}
+
       {/* 🔴 되돌리기가 막혀 **내자 줄까지 그대로**인 경우(2026-10-18). 위
           완료 처리 쪽과 같은 길을 그대로 타되 글만 해제 상황으로 바꾼다 —
           여기서도 "내자 줄도 안 풀렸다"를 함께 전해야 한다. */}
@@ -2478,6 +2527,7 @@ export default function DomesticOrderListScreen({
                                 row={row}
                                 onError={setCompletionError}
                                 onBlocked={setShipmentBlockedReason}
+                                onApprovalBlocked={setApprovalBlockedReason}
                                 onRequestRelease={setReleaseTarget}
                               />
                             )}
@@ -2807,6 +2857,7 @@ export default function DomesticOrderListScreen({
                                   row={row}
                                   onError={setCompletionError}
                                   onBlocked={setShipmentBlockedReason}
+                                  onApprovalBlocked={setApprovalBlockedReason}
                                   onRequestRelease={setReleaseTarget}
                                 />
                               )}

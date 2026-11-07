@@ -204,6 +204,11 @@ export async function updateDomesticOrderAction(input: {
  * 까닭은 그 파일 머리말에 있다. 이 액션이 하는 일은 그대로다: 세션 → 인가 →
  * 형식 검증 → 오류 가리기.
  *
+ * 🔴 **기타건은 승인이 있어야 완료된다**(2026-11-07 사용자 결정). 이 액션은 그
+ * 판정을 하지 않는다 — 서비스 아래 mutation 이 잠근 행을 보고 거절하고
+ * (setDomesticOrderCompletion), 여기로는 `APPROVAL_REQUIRED` 가 그대로 올라온다.
+ * 액션이 관문을 한 벌 더 가지면 화면 경로와 PO 통로가 서로 다른 조건으로 막힌다.
+ *
  * completed === false 도 **거울 서비스**로 보낸다
  * (server/services/release-domestic-order.ts). 붙어 있는 수리 건이 출하
  * 완료 상태면 그것부터 되돌리고, 되돌아간 뒤에만 내자 줄의 완료 표시를 푼다.
@@ -213,6 +218,16 @@ export async function updateDomesticOrderAction(input: {
  */
 export type DomesticOrderCompletionActionResultCode =
   | DomesticOrderActionResultCode
+  /**
+   * 🔴 **기타건인데 [기타건 최종 출하 승인]이 유효하지 않아 완료되지 않았다**
+   * (2026-11-07 사용자 결정). 관문은 서버 한 곳(mutations/domestic-orders.ts)이고
+   * 이 액션은 그 답을 그대로 나른다.
+   *
+   * 화면은 이 코드를 보고 **읽고 닫아야 하는 알림**(NoticePopup)을 띄운다 — 아래
+   * SHIPMENT_COMPLETION_BLOCKED 와 같은 까닭이고, 코드를 가른 까닭은 **할 일이 다르기
+   * 때문**이다(저쪽은 수리 건을 처리하러, 이쪽은 [승인] 탭으로 가야 한다).
+   */
+  | "APPROVAL_REQUIRED"
   /**
    * 붙어 있는 수리 건의 출하 완료 상태를 바꾸지 못해 **내자 줄도 그대로다.**
    * 두 방향이 같은 코드를 쓴다 — 완료 처리에서는 "넘기지 못했다", 완료 해제

@@ -2,7 +2,7 @@ import "server-only";
 
 import {
   setDomesticOrderCompletion,
-  type DomesticOrderMutationResultCode,
+  type DomesticOrderCompletionMutationResultCode,
 } from "@/lib/db/mutations/domestic-orders";
 import { revertShipmentCompletion } from "@/lib/db/mutations/workflow-transitions";
 import { getDomesticOrderShipmentLink } from "@/lib/db/queries/domestic-orders";
@@ -83,7 +83,18 @@ export const DOMESTIC_ORDER_SHIPMENT_REVERT_REASON =
   "내자 정리에서 [완료 해제]를 눌러 출하 완료가 자동으로 취소되었습니다.";
 
 export type ReleaseDomesticOrderResultCode =
-  | DomesticOrderMutationResultCode
+  /**
+   * 🔴 이 묶음에 `APPROVAL_REQUIRED` 가 들어 있지만 **이 길로는 오지 않는다** —
+   * 기타건 승인 관문은 [완료 **처리**]에만 선다(2026-11-07, mutations/domestic-orders.ts
+   * 의 `params.completed` 조건). 완료 해제까지 막으면 승인 없이 완료된 옛 줄을 되돌릴
+   * 길이 사라지므로 일부러 그렇게 두었다.
+   *
+   * 🔵 그런데도 타입에서 빼지 않는 것은, 빼려면 「올 수 없다」를 여기서 한 번 더
+   * 판정해야 하기 때문이다(코드를 보고 다른 코드로 바꾸거나 던지거나). 저쪽 조건이
+   * 바뀌는 날 그 판정은 **조용히 틀린 답**(예: 충돌)을 내놓는다 — 그대로 실어 보내면
+   * 적어도 사람은 서버가 말한 진짜 까닭을 읽는다.
+   */
+  | DomesticOrderCompletionMutationResultCode
   /**
    * 붙어 있는 수리 건의 출하 완료를 되돌리지 못했다 — 그래서 내자 줄의 완료
    * 표시도 그대로다. 코드 이름은 [완료 처리] 쪽과 **일부러 같다**: 화면이

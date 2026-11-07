@@ -41,7 +41,12 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  * **막혔을 때 아무것도 저장되지 않는가**에 있으므로, 성공뿐 아니라 거절된 뒤의
  * domestic_orders 행을 매번 다시 읽어 확인한다.
  *
- *  ① 수리 건이 붙지 않은 줄(repair_case_id = NULL)은 예전처럼 완료 처리만 된다.
+ *  ① 수리 건이 붙지 않은 줄(repair_case_id = NULL)은 내자 줄만 완료된다.
+ *     🔴 **2026-11-07 부터 그 줄에도 승인이 필요하다**(사용자 결정 — 기타건의
+ *     [기타건 최종 출하 승인]). 그래서 이 갈래의 표본은 「승인을 받아 둔 기타건」이고,
+ *     승인이 **없을 때** 막히는가는 울타리가 있는 자리에서 본다
+ *     (db/mutations/misc-case-completion-approval.integration.test.ts — 거기서 이
+ *     서비스로도 한 번 더 눌러 본다).
  *  ② 최종 출하 승인이 **없는** 건이 붙은 줄은 거절되고, 🔴 그때 내자 줄의
  *     completed_at 이 **여전히 NULL** 이다(version 도 그대로다).
  *  ③ 승인이 **있는** 건이 붙은 줄은 완료되고, 수리 건이 출하 완료 단계로
@@ -134,6 +139,12 @@ before(async () => {
 
 after(async () => {
   if (createdOrderIds.length > 0) {
+    // 🔴 기타건 결재 행이 먼저다 — 내자 줄을 지우면 그 칸이 NULL 로 풀릴 뿐 행은
+    //    남는다(표의 ON DELETE SET NULL). 아래 접수 건 쪽 지우기는 repair_case_id 로
+    //    고르므로 이 행들을 집지 못한다.
+    await db
+      .delete(repairCaseApprovals)
+      .where(inArray(repairCaseApprovals.domesticOrderId, createdOrderIds));
     await db.delete(domesticOrders).where(inArray(domesticOrders.id, createdOrderIds));
   }
   const testCaseIds = await db
@@ -253,6 +264,29 @@ async function grantFinalShipmentApproval(caseId: string) {
   assert.equal(shipmentDecision.ok, true, `shipment decision failed: ${JSON.stringify(shipmentDecision)}`);
 }
 
+/**
+ * 🔴 **기타건 줄에 「지금 판에 대한 승인」을 하나 박는다** — 2026-11-07 부터 수리 건이
+ * 붙지 않은 줄은 [기타건 최종 출하 승인]이 유효해야 완료되기 때문이다(사용자 결정).
+ * 위 grantFinalShipmentApproval 과 **다른 결재다**: 그쪽은 접수 건의 것이고 결재선도
+ * 갈래도 다르다.
+ *
+ * 🔵 여기서는 승인 경로(요청 → 결재)를 거치지 않고 행을 직접 넣는다 — 이 파일이 재는
+ * 것은 **두 mutation 을 어떤 차례로 부르는가**이고, 기타건 결재선을 끌어오면 그 차례가
+ * 결재선 밑자락에 묻힌다. 절차 자체와 거절 문구는
+ * db/mutations/misc-case-completion-approval.integration.test.ts 가 진짜 경로로 본다.
+ */
+async function grantMiscCaseApproval(orderId: string, version: number) {
+  await db.insert(repairCaseApprovals).values({
+    domesticOrderId: orderId,
+    approvalType: "DOMESTIC_ORDER_FINAL_SHIPMENT",
+    status: "APPROVED",
+    requestedByUserId: representativeId,
+    decidedByUserId: representativeId,
+    decidedAt: new Date(),
+    repairCaseVersionAtRequest: version,
+  });
+}
+
 async function createOrder(overrides: Partial<DomesticOrderFields> = {}) {
   const result = await createDomesticOrder({
     fields: { ...emptyFields(), ...overrides },
@@ -298,8 +332,13 @@ async function shipmentHistories(caseId: string) {
 }
 
 describe("completeDomesticOrderWithShipment", () => {
-  test("① 수리 건이 붙지 않은 줄은 예전처럼 완료 처리만 된다", async () => {
+  test("① 수리 건이 붙지 않은 줄(= 기타건)은 **승인을 받아 두면** 내자 줄만 완료된다", async () => {
     const order = await createOrder({ purchaseOrderNumber: "PO-NO-CASE" });
+    // 🔴 2026-11-07 부터 이 한 줄이 없으면 완료되지 않는다(사용자 결정) — 이 갈래가
+    //    「막히지 않는 길」에서 「승인을 요구하는 길」로 바뀌었다. 승인이 **없을 때**
+    //    막히는가는 db/mutations/misc-case-completion-approval.integration.test.ts 가
+    //    본다(거기서 이 서비스로도 한 번 더 눌러 본다).
+    await grantMiscCaseApproval(order.id, order.version);
 
     const result = await completeDomesticOrderWithShipment({
       id: order.id,

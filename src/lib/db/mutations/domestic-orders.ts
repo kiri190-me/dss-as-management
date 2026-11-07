@@ -1,12 +1,25 @@
 import "server-only";
 
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import { db } from "../client";
-import { customers, domesticOrderDueDates, domesticOrders, repairCases } from "../schema";
+import {
+  customers,
+  domesticOrderDueDates,
+  domesticOrders,
+  repairCaseApprovals,
+  repairCases,
+} from "../schema";
+import {
+  DOMESTIC_ORDER_APPROVAL_ROUTE_SCOPE,
+  isDomesticOrderApprovalRouteInForce,
+  resolveMiscCaseCompletionGate,
+} from "@/lib/domain/domestic-order-approval-rules";
+import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
 import {
   resolveRepairCaseDueDateWriteThrough,
   type RequestedDueDateLinkOutcome,
 } from "@/lib/domain/requested-due-date-link";
+import { getCurrentShipmentApprovalRouteChain } from "../queries/shipment-approval-routes";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 
 /**
@@ -71,6 +84,24 @@ import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input"
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export type DomesticOrderMutationResultCode = "NOT_FOUND" | "CONFLICT" | "VALIDATION_ERROR";
+
+/**
+ * 완료 처리에만 있는 거절. 🔴 **추가·수정에는 없다** — 그래서 위 묶음에 끼워 넣지
+ * 않고 따로 잇는다. 끼워 넣으면 「행을 추가했는데 승인이 없다고 거절당했다」가
+ * 타입상 말이 되어 버리고, 그 가능성을 부르는 쪽들이 저마다 가려내야 한다.
+ */
+export type DomesticOrderCompletionMutationResultCode =
+  | DomesticOrderMutationResultCode
+  /**
+   * 🔴 **기타건(수리 건이 붙지 않은 줄)인데 [기타건 최종 출하 승인]이 유효하지 않다**
+   * (2026-11-07 사용자 결정). `message` 가 어느 상태라서 막혔는지까지 말한다 —
+   * 가르는 것은 **코드**이고(글자를 견주지 않는다), 보여 주는 것은 message 다.
+   */
+  | "APPROVAL_REQUIRED";
+
+export type DomesticOrderCompletionMutationResult =
+  | { ok: true; id: string; version: number }
+  | { ok: false; code: DomesticOrderCompletionMutationResultCode; message: string };
 
 export type DomesticOrderMutationResult =
   | {
@@ -519,6 +550,32 @@ export async function updateDomesticOrder(params: {
  * 완료는 되돌릴 수 있는 조작이지만 그렇다고 남의 저장을 덮어써도 되는 것은
  * 아니다. 낡은 화면에서 누른 '완료'가 그 사이 바뀐 금액·입금 사실과 같은
  * version 을 들고 들어오면, 그 화면은 이미 사실과 다른 것을 보고 있다.
+ *
+ * ── 🔴 **기타건은 승인이 있어야 완료된다** (2026-11-07) ─────────────────
+ * 사용자 결정이다: 「기타건의 경우도 [기타건 최종 출하 승인]이 되야 [내자정리]에서
+ * [완료]처리를 할 수 있도록」. 규칙 자체는 여기 적지 않는다 —
+ * domain/domestic-order-approval-rules.ts 의 resolveMiscCaseCompletionGate 하나다.
+ *
+ * 🔴 **왜 서버의 울타리가 여기인가.** 완료를 누르는 자리는 화면 둘(표·카드) ·
+ * 서버 액션 하나 · PO 가 부르는 통로 하나인데, 그 넷이 전부 이 함수 한 곳으로
+ * 모인다(서비스 둘을 거쳐서 온다). 화면이나 서비스에서 막으면 그 층을 거치지 않는
+ * 길이 생기는 날 조용히 뚫린다. 접수 건 쪽도 같은 모양이다 — 출하 완료 전이의 승인
+ * 관문은 화면이 아니라 mutations/workflow-transitions.ts 안에 있다.
+ *
+ * 🔴 **잠근 행에서 본다.** 승인의 유효함은 「요청 때의 version == 지금 version」이고,
+ * 결재 요청 경로도 같은 행을 `FOR UPDATE` 로 잡는다
+ * (mutations/domestic-order-approvals.ts) — 둘이 줄을 서므로 「읽고 나서 쓰기까지」
+ * 사이에 승인이 생기거나 낡아지는 틈이 없다.
+ *
+ * 🔵 **막히는 줄은 셋 중 하나도 아니어야 한다**:
+ *  · 완료 **해제**(completed === false)는 막지 않는다 — 잠그는 조작이 아니고,
+ *    막으면 승인 없이 완료된 옛 줄을 되돌릴 길이 사라진다.
+ *  · **수리 건이 붙은 줄**은 막지 않는다 — 그쪽은 이미 전이가 승인을 요구한다
+ *    (services/complete-domestic-order.ts). 여기서 또 보면 **기타건 갈래의 승인**을
+ *    접수 건에까지 요구하게 되고, 그 결재선은 애초에 다른 갈래다.
+ *  · **이미 완료된 줄**은 막지 않는다 — 운영에 승인 없이 완료된 기타건이 있고
+ *    (2026-11-07 개발 DB 실측 1건), 같은 요청이 그 줄들을 오류로 만들면 안 된다.
+ *    이 관문은 「지금 완료로 넘어가는 줄」에만 선다.
  */
 export async function setDomesticOrderCompletion(params: {
   id: string;
@@ -526,10 +583,16 @@ export async function setDomesticOrderCompletion(params: {
   /** true 면 완료 처리, false 면 완료 해제. */
   completed: boolean;
   actorUserId: string;
-}): Promise<DomesticOrderMutationResult> {
-  return db.transaction(async (tx): Promise<DomesticOrderMutationResult> => {
+}): Promise<DomesticOrderCompletionMutationResult> {
+  return db.transaction(async (tx): Promise<DomesticOrderCompletionMutationResult> => {
     const [current] = await tx
-      .select({ id: domesticOrders.id, version: domesticOrders.version })
+      .select({
+        id: domesticOrders.id,
+        version: domesticOrders.version,
+        // 🔴 승인 관문이 보는 둘 — 「기타건인가」와 「이미 완료인가」.
+        repairCaseId: domesticOrders.repairCaseId,
+        completedAt: domesticOrders.completedAt,
+      })
       .from(domesticOrders)
       .where(and(eq(domesticOrders.id, params.id), eq(domesticOrders.isDeleted, false)))
       .for("update");
@@ -540,6 +603,14 @@ export async function setDomesticOrderCompletion(params: {
 
     if (current.version !== params.expectedVersion) {
       return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
+    }
+
+    // 🔴 **version 대조 뒤**다. 앞에 두면 낡은 화면에서 누른 완료가 CONFLICT 대신
+    //    「승인이 없다」로 답한다 — 사람은 승인을 받으러 가지만 진짜 문제는 그 사이
+    //    남이 줄을 고친 것이고, 승인을 받아 와도 같은 자리에서 또 막힌다.
+    if (params.completed && current.repairCaseId === null && current.completedAt === null) {
+      const blocked = await checkMiscCaseCompletionApproval(tx, current.id, current.version);
+      if (blocked) return blocked;
     }
 
     // 완료 시각과 수정 시각이 같은 한 순간을 가리키게 한다 — 두 번 읽으면
@@ -565,4 +636,58 @@ export async function setDomesticOrderCompletion(params: {
 
     return { ok: true, id: updated.id, version: updated.version };
   });
+}
+
+/**
+ * 기타건의 [완료] 관문 — 막혔으면 거절을, 통과면 `null` 을 돌려준다.
+ *
+ * 🔴 **판정을 여기 적지 않는다.** 「어느 상태가 통과인가」는 도메인 함수 하나이고
+ * (resolveMiscCaseCompletionGate), 「승인이 지금 내용에 유효한가」는 접수 건 승인
+ * 카드·결재 대기 조회가 쓰는 그 함수 하나다(resolveApprovalState). 여기서 하는 일은
+ * **그 둘이 볼 자료를 트랜잭션 안에서 읽어다 주는 것**뿐이다.
+ *
+ * 🔴 **가장 최근 결재 행 하나만 본다** — 다단계 결재선은 단계마다 행을 하나씩 잇는
+ * 구조라 사슬의 지금 상태는 언제나 마지막 행이 말한다. 「가장 최근」의 정의
+ * (`requested_at` 내림차순)는 상세 [승인] 탭이 쓰는 조회와 **같아야 한다**
+ * (queries/domestic-order-approvals.ts) — 갈리면 화면은 「승인 완료」라는데 저장은
+ * 거절하는 상태가 된다.
+ *
+ * 🔵 결재선 판은 **막힌 뒤에만** 읽는다. 통과하는 줄에서는 질의가 한 벌 덜 돈다.
+ */
+async function checkMiscCaseCompletionApproval(
+  tx: Tx,
+  domesticOrderId: string,
+  currentVersion: number
+): Promise<{ ok: false; code: "APPROVAL_REQUIRED"; message: string } | null> {
+  const [latest] = await tx
+    .select({
+      status: repairCaseApprovals.status,
+      versionAtRequest: repairCaseApprovals.repairCaseVersionAtRequest,
+    })
+    .from(repairCaseApprovals)
+    .where(eq(repairCaseApprovals.domesticOrderId, domesticOrderId))
+    .orderBy(desc(repairCaseApprovals.requestedAt))
+    .limit(1);
+
+  const approvalState = resolveApprovalState(
+    // 칸 이름이 `repairCase…` 인 까닭은 표의 그 칸 주석에 있다 — 기타건 행에는 내자
+    // 줄의 판 번호가 들어 있다.
+    latest ? { status: latest.status, repairCaseVersionAtRequest: latest.versionAtRequest } : null,
+    currentVersion
+  );
+  if (approvalState === "APPROVED") return null;
+
+  // 🔴 **공유 잠금을 잡지 않는다.** 결재 요청 경로는 「판 잠금 → 줄 잠금」 차례로
+  //    잡는데(mutations/domestic-order-approvals.ts), 여기는 줄을 이미 잡고 있다 —
+  //    같은 잠금을 여기서 또 잡으면 차례가 뒤집혀 두 트랜잭션이 서로를 기다린다.
+  //    이 읽기는 **무슨 말을 할지**만 정하므로 그 보증이 필요하지 않다.
+  const route = await getCurrentShipmentApprovalRouteChain(tx, DOMESTIC_ORDER_APPROVAL_ROUTE_SCOPE);
+  const gate = resolveMiscCaseCompletionGate({
+    approvalState,
+    routeInForce: isDomesticOrderApprovalRouteInForce(route),
+  });
+  // 🔵 APPROVED 는 위에서 이미 돌아갔으므로 여기서 통과가 나오는 길은 없다. 그래도
+  //    `allowed` 를 보고 가른다 — 통과 조건이 도메인 한 곳에만 적혀 있어야 한다.
+  if (gate.allowed) return null;
+  return { ok: false, code: "APPROVAL_REQUIRED", message: gate.message };
 }

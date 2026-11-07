@@ -7,7 +7,7 @@ import DomesticOrderApprovalHistory, {
   domesticOrderDecidedByLabel,
 } from "./DomesticOrderApprovalHistory";
 import {
-  DOMESTIC_ORDER_APPROVAL_DOES_NOT_BLOCK_NOTICE,
+  DOMESTIC_ORDER_APPROVAL_BLOCKS_COMPLETION_NOTICE,
   DOMESTIC_ORDER_APPROVAL_EMPTY_HISTORY_TEXT,
   DOMESTIC_ORDER_APPROVAL_STALE_NOTICE,
 } from "./domestic-order-approval-texts";
@@ -409,9 +409,32 @@ describe("올릴 수 있는 상태 · 그릴 말", () => {
     );
   });
 
-  test("🔴 「아무 문도 막지 않는다」를 카드 위에 적는다", () => {
-    assert.ok(panel.includes("{DOMESTIC_ORDER_APPROVAL_DOES_NOT_BLOCK_NOTICE}"), panel);
-    assert.match(DOMESTIC_ORDER_APPROVAL_DOES_NOT_BLOCK_NOTICE, /완료 처리/);
+  /**
+   * 🔴 2026-11-07 에 **뜻이 뒤집힌** 한 줄이다. 어제까지는 「승인 상태와 상관없이
+   * 완료 처리·납품은 그대로 진행할 수 있습니다」였고, 사용자 결정으로 승인이 [완료]를
+   * 막게 되면서 그 문장이 거짓이 됐다.
+   *
+   * 🔴 그래서 「무엇이 적혀 있는가」만 재지 않는다 — **옛 말이 돌아오지 않는가**도
+   * 함께 잰다. 뜻이 반대인 두 문장은 둘 다 「완료 처리」라는 낱말을 품고 있어서,
+   * 낱말만 재는 시험은 어느 쪽이 서 있어도 초록이다.
+   */
+  test("🔴 「이 승인이 완료 처리를 막는다」를 카드 위에 적는다", () => {
+    assert.ok(panel.includes("{DOMESTIC_ORDER_APPROVAL_BLOCKS_COMPLETION_NOTICE}"), panel);
+    assert.match(DOMESTIC_ORDER_APPROVAL_BLOCKS_COMPLETION_NOTICE, /\[완료\] 처리할 수 있습니다/);
+    assert.doesNotMatch(
+      DOMESTIC_ORDER_APPROVAL_BLOCKS_COMPLETION_NOTICE,
+      /상관없이|그대로 진행할 수 있습니다/,
+      "승인과 상관없이 완료된다는 옛 말이 돌아왔다 — 2026-11-07 부터 거짓이다"
+    );
+  });
+
+  /**
+   * 🔵 뒤집히지 않은 쪽. 막는 방향은 **한쪽뿐**이다 — 승인이 완료를 막지, 완료가
+   * 승인을 막지 않는다(2026-11-06 결정이 그대로 유효하다). 이 한 줄이 그 사실을
+   * 사람에게 전하지 않으면, 완료된 옛 줄의 승인을 올리러 온 사람이 되돌아간다.
+   */
+  test("🔵 「완료된 줄에서도 승인은 올릴 수 있다」가 그 한 줄에 함께 있다", () => {
+    assert.match(DOMESTIC_ORDER_APPROVAL_BLOCKS_COMPLETION_NOTICE, /이미 완료된 줄에서도/);
   });
 });
 

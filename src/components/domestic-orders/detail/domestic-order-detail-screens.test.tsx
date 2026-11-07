@@ -193,10 +193,24 @@ describe("🔴 머리 — 상태 배지 (2026-11-06 사용자 요구)", () => {
 describe("🔴 기본정보 탭 — 내자 정리의 내용이 화면에 나온다", () => {
   const html = renderToStaticMarkup(<DomesticOrderBasicInfoView row={ROW} />);
 
-  test("묶음 여섯이 소제목으로 서고, 칸 이름표가 전부 그려진다", () => {
-    for (const group of ["줄", "발주", "제품", "견적 · 납품", "정산", "기타"]) {
-      assert.ok(html.includes(`>${group}</h2>`), `${group} 묶음이 없다`);
+  /**
+   * 🔴 2026-11-07 사용자 지정: 「[제품, 견적. 납품]을 한 박스 [줄, 발주, 정산, 기타]를
+   * 한 박스로 해서 간결하게」. 하루 전까지는 상자가 여섯이었다.
+   */
+  test("🔴 상자는 **둘**이다 — 안에 소제목을 또 두지 않는다", () => {
+    for (const box of ["제품 · 견적 · 납품", "줄 · 발주 · 정산 · 기타"]) {
+      assert.ok(html.includes(`>${box}</h2>`), `${box} 상자가 없다: ${html}`);
     }
+    assert.equal(count(html, "<h2"), 2, `상자가 둘이 아니다: ${html}`);
+    // 🔴 안에 묶음 소제목(h3)을 두지 않는다 — 박스 이름이 이미 같은 낱말을 적고 있다.
+    assert.equal(count(html, "<h3"), 0, html);
+    // 옛 상자 이름이 하나라도 남아 있으면 반쪽만 접힌 것이다.
+    for (const old of [">줄</h2>", ">발주</h2>", ">제품</h2>", ">견적 · 납품</h2>", ">정산</h2>", ">기타</h2>"]) {
+      assert.equal(html.includes(old), false, `옛 상자 ${old} 가 남아 있다`);
+    }
+  });
+
+  test("칸 이름표가 그려진다", () => {
     for (const label of ["견적서번호", "금액(VAT별도)", "납기요청일", "형식", "입금완료 여부"]) {
       assert.ok(html.includes(`>${label}</dt>`), `${label} 칸이 없다`);
     }
@@ -230,6 +244,55 @@ describe("🔴 기본정보 탭 — 내자 정리의 내용이 화면에 나온�
     assert.equal(html.includes("<button"), false, html);
     assert.equal(html.includes("<form"), false, html);
     assert.equal(html.includes("<input"), false, html);
+  });
+
+  /**
+   * 🔴 2026-11-07 사용자 지정: 「[제품]에서 L/N, S/N, 고장내역은 없어도 돼」 ·
+   * 「[줄]에서 순번, 인수번호는 없어도 돼」.
+   *
+   * 🔵 **값이 들어 있는 줄로 잰다** — 전부 비어 있는 줄로 재면 「안 보인다」가 공짜로
+   * 통과한다. 이름표뿐 아니라 **값 글자**까지 화면에 없어야 한다.
+   */
+  test("🔴 뺀 다섯 칸이 화면에 **안 보인다** — 값이 있는 줄에서도", () => {
+    const filled = { ...ROW, displayIntakeNumber: "D990101" };
+    // ① 표본에 값이 정말 들어 있다.
+    assert.equal(filled.displayOrder, 12);
+    assert.equal(filled.lotNumber, "LN-1");
+    assert.equal(filled.serialNumber, "SN-1");
+    assert.equal(filled.reportedSymptom, "전원 불량");
+
+    const withValues = renderToStaticMarkup(<DomesticOrderBasicInfoView row={filled} />);
+    for (const label of [">순번</dt>", ">인수번호</dt>", ">L/N</dt>", ">S/N</dt>", ">고장내역</dt>"]) {
+      assert.equal(withValues.includes(label), false, `${label} 이름표가 아직 있다`);
+    }
+    for (const value of ["D990101", "LN-1", "SN-1", "전원 불량"]) {
+      assert.equal(withValues.includes(value), false, `${value} 가 아직 그려진다`);
+    }
+  });
+
+  /**
+   * 🔴 **빠진 것은 이 탭뿐이다.** 다섯 칸은 내자 정리 목록에 그대로 있어야 한다 —
+   * 표의 머리말 칸과 카드의 `제품` 묶음. 두 화면은 이 도메인 파일을 쓰지 않고 제
+   * 상수를 가지고 있어서 함께 바뀔 일이 없지만, **그 사실이 바로 이 조각의 전제**라
+   * 여기서 한 번 못 박는다(한 화면 요구로 공용 자리를 자르면 엉뚱한 데가 조용히
+   * 깨진다).
+   */
+  test("🔴 같은 칸들이 **내자 정리 목록에는 그대로** 있다", () => {
+    const listScreen = flat(stripComments(read("src/components/domestic-orders/DomesticOrderListScreen.tsx")));
+    for (const header of [
+      "<th className=\"px-3 py-2\">인수번호</th>",
+      "<th className=\"px-3 py-2\">L/N</th>",
+      "<th className=\"px-3 py-2\">S/N</th>",
+      "<th className=\"px-3 py-2\">고장내역</th>",
+    ]) {
+      assert.ok(listScreen.includes(header), `목록 표에서 ${header} 가 사라졌다`);
+    }
+    // 카드 쪽 `제품` 묶음도 그대로다(좁은 화면에서만 사라지면 더 찾기 어렵다).
+    assert.ok(listScreen.includes('{ label: "L/N", of: (row) => dash(row.lotNumber) }'), listScreen.length.toString());
+    assert.ok(listScreen.includes('{ label: "S/N", of: (row) => dash(row.serialNumber) }'));
+    // 🔵 그리고 이 탭은 그 상수를 쓰지 않는다 — 두 화면이 서로를 끌고 다니지 않는다.
+    const view = stripComments(read("src/components/domestic-orders/detail/DomesticOrderBasicInfoView.tsx"));
+    assert.equal(view.includes("CARD_FIELD_GROUPS"), false, view);
   });
 });
 

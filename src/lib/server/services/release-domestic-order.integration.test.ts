@@ -155,6 +155,12 @@ before(async () => {
 
 after(async () => {
   if (createdOrderIds.length > 0) {
+    // 🔴 기타건 결재 행이 먼저다 — 내자 줄을 지우면 그 칸이 NULL 로 풀릴 뿐 행은
+    //    남는다(표의 ON DELETE SET NULL). 아래 접수 건 쪽 지우기는 repair_case_id 로
+    //    고르므로 이 행들을 집지 못한다.
+    await db
+      .delete(repairCaseApprovals)
+      .where(inArray(repairCaseApprovals.domesticOrderId, createdOrderIds));
     await db.delete(domesticOrders).where(inArray(domesticOrders.id, createdOrderIds));
   }
   const testCaseIds = await db
@@ -286,9 +292,30 @@ async function createOrder(overrides: Partial<DomesticOrderFields> = {}) {
   return result;
 }
 
-/** 이미 완료 표시가 된 줄을 만든다 — [완료 해제]가 눌리는 자리가 그곳이다. */
+/**
+ * 이미 완료 표시가 된 줄을 만든다 — [완료 해제]가 눌리는 자리가 그곳이다.
+ *
+ * 🔴 **수리 건이 안 붙은 줄은 승인을 먼저 박는다**(2026-11-07 사용자 결정) — 그런 줄은
+ * 기타건이고, 기타건의 완료에는 [기타건 최종 출하 승인]이 필요해졌다. 승인 경로를
+ * 거치지 않고 행을 직접 넣는 까닭과 그 절차를 진짜로 보는 자리는
+ * db/mutations/misc-case-completion-approval.integration.test.ts 에 적혀 있다.
+ *
+ * 🔵 **해제 쪽에는 관문이 없다** — 그것이 이 파일이 재는 것이고, 여기 승인이 필요한
+ * 까닭은 오로지 「해제할 줄을 먼저 완료해 두어야」 하기 때문이다.
+ */
 async function createCompletedOrder(overrides: Partial<DomesticOrderFields> = {}) {
   const created = await createOrder(overrides);
+  if (overrides.repairCaseId == null) {
+    await db.insert(repairCaseApprovals).values({
+      domesticOrderId: created.id,
+      approvalType: "DOMESTIC_ORDER_FINAL_SHIPMENT",
+      status: "APPROVED",
+      requestedByUserId: representativeId,
+      decidedByUserId: representativeId,
+      decidedAt: new Date(),
+      repairCaseVersionAtRequest: created.version,
+    });
+  }
   const completed = await setDomesticOrderCompletion({
     id: created.id,
     expectedVersion: created.version,
