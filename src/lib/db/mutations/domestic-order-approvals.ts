@@ -1,7 +1,7 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq } from "drizzle-orm";
 import { db } from "../client";
-import { domesticOrders, repairCaseApprovals, users } from "../schema";
+import { domesticOrderDueDates, domesticOrders, repairCaseApprovals, users } from "../schema";
 import {
   approvalFollowsRoute,
   delegatedFromUserIdFor,
@@ -15,6 +15,7 @@ import {
   DOMESTIC_ORDER_APPROVAL_ROUTE_SCOPE,
   DOMESTIC_ORDER_APPROVAL_TYPE,
   isDomesticOrderApprovalRouteInForce,
+  isDomesticOrderApprovalUnit,
 } from "@/lib/domain/domestic-order-approval-rules";
 import { findNextRouteStepToApprove } from "@/lib/domain/shipment-approval-route";
 import {
@@ -90,9 +91,14 @@ export type DomesticOrderApprovalFailureCode =
   | "NOT_FOUND"
   /** 이 사람은 이 일을 할 수 없다(권한·계정 자격·지정 관문). */
   | "FORBIDDEN"
-  /** 반려인데 사유가 비어 있다. */
+  /** 반려인데 사유가 비어 있다 / 🔴 그 줄에 없는 회차 번호를 보냈다(2026-11-08). */
   | "VALIDATION_ERROR"
-  /** 🔴 한 기타건에 살아 있는 요청은 하나다(repair_case_approvals_one_active_domestic_request). */
+  /**
+   * 🔴 **한 회차에** 살아 있는 요청은 하나다
+   * (repair_case_approvals_one_active_domestic_request). 2026-11-08 까지는 「한
+   * 기타건에 하나」였고, 그 보증이 바로 회차마다 승인을 올리는 길을 막고 있었다 —
+   * 단위가 회차로 내려오면서 색인의 칸이 하나 늘었다.
+   */
   | "ALREADY_REQUESTED"
   /**
    * 🔴 기타건 최종 출하 승인 절차(결재선)가 없거나 단계가 0개다. 기타건에는 대신할
@@ -189,7 +195,30 @@ export type RequestDomesticOrderApprovalInput = {
   actorUserId: string;
   /** 올리며 적는 말. 없어도 된다. */
   requestReason: string | null;
+  /**
+   * 🔴 **어느 회차에 대한 승인인가**(1부터, 2026-11-08 사용자 결정 12). 화면은 회차가
+   * 둘 이상일 때 드롭다운으로 고르게 하고, 하나뿐이면 묻지 않고 1을 보낸다.
+   *
+   * 🔴 **필수다.** 「안 보내면 1」로 두면 드롭다운이 고장난 날 모든 요청이 조용히
+   * 1차로 쏠리고, 그 어긋남은 완료를 눌러 보기 전에는 드러나지 않는다.
+   */
+  dueDateRowOrder: number;
 };
+
+/**
+ * 그 줄의 납기요청일 행이 몇인가 — **승인 단위 수를 세는 재료**다.
+ *
+ * 🔴 **잠근 줄 안에서 읽는다**(부르는 쪽이 `FOR UPDATE` 로 그 줄을 쥐고 있다). 줄의
+ * 납기요청일을 바꾸는 저장도 같은 행을 잠그므로(updateDomesticOrder) 둘이 줄을 선다 —
+ * 그래서 「세고 나서 넣기」 사이에 회차가 사라지는 틈이 없다.
+ */
+async function countDueDateRows(tx: Tx, domesticOrderId: string): Promise<number> {
+  const [row] = await tx
+    .select({ value: count() })
+    .from(domesticOrderDueDates)
+    .where(eq(domesticOrderDueDates.domesticOrderId, domesticOrderId));
+  return Number(row?.value ?? 0);
+}
 
 /**
  * 기타건 한 줄의 최종 출하 승인을 올린다 — **첫 단계 행 하나만** 만든다.
@@ -233,15 +262,32 @@ export async function requestDomesticOrderApproval(
         fail("NOT_FOUND", "해당 기타건을 찾을 수 없습니다.");
       }
 
+      // 🔴 **보내온 회차가 그 줄에 실제로 있는 번호인가**(2026-11-08). 화면이 보낸
+      // 값은 형식 말고는 아무것도 믿지 않는다 — 막지 않으면 「3차에 대한 승인」이
+      // 회차가 둘뿐인 줄에 붙고, 그 승인은 관문이 보지 않아 **영영 쓰이지 않는다**
+      // (사람에게는 「승인했는데 완료가 안 된다」로만 보인다).
+      // 🔵 회차가 0개인 줄도 단위는 하나다 — 그 판정은 도메인 함수가 가진다.
+      const dueDateRowCount = await countDueDateRows(tx, order.id);
+      if (!isDomesticOrderApprovalUnit(input.dueDateRowOrder, dueDateRowCount)) {
+        fail(
+          "VALIDATION_ERROR",
+          "그 납기요청일 회차를 찾을 수 없습니다. 최신 정보를 다시 불러와 주세요."
+        );
+      }
+
       // 트랜잭션 안 재확인이 앞단이고, 부분 유니크 색인이 DB 쪽 최종 방어선이다
       // (아래 catch 의 23505). 둘 다 있어야 동시에 두 사람이 올릴 때 결재선이 둘로
       // 갈라지지 않는다.
+      //
+      // 🔴 **회차까지 좁힌다**(2026-11-08). 안 좁히면 1차가 열려 있는 동안 2차를 올릴
+      // 수 없고, 그것이 바로 이 조각이 푸는 문제다.
       const [existingActive] = await tx
         .select({ id: repairCaseApprovals.id })
         .from(repairCaseApprovals)
         .where(
           and(
             eq(repairCaseApprovals.domesticOrderId, input.domesticOrderId),
+            eq(repairCaseApprovals.dueDateRowOrder, input.dueDateRowOrder),
             eq(repairCaseApprovals.status, "REQUESTED")
           )
         );
@@ -282,6 +328,9 @@ export async function requestDomesticOrderApproval(
           // (`…_domestic_type_has_no_repair_case`)이 그것을 강제하고, 그 NULL 이
           // 접수 건 조회들이 이 행을 집어 들지 않게 하는 보증이다.
           domesticOrderId: order.id,
+          // 🔴 **어느 회차인가**(2026-11-08). 표의 CHECK 이 기타건 행에 이 값을
+          // 요구하므로, 빠뜨리면 INSERT 자체가 거절된다 — 조용히 통과하는 길이 없다.
+          dueDateRowOrder: input.dueDateRowOrder,
           approvalType: DOMESTIC_ORDER_APPROVAL_TYPE,
           status: "REQUESTED",
           requestedByUserId: actor.id,
@@ -322,6 +371,12 @@ export type DecideDomesticOrderApprovalInput = {
   actorUserId: string;
   /** 🔴 반려에는 **필수**다(표의 repair_case_approvals_decision_metadata CHECK). */
   decisionReason: string | null;
+  /**
+   * 🔴 **어느 회차의 결재를 처리하는가**(1부터, 2026-11-08). 한 기타건에 열린 요청이
+   * 회차마다 하나씩 **여럿일 수 있게** 되었으므로, 이 값 없이는 「가장 최근 행」이
+   * 남의 회차를 집어 든다 — 1차를 승인하려고 눌렀는데 2차가 승인되는 모양이다.
+   */
+  dueDateRowOrder: number;
 };
 
 /**
@@ -369,7 +424,14 @@ export async function decideDomesticOrderApproval(
           repairCaseVersionAtRequest: repairCaseApprovals.repairCaseVersionAtRequest,
         })
         .from(repairCaseApprovals)
-        .where(eq(repairCaseApprovals.domesticOrderId, order.id))
+        // 🔴 **회차까지 좁힌다**(2026-11-08). 한 기타건에 열린 요청이 여럿일 수 있으므로
+        // 줄만으로 좁히면 「가장 최근 행」이 남의 회차가 된다.
+        .where(
+          and(
+            eq(repairCaseApprovals.domesticOrderId, order.id),
+            eq(repairCaseApprovals.dueDateRowOrder, input.dueDateRowOrder)
+          )
+        )
         .orderBy(desc(repairCaseApprovals.requestedAt))
         .limit(1)
         .for("update");
@@ -477,6 +539,10 @@ export async function decideDomesticOrderApproval(
             .insert(repairCaseApprovals)
             .values({
               domesticOrderId: order.id,
+              // 🔴 회차도 물려받는다 — 사슬은 **그 회차의** 사슬이다. 여기서 빠뜨리면
+              // 표의 CHECK 이 거절하므로 조용히 어긋날 자리는 없지만, 다른 번호를
+              // 적으면 2단계부터 남의 회차로 넘어간다.
+              dueDateRowOrder: input.dueDateRowOrder,
               approvalType: DOMESTIC_ORDER_APPROVAL_TYPE,
               status: "REQUESTED",
               // 요청은 여전히 그 사람이 한 것이다 — 사슬이 나아갈 뿐이라 요청자·사유를

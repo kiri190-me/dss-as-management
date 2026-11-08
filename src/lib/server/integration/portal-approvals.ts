@@ -203,6 +203,14 @@ export type PendingDomesticOrderApprovalRow = {
   routeStepOrder: number | null;
   requestedByName: string;
   requestedAt: string;
+  /**
+   * 🔴 **몇 번째 납기요청일 회차인가**(1부터, 2026-11-08). 승인함 줄의 **열쇠가 이
+   * 값으로 갈린다** — 빼면 한 기타건의 1차와 2차가 같은 열쇠로 올라가 포털이 둘을
+   * 하나로 본다.
+   */
+  dueDateRowOrder: number | null;
+  /** 🔵 회차가 하나뿐인 기타건에서는 `null` 이고, 그때 줄은 2026-11-07 과 같다. */
+  dueDateRowLabel: string | null;
 };
 
 /**
@@ -299,6 +307,11 @@ export function buildDomesticOrderApprovalItem(
     modelName: row.modelName,
     routeStepOrder: row.routeStepOrder,
     requestedByName: row.requestedByName,
+    // 🔴 **회차까지 그대로 나른다**(2026-11-08). 승인함의 열쇠는 아래 `bell.id` 이고,
+    //    회차를 빼면 1차와 2차가 **같은 열쇠**로 올라가 포털이 둘을 하나로 본다 —
+    //    종에서 뭉개지는 것과 같은 사고가 통합 승인함에서도 난다.
+    dueDateRowOrder: row.dueDateRowOrder,
+    dueDateRowLabel: row.dueDateRowLabel,
   });
   return {
     id: bell.id,

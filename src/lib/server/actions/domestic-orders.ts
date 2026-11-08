@@ -10,10 +10,17 @@ import {
   isValidExpectedVersion,
   validateDomesticOrderFields,
 } from "@/lib/validation/domestic-order-input";
-// setDomesticOrderCompletion 은 여기서 직접 부르지 않는다 — 완료 처리·완료
+// setDomesticOrderCompletion 은 여기서 직접 부르지 않는다 — **줄 단위** 완료 처리·완료
 // 해제 둘 다 서비스를 거치고(아래 두 import), 그 서비스가 마지막 한 걸음으로
 // 이 mutation 을 부른다.
-import { createDomesticOrder, updateDomesticOrder } from "@/lib/db/mutations/domestic-orders";
+// 🔴 **회차 단위는 다르다**(2026-11-08). 기타건 전용이라 함께 움직일 수리 건이 애초에
+// 없어서, 서비스를 거치지 않고 mutation 을 바로 부른다 — 까닭 전문은
+// setDomesticOrderDueDateRowCompletionAction 머리말에 있다.
+import {
+  createDomesticOrder,
+  setDomesticOrderDueDateRowCompletion,
+  updateDomesticOrder,
+} from "@/lib/db/mutations/domestic-orders";
 import {
   permanentlyDeleteDomesticOrder,
   restoreDomesticOrder,
@@ -331,6 +338,102 @@ export async function setDomesticOrderCompletionAction(input: {
       : { ok: false, code: completed.code, message: completed.message };
   } catch (err) {
     console.error("setDomesticOrderCompletionAction: unexpected DB error", err);
+    return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
+  }
+}
+
+/**
+ * ============================================================================
+ * 🔴 **회차 하나의 완료 처리 · 완료 해제** (2026-11-08)
+ * ============================================================================
+ * 사용자 결정 7: 「납품일이 여러개라면 **각각에 [완료처리]버튼**을 만들어줘」.
+ *
+ * 관문은 바로 위 줄 단위 완료와 **똑같다**(canEditDomesticOrders AND
+ * `domesticOrders` WRITE). 🔴 올리지도 내리지도 않는다 — 같은 뜻의 조작을 단위만
+ * 바꿔 부르는 것이라, 열쇠가 갈리면 「줄은 끝낼 수 있는데 회차는 못 끝내는」(또는 그
+ * 반대의) 사람이 생긴다.
+ *
+ * ── 🔴 **서비스를 거치지 않는다** ───────────────────────────────────────
+ * 줄 단위 완료는 서비스 둘을 거친다 — 붙어 있는 수리 건을 함께 출하 완료로 넘기고
+ * 되돌리기 위해서다(complete-domestic-order.ts · release-domestic-order.ts).
+ * 회차별 완료는 **기타건 전용**이라(mutation 이 그것을 강제한다) 넘길 수리 건이 애초에
+ * 없다. 서비스를 억지로 태우면 「수리 건이 없다」는 길이 그 안에 한 벌 더 생기고,
+ * 그 길은 영영 돌지 않는 죽은 가지가 된다.
+ *
+ * 🔴 승인 관문은 여기서 보지 않는다 — mutation 이 잠근 행을 보고 거절하고
+ * (`APPROVAL_REQUIRED`), 이 액션은 그 답을 그대로 나른다. 액션이 한 벌 더 가지면
+ * 화면 경로와 서버가 서로 다른 조건으로 막힌다(줄 단위와 같은 규칙).
+ * ============================================================================
+ */
+export async function setDomesticOrderDueDateRowCompletionAction(input: {
+  id: string;
+  expectedVersion: number;
+  /** 몇 번째 회차인가(1부터). 화면의 「N차」와 같은 번호다. */
+  dueDateRowOrder: number;
+  completed: boolean;
+}): Promise<DomesticOrderCompletionActionResult> {
+  const auth = await resolveAuthorizedActingUser();
+  if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
+
+  if (!isValidDomesticOrderId(input.id)) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { id: "항목을 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+  if (!isValidExpectedVersion(input.expectedVersion)) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { expectedVersion: "수정 시점 정보를 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+  // 🔴 **형식만** 본다 — 「그 줄에 그 회차가 있는가」는 줄을 읽어야 아는 판단이라
+  //    mutation 이 잠근 줄에서 다시 센다. 그래도 여기서 한 겹 거르는 까닭은, 소수·
+  //    음수가 그대로 내려가면 SQL 비교가 조용히 아무 행도 못 찾기 때문이다.
+  if (!Number.isInteger(input.dueDateRowOrder) || input.dueDateRowOrder < 1) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { dueDateRowOrder: "회차를 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+  // 불리언이 아닌 값을 받아 두면 undefined 가 "해제"로 조용히 읽힌다(줄 단위와 같다).
+  if (typeof input.completed !== "boolean") {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { completed: "완료 여부를 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+
+  try {
+    const result = await setDomesticOrderDueDateRowCompletion({
+      id: input.id,
+      expectedVersion: input.expectedVersion,
+      dueDateRowOrder: input.dueDateRowOrder,
+      completed: input.completed,
+      actorUserId: auth.actingUser.id,
+    });
+    return result.ok
+      ? {
+          ok: true,
+          id: result.id,
+          version: result.version,
+          // 🔴 기타건 전용이라 수리 건이 함께 움직이는 일이 **없다**. 그래도 두 깃발을
+          //    돌려주는 것은 화면이 줄 단위 결과와 **같은 타입**을 받게 하기 위해서다 —
+          //    타입이 갈리면 성공 팝업을 그리는 자리가 두 벌이 된다.
+          repairCaseShipmentCompleted: false,
+          repairCaseShipmentReverted: false,
+        }
+      : { ok: false, code: result.code, message: result.message };
+  } catch (err) {
+    console.error("setDomesticOrderDueDateRowCompletionAction: unexpected DB error", err);
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
   }
 }

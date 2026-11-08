@@ -391,6 +391,17 @@ export type DomesticOrderCellEditRow = {
     note: string | null;
     deliveredDate: string | null;
     deliveredBy: string | null;
+    /**
+     * 🔴 그 회차의 **완료 시각**(2026-11-08). 🔴 **위 넷과 성질이 정반대다 — 저장에
+     * 실리지 않는다.** 실어 보내면 줄 수정 payload 하나로 승인 없이 완료를 찍을 수
+     * 있어서, 완료 표시를 다시 적는 일은 저장 통로가 제 손으로 한다
+     * (mutations/domestic-orders.ts 의 replaceDueDates).
+     *
+     * 그런데도 이 타입에 있는 까닭: **편집 목록이 이 값을 들고 가야** 화면이 [삭제]
+     * 단추를 미리 막을 수 있다(domain/domestic-order-due-date-rows.ts 의 셋째 울타리).
+     * 아래 collectRowFields 가 네 칸만 골라 싣는 것이 「안 나간다」의 보증이다.
+     */
+    completedAt: string | null;
   }[];
   quoteIssuedDate: string | null;
   quoteNumber: string | null;
@@ -643,7 +654,33 @@ export type DomesticOrderDueDateDraft = {
   note: string;
   deliveredDate: string;
   deliveredBy: string;
+  /**
+   * 🔴 그 회차가 **[완료 처리]되었는가**(2026-11-08). 다른 넷과 **성질이 다르다** —
+   * 유일하게 **서버로 나가지 않는** 값이다(buildDomesticOrderDueDatesUpdateFields 가
+   * 네 칸만 옮긴다).
+   *
+   * 보내지 않는 까닭: 보내게 두면 줄 수정 payload 하나로 승인 없이 완료를 찍을 수
+   * 있다. 완료 표시를 다시 적는 일은 저장 통로가 **제 손으로** 한다
+   * (mutations/domestic-orders.ts 의 replaceDueDates).
+   *
+   * 그런데도 편집 목록에 들어 있는 까닭: 화면이 **[삭제] 단추를 미리 막아야** 하기
+   * 때문이다(domain/domestic-order-due-date-rows.ts 의 셋째 울타리). 그 판정에 이
+   * 값이 없으면 단추는 눌리는데 저장이 거절되고, 사람은 까닭을 저장한 뒤에야 안다.
+   */
+  isCompleted: boolean;
 };
+
+/**
+ * 🔴 **서버로 실제로 나가는 네 칸** — 위 Draft 에서 `isCompleted` 를 뺀 모양
+ * (2026-11-08). `buildDomesticOrderDueDatesUpdateFields` 가 옮겨 담는 그 넷이고,
+ * **충돌 상자의 글자를 만드는 두 함수**가 이 모양을 받는다.
+ *
+ * 왜 따로 이름을 붙이는가: 그 두 함수에 Draft 를 통째로 요구하면 부르는 쪽이 서버로
+ * 나가지도 않는 완료 표시를 **지어내 채워야** 하고, 그렇게 지어낸 값은 언젠가
+ * 진짜처럼 읽힌다. 거꾸로 읽는 칸만 Pick 하면 네 칸짜리 목록을 그대로 넘기는 자리가
+ * 전부 「없는 속성」 오류가 된다.
+ */
+export type DomesticOrderDueDateDraftPayload = Omit<DomesticOrderDueDateDraft, "isCompleted">;
 
 /**
  * 편집 목록을 **무엇으로 채울 것인가** — 이 줄에 적힌 날짜 그대로, 차례도
@@ -663,6 +700,8 @@ export function domesticOrderDueDateEditDraft(row: {
     note: string | null;
     deliveredDate: string | null;
     deliveredBy: string | null;
+    /** 🔴 그 회차의 완료 시각. 보내지 않고 **단추를 막는 데만** 쓴다(Draft 주석). */
+    completedAt: string | null;
   }[];
 }): DomesticOrderDueDateDraft[] {
   return row.dueDates.map((entry) => ({
@@ -673,6 +712,9 @@ export function domesticOrderDueDateEditDraft(row: {
     // 않는다(위 DomesticOrderDueDateDraft 주석).
     deliveredDate: entry.deliveredDate ?? "",
     deliveredBy: entry.deliveredBy ?? "",
+    // 🔴 **판정은 completed_at 하나로만 한다**(그 표의 칸 주석과 같은 규칙) —
+    // completed_by 로 가르면 두 칸이 어긋난 행에서 답이 갈린다.
+    isCompleted: entry.completedAt !== null,
   }));
 }
 
@@ -687,7 +729,9 @@ export function domesticOrderDueDateEditDraft(row: {
  */
 export function buildDomesticOrderDueDatesUpdateFields(
   row: DomesticOrderCellEditRow,
-  dueDates: readonly DomesticOrderDueDateDraft[]
+  // 🔴 **서버로 나가는 네 칸**만 요구한다(2026-11-08) — 회차별 완료 표시는 이 목록에
+  // 실리지 않고 저장 통로가 제 손으로 다시 적는다(위 DomesticOrderDueDateDraftPayload).
+  dueDates: readonly DomesticOrderDueDateDraftPayload[]
 ): Record<string, unknown> {
   return {
     ...collectRowFields(row),
@@ -738,7 +782,10 @@ export function domesticOrderDueDateBorrowHint(row: {
  * 한다(formatDomesticOrderDueDates).
  */
 export function domesticOrderDueDatesDraftText(
-  dueDates: readonly DomesticOrderDueDateDraft[]
+  // 🔴 **서버로 나가는 네 칸**을 요구한다(2026-11-08) — 읽는 것은 둘뿐이지만, 이
+  // 모양이 「저장에 실리는 목록」 그 자체라 부르는 쪽이 들고 있는 값을 그대로 넘길 수
+  // 있다(위 DomesticOrderDueDateDraftPayload 주석).
+  dueDates: readonly DomesticOrderDueDateDraftPayload[]
 ): string {
   const written = dueDates.filter(
     (entry) => entry.dueDate.trim() !== "" || entry.note.trim() !== ""
@@ -794,7 +841,8 @@ export function domesticOrderDueDatesDraftText(
  * 아무것도 안 적은 회차는 뺀다 — 비어 있던 칸은 다시 넣을 것도 없다.
  */
 export function domesticOrderDeliveriesDraftText(
-  dueDates: readonly DomesticOrderDueDateDraft[]
+  // 🔴 바로 위 domesticOrderDueDatesDraftText 와 같은 모양·같은 까닭.
+  dueDates: readonly DomesticOrderDueDateDraftPayload[]
 ): string {
   const lines: string[] = [];
   dueDates.forEach((entry, index) => {

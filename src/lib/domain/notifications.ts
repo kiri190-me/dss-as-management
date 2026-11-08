@@ -362,9 +362,22 @@ export function domesticOrderApprovalSubject(modelName: string | null): string {
  * 남지 않는다. 그래서 주소를 손으로 적지 않고 기타건 상세의 탭 헬퍼 하나를 부른다
  * (domain/domestic-order-detail-tabs.ts).
  *
- * targetKey 는 내자 줄 id 다. 한 줄에 살아 있는 요청은 언제나 하나뿐이고
- * (repair_case_approvals_one_active_domestic_request 부분 유니크), 사람에게도 「그 한
- * 줄」이다.
+ * ── 🔴 **id 에 회차가 붙는다** (2026-11-08) ─────────────────────────────
+ * 여기에는 「한 줄에 살아 있는 요청은 언제나 하나뿐」이라고 적혀 있었다. 사용자 결정
+ * 12 로 승인의 단위가 **납기요청일 회차**로 내려오면서 그 말이 거짓이 되었다 — 부분
+ * 유니크(repair_case_approvals_one_active_domestic_request)에 칸이 하나 늘어, 이제
+ * **회차마다** 하나다. 1차와 2차가 동시에 열려 있을 수 있다.
+ *
+ * 🔴 그래서 id 에 회차를 붙인다. 안 붙이면 같은 줄의 두 알림이 **글자가 같은 id** 를
+ * 갖고, 종이 줄을 그릴 때 하나로 뭉개진다(React 의 key 가 겹친다) — 사람은 1차만
+ * 처리하고 2차가 남은 것을 영영 모른다. 🔵 이 종류는 **확인 기록에 적히지 않으므로**
+ * (ACKNOWLEDGEABLE_NOTIFICATION_KINDS 에 없다) id 모양을 바꿔도 쌓인 기록이 어긋나지
+ * 않는다.
+ *
+ * 🔴 **targetKey 는 내자 줄 id 그대로다.** 그 값을 세는 자리는 「처리할 **건**이
+ * 몇인가」를 말하고(countNotificationTargets 의 머리말 — 한 건에 결재가 둘이어도 1),
+ * 사람에게도 그 줄은 하나다. 종 배지는 보이는 **줄**을 세므로 둘로 뜬다 — 그 갈림이
+ * 2026-11-06 에 정해진 그대로다.
  */
 export function buildDomesticOrderApprovalNotification(input: {
   domesticOrderId: string;
@@ -373,14 +386,30 @@ export function buildDomesticOrderApprovalNotification(input: {
   /** 몇 번째 단계인가(1부터). 결재선을 타지 않는 행이면 `null`. */
   routeStepOrder: number | null;
   requestedByName: string;
+  /**
+   * 🔴 **몇 번째 납기요청일 회차인가**(1부터). 기타건 결재 행에는 언제나 값이 있다
+   * (표의 CHECK) — `null` 을 받는 것은 타입이 그 CHECK 을 모르기 때문이고, 그때는
+   * 2026-11-07 의 id 모양을 그대로 쓴다.
+   */
+  dueDateRowOrder: number | null;
+  /**
+   * 🔴 사람에게 보여 줄 회차 이름 — 「2차 · 납기 2026-02-15 (2차분)」.
+   * 🔵 **회차가 하나뿐인 기타건에서는 `null`** 이고, 그때 detail 은 2026-11-07 과
+   * 한 글자도 다르지 않다(queries/domestic-order-approvals-pending.ts 가 가른다).
+   */
+  dueDateRowLabel: string | null;
 }): NotificationItem {
   const step = input.routeStepOrder !== null ? `결재선 ${input.routeStepOrder}단계 · ` : "";
+  const row = input.dueDateRowLabel !== null ? `${input.dueDateRowLabel} · ` : "";
+  const idSuffix = input.dueDateRowOrder !== null ? `:${input.dueDateRowOrder}` : "";
   return {
-    id: `DOMESTIC_ORDER_APPROVAL_PENDING:${input.domesticOrderId}`,
+    id: `DOMESTIC_ORDER_APPROVAL_PENDING:${input.domesticOrderId}${idSuffix}`,
     kind: "DOMESTIC_ORDER_APPROVAL_PENDING",
     targetKey: input.domesticOrderId,
     subject: domesticOrderApprovalSubject(input.modelName),
-    detail: `${step}요청자 ${input.requestedByName}`,
+    // 🔴 회차를 **맨 앞**에 둔다 — 같은 품명이 두 줄 나란히 뜰 때 사람이 먼저 보는
+    //    자리이고, 뒤에 두면 좁은 종 패널에서 잘린다.
+    detail: `${row}${step}요청자 ${input.requestedByName}`,
     href: domesticOrderDetailHrefs(input.domesticOrderId).approval,
   };
 }

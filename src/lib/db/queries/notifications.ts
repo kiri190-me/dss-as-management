@@ -201,6 +201,10 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
           modelName: item.modelName,
           routeStepOrder: item.routeStepOrder,
           requestedByName: item.requestedByName,
+          // 🔴 회차를 빠뜨리면 같은 줄의 두 알림이 **글자가 같은 id** 를 갖는다
+          //    (그 빌더의 머리말) — 종에서 하나로 뭉개져 2차가 영영 안 보인다.
+          dueDateRowOrder: item.dueDateRowOrder,
+          dueDateRowLabel: item.dueDateRowLabel,
         })
       );
     },

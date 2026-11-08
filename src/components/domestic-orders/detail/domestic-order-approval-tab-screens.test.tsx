@@ -91,6 +91,8 @@ function record(
     delegatedFromUserId: null,
     delegatedFromName: null,
     versionAtRequest: 3,
+    // 🔴 2026-11-08 — 승인이 가리키는 회차. 기본 표본은 1차다.
+    dueDateRowOrder: 1,
     ...overrides,
   };
 }

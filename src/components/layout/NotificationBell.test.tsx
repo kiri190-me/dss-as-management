@@ -88,6 +88,10 @@ function oneOfEachKind() {
       modelName: "시험용 품명",
       routeStepOrder: 1,
       requestedByName: "박영업",
+      // 🔴 2026-11-08 — 승인 단위가 회차로 내려와 칸 둘이 늘었다. 회차가 하나뿐인
+      //    기타건이라 이름표는 null 이다(그때 줄은 2026-11-07 과 같아야 한다).
+      dueDateRowOrder: 1,
+      dueDateRowLabel: null,
     }),
     buildRepairCaseDueDateNearNotification({
       repairCaseId: "case-due-1",

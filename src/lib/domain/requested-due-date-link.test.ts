@@ -50,7 +50,9 @@ import { pickEarliestDueDate } from "./weekly-report-delivery";
 function dueDate(date: string, note: string | null = null) {
   // 🔴 네 칸으로 만든다(2026-11-08). 납품 둘은 이 파일이 재는 규칙과 상관없지만,
   //    모양이 실제와 달라지면 아래 cellEditRow 가 보내는 payload 도 달라진다.
-  return { dueDate: date, note, deliveredDate: null, deliveredBy: null };
+  // 🔴 다섯째 칸은 저장에 실리지 않는다(2026-11-08) — 편집 목록이 [삭제] 단추를
+  //    막는 데만 쓴다. 이 파일이 재는 규칙과는 상관없고, 모양만 실제와 맞춘다.
+  return { dueDate: date, note, deliveredDate: null, deliveredBy: null, completedAt: null };
 }
 
 // ── ① 내자 정리 쪽 — 이 줄에 적힌 날짜가 먼저 ───────────────────────────
@@ -349,6 +351,8 @@ function cellEditRow(
     note: string | null;
     deliveredDate: string | null;
     deliveredBy: string | null;
+    /** 🔴 2026-11-08 — 회차별 완료. 저장에 실리지 않지만 타입에는 있다. */
+    completedAt: string | null;
   }[]
 ) {
   return {

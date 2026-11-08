@@ -257,7 +257,9 @@ export default function DomesticOrderDueDatesCell({
    * 정하면 단추는 눌리는데 저장이 거절되거나 멀쩡한 줄에서 단추가 죽는다.
    */
   const addBlockedReason = domesticOrderAddDueDateBlockReason({
-    rows: lines.map((line) => ({ hasDelivery: hasDelivery(line) })),
+    // 🔴 완료 표시도 함께 넘긴다(2026-11-08, 셋째 울타리) — 빠뜨리면 그 울타리가
+    //    이 화면에서만 조용히 꺼진다.
+    rows: lines.map((line) => ({ hasDelivery: hasDelivery(line), isCompleted: line.isCompleted })),
     repairCaseId: row.repairCaseId,
   });
 
@@ -269,7 +271,8 @@ export default function DomesticOrderDueDatesCell({
     // 싣는다(domain/domestic-order-cell-edit.ts 의 Draft 주석).
     setLines((previous) => [
       ...previous,
-      { key, dueDate: "", note: "", deliveredDate: "", deliveredBy: "" },
+      // 🔴 새 회차는 완료 표시가 없다 — 완료는 승인을 거쳐야 찍히는 값이다.
+      { key, dueDate: "", note: "", deliveredDate: "", deliveredBy: "", isCompleted: false },
     ]);
   }
 
@@ -285,7 +288,7 @@ export default function DomesticOrderDueDatesCell({
    */
   function removeBlockedReason(index: number): string | null {
     return domesticOrderRemoveDueDateBlockReason({
-      rows: lines.map((line) => ({ hasDelivery: hasDelivery(line) })),
+      rows: lines.map((line) => ({ hasDelivery: hasDelivery(line), isCompleted: line.isCompleted })),
       index,
       repairCaseId: row.repairCaseId,
     });
@@ -310,11 +313,16 @@ export default function DomesticOrderDueDatesCell({
     // 받은 목록으로 그 줄의 행을 통째로 다시 만들므로 **빼면 납품 기록이 사라진다**
     // (domain/domestic-order-cell-edit.ts 의 넓어진 함정 ①).
     const drafts: DomesticOrderDueDateDraft[] = lines.map(
-      ({ dueDate, note, deliveredDate, deliveredBy }) => ({
+      ({ dueDate, note, deliveredDate, deliveredBy, isCompleted }) => ({
         dueDate,
         note,
         deliveredDate,
         deliveredBy,
+        // 🔴 **서버로 나가지 않는다**(buildDomesticOrderDueDatesUpdateFields 가 네 칸만
+        //    옮긴다 — 완료는 서버가 제 손으로 다시 적는다). 그래도 모양을 맞춰 들고
+        //    가는 것은, 여기서 지어낸 값을 넣으면 나중에 이 자리를 보는 사람이
+        //    「완료를 보내고 있다」고 읽기 때문이다.
+        isCompleted,
       })
     );
     try {

@@ -437,7 +437,10 @@ test("내자·주간보고·작업 비용은 팝업만 띄우고 머문다", () 
     // 머리말 저장 · 완료 표시 · 완료 표시 풀기 셋이다(2026-10-18 에 뒤의 둘이 「연결된
     // 수리 건도 함께 처리했는가」로 문구가 갈리면서 쉼표가 들어왔다 — 그 둘을 옛 읽개가
     // 못 읽어 이 시험이 터졌다. 자세한 것은 popupCalls() 머리말).
-    ["src/components/domestic-orders/DomesticOrderListScreen.tsx", 3],
+    // 🔴 **2026-11-08 에 넷이 되었다** — 회차별 [완료 처리]·[완료 해제]가 생기면서
+    //    팝업을 띄우는 자리가 하나 늘었다(DueDateRowCompletionToggles). 그 자리도 **머물고
+    //    띄우기만 한다** — 회차 하나를 끝낸 뒤 갈 곳은 지금 보고 있는 그 표다.
+    ["src/components/domestic-orders/DomesticOrderListScreen.tsx", 4],
     ["src/components/dashboard/WeeklyReportGoalsPanel.tsx", 3],
     ["src/components/dashboard/WeeklyReportDeliveriesPanel.tsx", 2],
     ["src/components/repair-labor/RepairLaborScreen.tsx", 1],

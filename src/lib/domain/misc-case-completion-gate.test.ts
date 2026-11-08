@@ -203,11 +203,40 @@ describe("🔴 완료를 누르는 자리가 전부 울타리를 지난다", () 
     ).replace(/\s+/g, " ");
     // 셋 중 하나라도 빠지면 막지 말아야 할 것을 막는다: 완료 해제 · 수리 건이 붙은
     // 줄 · 이미 완료된 옛 줄.
+    //
+    // 🔴 **2026-11-08 에 글자가 바뀌었다 — 뜻은 그대로다.** 「기타건인가」가
+    // `current.repairCaseId === null` 에서 **이름 붙은 값**(`isMiscCase`)으로 바뀌었다.
+    // 회차별 완료가 생기면서 같은 판정을 **세 곳**이 쓰게 되었기 때문이다(관문을 세울지
+    // · 회차 행에 완료를 찍을지 · 그 행의 완료를 거둘지). 조건 셋을 그대로 재되, 그
+    // 이름이 실제로 그 비교로 정해지는지도 함께 못 박는다 — 안 그러면 `isMiscCase` 가
+    // 언젠가 다른 뜻이 되어도 이 시험이 조용히 통과한다.
     assert.ok(
-      mutation.includes(
-        "if (params.completed && current.repairCaseId === null && current.completedAt === null)"
-      ),
+      mutation.includes("const isMiscCase = current.repairCaseId === null;"),
+      "「기타건인가」의 정의가 바뀌었다"
+    );
+    assert.ok(
+      mutation.includes("if (params.completed && isMiscCase && current.completedAt === null)"),
       "관문이 서는 조건 셋이 그대로가 아니다"
+    );
+  });
+
+  /**
+   * 🔴 **회차별 완료는 기타건에만 있다** (2026-11-08, 사용자 결정 7).
+   *
+   * 수리 건이 붙은 줄에 회차 행 완료를 찍으면 셋째 울타리(완료된 회차가 있으면 줄을
+   * 못 지운다)가 **수리 건 줄의 납기요청일 편집까지 조용히 묶는다.** 「수리 건 붙은
+   * 줄은 지금과 똑같다」가 이 조각의 완료 기준이라, 그 자리를 글자로 못 박는다.
+   */
+  test("🔴 회차 행에 완료를 찍는 일도 **기타건일 때만** 일어난다", () => {
+    const mutation = stripComments(
+      fs.readFileSync(path.join(srcDir, "lib/db/mutations/domestic-orders.ts"), "utf8")
+    ).replace(/\s+/g, " ");
+    // 줄 단위 완료가 회차 행을 건드리는 자리는 `isMiscCase` 안에만 있어야 한다.
+    assert.ok(mutation.includes("if (isMiscCase) { if (params.completed)"), "갈림이 사라졌다");
+    // 회차 단위 저장 경로는 수리 건이 붙은 줄을 **거절**한다.
+    assert.ok(
+      mutation.includes("if (current.repairCaseId !== null) { return { ok: false, code: \"VALIDATION_ERROR\""),
+      "회차별 완료가 수리 건 줄에서 열려 있다"
     );
   });
 });

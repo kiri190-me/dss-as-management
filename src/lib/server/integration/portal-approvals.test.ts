@@ -85,6 +85,10 @@ function domesticOrderRow(
     routeStepOrder: 1,
     requestedByName: "김결재",
     requestedAt: "2026-11-06T03:00:00.000Z",
+    // 🔴 2026-11-08 — 승인 단위가 회차로 내려왔다. 기본 표본은 회차 하나짜리 기타건
+    //    이라 이름표가 null 이고, 그때 승인함 줄은 2026-11-07 과 같아야 한다.
+    dueDateRowOrder: 1,
+    dueDateRowLabel: null,
     ...overrides,
   };
 }

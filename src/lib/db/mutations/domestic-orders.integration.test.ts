@@ -138,6 +138,9 @@ async function grantMiscCaseApproval(orderId: string, version: number): Promise<
   await db.insert(repairCaseApprovals).values({
     domesticOrderId: orderId,
     approvalType: "DOMESTIC_ORDER_FINAL_SHIPMENT",
+    // 🔴 2026-11-08 — 기타건 결재 행에는 회차가 반드시 있다(표의 CHECK). 이 표본은
+    //    회차 하나짜리 기타건이라 1차다.
+    dueDateRowOrder: 1,
     status: "APPROVED",
     requestedByUserId: actorUserId,
     decidedByUserId: actorUserId,

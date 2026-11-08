@@ -117,6 +117,16 @@ describe("🔴 휴지통 — 여기만은 링크가 서지 않는다", () => {
 });
 
 describe("🔴 링크를 쓰는 곳은 정확히 둘 — 규칙은 화면이 아니라 도메인이 쥔다", () => {
+  /**
+   * 🔴 **끝 표시를 바로 다음 함수로 둔다**(2026-11-08). 전에는 `export default
+   * function` 까지 잘랐는데, 그러면 **그 사이에 있는 남의 함수**까지 이 시험이 읽는다 —
+   * 2026-11-08 에 회차별 완료 단추가 그 사이에 서면서(그 함수는 `row.repairCaseId ===
+   * null` 로 기타건을 가린다) 멀쩡한 코드가 아래 단언에 걸렸다. 재려는 것은
+   * **ModelNameLink 의 본문**뿐이다.
+   */
+  const modelNameLinkBody = () =>
+    sliceBetween(screen, "function ModelNameLink(", "function CompletionToggle(");
+
   test("ModelNameLink 를 그리는 자리가 둘(표 · 카드)이고, 선언이 하나다", () => {
     // 선언 1 + 표 1 + 카드 1 = 3. 늘면 어딘가에 넷째 자리가 생긴 것이고,
     // 줄면 한 화면이 조용히 예전 글자로 돌아간 것이다.
@@ -125,7 +135,7 @@ describe("🔴 링크를 쓰는 곳은 정확히 둘 — 규칙은 화면이 아
   });
 
   test("🔴 화면이 repairCaseId 로 직접 가르지 않는다 — 도메인 함수 하나에 묻는다", () => {
-    const component = sliceBetween(screen, "function ModelNameLink(", "export default function");
+    const component = modelNameLinkBody();
     assert.ok(component.includes("const link = resolveDomesticOrderModelLink(row);"), component);
     assert.equal(
       component.includes("row.repairCaseId"),
@@ -136,12 +146,12 @@ describe("🔴 링크를 쓰는 곳은 정확히 둘 — 규칙은 화면이 아
   });
 
   test("🔴 줄(카드) 전체의 누르기로 새지 않는다 — 안 막으면 넘어가면서 수정 폼도 열린다", () => {
-    const component = sliceBetween(screen, "function ModelNameLink(", "export default function");
+    const component = modelNameLinkBody();
     assert.ok(component.includes("onClick={(event) => event.stopPropagation()}"), component);
   });
 
   test("⚠️ sr-only 는 relative 가 있는 링크 안에만 — 떼면 페이지가 표 아래로 굴러간다", () => {
-    const component = sliceBetween(screen, "function ModelNameLink(", "export default function");
+    const component = modelNameLinkBody();
     assert.ok(component.includes('className="relative text-blue-700'), component);
     assert.equal(count(component, 'className="sr-only"'), 1, component);
   });

@@ -186,3 +186,105 @@ describe("승인 종류 · 결재선 용도의 enum", () => {
     assert.ok(approvalTypeEnum.enumValues.length > REPAIR_CASE_APPROVAL_TYPES.length);
   });
 });
+
+/**
+ * ============================================================================
+ * 🔴 0126 — 승인의 단위가 **회차**로 내려온 판 (2026-11-08)
+ * ============================================================================
+ * 사용자 결정 12·13·7·8. 위 0124 묶음과 같은 자리·같은 방식이다(DB 에 붙지 않고
+ * 마이그레이션 글자와 스키마 모듈만 읽는다).
+ *
+ * 여기서 못 박는 것 다섯:
+ *  1. 🔴 **사라지는 자료가 없다.** 색인 하나를 떼고 **같은 파일에서 다시 세운다** —
+ *     db:preflight 에는 「살펴볼 문장」으로 나오고, 그것이 정상이다.
+ *  2. 🔴 **수리 건 쪽 부분 유니크는 건드리지 않는다**(0124 가 세운 그 보증이 아니라
+ *     기타건 쪽만 넓힌다).
+ *  3. 🔴 **CHECK 이 `::text` 로 견준다** — 0124 때 이 자리에서 적용이 멈췄다.
+ *  4. 🔴 **옛 기타건 결재 행을 1차로 메운다.** 그 UPDATE 가 CHECK 보다 **먼저** 와야
+ *     한다 — 순서가 뒤집히면 마이그레이션 적용 자체가 실패한다.
+ *  5. 🔴 **`domestic_orders` 를 건드리지 않는다** — 이 저장소는 select() 전체 조회가
+ *     새 칸을 곧바로 싣는다.
+ * ============================================================================
+ */
+const migration0126 = readFileSync(
+  new URL("../../../../drizzle/0126_faulty_otto_octavius.sql", import.meta.url),
+  "utf8"
+).replace(/\r\n/g, "\n");
+
+const statements0126 = migration0126
+  .split("--> statement-breakpoint")
+  .map((part) => part.trim())
+  .filter((part) => part.length > 0);
+
+describe("0126 — 승인 단위가 회차로 내려온다", () => {
+  test("사라지는 자료가 없다", () => {
+    // 🔵 `DROP INDEX` 가 하나 있지만 **같은 파일에서 다시 세운다**(칸을 하나 넓혀서).
+    //    migration-safety 는 그것을 「자료가 사라지는 문장」으로 세지 않는다.
+    assert.deepEqual(findDestructiveOperations(migration0126), []);
+  });
+
+  test("🔴 건드리는 표는 둘이다 — 그리고 domestic_orders 가 아니다", () => {
+    const touched = [...migration0126.matchAll(/ALTER TABLE "([^"]+)"/g)].map((match) => match[1]);
+    assert.ok(touched.length > 0, "표를 하나도 건드리지 않는다 — 이 시험이 아무것도 못 잰다");
+    assert.deepEqual(
+      [...new Set(touched)].sort(),
+      ["domestic_order_due_dates", "repair_case_approvals"]
+    );
+    // 🔴 `domestic_orders` 에 칸이 더해지면 적용 전까지 개발 서버가 깨진다.
+    assert.doesNotMatch(migration0126, /ALTER TABLE "domestic_orders"/);
+  });
+
+  test("🔴 더하는 칸은 셋이고 전부 NULL 을 허용한다 — 쌓여 있는 행이 그대로 지나야 한다", () => {
+    const added = [...migration0126.matchAll(/ADD COLUMN "([^"]+)"/g)].map((match) => match[1]);
+    assert.deepEqual(added, ["due_date_row_order", "completed_at", "completed_by"]);
+    assert.ok(!/ADD COLUMN "[^"]+" [^;]*NOT NULL/.test(migration0126), "NOT NULL 로 더했다");
+  });
+
+  test("🔴 기타건 쪽 색인만 넓힌다 — 수리 건 쪽은 손대지 않는다", () => {
+    assert.match(migration0126, /DROP INDEX "repair_case_approvals_one_active_domestic_request"/);
+    assert.match(
+      migration0126,
+      /CREATE UNIQUE INDEX "repair_case_approvals_one_active_domestic_request"[^;]*"domestic_order_id","approval_type","due_date_row_order"[^;]*WHERE status = 'REQUESTED'/
+    );
+    // 🔴 0124 가 세운 **수리 건용** 보증은 이 판에 나오지도 않는다.
+    assert.ok(
+      !/repair_case_approvals_one_active_request/.test(migration0126),
+      "수리 건 쪽 부분 유니크를 건드렸다"
+    );
+  });
+
+  test("🔴 CHECK 은 `approval_type::text` 로 견준다 — 리터럴로 되돌아가면 적용이 안 된다", () => {
+    const checkStatements = statements0126.filter((statement) =>
+      /ADD CONSTRAINT "repair_case_approvals_[a-z_]+" CHECK/.test(statement)
+    );
+    assert.equal(checkStatements.length, 2, `CHECK 문장 수가 달라졌다: ${checkStatements.length}`);
+    for (const statement of checkStatements) {
+      assert.match(statement, /approval_type::text/, `enum 리터럴로 되돌아갔다: ${statement}`);
+    }
+  });
+
+  test("🔴 옛 기타건 결재 행을 1차로 메우고, 그 UPDATE 가 CHECK 보다 **먼저** 온다", () => {
+    const update = migration0126.indexOf('UPDATE "repair_case_approvals"');
+    assert.ok(update >= 0, "옛 행을 메우는 문장이 없다 — 적용 자체가 실패한다");
+    assert.match(
+      migration0126,
+      /SET "due_date_row_order" = 1\s+WHERE "approval_type"::text = 'DOMESTIC_ORDER_FINAL_SHIPMENT'\s+AND "due_date_row_order" IS NULL/
+    );
+    // 🔴 **`ADD CONSTRAINT` 로 찾는다.** 이름만 찾으면 **메우기 위의 주석**이 먼저
+    //    걸려(그 주석이 이 CHECK 을 가리킨다) 차례를 거꾸로 읽는다.
+    const check = migration0126.indexOf(
+      'ADD CONSTRAINT "repair_case_approvals_domestic_type_has_due_date_row"'
+    );
+    assert.ok(check >= 0, "회차를 요구하는 CHECK 이 없다");
+    assert.ok(update < check, "메우기가 CHECK 뒤에 있다 — 그 순서로는 적용이 실패한다");
+    // 🔴 **지우는 문장이 아니다** — NULL 인 칸만 메운다.
+    assert.doesNotMatch(migration0126, /DELETE FROM/);
+  });
+
+  test("🔴 회차 두 칸이 한 쌍으로 묶인다 — 완료 시각과 완료자", () => {
+    assert.match(
+      migration0126,
+      /ADD CONSTRAINT "domestic_order_due_dates_completed_columns_together" CHECK \(\(completed_at IS NULL AND completed_by IS NULL\) OR \(completed_at IS NOT NULL AND completed_by IS NOT NULL\)\)/
+    );
+  });
+});

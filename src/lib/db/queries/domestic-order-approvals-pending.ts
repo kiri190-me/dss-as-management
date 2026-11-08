@@ -1,8 +1,16 @@
 import "server-only";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
-import { domesticOrders, products, repairCaseApprovals, repairCases, users } from "../schema";
+import {
+  domesticOrderDueDates,
+  domesticOrders,
+  products,
+  repairCaseApprovals,
+  repairCases,
+  users,
+} from "../schema";
+import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-date-label";
 import {
   approvalFollowsRoute,
   mayDecideAssignedApproval,
@@ -15,10 +23,26 @@ import { resolveActingApproverUserIds } from "./approval-route-delegations";
  * ============================================================================
  * 내가 결재해야 할 기타건 — 종 「기타건 결재 대기」와 통합 승인함의 원본
  * ============================================================================
- * 🔴 **이 파일은 아무것도 쓰지 않고, 아무 문도 여닫지 않는다.** 기타건 최종 출하
- * 승인은 완료 처리도 납품도 막지 않는다(domain/domestic-order-approval-rules.ts
- * 머리말 — 「남는 것은 기록뿐이다」). 여기서 하는 일은 「지금 누구 차례인가」를 읽어
- * 종에 한 줄을 세우고, 통합 승인함이 물어 올 때 그 줄을 내주는 것뿐이다.
+ * 🔴 **이 파일은 아무것도 쓰지 않고, 아무 문도 여닫지 않는다.** 여기서 하는 일은
+ * 「지금 누구 차례인가」를 읽어 종에 한 줄을 세우고, 통합 승인함이 물어 올 때 그 줄을
+ * 내주는 것뿐이다.
+ *
+ * ⚠️ **2026-11-07 에 이 자리의 말이 한 번 낡았다.** 여기에는 「기타건 최종 출하 승인은
+ * 완료 처리도 납품도 막지 않는다」가 적혀 있었는데, 그날 사용자 결정으로 **[완료]
+ * 처리를 막게** 되었다(domain/domestic-order-approval-rules.ts 의 머리말). 이 파일이
+ * 아무 문도 여닫지 않는다는 것은 그대로지만, **그 승인이 아무것도 막지 않는다는 말은
+ * 거짓**이다 — 고쳐 적는다(2026-11-08).
+ *
+ * ── 🔴 **한 기타건에 여러 줄이 뜰 수 있다** (2026-11-08) ────────────────
+ * 승인의 단위가 회차로 내려오면서(사용자 결정 12) **열려 있는 요청이 회차마다 하나씩**
+ * 설 수 있게 되었다. 그래서 같은 기타건이 종에 두 줄·세 줄로 뜬다 — 그것이 맞다:
+ * 결재자가 눌러야 하는 것이 **둘**이고, 하나로 접으면 1차를 처리한 뒤 2차가 남아 있는
+ * 것을 알 길이 없다(접수 건 결재가 검수·출하를 따로 세우는 것과 같은 자리다).
+ *
+ * 🔴 **그러니 줄마다 어느 회차인지 적어야 한다.** 같은 품명이 두 줄 나란히 뜨는데
+ * 구분할 글자가 없으면 사람은 **같은 것이 두 번 떴다**고 읽고 하나만 처리한다.
+ * 🔵 회차가 하나뿐인 기타건에는 적지 않는다 — 붙일 말이 없고, 그 줄은 2026-11-07 과
+ * 한 글자도 다르지 않아야 한다.
  *
  * ── 🔴 왜 접수 건 조회(repair-case-approvals-pending.ts)를 넓히지 않았나 ──
  * 결재 행은 **같은 표**(`repair_case_approvals`)에 쌓인다. 그래도 그 조회를 넓히면
@@ -52,11 +76,13 @@ import { resolveActingApproverUserIds } from "./approval-route-delegations";
  * 모양이고, 접수 건 최종 출하 승인의 「대표·위임」 축은 여기에 **없다**(기타건에는
  * 출하 대표가 없다 — domain/domestic-order-approval-rules.ts 의 근거 셋).
  *
- * ── 처리된 건은 뜨지 않는다 · 한 줄에 한 줄이다 ─────────────────────────
+ * ── 처리된 건은 뜨지 않는다 · 한 **회차**에 한 줄이다 ───────────────────
  * 후보는 **아직 결정되지 않은 행**(`status = 'REQUESTED'`)뿐이다. 승인·반려된 행은
  * 다음 조회에서 저절로 빠지고, 다단계 결재선은 앞 행을 닫은 **뒤에** 다음 행을 여는
- * 사슬이라 열린 행은 한 줄에 언제나 하나다 — 표의 부분 유니크
- * (repair_case_approvals_one_active_domestic_request)가 그것을 지킨다.
+ * 사슬이라 열린 행은 **회차마다** 언제나 하나다 — 표의 부분 유니크
+ * (repair_case_approvals_one_active_domestic_request)가 그것을 지킨다. 🔴 그 색인에
+ * 2026-11-08 에 칸이 하나 늘었다(`due_date_row_order`): 보증의 단위가 줄에서 회차로
+ * 내려왔다.
  *
  * 🔵 **「요청 뒤에 줄이 바뀌었는가」(STALE)는 여기서 보지 않는다.** 그 판정
  * (resolveApprovalState)은 **결정된** 행에만 뜻이 있다 — REQUESTED 행은 판 번호와
@@ -73,6 +99,8 @@ import { resolveActingApproverUserIds } from "./approval-route-delegations";
  */
 
 const approvalRequester = alias(users, "domestic_pending_approval_requester");
+/** 그 결재가 가리키는 **회차 행** — 짝을 맞추는 열쇠는 `display_order` 다(아래 조인). */
+const approvalDueDateRow = alias(domesticOrderDueDates, "domestic_pending_approval_due_date_row");
 
 /** 지정 관문(mayDecideAssignedApproval)에 그대로 넘기는 최소 모양. */
 type AssignmentActor = { id: string; role: string; isDeveloper: boolean };
@@ -130,10 +158,26 @@ export type PendingDomesticOrderApprovalItem = {
   approvalId: string;
   /** 그 행이 판의 몇 번째 단계인가(1부터). 결재선을 타지 않는 행이면 `null`. */
   routeStepOrder: number | null;
+  /**
+   * 🔴 **몇 번째 납기요청일 회차인가**(1부터, 2026-11-08). 알림 id 가 이 값으로
+   * 갈린다 — 빠뜨리면 같은 줄의 두 알림이 글자가 같은 id 를 갖고 종에서 뭉개진다
+   * (domain/notifications.ts 의 buildDomesticOrderApprovalNotification 머리말).
+   */
+  dueDateRowOrder: number | null;
   requestedByUserId: string;
   requestedByName: string;
   /** ISO 문자열 — 서버 컴포넌트 경계를 넘을 수 있게 Date 를 그대로 보내지 않는다. */
   requestedAt: string;
+  /**
+   * 🔴 **어느 회차의 결재인가** — 「2차 · 납기 2026-02-15 (2차분)」(2026-11-08).
+   *
+   * 🔵 **회차가 하나뿐인 기타건에서는 `null`** 이다. 그때는 붙일 말이 없고, 그 줄은
+   * 2026-11-07 의 알림과 한 글자도 다르지 않아야 한다(파일 머리말).
+   *
+   * 글자는 지어내지 않는다 — domain/domestic-order-due-date-label.ts 가 만든 그 한
+   * 줄이고, [승인] 탭의 회차 머리·드롭다운·완료 단추가 쓰는 말과 같다.
+   */
+  dueDateRowLabel: string | null;
 };
 
 /**
@@ -169,6 +213,16 @@ export async function listDomesticOrderApprovalsPendingMyApproval(
       repairCaseModelName: products.modelName,
       approvalId: repairCaseApprovals.id,
       routeStepOrder: repairCaseApprovals.routeStepOrder,
+      // 🔴 회차 이름표의 재료 셋(2026-11-08). **그 줄의 회차가 몇인지**까지 세는 것은
+      // 「하나뿐이면 적지 않는다」를 가리기 위해서다 — 세지 않으면 회차가 하나인 줄에도
+      // 「1차 · 납기 …」가 붙어 어제와 달라진다.
+      dueDateRowOrder: repairCaseApprovals.dueDateRowOrder,
+      dueDateRowCount: sql<number>`(
+        select count(*) from ${domesticOrderDueDates}
+        where ${domesticOrderDueDates.domesticOrderId} = ${domesticOrders.id}
+      )`,
+      dueDate: approvalDueDateRow.dueDate,
+      dueDateNote: approvalDueDateRow.note,
       // 「이 행이 결재선 단계인가」를 가르는 나머지 한 칸 — 위임은 단계에만 걸린다.
       // 같은 표의 칸이라 조인도 조건도 늘지 않는다.
       routeId: repairCaseApprovals.routeId,
@@ -190,6 +244,18 @@ export async function listDomesticOrderApprovalsPendingMyApproval(
     // 통째로 사라지는 실패 방식이 알림에서 가장 알아채기 어려워 LEFT JOIN 이다
     // (queries/quote-approvals-pending.ts 가 같은 이유로 같게 한다).
     .leftJoin(approvalRequester, eq(approvalRequester.id, repairCaseApprovals.requestedByUserId))
+    // 🔴 **그 회차의 납기요청일 행**(2026-11-08). 짝을 맞추는 열쇠는 `display_order` 다 —
+    // 승인 행이 회차를 가리키는 값과 **같은 번호**이기 때문이다
+    // (schema/repair-case-approvals.ts 의 due_date_row_order 주석).
+    // LEFT JOIN 인 까닭: 납기요청일이 0행인 기타건이 많고(개발 DB 실측 15건 중 11건)
+    // 그 줄에도 단위는 하나 있다 — INNER 로 걸면 그 결재가 종에서 통째로 사라진다.
+    .leftJoin(
+      approvalDueDateRow,
+      and(
+        eq(approvalDueDateRow.domesticOrderId, domesticOrders.id),
+        eq(approvalDueDateRow.displayOrder, repairCaseApprovals.dueDateRowOrder)
+      )
+    )
     .where(
       and(eq(repairCaseApprovals.status, "REQUESTED"), eq(domesticOrders.isDeleted, false))
     )
@@ -218,5 +284,15 @@ export async function listDomesticOrderApprovalsPendingMyApproval(
       requestedByUserId: row.requestedByUserId,
       requestedByName: row.requestedByName ?? "",
       requestedAt: row.requestedAt.toISOString(),
+      dueDateRowOrder: row.dueDateRowOrder,
+      // 🔴 **회차가 둘 이상일 때만** 이름표를 붙인다(파일 머리말). count(*) 는
+      // 드라이버에 따라 글자로 오므로 숫자로 못 박는다.
+      dueDateRowLabel:
+        Number(row.dueDateRowCount) > 1 && row.dueDateRowOrder !== null
+          ? domesticOrderDueDateRowLabel(row.dueDateRowOrder, {
+              dueDate: row.dueDate,
+              note: row.dueDateNote,
+            })
+          : null,
     }));
 }

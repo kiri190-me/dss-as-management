@@ -67,6 +67,10 @@ function pending(overrides: Partial<Parameters<typeof buildDomesticOrderApproval
     modelName: "시험용 품명",
     routeStepOrder: 1,
     requestedByName: "김결재",
+    // 🔴 2026-11-08 — 승인의 단위가 **회차**로 내려왔다. 기본 표본은 **회차가
+    //    하나뿐인 기타건**이다(그때 이름표는 null 이고, 줄은 2026-11-07 과 같아야 한다).
+    dueDateRowOrder: 1,
+    dueDateRowLabel: null,
     ...overrides,
   });
 }
@@ -172,10 +176,24 @@ describe("종 한 줄", () => {
     assert.equal(DOMESTIC_ORDER_NO_MODEL_LINK_LABEL, "(형식 없음)");
   });
 
-  test("열쇠는 줄 하나에 하나다 — 단계가 넘어가도 같은 열쇠", () => {
-    assert.equal(pending().id, `DOMESTIC_ORDER_APPROVAL_PENDING:${ORDER_ID}`);
+  /**
+   * 🔴 **2026-11-08 에 이 시험이 뒤집혔다.** 전에는 「열쇠는 **줄 하나에** 하나」였다 —
+   * 그때는 한 기타건에 열린 요청이 언제나 하나였기 때문이다. 사용자 결정 12 로 승인의
+   * 단위가 **납기요청일 회차**로 내려오면서 1차와 2차가 동시에 열릴 수 있게 되었고,
+   * 그 둘이 같은 열쇠를 가지면 **종에서 하나로 뭉개진다.**
+   *
+   * 🔴 그래서 단언을 **약하게 만들지 않고 방향을 바꿨다**: 「언제나 같다」가 아니라
+   * 「**단계가 넘어가도 같고, 회차가 다르면 다르다**」를 잰다.
+   */
+  test("열쇠는 회차 하나에 하나다 — 단계가 넘어가도 같고, 회차가 다르면 다르다", () => {
+    assert.equal(pending().id, `DOMESTIC_ORDER_APPROVAL_PENDING:${ORDER_ID}:1`);
     assert.equal(pending({ routeStepOrder: 3 }).id, pending().id);
+    // 🔴 **회차가 다르면 열쇠도 다르다** — 이것이 뒤집힌 쪽이다.
+    assert.notEqual(pending({ dueDateRowOrder: 2 }).id, pending().id);
+    // 🔵 **targetKey 는 그대로 줄 id 다.** 그 값을 세는 자리는 「처리할 건이 몇인가」를
+    //    말한다(countNotificationTargets 의 머리말 — 한 건에 결재가 둘이어도 1).
     assert.equal(pending().targetKey, ORDER_ID);
+    assert.equal(pending({ dueDateRowOrder: 2 }).targetKey, ORDER_ID);
     // 🔴 접수 건·견적서 결재와 열쇠가 겹치지 않는다 — 겹치면 포털이 둘을 한 줄로 접는다.
     const quote = buildQuoteApprovalNotification({
       quoteId: ORDER_ID,

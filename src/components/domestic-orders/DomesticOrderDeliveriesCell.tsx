@@ -24,6 +24,7 @@ import {
   type DomesticOrderDueDateDraft,
 } from "@/lib/domain/domestic-order-cell-edit";
 import { DOMESTIC_ORDER_DELIVERED_DATE_NOTE } from "@/lib/domain/delivered-date-link";
+import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-date-label";
 import type { DomesticOrderListItem } from "@/lib/db/queries/domestic-orders";
 import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders";
 import {
@@ -111,17 +112,14 @@ function linesOf(row: DomesticOrderListItem): Line[] {
 /**
  * 회차 이름표에 적을 글자 — 「1차 · 납기 2026-01-20 (1차분)」.
  *
- * 🔴 **납기요청일을 그대로 보여 준다.** 이 칸에서 고치는 것은 납품 둘뿐이지만, 어느
- * 회차에 적고 있는지는 그 날짜와 비고로만 알 수 있다 — 번호만 적으면 사람이 표의
- * 납기요청일 칸과 눈으로 짝을 맞춰야 하고, 편집 중에는 그 칸이 이 편집칸에 가려
- * 있을 수도 있다.
+ * 🔴 **글자를 여기서 만들지 않는다**(2026-11-08). 이 말이 태어난 자리는 이 파일이지만,
+ * 2026-11-08 부터 **같은 회차를 부르는 자리가 넷**이 되었다(승인 요청 창의 드롭다운 ·
+ * [승인] 탭의 회차 카드 · 회차별 [완료 처리] 단추 · 이 편집칸). 두 화면이 같은 줄을
+ * 다른 말로 부르면 사람은 그것이 같은 회차인지 알 수 없어서, 만드는 자리를
+ * domain/domestic-order-due-date-label.ts 하나로 옮겼다 — 글자도 규칙도 그대로다.
  */
 function rowLabelOf(line: DomesticOrderDueDateDraft, index: number): string {
-  const dueDate = line.dueDate.trim() === "" ? "(날짜 없음)" : line.dueDate.trim();
-  const note = line.note.trim();
-  return note === ""
-    ? `${index + 1}차 · 납기 ${dueDate}`
-    : `${index + 1}차 · 납기 ${dueDate} (${note})`;
+  return domesticOrderDueDateRowLabel(index + 1, line);
 }
 
 export default function DomesticOrderDeliveriesCell({
@@ -197,12 +195,17 @@ export default function DomesticOrderDeliveriesCell({
     setLineErrors({});
     // ② 네 칸을 전부, 차례 그대로 보낸다 — 날짜·메모를 빼면 그 저장이 납기요청일을
     // 지운다(헤더 ②).
+    // 🔴 `isCompleted` 는 **서버로 나가지 않는다**(2026-11-08) —
+    //    buildDomesticOrderDueDatesUpdateFields 가 네 칸만 옮긴다. 그래도 모양을 맞춰
+    //    들고 가는 것은, 여기서 지어낸 값(false 따위)을 넣으면 나중에 이 자리를 보는
+    //    사람이 「완료를 보내고 있다」고 읽기 때문이다.
     const drafts: DomesticOrderDueDateDraft[] = lines.map(
-      ({ dueDate, note, deliveredDate, deliveredBy }) => ({
+      ({ dueDate, note, deliveredDate, deliveredBy, isCompleted }) => ({
         dueDate,
         note,
         deliveredDate,
         deliveredBy,
+        isCompleted,
       })
     );
     try {

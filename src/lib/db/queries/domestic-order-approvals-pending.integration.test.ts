@@ -192,6 +192,7 @@ async function request(domesticOrderId: string): Promise<void> {
     domesticOrderId,
     actorUserId: requesterId,
     requestReason: null,
+    dueDateRowOrder: 1,
   });
   assert.equal(requested.ok, true, `setup request failed: ${JSON.stringify(requested)}`);
 }
@@ -328,6 +329,7 @@ describe("대기 목록 — 지금 누구 차례인가", () => {
       decision: "APPROVED",
       actorUserId: stepAId,
       decisionReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(decided.ok, true, JSON.stringify(decided));
 
@@ -353,6 +355,7 @@ describe("대기 목록 — 지금 누구 차례인가", () => {
       decision: "REJECTED",
       actorUserId: stepAId,
       decisionReason: "금액 확인 필요",
+      dueDateRowOrder: 1,
     });
     assert.equal(decided.ok, true, JSON.stringify(decided));
 
@@ -491,7 +494,13 @@ describe("🔴 종에 뜬다 — 등록이 실제로 돌았는가", () => {
       (item) => item.kind === "DOMESTIC_ORDER_APPROVAL_PENDING"
     );
     assert.equal(mine.length, 1, "🔴 레지스트리에 등록은 됐는데 종에 한 줄도 안 떴다");
-    assert.equal(mine[0].id, `DOMESTIC_ORDER_APPROVAL_PENDING:${orderId}`);
+    // 🔴 **2026-11-08 에 열쇠에 회차가 붙었다.** 전에는 `…:{줄 id}` 였다 — 그때는 한
+    //    기타건에 열린 요청이 언제나 하나였기 때문이다. 사용자 결정 12 로 회차마다
+    //    요청이 서게 되면서, 열쇠가 그대로였다면 **같은 줄의 두 알림이 종에서 하나로
+    //    뭉개진다**(React 의 key 가 겹친다).
+    assert.equal(mine[0].id, `DOMESTIC_ORDER_APPROVAL_PENDING:${orderId}:1`);
+    // 🔵 **targetKey 는 그대로 줄 id 다** — 그 값을 세는 자리는 「처리할 건이 몇인가」를
+    //    말한다(domain/notifications.ts 의 countNotificationTargets 머리말).
     assert.equal(mine[0].targetKey, orderId);
     assert.equal(mine[0].subject, "알림시험 품명");
     assert.equal(mine[0].href, `/domestic-orders/${orderId}/approval`);
@@ -516,6 +525,7 @@ describe("🔴 결과가 요청자 종에 뜬다 — 대기 쪽을 고쳐도 여
       decision: "APPROVED",
       actorUserId: stepAId,
       decisionReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(decided.ok, true, JSON.stringify(decided));
 
@@ -553,6 +563,7 @@ describe("🔴 결과가 요청자 종에 뜬다 — 대기 쪽을 고쳐도 여
       decision: "APPROVED",
       actorUserId: stepAId,
       decisionReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(decided.ok, true, JSON.stringify(decided));
     assert.ok(decided.ok && decided.nextApprovalId, "다음 단계 행이 안 생겼다 — 표본이 틀렸다");
@@ -573,6 +584,7 @@ describe("🔴 결과가 요청자 종에 뜬다 — 대기 쪽을 고쳐도 여
       decision: "REJECTED",
       actorUserId: stepAId,
       decisionReason: "금액 확인 필요",
+      dueDateRowOrder: 1,
     });
     assert.equal(decided.ok, true, JSON.stringify(decided));
 
@@ -599,6 +611,7 @@ describe("🔴 결과가 요청자 종에 뜬다 — 대기 쪽을 고쳐도 여
       decision: "APPROVED",
       actorUserId: stepAId,
       decisionReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(decided.ok, true, JSON.stringify(decided));
     // 🔵 지우기 전에는 떠 있다.

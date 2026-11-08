@@ -9,7 +9,9 @@ import DatabaseApprovalCard, {
   type DatabaseApprovalActionButton,
 } from "@/components/repair-cases/approval/DatabaseApprovalCard";
 import type { DatabaseDisplayApprovalStatus } from "@/components/repair-cases/approval/DatabaseApprovalStatusBadge";
-import DomesticOrderApprovalDialog from "./DomesticOrderApprovalDialog";
+import DomesticOrderApprovalDialog, {
+  type DomesticOrderApprovalDialogRowOption,
+} from "./DomesticOrderApprovalDialog";
 import DomesticOrderApprovalHistory from "./DomesticOrderApprovalHistory";
 import {
   DOMESTIC_ORDER_APPROVAL_BLOCKS_COMPLETION_NOTICE,
@@ -57,6 +59,20 @@ import {
  * 가리키는 시험·주석 열 곳이 함께 움직여야 해서, 지금은 **이름을 그대로 두고 뜻을
  * 주석으로 적는다.**
  *
+ * ── 🔴 **카드가 회차마다 한 장씩 선다** (2026-11-08, 사용자 결정 12·13) ──
+ * 승인의 단위가 「기타건 한 줄」에서 「납기요청일 **회차** 하나」로 내려왔다. 그래서 이
+ * 탭이 그리는 것은 **카드 하나**가 아니라 **회차 수만큼의 카드**다. 카드 한 장의 내용·
+ * 단추·판정은 2026-11-07 의 그 카드와 **한 줄도 다르지 않다** — 달라진 것은 몇 장을
+ * 그리는가와, 둘 이상일 때 **어느 회차인지 머리에 적는가**뿐이다.
+ *
+ * 🔵 **회차가 하나뿐이면 어제와 똑같이 보인다** — 머리도 드롭다운도 뜨지 않는다.
+ * 수리 건이 붙은 줄은 납기요청일이 하나로 제한되어 있어(결정 9 울타리) 언제나 그쪽이고,
+ * 납기요청일이 0행인 기타건도 단위가 하나다(domain 의 domesticOrderApprovalUnitCount).
+ *
+ * 🔴 **이력은 한 벌로 둔다** — 회차별로 쪼개지 않는다. 결재 이력은 「이 기타건에 무슨
+ * 일이 있었나」를 시간순으로 되짚는 자리이고, 쪼개면 1차와 2차가 번갈아 일어난 차례를
+ * 읽을 수 없게 된다. 대신 **줄마다 회차를 적는다**(DomesticOrderApprovalHistory).
+ *
  * ── 🔴 수리 건 카드와 **일부러 다른 것 셋** ─────────────────────────────
  *  1. **「사내 목표 완료일」 줄이 없다.** 기타건에는 대응하는 값이 없다(2026-11-06
  *     사용자 확인 — 「없으니까 빼도 돼」). 빈 값으로 두지 않고 **줄 자체를 뺀다** —
@@ -87,15 +103,31 @@ export type DomesticOrderApprovalActingUser = {
   isDeveloper: boolean;
 };
 
-type DialogState = "REQUEST" | "APPROVED" | "REJECTED" | null;
+/** 카드 한 장이 그릴 **회차 하나**의 지금 상태. 서버가 정해 내려준다. */
+export type DomesticOrderApprovalUnitView = {
+  /** 1부터. 승인 행이 가리키는 `due_date_row_order` 와 같은 번호다. */
+  rowOrder: number;
+  /** 「2차 · 납기 2026-02-15 (2차분)」 — domain 이 만든 그 한 줄이다. */
+  label: string;
+  /**
+   * 🔴 서버가 정한 상태를 그대로 받는다 — 여기서 다시 계산하지 않는다. 판정은
+   * resolveApprovalState 한 곳에만 있고(접수 건 승인 카드가 쓰는 그 함수다), 두 곳에
+   * 적으면 화면은 「승인 완료」라는데 기록은 「낡았다」고 답하는 날이 온다.
+   */
+  state: ShipmentApprovalState;
+  /** 그 회차의 가장 최근 승인 줄. 한 번도 올린 적이 없으면 null. */
+  latest: DomesticOrderApprovalRecordRow | null;
+};
 
-const DIALOG_TITLES: Record<Exclude<DialogState, null>, string> = {
+type DialogState = "REQUEST" | "APPROVED" | "REJECTED";
+
+const DIALOG_TITLES: Record<DialogState, string> = {
   REQUEST: "기타건 출하 승인 요청",
   APPROVED: "기타건 출하 승인",
   REJECTED: "기타건 출하 반려",
 };
 
-const DONE_MESSAGES: Record<Exclude<DialogState, null>, string> = {
+const DONE_MESSAGES: Record<DialogState, string> = {
   REQUEST: "승인을 요청했습니다.",
   APPROVED: "승인 처리했습니다.",
   REJECTED: "반려 처리했습니다.",
@@ -110,10 +142,12 @@ function toBadgeStatus(state: ShipmentApprovalState): DatabaseDisplayApprovalSta
   return state === "PENDING" ? "REQUESTED" : state;
 }
 
+/** 지금 열려 있는 창 — **어느 회차의** 무슨 창인가. */
+type OpenDialog = { kind: DialogState; rowOrder: number };
+
 export default function DomesticOrderApprovalPanel({
   domesticOrderId,
-  state,
-  latest,
+  units,
   history,
   routeSteps,
   isRouteConfigured,
@@ -124,13 +158,11 @@ export default function DomesticOrderApprovalPanel({
 }: {
   domesticOrderId: string;
   /**
-   * 🔴 서버가 정한 상태를 그대로 받는다 — 여기서 다시 계산하지 않는다. 판정은
-   * resolveApprovalState 한 곳에만 있고(접수 건 승인 카드가 쓰는 그 함수다), 두 곳에
-   * 적으면 화면은 「승인 완료」라는데 기록은 「낡았다」고 답하는 날이 온다.
+   * 🔴 **회차마다 하나씩, 차례대로**(2026-11-08). 길이는 언제나 1 이상이다 — 납기요청일이
+   * 0행인 기타건에도 단위가 하나 있다(domain 의 domesticOrderApprovalUnitCount).
    */
-  state: ShipmentApprovalState;
-  /** 가장 최근 승인 줄. 한 번도 올린 적이 없으면 null. */
-  latest: DomesticOrderApprovalRecordRow | null;
+  units: readonly DomesticOrderApprovalUnitView[];
+  /** 🔴 **회차를 가리지 않은 전부**다 — 이력은 시간순 한 벌이다(파일 머리말). */
   history: readonly DomesticOrderApprovalRecordRow[];
   /** 이력의 줄들이 가리키는 판들 — 「n/m단계」를 그 줄의 판으로 세기 위해서다. */
   routeSteps: readonly ShipmentApprovalRouteStepList[];
@@ -163,10 +195,152 @@ export default function DomesticOrderApprovalPanel({
   canRequestApproval: boolean;
 }) {
   const router = useRouter();
-  const [dialogState, setDialogState] = useState<DialogState>(null);
+  const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  /** 🔴 **어느 회차의 말인가**까지 쥔다 — 카드가 여럿이면 남의 카드 밑에 뜬다. */
+  const [status, setStatus] = useState<{ rowOrder: number; message: string } | null>(null);
 
+  // 🔴 회차 머리를 세우는 것은 **둘 이상일 때만**이다. 하나뿐이면 2026-11-07 의 탭과
+  //    한 글자도 다르지 않아야 한다(파일 머리말).
+  const showRowHeadings = units.length > 1;
+
+  /**
+   * 🔴 **요청 창의 드롭다운에 세울 회차들** — 지금 올릴 수 있는 것만.
+   *
+   * 진행 중이거나 이미 승인된 회차를 목록에 두면, 골라서 눌러 봐야 서버가
+   * ALREADY_REQUESTED 로 거절한다. 판정은 화면이 새로 적지 않고 도메인 함수를 그대로
+   * 부른다(isDomesticOrderApprovalRequestable) — 단추를 여는 조건과 **같은 함수**라
+   * 「단추는 열렸는데 목록에는 없는」 회차가 생기지 않는다.
+   */
+  const requestableOptions: DomesticOrderApprovalDialogRowOption[] = units
+    .filter((unit) => isDomesticOrderApprovalRequestable(unit.state))
+    .map((unit) => ({ rowOrder: unit.rowOrder, label: unit.label }));
+
+  async function handleConfirm(reason: string | null, dueDateRowOrder: number) {
+    if (!dialog || isSubmitting) return;
+    setIsSubmitting(true);
+    const result =
+      dialog.kind === "REQUEST"
+        ? await requestDomesticOrderApprovalAction({
+            domesticOrderId,
+            reason,
+            // 🔴 창이 돌려준 회차를 그대로 싣는다 — 드롭다운이 없는 줄에서는 창이
+            //    기본값(누른 카드의 회차)을 그대로 돌려준다.
+            dueDateRowOrder,
+          })
+        : await decideDomesticOrderApprovalAction({
+            domesticOrderId,
+            decision: dialog.kind,
+            reason,
+            // 🔴 승인·반려에는 드롭다운이 없다 — **누른 카드의 회차**다.
+            dueDateRowOrder: dialog.rowOrder,
+          });
+    setIsSubmitting(false);
+    if (!result.ok) {
+      // 🔴 거절 이유에는 결재선이 없다는 안내처럼 사람이 읽고 움직여야 할 말이 그대로
+      //    실려 온다 — 「실패했습니다」로 줄이지 않는다.
+      setStatus({ rowOrder: dialog.rowOrder, message: result.message });
+      return;
+    }
+    setStatus(null);
+    showSavePopup({ message: DONE_MESSAGES[dialog.kind], redirectTo: null });
+    setDialog(null);
+    // 상태·이력은 서버가 그린다 — 손으로 옮기지 않고 다시 묻는다.
+    router.refresh();
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/*
+        🔴 이 탭에 온 사람이 가장 먼저 묻는 것 — 「승인을 받아야 완료 처리가 되나」.
+        2026-11-07 부터 답이 **그렇다**로 바뀌었으므로(사용자 결정) 카드 위에 한 줄로
+        못 박는다. 글자는 texts 파일 하나에 있고, 거기 머리말에 **어제까지 정반대의
+        말이 서 있었다**는 사실과 까닭이 적혀 있다.
+      */}
+      <p className="break-keep rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+        {DOMESTIC_ORDER_APPROVAL_BLOCKS_COMPLETION_NOTICE}
+      </p>
+
+      {units.map((unit) => (
+        <UnitCard
+          key={unit.rowOrder}
+          unit={unit}
+          showHeading={showRowHeadings}
+          routeSteps={routeSteps}
+          isRouteConfigured={isRouteConfigured}
+          currentRouteSteps={currentRouteSteps}
+          actingUser={actingUser}
+          actingApproverUserIds={actingApproverUserIds}
+          canRequestApproval={canRequestApproval}
+          // 확인 창이 떠 있는 동안에는 보이지 않는다 — 창 뒤에서 지난 결과가 새 결과처럼
+          // 읽히지 않게 하려는 것이다(수리 건 카드와 같은 처리).
+          statusMessage={
+            dialog === null && status?.rowOrder === unit.rowOrder ? status.message : null
+          }
+          onOpenDialog={(kind) => setDialog({ kind, rowOrder: unit.rowOrder })}
+        />
+      ))}
+
+      {/*
+        읽어 주기 통로. 값이 없을 때도 빈 문자열로 **항상 DOM 에 남아 있어야** 내용이
+        바뀔 때 읽힌다. 절대배치(sr-only)라 자리를 먹지 않는다.
+      */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {status?.message ?? ""}
+      </p>
+
+      <DomesticOrderApprovalHistory records={history} routeSteps={routeSteps} />
+
+      <DomesticOrderApprovalDialog
+        isOpen={dialog !== null}
+        title={dialog ? DIALOG_TITLES[dialog.kind] : ""}
+        // 🔴 반려에만 사유가 필수다 — 서버도 같은 자리에서 거절한다.
+        requireReason={dialog?.kind === "REJECTED"}
+        isSubmitting={isSubmitting}
+        // 🔴 고르개는 **요청 창에만** 선다. 승인·반려는 이미 열려 있는 요청을 처리하는
+        //    것이라 고를 것이 없다(창 머리말).
+        rowOptions={dialog?.kind === "REQUEST" ? requestableOptions : []}
+        defaultRowOrder={dialog?.rowOrder ?? 1}
+        onConfirm={(reason, rowOrder) => void handleConfirm(reason, rowOrder)}
+        onCancel={() => setDialog(null)}
+      />
+    </div>
+  );
+}
+
+/**
+ * 회차 한 장. 🔴 **안에 든 판정은 2026-11-07 의 그 카드와 한 줄도 다르지 않다** —
+ * 달라진 것은 「무엇을 보고 판정하는가」가 줄 전체에서 **이 회차**로 좁혀진 것뿐이다.
+ *
+ * 🔴 **훅을 쓰지 않는다.** 카드 수가 회차 수에 따라 달라지므로, 여기서 훅을 쓰면
+ * 회차가 늘고 주는 저장 직후에 훅 차례가 어긋난다(React 의 규칙). 창과 전송 중 상태는
+ * 전부 부모가 쥔다.
+ */
+function UnitCard({
+  unit,
+  showHeading,
+  routeSteps,
+  isRouteConfigured,
+  currentRouteSteps,
+  actingUser,
+  actingApproverUserIds,
+  canRequestApproval,
+  statusMessage,
+  onOpenDialog,
+}: {
+  unit: DomesticOrderApprovalUnitView;
+  /** 회차 머리를 세울까 — 회차가 둘 이상일 때만 참이다. */
+  showHeading: boolean;
+  routeSteps: readonly ShipmentApprovalRouteStepList[];
+  isRouteConfigured: boolean;
+  currentRouteSteps: readonly ShipmentApprovalRouteStepLabel[];
+  actingUser: DomesticOrderApprovalActingUser;
+  actingApproverUserIds: readonly string[];
+  canRequestApproval: boolean;
+  statusMessage: string | null;
+  onOpenDialog: (kind: DialogState) => void;
+}) {
+  const { state, latest } = unit;
   const displayStatus = toBadgeStatus(state);
   // 🔴 위임이 걸리는 것은 결재선 **단계**뿐이다 — 서버(decideDomesticOrderApproval)가
   // 같은 함수로 같게 가른다. 기타건 결재는 언제나 결재선을 타므로 실제로는 언제나
@@ -214,7 +388,7 @@ export default function DomesticOrderApprovalPanel({
       actions.push({
         key: "request",
         label: state === "NOT_REQUESTED" ? "출하 승인 요청" : "출하 재요청",
-        onClick: () => setDialogState("REQUEST"),
+        onClick: () => onOpenDialog("REQUEST"),
       });
       if (state === "STALE") {
         // 🔴 「승인 완료」와 갈라 보이게 하는 두 번째 장치다. 이력에는 「승인」 줄이
@@ -242,37 +416,12 @@ export default function DomesticOrderApprovalPanel({
           : `지금 차례는 ${latest?.assignedApproverName ?? "다른 승인자"} 님입니다. 최고관리자 권한으로 대신 처리합니다.`;
       }
       actions.push(
-        { key: "approve", label: "출하 승인", onClick: () => setDialogState("APPROVED") },
-        { key: "reject", label: "출하 반려", onClick: () => setDialogState("REJECTED"), tone: "danger" }
+        { key: "approve", label: "출하 승인", onClick: () => onOpenDialog("APPROVED") },
+        { key: "reject", label: "출하 반려", onClick: () => onOpenDialog("REJECTED"), tone: "danger" }
       );
     }
   } else if (state === "APPROVED") {
     disabledReason = "이미 승인 완료되어 추가 처리를 할 수 없습니다.";
-  }
-
-  async function handleConfirm(reason: string | null) {
-    if (!dialogState || isSubmitting) return;
-    setIsSubmitting(true);
-    const result =
-      dialogState === "REQUEST"
-        ? await requestDomesticOrderApprovalAction({ domesticOrderId, reason })
-        : await decideDomesticOrderApprovalAction({
-            domesticOrderId,
-            decision: dialogState,
-            reason,
-          });
-    setIsSubmitting(false);
-    if (!result.ok) {
-      // 🔴 거절 이유에는 결재선이 없다는 안내처럼 사람이 읽고 움직여야 할 말이 그대로
-      //    실려 온다 — 「실패했습니다」로 줄이지 않는다.
-      setStatusMessage(result.message);
-      return;
-    }
-    setStatusMessage(null);
-    showSavePopup({ message: DONE_MESSAGES[dialogState], redirectTo: null });
-    setDialogState(null);
-    // 상태·이력은 서버가 그린다 — 손으로 옮기지 않고 다시 묻는다.
-    router.refresh();
   }
 
   /**
@@ -342,17 +491,17 @@ export default function DomesticOrderApprovalPanel({
   );
 
   return (
-    <div className="flex flex-col gap-4">
+    <section className="flex flex-col gap-2">
       {/*
-        🔴 이 탭에 온 사람이 가장 먼저 묻는 것 — 「승인을 받아야 완료 처리가 되나」.
-        2026-11-07 부터 답이 **그렇다**로 바뀌었으므로(사용자 결정) 카드 위에 한 줄로
-        못 박는다. 글자는 texts 파일 하나에 있고, 거기 머리말에 **어제까지 정반대의
-        말이 서 있었다**는 사실과 까닭이 적혀 있다.
+        🔴 **어느 회차인가** — 회차가 둘 이상일 때만 선다(파일 머리말). 글자는
+        domain/domestic-order-due-date-label.ts 가 만든 그 한 줄이고, 드롭다운·완료
+        단추가 쓰는 말과 **한 글자도 다르지 않다**.
       */}
-      <p className="break-keep rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-        {DOMESTIC_ORDER_APPROVAL_BLOCKS_COMPLETION_NOTICE}
-      </p>
-
+      {showHeading && (
+        <h3 className="break-keep text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+          {unit.label}
+        </h3>
+      )}
       <DatabaseApprovalCard
         title={DOMESTIC_ORDER_APPROVAL_LABEL}
         record={latest}
@@ -361,30 +510,8 @@ export default function DomesticOrderApprovalPanel({
         blockedNotice={blockedNotice}
         actions={actions}
         disabledReason={disabledReason}
-        // 확인 창이 떠 있는 동안에는 보이지 않는다 — 창 뒤에서 지난 결과가 새 결과처럼
-        // 읽히지 않게 하려는 것이다(수리 건 카드와 같은 처리).
-        statusMessage={dialogState ? null : statusMessage}
+        statusMessage={statusMessage}
       />
-
-      {/*
-        읽어 주기 통로. 값이 없을 때도 빈 문자열로 **항상 DOM 에 남아 있어야** 내용이
-        바뀔 때 읽힌다. 절대배치(sr-only)라 자리를 먹지 않는다.
-      */}
-      <p role="status" aria-live="polite" className="sr-only">
-        {statusMessage ?? ""}
-      </p>
-
-      <DomesticOrderApprovalHistory records={history} routeSteps={routeSteps} />
-
-      <DomesticOrderApprovalDialog
-        isOpen={dialogState !== null}
-        title={dialogState ? DIALOG_TITLES[dialogState] : ""}
-        // 🔴 반려에만 사유가 필수다 — 서버도 같은 자리에서 거절한다.
-        requireReason={dialogState === "REJECTED"}
-        isSubmitting={isSubmitting}
-        onConfirm={(reason) => void handleConfirm(reason)}
-        onCancel={() => setDialogState(null)}
-      />
-    </div>
+    </section>
   );
 }

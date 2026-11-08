@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { db } from "../client";
 import {
   customers,
@@ -11,10 +11,18 @@ import {
 } from "../schema";
 import {
   DOMESTIC_ORDER_APPROVAL_ROUTE_SCOPE,
+  foldDomesticOrderApprovalStates,
   isDomesticOrderApprovalRouteInForce,
   resolveMiscCaseCompletionGate,
 } from "@/lib/domain/domestic-order-approval-rules";
-import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
+import {
+  domesticOrderDueDateUnits,
+  type DomesticOrderDueDateUnit,
+} from "@/lib/domain/domestic-order-due-date-label";
+import {
+  resolveApprovalState,
+  type ShipmentApprovalState,
+} from "@/lib/domain/local/workflow/shipment-approval-checklist";
 import {
   resolveRepairCaseDueDateWriteThrough,
   type RequestedDueDateLinkOutcome,
@@ -307,7 +315,16 @@ async function checkReferences(
  * (validation 의 DomesticOrderDueDateInput 주석), 조회가 그 차례로 다시 읽으면
  * 사람이 보던 순서가 그대로 돌아온다.
  */
-async function replaceDueDates(tx: Tx, domesticOrderId: string, fields: DomesticOrderFields) {
+async function replaceDueDates(
+  tx: Tx,
+  domesticOrderId: string,
+  fields: DomesticOrderFields,
+  /**
+   * 🔴 **지우기 전에 읽어 둔 행들** — 차례대로다(readDueDateRows). 회차별 완료 표시를
+   * 되얹는 재료다(아래 '완료 표시를 되얹는다'). 새로 만드는 줄이면 빈 목록이다.
+   */
+  storedRows: readonly StoredDueDateRow[]
+) {
   await tx
     .delete(domesticOrderDueDates)
     .where(eq(domesticOrderDueDates.domesticOrderId, domesticOrderId));
@@ -325,6 +342,20 @@ async function replaceDueDates(tx: Tx, domesticOrderId: string, fields: Domestic
       // 모양을 정하는 자리는 domain/domestic-order-cell-edit.ts 하나다.
       deliveredDate: dueDate.deliveredDate,
       deliveredBy: dueDate.deliveredBy,
+      // ── 🔴 **완료 표시를 되얹는다** (2026-11-08) ─────────────────────────
+      // 회차별 완료(사용자 결정 7)는 **보내온 목록에 없는 값**이다. 넣게 두면 줄
+      // 수정 payload 하나로 승인 없이 완료를 찍을 수 있어서, 폼이 보내는 네 칸에
+      // 일부러 넣지 않았다(validation 의 DomesticOrderDueDateInput).
+      //
+      // 그래서 서버가 제 손으로 다시 적는다 — **같은 차례의 옛 행**에서 가져온다.
+      // 🔴 자리로 가져오는 것이 엉뚱한 회차로 밀릴 자리는 울타리가 막는다: 완료된
+      // 회차가 있으면 줄 수를 줄이는 저장이 통째로 거절된다
+      // (domain/domestic-order-due-date-rows.ts 의 셋째 울타리). 그래서 여기 오는
+      // 목록은 **옛 목록보다 짧지 않고**, index 가 그대로 회차 번호를 가리킨다.
+      // 🔵 뒤에 새로 더한 회차는 옛 행이 없으므로 `?? null` 로 비워진다 — 새 회차가
+      //    완료로 태어나는 길은 없다.
+      completedAt: storedRows[index]?.completedAt ?? null,
+      completedBy: storedRows[index]?.completedBy ?? null,
       displayOrder: index + 1,
     }))
   );
@@ -342,19 +373,36 @@ async function replaceDueDates(tx: Tx, domesticOrderId: string, fields: Domestic
  */
 type StoredDueDateRow = {
   dueDate: string;
+  note: string | null;
   deliveredDate: string | null;
   deliveredBy: string | null;
+  /**
+   * 🔴 그 회차의 완료 시각(2026-11-08). 셋을 함께 읽는 까닭이 셋이다 — 울타리가
+   * 「완료된 회차가 있는가」를 보고, replaceDueDates 가 그 값을 되얹고, 완료 관문이
+   * 「어느 회차가 아직인가」를 센다.
+   */
+  completedAt: Date | null;
+  completedBy: string | null;
 };
 
+/**
+ * 🔴 **차례대로 읽는다**(display_order → due_date). 조회가 화면에 내려보내는 차례와
+ * **같아야 한다**(queries/domestic-orders.ts 의 loadDueDates) — 갈리면 사람이 「2차」로
+ * 본 회차와 서버가 2번으로 센 회차가 달라진다. 그 번호가 곧 승인이 가리키는 값이다.
+ */
 async function readDueDateRows(tx: Tx, domesticOrderId: string): Promise<StoredDueDateRow[]> {
   return tx
     .select({
       dueDate: domesticOrderDueDates.dueDate,
+      note: domesticOrderDueDates.note,
       deliveredDate: domesticOrderDueDates.deliveredDate,
       deliveredBy: domesticOrderDueDates.deliveredBy,
+      completedAt: domesticOrderDueDates.completedAt,
+      completedBy: domesticOrderDueDates.completedBy,
     })
     .from(domesticOrderDueDates)
-    .where(eq(domesticOrderDueDates.domesticOrderId, domesticOrderId));
+    .where(eq(domesticOrderDueDates.domesticOrderId, domesticOrderId))
+    .orderBy(asc(domesticOrderDueDates.displayOrder), asc(domesticOrderDueDates.dueDate));
 }
 
 /** 그 행에 **납품 기록이 있는가** — 날짜든 사람이든 하나라도 적혀 있으면 참이다. */
@@ -390,8 +438,18 @@ function checkDueDateRowGuard(params: {
   fields: DomesticOrderFields;
 }): DomesticOrderMutationResult | null {
   const guard = checkDomesticOrderDueDateRows({
-    storedRows: params.storedRows.map((row) => ({ hasDelivery: hasDeliveryRecord(row) })),
-    nextRows: params.fields.dueDates.map((row) => ({ hasDelivery: hasDeliveryRecord(row) })),
+    storedRows: params.storedRows.map((row) => ({
+      hasDelivery: hasDeliveryRecord(row),
+      // 🔴 판정은 completed_at 하나로만 한다(그 표의 칸 주석과 같은 규칙).
+      isCompleted: row.completedAt !== null,
+    })),
+    // 🔴 **보내온 목록에는 완료 표시가 없다** — 그래서 전부 거짓으로 넘긴다. 셋째
+    //    울타리가 「보내온 쪽」이 아니라 **「저장돼 있던 쪽에 완료가 있는가」**만 보는
+    //    것이 그 까닭이다(그 파일의 '완료 표시는 자리로 따라간다').
+    nextRows: params.fields.dueDates.map((row) => ({
+      hasDelivery: hasDeliveryRecord(row),
+      isCompleted: false,
+    })),
     storedRepairCaseId: params.storedRepairCaseId,
     nextRepairCaseId: params.fields.repairCaseId,
   });
@@ -633,7 +691,9 @@ export async function createDomesticOrder(params: {
     // 같은 트랜잭션 안이다 — 날짜를 넣다 실패하면 방금 만든 줄도 함께 없던
     // 일이 된다. 날짜만 빠진 줄이 남는 편이 더 나쁘다: 화면에는 정상으로
     // 보이는데 사람이 적은 납기일만 사라진 상태다.
-    await replaceDueDates(tx, inserted.id, params.fields);
+    // 🔴 방금 만든 줄이라 **되얹을 옛 행이 없다**(빈 목록). 새 회차가 완료로 태어나는
+    //    길은 그래서 아예 없다.
+    await replaceDueDates(tx, inserted.id, params.fields, []);
 
     // 🔴 새 줄에 적은 납기요청일도 수리 건과 묶는다(2026-10-30). 앞 값은 빈 목록이다
     // — 방금 생긴 줄이라 「고치기 전」이 없다. 수리 건 쪽이 비어 있으면 아무 일도
@@ -736,7 +796,9 @@ export async function updateDomesticOrder(params: {
     // VALIDATION_ERROR 는 전부 이 줄 앞에서 돌아가므로, 그 길로 끝난 저장은
     // 날짜를 한 건도 바꾸지 않는다. 순서가 곧 그 보장이다 — 먼저 지워 놓고
     // version 을 보면, 충돌한 저장이 남의 날짜를 지운 채로 실패한다.
-    await replaceDueDates(tx, params.id, params.fields);
+    // 🔴 **아까 읽어 둔 옛 행들을 그대로 넘긴다** — 회차별 완료 표시는 그 안에만
+    //    있고, 지운 뒤에는 무엇이 있었는지 알 길이 없다.
+    await replaceDueDates(tx, params.id, params.fields, previousRows);
 
     // 🔴 수리 건의 고객 요청 납기일도 같은 날짜로 맞춘다(2026-10-30). 같은 트랜잭션
     // 안이라 **한쪽만 써지는 일이 없다** — 수리 건 쪽이 실패하면 이 줄의 날짜도 함께
@@ -798,6 +860,18 @@ export async function updateDomesticOrder(params: {
  * [완료]처리를 할 수 있도록」. 규칙 자체는 여기 적지 않는다 —
  * domain/domestic-order-approval-rules.ts 의 resolveMiscCaseCompletionGate 하나다.
  *
+ * ── 🔴 **그 관문이 회차마다 선다** (2026-11-08, 사용자 결정 13) ──────────
+ * 「납기 요청일에 대한 최종출하승인이 완료되지 않으면 납기 요청일에 대한 [완료 처리]가
+ * 안 되도록」. 이 함수는 **줄 전체를 끝내는 길**이라, 회차 **전부**의 승인을 본다 —
+ * 하나라도 아직이면 거절하고 **어느 회차가 막혔는지** 이름을 말한다.
+ * 🔵 회차가 0개·1개인 기타건에서는 단위가 하나뿐이라 2026-11-07 과 글자 그대로 같다.
+ *
+ * 🔴 **통과하면 회차 행에도 완료를 찍는다**(해제면 함께 지운다). 안 찍으면 「줄은
+ * 완료인데 회차는 미완료」인 상태가 남아, 회차별 단추가 완료된 줄에서 「아직」이라고
+ * 말한다. 🔴 **수리 건이 붙은 줄은 건드리지 않는다** — 그쪽에는 회차 개념이 없고,
+ * 찍어 두면 셋째 울타리(완료된 회차가 있으면 줄을 못 지운다)가 수리 건 줄까지
+ * 조용히 묶는다. 「수리 건 붙은 줄은 지금과 똑같다」가 이 조각의 완료 기준이다.
+ *
  * 🔴 **왜 서버의 울타리가 여기인가.** 완료를 누르는 자리는 화면 둘(표·카드) ·
  * 서버 액션 하나 · PO 가 부르는 통로 하나인데, 그 넷이 전부 이 함수 한 곳으로
  * 모인다(서비스 둘을 거쳐서 온다). 화면이나 서비스에서 막으면 그 층을 거치지 않는
@@ -847,11 +921,25 @@ export async function setDomesticOrderCompletion(params: {
       return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
     }
 
+    // 🔴 기타건인가. 이 한 값이 아래 셋을 함께 가른다 — 승인 관문을 세울지, 회차
+    //    행에 완료를 찍을지, 회차별 완료를 아예 쓰는 줄인지.
+    const isMiscCase = current.repairCaseId === null;
+
     // 🔴 **version 대조 뒤**다. 앞에 두면 낡은 화면에서 누른 완료가 CONFLICT 대신
     //    「승인이 없다」로 답한다 — 사람은 승인을 받으러 가지만 진짜 문제는 그 사이
     //    남이 줄을 고친 것이고, 승인을 받아 와도 같은 자리에서 또 막힌다.
-    if (params.completed && current.repairCaseId === null && current.completedAt === null) {
-      const blocked = await checkMiscCaseCompletionApproval(tx, current.id, current.version);
+    if (params.completed && isMiscCase && current.completedAt === null) {
+      // 🔴 **회차 전부**를 본다(2026-11-08, 사용자 결정 13). 이 길은 줄 전체를 끝내는
+      //    길이라, 하나라도 승인이 아직이면 거절이다.
+      const rows = await readDueDateRows(tx, current.id);
+      const blocked = await checkMiscCaseCompletionApproval(
+        tx,
+        current.id,
+        current.version,
+        domesticOrderDueDateUnits(rows),
+        // 🔴 그 줄에 회차가 여럿일 때만 이름을 댄다(그 함수의 nameTheRow 주석).
+        rows.length > 1
+      );
       if (blocked) return blocked;
     }
 
@@ -876,7 +964,193 @@ export async function setDomesticOrderCompletion(params: {
       return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
     }
 
+    // 🔴 회차 행도 줄과 **같은 방향으로** 움직인다(2026-11-08). 안 맞추면 「줄은
+    //    완료인데 회차는 아직」인 상태가 남고, 회차별 단추가 완료된 줄에서 「아직」을
+    //    말한다. 🔴 **수리 건이 붙은 줄은 건드리지 않는다** — 그쪽에 회차 개념이 없고,
+    //    찍어 두면 셋째 울타리가 수리 건 줄의 납기요청일 편집까지 조용히 묶는다.
+    if (isMiscCase) {
+      if (params.completed) {
+        // 이미 찍힌 회차는 **그 시각과 그 사람을 그대로 둔다** — 누가 언제 그 회차를
+        // 끝냈는지가 이 줄의 유일한 기록이고, 줄 전체를 끝내는 조작이 그것을 덮을
+        // 까닭이 없다.
+        await tx
+          .update(domesticOrderDueDates)
+          .set({ completedAt: now, completedBy: params.actorUserId, updatedAt: now })
+          .where(
+            and(
+              eq(domesticOrderDueDates.domesticOrderId, params.id),
+              isNull(domesticOrderDueDates.completedAt)
+            )
+          );
+      } else {
+        await tx
+          .update(domesticOrderDueDates)
+          .set({ completedAt: null, completedBy: null, updatedAt: now })
+          .where(eq(domesticOrderDueDates.domesticOrderId, params.id));
+      }
+    }
+
     return { ok: true, id: updated.id, version: updated.version };
+  });
+}
+
+/**
+ * ============================================================================
+ * 🔴 **회차 하나를 완료로 표시하거나 그 표시를 거둔다** (2026-11-08)
+ * ============================================================================
+ * 사용자 결정 7: 「납품일이 여러개라면 **각각에 [완료처리]버튼**을 만들어줘」.
+ * 결정 8: 「**마지막 분할분이 찍히면 자동으로**」 내자 줄이 완료된다.
+ * 결정 13: 「납기 요청일에 대한 최종출하승인이 완료되지 않으면 납기 요청일에 대한
+ * [완료 처리]가 안 되도록」.
+ *
+ * ── 🔴 **기타건 전용이다** ──────────────────────────────────────────────
+ * 수리 건이 붙은 줄은 납기요청일을 하나만 가질 수 있고(결정 9 울타리) 완료가 수리
+ * 건의 출하 완료까지 함께 움직이는 다른 흐름이다(services/complete-domestic-order.ts).
+ * 그 줄에 이 길을 열면 **수리 건을 건드리지 않고 내자 줄만 완료되는 뒷문**이 생긴다.
+ *
+ * ── 🔴 **`version` 을 올리지 않는다 — 이 함수에서 가장 중요한 한 줄** ────
+ * 올리면 이 기능이 **스스로를 먹는다.** 승인의 유효함은 「요청 때의 version == 지금
+ * version」이고(resolveApprovalState), 회차마다 승인이 따로 서 있다. 1차를 완료하며
+ * version 을 올리면 **그 순간 2차·3차의 승인이 전부 STALE** 이 되어, 사람은 1차를
+ * 끝낼 때마다 남은 회차의 승인을 다시 받아야 한다. 그 어긋남은 오류를 내지 않고
+ * 「승인했는데 왜 또 승인하라는가」로만 보인다.
+ *
+ * 🔵 **낙관적 잠금이 약해지지 않는다.** 들어온 `expectedVersion` 은 여전히 대조하고,
+ * 줄의 내용을 바꾸는 저장(updateDomesticOrder)은 그대로 version 을 올린다 — 그
+ * 사이에 누가 줄을 고쳤으면 여기서 CONFLICT 다. 올리지 않는 것은 **이 조작이 줄의
+ * 내용을 한 글자도 바꾸지 않기 때문**이고(회차 행의 완료 두 칸뿐이다), 그래서
+ * 「요청 뒤에 내용이 바뀌었는가」라는 물음의 답을 바꿀 이유가 없다.
+ * 🔴 줄 전체를 끝내는 setDomesticOrderCompletion 은 **그대로 올린다** — 그쪽은 줄의
+ * 칸(completed_at)을 바꾸는 조작이고, 끝난 뒤에 더 받을 승인도 없다.
+ *
+ * ── 🔴 **마지막 회차가 찍히면 줄이 자동으로 완료된다** (결정 8) ──────────
+ * 「마지막」의 뜻을 **「모든 회차가 완료된 순간」**으로 읽었다. 「모든 회차에 납품일이
+ * 찍힌 순간」이 아니다 — 그렇게 읽으면 승인을 받지 않은 회차까지 끌고 줄이 완료되어
+ * 결정 13 과 정면으로 부딪힌다. 이 읽기에서는 **모든 회차 완료 = 모든 회차 승인됨**
+ * 이므로(각 회차가 이 함수를 통과해야 완료된다) 자동 완료가 관문에 막힐 일이 없고,
+ * 그래서 여기서 줄 단위 관문을 **다시 세우지 않는다.**
+ *
+ * ── 🔵 해제는 위로도 번진다 ─────────────────────────────────────────────
+ * 회차 하나를 풀면 「모든 회차 완료」가 깨지므로 줄의 완료도 함께 거둔다. 안 그러면
+ * 줄은 완료인데 회차는 아닌 상태가 남고, 그 줄은 **다시 완료할 길이 없다**(이미
+ * 완료라 줄 단추가 [완료 해제]로 바뀐다).
+ * ============================================================================
+ */
+export async function setDomesticOrderDueDateRowCompletion(params: {
+  id: string;
+  expectedVersion: number;
+  /** 몇 번째 회차인가(1부터). `display_order` 와 같은 번호다. */
+  dueDateRowOrder: number;
+  /** true 면 그 회차를 완료 처리, false 면 완료 해제. */
+  completed: boolean;
+  actorUserId: string;
+}): Promise<DomesticOrderCompletionMutationResult> {
+  return db.transaction(async (tx): Promise<DomesticOrderCompletionMutationResult> => {
+    const [current] = await tx
+      .select({
+        id: domesticOrders.id,
+        version: domesticOrders.version,
+        repairCaseId: domesticOrders.repairCaseId,
+        completedAt: domesticOrders.completedAt,
+      })
+      .from(domesticOrders)
+      .where(and(eq(domesticOrders.id, params.id), eq(domesticOrders.isDeleted, false)))
+      .for("update");
+
+    if (!current) {
+      return { ok: false, code: "NOT_FOUND", message: NOT_FOUND_MESSAGE };
+    }
+    if (current.version !== params.expectedVersion) {
+      return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
+    }
+    if (current.repairCaseId !== null) {
+      // 🔴 기타건 전용이다(머리말). 화면은 이 단추를 그리지도 않지만, 막는 자리는
+      //    화면이 아니라 여기다.
+      return {
+        ok: false,
+        code: "VALIDATION_ERROR",
+        message: "수리 건이 연결된 줄은 회차별 완료 처리를 쓰지 않습니다. 줄의 [완료 처리]를 눌러 주세요.",
+      };
+    }
+
+    // 🔴 **잠근 줄에서 다시 읽는다.** 화면이 보낸 회차 번호가 지금도 있는 번호인지는
+    //    여기서만 알 수 있다 — 그 사이 남이 납기요청일을 줄였을 수 있고, 그랬다면
+    //    위 version 대조에서 이미 걸린다(줄을 고치는 저장은 version 을 올린다).
+    const rows = await readDueDateRows(tx, current.id);
+    if (rows.length === 0) {
+      return {
+        ok: false,
+        code: "VALIDATION_ERROR",
+        message: "납기요청일 줄이 없어 회차별 완료 처리를 할 수 없습니다. 먼저 납기요청일을 적어 주세요.",
+      };
+    }
+    const index = params.dueDateRowOrder - 1;
+    if (!Number.isInteger(params.dueDateRowOrder) || index < 0 || index >= rows.length) {
+      return {
+        ok: false,
+        code: "VALIDATION_ERROR",
+        message: "그 회차를 찾을 수 없습니다. 최신 정보를 다시 불러와 주세요.",
+      };
+    }
+
+    const units = domesticOrderDueDateUnits(rows);
+    const now = new Date();
+
+    if (params.completed) {
+      // 🔴 **그 회차의 승인 하나만** 본다(결정 13). 다른 회차가 아직이어도 이 회차는
+      //    끝낼 수 있다 — 그것이 회차별 완료의 뜻이다.
+      const blocked = await checkMiscCaseCompletionApproval(
+        tx,
+        current.id,
+        current.version,
+        [units[index]],
+        // 🔴 **단위 하나만 넘기므로 길이로는 가릴 수 없다**(그 함수의 nameTheRow 주석).
+        //    묻는 것은 「그 줄에 회차가 여럿인가」다 — 여럿이면 어느 회차가 막혔는지
+        //    말해야 단추 셋이 전부 같은 말을 하는 일이 없다.
+        rows.length > 1
+      );
+      if (blocked) return blocked;
+    }
+
+    // 🔴 차례(display_order)로 집는다 — 승인이 회차를 가리키는 값과 **같은 번호**다
+    //    (schema/repair-case-approvals.ts 의 due_date_row_order 주석).
+    await tx
+      .update(domesticOrderDueDates)
+      .set({
+        completedAt: params.completed ? now : null,
+        completedBy: params.completed ? params.actorUserId : null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(domesticOrderDueDates.domesticOrderId, current.id),
+          eq(domesticOrderDueDates.displayOrder, params.dueDateRowOrder)
+        )
+      );
+
+    // ── 🔴 줄의 완료를 **회차들의 결과에 맞춘다** (결정 8) ──────────────
+    // 방금 쓴 값을 포함해 다시 센다 — 손으로 셈을 맞추면 「막 지운 회차」 같은 자리에서
+    // 어긋난다.
+    const allCompleted = rows.every(
+      (row, rowIndex) => (rowIndex === index ? params.completed : row.completedAt !== null)
+    );
+    const nextLineCompleted = allCompleted;
+    const lineIsCompleted = current.completedAt !== null;
+    if (nextLineCompleted !== lineIsCompleted) {
+      await tx
+        .update(domesticOrders)
+        .set({
+          completedAt: nextLineCompleted ? now : null,
+          completedBy: nextLineCompleted ? params.actorUserId : null,
+          // 🔴 **version 을 올리지 않는다**(머리말의 그 한 줄). 올리면 남은 회차의
+          //    승인이 전부 STALE 이 된다.
+          updatedAt: now,
+          updatedBy: params.actorUserId,
+        })
+        .where(eq(domesticOrders.id, current.id));
+    }
+
+    return { ok: true, id: current.id, version: current.version };
   });
 }
 
@@ -888,36 +1162,79 @@ export async function setDomesticOrderCompletion(params: {
  * 카드·결재 대기 조회가 쓰는 그 함수 하나다(resolveApprovalState). 여기서 하는 일은
  * **그 둘이 볼 자료를 트랜잭션 안에서 읽어다 주는 것**뿐이다.
  *
- * 🔴 **가장 최근 결재 행 하나만 본다** — 다단계 결재선은 단계마다 행을 하나씩 잇는
- * 구조라 사슬의 지금 상태는 언제나 마지막 행이 말한다. 「가장 최근」의 정의
- * (`requested_at` 내림차순)는 상세 [승인] 탭이 쓰는 조회와 **같아야 한다**
- * (queries/domestic-order-approvals.ts) — 갈리면 화면은 「승인 완료」라는데 저장은
- * 거절하는 상태가 된다.
+ * 🔴 **회차마다 가장 최근 결재 행 하나씩**(2026-11-08). 다단계 결재선은 단계마다 행을
+ * 하나씩 잇는 구조라 **그 회차**의 지금 상태는 언제나 그 회차의 마지막 행이 말한다.
+ * 「가장 최근」의 정의(`requested_at` 내림차순)는 상세 [승인] 탭이 쓰는 조회와 **같아야
+ * 한다**(queries/domestic-order-approvals.ts) — 갈리면 화면은 「승인 완료」라는데 저장은
+ * 거절하는 상태가 된다. 🔴 **회차를 가르는 칸도 같아야 한다**(`due_date_row_order`).
+ *
+ * 🔴 **보는 회차는 부르는 쪽이 정한다**(`units`). 줄 전체를 끝내는 길은 전부를 넘기고,
+ * 회차 하나를 끝내는 길은 그 하나만 넘긴다 — 여기서 「무엇을 봐야 하는가」까지 정하면
+ * 두 길이 같은 함수를 부르면서 서로 다른 뜻을 갖게 된다.
+ * 🔴 **먼저 막히는 회차를 말한다** — 차례대로 보고 처음 걸린 것에서 멈춘다. 전부
+ * 모아서 말하면 문장이 길어지고, 사람이 해야 할 다음 행동은 어차피 하나씩이다.
+ *
+ * 🔴 **「회차 이름을 말할까」도 부르는 쪽이 정한다**(`nameTheRow`). 넘긴 `units` 의
+ * 길이로 가리면 **회차 하나를 끝내는 길에서 영영 이름이 안 나온다** — 그 길은 언제나
+ * 단위 하나만 넘기기 때문이다. 묻는 것은 「몇 개를 보고 있나」가 아니라 **「그 줄에
+ * 회차가 여럿인가」**이고, 그 답은 줄을 읽은 부르는 쪽만 안다.
  *
  * 🔵 결재선 판은 **막힌 뒤에만** 읽는다. 통과하는 줄에서는 질의가 한 벌 덜 돈다.
  */
 async function checkMiscCaseCompletionApproval(
   tx: Tx,
   domesticOrderId: string,
-  currentVersion: number
+  currentVersion: number,
+  units: readonly DomesticOrderDueDateUnit[],
+  /**
+   * 🔴 막힌 회차의 **이름을 문장에 넣을까.** 그 줄에 회차가 여럿일 때만 참이다 —
+   * 하나뿐이면 붙일 말이 없고, 붙이면 2026-11-07 부터 쓰던 문장이 까닭 없이 길어진다
+   * (그 문장을 글자로 재는 시험도 그대로 남는다).
+   */
+  nameTheRow: boolean
 ): Promise<{ ok: false; code: "APPROVAL_REQUIRED"; message: string } | null> {
-  const [latest] = await tx
+  // 🔴 질의 하나로 그 줄의 결재 행을 통째로 걷어 온다 — 회차마다 질의를 던지면 회차가
+  //    늘어날수록 질의가 늘고(N+1), 그 사이 트랜잭션이 잡는 시간도 함께 는다.
+  const rows = await tx
     .select({
+      dueDateRowOrder: repairCaseApprovals.dueDateRowOrder,
       status: repairCaseApprovals.status,
       versionAtRequest: repairCaseApprovals.repairCaseVersionAtRequest,
     })
     .from(repairCaseApprovals)
     .where(eq(repairCaseApprovals.domesticOrderId, domesticOrderId))
-    .orderBy(desc(repairCaseApprovals.requestedAt))
-    .limit(1);
+    .orderBy(desc(repairCaseApprovals.requestedAt));
 
-  const approvalState = resolveApprovalState(
-    // 칸 이름이 `repairCase…` 인 까닭은 표의 그 칸 주석에 있다 — 기타건 행에는 내자
-    // 줄의 판 번호가 들어 있다.
-    latest ? { status: latest.status, repairCaseVersionAtRequest: latest.versionAtRequest } : null,
-    currentVersion
-  );
-  if (approvalState === "APPROVED") return null;
+  // 🔴 **먼저 온 것이 이긴다** — 위 정렬이 최신을 맨 앞에 둔다(조회 쪽
+  //    loadDomesticOrderApprovalStates 와 같은 담기 방식이다).
+  const latestByRow = new Map<number, { status: "REQUESTED" | "APPROVED" | "REJECTED"; versionAtRequest: number }>();
+  for (const row of rows) {
+    // 기타건 행에는 언제나 값이 있다(표의 CHECK). 타입이 그것을 모를 뿐이다.
+    if (row.dueDateRowOrder === null) continue;
+    if (latestByRow.has(row.dueDateRowOrder)) continue;
+    latestByRow.set(row.dueDateRowOrder, {
+      status: row.status,
+      versionAtRequest: row.versionAtRequest,
+    });
+  }
+
+  const states: ShipmentApprovalState[] = units.map((unit) => {
+    const latest = latestByRow.get(unit.rowOrder) ?? null;
+    return resolveApprovalState(
+      // 칸 이름이 `repairCase…` 인 까닭은 표의 그 칸 주석에 있다 — 기타건 행에는 내자
+      // 줄의 판 번호가 들어 있다.
+      latest ? { status: latest.status, repairCaseVersionAtRequest: latest.versionAtRequest } : null,
+      currentVersion
+    );
+  });
+
+  // 🔴 **접는 규칙을 여기 적지 않는다** — 목록 배지·머리 카드 배지가 쓰는 그 함수
+  //    하나다(foldDomesticOrderApprovalStates). 두 곳에 적으면 같은 줄이 목록에서는
+  //    「출하 대기」인데 눌러 보면 거절되는 상태가 된다.
+  if (foldDomesticOrderApprovalStates(states) === "APPROVED") return null;
+  const blockedIndex = states.findIndex((state) => state !== "APPROVED");
+  const approvalState = states[blockedIndex];
+  const blockedLabel = nameTheRow ? units[blockedIndex].label : null;
 
   // 🔴 **공유 잠금을 잡지 않는다.** 결재 요청 경로는 「판 잠금 → 줄 잠금」 차례로
   //    잡는데(mutations/domestic-order-approvals.ts), 여기는 줄을 이미 잡고 있다 —
@@ -927,6 +1244,9 @@ async function checkMiscCaseCompletionApproval(
   const gate = resolveMiscCaseCompletionGate({
     approvalState,
     routeInForce: isDomesticOrderApprovalRouteInForce(route),
+    // 🔴 회차가 하나뿐이면 `null` 이고, 그때 문장은 2026-11-07 의 것과 한 글자도
+    //    다르지 않다(위 nameTheRow).
+    dueDateRowLabel: blockedLabel,
   });
   // 🔵 APPROVED 는 위에서 이미 돌아갔으므로 여기서 통과가 나오는 길은 없다. 그래도
   //    `allowed` 를 보고 가른다 — 통과 조건이 도메인 한 곳에만 적혀 있어야 한다.

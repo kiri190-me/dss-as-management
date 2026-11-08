@@ -121,6 +121,18 @@ export default function DomesticOrderApprovalHistory({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-medium text-zinc-900 dark:text-zinc-50">
                       {STATUS_EVENT_LABELS[record.status]}
+                      {/*
+                        🔴 **어느 회차의 결재인가**(2026-11-08). 이력은 회차를 가리지
+                        않고 한 벌로 쌓이므로(패널 머리말), 이 표시가 없으면 1차와 2차의
+                        요청·승인이 뒤섞여 **차례를 읽을 수 없다**.
+                        🔴 값이 있을 때만 적는다 — 2026-11-08 이전에 쌓인 줄과, 마이그레이션
+                        0126 이 메운 줄은 전부 1차지만, 타입이 `null` 을 허용한다.
+                      */}
+                      {record.dueDateRowOrder !== null && (
+                        <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">
+                          {record.dueDateRowOrder}차
+                        </span>
+                      )}
                       {stepLabel && (
                         <span className="ml-2 text-xs font-normal text-zinc-500 dark:text-zinc-400">
                           {stepLabel}

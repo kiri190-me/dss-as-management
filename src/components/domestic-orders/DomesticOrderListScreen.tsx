@@ -77,8 +77,10 @@ import {
   restoreDomesticOrdersAction,
   saveDomesticOrderSheetHeadingAction,
   setDomesticOrderCompletionAction,
+  setDomesticOrderDueDateRowCompletionAction,
   type DomesticOrderTrashItem,
 } from "@/lib/server/actions/domestic-orders";
+import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-date-label";
 import type { DomesticOrderSheetHeadingView } from "@/lib/db/queries/domestic-order-sheet-settings";
 import {
   countSheetHeadingChars,
@@ -1499,6 +1501,21 @@ function CompletionToggle({
   const [isPending, setIsPending] = useState(false);
   const completed = isDomesticOrderCompleted(row);
 
+  // 🔴 **회차가 둘 이상인 기타건은 단추가 회차마다 하나씩**이다(2026-11-08, 사용자
+  //    결정 7 — 「납품일이 여러개라면 각각에 [완료처리]버튼을 만들어줘」). 줄 하나짜리
+  //    단추를 함께 두지 않는 까닭도 그 결정이다: 「[완료 처리]가 자동으로 안 찍고」.
+  // 🔵 수리 건이 붙은 줄은 납기요청일이 하나로 제한되어 있어(결정 9 울타리) 언제나
+  //    아래 길이다 — 그래서 이 조각은 **수리 건 줄을 한 글자도 바꾸지 않는다.**
+  if (row.repairCaseId === null && row.dueDates.length >= 2) {
+    return (
+      <DueDateRowCompletionToggles
+        row={row}
+        onError={onError}
+        onApprovalBlocked={onApprovalBlocked}
+      />
+    );
+  }
+
   async function toggle(event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
     if (isPending) return;
@@ -1551,6 +1568,107 @@ function CompletionToggle({
     >
       {completed ? "완료 해제" : "완료 처리"}
     </button>
+  );
+}
+
+/**
+ * ============================================================================
+ * 🔴 **회차별 [완료 처리] · [완료 해제]** (2026-11-08)
+ * ============================================================================
+ * 사용자 결정 7: 「납품일이 여러개라면 **각각에 [완료처리]버튼**을 만들어줘」.
+ * 사용자 결정 13: 「납기 요청일에 대한 최종출하승인이 완료되지 않으면 납기 요청일에
+ * 대한 [완료 처리]가 안 되도록」.
+ *
+ * ── 🔴 왜 **이 자리**인가 (납품 편집칸이 아니라) ────────────────────────
+ * [완료 처리]가 살던 자리 그대로다 — 순번 칸의 단추 줄. 사람이 완료를 누르러 오는
+ * 자리를 회차가 생겼다고 옮기면, 회차 하나짜리 줄과 여럿인 줄의 단추가 **다른 곳에**
+ * 서게 된다. 🔴 회차별 납품 편집칸(DomesticOrderDeliveriesCell) 안에 넣지 않은 까닭은
+ * 더 분명하다: 그것은 **저장을 기다리는 폼**이고, 그 안에 상태를 바꾸는 단추를 두면
+ * 「아직 저장 안 한 납품일」과 「방금 찍은 완료」가 한 상자에서 다툰다.
+ *
+ * ── 🔴 **해제에는 확인 창이 없다** ──────────────────────────────────────
+ * 줄 단위 [완료 해제]는 확인 창을 연다 — 붙어 있는 **수리 건의 출하 완료까지 되돌리는**
+ * 조작이기 때문이다(CompletionToggle 머리말). 회차별 완료는 **기타건 전용**이라
+ * (저장 경로가 그것을 강제한다) 되돌릴 수리 건이 애초에 없고, 그 창의 문장도 수리 건
+ * 이야기다. 창을 그대로 띄우면 **일어나지 않을 일을 경고**하게 된다.
+ * 🔵 마지막 회차를 풀면 줄의 완료도 함께 풀린다(저장 경로가 한다 — 결정 8 의 거울).
+ *
+ * ── 🔴 막히는 까닭은 **눌러야 안다** ────────────────────────────────────
+ * 단추를 미리 잠그지 않는다 — 그러려면 목록이 줄마다, 회차마다 승인 상태를 싣고 와야
+ * 한다(CompletionToggle 머리말의 같은 판단). 막히면 서버가 **어느 회차가 왜 막혔는지**
+ * 글로 돌려주고(APPROVAL_REQUIRED), 화면 위쪽이 읽고 닫는 알림으로 띄운다.
+ * ============================================================================
+ */
+function DueDateRowCompletionToggles({
+  row,
+  onError,
+  onApprovalBlocked,
+}: {
+  row: DomesticOrderListItem;
+  onError: (message: string | null) => void;
+  onApprovalBlocked: (reason: string) => void;
+}) {
+  const router = useRouter();
+  /** 🔴 **어느 회차를 보내는 중인가** — 하나로 두면 단추 셋이 함께 흐려진다. */
+  const [pendingRowOrder, setPendingRowOrder] = useState<number | null>(null);
+
+  async function toggle(event: MouseEvent<HTMLButtonElement>, rowOrder: number, completed: boolean) {
+    event.stopPropagation();
+    if (pendingRowOrder !== null) return;
+    setPendingRowOrder(rowOrder);
+    onError(null);
+    try {
+      const result = await setDomesticOrderDueDateRowCompletionAction({
+        id: row.id,
+        // 🔴 줄 전체를 덮어쓰는 저장이 아니지만 version 은 그대로 싣는다 — 그 사이
+        //    남이 납기요청일을 고쳤으면 **회차 번호가 다른 것을 가리킨다.**
+        expectedVersion: row.version,
+        dueDateRowOrder: rowOrder,
+        completed,
+      });
+      if (!result.ok) {
+        // 🔴 그 회차의 승인이 유효하지 않다 — 이때도 한 글자도 안 바뀌었다.
+        if (result.code === "APPROVAL_REQUIRED") {
+          onApprovalBlocked(result.message);
+          return;
+        }
+        onError(result.message);
+        return;
+      }
+      router.refresh();
+      showSavePopup({
+        message: completed ? "이 회차를 완료로 표시했습니다." : "이 회차의 완료를 해제했습니다.",
+        redirectTo: null,
+      });
+    } finally {
+      setPendingRowOrder(null);
+    }
+  }
+
+  return (
+    // 🔴 칸이 좁으므로 접히게 둔다 — `nowrap` 이면 회차 셋이 표를 가로로 밀어낸다.
+    <span className="flex flex-wrap items-center gap-1">
+      {row.dueDates.map((dueDate, index) => {
+        const rowOrder = index + 1;
+        const completed = dueDate.completedAt !== null;
+        // 🔴 글자를 지어내지 않는다 — [승인] 탭의 회차 머리·드롭다운과 **같은 한 줄**
+        //    이다(domain/domestic-order-due-date-label.ts). 단추에는 짧은 「N차」만
+        //    적고, 긴 이름은 title 로 둔다(표 칸이 좁다).
+        const label = domesticOrderDueDateRowLabel(rowOrder, dueDate);
+        return (
+          <button
+            key={dueDate.id}
+            type="button"
+            onClick={(event) => void toggle(event, rowOrder, !completed)}
+            disabled={pendingRowOrder !== null}
+            title={`${label} — ${completed ? "완료 해제" : "완료 처리"}`}
+            className={rowActionButtonClass}
+          >
+            {rowOrder}차 {completed ? "해제" : "완료"}
+          </button>
+        );
+      })}
+    </span>
   );
 }
 

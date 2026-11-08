@@ -77,6 +77,13 @@ export type RequestDomesticOrderApprovalActionInput = {
   domesticOrderId: string;
   /** 올리며 적는 말. 없어도 된다. */
   reason?: string | null;
+  /**
+   * 🔴 **어느 납기요청일 회차에 대한 승인인가**(1부터, 2026-11-08 사용자 결정 12).
+   * 화면은 회차가 둘 이상일 때 드롭다운으로 고르게 하고, 하나뿐이면 묻지 않고 1을
+   * 보낸다. 🔴 **「그 줄에 있는 회차인가」는 여기서 보지 않는다** — 그것은 줄을 읽어야
+   * 아는 판단이라 mutation 의 몫이다(이 파일의 순서 규칙: 형식만 본다).
+   */
+  dueDateRowOrder: number;
 };
 
 export type DecideDomesticOrderApprovalActionInput = {
@@ -84,7 +91,24 @@ export type DecideDomesticOrderApprovalActionInput = {
   decision: ApprovalDecisionCode;
   /** 🔴 반려에는 필수다 — 그 판정은 mutation 이 한다(상태를 봐야 알 수 있다). */
   reason?: string | null;
+  /**
+   * 🔴 **어느 회차의 결재를 처리하는가**(1부터). 한 기타건에 열린 요청이 회차마다
+   * 하나씩 여럿일 수 있으므로, 이 값 없이는 저장 경로가 남의 회차를 집어 든다.
+   */
+  dueDateRowOrder: number;
 };
+
+/**
+ * 🔴 **회차 번호의 형식만** 본다 — 1 이상의 정수인가. 「그 줄에 그 회차가 있는가」는
+ * 줄을 읽어야 아는 판단이라 여기서 하지 않는다(mutation 이 잠근 줄에서 다시 센다).
+ *
+ * 그래도 여기서 한 겹 거르는 까닭: 소수·음수·`NaN` 이 그대로 내려가면 SQL 비교가
+ * 조용히 아무 행도 못 찾아 「관련 결재 요청을 찾을 수 없습니다」가 되고, 사람은 그
+ * 말에서 **자기가 보낸 값이 이상했다**는 사실을 읽어 낼 수 없다.
+ */
+function isValidDueDateRowOrder(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1;
+}
 
 const DATABASE_UNAVAILABLE_MESSAGE = "일시적으로 처리할 수 없습니다. 잠시 후 다시 시도해 주세요.";
 
@@ -179,6 +203,9 @@ export async function requestDomesticOrderApprovalAction(
   if (!reason.ok) {
     return { ok: false, code: "VALIDATION_ERROR", message: reason.error };
   }
+  if (!isValidDueDateRowOrder(input.dueDateRowOrder)) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "납기요청일 회차를 확인할 수 없습니다." };
+  }
 
   // 갱신은 try 밖에서 한다 — 여기서 나는 오류까지 DB 오류로 접어 넣으면 「저장은
   // 됐는데 화면만 안 바뀐 것」을 「저장 실패」라고 말하게 된다.
@@ -188,6 +215,7 @@ export async function requestDomesticOrderApprovalAction(
       domesticOrderId: input.domesticOrderId,
       actorUserId: actor.userId,
       requestReason: reason.reason,
+      dueDateRowOrder: input.dueDateRowOrder,
     });
   } catch (err) {
     // 값 자체는 로그에 담지 않는다 — 사유 글에 고객사 사정이 섞일 수 있다
@@ -224,6 +252,9 @@ export async function decideDomesticOrderApprovalAction(
   if (!reason.ok) {
     return { ok: false, code: "VALIDATION_ERROR", message: reason.error };
   }
+  if (!isValidDueDateRowOrder(input.dueDateRowOrder)) {
+    return { ok: false, code: "VALIDATION_ERROR", message: "납기요청일 회차를 확인할 수 없습니다." };
+  }
 
   let result: Awaited<ReturnType<typeof decideDomesticOrderApproval>>;
   try {
@@ -232,6 +263,7 @@ export async function decideDomesticOrderApprovalAction(
       decision: input.decision,
       actorUserId: actor.userId,
       decisionReason: reason.reason,
+      dueDateRowOrder: input.dueDateRowOrder,
     });
   } catch (err) {
     console.error("decideDomesticOrderApprovalAction: unexpected DB error", {

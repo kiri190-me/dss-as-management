@@ -136,6 +136,17 @@ export type DomesticOrderDueDate = {
   deliveredDate: string | null;
   /** 그 회차를 보낸 사람. 🔴 PII — 로그·오류 보고에 그대로 싣지 않는다. */
   deliveredBy: string | null;
+  /**
+   * 🔴 그 회차를 **[완료 처리]한 시각**(ISO 문자열). null 이면 아직 안 끝났다
+   * (2026-11-08, 사용자 결정 7).
+   *
+   * 🔴 **판정은 이 한 칸이 전부다** — 부모 줄의 `completedAt` 과 같은 규칙이다.
+   * 화면은 이 값을 **날짜로 그리지 않는다**(클라이언트에서 형식을 맞추면 서버가
+   * 그린 것과 달라져 hydration 이 어긋난다). 지금 쓰임은 「완료인가 아닌가」뿐이다.
+   */
+  completedAt: string | null;
+  /** 그 회차를 완료 처리한 사람의 id. 🔴 이름이 아니라 id 다 — 화면이 그리지 않는다. */
+  completedBy: string | null;
   /** 사람이 정한 차례. 아래 조회가 이 순서로 내려보낸다. */
   displayOrder: number | null;
 };
@@ -835,6 +846,11 @@ async function loadDueDatesByOrderId(
       // 그 줄의 납품 기록이 사라진다(domain/domestic-order-cell-edit.ts 헤더).
       deliveredDate: domesticOrderDueDates.deliveredDate,
       deliveredBy: domesticOrderDueDates.deliveredBy,
+      // 🔴 회차별 완료(2026-11-08). **되실어 보낼 값은 아니다** — 저장 통로가 제
+      // 손으로 다시 적는다(replaceDueDates). 여기서 읽는 까닭은 화면이 회차별
+      // [완료 처리] 단추를 그리고, [삭제] 단추를 미리 막아야 하기 때문이다.
+      completedAt: domesticOrderDueDates.completedAt,
+      completedBy: domesticOrderDueDates.completedBy,
       displayOrder: domesticOrderDueDates.displayOrder,
     })
     .from(domesticOrderDueDates)
@@ -849,6 +865,10 @@ async function loadDueDatesByOrderId(
       note: row.note,
       deliveredDate: row.deliveredDate,
       deliveredBy: row.deliveredBy,
+      // 🔴 서버 컴포넌트 경계를 넘어야 하므로 Date 를 그대로 보내지 않는다
+      //    (부모 줄의 completedAt 과 같은 처리).
+      completedAt: row.completedAt ? row.completedAt.toISOString() : null,
+      completedBy: row.completedBy,
       displayOrder: row.displayOrder,
     };
     if (bucket) bucket.push(item);

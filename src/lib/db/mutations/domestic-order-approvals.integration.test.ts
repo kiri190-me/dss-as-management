@@ -276,6 +276,7 @@ describe("결재선 판이 0개면 — 조용히 넘어가지 않는다", () => 
       domesticOrderId: order.id,
       actorUserId: requesterId,
       requestReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(requested.ok, false);
     if (requested.ok) return;
@@ -301,6 +302,7 @@ describe("결재선 판이 0개면 — 조용히 넘어가지 않는다", () => 
       domesticOrderId: order.id,
       actorUserId: requesterId,
       requestReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(requested.ok, false);
     if (requested.ok) return;
@@ -321,6 +323,7 @@ describe("요청 — 첫 단계 행 하나만 생기고 판 번호가 실린다"
       domesticOrderId: order.id,
       actorUserId: requesterId,
       requestReason: "출하 승인 부탁드립니다",
+      dueDateRowOrder: 1,
     });
     assert.equal(requested.ok, true, JSON.stringify(requested));
 
@@ -350,6 +353,7 @@ describe("요청 — 첫 단계 행 하나만 생기고 판 번호가 실린다"
       domesticOrderId: order.id,
       actorUserId: requesterId,
       requestReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(requested.ok, true);
     const decided = await decideDomesticOrderApproval({
@@ -357,6 +361,7 @@ describe("요청 — 첫 단계 행 하나만 생기고 판 번호가 실린다"
       decision: "APPROVED",
       actorUserId: stepAId,
       decisionReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(decided.ok, true, JSON.stringify(decided));
     assert.equal((await getDomesticOrderApprovalProgress(order.id))?.state, "APPROVED");
@@ -378,6 +383,7 @@ describe("요청 — 첫 단계 행 하나만 생기고 판 번호가 실린다"
           domesticOrderId: order.id,
           actorUserId: requesterId,
           requestReason: null,
+          dueDateRowOrder: 1,
         })
       ).ok,
       true
@@ -387,6 +393,7 @@ describe("요청 — 첫 단계 행 하나만 생기고 판 번호가 실린다"
       domesticOrderId: order.id,
       actorUserId: requesterId,
       requestReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(second.ok, false);
     if (second.ok) return;
@@ -409,6 +416,7 @@ describe("요청 — 첫 단계 행 하나만 생기고 판 번호가 실린다"
       domesticOrderId: order.id,
       actorUserId: requesterId,
       requestReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(requested.ok, false);
     if (requested.ok) return;
@@ -424,6 +432,7 @@ describe("사슬 — 단계를 순서대로 밟는다", () => {
       domesticOrderId: order.id,
       actorUserId: requesterId,
       requestReason: "첫 요청 사유",
+      dueDateRowOrder: 1,
     });
     assert.equal(requested.ok, true);
 
@@ -432,6 +441,7 @@ describe("사슬 — 단계를 순서대로 밟는다", () => {
       decision: "APPROVED",
       actorUserId: stepAId,
       decisionReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(first.ok, true, JSON.stringify(first));
     if (!first.ok) return;
@@ -458,6 +468,7 @@ describe("사슬 — 단계를 순서대로 밟는다", () => {
       decision: "APPROVED",
       actorUserId: stepBId,
       decisionReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(second.ok, true, JSON.stringify(second));
     if (!second.ok) return;
@@ -473,6 +484,7 @@ describe("사슬 — 단계를 순서대로 밟는다", () => {
       domesticOrderId: order.id,
       actorUserId: requesterId,
       requestReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(requested.ok, true, JSON.stringify(requested));
     const [row] = await approvalRows(order.id);
@@ -486,6 +498,7 @@ describe("사슬 — 단계를 순서대로 밟는다", () => {
       domesticOrderId: onlySelf.id,
       actorUserId: requesterId,
       requestReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(blocked.ok, false);
     if (blocked.ok) return;
@@ -502,6 +515,7 @@ describe("사슬 — 단계를 순서대로 밟는다", () => {
           domesticOrderId: order.id,
           actorUserId: requesterId,
           requestReason: null,
+          dueDateRowOrder: 1,
         })
       ).ok,
       true
@@ -512,6 +526,7 @@ describe("사슬 — 단계를 순서대로 밟는다", () => {
       decision: "REJECTED",
       actorUserId: stepAId,
       decisionReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(noReason.ok, false);
     if (!noReason.ok) assert.equal(noReason.code, "VALIDATION_ERROR");
@@ -522,6 +537,7 @@ describe("사슬 — 단계를 순서대로 밟는다", () => {
       decision: "REJECTED",
       actorUserId: stepAId,
       decisionReason: "금액이 맞지 않습니다",
+      dueDateRowOrder: 1,
     });
     assert.equal(rejected.ok, true, JSON.stringify(rejected));
     if (!rejected.ok) return;
@@ -533,6 +549,7 @@ describe("사슬 — 단계를 순서대로 밟는다", () => {
       domesticOrderId: order.id,
       actorUserId: requesterId,
       requestReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(again.ok, true, JSON.stringify(again));
     const rows = await approvalRows(order.id);
@@ -554,6 +571,7 @@ describe("인가 — 올리기와 결재는 서로 다른 열쇠를 본다", () 
       domesticOrderId: order.id,
       actorUserId: noDomesticPermissionId,
       requestReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(blocked.ok, false);
     if (blocked.ok) return;
@@ -567,6 +585,7 @@ describe("인가 — 올리기와 결재는 서로 다른 열쇠를 본다", () 
           domesticOrderId: order.id,
           actorUserId: requesterId,
           requestReason: null,
+          dueDateRowOrder: 1,
         })
       ).ok,
       true
@@ -582,6 +601,7 @@ describe("인가 — 올리기와 결재는 서로 다른 열쇠를 본다", () 
           domesticOrderId: order.id,
           actorUserId: requesterId,
           requestReason: null,
+          dueDateRowOrder: 1,
         })
       ).ok,
       true
@@ -592,6 +612,7 @@ describe("인가 — 올리기와 결재는 서로 다른 열쇠를 본다", () 
       decision: "APPROVED",
       actorUserId: outsiderId,
       decisionReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(byOutsider.ok, false);
     if (!byOutsider.ok) {
@@ -606,6 +627,7 @@ describe("인가 — 올리기와 결재는 서로 다른 열쇠를 본다", () 
       decision: "APPROVED",
       actorUserId: stepBId,
       decisionReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(tooEarly.ok, false);
 
@@ -615,6 +637,7 @@ describe("인가 — 올리기와 결재는 서로 다른 열쇠를 본다", () 
       decision: "APPROVED",
       actorUserId: superAdminId,
       decisionReason: null,
+      dueDateRowOrder: 1,
     });
     assert.equal(byAdmin.ok, true, JSON.stringify(byAdmin));
     const [first] = await approvalRows(order.id);
@@ -632,6 +655,7 @@ describe("인가 — 올리기와 결재는 서로 다른 열쇠를 본다", () 
           domesticOrderId: order.id,
           actorUserId: requesterId,
           requestReason: null,
+          dueDateRowOrder: 1,
         })
       ).ok,
       true
@@ -643,6 +667,7 @@ describe("인가 — 올리기와 결재는 서로 다른 열쇠를 본다", () 
           decision: "APPROVED",
           actorUserId: stepAId,
           decisionReason: null,
+          dueDateRowOrder: 1,
         })
       ).ok,
       true
@@ -653,6 +678,7 @@ describe("인가 — 올리기와 결재는 서로 다른 열쇠를 본다", () 
       decision: "REJECTED",
       actorUserId: stepAId,
       decisionReason: "되돌리기",
+      dueDateRowOrder: 1,
     });
     assert.equal(again.ok, false);
     if (!again.ok) assert.equal(again.code, "CONFLICT");
@@ -669,6 +695,7 @@ describe("🔴 접수 건 승인이 한 톨도 바뀌지 않는다", () => {
           domesticOrderId: order.id,
           actorUserId: requesterId,
           requestReason: null,
+          dueDateRowOrder: 1,
         })
       ).ok,
       true
@@ -721,6 +748,9 @@ describe("🔴 접수 건 승인이 한 톨도 바뀌지 않는다", () => {
       .insert(repairCaseApprovals)
       .values({
         approvalType: DOMESTIC_ORDER_APPROVAL_TYPE,
+        // 🔴 2026-11-08 — 기타건 행에는 회차가 반드시 있다(표의 CHECK). 이 행은 줄이
+        //    없는 고아라 회차도 뜻이 없지만, 값 없이는 들어가지 않는다.
+        dueDateRowOrder: 1,
         status: "REQUESTED",
         requestedByUserId: requesterId,
         repairCaseVersionAtRequest: 1,

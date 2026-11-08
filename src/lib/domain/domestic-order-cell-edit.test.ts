@@ -93,9 +93,23 @@ function row(overrides: Partial<DomesticOrderCellEditRow> = {}): DomesticOrderCe
     orderIssuedDate: "2026-01-05",
     // 🔴 네 칸이다(2026-11-08) — 납품일·납품자가 같은 행에 달렸다. 1차분은 이미
     //    보냈고 2차분은 아직인 **운영에서 실제로 나오는 모양**으로 둔다.
+    // 🔴 **다섯째 칸이 붙었다**(2026-11-08 늦게) — 회차별 완료 시각. 서버로 나가지
+    //    않지만 편집 목록이 들고 다닌다([삭제] 단추를 미리 막는 데 쓴다).
     dueDates: [
-      { dueDate: "2026-01-20", note: "1차분", deliveredDate: "2026-01-22", deliveredBy: "담당자1" },
-      { dueDate: "2026-02-15", note: null, deliveredDate: null, deliveredBy: null },
+      {
+        dueDate: "2026-01-20",
+        note: "1차분",
+        deliveredDate: "2026-01-22",
+        deliveredBy: "담당자1",
+        completedAt: null,
+      },
+      {
+        dueDate: "2026-02-15",
+        note: null,
+        deliveredDate: null,
+        deliveredBy: null,
+        completedAt: null,
+      },
     ],
     quoteIssuedDate: "2026-01-07",
     quoteNumber: "Q-1",
@@ -950,8 +964,21 @@ test("편집 목록은 이 줄에 적힌 날짜 그대로, 차례도 그대로 �
   const subject = {
     ...row({
       dueDates: [
-        { dueDate: "2026-02-15", note: null, deliveredDate: null, deliveredBy: null },
-        { dueDate: "2026-01-20", note: "1차분", deliveredDate: "2026-01-22", deliveredBy: "담당자1" },
+        {
+          dueDate: "2026-02-15",
+          note: null,
+          deliveredDate: null,
+          deliveredBy: null,
+          completedAt: null,
+        },
+        {
+          dueDate: "2026-01-20",
+          note: "1차분",
+          deliveredDate: "2026-01-22",
+          deliveredBy: "담당자1",
+          // 🔴 **완료된 회차** — 편집 목록이 그 사실을 들고 와야 [삭제] 단추가 막힌다.
+          completedAt: "2026-01-23T01:00:00.000Z",
+        },
       ],
     }),
     // 적힌 날짜가 있으면 수리 건 요청일은 목록에도 편집에도 끼지 않는다.
@@ -960,9 +987,18 @@ test("편집 목록은 이 줄에 적힌 날짜 그대로, 차례도 그대로 �
   // 🔴 납품 둘도 **함께 담긴다**(2026-11-08). 납기요청일만 고치는 편집칸이 이 값을
   //    보이지 않게 들고 다니다가 그대로 되돌려 보내야 저장이 납품 기록을 안 지운다.
   //    null 은 메모와 같은 규칙으로 빈 문자열이 된다(입력칸의 값은 문자열이어야 한다).
+  // 🔴 **완료 표시도 함께 담긴다**(2026-11-08). 판정은 `completed_at` 하나뿐이고,
+  //    이 값이 빠지면 화면의 [삭제] 단추가 완료된 회차에서도 눌린다(그리고 저장만
+  //    거절된다 — 셋째 울타리).
   assert.deepEqual(domesticOrderDueDateEditDraft(subject), [
-    { dueDate: "2026-02-15", note: "", deliveredDate: "", deliveredBy: "" },
-    { dueDate: "2026-01-20", note: "1차분", deliveredDate: "2026-01-22", deliveredBy: "담당자1" },
+    { dueDate: "2026-02-15", note: "", deliveredDate: "", deliveredBy: "", isCompleted: false },
+    {
+      dueDate: "2026-01-20",
+      note: "1차분",
+      deliveredDate: "2026-01-22",
+      deliveredBy: "담당자1",
+      isCompleted: true,
+    },
   ]);
 });
 

@@ -8,7 +8,7 @@ import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { getDomesticOrderApprovalProgress } from "@/lib/db/queries/domestic-order-approvals";
+import { getDomesticOrderApprovalUnits } from "@/lib/db/queries/domestic-order-approvals";
 import { getDomesticOrderDetail } from "@/lib/db/queries/domestic-orders";
 import { resolveMiscCaseStatus } from "@/lib/domain/misc-case-status";
 
@@ -93,12 +93,16 @@ export default async function DomesticOrderDetailLayout({
    * 🔴 머리 카드의 **상태 배지**(2026-11-06 사용자 요구 — 「출하 승인 대기」/「출하
    * 대기」가 상세의 헤드와 기타건 현황 목록 **둘 다**에 떠야 한다).
    *
-   * 🔵 **질의가 한 벌 더 돌지 않는다.** `getDomesticOrderApprovalProgress` 는 cache()
+   * 🔵 **질의가 한 벌 더 돌지 않는다.** `getDomesticOrderApprovalUnits` 는 cache()
    * 라, [승인] 탭이 같은 요청 안에서 다시 물어도 이 결과를 그대로 쓴다(그 함수 주석).
    * 승인 기록이 한 줄도 없으면 `state` 가 NOT_REQUESTED 이고, 그때 배지는 「진행 중」
    * 이다 — 접는 규칙은 목록과 **같은 함수** 하나가 갖는다.
+   *
+   * 🔴 **회차마다 선 승인을 하나로 접은 값**이다(2026-11-08). 1차만 승인되고 2차가
+   * 아직이면 이 줄은 아직 「출하 대기」가 아니다 — 접는 규칙은 목록 배지·완료 관문과
+   * 같은 함수 하나가 갖는다(foldDomesticOrderApprovalStates).
    */
-  const approval = await getDomesticOrderApprovalProgress(id);
+  const approval = await getDomesticOrderApprovalUnits(id);
   const status = resolveMiscCaseStatus({
     completedAt: row.completedAt,
     approvalState: approval?.state ?? null,

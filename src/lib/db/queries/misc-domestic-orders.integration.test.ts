@@ -228,6 +228,9 @@ async function insertApproval(fields: {
   await db.insert(repairCaseApprovals).values({
     domesticOrderId: fields.domesticOrderId,
     approvalType: "DOMESTIC_ORDER_FINAL_SHIPMENT",
+    // 🔴 2026-11-08 — 기타건 결재 행에는 회차가 반드시 있다(표의 CHECK). 이 표본은
+    //    회차 하나짜리 기타건이라 1차다.
+    dueDateRowOrder: 1,
     status: fields.status,
     requestedByUserId: borrowedUserId,
     requestedAt: fields.requestedAt,
@@ -267,9 +270,9 @@ test("🔴 올린 줄은 PENDING, 승인된 줄은 APPROVED — 그리고 상세
   });
 
   const states = await loadDomesticOrderApprovalStates([
-    { id: pendingId, version: pendingRow.version },
-    { id: approvedId, version: approvedRow.version },
-    { id: untouchedId, version: 1 },
+    { id: pendingId, version: pendingRow.version, dueDates: [] },
+    { id: approvedId, version: approvedRow.version, dueDates: [] },
+    { id: untouchedId, version: 1, dueDates: [] },
   ]);
 
   assert.equal(states.get(pendingId), "PENDING");
@@ -300,12 +303,12 @@ test("🔴 승인 뒤에 줄이 바뀌면 STALE 이다 — 낡은 승인을 「�
     requestedAt: new Date("2026-11-05T03:00:00.000Z"),
   });
 
-  const states = await loadDomesticOrderApprovalStates([{ id: staleId, version: row.version }]);
+  const states = await loadDomesticOrderApprovalStates([{ id: staleId, version: row.version, dueDates: [] }]);
   assert.equal(states.get(staleId), "STALE");
   // 🔵 못 — 같은 행을 「그때의 판」으로 보면 APPROVED 다. 즉 이 시험이 재는 것은
   //    판 번호를 실제로 대조한다는 사실이지, 늘 STALE 을 내는 것이 아니다.
   const asOfThen = await loadDomesticOrderApprovalStates([
-    { id: staleId, version: row.version - 1 },
+    { id: staleId, version: row.version - 1, dueDates: [] },
   ]);
   assert.equal(asOfThen.get(staleId), "APPROVED");
 });
@@ -332,7 +335,7 @@ test("🔴 「최신」의 정의가 상세와 같다 — 단계가 이어진 �
     requestedAt: new Date("2026-11-05T05:00:00.000Z"),
   });
 
-  const states = await loadDomesticOrderApprovalStates([{ id: chainedId, version: row.version }]);
+  const states = await loadDomesticOrderApprovalStates([{ id: chainedId, version: row.version, dueDates: [] }]);
   assert.equal(states.get(chainedId), "PENDING", "먼저 온 행(1단계)을 지금 상태로 읽었다");
   const progress = await getDomesticOrderApprovalProgress(chainedId);
   assert.equal(progress?.state, "PENDING");

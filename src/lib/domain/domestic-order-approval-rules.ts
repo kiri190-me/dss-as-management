@@ -50,6 +50,20 @@ import type { ShipmentApprovalState } from "./local/workflow/shipment-approval-c
  * 🔴 **판정은 아래 resolveMiscCaseCompletionGate 하나**다. 울타리는 저장 경로
  * (mutations/domestic-orders.ts 의 setDomesticOrderCompletion)가 **트랜잭션 안에서
  * 잠근 행을 보고** 치고, 화면은 그 결과를 사람 말로 보여 줄 뿐이다.
+ *
+ * ── 🔴 **단위가 한 칸 내려왔다 — 줄이 아니라 회차다** (2026-11-08) ───────
+ * 사용자 결정 12·13: 「납기 요청일이 복수로 있다면 … **드롭다운으로 어느 납기 요청일에
+ * 관한 출하승인 요청인지 선택**」 · 「**납기 요청일에 대한 최종출하승인이 완료되지
+ * 않으면 납기 요청일에 대한 [완료 처리]가 안 되도록**」.
+ *
+ * 그래서 「기타건 하나에 승인 하나」가 「**회차 하나에 승인 하나**」가 되었다. 이 파일의
+ * 규칙은 **한 글자도 달라지지 않았고**(어느 상태가 통과인가 · 언제 다시 올릴 수 있나 ·
+ * 판이 없으면 어떻게 되나), 달라진 것은 **그 규칙을 몇 번 적용하는가**뿐이다. 그 셈을
+ * 아래 domesticOrderApprovalUnitCount 하나가 쥔다.
+ *
+ * 🔵 **회차가 하나뿐이면 어제와 글자 그대로 같다** — 단위가 하나이므로 드롭다운도 회차
+ * 머리도 뜨지 않고, 관문도 한 번만 선다. 수리 건이 붙은 줄은 납기요청일이 하나로
+ * 제한되어 있어(결정 9 울타리) **언제나** 그쪽이다.
  * ============================================================================
  */
 
@@ -130,6 +144,76 @@ export const DOMESTIC_ORDER_APPROVAL_REQUESTABLE_STATES: readonly ShipmentApprov
 /** 지금 상태에서 결재를 올릴 수 있는가 — 화면과 시험이 같은 함수를 본다. */
 export function isDomesticOrderApprovalRequestable(state: ShipmentApprovalState): boolean {
   return DOMESTIC_ORDER_APPROVAL_REQUESTABLE_STATES.includes(state);
+}
+
+/**
+ * ============================================================================
+ * 🔴 **승인 단위가 몇 개인가** — 그 기타건의 회차 수 (2026-11-08)
+ * ============================================================================
+ * 사용자 결정 12·13 이 「줄 하나에 승인 하나」를 「**회차 하나에 승인 하나**」로
+ * 내렸다. 그 셈을 **이 함수 하나**가 쥔다 — 화면(드롭다운에 몇 줄을 세울까) ·
+ * 저장 경로(요청한 회차 번호가 범위 안인가) · 완료 관문(몇 개를 봐야 하나)이
+ * 같은 답을 봐야 하기 때문이다.
+ *
+ * ── 🔴 **납기요청일이 0행인 기타건도 단위는 하나**다 ────────────────────
+ * 가장 중요한 갈림이다. 「행이 없으면 승인할 것도 없다」로 두면 **살아 있는 기타건
+ * 15건 중 11건**(개발 DB 실측 2026-11-08)이 승인도 완료도 할 수 없는 줄이 된다 —
+ * 기타건은 손으로 [행 추가]한 줄이 많아 납기요청일이 비어 있는 것이 오히려 보통이다.
+ * 그 11건은 **어제까지 멀쩡히 승인을 올리고 완료하던 줄**이고, 이 조각이 그것을
+ * 깨뜨리면 안 된다.
+ *
+ * 🔵 그래서 0행과 1행이 **똑같이 단위 하나**다. 어느 쪽이든 드롭다운이 뜨지 않고,
+ * 관문도 한 번만 서고, 승인 행의 회차 번호는 1이다 — 2026-11-07 의 동작과 글자
+ * 그대로 같다(그래서 마이그레이션 0126 이 옛 행을 전부 1로 메울 수 있었다).
+ *
+ * 🔴 **음수·소수를 받지 않는다.** 행 수는 조회가 센 값이라 정상 경로로는 언제나
+ * 0 이상의 정수지만, 이 함수가 돌려주는 값이 곧 「올릴 수 있는 회차 번호의 위끝」이라
+ * 한 번 어긋나면 **있지도 않은 회차에 승인이 붙는다.**
+ * ============================================================================
+ */
+export function domesticOrderApprovalUnitCount(dueDateRowCount: number): number {
+  if (!Number.isFinite(dueDateRowCount)) return 1;
+  return Math.max(1, Math.floor(dueDateRowCount));
+}
+
+/**
+ * 보내온 회차 번호가 **그 줄에 실제로 있는 단위**인가 — 1 이상이고 단위 수 이하.
+ *
+ * 🔴 저장 경로가 쓴다. 화면이 보낸 값은 형식 말고는 아무것도 믿지 않는다는 규칙
+ * (actions/domestic-order-approvals.ts 머리말) 그대로이고, 여기서 막지 않으면
+ * 「3차에 대한 승인」이 회차가 둘뿐인 줄에 붙어 **아무도 열 수 없는 문**이 된다
+ * (관문은 1·2차만 보므로 그 승인은 영영 쓰이지 않는다).
+ */
+export function isDomesticOrderApprovalUnit(
+  rowOrder: number,
+  dueDateRowCount: number
+): boolean {
+  if (!Number.isInteger(rowOrder)) return false;
+  return rowOrder >= 1 && rowOrder <= domesticOrderApprovalUnitCount(dueDateRowCount);
+}
+
+/**
+ * 🔴 회차 상태 여럿을 **줄 하나의 상태**로 접는다 (2026-11-08).
+ *
+ * 승인이 회차마다 서면서 「이 기타건의 승인 상태는?」이라는 물음에 답하는 자리가
+ * 셋이 되었다 — 기타건 현황 목록의 배지 · 상세 머리 카드의 배지 · [완료] 관문.
+ * 셋이 각자 접으면 같은 줄이 **목록에서는 「출하 대기」인데 눌러 보면 안 되는** 상태가
+ * 된다. 그래서 접는 규칙을 여기 한 곳에 둔다.
+ *
+ * ── 규칙 — **차례대로 보고 처음 걸린 것** ──────────────────────────────
+ * 전부 `APPROVED` 여야 줄이 `APPROVED` 다. 하나라도 아니면 **그 첫 번째 상태**를
+ * 그대로 돌려준다(가장 나쁜 상태가 아니다). 까닭은 그 값이 곧 **사람이 다음에 할
+ * 일**이기 때문이다 — 1차가 아직 안 올라갔으면 할 일은 「1차를 올려라」이고, 2차가
+ * 반려된 사실은 1차를 끝낸 뒤에 보면 된다. 관문이 말하는 문장도 같은 회차를 가리킨다.
+ *
+ * 🔵 **빈 목록은 `NOT_REQUESTED`** — 단위가 0개인 줄은 없지만(단위 수는 언제나 1
+ * 이상이다) 타입이 그것을 모른다. 「아무 승인도 없다」가 빈 목록의 정직한 답이다.
+ */
+export function foldDomesticOrderApprovalStates(
+  states: readonly ShipmentApprovalState[]
+): ShipmentApprovalState {
+  if (states.length === 0) return "NOT_REQUESTED";
+  return states.find((state) => state !== "APPROVED") ?? "APPROVED";
 }
 
 /**
@@ -222,12 +306,28 @@ export function resolveMiscCaseCompletionGate(params: {
    * 붙잡혀 있어 진행 중인 건은 그대로 굴러간다).
    */
   routeInForce: boolean;
+  /**
+   * 🔴 **어느 회차가 막혔는가** — 「2차 · 납기 2026-02-15 (2차분)」(2026-11-08).
+   *
+   * 🔵 **회차가 하나뿐인 기타건에서는 넘기지 않는다.** 그때는 막힌 것이 줄 하나뿐이라
+   * 붙일 말이 없고, 붙이면 2026-11-07 부터 쓰던 문장이 까닭 없이 길어진다(그 문장을
+   * 글자로 재는 시험도 그대로 남는다). 회차가 둘 이상일 때만 **어느 회차인지**를
+   * 앞에 세운다 — 그러지 않으면 단추 셋이 전부 같은 말을 하고, 사람은 어느 회차를
+   * 승인받아야 하는지 모른다.
+   *
+   * 🔴 글자는 지어내지 않는다 — domain/domestic-order-due-date-label.ts 의
+   * domesticOrderDueDateRowLabel 이 만든 그 한 줄을 그대로 받는다(드롭다운·카드
+   * 머리와 **한 글자도 달라지면 안 된다**).
+   */
+  dueDateRowLabel?: string | null;
 }): MiscCaseCompletionGate {
   if (params.approvalState === "APPROVED") return { allowed: true };
-  if (params.approvalState === "NOT_REQUESTED" && !params.routeInForce) {
-    return { allowed: false, message: MISC_CASE_COMPLETION_BLOCKED_MESSAGES.ROUTE_MISSING };
-  }
-  return { allowed: false, message: MISC_CASE_COMPLETION_BLOCKED_MESSAGES[params.approvalState] };
+  const base =
+    params.approvalState === "NOT_REQUESTED" && !params.routeInForce
+      ? MISC_CASE_COMPLETION_BLOCKED_MESSAGES.ROUTE_MISSING
+      : MISC_CASE_COMPLETION_BLOCKED_MESSAGES[params.approvalState];
+  const label = (params.dueDateRowLabel ?? "").trim();
+  return { allowed: false, message: label === "" ? base : `「${label}」 — ${base}` };
 }
 
 /**

@@ -48,6 +48,9 @@ function oneOfEachKind(): NotificationItem[] {
       modelName: "시험용 품명",
       routeStepOrder: 1,
       requestedByName: "박영업",
+      // 🔴 2026-11-08 — 승인 단위가 회차로 내려와 칸 둘이 늘었다(회차 하나짜리 표본).
+      dueDateRowOrder: 1,
+      dueDateRowLabel: null,
     }),
     buildRepairCaseDueDateNearNotification({
       repairCaseId: "case-due-1",

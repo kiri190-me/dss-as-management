@@ -184,7 +184,14 @@ describe("🔴 머리 — 상태 배지 (2026-11-06 사용자 요구)", () => {
   });
 
   test("🔴 레이아웃이 그 값을 **실제로 넘긴다** — 안 넘기면 배지는 영영 안 뜬다", () => {
-    assert.ok(layout.includes("getDomesticOrderApprovalProgress(id)"), layout);
+    // 🔴 **2026-11-08 에 조회가 바뀌었다 — 뜻은 그대로다.** 승인이 회차마다 서면서
+    //    머리 배지가 봐야 하는 것이 「가장 최근 한 줄」이 아니라 **회차 전부를 접은
+    //    값**이 되었다(1차만 승인되고 2차가 아직이면 이 줄은 「출하 대기」가 아니다).
+    //    🔴 옛 함수(getDomesticOrderApprovalProgress)는 **지금도 있다** — 포털에 결재
+    //    메일을 찌르는 자리가 쓴다. 바꿔 쓰면 2차를 올렸는데 1차의 결재자에게 메일이
+    //    가므로, 여기서 **어느 쪽을 부르는지**를 글자로 못 박는다.
+    assert.ok(layout.includes("getDomesticOrderApprovalUnits(id)"), layout);
+    assert.ok(!layout.includes("getDomesticOrderApprovalProgress"), layout);
     assert.ok(layout.includes("resolveMiscCaseStatus({"), layout);
     assert.match(layout, /<DomesticOrderDetailHeader row=\{row\} status=\{status\} \/>/);
     // 🔴 판정을 레이아웃이 다시 적지 않는다 — 목록과 같은 함수 하나에 묻는다.

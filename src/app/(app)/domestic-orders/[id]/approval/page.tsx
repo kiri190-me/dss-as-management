@@ -9,7 +9,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingApproverUserIds } from "@/lib/db/queries/approval-route-delegations";
 import {
   getDomesticOrderApprovalHistory,
-  getDomesticOrderApprovalProgress,
+  getDomesticOrderApprovalUnits,
 } from "@/lib/db/queries/domestic-order-approvals";
 import { getDomesticOrderDetail } from "@/lib/db/queries/domestic-orders";
 import {
@@ -95,7 +95,11 @@ export default async function DomesticOrderApprovalPage({
   // 판정한다(그래야 읽은 직후 되돌려진 위임으로 결재가 통과하지 않는다).
   const [progress, history, currentRoute, actingApproverUserIds, canRequestApproval] =
     await Promise.all([
-      getDomesticOrderApprovalProgress(row.id),
+      // 🔴 **회차마다 하나씩**(2026-11-08, 사용자 결정 12). 「줄 전체에서 가장 최근
+      //    한 줄」을 돌려주는 getDomesticOrderApprovalProgress 와 다른 함수다 — 그쪽은
+      //    포털에 결재 메일을 찌르는 자리의 것이고, 바꿔 쓰면 2차를 올렸는데 1차의
+      //    결재자에게 메일이 간다(그 함수 머리말).
+      getDomesticOrderApprovalUnits(row.id),
       getDomesticOrderApprovalHistory(row.id),
       getCurrentShipmentApprovalRoute(DOMESTIC_ORDER_APPROVAL_ROUTE_SCOPE),
       resolveActingApproverUserIds(actingUser.id, new Date()),
@@ -114,10 +118,15 @@ export default async function DomesticOrderApprovalPage({
     <DomesticOrderApprovalPanel
       domesticOrderId={row.id}
       /* 줄을 이미 읽어 왔으므로 progress 가 null 일 수 없다(그 조회는 없는 줄·휴지통
-         에만 null 이다). 그래도 상태 하나를 기본값으로 둔다 — 경계를 넘는 값에 `!` 를
-         붙이지 않는 것이 이 저장소의 관례다. */
-      state={progress?.state ?? "NOT_REQUESTED"}
-      latest={progress?.latest ?? null}
+         에만 null 이다). 그래도 기본값 하나를 둔다 — 경계를 넘는 값에 `!` 를 붙이지
+         않는 것이 이 저장소의 관례다. 🔴 **빈 배열이 아니라 단위 하나**다: 단위가
+         0개인 줄은 없고(domain 의 domesticOrderApprovalUnitCount), 빈 배열을 넘기면
+         탭이 카드 없이 조용히 비어 고장으로 읽힌다. */
+      units={
+        progress?.units ?? [
+          { rowOrder: 1, label: "", state: "NOT_REQUESTED" as const, latest: null },
+        ]
+      }
       history={history}
       routeSteps={approvalRouteSteps}
       /* 🔴 판이 없거나 단계가 0개면 서버가 요청을 ROUTE_NOT_CONFIGURED 로 거절한다.

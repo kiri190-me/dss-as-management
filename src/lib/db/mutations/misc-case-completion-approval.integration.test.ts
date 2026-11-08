@@ -184,6 +184,7 @@ async function request(order: TestOrder): Promise<void> {
     domesticOrderId: order.id,
     actorUserId: requesterId,
     requestReason: null,
+    dueDateRowOrder: 1,
   });
   assert.equal(requested.ok, true, `setup approval request failed: ${JSON.stringify(requested)}`);
 }
@@ -195,6 +196,7 @@ async function decide(order: TestOrder, decision: "APPROVED" | "REJECTED"): Prom
     decision,
     actorUserId: approverId,
     decisionReason: decision === "REJECTED" ? "시험용 반려" : null,
+    dueDateRowOrder: 1,
   });
   assert.equal(decided.ok, true, `setup approval decision failed: ${JSON.stringify(decided)}`);
 }

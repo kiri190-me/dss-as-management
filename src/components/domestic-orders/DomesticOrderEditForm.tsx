@@ -230,7 +230,19 @@ const hintClass = "mt-1 text-xs text-zinc-500 dark:text-zinc-400";
  * domain/domestic-order-cell-edit.ts 의 DomesticOrderDueDateDraft 와 **같은 네
  * 칸**이다 — 표의 칸 편집과 이 폼이 같은 목록을 같은 모양으로 보낸다.
  */
-type DueDateDraft = { key: string; dueDate: string; note: string; deliveredDate: string; deliveredBy: string };
+type DueDateDraft = {
+  key: string;
+  dueDate: string;
+  note: string;
+  deliveredDate: string;
+  deliveredBy: string;
+  /**
+   * 🔴 그 회차가 **[완료 처리]되었는가**(2026-11-08). 나가는 fields 에는 **없다** —
+   * 완료 표시는 서버가 제 손으로 다시 적는다(mutations 의 replaceDueDates). 여기 있는
+   * 까닭은 [삭제] 단추를 미리 막기 위해서다(셋째 울타리).
+   */
+  isCompleted: boolean;
+};
 
 /** 납기일 한 줄의 date 입력칸 id. 추가한 뒤 그리로 포커스를 옮기는 데 쓴다. */
 function dueDateInputId(key: string): string {
@@ -318,6 +330,8 @@ export default function DomesticOrderEditForm({
       // 통째로 다시 만들기 때문이다(mutations 의 replaceDueDates).
       deliveredDate: dueDate.deliveredDate ?? "",
       deliveredBy: dueDate.deliveredBy ?? "",
+      // 🔴 판정은 completed_at 하나로만 한다(그 표의 칸 주석과 같은 규칙).
+      isCompleted: dueDate.completedAt !== null,
     }))
   );
   const [quoteIssuedDate, setQuoteIssuedDate] = useState(row?.quoteIssuedDate ?? "");
@@ -381,6 +395,9 @@ export default function DomesticOrderEditForm({
    */
   const dueDateRowShapes = dueDates.map((entry) => ({
     hasDelivery: entry.deliveredDate.trim() !== "" || entry.deliveredBy.trim() !== "",
+    // 🔴 완료된 회차가 있으면 줄을 **지우는** 저장이 통째로 거절된다(셋째 울타리).
+    //    여기서 빠뜨리면 단추는 눌리는데 저장만 거절되고, 사람은 까닭을 나중에 안다.
+    isCompleted: entry.isCompleted,
   }));
   const addDueDateBlockedReason = domesticOrderAddDueDateBlockReason({
     rows: dueDateRowShapes,
@@ -403,7 +420,9 @@ export default function DomesticOrderEditForm({
     pendingDueDateFocusRef.current = key;
     setDueDates((previous) => [
       ...previous,
-      { key, dueDate: "", note: "", deliveredDate: "", deliveredBy: "" },
+      // 🔴 새 회차는 완료 표시가 없다 — 완료는 승인을 거쳐야 찍히는 값이라
+      //    여기서 참으로 만들 수 있는 길이 있으면 안 된다.
+      { key, dueDate: "", note: "", deliveredDate: "", deliveredBy: "", isCompleted: false },
     ]);
   }
 
