@@ -40,6 +40,10 @@ const CARD_FIELD_KEYS: readonly (keyof typeof MISC_CASE_FIELDS)[] = [
   "amount",
   "paymentCompleted",
   "deliveredDate",
+  // 🔴 2026-11-08 에 늘었다 — 표의 납품일 칸 **바로 아래 짝**이다(같은 짝끼리
+  // 붙여 둔다는 이 목록의 규칙 그대로). 카드에서 빠뜨리면 좁은 화면에서만 납품자가
+  // 사라져, 같은 줄이 화면 폭에 따라 다르게 읽힌다.
+  "deliveredBy",
 ];
 
 /** 사람이 줄바꿈을 섞어 적는 칸 — 적은 그대로 여러 줄로(위 ②). */

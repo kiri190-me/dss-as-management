@@ -15,6 +15,18 @@ import { foldBlankToNull } from "../../src/lib/domain/domestic-order-list";
  * 어떻게 적혀 있는지 아무도 모른다. 2026-10-30 에 납기일을 묶을 때도 세는 도구를 먼저
  * 만들고 그 수를 보고 설계를 정했다 — 이 파일은 그 자리의 같은 일을 한다.
  *
+ * ── 🔴 **그 일이 2026-11-08 에 끝났다 — 이 도구는 자리를 바꿨다** ─────────
+ * 납품일·납품자는 이제 `domestic_order_due_dates` 의 행에 있고(결정 1), 화면이 그리는
+ * 값도 그 행이다. **옛 칸(`domestic_orders.delivered_date`·`delivered_by`)은 지우지
+ * 않았지만 A/S 는 그리지도 쓰지도 않는다**(결정 11 — PO 가 같은 DB 에서 쓴다).
+ *
+ * 🔴 그래서 이 도구가 세는 자리도 **둘**이 되었다. 아래 ①~⑧ 의 칸 여섯은 **옛 칸**을
+ * 재는 수 그대로다 — 한 글자도 안 바꿨고, 그 수가 계속 두 가지를 증명한다: **A/S 가
+ * 더 이상 그 칸에 안 쓴다**는 것과, **PO 가 거기 적어 둔 값이 몇인지**. 🔴 다만 그
+ * 수만 보고 「두 날짜가 맞다」고 읽으면 안 된다. 화면이 그리는 납품일은 새 자리이고,
+ * 그쪽은 아래 `deliveredRows`·`deliveredByRows` 가 센다. 이름을 ②③ 과 다르게 둔 까닭이
+ * 그것이다 — 같은 이름을 쓰면 다음에 읽는 사람이 한 수인 줄 안다.
+ *
  * 🔴 **두 칸은 애초에 다른 사실을 적는 칸이다.** `delivered_date` 는 내자 시트의
  * 「납품일」이고(사람이 손으로 적는다 — 그 표의 `delivered_by` 가 바로 옆에 있다),
  * `actual_shipment_date` 는 수리 건이 **우리 손을 떠난 날**이다. 보내는 날과 받는 날
@@ -65,10 +77,24 @@ import { foldBlankToNull } from "../../src/lib/domain/domestic-order-list";
  * ============================================================================
  */
 
-/** 내자 줄에 달린 납기요청일 한 행. `hasNote` 는 비고가 **적혀 있나**만 말한다(글자는 안 읽는다). */
+/**
+ * 내자 줄에 달린 납기요청일 한 행. `hasNote` 는 비고가 **적혀 있나**만 말한다(글자는
+ * 안 읽는다).
+ *
+ * 🔴 **납품 둘이 2026-11-08 에 이 행으로 옮겨 왔다**(사용자 결정 1). 그래서 이 도구가
+ * 세는 자리도 둘이 되었다 — 옛 칸(`domestic_orders.delivered_date`)과 **새 자리(이
+ * 행)**. 옛 칸 쪽 셈(아래 bucket 여섯)은 한 글자도 안 바꿨다: 그 수가 **A/S 가 더
+ * 이상 그 칸에 안 쓴다**는 사실을 계속 증명해 주고, PO 가 거기 적어 둔 값이 몇인지도
+ * 그 수로만 알 수 있다. 🔴 다만 그 수만 보고 「두 날짜가 맞다」고 읽으면 안 된다 —
+ * 화면이 그리는 납품일은 이제 이 행의 값이다.
+ */
 export type SurveyDueDateRow = {
   dueDate: string;
   hasNote: boolean;
+  /** 🔴 **새 자리**의 납품일(`domestic_order_due_dates.delivered_date`). */
+  deliveredDate: string | null;
+  /** 🔴 **새 자리**의 납품자가 적혀 있나. 이름은 이 타입에 들어오지 않는다(머리말의 PII). */
+  hasDeliveredBy: boolean;
 };
 
 /** 내자 줄에 붙은 수리 건에서 읽어 온 것. 🔴 여기 있는 글자는 접수번호뿐이다. */
@@ -161,6 +187,10 @@ export type LineVerdict = {
   dueDateRowCount: number;
   /** 그중 비고가 적힌 행 수 — ⑩. 🔴 글자는 안 읽는다. */
   notedDueDateRows: number;
+  /** 🔴 그중 **새 자리**에 납품일이 적힌 행 수(2026-11-08). */
+  deliveredRows: number;
+  /** 🔴 그중 **새 자리**에 납품자가 적힌 행 수. 이름은 세지도 담지도 않는다. */
+  deliveredByRows: number;
   /**
    * ⑪ 의 쓸모 — 납품일이 그 줄의 납기요청일 **가운데 하나와 같은가.** 같으면 「어느 행에
    * 달 것인가」가 자료만으로 정해진다. 납품일이 없거나 행이 없으면 거짓이다.
@@ -228,6 +258,13 @@ export type Survey = {
   dueDateRows: KindCount;
   /** ⑩ 비고가 적힌 납기요청일 행 — 갈래별. 🔴 글자는 안 읽는다. */
   notedDueDateRows: KindCount;
+  /**
+   * 🔴 **새 자리**에 납품일이 적힌 행 — 갈래별(2026-11-08). 위 ② 와 **다른 수**다:
+   * ② 는 옛 칸(`domestic_orders.delivered_date`)이고 이것은 화면이 실제로 그리는 값이다.
+   */
+  deliveredRows: KindCount;
+  /** 🔴 **새 자리**에 납품자가 적힌 행 — 갈래별. 🔴 이름은 세지도 담지도 않는다. */
+  deliveredByRows: KindCount;
   /** ⑪ 납기요청일 행이 **둘 이상인데** 납품일이 적힌 줄 — 어느 행에 달지가 모호하다. */
   ambiguousTargetLines: KindCount;
   /** 그중 납품일이 그 줄의 납기요청일 **하나와 같은** 줄 — 달 자리가 자료로 정해진다. */
@@ -296,6 +333,8 @@ export function classifyDeliveredDateLine(line: SurveyOrderLine): LineVerdict {
 
   let dueDateRowCount = 0;
   let notedDueDateRows = 0;
+  let deliveredRows = 0;
+  let deliveredByRows = 0;
   let deliveredDateMatchesADueDate = false;
   for (const row of line.dueDateRows) {
     // 날짜가 빈 행은 「납기일이 비어 있다」가 아니라 **행이 아니다**(그 표의 due_date 는
@@ -304,6 +343,9 @@ export function classifyDeliveredDateLine(line: SurveyOrderLine): LineVerdict {
     if (dueDate === null) continue;
     dueDateRowCount += 1;
     if (row.hasNote) notedDueDateRows += 1;
+    // 🔴 **새 자리** — 화면이 그리는 납품일은 2026-11-08 부터 이 값이다.
+    if (foldBlankToNull(row.deliveredDate) !== null) deliveredRows += 1;
+    if (row.hasDeliveredBy) deliveredByRows += 1;
     if (deliveredDate !== null && dueDate === deliveredDate) deliveredDateMatchesADueDate = true;
   }
 
@@ -311,6 +353,8 @@ export function classifyDeliveredDateLine(line: SurveyOrderLine): LineVerdict {
     deliveredDate,
     dueDateRowCount,
     notedDueDateRows,
+    deliveredRows,
+    deliveredByRows,
     deliveredDateMatchesADueDate,
     hasDeliveredBy: line.hasDeliveredBy,
     hasLegacyRequestedDueDate: line.hasLegacyRequestedDueDate,
@@ -442,6 +486,8 @@ export function summarizeDeliveredDateSync(
     },
     dueDateRows: { linked: 0, misc: 0 },
     notedDueDateRows: { linked: 0, misc: 0 },
+    deliveredRows: { linked: 0, misc: 0 },
+    deliveredByRows: { linked: 0, misc: 0 },
     ambiguousTargetLines: { linked: 0, misc: 0 },
     ambiguousTargetLinesMatchingADueDate: { linked: 0, misc: 0 },
     legacyRequestedDueDateLines: { linked: 0, misc: 0 },
@@ -495,9 +541,13 @@ export function summarizeDeliveredDateSync(
     if (kind === "linked") {
       survey.dueDateRows.linked += verdict.dueDateRowCount;
       survey.notedDueDateRows.linked += verdict.notedDueDateRows;
+      survey.deliveredRows.linked += verdict.deliveredRows;
+      survey.deliveredByRows.linked += verdict.deliveredByRows;
     } else {
       survey.dueDateRows.misc += verdict.dueDateRowCount;
       survey.notedDueDateRows.misc += verdict.notedDueDateRows;
+      survey.deliveredRows.misc += verdict.deliveredRows;
+      survey.deliveredByRows.misc += verdict.deliveredByRows;
     }
 
     if (verdict.deliveredDate !== null && verdict.dueDateRowCount >= 2) {

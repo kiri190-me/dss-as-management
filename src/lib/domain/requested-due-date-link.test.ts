@@ -48,7 +48,9 @@ import { pickEarliestDueDate } from "./weekly-report-delivery";
 
 /** 내자 줄의 납기요청일 한 줄. 이 파일이 보는 두 칸만 만든다. */
 function dueDate(date: string, note: string | null = null) {
-  return { dueDate: date, note };
+  // 🔴 네 칸으로 만든다(2026-11-08). 납품 둘은 이 파일이 재는 규칙과 상관없지만,
+  //    모양이 실제와 달라지면 아래 cellEditRow 가 보내는 payload 도 달라진다.
+  return { dueDate: date, note, deliveredDate: null, deliveredBy: null };
 }
 
 // ── ① 내자 정리 쪽 — 이 줄에 적힌 날짜가 먼저 ───────────────────────────
@@ -339,7 +341,16 @@ test("두 표시는 서로 다른 글자다 — 어느 쪽에서 빌려 왔는�
 // ── ⑤ ⚠️ 계산된 값은 저장에 실리지 않는다 ───────────────────────────────
 
 /** 저장 payload 를 만들 때 쓰는 한 줄. 값은 이 시험이 보는 것만 채운다. */
-function cellEditRow(dueDates: readonly { dueDate: string; note: string | null }[]) {
+function cellEditRow(
+  // 🔴 네 칸이다(2026-11-08) — 납품일·납품자가 같은 행에 달렸다. 이 시험이 보는
+  //    것은 납기요청일뿐이지만, 모양이 다르면 저장 payload 가 실제와 달라진다.
+  dueDates: readonly {
+    dueDate: string;
+    note: string | null;
+    deliveredDate: string | null;
+    deliveredBy: string | null;
+  }[]
+) {
   return {
     repairCaseId: "case-1",
     intakeNumberText: null,
@@ -392,7 +403,11 @@ test("이 줄에 적힌 납기요청일은 그대로 되실려 나간다 — 칸
     "quoteNumber",
     "Q-1"
   );
-  assert.deepEqual(fields.dueDates, [{ dueDate: "2026-01-20", note: "1차분" }]);
+  // 🔴 네 칸이 그대로 나간다(2026-11-08) — 납품 둘을 빼면 저장이 그 줄의 행을
+  //    다시 만들면서 납품 기록을 지운다.
+  assert.deepEqual(fields.dueDates, [
+    { dueDate: "2026-01-20", note: "1차분", deliveredDate: null, deliveredBy: null },
+  ]);
   assert.equal(Object.keys(fields).length, 24);
 });
 

@@ -192,8 +192,18 @@ export default function MiscCaseTable({ rows, sort, onSortChange }: MiscCaseTabl
               </span>
             </div>
           </th>
+          {/* 🔴 납품일(주) + 납품자(보조) — **한 칸**이다(2026-11-08). 둘 다
+              납기요청일 행마다 하나씩이라 줄 수가 같고, 위아래로 나란히 두면
+              회차별 짝이 눈으로 맞는다. 칼럼을 둘로 늘리지 않는 것은 이 표가
+              이미 열 칸이기 때문이고, 금액/입금완료가 같은 자리에서 같은
+              방식으로 묶여 있다. */}
           <th scope="col" className={thBaseClass} title={MISC_CASE_FIELDS.deliveredDate.hint}>
-            {MISC_CASE_FIELDS.deliveredDate.label}
+            <div className="flex flex-col gap-0.5">
+              <span className="whitespace-nowrap">{MISC_CASE_FIELDS.deliveredDate.label}</span>
+              <span className="text-[11px] font-normal text-zinc-400 dark:text-zinc-500">
+                {MISC_CASE_FIELDS.deliveredBy.label}
+              </span>
+            </div>
           </th>
           <th scope="col" className={thBaseClass}>
             상세
@@ -245,7 +255,18 @@ export default function MiscCaseTable({ rows, sort, onSortChange }: MiscCaseTabl
                 </span>
               </div>
             </td>
-            <td className="px-3 py-2 whitespace-nowrap">{MISC_CASE_FIELDS.deliveredDate.of(row)}</td>
+            {/* 🔴 `whitespace-nowrap` 은 그대로 두고 **줄은 부품이 나눈다**
+                (block 짜리 <span> — delivered-cell-content.tsx). 날짜가 여럿이어도
+                칼럼이 옆으로 늘지 않고 그 줄의 높이만 늘어난다 — 내자 정리의
+                납기요청일 칸이 같은 문제를 같은 방식으로 풀었다. */}
+            <td className="px-3 py-2 whitespace-nowrap">
+              <div className="flex flex-col gap-0.5">
+                <span className="block">{MISC_CASE_FIELDS.deliveredDate.of(row)}</span>
+                <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                  {MISC_CASE_FIELDS.deliveredBy.of(row)}
+                </span>
+              </div>
+            </td>
             <td className="px-3 py-2 whitespace-nowrap">
               <Link
                 href={domesticOrderDetailHrefs(row.id).root}

@@ -143,7 +143,11 @@ async function createCase(customerRequestedDueDate: string | null): Promise<stri
 
 async function attachDueDate(repairCaseId: string, dueDate: string): Promise<void> {
   const result = await createDomesticOrder({
-    fields: { ...emptyFields(), repairCaseId, dueDates: [{ dueDate, note: null }] },
+    fields: {
+      ...emptyFields(),
+      repairCaseId,
+      dueDates: [{ dueDate, note: null, deliveredDate: null, deliveredBy: null }],
+    },
     actorUserId,
   });
   assert.equal(result.ok, true, `setup domestic order failed: ${JSON.stringify(result)}`);

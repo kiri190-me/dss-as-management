@@ -8,10 +8,17 @@ import { DATE_INPUT_MAX } from "@/components/common/date-input-limits";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import { DUE_DATE_FROM_DOMESTIC_ORDER_LABEL } from "@/lib/domain/requested-due-date-link";
+import { REPAIR_CASE_SHIPMENT_DATE_LINK_NOTE } from "@/lib/domain/delivered-date-link";
 import { REPAIR_CASE_SAVED_POPUP, useSectionEditSubmit } from "./useSectionEditSubmit";
 import EditSectionActions, { editErrorClass, editInputClass, editLabelClass } from "./EditSectionActions";
 
 const MAX_SUGGESTIONS = 8;
+
+/**
+ * 칸 아래 회색 안내 한 줄의 모양. 🔴 이 파일의 다른 안내 두 줄과 **같은 글자**다 —
+ * 같은 성격의 글이 칸마다 다르게 보이면 한쪽이 더 중요한 말로 읽힌다.
+ */
+const shipmentLinkNoteClass = "mt-1 text-xs text-zinc-500 dark:text-zinc-400";
 
 function ReadOnlyField({
   label,
@@ -532,6 +539,12 @@ export default function IntakeInfoEditForm({
             {fieldErrors.actualShipmentDate && (
               <p className={editErrorClass}>{fieldErrors.actualShipmentDate}</p>
             )}
+            {/* 🔴 이 칸을 고치면 **내자 정리의 납품일도 함께 바뀐다**(2026-11-08
+                사용자 결정 2 — 연동은 양방향). 저장하고 나서 알게 되면 늦다:
+                내자 쪽에 사람이 적어 둔 날짜가 있을 수 있고, 그 값이 이 저장으로
+                덮인다. 글자는 규칙을 가진 파일에서 온다 — 두 화면이 같은 사실을
+                다른 말로 설명하지 않게(domain/delivered-date-link.ts). */}
+            <p className={shipmentLinkNoteClass}>{REPAIR_CASE_SHIPMENT_DATE_LINK_NOTE}</p>
           </div>
         ) : (
           <ReadOnlyField label="실제 출하일" value={resolved.actualShipmentDate ?? "-"} />

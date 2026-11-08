@@ -298,7 +298,7 @@ describe("softDeleteDomesticOrder", () => {
 describe("restoreDomesticOrder", () => {
   test("네 칸이 비고 목록에 돌아온다 — 감사 로그 RESTORE", async () => {
     const created = await createOrder("RESTORE", {
-      dueDates: [{ dueDate: "2096-03-01", note: "1차분" }],
+      dueDates: [{ dueDate: "2096-03-01", note: "1차분", deliveredDate: null, deliveredBy: null }],
     });
     const version = await trash(created.id, "되살릴 줄");
 
@@ -361,8 +361,8 @@ describe("permanentlyDeleteDomesticOrder", () => {
   test("휴지통의 줄이 사라지고 납기요청일도 함께 사라진다 — 감사 로그 PURGE", async () => {
     const created = await createOrder("PURGE-MANUAL", {
       dueDates: [
-        { dueDate: "2096-04-01", note: "1차분" },
-        { dueDate: "2096-05-01", note: "2차분" },
+        { dueDate: "2096-04-01", note: "1차분", deliveredDate: null, deliveredBy: null },
+        { dueDate: "2096-05-01", note: "2차분", deliveredDate: null, deliveredBy: null },
       ],
     });
     const dueDatesBefore = await db
@@ -412,7 +412,7 @@ describe("permanentlyDeleteDomesticOrder", () => {
 
   test("🔴 활성 줄은 완전 삭제할 수 없다 — NOT_FOUND, 줄도 납기요청일도 그대로다", async () => {
     const created = await createOrder("PURGE-ACTIVE", {
-      dueDates: [{ dueDate: "2096-06-01", note: null }],
+      dueDates: [{ dueDate: "2096-06-01", note: null, deliveredDate: null, deliveredBy: null }],
     });
     const result = await permanentlyDeleteDomesticOrder({
       id: created.id,
@@ -540,7 +540,7 @@ describe("purgeExpiredDomesticOrder — 15일 정리", () => {
 
   test("15일이 지나면 줄과 납기요청일이 함께 사라지고, 감사 로그의 행위자는 비어 있다", async () => {
     const created = await createOrder("SWEEP-EXPIRED-1", {
-      dueDates: [{ dueDate: "2096-07-01", note: "만료" }],
+      dueDates: [{ dueDate: "2096-07-01", note: "만료", deliveredDate: null, deliveredBy: null }],
     });
     await trash(created.id, "오래된 줄");
     await backdateDeletion(created.id, MASTER_DATA_TRASH_RETENTION_DAYS + 1);

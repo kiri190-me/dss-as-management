@@ -896,9 +896,9 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
   test("여러 개를 적은 차례 그대로 만들 수 있다", async () => {
     const created = await createOrder({
       dueDates: [
-        { dueDate: "2096-03-10", note: "1차분" },
-        { dueDate: "2096-01-20", note: null },
-        { dueDate: "2096-02-15", note: "3차분" },
+        { dueDate: "2096-03-10", note: "1차분", deliveredDate: null, deliveredBy: null },
+        { dueDate: "2096-01-20", note: null, deliveredDate: null, deliveredBy: null },
+        { dueDate: "2096-02-15", note: "3차분", deliveredDate: null, deliveredBy: null },
       ],
     });
     if (!created.ok) return;
@@ -923,7 +923,7 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
 
   test("수정으로 날짜를 늘리면 생기고 줄이면 없어진다", async () => {
     const created = await createOrder({
-      dueDates: [{ dueDate: "2096-01-20", note: "1차분" }],
+      dueDates: [{ dueDate: "2096-01-20", note: "1차분", deliveredDate: null, deliveredBy: null }],
     });
     if (!created.ok) return;
 
@@ -932,9 +932,9 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
       expectedVersion: created.version,
       fields: fields({
         dueDates: [
-          { dueDate: "2096-01-20", note: "1차분" },
-          { dueDate: "2096-02-15", note: "2차분" },
-          { dueDate: "2096-03-10", note: "3차분" },
+          { dueDate: "2096-01-20", note: "1차분", deliveredDate: null, deliveredBy: null },
+          { dueDate: "2096-02-15", note: "2차분", deliveredDate: null, deliveredBy: null },
+          { dueDate: "2096-03-10", note: "3차분", deliveredDate: null, deliveredBy: null },
         ],
       }),
       actorUserId,
@@ -946,7 +946,7 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
     const shrunk = await updateDomesticOrder({
       id: created.id,
       expectedVersion: grown.version,
-      fields: fields({ dueDates: [{ dueDate: "2096-02-15", note: "이것만 남는다" }] }),
+      fields: fields({ dueDates: [{ dueDate: "2096-02-15", note: "이것만 남는다", deliveredDate: null, deliveredBy: null }] }),
       actorUserId,
     });
     assert.equal(shrunk.ok, true, `줄이기 실패: ${JSON.stringify(shrunk)}`);
@@ -962,8 +962,8 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
   test("빈 목록으로 되돌릴 수 있다", async () => {
     const created = await createOrder({
       dueDates: [
-        { dueDate: "2096-01-20", note: "잘못 넣은 날짜" },
-        { dueDate: "2096-02-15", note: null },
+        { dueDate: "2096-01-20", note: "잘못 넣은 날짜", deliveredDate: null, deliveredBy: null },
+        { dueDate: "2096-02-15", note: null, deliveredDate: null, deliveredBy: null },
       ],
     });
     if (!created.ok) return;
@@ -981,8 +981,8 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
   test("낡은 version으로 온 저장은 CONFLICT이고 날짜가 한 건도 바뀌지 않는다", async () => {
     const created = await createOrder({
       dueDates: [
-        { dueDate: "2096-01-20", note: "1차분" },
-        { dueDate: "2096-02-15", note: "2차분" },
+        { dueDate: "2096-01-20", note: "1차분", deliveredDate: null, deliveredBy: null },
+        { dueDate: "2096-02-15", note: "2차분", deliveredDate: null, deliveredBy: null },
       ],
     });
     if (!created.ok) return;
@@ -991,7 +991,7 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
     const first = await updateDomesticOrder({
       id: created.id,
       expectedVersion: staleVersion,
-      fields: fields({ dueDates: [{ dueDate: "2096-03-10", note: "먼저 저장된 날짜" }] }),
+      fields: fields({ dueDates: [{ dueDate: "2096-03-10", note: "먼저 저장된 날짜", deliveredDate: null, deliveredBy: null }] }),
       actorUserId,
     });
     assert.equal(first.ok, true);
@@ -1019,7 +1019,7 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
 
   test("지워진 행에 저장하려 해도 NOT_FOUND이고 날짜는 그대로다", async () => {
     const created = await createOrder({
-      dueDates: [{ dueDate: "2096-01-20", note: "지우기 전" }],
+      dueDates: [{ dueDate: "2096-01-20", note: "지우기 전", deliveredDate: null, deliveredBy: null }],
     });
     if (!created.ok) return;
     await db
@@ -1045,7 +1045,7 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
   test("없는 고객사로 고치려 하면 날짜도 그대로다 — VALIDATION_ERROR가 먼저다", async () => {
     const created = await createOrder({
       customerId,
-      dueDates: [{ dueDate: "2096-01-20", note: "그대로 남아야 한다" }],
+      dueDates: [{ dueDate: "2096-01-20", note: "그대로 남아야 한다", deliveredDate: null, deliveredBy: null }],
     });
     if (!created.ok) return;
 
@@ -1067,14 +1067,14 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
     const other = await createOrder({
       purchaseOrderNumber: "PO-OTHER-ROW",
       dueDates: [
-        { dueDate: "2096-05-01", note: "남의 줄 1차분" },
-        { dueDate: "2096-06-01", note: "남의 줄 2차분" },
+        { dueDate: "2096-05-01", note: "남의 줄 1차분", deliveredDate: null, deliveredBy: null },
+        { dueDate: "2096-06-01", note: "남의 줄 2차분", deliveredDate: null, deliveredBy: null },
       ],
     });
     if (!other.ok) return;
 
     const target = await createOrder({
-      dueDates: [{ dueDate: "2096-01-20", note: "내 줄" }],
+      dueDates: [{ dueDate: "2096-01-20", note: "내 줄", deliveredDate: null, deliveredBy: null }],
     });
     if (!target.ok) return;
 
@@ -1113,7 +1113,7 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
     const result = await updateDomesticOrder({
       id: created.id,
       expectedVersion: created.version,
-      fields: fields({ dueDates: [{ dueDate: "2096-02-15", note: "새 표에 적은 날짜" }] }),
+      fields: fields({ dueDates: [{ dueDate: "2096-02-15", note: "새 표에 적은 날짜", deliveredDate: null, deliveredBy: null }] }),
       actorUserId,
     });
     assert.equal(result.ok, true, `저장 실패: ${JSON.stringify(result)}`);
@@ -1129,7 +1129,7 @@ describe("납기요청일 목록 (domestic_order_due_dates)", () => {
 
   test("완료 처리는 날짜를 건드리지 않는다 — 표시일 뿐 값을 고치는 조작이 아니다", async () => {
     const created = await createOrder({
-      dueDates: [{ dueDate: "2096-01-20", note: "완료 전에 적은 날짜" }],
+      dueDates: [{ dueDate: "2096-01-20", note: "완료 전에 적은 날짜", deliveredDate: null, deliveredBy: null }],
     });
     if (!created.ok) return;
     await grantMiscCaseApproval(created.id, created.version);

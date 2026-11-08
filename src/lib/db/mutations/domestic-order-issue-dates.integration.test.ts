@@ -470,10 +470,19 @@ describe("2. 🔴 줄이 있을 때 저장해도 다른 칸이 그대로다", ()
       japanRemittanceNote: "2095-04-10 송금",
       historyNote: "재수리 이력 있음",
       etcNote: "기타 메모",
-      dueDates: [
-        { dueDate: "2095-05-01", note: "1차분" },
-        { dueDate: "2095-06-01", note: null },
-      ],
+      dueDates: [{ dueDate: "2095-05-01", note: "1차분", deliveredDate: null, deliveredBy: null }],
+    });
+
+    // 🔴 **둘째 행은 SQL 로 직접 넣는다**(2026-11-08). 2026-11-07 사용자 결정 9 로
+    //    「수리 건이 연결된 줄에는 납기요청일을 하나만」이 되어, 저장 통로로는 이
+    //    모양을 만들 수 없다(domain/domestic-order-due-date-rows.ts).
+    //    🔵 그래도 **둘로 둔다** — 이 시험이 보는 것은 「저장이 딸린 표를 휩쓰는가」이고,
+    //    행이 하나뿐이면 「통째로 지우고 다시 넣는」 사고가 나도 눈에 덜 띈다. 개발
+    //    DB 에 실제로 이 모양인 줄이 하나 있다(2026-11-07 실측).
+    await db.insert(domesticOrderDueDates).values({
+      domesticOrderId: orderId,
+      dueDate: "2095-06-01",
+      displayOrder: 2,
     });
 
     const beforeRow = await readOrder(orderId);

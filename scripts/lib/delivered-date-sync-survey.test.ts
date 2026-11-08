@@ -46,8 +46,15 @@ const CASE_NO = {
   unreadable: "D990107",
 } as const;
 
-function due(dueDate: string, hasNote = false) {
-  return { dueDate, hasNote };
+function due(
+  dueDate: string,
+  hasNote = false,
+  // 🔴 **새 자리**의 납품 둘(2026-11-08). 안 주면 「아직 안 보냈다」 — 옛 칸을 재는
+  //    위 수들과 **다른 수**라, 표본에서도 따로 세워 본다.
+  deliveredDate: string | null = null,
+  hasDeliveredBy = false
+) {
+  return { dueDate, hasNote, deliveredDate, hasDeliveredBy };
 }
 
 /** 수리 건이 붙은 줄 하나. 안 적은 것은 전부 「비어 있음」이다. */
@@ -124,11 +131,13 @@ const SAMPLE_LINES: SurveyOrderLine[] = [
   // 🔴 수리 건을 못 읽었다 — 「출하일이 없는 줄」이 아니다
   { ...linkedLine(CASE_NO.unreadable), repairCase: null },
   // 기타건 — 납기요청일 2행 + 납품일(어느 행과도 다르다) + 납품자 + 옛 칸
+  // 🔴 **새 자리**도 여기서만 찬다(2026-11-08): 1차분은 보냈고 2차분은 아직이다.
+  //    옛 칸과 **다른 수**라, 둘이 섞이면 이 도구가 말을 못 하게 된다.
   miscLine({
     deliveredDate: "2026-08-08",
     hasDeliveredBy: true,
     hasLegacyRequestedDueDate: true,
-    dueDateRows: [due("2026-08-01"), due("2026-08-20")],
+    dueDateRows: [due("2026-08-01", false, "2026-08-03", true), due("2026-08-20")],
   }),
 ];
 
@@ -161,6 +170,24 @@ describe("무엇을 재고 있는가 — 표본이 비어 공짜로 통과하지
   test("🔴 납기요청일 0행 · 1행 · 2행 이상이 전부 나온다", () => {
     assert.deepEqual(survey.dueDateRowBuckets.linked, { none: 2, one: 4, many: 1 });
     assert.deepEqual(survey.dueDateRowBuckets.misc, { none: 0, one: 0, many: 1 });
+  });
+
+  test("🔴 **새 자리**도 표본에 들어 있다 — 옛 칸과 다른 수라야 쓸모가 있다 (2026-11-08)", () => {
+    // 🔴 이 못이 없으면, 새 자리를 한 줄도 안 세는 날에도 아래 단언들이 0 == 0 으로
+    //    조용히 통과한다. 그리고 **옛 칸의 수와 달라야** 한다 — 같으면 둘 중 하나를
+    //    다른 하나로 읽고 있다는 뜻이다.
+    assert.deepEqual(survey.deliveredRows, { linked: 0, misc: 1 });
+    assert.deepEqual(survey.deliveredByRows, { linked: 0, misc: 1 });
+    // 옛 칸: 납품일이 적힌 줄 다섯(⑤ 둘 · ⑥ 하나 · ⑦ 하나 · 기타건 하나).
+    assert.deepEqual(survey.deliveredDateLines, { linked: 4, misc: 1 });
+    assert.notDeepEqual(
+      survey.deliveredRows,
+      survey.deliveredDateLines,
+      "새 자리와 옛 칸이 같은 수다 — 한쪽을 다른 쪽으로 읽고 있을 수 있다"
+    );
+    // 🔵 새 자리는 **줄이 아니라 행**을 센다 — 기타건 줄 하나에 행이 둘인데 찬 것은
+    //    하나다. 그 차이가 이 수의 뜻이다(분할 납품의 1차분만 보냈다).
+    assert.equal(survey.dueDateRows.misc, 2);
   });
 
   test("🔴 검산이 통과한다 — 갈래의 합 · 칸의 합 · 방향의 합 · 행 분포의 합", () => {

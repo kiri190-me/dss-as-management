@@ -84,11 +84,29 @@ const MAX_DUE_DATE_NOTE = MAX_SHORT_TEXT;
  * 곧 차례**라서, 저장하는 쪽이 배열 index 로 1부터 매긴다
  * (mutations/domestic-orders.ts). 따로 받으면 화면의 차례와 저장된 차례가
  * 어긋날 수 있고, 그때 어느 쪽이 맞는지 답할 방법이 없다.
+ *
+ * 🔴 **납품일·납품자가 여기 달려 있다**(2026-11-08 — 사용자 결정 1: 「납기요청일
+ * 1번 줄 ↔ 납품일 1번 줄, 행이 묶인다」). 그래서 이 하나가 **한 회차의 약속과
+ * 결과**이고, 둘을 잇는 규칙을 코드 어디에도 적을 필요가 없다.
+ *
+ * ⚠️ **셋이 함께 와야 한다.** 이 목록은 차례가 곧 열쇠라(위) 저장이 통째로 지우고
+ * 다시 넣으므로(replaceDueDates), 보내는 쪽이 납품일을 빠뜨리면 **그 저장 한 번에
+ * 그 줄의 납품 기록이 사라진다.** 보내는 모양을 정하는 자리는 한 곳이다
+ * (domain/domestic-order-cell-edit.ts 의 collectRowFields) — 거기 적힌 것만 나간다.
  */
 export type DomesticOrderDueDateInput = {
   /** "YYYY-MM-DD". 실제 달력에 있는 날이어야 한다. */
   dueDate: string;
   note: string | null;
+  /**
+   * 그 회차를 **실제로 보낸 날**. null 이면 아직 안 보냈다.
+   *
+   * 위 dueDate 와 달리 **비어 있는 것이 정상**이라 빈 값을 거절하지 않는다 —
+   * 납기일만 잡히고 아직 안 나간 회차가 보통의 모습이다.
+   */
+  deliveredDate: string | null;
+  /** 그 회차를 보낸 사람. 🔴 PII — 거절 문구에 값을 싣지 않는다. */
+  deliveredBy: string | null;
 };
 
 export type DomesticOrderFields = {
@@ -238,6 +256,11 @@ export function validateDomesticOrderFields(
    * 조용히 뺀다 — 메모만 적힌 줄은 뺄 수 없다(날짜 없는 납기일은 저장할 자리
    * 자체가 없고, 조용히 버리면 적은 글이 말없이 사라진다).
    *
+   * 🔴 **납품일·납품자가 적힌 줄도 뺄 수 없다**(2026-11-08). 「완전히 빈 줄」의
+   * 뜻이 넷 다 비었다로 넓어졌다는 말이고, 메모 때와 **같은 까닭**이다: 납기일
+   * 없이 납품일만 있는 행은 저장할 자리가 없는데(그 표의 due_date 는 NOT NULL),
+   * 조용히 버리면 사람이 적은 납품 기록이 말없이 사라진다.
+   *
    * ── 오류는 줄 번호까지 말한다 ─────────────────────────────────────────
    * 키가 `dueDates.0` 처럼 index 를 달고 나가서, 폼이 **그 줄 밑에** 문장을
    * 붙일 수 있다. 목록 전체가 잘못된 경우(배열이 아니다 · 개수 상한 초과)만
@@ -282,8 +305,35 @@ export function validateDomesticOrderFields(
         return;
       }
 
-      // 아무것도 안 적은 줄 — 위 '완전히 빈 줄은 거절하지 않고 뺀다'.
-      if (dueDate === "" && note === null) return;
+      // 🔴 납품일 — 빈 값이 **정상**이다(아직 안 나간 회차). 날짜 꼴만 본다.
+      //    실제로 있는 날인지까지 보는 것은 위 normalizeDate 와 같은 까닭이다
+      //    (2026-02-31 은 형식은 맞지만 없는 날이고, 그대로 넘기면 Postgres 가
+      //    22008 로 거절해 사용자에게는 이유 없는 실패만 남는다).
+      let deliveredDate: string | null = null;
+      let deliveredDateRaw = "";
+      if (typeof record.deliveredDate === "string") {
+        deliveredDateRaw = record.deliveredDate.trim();
+      } else if (record.deliveredDate !== null && record.deliveredDate !== undefined) {
+        fieldErrors[key] = "납품일 값을 확인할 수 없습니다.";
+        return;
+      }
+
+      // 🔴 납품자 — PII 다. 길이에 걸려도 **값을 문장에 싣지 않는다**(이 파일의
+      //    다른 칸들과 같다 — 이름표와 상한만 말한다).
+      let deliveredBy: string | null = null;
+      if (typeof record.deliveredBy === "string") {
+        const trimmed = record.deliveredBy.trim();
+        deliveredBy = trimmed === "" ? null : trimmed;
+      } else if (record.deliveredBy !== null && record.deliveredBy !== undefined) {
+        fieldErrors[key] = "납품자 값을 확인할 수 없습니다.";
+        return;
+      }
+
+      // 아무것도 안 적은 줄 — 위 '완전히 빈 줄은 거절하지 않고 뺀다'. 🔴 넷을 다
+      // 본다: 납품 기록만 적힌 줄을 조용히 버리면 사람이 적은 글이 사라진다.
+      if (dueDate === "" && note === null && deliveredDateRaw === "" && deliveredBy === null) {
+        return;
+      }
 
       if (dueDate === "") {
         fieldErrors[key] = "납기요청일을 입력하거나 그 줄을 지워 주세요.";
@@ -297,8 +347,19 @@ export function validateDomesticOrderFields(
         fieldErrors[key] = `납기요청일 메모는 ${MAX_DUE_DATE_NOTE}자를 넘을 수 없습니다.`;
         return;
       }
+      if (deliveredDateRaw !== "") {
+        if (!isValidDateString(deliveredDateRaw)) {
+          fieldErrors[key] = "납품일은 YYYY-MM-DD 형식의 실제 날짜여야 합니다.";
+          return;
+        }
+        deliveredDate = deliveredDateRaw;
+      }
+      if (deliveredBy !== null && deliveredBy.length > MAX_SHORT_TEXT) {
+        fieldErrors[key] = `납품자는 ${MAX_SHORT_TEXT}자를 넘을 수 없습니다.`;
+        return;
+      }
 
-      parsed.push({ dueDate, note });
+      parsed.push({ dueDate, note, deliveredDate, deliveredBy });
     });
     return parsed;
   }

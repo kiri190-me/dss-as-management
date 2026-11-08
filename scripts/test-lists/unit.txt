@@ -338,6 +338,18 @@ src/lib/validation/quote-kind-labels.test.ts
 src/lib/domain/quote-document-support.test.ts
 src/lib/domain/quote-file-name.test.ts
 src/lib/domain/requested-due-date-link.test.ts
+# 🔴 위 파일의 **거울**이다(2026-11-08) — 내자 `납품일` ↔ 수리 건 `실제 출하일`.
+# 그리기(행에 적힌 것이 먼저 · 두 목록의 줄 수가 늘 같다 · 빌려 온 값의 꼬리표)와
+# 묶기 양방향(멈추는 자리 다섯)을 전부 값으로 잰다.
+# 🔴 가장 중요한 단언 하나: **아직 출하 완료가 안 된 건에는 날짜를 밀어 넣지 않는다** —
+#    `actual_shipment_date` 는 종 알림 넷의 침묵 스위치라, 뚫리면 오류가 아니라
+#    「아무것도 안 뜸」으로 드러나 아무도 신고하지 않는다.
+src/lib/domain/delivered-date-link.test.ts
+# 🔴 납기요청일 **행을 더하고 지우는 울타리 둘**(사용자 결정 5 · 9). 화면의 두 단추가
+# 서버가 거절하는 그 판정에 그대로 물어보는지도 함께 본다.
+# 🔴 두 시험이 **닫는 길**을 지킨다 — 기록을 지우기만 하는 저장과, 이미 둘 이상인
+#    붙은 줄을 줄이는 저장. 막으면 그 줄은 영영 고칠 수도 지울 수도 없게 된다.
+src/lib/domain/domestic-order-due-date-rows.test.ts
 src/lib/domain/fault-symptom-breakdown.test.ts
 src/lib/domain/pie-slices.test.ts
 src/lib/domain/product-model-breakdown.test.ts

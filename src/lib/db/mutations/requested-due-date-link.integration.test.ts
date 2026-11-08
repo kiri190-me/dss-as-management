@@ -223,7 +223,7 @@ describe("수리 건 → 내자", () => {
     const caseId = await createCase("2096-09-01");
     const orderId = await createOrder({
       repairCaseId: caseId,
-      dueDates: [{ dueDate: "2096-09-01", note: "1차분" }],
+      dueDates: [{ dueDate: "2096-09-01", note: "1차분", deliveredDate: null, deliveredBy: null }],
     });
     const [rowBefore] = await readDueDateRows(orderId);
     const orderBefore = await readOrder(orderId);
@@ -269,10 +269,18 @@ describe("수리 건 → 내자", () => {
     const caseId = await createCase("2096-09-01");
     const orderId = await createOrder({
       repairCaseId: caseId,
-      dueDates: [
-        { dueDate: "2096-09-01", note: "1차분" },
-        { dueDate: "2096-09-20", note: "2차분" },
-      ],
+      dueDates: [{ dueDate: "2096-09-01", note: "1차분", deliveredDate: null, deliveredBy: null }],
+    });
+    // 🔴 **둘째 행은 SQL 로 직접 넣는다**(2026-11-08). 2026-11-07 사용자 결정 9 로
+    //    「수리 건이 연결된 줄에는 납기요청일을 하나만」이 되어, 저장 통로로는 이
+    //    모양을 만들 수 없다(domain/domestic-order-due-date-rows.ts).
+    //    🔵 그래도 이 시험은 그대로 둔다 — **이미 둘 이상인 줄**이 개발 DB 에 실제로
+    //    있고(2026-11-07 실측), 그 줄에서도 묶기는 멈춰야 한다.
+    await db.insert(domesticOrderDueDates).values({
+      domesticOrderId: orderId,
+      dueDate: "2096-09-20",
+      note: "2차분",
+      displayOrder: 2,
     });
 
     const result = await saveCaseDueDate(caseId, "2096-10-15");
@@ -295,7 +303,7 @@ describe("수리 건 → 내자", () => {
     const caseId = await createCase("2096-09-01");
     const orderId = await createOrder({
       repairCaseId: caseId,
-      dueDates: [{ dueDate: "2096-09-01", note: "1차분" }],
+      dueDates: [{ dueDate: "2096-09-01", note: "1차분", deliveredDate: null, deliveredBy: null }],
     });
 
     const result = await saveCaseDueDate(caseId, null);
@@ -316,7 +324,7 @@ describe("수리 건 → 내자", () => {
     const caseId = await createCase("2096-09-01");
     const orderId = await createOrder({
       repairCaseId: caseId,
-      dueDates: [{ dueDate: "2096-09-01", note: "1차분" }],
+      dueDates: [{ dueDate: "2096-09-01", note: "1차분", deliveredDate: null, deliveredBy: null }],
     });
     const stale = (await readCase(caseId)).version - 1;
 
@@ -342,7 +350,7 @@ describe("내자 → 수리 건", () => {
     const caseId = await createCase("2096-09-01");
     const orderId = await createOrder({
       repairCaseId: caseId,
-      dueDates: [{ dueDate: "2096-09-01", note: "1차분" }],
+      dueDates: [{ dueDate: "2096-09-01", note: "1차분", deliveredDate: null, deliveredBy: null }],
     });
     const caseBefore = await readCase(caseId);
 
@@ -351,7 +359,7 @@ describe("내자 → 수리 건", () => {
       expectedVersion: (await readOrder(orderId)).version,
       fields: fields({
         repairCaseId: caseId,
-        dueDates: [{ dueDate: "2096-11-20", note: "1차분" }],
+        dueDates: [{ dueDate: "2096-11-20", note: "1차분", deliveredDate: null, deliveredBy: null }],
       }),
       actorUserId,
     });
@@ -369,14 +377,14 @@ describe("내자 → 수리 건", () => {
     const caseId = await createCase(null);
     const orderId = await createOrder({
       repairCaseId: caseId,
-      dueDates: [{ dueDate: "2096-09-01", note: null }],
+      dueDates: [{ dueDate: "2096-09-01", note: null, deliveredDate: null, deliveredBy: null }],
     });
     const caseBefore = await readCase(caseId);
 
     const result = await updateDomesticOrder({
       id: orderId,
       expectedVersion: (await readOrder(orderId)).version,
-      fields: fields({ repairCaseId: caseId, dueDates: [{ dueDate: "2096-11-20", note: null }] }),
+      fields: fields({ repairCaseId: caseId, dueDates: [{ dueDate: "2096-11-20", note: null, deliveredDate: null, deliveredBy: null }] }),
       actorUserId,
     });
     assert.equal(result.ok, true);
@@ -392,14 +400,14 @@ describe("내자 → 수리 건", () => {
     const caseId = await createCase("2096-09-01");
     const orderId = await createOrder({
       repairCaseId: caseId,
-      dueDates: [{ dueDate: "2096-09-01", note: null }],
+      dueDates: [{ dueDate: "2096-09-01", note: null, deliveredDate: null, deliveredBy: null }],
     });
 
     const result = await updateDomesticOrder({
       id: orderId,
       expectedVersion: (await readOrder(orderId)).version,
       // 인수일은 2096-08-05 다.
-      fields: fields({ repairCaseId: caseId, dueDates: [{ dueDate: "2096-08-01", note: null }] }),
+      fields: fields({ repairCaseId: caseId, dueDates: [{ dueDate: "2096-08-01", note: null, deliveredDate: null, deliveredBy: null }] }),
       actorUserId,
     });
     assert.equal(result.ok, true, "내자 쪽 저장까지 막으면 안 된다 — 그쪽에는 그 잣대가 없다");
@@ -425,7 +433,7 @@ describe("내자 → 수리 건", () => {
     const orderId = await createOrder({
       repairCaseId: caseId,
       purchaseOrderNumber: "PO-BEFORE",
-      dueDates: [{ dueDate: "2096-09-20", note: "1차분" }],
+      dueDates: [{ dueDate: "2096-09-20", note: "1차분", deliveredDate: null, deliveredBy: null }],
     });
     // 🔴 **줄을 만든 뒤에** 수리 건의 날짜를 적는다 — 줄을 만드는 저장도 묶기를 타므로
     // (바로 아래 시험), 먼저 적어 두면 그 create 가 이 값을 2096-09-20 으로 덮어
@@ -445,7 +453,7 @@ describe("내자 → 수리 건", () => {
         repairCaseId: caseId,
         purchaseOrderNumber: "PO-AFTER",
         // 화면이 되실어 보내는 것과 같은 목록이다(차례도 그대로).
-        dueDates: [{ dueDate: "2096-09-20", note: "1차분" }],
+        dueDates: [{ dueDate: "2096-09-20", note: "1차분", deliveredDate: null, deliveredBy: null }],
       }),
       actorUserId,
     });
@@ -463,7 +471,7 @@ describe("내자 → 수리 건", () => {
     const result = await createDomesticOrder({
       fields: fields({
         repairCaseId: caseId,
-        dueDates: [{ dueDate: "2096-11-20", note: null }],
+        dueDates: [{ dueDate: "2096-11-20", note: null, deliveredDate: null, deliveredBy: null }],
       }),
       actorUserId,
     });
@@ -478,11 +486,11 @@ describe("내자 → 수리 건", () => {
     const caseId = await createCase("2096-09-01");
     const firstId = await createOrder({
       repairCaseId: caseId,
-      dueDates: [{ dueDate: "2096-09-10", note: "1차 발주" }],
+      dueDates: [{ dueDate: "2096-09-10", note: "1차 발주", deliveredDate: null, deliveredBy: null }],
     });
     await createOrder({
       repairCaseId: caseId,
-      dueDates: [{ dueDate: "2096-09-25", note: "2차 발주" }],
+      dueDates: [{ dueDate: "2096-09-25", note: "2차 발주", deliveredDate: null, deliveredBy: null }],
     });
     // 🔴 **지금 적혀 있는 값**을 기준으로 삼는다 — 첫 줄을 만든 저장은 줄이 하나였으므로
     // 그때 이미 묶였고(바로 위 시험), 둘째 줄부터 「여럿」이 된다. 처음 적은 값으로
@@ -492,7 +500,7 @@ describe("내자 → 수리 건", () => {
     const result = await updateDomesticOrder({
       id: firstId,
       expectedVersion: (await readOrder(firstId)).version,
-      fields: fields({ repairCaseId: caseId, dueDates: [{ dueDate: "2096-11-20", note: "1차 발주" }] }),
+      fields: fields({ repairCaseId: caseId, dueDates: [{ dueDate: "2096-11-20", note: "1차 발주", deliveredDate: null, deliveredBy: null }] }),
       actorUserId,
     });
     assert.equal(result.ok, true);

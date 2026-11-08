@@ -33,13 +33,13 @@ import type {
  */
 import {
   dash,
-  DELIVERED_DATE_NOTE,
   formatAmount,
   formatMinorUnits,
   NO_ORDER_DATE_LABEL,
   paymentLabel,
   toMinorUnits,
 } from "@/lib/domain/domestic-order-display";
+import { DOMESTIC_ORDER_DELIVERED_DATE_NOTE } from "@/lib/domain/delivered-date-link";
 import { resolveDomesticOrderModelLink } from "@/lib/domain/domestic-order-detail-link";
 import {
   collectDomesticOrderYears,
@@ -97,6 +97,14 @@ import DomesticOrderCompletionReleaseDialog from "./DomesticOrderCompletionRelea
 import DomesticOrderEditForm, { type QuoteOption } from "./DomesticOrderEditForm";
 import DomesticOrderTextCell from "./DomesticOrderTextCell";
 import DomesticOrderDueDatesCell from "./DomesticOrderDueDatesCell";
+import DomesticOrderDeliveriesCell from "./DomesticOrderDeliveriesCell";
+// 🔴 납품 두 칸이 그리는 것 · 빌려 온 값의 꼬리표 모양 — 「기타건 현황」과 **같은
+// 부품**이다(한쪽만 고쳐지면 같은 줄이 메뉴에 따라 다른 글자로 보인다).
+import {
+  borrowedBadgeClass,
+  DeliveredByCellContent,
+  DeliveredDateCellContent,
+} from "./delivered-cell-content";
 import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
 
 /**
@@ -358,31 +366,38 @@ import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
  * 나가 문서 바닥에 자리를 주장한다 — 이 화면이 바로 그것으로 405px 을 흘렸다
  * (EditRowButton 주석의 실측). 자리를 줄이려다 자리를 새로 만드는 셈이 된다.
  *
- * ── ⚠️ 납품일은 연결된 수리 건의 실제 출하일이다. 표에서 적지 않는다 ────
- * 수리 건이 연결된 줄에서 이 칸이 그리는 것은 그 건의 `actual_shipment_date`
- * 이고(queries 의 displayDeliveredDate), 그 줄의 `delivered_date` 에 값이 있어도
- * 보지 않는다. 실제 출하일은 워크플로가 출하 완료 때 자동으로 찍는 값이라 사람이
- * 손을 댈 수 없고, "언제 나갔는가"에 대해 이 시스템이 가진 유일한 사실이다.
+ * ── 🔴 납품일·납품자는 **납기요청일 줄마다 하나**다 (2026-11-08) ──────────
+ * 사용자 요구 원문: 「납기 요청일을 여러줄로 두면, 납품일, 납품자도 그 수에 맞게
+ * 설정할 수 있도록 해주고, **납품일을 표에서 직접 바꿀 수 있도록** 해주고, 납품일과
+ * 수리건 상세의 실제 출하일이 **서로 연동**되도록 해줘.」
  *
- * **연결이 없는 줄은 그 줄의 `delivered_date` 를 그린다**(2026-09-11 사용자
- * 결정) — 적는 자리는 `줄 수정` 폼의 입력칸이다(연결이 없을 때만 열린다 —
- * DomesticOrderEditForm). 둘을 섞지는 않는다: 연결된 줄이 비었다고 손 값으로
- * 메우지 않는다(resolveDomesticOrderDeliveredDate).
+ * 그래서 이 두 칸은 **1번 줄 ↔ 1번 줄**로 납기요청일 칸과 자리가 맞고, 두 칸의 줄
+ * 수는 늘 같다(안 적은 회차도 "-" 한 줄을 차지한다 —
+ * ./delivered-cell-content.tsx). 칼럼은 여전히 22개이고, 늘어나는 것은 옆이 아니라
+ * 그 줄의 높이뿐이다(납기요청일 칸과 같은 판단).
  *
- * **그래서 이 칸은 빈칸일 수 있다** — 연결은 있어도 아직 안 나간 줄, 연결 없이
- * 날짜를 안 적은 줄이 그렇다. 아무 말 없이 비워 두면 **자료가 사라진 것으로
- * 읽히므로**, 표 위에 한 줄(DELIVERED_DATE_NOTE)을 적고 표 머리말과 카드
- * 이름표에도 같은 말을 title 로 붙인다. 22칼럼을 옆으로 밀어 보는 표라, 표 위의
- * 한 줄만으로는 그 칸에 닿았을 때 설명이 화면 밖에 있다.
+ * **아무 줄에도 안 적혀 있으면** 연결된 수리 건의 실제 출하일을 빌려 그리고, 거기엔
+ * `수리 건 출하일` 꼬리표가 붙는다 — 표시 없이 날짜만 그리면 「이 줄에 적어 둔 값」
+ * 으로 읽히고, 나중에 수리 건 쪽이 바뀌면 아무도 안 건드렸는데 값이 달라진 것으로
+ * 보인다(납기요청일 꼬리표와 같은 까닭).
  *
- * 이 칸에는 **칸 편집을 붙이지 않는다** — 연결 여부와 무관하게 없다. 연결된
- * 줄에서는 못 적는 값이라, 눌러서 고칠 수 있는 열두 칸에 이것이 없는 것은
- * 빠뜨린 것이 아니다. **날짜 셋에 칸 편집이 붙은 뒤에도 그대로다** — 옆 칸들이
- * 눌러서 고쳐진다는 이유로 이 칸까지 열면, 자동으로 따라오던 출하일이 이 줄에
- * 박제된다. 연결 없는 줄의 날짜는 `줄 수정` 폼에서 고친다.
+ * **그래서 이 칸은 빈칸일 수 있다** — 아직 안 나간 줄, 행이 아예 없는 줄이 그렇다.
+ * 아무 말 없이 비워 두면 **자료가 사라진 것으로 읽히므로**, 표 위에 한 줄
+ * (DOMESTIC_ORDER_DELIVERED_DATE_NOTE)을 적고 표 머리말과 카드 이름표에도 같은 말을
+ * title 로 붙인다. 22칼럼을 옆으로 밀어 보는 표라, 표 위의 한 줄만으로는 그 칸에
+ * 닿았을 때 설명이 화면 밖에 있다.
  *
- * ⚠️ **`납품자`(deliveredBy)는 이름만 비슷한 다른 칸이다.** 그쪽은 지금도 눌러서
- * 고치는 열두 칸 중 하나다.
+ * 🔴 **이 두 칸은 이제 눌러서 고친다** — 2026-11-07 까지 「붙이지 않는다」고 적혀
+ * 있던 바로 그 자리다. 그때의 까닭은 「연결된 줄의 납품일은 수리 건의 출하일이라
+ * 사람이 적는 값이 아니고, 칸 편집을 붙이면 따라오던 출하일이 이 줄에 박제된다」
+ * 였는데, **박제를 막는 방법이 숨기기에서 맞추기로 바뀌었다**(사용자 결정 2 —
+ * 양방향). 눌러 열리는 것은 열한 칸짜리 글자 편집이 아니라 **회차별 납품 편집**이고
+ * (DomesticOrderDeliveriesCell), 두 칸 어느 쪽을 눌러도 같은 목록이 열린다.
+ *
+ * 🔵 옛 칼럼(`domestic_orders.delivered_date`·`delivered_by`)은 **지우지 않았지만
+ * 이 화면 어디에도 안 보인다**(사용자 결정 11 — PO 가 같은 DB 에서 쓴다). 그래서
+ * `deliveredBy` 는 눌러 고치는 칸 목록에서 빠졌다 — 보이지 않는 값을 고치는 단추는
+ * 글자를 적어도 아무 데도 안 뜨는 죽은 단추다.
  *
  * ── 납기요청일이 비어 있으면 수리 건의 고객 요청 납기일이 대신 보인다 ────
  * 그 줄의 딸린 표에 날짜가 하나라도 있으면 **그것이 전부**이고, 하나도 없을
@@ -462,14 +477,12 @@ function sumAmounts(rows: DomesticOrderListItem[]): { total: string; skipped: nu
 }
 
 /**
- * 빌려 온 값 옆에 붙는 작은 표시의 모양. `발주일 미정` 배지와 **일부러 다른
- * 색**이다 — 저쪽은 "챙겨야 하는 줄"이라는 주의 표시(amber)이고, 이것은 값의
- * 출처를 알리는 중립적인 꼬리표다. 같은 색으로 두면 빌려 온 날짜가 전부 경고로
- * 읽힌다.
+ * 빌려 온 값 옆에 붙는 작은 표시의 모양(borrowedBadgeClass)은 **이 파일에 없다** —
+ * 2026-11-08 에 납품 두 칸이 같은 꼬리표를 쓰게 되면서 공용 자리로 내렸다
+ * (./delivered-cell-content.tsx). `발주일 미정` 배지와 **일부러 다른 색**인 까닭은
+ * 그대로다: 저쪽은 "챙겨야 하는 줄"이라는 주의 표시(amber)이고, 이것은 값의 출처를
+ * 알리는 중립적인 꼬리표다. 같은 색으로 두면 빌려 온 날짜가 전부 경고로 읽힌다.
  */
-const borrowedBadgeClass =
-  "ml-1.5 rounded border border-zinc-300 px-1 py-0.5 text-[11px] leading-none font-normal text-zinc-500 dark:border-zinc-600 dark:text-zinc-400";
-
 /**
  * 표의 `납기요청일` 칸. **칼럼은 여전히 22개다** — 날짜가 여럿이 될 수 있게
  * 됐다고 칸을 늘리지 않는다(파일 헤더의 '표 22칼럼'). 늘어나는 것은 옆이 아니라
@@ -1044,6 +1057,16 @@ const CARD_FIELD_GROUPS: {
      * 안 된다. 접는 방식은 바로 아래 `<dd>` 가 쓰는 것과 결과가 같은 값이다.
      */
     dueDatesEdit?: { wrapping: InlineEditCellWrapping };
+    /**
+     * 🔴 납품일·납품자 칸 — **회차별 납품**을 그 자리에서 고친다
+     * (DomesticOrderDeliveriesCell, 2026-11-08). 위 둘과 또 따로인 것은 값이
+     * **행마다 둘**이라서다(그 파일 헤더).
+     *
+     * 🔵 **두 칸이 같은 편집칸을 연다.** 납품일과 납품자는 같은 행의 두 값이라,
+     * 따로 열면 한쪽을 저장하는 동안 다른 쪽이 낡은 값을 들고 있게 된다. 어느
+     * 칸을 눌렀든 열리는 것은 같은 목록이다.
+     */
+    deliveriesEdit?: { wrapping: InlineEditCellWrapping };
   }[];
 }[] = [
   {
@@ -1148,19 +1171,21 @@ const CARD_FIELD_GROUPS: {
         multiline: true,
         edit: { field: "progressNote", wrapping: "break-words whitespace-pre-line" },
       },
-      // ⚠️ 표와 **같은 값**(displayDeliveredDate)이다 — 연결된 줄은 수리 건의 실제
-      // 출하일, 연결 없는 줄은 그 줄에 적은 deliveredDate. 한쪽만 고치면 같은 자료가
-      // 화면 크기에 따라 다른 날짜로 읽힌다(파일 헤더). 눌러서 고칠 수 없는 칸이라
-      // edit 도 없다.
+      // 🔴 표와 **같은 부품**이다(2026-11-08). 납품일·납품자는 납기요청일 행마다
+      // 하나씩이라 둘 다 여러 줄이 될 수 있고, 두 칸의 줄 수는 늘 같다 — 그리는 일을
+      // 한 부품에 맡기지 않으면 좁은 화면에서만 짝이 어긋난다(파일 헤더의 표/카드
+      // 원칙). 눌러서 고치는 것도 표와 같은 부품이다(deliveriesEdit).
       {
         label: "납품일",
-        of: (row) => dash(row.displayDeliveredDate),
-        hint: DELIVERED_DATE_NOTE,
+        of: (row) => <DeliveredDateCellContent row={row} />,
+        hint: DOMESTIC_ORDER_DELIVERED_DATE_NOTE,
+        deliveriesEdit: { wrapping: "break-words whitespace-normal" },
       },
       {
         label: "납품자",
-        of: (row) => dash(row.deliveredBy),
-        edit: { field: "deliveredBy", wrapping: "whitespace-nowrap" },
+        of: (row) => <DeliveredByCellContent row={row} />,
+        hint: DOMESTIC_ORDER_DELIVERED_DATE_NOTE,
+        deliveriesEdit: { wrapping: "break-words whitespace-normal" },
       },
     ],
   },
@@ -2263,7 +2288,9 @@ export default function DomesticOrderListScreen({
                 "등록된 …이 없습니다" 한 줄뿐이라, 없는 표의 없는 칸을 설명하는
                 문장이 된다. */}
             {showDeliveredDateNote && (
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">{DELIVERED_DATE_NOTE}</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                {DOMESTIC_ORDER_DELIVERED_DATE_NOTE}
+              </p>
             )}
           </div>
         )}
@@ -2339,14 +2366,20 @@ export default function DomesticOrderListScreen({
         />
       )}
 
-      {/* 🔴 납기요청일은 저장됐는데 **수리 건의 고객 요청 납기일이 그대로**인 경우
-          (2026-10-30). 위 둘과 달리 **이 줄의 저장은 성공했다** — 그래서 서버가 준 글이
-          "납기요청일은 저장했습니다"로 시작하고, 이 상자는 못 따라간 까닭과 어디서
-          맞춰야 하는지를 전한다. 0.5초 저장 팝업으로는 전할 수 없는 글이다. */}
+      {/* 🔴 이 줄은 저장됐는데 **수리 건의 칸이 그대로**인 경우. 위 둘과 달리 **이 줄의
+          저장은 성공했다** — 그래서 서버가 준 글이 "…은 저장했습니다"로 시작하고, 이
+          상자는 못 따라간 까닭과 어디서 맞춰야 하는지를 전한다. 0.5초 저장 팝업으로는
+          전할 수 없는 글이다.
+
+          🔴 **묶이는 칸이 둘이다**(2026-10-30 납기요청일 ↔ 고객 요청 납기일,
+          2026-11-08 납품일 ↔ 실제 출하일). 한 저장이 둘 다 못 맞출 수 있어 글도 둘이
+          올라오므로(domestic-order-link-notices.ts), 제목에 어느 칸인지를 박지 않는다 —
+          박으면 나머지 하나가 **제목이 가리키지 않는 글**로 상자 안에 섞인다.
+          어느 칸이 안 바뀌었는지는 서버가 준 문장이 저마다 말한다. */}
       {requestedDueDateNotLinked !== null && (
         <NoticePopup
-          title="수리 건의 고객 요청 납기일은 바뀌지 않았습니다"
-          lines={[requestedDueDateNotLinked]}
+          title="수리 건의 날짜는 바뀌지 않았습니다"
+          lines={requestedDueDateNotLinked.split("\n\n")}
           onClose={() => setRequestedDueDateNotLinked(null)}
         />
       )}
@@ -2422,15 +2455,18 @@ export default function DomesticOrderListScreen({
                   <th className="px-3 py-2">견적발행일</th>
                   <th className="px-3 py-2">견적서번호</th>
                   <th className="px-3 py-2">현황</th>
-                  {/* 이 칸만 머리말에 설명이 붙는다 — 여기 보이는 날짜의 출처가
-                      연결된 줄은 수리 건의 출하일, 연결 없는 줄은 그 줄에 적은
-                      날짜로 다르고, 그래서 빈칸이 될 수 있다는 사실을 칸에 닿았을
+                  {/* 🔴 이 두 칸에 머리말 설명이 붙는다 — 값이 **납기요청일 줄마다
+                      하나**라는 것과, 아무 줄에도 안 적힌 건은 수리 건의 출하일을
+                      빌려 그린다는 것(그래서 빈칸이 될 수 있다는 것)을 칸에 닿았을
                       때 알 수 있어야 한다. 표 위의 한 줄만으로는 22칼럼을 옆으로
-                      밀어 본 뒤에는 화면 밖이다. */}
-                  <th className="px-3 py-2" title={DELIVERED_DATE_NOTE}>
+                      밀어 본 뒤에는 화면 밖이다. 두 칸이 **같은 글자**를 쓰는 것은
+                      같은 행의 두 값이기 때문이다. */}
+                  <th className="px-3 py-2" title={DOMESTIC_ORDER_DELIVERED_DATE_NOTE}>
                     납품일
                   </th>
-                  <th className="px-3 py-2">납품자</th>
+                  <th className="px-3 py-2" title={DOMESTIC_ORDER_DELIVERED_DATE_NOTE}>
+                    납품자
+                  </th>
                   <th className="px-3 py-2">세금계산서발행일</th>
                   <th className="px-3 py-2 text-right">금액(VAT별도)</th>
                   <th className="px-3 py-2">입금완료 여부</th>
@@ -2708,23 +2744,39 @@ export default function DomesticOrderListScreen({
                             <div className={noteCellContentClass}>{dash(row.progressNote)}</div>
                           )}
                         </td>
-                        {/* ⚠️ 연결된 줄은 그 줄의 deliveredDate 가 아니라 수리
-                            건의 실제 출하일, 연결 없는 줄은 그 deliveredDate 다
-                            (파일 헤더). 눌러서 고칠 수 없는 칸이라
-                            DomesticOrderTextCell 이 붙지 않는다. */}
+                        {/* 🔴 납품일·납품자는 **납기요청일 행마다 하나씩**이다
+                            (2026-11-08 — 파일 헤더의 그 묶음). 날짜가 여럿이어도
+                            칼럼은 22개 그대로이고 그 줄의 높이만 늘어난다(줄은
+                            부품이 block 짜리 <span> 으로 나눈다).
+
+                            누르면 **두 칸 다 같은 편집칸**이 열린다 — 같은 행의 두
+                            값이라, 따로 열면 한쪽을 저장하는 동안 다른 쪽이 낡은
+                            값을 들고 있게 된다. numeric 은 날짜 칸 셋과 같은
+                            이유로 넘긴다(`<td>` 의 tabular-nums 가 버튼 안까지
+                            안 내려온다). */}
                         <td className="px-3 py-2 tabular-nums">
-                          {dash(row.displayDeliveredDate)}
+                          {canEdit ? (
+                            <DomesticOrderDeliveriesCell
+                              row={row}
+                              displayText={<DeliveredDateCellContent row={row} />}
+                              wrapping="whitespace-nowrap"
+                              numeric="tabular-nums"
+                              onLinkNotice={setRequestedDueDateNotLinked}
+                            />
+                          ) : (
+                            <DeliveredDateCellContent row={row} />
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           {canEdit ? (
-                            <DomesticOrderTextCell
+                            <DomesticOrderDeliveriesCell
                               row={row}
-                              field="deliveredBy"
-                              displayText={dash(row.deliveredBy)}
+                              displayText={<DeliveredByCellContent row={row} />}
                               wrapping="whitespace-nowrap"
+                              onLinkNotice={setRequestedDueDateNotLinked}
                             />
                           ) : (
-                            dash(row.deliveredBy)
+                            <DeliveredByCellContent row={row} />
                           )}
                         </td>
                         <td className="px-3 py-2 tabular-nums">
@@ -2904,6 +2956,14 @@ export default function DomesticOrderListScreen({
                                           displayText={field.of(row)}
                                           wrapping={field.dueDatesEdit.wrapping}
                                           onRequestedDueDateNotLinked={setRequestedDueDateNotLinked}
+                                        />
+                                      ) : canEdit && field.deliveriesEdit ? (
+                                        // 납품일·납품자 — 회차별 납품을 고친다(표와 같은 부품).
+                                        <DomesticOrderDeliveriesCell
+                                          row={row}
+                                          displayText={field.of(row)}
+                                          wrapping={field.deliveriesEdit.wrapping}
+                                          onLinkNotice={setRequestedDueDateNotLinked}
                                         />
                                       ) : canEdit && field.edit ? (
                                         <DomesticOrderTextCell

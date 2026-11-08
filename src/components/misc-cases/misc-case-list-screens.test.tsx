@@ -84,7 +84,9 @@ function row(id: string, fields: Partial<MiscCaseListRow> = {}): MiscCaseListRow
     progressNote: null,
     displayAmountExcludingVat: null,
     paymentCompleted: false,
-    displayDeliveredDate: null,
+    deliveredDateLines: [],
+    deliveredByLines: [],
+    deliveredDateBorrowed: false,
     serialNumber: null,
     lotNumber: null,
     ...fields,
@@ -103,7 +105,10 @@ const FULL = row("11111111-1111-4111-8111-111111111111", {
   progressNote: "발주 대기",
   displayAmountExcludingVat: "1234567.00",
   paymentCompleted: true,
-  displayDeliveredDate: "2026-10-20",
+  // 🔴 2026-11-08 — 행마다 하나씩이다. 1차분을 보낸 줄.
+  deliveredDateLines: ["2026-10-20"],
+  deliveredByLines: ["담당자1"],
+  deliveredDateBorrowed: false,
   // 🔴 서버가 접어 보낸 상태다(domain/misc-case-status.ts) — 화면은 이 값을 배지로만
   //    그린다. 접는 규칙 자체는 그 파일의 시험이 값으로 잰다.
   status: "COMPLETED",
@@ -171,9 +176,16 @@ describe("🔴 표 — 값이 나오고, 줄마다 기타건 상세로 가는 �
       "발주 대기",
       "1,234,567", // 금액 서식 — 세 자리마다 쉼표, 소수점 이하 0 은 적지 않는다
       "2026-10-20",
+      // 🔴 2026-11-08 에 생긴 칸 — 납품자. 분할 납품은 기타건에서만 생기므로
+      //    여러 줄이 실제로 서는 곳이 이 화면이다(사용자 결정 9).
+      "담당자1",
     ]) {
       assert.ok(tableHtml.includes(value), `표에 ${value} 가 없다`);
     }
+    // 🔴 카드에서도 같은 두 값이 보인다 — 좁은 화면이라고 칸이 사라지면 같은 줄이
+    //    화면 폭에 따라 다르게 읽힌다.
+    assert.ok(cardHtml.includes("2026-10-20"), "카드에 납품일이 없다");
+    assert.ok(cardHtml.includes("담당자1"), "카드에 납품자가 없다");
     // 발주일이 없는 줄은 "-" 가 아니라 「발주일 미정」이다(내자 정리와 같은 글자).
     assert.ok(tableHtml.includes(NO_ORDER_DATE_LABEL), tableHtml);
   });

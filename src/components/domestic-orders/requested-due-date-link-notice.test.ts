@@ -2,6 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import {
+  domesticOrderLinkNotices,
+  domesticOrderLinkNoticeText,
+} from "./domestic-order-link-notices";
+
 /**
  * ============================================================================
  * 🔴 내자 정리 — 「수리 건이 못 따라갔다」를 **사람이 알게 하는가** (2026-10-30)
@@ -39,39 +44,87 @@ const read = (relativePath: string) =>
 const flat = (source: string) => source.replace(/\s+/g, " ");
 
 const dueDatesCell = read("src/components/domestic-orders/DomesticOrderDueDatesCell.tsx");
+const deliveriesCell = read("src/components/domestic-orders/DomesticOrderDeliveriesCell.tsx");
 const editForm = read("src/components/domestic-orders/DomesticOrderEditForm.tsx");
 const listScreen = read("src/components/domestic-orders/DomesticOrderListScreen.tsx");
 
 /**
- * 성공한 저장에서 **「못 맞췄다」를 읽고 먼저 돌아가는가.** 두 통로가 같은 모양을
+ * 성공한 저장에서 **「못 맞췄다」를 읽고 먼저 돌아가는가.** 세 통로가 같은 모양을
  * 쓰므로 한 함수로 본다 — 한쪽만 고쳐지면 그 자리에서 깨진다.
+ *
+ * 🔴 **모양이 바뀌었다**(2026-11-08). 2026-11-07 까지는 묶이는 칸이 하나여서
+ * `result.requestedDueDateLink` 를 그 자리에서 읽었는데, 납품일 ↔ 실제 출하일이
+ * 더해지면서 **한 저장이 둘 다 못 맞출 수 있게** 되었다. 하나만 읽으면 나머지
+ * 하나가 조용히 사라지므로, 모으는 일을 한 곳이 한다
+ * (domestic-order-link-notices.ts — 세 통로가 그 함수를 부른다).
  */
 function assertReadsLinkOutcomeBeforePopup(source: string, label: string) {
   assert.match(
     flat(source),
-    /const link = result\.requestedDueDateLink; if \(link && !link\.linked\) \{ onRequestedDueDateNotLinked\(link\.message\); return; \}/,
-    `${label}: 「못 맞췄다」를 읽고 알림으로 올려 보내는 길이 없다`
+    /const noticeText = domesticOrderLinkNoticeText\(domesticOrderLinkNotices\(result\)\); if \(noticeText !== null\) \{ on[A-Za-z]+\(noticeText\); return; \}/,
+    `${label}: 「못 맞췄다」를 **둘 다** 읽어 알림으로 올려 보내는 길이 없다`
   );
+}
+
+/** 알림을 올려 보내는 줄이 **저장 팝업보다 앞**인가. 뒤면 두 상자가 함께 뜬다. */
+function assertNoticeBeforeSavePopup(source: string, popupNeedle: string, label: string) {
+  const flattened = flat(source);
+  const noticeAt = flattened.indexOf("(noticeText); return;");
+  const popupAt = flattened.indexOf(popupNeedle);
+  assert.ok(noticeAt >= 0, `${label}: 알림을 올려 보내는 줄이 없다`);
+  assert.ok(popupAt >= 0, `${label}: 저장 팝업 문구가 바뀌었다 — 이 시험도 함께 볼 것`);
+  assert.ok(noticeAt < popupAt, `${label}: 알림이 저장 팝업보다 뒤에 있다 — 두 상자가 함께 뜬다`);
 }
 
 test("🔴 납기요청일 칸은 「수리 건이 못 따라갔다」를 알림으로 올려 보낸다 — 저장 팝업 대신", () => {
   assertReadsLinkOutcomeBeforePopup(dueDatesCell, "납기요청일 칸");
-  // 그 분기가 **저장 팝업보다 앞**에 있어야 한다. 뒤에 있으면 둘 다 뜬다.
-  const flattened = flat(dueDatesCell);
-  assert.ok(
-    flattened.indexOf("onRequestedDueDateNotLinked(link.message)") <
-      flattened.indexOf('showSavePopup({ message: "납기요청일을 저장했습니다."'),
-    "알림이 저장 팝업보다 뒤에 있다 — 두 상자가 함께 뜬다"
+  assertNoticeBeforeSavePopup(
+    dueDatesCell,
+    'showSavePopup({ message: "납기요청일을 저장했습니다."',
+    "납기요청일 칸"
+  );
+});
+
+test("🔴 납품 칸도 같은 답을 읽는다 — 납품일을 고친 길에서만 알림이 사라지면 안 된다", () => {
+  // 🔴 2026-11-08 에 생긴 세 번째 통로다(DomesticOrderDeliveriesCell). 표의 `납품일`
+  //    칸과 `납품자` 칸이 둘 다 이 부품을 연다.
+  assertReadsLinkOutcomeBeforePopup(deliveriesCell, "납품 칸");
+  assertNoticeBeforeSavePopup(
+    deliveriesCell,
+    'showSavePopup({ message: "납품일·납품자를 저장했습니다."',
+    "납품 칸"
   );
 });
 
 test("🔴 `줄 수정` 폼도 같은 답을 읽는다 — 어느 길로 고쳤느냐로 갈리지 않는다", () => {
   assertReadsLinkOutcomeBeforePopup(editForm, "줄 수정 폼");
-  const flattened = flat(editForm);
-  assert.ok(
-    flattened.indexOf("onRequestedDueDateNotLinked(link.message)") <
-      flattened.indexOf('showSavePopup({ message: row ? "내자 줄을 저장했습니다."'),
-    "알림이 저장 팝업보다 뒤에 있다 — 두 상자가 함께 뜬다"
+  assertNoticeBeforeSavePopup(
+    editForm,
+    'showSavePopup({ message: row ? "내자 줄을 저장했습니다."',
+    "줄 수정 폼"
+  );
+});
+
+test("🔴 모으는 함수가 **둘 다** 담는다 — 하나만 담으면 나머지가 조용히 사라진다", () => {
+  // 글자로 세지 않고 **값으로** 잰다 — 이 파일의 다른 시험들과 달리 이 함수는
+  // 서버 액션을 끌어오지 않아 그대로 부를 수 있다.
+  const notices = domesticOrderLinkNotices({
+    requestedDueDateLink: { linked: false, reason: "AMBIGUOUS", message: "납기요청일 쪽 글" },
+    deliveredDateLink: { linked: false, reason: "NOT_SHIPPED", message: "납품일 쪽 글" },
+  });
+  assert.deepEqual(notices, ["납기요청일 쪽 글", "납품일 쪽 글"]);
+  // 🔵 차례는 화면의 칸 차례와 같다(발주 묶음이 먼저, 납품 묶음이 나중).
+  assert.equal(domesticOrderLinkNoticeText(notices), "납기요청일 쪽 글\n\n납품일 쪽 글");
+  // 맞춰졌거나 할 일이 없었으면 담을 것이 없다 — 그때는 평소의 저장 팝업이다.
+  assert.equal(domesticOrderLinkNoticeText(domesticOrderLinkNotices({})), null);
+  assert.equal(
+    domesticOrderLinkNoticeText(
+      domesticOrderLinkNotices({
+        requestedDueDateLink: { linked: true },
+        deliveredDateLink: { linked: true },
+      })
+    ),
+    null
   );
 });
 
@@ -85,15 +138,19 @@ test("🔴 팝업은 표 칸이 아니라 **목록 화면**이 그린다 — 칸
     "납기요청일 칸이 제 안에서 팝업을 그린다 — 칸의 정렬·줄바꿈을 물려받는다"
   );
   assert.doesNotMatch(editForm, /<NoticePopup/, "`줄 수정` 폼이 제 안에서 팝업을 그린다");
+  assert.doesNotMatch(deliveriesCell, /<NoticePopup/, "납품 칸이 제 안에서 팝업을 그린다");
 
   // 목록 화면이 상태를 쥐고, 그 상태로 알림을 그린다.
   assert.match(
     listScreen,
     /const \[requestedDueDateNotLinked, setRequestedDueDateNotLinked\] = useState<string \| null>\(null\);/
   );
+  // 🔴 **제목에 칸 이름을 박지 않는다**(2026-11-08) — 묶이는 칸이 둘이라 한 상자에
+  //    글이 둘 올 수 있고, 제목이 한쪽을 가리키면 나머지가 제목 밖의 글이 된다.
+  //    그래서 줄도 `\n\n` 으로 갈라 **여러 줄**로 넘긴다.
   assert.match(
     flat(listScreen),
-    /\{requestedDueDateNotLinked !== null && \( <NoticePopup title="수리 건의 고객 요청 납기일은 바뀌지 않았습니다" lines=\{\[requestedDueDateNotLinked\]\} onClose=\{\(\) => setRequestedDueDateNotLinked\(null\)\}/,
+    /\{requestedDueDateNotLinked !== null && \( <NoticePopup title="수리 건의 날짜는 바뀌지 않았습니다" lines=\{requestedDueDateNotLinked\.split\("\\n\\n"\)\} onClose=\{\(\) => setRequestedDueDateNotLinked\(null\)\}/,
     "목록 화면이 그 상태로 알림을 그리지 않는다"
   );
   // `줄 수정` 폼도 같은 상태에 묶여 있어야 한다(표·카드의 두 칸은 이웃 시험이 본다).

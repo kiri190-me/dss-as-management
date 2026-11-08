@@ -33,8 +33,16 @@ import {
   type DomesticOrderDueDateDraft,
 } from "@/lib/domain/domestic-order-cell-edit";
 import { DUE_DATE_FROM_REPAIR_CASE_LABEL } from "@/lib/domain/requested-due-date-link";
+import {
+  domesticOrderAddDueDateBlockReason,
+  domesticOrderRemoveDueDateBlockReason,
+} from "@/lib/domain/domestic-order-due-date-rows";
 import type { DomesticOrderListItem } from "@/lib/db/queries/domestic-orders";
 import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders";
+import {
+  domesticOrderLinkNotices,
+  domesticOrderLinkNoticeText,
+} from "./domestic-order-link-notices";
 
 /**
  * ============================================================================
@@ -73,6 +81,24 @@ import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders"
  * **못 맞췄다는 답을 받으면 저장 팝업 대신 알림을 띄우게 올려 보낸다**
  * (onRequestedDueDateNotLinked). ② 와 어긋나지 않는다: 올라가는 것은 사람이 이 칸에
  * 적은 날짜뿐이고, 빌려 온 날짜는 여전히 이 목록에 들어오지 않는다.
+ *
+ * ── 🔴 납품 둘을 **보이지 않게 들고 다닌다** (2026-11-08) ─────────────────
+ * 납품일·납품자가 같은 행에 달리면서(사용자 결정 1), 이 칸이 보내는 목록에는 **네
+ * 칸이 전부** 실린다. 이 칸은 그 둘을 그리지도 고치지도 않지만, 저장이 받은 목록으로
+ * 그 줄의 행을 통째로 다시 만들기 때문에 **빼면 그 저장 한 번에 납품 기록이
+ * 사라진다**(domain/domestic-order-cell-edit.ts 의 넓어진 함정 ①). 그 둘을 고치는
+ * 자리는 옆 칸이다(DomesticOrderDeliveriesCell).
+ *
+ * ── 🔴 단추 둘이 막힐 수 있다 — **까닭을 글로 적는다** ───────────────────
+ *  · **[삭제]** — 납품 기록이 달린 줄은 못 지운다(사용자 결정 5). 먼저 납품일·
+ *    납품자를 지워 저장한 뒤에 줄을 지운다.
+ *  · **[납기요청일 추가]** — 수리 건이 붙은 줄은 둘 이상 못 만든다(사용자 결정 9 —
+ *    「납품을 여러 날짜에 나눠서 하게 되는건 기타건 밖에 없어」).
+ *
+ * 🔴 **판정을 화면이 하지 않는다.** 저장을 거절하는 그 함수에 그대로 물어본다
+ * (domain/domestic-order-due-date-rows.ts) — 두 곳이 따로 정하면 단추는 눌리는데
+ * 저장이 거절되거나, 멀쩡한 줄에서 단추가 죽는다. 그리고 **title 만 달지 않는다**:
+ * 마우스를 올려야 보이는 글은 키보드만 쓰는 사람에게 없는 것과 같다.
  *
  * ── 검증은 다시 하지 않는다 ─────────────────────────────────────────────
  * 빈 줄 빼기 · 메모만 적은 줄 거절 · 없는 날짜 거절 · 스무 개 상한은 검증 한
@@ -118,6 +144,16 @@ const smallButtonClass =
  * 폼의 DueDateDraft 와 같은 이유).
  */
 type Line = DomesticOrderDueDateDraft & { key: string };
+
+/**
+ * 그 줄에 **납품 기록이 달려 있는가** — 날짜든 사람이든 하나라도 적혀 있으면 참.
+ * 🔴 저장 통로가 같은 것을 보는 그 판정과 **같은 모양**이어야 한다
+ * (mutations/domestic-orders.ts 의 hasDeliveryRecord) — 다르면 단추는 눌리는데
+ * 저장이 거절된다. 이쪽 값은 입력칸의 문자열이라 공백을 접는 것까지 같다.
+ */
+function hasDelivery(line: DomesticOrderDueDateDraft): boolean {
+  return line.deliveredDate.trim() !== "" || line.deliveredBy.trim() !== "";
+}
 
 /**
  * 편집을 열 때의 목록. **이 줄에 적힌 날짜만**이다(파일 헤더 ② — 도메인
@@ -214,17 +250,49 @@ export default function DomesticOrderDueDatesCell({
     setIsEditing(true);
   }
 
+  /**
+   * 🔴 **[추가] 를 막아야 하는가** — 수리 건이 붙은 줄은 납기요청일을 둘 이상 둘 수
+   * 없다(사용자 결정 9: 「납품을 여러 날짜에 나눠서 하게 되는건 기타건 밖에 없어」).
+   * 판정은 화면이 하지 않고 **서버의 울타리와 같은 함수**에 물어본다 — 두 곳이 따로
+   * 정하면 단추는 눌리는데 저장이 거절되거나 멀쩡한 줄에서 단추가 죽는다.
+   */
+  const addBlockedReason = domesticOrderAddDueDateBlockReason({
+    rows: lines.map((line) => ({ hasDelivery: hasDelivery(line) })),
+    repairCaseId: row.repairCaseId,
+  });
+
   function addLine() {
+    if (addBlockedReason !== null) return;
     const key = generateClientUuid();
     pendingFocusRef.current = key;
-    setLines((previous) => [...previous, { key, dueDate: "", note: "" }]);
+    // 🔴 납품 둘도 빈 문자열로 함께 만든다 — 모양이 하나라야 저장이 네 칸을 전부
+    // 싣는다(domain/domestic-order-cell-edit.ts 의 Draft 주석).
+    setLines((previous) => [
+      ...previous,
+      { key, dueDate: "", note: "", deliveredDate: "", deliveredBy: "" },
+    ]);
   }
 
   function updateLine(key: string, patch: Partial<DomesticOrderDueDateDraft>) {
     setLines((previous) => previous.map((line) => (line.key === key ? { ...line, ...patch } : line)));
   }
 
-  function removeLine(key: string) {
+  /**
+   * 🔴 **[삭제] 를 막아야 하는가** — 납품 기록이 달린 줄은 지울 수 없다(사용자
+   * 결정 5). 위 [추가] 와 같은 방식으로 **서버의 울타리와 같은 함수**에 물어본다.
+   * 막힌 줄이면 그 까닭이 단추의 title 과 줄 밑 안내로 그대로 뜬다 — 까닭 없이 안
+   * 눌리는 단추는 고장으로 읽힌다.
+   */
+  function removeBlockedReason(index: number): string | null {
+    return domesticOrderRemoveDueDateBlockReason({
+      rows: lines.map((line) => ({ hasDelivery: hasDelivery(line) })),
+      index,
+      repairCaseId: row.repairCaseId,
+    });
+  }
+
+  function removeLine(key: string, index: number) {
+    if (removeBlockedReason(index) !== null) return;
     setLines((previous) => previous.filter((line) => line.key !== key));
     // 지운 줄과 함께 포커스가 사라지면 키보드 사용자는 갈 곳을 잃는다 — 늘 있는
     // `추가` 버튼으로 돌려보낸다(`줄 수정` 폼과 같다).
@@ -238,7 +306,17 @@ export default function DomesticOrderDueDatesCell({
     setErrorMessage(null);
     setLineErrors({});
     // 차례 그대로, 빈 줄까지 보낸다(파일 헤더 '검증은 다시 하지 않는다').
-    const drafts: DomesticOrderDueDateDraft[] = lines.map(({ dueDate, note }) => ({ dueDate, note }));
+    // 🔴 **납품 둘도 함께 보낸다.** 이 칸은 그 값을 그리지도 고치지도 않지만, 저장은
+    // 받은 목록으로 그 줄의 행을 통째로 다시 만들므로 **빼면 납품 기록이 사라진다**
+    // (domain/domestic-order-cell-edit.ts 의 넓어진 함정 ①).
+    const drafts: DomesticOrderDueDateDraft[] = lines.map(
+      ({ dueDate, note, deliveredDate, deliveredBy }) => ({
+        dueDate,
+        note,
+        deliveredDate,
+        deliveredBy,
+      })
+    );
     try {
       const result = await updateDomesticOrderAction({
         id: row.id,
@@ -278,9 +356,11 @@ export default function DomesticOrderDueDatesCell({
       // 0.5초 저장 팝업으로 띄우면 읽기 전에 사라지고, 그러면 두 화면이 다른 날짜를
       // 보이는 채로 남는다(common/NoticePopup.tsx 머리말). 그 글 첫머리가
       // "저장했습니다"로 시작하므로 성공 알림까지 함께 전한다.
-      const link = result.requestedDueDateLink;
-      if (link && !link.linked) {
-        onRequestedDueDateNotLinked(link.message);
+      // 🔴 묶기가 둘이다(납기요청일 · 납품일) — **둘 다 모아서** 띄운다. 하나만
+      // 보면 나머지 하나가 조용히 사라진다(domestic-order-link-notices.ts 머리말).
+      const noticeText = domesticOrderLinkNoticeText(domesticOrderLinkNotices(result));
+      if (noticeText !== null) {
+        onRequestedDueDateNotLinked(noticeText);
         return;
       }
       showSavePopup({ message: "납기요청일을 저장했습니다.", redirectTo: null });
@@ -329,6 +409,10 @@ export default function DomesticOrderDueDatesCell({
         <ul className="flex flex-col gap-1.5">
           {lines.map((line, index) => {
             const errorKey = `dueDates.${index}`;
+            // 🔴 납품 기록이 달린 줄은 못 지운다(사용자 결정 5). 까닭은 단추의
+            // title 과 줄 밑 안내로 **글로 보인다** — 까닭 없이 안 눌리는 단추는
+            // 고장으로 읽힌다.
+            const removeBlocked = removeBlockedReason(index);
             return (
               <li key={line.key} className="flex flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -366,13 +450,18 @@ export default function DomesticOrderDueDatesCell({
                   <button
                     type="button"
                     className={`relative flex-none ${smallButtonClass}`}
-                    disabled={disabled}
-                    onClick={() => removeLine(line.key)}
+                    disabled={disabled || removeBlocked !== null}
+                    title={removeBlocked ?? undefined}
+                    onClick={() => removeLine(line.key, index)}
                   >
                     삭제
                     <span className="sr-only">{` — ${LABEL} ${index + 1}`}</span>
                   </button>
                 </div>
+                {/* 🔴 마우스를 올려야 보이는 title 만으로는 모자란다 — 왜 못 지우는지
+                    **늘 보이는 한 줄**로 적는다(사용자 결정 5 의 「까닭이 글로
+                    보인다」). 키보드만 쓰는 사람에게는 이것이 유일한 설명이다. */}
+                {removeBlocked !== null && <p className={cellHintClass}>{removeBlocked}</p>}
                 {lineErrors[errorKey] && <p className={editErrorClass}>{lineErrors[errorKey]}</p>}
               </li>
             );
@@ -383,11 +472,15 @@ export default function DomesticOrderDueDatesCell({
         type="button"
         ref={addButtonRef}
         className={`self-start ${smallButtonClass}`}
-        disabled={disabled}
+        disabled={disabled || addBlockedReason !== null}
+        title={addBlockedReason ?? undefined}
         onClick={addLine}
       >
         {LABEL} 추가
       </button>
+      {/* 🔴 수리 건이 붙은 줄에서 왜 못 더하는지(사용자 결정 9). 위 [삭제] 와 같은
+          까닭으로 title 만 두지 않는다 — 안 눌리는 단추는 고장으로 읽힌다. */}
+      {addBlockedReason !== null && <p className={cellHintClass}>{addBlockedReason}</p>}
       {/* 목록 전체가 잘못된 경우(개수 상한 초과 등)의 자리. */}
       {lineErrors.dueDates && <p className={editErrorClass}>{lineErrors.dueDates}</p>}
       {/* ② 빈 목록으로 열리는 순간을 설명한다 — 표에 보이던 날짜가 편집 목록에

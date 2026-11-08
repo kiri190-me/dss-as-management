@@ -488,22 +488,30 @@ test("납기요청일 여러 개가 적은 순서 그대로 들어간다", () =>
   assert.equal(result.ok, true);
   if (!result.ok) return;
   // 날짜순으로 다시 세우지 않는다 — 1차분·2차분처럼 순서가 곧 뜻이다.
+  // 🔴 납품 둘은 안 보냈으면 null 이다(2026-11-08) — 「아직 안 보냈다」가 정상이라
+  //    빈 값을 거절하지 않는다.
   assert.deepEqual(result.data.dueDates, [
-    { dueDate: "2026-02-28", note: "1차분" },
-    { dueDate: "2026-01-20", note: null },
-    { dueDate: "2026-03-15", note: null },
+    { dueDate: "2026-02-28", note: "1차분", deliveredDate: null, deliveredBy: null },
+    { dueDate: "2026-01-20", note: null, deliveredDate: null, deliveredBy: null },
+    { dueDate: "2026-03-15", note: null, deliveredDate: null, deliveredBy: null },
   ]);
 });
 
 test("납기요청일도 앞뒤 공백을 떼고, 공백만 적힌 메모는 null이 된다", () => {
   const result = validateDomesticOrderFields({
-    dueDates: [{ dueDate: " 2026-02-28 ", note: "  1차분  " }, { dueDate: "2026-03-01", note: "   " }],
+    dueDates: [
+      // 🔴 납품 둘도 **같은 규칙**이다(2026-11-08) — 앞뒤 공백을 떼고, 공백만
+      //    적힌 값은 null 이 된다. 다른 규칙을 두면 「화면엔 빈칸인데 적혀 있다로
+      //    세어지는」 행이 생기고, 그 행 때문에 납기요청일 줄이 안 지워진다.
+      { dueDate: " 2026-02-28 ", note: "  1차분  ", deliveredDate: " 2026-03-02 ", deliveredBy: "  담당자1  " },
+      { dueDate: "2026-03-01", note: "   ", deliveredDate: "   ", deliveredBy: "   " },
+    ],
   });
   assert.equal(result.ok, true);
   if (!result.ok) return;
   assert.deepEqual(result.data.dueDates, [
-    { dueDate: "2026-02-28", note: "1차분" },
-    { dueDate: "2026-03-01", note: null },
+    { dueDate: "2026-02-28", note: "1차분", deliveredDate: "2026-03-02", deliveredBy: "담당자1" },
+    { dueDate: "2026-03-01", note: null, deliveredDate: null, deliveredBy: null },
   ]);
 });
 

@@ -22,9 +22,9 @@ import {
 } from "@/lib/domain/quote-list";
 import {
   resolveDomesticOrderCustomerRowColor,
-  resolveDomesticOrderDeliveredDate,
   resolveDomesticOrderValue,
 } from "@/lib/domain/domestic-order-list";
+import { resolveDomesticOrderDeliveryDisplay } from "@/lib/domain/delivered-date-link";
 import type { RepairCaseDomesticOrderIssueDateRow } from "@/lib/domain/domestic-order-issue-date-edit";
 import type { RepairStatus } from "@/lib/domain/types";
 
@@ -61,23 +61,23 @@ import type { RepairStatus } from "@/lib/domain/types";
  * 수리 건에서 따라오는 값은 원본이 바뀌면 다음 조회에서 바로 따라간다 — 이
  * 행의 칸을 비워 두는 것이 기본인 이유가 그것이다.
  *
- * ── ⚠️ 연결된 줄의 납품일은 수리 건의 실제 출하일 하나뿐이다 ──────────────
- * 위 다섯과 **규칙이 다르다.** 수리 건이 연결된 줄의 `납품일` 은 그 건의
- * `actual_shipment_date` 이고, 그 줄의 `delivered_date` 는 값이 있어도 화면에
- * 나오지 않는다. 실제 출하일은 워크플로가 출하 완료 시점에 자동으로 찍는 값이라
- * (mutations/workflow-transitions.ts) 사람이 손으로 고칠 수 없고, "언제 나갔는가"에
- * 대해 이 시스템이 가진 유일한 사실이다.
+ * ── 🔴 납품일·납품자는 **납기요청일 행에 있다** (2026-11-08) ───────────────
+ * 2026-09-11 까지는 「연결된 줄의 납품일은 수리 건의 실제 출하일 하나뿐」이었고
+ * 그 줄의 `delivered_date` 는 값이 있어도 안 그렸다. 🔴 **지금은 둘 다 다르다** —
+ * 납품일·납품자가 `domestic_order_due_dates` 의 행마다 하나씩 달려 있고(분할
+ * 납품), 수리 건의 실제 출하일과는 **양방향으로 맞춰진다**(사용자 결정 2).
  *
- * **연결 없는 줄은 그 줄의 `delivered_date` 를 보여 준다**(2026-09-11 사용자
- * 결정) — 출하일이 없어 어긋날 상대가 없고, 납품일을 적을 자리가 그 칸뿐이다.
- * 둘을 섞지는 않는다(연결된 줄이 아직 안 나갔다고 손 값으로 메우지 않는다).
- * 고르는 규칙은 여기가 아니라 도메인 함수가 갖는다
- * (resolveDomesticOrderDeliveredDate — 그 함수 주석에 까닭이 있다).
+ * 그래서 이 조회가 그릴 값으로 내놓는 것은 날짜 하나가 아니라 **행마다 하나씩
+ * 늘어놓은 목록 둘**이다(아래 deliveredDateLines · deliveredByLines). 아무 행에도
+ * 안 적혀 있으면 연결된 수리 건의 실제 출하일을 빌려 그리고 거기엔 꼬리표가
+ * 붙는다 — 고르는 규칙은 여기가 아니라 도메인 함수 하나가 갖는다
+ * (domain/delivered-date-link.ts 의 resolveDomesticOrderDeliveryDisplay).
  *
- * ⚠️ 그래서 `delivered_date` 는 **늘 골라 온다.** 연결 없는 줄에서는 그릴 값이고,
- * 연결된 줄에서도 **되실어 보내야 하는 값**이다 — 이 화면의 저장은 모든 칼럼을
- * SET 하므로, 목록이 이 값을 안 실어 오면 칸 하나를 고치는 저장 한 번에 그
- * 칼럼이 지워진다(domain/domestic-order-cell-edit.ts 의 파일 헤더).
+ * ⚠️ 그래도 `delivered_date`·`delivered_by` **칼럼은 늘 골라 온다.** 🔴 **그릴
+ * 값이 아니라 되실어 보내야 하는 값**이다 — 이 화면의 저장은 모든 칼럼을 SET
+ * 하므로, 목록이 이 값을 안 실어 오면 칸 하나를 고치는 저장 한 번에 그 칼럼이
+ * 지워진다(domain/domestic-order-cell-edit.ts 의 파일 헤더). 그 칼럼을 PO
+ * 시스템(dss-po)이 같은 DB 에서 쓰므로 지우지 않았다(사용자 결정 11).
  *
  * ── 납기 요청일만 질의가 하나 더 있다 ───────────────────────────────────
  * 한 줄에 날짜가 여럿일 수 있어 딸린 표에 있다(schema/domestic-order-due-dates.ts).
@@ -126,6 +126,16 @@ export type DomesticOrderDueDate = {
   dueDate: string;
   /** "1차분" 같은 짧은 메모. 여러 날짜를 구분하는 유일한 단서다. */
   note: string | null;
+  /**
+   * 🔴 그 회차를 **실제로 보낸 날**(2026-11-08). null 이면 아직 안 보냈다.
+   *
+   * 위 dueDate 와 뜻이 다른 날짜다 — 저쪽은 「언제까지 달라고 했는가」, 이쪽은
+   * 「언제 보냈는가」. 한 행에 나란히 있는 것이 **사용자 결정 1**(1번 줄 ↔ 1번 줄)
+   * 그대로이고, 그래서 둘을 잇는 규칙을 코드 어디에도 적을 필요가 없다.
+   */
+  deliveredDate: string | null;
+  /** 그 회차를 보낸 사람. 🔴 PII — 로그·오류 보고에 그대로 싣지 않는다. */
+  deliveredBy: string | null;
   /** 사람이 정한 차례. 아래 조회가 이 순서로 내려보낸다. */
   displayOrder: number | null;
 };
@@ -286,21 +296,18 @@ export type DomesticOrderJoinRow = {
   linkedQuoteDate: string | null;
   progressNote: string | null;
   /**
-   * 이 줄에 **손으로 적은** 납품일(원본 칸).
+   * 🔴 **옛 자리의 납품일**(2026-11-08 부터 A/S 는 그리지 않는다).
    *
-   * ⚠️ **연결된 줄에서는 화면에 그리지 않는다** — 그 줄의 `납품일` 은 위
-   * repairCaseActualShipmentDate 다(파일 헤더). **연결 없는 줄에서는 이 값이
-   * 그 줄의 `납품일` 이다**(2026-09-11). 어느 쪽인지 고르는 일은 매퍼가
-   * displayDeliveredDate 로 한다 — 화면은 이 칸을 직접 그리지 않는다.
+   * 화면에 보이는 납품일은 이 칸이 아니라 **납기요청일 행에 달린 값**이다
+   * (위 deliveredDateLines). 이 칸을 그리는 자리는 A/S 에 **한 곳도 없다.**
    *
-   * 연결된 줄에서도 실어 오는 이유 — **저장할 때 그대로 되돌려 보내기
-   * 위해서.** 이 화면의 저장은 모든 칼럼을 SET 하므로 payload 에서 빠지면 그
-   * 칼럼이 지워진다. 이 값을 지우는 것은 되돌릴 수 없는 일이라, 안 보여 주는
-   * 것과 버리는 것은 다르게 다룬다. 폼도 이 값(계산된 값이 아니라 원본)으로
-   * 입력칸을 채운다(DomesticOrderEditForm).
+   * 그래도 실어 오는 이유 — **저장할 때 그대로 되돌려 보내기 위해서.** 이 화면의
+   * 저장은 모든 칼럼을 SET 하므로 payload 에서 빠지면 그 칼럼이 지워진다. 🔴 그
+   * 칼럼을 PO 시스템(dss-po)이 같은 DB 에서 쓰므로(사용자 결정 11) 안 보여 주는
+   * 것과 버리는 것은 전혀 다른 일이다.
    */
   deliveredDate: string | null;
-  /** `납품일` 과 이름만 비슷한 다른 칸이다. 이쪽은 그대로 손으로 적는다. */
+  /** 옛 자리의 납품자. 위와 **같은 까닭으로** 실려 다닌다(A/S 는 안 그린다 · PO 가 쓴다). */
   deliveredBy: string | null;
   taxInvoiceDate: string | null;
   /**
@@ -361,22 +368,28 @@ export type DomesticOrderListItem = Omit<DomesticOrderJoinRow, "completedAt"> & 
    */
   customerRowColor: string | null;
   /**
-   * 화면의 `납품일` 에 그릴 날짜 — 연결된 줄은 **그 수리 건의 실제 출하일**,
-   * 연결 없는 줄은 **그 줄에 손으로 적은 날짜**(2026-09-11)다. 연결된 건이 아직
-   * 안 나갔거나, 연결 없는 줄에 적은 날짜가 없으면 null 이고, 화면이 "-"로 그린다.
+   * 화면의 `납품일`·`납품자` 에 그릴 것 — **납기요청일 행마다 하나씩**이다
+   * (2026-11-08). 두 목록은 **길이가 같고 자리가 맞는다**: 1번 줄의 납기요청일
+   * 옆이 1번 줄의 납품일이고 1번 줄의 납품자다. 안 적은 회차는 null 이고 화면이
+   * "-"로 그린다.
    *
-   * ⚠️ 위 다섯(customerName · modelName …)과 **이름은 비슷해도 규칙이 다르다.**
-   * 저쪽은 이 행의 값이 먼저이고 비면 수리 건 값으로 메우지만, 이것은 연결 여부
-   * 하나로 출처가 정해지고 **섞이지 않는다** — 연결된 줄에서는 원본 칸
-   * (deliveredDate)에 값이 적혀 있어도 여기에 들어오지 않는다
-   * (resolveDomesticOrderDeliveredDate).
+   * 아무 행에도 안 적혀 있으면 연결된 수리 건의 실제 출하일 하나를 빌려 그리고,
+   * 그때 `deliveredDateBorrowed` 가 참이다 — 화면은 **그때만** 꼬리표를 붙인다
+   * (domain/delivered-date-link.ts 의 DELIVERED_DATE_FROM_REPAIR_CASE_LABEL).
+   * 양쪽 다 없으면 두 목록이 비고, 화면이 "-" 하나를 그린다.
+   *
+   * ⚠️ 위 다섯(customerName · modelName …)과 **규칙이 다르다.** 저쪽은 이 행의
+   * 값이 먼저이고 비면 수리 건 값으로 메우지만, 이것은 **섞이지 않는다** — 행에
+   * 하나라도 적혀 있으면 그것이 전부다.
    *
    * ⚠️ **저장에 실으면 안 되는 계산된 값이다.** 이 이름으로 SET 을 만들 칼럼은
-   * 없고, 원본 칸에 옮겨 담으면 자동으로 따라오던 값이 이 줄에 박제된다 —
-   * domain/domestic-order-cell-edit.ts 의 DomesticOrderCellEditRow 에 이 칸이
-   * 없는 것이 그 장치다(그 파일 헤더의 함정 ②와 같은 이유).
+   * 없고, 빌려 온 날짜를 행에 옮겨 담으면 아무도 적지 않은 날짜가 그 줄에
+   * 박제된다 — domain/domestic-order-cell-edit.ts 의 DomesticOrderCellEditRow 에
+   * 이 셋이 없는 것이 그 장치다(그 파일 헤더의 함정 ②와 같은 이유).
    */
-  displayDeliveredDate: string | null;
+  deliveredDateLines: (string | null)[];
+  deliveredByLines: (string | null)[];
+  deliveredDateBorrowed: boolean;
   /**
    * 화면의 견적서번호 · 견적발행일 · 금액(VAT별도)에 그릴 값 — **연결된 견적서의
    * 값이 먼저**, 없으면 이 줄에 손으로 적은 값이다(mapDomesticOrderRow 의 머리말).
@@ -442,6 +455,14 @@ export function mapDomesticOrderRow(
    */
   linkedQuoteAmount: string | null = null
 ): DomesticOrderListItem {
+  // 🔴 납품 둘을 **한 번에** 정한다 — 따로 부르면 「무엇이 적혀 있는가」를 두 번
+  // 판정하게 되고, 납품자만 적힌 줄에서 두 칸의 줄 수가 어긋나 표가 세로로
+  // 밀린다(그 함수 주석).
+  const delivery = resolveDomesticOrderDeliveryDisplay({
+    dueDates,
+    repairCaseId: row.repairCaseId,
+    repairCaseActualShipmentDate: row.repairCaseActualShipmentDate,
+  });
   return {
     ...row,
     dueDates,
@@ -457,15 +478,14 @@ export function mapDomesticOrderRow(
       row.faultDescriptionText,
       row.repairCaseReportedSymptom
     ),
-    // 납품일은 위 다섯과 같은 규칙으로 **접지 않는다** — 연결된 줄은 수리 건의
-    // 실제 출하일만, 연결 없는 줄은 이 행의 deliveredDate 만 본다(그 함수 주석,
-    // 2026-09-11). 두 값을 섞지 않는다. row 를 통째로 넘기지 않고 칸 셋만 이름
-    // 붙여 넘기는 것이 그 규칙을 코드로 못 박는 자리다.
-    displayDeliveredDate: resolveDomesticOrderDeliveredDate({
-      repairCaseId: row.repairCaseId,
-      repairCaseActualShipmentDate: row.repairCaseActualShipmentDate,
-      deliveredDate: row.deliveredDate,
-    }),
+    // 🔴 납품 둘은 위 다섯과 같은 규칙으로 **접지 않는다** — 행에 하나라도
+    // 적혀 있으면 그것이 전부이고, 아무 행에도 없을 때만 연결된 수리 건의 실제
+    // 출하일을 빌린다(2026-11-08). 옛 칼럼(row.deliveredDate)은 **넘기지 않는다**:
+    // 그 함수가 받는 타입에 그 칸이 아예 없는 것이 「A/S 는 옛 자리를 안 그린다」를
+    // 코드로 못 박는 자리다.
+    deliveredDateLines: delivery.dates,
+    deliveredByLines: delivery.people,
+    deliveredDateBorrowed: delivery.borrowed,
     // 색은 위 다섯과 같은 규칙으로 **접지 않는다** — 이름을 고른 쪽의 고객사를
     // 그대로 따라간다(그 함수의 주석). 두 벌을 coalesce 하면 화면의 이름과 줄
     // 색이 서로 다른 고객사를 가리킬 수 있다.
@@ -547,9 +567,9 @@ function selectDomesticOrderJoinRows() {
       linkedQuoteNumber: linkedQuotes.quoteNumber,
       linkedQuoteDate: linkedQuotes.quoteDate,
       progressNote: domesticOrders.progressNote,
-      // 연결 없는 줄의 `납품일` 이고(2026-09-11), 연결된 줄에서는 그리지 않는데도
-      // 고른다 — **저장이 되실어 보내야** 해서다. 빼는 순간 칸 하나를 고치는
-      // 저장 한 번에 이 칼럼이 지워진다(위 타입 주석).
+      // 🔴 **옛 자리다 — 어느 화면도 그리지 않는데 고른다**(2026-11-08). 까닭은
+      // 하나, **저장이 되실어 보내야** 해서다: 빼는 순간 칸 하나를 고치는 저장 한
+      // 번에 이 칼럼이 지워지고, 그 칼럼을 PO 가 쓴다(위 타입 주석).
       deliveredDate: domesticOrders.deliveredDate,
       deliveredBy: domesticOrders.deliveredBy,
       taxInvoiceDate: domesticOrders.taxInvoiceDate,
@@ -810,6 +830,11 @@ async function loadDueDatesByOrderId(
       domesticOrderId: domesticOrderDueDates.domesticOrderId,
       dueDate: domesticOrderDueDates.dueDate,
       note: domesticOrderDueDates.note,
+      // 🔴 납품 둘. **그릴 값이면서 되실어 보낼 값**이다 — 저장이 이 줄의 행을
+      // 통째로 다시 만들므로, 여기서 안 실어 오면 칸 하나 고치는 저장 한 번에
+      // 그 줄의 납품 기록이 사라진다(domain/domestic-order-cell-edit.ts 헤더).
+      deliveredDate: domesticOrderDueDates.deliveredDate,
+      deliveredBy: domesticOrderDueDates.deliveredBy,
       displayOrder: domesticOrderDueDates.displayOrder,
     })
     .from(domesticOrderDueDates)
@@ -822,6 +847,8 @@ async function loadDueDatesByOrderId(
       id: row.id,
       dueDate: row.dueDate,
       note: row.note,
+      deliveredDate: row.deliveredDate,
+      deliveredBy: row.deliveredBy,
       displayOrder: row.displayOrder,
     };
     if (bucket) bucket.push(item);

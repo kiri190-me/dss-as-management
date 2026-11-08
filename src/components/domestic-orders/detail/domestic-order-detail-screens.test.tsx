@@ -80,8 +80,10 @@ const ROW: DomesticOrderBasicInfoRow = {
   displayQuoteIssuedDate: "2026-09-30",
   displayQuoteNumber: "DSS 2026-120",
   progressNote: "발주 대기",
-  displayDeliveredDate: null,
-  deliveredBy: null,
+  // 🔴 2026-11-08 — 납품 둘은 행마다 하나씩이다. 행이 없는 줄이라 빈 목록.
+  deliveredDateLines: [],
+  deliveredByLines: [],
+  deliveredDateBorrowed: false,
   taxInvoiceDate: null,
   displayAmountExcludingVat: "1234567.00",
   paymentCompleted: false,

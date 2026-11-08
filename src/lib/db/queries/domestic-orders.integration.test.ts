@@ -213,6 +213,28 @@ async function insertDueDates(orderId: string, dates: readonly string[]): Promis
   );
 }
 
+/**
+ * 🔴 **납품 기록이 달린 납기요청일 행**을 붙인다(2026-11-08). 납품일·납품자는
+ * 그 행의 칼럼이라(schema/domestic-order-due-dates.ts) 이 길 말고는 만들 자리가
+ * 없다 — 위 insertDueDates 와 나눠 둔 것은, 그쪽이 「납품 기록 없는 행」이라는
+ * 다른 모양을 만드는 자리이기 때문이다.
+ */
+async function insertDeliveries(
+  orderId: string,
+  rows: readonly { dueDate: string; deliveredDate?: string | null; deliveredBy?: string | null }[]
+): Promise<void> {
+  if (rows.length === 0) return;
+  await db.insert(domesticOrderDueDates).values(
+    rows.map((row, index) => ({
+      domesticOrderId: orderId,
+      dueDate: row.dueDate,
+      deliveredDate: row.deliveredDate ?? null,
+      deliveredBy: row.deliveredBy ?? null,
+      displayOrder: index + 1,
+    }))
+  );
+}
+
 /** 목록에서 이 스위트가 만든 한 줄을 찾아 온다. 못 찾으면 그 자리에서 멈춘다. */
 async function loadOrder(orderId: string) {
   const found = (await listDomesticOrders()).find((item) => item.id === orderId);
@@ -260,54 +282,102 @@ after(async () => {
   await pgClient.end({ timeout: 5 });
 });
 
-test("납품일은 연결된 수리 건의 실제 출하일로 실려 온다", async () => {
+test("납기요청일 행에 납품 기록이 없으면 수리 건의 실제 출하일을 빌려 그린다", async () => {
   const caseId = await createTestCase("2096-07-20");
   const orderId = await insertOrder({ repairCaseId: caseId });
 
   const found = await loadOrder(orderId);
   assert.equal(found.repairCaseActualShipmentDate, "2096-07-20", "조인이 그 칼럼을 안 골라 왔다");
-  assert.equal(found.displayDeliveredDate, "2096-07-20");
+  assert.deepEqual(found.deliveredDateLines, ["2096-07-20"]);
+  assert.equal(found.deliveredDateBorrowed, true, "빌려 온 값에 표시가 안 붙었다");
+  // 🔵 수리 건에는 「누가 보냈는가」가 없다 — 그 칸은 빈 채로 자리만 맞춘다.
+  assert.deepEqual(found.deliveredByLines, [null]);
 });
 
-test("⚠️ 그 줄에 납품일이 적혀 있어도 실제 출하일이 보인다 — 그리고 원본은 지워지지 않는다", async () => {
-  // 실 자료에서 날짜가 바뀌는 줄이 이 모양이다. 손으로 적은 값은 DB 에 그대로
-  // 남아 있어야 한다 — 저장이 그 값을 되실어 보내야 하고(payload 에서 빠지면
-  // 지워진다), 나중에 "역시 손으로 적는 게 맞았다"가 되어도 되돌릴 수 있어야 한다.
+test("🔴 행에 적힌 납품일이 **이긴다** — 2026-09-11 의 결정이 뒤집힌 자리다 (2026-11-08)", async () => {
+  /**
+   * ── 이 시험은 무엇을 재고 있었나 ────────────────────────────────────────
+   * 이름이 「⚠️ 그 줄에 납품일이 적혀 있어도 실제 출하일이 보인다」였고, 연결된
+   * 줄에서는 손으로 적은 값을 **안 보여 주는** 것이 요점이었다. 까닭은 「둘이
+   * 어긋나는 줄이 생기면 어느 쪽이 맞는지 화면만 봐서는 알 길이 없다」였다.
+   *
+   * ── 🔴 왜 뒤집혔나 ─────────────────────────────────────────────────────
+   * 사용자 결정 2(2026-11-07): 연동은 **양방향**. 어긋남을 숨기는 대신 **맞춘다**.
+   * 그리고 납품일이 줄의 칼럼이 아니라 **납기요청일 행**에 달리면서, 연결된
+   * 줄에서도 사람이 적는 값이 되었다.
+   *
+   * 🔵 **지워지지 않는다는 약속은 그대로다** — 옛 칼럼은 PO 가 쓰므로(사용자 결정
+   * 11) 남아 있어야 하고, 다만 A/S 가 그리지 않는다.
+   */
   const caseId = await createTestCase("2095-11-14");
-  const orderId = await insertOrder({ repairCaseId: caseId, deliveredDate: "2096-03-31" });
+  const orderId = await insertOrder({ repairCaseId: caseId, deliveredDate: "2090-01-01" });
+  await insertDeliveries(orderId, [
+    { dueDate: "2096-03-20", deliveredDate: "2096-03-31", deliveredBy: "담당자1" },
+  ]);
 
   const found = await loadOrder(orderId);
-  assert.equal(found.displayDeliveredDate, "2095-11-14", "손으로 적은 값이 화면 값을 가렸다");
-  assert.equal(found.deliveredDate, "2096-03-31", "원본 칼럼이 조회에서 사라졌다");
+  assert.deepEqual(found.deliveredDateLines, ["2096-03-31"], "행에 적은 납품일이 안 보인다");
+  assert.deepEqual(found.deliveredByLines, ["담당자1"]);
+  assert.equal(found.deliveredDateBorrowed, false, "행에 적힌 값에 '빌려 옴' 표시가 붙었다");
+  // 🔴 옛 칼럼은 **그려지지 않지만 지워지지도 않는다**(PO 가 쓴다).
+  assert.equal(found.deliveredDate, "2090-01-01", "옛 칼럼이 조회에서 사라졌다");
 });
 
-test("수리 건 연결이 없으면 그 줄에 손으로 적은 납품일이 보인다 (2026-09-11)", async () => {
-  // 2026-09-11 전에는 이 줄이 빈칸이었다(HANDOFF V-4). 사용자가 연결 없는 줄에
-  // 한해 손 납품일을 보이게 하기로 정했다 — 실 자료에 남아 있던 옛 손 값도 다시
-  // 보이게 된다는 것을 알고 받아들였다.
-  const orderId = await insertOrder({ repairCaseId: null, deliveredDate: "2096-03-31" });
+test("🔴 분할 납품 — 행마다 하나씩, 두 칸의 줄 수가 같다", async () => {
+  // 운영에서 쓰는 그 모양이다(사용자: 「납품을 여러 날짜에 나눠서 하게 되는건
+  // 기타건 밖에 없어」) — 수리 건이 안 붙은 줄에 납기요청일 둘, 1차분만 보냈다.
+  const orderId = await insertOrder({ repairCaseId: null });
+  await insertDeliveries(orderId, [
+    { dueDate: "2096-01-20", deliveredDate: "2096-01-22", deliveredBy: "담당자1" },
+    { dueDate: "2096-02-15" },
+  ]);
 
   const found = await loadOrder(orderId);
-  assert.equal(found.displayDeliveredDate, "2096-03-31");
-  assert.equal(found.repairCaseActualShipmentDate, null);
-  assert.equal(found.deliveredDate, "2096-03-31");
+  assert.deepEqual(found.deliveredDateLines, ["2096-01-22", null]);
+  assert.deepEqual(found.deliveredByLines, ["담당자1", null]);
+  assert.equal(
+    found.deliveredDateLines.length,
+    found.deliveredByLines.length,
+    "두 칸의 줄 수가 어긋나면 표가 세로로 밀린다"
+  );
+  // 1번 줄의 납기요청일 옆이 1번 줄의 납품일이다(사용자 결정 1).
+  assert.deepEqual(
+    found.dueDates.map((entry) => entry.dueDate),
+    ["2096-01-20", "2096-02-15"]
+  );
+  assert.equal(found.deliveredDateBorrowed, false);
 });
 
-test("수리 건 연결이 없고 손 납품일도 없으면 납품일은 비어 있다", async () => {
+test("🔴 납품자만 적힌 행도 「적혀 있다」로 친다 — 한 줄에 두 출처가 섞이면 안 된다", async () => {
+  // 「누가 보냈는지는 아는데 언제인지 아직 모른다」는 줄이다. 날짜만 보고 가르면
+  // 납품자 칸만 값이 있고 날짜 칸은 수리 건에서 빌려 온 값이 된다.
+  const caseId = await createTestCase("2096-07-20");
+  const orderId = await insertOrder({ repairCaseId: caseId });
+  await insertDeliveries(orderId, [{ dueDate: "2096-07-01", deliveredBy: "담당자1" }]);
+
+  const found = await loadOrder(orderId);
+  assert.deepEqual(found.deliveredDateLines, [null], "빌려 온 날짜가 새어 들어왔다");
+  assert.deepEqual(found.deliveredByLines, ["담당자1"]);
+  assert.equal(found.deliveredDateBorrowed, false);
+});
+
+test("수리 건 연결이 없고 행에도 납품 기록이 없으면 납품일은 비어 있다", async () => {
   const orderId = await insertOrder({ repairCaseId: null });
 
   const found = await loadOrder(orderId);
-  assert.equal(found.displayDeliveredDate, null);
+  assert.deepEqual(found.deliveredDateLines, []);
+  assert.deepEqual(found.deliveredByLines, []);
+  assert.equal(found.deliveredDateBorrowed, false);
 });
 
-test("🔴 연결은 있어도 아직 안 나갔으면 납품일은 비어 있다 — 그 줄의 손 값으로 메우지 않는다", async () => {
-  // 연결 없는 줄이 손 값을 보여 주게 된 뒤로 이 시험이 더 중요해졌다. 출하일이
-  // null 이라고 손 값으로 내려가면 "아직 안 나갔다"는 사실이 옛 손 값에 가려진다.
+test("🔴 연결은 있어도 아직 안 나갔으면 납품일은 비어 있다 — 옛 칼럼으로 메우지 않는다", async () => {
+  // 🔴 옛 칼럼에 값이 남아 있어도 화면에 새어 나오면 안 된다(A/S 는 그 칸을 안
+  //    그린다 — 사용자 결정 11 로 남겨 둔 PO 의 칸이다).
   const caseId = await createTestCase();
   const orderId = await insertOrder({ repairCaseId: caseId, deliveredDate: "2096-03-31" });
 
   const found = await loadOrder(orderId);
-  assert.equal(found.displayDeliveredDate, null, "연결된 줄에 손 납품일이 새어 나왔다");
+  assert.deepEqual(found.deliveredDateLines, [], "옛 칼럼이 화면 값으로 새어 나왔다");
   assert.equal(found.deliveredDate, "2096-03-31");
 
   // 대조 — 그 건이 나가면 같은 줄에 날짜가 생긴다. 이것이 없으면 위 단언은
@@ -316,18 +386,20 @@ test("🔴 연결은 있어도 아직 안 나갔으면 납품일은 비어 있�
     .update(repairCases)
     .set({ actualShipmentDate: "2096-08-01" })
     .where(eq(repairCases.id, caseId));
-  assert.equal((await loadOrder(orderId)).displayDeliveredDate, "2096-08-01");
+  const shipped = await loadOrder(orderId);
+  assert.deepEqual(shipped.deliveredDateLines, ["2096-08-01"]);
+  assert.equal(shipped.deliveredDateBorrowed, true);
 });
 
-test("같은 수리 건에 붙은 두 줄이 같은 날짜를 본다 — 줄마다 다르게 보이면 안 된다", async () => {
-  // 한 접수 건에 내자 줄이 여럿인 것은 흔하다(분할 발주). 그 줄들의 납품일은
-  // 전부 같은 출처에서 오므로 언제나 같은 날짜여야 한다.
+test("같은 수리 건에 붙은 두 줄이 같은 날짜를 빌려 본다 — 줄마다 다르게 보이면 안 된다", async () => {
+  // 한 접수 건에 내자 줄이 여럿인 것은 흔하다(분할 발주). 두 줄 다 제 행에 적은
+  // 것이 없으면 둘 다 그 건의 출하일을 빌리므로 언제나 같은 날짜여야 한다.
   const caseId = await createTestCase("2096-07-25");
   const first = await insertOrder({ repairCaseId: caseId, deliveredDate: "2096-01-01" });
   const second = await insertOrder({ repairCaseId: caseId });
 
-  assert.equal((await loadOrder(first)).displayDeliveredDate, "2096-07-25");
-  assert.equal((await loadOrder(second)).displayDeliveredDate, "2096-07-25");
+  assert.deepEqual((await loadOrder(first)).deliveredDateLines, ["2096-07-25"]);
+  assert.deepEqual((await loadOrder(second)).deliveredDateLines, ["2096-07-25"]);
 });
 
 // ── 연결 없는 줄을 손으로 채운다 — 폼 → 검증 → 저장 → 조회(2026-09-11) ────
@@ -407,10 +479,11 @@ test("연결 없이 추가한 줄 — 손으로 적은 고객사·식별 칸·�
   assert.equal(found.lotNumber, "LN-손");
   assert.equal(found.serialNumber, "SN-손");
   assert.equal(found.reportedSymptom, "손으로 적은 고장내역");
-  // 목록의 `납품일` — 연결 없는 줄은 손으로 적은 날짜다(2026-09-11).
-  assert.equal(found.displayDeliveredDate, "2096-07-28");
-  // 폼이 다음에 열 때 입력칸에 담을 원본 칸. 이것이 안 실려 오면 폼은 빈칸으로
-  // 시작하고, 그대로 저장하면 적어 둔 납품일이 지워진다.
+  // 🔴 목록의 `납품일` 은 **옛 칼럼을 안 그린다**(2026-11-08) — 행에 적은 것이
+  //    없으므로 비어 있다. 그려지지 않는 것과 지워지는 것은 다르다.
+  assert.deepEqual(found.deliveredDateLines, []);
+  // 폼이 되실어 보내는 옛 칸. 이것이 안 실려 오면 저장 한 번에 PO 가 쓰는
+  // 칼럼이 지워진다(사용자 결정 11).
   assert.equal(found.deliveredDate, "2096-07-28");
   assert.equal(found.customerId, customerId);
 });
@@ -438,9 +511,11 @@ test("연결을 붙였다 떼도 손으로 적은 납품일은 남는다 — 붙
   if (!linked.ok) return;
 
   const whileLinked = await loadOrder(created.id);
-  // 🔴 연결된 줄의 납품일은 여전히 수리 건의 실제 출하일이다 — 손 값이 가리지 않는다.
-  assert.equal(whileLinked.displayDeliveredDate, "2096-07-30");
-  assert.equal(whileLinked.deliveredDate, "2096-07-28", "연결하는 저장이 손 납품일을 지웠다");
+  // 🔴 연결된 줄의 납품일은 그 건의 실제 출하일을 **빌려** 그린다 — 이 줄의 행에
+  //    적은 것이 없기 때문이다(옛 칼럼은 어느 쪽이든 안 그린다).
+  assert.deepEqual(whileLinked.deliveredDateLines, ["2096-07-30"]);
+  assert.equal(whileLinked.deliveredDateBorrowed, true);
+  assert.equal(whileLinked.deliveredDate, "2096-07-28", "연결하는 저장이 옛 칼럼을 지웠다");
 
   const unlinked = await updateDomesticOrder({
     id: created.id,
@@ -453,9 +528,10 @@ test("연결을 붙였다 떼도 손으로 적은 납품일은 남는다 — 붙
   const afterUnlink = await loadOrder(created.id);
   assert.equal(afterUnlink.repairCaseId, null);
   assert.equal(afterUnlink.repairCaseActualShipmentDate, null);
-  assert.equal(afterUnlink.deliveredDate, "2096-07-28", "연결을 푼 뒤 손 납품일이 사라졌다");
-  // 연결을 풀면 그 손 값이 다시 목록의 납품일이 된다.
-  assert.equal(afterUnlink.displayDeliveredDate, "2096-07-28");
+  assert.equal(afterUnlink.deliveredDate, "2096-07-28", "연결을 푼 뒤 옛 칼럼이 사라졌다");
+  // 🔴 연결을 풀어도 그 옛 값은 **화면에 안 나온다**(2026-11-08). 빌려 올 수리 건이
+  //    없어졌으니 이 줄의 납품일은 비어 있고, 적는 자리는 납기요청일 행이다.
+  assert.deepEqual(afterUnlink.deliveredDateLines, []);
   assert.equal(afterUnlink.customerName, await customerName(customerId));
 });
 

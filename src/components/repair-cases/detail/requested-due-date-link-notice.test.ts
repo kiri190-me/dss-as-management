@@ -38,9 +38,12 @@ test("🔴 묶기 결과가 훅 → 폼 → 구역 → 상세 화면까지 **끊
   // 한 칸이라도 빠지면 타입이 막아 주지만(필수 프롭), **엉뚱한 곳에 묶는 것**은
   // 타입이 안 막는다. 그래서 이름을 자리마다 글자로 확인한다.
   assert.match(hook, /onRequestedDueDateNotLinked\?: \(message: string\) => void;/);
+  // 🔴 **모양이 바뀌었다**(2026-11-08) — 묶이는 칸이 둘이 되어(고객 요청 납기일 ↔
+  //    납기요청일, 실제 출하일 ↔ 납품일) 한 저장이 둘 다 못 맞출 수 있다. 하나만
+  //    읽으면 나머지가 조용히 사라지므로 **모아서** 올린다.
   assert.match(
     flat(hook),
-    /const link = result\.requestedDueDateLink; if \(link && !link\.linked && params\.onRequestedDueDateNotLinked\) \{ params\.onRequestedDueDateNotLinked\(link\.message\); return; \}/
+    /const linkMessages = \[result\.requestedDueDateLink, result\.deliveredDateLink\] \.filter\(\(link\) => link !== undefined && !link\.linked\) \.map\(\(link\) => \(link as \{ message: string \}\)\.message\); if \(linkMessages\.length > 0 && params\.onRequestedDueDateNotLinked\) \{ params\.onRequestedDueDateNotLinked\(linkMessages\.join\("\\n\\n"\)\); return; \}/
   );
   assert.match(flat(intakeForm), /savedPopup: REPAIR_CASE_SAVED_POPUP, [^;]*onRequestedDueDateNotLinked, \}\);/);
   assert.match(intakeForm, /onRequestedDueDateNotLinked: \(message: string\) => void;/);
@@ -59,9 +62,12 @@ test("🔴 알림은 **상세 화면**이 띄운다 — 폼은 저장에 성공�
     detailView,
     /const \[requestedDueDateNotLinked, setRequestedDueDateNotLinked\] = useState<string \| null>\(null\);/
   );
+  // 🔴 **제목에 칸 이름을 박지 않는다**(2026-11-08) — 묶이는 칸이 둘이라 한 상자에
+  //    글이 둘 올 수 있고, 제목이 한쪽을 가리키면 나머지가 제목 밖의 글이 된다.
+  //    그래서 줄도 `\n\n` 으로 갈라 **여러 줄**로 넘긴다.
   assert.match(
     flat(detailView),
-    /\{requestedDueDateNotLinked !== null && \( <NoticePopup title="내자 정리의 납기요청일은 바뀌지 않았습니다" lines=\{\[requestedDueDateNotLinked\]\} onClose=\{\(\) => setRequestedDueDateNotLinked\(null\)\}/
+    /\{requestedDueDateNotLinked !== null && \( <NoticePopup title="내자 정리의 날짜는 바뀌지 않았습니다" lines=\{requestedDueDateNotLinked\.split\("\\n\\n"\)\} onClose=\{\(\) => setRequestedDueDateNotLinked\(null\)\}/
   );
   // 폼과 구역에는 대화상자가 없어야 한다 — 있으면 뜨자마자 함께 사라진다. 🔴 이름이
   // 아니라 **여는 꺾쇠**로 센다: 주석이 그 부품을 까닭으로 들 수 있어서, 글자만 세면

@@ -39,16 +39,18 @@
  *     quoteNumber · quoteIssuedDate · amountExcludingVat
  *   - **계산된 값** — modelName · lotNumber · serialNumber ·
  *     displayIntakeNumber · customerName · reportedSymptom ·
- *     **displayDeliveredDate** · **displayQuoteNumber · displayQuoteIssuedDate ·
- *     displayAmountExcludingVat**
+ *     **deliveredDateLines · deliveredByLines** · **displayQuoteNumber ·
+ *     displayQuoteIssuedDate · displayAmountExcludingVat**
  *
  * 계산된 값은 *"그 줄에 적힌 것이 먼저, 없으면 연결된 수리 건의 것"* 이다
- * (resolveDomesticOrderValue). 마지막 하나만 규칙이 다르다 — displayDeliveredDate
- * 는 둘을 섞지 않고 연결 여부로 가른다: **연결된 줄은 수리 건의 실제 출하일뿐**
- * 이라 그 줄의 deliveredDate 는 보지 않고, 연결 없는 줄은 그 deliveredDate
- * 그대로다(resolveDomesticOrderDeliveredDate). 그 값이 실려 나가면 담길 칼럼조차
- * 없거니와, 원본 칸(deliveredDate)에 옮겨 담으면 연결된 줄에서 자동으로 따라오던
- * 출하일이 이 줄에 박제된다. 견적서 셋(display* 셋)은 방향이 반대라 **연결된
+ * (resolveDomesticOrderValue). 납품 둘만 규칙이 다르다 — 🔴 **2026-11-08 부터
+ * 납품일·납품자는 이 줄의 칼럼이 아니라 납기요청일 **행**에 산다**
+ * (domestic_order_due_dates.delivered_date / _by). 화면이 그리는
+ * deliveredDateLines · deliveredByLines 는 그 행들을 **행마다 하나씩** 늘어놓은
+ * 것이고, 아무 행에도 안 적혀 있으면 연결된 수리 건의 실제 출하일을 빌려 그린다
+ * (domain/delivered-date-link.ts 의 resolveDomesticOrderDeliveryDisplay). 그 값이
+ * 실려 나가면 담길 칼럼조차 없거니와, 빌려 온 날짜를 행에 옮겨 담으면 아무도 적지
+ * 않은 날짜가 그 줄에 박제된다. 견적서 셋(display* 셋)은 방향이 반대라 **연결된
  * 견적서의 값이 먼저**이고, 원본 칸에 옮겨 담으면 손으로 적은 값이 견적서 값으로
  * 바뀌어 연결을 풀어도 돌아오지 않는다(아래 '견적서를 따르는 칸 둘').
  * 그러므로 **보낼 때는 반드시 원본 칸을 쓴다.**
@@ -117,6 +119,26 @@
  * 같다 — 줄 전체를 싣고 dueDates 하나만 갈아 끼운다. 다른 것은 편집 목록을
  * **무엇으로 채우는가** 하나이고, 그것이 이 기능에서 가장 위험한 자리다(그 묶음의
  * '빌려 온 날짜는 채우지 않는다').
+ *
+ * ── 🔴 납품일·납품자 목록 편집 (2026-11-08) ──────────────────────────────
+ * 사용자 요구 원문: 「납기 요청일을 여러줄로 두면, 납품일, 납품자도 그 수에 맞게
+ * 설정할 수 있도록 … 납품일을 표에서 직접 바꿀 수 있도록」. 그래서 그 둘도 **같은
+ * 행 목록(dueDates)에 실려** 오간다 — 행 하나가 「언제까지 달라고 했고, 언제 누가
+ * 보냈는가」 한 쌍이다.
+ *
+ * 🔴 **그 결과 이 파일의 함정 ①이 한 칸 더 넓어졌다.** 저장은 그 줄의 납기요청일
+ * 행을 통째로 지우고 받은 목록으로 다시 넣으므로(mutations 의 replaceDueDates),
+ * **보내는 목록이 납품 기록을 들고 오지 않으면 그 저장 한 번에 사라진다.** 아래
+ * collectRowFields 가 네 칸을 전부 싣는 것이 그 장치이고, 납기요청일만 고치는
+ * 편집칸(DomesticOrderDueDatesCell)이 납품 기록을 **보이지 않게 그대로 들고
+ * 다니는** 것도 같은 까닭이다.
+ *
+ * 🔴 **그리고 두 칸이 열두 칸에서 빠졌다.** `deliveredBy`(납품자)는 2026-11-07
+ * 까지 눌러 고치는 열두 칸 중 하나였는데, 이제 그 칸이 **행에 있다.** 옛
+ * 칼럼(domestic_orders.delivered_by)은 PO 가 쓰므로 지우지 않았지만 A/S 는 더
+ * 이상 그리지 않으므로, 그 칸을 눌러 고치게 두면 **아무 데도 안 보이는 값을 고치는
+ * 죽은 단추**가 된다. 그래서 열두 칸은 **열한 칸**이 되었고, 납품자를 적는 자리는
+ * 아래 '납품' 묶음 하나다.
  * ============================================================================
  */
 
@@ -124,27 +146,36 @@ import { foldBlankToNull, formatDomesticOrderDueDates } from "./domestic-order-l
 import { resolveDomesticOrderDueDateDisplay } from "./requested-due-date-link";
 
 /**
- * 칸을 눌러 그 자리에서 고칠 수 있는 칸. **글자 칸 아홉 + 날짜 칸 셋, 열둘이다.**
+ * 칸을 눌러 그 자리에서 고칠 수 있는 칸. **글자 칸 여덟 + 날짜 칸 셋, 열하나다.**
  *
- * 한 줄짜리 다섯(발주서번호 · PJT · 견적서번호 · 납품자 · 일본 송금), 사람이
- * 줄바꿈을 섞어 적는 여러 줄짜리 넷(고장내역 · 현황 · 이력 · 기타), 그리고 날짜
- * 셋(발주발행일 · 견적발행일 · 세금계산서발행일)이다. 셋 갈래의 차이는
- * **편집칸의 생김새 하나뿐**이고(아래 domesticOrderInlineEditControl), 보내는
- * 값을 만드는 규칙은 열둘이 똑같다 — 그래서 하나의 목록이다.
+ * 한 줄짜리 넷(발주서번호 · PJT · 견적서번호 · 일본 송금), 사람이 줄바꿈을 섞어
+ * 적는 여러 줄짜리 넷(고장내역 · 현황 · 이력 · 기타), 그리고 날짜 셋(발주발행일 ·
+ * 견적발행일 · 세금계산서발행일)이다. 셋 갈래의 차이는 **편집칸의 생김새
+ * 하나뿐**이고(아래 domesticOrderInlineEditControl), 보내는 값을 만드는 규칙은
+ * 열하나가 똑같다 — 그래서 하나의 목록이다.
  *
  * ── 날짜 셋이 여기 들어오고 둘이 안 들어온 까닭 ─────────────────────────
  * 이 셋은 **그 줄에 사람이 적는 날짜 하나**다. 값이 `"YYYY-MM-DD"` 문자열 하나라
- * 위 아홉과 똑같이 실려 나가고, 검증도 같은 관문 하나를 지난다. 반면:
+ * 위 여덟과 똑같이 실려 나가고, 검증도 같은 관문 하나를 지난다. 반면:
  *
- *   - **`deliveredDate`(납품일)** — 연결된 줄의 목록 납품일은 이 칼럼이 아니라
- *     수리 건의 실제 출하일이라 사람이 적는 값이 아니고, 칸 편집을 붙이면 따라오던
- *     출하일이 이 줄에 박제된다. 연결 없는 줄은 이 칼럼이 곧 납품일이지만 적는
- *     자리는 `줄 수정` 폼의 입력칸뿐이다(DomesticOrderEditForm). 칸 편집은 연결
- *     여부와 무관하게 없다 — **여기 적으면 안 된다.**
+ *   - **`deliveredDate`(납품일)** — 🔴 **이제 이 줄의 칼럼이 아니다**(2026-11-08).
+ *     납품일은 납기요청일 **행마다** 하나씩 달려 있어서 값이 하나가 아니고,
+ *     그리는 것도 행 목록이다. 칸 하나에 값 하나라는 이 목록의 전제가 통째로
+ *     다르므로 파일 아래 '납품' 묶음이 따로 맡는다. 옛 칼럼
+ *     (`domestic_orders.delivered_date`)은 PO 때문에 남아 있지만 A/S 는 그리지도
+ *     고치지도 않는다 — **여기 적으면 안 된다.**
  *   - **`dueDates`(납기요청일)** — 날짜가 **여럿**이고 메모가 딸린 별도 표다
  *     (schema/domestic-order-due-dates.ts). 칸 하나에 값 하나라는 이 목록의 전제가
  *     통째로 다르다. 2026-09-11 부터 표에서 눌러 고치지만 **이 목록이 아니라**
  *     파일 아래 '납기요청일' 묶음이 따로 맡는다(값 모양과 편집칸이 다르다).
+ *
+ * ── 🔴 `deliveredBy`(납품자)가 **여기서 빠졌다** (2026-11-08) ─────────────
+ * 2026-11-07 까지는 한 줄짜리 다섯 중 하나였다(그래서 열둘이었다). 납품자가
+ * 납기요청일 행으로 옮겨 가면서 이 칼럼은 **A/S 어느 화면에도 안 보이는 값**이
+ * 되었고, 보이지 않는 값을 눌러 고치게 두면 **글자를 적어도 아무 데도 안 뜨는 죽은
+ * 단추**가 된다. 적는 자리는 이제 '납품' 묶음 하나다.
+ * 🔵 옛 칼럼은 지우지 않았다(사용자 결정 11 — PO 가 쓴다). 저장은 읽어 온 값을
+ * 그대로 되실어 보낼 뿐이라, 그 칸에 남아 있던 값도 그대로 남는다.
  *
  * 금액·입금완료·고르기 칸도 아직 아니다(쉼표가 섞인 숫자, 체크상자, UUID 를
  * 고르는 드롭다운). 그 칸들은 지금도 `줄 수정` 폼에서 고친다.
@@ -153,14 +184,13 @@ import { resolveDomesticOrderDueDateDisplay } from "./requested-due-date-link";
  * 계산된 값(`reportedSymptom`)이지 이 칸이 아니다(파일 헤더의 함정 ②). 여기 적힌
  * 것이 원본 칸이라야 그 함정에 빠질 자리가 없다 — 이 목록에 계산된 값의 이름을
  * 적는 순간 아래 buildDomesticOrderCellUpdateFields 가 그 이름으로 SET 을 만든다.
- * 날짜 셋에는 계산된 짝이 없어(`displayDeliveredDate` 는 납품일의 짝이다) 이
- * 함정이 없지만, **함께 실려 나가는 나머지 스물세 칸에는 그대로 있다.**
+ * 날짜 셋에는 계산된 짝이 없어(`deliveredDateLines` 는 납품일의 짝이다) 이 함정이
+ * 없지만, **함께 실려 나가는 나머지 스물세 칸에는 그대로 있다.**
  */
 export type DomesticOrderInlineEditableField =
   | "purchaseOrderNumber"
   | "projectName"
   | "quoteNumber"
-  | "deliveredBy"
   | "japanRemittanceNote"
   | "faultDescriptionText"
   | "progressNote"
@@ -181,7 +211,6 @@ export const DOMESTIC_ORDER_INLINE_EDIT_LABELS: Readonly<
   purchaseOrderNumber: "발주서번호",
   projectName: "PJT",
   quoteNumber: "견적서번호",
-  deliveredBy: "납품자",
   japanRemittanceNote: "일본 송금",
   faultDescriptionText: "고장내역",
   progressNote: "현황",
@@ -226,7 +255,6 @@ export const DOMESTIC_ORDER_INLINE_EDIT_MULTILINE: Readonly<
   purchaseOrderNumber: false,
   projectName: false,
   quoteNumber: false,
-  deliveredBy: false,
   japanRemittanceNote: false,
   faultDescriptionText: true,
   progressNote: true,
@@ -264,7 +292,6 @@ export const DOMESTIC_ORDER_INLINE_EDIT_DATE: Readonly<
   purchaseOrderNumber: false,
   projectName: false,
   quoteNumber: false,
-  deliveredBy: false,
   japanRemittanceNote: false,
   faultDescriptionText: false,
   progressNote: false,
@@ -350,12 +377,21 @@ export type DomesticOrderCellEditRow = {
    * DomesticOrderDueDateInput 주석) — 여기서 다시 정렬하거나 걸러 내면 그 줄의
    * 납기일 순서가 칸 하나 고칠 때마다 바뀐다.
    *
+   * 🔴 **행마다 납품일·납품자가 달려 있다**(2026-11-08). 네 칸이 한 덩어리이고,
+   * 아래에서 네 칸을 전부 골라 싣는 것이 **이 파일에서 가장 위험한 자리**다 —
+   * 저장은 이 줄의 행을 통째로 지우고 받은 목록으로 다시 넣으므로, 하나라도
+   * 빠뜨리면 **칸 하나 고치는 저장 한 번에 그 줄의 납품 기록이 사라진다.**
+   *
    * 목록이 실어 오는 항목에는 id 와 displayOrder 도 붙어 있지만 저장에는 쓰이지
-   * 않는다(검증이 dueDate · note 만 읽는다). 그래도 아래에서 두 칸만 골라
-   * 새로 만드는 것은, **보내는 값의 모양을 이 파일이 정한다**는 사실을 코드로
-   * 남겨 두기 위해서다.
+   * 않는다(검증이 네 칸만 읽는다). 그래도 아래에서 네 칸만 골라 새로 만드는 것은,
+   * **보내는 값의 모양을 이 파일이 정한다**는 사실을 코드로 남겨 두기 위해서다.
    */
-  dueDates: readonly { dueDate: string; note: string | null }[];
+  dueDates: readonly {
+    dueDate: string;
+    note: string | null;
+    deliveredDate: string | null;
+    deliveredBy: string | null;
+  }[];
   quoteIssuedDate: string | null;
   quoteNumber: string | null;
   /**
@@ -369,27 +405,23 @@ export type DomesticOrderCellEditRow = {
   quoteId: string | null;
   progressNote: string | null;
   /**
-   * ⚠️ **칸 편집으로는 고치지 않는 값인데 반드시 여기 있어야 한다.**
+   * ⚠️ **어느 화면에도 안 보이고 아무도 고치지 않는 값인데 반드시 여기 있어야
+   * 한다.** 🔴 **옛 자리다**(2026-11-08 — 납품일은 이제 위 dueDates 행에 산다).
    *
-   * 연결된 줄의 `납품일` 은 이 칼럼이 아니라 수리 건의 실제 출하일이고
-   * (queries 의 displayDeliveredDate), 연결 없는 줄은 이 칼럼이 곧 목록에 보이는
-   * 납품일이다(2026-09-11) — 적는 자리는 `줄 수정` 폼의 입력칸뿐이다. 어느 쪽이든
-   * 이 칸을 뺄 수 없는 이유는 파일 헤더의 규칙 하나 때문이다 — **이 저장은 모든
-   * 칼럼을 SET 한다.** 아래 builder 가 이 키를 안 실으면 검증이 undefined 를
-   * null 로 접고, 그 줄의 납품일이 **칸 하나 고치는 저장 한 번에** DB 에서
-   * 사라진다.
+   * 뺄 수 없는 이유는 파일 헤더의 규칙 하나 때문이다 — **이 저장은 모든 칼럼을
+   * SET 한다.** 아래 builder 가 이 키를 안 실으면 검증이 undefined 를 null 로 접고,
+   * 그 칼럼이 **칸 하나 고치는 저장 한 번에** DB 에서 지워진다.
    *
-   * ⚠️ **연결 없는 줄에서는 이 경고가 더 무겁다.** 거기서는 이 값이 화면에 보이는
-   * 납품일의 원본 그 자체라, 지워지면 목록의 날짜가 곧바로 "-"가 된다 — 다른 칸
-   * 하나 고치다 사람이 적은 납품일을 잃는다. 연결된 줄에서는 안 보여 줄 뿐 버린
-   * 값이 아니고, 연결을 풀면 다시 보인다(domestic-order-list.ts 헤더).
+   * 🔴 **그 칼럼을 PO 시스템(dss-po)이 같은 DB 에서 쓴다**(사용자 결정 11 — 그래서
+   * 지우지 않았다). A/S 가 그리지 않는다고 비워도 되는 값이 아니라는 뜻이다. 여기서
+   * 하는 일은 읽어 온 값을 **한 글자도 안 바꾸고 그대로 되돌려 보내는 것**뿐이다.
    *
-   * ⚠️ 계산된 짝(displayDeliveredDate)은 **이 타입에 없다.** 고장내역과 같은
-   * 함정이고(파일 헤더의 함정 ②), 여기 없다는 것이 그 함정에 빠질 자리를 없애는
-   * 장치다 — 그 이름으로 SET 을 만들 칼럼은 아예 없다.
+   * ⚠️ 계산된 짝(deliveredDateLines · deliveredByLines)은 **이 타입에 없다.**
+   * 고장내역과 같은 함정이고(파일 헤더의 함정 ②), 여기 없다는 것이 그 함정에 빠질
+   * 자리를 없애는 장치다 — 그 이름으로 SET 을 만들 칼럼은 아예 없다.
    */
   deliveredDate: string | null;
-  /** `납품일` 과 이름만 비슷한 다른 칸이다. 이쪽은 눌러서 고치는 열두 칸에 든다. */
+  /** 옛 자리의 짝. 위와 **같은 까닭으로** 실려 다닌다(A/S 는 안 그린다 · PO 가 쓴다). */
   deliveredBy: string | null;
   taxInvoiceDate: string | null;
   amountExcludingVat: string | null;
@@ -447,15 +479,23 @@ function collectRowFields(row: DomesticOrderCellEditRow): Record<string, unknown
     purchaseOrderNumber: row.purchaseOrderNumber,
     projectName: row.projectName,
     orderIssuedDate: row.orderIssuedDate,
-    dueDates: row.dueDates.map((entry) => ({ dueDate: entry.dueDate, note: entry.note })),
+    // 🔴 **네 칸을 전부 싣는다.** 저장이 이 줄의 행을 통째로 지우고 다시 넣으므로
+    // (replaceDueDates), 납품일·납품자를 빠뜨리면 칸 하나 고치는 저장 한 번에 그
+    // 줄의 납품 기록이 사라진다(위 타입의 dueDates 주석).
+    dueDates: row.dueDates.map((entry) => ({
+      dueDate: entry.dueDate,
+      note: entry.note,
+      deliveredDate: entry.deliveredDate,
+      deliveredBy: entry.deliveredBy,
+    })),
     quoteIssuedDate: row.quoteIssuedDate,
     quoteNumber: row.quoteNumber,
     // ⚠️ 화면에 칸이 없지만 **빼면 견적서 연결이 풀린다**(위 타입의 그 칸 주석).
     // 2026-08-28 부터 09-11 까지 여기가 비어 있었다.
     quoteId: row.quoteId,
     progressNote: row.progressNote,
-    // ⚠️ 칸 편집으로는 안 고치는 값이지만 **빼면 지워진다**(위 타입의 그 칸 주석).
-    // 연결 없는 줄에서는 목록에 보이는 납품일의 원본이다.
+    // ⚠️ 🔴 **옛 자리다 — A/S 는 안 그리는데 빼면 지워지고, 그 칼럼을 PO 가 쓴다**
+    // (위 타입의 그 칸 주석). 읽어 온 값을 그대로 되돌려 보낸다.
     deliveredDate: row.deliveredDate,
     deliveredBy: row.deliveredBy,
     taxInvoiceDate: row.taxInvoiceDate,
@@ -584,8 +624,26 @@ export function domesticOrderFaultDescriptionHint(
  * ============================================================================
  */
 
-/** 편집 중인 납기요청일 한 줄. 두 값 다 문자열이다(빈 문자열 = 안 적음). */
-export type DomesticOrderDueDateDraft = { dueDate: string; note: string };
+/**
+ * 편집 중인 납기요청일 한 줄. 네 값 다 문자열이다(빈 문자열 = 안 적음).
+ *
+ * 🔴 **납품일·납품자가 여기 들어 있고, 편집칸 둘이 이 한 모양을 나눠 쓴다**
+ * (2026-11-08):
+ *
+ *   `납기요청일` 칸  — 날짜·메모 입력칸을 그리고 **납품 둘은 보이지 않게 들고만 있다**
+ *   `납품일`·`납품자` 칸 — 납품 둘을 그리고 **날짜·메모를 보이지 않게 들고만 있다**
+ *
+ * 🔴 **들고만 있는 쪽을 빼면 그 저장이 그 값을 지운다** — 저장은 받은 목록으로 그
+ * 줄의 행을 통째로 다시 만들기 때문이다(파일 헤더의 넓어진 함정 ①). 그래서 모양을
+ * 둘로 가르지 않고 **하나로 둔다**: 가르는 순간 한쪽이 상대 칸을 빠뜨릴 자리가
+ * 생기고, 그 증상은 「납품일을 적었더니 메모가 사라졌다」로 나타난다.
+ */
+export type DomesticOrderDueDateDraft = {
+  dueDate: string;
+  note: string;
+  deliveredDate: string;
+  deliveredBy: string;
+};
 
 /**
  * 편집 목록을 **무엇으로 채울 것인가** — 이 줄에 적힌 날짜 그대로, 차례도
@@ -600,9 +658,22 @@ export type DomesticOrderDueDateDraft = { dueDate: string; note: string };
  * 빈 문자열을 null 로 접는 일은 검증이 한다.
  */
 export function domesticOrderDueDateEditDraft(row: {
-  dueDates: readonly { dueDate: string; note: string | null }[];
+  dueDates: readonly {
+    dueDate: string;
+    note: string | null;
+    deliveredDate: string | null;
+    deliveredBy: string | null;
+  }[];
 }): DomesticOrderDueDateDraft[] {
-  return row.dueDates.map((entry) => ({ dueDate: entry.dueDate, note: entry.note ?? "" }));
+  return row.dueDates.map((entry) => ({
+    dueDate: entry.dueDate,
+    note: entry.note ?? "",
+    // 🔴 납품 둘도 함께 담는다 — 납기요청일만 고치는 편집칸이 이 값을 **보이지
+    // 않게 들고 다니다가 그대로 되돌려 보내야** 그 저장이 납품 기록을 지우지
+    // 않는다(위 DomesticOrderDueDateDraft 주석).
+    deliveredDate: entry.deliveredDate ?? "",
+    deliveredBy: entry.deliveredBy ?? "",
+  }));
 }
 
 /**
@@ -623,7 +694,15 @@ export function buildDomesticOrderDueDatesUpdateFields(
     // 고치는 칸은 맨 마지막에 갈아 끼운다(위 칸 편집과 같은 이유). 새 배열·새
     // 객체로 만든다 — 편집 중인 상태를 그대로 넘기면 저장이 도는 동안 사람이
     // 고친 글자가 보낸 값에 섞일 수 있다.
-    dueDates: dueDates.map((entry) => ({ dueDate: entry.dueDate, note: entry.note })),
+    //
+    // 🔴 **네 칸을 전부 옮긴다.** 보내는 쪽이 납기요청일만 고쳤든 납품일만
+    // 고쳤든, 나가는 목록에는 늘 네 칸이 다 있어야 한다(위 Draft 주석).
+    dueDates: dueDates.map((entry) => ({
+      dueDate: entry.dueDate,
+      note: entry.note,
+      deliveredDate: entry.deliveredDate,
+      deliveredBy: entry.deliveredBy,
+    })),
   };
 }
 
@@ -674,3 +753,58 @@ export function domesticOrderDueDatesDraftText(
     ) ?? ""
   );
 }
+
+/**
+ * ============================================================================
+ * 🔴 납품 — 표에서 **납품일·납품자를 줄마다** 고칠 때 (2026-11-08)
+ * ============================================================================
+ * 사용자 요구 원문: 「납기 요청일을 여러줄로 두면, 납품일, 납품자도 그 수에 맞게
+ * 설정할 수 있도록 … 납품일을 표에서 직접 바꿀 수 있도록」.
+ *
+ * ── 🔴 왜 **따로 쓸 함수가 거의 없는가** ────────────────────────────────
+ * 납품일·납품자는 납기요청일과 **같은 행**에 있으므로, 보내는 모양도 같은
+ * 목록(dueDates)이고 저장 길도 같다(buildDomesticOrderDueDatesUpdateFields).
+ * 편집칸 둘이 다른 것은 **어느 칸에 입력칸을 세우는가** 하나뿐이다. 그래서 여기에
+ * 새로 두는 것은 **충돌 상자에 적을 글** 하나뿐이고, 목록을 만드는 일도 저장을
+ * 만드는 일도 위 묶음을 그대로 쓴다.
+ *
+ * ── 🔴 **행을 더하거나 지우지 않는다** ──────────────────────────────────
+ * 납품 편집칸에는 `추가`·`삭제` 가 없다. 행은 **납기요청일이 만든다** — 그 표의
+ * `due_date` 가 NOT NULL 이라(schema 파일) 납기일 없이 납품일만 있는 행은 들어갈
+ * 자리가 아예 없고, 납품 쪽에서 행을 만들려면 **지어낸 납기일**을 함께 넣어야
+ * 한다. 지어낸 날짜는 그 줄의 「발주서에 이렇게 적혀 있다」는 기록을 거짓으로
+ * 만든다. 그래서 행이 하나도 없는 줄에서는 편집칸 대신 **먼저 납기요청일을
+ * 적으라는 안내**가 선다(DomesticOrderDeliveriesCell).
+ * ============================================================================
+ */
+
+/**
+ * 납품 편집의 충돌 상자에 담을 한 줄 — "2026-02-01 홍길동 (1차분)". 담을 것이
+ * 없으면 빈 문자열이다(상자가 아예 안 그려진다 — buildDraftText).
+ *
+ * 🔴 **납기요청일을 함께 적는다.** 납품일만 늘어놓으면 충돌로 날아간 글을 다시
+ * 넣을 때 **어느 회차의 것인지** 알 수 없다 — 이 목록은 차례가 곧 열쇠인데, 상자에
+ * 붙여 넣는 사람에게는 그 차례가 안 보인다. 그래서 `1차: 납기 2026-01-20 → 납품
+ * 2026-02-01 홍길동` 처럼 회차와 납기일을 함께 남긴다.
+ *
+ * 🔴 **납품자는 PII 다**(schema 의 그 칸 주석). 그래도 여기 적는다 — 이 글은 로그나
+ * 오류 보고가 아니라 **방금 그 사람이 친 글을 그 사람 화면에 돌려주는 상자**이고,
+ * 비워 두면 다시 칠 수 없다. 서버로도 로그로도 나가지 않는다.
+ *
+ * 아무것도 안 적은 회차는 뺀다 — 비어 있던 칸은 다시 넣을 것도 없다.
+ */
+export function domesticOrderDeliveriesDraftText(
+  dueDates: readonly DomesticOrderDueDateDraft[]
+): string {
+  const lines: string[] = [];
+  dueDates.forEach((entry, index) => {
+    const date = entry.deliveredDate.trim();
+    const person = entry.deliveredBy.trim();
+    if (date === "" && person === "") return;
+    const dueDate = entry.dueDate.trim() === "" ? "(날짜 없음)" : entry.dueDate.trim();
+    const written = [date, person].filter((value) => value !== "").join(" ");
+    lines.push(`${index + 1}차: 납기 ${dueDate} → 납품 ${written}`);
+  });
+  return lines.join("\n");
+}
+

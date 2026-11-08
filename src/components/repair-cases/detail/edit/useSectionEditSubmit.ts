@@ -126,9 +126,16 @@ export function useSectionEditSubmit(params: {
       // 🔴 「저장은 됐는데 내자가 못 따라갔다」는 **읽어야 하는 글**이다 — 그때는
       // 성공 팝업 대신 알림을 띄운다(위 prop 주석). 그 글 첫머리가 "저장했습니다"로
       // 시작하므로 성공 알림까지 함께 전한다(domain/requested-due-date-link.ts).
-      const link = result.requestedDueDateLink;
-      if (link && !link.linked && params.onRequestedDueDateNotLinked) {
-        params.onRequestedDueDateNotLinked(link.message);
+      //
+      // 🔴 **묶이는 칸이 둘이다**(2026-10-30 고객 요청 납기일 ↔ 납기요청일,
+      // 2026-11-08 실제 출하일 ↔ 납품일). 한 저장이 둘 다 못 맞출 수 있으므로
+      // **모아서** 올린다 — 하나만 보면 나머지 하나가 조용히 사라지고, 다음에 내자
+      // 정리를 연 사람은 자기가 고친 적 없는 날짜를 본다.
+      const linkMessages = [result.requestedDueDateLink, result.deliveredDateLink]
+        .filter((link) => link !== undefined && !link.linked)
+        .map((link) => (link as { message: string }).message);
+      if (linkMessages.length > 0 && params.onRequestedDueDateNotLinked) {
+        params.onRequestedDueDateNotLinked(linkMessages.join("\n\n"));
         return;
       }
       if (params.savedPopup) showSavePopup(params.savedPopup);

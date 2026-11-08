@@ -1,5 +1,6 @@
 import { isValidDateString } from "@/lib/domain/local/validation";
 import type { RequestedDueDateLinkOutcome } from "@/lib/domain/requested-due-date-link";
+import type { DeliveredDateLinkOutcome } from "@/lib/domain/delivered-date-link";
 import { BILLING_TYPE_CODES, PRIORITY_CODES, type BillingType, type Priority } from "@/lib/domain/types";
 import { WORKFLOW_REASSIGNMENT_KIND_CODES, type WorkflowKind } from "@/lib/domain/workflow-kind";
 
@@ -419,6 +420,13 @@ export type UpdateRepairCaseActionResult =
        * 뒤에 사라져 경고를 전할 수 없다(components/common/NoticePopup.tsx 머리말).
        */
       requestedDueDateLink?: RequestedDueDateLinkOutcome;
+      /**
+       * 🔴 이번 저장이 **내자 정리의 납품일까지 맞췄는가**(2026-11-08). 위 짝과 같은
+       * 성질이고, **한 저장에 둘 다 올 수 있다** — 실제 출하일과 고객 요청 납기일을
+       * 함께 고치는 저장이 그 모습이다. 화면은 둘을 모아 한 상자에 띄운다
+       * (components/repair-cases/detail/edit/useSectionEditSubmit.ts).
+       */
+      deliveredDateLink?: DeliveredDateLinkOutcome;
     }
   | {
       ok: false;

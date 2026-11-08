@@ -249,9 +249,12 @@ test("A/S 상세의 섹션·칸 저장은 팝업만 띄우고 그 상세에 머�
   //    닫히는 알림으로 알리고(NoticePopup), 그래서 그 분기는 **return 으로 끝나야**
   //    한다 — 안 그러면 두 상자가 겹쳐 뜨고 읽어야 하는 글이 성공 팝업에 가린다.
   //    저장 자체는 성공했으므로 refresh·onDone 은 그 앞에서 그대로 먼저 돈다.
+  // 🔴 2026-11-08 에 **묶이는 칸이 둘**이 되었다(실제 출하일 ↔ 내자 납품일). 한
+  //    저장이 둘 다 못 맞출 수 있어 글을 **모아서** 올리지만, 위 규율은 한 글자도
+  //    그대로다 — 모을 것이 있으면 return 으로 끝나고, 없으면 평소의 저장 팝업이다.
   assert.match(
     hook,
-    /if \(!result\.ok\) \{[\s\S]*?\}\s*router\.refresh\(\);\s*params\.onDone\(\);\s*(?:\/\/[^\n]*\n\s*)*const link = result\.requestedDueDateLink;\s*if \(link && !link\.linked && params\.onRequestedDueDateNotLinked\) \{\s*params\.onRequestedDueDateNotLinked\(link\.message\);\s*return;\s*\}\s*if \(params\.savedPopup\) showSavePopup\(params\.savedPopup\);/
+    /if \(!result\.ok\) \{[\s\S]*?\}\s*router\.refresh\(\);\s*params\.onDone\(\);\s*(?:\/\/[^\n]*\n\s*)*const linkMessages = \[result\.requestedDueDateLink, result\.deliveredDateLink\][\s\S]*?if \(linkMessages\.length > 0 && params\.onRequestedDueDateNotLinked\) \{\s*params\.onRequestedDueDateNotLinked\(linkMessages\.join\("\\n\\n"\)\);\s*return;\s*\}\s*if \(params\.savedPopup\) showSavePopup\(params\.savedPopup\);/
   );
   // 빠뜨리면 타입이 막도록 필수다 — 새로 부르는 곳이 정하고 가야 한다.
   assert.match(hook, /savedPopup: SavePopupRequest \| null;/);

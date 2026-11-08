@@ -30,6 +30,13 @@ import {
   type RequestedDueDateLinkOutcome,
   type RequestedDueDateLinkPlan,
 } from "@/lib/domain/requested-due-date-link";
+import type { DeliveredDateLinkOutcome } from "@/lib/domain/delivered-date-link";
+import {
+  deliveredLinkOutcomeOf,
+  planDomesticOrderDeliveredLink,
+  writeDomesticOrderDeliveredLink,
+  type DomesticOrderDeliveredLinkWork,
+} from "./domestic-order-delivered-link";
 import { deriveWorkflowType, workflowKindLabels, type WorkflowKind } from "@/lib/domain/workflow-kind";
 import type { BillingType, WorkflowType } from "@/lib/domain/types";
 import type {
@@ -607,6 +614,13 @@ export type UpdateRepairCaseResult =
        * 맞춰진 줄 안다(domain/requested-due-date-link.ts 머리말 ④).
        */
       requestedDueDateLink?: RequestedDueDateLinkOutcome;
+      /**
+       * 🔴 이번 저장이 **내자 정리의 납품일까지 맞췄는가**(2026-11-08). 위 짝과
+       * 같은 성질이고 같은 이유로 조용히 버리면 안 된다 — 실제 출하일을 고쳤는데
+       * 내자 쪽이 못 따라갔으면, 다음에 내자 정리를 연 사람은 자기가 고친 적 없는
+       * 날짜를 보게 된다(domain/delivered-date-link.ts 머리말 ④).
+       */
+      deliveredDateLink?: DeliveredDateLinkOutcome;
     }
   | {
       ok: false;
@@ -772,6 +786,16 @@ async function planDomesticOrderDueDateLink(
 }
 
 /**
+ * 🔴 **실제 출하일 → 내자 납품일 묶기는 이 파일에 없다**(2026-11-08).
+ *
+ * 그 방향을 타는 통로가 **둘**이라서다 — 여기(인수정보에서 사람이 고치는 길)와
+ * 출하 완료 전이(mutations/workflow-transitions.ts 가 자동으로 찍는 길). 둘이 각자
+ * 같은 일을 적으면 언젠가 한쪽만 고쳐지므로 **mutations/domestic-order-delivered-link.ts
+ * 하나**가 갖는다(plan… · write… · …OutcomeOf 셋). 잠금 차례와 「쓰기는 UPDATE
+ * 뒤」라는 규율도 그 파일 머리말에 있고, 바로 위 납기요청일 묶기와 같은 모양이다.
+ */
+
+/**
  * Section-based, optimistic-concurrency update for an existing repair case.
  * Called only after update-repair-case.ts's Server Action has already
  * enforced authentication, the shipment-lock policy, and field-level role
@@ -868,6 +892,11 @@ export async function updateRepairCase(
      * 뒤에 일어난다 — 그 전까지는 **읽고 잠근 결과**일 뿐이다.
      */
     let requestedDueDateLink: DomesticOrderDueDateLinkWork | null = null;
+    /**
+     * 🔴 내자 정리의 **납품일**을 이 저장과 함께 맞출 것인가(2026-11-08). 바로 위
+     * 짝과 같은 성질이고, 쓰는 일도 같은 자리(UPDATE 가 성공한 뒤)에서 한다.
+     */
+    let deliveredDateLink: DomesticOrderDeliveredLinkWork | null = null;
     let billingReassignment:
       | {
           previousBillingType: BillingType;
@@ -1050,6 +1079,21 @@ export async function updateRepairCase(
           };
         }
         setValues.actualShipmentDate = shipped;
+
+        // 🔴 내자 정리의 납품일도 같은 날짜로 맞춘다(2026-11-08 사용자 결정 2 —
+        // 연동은 양방향). 여기서는 **읽고 잠그기만** 하고, 쓰는 일은 아래 UPDATE 가
+        // 성공한 뒤다(planDomesticOrderDeliveredLink 머리말의 두 까닭).
+        //
+        // 🔵 `trigger` 가 MANUAL_EDIT 인 것이 이 자리의 뜻이다 — 사람이 「이 건은
+        // 이 날 나갔다」를 다시 말한 것이라, 내자 쪽에 이미 적힌 납품일도 그 날짜로
+        // 맞춘다. 출하 완료 전이가 자동으로 찍는 자리와 거기서 갈린다
+        // (domain/delivered-date-link.ts 의 trigger 머리말).
+        deliveredDateLink = await planDomesticOrderDeliveredLink(tx, {
+          repairCaseId,
+          previous: current.actualShipmentDate,
+          next: shipped,
+          trigger: "MANUAL_EDIT",
+        });
       }
 
       // 우선순위 — NOT NULL 컬럼이라 다른 날짜 필드처럼 인수일과의 선후 관계
@@ -1395,6 +1439,12 @@ export async function updateRepairCase(
       }
     }
 
+    // 🔴 내자 정리의 납품일도 같은 자리에서 쓴다(2026-11-08). 위와 **같은 까닭으로
+    // UPDATE 뒤**다 — version 이 어긋나 돌아가는 길에서 이미 써 두면 수리 건은 안
+    // 바뀌었는데 내자 줄만 바뀐 상태가 남는다.
+    await writeDomesticOrderDeliveredLink(tx, deliveredDateLink, actorUserId);
+    const deliveredOutcome = deliveredLinkOutcomeOf(deliveredDateLink);
+
     return {
       ok: true,
       id: updated.id,
@@ -1409,6 +1459,7 @@ export async function updateRepairCase(
                 : requestedDueDateLink.plan.outcome,
           }
         : {}),
+      ...(deliveredOutcome ? { deliveredDateLink: deliveredOutcome } : {}),
     };
   });
 }

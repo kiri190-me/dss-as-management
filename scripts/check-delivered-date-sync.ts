@@ -14,10 +14,20 @@ import {
 
 /**
  * ============================================================================
- * 내자 `납품일` ↔ 수리 건 `실제 출하일` — **옮기기 전에 무엇이 어떻게 적혀 있나**
+ * 내자 `납품일` ↔ 수리 건 `실제 출하일` — **두 자리에 무엇이 어떻게 적혀 있나**
  * ============================================================================
  *
  *   npm run check:delivered-date-sync
+ *
+ * ── 🔴 **2026-11-08 에 자리가 바뀌었다** ────────────────────────────────
+ * 납품일·납품자는 이제 납기요청일 행에 있고 화면이 그리는 값도 그 행이다(사용자
+ * 결정 1). 옛 칸(`domestic_orders.delivered_date`·`delivered_by`)은 PO 가 쓰므로
+ * 남겨 두었고(결정 11), **A/S 는 그리지도 쓰지도 않는다.**
+ *
+ * 🔴 그래서 이 도구는 **두 자리를 따로 센다.** ②③ 과 칸 여섯은 옛 칸을 재던 수
+ * 그대로이고(그 수가 「A/S 가 더 이상 안 쓴다」와 「PO 가 적어 둔 값이 몇인가」를
+ * 계속 증명한다), 화면이 그리는 쪽은 「새 자리」 두 줄이 센다. 섞어 읽으면
+ * 「맞다/틀리다」를 거꾸로 본다.
  *
  * ── 🔴 왜 이것부터인가 ──────────────────────────────────────────────────
  * 2026-11-07 사용자 요구는 **내자정리의 납품일을 납기요청일 줄에 달고, 수리 건의 실제
@@ -84,6 +94,9 @@ type JoinedRow = {
   hasLegacyRequestedDueDate: boolean | null;
   dueDate: string | null;
   hasNote: boolean | null;
+  /** 🔴 **새 자리**의 납품 둘(2026-11-08). 화면이 그리는 납품일이 이 값이다. */
+  rowDeliveredDate: string | null;
+  rowHasDeliveredBy: boolean | null;
 };
 
 /**
@@ -116,6 +129,11 @@ async function readJoinedRows(): Promise<JoinedRow[]> {
       hasLegacyRequestedDueDate: sql<boolean>`${domesticOrders.requestedDueDate} is not null`,
       dueDate: domesticOrderDueDates.dueDate,
       hasNote: sql<boolean>`${domesticOrderDueDates.note} is not null and btrim(${domesticOrderDueDates.note}) <> ''`,
+      // 🔴 **새 자리**(2026-11-08). 화면이 그리는 납품일·납품자가 이 행의 값이다 —
+      //    위 옛 칸과 **다른 수**라 이름도 다르게 둔다.
+      rowDeliveredDate: domesticOrderDueDates.deliveredDate,
+      // 🔴 글자를 꺼내지 않는다(머리말의 PII 항목). 옛 칸과 같은 규칙이다.
+      rowHasDeliveredBy: sql<boolean>`${domesticOrderDueDates.deliveredBy} is not null and btrim(${domesticOrderDueDates.deliveredBy}) <> ''`,
     })
     .from(domesticOrders)
     .leftJoin(repairCases, eq(repairCases.id, domesticOrders.repairCaseId))
@@ -206,7 +224,12 @@ function groupByLine(rows: readonly JoinedRow[]): SurveyOrderLine[] {
     }
     // leftJoin 이라 날짜 행이 없는 줄은 여기서 null 로 온다 — 줄은 서고 행만 없다.
     if (row.dueDate !== null) {
-      line.dueDateRows.push({ dueDate: row.dueDate, hasNote: row.hasNote === true });
+      line.dueDateRows.push({
+        dueDate: row.dueDate,
+        hasNote: row.hasNote === true,
+        deliveredDate: row.rowDeliveredDate,
+        hasDeliveredBy: row.rowHasDeliveredBy === true,
+      });
     }
   }
 
@@ -266,7 +289,8 @@ function days(value: number | null): string {
 
 async function main(): Promise<void> {
   console.log("\n" + "─".repeat(84));
-  console.log("  납품일 ↔ 실제 출하일 — 옮기기 전에 무엇이 어떻게 적혀 있나 (읽기만 한다)");
+  console.log("  납품일 ↔ 실제 출하일 — 두 자리에 무엇이 어떻게 적혀 있나 (읽기만 한다)");
+  console.log("  🔴 ②③ 과 아래 칸 여섯은 **옛 칸**이다 — 화면이 그리는 납품일은 「새 자리」 두 줄이다.");
   console.log("─".repeat(84));
 
   const rows = await readJoinedRows();
@@ -360,6 +384,11 @@ async function main(): Promise<void> {
   console.log(kinds("   납기요청일 행 수", survey.dueDateRows));
   console.log(kinds("⑩ 비고가 적힌 행", survey.notedDueDateRows));
   console.log("     🔴 비고는 **글자를 읽지 않았다** — 적혀 있나만 셌다(담당자 이름이 섞일 수 있다).");
+  console.log(kinds("🔴 새 자리에 납품일이 적힌 행", survey.deliveredRows));
+  console.log(kinds("🔴 새 자리에 납품자가 적힌 행", survey.deliveredByRows));
+  console.log("     🔴 2026-11-08 부터 **화면이 그리는 납품일이 이 수**다 — 위 ②③ 은 옛 칸이고");
+  console.log("        A/S 는 그 칸을 그리지도 쓰지도 않는다(PO 가 쓴다 — 사용자 결정 11).");
+  console.log("     🔴 이름도 세지 않았다 — 적혀 있나만 셌다(옛 칸과 같은 규칙).");
   console.log(kinds("⑪ 2행 이상인데 납품일이 적힌 줄", survey.ambiguousTargetLines));
   console.log(kinds("   그중 납품일이 그 행과 같은 줄", survey.ambiguousTargetLinesMatchingADueDate));
   console.log("     🔵 같은 줄은 「어느 행에 달 것인가」가 자료로 정해진다. 나머지는 사람이 고를 수밖에 없다.");

@@ -1,6 +1,5 @@
 import {
   dash,
-  DELIVERED_DATE_NOTE,
   formatAmount,
   NO_ORDER_DATE_LABEL,
   paymentLabel,
@@ -10,6 +9,10 @@ import {
   DUE_DATE_FROM_REPAIR_CASE_LABEL,
   resolveDomesticOrderDueDateDisplay,
 } from "./requested-due-date-link";
+import {
+  DELIVERED_DATE_FROM_REPAIR_CASE_LABEL,
+  DOMESTIC_ORDER_DELIVERED_DATE_NOTE,
+} from "./delivered-date-link";
 
 /**
  * ============================================================================
@@ -142,8 +145,13 @@ export type DomesticOrderBasicInfoRow = {
   displayQuoteIssuedDate: string | null;
   displayQuoteNumber: string | null;
   progressNote: string | null;
-  displayDeliveredDate: string | null;
-  deliveredBy: string | null;
+  /**
+   * 🔴 **납기요청일 행마다 하나씩**이다(2026-11-08). 두 목록은 길이가 같고 자리가
+   * 맞는다 — 목록의 같은 두 칸과 **같은 값**이다(queries 의 매퍼가 이미 골라 둔다).
+   */
+  deliveredDateLines: readonly (string | null)[];
+  deliveredByLines: readonly (string | null)[];
+  deliveredDateBorrowed: boolean;
   taxInvoiceDate: string | null;
   displayAmountExcludingVat: string | null;
   paymentCompleted: boolean;
@@ -155,6 +163,18 @@ export type DomesticOrderBasicInfoRow = {
 /** 값 하나짜리 칸. 「없음」의 글자는 목록과 같은 한 곳에서 온다(dash). */
 function one(label: string, value: string | number | null | undefined): DomesticOrderBasicInfoField {
   return { label, lines: [dash(value)] };
+}
+
+/**
+ * 줄마다 하나인 납품 칸을 글자 줄로. 🔴 **안 적은 회차도 "-" 한 줄을 차지한다** —
+ * 거르면 납품일과 납품자의 줄 수가 달라져 아래로 갈수록 엉뚱한 회차끼리 나란히
+ * 선다(components/domestic-orders/delivered-cell-content.tsx 의 같은 규칙).
+ *
+ * 🔵 행이 아예 없는 줄은 "-" 한 줄이다 — 다른 칸의 빈 값과 같은 모양이다.
+ */
+function deliveredLinesOrDash(lines: readonly (string | null)[]): string[] {
+  if (lines.length === 0) return [dash(null)];
+  return lines.map((line) => dash(line));
 }
 
 /**
@@ -186,8 +206,22 @@ export function domesticOrderBasicInfoBoxes(
         one("견적발행일", row.displayQuoteIssuedDate),
         one("견적서번호", row.displayQuoteNumber),
         one("현황", row.progressNote),
-        { ...one("납품일", row.displayDeliveredDate), hint: DELIVERED_DATE_NOTE },
-        one("납품자", row.deliveredBy),
+        // 🔴 납품 둘은 **줄마다 하나**다(2026-11-08). 납기요청일 칸과 같은 모양으로
+        //    늘어놓고, 빌려 온 날짜에는 꼬리표를 단다 — 꼬리표가 없으면 「내가 적은
+        //    값」으로 읽힌다(2026-10-30 「동기화해도 출처 표시는 남긴다」).
+        //    🔵 **꼬리표는 날짜 쪽에만** 붙는다. 수리 건에는 「누가 보냈는가」가 없어
+        //    납품자는 그때 "-" 한 줄이고, 거기 출처를 적으면 없는 값의 출처가 된다.
+        {
+          label: "납품일",
+          lines: deliveredLinesOrDash(row.deliveredDateLines),
+          note: row.deliveredDateBorrowed ? DELIVERED_DATE_FROM_REPAIR_CASE_LABEL : undefined,
+          hint: DOMESTIC_ORDER_DELIVERED_DATE_NOTE,
+        },
+        {
+          label: "납품자",
+          lines: deliveredLinesOrDash(row.deliveredByLines),
+          hint: DOMESTIC_ORDER_DELIVERED_DATE_NOTE,
+        },
       ],
     },
     {

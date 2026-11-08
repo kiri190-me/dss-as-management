@@ -260,10 +260,15 @@ export default function RepairCaseDetailView({
           사람이 닫아야 닫히는 알림이라야 한다 — 0.5초 저장 팝업으로 띄우면 읽기 전에
           사라지고, 그러면 두 화면이 다른 날짜를 보이는 채로 남는다. 서버가 돌려준
           까닭을 그대로 적는다(domain/requested-due-date-link.ts 가 그 글의 주인이다). */}
+      {/* 🔴 **묶이는 칸이 둘이다**(2026-10-30 고객 요청 납기일 ↔ 납기요청일,
+          2026-11-08 실제 출하일 ↔ 납품일). 한 저장이 둘 다 못 맞출 수 있어 글도
+          둘이 올라오므로(useSectionEditSubmit), 제목에 어느 칸인지를 박지 않는다 —
+          박으면 나머지 하나가 **제목이 가리키지 않는 글**로 상자 안에 섞인다.
+          어느 칸이 안 바뀌었는지는 서버가 준 문장이 저마다 말한다. */}
       {requestedDueDateNotLinked !== null && (
         <NoticePopup
-          title="내자 정리의 납기요청일은 바뀌지 않았습니다"
-          lines={[requestedDueDateNotLinked]}
+          title="내자 정리의 날짜는 바뀌지 않았습니다"
+          lines={requestedDueDateNotLinked.split("\n\n")}
           onClose={() => setRequestedDueDateNotLinked(null)}
         />
       )}

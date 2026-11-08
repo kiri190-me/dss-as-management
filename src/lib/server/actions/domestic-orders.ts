@@ -30,6 +30,7 @@ import {
   type DomesticOrderSheetHeadingFieldErrors,
 } from "@/lib/domain/domestic-order-sheet-heading";
 import type { RequestedDueDateLinkOutcome } from "@/lib/domain/requested-due-date-link";
+import type { DeliveredDateLinkOutcome } from "@/lib/domain/delivered-date-link";
 
 /**
  * ============================================================================
@@ -76,6 +77,12 @@ export type DomesticOrderActionResult =
        * 뒤에 사라져 경고를 전할 수 없다(components/common/NoticePopup.tsx 머리말).
        */
       requestedDueDateLink?: RequestedDueDateLinkOutcome;
+      /**
+       * 🔴 이번 저장이 **수리 건의 실제 출하일까지 맞췄는가**(2026-11-08). 위 짝과
+       * 같은 성질이고, **한 저장에 둘 다 올 수 있다** — 화면은 둘을 모아서 한 상자에
+       * 띄운다(components/domestic-orders/domestic-order-link-notices.ts).
+       */
+      deliveredDateLink?: DeliveredDateLinkOutcome;
     }
   | {
       ok: false;

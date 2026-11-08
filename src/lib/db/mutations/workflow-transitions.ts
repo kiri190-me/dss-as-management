@@ -16,6 +16,13 @@ import {
   isAdvanceIntoShipmentWaiting,
   SHIPMENT_WAITING_AUTO_ONLY_MESSAGE,
 } from "@/lib/domain/shipment-waiting-auto-advance";
+import {
+  deliveredLinkOutcomeOf,
+  planDomesticOrderDeliveredLink,
+  writeDomesticOrderDeliveredLink,
+  type DomesticOrderDeliveredLinkWork,
+} from "./domestic-order-delivered-link";
+import type { DeliveredDateLinkOutcome } from "@/lib/domain/delivered-date-link";
 import type { HoldState } from "@/lib/domain/local/workflow/workflow-types";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { WorkflowActionCode } from "@/lib/validation/workflow-transition-input";
@@ -51,7 +58,22 @@ export type TransitionMutationResultCode =
   | "BILLING_DECISION_REQUIRED";
 
 export type TransitionMutationResult =
-  | { ok: true; id: string; version: number; currentWorkflowStepKey: string }
+  | {
+      ok: true;
+      id: string;
+      version: number;
+      currentWorkflowStepKey: string;
+      /**
+       * 🔴 이번 **출하 완료**가 연결된 내자 줄의 납품일까지 찍었는가(2026-11-08,
+       * 사용자 결정 6·7). 없으면 찍을 일이 없었다는 뜻이다 — 다른 전이이거나,
+       * 내자 줄이 없거나, 그 줄에 납기요청일 행이 없거나(찍을 자리가 없다),
+       * 이미 사람이 적어 둔 납품일이 있어 **덮지 않은** 것이다.
+       *
+       * `linked: false` 는 「수리 건은 넘어갔는데 내자 쪽이 못 따라갔다」이고,
+       * 결정 7 의 「여럿이면 자동으로 안 찍는다」가 바로 그 모습이다.
+       */
+      deliveredDateLink?: DeliveredDateLinkOutcome;
+    }
   | { ok: false; code: TransitionMutationResultCode; message: string };
 
 const VERSION_CONFLICT_MESSAGE =
@@ -92,6 +114,9 @@ export async function transitionWorkflow(
           id: repairCases.id,
           version: repairCases.version,
           isLocked: repairCases.isLocked,
+          // 🔴 출하 완료가 내자 납품일을 찍을지 정하는 **앞 값**이다(2026-11-08).
+          // 이 전이로 처음 적히는 건은 여기가 null 이다.
+          actualShipmentDate: repairCases.actualShipmentDate,
           assignedEngineerId: repairCases.assignedEngineerId,
           billingType: repairCases.billingType,
           workflowVersionId: repairCases.workflowVersionId,
@@ -177,6 +202,17 @@ export async function transitionWorkflow(
 
       let toStepId = current.currentWorkflowStepId;
       let toStepKeyForResult = current.currentStepKey;
+      /**
+       * 🔴 출하 완료가 **내자 정리의 납품일도 찍는다**(2026-11-08 사용자 결정 6).
+       * 여기서는 **읽고 잠그기만** 하고, 쓰는 일은 아래 UPDATE 가 성공한 뒤다 —
+       * 까닭과 잠금 차례는 mutations/domestic-order-delivered-link.ts 머리말에 있다.
+       *
+       * 🔴 **이 전이 안에 둔 것이 일부러다.** 서비스 계층(내자 [완료 처리])에 한
+       * 단계 더 붙이면 **수리 건 상세에서 [출하 완료]를 누르는 길**이 빠진다 —
+       * 두 길 다 이 함수를 지나므로, 여기 두면 어느 쪽으로 눌러도 같은 일이
+       * 일어나고 **같은 트랜잭션 안**이라 반쪽만 남는 일도 없다.
+       */
+      let deliveredDateLink: DomesticOrderDeliveredLinkWork | null = null;
       const setValues: Record<string, unknown> = {
         version: sql`${repairCases.version} + 1`,
         updatedAt: sql`now()`,
@@ -287,7 +323,20 @@ export async function transitionWorkflow(
         setValues.currentWorkflowStepId = toStepId;
         if (actionCode === "SHIPMENT_COMPLETED") {
           setValues.isLocked = true;
-          setValues.actualShipmentDate = new Date().toISOString().slice(0, 10);
+          const shippedOn = new Date().toISOString().slice(0, 10);
+          setValues.actualShipmentDate = shippedOn;
+          // 🔴 같은 날짜를 연결된 내자 줄의 납품일에도 찍는다(사용자 결정 6).
+          // 🔵 `trigger` 가 SHIPMENT_COMPLETED 라 **이미 사람이 적어 둔 납품일은
+          // 덮지 않는다** — 그 값은 운송이 끼면 출하일과 며칠 어긋나는 것이 정상인
+          // 사실이고, 자동 처리가 덮으면 말없이 사라진다
+          // (domain/delivered-date-link.ts 의 trigger 머리말).
+          // 🔵 결정 7(여럿이면 자동으로 안 찍는다)은 그 판정의 AMBIGUOUS 그대로다.
+          deliveredDateLink = await planDomesticOrderDeliveredLink(tx, {
+            repairCaseId,
+            previous: current.actualShipmentDate,
+            next: shippedOn,
+            trigger: "SHIPMENT_COMPLETED",
+          });
         }
       } else if (actionCode === "STEP_SET_MANUALLY") {
         // ────────────────────────────────────────────────────────────────
@@ -426,7 +475,19 @@ export async function transitionWorkflow(
       }
 
       const updated = updatedRows[0];
-      return { ok: true, id: updated.id, version: updated.version, currentWorkflowStepKey: toStepKeyForResult };
+
+      // 🔴 **UPDATE 가 1행을 돌려준 뒤**에 쓴다(그 파일 머리말). version 이 어긋나는
+      // 길은 위에서 예외로 끝나므로, 그 길에서는 내자 줄이 한 글자도 안 바뀐다.
+      await writeDomesticOrderDeliveredLink(tx, deliveredDateLink, actorUserId);
+      const deliveredOutcome = deliveredLinkOutcomeOf(deliveredDateLink);
+
+      return {
+        ok: true,
+        id: updated.id,
+        version: updated.version,
+        currentWorkflowStepKey: toStepKeyForResult,
+        ...(deliveredOutcome ? { deliveredDateLink: deliveredOutcome } : {}),
+      };
     });
   } catch (err) {
     if (err instanceof TransitionConflictError) {
@@ -473,8 +534,18 @@ export async function transitionWorkflow(
  * ── 실제 출하일을 **지운다** ────────────────────────────────────────────
  * 🔵 「출하 완료인가」는 워크플로 단계와 `actual_shipment_date` **둘 중
  * 하나**로 판정된다(domain/types.ts). 날짜를 남겨 두면 단계만 되돌아가고 다른
- * 화면에서는 **여전히 출하된 것으로 읽히는** 건이 남는다. 내자 정리 목록의
- * `납품일` 이 바로 그 값이다(queries/domestic-orders.ts).
+ * 화면에서는 **여전히 출하된 것으로 읽히는** 건이 남는다.
+ *
+ * 🔴 **그런데 내자 정리의 납품일은 지우지 않는다**(2026-11-08). 2026-10-18 에는 이
+ * 자리에 「내자 정리 목록의 `납품일` 이 바로 그 값이다」가 적혀 있었다 — 그때는
+ * 연결된 줄의 납품일이 이 칸을 그대로 그렸기 때문인데, 지금은 납품일이 **납기요청일
+ * 행에 따로 적히는 값**이다. 그 행에는 **사람이 적은 납품자**가 함께 달려 있어서,
+ * 되돌리기가 그것까지 지우면 손으로 적은 기록이 말없이 사라진다. 지우는 쪽을 묶지
+ * 않는 것은 반대 방향도 같다(domain/delivered-date-link.ts 머리말 ②).
+ *
+ * 🔵 **그 결과 「단계는 출하 전인데 내자에는 납품일이 적혀 있는」 줄이 생긴다.**
+ * 고장이 아니라 위 결정의 결과다 — 다시 출하 완료를 누르면 그 행에 이미 값이 있어
+ * 자동 처리가 덮지 않고, 날짜를 바꾸려면 어느 쪽 화면에서든 사람이 고치면 된다.
  *
  * ── 이력은 STEP_RETURNED 로 남긴다 ──────────────────────────────────────
  * 🔴 새 action_type 값을 만들지 않았다. 그 칸은 enum 이라 값을 늘리려면

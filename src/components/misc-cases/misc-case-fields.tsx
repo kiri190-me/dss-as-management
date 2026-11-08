@@ -3,11 +3,15 @@ import Link from "next/link";
 
 import {
   dash,
-  DELIVERED_DATE_NOTE,
   formatAmount,
   NO_ORDER_DATE_LABEL,
   paymentLabel,
 } from "@/lib/domain/domestic-order-display";
+import { DOMESTIC_ORDER_DELIVERED_DATE_NOTE } from "@/lib/domain/delivered-date-link";
+import {
+  DeliveredByCellContent,
+  DeliveredDateCellContent,
+} from "@/components/domestic-orders/delivered-cell-content";
 import { resolveDomesticOrderModelLink } from "@/lib/domain/domestic-order-detail-link";
 import type { MiscCaseStatus } from "@/lib/domain/misc-case-status";
 import MiscCaseStatusBadge from "./MiscCaseStatusBadge";
@@ -73,7 +77,19 @@ export type MiscCaseRow = {
   /** numeric — 문자열이다(schema/domestic-orders.ts 의 '금액은 numeric 이다'). */
   displayAmountExcludingVat: string | null;
   paymentCompleted: boolean;
-  displayDeliveredDate: string | null;
+  /**
+   * 🔴 **납기요청일 행마다 하나씩**이다(2026-11-08). 두 목록은 길이가 같고 자리가
+   * 맞는다 — 그리는 일은 내자 정리와 **같은 부품**이 한다
+   * (components/domestic-orders/delivered-cell-content.tsx).
+   *
+   * 🔵 이 목록의 줄은 전부 수리 건이 안 붙은 줄이라 `deliveredDateBorrowed` 는
+   * 언제나 거짓이다(빌려 올 수리 건이 없다). 그래도 칸을 요구하는 것은 **같은
+   * 부품에 같은 모양을 넘기기 위해서**다 — 여기서 빼면 그 부품이 두 화면에서 다른
+   * 타입을 받게 되고, 그 순간 둘이 갈라질 자리가 생긴다.
+   */
+  deliveredDateLines: (string | null)[];
+  deliveredByLines: (string | null)[];
+  deliveredDateBorrowed: boolean;
 };
 
 /**
@@ -183,9 +199,21 @@ export const MISC_CASE_FIELDS = {
   paymentCompleted: { label: "입금완료 여부", of: (row) => paymentLabel(row.paymentCompleted) },
   // 이 칸이 어디서 오는지는 이름만으로 서지 않는다 — 내자 정리 · 기타건 상세와
   // **같은 한 글자**를 설명으로 단다.
+  //
+  // 🔴 **값이 여러 줄이 될 수 있다**(2026-11-08 — 납기요청일 행마다 하나). 분할
+  // 납품은 기타건에서만 생기므로(사용자 결정 9) 여러 줄이 실제로 서는 곳은 바로
+  // 이 화면이다. 그리는 일은 내자 정리와 같은 부품이 한다.
   deliveredDate: {
     label: "납품일",
-    of: (row) => dash(row.displayDeliveredDate),
-    hint: DELIVERED_DATE_NOTE,
+    of: (row) => <DeliveredDateCellContent row={row} />,
+    hint: DOMESTIC_ORDER_DELIVERED_DATE_NOTE,
+  },
+  // 🔴 **새로 생긴 칸이다**(2026-11-08). 납품자가 행에 달리면서 「누가 보냈는가」가
+  // 비로소 이 화면에서 뜻을 갖게 됐다 — 바로 위 납품일과 **같은 차례·같은 줄 수**라
+  // 두 칸을 나란히 읽으면 회차별로 짝이 맞는다.
+  deliveredBy: {
+    label: "납품자",
+    of: (row) => <DeliveredByCellContent row={row} />,
+    hint: DOMESTIC_ORDER_DELIVERED_DATE_NOTE,
   },
 } satisfies Record<string, MiscCaseField>;

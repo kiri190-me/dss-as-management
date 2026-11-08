@@ -227,6 +227,127 @@ test("표의 납기요청일 줄들은 버튼 안에 들어갈 수 있는 모양
   assert.match(content, /<span key=\{index\} className="block">/);
 });
 
+/**
+ * ============================================================================
+ * 🔴 납품일 · 납품자 — 표에서 직접 고친다 (2026-11-08)
+ * ============================================================================
+ * 사용자 요구: 「**납품일을 표에서 직접 바꿀 수 있도록** 해주고」. 2026-11-07 까지
+ * 이 칸에는 칸 편집이 **없었고**(「연결된 줄에서는 못 적는 값이다」), 그 결정이
+ * 양방향 연동으로 뒤집혔다.
+ *
+ * 🔵 두 칸이 **같은 부품**을 연다 — 같은 행의 두 값이라, 따로 열면 한쪽을 저장하는
+ * 동안 다른 쪽이 낡은 값을 들고 있게 된다.
+ * ============================================================================
+ */
+const deliveriesCell = read("src/components/domestic-orders/DomesticOrderDeliveriesCell.tsx");
+
+test("🔴 납품일·납품자는 표에서 눌러 고친다 — 두 칸이 같은 편집칸을 연다", () => {
+  assert.match(
+    tableBody,
+    /\{canEdit \? \( <DomesticOrderDeliveriesCell row=\{row\} displayText=\{<DeliveredDateCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" numeric="tabular-nums" onLinkNotice=\{setRequestedDueDateNotLinked\} \/> \) : \( <DeliveredDateCellContent row=\{row\} \/> \)\}/,
+    "표의 납품일이 칸 편집이 아니다"
+  );
+  assert.match(
+    tableBody,
+    /\{canEdit \? \( <DomesticOrderDeliveriesCell row=\{row\} displayText=\{<DeliveredByCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" onLinkNotice=\{setRequestedDueDateNotLinked\} \/> \) : \( <DeliveredByCellContent row=\{row\} \/> \)\}/,
+    "표의 납품자가 칸 편집이 아니다"
+  );
+});
+
+test("🔴 납품일·납품자는 카드에서도 눌러 고친다 — 좁은 화면이라고 사라지지 않는다", () => {
+  const deliveredEntry = sliceBetween(cardGroups, 'label: "납품일",', 'label: "정산"');
+  assert.ok(
+    deliveredEntry.includes("of: (row) => <DeliveredDateCellContent row={row} />"),
+    "카드의 납품일이 표와 같은 부품을 쓰지 않는다"
+  );
+  assert.ok(
+    deliveredEntry.includes("of: (row) => <DeliveredByCellContent row={row} />"),
+    "카드의 납품자가 표와 같은 부품을 쓰지 않는다"
+  );
+  // 두 칸 다 편집이 달려 있고, 접는 방식은 `<dd>` 와 결과가 같은 값이다.
+  assert.equal(
+    deliveredEntry.split('deliveriesEdit: { wrapping: "break-words whitespace-normal" }').length - 1,
+    2,
+    "카드의 납품 두 칸 중 하나에 편집이 없다"
+  );
+  // 🔴 표와 **같은 알림 상태**에 묶여야 한다 — 카드에서 고친 저장만 알림이 안 뜨면
+  //    좁은 화면에서는 수리 건이 안 따라간 것을 아무도 모른다.
+  assert.match(
+    cardRender,
+    /: canEdit && field\.deliveriesEdit \? \( (\/\/[^<]*)?<DomesticOrderDeliveriesCell row=\{row\} displayText=\{field\.of\(row\)\} wrapping=\{field\.deliveriesEdit\.wrapping\} onLinkNotice=\{setRequestedDueDateNotLinked\} \/>/
+  );
+});
+
+test("🔴 납품 편집칸은 행을 더하지도 지우지도 않는다 — 행은 납기요청일이 만든다", () => {
+  // 그 표의 due_date 가 NOT NULL 이라, 여기서 행을 만들려면 지어낸 납기일이 필요하다.
+  const source = flat(stripComments(deliveriesCell));
+  assert.equal(source.includes("추가</button>"), false, "납품 편집칸에 [추가] 가 생겼다");
+  assert.equal(source.includes("삭제 <span"), false, "납품 편집칸에 [삭제] 가 생겼다");
+  // 행이 없으면 **먼저 납기요청일을 적으라**고 말한다 — 빈 자리는 고장으로 읽힌다.
+  assert.match(
+    flat(deliveriesCell),
+    /납기요청일이 없어 납품일을 적을 자리가 없습니다\. 먼저 `납기요청일` 칸에서 날짜를 추가해 주세요\./
+  );
+});
+
+test("🔴 납품 편집칸도 줄 전체를 싣고 version 을 건다 — 납기요청일 칸과 같은 길이다", () => {
+  const source = flat(deliveriesCell);
+  assert.match(
+    source,
+    /updateDomesticOrderAction\(\{ id: row\.id, (\/\/[^}]*)?expectedVersion: row\.version, fields: buildDomesticOrderDueDatesUpdateFields\(row, drafts\), \}\)/
+  );
+  // 🔴 **네 칸을 전부** 보낸다 — 날짜·메모를 빼면 그 저장이 납기요청일을 지운다.
+  assert.match(
+    source,
+    /lines\.map\( \(\{ dueDate, note, deliveredDate, deliveredBy \}\) => \(\{ dueDate, note, deliveredDate, deliveredBy, \}\) \)/
+  );
+  assert.match(source, /function openEditor\(event: MouseEvent<HTMLButtonElement>\) \{ (\/\/[^}]*)?event\.stopPropagation\(\);/);
+  assert.match(source, /<form onSubmit=\{handleSubmit\} onClick=\{\(event\) => event\.stopPropagation\(\)\}/);
+});
+
+test("🔴 막힌 단추 둘은 **까닭을 글로** 보여 준다 — title 만 달면 키보드 사용자에게는 없다", () => {
+  const source = flat(dueDatesCell);
+  // [삭제] — 납품 기록이 달린 줄(사용자 결정 5).
+  assert.match(source, /disabled=\{disabled \|\| removeBlocked !== null\} title=\{removeBlocked \?\? undefined\}/);
+  assert.match(source, /\{removeBlocked !== null && <p className=\{cellHintClass\}>\{removeBlocked\}<\/p>\}/);
+  // [납기요청일 추가] — 수리 건이 붙은 줄(사용자 결정 9).
+  assert.match(
+    source,
+    /disabled=\{disabled \|\| addBlockedReason !== null\} title=\{addBlockedReason \?\? undefined\}/
+  );
+  assert.match(
+    source,
+    /\{addBlockedReason !== null && <p className=\{cellHintClass\}>\{addBlockedReason\}<\/p>\}/
+  );
+  // 🔴 판정은 화면이 하지 않는다 — 서버가 거절하는 그 함수에 그대로 물어본다.
+  assert.match(source, /domesticOrderAddDueDateBlockReason\(\{/);
+  assert.match(source, /domesticOrderRemoveDueDateBlockReason\(\{/);
+});
+
+test("🔴 `줄 수정` 폼의 같은 두 단추도 같은 함수에 물어본다 — 길마다 갈리면 안 된다", () => {
+  const editForm = read("src/components/domestic-orders/DomesticOrderEditForm.tsx");
+  const source = flat(editForm);
+  assert.match(source, /domesticOrderAddDueDateBlockReason\(\{/);
+  assert.match(source, /domesticOrderRemoveDueDateBlockReason\(\{/);
+  assert.match(source, /\{removeBlocked !== null && <p className=\{hintClass\}>\{removeBlocked\}<\/p>\}/);
+  assert.match(
+    source,
+    /\{addDueDateBlockedReason !== null && \( <p className=\{hintClass\}>\{addDueDateBlockedReason\}<\/p> \)\}/
+  );
+  // 🔴 그리고 **따로 서 있던 납품일·납품자 칸이 사라졌다** — 옛 칼럼을 고치는 죽은
+  //    단추가 남으면, 글자를 적어도 아무 데도 안 뜬다.
+  assert.equal(
+    source.includes('renderText("deliveredDate"'),
+    false,
+    "옛 칼럼을 고치는 납품일 입력칸이 남아 있다"
+  );
+  assert.equal(
+    source.includes('renderText("deliveredBy"'),
+    false,
+    "옛 칼럼을 고치는 납품자 입력칸이 남아 있다"
+  );
+});
+
 test("견적서를 따르는 칸의 막음은 편집 여부보다 먼저 본다", () => {
   const lockAt = textCell.indexOf("const quoteLock = domesticOrderInlineEditQuoteLock(row, field);");
   const editingAt = textCell.indexOf("if (!isEditing) {");

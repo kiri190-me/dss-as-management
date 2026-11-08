@@ -24,6 +24,12 @@ import {
   foldBlankToNull,
   formatDomesticOrderDueDates,
 } from "@/lib/domain/domestic-order-list";
+import { domesticOrderDeliveriesDraftText } from "@/lib/domain/domestic-order-cell-edit";
+import { DOMESTIC_ORDER_DELIVERED_DATE_NOTE } from "@/lib/domain/delivered-date-link";
+import {
+  domesticOrderAddDueDateBlockReason,
+  domesticOrderRemoveDueDateBlockReason,
+} from "@/lib/domain/domestic-order-due-date-rows";
 import {
   filterRepairCaseLinkOptions,
   keepSelectedRepairCaseOption,
@@ -38,6 +44,10 @@ import {
   createDomesticOrderAction,
   updateDomesticOrderAction,
 } from "@/lib/server/actions/domestic-orders";
+import {
+  domesticOrderLinkNotices,
+  domesticOrderLinkNoticeText,
+} from "./domestic-order-link-notices";
 
 /**
  * ============================================================================
@@ -94,31 +104,26 @@ import {
  * 저장된 값이 아니다. 그 날짜를 여기 dueDates 에 미리 채워 두면, 아무것도 고치지
  * 않고 저장만 눌러도 빌려 오던 날짜가 이 줄에 박제된다.
  *
- * ── ⚠️ 납품일 — 연결이 있으면 입력칸이 아니고, 없으면 입력칸이다 ─────────
- * 수리 건이 연결된 줄의 `납품일` 은 그 건의 **실제 출하일**이고, 그 값은
- * 워크플로가 출하 완료 시점에 자동으로 찍는다(mutations/workflow-transitions.ts).
- * 사람이 적을 수 있는 값이 아니라서 이 폼에서도 받지 않는다 — 그 자리에는 지금
- * 값과 "왜 못 적는지"를 읽기 전용 한 줄로 적어 둔다(deliveredDateText).
+ * ── 🔴 납품일·납품자 — **납기요청일 줄 안으로 들어갔다** (2026-11-08) ──────
+ * 사용자 요구 원문: 「납기 요청일을 여러줄로 두면, 납품일, 납품자도 그 수에 맞게
+ * 설정할 수 있도록」. 그래서 이 폼에는 납품일 칸도 납품자 칸도 **따로 없다** —
+ * 납기요청일 묶음의 줄마다 입력칸 넷(납기일 · 메모 · 납품일 · 납품자)이 선다.
  *
- * **연결이 없는 줄에는 출하일이 없다.** 그 줄의 납품일을 적을 자리는 이 줄의
- * delivered_date 뿐이라, `수리 건 연결` 을 '연결 없음'으로 두면 날짜 입력칸이
- * 열린다(2026-09-11 사용자 요청). 초기값은 **원본 칸**(row.deliveredDate)이다 —
- * 목록이 그리는 계산된 값(displayDeliveredDate)이 아니다. 그것으로 채우면 연결을
- * 풀고 저장만 눌러도 수리 건의 출하일이 이 줄에 박제된다(위 'placeholder 다.
- * value 가 아니다'와 같은 함정).
+ * 🔴 **그 전까지 여기에는 이렇게 적혀 있었다**: 「수리 건이 연결된 줄의 납품일은
+ * 그 건의 실제 출하일이고 … 사람이 적을 수 있는 값이 아니라서 이 폼에서도 받지
+ * 않는다」. 그 결정이 2026-11-07 사용자 결정 2(연동은 **양방향**)로 뒤집혔다 —
+ * 이제 연결된 줄에서도 사람이 납품일을 적고, 그 값은 수리 건의 실제 출하일과 **같은
+ * 날짜로 맞춰진다**(domain/delivered-date-link.ts). 맞출 수 없는 모양에서는 저장
+ * 결과가 **까닭을 말한다.**
  *
- * ⚠️ **어느 쪽이든 collectFields 에서는 빼면 안 된다.** 이 화면의 저장은 보낸
- * 칸만 고치지 않는다: 검증이 키 없음(undefined)을 null 로 접고
- * (validation/domestic-order-input.ts) mutation 이 모든 칼럼을 SET 한다
- * (mutations/domestic-orders.ts). 즉 payload 에서 `deliveredDate` 를 빼면 DB 에
- * 남아 있는 납품일이 **저장 한 번에 지워진다** — 화면에서 안 보여 주기로 한
- * 것이 자료를 버리는 것으로 바뀐다. 입력칸이 없는 동안에도 state 는 그대로
- * 실려 간다.
- *
- * 연결을 켰다 껐다 해도 적어 둔 날짜는 사라지지 않는다 — state 를 비우는 길이
- * 없다. 연결을 켠 채로 저장하면 그 날짜도 이 줄에 남고(목록에는 출하일이
- * 보인다), 그 사실을 납품일 자리에 한 줄로 알린다(linkedDeliveredDateDraftHint).
- * 견적서 연결이 손으로 적은 번호·금액을 지우지 않는 것과 같은 규칙이다.
+ * ── ⚠️ 옛 칼럼 둘은 **눈에 안 보이는 채로 실려 간다** ────────────────────
+ * `domestic_orders.delivered_date`·`delivered_by` 는 지우지 않았다(사용자 결정
+ * 11 — PO 가 같은 DB 에서 쓴다). 이 폼에는 그 칸의 입력칸이 없지만 **collectFields
+ * 에서는 뺄 수 없다**: 이 화면의 저장은 보낸 칸만 고치지 않는다. 검증이 키
+ * 없음(undefined)을 null 로 접고(validation/domestic-order-input.ts) mutation 이
+ * 모든 칼럼을 SET 하므로(mutations/domestic-orders.ts), payload 에서 빼면 **PO 가
+ * 적어 둔 값이 저장 한 번에 지워진다.** 그래서 state 둘은 읽어 온 값을 들고만
+ * 있고, 그것을 바꾸는 길은 이 폼 어디에도 없다.
  *
  * ── 수리 건은 검색해서 고른다 ───────────────────────────────────────────
  * 접수 건이 수백 건이라 `<select>` 하나로는 원하는 건을 찾을 수 없다. 검색 칸을
@@ -163,6 +168,13 @@ const DRAFT_LABELS: Readonly<Record<string, string>> = {
    * 불러온 화면 어디에도 남아 있지 않다.
    */
   dueDatesText: "납기요청일",
+  /**
+   * 🔴 회차별 납품일·납품자(2026-11-08). 위 dueDatesText 와 **같은 사정**이다 —
+   * 배열이라 buildDraftText 가 통째로 걸러 내므로, 충돌한 순간에만 한 덩어리
+   * 글자로 만들어 함께 넘긴다. 붙잡는 까닭도 같다: **납품자는 손으로 친 글**이라
+   * 다시 불러온 화면 어디에도 남아 있지 않다.
+   */
+  deliveriesText: "납품일 · 납품자",
   intakeNumberText: "인수번호(직접 입력)",
   modelNameText: "형식",
   lotNumberText: "L/N",
@@ -172,7 +184,10 @@ const DRAFT_LABELS: Readonly<Record<string, string>> = {
   projectName: "PJT",
   quoteNumber: "견적서번호",
   progressNote: "현황",
-  deliveredBy: "납품자",
+  // 🔴 `deliveredBy` 는 **여기 없다**(2026-11-08). 그 이름의 옛 칼럼은 이 폼이
+  // 그리지도 고치지도 않고 읽어 온 값을 들고만 있어서(파일 헤더), 충돌 상자에
+  // 적으면 **사람이 치지도 않은 글**을 「다시 적으세요」라고 내미는 셈이 된다.
+  // 사람이 친 납품자는 위 deliveriesText 가 붙잡는다.
   amountExcludingVat: "금액(VAT별도)",
   japanRemittanceNote: "일본 송금",
   historyNote: "이력",
@@ -206,10 +221,16 @@ const hintClass = "mt-1 text-xs text-zinc-500 dark:text-zinc-400";
  * 줄들의 index 가 하나씩 당겨지고, index 를 key 로 쓰면 React 는 "지워진 것은
  * 마지막 줄"이라고 읽어 남은 입력칸에 엉뚱한 값이 남는다.
  *
- * 값은 둘 다 문자열이다(빈 문자열 = 안 적음). 검증이 그 빈 값을 접는다
+ * 값은 **넷 다** 문자열이다(빈 문자열 = 안 적음). 검증이 그 빈 값을 접는다
  * (validation/domestic-order-input.ts 의 '완전히 빈 줄은 거절하지 않고 뺀다').
+ *
+ * 🔴 **납품일·납품자가 여기 들어 있다**(2026-11-08 — 사용자 결정 1: 1번 줄 ↔
+ * 1번 줄). 한 줄이 「언제까지 달라고 했고, 언제 누가 보냈는가」 한 쌍이라, 둘을
+ * 잇는 규칙을 이 폼 어디에도 적을 필요가 없다. 보내는 모양은
+ * domain/domestic-order-cell-edit.ts 의 DomesticOrderDueDateDraft 와 **같은 네
+ * 칸**이다 — 표의 칸 편집과 이 폼이 같은 목록을 같은 모양으로 보낸다.
  */
-type DueDateDraft = { key: string; dueDate: string; note: string };
+type DueDateDraft = { key: string; dueDate: string; note: string; deliveredDate: string; deliveredBy: string };
 
 /** 납기일 한 줄의 date 입력칸 id. 추가한 뒤 그리로 포커스를 옮기는 데 쓴다. */
 function dueDateInputId(key: string): string {
@@ -292,6 +313,11 @@ export default function DomesticOrderEditForm({
       key: dueDate.id,
       dueDate: dueDate.dueDate,
       note: dueDate.note ?? "",
+      // 🔴 납품 둘도 같은 줄에서 시작한다(2026-11-08). 여기서 빠뜨리면 이 폼으로
+      // 저장할 때마다 그 줄의 납품 기록이 사라진다 — 저장이 받은 목록으로 행을
+      // 통째로 다시 만들기 때문이다(mutations 의 replaceDueDates).
+      deliveredDate: dueDate.deliveredDate ?? "",
+      deliveredBy: dueDate.deliveredBy ?? "",
     }))
   );
   const [quoteIssuedDate, setQuoteIssuedDate] = useState(row?.quoteIssuedDate ?? "");
@@ -299,29 +325,16 @@ export default function DomesticOrderEditForm({
   const [quoteId, setQuoteId] = useState<string | null>(row?.quoteId ?? null);
   const [progressNote, setProgressNote] = useState(row?.progressNote ?? "");
   /**
-   * 이 줄에 **손으로 적는** 납품일(domestic_orders.delivered_date).
+   * 🔴 **옛 칼럼 둘**(`domestic_orders.delivered_date`·`delivered_by`). 이 폼에는
+   * 입력칸이 없고 **바꾸는 길도 없다** — 읽어 온 값을 그대로 들고 있다가
+   * collectFields 가 되돌려 보낼 뿐이다(파일 헤더의 '눈에 안 보이는 채로').
    *
-   * ⚠️ **입력칸은 수리 건 연결이 없을 때만 있다**(아래 납품일 자리). 연결된
-   * 줄의 납품일은 그 건의 실제 출하일이라(deliveredDateText) 이 폼이 받지
-   * 않는다. 예전에는 이 값이 상수였다 — 입력칸이 아예 없었기 때문이다. 연결
-   * 없는 줄에는 출하일이 없어 적을 자리가 이 칸뿐이라 setter 를 되살렸고
-   * (2026-09-11), 그 setter 를 부르는 곳은 연결이 없을 때만 그리는 입력칸 하나다.
-   *
-   * 초기값은 **원본 칸**이다. row.displayDeliveredDate 는 수리 건에서 계산된
-   * 값이라 여기 들이면 저장 한 번에 이 줄에 박제된다(파일 헤더).
-   *
-   * 입력칸이 없는 동안에도 collectFields 는 이 값을 싣는다 — 이 화면의 저장은
-   * 모든 칼럼을 SET 하므로 키가 빠지면 DB 의 값이 지워진다(파일 헤더). 연결을
-   * 켰다 껐다 해도 이 state 를 비우는 길은 없다.
+   * 🔴 **state 가 아니라 const 인 것이 그 사실을 코드로 못 박는 자리다.** setter 가
+   * 있으면 언젠가 누가 입력칸을 붙이고, 그 순간 A/S 어디에도 안 보이는 값을 고치는
+   * 죽은 단추가 생긴다. 사람이 적는 납품일·납품자는 위 dueDates 의 줄 안에 있다.
    */
-  const [deliveredDate, setDeliveredDate] = useState(row?.deliveredDate ?? "");
-  /**
-   * 불러온 그대로의 원본 칸. **저장에 쓰지 않는다** — 연결을 켠 채로 이 폼에서
-   * 고친 날짜가 있는지(linkedDeliveredDateDraftHint), 입력칸에 보이는 날짜가 예전
-   * 연결 시절의 손 값인지(unlinkedDeliveredDateHint) 가리는 데만 쓴다.
-   */
-  const savedDeliveredDate = row?.deliveredDate ?? "";
-  const [deliveredBy, setDeliveredBy] = useState(row?.deliveredBy ?? "");
+  const deliveredDate = row?.deliveredDate ?? "";
+  const deliveredBy = row?.deliveredBy ?? "";
   const [taxInvoiceDate, setTaxInvoiceDate] = useState(row?.taxInvoiceDate ?? "");
   const [amountExcludingVat, setAmountExcludingVat] = useState(row?.amountExcludingVat ?? "");
   const [paymentCompleted, setPaymentCompleted] = useState(row?.paymentCompleted ?? false);
@@ -356,12 +369,42 @@ export default function DomesticOrderEditForm({
     document.getElementById(dueDateInputId(key))?.focus();
   }, [dueDates]);
 
+  /**
+   * 🔴 울타리 둘 — **서버가 거절하는 그 함수에 그대로 물어본다**
+   * (domain/domestic-order-due-date-rows.ts). 화면이 따로 판정하면 단추는 눌리는데
+   * 저장이 거절되거나, 멀쩡한 줄에서 단추가 죽는다. 표의 칸 편집도 같은 함수를
+   * 부른다(DomesticOrderDueDatesCell).
+   *
+   * 🔵 수리 건 연결은 **지금 고른 값**으로 잰다 — 저장된 값이 아니다. 연결 없음에서
+   * 날짜 둘을 적어 두고 수리 건을 고르는 순간 단추가 막혀야, 저장 버튼을 눌러 보고
+   * 거절당하는 일이 없다.
+   */
+  const dueDateRowShapes = dueDates.map((entry) => ({
+    hasDelivery: entry.deliveredDate.trim() !== "" || entry.deliveredBy.trim() !== "",
+  }));
+  const addDueDateBlockedReason = domesticOrderAddDueDateBlockReason({
+    rows: dueDateRowShapes,
+    repairCaseId: repairCaseId || null,
+  });
+
+  function removeDueDateBlockedReason(index: number): string | null {
+    return domesticOrderRemoveDueDateBlockReason({
+      rows: dueDateRowShapes,
+      index,
+      repairCaseId: repairCaseId || null,
+    });
+  }
+
   function addDueDate() {
+    if (addDueDateBlockedReason !== null) return;
     // 저장된 행의 id 와 섞이지 않는 임시 key 다. LAN 평문 HTTP 에서도
     // 만들어져야 해서 crypto.randomUUID 를 직접 부르지 않는다(client-uuid.ts).
     const key = generateClientUuid();
     pendingDueDateFocusRef.current = key;
-    setDueDates((previous) => [...previous, { key, dueDate: "", note: "" }]);
+    setDueDates((previous) => [
+      ...previous,
+      { key, dueDate: "", note: "", deliveredDate: "", deliveredBy: "" },
+    ]);
   }
 
   function updateDueDate(key: string, patch: Partial<Omit<DueDateDraft, "key">>) {
@@ -370,7 +413,8 @@ export default function DomesticOrderEditForm({
     );
   }
 
-  function removeDueDate(key: string) {
+  function removeDueDate(key: string, index: number) {
+    if (removeDueDateBlockedReason(index) !== null) return;
     setDueDates((previous) => previous.filter((entry) => entry.key !== key));
     // 지운 줄과 함께 포커스가 사라지면 키보드 사용자는 갈 곳을 잃는다.
     // 남은 줄의 번호가 당겨지므로 어느 줄로 보내도 어색하고, '추가' 버튼은
@@ -552,60 +596,17 @@ export default function DomesticOrderEditForm({
    *  - 연결은 그대로인데 날짜가 없다 → 그 건이 아직 안 나갔다. 기다리는 것 말고
    *    이 폼에서 할 수 있는 일이 없다.
    */
-  function deliveredDateText(): string {
-    if (repairCaseId !== savedRepairCaseId) {
-      return "저장하면 지금 고른 수리 건의 실제 출하일이 보입니다";
-    }
-    return foldBlankToNull(row?.repairCaseActualShipmentDate) ?? "아직 출하 기록이 없습니다";
-  }
-
   /**
-   * 연결이 없을 때 납품일 입력칸 아래 한 줄.
+   * 🔴 납품일 자리에 있던 함수 셋(`deliveredDateText` · `unlinkedDeliveredDateHint` ·
+   * `linkedDeliveredDateDraftHint`)은 **없앴다**(2026-11-08). 셋 다 「연결된 줄의
+   * 납품일은 수리 건의 실제 출하일이라 여기서 못 적는다」는 2026-09-11 의 규칙을
+   * 사람에게 설명하던 글인데, 그 규칙이 사용자 결정 2(양방향)로 뒤집혔다 — 지금은
+   * 연결 여부와 상관없이 **납기요청일 줄 안에서** 적고, 적은 값이 수리 건의 출하일과
+   * 맞춰진다. 남겨 두면 다음 사람이 그 글을 읽고 규칙이 아직 그대로인 줄 안다.
    *
-   * 저장돼 있던 줄이 **연결된 채였고**, 입력칸에 보이는 날짜가 불러온 그대로라면
-   * 그 날짜는 목록에 보이던 출하일이 아니라 **예전에 이 줄에 손으로 적어 둔
-   * 값**이다(파일 헤더 — 연결된 줄은 그 값을 목록에 그리지 않는다). 방금 연결을
-   * 푼 사람은 목록에서 보던 날짜와 다른 날짜를 보게 되므로, 까닭을 함께 적는다.
-   * 이 말이 없으면 "연결을 풀었더니 날짜가 바뀌었다"로 읽힌다.
+   * 🔵 **설명이 사라진 것은 아니다** — 그 자리를 납기요청일 묶음 아래 한 줄이
+   * 대신한다(DOMESTIC_ORDER_DELIVERED_DATE_NOTE, 목록·기타건 현황과 같은 글자).
    */
-  function unlinkedDeliveredDateHint(): ReactNode {
-    const showsSavedHandValue =
-      savedRepairCaseId !== "" && deliveredDate !== "" && deliveredDate === savedDeliveredDate;
-    return (
-      <p className={hintClass}>
-        수리 건 연결이 없는 줄이라 납품일을 직접 적습니다. 수리 건을 연결하면 그 건의 실제
-        출하일이 대신 보입니다.
-        {showsSavedHandValue && (
-          <>
-            <br />
-            지금 칸의 날짜는 이 줄에 손으로 적혀 있던 값입니다 — 연결돼 있던 수리 건의 출하일이
-            아닙니다.
-          </>
-        )}
-      </p>
-    );
-  }
-
-  /**
-   * 연결된 채로 납품일 자리 아래 붙는 한 줄 — **이 폼에서 연결을 풀고 날짜를
-   * 고친 뒤 다시 연결했을 때만** 보인다. 불러온 그대로라면 아무것도 그리지
-   * 않는다(연결된 줄의 모양은 이 기능 전과 같다).
-   *
-   * 입력칸은 사라졌지만 고친 날짜는 버리지 않고 저장에 실린다(파일 헤더). 말없이
-   * 실으면 사용자는 "연결했으니 그 날짜는 없어졌다"고 읽고, 말없이 버리면 적은
-   * 값이 사라진다 — 둘 다 조용한 일이라 한 줄로 알린다.
-   */
-  function linkedDeliveredDateDraftHint(): ReactNode {
-    if (deliveredDate === savedDeliveredDate) return null;
-    return (
-      <p className={hintClass} role="status">
-        {deliveredDate === ""
-          ? "연결 없음일 때 지운 납품일은 저장하면 이 줄에서 지워집니다."
-          : `연결 없음일 때 적은 납품일 ${deliveredDate} 은(는) 지워지지 않고 이 줄에 저장됩니다.`}{" "}
-        수리 건이 연결돼 있는 동안 목록에는 그 건의 실제 출하일이 보입니다.
-      </p>
-    );
-  }
 
   /**
    * 충돌 상자에 넣을 납기일 한 줄 — "2026-01-20 (1차분), 2026-02-15".
@@ -646,15 +647,21 @@ export default function DomesticOrderEditForm({
       // index 로 매긴다(validation 의 DomesticOrderDueDateInput 주석). 여기서
       // 빈 줄을 걸러 내지 않는 것은 일부러다: 무엇이 빈 줄인지 정하는 규칙은
       // 검증 한 곳에 있어야 하고, 화면이 미리 걸러 내면 두 곳이 어긋난다.
-      dueDates: dueDates.map((entry) => ({ dueDate: entry.dueDate, note: entry.note })),
+      // 🔴 **네 칸을 전부** 보낸다 — 납품 둘을 빼면 그 저장 한 번에 그 줄의 납품
+      // 기록이 사라진다(위 DueDateDraft 주석).
+      dueDates: dueDates.map((entry) => ({
+        dueDate: entry.dueDate,
+        note: entry.note,
+        deliveredDate: entry.deliveredDate,
+        deliveredBy: entry.deliveredBy,
+      })),
       quoteIssuedDate,
       quoteNumber,
       quoteId,
       progressNote,
-      // ⚠️ **입력칸이 없을 때(수리 건이 연결돼 있을 때)도 반드시 실어 보낸다.**
-      // 이 저장은 모든 칼럼을 SET 하므로, 여기서 빼면 DB 에 남아 있는 납품일이
-      // 저장 한 번에 지워진다(위 deliveredDate 선언의 주석). 값은 원본 칸에서
-      // 시작한 state 그대로다 — 계산된 출하일이 섞일 길은 없다.
+      // ⚠️ 🔴 **옛 칼럼 둘 — 입력칸이 없는데도 반드시 실어 보낸다.** 이 저장은
+      // 모든 칼럼을 SET 하므로 여기서 빼면 그 칼럼이 지워지고, 그 칸을 PO 가
+      // 쓴다(위 선언의 주석 · 사용자 결정 11). 읽어 온 값 그대로다.
       deliveredDate,
       deliveredBy,
       taxInvoiceDate,
@@ -688,7 +695,20 @@ export default function DomesticOrderEditForm({
             // 메모를 잃지 않도록 여기서만 한 줄 글자로 만들어 얹는다
             // (DRAFT_LABELS 의 dueDatesText). 서버로 가는 fields 는 그대로다.
             draftText: buildDraftText(
-              { ...fields, dueDatesText: dueDatesDraftText() },
+              {
+                ...fields,
+                dueDatesText: dueDatesDraftText(),
+                // 🔴 납품 둘도 배열 안이라 같은 사정이다(DRAFT_LABELS 의
+                // deliveriesText) — 손으로 친 납품자가 여기서만 붙잡힌다.
+                deliveriesText: domesticOrderDeliveriesDraftText(
+                  dueDates.map(({ dueDate, note, deliveredDate: d, deliveredBy: by }) => ({
+                    dueDate,
+                    note,
+                    deliveredDate: d,
+                    deliveredBy: by,
+                  }))
+                ),
+              },
               DRAFT_LABELS
             ),
           });
@@ -704,9 +724,11 @@ export default function DomesticOrderEditForm({
       // 🔴 「이 줄은 저장됐는데 수리 건이 못 따라갔다」는 **읽어야 하는 글**이다 —
       // 0.5초 저장 팝업으로는 전할 수 없다(common/NoticePopup.tsx 머리말). 그 글
       // 첫머리가 "저장했습니다"로 시작하므로 성공 알림까지 함께 전한다.
-      const link = result.requestedDueDateLink;
-      if (link && !link.linked) {
-        onRequestedDueDateNotLinked(link.message);
+      // 🔴 묶기가 둘이다(납기요청일 · 납품일) — **둘 다 모아서** 띄운다. 하나만
+      // 보면 나머지 하나가 조용히 사라진다(domestic-order-link-notices.ts 머리말).
+      const noticeText = domesticOrderLinkNoticeText(domesticOrderLinkNotices(result));
+      if (noticeText !== null) {
+        onRequestedDueDateNotLinked(noticeText);
         return;
       }
       // 내자 목록 위의 폼이라 그 자리가 곧 목록이다 — 팝업만 띄운다(common/SavePopup.tsx).
@@ -952,6 +974,9 @@ export default function DomesticOrderEditForm({
             <ul className="flex flex-col gap-2">
               {dueDates.map((entry, index) => {
                 const errorKey = `dueDates.${index}`;
+                // 🔴 납품 기록이 달린 줄은 못 지운다(사용자 결정 5). 판정은 서버가
+                // 거절하는 그 함수가 한다(위 removeDueDateBlockedReason).
+                const removeBlocked = removeDueDateBlockedReason(index);
                 return (
                   // key 는 index 가 아니다 — 가운데 줄을 지웠을 때 남은 칸에
                   // 엉뚱한 값이 남지 않게 한다(DueDateDraft 주석).
@@ -989,6 +1014,37 @@ export default function DomesticOrderEditForm({
                           onChange={(e) => updateDueDate(entry.key, { note: e.target.value })}
                         />
                       </div>
+                      {/* 🔴 같은 회차의 **납품일 · 납품자**(2026-11-08 — 사용자
+                          결정 1). 한 줄 안에 네 칸이 나란히 서야 「이 납기일에
+                          이렇게 보냈다」가 한눈에 읽힌다 — 따로 묶으면 회차끼리
+                          눈으로 짝을 맞춰야 한다. */}
+                      <div className="w-44 flex-none">
+                        <input
+                          type="date"
+                          max={DATE_INPUT_MAX}
+                          className={editInputClass}
+                          value={entry.deliveredDate}
+                          disabled={disabled}
+                          aria-label={`납품일 ${index + 1}`}
+                          onChange={(e) =>
+                            updateDueDate(entry.key, { deliveredDate: e.target.value })
+                          }
+                        />
+                      </div>
+                      <div className="min-w-32 flex-1">
+                        <input
+                          type="text"
+                          className={editInputClass}
+                          value={entry.deliveredBy}
+                          disabled={disabled}
+                          placeholder="납품자"
+                          aria-label={`납품자 ${index + 1}`}
+                          autoComplete="off"
+                          onChange={(e) =>
+                            updateDueDate(entry.key, { deliveredBy: e.target.value })
+                          }
+                        />
+                      </div>
                       {/* ⚠️ **relative 를 떼지 말 것 — 떼면 창 스크롤이 하나 더
                           생긴다.** 아래 sr-only 는 position:absolute 다(Tailwind
                           의 sr-only 가 그렇다). 이 버튼에 relative 가 없으면 그
@@ -1015,13 +1071,18 @@ export default function DomesticOrderEditForm({
                       <button
                         type="button"
                         className="relative flex-none rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-700"
-                        disabled={disabled}
-                        onClick={() => removeDueDate(entry.key)}
+                        disabled={disabled || removeBlocked !== null}
+                        title={removeBlocked ?? undefined}
+                        onClick={() => removeDueDate(entry.key, index)}
                       >
                         삭제
                         <span className="sr-only"> — 납기요청일 {index + 1}</span>
                       </button>
                     </div>
+                    {/* 🔴 납품 기록이 달린 줄은 못 지운다(사용자 결정 5) — 까닭을
+                        **늘 보이는 한 줄**로 적는다. title 만 달면 키보드만 쓰는
+                        사람에게는 없는 것과 같다. */}
+                    {removeBlocked !== null && <p className={hintClass}>{removeBlocked}</p>}
                     {fieldErrors[errorKey] && (
                       <p className={editErrorClass}>{fieldErrors[errorKey]}</p>
                     )}
@@ -1035,16 +1096,26 @@ export default function DomesticOrderEditForm({
             type="button"
             ref={addDueDateButtonRef}
             className="mt-2 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-700"
-            disabled={disabled}
+            disabled={disabled || addDueDateBlockedReason !== null}
+            title={addDueDateBlockedReason ?? undefined}
             onClick={addDueDate}
           >
             납기요청일 추가
           </button>
 
+          {/* 🔴 수리 건이 연결된 줄은 둘 이상 못 만든다(사용자 결정 9) — 위 [삭제]
+              와 같은 까닭으로 title 만 두지 않는다. */}
+          {addDueDateBlockedReason !== null && (
+            <p className={hintClass}>{addDueDateBlockedReason}</p>
+          )}
+
           {/* 목록 전체가 잘못된 경우(개수 상한 초과 등)의 자리. 줄마다의
               오류는 위에서 그 줄 밑에 붙는다. */}
           {fieldErrors.dueDates && <p className={editErrorClass}>{fieldErrors.dueDates}</p>}
           {requestedDueDateHint()}
+          {/* 🔴 납품 둘이 이 묶음 안으로 들어오면서, 그 둘이 수리 건과 어떻게
+              묶이는지도 여기서 말해야 한다 — 목록·기타건 현황과 **같은 글자**다. */}
+          <p className={hintClass}>{DOMESTIC_ORDER_DELIVERED_DATE_NOTE}</p>
         </fieldset>
         {renderText("quoteIssuedDate", "견적발행일", quoteIssuedDate, setQuoteIssuedDate, { type: "date" })}
         <div className="flex flex-col gap-1">
@@ -1110,45 +1181,14 @@ export default function DomesticOrderEditForm({
         </div>
 
         {renderText("quoteNumber", "견적서번호", quoteNumber, setQuoteNumber)}
-        {/* ⚠️ **수리 건이 연결돼 있으면 납품일에는 입력칸이 없다.** 빈 자리로
-            두지 않고 지금 값과 까닭을 함께 적는 이유는, 있던 칸이 그냥 사라지면
-            "고장 났다"로 읽히기 때문이다 — 이 폼의 납기요청일 빈 묶음에도 같은
-            이유로 한 줄이 붙어 있다.
+        {/* 🔴 **납품일·납품자 칸이 여기 없다**(2026-11-08). 둘은 위 `납기요청일`
+            묶음의 **줄 안**으로 들어갔다 — 회차마다 하나씩이라야 분할 납품을 적을
+            수 있고(사용자 결정 1), 그래야 1번 줄의 납기일과 1번 줄의 납품일이
+            같은 행에 남는다.
 
-            값은 손으로 적는 것이 아니라 워크플로가 출하 완료 때 자동으로 찍는다
-            (mutations/workflow-transitions.ts). 여기서 받을 방법이 없으므로 받는
-            척도 하지 않는다.
-
-            **연결이 없으면 날짜 입력칸이다**(2026-09-11) — 출하일이 없는 줄이라
-            이 줄에 적는 값이 그 줄의 납품일이다. 입력칸은 원본 칸(deliveredDate
-            state)만 담고, 계산된 출하일은 어떤 경로로도 들어오지 않는다.
-
-            ⚠️ 어느 쪽이든 **저장에는 그 state 가 실린다**(collectFields 의
-            deliveredDate) — 이 저장은 모든 칼럼을 SET 하므로, 안 보여 주는 것과
-            지우는 것은 다르게 다뤄야 한다. */}
-        {repairCaseId === "" ? (
-          renderText("deliveredDate", "납품일", deliveredDate, setDeliveredDate, {
-            type: "date",
-            hint: unlinkedDeliveredDateHint(),
-          })
-        ) : (
-          <div>
-            <span className={editLabelClass}>납품일</span>
-            <p className={`${editInputClass} text-zinc-600 dark:text-zinc-300`}>
-              {deliveredDateText()}
-            </p>
-            <p className={hintClass}>
-              납품일은 연결된 수리 건의{" "}
-              <strong className="font-semibold">실제 출하일</strong>이라 여기서 직접 적을 수
-              없습니다. 출하 완료 처리를 하면 그 날짜가 자동으로 적힙니다.
-            </p>
-            {fieldErrors.deliveredDate && (
-              <p className={editErrorClass}>{fieldErrors.deliveredDate}</p>
-            )}
-            {linkedDeliveredDateDraftHint()}
-          </div>
-        )}
-        {renderText("deliveredBy", "납품자", deliveredBy, setDeliveredBy)}
+            🔵 옛 칼럼 둘(`domestic_orders.delivered_date`·`delivered_by`)은 지우지
+            않았지만 이 폼이 그리지도 고치지도 않는다 — 읽어 온 값을 그대로
+            되실어 보낼 뿐이다(파일 헤더 · collectFields 의 그 두 줄). */}
         {renderText("taxInvoiceDate", "세금계산서발행일", taxInvoiceDate, setTaxInvoiceDate, { type: "date" })}
         {/* type="number" 를 쓰지 않는다 — 목록이 1,234,567 처럼 끊어 보여 주므로
             사용자가 그 모양 그대로 붙여 넣는 일이 실제로 있고, number 입력은

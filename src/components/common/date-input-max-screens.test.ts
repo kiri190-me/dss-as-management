@@ -264,7 +264,12 @@ const COUNTS: Record<string, Partial<Record<DateInputKind, number>>> = {
   // 고객 안내 현황의 수기 칸 — type 이 식이라 글자 grep 에는 안 걸린다.
   "src/components/customer-portal/CustomerPortalScreen.tsx": { date: 1 },
   "src/components/domestic-orders/DomesticOrderDueDatesCell.tsx": { date: 1 },
-  "src/components/domestic-orders/DomesticOrderEditForm.tsx": { date: 1 },
+  // 🔴 2026-11-08 에 생긴 칸 — 납기요청일 **행마다** 적는 납품일(회차별 납품 편집).
+  "src/components/domestic-orders/DomesticOrderDeliveriesCell.tsx": { date: 1 },
+  // 🔴 2026-11-08 에 하나에서 **둘**이 되었다 — 납기요청일 묶음의 한 줄 안에
+  //    납기일 칸과 납품일 칸이 나란히 선다(사용자 결정 1: 1번 줄 ↔ 1번 줄).
+  //    🔵 그 대신 **따로 서 있던 납품일 칸이 없어졌다** — 그래서 둘이지 셋이 아니다.
+  "src/components/domestic-orders/DomesticOrderEditForm.tsx": { date: 2 },
   "src/components/domestic-orders/DomesticOrderTextCell.tsx": { date: 1 },
   "src/components/quotes/QuoteEditForm.tsx": { date: 1 },
   "src/components/repair-cases/detail/DomesticOrderDatesSection.tsx": { date: 2 },
