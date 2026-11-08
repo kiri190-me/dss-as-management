@@ -527,15 +527,3 @@ src/lib/db/queries/repair-case-overdue-notifications.integration.test.ts
 # 🔴 완료 표시가 줄 저장(replaceDueDates 의 지우고-다시-넣기)을 지나 **살아남는가**.
 # 🔵 승인은 **진짜 경로**(요청 → 결재)로 받는다. 접수 건은 만들지 않고 빌린다.
 src/lib/db/mutations/misc-case-due-date-row-approval.integration.test.ts
-
-# 🔴 **완료된 것은 잠근다 — 울타리가 진짜 서버에 서 있는가**(2026-11-08 사용자 결정 —
-# 「해제하지 않으면 내자정리의 어떤 내용도 수정할 수 없도록」·「1차가 완료되면 1차와
-# 관련된 내용들만」). 내자 줄의 칸을 고치는 길 **셋을 전부** 본다: 자리편집·줄 수정 폼이
-# 함께 타는 updateDomesticOrder · 수리 건 상세의 발행일 둘(저장 경로가 따로다) · 수리 건의
-# 묶인 두 칸(고객 요청 납기일 · 실제 출하일). 재는 것: 줄이 완료면 거절되고 **값도 version
-# 도 안 움직이는가** · 완료된 회차의 네 칸만 막히고 🔵 **다른 회차와 줄의 다른 칸은 그대로
-# 고쳐지는가** · 🔵 **A/S 본업(수리 메모)과 인수정보의 다른 칸은 안 막히는가** ·
-# 🔵 **값이 안 바뀌는 제출은 통과하는가**(폼이 늘 함께 보낸다) · 🔵 [완료 해제]·[1차 해제]
-# 뒤에는 고쳐지는가(막다른 길이 아니다) · 🔵 휴지통은 막지 않는가(재서 정한 결정).
-# 🔵 완료 표시는 DB 에 직접 찍는다 — 그 칸이 어떻게 차는가는 위 두 파일이 본다.
-src/lib/db/mutations/domestic-order-completion-lock.integration.test.ts

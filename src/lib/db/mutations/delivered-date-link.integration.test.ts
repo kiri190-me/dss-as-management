@@ -31,7 +31,6 @@ import {
   DUE_DATE_ROW_HAS_DELIVERY_MESSAGE,
   LINKED_LINE_SINGLE_DUE_DATE_MESSAGE,
 } from "@/lib/domain/domestic-order-due-date-rows";
-import { toKstDateOnly } from "@/lib/domain/date-only";
 import type { DomesticOrderDueDateInput, DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -284,16 +283,9 @@ async function grantFinalShipmentApproval(caseId: string) {
   assert.equal(shipmentDecision.ok, true, JSON.stringify(shipmentDecision));
 }
 
-/**
- * 오늘 — 출하 완료 전이가 찍는 날짜. **전이가 쓰는 그 식 그대로**다.
- *
- * 🔴 **2026-11-08 에 `toISOString().slice(0, 10)` 에서 바뀌었다.** 그 식은 UTC 날짜라
- * 한국 시간 00:00~09:00 사이에 돌면 **어제**를 내놓았고, 그때는 이 시험이 서버가 찍은
- * 날짜와 어긋나 까닭 없이 빨개졌다(그리고 운영에서는 실제로 하루 어긋난 출하일이
- * 찍히고 있었다 — mutations/workflow-transitions.ts 의 `shippedOn`).
- */
+/** 오늘(KST 가 아니라 전이가 쓰는 그 식 그대로) — 출하 완료가 찍는 날짜. */
 function shipmentStampToday(): string {
-  return toKstDateOnly(new Date());
+  return new Date().toISOString().slice(0, 10);
 }
 
 before(async () => {

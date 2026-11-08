@@ -34,7 +34,6 @@ import {
   MISC_CASE_COMPLETION_BLOCKED_MESSAGES,
 } from "@/lib/domain/domestic-order-approval-rules";
 import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-date-label";
-import { toKstDateOnly } from "@/lib/domain/date-only";
 import {
   COMPLETED_DUE_DATE_ROW_MESSAGE,
   DUE_DATE_ROW_HAS_DELIVERY_MESSAGE,
@@ -210,31 +209,6 @@ async function approveRow(order: TestOrder, rowOrder: number): Promise<void> {
   assert.equal(requested.ok, true, `setup request failed: ${JSON.stringify(requested)}`);
   const decided = await decide(order, rowOrder, "APPROVED");
   assert.equal(decided.ok, true, `setup decision failed: ${JSON.stringify(decided)}`);
-}
-
-/**
- * 🔴 **지금 DB 에 적혀 있는 납기요청일 행 그대로**를 실은 저장 payload (2026-11-08).
- *
- * 🔵 화면이 하는 일을 그대로 흉내 낸다 — 자리편집도 `줄 수정` 폼도 **지금 보이는 줄
- * 전체**를 다시 실어 보낸다(domain/domestic-order-cell-edit.ts 의 collectRowFields).
- *
- * 🔴 **왜 필요해졌나**: 회차 [완료 처리]가 그 회차의 납품일에 오늘을 찍고(㉨),
- * 2026-11-08 부터 **완료된 회차의 네 칸은 잠긴다**(domain/domestic-order-completion-
- * lock.ts). 그래서 완료 **전에** 만들어 둔 `order.fields` 를 그대로 보내면 그 저장은
- * 「1차의 납품일을 지우려 한다」가 되어 거절된다 — 그것이 **맞는 거절**이고, 줄의
- * 다른 칸만 고치려는 시험은 화면과 같이 **방금 읽은 목록**을 실어야 한다.
- */
-async function fieldsWithStoredRows(order: TestOrder): Promise<DomesticOrderFields> {
-  const rows = await readRows(order.id);
-  return {
-    ...order.fields,
-    dueDates: rows.map((row) => ({
-      dueDate: row.dueDate,
-      note: row.note,
-      deliveredDate: row.deliveredDate,
-      deliveredBy: row.deliveredBy,
-    })),
-  };
 }
 
 async function readOrder(id: string) {
@@ -713,16 +687,10 @@ describe("㉧ 완료 표시는 줄을 저장해도 살아남는다 — 그리고
     assert.equal(done.ok, true);
 
     // 🔴 이 저장은 납기요청일 행을 **통째로 지우고 다시 넣는다**(replaceDueDates).
-    // 🔵 **단언은 2026-11-08 에 한 글자도 안 바뀌었다 — 상황 만들기만 바뀌었다.**
-    //    그날 완료된 회차의 네 칸이 잠겼고(domain/domestic-order-completion-lock.ts),
-    //    완료가 그 회차의 납품일에 오늘을 찍는다(㉨). 그래서 완료 **전**의 payload 를
-    //    그대로 보내면 「1차의 납품일을 지우려 한다」가 되어 거절되는 것이 맞다 —
-    //    화면이 그러듯 **방금 읽은 목록**을 실어 보내고, 재는 것은 그대로 「줄의 다른
-    //    칸만 고치는 저장이 완료 표시를 지우는가」다.
     const updated = await updateDomesticOrder({
       id: order.id,
       expectedVersion: order.version,
-      fields: { ...(await fieldsWithStoredRows(order)), etcNote: "메모만 고친다" },
+      fields: { ...order.fields, etcNote: "메모만 고친다" },
       actorUserId: requesterId,
     });
     assert.equal(updated.ok, true, `저장이 막혔다: ${JSON.stringify(updated)}`);
@@ -866,15 +834,8 @@ describe("㉧ 완료 표시는 줄을 저장해도 살아남는다 — 그리고
  * ============================================================================
  */
 describe("㉨ 회차 [완료 처리]가 납품일을 찍는다", () => {
-  /**
-   * 서버가 쓰는 것과 **같은 방식**의 오늘.
-   *
-   * 🔴 **2026-11-08 에 바뀌었다** — mutation 이 `toISOString().slice(0, 10)`(UTC 날짜)
-   * 로 만들던 것을 `toKstDateOnly` 로 고쳤다. 옛 식은 한국 시간 00:00~09:00 사이에
-   * **어제**를 내놓아, 그 시간대에 [1차 완료]를 누르면 납품일이 하루 어긋나게 찍혔다.
-   * 🔵 여기도 함께 고쳐야 한다 — 안 고치면 그 아홉 시간 동안만 이 시험이 빨개진다.
-   */
-  const today = () => toKstDateOnly(new Date());
+  /** 서버가 쓰는 것과 **같은 방식**의 오늘 — mutation 이 toISOString 으로 만든다. */
+  const today = () => new Date().toISOString().slice(0, 10);
 
   test("🔴 1차를 완료하면 1차 줄에만 오늘이 찍힌다", async () => {
     await saveDomesticRoute([approverId]);

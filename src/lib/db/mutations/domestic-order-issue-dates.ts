@@ -10,7 +10,6 @@ import {
   DOMESTIC_ORDER_ISSUE_DATE_QUOTE_LOCK_MESSAGE,
   resolveDomesticOrderIssueDateEditPlan,
 } from "@/lib/domain/domestic-order-issue-date-edit";
-import { DOMESTIC_ORDER_LINE_COMPLETED_MESSAGE } from "@/lib/domain/domestic-order-completion-lock";
 import { VERSION_CONFLICT_MESSAGE } from "./domestic-orders";
 
 /**
@@ -90,15 +89,6 @@ export type SaveRepairCaseDomesticOrderIssueDatesCode =
   | "FORBIDDEN"
   | "MULTIPLE_ROWS"
   | "QUOTE_LOCKED"
-  /**
-   * 🔴 **그 내자 줄이 완료 상태라 고칠 수 없다**(2026-11-08 사용자 결정).
-   *
-   * 🔴 이 길을 울타리에서 빼면 **구멍이 된다.** 여기는 내자 줄의 칸을 고치는 세
-   * 길 가운데 **updateDomesticOrder 를 안 거치는 하나**라(파일 머리말의 「그러니
-   * 합치지 마라」), 그쪽에만 울타리를 치면 수리 건 상세에서 완료된 줄의 발행일
-   * 둘을 그대로 고칠 수 있다.
-   */
-  | "LINE_COMPLETED"
   | "EMPTY";
 
 export type SaveRepairCaseDomesticOrderIssueDatesResult =
@@ -170,8 +160,6 @@ export async function saveRepairCaseDomesticOrderIssueDates(params: {
         version: domesticOrders.version,
         quoteId: domesticOrders.quoteId,
         quoteIssuedDate: domesticOrders.quoteIssuedDate,
-        // 🔴 **완료 잠금이 본다**(2026-11-08). 줄이 완료면 이 두 칸도 못 고친다.
-        completedAt: domesticOrders.completedAt,
       })
       .from(domesticOrders)
       .where(
@@ -228,22 +216,6 @@ export async function saveRepairCaseDomesticOrderIssueDates(params: {
 
     // plan.kind === "UPDATE" 는 줄이 정확히 하나라는 뜻이다(같은 함수가 낸 판정).
     const current = rows[0];
-
-    // ── 🔴 **완료된 줄은 어떤 칸도 못 고친다** (2026-11-08 사용자 결정) ──────
-    // 🔴 **version 대조 뒤**다. 앞에 두면 낡은 화면에서 누른 저장이 CONFLICT 대신
-    // 「완료 상태다」로 답한다 — 사람은 완료를 풀러 가지만 진짜 문제는 그 사이 남이
-    // 줄을 고친 것이고, 완료를 풀고 와도 같은 자리에서 또 막힌다
-    // (setDomesticOrderCompletion 의 승인 관문이 같은 까닭으로 같은 자리에 선다).
-    //
-    // 🔴 **만들기 쪽(plan.kind === "CREATE")에는 없다** — 아직 없는 줄이 완료일 수는
-    // 없다. 거기 두면 영영 안 도는 죽은 가지가 된다.
-    //
-    // 🔵 글자는 내자 정리 화면이 쓰는 그 한 줄을 그대로 쓴다 — 같은 일이 화면마다
-    // 다른 말로 설명되면 사람은 다른 일로 읽는다(VERSION_CONFLICT_MESSAGE 를 이
-    // 파일이 빌려 쓰는 것과 같은 판단).
-    if (current.completedAt !== null) {
-      return { ok: false, code: "LINE_COMPLETED", message: DOMESTIC_ORDER_LINE_COMPLETED_MESSAGE };
-    }
     // 🔴 견적서가 붙은 줄의 견적발행일은 견적서를 따른다. **바꾸려 할 때만**
     // 막는다 — 지금 값을 그대로 되실어 보낸 저장(발주발행일만 고치는 저장)까지
     // 막으면 이 줄에서는 PO 발행일도 고칠 수 없게 된다.

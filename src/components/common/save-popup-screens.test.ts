@@ -440,11 +440,7 @@ test("내자·주간보고·작업 비용은 팝업만 띄우고 머문다", () 
     // 🔴 **2026-11-08 에 넷이 되었다** — 회차별 [완료 처리]·[완료 해제]가 생기면서
     //    팝업을 띄우는 자리가 하나 늘었다(DueDateRowCompletionToggles). 그 자리도 **머물고
     //    띄우기만 한다** — 회차 하나를 끝낸 뒤 갈 곳은 지금 보고 있는 그 표다.
-    // 🔴 **같은 날 다섯이 되었다** — [N차 해제]가 확인 창을 거치게 되면서, 보내는 일이
-    //    단추에서 화면 위쪽(releaseDueDateRowCompletion)으로 옮겨 **한 벌 더** 생겼다.
-    //    줄 단위 [완료 해제]가 2026-10-18 에 같은 모양으로 갈라진 것과 같다. 다섯 다
-    //    머문다 — 완료든 해제든 끝낸 뒤 갈 곳은 지금 보고 있는 그 표다.
-    ["src/components/domestic-orders/DomesticOrderListScreen.tsx", 5],
+    ["src/components/domestic-orders/DomesticOrderListScreen.tsx", 4],
     ["src/components/dashboard/WeeklyReportGoalsPanel.tsx", 3],
     ["src/components/dashboard/WeeklyReportDeliveriesPanel.tsx", 2],
     ["src/components/repair-labor/RepairLaborScreen.tsx", 1],

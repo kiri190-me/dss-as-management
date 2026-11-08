@@ -114,7 +114,6 @@ export default function IntakeInfoSection({
   isDueDateNear,
   isDueDateInverted,
   onRequestedDueDateNotLinked,
-  onDomesticOrderCompleted,
   onStartEdit,
   onDone,
 }: {
@@ -162,13 +161,6 @@ export default function IntakeInfoSection({
    * (RepairCaseDetailView).
    */
   onRequestedDueDateNotLinked: (message: string) => void;
-  /**
-   * 🔴 **내자 정리에서 완료된 줄과 묶여 저장이 막혔을 때**(2026-11-08 사용자 결정).
-   * 위 짝과 같은 까닭으로 이 구역은 띄우지 않고 위로 올려 보낸다 — 다만 이쪽은
-   * **폼이 닫히지 않는다**(아무것도 저장되지 않았다). 그래도 알림이 폼 안에서
-   * 태어나면 `<dl>` 격자의 정렬을 물려받는다.
-   */
-  onDomesticOrderCompleted: (message: string) => void;
   onStartEdit: () => void;
   onDone: () => void;
 }) {
@@ -211,7 +203,6 @@ export default function IntakeInfoSection({
               requestedDueDate.borrowed ? requestedDueDate.dueDate : null
             }
             onRequestedDueDateNotLinked={onRequestedDueDateNotLinked}
-            onDomesticOrderCompleted={onDomesticOrderCompleted}
             onDone={onDone}
           />
         </div>

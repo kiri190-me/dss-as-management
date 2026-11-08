@@ -25,7 +25,6 @@ import {
 } from "@/lib/domain/domestic-order-cell-edit";
 import { DOMESTIC_ORDER_DELIVERED_DATE_NOTE } from "@/lib/domain/delivered-date-link";
 import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-date-label";
-import { domesticOrderDueDateRowEditBlockReason } from "@/lib/domain/domestic-order-completion-lock";
 import type { DomesticOrderListItem } from "@/lib/db/queries/domestic-orders";
 import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders";
 import {
@@ -302,15 +301,6 @@ export default function DomesticOrderDeliveriesCell({
         <ul className="flex flex-col gap-2">
           {lines.map((line, index) => {
             const errorKey = `dueDates.${index}`;
-            // 🔴 **완료 처리된 회차는 납품일·납품자도 못 고친다**(2026-11-08 사용자
-            //    결정 — 「1차가 완료되면 1차와 관련된 내용들만 잠기도록」). 판정은
-            //    납기요청일 칸과 **같은 함수**이고, 그 함수는 서버의 울타리가 쓰는 바로
-            //    그것이다 — 세 곳이 따로 정하면 어딘가 한 곳만 어긋난다.
-            // 🔵 **다른 회차는 그대로 고쳐진다.**
-            const rowLocked = domesticOrderDueDateRowEditBlockReason({
-              rowOrder: index + 1,
-              row: line,
-            });
             return (
               <li key={line.key} className="flex flex-col gap-1">
                 {/* 🔴 어느 회차인지 — 이 칸에서 고치지 않는 값이라 **읽기 전용 글자**다.
@@ -330,10 +320,7 @@ export default function DomesticOrderDeliveriesCell({
                       max={DATE_INPUT_MAX}
                       className={editInputClass}
                       value={line.deliveredDate}
-                      // 🔴 완료된 회차는 잠긴다 — 까닭은 title 과 줄 밑 안내로 **글로
-                      // 보인다**(납기요청일 칸과 같은 모양·같은 까닭).
-                      disabled={disabled || rowLocked !== null}
-                      title={rowLocked ?? undefined}
+                      disabled={disabled}
                       aria-label={`납품일 ${index + 1}`}
                       onChange={(event) =>
                         updateLine(line.key, { deliveredDate: event.target.value })
@@ -345,8 +332,7 @@ export default function DomesticOrderDeliveriesCell({
                       type="text"
                       className={editInputClass}
                       value={line.deliveredBy}
-                      disabled={disabled || rowLocked !== null}
-                      title={rowLocked ?? undefined}
+                      disabled={disabled}
                       placeholder="납품자"
                       aria-label={`납품자 ${index + 1}`}
                       autoComplete="off"
@@ -356,10 +342,6 @@ export default function DomesticOrderDeliveriesCell({
                     />
                   </div>
                 </div>
-                {/* 🔴 **왜 안 열리는지**를 늘 보이는 한 줄로 적는다(2026-11-08).
-                    title 은 마우스를 올려야 보이고, 키보드만 쓰는 사람에게는 이 줄이
-                    유일한 설명이다(납기요청일 칸과 같은 모양). */}
-                {rowLocked !== null && <p className={cellHintClass}>{rowLocked}</p>}
                 {lineErrors[errorKey] && <p className={editErrorClass}>{lineErrors[errorKey]}</p>}
               </li>
             );

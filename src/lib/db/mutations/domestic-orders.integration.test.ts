@@ -22,7 +22,6 @@ import {
   setDomesticOrderCompletion,
   updateDomesticOrder,
 } from "./domestic-orders";
-import { DOMESTIC_ORDER_LINE_COMPLETED_MESSAGE } from "@/lib/domain/domestic-order-completion-lock";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
@@ -849,19 +848,7 @@ describe("setDomesticOrderCompletion", () => {
     assert.equal(result.code, "NOT_FOUND");
   });
 
-  /**
-   * 🔴 **2026-11-08 에 이 시험이 뒤집혔다 — 약해진 것이 아니라 결정이 바뀌었다.**
-   *
-   * 그 전의 이름은 「완료된 줄도 여전히 고칠 수 있다 — 회색은 잠금이 아니다」였고,
-   * 단언은 `updated.ok === true` 였다. 그날 사용자가 그 결정을 뒤집었다: 「해제하지
-   * 않으면 **내자정리의 어떤 내용도 수정할 수 없도록** 해줘.」
-   *
-   * 🔵 **회색은 여전히 잠금이 아니다** — 완료된 줄을 회색으로 칠하는 것과 잠그는 것은
-   * 다른 일이고, 지금 잠그는 근거는 색이 아니라 `completed_at` 이다.
-   * 🔵 **막다른 길이 아니라는 것**을 같은 자리에서 함께 잰다(아래 둘째 걸음) — 그러지
-   * 않으면 「막힌다」만 재는 시험이 되어, 영영 못 고치는 문이 생겨도 초록으로 남는다.
-   */
-  test("🔴 완료된 줄은 못 고친다 — 그리고 [완료 해제] 뒤에는 고쳐진다", async () => {
+  test("완료된 줄도 여전히 고칠 수 있다 — 회색은 잠금이 아니다", async () => {
     const created = await createOrder({ progressNote: "완료 전" });
     if (!created.ok) return;
     await grantMiscCaseApproval(created.id, created.version);
@@ -875,47 +862,19 @@ describe("setDomesticOrderCompletion", () => {
     assert.equal(completed.ok, true);
     if (!completed.ok) return;
 
-    // ① 🔴 완료된 줄의 저장은 거절된다.
-    const blocked = await updateDomesticOrder({
+    const updated = await updateDomesticOrder({
       id: created.id,
       expectedVersion: completed.version,
       fields: fields({ progressNote: "완료 후에 적은 입금 사실" }),
       actorUserId,
     });
-    assert.equal(blocked.ok, false, "완료된 줄이 그대로 고쳐졌다");
-    if (blocked.ok) return;
-    assert.equal(blocked.code, "VALIDATION_ERROR");
-    assert.equal(blocked.message, DOMESTIC_ORDER_LINE_COMPLETED_MESSAGE);
-
-    // 🔴 거절된 저장은 그 줄을 **한 글자도** 건드리지 않는다.
-    const afterBlock = await readOrder(created.id);
-    assert.equal(afterBlock.progressNote, "완료 전", "거절된 저장이 값을 바꿨다");
-    assert.equal(afterBlock.version, completed.version, "거절된 저장이 version 을 올렸다");
-
-    // ② 🔵 [완료 해제]는 막히지 않는다 — 여기가 막히면 영영 못 고치는 문이 된다.
-    const released = await setDomesticOrderCompletion({
-      id: created.id,
-      expectedVersion: completed.version,
-      completed: false,
-      actorUserId,
-    });
-    assert.equal(released.ok, true, `완료 해제가 막혔다: ${JSON.stringify(released)}`);
-    if (!released.ok) return;
-
-    // ③ 🔵 그제야 고쳐진다. 거절 문장이 말한 그 차례 그대로다.
-    const updated = await updateDomesticOrder({
-      id: created.id,
-      expectedVersion: released.version,
-      fields: fields({ progressNote: "해제한 뒤에 적은 입금 사실" }),
-      actorUserId,
-    });
-    assert.equal(updated.ok, true, `해제한 줄 수정 실패: ${JSON.stringify(updated)}`);
+    assert.equal(updated.ok, true, `완료된 줄 수정 실패: ${JSON.stringify(updated)}`);
 
     const row = await readOrder(created.id);
-    assert.equal(row.progressNote, "해제한 뒤에 적은 입금 사실");
-    // 수정은 완료 표시를 건드리지 않는다 — 둘은 서로 다른 조작이다(해제된 뒤라 null 이다).
-    assert.equal(row.completedAt, null, "해제한 줄에 완료 표시가 되살아났다");
-    assert.equal(row.completedBy, null);
+    assert.equal(row.progressNote, "완료 후에 적은 입금 사실");
+    // 수정은 완료 표시를 건드리지 않는다 — 둘은 서로 다른 조작이다.
+    assert.ok(row.completedAt instanceof Date, "수정이 완료 표시를 지워서는 안 된다");
+    assert.equal(row.completedBy, actorUserId);
   });
 });
 

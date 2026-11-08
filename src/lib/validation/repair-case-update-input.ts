@@ -401,13 +401,6 @@ export type UpdateRepairCaseActionResultCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "CONFLICT"
-  /**
-   * 🔴 **내자 정리에서 완료된 줄과 묶인 칸이라 고칠 수 없다**(2026-11-08 사용자 결정).
-   * 막히는 칸은 고객 요청 납기일 · 실제 출하일 둘뿐이고, 판정은 서버 한 곳이다
-   * (db/mutations/repair-cases.ts). 화면은 이 **코드**를 보고 읽고 닫는 알림을 띄운다 —
-   * 글자를 견주지 않는다.
-   */
-  | "DOMESTIC_ORDER_COMPLETED"
   | "REFERENCE_NOT_FOUND"
   | "REFERENCE_MISMATCH"
   | "ENGINEER_NOT_ALLOWED"

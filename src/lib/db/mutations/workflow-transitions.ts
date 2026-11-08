@@ -22,7 +22,6 @@ import {
   writeDomesticOrderDeliveredLink,
   type DomesticOrderDeliveredLinkWork,
 } from "./domestic-order-delivered-link";
-import { toKstDateOnly } from "@/lib/domain/date-only";
 import type { DeliveredDateLinkOutcome } from "@/lib/domain/delivered-date-link";
 import type { HoldState } from "@/lib/domain/local/workflow/workflow-types";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
@@ -324,15 +323,7 @@ export async function transitionWorkflow(
         setValues.currentWorkflowStepId = toStepId;
         if (actionCode === "SHIPMENT_COMPLETED") {
           setValues.isLocked = true;
-          // 🔴 **한국 달력 날짜다**(2026-11-08 고침). 전에는
-          //    `new Date().toISOString().slice(0, 10)` — 즉 **UTC 날짜**였고, 한국 시간
-          //    00:00~09:00 사이에 [출하 완료]를 누르면 **어제 날짜가 실제 출하일로**
-          //    찍혔다. 오류도 경고도 없이 날짜만 하루 어긋나므로 아무도 신고하지 않는다.
-          //    🔵 이 값은 연결된 내자 줄의 납품일에도 그대로 흘러가고(아래
-          //    planDomesticOrderDeliveredLink), 기타건의 회차 [완료 처리]도 **같은
-          //    함수**로 오늘을 만든다(mutations/domestic-orders.ts) — 둘이 다른 방식을
-          //    쓰면 같은 날 찍힌 두 값이 하루 어긋난다.
-          const shippedOn = toKstDateOnly(new Date());
+          const shippedOn = new Date().toISOString().slice(0, 10);
           setValues.actualShipmentDate = shippedOn;
           // 🔴 같은 날짜를 연결된 내자 줄의 납품일에도 찍는다(사용자 결정 6).
           // 🔵 `trigger` 가 SHIPMENT_COMPLETED 라 **이미 사람이 적어 둔 납품일은

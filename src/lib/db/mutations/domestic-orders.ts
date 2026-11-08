@@ -33,8 +33,6 @@ import {
   type DeliveredDateLinkOutcome,
 } from "@/lib/domain/delivered-date-link";
 import { checkDomesticOrderDueDateRows } from "@/lib/domain/domestic-order-due-date-rows";
-import { checkDomesticOrderCompletionLock } from "@/lib/domain/domestic-order-completion-lock";
-import { toKstDateOnly } from "@/lib/domain/date-only";
 import { getCurrentShipmentApprovalRouteChain } from "../queries/shipment-approval-routes";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 
@@ -82,18 +80,6 @@ import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input"
  * 머리말을 함께 읽어야 한다. 묶지 않는 자리와 그 까닭은 전부
  * domain/requested-due-date-link.ts 머리말에 있고, **판정은 그 파일 하나가**
  * 가진다(거울 방향인 mutations/repair-cases.ts 도 같은 파일을 부른다).
- *
- * ── 🔴 **완료된 것은 잠근다** (2026-11-08) ──────────────────────────────
- * 사용자 결정이다 — 「해제하지 않으면 내자정리의 어떤 내용도 수정할 수 없도록」.
- * 줄 전체가 완료면 이 함수의 저장이 통째로 거절되고, 회차 하나가 완료면 **그 회차의
- * 네 칸**만 거절된다. 판정과 글자는 domain/domestic-order-completion-lock.ts 하나가
- * 가지고, 여기서는 **저장돼 있던 모양과 보내온 모양**을 넘길 뿐이다
- * (checkCompletionLock).
- *
- * 🔴 **조각 A 의 울타리 뒤에서 부른다.** 완료된 회차가 있는데 줄이 줄어드는 저장은
- * 그쪽이 먼저 거절해야 자리(index)가 어긋나지 않는다(그 파일의 「자리로 잰다」).
- * 🔴 **만들기(createDomesticOrder)에는 걸지 않는다** — 새 줄은 완료일 수가 없다
- * (줄의 완료도 회차의 완료도 승인을 거쳐 따로 찍는 값이다).
  *
  * ── 🔴 납품일·납품자도 **그 딸린 표에 있다** (2026-11-08) ─────────────────
  * 사용자 결정 1(「납기요청일 1번 줄 ↔ 납품일 1번 줄, 행이 묶인다」)로 납품 둘이
@@ -478,47 +464,6 @@ function checkDueDateRowGuard(params: {
 }
 
 /**
- * 🔴 **완료된 것을 잠그는 울타리**(2026-11-08). 막히면 검증 오류를, 통과면 null 을
- * 돌려준다.
- *
- * 🔴 **판정도 글자도 여기 적지 않는다** — domain/domestic-order-completion-lock.ts
- * 하나가 가진다(화면도 같은 함수로 칸을 미리 막는다). 이 함수가 하는 일은 **저장돼
- * 있던 모양과 보내온 모양을 넘기는 것**뿐이다.
- *
- * 🔴 **checkDueDateRowGuard 보다 뒤에서, 그리고 UPDATE 보다 앞에서** 불러야 한다.
- * 앞이면 줄이 줄어드는 저장에서 자리가 밀려 엉뚱한 회차를 가리키고, 뒤면 거절된
- * 저장이 이미 줄의 다른 칸을 바꿔 놓는다.
- *
- * 🔵 거절의 `fieldErrors` 는 **회차가 막았을 때만** 붙는다 — 줄 전체가 잠긴 것은 어느
- * 한 칸의 문제가 아니라서, 칸 밑에 빨간 줄을 그으면 그 칸만 문제인 것으로 읽힌다.
- */
-function checkCompletionLock(params: {
-  lineCompletedAt: Date | null;
-  storedRows: readonly StoredDueDateRow[];
-  fields: DomesticOrderFields;
-}): DomesticOrderMutationResult | null {
-  const guard = checkDomesticOrderCompletionLock({
-    lineCompleted: params.lineCompletedAt !== null,
-    storedRows: params.storedRows.map((row) => ({
-      dueDate: row.dueDate,
-      note: row.note,
-      deliveredDate: row.deliveredDate,
-      deliveredBy: row.deliveredBy,
-      // 🔴 판정은 completed_at 하나로만 한다(그 표의 칸 주석과 같은 규칙).
-      isCompleted: row.completedAt !== null,
-    })),
-    nextRows: params.fields.dueDates,
-  });
-  if (guard.ok) return null;
-  return {
-    ok: false,
-    code: "VALIDATION_ERROR",
-    ...(guard.field ? { fieldErrors: { [guard.field]: guard.message } } : {}),
-    message: guard.message,
-  };
-}
-
-/**
  * ============================================================================
  * 🔴 납기요청일을 고치면 **수리 건의 고객 요청 납기일도 함께** (2026-10-30)
  * ============================================================================
@@ -796,9 +741,6 @@ export async function updateDomesticOrder(params: {
         // 🔴 묶기가 본다 — 이 저장이 **가리키는 수리 건 자체를 바꾸는 중**이면
         // 날짜를 밀어 넣지 않는다(applyRepairCaseDueDateLink 머리말).
         repairCaseId: domesticOrders.repairCaseId,
-        // 🔴 **완료 잠금이 본다**(2026-11-08) — 줄 전체가 완료면 이 저장은 통째로
-        //    거절된다(아래 checkCompletionLock).
-        completedAt: domesticOrders.completedAt,
       })
       .from(domesticOrders)
       .where(and(eq(domesticOrders.id, params.id), eq(domesticOrders.isDeleted, false)))
@@ -832,16 +774,6 @@ export async function updateDomesticOrder(params: {
       fields: params.fields,
     });
     if (badRows) return badRows;
-
-    // 🔴 **완료된 것은 잠근다**(2026-11-08 사용자 결정). 바로 위 울타리 **뒤**에서
-    //    본다 — 줄이 줄어드는 저장은 그쪽이 먼저 거절해야 회차 자리가 안 밀린다
-    //    (그 도메인 파일의 「자리로 잰다」).
-    const locked = checkCompletionLock({
-      lineCompletedAt: current.completedAt,
-      storedRows: previousRows,
-      fields: params.fields,
-    });
-    if (locked) return locked;
 
     const [updated] = await tx
       .update(domesticOrders)
@@ -1212,17 +1144,12 @@ export async function setDomesticOrderDueDateRowCompletion(params: {
     // 🔵 「오늘」은 출하 완료 자동 기록과 **같은 방식으로** 만든다
     //    (mutations/workflow-transitions.ts 의 `shippedOn`). 두 자동 기록이 서로 다른
     //    방식으로 날짜를 만들면 같은 날 찍힌 두 값이 하루 어긋날 수 있다.
-    // 🔴 **`toKstDateOnly` 다**(2026-11-08 고침). 전에는 `toISOString().slice(0, 10)`
-    //    이었는데 그것은 **UTC 날짜**라, 한국 시간 00:00~09:00 사이에 [1차 완료]를
-    //    누르면 **어제 날짜가 납품일로 찍혔다.** 오류도 경고도 없고 날짜만 하루
-    //    어긋나므로, 나중에 그 줄을 보는 사람은 그냥 잘못 적힌 값으로 읽는다.
-    //    🔵 손으로 고치는 경로가 이미 이 함수를 쓰고 있다(mutations/repair-cases.ts).
     // 🔵 **수리 건 쪽으로 밀지 않는다** — 이 길은 기타건 전용이라(바로 위 울타리)
     //    맞출 수리 건이 애초에 없다.
     const deliveredStamp = params.completed
       ? resolveDueDateRowCompletionDeliveredPlan({
           currentDeliveredDate: rows[index].deliveredDate,
-          today: toKstDateOnly(new Date()),
+          today: new Date().toISOString().slice(0, 10),
         })
       : { kind: "NONE" as const };
 
