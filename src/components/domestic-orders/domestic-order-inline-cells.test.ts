@@ -143,9 +143,14 @@ test("납기요청일은 표에서 눌러 고친다 — 못 고치는 사람에�
   // 🔴 2026-10-30 에 프롭이 하나 늘었다(onRequestedDueDateNotLinked) — 수리 건이 못
   //    따라갔을 때의 알림을 **화면 위쪽**이 띄우게 올려 보내는 길이다. 여기 적어 두는
   //    까닭: 빠뜨리면 타입이 막지만, **엉뚱한 상태에 묶는 것**은 타입이 안 막는다.
+  // 🔵 **2026-11-08 에 여는 열쇠의 이름만 바뀌었다** — `canEdit` → `rowEditable`
+  //    (= `canEdit && !completed`). 완료된 줄은 어떤 칸도 못 고친다는 사용자 결정이
+  //    생겼고, 이 시험이 지키는 것은 그대로다: **고칠 수 있는 사람에게는 이 칸이
+  //    편집칸으로 열리고, 못 고치는 사람에게는 같은 글자만 보인다.**
+  //    🔵 잠금 자체는 domestic-order-completion-lock-screens.test.ts 가 잰다.
   assert.match(
     tableBody,
-    /\{canEdit \? \( <DomesticOrderDueDatesCell row=\{row\} displayText=\{<DueDateCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" numeric="tabular-nums" onRequestedDueDateNotLinked=\{setRequestedDueDateNotLinked\} \/> \) : \( <DueDateCellContent row=\{row\} \/> \)\}/
+    /\{rowEditable \? \( <DomesticOrderDueDatesCell row=\{row\} displayText=\{<DueDateCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" numeric="tabular-nums" onRequestedDueDateNotLinked=\{setRequestedDueDateNotLinked\} \/> \) : \( <DueDateCellContent row=\{row\} \/> \)\}/
   );
 });
 
@@ -173,9 +178,10 @@ test("납기요청일은 카드에서도 눌러 고친다 — 좁은 화면이�
   );
   // 🔴 표와 **같은 프롭**을 받아야 한다 — 카드에서 고친 저장만 알림이 안 뜨면,
   //    좁은 화면에서는 수리 건이 안 따라간 것을 아무도 모른다(2026-10-30).
+  // 🔵 여는 열쇠의 이름은 2026-11-08 에 `rowEditable` 이 되었다(위 표 쪽 주석).
   assert.match(
     cardRender,
-    /\{canEdit && field\.dueDatesEdit \? \( (\/\/[^<]*)?<DomesticOrderDueDatesCell row=\{row\} displayText=\{field\.of\(row\)\} wrapping=\{field\.dueDatesEdit\.wrapping\} onRequestedDueDateNotLinked=\{setRequestedDueDateNotLinked\} \/>/
+    /\{rowEditable && field\.dueDatesEdit \? \( (\/\/[^<]*)?<DomesticOrderDueDatesCell row=\{row\} displayText=\{field\.of\(row\)\} wrapping=\{field\.dueDatesEdit\.wrapping\} onRequestedDueDateNotLinked=\{setRequestedDueDateNotLinked\} \/>/
   );
 });
 
@@ -242,14 +248,17 @@ test("표의 납기요청일 줄들은 버튼 안에 들어갈 수 있는 모양
 const deliveriesCell = read("src/components/domestic-orders/DomesticOrderDeliveriesCell.tsx");
 
 test("🔴 납품일·납품자는 표에서 눌러 고친다 — 두 칸이 같은 편집칸을 연다", () => {
+  // 🔵 **2026-11-08 에 여는 열쇠의 이름만 바뀌었다**(`canEdit` → `rowEditable`) —
+  //    완료된 줄은 어떤 칸도 못 고친다는 사용자 결정이 생겼다. 이 시험이 지키는 것은
+  //    그대로다: 고칠 수 있는 사람에게 두 칸이 **같은 편집칸**을 연다.
   assert.match(
     tableBody,
-    /\{canEdit \? \( <DomesticOrderDeliveriesCell row=\{row\} displayText=\{<DeliveredDateCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" numeric="tabular-nums" onLinkNotice=\{setRequestedDueDateNotLinked\} \/> \) : \( <DeliveredDateCellContent row=\{row\} \/> \)\}/,
+    /\{rowEditable \? \( <DomesticOrderDeliveriesCell row=\{row\} displayText=\{<DeliveredDateCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" numeric="tabular-nums" onLinkNotice=\{setRequestedDueDateNotLinked\} \/> \) : \( <DeliveredDateCellContent row=\{row\} \/> \)\}/,
     "표의 납품일이 칸 편집이 아니다"
   );
   assert.match(
     tableBody,
-    /\{canEdit \? \( <DomesticOrderDeliveriesCell row=\{row\} displayText=\{<DeliveredByCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" onLinkNotice=\{setRequestedDueDateNotLinked\} \/> \) : \( <DeliveredByCellContent row=\{row\} \/> \)\}/,
+    /\{rowEditable \? \( <DomesticOrderDeliveriesCell row=\{row\} displayText=\{<DeliveredByCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" onLinkNotice=\{setRequestedDueDateNotLinked\} \/> \) : \( <DeliveredByCellContent row=\{row\} \/> \)\}/,
     "표의 납품자가 칸 편집이 아니다"
   );
 });
@@ -272,9 +281,10 @@ test("🔴 납품일·납품자는 카드에서도 눌러 고친다 — 좁은 �
   );
   // 🔴 표와 **같은 알림 상태**에 묶여야 한다 — 카드에서 고친 저장만 알림이 안 뜨면
   //    좁은 화면에서는 수리 건이 안 따라간 것을 아무도 모른다.
+  // 🔵 여는 열쇠의 이름은 2026-11-08 에 `rowEditable` 이 되었다(위 표 쪽 주석).
   assert.match(
     cardRender,
-    /: canEdit && field\.deliveriesEdit \? \( (\/\/[^<]*)?<DomesticOrderDeliveriesCell row=\{row\} displayText=\{field\.of\(row\)\} wrapping=\{field\.deliveriesEdit\.wrapping\} onLinkNotice=\{setRequestedDueDateNotLinked\} \/>/
+    /: rowEditable && field\.deliveriesEdit \? \( (\/\/[^<]*)?<DomesticOrderDeliveriesCell row=\{row\} displayText=\{field\.of\(row\)\} wrapping=\{field\.deliveriesEdit\.wrapping\} onLinkNotice=\{setRequestedDueDateNotLinked\} \/>/
   );
 });
 

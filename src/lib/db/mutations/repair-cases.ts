@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, isNull, like, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, like, sql } from "drizzle-orm";
 import { db } from "../client";
 import {
   domesticOrderDueDates,
@@ -30,6 +30,7 @@ import {
   type RequestedDueDateLinkOutcome,
   type RequestedDueDateLinkPlan,
 } from "@/lib/domain/requested-due-date-link";
+import { domesticOrderLinkedFieldLockedMessage } from "@/lib/domain/domestic-order-completion-lock";
 import type { DeliveredDateLinkOutcome } from "@/lib/domain/delivered-date-link";
 import {
   deliveredLinkOutcomeOf,
@@ -591,6 +592,16 @@ async function linkProductModelIfMissing(
 export type UpdateRepairCaseResultCode =
   | "NOT_FOUND"
   | "CONFLICT"
+  /**
+   * 🔴 **내자 정리에서 완료된 줄과 묶인 칸이라 고칠 수 없다**(2026-11-08 사용자 결정
+   * — 「이건 수리건과 연동되는 내용들도 마찬가지야」). 막히는 칸은 **정확히 둘**이다:
+   * `customerRequestedDueDate` · `actualShipmentDate`.
+   *
+   * 🔴 **VALIDATION_ERROR 로 접지 않았다.** 화면이 이 거절에만 **읽고 닫는 팝업**을
+   * 띄워야 하는데(사용자가 그 문장을 못 박았다), 입력 오류와 한 코드로 묶이면 칸 밑
+   * 빨간 줄과 구분할 수 없다. 가르는 것은 언제나 코드이지 글자가 아니다.
+   */
+  | "DOMESTIC_ORDER_COMPLETED"
   | "REFERENCE_NOT_FOUND"
   | "REFERENCE_MISMATCH"
   | "ENGINEER_NOT_ALLOWED"
@@ -786,6 +797,62 @@ async function planDomesticOrderDueDateLink(
 }
 
 /**
+ * 🔴 **내자 정리와 묶여 있어 그 줄이 완료되면 함께 잠기는 칸** (2026-11-08).
+ *
+ * 🔴 **정확히 둘이고, 넓히지 마라.** 그 둘만 내자 줄과 **양방향으로** 묶여 있다
+ * (domain/requested-due-date-link.ts · domain/delivered-date-link.ts). 수리 내용 ·
+ * 부품 · 보고서 · 담당 엔지니어 같은 **A/S 본업은 그대로 돌아가야 한다** — 거기까지
+ * 막으면 내자 정리의 완료 한 번이 수리 업무를 통째로 세운다.
+ */
+const DOMESTIC_ORDER_LOCKED_FIELDS = ["customerRequestedDueDate", "actualShipmentDate"] as const;
+
+/**
+ * 이 건에 붙은 **완료된 내자 줄**을 하나 찾는다. 없으면 null — 그때는 잠글 일이 없다.
+ *
+ * ── 🔴 왜 **mutation 안**인가(역할 표가 아니라) ─────────────────────────
+ * 「내자 줄이 완료인가」는 **DB 를 읽어야 아는 값**이라 역할 표
+ * (auth/repair-case-edit-authorization.ts)가 답할 수 있는 물음이 아니다. 바로 아래
+ * 실제 출하일의 「이미 출하 완료된 건만 고칠 수 있다」도 같은 성질이라 같은 자리에
+ * 같은 모양으로 서 있다.
+ * 🔴 **`isBlockedByShipmentLock` 을 되살리는 것이 아니다** — 그쪽은 2026-10 에 뒤집힌
+ * 「출하 완료된 건은 통째로 읽기 전용」이고(지금 언제나 거짓이다), 이쪽은 **다른
+ * 잠금**이다(domain/domestic-order-completion-lock.ts 머리말).
+ *
+ * ── 🔴 **살아 있는 줄만** 센다 ─────────────────────────────────────────
+ * 휴지통에 든 줄이 이 두 칸을 잠그면, 화면 어디에도 없는 줄이 수리 건 상세를 막는
+ * 셈이 된다(planDomesticOrderDueDateLink · 발행일 저장이 같은 규칙을 쓴다).
+ *
+ * ── 🔴 **한 줄이라도 완료면 막는다** ───────────────────────────────────
+ * 한 건에 내자 줄이 여럿일 수 있다. 그때 「묶기가 실제로 닿는 줄만」으로 좁히지 않은
+ * 까닭: 묶기가 닿는 조건은 「줄 하나 · 날짜 하나」라서(그 도메인 판정의 WRITE), 줄이
+ * 여럿이면 어차피 아무 줄도 안 따라간다 — 그런 상태에서 이 칸만 바꾸면 **완료된 줄에
+ * 적힌 날짜와 수리 건의 날짜가 영영 어긋난 채로 굳는다.** 잠그는 쪽이 맞다.
+ * 🔵 좁히고 싶으면 그때는 「어느 줄이 막았는지」를 사람에게 말할 수 있어야 한다 —
+ * 지금 거절 문장이 발주서번호를 함께 적는 것이 그 준비다.
+ *
+ * 🔵 **잠그지 않는다**(`FOR UPDATE` 를 안 건다). 이 읽기는 **거절할지만** 정하고,
+ * 통과하는 길에서는 바로 아래 묶기가 그 줄들을 제 차례에 잠근다 — 여기서 먼저 잡으면
+ * 잠그는 차례가 「내자 줄 먼저, 수리 건 나중」이라는 이 파일의 규율과 어긋난다.
+ */
+async function findCompletedDomesticOrderLine(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  repairCaseId: string
+): Promise<{ purchaseOrderNumber: string | null } | null> {
+  const [line] = await tx
+    .select({ purchaseOrderNumber: domesticOrders.purchaseOrderNumber })
+    .from(domesticOrders)
+    .where(
+      and(
+        eq(domesticOrders.repairCaseId, repairCaseId),
+        eq(domesticOrders.isDeleted, false),
+        isNotNull(domesticOrders.completedAt)
+      )
+    )
+    .limit(1);
+  return line ?? null;
+}
+
+/**
  * 🔴 **실제 출하일 → 내자 납품일 묶기는 이 파일에 없다**(2026-11-08).
  *
  * 그 방향을 타는 통로가 **둘**이라서다 — 여기(인수정보에서 사람이 고치는 길)와
@@ -909,6 +976,46 @@ export async function updateRepairCase(
       | null = null;
 
     if (section === "INTAKE") {
+      // ── 🔴 **내자 정리에서 완료된 줄과 묶인 두 칸은 잠긴다** (2026-11-08) ────
+      // 사용자 결정: 「이건 수리건과 연동되는 내용들도 마찬가지야. 만약 수리건
+      // 상세에서 내용을 바꾸려 한다면 [내자정리에서 완료 상태이므로 수정이
+      // 불가능합니다.]라는 팝업이 뜨도록 해줘.」
+      //
+      // 🔴 **이 제출에 그 두 칸이 실렸을 때만 읽는다.** 섹션 전체를 막으면 같은
+      // 구역의 고객사 · 인수일 · 보고서번호 · 우선순위까지 함께 서고, 그것은
+      // 사용자가 말한 「연동되는 내용」이 아니다. 질의도 그만큼 덜 돈다.
+      // 🔴 **PRODUCT · FAULT_SERVICE 구역은 쳐다보지도 않는다** — 수리 내용 · 부품 ·
+      // 보고서는 A/S 본업이라 내자 정리의 완료와 아무 상관이 없다.
+      //
+      // 🔴 **「바꾸려 할 때만」 막는다 — 실렸다고 막지 않는다.** 인수정보 폼은 고칠 수
+      // 있는 칸을 **늘 함께 보내므로**(IntakeInfoEditForm 의 handleSubmit), 실렸다는
+      // 이유로 막으면 출하 완료된 건에서는 **보고서번호 하나 고치는 저장까지** 막힌다.
+      // 같은 함정을 같은 방식으로 피하는 선례가 바로 옆에 있다 — 견적서가 붙은 줄의
+      // 견적발행일(mutations/domestic-order-issue-dates.ts 의 QUOTE_LOCKED).
+      const storedLockedValues: Record<(typeof DOMESTIC_ORDER_LOCKED_FIELDS)[number], string | null> = {
+        customerRequestedDueDate: current.customerRequestedDueDate,
+        actualShipmentDate: current.actualShipmentDate,
+      };
+      const lockedFields = DOMESTIC_ORDER_LOCKED_FIELDS.filter(
+        (field) => field in fields && fields[field] !== storedLockedValues[field]
+      );
+      if (lockedFields.length > 0) {
+        const completedLine = await findCompletedDomesticOrderLine(tx, repairCaseId);
+        if (completedLine) {
+          // 🔴 글자는 도메인 한 곳이 만든다 — **어느 줄인지**까지 말해야 사람이
+          // 무엇을 풀러 가야 하는지 안다(그 파일의 「어디서 왔는지」).
+          const message = domesticOrderLinkedFieldLockedMessage(completedLine);
+          return {
+            ok: false,
+            code: "DOMESTIC_ORDER_COMPLETED",
+            // 보낸 칸마다 같은 글을 단다 — 둘을 한 번에 보낸 제출에서 한쪽 칸만
+            // 빨개지면 나머지 하나는 저장된 것으로 읽힌다.
+            fieldErrors: Object.fromEntries(lockedFields.map((field) => [field, message])),
+            message,
+          };
+        }
+      }
+
       let effectiveCustomerId = current.customerId;
       const customerIsChanging = "customerId" in fields || "newCustomerName" in fields;
       if (customerIsChanging) {

@@ -85,6 +85,20 @@ export function useSectionEditSubmit(params: {
    * 성공 팝업이 가린다(components/common/NoticePopup.tsx 머리말).
    */
   onRequestedDueDateNotLinked?: (message: string) => void;
+  /**
+   * 🔴 **내자 정리에서 완료된 줄과 묶여 있어 저장이 막혔다**(2026-11-08 사용자 결정 —
+   * 「[내자정리에서 완료 상태이므로 수정이 불가능합니다.]라는 팝업이 뜨도록 해줘」).
+   *
+   * 바로 위 짝과 **정반대의 상황**이다: 저쪽은 **저장이 됐는데** 내자가 못 따라간
+   * 것이고, 이쪽은 **아무것도 저장되지 않았다.** 그래서 폼을 닫지 않는다 — 사람이
+   * 적어 둔 값이 그대로 남아 있어야 완료를 풀고 와서 다시 누를 수 있다.
+   *
+   * 🔴 가르는 것은 **코드**(`DOMESTIC_ORDER_COMPLETED`)다. 글자를 견주지 않는다.
+   * 🔴 **넘기지 않아도 폼은 지금까지와 똑같이 동작한다** — 그때는 평소 오류 자리에
+   * 그 문장이 그대로 뜬다(아래 기본 길). 고객 요청 납기일·실제 출하일을 보내는 폼
+   * 하나만 넘기면 된다(IntakeInfoEditForm).
+   */
+  onDomesticOrderCompleted?: (message: string) => void;
 }) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -116,8 +130,16 @@ export function useSectionEditSubmit(params: {
           setSubmitError({ message: result.message, draftText: buildDraftText(fields) });
           return;
         }
+        // 🔴 **내자 정리에서 완료된 줄과 묶여 막혔다** — 읽고 닫아야 하는 알림이다
+        // (2026-11-08 사용자 결정의 그 문장). 칸 밑 빨간 줄은 **함께** 남긴다:
+        // 어느 칸이 막혔는지는 거기가 말하고, 무엇을 먼저 눌러야 하는지는 팝업이
+        // 말한다. 🔵 폼은 닫지 않는다 — 아무것도 저장되지 않았고, 사람이 적어 둔
+        // 값이 사라지면 완료를 풀고 와서 처음부터 다시 적어야 한다.
         setFieldErrors(result.fieldErrors ?? {});
         setSubmitError(result.message);
+        if (result.code === "DOMESTIC_ORDER_COMPLETED" && params.onDomesticOrderCompleted) {
+          params.onDomesticOrderCompleted(result.message);
+        }
         return;
       }
 

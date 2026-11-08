@@ -99,6 +99,7 @@ export default function IntakeInfoEditForm({
   referenceData,
   borrowedRequestedDueDate,
   onRequestedDueDateNotLinked,
+  onDomesticOrderCompleted,
   onDone,
 }: {
   resolved: EffectiveRepairCase;
@@ -125,6 +126,15 @@ export default function IntakeInfoEditForm({
    * (RepairCaseDetailView).
    */
   onRequestedDueDateNotLinked: (message: string) => void;
+  /**
+   * 🔴 **내자 정리에서 완료된 줄과 묶여 저장이 막혔다**(2026-11-08). 막히는 칸은 이
+   * 폼의 **고객 요청 납기일 · 실제 출하일** 둘뿐이라 이 폼만 받는다.
+   *
+   * 바로 위 짝과 달리 **폼이 닫히지 않는다**(아무것도 저장되지 않았다). 그래도 띄우는
+   * 일은 상세 화면이 한다 — 이 폼은 `<dl>` 격자 안에 살아서, 읽어야 닫히는 알림이
+   * 여기서 태어나면 칸의 정렬을 물려받는다(RepairCaseDetailView 의 같은 판단).
+   */
+  onDomesticOrderCompleted: (message: string) => void;
   onDone: () => void;
 }) {
   const canEdit = (field: string) => editableFields.includes(field);
@@ -177,6 +187,9 @@ export default function IntakeInfoEditForm({
       // 🔴 고객 요청 납기일을 보내는 폼은 이 하나다 — 서버가 그 칸을 받은 저장에서만
       // 묶기 결과를 실어 보낸다(lib/db/mutations/repair-cases.ts).
       onRequestedDueDateNotLinked,
+      // 🔴 **잠긴 두 칸을 보내는 폼도 이 하나다** — 서버는 그 둘이 실제로 바뀌는
+      // 저장에서만 이 거절을 낸다(lib/db/mutations/repair-cases.ts).
+      onDomesticOrderCompleted,
     });
 
   const disabled = isSubmitting || isConflict;

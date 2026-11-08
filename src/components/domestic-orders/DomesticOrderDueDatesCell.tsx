@@ -37,6 +37,7 @@ import {
   domesticOrderAddDueDateBlockReason,
   domesticOrderRemoveDueDateBlockReason,
 } from "@/lib/domain/domestic-order-due-date-rows";
+import { domesticOrderDueDateRowEditBlockReason } from "@/lib/domain/domestic-order-completion-lock";
 import type { DomesticOrderListItem } from "@/lib/db/queries/domestic-orders";
 import { updateDomesticOrderAction } from "@/lib/server/actions/domestic-orders";
 import {
@@ -421,6 +422,15 @@ export default function DomesticOrderDueDatesCell({
             // title 과 줄 밑 안내로 **글로 보인다** — 까닭 없이 안 눌리는 단추는
             // 고장으로 읽힌다.
             const removeBlocked = removeBlockedReason(index);
+            // 🔴 **완료 처리된 회차는 그 줄의 값도 못 고친다**(2026-11-08 사용자 결정 —
+            //    「1차가 완료되면 1차와 관련된 내용들만 잠기도록」). 판정은 화면이 하지
+            //    않고 **서버의 울타리와 같은 함수**에 물어본다 — 두 곳이 따로 정하면
+            //    칸은 열리는데 저장이 거절된다.
+            // 🔵 **다른 회차는 그대로 고쳐진다** — 이 값이 줄마다 따로 서는 까닭이다.
+            const rowLocked = domesticOrderDueDateRowEditBlockReason({
+              rowOrder: index + 1,
+              row: line,
+            });
             return (
               <li key={line.key} className="flex flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -436,7 +446,10 @@ export default function DomesticOrderDueDatesCell({
                       max={DATE_INPUT_MAX}
                       className={editInputClass}
                       value={line.dueDate}
-                      disabled={disabled}
+                      // 🔴 완료된 회차는 잠긴다 — 까닭은 title 과 줄 밑 안내로 **글로
+                      // 보인다**(까닭 없이 안 열리는 칸은 고장으로 읽힌다).
+                      disabled={disabled || rowLocked !== null}
+                      title={rowLocked ?? undefined}
                       aria-label={`${LABEL} ${index + 1}`}
                       onChange={(event) => updateLine(line.key, { dueDate: event.target.value })}
                     />
@@ -446,7 +459,8 @@ export default function DomesticOrderDueDatesCell({
                       type="text"
                       className={editInputClass}
                       value={line.note}
-                      disabled={disabled}
+                      disabled={disabled || rowLocked !== null}
+                      title={rowLocked ?? undefined}
                       placeholder="메모 (예: 1차분)"
                       aria-label={`${LABEL} ${index + 1} 메모`}
                       autoComplete="off"
@@ -470,6 +484,12 @@ export default function DomesticOrderDueDatesCell({
                     **늘 보이는 한 줄**로 적는다(사용자 결정 5 의 「까닭이 글로
                     보인다」). 키보드만 쓰는 사람에게는 이것이 유일한 설명이다. */}
                 {removeBlocked !== null && <p className={cellHintClass}>{removeBlocked}</p>}
+                {/* 🔴 **완료된 회차가 왜 안 열리는지**도 늘 보이는 한 줄로 적는다
+                    (2026-11-08). 위 [삭제]와 같은 까닭이다 — title 은 마우스를 올려야
+                    보이고, 키보드만 쓰는 사람에게는 이 줄이 유일한 설명이다.
+                    🔵 두 줄이 함께 뜰 수 있다(완료된 회차는 지우지도 못한다). 그때
+                    말하는 것이 서로 다른 조작이라 겹치지 않는다. */}
+                {rowLocked !== null && <p className={cellHintClass}>{rowLocked}</p>}
                 {lineErrors[errorKey] && <p className={editErrorClass}>{lineErrors[errorKey]}</p>}
               </li>
             );

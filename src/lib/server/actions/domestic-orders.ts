@@ -729,7 +729,13 @@ export type RepairCaseDomesticOrderIssueDatesResultCode =
   /** 줄이 둘 이상이라 여기서는 고칠 수 없다 — 내자 정리로 보낸다. */
   | "MULTIPLE_ROWS"
   /** 견적서가 연결된 줄이라 견적서 발행일을 바꿀 수 없다. */
-  | "QUOTE_LOCKED";
+  | "QUOTE_LOCKED"
+  /**
+   * 🔴 **그 내자 줄이 완료 상태다**(2026-11-08 사용자 결정 — 「해제하지 않으면
+   * 내자정리의 어떤 내용도 수정할 수 없도록」). 관문은 서버 한 곳이고
+   * (mutations/domestic-order-issue-dates.ts) 이 액션은 그 답을 그대로 나른다.
+   */
+  | "LINE_COMPLETED";
 
 export type RepairCaseDomesticOrderIssueDatesActionResult =
   | { ok: true; id: string; version: number; created: boolean }

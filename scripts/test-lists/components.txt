@@ -1288,3 +1288,14 @@ src/components/domestic-orders/detail/domestic-order-due-date-row-approval-scree
 # 단추 옆에만 뜬다.** 🔴 그리고 **회차 완료가 눈에 보이는가**(「N차 완료 ✓」) — 단추 글자와
 # 헷갈리지 않도록 채운 바탕과 ✓ 를 함께 본다.
 src/components/approvals/final-shipment-approved-badge-screens.test.tsx
+
+# 🔴 **완료된 것은 잠근다 — 화면 쪽**(2026-11-08 사용자 결정). 재는 것 넷:
+# ① 완료된 줄의 자리편집 칸 열넷과 [수정]이 안 열리는가 ↔ 🔴 **[완료 해제]는 그대로
+# 열리는가**(거기까지 막으면 영영 못 고치는 문이 된다) · ② 완료된 회차의 입력칸 넷만
+# 잠기고 까닭이 **늘 보이는 한 줄**로 뜨는가(title 만으로는 모자라다) · ③ [N차 해제]가
+# 한 번의 클릭으로 안 되고, 그 창이 **수리 건 이야기를 하지 않는가**(기타건 전용이라
+# 일어나지 않을 일이다) ↔ 🔵 **[완료 처리]는 그대로 바로 보내는가** · ④ 수리 건 상세가
+# 서버가 준 **코드**로 가려 읽고 닫는 알림을 띄우고 **폼은 안 닫는가**.
+# 🔵 화면 셋 다 서버 액션을 물고 있어 이 환경에서 그려 볼 수 없다 — 주석을 걷어낸 원본을
+# 글자로 읽는다(이웃 misc-case-completion-blocked-notice.test.ts 와 같은 방법·같은 까닭).
+src/components/domestic-orders/domestic-order-completion-lock-screens.test.ts

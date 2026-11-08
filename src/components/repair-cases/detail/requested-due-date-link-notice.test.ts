@@ -45,7 +45,14 @@ test("🔴 묶기 결과가 훅 → 폼 → 구역 → 상세 화면까지 **끊
     flat(hook),
     /const linkMessages = \[result\.requestedDueDateLink, result\.deliveredDateLink\] \.filter\(\(link\) => link !== undefined && !link\.linked\) \.map\(\(link\) => \(link as \{ message: string \}\)\.message\); if \(linkMessages\.length > 0 && params\.onRequestedDueDateNotLinked\) \{ params\.onRequestedDueDateNotLinked\(linkMessages\.join\("\\n\\n"\)\); return; \}/
   );
-  assert.match(flat(intakeForm), /savedPopup: REPAIR_CASE_SAVED_POPUP, [^;]*onRequestedDueDateNotLinked, \}\);/);
+  // 🔵 **2026-11-08 에 그 뒤로 한 칸이 더 붙었다** — 내자 줄이 완료라 저장이 막혔을
+  //    때의 통로다(onDomesticOrderCompleted). 이 시험이 지키는 것은 그대로다: 이 폼이
+  //    **묶기 알림 통로를 훅에 넘긴다.** 그래서 끝을 `});` 로 못 박지 않고, 그 이름이
+  //    같은 훅 호출 안에 있는지만 본다(옆에 무엇이 더 붙어도 이 단언의 뜻은 같다).
+  assert.match(
+    flat(intakeForm),
+    /savedPopup: REPAIR_CASE_SAVED_POPUP, [^;]*onRequestedDueDateNotLinked,[^;]*\}\);/
+  );
   assert.match(intakeForm, /onRequestedDueDateNotLinked: \(message: string\) => void;/);
   assert.match(
     flat(intakeSection),

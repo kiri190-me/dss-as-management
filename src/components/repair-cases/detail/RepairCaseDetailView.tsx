@@ -229,6 +229,16 @@ export default function RepairCaseDetailView({
    * 닫을 때까지 떠 있어야 한다.
    */
   const [requestedDueDateNotLinked, setRequestedDueDateNotLinked] = useState<string | null>(null);
+  /**
+   * 🔴 **내자 정리에서 완료된 줄과 묶여 저장이 막혔을 때**의 글(2026-11-08 사용자
+   * 결정 — 「[내자정리에서 완료 상태이므로 수정이 불가능합니다.]라는 팝업이 뜨도록」).
+   *
+   * 🔴 **위 짝과 상태를 나눈 까닭은 할 말이 정반대이기 때문**이다: 저쪽은 「이 건은
+   * 저장됐는데 내자가 안 따라갔다」이고, 이쪽은 **「아무것도 저장되지 않았다」**이다.
+   * 한 상자에 섞으면 제목이 어느 쪽도 가리키지 못한다. 둘이 동시에 뜨는 길은 없다 —
+   * 한 저장은 성공했거나 막혔거나 둘 중 하나다.
+   */
+  const [domesticOrderCompletedBlock, setDomesticOrderCompletedBlock] = useState<string | null>(null);
 
   if (!isHydrated || !effective) {
     return <LoadingNotice />;
@@ -272,6 +282,18 @@ export default function RepairCaseDetailView({
           onClose={() => setRequestedDueDateNotLinked(null)}
         />
       )}
+      {/* 🔴 **내자 정리에서 완료된 줄과 묶여 막혔다**(2026-11-08). 이때는 **아무것도
+          저장되지 않았다** — 0.5초 뒤 사라지는 저장 팝업으로는 전할 수 없는 사실이라
+          읽고 닫는 알림이다(common/NoticePopup.tsx 머리말). 첫 줄은 사용자가 못 박은
+          문장 그대로이고, 어느 줄을 풀어야 하는지는 서버가 준 글이 말한다
+          (domain/domestic-order-completion-lock.ts 가 그 글의 주인이다). */}
+      {domesticOrderCompletedBlock !== null && (
+        <NoticePopup
+          title="내자 정리에서 완료된 줄입니다"
+          lines={[domesticOrderCompletedBlock]}
+          onClose={() => setDomesticOrderCompletedBlock(null)}
+        />
+      )}
       {resolved.source === "DATABASE" && effective.billingType === "PENDING_DECISION" && (
         <PendingBillingDecisionCard
           repairCaseId={effective.id}
@@ -289,6 +311,7 @@ export default function RepairCaseDetailView({
           isDueDateNear={isDueDateNear}
           isDueDateInverted={isDueDateInverted}
           onRequestedDueDateNotLinked={setRequestedDueDateNotLinked}
+          onDomesticOrderCompleted={setDomesticOrderCompletedBlock}
           onStartEdit={() => setEditingSection("INTAKE")}
           onDone={handleDone}
         />
