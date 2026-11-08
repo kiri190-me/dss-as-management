@@ -23,6 +23,7 @@ import {
   type DomesticOrderDeliveredLinkWork,
 } from "./domestic-order-delivered-link";
 import type { DeliveredDateLinkOutcome } from "@/lib/domain/delivered-date-link";
+import { toKstDateOnly } from "@/lib/domain/date-only";
 import type { HoldState } from "@/lib/domain/local/workflow/workflow-types";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { WorkflowActionCode } from "@/lib/validation/workflow-transition-input";
@@ -323,7 +324,13 @@ export async function transitionWorkflow(
         setValues.currentWorkflowStepId = toStepId;
         if (actionCode === "SHIPMENT_COMPLETED") {
           setValues.isLocked = true;
-          const shippedOn = new Date().toISOString().slice(0, 10);
+          // 🔴 **`toKstDateOnly` 다**(2026-11-09 고침). 전에는 `toISOString().slice(0, 10)`
+          //    이었는데 그것은 **UTC 날짜**라, 한국 시간 00:00~09:00 사이에 [출하 완료]를
+          //    누르면 **어제 날짜가 찍혔다.** 손으로 적는 경로는 처음부터 toKstDateOnly 를
+          //    쓰고 있어, 같은 건의 두 값이 하루 어긋날 수 있었다.
+          // 🔴 **아래 내자 줄 납품일과 같은 값이어야 한다** — 한쪽만 고치면 같은 날 찍힌
+          //    두 값이 어긋난다(mutations/domestic-orders.ts 의 회차 완료 자리도 같다).
+          const shippedOn = toKstDateOnly(new Date());
           setValues.actualShipmentDate = shippedOn;
           // 🔴 같은 날짜를 연결된 내자 줄의 납품일에도 찍는다(사용자 결정 6).
           // 🔵 `trigger` 가 SHIPMENT_COMPLETED 라 **이미 사람이 적어 둔 납품일은

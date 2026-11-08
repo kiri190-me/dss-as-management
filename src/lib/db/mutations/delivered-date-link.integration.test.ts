@@ -20,6 +20,7 @@ import {
   workflowTemplates,
   workflowVersions,
 } from "../schema";
+import { toKstDateOnly } from "@/lib/domain/date-only";
 import { createRepairCase, updateRepairCase } from "./repair-cases";
 import { createDomesticOrder, updateDomesticOrder } from "./domestic-orders";
 import {
@@ -283,9 +284,15 @@ async function grantFinalShipmentApproval(caseId: string) {
   assert.equal(shipmentDecision.ok, true, JSON.stringify(shipmentDecision));
 }
 
-/** 오늘(KST 가 아니라 전이가 쓰는 그 식 그대로) — 출하 완료가 찍는 날짜. */
+/**
+ * 오늘 — 전이가 쓰는 그 식 그대로. 🔴 **`toKstDateOnly` 다**(2026-11-09 고침).
+ * 전에는 `toISOString().slice(0, 10)` 이었는데 그것은 UTC 날짜라, 한국 시간
+ * 00:00~09:00 사이에 이 시험을 돌리면 서버가 찍는 KST 날짜와 **하루가 어긋나
+ * 깨졌다.** 서버와 같은 함수를 부르는 것이 답이다 — 식을 베껴 적으면 한쪽만
+ * 고쳤을 때 또 어긋난다.
+ */
 function shipmentStampToday(): string {
-  return new Date().toISOString().slice(0, 10);
+  return toKstDateOnly(new Date());
 }
 
 before(async () => {

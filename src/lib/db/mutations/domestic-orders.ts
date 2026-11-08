@@ -32,6 +32,7 @@ import {
   resolveRepairCaseShipmentWriteThrough,
   type DeliveredDateLinkOutcome,
 } from "@/lib/domain/delivered-date-link";
+import { toKstDateOnly } from "@/lib/domain/date-only";
 import { checkDomesticOrderDueDateRows } from "@/lib/domain/domestic-order-due-date-rows";
 import { getCurrentShipmentApprovalRouteChain } from "../queries/shipment-approval-routes";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
@@ -1149,7 +1150,12 @@ export async function setDomesticOrderDueDateRowCompletion(params: {
     const deliveredStamp = params.completed
       ? resolveDueDateRowCompletionDeliveredPlan({
           currentDeliveredDate: rows[index].deliveredDate,
-          today: new Date().toISOString().slice(0, 10),
+          // 🔴 **`toKstDateOnly` 다**(2026-11-09 고침). 전에는 `toISOString().slice(0, 10)`
+          //    이었는데 그것은 **UTC 날짜**라, 한국 시간 00:00~09:00 사이에 [N차 완료]를
+          //    누르면 **어제 날짜가 납품일로 찍혔다.**
+          // 🔴 **출하 완료 전이와 같은 값이어야 한다**(mutations/workflow-transitions.ts).
+          //    둘은 같은 사실을 두 표에 적는다 — 한쪽만 고치면 하루 어긋난다.
+          today: toKstDateOnly(new Date()),
         })
       : { kind: "NONE" as const };
 

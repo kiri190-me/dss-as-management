@@ -16,6 +16,7 @@ import {
   shipmentApprovalRoutes,
   users,
 } from "../schema";
+import { toKstDateOnly } from "@/lib/domain/date-only";
 import {
   createDomesticOrder,
   setDomesticOrderCompletion,
@@ -834,8 +835,12 @@ describe("㉧ 완료 표시는 줄을 저장해도 살아남는다 — 그리고
  * ============================================================================
  */
 describe("㉨ 회차 [완료 처리]가 납품일을 찍는다", () => {
-  /** 서버가 쓰는 것과 **같은 방식**의 오늘 — mutation 이 toISOString 으로 만든다. */
-  const today = () => new Date().toISOString().slice(0, 10);
+  /**
+   * 서버가 쓰는 것과 **같은 방식**의 오늘 — mutation 이 `toKstDateOnly` 로 만든다
+   * (2026-11-09 고침). 전에는 `toISOString().slice(0, 10)` 을 베껴 적었는데 그것은
+   * UTC 날짜라, 한국 시간 00:00~09:00 사이에 돌리면 **하루가 어긋나 깨졌다.**
+   */
+  const today = () => toKstDateOnly(new Date());
 
   test("🔴 1차를 완료하면 1차 줄에만 오늘이 찍힌다", async () => {
     await saveDomesticRoute([approverId]);
