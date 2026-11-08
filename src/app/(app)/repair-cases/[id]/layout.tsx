@@ -6,7 +6,9 @@ import { isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
 import { readSession } from "@/lib/auth/session";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
+import { loadRepairCaseFinalShipmentApprovalStates } from "@/lib/db/queries/repair-case-approvals";
 import { listDomesticOrderDueDatesForRepairCase } from "@/lib/db/queries/domestic-orders";
+import { isFinalShipmentApproved } from "@/lib/domain/final-shipment-approval-badge";
 import { isRepairCaseDueDateNear } from "@/lib/domain/notifications";
 import DetailHeader from "@/components/repair-cases/detail/DetailHeader";
 import DetailTabs from "@/components/repair-cases/detail/DetailTabs";
@@ -122,6 +124,30 @@ export default async function RepairCaseDetailLayout({
     new Date()
   );
 
+  /**
+   * 🔴 머리 카드의 「[최종 출하 승인 완료]」 배지(2026-11-08 사용자 요구 —
+   * 「현황판과 **상세페이지 헤드**, 내자정리의 [완료 처리]버튼의 오른쪽」).
+   *
+   * 🔴 **여기서 읽어야 한다** — 바로 위 「납기 임박」과 같은 사정이다. 이 카드는
+   * 탭 줄보다 위에서 그려지므로 어느 탭에서도 같은 배지가 보여야 하는데, 승인
+   * 자료를 읽는 곳은 [승인] 탭뿐이었다. 레이아웃이 모르면 **탭을 옮기면 배지가
+   * 사라지는** 건이 생긴다.
+   *
+   * 🔵 **전체 A/S 현황과 같은 함수**를 부른다 — 건 하나짜리 묶음이다. 목록 쪽과
+   * 판정이 갈릴 자리를 아예 없애려는 것이고(같은 건이 목록에서는 붙고 상세에서는
+   * 안 붙는 날이 오지 않게), 질의는 작은 인덱스 조회 하나다.
+   *
+   * mock/로컬 소스에는 결재 표 자체가 없다 — 위 내자 납기요청일과 같은 조건으로
+   * 거른다.
+   */
+  const finalShipmentApprovalStates =
+    resolved.source === "DATABASE"
+      ? await loadRepairCaseFinalShipmentApprovalStates([resolved.id])
+      : null;
+  const headerFinalShipmentApproved = isFinalShipmentApproved(
+    finalShipmentApprovalStates?.get(resolved.id) ?? null
+  );
+
   return (
     <div className="flex flex-col gap-4">
       {/* 🔴 탭 줄보다 **위**다 — 어느 탭을 눌러도 같은 카드가 그대로 남는다
@@ -133,6 +159,7 @@ export default async function RepairCaseDetailLayout({
         canEditReportNumber={canEditReportNumber}
         referenceData={referenceData}
         isDueDateNear={isDueDateNear}
+        isFinalShipmentApproved={headerFinalShipmentApproved}
       />
       <DetailTabs id={id} canViewQuotes={canViewQuotes} canViewPurchaseOrders={canViewPurchaseOrders} />
       {children}

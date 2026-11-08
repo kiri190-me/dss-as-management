@@ -11,6 +11,7 @@ import {
   StatusBadge,
   WorkflowOverrideBadge,
 } from "@/components/repair-cases/badges";
+import FinalShipmentApprovedBadge from "@/components/approvals/FinalShipmentApprovedBadge";
 import ContactFolderOpenButton from "@/components/repair-cases/detail/ContactFolderOpenButton";
 import EngineerEditCell from "@/components/repair-cases/detail/edit/EngineerEditCell";
 import ReportNumberEditCell from "@/components/repair-cases/detail/edit/ReportNumberEditCell";
@@ -103,6 +104,7 @@ export default function DetailHeader({
   canEditReportNumber,
   referenceData,
   isDueDateNear,
+  isFinalShipmentApproved = false,
 }: {
   resolved: ResolvedRepairCase;
   canEditEngineer: boolean;
@@ -119,6 +121,20 @@ export default function DetailHeader({
    * isRepairCaseDueDateNear).
    */
   isDueDateNear: boolean;
+  /**
+   * 🔴 「[최종 출하 승인 완료]」 배지(2026-11-08 사용자 요구 — 「현황판과 **상세페이지
+   * 헤드**, 내자정리의 [완료 처리]버튼의 오른쪽」).
+   *
+   * 🔴 **레이아웃이 재 온다** — 바로 위 `isDueDateNear` 와 같은 사정이다. 승인
+   * 상태는 이 건의 칸이 아니라 **다른 표의 최신 결재 행 + 이 건의 판 번호**로 나오는
+   * 파생값이고, 그 자료를 읽는 곳은 서버뿐이다([id]/layout.tsx). 판정도 새로 적지
+   * 않는다 — domain/final-shipment-approval-badge.ts 의 isFinalShipmentApproved
+   * 하나가 한다(`STALE` 에는 안 붙는 까닭이 그 파일에 있다).
+   *
+   * 🔵 **선택 인자다.** 넘기지 않으면 배지를 아예 그리지 않는다 — 이 카드를 값만
+   * 보려고 그려 보는 자리(시험·mock 소스)에서 승인 조회까지 세우게 만들지 않는다.
+   */
+  isFinalShipmentApproved?: boolean;
 }) {
   const uiText = useUiText();
   // 훅은 어떤 갈래에서도 같은 차례로 불려야 하므로 이른 반환보다 먼저 부른다.
@@ -184,6 +200,12 @@ export default function DetailHeader({
               2026-10-06 에 없앴고(아래 ⑤ 주석·detail-header-placement.test.ts),
               일곱째도 그 규율을 따른다. 색은 「납기 지연」과 갈라 둔다(badges.tsx). */}
           <DueDateNearBadge isDueDateNear={isDueDateNear} />
+          {/* 🔴 「[최종 출하 승인 완료]」도 **같은 묶음 안**이다 — 배지만 따로 서던
+              줄을 2026-10-06 에 없앴고(위 ⑤ 주석), 여덟째도 그 규율을 따른다.
+              🔵 **맨 뒤**에 둔다: 앞의 일곱이 「이 건이 지금 어떤 상태인가」를
+              말하고, 이것은 그 위에 얹히는 **결재 사실** 하나다. 색도 그래서
+              채운 진한 초록이다(그 파일 머리말 — 이웃과 겹치지 않는다). */}
+          <FinalShipmentApprovedBadge approved={isFinalShipmentApproved} />
         </div>
         {/* 🔴 값 알약 묶음 — 조각마다 연한 배경과 짧은 이름표를 쓴다. 가운뎃점
             구분자는 없다(알약이 가른다). 배경은 상태 배지가 쓰는 회색과 같은 단계고

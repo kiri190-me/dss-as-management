@@ -13,6 +13,7 @@ import {
   WorkflowOverrideBadge,
 } from "./badges";
 import RequestedDueDateValue from "./RequestedDueDateValue";
+import FinalShipmentApprovedBadge from "@/components/approvals/FinalShipmentApprovedBadge";
 import SelectAllCheckbox from "@/components/common/select-all-checkbox";
 import { preventShiftClickTextSelection, shiftKeyOf } from "@/lib/hooks/useShiftRangeSelection";
 
@@ -56,6 +57,22 @@ type RepairCaseTableProps = {
    * 이 값을 넘기지 않으므로 예전과 한 글자도 다르지 않게 그려진다.
    */
   dueDateNearCaseIds?: ReadonlySet<string>;
+  /**
+   * 🔴 **[최종 출하 승인 완료]** 배지가 붙는 접수 건의 id 묶음(2026-11-08 사용자
+   * 요구 — 「현황판과 상세페이지 헤드, 내자정리의 [완료 처리]버튼의 오른쪽」).
+   *
+   * 🔴 **판정은 서버가 한다** — 바로 위 `dueDateNearCaseIds` 와 **같은 모양·같은
+   * 까닭**이다. 승인 상태는 이 건의 칸이 아니라 다른 표의 최신 결재 행과 이 건의
+   * 판 번호로 나오는 파생값이고, 화면에는 그 재료가 아예 없다. 어느 상태에 붙는지도
+   * 도메인 하나가 정한다(isFinalShipmentApproved — `STALE` 에는 안 붙는다).
+   *
+   * 🔴 **줄마다 묻지 않는다**(N+1) — 페이지가 질의 하나로 걷어 와 묶음으로 준다
+   * (queries/repair-case-approvals.ts 의 loadRepairCaseFinalShipmentApprovalStates).
+   *
+   * undefined 가 기본이다. 이 표를 함께 쓰는 다른 화면들(고객사·모델 이력 등)은
+   * 이 값을 넘기지 않으므로 예전과 한 글자도 다르지 않게 그려진다.
+   */
+  finalShipmentApprovedCaseIds?: ReadonlySet<string>;
 };
 
 const thBaseClass =
@@ -196,6 +213,7 @@ export default function RepairCaseTable({
   onToggleSelect,
   onToggleSelectAll,
   dueDateNearCaseIds,
+  finalShipmentApprovedCaseIds,
 }: RepairCaseTableProps) {
   const selectableVisible = selectionMode ? rows.filter((row) => selectableIds?.has(row.id) ?? false) : [];
   const selectedVisibleCount = selectableVisible.filter((row) => selectedIds?.has(row.id) ?? false).length;
@@ -303,6 +321,14 @@ export default function RepairCaseTable({
                     <DueDateNearBadge isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false} />
                     <HoldBadge isOnHold={row.holdState?.isOnHold ?? false} />
                     <WorkflowOverrideBadge hasOverride={row.hasWorkflowOverride} />
+                    {/* 🔴 「[최종 출하 승인 완료]」 — 배지 묶음의 **맨 뒤**다
+                        (2026-11-08). 앞의 넷은 「이 건이 지금 어떤 상태인가」를
+                        말하고, 이것은 그 위에 얹히는 **결재 사실** 하나다. 묶음이
+                        wrap 이라 좁아지면 아래로 접힌다 — 칼럼이 옆으로 늘지
+                        않는다. 상세 머리 카드도 같은 자리에 같은 차례로 둔다. */}
+                    <FinalShipmentApprovedBadge
+                      approved={finalShipmentApprovedCaseIds?.has(row.id) ?? false}
+                    />
                   </div>
                 </div>
               </td>

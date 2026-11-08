@@ -11,6 +11,7 @@ import {
   WorkflowOverrideBadge,
 } from "./badges";
 import RequestedDueDateValue from "./RequestedDueDateValue";
+import FinalShipmentApprovedBadge from "@/components/approvals/FinalShipmentApprovedBadge";
 import { preventShiftClickTextSelection, shiftKeyOf } from "@/lib/hooks/useShiftRangeSelection";
 
 type RepairCaseCardListProps = {
@@ -31,6 +32,13 @@ type RepairCaseCardListProps = {
    * — 이 파일 머리말이 유·무상·날짜·L/N 에서 세 번 겪은 바로 그 결함이다.
    */
   dueDateNearCaseIds?: ReadonlySet<string>;
+  /**
+   * 🔴 「[최종 출하 승인 완료]」가 붙는 접수 건의 id 묶음 — 표와 **같은 값을 같은
+   * 부모가** 내려 준다(RepairCaseTable 의 같은 prop 주석에 판정을 서버가 하는
+   * 까닭이 있다). 🔴 표에만 넣으면 창 크기에 따라 배지가 보이는 사람과 안 보이는
+   * 사람이 갈린다 — 이 파일 머리말이 유·무상·날짜·L/N 에서 세 번 겪은 그 결함이다.
+   */
+  finalShipmentApprovedCaseIds?: ReadonlySet<string>;
 };
 
 /**
@@ -67,6 +75,7 @@ export default function RepairCaseCardList({
   selectableIds,
   onToggleSelect,
   dueDateNearCaseIds,
+  finalShipmentApprovedCaseIds,
 }: RepairCaseCardListProps) {
   return (
     <div className={LIST_CARD_GRID}>
@@ -110,6 +119,10 @@ export default function RepairCaseCardList({
             <HoldBadge isOnHold={row.holdState?.isOnHold ?? false} />
             <WorkflowOverrideBadge hasOverride={row.hasWorkflowOverride} />
             <SourceBadge source={row.source} />
+            {/* 표와 같은 자리·같은 차례다(배지 묶음의 맨 뒤 — 2026-11-08). */}
+            <FinalShipmentApprovedBadge
+              approved={finalShipmentApprovedCaseIds?.has(row.id) ?? false}
+            />
           </div>
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
             <div>

@@ -1,10 +1,14 @@
 import "server-only";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
-import { repairCaseApprovals, users } from "../schema";
+import { repairCaseApprovals, repairCases, users } from "../schema";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
 import { INSPECTION_DECIDE_ELIGIBLE_ROLES } from "../mutations/repair-case-approvals";
+import {
+  resolveApprovalState,
+  type ShipmentApprovalState,
+} from "@/lib/domain/local/workflow/shipment-approval-checklist";
 import {
   isValidApprovalType,
   type RepairCaseApprovalType,
@@ -151,6 +155,87 @@ export async function getCurrentApprovalsForCase(repairCaseId: string): Promise<
     approvalType,
     latest: latestByType.get(approvalType) ?? null,
   }));
+}
+
+/**
+ * ============================================================================
+ * 🔴 여러 접수 건의 **최종 출하 승인 상태**를 한 번에 (2026-11-08)
+ * ============================================================================
+ * [최종 출하 승인 완료] 배지가 쓰는 값이다(사용자 요구 — 전체 A/S 현황 · 수리 건
+ * 상세 머리 카드 · 내자 정리의 [완료 처리] 옆).
+ *
+ * ── 🔴 **N+1 이면 안 된다** ─────────────────────────────────────────────
+ * 전체 A/S 현황은 한 해치가 수백 줄이다. 줄마다 getCurrentApprovalsForCase 를
+ * 부르면 질의가 줄 수만큼 돈다. 여기서는 **질의 하나**로 그 건들의 최종 출하
+ * 승인 행을 통째로 걷어 와 건마다 최신 한 줄만 남긴다 — 기타건 쪽이 먼저 같은
+ * 모양으로 푼 자리다(queries/domestic-order-approvals.ts 의
+ * loadDomesticOrderApprovalStates).
+ *
+ * ── 🔴 **판 번호를 부르는 쪽에서 받지 않는다** ──────────────────────────
+ * 기타건 쪽과 **일부러 다르다.** 저쪽은 목록이 이미 읽어 온 `version` 을 받지만,
+ * 이 함수를 부르는 자리 셋 중 하나(내자 정리의 목록)는 **접수 건의 판 번호를 아예
+ * 안 들고 있다** — 내자 줄이 들고 있는 `version` 은 그 줄의 것이고, 접수 건의
+ * 것과 **다른 수**다. 🔴 그 둘을 헷갈려 넘기면 이 함수는 멀쩡한 승인을 STALE 로
+ * 답하거나(또는 그 반대로) 하고, 그 어긋남은 오류를 내지 않는다.
+ * 그래서 판 번호는 **여기서 조인해 읽는다**(한 번의 조인이다).
+ *
+ * ── 🔴 접수 건 행만 온다 ────────────────────────────────────────────────
+ * `repair_case_approvals` 에는 기타건 결재 행도 함께 쌓이지만
+ * ('DOMESTIC_ORDER_FINAL_SHIPMENT'), 그 행은 `repair_case_id` 가 언제나 NULL
+ * 이라(표의 CHECK) `IN (...)` 에 걸릴 수 없다. 🔵 그런데도 승인 종류로 한 번 더
+ * 좁히는 것은 **같은 접수 건의 수리 검수 승인(REPAIR_INSPECTION)을 빼기 위해서**다
+ * — 종류를 안 가르면 검수 승인이 더 최근일 때 그 행이 「최신」으로 뽑힌다.
+ *
+ * 🔵 **결재 기록이 없는 건은 지도에 넣지 않는다** — 받는 쪽이 `?? null` 로 메우면
+ * 그것이 곧 NOT_REQUESTED 다(domain/final-shipment-approval-badge.ts 가 둘을 같게
+ * 다룬다).
+ * ============================================================================
+ */
+export async function loadRepairCaseFinalShipmentApprovalStates(
+  repairCaseIds: readonly string[]
+): Promise<Map<string, ShipmentApprovalState>> {
+  const states = new Map<string, ShipmentApprovalState>();
+  // 🔴 빈 목록으로 `IN ()` 을 만들지 않는다 — drizzle 이 거짓 조건으로 접어 주더라도
+  //    질의 한 벌을 괜히 돌린다.
+  const ids = [...new Set(repairCaseIds)];
+  if (ids.length === 0) return states;
+
+  const rows = await db
+    .select({
+      repairCaseId: repairCaseApprovals.repairCaseId,
+      status: repairCaseApprovals.status,
+      versionAtRequest: repairCaseApprovals.repairCaseVersionAtRequest,
+      currentVersion: repairCases.version,
+    })
+    .from(repairCaseApprovals)
+    .innerJoin(repairCases, eq(repairCaseApprovals.repairCaseId, repairCases.id))
+    .where(
+      and(
+        inArray(repairCaseApprovals.repairCaseId, ids),
+        eq(repairCaseApprovals.approvalType, "FINAL_SHIPMENT")
+      )
+    )
+    // 🔴 「가장 최근」의 정의가 다른 자리들과 **같아야 한다** — `requested_at`
+    //    내림차순의 첫 행이다(resolveApprovalValidity · 전이 관문이 쓰는 그 정의).
+    //    갈리면 화면은 「승인 완료」라는데 출하 완료 단추는 거절한다.
+    .orderBy(desc(repairCaseApprovals.requestedAt));
+
+  for (const row of rows) {
+    // 조인이 접수 건 행만 남기므로 null 일 수 없지만, 타입이 그것을 모른다.
+    if (row.repairCaseId === null) continue;
+    // 🔴 **먼저 온 것이 이긴다** — 위 정렬이 최신을 맨 앞에 둔다.
+    if (states.has(row.repairCaseId)) continue;
+    states.set(
+      row.repairCaseId,
+      // 🔴 판정은 여기 새로 적지 않는다 — 승인 카드·전이 관문이 쓰는 그 함수 하나다.
+      resolveApprovalState(
+        { status: row.status, repairCaseVersionAtRequest: row.versionAtRequest },
+        row.currentVersion
+      )
+    );
+  }
+
+  return states;
 }
 
 export type ApprovalAssigneeCandidate = {

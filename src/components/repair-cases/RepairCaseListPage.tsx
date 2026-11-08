@@ -130,6 +130,18 @@ type RepairCaseListPageProps = {
    * 그래서 undefined 여도 감출 조건이 없고, 배지와 글자색만 안 붙는다.
    */
   dueDateNearCaseIds?: string[];
+  /**
+   * 🔴 지금 **최종 출하 승인이 완료된** 접수 건 id — 서버가 계산해 내려준다
+   * (2026-11-08 사용자 요구: 「[최종 출하 승인 완료]라는 베찌가 현황판과 …」).
+   *
+   * 🔴 화면이 스스로 판정할 수 없다 — 승인 상태는 이 건의 칸이 아니라 **다른 표의
+   * 최신 결재 행 + 이 건의 판 번호**로 나오는 파생값이고, 이 화면에 그 재료가
+   * 아예 없다. 위 세 묶음과 같은 모양이다.
+   *
+   * 🔵 **필터가 아니라 표시**다(납기 임박과 같다) — 조건을 만들지 않으므로
+   * undefined 여도 감출 조건이 없고, 배지만 안 붙는다.
+   */
+  finalShipmentApprovedCaseIds?: string[];
 };
 
 export default function RepairCaseListPage({
@@ -141,6 +153,7 @@ export default function RepairCaseListPage({
   myPendingApprovalCaseIds,
   longPendingPoCaseIds,
   dueDateNearCaseIds,
+  finalShipmentApprovedCaseIds,
 }: RepairCaseListPageProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -243,6 +256,13 @@ export default function RepairCaseListPage({
   const dueDateNearIdSet = useMemo(
     () => (dueDateNearCaseIds ? new Set(dueDateNearCaseIds) : undefined),
     [dueDateNearCaseIds]
+  );
+
+  // 🔴 [최종 출하 승인 완료]도 **거르는 조건이 아니라 표시**다(2026-11-08) —
+  //    납기 임박과 같은 자리의 같은 모양이라 짝이 되는 canFilter… 가 없다.
+  const finalShipmentApprovedIdSet = useMemo(
+    () => (finalShipmentApprovedCaseIds ? new Set(finalShipmentApprovedCaseIds) : undefined),
+    [finalShipmentApprovedCaseIds]
   );
 
   const [filters, setFilters] = useState<Filters>(() => {
@@ -833,6 +853,7 @@ export default function RepairCaseListPage({
                         onToggleSelect={handleToggleSelect}
                         onToggleSelectAll={handleToggleSelectAllOnPage}
                         dueDateNearCaseIds={dueDateNearIdSet}
+                        finalShipmentApprovedCaseIds={finalShipmentApprovedIdSet}
                       />
                     }
                     cards={
@@ -843,6 +864,7 @@ export default function RepairCaseListPage({
                         selectableIds={selectableIds}
                         onToggleSelect={handleToggleSelect}
                         dueDateNearCaseIds={dueDateNearIdSet}
+                        finalShipmentApprovedCaseIds={finalShipmentApprovedIdSet}
                       />
                     }
                   />

@@ -95,6 +95,7 @@ import {
   type DomesticOrderSheetHeadingFieldErrors,
   type SheetIndentLevel,
 } from "@/lib/domain/domestic-order-sheet-heading";
+import FinalShipmentApprovedBadge from "@/components/approvals/FinalShipmentApprovedBadge";
 import DomesticOrderCompletionReleaseDialog from "./DomesticOrderCompletionReleaseDialog";
 import DomesticOrderEditForm, { type QuoteOption } from "./DomesticOrderEditForm";
 import DomesticOrderTextCell from "./DomesticOrderTextCell";
@@ -1241,6 +1242,12 @@ function CompletedBadge() {
 }
 
 /**
+ * 🔴 승인이 하나도 안 붙은 줄이 받는 **빈 목록 한 벌**(2026-11-08). 줄마다 `[]` 를
+ * 새로 만들면 이 표(한 해치 수백 줄 × 표·카드 두 벌)가 그릴 때마다 쓰레기를 만든다.
+ */
+const NO_APPROVED_UNITS: readonly number[] = [];
+
+/**
  * 순번 칸에 나란히 서는 작은 버튼들의 모양. 수정과 완료가 같은 자리에 붙어
  * 있으므로 둘의 크기와 색이 어긋나면 한쪽이 다른 성격의 조작처럼 보인다.
  */
@@ -1479,12 +1486,19 @@ function ModelNameLink({ row }: { row: DomesticOrderListItem }) {
  */
 function CompletionToggle({
   row,
+  approvedRowOrders,
   onError,
   onBlocked,
   onApprovalBlocked,
   onRequestRelease,
 }: {
   row: DomesticOrderListItem;
+  /**
+   * 🔴 **[최종 출하 승인 완료]** 가 붙는 단위 번호들(2026-11-08). 단추가 하나인
+   * 줄의 단위 번호는 **1** 이다 — 세 갈래의 뜻은 화면 props 머리말에 전문이 있다
+   * (finalShipmentApprovedUnits).
+   */
+  approvedRowOrders: readonly number[];
   onError: (message: string | null) => void;
   /** 출하 완료가 막혀 아무것도 저장되지 않았다 — 서버가 돌려준 까닭 한 줄. */
   onBlocked: (reason: string) => void;
@@ -1510,6 +1524,7 @@ function CompletionToggle({
     return (
       <DueDateRowCompletionToggles
         row={row}
+        approvedRowOrders={approvedRowOrders}
         onError={onError}
         onApprovalBlocked={onApprovalBlocked}
       />
@@ -1560,14 +1575,65 @@ function CompletionToggle({
   }
 
   return (
-    <button
-      type="button"
-      onClick={toggle}
-      disabled={isPending}
-      className={rowActionButtonClass}
+    // 🔴 배지가 단추의 **오른쪽**에 선다(2026-11-08 사용자 지정: 「내자정리의
+    //    [완료 처리]버튼의 오른쪽」). 감싸개를 하나 두는 까닭은 순번 칸의 바깥 줄이
+    //    `items-center gap-2` 라 그대로 두면 배지가 [수정]·[완료] 사이로 끼어들
+    //    자리에 서기 때문이다 — 단추와 그 단추의 배지는 **한 덩이**로 묶인다.
+    <span className="inline-flex items-center gap-1">
+      <button
+        type="button"
+        onClick={toggle}
+        disabled={isPending}
+        className={rowActionButtonClass}
+      >
+        {completed ? "완료 해제" : "완료 처리"}
+      </button>
+      {/* 🔵 단추가 하나인 줄의 단위 번호는 **1** 이다(props 머리말). 수리 건이
+          붙은 줄이면 그 수리 건의 최종 출하 승인, 기타건이면 그 하나뿐인 회차의
+          승인이다 — 어느 쪽이든 「이 단추가 열리는가」와 같은 물음이다. */}
+      <FinalShipmentApprovedBadge size="compact" approved={approvedRowOrders.includes(1)} />
+    </span>
+  );
+}
+
+/**
+ * 🔴 **회차 하나가 완료 처리되었다는 표** (2026-11-08).
+ *
+ * ── 왜 생겼나 ───────────────────────────────────────────────────────────
+ * 사용자 지적 그대로다: 「**[1차 완료]가 되었다는게 내자정리에서 시각적으로 한눈에
+ * 파악이 안되는 것** 같아.」 그 전까지 1차를 완료했다는 사실이 화면에 남긴 흔적은
+ * **단추 글자 한 자**뿐이었다 — 「1차 완료」가 「1차 해제」로 바뀌는 것. 11px 짜리
+ * 같은 모양·같은 색 단추에서 글자 두 자가 바뀌는 것을 22칼럼짜리 표에서 알아보라는
+ * 것은 무리다.
+ *
+ * ── 🔴 왜 **줄 단위 완료 표와 같은 모양**인가 ───────────────────────────
+ * 이 표(CompletedBadge)가 바로 옆에서 「완료」를 말하고 있다. 회차 완료도 **같은
+ * 종류의 사실**이므로 같은 치수·같은 색(채운 진한 회색)을 쓴다 — 한 칸 안에 같은
+ * 뜻의 표가 두 모양이면 사람은 다른 뜻으로 읽는다. 🔵 색만으로 말하지 않는 까닭도
+ * 그 파일에 적혀 있다: 색을 구분하기 어려운 사람에게는 **글자가 유일한 단서**다.
+ *
+ * ── 🔴 **단추 글자와 헷갈리지 않아야 한다** ─────────────────────────────
+ * 가장 조심한 자리다. 완료된 1차 옆에 이 표가 「1차 완료」라고 서면, 바로 옆에서
+ * 아직 완료 안 된 2차의 **단추**가 똑같이 「2차 완료」라고 적혀 있다(그 단추는
+ * 「눌러서 완료해라」라는 뜻이다). 글자만 보면 둘 다 완료로 읽힌다.
+ *
+ * 그래서 가르는 것을 **둘** 둔다:
+ *  · **채운 진한 바탕** — 단추는 흰 바탕에 테두리뿐이다(rowActionButtonClass).
+ *  · 🔴 **✓** — 색을 못 가리는 화면·사람에게도 남는 단서다. 이 저장소가 「끝났다」를
+ *    말할 때 쓰는 그 글자다(첨부 고르기의 `담김 ✓` · 저장 팝업의 ✓).
+ *
+ * 🔵 긴 회차 이름은 `title` 에 둔다 — 단추가 같은 까닭으로 같은 일을 한다(표 칸이
+ * 좁다). 글자를 지어내지 않고 **그 한 줄**을 그대로 받는다
+ * (domain/domestic-order-due-date-label.ts).
+ */
+function DueDateRowCompletedBadge({ rowOrder, label }: { rowOrder: number; label: string }) {
+  return (
+    <span
+      title={`${label} — 완료 처리됨`}
+      className="inline-flex items-center rounded bg-zinc-700 px-1.5 py-0.5 text-[11px] leading-none font-medium whitespace-nowrap text-white dark:bg-zinc-300 dark:text-zinc-900"
     >
-      {completed ? "완료 해제" : "완료 처리"}
-    </button>
+      {rowOrder}차 완료 ✓
+    </span>
   );
 }
 
@@ -1594,17 +1660,33 @@ function CompletionToggle({
  * 🔵 마지막 회차를 풀면 줄의 완료도 함께 풀린다(저장 경로가 한다 — 결정 8 의 거울).
  *
  * ── 🔴 막히는 까닭은 **눌러야 안다** ────────────────────────────────────
- * 단추를 미리 잠그지 않는다 — 그러려면 목록이 줄마다, 회차마다 승인 상태를 싣고 와야
- * 한다(CompletionToggle 머리말의 같은 판단). 막히면 서버가 **어느 회차가 왜 막혔는지**
- * 글로 돌려주고(APPROVAL_REQUIRED), 화면 위쪽이 읽고 닫는 알림으로 띄운다.
+ * 단추를 미리 잠그지 않는다. 막히면 서버가 **어느 회차가 왜 막혔는지** 글로 돌려주고
+ * (APPROVAL_REQUIRED), 화면 위쪽이 읽고 닫는 알림으로 띄운다.
+ *
+ * 🔴 **2026-11-08 에 승인 상태가 실려 오게 되었는데도 그대로 둔다.** 배지를 그리려고
+ * 싣는 값이지(아래) 단추를 잠그려고 싣는 값이 아니다 — 수리 건이 붙은 줄도 **눌러야
+ * 막힌 까닭을 안다**(그쪽 관문은 전이 안에 있다). 두 종류가 같게 동작하는 편이
+ * 「왜 이 줄만 단추가 흐린가」보다 읽기 쉽다(CompletionToggle 머리말의 그 판단).
+ *
+ * ── 🔴 **회차 하나가 한 덩이다 — 표 · 단추 · 배지** (2026-11-08) ─────────
+ * 회차마다 셋이 나란히 선다. 사용자 지적이 둘 다 이 자리였다:
+ *  · 「[1차 완료]가 되었다는게 **시각적으로 한눈에 파악이 안되는 것** 같아」
+ *    → **완료 표**(DueDateRowCompletedBadge)가 단추 **왼쪽**에 선다.
+ *  · 「최종출하승인이 되면 [최종 출하 승인 완료]라는 베찌가 … **[완료 처리]버튼의
+ *    오른쪽**에」 → 승인 배지가 단추 **오른쪽**에 선다.
+ * 🔴 셋을 한 `<span>` 으로 묶는 것이 요점이다 — 바깥 줄이 접히는 상자라, 안 묶으면
+ * 좁은 화면에서 2차의 배지가 1차 단추 옆으로 올라붙는다.
  * ============================================================================
  */
 function DueDateRowCompletionToggles({
   row,
+  approvedRowOrders,
   onError,
   onApprovalBlocked,
 }: {
   row: DomesticOrderListItem;
+  /** 🔴 **[최종 출하 승인 완료]** 가 붙는 회차 번호들(화면 props 머리말). */
+  approvedRowOrders: readonly number[];
   onError: (message: string | null) => void;
   onApprovalBlocked: (reason: string) => void;
 }) {
@@ -1656,16 +1738,32 @@ function DueDateRowCompletionToggles({
         //    적고, 긴 이름은 title 로 둔다(표 칸이 좁다).
         const label = domesticOrderDueDateRowLabel(rowOrder, dueDate);
         return (
-          <button
-            key={dueDate.id}
-            type="button"
-            onClick={(event) => void toggle(event, rowOrder, !completed)}
-            disabled={pendingRowOrder !== null}
-            title={`${label} — ${completed ? "완료 해제" : "완료 처리"}`}
-            className={rowActionButtonClass}
-          >
-            {rowOrder}차 {completed ? "해제" : "완료"}
-          </button>
+          // 🔴 **회차 하나가 한 덩이**다(2026-11-08) — 완료 표 · 단추 · 승인 배지
+          //    셋이 흩어지면 「1차의 승인」이 2차 단추 옆에 선 것처럼 읽힌다.
+          //    바깥 줄만 접히게 두고 이 안쪽은 묶어 둔다.
+          <span key={dueDate.id} className="inline-flex items-center gap-1">
+            {/* 🔴 **완료 표가 단추 왼쪽**이다 — 줄 단위가 「[완료] [완료 해제]」로
+                세우는 차례 그대로다(위 순번 칸). 사실을 먼저 말하고 그다음이
+                조작이다. */}
+            {completed && <DueDateRowCompletedBadge rowOrder={rowOrder} label={label} />}
+            <button
+              type="button"
+              onClick={(event) => void toggle(event, rowOrder, !completed)}
+              disabled={pendingRowOrder !== null}
+              title={`${label} — ${completed ? "완료 해제" : "완료 처리"}`}
+              className={rowActionButtonClass}
+            >
+              {rowOrder}차 {completed ? "해제" : "완료"}
+            </button>
+            {/* 🔴 **승인 배지는 단추의 오른쪽**(사용자 지정). 회차가 여럿이라
+                보이는 글자만으로는 어느 회차의 승인인지 알 수 없어 `title` 에
+                회차 이름을 단다 — 단추가 같은 까닭으로 같은 일을 한다. */}
+            <FinalShipmentApprovedBadge
+              size="compact"
+              approved={approvedRowOrders.includes(rowOrder)}
+              title={label}
+            />
+          </span>
         );
       })}
     </span>
@@ -1974,6 +2072,7 @@ export default function DomesticOrderListScreen({
   canDelete = false,
   trashRows = [],
   sheetHeading,
+  finalShipmentApprovedUnits,
 }: {
   rows: DomesticOrderListItem[];
   /** 서버가 정한 "오늘". 머리말의 진행 상황 날짜다. */
@@ -2005,7 +2104,45 @@ export default function DomesticOrderListScreen({
    * 있는지는 canEdit 과 같은 판정이다(page.tsx).
    */
   sheetHeading: DomesticOrderSheetHeadingView;
+  /**
+   * ==========================================================================
+   * 🔴 **[최종 출하 승인 완료] 배지의 근거** — 줄 → 승인된 **단위 번호**들
+   * ==========================================================================
+   * 2026-11-08 사용자 요구: 「수리건과 기타건 모두 최종출하승인이 되면 [최종 출하
+   * 승인 완료]라는 베찌가 … **내자정리의 [완료 처리]버튼의 오른쪽**에」.
+   *
+   * ── 🔴 **번호는 「단위」다 — 회차가 없는 줄에서도 1 이다** ───────────────
+   * 이 표의 [완료 처리]는 줄에 따라 **단추가 하나이기도 여럿이기도** 하다:
+   *  · 수리 건이 붙은 줄 → 단추 하나. 승인은 **그 수리 건의** 최종 출하 승인이고,
+   *    여기서는 단위 번호 **1** 로 싣는다.
+   *  · 기타건이고 회차가 0·1 → 단추 하나. 승인 단위도 하나이고 번호는 1 이다
+   *    (domain/domestic-order-approval-rules.ts 의 domesticOrderApprovalUnitCount
+   *    가 「0행도 단위 하나」라고 못 박아 둔 그 셈이다).
+   *  · 기타건이고 회차 둘 이상 → **회차마다** 단추. 번호가 곧 회차다.
+   * 🔴 그래서 받는 쪽은 **단추의 단위 번호가 이 목록에 있는가**만 보면 된다 — 세
+   * 갈래에 세 가지 판정을 두지 않는다.
+   *
+   * ── 🔴 **판정도 질의도 서버가 한다**(N+1 아님) ───────────────────────────
+   * 승인 상태는 이 줄의 칸이 아니라 다른 표의 최신 결재 행으로 나오는 파생값이고,
+   * 이 표에는 수리 건이 붙은 줄과 기타건이 섞여 있어 **읽을 표가 둘**이다. 페이지가
+   * 질의 **둘**(기타건 승인 · 수리 건 승인)로 통째로 걷어 와 이 모양으로 접어 준다
+   * (app/(app)/domestic-orders/page.tsx).
+   *
+   * 🔵 **없으면 아무 배지도 안 붙는다.** 이 화면을 값만 보려고 그려 보는 자리
+   * (시험)에서 승인 조회까지 세우게 만들지 않는다.
+   * ==========================================================================
+   */
+  finalShipmentApprovedUnits?: Record<string, readonly number[]>;
 }) {
+  /**
+   * 그 줄에서 **[최종 출하 승인 완료]** 가 붙는 단위 번호들. 안 실려 오면 빈 목록이다.
+   *
+   * 🔵 `NO_APPROVED_UNITS` 한 벌을 돌려 쓰는 까닭은 **새 배열을 매 줄 만들지 않기
+   * 위해서**다 — 이 표는 한 해치가 수백 줄이고, 표와 카드 두 벌이 그려진다.
+   */
+  const approvedUnitsOf = (rowId: string): readonly number[] =>
+    finalShipmentApprovedUnits?.[rowId] ?? NO_APPROVED_UNITS;
+
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
   const [view, setView] = useState<ListView>("active");
   /**
@@ -2679,6 +2816,7 @@ export default function DomesticOrderListScreen({
                             {canEdit && (
                               <CompletionToggle
                                 row={row}
+                                approvedRowOrders={approvedUnitsOf(row.id)}
                                 onError={setCompletionError}
                                 onBlocked={setShipmentBlockedReason}
                                 onApprovalBlocked={setApprovalBlockedReason}
@@ -3025,6 +3163,7 @@ export default function DomesticOrderListScreen({
                               {canEdit && (
                                 <CompletionToggle
                                   row={row}
+                                  approvedRowOrders={approvedUnitsOf(row.id)}
                                   onError={setCompletionError}
                                   onBlocked={setShipmentBlockedReason}
                                   onApprovalBlocked={setApprovalBlockedReason}

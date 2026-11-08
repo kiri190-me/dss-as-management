@@ -34,7 +34,10 @@ import {
   MISC_CASE_COMPLETION_BLOCKED_MESSAGES,
 } from "@/lib/domain/domestic-order-approval-rules";
 import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-date-label";
-import { COMPLETED_DUE_DATE_ROW_MESSAGE } from "@/lib/domain/domestic-order-due-date-rows";
+import {
+  COMPLETED_DUE_DATE_ROW_MESSAGE,
+  DUE_DATE_ROW_HAS_DELIVERY_MESSAGE,
+} from "@/lib/domain/domestic-order-due-date-rows";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 
 /**
@@ -66,6 +69,9 @@ import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input"
  *  ㉦ 🔴 **줄 전체를 끝내는 길은 회차 전부의 승인을 본다** — 하나라도 아직이면 거절.
  *  ㉧ 🔴 **완료 표시는 줄을 저장해도 살아남는다**(replaceDueDates 의 되얹기). 그리고
  *     완료된 회차가 있으면 **줄 수를 줄이는 저장이 거절된다**(셋째 울타리).
+ *  ㉨ 🔴 **[완료 처리]가 그 회차의 납품일에 오늘을 찍는다**(2026-11-08 사용자 요구 —
+ *     「1차완료 2차 완료를 누를 때 그 날짜로 납품일이 찍히도록」). 그 회차에만 찍고 ·
+ *     이미 적힌 날짜는 안 덮고 · [완료 해제]로 지우지 않고 · `version` 은 그대로다.
  *
  * ── 왜 결재 행을 직접 박지 않는가 ───────────────────────────────────────
  * 승인은 **진짜 경로**로 받는다(요청 → 결재). 회차가 어느 행에 붙는지가 바로 이
@@ -220,6 +226,9 @@ async function readRows(orderId: string) {
       displayOrder: domesticOrderDueDates.displayOrder,
       completedAt: domesticOrderDueDates.completedAt,
       completedBy: domesticOrderDueDates.completedBy,
+      // 🔴 2026-11-08 — 회차 [완료 처리]가 이 칸에 오늘을 찍는다(㉨).
+      deliveredDate: domesticOrderDueDates.deliveredDate,
+      deliveredBy: domesticOrderDueDates.deliveredBy,
     })
     .from(domesticOrderDueDates)
     .where(eq(domesticOrderDueDates.domesticOrderId, orderId))
@@ -724,7 +733,19 @@ describe("㉧ 완료 표시는 줄을 저장해도 살아남는다 — 그리고
     assert.equal((await readRows(order.id)).length, 2);
   });
 
-  test("🔵 완료를 풀면 그 저장이 통과한다 — 막다른 길이 아니다", async () => {
+  /**
+   * 🔴 **2026-11-08 에 이 시험이 한 걸음 길어졌다 — 약해진 것이 아니다.**
+   *
+   * 그날 회차 [완료 처리]가 **그 회차의 납품일에 오늘을 찍기** 시작했고(㉨, 사용자
+   * 요구), [완료 해제]는 그 날짜를 **지우지 않는다**(일부러 정한 모양). 그래서 완료를
+   * 풀어도 그 회차에는 **납품 기록이 남고**, 그 줄은 **결정 5 의 울타리**에 걸려 여전히
+   * 지워지지 않는다 — 셋째 울타리에서 첫째 울타리로 **막는 주체가 바뀐 것**이다.
+   *
+   * 🔵 **그것이 맞다**: 보냈다는 기록이 달린 줄을 한 번의 저장으로 지우면 그 기록이
+   * 말없이 사라진다. 빠져나가는 길은 그대로 있고(기록을 먼저 지우는 저장은 줄 수가
+   * 안 줄어 통과한다), 이 시험이 그 두 걸음을 **차례대로** 못 박는다.
+   */
+  test("🔵 완료를 풀고 납품 기록까지 지우면 그 저장이 통과한다 — 막다른 길이 아니다", async () => {
     await saveDomesticRoute([approverId]);
     const order = await createTestOrder();
     await approveRow(order, 1);
@@ -752,14 +773,186 @@ describe("㉧ 완료 표시는 줄을 저장해도 살아남는다 — 그리고
       ).ok,
       true
     );
+    // 🔵 못 — **납품일이 실제로 남아 있는가.** 안 남아 있으면 아래 거절이 공짜로
+    //    통과하는 것이 아니라 아예 일어나지 않아, 이 시험이 뜻을 잃는다.
+    const afterRelease = await readRows(order.id);
+    assert.ok(
+      afterRelease[0].deliveredDate !== null,
+      "완료를 풀었더니 납품일까지 지워졌다 — 보낸 사실이 사라졌다"
+    );
 
-    const shrink = await updateDomesticOrder({
+    // 🔴 ① 완료만 풀고 바로 줄을 지우면 **첫째 울타리**가 막는다(납품 기록이 함께 준다).
+    const tooEarly = await updateDomesticOrder({
       id: order.id,
       expectedVersion: order.version,
       fields: { ...order.fields, dueDates: [dueDate("2096-01-20", "1차분")] },
       actorUserId: requesterId,
     });
-    assert.equal(shrink.ok, true, `완료를 풀었는데도 막혔다: ${JSON.stringify(shrink)}`);
+    assert.equal(tooEarly.ok, false, "납품 기록이 달린 줄이 그대로 지워졌다");
+    if (tooEarly.ok) return;
+    assert.equal(tooEarly.code, "VALIDATION_ERROR");
+    assert.equal(tooEarly.message, DUE_DATE_ROW_HAS_DELIVERY_MESSAGE);
+    assert.equal((await readRows(order.id)).length, 2, "거절된 저장이 행을 건드렸다");
+
+    // 🔴 ② 납품 기록을 **먼저 지우는** 저장 — 줄 수가 안 줄므로 통과한다.
+    const clearDelivery = await updateDomesticOrder({
+      id: order.id,
+      expectedVersion: order.version,
+      fields: { ...order.fields },
+      actorUserId: requesterId,
+    });
+    assert.equal(clearDelivery.ok, true, `납품 기록 지우기가 막혔다: ${JSON.stringify(clearDelivery)}`);
+    if (!clearDelivery.ok) return;
+    assert.equal((await readRows(order.id))[0].deliveredDate, null);
+
+    // 🔴 ③ 그제야 줄을 지울 수 있다. 거절 문장이 말한 그 차례 그대로다.
+    const shrink = await updateDomesticOrder({
+      id: order.id,
+      expectedVersion: clearDelivery.version,
+      fields: { ...order.fields, dueDates: [dueDate("2096-01-20", "1차분")] },
+      actorUserId: requesterId,
+    });
+    assert.equal(shrink.ok, true, `두 걸음을 다 밟았는데도 막혔다: ${JSON.stringify(shrink)}`);
     assert.equal((await readRows(order.id)).length, 1);
+  });
+});
+
+/**
+ * ============================================================================
+ * ㉨ 🔴 **[1차 완료]를 누르면 그 회차의 납품일에 오늘이 찍힌다** (2026-11-08)
+ * ============================================================================
+ * 사용자 요구 원문: 「**1차완료 2차 완료를 누를 때 그 날짜로 납품일이 찍히도록**
+ * 해줘.」 출하 완료 전이가 연결된 내자 줄에 같은 일을 하는 것(결정 6)의 기타건 판이다.
+ *
+ * 재는 것 넷:
+ *  · 🔴 **그 회차에만** 찍힌다 — 2차 줄은 1차를 완료해도 그대로다.
+ *  · 🔴 **이미 적힌 납품일은 안 덮는다** — 사람이 고른 날짜가 이긴다.
+ *  · 🔴 **[완료 해제]는 안 지운다** — 「완료는 풀렸는데 납품일은 남은」 회차가 **정한
+ *    모양**이다.
+ *  · 🔴 **`version` 이 안 올라간다** — 납품일을 함께 찍는다고 그 판단이 달라지지
+ *    않는다(㉤ 이 재던 그 자리가 그대로 참이어야 한다).
+ * ============================================================================
+ */
+describe("㉨ 회차 [완료 처리]가 납품일을 찍는다", () => {
+  /** 서버가 쓰는 것과 **같은 방식**의 오늘 — mutation 이 toISOString 으로 만든다. */
+  const today = () => new Date().toISOString().slice(0, 10);
+
+  test("🔴 1차를 완료하면 1차 줄에만 오늘이 찍힌다", async () => {
+    await saveDomesticRoute([approverId]);
+    const order = await createTestOrder();
+    // 🔵 못 — 시작할 때 두 줄 다 비어 있는가. 안 비어 있으면 아래 단언이 공짜다.
+    const before = await readRows(order.id);
+    assert.equal(before.length, 2, "표본의 회차가 둘이 아니다");
+    assert.ok(
+      before.every((row) => row.deliveredDate === null),
+      "표본에 이미 납품일이 적혀 있다 — 「찍혔다」를 잴 수 없다"
+    );
+
+    await approveRow(order, 1);
+    const stamped = await setDomesticOrderDueDateRowCompletion({
+      id: order.id,
+      expectedVersion: order.version,
+      dueDateRowOrder: 1,
+      completed: true,
+      actorUserId: requesterId,
+    });
+    assert.equal(stamped.ok, true, `1차 완료가 막혔다: ${JSON.stringify(stamped)}`);
+
+    const rows = await readRows(order.id);
+    assert.equal(rows[0].deliveredDate, today(), "1차 납품일에 오늘이 안 찍혔다");
+    assert.equal(rows[1].deliveredDate, null, "완료하지 않은 2차에 납품일이 찍혔다");
+    // 🔵 납품**자**는 건드리지 않는다 — 누가 보냈는지는 사람이 적는 값이다.
+    assert.equal(rows[0].deliveredBy, null, "납품자까지 멋대로 적었다");
+  });
+
+  test("🔴 이미 적힌 납품일은 덮지 않는다 — 사람이 고른 날짜가 이긴다", async () => {
+    await saveDomesticRoute([approverId]);
+    const WRITTEN = "2096-01-25";
+    const order = await createTestOrder({
+      dueDates: [
+        { dueDate: "2096-01-20", note: "1차분", deliveredDate: WRITTEN, deliveredBy: "보낸사람" },
+        dueDate("2096-02-15", "2차분"),
+      ],
+    });
+    // 🔵 못 — 그 날짜가 **오늘이 아니어야** 이 시험이 뜻을 갖는다.
+    assert.notEqual(WRITTEN, today(), "표본의 납품일이 오늘과 같다 — 덮었는지 알 수 없다");
+
+    await approveRow(order, 1);
+    assert.equal(
+      (
+        await setDomesticOrderDueDateRowCompletion({
+          id: order.id,
+          expectedVersion: order.version,
+          dueDateRowOrder: 1,
+          completed: true,
+          actorUserId: requesterId,
+        })
+      ).ok,
+      true
+    );
+
+    const rows = await readRows(order.id);
+    assert.equal(rows[0].deliveredDate, WRITTEN, "사람이 적은 납품일을 자동 처리가 덮었다");
+    assert.equal(rows[0].deliveredBy, "보낸사람", "납품자가 사라졌다");
+    assert.ok(rows[0].completedAt !== null, "완료 자체가 안 됐다");
+  });
+
+  test("🔴 [완료 해제]를 해도 납품일은 남는다 — 보낸 사실은 사라지지 않는다", async () => {
+    await saveDomesticRoute([approverId]);
+    const order = await createTestOrder();
+    await approveRow(order, 1);
+    assert.equal(
+      (
+        await setDomesticOrderDueDateRowCompletion({
+          id: order.id,
+          expectedVersion: order.version,
+          dueDateRowOrder: 1,
+          completed: true,
+          actorUserId: requesterId,
+        })
+      ).ok,
+      true
+    );
+    assert.equal((await readRows(order.id))[0].deliveredDate, today(), "찍히지 않았다");
+
+    assert.equal(
+      (
+        await setDomesticOrderDueDateRowCompletion({
+          id: order.id,
+          expectedVersion: order.version,
+          dueDateRowOrder: 1,
+          completed: false,
+          actorUserId: requesterId,
+        })
+      ).ok,
+      true
+    );
+
+    const rows = await readRows(order.id);
+    assert.equal(rows[0].completedAt, null, "완료가 안 풀렸다");
+    assert.equal(rows[0].deliveredDate, today(), "완료를 풀었더니 납품일까지 지워졌다");
+  });
+
+  test("🔴 납품일을 함께 찍어도 `version` 은 그대로다 — 남은 회차의 승인이 안 죽는다", async () => {
+    await saveDomesticRoute([approverId]);
+    const order = await createTestOrder();
+    await approveRow(order, 1);
+    await approveRow(order, 2);
+
+    const done = await setDomesticOrderDueDateRowCompletion({
+      id: order.id,
+      expectedVersion: order.version,
+      dueDateRowOrder: 1,
+      completed: true,
+      actorUserId: requesterId,
+    });
+    assert.equal(done.ok, true);
+    if (!done.ok) return;
+    assert.equal(done.version, order.version, "회차 완료가 version 을 올렸다");
+    assert.equal((await readOrder(order.id)).version, order.version, "DB 의 version 이 올랐다");
+
+    // 🔴 그래서 2차의 승인이 아직 **유효하다** — version 이 올랐다면 STALE 이 된다.
+    const units = await getDomesticOrderApprovalUnits(order.id);
+    assert.equal(units?.units[1].state, "APPROVED", "1차를 완료했더니 2차 승인이 죽었다");
   });
 });

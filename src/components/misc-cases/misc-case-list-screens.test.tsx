@@ -75,6 +75,10 @@ function row(id: string, fields: Partial<MiscCaseListRow> = {}): MiscCaseListRow
     modelName: null,
     customerName: null,
     status: "IN_PROGRESS",
+    // 🔴 2026-11-08 에 늘었다 — [최종 출하 승인 완료] 배지. 기본은 **안 붙는 쪽**이고,
+    //    붙는 쪽과 안 붙는 쪽을 함께 재는 자리는
+    //    components/approvals/final-shipment-approved-badge-screens.test.tsx 다.
+    finalShipmentApproved: false,
     displayQuoteNumber: null,
     displayQuoteIssuedDate: null,
     displayIntakeNumber: null,

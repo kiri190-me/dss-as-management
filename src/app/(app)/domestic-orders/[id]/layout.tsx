@@ -10,6 +10,7 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getDomesticOrderApprovalUnits } from "@/lib/db/queries/domestic-order-approvals";
 import { getDomesticOrderDetail } from "@/lib/db/queries/domestic-orders";
+import { isFinalShipmentApproved } from "@/lib/domain/final-shipment-approval-badge";
 import { resolveMiscCaseStatus } from "@/lib/domain/misc-case-status";
 
 /**
@@ -108,9 +109,26 @@ export default async function DomesticOrderDetailLayout({
     approvalState: approval?.state ?? null,
   });
 
+  /**
+   * 🔴 머리 카드의 **[최종 출하 승인 완료]** 배지(2026-11-08 사용자 요구).
+   *
+   * 🔵 **질의가 늘지 않는다** — 바로 위 상태 배지와 **같은 조회 하나**의 결과를
+   * 다시 읽는다. 값을 둘로 나누는 까닭은 상태 배지가 완료된 줄에서 「완료」로
+   * 덮이기 때문이다(그 머리 카드의 주석).
+   *
+   * 🔴 **회차 전부가 승인됐을 때만** 참이다 — `approval.state` 가 이미 접힌 값이다
+   * (foldDomesticOrderApprovalStates). 판정은 도메인 하나가 한다: `STALE` 에는 안
+   * 붙는다(domain/final-shipment-approval-badge.ts).
+   */
+  const finalShipmentApproved = isFinalShipmentApproved(approval?.state ?? null);
+
   return (
     <div className="flex flex-col gap-4">
-      <DomesticOrderDetailHeader row={row} status={status} />
+      <DomesticOrderDetailHeader
+        row={row}
+        status={status}
+        finalShipmentApproved={finalShipmentApproved}
+      />
       <DomesticOrderDetailTabs id={id} canViewQuotes={canViewQuotes} />
       {children}
     </div>

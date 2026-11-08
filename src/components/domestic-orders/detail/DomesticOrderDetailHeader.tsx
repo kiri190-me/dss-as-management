@@ -1,3 +1,4 @@
+import FinalShipmentApprovedBadge from "@/components/approvals/FinalShipmentApprovedBadge";
 import MiscCaseStatusBadge from "@/components/misc-cases/MiscCaseStatusBadge";
 import {
   domesticOrderDetailHeadFacts,
@@ -44,13 +45,29 @@ import type { MiscCaseStatus } from "@/lib/domain/misc-case-status";
  *
  * 🔵 `status` 는 **선택 인자**다. 넘기지 않으면 배지를 아예 그리지 않는다 — 이 카드를
  * 값만 보려고 그려 보는 자리(시험)에서 승인 조회까지 세우게 만들지 않기 위해서다.
+ *
+ * ── 🔴 [최종 출하 승인 완료] 배지 (2026-11-08 사용자 요구) ──────────────
+ * 「수리건과 기타건 모두 최종출하승인이 되면 [최종 출하 승인 완료]라는 베찌가 현황판과
+ * **상세페이지 헤드**, 내자정리의 [완료 처리]버튼의 오른쪽에」.
+ *
+ * 🔴 **위 상태 배지와 겹치지 않는다.** 「출하 대기」(승인은 끝났고 아직 안 나갔다)와
+ * 겹쳐 보이지만, 그 배지는 **완료된 줄에서 「완료」로 덮인다**(domain/misc-case-status.ts
+ * 의 보는 차례 ①) — 끝난 기타건에서는 승인 사실을 말할 자리가 여기밖에 없다. 그래서
+ * 판정을 나눠 받는다.
+ *
+ * 🔴 **회차 여럿이면 전부 승인됐을 때만 붙는다** — 접는 일은 조회가 하고
+ * (foldDomesticOrderApprovalStates), 이 카드는 그 결과를 받는다. 회차 하나만 끝난
+ * 줄에서 머리에 「승인 완료」가 뜨면, 바로 아래 [승인] 탭의 카드 둘과 어긋난다.
  */
 export default function DomesticOrderDetailHeader({
   row,
   status,
+  finalShipmentApproved = false,
 }: {
   row: DomesticOrderDetailHeadRow;
   status?: MiscCaseStatus;
+  /** 🔴 판정은 도메인 하나가 한다(isFinalShipmentApproved) — `STALE` 에는 안 붙는다. */
+  finalShipmentApproved?: boolean;
 }) {
   const facts = domesticOrderDetailHeadFacts(row);
 
@@ -62,6 +79,9 @@ export default function DomesticOrderDetailHeader({
             먼저 묻는 것이 「이 건이 지금 어디까지 왔나」이고, 알약 사이에 섞어 두면
             품명·공급처와 같은 무게의 또 하나의 값으로 읽힌다. */}
         {status !== undefined && <MiscCaseStatusBadge status={status} />}
+        {/* 🔴 상태 배지 **바로 오른쪽**이다 — 둘은 한 물음의 두 답이라(「어디까지
+            왔나」·「결재는 끝났나」) 떼어 놓으면 값 알약 사이에서 길을 잃는다. */}
+        <FinalShipmentApprovedBadge approved={finalShipmentApproved} />
         {/* 값 알약 묶음 — 가운뎃점 구분자는 두지 않는다(알약의 테두리가 가른다).
             좁은 화면에서는 묶음 안에서 줄바꿈된다. */}
         <div className="flex flex-wrap items-baseline gap-1.5">

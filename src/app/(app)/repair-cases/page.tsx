@@ -10,6 +10,8 @@ import {
   canDecideAnyRepairCaseApproval,
   listRepairCasesPendingMyApproval,
 } from "@/lib/db/queries/repair-case-approvals-pending";
+import { loadRepairCaseFinalShipmentApprovalStates } from "@/lib/db/queries/repair-case-approvals";
+import { isFinalShipmentApproved } from "@/lib/domain/final-shipment-approval-badge";
 import { listLongPendingPoCaseIds } from "@/lib/db/queries/long-pending-po";
 import { isRepairCaseDueDateNear } from "@/lib/domain/notifications";
 import RepairCaseListPage from "@/components/repair-cases/RepairCaseListPage";
@@ -109,6 +111,30 @@ export default async function RepairCasesPage() {
     .filter((row) => isRepairCaseDueDateNear(row, now))
     .map((row) => row.id);
 
+  /**
+   * 🔴 「[최종 출하 승인 완료]」 배지의 근거(2026-11-08 사용자 요구 — 「수리건과
+   * 기타건 모두 최종출하승인이 되면 … 현황판과 상세페이지 헤드, 내자정리의
+   * [완료 처리]버튼의 오른쪽에」).
+   *
+   * 🔴 **화면이 스스로 판정할 수 없다** — 승인 상태는 접수 건의 칸이 아니라 다른
+   * 표의 최신 결재 행과 이 건의 판 번호로 나오는 파생값이다. 바로 위 세 묶음과
+   * 같은 모양이고, 기타건 현황이 같은 일을 같은 방식으로 한다.
+   *
+   * 🔴 **질의는 하나뿐이다**(N+1 아님) — 그 함수가 id 묶음을 한 번에 받아 질의
+   * 하나로 답한다(queries/repair-case-approvals.ts 의 머리말). 🔵 판 번호도 그
+   * 함수가 조인해 읽는다: 여기서 넘기면 다른 부르는 자리(내자 정리)가 들고 있는
+   * **내자 줄의 version** 과 헷갈릴 자리가 생긴다.
+   *
+   * 🔴 어느 상태에 배지가 붙는지는 도메인 하나가 정한다 — `STALE` 에는 안 붙는다
+   * (domain/final-shipment-approval-badge.ts 에 까닭 전문이 있다).
+   */
+  const finalShipmentApprovalStates = await loadRepairCaseFinalShipmentApprovalStates(
+    serverBaseCases.map((row) => row.id)
+  );
+  const finalShipmentApprovedCaseIds = serverBaseCases
+    .filter((row) => isFinalShipmentApproved(finalShipmentApprovalStates.get(row.id) ?? null))
+    .map((row) => row.id);
+
   return (
     <Suspense>
       <RepairCaseListPage
@@ -120,6 +146,7 @@ export default async function RepairCasesPage() {
         myPendingApprovalCaseIds={myPendingApprovalCaseIds}
         longPendingPoCaseIds={longPendingPoCaseIds}
         dueDateNearCaseIds={dueDateNearCaseIds}
+        finalShipmentApprovedCaseIds={finalShipmentApprovedCaseIds}
       />
     </Suspense>
   );

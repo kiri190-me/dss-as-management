@@ -28,6 +28,7 @@ import {
   type RequestedDueDateLinkOutcome,
 } from "@/lib/domain/requested-due-date-link";
 import {
+  resolveDueDateRowCompletionDeliveredPlan,
   resolveRepairCaseShipmentWriteThrough,
   type DeliveredDateLinkOutcome,
 } from "@/lib/domain/delivered-date-link";
@@ -1034,6 +1035,21 @@ export async function setDomesticOrderCompletion(params: {
  * 회차 하나를 풀면 「모든 회차 완료」가 깨지므로 줄의 완료도 함께 거둔다. 안 그러면
  * 줄은 완료인데 회차는 아닌 상태가 남고, 그 줄은 **다시 완료할 길이 없다**(이미
  * 완료라 줄 단추가 [완료 해제]로 바뀐다).
+ *
+ * ── 🔴 **완료를 누르면 그 회차의 납품일에 오늘이 찍힌다** (2026-11-08) ────
+ * 사용자 요구: 「**1차완료 2차 완료를 누를 때 그 날짜로 납품일이 찍히도록** 해줘.」
+ * 출하 완료 전이가 연결된 내자 줄에 같은 일을 하는 것(사용자 결정 6)의 **기타건
+ * 판**이고, 규칙도 그 한 벌을 그대로 쓴다(domain/delivered-date-link.ts).
+ *
+ *  · 🔴 **이미 적힌 납품일은 덮지 않는다.** 사람이 적은 날짜가 이긴다.
+ *  · 🔴 **[완료 해제]는 납품일을 지우지 않는다.** 그래서 「완료는 풀렸는데 납품일은
+ *    남은」 회차가 생긴다 — **고장이 아니라 정한 모양**이다. 지우려면 납품 편집칸에서
+ *    사람이 지운다.
+ *  · 🔵 **건드리는 것은 그 회차 한 줄뿐**이다 — `display_order = dueDateRowOrder`
+ *    하나를 집어 쓴다(아래 WHERE). 2차 줄은 1차를 완료해도 그대로다.
+ *  · 🔵 **version 은 여기서도 안 올라간다**(위 그 한 줄). 납품일을 함께 찍는다고
+ *    「요청 뒤에 내용이 바뀌었는가」의 답이 달라질 이유가 없다 — 올리면 남은 회차의
+ *    승인이 전부 STALE 이 되어 기능이 스스로를 먹는다.
  * ============================================================================
  */
 export async function setDomesticOrderDueDateRowCompletion(params: {
@@ -1112,13 +1128,41 @@ export async function setDomesticOrderDueDateRowCompletion(params: {
       if (blocked) return blocked;
     }
 
+    // ── 🔴 **완료를 누르면 그 회차의 납품일에 오늘이 찍힌다** (2026-11-08) ──
+    // 사용자 요구: 「1차완료 2차 완료를 누를 때 그 날짜로 납품일이 찍히도록」.
+    //
+    // 🔴 **규칙을 여기 적지 않는다** — 출하 완료 전이가 연결된 내자 줄에 쓰는 그
+    //    규칙과 **한 벌**이다(domain/delivered-date-link.ts). 요점은 하나뿐이다:
+    //    **이미 적힌 납품일은 덮지 않는다.** 사람이 적어 둔 날짜는 「실제로 보낸 날」
+    //    이고 완료를 누른 날과 며칠 어긋나는 것이 정상이라, 자동 처리가 덮으면 그
+    //    사실이 말없이 사라진다.
+    //
+    // 🔴 **[완료 해제] 때는 묻지도 않는다** — 보낸 사실은 완료를 풀었다고 사라지지
+    //    않는다(그 파일의 「지우는 쪽은 안 묶는다」). 그래서 「완료는 풀렸는데 납품일은
+    //    남은」 회차가 생기고, **그것이 정한 모양**이다.
+    //
+    // 🔵 「오늘」은 출하 완료 자동 기록과 **같은 방식으로** 만든다
+    //    (mutations/workflow-transitions.ts 의 `shippedOn`). 두 자동 기록이 서로 다른
+    //    방식으로 날짜를 만들면 같은 날 찍힌 두 값이 하루 어긋날 수 있다.
+    // 🔵 **수리 건 쪽으로 밀지 않는다** — 이 길은 기타건 전용이라(바로 위 울타리)
+    //    맞출 수리 건이 애초에 없다.
+    const deliveredStamp = params.completed
+      ? resolveDueDateRowCompletionDeliveredPlan({
+          currentDeliveredDate: rows[index].deliveredDate,
+          today: new Date().toISOString().slice(0, 10),
+        })
+      : { kind: "NONE" as const };
+
     // 🔴 차례(display_order)로 집는다 — 승인이 회차를 가리키는 값과 **같은 번호**다
     //    (schema/repair-case-approvals.ts 의 due_date_row_order 주석).
+    // 🔵 납품일은 **쓸 때만** 목록에 넣는다 — `undefined` 를 섞으면 drizzle 이 그
+    //    칸을 SET 에서 빼므로 동작은 같지만, 조건을 눈에 보이게 적어 둔다.
     await tx
       .update(domesticOrderDueDates)
       .set({
         completedAt: params.completed ? now : null,
         completedBy: params.completed ? params.actorUserId : null,
+        ...(deliveredStamp.kind === "WRITE" ? { deliveredDate: deliveredStamp.date } : {}),
         updatedAt: now,
       })
       .where(

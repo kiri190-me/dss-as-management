@@ -1278,3 +1278,13 @@ src/components/repair-cases/repair-case-overdue-badge.test.tsx
 # 회차가 둘 이상일 때만** 회차 단추로 갈라지는가(수리 건 줄은 어제와 같아야 한다).
 # 🔵 패널은 서버 액션을 물어 **그려 볼 수 없다** — 주석을 걷어낸 원본을 글자로 읽는다.
 src/components/domestic-orders/detail/domestic-order-due-date-row-approval-screens.test.tsx
+
+# 🔴 **[최종 출하 승인 완료] 배지가 다섯 자리에 뜨는가**(2026-11-08 사용자 요구). 전체 A/S
+# 현황(표·카드) · 기타건 현황(표·카드)은 **그려 보고**, 두 상세 머리 카드와 내자 정리의
+# [완료 처리] 옆은 **원본 글자로** 읽는다(앞의 하나는 훅 셋을, 뒤의 하나는 서버 액션과
+# useRouter 를 물고 있어 이 환경에서 그려 볼 수 없다 — 이웃 due-date-near-badge.test.tsx 와
+# 같은 방법·같은 까닭). 🔴 **「안 뜬다」 쪽을 함께 잰다**(승인 전·반려·STALE) — 그쪽은 표본이
+# 비면 영영 통과한다. 🔴 회차가 여럿인 기타건에서 **1차만 승인되면 줄 배지는 안 뜨고 1차
+# 단추 옆에만 뜬다.** 🔴 그리고 **회차 완료가 눈에 보이는가**(「N차 완료 ✓」) — 단추 글자와
+# 헷갈리지 않도록 채운 바탕과 ✓ 를 함께 본다.
+src/components/approvals/final-shipment-approved-badge-screens.test.tsx

@@ -13,8 +13,11 @@ import {
   listRepairCaseLinkOptions,
 } from "@/lib/db/queries/domestic-orders";
 import { getDomesticOrderSheetHeading } from "@/lib/db/queries/domestic-order-sheet-settings";
+import { loadDomesticOrderApprovalUnitStates } from "@/lib/db/queries/domestic-order-approvals";
+import { loadRepairCaseFinalShipmentApprovalStates } from "@/lib/db/queries/repair-case-approvals";
 import { listQuoteOptions } from "@/lib/db/queries/quotes";
 import { toKstDateOnly } from "@/lib/domain/date-only";
+import { isFinalShipmentApproved } from "@/lib/domain/final-shipment-approval-badge";
 
 export const metadata: Metadata = {
   title: "내자 정리 | DSS A/S 관리 시스템",
@@ -102,6 +105,54 @@ export default async function DomesticOrdersPage() {
   // 곳이다(domain/date-only.ts).
   const currentYear = toKstDateOnly(new Date()).slice(0, 4);
 
+  /**
+   * ==========================================================================
+   * 🔴 **[완료 처리] 단추 오른쪽의 [최종 출하 승인 완료] 배지** (2026-11-08)
+   * ==========================================================================
+   * 사용자 요구: 「수리건과 기타건 모두 최종출하승인이 되면 [최종 출하 승인 완료]라는
+   * 베찌가 … **내자정리의 [완료 처리]버튼의 오른쪽**에 베찌가 붙도록 해줘」.
+   *
+   * 🔴 **이 표에는 두 종류의 줄이 섞여 있어 읽을 표가 둘이다.**
+   *  · 기타건(수리 건이 안 붙은 줄) → 승인 행이 `domestic_order_id` 로 붙어 있고
+   *    **회차마다** 선다(사용자 결정 12). 단추도 회차마다라 **회차 번호 그대로** 싣는다.
+   *  · 수리 건이 붙은 줄 → 그 수리 건의 최종 출하 승인이다. 단추가 하나뿐이라
+   *    **단위 번호 1** 로 싣는다(화면 props 머리말의 그 셈).
+   *
+   * 🔴 **N+1 이 아니다 — 질의 둘이다.** 줄 수와 무관하게 늘지 않는다: 두 함수 모두
+   * id 묶음을 한 번에 받아 `IN (...)` 한 방으로 답한다. 화면이 그 둘을 다시 묻는
+   * 자리는 없다.
+   *
+   * 🔴 **판정은 도메인 하나가 한다** — `STALE` 에는 안 붙는다
+   * (domain/final-shipment-approval-badge.ts 에 그 한 줄의 까닭 전문이 있다).
+   * 기타건의 회차별 상태를 **접지 않고 그대로** 쓰는 것이 여기서만 다른 점이다:
+   * 단추가 회차마다라 배지도 회차마다여야 한다(접으면 1차만 승인된 줄에서 1차 단추
+   * 옆의 배지까지 사라진다).
+   *
+   * 🔵 **휴지통 줄은 묻지 않는다** — 그 줄에는 완료 단추가 아예 없다.
+   */
+  const miscRows = rows.filter((row) => row.repairCaseId === null);
+  const linkedRows = rows.filter(
+    (row): row is typeof row & { repairCaseId: string } => row.repairCaseId !== null
+  );
+  const [miscUnitStates, linkedCaseStates] = await Promise.all([
+    loadDomesticOrderApprovalUnitStates(miscRows),
+    loadRepairCaseFinalShipmentApprovalStates(linkedRows.map((row) => row.repairCaseId)),
+  ]);
+
+  const finalShipmentApprovedUnits: Record<string, number[]> = {};
+  for (const row of miscRows) {
+    // 🔴 **차례가 곧 회차 번호다**(자리 0 이 1차) — 조회가 그렇게 담아 준다.
+    const approved = (miscUnitStates.get(row.id) ?? [])
+      .map((state, index) => (isFinalShipmentApproved(state) ? index + 1 : 0))
+      .filter((rowOrder) => rowOrder > 0);
+    if (approved.length > 0) finalShipmentApprovedUnits[row.id] = approved;
+  }
+  for (const row of linkedRows) {
+    if (isFinalShipmentApproved(linkedCaseStates.get(row.repairCaseId) ?? null)) {
+      finalShipmentApprovedUnits[row.id] = [1];
+    }
+  }
+
   return (
     <DomesticOrderListScreen
       rows={rows}
@@ -114,6 +165,7 @@ export default async function DomesticOrdersPage() {
       canDelete={canDelete}
       trashRows={trashRows}
       sheetHeading={sheetHeading}
+      finalShipmentApprovedUnits={finalShipmentApprovedUnits}
     />
   );
 }

@@ -6,6 +6,7 @@ import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { loadDomesticOrderApprovalStates } from "@/lib/db/queries/domestic-order-approvals";
 import { listMiscDomesticOrders } from "@/lib/db/queries/domestic-orders";
+import { isFinalShipmentApproved } from "@/lib/domain/final-shipment-approval-badge";
 import { resolveMiscCaseStatus } from "@/lib/domain/misc-case-status";
 
 /**
@@ -90,6 +91,18 @@ export default async function MiscCasesPage() {
       completedAt: row.completedAt,
       approvalState: approvalStates.get(row.id) ?? null,
     }),
+    /**
+     * 🔴 **[최종 출하 승인 완료] 배지**(2026-11-08 사용자 요구 — 「수리건과 기타건
+     * 모두 최종출하승인이 되면 … 현황판과 상세페이지 헤드에」).
+     *
+     * 🔴 **같은 조회 하나에서 나온다** — 위 상태 배지와 재료가 같다(질의가 늘지
+     * 않는다). 그런데도 값을 둘로 나눠 보내는 까닭은 **상태 배지가 완료된 줄에서
+     * 「완료」로 덮이기 때문**이다(resolveMiscCaseStatus 의 보는 차례 ①). 하나로
+     * 묶으면 끝난 기타건에서 승인 사실이 통째로 사라진다.
+     *
+     * 🔴 어느 상태에 붙는지는 도메인 하나가 정한다 — `STALE` 에는 안 붙는다.
+     */
+    finalShipmentApproved: isFinalShipmentApproved(approvalStates.get(row.id) ?? null),
   }));
 
   return <MiscCaseListScreen rows={rowsWithStatus} />;

@@ -12,6 +12,7 @@ import {
   DeliveredByCellContent,
   DeliveredDateCellContent,
 } from "@/components/domestic-orders/delivered-cell-content";
+import FinalShipmentApprovedBadge from "@/components/approvals/FinalShipmentApprovedBadge";
 import { resolveDomesticOrderModelLink } from "@/lib/domain/domestic-order-detail-link";
 import type { MiscCaseStatus } from "@/lib/domain/misc-case-status";
 import MiscCaseStatusBadge from "./MiscCaseStatusBadge";
@@ -68,6 +69,20 @@ export type MiscCaseRow = {
    * 서버에서 계산해 내려보내는 것과 같은 모양이다.
    */
   status: MiscCaseStatus;
+  /**
+   * 🔴 **[최종 출하 승인 완료] 배지를 붙이는가**(2026-11-08 사용자 요구). 위
+   * `status` 와 **같은 자리에서 서버가 정해 보낸다**(페이지가 같은 승인 조회
+   * 하나의 결과로 둘을 함께 만든다).
+   *
+   * 🔴 **`status` 로는 대신할 수 없다.** 그 배지는 「완료」가 찍힌 줄에서
+   * COMPLETED 로 덮이기 때문이다(domain/misc-case-status.ts 의 보는 차례 ①) —
+   * 끝난 기타건에서 승인 사실이 통째로 사라진다. 사용자가 두 배지를 **함께**
+   * 요구한 자리가 바로 거기다.
+   *
+   * 🔵 어느 상태에 붙는지는 도메인 하나가 정한다(isFinalShipmentApproved) —
+   * `STALE` 에는 안 붙는다. 까닭은 그 파일 머리말에 있다.
+   */
+  finalShipmentApproved: boolean;
   displayQuoteNumber: string | null;
   displayQuoteIssuedDate: string | null;
   purchaseOrderNumber: string | null;
@@ -182,7 +197,27 @@ export const MISC_CASE_FIELDS = {
   // 🔴 **배지 모양**이다(2026-11-06 사용자 지정: 「상태를 베찌 모양으로 해주고」).
   // 글자도 색도 여기서 정하지 않는다 — 말은 domain/misc-case-status.ts, 색은
   // MiscCaseStatusBadge 한 곳이고, 기타건 상세의 머리 카드가 같은 배지를 그린다.
-  status: { label: "상태", of: (row) => <MiscCaseStatusBadge status={row.status} /> },
+  //
+  // 🔴 **2026-11-08 — [최종 출하 승인 완료]가 같은 칸에 함께 선다**(사용자 요구).
+  // 칸을 새로 만들지 않고 여기 붙인 까닭 둘:
+  //  · 이 배지는 **상태의 한 갈래가 아니라 상태 위에 얹히는 사실**이라, 둘이 한
+  //    자리에 나란히 서야 「완료 + 승인도 끝남」이 한눈에 읽힌다. 칸을 늘리면 표가
+  //    열 칸이 되고 카드에도 줄이 하나 더 는다.
+  //  · 🔵 **표와 카드가 함께 따라온다** — 이 한 벌이 두 화면을 먹이므로, 여기
+  //    붙이면 좁은 화면에서만 배지가 사라지는 일이 생기지 않는다(이 파일의 요점).
+  //
+  // ⚠️ 감싸개가 `flex-wrap` 인 것이 중요하다 — 부르는 쪽(표의 보조 줄)이
+  // `whitespace-nowrap` 이라 두 배지가 한 줄에 묶이면 그 칼럼만 옆으로 늘어난다.
+  // flex 상자의 **칸끼리는** 그 설정과 무관하게 접힌다.
+  status: {
+    label: "상태",
+    of: (row) => (
+      <span className="inline-flex flex-wrap items-center gap-1">
+        <MiscCaseStatusBadge status={row.status} />
+        <FinalShipmentApprovedBadge approved={row.finalShipmentApproved} />
+      </span>
+    ),
+  },
   customerName: { label: "공급처", of: (row) => dash(row.customerName) },
   quoteNumber: { label: "발행번호", of: (row) => dash(row.displayQuoteNumber) },
   quoteIssuedDate: { label: "발행일자", of: (row) => dash(row.displayQuoteIssuedDate) },

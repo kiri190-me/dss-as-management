@@ -11,6 +11,7 @@ import {
   resolveDeliveredLinkShape,
   resolveDomesticOrderDeliveredWriteThrough,
   resolveDomesticOrderDeliveryDisplay,
+  resolveDueDateRowCompletionDeliveredPlan,
   resolveRepairCaseShipmentWriteThrough,
 } from "./delivered-date-link";
 
@@ -328,5 +329,75 @@ test("안 바뀐 저장은 아무 일도 하지 않는다 — 인수정보 폼�
   assert.deepEqual(
     toOrder({ previousActualShipmentDate: "   ", nextActualShipmentDate: "  " }),
     { kind: "NONE" }
+  );
+});
+
+/**
+ * ============================================================================
+ * 🔴 회차 [완료 처리] → 그 회차의 납품일 (2026-11-08)
+ * ============================================================================
+ * 사용자 요구: 「1차완료 2차 완료를 누를 때 그 날짜로 납품일이 찍히도록 해줘.」
+ *
+ * 🔴 여기서 재는 것은 **덮을 것인가** 하나다. 「어느 회차에 쓰는가」는 저장 통로가
+ * 쥐고 있어(display_order 하나를 집어 쓴다) 진짜 DB 로 잰다
+ * (db/mutations/misc-case-due-date-row-approval.integration.test.ts 의 ㉨).
+ * ============================================================================
+ */
+test("🔴 빈 회차에는 오늘을 찍는다", () => {
+  assert.deepEqual(
+    resolveDueDateRowCompletionDeliveredPlan({
+      currentDeliveredDate: null,
+      today: "2096-03-10",
+    }),
+    { kind: "WRITE", date: "2096-03-10" }
+  );
+  // 공백만 적힌 값은 「없음」으로 접는다 — 화면에는 빈칸인데 「적혀 있다」로 세어지면
+  // 그 회차는 영영 안 찍힌다.
+  assert.deepEqual(
+    resolveDueDateRowCompletionDeliveredPlan({ currentDeliveredDate: "  ", today: "2096-03-10" }),
+    { kind: "WRITE", date: "2096-03-10" }
+  );
+});
+
+test("🔴 이미 적힌 납품일은 덮지 않는다 — 운송 시차가 말없이 사라진다", () => {
+  assert.deepEqual(
+    resolveDueDateRowCompletionDeliveredPlan({
+      currentDeliveredDate: "2096-03-07",
+      today: "2096-03-10",
+    }),
+    { kind: "NONE" }
+  );
+  // 🔵 같은 날짜가 이미 적혀 있어도 답은 같다(쓸 것이 없다).
+  assert.deepEqual(
+    resolveDueDateRowCompletionDeliveredPlan({
+      currentDeliveredDate: "2096-03-10",
+      today: "2096-03-10",
+    }),
+    { kind: "NONE" }
+  );
+});
+
+test("🔴 출하 완료 자동 기록과 **같은 잣대**다 — 자동으로 찍는 자리는 빈 행에만", () => {
+  // 두 자동 기록이 서로 다른 규칙을 가지면, 같은 줄이 어느 쪽에서 왔느냐에 따라
+  // 덮이기도 안 덮이기도 한다. 그 둘을 나란히 세워 답이 같은지 본다.
+  const written = "2096-03-07";
+  assert.deepEqual(
+    resolveDueDateRowCompletionDeliveredPlan({ currentDeliveredDate: written, today: "2096-03-10" }),
+    resolveDomesticOrderDeliveredWriteThrough({
+      previousActualShipmentDate: null,
+      nextActualShipmentDate: "2096-03-10",
+      trigger: "SHIPMENT_COMPLETED",
+      lines: [{ dueDateRows: [{ deliveredDate: written }] }],
+    })
+  );
+  // 🔵 못 — 빈 행에서는 둘 다 **쓴다**(위 비교가 「둘 다 NONE」으로 공짜 통과하지 않는다).
+  assert.deepEqual(
+    resolveDueDateRowCompletionDeliveredPlan({ currentDeliveredDate: null, today: "2096-03-10" }),
+    resolveDomesticOrderDeliveredWriteThrough({
+      previousActualShipmentDate: null,
+      nextActualShipmentDate: "2096-03-10",
+      trigger: "SHIPMENT_COMPLETED",
+      lines: [{ dueDateRows: [{ deliveredDate: null }] }],
+    })
   );
 });

@@ -15,6 +15,7 @@ import {
 } from "../schema";
 import { createRepairCase } from "./repair-cases";
 import { requestRepairCaseApproval, decideRepairCaseApproval } from "./repair-case-approvals";
+import { loadRepairCaseFinalShipmentApprovalStates } from "../queries/repair-case-approvals";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 
 /**
@@ -544,3 +545,114 @@ describe("requestRepairCaseApproval / decideRepairCaseApproval: 지정 승인자
   });
 });
 
+
+/**
+ * ============================================================================
+ * 🔴 **[최종 출하 승인 완료] 배지가 보는 묶음 조회** (2026-11-08)
+ * ============================================================================
+ * 전체 A/S 현황 · 수리 건 상세 머리 카드 · 내자 정리의 [완료 처리] 옆이 이 한
+ * 함수의 답으로 배지를 그린다(queries/repair-case-approvals.ts 의
+ * loadRepairCaseFinalShipmentApprovalStates).
+ *
+ * 🔴 **값이 틀려도 화면에는 「아무것도 없음」으로만 보인다** — 오류가 안 나는
+ * 종류라 진짜 DB 로 재야 한다. 여기서 못 박는 것 넷:
+ *  ① 승인이 끝난 건은 `APPROVED` 다.
+ *  ② 🔴 **수리 검수 승인을 최종 출하 승인으로 읽지 않는다.** 검수 쪽이 더 최근일
+ *     수 있어, 종류로 안 좁히면 그 행이 「최신」으로 뽑힌다.
+ *  ③ 🔴 **판 번호를 조인해 읽는다** — 승인 뒤 건이 바뀌면 `STALE` 이다. 이 조회가
+ *     낡은 판 번호를 받아 쓰면 바뀐 건에 「승인 완료」가 붙는다.
+ *  ④ 반려된 건은 `REJECTED`, 결재 기록이 없는 건은 **지도에 아예 없다**.
+ *
+ * 🔵 **접수 건을 셋만 만든다** — 인수번호가 한 달에 99개뿐이라(이 스위트는 9906 을
+ * 쓴다) 한 시험 안에 여러 사례를 세운다.
+ * ============================================================================
+ */
+describe("loadRepairCaseFinalShipmentApprovalStates — 배지가 보는 묶음 조회", () => {
+  test("🔴 승인 · 반려 · 기록 없음 · 바뀐 건(STALE)을 한 번에 가른다", async () => {
+    const approvedId = await createTestCase();
+    const rejectedId = await createTestCase();
+    const untouchedId = await createTestCase();
+
+    // ── 승인이 끝난 건 ────────────────────────────────────────────────
+    await requestRepairCaseApproval(approvedId, "REPAIR_INSPECTION", engineerId, null);
+    await decideRepairCaseApproval(approvedId, "REPAIR_INSPECTION", "APPROVED", adminId, null);
+    await requestRepairCaseApproval(approvedId, "FINAL_SHIPMENT", engineerId, null);
+    const approved = await decideRepairCaseApproval(
+      approvedId,
+      "FINAL_SHIPMENT",
+      "APPROVED",
+      representativeId,
+      null
+    );
+    assert.equal(approved.ok, true, `setup approval failed: ${JSON.stringify(approved)}`);
+
+    // ── 반려된 건 ─────────────────────────────────────────────────────
+    await requestRepairCaseApproval(rejectedId, "REPAIR_INSPECTION", engineerId, null);
+    await decideRepairCaseApproval(rejectedId, "REPAIR_INSPECTION", "APPROVED", adminId, null);
+    await requestRepairCaseApproval(rejectedId, "FINAL_SHIPMENT", engineerId, null);
+    const rejected = await decideRepairCaseApproval(
+      rejectedId,
+      "FINAL_SHIPMENT",
+      "REJECTED",
+      representativeId,
+      "시험용 반려"
+    );
+    assert.equal(rejected.ok, true, `setup rejection failed: ${JSON.stringify(rejected)}`);
+
+    const states = await loadRepairCaseFinalShipmentApprovalStates([
+      approvedId,
+      rejectedId,
+      untouchedId,
+    ]);
+
+    // ① · ④
+    assert.equal(states.get(approvedId), "APPROVED");
+    assert.equal(states.get(rejectedId), "REJECTED");
+    assert.equal(
+      states.has(untouchedId),
+      false,
+      "결재 기록이 없는 건이 지도에 들어왔다 — 받는 쪽이 `?? null` 로 메우는 약속이 깨진다"
+    );
+
+    // ② 🔴 **검수 승인을 최종 출하 승인으로 읽지 않는다.** 반려된 건에 검수 승인을
+    //    한 번 더 올려 **더 최근 행**으로 만든다 — 종류로 안 좁히면 그 행이 뽑혀
+    //    상태가 PENDING 으로 뒤집힌다.
+    const laterInspection = await requestRepairCaseApproval(
+      rejectedId,
+      "REPAIR_INSPECTION",
+      engineerId,
+      null
+    );
+    assert.equal(laterInspection.ok, true, `setup later inspection failed: ${JSON.stringify(laterInspection)}`);
+    const afterInspection = await loadRepairCaseFinalShipmentApprovalStates([rejectedId]);
+    assert.equal(
+      afterInspection.get(rejectedId),
+      "REJECTED",
+      "더 최근의 수리 검수 승인 행이 최종 출하 승인으로 읽혔다"
+    );
+
+    // ③ 🔴 **판 번호는 이 조회가 조인해 읽는다.** 건이 바뀌면 그 승인은 지금
+    //    내용에 대한 것이 아니다 — 배지도 거기서 사라져야 한다.
+    const [current] = await db
+      .select({ version: repairCases.version })
+      .from(repairCases)
+      .where(eq(repairCases.id, approvedId));
+    assert.ok(current, "표본 건을 못 읽었다");
+    await db
+      .update(repairCases)
+      .set({ version: current.version + 1 })
+      .where(eq(repairCases.id, approvedId));
+
+    const afterEdit = await loadRepairCaseFinalShipmentApprovalStates([approvedId]);
+    assert.equal(
+      afterEdit.get(approvedId),
+      "STALE",
+      "건이 바뀌었는데도 「승인 완료」다 — 배지가 거짓을 말한다"
+    );
+  });
+
+  test("🔵 빈 묶음은 질의 없이 빈 지도다", async () => {
+    const states = await loadRepairCaseFinalShipmentApprovalStates([]);
+    assert.equal(states.size, 0);
+  });
+});

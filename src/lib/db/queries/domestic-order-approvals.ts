@@ -176,12 +176,9 @@ function toRow(
  * 쓴다(2026-11-06).
  *
  * 🔴 **줄마다 getDomesticOrderApprovalProgress 를 부르지 않는다.** 그러면 줄 수만큼
- * 질의가 두 번씩 돈다(N+1). 여기서는 **질의 하나**로 그 줄들의 결재 행을 통째로 걷어
- * 와 각 줄의 최신 한 건만 남긴다.
- *
- * 🔴 **「최신」의 정의가 저쪽과 같아야 한다** — `requested_at` 내림차순의 첫 행이다.
- * 갈리면 같은 줄이 목록과 상세에서 다른 상태로 보인다. 그래서 정렬을 SQL 에 걸고
- * **먼저 온 것이 이기게** 담는다(아래 `if (map.has(...)) continue`).
+ * 질의가 두 번씩 돈다(N+1). 질의를 하나로 묶는 일과 「최신」의 정의는 아래
+ * `loadDomesticOrderApprovalUnitStates` 가 쥐고 있고, 이 함수는 그 결과를 줄 하나로
+ * **접기만** 한다(2026-11-08 에 갈라졌다 — 그 함수의 머리말에 까닭이 있다).
  *
  * 🔴 **판 번호는 부르는 쪽이 준다.** 목록이 이미 그 줄들을 읽어 왔고(`version` 이
  * 거기 실려 있다), 여기서 다시 읽으면 같은 표를 한 요청에 두 번 훑는다. 낡은 값을
@@ -192,21 +189,59 @@ function toRow(
  * (domain/misc-case-status.ts 가 그 둘을 같게 다룬다).
  */
 export async function loadDomesticOrderApprovalStates(
-  orders: readonly {
-    id: string;
-    version: number;
-    /**
-     * 🔴 그 줄의 납기요청일 행들 — **길이만 쓴다**(2026-11-08). 승인이 회차마다 서므로
-     * 「이 줄의 상태」는 회차 수를 알아야 접을 수 있다: 회차가 둘인데 1차만 승인됐으면
-     * 그 줄은 아직 승인 완료가 아니다.
-     *
-     * 🔵 목록이 이미 읽어 온 값을 그대로 넘긴다(DomesticOrderListItem.dueDates) —
-     * 여기서 다시 세면 같은 표를 한 요청에 두 번 훑는다.
-     */
-    dueDates: readonly unknown[];
-  }[]
+  orders: readonly DomesticOrderApprovalStateInput[]
 ): Promise<Map<string, ShipmentApprovalState>> {
   const states = new Map<string, ShipmentApprovalState>();
+  const perOrder = await loadDomesticOrderApprovalUnitStates(orders);
+  for (const [orderId, units] of perOrder) {
+    // 🔴 접는 규칙은 여기 적지 않는다 — 머리 카드 배지·완료 관문과 같은 함수다.
+    states.set(orderId, foldDomesticOrderApprovalStates(units));
+  }
+  return states;
+}
+
+/** 위 두 함수가 함께 받는 줄 하나. 🔴 **읽는 칸이 셋뿐**인 것이 그대로 울타리다. */
+export type DomesticOrderApprovalStateInput = {
+  id: string;
+  version: number;
+  /**
+   * 🔴 그 줄의 납기요청일 행들 — **길이만 쓴다**(2026-11-08). 승인이 회차마다 서므로
+   * 「이 줄의 상태」는 회차 수를 알아야 접을 수 있다: 회차가 둘인데 1차만 승인됐으면
+   * 그 줄은 아직 승인 완료가 아니다.
+   *
+   * 🔵 목록이 이미 읽어 온 값을 그대로 넘긴다(DomesticOrderListItem.dueDates) —
+   * 여기서 다시 세면 같은 표를 한 요청에 두 번 훑는다.
+   */
+  dueDates: readonly unknown[];
+};
+
+/**
+ * ============================================================================
+ * 🔴 여러 기타건의 **회차별** 승인 상태를 한 번에 (2026-11-08)
+ * ============================================================================
+ * 바로 위 `loadDomesticOrderApprovalStates` 가 **접기 전에 보던 그 값**이다. 접는
+ * 쪽을 이 함수 위에 다시 세운 까닭은 **부르는 자리가 둘로 갈렸기 때문**이다:
+ *
+ *  · 기타건 현황 목록 · 기타건 상세 머리 카드 → **접은 값 하나**가 필요하다.
+ *  · 🔴 **내자 정리의 회차별 [완료 처리] 단추 옆** → **회차마다 하나씩** 필요하다
+ *    (사용자 요구 — 단추가 회차마다이니 배지도 회차마다다).
+ *
+ * 🔴 **접는 일을 두 벌로 만들지 않는 것이 요점이다.** 목록이 제 손으로 접기
+ * 시작하면 같은 줄이 기타건 현황에서는 「출하 대기」인데 내자 정리의 단추는
+ * 거절하는 날이 온다 — foldDomesticOrderApprovalStates 의 그 주석 그대로다.
+ *
+ * 🔵 **질의는 여전히 하나**다(N+1 아님). 접는 자리가 한 층 올라갔을 뿐
+ * 2026-11-08 아침까지 이 파일이 하던 일과 한 줄도 다르지 않다.
+ *
+ * 🔴 **결재 기록이 한 줄도 없는 기타건은 지도에 넣지 않는다** — 「없음」을
+ * 돌려주지 않고 아예 뺀다. 받는 쪽이 빈 배열로 메우면 그것이 곧 전부
+ * NOT_REQUESTED 다(위 접기 함수가 빈 목록을 NOT_REQUESTED 로 답한다).
+ * ============================================================================
+ */
+export async function loadDomesticOrderApprovalUnitStates(
+  orders: readonly DomesticOrderApprovalStateInput[]
+): Promise<Map<string, ShipmentApprovalState[]>> {
+  const states = new Map<string, ShipmentApprovalState[]>();
   if (orders.length === 0) return states;
 
   const byId = new Map(orders.map((order) => [order.id, order]));
@@ -258,8 +293,9 @@ export async function loadDomesticOrderApprovalStates(
     for (let rowOrder = 1; rowOrder <= unitCount; rowOrder += 1) {
       perUnit.push(bucket.get(rowOrder) ?? "NOT_REQUESTED");
     }
-    // 🔴 접는 규칙도 여기 새로 적지 않는다 — 머리 카드 배지·완료 관문과 같은 함수다.
-    states.set(orderId, foldDomesticOrderApprovalStates(perUnit));
+    // 🔴 **차례가 곧 회차 번호다**(자리 0 이 1차). 부르는 쪽이 단추 옆에 배지를
+    //    붙일 때 이 차례로 짝을 맞춘다 — 뒤섞으면 2차의 승인이 1차 단추 옆에 뜬다.
+    states.set(orderId, perUnit);
   }
 
   return states;

@@ -193,7 +193,14 @@ describe("🔴 머리 — 상태 배지 (2026-11-06 사용자 요구)", () => {
     assert.ok(layout.includes("getDomesticOrderApprovalUnits(id)"), layout);
     assert.ok(!layout.includes("getDomesticOrderApprovalProgress"), layout);
     assert.ok(layout.includes("resolveMiscCaseStatus({"), layout);
-    assert.match(layout, /<DomesticOrderDetailHeader row=\{row\} status=\{status\} \/>/);
+    // 🔴 **2026-11-08 에 인자가 하나 더 늘었다**(finalShipmentApproved — [최종 출하
+    //    승인 완료] 배지). 뜻은 위와 같다: 레이아웃이 안 넘기면 그 배지도 영영 안 뜬다.
+    //    그 배지가 상태 배지와 **따로** 가는 까닭은 머리 카드의 주석에 있다(완료된
+    //    줄에서 상태 배지가 「완료」로 덮여 승인 사실이 사라진다).
+    assert.match(
+      layout,
+      /<DomesticOrderDetailHeader row=\{row\} status=\{status\} finalShipmentApproved=\{finalShipmentApproved\} \/>/
+    );
     // 🔴 판정을 레이아웃이 다시 적지 않는다 — 목록과 같은 함수 하나에 묻는다.
     assert.equal(count(layout, "completedAt !== null"), 0, layout);
   });
