@@ -126,7 +126,31 @@ export async function listArchiveQuoteNumbers(
  *
  * 🔴 내자 줄이 **아예 없는** 건(또는 완료된 줄만 있는 건)은 이 표에 자리가 없다
  * (queries/domestic-orders.ts 의 listQuoteInfoForRepairCases). 그때도 발행일이 없는 것이라
- * **보지 않는다** — 그 건의 번호 칸은 빈 채로 남는다.
+ * **보지 않는다** — 그 건의 번호 칸은 빈 채로 남는다. 🔴 그때는 아래 repairCaseQuoteNumbers
+ * 의 **첫 줄**(적어 둔 번호를 그대로 내는 자리)도 `info` 가 없어 함께 막혀, 결과가 **빈
+ * 배열**이다.
+ *
+ * ── 🔴 그 빈 칸이 왜 괜찮은가 (2026-11-11 에 코드를 읽어 확인) ──────────────
+ * 내자 줄 완료와 수리 건 출하 완료는 사용자 결정 2026-10-18 로 **양방향으로 묶여 있다** —
+ * server/services/complete-domestic-order.ts 가 [완료 처리] 한 번으로 붙어 있는 수리 건도
+ * 출하 완료로 넘기고, server/services/release-domestic-order.ts 가 그 **거울**이다. 두
+ * 서비스가 **수리 건을 먼저** 손대는 까닭이 바로 「내자 줄은 완료, 수리 건은 아직」이라는
+ * 반쪽을 피하는 것이다(완료된 줄에는 [완료 처리] 단추가 없어 복구할 길이 없다 — 그쪽
+ * 머리말). 🔵 운영 실측 2026-11-11 — 그런 건은 **0 건**이다. 게다가 이 함수를 쓰는 두
+ * 화면은 출하 완료된 건을 **애초에 목록에서 뺀다**(고객 안내 현황의
+ * `status !== "SHIPMENT_COMPLETED"` · 주간 보고의 `is distinct from 'SHIPMENT_COMPLETED'`).
+ *
+ * ── 🔴 발주서는 **다르다** (2026-11-11) ────────────────────────────────────
+ * 빈 채로 두는 것은 **고객 안내 현황 · 주간 보고의 견적번호 칸**뿐이다. 수리 건 상세
+ * [발주서] 탭은 **출하 완료된 건에서도 열려** 같은 원인으로 실제 피해가 났고, 그래서 완료
+ * 여부를 안 보는 전용 조회를 따로 두었다(queries/domestic-orders.ts 의
+ * listRepairCaseIdsWithOrderIssuedDate). 🔴 **지금 견적번호와 발주서는 서로 다른 규칙으로
+ * 돈다.** 🔵 수리 건 상세 [견적서] 탭은 또 달라서 이 관문을 아예 지나지 않는다 —
+ * api/repair-cases/[id]/quote-archive-folders 에는 발행일 관문도 위 조회도 없다.
+ *
+ * 🔵 짝이 되는 글이 queries/domestic-orders.ts 의 RepairCaseQuoteInfo 머리말에 있다.
+ * 🔴 2026-11-11 까지 그쪽에는 「부르는 쪽은 그때 공유폴더에서 번호를 읽는다」고 **거꾸로**
+ * 적혀 있었다 — 두 글이 서로를 가리키는 까닭이다.
  */
 function readsArchive(info: QuoteNumberInfo | undefined): boolean {
   return filledText(info?.quoteNumber) === null && filledText(info?.quoteIssuedDate) !== null;
