@@ -2,8 +2,10 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import {
+  isShortcutActive,
   selectionSummary,
   toggleSelection,
+  toggleShortcut,
   watchDropdownDismiss,
   type CheckboxFilterOption,
 } from "./checkbox-filter-dropdown";
@@ -42,11 +44,15 @@ export type CheckboxFilterShortcut<T extends string> = {
   /** 단추에 적히는 글자(예: 「입고품 전체」). */
   label: string;
   /**
-   * 누르면 **이 값들로 갈아 끼운다**(더하는 것이 아니다).
+   * 누르면 **이 값들로 갈아 끼운다**(더하는 것이 아니다). 갈아 끼운 뒤에 남는
+   * 것은 그냥 「여럿 고른 상태」라, 거기서 하나씩 빼거나 더할 수 있다 — 이 단추는
+   * 체크 칸이 아니다(2026-11-11 사용자 결정).
    *
-   * 🔴 누른 뒤에 남는 것은 그냥 「여럿 고른 상태」다 — 이 단추가 체크된 채로
-   *    남지 않는다. 그래서 사용자는 거기서 하나씩 빼거나 더할 수 있고,
-   *    복수 선택과 모순이 생기지 않는다(2026-11-11 사용자 결정).
+   * 🔴 다만 **눌린 토글**이다(2026-11-11 사용자 추가 요청). 고른 값이 이 값들과
+   *    꼭 같으면 단추가 눌린 모습이 되고, 그때 누르면 체크가 **다 풀린다.**
+   *    눌렸는지는 누른 적이 있는지로 기억하지 않고 **지금 고른 값으로** 판정한다
+   *    — 손으로 하나씩 체크해 같은 묶음을 만들어도 같게 보여야 하기 때문이다
+   *    (값 쪽 파일의 isShortcutActive).
    */
   values: readonly T[];
 };
@@ -74,6 +80,18 @@ const triggerClass =
 const labelClass = "text-xs text-zinc-500 dark:text-zinc-400";
 
 /**
+ * 단축 단추의 모양. **눌린 모습과 안 눌린 모습이 눈에 띄게 달라야** 한다 —
+ * aria-pressed 만 바뀌고 색이 그대로면 화면을 보는 사람은 토글인 줄 모른다.
+ * 색은 이 저장소의 다른 토글 단추(주간보고의 「견적서 번호 보기」)와 같은 결로
+ * 맞췄다: 눌리면 바탕이 진해지고 글자가 뒤집힌다.
+ */
+const shortcutBaseClass = "w-full px-3 py-1.5 text-left text-sm font-medium transition-colors";
+const shortcutIdleClass =
+  "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800";
+const shortcutPressedClass =
+  "bg-primary-900 text-white hover:bg-primary-800 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200";
+
+/**
  * **펼쳤을 때 보이는 목록.** 따로 내보내는 까닭은 시험이다 — 아래 본체는 접힌
  * 채로 태어나고(useState(false)) 정적 렌더(renderToStaticMarkup)는 효과도
  * 누르기도 돌리지 못하므로, 한 덩어리로 두면 **펼친 모습을 영영 못 잰다**
@@ -96,6 +114,9 @@ export function CheckboxFilterPanel<T extends string>({
   shortcut?: CheckboxFilterShortcut<T>;
 }) {
   const pickedValues = new Set<T>(selected);
+  // 🔴 「눌렀는가」가 아니라 **「지금 고른 것이 그 묶음인가」**다. 손으로 하나씩
+  //    체크해 같은 묶음을 만든 사람도 눌린 모습을 봐야 한다(값 쪽 파일의 주석).
+  const shortcutPressed = shortcut ? isShortcutActive(shortcut.values, selected) : false;
 
   return (
     // 🔴 자리를 차지하지 않고 **떠 있어야** 한다. 흐름에 끼면 펼칠 때마다 격자
@@ -112,8 +133,12 @@ export function CheckboxFilterPanel<T extends string>({
         <>
           <button
             type="button"
-            className="w-full px-3 py-1.5 text-left text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800"
-            onClick={() => onChange([...shortcut.values])}
+            // 읽어 주는 프로그램에도 「눌린 토글」로 전해져야 한다. 글자는 늘
+            // 그대로다(「입고품 전체」) — 눌렸을 때 「해제」로 바꾸면 사용자가
+            // 지정한 이름이 화면에서 사라진다.
+            aria-pressed={shortcutPressed}
+            className={`${shortcutBaseClass} ${shortcutPressed ? shortcutPressedClass : shortcutIdleClass}`}
+            onClick={() => onChange(toggleShortcut(shortcut.values, selected))}
           >
             {shortcut.label}
           </button>

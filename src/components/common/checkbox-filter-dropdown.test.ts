@@ -1,10 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  isShortcutActive,
   orderSelection,
   selectionLabels,
   selectionSummary,
   toggleSelection,
+  toggleShortcut,
   watchDropdownDismiss,
   type CheckboxFilterOption,
   type DropdownDismissHandle,
@@ -107,6 +109,100 @@ test("선택지에 없는 값은 버리지 않고 뒤에 둔다", () => {
     "REPAIRING",
     "GONE",
   ]);
+});
+
+// ─────────────────────────────────────────────── 단축 단추가 눌렸는가 · 누르면
+//
+// 2026-11-11 사용자 추가 요청: 손으로 [출하 완료]만 빼고 다 체크해도 [입고품 전체]
+// 단추가 토글된 모습이 되고, 토글된 그 단추를 누르면 체크가 다 풀려야 한다.
+// 그래서 판정은 「눌렀는가」가 아니라 **「지금 고른 것이 그 묶음인가」**다.
+
+/** 화면에서는 IN_HOUSE_STATUSES 가 들어온다 — 여기서는 그 모양만 흉내 낸다. */
+const IN_HOUSE = ["RECEIVED", "REPAIRING", "INSPECTING", "WAITING_SHIPMENT"];
+
+test("🔵 표본부터 본다 — 단축 묶음이 하나뿐이면 아래 「집합으로 견준다」가 공짜로 통과한다", () => {
+  assert.ok(IN_HOUSE.length > 1, "표본이 하나뿐이면 차례를 섞어도 같은 배열이다");
+  assert.ok(!IN_HOUSE.includes("SHIPPED"), "출하 완료가 단축 묶음에 들어가면 시험 전체의 전제가 깨진다");
+});
+
+test("🔴 꼭 같은 묶음이면 눌림 — 단추로 채웠든 손으로 하나씩 체크했든", () => {
+  // 사용자가 본 것이 이것이다: 출하 완료만 빼고 손으로 다 체크했는데 단추가
+  // 아무 표시도 없었다. 누른 적이 있는지를 따로 기억하면 영영 그렇게 보인다.
+  assert.equal(isShortcutActive(IN_HOUSE, IN_HOUSE), true);
+  const byHand = ["RECEIVED", "REPAIRING", "INSPECTING", "WAITING_SHIPMENT"];
+  assert.equal(isShortcutActive(IN_HOUSE, byHand), true, "손으로 같은 묶음을 만들었는데 안 눌렸다");
+});
+
+test("🔴 차례가 달라도 눌림 — 집합으로 견준다", () => {
+  const shuffled = ["WAITING_SHIPMENT", "RECEIVED", "INSPECTING", "REPAIRING"];
+  assert.notDeepEqual(shuffled, IN_HOUSE, "차례가 같으면 이 시험이 아무것도 안 잰다");
+  assert.equal(isShortcutActive(IN_HOUSE, shuffled), true);
+  assert.equal(isShortcutActive(IN_HOUSE, [...IN_HOUSE].reverse()), true);
+});
+
+test("🔴 하나라도 빠지면 안 눌림", () => {
+  assert.equal(isShortcutActive(IN_HOUSE, ["RECEIVED", "REPAIRING", "INSPECTING"]), false);
+  assert.equal(isShortcutActive(IN_HOUSE, ["RECEIVED"]), false);
+});
+
+test("🔴 하나라도 더 있으면 안 눌림 — 출하 완료까지 체크하면 다른 조건이다", () => {
+  assert.equal(isShortcutActive(IN_HOUSE, [...IN_HOUSE, "SHIPPED"]), false);
+  // 선택지에 없는 값이 섞여 있어도 마찬가지다(그 값이 목록을 거르고 있다).
+  assert.equal(isShortcutActive(IN_HOUSE, [...IN_HOUSE, "GONE"]), false);
+});
+
+test("🔴 다른 묶음은 수가 같아도 안 눌림 — 개수만 세면 안 된다", () => {
+  const sameSize = ["RECEIVED", "REPAIRING", "INSPECTING", "SHIPPED"];
+  assert.equal(sameSize.length, IN_HOUSE.length, "크기가 다르면 이 시험이 개수 비교와 구분이 안 된다");
+  assert.equal(isShortcutActive(IN_HOUSE, sameSize), false);
+});
+
+test("🔴 하나도 안 고른 상태는 안 눌림 — 평상시 화면이 늘 눌린 모습이면 안 된다", () => {
+  assert.equal(isShortcutActive(IN_HOUSE, []), false);
+});
+
+test("🔴 단축 값이 빈 배열이어도 빈 선택을 눌림으로 보지 않는다", () => {
+  // 집합으로만 견주면 빈 것끼리 「같다」가 되어, 아무것도 안 고른 평상시 화면에서
+  // 단추가 늘 눌린 모습이 된다 — 게다가 누르면 또 빈 배열이라 죽은 단추가 된다.
+  assert.equal(isShortcutActive([], []), false);
+  assert.equal(isShortcutActive([], ["RECEIVED"]), false);
+});
+
+test("🔴 눌린 상태에서 누르면 전부 풀린다 — 빈 배열(= 전체)", () => {
+  assert.deepEqual(toggleShortcut(IN_HOUSE, IN_HOUSE), []);
+  // 차례가 뒤섞여 들어와도 같다 — 판정이 집합이므로 누르기도 집합을 따른다.
+  assert.deepEqual(toggleShortcut(IN_HOUSE, [...IN_HOUSE].reverse()), []);
+});
+
+test("🔴 안 눌린 상태에서 누르면 단축 값들로 갈아 끼운다 — 더하는 것이 아니다", () => {
+  assert.deepEqual(toggleShortcut(IN_HOUSE, []), IN_HOUSE);
+  // 출하 완료만 골라 둔 사람이 눌러도 「전부 + 출하 완료」가 아니라 단축 값들이다.
+  assert.deepEqual(toggleShortcut(IN_HOUSE, ["SHIPPED"]), IN_HOUSE);
+  assert.deepEqual(toggleShortcut(IN_HOUSE, [...IN_HOUSE, "SHIPPED"]), IN_HOUSE);
+});
+
+test("🔴 눌렀다 또 누르면 제자리로 — 꺼짐과 켜짐이 번갈아 간다", () => {
+  const filled = toggleShortcut(IN_HOUSE, []);
+  assert.equal(isShortcutActive(IN_HOUSE, filled), true, "채운 직후인데 안 눌린 모습이다");
+  const cleared = toggleShortcut(IN_HOUSE, filled);
+  assert.deepEqual(cleared, []);
+  assert.equal(isShortcutActive(IN_HOUSE, cleared), false);
+});
+
+test("🔴 누를 때마다 새 배열이다 — 같은 배열을 돌려주면 화면이 안 바뀐다", () => {
+  const filled = toggleShortcut(IN_HOUSE, []);
+  assert.notEqual(filled, IN_HOUSE, "단축 값 배열을 그대로 돌려주면 부르는 쪽이 그것을 고칠 수 있다");
+  const before = [...IN_HOUSE];
+  toggleShortcut(IN_HOUSE, before);
+  assert.deepEqual(before, IN_HOUSE, "받은 배열이 바뀌었다");
+});
+
+test("체크를 하나 빼면 눌린 모습이 바로 풀린다 — 두 함수가 같은 잣대를 쓴다", () => {
+  const filled = toggleShortcut(IN_HOUSE, []);
+  const minusOne = toggleSelection(STATUS_OPTIONS, filled, "REPAIRING");
+  assert.equal(isShortcutActive(IN_HOUSE, minusOne), false);
+  // 도로 넣으면 다시 눌린 모습 — 뺐다 넣었다고 어긋난 채로 남지 않는다.
+  assert.equal(isShortcutActive(IN_HOUSE, toggleSelection(STATUS_OPTIONS, minusOne, "REPAIRING")), true);
 });
 
 // ─────────────────────────────────────────────── 바깥 누르기 · Esc 로 접기

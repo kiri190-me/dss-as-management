@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import CheckboxFilterDropdown, { CheckboxFilterPanel } from "./CheckboxFilterDropdown";
 import type { CheckboxFilterOption } from "./checkbox-filter-dropdown";
@@ -144,6 +145,119 @@ test("🔴 단축 단추가 없어도 그려진다 — 뒤 조각의 여섯 중 
   assert.ok(html.includes("수리 중"), "단축 단추가 없으면 목록까지 안 그려졌다");
   assert.equal((html.match(/type="checkbox"/g) ?? []).length, OPTIONS.length);
   assert.equal((html.match(/<button/g) ?? []).length, 0, "없는 단축 단추가 그려졌다");
+  // 단축이 없는 필터는 이 조각(토글)에 아무 영향도 받지 않는다.
+  assert.ok(!html.includes("aria-pressed"), "단축 단추가 없는데 눌림 표시가 그려졌다");
+});
+
+// ── 단축 단추가 **눌린 모습**인가 (2026-11-11 사용자 추가 요청) ─────────────
+//
+// 눌렸는지는 지금 고른 값으로만 판정한다(값 쪽 시험이 그 규칙을 본다). 여기서는
+// **그 판정이 화면에 실제로 나타나는가**를 본다 — 읽어 주는 프로그램에는
+// aria-pressed 로, 눈에는 색으로.
+
+/** 펼친 목록에서 단축 단추의 여는 태그와 그 class 를 뽑는다. */
+function shortcutButton(html: string) {
+  const tag = (html.match(/<button[^>]*>/) ?? [])[0];
+  assert.ok(tag, "단축 단추를 못 찾았다 — 아래 단언이 공짜로 통과한다");
+  const className = (tag.match(/class="([^"]*)"/) ?? [])[1];
+  assert.ok(className, `단축 단추에 class 가 아예 없다: ${tag}`);
+  return { tag, className };
+}
+
+test("🔴 고른 것이 단축 값과 꼭 같으면 눌린 모습이다 — 손으로 하나씩 체크해도 마찬가지", () => {
+  const { tag } = shortcutButton(panel([...SHORTCUT.values], SHORTCUT));
+  assert.match(tag, /aria-pressed="true"/);
+  // 차례를 섞어도 같다 — 집합으로 견주는지는 값 쪽 시험이 더 자세히 본다.
+  const shuffled = [...SHORTCUT.values].reverse();
+  assert.match(shortcutButton(panel(shuffled, SHORTCUT)).tag, /aria-pressed="true"/);
+});
+
+test("🔴 하나 빠지거나 하나 더 있으면 안 눌린 모습이다", () => {
+  assert.match(shortcutButton(panel([], SHORTCUT)).tag, /aria-pressed="false"/);
+  assert.match(shortcutButton(panel(["RECEIVED"], SHORTCUT)).tag, /aria-pressed="false"/);
+  assert.match(
+    shortcutButton(panel([...SHORTCUT.values, "SHIPPED"], SHORTCUT)).tag,
+    /aria-pressed="false"/
+  );
+});
+
+test("🔴 눌린 모습과 안 눌린 모습은 **색이 다르다** — aria-pressed 만 바뀌면 눈으로는 못 본다", () => {
+  const pressed = shortcutButton(panel([...SHORTCUT.values], SHORTCUT)).className;
+  const idle = shortcutButton(panel([], SHORTCUT)).className;
+  assert.notEqual(pressed, idle, "두 모습의 class 가 같다 — 화면을 보는 사람은 토글인 줄 모른다");
+
+  // 🔵 「다르기만」 하면 글자 굵기처럼 눈에 잘 안 띄는 차이로도 통과한다. 눌린
+  //    쪽에는 **마우스를 얹지 않아도 보이는** 바탕색이 있어야 한다 — 평상시
+  //    바탕색만 세려고 hover 쪽 낱말을 먼저 걷어낸다.
+  const restingBackgrounds = (className: string) =>
+    className
+      .split(/\s+/)
+      .filter((token) => !token.includes("hover:"))
+      .filter((token) => /(^|:)bg-/.test(token));
+  assert.ok(restingBackgrounds(pressed).length > 0, `눌린 쪽에 바탕색이 없다: ${pressed}`);
+  assert.equal(
+    restingBackgrounds(idle).length,
+    0,
+    `안 눌린 쪽에 평상시 바탕색이 붙었다 — 둘이 안 갈린다: ${idle}`
+  );
+});
+
+// ── 단축 단추를 **눌렀을 때** 무엇이 넘어가는가 ────────────────────────────
+//
+// 정적 렌더(renderToStaticMarkup)는 글자만 뱉고 누르기를 돌리지 못한다. 값 쪽
+// 시험이 toggleShortcut 의 규칙을 보지만, **화면이 그 함수를 실제로 부르는가**는
+// 거기서 못 본다 — 옛 코드(늘 단축 값으로 갈아 끼우기)로 되돌려도 위 시험은
+// aria-pressed 만 보므로 전부 통과한다. 그래서 여기서는 컴포넌트 함수를 그냥
+// **불러서** 돌아온 element 나무에서 단추를 찾아 onClick 을 직접 부른다
+// (CheckboxFilterPanel 은 훅을 하나도 안 쓰므로 이렇게 부를 수 있다).
+
+type ButtonProps = { onClick?: () => void; children?: ReactNode };
+
+function buttonsIn(node: ReactNode): ButtonProps[] {
+  if (Array.isArray(node)) return node.flatMap((child) => buttonsIn(child as ReactNode));
+  if (!isValidElement(node)) return [];
+  const props = node.props as { children?: ReactNode };
+  const inner = buttonsIn(props.children);
+  return node.type === "button" ? [props as ButtonProps, ...inner] : inner;
+}
+
+/** 단축 단추를 누른 뒤 onChange 에 넘어온 값들. */
+function pressShortcut(selected: string[]): string[][] {
+  const given: string[][] = [];
+  const tree = CheckboxFilterPanel({
+    panelId: "p",
+    labelId: "l",
+    options: OPTIONS,
+    selected,
+    onChange: (next) => given.push(next),
+    shortcut: SHORTCUT,
+  });
+  const buttons = buttonsIn(tree);
+  assert.equal(buttons.length, 1, "단축 단추 하나를 못 찾았다 — 아래 단언이 공짜로 통과한다");
+  assert.ok(buttons[0].onClick, "단축 단추에 누르기 동작이 아예 없다");
+  buttons[0].onClick?.();
+  return given;
+}
+
+test("🔴 눌린 단추를 또 누르면 체크가 다 풀린다 — 빈 배열(= 전체)이 넘어간다", () => {
+  assert.deepEqual(pressShortcut([...SHORTCUT.values]), [[]]);
+  // 손으로 차례를 뒤섞어 체크해 눌린 모습이 된 사람도 마찬가지다.
+  assert.deepEqual(pressShortcut([...SHORTCUT.values].reverse()), [[]]);
+});
+
+test("🔴 안 눌린 단추를 누르면 단축 값들로 갈아 끼운다 — 전과 같다", () => {
+  assert.deepEqual(pressShortcut([]), [SHORTCUT.values]);
+  assert.deepEqual(pressShortcut(["SHIPPED"]), [SHORTCUT.values]);
+  assert.deepEqual(pressShortcut([...SHORTCUT.values, "SHIPPED"]), [SHORTCUT.values]);
+});
+
+test("🔴 눌려도 글자는 그대로 「입고품 전체」다 — 사용자가 지정한 이름이 사라지면 안 된다", () => {
+  const html = panel([...SHORTCUT.values], SHORTCUT);
+  assert.ok(html.includes("입고품 전체"));
+  assert.ok(!html.includes("해제"), "눌렸다고 글자를 바꿨다");
+  // 눌린 뒤에도 체크박스 수는 선택지 수 그대로 — 단축 단추가 한 줄을 더하지 않는다.
+  assert.equal((html.match(/type="checkbox"/g) ?? []).length, OPTIONS.length);
+  assert.equal((html.match(/checked=""/g) ?? []).length, SHORTCUT.values.length);
 });
 
 test("🔴 단축 단추도 type=\"button\" 이다", () => {

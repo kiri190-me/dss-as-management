@@ -101,6 +101,58 @@ export function selectionSummary<T extends string>(
 }
 
 /**
+ * **단축 단추가 지금 눌려 있는가** — 고른 값들이 단축 값들과 꼭 같은가.
+ *
+ * 2026-11-11 사용자 추가 요청. 그 전에는 한 방향이었다: 누르면 값이 채워지고,
+ * 그 뒤에는 아무 표시도 없고 다시 눌러도 같은 값이 또 채워질 뿐이었다.
+ *
+ * 🔴 **누른 적이 있는지를 따로 기억하지 않는다.** 판정은 오직 지금 고른 값으로
+ *    한다 — 그래야 손으로 하나씩 체크해 같은 묶음을 만든 사람도, 단추로 한 번에
+ *    채운 사람도, 주소줄(`?status=IN_HOUSE`)로 들어온 사람도 **같은 모습**을
+ *    본다. 「눌렀다」를 따로 들고 있으면 세 길이 서로 다르게 보이고, 체크를
+ *    하나 뺐다가 도로 넣으면 모습이 어긋난 채로 남는다.
+ *
+ * 🔴 **차례는 안 본다.** 접수→수리중으로 누른 사람과 거꾸로 누른 사람은 같은
+ *    묶음을 고른 것이다. 그래서 길이와 포함 여부(집합)로만 견준다.
+ *
+ * 🔴 **단축 값이 비어 있으면 늘 꺼짐이다.** 빈 선택(= 전체)과 빈 단축을 집합으로
+ *    맞대면 「같다」가 되어, 아무것도 안 고른 평상시 화면에서 단추가 늘 눌린
+ *    모습이 된다. 그러면 누르는 순간 또 빈 배열이 되어 아무 일도 안 일어나는
+ *    죽은 단추가 된다.
+ */
+export function isShortcutActive<T extends string>(
+  shortcutValues: readonly T[],
+  selected: readonly T[]
+): boolean {
+  if (shortcutValues.length === 0) return false;
+  const picked = new Set<T>(selected);
+  const wanted = new Set<T>(shortcutValues);
+  // 같은 값이 두 번 적혀 있어도 Set 이 한 번으로 접어 주므로 크기 비교가 선다.
+  if (picked.size !== wanted.size) return false;
+  for (const value of wanted) if (!picked.has(value)) return false;
+  return true;
+}
+
+/**
+ * 단축 단추를 눌렀을 때의 **다음 값**.
+ *
+ * - 눌린 상태였으면 **빈 배열**(= 전체). 체크가 다 풀린다 — 토글된 단추를 다시
+ *   누르는 손은 「되돌리기」를 기대하지, 같은 값이 또 채워지기를 기대하지 않는다
+ *   (2026-11-11 사용자 요청의 뒤 절반이 이것이다).
+ * - 아니었으면 단축 값들로 **갈아 끼운다**(더하는 것이 아니다).
+ *
+ * 돌려주는 것은 늘 새 배열이다 — 받은 것을 그대로 돌려주면 React 가 같은 참조로
+ * 보고 다시 그리지 않는다.
+ */
+export function toggleShortcut<T extends string>(
+  shortcutValues: readonly T[],
+  selected: readonly T[]
+): T[] {
+  if (isShortcutActive(shortcutValues, selected)) return [];
+  return [...shortcutValues];
+}
+
+/**
  * 접을 수 있는 드롭다운 하나. **진짜 DOM 이 아니라 이 최소한의 모양**만 받는다.
  */
 export type DropdownDismissHandle = {
