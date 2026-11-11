@@ -25,6 +25,17 @@ import { resolveRepairCaseRequestedDueDate } from "./requested-due-date-link";
  * "Generator 전부"가 새로 된다. workflowType으로 들어오는 딥링크는 대시보드를
  * 포함해 한 군데도 없어서(2026-08-19 확인) 끊어질 링크도 없다.
  */
+
+/**
+ * 유·무상 필터가 고를 수 있는 값 — 실제 코드 넷에 **미지정**이 하나 더 붙는다.
+ *
+ * 🔴 "NONE" 은 DB 에 저장되는 코드가 아니다. billing_type 이 null 인 건(표에
+ *    "-" 로 나오는 그것)을 가리키는 **필터 전용 값**이다. BILLING_TYPE_CODES 에
+ *    끼워 넣지 않는 까닭이 그것이다 — 그 배열은 접수·수정 화면이 저장할 값을
+ *    뽑아 쓰는 자리라, 거기 섞이면 "미지정"이 실제로 저장될 길이 열린다.
+ */
+export type BillingTypeFilterValue = BillingType | "NONE";
+
 export type Filters = {
   query: string;
   /**
@@ -42,12 +53,39 @@ export type Filters = {
    *    없는 값이 저장·전이·표의 상태 칸으로 샐 길이 처음부터 없다.
    */
   statuses: readonly RepairStatus[];
-  /** productCategoryLabels가 만든 표시 문구("Generator" 등)와 그대로 비교한다. */
-  productCategory: "ALL" | string;
-  /** "NONE"은 유·무상이 아직 정해지지 않은 건만 — 표에 "-"로 나오는 그것이다. */
-  billingType: "ALL" | "NONE" | BillingType;
-  customerId: "ALL" | string;
-  priority: "ALL" | Priority;
+  /**
+   * 보고 싶은 제품군들. **여럿 고를 수 있다**(2026-11-11 사용자 개선요청 — 그
+   * 전에는 `"ALL" | string` 하나였다). 위 statuses 와 같은 규칙이다: **빈 배열이
+   * 「전체」**고, 고른 것이 있으면 그 제품군들의 합집합만 남는다.
+   *
+   * 🔴 견주는 대상은 코드가 아니라 **productCategoryLabels가 만든 표시 문구**
+   *    ("Generator" 등)다 — 제품군은 아직 DB 칸이 아니라 workflowType 에서
+   *    파생시킨 글자이기 때문이다(types.ts 의 PRODUCT_CATEGORY_OPTIONS 주석).
+   *    복수 선택이 되었다고 견주는 대상을 코드로 바꾸면, 선택지(그 글자)와
+   *    맞을 줄이 하나도 없어 목록이 조용히 빈다.
+   */
+  productCategories: readonly string[];
+  /**
+   * 보고 싶은 유·무상들. 빈 배열이 「전체」다.
+   *
+   * 🔴 **"NONE"(미지정)은 거르는 방식이 아니라 배열의 원소**다. 「입고품 전체」
+   *    (statuses 의 IN_HOUSE)와는 다르다 — 그쪽은 상태들로 펼쳐 넣는 단축이라
+   *    저장되지 않지만, 미지정은 **표에 "-" 로 나오는 실제로 고를 수 있는 한 줄**
+   *    이고 billing_type 이 null 인 건을 가리킨다. 그래서 다른 값과 **함께** 고를
+   *    수 있어야 한다("유상과 미지정" 같은 조합이 실제 쓰임이다).
+   */
+  billingTypes: readonly BillingTypeFilterValue[];
+  /**
+   * 보고 싶은 고객사 id 들. 빈 배열이 「전체」다.
+   *
+   * 선택지는 지금 화면에 올라와 있는 접수 건에서 뽑으므로(아래
+   * collectCustomerFilterOptions) 주소줄로 들어온 id 가 선택지에 없을 수 있다.
+   * 그래도 **버리지 않는다** — 걸린 조건이 화면에서 사라지면 사람이 풀 수 없다
+   * (체크박스 칸의 orderSelection 이 모르는 값을 뒤에 그대로 둔다).
+   */
+  customerIds: readonly string[];
+  /** 보고 싶은 우선순위들. 빈 배열이 「전체」다. */
+  priorities: readonly Priority[];
   overdueOnly: boolean;
   /** "YYYY-MM" 형식. 유효하지 않으면 null로 취급한다. */
   shipmentMonth: string | null;
@@ -118,8 +156,43 @@ export const IN_HOUSE_STATUSES: readonly RepairStatus[] = REPAIR_STATUS_CODES.fi
  */
 const IN_HOUSE_STATUS_ALIAS = "IN_HOUSE";
 
-/** 주소줄에서 상태 여럿을 잇는 글자: `?status=WAITING_PO,IN_REPAIR` */
-const STATUS_PARAM_SEPARATOR = ",";
+/**
+ * 주소줄에서 값 여럿을 잇는 글자: `?status=WAITING_PO,IN_REPAIR`
+ *
+ * 상태뿐 아니라 제품군·유·무상·고객사·우선순위가 **전부 같은 글자**를 쓴다
+ * (2026-11-11 복수 선택). 필터마다 다른 글자를 쓰면 주소를 손으로 적는 사람이
+ * 매번 확인해야 한다.
+ */
+const LIST_PARAM_SEPARATOR = ",";
+
+/**
+ * `?제품군=A,B` 꼴의 한 줄을 값 배열로. 상태 쪽(parseStatusesParam)과 **같은 결**
+ * 이다 — 앞뒤 공백을 걷어내고, 같은 값이 두 번 와도 한 번만 넣고, **모르는 값은
+ * 조용히 버린다.** 하나도 안 남으면 빈 배열, 곧 「전체」다.
+ *
+ * 상태 쪽과 합치지 않은 까닭은 그쪽에만 있는 것이 하나 있어서다: 「입고품 전체」
+ * 별칭을 상태 열하나로 **펼치는** 일. 그 특수한 한 줄을 이 일반 함수에 끌어들이면
+ * 다른 네 필터가 쓰지도 않는 갈래를 업고 다니게 된다.
+ *
+ * `isKnown` 은 **아는 값인가**를 판정한다. 고객사처럼 미리 정해진 목록이 없는
+ * 필터는 "비어 있지 않으면 안다"가 된다(선택지가 지금 화면의 줄에서 뽑히므로,
+ * 목록에 없는 id 라고 버리면 걸린 조건이 화면에서 사라진다).
+ */
+function parseListParam<T extends string>(
+  raw: string | null,
+  isKnown: (token: string) => boolean
+): T[] {
+  if (!raw) return [];
+
+  const picked: T[] = [];
+  for (const piece of raw.split(LIST_PARAM_SEPARATOR)) {
+    const token = piece.trim();
+    if (!token || !isKnown(token)) continue;
+    if (!picked.includes(token as T)) picked.push(token as T);
+  }
+
+  return picked;
+}
 
 /**
  * `?status=` 한 줄을 상태 배열로.
@@ -137,7 +210,7 @@ function parseStatusesParam(raw: string | null): RepairStatus[] {
     if (!picked.includes(status)) picked.push(status);
   };
 
-  for (const piece of raw.split(STATUS_PARAM_SEPARATOR)) {
+  for (const piece of raw.split(LIST_PARAM_SEPARATOR)) {
     const token = piece.trim();
     if (!token) continue;
     if (token === IN_HOUSE_STATUS_ALIAS) {
@@ -153,10 +226,10 @@ function parseStatusesParam(raw: string | null): RepairStatus[] {
 export const DEFAULT_FILTERS: Filters = {
   query: "",
   statuses: [],
-  productCategory: "ALL",
-  billingType: "ALL",
-  customerId: "ALL",
-  priority: "ALL",
+  productCategories: [],
+  billingTypes: [],
+  customerIds: [],
+  priorities: [],
   overdueOnly: false,
   shipmentMonth: null,
   myPendingApprovalOnly: false,
@@ -177,8 +250,17 @@ export function formatShipmentMonthLabel(month: string): string {
 
 /**
  * URLSearchParams로부터 초기 필터 상태를 만든다. 값이 허용된 코드 목록과
- * 일치하지 않으면 안전하게 기본값("ALL"/false/null)으로 무시한다 —
+ * 일치하지 않으면 안전하게 기본값(빈 배열/false/null)으로 무시한다 —
  * 서명 없는 쿼리스트링을 그대로 신뢰하지 않는다.
+ *
+ * 읽는 파라미터는 **아홉**이다(2026-11-11 실측):
+ *   status · productCategory · billingType · customerId · priority — 복수 선택이
+ *   되면서 전부 **쉼표로 여럿** 받는다(`?priority=HIGH,NORMAL`). 이름은 그대로
+ *   단수다: 대시보드·사이드바·즐겨찾기·메일에 남은 옛 링크가 전부 이 이름으로
+ *   오고, 값이 하나면 길이 1 짜리 배열이 되어 **전과 똑같이** 동작한다.
+ *   overdue · shipmentMonth · myApproval · longPendingPo — 전과 같다.
+ * 여기에 reportedSymptom 하나가 더 있는데, 그것만은 이 함수가 직접 읽지 않고
+ * reported-symptom-param.ts 에 통째로 맡긴다(아래 주석).
  */
 export function parseInitialFilters(searchParams: URLSearchParams): Filters {
   const status = searchParams.get("status");
@@ -198,17 +280,24 @@ export function parseInitialFilters(searchParams: URLSearchParams): Filters {
     // 카드가 거는 딥링크(?status=IN_HOUSE)도 이 자리를 지나 상태 열하나로 펼쳐진다
     // — 모르는 값은 조용히 버려지고, 하나도 안 남으면 빈 배열(= 전체)이다.
     statuses: parseStatusesParam(status),
-    productCategory:
-      productCategory && PRODUCT_CATEGORY_OPTIONS.includes(productCategory) ? productCategory : "ALL",
-    billingType:
-      billingType === "NONE" || (billingType && (BILLING_TYPE_CODES as readonly string[]).includes(billingType))
-        ? (billingType as "NONE" | BillingType)
-        : "ALL",
-    customerId: customerId ?? "ALL",
-    priority:
-      priority && (PRIORITY_CODES as readonly string[]).includes(priority)
-        ? (priority as Priority)
-        : "ALL",
+    // 아래 넷도 쉼표로 여럿 받는다(`?priority=HIGH,NORMAL`). 모르는 값은 조용히
+    // 버리고 하나도 안 남으면 빈 배열(= 전체)이다 — 주소줄은 사람이 손으로 고칠
+    // 수 있어서, 엉뚱한 값에 목록이 통째로 비면 안 된다.
+    productCategories: parseListParam(productCategory, (token) =>
+      PRODUCT_CATEGORY_OPTIONS.includes(token)
+    ),
+    // 🔴 "NONE"(미지정)도 그냥 받는다 — 거르는 방식이 아니라 고를 수 있는 한 줄이다.
+    billingTypes: parseListParam<BillingTypeFilterValue>(
+      billingType,
+      (token) => token === "NONE" || (BILLING_TYPE_CODES as readonly string[]).includes(token)
+    ),
+    // 🔴 고객사만 **아는 값인지 따지지 않는다.** 선택지가 지금 화면에 올라온
+    //    줄에서 뽑히므로(collectCustomerFilterOptions) 미리 맞대 볼 목록이 없다.
+    //    전에도 `customerId ?? "ALL"` 로 그대로 받았다 — 그 결을 그대로 둔다.
+    customerIds: parseListParam(customerId, (token) => token.length > 0),
+    priorities: parseListParam<Priority>(priority, (token) =>
+      (PRIORITY_CODES as readonly string[]).includes(token)
+    ),
     overdueOnly: overdue === "1" || overdue === "true",
     shipmentMonth: isValidShipmentMonth(shipmentMonth) ? shipmentMonth : null,
     myPendingApprovalOnly: myApproval === "1" || myApproval === "true",
@@ -279,15 +368,28 @@ export function applyFilters(
     if (filters.statuses.length > 0 && !filters.statuses.includes(row.effectiveStatus)) {
       return false;
     }
-    if (filters.productCategory !== "ALL" && row.productCategory !== filters.productCategory) return false;
-    // 유·무상이 안 정해진 건(billingType === null)은 "미지정"을 고를 때만 남는다.
-    // 어느 한쪽으로 추측해 넣지 않는다 — 표에도 "-"로 그대로 적는 값이다.
-    if (filters.billingType === "NONE" && row.billingType !== null) return false;
-    if (filters.billingType !== "ALL" && filters.billingType !== "NONE" && row.billingType !== filters.billingType) {
+    // 아래 넷도 상태와 같은 규칙이다(2026-11-11 복수 선택): 빈 배열이면 전부
+    // 지나가고, 고른 것이 있으면 그 값들의 **합집합**만 남는다. 조건끼리는 전처럼
+    // AND 로 겹친다 — 제품군 둘과 우선순위 하나를 고르면 "그 두 제품군 중 하나
+    // **이면서** 그 우선순위인" 줄이다.
+    //
+    // 🔴 견주는 대상은 전과 한 글자도 다르지 않다. 제품군은 표시 문구
+    //    (productCategoryLabels 가 만든 "Generator" 등)와 견주고, 고객사는 id 와
+    //    견준다. 복수 선택을 핑계로 여기를 코드/이름으로 바꾸면 선택지와 맞을 줄이
+    //    없어 목록이 조용히 빈다.
+    if (filters.productCategories.length > 0 && !filters.productCategories.includes(row.productCategory)) {
       return false;
     }
-    if (filters.customerId !== "ALL" && row.customerId !== filters.customerId) return false;
-    if (filters.priority !== "ALL" && row.priority !== filters.priority) return false;
+    // 유·무상이 안 정해진 건(billingType === null)은 "미지정"을 고를 때만 남는다.
+    // 어느 한쪽으로 추측해 넣지 않는다 — 표에도 "-"로 그대로 적는 값이다.
+    // 🔴 null 을 "NONE" 으로 **바꿔 놓고 한 번만 견준다.** 미지정을 따로 떼어
+    //    판정하면 "유상과 미지정을 함께" 고른 조합에서 둘 중 하나가 서로를
+    //    잡아먹는다(먼저 쓴 줄이 이긴다) — 그 조합이 실제 쓰임이다.
+    if (filters.billingTypes.length > 0 && !filters.billingTypes.includes(row.billingType ?? "NONE")) {
+      return false;
+    }
+    if (filters.customerIds.length > 0 && !filters.customerIds.includes(row.customerId)) return false;
+    if (filters.priorities.length > 0 && !filters.priorities.includes(row.priority)) return false;
     if (filters.overdueOnly && !row.effectiveIsOverdue) return false;
     // 앞뒤 공백을 걷어내고 글자 그대로 견준다 — 대시보드가 증상을 묶을 때 쓰는
     // 규칙과 같다(fault-symptom-breakdown.ts). 증상이 비어 있는 행은 어떤 값과도
@@ -320,12 +422,13 @@ export function applyFilters(
  *
  * 반환 타입이 Customer인 것은 RepairCaseFilters의 customers prop에 맞춘 것이다.
  * 접수 건 행에는 고객사 연락처가 없으므로(행의 contact*는 그 **접수 건**의 연락
- * 담당자이지 고객사 마스터가 아니다) 연락처 세 칸은 빈 문자열로 둔다 — 필터
- * <select>는 id와 name만 읽는다. 여기서 나온 객체를 연락처 용도로 쓰면 안 된다.
+ * 담당자이지 고객사 마스터가 아니다) 연락처 세 칸은 빈 문자열로 둔다 — 필터 칸은
+ * id와 name만 읽는다(2026-11-11 복수 선택이 되면서 <select> 가 체크박스 드롭다운이
+ * 되었지만 읽는 두 칸은 그대로다). 여기서 나온 객체를 연락처 용도로 쓰면 안 된다.
  *
  * 빈 값 규칙:
- * - customerId가 비어 있는 행은 건너뛴다. <option value="">는 "고르지 않음"과
- *   구분되지 않고, applyFilters가 ===로 맞출 값도 되지 못한다. 타입상으로는
+ * - customerId가 비어 있는 행은 건너뛴다. 값이 빈 선택지는 "고르지 않음"과
+ *   구분되지 않고, applyFilters가 맞출 값도 되지 못한다. 타입상으로는
  *   customerId가 반드시 있는 string이지만, 이 함수는 화면에 실제로 떠 있는 값을
  *   그대로 받으므로 방어한다.
  * - 이름이 비어 있으면 id를 대신 적는다. 그 행을 버리지 않는 이유는, 그 고객사의

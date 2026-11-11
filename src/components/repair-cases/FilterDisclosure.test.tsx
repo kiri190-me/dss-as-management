@@ -67,10 +67,10 @@ test("countHiddenActiveFilters는 감춰지는 조건만 하나씩 센다", () =
     countHiddenActiveFilters({
       ...DEFAULT_FILTERS,
       statuses: ["IN_REPAIR"],
-      productCategory: "Generator",
-      billingType: "PAID",
-      customerId: "c-1",
-      priority: "HIGH",
+      productCategories: ["Generator"],
+      billingTypes: ["PAID"],
+      customerIds: ["c-1"],
+      priorities: ["HIGH"],
       overdueOnly: true,
     }),
     6
@@ -78,9 +78,52 @@ test("countHiddenActiveFilters는 감춰지는 조건만 하나씩 센다", () =
 });
 
 test("유·무상 '미지정'도 걸린 조건 하나로 센다", () => {
-  // "ALL이 아니면 걸린 것"이라는 규칙에서 NONE만 빠지면, 미지정만 훑는 동안
-  // 접힌 필터가 "0개 적용됨"이라고 말하게 된다.
-  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, billingType: "NONE" }), 1);
+  // 미지정만 훑는 동안 접힌 필터가 "0개 적용됨"이라고 말하면 안 된다. 2026-11-11
+  // 복수 선택으로 바뀌면서 "NONE" 은 거르는 방식이 아니라 **배열의 원소**가
+  // 되었으므로, 길이만 보는 규칙이면 저절로 세어진다.
+  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, billingTypes: ["NONE"] }), 1);
+  // 다른 값과 함께 골라도 여전히 **조건 하나**다.
+  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, billingTypes: ["NONE", "PAID"] }), 1);
+});
+
+test("🔴 나머지 네 필터도 몇 개를 골랐든 걸린 조건 **하나**다", () => {
+  // 2026-11-11 복수 선택. 고른 값의 수를 세면 제품군 셋을 고른 사람에게 접힌
+  // 필터가 "3개 적용됨"이라 말하고, 사람은 어디서 세 가지를 걸었는지 찾아 헤맨다.
+  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, productCategories: ["Generator"] }), 1);
+  assert.equal(
+    countHiddenActiveFilters({
+      ...DEFAULT_FILTERS,
+      productCategories: ["Generator", "Matcher", "Total Controller"],
+    }),
+    1
+  );
+  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, billingTypes: ["PAID", "WARRANTY"] }), 1);
+  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, customerIds: ["c-1", "c-2", "c-3"] }), 1);
+  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, priorities: ["HIGH", "URGENT"] }), 1);
+
+  // 빈 배열은 「전체」라 안 센다 — 넷 다.
+  assert.equal(
+    countHiddenActiveFilters({
+      ...DEFAULT_FILTERS,
+      productCategories: [],
+      billingTypes: [],
+      customerIds: [],
+      priorities: [],
+    }),
+    0
+  );
+
+  // 서로 다른 종류를 함께 걸면 그만큼 는다 — 혼자만 안 세어지는 것이 없게.
+  assert.equal(
+    countHiddenActiveFilters({
+      ...DEFAULT_FILTERS,
+      productCategories: ["Generator", "Matcher"],
+      billingTypes: ["PAID", "NONE"],
+      customerIds: ["c-1", "c-2"],
+      priorities: ["HIGH", "URGENT"],
+    }),
+    4
+  );
 });
 
 test("🔴 현재 상태는 몇 개를 골랐든 걸린 조건 **하나**다", () => {
@@ -96,7 +139,7 @@ test("🔴 현재 상태는 몇 개를 골랐든 걸린 조건 **하나**다", (
   assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, statuses: ["IN_REPAIR", "WAITING_PO"] }), 1);
   // 다른 조건과 함께 걸면 그만큼 는다 — 혼자만 안 세어지는 일이 없게.
   assert.equal(
-    countHiddenActiveFilters({ ...DEFAULT_FILTERS, statuses: IN_HOUSE_STATUSES, priority: "HIGH" }),
+    countHiddenActiveFilters({ ...DEFAULT_FILTERS, statuses: IN_HOUSE_STATUSES, priorities: ["HIGH"] }),
     2
   );
   // 빈 배열은 「전체」라 안 센다.

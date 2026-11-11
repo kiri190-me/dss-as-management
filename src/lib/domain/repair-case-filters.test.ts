@@ -9,7 +9,12 @@ import {
   sortRows,
   type Filters,
 } from "./repair-case-filters";
-import { REPAIR_STATUS_CODES } from "./types";
+import {
+  BILLING_TYPE_CODES,
+  PRIORITY_CODES,
+  PRODUCT_CATEGORY_OPTIONS,
+  REPAIR_STATUS_CODES,
+} from "./types";
 import type { EffectiveRepairCase } from "./local/workflow/effective-repair-case";
 
 /**
@@ -88,7 +93,7 @@ test("제품군은 표에 적히는 문구 그대로 비교한다", () => {
     row({ id: "gen", productCategory: "Generator" }),
     row({ id: "tc", productCategory: "Total Controller" }),
   ];
-  assert.deepEqual(idsOf(applyFilters(rows, filters({ productCategory: "Generator" }))), ["gen"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ productCategories: ["Generator"] }))), ["gen"]);
 });
 
 test("제품군은 유·무상을 가리지 않는다 — 예전 워크플로 유형이 못 하던 것", () => {
@@ -101,7 +106,10 @@ test("제품군은 유·무상을 가리지 않는다 — 예전 워크플로 �
       billingType: "WARRANTY",
     }),
   ];
-  assert.deepEqual(idsOf(applyFilters(rows, filters({ productCategory: "Generator" }))), ["paid", "warranty"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ productCategories: ["Generator"] }))), [
+    "paid",
+    "warranty",
+  ]);
 });
 
 // ─────────────────────────────────────────────── 유·무상
@@ -112,7 +120,7 @@ test("유·무상은 제품군을 가리지 않는다", () => {
     row({ id: "tc", productCategory: "Total Controller", billingType: "PAID" }),
     row({ id: "free", productCategory: "Generator", billingType: "WARRANTY" }),
   ];
-  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingType: "PAID" }))), ["gen", "tc"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingTypes: ["PAID"] }))), ["gen", "tc"]);
 });
 
 test("'미지정'은 유·무상이 아직 정해지지 않은 건만 남긴다", () => {
@@ -120,13 +128,13 @@ test("'미지정'은 유·무상이 아직 정해지지 않은 건만 남긴다"
     row({ id: "unset", billingType: null, paidOrWarranty: "-" }),
     row({ id: "paid", billingType: "PAID" }),
   ];
-  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingType: "NONE" }))), ["unset"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingTypes: ["NONE"] }))), ["unset"]);
 });
 
 test("유·무상을 고르면 정해지지 않은 건은 어느 쪽으로도 딸려오지 않는다", () => {
   const rows = [row({ id: "unset", billingType: null }), row({ id: "paid", billingType: "PAID" })];
-  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingType: "PAID" }))), ["paid"]);
-  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingType: "WARRANTY" }))), []);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingTypes: ["PAID"] }))), ["paid"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingTypes: ["WARRANTY"] }))), []);
 });
 
 test("전체는 정해지지 않은 건까지 다 남긴다", () => {
@@ -140,7 +148,7 @@ test("제품군과 유·무상은 함께 걸린다", () => {
     row({ id: "wrong-category", productCategory: "Matcher", billingType: "WARRANTY" }),
     row({ id: "wrong-billing", productCategory: "Generator", billingType: "PAID" }),
   ];
-  const result = applyFilters(rows, filters({ productCategory: "Generator", billingType: "WARRANTY" }));
+  const result = applyFilters(rows, filters({ productCategories: ["Generator"], billingTypes: ["WARRANTY"] }));
   assert.deepEqual(idsOf(result), ["hit"]);
 });
 
@@ -150,16 +158,17 @@ test("주소창의 제품군·유·무상 값은 아는 값일 때만 받는다"
   const parsed = parseInitialFilters(
     new URLSearchParams("productCategory=Generator&billingType=WARRANTY")
   );
-  assert.equal(parsed.productCategory, "Generator");
-  assert.equal(parsed.billingType, "WARRANTY");
+  // 값이 하나면 길이 1 짜리 배열이다 — 옛 링크가 전과 똑같이 동작한다.
+  assert.deepEqual(parsed.productCategories, ["Generator"]);
+  assert.deepEqual(parsed.billingTypes, ["WARRANTY"]);
 
   const junk = parseInitialFilters(new URLSearchParams("productCategory=드론&billingType=FREE"));
-  assert.equal(junk.productCategory, "ALL", "모르는 제품군은 조용히 무시한다");
-  assert.equal(junk.billingType, "ALL", "모르는 유·무상 코드도 마찬가지다");
+  assert.deepEqual(junk.productCategories, [], "모르는 제품군은 조용히 무시한다");
+  assert.deepEqual(junk.billingTypes, [], "모르는 유·무상 코드도 마찬가지다");
 });
 
 test("주소창으로도 '미지정'을 걸 수 있다", () => {
-  assert.equal(parseInitialFilters(new URLSearchParams("billingType=NONE")).billingType, "NONE");
+  assert.deepEqual(parseInitialFilters(new URLSearchParams("billingType=NONE")).billingTypes, ["NONE"]);
 });
 
 // ─────────────────────────────────────────────── 내게 온 결재 요청
@@ -396,7 +405,7 @@ test("입고품 전체도 다른 조건과 함께 걸린다", () => {
       productCategory: "Generator",
     }),
   ];
-  const result = applyFilters(rows, filters({ statuses: IN_HOUSE_STATUSES, productCategory: "Generator" }));
+  const result = applyFilters(rows, filters({ statuses: IN_HOUSE_STATUSES, productCategories: ["Generator"] }));
   assert.deepEqual(idsOf(result), ["hit"]);
 });
 
@@ -463,6 +472,242 @@ test("🔴 주소창에 모르는 값이 오면 조용히 버린다 — 한 건�
   ];
   const parsed = parseInitialFilters(new URLSearchParams("status=in_house"));
   assert.deepEqual(idsOf(applyFilters(rows, parsed)), ["repair", "shipped"]);
+});
+
+// ──────────────────── 나머지 네 필터도 여럿 고르기 (2026-11-11 사용자 개선요청)
+//
+// [현재 상태]에 이어 제품군·유·무상·고객사·우선순위도 배열이 되었다. 넷 다 **빈
+// 배열이 「전체」**이고 고른 것이 있으면 **합집합**이다 — "ALL" 이라는 값은 없앴다.
+//
+// 🔴 넷 중 유·무상만 특별하다. "NONE"(미지정)이 **배열의 원소**로 들어간다 —
+// [현재 상태]의 "IN_HOUSE" 와는 다르다. 그쪽은 상태들로 펼쳐지는 단축이라 저장되지
+// 않지만, 미지정은 표에 "-" 로 나오는 **실제로 고를 수 있는 한 줄**이고 유상·무상과
+// 함께 고를 수 있어야 한다.
+
+test("🔵 표본 점검 — 네 필터가 쓰는 값이 실제 선택지에서 나온 것이다", () => {
+  // 선택지에 없는 값으로 재면 "거르기가 되는가"는 알아도 **화면에서 고를 수 있는
+  // 값인가**는 모른다. 아래 시험들이 쓰는 값이 진짜 목록에 있는지 먼저 못 박는다.
+  for (const category of ["Generator", "Matcher", "Total Controller"]) {
+    assert.ok(PRODUCT_CATEGORY_OPTIONS.includes(category), `제품군 선택지에 ${category} 가 없다`);
+  }
+  for (const code of ["PAID", "WARRANTY", "PARTIAL_PAID"]) {
+    assert.ok((BILLING_TYPE_CODES as readonly string[]).includes(code), `유·무상 코드에 ${code} 가 없다`);
+  }
+  assert.ok(
+    !(BILLING_TYPE_CODES as readonly string[]).includes("NONE"),
+    "미지정이 저장되는 코드 목록에 섞였다 — 필터 전용 값이어야 한다"
+  );
+  for (const code of ["LOW", "NORMAL", "HIGH", "URGENT"]) {
+    assert.ok((PRIORITY_CODES as readonly string[]).includes(code), `우선순위 코드에 ${code} 가 없다`);
+  }
+  // 기본값이 빈 배열이 아니면 첫 화면부터 걸러진다.
+  assert.deepEqual(DEFAULT_FILTERS.productCategories, []);
+  assert.deepEqual(DEFAULT_FILTERS.billingTypes, []);
+  assert.deepEqual(DEFAULT_FILTERS.customerIds, []);
+  assert.deepEqual(DEFAULT_FILTERS.priorities, []);
+});
+
+test("🔴 제품군 — 빈 배열은 전체, 하나면 그것만, 여럿이면 합집합", () => {
+  const rows = [
+    row({ id: "gen", productCategory: "Generator" }),
+    row({ id: "matcher", productCategory: "Matcher" }),
+    row({ id: "tc", productCategory: "Total Controller" }),
+  ];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ productCategories: [] }))), [
+    "gen",
+    "matcher",
+    "tc",
+  ]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ productCategories: ["Matcher"] }))), ["matcher"]);
+  assert.deepEqual(
+    idsOf(applyFilters(rows, filters({ productCategories: ["Generator", "Total Controller"] }))),
+    ["gen", "tc"]
+  );
+  // 고른 차례가 달라도 남는 줄은 같다 — 배열이지 순서가 있는 조건이 아니다.
+  assert.deepEqual(
+    idsOf(applyFilters(rows, filters({ productCategories: ["Total Controller", "Generator"] }))),
+    ["gen", "tc"]
+  );
+  // 🔵 고른 제품군의 줄이 하나도 없으면 빈 목록이다(전체로 되돌아가지 않는다).
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ productCategories: ["없는 제품군"] }))), []);
+});
+
+test("🔴 유·무상 — 빈 배열은 전체, 하나면 그것만, 여럿이면 합집합", () => {
+  const rows = [
+    row({ id: "paid", billingType: "PAID" }),
+    row({ id: "warranty", billingType: "WARRANTY" }),
+    row({ id: "partial", billingType: "PARTIAL_PAID" }),
+  ];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingTypes: [] }))), [
+    "paid",
+    "warranty",
+    "partial",
+  ]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingTypes: ["WARRANTY"] }))), ["warranty"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingTypes: ["PAID", "PARTIAL_PAID"] }))), [
+    "paid",
+    "partial",
+  ]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingTypes: ["PENDING_DECISION"] }))), []);
+});
+
+test("🔴 유·무상의 '미지정'은 배열의 원소다 — 다른 값과 **함께** 고를 수 있다", () => {
+  // 이 조각에서 가장 틀리기 쉬운 자리다. 미지정을 따로 떼어 판정하면("미지정이면
+  // null 인 것만") 유상과 함께 고른 순간 둘 중 하나가 서로를 잡아먹어, 고른 것이
+  // 둘인데 남는 줄은 한쪽뿐이거나 아예 없어진다 — 오류는 안 난다.
+  const rows = [
+    row({ id: "unset", billingType: null, paidOrWarranty: "-" }),
+    row({ id: "paid", billingType: "PAID" }),
+    row({ id: "warranty", billingType: "WARRANTY" }),
+  ];
+
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingTypes: ["NONE"] }))), ["unset"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingTypes: ["NONE", "PAID"] }))), [
+    "unset",
+    "paid",
+  ]);
+  // 적은 차례를 뒤집어도 같다 — 먼저 쓴 조건이 이기는 구현이면 여기서 갈린다.
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingTypes: ["PAID", "NONE"] }))), [
+    "unset",
+    "paid",
+  ]);
+  // 미지정을 빼고 고르면 정해지지 않은 건은 어느 쪽으로도 딸려오지 않는다.
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ billingTypes: ["PAID", "WARRANTY"] }))), [
+    "paid",
+    "warranty",
+  ]);
+});
+
+test("🔴 고객사 — 빈 배열은 전체, 하나면 그것만, 여럿이면 합집합", () => {
+  const rows = [
+    row({ id: "a", customerId: "c-1", customerName: "가온전자" }),
+    row({ id: "b", customerId: "c-2", customerName: "나래시스템" }),
+    row({ id: "c", customerId: "c-3", customerName: "다온계측" }),
+  ];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ customerIds: [] }))), ["a", "b", "c"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ customerIds: ["c-2"] }))), ["b"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ customerIds: ["c-1", "c-3"] }))), ["a", "c"]);
+  // 🔴 견주는 것은 이름이 아니라 id 다 — 같은 이름의 고객사가 둘일 수 있다.
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ customerIds: ["가온전자"] }))), []);
+});
+
+test("🔴 우선순위 — 빈 배열은 전체, 하나면 그것만, 여럿이면 합집합", () => {
+  const rows = [
+    row({ id: "low", priority: "LOW" }),
+    row({ id: "normal", priority: "NORMAL" }),
+    row({ id: "high", priority: "HIGH" }),
+    row({ id: "urgent", priority: "URGENT" }),
+  ];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ priorities: [] }))), [
+    "low",
+    "normal",
+    "high",
+    "urgent",
+  ]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ priorities: ["HIGH"] }))), ["high"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ priorities: ["HIGH", "URGENT"] }))), [
+    "high",
+    "urgent",
+  ]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ priorities: ["URGENT", "HIGH"] }))), [
+    "high",
+    "urgent",
+  ]);
+});
+
+test("🔴 다섯 필터는 서로 AND 로 겹친다 — 한 종류 안에서만 합집합이다", () => {
+  // "제품군 둘 중 하나 **이면서** 우선순위 둘 중 하나"가 되어야 한다. 종류끼리도
+  // 합집합이 되면 아무것도 못 좁히는 필터가 된다.
+  const rows = [
+    row({
+      id: "hit",
+      effectiveStatus: "IN_REPAIR",
+      productCategory: "Generator",
+      billingType: "PAID",
+      customerId: "c-1",
+      priority: "HIGH",
+    }),
+    row({ id: "wrong-category", productCategory: "Matcher", billingType: "PAID", customerId: "c-1", priority: "HIGH" }),
+    row({ id: "wrong-billing", productCategory: "Generator", billingType: "WARRANTY", customerId: "c-1", priority: "HIGH" }),
+    row({ id: "wrong-customer", productCategory: "Generator", billingType: "PAID", customerId: "c-9", priority: "HIGH" }),
+    row({ id: "wrong-priority", productCategory: "Generator", billingType: "PAID", customerId: "c-1", priority: "LOW" }),
+    row({
+      id: "wrong-status",
+      effectiveStatus: "SHIPMENT_COMPLETED",
+      effectiveActualShipmentDate: "2026-11-02",
+      productCategory: "Generator",
+      billingType: "PAID",
+      customerId: "c-1",
+      priority: "HIGH",
+    }),
+  ];
+
+  const picked = filters({
+    statuses: ["IN_REPAIR", "WAITING_PO"],
+    productCategories: ["Generator", "Total Controller"],
+    billingTypes: ["PAID", "NONE"],
+    customerIds: ["c-1", "c-2"],
+    priorities: ["HIGH", "URGENT"],
+  });
+  assert.deepEqual(idsOf(applyFilters(rows, picked)), ["hit"]);
+});
+
+test("🔴 주소창으로 넷 다 여럿 걸 수 있다 — 쉼표로 잇는다", () => {
+  const parsed = parseInitialFilters(
+    new URLSearchParams(
+      "productCategory=Generator,Matcher&billingType=PAID,NONE&customerId=c-1,c-2&priority=HIGH,URGENT"
+    )
+  );
+  assert.deepEqual(parsed.productCategories, ["Generator", "Matcher"]);
+  assert.deepEqual(parsed.billingTypes, ["PAID", "NONE"]);
+  assert.deepEqual(parsed.customerIds, ["c-1", "c-2"]);
+  assert.deepEqual(parsed.priorities, ["HIGH", "URGENT"]);
+
+  // 공백이 섞여도(메일·메신저를 거치면 붙는다) 읽고, 같은 값이 두 번 오면 한 번만.
+  const messy = parseInitialFilters(new URLSearchParams("priority=HIGH, HIGH ,URGENT"));
+  assert.deepEqual(messy.priorities, ["HIGH", "URGENT"]);
+});
+
+test("🔴 주소창에 모르는 값이 오면 조용히 버린다 — 넷 다", () => {
+  // 주소줄은 사람이 손으로 고칠 수 있다. 엉뚱한 값에 목록이 통째로 비면 안 된다.
+  const junk = parseInitialFilters(
+    new URLSearchParams("productCategory=드론&billingType=FREE&priority=매우긴급")
+  );
+  assert.deepEqual(junk.productCategories, []);
+  assert.deepEqual(junk.billingTypes, []);
+  assert.deepEqual(junk.priorities, []);
+
+  // 아는 값과 섞여 오면 **아는 것만** 남는다. 통째로 버리면 멀쩡한 조건까지
+  // 날아가고, 그대로 넣으면 아무 줄과도 안 맞아 목록이 빈다.
+  const mixed = parseInitialFilters(
+    new URLSearchParams("productCategory=드론,Generator&billingType=FREE,WARRANTY&priority=매우긴급,LOW")
+  );
+  assert.deepEqual(mixed.productCategories, ["Generator"]);
+  assert.deepEqual(mixed.billingTypes, ["WARRANTY"]);
+  assert.deepEqual(mixed.priorities, ["LOW"]);
+
+  // 🔴 고객사만 다르다 — 아는 값의 목록이 아예 없다(선택지가 지금 화면의 줄에서
+  //    뽑힌다). 전에도 `customerId ?? "ALL"` 로 그대로 받았고, 그 결을 그대로 둔다.
+  //    빈 조각만 버린다.
+  assert.deepEqual(
+    parseInitialFilters(new URLSearchParams("customerId=c-9, ,c-8")).customerIds,
+    ["c-9", "c-8"]
+  );
+  assert.deepEqual(parseInitialFilters(new URLSearchParams("customerId=,,,")).customerIds, []);
+});
+
+test("🔴 주소창에서 아무것도 안 오면 넷 다 빈 배열이다 — 걸리지 않는다", () => {
+  const parsed = parseInitialFilters(new URLSearchParams(""));
+  assert.deepEqual(parsed.productCategories, []);
+  assert.deepEqual(parsed.billingTypes, []);
+  assert.deepEqual(parsed.customerIds, []);
+  assert.deepEqual(parsed.priorities, []);
+
+  const rows = [
+    row({ id: "a", productCategory: "Generator", billingType: "PAID", priority: "HIGH" }),
+    row({ id: "b", productCategory: "Matcher", billingType: null, priority: "LOW" }),
+  ];
+  assert.deepEqual(idsOf(applyFilters(rows, parsed)), ["a", "b"]);
 });
 
 // ─────────────────────────────────────────────── 고객사 선택지
@@ -537,13 +782,15 @@ test("선택지는 필터 상태와 무관하다 — 고른 고객사가 목록�
   const options = collectCustomerFilterOptions(rows);
 
   // 고객사 c-1을 고르고, 그 고객사의 건이 하나도 안 남도록 검색어까지 겹쳐 건다.
-  const narrowed = filters({ customerId: "c-1", query: "없는인수번호" });
+  const narrowed = filters({ customerIds: ["c-1"], query: "없는인수번호" });
   assert.deepEqual(idsOf(applyFilters(rows, narrowed)), [], "이 조건에서는 남는 행이 없다");
 
   // 그래도 선택지는 그대로다 — 고른 c-1이 남아 있어야 무엇을 걸어 뒀는지 보이고,
   // c-2가 남아 있어야 다른 고객사로 옮겨 갈 수 있다.
   assert.deepEqual(collectCustomerFilterOptions(rows), options);
-  assert.ok(options.some((c) => c.id === narrowed.customerId));
+  for (const picked of narrowed.customerIds) {
+    assert.ok(options.some((c) => c.id === picked));
+  }
 });
 
 test("고객사 id가 없는 행은 선택지가 되지 않는다", () => {
@@ -721,7 +968,7 @@ test("다른 조건과 함께 걸린다 — 신고 증상만 남기고 나머지
     row({ id: "other-symptom", reportedSymptom: "과열", customerId: "cust-1" }),
   ];
   assert.deepEqual(
-    idsOf(applyFilters(rows, filters({ reportedSymptom: "소음", customerId: "cust-1" }))),
+    idsOf(applyFilters(rows, filters({ reportedSymptom: "소음", customerIds: ["cust-1"] }))),
     ["match"]
   );
 });

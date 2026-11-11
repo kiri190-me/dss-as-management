@@ -1303,3 +1303,11 @@ src/components/common/CheckboxFilterDropdown.test.tsx
 # 🔴 **안을 누르면 안 접히는** 쪽을 함께 잰다. 그쪽이 깨지면 체크 하나를 누를 때마다
 # 접혀서 복수 선택이라는 기능 자체가 없어지는데, 바깥 누르기만 재면 영영 통과한다.
 src/components/common/checkbox-filter-dropdown.test.ts
+
+# [전체 A/S 현황]의 **나머지 네 필터**(제품군·유·무상·고객사·우선순위)가 복수 선택
+# 칸이 되었는가(2026-11-11). 거르는 규칙과 주소줄은 unit 목록의
+# repair-case-filters.test.ts 가, 부품 자체는 바로 위 둘이 잰다 — 여기서 보는 것은
+# 🔴 **화면이 그 부품을 실제로 쓰는가**다. 값 쪽 시험이 전부 통과한 채로 화면만
+# <select> 로 되돌아가면 사용자가 보는 것은 전과 똑같아지는데, 되돌리는 쪽은 시험이
+# 줄어드는 것으로도 안 드러난다. 주석을 걷어낸 뒤 센다(주석에 그 낱말들이 적혀 있다).
+src/components/repair-cases/repair-case-multi-select-filters.test.ts

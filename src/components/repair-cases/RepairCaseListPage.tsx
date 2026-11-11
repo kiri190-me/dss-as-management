@@ -797,10 +797,10 @@ export default function RepairCaseListPage({
             customers={customerOptions}
             onQueryChange={(value) => updateFilters({ query: value })}
             onStatusesChange={(value) => updateFilters({ statuses: value })}
-            onProductCategoryChange={(value) => updateFilters({ productCategory: value })}
-            onBillingTypeChange={(value) => updateFilters({ billingType: value })}
-            onCustomerChange={(value) => updateFilters({ customerId: value })}
-            onPriorityChange={(value) => updateFilters({ priority: value })}
+            onProductCategoriesChange={(value) => updateFilters({ productCategories: value })}
+            onBillingTypesChange={(value) => updateFilters({ billingTypes: value })}
+            onCustomerIdsChange={(value) => updateFilters({ customerIds: value })}
+            onPrioritiesChange={(value) => updateFilters({ priorities: value })}
             onOverdueOnlyChange={(value) => updateFilters({ overdueOnly: value })}
             canFilterMyPendingApproval={canFilterMyPendingApproval}
             onMyPendingApprovalOnlyChange={(value) => updateFilters({ myPendingApprovalOnly: value })}

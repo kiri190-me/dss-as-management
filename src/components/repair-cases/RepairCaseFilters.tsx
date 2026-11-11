@@ -3,6 +3,7 @@
 import {
   formatShipmentMonthLabel,
   IN_HOUSE_STATUSES,
+  type BillingTypeFilterValue,
   type Filters,
 } from "@/lib/domain/repair-case-filters";
 import {
@@ -12,7 +13,7 @@ import {
   PRODUCT_CATEGORY_OPTIONS,
   REPAIR_STATUS_CODES,
 } from "@/lib/domain/types";
-import type { Customer, RepairStatus } from "@/lib/domain/types";
+import type { Customer, Priority, RepairStatus } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
 import CheckboxFilterDropdown from "@/components/common/CheckboxFilterDropdown";
 import FilterDisclosure from "./FilterDisclosure";
@@ -23,10 +24,14 @@ type RepairCaseFiltersProps = {
   onQueryChange: (value: string) => void;
   /** 고른 상태들. 빈 배열이면 「전체」다(2026-11-11 복수 선택). */
   onStatusesChange: (value: RepairStatus[]) => void;
-  onProductCategoryChange: (value: Filters["productCategory"]) => void;
-  onBillingTypeChange: (value: Filters["billingType"]) => void;
-  onCustomerChange: (value: Filters["customerId"]) => void;
-  onPriorityChange: (value: Filters["priority"]) => void;
+  /**
+   * 아래 넷도 전부 **배열**이다(2026-11-11 사용자 개선요청 — 그 전에는 값 하나와
+   * "ALL" 이었다). 빈 배열이면 「전체」라, 받는 쪽은 길이가 0 인지만 보면 된다.
+   */
+  onProductCategoriesChange: (value: string[]) => void;
+  onBillingTypesChange: (value: BillingTypeFilterValue[]) => void;
+  onCustomerIdsChange: (value: string[]) => void;
+  onPrioritiesChange: (value: Priority[]) => void;
   onOverdueOnlyChange: (value: boolean) => void;
   /**
    * "내게 온 결재 요청"을 쓸 수 있는가. 서버가 내게 결재 요청이 들어와 있는
@@ -73,19 +78,20 @@ export function countHiddenActiveFilters(filters: Filters): number {
   // 빈 배열(= 전체)만 안 센다. 대시보드 [현재 입고 수]를 눌러 들어온 사람은
   // 조건이 걸린 채로 이 화면을 처음 보는데, 세지 않으면 "0개 적용됨"이라
   // 말하면서 목록만 짧아져 왜 짧은지 알 길이 없어진다.
+  // 🔴 아래 넷도 상태와 **똑같은 규칙**이다(2026-11-11 복수 선택). 몇 개를
+  // 골랐든 그 필터는 하나다 — 제품군 셋을 고른 것은 "제품군이라는 조건 하나가
+  // 걸려 있다"는 뜻이지 세 조건이 아니다.
   if (filters.statuses.length > 0) count += 1;
-  if (filters.productCategory !== "ALL") count += 1;
-  if (filters.billingType !== "ALL") count += 1;
-  if (filters.customerId !== "ALL") count += 1;
-  if (filters.priority !== "ALL") count += 1;
+  if (filters.productCategories.length > 0) count += 1;
+  if (filters.billingTypes.length > 0) count += 1;
+  if (filters.customerIds.length > 0) count += 1;
+  if (filters.priorities.length > 0) count += 1;
   if (filters.overdueOnly) count += 1;
   if (filters.myPendingApprovalOnly) count += 1;
   if (filters.longPendingPoOnly) count += 1;
   return count;
 }
 
-const selectClass =
-  "w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300";
 const labelClass = "text-xs text-zinc-500 dark:text-zinc-400";
 
 export default function RepairCaseFilters({
@@ -93,10 +99,10 @@ export default function RepairCaseFilters({
   customers,
   onQueryChange,
   onStatusesChange,
-  onProductCategoryChange,
-  onBillingTypeChange,
-  onCustomerChange,
-  onPriorityChange,
+  onProductCategoriesChange,
+  onBillingTypesChange,
+  onCustomerIdsChange,
+  onPrioritiesChange,
   onOverdueOnlyChange,
   canFilterMyPendingApproval = false,
   onMyPendingApprovalOnlyChange,
@@ -165,87 +171,57 @@ export default function RepairCaseFilters({
             shortcut={{ label: "입고품 전체", values: IN_HOUSE_STATUSES }}
           />
 
-          <div className="flex flex-col gap-1">
-            <label htmlFor="repair-case-product-category" className={labelClass}>
-              제품군
-            </label>
-            <select
-              id="repair-case-product-category"
-              className={selectClass}
-              value={filters.productCategory}
-              onChange={(event) => onProductCategoryChange(event.target.value)}
-            >
-              <option value="ALL">전체</option>
-              {PRODUCT_CATEGORY_OPTIONS.map((category) => (
-                <option key={category} value={category}>
-                  {category}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* 아래 네 칸도 같은 부품을 쓴다(2026-11-11 사용자 개선요청의 나머지).
+              🔴 단축 단추(shortcut)는 **주지 않는다** — 「입고품 전체」 같은 미리
+              정해진 묶음이 있는 것은 [현재 상태] 하나뿐이다. 안 주면 목록만 그려진다. */}
+          <CheckboxFilterDropdown
+            id="repair-case-product-category"
+            label="제품군"
+            options={PRODUCT_CATEGORY_OPTIONS.map((category) => ({
+              value: category,
+              label: category,
+            }))}
+            selected={filters.productCategories}
+            onChange={onProductCategoriesChange}
+          />
 
-          <div className="flex flex-col gap-1">
-            <label htmlFor="repair-case-billing-type" className={labelClass}>
-              유·무상
-            </label>
-            <select
-              id="repair-case-billing-type"
-              className={selectClass}
-              value={filters.billingType}
-              onChange={(event) =>
-                onBillingTypeChange(event.target.value as Filters["billingType"])
-              }
-            >
-              <option value="ALL">전체</option>
-              {BILLING_TYPE_CODES.map((code) => (
-                <option key={code} value={code}>
-                  {billingTypeLabels[code]}
-                </option>
-              ))}
-              {/* 표에 "-"로 나오는 건들. 아직 정해지지 않은 것을 따로 훑을 수 있어야 한다. */}
-              <option value="NONE">미지정</option>
-            </select>
-          </div>
+          {/* 🔴 「미지정」은 단축 단추가 아니라 **목록의 한 줄**이다. 표에 "-"로
+              나오는 건들(billing_type 이 null)을 가리키고, 유상·무상과 **함께**
+              고를 수 있어야 한다. 값이 "NONE" 인 것도 그래서다 — 빈 값이면 체크해도
+              「전체」와 구분되지 않는다. */}
+          <CheckboxFilterDropdown<BillingTypeFilterValue>
+            id="repair-case-billing-type"
+            label="유·무상"
+            options={[
+              ...BILLING_TYPE_CODES.map((code) => ({ value: code, label: billingTypeLabels[code] })),
+              { value: "NONE", label: "미지정" },
+            ]}
+            selected={filters.billingTypes}
+            onChange={onBillingTypesChange}
+          />
 
-          <div className="flex flex-col gap-1">
-            <label htmlFor="repair-case-customer" className={labelClass}>
-              고객사
-            </label>
-            <select
-              id="repair-case-customer"
-              className={selectClass}
-              value={filters.customerId}
-              onChange={(event) => onCustomerChange(event.target.value)}
-            >
-              <option value="ALL">전체</option>
-              {customers.map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* 고객사는 선택지가 수십 줄까지 는다 — 부품이 목록 높이를 묶고 제 안에서
+              굴린다(CheckboxFilterPanel 의 max-h-60). 명단은 지금 화면에 올라온
+              접수 건에서 뽑은 것이라(collectCustomerFilterOptions) 주소줄로 들어온
+              id 가 여기 없을 수 있는데, 그때도 걸린 조건이 사라지지 않는다. */}
+          <CheckboxFilterDropdown
+            id="repair-case-customer"
+            label="고객사"
+            options={customers.map((customer) => ({ value: customer.id, label: customer.name }))}
+            selected={filters.customerIds}
+            onChange={onCustomerIdsChange}
+          />
 
-          <div className="flex flex-col gap-1">
-            <label htmlFor="repair-case-priority" className={labelClass}>
-              우선순위
-            </label>
-            <select
-              id="repair-case-priority"
-              className={selectClass}
-              value={filters.priority}
-              onChange={(event) =>
-                onPriorityChange(event.target.value as Filters["priority"])
-              }
-            >
-              <option value="ALL">전체</option>
-              {PRIORITY_CODES.map((priority) => (
-                <option key={priority} value={priority}>
-                  {uiText.priority[priority]}
-                </option>
-              ))}
-            </select>
-          </div>
+          <CheckboxFilterDropdown<Priority>
+            id="repair-case-priority"
+            label="우선순위"
+            options={PRIORITY_CODES.map((priority) => ({
+              value: priority,
+              label: uiText.priority[priority],
+            }))}
+            selected={filters.priorities}
+            onChange={onPrioritiesChange}
+          />
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
