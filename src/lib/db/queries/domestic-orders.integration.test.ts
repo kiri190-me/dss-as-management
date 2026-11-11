@@ -24,6 +24,7 @@ import {
   listDomesticOrderDueDatesForRepairCase,
   listDomesticOrders,
   listQuoteInfoForRepairCases,
+  listRepairCaseIdsWithOrderIssuedDate,
 } from "./domestic-orders";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
 import {
@@ -970,4 +971,142 @@ test("대조 — 같은 줄에서 완료 표시만 빼면 그 번호가 다시 �
   assert.equal(info.quoteNumber, "완료-Q-006");
   assert.equal(info.quoteIssuedDate, "2096-07-01");
   assert.equal(info.orderIssuedDate, "2096-07-02");
+});
+
+// ── listRepairCaseIdsWithOrderIssuedDate — 끝난 건도 찾아진다 (2026-11-11) ──
+//
+// 수리 건 상세 「발주서」 탭의 통로가 쓰는 조회다. 묻는 것은 **발주가 나갔는가**
+// 하나뿐이고, 나갔으면 통로가 공유폴더를 L/N + S/N 으로 뒤진다.
+//
+// 🔴 바로 위 묶음과 **일부러 반대**다. listQuoteInfoForRepairCases 는 완료된 줄을
+// 빼는데(2026-10-07), 그것을 발주서 탭이 쓰면 **수리가 끝나는 순간 발주서가 영영 안
+// 보인다** — 발주발행일이 적혀 있고 공유폴더에 PDF 가 있는데도 화면에는 「아직
+// 발주발행일이 적혀 있지 않습니다」가 떴다(운영 실측 2026-11-11, 고객사와 무관).
+// 과거 건을 찾아보는 것이 그 탭의 쓰임새라 정반대였다. 사용자 결정 2026-11-11:
+// **완료된 건도 보여 준다.**
+//
+// 🔴 그래서 여기서 가장 비싼 단언은 **같은 자료에 두 조회를 나란히 물어 답이
+// 갈리는가**다. 누가 통로를 옛 함수로 되돌리거나 새 함수에 completed_at 조건을
+// 보태면 그 자리가 먼저 빨개진다.
+
+test("🔴 완료된 줄만 있어도 발주발행일이 있으면 찾아진다 — 끝난 건의 발주서", async () => {
+  const caseId = await createTestCase();
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "끝난-Q-101",
+    quoteIssuedDate: "2096-07-01",
+    orderIssuedDate: "2096-07-02",
+    completedAt: COMPLETED_AT,
+  });
+
+  const found = await listRepairCaseIdsWithOrderIssuedDate([caseId]);
+  assert.equal(found.has(caseId), true, "수리가 끝난 건의 발주발행일을 못 봤다");
+
+  // 🔴 대조 — **같은 자료**에서 옛 조회는 이 건을 못 찾는다. 이 줄이 없으면 위 단언이
+  //    「두 조회가 사실 같다」는 상태에서도 초록이라 결함을 못 잡는다.
+  assert.equal(
+    (await listQuoteInfoForRepairCases([caseId])).has(caseId),
+    false,
+    "옛 조회가 완료된 줄을 더는 빼지 않는다 — 두 함수를 가른 까닭이 사라졌다"
+  );
+});
+
+test("발주발행일이 하나도 없으면 안 찾아진다 — 발주가 아직 안 나간 건", async () => {
+  // 🔴 이 건은 내자 줄이 **있다**. 줄이 없어서 못 찾은 것과 가르려면 줄이 있어야 한다.
+  const caseId = await createTestCase();
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "견적만-Q-102",
+    quoteIssuedDate: "2096-07-03",
+    orderIssuedDate: null,
+  });
+  // 완료된 줄에도 발행일이 없다 — 완료 여부와 무관하게 「없으면 없다」여야 한다.
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "견적만-Q-103",
+    quoteIssuedDate: "2096-07-04",
+    orderIssuedDate: null,
+    completedAt: COMPLETED_AT,
+  });
+
+  const found = await listRepairCaseIdsWithOrderIssuedDate([caseId]);
+  assert.equal(found.has(caseId), false, "발주발행일이 없는데 찾아졌다");
+});
+
+test("완료 안 된 줄에 발주발행일이 있으면 찾아진다 — 2026-10-12 부터의 동작 그대로", async () => {
+  const caseId = await createTestCase();
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "진행-Q-104",
+    quoteIssuedDate: "2096-07-05",
+    orderIssuedDate: "2096-07-06",
+  });
+
+  const found = await listRepairCaseIdsWithOrderIssuedDate([caseId]);
+  assert.equal(found.has(caseId), true, "진행 중인 건의 발주발행일을 못 봤다");
+});
+
+test("🔴 줄을 가리지 않는다 — 견적발행일로 지는 줄에만 발주발행일이 있어도 찾아진다", async () => {
+  // 옛 조회는 견적발행일이 가장 늦은 줄을 고른 뒤 **그 줄의** 발주발행일을 본다.
+  // 그 규칙을 이 함수에 베껴 오면 아래 모양에서 막힌다 — 이긴 줄(늦은 견적발행일)에는
+  // 발주발행일이 없기 때문이다. 분할 발주가 실제로 이 모양이 된다.
+  const caseId = await createTestCase();
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "먼저-Q-105",
+    quoteIssuedDate: "2096-01-02",
+    orderIssuedDate: "2096-01-03",
+  });
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "나중-Q-106",
+    quoteIssuedDate: "2096-12-31",
+    orderIssuedDate: null,
+  });
+
+  // 전제 확인 — 옛 조회는 실제로 「이긴 줄」의 빈 발주발행일을 내고 있다.
+  const info = (await listQuoteInfoForRepairCases([caseId])).get(caseId);
+  assert.ok(info, "표본이 비었다 — 옛 조회가 이 건을 아예 못 읽는다");
+  assert.equal(info.quoteNumber, "나중-Q-106");
+  assert.equal(info.orderIssuedDate, null, "표본이 재려는 모양이 아니다");
+
+  const found = await listRepairCaseIdsWithOrderIssuedDate([caseId]);
+  assert.equal(found.has(caseId), true, "줄을 가려 멀쩡히 나간 발주서를 막았다");
+});
+
+test("지운 내자 줄의 발주발행일은 세지 않는다", async () => {
+  // 화면에 없는 줄이 공유폴더를 여는 근거가 되면 안 된다 — 이 파일의 다른 묶음과
+  // 같은 잣대다(지운 발주 줄의 날짜는 세지 않는다).
+  const caseId = await createTestCase();
+  await insertOrder({
+    repairCaseId: caseId,
+    quoteNumber: "지운-Q-107",
+    quoteIssuedDate: "2096-07-07",
+    orderIssuedDate: "2096-07-08",
+    isDeleted: true,
+  });
+
+  const found = await listRepairCaseIdsWithOrderIssuedDate([caseId]);
+  assert.equal(found.has(caseId), false, "지운 줄의 발주발행일이 세어졌다");
+});
+
+test("여러 건을 한 번에 묻는다 — 있는 건만 담겨 온다 · 빈 목록은 빈 답", async () => {
+  // 통로는 한 건만 묻지만 모양이 「여럿 받아 Set」이다. 담기는 쪽과 안 담기는 쪽을
+  // **같은 호출**에서 함께 재야 「전부 담는다」나 「전부 뺀다」가 걸린다.
+  const withDate = await createTestCase();
+  const withoutDate = await createTestCase();
+  await insertOrder({
+    repairCaseId: withDate,
+    orderIssuedDate: "2096-07-09",
+    completedAt: COMPLETED_AT,
+  });
+  await insertOrder({ repairCaseId: withoutDate, orderIssuedDate: null });
+
+  const found = await listRepairCaseIdsWithOrderIssuedDate([withDate, withoutDate]);
+  assert.equal(found.has(withDate), true);
+  assert.equal(found.has(withoutDate), false);
+  // 묻지 않은 건이 섞여 들어오지 않는다(이 스위트가 만든 다른 건들이 있다).
+  assert.deepEqual([...found], [withDate]);
+
+  assert.equal((await listRepairCaseIdsWithOrderIssuedDate([])).size, 0);
 });

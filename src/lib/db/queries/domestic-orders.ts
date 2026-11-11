@@ -1,7 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import {
@@ -1335,6 +1335,71 @@ export async function listQuoteInfoForRepairCases(
         orderIssuedDate: row.orderIssuedDate,
       });
     }
+  }
+
+  return result;
+}
+
+/**
+ * 이 접수 건들에 **발주발행일이 적힌 내자 줄이 하나라도 있는가** (2026-11-11).
+ *
+ * 수리 건 상세 「발주서」 탭의 통로 하나가 부른다
+ * (api/repair-cases/[id]/purchase-order-folder/entries 의 6단계). 그 통로가 묻는 것은
+ * **발주가 나갔는가** 하나뿐이고, 나갔으면 공유폴더를 L/N + S/N 으로 뒤진다 — 여기서
+ * 내는 값은 디스크를 볼지 말지를 가르는 관문의 열쇠다.
+ *
+ * ── 🔴 바로 위 listQuoteInfoForRepairCases 를 쓰지 않는 까닭 ────────────────
+ * 그 조회는 **완료 처리된 줄을 뺀다**(2026-10-07, 그쪽 머리말). 「지금 진행 중인 건의
+ * 견적서 번호」를 묻는 고객 안내 현황에는 그것이 맞지만, 발주서 탭은 **반대**다 —
+ * **수리가 끝난 건의 지난 발주서를 찾아보는 것**이 그 탭의 쓰임새다. 그 함수를 그대로
+ * 쓰면 줄이 완료되는 순간 발주서가 영영 안 보이고, 발행일이 분명히 적혀 있는데도 화면에
+ * 「아직 발주발행일이 적혀 있지 않습니다」가 뜬다(운영 실측 2026-11-11 — 고객사와
+ * 무관하게, 수리가 끝난 건이면 모두 그랬다). 사용자 결정 2026-11-11: **완료된 건도
+ * 보여 준다.**
+ *
+ * 🔴 그래서 저쪽 조건을 **고치지 않고** 이 함수를 옆에 둔다. 완료 거르기는 고객 안내
+ * 현황(queries/customer-portal.ts)과 주간 보고(queries/weekly-report.ts)가 **함께 쓰는**
+ * 규칙이라, 한 화면 때문에 풀면 그 둘이 같이 바뀐다.
+ *
+ * ── 🔴 어느 줄이 이기는지 가리지 않는다 ───────────────────────────────────
+ * 위 조회는 견적발행일이 가장 늦은 줄을 고른 뒤 **그 줄의** 발주발행일을 본다. 번호 ·
+ * 견적발행일 · 발주발행일 셋이 같은 줄에서 나와야 하기 때문인데(RepairCaseQuoteInfo),
+ * 여기서 내는 것은 날짜가 아니라 **있는가 없는가** 하나다. 그 날짜는 화면에 나가지 않고
+ * 폴더도 L/N + S/N 으로 찾는다. 줄을 가리면 분할 발주처럼 줄이 여럿일 때, **이긴 줄에만**
+ * 발행일이 비어 있다는 이유로 멀쩡히 나간 발주서가 막힌다.
+ *
+ * ── 조건 ──────────────────────────────────────────────────────────────────
+ * `is_deleted = false` · `repair_case_id` 가 그 건 · `order_issued_date IS NOT NULL`.
+ * 🔴 **completed_at 을 보지 않는다**(위 까닭). 발주발행일은 PostgreSQL date 칼럼이라
+ * 값이 있으면 "YYYY-MM-DD" 다(domain/domestic-order-list.ts 머리말) — 공백만 적힌 칸이
+ * 생길 자리가 없어 NULL 하나로 가른다.
+ *
+ * 통로는 한 건만 묻지만 **여럿 받아 Set 을 내는** 모양이다 — 이 파일의 이웃
+ * (listQuoteInfoForRepairCases)과 같은 결이고, 나중에 목록 화면이 같은 것을 물어도
+ * 줄마다 왕복이 생기지 않는다.
+ */
+export async function listRepairCaseIdsWithOrderIssuedDate(
+  repairCaseIds: string[]
+): Promise<Set<string>> {
+  const result = new Set<string>();
+  if (repairCaseIds.length === 0) return result;
+
+  const rows = await db
+    .selectDistinct({ repairCaseId: domesticOrders.repairCaseId })
+    .from(domesticOrders)
+    .where(
+      and(
+        eq(domesticOrders.isDeleted, false),
+        inArray(domesticOrders.repairCaseId, repairCaseIds),
+        isNotNull(domesticOrders.orderIssuedDate)
+      )
+    );
+
+  for (const row of rows) {
+    // repair_case_id 는 NULL 허용 칸이라(수리 건이 안 붙은 줄 = 기타건, 그리고 접수 건이
+    // 영구 삭제되면 ON DELETE SET NULL — schema/domestic-orders.ts) 타입이 nullable 이다.
+    // 위 inArray 가 이미 걸렀지만 컴파일러에게는 그 사실이 보이지 않는다.
+    if (row.repairCaseId !== null) result.add(row.repairCaseId);
   }
 
   return result;

@@ -12,11 +12,14 @@ import { describe, test } from "node:test";
  * domain/purchase-order-folder-name.test.ts 가, 화면은
  * components/repair-cases/purchase-orders/PurchaseOrderFolderSection.test.tsx 가 본다.
  *
- * 여기서 못 박는 것은 여섯이다:
+ * 여기서 못 박는 것은 일곱이다:
  *  · 🔴 문지기 **차례**가 이웃 통로(지난 견적서 폴더)와 같다 — 권한이 **조회보다 앞**이다
  *  · 🔴 권한이 `domesticOrders` READ 다 — 🔴 **견적서 열쇠가 아니다**(나가는 것은 발주서
  *    자료이고 폴더 이름에 발주 금액이 들어 있다). 새 영역을 만들지도 넓히지도 않았다
  *  · 🔴 **발주발행일이 비면 저장소 모듈을 부르지 않는다** — 공유폴더를 아예 보지 않는다
+ *  · 🔴 **수리가 끝난 건에서도 공유폴더를 본다**(2026-11-11 사용자 결정) — 관문이 부르는
+ *    조회가 **완료된 줄을 빼지 않는** 쪽이다. 전에 쓰던 listQuoteInfoForRepairCases 로
+ *    되돌아가면 끝난 건의 발주서가 영영 안 보인다(운영에서 실제로 그랬다)
  *  · 🔴 **만들지 않는다 · 지우지 않는다** — 폴더 만들기 · 쓰기 · 삭제 · 쓰기 메서드가 없다
  *  · 🔴 **파일 바이트를 중계하지 않는다** — JSON 목록만 낸다
  *  · 🔴 응답 타입에 **절대 경로를 담는 칸이 없다** — 전체 공유폴더 주소(uncPath)도 없다
@@ -106,7 +109,7 @@ describe("발주서 폴더 통로 — 소스로 지킨다", () => {
       "await context.params",
       "getRepairCaseContactFolderNamingById(id)",
       "resolvePurchaseOrderArchiveRoot()",
-      "listQuoteInfoForRepairCases([repairCase.id])",
+      "listRepairCaseIdsWithOrderIssuedDate([repairCase.id])",
       "findPurchaseOrderArchiveFolder({",
     ];
     let previous = -1;
@@ -138,17 +141,42 @@ describe("발주서 폴더 통로 — 소스로 지킨다", () => {
     const searchAt = getBody.indexOf("findPurchaseOrderArchiveFolder({");
     assert.ok(gateAt >= 0, "발행일 관문이 없다");
     assert.ok(searchAt > gateAt, "발행일 관문보다 찾기가 먼저다");
-    // 🔴 관문은 **조회가 내는 값 하나**를 본다 — 조건을 통로가 다시 짜지 않는다.
-    assert.ok(getBody.includes("isFilled(quoteInfo.get(repairCase.id)?.orderIssuedDate)"), getBody);
+    // 🔴 관문은 **조회가 내는 답 하나**를 본다 — 조건을 통로가 다시 짜지 않는다.
+    assert.ok(getBody.includes("listRepairCaseIdsWithOrderIssuedDate([repairCase.id])"), getBody);
+    assert.ok(getBody.includes("casesWithOrderIssuedDate.has(repairCase.id)"), getBody);
     // 🔴 이 통로는 내자 정리 표를 제 손으로 읽지 않는다 — 그 일은 조회 하나가 쥔다.
     for (const forbidden of ["drizzle", "db/client", "domesticOrders.", "completedAt", "isNull("]) {
       assert.equal(code.includes(forbidden), false, `조회가 할 일이 통로로 내려왔다: ${forbidden}`);
     }
     // 🔴 설정(루트) 판단이 발행일보다 **앞**이다 — 꺼진 환경에서는 구역이 통째로 안 그려진다.
     assert.ok(
-      getBody.indexOf("resolvePurchaseOrderArchiveRoot()") < getBody.indexOf("listQuoteInfoForRepairCases("),
+      getBody.indexOf("resolvePurchaseOrderArchiveRoot()") <
+        getBody.indexOf("listRepairCaseIdsWithOrderIssuedDate("),
       "꺼진 환경에서 발행일 문장이 먼저 나간다"
     );
+  });
+
+  test("🔴 **수리가 끝난 건에서도 본다** — 완료된 줄을 빼는 조회로 되돌아가지 않았다", () => {
+    // 2026-11-11 사용자 결정. 2026-10-12~2026-11-11 의 이 통로는
+    // listQuoteInfoForRepairCases 를 불렀는데 그 조회가 **완료 처리된 줄을 뺀다** —
+    // 발주발행일이 적혀 있고 공유폴더에 발주서가 있어도 그 줄이 완료되면 화면이
+    // 「아직 발주발행일이 적혀 있지 않습니다」로 바뀌었다(운영 실측). 과거 건을 찾아보는
+    // 것이 이 탭의 쓰임새라 정반대였다. 그 되돌림을 여기서 막는다.
+    //
+    // 🔴 **주석을 걷어낸 code 로 센다.** 머리말이 그 함수 이름을 **까닭으로** 적고 있어서
+    //    원본(route)으로 세면 영영 참이 되지 않는다.
+    assert.equal(
+      code.includes("listQuoteInfoForRepairCases"),
+      false,
+      "완료된 줄을 빼는 조회로 되돌아갔다 — 수리가 끝난 건의 발주서가 안 보인다"
+    );
+    // 주석을 걷어내는 일이 실제로 되고 있는지도 함께 본다 — 걷어내기가 망가지면 위
+    // 단언이 **까닭을 적은 머리말 때문에** 조용히 빨개진다(그때는 이 줄이 먼저 터진다).
+    assert.ok(route.includes("listQuoteInfoForRepairCases"), "머리말에서 까닭이 사라졌다");
+    // 🔴 통로가 제 손으로 완료 여부를 보지도 않는다 — 같은 결함을 통로 쪽에 다시 짓는 길이다.
+    for (const forbidden of ["completed", "완료"]) {
+      assert.equal(code.includes(forbidden), false, `완료 판정이 통로로 내려왔다: ${forbidden}`);
+    }
   });
 
   test("🔴 아무것도 만들지 않는다 · 지우지 않는다 — 가져오는 것은 문지기 · 조회 둘 · 읽기 전용 둘뿐", () => {

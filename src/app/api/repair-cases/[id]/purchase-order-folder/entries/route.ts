@@ -4,7 +4,7 @@ import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { listQuoteInfoForRepairCases } from "@/lib/db/queries/domestic-orders";
+import { listRepairCaseIdsWithOrderIssuedDate } from "@/lib/db/queries/domestic-orders";
 import { getRepairCaseContactFolderNamingById } from "@/lib/db/queries/repair-cases";
 import { isQuoteFolderRelativePath } from "@/lib/domain/quote-folder-link";
 import { findPurchaseOrderArchiveFolder, resolvePurchaseOrderArchiveRoot } from "@/lib/storage/purchase-order-archive";
@@ -28,12 +28,18 @@ import { findPurchaseOrderArchiveFolder, resolvePurchaseOrderArchiveRoot } from 
  * 사용자 결정 2026-10-12. 발행일이 없는 건은 발주가 아직 나가지 않은 건이다 — 그런 건에
  * 지난 발주서를 붙이면 **남의 발주서를 이 건의 것처럼** 보여 주게 된다. 그래서
  * `no-order-date` 로 끝내고 🔴 **저장소 모듈을 부르지 않는다**(= 디스크를 보지 않는다).
- *  · 🔴 날짜는 내자 정리의 `orderIssuedDate` 하나다(queries/domestic-orders.ts 의
- *    listQuoteInfoForRepairCases — 완료된 줄을 빼는 규칙까지 거기 있다). 견적서 쪽이 바로
- *    오늘 같은 조건을 넣은 것과 **같은 결**이다(queries/repair-case-quote-numbers.ts 의
- *    readsArchive). 🔴 조건을 여기서 다시 짜지 않고 **그 조회가 내는 값**만 본다.
- *  · 내자 줄이 **아예 없는** 건(또는 완료된 줄만 있는 건)은 그 표에 자리가 없다 — 그때도
- *    발행일이 없는 것이라 **보지 않는다.**
+ *  · 🔴 날짜는 내자 정리의 `order_issued_date` 하나이고, 그 칸을 **어떤 조건으로 보는지**는
+ *    queries/domestic-orders.ts 의 listRepairCaseIdsWithOrderIssuedDate 가 쥔다.
+ *    🔴 조건을 여기서 다시 짜지 않고 **그 조회가 내는 답**만 본다.
+ *  · 🔴 **수리가 끝난 건에서도 보인다 — 사용자 결정 2026-11-11.** 2026-10-12 부터
+ *    2026-11-11 까지 이 자리는 listQuoteInfoForRepairCases 를 불렀는데, 그 조회는
+ *    **완료 처리된 줄을 뺀다.** 그래서 발주발행일이 분명히 적혀 있고 공유폴더에 발주서가
+ *    있는 건이라도, 그 내자 줄이 완료되는 순간 화면이 「아직 발주발행일이 적혀 있지
+ *    않습니다」로 바뀌었다(운영 실측 2026-11-11 — 고객사와 무관했다). **과거 건을
+ *    찾아보는 것**이 이 탭의 쓰임새인데 정반대로 동작한 것이다. 지금 관문은
+ *    🔴 **완료 여부(completed_at)를 보지 않는다.**
+ *  · 발주발행일이 적힌 줄이 **정말 하나도 없는** 건(내자 줄이 아예 없는 건도 그렇다)은
+ *    여전히 `no-order-date` 다 — 그때는 발주가 나가지 않은 것이 맞다.
  *  · 🔴 공유폴더 설정이 꺼져 있으면 그 판단이 **먼저**다(`disabled`). 꺼진 환경에서 구역은
  *    통째로 그려지지 않는 것이 맞고, 거기서 「아직 발주발행일이…」를 내밀면 설정이 없는
  *    개발 PC 가 설정이 있는 운영처럼 보인다.
@@ -129,11 +135,6 @@ function modifiedAtOf(modifiedAtMs: number | null): { modifiedAt?: string } {
   return { modifiedAt: new Date(modifiedAtMs).toISOString() };
 }
 
-/** 칸에 **적혀 있는** 값인가 — 공백만 적힌 칸도 빈 것으로 본다(견적서 쪽 filledText 와 같은 잣대). */
-function isFilled(value: string | null | undefined): boolean {
-  return typeof value === "string" && value.trim() !== "";
-}
-
 export async function GET(
   _request: NextRequest,
   context: { params: Promise<{ id: string }> }
@@ -177,8 +178,9 @@ export async function GET(
   }
 
   // ── 6) 🔴 발주발행일이 비면 **여기서 끝난다** — 공유폴더를 보지 않는다 ───
-  const quoteInfo = await listQuoteInfoForRepairCases([repairCase.id]);
-  if (!isFilled(quoteInfo.get(repairCase.id)?.orderIssuedDate)) {
+  //    🔴 **완료된 건도 통과한다**(2026-11-11, 머리말) — 조회가 completed_at 을 안 본다.
+  const casesWithOrderIssuedDate = await listRepairCaseIdsWithOrderIssuedDate([repairCase.id]);
+  if (!casesWithOrderIssuedDate.has(repairCase.id)) {
     return respond({ status: "no-order-date" });
   }
 
