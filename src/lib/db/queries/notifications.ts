@@ -68,8 +68,14 @@ import { listAcknowledgedNotificationKeys } from "./notification-acknowledgement
  *    그때 쓸 본보기: 조회를 부르기 **전에** 역할을 보고 아니면 빈 배열로 끝낸다
  *    (걸러 내는 것이 아니라 아예 읽지 않는 쪽이 인가 경계로도 맞다).
  *
- * 결재 결과(승인 완료·반려됨)도 (가)형이다 — 대상이 **요청자 본인**이고, 조회가
- * `requested_by_user_id = 나` 로 스스로 좁힌다(approval-outcome-notifications.ts).
+ * 결재 결과(승인 완료·반려됨)도 (가)형이다 — 판정이 조회 안에 있고, load 는 그 조회가
+ * 요구하는 값을 넘겨 주기만 한다(approval-outcome-notifications.ts). 🔴 **다만 2026-11-12
+ * 부터 둘의 대상이 갈린다**: 반려됨은 **요청자 본인**뿐이라 조회가
+ * `requested_by_user_id = 나` 로 스스로 좁히고, 승인 완료는 **요청자 본인 또는
+ * 영업·관리자·최고관리자**라 조회가 사용자 id 와 함께 **역할**을 받는다. 🔵 그래도
+ * (나)형은 아니다 — load 가 역할로 걸러 조회를 건너뛰는 것이 아니라, 조회가 그 역할까지
+ * 보고 **어느 행을 내줄지**를 정한다. 역할로 안 받는 사람을 막는 일은 종전 그대로
+ * 설정 층(deliversNotification)의 몫이다.
  *
  * ── 눌러서 확인하는 종류는 확인 기록을 뺀다 ────────────────────────────
  * 할 일 알림은 처리하면 저절로 사라지지만, 결재 결과는 알려 주는 것이라 사람이
@@ -325,12 +331,21 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
   },
   {
     kind: "APPROVAL_GRANTED",
-    load: async (actorUserId) => {
-      // (가)형 — 대상이 역할이 아니라 **요청자 본인**이다. 역할로 먼저 거르지 않는다:
-      // 결재를 요청하는 사람은 역할이 여럿이고, 받는 사람은 조회가
-      // `requested_by_user_id = 나` 로 이미 정한다. 여기서 하는 일은 모양 변환과
-      // 확인한 것 빼기뿐이다.
-      const outcomes = await listMyGrantedApprovalOutcomes(actorUserId);
+    load: async (actorUserId, actorRole) => {
+      // (가)형 — 받는 사람을 정하는 것은 여전히 **조회**다. 여기서 하는 일은 조회가
+      // 요구하는 값을 넘기고, 모양을 바꾸고, 확인한 것을 빼는 셋뿐이다.
+      //
+      // 🔴 **역할을 넘기지만 역할로 거르지 않는다**(2026-11-12). 이 종류의 대상은
+      // 「요청자 본인 **또는** 영업·관리자·최고관리자」라(사용자 요구), 조회가 그
+      // 판정을 하려면 사용자 id 만으로는 모자란다. 🔵 여기서 미리 걸러 조회를 건너뛰는
+      // (나)형으로 적지 **않은** 까닭은, 역할이 그 셋이 아니어도 **자기가 올린 결재의
+      // 결과는 받아야** 하기 때문이다 — 건너뛰면 엔지니어·재고 담당자에게 한 줄도 안
+      // 간다. 판정이 「받는가/못 받는가」가 아니라 「어느 행까지 보는가」다.
+      //
+      // 🔴 **바로 아래 반려됨은 역할을 넘기지 않는다** — 그쪽은 요청자 본인뿐이고,
+      // 조회 함수도 그 값을 받지 않는다(approval-outcome-notifications.ts). 둘이 달라
+      // 보인다고 맞추지 마라.
+      const outcomes = await listMyGrantedApprovalOutcomes(actorUserId, actorRole);
       return withoutAcknowledged(
         actorUserId,
         outcomes.map((outcome) => buildApprovalGrantedNotification(outcome))
@@ -340,7 +355,13 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
   {
     kind: "APPROVAL_REJECTED",
     load: async (actorUserId) => {
-      // 승인 완료와 같은 모양이다 — 요청자 본인, 역할로 거르지 않는다, 확인한 것은 뺀다.
+      // 🔴 **대상이 요청자 본인뿐이다 — 위 승인 완료와 여기서 갈린다**(2026-11-12).
+      // 그래서 load 가 사용자 id 하나만 받고, 부르는 조회도 역할을 받지 않는다
+      // (approval-outcome-notifications.ts 의 listMyRejectedApprovalOutcomes). 위
+      // 덩어리를 베껴 와 인자를 늘리면 그 순간 명단이 조용히 넓어진다 — 사용자 결정은
+      // 승인 완료 하나였다.
+      //
+      // 나머지는 위와 같다: 조회가 판정하고, 여기서는 모양 변환과 확인한 것 빼기만.
       const outcomes = await listMyRejectedApprovalOutcomes(actorUserId);
       return withoutAcknowledged(
         actorUserId,

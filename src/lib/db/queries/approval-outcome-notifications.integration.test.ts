@@ -63,7 +63,13 @@ import {
  * domain/notifications.ts 의 PART_ISSUE 갈래를 **어떻게 할지 함께 정해야 한다.**
  *
  * 이 파일이 못 박는 것:
- *  1. 🔴 **요청자에게만** 간다 — 결정자·다음 단계 승인자·다른 요청자에게는 없다.
+ *  1. 🔴 **승인 완료와 반려됨의 받는 사람이 다르다**(2026-11-12 — 사용자 요구로 승인
+ *     완료만 넓혔다).
+ *      · 승인 완료 — 요청자 **또는 영업·관리자·최고관리자**(1-B). 엔지니어·재고
+ *        담당자 제삼자에게는 없고(1 · 1-B), 넓어진 사람이 자기가 올린 것을 두 번 받지도
+ *        않는다(1-C).
+ *      · 반려됨 — **요청자뿐**이다. 넓어진 세 역할에게도 가지 않는다(1 · 1-B).
+ *        🔴 이 갈림이 깨지면 「한쪽만 빠뜨렸다」로 읽혀 맞춰지기 쉬운 자리다.
  *  2. 🔴 **중간 단계 승인은 안 잡히고 마지막 단계 승인만** 잡힌다(검수·출하).
  *  3. 반려는 **어느 단계에서든** 잡힌다.
  *  4. 🔴 **결정자가 요청자 본인이면** 안 잡힌다 — 스스로 승인한 검수, 최고관리자가
@@ -101,9 +107,18 @@ let inspectorId: string; // 검수 결재자 (AS_ENGINEER)
 let stepAId: string; // 결재선 1단계
 let stepBId: string; // 결재선 2단계
 let superAdminId: string; // 판을 만드는 사람 + 비상구
+// 🔴 2026-11-12 에 「승인 완료」가 **영업·관리자·최고관리자**까지 넓어졌다. 아래 셋은
+//    결재에 한 번도 끼지 않는 **구경꾼**이다 — 요청하지도 결정하지도 않으므로, 이들에게
+//    줄이 서면 그것은 오로지 「역할 때문」이다. 재고 담당자는 **안 넓힌 쪽**의 표본이다.
+let salesViewerId: string; // 영업 — 넓어진 쪽
+let adminViewerId: string; // 관리자 — 넓어진 쪽
+let inventoryViewerId: string; // 재고 담당자 — 안 넓힌 쪽
 
 const testUserIds: string[] = [];
 const userNames = new Map<string, string>();
+/** 🔴 조회가 역할을 보므로(승인 완료) 시험도 **그 사람의 진짜 역할**로 묻는다. */
+const userRoles = new Map<string, Role>();
+
 let routeVersionCounter = 0;
 
 async function createTestUser(name: string, overrides: Partial<typeof users.$inferInsert> = {}): Promise<string> {
@@ -121,7 +136,15 @@ async function createTestUser(name: string, overrides: Partial<typeof users.$inf
     .returning({ id: users.id });
   testUserIds.push(row.id);
   userNames.set(row.id, name);
+  userRoles.set(row.id, (overrides.role as Role | undefined) ?? "AS_ENGINEER");
   return row.id;
+}
+
+/** 그 사람의 역할. 없는 사람을 물으면 시험이 조용히 엉뚱한 답을 내지 않게 멈춘다. */
+function roleOf(userId: string): Role {
+  const role = userRoles.get(userId);
+  assert.ok(role, `이 파일이 만들지 않은 사람이다: ${userId}`);
+  return role;
 }
 
 function baseCreateInput(): ValidatedCreateRepairCaseInput {
@@ -222,9 +245,24 @@ async function createInspectedCase(): Promise<{ id: string; intakeNumber: string
 }
 
 const grantedIds = async (userId: string, now?: Date) =>
-  (await listMyGrantedApprovalOutcomes(userId, now ? { now } : {})).map((outcome) => outcome.approvalId);
+  (await listMyGrantedApprovalOutcomes(userId, roleOf(userId), now ? { now } : {})).map(
+    (outcome) => outcome.approvalId
+  );
 const rejectedIds = async (userId: string, now?: Date) =>
   (await listMyRejectedApprovalOutcomes(userId, now ? { now } : {})).map((outcome) => outcome.approvalId);
+
+/**
+ * 이 시험이 만든 결재 행만 골라 차례를 맞춘다.
+ *
+ * 🔴 **넓어진 역할(영업·관리자·최고관리자)에게만 필요한 거름망이다.** 그 사람들의
+ * 승인 완료 목록에는 시험 DB 에 남아 있는 **남의 행**도 들어올 수 있다(앞 실행이
+ * 중간에 끊겨 남은 행 같은 것). 요청자 본인만 보던 시절에는 그럴 일이 없었다.
+ * 🔵 거름망은 「우리 것이 들어 있는가 / 안 들어 있는가」를 조금도 무르게 하지 않는다 —
+ * 새면 샌 그 id 가 그대로 남는다.
+ */
+function ourIds(ids: readonly string[], ours: readonly string[]): string[] {
+  return ids.filter((id) => ours.includes(id)).sort();
+}
 
 /** 이 사람의 종에 뜬 결재 결과 알림의 id(= 확인 키). 다른 종류는 시드 자료에 흔들리므로 뺀다. */
 async function outcomeNotificationIds(userId: string, role: Role): Promise<string[]> {
@@ -298,6 +336,9 @@ before(async () => {
   stepAId = await createTestUser("결과시험 1단계");
   stepBId = await createTestUser("결과시험 2단계");
   superAdminId = await createTestUser("결과시험 최고관리자", { role: "SUPER_ADMIN" });
+  salesViewerId = await createTestUser("결과시험 영업 구경꾼", { role: "SALES" });
+  adminViewerId = await createTestUser("결과시험 관리자 구경꾼", { role: "ADMIN" });
+  inventoryViewerId = await createTestUser("결과시험 재고 구경꾼", { role: "INVENTORY_MANAGER" });
 });
 
 afterEach(async () => {
@@ -333,7 +374,7 @@ describe("접수 건 결재 — 최종 승인과 반려", () => {
     assert.deepEqual(await grantedIds(requesterId), [repairCase.inspectionId], "중간 단계 승인이 승인 완료로 잡혔다");
 
     await decideCaseApproval(repairCase.id, "FINAL_SHIPMENT", "APPROVED", stepBId);
-    const granted = await listMyGrantedApprovalOutcomes(requesterId);
+    const granted = await listMyGrantedApprovalOutcomes(requesterId, roleOf(requesterId));
     assert.deepEqual(
       granted.map((outcome) => outcome.approvalId),
       [step2Id, repairCase.inspectionId],
@@ -396,7 +437,7 @@ describe("접수 건 결재 — 최종 승인과 반려", () => {
     assert.deepEqual(await rejectedIds(superAdminId), []);
   });
 
-  test("🔴 1. 요청자에게만 간다 — 결정자·결재선 승인자·다른 요청자에게는 없다", async () => {
+  test("🔴 1. 엔지니어 제삼자에게는 안 간다 — 결정자·결재선 승인자·다른 요청자(승인 완료·반려 둘 다)", async () => {
     await insertRoute("FINAL_SHIPMENT", [stepAId]);
     const repairCase = await createInspectedCase();
     await requestCaseApproval(repairCase.id, "FINAL_SHIPMENT", requesterId);
@@ -405,12 +446,91 @@ describe("접수 건 결재 — 최종 승인과 반려", () => {
     await requestCaseApproval(rejectedCase.id, "REPAIR_INSPECTION", requesterId);
     await decideCaseApproval(rejectedCase.id, "REPAIR_INSPECTION", "REJECTED", inspectorId);
 
-    assert.equal((await grantedIds(requesterId)).length, 2);
-    assert.equal((await rejectedIds(requesterId)).length, 1);
-    for (const someoneElse of [inspectorId, stepAId, otherRequesterId, superAdminId]) {
-      assert.deepEqual(await grantedIds(someoneElse), [], `${userNames.get(someoneElse)} 에게 승인 완료가 샌다`);
-      assert.deepEqual(await rejectedIds(someoneElse), [], `${userNames.get(someoneElse)} 에게 반려가 샌다`);
+    const ourGranted = await grantedIds(requesterId);
+    const ourRejected = await rejectedIds(requesterId);
+    assert.equal(ourGranted.length, 2);
+    assert.equal(ourRejected.length, 1);
+
+    // 🔴 **2026-11-12 에 최고관리자가 이 줄에서 빠졌다** — 승인 완료가 영업·관리자·
+    //    최고관리자까지 넓어져서다(바로 아래 1-B). 여기 남은 셋은 전부 **A/S 엔지니어**로,
+    //    「안 넓혔다」를 지키는 표본이다. 넓히는 날 이 셋 중 하나를 옮기면 그때도 여기가
+    //    먼저 깨진다.
+    for (const someoneElse of [inspectorId, stepAId, otherRequesterId]) {
+      assert.equal(roleOf(someoneElse), "AS_ENGINEER", "표본이 엔지니어가 아니면 이 시험의 뜻이 달라진다");
+      assert.deepEqual(
+        ourIds(await grantedIds(someoneElse), ourGranted),
+        [],
+        `${userNames.get(someoneElse)} 에게 승인 완료가 샌다`
+      );
     }
+
+    // 🔴 **반려는 넓어진 역할에게도 가지 않는다** — 2026-11-12 결정은 승인 완료 하나였다.
+    //    이 줄이 둘이 갈라진 것을 지킨다.
+    for (const someoneElse of [inspectorId, stepAId, otherRequesterId, superAdminId, salesViewerId, adminViewerId]) {
+      assert.deepEqual(
+        ourIds(await rejectedIds(someoneElse), ourRejected),
+        [],
+        `${userNames.get(someoneElse)} 에게 반려가 샌다`
+      );
+    }
+  });
+
+  test("🔴 1-B. 승인 완료는 **영업·관리자·최고관리자**에게도 간다 — 남이 올린 것까지(2026-11-12)", async () => {
+    await insertRoute("FINAL_SHIPMENT", [stepAId]);
+    const repairCase = await createInspectedCase();
+    await requestCaseApproval(repairCase.id, "FINAL_SHIPMENT", requesterId);
+    await decideCaseApproval(repairCase.id, "FINAL_SHIPMENT", "APPROVED", stepAId);
+
+    // 🔵 무엇을 재는지 먼저 — 올린 사람에게 두 건(검수 승인 · 최종 출하 승인)이 서 있다.
+    //    여기가 비면 아래 「남도 본다」가 빈 배열끼리 견주며 조용히 통과한다.
+    const ourGranted = await grantedIds(requesterId);
+    assert.equal(ourGranted.length, 2, "전제가 서지 않았다");
+
+    for (const viewer of [salesViewerId, adminViewerId, superAdminId]) {
+      assert.deepEqual(
+        ourIds(await grantedIds(viewer), ourGranted),
+        [...ourGranted].sort(),
+        `${userNames.get(viewer)}(${roleOf(viewer)}) 가 남이 올린 승인 완료를 못 받는다`
+      );
+    }
+
+    // 🔴 **안 넓힌 쪽** — 엔지니어와 재고 담당자는 자기가 올린 것만 받는다.
+    for (const viewer of [otherRequesterId, inventoryViewerId]) {
+      assert.deepEqual(
+        ourIds(await grantedIds(viewer), ourGranted),
+        [],
+        `${userNames.get(viewer)}(${roleOf(viewer)}) 까지 넓어졌다`
+      );
+    }
+
+    // 🔴 같은 밑자락에 반려 하나를 세워 **반려는 안 넓어졌다**를 같은 자리에서 잰다.
+    const rejectedCase = await createTestCase();
+    const rejectedId = await requestCaseApproval(rejectedCase.id, "REPAIR_INSPECTION", requesterId);
+    await decideCaseApproval(rejectedCase.id, "REPAIR_INSPECTION", "REJECTED", inspectorId);
+    assert.deepEqual(await rejectedIds(requesterId), [rejectedId], "전제 — 올린 사람에게는 반려가 선다");
+    for (const viewer of [salesViewerId, adminViewerId, superAdminId]) {
+      assert.deepEqual(
+        ourIds(await rejectedIds(viewer), [rejectedId]),
+        [],
+        `🔴 ${userNames.get(viewer)}(${roleOf(viewer)}) 에게 반려까지 갔다 — 넓힌 것은 승인 완료 하나다`
+      );
+    }
+  });
+
+  test("🔴 1-C. 넓어진 역할이 **자기가 올린** 것을 두 번 받지 않는다 — 조건이 OR 라서", async () => {
+    // 최고관리자(넓어진 쪽)가 **스스로 올리고** 남이 결정한다. 조건이 「요청자가 나 OR
+    // 내 역할이 그 셋」이라 둘 다 참인 경우인데, 둘을 더하는 것이 아니라 **같은 행 하나**를
+    // 고르는 것이므로 줄도 하나여야 한다.
+    const repairCase = await createTestCase();
+    const approvalId = await requestCaseApproval(repairCase.id, "REPAIR_INSPECTION", superAdminId);
+    await decideCaseApproval(repairCase.id, "REPAIR_INSPECTION", "APPROVED", inspectorId);
+
+    assert.deepEqual(ourIds(await grantedIds(superAdminId), [approvalId]), [approvalId], "전제 — 한 줄은 서야 한다");
+    assert.equal(
+      (await grantedIds(superAdminId)).filter((id) => id === approvalId).length,
+      1,
+      "🔴 같은 결재가 두 줄로 왔다 — OR 이 아니라 합집합으로 돌고 있다"
+    );
   });
 
   test("6. 7일 창 — 결정 시각으로 재고, 창 밖은 확인하지 않아도 뜨지 않는다", async () => {
@@ -538,7 +658,7 @@ describe("종 알림 — 승인 완료 · 반려됨", () => {
     const rejectedApprovalId = await requestCaseApproval(rejectedCase.id, "REPAIR_INSPECTION", requesterId);
     await decideCaseApproval(rejectedCase.id, "REPAIR_INSPECTION", "REJECTED", inspectorId);
 
-    const [grantedOutcome] = await listMyGrantedApprovalOutcomes(requesterId);
+    const [grantedOutcome] = await listMyGrantedApprovalOutcomes(requesterId, roleOf(requesterId));
     const [rejectedOutcome] = await listMyRejectedApprovalOutcomes(requesterId);
     assert.equal(grantedOutcome.approvalId, grantedCase.inspectionId);
     assert.equal(rejectedOutcome.approvalId, rejectedApprovalId);
@@ -576,9 +696,26 @@ describe("종 알림 — 승인 완료 · 반려됨", () => {
       [stepAId, "AS_ENGINEER"],
       [inspectorId, "AS_ENGINEER"],
       [otherRequesterId, "AS_ENGINEER"],
-      [superAdminId, "SUPER_ADMIN"],
     ] as const) {
-      assert.deepEqual(await outcomeNotificationIds(someoneElse, role), [], `${userNames.get(someoneElse)} 의 종에 떴다`);
+      assert.deepEqual(
+        ourIds(await outcomeNotificationIds(someoneElse, role), [grantedKey, rejectedKey]),
+        [],
+        `${userNames.get(someoneElse)} 의 종에 떴다`
+      );
+    }
+
+    // 🔴 **넓어진 세 역할의 종에는 「승인 완료」 한 줄만 선다**(2026-11-12). 반려됨이
+    //    함께 오면 둘이 갈라진 것이 무너진 것이다 — 레지스트리까지 태워서 잰다.
+    for (const [viewer, role] of [
+      [superAdminId, "SUPER_ADMIN"],
+      [salesViewerId, "SALES"],
+      [adminViewerId, "ADMIN"],
+    ] as const) {
+      assert.deepEqual(
+        ourIds(await outcomeNotificationIds(viewer, role), [grantedKey, rejectedKey]),
+        [grantedKey],
+        `${userNames.get(viewer)}(${role}) 의 종이 기대와 다르다`
+      );
     }
   });
 
@@ -610,10 +747,17 @@ describe("종 알림 — 승인 완료 · 반려됨", () => {
     assert.equal((await rejectedIds(requesterId)).length, 1);
   });
 
-  test("🔴 역할로 거르지 않는다 — 다섯 역할 어느 것으로 불러도 자기 결재 결과를 받는다", async () => {
+  test("🔴 역할로 막지 않는다 — 다섯 역할 어느 것으로 불러도 **자기** 결재 결과는 받는다", async () => {
+    // 🔴 2026-11-12 에 승인 완료가 세 역할까지 넓어졌지만, 그것은 「누가 **남의 것도**
+    //    보는가」다. 「자기가 올린 것을 받는가」는 다섯 역할 전부 그대로여야 한다 —
+    //    여기서 어느 역할이 빠지면 엔지니어·재고 담당자가 자기 결재의 결과를 모르게 된다.
     const { grantedKey, rejectedKey } = await arrangeOneOfEach();
     for (const role of ROLE_CODES) {
-      assert.deepEqual(await outcomeNotificationIds(requesterId, role), [grantedKey, rejectedKey], role);
+      assert.deepEqual(
+        ourIds(await outcomeNotificationIds(requesterId, role), [grantedKey, rejectedKey]),
+        [grantedKey, rejectedKey],
+        role
+      );
     }
   });
 

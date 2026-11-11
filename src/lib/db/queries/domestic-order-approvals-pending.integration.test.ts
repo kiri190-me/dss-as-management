@@ -34,6 +34,7 @@ import { getUserBySsoSubject } from "./users";
 import { buildPortalApprovalInbox } from "@/lib/server/integration/portal-approvals";
 import { DOMESTIC_ORDER_APPROVAL_ROUTE_SCOPE } from "@/lib/domain/domestic-order-approval-rules";
 import { DOMESTIC_ORDER_NO_MODEL_LINK_LABEL } from "@/lib/domain/domestic-order-detail-link";
+import type { Role } from "@/lib/domain/types";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 
 /**
@@ -53,7 +54,9 @@ import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input"
  *  5. 휴지통에 간 줄의 결재는 안 뜬다(누르면 갈 화면이 없다).
  *  6. 🔴 **품명이 비어도 줄이 서고 제목이 비지 않는다** — 빈 제목은 승인함이 줄을
  *     통째로 뺀다(포털 lib/approvals/screen-inbox.ts 의 계약).
- *  7. 🔴 **승인·반려 결과가 요청자 종에 뜬다** — 대기 쪽을 고쳐도 여기는 안 열린다.
+ *  7. 🔴 **승인·반려 결과가 종에 뜬다** — 대기 쪽을 고쳐도 여기는 안 열린다. 🔴 받는
+ *     사람은 2026-11-12 부터 **갈린다**: 승인 완료는 요청자 **또는 영업·관리자·
+ *     최고관리자**, 반려는 **요청자뿐**이다.
  *  8. 🔴 주소가 `/domestic-orders/` 로 간다 — 통로가 실제로 내주는 글자로 잰다.
  *
  * ── 격리·청소 규약 ──────────────────────────────────────────────────────
@@ -83,12 +86,20 @@ let stepBId: string;
 let outsiderId: string;
 /** 판을 저장하는 사람. 🔵 최고관리자 비상구는 이 파일에서 재지 않는다. */
 let superAdminId: string;
+/**
+ * 🔴 **안 넓힌 쪽의 표본**(2026-11-12). 「승인 완료」가 영업·관리자·최고관리자까지
+ * 넓어졌는데, 이 파일의 사람은 기본이 **영업**이라 전부 넓어진 쪽이다. 엔지니어가 하나
+ * 없으면 「엔지니어에게는 안 간다」를 이 파일에서 한 줄도 잴 수 없다.
+ */
+let engineerOutsiderId: string;
 
 /** 통합 승인함 통로가 사람을 가리키는 값. 🔴 A/S 의 사용자 id 와 **다른 값**이다. */
 const STEP_A_SUBJECT = `portal-${RUN}-step-a`;
 
 const createdTestUserIds: string[] = [];
 const createdOrderIds: string[] = [];
+/** 🔴 「승인 완료」 조회가 역할을 보므로(2026-11-12) 시험도 **진짜 역할**로 묻는다. */
+const createdUserRoles = new Map<string, Role>();
 
 async function createTestUser(
   name: string,
@@ -109,7 +120,29 @@ async function createTestUser(
     })
     .returning({ id: users.id });
   createdTestUserIds.push(row.id);
+  createdUserRoles.set(row.id, (overrides.role as Role | undefined) ?? "SALES");
   return row.id;
+}
+
+/** 그 사람의 역할. 모르는 사람을 물으면 조용히 엉뚱한 답을 내지 않게 멈춘다. */
+function roleOf(userId: string): Role {
+  const role = createdUserRoles.get(userId);
+  assert.ok(role, `이 파일이 만들지 않은 사람이다: ${userId}`);
+  return role;
+}
+
+/**
+ * 이 사람 종에 선 **이 시험의** 기타건 승인 완료.
+ *
+ * 🔴 역할을 함께 넘긴다(2026-11-12) — 영업·관리자·최고관리자는 남이 올린 결재의 결과도
+ * 본다(queries/approval-outcome-notifications.ts). 그래서 갈래만으로 거르면 시험 DB 에
+ * 남아 있는 **남의 줄**까지 섞인다. 이 시험이 만든 줄 id 로 한 번 더 좁힌다.
+ */
+async function domesticGrantedFor(userId: string, orderIds: readonly string[]): Promise<string[]> {
+  const outcomes = await listMyGrantedApprovalOutcomes(userId, roleOf(userId));
+  return outcomes
+    .flatMap((one) => (one.source === "DOMESTIC_ORDER" ? [one.domesticOrderId] : []))
+    .filter((orderId) => orderIds.includes(orderId));
 }
 
 /** 필수 칸이 따로 없는 표라 거의 다 null 로 둔다 — 알아볼 번호만 넣는다. */
@@ -269,6 +302,7 @@ before(async () => {
   stepBId = await createTestUser("기타건알림시험 2단계");
   outsiderId = await createTestUser("기타건알림시험 제삼자");
   superAdminId = await createTestUser("기타건알림시험 최고관리자", { role: "SUPER_ADMIN" });
+  engineerOutsiderId = await createTestUser("기타건알림시험 엔지니어", { role: "AS_ENGINEER" });
 });
 
 afterEach(async () => {
@@ -507,18 +541,14 @@ describe("🔴 종에 뜬다 — 등록이 실제로 돌았는가", () => {
   });
 });
 
-describe("🔴 결과가 요청자 종에 뜬다 — 대기 쪽을 고쳐도 여기는 안 열린다", () => {
-  test("최종 승인되면 **요청자**에게 「승인 완료」가 간다", async () => {
+describe("🔴 결과가 종에 뜬다 — 대기 쪽을 고쳐도 여기는 안 열린다", () => {
+  test("최종 승인되면 **요청자와 영업·관리자·최고관리자**에게 「승인 완료」가 간다(2026-11-12)", async () => {
     await saveDomesticRoute([stepAId]);
     const orderId = await createTestOrder();
     await request(orderId);
 
     // 🔵 결정 전에는 0건 — 아래 1건이 정말 이 결정 때문인지 가른다.
-    const before = await listMyGrantedApprovalOutcomes(requesterId);
-    assert.deepEqual(
-      before.filter((one) => one.source === "DOMESTIC_ORDER"),
-      []
-    );
+    assert.deepEqual(await domesticGrantedFor(requesterId, [orderId]), []);
 
     const decided = await decideDomesticOrderApproval({
       domesticOrderId: orderId,
@@ -529,20 +559,42 @@ describe("🔴 결과가 요청자 종에 뜬다 — 대기 쪽을 고쳐도 여
     });
     assert.equal(decided.ok, true, JSON.stringify(decided));
 
-    const granted = (await listMyGrantedApprovalOutcomes(requesterId)).filter(
-      (one) => one.source === "DOMESTIC_ORDER"
+    const granted = (await listMyGrantedApprovalOutcomes(requesterId, roleOf(requesterId))).filter(
+      (one) => one.source === "DOMESTIC_ORDER" && one.domesticOrderId === orderId
     );
     assert.equal(granted.length, 1, "🔴 기타건 승인 결과가 요청자 종에 안 떴다");
     assert.equal(granted[0].source === "DOMESTIC_ORDER" && granted[0].domesticOrderId, orderId);
     assert.equal(granted[0].decidedByName, "기타건알림시험 1단계");
 
-    // 🔴 남에게는 안 간다 — 결정한 사람에게도, 결재선 밖 사람에게도.
-    for (const userId of [stepAId, outsiderId]) {
-      const theirs = (await listMyGrantedApprovalOutcomes(userId)).filter(
-        (one) => one.source === "DOMESTIC_ORDER"
-      );
-      assert.deepEqual(theirs, [], `${userId}: 남의 결재 결과가 떴다`);
-    }
+    // 🔴 **2026-11-12 — 결재선 밖 사람 쪽이 뒤집혔다.** 승인 완료가 영업·관리자·
+    //    최고관리자까지 넓어졌고(사용자 요구), 이 파일의 기본 역할이 **영업**이다.
+    //    기타건 현황과 그 줄의 [승인] 탭을 이미 여는 사람들이라(canViewDomesticOrders)
+    //    새로 보이는 값은 없다.
+    assert.deepEqual(
+      await domesticGrantedFor(outsiderId, [orderId]),
+      [orderId],
+      "영업 제삼자가 남이 올린 기타건 승인 완료를 못 받는다"
+    );
+    assert.deepEqual(
+      await domesticGrantedFor(superAdminId, [orderId]),
+      [orderId],
+      "최고관리자가 남이 올린 기타건 승인 완료를 못 받는다"
+    );
+
+    // 🔴 **안 넓힌 쪽** — A/S 엔지니어는 자기가 올린 것만 받는다.
+    assert.deepEqual(
+      await domesticGrantedFor(engineerOutsiderId, [orderId]),
+      [],
+      "엔지니어까지 넓어졌다"
+    );
+
+    // 🔴 **결정한 사람에게는 안 간다** — 영업이라 넓어진 쪽인데도 그렇다. 자기가 한 일을
+    //    자기 종으로 돌려받지 않는다는 조건이 넓어진 뒤에도 그대로 선다.
+    assert.deepEqual(
+      await domesticGrantedFor(stepAId, [orderId]),
+      [],
+      "결재한 본인에게 자기 결정이 알림으로 돌아왔다"
+    );
 
     // 종까지 실제로 이어지는가 — 빌더가 붙여 내는 한 줄로 잰다.
     const bell = (await listMyNotifications(requesterId, "SALES")).filter(
@@ -568,10 +620,9 @@ describe("🔴 결과가 요청자 종에 뜬다 — 대기 쪽을 고쳐도 여
     assert.equal(decided.ok, true, JSON.stringify(decided));
     assert.ok(decided.ok && decided.nextApprovalId, "다음 단계 행이 안 생겼다 — 표본이 틀렸다");
 
-    const granted = (await listMyGrantedApprovalOutcomes(requesterId)).filter(
-      (one) => one.source === "DOMESTIC_ORDER"
-    );
-    assert.deepEqual(granted, [], "중간 단계 승인이 「승인 완료」로 떴다");
+    assert.deepEqual(await domesticGrantedFor(requesterId, [orderId]), [], "중간 단계 승인이 「승인 완료」로 떴다");
+    // 🔵 넓어진 역할에게도 중간 단계는 결과가 아니다 — 「최종 승인만」이 역할과 무관하다.
+    assert.deepEqual(await domesticGrantedFor(outsiderId, [orderId]), [], "중간 단계가 영업 종에 떴다");
   });
 
   test("반려되면 **요청자**에게 「반려됨」이 가고 사유가 실린다", async () => {
@@ -594,6 +645,15 @@ describe("🔴 결과가 요청자 종에 뜬다 — 대기 쪽을 고쳐도 여
     assert.equal(rejected.length, 1, "🔴 기타건 반려 결과가 요청자 종에 안 떴다");
     assert.equal(rejected[0].decisionReason, "금액 확인 필요");
 
+    // 🔴 **반려는 2026-11-12 에 안 넓혔다** — 승인 완료만 영업·관리자·최고관리자까지
+    //    갔다. 결재선 밖 영업과 최고관리자에게 사유가 실린 이 줄이 가면 안 된다.
+    for (const viewer of [outsiderId, superAdminId]) {
+      const theirs = (await listMyRejectedApprovalOutcomes(viewer)).filter(
+        (one) => one.source === "DOMESTIC_ORDER" && one.domesticOrderId === orderId
+      );
+      assert.deepEqual(theirs, [], `${roleOf(viewer)} 에게 반려까지 갔다`);
+    }
+
     const bell = (await listMyNotifications(requesterId, "SALES")).filter(
       (item) => item.kind === "APPROVAL_REJECTED" && item.href.includes(orderId)
     );
@@ -615,20 +675,13 @@ describe("🔴 결과가 요청자 종에 뜬다 — 대기 쪽을 고쳐도 여
     });
     assert.equal(decided.ok, true, JSON.stringify(decided));
     // 🔵 지우기 전에는 떠 있다.
-    assert.equal(
-      (await listMyGrantedApprovalOutcomes(requesterId)).filter(
-        (one) => one.source === "DOMESTIC_ORDER"
-      ).length,
-      1
-    );
+    assert.deepEqual(await domesticGrantedFor(requesterId, [orderId]), [orderId]);
+    assert.deepEqual(await domesticGrantedFor(outsiderId, [orderId]), [orderId], "전제 — 영업 쪽에도 떠 있다");
 
     await trashTestOrder(orderId);
 
-    assert.deepEqual(
-      (await listMyGrantedApprovalOutcomes(requesterId)).filter(
-        (one) => one.source === "DOMESTIC_ORDER"
-      ),
-      []
-    );
+    assert.deepEqual(await domesticGrantedFor(requesterId, [orderId]), []);
+    // 🔵 넓어진 역할에게도 똑같이 사라진다 — 누르면 갈 화면이 없다는 것은 역할과 무관하다.
+    assert.deepEqual(await domesticGrantedFor(outsiderId, [orderId]), []);
   });
 });

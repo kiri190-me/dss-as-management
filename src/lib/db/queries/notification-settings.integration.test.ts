@@ -47,10 +47,15 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  *  · 결재 대기(REPAIR_CASE_APPROVAL) → 「그 건의 **결재자**인가」. 검수 결재는
  *    최고관리자·관리자·엔지니어가 받는다(repair-case-approvals-pending.ts의
  *    INSPECTION_DECIDE_ELIGIBLE_ROLES).
- *  · 승인 완료(APPROVAL_GRANTED) → 「내가 **올린** 결재인가」. 요청자 본인에게만
- *    가고 역할은 보지 않는다(approval-outcome-notifications.ts).
- * 두 축이 같으면 「역할을 빼면 그 역할만」도 「영업에게는 안 간다」도 잴 수 없다 —
- * 같은 사람이 둘 다 받거나 둘 다 못 받아 갈라지는 자리가 사라진다.
+ *  · 승인 완료(APPROVAL_GRANTED) → 「내가 **올린** 결재인가, **또는** 내 역할이
+ *    영업·관리자·최고관리자인가」(approval-outcome-notifications.ts).
+ *    🔴 **2026-11-12 에 뒤쪽 절반이 붙었다** — 전에는 「요청자 본인에게만 가고 역할은
+ *    보지 않는다」였다(사용자 요구로 승인 완료만 넓혔다. 반려됨은 그대로다).
+ * 두 축이 같으면 「역할을 빼면 그 역할만」을 잴 수 없다 — 같은 사람이 둘 다 받거나
+ * 둘 다 못 받아 갈라지는 자리가 사라진다.
+ * 🔴 **그 넓히기로 이 파일에서 잃은 것이 하나 있다**: 「영업에게는 아무것도 안 간다」를
+ * 두 종류로 한꺼번에 잴 수 없게 됐다. 영업은 이제 승인 완료 쪽을 받는다. 대신
+ * **엔지니어**가 그 자리를 잇는다(결재 대기는 받고 승인 완료는 못 받는 사람).
  *
  * 🔵 **2026-10-27(옛 재고 걷어내기 13-C2)에 첫째 표본을 갈았다.** 그 전에는
  *    「부품 요청 대기」였고, 밑자락으로 부품 하나와 부품 요청 하나를 옛 재고 mutation
@@ -189,11 +194,16 @@ function grantedTargetKey(approvalId: string): string {
 /**
  * 결정이 끝난 결재 행 하나 — 「승인 완료」 알림의 원본.
  *
- * 승인 완료는 **요청한 사람 본인에게만** 가고, 창은 결정 시각 기준 7일이라
- * `decidedAt`을 지금으로 둔다. 결정자는 요청자와 **달라야** 한다 — 자기가 한 일은
- * 자기에게 알리지 않는다(approval-outcome-notifications.ts의
- * `ne(decided_by, requested_by)`). 「최종 승인」은 같은 (접수 건, 결재 종류)에 더 늦게
- * 요청된 행이 없는 것이므로, 종류를 하나씩 나눠 쓰면 접수 건 하나로 둘을 만들 수 있다.
+ * 창은 결정 시각 기준 7일이라 `decidedAt`을 지금으로 둔다. 결정자는 요청자와 **달라야**
+ * 한다 — 자기가 한 일은 자기에게 알리지 않는다. 🔵 그 조건이 보는 것은 **지금 종을 여는
+ * 사람**이다(approval-outcome-notifications.ts 의 `ne(decided_by, 보는 사람)`) —
+ * 요청자만 보던 시절에는 둘이 같은 말이었다. 「최종 승인」은 같은 (접수 건, 결재 종류)에
+ * 더 늦게 요청된 행이 없는 것이므로, 종류를 하나씩 나눠 쓰면 접수 건 하나로 둘을 만들 수
+ * 있다.
+ *
+ * 🔴 **이 두 행은 관리자와 최고관리자가 서로의 것을 결정한 모양이다** — 그래서
+ * 2026-11-12 뒤에도 각자 자기가 올린 것 하나씩만 본다(상대의 것은 자기가 결정해서
+ * 빠진다). 영업처럼 **둘 다 결정하지 않은** 사람에게는 두 줄이 다 간다.
  */
 async function insertGrantedApproval(input: {
   repairCaseId: string;
@@ -381,12 +391,20 @@ test("🔴 설정이 하나도 없을 때 실제 종 알림이 1단계와 똑같
     false,
     "엔지니어가 올린 검수 요청은 아직 결정되지 않았다 — 결과 알림은 결정이 나야 생긴다"
   );
+  // 🔴 **2026-11-12 뒤에는 이 줄이 「안 넓혔다」까지 함께 지킨다.** 승인 완료가
+  //    영업·관리자·최고관리자에게 넓어졌고 엔지니어는 그 셋이 아니다 — 여기까지
+  //    넓히면 이 단언이 먼저 깨진다.
 
+  // 🔴 **여기가 2026-11-12 에 뒤집혔다.** 전에는 「영업은 검수 결재자도, 이 결재들을
+  //    올린 사람도 아니다」라 빈 목록이었다. 지금은 **영업이라서** 남이 올린 승인 완료
+  //    두 줄을 받는다(결재 대기는 여전히 안 받는다 — 검수 결재자가 아니다).
   assert.deepEqual(
-    await myItemIds(salesId, "SALES"),
-    [],
-    "영업은 검수 결재자도, 이 결재들을 올린 사람도 아니다"
+    [...(await myItemIds(salesId, "SALES"))].sort(),
+    [grantedTargetKey(grantedForAdminApprovalId), grantedTargetKey(grantedForSuperAdminApprovalId)].sort(),
+    "영업이 남이 올린 승인 완료를 못 받는다(2026-11-12 사용자 요구)"
   );
+  // 🔵 **승인 완료만** 열린 것도 같은 단언이 함께 지킨다 — 거름망은 우리 결재 대기 건도
+  //    집으므로(myItemIds), 영업에게 그것까지 갔다면 위 목록이 세 줄이 됐을 것이다.
   // 🔴 대조 — 같은 거름망이 관리자에게는 **두 줄을 집는다.** 이것이 없으면 위의
   //    빈 목록이 「영업에게 안 간다」인지 「거름망이 애초에 아무것도 못 집는다」인지
   //    구별되지 않는다.
@@ -481,31 +499,55 @@ test("🔴 최고관리자는 저장된 값과 무관하게 계속 받는다 —
 });
 
 test("역할을 넣어도 원래 판정은 그대로다 — 설정은 윗단 필터일 뿐이다", async () => {
-  // 영업을 두 종류의 대상으로 두어도, 영업은 검수 결재자도 아니고 이 결재들을
-  // 올린 사람도 아니므로 이 스위트가 만든 자료는 여전히 보이지 않는다. 이것이
-  // 두 종류의 원래 판정을 조회 안에 남겨 둔 이유다 — 축이 서로 달라서(파일
-  // 머리말) 한 번에 둘을 함께 잰다.
+  // 엔지니어를 두 종류의 대상으로 두어도, 엔지니어는 이 결재들을 올린 사람이 아니고
+  // 승인 완료가 넓어진 세 역할에도 들지 않으므로 **승인 완료는 여전히 보이지 않는다.**
+  // 이것이 종류의 원래 판정을 조회 안에 남겨 둔 이유다.
+  //
+  // 🔴 **표본이 영업에서 엔지니어로 바뀌었다**(2026-11-12). 영업은 이제 **역할 때문에**
+  //    남의 승인 완료를 받으므로, 이 시험의 「역할을 열어도 안 보인다」를 영업으로는 더
+  //    이상 잴 수 없다. 엔지니어는 결재 대기 쪽에서 원래 결재자라 그 줄이 함께 보이는
+  //    것이 정상이다 — 그래서 승인 완료 쪽만 본다.
   await saveNotificationSettings({
     changes: [
-      { kind: "REPAIR_CASE_APPROVAL", enabled: true, roles: { SALES: true } },
-      { kind: "APPROVAL_GRANTED", enabled: true, roles: { SALES: true } },
+      { kind: "REPAIR_CASE_APPROVAL", enabled: true, roles: { AS_ENGINEER: true } },
+      { kind: "APPROVAL_GRANTED", enabled: true, roles: { AS_ENGINEER: true } },
     ],
     actorUserId: superAdminId,
   });
 
-  assert.deepEqual(
-    await myItemIds(salesId, "SALES"),
-    [],
-    "역할을 열었다고 남의 결재 건·남이 올린 결재의 결과가 보이면 안 된다"
+  assert.equal(
+    (await kindsFor(engineerId, "AS_ENGINEER")).has("APPROVAL_GRANTED"),
+    false,
+    "역할을 열었다고 남이 올린 결재의 결과가 보이면 안 된다"
   );
   // 🔴 대조 — 결재자이자 요청자인 관리자에게는 같은 두 줄이 그대로 보인다. 거름망
-  //    쪽으로도 한 번 더 세는 것은 위의 빈 목록이 「영업에게 안 간다」가 아니라
-  //    「거름망이 아무것도 못 집는다」일 수 있기 때문이다(실제로 알림 키 모양을
-  //    일부러 어긋나게 해 보니 이 시험만 조용히 통과했다).
+  //    쪽으로도 한 번 더 세는 것은 위의 「안 보인다」가 「거름망이 아무것도 못 집는다」일
+  //    수 있기 때문이다(실제로 알림 키 모양을 일부러 어긋나게 해 보니 이 시험만 조용히
+  //    통과했다).
   const adminKinds = await kindsFor(adminId, "ADMIN");
   assert.ok(adminKinds.has("REPAIR_CASE_APPROVAL"));
   assert.ok(adminKinds.has("APPROVAL_GRANTED"));
   assert.equal((await myItemIds(adminId, "ADMIN")).length, 2, "거름망이 이 스위트가 만든 두 줄을 집지 못한다");
+});
+
+test("🔴 역할 스위치를 끄면 넓어진 역할도 남의 승인 완료를 못 받는다 — 설정이 윗단 필터인 자리", async () => {
+  // 🔵 **넓힌 쪽을 되좁히는 손잡이가 실제로 듣는가**(2026-11-12). 바로 위 시험의
+  //    반대 방향이다 — 그쪽은 「열어도 원래 판정이 막는다」, 이쪽은 「닫으면 넓어진
+  //    것도 막힌다」. 둘 중 하나만 있으면 스위치가 한쪽으로만 듣는 것을 못 잡는다.
+  assert.deepEqual(
+    [...(await myItemIds(salesId, "SALES"))].sort(),
+    [grantedTargetKey(grantedForAdminApprovalId), grantedTargetKey(grantedForSuperAdminApprovalId)].sort(),
+    "전제 — 끄기 전에는 영업에게 두 줄이 간다"
+  );
+
+  await saveNotificationSettings({
+    changes: [{ kind: "APPROVAL_GRANTED", enabled: true, roles: { SALES: false } }],
+    actorUserId: superAdminId,
+  });
+
+  assert.deepEqual(await myItemIds(salesId, "SALES"), [], "역할 스위치를 꺼도 남의 승인 완료가 온다");
+  // 🔴 끈 것은 영업 한 칸뿐이다 — 관리자는 그대로 자기 것을 받는다.
+  assert.equal((await myItemIds(adminId, "ADMIN")).length, 2, "영업을 껐는데 관리자까지 빠졌다");
 });
 
 // ──────────────────────────────────────────── 읽기 쪽 규약

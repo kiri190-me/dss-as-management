@@ -12,15 +12,20 @@ import {
   users,
 } from "../schema";
 import { resolveDomesticOrderValue } from "@/lib/domain/domestic-order-list";
-import { approvalOutcomeNotificationWindowStart, type ApprovalOutcomeTarget } from "@/lib/domain/notifications";
+import {
+  approvalOutcomeNotificationWindowStart,
+  receivesOthersApprovalGrantedOutcomes,
+  type ApprovalOutcomeTarget,
+} from "@/lib/domain/notifications";
+import type { Role } from "@/lib/domain/types";
 import { isValidApprovalType } from "@/lib/validation/repair-case-approval-input";
 
 /**
  * ============================================================================
- * 내가 요청한 결재의 결과 — 종 알림 「승인 완료」·「반려됨」의 원본
+ * 결재의 결과 — 종 알림 「승인 완료」·「반려됨」의 원본
  * ============================================================================
- * 결재를 **요청한 사람**에게 그 결과를 알리는 조회 둘이다. 대상 결재는 네 가지고
- * 표는 둘이다:
+ * 결재가 끝났다는 것을 알리는 조회 둘이다. 🔴 **받는 사람은 둘이 서로 다르다**
+ * (2026-11-12 — 아래 「누구에게 가는가」). 대상 결재는 네 가지고 표는 둘이다:
  *   · repair_case_approvals           — 수리 검수 승인 · 최종 출하 승인
  *   · repair_case_approvals (기타건)  — 기타건 최종 출하 승인 (2026-11-06)
  *   · quote_approvals                 — 견적서 승인
@@ -46,18 +51,55 @@ import { isValidApprovalType } from "@/lib/validation/repair-case-approval-input
  * 🔴 **이 파일은 아무것도 쓰지 않는다.** 결재·출하·불출 mutation 을 한 줄도 건드리지
  * 않고, 이미 쌓인 결재 기록에서 결과 사건을 골라 읽기만 한다.
  *
- * ── 누구에게 가는가 — 요청자 본인뿐 ────────────────────────────────────
- * 두 조회 모두 WHERE 에 `requested_by_user_id = 나` 가 언제나 있다. 인자는 서버가
- * 세션에서 푼 사용자 id 하나뿐이고(db/queries/notifications.ts), 역할을 보지 않는다
- * — 사람 단위 알림이라 역할로 막을 것이 없고, 남의 결재 결과를 요구할 입구도 없다.
+ * ── 누구에게 가는가 — 🔴 **승인 완료와 반려됨이 갈린다**(2026-11-12) ──────
+ *  · **반려됨** — 종전 그대로 **요청자 본인뿐**이다. WHERE 에
+ *    `requested_by_user_id = 나` 가 언제나 있고, listMyRejectedApprovalOutcomes 는
+ *    역할을 **인자로 받지도 않는다** — 넓힐 길이 코드에 없다.
+ *  · **승인 완료** — 요청자 본인 **또는** 영업·관리자·최고관리자다(사용자 요구 —
+ *    「승인 요청을 한 사람 외에도 [영업, 관리자]인 사람들에게도 뜨도록」). 조건이 OR
+ *    이라 영업인 사람이 **자기가 올린 것을 두 번 받지 않는다** — 행이 하나면 줄도
+ *    하나다. 셋 중 하나이면 요청자 조건을 아예 걸지 않는다(OR 의 한쪽이 언제나
+ *    참이면 전체가 참이다). 명단을 쥔 곳은 한 곳이다:
+ *    domain/notifications.ts 의 receivesOthersApprovalGrantedOutcomes.
+ *
+ * 🔴 **둘이 다른 것은 빠뜨린 것이 아니다.** 2026-11-12 사용자 결정이 승인 완료
+ * 하나였고, 반려는 「고쳐서 다시 올릴 사람」에게 사유와 함께 가는 할 일 알림이라
+ * 명단을 넓히면 성격이 달라진다. **맞추지 마라.**
+ *
+ * ── 🔴 정보가 새는가 — 넓히기 전에 재어 보았다(2026-11-12) ───────────────
+ * 승인 완료 한 줄이 싣는 것은 제목(접수 건의 인수번호 · 견적서 발행번호 · 기타건
+ * 품명)과 상세(결재 이름 · 결정한 사람 이름)뿐이고, 누르면 가는 화면이 셋이다.
+ * 영업·관리자는 그 셋을 **이미 연다**:
+ *  · 전체 A/S 현황(`repairCases`) — 역할 검사가 아예 없다. 로그인한 사람은 모두
+ *    목록과 그 건의 검수/승인 화면을 본다(auth/permission-baseline.ts 의
+ *    `repairCases.view` 는 역할을 묻지 않고 READ 를 돌려준다).
+ *  · 견적서(`quotes`) — canViewQuotes 가 canViewDomesticOrders 를 그대로 부른다:
+ *    최고관리자·관리자·영업·엔지니어(auth/quote-authorization.ts).
+ *  · 기타건 현황(`miscCases`)과 그 줄의 [승인] 탭 — 같은 canViewDomesticOrders 다
+ *    (auth/permission-baseline.ts · app/(app)/domestic-orders/[id]/approval/page.tsx).
+ * 그래서 이 변경이 **새로 보여 주는 값은 없다** — 이미 볼 수 있는 자료가 종에도
+ * 서는 것뿐이다.
+ * 🔵 다만 관리자가 역할별 접근 권한에서 그 역할의 `quotes`·`domesticOrders` 를
+ *    따로 닫아 둔 경우에는 제목(발행번호·품명)이 종에 서면서 화면은 막힌다. 이
+ *    저장소의 다른 종류들도 같은 모양이다 — 납기 임박·납기 지연·납기 역전은
+ *    인수번호를 싣고 역할별 접근 권한을 보지 않는다(domain/notification-settings.ts
+ *    의 그 case 주석: 「싣는 것이 인수번호와 날짜뿐이라 인가 경계가 아니다」). 그
+ *    자리에서 좁히는 손잡이는 알림 설정의 **역할 스위치**다.
  *
  * ── 언제 알리나 — 「결과 사건」 ─────────────────────────────────────────
  *  · 결정 시각이 최근 창(APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS) 안인 것만. 그보다
  *    오래된 것은 확인하지 않아도 뜨지 않는다 — 기능을 켜는 순간 옛 결재가 쏟아지지
  *    않게 하려는 것이다.
- *  · 🔴 **결정자가 요청자 본인이면 알리지 않는다.** 최고관리자가 비상구로 자기 요청을
- *    스스로 결정한 경우와, 엔지니어가 자기 검수 요청을 스스로 승인한 경우가 여기
- *    걸린다. 자기가 한 일을 자기에게 알릴 이유가 없다.
+ *  · 🔴 **결정자가 보는 사람 본인이면 알리지 않는다.** 최고관리자가 비상구로 자기
+ *    요청을 스스로 결정한 경우와, 엔지니어가 자기 검수 요청을 스스로 승인한 경우가
+ *    여기 걸린다. 자기가 한 일을 자기에게 알릴 이유가 없다.
+ *    🔵 이 조건이 보는 것은 **지금 종을 여는 사람**이지 요청자 칸이 아니다. 2026-11-12
+ *    에 승인 완료의 명단이 넓어지면서 뜻이 한 겹 늘었다 — 요청자에게는 종전 그대로
+ *    「내가 스스로 결정한 것은 안 뜬다」이고, 넓어진 영업·관리자에게는 「내가 결재한
+ *    건은 내 종에 안 뜬다」가 된다. 둘 다 같은 말의 두 모습이다.
+ *    🔴 **그래서 요청자와 결정자가 같은 남의 건은 이제 영업·관리자에게는 뜬다**(전에는
+ *    아무에게도 뜨지 않았다). 일어난 사건 자체는 참이고, 가려야 할 까닭이 「자기 일」
+ *    하나뿐이었기 때문이다.
  *  · 승인 완료는 **최종 승인일 때만**이다(아래 「최종」 절).
  *  · 반려는 어느 단계에서든 알린다 — 반려되면 사슬이 거기서 끝나므로 그 행이 곧
  *    결과다.
@@ -132,10 +174,27 @@ function byDecisionNewestFirst(a: ApprovalOutcome, b: ApprovalOutcome): number {
 
 type CaseOutcomeStatus = "APPROVED" | "REJECTED";
 
+/**
+ * 세 조회가 똑같이 받는 넷째 인자 — **요청자 조건을 거는가**.
+ *
+ * `true` 면 `requested_by_user_id = 나` 를 **걸지 않는다.** 「요청자 본인 OR 영업·
+ * 관리자·최고관리자」에서 오른쪽이 참이면 왼쪽을 볼 것이 없기 때문이다(파일 머리말).
+ *
+ * 🔴 **판정은 여기서 하지 않는다 — 넘겨받기만 한다.** 역할을 푸는 자리는 아래 바깥
+ * 입구 하나뿐이다. 세 조회가 각자 역할을 보면 같은 판정이 세 벌이 되고, 그중 하나만
+ * 고쳐지는 날 **한 갈래에서만** 명단이 어긋난다 — 그 어긋남은 화면에 아무 표시도
+ * 남기지 않는다.
+ */
+type OutcomeScope = {
+  /** 반려됨은 언제나 false 다 — 그쪽은 요청자 본인뿐이다(파일 머리말). */
+  includeOtherRequesters: boolean;
+};
+
 async function listRepairCaseApprovalOutcomes(
-  requesterUserId: string,
+  viewerUserId: string,
   status: CaseOutcomeStatus,
-  since: Date
+  since: Date,
+  scope: OutcomeScope
 ): Promise<ApprovalOutcome[]> {
   const rows = await db
     .select({
@@ -154,12 +213,14 @@ async function listRepairCaseApprovalOutcomes(
     .leftJoin(decider, eq(decider.id, repairCaseApprovals.decidedByUserId))
     .where(
       and(
-        // 🔴 요청자 본인 — 이 조건이 빠지면 남의 결재 결과가 내 종에 뜬다.
-        eq(repairCaseApprovals.requestedByUserId, requesterUserId),
+        // 🔴 요청자 본인 — 이 조건을 **거는 경우에만** 남의 결재 결과가 내 종에서
+        // 빠진다. 거는가 마는가는 바깥 입구가 역할을 보고 정한다(파일 머리말의
+        // 「누구에게 가는가」). 반려됨은 언제나 건다.
+        ...(scope.includeOtherRequesters ? [] : [eq(repairCaseApprovals.requestedByUserId, viewerUserId)]),
         eq(repairCaseApprovals.status, status),
-        // 🔴 결정자가 요청자 본인이면 알리지 않는다. 결정된 행은 표 CHECK 가
+        // 🔴 결정자가 보는 사람 본인이면 알리지 않는다. 결정된 행은 표 CHECK 가
         // decided_by 를 요구하므로 NULL 비교로 조용히 빠지는 행은 없다.
-        ne(repairCaseApprovals.decidedByUserId, requesterUserId),
+        ne(repairCaseApprovals.decidedByUserId, viewerUserId),
         gte(repairCaseApprovals.decidedAt, since),
         eq(repairCases.isDeleted, false),
         ...(status === "APPROVED"
@@ -230,9 +291,10 @@ async function listRepairCaseApprovalOutcomes(
  * 아니라.
  */
 async function listQuoteApprovalOutcomes(
-  requesterUserId: string,
+  viewerUserId: string,
   status: CaseOutcomeStatus,
-  since: Date
+  since: Date,
+  scope: OutcomeScope
 ): Promise<ApprovalOutcome[]> {
   const rows = await db
     .select({
@@ -249,15 +311,16 @@ async function listQuoteApprovalOutcomes(
     .leftJoin(decider, eq(decider.id, quoteApprovals.decidedByUserId))
     .where(
       and(
-        // 🔴 요청자 본인 — 이 조건이 빠지면 남의 결재 결과가 내 종에 뜬다. 결재 행의
-        // 요청자는 사슬 내내 처음 올린 사람 그대로다(mutations/quote-approvals.ts 가
-        // 다음 단계 행에 물려준다).
-        eq(quoteApprovals.requestedByUserId, requesterUserId),
+        // 🔴 요청자 본인 — 거는가 마는가는 바깥 입구가 역할을 보고 정한다(파일
+        // 머리말). 결재 행의 요청자는 사슬 내내 처음 올린 사람 그대로다
+        // (mutations/quote-approvals.ts 가 다음 단계 행에 물려준다).
+        ...(scope.includeOtherRequesters ? [] : [eq(quoteApprovals.requestedByUserId, viewerUserId)]),
         eq(quoteApprovals.status, status),
-        // 🔴 결정자가 요청자 본인이면 알리지 않는다. 견적서 결재에서는 요청 경로가
-        // 요청자 본인 단계를 건너뛰므로(findNextRouteStepToApprove) 정상적으로는
-        // 최고관리자가 비상구로 자기 요청을 스스로 결정한 경우뿐이다.
-        ne(quoteApprovals.decidedByUserId, requesterUserId),
+        // 🔴 결정자가 보는 사람 본인이면 알리지 않는다. 견적서 결재에서는 요청 경로가
+        // 요청자 본인 단계를 건너뛰므로(findNextRouteStepToApprove) 요청자 쪽에서는
+        // 최고관리자가 비상구로 자기 요청을 스스로 결정한 경우뿐이고, 넓어진
+        // 영업·관리자 쪽에서는 「내가 결재한 견적서」가 여기 걸린다.
+        ne(quoteApprovals.decidedByUserId, viewerUserId),
         gte(quoteApprovals.decidedAt, since),
         eq(quotes.isDeleted, false),
         ...(status === "APPROVED"
@@ -326,9 +389,10 @@ async function listQuoteApprovalOutcomes(
  * 규칙이 두 벌이 된다.
  */
 async function listDomesticOrderApprovalOutcomes(
-  requesterUserId: string,
+  viewerUserId: string,
   status: CaseOutcomeStatus,
-  since: Date
+  since: Date,
+  scope: OutcomeScope
 ): Promise<ApprovalOutcome[]> {
   const rows = await db
     .select({
@@ -351,15 +415,16 @@ async function listDomesticOrderApprovalOutcomes(
     .leftJoin(decider, eq(decider.id, repairCaseApprovals.decidedByUserId))
     .where(
       and(
-        // 🔴 요청자 본인 — 이 조건이 빠지면 남의 결재 결과가 내 종에 뜬다. 결재 행의
-        // 요청자는 사슬 내내 처음 올린 사람 그대로다(mutations/domestic-order-
-        // approvals.ts 가 다음 단계 행에 물려준다).
-        eq(repairCaseApprovals.requestedByUserId, requesterUserId),
+        // 🔴 요청자 본인 — 거는가 마는가는 바깥 입구가 역할을 보고 정한다(파일
+        // 머리말). 결재 행의 요청자는 사슬 내내 처음 올린 사람 그대로다
+        // (mutations/domestic-order-approvals.ts 가 다음 단계 행에 물려준다).
+        ...(scope.includeOtherRequesters ? [] : [eq(repairCaseApprovals.requestedByUserId, viewerUserId)]),
         eq(repairCaseApprovals.status, status),
-        // 🔴 결정자가 요청자 본인이면 알리지 않는다. 기타건 결재에서는 요청 경로가
-        // 요청자 본인 단계를 건너뛰므로(findNextRouteStepToApprove) 정상적으로는
-        // 최고관리자가 비상구로 자기 요청을 스스로 결정한 경우뿐이다.
-        ne(repairCaseApprovals.decidedByUserId, requesterUserId),
+        // 🔴 결정자가 보는 사람 본인이면 알리지 않는다. 기타건 결재에서는 요청 경로가
+        // 요청자 본인 단계를 건너뛰므로(findNextRouteStepToApprove) 요청자 쪽에서는
+        // 최고관리자가 비상구로 자기 요청을 스스로 결정한 경우뿐이고, 넓어진
+        // 영업·관리자 쪽에서는 「내가 결재한 기타건」이 여기 걸린다.
+        ne(repairCaseApprovals.decidedByUserId, viewerUserId),
         gte(repairCaseApprovals.decidedAt, since),
         eq(domesticOrders.isDeleted, false),
         ...(status === "APPROVED"
@@ -405,35 +470,54 @@ async function listDomesticOrderApprovalOutcomes(
 // ──────────────────────────────────────────────────────────────── 바깥 입구
 
 /**
- * 내가 요청한 결재 중 **최근 창 안에 최종 승인된** 것 — 네 결재 모두, 결정이 늦은
- * 것부터.
+ * **최근 창 안에 최종 승인된** 결재 — 세 갈래 모두, 결정이 늦은 것부터.
+ *
+ * 🔴 **역할을 받는다(2026-11-12).** 이 사람이 영업·관리자·최고관리자면 **남이 올린**
+ * 결재의 승인 완료도 함께 돌려준다(파일 머리말의 「누구에게 가는가」). 역할을 푸는
+ * 자리는 여기 한 곳이고, 세 조회는 그 답(`includeOtherRequesters`)만 받는다.
+ *
+ * 🔴 **역할을 선택 인자로 두지 않았다.** 기본값을 두면 부르는 자리가 한 곳만 늘어도
+ * 조용히 「요청자 본인뿐」으로 떨어지거나(기능이 반만 서고 아무 오류도 없다) 반대로
+ * 조용히 넓어진다. 필수 인자라 빠뜨리면 tsc 가 멈춘다.
+ *
+ * 🔵 역할은 부르는 쪽이 넘겨 주지만, 그 값은 (app)/layout.tsx 가 세션 토큰이 아니라
+ *    **살아 있는 계정**에서 다시 푼 것이다(resolveActingUserForSession) — 토큰에 박힌
+ *    옛 역할이 아니다(db/queries/notifications.ts 의 listMyNotifications 머리말).
  */
 export async function listMyGrantedApprovalOutcomes(
-  requesterUserId: string,
+  viewerUserId: string,
+  viewerRole: Role,
   options: OutcomeOptions = {}
 ): Promise<ApprovalOutcome[]> {
   const since = approvalOutcomeNotificationWindowStart(options.now ?? new Date());
+  const scope: OutcomeScope = { includeOtherRequesters: receivesOthersApprovalGrantedOutcomes(viewerRole) };
   const [cases, quoteOutcomes, domesticOutcomes] = await Promise.all([
-    listRepairCaseApprovalOutcomes(requesterUserId, "APPROVED", since),
-    listQuoteApprovalOutcomes(requesterUserId, "APPROVED", since),
-    listDomesticOrderApprovalOutcomes(requesterUserId, "APPROVED", since),
+    listRepairCaseApprovalOutcomes(viewerUserId, "APPROVED", since, scope),
+    listQuoteApprovalOutcomes(viewerUserId, "APPROVED", since, scope),
+    listDomesticOrderApprovalOutcomes(viewerUserId, "APPROVED", since, scope),
   ]);
   return [...cases, ...quoteOutcomes, ...domesticOutcomes].sort(byDecisionNewestFirst);
 }
 
 /**
- * 내가 요청한 결재 중 **최근 창 안에 반려된** 것 — 어느 단계에서든, 네 결재 모두,
+ * 내가 요청한 결재 중 **최근 창 안에 반려된** 것 — 어느 단계에서든, 세 갈래 모두,
  * 결정이 늦은 것부터. 내가 스스로 결정한 것은 빠진다.
+ *
+ * 🔴 **역할을 받지 않는다 — 일부러다.** 2026-11-12 에 승인 완료만 영업·관리자까지
+ * 넓어졌고 반려는 **요청자 본인 그대로**다(파일 머리말). 인자에 역할이 없으면 「반만
+ * 넓히는」 실수가 애초에 코드에 적히지 않는다. 바로 위 함수와 모양이 달라 보인다고
+ * 맞추지 마라.
  */
 export async function listMyRejectedApprovalOutcomes(
   requesterUserId: string,
   options: OutcomeOptions = {}
 ): Promise<ApprovalOutcome[]> {
   const since = approvalOutcomeNotificationWindowStart(options.now ?? new Date());
+  const scope: OutcomeScope = { includeOtherRequesters: false };
   const [cases, quoteOutcomes, domesticOutcomes] = await Promise.all([
-    listRepairCaseApprovalOutcomes(requesterUserId, "REJECTED", since),
-    listQuoteApprovalOutcomes(requesterUserId, "REJECTED", since),
-    listDomesticOrderApprovalOutcomes(requesterUserId, "REJECTED", since),
+    listRepairCaseApprovalOutcomes(requesterUserId, "REJECTED", since, scope),
+    listQuoteApprovalOutcomes(requesterUserId, "REJECTED", since, scope),
+    listDomesticOrderApprovalOutcomes(requesterUserId, "REJECTED", since, scope),
   ]);
   return [...cases, ...quoteOutcomes, ...domesticOutcomes].sort(byDecisionNewestFirst);
 }

@@ -55,8 +55,12 @@ import type { QuoteFields } from "@/lib/validation/quote-input";
  *  3. 🔴 **처리된 건은 안 뜬다** — 승인하면 다음 단계로 넘어가고, 반려하면 사라진다.
  *  4. 🔴 **한 요청에 알림 하나** — 단계가 나아가도 한 장에 한 줄이다.
  *  5. 휴지통에 간 견적서의 결재는 뜨지 않는다(누르면 갈 화면이 없다).
- *  6. 🔴 결과 알림은 **요청자에게만**, **마지막 단계 승인**에만. 반려는 어느 단계에서든.
- *  7. 🔴 결정자가 요청자 본인이면(최고관리자 비상구) 알리지 않는다.
+ *  6. 🔴 결과 알림은 **마지막 단계 승인**에만(반려는 어느 단계에서든). 받는 사람은
+ *     2026-11-12 부터 갈린다 — 승인 완료는 요청자 **또는 영업·관리자·최고관리자**,
+ *     반려는 **요청자뿐**이다. 🔵 이 파일의 사람은 최고관리자 하나만 빼고 전부 영업이라
+ *     그 넓히기가 여기서 그대로 드러난다.
+ *  7. 🔴 결정자가 **보는 사람 본인**이면 그 사람에게는 알리지 않는다(최고관리자 비상구 ·
+ *     마지막 단계를 결재한 사람). 넓어진 뒤에도 그대로다.
  *  8. 🔴 승인 뒤 견적서를 고쳐도(APPROVED_OUTDATED) 이미 난 승인 **사건**은 그대로다 —
  *     고칠 때마다 종에 줄이 서지 않는다.
  *
@@ -85,6 +89,15 @@ let superAdminId: string;
 
 const createdTestUserIds: string[] = [];
 const createdQuoteIds: string[] = [];
+/**
+ * 🔴 **역할을 적어 둔다**(2026-11-12). 「승인 완료」 조회가 사용자 id 와 함께 **역할**을
+ * 받게 됐다 — 영업·관리자·최고관리자는 남이 올린 결재의 결과도 본다
+ * (queries/approval-outcome-notifications.ts). 시험이 아무 역할이나 넘기면 그 사람의
+ * 진짜 자격과 어긋난 답을 재게 되므로, 만들 때의 역할 그대로 묻는다.
+ * 🔵 이 파일의 기본 역할이 **영업**이라는 것이 그대로 뜻을 갖는다 — 견적서를 올리는
+ *    사람이 곧 넓어진 역할이다.
+ */
+const createdUserRoles = new Map<string, Role>();
 
 async function createTestUser(
   name: string,
@@ -103,7 +116,20 @@ async function createTestUser(
     })
     .returning({ id: users.id });
   createdTestUserIds.push(row.id);
+  createdUserRoles.set(row.id, (overrides.role as Role | undefined) ?? "SALES");
   return row.id;
+}
+
+/** 그 사람의 역할. 모르는 사람을 물으면 조용히 엉뚱한 답을 내지 않게 멈춘다. */
+function roleOf(userId: string): Role {
+  const role = createdUserRoles.get(userId);
+  assert.ok(role, `이 파일이 만들지 않은 사람이다: ${userId}`);
+  return role;
+}
+
+/** 이 사람이 지금 보는 **이 실행의** 승인 완료. 역할은 그 사람의 진짜 역할로 묻는다. */
+async function grantedOfThisRun(userId: string): Promise<QuoteOutcome[]> {
+  return ofThisRun(await listMyGrantedApprovalOutcomes(userId, roleOf(userId)));
 }
 
 /** 필수 칸만 채운 한 장. 견적서는 수리 건·고객사가 없어도 만들 수 있다. */
@@ -466,22 +492,43 @@ describe("결과 알림 — 올린 사람에게", () => {
 
     await decide(quote, stepAId, "APPROVED");
     assert.deepEqual(
-      ofThisRun(await listMyGrantedApprovalOutcomes(requesterId)),
+      (await grantedOfThisRun(requesterId)),
       [],
       "중간 단계 승인이 결과로 샜다"
     );
 
     await decide(quote, stepBId, "APPROVED");
-    const granted = ofThisRun(await listMyGrantedApprovalOutcomes(requesterId));
-    assert.equal(granted.length, 1, "마지막 단계 승인이 요청자에게 가지 않았다");
+    const granted = (await grantedOfThisRun(requesterId));
+    // 🔴 **한 줄이다.** 올린 사람이 영업이라(이 파일의 기본 역할) 2026-11-12 의 조건
+    //    「요청자가 나 **또는** 내 역할이 영업·관리자·최고관리자」가 **양쪽 다 참**인
+    //    경우인데, 둘을 더하는 것이 아니라 같은 행 하나를 고르는 것이므로 줄도 하나다.
+    //    여기가 2가 되면 OR 이 합집합으로 돌고 있는 것이다.
+    assert.equal(granted.length, 1, "마지막 단계 승인이 요청자에게 한 줄로 가지 않았다");
     assert.equal(granted[0].quoteId, quote.id);
     assert.equal(granted[0].quoteNumber, quote.quoteNumber);
     assert.equal(granted[0].decidedByName, "견적알림시험 2단계");
 
-    // 🔴 남에게는 가지 않는다 — 결재한 사람에게도, 제삼자에게도.
-    for (const userId of [stepAId, stepBId, outsiderId, superAdminId]) {
-      assert.deepEqual(ofThisRun(await listMyGrantedApprovalOutcomes(userId)), [], `${userId} 에게 샜다`);
+    // 🔴 **2026-11-12 — 여기가 뒤집혔다.** 전에는 「남에게는 가지 않는다」였다. 승인
+    //    완료가 영업·관리자·최고관리자까지 넓어졌고, 이 파일의 사람은 최고관리자 하나만
+    //    빼고 전부 **영업**이라 결재선 밖 사람도 이 결과를 본다.
+    for (const userId of [stepAId, outsiderId, superAdminId]) {
+      const theirs = await grantedOfThisRun(userId);
+      assert.equal(
+        theirs.length,
+        1,
+        `${userId}(${roleOf(userId)}) 가 남이 올린 승인 완료를 못 받는다`
+      );
+      assert.equal(theirs[0].quoteId, quote.id);
     }
+
+    // 🔴 **딱 한 사람만 못 받는다 — 마지막 단계를 결재한 본인이다.** 자기가 한 일을
+    //    자기 종으로 돌려받지 않는다는 조건이 넓어진 뒤에도 그대로 선다. 이 줄이 없으면
+    //    위의 「다 받는다」가 「아무나 다 받는다」와 구별되지 않는다.
+    assert.deepEqual(
+      await grantedOfThisRun(stepBId),
+      [],
+      "마지막 단계를 결재한 본인에게 자기 결정이 알림으로 돌아왔다"
+    );
   });
 
   test("반려는 어느 단계에서든 요청자에게 간다 — 사유와 함께", async () => {
@@ -494,17 +541,25 @@ describe("결과 알림 — 올린 사람에게", () => {
     assert.equal(rejected.length, 1);
     assert.equal(rejected[0].quoteId, quote.id);
     assert.equal(rejected[0].decisionReason, "단가 근거가 없습니다");
-    assert.deepEqual(ofThisRun(await listMyGrantedApprovalOutcomes(requesterId)), [], "반려가 승인으로 샜다");
+    assert.deepEqual((await grantedOfThisRun(requesterId)), [], "반려가 승인으로 샜다");
     assert.deepEqual(ofThisRun(await listMyRejectedApprovalOutcomes(stepAId)), [], "결재한 사람에게 샜다");
   });
 
-  test("🔴 결정자가 요청자 본인이면 알리지 않는다 — 최고관리자가 비상구로 자기 요청을 결정한 경우", async () => {
+  test("🔴 결정자가 본인이면 그 사람에게는 알리지 않는다 — 최고관리자가 비상구로 자기 요청을 결정한 경우", async () => {
     await saveQuoteRoute([stepAId]);
     const quote = await createTestQuote(superAdminId);
     await request(quote, superAdminId);
     await decide(quote, superAdminId, "APPROVED");
 
-    assert.deepEqual(ofThisRun(await listMyGrantedApprovalOutcomes(superAdminId)), []);
+    assert.deepEqual((await grantedOfThisRun(superAdminId)), []);
+
+    // 🔴 **2026-11-12 에 이 조건의 뜻이 한 겹 늘었다.** 그 조건이 보는 것은 **지금 종을
+    //    여는 사람**이지 요청자 칸이 아니다 — 그래서 요청자와 결정자가 같은 이 건도
+    //    **넓어진 다른 사람**(여기서는 영업)에게는 뜬다. 전에는 아무에게도 뜨지 않았다.
+    //    조회의 조건을 `ne(결정자, 요청자)` 로 바꾸면 여기가 깨진다.
+    const theirs = await grantedOfThisRun(requesterId);
+    assert.equal(theirs.length, 1, "스스로 결정한 건이 넓어진 역할에게도 안 뜬다");
+    assert.equal(theirs[0].quoteId, quote.id);
   });
 
   test("🔴 승인 뒤 **판 번호만** 올라가도 승인 사건은 그대로다 — 줄이 늘지도 사라지지도 않는다", async () => {
@@ -519,7 +574,7 @@ describe("결과 알림 — 올린 사람에게", () => {
     const quote = await createTestQuote();
     await request(quote);
     await decide(quote, stepAId, "APPROVED");
-    assert.equal(ofThisRun(await listMyGrantedApprovalOutcomes(requesterId)).length, 1);
+    assert.equal((await grantedOfThisRun(requesterId)).length, 1);
 
     await bumpQuoteVersionWithoutTouchingApproval(quote);
     // 🔵 무엇을 재는지 — 승인은 여전히 APPROVED 이고 판 번호만 어긋났다.
@@ -532,7 +587,7 @@ describe("결과 알림 — 올린 사람에게", () => {
     assert.equal(rows[0].status, "APPROVED");
 
     assert.equal(
-      ofThisRun(await listMyGrantedApprovalOutcomes(requesterId)).length,
+      (await grantedOfThisRun(requesterId)).length,
       1,
       "판 번호가 올랐다고 결과 알림이 늘거나 사라졌다"
     );
@@ -549,7 +604,7 @@ describe("결과 알림 — 올린 사람에게", () => {
     const quote = await createTestQuote();
     await request(quote);
     await decide(quote, stepAId, "APPROVED");
-    assert.equal(ofThisRun(await listMyGrantedApprovalOutcomes(requesterId)).length, 1);
+    assert.equal((await grantedOfThisRun(requesterId)).length, 1);
 
     // 🔴 **올린 사람이 아닌 사람**이 고친다 — 결과 알림은 결정자가 요청자 본인이면
     //    알리지 않으므로(자기 행동을 자기 종으로 돌려받지 않게), 그 갈림까지 재려면
@@ -557,7 +612,7 @@ describe("결과 알림 — 올린 사람에게", () => {
     await bumpQuoteVersion(quote, outsiderId);
 
     assert.deepEqual(
-      ofThisRun(await listMyGrantedApprovalOutcomes(requesterId)),
+      (await grantedOfThisRun(requesterId)),
       [],
       "🔴 반려된 승인이 「승인 완료」로 종에 남았다"
     );
@@ -581,7 +636,7 @@ describe("결과 알림 — 올린 사람에게", () => {
 
     await bumpQuoteVersion(quote, requesterId);
 
-    assert.deepEqual(ofThisRun(await listMyGrantedApprovalOutcomes(requesterId)), []);
+    assert.deepEqual((await grantedOfThisRun(requesterId)), []);
     assert.deepEqual(
       ofThisRun(await listMyRejectedApprovalOutcomes(requesterId)),
       [],

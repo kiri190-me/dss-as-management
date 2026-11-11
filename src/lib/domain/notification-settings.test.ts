@@ -118,9 +118,12 @@ function ruleBeforeNotificationSettings(kind: string, role: Role): boolean {
   }
   if (kind === "APPROVAL_GRANTED" || kind === "APPROVAL_REJECTED") {
     // 새로 태어난 종류라 재현할 옛 동작은 없고, **그때 내린 결정**을 손으로
-    // 적는다 — 다섯 역할 전부. 요청자 본인에게만 가는 사람 단위 알림이라(조회가
-    // requested_by_user_id = 나 로 정한다) 역할로 막을 것이 없고, 결재를 요청하는
-    // 쪽은 역할이 여럿이다.
+    // 적는다 — 다섯 역할 전부. 결재를 요청하는 쪽은 역할이 여럿이라, 어느 역할을
+    // 빼면 자기가 올린 결재의 결과를 모르는 사람이 생긴다.
+    // 🔴 2026-11-12 에 **승인 완료만** 받는 사람이 넓어졌다(요청자 본인 또는
+    //    영업·관리자·최고관리자). 그래도 이 기본값은 둘 다 참 그대로다 — 넓어진 뒤에도
+    //    「자기가 올린 것을 받는가」는 다섯 역할 전부이고, 이 스위치는 넓힌 쪽을 되좁히는
+    //    손잡이로 그대로 산다(queries/approval-outcome-notifications.ts).
     return true;
   }
   throw new Error(`대상을 판정한 적 없는 종류다: ${kind}`);
@@ -486,7 +489,7 @@ test("납기 지연의 이름·설명·색 — 표의 배지와 같은 말이고
   );
 });
 
-test("🔴 승인 완료·반려됨의 기본값은 켜짐·다섯 역할 전부 받음이다 — 요청자 본인에게만 가는 알림이다", () => {
+test("🔴 승인 완료·반려됨의 기본값은 켜짐·다섯 역할 전부 받음이다 — 자기가 올린 결재의 결과는 누구나 받는다", () => {
   for (const kind of ["APPROVAL_GRANTED", "APPROVAL_REJECTED"] as const) {
     assert.equal(defaultNotificationKindEnabled(kind), true, `${kind} 는 켜진 채로 태어난다`);
     for (const role of ROLE_CODES) {

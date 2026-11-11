@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  APPROVAL_GRANTED_BROAD_RECIPIENT_ROLES,
   APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS,
   APPROVAL_REJECTION_REASON_PREVIEW_LENGTH,
   NOTIFICATION_KINDS,
@@ -18,10 +19,12 @@ import {
   isRepairCaseDueDateNear,
   isRepairCaseDueDateWithinNotificationWindow,
   previewApprovalRejectionReason,
+  receivesOthersApprovalGrantedOutcomes,
   repairCaseDueDateNotificationWindowEnd,
   type ApprovalOutcomeTarget,
   type NotificationItem,
 } from "./notifications";
+import { ROLE_CODES } from "./types";
 // 🔵 「이 건은 이미 나갔는가」는 2026-10-30 에 domain/shipment-finished.ts 로 나갔다
 //    (고리를 끊은 조각). 시험은 여기 그대로 둔다 — 아래 「납기 임박」 시험들이 바로 그
 //    판정으로 걸러지는지를 **같은 자리에서** 맞대어 보기 때문이다.
@@ -151,9 +154,13 @@ test("등록된 알림 종류는 결재 요청·견적서 결재 대기·기타�
   // 않는다(아래 레지스트리 시험이 그것을 못 박는다).
   //
   // APPROVAL_GRANTED·APPROVAL_REJECTED는 판정을 새로 세웠다: **요청자 본인**
-  // (queries/approval-outcome-notifications.ts 의 `requested_by_user_id = 나`). 남의
-  // 결재 결과를 요구할 입구가 없고, 역할로 거르지 않는 (가)형이다. 할 일이 아니라
-  // 정보성이라 눌러서 확인하면 사라진다(domain/notification-acknowledgement.ts).
+  // (queries/approval-outcome-notifications.ts 의 `requested_by_user_id = 나`). 둘 다
+  // 역할로 거르지 않는 (가)형이고, 할 일이 아니라 정보성이라 눌러서 확인하면 사라진다
+  // (domain/notification-acknowledgement.ts).
+  // 🔴 **2026-11-12 에 승인 완료만 명단이 넓어졌다** — 요청자 본인 **또는**
+  // 영업·관리자·최고관리자(사용자 요구). 조회가 사용자 id 와 함께 역할을 받아
+  // 「어느 행까지 내줄지」를 정한다. 🔴 **반려됨은 그대로 요청자 본인뿐**이고, 그
+  // 갈림을 아래 레지스트리 시험 둘이 글자로 지킨다.
   //
   // REPAIR_CASE_DUE_DATE_NEAR 은 판정이 **아예 없다** — 2026-10-19 사용자 결정으로
   // 모든 역할이 받는다. 대상이 사람도 역할도 아니라 「지금 납기가 다가온 건」이라는
@@ -308,6 +315,11 @@ function registryBlockFor(kind: string): string {
  * 자른 부품 요청 대기 덩어리에는 `actorRole` 이 실제로 들어 있어야 한다는 단언.
  * 역할로 거르는 종류가 하나도 안 남아 그 대조를 쓸 수 없게 됐고, 대신 **덩어리가
  * 제 조회를 담고 남의 조회는 안 담는다**를 본다(경계가 앞뒤로 새면 둘 중 하나가 깨진다).
+ *
+ * 🔵 **2026-11-12 에 그 글자 대조가 다른 모양으로 돌아왔다** — 승인 완료 덩어리에는
+ *    `actorRole` 이 있어야 하고 반려됨 덩어리에는 없어야 한다(아래 두 시험). 역할로
+ *    **거르는** 종류가 생긴 것은 아니다. 승인 완료는 역할을 조회에 **넘겨** 「어느
+ *    행까지 내줄지」를 정하게 하는 것이고, (나)형의 자리는 여전히 비어 있다.
  */
 function assertRegistryBlockIsolated(kind: string, ownCall: string, otherCall: string): string {
   const block = registryBlockFor(kind);
@@ -922,6 +934,57 @@ test("🔴 결재 결과 알림의 id 는 네 갈래 모두 확인 키 검증을
   assert.equal(new Set(items.map((item) => item.id)).size, items.length, "네 갈래의 id 가 서로 겹친다");
 });
 
+// ───────────────────── 승인 완료를 남의 것까지 받는 역할 (2026-11-12)
+
+test("🔴 승인 완료를 남의 것까지 받는 역할은 **셋**이다 — 영업·관리자·최고관리자", () => {
+  // 🔵 먼저 무엇을 재는지 — 다섯 역할을 전부 돌아야 「셋만」이라는 말이 뜻을 갖는다.
+  assert.equal(ROLE_CODES.length, 5, "역할 수가 바뀌었다 — 이 시험이 무엇을 도는지 다시 적어야 한다");
+
+  const broad = ROLE_CODES.filter((role) => receivesOthersApprovalGrantedOutcomes(role));
+  assert.deepEqual([...broad].sort(), ["ADMIN", "SALES", "SUPER_ADMIN"]);
+
+  // 🔴 **안 넓힌 쪽도 이름으로 못 박는다** — 위 목록이 줄어드는 것만 보면, 엔지니어가
+  //    들어오는 날은 잡아도 빠지는 날은 못 잡는다.
+  assert.equal(receivesOthersApprovalGrantedOutcomes("AS_ENGINEER"), false);
+  assert.equal(receivesOthersApprovalGrantedOutcomes("INVENTORY_MANAGER"), false);
+
+  // 🔴 **최고관리자가 명단에 있어야 한다**(2026-11-12 보고). 사용자가 말한 것은
+  //    「영업, 관리자」지만, 알림 설정의 최고관리자 잠금이 「언제나 받는다」를 약속하므로
+  //    여기서 빼면 그 화면이 「받음(잠김)」이라 적어 놓고 한 줄도 안 가는 상태가 된다.
+  assert.equal(receivesOthersApprovalGrantedOutcomes("SUPER_ADMIN"), true);
+
+  // 목록과 판정이 두 벌이 되지 않는다 — 판정은 그 목록을 읽어서 답한다.
+  assert.deepEqual(
+    [...APPROVAL_GRANTED_BROAD_RECIPIENT_ROLES].sort(),
+    [...broad].sort(),
+    "상수와 판정이 어긋났다"
+  );
+});
+
+test("🔴 반려됨에는 같은 넓히기가 없다 — 그 조회는 역할을 **인자로 받지도 않는다**", () => {
+  // 🔴 2026-11-12 사용자 결정은 **승인 완료 하나**였다. 둘이 같은 파일의 같은 사슬에서
+  //    나오는 짝이라 「한쪽만 빠뜨렸다」로 읽히기 쉬워, 글자로 못 박아 둔다.
+  const source = readFileSync(new URL("../db/queries/approval-outcome-notifications.ts", import.meta.url), "utf8");
+
+  // 🔵 먼저 자르기가 뜻을 갖는지 — 두 함수가 실제로 그 파일에 있어야 한다.
+  assert.ok(source.includes("export async function listMyGrantedApprovalOutcomes("), "승인 완료 조회가 없다");
+  assert.ok(source.includes("export async function listMyRejectedApprovalOutcomes("), "반려됨 조회가 없다");
+
+  const signatureOf = (name: string): string => {
+    const start = source.indexOf(`export async function ${name}(`);
+    assert.ok(start >= 0, `${name} 를 못 찾았다`);
+    const end = source.indexOf("): Promise<ApprovalOutcome[]> {", start);
+    assert.ok(end > start, `${name} 의 인자 목록 끝을 못 찾았다`);
+    return source.slice(start, end);
+  };
+
+  assert.match(signatureOf("listMyGrantedApprovalOutcomes"), /viewerRole:\s*Role/, "승인 완료가 역할을 안 받는다");
+  assert.ok(
+    !/Role/.test(signatureOf("listMyRejectedApprovalOutcomes")),
+    "🔴 반려됨 조회가 역할을 받는다 — 넓힐 길이 생겼다"
+  );
+});
+
 test("같은 행 id 여도 두 표(접수 건 결재·견적서 결재)의 키는 겹치지 않는다", () => {
   const sameId = "55555555-5555-4555-8555-555555555555";
   const fromCase = buildApprovalGrantedNotification({ ...caseTarget(), approvalId: sameId, decidedByName: "a" });
@@ -938,21 +1001,58 @@ test("결재 결과는 사건 단위로 센다 — 같은 접수 건의 검수·
   assert.equal(counts.REPAIR_CASE_APPROVAL, 0, "사이드바 결재 배지는 결재 결과를 세지 않는다");
 });
 
-// ─────────────────────── 레지스트리 — 결재 결과는 요청자 본인 · 확인한 것은 뺀다
+// ──────── 레지스트리 — 승인 완료는 역할까지, 반려는 요청자 본인 · 확인한 것은 뺀다
 
-for (const kind of ["APPROVAL_GRANTED", "APPROVAL_REJECTED"] as const) {
-  test(`🔴 ${kind} 는 역할로 거르지 않고, 새 조회를 부른 뒤 확인한 키를 뺀다`, () => {
-    const block = registryBlockFor(kind);
-    assert.match(block, /load:\s*async\s*\(\s*actorUserId\s*\)\s*=>/, "load 가 사용자 id 하나만 받아야 한다");
-    assert.ok(!block.includes("actorRole"), `${kind} load 가 역할을 본다`);
-    assert.ok(!/canReceive\w*\(/.test(block), `${kind} load 가 역할 판정 함수를 부른다`);
-    assert.match(block, /withoutAcknowledged\(\s*actorUserId,/, "확인한 키를 빼지 않는다");
-    const query = kind === "APPROVAL_GRANTED" ? "listMyGrantedApprovalOutcomes" : "listMyRejectedApprovalOutcomes";
-    const build = kind === "APPROVAL_GRANTED" ? "buildApprovalGrantedNotification(" : "buildApprovalRejectedNotification(";
-    assert.ok(block.includes(`${query}(actorUserId)`), "결과 사건 조회를 요청자 id 로 부르지 않는다");
-    assert.ok(block.includes(build), "모양 변환은 도메인의 build 함수가 한다");
-  });
-}
+/**
+ * 🔴 **두 종류의 load 모양이 2026-11-12 에 갈렸다 — 그 갈림 자체를 글자로 지킨다.**
+ *
+ * 승인 완료는 사용자 id 와 **역할**을 함께 조회에 넘긴다(영업·관리자·최고관리자는 남이
+ * 올린 결재의 결과도 본다). 반려됨은 **요청자 본인뿐**이라 id 하나만 넘긴다. 둘을 한
+ * 루프로 묶어 두면 「한쪽만 빠뜨렸다」로 읽혀 맞춰지기 쉬운 자리라, 기대값을 종류마다
+ * 따로 적는다.
+ *
+ * 🔵 역할을 넘기는 것과 「역할로 거른다」는 다른 말이다 — 거르는 것은 설정 층이고
+ *    (deliversNotification), 여기서는 조회가 **어느 행까지 내줄지**를 정한다. 그래서
+ *    승인 완료 쪽에서도 역할 판정 함수(canReceive…)를 부르지 않는 것은 그대로다.
+ */
+test("🔴 APPROVAL_GRANTED 의 load 는 역할을 **함께 넘기고**, 조회를 부른 뒤 확인한 키를 뺀다", () => {
+  const block = assertRegistryBlockIsolated(
+    "APPROVAL_GRANTED",
+    "listMyGrantedApprovalOutcomes(",
+    "listMyRejectedApprovalOutcomes("
+  );
+  assert.match(
+    block,
+    /load:\s*async\s*\(\s*actorUserId,\s*actorRole\s*\)\s*=>/,
+    "load 가 사용자 id 와 역할 둘을 받아야 한다"
+  );
+  assert.ok(!/canReceive\w*\(/.test(block), "APPROVAL_GRANTED load 가 역할 판정 함수를 부른다");
+  assert.match(block, /withoutAcknowledged\(\s*actorUserId,/, "확인한 키를 빼지 않는다");
+  assert.ok(
+    block.includes("listMyGrantedApprovalOutcomes(actorUserId, actorRole)"),
+    "🔴 결과 사건 조회에 역할을 안 넘긴다 — 영업·관리자가 남의 승인 완료를 못 받는다"
+  );
+  assert.ok(block.includes("buildApprovalGrantedNotification("), "모양 변환은 도메인의 build 함수가 한다");
+});
+
+test("🔴 APPROVAL_REJECTED 의 load 는 사용자 id 하나만 받는다 — 반려는 요청자 본인뿐이다", () => {
+  const block = assertRegistryBlockIsolated(
+    "APPROVAL_REJECTED",
+    "listMyRejectedApprovalOutcomes(",
+    "listMyGrantedApprovalOutcomes("
+  );
+  assert.match(block, /load:\s*async\s*\(\s*actorUserId\s*\)\s*=>/, "load 가 사용자 id 하나만 받아야 한다");
+  // 🔴 위 승인 완료 덩어리에는 이 글자가 **있어야** 하고 여기에는 **없어야** 한다.
+  //    둘이 같아지는 순간 「승인 완료만 넓힌다」는 2026-11-12 결정이 무너진다.
+  assert.ok(!block.includes("actorRole"), "반려됨 load 가 역할을 본다 — 넓힌 것은 승인 완료 하나다");
+  assert.ok(!/canReceive\w*\(/.test(block), "APPROVAL_REJECTED load 가 역할 판정 함수를 부른다");
+  assert.match(block, /withoutAcknowledged\(\s*actorUserId,/, "확인한 키를 빼지 않는다");
+  assert.ok(
+    block.includes("listMyRejectedApprovalOutcomes(actorUserId)"),
+    "결과 사건 조회를 요청자 id 하나로 부르지 않는다"
+  );
+  assert.ok(block.includes("buildApprovalRejectedNotification("), "모양 변환은 도메인의 build 함수가 한다");
+});
 
 test("🔴 확인 기록은 결재 결과 두 종류의 load 에서만 대 본다 — 할 일 알림에는 대 보지 않는다", () => {
   for (const kind of NOTIFICATION_KINDS) {

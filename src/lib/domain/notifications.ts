@@ -64,7 +64,7 @@ import {
 } from "./requested-due-date-link";
 import { SHIPMENT_APPROVAL_ROUTE_SCOPE_LABELS } from "./shipment-approval-route";
 import { isRepairCaseShipmentFinished } from "./shipment-finished";
-import type { RepairStatus } from "./types";
+import type { RepairStatus, Role } from "./types";
 
 /**
  * 등록된 알림 종류. 새 종류를 붙일 때 손대는 곳은 이 배열과
@@ -924,6 +924,39 @@ const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 /** `now` 기준 창의 시작 시각. 결정 시각이 이 값 이상이면 창 안이다. */
 export function approvalOutcomeNotificationWindowStart(now: Date): Date {
   return new Date(now.getTime() - APPROVAL_OUTCOME_NOTIFICATION_WINDOW_DAYS * MILLISECONDS_PER_DAY);
+}
+
+/**
+ * 「승인 완료」를 **요청자 말고도** 받는 역할 — 영업 · 관리자 · 최고관리자.
+ *
+ * 2026-11-12 사용자 요구다 — 「[승인 완료] 알림이 승인 요청을 한 사람 외에도
+ * [영업, 관리자]인 사람들에게도 뜨도록」.
+ *
+ * 🔴 **「반려됨」은 여기 걸리지 않는다 — 그쪽은 여전히 요청자 본인뿐이다.** 둘은 같은
+ * 결재 사슬에서 같은 조회로 나오는 짝이라 「한쪽만 빠뜨렸다」로 읽기 아주 쉬운 자리인데,
+ * 사용자 결정이 승인 완료 **하나**였다. 까닭도 있다: 반려는 사유가 실리고 「고쳐서 다시
+ * 올릴 사람」에게 가는 알림이라, 명단을 넓히면 할 일 알림이 구경거리가 된다. 맞추지
+ * 마라. 조회 쪽도 그 뜻대로 갈라 두었다 — listMyRejectedApprovalOutcomes 는 역할을
+ * **인자로 받지도 않아서** 넓힐 길이 없다(db/queries/approval-outcome-notifications.ts).
+ *
+ * 🔴 **최고관리자를 함께 적는다.** 사용자가 말한 것은 「영업, 관리자」지만, 알림 설정에는
+ * 종류를 가리지 않는 잠금이 따로 있어 최고관리자가 받는 것은 화면에서 끌 수 없다
+ * (notification-settings.ts 의 isRoleEditableInNotificationSettings). 여기서 빼면
+ * 「받음(잠김)」이라 적어 둔 그 화면이 거짓말이 된다 — 명단을 넓히는 결정이 아니라
+ * 잠금이 이미 참으로 만들어 둔 것을 같은 말로 적는 것이다(같은 파일의 사내 목표 완료일
+ * 미등록·납기 역전이 같은 문단을 달고 있다).
+ *
+ * 🔵 **A/S 엔지니어·재고 담당자는 넓히지 않는다** — 자기가 올린 결재의 결과만 받는
+ * 종전 그대로다.
+ *
+ * 🔵 **이 판정이 역할 스위치를 대신하지 않는다.** 알림 설정에서 영업을 끄면 그 사람
+ * 앞에서는 조회가 아예 돌지 않는다(db/queries/notifications.ts 의 deliversNotification).
+ * 여기가 정하는 것은 「스위치를 지나온 사람이 **남의** 결과까지 보는가」 하나다.
+ */
+export const APPROVAL_GRANTED_BROAD_RECIPIENT_ROLES: readonly Role[] = ["SALES", "ADMIN", "SUPER_ADMIN"];
+
+export function receivesOthersApprovalGrantedOutcomes(role: Role): boolean {
+  return APPROVAL_GRANTED_BROAD_RECIPIENT_ROLES.includes(role);
 }
 
 /**
