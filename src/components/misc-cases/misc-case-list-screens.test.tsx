@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import MiscCaseCardList from "./MiscCaseCardList";
+import MiscCaseFilters from "./MiscCaseFilters";
 import MiscCaseListScreen, { type MiscCaseListRow } from "./MiscCaseListScreen";
 import MiscCaseStatusBadge from "./MiscCaseStatusBadge";
 import MiscCaseTable from "./MiscCaseTable";
@@ -11,7 +12,9 @@ import { MISC_CASE_FIELDS } from "./misc-case-fields";
 import { navItems } from "@/lib/navigation";
 import { DOMESTIC_ORDER_NO_MODEL_LINK_LABEL } from "@/lib/domain/domestic-order-detail-link";
 import { NO_ORDER_DATE_LABEL } from "@/lib/domain/domestic-order-display";
+import { UNASSIGNED_CUSTOMER_LABEL } from "@/lib/domain/domestic-order-list";
 import {
+  collectMiscCaseCustomerOptions,
   MISC_CASE_DEFAULT_SORT,
   MISC_CASE_EMPTY_LABEL,
   MISC_CASE_NO_MATCH_LABEL,
@@ -301,26 +304,102 @@ describe("🔴 화면 — 건수와 0건일 때의 말", () => {
   });
 });
 
-describe("🔴 거르개 — 상태 · 공급처 (2026-11-06 사용자 요구)", () => {
+describe("🔴 거르개 — 상태 · 공급처 (2026-11-06 사용자 요구 · 2026-11-11 복수 선택)", () => {
   const html = renderToStaticMarkup(<MiscCaseListScreen rows={SAMPLE} />);
 
-  test("상태 고르개에 여섯 상태가 **전부** 선다", () => {
+  /**
+   * 🔴 2026-11-11 부터 두 칸은 **여럿 고르는 칸**이다(사용자 개선요청). 그래서
+   * **펼친 목록을 이 환경에서 볼 수 없다** — 부품은 접힌 채로 태어나고
+   * (useState(false)) 정적 렌더는 누르기를 돌리지 못한다(jsdom 이 없다).
+   * 그 대신 재는 것 셋:
+   *  · 닫힌 칸이 둘 서고 **<select> 가 한 칸도 안 남았는가**(되돌아가지 않았는가),
+   *  · 고른 것을 닫힌 칸이 **사실대로 말하는가**(= 선택지와 고른 값이 실제로
+   *    부품까지 닿았는가 — 안 닿으면 글자가 코드로 나온다),
+   *  · 공급처 선택지가 **지금 떠 있는 줄에서** 나오는가.
+   * 펼친 목록 자체는 부품의 시험이 본다(common/CheckboxFilterDropdown.test.tsx).
+   */
+  /**
+   * ⚠️ **거르개 카드만 따로 그려서 센다.** 목록 화면 전체에는 쪽 나누기의
+   * 「N개씩」 고르개가 있어 `<select>` 가 늘 하나 남는다 — 화면 전체로 세면 이
+   * 시험은 영영 깨지거나(지금처럼) 엉뚱한 칸을 재게 된다.
+   */
+  const filtersHtml = renderToStaticMarkup(
+    <MiscCaseFilters
+      filters={{ query: "", statuses: [], customerNames: [] }}
+      customerOptions={collectMiscCaseCustomerOptions(SAMPLE)}
+      onQueryChange={() => {}}
+      onStatusesChange={() => {}}
+      onCustomerNamesChange={() => {}}
+      onReset={() => {}}
+    />
+  );
+
+  test("🔴 두 칸 다 복수 선택 칸이고, 한 번에 하나만 고르던 <select> 는 안 남았다", () => {
+    // 목록 화면이 그 두 칸을 실제로 세운다.
     assert.ok(html.includes('id="misc-case-status"'), html);
-    for (const label of Object.values(MISC_CASE_STATUS_LABELS)) {
-      assert.ok(html.includes(`>${label}</option>`), `상태 고르개에 ${label} 이 없다`);
-    }
-    // 「전체」가 없으면 한 번 고른 뒤 되돌릴 길이 없다. (React 가 고른 칸에
-    // `selected=""` 를 붙이므로 글자만 본다.)
-    assert.ok(html.includes(">전체</option>"), html);
+    assert.ok(html.includes('id="misc-case-customer"'), html);
+    // 여는 단추가 둘(aria-haspopup) — 칸 하나만 바꾸고 하나를 잊으면 여기서 1 이다.
+    assert.equal(count(filtersHtml, 'aria-haspopup="true"'), 2, filtersHtml);
+    assert.equal(filtersHtml.includes("<select"), false, "거르개에 <select> 가 되살아났다");
+    assert.equal(filtersHtml.includes("<option"), false, "거르개에 <option> 이 되살아났다");
+    assert.equal(
+      filtersHtml.includes('value="ALL"'),
+      false,
+      "「전체」가 다시 고르는 값이 되었다 — 이제는 빈 배열이 「전체」다"
+    );
+    // 아무것도 안 골랐을 때 닫힌 칸에 적히는 글자. 예전 <select> 의 「전체」와 같은
+    // 뜻·같은 글자여야 한다 — 없으면 한 번 고른 뒤 되돌릴 길이 없어 보인다.
+    assert.equal(count(filtersHtml, ">전체</span>"), 2, filtersHtml);
   });
 
-  test("🔴 공급처 고르개는 **지금 떠 있는 줄에서** 뽑는다", () => {
-    assert.ok(html.includes('id="misc-case-customer"'), html);
-    // 표본의 두 줄 중 하나에만 공급처가 있다 — 그 이름 하나와 「미지정」이 선다.
-    assert.ok(html.includes('value="가나 테크"'), html);
-    assert.ok(html.includes(`value="${MISC_CASE_UNASSIGNED_CUSTOMER_VALUE}"`), html);
+  test("🔴 고른 것을 닫힌 칸이 사실대로 말한다 — 「미지정」도 **그 글자**로", () => {
+    // 🔵 이 시험이 선택지와 고른 값이 **부품까지 닿았는지**를 가른다: 선택지가 안
+    //    닿으면 공급처 칸에 이름표 대신 코드("NONE")가 그대로 적힌다.
+    const picked = renderToStaticMarkup(
+      <MiscCaseFilters
+        filters={{
+          query: "",
+          statuses: ["IN_PROGRESS", "COMPLETED"],
+          customerNames: [MISC_CASE_UNASSIGNED_CUSTOMER_VALUE],
+        }}
+        customerOptions={collectMiscCaseCustomerOptions(SAMPLE)}
+        onQueryChange={() => {}}
+        onStatusesChange={() => {}}
+        onCustomerNamesChange={() => {}}
+        onReset={() => {}}
+      />
+    );
+    // 상태 둘 — 「첫째 이름 외 N개」. 차례는 선택지의 차례다(흐름의 순서).
+    assert.ok(
+      picked.includes(`${MISC_CASE_STATUS_LABELS.IN_PROGRESS} 외 1개`),
+      `상태 칸이 고른 것을 말하지 않는다: ${picked}`
+    );
+    // 공급처 하나 — 코드가 아니라 내자 정리와 같은 글자로 적힌다.
+    assert.ok(picked.includes(UNASSIGNED_CUSTOMER_LABEL), `공급처 칸에 미지정 글자가 없다: ${picked}`);
+    assert.equal(
+      picked.includes(`>${MISC_CASE_UNASSIGNED_CUSTOMER_VALUE}<`),
+      false,
+      "공급처 칸에 코드가 그대로 적혔다 — 선택지가 부품까지 안 닿았다"
+    );
+    // 🔵 못 — 아무것도 안 고른 화면과 **다른 글자**여야 한다(위 시험이 「전체」를 잰다).
+    assert.equal(count(picked, ">전체</span>"), 0, picked);
+  });
+
+  test("🔴 공급처 선택지는 **지금 떠 있는 줄에서** 뽑힌다", () => {
+    // 화면이 부품에 넘기는 그 배열을 **같은 함수로 다시 만들어** 본다(어느 배열을
+    // 넘기는지는 바로 아래 원본 글자 시험이 못 박는다). 표본의 두 줄 중 하나에만
+    // 공급처가 있으므로, 그 이름 하나와 「미지정」이 선다.
+    const options = collectMiscCaseCustomerOptions(SAMPLE);
+    assert.deepEqual(
+      options.map((option) => option.value),
+      ["가나 테크", MISC_CASE_UNASSIGNED_CUSTOMER_VALUE]
+    );
     // 🔵 못 — 표본에 없는 이름이 섞여 있으면 고객사 마스터를 끌어온 것이다.
-    assert.equal(html.includes("다라 전자"), false, html);
+    assert.equal(
+      options.some((option) => option.label === "다라 전자"),
+      false,
+      JSON.stringify(options)
+    );
   });
 
   test("🔴 공급처 목록을 **거르기 전의 줄**에서 뽑는다 — 원본 글자로 못을 박는다", () => {

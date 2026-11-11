@@ -162,8 +162,10 @@ export default function MiscCaseListScreen({ rows }: { rows: readonly MiscCaseLi
         filters={filters}
         customerOptions={customerOptions}
         onQueryChange={(value) => updateFilters({ query: value })}
-        onStatusChange={(value) => updateFilters({ status: value })}
-        onCustomerNameChange={(value) => updateFilters({ customerName: value })}
+        // 🔴 아래 둘은 **배열**이다(2026-11-11 복수 선택 — 그 전에는 값 하나와
+        //    "ALL" 이었다). 빈 배열이 「전체」라, 받는 쪽은 길이가 0 인지만 보면 된다.
+        onStatusesChange={(value) => updateFilters({ statuses: value })}
+        onCustomerNamesChange={(value) => updateFilters({ customerNames: value })}
         onReset={handleReset}
       />
 

@@ -174,8 +174,14 @@ export function nextMiscCaseSort(
  * 「상태·공급처 별로 필터링할 수 있는 검색기능을 넣어줘」.
  *
  * 모양은 전체 A/S 현황의 거르개를 따른다(domain/repair-case-filters.ts 의 Filters ·
- * applyFilters) — 값은 언제나 **코드이거나 `"ALL"`**, 거르는 일은 순수 함수 하나,
- * 그리는 일은 화면. 새 모양을 만들지 않는다.
+ * applyFilters) — 값은 언제나 **코드**, 거르는 일은 순수 함수 하나, 그리는 일은
+ * 화면. 새 모양을 만들지 않는다.
+ *
+ * ── 🔴 한 종류 안에서 **여럿 고른다** (2026-11-11 사용자 개선요청) ───────
+ * 「[전체 A/S 현황]·[기타건 현황]에서 한 종류의 필터 안에서 복수로 선택할 수 있게」.
+ * 그래서 둘 다 **배열**이고 **빈 배열이 「전체」**다 — `"ALL"` 이라는 값은 없앴다.
+ * 두면 「"ALL" 이 들어 있는 배열」이라는 뜻 없는 상태가 생기고, 거르는 쪽이 매번
+ * 그것을 따로 가려내야 한다(전체 A/S 현황이 같은 날 같은 판단을 했다).
  *
  * ── 🔴 공급처는 **이름으로** 거른다 (id 가 아니다) ──────────────────────
  * 전체 A/S 현황은 고객사 id 로 거르는데 여기서는 이름이다. 까닭 둘:
@@ -186,7 +192,10 @@ export function nextMiscCaseSort(
  *    비어 있는 줄이 많다(개발 DB 실측 2026-11-06 — 13건 중 3건만 찼다). 비어 있는
  *    줄을 고르는 길이 있어야 하는데 id 에는 그런 값이 없다.
  *
- * 그래서 값이 셋이다: `"ALL"` · `"NONE"`(공급처가 비어 있는 줄) · 그 이름 자체.
+ * 그래서 배열에 들어갈 수 있는 값이 둘이다: `"NONE"`(공급처가 비어 있는 줄) · 그
+ * 이름 자체. 🔴 **`"NONE"` 은 거르는 방식이 아니라 배열의 평범한 원소**다 — 화면의
+ * 목록에 실제로 서는 한 줄이고, 다른 이름과 **함께** 고를 수 있어야 한다(「가나
+ * 테크와 미지정을 같이」가 실제 쓰임이다).
  *
  * ── 🔴 고를 수 있는 공급처는 **지금 떠 있는 기타건들에서** 뽑는다 ────────
  * 고객사 마스터 전체를 내밀면 고를 수 있는 이름이 수백인데 대부분 0건이다. 전체 A/S
@@ -202,26 +211,34 @@ export const MISC_CASE_UNASSIGNED_CUSTOMER_VALUE = "NONE";
 export type MiscCaseFilters = {
   /** 글자 찾기. 여덟 칸을 함께 본다(filterDomesticOrdersBySearch). */
   query: string;
-  /** `"ALL"` 이거나 상태 하나. */
-  status: "ALL" | MiscCaseStatus;
-  /** `"ALL"` · `"NONE"`(미지정) · 공급처 이름. */
-  customerName: string;
+  /** 보고 싶은 상태들. **빈 배열이 「전체」**다(2026-11-11 복수 선택). */
+  statuses: readonly MiscCaseStatus[];
+  /**
+   * 보고 싶은 공급처들 — **이름**이다(id 가 아니다, 위 머리말). 빈 배열이 「전체」고,
+   * `"NONE"`(미지정)은 그 안의 평범한 원소다.
+   */
+  customerNames: readonly string[];
 };
 
 export const DEFAULT_MISC_CASE_FILTERS: MiscCaseFilters = {
   query: "",
-  status: "ALL",
-  customerName: "ALL",
+  statuses: [],
+  customerNames: [],
 };
 
 /**
  * 접혔을 때 감춰지는 조건 중 지금 걸려 있는 개수 — 전체 A/S 현황의
  * countHiddenActiveFilters 와 같은 자리다. **검색어는 세지 않는다**(늘 보인다).
+ *
+ * 🔴 **몇 개를 골랐든 그 필터는 하나**다. 여기서 세는 것은 「걸려 있는 조건의
+ * 수」이지 고른 값의 수가 아니다 — 공급처를 셋 고른 것은 「공급처라는 조건 하나가
+ * 걸려 있다」는 뜻이고, 그것을 3 으로 세면 접힌 거르개가 「3개 적용됨」이라 말해
+ * 사람이 어디서 세 가지를 걸었는지 찾아 헤맨다(전체 A/S 현황의 같은 주석).
  */
 export function countActiveMiscCaseFilters(filters: MiscCaseFilters): number {
   let count = 0;
-  if (filters.status !== "ALL") count += 1;
-  if (filters.customerName !== "ALL") count += 1;
+  if (filters.statuses.length > 0) count += 1;
+  if (filters.customerNames.length > 0) count += 1;
   return count;
 }
 
@@ -265,7 +282,11 @@ export function collectMiscCaseCustomerOptions(
 
 /**
  * 조건에 맞는 줄만 남긴다 — 글자 찾기 · 상태 · 공급처를 **모두** 만족해야 한다
- * (전체 A/S 현황의 applyFilters 와 같은 규칙: 조건은 AND 로 겹친다).
+ * (전체 A/S 현황의 applyFilters 와 같은 규칙: **종류끼리는 AND**).
+ *
+ * 🔴 **한 종류 안에서는 합집합**이다(2026-11-11 복수 선택). 상태를 둘 고르면 둘 중
+ * 하나이기만 하면 남는다 — 교집합이면 한 줄의 상태는 하나뿐이라 둘을 고르는 순간
+ * 늘 0건이 된다. 길이가 0 이면 그 조건은 아예 안 걸린 것이다(= 전체).
  *
  * **입력 차례를 그대로 지킨다.** 세우는 일은 sortMiscCases 가 따로 하고, 거르는 쪽이
  * 차례를 건드리면 조건을 걸 때마다 줄이 다시 선다.
@@ -276,11 +297,17 @@ export function applyMiscCaseFilters<T extends MiscCaseFilterable>(
 ): T[] {
   const searched = filterDomesticOrdersBySearch(rows, filters.query);
   return searched.filter((row) => {
-    if (filters.status !== "ALL" && row.status !== filters.status) return false;
-    if (filters.customerName === "ALL") return true;
-    const name = foldBlankToNull(row.customerName);
-    if (filters.customerName === MISC_CASE_UNASSIGNED_CUSTOMER_VALUE) return name === null;
-    return name === filters.customerName;
+    if (filters.statuses.length > 0 && !filters.statuses.includes(row.status)) return false;
+    // 🔴 공급처가 비어 있는 줄을 `"NONE"` 으로 **바꿔 놓고 한 번만 견준다.** 미지정을
+    //    따로 떼어 판정하면 「가나 테크와 미지정을 함께」 고른 조합에서 먼저 쓴 줄이
+    //    나중 줄을 잡아먹는다(전체 A/S 현황의 유·무상에서 실제로 걸린 자리다).
+    //    공백만 적힌 이름도 없는 것으로 접는다 — 보이지 않는 한 칸짜리 이름 때문에
+    //    화면에는 빈칸인데 「미지정」에서 빠지는 줄이 생기면 안 된다.
+    if (filters.customerNames.length > 0) {
+      const name = foldBlankToNull(row.customerName) ?? MISC_CASE_UNASSIGNED_CUSTOMER_VALUE;
+      if (!filters.customerNames.includes(name)) return false;
+    }
+    return true;
   });
 }
 

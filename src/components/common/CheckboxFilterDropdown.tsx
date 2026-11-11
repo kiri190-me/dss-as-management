@@ -26,11 +26,11 @@ import {
  * 이 칸 하나 때문에 묶음을 더하지 않는다. HTML + CSS + React 로 되는 일이고,
  * 늘어나는 것은 아래 useEffect 하나뿐이다.
  *
- * ── 🔴 뒤 조각들이 그대로 쓴다 ─────────────────────────────────────────────
- * 지금은 [현재 상태] 하나가 쓰지만, 나머지 여섯 필터(제품군·유·무상·고객사·
- * 우선순위 · 기타건 둘)가 뒤이어 같은 부품을 쓴다. 그래서
+ * ── 🔴 **일곱 칸이 이것을 쓴다** ───────────────────────────────────────────
+ * [전체 A/S 현황]의 다섯(현재 상태·제품군·유·무상·고객사·우선순위)과 [기타건
+ * 현황]의 둘(상태·공급처)이다 — 2026-11-11 에 일곱이 다 옮겨 왔다. 그래서
  *   · 값의 종류를 T 로 열어 두고(코드 문자열이면 무엇이든),
- *   · 단축 단추(shortcut)는 **없어도 그려지게** 했다 — 여섯 중 다섯은 없다.
+ *   · 단축 단추(shortcut)는 **없어도 그려지게** 했다 — 일곱 중 여섯은 없다.
  * 이 파일에 [현재 상태]만 아는 것(상태 코드·「입고품 전체」)을 적지 않는다.
  *
  * ── 값으로 도는 규칙은 옆 파일에 ───────────────────────────────────────────
@@ -70,7 +70,8 @@ export type CheckboxFilterDropdownProps<T extends string> = {
   emptyLabel?: string;
   /**
    * 여는 단추의 id. 안 주면 React 가 짓는다 — 화면에서 이 칸을 집어 가리킬 일이
-   * 있는 자리(지금은 [현재 상태])만 적어 준다.
+   * 있는 자리만 적어 준다(지금은 일곱 칸이 모두 적어 준다: 시험이 「어느 칸이
+   * 복수 선택인가」를 이 id 로 집는다).
    */
   id?: string;
 };
@@ -128,7 +129,8 @@ export function CheckboxFilterPanel<T extends string>({
       className="absolute left-0 right-0 top-full z-20 mt-1 rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
     >
       {/* 🔴 단축 단추는 **있을 수도 없을 수도** 있다. 없으면 목록만 그린다 —
-          뒤이어 이 부품을 쓸 여섯 필터 가운데 다섯은 단축 단추가 없다. */}
+          이 부품을 쓰는 일곱 칸 가운데 여섯은 단축 단추가 없다(있는 것은 [전체
+          A/S 현황]의 [현재 상태] 하나다). */}
       {shortcut && (
         <>
           <button
@@ -146,8 +148,9 @@ export function CheckboxFilterPanel<T extends string>({
         </>
       )}
 
-      {/* 선택지가 많은 필터(고객사)가 뒤이어 이 부품을 쓴다 — 목록이 화면
-          밖까지 자라지 않도록 높이를 묶고 제 안에서 굴린다. */}
+      {/* 선택지가 많은 필터(전체 A/S 현황의 고객사 · 기타건 현황의 공급처)도 이
+          부품을 쓴다 — 목록이 화면 밖까지 자라지 않도록 높이를 묶고 제 안에서
+          굴린다. */}
       <div className="max-h-60 overflow-y-auto">
         {options.map((option) => (
           <label
@@ -190,8 +193,9 @@ export default function CheckboxFilterDropdown<T extends string>({
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    // 접혀 있을 때는 아무것도 듣지 않는다. 화면 하나에 이 칸이 일곱까지 늘어날
-    // 예정이라, 늘 듣고 있으면 누를 때마다 하는 일이 그만큼 는다.
+    // 접혀 있을 때는 아무것도 듣지 않는다. 한 화면에 이 칸이 다섯까지 서므로
+    // ([전체 A/S 현황] — 기타건 현황은 둘), 늘 듣고 있으면 누를 때마다 하는 일이
+    // 그만큼 는다.
     if (!isOpen) return;
 
     return watchDropdownDismiss(document, {
