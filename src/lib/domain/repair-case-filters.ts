@@ -27,7 +27,22 @@ import { resolveRepairCaseRequestedDueDate } from "./requested-due-date-link";
  */
 export type Filters = {
   query: string;
-  status: "ALL" | RepairStatus;
+  /**
+   * "ALL" · "IN_HOUSE" · 낱낱의 상태 하나.
+   *
+   * 🔴 "IN_HOUSE"(화면 글자로는 「입고품 전체」)는 **상태가 아니다.**
+   * REPAIR_STATUS_CODES 는 DB 의 상태 enum 과 한 짝이라 거기에 넣으면 저장·전이·표의
+   * 상태 칸까지 있지도 않은 값을 다루게 된다. 이것은 상태가 아니라 **거르는 방식**이라
+   * 필터 타입에서만 합집합으로 더한다 — 바로 아래 billingType 의 "NONE" 과 같은 결이다.
+   *
+   * 뜻은 **출하 완료가 아닌 건 전부**이고, 그 잣대는 대시보드 [현재 입고 수]
+   * (domain/dashboard-metrics.ts 의 currentIntakeCount)와 **같아야 한다**. 그 카드를
+   * 눌러 들어오는 자리이기 때문이다(DashboardContent 의 href =
+   * `/repair-cases?status=IN_HOUSE`) — 둘이 갈라지면 카드에 적힌 수와 목록에 보이는
+   * 수가 달라진다. 두 자리가 같은 표본에서 같은 수를 내는지는
+   * in-house-filter-matches-dashboard.test.ts 가 맞대어 본다.
+   */
+  status: "ALL" | "IN_HOUSE" | RepairStatus;
   /** productCategoryLabels가 만든 표시 문구("Generator" 등)와 그대로 비교한다. */
   productCategory: "ALL" | string;
   /** "NONE"은 유·무상이 아직 정해지지 않은 건만 — 표에 "-"로 나오는 그것이다. */
@@ -119,9 +134,13 @@ export function parseInitialFilters(searchParams: URLSearchParams): Filters {
 
   return {
     query: "",
+    // 대시보드 [현재 입고 수] 카드가 거는 딥링크(?status=IN_HOUSE)가 이 자리를
+    // 지난다. "IN_HOUSE" 는 REPAIR_STATUS_CODES 에 없는 값이라 따로 받는다 —
+    // 바로 아래 billingType 의 "NONE" 과 같은 모양이다. 모르는 값은 여기서
+    // 조용히 "ALL" 이 된다(주소줄은 사람이 손으로 고칠 수 있다).
     status:
-      status && (REPAIR_STATUS_CODES as readonly string[]).includes(status)
-        ? (status as RepairStatus)
+      status === "IN_HOUSE" || (status && (REPAIR_STATUS_CODES as readonly string[]).includes(status))
+        ? (status as "IN_HOUSE" | RepairStatus)
         : "ALL",
     productCategory:
       productCategory && PRODUCT_CATEGORY_OPTIONS.includes(productCategory) ? productCategory : "ALL",
@@ -195,7 +214,16 @@ export function applyFilters(
   return rows.filter((row) => {
     if (filters.myPendingApprovalOnly && !myPendingApprovalCaseIds?.has(row.id)) return false;
     if (filters.longPendingPoOnly && !longPendingPoCaseIds?.has(row.id)) return false;
-    if (filters.status !== "ALL" && row.effectiveStatus !== filters.status) return false;
+    // 「입고품 전체」는 상태 하나와 견주는 것이 아니라 **출하 완료만 걷어낸다.**
+    // 🔴 이 한 줄이 대시보드 [현재 입고 수]의 잣대와 같은 것이어야 한다
+    //    (dashboard-metrics.ts 의 currentIntakeCount — 그쪽도 effectiveStatus 로
+    //    SHIPMENT_COMPLETED 만 뺀다). 한쪽만 고치면 카드에 적힌 수와 이 목록의
+    //    건수가 갈라지는데, 오류는 한 번도 안 난다.
+    if (filters.status === "IN_HOUSE") {
+      if (row.effectiveStatus === "SHIPMENT_COMPLETED") return false;
+    } else if (filters.status !== "ALL" && row.effectiveStatus !== filters.status) {
+      return false;
+    }
     if (filters.productCategory !== "ALL" && row.productCategory !== filters.productCategory) return false;
     // 유·무상이 안 정해진 건(billingType === null)은 "미지정"을 고를 때만 남는다.
     // 어느 한쪽으로 추측해 넣지 않는다 — 표에도 "-"로 그대로 적는 값이다.

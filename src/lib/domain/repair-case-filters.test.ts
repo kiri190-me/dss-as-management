@@ -238,6 +238,134 @@ test("사라진 workflowType 파라미터는 아무 것도 걸지 않는다", ()
   assert.deepEqual(parsed, { ...DEFAULT_FILTERS });
 });
 
+// ─────────────────────────────────────────────── 현재 상태 「입고품 전체」(IN_HOUSE)
+//
+// 2026-11-11 사용자 개선요청. 대시보드 [현재 입고 수]를 누르면 이 값이 걸린 채로
+// 목록이 열린다 — 그 전에는 조건 없이 열려서 출하 완료 건까지 다 보였고, 카드에
+// 적힌 수와 목록의 건수가 달랐다.
+//
+// 🔴 **두 수가 같은지**(이 조각의 핵심)는 여기가 아니라
+// in-house-filter-matches-dashboard.test.ts 가 같은 표본에 두 함수를 돌려 맞댄다.
+// 여기서 보는 것은 거르는 규칙 자체와 주소줄이다.
+
+test("🔴 IN_HOUSE 는 상태 목록에 없는 값이다 — 상태가 아니라 거르는 방식이다", () => {
+  // 언젠가 이것을 상태로 끼워 넣으면 DB 의 상태 enum 에 없는 값이 저장·전이·표의
+  // 상태 칸으로 새어 나간다. 그래서 필터 타입에서만 합집합으로 더했다.
+  assert.ok(
+    !(REPAIR_STATUS_CODES as readonly string[]).includes("IN_HOUSE"),
+    "IN_HOUSE 가 상태 목록에 들어갔다"
+  );
+});
+
+test("입고품 전체는 출하 완료가 아닌 줄만 남긴다", () => {
+  const rows = [
+    row({ id: "intake", effectiveStatus: "WAITING_INTAKE_INSPECTION" }),
+    row({ id: "repair", effectiveStatus: "IN_REPAIR" }),
+    row({ id: "ship-wait", effectiveStatus: "WAITING_SHIPMENT" }),
+    row({
+      id: "shipped",
+      effectiveStatus: "SHIPMENT_COMPLETED",
+      effectiveActualShipmentDate: "2026-11-02",
+    }),
+  ];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ status: "IN_HOUSE" }))), [
+    "intake",
+    "repair",
+    "ship-wait",
+  ]);
+});
+
+test("입고품 전체는 상태를 낱낱이 적지 않는다 — 출하 완료 하나만 빠진다", () => {
+  // 상태가 하나 늘어도 저절로 따라오는지 본다. 남길 상태를 적어 두는 방식이면
+  // 상태가 늘 때 그 건들이 아무 소리 없이 목록에서 빠진다.
+  const rows = REPAIR_STATUS_CODES.map((status) => row({ id: status, effectiveStatus: status }));
+  const kept = idsOf(applyFilters(rows, filters({ status: "IN_HOUSE" })));
+  assert.equal(kept.length, REPAIR_STATUS_CODES.length - 1);
+  assert.ok(!kept.includes("SHIPMENT_COMPLETED"), "출하 완료만 빠져야 한다");
+});
+
+test("🔴 원본 status 가 아니라 effectiveStatus 로 가른다", () => {
+  // 워크플로 재정의가 있으면 두 칸이 갈린다. 대시보드도 effectiveStatus 만 보므로
+  // (dashboard-metrics.ts), 여기서 원본 칸을 보면 두 수가 어긋난다.
+  const rows = [
+    row({
+      id: "override-in",
+      status: "SHIPMENT_COMPLETED",
+      effectiveStatus: "IN_REPAIR",
+      hasWorkflowOverride: true,
+    }),
+    row({
+      id: "override-out",
+      status: "IN_REPAIR",
+      effectiveStatus: "SHIPMENT_COMPLETED",
+      effectiveActualShipmentDate: "2026-11-02",
+      hasWorkflowOverride: true,
+    }),
+  ];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ status: "IN_HOUSE" }))), ["override-in"]);
+});
+
+test("전체·낱낱의 상태는 전과 똑같다 — 입고품 전체가 끼어들지 않는다", () => {
+  const rows = [
+    row({ id: "repair", effectiveStatus: "IN_REPAIR" }),
+    row({ id: "ship-wait", effectiveStatus: "WAITING_SHIPMENT" }),
+    row({
+      id: "shipped",
+      effectiveStatus: "SHIPMENT_COMPLETED",
+      effectiveActualShipmentDate: "2026-11-02",
+    }),
+  ];
+  assert.deepEqual(idsOf(applyFilters(rows, filters())), ["repair", "ship-wait", "shipped"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ status: "IN_REPAIR" }))), ["repair"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ status: "SHIPMENT_COMPLETED" }))), ["shipped"]);
+});
+
+test("입고품 전체도 다른 조건과 함께 걸린다", () => {
+  const rows = [
+    row({ id: "hit", effectiveStatus: "IN_REPAIR", productCategory: "Generator" }),
+    row({ id: "other-category", effectiveStatus: "IN_REPAIR", productCategory: "Matcher" }),
+    row({
+      id: "shipped",
+      effectiveStatus: "SHIPMENT_COMPLETED",
+      effectiveActualShipmentDate: "2026-11-02",
+      productCategory: "Generator",
+    }),
+  ];
+  const result = applyFilters(rows, filters({ status: "IN_HOUSE", productCategory: "Generator" }));
+  assert.deepEqual(idsOf(result), ["hit"]);
+});
+
+test("주소창으로 입고품 전체를 걸 수 있다(?status=IN_HOUSE)", () => {
+  // 대시보드 [현재 입고 수] 카드가 거는 딥링크다.
+  assert.equal(parseInitialFilters(new URLSearchParams("status=IN_HOUSE")).status, "IN_HOUSE");
+  // 낱낱의 상태 딥링크(다른 카드 여덟)는 그대로다.
+  assert.equal(parseInitialFilters(new URLSearchParams("status=IN_REPAIR")).status, "IN_REPAIR");
+  assert.equal(parseInitialFilters(new URLSearchParams("")).status, "ALL");
+});
+
+test("🔴 주소창에 모르는 값이 와도 ALL 로 떨어진다 — 한 건도 사라지지 않는다", () => {
+  // 주소줄은 사람이 손으로 고칠 수 있다. 엉뚱한 값에 화면이 깨지거나 목록이
+  // 통째로 비면 안 된다 — 대소문자가 다른 것도 모르는 값이다.
+  for (const junk of ["in_house", "IN HOUSE", "입고품 전체", "SHIPPED", ""]) {
+    assert.equal(
+      parseInitialFilters(new URLSearchParams(`status=${junk}`)).status,
+      "ALL",
+      `"${junk}" 는 ALL 로 떨어져야 한다`
+    );
+  }
+
+  const rows = [
+    row({ id: "repair", effectiveStatus: "IN_REPAIR" }),
+    row({
+      id: "shipped",
+      effectiveStatus: "SHIPMENT_COMPLETED",
+      effectiveActualShipmentDate: "2026-11-02",
+    }),
+  ];
+  const parsed = parseInitialFilters(new URLSearchParams("status=in_house"));
+  assert.deepEqual(idsOf(applyFilters(rows, parsed)), ["repair", "shipped"]);
+});
+
 // ─────────────────────────────────────────────── 고객사 선택지
 //
 // 이 필터는 mock-data.ts의 데모 고객사 7곳을 그대로 보고 있었다. 실제 DB에는

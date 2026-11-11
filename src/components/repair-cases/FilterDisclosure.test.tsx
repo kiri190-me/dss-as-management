@@ -83,6 +83,18 @@ test("유·무상 '미지정'도 걸린 조건 하나로 센다", () => {
   assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, billingType: "NONE" }), 1);
 });
 
+test("현재 상태 「입고품 전체」(IN_HOUSE)도 걸린 조건 하나로 센다", () => {
+  // 대시보드 [현재 입고 수]를 눌러 들어온 사람은 이 조건이 걸린 채로 화면을
+  // 처음 본다(2026-11-11). "ALL이 아니면 걸린 것"에서 이 값만 빠지면 접힌
+  // 필터가 "0개 적용됨"이라 말하면서 목록만 짧아져, 왜 짧은지 알 길이 없다.
+  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, status: "IN_HOUSE" }), 1);
+  // 다른 조건과 함께 걸면 그만큼 는다 — 혼자만 안 세어지는 일이 없게.
+  assert.equal(
+    countHiddenActiveFilters({ ...DEFAULT_FILTERS, status: "IN_HOUSE", priority: "HIGH" }),
+    2
+  );
+});
+
 test("대시보드에서 넘어온 출하월 필터는 세지 않는다", () => {
   // 그 필터는 카드 아래 자기 안내 문구가 따로 있어서, 개수에 넣으면 같은 것을
   // 두 번 말하게 된다.

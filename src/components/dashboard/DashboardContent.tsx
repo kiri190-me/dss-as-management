@@ -48,7 +48,11 @@ export default function DashboardContent({ serverBaseCases }: DashboardContentPr
     href: string;
     tone?: "neutral" | "success" | "danger";
   }[] = [
-    { label: "현재 입고 수", value: summary.currentIntakeCount, href: "/repair-cases" },
+    // 🔴 href 에 조건이 붙는다(2026-11-11 사용자 개선요청). 전에는 조건 없이
+    //    /repair-cases 로 보냈는데, 그러면 출하 완료 건까지 다 보여 **카드에 적힌
+    //    수와 목록의 건수가 달랐다.** status=IN_HOUSE 는 이 카드와 같은 잣대로
+    //    거른다(repair-case-filters.ts 의 status 주석 — 출하 완료가 아닌 건 전부).
+    { label: "현재 입고 수", value: summary.currentIntakeCount, href: "/repair-cases?status=IN_HOUSE" },
     {
       label: "인수점검 대기",
       value: summary.waitingIntakeInspection,

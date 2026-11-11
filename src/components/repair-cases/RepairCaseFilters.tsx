@@ -63,6 +63,10 @@ type RepairCaseFiltersProps = {
  */
 export function countHiddenActiveFilters(filters: Filters): number {
   let count = 0;
+  // "ALL 이 아니면 걸린 것"이다 — 낱낱의 상태뿐 아니라 「입고품 전체」("IN_HOUSE")도
+  // 이 규칙으로 하나 센다. 대시보드 [현재 입고 수]를 눌러 들어온 사람은 조건이 걸린
+  // 채로 이 화면을 처음 보는데, 세지 않으면 접힌 필터가 "0개 적용됨"이라 말하면서
+  // 목록만 짧아져 왜 짧은지 알 길이 없어진다(유·무상의 "NONE" 과 같은 판단이다).
   if (filters.status !== "ALL") count += 1;
   if (filters.productCategory !== "ALL") count += 1;
   if (filters.billingType !== "ALL") count += 1;
@@ -134,6 +138,14 @@ export default function RepairCaseFilters({
               }
             >
               <option value="ALL">전체</option>
+              {/* 🔴 「전체」 바로 아래, 낱낱의 상태보다 앞이다(2026-11-11 사용자 결정).
+                  대시보드 [현재 입고 수] 카드를 누르면 이 값이 걸린 채로 열린다 —
+                  카드가 센 것과 같은 묶음이어야 두 수가 맞는다(repair-case-filters.ts
+                  의 status 주석). 글자를 uiText 사전에서 뽑지 않는 까닭은 이것이
+                  상태가 아니기 때문이다: repairStatus 사전의 키는 REPAIR_STATUS_CODES
+                  와 한 짝이라 없는 상태의 글자를 거기 둘 자리가 없다. 바로 위
+                  「전체」와 같은 자리의 같은 모양이다. */}
+              <option value="IN_HOUSE">입고품 전체</option>
               {REPAIR_STATUS_CODES.map((status) => (
                 <option key={status} value={status}>
                   {uiText.repairStatus[status]}
