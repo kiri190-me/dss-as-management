@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 import FilterDisclosure from "./FilterDisclosure";
 import { countHiddenActiveFilters } from "./RepairCaseFilters";
-import { DEFAULT_FILTERS } from "@/lib/domain/repair-case-filters";
+import { DEFAULT_FILTERS, IN_HOUSE_STATUSES } from "@/lib/domain/repair-case-filters";
 
 /**
  * 정적 렌더로 확인할 수 있는 것은 **첫 화면**이다. 이 컴포넌트에서 첫 화면이
@@ -62,11 +62,11 @@ test("countHiddenActiveFilters는 검색어를 세지 않는다", () => {
 
 test("countHiddenActiveFilters는 감춰지는 조건만 하나씩 센다", () => {
   assert.equal(countHiddenActiveFilters(DEFAULT_FILTERS), 0);
-  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, status: "IN_REPAIR" }), 1);
+  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, statuses: ["IN_REPAIR"] }), 1);
   assert.equal(
     countHiddenActiveFilters({
       ...DEFAULT_FILTERS,
-      status: "IN_REPAIR",
+      statuses: ["IN_REPAIR"],
       productCategory: "Generator",
       billingType: "PAID",
       customerId: "c-1",
@@ -83,16 +83,24 @@ test("유·무상 '미지정'도 걸린 조건 하나로 센다", () => {
   assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, billingType: "NONE" }), 1);
 });
 
-test("현재 상태 「입고품 전체」(IN_HOUSE)도 걸린 조건 하나로 센다", () => {
+test("🔴 현재 상태는 몇 개를 골랐든 걸린 조건 **하나**다", () => {
   // 대시보드 [현재 입고 수]를 눌러 들어온 사람은 이 조건이 걸린 채로 화면을
-  // 처음 본다(2026-11-11). "ALL이 아니면 걸린 것"에서 이 값만 빠지면 접힌
-  // 필터가 "0개 적용됨"이라 말하면서 목록만 짧아져, 왜 짧은지 알 길이 없다.
-  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, status: "IN_HOUSE" }), 1);
+  // 처음 본다(2026-11-11). 세지 않으면 접힌 필터가 "0개 적용됨"이라 말하면서
+  // 목록만 짧아져, 왜 짧은지 알 길이 없다.
+  //
+  // 🔴 반대로 고른 값의 수를 세도 안 된다. 「입고품 전체」는 상태를 열하나
+  //    넣는데, 그것을 11 로 세면 "11개 적용됨"이라 적히고 사람은 어디서 열한
+  //    가지를 걸었는지 찾아 헤맨다. 여기서 세는 것은 **조건의 수**다.
+  assert.ok(IN_HOUSE_STATUSES.length > 1, "표본이 하나뿐이면 '개수를 센다'와 구분이 안 된다");
+  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, statuses: IN_HOUSE_STATUSES }), 1);
+  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, statuses: ["IN_REPAIR", "WAITING_PO"] }), 1);
   // 다른 조건과 함께 걸면 그만큼 는다 — 혼자만 안 세어지는 일이 없게.
   assert.equal(
-    countHiddenActiveFilters({ ...DEFAULT_FILTERS, status: "IN_HOUSE", priority: "HIGH" }),
+    countHiddenActiveFilters({ ...DEFAULT_FILTERS, statuses: IN_HOUSE_STATUSES, priority: "HIGH" }),
     2
   );
+  // 빈 배열은 「전체」라 안 센다.
+  assert.equal(countHiddenActiveFilters({ ...DEFAULT_FILTERS, statuses: [] }), 0);
 });
 
 test("대시보드에서 넘어온 출하월 필터는 세지 않는다", () => {

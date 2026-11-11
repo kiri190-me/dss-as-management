@@ -796,7 +796,7 @@ export default function RepairCaseListPage({
             filters={filters}
             customers={customerOptions}
             onQueryChange={(value) => updateFilters({ query: value })}
-            onStatusChange={(value) => updateFilters({ status: value })}
+            onStatusesChange={(value) => updateFilters({ statuses: value })}
             onProductCategoryChange={(value) => updateFilters({ productCategory: value })}
             onBillingTypeChange={(value) => updateFilters({ billingType: value })}
             onCustomerChange={(value) => updateFilters({ customerId: value })}

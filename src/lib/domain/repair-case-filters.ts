@@ -28,21 +28,20 @@ import { resolveRepairCaseRequestedDueDate } from "./requested-due-date-link";
 export type Filters = {
   query: string;
   /**
-   * "ALL" · "IN_HOUSE" · 낱낱의 상태 하나.
+   * 보고 싶은 상태들. **여러 개를 한꺼번에** 고를 수 있다(2026-11-11 사용자
+   * 개선요청 — 그 전에는 한 번에 하나였다).
    *
-   * 🔴 "IN_HOUSE"(화면 글자로는 「입고품 전체」)는 **상태가 아니다.**
-   * REPAIR_STATUS_CODES 는 DB 의 상태 enum 과 한 짝이라 거기에 넣으면 저장·전이·표의
-   * 상태 칸까지 있지도 않은 값을 다루게 된다. 이것은 상태가 아니라 **거르는 방식**이라
-   * 필터 타입에서만 합집합으로 더한다 — 바로 아래 billingType 의 "NONE" 과 같은 결이다.
+   * 🔴 **빈 배열이 「전체」다.** "ALL" 같은 값은 두지 않는다 — 두면 "ALL" 이
+   *    들어 있는 배열이라는 뜻 없는 상태가 생기고, 거르는 쪽이 그것을 매번
+   *    따로 가려내야 한다. 길이가 0 인가만 보면 끝나는 쪽이 틀릴 자리가 적다.
    *
-   * 뜻은 **출하 완료가 아닌 건 전부**이고, 그 잣대는 대시보드 [현재 입고 수]
-   * (domain/dashboard-metrics.ts 의 currentIntakeCount)와 **같아야 한다**. 그 카드를
-   * 눌러 들어오는 자리이기 때문이다(DashboardContent 의 href =
-   * `/repair-cases?status=IN_HOUSE`) — 둘이 갈라지면 카드에 적힌 수와 목록에 보이는
-   * 수가 달라진다. 두 자리가 같은 표본에서 같은 수를 내는지는
-   * in-house-filter-matches-dashboard.test.ts 가 맞대어 본다.
+   * 🔴 「입고품 전체」(예전의 "IN_HOUSE")도 **여기 저장되는 값이 아니다.**
+   *    화면의 단축 단추와 주소줄 별칭이 그것을 **출하 완료를 뺀 상태들로 펼쳐**
+   *    넣는다(아래 IN_HOUSE_STATUSES). 그래서 사람이 거기서 하나를 빼거나 더할
+   *    수 있고, 이 배열에는 늘 진짜 상태 코드만 들어 있다 — DB 의 상태 enum 에
+   *    없는 값이 저장·전이·표의 상태 칸으로 샐 길이 처음부터 없다.
    */
-  status: "ALL" | "IN_HOUSE" | RepairStatus;
+  statuses: readonly RepairStatus[];
   /** productCategoryLabels가 만든 표시 문구("Generator" 등)와 그대로 비교한다. */
   productCategory: "ALL" | string;
   /** "NONE"은 유·무상이 아직 정해지지 않은 건만 — 표에 "-"로 나오는 그것이다. */
@@ -90,9 +89,70 @@ export type Filters = {
   reportedSymptom: string | null;
 };
 
+/**
+ * 「입고품 전체」가 넣는 상태들 — **출하 완료만 뺀 전부.**
+ *
+ * 🔴 목록을 손으로 적지 않는다. REPAIR_STATUS_CODES 에서 걸러 내므로 상태가
+ *    하나 늘면 저절로 따라온다. 적어 두는 방식이면 상태가 느는 날 그 건들이
+ *    아무 소리 없이 「입고품 전체」에서 빠지고, 오류는 한 번도 안 난다.
+ *
+ * 🔴 이 잣대는 대시보드 [현재 입고 수](domain/dashboard-metrics.ts 의
+ *    currentIntakeCount — 그쪽도 effectiveStatus 로 SHIPMENT_COMPLETED 만
+ *    뺀다)와 **같아야 한다.** 그 카드를 눌러 들어오는 자리이기 때문이다
+ *    (DashboardContent 의 href = `/repair-cases?status=IN_HOUSE`). 둘이
+ *    갈라지면 카드에 적힌 수와 목록의 건수가 달라지는데 오류는 안 난다 —
+ *    같은 표본에 두 함수를 돌려 맞대어 보는 것이
+ *    in-house-filter-matches-dashboard.test.ts 다.
+ */
+export const IN_HOUSE_STATUSES: readonly RepairStatus[] = REPAIR_STATUS_CODES.filter(
+  (status) => status !== "SHIPMENT_COMPLETED"
+);
+
+/**
+ * 주소줄에서 「입고품 전체」를 가리키는 별칭.
+ *
+ * 상태 목록에 없는 값이라 거르는 쪽까지 들어가지는 않고, 주소를 읽는 자리에서
+ * 바로 IN_HOUSE_STATUSES 로 펼쳐진다. 대시보드 카드의 href 가 이 값을 그대로
+ * 쓰고 있어 **계속 받아야 한다** — 카드 쪽 주소를 고치면 즐겨찾기·메일에 남은
+ * 옛 링크가 조용히 「전체」로 열린다.
+ */
+const IN_HOUSE_STATUS_ALIAS = "IN_HOUSE";
+
+/** 주소줄에서 상태 여럿을 잇는 글자: `?status=WAITING_PO,IN_REPAIR` */
+const STATUS_PARAM_SEPARATOR = ",";
+
+/**
+ * `?status=` 한 줄을 상태 배열로.
+ *
+ * 🔴 **모르는 값은 조용히 버린다.** 주소줄은 사람이 손으로 고칠 수 있으므로
+ *    엉뚱한 값에 화면이 깨지거나 목록이 통째로 비면 안 된다. 아는 값만 남기고
+ *    하나도 안 남으면 빈 배열 — 곧 「전체」다.
+ */
+function parseStatusesParam(raw: string | null): RepairStatus[] {
+  if (!raw) return [];
+
+  const knownCodes = new Set<string>(REPAIR_STATUS_CODES);
+  const picked: RepairStatus[] = [];
+  const add = (status: RepairStatus) => {
+    if (!picked.includes(status)) picked.push(status);
+  };
+
+  for (const piece of raw.split(STATUS_PARAM_SEPARATOR)) {
+    const token = piece.trim();
+    if (!token) continue;
+    if (token === IN_HOUSE_STATUS_ALIAS) {
+      for (const status of IN_HOUSE_STATUSES) add(status);
+      continue;
+    }
+    if (knownCodes.has(token)) add(token as RepairStatus);
+  }
+
+  return picked;
+}
+
 export const DEFAULT_FILTERS: Filters = {
   query: "",
-  status: "ALL",
+  statuses: [],
   productCategory: "ALL",
   billingType: "ALL",
   customerId: "ALL",
@@ -134,14 +194,10 @@ export function parseInitialFilters(searchParams: URLSearchParams): Filters {
 
   return {
     query: "",
-    // 대시보드 [현재 입고 수] 카드가 거는 딥링크(?status=IN_HOUSE)가 이 자리를
-    // 지난다. "IN_HOUSE" 는 REPAIR_STATUS_CODES 에 없는 값이라 따로 받는다 —
-    // 바로 아래 billingType 의 "NONE" 과 같은 모양이다. 모르는 값은 여기서
-    // 조용히 "ALL" 이 된다(주소줄은 사람이 손으로 고칠 수 있다).
-    status:
-      status === "IN_HOUSE" || (status && (REPAIR_STATUS_CODES as readonly string[]).includes(status))
-        ? (status as "IN_HOUSE" | RepairStatus)
-        : "ALL",
+    // 쉼표로 여럿 받는다(`?status=WAITING_PO,IN_REPAIR`). 대시보드 [현재 입고 수]
+    // 카드가 거는 딥링크(?status=IN_HOUSE)도 이 자리를 지나 상태 열하나로 펼쳐진다
+    // — 모르는 값은 조용히 버려지고, 하나도 안 남으면 빈 배열(= 전체)이다.
+    statuses: parseStatusesParam(status),
     productCategory:
       productCategory && PRODUCT_CATEGORY_OPTIONS.includes(productCategory) ? productCategory : "ALL",
     billingType:
@@ -214,14 +270,13 @@ export function applyFilters(
   return rows.filter((row) => {
     if (filters.myPendingApprovalOnly && !myPendingApprovalCaseIds?.has(row.id)) return false;
     if (filters.longPendingPoOnly && !longPendingPoCaseIds?.has(row.id)) return false;
-    // 「입고품 전체」는 상태 하나와 견주는 것이 아니라 **출하 완료만 걷어낸다.**
-    // 🔴 이 한 줄이 대시보드 [현재 입고 수]의 잣대와 같은 것이어야 한다
-    //    (dashboard-metrics.ts 의 currentIntakeCount — 그쪽도 effectiveStatus 로
-    //    SHIPMENT_COMPLETED 만 뺀다). 한쪽만 고치면 카드에 적힌 수와 이 목록의
-    //    건수가 갈라지는데, 오류는 한 번도 안 난다.
-    if (filters.status === "IN_HOUSE") {
-      if (row.effectiveStatus === "SHIPMENT_COMPLETED") return false;
-    } else if (filters.status !== "ALL" && row.effectiveStatus !== filters.status) {
+    // 아무것도 안 고르면 전부 지나간다(빈 배열 = 전체). 고른 것이 있으면 그
+    // 상태들의 **합집합**만 남는다.
+    // 🔴 원본 status 가 아니라 effectiveStatus 다 — 워크플로 재정의가 있으면 두
+    //    칸이 갈리고, 표에 보이는 상태도 대시보드가 세는 것도 effective 쪽이다.
+    //    여기서 원본 칸을 보면 화면에 「수리 중」이라 적힌 줄이 「수리 중」으로
+    //    걸러도 안 나오는데, 오류는 한 번도 안 난다.
+    if (filters.statuses.length > 0 && !filters.statuses.includes(row.effectiveStatus)) {
       return false;
     }
     if (filters.productCategory !== "ALL" && row.productCategory !== filters.productCategory) return false;

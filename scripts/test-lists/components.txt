@@ -1288,3 +1288,18 @@ src/components/domestic-orders/detail/domestic-order-due-date-row-approval-scree
 # 단추 옆에만 뜬다.** 🔴 그리고 **회차 완료가 눈에 보이는가**(「N차 완료 ✓」) — 단추 글자와
 # 헷갈리지 않도록 채운 바탕과 ✓ 를 함께 본다.
 src/components/approvals/final-shipment-approved-badge-screens.test.tsx
+
+# 🔴 한 종류의 필터 안에서 **여럿 고르는** 칸 — 사이트 공용 부품(2026-11-11 사용자
+# 개선요청). 지금은 [전체 A/S 현황]의 [현재 상태] 하나가 쓰고, 나머지 여섯 필터가
+# 뒤이어 같은 부품을 쓴다. 그래서 **재사용 가능한가**가 재는 것의 절반이다:
+# 🔴 단축 단추가 **없을 때도** 그려지는가(여섯 중 다섯은 없다) · 단축 단추가 체크 칸이
+# 아니라 목록 맨 위의 단추인가 · 닫힌 칸이 고른 것을 사실대로 말하는가(전체 / 이름 /
+# 「외 N개」) · 🔴 단추가 전부 type="button" 인가(폼 안에서 제출이 되면 안 된다).
+# 🔵 정적 렌더라 **펼친 모습**은 본체로 못 본다 — 패널 조각을 따로 내보내 그려 본다.
+src/components/common/CheckboxFilterDropdown.test.tsx
+
+# 같은 부품의 **값으로 도는 부분**. 누르고 난 뒤의 값 · 닫힌 칸의 글자 · 🔴 바깥 누르기와
+# Esc 로 접기다. 접기는 진짜 DOM 없이 가짜 듣는곳으로 잰다(이 저장소에는 jsdom 이 없다) —
+# 🔴 **안을 누르면 안 접히는** 쪽을 함께 잰다. 그쪽이 깨지면 체크 하나를 누를 때마다
+# 접혀서 복수 선택이라는 기능 자체가 없어지는데, 바깥 누르기만 재면 영영 통과한다.
+src/components/common/checkbox-filter-dropdown.test.ts

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { applyFilters, DEFAULT_FILTERS } from "./repair-case-filters";
+import { applyFilters, DEFAULT_FILTERS, IN_HOUSE_STATUSES } from "./repair-case-filters";
 import { computeDashboardSummary } from "./dashboard-metrics";
 import { REPAIR_STATUS_CODES } from "./types";
 import type { EffectiveRepairCase } from "./local/workflow/effective-repair-case";
@@ -23,6 +23,13 @@ import type { EffectiveRepairCase } from "./local/workflow/effective-repair-case
  * 🔵 표본이 비어서 공짜로 통과하지 않도록, 수를 맞대기 전에 **표본이 정말 무엇을
  * 재는 모양인지**부터 단언한다(출하 완료가 섞여 있는가 · 재정의로 두 칸이 갈린 줄이
  * 있는가). 둘 중 하나라도 없으면 틀린 구현도 통과한다.
+ *
+ * ── 2026-11-11 복수 선택으로 바뀐 뒤 ──────────────────────────────────────
+ * 필터가 `status: "IN_HOUSE"` 하나에서 `statuses: RepairStatus[]` 로 바뀌면서
+ * 「입고품 전체」는 **저장되는 값이 아니라 상태들로 펼쳐지는 단축**이 되었다.
+ * 맞대는 일 자체는 그대로다 — 다만 이제 **잣대가 갈라질 자리가 하나 늘었다**:
+ * 거르는 규칙뿐 아니라 **펼쳐 넣는 묶음**(IN_HOUSE_STATUSES)도 대시보드와 같아야
+ * 한다. 그래서 아래에 묶음 자체를 REPAIR_STATUS_CODES 와 세어 보는 시험을 더했다.
  */
 
 function row(overrides: Partial<EffectiveRepairCase> = {}): EffectiveRepairCase {
@@ -80,9 +87,13 @@ function row(overrides: Partial<EffectiveRepairCase> = {}): EffectiveRepairCase 
   };
 }
 
-/** 「입고품 전체」가 남기는 줄. 화면이 하는 것과 같은 호출이다. */
+/**
+ * 「입고품 전체」가 남기는 줄. **화면이 하는 것과 같은 호출**이다 — 단축 단추를
+ * 누르면 IN_HOUSE_STATUSES 가 그대로 statuses 에 들어간다
+ * (RepairCaseFilters 의 shortcut.values).
+ */
 function inHouseRows(rows: EffectiveRepairCase[]): EffectiveRepairCase[] {
-  return applyFilters(rows, { ...DEFAULT_FILTERS, status: "IN_HOUSE" });
+  return applyFilters(rows, { ...DEFAULT_FILTERS, statuses: IN_HOUSE_STATUSES });
 }
 
 /**
@@ -173,6 +184,22 @@ test("🔵 표본 점검 — 맞댈 것이 실제로 들어 있다", () => {
   );
 });
 
+test("🔴 펼쳐 넣는 묶음 자체가 「출하 완료 말고 전부」다 — 손으로 적으면 터진다", () => {
+  // 2026-11-11 복수 선택으로 바뀌면서 새로 생긴 갈라질 자리다. 거르는 규칙은
+  // 이제 "고른 상태의 합집합"일 뿐이라, **무엇을 넣어 주는가**가 대시보드와
+  // 어긋나면 수가 갈린다. 상태가 하나 늘어도 저절로 따라오는지 여기서 센다 —
+  // 목록을 적어 두는 방식이면 그날 조용히 어긋난다.
+  assert.equal(IN_HOUSE_STATUSES.length, REPAIR_STATUS_CODES.length - 1);
+  assert.deepEqual(
+    [...IN_HOUSE_STATUSES],
+    REPAIR_STATUS_CODES.filter((status) => status !== "SHIPMENT_COMPLETED")
+  );
+  assert.ok(
+    !IN_HOUSE_STATUSES.includes("SHIPMENT_COMPLETED"),
+    "출하 완료가 들어가면 카드가 센 것보다 목록이 많아진다"
+  );
+});
+
 // ─────────────────────────────────────────────── 핵심: 두 수가 같은가
 
 test("🔴 「입고품 전체」가 남기는 건수 = 대시보드 [현재 입고 수]", () => {
@@ -202,7 +229,7 @@ test("🔴 남는 줄의 정체도 같다 — 수만 맞고 다른 건이 남는
 
 test("「입고품 전체」와 「출하 완료」는 겹치지도 빠지지도 않는다", () => {
   const sample = sampleCases();
-  const shipped = applyFilters(sample, { ...DEFAULT_FILTERS, status: "SHIPMENT_COMPLETED" });
+  const shipped = applyFilters(sample, { ...DEFAULT_FILTERS, statuses: ["SHIPMENT_COMPLETED"] });
   const listed = inHouseRows(sample);
 
   assert.equal(listed.length + shipped.length, sample.length);
@@ -265,9 +292,19 @@ test("🔵 주석 걷어내기가 정말 듣는다 — 안 들으면 아래 둘�
   assert.ok(dashboardSource.includes("사용자 개선요청"), "표지로 삼은 주석 글귀가 사라졌다");
   assert.ok(!stripped.includes("사용자 개선요청"), "주석이 그대로 남아 있다 — 아래 시험이 무의미해진다");
   assert.ok(stripped.includes("현재 입고 수"), "걷어내다 코드까지 날렸다");
+  // 🔴 필터 화면 쪽도 **먼저 있는지**부터 본다. 표지로 삼은 주석이 사라지면
+  //    아래 부정 단언은 영영 공짜로 통과한다(걷어내기가 고장 나도 모른다).
+  assert.ok(
+    filtersSource.includes("2026-11-11 사용자 결정"),
+    "필터 화면에서 표지로 삼은 주석 글귀가 사라졌다 — 이 시험도 함께 고칠 것"
+  );
   assert.ok(
     !withoutComments(filtersSource).includes("2026-11-11 사용자 결정"),
     "필터 화면 쪽 주석이 그대로 남아 있다"
+  );
+  assert.ok(
+    withoutComments(filtersSource).includes("입고품 전체"),
+    "걷어내다 단축 단추의 글자까지 날렸다"
   );
 });
 
@@ -306,15 +343,39 @@ test("다른 카드 아홉의 링크는 건드리지 않았다", () => {
   assert.ok(stripped.includes("status=SHIPMENT_COMPLETED&shipmentMonth="), "금월 출하 완료 링크가 사라졌다");
 });
 
-test("🔴 [현재 상태] 고르개에서 「입고품 전체」는 「전체」 바로 아래다", () => {
-  // 사용자가 고른 자리다(2026-11-11). 그다음이 낱낱의 상태 열둘이다.
+test("🔴 [현재 상태] 칸이 「입고품 전체」에 IN_HOUSE_STATUSES 를 그대로 넘긴다", () => {
+  // 2026-11-11 복수 선택으로 바뀌면서 이 자리가 <select> 가 아니라 체크박스
+  // 드롭다운이 되었고, 「입고품 전체」는 한 줄짜리 선택지가 아니라 **목록 맨 위의
+  // 단축 단추**가 되었다(사용자 결정).
+  //
+  // 🔴 여기서 못 박는 것은 **화면이 위의 묶음을 그대로 쓰는가**다. 위 시험들이
+  //    IN_HOUSE_STATUSES = 대시보드와 같은 묶음임을 보장해도, 화면이 그것을 안
+  //    쓰고 제 목록을 적어 두면 수가 갈린다 — 값 쪽 시험은 전부 통과한 채로.
   const stripped = withoutComments(filtersSource);
   const start = stripped.indexOf('id="repair-case-status"');
-  assert.notEqual(start, -1, "현재 상태 고르개를 찾지 못했다");
-  const block = flat(stripped.slice(start, stripped.indexOf("</select>", start)));
+  assert.notEqual(start, -1, "현재 상태 칸을 찾지 못했다");
+  const block = flat(stripped.slice(start, stripped.indexOf("/>", start)));
 
+  assert.match(block, /label="현재 상태"/);
+  assert.match(block, /options=\{REPAIR_STATUS_CODES\.map/, "선택지는 상태 목록에서 뽑는다");
+  assert.match(block, /selected=\{filters\.statuses\}/);
   assert.match(
     block,
-    /<option value="ALL">전체<\/option> <option value="IN_HOUSE">입고품 전체<\/option> \{REPAIR_STATUS_CODES\.map/
+    /shortcut=\{\{ label: "입고품 전체", values: IN_HOUSE_STATUSES \}\}/,
+    "단축 단추가 넣는 값을 손으로 적으면 대시보드와 조용히 갈라진다"
   );
+});
+
+test("🔴 [현재 상태] 가 한 번에 하나만 고르던 <select> 로 되돌아가지 않았다", () => {
+  // 되돌아가면 복수 선택이 통째로 사라지는데, 위 시험들은 값만 보므로 전부
+  // 통과한다. 되돌리는 쪽은 "시험이 줄어드는 것"으로도 안 드러난다.
+  const stripped = flat(withoutComments(filtersSource));
+  const start = stripped.indexOf('id="repair-case-status"');
+  assert.notEqual(start, -1, "현재 상태 칸을 찾지 못했다");
+  // 🔴 이 칸 **한 덩어리** 안에서만 본다. 넉넉히 잘라 보면 바로 다음 필터
+  //    (제품군)의 <option> 들이 딸려 들어와 영영 빨갛다 — 처음에 그랬다.
+  const block = stripped.slice(start, stripped.indexOf("/>", start));
+  assert.ok(block.length > 0, "덩어리를 못 잘랐다 — 아래 단언이 공짜로 통과한다");
+  assert.ok(!block.includes("<option"), "상태 칸이 <option> 목록으로 되돌아갔다");
+  assert.ok(!block.includes('value="IN_HOUSE"'), "IN_HOUSE 가 다시 고르는 값이 되었다");
 });

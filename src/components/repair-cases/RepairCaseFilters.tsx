@@ -2,6 +2,7 @@
 
 import {
   formatShipmentMonthLabel,
+  IN_HOUSE_STATUSES,
   type Filters,
 } from "@/lib/domain/repair-case-filters";
 import {
@@ -11,15 +12,17 @@ import {
   PRODUCT_CATEGORY_OPTIONS,
   REPAIR_STATUS_CODES,
 } from "@/lib/domain/types";
-import type { Customer } from "@/lib/domain/types";
+import type { Customer, RepairStatus } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
+import CheckboxFilterDropdown from "@/components/common/CheckboxFilterDropdown";
 import FilterDisclosure from "./FilterDisclosure";
 
 type RepairCaseFiltersProps = {
   filters: Filters;
   customers: Customer[];
   onQueryChange: (value: string) => void;
-  onStatusChange: (value: Filters["status"]) => void;
+  /** 고른 상태들. 빈 배열이면 「전체」다(2026-11-11 복수 선택). */
+  onStatusesChange: (value: RepairStatus[]) => void;
   onProductCategoryChange: (value: Filters["productCategory"]) => void;
   onBillingTypeChange: (value: Filters["billingType"]) => void;
   onCustomerChange: (value: Filters["customerId"]) => void;
@@ -63,11 +66,14 @@ type RepairCaseFiltersProps = {
  */
 export function countHiddenActiveFilters(filters: Filters): number {
   let count = 0;
-  // "ALL 이 아니면 걸린 것"이다 — 낱낱의 상태뿐 아니라 「입고품 전체」("IN_HOUSE")도
-  // 이 규칙으로 하나 센다. 대시보드 [현재 입고 수]를 눌러 들어온 사람은 조건이 걸린
-  // 채로 이 화면을 처음 보는데, 세지 않으면 접힌 필터가 "0개 적용됨"이라 말하면서
-  // 목록만 짧아져 왜 짧은지 알 길이 없어진다(유·무상의 "NONE" 과 같은 판단이다).
-  if (filters.status !== "ALL") count += 1;
+  // 🔴 상태는 몇 개를 골랐든 **필터 하나**다. 여기서 세는 것은 "걸려 있는
+  // 조건의 수"이지 고른 값의 수가 아니다 — 「입고품 전체」를 누르면 상태가
+  // 열하나 들어오는데, 그것을 11 로 세면 접힌 필터가 "11개 적용됨"이라 말하고
+  // 사람은 어디서 열한 가지를 걸었는지 찾아 헤맨다.
+  // 빈 배열(= 전체)만 안 센다. 대시보드 [현재 입고 수]를 눌러 들어온 사람은
+  // 조건이 걸린 채로 이 화면을 처음 보는데, 세지 않으면 "0개 적용됨"이라
+  // 말하면서 목록만 짧아져 왜 짧은지 알 길이 없어진다.
+  if (filters.statuses.length > 0) count += 1;
   if (filters.productCategory !== "ALL") count += 1;
   if (filters.billingType !== "ALL") count += 1;
   if (filters.customerId !== "ALL") count += 1;
@@ -86,7 +92,7 @@ export default function RepairCaseFilters({
   filters,
   customers,
   onQueryChange,
-  onStatusChange,
+  onStatusesChange,
   onProductCategoryChange,
   onBillingTypeChange,
   onCustomerChange,
@@ -125,34 +131,29 @@ export default function RepairCaseFilters({
             마지막 하나만 다음 줄에 홀로 남아, 그 항목만 다른 종류인 것처럼
             보인다. 항목을 더하거나 뺄 때 이 숫자도 같이 고쳐야 한다. */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <div className="flex flex-col gap-1">
-            <label htmlFor="repair-case-status" className={labelClass}>
-              현재 상태
-            </label>
-            <select
-              id="repair-case-status"
-              className={selectClass}
-              value={filters.status}
-              onChange={(event) =>
-                onStatusChange(event.target.value as Filters["status"])
-              }
-            >
-              <option value="ALL">전체</option>
-              {/* 🔴 「전체」 바로 아래, 낱낱의 상태보다 앞이다(2026-11-11 사용자 결정).
-                  대시보드 [현재 입고 수] 카드를 누르면 이 값이 걸린 채로 열린다 —
-                  카드가 센 것과 같은 묶음이어야 두 수가 맞는다(repair-case-filters.ts
-                  의 status 주석). 글자를 uiText 사전에서 뽑지 않는 까닭은 이것이
-                  상태가 아니기 때문이다: repairStatus 사전의 키는 REPAIR_STATUS_CODES
-                  와 한 짝이라 없는 상태의 글자를 거기 둘 자리가 없다. 바로 위
-                  「전체」와 같은 자리의 같은 모양이다. */}
-              <option value="IN_HOUSE">입고품 전체</option>
-              {REPAIR_STATUS_CODES.map((status) => (
-                <option key={status} value={status}>
-                  {uiText.repairStatus[status]}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* 🔴 한 종류 안에서 **여럿 고르는** 칸이다(2026-11-11 사용자 결정) —
+              일곱 필터 가운데 이것이 첫째고, 나머지 여섯도 같은 부품을 쓰게 된다.
+              아무것도 안 고르면 「전체」, 하나면 그 이름, 여럿이면 「첫째 이름 외 N개」.
+
+              「입고품 전체」는 체크 칸이 아니라 목록 맨 위의 **단축 단추**다:
+              누르면 출하 완료를 뺀 상태들이 전부 체크되고, 그 뒤에는 그냥 여럿
+              고른 상태라 거기서 하나씩 빼거나 더할 수 있다. 넣을 값을 여기 적지
+              않고 IN_HOUSE_STATUSES 를 그대로 넘기는 까닭은, 그것이 대시보드
+              [현재 입고 수]와 **같은 잣대**여야 하기 때문이다(그 상수의 주석).
+              글자를 uiText 사전에서 뽑지 않는 것도 그래서다 — repairStatus 사전의
+              키는 REPAIR_STATUS_CODES 와 한 짝이라 상태가 아닌 것의 글자를 거기
+              둘 자리가 없다. */}
+          <CheckboxFilterDropdown
+            id="repair-case-status"
+            label="현재 상태"
+            options={REPAIR_STATUS_CODES.map((status) => ({
+              value: status,
+              label: uiText.repairStatus[status],
+            }))}
+            selected={filters.statuses}
+            onChange={onStatusesChange}
+            shortcut={{ label: "입고품 전체", values: IN_HOUSE_STATUSES }}
+          />
 
           <div className="flex flex-col gap-1">
             <label htmlFor="repair-case-product-category" className={labelClass}>

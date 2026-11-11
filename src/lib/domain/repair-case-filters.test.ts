@@ -4,6 +4,7 @@ import {
   applyFilters,
   collectCustomerFilterOptions,
   DEFAULT_FILTERS,
+  IN_HOUSE_STATUSES,
   parseInitialFilters,
   sortRows,
   type Filters,
@@ -238,23 +239,71 @@ test("사라진 workflowType 파라미터는 아무 것도 걸지 않는다", ()
   assert.deepEqual(parsed, { ...DEFAULT_FILTERS });
 });
 
-// ─────────────────────────────────────────────── 현재 상태 「입고품 전체」(IN_HOUSE)
+// ─────────────────────────────────────────────── 현재 상태 — 여럿 고르기
 //
-// 2026-11-11 사용자 개선요청. 대시보드 [현재 입고 수]를 누르면 이 값이 걸린 채로
-// 목록이 열린다 — 그 전에는 조건 없이 열려서 출하 완료 건까지 다 보였고, 카드에
-// 적힌 수와 목록의 건수가 달랐다.
+// 2026-11-11 사용자 개선요청: 한 종류의 필터 안에서 **복수로** 고를 수 있게.
+// 그래서 status 하나가 statuses 배열이 되었고, **빈 배열이 「전체」**다.
 //
-// 🔴 **두 수가 같은지**(이 조각의 핵심)는 여기가 아니라
+// 「입고품 전체」는 그보다 앞선 같은 날의 결정이다 — 대시보드 [현재 입고 수]를
+// 누르면 그 묶음이 걸린 채로 목록이 열린다(그 전에는 조건 없이 열려서 출하 완료
+// 건까지 다 보였고, 카드에 적힌 수와 목록의 건수가 달랐다). 복수 선택이 되면서
+// 그것은 **저장되는 값이 아니라 상태들로 펼쳐지는 단축**이 되었다.
+//
+// 🔴 **두 수가 같은지**(그 결정의 핵심)는 여기가 아니라
 // in-house-filter-matches-dashboard.test.ts 가 같은 표본에 두 함수를 돌려 맞댄다.
 // 여기서 보는 것은 거르는 규칙 자체와 주소줄이다.
 
 test("🔴 IN_HOUSE 는 상태 목록에 없는 값이다 — 상태가 아니라 거르는 방식이다", () => {
   // 언젠가 이것을 상태로 끼워 넣으면 DB 의 상태 enum 에 없는 값이 저장·전이·표의
-  // 상태 칸으로 새어 나간다. 그래서 필터 타입에서만 합집합으로 더했다.
+  // 상태 칸으로 새어 나간다. 이제는 필터 값으로도 남지 않는다 — 주소줄 별칭과
+  // 화면의 단축 단추가 상태들로 펼쳐 넣을 뿐이라 샐 길이 아예 없다.
   assert.ok(
     !(REPAIR_STATUS_CODES as readonly string[]).includes("IN_HOUSE"),
     "IN_HOUSE 가 상태 목록에 들어갔다"
   );
+  assert.ok(
+    !(IN_HOUSE_STATUSES as readonly string[]).includes("IN_HOUSE"),
+    "펼쳐 넣는 묶음에 IN_HOUSE 가 섞였다 — 그러면 아무 줄과도 안 맞아 목록이 빈다"
+  );
+});
+
+test("🔴 아무것도 안 고르면 전부 지나간다 — 빈 배열이 「전체」다", () => {
+  const rows = [
+    row({ id: "repair", effectiveStatus: "IN_REPAIR" }),
+    row({
+      id: "shipped",
+      effectiveStatus: "SHIPMENT_COMPLETED",
+      effectiveActualShipmentDate: "2026-11-02",
+    }),
+  ];
+  assert.deepEqual(DEFAULT_FILTERS.statuses, [], "기본값이 빈 배열이 아니면 첫 화면부터 걸러진다");
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ statuses: [] }))), ["repair", "shipped"]);
+});
+
+test("🔴 여럿 고르면 합집합이다 — 고른 상태의 줄이 전부 남는다", () => {
+  // 이 조각이 있는 까닭 그 자체다. 예전에는 한 번에 하나뿐이라 「수리 중과 출하
+  // 대기」를 한 화면에서 볼 수 없었다.
+  const rows = [
+    row({ id: "intake", effectiveStatus: "WAITING_INTAKE_INSPECTION" }),
+    row({ id: "repair", effectiveStatus: "IN_REPAIR" }),
+    row({ id: "ship-wait", effectiveStatus: "WAITING_SHIPMENT" }),
+    row({
+      id: "shipped",
+      effectiveStatus: "SHIPMENT_COMPLETED",
+      effectiveActualShipmentDate: "2026-11-02",
+    }),
+  ];
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ statuses: ["IN_REPAIR", "WAITING_SHIPMENT"] }))), [
+    "repair",
+    "ship-wait",
+  ]);
+  // 고른 차례가 달라도 남는 줄은 같다 — 배열이지 순서가 있는 조건이 아니다.
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ statuses: ["WAITING_SHIPMENT", "IN_REPAIR"] }))), [
+    "repair",
+    "ship-wait",
+  ]);
+  // 🔵 고른 상태의 줄이 하나도 없으면 빈 목록이다(전체로 되돌아가지 않는다).
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ statuses: ["WAITING_KYOSAN_REPLY"] }))), []);
 });
 
 test("입고품 전체는 출하 완료가 아닌 줄만 남긴다", () => {
@@ -268,18 +317,31 @@ test("입고품 전체는 출하 완료가 아닌 줄만 남긴다", () => {
       effectiveActualShipmentDate: "2026-11-02",
     }),
   ];
-  assert.deepEqual(idsOf(applyFilters(rows, filters({ status: "IN_HOUSE" }))), [
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ statuses: IN_HOUSE_STATUSES }))), [
     "intake",
     "repair",
     "ship-wait",
   ]);
 });
 
-test("입고품 전체는 상태를 낱낱이 적지 않는다 — 출하 완료 하나만 빠진다", () => {
+test("🔴 입고품 전체는 상태를 낱낱이 적지 않는다 — 출하 완료 하나만 빠진다", () => {
   // 상태가 하나 늘어도 저절로 따라오는지 본다. 남길 상태를 적어 두는 방식이면
   // 상태가 늘 때 그 건들이 아무 소리 없이 목록에서 빠진다.
+  // 🔴 묶음 자체를 REPAIR_STATUS_CODES 와 맞대어 센다 — 거르기로만 재면 "출하
+  //    완료만 빠진다"는 것은 알아도 **빠진 것이 하나뿐인지**는 모른다.
+  assert.equal(
+    IN_HOUSE_STATUSES.length,
+    REPAIR_STATUS_CODES.length - 1,
+    "손으로 적은 목록이면 상태가 늘어난 날 여기가 터진다"
+  );
+  assert.deepEqual(
+    [...IN_HOUSE_STATUSES],
+    REPAIR_STATUS_CODES.filter((status) => status !== "SHIPMENT_COMPLETED"),
+    "출하 완료 말고 전부여야 한다 — 차례까지 그대로다"
+  );
+
   const rows = REPAIR_STATUS_CODES.map((status) => row({ id: status, effectiveStatus: status }));
-  const kept = idsOf(applyFilters(rows, filters({ status: "IN_HOUSE" })));
+  const kept = idsOf(applyFilters(rows, filters({ statuses: IN_HOUSE_STATUSES })));
   assert.equal(kept.length, REPAIR_STATUS_CODES.length - 1);
   assert.ok(!kept.includes("SHIPMENT_COMPLETED"), "출하 완료만 빠져야 한다");
 });
@@ -302,7 +364,10 @@ test("🔴 원본 status 가 아니라 effectiveStatus 로 가른다", () => {
       hasWorkflowOverride: true,
     }),
   ];
-  assert.deepEqual(idsOf(applyFilters(rows, filters({ status: "IN_HOUSE" }))), ["override-in"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ statuses: IN_HOUSE_STATUSES }))), ["override-in"]);
+  // 낱낱의 상태를 골랐을 때도 같은 칸을 본다 — 표에 「수리 중」이라 적힌 줄이
+  // 「수리 중」으로 걸러도 안 나오면, 오류 없이 사람만 헤맨다.
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ statuses: ["IN_REPAIR"] }))), ["override-in"]);
 });
 
 test("전체·낱낱의 상태는 전과 똑같다 — 입고품 전체가 끼어들지 않는다", () => {
@@ -316,8 +381,8 @@ test("전체·낱낱의 상태는 전과 똑같다 — 입고품 전체가 끼�
     }),
   ];
   assert.deepEqual(idsOf(applyFilters(rows, filters())), ["repair", "ship-wait", "shipped"]);
-  assert.deepEqual(idsOf(applyFilters(rows, filters({ status: "IN_REPAIR" }))), ["repair"]);
-  assert.deepEqual(idsOf(applyFilters(rows, filters({ status: "SHIPMENT_COMPLETED" }))), ["shipped"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ statuses: ["IN_REPAIR"] }))), ["repair"]);
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ statuses: ["SHIPMENT_COMPLETED"] }))), ["shipped"]);
 });
 
 test("입고품 전체도 다른 조건과 함께 걸린다", () => {
@@ -331,28 +396,62 @@ test("입고품 전체도 다른 조건과 함께 걸린다", () => {
       productCategory: "Generator",
     }),
   ];
-  const result = applyFilters(rows, filters({ status: "IN_HOUSE", productCategory: "Generator" }));
+  const result = applyFilters(rows, filters({ statuses: IN_HOUSE_STATUSES, productCategory: "Generator" }));
   assert.deepEqual(idsOf(result), ["hit"]);
 });
 
-test("주소창으로 입고품 전체를 걸 수 있다(?status=IN_HOUSE)", () => {
-  // 대시보드 [현재 입고 수] 카드가 거는 딥링크다.
-  assert.equal(parseInitialFilters(new URLSearchParams("status=IN_HOUSE")).status, "IN_HOUSE");
-  // 낱낱의 상태 딥링크(다른 카드 여덟)는 그대로다.
-  assert.equal(parseInitialFilters(new URLSearchParams("status=IN_REPAIR")).status, "IN_REPAIR");
-  assert.equal(parseInitialFilters(new URLSearchParams("")).status, "ALL");
+test("🔴 주소창으로 상태 여럿을 걸 수 있다(?status=A,B)", () => {
+  // 쉼표로 잇는다. 필터를 바꿀 때 주소줄을 되쓰지는 않지만(이번 범위가 아니다),
+  // 읽는 쪽은 받아야 한다 — 사람이 주소를 손으로 적어 넘기는 자리다.
+  assert.deepEqual(
+    parseInitialFilters(new URLSearchParams("status=WAITING_PO,IN_REPAIR")).statuses,
+    ["WAITING_PO", "IN_REPAIR"]
+  );
+  // 공백이 섞여도(메일·메신저를 거치면 붙는다) 읽는다. 같은 값이 두 번 오면 한 번만.
+  assert.deepEqual(
+    parseInitialFilters(new URLSearchParams("status=IN_REPAIR, IN_REPAIR ,WAITING_PO")).statuses,
+    ["IN_REPAIR", "WAITING_PO"]
+  );
+  // 낱낱의 상태 딥링크(대시보드 카드 여덟)는 그대로다 — 길이 1 짜리 배열이 된다.
+  assert.deepEqual(parseInitialFilters(new URLSearchParams("status=IN_REPAIR")).statuses, ["IN_REPAIR"]);
+  assert.deepEqual(parseInitialFilters(new URLSearchParams("")).statuses, []);
 });
 
-test("🔴 주소창에 모르는 값이 와도 ALL 로 떨어진다 — 한 건도 사라지지 않는다", () => {
+test("🔴 ?status=IN_HOUSE 는 계속 받는다 — 상태 열하나로 펼쳐진다", () => {
+  // 대시보드 [현재 입고 수] 카드가 거는 딥링크다. 카드의 href 는 그대로 두고
+  // (즐겨찾기·메일에 남은 링크가 조용히 「전체」로 열리면 안 된다) 여기서 푼다.
+  assert.deepEqual(
+    parseInitialFilters(new URLSearchParams("status=IN_HOUSE")).statuses,
+    [...IN_HOUSE_STATUSES]
+  );
+  // 별칭과 낱낱의 상태를 섞어 적어도 한 번씩만 들어간다.
+  assert.deepEqual(
+    parseInitialFilters(new URLSearchParams("status=IN_HOUSE,IN_REPAIR")).statuses,
+    [...IN_HOUSE_STATUSES]
+  );
+  // 별칭에 없는 상태를 덧붙이면 그만큼 는다.
+  assert.deepEqual(
+    parseInitialFilters(new URLSearchParams("status=IN_HOUSE,SHIPMENT_COMPLETED")).statuses,
+    [...IN_HOUSE_STATUSES, "SHIPMENT_COMPLETED"]
+  );
+});
+
+test("🔴 주소창에 모르는 값이 오면 조용히 버린다 — 한 건도 사라지지 않는다", () => {
   // 주소줄은 사람이 손으로 고칠 수 있다. 엉뚱한 값에 화면이 깨지거나 목록이
   // 통째로 비면 안 된다 — 대소문자가 다른 것도 모르는 값이다.
-  for (const junk of ["in_house", "IN HOUSE", "입고품 전체", "SHIPPED", ""]) {
-    assert.equal(
-      parseInitialFilters(new URLSearchParams(`status=${junk}`)).status,
-      "ALL",
-      `"${junk}" 는 ALL 로 떨어져야 한다`
+  for (const junk of ["in_house", "IN HOUSE", "입고품 전체", "SHIPPED", "", ",,,"]) {
+    assert.deepEqual(
+      parseInitialFilters(new URLSearchParams(`status=${junk}`)).statuses,
+      [],
+      `"${junk}" 는 빈 배열(= 전체)로 떨어져야 한다`
     );
   }
+  // 🔴 아는 값과 섞여 오면 **아는 것만** 남는다. 통째로 버리면 멀쩡한 조건까지
+  //    날아가고, 그대로 넣으면 아무 줄과도 안 맞아 목록이 빈다.
+  assert.deepEqual(
+    parseInitialFilters(new URLSearchParams("status=SHIPPED,IN_REPAIR")).statuses,
+    ["IN_REPAIR"]
+  );
 
   const rows = [
     row({ id: "repair", effectiveStatus: "IN_REPAIR" }),
