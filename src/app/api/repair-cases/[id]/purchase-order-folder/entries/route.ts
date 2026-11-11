@@ -49,6 +49,14 @@ import { findPurchaseOrderArchiveFolder, resolvePurchaseOrderArchiveRoot } from 
  * 권한 · 확장자 검사 · 앞머리 바이트 대조 **밖**에 있다 — 우리 출처로 내보내면 그 방어선이
  * 통째로 빠진다. 파일을 **여는** 일은 그 PC 의 탐색기 도우미가 한다.
  *
+ * ── 🔴 **「못 찾았다」가 두 갈래다 — 그대로 넘긴다** (2026-11-11) ───────────
+ * 저장소 모듈이 둘을 갈랐고(그 파일 머리말), 이 통로는 **고쳐 쓰지 않고 그대로 내보낸다.**
+ *  · `no-equipment-key` — 수리 건에 **L/N · S/N 이 없어** 공유폴더를 **한 번도 안 봤다.**
+ *  · `not-found`        — 열쇠를 들고 **다 훑었는데** 맞는 폴더가 없었다.
+ * 🔴 **둘 다 200 이다 — 실패가 아니다.** 404 로 바꿔 달면 화면이 「없는 수리 건」으로 읽고,
+ * 다시 한 갈래로 합치면 사람이 **공유폴더를 정리할 일인지 접수 정보를 적을 일인지** 알 수
+ * 없게 된다(그 둘은 할 일이 정반대다).
+ *
  * ── 🔴 아무것도 만들지 않는다 ──────────────────────────────────────────────
  * 폴더가 없으면 `not-found` 로 끝난다 — **발주서 폴더는 사람이 만든다.** 이 파일에는 폴더
  * 만들기 · 파일 쓰기 · DB 쓰기가 없고, 쓰기 메서드(POST · PUT)도 없다. 감사도 남기지
@@ -74,8 +82,8 @@ import { findPurchaseOrderArchiveFolder, resolvePurchaseOrderArchiveRoot } from 
  *
  * ── 응답 ────────────────────────────────────────────────────────────────
  *  · 200 `{ status: "found", relativePath, issuedDate, entries, totalCount, truncated }`
- *  · 200 `{ status: "multiple" }` · `{ status: "not-found" }` · `{ status: "no-order-date" }`
- *  · 200 `{ status: "disabled" }` · `{ status: "failed", reason }`
+ *  · 200 `{ status: "multiple" }` · `{ status: "not-found" }` · `{ status: "no-equipment-key" }`
+ *  · 200 `{ status: "no-order-date" }` · `{ status: "disabled" }` · `{ status: "failed", reason }`
  *  · 실패 `{ error, code }` — 401 · 403 · 404. 모두 `Cache-Control: no-store`(JSON 성공 응답).
  * ============================================================================
  */
@@ -111,7 +119,10 @@ type PurchaseOrderFolderEntriesResponse =
     }
   /** 🔴 목록도 경로도 없다 — 어느 폴더인지 모르는 채로 내용을 보이지 않는다. */
   | { status: "multiple" }
+  /** 🔴 열쇠를 들고 **다 훑었는데** 없다 — 할 일은 공유폴더 정리다. */
   | { status: "not-found" }
+  /** 🔴 L/N · S/N 이 없어 공유폴더를 **아예 안 봤다** — 할 일은 접수 정보 적기다. */
+  | { status: "no-equipment-key" }
   /** 🔴 내자 정리에 발주발행일이 없다 — 공유폴더를 **보지 않았다**는 뜻이다. */
   | { status: "no-order-date" }
   | { status: "disabled" }
@@ -216,6 +227,12 @@ export async function GET(
   }
   if (found.status === "not-found") {
     return respond({ status: "not-found" });
+  }
+  // 🔴 위와 **다른 말**이다 — 저장소 모듈이 L/N · S/N 이 없어 디스크를 한 번도 안 봤다는
+  //    뜻으로 낸다. 합치면 사람이 공유폴더를 뒤지러 가는데, 실제로 할 일은 접수 정보에
+  //    L/N · S/N 을 적는 것이다. 🔴 200 이다 — 실패가 아니다.
+  if (found.status === "no-equipment-key") {
+    return respond({ status: "no-equipment-key" });
   }
   if (found.status === "disabled") {
     // 루트를 먼저 보았으므로 여기에 닿지 않지만, 상태가 하나 늘면 컴파일러가 짚게 둔다.

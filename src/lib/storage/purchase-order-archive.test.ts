@@ -183,20 +183,52 @@ describe("발주서 폴더 찾기", () => {
     assert.deepEqual(await find(root), { status: "not-found" });
   });
 
-  test("🔴 L/N 이나 S/N 이 비면 **디스크를 아예 안 본다**", async () => {
+  test("🔴 L/N 이나 S/N 이 비면 `no-equipment-key` — **디스크를 아예 안 본다**", async () => {
     // 🔴 없는 폴더를 루트로 준다 — 디스크를 봤다면 `failed` 가 나왔을 것이다.
     const missing = path.join(await makeRoot(), "없는-폴더");
+    // 🔴 `-` 하나뿐인 칸도 **빈 것**이다 — 수리 건 조회가 빈 칸을 그렇게 채워 내려보내는
+    //    자리가 있다(mappers/repair-case.ts). 그 글자를 열쇠로 쓰면 아무 폴더에나 걸린다.
     for (const overrides of [
       { lotNumber: "" },
       { serialNumber: "" },
+      { lotNumber: "   " },
       { lotNumber: null },
+      { serialNumber: null },
+      { lotNumber: undefined },
       { serialNumber: undefined },
       { lotNumber: "-" },
+      { serialNumber: "-" },
+      { lotNumber: " - ", serialNumber: " - " },
     ]) {
-      assert.deepEqual(await find(missing, overrides), { status: "not-found" }, JSON.stringify(overrides));
+      assert.deepEqual(await find(missing, overrides), { status: "no-equipment-key" }, JSON.stringify(overrides));
     }
     // 열쇠가 둘 다 있으면 그제야 디스크를 보고 실패한다 — 위가 「안 봤다」는 증거다.
     assert.equal((await find(missing)).status, "failed");
+  });
+
+  test("🔴 **「다 뒤졌는데 없다」와 「못 뒤졌다」는 서로 다른 상태다**", async () => {
+    // 2026-11-11. 사람이 할 일이 정반대라 갈랐다 — 앞은 공유폴더를 정리할 일이고,
+    // 뒤는 접수 정보에 L/N · S/N 을 적을 일이다.
+    const root = await makeRoot();
+    // 🔴 **진짜 서류함**이다 — 훑을 폴더가 실제로 있고, 그 안에 **다른 장비**의 발주서만 있다.
+    await makeFolder(root, "2026", "1. 가나전자", poFolder(1, "20260215", "ZZ9999", "7654321"));
+
+    // 열쇠가 둘 다 있다 → 연도 폴더를 전부 훑고 후보 0 → **여전히** `not-found`.
+    const searched = await find(root);
+    assert.deepEqual(searched, { status: "not-found" });
+
+    // 한쪽만 비어도 → 훑기 전에 끝난다 → `no-equipment-key`.
+    const noLot = await find(root, { lotNumber: "" });
+    const noSerial = await find(root, { serialNumber: "" });
+    const dashOnly = await find(root, { lotNumber: "-" });
+    assert.deepEqual(noLot, { status: "no-equipment-key" });
+    assert.deepEqual(noSerial, { status: "no-equipment-key" });
+    assert.deepEqual(dashOnly, { status: "no-equipment-key" });
+
+    // 🔴 **같은 서류함에서 답이 갈린다** — 둘을 다시 한 상태로 합치면 여기서 터진다.
+    assert.notDeepEqual(searched, noLot);
+    // 칸은 여전히 `status` 하나다 — 가르면서 경로도 줄도 새로 싣지 않았다.
+    assert.deepEqual(Object.keys(noLot), ["status"]);
   });
 
   test("🔴 설정이 비면 `disabled` — 디스크를 보지 않는다", async () => {

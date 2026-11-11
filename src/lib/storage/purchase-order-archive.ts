@@ -62,6 +62,18 @@ import {
  * 리눅스의 심볼릭 링크도 거기서 폴더로 치지 않는다 — **따로 거를 필요가 없다**(그 파일
  * 머리말에 그렇게 적혀 있다). `.lnk` 파일 모양이면 애초에 파일이라 빠진다.
  *
+ * ── 🔴 **「못 찾았다」를 둘로 가른다** (2026-11-11) ───────────────────────
+ * 사람이 할 일이 **정반대**라서다. 2026-10-12 부터 2026-11-11 까지 둘 다 `not-found` 였고,
+ * 화면 문장도 하나라 **어느 쪽인지 알 길이 없었다** — L/N 이 비어 디스크를 한 번도 안 본
+ * 건에서도 「공유폴더에 없나 보다」로 읽혔다.
+ *  · `no-equipment-key` — 수리 건에 **L/N · S/N 이 없어 열쇠를 못 만들었다.** 디스크를
+ *    **한 번도 보지 않았다.** 할 일은 **접수 정보에 L/N · S/N 을 적는 것**이다.
+ *  · `not-found` — 열쇠를 들고 **연도 폴더를 전부 훑었는데** 맞는 폴더가 하나도 없었다.
+ *    할 일은 **공유폴더를 정리하는 것**이다.
+ * 🔴 **가르는 자리는 아래 findPurchaseOrderArchiveFolder 의 열쇠 판정 한 곳뿐**이다 —
+ * findAndRead 의 `not-found`(후보가 0개)는 **그대로 둔다.** 그것이 진짜 「다 뒤졌는데
+ * 없다」다. 둘을 다시 합치면 화면이 또 한 문장으로 돌아간다.
+ *
  * ── 🔴 돌려주는 값에 **절대 경로**가 없다 ────────────────────────────────
  * 폴더를 가리키는 값은 **루트 기준 상대 경로**(`연도/고객사/발주 건`)뿐이고, 줄을 가리키는
  * 값은 **그 폴더 안에서의 이름**뿐이다. 컨테이너 안 경로(루트)를 담을 칸이 타입 수준에
@@ -186,7 +198,12 @@ export type PurchaseOrderArchiveResult =
     }
   /** 🔴 날짜가 같은 폴더가 둘 이상이다 — **목록도 경로도 내지 않는다**(머리말). */
   | { status: "multiple" }
-  /** 이 장비의 발주서 폴더가 아직 없다 — 만들지 않는다. */
+  /**
+   * 🔴 **L/N · S/N 이 없어 열쇠를 못 만들었다** — 디스크를 **한 번도 보지 않았다.**
+   * 아래 `not-found` 와 **사람이 할 일이 정반대**라 갈라 둔다(머리말).
+   */
+  | { status: "no-equipment-key" }
+  /** 🔴 열쇠를 들고 **다 훑었는데** 이 장비의 발주서 폴더가 없다 — 만들지 않는다. */
   | { status: "not-found" }
   /** 공유폴더 위치가 설정되지 않았다 — 이 기능만 꺼져 있다. 실패가 아니다. */
   | { status: "disabled" }
@@ -198,9 +215,9 @@ export type FindPurchaseOrderArchiveFolderInput = {
    * `disabled` 로 끝나고 🔴 **디스크를 한 번도 보지 않는다.** 시험에서는 임시 폴더를 준다.
    */
   root?: string | null;
-  /** 장비의 L/N. 🔴 비면 디스크를 아예 보지 않는다. */
+  /** 장비의 L/N. 🔴 비면(`-` 하나뿐인 것도 빈 것이다) 디스크를 아예 안 보고 `no-equipment-key`. */
   lotNumber: string | null | undefined;
-  /** 장비의 S/N. 🔴 비면 디스크를 아예 보지 않는다. */
+  /** 장비의 S/N. 🔴 비면(`-` 하나뿐인 것도 빈 것이다) 디스크를 아예 안 보고 `no-equipment-key`. */
   serialNumber: string | null | undefined;
   /** 줄 수 상한. 시험에서만 바꾼다. */
   limit?: number;
@@ -218,7 +235,9 @@ export async function findPurchaseOrderArchiveFolder(
   const wantedKey = purchaseOrderProductKey(input.lotNumber, input.serialNumber);
   // 🔴 둘 중 하나라도 비면 여기서 끝난다 — 아래 디스크를 보는 코드에 닿지 않는다.
   //    빈 열쇠로 훑으면 남의 발주서가 걸린다(domain 쪽 머리말).
-  if (wantedKey === null) return { status: "not-found" };
+  // 🔴 아래 findAndRead 의 `not-found` 와 **다른 상태**다 — 여기는 「못 뒤졌다」이고 저기는
+  //    「다 뒤졌는데 없다」라, 사람이 할 일이 정반대다(머리말).
+  if (wantedKey === null) return { status: "no-equipment-key" };
 
   // 🔴 설정이 비어 있으면 여기서 끝난다 — 아래 디스크를 보는 코드에 닿지 않는다.
   const configured =
@@ -265,6 +284,8 @@ async function findAndRead(
   const root = await requireExistingShareFolderRoot(rawRoot);
 
   const candidates = await scan(root, wantedKey);
+  // 🔴 **여기가 진짜 「다 뒤졌는데 없다」다** — 연도 폴더를 전부 훑은 뒤다. 열쇠를 못 만들어
+  //    훑지도 못한 경우(`no-equipment-key`)와 합치지 않는다(머리말).
   if (candidates.length === 0) return { status: "not-found" };
 
   // 🔴 **폴더 이름의 날짜**로 가린다 — `YYYY-MM-DD` 라 글자 차례가 곧 날짜 차례다.

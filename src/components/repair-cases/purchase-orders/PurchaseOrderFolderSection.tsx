@@ -65,7 +65,12 @@ import {
  *  · `disabled`      → 🔴 **구역 자체를 그리지 않는다**(설정이 없는 개발 PC 에서 빈 상자가 늘지 않게)
  *  · 불러오는 중     → 「불러오는 중…」
  *  · `no-order-date` → 차분한 한 줄(muted) — 공유폴더를 보지 않았다
- *  · `not-found`     → 「아직 이 장비의 발주서 폴더를 찾지 못했습니다 …」(muted)
+ *  · `no-equipment-key` → 「L/N 과 S/N 이 둘 다 적혀 있어야 …」(muted) — 🔴 공유폴더를 **안 봤다**
+ *  · `not-found`     → 「공유폴더를 찾아봤지만 … 없습니다」(muted) — 🔴 **다 뒤진 뒤**다
+ * 🔴 **`no-equipment-key` 와 `not-found` 는 다른 문장이어야 한다**(2026-11-11). 2026-10-12 부터
+ *   2026-11-11 까지 둘이 한 문장이었고, 그 문장이 「아직 … 못했습니다」라 **「아직 안 해 봤다」**
+ *   로 읽혔다. 사람이 할 일이 정반대다 — 앞은 **접수 정보에 L/N · S/N 적기**, 뒤는
+ *   **공유폴더 정리**다. 화면이 한 문장이면 어느 쪽인지 알 길이 없다.
  *  · `multiple`      → 🔴 「같은 날짜의 발주서 폴더가 여럿입니다 …」 — **목록을 내지 않는다**
  *  · `failed`        → 「공유폴더를 읽지 못했습니다」(warning) + 서버가 준 짧은 사유
  *  · `found` + 빈 폴더 → 「폴더가 비어 있습니다」
@@ -96,9 +101,25 @@ export const PURCHASE_ORDER_FOLDER_SECTION_LOADING_TEXT = "불러오는 중…";
 export const PURCHASE_ORDER_FOLDER_SECTION_NO_ORDER_DATE_TEXT =
   "아직 발주발행일이 적혀 있지 않습니다 — 내자 정리에 적히면 그때 이 장비의 발주서 폴더를 찾습니다";
 
-/** 🔴 폴더를 세우는 일은 앱이 하지 않는다 — 공유폴더는 사람이 만든다. */
+/**
+ * 🔴 **L/N · S/N 이 없어 공유폴더를 한 번도 안 봤다**(2026-11-11). 아래 `not-found` 와 사람이
+ * 할 일이 **정반대**라 문장을 갈랐다 — 여기서 할 일은 **접수 정보를 적는 것**이지 공유폴더를
+ * 뒤지는 것이 아니다.
+ * 🔴 **둘 다 필요하다는 것**을 적는다. S/N 하나로는 장비가 확정되지 않는다 — 이 시스템에는
+ * 같은 S/N 에 모델이 셋인 사례가 있어 열쇠가 한 덩이다(domain/purchase-order-folder-name.ts
+ * 머리말). 「S/N 이 없습니다」로만 적으면 L/N 이 빈 건에서 엉뚱한 칸을 보러 간다.
+ */
+export const PURCHASE_ORDER_FOLDER_SECTION_NO_EQUIPMENT_KEY_TEXT =
+  "L/N 과 S/N 이 둘 다 적혀 있어야 발주서 폴더를 찾을 수 있습니다 — 접수 정보를 확인해 주세요";
+
+/**
+ * 🔴 폴더를 세우는 일은 앱이 하지 않는다 — 공유폴더는 사람이 만든다.
+ * 🔴 **「찾아봤지만 없다」로 적는다**(2026-11-11). 2026-10-12 판은 「**아직** … 찾지
+ * **못했습니다**」였는데 그 말이 **「아직 안 해 봤다」**로 읽혔다 — 실제로는 연도 폴더를
+ * **전부 훑은 뒤**이고, 그때 할 일은 기다리는 것이 아니라 **공유폴더를 정리하는 것**이다.
+ */
 export const PURCHASE_ORDER_FOLDER_SECTION_NOT_FOUND_TEXT =
-  "아직 공유폴더에서 이 장비의 발주서 폴더를 찾지 못했습니다";
+  "공유폴더를 찾아봤지만 이 장비의 발주서 폴더가 없습니다";
 
 export const PURCHASE_ORDER_FOLDER_SECTION_EMPTY_TEXT = "폴더가 비어 있습니다";
 
@@ -153,6 +174,9 @@ export type PurchaseOrderFolderSectionState =
   | { kind: "disabled" }
   /** 🔴 내자 정리에 발주발행일이 없다 — 공유폴더를 **보지 않았다**. */
   | { kind: "no-order-date" }
+  /** 🔴 L/N · S/N 이 없다 — 공유폴더를 **한 번도 안 봤다**(아래 `not-found` 와 다른 말이다). */
+  | { kind: "no-equipment-key" }
+  /** 🔴 열쇠를 들고 **다 훑었는데** 없다. */
   | { kind: "not-found" }
   /** 🔴 목록도 경로도 없다. */
   | { kind: "multiple" }
@@ -212,6 +236,8 @@ export function readPurchaseOrderFolderEntriesAnswer(payload: unknown): Purchase
       return { kind: "multiple" };
     case "not-found":
       return { kind: "not-found" };
+    case "no-equipment-key":
+      return { kind: "no-equipment-key" };
     case "no-order-date":
       return { kind: "no-order-date" };
     case "disabled":
@@ -282,8 +308,9 @@ export function canOpenPurchaseOrderFolderEntry(entry: PurchaseOrderFolderEntryV
 /**
  * 🔴 **열 수 있는 폴더 경로** — 찾았고 통로가 경로를 줬을 때만 글자가 있고, 아니면 빈 글자다.
  * 줄의 [열기]와 구역 맨 아래의 [폴더 열기]가 **이 하나**를 함께 본다. 빈 글자면 둘 다 그리지
- * 않는다: `not-found` · `multiple`(어느 폴더인지 모른다) · `no-order-date` · `disabled` ·
- * `failed` · 불러오는 중에는 열 자리가 없고, 주소를 지어내서도 안 된다.
+ * 않는다: `not-found` · `no-equipment-key` · `multiple`(어느 폴더인지 모른다) ·
+ * `no-order-date` · `disabled` · `failed` · 불러오는 중에는 열 자리가 없고, 주소를 지어내서도
+ * 안 된다.
  */
 export function purchaseOrderFolderOpenPath(state: PurchaseOrderFolderSectionState): string {
   return state.kind === "found" ? state.relativePath : "";
@@ -382,6 +409,16 @@ export function PurchaseOrderFolderSectionView({ state }: { state: PurchaseOrder
         <p className={MUTED_CLASS}>{PURCHASE_ORDER_FOLDER_SECTION_NO_ORDER_DATE_TEXT}</p>
       )}
 
+      {/*
+        🔴 **공유폴더를 한 번도 안 봤다** — 열쇠(L/N · S/N)가 없어 서버가 훑지도 못했다.
+        아래 `not-found` 와 **다른 문장**이어야 한다: 여기서 할 일은 접수 정보를 적는 것이고
+        저기서 할 일은 공유폴더를 정리하는 것이다. 고장이 아니라 차분한 한 줄이다(muted).
+      */}
+      {state.kind === "no-equipment-key" && (
+        <p className={MUTED_CLASS}>{PURCHASE_ORDER_FOLDER_SECTION_NO_EQUIPMENT_KEY_TEXT}</p>
+      )}
+
+      {/* 🔴 **다 뒤진 뒤**다 — 「아직 안 해 봤다」로 읽히지 않게 「찾아봤지만 없습니다」로 적는다. */}
       {state.kind === "not-found" && <p className={MUTED_CLASS}>{PURCHASE_ORDER_FOLDER_SECTION_NOT_FOUND_TEXT}</p>}
 
       {/* 🔴 목록을 내지 않는다 — 어느 폴더인지 모르는 채로 내용을 보이면 안 된다. */}
@@ -412,8 +449,9 @@ export function PurchaseOrderFolderSectionView({ state }: { state: PurchaseOrder
       {state.kind === "found" && <p className={NOTE_CLASS}>{PURCHASE_ORDER_FOLDER_SECTION_SCOPE_TEXT}</p>}
 
       {/*
-        🔴 **폴더를 찾았을 때만** 선다 — 못 찾았거나(not-found) 여럿이거나(multiple) 발주발행일이
-        없거나(no-order-date) 설정이 꺼져 있거나(disabled) 읽다 실패했으면 **열 자리가 없다.**
+        🔴 **폴더를 찾았을 때만** 선다 — 못 찾았거나(not-found) 열쇠가 없어 찾지도 못했거나
+        (no-equipment-key) 여럿이거나(multiple) 발주발행일이 없거나(no-order-date) 설정이 꺼져
+        있거나(disabled) 읽다 실패했으면 **열 자리가 없다.**
         빈 폴더에는 그대로 선다(폴더는 있다).
         🔴 여는 장치는 연락서 쪽 자리 열기 단추 한 벌이다 — Windows 가 아니면 스스로 아무것도
         그리지 않고, 도우미 재설치 안내도 그 단추가 제 결과 줄로 함께 낸다. 여기서 끄지 않는다.

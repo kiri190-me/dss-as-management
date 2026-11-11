@@ -127,8 +127,12 @@ describe("발주서 폴더 읽기 — 원본으로 지킨다", () => {
       assert.ok(code.indexOf('return { status: "disabled" };') < code.indexOf(diskMark), diskMark);
     }
     // 열쇠가 비면 그보다도 **앞**에서 끝난다 — 빈 열쇠로 훑으면 남의 발주서가 걸린다.
-    assert.ok(code.indexOf('return { status: "not-found" };') < code.indexOf('return { status: "disabled" };'));
-    assert.ok(code.includes("if (wantedKey === null) return { status: \"not-found\" };"));
+    // 🔴 그때의 답은 `not-found` 가 **아니라** `no-equipment-key` 다(2026-11-11) — 「다 뒤졌는데
+    //    없다」와 사람이 할 일이 정반대라 갈랐다. 아래 「둘을 가른다」 시험이 그 짝이다.
+    assert.ok(
+      code.indexOf('return { status: "no-equipment-key" };') < code.indexOf('return { status: "disabled" };')
+    );
+    assert.ok(code.includes('if (wantedKey === null) return { status: "no-equipment-key" };'));
     // 설정을 읽는 자리는 **한 곳**이다.
     assert.equal(code.match(/process\.env/g)?.length, 1);
     assert.equal(code.match(/PURCHASE_ORDER_ARCHIVE_DIR/g)?.length, 1);
@@ -170,6 +174,23 @@ describe("발주서 폴더 읽기 — 원본으로 지킨다", () => {
     );
     const entryFields = [...entry.matchAll(/^\s*(\w+)\??:/gm)].map((match) => match[1]).sort();
     assert.deepEqual(entryFields, ["isDirectory", "modifiedAtMs", "name", "sizeBytes"]);
+  });
+
+  test("🔴 **「못 뒤졌다」와 「다 뒤졌는데 없다」를 가르는 자리가 한 곳씩이다**", () => {
+    // 2026-11-11. 합치면 화면이 또 한 문장으로 돌아가고, 사람은 **공유폴더를 정리할 일인지
+    // 접수 정보를 적을 일인지** 알 수 없게 된다.
+    // 🔴 `no-equipment-key` 를 **내는 자리**는 열쇠 판정 한 곳뿐이다(타입 선언 한 줄은 뺀다).
+    assert.equal(code.match(/return \{ status: "no-equipment-key" \};/g)?.length, 1);
+    // 🔴 `not-found` 를 **내는 자리**도 한 곳뿐이고, 그 자리는 **훑은 뒤**다.
+    assert.equal(code.match(/return \{ status: "not-found" \};/g)?.length, 1);
+    const findAndReadAt = code.indexOf("async function findAndRead(");
+    assert.ok(findAndReadAt >= 0, "findAndRead 를 찾지 못했다");
+    assert.ok(
+      code.indexOf('return { status: "not-found" };') > findAndReadAt,
+      "훑기 전에 not-found 를 낸다 — 둘이 다시 합쳐졌다"
+    );
+    // 그 한 줄이 **후보가 0개**일 때의 답이라는 것까지 못 박는다.
+    assert.ok(code.includes('if (candidates.length === 0) return { status: "not-found" };'), code);
   });
 
   test("🔴 **하나만** 고른다 — 날짜가 같으면 `multiple` 이고 목록이 안 나간다", () => {

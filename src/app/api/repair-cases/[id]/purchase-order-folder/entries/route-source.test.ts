@@ -12,7 +12,7 @@ import { describe, test } from "node:test";
  * domain/purchase-order-folder-name.test.ts 가, 화면은
  * components/repair-cases/purchase-orders/PurchaseOrderFolderSection.test.tsx 가 본다.
  *
- * 여기서 못 박는 것은 일곱이다:
+ * 여기서 못 박는 것은 여덟이다:
  *  · 🔴 문지기 **차례**가 이웃 통로(지난 견적서 폴더)와 같다 — 권한이 **조회보다 앞**이다
  *  · 🔴 권한이 `domesticOrders` READ 다 — 🔴 **견적서 열쇠가 아니다**(나가는 것은 발주서
  *    자료이고 폴더 이름에 발주 금액이 들어 있다). 새 영역을 만들지도 넓히지도 않았다
@@ -20,6 +20,9 @@ import { describe, test } from "node:test";
  *  · 🔴 **수리가 끝난 건에서도 공유폴더를 본다**(2026-11-11 사용자 결정) — 관문이 부르는
  *    조회가 **완료된 줄을 빼지 않는** 쪽이다. 전에 쓰던 listQuoteInfoForRepairCases 로
  *    되돌아가면 끝난 건의 발주서가 영영 안 보인다(운영에서 실제로 그랬다)
+ *  · 🔴 **「다 뒤졌는데 없다」(not-found)와 「L/N · S/N 이 없다」(no-equipment-key)를 갈라
+ *    내보낸다**(2026-11-11 사용자 결정) — 사람이 할 일이 정반대다(공유폴더 정리 ↔ 접수
+ *    정보 적기). 둘 다 200 이고, 통로는 저장소 모듈이 낸 상태를 고쳐 쓰지 않는다
  *  · 🔴 **만들지 않는다 · 지우지 않는다** — 폴더 만들기 · 쓰기 · 삭제 · 쓰기 메서드가 없다
  *  · 🔴 **파일 바이트를 중계하지 않는다** — JSON 목록만 낸다
  *  · 🔴 응답 타입에 **절대 경로를 담는 칸이 없다** — 전체 공유폴더 주소(uncPath)도 없다
@@ -282,11 +285,34 @@ describe("발주서 폴더 통로 — 소스로 지킨다", () => {
     assert.equal(/toUpperCase|toLocaleUpperCase/.test(getBody), false, "통로가 열쇠를 접는다");
   });
 
-  test("상태 여섯 — found · multiple · not-found · no-order-date · disabled · failed, 캐시하지 않는다", () => {
+  test("🔴 **「다 뒤졌는데 없다」와 「L/N · S/N 이 없다」를 갈라 내보낸다**", () => {
+    // 2026-11-11 사용자 결정. 저장소 모듈이 둘을 갈랐고(열쇠를 못 만들면 디스크를 아예 안
+    // 본다), 이 통로는 **고쳐 쓰지 않고 그대로 넘긴다** — 사람이 할 일이 정반대라서다
+    // (공유폴더 정리 ↔ 접수 정보에 L/N · S/N 적기).
+    assert.ok(getBody.includes('if (found.status === "not-found") {'), getBody);
+    assert.ok(getBody.includes('return respond({ status: "not-found" });'), getBody);
+    assert.ok(getBody.includes('if (found.status === "no-equipment-key") {'), getBody);
+    assert.ok(getBody.includes('return respond({ status: "no-equipment-key" });'), getBody);
+    // 🔴 둘을 **다시 합치지 않는다** — 한쪽을 다른 쪽 글자로 바꿔 적으면 여기서 터진다.
+    assert.equal(getBody.match(/status: "no-equipment-key"/g)?.length, 1);
+    assert.equal(getBody.match(/status: "not-found"/g)?.length, 1);
+    // 🔴 **200 이다 — 실패가 아니다.** 내보내는 길이 respond 쪽이고, 저장소 답을 보고
+    //    404(fail)로 가지 않는다. 404 로 바꿔 달면 화면이 「없는 수리 건」으로 읽는다.
+    const responding = getBody.slice(getBody.indexOf('if (found.status === "found") {'));
+    assert.ok(responding.includes('status: "no-equipment-key"'), responding);
+    assert.equal(responding.includes("fail("), false, "저장소가 낸 답을 실패로 내보냈다");
+    // 🔴 저장소에게 묻기 **전**에는 이 상태를 짓지 않는다 — 통로가 L/N · S/N 을 제 손으로
+    //    보고 미리 끊으면 열쇠 규칙이 두 벌이 된다(domain 쪽 함수 하나가 쥔다).
+    const beforeAsking = getBody.slice(0, getBody.indexOf("findPurchaseOrderArchiveFolder({"));
+    assert.equal(beforeAsking.includes("no-equipment-key"), false, beforeAsking);
+  });
+
+  test("상태 일곱 — found · multiple · not-found · no-equipment-key · no-order-date · disabled · failed, 캐시하지 않는다", () => {
     for (const status of [
       'status: "found"',
       'status: "multiple"',
       'status: "not-found"',
+      'status: "no-equipment-key"',
       'status: "no-order-date"',
       'status: "disabled"',
       'status: "failed"',

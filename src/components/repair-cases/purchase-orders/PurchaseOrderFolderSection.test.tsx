@@ -18,6 +18,7 @@ import PurchaseOrderFolderSection, {
   PURCHASE_ORDER_FOLDER_SECTION_LOADING_TEXT,
   PURCHASE_ORDER_FOLDER_SECTION_MULTIPLE_TEXT,
   PURCHASE_ORDER_FOLDER_SECTION_NOT_FOUND_TEXT,
+  PURCHASE_ORDER_FOLDER_SECTION_NO_EQUIPMENT_KEY_TEXT,
   PURCHASE_ORDER_FOLDER_SECTION_NO_ORDER_DATE_TEXT,
   PURCHASE_ORDER_FOLDER_SECTION_SCOPE_TEXT,
   PurchaseOrderFolderSectionView,
@@ -33,7 +34,7 @@ import PurchaseOrderFolderSection, {
 
 /**
  * ============================================================================
- * 「발주서」 탭의 공유폴더 구역 — 상태 일곱 · 자리 · 인쇄 · 읽기만 (2026-10-12)
+ * 「발주서」 탭의 공유폴더 구역 — 상태 여덟 · 자리 · 인쇄 · 읽기만 (2026-10-12)
  * ============================================================================
  * 통로 쪽 규율은 app/api/repair-cases/[id]/purchase-order-folder/entries/route-source.test.ts 가,
  * 실제 읽기는 lib/storage/purchase-order-archive.test.ts 가, 이름 읽기는
@@ -107,10 +108,60 @@ describe("상태마다 무엇을 보이는가", () => {
     assert.equal(html.includes("data-contact-folder-place-open"), false);
   });
 
-  test("못 찾았을 때", () => {
+  test("🔴 못 찾았을 때 — **찾아봤지만 없다**는 뜻이 드러난다", () => {
     const html = render({ kind: "not-found" });
     assert.ok(html.includes(PURCHASE_ORDER_FOLDER_SECTION_NOT_FOUND_TEXT));
     assert.equal(html.includes("data-contact-folder-place-open"), false, "열 자리가 없는데 단추가 섰다");
+    // 🔴 이 상태는 **연도 폴더를 전부 훑은 뒤**다. 2026-10-12 판은 「**아직** … 찾지
+    //    **못했습니다**」였고 그 말이 「아직 안 해 봤다」로 읽혔다 — 그때 할 일은 기다리는
+    //    것이 아니라 공유폴더를 정리하는 것이다(2026-11-11 사용자 결정).
+    assert.ok(
+      PURCHASE_ORDER_FOLDER_SECTION_NOT_FOUND_TEXT.includes("찾아봤"),
+      PURCHASE_ORDER_FOLDER_SECTION_NOT_FOUND_TEXT
+    );
+    assert.ok(
+      PURCHASE_ORDER_FOLDER_SECTION_NOT_FOUND_TEXT.includes("없습니다"),
+      PURCHASE_ORDER_FOLDER_SECTION_NOT_FOUND_TEXT
+    );
+    assert.equal(
+      PURCHASE_ORDER_FOLDER_SECTION_NOT_FOUND_TEXT.includes("아직"),
+      false,
+      "「아직」이 있으면 아직 안 해 본 것으로 읽힌다"
+    );
+    // 🔴 열쇠가 없을 때의 문장이 **여기 섞이지 않는다** — 사람이 할 일이 정반대다.
+    assert.equal(html.includes(PURCHASE_ORDER_FOLDER_SECTION_NO_EQUIPMENT_KEY_TEXT), false, html);
+  });
+
+  test("🔴 L/N · S/N 이 없으면 **다른 문장**이다 — 할 일이 공유폴더 정리가 아니다", () => {
+    const html = render({ kind: "no-equipment-key" });
+    assert.ok(html.includes(PURCHASE_ORDER_FOLDER_SECTION_NO_EQUIPMENT_KEY_TEXT), html);
+    // 🔴 **갈라졌는지**를 글자로 본다 — 「다 뒤졌는데 없다」 문장이 함께 나오면 가른 뜻이 없다.
+    assert.equal(html.includes(PURCHASE_ORDER_FOLDER_SECTION_NOT_FOUND_TEXT), false, html);
+    assert.notEqual(
+      PURCHASE_ORDER_FOLDER_SECTION_NO_EQUIPMENT_KEY_TEXT,
+      PURCHASE_ORDER_FOLDER_SECTION_NOT_FOUND_TEXT
+    );
+    // 🔴 **둘 다** 있어야 한다는 것이 드러나야 한다 — S/N 하나로는 장비가 확정되지 않는다
+    //    (같은 S/N 에 모델이 셋인 사례가 있다 — domain/purchase-order-folder-name.ts 머리말).
+    for (const must of ["L/N", "S/N", "둘 다"]) {
+      assert.ok(
+        PURCHASE_ORDER_FOLDER_SECTION_NO_EQUIPMENT_KEY_TEXT.includes(must),
+        `${must} 가 빠졌다: ${PURCHASE_ORDER_FOLDER_SECTION_NO_EQUIPMENT_KEY_TEXT}`
+      );
+    }
+    // 🔴 어디를 고쳐야 하는지까지 적는다 — 공유폴더가 아니라 **접수 정보**다.
+    assert.ok(
+      PURCHASE_ORDER_FOLDER_SECTION_NO_EQUIPMENT_KEY_TEXT.includes("접수 정보"),
+      PURCHASE_ORDER_FOLDER_SECTION_NO_EQUIPMENT_KEY_TEXT
+    );
+    // 고장이 아니다 — 경고색(amber)이 아니라 흐린 글씨이고, 「읽지 못했습니다」와 섞이지 않는다.
+    assert.equal(html.includes("amber"), false, "차분해야 할 줄이 경고로 섰다");
+    assert.equal(html.includes(PURCHASE_ORDER_FOLDER_SECTION_FAILED_TEXT), false, html);
+    // 🔴 공유폴더를 한 번도 안 봤으므로 경로도 줄도 단추도 없다.
+    assert.equal(html.includes(RELATIVE_PATH), false, html);
+    assert.equal(html.includes("<li"), false, html);
+    assert.equal(html.includes("data-contact-folder-place-open"), false, html);
+    assert.equal(purchaseOrderFolderOpenPath({ kind: "no-equipment-key" }), "");
   });
 
   test("🔴 `multiple` 이면 **목록도 경로도 내지 않는다**", () => {
@@ -221,6 +272,10 @@ describe("통로", () => {
     assert.deepEqual(readPurchaseOrderFolderEntriesAnswer({ status: "no-order-date" }), { kind: "no-order-date" });
     assert.deepEqual(readPurchaseOrderFolderEntriesAnswer({ status: "multiple" }), { kind: "multiple" });
     assert.deepEqual(readPurchaseOrderFolderEntriesAnswer({ status: "not-found" }), { kind: "not-found" });
+    // 🔴 통로가 가른 둘을 화면도 갈라 받는다 — 한쪽으로 접어 읽으면 문장이 다시 하나가 된다.
+    assert.deepEqual(readPurchaseOrderFolderEntriesAnswer({ status: "no-equipment-key" }), {
+      kind: "no-equipment-key",
+    });
     assert.deepEqual(readPurchaseOrderFolderEntriesAnswer({ status: "disabled" }), { kind: "disabled" });
 
     const answer = readPurchaseOrderFolderEntriesAnswer({
