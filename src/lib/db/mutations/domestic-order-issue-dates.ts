@@ -134,7 +134,11 @@ export async function saveRepairCaseDomesticOrderIssueDates(params: {
     if (!actor || actor.approvalStatus !== "APPROVED") {
       return { ok: false, code: "FORBIDDEN", message: ACTOR_UNKNOWN_MESSAGE };
     }
-    if (!(await hasPermission(actor, "domesticOrders", "WRITE"))) {
+    // 🔴 2026-11-12(둘째)에 `domesticOrders` → `domesticOrders.edit` 로 내려왔다
+    //    (그 메뉴가 잎 넷으로 쪼개졌다). 행 추가·수정과 **같은 열쇠**라는 사실이
+    //    달라지지 않도록 저쪽과 같은 글자를 쓴다 — 머리말의 「관문은 행 추가·수정과
+    //    같다」가 그 말이다. 통과하는 역할은 쪼개기 전과 다르지 않다.
+    if (!(await hasPermission(actor, "domesticOrders.edit", "WRITE"))) {
       return { ok: false, code: "FORBIDDEN", message: FORBIDDEN_MESSAGE };
     }
 

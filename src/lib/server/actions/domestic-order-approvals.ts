@@ -140,7 +140,11 @@ async function resolveActor(requireDomesticOrdersWrite: boolean): Promise<Resolv
   if (!actingUser) {
     return { ok: false, code: "UNAUTHORIZED", message: "로그인이 필요합니다." };
   }
-  if (requireDomesticOrdersWrite && !(await hasPermission(actingUser, "domesticOrders", "WRITE"))) {
+  // 🔴 2026-11-12(둘째)에 `domesticOrders` → `domesticOrders.edit` 로 내려왔다.
+  //    **「승인 탭을 보는 열쇠」가 아니다** — 올리는 일은 그 줄을 고치는 일과 같은
+  //    문턱이고(mutations/domestic-order-approvals.ts 의 같은 줄), 탭을 보는 열쇠는
+  //    읽기 전용인 `domesticOrders.approval` 이다. 통과하는 역할은 그대로다.
+  if (requireDomesticOrdersWrite && !(await hasPermission(actingUser, "domesticOrders.edit", "WRITE"))) {
     return { ok: false, code: "FORBIDDEN", message: "이 작업을 수행할 권한이 없습니다." };
   }
   return { ok: true, userId: actingUser.id };

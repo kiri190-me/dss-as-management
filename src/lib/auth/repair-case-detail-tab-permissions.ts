@@ -1,4 +1,13 @@
-import { meetsPermissionLevel, type PermissionLevel } from "./permission-areas";
+import type { PermissionLevel } from "./permission-areas";
+import {
+  detailTabKeysOf,
+  isDetailTabOpen,
+  requiredKeysOfDetailTab,
+  type DetailTabPermission,
+  type DetailTabPermissionTable,
+  type DetailTabRequirement,
+  type DetailTabVisibility,
+} from "./detail-tab-permissions";
 
 /**
  * ============================================================================
@@ -68,12 +77,13 @@ export type RepairCaseDetailTabKey =
   | "purchaseOrders"
   | "approval";
 
-export type RepairCaseDetailTabRequirement = {
-  /** 저장되는 잎(또는 하위 기능이 없는 메뉴)의 키. role_permissions.area_key 의 그 글자다. */
-  key: string;
-  /** 탭에 들어가는 데 필요한 수준. 지금은 전부 읽기다. */
-  level: PermissionLevel;
-};
+/**
+ * 🔴 2026-11-12(같은 날 둘째): 요구사항의 **모양**(키 + 수준, 그리고 그것을 OR 로
+ * 읽는 방법)은 이제 `detail-tab-permissions.ts` 에 산다. 기타건 상세가 같은 일을
+ * 하게 되면서 같은 글이 두 벌이 됐기 때문이다. 🔵 **여기서 다시 내보내는 것**은
+ * 이 이름으로 들여오던 자리를 그대로 두기 위해서다 — 뜻은 한 글자도 안 바뀌었다.
+ */
+export type RepairCaseDetailTabRequirement = DetailTabRequirement;
 
 /**
  * ── 🔴 왜 열쇠 **하나**가 아니라 목록인가 (2026-11-12, 같은 날 두 번째) ────────
@@ -94,16 +104,14 @@ export type RepairCaseDetailTabRequirement = {
  *
  * 🔴 **빈 목록은 만들 수 없다** — 타입이 「적어도 하나」를 요구한다. 빈 목록이면
  * `some()` 이 거짓이 되어 **아무에게도 안 열리는 탭**이 조용히 생긴다.
+ *
+ * 🔴 2026-11-12(둘째)에 이 타입의 **몸이 `detail-tab-permissions.ts` 로 옮겨 갔다** —
+ * 기타건 상세가 같은 모양을 쓰게 됐기 때문이다. 위 문단은 **그 결정의 까닭**이라
+ * 여기 남긴다(그 탭이 왜 열쇠 둘인지는 이 화면의 사정이다).
  */
-export type RepairCaseDetailTabPermission = {
-  /** 🔴 **하나라도** 만족하면 탭이 열린다(OR). 전부 못 미칠 때만 숨는다. */
-  anyOf: readonly [RepairCaseDetailTabRequirement, ...RepairCaseDetailTabRequirement[]];
-};
+export type RepairCaseDetailTabPermission = DetailTabPermission;
 
-export const REPAIR_CASE_DETAIL_TAB_PERMISSIONS: Record<
-  RepairCaseDetailTabKey,
-  RepairCaseDetailTabPermission
-> = {
+export const REPAIR_CASE_DETAIL_TAB_PERMISSIONS: DetailTabPermissionTable<RepairCaseDetailTabKey> = {
   /**
    * 🔴 **이 탭만 열쇠가 둘이다.** 한 화면에 기능이 셋 살기 때문이다(위 타입 주석).
    * 작업 기록을 못 쓰는 사람도 절차는 밟을 수 있고, 그 반대도 있다 — 그래서 **둘 다**
@@ -154,19 +162,34 @@ export const REPAIR_CASE_DETAIL_TAB_PERMISSIONS: Record<
   report: { anyOf: [{ key: "repairCases.serviceReports", level: "READ" }] },
   /** 🔴 2026-11-12 이전부터 이 열쇠였다 — 바꾸지 않았다(위 머리말의 '새 열쇠를 만들지 않은 탭 둘'). */
   quotes: { anyOf: [{ key: "quotes", level: "READ" }] },
-  /** 🔴 견적서와 **다른 열쇠**다 — 이 탭이 보여 주는 것은 고객사가 우리에게 낸 발주서다. */
-  purchaseOrders: { anyOf: [{ key: "domesticOrders", level: "READ" }] },
+  /**
+   * 🔴 견적서와 **다른 열쇠**다 — 이 탭이 보여 주는 것은 고객사가 우리에게 낸 발주서다.
+   *
+   * 🔴 2026-11-12(둘째)에 `domesticOrders`(메뉴 키) → `domesticOrders.view`(조회 잎)로
+   * **내려왔다.** 그날 내자 정리 메뉴가 잎 넷으로 쪼개지면서 메뉴 키가 더 이상 저장되는
+   * 잎이 아니게 됐기 때문이다(permission-features.ts 의 그 문단). **가리키는 사람
+   * 집합은 그대로다** — 쪼개기 전 메뉴 READ 를 넘던 네 역할이 그대로 `view` READ 를
+   * 넘고, 자재 담당자는 전과 같이 못 넘는다. 🔵 오히려 전보다 정확하다: 「내자 줄을
+   * **볼** 수 있는가」를 묻는 자리인데, 메뉴 키는 잎 넷의 최대값이라 조회를 닫고
+   * 수정만 열어 둔 역할에게도 참이 된다.
+   */
+  purchaseOrders: { anyOf: [{ key: "domesticOrders.view", level: "READ" }] },
   approval: { anyOf: [{ key: "repairCases.approval", level: "READ" }] },
 };
 
 /**
  * 이 탭이 열리는가 — **순수** 판정. 잎마다 이미 구한 수준을 받아 답한다.
  *
- * 🔴 **판정이 사는 자리는 여기 하나다.** 탭 줄을 그리는 레이아웃도, 주소를 직접 친
+ * 🔴 **판정이 사는 자리는 하나다.** 탭 줄을 그리는 레이아웃도, 주소를 직접 친
  * 사람을 막는 각 page.tsx 도 결국 이 함수에 닿는다
  * (`auth/repair-case-detail-tab-access.ts` 가 수준을 읽어 와 넘긴다). 한쪽이 제
  * 조건을 따로 적는 날 증상은 「탭은 보이는데 들어가면 막힌다」 또는 그 반대이고,
  * 둘 다 아무 오류를 내지 않는다.
+ *
+ * 🔴 2026-11-12(둘째)부터 **묶는 방식 자체는 `detail-tab-permissions.ts` 가 갖는다** —
+ * 기타건 상세가 같은 OR 을 쓰게 되면서 두 벌이 됐기 때문이다. 이 함수가 남아 있는
+ * 것은 「이 화면의 표를 쥐고 묻는다」를 한 이름으로 두기 위해서다: 부르는 쪽이 표를
+ * 손에 들고 다니면 **표를 빠뜨리거나 남의 표를 넘길 자리**가 생긴다.
  *
  * 🔵 순수 함수라 **값으로 시험할 수 있다** — 「작업 기록만 닫으면 탭이 그대로 보인다」
  * 같은 OR 동작을 DB 없이 그대로 재는 자리가 이것이다.
@@ -175,23 +198,19 @@ export function isRepairCaseDetailTabOpen(
   tab: RepairCaseDetailTabKey,
   levelOf: (key: string) => PermissionLevel
 ): boolean {
-  return REPAIR_CASE_DETAIL_TAB_PERMISSIONS[tab].anyOf.some((requirement) =>
-    meetsPermissionLevel(levelOf(requirement.key), requirement.level)
-  );
+  return isDetailTabOpen(REPAIR_CASE_DETAIL_TAB_PERMISSIONS, tab, levelOf);
 }
 
 /** 이 탭이 보는 잎들. 수준을 미리 읽어 올 때 쓴다. */
 export function requiredKeysOfRepairCaseDetailTab(tab: RepairCaseDetailTabKey): readonly string[] {
-  return REPAIR_CASE_DETAIL_TAB_PERMISSIONS[tab].anyOf.map((requirement) => requirement.key);
+  return requiredKeysOfDetailTab(REPAIR_CASE_DETAIL_TAB_PERMISSIONS, tab);
 }
 
 /** 표에 적힌 차례 그대로. 탭 줄의 차례가 아니라 **훑는 차례**다(탭 차례는 화면이 정한다). */
-export const REPAIR_CASE_DETAIL_TAB_KEYS = Object.keys(
-  REPAIR_CASE_DETAIL_TAB_PERMISSIONS
-) as RepairCaseDetailTabKey[];
+export const REPAIR_CASE_DETAIL_TAB_KEYS = detailTabKeysOf(REPAIR_CASE_DETAIL_TAB_PERMISSIONS);
 
 /**
  * 어느 탭을 그릴까. 🔴 [기본 정보]가 이 꾸러미에 없는 것이 결정 그 자체다 —
  * 그 탭은 언제나 그려진다.
  */
-export type RepairCaseDetailTabVisibility = Record<RepairCaseDetailTabKey, boolean>;
+export type RepairCaseDetailTabVisibility = DetailTabVisibility<RepairCaseDetailTabKey>;

@@ -5,7 +5,7 @@ import DomesticOrderDetailHeader from "@/components/domestic-orders/detail/Domes
 import DomesticOrderDetailTabs from "@/components/domestic-orders/detail/DomesticOrderDetailTabs";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
-import { hasPermission } from "@/lib/auth/permission-resolver";
+import { resolveDomesticOrderDetailTabVisibility } from "@/lib/auth/domestic-order-detail-tab-access";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getDomesticOrderApprovalUnits } from "@/lib/db/queries/domestic-order-approvals";
@@ -36,6 +36,14 @@ import { resolveMiscCaseStatus } from "@/lib/domain/misc-case-status";
  * READ 하나이고, 새 영역을 만들지 않는다. **다만 여기서 막는 것은 관문의 전부가
  * 아니다**: 레이아웃이 막아도 각 탭 페이지가 **스스로 다시** 확인한다. 감추는 것은
  * 막은 것이 아니고, 이 표에는 거래 금액과 입금 여부가 들어 있다.
+ *
+ * 🔴 **그 한 줄의 뜻이 2026-11-12(둘째)에 또렷해졌다.** 그날 `domesticOrders` 가
+ * 잎 넷(조회 · 수정 · 삭제·복원 · 승인)으로 쪼개졌고, 메뉴 수준은 **잎들의
+ * 최대값**이다(permission-features.ts 의 areaLevelFromLeaves). 그러니 아래 가드가
+ * 묻는 것은 정확히 「**넷 중 하나라도 열려 있는가**」이고, 그것이 이 화면의 입장권이다.
+ * 🔵 탭마다의 열쇠는 그보다 **좁다** — 그래서 들어온 사람 사이를 가를 수 있다.
+ * 🔵 역할별 기본값으로는 넷이 함께 열리고 함께 닫히므로, 설정을 아무도 건드리지
+ * 않은 상태에서 이 줄의 동작은 쪼개기 전과 한 글자도 다르지 않다.
  * ============================================================================
  */
 
@@ -72,23 +80,34 @@ export default async function DomesticOrderDetailLayout({
   if (!row) notFound();
 
   /**
-   * 「견적서」 탭을 그릴지 정한다. 견적서에는 우리가 고객사에 부른 값이 통째로
-   * 있어서, 견적서를 못 보는 사람이 이 탭으로 금액을 들여다볼 수 있으면 그것은
-   * 인가 구멍이다.
+   * 어느 탭을 그릴지 정한다(2026-11-12 둘째 — 그 전에는 「견적서」 하나뿐이었다).
    *
-   * 판정 방법은 수리 건 상세가 같은 탭에 쓰는 것과 **똑같다** — 살아 있는 계정을
-   * 다시 읽고(강등된 계정이 옛 토큰으로 다니지 못하게), `quotes` 영역의 READ 를
-   * 묻는다. 새 영역 열쇠를 만들지 않는다.
+   * 판정 방법은 각 탭의 화면이 쓰는 것과 **똑같다** — 살아 있는 계정을 다시 읽고
+   * (강등된 계정이 옛 토큰으로 금액을 들여다보지 못하게), 탭마다 정해진 열쇠의
+   * READ 를 묻는다. 🔴 **열쇠를 여기 적지 않는다** — 어느 탭이 어느 잎을 보는지는
+   * `auth/domestic-order-detail-tab-permissions.ts` 한 곳에만 있다. 탭 줄과 각
+   * 페이지가 서로 다른 열쇠를 보게 되는 날 증상은 「탭은 없는데 주소로는
+   * 들어와진다」이고, 그것은 아무 오류도 내지 않는다.
    *
-   * 🔴 이것은 **탭을 그릴지 말지**일 뿐 관문이 아니다 — `[id]/quotes/page.tsx` 가
-   * 같은 판정을 한 번 더 한다.
+   * 🔴 이것은 **탭을 그릴지 말지**일 뿐 관문이 아니다. 주소를 직접 치면 그대로
+   * 들어와지므로 탭마다 제 page.tsx 가 같은 창구로 한 번 더 판정한다.
+   *
+   * 🔵 **위 입장 가드보다 좁은 열쇠들이다.** 입장은 메뉴 수준(= 내자 잎 넷의
+   * 최대값)이고 탭은 그중 하나씩을 본다 — 그래서 조회만 닫힌 사람은 들어오기는
+   * 하고 [발주서]만 못 본다. 2026-11-06 에 이 가름이 서지 않았던 까닭은 그때
+   * `domesticOrders` 에 잎이 없어 **입장권과 탭 열쇠가 같은 글자**였기 때문이다.
+   *
+   * 🔴 [기본정보] 탭은 이 꾸러미에 없다 — 가리지 않기로 한 탭이고, 셋을 전부
+   * 닫아도 그 하나는 남는다(그래서 「탭이 하나도 없는 사람」이 생기지 않는다).
    *
    * 세션이 없으면 위 가드가 이미 로그인으로 보냈다 — 여기서는 못 보는 것으로만
    * 취급한다(수리 건 상세 레이아웃과 같은 방어적 처리).
+   *
+   * 🔵 열쇠가 셋이어도 **질의는 요청당 한 번**이다(permission-resolver 의 cache()).
    */
   const session = await readSession();
   const actingUser = session ? await resolveActingUserForSession(session) : null;
-  const canViewQuotes = actingUser !== null && (await hasPermission(actingUser, "quotes", "READ"));
+  const tabVisibility = await resolveDomesticOrderDetailTabVisibility(actingUser);
 
   /**
    * 🔴 머리 카드의 **상태 배지**(2026-11-06 사용자 요구 — 「출하 승인 대기」/「출하
@@ -129,7 +148,7 @@ export default async function DomesticOrderDetailLayout({
         status={status}
         finalShipmentApproved={finalShipmentApproved}
       />
-      <DomesticOrderDetailTabs id={id} canViewQuotes={canViewQuotes} />
+      <DomesticOrderDetailTabs id={id} visibility={tabVisibility} />
       {children}
     </div>
   );

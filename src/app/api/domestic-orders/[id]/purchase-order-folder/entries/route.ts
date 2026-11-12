@@ -153,7 +153,11 @@ export async function GET(
   }
 
   // ── 3) 권한 — 조회보다 앞이다 ────────────────────────────────────────
-  if (!(await hasPermission(actingUser, "domesticOrders", "READ"))) {
+  // 🔴 2026-11-12(둘째)에 `domesticOrders` → `domesticOrders.view` 로 내려왔다(그 메뉴가
+  //    잎 넷으로 쪼개졌다). 이 통로가 내주는 것을 그리는 탭(기타건 상세의 [발주서])과
+  //    **같은 열쇠**여야 한다 — 그 탭은 같은 날부터 이 잎으로 가려진다. 갈리면 탭은
+  //    열리는데 폴더만 안 열린다. 통과하는 역할은 쪼개기 전과 다르지 않다.
+  if (!(await hasPermission(actingUser, "domesticOrders.view", "READ"))) {
     return fail(403, "FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }
 

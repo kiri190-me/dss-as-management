@@ -111,11 +111,18 @@ describe("🔴 내자 자료를 볼 수 없는 사람에게는 구역이 안 그
 // ── ①-2 🔴 쓰기는 읽기와 다른 축이다 ────────────────────────────────────
 
 describe("🔴 볼 수 있다고 고칠 수 있는 것은 아니다", () => {
-  test("고치기는 domesticOrders **WRITE** 를 따로 묻는다 — 내자 정리 저장과 같은 관문", () => {
+  test("고치기는 `domesticOrders.edit` **WRITE** 를 따로 묻는다 — 내자 정리 저장과 같은 관문", () => {
+    // 🔴 2026-11-12(둘째): 메뉴 키 → 수정 잎. 그날 내자 메뉴가 잎 넷으로 쪼개졌고 **쓰기
+    //    칸이 그대로 이 잎**이 됐다 — 통과하는 역할은 한 명도 달라지지 않는다. 내자 정리의
+    //    행 추가·수정 액션과 **같은 글자**여야 한다는 사실이 이 시험의 핵심이고, 그건
+    //    그대로다(actions/domestic-orders.ts 가 같은 날 같은 잎으로 내려갔다).
     assert.match(
       pageFlat,
-      /const canWriteDomesticOrders = canReadDomesticOrders && actingUser !== null && \(await hasPermission\(actingUser, "domesticOrders", "WRITE"\)\);/
+      /const canWriteDomesticOrders = canReadDomesticOrders && actingUser !== null && \(await hasPermission\(actingUser, "domesticOrders\.edit", "WRITE"\)\);/
     );
+    // 🔵 **보는 쪽은 영역 키 그대로**다 — 그 줄이 묻는 것은 「내자 메뉴에 들어갈 수 있는가」
+    //    이고(목록 화면의 가드와 짝), 쪼갠 뒤에도 메뉴 수준 하나로 그대로 표현된다.
+    assert.ok(pageFlat.includes('await hasAreaAccess("domesticOrders", actingUser)'), pageFlat.slice(0, 200));
   });
 
   test("볼 수 없으면 고칠 수도 없다 — 읽기 판정을 먼저 건다", () => {

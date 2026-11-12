@@ -121,9 +121,15 @@ async function resolveAuthorizedActingUser() {
   }
   // 관문은 하나다 — 관리자가 설정한 수준(2026-08-31 전환). 예전에는
   // canEditDomesticOrders(역할)와 AND 였고, 그래서 넓혀 줘도 열리지 않았다.
-  // 기본값은 그대로다 — permission-baseline.ts 의 domesticOrders 기본값이
-  // 바로 그 역할 함수라, 설정을 건드리지 않으면 같은 답을 낸다.
-  if (!(await hasPermission(actingUser, "domesticOrders", "WRITE"))) {
+  // 기본값은 그대로다 — permission-baseline.ts 의 기본값이 바로 그 역할 함수라,
+  // 설정을 건드리지 않으면 같은 답을 낸다.
+  //
+  // 🔴 2026-11-12(둘째)에 `domesticOrders` → `domesticOrders.edit` 로 내려왔다.
+  // 그날 그 메뉴가 잎 넷으로 쪼개졌고(permission-features.ts), 쓰기 칸이 그대로
+  // 이 잎이 됐다 — **통과하는 역할이 한 명도 달라지지 않는다.** 메뉴 키로 두면 안
+  // 되는 까닭: 쪼갠 뒤 메뉴 수준은 **잎들의 최대값**이라, 수정은 닫고 삭제만 열어
+  // 둔 역할에게도 참이 된다(MANAGE ≥ WRITE).
+  if (!(await hasPermission(actingUser, "domesticOrders.edit", "WRITE"))) {
     return { ok: false as const, code: "FORBIDDEN" as const, message: "이 작업을 수행할 권한이 없습니다." };
   }
   return { ok: true as const, actingUser };
@@ -501,7 +507,9 @@ async function resolveManagingActingUser() {
   if (!actingUser) {
     return { ok: false as const, code: "UNAUTHORIZED" as const, message: "로그인이 필요합니다." };
   }
-  if (!(await hasPermission(actingUser, "domesticOrders", "MANAGE"))) {
+  // 🔴 2026-11-12(둘째)에 `domesticOrders` → `domesticOrders.lifecycle` 로 내려왔다.
+  //    관리 칸이 그대로 이 잎이 됐다 — 통과하는 역할(관리자 이상)은 그대로다.
+  if (!(await hasPermission(actingUser, "domesticOrders.lifecycle", "MANAGE"))) {
     return { ok: false as const, code: "FORBIDDEN" as const, message: "내자 정리 항목을 지울 권한이 없습니다." };
   }
   return { ok: true as const, actingUser };

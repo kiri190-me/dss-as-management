@@ -63,6 +63,14 @@ src/lib/auth/permission-features.test.ts
 # 🔴 [작업내용]은 열쇠가 **둘이고 OR** 다 — 작업 기록만 닫아도 탭은 남고(절차 수행이 길을
 # 잃지 않게), 둘 다 닫아야 숨는다. 그 판정이 순수 함수라 여기서 값으로 잰다.
 src/lib/auth/repair-case-detail-tab-permissions.test.ts
+# 🔴 같은 요구의 나머지 — 기타건 상세의 탭마다 권한, 그리고 그러려고 먼저 한 일
+# (2026-11-12, 같은 날 둘째). [발주서]·[승인]을 가리려면 **입장권보다 좁은 열쇠**가
+# 있어야 하는데 `domesticOrders` 에는 잎이 없어 메뉴 키가 곧 유일한 잎이었다 —
+# 그래서 그 메뉴를 **잎 넷**(조회·수정·삭제복원·승인)으로 쪼갰다.
+# 🔴 이 파일이 가장 세게 지키는 것: **쪼개기 전후로 다섯 역할 × 영역 수준이 그대로다.**
+# 잎 하나만 더했으면 메뉴 수준이 READ 에 묶여 내자의 쓰기·삭제가 전원에게 막혔다(실측).
+# 마이그레이션(drizzle/0127)이 저장된 행을 **동작이 안 바뀌게** 펼치는지도 여기서 본다.
+src/lib/auth/domestic-order-permission-leaves.test.ts
 src/lib/auth/developer-flag.test.ts
 src/lib/db/migration-safety.test.ts
 src/lib/client-uuid.test.ts

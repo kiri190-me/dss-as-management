@@ -143,7 +143,10 @@ export async function saveDomesticOrderSheetHeading(params: {
           message: "사용자 정보를 확인할 수 없습니다.",
         });
       }
-      if (!(await hasPermission(actor, "domesticOrders", "WRITE"))) {
+      // 🔴 2026-11-12(둘째)에 `domesticOrders` → `domesticOrders.edit` 로 내려왔다.
+      //    행 추가·수정과 **같은 관문**이라는 사실이 그대로여야 해서 저쪽과 같은
+      //    글자를 쓴다(머리말). 통과하는 역할은 쪼개기 전과 다르지 않다.
+      if (!(await hasPermission(actor, "domesticOrders.edit", "WRITE"))) {
         throw new SaveRejected({
           ok: false,
           code: "FORBIDDEN",

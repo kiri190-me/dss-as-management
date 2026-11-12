@@ -60,13 +60,16 @@ export default async function DomesticOrdersPage() {
   // 예전에는 canEditDomesticOrders(역할)를 AND 로 겹쳐 넓혀도 열리지 않았다.
   // 머리말 편집(2026-09-11)도 이 값 하나로 단추가 보인다 — 저장 액션
   // (saveDomesticOrderSheetHeadingAction)이 같은 관문을 다시 본다.
+  // 🔴 2026-11-12(둘째)에 `domesticOrders` → `domesticOrders.edit` 로 내려왔다(그 메뉴가
+  //    잎 넷으로 쪼개졌다). 서버 액션과 **같은 열쇠**여야 화면의 단추와 실제로 되는 일이
+  //    어긋나지 않는다 — 통과하는 역할은 쪼개기 전과 다르지 않다.
   const canEdit =
-    actingUser !== null && (await hasPermission(actingUser, "domesticOrders", "WRITE"));
+    actingUser !== null && (await hasPermission(actingUser, "domesticOrders.edit", "WRITE"));
   // 휴지통으로 보내기·복원·완전 삭제는 한 칸 좁다 — 관리(2026-09-11). 서버
   // 액션(actions/domestic-orders.ts 의 resolveManagingActingUser)과 **같은 판정**
   // 이라 화면에 보이는 단추와 실제로 되는 일이 어긋나지 않는다.
   const canDelete =
-    actingUser !== null && (await hasPermission(actingUser, "domesticOrders", "MANAGE"));
+    actingUser !== null && (await hasPermission(actingUser, "domesticOrders.lifecycle", "MANAGE"));
 
   // 고칠 수 없는 사람에게는 폼의 드롭다운 목록을 읽지 않는다 — 쓰지 않을 값을
   // 클라이언트로 내려보내지 않는다(고객사 화면이 휴지통을 다루는 방식과 같다).

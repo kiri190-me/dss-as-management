@@ -376,7 +376,16 @@ describe("자리와 규율", () => {
     assert.equal(tabPage.includes("@/lib/storage/"), false, "서버 컴포넌트가 공유폴더를 읽는다");
     assert.equal(tabPage.includes("node:fs"), false);
     // 🔴 인가를 화면에 맡기지 않는다 — 페이지가 스스로 다시 본다.
-    assert.ok(tabPage.includes('hasPermission(actingUser, "domesticOrders", "READ")'));
+    // 🔴 2026-11-12(둘째): 메뉴 키 → **조회 잎**(`domesticOrders.view`). 그날 내자 메뉴가
+    //    잎 넷으로 쪼개졌고, 탭 줄이 이 탭을 그릴지 정할 때 보는 열쇠도 같은 잎이다
+    //    (auth/repair-case-detail-tab-permissions.ts 의 purchaseOrders) — **둘이 같은
+    //    글자**여야 「탭은 없는데 주소로는 들어와진다」가 안 생긴다.
+    assert.ok(tabPage.includes('hasPermission(actingUser, "domesticOrders.view", "READ")'));
+    assert.equal(
+      tabPage.includes('hasPermission(actingUser, "domesticOrders", "READ")'),
+      false,
+      "메뉴 키로 되돌아갔다 — 조회를 닫고 수정만 열어 둔 역할에게도 열린다"
+    );
     assert.equal(tabPage.includes('"quotes"'), false, "견적서 열쇠를 쓴다");
   });
 

@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
 import DomesticOrderApprovalPanel from "@/components/domestic-orders/detail/DomesticOrderApprovalPanel";
+import DomesticOrderDetailNotice from "@/components/domestic-orders/detail/DomesticOrderDetailNotice";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
+import { canOpenDomesticOrderDetailTab } from "@/lib/auth/domestic-order-detail-tab-access";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingApproverUserIds } from "@/lib/db/queries/approval-route-delegations";
@@ -35,12 +37,20 @@ import {
  * 절차를 따로 만들자」). 흐름·위임·판정은 기존 승인 절차 그대로이고, 갈라진 것은
  * [사용자 관리] › [승인 절차] 탭에서 고르는 **용도 하나**뿐이다.
  *
- * ── 🔴 열쇠가 둘이지만 영역은 하나다 ────────────────────────────────────
- *  · `domesticOrders` READ — 이 화면에 들어올 수 있는가. 레이아웃이 같은 열쇠로
- *    막지만 여기서 한 번 더 건다(형제 탭들과 같은 모양 — 감추는 것은 막은 것이
- *    아니고, 주소를 직접 치면 그대로 들어와진다).
- *  · `domesticOrders` WRITE — **승인을 올릴 수 있는가.** 내자 줄을 고치는 그 열쇠
- *    그대로다. 새 영역을 만들지 않는다.
+ * ── 🔴 열쇠가 셋이지만 영역은 하나다 (2026-11-12 둘째에 둘에서 셋이 됐다) ──
+ *  · `domesticOrders` 영역 READ — 이 화면에 들어올 수 있는가. 쪼갠 뒤로 그 뜻은
+ *    「내자 잎 넷 중 하나라도 열려 있는가」다. 레이아웃이 같은 줄을 걸지만 여기서
+ *    한 번 더 건다(형제 탭들과 같은 모양 — 감추는 것은 막은 것이 아니고, 주소를
+ *    직접 치면 그대로 들어와진다).
+ *  · `domesticOrders.approval` READ — **이 탭을 볼 수 있는가**(새로 생겼다). 위
+ *    입장권보다 **좁다** — 그래서 들어온 사람 사이를 가른다. 2026-11-06 에 이 탭을
+ *    가리지 못한 까닭은 그때 쓸 수 있는 열쇠가 입장권과 같은 글자뿐이었기 때문이다.
+ *    🔴 **결재권이 아니다**(아래 셋째 줄과 다른 일이다).
+ *  · `domesticOrders.edit` WRITE — **승인을 올릴 수 있는가.** 내자 줄을 고치는 그
+ *    열쇠 그대로다(쪼개기 전에는 `domesticOrders` WRITE 였고, 사다리의 그 칸이
+ *    잎으로 내려앉았을 뿐이라 **통과하는 역할이 한 명도 달라지지 않는다**).
+ *    🔴 탭을 보는 열쇠와 **일부러 다르다** — 「승인 탭은 보는데 올리지는 못하는」
+ *    지금 상태를 한 칸으로는 표현할 수 없다.
  * 🔴 **승인·반려에는 영역 열쇠를 걸지 않는다** — 결재선에 올라간 사람이 곧 그 단계의
  * 결재자라는 것이 이 기능의 설계이고, 서버 액션도 그렇게 판정한다
  * (actions/domestic-order-approvals.ts 머리말). 🔵 다만 이 **화면**은 위의 READ 로
@@ -82,6 +92,25 @@ export default async function DomesticOrderApprovalPage({
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
+  /**
+   * 🔴 **주소를 직접 쳐도 막힌다**(2026-11-12 둘째). 탭 줄이 이 탭을 감추는 것은 관문이
+   * 아니다 — 관문은 여기다. 레이아웃과 **같은 창구·같은 열쇠**를 부른다
+   * (`auth/domestic-order-detail-tab-access.ts`).
+   *
+   * 🔴 이것은 **결재권이 아니다.** 누가 승인·반려를 누를 수 있는가는 아래에서 읽는
+   * 결재선·단계 위임이 정하고, 이 관문은 「이 화면에 들어올 수 있는가」만 답한다.
+   * 그래서 기본값이 **지금 이 탭을 보던 사람 전부**다 — 결재를 못 누르는 사람도 지금
+   * 이 탭을 보고 있고, 그 사람들을 좁히는 것은 이 조각의 일이 아니다.
+   */
+  if (!(await canOpenDomesticOrderDetailTab(actingUser, "approval"))) {
+    return (
+      <DomesticOrderDetailNotice
+        title="승인"
+        description="「승인」 탭을 볼 권한이 없습니다. 필요하면 관리자에게 요청해 주세요."
+      />
+    );
+  }
+
   // 없는 줄 · 휴지통에 든 줄 · uuid 가 아닌 주소는 전부 여기서 404 다. 레이아웃이 이미
   // 같은 판정을 하지만 cache() 덕에 질의가 한 번 더 돌지 않고, 이 페이지만 따로
   // 보더라도 "어떤 줄이 있어야 한다"는 전제가 코드에 적혀 있게 된다.
@@ -103,7 +132,12 @@ export default async function DomesticOrderApprovalPage({
       getDomesticOrderApprovalHistory(row.id),
       getCurrentShipmentApprovalRoute(DOMESTIC_ORDER_APPROVAL_ROUTE_SCOPE),
       resolveActingApproverUserIds(actingUser.id, new Date()),
-      hasPermission(actingUser, "domesticOrders", "WRITE"),
+      // 🔴 **승인을 올릴 수 있는가** — 내자 줄을 고치는 그 열쇠다. 2026-11-12(둘째)에
+      //    `domesticOrders` WRITE 에서 `domesticOrders.edit` WRITE 로 내려왔고, 통과하는
+      //    역할은 한 명도 달라지지 않았다(사다리의 쓰기 칸이 그대로 잎이 됐다).
+      //    🔴 서버 액션(actions/domestic-order-approvals.ts)과 **같은 열쇠**여야 한다 —
+      //    갈리는 날 단추는 보이는데 눌리지 않는다.
+      hasPermission(actingUser, "domesticOrders.edit", "WRITE"),
     ]);
 
   // 🔴 이력의 줄들이 가리키는 **판들**을 한 번에 읽는다. 「n/m단계」의 m 은 그 줄에

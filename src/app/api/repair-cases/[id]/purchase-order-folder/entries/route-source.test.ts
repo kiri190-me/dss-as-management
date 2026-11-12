@@ -14,8 +14,10 @@ import { describe, test } from "node:test";
  *
  * 여기서 못 박는 것은 여덟이다:
  *  · 🔴 문지기 **차례**가 이웃 통로(지난 견적서 폴더)와 같다 — 권한이 **조회보다 앞**이다
- *  · 🔴 권한이 `domesticOrders` READ 다 — 🔴 **견적서 열쇠가 아니다**(나가는 것은 발주서
- *    자료이고 폴더 이름에 발주 금액이 들어 있다). 새 영역을 만들지도 넓히지도 않았다
+ *  · 🔴 권한이 `domesticOrders.view` READ 다 — 🔴 **견적서 열쇠가 아니다**(나가는 것은 발주서
+ *    자료이고 폴더 이름에 발주 금액이 들어 있다). 새 영역을 만들지도 넓히지도 않았다.
+ *    🔴 2026-11-12(둘째)에 메뉴 키 `domesticOrders` 에서 **조회 잎**으로 내려왔다 — 그 메뉴가
+ *    잎 넷으로 쪼개졌고, 통과하는 역할은 한 명도 달라지지 않았다
  *  · 🔴 **발주발행일이 비면 저장소 모듈을 부르지 않는다** — 공유폴더를 아예 보지 않는다
  *  · 🔴 **수리가 끝난 건에서도 공유폴더를 본다**(2026-11-11 사용자 결정) — 관문이 부르는
  *    조회가 **완료된 줄을 빼지 않는** 쪽이다. 전에 쓰던 listQuoteInfoForRepairCases 로
@@ -94,21 +96,32 @@ describe("발주서 폴더 통로 — 소스로 지킨다", () => {
   });
 
   test("🔴 문지기가 이웃 통로와 **권한 영역 한 낱말만 다르다**", () => {
-    // 🔴 열쇠는 `domesticOrders` 다 — 나가는 것은 발주서 자료(폴더 이름에 발주 금액이 있다).
-    assert.ok(code.includes('hasPermission(actingUser, "domesticOrders", "READ")'));
+    // 🔴 열쇠는 `domesticOrders.view` 다 — 나가는 것은 발주서 자료(폴더 이름에 발주 금액이 있다).
+    //    🔴 2026-11-12(둘째)에 메뉴 키에서 **조회 잎**으로 내려왔다. 그날 내자 메뉴가 잎
+    //    넷으로 쪼개졌고, 이 통로가 내주는 것을 그리는 탭(수리 건 상세의 [발주서])이 같은
+    //    날부터 그 잎으로 가려진다 — **둘이 같은 열쇠**여야 탭만 열리고 폴더는 안 열리는
+    //    어긋남이 안 생긴다.
+    assert.ok(code.includes('hasPermission(actingUser, "domesticOrders.view", "READ")'));
+    // 🔴 메뉴 키로 되돌아가지 않았다 — 쪼갠 뒤 메뉴 수준은 잎들의 **최대값**이라, 조회를
+    //    닫고 수정만 열어 둔 역할에게도 참이 된다(그러면 이 통로가 탭보다 넓어진다).
+    assert.equal(
+      code.includes('hasPermission(actingUser, "domesticOrders", "READ")'),
+      false,
+      "메뉴 키로 되돌아갔다 — 조회 잎보다 넓다"
+    );
     // 🔴 견적서 열쇠로 바꿔 달지 않았다.
     assert.equal(code.includes('"quotes"'), false, "권한 영역이 견적서로 바뀌었다");
     // 그 한 낱말을 맞추면 문지기가 이웃과 **글자 그대로 같다**.
-    assert.equal(gatekeeper(route), gatekeeper(sibling).replace('"quotes"', '"domesticOrders"'));
+    assert.equal(gatekeeper(route), gatekeeper(sibling).replace('"quotes"', '"domesticOrders.view"'));
   });
 
-  test("🔴 순서: 저장 모드 → 세션 → 계정 · 승인 → domesticOrders READ → 수리 건 → 루트 → 발행일 → 찾기", () => {
+  test("🔴 순서: 저장 모드 → 세션 → 계정 · 승인 → domesticOrders.view READ → 수리 건 → 루트 → 발행일 → 찾기", () => {
     const marks = [
       'getAuthSource() !== "database"',
       "await readSession()",
       "resolveActingUserForSession(session)",
       'actingUser.approvalStatus !== "APPROVED"',
-      'hasPermission(actingUser, "domesticOrders", "READ")',
+      'hasPermission(actingUser, "domesticOrders.view", "READ")',
       "await context.params",
       "getRepairCaseContactFolderNamingById(id)",
       "resolvePurchaseOrderArchiveRoot()",
@@ -124,7 +137,7 @@ describe("발주서 폴더 통로 — 소스로 지킨다", () => {
     }
     // 🔴 권한이 조회보다 **앞**이다 — 두 자리를 직접 견준다.
     assert.ok(
-      getBody.indexOf('hasPermission(actingUser, "domesticOrders", "READ")') <
+      getBody.indexOf('hasPermission(actingUser, "domesticOrders.view", "READ")') <
         getBody.indexOf("getRepairCaseContactFolderNamingById(id)"),
       "권한 검사가 조회보다 뒤에 있다"
     );
@@ -147,9 +160,29 @@ describe("발주서 폴더 통로 — 소스로 지킨다", () => {
     // 🔴 관문은 **조회가 내는 답 하나**를 본다 — 조건을 통로가 다시 짜지 않는다.
     assert.ok(getBody.includes("listRepairCaseIdsWithOrderIssuedDate([repairCase.id])"), getBody);
     assert.ok(getBody.includes("casesWithOrderIssuedDate.has(repairCase.id)"), getBody);
-    // 🔴 이 통로는 내자 정리 표를 제 손으로 읽지 않는다 — 그 일은 조회 하나가 쥔다.
+    /**
+     * 🔴 이 통로는 내자 정리 표를 제 손으로 읽지 않는다 — 그 일은 조회 하나가 쥔다.
+     *
+     * 🔴 **권한 열쇠 글자만 먼저 가린다**(2026-11-12 둘째). 그 전에는 원본을 그대로
+     * 훑었는데, 같은 날 열쇠가 `"domesticOrders.view"` 가 되면서 금지 낱말
+     * `domesticOrders.`(= drizzle 표 객체의 칸 접근)와 **글자가 겹쳤다.** 겹친 채로
+     * 두면 둘 중 하나다: 멀쩡한 권한 한 줄 때문에 이 시험이 빨개지거나, 금지 낱말을
+     * 느슨하게 고쳐 **진짜 표 접근을 놓치거나.**
+     *
+     * 🔴 **따옴표 안을 통째로 지우지 않는다** — `"drizzle"` · `"@/lib/db/client"` 는
+     * import 경로라 그 자체가 따옴표 안에 있다. 통째로 지우면 그 둘이 **공짜로
+     * 통과**한다(이 시험이 가장 크게 막고 싶은 것이 바로 그 둘이다). 그래서 가리는
+     * 것은 **열쇠 모양의 글자 하나**뿐이다.
+     */
+    const codeWithoutPermissionKeys = code.replace(/"domesticOrders(\.[A-Za-z]+)?"/g, '"<권한열쇠>"');
+    assert.notEqual(codeWithoutPermissionKeys, code, "가릴 열쇠가 없다 — 표본이 비었다");
+    assert.ok(codeWithoutPermissionKeys.includes('"@/lib/'), "import 경로까지 지웠다 — 아래 검사가 공짜가 된다");
     for (const forbidden of ["drizzle", "db/client", "domesticOrders.", "completedAt", "isNull("]) {
-      assert.equal(code.includes(forbidden), false, `조회가 할 일이 통로로 내려왔다: ${forbidden}`);
+      assert.equal(
+        codeWithoutPermissionKeys.includes(forbidden),
+        false,
+        `조회가 할 일이 통로로 내려왔다: ${forbidden}`
+      );
     }
     // 🔴 설정(루트) 판단이 발행일보다 **앞**이다 — 꺼진 환경에서는 구역이 통째로 안 그려진다.
     assert.ok(

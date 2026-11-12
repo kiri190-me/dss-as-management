@@ -352,19 +352,61 @@ describe("⑤ 🔴 탭 안의 판정은 **그대로**다 — 관문이 그것을
 describe("⑥ 🔴 OR 을 두 벌로 적지 않는다", () => {
   const access = read("src/lib/auth/repair-case-detail-tab-access.ts");
   const table = read("src/lib/auth/repair-case-detail-tab-permissions.ts");
+  /**
+   * 🔴 2026-11-12(**같은 날 둘째**): 기타건 상세가 같은 OR 을 쓰게 되면서 **묶는 방식의
+   * 몸이 공용 모듈로 올라갔다**(auth/detail-tab-permissions.ts · detail-tab-access.ts).
+   * 그래서 아래 단언들이 「수리 건 파일 안에 그 식이 있는가」에서 **「그 식이 사는 자리가
+   * 저장소에 하나인가」**로 옮겨졌다 — 재는 것은 그대로이고, 오히려 **화면 둘을 함께**
+   * 덮는다(전에는 수리 건 쪽만 봤다).
+   */
+  const sharedTable = read("src/lib/auth/detail-tab-permissions.ts");
+  const sharedAccess = read("src/lib/auth/detail-tab-access.ts");
+  const domesticTable = read("src/lib/auth/domestic-order-detail-tab-permissions.ts");
+  const domesticAccess = read("src/lib/auth/domestic-order-detail-tab-access.ts");
 
   test("창구가 순수 판정 함수에 그대로 넘긴다", () => {
-    assert.ok(access.includes("isRepairCaseDetailTabOpen(tab,"), "창구가 공용 판정을 안 쓴다");
-    assert.ok(access.includes("requiredKeysOfRepairCaseDetailTab(tab)"), "창구가 필요한 잎을 표에서 안 받는다");
+    // 수리 건 창구는 **제 표를 쥐고** 공용 창구에 넘긴다 — 부르는 쪽(열두 페이지)이
+    // 표를 들고 다니면 언젠가 남의 화면 표가 넘어간다.
+    assert.ok(
+      access.includes("canOpenDetailTab(actor, REPAIR_CASE_DETAIL_TAB_PERMISSIONS, tab)"),
+      "창구가 제 표를 쥐고 공용 창구에 넘기지 않는다"
+    );
+    assert.ok(
+      access.includes("resolveDetailTabVisibility(actor, REPAIR_CASE_DETAIL_TAB_PERMISSIONS)"),
+      "탭 줄 판정이 같은 표를 안 쓴다"
+    );
+    // 공용 창구가 수준을 읽어다 **순수 판정**에 넘기는 그 자리.
+    assert.ok(sharedAccess.includes("isDetailTabOpen(table, tab,"), "공용 창구가 공용 판정을 안 쓴다");
+    assert.ok(sharedAccess.includes("requiredKeysOfDetailTab(table, tab)"), "공용 창구가 필요한 잎을 표에서 안 받는다");
+    // 🔵 기타건 창구도 **같은 모양**이어야 한다 — 한쪽만 공용을 쓰면 두 벌이 된 것이다.
+    assert.ok(
+      domesticAccess.includes("canOpenDetailTab(actor, DOMESTIC_ORDER_DETAIL_TAB_PERMISSIONS, tab)"),
+      "기타건 창구가 공용 창구를 안 쓴다"
+    );
   });
 
   test("🔴 창구가 제 조건을 따로 적지 않는다 — OR 도, 열쇠 글자도", () => {
-    assert.equal(access.includes("||"), false, "창구에 조건을 손으로 엮은 자리가 있다");
+    for (const [name, source] of [
+      ["수리 건 창구", access],
+      ["기타건 창구", domesticAccess],
+      ["공용 창구", sharedAccess],
+    ] as const) {
+      assert.equal(source.includes("||"), false, `${name}에 조건을 손으로 엮은 자리가 있다`);
+    }
     assert.equal(access.includes("repairCases."), false, "창구가 잎 키를 글자로 적고 있다");
+    assert.equal(domesticAccess.includes("domesticOrders."), false, "기타건 창구가 잎 키를 글자로 적고 있다");
   });
 
-  test("🔴 묶는 방식이 사는 자리는 표 하나다 — `anyOf` 를 읽는 곳이 거기뿐이다", () => {
-    assert.ok(table.includes(".anyOf.some("), "표에 OR 판정이 없다");
+  test("🔴 묶는 방식이 사는 자리는 **저장소에 하나**다 — `anyOf` 를 읽는 곳이 거기뿐이다", () => {
+    assert.ok(sharedTable.includes(".anyOf.some("), "공용 모듈에 OR 판정이 없다");
+    // 🔴 화면별 표는 짝(키 ↔ 잎)만 갖는다 — 읽는 방식을 제 손으로 다시 적으면 두 벌이 된다.
+    for (const [name, source] of [
+      ["수리 건 표", table],
+      ["기타건 표", domesticTable],
+    ] as const) {
+      assert.equal(source.includes(".anyOf.some("), false, `${name}가 묶는 방식을 따로 적고 있다`);
+      assert.ok(source.includes("anyOf: ["), `${name}에 요구사항 목록이 없다`);
+    }
     // 🔴 **주석을 먼저 걷어낸다.** 이 저장소에서 원본 글자로 재는 검사가 주석에 적힌
     //    낱말 때문에 틀린 적이 여러 번 있다 — 여기서도 execution/page.tsx 의 설명 주석이
     //    `anyOf` 를 입에 올린다(그 탭이 왜 OR 인지를 적어 둔 자리다).
@@ -374,6 +416,9 @@ describe("⑥ 🔴 OR 을 두 벌로 적지 않는다", () => {
       "src/app/(app)/repair-cases/[id]/execution/page.tsx",
       "src/app/(app)/repair-cases/[id]/layout.tsx",
       "src/components/repair-cases/detail/detail-tabs-list.ts",
+      // 🔵 기타건 쪽도 같은 규율 아래 둔다(2026-11-12 둘째).
+      "src/app/(app)/domestic-orders/[id]/layout.tsx",
+      "src/components/domestic-orders/detail/domestic-order-detail-tabs-list.ts",
     ]) {
       const code = codeOf(file);
       assert.ok(code.length > 200, `${file}: 주석을 걷었더니 코드가 남지 않았다 — 거르는 식이 깨졌다`);

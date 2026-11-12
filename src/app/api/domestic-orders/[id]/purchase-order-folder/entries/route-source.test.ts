@@ -15,7 +15,9 @@ import { describe, test } from "node:test";
  *  · 🔴 **번호를 요청에서 받지 않는다** — 받는 것은 내자 줄의 id 하나이고, 발주서번호는
  *    서버가 그 줄에서 꺼낸다. 번호를 받으면 내자 정리를 볼 수 있는 사람이 **아무 번호나
  *    넣어 남의 발주 건 폴더**(다른 고객사의 발주서 · 금액)를 들여다볼 수 있다.
- *  · 🔴 열쇠는 `domesticOrders` READ **하나**이고 **조회보다 앞**이다(견적서 열쇠를 묻지 않는다)
+ *  · 🔴 열쇠는 `domesticOrders.view` READ **하나**이고 **조회보다 앞**이다(견적서 열쇠를 묻지
+ *    않는다). 🔴 2026-11-12(둘째)에 메뉴 키에서 조회 잎으로 내려왔다 — 같은 날부터 이 통로가
+ *    내주는 것을 그리는 [발주서] 탭도 그 잎으로 가려진다
  *  · 🔴 쓸 수 있는 번호가 없으면 **디스크를 보지 않는다**(설정 판정은 그보다도 앞이다)
  *  · 🔴 **발주발행일로 문을 열지 않는다** — 수리 건 통로와 다른 한 가지라, 그 조건이 코드에
  *    **한 글자도** 없어야 한다(머리말에는 까닭이 길게 적혀 있다)
@@ -115,13 +117,17 @@ describe("기타건 발주서 공유폴더 통로 — 소스로 지킨다", () =
     );
   });
 
-  test("🔴 순서: 저장 모드 → 세션 → 계정 · 승인 → domesticOrders READ → 줄 → 루트 → 번호 → 읽기 → 규칙", () => {
+  test("🔴 순서: 저장 모드 → 세션 → 계정 · 승인 → domesticOrders.view READ → 줄 → 루트 → 번호 → 읽기 → 규칙", () => {
     const marks = [
       'getAuthSource() !== "database"',
       "await readSession()",
       "resolveActingUserForSession(session)",
       'actingUser.approvalStatus !== "APPROVED"',
-      'hasPermission(actingUser, "domesticOrders", "READ")',
+      // 🔴 2026-11-12(둘째)에 메뉴 키 → **조회 잎**으로 내려왔다. 이 통로가 내주는 것을
+      //    그리는 탭(기타건 상세의 [발주서])이 같은 날부터 그 잎으로 가려진다 — 둘이 같은
+      //    열쇠여야 「탭은 열리는데 폴더만 안 열린다」가 안 생긴다. 메뉴 키로 되돌리면
+      //    조회를 닫고 수정만 열어 둔 역할에게 이 통로가 탭보다 넓어진다.
+      'hasPermission(actingUser, "domesticOrders.view", "READ")',
       "await getDomesticOrderDetail(id)",
       "resolvePurchaseOrderArchiveRoot()",
       "resolveDomesticOrderPurchaseOrderArchiveLookup(row)",

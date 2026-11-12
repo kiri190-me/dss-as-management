@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { DOMESTIC_ORDER_DETAIL_TAB_PERMISSIONS } from "@/lib/auth/domestic-order-detail-tab-permissions";
 import {
   QUOTE_ARCHIVE_FOLDER_SECTION_EMPTY_TEXT,
   QUOTE_ARCHIVE_FOLDER_SECTION_FAILED_TEXT,
@@ -317,7 +318,14 @@ describe("🔴 탭 페이지 — 갈래 둘이 한 화면에 있다", () => {
 
   test("🔴 인가 — 레이아웃이 감춘 것은 관문이 아니다(열쇠 둘을 페이지가 다시 본다)", () => {
     assert.ok(quotesPage.includes('await requireAreaAccessForCurrentUser("domesticOrders");'), quotesPage);
-    assert.ok(quotesPage.includes('await hasPermission(actingUser, "quotes", "READ")'), quotesPage);
+    // 🔴 2026-11-12(둘째): 묻는 **열쇠는 그대로 `quotes` READ** 이고, 묻는 **길**만 탭 표를
+    //    거치게 됐다(auth/domestic-order-detail-tab-permissions.ts). 레이아웃이 탭 단추를
+    //    그릴지 정할 때도 같은 창구를 쓰므로 둘이 갈라질 자리가 없어졌다.
+    //    🔵 열쇠가 그대로라는 것은 표를 값으로 읽어 못 박는다.
+    assert.deepEqual(DOMESTIC_ORDER_DETAIL_TAB_PERMISSIONS.quotes, {
+      anyOf: [{ key: "quotes", level: "READ" }],
+    });
+    assert.ok(quotesPage.includes('await canOpenDomesticOrderDetailTab(actingUser, "quotes")'), quotesPage);
     assert.ok(quotesPage.includes("권한이 없습니다"), quotesPage);
     // 살아 있는 계정을 다시 읽는다 — 강등된 계정이 옛 토큰으로 금액을 보지 못하게.
     assert.ok(quotesPage.includes("await resolveActingUserForSession(session)"), quotesPage);

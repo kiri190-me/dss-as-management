@@ -240,7 +240,11 @@ export async function requestDomesticOrderApproval(
       const actor = await requireActor(tx, input.actorUserId);
 
       // 인가 — 내자 줄을 고칠 수 있는 사람이 올린다(파일 머리말의 「인가」).
-      if (!(await hasPermission(actor, "domesticOrders", "WRITE"))) {
+      // 🔴 2026-11-12(둘째)에 `domesticOrders` → `domesticOrders.edit` 로 내려왔다.
+      //    **「승인 탭을 보는 열쇠」(domesticOrders.approval)가 아니다** — 그쪽은 읽기
+      //    전용이고 결재권도 아니다. 올리는 일은 그 줄을 고치는 일과 같은 문턱으로
+      //    본다(위 머리말). 통과하는 역할은 쪼개기 전과 한 명도 다르지 않다.
+      if (!(await hasPermission(actor, "domesticOrders.edit", "WRITE"))) {
         fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }
 

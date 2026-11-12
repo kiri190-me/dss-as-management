@@ -98,13 +98,28 @@ describe("휴지통의 줄은 지울 수 있는 세션에만 실어 보낸다", 
     );
   });
 
-  test("🔴 화면의 canDelete 와 서버 액션의 관문이 같은 수준(MANAGE)이다", () => {
+  test("🔴 화면의 canDelete 와 서버 액션의 관문이 같은 열쇠·같은 수준(lifecycle MANAGE)이다", () => {
+    // 🔴 2026-11-12(둘째): 메뉴 키 → `domesticOrders.lifecycle`. 그날 내자 메뉴가 잎 넷으로
+    //    쪼개졌고 **관리 칸이 그대로 이 잎**이 됐다 — 통과하는 역할(관리자 이상)은 그대로다.
+    //    🔴 메뉴 키로 되돌리면 안 된다: 쪼갠 뒤 메뉴 수준은 잎들의 **최대값**이라 MANAGE 가
+    //    아닌 역할에게도 참이 될 수 있고, 그러면 휴지통이 조용히 넓어진다.
     assert.ok(
-      pageSource.includes('hasPermission(actingUser, "domesticOrders", "MANAGE")'),
-      "page.tsx 의 canDelete 가 MANAGE 판정이 아니다"
+      pageSource.includes('hasPermission(actingUser, "domesticOrders.lifecycle", "MANAGE")'),
+      "page.tsx 의 canDelete 가 lifecycle MANAGE 판정이 아니다"
     );
     const gate = flat(sliceBetween(actionSource, "async function resolveManagingActingUser()", "function validateTrashItems("));
-    assert.ok(gate.includes('hasPermission(actingUser, "domesticOrders", "MANAGE")'), "휴지통 액션의 관문이 MANAGE 가 아니다");
+    assert.ok(
+      gate.includes('hasPermission(actingUser, "domesticOrders.lifecycle", "MANAGE")'),
+      "휴지통 액션의 관문이 lifecycle MANAGE 가 아니다"
+    );
+    // 🔴 화면과 액션이 **같은 글자**여야 한다 — 갈리면 단추는 보이는데 눌리지 않는다.
+    for (const source of [pageSource, gate]) {
+      assert.equal(
+        /hasPermission\(actingUser, "domesticOrders", "MANAGE"\)/.test(source),
+        false,
+        "메뉴 키로 되돌아갔다 — 삭제가 잎들의 최대값으로 판정된다"
+      );
+    }
   });
 
   test("🔴 휴지통 액션 셋이 모두 그 관문을 먼저 지난다", () => {

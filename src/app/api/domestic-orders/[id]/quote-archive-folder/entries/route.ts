@@ -151,6 +151,12 @@ export async function GET(
   }
 
   // ── 3) 권한 **두 겹** — 조회보다 앞이다 ──────────────────────────────
+  // 🔴 이 줄만 **영역 키 그대로** 둔다(2026-11-12 둘째에 그 메뉴가 잎 넷으로 쪼개졌지만
+  //    여기는 안 옮겼다). 묻는 것이 「기타건 상세에 들어올 수 있는가」이기 때문이다 —
+  //    짝이 되는 화면(domestic-orders/[id]/quotes/page.tsx)의 첫 줄이
+  //    requireAreaAccessForCurrentUser("domesticOrders") 이고, 쪼갠 뒤 그 뜻은 「잎 넷 중
+  //    하나라도 열려 있는가」다. 여기를 `domesticOrders.view` 로 좁히면 **화면은 열리는데
+  //    폴더만 안 열리는** 짝이 생긴다. 🔵 이 탭을 가르는 열쇠는 아래 `quotes` 다.
   if (!(await hasPermission(actingUser, "domesticOrders", "READ"))) {
     return fail(403, "FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
   }

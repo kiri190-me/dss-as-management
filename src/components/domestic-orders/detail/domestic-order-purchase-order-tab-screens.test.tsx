@@ -315,7 +315,9 @@ describe("🔴 탭 페이지 — 번호가 있으면 구역, 없으면 까닭", 
     const routeCode = flat(
       stripComments(read("src/app/api/domestic-orders/[id]/purchase-order-folder/entries/route.ts"))
     );
-    assert.ok(routeCode.includes('hasPermission(actingUser, "domesticOrders", "READ")'), routeCode.slice(0, 200));
+    // 🔴 2026-11-12(둘째): 메뉴 키 → **조회 잎**(`domesticOrders.view`). 같은 날부터 이 탭도
+    //    그 잎으로 가려지므로 **화면과 통로가 같은 열쇠**다 — 이 시험의 제목이 그 말이다.
+    assert.ok(routeCode.includes('hasPermission(actingUser, "domesticOrders.view", "READ")'), routeCode.slice(0, 200));
     assert.ok(routeCode.includes("resolveDomesticOrderPurchaseOrderArchiveLookup(row)"), routeCode.slice(0, 200));
   });
 

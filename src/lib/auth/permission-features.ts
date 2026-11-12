@@ -218,7 +218,10 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
      * 어딘가가 답하고 있다: [기본 정보]는 `repairCases.view`, [작업내용]은
      * `repairCases.workRecords` **또는** `repairCases.procedureExecution`(한 탭에 기능이
      * 둘이라 OR 다), [진단 Flowchart]는 `diagnosisFlowcharts.view`, [파일 관리]는
-     * `repairCases.files`, [견적서]는 `quotes`, [발주서]는 `domesticOrders`.
+     * `repairCases.files`, [견적서]는 `quotes`, [발주서]는 `domesticOrders.view`
+     * (🔴 그날 오후까지는 `domesticOrders` 메뉴 키였다 — 그 메뉴가 잎 넷으로 쪼개지면서
+     * 조회 잎으로 내려왔다. **열쇠가 가리키는 사람 집합은 그대로다**: 쪼개기 전 메뉴
+     * READ 를 넘던 네 역할이 그대로 `view` READ 를 넘는다).
      * 짝은 auth/repair-case-detail-tab-permissions.ts 한 곳에 있다.
      *
      * 🔴 **「탭 보기」 전용 항목을 따로 만들지 않는다**(2026-11-12 사용자 결정). 이미 잎이
@@ -505,6 +508,90 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       maxMeaningfulLevel: "WRITE",
     },
   }),
+
+  /**
+   * ── 🔴 2026-11-12(같은 날 둘째): 이 메뉴가 **잎 넷으로 쪼개졌다** ──────────
+   * 그전까지 `domesticOrders` 는 하위 기능이 없어서 **메뉴 키 자체가 저장되는
+   * 잎**이었다. 쪼갠 까닭은 하나다 — 기타건 상세의 [승인] 탭을 가리려면 그 탭만
+   * 가리키는 잎이 필요한데, **잎을 하나만 더하는 길이 없다.** 하위 기능이 하나라도
+   * 생기는 순간 메뉴 키가 잎 목록에서 빠지고(아래 PERMISSION_LEAF_KEYS), 메뉴 수준은
+   * **잎들의 최대값**이 된다. 그러면 읽기짜리 잎 하나만 둔 상태에서 메뉴 수준이
+   * READ 에 묶여 **내자 정리의 쓰기·삭제가 전원에게 막힌다.** 실측으로 확인했다
+   * (2026-11-12: 잎 하나만 넣었더니 다섯 역할 전부 NONE, 상한 case 를 더해도 전부
+   * READ — 최고관리자까지 휴지통을 잃고 자재 담당자에게는 거꾸로 열렸다).
+   *
+   * 🔴 **그래서 넷을 한꺼번에 만든다.** 넷이 함께 있어야 메뉴 수준(= 최대값)이
+   * 쪼개기 전과 같아진다:
+   *   조회 READ · 수정 WRITE · 삭제·복원 MANAGE · 승인 READ
+   *   → 최대값이 최고관리자/관리자 MANAGE · 영업/엔지니어 WRITE · 자재 담당자 NONE
+   *   이고, 이것이 쪼개기 **전** 값과 한 칸도 다르지 않다(시험이 다섯 역할을 훑는다).
+   *
+   * 🔴 **기본값은 전부 *-authorization.ts 를 불러서 구한다**(permission-baseline.ts).
+   * 손으로 역할 목록을 옮겨 적으면 2026-09-29 처럼 정책이 바뀌는 날 한쪽만 따라온다.
+   *
+   * 🔴 **저장된 행은 마이그레이션이 옮긴다**(drizzle/0127). 옛 `area_key='domesticOrders'`
+   * 행은 이 트리에서 더 이상 잎이 아니라, 그냥 두면 `isPermissionLeafKey` 가 걸러
+   * **오류 없이 조용히** 기본값으로 되돌아간다(`inventory.stock` 이 그 실물이다).
+   */
+  domesticOrders: features("domesticOrders", {
+    view: {
+      // 이웃 메뉴들의 `view` 와 같은 자리다(repairCases.view · customers.view).
+      //
+      // 🔴 2026-11-12 부터 이 값이 **[발주서] 탭 둘**도 여닫는다 — 수리 건 상세와
+      // 기타건 상세 양쪽이다. 고객사가 우리에게 낸 발주서라 내자 영역이 답하고,
+      // 폴더 이름에 발주 금액이 들어 있다. 🔵 **기타건 상세에서도 뜻을 갖는다**:
+      // 그 화면의 입장권은 메뉴 수준(= 잎 넷의 최대값)이라, 이 잎 하나만 닫아도
+      // 「승인」이 열려 있으면 사람은 들어오고 [발주서] 탭만 사라진다.
+      label: "내자 정리 조회",
+      description:
+        "내자 정리 목록과 기타건 상세를 봅니다. 수리 건 상세와 기타건 상세의 「발주서」 탭도 이 값이 엽니다.",
+      maxMeaningfulLevel: "READ",
+    },
+    edit: {
+      // 🔴 **승인을 올리는 것도 이 값이다.** 「기타건 최종 출하 승인」을 올리는 일은
+      // 그 내자 줄을 고치는 일과 같은 문턱으로 본다(mutations/domestic-order-approvals.ts
+      // 의 「내자 줄을 고칠 수 있는 사람이 올린다」). 아래 `approval` 은 **탭을 보는**
+      // 열쇠일 뿐 결재권이 아니다 — 둘을 한 칸에 접으면 「승인 탭은 보는데 올리지는
+      // 못하는」 지금 상태를 표현할 수 없다.
+      //
+      // 🔴 읽기를 두지 않는다 — 보는 일은 위 `view` 가 맡는다(customers.edit 와 같은
+      // 모양). 여기에 읽기를 두면 조회 노드와 구분되지 않는다.
+      label: "내자 정리 수정",
+      minMeaningfulLevel: "WRITE",
+      description:
+        "내자 줄을 추가하고 고칩니다. 완료 처리·발행일·머리말 수정과 기타건 승인 요청도 이 값이 정합니다.",
+      levelHints: { WRITE: "줄을 추가하고, 고치고, 완료 처리하고, 승인을 올립니다" },
+      maxMeaningfulLevel: "WRITE",
+    },
+    lifecycle: {
+      // 이웃들과 같은 모양이다(repairCases.lifecycle · customers.lifecycle) — 조작
+      // 하나뿐이라 읽기·쓰기를 골라도 달라지는 것이 없으므로 '접근 불가 아니면 관리'
+      // 만 둔다. 셋(휴지통·복원·완전 삭제)이 한 함수다 — 나누면 「지울 수는 있는데
+      // 되살릴 수 없는」 역할이 만들어진다(domestic-order-authorization.ts).
+      label: "삭제·복원",
+      minMeaningfulLevel: "MANAGE",
+      description: "내자 줄을 휴지통으로 보내고, 되살리고, 완전히 지웁니다.",
+      levelHints: { MANAGE: "휴지통으로 보내기, 복원, 완전 삭제" },
+      maxMeaningfulLevel: "MANAGE",
+    },
+    approval: {
+      // 🔴 **결재권이 아니다.** 누가 승인·반려를 누를 수 있는가는 결재선과 그 단계
+      // 위임이 정하고(queries/approval-route-delegations.ts), 이 값은 **그 탭에 들어갈
+      // 수 있는가**만 답한다. 수리 건 쪽 `repairCases.approval` 과 같은 결이다.
+      // 승인을 **올리는** 문턱은 위 `edit` 이다(그쪽 주석).
+      //
+      // 🔴 **기본값은 「지금처럼 보이게」다** — 지금 이 탭을 볼 수 있는 역할 전부에게
+      // READ 다(= 내자를 볼 수 있는 사람 그대로). 닫아 두고 시작하면 배포 즉시 아무도
+      // 그 탭을 못 본다. 닫는 것은 관리자가 설정 화면에서 할 일이다.
+      //
+      // 🔴 읽기 하나뿐이다. 탭 안에서 무엇을 할 수 있는가는 결재선이 이미 정한다 —
+      // 여기에 쓰기·관리를 만들면 고른 사람은 무언가 열었다고 믿지만 아무것도
+      // 달라지지 않는다(이 파일이 minMeaningfulLevel 을 두는 그 까닭).
+      label: "승인",
+      description: "기타건 상세의 「승인」 탭입니다. 그 줄의 최종 출하 승인 요청과 결재 이력을 봅니다.",
+      maxMeaningfulLevel: "READ",
+    },
+  }),
 };
 
 /**
@@ -527,6 +614,19 @@ const SETTINGS_ENFORCED_AREAS = new Set<string>([
   "workflows",
   "technicalProcedures",
   "diagnosisFlowcharts",
+  /**
+   * 🔴 2026-11-12(둘째): 아래 SETTINGS_ENFORCED_LEAVES 에 있던 `"domesticOrders"` 가
+   * **이리로 올라왔다.** 메뉴가 잎 넷으로 쪼개지면서 그 키는 더 이상 잎이 아니고,
+   * 잎 목록에 적힌 키만 보는 `isSettingsEnforced` 가 메뉴를 「전환 안 됨」으로 읽게
+   * 되기 때문이다.
+   *
+   * 🔵 **말의 참·거짓은 그대로다.** 2026-08-31 에 「액션·페이지가 설정만 본다」가
+   * 참이 됐고(그 전에는 canEditDomesticOrders 와 AND 였다), 쪼갠 뒤에도 네 잎 전부가
+   * 그렇다 — 관문이 전부 hasPermission 한 줄이고 뒤에 남은 역할 함수가 없다. 새로
+   * 생긴 `approval` 도 마찬가지다(탭을 그릴지 정하는 레이아웃과 주소를 직접 쳤을 때
+   * 막는 페이지가 둘 다 그 한 줄만 본다 — auth/detail-tab-access.ts).
+   */
+  "domesticOrders",
 ]);
 
 /**
@@ -608,9 +708,13 @@ const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   // 세 단계(보기·안내문구·주소관리)를 모두 설정으로 옮겼다(2026-08-31).
   // 주소 발급·회수까지 설정이 정한다 — permission-areas.ts 의 경고 참조.
   "customerPortal",
-  // 액션·페이지가 설정만 본다(2026-08-31 전환). 예전에는 canEditDomesticOrders
-  // 와 AND 였다.
-  "domesticOrders",
+  // 🔴 `"domesticOrders"` 는 2026-11-12(둘째)에 **위 SETTINGS_ENFORCED_AREAS 로
+  // 옮겼다** — 그날 메뉴가 잎 넷으로 쪼개져 그 키가 더 이상 잎이 아니다. 「액션·
+  // 페이지가 설정만 본다」(2026-08-31 전환, 예전에는 canEditDomesticOrders 와 AND
+  // 였다)는 말은 네 잎 전부에 그대로 참이다. 🔴 여기 다시 적지 말 것 — 잎이 아닌
+  // 키를 이 집합에 두면 그 키가 메뉴 경로로도 잎 경로로도 답하게 되어, 두 답이
+  // 갈릴 자리가 생긴다.
+  //
   // 목표·납품 액션과 화면이 설정만 본다(2026-08-31 전환). 예전에는
   // canEditWeeklyReportGoals 와 AND 였다. 상세표의 `비고` 는 수리 건의
   // 컬럼이라 여전히 수리 건 상세의 판정을 따른다 — 이 영역의 값이 아니다.

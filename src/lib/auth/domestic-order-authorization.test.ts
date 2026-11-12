@@ -9,14 +9,19 @@ import {
 import { canDeleteQuotes, canEditQuotes, canViewQuotes } from "./quote-authorization";
 import { baselineLeafLevel, baselinePermissionLevel } from "./permission-baseline";
 import { findPermissionArea } from "./permission-areas";
-import { selectableLevelsOfLeaf } from "./permission-features";
+import { areaLevelFromLeaves, selectableLevelsOfLeaf } from "./permission-features";
 
 /**
  * 내자 정리의 역할 정책 — 휴지통(2026-09-11)과 엔지니어 개방(2026-09-29).
  *
- * 실제 관문은 서버 액션의 hasPermission("domesticOrders", "MANAGE") 이고, 그
- * 기본값을 permission-baseline.ts 가 이 함수들로 계산한다. 여기서 지키는 것은
+ * 실제 관문은 서버 액션의 hasPermission(…, "MANAGE") 이고, 그 기본값을
+ * permission-baseline.ts 가 이 함수들로 계산한다. 여기서 지키는 것은
  * "누가 기본으로 보고·고치고·지울 수 있는가"라는 정책 그 자체다.
+ *
+ * 🔴 2026-11-12(둘째)에 그 관문의 **열쇠 글자**가 메뉴 키에서 잎으로 내려왔다
+ * (`domesticOrders` → `domesticOrders.edit` · `.lifecycle` · `.view`). 이 파일이 재는
+ * **정책은 한 글자도 안 바뀌었다** — 잎들의 기본값이 여기 있는 세 함수를 그대로 나눠
+ * 부르기 때문이다. 쪼갠 쪽의 불변식은 `domestic-order-permission-leaves.test.ts`.
  */
 
 /**
@@ -116,8 +121,15 @@ test("지울 수 없는 역할의 기본 상한은 관리가 아니다 — 설�
 test("🔴 역할별 기본 수준 — 최고관리자·관리자만 관리이고, 엔지니어는 2026-09-29 에 쓰기가 됐다", () => {
   // 설정을 아무도 만지지 않은 상태의 실효 수준이 이 값이다 — resolver 는 저장된
   // 값이 없으면 baselineLeafLevel 을 그대로 쓴다(permission-resolver.ts).
-  // 메뉴(baselinePermissionLevel)와 잎(baselineLeafLevel) 두 창구가 같은 답을
-  // 해야 한다: 이 메뉴는 하위 기능이 없어 메뉴가 곧 잎이다.
+  //
+  // 🔴 2026-11-12(둘째)에 이 메뉴가 **잎 넷으로 쪼개졌다.** 그래서 아래 둘째 단언이
+  // `baselineLeafLevel("domesticOrders", …)`(이제 언제나 NONE 이다 — 잎이 아니니까)
+  // 에서 **잎들의 최대값**으로 바뀌었다. 🔴 **그것이 이 시험이 원래 재려던 것이다**:
+  // 「메뉴 창구와 잎 창구가 같은 답을 하는가」. 쪼개기 전에는 메뉴가 곧 잎이라 두
+  // 창구가 같은 함수였고, 쪼갠 뒤에는 **최대값이 그 역할**을 한다
+  // (permission-resolver.ts 가 levels[area] 를 그렇게 만든다).
+  // 🔵 그래서 이 줄이 「쪼갠 뒤에도 영역 수준이 한 칸도 안 달라졌다」의 증거가 된다 —
+  // 약해진 것이 아니라 **실제로 돌아가는 식**을 재게 됐다.
   const expected = {
     SUPER_ADMIN: "MANAGE",
     ADMIN: "MANAGE",
@@ -131,7 +143,11 @@ test("🔴 역할별 기본 수준 — 최고관리자·관리자만 관리이�
   assert.deepEqual(Object.keys(expected).sort(), [...ROLE_CODES].sort(), "역할 목록이 바뀌었다 — 이 표를 다시 볼 것");
   for (const role of ROLE_CODES) {
     assert.equal(baselinePermissionLevel("domesticOrders", role), expected[role], `${role} 메뉴 상한`);
-    assert.equal(baselineLeafLevel("domesticOrders", role), expected[role], `${role} 잎 상한`);
+    assert.equal(
+      areaLevelFromLeaves("domesticOrders", (leafKey) => baselineLeafLevel(leafKey, role)),
+      expected[role],
+      `${role} 잎들의 최대값 — 쪼갠 뒤 실효 수준이 달라졌다`
+    );
   }
 });
 

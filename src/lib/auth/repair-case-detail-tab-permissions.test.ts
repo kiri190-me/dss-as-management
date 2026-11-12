@@ -81,7 +81,19 @@ const BASELINE_BEFORE: Record<string, Record<Role, string>> = {
   // 건드리지 않았다는 사실 자체가 「[견적서]·[발주서]는 그대로」의 근거다.
   "diagnosisFlowcharts.view": { SUPER_ADMIN: "READ", ADMIN: "READ", AS_ENGINEER: "READ", SALES: "READ", INVENTORY_MANAGER: "READ" },
   quotes: { SUPER_ADMIN: "MANAGE", ADMIN: "MANAGE", AS_ENGINEER: "WRITE", SALES: "WRITE", INVENTORY_MANAGER: "NONE" },
-  domesticOrders: { SUPER_ADMIN: "MANAGE", ADMIN: "MANAGE", AS_ENGINEER: "WRITE", SALES: "WRITE", INVENTORY_MANAGER: "NONE" },
+  /**
+   * 🔴 2026-11-12(**같은 날 둘째**): `domesticOrders`(메뉴 키)가 여기 있었다. 그날
+   * 오후 그 메뉴가 잎 넷으로 쪼개지면서 메뉴 키는 저장되는 잎이 아니게 됐고
+   * (`baselineLeafLevel` 이 NONE 을 돌려준다), [발주서] 탭의 열쇠가 조회 잎으로
+   * 내려왔다. 그래서 **같은 질문을 새 열쇠에 한다** — 줄을 지운 것이 아니다.
+   *
+   * 🔵 **가리키는 사람 집합이 그대로임이 여기서 보인다**: 쪼개기 전 메뉴 값이
+   * MANAGE/MANAGE/WRITE/WRITE/NONE 이었고 탭은 그중 READ 이상을 물었다 — 넘던 넷이
+   * 그대로 아래 READ 를 넘고, 자재 담당자는 전과 같이 못 넘는다.
+   * 🔵 메뉴 수준 자체가 그대로라는 사실은 이 파일이 아니라
+   * `domestic-order-permission-leaves.test.ts` 가 다섯 역할 × 영역 수준으로 잰다.
+   */
+  "domesticOrders.view": { SUPER_ADMIN: "READ", ADMIN: "READ", AS_ENGINEER: "READ", SALES: "READ", INVENTORY_MANAGER: "NONE" },
 };
 
 describe("① 🔴 기본값이 지금과 같다 — 새 잎 셋은 다섯 역할 전부에게 열려 있다", () => {
@@ -123,9 +135,14 @@ describe("② 🔴 권한 키가 하나도 안 사라졌다 — 수를 센다", 
     assert.equal(PRE_EXISTING_REPAIR_CASE_LEAVES.length, 7);
   });
 
-  test("🔴 저장되는 잎의 총수는 48 — 45 에서 셋만 늘었다", () => {
+  test("🔴 저장되는 잎의 총수는 51 — 45 → 48(탭 셋) → 51(내자 쪼개기)", () => {
     // 수가 달라지면 사람이 한 번 더 보게 한다. 줄어든 쪽은 특히 조용하다.
-    assert.equal(PERMISSION_LEAF_KEYS.length, 48);
+    //
+    // 🔴 2026-11-12 **같은 날 두 번**이 움직였다:
+    //   · 오전 45 → 48 — 수리 건 상세의 탭 잎 셋이 더해졌다.
+    //   · 오후 48 → 51 — `domesticOrders` 하나가 빠지고 그 아래 넷이 들어왔다(순증 +3).
+    // 🔵 **빠진 하나가 죽지 않았다는 증거**는 아래 ④ 와 마이그레이션(drizzle/0127)이다.
+    assert.equal(PERMISSION_LEAF_KEYS.length, 51);
     assert.equal(new Set(PERMISSION_LEAF_KEYS).size, PERMISSION_LEAF_KEYS.length, "키가 겹친다");
   });
 
@@ -173,21 +190,43 @@ describe("③ 🔴 [기본 정보]는 가리지 않는다", () => {
   });
 });
 
-describe("④ 🔴 [견적서]·[발주서]는 지금 동작 그대로 — 탭 전용 키를 만들지 않았다", () => {
-  test("두 탭의 열쇠가 **메뉴 그 자체**이고, 하나씩뿐이다", () => {
+describe("④ 🔴 [견적서]·[발주서]는 **탭 전용 키를 만들지 않았다** — 이웃 메뉴의 것을 쓴다", () => {
+  test("두 탭의 열쇠가 하나씩이고, 둘 다 **이웃 메뉴 쪽**이다", () => {
     assert.deepEqual(REPAIR_CASE_DETAIL_TAB_PERMISSIONS.quotes, {
       anyOf: [{ key: "quotes", level: "READ" }],
     });
+    // 🔴 2026-11-12(둘째)에 `domesticOrders` → `domesticOrders.view` 로 **내려왔다.**
+    //    탭 전용 키를 만든 것이 아니다 — 내자 메뉴가 잎 넷으로 쪼개지면서 그중
+    //    「조회」 잎이 이 탭의 제자리가 됐다(기타건 상세의 같은 탭과 한 열쇠다).
     assert.deepEqual(REPAIR_CASE_DETAIL_TAB_PERMISSIONS.purchaseOrders, {
-      anyOf: [{ key: "domesticOrders", level: "READ" }],
+      anyOf: [{ key: "domesticOrders.view", level: "READ" }],
     });
   });
 
-  test("🔴 두 메뉴에 하위 기능이 없다 — 그래서 메뉴 키가 곧 저장되는 잎이다", () => {
-    for (const key of ["quotes", "domesticOrders"]) {
-      assert.ok(isPermissionLeafKey(key), `${key} 가 더 이상 잎이 아니다 — 탭의 열쇠를 다시 볼 것`);
-      assert.equal(featuresOfArea(key).length, 0, `${key} 에 하위 기능이 생겼다`);
-    }
+  /**
+   * 🔴 **이 시험은 2026-11-12(둘째)에 `quotes` 하나로 좁아졌다 — 지운 것이 아니다.**
+   *
+   * 원래 둘(`quotes` · `domesticOrders`)을 봤고, 이 울타리가 그날 **실제로 우리를
+   * 살렸다**: 내자 메뉴에 잎을 하나 넣어 보는 순간 이 줄이 터지면서 「메뉴 키가 잎
+   * 목록에서 빠지고 메뉴 수준이 잎들의 최대값이 된다」가 드러났다(그대로 갔으면 내자
+   * 정리의 쓰기·삭제가 전원에게 조용히 막혔다). `domesticOrders` 를 **일부러** 뺀 것은
+   * 그 메뉴를 **넷으로 한꺼번에** 쪼개 메뉴 수준을 그대로 지켰기 때문이고, 그 사실은
+   * `domestic-order-permission-leaves.test.ts` 가 다섯 역할로 잰다.
+   *
+   * 🔴 `quotes` 에는 그 울타리가 **그대로 필요하다.** 저쪽은 아직 하위 기능이 없어
+   * 메뉴 키가 곧 저장되는 잎이고, 거기에 잎을 하나만 더하면 **견적서 메뉴가 바로 그
+   * 함정에 빠진다**(쓰기·삭제가 전원에게 막힌다). 그때 이 줄이 다시 터져야 한다.
+   */
+  test("🔴 `quotes` 에는 하위 기능이 없다 — 그래서 메뉴 키가 곧 저장되는 잎이다", () => {
+    assert.ok(isPermissionLeafKey("quotes"), "quotes 가 더 이상 잎이 아니다 — 탭의 열쇠를 다시 볼 것");
+    assert.equal(featuresOfArea("quotes").length, 0, "quotes 에 하위 기능이 생겼다");
+  });
+
+  test("🔴 거꾸로, `domesticOrders` 는 이제 메뉴 키로 저장되지 않는다", () => {
+    // 🔵 「쪼갰다」를 값으로 못 박는다 — 메뉴 키가 아직 잎이면 마이그레이션(0127)이
+    //    옮긴 행과 옛 행이 **둘 다 살아** 서로 다른 답을 낼 수 있다.
+    assert.equal(isPermissionLeafKey("domesticOrders"), false, "메뉴 키가 아직 잎이다 — 쪼개기가 안 됐다");
+    assert.equal(featuresOfArea("domesticOrders").length, 4, "내자 잎이 넷이 아니다");
   });
 });
 
@@ -231,7 +270,9 @@ describe("⑥ 🔴 설정이 실제 판정을 지배한다고 화면이 말해�
   });
 
   test("탭을 여닫게 된 **기존** 열쇠들도 그대로 SETTINGS_ENFORCED 다", () => {
-    for (const key of ["repairCases.workRecords", "repairCases.files", "diagnosisFlowcharts.view", "quotes", "domesticOrders"]) {
+    // 🔴 `domesticOrders` → `domesticOrders.view`(2026-11-12 둘째). 이 탭을 여는 열쇠
+    //    그 자체를 봐야 한다 — 메뉴 키를 보면 쪼갠 뒤에도 참이라 아무것도 재지 않는다.
+    for (const key of ["repairCases.workRecords", "repairCases.files", "diagnosisFlowcharts.view", "quotes", "domesticOrders.view"]) {
       assert.equal(isSettingsEnforced(key), true, `${key}: 탭을 가리게 됐는데 설정이 최종 판정이 아니다`);
     }
   });
@@ -369,7 +410,7 @@ describe("⑨ 🔴 [작업내용] — 작업 기록만 닫아도 탭은 남는�
       const levelOf = (key: string) => baselineLeafLevel(key, role);
       for (const tab of REPAIR_CASE_DETAIL_TAB_KEYS) {
         // 🔵 [견적서]·[발주서]는 자재 담당자에게 **원래부터** 닫혀 있다(이 조각이
-        //    만든 것이 아니다 — `quotes`/`domesticOrders` 의 기본값이 NONE 이다).
+        //    만든 것이 아니다 — `quotes`/`domesticOrders.view` 의 기본값이 NONE 이다).
         const expected =
           role === "INVENTORY_MANAGER" && (tab === "quotes" || tab === "purchaseOrders") ? false : true;
         assert.equal(

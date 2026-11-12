@@ -177,7 +177,10 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     console.error("[api] 내자 완료 통로: 일할 수 있는 계정을 찾지 못했습니다.", { found: actor !== null });
     return failure("FORBIDDEN", FORBIDDEN_MESSAGE);
   }
-  if (!(await hasPermission({ role: actor.role, isDeveloper: actor.isDeveloper }, "domesticOrders", "WRITE"))) {
+  // 🔴 2026-11-12(둘째)에 `domesticOrders` → `domesticOrders.edit` 로 내려왔다. 서버
+  //    액션과 **똑같은 관문**이어야 한다는 머리말의 약속을 지키려면 저쪽과 같은 글자를
+  //    써야 한다 — 통과하는 역할은 쪼개기 전과 다르지 않다.
+  if (!(await hasPermission({ role: actor.role, isDeveloper: actor.isDeveloper }, "domesticOrders.edit", "WRITE"))) {
     console.error("[api] 내자 완료 통로: 권한이 모자랍니다.", { userId: actor.id });
     return failure("FORBIDDEN", FORBIDDEN_MESSAGE);
   }

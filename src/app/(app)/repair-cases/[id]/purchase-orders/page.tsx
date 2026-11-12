@@ -66,7 +66,12 @@ export default async function RepairCasePurchaseOrdersPage({
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  const canView = await hasPermission(actingUser, "domesticOrders", "READ");
+  // 🔴 2026-11-12(둘째)에 `domesticOrders` → `domesticOrders.view` 로 내려왔다(그 메뉴가
+  //    잎 넷으로 쪼개졌다). **열쇠가 가리키는 사람 집합은 그대로다** — 쪼개기 전 메뉴
+  //    READ 를 넘던 네 역할이 그대로 조회 잎 READ 를 넘는다. 탭 줄이 이 탭을 그릴지
+  //    정할 때 보는 열쇠(auth/repair-case-detail-tab-permissions.ts 의 purchaseOrders)와
+  //    **같은 글자**여야 한다 — 갈리면 「탭은 없는데 주소로는 들어와진다」가 된다.
+  const canView = await hasPermission(actingUser, "domesticOrders.view", "READ");
   if (!canView) {
     return (
       <PlaceholderPage

@@ -267,6 +267,14 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
       });
 
     case "domesticOrders":
+      // 🔴 2026-11-12(둘째)부터 이 case 는 **영역 상한**만 답한다. 실효 수준은 이제
+      // 잎 넷의 최대값이고(permission-resolver.ts), 여기는 권한 설정 화면이 메뉴 줄의
+      // 드롭다운 상한을 그릴 때만 쓰인다(baselinePermissionLevel).
+      // 🔴 **그래도 지우면 안 된다** — 빠지면 아래 default 로 떨어져 NONE 이 되고,
+      // 메뉴 상한이 통째로 0 이 된다(mailSettings 에 적어 둔 그 함정).
+      // 🔵 아래 세 함수를 쪼갠 잎 넷이 **그대로 나눠 부른다**(rawLeafBaseline 의
+      // `domesticOrders.*`). 그래서 이 사다리의 답과 잎들의 최대값이 같다.
+      //
       // 행 추가·수정(2단계)에 이어 휴지통이 생겼다(2026-09-11) — 휴지통으로
       // 보내기·되살리기·완전 삭제는 관리자 이상이다. 견적서와 같은 모양이다.
       // 여기서도 표로 옮겨 적지 않고 *-authorization.ts를 **호출해서**
@@ -567,6 +575,41 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
         write: canCreatePartRequest(role, PERMISSIVE_CASE_LOCK),
         read: canViewPartRequests(role),
       });
+
+    /**
+     * ── 🔴 내자 정리 — 2026-11-12(둘째)에 잎 넷으로 쪼갰다 ─────────────────────
+     * 🔴 **쪼개기 전후로 한 역할도 달라지면 안 된다.** 메뉴 수준은 잎들의 최대값이라
+     * (permission-features.ts 의 areaLevelFromLeaves), 아래 넷의 최대값이 쪼개기 전
+     * `case "domesticOrders"` 의 답과 같아야 한다 — 그 case 는 **지우지 않았다**
+     * (영역 상한 `baselinePermissionLevel` 이 지금도 그것을 쓴다).
+     *
+     * 그 성질이 공짜로 성립하는 까닭: 위 세 함수(`canView` · `canEdit` · `canDelete`)를
+     * **그대로 나눠 부르기** 때문이다. 사다리의 각 칸이 잎 하나씩으로 내려앉았을 뿐이라
+     * 최대값은 같은 함수들의 같은 조합이 된다. 🔴 여기에 역할 이름을 손으로 적으면
+     * 그 성질이 깨진다 — 2026-09-29 에 엔지니어가 더해진 것처럼 정책이 또 바뀌는 날
+     * 한쪽만 따라오고, 그때 증상은 「메뉴는 열리는데 아무것도 못 한다」이다.
+     * 시험이 다섯 역할 × 영역 수준을 쪼개기 전 값과 맞대어 지킨다.
+     */
+    case "domesticOrders.view":
+      return canViewDomesticOrders(role) ? "READ" : "NONE";
+    case "domesticOrders.edit":
+      // 🔴 읽기를 false 로 둔다 — 이 잎에서 '보기'는 뜻이 없다(보는 일은 위 `view` 가
+      // 맡는다). customers.edit · productModels.files 와 같은 모양이다.
+      return ladder({ write: canEditDomesticOrders(role), read: false });
+    case "domesticOrders.lifecycle":
+      return ladder({ manage: canDeleteDomesticOrders(role), read: false });
+    case "domesticOrders.approval":
+      // 🔴 **「지금 그 탭을 볼 수 있는 사람」 그대로다.** 기타건 상세의 [승인] 탭에는
+      // 2026-11-12 이전까지 탭 단위 검사가 **0건**이었다 — 그 화면에 들어온 사람이면
+      // 누구나 보았고, 들어올 수 있는 사람이 곧 내자를 볼 수 있는 사람이다. 그래서
+      // 상한을 `canViewDomesticOrders` 로 잡는다. 낮춰 적으면 표를 만들었을 뿐인데
+      // **배포 즉시 아무도 그 탭을 못 본다**(이 파일 맨 위 '아직 아무 역할 검사도 없는
+      // 영역' 규칙).
+      //
+      // 🔴 결재 자격 함수를 끌어다 쓰지 않는다 — 결재를 못 누르는 사람도 지금 이 탭을
+      // 보고 있다. 그 둘을 같은 값으로 묶으면 「지금 보이는 사람이 계속 보인다」가
+      // 깨진다(repairCases.approval 에 적어 둔 같은 함정).
+      return canViewDomesticOrders(role) ? "READ" : "NONE";
 
     default:
       // 트리에 없는 키는 열어 주지 않는다. 노드를 permission-features.ts에만

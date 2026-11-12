@@ -8,7 +8,7 @@ import { groupQuotesByArchiveBaseNumber } from "@/components/quotes/quote-archiv
 import QuoteListSlots from "@/components/quotes/QuoteListSlots";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
-import { hasPermission } from "@/lib/auth/permission-resolver";
+import { canOpenDomesticOrderDetailTab } from "@/lib/auth/domestic-order-detail-tab-access";
 import { readSession } from "@/lib/auth/session";
 import { getDomesticOrderDetail } from "@/lib/db/queries/domestic-orders";
 import { listQuotesForDomesticOrder } from "@/lib/db/queries/quotes";
@@ -100,7 +100,13 @@ export default async function DomesticOrderQuotesPage({
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  const canViewQuotes = await hasPermission(actingUser, "quotes", "READ");
+  /**
+   * 🔴 2026-11-12(둘째): 묻는 열쇠는 그대로 `quotes` READ 인데, **묻는 길**이 탭 표를
+   * 거치도록 바뀌었다(`auth/domestic-order-detail-tab-access.ts`). 레이아웃이 탭 단추를
+   * 그릴지 정할 때도 같은 창구를 쓰므로, 「탭은 보이는데 들어가면 막힌다」(또는 그 반대)가
+   * 생길 자리가 없어진다 — 그 전에는 두 곳이 각자 `quotes` 를 글자로 적고 있었다.
+   */
+  const canViewQuotes = await canOpenDomesticOrderDetailTab(actingUser, "quotes");
   if (!canViewQuotes) {
     return (
       <DomesticOrderDetailNotice

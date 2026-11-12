@@ -6,6 +6,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import DomesticOrderBasicInfoView from "./DomesticOrderBasicInfoView";
 import DomesticOrderDetailHeader from "./DomesticOrderDetailHeader";
 import DomesticOrderDetailNotice from "./DomesticOrderDetailNotice";
+import { buildDomesticOrderDetailTabs } from "./domestic-order-detail-tabs-list";
+import { DOMESTIC_ORDER_DETAIL_TAB_PERMISSIONS } from "@/lib/auth/domestic-order-detail-tab-permissions";
 import MiscCaseStatusBadge from "@/components/misc-cases/MiscCaseStatusBadge";
 import type { DomesticOrderBasicInfoRow } from "@/lib/domain/domestic-order-basic-info";
 import { MISC_CASE_STATUS_LABELS } from "@/lib/domain/misc-case-status";
@@ -313,21 +315,60 @@ describe("🔴 기본정보 탭 — 내자 정리의 내용이 화면에 나온�
 });
 
 describe("🔴 탭 틀 — 기본정보가 첫 화면이고, 아직 안 만든 하나만 자리표시다", () => {
+  /**
+   * 🔴 **2026-11-12(둘째)에 탭 목록이 조각에서 떨어져 나왔다** — 순수 함수
+   * `buildDomesticOrderDetailTabs`(domestic-order-detail-tabs-list.ts)가 그것을 만든다.
+   * 그래서 아래 둘이 **글자가 아니라 값**으로 잰다. 수리 건 상세가 같은 날 오전에 같은
+   * 모양으로 옮겨 간 그대로이고, 원본 글자로 재던 것보다 강하다: 「닫으면 그 탭만 빠지고
+   * 차례는 그대로인가」를 실제로 만들어 보고 확인한다.
+   */
   test("탭 넷의 차례가 기본정보 · 견적서 · 발주서 · 승인이다", () => {
-    const list = flat(tabs.slice(indexOrFail(tabs, "const tabs = ["), indexOrFail(tabs, "const activeHref")));
-    assert.ok(list.includes('{ label: "기본정보", href: hrefs.root },'), list);
-    assert.ok(list.includes('{ label: "견적서", href: hrefs.quotes }'), list);
-    assert.ok(list.includes('{ label: "발주서", href: hrefs.purchaseOrders }'), list);
-    assert.ok(list.includes('{ label: "승인", href: hrefs.approval }'), list);
-    // 차례가 곧 화면의 차례다 — 기본정보가 맨 앞이어야 한다(사용자 결정).
-    assert.ok(list.indexOf('"기본정보"') < list.indexOf('"견적서"'), list);
-    assert.ok(list.indexOf('"견적서"') < list.indexOf('"발주서"'), list);
-    assert.ok(list.indexOf('"발주서"') < list.indexOf('"승인"'), list);
+    const all = buildDomesticOrderDetailTabs("d1", {
+      quotes: true,
+      purchaseOrders: true,
+      approval: true,
+    });
+    assert.deepEqual(
+      all.map((tab) => tab.label),
+      ["기본정보", "견적서", "발주서", "승인"]
+    );
+    assert.deepEqual(
+      all.map((tab) => tab.href),
+      ["/domestic-orders/d1", "/domestic-orders/d1/quotes", "/domestic-orders/d1/purchase-orders", "/domestic-orders/d1/approval"]
+    );
+    // 🔵 조각은 그 함수를 부르기만 한다 — 목록을 제 손으로 다시 적으면 두 벌이 된다.
+    assert.ok(tabs.includes("buildDomesticOrderDetailTabs(id, visibility)"), tabs);
+    assert.equal(tabs.includes('label: "견적서"'), false, "조각이 탭 목록을 아직 제 손으로 적는다");
   });
 
-  test("🔴 견적서 탭만 조건부다 — 발주서 · 승인은 늘 그린다", () => {
-    assert.ok(tabs.includes('...(canViewQuotes ? [{ label: "견적서", href: hrefs.quotes }] : []),'), tabs);
-    assert.equal(tabs.includes("canViewPurchaseOrders"), false, "안 쓰는 프롭이 생겼다");
+  test("🔴 탭 셋이 **각각** 조건부다 — 하나를 닫으면 그 하나만 빠지고 차례는 그대로다", () => {
+    // 🔴 2026-11-12(둘째) 전에는 [견적서]만 조건부였다. 그때 [발주서]·[승인]을 가릴 수
+    //    있는 열쇠가 이 화면의 입장권(`domesticOrders`)뿐이라 **아무것도 재지 못했기**
+    //    때문이다. 그날 그 메뉴가 잎 넷으로 쪼개지면서 입장권보다 좁은 열쇠가 생겼다.
+    const all = { quotes: true, purchaseOrders: true, approval: true };
+    for (const [closed, gone] of [
+      ["quotes", "견적서"],
+      ["purchaseOrders", "발주서"],
+      ["approval", "승인"],
+    ] as const) {
+      const labels = buildDomesticOrderDetailTabs("d1", { ...all, [closed]: false }).map((t) => t.label);
+      assert.equal(labels.includes(gone), false, `${closed} 를 닫았는데 [${gone}] 가 남았다`);
+      // 🔴 나머지는 자리를 그대로 지킨다 — 하나를 닫았더니 차례가 바뀌면 안 된다.
+      assert.deepEqual(
+        labels,
+        ["기본정보", "견적서", "발주서", "승인"].filter((label) => label !== gone),
+        `${closed} 를 닫았더니 다른 탭이 함께 움직였다`
+      );
+    }
+  });
+
+  test("🔴 셋을 전부 닫아도 [기본정보]는 남는다 — 탭이 하나도 없는 사람은 없다", () => {
+    const labels = buildDomesticOrderDetailTabs("d1", {
+      quotes: false,
+      purchaseOrders: false,
+      approval: false,
+    }).map((tab) => tab.label);
+    assert.deepEqual(labels, ["기본정보"]);
   });
 
   /**
@@ -412,13 +453,50 @@ describe("🔴 인가 — 감추는 것은 막은 것이 아니다", () => {
     }
   });
 
+  /**
+   * 🔴 2026-11-12(둘째): 묻는 **열쇠는 그대로 `quotes` READ** 인데, 묻는 **길**이 탭 표를
+   * 거치게 됐다(auth/domestic-order-detail-tab-permissions.ts). 그래서 이 시험이
+   * 「두 곳이 같은 글자를 적었는가」에서 **「두 곳이 같은 창구를 부르는가」**로 바뀌었다 —
+   * 글자가 같은지 사람이 눈으로 맞추던 일을 구조가 대신하게 됐으므로 **더 강하다.**
+   * 🔵 열쇠가 그대로임은 표를 값으로 읽어 못 박는다(아래 첫 줄).
+   */
   test("🔴 견적서 탭은 `quotes` READ 를 **페이지가 다시** 본다", () => {
-    assert.ok(quotesPage.includes('await hasPermission(actingUser, "quotes", "READ")'), quotesPage);
+    assert.deepEqual(DOMESTIC_ORDER_DETAIL_TAB_PERMISSIONS.quotes, {
+      anyOf: [{ key: "quotes", level: "READ" }],
+    });
+    assert.ok(quotesPage.includes('await canOpenDomesticOrderDetailTab(actingUser, "quotes")'), quotesPage);
     assert.ok(quotesPage.includes("권한이 없습니다"), quotesPage);
     // 살아 있는 계정을 다시 읽는다 — 강등된 계정이 옛 토큰으로 금액을 보지 못하게.
     assert.ok(quotesPage.includes("await resolveActingUserForSession(session)"), quotesPage);
-    // 레이아웃이 탭을 감추는 판정도 **같은 열쇠**다.
-    assert.ok(layout.includes('await hasPermission(actingUser, "quotes", "READ")'), layout);
+    // 레이아웃이 탭을 감추는 판정도 **같은 표**를 거친다.
+    assert.ok(layout.includes("await resolveDomesticOrderDetailTabVisibility(actingUser)"), layout);
+    // 🔴 페이지가 열쇠를 글자로 다시 적지 않는다 — 적으면 표와 갈라질 자리가 생긴다.
+    assert.equal(quotesPage.includes('hasPermission(actingUser, "quotes"'), false, quotesPage);
+  });
+
+  /**
+   * 🔴 **2026-11-12(둘째)에 생긴 가름** — [발주서]·[승인]에는 그 전까지 탭 단위 검사가
+   * **0건**이었다. 두 페이지가 `requireAreaAccessForCurrentUser("domesticOrders")` 를
+   * 걸고 있었지만 그것은 레이아웃이 이미 거는 **입장권**이라, 들어온 사람 사이를 가르지
+   * 못했다(같은 열쇠를 다시 물으면 언제나 참이다).
+   */
+  test("🔴 [발주서]·[승인]도 이제 **입장권보다 좁은** 열쇠를 페이지가 다시 본다", () => {
+    for (const [tab, source, key] of [
+      ["purchaseOrders", purchaseOrdersPage, "domesticOrders.view"],
+      ["approval", approvalPage, "domesticOrders.approval"],
+    ] as const) {
+      // 표가 가리키는 열쇠가 **입장권(메뉴 키)과 다른 글자**여야 가름이 선다.
+      assert.deepEqual(DOMESTIC_ORDER_DETAIL_TAB_PERMISSIONS[tab], {
+        anyOf: [{ key, level: "READ" }],
+      });
+      assert.notEqual(key, "domesticOrders", `${tab}: 열쇠가 입장권과 같은 글자다 — 아무것도 재지 않는다`);
+      // 페이지가 **서버에서** 같은 창구로 다시 본다(감추는 것은 막은 것이 아니다).
+      assert.ok(source.includes(`await canOpenDomesticOrderDetailTab(actingUser, "${tab}")`), source);
+      assert.ok(source.includes("권한이 없습니다"), source);
+      assert.ok(source.includes("await resolveActingUserForSession(session)"), source);
+      // 🔵 입장 가드도 그대로 남아 있다 — 둘은 서로 다른 질문이다.
+      assert.ok(source.includes('await requireAreaAccessForCurrentUser("domesticOrders")'), source);
+    }
   });
 
   test("🔴 없는 줄 · 휴지통에 든 줄은 레이아웃과 페이지 넷 모두에서 404 다", () => {

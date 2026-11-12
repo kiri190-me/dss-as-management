@@ -485,14 +485,32 @@ describe("🔴 판정을 화면에서 새로 적지 않는다", () => {
 });
 
 describe("🔴 인가 — 화면이 감춘 것은 관문이 아니다", () => {
-  test("페이지가 영역 가드와 쓰기 열쇠를 **제자리에서** 다시 본다", () => {
+  /**
+   * 🔴 2026-11-12(둘째)에 이 화면의 열쇠가 **둘에서 셋**이 됐다. 내자 메뉴가 잎 넷으로
+   * 쪼개지면서 「이 탭을 볼 수 있는가」를 묻는 자리가 처음 생겼기 때문이다 — 그 전에는
+   * 쓸 수 있는 열쇠가 입장권(`domesticOrders`)뿐이라 **탭을 가릴 수 없었다.**
+   */
+  test("페이지가 영역 가드 · 탭 열쇠 · 쓰기 열쇠 **셋을 제자리에서** 다시 본다", () => {
     assert.ok(
       approvalPage.includes('requireAreaAccessForCurrentUser("domesticOrders")'),
       "탭 페이지가 영역 가드를 부르지 않는다"
     );
+    // 🔴 **탭을 볼 수 있는가** — 입장권보다 좁다(`domesticOrders.approval`).
     assert.ok(
-      approvalPage.includes('hasPermission(actingUser, "domesticOrders", "WRITE")'),
+      approvalPage.includes('canOpenDomesticOrderDetailTab(actingUser, "approval")'),
+      "탭을 볼 수 있는가를 페이지가 묻지 않는다 — 주소를 직접 치면 들어와진다"
+    );
+    // 🔴 **올릴 수 있는가** — 내자 줄을 고치는 그 열쇠다(`domesticOrders.edit`).
+    //    🔴 탭 열쇠와 **다른 글자**여야 한다: 「승인 탭은 보는데 올리지는 못하는」 상태가
+    //    지금의 기본값이고, 한 칸으로 접으면 그것을 표현할 수 없다.
+    assert.ok(
+      approvalPage.includes('hasPermission(actingUser, "domesticOrders.edit", "WRITE")'),
       "올릴 수 있는가를 페이지가 묻지 않는다"
+    );
+    assert.equal(
+      approvalPage.includes('hasPermission(actingUser, "domesticOrders.approval"'),
+      false,
+      "탭 보기 열쇠로 올리기를 판정한다 — 결재권이 아닌 값이 결재권이 됐다"
     );
     assert.ok(
       approvalPage.includes("resolveActingUserForSession(session)"),
@@ -500,7 +518,7 @@ describe("🔴 인가 — 화면이 감춘 것은 관문이 아니다", () => {
     );
   });
 
-  test("🔴 올리기는 `domesticOrders` WRITE, 결재는 영역을 묻지 않는다", () => {
+  test("🔴 올리기는 `domesticOrders.edit` WRITE, 결재는 영역을 묻지 않는다", () => {
     assert.match(actionSource, /requestDomesticOrderApprovalAction[\s\S]*?resolveActor\(true\)/);
     assert.match(actionSource, /decideDomesticOrderApprovalAction[\s\S]*?resolveActor\(false\)/);
     // 저장 경로도 올리기에서만 영역을 본다.
@@ -509,6 +527,13 @@ describe("🔴 인가 — 화면이 감춘 것은 관문이 아니다", () => {
       1,
       "결재 쪽에도 영역 열쇠가 걸렸다 — 결재선에 올린 사람이 못 누르게 된다"
     );
-    assert.match(mutationSource, /hasPermission\(actor, "domesticOrders", "WRITE"\)/);
+    // 🔴 2026-11-12(둘째): 메뉴 키 → `domesticOrders.edit`. **탭 보기 열쇠가 아니다** —
+    //    올리는 일은 그 줄을 고치는 일과 같은 문턱이고, 통과하는 역할은 그대로다.
+    assert.match(mutationSource, /hasPermission\(actor, "domesticOrders\.edit", "WRITE"\)/);
+    assert.equal(
+      /hasPermission\(actor, "domesticOrders", /.test(mutationSource),
+      false,
+      "메뉴 키로 되돌아갔다 — 쪼갠 뒤 메뉴 수준은 잎들의 최대값이라 삭제만 열린 역할도 통과한다"
+    );
   });
 });

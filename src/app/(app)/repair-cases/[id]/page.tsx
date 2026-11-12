@@ -217,10 +217,16 @@ export default async function RepairCaseDetailPage({
   //
   // 볼 수 없으면 고칠 수도 없다(canReadDomesticOrders 를 먼저 건다) — 구역이
   // 아예 안 그려지므로 뒤 판정을 물을 일도 없다.
+  // 🔴 2026-11-12(둘째)에 `domesticOrders` → `domesticOrders.edit` 로 내려왔다(그 메뉴가
+  //    잎 넷으로 쪼개졌다). 내자 정리의 행 추가·수정 액션과 **같은 관문**이라는 위
+  //    문단의 약속을 지키려면 저쪽과 같은 글자여야 한다. 통과하는 역할은 그대로다.
+  //    🔵 바로 위의 **보는 쪽**은 영역 키 그대로 둔다 — 그 줄이 묻는 것은 「내자 정리
+  //    메뉴에 들어갈 수 있는가」이고(목록 화면의 가드와 짝), 그 뜻은 쪼갠 뒤에도 메뉴
+  //    수준 하나로 그대로 표현된다.
   const canWriteDomesticOrders =
     canReadDomesticOrders &&
     actingUser !== null &&
-    (await hasPermission(actingUser, "domesticOrders", "WRITE"));
+    (await hasPermission(actingUser, "domesticOrders.edit", "WRITE"));
 
   // 「사용 부품」 칸 — 그 건에 손으로 적어 둔 부품 줄과, "여기에 적을 건인가"의
   // 재료(살아 있는 부품 요청 줄이 있는가). 위 둘과 같은 이유로 DATABASE 소스에만

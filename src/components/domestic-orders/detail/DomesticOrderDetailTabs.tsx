@@ -2,10 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  domesticOrderDetailHrefs,
-  resolveActiveTabHref,
-} from "@/lib/domain/domestic-order-detail-tabs";
+import type { DomesticOrderDetailTabVisibility } from "@/lib/auth/domestic-order-detail-tab-permissions";
+import { resolveActiveTabHref } from "@/lib/domain/domestic-order-detail-tabs";
+import { buildDomesticOrderDetailTabs } from "./domestic-order-detail-tabs-list";
 
 /**
  * 「기타건 상세」의 탭 줄 — 기본정보 · 견적서 · 발주서 · 승인 (2026-11-06).
@@ -20,39 +19,35 @@ import {
 type DomesticOrderDetailTabsProps = {
   id: string;
   /**
-   * 「견적서」 탭을 그릴까. **판정은 여기서 하지 않는다** — 이 조각은 클라이언트
+   * 어느 탭을 그릴까. **판정은 여기서 하지 않는다** — 이 조각은 클라이언트
    * 컴포넌트라 권한을 물어볼 수 없고, 물어볼 수 있더라도 화면이 내린 판정은
-   * 관문이 아니다. 상위 레이아웃(서버)이 `quotes` 영역의 READ 를 보고 넘겨준다 —
-   * 수리 건 상세가 같은 탭을 같은 열쇠로 가르는 것 그대로다.
+   * 관문이 아니다. 상위 레이아웃(서버)이 탭마다 정해진 열쇠를 보고 넘겨준다
+   * (`auth/domestic-order-detail-tab-access.ts` · 열쇠 표는 그 옆 파일에 있다).
    *
    * 🔴 **감추는 것은 막은 것이 아니다.** 주소를 직접 치면 그대로 들어와지므로
-   * `/domestic-orders/{id}/quotes` 페이지가 스스로 다시 확인한다. 여기서 감추는
+   * 탭마다 제 page.tsx 가 **같은 열쇠로** 한 번 더 확인한다. 여기서 감추는
    * 까닭은 눌러도 "권한이 없습니다"만 나오는 탭을 내밀지 않기 위해서다.
    *
    * 기본값을 두지 않는다 — 넘기는 것을 잊으면 tsc 가 잡는다. 기본 false 로
-   * 두면 조용히 안 보이고, 기본 true 로 두면 조용히 새어 나간다.
+   * 두면 조용히 안 보이고, 기본 true 로 두면 조용히 새어 나간다. 참/거짓 셋을
+   * 각각 받지 않고 꾸러미 하나로 받는 것도 같은 판단이다: 탭이 늘 때 넘기는 쪽이
+   * 한 칸을 빠뜨리면 그 역시 tsc 가 잡는다.
    *
-   * 🔵 **발주서 · 승인에는 짝이 없다.** 수리 건 쪽에서 발주서 탭을 가르던 열쇠는
-   * `domesticOrders` 였는데, 이 화면은 그 열쇠가 **이미 입장권**이다(레이아웃이
-   * requireAreaAccessForCurrentUser("domesticOrders") 로 막는다). 같은 열쇠를 한
-   * 번 더 물어 언제나 참인 값을 프롭으로 나르면 「가르고 있다」는 착각만 남는다.
-   * 막는 일은 각 페이지가 제자리에서 한다.
+   * 🔴 2026-11-12(둘째)에 `canViewQuotes: boolean` 하나에서 이 꾸러미로 바뀌었다.
+   * 그전에는 [발주서]·[승인]에 **짝이 없었다** — 그 둘을 가릴 수 있는 열쇠가 이
+   * 화면의 입장권(`domesticOrders`)뿐이었고, 같은 열쇠를 한 번 더 물어 봐야
+   * 언제나 참이라 「가르고 있다」는 착각만 남았기 때문이다. 그날 그 메뉴가 잎
+   * 넷으로 쪼개지면서 **입장권보다 좁은 열쇠**가 생겼고, 그래서 셋을 함께 받는다.
+   *
+   * 🔴 [기본정보]는 이 꾸러미에 **없다** — 가리지 않기로 한 탭이다(2026-11-12).
    */
-  canViewQuotes: boolean;
+  visibility: DomesticOrderDetailTabVisibility;
 };
 
-export default function DomesticOrderDetailTabs({ id, canViewQuotes }: DomesticOrderDetailTabsProps) {
+export default function DomesticOrderDetailTabs({ id, visibility }: DomesticOrderDetailTabsProps) {
   const pathname = usePathname();
 
-  // 주소는 도메인 헬퍼가 만들고, 라벨과 순서만 여기(화면)에서 정한다.
-  const hrefs = domesticOrderDetailHrefs(id);
-  const tabs = [
-    { label: "기본정보", href: hrefs.root },
-    ...(canViewQuotes ? [{ label: "견적서", href: hrefs.quotes }] : []),
-    { label: "발주서", href: hrefs.purchaseOrders },
-    { label: "승인", href: hrefs.approval },
-  ];
-
+  const tabs = buildDomesticOrderDetailTabs(id, visibility);
   const activeHref = resolveActiveTabHref(pathname, tabs.map((t) => t.href));
 
   return (
