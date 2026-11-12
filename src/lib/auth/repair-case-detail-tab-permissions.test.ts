@@ -17,7 +17,7 @@ import {
   requiredKeysOfRepairCaseDetailTab,
   type RepairCaseDetailTabKey,
 } from "./repair-case-detail-tab-permissions";
-import type { PermissionLevel } from "./permission-areas";
+import { meetsPermissionLevel, type PermissionLevel } from "./permission-areas";
 import { ROLE_CODES, type Role } from "@/lib/domain/types";
 
 /**
@@ -36,7 +36,10 @@ import { ROLE_CODES, type Role } from "@/lib/domain/types";
  *     곳을 잃고 오류 없이 조용히 기본값으로 되돌아간다.
  *  ③ 🔴 **[기본 정보]는 가리지 않는다** — 표에 그 칸이 없다(결정 그 자체다).
  *  ④ 🔴 **[견적서]·[발주서]는 지금 열쇠 그대로다** — 탭 전용 키를 만들지 않았다.
- *  ⑤ 새 셋은 「들어갈 수 있는가」 하나만 답한다(읽기 말고 고를 것이 없다).
+ *  ⑤ 새 셋 중 **둘**은 「들어갈 수 있는가」 하나만 답한다(읽기 말고 고를 것이 없다).
+ *     🔴 `repairCases.approval` 만 2026-11-12(셋째)에 **쓰기가 생겼다** — 「승인 요청을
+ *     올릴 수 있는가」다. 그 칸이 **골라도 아무것도 달라지지 않는 칸**이 아니라는 것을
+ *     같은 절에서 잰다.
  *  ⑥ 이름표가 화면의 탭 이름과 같다.
  *
  * 🔵 「막히는 사람」이 아니라 **「지금 보이는 사람이 계속 보이는가」**를 잰다 —
@@ -101,17 +104,75 @@ describe("① 🔴 기본값이 지금과 같다 — 새 잎 셋은 다섯 역�
     assert.equal(ROLE_CODES.length, 5, "역할 수가 달라졌다 — 이 파일의 표를 다시 잴 것");
   });
 
+  /**
+   * 🔴 **이 절이 지키는 것은 「탭이 보이는가」다 — 수준의 글자가 아니다.**
+   * 2026-11-12(셋째)에 `repairCases.approval` 에 쓰기가 생기면서 그 잎만 **셋이 WRITE**
+   * 가 됐는데, 그것은 「요청을 올릴 수 있는가」가 얹힌 것이고 **읽기(= 탭 보기)는 다섯
+   * 역할 전부 그대로**다. 그래서 「전부 READ 와 같은 글자인가」가 아니라 「전부 READ **이상**
+   * 인가」로 잰다 — 전자로 두면 쓰기가 생긴 날 멀쩡한 변경이 터지고, 터진 것을 고치다
+   * 보면 이 절이 진짜로 지키던 것(아무도 탭을 잃지 않는다)을 잃는다.
+   */
   for (const leafKey of NEW_TAB_LEAVES) {
-    test(`${leafKey} 는 다섯 역할 전부 READ 다`, () => {
+    test(`${leafKey} 는 다섯 역할 전부 **읽기 이상**이다 — 아무도 탭을 잃지 않는다`, () => {
       for (const role of ROLE_CODES) {
-        assert.equal(
-          baselineLeafLevel(leafKey, role),
-          "READ",
+        assert.ok(
+          meetsPermissionLevel(baselineLeafLevel(leafKey, role), "READ"),
           `${leafKey} / ${role}: 기본값이 닫혔다 — 배포 즉시 그 역할이 탭을 못 본다`
         );
       }
     });
   }
+
+  test("🔴 읽기 전용인 둘은 **정확히 READ** 다 — 그 둘에는 쓰기가 생기지 않았다", () => {
+    for (const leafKey of ["repairCases.workHistory", "repairCases.serviceReports"] as const) {
+      for (const role of ROLE_CODES) {
+        assert.equal(
+          baselineLeafLevel(leafKey, role),
+          "READ",
+          `${leafKey} / ${role}: 읽기 하나뿐이어야 하는 잎의 기본값이 달라졌다`
+        );
+      }
+    }
+  });
+
+  /**
+   * 🔴 **2026-11-12(셋째)의 핵심 불변식** — 「승인 요청을 올릴 수 있는 사람」이 그날
+   * 이전과 **한 칸도 달라지지 않았는가.**
+   *
+   * 그날까지 요청을 막던 것은 코드에 박힌 역할 셋 하나뿐이었다(mutations/
+   * repair-case-approvals.ts 의 REQUEST_ELIGIBLE_ROLES = 최고관리자 · 관리자 ·
+   * A/S 엔지니어, 같은 리터럴이 승인 카드 둘에도 있었다). 그것을 설정
+   * (`repairCases.approval` 쓰기)으로 옮기면서 **기본값이 그 셋 그대로**여야 한다 —
+   * 아무도 설정을 만지지 않은 상태가 종전 동작이다.
+   */
+  test("🔴 요청 가능 여부가 전과 같다 — 셋만 올릴 수 있고, 둘은 탭만 본다", () => {
+    const EXPECTED: Record<Role, { tab: boolean; request: boolean }> = {
+      SUPER_ADMIN: { tab: true, request: true },
+      ADMIN: { tab: true, request: true },
+      AS_ENGINEER: { tab: true, request: true },
+      // 🔴 이 둘이 이 시험의 알맹이다 — 요청은 못 하지만 **탭은 보인다.**
+      //    요청 자격 쪽으로 읽기까지 좁혔다면 여기서 터진다.
+      SALES: { tab: true, request: false },
+      INVENTORY_MANAGER: { tab: true, request: false },
+    };
+    // 표본이 비어서 공짜로 통과하지 않게 — 가를 것이 실제로 둘로 갈린다.
+    assert.equal(Object.values(EXPECTED).filter((e) => e.request).length, 3);
+    assert.equal(Object.values(EXPECTED).filter((e) => !e.request).length, 2);
+
+    for (const role of ROLE_CODES) {
+      const level = baselineLeafLevel("repairCases.approval", role);
+      assert.equal(
+        meetsPermissionLevel(level, "READ"),
+        EXPECTED[role].tab,
+        `${role}: [검수/승인] 탭 가시성이 달라졌다 (지금 ${level})`
+      );
+      assert.equal(
+        meetsPermissionLevel(level, "WRITE"),
+        EXPECTED[role].request,
+        `${role}: 승인 요청 가능 여부가 2026-11-12 이전과 달라졌다 (지금 ${level})`
+      );
+    }
+  });
 
   test("🔴 상한 계산을 빠뜨리지 않았다 — permission-baseline 의 default 로 떨어지면 NONE 이다", () => {
     for (const leafKey of NEW_TAB_LEAVES) {
@@ -246,8 +307,17 @@ describe("⑤ 표의 모든 열쇠가 실재하고, 수준은 전부 읽기다",
     assert.equal(counted, 9, "표의 열쇠 수가 달라졌다 — 사람이 한 번 더 볼 것");
   });
 
-  test("새 잎 셋은 고를 것이 「접근 불가 / 읽기」 둘뿐이다", () => {
-    for (const leafKey of NEW_TAB_LEAVES) {
+  /**
+   * 🔴 **이 시험은 2026-11-12(셋째)에 둘로 갈라졌다 — 느슨해진 것이 아니다.**
+   *
+   * 원래 새 잎 셋 전부가 「접근 불가 / 읽기」 둘뿐이었고, 그것이 지키던 것은
+   * 「**골라도 아무것도 달라지지 않는 칸**을 관리자에게 내밀지 않는다」였다. 그날
+   * `repairCases.approval` 에 쓰기가 생겼으므로 그 잎에 대해서는 같은 물음을
+   * **뒤집어** 묻는다: 그 칸이 **정말로 무언가를 바꾸는가.** 나머지 둘에는 원래 울타리가
+   * 그대로 필요하다 — 저 둘에 수준을 더하면 그때는 진짜로 빈 칸이 생긴다.
+   */
+  test("읽기 전용인 둘은 고를 것이 「접근 불가 / 읽기」 둘뿐이다", () => {
+    for (const leafKey of ["repairCases.workHistory", "repairCases.serviceReports"] as const) {
       assert.deepEqual(
         selectableLevelsOfLeaf(leafKey),
         ["NONE", "READ"],
@@ -259,6 +329,42 @@ describe("⑤ 표의 모든 열쇠가 실재하고, 수준은 전부 읽기다",
         `${leafKey}: 고를 것이 하나인데 수준별 설명이 달려 있다`
       );
     }
+  });
+
+  test("🔴 `repairCases.approval` 의 [읽기+쓰기]는 **빈 칸이 아니다**", () => {
+    assert.deepEqual(
+      selectableLevelsOfLeaf("repairCases.approval"),
+      ["NONE", "READ", "WRITE"],
+      "쓰기가 드롭다운에 나오지 않는다 — 관리자가 고를 수 없으면 옮긴 뜻이 없다"
+    );
+
+    // ① 설정이 **최종 판정**이다 — 넓혀도 안 열리는 칸이면 화면이 거짓말을 한다.
+    assert.equal(
+      isSettingsEnforced("repairCases.approval"),
+      true,
+      "넓혀도 실제로는 안 열린다고 화면이 말하게 된다"
+    );
+
+    // ② **기본값이 그 칸으로 갈린다** — 다섯 역할 중 셋만 쓰기다. 아무도 못 가지는
+    //    수준이라면 그 칸은 실제로 아무것도 바꾸지 않는 셈이다.
+    const withWrite = ROLE_CODES.filter((role) =>
+      meetsPermissionLevel(baselineLeafLevel("repairCases.approval", role), "WRITE")
+    );
+    assert.equal(withWrite.length, 3, `쓰기를 가진 역할이 셋이 아니다: ${withWrite.join(", ")}`);
+
+    // ③ 읽기와 쓰기가 **다른 일**을 가리킨다고 화면에 적혀 있다. 같은 말이면 고른
+    //    사람은 무엇이 달라지는지 알 수 없다(이 파일이 levelHints 를 요구하는 까닭).
+    const hints = findPermissionFeature("repairCases.approval")?.levelHints;
+    assert.ok(hints?.READ && hints.WRITE, "수준별 설명이 없다 — 고를 것이 둘인데 안내가 없다");
+    assert.notEqual(hints?.READ, hints?.WRITE, "읽기와 쓰기 설명이 같은 말이다");
+
+    // ④ 🔴 **탭 문턱은 읽기 그대로다.** 쓰기를 더하면서 여기까지 같이 올리면 요청을
+    //    못 하는 두 역할이 탭을 통째로 잃는다(결재 알림 종이 이 탭을 가리킨다).
+    //    🔵 「서버와 화면이 그 쓰기를 관문으로 읽는가」는 값으로 잴 수 없어
+    //    repair-case-approval-request-permission.test.ts 가 소스로 잰다.
+    assert.deepEqual(REPAIR_CASE_DETAIL_TAB_PERMISSIONS.approval, {
+      anyOf: [{ key: "repairCases.approval", level: "READ" }],
+    });
   });
 });
 

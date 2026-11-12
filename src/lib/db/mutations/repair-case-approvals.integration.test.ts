@@ -3,20 +3,24 @@ import "../../../../scripts/load-env";
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, inArray, like } from "drizzle-orm";
 import { db, pgClient } from "../connection";
 import {
+  auditLogs,
   customers,
   users,
   products,
   repairCases,
   repairCaseIntakeSequences,
   repairCaseApprovals,
+  rolePermissions,
 } from "../schema";
 import { createRepairCase } from "./repair-cases";
 import { requestRepairCaseApproval, decideRepairCaseApproval } from "./repair-case-approvals";
+import { saveRolePermissions } from "./role-permissions";
 import { loadRepairCaseFinalShipmentApprovalStates } from "../queries/repair-case-approvals";
 import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-case-input";
+import { ROLE_CODES, type Role } from "@/lib/domain/types";
 
 /**
  * Real-DB integration test for the approval request/decision mutations —
@@ -654,5 +658,171 @@ describe("loadRepairCaseFinalShipmentApprovalStates — 배지가 보는 묶음 
   test("🔵 빈 묶음은 질의 없이 빈 지도다", async () => {
     const states = await loadRepairCaseFinalShipmentApprovalStates([]);
     assert.equal(states.size, 0);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 승인 **요청** 자격은 [역할별 접근 권한]이 정한다 (2026-11-12 셋째)
+ * ============================================================================
+ * 그날까지 요청을 막던 유일한 자격 검사는 이 모듈 안의 하드코딩 역할 셋이었다
+ * (REQUEST_ELIGIBLE_ROLES = 최고관리자 · 관리자 · A/S 엔지니어, 같은 리터럴이 승인
+ * 카드 둘에도 있었다). 이제 관문은 `repairCases.approval` **쓰기** 하나다.
+ *
+ * 🔴 **여기서 재는 것은 진짜 DB 위의 서버 관문이다.** 화면이 단추를 감추는 것은
+ * 관문이 아니다 — 서버 액션을 바로 부르면 그대로 들어온다. 그래서 이 스위트는
+ * mutation 을 직접 부른다(이 파일의 다른 스위트와 같은 층 가르기).
+ *  ① 아무도 설정을 만지지 않았을 때 **다섯 역할의 답이 전과 같다**(셋만 통과).
+ *  ② [역할별 접근 권한]에서 **넓히면 실제로 열리고, 좁히면 막힌다.**
+ *
+ * 🔴 설정을 표에 손으로 넣지 않고 **저장 함수**(saveRolePermissions)로 넣는다 —
+ * 그래야 설정 화면이 **쓰는** 값과 이 관문이 **읽는** 값이 같은 모양인지까지 시험
+ * 하나가 잇는다. 표에 직접 넣으면 저장 쪽이 다른 키로 적고 있어도 멀쩡히 통과한다
+ * (repair-case-used-parts.integration.test.ts 가 같은 까닭으로 같은 길을 쓴다).
+ *
+ * 🔴 끝에서 **반드시 치운다.** 남으면 뒤따르는 시험이 기본값 대신 이 행을 보게 된다.
+ * ============================================================================
+ */
+describe("요청 자격 — [역할별 접근 권한]의 repairCases.approval 쓰기", () => {
+  const APPROVAL_LEAF = "repairCases.approval";
+
+  /** 이 스위트가 저장한 설정과 그때 남은 감사 자취를 되돌린다. */
+  async function clearStoredApprovalPermissions() {
+    // 🔴 **지우기 전에** 행 id 를 집어 둔다 — 감사 이력이 그 id 를 가리키고 있어서,
+    // 행을 먼저 지우면 가리킬 곳 없는 자취만 시험 DB 에 쌓인다.
+    const savedRows = await db
+      .select({ id: rolePermissions.id })
+      .from(rolePermissions)
+      .where(eq(rolePermissions.areaKey, APPROVAL_LEAF));
+    await db.delete(rolePermissions).where(eq(rolePermissions.areaKey, APPROVAL_LEAF));
+    if (savedRows.length > 0) {
+      await db.delete(auditLogs).where(
+        and(
+          eq(auditLogs.targetEntity, "role_permissions"),
+          inArray(
+            auditLogs.targetRecordId,
+            savedRows.map((row) => row.id)
+          )
+        )
+      );
+    }
+  }
+
+  async function approvalRowCount(repairCaseId: string): Promise<number> {
+    const rows = await db
+      .select({ id: repairCaseApprovals.id })
+      .from(repairCaseApprovals)
+      .where(eq(repairCaseApprovals.repairCaseId, repairCaseId));
+    return rows.length;
+  }
+
+  test("🔴 기본값: 다섯 역할의 요청 가능 여부가 2026-11-12 이전과 같다", async () => {
+    const EXPECTED: Record<Role, boolean> = {
+      SUPER_ADMIN: true,
+      ADMIN: true,
+      AS_ENGINEER: true,
+      // 🔴 이 둘이 전과 같이 막히는지가 이 시험의 알맹이다 — 설정으로 옮기면서
+      //    아무에게도 권한을 **더 주지 않았다**.
+      SALES: false,
+      INVENTORY_MANAGER: false,
+    };
+    // 표본이 비어서 공짜로 통과하지 않게.
+    assert.equal(ROLE_CODES.length, 5, "역할 수가 달라졌다 — 이 표를 다시 잴 것");
+    assert.equal(Object.values(EXPECTED).filter(Boolean).length, 3, "표본이 한쪽으로 쏠렸다");
+
+    for (const role of ROLE_CODES) {
+      const userId = await createTestUser({ role });
+      const caseId = await createTestCase();
+      const result = await requestRepairCaseApproval(caseId, "REPAIR_INSPECTION", userId, null);
+      assert.equal(
+        result.ok,
+        EXPECTED[role],
+        `${role}: 요청 가능 여부가 달라졌다 — ${JSON.stringify(result)}`
+      );
+      if (!result.ok) {
+        assert.equal(result.code, "FORBIDDEN");
+        // 🔴 막힌 요청은 **행을 한 줄도 남기지 않는다.** ok:false 만 보면 「거절해
+        //    놓고 이미 적은」 경우를 못 가른다.
+        assert.equal(await approvalRowCount(caseId), 0, `${role}: 막혔는데 행이 남았다`);
+      } else {
+        assert.equal(await approvalRowCount(caseId), 1, `${role}: 통과했는데 행이 없다`);
+      }
+    }
+  });
+
+  test("🔴 넓히면 실제로 열리고, 좁히면 막힌다 — 설정 **저장 경로**로 넣는다", async () => {
+    const superAdminId = await createTestUser({ role: "SUPER_ADMIN" });
+    const salesUserId = await createTestUser({ role: "SALES" });
+    const engineerUserId = await createTestUser({ role: "AS_ENGINEER" });
+
+    try {
+      const saved = await saveRolePermissions({
+        changes: [
+          // 기본값이 「읽기」(탭만 보임)인 역할에게 요청을 열어 준다.
+          { role: "SALES", levels: { [APPROVAL_LEAF]: "WRITE" } },
+          // 기본값이 「읽기+쓰기」인 역할에게서 요청만 걷어 간다 — 탭은 그대로 보인다.
+          { role: "AS_ENGINEER", levels: { [APPROVAL_LEAF]: "READ" } },
+        ],
+        // 🔴 기본 정책보다 **넓게** 주는 것은 최고관리자만 할 수 있다. 관리자로 부르면
+        //    영업 쪽이 조용히 기본값으로 깎인 채 ok:true 가 온다.
+        actorUserId: superAdminId,
+      });
+      assert.equal(saved.ok, true, `설정 저장이 거절됐다: ${JSON.stringify(saved)}`);
+      if (!saved.ok) return;
+      // 깎였으면 여기서 멈춘다 — ok 만 보면 「저장은 됐는데 아무 행도 안 생긴」 경우를
+      // 못 가른다.
+      assert.equal(saved.changedCount, 2, "두 역할 모두 실제로 저장돼야 한다");
+      // 🔴 이음새 그 자체 — 저장이 적어 넣은 (역할, 기능 키, 수준)이 아래 관문이 읽는
+      //    것과 같은 모양인가. 키 이름이 어긋나면 여기서 먼저 터진다.
+      assert.deepEqual(
+        Object.fromEntries(
+          (
+            await db
+              .select({ role: rolePermissions.role, level: rolePermissions.level })
+              .from(rolePermissions)
+              .where(eq(rolePermissions.areaKey, APPROVAL_LEAF))
+          ).map((row) => [row.role, row.level])
+        ),
+        { SALES: "WRITE", AS_ENGINEER: "READ" }
+      );
+
+      // ── 넓힌 쪽 — 기본값으로는 막히던 영업이 실제로 올린다 ──────────────────
+      const widenedCase = await createTestCase();
+      const widened = await requestRepairCaseApproval(
+        widenedCase,
+        "REPAIR_INSPECTION",
+        salesUserId,
+        "설정으로 열린 영업이 올린 요청"
+      );
+      assert.equal(widened.ok, true, `넓힌 설정이 실제로 열리지 않았다: ${JSON.stringify(widened)}`);
+      assert.equal(await approvalRowCount(widenedCase), 1, "열렸다는데 행이 없다");
+
+      // ── 좁힌 쪽 — 읽기만 남은 엔지니어는 **직접 불러도** 막힌다 ────────────
+      // 🔴 화면이 단추를 감추는 것만으로는 모자라다. 이 호출이 곧 「주소·액션으로
+      //    바로 들어온 사람」이다.
+      const narrowedCase = await createTestCase();
+      const narrowed = await requestRepairCaseApproval(
+        narrowedCase,
+        "REPAIR_INSPECTION",
+        engineerUserId,
+        null
+      );
+      assert.equal(narrowed.ok, false, "좁힌 설정이 막지 못했다");
+      if (narrowed.ok) return;
+      assert.equal(narrowed.code, "FORBIDDEN");
+      assert.equal(await approvalRowCount(narrowedCase), 0, "막혔는데 행이 남았다");
+    } finally {
+      await clearStoredApprovalPermissions();
+    }
+
+    // 치운 뒤에는 기본값으로 돌아온다 — 설정을 만지지 않은 상태가 종전 동작이다.
+    const backToDefaultCase = await createTestCase();
+    const backToDefault = await requestRepairCaseApproval(
+      backToDefaultCase,
+      "REPAIR_INSPECTION",
+      engineerUserId,
+      null
+    );
+    assert.equal(backToDefault.ok, true, "설정을 치웠는데도 엔지니어가 막힌다");
   });
 });

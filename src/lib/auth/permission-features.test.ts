@@ -8,6 +8,7 @@ import {
   areaLevelFromLeaves,
   featuresOfArea,
   findPermissionFeature,
+  fixedNoticeOf,
   hasFeatures,
   isPermissionLeafKey,
   isSettingsEnforced,
@@ -469,12 +470,25 @@ test("접수 건 수정이 남아 있는 한 '전체 A/S 현황'은 전환 완�
   assert.equal(isSettingsEnforced("repairCases"), false);
 });
 
-test("설정으로 건드릴 수 없는 노드는 권한 설정 화면 하나뿐이다", () => {
+test("설정으로 건드릴 수 없는 노드는 둘뿐이다 — 그리고 까닭이 서로 다르다", () => {
+  // 🔴 2026-11-12(넷째)에 `repairCases.edit` 이 **둘째 고정 노드**가 됐다(사용자 결정).
+  // 그 칸은 양방향 다 장식이었다 — hasPermission("repairCases.edit", …) 호출이
+  // 저장소에 0건이라 넓혀도 안 열리고 좁혀도 안 막혔다. 만질 수 있는데 아무 효과가
+  // 없는 칸은 고른 사람에게 거짓을 말한다.
+  //
+  // 이 시험을 남겨 두는 까닭은 그대로다: 고정 노드가 소리 없이 하나 더 생기면,
+  // 그 칸은 **화면에 보이는데 아무도 못 고치는** 칸이 된다. 늘리는 것은 결정이지
+  // 부작용이어서는 안 된다.
   const fixed = PERMISSION_AREAS.flatMap((area) => featuresOfArea(area.key)).filter(
     (feature) => feature.fixed
   );
   assert.deepEqual(
     fixed.map((feature) => feature.key),
-    ["users.rolePermissions"]
+    ["repairCases.edit", "users.rolePermissions"]
   );
+
+  // 🔴 **까닭이 둘이면 문장도 둘이어야 한다.** 한 문장이 모든 고정 칸을 덮던 때로
+  // 되돌아가면(화면에 글을 박아 두면) 여기서 걸린다.
+  const notices = fixed.map((feature) => fixedNoticeOf(feature.key));
+  assert.equal(new Set(notices).size, 2, `고정 칸 둘이 같은 안내를 쓴다: ${notices.join(" / ")}`);
 });

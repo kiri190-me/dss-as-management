@@ -142,6 +142,41 @@ test("갈 곳이 하나도 남지 않는 저장은 거절한다", async () => {
   if (!result.ok) assert.equal(result.code, "LOCKOUT");
 });
 
+test("🔴 장식 잎은 메뉴를 떠받치지 않는다 — 전부 닫으면 그 메뉴가 실제로 닫힌다", async () => {
+  /**
+   * 🔴 2026-11-12(넷째)에 `repairCases.edit`(접수 건 수정)이 고정이 됐다. 그 칸은
+   * 양방향 다 장식이라(넓혀도 안 열리고 좁혀도 안 막힌다) 만질 수 없게 잠근 것인데,
+   * **메뉴 수준은 잎들의 최대값**이라 잠긴 잎이 기본 정책값(영업에게 읽기+쓰기)으로
+   * '전체 A/S 현황'을 혼자 열린 채 붙잡는 일이 한 번 있었다 — 저장이 고정 잎을
+   * 건너뛰므로 관리자가 그 메뉴를 **영영 못 닫는** 상태였다('하위 기능 전부 닫기'를
+   * 눌러도 수준이 안 내려갔다).
+   *
+   * 그래서 장식 잎을 최대값 셈에서 뺐다(permission-features.ts 의
+   * `doesNotRaiseAreaLevel`). 이 시험은 그 성질을 **실제 저장 경로로** 잰다 — 위
+   * 「갈 곳이 하나도 남지 않는 저장」이 영업으로 다시 성립하는 것과 같은 뿌리다.
+   *
+   * 🔵 여기서는 그 메뉴 하나만 닫는다. 전부 닫으면 위 시험처럼 잠금으로 거절되어
+   * 「메뉴가 닫혔는가」를 볼 수 없다.
+   */
+  // 🔵 먼저 무엇을 재는지 못 박는다 — 이 잎의 기본값이 접근 불가면 공짜로 통과한다.
+  assert.equal(baselineLeafLevel("repairCases.edit", "SALES"), "WRITE");
+
+  const repairCaseLeaves = PERMISSION_LEAF_KEYS.filter((key) => key.startsWith("repairCases."));
+  assert.equal(repairCaseLeaves.length, 10, "전체 A/S 현황의 잎 수가 달라졌다");
+
+  const result = await saveRolePermissions({
+    changes: [{ role: "SALES", levels: Object.fromEntries(repairCaseLeaves.map((key) => [key, "NONE"])) }],
+    actorUserId: superAdminId,
+  });
+
+  assert.equal(result.ok, true);
+  // 고정 잎이라 행이 생기지 않는다 — 그래도 메뉴는 닫혀야 한다.
+  assert.equal(await storedLevel("SALES", "repairCases.edit"), null);
+  assert.equal(await hasPermission(roleOnlyActor("SALES"), "repairCases", "READ"), false);
+  // 🔵 다른 메뉴는 그대로다 — 잠금이 아니라 이 메뉴 하나를 닫은 것이다.
+  assert.equal(await hasPermission(roleOnlyActor("SALES"), "customers", "READ"), true);
+});
+
 test("한 역할이 거절되면 같이 보낸 다른 역할도 저장되지 않는다", async () => {
   // 여러 역할을 한 화면에서 편집하므로, 뒤엣것이 막혔는데 앞엣것만 저장되면
   // 권한이 반쯤 적용된 상태가 된다 — 무엇이 통하는지 아무도 모르게 된다.

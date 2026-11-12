@@ -15,6 +15,7 @@ import {
   areaLevelFromLeaves,
   featuresOfArea,
   findPermissionFeature,
+  fixedNoticeOf,
   hasFeatures,
   isSettingsEnforced,
   levelHintOfLeaf,
@@ -361,7 +362,15 @@ function AreaSummary({
         >
           하위 기능 전부 기본값으로
         </button>
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">최고관리자 줄은 바뀌지 않습니다.</span>
+        {/* 🔴 「고정 항목」을 2026-11-12(넷째)에 적어 넣었다. 위 두 단추는 **처음부터**
+            고정 항목을 건너뛰었는데(applyToArea 의 그 줄), 그전까지 고정이 '사용자 관리'
+            아래 하나뿐이라 눈에 띌 일이 거의 없었다. 같은 날 '접수 건 수정'이 고정이
+            되면서 사정이 달라진다 — 전체 A/S 현황에서 '전부 닫기'를 눌러도 그 잎이
+            기본값(읽기+쓰기)으로 남아 **메뉴 수준이 접근 불가로 안 내려간다.** 까닭을
+            적어 두지 않으면 단추가 고장 난 것으로 보인다. */}
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          고정 항목과 최고관리자 줄은 바뀌지 않습니다.
+        </span>
       </div>
 
       <div>
@@ -404,13 +413,20 @@ function LeafTable({
   const feature = findPermissionFeature(leafKey);
   const levels = selectableLevelsOfLeaf(leafKey);
   const isFixed = Boolean(feature?.fixed);
+  /**
+   * 🔴 2026-11-12(넷째)부터 **고정 칸마다 제 까닭**이 뜬다. 그전에는 여기 한 문장이
+   * 박혀 있었는데(「…되돌릴 사람이 아무도 남지 않습니다」), 그것은 '역할별 접근 권한
+   * 설정'의 까닭이라 같은 날 둘째 고정 칸이 된 '접수 건 수정'에 붙으면 **사실이
+   * 아니다.** 서로 다른 까닭을 한 문장으로 덮으면 둘 다 안 읽힌다 — 그래서 글은
+   * 잎이 들고(permission-features.ts 의 PermissionFixedNode), 여기서는 그리기만 한다.
+   */
+  const fixedNotice = fixedNoticeOf(leafKey);
 
   return (
     <div className="flex flex-col gap-3">
-      {isFixed && (
+      {fixedNotice && (
         <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
-          이 기능은 설정으로 여닫을 수 없습니다. 여기를 잠글 수 있게 하면, 잘못 저장한 순간 권한을
-          되돌릴 사람이 아무도 남지 않습니다.
+          {fixedNotice}
         </p>
       )}
 

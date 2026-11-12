@@ -139,6 +139,32 @@ function writesUsedPartsByDefault(role: Role): boolean {
 }
 
 /**
+ * 「검수/승인」의 **쓰기 기본값** — 2026-11-12(셋째) 전까지 코드가 최종 판정으로 쓰던
+ * 역할 셋 그대로다(SUPER_ADMIN · ADMIN · AS_ENGINEER).
+ *
+ * 🔴 **그 셋이 마지막으로 남는 자리가 여기다.** 그날까지 같은 리터럴이 **네 벌**
+ * 흩어져 있었다 — 서버 관문(mutations/repair-case-approvals.ts) · 승인 카드 둘
+ * (DatabaseRepairInspectionCard · DatabaseFinalShipmentCard) · local-demo 의
+ * transitions.ts. 앞의 셋은 걷어냈고(이제 전부 `repairCases.approval` 쓰기 하나를
+ * 본다), local-demo 쪽은 DB 모드가 아니라 그대로 두었다. 바로 위
+ * `writesUsedPartsByDefault` 와 **같은 모양·같은 까닭**이다.
+ *
+ * 🔴 여기 적힌 것은 **관문이 아니라 기본값**이다. 실효 권한을 정하는 것은 설정이고
+ * (permission-resolver.ts), 저장된 값이 있으면 이 함수의 답은 쓰이지 않는다. 그래서
+ * export 하지 않는다 — 밖에서 부를 수 있게 두면 그 순간 두 번째 관문이 된다.
+ *
+ * 🔴 위 `writesUsedPartsByDefault` 나 transitions.ts 의 REQUEST_ELIGIBLE_ROLES 를
+ * 가져다 쓰지 않는 까닭도 종전과 같다 — 지금 우연히 같은 셋일 뿐이고, 한쪽 정책이
+ * 바뀔 때 이 칸의 기본값이 조용히 따라 움직이면 안 된다.
+ *
+ * 🔵 **읽기는 이 함수를 타지 않는다** — 다섯 역할 전부 읽기다(아래 case 의 `read: true`).
+ * 탭을 보는 일과 요청을 올리는 일은 다른 물음이고, 결재 알림 종이 이 탭을 가리킨다.
+ */
+function requestsRepairCaseApprovalByDefault(role: Role): boolean {
+  return role === "SUPER_ADMIN" || role === "ADMIN" || role === "AS_ENGINEER";
+}
+
+/**
  * 참/거짓 사다리를 수준으로 접는다. 위에서부터 처음 참인 칸이 상한이다 —
  * "관리는 되는데 읽기는 안 된다" 같은 조합은 존재하지 않으므로 순서대로 본다.
  */
@@ -441,6 +467,10 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
      * 아무도 그 탭을 못 보게 된다.** 닫는 것은 관리자가 설정 화면에서 할 일이지 우리가
      * 미리 할 일이 아니다(2026-11-12 사용자 결정).
      *
+     * 🔴 **그중 `repairCases.approval` 만 같은 날(셋째) 쓰기가 생겨 아래로 갈라져 나갔다.**
+     * 읽기(= 탭 보기)는 여전히 다섯 역할 전부이고, 그 위에 「요청을 올릴 수 있는가」가
+     * 얹혔을 뿐이다 — 이 문단이 말하는 성질은 한 글자도 깨지지 않았다.
+     *
      * 🔴 부를 *-authorization.ts 함수가 **없다.** 지어내서 부르면 안 된다 — 예를 들어
      * 검수/승인에 결재 자격 함수를 끌어다 쓰면 「지금 보이는 사람이 계속 보인다」가
      * 깨진다(결재를 못 누르는 사람도 그 탭을 보고 있다). 보고서 쪽도 마찬가지로
@@ -451,8 +481,20 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
      */
     case "repairCases.workHistory":
     case "repairCases.serviceReports":
-    case "repairCases.approval":
       return "READ";
+
+    /**
+     * 🔴 **이 잎만 쓰기가 있다**(2026-11-12 셋째) — 「승인 요청을 올릴 수 있는가」가
+     * 코드에 박힌 역할 목록에서 이 값으로 옮겨 왔다(permission-features.ts 의 같은 잎).
+     *
+     * 🔴 **두 칸이 서로 다른 물음에 답한다. 한 칸도 달라지면 안 된다:**
+     *  · 읽기 — 탭을 보는가. 다섯 역할 전부다(위 둘과 같은 자리, 종 링크가 가리킨다).
+     *  · 쓰기 — 요청을 올리는가. 그날까지 올릴 수 있던 셋 그대로다.
+     * 그래서 `read` 가 **무조건 참**이다. 요청 자격 쪽으로 읽기까지 좁히면 요청을 못 하는
+     * 두 역할이 탭을 통째로 잃는다 — 이 조각에서 가장 조심한 자리다.
+     */
+    case "repairCases.approval":
+      return ladder({ write: requestsRepairCaseApprovalByDefault(role), read: true });
 
     // ── 진단 Flowchart 관리 ───────────────────────────────────────────────
     case "diagnosisFlowcharts.view":

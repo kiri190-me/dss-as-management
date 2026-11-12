@@ -24,6 +24,7 @@ export default function DatabaseApprovalScreen({
   inspectionAssigneeCandidates,
   routeSteps,
   actingApproverUserIds,
+  canRequestApproval,
 }: {
   resolved: ResolvedRepairCase;
   actingUser: ActingUser | null;
@@ -49,6 +50,18 @@ export default function DatabaseApprovalScreen({
    * CHECK) 대신할 단계가 애초에 없고, 안 쓰는 값을 넘겨 두면 언젠가 쓰인다.
    */
   actingApproverUserIds: readonly string[];
+  /**
+   * 🔴 **승인 요청을 올릴 수 있는가** — [역할별 접근 권한]의 `repairCases.approval`
+   * 쓰기다(2026-11-12 셋째). 서버(page.tsx)가 구해 내려준다.
+   *
+   * 🔴 **두 카드가 똑같이 받는다.** 그 전까지 카드마다 역할 셋을 리터럴로 들고
+   * 각자 판정했고(같은 목록이 세 벌이었다), 검수와 출하의 요청 자격은 처음부터
+   * 같은 값이었다 — 둘을 갈라 받으면 언젠가 한쪽만 고쳐진다.
+   *
+   * 🔵 **결재권이 아니다.** 승인·반려를 누를 수 있는가는 아래 decideAuthorization ·
+   * actingApproverUserIds · 지정 관문이 종전 그대로 정한다.
+   */
+  canRequestApproval: boolean;
 }) {
   if (!actingUser) {
     return (
@@ -89,6 +102,7 @@ export default function DatabaseApprovalScreen({
           actingUser={actingUser}
           currentVersion={resolved.version}
           assigneeCandidates={inspectionAssigneeCandidates}
+          canRequestApproval={canRequestApproval}
         />
         <DatabaseFinalShipmentCard
           repairCaseId={resolved.id}
@@ -99,6 +113,7 @@ export default function DatabaseApprovalScreen({
           currentVersion={resolved.version}
           routeSteps={shipmentRouteSteps}
           actingApproverUserIds={actingApproverUserIds}
+          canRequestApproval={canRequestApproval}
           // 이미 이 화면에 와 있는 값이다 — 서버도 조회도 새로 부르지 않는다.
           // 카드는 이것을 확인 창에 읽기 전용으로 넘기기만 한다.
           internalTargetShipmentDate={resolved.internalTargetShipmentDate}

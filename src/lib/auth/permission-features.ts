@@ -71,14 +71,85 @@ export type PermissionFeature = {
   /**
    * 설정으로 건드릴 수 없는 노드. 화면에는 보이되 '고정'으로 잠긴다.
    *
-   * 지금은 '역할별 접근 권한 설정' 하나뿐이다. 이 화면의 접근을 설정으로 막을 수
-   * 있게 하면 잘못 저장한 순간 아무도 되돌릴 수 없다 — 권한 설정 화면만은
-   * 설정보다 위에 있어야 한다(role-permission-authorization.ts). 목록에서 빼지
-   * 않고 잠가서 보여 주는 이유는, 안 보이면 "왜 이 역할은 권한 화면에 들어가지나"를
-   * 화면 어디에서도 알 수 없기 때문이다.
+   * 목록에서 빼지 않고 잠가서 보여 주는 이유는, 안 보이면 "왜 이 역할은 권한
+   * 화면에 들어가지나"를 화면 어디에서도 알 수 없기 때문이다.
+   *
+   * 🔴 **고정이면 levelHints 가 화면에 안 뜬다**(RolePermissionSettings.tsx 의
+   * `{!isFixed && …}`). 그래서 고정 노드에서 할 말은 **전부 description 과 아래
+   * notice 에** 담아야 한다 — levelHints 에 적어 두면 아무도 못 읽는다.
    */
-  fixed?: boolean;
+  fixed?: PermissionFixedNode;
 };
+
+/**
+ * '고정'의 사정. boolean 이 아닌 까닭은 **고정인 까닭이 둘**이고, 그 둘이 화면
+ * 문구와 메뉴 전환 판정 양쪽에서 갈리기 때문이다(2026-11-12 넷째).
+ *
+ *  · `users.rolePermissions` — 설정이 **표현할 수는 있는데 일부러 밖에 둔** 칸이다.
+ *    이 화면의 접근을 설정으로 막을 수 있게 하면 잘못 저장한 순간 아무도 되돌릴 수
+ *    없다(role-permission-authorization.ts).
+ *  · `repairCases.edit` — 설정이 **애초에 표현할 수 없는** 칸이다. 역할마다 고칠 수
+ *    있는 칸이 달라 4단계 사다리에 접히지 않는다(EDITABLE_FIELDS_BY_ROLE).
+ *
+ * 🔴 두 까닭을 한 문장으로 덮으면 **둘 다 안 읽힌다.** 2026-11-12 까지 화면에는
+ * 「되돌릴 사람이 아무도 남지 않습니다」 한 문장이 모든 고정 칸에 공통으로 붙어
+ * 있었는데, 그것은 위 첫째의 까닭이라 둘째 칸에 붙으면 **사실이 아니다.**
+ */
+export type PermissionFixedNode = {
+  /**
+   * 화면의 '고정' 안내 상자에 그대로 나가는 한 문단. 생략하면
+   * DEFAULT_FIXED_NOTICE 를 쓴다 — 새 고정 노드를 만들면서 까닭을 안 적어도
+   * 빈 상자가 뜨지는 않게 한다.
+   */
+  notice?: string;
+  /**
+   * 이 잎을 메뉴의 '하위가 전부 전환됐는가' 셈(isSettingsEnforced)에서 **뺄 것인가.**
+   *
+   * 🔵 기본값은 false(= 빼지 않고 센다)다. 고정이면서 전환도 안 된 잎이 하나라도
+   * 있으면 그 메뉴는 「아직 코드가 최종 판정」으로 남는 쪽이 사실에 가깝다 —
+   * 설정이 건드릴 수 없는 판정이 그 메뉴 안에 **실제로 살아 있다**는 뜻이기
+   * 때문이다. 담을 수 없을 때는 넓게 말하지 않는 쪽이 맞다(아래
+   * SETTINGS_ENFORCED_LEAVES 의 주간보고 문단과 같은 판단).
+   *
+   * 🔴 그래서 `users.rolePermissions` 만 true 다. 그 잎은 설정 밖에 **일부러** 둔
+   * 칸이라, 그것 때문에 '사용자 관리'가 영원히 전환 중으로 보이면 화면이 거짓말을
+   * 하는 셈이 된다. 반대로 `repairCases.edit` 는 지금도 코드가 최종 판정이라
+   * 세어야 한다 — '전체 A/S 현황'이 전환 완료로 보이면 안 된다.
+   *
+   * 🔵 아래 `doesNotRaiseAreaLevel` 과 **다른 물음**이다. 이쪽은 화면이 고를 말
+   * (「설정이 최종 판정인가」)을 정하고, 저쪽은 **실제 메뉴 수준**을 정한다. 한 잎에
+   * 둘이 함께 붙을 수도 있어서 칸을 따로 둔다.
+   */
+  excludedFromAreaTransition?: boolean;
+  /**
+   * 이 잎이 **메뉴 수준을 올리지 않는다**(areaLevelFromLeaves 의 최대값 셈에서 빠진다).
+   *
+   * 🔴 **장식 잎에만 붙인다.** `repairCases.edit` 이 그것이다 — 코드가 칸 단위로 실제
+   * 판정을 들고 있어서(EDITABLE_FIELDS_BY_ROLE) 이 잎의 설정값은 **아무 뜻도 없다.**
+   * 그런 잎이 메뉴 수준을 떠받치면 「접수 건 수정」 하나가 '전체 A/S 현황' 메뉴를
+   * 혼자 열린 채로 붙잡는다 — 고정이라 닫을 수도 없으니 **관리자가 그 메뉴를 영영 못
+   * 닫는다.** 실제로 그 상태를 한 번 만들어 보고 되돌린 자리다(2026-11-12 넷째):
+   * '하위 기능 전부 닫기'를 눌러도 메뉴 수준이 접근 불가로 안 내려갔고, 「갈 곳이
+   * 하나도 안 남는 저장」을 막는 관문이 영업에게는 닿을 수 없는 것이 되어 있었다.
+   *
+   * 🔴 **`users.rolePermissions` 에는 붙이지 않는다.** 그 잎은 장식이 아니다 —
+   * 설정으로 못 바꿀 뿐 「권한 설정 화면에 들어갈 수 있는가」라는 실제 판정을 담고
+   * 있고(role-permission-authorization.ts), '사용자 관리' 메뉴를 떠받치는 것이 맞다.
+   *
+   * 🔵 **빼도 지금 열린 문은 한 짝도 안 닫힌다**: 실측으로 다섯 역할 × 메뉴 21개의
+   * 수준이 빼기 전과 **한 칸도 다르지 않다**(permission-settings-truth.test.ts 의 표).
+   * `repairCases.files` 가 다섯 역할 전부 읽기+쓰기라 최대값을 그쪽이 들고 있다.
+   */
+  doesNotRaiseAreaLevel?: boolean;
+};
+
+/**
+ * 까닭을 따로 적지 않은 고정 노드에 붙는 안내. 2026-11-12 까지 **모든** 고정 칸에
+ * 붙던 그 문장 그대로다 — 기본값을 바꾸면 새 고정 노드가 생기는 날 조용히 다른
+ * 말을 하게 된다.
+ */
+const DEFAULT_FIXED_NOTICE =
+  "이 기능은 설정으로 여닫을 수 없습니다. 여기를 잠글 수 있게 하면, 잘못 저장한 순간 권한을 되돌릴 사람이 아무도 남지 않습니다.";
 
 type FeatureSeed = Omit<PermissionFeature, "key" | "areaKey">;
 
@@ -102,11 +173,41 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       maxMeaningfulLevel: "READ",
     },
     edit: {
+      // ── 🔴 2026-11-12(넷째): **고정으로 잠갔다** ───────────────────────────────
+      // 이 칸은 **양방향 다 장식이었다.** 저장 경로(server/actions/update-repair-case.ts)가
+      // 부르는 것은 `authorizeSubmittedFields` → `EDITABLE_FIELDS_BY_ROLE` 하드코딩 표이고,
+      // 화면도 `editableFieldsForRoleInSection` 을 직접 부른다. 🔴 `hasPermission(…
+      // "repairCases.edit" …)` 호출은 **저장소 전체에 0건**이다 — 넓혀도 안 열리고
+      // **좁혀도 안 막힌다.** 만질 수 있는데 아무 효과가 없는 칸은 고른 사람에게
+      // 「무언가 했다」고 믿게 하므로, 이 파일이 minMeaningfulLevel 을 두는 그 까닭으로
+      // 아예 만질 수 없게 했다(2026-11-12 사용자 결정).
+      //
+      // 🔴 **이것은 버그가 아니라 의도다.** 역할마다 고칠 수 있는 **칸**이 달라
+      // (예: 영업은 인수·고장 정보는 고치지만 제품 정보는 못 고친다) 4단계 사다리
+      // 한 칸으로 접히지 않는다 — 접으면 영업에게 제품 정보가 통째로 열린다.
+      // 아래 SETTINGS_ENFORCED_LEAVES 머리말이 그 결정의 원본이다.
+      //
+      // 🔴 **기본값(permission-baseline.ts 의 같은 case)은 건드리지 않았다.** 화면의
+      // 「기본 정책」 칸으로 계속 보여야 하고, 그 값이 메뉴 수준(= 잎들의 최대값)
+      // 계산에 들어간다 — 지우면 '전체 A/S 현황' 메뉴 수준이 통째로 내려앉는다.
+      //
+      // 🔴 **levelHints 를 걷어냈다.** 고정 노드에서는 화면이 그것을 아예 안 그리므로
+      // (RolePermissionSettings.tsx 의 `{!isFixed && …}`), 거기 적힌 「내용을 고칠 수
+      // 있습니다」는 **누구에게도 안 보이면서 아래 설명과 정반대인** 글이 된다.
+      // 역할별 실제 규칙은 전부 description 으로 옮겼다.
       label: "접수 건 수정",
       minMeaningfulLevel: "WRITE",
-      description: "접수·제품·고장 정보를 고칩니다.",
-      levelHints: { WRITE: "내용을 고칠 수 있습니다" },
+      description:
+        "지금 이 항목은 아무것도 여닫지 않습니다 — [읽기+쓰기]로 넓혀도 열리지 않고, [접근 불가]로 좁혀도 막히지 않습니다. 접수 건 상세 「기본 정보」 탭의 세 카드(인수 정보 · 제품 정보 · 고장 및 서비스 정보)는 역할마다 고칠 수 있는 칸이 서로 달라서, [접근 불가]와 [읽기+쓰기] 두 단으로 접히지 않습니다 — 접으면 지금 못 고치는 칸이 함께 열립니다. 그래서 칸 단위 목록을 코드가 그대로 들고 있고, 이 줄은 그 규칙을 보여 주기만 합니다. 실제 규칙은 이렇습니다. 최고관리자와 관리자는 세 카드의 모든 칸을 고칩니다. A/S 엔지니어는 인수 정보의 담당자 성함·연락처(전화)·연락처(이메일) 세 칸과 제품 정보의 「새 모델로 등록」만 빼고 전부 고칩니다. 영업 담당자는 인수 정보에서 유상/무상 · 우선순위 · 사내 목표 검수 완료일 · 사내 목표 완료일 · 실제 출하일 · 보고서번호를 고칠 수 없고, 고장 및 서비스 정보는 비고 한 칸만 고치며, 제품 정보는 [수정] 단추 자체가 뜨지 않습니다. 재고 담당자는 세 카드 모두 [수정] 단추가 없습니다 — 읽기 전용입니다. 이 규칙을 바꾸는 일은 설정이 아니라 코드(역할별 편집 가능 칸 목록)에서 합니다.",
       maxMeaningfulLevel: "WRITE",
+      fixed: {
+        notice:
+          "이 항목은 설정으로 여닫을 수 없습니다. 역할마다 고칠 수 있는 칸이 서로 달라 [접근 불가]와 [읽기+쓰기] 두 단으로 접히지 않아서, 어느 쪽을 골라도 실제로 달라지는 것이 없기 때문입니다. 지금 누가 무엇을 고치는지는 위 설명에 적어 두었습니다.",
+        // 🔴 **메뉴 수준을 떠받치지 않는다.** 아무것도 여닫지 않는 잎이 '전체 A/S 현황'
+        // 메뉴를 혼자 열린 채로 붙잡으면, 고정이라 닫을 수도 없어 관리자가 그 메뉴를
+        // 영영 못 닫는다 — 잠그고 나서 실제로 그렇게 됐다가 되돌린 자리다(그 칸 주석).
+        doesNotRaiseAreaLevel: true,
+      },
     },
     workRecords: {
       // 🔴 2026-11-12 에 이름표가 「작업 기록」에서 **「작업내용」**으로 바뀌었다.
@@ -228,11 +329,15 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
      * 있는 탭은 그 잎이 탭까지 가린다 — 못 쓰는 사람에게 탭만 보여 줄 까닭이 없고 설정
      * 개수도 늘지 않는다. 그래서 새로 만드는 것은 이 셋뿐이다.
      *
-     * 🔴 **셋 다 읽기 하나뿐이다.** 이들이 답하는 것은 「그 탭에 들어갈 수 있는가」 하나다.
-     * 탭 안에서 무엇을 저장할 수 있는가는 각자 제 판정을 이미 가지고 있다(보고서는
-     * auth/service-report-authorization.ts 가 `repairCases` 메뉴 수준으로, 검수/승인은
-     * 결재선·출하 위임이). 여기에 쓰기·관리를 만들면 고른 사람은 무언가 열었다고 믿지만
-     * 실제로는 아무것도 달라지지 않는다 — 이 파일이 minMeaningfulLevel 을 두는 그 까닭이다.
+     * 🔴 **셋 중 둘(작업 이력 · 보고서)은 읽기 하나뿐이다.** 그 둘이 답하는 것은 「그 탭에
+     * 들어갈 수 있는가」 하나다. 탭 안에서 무엇을 저장할 수 있는가는 각자 제 판정을 이미
+     * 가지고 있다(보고서는 auth/service-report-authorization.ts 가 `repairCases` 메뉴
+     * 수준으로). 거기에 쓰기·관리를 만들면 고른 사람은 무언가 열었다고 믿지만 실제로는
+     * 아무것도 달라지지 않는다 — 이 파일이 minMeaningfulLevel 을 두는 그 까닭이다.
+     *
+     * 🔴 **[검수/승인]만 2026-11-12(셋째)에 쓰기가 생겼다.** 「승인 요청을 올릴 수 있는가」가
+     * 실제로 그 값에 달리게 됐기 때문이다 — 고르면 **정말로 달라진다**(아래 그 잎의 주석).
+     * 읽기와 쓰기가 가리키는 일이 서로 달라서 levelHints 도 셋 중 그 잎에만 있다.
      *
      * 🔴 **기본값은 「지금처럼 보이게」다**(permission-baseline.ts 의 같은 셋). 닫아 두고
      * 시작하면 배포 즉시 아무도 그 탭을 못 본다. 닫는 것은 관리자가 하는 일이다.
@@ -259,17 +364,42 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       maxMeaningfulLevel: "READ",
     },
     approval: {
-      // 🔴 **결재권이 아니다.** 누가 승인·반려를 누를 수 있는가는 결재선과 출하 위임이
-      // 정하고(queries/shipment-delegations.ts · approval-route-delegations.ts), 이 값은
-      // 그 화면에 들어갈 수 있는가만 답한다. 결재 알림 종이 가리키는 곳도 이 탭이라,
-      // 닫으면 그 사람의 종 링크가 막힌 화면으로 간다 — 그래서 기본값을 열어 둔다.
+      // ── 🔴 **읽기와 쓰기가 가리키는 일이 다르다** (2026-11-12 셋째) ─────────────
+      //  · 읽기      = 「검수/승인」 탭에 들어갈 수 있다(그날까지의 뜻 그대로).
+      //  · 읽기+쓰기 = **승인 요청을 올릴 수 있다**(수리 검수 · 최종 출하 둘 다).
       //
-      // 🔴 **이번 조각에서 좁히지 않는다.** 결재와 관련돼 좁히고 싶어 보이지만, 운영에서
-      // 누가 이 탭을 쓰는지 우리는 모른다(2026-11-12 사용자 결정). 지금 보이는 사람이
-      // 계속 보여야 하고, 좁히는 것은 관리자가 설정 화면에서 한다.
+      // 🔴 **결재권은 둘 중 어느 쪽도 아니다.** 누가 승인·반려를 **누를** 수 있는가는
+      // 결재선과 출하 대표·위임이 정하고(queries/shipment-delegations.ts ·
+      // approval-route-delegations.ts), 이 값을 [읽기+쓰기]로 올려 줘도 그 사람은
+      // **올리는 쪽**만 열릴 뿐 결재자가 되지 않는다. 결재권을 주고 싶으면 결재선 판이나
+      // 출하 대표 지정을 손봐야 한다 — 이 화면에서 할 수 있는 일이 아니다.
+      //
+      // 🔴 **쓰기가 생기기 전에는 요청 자격이 코드에 박혀 있었다.** 역할 셋
+      // (최고관리자 · 관리자 · A/S 엔지니어)이 서버 관문과 승인 카드 둘에 **같은 리터럴로
+      // 세 벌** 베껴져 있었고 설정으로는 한 칸도 못 건드렸다. 이제 그 세 자리가 전부
+      // 이 값 하나를 본다(mutations/repair-case-approvals.ts ·
+      // repair-cases/[id]/approval/page.tsx 가 계산해 카드에 내려준다).
+      //
+      // 🔴 **탭에 들어가는 문턱은 읽기 그대로다**(repair-case-detail-tab-permissions.ts 의
+      // `approval` — level: "READ"). 요청은 못 해도 탭은 보여야 한다: 결재 알림 종이
+      // 가리키는 곳이 이 탭이라, 읽기를 닫으면 그 사람의 종 링크가 막힌 화면으로 간다.
+      // 그래서 기본값은 다섯 역할 전부 읽기이고, 그 위에 셋만 쓰기다 — 쓰기를 가진 셋은
+      // 2026-11-12 이전에 요청할 수 있던 바로 그 셋이라 아무것도 달라지지 않는다
+      // (auth/permission-baseline.ts 의 requestsRepairCaseApprovalByDefault).
+      //
+      // 🔵 **기타건 쪽과 일부러 다르다.** 저쪽은 요청 문턱이 `domesticOrders.edit` 다
+      // (줄을 쥔 사람이 올린다). 수리 건에서 같은 자리에 설 법한 `repairCases.edit` 는
+      // **구간별 편집 가능 필드**를 뜻하고(EDITABLE_FIELDS_BY_ROLE) 설정이 최종 판정도
+      // 아니라서(SETTINGS_ENFORCED_LEAVES 에 일부러 없다) 쓸 수 없었다. 「왜 다르지」에서
+      // 멈추지 않도록 적어 둔다 — 두 화면의 모양이 아니라 **그 잎이 뜻하는 것**이 다르다.
       label: "검수/승인",
-      description: "「검수/승인」 탭입니다. 이 건의 승인 요청과 결재 이력을 봅니다.",
-      maxMeaningfulLevel: "READ",
+      description:
+        "「검수/승인」 탭입니다. 읽기는 이 건의 승인 요청과 결재 이력을 보는 것이고, 읽기+쓰기는 수리 검수·최종 출하 승인을 올릴 수 있다는 뜻입니다. 승인·반려를 누르는 결재권은 이 값이 정하지 않습니다 — 결재선과 출하 대표·위임이 정합니다. 결재 알림 종이 이 탭을 가리키므로 [접근 불가]로 두면 그 사람의 종 링크가 막힌 화면으로 갑니다.",
+      levelHints: {
+        READ: "탭이 보이고, 승인 요청과 결재 이력을 봅니다",
+        WRITE: "승인을 올립니다 — 승인·반려를 누르는 결재권은 아닙니다",
+      },
+      maxMeaningfulLevel: "WRITE",
     },
   }),
 
@@ -347,7 +477,13 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       // 선택지가 여러 개 보이면 잠긴 이유를 오해하게 된다.
       minMeaningfulLevel: "MANAGE",
       maxMeaningfulLevel: "MANAGE",
-      fixed: true,
+      // 🔵 안내 문구를 적지 않는다 — 이 잎이 바로 DEFAULT_FIXED_NOTICE 의 주인이다
+      //    (「잘못 저장한 순간 되돌릴 사람이 아무도 남지 않습니다」). 2026-11-12(넷째)에
+      //    고정 노드가 둘이 되면서 문구를 잎마다 가를 수 있게 했지만, 이 칸의 문구는
+      //    **한 글자도 바뀌지 않았다.**
+      // 🔴 `excludedFromAreaTransition` 은 이 잎에만 true 다 — 자세한 까닭은
+      //    PermissionFixedNode 의 그 칸 주석.
+      fixed: { excludedFromAreaTransition: true },
     },
   }),
 
@@ -702,6 +838,26 @@ const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   "repairCaseNew",
   "excelKyosanIntakeList",
   "settings",
+  /**
+   * 🔴 기타건 현황(2026-11-12 넷째에 **뒤늦게** 넣었다). 2026-11-06 에 메뉴가 생길 때
+   * 함께 들어왔어야 하는 줄인데 빠져 있었고, **왜 빠졌는지 적어 둔 주석이 없다** —
+   * 일부러 뺀 흔적이 아무 데도 없으니 그냥 빠뜨린 것으로 본다(같은 모양의 「하위
+   * 기능 없는 메뉴」 열한 개는 전부 위아래에 적혀 있다).
+   *
+   * 빠져 있는 동안 화면은 이 칸에 대고 「넓혀도 실제로는 열리지 않을 수 있습니다」라는
+   * **거짓 경고**를 띄우고 있었다. 실제 관문은 app/(app)/misc-cases/page.tsx 의
+   * `requireAreaAccessForCurrentUser("miscCases")` 한 줄뿐이고, 그것은 설정만 본다
+   * (area-guard → permission-resolver). 뒤에 남은 역할 함수가 없으므로 넓히면 정말로
+   * 열리고 좁히면 정말로 막힌다.
+   *
+   * 🔵 **이 목록에 넣는 것은 화면의 말만 바꾼다.** `isSettingsEnforced` 를 부르는 자리는
+   * 저장소에 권한 설정 화면 한 곳뿐이고(components/users/RolePermissionSettings.tsx 의
+   * 그 문장), 판정 경로(permission-resolver)는 이 집합을 쳐다보지 않는다.
+   *
+   * 🔴 기타건 **상세**는 `domesticOrders` 가 지킨다 — 이 줄은 목록 화면 하나에 대한
+   * 말이다(misc-cases/page.tsx 머리말의 그 문단).
+   */
+  "miscCases",
   // 액션·페이지가 모두 이 설정만 본다(2026-08-31 전환). 예전에는 역할 함수와
   // AND 였다 — 자세한 경위는 actions/repair-labor.ts 주석에 있다.
   "repairLabor",
@@ -744,9 +900,16 @@ export function isSettingsEnforced(key: string): boolean {
   if (SETTINGS_ENFORCED_AREAS.has(key)) return true;
   // 하위 기능이 없는 메뉴는 그 메뉴 자체가 잎이다.
   if (!hasFeatures(key)) return SETTINGS_ENFORCED_LEAVES.has(key);
-  // 고정 노드는 설정 대상이 아니므로 '전부 전환됐는가' 판정에서 뺀다 —
+  // 고정 노드 가운데 **설정 밖에 일부러 둔 것만** '전부 전환됐는가' 판정에서 뺀다 —
   // 넣어 두면 '사용자 관리'는 영원히 전환 중으로 보인다.
-  const children = featuresOfArea(key).filter((feature) => !feature.fixed);
+  //
+  // 🔴 2026-11-12(넷째)에 `!feature.fixed` 에서 이 모양으로 바뀌었다. 그날 고정 노드가
+  // 둘이 됐는데, 둘째(`repairCases.edit`)는 **지금도 코드가 최종 판정**이라 빼면 안 된다
+  // — 빼는 순간 '전체 A/S 현황'이 전환 완료로 보이고, 그러면 칸 단위 편집 권한이
+  // 설정으로 넘어온 것처럼 읽힌다(PermissionFixedNode 의 그 칸 주석).
+  const children = featuresOfArea(key).filter(
+    (feature) => !feature.fixed?.excludedFromAreaTransition
+  );
   return children.length > 0 && children.every((feature) => SETTINGS_ENFORCED_LEAVES.has(feature.key));
 }
 
@@ -803,16 +966,28 @@ export function maxMeaningfulLevelOfLeaf(leafKey: string): PermissionLevel {
  * 두면 한 곳만 고쳐지는 날이 오고, 그러면 "화면에는 열려 보이는데 실제로는
  * 막히는"(또는 그 반대의) 어긋남이 생긴다. 그래서 값을 인자로 받는 순수 함수로
  * 한 번만 적는다 — 부르는 쪽이 저장된 값이든 초안이든 넘기면 된다.
+ *
+ * 🔴 **장식 잎은 최대값 셈에서 뺀다**(2026-11-12 넷째 — 위 `doesNotRaiseAreaLevel`).
+ * 아무것도 여닫지 않는 잎이 메뉴를 혼자 열린 채로 떠받치면, 그 잎이 고정이라 닫을
+ * 수도 없어 **관리자가 그 메뉴를 영영 못 닫는다.** 지금 그런 잎은 `repairCases.edit`
+ * 하나뿐이고, 빼도 다섯 역할 × 메뉴 21개의 수준이 **한 칸도 달라지지 않는다**(실측 —
+ * permission-settings-truth.test.ts 의 표가 그것을 지킨다). 🔵 최대값에서 하나를 빼는
+ * 일이라 방향은 언제나 **닫히는 쪽**이다 — 이 함수가 없던 권한을 만들어 낼 수는 없다.
+ *
+ * 🔵 하위 기능이 없는 메뉴(메뉴 자체가 잎)는 걸러낼 것이 없다 — 그 한 잎을 빼면
+ * 메뉴가 언제나 접근 불가가 되므로, 그런 잎에는 이 표시를 붙이지 않는다.
  */
 export function areaLevelFromLeaves(
   areaKey: string,
   levelOf: (leafKey: string) => PermissionLevel
 ): PermissionLevel {
   if (!hasFeatures(areaKey)) return levelOf(areaKey);
-  return featuresOfArea(areaKey).reduce<PermissionLevel>((acc, feature) => {
-    const level = levelOf(feature.key);
-    return permissionLevelRank(level) > permissionLevelRank(acc) ? level : acc;
-  }, "NONE");
+  return featuresOfArea(areaKey)
+    .filter((feature) => !feature.fixed?.doesNotRaiseAreaLevel)
+    .reduce<PermissionLevel>((acc, feature) => {
+      const level = levelOf(feature.key);
+      return permissionLevelRank(level) > permissionLevelRank(acc) ? level : acc;
+    }, "NONE");
 }
 
 /** 이 잎에서 의미가 있는 가장 낮은 수준(접근 불가 제외). 기본은 읽기다. */
@@ -845,4 +1020,18 @@ export function selectableLevelsOfLeaf(leafKey: string): PermissionLevel[] {
  */
 export function levelHintOfLeaf(leafKey: string, level: PermissionLevel): string | undefined {
   return FEATURE_BY_KEY.get(leafKey)?.levelHints?.[level];
+}
+
+/**
+ * 이 잎이 '고정'이면 화면의 안내 상자에 띄울 한 문단. 고정이 아니면 undefined 다.
+ *
+ * 🔴 **까닭이 다른 고정 칸에 같은 문장을 붙이면 둘 다 안 읽힌다.** 그래서 문구를
+ * 화면이 아니라 잎이 들고 있다(PermissionFixedNode 의 머리말). 화면은 이 함수가
+ * 돌려주는 글을 그대로 그리기만 한다 — 거기에 문장을 적어 두면 고정 칸이 늘어날
+ * 때마다 한 문장이 전부를 덮게 된다.
+ */
+export function fixedNoticeOf(leafKey: string): string | undefined {
+  const fixed = FEATURE_BY_KEY.get(leafKey)?.fixed;
+  if (!fixed) return undefined;
+  return fixed.notice ?? DEFAULT_FIXED_NOTICE;
 }

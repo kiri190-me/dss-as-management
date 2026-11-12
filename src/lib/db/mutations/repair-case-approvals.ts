@@ -4,6 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { repairCaseApprovals, repairCases, shipmentApprovalDelegations, users } from "../schema";
 import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import {
   approvalFollowsRoute,
   delegatedFromUserIdFor,
@@ -28,15 +29,30 @@ const delegationRepresentative = alias(users, "delegation_representative");
 /**
  * Database-backed approval request/decision persistence, replacing the
  * localStorage-only approval subsystem (src/lib/domain/local/approval/) for
- * DATABASE-sourced repair cases. Reuses the same role-eligibility values
- * the local layer already established (REQUEST_ELIGIBLE_ROLES/
- * INSPECTION_DECIDE_ELIGIBLE_ROLES in transitions.ts) as literals here
- * rather than importing them — this module deliberately has no dependency
- * on the local-demo domain layer (same layering choice
- * workflow-transitions.ts already makes for
- * checkTransitionEligibility/checkHoldEligibility, which it *does* import,
- * since those are pure/framework-agnostic; role-list literals are simple
- * enough to duplicate rather than reach across the mock/DB boundary for).
+ * DATABASE-sourced repair cases.
+ *
+ * ── 🔴 요청 자격은 [역할별 접근 권한]으로 옮겨 갔다 (2026-11-12 셋째) ────────
+ * 그 전까지 「누가 승인을 올릴 수 있는가」는 이 파일의 리터럴
+ * (REQUEST_ELIGIBLE_ROLES = 최고관리자 · 관리자 · A/S 엔지니어)이었고, **같은 셋이
+ * 승인 카드 둘에도 베껴져** 있었다. 이제 관문은
+ * `hasPermission(actor, "repairCases.approval", "WRITE")` **한 줄**이고, 화면 카드
+ * 둘은 제가 역할을 계산하지 않고 **서버가 내려준 값**을 받는다
+ * (repair-cases/[id]/approval/page.tsx 의 canRequestApproval).
+ *
+ * 🔴 **문턱을 둘로 늘리지 않았다 — 역할 목록을 남겨 AND 로 묶지 않았다.** 그러면
+ * 「권한 화면에서 열어 줬는데 왜 안 되지」가 생기고, 그 상태는 설정 화면이
+ * 「넓히면 실제로 열립니다」라고 거짓말을 하게 만든다(permission-features.ts 의
+ * SETTINGS_ENFORCED_LEAVES 주석). 🔵 **기본값은 그 셋 그대로**라 아무도 설정을
+ * 만지지 않으면 전과 한 칸도 다르지 않다(auth/permission-baseline.ts 의
+ * requestsRepairCaseApprovalByDefault).
+ *
+ * 🔵 **결재(승인·반려) 쪽은 한 글자도 바뀌지 않았다.** 검수 결재는 아래
+ * INSPECTION_DECIDE_ELIGIBLE_ROLES 가, 최종 출하 결재는 결재선·출하 대표·위임이
+ * 종전대로 정한다. 그 목록을 이 파일이 리터럴로 쥐고 있는 까닭도 종전과 같다 —
+ * 이 모듈은 local-demo 도메인 층(transitions.ts)에 의존을 만들지 않는다(같은 층
+ * 가르기를 workflow-transitions.ts 가 이미 한다: 순수 함수인
+ * checkTransitionEligibility/checkHoldEligibility 는 import 하고, 역할 목록은
+ * 베껴 적는다).
  *
  * FINAL_SHIPMENT decision eligibility: either the actor is a currently-
  * eligible representative (direct — delegated_from_user_id stays null), or
@@ -107,7 +123,6 @@ const delegationRepresentative = alias(users, "delegation_representative");
  * 바뀌지 않았다.
  */
 
-const REQUEST_ELIGIBLE_ROLES = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const;
 /**
  * 검수 승인을 **결재할 수 있는** 역할. 내보내는 이유는 하나뿐이다:
  * queries/repair-case-approvals.ts 의 「지정 후보 목록」이 **같은 목록**으로
@@ -169,9 +184,21 @@ export async function requestRepairCaseApproval(
         .from(users)
         .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
       if (!actor) fail("FORBIDDEN", "사용자 정보를 확인할 수 없습니다.");
+      // 🔴 자격은 [역할별 접근 권한]의 `repairCases.approval` **쓰기** 하나가 정한다
+      // (파일 머리말). 개발자 표시 승격도 그 안에서 함께 일어나므로
+      // actorHasAllowedRole 을 겹쳐 부르지 않는다 — 두 번 물으면 두 문턱이 된다.
+      //
+      // 🔴 계정 **승인 상태**는 그 앞에 그대로 둔다. 설정이 답하는 것은 「어느 역할이
+      // 올릴 수 있는가」이고, 「이 계정이 지금 쓸 수 있는 상태인가」는 4단계 사다리가
+      // 애초에 말할 수 없는 다른 물음이다(permission-features.ts 맨 위 '여기서 정하지
+      // 않는 것'). 설정을 넓혀도 승인되지 않은 계정은 여전히 막힌다.
+      //
+      // 🔴 화면 카드 둘이 보는 값과 **같은 열쇠**여야 한다
+      // (repair-cases/[id]/approval/page.tsx 의 canRequestApproval) — 갈리는 날
+      // 「단추는 보이는데 눌러도 거절」이나 그 반대가 되고, 뒤쪽은 아무 표시도 남기지 않는다.
       if (
         actor.approvalStatus !== "APPROVED" ||
-        !actorHasAllowedRole(actor, REQUEST_ELIGIBLE_ROLES)
+        !(await hasPermission(actor, "repairCases.approval", "WRITE"))
       ) {
         fail("FORBIDDEN", "이 작업을 수행할 권한이 없습니다.");
       }

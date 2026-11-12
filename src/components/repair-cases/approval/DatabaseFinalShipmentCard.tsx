@@ -6,10 +6,11 @@ import { showSavePopup } from "@/components/common/SavePopup";
 import ApprovalRouteDiagram, { markForRouteStep } from "@/components/approvals/ApprovalRouteDiagram";
 import DatabaseApprovalCard, { type DatabaseApprovalActionButton } from "./DatabaseApprovalCard";
 import ApprovalActionDialog from "./ApprovalActionDialog";
-import { UNSET_TARGET_SHIPMENT_DATE_TEXT } from "./approval-texts";
+import { APPROVAL_REQUEST_NOT_PERMITTED_TEXT, UNSET_TARGET_SHIPMENT_DATE_TEXT } from "./approval-texts";
 import { requestRepairCaseApprovalAction, decideRepairCaseApprovalAction } from "@/lib/server/actions/repair-case-approvals";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
-import { actorHasAllowedRole } from "@/lib/auth/developer-promotion";
+// 🔵 `actorHasAllowedRole` 를 더는 들여오지 않는다 — 이 카드에서 역할로 판정하던
+// 유일한 자리가 요청 자격이었고, 그것이 설정으로 옮겨 갔다(아래 canRequestApproval).
 import {
   approvalFollowsRoute,
   delegatedFromUserIdFor,
@@ -24,7 +25,16 @@ import type { ShipmentDecideAuthorization } from "@/lib/db/queries/shipment-dele
 import type { DatabaseDisplayApprovalStatus } from "./DatabaseApprovalStatusBadge";
 import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
 
-const REQUEST_ELIGIBLE_ROLES = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const;
+/**
+ * 🔴 **요청 자격 목록(REQUEST_ELIGIBLE_ROLES)은 여기서 걷어냈다**(2026-11-12 셋째).
+ * 이제 서버가 [역할별 접근 권한]의 `repairCases.approval` 쓰기로 판정해
+ * `canRequestApproval` 로 내려준다(검수 카드와 **같은 값**이다 — 두 요청의 자격은
+ * 처음부터 같았고, 갈라 두면 언젠가 한쪽만 고쳐진다).
+ *
+ * 🔵 **결재 자격은 이 파일에 애초에 없었다** — 최종 출하 승인은 결재선·출하 대표·위임이
+ * 정하고, 그 판정은 서버가 `decideAuthorization` · `actingApproverUserIds` 로 내려준다.
+ * 이번 변경이 그 길을 한 글자도 건드리지 않았다.
+ */
 
 type DialogState = "REQUEST" | "APPROVED" | "REJECTED" | null;
 
@@ -75,6 +85,7 @@ export default function DatabaseFinalShipmentCard({
   routeSteps,
   actingApproverUserIds,
   internalTargetShipmentDate,
+  canRequestApproval,
 }: {
   repairCaseId: string;
   record: ApprovalRecordRow | null;
@@ -122,6 +133,15 @@ export default function DatabaseFinalShipmentCard({
    * UNSET_TARGET_SHIPMENT_DATE_TEXT).
    */
   internalTargetShipmentDate: string | null;
+  /**
+   * 🔴 **출하 승인을 올릴 수 있는가** — 서버가 [역할별 접근 권한]의
+   * `repairCases.approval` 쓰기로 구해 내려준다(repair-cases/[id]/approval/page.tsx).
+   * 요청을 실제로 받는 mutation 이 보는 것과 **같은 열쇠**다.
+   *
+   * 🔵 **결재권과 아무 상관이 없다.** 승인·반려를 누를 수 있는가는 위
+   * `decideAuthorization` · `actingApproverUserIds` · 지정 관문이 종전대로 정한다.
+   */
+  canRequestApproval: boolean;
 }) {
   const router = useRouter();
   const [dialogState, setDialogState] = useState<DialogState>(null);
@@ -129,7 +149,6 @@ export default function DatabaseFinalShipmentCard({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const displayStatus = displayStatusOf(record, currentVersion);
-  const requestEligible = actorHasAllowedRole(actingUser, REQUEST_ELIGIBLE_ROLES);
   // 이 요청이 결재선을 타는가 — 서버가 실제로 판정하는 것과 **같은 함수**를
   // 부른다. 참이면 절차가 「출하 대표」를 대신하므로 대표·위임을 보지 않는다.
   const followsRoute = record !== null && approvalFollowsRoute(record);
@@ -174,7 +193,7 @@ export default function DatabaseFinalShipmentCard({
         displayStatus === "STALE"
           ? "승인 이후 접수 건이 변경되어(단계 진행 포함) 이 출하 승인은 무효입니다. 수리 검수 승인부터 다시 받아야 합니다."
           : "수리 검수 승인이 완료된 후 최종 출하 승인을 요청할 수 있습니다.";
-    } else if (requestEligible) {
+    } else if (canRequestApproval) {
       actions.push({
         key: "request",
         label: displayStatus === "NOT_REQUESTED" ? "출하 승인 요청" : "출하 재요청",
@@ -184,7 +203,10 @@ export default function DatabaseFinalShipmentCard({
         blockedNotice = "승인 이후 접수 건이 변경되어(단계 진행 포함) 이 승인은 더 이상 유효하지 않습니다. 다시 요청해 주세요.";
       }
     } else {
-      disabledReason = "최고관리자·관리자·A/S 엔지니어만 요청할 수 있습니다.";
+      // 🔴 **역할 이름을 적지 않는다**(2026-11-12 셋째) — 검수 카드와 같은 문구·같은
+      // 까닭이다. 설정으로 열고 닫게 된 뒤로 역할 이름을 적은 안내는 거짓이 될 수 있다.
+      // 🔴 글자를 여기 적지 않는다 — 두 카드가 **같은 상수 한 곳**을 부른다.
+      disabledReason = APPROVAL_REQUEST_NOT_PERMITTED_TEXT;
     }
   } else if (displayStatus === "REQUESTED") {
     if (!followsRoute && !decideAuthorization.allowed) {

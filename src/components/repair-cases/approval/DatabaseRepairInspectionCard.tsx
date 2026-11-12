@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
 import DatabaseApprovalCard, { type DatabaseApprovalActionButton } from "./DatabaseApprovalCard";
+import { APPROVAL_REQUEST_NOT_PERMITTED_TEXT } from "./approval-texts";
 import ApprovalActionDialog, { type ApprovalAssigneeOption } from "./ApprovalActionDialog";
 import { requestRepairCaseApprovalAction, decideRepairCaseApprovalAction } from "@/lib/server/actions/repair-case-approvals";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
@@ -17,7 +18,16 @@ import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
 import type { DatabaseDisplayApprovalStatus } from "./DatabaseApprovalStatusBadge";
 import { resolveApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
 
-const REQUEST_ELIGIBLE_ROLES = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const;
+/**
+ * 🔴 **요청 자격 목록(REQUEST_ELIGIBLE_ROLES)은 여기서 걷어냈다**(2026-11-12 셋째).
+ * 이제 서버가 [역할별 접근 권한]의 `repairCases.approval` 쓰기로 판정해
+ * `canRequestApproval` 로 내려준다 — 화면이 역할을 다시 세면 설정을 넓혀도 단추가
+ * 안 생기거나(또는 그 반대) 하는 어긋남이 생긴다.
+ *
+ * 🔵 **결재 자격은 그대로 여기 있다.** 검수 승인을 누를 수 있는 역할은 이번 변경과
+ * 아무 상관이 없고(결재선·출하 위임·지정 관문이 정하는 영역), 서버의 같은 목록
+ * (mutations/repair-case-approvals.ts 의 INSPECTION_DECIDE_ELIGIBLE_ROLES)과 짝이다.
+ */
 const DECIDE_ELIGIBLE_ROLES = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"] as const;
 
 type DialogState = "REQUEST" | "APPROVED" | "REJECTED" | null;
@@ -51,6 +61,7 @@ export default function DatabaseRepairInspectionCard({
   actingUser,
   currentVersion,
   assigneeCandidates,
+  canRequestApproval,
 }: {
   repairCaseId: string;
   record: ApprovalRecordRow | null;
@@ -63,6 +74,15 @@ export default function DatabaseRepairInspectionCard({
    * 그대로 된다.
    */
   assigneeCandidates: ApprovalAssigneeOption[];
+  /**
+   * 🔴 **승인을 올릴 수 있는가** — 서버가 [역할별 접근 권한]의 `repairCases.approval`
+   * 쓰기로 구해 내려준다(repair-cases/[id]/approval/page.tsx). 요청을 실제로 받는
+   * mutation 이 보는 것과 **같은 열쇠**다.
+   *
+   * 🔵 이 카드가 들어 있는 탭에 **들어오는** 문턱은 같은 잎의 **읽기**다 — 요청을 못
+   * 하는 사람도 이 카드를 본다(결재만 하는 사람, 종 알림을 따라온 사람).
+   */
+  canRequestApproval: boolean;
 }) {
   const router = useRouter();
   const [dialogState, setDialogState] = useState<DialogState>(null);
@@ -70,7 +90,6 @@ export default function DatabaseRepairInspectionCard({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const displayStatus = displayStatusOf(record, currentVersion);
-  const requestEligible = actorHasAllowedRole(actingUser, REQUEST_ELIGIBLE_ROLES);
   const decideEligible = actorHasAllowedRole(actingUser, DECIDE_ELIGIBLE_ROLES);
   // 자격(위)을 통과한 **뒤** 보는 관문이다. 서버가 실제로 강제하는 것과 같은
   // 함수를 부른다 — 여기서 따로 계산하면 「단추는 보이는데 누르면 거절」이나
@@ -101,7 +120,7 @@ export default function DatabaseRepairInspectionCard({
   // STALE도 요청을 다시 열어야 하는 상태다. 서버는 이미 재요청을 받아 준다
   // (대기 중인 요청이 있을 때만 막는다) — 막고 있던 것은 화면뿐이었다.
   if (displayStatus === "NOT_REQUESTED" || displayStatus === "REJECTED" || displayStatus === "STALE") {
-    if (requestEligible) {
+    if (canRequestApproval) {
       actions.push({
         key: "request",
         label: displayStatus === "NOT_REQUESTED" ? "검수 승인 요청" : "재요청",
@@ -116,7 +135,13 @@ export default function DatabaseRepairInspectionCard({
         blockedNotice = "승인 이후 접수 건이 변경되어(단계 진행 포함) 이 승인은 더 이상 유효하지 않습니다. 다시 요청해 주세요.";
       }
     } else {
-      disabledReason = "최고관리자·관리자·A/S 엔지니어만 요청할 수 있습니다.";
+      // 🔴 **역할 이름을 적지 않는다**(2026-11-12 셋째). 이 자리가 설정으로 열리고
+      // 닫히게 된 뒤로 「최고관리자·관리자·A/S 엔지니어만」은 거짓이 될 수 있다 —
+      // 관리자가 엔지니어에게서 쓰기를 걷어 간 순간, 엔지니어가 「A/S 엔지니어만 요청할
+      // 수 있습니다」를 읽는다. 대신 **어느 칸을 열어야 하는지**를 적는다(출하 카드와
+      // 같은 문구이고, 기타건 쪽도 같은 모양이다 — DomesticOrderApprovalPanel).
+      // 🔴 글자를 여기 적지 않는다 — 두 카드가 **같은 상수 한 곳**을 부른다.
+      disabledReason = APPROVAL_REQUEST_NOT_PERMITTED_TEXT;
     }
   } else if (displayStatus === "REQUESTED") {
     if (!decideEligible) {

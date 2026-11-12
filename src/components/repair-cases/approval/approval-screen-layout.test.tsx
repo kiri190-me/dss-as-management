@@ -10,7 +10,7 @@ import ApprovalActionDialog from "./ApprovalActionDialog";
  * 시작하면(server-only 사슬 끝, "use client", React) 이 시험 파일이 **여기서**
  * 죽는다. 아래 머리말이 말하는 그 사슬이다.
  */
-import { UNSET_TARGET_SHIPMENT_DATE_TEXT } from "./approval-texts";
+import { APPROVAL_REQUEST_NOT_PERMITTED_TEXT, UNSET_TARGET_SHIPMENT_DATE_TEXT } from "./approval-texts";
 import { standsInForAssignedApprover } from "@/lib/auth/approval-assignment";
 import { isRouteStepSkippedForRequester } from "@/lib/domain/shipment-approval-route";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
@@ -1610,12 +1610,50 @@ describe("🔴 수리 검수 승인 카드 — 무효가 된 승인의 안내", 
     assert.ok(shipmentCardSource.includes(STALE_NOTICE), "출하 카드 쪽 문구가 갈라졌다");
   });
 
+  /**
+   * 🔴 **2026-11-12(셋째)에 이 시험의 글자가 바뀌었다 — 지킨 것은 그대로다.**
+   *
+   * 이 시험이 지키는 것은 「**자격이 없어 단추가 하나도 없는 자리**의 안내는
+   * blockedNotice 가 아니라 disabledReason 으로 나가야 한다」이고, 그 성질은 한 글자도
+   * 건드리지 않았다. 바뀐 것은 **그 안내의 문장**이다: 요청 자격이 코드에 박힌 역할 셋에서
+   * [역할별 접근 권한]의 `repairCases.approval` 쓰기로 옮겨 가면서, 「최고관리자·관리자·
+   * A/S 엔지니어만 요청할 수 있습니다」가 **거짓이 될 수 있는 문장**이 됐다(관리자가
+   * 엔지니어에게서 쓰기를 걷어 가면 엔지니어가 그 문장을 읽는다).
+   *
+   * 🔴 그래서 **못 박는 것을 하나 더한다**: 그 문장에 역할 이름이 다시 들어오지 않을 것.
+   * 그러지 않으면 다음 사람이 「옛 문구가 더 친절하다」며 되돌려 놓는다.
+   */
   test("🔴 자격이 없어 단추가 없을 때의 문구는 그대로 disabledReason 이다", () => {
-    // 그쪽은 단추가 없어 지금도 제대로 그려지고 있다 — 건드리지 않는다.
+    // 그쪽은 단추가 없어 지금도 제대로 그려지고 있다 — 자리를 건드리지 않았다.
     assert.ok(
-      requestBranch.includes('disabledReason = "최고관리자·관리자·A/S 엔지니어만 요청할 수 있습니다."'),
-      "자격 안내까지 옮기면 단추가 없는 자리에서 안내가 사라진다"
+      requestBranch.includes("disabledReason = APPROVAL_REQUEST_NOT_PERMITTED_TEXT;"),
+      "자격 안내까지 blockedNotice 로 옮기면 단추가 없는 자리에서 안내가 사라진다"
     );
+    // 🔴 두 카드가 **같은 상수 한 곳**을 부른다 — 글자를 각자 적으면 같은 까닭으로
+    //    막힌 두 카드가 서로 다른 이유를 대는 날이 온다.
+    for (const [name, source] of [
+      ["검수 카드", inspectionCardSource],
+      ["출하 카드", shipmentCardSource],
+    ] as const) {
+      assert.match(
+        source,
+        /import \{[^}]*\bAPPROVAL_REQUEST_NOT_PERMITTED_TEXT\b[^}]*\} from "\.\/approval-texts"/,
+        `${name}: 공용 문구를 가져다 쓰지 않는다`
+      );
+      assert.ok(
+        source.includes("disabledReason = APPROVAL_REQUEST_NOT_PERMITTED_TEXT;"),
+        `${name}: 자격 안내를 제 글자로 적고 있다`
+      );
+    }
+
+    // 🔴 역할 이름이 다시 들어오지 않았는가. 주석까지 포함해 **문구 상수 자체**를 본다.
+    for (const roleWord of ["최고관리자", "관리자", "A/S 엔지니어", "영업", "자재"]) {
+      assert.equal(
+        APPROVAL_REQUEST_NOT_PERMITTED_TEXT.includes(roleWord),
+        false,
+        `안내 문구에 역할 이름(${roleWord})이 들어왔다 — 설정으로 바뀌는 값이라 거짓이 될 수 있다`
+      );
+    }
 
     const html = renderToStaticMarkup(
       <DatabaseApprovalCard
@@ -1623,10 +1661,10 @@ describe("🔴 수리 검수 승인 카드 — 무효가 된 승인의 안내", 
         record={null}
         displayStatus="NOT_REQUESTED"
         actions={[]}
-        disabledReason="최고관리자·관리자·A/S 엔지니어만 요청할 수 있습니다."
+        disabledReason={APPROVAL_REQUEST_NOT_PERMITTED_TEXT}
       />
     );
-    assert.match(html, /최고관리자·관리자·A\/S 엔지니어만 요청할 수 있습니다\./);
+    assert.ok(html.includes("승인을 올릴 수 있습니다."), "안내가 그려지지 않았다");
   });
 
   test("🔴 재요청 단추와 **함께** 실제로 그려진다 — 껍데기가 그렇게 그린다", () => {

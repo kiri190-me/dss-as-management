@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { canOpenRepairCaseDetailTab } from "@/lib/auth/repair-case-detail-tab-access";
+import { hasPermission } from "@/lib/auth/permission-resolver";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import PlaceholderPage from "@/components/layout/PlaceholderPage";
@@ -83,16 +84,35 @@ export default async function RepairCaseApprovalPage({
   // 판정한다(그래야 읽은 직후 되돌려진 위임으로 결재가 통과하지 않는다).
   // 로그인 사용자를 못 읽었으면 빈 배열이다 — 그때는 화면이 단추를 아예 그리지
   // 않는다(DatabaseApprovalScreen 의 첫 갈래).
-  const [currentApprovals, history, decideAuthorization, inspectionAssignees, actingApproverUserIds] =
-    await Promise.all([
-      getCurrentApprovalsForCase(resolved.id),
-      getApprovalHistoryForCase(resolved.id),
-      actingUser ? resolveShipmentDecideAuthorization(actingUser.id) : Promise.resolve({ allowed: false as const }),
-      listInspectionApproverCandidates(),
-      actingUser
-        ? resolveActingApproverUserIds(actingUser.id, new Date())
-        : Promise.resolve([] as readonly string[]),
-    ]);
+  const [
+    currentApprovals,
+    history,
+    decideAuthorization,
+    inspectionAssignees,
+    actingApproverUserIds,
+    canRequestApproval,
+  ] = await Promise.all([
+    getCurrentApprovalsForCase(resolved.id),
+    getApprovalHistoryForCase(resolved.id),
+    actingUser ? resolveShipmentDecideAuthorization(actingUser.id) : Promise.resolve({ allowed: false as const }),
+    listInspectionApproverCandidates(),
+    actingUser
+      ? resolveActingApproverUserIds(actingUser.id, new Date())
+      : Promise.resolve([] as readonly string[]),
+    // 🔴 **승인을 올릴 수 있는가** — 2026-11-12(셋째)부터 [역할별 접근 권한]의
+    //    `repairCases.approval` **쓰기**가 정한다. 그 전까지 두 카드가 각자 역할 셋을
+    //    리터럴로 들고 판정했다(그래서 같은 목록이 세 벌이었다). 기타건 상세가 이미
+    //    쓰는 모양 그대로다 — 서버가 계산해 내려주고 화면은 받기만 한다.
+    //    🔴 요청을 실제로 받는 mutation(requestRepairCaseApproval)과 **같은 열쇠**여야
+    //    한다. 갈리는 날 「단추는 보이는데 눌러도 거절」이 되고, 그 반대는 아무 표시도
+    //    남기지 않아 더 나쁘다.
+    //    🔵 **탭에 들어오는 문턱(위 canOpenRepairCaseDetailTab)은 읽기다.** 요청을 못
+    //    하는 사람도 이 화면은 본다 — 결재 알림 종이 여기를 가리키고, 결재만 하는
+    //    사람도 여기서 누른다.
+    actingUser
+      ? hasPermission(actingUser, "repairCases.approval", "WRITE")
+      : Promise.resolve(false),
+  ]);
 
   // 결재선을 그리는 데 필요한 단계들. 🔴 「현재 판」이 아니라 **각 줄에 적힌
   // 판**으로 읽는다 — 진행 중인 건은 관리자가 절차를 바꿔도 옛 판을 끝까지
@@ -119,6 +139,7 @@ export default async function RepairCaseApprovalPage({
       decideAuthorization={decideAuthorization}
       routeSteps={routeSteps}
       actingApproverUserIds={actingApproverUserIds}
+      canRequestApproval={canRequestApproval}
       // 역할 이름표는 화면에 보여 줄 **값**이라 승격하지 않는다 — 개발자
       // 표시가 켜져 있어도 그 사람의 역할은 그대로다(developer-promotion.ts).
       inspectionAssigneeCandidates={inspectionAssignees.map((candidate) => ({
