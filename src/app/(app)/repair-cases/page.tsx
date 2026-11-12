@@ -127,6 +127,16 @@ export default async function RepairCasesPage() {
    *
    * 🔴 어느 상태에 배지가 붙는지는 도메인 하나가 정한다 — `STALE` 에는 안 붙는다
    * (domain/final-shipment-approval-badge.ts 에 까닭 전문이 있다).
+   *
+   * 🔴 2026-11-12 부터 이 묶음은 **[현재 상태] 필터의 근거이기도 하다**(사용자 요구:
+   * 「[현재 상태] 필터에 [최종 출하 승인 완료]도 추가해 줘. 그걸 선택하면 그 배지가
+   * 있는 수리건들을 찾아볼 수 있도록」). 묶음을 하나만 두는 것이 「고른 줄 = 배지가
+   * 붙은 줄」을 지키는 방법이다 — 거르는 쪽이 제 조회를 따로 가지면 둘이 갈라지고,
+   * 그때 나는 것은 오류가 아니라 **배지 없는 줄이 섞인 목록**이다.
+   *
+   * 🔵 그래서 **권한으로 접지 않는다.** 위 「내게 온 결재 요청」과 달리 누구에게나
+   * 같은 판정이라, 0건은 「지금 그런 건이 없다」는 사실 그대로다(장기 PO 미발행과
+   * 같은 자리의 같은 판단).
    */
   const finalShipmentApprovalStates = await loadRepairCaseFinalShipmentApprovalStates(
     serverBaseCases.map((row) => row.id)

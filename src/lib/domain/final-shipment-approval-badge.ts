@@ -65,6 +65,29 @@ import { LABELS, type ShipmentApprovalState } from "./local/workflow/shipment-ap
 export const FINAL_SHIPMENT_APPROVED_LABEL = `${LABELS.FINAL_SHIPMENT} 완료`;
 
 /**
+ * 🔴 **이 배지를 거르개에서 고르는 값**(2026-11-12 사용자 요구 — 「[전체 A/S
+ * 현황]의 [현재 상태] 필터에 [최종 출하 승인 완료]도 추가해 줘. 그걸 선택하면
+ * [최종 출하 승인 완료] 배지가 있는 수리건들을 찾아볼 수 있도록」).
+ *
+ * 🔴 **상태 코드가 아니다.** REPAIR_STATUS_CODES 에 끼워 넣지 않는 까닭이 유·무상
+ * 필터의 "NONE"(미지정)과 똑같다(repair-case-filters.ts 의 BillingTypeFilterValue
+ * 주석) — 그 배열은 접수·수정 화면이 **저장할 값**을 뽑아 쓰는 자리고, 워크플로
+ * 단계·상태 이름표·전이 규칙이 전부 그 열둘과 한 짝으로 서 있다. 거기 한 줄을
+ * 더하면 DB 의 상태 enum 에 없는 값이 저장·전이·표의 상태 칸으로 샐 길이 열린다.
+ * 그래서 **필터 값 타입만 넓힌다**(RepairStatusFilterValue).
+ *
+ * 🔴 글자가 상태 코드 열둘·기타건 상태 여섯 가운데 **어느 것과도 겹치면 안 된다** —
+ * 겹치면 주소줄(`?status=…`)에서 둘을 가를 수 없다. 겹치지 않음은 시험이 센다
+ * (repair-case-filters.test.ts).
+ *
+ * 🔵 **이 파일에 두는 까닭**: 배지의 말(위 LABEL)과 판정(아래 함수)이 여기 한 벌이라,
+ * 그것을 고르는 값도 같은 자리에 있어야 셋이 함께 바뀐다. [기타건 현황]에도 같은
+ * 배지가 서 있으므로 그쪽이 같은 필터를 만드는 날 이 값을 그대로 가져다 쓴다
+ * (2026-11-12 이번 조각의 범위는 [전체 A/S 현황] 하나다 — 미리 일반화해 두지 않는다).
+ */
+export const FINAL_SHIPMENT_APPROVED_FILTER_VALUE = "FINAL_SHIPMENT_APPROVED";
+
+/**
  * 그 건(또는 그 회차)에 **[최종 출하 승인 완료] 배지를 붙이는가.**
  *
  * `null`·`undefined` 는 「결재 기록이 한 줄도 없다」와 같은 뜻이다 — 목록 조회가

@@ -138,8 +138,15 @@ type RepairCaseListPageProps = {
    * 최신 결재 행 + 이 건의 판 번호**로 나오는 파생값이고, 이 화면에 그 재료가
    * 아예 없다. 위 세 묶음과 같은 모양이다.
    *
-   * 🔵 **필터가 아니라 표시**다(납기 임박과 같다) — 조건을 만들지 않으므로
-   * undefined 여도 감출 조건이 없고, 배지만 안 붙는다.
+   * 🔴 **표시이면서 거르는 근거이기도 하다**(2026-11-12 사용자 요구로 [현재 상태]
+   * 필터에 [최종 출하 승인 완료] 한 줄이 생겼다 — 그 전까지는 배지뿐이었다).
+   * 그래서 배지와 필터가 **같은 묶음 하나**를 본다: 고른 줄과 배지가 붙은 줄이
+   * 어긋나면 「골랐는데 배지가 없는 줄」이 나오고, 오류는 한 번도 안 난다.
+   *
+   * 🔵 그래도 짝이 되는 canFilter… 는 두지 않는다. 페이지가 **권한을 묻지 않고 늘**
+   * 내려주므로 운영에서 undefined 가 되는 길이 없고(위 두 묶음은 결재 권한·쓰기
+   * 모드에 걸려 있어 다르다), undefined 인 mock 모드에서는 그 한 줄이 아무 줄도
+   * 더하지 않을 뿐이다(applyFilters 의 다섯째 인자 주석).
    */
   finalShipmentApprovedCaseIds?: string[];
 };
@@ -258,8 +265,11 @@ export default function RepairCaseListPage({
     [dueDateNearCaseIds]
   );
 
-  // 🔴 [최종 출하 승인 완료]도 **거르는 조건이 아니라 표시**다(2026-11-08) —
-  //    납기 임박과 같은 자리의 같은 모양이라 짝이 되는 canFilter… 가 없다.
+  // 🔴 [최종 출하 승인 완료]는 **배지이면서 [현재 상태]의 한 줄**이다(2026-11-08
+  //    배지 · 2026-11-12 필터). 묶음을 하나만 두는 것이 그 둘을 맞춰 두는 유일한
+  //    방법이다 — 아래 표·카드에 넘기는 것과 applyFilters 에 넘기는 것이 **같은 값**
+  //    이라, 고른 줄에 배지가 없거나 배지가 붙은 줄이 안 걸릴 길이 없다.
+  //    짝이 되는 canFilter… 는 두지 않는다(프롭 주석의 까닭).
   const finalShipmentApprovedIdSet = useMemo(
     () => (finalShipmentApprovedCaseIds ? new Set(finalShipmentApprovedCaseIds) : undefined),
     [finalShipmentApprovedCaseIds]
@@ -308,8 +318,18 @@ export default function RepairCaseListPage({
   const [deleteItemErrors, setDeleteItemErrors] = useState<Record<string, string>>({});
 
   const filteredRows = useMemo(
-    () => applyFilters(rows, filters, myPendingApprovalIdSet, longPendingPoIdSet),
-    [rows, filters, myPendingApprovalIdSet, longPendingPoIdSet]
+    () =>
+      applyFilters(
+        rows,
+        filters,
+        myPendingApprovalIdSet,
+        longPendingPoIdSet,
+        // 🔴 안 넘기면 [최종 출하 승인 완료]를 골라도 **한 건도 안 나온다** — 그쪽은
+        //    근거가 없으면 아무 줄도 더하지 않기 때문이다(applyFilters 의 그 주석).
+        //    오류가 아니라 「조건에 맞는 건이 없습니다」라서 아무도 신고하지 않는다.
+        finalShipmentApprovedIdSet
+      ),
+    [rows, filters, myPendingApprovalIdSet, longPendingPoIdSet, finalShipmentApprovedIdSet]
   );
   const sortedRows = useMemo(() => sortRows(filteredRows, sort), [filteredRows, sort]);
 

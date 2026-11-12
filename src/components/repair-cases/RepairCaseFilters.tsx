@@ -5,7 +5,12 @@ import {
   IN_HOUSE_STATUSES,
   type BillingTypeFilterValue,
   type Filters,
+  type RepairStatusFilterValue,
 } from "@/lib/domain/repair-case-filters";
+import {
+  FINAL_SHIPMENT_APPROVED_FILTER_VALUE,
+  FINAL_SHIPMENT_APPROVED_LABEL,
+} from "@/lib/domain/final-shipment-approval-badge";
 import {
   billingTypeLabels,
   BILLING_TYPE_CODES,
@@ -13,7 +18,7 @@ import {
   PRODUCT_CATEGORY_OPTIONS,
   REPAIR_STATUS_CODES,
 } from "@/lib/domain/types";
-import type { Customer, Priority, RepairStatus } from "@/lib/domain/types";
+import type { Customer, Priority } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
 import CheckboxFilterDropdown from "@/components/common/CheckboxFilterDropdown";
 import FilterDisclosure from "./FilterDisclosure";
@@ -22,8 +27,13 @@ type RepairCaseFiltersProps = {
   filters: Filters;
   customers: Customer[];
   onQueryChange: (value: string) => void;
-  /** 고른 상태들. 빈 배열이면 「전체」다(2026-11-11 복수 선택). */
-  onStatusesChange: (value: RepairStatus[]) => void;
+  /**
+   * 고른 상태들. 빈 배열이면 「전체」다(2026-11-11 복수 선택).
+   *
+   * 🔴 값이 `RepairStatus` 가 아니라 **한 줄 더 넓은** 타입이다(2026-11-12) —
+   * [최종 출하 승인 완료]는 상태가 아니라 필터 전용 값이다(그 타입의 주석).
+   */
+  onStatusesChange: (value: RepairStatusFilterValue[]) => void;
   /**
    * 아래 넷도 전부 **배열**이다(2026-11-11 사용자 개선요청 — 그 전에는 값 하나와
    * "ALL" 이었다). 빈 배열이면 「전체」라, 받는 쪽은 길이가 0 인지만 보면 된다.
@@ -159,14 +169,39 @@ export default function RepairCaseFilters({
               (그 상수의 주석).
               글자를 uiText 사전에서 뽑지 않는 것도 그래서다 — repairStatus 사전의
               키는 REPAIR_STATUS_CODES 와 한 짝이라 상태가 아닌 것의 글자를 거기
-              둘 자리가 없다. */}
-          <CheckboxFilterDropdown
+              둘 자리가 없다.
+
+              🔴 **목록의 마지막 한 줄만 상태가 아니다**(2026-11-12 사용자 요구 —
+              「[현재 상태] 필터에 [최종 출하 승인 완료]도 추가해 줘」). 유·무상 칸의
+              「미지정」과 같은 꼴이다: 코드 목록에 끼워 넣지 않고 **여기서만 한 줄을
+              덧붙인다**(까닭은 final-shipment-approval-badge.ts 의 그 상수 주석).
+
+              🔴 **차례가 맨 아래인 까닭.** 위의 열둘은 워크플로 순서대로 서 있어서
+              사이에 끼우면 읽는 사람이 그것도 한 단계인 줄 안다. 마지막 상태인
+              「출하 완료」 **뒤**에 두면 흐름이 끝난 자리부터가 다른 종류라는 것이
+              읽는 차례만으로 드러난다. 구분선으로 가르지 않는 것은 공용 부품이
+              묶음을 모르기 때문이다(CheckboxFilterOption 은 value·label 둘뿐이다) —
+              **일곱 칸이 함께 쓰는 부품**을 이 칸 하나 때문에 고치지 않는다.
+
+              🔴 글자는 **배지가 쓰는 그 상수**다. 여기 "최종 출하 승인 완료" 라고
+              적어 두면 이름표가 바뀌는 날 거르개와 배지가 다른 말을 하게 되는데,
+              타입이 같은 문자열이라 tsc 가 한마디도 안 한다.
+
+              🔵 「입고품 전체」 단추의 규칙은 **건드리지 않았다**. 그 묶음은
+              IN_HOUSE_STATUSES(= 출하 완료만 뺀 상태들)뿐이라, 단추를 누른 뒤 이
+              한 줄을 더 체크하면 고른 묶음이 달라져 단추가 풀린 모습이 된다 —
+              2026-11-11 에 정한 「지금 고른 값으로 판정한다」 그대로이고, 여기서만
+              따로 봐주면 손으로 체크한 사람과 단추를 누른 사람이 다른 화면을 본다. */}
+          <CheckboxFilterDropdown<RepairStatusFilterValue>
             id="repair-case-status"
             label="현재 상태"
-            options={REPAIR_STATUS_CODES.map((status) => ({
-              value: status,
-              label: uiText.repairStatus[status],
-            }))}
+            options={[
+              ...REPAIR_STATUS_CODES.map((status) => ({
+                value: status,
+                label: uiText.repairStatus[status],
+              })),
+              { value: FINAL_SHIPMENT_APPROVED_FILTER_VALUE, label: FINAL_SHIPMENT_APPROVED_LABEL },
+            ]}
             selected={filters.statuses}
             onChange={onStatusesChange}
             shortcut={{ label: "입고품 전체", values: IN_HOUSE_STATUSES }}

@@ -357,7 +357,11 @@ test("🔴 [현재 상태] 칸이 「입고품 전체」에 IN_HOUSE_STATUSES �
   const block = flat(stripped.slice(start, stripped.indexOf("/>", start)));
 
   assert.match(block, /label="현재 상태"/);
-  assert.match(block, /options=\{REPAIR_STATUS_CODES\.map/, "선택지는 상태 목록에서 뽑는다");
+  // 🔴 2026-11-12 에 선택지가 `REPAIR_STATUS_CODES.map(…)` 하나에서 **펼친 배열**이
+  //    되었다 — 상태 열둘 뒤에 [최종 출하 승인 완료] 한 줄이 붙는다(사용자 요구).
+  //    여기서 지키는 것은 전과 같다: **상태 쪽은 여전히 코드 목록에서 뽑는가.**
+  //    손으로 적기 시작하면 상태가 느는 날 그 줄이 조용히 필터에서만 빠진다.
+  assert.match(block, /options=\{\[ \.\.\.REPAIR_STATUS_CODES\.map/, "선택지는 상태 목록에서 뽑는다");
   assert.match(block, /selected=\{filters\.statuses\}/);
   assert.match(
     block,

@@ -9,6 +9,7 @@ import {
   type RepairStatus,
 } from "./types";
 import type { EffectiveRepairCase } from "./local/workflow/effective-repair-case";
+import { FINAL_SHIPMENT_APPROVED_FILTER_VALUE } from "./final-shipment-approval-badge";
 import { reportedSymptomFromSearchParams } from "./reported-symptom-param";
 import { resolveRepairCaseRequestedDueDate } from "./requested-due-date-link";
 
@@ -36,6 +37,23 @@ import { resolveRepairCaseRequestedDueDate } from "./requested-due-date-link";
  */
 export type BillingTypeFilterValue = BillingType | "NONE";
 
+/**
+ * [현재 상태] 필터가 고를 수 있는 값 — 실제 상태 **열둘**에
+ * **[최종 출하 승인 완료]** 하나가 더 붙는다(2026-11-12 사용자 요구).
+ *
+ * 🔴 바로 위 유·무상과 **같은 꼴**이다. 더한 값은 상태 코드가 아니라 **필터 전용
+ *    값**이고, REPAIR_STATUS_CODES 에 끼워 넣지 않는 까닭도 같다(그 배열은 저장할
+ *    값을 뽑아 쓰는 자리다 — final-shipment-approval-badge.ts 의 그 상수 주석).
+ *
+ * 🔴 다만 "NONE"(미지정)과 **판정 근거가 다르다.** 미지정은 행의 칸(billingType)이
+ *    null 인가로 가려지지만, 최종 출하 승인은 **이 건의 칸이 아니다** — 다른 표의
+ *    최신 결재 행과 이 건의 판 번호로 나오는 파생값이라, 서버가 계산해 내려준 접수
+ *    건 id 묶음과 대조해야 한다(아래 applyFilters 의 다섯째 인자).
+ */
+export type RepairStatusFilterValue =
+  | RepairStatus
+  | typeof FINAL_SHIPMENT_APPROVED_FILTER_VALUE;
+
 export type Filters = {
   query: string;
   /**
@@ -51,8 +69,14 @@ export type Filters = {
    *    넣는다(아래 IN_HOUSE_STATUSES). 그래서 사람이 거기서 하나를 빼거나 더할
    *    수 있고, 이 배열에는 늘 진짜 상태 코드만 들어 있다 — DB 의 상태 enum 에
    *    없는 값이 저장·전이·표의 상태 칸으로 샐 길이 처음부터 없다.
+   *
+   * 🔴 **[최종 출하 승인 완료]만은 이 배열에 그대로 담긴다**(2026-11-12). 「입고품
+   *    전체」처럼 펼쳐 넣을 상태가 없기 때문이다 — 어느 상태에서도 승인이 나 있을
+   *    수 있어서(배지가 붙는 상태가 따로 정해져 있지 않다) 상태들로 바꿔 쓸 수
+   *    없다. 유·무상의 "NONE" 과 같은 자리이고, 여럿 고르기의 규칙도 그대로다:
+   *    다른 상태와 함께 고르면 **OR** 다(「수리 완료 **이거나** 최종 출하 승인 완료」).
    */
-  statuses: readonly RepairStatus[];
+  statuses: readonly RepairStatusFilterValue[];
   /**
    * 보고 싶은 제품군들. **여럿 고를 수 있다**(2026-11-11 사용자 개선요청 — 그
    * 전에는 `"ALL" | string` 하나였다). 위 statuses 와 같은 규칙이다: **빈 배열이
@@ -201,12 +225,19 @@ function parseListParam<T extends string>(
  *    엉뚱한 값에 화면이 깨지거나 목록이 통째로 비면 안 된다. 아는 값만 남기고
  *    하나도 안 남으면 빈 배열 — 곧 「전체」다.
  */
-function parseStatusesParam(raw: string | null): RepairStatus[] {
+function parseStatusesParam(raw: string | null): RepairStatusFilterValue[] {
   if (!raw) return [];
 
-  const knownCodes = new Set<string>(REPAIR_STATUS_CODES);
-  const picked: RepairStatus[] = [];
-  const add = (status: RepairStatus) => {
+  // 🔴 [최종 출하 승인 완료]도 **아는 값**이다(2026-11-12). 유·무상의 "NONE" 과
+  //    같은 결이다 — 거르개에서 고를 수 있는 한 줄이면 주소줄로도 걸 수 있어야
+  //    같은 화면을 링크로 건넬 수 있다. 「입고품 전체」 별칭처럼 펼쳐지지 않고
+  //    값 그대로 들어간다(위 statuses 주석).
+  const knownCodes = new Set<string>([
+    ...REPAIR_STATUS_CODES,
+    FINAL_SHIPMENT_APPROVED_FILTER_VALUE,
+  ]);
+  const picked: RepairStatusFilterValue[] = [];
+  const add = (status: RepairStatusFilterValue) => {
     if (!picked.includes(status)) picked.push(status);
   };
 
@@ -217,7 +248,7 @@ function parseStatusesParam(raw: string | null): RepairStatus[] {
       for (const status of IN_HOUSE_STATUSES) add(status);
       continue;
     }
-    if (knownCodes.has(token)) add(token as RepairStatus);
+    if (knownCodes.has(token)) add(token as RepairStatusFilterValue);
   }
 
   return picked;
@@ -352,9 +383,39 @@ export function applyFilters(
    * (queries/long-pending-po.ts). 없으면 undefined —
    * longPendingPoOnly가 켜져 있어도 아무 행도 남기지 않는다.
    */
-  longPendingPoCaseIds?: ReadonlySet<string>
+  longPendingPoCaseIds?: ReadonlySet<string>,
+  /**
+   * 서버가 계산해 내려준 "최종 출하 승인이 완료된" 접수 건 id 집합
+   * (queries/repair-case-approvals.ts + domain/final-shipment-approval-badge.ts 의
+   * isFinalShipmentApproved — 목록 표의 [최종 출하 승인 완료] 배지가 쓰는 **바로 그
+   * 묶음**이다. 고른 줄과 배지가 붙은 줄은 늘 같아야 한다).
+   *
+   * 🔴 **없으면(undefined) [최종 출하 승인 완료]는 아무 줄도 더하지 않는다.** 위 두
+   *    묶음(내게 온 결재 요청 · 장기 PO 미발행)이 근거 없이 전부 통과시키지 않는
+   *    것과 같은 판단이다 — 근거가 없는데 통과시키면 **배지가 하나도 없는 줄들이
+   *    「최종 출하 승인 완료」로 걸러져 나온다.** 승인이 끝났다고 읽고 출하로 넘기는
+   *    사람이 생기는 쪽이, 목록이 비는 쪽보다 훨씬 위험하다.
+   *
+   * 🔵 그러면서 **전부 숨기지는 않는다.** 이 값은 여럿 고르기의 한 줄이라, 다른 상태와
+   *    함께 골랐으면 그 상태의 줄은 그대로 남는다(OR 중 한쪽이 0건이 될 뿐이다).
+   *
+   * 🔵 운영에서 undefined 가 되는 길은 없다 — 목록 페이지가 **권한을 묻지 않고 늘**
+   *    계산해 내려준다(app/(app)/repair-cases/page.tsx). 빈 묶음이 오는 길(= 승인된
+   *    건이 한 건도 없다)과 mock 모드만 남는데, 둘 다 「해당 없음」이 사실이다.
+   */
+  finalShipmentApprovedCaseIds?: ReadonlySet<string>
 ): EffectiveRepairCase[] {
   const query = filters.query.trim().toLowerCase();
+
+  // 🔴 고른 상태는 **줄마다** 견주는 값이라 여기서 한 번만 펼쳐 둔다. 목록이 수백
+  //    줄이고 고른 값이 열셋까지 가므로, 줄마다 includes() 를 부르면 그 곱만큼 돈다.
+  //    (나머지 네 필터는 전과 그대로 두었다 — 이번에 손댄 자리만 고친다.)
+  const pickedStatuses = new Set<RepairStatusFilterValue>(filters.statuses);
+  const wantsFinalShipmentApproved = pickedStatuses.has(FINAL_SHIPMENT_APPROVED_FILTER_VALUE);
+  // 🔴 [최종 출하 승인 완료]는 상태 칸과 맞댈 값이 아니므로 **상태 묶음에서 덜어낸다.**
+  //    남겨 두어도 지금은 아무 상태와도 같아지지 않지만, 그것은 「상태 코드와 겹치지
+  //    않는다」는 다른 파일의 약속에 기댄 안전이다 — 여기서 갈라 두면 기대지 않는다.
+  pickedStatuses.delete(FINAL_SHIPMENT_APPROVED_FILTER_VALUE);
 
   return rows.filter((row) => {
     if (filters.myPendingApprovalOnly && !myPendingApprovalCaseIds?.has(row.id)) return false;
@@ -365,8 +426,16 @@ export function applyFilters(
     //    칸이 갈리고, 표에 보이는 상태도 대시보드가 세는 것도 effective 쪽이다.
     //    여기서 원본 칸을 보면 화면에 「수리 중」이라 적힌 줄이 「수리 중」으로
     //    걸러도 안 나오는데, 오류는 한 번도 안 난다.
-    if (filters.statuses.length > 0 && !filters.statuses.includes(row.effectiveStatus)) {
-      return false;
+    //
+    // 🔴 고른 것 가운데 **[최종 출하 승인 완료]만 판정 근거가 행에 없다**(2026-11-12).
+    //    그래서 그 한 줄은 상태 칸이 아니라 서버가 내려준 id 묶음과 대조하고, 상태와는
+    //    **OR** 로 잇는다 — 「수리 완료 **이거나** 최종 출하 승인 완료」가 사람이
+    //    여럿 고를 때 기대하는 뜻이고, 다른 다섯 필터끼리는 전처럼 AND 로 겹친다.
+    if (filters.statuses.length > 0) {
+      const matchesStatus = pickedStatuses.has(row.effectiveStatus);
+      const matchesFinalShipmentApproved =
+        wantsFinalShipmentApproved && finalShipmentApprovedCaseIds?.has(row.id) === true;
+      if (!matchesStatus && !matchesFinalShipmentApproved) return false;
     }
     // 아래 넷도 상태와 같은 규칙이다(2026-11-11 복수 선택): 빈 배열이면 전부
     // 지나가고, 고른 것이 있으면 그 값들의 **합집합**만 남는다. 조건끼리는 전처럼

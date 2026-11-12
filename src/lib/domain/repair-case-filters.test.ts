@@ -15,6 +15,8 @@ import {
   PRODUCT_CATEGORY_OPTIONS,
   REPAIR_STATUS_CODES,
 } from "./types";
+import { FINAL_SHIPMENT_APPROVED_FILTER_VALUE } from "./final-shipment-approval-badge";
+import { MISC_CASE_STATUS_ORDER } from "./misc-case-status";
 import type { EffectiveRepairCase } from "./local/workflow/effective-repair-case";
 
 /**
@@ -472,6 +474,200 @@ test("🔴 주소창에 모르는 값이 오면 조용히 버린다 — 한 건�
   ];
   const parsed = parseInitialFilters(new URLSearchParams("status=in_house"));
   assert.deepEqual(idsOf(applyFilters(rows, parsed)), ["repair", "shipped"]);
+});
+
+// ───────────────── 현재 상태 — [최종 출하 승인 완료] (2026-11-12 사용자 요구)
+//
+// 「[전체 A/S 현황]의 [현재 상태] 필터에 [최종 출하 승인 완료]도 추가해 줘. 그걸
+// 선택하면 [최종 출하 승인 완료] 배지가 있는 수리건들을 찾아볼 수 있도록 해 줘.」
+//
+// 🔴 **상태가 아니다.** 상태 열둘(REPAIR_STATUS_CODES)은 그대로 두고 **필터 값
+// 타입만** 넓혔다 — 유·무상의 "NONE"(미지정)과 같은 꼴이다. 거기 한 줄을 더하면
+// 워크플로 단계·전이 규칙·상태 이름표가 전부 딸려 깨진다.
+//
+// 🔴 그러면서 "NONE" 과 **판정 근거가 다르다.** 미지정은 행의 칸으로 가려지지만
+// 이것은 **행에 근거가 없다** — 서버가 내려준 접수 건 id 묶음(배지가 쓰는 바로 그
+// 묶음)과 대조해야 한다. 그래서 「내게 온 결재 요청」·「장기 PO 미발행」과 같은
+// 규율을 따른다: **근거가 없으면 아무 줄도 더하지 않는다.**
+
+/** 이 묶음이 「배지가 붙은 건」이다 — 서버가 내려주는 것과 같은 모양(id 집합). */
+function approved(...ids: string[]): ReadonlySet<string> {
+  return new Set(ids);
+}
+
+test("🔵 표본 점검 — 고르는 값이 상태 코드와 겹치지 않는다", () => {
+  // 겹치면 주소줄(`?status=…`)에서 둘을 가를 수 없고, 거르는 쪽도 상태 칸과
+  // 맞대어 엉뚱한 줄을 남긴다. 아래 시험 전부가 이 전제 위에 선다.
+  assert.ok(
+    !(REPAIR_STATUS_CODES as readonly string[]).includes(FINAL_SHIPMENT_APPROVED_FILTER_VALUE),
+    "상태 코드와 같은 글자가 되었다 — 상태 열둘에 끼워 넣은 것과 다를 바 없어진다"
+  );
+  // 같은 배지를 [기타건 현황]도 쓴다. 그쪽이 같은 필터를 만드는 날 쓸 값이므로
+  // 기타건 상태와도 겹치면 안 된다(final-shipment-approval-badge.ts 의 그 주석).
+  assert.ok(
+    !(MISC_CASE_STATUS_ORDER as readonly string[]).includes(FINAL_SHIPMENT_APPROVED_FILTER_VALUE),
+    "기타건 상태와 같은 글자가 되었다"
+  );
+  assert.ok(
+    !(IN_HOUSE_STATUSES as readonly string[]).includes(FINAL_SHIPMENT_APPROVED_FILTER_VALUE),
+    "「입고품 전체」가 펼쳐 넣는 묶음에 섞였다 — 그 단추의 뜻이 바뀐다"
+  );
+});
+
+test("🔴 이것만 고르면 배지가 붙은 건만 남는다", () => {
+  // 🔵 표본을 먼저 못 박는다. 승인된 줄과 아닌 줄의 **상태가 같아야** 이 시험이
+  //    상태가 아니라 승인 묶음으로 가렸음을 말한다 — 상태가 다르면 상태로 걸러도
+  //    같은 답이 나와 영영 통과한다.
+  const rows = [
+    row({ id: "approved", effectiveStatus: "WAITING_SHIPMENT" }),
+    row({ id: "not-approved", effectiveStatus: "WAITING_SHIPMENT" }),
+    row({ id: "other-status", effectiveStatus: "IN_REPAIR" }),
+  ];
+  assert.equal(rows[0].effectiveStatus, rows[1].effectiveStatus, "표본 전제가 깨졌다");
+
+  assert.deepEqual(
+    idsOf(
+      applyFilters(
+        rows,
+        filters({ statuses: [FINAL_SHIPMENT_APPROVED_FILTER_VALUE] }),
+        undefined,
+        undefined,
+        approved("approved")
+      )
+    ),
+    ["approved"]
+  );
+});
+
+test("🔴 상태와 함께 고르면 OR 다 — 「그 상태이거나 승인 완료이거나」", () => {
+  // 이 값이 [현재 상태] 안의 한 줄인 까닭 그 자체다(사용자가 「[현재 상태] 필터에
+  // 추가」라고 못 박았다). 다른 조건끼리는 AND 지만 같은 칸 안은 합집합이다.
+  const rows = [
+    row({ id: "repair-done", effectiveStatus: "REPAIR_COMPLETED" }),
+    row({ id: "approved-in-repair", effectiveStatus: "IN_REPAIR" }),
+    row({ id: "neither", effectiveStatus: "WAITING_PO" }),
+  ];
+
+  assert.deepEqual(
+    idsOf(
+      applyFilters(
+        rows,
+        filters({ statuses: ["REPAIR_COMPLETED", FINAL_SHIPMENT_APPROVED_FILTER_VALUE] }),
+        undefined,
+        undefined,
+        approved("approved-in-repair")
+      )
+    ),
+    ["repair-done", "approved-in-repair"],
+    "AND 로 이으면 한 줄도 안 남는다 — 승인된 줄의 상태는 REPAIR_COMPLETED 가 아니다"
+  );
+});
+
+test("🔴 아무것도 안 고르면 이 값은 아무것도 막지 않는다 — 빈 배열은 그대로 「전체」다", () => {
+  const rows = [
+    row({ id: "approved", effectiveStatus: "WAITING_SHIPMENT" }),
+    row({ id: "not-approved", effectiveStatus: "IN_REPAIR" }),
+  ];
+  // 묶음이 와 있어도, 안 와 있어도 전부 남는다.
+  assert.deepEqual(
+    idsOf(applyFilters(rows, filters(), undefined, undefined, approved("approved"))),
+    ["approved", "not-approved"]
+  );
+  assert.deepEqual(idsOf(applyFilters(rows, filters())), ["approved", "not-approved"]);
+});
+
+test("🔴 근거가 되는 묶음이 없으면 이 값은 아무 줄도 더하지 않는다", () => {
+  // 「내게 온 결재 요청」·「장기 PO 미발행」과 같은 규율이다. 근거 없이 통과시키면
+  // **배지가 하나도 없는 줄들이 「최종 출하 승인 완료」로 걸러져 나온다** — 승인이
+  // 끝났다고 읽고 출하로 넘기는 사람이 생기는 쪽이 목록이 비는 쪽보다 위험하다.
+  const rows = [
+    row({ id: "a", effectiveStatus: "WAITING_SHIPMENT" }),
+    row({ id: "b", effectiveStatus: "IN_REPAIR" }),
+  ];
+
+  // 묶음을 아예 안 넘긴 경우(mock 모드)와 빈 묶음인 경우(승인된 건이 0)가 같다.
+  assert.deepEqual(idsOf(applyFilters(rows, filters({ statuses: [FINAL_SHIPMENT_APPROVED_FILTER_VALUE] }))), []);
+  assert.deepEqual(
+    idsOf(
+      applyFilters(
+        rows,
+        filters({ statuses: [FINAL_SHIPMENT_APPROVED_FILTER_VALUE] }),
+        undefined,
+        undefined,
+        approved()
+      )
+    ),
+    []
+  );
+
+  // 🔵 그러면서 **전부 숨기지는 않는다.** 함께 고른 상태의 줄은 그대로 남는다 —
+  //    OR 의 한쪽이 0건이 될 뿐이다. 이쪽이 깨지면 근거 하나가 없다고 멀쩡한
+  //    조건까지 통째로 빈 목록이 된다.
+  assert.deepEqual(
+    idsOf(applyFilters(rows, filters({ statuses: ["IN_REPAIR", FINAL_SHIPMENT_APPROVED_FILTER_VALUE] }))),
+    ["b"]
+  );
+});
+
+test("🔴 이 값도 다른 필터와는 AND 로 겹친다", () => {
+  const rows = [
+    row({ id: "hit", effectiveStatus: "IN_REPAIR", productCategory: "Generator" }),
+    row({ id: "other-category", effectiveStatus: "IN_REPAIR", productCategory: "Matcher" }),
+  ];
+  assert.deepEqual(
+    idsOf(
+      applyFilters(
+        rows,
+        filters({
+          statuses: [FINAL_SHIPMENT_APPROVED_FILTER_VALUE],
+          productCategories: ["Generator"],
+        }),
+        undefined,
+        undefined,
+        approved("hit", "other-category")
+      )
+    ),
+    ["hit"]
+  );
+});
+
+test("🔴 「입고품 전체」 단추의 묶음은 그대로다 — 이 값이 거기 끼지 않았다", () => {
+  // 단축 단추가 넣는 것은 **상태들뿐**이다(출하 완료만 뺀 전부). 거기 이 값을
+  // 끼워 넣으면 「입고품 전체」가 승인 여부까지 말하는 조건이 되어 대시보드
+  // [현재 입고 수]와 수가 갈린다 — 그 두 수가 같은지는 옆 파일이 잰다.
+  assert.equal(
+    IN_HOUSE_STATUSES.length,
+    REPAIR_STATUS_CODES.length - 1,
+    "상태가 아닌 값이 묶음에 들어왔거나 상태 수가 바뀌었다"
+  );
+  const rows = [
+    row({ id: "approved-shipped", effectiveStatus: "SHIPMENT_COMPLETED", effectiveActualShipmentDate: "2026-11-02" }),
+    row({ id: "in-house", effectiveStatus: "IN_REPAIR" }),
+  ];
+  // 승인까지 난 출하 완료 건이 있어도 「입고품 전체」에는 안 들어온다.
+  assert.deepEqual(
+    idsOf(
+      applyFilters(rows, filters({ statuses: IN_HOUSE_STATUSES }), undefined, undefined, approved("approved-shipped"))
+    ),
+    ["in-house"]
+  );
+});
+
+test("🔴 주소줄로도 걸 수 있다(?status=FINAL_SHIPMENT_APPROVED)", () => {
+  // 유·무상의 "NONE" 과 같은 결이다 — 거르개에서 고를 수 있는 한 줄이면 주소줄로도
+  // 걸 수 있어야 같은 화면을 링크로 건넬 수 있다.
+  assert.deepEqual(parseInitialFilters(new URLSearchParams("status=FINAL_SHIPMENT_APPROVED")).statuses, [
+    FINAL_SHIPMENT_APPROVED_FILTER_VALUE,
+  ]);
+  // 상태와 섞어 적으면 적은 차례대로 둘 다 들어간다.
+  assert.deepEqual(
+    parseInitialFilters(new URLSearchParams("status=IN_REPAIR,FINAL_SHIPMENT_APPROVED")).statuses,
+    ["IN_REPAIR", FINAL_SHIPMENT_APPROVED_FILTER_VALUE]
+  );
+  // 🔴 「입고품 전체」 별칭이 펼칠 때는 **안 섞인다** — 상태들로만 펼쳐진다.
+  assert.deepEqual(parseInitialFilters(new URLSearchParams("status=IN_HOUSE")).statuses, [
+    ...IN_HOUSE_STATUSES,
+  ]);
 });
 
 // ──────────────────── 나머지 네 필터도 여럿 고르기 (2026-11-11 사용자 개선요청)
