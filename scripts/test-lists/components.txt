@@ -1331,3 +1331,12 @@ src/components/misc-cases/misc-case-multi-select-filters.test.ts
 # 「조건에 맞는 건이 없습니다」라 아무도 신고하지 않는다) · 🔵 「입고품 전체」 단추의
 # 규칙은 그대로인가(이 줄을 더 체크하면 풀린 모습 — 2026-11-11 규칙 그대로다).
 src/components/repair-cases/final-shipment-approved-status-filter.test.ts
+
+# 위 재정비가 **마크업까지 왔는가**(2026-11-12). 묶음·차례의 규칙은 unit 목록의
+# permission-area-groups.test.ts 가 값으로 보고, 여기서는 그려진 글자를 읽는다 — 이 판에서
+# 가장 큰 위험이 「규칙은 맞는데 한 줄이 안 그려졌다」이기 때문이다(오류가 안 난다).
+# 🔴 못 박는 것: 영역 21줄과 잎 32줄을 **수로** 세는가 · 접힘(▾)이 그대로 듣는가 · 묶음
+# 머리말 다섯이 메뉴와 같은 글자이고 스크롤에 안 묻히는가 · 🔴 주간보고가 **하위메뉴**로
+# (세로 선) 그려져 같은 화면 안의 하위 기능과 눈으로 갈리는가 · 🔴 메뉴에 없는 재고 관리에
+# 꼬리표와 안내가 붙는가 · 🔴 개발자 모드 글자가 화면에 한 번도 안 나오는가.
+src/components/users/PermissionTargetTree.test.tsx

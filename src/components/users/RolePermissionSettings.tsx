@@ -23,6 +23,7 @@ import {
 import { ROLE_CODES, type Role } from "@/lib/domain/types";
 import { useUiText } from "@/components/providers/UiTextProvider";
 import { saveRolePermissionsAction } from "@/lib/server/actions/role-permissions";
+import PermissionTargetTree from "./PermissionTargetTree";
 
 export type RolePermissionView = {
   effective: Record<string, PermissionLevel>;
@@ -193,86 +194,25 @@ export default function RolePermissionSettings({
       )}
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(14rem,18rem)_1fr]">
-        {/* ── 왼쪽: 대상 트리 ─────────────────────────────────────── */}
-        <nav
-          aria-label="권한 대상"
-          className="max-h-[28rem] overflow-y-auto rounded-lg border border-zinc-200 p-1 text-sm dark:border-zinc-800"
-        >
-          <ul className="flex flex-col">
-            {PERMISSION_AREAS.map((area) => {
-              const children = featuresOfArea(area.key);
-              const isOpen = expanded.has(area.key);
-              return (
-                <li key={area.key}>
-                  <div className="flex items-center">
-                    {children.length > 0 ? (
-                      <button
-                        type="button"
-                        aria-label={`${area.label} ${isOpen ? "접기" : "펼치기"}`}
-                        aria-expanded={isOpen}
-                        onClick={() =>
-                          setExpanded((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(area.key)) next.delete(area.key);
-                            else next.add(area.key);
-                            return next;
-                          })
-                        }
-                        className="w-5 shrink-0 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-                      >
-                        {isOpen ? "▾" : "▸"}
-                      </button>
-                    ) : (
-                      <span className="w-5 shrink-0" />
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setSelectedKey(area.key)}
-                      aria-current={selectedKey === area.key ? "true" : undefined}
-                      className={`flex flex-1 items-center justify-between gap-2 rounded px-2 py-1 text-left ${
-                        selectedKey === area.key
-                          ? "bg-primary-900 text-zinc-50 dark:bg-primary-100 dark:text-zinc-900"
-                          : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                      }`}
-                    >
-                      <span className="truncate font-medium">{area.label}</span>
-                      <RoleCountBadge count={openRoleCount(area.key)} selected={selectedKey === area.key} />
-                    </button>
-                  </div>
-
-                  {isOpen && children.length > 0 && (
-                    <ul className="flex flex-col">
-                      {children.map((feature) => (
-                        <li key={feature.key} className="flex items-center">
-                          <span className="w-5 shrink-0" />
-                          <button
-                            type="button"
-                            onClick={() => setSelectedKey(feature.key)}
-                            aria-current={selectedKey === feature.key ? "true" : undefined}
-                            className={`ml-3 flex flex-1 items-center justify-between gap-2 rounded px-2 py-1 text-left ${
-                              selectedKey === feature.key
-                                ? "bg-primary-900 text-zinc-50 dark:bg-primary-100 dark:text-zinc-900"
-                                : "hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                            }`}
-                          >
-                            <span className="truncate">
-                              {feature.label}
-                              {feature.fixed && <span className="ml-1 text-xs opacity-60">고정</span>}
-                            </span>
-                            <RoleCountBadge
-                              count={openRoleCount(feature.key)}
-                              selected={selectedKey === feature.key}
-                            />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
+        {/* ── 왼쪽: 대상 트리 ───────────────────────────────────────
+            🔴 2026-11-12 에 **그리는 일만** 이웃 파일로 옮겼다
+            (PermissionTargetTree.tsx). 거기서 묶음과 차례를 실제 메뉴에서 읽어
+            오고, 고르고 펼치는 상태는 지금까지와 똑같이 **이 화면이** 들고 있다 —
+            저장·되돌리기가 그 상태를 함께 보기 때문이다. */}
+        <PermissionTargetTree
+          selectedKey={selectedKey}
+          onSelect={setSelectedKey}
+          expandedKeys={expanded}
+          onToggleExpanded={(areaKey) =>
+            setExpanded((prev) => {
+              const next = new Set(prev);
+              if (next.has(areaKey)) next.delete(areaKey);
+              else next.add(areaKey);
+              return next;
+            })
+          }
+          openRoleCount={openRoleCount}
+        />
 
         {/* ── 오른쪽: 고른 대상 × 역할 ────────────────────────────── */}
         <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
@@ -340,24 +280,6 @@ export default function RolePermissionSettings({
         </p>
       )}
     </section>
-  );
-}
-
-/** 몇 개 역할이 이 대상을 쓸 수 있는지. 트리에서 규모를 한눈에 보여 준다. */
-function RoleCountBadge({ count, selected }: { count: number; selected: boolean }) {
-  return (
-    <span
-      title={`${count}개 역할이 사용할 수 있습니다`}
-      className={`shrink-0 rounded-full px-1.5 text-[11px] tabular-nums ${
-        selected
-          ? "bg-zinc-700 text-zinc-100 dark:bg-zinc-300 dark:text-zinc-800"
-          : count === 0
-            ? "bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500"
-            : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-      }`}
-    >
-      {count}
-    </span>
   );
 }
 

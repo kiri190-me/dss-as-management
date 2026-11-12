@@ -1936,3 +1936,13 @@ src/lib/domain/repair-case-overdue-notification.test.ts
 # 않는가 · 🔴 **`APPROVED` 하나만 참인가** — 특히 `STALE` 이 거짓이어야 한다(붙이면 「승인
 # 완료」라고 적힌 줄의 단추가 「승인이 안 됐습니다」로 거절한다). 상태 다섯을 빠짐없이 센다.
 src/lib/domain/final-shipment-approval-badge.test.ts
+
+# 🔴 **역할별 접근 권한 화면의 왼쪽 목록을 실제 메뉴에 맞춰 재정비**했다(2026-11-12 사용자
+# 요구 — 「메뉴·기능을 실제 메뉴와 기능의 위치에 맞게 재정비」). 이 파일이 재는 것은 **묶음과
+# 차례**뿐이다: 🔴 영역 21개가 하나도 안 사라졌는가(재배치하다 빠뜨리면 오류 없이 그 줄만
+# 사라지고, 그러면 운영 DB 에 저장된 그 영역의 값을 화면에서 되돌릴 길이 없어진다) · 묶음
+# 이름표와 차례가 navigation.ts 에서 **오는가**(손으로 한 벌 더 적으면 타입이 같아 tsc 가
+# 침묵한다) · 사용자가 짚은 어긋남 넷이 고쳐졌는가 · 🔴 메뉴에 없는 재고 관리가 맨 아래
+# 따로 묶이고 줄마다 표시되는가 · 🔴 개발자 모드가 권한 항목으로 생기지 않았는가(일부러
+# 없는 것이다). 그려지는 쪽은 components 목록의 PermissionTargetTree.test.tsx 가 본다.
+src/lib/auth/permission-area-groups.test.ts
