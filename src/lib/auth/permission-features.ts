@@ -109,11 +109,36 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       maxMeaningfulLevel: "WRITE",
     },
     workRecords: {
-      label: "작업 기록",
-      description: "무슨 작업을 했는지 남기는 기록입니다.",
+      // 🔴 2026-11-12 에 이름표가 「작업 기록」에서 **「작업내용」**으로 바뀌었다.
+      // 🔴 **키(`workRecords`)는 한 글자도 바뀌지 않았다** — 운영 role_permissions 에
+      // 그 글자로 저장돼 있어서, 키를 바꾸면 저장된 행이 가리킬 곳을 잃고 **오류 없이
+      // 조용히** 기본값으로 되돌아간다(inventory.requests 에 적어 둔 그 함정).
+      //
+      // 이름을 바꾼 까닭: 이 잎이 같은 날부터 수리 건 상세의 **[작업내용] 탭**을 여는
+      // 열쇠 가운데 하나가 됐다(auth/repair-case-detail-tab-permissions.ts). 권한을
+      // 정하는 사람이 보는 것은 화면의 탭 이름이지 코드의 개념이 아닌데, 이웃 잎 넷
+      // (파일 관리 · 작업 이력 · 보고서 · 검수/승인)이 전부 탭 이름이라 이것만 다른
+      // 글자면 어느 탭인지 알 수 없다.
+      //
+      // 🔴 **이것 하나로는 탭이 안 닫힌다.** 그 탭에는 기능이 셋 산다 — 작업 기록 작성 ·
+      // 워크플로 단계 변경 · 「작업 절차 수행」(app/(app)/repair-cases/[id]/execution/page.tsx).
+      // 그래서 탭은 이 잎 **또는** `repairCases.procedureExecution` 중 하나라도 읽기
+      // 이상이면 열린다(OR). 여기만 닫으면 **탭은 그대로 보이고** 작업 기록을 적는
+      // 자리만 막힌다. 한 기능의 권한으로 탭 전체를 닫으면 나머지 둘이 길을 잃는다 —
+      // 절차 수행으로 가는 입구는 저장소에 그 탭 하나뿐이다.
+      //
+      // 🔴 **아래 설명의 가운데 토막은 장식이 아니다.** 워크플로 단계 변경에는 여닫을
+      // 잎이 아예 없는데(2026-11-12 결정 — repair-case-detail-tab-permissions.ts 의
+      // 그 문단) 둘을 다 닫으면 그 조작까지 길을 잃는다. 그 사실을 적어 두지 않으면
+      // **닫은 사람이 자기가 무엇을 껐는지 모른다** — 이 조각에서 가장 걱정한 자리다.
+      // 이 글은 역할별 접근 권한 화면의 오른쪽 머리 문단에 그대로 나간다
+      // (components/users/RolePermissionSettings.tsx 의 selectedFeature?.description).
+      label: "작업내용",
+      description:
+        "「작업내용」 탭의 작업 기록입니다. 그 탭에는 워크플로 단계 변경과 작업 절차 수행도 함께 있어서, 여기만 [접근 불가]로 두어도 탭은 그대로 보입니다. 다만 이 메뉴의 「작업 절차 수행」 항목까지 함께 [접근 불가]면 「작업내용」 탭이 숨고, 그 탭에서만 할 수 있는 워크플로 단계 변경도 같이 막힙니다 — 단계 변경은 여기서 여닫을 수 있는 항목이 따로 없고, 워크플로 편집기에서 정한 단계별 허용 역할이 가립니다. 「작업 이력」 탭의 수정·무효 처리도 이 값이 정합니다.",
       levelHints: {
         READ: "남의 기록까지 보기만 합니다",
-        WRITE: "기록을 남깁니다",
+        WRITE: "기록을 남기고 자기가 쓴 기록을 고칩니다",
         MANAGE: "잘못된 기록을 무효화합니다",
       },
       maxMeaningfulLevel: "MANAGE",
@@ -147,10 +172,14 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       // 열람을 나누지 않는다 — 분류별로 가르면 "회로도는 못 보는데 그 회로도가
       // 들어 있는 검사 보고서는 보는" 조합이 만들어지고, 그 경계를 사람이
       // 설명할 수도 지킬 수도 없다.
+      //
+      // 🔴 2026-11-12 부터 이 값이 **[파일 관리] 탭 자체**도 여닫는다([접근 불가]면 탭이
+      // 안 보이고 주소를 직접 쳐도 막힌다). 이름표는 이미 탭 이름과 같아서 글자를 건드릴
+      // 것이 없었다 — 바뀐 것은 아래 '읽기' 설명뿐이다.
       label: "파일 관리",
-      description: "접수 건에 붙은 사진·문서를 봅니다. 쓰기는 올리고 지우는 쪽입니다.",
+      description: "「파일 관리」 탭입니다. 접수 건에 붙은 사진·문서를 봅니다. 쓰기는 올리고 지우는 쪽입니다.",
       levelHints: {
-        READ: "목록을 보고 내려받습니다",
+        READ: "「파일 관리」 탭이 보이고, 목록을 보고 내려받습니다",
         WRITE: "올리고, 설명을 고치고, 휴지통으로 보내고 되살립니다",
       },
       maxMeaningfulLevel: "WRITE",
@@ -159,8 +188,21 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       // 절차 '문서'를 고치는 것은 기술 작업 절차 메뉴지만, 절차를 실제로 밟는
       // 일은 접수 건 화면에서 일어난다. 문서 쪽에 달아 두면 절차를 볼 수 없는
       // 역할에게 그 메뉴가 열려 버린다.
+      //
+      // 🔴 이 잎도 **[작업내용] 탭을 여는 열쇠 가운데 하나**다(2026-11-12) — 위
+      // `workRecords` 와 **OR** 로 묶인다. 절차 수행 화면으로 가는 입구는 저장소에 그 탭
+      // 하나뿐이라, 작업 기록 쪽만 닫혔다고 탭이 사라지면 **이 기능이 길을 잃는다.**
+      // 둘 다 [접근 불가]일 때만 탭이 숨는다(auth/repair-case-detail-tab-permissions.ts).
+      //
+      // 🔵 여기만 닫으면 탭은 그대로 보이고 절차를 진행하는 조작만 막힌다
+      // (mutations/procedure-case-execution.ts 가 최종 관문이다).
+      //
+      // 🔴 아래 설명의 가운데 토막은 위 `workRecords` 의 것과 **짝**이다 — 어느 쪽을
+      // 먼저 고르든 같은 경고를 읽어야 한다. 한쪽에만 적어 두면 다른 쪽을 고른 사람은
+      // 영영 못 본다(이 화면은 고른 항목의 설명 한 문단만 보여 준다).
       label: "작업 절차 수행",
-      description: "접수 건에서 정해진 작업 절차를 밟습니다.",
+      description:
+        "「작업내용」 탭 안에서 정해진 작업 절차를 밟습니다. 작업 기록과 함께 그 탭을 여는 열쇠여서, 여기만 [접근 불가]로 두어도 탭은 그대로 보입니다. 다만 이 메뉴의 「작업내용」 항목까지 함께 [접근 불가]면 「작업내용」 탭이 숨고, 그 탭에서만 할 수 있는 워크플로 단계 변경도 같이 막힙니다 — 단계 변경은 여기서 여닫을 수 있는 항목이 따로 없고, 워크플로 편집기에서 정한 단계별 허용 역할이 가립니다.",
       levelHints: {
         READ: "진행 상황을 보기만 합니다",
         WRITE: "단계를 진행하고 완료 처리합니다",
@@ -168,12 +210,74 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       },
       maxMeaningfulLevel: "MANAGE",
     },
+
+    /**
+     * ── 🔴 탭 하나를 통째로 여닫는 잎 셋 (2026-11-12) ──────────────────────────
+     * 수리 건 상세의 탭 아홉 가운데 **셋은 대응하는 잎이 없었다** — 화면에도 서버에도
+     * 탭 단위 검사가 0건이라 로그인한 사람이면 누구나 보았다. 나머지 여섯은 이미
+     * 어딘가가 답하고 있다: [기본 정보]는 `repairCases.view`, [작업내용]은
+     * `repairCases.workRecords` **또는** `repairCases.procedureExecution`(한 탭에 기능이
+     * 둘이라 OR 다), [진단 Flowchart]는 `diagnosisFlowcharts.view`, [파일 관리]는
+     * `repairCases.files`, [견적서]는 `quotes`, [발주서]는 `domesticOrders`.
+     * 짝은 auth/repair-case-detail-tab-permissions.ts 한 곳에 있다.
+     *
+     * 🔴 **「탭 보기」 전용 항목을 따로 만들지 않는다**(2026-11-12 사용자 결정). 이미 잎이
+     * 있는 탭은 그 잎이 탭까지 가린다 — 못 쓰는 사람에게 탭만 보여 줄 까닭이 없고 설정
+     * 개수도 늘지 않는다. 그래서 새로 만드는 것은 이 셋뿐이다.
+     *
+     * 🔴 **셋 다 읽기 하나뿐이다.** 이들이 답하는 것은 「그 탭에 들어갈 수 있는가」 하나다.
+     * 탭 안에서 무엇을 저장할 수 있는가는 각자 제 판정을 이미 가지고 있다(보고서는
+     * auth/service-report-authorization.ts 가 `repairCases` 메뉴 수준으로, 검수/승인은
+     * 결재선·출하 위임이). 여기에 쓰기·관리를 만들면 고른 사람은 무언가 열었다고 믿지만
+     * 실제로는 아무것도 달라지지 않는다 — 이 파일이 minMeaningfulLevel 을 두는 그 까닭이다.
+     *
+     * 🔴 **기본값은 「지금처럼 보이게」다**(permission-baseline.ts 의 같은 셋). 닫아 두고
+     * 시작하면 배포 즉시 아무도 그 탭을 못 본다. 닫는 것은 관리자가 하는 일이다.
+     */
+    workHistory: {
+      // 🔴 `workRecords`(= [작업내용] 탭)와 **다른 잎**이다. 두 탭이 같은 작업 기록을
+      // 다루지만 하는 일이 다르다 — 저쪽은 적는 자리, 이쪽은 지나간 것을 보는 자리다.
+      // 그래서 [작업내용]을 닫아도 이 탭의 **목록은 그대로 보인다**(고치기·무효 처리
+      // 단추만 사라진다 — 그 둘은 여전히 `workRecords` 가 정한다).
+      label: "작업 이력",
+      description: "「작업 이력」 탭입니다. 지나간 작업 기록과 워크플로·상태 변경 이력을 봅니다.",
+      maxMeaningfulLevel: "READ",
+    },
+    serviceReports: {
+      // 🔴 이 잎이 생기기 전에도 이 탭이 완전히 열려 있던 것은 아니다 — 탭 **안의**
+      // 목록·공유폴더 구역은 `repairCases` **메뉴 수준**이 READ 이상인지를 보고 있었다
+      // (auth/service-report-authorization.ts 의 SERVICE_REPORT_PERMISSION_AREA).
+      // 메뉴 수준은 잎들의 최대값이라 사실상 전원에게 열려 있었고, 탭 자체는 아무도
+      // 안 가렸다. 🔴 **그 판정은 그대로 둔다** — 여기서 하는 일은 「탭에 들어갈 수
+      // 있는가」 하나이고, 만들기·고치기(WRITE)·지우기(MANAGE)의 문턱을 이 조각에서
+      // 좁히지 않는다(좁히는 것은 별개의 결정이다).
+      label: "보고서",
+      description: "「보고서」 탭입니다. 이 건의 검사·수리 보고서를 봅니다.",
+      maxMeaningfulLevel: "READ",
+    },
+    approval: {
+      // 🔴 **결재권이 아니다.** 누가 승인·반려를 누를 수 있는가는 결재선과 출하 위임이
+      // 정하고(queries/shipment-delegations.ts · approval-route-delegations.ts), 이 값은
+      // 그 화면에 들어갈 수 있는가만 답한다. 결재 알림 종이 가리키는 곳도 이 탭이라,
+      // 닫으면 그 사람의 종 링크가 막힌 화면으로 간다 — 그래서 기본값을 열어 둔다.
+      //
+      // 🔴 **이번 조각에서 좁히지 않는다.** 결재와 관련돼 좁히고 싶어 보이지만, 운영에서
+      // 누가 이 탭을 쓰는지 우리는 모른다(2026-11-12 사용자 결정). 지금 보이는 사람이
+      // 계속 보여야 하고, 좁히는 것은 관리자가 설정 화면에서 한다.
+      label: "검수/승인",
+      description: "「검수/승인」 탭입니다. 이 건의 승인 요청과 결재 이력을 봅니다.",
+      maxMeaningfulLevel: "READ",
+    },
   }),
 
   diagnosisFlowcharts: features("diagnosisFlowcharts", {
     view: {
+      // 🔴 2026-11-12 부터 이 값이 수리 건 상세의 **[진단 Flowchart] 탭 자체**도 여닫는다
+      // ([접근 불가]면 탭이 안 보이고, 흐름도 편집기 주소를 직접 쳐도 막힌다 —
+      // auth/repair-case-detail-tab-permissions.ts). 이름표는 바꾸지 않았다: 이 잎이 선
+      // 자리는 메뉴 「진단 Flowchart 관리」 아래라, 둘을 이어 읽으면 어느 탭인지 드러난다.
       label: "흐름도 조회",
-      description: "접수 건에 붙은 진단 흐름도를 봅니다.",
+      description: "접수 건 상세의 「진단 Flowchart」 탭입니다. 그 건에 붙은 진단 흐름도를 봅니다.",
       maxMeaningfulLevel: "READ",
     },
     edit: {
@@ -454,6 +558,26 @@ const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   // 전부 hasPermission("repairCases.files") 하나를 쓴다. 목록에 올리지 않아
   // 화면이 괜히 "아직 코드가 최종 판정"이라고 말하고 있었다(2026-08-31 확인).
   "repairCases.files",
+  /**
+   * 🔴 탭 하나를 통째로 여닫는 잎 셋(2026-11-12). 이 셋은 **처음부터 설정만 본다** —
+   * 탭을 그릴지 정하는 레이아웃과, 주소를 직접 쳤을 때 막는 각 페이지가 둘 다
+   * hasPermission 하나만 부른다(auth/repair-case-detail-tab-access.ts). 뒤에 남은 역할
+   * 함수가 없으므로 여기 올려도 화면이 거짓말을 하지 않는다: 넓히면 실제로 열린다.
+   *
+   * 🔵 같은 날 이 집합에 **이미 들어 있던** 잎 셋(`repairCases.files` ·
+   * `repairCases.workRecords` · `repairCases.procedureExecution`)과
+   * `diagnosisFlowcharts.view`(메뉴째 전환돼 있다)의 뜻이 넓어졌다 — 전에는 「탭 안의
+   * 단추」를 가렸는데 이제 **탭 전체**(작업내용 쪽 둘은 **함께** OR 로)를 가린다.
+   * 넓어지는 방향이라 목록에서 뺄 까닭이 없다: 설정이 최종 판정이라는 말은 그대로
+   * 참이고, 오히려 전보다 더 참이다.
+   *
+   * 🔴 `repairCases.serviceReports` 가 「보고서 탭에 들어갈 수 있는가」만 답한다는 점에
+   * 주의할 것. 그 탭 **안**의 만들기·고치기·지우기 문턱은 여전히
+   * auth/service-report-authorization.ts 가 `repairCases` 메뉴 수준으로 판정한다.
+   */
+  "repairCases.workHistory",
+  "repairCases.serviceReports",
+  "repairCases.approval",
   "users.view",
   "users.shipmentRepresentatives",
   // 하위 기능이 없는 메뉴들. 대시보드·A/S 접수·Excel 생성·시스템 설정은 원래

@@ -9,7 +9,9 @@ import ServiceReportList, {
 import ServiceReportTabs, {
   type DeletedServiceReportListRow,
 } from "@/components/repair-cases/report/ServiceReportTabs";
+import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
+import { canOpenRepairCaseDetailTab } from "@/lib/auth/repair-case-detail-tab-access";
 import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
 import { getPermissionLevel } from "@/lib/auth/permission-resolver";
 import {
@@ -130,6 +132,27 @@ export default async function RepairCaseReportPage({
    */
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
+
+  /**
+   * 🔴 **탭에 들어올 수 있는가**(2026-11-12) — 바로 아래의 「무엇을 할 수 있는가」와
+   * **다른 질문**이다. 탭 줄이 이 탭을 감추는 것은 관문이 아니므로, 주소를 직접 친
+   * 사람을 막는 것은 여기다. 레이아웃과 **같은 창구·같은 열쇠**를 부른다
+   * (`auth/repair-case-detail-tab-access.ts` → `repairCases.serviceReports`).
+   *
+   * 🔴 **아래 판정을 대신하지 않는다.** 목록·공유폴더 구역은 종전대로
+   * `auth/service-report-authorization.ts` 가 `repairCases` **메뉴 수준**으로 정하고,
+   * 만들기·고치기(WRITE)·지우기(MANAGE) 문턱도 그대로다. 이 조각에서 그 문턱을
+   * 좁히지 않는다 — 좁히는 것은 별개의 결정이다.
+   */
+  if (!(await canOpenRepairCaseDetailTab(actingUser, "report"))) {
+    return (
+      <PlaceholderPage
+        title="보고서"
+        description="「보고서」 탭을 볼 권한이 없습니다. 필요하면 관리자에게 요청해 주세요."
+      />
+    );
+  }
+
   const level = await getPermissionLevel(actingUser, SERVICE_REPORT_PERMISSION_AREA);
 
   /**

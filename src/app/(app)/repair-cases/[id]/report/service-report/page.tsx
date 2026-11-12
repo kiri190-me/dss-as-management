@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import ServiceReportForm from "@/components/repair-cases/report/service-report/ServiceReportForm";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getPermissionLevel } from "@/lib/auth/permission-resolver";
+import { canOpenRepairCaseDetailTab } from "@/lib/auth/repair-case-detail-tab-access";
 import {
   SERVICE_REPORT_PERMISSION_AREA,
   canDeleteServiceReports,
@@ -150,6 +151,18 @@ export default async function ServiceReportPage({
 
   const resolved = await resolveRepairCaseForServer(id);
   if (!resolved) notFound();
+
+  /**
+   * 🔴 **「보고서」 탭에 못 들어가는 사람은 여기도 못 들어온다**(2026-11-12). 이 주소는
+   * 그 탭의 자식이라, 탭만 막고 자식을 두면 주소를 직접 쳐서 그대로 들어와진다 —
+   * 가린 것이 아니다. 레이아웃·탭 화면과 **같은 창구·같은 열쇠**를 부른다
+   * (`auth/repair-case-detail-tab-access.ts`). 형제 화면(`print/page.tsx`)과 같은
+   * 모양으로 404 를 낸다: 고객사로 나가는 문서를 짓는 자리라 존재 자체를 알리지 않는다.
+   *
+   * 🔴 아래 `level` 로 하는 판정들은 **그대로 둔다** — 「만들고 고칠 수 있는가」는
+   * 종전대로 service-report-authorization.ts 가 답한다. 문턱이 둘이고 뜻이 다르다.
+   */
+  if (!(await canOpenRepairCaseDetailTab(actingUser, "report"))) notFound();
 
   /**
    * 저장된 장을 여는 길. 🔴 **주소에 `id` 가 있는데 읽을 수 없으면 404 다** —

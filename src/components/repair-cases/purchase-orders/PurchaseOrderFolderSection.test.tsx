@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import type { RepairCaseDetailTabVisibility } from "@/lib/auth/repair-case-detail-tab-permissions";
+import { buildRepairCaseDetailTabs } from "@/components/repair-cases/detail/detail-tabs-list";
 import {
   SHARE_FOLDER_ENTRY_ACTIONS_CLASS,
   SHARE_FOLDER_ENTRY_META_MODIFIED_CLASS,
@@ -58,10 +60,31 @@ const tabPage = readFileSync(
   path.join(srcDir, "app", "(app)", "repair-cases", "[id]", "purchase-orders", "page.tsx"),
   "utf8"
 ).replace(/\r\n/g, "\n");
+/**
+ * 🔴 탭 줄은 파일 **둘**이 되었다(2026-11-12) — 그리는 조각(DetailTabs.tsx)과, 무엇을
+ * 어떤 차례로 그릴지 정하는 순수 함수(detail-tabs-list.ts). 아래 '화면이 권한을 묻지
+ * 않는다'는 **둘 다** 봐야 한다: 한쪽만 보면 다른 쪽으로 옮겨 적는 순간 조용히 통과한다.
+ */
 const detailTabs = readFileSync(
   path.join(srcDir, "components", "repair-cases", "detail", "DetailTabs.tsx"),
   "utf8"
 ).replace(/\r\n/g, "\n");
+const detailTabsList = readFileSync(
+  path.join(srcDir, "components", "repair-cases", "detail", "detail-tabs-list.ts"),
+  "utf8"
+).replace(/\r\n/g, "\n");
+
+/** 여덟 탭이 전부 보이는 세션. 차례를 재는 데 쓴다. */
+const ALL_TABS_VISIBLE: RepairCaseDetailTabVisibility = {
+  execution: true,
+  diagnosis: true,
+  workHistory: true,
+  files: true,
+  report: true,
+  quotes: true,
+  purchaseOrders: true,
+  approval: true,
+};
 
 const CASE_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 /** 🔴 실제 폴더 이름 **모양** — 값은 가짜다. */
@@ -328,15 +351,25 @@ describe("통로", () => {
 
 describe("자리와 규율", () => {
   test("🔴 **견적서 탭 오른쪽**이다 — 검수/승인보다는 앞이다", () => {
-    const quotesAt = detailTabs.indexOf("href: hrefs.quotes");
-    const purchaseAt = detailTabs.indexOf("href: hrefs.purchaseOrders");
-    const approvalAt = detailTabs.indexOf("href: hrefs.approval");
-    assert.ok(quotesAt >= 0 && purchaseAt >= 0 && approvalAt >= 0, "탭 줄에서 세 자리를 찾지 못했다");
+    // 🔴 2026-11-12: 글자(indexOf)가 아니라 **실제로 만들어지는 목록**으로 잰다 —
+    // 탭 줄이 순수 함수로 떨어져 나오면서 값으로 확인할 수 있게 됐다. 글자로 재면
+    // 조각이 또 옮겨 갈 때 조용히 통과한다.
+    const labels = buildRepairCaseDetailTabs(CASE_ID, ALL_TABS_VISIBLE).map((tab) => tab.label);
+    const quotesAt = labels.indexOf("견적서");
+    const purchaseAt = labels.indexOf("발주서");
+    const approvalAt = labels.indexOf("검수/승인");
+    assert.ok(quotesAt >= 0 && purchaseAt >= 0 && approvalAt >= 0, `탭 줄에서 세 자리를 찾지 못했다: ${labels.join(" · ")}`);
     assert.ok(quotesAt < purchaseAt, "발주서 탭이 견적서 탭 왼쪽에 있다");
     assert.ok(purchaseAt < approvalAt, "발주서 탭이 검수/승인 오른쪽에 있다");
-    assert.ok(detailTabs.includes('label: "발주서"'));
-    // 🔴 화면이 권한을 묻지 않는다 — 서버가 넘겨준 값을 그릴 뿐이다.
+
+    // 🔴 견적서를 못 보는 세션에서는 **그 자리에 그대로** 선다 — 차례가 흔들리지 않는다.
+    const withoutQuotes = buildRepairCaseDetailTabs(CASE_ID, { ...ALL_TABS_VISIBLE, quotes: false }).map((t) => t.label);
+    assert.equal(withoutQuotes.includes("견적서"), false);
+    assert.ok(withoutQuotes.indexOf("발주서") < withoutQuotes.indexOf("검수/승인"));
+
+    // 🔴 화면이 권한을 묻지 않는다 — 서버가 넘겨준 값을 그릴 뿐이다(파일 둘 다).
     assert.equal(detailTabs.includes("hasPermission"), false);
+    assert.equal(detailTabsList.includes("hasPermission"), false);
   });
 
   test("🔴 탭 페이지가 **서버에서 공유폴더를 읽지 않는다**", () => {

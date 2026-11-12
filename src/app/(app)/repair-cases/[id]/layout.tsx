@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
-import { hasPermission } from "@/lib/auth/permission-resolver";
 import { isFieldEditable } from "@/lib/auth/repair-case-edit-authorization";
+import { resolveRepairCaseDetailTabVisibility } from "@/lib/auth/repair-case-detail-tab-access";
 import { readSession } from "@/lib/auth/session";
 import { getRepairCaseWriteSource } from "@/lib/config/write-source";
 import { getIntakeReferenceData } from "@/lib/db/queries/repair-case-references";
@@ -40,37 +40,29 @@ export default async function RepairCaseDetailLayout({
   }
 
   /**
-   * 「견적서」 탭을 그릴지 정한다. 견적서에는 우리가 고객사에 부른 값이 통째로
-   * 있어서, PO/내자 메뉴에서 못 보는 사람이 이 탭으로 금액을 들여다볼 수 있으면
-   * 그것은 인가 구멍이다.
+   * 어느 탭을 그릴지 정한다(2026-11-12 — 그 전에는 「견적서」 · 「발주서」 둘뿐이었다).
    *
-   * 판정 방법은 `/quotes` 화면이 쓰는 것과 **똑같다** — 살아 있는 계정을 다시
-   * 읽고(강등된 계정이 옛 토큰으로 다니지 못하게), `quotes` 영역의 READ 를
-   * 묻는다. 새 영역 열쇠를 만들지 않는다: 견적서를 볼 수 있는가는 이미
-   * `quotes` 하나가 답하고 있다.
+   * 판정 방법은 각 탭의 화면이 쓰는 것과 **똑같다** — 살아 있는 계정을 다시 읽고
+   * (강등된 계정이 옛 토큰으로 다니지 못하게), 탭마다 정해진 열쇠의 READ 를 묻는다.
+   * 🔴 **열쇠를 여기 적지 않는다** — 어느 탭이 어느 잎을 보는지는
+   * `auth/repair-case-detail-tab-permissions.ts` 한 곳에만 있다. 탭 줄과 각 페이지가
+   * 서로 다른 열쇠를 보게 되는 날 증상은 「탭은 없는데 주소로는 들어와진다」이고,
+   * 그것은 아무 오류도 내지 않는다.
    *
    * 🔴 이것은 **탭을 그릴지 말지**일 뿐 관문이 아니다. 주소를 직접 치면 그대로
-   * 들어와지므로 `[id]/quotes/page.tsx` 가 같은 판정을 한 번 더 한다.
+   * 들어와지므로 탭마다 제 page.tsx 가 같은 판정을 한 번 더 한다.
+   *
+   * 🔴 [기본 정보] 탭은 이 꾸러미에 없다 — 가리지 않기로 한 탭이고, 여덟을 전부
+   * 닫아도 그 하나는 남는다(그래서 「탭이 하나도 없는 사람」이 생기지 않는다).
    *
    * 세션이 없으면 상위 (app) 레이아웃이 이미 로그인으로 보냈다 — 여기서는 못
    * 보는 것으로만 취급한다(형제 탭들과 같은 방어적 처리).
+   *
+   * 🔵 열쇠가 여덟이어도 **질의는 요청당 한 번**이다(permission-resolver 의 cache()).
    */
   const session = await readSession();
   const actingUser = session ? await resolveActingUserForSession(session) : null;
-  const canViewQuotes =
-    actingUser !== null && (await hasPermission(actingUser, "quotes", "READ"));
-
-  /**
-   * 「발주서」 탭(2026-10-12)도 같은 모양으로 정한다 — 🔴 다만 **열쇠가 다르다.**
-   * 그 탭이 보여 주는 것은 고객사가 우리에게 낸 발주서(내자)이고, 폴더 이름에 발주
-   * 금액이 들어 있다. 「발주서를 볼 수 있는가」는 이미 `domesticOrders` 하나가
-   * 답하고 있으므로 새 영역을 만들지 않는다.
-   *
-   * 🔴 이것도 **탭을 그릴지 말지**일 뿐 관문이 아니다 — 주소를 직접 치면 그대로
-   * 들어와지므로 `[id]/purchase-orders/page.tsx` 가 같은 판정을 한 번 더 한다.
-   */
-  const canViewPurchaseOrders =
-    actingUser !== null && (await hasPermission(actingUser, "domesticOrders", "READ"));
+  const tabVisibility = await resolveRepairCaseDetailTabVisibility(actingUser);
 
   /**
    * 머리 카드(DetailHeader)의 재료 — 2026-10-06 이전에는 「기본 정보」 탭의
@@ -161,7 +153,7 @@ export default async function RepairCaseDetailLayout({
         isDueDateNear={isDueDateNear}
         isFinalShipmentApproved={headerFinalShipmentApproved}
       />
-      <DetailTabs id={id} canViewQuotes={canViewQuotes} canViewPurchaseOrders={canViewPurchaseOrders} />
+      <DetailTabs id={id} visibility={tabVisibility} />
       {children}
     </div>
   );

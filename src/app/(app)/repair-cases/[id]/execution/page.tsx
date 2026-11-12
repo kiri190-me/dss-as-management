@@ -4,6 +4,7 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
+import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import DatabaseWorkflowControlPanel from "@/components/repair-cases/workflow/DatabaseWorkflowControlPanel";
 import ManualStepSetPanel from "@/components/repair-cases/workflow/ManualStepSetPanel";
 import ProcedureExecutionScreen from "@/components/procedures/execution/ProcedureExecutionScreen";
@@ -28,6 +29,7 @@ import {
 import { workRecordRequiresOwnAssignment } from "@/lib/auth/repair-case-work-record-authorization";
 import { actorMay } from "@/lib/auth/developer-promotion";
 import { hasPermission } from "@/lib/auth/permission-resolver";
+import { canOpenRepairCaseDetailTab } from "@/lib/auth/repair-case-detail-tab-access";
 import {
   listManuallySelectableStepsFromRules,
   loadWorkflowRulesForCase,
@@ -77,6 +79,32 @@ export default async function RepairCaseExecutionPage({
       <p className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-400">
         현재 로그인한 사용자 정보를 확인할 수 없습니다.
       </p>
+    );
+  }
+
+  /**
+   * 🔴 **주소를 직접 쳐도 막힌다**(2026-11-12). 탭 줄이 이 탭을 감추는 것은 눌러도
+   * 막히는 탭을 내밀지 않기 위해서일 뿐 관문이 아니다 — 관문은 여기다. 레이아웃과
+   * **같은 창구·같은 열쇠**를 부른다(`auth/repair-case-detail-tab-access.ts`):
+   * 열쇠를 여기 다시 적으면 한쪽만 고쳐지는 날 「탭은 없는데 주소로는 들어와진다」가 된다.
+   *
+   * 🔴 이 탭은 **열쇠가 둘이고 OR 다** — `repairCases.workRecords`(작업 기록) 또는
+   * `repairCases.procedureExecution`(작업 절차 수행) 중 하나라도 읽기 이상이면 들어온다.
+   * 한 화면에 기능이 셋 살기 때문이다(작업 기록 작성 · 워크플로 단계 변경 · 절차 수행).
+   * 한 기능의 잎으로 탭 전체를 닫으면 나머지 둘이 길을 잃는다 — 절차 수행으로 가는
+   * 입구는 저장소에 이 탭 하나뿐이다.
+   * 🔴 그 묶는 방식을 **여기 적지 않는다** — 레이아웃이 탭을 그릴 때 쓰는 것과 같은
+   * 판정 함수 하나에 닿는다(그 표의 `anyOf`). 두 벌로 적으면 「탭은 보이는데 들어가면
+   * 막힌다」가 된다.
+   *
+   * 아래 무거운 조회들보다 **먼저** 선다 — 막을 사람의 자료를 읽을 까닭이 없다.
+   */
+  if (!(await canOpenRepairCaseDetailTab(actingUser, "execution"))) {
+    return (
+      <PlaceholderPage
+        title="작업내용"
+        description="「작업내용」 탭을 볼 권한이 없습니다. 필요하면 관리자에게 요청해 주세요."
+      />
     );
   }
 

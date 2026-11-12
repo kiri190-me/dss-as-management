@@ -7,6 +7,8 @@ import { getAuthSource } from "@/lib/config/auth-source";
 import { getWorkRecordHistoryForCase } from "@/lib/db/queries/repair-case-work-records";
 import { getRepairCaseFlowchartPageContext } from "@/lib/db/queries/repair-case-flowcharts";
 import { hasPermission, roleOnlyActor } from "@/lib/auth/permission-resolver";
+import { resolveActingUserForSession } from "@/lib/auth/acting-user";
+import { canOpenRepairCaseDetailTab } from "@/lib/auth/repair-case-detail-tab-access";
 import {
   buildWorkRecordFlowchart,
   listWorkRecordIdsInFlowchart,
@@ -58,11 +60,24 @@ export default async function WorkRecordFlowchartPage({ params }: { params: Prom
   const resolved = await resolveRepairCaseForServer(id);
   if (!resolved) notFound();
 
+  const session = await readSession();
+
+  /**
+   * 🔴 **「진단 Flowchart」 탭에 못 들어가는 사람은 여기도 못 들어온다**(2026-11-12).
+   * 이 화면은 그 탭 목록의 맨 위 줄에서 들어오는 자식 주소라, 탭만 막고 두면 주소를
+   * 직접 쳐서 그대로 들어와진다. 레이아웃·탭 화면과 **같은 창구·같은 열쇠**를
+   * 부른다(`auth/repair-case-detail-tab-access.ts` → `diagnosisFlowcharts.view`).
+   *
+   * 🔴 **작업 기록 조회보다 위**다 — 막을 사람의 기록을 읽을 까닭이 없다.
+   * 아래 `canEdit`(`diagnosisFlowcharts.edit`)는 그대로 둔다.
+   */
+  const actingUser = session ? await resolveActingUserForSession(session) : null;
+  if (!(await canOpenRepairCaseDetailTab(actingUser, "diagnosis"))) notFound();
+
   const { rows, total } = await getWorkRecordHistoryForCase(id, { limit: WORK_RECORD_FLOWCHART_MAX_RECORDS, offset: 0 });
   const { nodes, edges } = buildWorkRecordFlowchart(rows);
   const isTruncated = total > WORK_RECORD_FLOWCHART_MAX_RECORDS;
 
-  const session = await readSession();
   const pageContext = await getRepairCaseFlowchartPageContext(id);
   const canEdit =
     !!session &&

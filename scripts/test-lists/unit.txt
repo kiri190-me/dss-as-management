@@ -55,6 +55,14 @@ src/lib/navigation.test.ts
 src/lib/auth/workflow-template-authorization.test.ts
 src/lib/auth/permission-areas.test.ts
 src/lib/auth/permission-features.test.ts
+# 수리 건 상세의 **탭마다 권한**(2026-11-12) — 탭 아홉 중 여덟에 잎을 붙였다. 🔴 못 박는 것은
+# 「기본값이 지금과 같다」(새 잎 셋이 다섯 역할 전부 READ — 닫아 두면 배포 즉시 아무도 못 본다) ·
+# 「권한 키가 하나도 안 사라졌다」(있던 일곱 + 더한 셋 = 48, 상한도 한 칸 안 달라졌다) ·
+# [기본 정보]를 가릴 칸이 표에 **없다** · [견적서]·[발주서]는 메뉴 열쇠 그대로 ·
+# 새 셋은 읽기 하나뿐 · 이름표가 탭 이름과 같다(「작업 기록」 → 「작업내용」, 키는 그대로).
+# 🔴 [작업내용]은 열쇠가 **둘이고 OR** 다 — 작업 기록만 닫아도 탭은 남고(절차 수행이 길을
+# 잃지 않게), 둘 다 닫아야 숨는다. 그 판정이 순수 함수라 여기서 값으로 잰다.
+src/lib/auth/repair-case-detail-tab-permissions.test.ts
 src/lib/auth/developer-flag.test.ts
 src/lib/db/migration-safety.test.ts
 src/lib/client-uuid.test.ts

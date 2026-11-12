@@ -86,11 +86,17 @@ describe("① 레이아웃이 머리 카드를 그린다 — 탭 줄보다 위�
   });
 
   test("🔴 조건부가 아니다 — 「견적서」 탭처럼 사라지지 않는다", () => {
-    // canViewQuotes 는 탭 하나를 그릴지 정하는 값이다. 카드가 그 값에 묶이면
-    // 견적서를 못 보는 사람에게 카드까지 사라진다.
+    // 🔴 2026-11-12: 레이아웃이 탭마다 참/거짓을 따로 들고 있던 것(canViewQuotes ·
+    //    canViewPurchaseOrders)이 꾸러미 하나(tabVisibility)로 바뀌었다 — 탭 아홉에
+    //    권한을 붙이면서 열쇠 표를 한 곳으로 모은 결과다. 그 이름을 **여기서 먼저
+    //    확인한다**: 이름이 또 바뀌면 아래 단언이 빈 표본으로 공짜 통과한다.
+    assert.ok(layout.includes("tabVisibility"), "레이아웃이 탭 가시성 값을 들고 있지 않다 — 이 시험의 전제가 사라졌다");
+    assert.ok(layout.includes("visibility={tabVisibility}"), "탭 줄에 그 값이 안 넘어간다");
+
+    // 카드가 그 값에 묶이면 어느 탭을 못 보는 사람에게 카드까지 사라진다.
     const card = indexOrFail(layout, "<DetailHeader");
     const cardBlock = layout.slice(card, indexOrFail(layout, "<DetailTabs"));
-    assert.equal(cardBlock.includes("canViewQuotes"), false, "카드가 견적서 권한에 묶여 있다");
+    assert.equal(cardBlock.includes("tabVisibility"), false, "카드가 탭 권한에 묶여 있다");
     assert.equal(cardBlock.includes("&&"), false, "카드가 조건부로 그려진다");
   });
 });

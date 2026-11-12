@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
+import { canOpenRepairCaseDetailTab } from "@/lib/auth/repair-case-detail-tab-access";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import {
   listAttachmentsForRepairCase,
@@ -16,6 +17,7 @@ import { workflowKindOf } from "@/lib/domain/workflow-kind";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import { resolveContactFolderArchiveRoot } from "@/lib/storage/contact-folder-archive";
 import { resolveRepairDocsArchiveRoot } from "@/lib/storage/repair-docs-archive";
+import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import FilesScreen from "@/components/repair-cases/files/FilesScreen";
 
 export const metadata: Metadata = {
@@ -48,6 +50,25 @@ export default async function RepairCaseFilesPage({
   // 항상 존재해야 한다. 방어적으로만 남겨둔다.
   if (!resolved) {
     notFound();
+  }
+
+  /**
+   * 🔴 **주소를 직접 쳐도 막힌다**(2026-11-12). 탭 줄이 이 탭을 감추는 것은 관문이
+   * 아니다 — 관문은 여기다. 레이아웃과 **같은 창구·같은 열쇠**를 부른다
+   * (`auth/repair-case-detail-tab-access.ts`).
+   *
+   * 🔴 열쇠는 아래 `canManageFiles` 와 **같은 잎**(`repairCases.files`)이고 수준만
+   * 다르다 — 들어오는 데 READ, 올리고 지우는 데 WRITE. 새 열쇠를 만들지 않는다:
+   * 「이 건의 파일을 볼 수 있는가」는 이미 그 하나가 답하고 있고, 둘로 나누면 관리자가
+   * 한쪽만 풀어 둔 상태가 생긴다.
+   */
+  if (!(await canOpenRepairCaseDetailTab(actingUser, "files"))) {
+    return (
+      <PlaceholderPage
+        title="파일 관리"
+        description="「파일 관리」 탭을 볼 권한이 없습니다. 필요하면 관리자에게 요청해 주세요."
+      />
+    );
   }
 
   // 🔴 **이 건의 제품 종류** — 수리 건에는 그 칸이 없다. 접수할 때 사람이 고른 워크플로

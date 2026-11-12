@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
+import { canOpenRepairCaseDetailTab } from "@/lib/auth/repair-case-detail-tab-access";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
+import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import DatabaseApprovalScreen from "@/components/repair-cases/approval/DatabaseApprovalScreen";
 import {
   getCurrentApprovalsForCase,
@@ -45,6 +47,26 @@ export default async function RepairCaseApprovalPage({
   // 항상 존재해야 한다. 방어적으로만 남겨둔다.
   if (!resolved) {
     notFound();
+  }
+
+  /**
+   * 🔴 **주소를 직접 쳐도 막힌다**(2026-11-12). 탭 줄이 이 탭을 감추는 것은 관문이
+   * 아니다 — 관문은 여기다. 레이아웃과 **같은 창구·같은 열쇠**를 부른다
+   * (`auth/repair-case-detail-tab-access.ts`).
+   *
+   * 🔴 이것은 **결재권이 아니다.** 누가 승인·반려를 누를 수 있는가는 아래에서 읽는
+   * 결재선·출하 위임이 정하고, 이 관문은 「이 화면에 들어올 수 있는가」만 답한다.
+   * 그래서 기본값이 다섯 역할 전부 열림이다 — 결재를 못 누르는 사람도 지금 이 탭을
+   * 보고 있고(종 알림도 여기를 가리킨다), 그 사람들을 좁히는 것은 이 조각의 일이
+   * 아니다(2026-11-12 사용자 결정).
+   */
+  if (!(await canOpenRepairCaseDetailTab(actingUser, "approval"))) {
+    return (
+      <PlaceholderPage
+        title="검수/승인"
+        description="「검수/승인」 탭을 볼 권한이 없습니다. 필요하면 관리자에게 요청해 주세요."
+      />
+    );
   }
 
   // 읽기 소스에서 mock이 사라진 뒤로 모든 수리 건은 항상 DATABASE로 해석되므로

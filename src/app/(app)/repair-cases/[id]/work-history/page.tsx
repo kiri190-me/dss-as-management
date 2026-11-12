@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
+import { canOpenRepairCaseDetailTab } from "@/lib/auth/repair-case-detail-tab-access";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
+import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import DatabaseWorkHistoryScreen from "@/components/repair-cases/work-history/DatabaseWorkHistoryScreen";
 import { editWorkRecordAction, invalidateWorkRecordAction } from "@/lib/server/actions/repair-case-work-records";
 import { getWorkRecordCaseContext, getWorkRecordHistoryForCase } from "@/lib/db/queries/repair-case-work-records";
@@ -48,6 +50,31 @@ export default async function WorkHistoryPage({
   const { page: pageParam } = await searchParams;
   const page = Math.max(1, Number.parseInt(pageParam ?? "1", 10) || 1);
 
+  /**
+   * 🔴 **주소를 직접 쳐도 막힌다**(2026-11-12). 탭 줄이 이 탭을 감추는 것은 관문이
+   * 아니다 — 관문은 여기다. 레이아웃과 **같은 창구·같은 열쇠**를 부른다
+   * (`auth/repair-case-detail-tab-access.ts`).
+   *
+   * 🔴 세션·행위자를 읽는 자리가 **아래 조회들보다 위로 올라왔다.** 예전에는 무효화
+   * 권한을 정하려고 조회가 끝난 뒤에 읽었는데, 막을 사람의 작업 기록을 먼저 읽고 나서
+   * 버리는 꼴이 된다. 같은 값을 아래에서 그대로 쓴다 — 두 번 읽지 않는다.
+   *
+   * 🔴 이 탭의 열쇠는 `repairCases.workHistory` 로 **`workRecords` 와 다르다.** 두 탭이
+   * 같은 작업 기록을 다루지만 하는 일이 다르다(저쪽은 적는 자리, 이쪽은 지나간 것을
+   * 보는 자리). 그래서 [작업내용]을 닫아도 이 목록은 그대로 보이고, 아래의 고치기·
+   * 무효 처리 단추만 사라진다.
+   */
+  const session = await readSession();
+  const actingUser = session ? await resolveActingUserForSession(session) : null;
+  if (!(await canOpenRepairCaseDetailTab(actingUser, "workHistory"))) {
+    return (
+      <PlaceholderPage
+        title="작업 이력"
+        description="「작업 이력」 탭을 볼 권한이 없습니다. 필요하면 관리자에게 요청해 주세요."
+      />
+    );
+  }
+
   const [{ rows, total }, workflowHistory, caseContext] = await Promise.all([
     getWorkRecordHistoryForCase(resolved.id, { limit: WORK_HISTORY_PAGE_SIZE, offset: (page - 1) * WORK_HISTORY_PAGE_SIZE }),
     getWorkflowHistoryForCase(resolved.id),
@@ -63,9 +90,11 @@ export default async function WorkHistoryPage({
    * 내주지 않는다(상위 (app)/layout.tsx가 이미 두 경우를 로그인으로 돌려보내
    * 므로 여기까지 오지 않지만, 이 화면 혼자서도 닫혀 있어야 한다).
    * 서버 액션도 자기 검사를 그대로 하므로 이 판정은 "보여줄지"만 정한다.
+   *
+   * 🔴 `actingUser` 는 위 탭 관문에서 이미 읽어 둔 그 값이다(2026-11-12) — 여기서
+   * 다시 읽지 않는다. 열쇠는 여전히 **`workRecords`** 다: 이 탭에 들어오는 열쇠
+   * (`workHistory`)와 **일부러 다르다.**
    */
-  const session = await readSession();
-  const actingUser = session ? await resolveActingUserForSession(session) : null;
   const canInvalidate = actingUser
     ? await hasPermission(actingUser, "repairCases.workRecords", "MANAGE")
     : false;

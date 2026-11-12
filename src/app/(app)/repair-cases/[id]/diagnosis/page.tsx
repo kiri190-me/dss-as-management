@@ -7,6 +7,9 @@ import { listRepairCaseFlowcharts, getRepairCaseFlowchartPageContext } from "@/l
 import { getWorkRecordHistoryForCase } from "@/lib/db/queries/repair-case-work-records";
 import { buildWorkRecordFlowchart, WORK_RECORD_FLOWCHART_MAX_RECORDS } from "@/lib/domain/work-record-flowchart";
 import { hasPermission, roleOnlyActor } from "@/lib/auth/permission-resolver";
+import { resolveActingUserForSession } from "@/lib/auth/acting-user";
+import { canOpenRepairCaseDetailTab } from "@/lib/auth/repair-case-detail-tab-access";
+import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import CaseFlowchartListScreen from "@/components/repair-cases/flowchart/CaseFlowchartListScreen";
 
 export const metadata: Metadata = {
@@ -43,6 +46,31 @@ export default async function CaseFlowchartListPage({ params }: { params: Promis
   if (!resolved) notFound();
 
   const session = await readSession();
+
+  /**
+   * 🔴 **주소를 직접 쳐도 막힌다**(2026-11-12). 탭 줄이 이 탭을 감추는 것은 관문이
+   * 아니다 — 관문은 여기다. 레이아웃과 **같은 창구·같은 열쇠**를 부른다
+   * (`auth/repair-case-detail-tab-access.ts` → `diagnosisFlowcharts.view`).
+   *
+   * 🔴 **들어오는 열쇠와 고치는 열쇠가 다르다** — 아래 `canEdit` 는 그대로
+   * `diagnosisFlowcharts.edit` 를 본다. 같은 메뉴의 다른 잎이다.
+   *
+   * 🔴 여기서는 `roleOnlyActor` 가 아니라 **살아 있는 계정**(resolveActingUserForSession)을
+   * 쓴다 — 레이아웃이 탭을 그릴 때 쓰는 것과 같은 값이어야 하기 때문이다. 둘이
+   * 다르면 개발자 표시가 켜진 계정에서 「탭은 보이는데 들어가면 막힌다」가 된다.
+   * 아래 `canEdit` 는 **건드리지 않았다** — 그 판정의 승격 문제는 제 주석이 적어 둔
+   * 대로 이 조각의 범위가 아니고, 닫히는 쪽으로 실패하므로 권한이 새지 않는다.
+   */
+  const actingUser = session ? await resolveActingUserForSession(session) : null;
+  if (!(await canOpenRepairCaseDetailTab(actingUser, "diagnosis"))) {
+    return (
+      <PlaceholderPage
+        title="진단 Flowchart"
+        description="「진단 Flowchart」 탭을 볼 권한이 없습니다. 필요하면 관리자에게 요청해 주세요."
+      />
+    );
+  }
+
   const pageContext = await getRepairCaseFlowchartPageContext(id);
   const canEdit =
     !!session &&

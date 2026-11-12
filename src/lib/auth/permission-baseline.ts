@@ -423,6 +423,29 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
         read: canViewProcedureExecution(role),
       });
 
+    /**
+     * ── 🔴 탭 하나를 통째로 여닫는 잎 셋 (2026-11-12) ──────────────────────────
+     * 「작업 이력」 · 「보고서」 · 「검수/승인」 탭에는 **역할 검사가 하나도 없었다** —
+     * 로그인한 사람이면 누구나 보았다(화면에도 서버에도 탭 단위 검사가 0건이었다).
+     *
+     * 🔴 그래서 셋 다 **다섯 역할 전부에게 READ** 다. 이 파일 맨 위의 '아직 아무 역할
+     * 검사도 없는 영역' 규칙 그대로다 — 낮춰 적으면 표를 만들었을 뿐인데 **배포 즉시
+     * 아무도 그 탭을 못 보게 된다.** 닫는 것은 관리자가 설정 화면에서 할 일이지 우리가
+     * 미리 할 일이 아니다(2026-11-12 사용자 결정).
+     *
+     * 🔴 부를 *-authorization.ts 함수가 **없다.** 지어내서 부르면 안 된다 — 예를 들어
+     * 검수/승인에 결재 자격 함수를 끌어다 쓰면 「지금 보이는 사람이 계속 보인다」가
+     * 깨진다(결재를 못 누르는 사람도 그 탭을 보고 있다). 보고서 쪽도 마찬가지로
+     * canViewServiceReports 를 부를 수 없다 — 그 함수는 역할이 아니라 **수준**을 받고,
+     * 그 수준이 바로 이 표가 계산하는 값이라 서로를 부르는 꼴이 된다.
+     *
+     * 🔵 `repairCases.view` · `users.view` 와 같은 자리의 값이다(둘 다 "READ" 한 줄).
+     */
+    case "repairCases.workHistory":
+    case "repairCases.serviceReports":
+    case "repairCases.approval":
+      return "READ";
+
     // ── 진단 Flowchart 관리 ───────────────────────────────────────────────
     case "diagnosisFlowcharts.view":
       return canViewRepairCaseFlowcharts(role) ? "READ" : "NONE";

@@ -2,57 +2,36 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { repairCaseDetailHrefs, resolveActiveTabHref } from "@/lib/domain/repair-case-detail-tabs";
+import type { RepairCaseDetailTabVisibility } from "@/lib/auth/repair-case-detail-tab-permissions";
+import { resolveActiveTabHref } from "@/lib/domain/repair-case-detail-tabs";
+import { buildRepairCaseDetailTabs } from "./detail-tabs-list";
 
 type DetailTabsProps = {
   id: string;
   /**
-   * 「견적서」 탭을 그릴까. **판정은 여기서 하지 않는다** — 이 조각은 클라이언트
+   * 어느 탭을 그릴까. **판정은 여기서 하지 않는다** — 이 조각은 클라이언트
    * 컴포넌트라 권한을 물어볼 수 없고, 물어볼 수 있더라도 화면이 내린 판정은
-   * 관문이 아니다. 상위 레이아웃(서버)이 `quotes` 영역의 READ 를 보고 넘겨준다.
+   * 관문이 아니다. 상위 레이아웃(서버)이 탭마다 정해진 열쇠를 보고 넘겨준다
+   * (`auth/repair-case-detail-tab-access.ts` · 열쇠 표는 그 옆 파일에 있다).
    *
    * 🔴 **감추는 것은 막은 것이 아니다.** 주소를 직접 치면 그대로 들어와지므로
-   * `/repair-cases/{id}/quotes` 페이지가 스스로 다시 확인한다. 여기서 감추는
+   * 탭마다 제 page.tsx 가 **같은 열쇠로** 한 번 더 확인한다. 여기서 감추는
    * 까닭은 눌러도 "권한이 없습니다"만 나오는 탭을 내밀지 않기 위해서다.
    *
    * 기본값을 두지 않는다 — 넘기는 것을 잊으면 tsc 가 잡는다. 기본 false 로
-   * 두면 조용히 안 보이고, 기본 true 로 두면 조용히 새어 나간다.
-   */
-  canViewQuotes: boolean;
-  /**
-   * 「발주서」 탭을 그릴까(2026-10-12). 🔴 **견적서와 다른 열쇠**다 — 이 탭이 보여 주는
-   * 것은 고객사가 우리에게 낸 발주서라 `domesticOrders` 영역이 답한다. 판정은 상위
-   * 레이아웃(서버)이 하고, 여기서는 받은 값을 그릴 뿐이다.
+   * 두면 조용히 안 보이고, 기본 true 로 두면 조용히 새어 나간다. 참/거짓 여덟을
+   * 각각 받지 않고 꾸러미 하나로 받는 것도 같은 판단이다: 탭이 늘 때 넘기는 쪽이
+   * 한 칸을 빠뜨리면 그 역시 tsc 가 잡는다.
    *
-   * 🔴 **감추는 것은 막은 것이 아니다.** 주소를 직접 치면 그대로 들어와지므로
-   * `/repair-cases/{id}/purchase-orders` 페이지가 스스로 다시 확인한다.
-   *
-   * 견적서와 마찬가지로 기본값을 두지 않는다 — 넘기는 것을 잊으면 tsc 가 잡는다.
+   * 🔴 [기본 정보]는 이 꾸러미에 **없다** — 가리지 않기로 한 탭이다(2026-11-12).
    */
-  canViewPurchaseOrders: boolean;
+  visibility: RepairCaseDetailTabVisibility;
 };
 
-export default function DetailTabs({ id, canViewQuotes, canViewPurchaseOrders }: DetailTabsProps) {
+export default function DetailTabs({ id, visibility }: DetailTabsProps) {
   const pathname = usePathname();
 
-  // 주소는 도메인 헬퍼가 만들고, 라벨과 순서만 여기(화면)에서 정한다.
-  const hrefs = repairCaseDetailHrefs(id);
-  const tabs = [
-    { label: "기본 정보", href: hrefs.root },
-    { label: "작업내용", href: hrefs.execution },
-    { label: "진단 Flowchart", href: hrefs.diagnosis },
-    { label: "작업 이력", href: hrefs.workHistory },
-    { label: "파일 관리", href: hrefs.files },
-    { label: "보고서", href: hrefs.report },
-    // 견적서 · 검수/승인이 뒤에 온다(2026-09-04 사용자 지정 차례). 견적서와
-    // 발주서만 조건부다 — 나머지 일곱은 예전 그대로 언제나 그린다.
-    ...(canViewQuotes ? [{ label: "견적서", href: hrefs.quotes }] : []),
-    // 🔴 **견적서 바로 오른쪽**이다(사용자 지정 2026-10-12). 견적서를 못 보는 세션에서는
-    // 견적서가 빠진 그 자리에 선다 — 차례는 그대로이고 열쇠만 서로 다르다.
-    ...(canViewPurchaseOrders ? [{ label: "발주서", href: hrefs.purchaseOrders }] : []),
-    { label: "검수/승인", href: hrefs.approval },
-  ];
-
+  const tabs = buildRepairCaseDetailTabs(id, visibility);
   const activeHref = resolveActiveTabHref(pathname, tabs.map((t) => t.href));
 
   return (

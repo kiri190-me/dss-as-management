@@ -5,6 +5,7 @@ import PlaceholderPage from "@/components/layout/PlaceholderPage";
 import ServiceReportPrintView from "@/components/repair-cases/report/service-report/ServiceReportPrintView";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getPermissionLevel } from "@/lib/auth/permission-resolver";
+import { canOpenRepairCaseDetailTab } from "@/lib/auth/repair-case-detail-tab-access";
 import {
   SERVICE_REPORT_PERMISSION_AREA,
   canViewServiceReports,
@@ -124,6 +125,13 @@ export default async function ServiceReportPrintPage({
   if (!resolved) notFound();
 
   // 🔴 권한을 **조회보다 앞에** 본다 — 위 '볼 수 없는 사람에게는 404 다'.
+  //
+  // 🔴 문턱이 **둘**이다(2026-11-12). 이 주소는 「보고서」 탭의 자식이라, 그 탭에
+  // 못 들어가는 사람이 주소를 직접 쳐서 들어오는 길을 함께 막는다 — 탭만 막고
+  // 자식을 두면 가린 것이 아니다(`auth/repair-case-detail-tab-access.ts`).
+  // 아래 수준 판정은 **그대로 둔다** — 보고서 안을 볼 수 있는가는 종전대로
+  // service-report-authorization.ts 가 답한다.
+  if (!(await canOpenRepairCaseDetailTab(actingUser, "report"))) notFound();
   const level = await getPermissionLevel(actingUser, SERVICE_REPORT_PERMISSION_AREA);
   if (!canViewServiceReports(level)) notFound();
 
