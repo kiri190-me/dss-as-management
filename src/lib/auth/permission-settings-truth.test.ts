@@ -434,7 +434,17 @@ describe("⑦ 🔴 잎이 하나도 안 사라졌고, 기본값이 한 칸도 �
     quotes: "MANAGE MANAGE WRITE WRITE NONE",
     repairLabor: "MANAGE MANAGE READ READ NONE",
     mailSettings: "MANAGE MANAGE NONE NONE NONE",
-    settings: "READ READ READ READ READ",
+    /**
+     * 🔴 **2026-11-13(조각 2)에 이 한 줄이 바뀌었다** — "READ READ READ READ READ" 에서
+     * 지금 값으로. 일부러 바꾼 것이다: [시스템 설정] 화면에 [배지 표시] 탭이 들어오면서
+     * **저장하는 조작**이 생겼고, 그때까지 이 영역에는 「누가 바꿀 수 있나」를 적을 칸이
+     * 없었다(상한이 읽기였다). 관리는 메일 설정과 같은 선(관리자 이상)이다.
+     *
+     * 🔴 **읽기는 다섯 역할 전부 그대로다.** 이 표가 지키는 「닫힌 쪽이 조용히 좁아지지
+     * 않는가」는 한 글자도 깨지지 않았다 — 넓어진 쪽만 움직였다. 까닭과 그 불변식은
+     * settings-area-permission.test.ts 가 영역 하나를 놓고 따로 잰다.
+     */
+    settings: "MANAGE MANAGE READ READ READ",
   };
 
   test("잎 51개가 글자 그대로 남아 있다", () => {
@@ -488,7 +498,9 @@ describe("⑧ 🔴 장식 잎은 메뉴 수준을 떠받치지 않는다", () =>
     quotes: "MANAGE MANAGE WRITE WRITE NONE",
     repairLabor: "MANAGE MANAGE READ READ NONE",
     mailSettings: "MANAGE MANAGE NONE NONE NONE",
-    settings: "READ READ READ READ READ",
+    // 🔴 위 ⑦절의 같은 줄과 **함께** 바뀌었다(2026-11-13, 조각 2). 이 메뉴에는 하위
+    //    기능이 없어 메뉴 수준이 곧 그 잎의 수준이다 — 두 표가 갈리면 그쪽이 결함이다.
+    settings: "MANAGE MANAGE READ READ READ",
   };
 
   test("표본이 비어 있지 않다 — 메뉴 21개를 실제로 훑는다", () => {

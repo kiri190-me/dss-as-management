@@ -5,7 +5,12 @@ import { db } from "../client";
 import { badgeVisibilitySettings } from "../schema";
 import { getAuthSource } from "@/lib/config/auth-source";
 import {
+  BADGES,
   NO_BADGE_VISIBILITY_SETTINGS,
+  findBadgePlace,
+  isBadgeVisible,
+  type BadgeKey,
+  type BadgePlaceKey,
   type BadgeVisibilityRow,
 } from "@/lib/domain/badge-visibility";
 
@@ -36,9 +41,9 @@ import {
  * 누르게 된다. 행 수가 **최대 33**이라(설정할 수 있는 쌍 전부를 꺼도 그렇다)
  * 비용보다 정확함이 훨씬 크다.
  *
- * 🔵 값을 **바꾸러 온 화면**이 쓸 읽기(표가 없을 때를 삼키지 않는 쪽 —
- * buildUiThemeView · buildUiTextView 자리)는 설정 화면과 함께 조각 2에서 만든다.
- * 여기 미리 두면 아무도 부르지 않는 채로 남는다.
+ * 🔵 값을 **바꾸러 온 화면**이 쓸 읽기는 이 파일 맨 아래 buildBadgeVisibilityView 다
+ * (2026-11-13, 조각 2에서 더했다 — buildUiThemeView · buildUiTextView 가 선 자리).
+ * 표가 없을 때를 **삼키지 않는** 쪽이고, 까닭은 그 함수 주석에 있다.
  * ============================================================================
  */
 
@@ -48,9 +53,19 @@ const UNDEFINED_TABLE = "42P01";
 /**
  * 저장된 행만 그대로 읽는다. 등록부와 대조하지 않는다.
  *
- * 🔴 `isVisible` 이 true 인 행도 그대로 싣는다. 설정 화면이 "한 번 껐다가 다시
- * 켠 자리"와 "한 번도 만진 적 없는 자리"를 구별해야 하고, 끄기를 되돌리는 길이
- * 두 가지(행을 지우기 · true 로 되돌리기)라 뒤엣것이 결과에서 사라지면 안 된다.
+ * 🔴 `isVisible` 이 true 인 행도 그대로 싣는다 — **설정 화면이 그런 행을 만들지
+ * 않는데도** 그렇다. 2026-11-13(조각 2)에 저장 규칙이 「끈 것만 행을 남긴다」로
+ * 정해졌다: 체크를 푼 쌍은 false 행이 되고, 다시 켜는 것은 **그 행을 지우는** 일이다
+ * (db/mutations/badge-visibility-settings.ts). 그래서 앱이 쓰는 동안에는 true 행이
+ * 생기지 않고, "껐다 켠 자리"와 "한 번도 안 만진 자리"는 **구별되지 않는다** —
+ * 구별할 필요가 없다는 것이 그 결정의 요점이다(빈 표 = 전부 보임이라야 "아무것도
+ * 안 건드린 시스템"과 "전부 켜 둔 시스템"이 같아진다).
+ *
+ * 🔴 그런데도 true 행을 걸러 내지 않는 까닭은 **DB 에 손으로 넣은 행**이다. 운영에서
+ * psql 로 넣었거나, 옛 판이 남겼거나, 다른 도구가 적은 true 행이 있을 수 있다. 여기서
+ * 지워 버리면 판정(isBadgeVisible)이 그 행을 못 보고 "행 없음 = 보임"으로 떨어지는데,
+ * 그것은 우연히 같은 답이라 **거르는 쪽이 안전해 보이지만 실제로는 두 번째 판정**이다.
+ * 읽기는 읽기만 한다 — 이 파일 머리말의 규율 그대로다.
  */
 export async function loadStoredBadgeVisibilitySettings(): Promise<BadgeVisibilityRow[]> {
   return db
@@ -105,4 +120,86 @@ function isUndefinedTableError(err: unknown): boolean {
     "code" in err &&
     (err as { code?: string }).code === UNDEFINED_TABLE
   );
+}
+
+/**
+ * ============================================================================
+ * 설정 화면이 그릴 자료 (2026-11-13, 조각 2)
+ * ============================================================================
+ * 등록부(domain/badge-visibility.ts)와 저장된 행을 **합쳐**, [배지 표시] 탭이
+ * 그대로 늘어놓기만 하면 되는 모양으로 돌려준다.
+ *
+ * 🔴 **차례도 글자도 등록부가 정한다.** 배지는 BADGES 차례, 자리는 각 배지의
+ * places 차례(= BADGE_PLACES 차례)다. 화면이 제 손으로 정렬하거나 이름을 지으면
+ * 배지를 하나 더 그리는 날 **두 곳을 고쳐야** 하고, 둘 다 문자열이라 tsc 가
+ * 침묵한다(badge-visibility.ts 가 쌍을 손으로 적지 않는 것과 같은 까닭).
+ *
+ * 🔴 **그 배지가 실제로 뜨는 자리만** 담는다 — 곱으로 펼치지 않는다. 체크상자
+ * 총수가 33 인 것이 그 결과이고, 그 수를 시험이 센다. 「수리 건 요청일」에 「전체
+ * A/S 현황」 칸을 만들면, 꺼도 아무 일이 안 일어나 끈 사람은 기능이 고장 난 것으로
+ * 읽는다.
+ *
+ * ── 🔴 여기서는 "표 없음"을 삼키지 않는다 ───────────────────────────────
+ * 위의 loadBadgeVisibilitySettings 와 **일부러 다르다**. 그쪽은 배지를 그리는 화면
+ * 전부가 쓰므로 마이그레이션 전 DB 에서 화면이 한꺼번에 죽지 않게 42P01 을 삼키지만,
+ * 여기는 값을 **바꾸러 온 화면**이다. 표가 없다는 사실을 감추면 체크상자를 다 그려
+ * 놓고 [저장]을 눌렀을 때에야 터진다 — buildUiThemeView · buildNotificationSettingsView
+ * 와 같은 자리의 같은 판단이다.
+ * ============================================================================
+ */
+
+/** 설정 화면의 체크상자 한 칸. */
+export type BadgeVisibilityPlaceView = {
+  placeKey: BadgePlaceKey;
+  /** 등록부의 자리 이름. 화면이 다시 짓지 않는다. */
+  label: string;
+  /** 지금 이 자리에서 보이는가 — 곧 체크 상태다(체크 = 보임). */
+  visible: boolean;
+};
+
+/** 설정 화면의 한 덩이 — 배지 하나와 그 배지가 뜨는 자리들. */
+export type BadgeVisibilityBadgeView = {
+  badgeKey: BadgeKey;
+  label: string;
+  description: string;
+  places: BadgeVisibilityPlaceView[];
+};
+
+/**
+ * 저장된 행을 등록부에 얹는다. DB 를 읽지 않는 순수 함수라 값으로 잴 수 있다.
+ *
+ * 🔴 보임 판정을 여기서 새로 적지 않고 **isBadgeVisible 을 부른다.** 규칙이 두
+ * 벌이 되면 설정 화면이 보여 주는 체크 상태와 실제 화면의 배지가 갈리는 날이 오고,
+ * 그때 관리자는 자기가 끈 것이 왜 그대로인지 알 길이 없다.
+ */
+export function mergeBadgeVisibilityView(
+  rows: readonly BadgeVisibilityRow[]
+): BadgeVisibilityBadgeView[] {
+  return BADGES.map((badge) => ({
+    badgeKey: badge.key,
+    label: badge.label,
+    description: badge.description,
+    places: badge.places.map((placeKey) => {
+      const place = findBadgePlace(placeKey);
+      // 등록부 안에서 어긋난 것이다(배지의 places 에 BADGE_PLACES 에 없는 키가 적혀
+      // 있다). 🔴 조용히 건너뛰지 않는다 — 그러면 체크상자 하나가 소리 없이 사라지고,
+      // 그 자리의 배지는 영영 끌 수 없는 채로 남는다. 코드로만 생길 수 있는 어긋남이라
+      // 여기서 터뜨리는 편이 싸다.
+      if (!place) {
+        throw new Error(
+          `badge-visibility: 등록부에 없는 자리입니다 — ${badge.key} / ${placeKey}`
+        );
+      }
+      return {
+        placeKey,
+        label: place.label,
+        visible: isBadgeVisible(rows, badge.key, placeKey),
+      };
+    }),
+  }));
+}
+
+/** 설정 화면이 쓰는 읽기. 표가 없으면 **그대로 터진다**(위 머리말). */
+export async function buildBadgeVisibilityView(): Promise<BadgeVisibilityBadgeView[]> {
+  return mergeBadgeVisibilityView(await loadStoredBadgeVisibilitySettings());
 }

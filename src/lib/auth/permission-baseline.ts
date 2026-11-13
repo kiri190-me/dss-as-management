@@ -363,8 +363,22 @@ function rawBaseline(areaKey: string, role: Role): PermissionLevel {
       return ladder({ manage: canManageIntakeMailSettings(role), read: canManageIntakeMailSettings(role) });
 
     case "settings":
-      // 아직 안내 문구만 있는 화면이다.
-      return "READ";
+      // 🔴 2026-11-13 까지 이 자리는 `return "READ"` 한 줄이었다("아직 안내 문구만
+      // 있는 화면이다"). 「배지 표시」 탭이 들어오면서 **저장하는 조작이 생겼다** —
+      // 주간보고에 `금주 목표`가 붙던 날과 같은 자리의 같은 변화다.
+      //
+      // 🔴 **읽기는 무조건 참이다.** 그날까지 다섯 역할 전부 READ 였고, 여기를 고칠
+      // 자격 쪽으로 함께 좁히면 지금 이 화면을 보던 사람이 **배포 즉시 통째로
+      // 튕긴다**(이 파일 맨 위 '아직 아무 역할 검사도 없는 영역' 규칙 — 낮춰 적으면
+      // 그 자체가 새로운 제한이 된다). 닫는 것은 관리자가 설정 화면에서 할 일이다.
+      //
+      // 관리는 **관리자 이상**이다 — 메일 설정이 MANAGE 를 주는 역할 집합과 같은
+      // 선이다(그 영역이 부르는 canManageIntakeMailSettings 가 바로 이 함수에 답을
+      // 빌린다). 🔴 그렇다고 canManageIntakeMailSettings 를 부르지는 않는다: 이것은
+      // 「누가 전사원 메일 문구를 정하는가」와 **다른 물음**이고, 지금 답이 같을 뿐이다.
+      // 역할 목록을 여기 손으로 적지 않고 *-authorization.ts 를 **호출해서** 구하는
+      // 규율은 이 파일 맨 위 주석 그대로다.
+      return ladder({ manage: canManageRolePermissions(role), read: true });
 
     default:
       // 목록에 없는 영역은 열어 주지 않는다. 새 영역을 PERMISSION_AREAS에만
