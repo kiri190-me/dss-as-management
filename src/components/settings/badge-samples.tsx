@@ -11,9 +11,16 @@ import {
   WorkflowOverrideBadge,
 } from "@/components/repair-cases/badges";
 import FinalShipmentApprovedBadge from "@/components/approvals/FinalShipmentApprovedBadge";
+import {
+  DomesticOrderCompletedBadge,
+  DueDateFromRepairCaseBadge,
+  DueDateRowCompletedBadge,
+  OrderIssuedDateMissingBadge,
+} from "@/components/domestic-orders/badges";
 import MiscCaseStatusBadge from "@/components/misc-cases/MiscCaseStatusBadge";
 import RequestedDueDateValue from "@/components/repair-cases/RequestedDueDateValue";
 import type { BadgeKey } from "@/lib/domain/badge-visibility";
+import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-date-label";
 
 /**
  * ============================================================================
@@ -51,20 +58,24 @@ import type { BadgeKey } from "@/lib/domain/badge-visibility";
  * 공개 저장소라 실제 고객사 이름·L/N·S/N 을 한 글자도 쓰지 않는다. 날짜도 뜻 없는
  * 하루다(그 칸의 배지는 날짜가 있어야 모양이 나온다).
  *
- * ── 🔵 모양이 없는 배지 다섯 ────────────────────────────────────────────
- * 아래 표에 없는 다섯(`dueDateFromDomesticOrder` · `dueDateFromRepairCase` ·
- * `domesticOrderCompleted` · `dueDateRowCompleted` · `orderIssuedDateMissing`)은
- * **가져다 쓸 컴포넌트가 없다** — 넷은 내자 정리 목록 화면 안의 비공개 함수이고
- * (DomesticOrderListScreen.tsx 의 CompletedBadge · DueDateRowCompletedBadge ·
- * OrderIssuedDateContent), 하나는 수리건 상세 기본 정보 탭의 비공개 `Field` 가 그린다.
- * 🔴 그 화면들을 고쳐 내보내게 하는 것도, 모양을 여기 베끼는 것도 하지 않았다
- * (위 '베끼지 않는다' 참조 — 베낀 사본은 색이 바뀌는 날 조용히 거짓말을 한다).
- * 그 다섯은 이름과 설명만 서고, 그래도 체크상자는 똑같이 돈다.
+ * ── 🔵 모양이 없는 배지 **하나** (2026-11-13 에 다섯에서 줄었다) ─────────
+ * 아래 표에 없는 것은 이제 `dueDateFromDomesticOrder`(「내자 정리에서 작성됨」)
+ * 하나뿐이다 — 그 줄은 수리건 상세 기본 정보 탭의 **비공개 `Field` 조각**이 그리고,
+ * 떼어내려면 그 화면 파일을 고쳐야 해서 이 조각에서는 손대지 않았다.
+ *
+ * 🔵 나머지 넷(`dueDateFromRepairCase` · `domesticOrderCompleted` ·
+ * `dueDateRowCompleted` · `orderIssuedDateMissing`)은 **2026-11-13 에 모양이
+ * 생겼다.** 넷 다 내자 정리 목록 화면 안의 비공개 함수였는데, 조각 4가 그 화면에
+ * 배지 표시 설정을 붙이면서 **제 파일로 내려 내보내게** 했다
+ * (components/domestic-orders/badges.tsx). 🔴 여기서 하는 일은 **그 조각을 그대로
+ * 부르는 것**뿐이다 — 모양을 베껴 적지 않았다(위 '베끼지 않는다').
+ *
+ * 🔴 모양이 없는 줄은 이름과 설명만 서고, 그래도 체크상자는 똑같이 돈다.
  * ============================================================================
  */
 
 /**
- * 배지 키 → 보기 배지. 🔴 **없는 키는 없는 대로 둔다**(위 '모양이 없는 배지 다섯') —
+ * 배지 키 → 보기 배지. 🔴 **없는 키는 없는 대로 둔다**(위 '모양이 없는 배지 하나') —
  * 빈 네모나 "모양 없음" 같은 글자를 대신 세우지 않는다. 줄이 한 칸 비는 것보다
  * 뜻 없는 표식이 서는 쪽이 읽는 사람을 더 헷갈리게 한다.
  */
@@ -91,6 +102,21 @@ export const BADGE_SAMPLES: Partial<Record<BadgeKey, ReactNode>> = {
   dueDateFromDomesticOrderShort: (
     <RequestedDueDateValue customerRequestedDueDate={null} domesticOrderDueDates={["2026-01-15"]} />
   ),
+  // 🔵 바로 위와 **거울 관계**인 꼬리표다(이쪽은 내자 정리에서 수리 건의 날짜를
+  // 빌려 온 자리). 날짜 없이 혼자 세우는 까닭은 위와 다르다 — 그 칸의 날짜를 그리는
+  // 조각이 내자 줄 **한 행 전체**를 받으므로, 보기를 세우자고 가짜 줄을 지어내야
+  // 한다. 꼬리표 조각만 부르면 모양은 화면의 것 그대로다.
+  dueDateFromRepairCase: <DueDateFromRepairCaseBadge />,
+  domesticOrderCompleted: <DomesticOrderCompletedBadge />,
+  // 🔴 회차 번호와 이름은 **도메인 함수**가 만든다 — 「1차」를 여기 적으면 그 말이
+  // 바뀌는 날 설정 화면만 옛 말로 남는다. 날짜는 뜻 없는 하루다(title 에만 쓰인다).
+  dueDateRowCompleted: (
+    <DueDateRowCompletedBadge
+      rowOrder={1}
+      label={domesticOrderDueDateRowLabel(1, { dueDate: "2026-01-15", note: null })}
+    />
+  ),
+  orderIssuedDateMissing: <OrderIssuedDateMissingBadge />,
   miscCaseStatus: <MiscCaseStatusBadge status="IN_PROGRESS" />,
 };
 

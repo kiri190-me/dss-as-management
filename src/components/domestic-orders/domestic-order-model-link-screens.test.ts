@@ -59,7 +59,10 @@ const screen = flat(stripComments(raw));
 
 /** ① 목록의 표 본문. ② 목록의 카드 칸 목록. ③④ 휴지통 한 덩어리. */
 const tableBody = sliceBetween(screen, "{group.rows.map((row) => {", "cards={");
-const cardGroups = sliceBetween(screen, 'label: "발주",', "function CompletedBadge");
+// 🔵 끝 표시가 `const NO_APPROVED_UNITS` 인 까닭: 2026-11-13 까지 그 자리에 있던
+//    `function CompletedBadge` 가 제 파일로 내려갔다(domestic-orders/badges.tsx).
+//    끝 표시는 **카드 칸 목록 바로 다음에 오는 것**이면 되고, 지금은 이것이다.
+const cardGroups = sliceBetween(screen, 'label: "발주",', "const NO_APPROVED_UNITS");
 const trashPanel = sliceBetween(screen, "function DomesticOrderTrashPanel(", "function trashTarget(");
 
 test("🔵 못 — 주석을 걷어낸 원본이 비어 있지 않고, 걷어내기가 실제로 문다", () => {

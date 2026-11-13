@@ -58,6 +58,18 @@ import type { MiscCaseStatus } from "@/lib/domain/misc-case-status";
  * 🔴 **회차 여럿이면 전부 승인됐을 때만 붙는다** — 접는 일은 조회가 하고
  * (foldDomesticOrderApprovalStates), 이 카드는 그 결과를 받는다. 회차 하나만 끝난
  * 줄에서 머리에 「승인 완료」가 뜨면, 바로 아래 [승인] 탭의 카드 둘과 어긋난다.
+ *
+ * ── 🔴 배지 둘이 **자리를 받는다** (2026-11-13) ────────────────────────
+ * 두 배지에 `placeKey="miscCaseDetailHeader"` 를 넘긴다 — [시스템 설정] →
+ * [배지 표시]의 「기타건 상세 — 머리말」에서 체크를 풀면 여기서만 사라지고 기타건
+ * 현황 목록의 같은 배지는 그대로 남는다(설정의 단위가 **배지가 아니라 (배지, 자리)
+ * 한 쌍**인 까닭 — domain/badge-visibility.ts).
+ * 🔴 **값 알약 넷은 설정 대상이 아니다.** 그것은 표식이 아니라 사용자가 「이것들이
+ * 보이게」라고 지목한 **값**이고, 등록부에 그런 배지가 없다 — 자리를 적어 두는 것
+ * 자체가 「여기도 끌 수 있다」는 거짓말이 된다.
+ * 🔵 이 파일은 서버 컴포넌트인 채로 둔다. 판정은 두 배지가 각자 클라이언트 조각
+ * 하나(BadgeVisibilityGate)를 **그려서** 넘긴다 — 그 둘에 훅이 들어가면 이 카드가
+ * 통째로 죽는다(두 배지 파일의 머리말).
  */
 export default function DomesticOrderDetailHeader({
   row,
@@ -78,10 +90,15 @@ export default function DomesticOrderDetailHeader({
         {/* 🔴 제목 **바로 옆**이다 — 값 알약 넷보다 앞에 둔다. 이 줄에서 사람이 가장
             먼저 묻는 것이 「이 건이 지금 어디까지 왔나」이고, 알약 사이에 섞어 두면
             품명·공급처와 같은 무게의 또 하나의 값으로 읽힌다. */}
-        {status !== undefined && <MiscCaseStatusBadge status={status} />}
+        {status !== undefined && (
+          <MiscCaseStatusBadge status={status} placeKey="miscCaseDetailHeader" />
+        )}
         {/* 🔴 상태 배지 **바로 오른쪽**이다 — 둘은 한 물음의 두 답이라(「어디까지
             왔나」·「결재는 끝났나」) 떼어 놓으면 값 알약 사이에서 길을 잃는다. */}
-        <FinalShipmentApprovedBadge approved={finalShipmentApproved} />
+        <FinalShipmentApprovedBadge
+          approved={finalShipmentApproved}
+          placeKey="miscCaseDetailHeader"
+        />
         {/* 값 알약 묶음 — 가운뎃점 구분자는 두지 않는다(알약의 테두리가 가른다).
             좁은 화면에서는 묶음 안에서 줄바꿈된다. */}
         <div className="flex flex-wrap items-baseline gap-1.5">

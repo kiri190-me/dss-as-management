@@ -18,7 +18,14 @@ import {
   WorkflowOverrideBadge,
 } from "@/components/repair-cases/badges";
 import FinalShipmentApprovedBadge from "@/components/approvals/FinalShipmentApprovedBadge";
+import {
+  DomesticOrderCompletedBadge,
+  DueDateFromRepairCaseBadge,
+  DueDateRowCompletedBadge,
+  OrderIssuedDateMissingBadge,
+} from "@/components/domestic-orders/badges";
 import MiscCaseStatusBadge from "@/components/misc-cases/MiscCaseStatusBadge";
+import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-date-label";
 import {
   BADGES,
   BADGE_PLACEMENTS,
@@ -108,6 +115,19 @@ const SAMPLE_MARKUP: Record<string, string> = {
   hold: renderToStaticMarkup(<HoldBadge isOnHold />),
   workflowOverride: renderToStaticMarkup(<WorkflowOverrideBadge hasOverride />),
   finalShipmentApproved: renderToStaticMarkup(<FinalShipmentApprovedBadge approved />),
+  // 🔵 **2026-11-13(조각 4)에 넷이 늘었다.** 내자 정리 목록 화면 안의 비공개 함수라
+  //    가져다 쓸 수 없던 것들인데, 그 화면에 배지 표시 설정을 붙이면서 제 파일로
+  //    내려 내보내게 했다(components/domestic-orders/badges.tsx). 모양을 베끼지
+  //    않았다는 사실을 아래 ③의 두 시험이 그대로 잰다.
+  dueDateFromRepairCase: renderToStaticMarkup(<DueDateFromRepairCaseBadge />),
+  domesticOrderCompleted: renderToStaticMarkup(<DomesticOrderCompletedBadge />),
+  dueDateRowCompleted: renderToStaticMarkup(
+    <DueDateRowCompletedBadge
+      rowOrder={1}
+      label={domesticOrderDueDateRowLabel(1, { dueDate: "2026-01-15", note: null })}
+    />
+  ),
+  orderIssuedDateMissing: renderToStaticMarkup(<OrderIssuedDateMissingBadge />),
   miscCaseStatus: renderToStaticMarkup(<MiscCaseStatusBadge status="IN_PROGRESS" />),
 };
 
@@ -122,6 +142,10 @@ const SAMPLED_BADGE_KEYS: readonly BadgeKey[] = [
   "workflowOverride",
   "finalShipmentApproved",
   "dueDateFromDomesticOrderShort",
+  "dueDateFromRepairCase",
+  "domesticOrderCompleted",
+  "dueDateRowCompleted",
+  "orderIssuedDateMissing",
   "miscCaseStatus",
 ];
 
@@ -222,7 +246,7 @@ describe("③ 🔴 보기 배지는 설정을 따르지 않는다", () => {
   test("🔴 보기 배지가 **진짜 배지 컴포넌트의 출력**이다 — 베낀 사본이 아니다", () => {
     // 아래 글자는 배지 컴포넌트를 직접 그려서 얻은 것이다. 설정 화면이 모양을
     // 베껴 적었다면 색 한 글자만 달라도 여기서 어긋난다.
-    assert.equal(Object.keys(SAMPLE_MARKUP).length, 10);
+    assert.equal(Object.keys(SAMPLE_MARKUP).length, 14);
     for (const [badgeKey, markup] of Object.entries(SAMPLE_MARKUP)) {
       assert.ok(markup.length > 0, `${badgeKey}: 표본이 비었다`);
       assert.ok(MANAGED.includes(markup), `${badgeKey}: 보기 배지가 안 보인다`);
@@ -249,18 +273,17 @@ describe("③ 🔴 보기 배지는 설정을 따르지 않는다", () => {
     }
   });
 
-  test("🔵 모양이 없는 배지 다섯은 **그 다섯 그대로**다", () => {
-    // 가져다 쓸 컴포넌트가 없는 것들이다(내자 정리 목록 화면과 수리건 상세 기본 정보
-    // 탭의 비공개 조각). 🔴 베껴서 모양을 만들지 않았다는 결정의 기록이고, 모양이
-    // 생기는 날 이 줄에서 멈춰 사람이 다시 판단하게 한다.
+  test("🔵 모양이 없는 배지는 **하나뿐**이다 — 2026-11-13 에 다섯에서 줄었다", () => {
+    // 🔵 넷은 조각 4에서 모양이 생겼다. 내자 정리 목록 화면 안의 비공개 함수였는데
+    //    그 화면에 설정을 붙이면서 **제 파일로 내려 내보내게** 했다
+    //    (components/domestic-orders/badges.tsx). 베껴 그린 것이 아니다 — 바로 위
+    //    두 시험이 그 조각을 직접 그려 글자를 맞대어 본다.
+    // 🔴 남은 하나(`dueDateFromDomesticOrder` — 「내자 정리에서 작성됨」)는 수리건
+    //    상세 기본 정보 탭의 **비공개 `Field` 조각**이 그려서 가져다 쓸 수 없다.
+    //    베껴서 모양을 만들지 않았다는 결정의 기록이고, 모양이 생기는 날 이 줄에서
+    //    멈춰 사람이 다시 판단하게 한다.
     const missing = BADGES.map((badge) => badge.key).filter((key) => !(key in BADGE_SAMPLES));
-    assert.deepEqual(missing, [
-      "dueDateFromDomesticOrder",
-      "dueDateFromRepairCase",
-      "domesticOrderCompleted",
-      "dueDateRowCompleted",
-      "orderIssuedDateMissing",
-    ]);
+    assert.deepEqual(missing, ["dueDateFromDomesticOrder"]);
     // 모양이 없어도 이름과 설명은 선다 — 체크상자도 똑같이 돈다.
     for (const key of missing) {
       const badge = BADGES.find((one) => one.key === key);

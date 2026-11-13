@@ -72,6 +72,16 @@ function sliceBetween(source: string, startMarker: string, endMarker: string): s
 const screen = codeOf("src/components/domestic-orders/DomesticOrderListScreen.tsx");
 const dueDatesCell = codeOf("src/components/domestic-orders/DomesticOrderDueDatesCell.tsx");
 const query = codeOf("src/lib/db/queries/domestic-orders.ts");
+/**
+ * 🔵 빌려 왔다는 꼬리표는 **2026-11-13 에 제 파일로 내려갔다**(배지 표시 설정을
+ * 붙이면서 — 설정 화면이 그 모양을 그대로 가져다 보여 준다). 화면에 남은 것은
+ * 「언제 그리는가」뿐이고 **모양은 이 파일**이 쥔다. 그래서 아래 ④는 두 자리를 함께
+ * 본다 — 화면만 보면 꼬리표가 무슨 옷을 입는지 더는 알 수 없다.
+ */
+const badges = codeOf("src/components/domestic-orders/badges.tsx");
+const borrowedBadge = flatten(
+  sliceBetween(badges, "export function DueDateFromRepairCaseBadge(", "\n}\n")
+);
 
 /** 표의 `납기요청일` 칸을 그리는 조각 하나. */
 const tableCell = flatten(
@@ -145,13 +155,23 @@ describe("내자 정리 납기요청일 — 납기 역전이 화면까지 닿는
   });
 
   test("🔴 빌려 왔다는 꼬리표는 함께 붉어지지 않는다 — 경보가 아니라 출처 표시다", () => {
+    // 🔵 표본 — 떼어낸 조각을 실제로 집었다(빈 글자를 뒤지면 아래가 공짜로 통과한다).
+    assert.ok(borrowedBadge.includes("DUE_DATE_FROM_REPAIR_CASE_LABEL"), borrowedBadge);
+    // 화면은 **언제 그리는가**만 쥔다 — 그 조각을 빌려 온 날짜에만 세운다.
     const badge = sliceBetween(tableCell, "{display.borrowed && (", "{inverted && (");
-    assert.ok(badge.includes("className={borrowedBadgeClass}"), badge);
-    assert.equal(
-      badge.includes("DUE_DATE_NEAR_TEXT_CLASS"),
-      false,
-      "출처 꼬리표까지 굵은 붉은색이 됐다 — 고쳐야 할 것으로 읽힌다"
-    );
+    assert.ok(badge.includes("<DueDateFromRepairCaseBadge"), badge);
+    // 모양은 떼어낸 조각이 쥔다 — 납품일 꼬리표와 **한 벌**이어야 한다.
+    assert.ok(borrowedBadge.includes("className={borrowedBadgeClass}"), borrowedBadge);
+    for (const [name, source] of [
+      ["화면의 그 자리", badge],
+      ["떼어낸 꼬리표 조각", borrowedBadge],
+    ] as const) {
+      assert.equal(
+        source.includes("DUE_DATE_NEAR_TEXT_CLASS"),
+        false,
+        `${name}: 출처 꼬리표까지 굵은 붉은색이 됐다 — 고쳐야 할 것으로 읽힌다`
+      );
+    }
     // 읽는 차례 — 날짜 → 어디서 온 값인가 → 그래서 무엇을 해야 하는가.
     assert.ok(
       tableCell.indexOf("{display.borrowed && (") < tableCell.indexOf("{inverted && ("),

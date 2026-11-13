@@ -209,12 +209,22 @@ export const MISC_CASE_FIELDS = {
   // ⚠️ 감싸개가 `flex-wrap` 인 것이 중요하다 — 부르는 쪽(표의 보조 줄)이
   // `whitespace-nowrap` 이라 두 배지가 한 줄에 묶이면 그 칼럼만 옆으로 늘어난다.
   // flex 상자의 **칸끼리는** 그 설정과 무관하게 접힌다.
+  //
+  // 🔴 **둘 다 자리를 받는다**(2026-11-13) — [시스템 설정] → [배지 표시]의
+  // 「기타건 현황 — 목록」에서 체크를 풀면 그 배지가 여기서 사라진다. 자리 글자를
+  // 이 한 벌에 적는 것이 요점이다: **표와 카드가 이 파일 하나를 먹으므로** 한쪽만
+  // 안 꺼지는 일이 생기지 않는다(이 파일의 요점 그대로다). 🔵 자리를 아는 것은
+  // 이 한 줄뿐이고, 숨길지 말지는 배지 조각이 제 손으로 정한다 — 여기에
+  // `{보일까 && <배지/>}` 를 적지 않는 까닭은 repair-cases/badges.tsx 머리말에 있다.
   status: {
     label: "상태",
     of: (row) => (
       <span className="inline-flex flex-wrap items-center gap-1">
-        <MiscCaseStatusBadge status={row.status} />
-        <FinalShipmentApprovedBadge approved={row.finalShipmentApproved} />
+        <MiscCaseStatusBadge status={row.status} placeKey="miscCaseList" />
+        <FinalShipmentApprovedBadge
+          approved={row.finalShipmentApproved}
+          placeKey="miscCaseList"
+        />
       </span>
     ),
   },

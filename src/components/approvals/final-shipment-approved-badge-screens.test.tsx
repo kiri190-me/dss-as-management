@@ -456,14 +456,29 @@ describe("⑤ 내자 정리 — [완료 처리] 단추의 **오른쪽**", () => 
 describe("🔴 회차 완료가 **한눈에 보인다** — 「N차 완료 ✓」 (2026-11-08 사용자 지적)", () => {
   const screenSource = read("src/components/domestic-orders/DomesticOrderListScreen.tsx");
   const screen = flat(stripComments(screenSource));
-  const badgeBody = screen.slice(
-    indexOrFail(screen, "function DueDateRowCompletedBadge("),
-    indexOrFail(screen, "function DueDateRowCompletionToggles(")
+  /**
+   * 🔵 표 둘이 **2026-11-13 에 제 파일로 내려갔다** — 배지 표시 설정을 붙이면서
+   * [시스템 설정] → [배지 표시]가 그 모양을 **베끼지 않고** 가져다 세울 수 있게 한
+   * 것이다(components/domestic-orders/badges.tsx 머리말). 화면에 남은 것은 「언제
+   * 어디에 그리는가」뿐이고 **모양은 그 파일**이 쥔다. 아래 치수·글자 단언은 그래서
+   * 그 파일을 읽는다 — 자리는 옮겼어도 재는 것은 한 글자도 줄이지 않았다.
+   */
+  const badgesSource = flat(stripComments(read("src/components/domestic-orders/badges.tsx")));
+  const badgeBody = badgesSource.slice(
+    indexOrFail(badgesSource, "export function DueDateRowCompletedBadge("),
+    indexOrFail(badgesSource, "export function OrderIssuedDateMissingBadge(")
   );
+
+  test("🔵 못 — 떼어낸 조각을 실제로 집었다(빈 글자를 뒤지면 아래가 공짜로 통과한다)", () => {
+    assert.ok(badgeBody.length > 200, `회차 완료 표 조각이 너무 짧다(${badgeBody.length})`);
+    assert.ok(badgeBody.includes("useIsBadgeVisible(\"dueDateRowCompleted\""), badgeBody);
+  });
 
   test("🔴 완료된 회차에만 그린다 — 안 된 회차에는 한 글자도 없다", () => {
     assert.ok(
-      screen.includes("{completed && <DueDateRowCompletedBadge rowOrder={rowOrder} label={label} />}"),
+      screen.includes(
+        "{completed && <DueDateRowCompletedBadge rowOrder={rowOrder} label={label} placeKey=\"domesticOrderList\" />}"
+      ),
       "완료 표가 조건 없이 그려지거나 아예 없다"
     );
   });
@@ -488,9 +503,11 @@ describe("🔴 회차 완료가 **한눈에 보인다** — 「N차 완료 ✓�
   });
 
   test("🔴 줄 단위 「완료」 표와 **같은 치수**다 — 같은 칸에 나란히 선다", () => {
-    const rowBadge = screen.slice(
-      indexOrFail(screen, "function CompletedBadge("),
-      indexOrFail(screen, "const NO_APPROVED_UNITS")
+    // 🔵 둘이 같은 파일로 내려가 **바로 이웃**이 되었다 — 치수가 갈라질 자리가
+    //    그만큼 줄었지만, 「같아야 한다」는 못은 그대로 박아 둔다.
+    const rowBadge = badgesSource.slice(
+      indexOrFail(badgesSource, "export function DomesticOrderCompletedBadge("),
+      indexOrFail(badgesSource, "export function DueDateRowCompletedBadge(")
     );
     for (const token of ["rounded", "px-1.5", "py-0.5", "text-[11px]", "leading-none", "font-medium"]) {
       assert.ok(rowBadge.includes(token), `줄 단위 완료 표에서 ${token} 를 못 찾았다`);

@@ -56,8 +56,17 @@ const textCell = read("src/components/domestic-orders/DomesticOrderTextCell.tsx"
 
 /** 표 본문(줄마다 그리는 `<tr>`) — 머리말의 같은 글자와 섞이지 않게 잘라 둔다. */
 const tableBody = flat(sliceBetween(listScreen, "{group.rows.map((row) => {", "cards={"));
-/** 카드 칸 목록. */
-const cardGroups = flat(sliceBetween(listScreen, "label: \"발주\",", "function CompletedBadge"));
+/**
+ * 카드 칸 목록.
+ *
+ * 🔵 끝 표시가 `const NO_APPROVED_UNITS` 인 까닭: 2026-11-13 까지는 그 자리에
+ * `function CompletedBadge` 가 있었는데, 그 배지가 **제 파일로 내려갔다**
+ * (components/domestic-orders/badges.tsx — 설정 화면이 그 모양을 보여 줄 수 있게).
+ * 끝 표시는 **카드 칸 목록 바로 다음에 오는 것**이면 되고, 지금은 이것이다.
+ */
+const cardGroups = flat(
+  sliceBetween(listScreen, "label: \"발주\",", "const NO_APPROVED_UNITS")
+);
 /** 카드가 칸 하나를 그리는 자리. */
 const cardRender = flat(sliceBetween(listScreen, "{fieldGroup.fields.map((field) => (", "</dl>"));
 

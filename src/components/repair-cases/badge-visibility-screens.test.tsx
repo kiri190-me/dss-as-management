@@ -508,7 +508,8 @@ describe("🔴 수리건 쪽 세 자리 — 쌍 **20개**가 전부 화면에 �
       (REPAIR_CASE_PLACES as readonly string[]).includes(one.placeKey)
     );
     assert.equal(pairs.length, 20);
-    // 나머지 아홉은 내자 정리·기타건 쪽이다 — 조각 4의 일이라 아직 안 붙였다.
+    // 나머지 아홉은 내자 정리·기타건 쪽이다 — 🔵 2026-11-13(조각 4)에 그쪽도 붙었고,
+    // 그 아홉은 이웃이 센다(domestic-orders/badge-visibility-screens.test.tsx).
     assert.equal(BADGE_PLACEMENTS.length - pairs.length, 9);
     // 🔵 못 — 수리건 쪽 자리가 **등록부에도 꼭 셋**인가. 여기 목록만 줄이고 등록부에
     //    자리가 남아 있으면 「안 붙은 자리」가 생기는데 위 두 셈은 그대로 맞는다.

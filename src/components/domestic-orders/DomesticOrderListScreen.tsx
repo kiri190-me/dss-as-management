@@ -53,7 +53,6 @@ import {
 } from "@/lib/domain/domestic-order-list";
 import {
   DOMESTIC_ORDER_DUE_DATE_LINK_NOTE,
-  DUE_DATE_FROM_REPAIR_CASE_LABEL,
   resolveDomesticOrderDueDateDisplay,
 } from "@/lib/domain/requested-due-date-link";
 // 「납기 역전」 — 말도 옷도 판정도 도메인 하나에서 온다. 수리 건 상세와 같은 자리다.
@@ -101,13 +100,19 @@ import DomesticOrderEditForm, { type QuoteOption } from "./DomesticOrderEditForm
 import DomesticOrderTextCell from "./DomesticOrderTextCell";
 import DomesticOrderDueDatesCell from "./DomesticOrderDueDatesCell";
 import DomesticOrderDeliveriesCell from "./DomesticOrderDeliveriesCell";
-// 🔴 납품 두 칸이 그리는 것 · 빌려 온 값의 꼬리표 모양 — 「기타건 현황」과 **같은
-// 부품**이다(한쪽만 고쳐지면 같은 줄이 메뉴에 따라 다른 글자로 보인다).
+// 🔴 납품 두 칸이 그리는 것 — 「기타건 현황」과 **같은 부품**이다(한쪽만 고쳐지면
+// 같은 줄이 메뉴에 따라 다른 글자로 보인다).
+import { DeliveredByCellContent, DeliveredDateCellContent } from "./delivered-cell-content";
+// 🔴 이 화면에 서던 작은 표식 넷 — 2026-11-13 에 **제 파일로 내렸다**(그 파일 머리말).
+// 모양은 한 글자도 안 바뀌었고, 옮긴 까닭은 설정 화면이 그 모양을 보여 줄 수 있게
+// 하려는 것이다([시스템 설정] → [배지 표시] 의 보기 배지는 베낀 사본을 쓰지 않는다).
 import {
-  borrowedBadgeClass,
-  DeliveredByCellContent,
-  DeliveredDateCellContent,
-} from "./delivered-cell-content";
+  DomesticOrderCompletedBadge,
+  DueDateFromRepairCaseBadge,
+  DueDateRowCompletedBadge,
+  OrderIssuedDateMissingBadge,
+  OrderIssuedDateMissingText,
+} from "./badges";
 import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
 
 /**
@@ -480,11 +485,13 @@ function sumAmounts(rows: DomesticOrderListItem[]): { total: string; skipped: nu
 }
 
 /**
- * 빌려 온 값 옆에 붙는 작은 표시의 모양(borrowedBadgeClass)은 **이 파일에 없다** —
- * 2026-11-08 에 납품 두 칸이 같은 꼬리표를 쓰게 되면서 공용 자리로 내렸다
- * (./delivered-cell-content.tsx). `발주일 미정` 배지와 **일부러 다른 색**인 까닭은
- * 그대로다: 저쪽은 "챙겨야 하는 줄"이라는 주의 표시(amber)이고, 이것은 값의 출처를
- * 알리는 중립적인 꼬리표다. 같은 색으로 두면 빌려 온 날짜가 전부 경고로 읽힌다.
+ * 빌려 온 값 옆에 붙는 작은 꼬리표(「수리 건 요청일」)는 **이 파일에 없다** — 모양은
+ * 2026-11-08 에 납품 두 칸이 같은 꼬리표를 쓰게 되면서 공용 자리로 내렸고
+ * (./delivered-cell-content.tsx 의 borrowedBadgeClass), 조각 자체는 2026-11-13 에
+ * ./badges.tsx 로 내렸다(DueDateFromRepairCaseBadge — 설정 화면이 그 모양을 그대로
+ * 가져다 보여 준다). `발주일 미정` 배지와 **일부러 다른 색**인 까닭은 그대로다:
+ * 저쪽은 "챙겨야 하는 줄"이라는 주의 표시(amber)이고, 이것은 값의 출처를 알리는
+ * 중립적인 꼬리표다. 같은 색으로 두면 빌려 온 날짜가 전부 경고로 읽힌다.
  */
 /**
  * 표의 `납기요청일` 칸. **칼럼은 여전히 22개다** — 날짜가 여럿이 될 수 있게
@@ -555,10 +562,12 @@ function DueDateCellContent({ row }: { row: DomesticOrderListItem }) {
           {/* 역전이면 날짜만 굵은 붉은색이다 — 옆의 꼬리표는 그대로 둔다. 거짓일
               때는 감싸는 마디 없이 글자 그대로라, 예전 HTML 과 같다. */}
           {inverted ? <span className={DUE_DATE_NEAR_TEXT_CLASS}>{line}</span> : line}
+          {/* 🔴 꼬리표는 **끌 수 있다**(2026-11-13) — 자리를 넘기면 [시스템 설정] →
+              [배지 표시]의 「수리 건 요청일」을 끈 곳에서 사라진다. 🔴 **날짜는 그대로
+              남는다**: 끄는 것은 꼬리표 하나이고 날짜는 이 칸의 값이다. 빈칸까지
+              꼬리표 쪽이라는 것도 그 조각이 쥐고 있다(./badges.tsx). */}
           {display.borrowed && (
-            <span className={borrowedBadgeClass} title={DOMESTIC_ORDER_DUE_DATE_LINK_NOTE}>
-              {DUE_DATE_FROM_REPAIR_CASE_LABEL}
-            </span>
+            <DueDateFromRepairCaseBadge placeKey="domesticOrderList" />
           )}
         </span>
       ))}
@@ -588,14 +597,15 @@ function DueDateCellContent({ row }: { row: DomesticOrderListItem }) {
  *
  * ⚠️ 그래서 이 칸에 넘기는 것은 글자가 아니라 마디다(DomesticOrderTextCell 의
  * displayText). 글자만 넘기면 눌러서 고칠 수 있게 되는 순간 배지가 사라진다.
+ *
+ * 🔴 **알약 자체는 이제 ./badges.tsx 에 있다**(2026-11-13). 자리를 넘기므로 [시스템
+ * 설정] → [배지 표시]의 「발주일 미정」을 끈 곳에서는 알약 대신 다른 빈 칸과 같은
+ * "-" 가 남는다 — **칸이 통째로 비면 위의 그 단추를 누를 수 없게 된다**(그 조각의
+ * 머리말 ①).
  */
 function OrderIssuedDateContent({ row }: { row: DomesticOrderListItem }) {
   if (row.orderIssuedDate !== null) return <>{row.orderIssuedDate}</>;
-  return (
-    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] leading-none text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-      {NO_ORDER_DATE_LABEL}
-    </span>
-  );
+  return <OrderIssuedDateMissingBadge placeKey="domesticOrderList" />;
 }
 
 /**
@@ -1092,9 +1102,20 @@ const CARD_FIELD_GROUPS: {
       // 자리이고(카드에는 배지가 없었다), 눌러서 고칠 수 있게 되었다는 이유로
       // 한쪽 생김새를 다른 쪽에 맞추지 않는다. 카드에서 눌렀을 때도 편집칸 아래
       // 두 줄은 똑같이 붙는다 — 그 판정은 칸 이름이 하지 화면이 하지 않는다.
+      //
+      // 🔴 **생김새는 갈려 있어도 끄는 설정은 양쪽이 함께 듣는다**(2026-11-13).
+      // 사람이 끄는 것은 모양이 아니라 「발주일 미정」이라는 표식이고 자리도 같은
+      // 한 자리(내자 정리 — 목록)다. 표에서만 들으면 **폰으로 보는 사람에게만
+      // 안 꺼진** 꼴이 되고, 그 어긋남은 오류 없이 화면 폭에 따라서만 드러난다.
+      // 켜져 있을 때 나오는 글자는 예전과 한 글자도 다르지 않다(./badges.tsx).
       {
         label: "발주발행일",
-        of: (row) => (row.orderIssuedDate === null ? NO_ORDER_DATE_LABEL : row.orderIssuedDate),
+        of: (row) =>
+          row.orderIssuedDate === null ? (
+            <OrderIssuedDateMissingText placeKey="domesticOrderList" />
+          ) : (
+            row.orderIssuedDate
+          ),
         edit: { field: "orderIssuedDate", wrapping: "whitespace-nowrap" },
       },
       // 표와 같은 규칙이다 — 한 줄에 날짜 하나씩 전부, 어느 쪽 날짜인지도 같은
@@ -1228,18 +1249,6 @@ const CARD_FIELD_GROUPS: {
     ],
   },
 ];
-
-/**
- * 완료된 줄에 붙는 표. 회색 배경만으로는 "왜 회색인지"를 말하지 못한다 —
- * 색을 구분하기 어려운 사람에게는 이 글자가 유일한 단서다.
- */
-function CompletedBadge() {
-  return (
-    <span className="rounded bg-zinc-700 px-1.5 py-0.5 text-[11px] leading-none font-medium text-white dark:bg-zinc-300 dark:text-zinc-900">
-      완료
-    </span>
-  );
-}
 
 /**
  * 🔴 승인이 하나도 안 붙은 줄이 받는 **빈 목록 한 벌**(2026-11-08). 줄마다 `[]` 를
@@ -1591,48 +1600,11 @@ function CompletionToggle({
       {/* 🔵 단추가 하나인 줄의 단위 번호는 **1** 이다(props 머리말). 수리 건이
           붙은 줄이면 그 수리 건의 최종 출하 승인, 기타건이면 그 하나뿐인 회차의
           승인이다 — 어느 쪽이든 「이 단추가 열리는가」와 같은 물음이다. */}
-      <FinalShipmentApprovedBadge size="compact" approved={approvedRowOrders.includes(1)} />
-    </span>
-  );
-}
-
-/**
- * 🔴 **회차 하나가 완료 처리되었다는 표** (2026-11-08).
- *
- * ── 왜 생겼나 ───────────────────────────────────────────────────────────
- * 사용자 지적 그대로다: 「**[1차 완료]가 되었다는게 내자정리에서 시각적으로 한눈에
- * 파악이 안되는 것** 같아.」 그 전까지 1차를 완료했다는 사실이 화면에 남긴 흔적은
- * **단추 글자 한 자**뿐이었다 — 「1차 완료」가 「1차 해제」로 바뀌는 것. 11px 짜리
- * 같은 모양·같은 색 단추에서 글자 두 자가 바뀌는 것을 22칼럼짜리 표에서 알아보라는
- * 것은 무리다.
- *
- * ── 🔴 왜 **줄 단위 완료 표와 같은 모양**인가 ───────────────────────────
- * 이 표(CompletedBadge)가 바로 옆에서 「완료」를 말하고 있다. 회차 완료도 **같은
- * 종류의 사실**이므로 같은 치수·같은 색(채운 진한 회색)을 쓴다 — 한 칸 안에 같은
- * 뜻의 표가 두 모양이면 사람은 다른 뜻으로 읽는다. 🔵 색만으로 말하지 않는 까닭도
- * 그 파일에 적혀 있다: 색을 구분하기 어려운 사람에게는 **글자가 유일한 단서**다.
- *
- * ── 🔴 **단추 글자와 헷갈리지 않아야 한다** ─────────────────────────────
- * 가장 조심한 자리다. 완료된 1차 옆에 이 표가 「1차 완료」라고 서면, 바로 옆에서
- * 아직 완료 안 된 2차의 **단추**가 똑같이 「2차 완료」라고 적혀 있다(그 단추는
- * 「눌러서 완료해라」라는 뜻이다). 글자만 보면 둘 다 완료로 읽힌다.
- *
- * 그래서 가르는 것을 **둘** 둔다:
- *  · **채운 진한 바탕** — 단추는 흰 바탕에 테두리뿐이다(rowActionButtonClass).
- *  · 🔴 **✓** — 색을 못 가리는 화면·사람에게도 남는 단서다. 이 저장소가 「끝났다」를
- *    말할 때 쓰는 그 글자다(첨부 고르기의 `담김 ✓` · 저장 팝업의 ✓).
- *
- * 🔵 긴 회차 이름은 `title` 에 둔다 — 단추가 같은 까닭으로 같은 일을 한다(표 칸이
- * 좁다). 글자를 지어내지 않고 **그 한 줄**을 그대로 받는다
- * (domain/domestic-order-due-date-label.ts).
- */
-function DueDateRowCompletedBadge({ rowOrder, label }: { rowOrder: number; label: string }) {
-  return (
-    <span
-      title={`${label} — 완료 처리됨`}
-      className="inline-flex items-center rounded bg-zinc-700 px-1.5 py-0.5 text-[11px] leading-none font-medium whitespace-nowrap text-white dark:bg-zinc-300 dark:text-zinc-900"
-    >
-      {rowOrder}차 완료 ✓
+      <FinalShipmentApprovedBadge
+        size="compact"
+        approved={approvedRowOrders.includes(1)}
+        placeKey="domesticOrderList"
+      />
     </span>
   );
 }
@@ -1745,7 +1717,7 @@ function DueDateRowCompletionToggles({
             {/* 🔴 **완료 표가 단추 왼쪽**이다 — 줄 단위가 「[완료] [완료 해제]」로
                 세우는 차례 그대로다(위 순번 칸). 사실을 먼저 말하고 그다음이
                 조작이다. */}
-            {completed && <DueDateRowCompletedBadge rowOrder={rowOrder} label={label} />}
+            {completed && <DueDateRowCompletedBadge rowOrder={rowOrder} label={label} placeKey="domesticOrderList" />}
             <button
               type="button"
               onClick={(event) => void toggle(event, rowOrder, !completed)}
@@ -1762,6 +1734,7 @@ function DueDateRowCompletionToggles({
               size="compact"
               approved={approvedRowOrders.includes(rowOrder)}
               title={label}
+              placeKey="domesticOrderList"
             />
           </span>
         );
@@ -2811,7 +2784,7 @@ export default function DomesticOrderListScreen({
                         <td className="px-3 py-2">
                           <span className="flex items-center gap-2">
                             <span className="tabular-nums">{dash(row.displayOrder)}</span>
-                            {completed && <CompletedBadge />}
+                            {completed && <DomesticOrderCompletedBadge placeKey="domesticOrderList" />}
                             {canEdit && <EditRowButton row={row} onOpen={openRow} />}
                             {canEdit && (
                               <CompletionToggle
@@ -3158,7 +3131,7 @@ export default function DomesticOrderListScreen({
                             </span>
                             <span className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                               순번 {dash(row.displayOrder)}
-                              {completed && <CompletedBadge />}
+                              {completed && <DomesticOrderCompletedBadge placeKey="domesticOrderList" />}
                               {canEdit && <EditRowButton row={row} onOpen={openRow} />}
                               {canEdit && (
                                 <CompletionToggle
