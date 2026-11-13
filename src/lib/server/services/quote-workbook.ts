@@ -168,7 +168,9 @@ async function fillQuoteWorkbookFor(
     return isOverhaul
       ? fillOhQuoteWorkbook(await readOhQuoteTemplate(), {
           ...common,
-          // `2) OH 부품 비용` 칸(34~46행). OH 표시가 붙은 줄만 여기로 간다.
+          // `2) OH 부품 비용` 칸. OH 표시가 붙은 줄만 여기로 간다. 🔴 **줄 수를 세어
+          // 자르지 않는다** — 채우개가 D열 머리글로 그 칸을 찾아 담은 만큼 줄을 늘리고
+          // 줄인다(xlsx/oh-quote-template.ts, 2026-08-31 에 34~46행 박기를 없앴다).
           overhaulParts: quote.items
             .filter((item) => item.isOverhaulPart)
             .map((item) => ({
