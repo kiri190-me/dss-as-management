@@ -103,7 +103,10 @@ describe("제품 정보 — 과거 A/S 이력 접기", () => {
   });
 
   test("이력 한 줄의 세 줄 구성은 그대로다", () => {
-    assert.match(flat, /<SourceBadge source=\{item\.source\} \/>/);
+    // 🔵 2026-11-13 — 배지에 `placeKey` 가 붙었다(배지 표시 설정, 조각 3). 구성은
+    //    그대로고 인자가 하나 늘었을 뿐이라 **글자를 맞춰 적는다**: 자리를 빼면
+    //    [시스템 설정]에서 「DB」를 꺼도 이 줄에서만 안 꺼진다.
+    assert.match(flat, /<SourceBadge source=\{item\.source\} placeKey="repairCaseDetailBasicInfo" \/>/);
     assert.match(flat, /<HistoryLine label="신고증상" value=\{item\.reportedSymptom\} \/>/);
     assert.match(flat, /<HistoryLine label="조치 내용" value=\{actionSummary\} \/>/);
   });

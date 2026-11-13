@@ -158,9 +158,13 @@ describe("㉡ 지금 쓰이는 판만 본다", () => {
   });
 
   test("🔴 레이아웃이 조회를 줄 세우지 않는다 — 모든 화면이 그 왕복을 치른다", () => {
+    // 🔵 2026-11-13 — 묶음에 셋째가 들어왔다(배지 표시 설정, getBadgeVisibilitySettings).
+    //    🔴 **글자를 그대로 맞춰 적는 것이 이 시험의 요점**이다: 묶음에 무엇을 더하는
+    //    사람이 여기서 한 번 멈춰, 줄을 세우지 않았는지 눈으로 보게 된다. 느슨하게
+    //    고쳐 두면 `await` 를 하나 더 붙인 날 모든 화면이 그 왕복만큼 느려진다.
     assert.match(
       flat(layoutCode),
-      /const \[accessibleAreaKeys, usersAreaAccess\] = await Promise\.all\(\[ listAccessibleAreaKeys\(user\), resolveUsersAreaAccess\(user\), \]\);/,
+      /const \[accessibleAreaKeys, usersAreaAccess, badgeVisibility\] = await Promise\.all\(\[ listAccessibleAreaKeys\(user\), resolveUsersAreaAccess\(user\), getBadgeVisibilitySettings\(\), \]\);/,
       "새 조회가 기존 조회와 같은 묶음으로 가지 않는다"
     );
     // 요청 한 번에 한 번만 실제로 묻는다 — 레이아웃과 페이지가 각각 부른다.

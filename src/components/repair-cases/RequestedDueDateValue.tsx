@@ -1,3 +1,5 @@
+import { BadgeVisibilityGate } from "@/components/providers/BadgeVisibilityProvider";
+import type { BadgePlaceKey } from "@/lib/domain/badge-visibility";
 import {
   DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL,
   DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_NOTE,
@@ -41,12 +43,22 @@ import { DUE_DATE_NEAR_TEXT_CLASS } from "./due-date-near";
  * 이 조각은 네 화면이 함께 쓰므로, 평소 모양이 바뀌면 네 곳이 한꺼번에 바뀐다.
  * 꼬리표(내자)는 임박이어도 색이 바뀌지 않는다 — 그것은 경보가 아니라 **어디서 온
  * 값인가**를 말하는 표시이고, 함께 붉어지면 날짜와 같은 무게로 읽힌다.
+ *
+ * ── 🔴 **꼬리표만 끌 수 있다 — 날짜는 못 끈다** (2026-11-13) ───────────────
+ * 아래 `placeKey` 를 주면 [시스템 설정] → [배지 표시]의 「(내자)」를 끈 자리에서
+ * 꼬리표가 사라진다. 🔴 **날짜는 그대로 남는다.** 등록부가 끌 수 있다고 적어 둔 것은
+ * 「(내자)」라는 꼬리표 하나이고(domain/badge-visibility.ts), 날짜는 배지가 아니라
+ * 이 칸의 **값**이다 — 배지 설정으로 자료가 사라지면 그것은 표시 설정이 아니라
+ * 자료를 가리는 설정이 된다.
+ * 🔵 이 조각은 `"use client"` 를 **안 붙인 채로** 둔다(지금은 클라이언트 쪽 부모만
+ * 쓴다). 그래서 판정도 훅이 아니라 그려서 묻는다 — BadgeVisibilityGate 의 머리말.
  * ============================================================================
  */
 export default function RequestedDueDateValue({
   customerRequestedDueDate,
   domesticOrderDueDates,
   isDueDateNear = false,
+  placeKey,
 }: {
   /** 이 건의 repair_cases.customer_requested_due_date 그대로. */
   customerRequestedDueDate: string | null;
@@ -57,6 +69,12 @@ export default function RequestedDueDateValue({
    * 예전과 똑같이 그려진다(전체 A/S 현황·내 작업 넷만 넘긴다).
    */
   isDueDateNear?: boolean;
+  /**
+   * 꼬리표(「(내자)」)가 서는 자리. 안 주면 설정과 상관없이 예전 그대로 붙는다 —
+   * 이 조각을 쓰는 네 화면 가운데 **전체 A/S 현황의 표·카드만** 자리를 넘긴다
+   * (내 작업 화면 둘과 설정 화면의 보기는 설정 대상이 아니다).
+   */
+  placeKey?: BadgePlaceKey;
 }) {
   const { dueDate, borrowed } = resolveRepairCaseRequestedDueDate({
     customerRequestedDueDate,
@@ -73,15 +91,20 @@ export default function RequestedDueDateValue({
 
   if (!borrowed) return <>{value}</>;
 
+  // 🔴 날짜와 **사이의 빈칸까지** 꼬리표 쪽이다. 빈칸을 밖에 두면 꼬리표를 끈
+  //    자리에 날짜 뒤 빈칸 하나가 남고, 그 칸이 줄 끝에서 줄바꿈을 일으킨다.
   return (
     <>
-      {value}{" "}
-      <span
-        className="text-[0.9em] text-zinc-400 dark:text-zinc-500"
-        title={DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_NOTE}
-      >
-        {DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL}
-      </span>
+      {value}
+      <BadgeVisibilityGate badgeKey="dueDateFromDomesticOrderShort" placeKey={placeKey}>
+        {" "}
+        <span
+          className="text-[0.9em] text-zinc-400 dark:text-zinc-500"
+          title={DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_NOTE}
+        >
+          {DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL}
+        </span>
+      </BadgeVisibilityGate>
     </>
   );
 }

@@ -1,3 +1,5 @@
+import { BadgeVisibilityGate } from "@/components/providers/BadgeVisibilityProvider";
+import type { BadgePlaceKey } from "@/lib/domain/badge-visibility";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { IntakeReferenceData } from "@/lib/db/queries/repair-case-references";
 import type { RepairCaseEditSection } from "@/lib/validation/repair-case-update-input";
@@ -30,6 +32,7 @@ function Field({
   label,
   value,
   borrowedLabel,
+  borrowedLabelPlaceKey,
   hint,
   emphasized = false,
   note,
@@ -39,6 +42,16 @@ function Field({
   value: string;
   /** 빌려 온 값일 때만 적는다. 없으면 이 줄 자체가 없다. */
   borrowedLabel?: string;
+  /**
+   * 그 출처 표시가 서는 자리 — [시스템 설정] → [배지 표시]의 「내자 정리에서
+   * 작성됨」이다(2026-11-13). 안 주면 설정과 상관없이 예전 그대로 붙는다.
+   *
+   * 🔴 **끄는 것은 이 한 줄뿐이고 날짜는 그대로 남는다.** 날짜는 배지가 아니라
+   * 이 칸의 값이다 — 표시 설정으로 자료가 사라지면 그것은 자료를 가리는 설정이 된다.
+   * 🔴 아래 `note`(납기 역전 경보)는 **이 설정과 무관하다.** 그것은 출처 표시가
+   * 아니라 고쳐야 할 일을 알리는 말이고, 등록부에 그런 배지가 없다.
+   */
+  borrowedLabelPlaceKey?: BadgePlaceKey;
   /** 이름표에 마우스를 올렸을 때 뜨는 설명. 규칙이 있는 칸에만 붙는다. */
   hint?: string;
   /**
@@ -89,9 +102,14 @@ function Field({
           🔴 아래 경보 상자와 **색이 다르다**: 여기는 출처라 회색이고, 경보는 붉다.
           같은 색으로 두면 출처 표시까지 「고쳐야 할 것」으로 보인다. */}
       {borrowedLabel && (
-        <p className="mt-1 mr-1 inline-block whitespace-nowrap rounded border border-zinc-300 bg-zinc-50 px-1.5 py-0.5 text-[10px] text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-300">
-          {borrowedLabel}
-        </p>
+        <BadgeVisibilityGate
+          badgeKey="dueDateFromDomesticOrder"
+          placeKey={borrowedLabelPlaceKey}
+        >
+          <p className="mt-1 mr-1 inline-block whitespace-nowrap rounded border border-zinc-300 bg-zinc-50 px-1.5 py-0.5 text-[10px] text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-300">
+            {borrowedLabel}
+          </p>
+        </BadgeVisibilityGate>
       )}
       {/* 🔵 빌려 왔다는 표시보다 **뒤**다. 그 표시는 바로 위 날짜가 어디서 온
           값인지를 말하므로 날짜에 붙어 있어야 하고, 경보는 그 둘을 읽은 다음에
@@ -219,6 +237,9 @@ export default function IntakeInfoSection({
             borrowedLabel={
               requestedDueDate.borrowed ? DUE_DATE_FROM_DOMESTIC_ORDER_LABEL : undefined
             }
+            // 🔴 이 구역 전체가 「수리건 상세 — 기본 정보 탭」이고, 이 표시만
+            //    끌 수 있다(2026-11-13). 날짜도 경보 줄도 설정 대상이 아니다.
+            borrowedLabelPlaceKey="repairCaseDetailBasicInfo"
             hint={REPAIR_CASE_DUE_DATE_LINK_NOTE}
             // 🔴 이 한 칸에서만 켠다 — 「납기 임박」도 「납기 역전」도 이 날짜에
             // 대한 말이다. 빌려 왔다는 표시(날짜 바로 아래 줄)는 함께 붉어지지

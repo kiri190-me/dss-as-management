@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useIsBadgeVisible } from "@/components/providers/BadgeVisibilityProvider";
+import type { BadgePlaceKey } from "@/lib/domain/badge-visibility";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { SortColumn, SortState } from "@/lib/domain/repair-case-filters";
 import {
@@ -73,6 +75,20 @@ type RepairCaseTableProps = {
    * 이 값을 넘기지 않으므로 예전과 한 글자도 다르지 않게 그려진다.
    */
   finalShipmentApprovedCaseIds?: ReadonlySet<string>;
+  /**
+   * 🔴 이 표가 **등록부의 어느 자리인가** (2026-11-13 — 배지 표시 설정).
+   *
+   * `"repairCaseList"`(= 「전체 A/S 현황 — 목록」)를 받으면 아래 배지 아홉이 각자
+   * 그 자리의 설정을 보고 스스로 안 그린다. 🔴 **이 표를 함께 쓰는 다른 화면
+   * (고객사 상세 · 제품모델 상세의 A/S 이력)은 이 값을 안 넘긴다** — 등록부에 그
+   * 자리들이 아예 없고, 자리를 안 주면 판정이 언제나 「보임」이라 예전과 한 글자도
+   * 다르지 않게 그려진다. 그래서 자리를 **이 파일에 박지 않고 받는다**: 박으면
+   * 전체 A/S 현황에서 「상태」를 끈 날 고객사 상세의 이력까지 함께 비어 버린다.
+   *
+   * 🔴 **휴대폰 쪽(RepairCaseCardList)도 같은 자리다.** 한쪽에만 넘기면 폰에서만
+   * 안 꺼진다 — 두 조각을 세우는 RepairCaseListPage 가 같은 값을 둘 다에 준다.
+   */
+  badgePlaceKey?: BadgePlaceKey;
 };
 
 const thBaseClass =
@@ -140,7 +156,21 @@ function SecondarySortButton({
  * rendering unchanged. The overdue (true) case still reuses OverdueBadge
  * as-is — its red badge already has a background and needs no change.
  */
-function StatusRowOverdueBadge({ isOverdue }: { isOverdue: boolean }) {
+function StatusRowOverdueBadge({
+  isOverdue,
+  placeKey,
+}: {
+  isOverdue: boolean;
+  /**
+   * 🔴 이 조각도 자리를 받아 **스스로** 판정한다 (2026-11-13). 「정상」 쪽 알약이
+   * 이 파일에만 있어서, 판정을 아래 OverdueBadge 에만 맡기면 그 배지를 끈 자리에
+   * **파란 「정상」만 남는다** — 그 칸이 「납기 지연 / 정상」 한 쌍이라는 사실이
+   * 등록부의 배지 이름에 그대로 적혀 있다.
+   */
+  placeKey?: BadgePlaceKey;
+}) {
+  const visible = useIsBadgeVisible("overdue", placeKey);
+  if (!visible) return null;
   if (!isOverdue) {
     return (
       <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-blue-700 dark:bg-blue-950 dark:text-blue-400">
@@ -148,6 +178,8 @@ function StatusRowOverdueBadge({ isOverdue }: { isOverdue: boolean }) {
       </span>
     );
   }
+  // 🔵 자리는 넘기지 않는다 — 바로 위에서 이미 같은 쌍으로 판정했다. 두 번 물으면
+  //    답은 같지만 조건이 두 벌이 되고, 한쪽만 고쳐지는 날이 온다.
   return <OverdueBadge isOverdue={isOverdue} />;
 }
 
@@ -214,6 +246,7 @@ export default function RepairCaseTable({
   onToggleSelectAll,
   dueDateNearCaseIds,
   finalShipmentApprovedCaseIds,
+  badgePlaceKey,
 }: RepairCaseTableProps) {
   const selectableVisible = selectionMode ? rows.filter((row) => selectableIds?.has(row.id) ?? false) : [];
   const selectedVisibleCount = selectableVisible.filter((row) => selectedIds?.has(row.id) ?? false).length;
@@ -301,7 +334,7 @@ export default function RepairCaseTable({
                     >
                       {row.intakeNumber}
                     </Link>
-                    <SourceBadge source={row.source} />
+                    <SourceBadge source={row.source} placeKey={badgePlaceKey} />
                   </div>
                   <span className="text-xs whitespace-nowrap text-zinc-500 dark:text-zinc-400">{row.receivedAt}</span>
                   <span className="text-xs whitespace-nowrap text-zinc-500 dark:text-zinc-400">보고서번호 {row.legacyReportNumber ?? "—"}</span>
@@ -310,17 +343,29 @@ export default function RepairCaseTable({
               <td className="px-3 py-2">
                 <div className="flex flex-col gap-1">
                   <div className="flex flex-wrap items-center gap-1">
-                    <StatusBadge status={row.effectiveStatus} />
+                    <StatusBadge status={row.effectiveStatus} placeKey={badgePlaceKey} />
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
-                    <PriorityBadge priority={row.priority} />
-                    <StatusRowOverdueBadge isOverdue={row.effectiveIsOverdue} />
+                    <PriorityBadge priority={row.priority} placeKey={badgePlaceKey} />
+                    <StatusRowOverdueBadge
+                      isOverdue={row.effectiveIsOverdue}
+                      placeKey={badgePlaceKey}
+                    />
                     {/* 「납기 지연」 바로 뒤다 — 둘은 다른 판정이지만(지연은 사내
                         목표 완료일, 임박은 고객 요청 납기일) 사람이 같은 물음으로
                         읽는 자리라 나란히 선다. 색은 일부러 갈랐다(badges.tsx). */}
-                    <DueDateNearBadge isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false} />
-                    <HoldBadge isOnHold={row.holdState?.isOnHold ?? false} />
-                    <WorkflowOverrideBadge hasOverride={row.hasWorkflowOverride} />
+                    <DueDateNearBadge
+                      isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false}
+                      placeKey={badgePlaceKey}
+                    />
+                    <HoldBadge
+                      isOnHold={row.holdState?.isOnHold ?? false}
+                      placeKey={badgePlaceKey}
+                    />
+                    <WorkflowOverrideBadge
+                      hasOverride={row.hasWorkflowOverride}
+                      placeKey={badgePlaceKey}
+                    />
                     {/* 🔴 「[최종 출하 승인 완료]」 — 배지 묶음의 **맨 뒤**다
                         (2026-11-08). 앞의 넷은 「이 건이 지금 어떤 상태인가」를
                         말하고, 이것은 그 위에 얹히는 **결재 사실** 하나다. 묶음이
@@ -328,6 +373,7 @@ export default function RepairCaseTable({
                         않는다. 상세 머리 카드도 같은 자리에 같은 차례로 둔다. */}
                     <FinalShipmentApprovedBadge
                       approved={finalShipmentApprovedCaseIds?.has(row.id) ?? false}
+                      placeKey={badgePlaceKey}
                     />
                   </div>
                 </div>
@@ -361,10 +407,13 @@ export default function RepairCaseTable({
                   <span className="font-medium whitespace-nowrap">{row.effectiveActualShipmentDate ?? "-"}</span>
                   <span className="text-xs whitespace-nowrap text-zinc-500 dark:text-zinc-400">
                     고객요청{" "}
+                    {/* 🔴 자리를 넘겨도 **날짜는 안 사라진다** — 끄는 것은 꼬리표
+                        「(내자)」 하나뿐이다(RequestedDueDateValue 머리말). */}
                     <RequestedDueDateValue
                       customerRequestedDueDate={row.customerRequestedDueDate}
                       domesticOrderDueDates={row.domesticOrderDueDates}
                       isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false}
+                      placeKey={badgePlaceKey}
                     />
                   </span>
                 </div>

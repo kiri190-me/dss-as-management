@@ -874,9 +874,13 @@ export default function RepairCaseListPage({
                         onToggleSelectAll={handleToggleSelectAllOnPage}
                         dueDateNearCaseIds={dueDateNearIdSet}
                         finalShipmentApprovedCaseIds={finalShipmentApprovedIdSet}
+                        badgePlaceKey="repairCaseList"
                       />
                     }
                     cards={
+                      // 🔴 `badgePlaceKey` 는 바로 위 표와 **같은 값**이다 — 둘이
+                      //    한 자리(「전체 A/S 현황 — 목록」)이고, 한쪽에만 주면
+                      //    폰에서만 배지가 안 꺼진다.
                       <RepairCaseCardList
                         rows={pagedRows}
                         selectionMode={isDeleteMode}
@@ -885,6 +889,7 @@ export default function RepairCaseListPage({
                         onToggleSelect={handleToggleSelect}
                         dueDateNearCaseIds={dueDateNearIdSet}
                         finalShipmentApprovedCaseIds={finalShipmentApprovedIdSet}
+                        badgePlaceKey="repairCaseList"
                       />
                     }
                   />

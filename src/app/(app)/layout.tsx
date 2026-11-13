@@ -21,8 +21,10 @@ import "@dss/ui/notification-bell.css";
 import AppShell from "@/components/layout/AppShell";
 import BrowserNotifications from "@/components/layout/BrowserNotifications";
 import SavePopupHost from "@/components/common/SavePopup";
+import { BadgeVisibilityProvider } from "@/components/providers/BadgeVisibilityProvider";
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
+import { getBadgeVisibilitySettings } from "@/lib/server/badge-visibility";
 import { getUiText } from "@/lib/server/ui-text";
 import { listAccessibleAreaKeys } from "@/lib/auth/permission-resolver";
 import { mayEnterDeveloperMode } from "@/lib/auth/developer-mode-gate";
@@ -78,9 +80,16 @@ export default async function AppLayout({
   // 🔴 **같은 묶음으로 던진다.** 이 레이아웃은 모든 화면에 딸려 오므로 줄 세우면
   // 전 화면이 그 왕복만큼 느려진다. 결재선 조회는 요청 단위로 묶여 있어
   // (users-area-access.ts 의 cache) /users 페이지가 다시 물어도 왕복이 늘지 않는다.
-  const [accessibleAreaKeys, usersAreaAccess] = await Promise.all([
+  //
+  // 🔵 **배지 표시 설정도 이 묶음에 얹는다**(2026-11-13). 관리자가 [시스템 설정] →
+  // [배지 표시]에서 끈 (배지, 자리) 쌍이고, 행 수가 최대 33 인 작은 조회다. 이 아래
+  // 어느 화면에서 배지를 그리든 같은 값을 봐야 해서 레이아웃이 한 번 읽어 내려보낸다
+  // (components/providers/BadgeVisibilityProvider.tsx). 표가 아직 없는 DB 에서도
+  // 빈 목록으로 답한다 — 빈 목록은 「전부 보임」이라 이 기능을 넣기 전과 같은 화면이다.
+  const [accessibleAreaKeys, usersAreaAccess, badgeVisibility] = await Promise.all([
     listAccessibleAreaKeys(user),
     resolveUsersAreaAccess(user),
+    getBadgeVisibilitySettings(),
   ]);
 
   // 개발자 모드는 위 목록에 **담길 수 없다** — PERMISSION_AREAS 에 없기 때문이고,
@@ -166,35 +175,53 @@ export default async function AppLayout({
 
   return (
     <>
-      <AppShell
-        user={{ name: user.name, roleLabel: uiText.role[user.role], role: user.role }}
-        accessibleAreaKeys={accessibleAreaKeys}
-        // 🔴 설정 밖의 길 **둘**을 한 객체로 넘긴다. 참/거짓 둘이 자리 인자로 나란히
-        //    서면 바꿔 넣어도 tsc 가 침묵하고, 그때 고장은 조용하다(navigation.ts).
-        navAccessFlags={{
-          canEnterDeveloperMode,
-          mayEnterUsersArea: usersAreaAccess.mayEnterUsersArea,
-        }}
-        myPendingApprovalCount={myPendingApprovalCount}
-        notifications={notifications}
-        portalInbox={portalInbox}
-        // 🔴 「이 알림은 그만 보겠다」를 **여기서 내려보내지 않는다**(2026-10-20).
-        //    한때 `notificationDismissal={{ userId, issuedAt }}` 이 이 자리에
-        //    있었다 — 지움을 이 브라우저의 localStorage 어느 칸에 적을지 가르는
-        //    값이었다. 지움이 포털로 옮겨 가면서 그 칸도, 그것을 가르는 값도
-        //    없어졌다. 적는 일은 TopBar 가 종에 건네는 서버 액션이 하고
-        //    (server/actions/notification-dismissals.ts), **누구의 지움인지는 그
-        //    액션이 제 세션에서 다시 읽는다** — 그래서 사람을 가리키는 값이 이
-        //    줄기를 타고 내려갈 까닭이 없다.
-        //
-        // 자기 줄 열쇠의 접두사(바로 위 notificationClientId 주석).
-        notificationClientId={notificationClientId}
-        portalUrl={portalUrl}
-        services={serviceMenu}
-        currentServiceId={currentServiceId}
-      >
-        {children}
-      </AppShell>
+      {/*
+        🔴 배지 표시 설정은 **여기**가 자리다 — 루트 레이아웃이 아니다.
+        UiTextProvider 가 루트에 있는 까닭(/login · /pending-approval 이 (app) 밖인데
+        역할 이름 같은 문구를 쓴다)이 배지에는 해당하지 않는다: 등록부의 자리 일곱이
+        전부 이 아래이고, 로그인 전 두 화면은 배지를 하나도 그리지 않는다. 루트에
+        두면 아직 아무도 아닌 사람에게 질의가 한 번씩 더 돈다.
+
+        🔴 DOM 을 하나도 만들지 않는다(Context.Provider 뿐이다) — AppShell 이
+        여전히 이 조각의 직계라 배치가 그대로다.
+
+        🔴 **아래 둘(BrowserNotifications · SavePopupHost)까지 감싸지 않는다.**
+        배지를 그리는 것은 AppShell 아래뿐이고, 이 클라이언트 조각에 자식을 **둘
+        이상** 넘기면 서버에서 건너온 슬롯이 배열이 되어 브라우저 콘솔에
+        `unique "key" prop` 경고가 뜬다 — 이 저장소에는 브라우저가 없어 시험으로
+        못 잡는 종류다. 자식이 하나면 그 길이 아예 없다(UiTextProvider 와 같은 모양).
+      */}
+      <BadgeVisibilityProvider value={badgeVisibility}>
+        <AppShell
+          user={{ name: user.name, roleLabel: uiText.role[user.role], role: user.role }}
+          accessibleAreaKeys={accessibleAreaKeys}
+          // 🔴 설정 밖의 길 **둘**을 한 객체로 넘긴다. 참/거짓 둘이 자리 인자로 나란히
+          //    서면 바꿔 넣어도 tsc 가 침묵하고, 그때 고장은 조용하다(navigation.ts).
+          navAccessFlags={{
+            canEnterDeveloperMode,
+            mayEnterUsersArea: usersAreaAccess.mayEnterUsersArea,
+          }}
+          myPendingApprovalCount={myPendingApprovalCount}
+          notifications={notifications}
+          portalInbox={portalInbox}
+          // 🔴 「이 알림은 그만 보겠다」를 **여기서 내려보내지 않는다**(2026-10-20).
+          //    한때 `notificationDismissal={{ userId, issuedAt }}` 이 이 자리에
+          //    있었다 — 지움을 이 브라우저의 localStorage 어느 칸에 적을지 가르는
+          //    값이었다. 지움이 포털로 옮겨 가면서 그 칸도, 그것을 가르는 값도
+          //    없어졌다. 적는 일은 TopBar 가 종에 건네는 서버 액션이 하고
+          //    (server/actions/notification-dismissals.ts), **누구의 지움인지는 그
+          //    액션이 제 세션에서 다시 읽는다** — 그래서 사람을 가리키는 값이 이
+          //    줄기를 타고 내려갈 까닭이 없다.
+          //
+          // 자기 줄 열쇠의 접두사(바로 위 notificationClientId 주석).
+          notificationClientId={notificationClientId}
+          portalUrl={portalUrl}
+          services={serviceMenu}
+          currentServiceId={currentServiceId}
+        >
+          {children}
+        </AppShell>
+      </BadgeVisibilityProvider>
       {/*
         화면을 하나도 그리지 않는다(return null) — 위 종에 뜬 것과 **같은 목록**을
         받아, 새로 생긴 것만 컴퓨터·폰 알림창에 띄우는 일만 한다. 조회는 여전히

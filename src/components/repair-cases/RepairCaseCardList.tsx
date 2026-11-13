@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LIST_CARD_GRID } from "@/components/common/responsive-list";
+import type { BadgePlaceKey } from "@/lib/domain/badge-visibility";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import {
   DueDateNearBadge,
@@ -39,6 +40,15 @@ type RepairCaseCardListProps = {
    * 사람이 갈린다 — 이 파일 머리말이 유·무상·날짜·L/N 에서 세 번 겪은 그 결함이다.
    */
   finalShipmentApprovedCaseIds?: ReadonlySet<string>;
+  /**
+   * 🔴 이 카드 목록이 **등록부의 어느 자리인가** (2026-11-13 — 배지 표시 설정).
+   * 표(RepairCaseTable)의 같은 prop 과 **같은 값을 같은 부모가** 내려 준다 —
+   * 🔴 표에만 넣으면 **폰에서만 배지가 안 꺼진다.** 이 파일 머리말이 유·무상·날짜·
+   * L/N 에서 세 번 겪은 바로 그 결함이고, 이번엔 끈 사람이 「안 꺼졌다」고 본다.
+   * 이 목록을 함께 쓰는 고객사 상세·제품모델 상세는 이 값을 안 넘긴다(설정 대상이
+   * 아니다 — 자리를 안 주면 판정이 언제나 「보임」이다).
+   */
+  badgePlaceKey?: BadgePlaceKey;
 };
 
 /**
@@ -76,6 +86,7 @@ export default function RepairCaseCardList({
   onToggleSelect,
   dueDateNearCaseIds,
   finalShipmentApprovedCaseIds,
+  badgePlaceKey,
 }: RepairCaseCardListProps) {
   return (
     <div className={LIST_CARD_GRID}>
@@ -109,19 +120,26 @@ export default function RepairCaseCardList({
               </span>
               <span className="text-xs text-zinc-500 dark:text-zinc-400">보고서번호 {row.legacyReportNumber ?? "—"}</span>
             </div>
-            <StatusBadge status={row.effectiveStatus} />
+            <StatusBadge status={row.effectiveStatus} placeKey={badgePlaceKey} />
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <PriorityBadge priority={row.priority} />
-            <OverdueBadge isOverdue={row.effectiveIsOverdue} />
+            <PriorityBadge priority={row.priority} placeKey={badgePlaceKey} />
+            <OverdueBadge isOverdue={row.effectiveIsOverdue} placeKey={badgePlaceKey} />
             {/* 표와 같은 자리·같은 차례다(「납기 지연」 바로 뒤). */}
-            <DueDateNearBadge isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false} />
-            <HoldBadge isOnHold={row.holdState?.isOnHold ?? false} />
-            <WorkflowOverrideBadge hasOverride={row.hasWorkflowOverride} />
-            <SourceBadge source={row.source} />
+            <DueDateNearBadge
+              isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false}
+              placeKey={badgePlaceKey}
+            />
+            <HoldBadge isOnHold={row.holdState?.isOnHold ?? false} placeKey={badgePlaceKey} />
+            <WorkflowOverrideBadge
+              hasOverride={row.hasWorkflowOverride}
+              placeKey={badgePlaceKey}
+            />
+            <SourceBadge source={row.source} placeKey={badgePlaceKey} />
             {/* 표와 같은 자리·같은 차례다(배지 묶음의 맨 뒤 — 2026-11-08). */}
             <FinalShipmentApprovedBadge
               approved={finalShipmentApprovedCaseIds?.has(row.id) ?? false}
+              placeKey={badgePlaceKey}
             />
           </div>
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
@@ -146,10 +164,13 @@ export default function RepairCaseCardList({
             <div>
               <dt className="text-xs text-zinc-500 dark:text-zinc-500">고객 요청 납기일</dt>
               <dd>
+                {/* 🔴 자리를 넘겨도 **날짜는 안 사라진다** — 끄는 것은 꼬리표
+                    「(내자)」 하나뿐이다(RequestedDueDateValue 머리말). */}
                 <RequestedDueDateValue
                   customerRequestedDueDate={row.customerRequestedDueDate}
                   domesticOrderDueDates={row.domesticOrderDueDates}
                   isDueDateNear={dueDateNearCaseIds?.has(row.id) ?? false}
+                  placeKey={badgePlaceKey}
                 />
               </dd>
             </div>

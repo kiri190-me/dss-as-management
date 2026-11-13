@@ -1,3 +1,5 @@
+import { BadgeVisibilityGate } from "@/components/providers/BadgeVisibilityProvider";
+import type { BadgePlaceKey } from "@/lib/domain/badge-visibility";
 import { FINAL_SHIPMENT_APPROVED_LABEL } from "@/lib/domain/final-shipment-approval-badge";
 
 /**
@@ -48,6 +50,15 @@ import { FINAL_SHIPMENT_APPROVED_LABEL } from "@/lib/domain/final-shipment-appro
  * 기타건 상세의 머리 카드(서버)가 그대로 그리고, 클라이언트 화면(내자 정리의 표 ·
  * 전체 A/S 현황)에서도 그대로 쓰인다 — MiscCaseStatusBadge 와 같은 자리의 같은
  * 판단이다.
+ *
+ * ── 🔴 그래서 배지 표시 설정은 **훅이 아니라 조각으로** 묻는다 (2026-11-13) ──
+ * 아래 `placeKey` 를 받으면 그 자리에서 꺼져 있는지 보고 스스로 안 그린다. 그
+ * 판정을 `useIsBadgeVisible` 로 하면 이 파일이 클라이언트 전용이 되고, 그러면
+ * **기타건 상세의 머리 카드(서버)가 이 배지를 그리는 순간 그 화면이 통째로 죽는다**
+ * — 타입 검사도 단위 시험도 못 잡고 `npm run build` 나 실제 화면에서만 드러나는
+ * 고장이다(app/server-client-boundary-source.test.ts 머리말의 실제 사고). 그래서
+ * 판정은 클라이언트 조각 하나(BadgeVisibilityGate)를 **그려서** 넘긴다 — 서버가
+ * 클라이언트 컴포넌트를 그리는 것은 되는 길이다.
  * ============================================================================
  */
 
@@ -73,6 +84,7 @@ export default function FinalShipmentApprovedBadge({
   approved,
   size = "default",
   title,
+  placeKey,
 }: {
   /**
    * 🔴 **판정은 여기서 하지 않는다** — 받는 것은 불리언 하나다
@@ -88,14 +100,30 @@ export default function FinalShipmentApprovedBadge({
    * 수 없다(내자 정리의 완료 단추가 긴 회차 이름을 title 에 두는 것과 같은 까닭).
    */
   title?: string;
+  /**
+   * 지금 서는 자리(2026-11-13). 주면 [시스템 설정] → [배지 표시]에서 그 자리의
+   * 체크를 푼 경우 아무것도 안 그린다. 🔴 **안 주면 예전 그대로** 그린다 — 설정
+   * 화면의 보기 배지와, 아직 자리를 안 붙인 호출부를 지키는 장치다.
+   *
+   * 🔵 2026-11-13 현재 자리를 넘기는 곳은 **수리건 쪽 둘**뿐이다(전체 A/S 현황의
+   * 표·카드, 수리건 상세 머리 카드). 내자 정리 · 기타건 쪽 세 자리는 조각 4의 일이라
+   * 아직 안 넘긴다 — 등록부에는 다섯 자리가 다 적혀 있으므로 설정 화면에는 체크상자가
+   * 다섯 개 서 있고, 그중 셋은 아직 눌러도 화면이 안 바뀐다.
+   */
+  placeKey?: BadgePlaceKey;
 }) {
   // 🔴 거짓이면 **아무것도 그리지 않는다** — "승인 전" 같은 말을 대신 적지 않는다.
   //    현황 목록의 배지들이 전부 그 규율이고(OverdueBadge 의 "정상" 하나만 예외다),
   //    안 붙는 것이 기본값인 배지에 빈자리 글자를 두면 모든 줄이 한 칸씩 길어진다.
   if (!approved) return null;
+  // 🔴 관문이 **승인 판정 뒤**다. 순서를 뒤집어도 보이는 것은 같지만, 승인이 아닌
+  //    건마다 클라이언트 조각이 하나씩 서게 된다 — 목록 한 쪽이 50줄이다.
+  //    보일 때는 아래 <span> 을 그대로 내놓는다(이 조각은 DOM 을 안 만든다).
   return (
-    <span className={`${SIZE_CLASS[size]} ${TONE_CLASS}`} title={title}>
-      {FINAL_SHIPMENT_APPROVED_LABEL}
-    </span>
+    <BadgeVisibilityGate badgeKey="finalShipmentApproved" placeKey={placeKey}>
+      <span className={`${SIZE_CLASS[size]} ${TONE_CLASS}`} title={title}>
+        {FINAL_SHIPMENT_APPROVED_LABEL}
+      </span>
+    </BadgeVisibilityGate>
   );
 }

@@ -1,8 +1,38 @@
 "use client";
 
+import { useIsBadgeVisible } from "@/components/providers/BadgeVisibilityProvider";
 import { useUiText } from "@/components/providers/UiTextProvider";
+import type { BadgePlaceKey } from "@/lib/domain/badge-visibility";
 import { NOTIFICATION_KIND_META } from "@/lib/domain/notification-settings";
 import type { Priority, RepairStatus } from "@/lib/domain/types";
+
+/**
+ * ============================================================================
+ * 🔴 `placeKey` — 「이 배지가 지금 **어느 자리**에 서는가」 (2026-11-13, 조각 3)
+ * ============================================================================
+ * 아래 배지들이 전부 선택적 인자 `placeKey` 를 하나씩 받는다. 받으면 저장된 배지
+ * 표시 설정을 보고 **스스로 안 그린다**(null). 안 받으면 지금까지와 **글자 하나
+ * 다르지 않게** 그린다.
+ *
+ * ── 🔴 판단이 배지 안에 있는 까닭 ───────────────────────────────────────
+ * 부르는 자리가 스물이 넘는다. 그 자리마다 `{보일까 && <배지/>}` 를 적으면 조건이
+ * 스물몇 벌이 되고, 새 화면에서 배지를 하나 더 그리는 날 그 줄을 빠뜨린 것이
+ * **아무 오류 없이** 지나간다 — 끈 사람에게는 「한 화면에서만 안 꺼지는」 모양으로
+ * 보인다. 조건은 배지 쪽에 한 벌만 둔다.
+ *
+ * ── 🔴 **안 주면 언제나 보인다** — 이것이 안전장치다 ─────────────────────
+ *  · 설정 화면의 보기 배지(settings/badge-samples.tsx)가 자리를 한 글자도 안 넘긴다.
+ *    넘기게 되면 「상태」를 끈 순간 설정 화면의 그 줄이 비고, 끈 사람은 무엇을 껐는지
+ *    볼 수도 다시 켤 수도 없다(badge-visibility-panel.test.tsx 의 ③ 묶음이 지킨다).
+ *  · 설정 대상이 아닌 화면 — 내 담당 제품 · 내 작업기록 · 휴지통 · 고객사 상세 ·
+ *    제품모델 상세 · 워크플로 관리 — 도 자리를 안 넘겨 예전 그대로다. 등록부
+ *    (domain/badge-visibility.ts)에 그 자리들이 아예 없다.
+ *
+ * ── 🔵 글자 이름이 `placeKey` 인 까닭 ───────────────────────────────────
+ * DB 의 `place_key` · 등록부의 `BadgePlaceKey` 와 같은 말이다. 자리마다 다른 이름을
+ * 지으면 설정 화면에서 끈 쌍과 화면이 묻는 쌍이 같은 것인지 눈으로 맞춰 봐야 한다.
+ * ============================================================================
+ */
 
 /**
  * 🔴 이 파일에 "use client" 를 붙인 이유 — 상태·우선순위 이름표를 저장된 문구로
@@ -18,8 +48,17 @@ import type { Priority, RepairStatus } from "@/lib/domain/types";
 const baseBadgeClass =
   "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap";
 
-export function StatusBadge({ status }: { status: RepairStatus }) {
+export function StatusBadge({
+  status,
+  placeKey,
+}: {
+  status: RepairStatus;
+  /** 지금 서는 자리. 안 주면 설정과 상관없이 늘 그린다(파일 머리말). */
+  placeKey?: BadgePlaceKey;
+}) {
   const uiText = useUiText();
+  const visible = useIsBadgeVisible("repairStatus", placeKey);
+  if (!visible) return null;
   const tone =
     status === "SHIPMENT_COMPLETED"
       ? "bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400"
@@ -27,8 +66,17 @@ export function StatusBadge({ status }: { status: RepairStatus }) {
   return <span className={`${baseBadgeClass} ${tone}`}>{uiText.repairStatus[status]}</span>;
 }
 
-export function PriorityBadge({ priority }: { priority: Priority }) {
+export function PriorityBadge({
+  priority,
+  placeKey,
+}: {
+  priority: Priority;
+  /** 지금 서는 자리. 안 주면 설정과 상관없이 늘 그린다(파일 머리말). */
+  placeKey?: BadgePlaceKey;
+}) {
   const uiText = useUiText();
+  const visible = useIsBadgeVisible("priority", placeKey);
+  if (!visible) return null;
   const tone =
     priority === "URGENT"
       ? "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400"
@@ -38,7 +86,16 @@ export function PriorityBadge({ priority }: { priority: Priority }) {
   return <span className={`${baseBadgeClass} ${tone}`}>{uiText.priority[priority]}</span>;
 }
 
-export function SourceBadge({ source }: { source: "MOCK" | "LOCAL_DEMO" | "DATABASE" }) {
+export function SourceBadge({
+  source,
+  placeKey,
+}: {
+  source: "MOCK" | "LOCAL_DEMO" | "DATABASE";
+  /** 지금 서는 자리. 안 주면 설정과 상관없이 늘 그린다(파일 머리말). */
+  placeKey?: BadgePlaceKey;
+}) {
+  const visible = useIsBadgeVisible("source", placeKey);
+  if (!visible) return null;
   if (source === "LOCAL_DEMO") {
     return (
       <span
@@ -84,7 +141,22 @@ export function SourceBadge({ source }: { source: "MOCK" | "LOCAL_DEMO" | "DATAB
  * (2026-11-07 — queries/repair-case-overdue-notifications.ts). 글자도 나눠 쓰지 않고
  * 종류 이름표가 이 배지와 같은 말을 적는다(NOTIFICATION_KIND_META).
  */
-export function OverdueBadge({ isOverdue }: { isOverdue: boolean }) {
+export function OverdueBadge({
+  isOverdue,
+  placeKey,
+}: {
+  isOverdue: boolean;
+  /**
+   * 지금 서는 자리. 안 주면 설정과 상관없이 늘 그린다(파일 머리말).
+   *
+   * 🔴 끄면 **「정상」까지 함께 사라진다.** 등록부의 이름이 「납기 지연 / 정상」인
+   * 까닭이 그것이다 — 이 조각이 내놓는 것은 그 한 칸의 두 얼굴이고, 한쪽만 끄면
+   * 「지연인 건만 아무 표시가 없는」 모양이 되어 거꾸로 읽힌다.
+   */
+  placeKey?: BadgePlaceKey;
+}) {
+  const visible = useIsBadgeVisible("overdue", placeKey);
+  if (!visible) return null;
   if (!isOverdue) {
     return <span className="text-xs text-zinc-500 dark:text-zinc-400">정상</span>;
   }
@@ -124,7 +196,16 @@ export function OverdueBadge({ isOverdue }: { isOverdue: boolean }) {
  * 글자는 종 알림의 종류 이름을 그대로 가져온다(NOTIFICATION_KIND_META) — 같은
  * 사실을 종에서는 「납기 임박」, 표에서는 다른 말로 부르지 않기 위해서다.
  */
-export function DueDateNearBadge({ isDueDateNear }: { isDueDateNear: boolean }) {
+export function DueDateNearBadge({
+  isDueDateNear,
+  placeKey,
+}: {
+  isDueDateNear: boolean;
+  /** 지금 서는 자리. 안 주면 설정과 상관없이 늘 그린다(파일 머리말). */
+  placeKey?: BadgePlaceKey;
+}) {
+  const visible = useIsBadgeVisible("dueDateNear", placeKey);
+  if (!visible) return null;
   if (!isDueDateNear) return null;
   return (
     <span className={`${baseBadgeClass} bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-400`}>
@@ -137,7 +218,16 @@ export function DueDateNearBadge({ isDueDateNear }: { isDueDateNear: boolean }) 
  * Stage E-1: 워크플로 보류(holdState)는 exceptionStatus·isOverdue와 완전히
  * 별개의 축이다 — 이 배지는 절대 다른 배지와 문자열/의미를 합치지 않는다.
  */
-export function HoldBadge({ isOnHold }: { isOnHold: boolean }) {
+export function HoldBadge({
+  isOnHold,
+  placeKey,
+}: {
+  isOnHold: boolean;
+  /** 지금 서는 자리. 안 주면 설정과 상관없이 늘 그린다(파일 머리말). */
+  placeKey?: BadgePlaceKey;
+}) {
+  const visible = useIsBadgeVisible("hold", placeKey);
+  if (!visible) return null;
   if (!isOnHold) return null;
   return (
     <span className={`${baseBadgeClass} bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-300`}>
@@ -147,7 +237,16 @@ export function HoldBadge({ isOnHold }: { isOnHold: boolean }) {
 }
 
 /** 해당 접수 건에 Stage E-1 로컬 워크플로 재정의가 적용되어 있음을 표시한다. */
-export function WorkflowOverrideBadge({ hasOverride }: { hasOverride: boolean }) {
+export function WorkflowOverrideBadge({
+  hasOverride,
+  placeKey,
+}: {
+  hasOverride: boolean;
+  /** 지금 서는 자리. 안 주면 설정과 상관없이 늘 그린다(파일 머리말). */
+  placeKey?: BadgePlaceKey;
+}) {
+  const visible = useIsBadgeVisible("workflowOverride", placeKey);
+  if (!visible) return null;
   if (!hasOverride) return null;
   return (
     <span className={`${baseBadgeClass} bg-purple-50 text-purple-700 dark:bg-purple-950 dark:text-purple-400`}>

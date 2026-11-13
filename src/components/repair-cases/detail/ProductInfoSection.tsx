@@ -135,7 +135,10 @@ function HistoryItem({
         <span className="flex flex-wrap items-center justify-between gap-2">
           <span className="flex items-center gap-2 font-medium text-zinc-900 dark:text-zinc-50">
             {item.intakeNumber}
-            <SourceBadge source={item.source} />
+            {/* 🔴 자리는 「수리건 상세 — 기본 정보 탭」이다(2026-11-13). 이 구역의
+                배지 둘이 **과거 A/S 이력 줄**의 것이라 줄마다 되풀이된다 — 머리
+                카드의 같은 배지와 따로 끌 수 있어야 하는 까닭이 그것이다. */}
+            <SourceBadge source={item.source} placeKey="repairCaseDetailBasicInfo" />
           </span>
           <span className="text-xs text-zinc-500 dark:text-zinc-400">접수일 {item.receivedAt}</span>
           {item.status === "SHIPMENT_COMPLETED" && item.actualShipmentDate ? (
@@ -143,7 +146,7 @@ function HistoryItem({
               출하 완료 {item.actualShipmentDate}
             </span>
           ) : (
-            <StatusBadge status={item.status} />
+            <StatusBadge status={item.status} placeKey="repairCaseDetailBasicInfo" />
           )}
         </span>
         <HistoryLine label="신고증상" value={item.reportedSymptom} />

@@ -190,22 +190,38 @@ export default function DetailHeader({
             {effective.intakeNumber}
           </h1>
           <ContactFolderOpenButton repairCaseId={effective.id} />
-          <StatusBadge status={effective.effectiveStatus} />
-          <PriorityBadge priority={effective.priority} />
-          <OverdueBadge isOverdue={effective.effectiveIsOverdue} />
-          <HoldBadge isOnHold={effective.holdState?.isOnHold ?? false} />
-          <WorkflowOverrideBadge hasOverride={effective.hasWorkflowOverride} />
-          <SourceBadge source={effective.source} />
+          {/* 🔴 배지 여덟이 전부 `placeKey="repairCaseDetailHeader"` 를 받는다
+              (2026-11-13). 이 카드는 **탭 줄보다 위**라 어느 탭에서도 같은 줄이
+              보이므로, 등록부에서도 자리 하나다(「수리건 상세 — 머리말」). 끄면
+              이 줄에서만 빠지고 목록 쪽은 제 자리의 설정을 따로 본다. */}
+          <StatusBadge status={effective.effectiveStatus} placeKey="repairCaseDetailHeader" />
+          <PriorityBadge priority={effective.priority} placeKey="repairCaseDetailHeader" />
+          <OverdueBadge
+            isOverdue={effective.effectiveIsOverdue}
+            placeKey="repairCaseDetailHeader"
+          />
+          <HoldBadge
+            isOnHold={effective.holdState?.isOnHold ?? false}
+            placeKey="repairCaseDetailHeader"
+          />
+          <WorkflowOverrideBadge
+            hasOverride={effective.hasWorkflowOverride}
+            placeKey="repairCaseDetailHeader"
+          />
+          <SourceBadge source={effective.source} placeKey="repairCaseDetailHeader" />
           {/* 🔴 「납기 임박」은 **같은 묶음 안**이다 — 배지만 따로 서던 줄을
               2026-10-06 에 없앴고(아래 ⑤ 주석·detail-header-placement.test.ts),
               일곱째도 그 규율을 따른다. 색은 「납기 지연」과 갈라 둔다(badges.tsx). */}
-          <DueDateNearBadge isDueDateNear={isDueDateNear} />
+          <DueDateNearBadge isDueDateNear={isDueDateNear} placeKey="repairCaseDetailHeader" />
           {/* 🔴 「[최종 출하 승인 완료]」도 **같은 묶음 안**이다 — 배지만 따로 서던
               줄을 2026-10-06 에 없앴고(위 ⑤ 주석), 여덟째도 그 규율을 따른다.
               🔵 **맨 뒤**에 둔다: 앞의 일곱이 「이 건이 지금 어떤 상태인가」를
               말하고, 이것은 그 위에 얹히는 **결재 사실** 하나다. 색도 그래서
               채운 진한 초록이다(그 파일 머리말 — 이웃과 겹치지 않는다). */}
-          <FinalShipmentApprovedBadge approved={isFinalShipmentApproved} />
+          <FinalShipmentApprovedBadge
+            approved={isFinalShipmentApproved}
+            placeKey="repairCaseDetailHeader"
+          />
         </div>
         {/* 🔴 값 알약 묶음 — 조각마다 연한 배경과 짧은 이름표를 쓴다. 가운뎃점
             구분자는 없다(알약이 가른다). 배경은 상태 배지가 쓰는 회색과 같은 단계고
