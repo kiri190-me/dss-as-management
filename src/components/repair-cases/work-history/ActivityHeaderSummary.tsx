@@ -12,12 +12,20 @@ import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-
  * 화면에는 배지가 한 개도 없다 — 탭 위의 머리 카드(DetailHeader)가 상태 배지를
  * 맡고 있다. HANDOFF 에도 「죽은 파일, 지울지 정하면 된다」로 적혀 있다.
  *
- * 🔴 그래도 아래 배지 넷에 자리(`repairCaseDetailActivity`)를 붙여 둔 까닭은,
- * 등록부(domain/badge-visibility.ts)가 그 네 쌍을 「수리건 상세 — 작업 이력 탭」
- * 으로 이미 적어 두었고 설정 화면에 체크상자가 서 있기 때문이다. 자리를 안 붙이면
- * **이 파일이 되살아나는 날 그 네 스위치만 조용히 안 듣는다.**
- * 🔴 **다만 지금은 그 네 스위치를 꺼도 화면에서 달라지는 것이 없다** — 파일을
- * 되살릴지 지울지는 사람이 정할 일이라 여기서 건드리지 않았다.
+ * ── 🔴 같은 날 늦게: 아래 배지 넷은 **자리를 하나도 안 받는다** ───────────
+ * 조각 3이 「수리건 상세 — 작업 이력 탭」 자리를 이 넷에 붙여 뒀었는데, 그날
+ * 등록부(domain/badge-visibility.ts)에서 **그 자리 자체를 걷어냈다.** 까닭은 위
+ * 문단 그대로다 — 그 자리를 그리는 살아 있는 화면이 없어서, 설정 화면에 선 체크상자
+ * 넷이 꺼도 아무 일이 안 일어나는 스위치였다. 끈 사람은 기능이 고장 난 것으로 읽는다.
+ *
+ * 🔵 자리를 안 주면 판정은 **언제나 「보임」**이다(허용되지 않는 쌍의 규칙). 그래서
+ * 이 파일이 되살아나도 배지는 예전처럼 그대로 그려진다 — 조용히 사라지는 쪽이 아니다.
+ *
+ * 🔴 **되살리면서 자리별로 끄고 싶어지거든 등록부에 자리를 먼저 적지 마라.** 순서는
+ * ① 이 화면을 실제로 그리는 탭을 만들고 → ② 자리 키를 받아 넘기고 → ③ 등록부에 자리를
+ * 더한다. 거꾸로 하면 이번에 되돌린 그 모양(스위치는 있는데 그릴 화면이 없는 상태)이
+ * 다시 생긴다. 🔵 지금 이 파일이 자리를 한 글자도 안 들고 있는지는
+ * badge-visibility-screens.test.tsx 의 「설정 대상이 **아닌** 화면들」 목록이 지킨다.
  */
 export default function ActivityHeaderSummary({ resolved }: { resolved: EffectiveRepairCase }) {
   return (
@@ -27,22 +35,16 @@ export default function ActivityHeaderSummary({ resolved }: { resolved: Effectiv
           {resolved.intakeNumber} · 작업 이력
         </h1>
         <div className="flex flex-wrap items-center gap-2">
-          <WorkflowOverrideBadge
-            hasOverride={resolved.hasWorkflowOverride}
-            placeKey="repairCaseDetailActivity"
-          />
-          <SourceBadge source={resolved.source} placeKey="repairCaseDetailActivity" />
+          <WorkflowOverrideBadge hasOverride={resolved.hasWorkflowOverride} />
+          <SourceBadge source={resolved.source} />
         </div>
       </div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
         <div>
           <dt className="text-xs text-zinc-500 dark:text-zinc-400">현재 수리 상태</dt>
           <dd className="mt-0.5 flex items-center gap-1">
-            <StatusBadge status={resolved.effectiveStatus} placeKey="repairCaseDetailActivity" />
-            <HoldBadge
-              isOnHold={resolved.holdState?.isOnHold ?? false}
-              placeKey="repairCaseDetailActivity"
-            />
+            <StatusBadge status={resolved.effectiveStatus} />
+            <HoldBadge isOnHold={resolved.holdState?.isOnHold ?? false} />
           </dd>
         </div>
         <div>

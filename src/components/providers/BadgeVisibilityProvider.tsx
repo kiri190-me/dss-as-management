@@ -21,7 +21,7 @@ import {
  * UiTextProvider 와 **일부러 다른 자리**다. 그쪽이 루트인 까닭은 `/login` ·
  * `/pending-approval` 이 (app) 밖인데 역할 이름 같은 문구를 쓰기 때문이고, 거기
  * 두지 않으면 그 화면들만 빈손이 된다. 🔴 **배지에는 그 사정이 없다**: 등록부의
- * 자리 일곱이 전부 (app) 안이고(domain/badge-visibility.ts 의 BADGE_PLACES —
+ * 자리 여섯이 전부 (app) 안이고(domain/badge-visibility.ts 의 BADGE_PLACES —
  * 전체 A/S 현황 · 수리건 상세 · 내자 정리 · 기타건), 로그인 전 두 화면은 배지를
  * 한 개도 그리지 않는다. 루트에 두면 **로그인 화면마다 쓰이지 않을 조회가 한 번씩**
  * 더 돈다 — 아직 아무도 아닌 사람에게 돌리는 질의다.

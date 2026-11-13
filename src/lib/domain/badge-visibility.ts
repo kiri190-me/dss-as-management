@@ -1,6 +1,6 @@
 /**
  * ============================================================================
- * 배지 표시 설정 — 등록부(배지 15 · 자리 7 · 쌍 33)와 판정
+ * 배지 표시 설정 — 등록부(배지 15 · 자리 6 · 쌍 29)와 판정
  * ============================================================================
  * 화면에 뜨는 작은 알약 모양 표식(배지)을 관리자가 **자리별로** 끌 수 있게 하는
  * 축의 맨 아래 조각이다. DB 도 server-only 도 여기 들어오지 않는다 —
@@ -9,9 +9,10 @@
  * 화면들(조각 3)이 **같은 규칙**을 쓰게 하려고 가운데에 두었고, 그래서 Node 단위
  * 시험으로 그대로 돈다.
  *
- * 🔴 **이 파일이 생겼다고 화면이 바뀌지는 않는다.** 배지를 그리는 쪽은 아직 이
- * 등록부를 거치지 않는다(조각 3의 일이다). 지금은 그릇과 규칙뿐이고, 표가
- * 비어 있는 동안에는 조각 3이 붙은 뒤에도 화면이 지금과 완전히 같다.
+ * 🔵 2026-11-13 현재 **수리건 쪽 자리 셋은 화면에 붙었다**(조각 3 — 전체 A/S 현황
+ * 목록·상세 머리말·기본 정보 탭). 내자 정리와 기타건 쪽 자리 셋은 등록부에만 있고
+ * 아직 그리는 쪽이 이 판정을 거치지 않는다(조각 4의 일) — 그 아홉 쌍은 꺼도 지금은
+ * 화면이 안 바뀐다.
  *
  * ── 왜 (배지, 자리) 쌍인가 ──────────────────────────────────────────────
  * 같은 배지가 자리마다 사정이 다르다. 「DB」 배지는 목록에서 줄마다 되풀이돼 눈에
@@ -19,11 +20,24 @@
  * 배지를 통째로 끄는 스위치만 두면 그 둘을 나눠 정할 수 없다.
  *
  * ── 🔴 쌍을 손으로 적는다 — 배지 × 자리를 곱하지 않는다 ─────────────────
- * 15 × 7 = 105 가 아니라 **33**이다. 「수리 건 요청일」은 내자 정리 목록에서만,
+ * 15 × 6 = 90 이 아니라 **29**다. 「수리 건 요청일」은 내자 정리 목록에서만,
  * 「(내자)」는 전체 A/S 현황에서만 뜬다. 곱으로 펼치면 설정 화면에 **어디에도 안
- * 뜨는 배지의 스위치**가 72개 생기고, 관리자가 그 중 하나를 꺼도 아무 일이
+ * 뜨는 배지의 스위치**가 61개 생기고, 관리자가 그 중 하나를 꺼도 아무 일이
  * 일어나지 않는다 — 끈 사람은 기능이 고장 난 것으로 읽는다. 그래서 배지마다
- * 「실제로 그려지는 자리」만 적고, 그 합이 33인지를 시험이 센다.
+ * 「실제로 그려지는 자리」만 적고, 그 합이 29인지를 시험이 센다.
+ *
+ * ── 🔴 2026-11-13: 「수리건 상세 — 작업 이력 탭」 자리를 걷어냈다 ─────────
+ * 같은 날 **자리 일곱 · 쌍 33**에서 지금의 수로 줄었다. 걷어낸 까닭은 위 문단과
+ * 똑같다 — **그 자리를 그리는 화면이 없었다.** 「작업 이력」 탭이 실제로 그리는
+ * 것은 DatabaseWorkHistoryScreen 하나이고 거기엔 배지가 한 개도 없다(탭 줄 **위**의
+ * 머리 카드가 상태 배지를 맡고 있고, 그 자리는 repairCaseDetailHeader 로 따로 잡혀
+ * 있다). 설정 화면에는 체크상자가 넷 서 있었는데 꺼도 화면이 하나도 안 바뀌었다.
+ *
+ * 🔴 **나중에 「작업 이력 탭에도 배지를 달자」는 생각이 들거든, 자리를 여기 먼저
+ * 적지 마라 — 그릴 화면을 먼저 만들어라.** 등록부에 자리를 더하는 순간 설정 화면에
+ * 스위치가 생기고, 그리는 쪽이 없으면 그 스위치는 거짓말이 된다. 순서는 ① 배지를
+ * 실제로 그리는 화면 → ② 그 화면이 자리 키를 받아 판정을 타게 → ③ 여기에 자리 등록
+ * 이다(그 역순이 이번에 되돌린 바로 그 모양이다).
  *
  * ── 🔴 모르는 키는 거절이 아니라 「보임」이다 ────────────────────────────
  * 판정(isBadgeVisible)은 어떤 문자열이 들어와도 던지지 않는다. 배지를 하나
@@ -57,7 +71,6 @@ export type BadgePlaceKey =
   | "repairCaseList"
   | "repairCaseDetailHeader"
   | "repairCaseDetailBasicInfo"
-  | "repairCaseDetailActivity"
   | "domesticOrderList"
   | "miscCaseList"
   | "miscCaseDetailHeader";
@@ -87,13 +100,16 @@ export type BadgeDefinition = {
 };
 
 /**
- * 자리 일곱. 차례가 곧 설정 화면의 차례다(화면을 보는 사람이 메뉴를 훑는 순서).
+ * 자리 여섯. 차례가 곧 설정 화면의 차례다(화면을 보는 사람이 메뉴를 훑는 순서).
+ *
+ * 🔴 **여기 적은 자리는 전부 「그 자리에 배지를 그리는 화면」이 있어야 한다.** 없는
+ * 자리를 적으면 설정 화면에 꺼도 아무 일이 안 일어나는 스위치가 선다 — 2026-11-13 에
+ * 「수리건 상세 — 작업 이력 탭」을 그 까닭으로 걷어냈다(머리말 참조).
  */
 export const BADGE_PLACES: readonly BadgePlace[] = [
   { key: "repairCaseList", label: "전체 A/S 현황 — 목록" },
   { key: "repairCaseDetailHeader", label: "수리건 상세 — 머리말" },
   { key: "repairCaseDetailBasicInfo", label: "수리건 상세 — 기본 정보 탭" },
-  { key: "repairCaseDetailActivity", label: "수리건 상세 — 작업 이력 탭" },
   { key: "domesticOrderList", label: "내자 정리 — 목록" },
   { key: "miscCaseList", label: "기타건 현황 — 목록" },
   { key: "miscCaseDetailHeader", label: "기타건 상세 — 머리말" },
@@ -113,12 +129,7 @@ export const BADGES: readonly BadgeDefinition[] = [
     label: "상태",
     description:
       "그 건이 지금 어느 단계인지. 접수·수리 중·출하 완료 등 12가지 중 하나가 항상 뜹니다",
-    places: [
-      "repairCaseList",
-      "repairCaseDetailHeader",
-      "repairCaseDetailBasicInfo",
-      "repairCaseDetailActivity",
-    ],
+    places: ["repairCaseList", "repairCaseDetailHeader", "repairCaseDetailBasicInfo"],
   },
   {
     key: "priority",
@@ -131,12 +142,7 @@ export const BADGES: readonly BadgeDefinition[] = [
     label: "DB",
     description:
       "이 자료가 실제 데이터베이스에서 온 것이라는 표시. 개발용 가짜 자료와 구분하려고 만들었습니다",
-    places: [
-      "repairCaseList",
-      "repairCaseDetailHeader",
-      "repairCaseDetailBasicInfo",
-      "repairCaseDetailActivity",
-    ],
+    places: ["repairCaseList", "repairCaseDetailHeader", "repairCaseDetailBasicInfo"],
   },
   {
     key: "overdue",
@@ -154,13 +160,13 @@ export const BADGES: readonly BadgeDefinition[] = [
     key: "hold",
     label: "보류 중",
     description: "그 건이 보류 상태일 때",
-    places: ["repairCaseList", "repairCaseDetailHeader", "repairCaseDetailActivity"],
+    places: ["repairCaseList", "repairCaseDetailHeader"],
   },
   {
     key: "workflowOverride",
     label: "로컬 워크플로 재정의",
     description: "그 건만 기본 작업 흐름과 다르게 바꿔 놓았을 때",
-    places: ["repairCaseList", "repairCaseDetailHeader", "repairCaseDetailActivity"],
+    places: ["repairCaseList", "repairCaseDetailHeader"],
   },
   {
     key: "finalShipmentApproved",
@@ -229,7 +235,7 @@ export const BADGE_PLACE_KEYS: readonly BadgePlaceKey[] = BADGE_PLACES.map((plac
 export type BadgePlacement = { badgeKey: BadgeKey; placeKey: BadgePlaceKey };
 
 /**
- * 설정 대상이 되는 쌍 전부 — **33개**.
+ * 설정 대상이 되는 쌍 전부 — **29개**.
  *
  * 손으로 다시 적지 않고 등록부에서 펼친다. 두 벌로 적으면 배지의 places 를
  * 고치는 날 한쪽만 바뀌고, 둘 다 타입이 같아 tsc 가 침묵한다.

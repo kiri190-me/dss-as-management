@@ -36,7 +36,7 @@ import type { BadgeKey } from "@/lib/domain/badge-visibility";
  * 만든 막다른 길이 된다.
  *
  * 🔴 **그래서 이 파일은 「자리」를 한 글자도 넘기지 않는다.** 아래 어느 줄에도
- * placeKey·settings·isBadgeVisible 이 없다. 등록부의 자리 일곱 가운데 **설정 화면인
+ * placeKey·settings·isBadgeVisible 이 없다. 등록부의 자리 여섯 가운데 **설정 화면인
  * 것은 하나도 없고**(domain/badge-visibility.ts 의 BADGE_PLACES), 허용되지 않는 쌍은
  * 판정이 언제나 "보임"으로 답한다 — 자리를 안 주는 것이 곧 "판정 밖"이다.
  *

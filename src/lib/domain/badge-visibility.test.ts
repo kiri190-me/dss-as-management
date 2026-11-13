@@ -23,12 +23,17 @@ import {
  * 있는 것이 하나도 없고, 지키는 일을 전부 이 파일이 한다.
  *
  * 🔴 가장 세게 지키는 둘:
- *  ① **쌍이 33개다** — 15 × 7 = 105 로 펼치면 설정 화면에 「어디에도 안 뜨는
- *     배지」의 스위치가 72개 생긴다. 꺼도 아무 일이 안 일어나므로, 끈 사람은
+ *  ① **쌍이 29개다** — 15 × 6 = 90 으로 펼치면 설정 화면에 「어디에도 안 뜨는
+ *     배지」의 스위치가 61개 생긴다. 꺼도 아무 일이 안 일어나므로, 끈 사람은
  *     기능이 고장 난 것으로 읽는다.
  *  ② **같은 배지라도 자리가 다르면 따로 판정된다** — 이 기능의 존재 이유다.
  *     한 자리를 끄는 설정이 다른 자리까지 끄면 (배지, 자리) 표를 만든 값이 통째로
  *     사라지는데, 그 어긋남은 끈 자리만 보는 사람 눈에는 「잘 된다」로 보인다.
+ *
+ * 🔵 2026-11-13 늦게 **자리 일곱 · 쌍 33**에서 지금의 수로 줄었다 — 「수리건 상세 —
+ *    작업 이력 탭」을 걷어냈다. 그 자리를 그리는 살아 있는 화면이 없어, ① 이 말하는
+ *    「꺼도 아무 일이 안 일어나는 스위치」가 넷 서 있었다. 사라진 배지는 없다(그
+ *    넷은 다른 자리에도 뜬다). 아래 「걷어낸 자리는 다시 허용되지 않는다」가 못이다.
  *
  * 🔵 읽는 함수(db/queries/badge-visibility-settings.ts)의 통합 시험은 표가 아직
  *    적용 전이라 여기 없다. 조각 2에서 db 목록에 붙인다.
@@ -36,11 +41,11 @@ import {
  */
 
 describe("🔵 못 — 등록부가 실제로 차 있는가", () => {
-  test("배지 15종 · 자리 7곳", () => {
+  test("배지 15종 · 자리 6곳", () => {
     // 아래 시험들이 전부 등록부를 돌며 센다. 등록부가 비면 그 반복이 한 번도
     // 안 돌고 **전부 공짜로 통과한다** — 그 길을 여기서 먼저 막는다.
     assert.equal(BADGES.length, 15, "배지 수가 달라졌다 — 늘렸다면 뜨는 자리와 설명도 정했는가");
-    assert.equal(BADGE_PLACES.length, 7, "자리 수가 달라졌다");
+    assert.equal(BADGE_PLACES.length, 6, "자리 수가 달라졌다");
   });
 
   test("키 목록이 등록부의 차례를 그대로 따른다", () => {
@@ -51,16 +56,16 @@ describe("🔵 못 — 등록부가 실제로 차 있는가", () => {
   });
 });
 
-describe("🔴 허용 쌍 — 33개", () => {
-  test("합이 33이다", () => {
+describe("🔴 허용 쌍 — 29개", () => {
+  test("합이 29다", () => {
     assert.equal(
       BADGE_PLACEMENTS.length,
-      33,
+      29,
       "설정할 수 있는 쌍의 수가 달라졌다 — 배지를 한 자리 더 그리기로 했다면 여기도 함께 고친다"
     );
   });
 
-  test("🔴 곱(15 × 7 = 105)으로 펼치지 않았다", () => {
+  test("🔴 곱(15 × 6 = 90)으로 펼치지 않았다", () => {
     assert.notEqual(
       BADGE_PLACEMENTS.length,
       BADGES.length * BADGE_PLACES.length,
@@ -120,6 +125,24 @@ describe("🔴 허용 쌍 — 33개", () => {
     );
   });
 
+  test("🔴 걷어낸 자리(「수리건 상세 — 작업 이력 탭」)는 다시 허용되지 않는다", () => {
+    // 2026-11-13 에 **그리는 화면이 없어서** 걷어낸 자리다. 등록부에 다시 적는 것은
+    // 「꺼도 아무 일이 안 일어나는 스위치」를 되살리는 일이라, 그 전에 그릴 화면부터
+    // 만들어야 한다(domain/badge-visibility.ts 머리말의 ①②③ 순서).
+    assert.equal(findBadgePlace("repairCaseDetailActivity"), undefined, "자리가 되살아났다");
+    for (const badgeKey of ["repairStatus", "source", "hold", "workflowOverride"]) {
+      assert.equal(
+        isBadgePlacementAllowed(badgeKey, "repairCaseDetailActivity"),
+        false,
+        `${badgeKey}: 걷어낸 자리의 쌍이 다시 설정 대상이 됐다`
+      );
+    }
+    // 🔵 못 — 위 넷이 **지금도 등록부에 있는 배지**인가(없는 배지로 재면 공짜다).
+    for (const badgeKey of ["repairStatus", "source", "hold", "workflowOverride"]) {
+      assert.ok(findBadge(badgeKey), `${badgeKey}: 배지 자체가 사라졌다 — 이 시험은 자리만 뺐다`);
+    }
+  });
+
   test("모르는 키는 던지지 않고 false·undefined 로 답한다", () => {
     assert.equal(isBadgePlacementAllowed("nopeBadge", "repairCaseList"), false);
     assert.equal(isBadgePlacementAllowed("repairStatus", "nopePlace"), false);
@@ -143,13 +166,13 @@ describe("🔴 글 — 이름과 설명이 비어 있지 않다", () => {
     assert.equal(counted, 15);
   });
 
-  test("자리 7곳 전부에 한글 이름이 있다", () => {
+  test("자리 6곳 전부에 한글 이름이 있다", () => {
     let counted = 0;
     for (const place of BADGE_PLACES) {
       assert.ok(place.label.trim().length > 0, `${place.key} 에 한글 이름이 없다`);
       counted += 1;
     }
-    assert.equal(counted, 7);
+    assert.equal(counted, 6);
   });
 
   test("배지 키와 자리 키가 각각 고유하다", () => {
@@ -169,8 +192,8 @@ describe("🔴 판정 — isBadgeVisible", () => {
       );
       counted += 1;
     }
-    // 🔵 못 — 33쌍을 실제로 다 돌았는가(목록이 비면 공짜로 통과한다).
-    assert.equal(counted, 33);
+    // 🔵 못 — 29쌍을 실제로 다 돌았는가(목록이 비면 공짜로 통과한다).
+    assert.equal(counted, 29);
   });
 
   test("그 쌍의 줄이 없으면 보인다 — 남의 줄만 있어도 마찬가지", () => {
@@ -210,9 +233,8 @@ describe("🔴 판정 — isBadgeVisible", () => {
       "🔴 한 자리를 껐는데 다른 자리까지 꺼졌다 — (배지, 자리) 표를 만든 값이 사라진다"
     );
     assert.equal(isBadgeVisible(settings, "source", "repairCaseDetailBasicInfo"), true);
-    assert.equal(isBadgeVisible(settings, "source", "repairCaseDetailActivity"), true);
-    // 🔵 못 — 이 배지가 정말 네 자리에 뜨는가(한 자리짜리 배지로 재면 아무것도 안 잰다).
-    assert.equal(findBadge("source")?.places.length, 4);
+    // 🔵 못 — 이 배지가 정말 세 자리에 뜨는가(한 자리짜리 배지로 재면 아무것도 안 잰다).
+    assert.equal(findBadge("source")?.places.length, 3);
   });
 
   test("🔴 허용되지 않는 쌍은 **꺼진 줄이 있어도** 보인다", () => {

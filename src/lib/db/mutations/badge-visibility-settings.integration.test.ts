@@ -29,9 +29,9 @@ import { BADGES, BADGE_PLACEMENTS } from "@/lib/domain/badge-visibility";
  * 덮어쓰거나 지우면 안 된다 — before() 가 비어 있는지 먼저 보고 아니면 멈춘다.
  *
  * 여기서 지키려는 것:
- *  1. 빈 표 = 전부 보임(편집 화면 자료가 배지 15 · 체크상자 33).
+ *  1. 빈 표 = 전부 보임(편집 화면 자료가 배지 15 · 체크상자 29).
  *  2. 🔴 **끈 것만 행을 남긴다** — 체크를 풀면 false 행, 다시 켜면 **행이 지워진다.**
- *  3. 🔴 33쌍을 전부 켠 입력은 **빈 표**를 만든다(그 불변식이 이 기능의 바닥이다).
+ *  3. 🔴 29쌍을 전부 켠 입력은 **빈 표**를 만든다(그 불변식이 이 기능의 바닥이다).
  *  4. 🔴 등록부에 없는 쌍은 거절되고, 같은 요청의 **멀쩡한 쌍도 안 들어간다.**
  *  5. 🔴 「바꿈」이 꺼진 역할은 저장이 거절된다 — 표본 계정은 개발자 표시가 꺼져 있다
  *     (켜져 있으면 최고관리자 권한이 더해져 「닫으면 막히는가」가 영영 통과한다).
@@ -178,13 +178,13 @@ describe("① 빈 표 = 전부 보임", () => {
     assert.deepEqual(await loadStoredBadgeVisibilitySettings(), []);
   });
 
-  test("2. 🔴 편집 화면 자료가 배지 15 · 체크상자 33 이고 전부 보임이다", async () => {
+  test("2. 🔴 편집 화면 자료가 배지 15 · 체크상자 29 이고 전부 보임이다", async () => {
     const view = await buildBadgeVisibilityView();
     assert.equal(view.length, 15);
     assert.equal(view.length, BADGES.length);
     assert.equal(
       view.reduce((sum, badge) => sum + badge.places.length, 0),
-      33
+      29
     );
     assert.equal(
       view.reduce((sum, badge) => sum + badge.places.length, 0),
@@ -231,7 +231,7 @@ describe("② 끈 것만 행을 남긴다", () => {
     assert.equal(rows[0].updatedBy, adminId);
   });
 
-  test("5. 🔴 그 자리**만** 꺼진다 — 같은 배지의 다른 세 자리는 그대로다", async () => {
+  test("5. 🔴 그 자리**만** 꺼진다 — 같은 배지의 다른 두 자리는 그대로다", async () => {
     await saveBadgeVisibilitySettings({
       placements: [{ badgeKey: "repairStatus", placeKey: "repairCaseList", isVisible: false }],
       actorUserId: adminId,
@@ -239,7 +239,7 @@ describe("② 끈 것만 행을 남긴다", () => {
     const view = await buildBadgeVisibilityView();
     const badge = view.find((one) => one.badgeKey === "repairStatus");
     assert.ok(badge);
-    assert.equal(badge.places.length, 4, "표본이 비었다 — 자리가 하나면 이 시험이 아무것도 안 잰다");
+    assert.equal(badge.places.length, 3, "표본이 비었다 — 자리가 하나면 이 시험이 아무것도 안 잰다");
     assert.equal(badge.places.find((place) => place.placeKey === "repairCaseList")?.visible, false);
     assert.equal(
       badge.places.filter((place) => place.placeKey !== "repairCaseList").every((p) => p.visible),
@@ -294,14 +294,14 @@ describe("② 끈 것만 행을 남긴다", () => {
     assert.deepEqual(await storedRows(), []);
   });
 
-  test("9. 🔴 33쌍을 전부 끈 뒤 전부 켜면 **빈 표**로 돌아온다", async () => {
+  test("9. 🔴 29쌍을 전부 끈 뒤 전부 켜면 **빈 표**로 돌아온다", async () => {
     const hideAll = await saveBadgeVisibilitySettings({
       placements: BADGE_PLACEMENTS.map((placement) => ({ ...placement, isVisible: false })),
       actorUserId: adminId,
     });
-    assert.deepEqual(hideAll, { ok: true, changedCount: 33 });
+    assert.deepEqual(hideAll, { ok: true, changedCount: 29 });
     const hidden = await storedRows();
-    assert.equal(hidden.length, 33);
+    assert.equal(hidden.length, 29);
     assert.equal(
       hidden.every((row) => row.isVisible === false),
       true
@@ -316,7 +316,7 @@ describe("② 끈 것만 행을 남긴다", () => {
       placements: BADGE_PLACEMENTS.map((placement) => ({ ...placement, isVisible: true })),
       actorUserId: adminId,
     });
-    assert.deepEqual(showAll, { ok: true, changedCount: 33 });
+    assert.deepEqual(showAll, { ok: true, changedCount: 29 });
     assert.deepEqual(
       await storedRows(),
       [],
@@ -361,7 +361,7 @@ describe("③ 거절 — 등록부에 없는 쌍 · 중복", () => {
   });
 
   test("13. 🔴 한 요청에 섞여 있으면 **멀쩡한 쌍도 안 들어간다**", async () => {
-    // 33개 중 몇 개만 반영된 상태를 만들지 않는다는 약속이 재어지는 자리다.
+    // 29개 중 몇 개만 반영된 상태를 만들지 않는다는 약속이 재어지는 자리다.
     const result = await saveBadgeVisibilitySettings({
       placements: [
         { badgeKey: "repairStatus", placeKey: "repairCaseList", isVisible: false },

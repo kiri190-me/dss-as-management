@@ -8,7 +8,6 @@ import type { ReactElement } from "react";
 
 import RepairCaseTable from "./RepairCaseTable";
 import RepairCaseCardList from "./RepairCaseCardList";
-import ActivityHeaderSummary from "./work-history/ActivityHeaderSummary";
 import {
   DueDateNearBadge,
   HoldBadge,
@@ -22,6 +21,7 @@ import FinalShipmentApprovedBadge from "@/components/approvals/FinalShipmentAppr
 import { BadgeVisibilityProvider } from "@/components/providers/BadgeVisibilityProvider";
 import {
   BADGE_PLACEMENTS,
+  BADGE_PLACES,
   type BadgeKey,
   type BadgePlaceKey,
   type BadgePlacement,
@@ -36,7 +36,7 @@ import type { SortState } from "@/lib/domain/repair-case-filters";
 
 /**
  * ============================================================================
- * 배지 표시 설정이 **수리건 쪽 화면 넷**에서 실제로 먹는다 (2026-11-13, 조각 3)
+ * 배지 표시 설정이 **수리건 쪽 화면 셋**에서 실제로 먹는다 (2026-11-13, 조각 3)
  * ============================================================================
  * 조각 1이 등록부와 판정을, 조각 2가 설정 화면과 저장을 만들었다. 거기까지는 체크를
  * 풀어도 **화면이 한 글자도 안 바뀌었다.** 이 조각이 그 설정을 화면에 잇는다.
@@ -55,10 +55,15 @@ import type { SortState } from "@/lib/domain/repair-case-filters";
  *    차례에 손대면 안 된다.
  *  ⑦ 🔵 Provider 가 없어도 **전부 보임**으로 떨어진다(마이그레이션 전 DB·시험 환경).
  *
- * 🔵 함께 세는 것: 수리건 쪽 **네 자리의 쌍이 24개**이고 그 24개가 전부 화면에
- * 붙었는가. 넷 중 둘(상세 머리말·기본 정보 탭)은 이 환경에서 그려 볼 수 없어
+ * 🔵 함께 세는 것: 수리건 쪽 **세 자리의 쌍이 20개**이고 그 20개가 전부 화면에
+ * 붙었는가. 셋 중 둘(상세 머리말·기본 정보 탭)은 이 환경에서 그려 볼 수 없어
  * (usePathname·server-only 사슬) 원본 글자로 읽는다 — 이웃
  * detail-header-placement.test.ts 와 같은 방법·같은 까닭이다.
+ *
+ * 🔵 **2026-11-13 늦게 「수리건 상세 — 작업 이력 탭」 묶음을 통째로 지웠다.** 이 파일에
+ * ActivityHeaderSummary 의 네 쌍을 재는 묶음이 있었는데, 같은 날 등록부에서 그 자리를
+ * 걷어내 **잴 것이 없어졌다**(그 자리를 그리는 살아 있는 화면이 없었다). 그 조각이
+ * 자리를 다시 들고 있지 않은지는 아래 「설정 대상이 **아닌** 화면들」이 이어서 지킨다.
  *
  * 🔴 값은 전부 지어낸 것이다. 실제 고객사 이름·L/N·S/N 은 한 글자도 쓰지 않는다.
  * ============================================================================
@@ -388,64 +393,6 @@ describe("⑥ 🔴 배지를 다 꺼도 **그 건이 목록에서 사라지지 �
   });
 });
 
-/* ───────────────────────────── ⑦ 작업 이력 탭의 머리말 */
-
-describe("⑦ 작업 이력 탭 머리말(ActivityHeaderSummary) — 네 쌍", () => {
-  /**
-   * 🔴 **이 조각은 2026-11-13 현재 아무 데서도 안 쓰인다**(그 파일 머리말 · HANDOFF).
-   * 그래도 자리를 붙이고 여기서 재는 까닭은, 등록부가 「수리건 상세 — 작업 이력 탭」
-   * 의 네 쌍을 이미 적어 두어 설정 화면에 체크상자가 서 있기 때문이다 — 파일이
-   * 되살아나는 날 그 넷만 조용히 안 듣는 일을 막는다.
-   */
-  const ACTIVITY_BADGES: readonly { badgeKey: BadgeKey; label: string }[] = [
-    { badgeKey: "repairStatus", label: DEFAULT_UI_TEXT.repairStatus.IN_REPAIR },
-    { badgeKey: "source", label: "DB" },
-    { badgeKey: "hold", label: "보류 중" },
-    { badgeKey: "workflowOverride", label: "로컬 워크플로 재정의" },
-  ];
-
-  test("🔵 등록부의 넷과 맞는다", () => {
-    const registered = BADGE_PLACEMENTS.filter(
-      (one) => one.placeKey === "repairCaseDetailActivity"
-    )
-      .map((one) => one.badgeKey)
-      .sort();
-    assert.deepEqual(ACTIVITY_BADGES.map((one) => one.badgeKey).sort(), registered);
-    assert.equal(registered.length, 4);
-  });
-
-  test("표본이 비어 있지 않다 — 넷이 다 서 있다", () => {
-    const html = renderWith([], <ActivityHeaderSummary resolved={fakeRow()} />);
-    for (const badge of ACTIVITY_BADGES) {
-      assert.ok(hasBadge(html, badge.label), `${badge.badgeKey}: 끄지도 않았는데 안 보인다`);
-    }
-  });
-
-  for (const badge of ACTIVITY_BADGES) {
-    test(`🔴 ${badge.badgeKey} 를 끄면 사라지고, 옆은 그대로다`, () => {
-      const html = renderWith(
-        [{ badgeKey: badge.badgeKey, placeKey: "repairCaseDetailActivity" }],
-        <ActivityHeaderSummary resolved={fakeRow()} />
-      );
-      assert.equal(hasBadge(html, badge.label), false, `껐는데 그대로 있다: ${badge.badgeKey}`);
-      for (const other of ACTIVITY_BADGES) {
-        if (other.badgeKey === badge.badgeKey) continue;
-        assert.ok(hasBadge(html, other.label), `${other.badgeKey} 까지 사라졌다`);
-      }
-      // 머리말의 글자(인수번호 · 담당 엔지니어 줄)는 배지와 상관없이 남는다.
-      assert.ok(html.includes("D940202"), "배지를 껐더니 인수번호가 사라졌다");
-    });
-
-    test(`🔵 ${badge.badgeKey}: 목록 자리를 끈 것은 영향이 없다`, () => {
-      const html = renderWith(
-        [{ badgeKey: badge.badgeKey, placeKey: "repairCaseList" }],
-        <ActivityHeaderSummary resolved={fakeRow()} />
-      );
-      assert.ok(hasBadge(html, badge.label), `${badge.badgeKey}: 남의 자리 설정에 꺼졌다`);
-    });
-  }
-});
-
 /* ───────────────────────────── 배지 조각 자체 */
 
 describe("배지 조각 자체 — 자리를 안 주면 **언제나** 그린다", () => {
@@ -487,8 +434,8 @@ describe("배지 조각 자체 — 자리를 안 주면 **언제나** 그린다"
     },
   ];
 
-  test("🔴 33쌍을 전부 꺼도 **자리 없는** 배지 여덟이 그대로 그려진다", () => {
-    assert.equal(EVERY_PLACEMENT_HIDDEN.length, 33, "등록부의 쌍이 33이 아니다");
+  test("🔴 29쌍을 전부 꺼도 **자리 없는** 배지 여덟이 그대로 그려진다", () => {
+    assert.equal(EVERY_PLACEMENT_HIDDEN.length, 29, "등록부의 쌍이 29가 아니다");
     for (const sample of SAMPLES) {
       const html = renderToStaticMarkup(
         <BadgeVisibilityProvider value={EVERY_PLACEMENT_HIDDEN}>
@@ -547,29 +494,34 @@ describe("배지 조각 자체 — 자리를 안 주면 **언제나** 그린다"
   });
 });
 
-/* ───────────────────────────── 네 자리 24쌍이 전부 붙었다 */
+/* ───────────────────────────── 세 자리 20쌍이 전부 붙었다 */
 
-describe("🔴 수리건 쪽 네 자리 — 쌍 **24개**가 전부 화면에 붙었다", () => {
+describe("🔴 수리건 쪽 세 자리 — 쌍 **20개**가 전부 화면에 붙었다", () => {
   const REPAIR_CASE_PLACES: readonly BadgePlaceKey[] = [
     "repairCaseList",
     "repairCaseDetailHeader",
     "repairCaseDetailBasicInfo",
-    "repairCaseDetailActivity",
   ];
 
-  test("🔴 등록부에서 세어 24다 — 이 수가 달라지면 아래 셋을 다시 볼 것", () => {
+  test("🔴 등록부에서 세어 20이다 — 이 수가 달라지면 아래 셋을 다시 볼 것", () => {
     const pairs = BADGE_PLACEMENTS.filter((one) =>
       (REPAIR_CASE_PLACES as readonly string[]).includes(one.placeKey)
     );
-    assert.equal(pairs.length, 24);
+    assert.equal(pairs.length, 20);
     // 나머지 아홉은 내자 정리·기타건 쪽이다 — 조각 4의 일이라 아직 안 붙였다.
     assert.equal(BADGE_PLACEMENTS.length - pairs.length, 9);
+    // 🔵 못 — 수리건 쪽 자리가 **등록부에도 꼭 셋**인가. 여기 목록만 줄이고 등록부에
+    //    자리가 남아 있으면 「안 붙은 자리」가 생기는데 위 두 셈은 그대로 맞는다.
+    assert.equal(
+      BADGE_PLACES.filter((place) => place.key.startsWith("repairCase")).length,
+      REPAIR_CASE_PLACES.length
+    );
   });
 
   /**
    * 🔴 상세 머리말과 기본 정보 탭은 이 환경에서 **그려 볼 수 없다** — DetailHeader 는
    * usePathname 을, 두 구역의 부모는 server-only 사슬을 물고 있다. 그래서 글자로
-   * 읽는다(detail-header-placement.test.ts 와 같은 방법). 목록과 작업 이력 탭은 위에서
+   * 읽는다(detail-header-placement.test.ts 와 같은 방법). 목록(표·카드)은 위에서
    * 진짜로 그려서 쟀다.
    */
   const headerSource = flat(read("src/components/repair-cases/detail/DetailHeader.tsx"));
@@ -635,6 +587,14 @@ describe("🔴 수리건 쪽 네 자리 — 쌍 **24개**가 전부 화면에 �
     // 자리를 적어 두는 것 자체가 「여기도 끌 수 있다」는 거짓말이 된다.
     // 🔵 짝으로 적은 글자는 **그 화면이 배지를 실제로 세운다는 증거**다. 없으면
     //    표본이 빈 것이고, 그 줄은 「자리를 안 넘긴다」를 공짜로 통과한다.
+    //
+    // 🔴 맨 아래 ActivityHeaderSummary 는 **아무도 안 부르는 죽은 파일**이라 다른 여덟과
+    //    사정이 다르다. 그래도 여기 적는 까닭: 2026-11-13 에 등록부에서 「수리건 상세 —
+    //    작업 이력 탭」 자리를 걷어냈는데(그 자리를 그리는 살아 있는 화면이 없었다),
+    //    그 파일은 바로 전까지 그 자리를 넷에 들고 있었다. 자리를 되돌려 적어 넣으면
+    //    허용되지 않는 쌍이라 판정은 언제나 「보임」 — 오류도 안 나고 화면도 안 바뀌어
+    //    **조용히 아무것도 안 하는 글자**가 된다. 이 줄이 그때 멈춘다.
+    //    🔵 이 파일을 지우기로 하면 여기 한 줄도 함께 지운다(읽기가 먼저 터진다).
     const SCREENS_OUTSIDE: readonly [string, string][] = [
       ["src/components/customers/CustomerRepairCaseHistory.tsx", "<RepairCaseTable"],
       ["src/components/product-models/ProductModelRepairCaseHistory.tsx", "<RepairCaseCardList"],
@@ -644,7 +604,9 @@ describe("🔴 수리건 쪽 네 자리 — 쌍 **24개**가 전부 화면에 �
       ["src/components/repair-cases/trash/RepairCaseTrashTable.tsx", "<StatusBadge"],
       ["src/components/repair-cases/trash/RepairCaseTrashCardList.tsx", "<StatusBadge"],
       ["src/components/repair-cases/workflow/WorkflowStageStatus.tsx", "<HoldBadge"],
+      ["src/components/repair-cases/work-history/ActivityHeaderSummary.tsx", "<StatusBadge"],
     ];
+    assert.equal(SCREENS_OUTSIDE.length, 9, "표본 수가 달라졌다 — 목록을 줄이지 않았는가");
     for (const [relativePath, marker] of SCREENS_OUTSIDE) {
       const source = read(relativePath);
       assert.ok(
