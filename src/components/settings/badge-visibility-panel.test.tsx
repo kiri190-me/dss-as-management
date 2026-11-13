@@ -25,7 +25,9 @@ import {
   OrderIssuedDateMissingBadge,
 } from "@/components/domestic-orders/badges";
 import MiscCaseStatusBadge from "@/components/misc-cases/MiscCaseStatusBadge";
+import BorrowedSourceNote from "@/components/repair-cases/BorrowedSourceNote";
 import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-date-label";
+import { DUE_DATE_FROM_DOMESTIC_ORDER_LABEL } from "@/lib/domain/requested-due-date-link";
 import {
   BADGES,
   BADGE_PLACEMENTS,
@@ -115,6 +117,13 @@ const SAMPLE_MARKUP: Record<string, string> = {
   hold: renderToStaticMarkup(<HoldBadge isOnHold />),
   workflowOverride: renderToStaticMarkup(<WorkflowOverrideBadge hasOverride />),
   finalShipmentApproved: renderToStaticMarkup(<FinalShipmentApprovedBadge approved />),
+  // 🔵 **2026-11-13 에 마지막 하나가 늘었다.** 수리건 상세 기본 정보 탭의 비공개
+  //    `Field` 조각이 그리던 한 줄인데, 제 파일로 내려 내보내게 했다
+  //    (components/repair-cases/BorrowedSourceNote.tsx). 🔴 **글자를 여기서 짓지
+  //    않는다** — 화면이 쓰는 그 도메인 상수를 그대로 넘긴다.
+  dueDateFromDomesticOrder: renderToStaticMarkup(
+    <BorrowedSourceNote label={DUE_DATE_FROM_DOMESTIC_ORDER_LABEL} />
+  ),
   // 🔵 **2026-11-13(조각 4)에 넷이 늘었다.** 내자 정리 목록 화면 안의 비공개 함수라
   //    가져다 쓸 수 없던 것들인데, 그 화면에 배지 표시 설정을 붙이면서 제 파일로
   //    내려 내보내게 했다(components/domestic-orders/badges.tsx). 모양을 베끼지
@@ -131,7 +140,13 @@ const SAMPLE_MARKUP: Record<string, string> = {
   miscCaseStatus: renderToStaticMarkup(<MiscCaseStatusBadge status="IN_PROGRESS" />),
 };
 
-/** 🔵 보기가 있는 배지 키(위 표의 overdue 둘은 한 배지다). */
+/**
+ * 🔵 보기가 있는 배지 키 — **등록부의 열다섯 전부**다(2026-11-13).
+ *
+ * 🔴 위 SAMPLE_MARKUP 과 **수가 다를 수 있다**: overdue 는 거기 둘(지연·정상)로
+ * 들어 있고, `dueDateFromDomesticOrderShort` 는 날짜와 함께 서야 모양이 나와 거기
+ * 없고 ⑤가 따로 본다. 그래서 「보기 배지 열다섯」을 세는 잣대는 이 목록이다.
+ */
 const SAMPLED_BADGE_KEYS: readonly BadgeKey[] = [
   "repairStatus",
   "priority",
@@ -141,6 +156,7 @@ const SAMPLED_BADGE_KEYS: readonly BadgeKey[] = [
   "hold",
   "workflowOverride",
   "finalShipmentApproved",
+  "dueDateFromDomesticOrder",
   "dueDateFromDomesticOrderShort",
   "dueDateFromRepairCase",
   "domesticOrderCompleted",
@@ -234,19 +250,34 @@ describe("③ 🔴 보기 배지는 설정을 따르지 않는다", () => {
     assert.equal(count(ALL_HIDDEN, "checked="), 0, "전부 끈 화면인데 체크가 남아 있다");
   });
 
-  test("🔴 29쌍을 전부 꺼도 보기 배지가 **그대로** 그려진다", () => {
+  test("🔴 29쌍을 전부 꺼도 보기 배지가 **그대로** 그려진다 — 열다섯 전부", () => {
+    // 🔵 표본이 줄면 이 줄이 덜 잰 채로 초록이 된다.
+    assert.equal(Object.keys(SAMPLE_MARKUP).length, 15, "표본이 줄었다 — 덜 재고 있다");
     for (const [badgeKey, markup] of Object.entries(SAMPLE_MARKUP)) {
       assert.ok(
         ALL_HIDDEN.includes(markup),
         `${badgeKey}: 전부 끈 화면에서 보기 배지가 사라졌다 — 끈 사람이 되돌릴 길을 잃는다`
       );
     }
+
+    // 🔴 **열다섯을 하나도 빠뜨리지 않았는가.** 위 표의 열쇠는 배지 키와 일대일이
+    //    아니다(overdue 가 지연·정상 둘로 들어 있다). 그래서 등록부 쪽 목록으로
+    //    되짚어, 배지마다 전부 끈 화면에서 잰 글자가 **적어도 하나** 있는지 본다.
+    //    🔵 「(내자)」만 이 표에 없다 — 날짜와 함께 서야 모양이 나오는 꼬리표라
+    //    ⑤가 ALL_HIDDEN 에서 따로 본다.
+    for (const key of SAMPLED_BADGE_KEYS) {
+      if (key === "dueDateFromDomesticOrderShort") continue;
+      const entries = Object.keys(SAMPLE_MARKUP).filter((name) => name.startsWith(key));
+      assert.ok(entries.length > 0, `${key}: 전부 끈 화면에서 잴 글자가 하나도 없다`);
+    }
+    assert.match(ALL_HIDDEN, /\(내자\)/, "「(내자)」 보기가 전부 끈 화면에서 사라졌다");
+    assert.equal(SAMPLED_BADGE_KEYS.length, BADGES.length, "덮지 못한 배지가 남았다");
   });
 
   test("🔴 보기 배지가 **진짜 배지 컴포넌트의 출력**이다 — 베낀 사본이 아니다", () => {
     // 아래 글자는 배지 컴포넌트를 직접 그려서 얻은 것이다. 설정 화면이 모양을
     // 베껴 적었다면 색 한 글자만 달라도 여기서 어긋난다.
-    assert.equal(Object.keys(SAMPLE_MARKUP).length, 14);
+    assert.equal(Object.keys(SAMPLE_MARKUP).length, 15);
     for (const [badgeKey, markup] of Object.entries(SAMPLE_MARKUP)) {
       assert.ok(markup.length > 0, `${badgeKey}: 표본이 비었다`);
       assert.ok(MANAGED.includes(markup), `${badgeKey}: 보기 배지가 안 보인다`);
@@ -273,22 +304,36 @@ describe("③ 🔴 보기 배지는 설정을 따르지 않는다", () => {
     }
   });
 
-  test("🔵 모양이 없는 배지는 **하나뿐**이다 — 2026-11-13 에 다섯에서 줄었다", () => {
-    // 🔵 넷은 조각 4에서 모양이 생겼다. 내자 정리 목록 화면 안의 비공개 함수였는데
-    //    그 화면에 설정을 붙이면서 **제 파일로 내려 내보내게** 했다
-    //    (components/domestic-orders/badges.tsx). 베껴 그린 것이 아니다 — 바로 위
-    //    두 시험이 그 조각을 직접 그려 글자를 맞대어 본다.
-    // 🔴 남은 하나(`dueDateFromDomesticOrder` — 「내자 정리에서 작성됨」)는 수리건
-    //    상세 기본 정보 탭의 **비공개 `Field` 조각**이 그려서 가져다 쓸 수 없다.
-    //    베껴서 모양을 만들지 않았다는 결정의 기록이고, 모양이 생기는 날 이 줄에서
-    //    멈춰 사람이 다시 판단하게 한다.
-    const missing = BADGES.map((badge) => badge.key).filter((key) => !(key in BADGE_SAMPLES));
-    assert.deepEqual(missing, ["dueDateFromDomesticOrder"]);
-    // 모양이 없어도 이름과 설명은 선다 — 체크상자도 똑같이 돈다.
-    for (const key of missing) {
-      const badge = BADGES.find((one) => one.key === key);
-      assert.ok(badge && MANAGED.includes(badge.label));
+  test("🔴 배지 열다섯에 **전부** 보기가 있다 — 2026-11-13 에 다섯에서 영이 됐다", () => {
+    // 🔵 다섯 다 화면 파일 안의 **비공개 함수**가 그려서 가져다 쓸 수 없던 것들이고,
+    //    같은 날 둘로 나눠 떼어냈다: 넷은 내자 정리 목록에서(domestic-orders/
+    //    badges.tsx), 하나(`dueDateFromDomesticOrder`)는 수리건 상세 기본 정보 탭의
+    //    `Field` 에서(repair-cases/BorrowedSourceNote.tsx). 베껴 그린 것이 아니라는
+    //    사실은 위 두 시험이 그 조각들을 직접 그려 글자를 맞대어 본다.
+    //
+    // 🔴 **「없는 것이 없다」를 빈 목록으로 재지 않는다.** 등록부가 통째로 비어도
+    //    `missing` 은 빈 목록이라 그 단언은 공짜로 통과한다. 그래서 세는 방향을
+    //    뒤집어, **배지 하나하나에 보기가 있는가**를 묻는다 — 표본(열다섯)이 먼저
+    //    서야 아래 줄이 뜻을 가진다.
+    assert.equal(BADGES.length, 15, "등록부의 배지가 열다섯이 아니다 — 표본이 달라졌다");
+    for (const badge of BADGES) {
+      assert.ok(
+        badge.key in BADGE_SAMPLES,
+        `${badge.key}: 보기가 없다 — 이름과 설명만 서는 줄이 생겼다. 🔴 모양을 설정 화면에 ` +
+          "베껴 그리지 말고 그 화면에서 조각을 떼어내 불러라(위 두 줄이 그 결정이다)"
+      );
+      // 모양이 생겨도 이름과 설명은 그대로 선다 — 체크상자도 똑같이 돈다.
+      assert.ok(MANAGED.includes(badge.label), `${badge.key}: 이름이 안 보인다`);
     }
+    assert.equal(
+      Object.keys(BADGE_SAMPLES).length,
+      BADGES.length,
+      "보기 수와 배지 수가 다르다 — 등록부에 없는 보기가 섞였거나 빠진 줄이 있다"
+    );
+    // 🔵 위 둘이면 이 수는 0이다. 그래도 한 줄 남기는 까닭은, 이 수가 다시 늘어나는
+    //    날 **무엇이 비었는지**를 이름으로 말해 주기 때문이다.
+    const missing = BADGES.map((badge) => badge.key).filter((key) => !(key in BADGE_SAMPLES));
+    assert.deepEqual(missing, []);
   });
 
   test("등록부에 없는 배지 키의 보기는 없다", () => {

@@ -16,6 +16,7 @@ import {
 import IntakeInfoEditForm from "./edit/IntakeInfoEditForm";
 import { detailEditButtonClass } from "./edit-button-class";
 import { DUE_DATE_NEAR_TEXT_CLASS } from "@/components/repair-cases/due-date-near";
+import BorrowedSourceNote from "@/components/repair-cases/BorrowedSourceNote";
 
 /**
  * ⚠️ `고객 요청 납기일` 한 칸만 값이 두 곳에서 올 수 있다 — 이 건에 적힌 값이
@@ -97,18 +98,20 @@ function Field({
       >
         {value}
       </dd>
-      {/* 🔵 **테두리 있는 상자**다(2026-10-30 사용자 요청). 날짜 바로 아래라 글자만
-          두면 날짜의 일부로 읽힌다 — 이것은 값이 아니라 **그 값이 어디서 왔는가**다.
-          🔴 아래 경보 상자와 **색이 다르다**: 여기는 출처라 회색이고, 경보는 붉다.
-          같은 색으로 두면 출처 표시까지 「고쳐야 할 것」으로 보인다. */}
+      {/* 🔵 그 상자의 **모양은 제 파일에 있다**(components/repair-cases/BorrowedSourceNote.tsx
+          — 2026-11-13 에 이 자리에서 떼어냈다). [시스템 설정] → [배지 표시]가 이름
+          옆에 **실제 모양**을 함께 세우는데, 여기 비공개로 두면 그 화면이 가져다
+          쓸 수 없어 배지 열다섯 중 이 하나만 보기가 비어 있었다. 🔴 베껴 그리는
+          길은 일부러 닫았다 — 사본은 색이 바뀌는 날 오류 없이 어긋난다.
+          🔴 **「언제 그리는가」는 여기 남는다**: 관문도 배지 키도 자리 키도 이 파일
+          것이다. 떼어낸 조각이 설정을 읽어 스스로 숨게 되면 설정 화면의 보기까지
+          함께 사라져, 끈 사람이 다시 켤 길을 잃는다(그 파일 머리말의 ②). */}
       {borrowedLabel && (
         <BadgeVisibilityGate
           badgeKey="dueDateFromDomesticOrder"
           placeKey={borrowedLabelPlaceKey}
         >
-          <p className="mt-1 mr-1 inline-block whitespace-nowrap rounded border border-zinc-300 bg-zinc-50 px-1.5 py-0.5 text-[10px] text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-300">
-            {borrowedLabel}
-          </p>
+          <BorrowedSourceNote label={borrowedLabel} />
         </BadgeVisibilityGate>
       )}
       {/* 🔵 빌려 왔다는 표시보다 **뒤**다. 그 표시는 바로 위 날짜가 어디서 온
