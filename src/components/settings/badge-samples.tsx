@@ -91,14 +91,12 @@ export const BADGE_SAMPLES: Partial<Record<BadgeKey, ReactNode>> = {
   repairStatus: <StatusBadge status="IN_REPAIR" />,
   priority: <PriorityBadge priority="URGENT" />,
   source: <SourceBadge source="DATABASE" />,
-  // 🔴 **이름 자체가 두 값을 말한다**(「납기 지연 / 정상」) — 둘 다 세운다. 하나만
-  // 세우면 나머지 한쪽을 끄는 것인지 아닌지 알 수 없다.
-  overdue: (
-    <>
-      <OverdueBadge isOverdue />
-      <OverdueBadge isOverdue={false} />
-    </>
-  ),
+  // 🔵 **보기가 하나다**(2026-11-13). 그 전까지는 둘을 나란히 세웠다 — 이름이
+  // 「납기 지연 / 정상」이라 한쪽만 세우면 나머지를 끄는 것인지 알 수 없었다. 같은 날
+  // 「정상」 쪽 표시를 걷어내(badges.tsx 의 OverdueBadge) 이 배지가 그리는 것이 하나가
+  // 됐고, 등록부의 이름도 「납기 지연」으로 줄였다. 🔴 `isOverdue={false}` 를 여기
+  // 되돌려 적으면 **아무것도 안 그리는 빈 보기**가 하나 늘 뿐이다.
+  overdue: <OverdueBadge isOverdue />,
   dueDateNear: <DueDateNearBadge isDueDateNear />,
   hold: <HoldBadge isOnHold />,
   workflowOverride: <WorkflowOverrideBadge hasOverride />,

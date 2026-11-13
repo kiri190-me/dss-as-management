@@ -140,6 +140,15 @@ export function SourceBadge({
  * DueDateNearBadge 와 같은 규율). 🔵 종 알림 「납기 지연」도 **그 함수 하나**를 쓴다
  * (2026-11-07 — queries/repair-case-overdue-notifications.ts). 글자도 나눠 쓰지 않고
  * 종류 이름표가 이 배지와 같은 말을 적는다(NOTIFICATION_KIND_META).
+ *
+ * ── 🔴 **지연이 아니면 아무것도 안 그린다** (2026-11-13) ────────────────────
+ * 그 전까지는 지연이 아닌 건에 회색 글자 「정상」을 세웠다(표에서는 파란 알약이었다).
+ * 사용자 결정으로 걷어냈다 — 「[정상] 배지는 없애 달라. 납기가 지연되었을 때에
+ * [납기 지연] 배지만 뜨면 된다」.
+ * 🔵 그래서 이 배지도 이웃들과 **같은 규율**이 됐다: 바로 아래 DueDateNearBadge ·
+ * HoldBadge · WorkflowOverrideBadge · FinalShipmentApprovedBadge 가 전부 「아닐 때는
+ * 아무것도 안 그린다」다. 안 붙는 것이 기본값인 배지에 빈자리 글자를 두면 목록의
+ * 모든 줄이 한 칸씩 길어진다.
  */
 export function OverdueBadge({
   isOverdue,
@@ -149,17 +158,16 @@ export function OverdueBadge({
   /**
    * 지금 서는 자리. 안 주면 설정과 상관없이 늘 그린다(파일 머리말).
    *
-   * 🔴 끄면 **「정상」까지 함께 사라진다.** 등록부의 이름이 「납기 지연 / 정상」인
-   * 까닭이 그것이다 — 이 조각이 내놓는 것은 그 한 칸의 두 얼굴이고, 한쪽만 끄면
-   * 「지연인 건만 아무 표시가 없는」 모양이 되어 거꾸로 읽힌다.
+   * 🔵 끄면 「납기 지연」이 안 그려진다 — 그것이 이 배지가 그리는 전부다. 🔴 예전에는
+   * 「정상」까지 **함께** 꺼야 한다는 주의가 여기 적혀 있었는데, 2026-11-13 에 「정상」
+   * 자체를 걷어내 그 짝이 사라졌다(바로 위 머리말). 등록부의 이름도 같은 날
+   * 「납기 지연 / 정상」에서 「납기 지연」으로 줄였다.
    */
   placeKey?: BadgePlaceKey;
 }) {
   const visible = useIsBadgeVisible("overdue", placeKey);
   if (!visible) return null;
-  if (!isOverdue) {
-    return <span className="text-xs text-zinc-500 dark:text-zinc-400">정상</span>;
-  }
+  if (!isOverdue) return null;
   return (
     <span
       className={`${baseBadgeClass} bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400`}

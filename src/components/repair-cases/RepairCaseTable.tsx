@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useIsBadgeVisible } from "@/components/providers/BadgeVisibilityProvider";
+// 🔵 `useIsBadgeVisible` 는 2026-11-13 에 이 파일에서 빠졌다 — 표 전용 「정상」 조각이
+//    사라지면서 이 화면은 설정을 **스스로 묻지 않는다**. 받은 자리를 배지에 넘길 뿐이고
+//    판정은 전부 badges.tsx 안의 한 벌이다.
 import type { BadgePlaceKey } from "@/lib/domain/badge-visibility";
 import type { EffectiveRepairCase } from "@/lib/domain/local/workflow/effective-repair-case";
 import type { SortColumn, SortState } from "@/lib/domain/repair-case-filters";
@@ -147,41 +149,16 @@ function SecondarySortButton({
   );
 }
 
-/**
- * Table-local badge for the non-overdue ("정상") state — deliberately NOT
- * the shared badges.tsx OverdueBadge for this case, so this column's
- * badge-consistency treatment (blue pill instead of unstyled text) doesn't
- * bleed into OverdueBadge's other callers (DetailHeader,
- * RepairCaseCardList), which keep their existing plain-text "정상"
- * rendering unchanged. The overdue (true) case still reuses OverdueBadge
- * as-is — its red badge already has a background and needs no change.
+/*
+ * 🔴 **2026-11-13 — 이 자리에 있던 `StatusRowOverdueBadge` 를 걷어냈다.**
+ * 지연이 아닌 건에 파란 알약 「정상」을 세우던 표 전용 조각이었다(공용
+ * badges.tsx 의 OverdueBadge 는 같은 상태를 꾸밈 없는 회색 글자로 그렸고, 이
+ * 표에서만 이웃 배지들과 모양을 맞춘 것이었다). 사용자 결정으로 「정상」 자체가
+ * 사라져 — 「[정상] 배지는 없애 달라」 — 그 조각이 하는 일이 OverdueBadge 와 한
+ * 글자도 다르지 않게 됐고, 그래서 표도 공용 배지를 **직접** 부른다.
+ * 🔵 자리(placeKey)를 두 번 묻던 문제도 함께 없어졌다: 판정이 공용 배지 안의 한
+ * 벌뿐이다.
  */
-function StatusRowOverdueBadge({
-  isOverdue,
-  placeKey,
-}: {
-  isOverdue: boolean;
-  /**
-   * 🔴 이 조각도 자리를 받아 **스스로** 판정한다 (2026-11-13). 「정상」 쪽 알약이
-   * 이 파일에만 있어서, 판정을 아래 OverdueBadge 에만 맡기면 그 배지를 끈 자리에
-   * **파란 「정상」만 남는다** — 그 칸이 「납기 지연 / 정상」 한 쌍이라는 사실이
-   * 등록부의 배지 이름에 그대로 적혀 있다.
-   */
-  placeKey?: BadgePlaceKey;
-}) {
-  const visible = useIsBadgeVisible("overdue", placeKey);
-  if (!visible) return null;
-  if (!isOverdue) {
-    return (
-      <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-blue-700 dark:bg-blue-950 dark:text-blue-400">
-        정상
-      </span>
-    );
-  }
-  // 🔵 자리는 넘기지 않는다 — 바로 위에서 이미 같은 쌍으로 판정했다. 두 번 물으면
-  //    답은 같지만 조건이 두 벌이 되고, 한쪽만 고쳐지는 날이 온다.
-  return <OverdueBadge isOverdue={isOverdue} />;
-}
 
 /**
  * Compact 9-column table for 전체 A/S 현황: 인수번호, 상태, 고객사, 제품,
@@ -196,9 +173,9 @@ function StatusRowOverdueBadge({
  * header where the field itself no longer has its own column.
  *
  * 상태 cell is two lines: 상태 배지 alone on line 1, 우선순위/납기/보류/재정의
- * 배지 cluster on line 2 — StatusRowOverdueBadge keeps the non-overdue
- * "정상" state a filled blue pill instead of unstyled text, so it reads
- * consistently with its badge neighbors on the same line.
+ * 배지 cluster on line 2. 🔴 그 묶음의 배지는 **해당하는 건에만** 선다 —
+ * 「납기 지연」도 2026-11-13 부터 그 규율이다(지연이 아닌 건에 세우던 파란
+ * 「정상」을 사용자 결정으로 걷어냈다 — badges.tsx 의 OverdueBadge 머리말).
  *
  * 제품 cell: line 1 (stronger) is 제품 구분(제품명 역할)/모델, line 2
  * (secondary, smaller/gray) is S/N·L/N.
@@ -347,7 +324,7 @@ export default function RepairCaseTable({
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
                     <PriorityBadge priority={row.priority} placeKey={badgePlaceKey} />
-                    <StatusRowOverdueBadge
+                    <OverdueBadge
                       isOverdue={row.effectiveIsOverdue}
                       placeKey={badgePlaceKey}
                     />

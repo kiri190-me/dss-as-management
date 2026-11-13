@@ -20,6 +20,7 @@ import {
 import FinalShipmentApprovedBadge from "@/components/approvals/FinalShipmentApprovedBadge";
 import { BadgeVisibilityProvider } from "@/components/providers/BadgeVisibilityProvider";
 import {
+  BADGES,
   BADGE_PLACEMENTS,
   BADGE_PLACES,
   type BadgeKey,
@@ -449,37 +450,87 @@ describe("배지 조각 자체 — 자리를 안 주면 **언제나** 그린다"
     }
   });
 
-  test("🔴 「납기 지연 / 정상」은 **둘 다** 끄는 한 쌍이다", () => {
-    // 「정상」만 남으면 지연인 건에만 표시가 없는 꼴이 되어 거꾸로 읽힌다.
-    const hiddenHere = hiddenRows([{ badgeKey: "overdue", placeKey: "repairCaseDetailHeader" }]);
-    const normal = renderToStaticMarkup(
-      <BadgeVisibilityProvider value={hiddenHere}>
-        <OverdueBadge isOverdue={false} placeKey="repairCaseDetailHeader" />
-      </BadgeVisibilityProvider>
+  test("🔴 「납기 지연」은 지연일 때만 — 아니면 **설정과 상관없이** 아무것도 안 그린다", () => {
+    // 🔵 **2026-11-13 에 이 시험이 재는 것이 바뀌었다.** 그 전까지 이 조각은 지연이
+    //    아닌 건에 「정상」을 세웠고, 여기서는 「둘 다 함께 꺼지는가」를 쟀다. 사용자
+    //    결정으로 「정상」을 걷어냈다 — 「[정상] 배지는 없애 달라. 납기가 지연되었을
+    //    때에 [납기 지연] 배지만 뜨면 된다」. 🔴 그래서 단언을 지우지 않고 **방향을
+    //    바꿔** 적는다: 되돌려 놓는 날 아래 둘째 줄이 바로 깨진다.
+
+    // ⓪ 표본 먼저 — 안 끄면 지연인 건에 알약이 선다. 이 줄이 없으면 아래 둘은
+    //    「배지가 통째로 죽었다」와 구별되지 않는다.
+    const shown = renderToStaticMarkup(
+      <OverdueBadge isOverdue placeKey="repairCaseDetailHeader" />
     );
+    assert.ok(hasBadge(shown, "납기 지연"), `안 껐는데 지연 배지가 없다: ${shown}`);
+
+    // ① 지연이 아니면 **빈 글자**다 — 「정상」도, 어떤 대체 글자도 세우지 않는다.
+    const calm = renderToStaticMarkup(
+      <OverdueBadge isOverdue={false} placeKey="repairCaseDetailHeader" />
+    );
+    assert.equal(calm, "", `지연이 아닌데 무언가 그려졌다 — 「정상」이 되살아났다: ${calm}`);
+
+    // ② 껐을 때는 **지연인 건으로** 잰다. 지연이 아닌 건으로 재면 안 꺼도 비어 있어
+    //    이 줄이 공짜로 통과한다.
+    const hiddenHere = hiddenRows([{ badgeKey: "overdue", placeKey: "repairCaseDetailHeader" }]);
     const late = renderToStaticMarkup(
       <BadgeVisibilityProvider value={hiddenHere}>
         <OverdueBadge isOverdue placeKey="repairCaseDetailHeader" />
       </BadgeVisibilityProvider>
     );
-    assert.equal(normal, "", `「정상」이 남았다: ${normal}`);
-    assert.equal(late, "", `「납기 지연」이 남았다: ${late}`);
+    assert.equal(late, "", `껐는데 「납기 지연」이 남았다: ${late}`);
   });
 
-  test("🔴 표의 「정상」 파란 알약도 함께 꺼진다 — 그 조각은 이 표에만 있다", () => {
-    const node = (
+  test("🔴 표에서도 지연이 아니면 한 글자도 안 선다 — 표 전용 「정상」 알약을 걷어냈다", () => {
+    // 🔵 2026-11-13 까지 이 표에만 파란 「정상」 알약이 따로 있었다
+    //    (RepairCaseTable.tsx 의 StatusRowOverdueBadge — 같은 날 없앴다). 그 조각이
+    //    되살아나면 공용 배지를 고쳐도 표에서만 「정상」이 남는데, 그것은 오류 없이
+    //    화면에서만 드러난다. 그래서 **표를 따로** 잰다.
+    const tableWith = (rowIsOverdue: boolean) => (
       <RepairCaseTable
-        rows={[fakeRow({ effectiveIsOverdue: false })]}
+        rows={[fakeRow({ effectiveIsOverdue: rowIsOverdue })]}
         sort={SORT}
         onSortChange={() => {}}
         badgePlaceKey="repairCaseList"
       />
     );
-    assert.ok(hasBadge(renderWith([], node), "정상"), "표본이 비었다 — 「정상」이 애초에 없다");
+
+    // ⓪ 표본 — 지연인 줄에는 알약이 선다.
+    assert.ok(
+      hasBadge(renderWith([], tableWith(true)), "납기 지연"),
+      "표본이 비었다 — 지연인 줄에도 배지가 없다"
+    );
+
+    // ① 지연이 아닌 줄 — 「정상」이 **글자 하나도** 없다.
+    const calm = renderWith([], tableWith(false));
+    assert.equal(calm.includes("정상"), false, "표에 「정상」이 되살아났다");
+    assert.equal(hasBadge(calm, "납기 지연"), false, "지연이 아닌데 지연 배지가 섰다");
+    // 🔵 그래도 줄은 그대로다 — 위 둘이 「표가 통째로 안 그려졌다」로 통과하지 않게.
+    assert.ok(calm.includes("D940202"), `줄이 통째로 사라졌다: ${calm}`);
+
+    // ② 껐을 때도 **지연인 줄로** 잰다(위 ②와 같은 까닭).
     assert.equal(
-      hasBadge(renderWith([{ badgeKey: "overdue", placeKey: "repairCaseList" }], node), "정상"),
+      hasBadge(
+        renderWith([{ badgeKey: "overdue", placeKey: "repairCaseList" }], tableWith(true)),
+        "납기 지연"
+      ),
       false,
-      "「납기 지연 / 정상」을 껐는데 파란 「정상」만 남았다"
+      "표에서 「납기 지연」을 껐는데 남았다"
+    );
+  });
+
+  test("🔵 등록부의 이름이 **배지에 찍히는 글자 그대로**다 — 「/ 정상」이 되살아나면 깨진다", () => {
+    // 🔴 키는 "overdue" 그대로여야 한다 — 바꾸면 이미 이 쌍을 꺼 둔 관리자의 DB 행이
+    //    조용히 무효가 된다(모르는 키는 언제나 「보임」).
+    const badge = BADGES.find((one) => one.key === "overdue");
+    assert.ok(badge, "등록부에서 overdue 를 못 찾았다 — 배지 키가 바뀌었다");
+    // 🔵 등록부의 `label` 주석이 적은 규율(「되도록 배지에 실제로 찍히는 글자 그대로」)을
+    //    이 배지에 한해 못으로 박는다. 이름을 「납기 지연 / 정상」으로 되돌리면 이 줄이
+    //    깨진다 — 설정 화면에만 있는 글자라 눈으로는 아무도 안 본다.
+    const html = renderToStaticMarkup(<OverdueBadge isOverdue />);
+    assert.ok(
+      hasBadge(html, badge.label),
+      `등록부 이름(${badge.label})이 배지에 찍히는 글자와 다르다: ${html}`
     );
   });
 

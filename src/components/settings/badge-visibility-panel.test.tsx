@@ -111,8 +111,12 @@ const SAMPLE_MARKUP: Record<string, string> = {
   repairStatus: renderToStaticMarkup(<StatusBadge status="IN_REPAIR" />),
   priority: renderToStaticMarkup(<PriorityBadge priority="URGENT" />),
   source: renderToStaticMarkup(<SourceBadge source="DATABASE" />),
-  overdueYes: renderToStaticMarkup(<OverdueBadge isOverdue />),
-  overdueNo: renderToStaticMarkup(<OverdueBadge isOverdue={false} />),
+  // 🔵 **2026-11-13 에 둘에서 하나가 됐다.** 그 전까지 `overdueYes`·`overdueNo` 로
+  //    나뉘어 있었다 — 그때는 이 배지가 지연이 아닌 건에 「정상」을 세웠기 때문이다.
+  //    사용자 결정으로 「정상」을 걷어내 `isOverdue={false}` 는 이제 **빈 글자**를
+  //    내놓는다. 🔴 그 줄을 여기 되돌려 적으면 `markup.length > 0` 이 깨지고, 깨지지
+  //    않게 고치면 `ALL_HIDDEN.includes("")` 이 늘 참이라 **아무것도 안 재게** 된다.
+  overdue: renderToStaticMarkup(<OverdueBadge isOverdue />),
   dueDateNear: renderToStaticMarkup(<DueDateNearBadge isDueDateNear />),
   hold: renderToStaticMarkup(<HoldBadge isOnHold />),
   workflowOverride: renderToStaticMarkup(<WorkflowOverrideBadge hasOverride />),
@@ -143,9 +147,11 @@ const SAMPLE_MARKUP: Record<string, string> = {
 /**
  * 🔵 보기가 있는 배지 키 — **등록부의 열다섯 전부**다(2026-11-13).
  *
- * 🔴 위 SAMPLE_MARKUP 과 **수가 다를 수 있다**: overdue 는 거기 둘(지연·정상)로
- * 들어 있고, `dueDateFromDomesticOrderShort` 는 날짜와 함께 서야 모양이 나와 거기
- * 없고 ⑤가 따로 본다. 그래서 「보기 배지 열다섯」을 세는 잣대는 이 목록이다.
+ * 🔴 위 SAMPLE_MARKUP 과 **수가 다르다**(열넷): `dueDateFromDomesticOrderShort` 는
+ * 날짜와 함께 서야 모양이 나와 거기 없고 ⑤가 따로 본다. 그래서 「보기 배지 열다섯」을
+ * 세는 잣대는 이 목록이다.
+ * 🔵 같은 날 늦게 한 칸이 더 줄었다 — overdue 가 거기 둘(지연·정상)이었는데 「정상」을
+ * 걷어내 하나가 됐다(그 표의 주석).
  */
 const SAMPLED_BADGE_KEYS: readonly BadgeKey[] = [
   "repairStatus",
@@ -252,7 +258,7 @@ describe("③ 🔴 보기 배지는 설정을 따르지 않는다", () => {
 
   test("🔴 29쌍을 전부 꺼도 보기 배지가 **그대로** 그려진다 — 열다섯 전부", () => {
     // 🔵 표본이 줄면 이 줄이 덜 잰 채로 초록이 된다.
-    assert.equal(Object.keys(SAMPLE_MARKUP).length, 15, "표본이 줄었다 — 덜 재고 있다");
+    assert.equal(Object.keys(SAMPLE_MARKUP).length, 14, "표본이 줄었다 — 덜 재고 있다");
     for (const [badgeKey, markup] of Object.entries(SAMPLE_MARKUP)) {
       assert.ok(
         ALL_HIDDEN.includes(markup),
@@ -260,15 +266,20 @@ describe("③ 🔴 보기 배지는 설정을 따르지 않는다", () => {
       );
     }
 
-    // 🔴 **열다섯을 하나도 빠뜨리지 않았는가.** 위 표의 열쇠는 배지 키와 일대일이
-    //    아니다(overdue 가 지연·정상 둘로 들어 있다). 그래서 등록부 쪽 목록으로
-    //    되짚어, 배지마다 전부 끈 화면에서 잰 글자가 **적어도 하나** 있는지 본다.
-    //    🔵 「(내자)」만 이 표에 없다 — 날짜와 함께 서야 모양이 나오는 꼬리표라
+    // 🔴 **열다섯을 하나도 빠뜨리지 않았는가.** 위 표의 열쇠는 2026-11-13 부터 배지
+    //    키와 **일대일**이다(그 전에는 overdue 가 지연·정상 둘이라 앞글자로 맞댔다).
+    //    그래서 등록부 쪽 목록으로 되짚어, 배지마다 전부 끈 화면에서 잰 글자가 있는지
+    //    본다. 🔵 「(내자)」만 이 표에 없다 — 날짜와 함께 서야 모양이 나오는 꼬리표라
     //    ⑤가 ALL_HIDDEN 에서 따로 본다.
     for (const key of SAMPLED_BADGE_KEYS) {
       if (key === "dueDateFromDomesticOrderShort") continue;
-      const entries = Object.keys(SAMPLE_MARKUP).filter((name) => name.startsWith(key));
-      assert.ok(entries.length > 0, `${key}: 전부 끈 화면에서 잴 글자가 하나도 없다`);
+      assert.ok(key in SAMPLE_MARKUP, `${key}: 전부 끈 화면에서 잴 글자가 하나도 없다`);
+    }
+    // 🔴 거꾸로도 센다 — 등록부에 없는 열쇠가 섞이면 위 셈(14)이 맞는데도 덮지 못한
+    //    배지가 생긴다. 일대일이 된 뒤에야 잴 수 있는 줄이다.
+    const badgeKeys = new Set<string>(BADGES.map((badge) => badge.key));
+    for (const name of Object.keys(SAMPLE_MARKUP)) {
+      assert.ok(badgeKeys.has(name), `${name}: 등록부에 없는 열쇠로 재고 있다`);
     }
     assert.match(ALL_HIDDEN, /\(내자\)/, "「(내자)」 보기가 전부 끈 화면에서 사라졌다");
     assert.equal(SAMPLED_BADGE_KEYS.length, BADGES.length, "덮지 못한 배지가 남았다");
@@ -277,7 +288,7 @@ describe("③ 🔴 보기 배지는 설정을 따르지 않는다", () => {
   test("🔴 보기 배지가 **진짜 배지 컴포넌트의 출력**이다 — 베낀 사본이 아니다", () => {
     // 아래 글자는 배지 컴포넌트를 직접 그려서 얻은 것이다. 설정 화면이 모양을
     // 베껴 적었다면 색 한 글자만 달라도 여기서 어긋난다.
-    assert.equal(Object.keys(SAMPLE_MARKUP).length, 15);
+    assert.equal(Object.keys(SAMPLE_MARKUP).length, 14);
     for (const [badgeKey, markup] of Object.entries(SAMPLE_MARKUP)) {
       assert.ok(markup.length > 0, `${badgeKey}: 표본이 비었다`);
       assert.ok(MANAGED.includes(markup), `${badgeKey}: 보기 배지가 안 보인다`);

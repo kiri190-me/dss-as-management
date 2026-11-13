@@ -147,8 +147,12 @@ export const BADGES: readonly BadgeDefinition[] = [
   },
   {
     key: "overdue",
-    label: "납기 지연 / 정상",
-    description: "고객 요청 납기일이 지났는데 아직 출하 전이면 「납기 지연」",
+    // 🔴 키는 "overdue" 그대로다 — 이름만 2026-11-13 에 「납기 지연 / 정상」에서
+    //    줄였다(「정상」 쪽 표시를 걷어낸 날). 키를 함께 바꿨다면 이미 이 쌍을 꺼 둔
+    //    관리자의 DB 행이 **조용히 무효**가 된다(판정의 규칙 1 — 모르는 키는 보임).
+    label: "납기 지연",
+    description:
+      "고객 요청 납기일이 지났는데 아직 출하 전인 건에만. 지연이 아닌 건에는 아무것도 안 뜹니다",
     places: ["repairCaseList", "repairCaseDetailHeader"],
   },
   {
