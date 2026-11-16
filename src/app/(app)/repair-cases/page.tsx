@@ -11,7 +11,6 @@ import {
   listRepairCasesPendingMyApproval,
 } from "@/lib/db/queries/repair-case-approvals-pending";
 import { loadRepairCaseFinalShipmentApprovalStates } from "@/lib/db/queries/repair-case-approvals";
-import { readPortalRouteDelegations } from "@/lib/server/acting-approvers";
 import { isFinalShipmentApproved } from "@/lib/domain/final-shipment-approval-badge";
 import { listLongPendingPoCaseIds } from "@/lib/db/queries/long-pending-po";
 import { isRepairCaseDueDateNear } from "@/lib/domain/notifications";
@@ -76,15 +75,10 @@ export default async function RepairCasesPage() {
   // 결재 권한이 아예 없는 세션은 빈 배열을 받으므로, 필터는 보이되 0건이 되는
   // 대신 아래에서 undefined로 접어 조건 자체를 감춘다.
   //
-  // 🔴 **통합 로그인 포털에 맡긴 결재권 위임도 함께 묻는다**(2026-11-16, 설계 B-4).
-  // 안 물으면 승인함에만 위임을 맡은 사람에게는 그 건이 이 목록에서 빠져, 「내게 온
-  // 결재 요청」을 켜도 **대신 눌러야 할 건이 안 보인다.** 묻는 것은 조회가 아니라
-  // 부르는 쪽인 여기다 — 같은 조회를 **포털이 되묻는 통로**도 부르는데 거기서 또
-  // 포털에 물으면 서로를 기다리기 때문이다(그 조회의 @param 주석).
-  const pendingApprovalItems = await listRepairCasesPendingMyApproval(
-    session.userId,
-    (await readPortalRouteDelegations(session.userId)).delegatorUserIds
-  );
+  // 🟢 **통합 승인함에 맡긴 결재권 위임도 그 조회가 함께 읽는다**(2026-11-16, 설계
+  // B-4·B-12). 2026-11-16 낮에는 **여기서 포털에 물어** 그 목록을 넘겨야 했는데, 저녁에
+  // 방식이 전파로 뒤집히면서 그 줄이 A/S 안의 표에 앉았다 — 이 화면에 망 호출이 없다.
+  const pendingApprovalItems = await listRepairCasesPendingMyApproval(session.userId);
   // 0건일 때 "결재할 게 없다"와 "애초에 결재자가 아니다"는 다르다 — 전자는
   // 조건을 보여 주고(딥링크로 들어와도 그대로 동작한다), 후자는 눌러도 늘
   // 0건인 조건을 아예 감춘다.

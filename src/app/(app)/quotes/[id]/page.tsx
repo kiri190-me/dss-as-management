@@ -28,7 +28,7 @@ import {
   getQuoteApprovalHistory,
   getQuoteApprovalProgress,
 } from "@/lib/db/queries/quote-approvals";
-import { resolveActingApproversForScreen } from "@/lib/server/acting-approvers";
+import { resolveActingApproverUserIds } from "@/lib/db/queries/approval-route-delegations";
 import {
   getCurrentShipmentApprovalRoute,
   listShipmentApprovalRouteSteps,
@@ -139,9 +139,10 @@ export default async function QuoteDetailPage({
   // 수 있는 자리들」이다. 🔴 화면에 주는 것은 **힌트**이고, 실제 승인·반려는
   // decideQuoteApproval 이 자기 트랜잭션 안에서 같은 목록을 다시 읽어 판정한다
   // (그래야 읽은 직후 되돌려진 위임으로 결재가 통과하지 않는다).
-  // 🔴 **2026-11-16 부터 통합 로그인 포털에도 묻는다**(설계 B-4) — 안 물으면 승인함에만
-  // 위임을 맡은 사람에게 단추가 안 그려진다. 묻는 일은 server/acting-approvers.ts 하나가
-  // 한다(포털이 되묻는 통로에서는 묻지 않는 까닭도 그 파일 머리말에 있다).
+  // 🔵 **통합 승인함에서 맡긴 위임도 그 조회가 함께 읽는다**(2026-11-16, 설계
+  // B-4·B-12) — 그날 낮에는 여기서 **포털에 물었고**, 안 물으면 승인함에만 맡긴
+  // 사람에게 단추가 안 그려졌다. 저녁에 방식이 전파로 뒤집혀 그 줄이 A/S 안의 표에
+  // 앉았다.
   // 공급처 칸에서 고를 고객사 — 새 견적서 페이지와 같은 조회이고, 같은 까닭으로 이미
   // 나란히 도는 Promise.all 에 태운다.
   const [
@@ -153,7 +154,7 @@ export default async function QuoteDetailPage({
     approvalProgress,
     approvalHistory,
     currentApprovalRoute,
-    actingApprovers,
+    actingApproverUserIds,
     customerOptions,
   ] = await Promise.all([
     listRepairLabor(),
@@ -164,7 +165,7 @@ export default async function QuoteDetailPage({
     getQuoteApprovalProgress(quote.id),
     getQuoteApprovalHistory(quote.id),
     getCurrentShipmentApprovalRoute(QUOTE_APPROVAL_ROUTE_SCOPE),
-    resolveActingApproversForScreen(actingUser.id),
+    resolveActingApproverUserIds(actingUser.id, new Date()),
     listCustomerOptions(),
   ]);
 
@@ -279,11 +280,7 @@ export default async function QuoteDetailPage({
           }}
           /* 결재선 단계 위임 — 「지금 이 사람이 대신 누를 수 있는 자리들」. 서버에서
              읽어 내려보낸다(클라이언트가 DB 를 읽게 두지 않는다). */
-          actingApproverUserIds={actingApprovers.userIds}
-          /* 🔴 포털에 **못 물었으면** 패널이 안내를 띄운다(설계 B-7). 결재는 그대로
-             진행되지만 **대리인만 조용히 막히므로**, 그 사실을 눈에 보이게 하는 것이
-             B-6 을 고른 값을 치르는 유일한 자리다. */
-          portalDelegationUnavailable={actingApprovers.portalDelegationUnavailable}
+          actingApproverUserIds={actingApproverUserIds}
         />
       }
     />

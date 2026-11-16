@@ -18,7 +18,6 @@ import {
   NO_ROUTE_DELEGATIONS,
   standsInForAssignedApprover,
 } from "@/lib/auth/approval-assignment";
-import { appendPortalDelegationOutage } from "@/lib/domain/portal-approval-delegation";
 import type { ApprovalRecordRow } from "@/lib/db/queries/repair-case-approvals";
 import type { ShipmentApprovalRouteStepLabel } from "@/lib/db/queries/shipment-approval-routes";
 import { isRouteStepSkippedForRequester } from "@/lib/domain/shipment-approval-route";
@@ -268,12 +267,7 @@ export default function DatabaseFinalShipmentCard({
           });
     setIsSubmitting(false);
     if (!result.ok) {
-      // 🔴 **거절당한 바로 그 순간이 안내가 가장 필요한 때다**(2026-11-16, 설계 B-7).
-      //    화면 위의 상자(DatabaseApprovalScreen 의 PortalDelegationUnavailableNotice)
-      //    는 **그릴 때** 물어본 결과로 뜨는데, 포털이 그 뒤에 넘어지면 상자는 안 떠
-      //    있고 사람은 「지정된 승인자만 처리할 수 있습니다」만 받는다. 서버가 결과에
-      //    실어 보낸 칸을 여기서 읽어 말을 잇는다 — 멀쩡하면 글자가 그대로 돌아온다.
-      setStatusMessage(appendPortalDelegationOutage(result.message, result));
+      setStatusMessage(result.message);
       return;
     }
     // 성공은 저장 팝업으로 알린다(common/SavePopup.tsx). 거절 이유는 지금처럼 카드 안에.

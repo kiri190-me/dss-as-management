@@ -13,11 +13,6 @@ import {
 } from "@/lib/auth/approval-assignment";
 import { resolveActingApproverUserIds } from "../queries/approval-route-delegations";
 import {
-  NO_PORTAL_DELEGATIONS,
-  notePortalDelegationOutage,
-  type PortalRouteDelegations,
-} from "@/lib/domain/portal-approval-delegation";
-import {
   getCurrentShipmentApprovalRouteChain,
   getShipmentApprovalRouteSteps,
 } from "../queries/shipment-approval-routes";
@@ -373,34 +368,26 @@ export async function requestRepairCaseApproval(
 }
 
 /**
- * @param portalDelegations 🔴 **포털(dss-auth)에 맡긴 결재권 위임**을 **트랜잭션을 열기
- *   전에** 물어 온 결과다(2026-11-16, 설계 B-1·C-3 —
- *   dss-approvals/DELEGATION_DESIGN.md). 묻는 자리는 서버 액션이고
- *   (server/actions/repair-case-approvals.ts), 묻는 함수는
- *   server/integration/portal-delegations.ts 의 resolvePortalRouteDelegations 다.
+ * 🔴 **포털(dss-auth)에 맡긴 결재권 위임도 여기서 함께 듣는다 — 인자가 아니다**
+ * (2026-11-16, 설계 B-12). 2026-11-16 낮에는 서버 액션이 **포털에 물어** 그 결과를
+ * 여섯째 인자로 들고 들어왔는데, 같은 날 저녁에 방식이 **포털이 전파하는** 쪽으로
+ * 뒤집히면서 그 줄이 A/S 안의 표(`portal_approval_delegations`)에 앉았다. 그래서
+ * **이 트랜잭션 안에서 제 표를 읽으면 된다** — 읽는 자리는 아래
+ * `resolveActingApproverUserIds` 하나이고, 결재 길목에 망 호출이 없다.
  *
- *   🔴 **여기서 직접 묻지 않는 까닭이 둘이다.** (1) 망 호출을 트랜잭션 안에 넣으면
- *   결재 행 잠금이 망 지연만큼 붙들린다(설계 C-3). (2) 이 집의 층 가르기는
- *   `server/` → `db/` 한 방향이라 `src/lib/db` 는 `@/lib/server/...` 를 끌어올 수 없다.
- *
- *   🔵 기본값은 「묻지 않았다」다. 🔴 **그래서 이 함수를 새로 부르는 자리가 생기면
- *   포털 위임이 조용히 안 걸린다** — 지금 부르는 자리가 서버 액션 하나뿐이라 필수
- *   인자로 두지 않았고, 대신 그 한 자리가 실제로 묻는지를
- *   server/actions/portal-delegation-wiring.test.ts 가 소스로 못 박는다.
+ * 🔴 **그 인자를 되살리지 마라.** 망 호출이 트랜잭션 안으로 들어오면 결재 행 잠금이
+ * 포털 지연만큼 붙들리고(설계 C-3), 이 집의 층 가르기(`server/` → `db/` 한 방향)도
+ * 깨진다. 「포털에 못 물었다」라는 상태 자체가 이제 없다.
  */
 export async function decideRepairCaseApproval(
   repairCaseId: string,
   approvalType: RepairCaseApprovalType,
   decision: "APPROVED" | "REJECTED",
   actorUserId: string,
-  decisionReason: string | null,
-  portalDelegations: PortalRouteDelegations = NO_PORTAL_DELEGATIONS
+  decisionReason: string | null
 ): Promise<ApprovalActionResult> {
   try {
-    // 🔴 돌려주는 모양을 **여기서 못 박는다.** 값을 변수에 받아 두면(아래에서 포털
-    // 안내를 얹어야 한다) 바깥 함수의 반환 타입이 더 이상 문맥을 주지 않아, `ok: true`
-    // 가 `boolean` 으로 넓어져 버린다.
-    const decided = await db.transaction(async (tx): Promise<ApprovalActionResult> => {
+    return await db.transaction(async (tx) => {
       // 🔴 결재선 공유 잠금 — 이 트랜잭션의 **첫 잠금**이다(요청 경로와 같은 이유).
       // 아래에서 사슬을 이을 때 판의 다음 단계 승인자를 지정하는데, 그 사이 사용자
       // 계정 삭제가 커밋되면 지워진 사람에게 다음 행이 간다. 결정 행을 FOR UPDATE 로
@@ -486,19 +473,14 @@ export async function decideRepairCaseApproval(
       // 승인(결재선을 탈 수 없다)과 대표·위임 방식의 출하 승인(지정이 NULL 이라 관문이
       // 어차피 열려 있다)이 그 둘이다. 묻지 않는 쪽이 질의도 하나 아낀다.
       //
-      // 🔴 **포털에 맡긴 위임도 같은 갈래에서 함께 걸린다**(2026-11-16, 설계 B-4 —
-      // 두 고지를 둘 다 인정하고 합집합으로 판정한다). 들고 들어온 목록을 여기서
-      // 넘길 뿐, 합치는 규칙(본인 맨 앞 · 중복 제거 · **이어 붙지 않음**)은 순수 함수
+      // 🔴 **승인함에서 맡긴 위임도 같은 갈래에서 함께 걸린다**(2026-11-16, 설계
+      // B-4·B-12 — 두 고지를 둘 다 인정하고 합집합으로 판정한다). 그 조회가 표 **둘**을
+      // 읽고, 합치는 규칙(본인 맨 앞 · 중복 제거 · **이어 붙지 않음**)은 순수 함수
       // 하나가 쥔다(domain/approval-route-delegation.ts 의 actingApproverUserIds).
-      // 🔵 결재선을 타지 않는 행에서 그 목록이 버려지는 것은 맞다 — 포털 위임도 결재선
+      // 🔵 결재선을 타지 않는 행에서 둘 다 버려지는 것은 맞다 — 포털 위임도 결재선
       // **단계**를 맡기는 것이라 단계가 없는 행에는 대신할 자리가 없다.
       const actingApproverUserIds = followsRoute
-        ? await resolveActingApproverUserIds(
-            actorUserId,
-            new Date(),
-            tx,
-            portalDelegations.delegatorUserIds
-          )
+        ? await resolveActingApproverUserIds(actorUserId, new Date(), tx)
         : NO_ROUTE_DELEGATIONS;
 
       let delegatedFromUserId: string | null = null;
@@ -734,16 +716,8 @@ export async function decideRepairCaseApproval(
 
       return { ok: true, id: updated[0].id };
     });
-    // 🔴 **「포털에 못 물은 채로 판정했다」를 결과에 얹는다** — 성공이든 거절이든
-    // 같다. 까닭(그리고 왜 가지를 두지 않는가)은 notePortalDelegationOutage 주석에
-    // 있다. 화면이 안내를 띄우는 것은 다음 조각의 일이지만, **나올 길은 여기다.**
-    return notePortalDelegationOutage(decided, portalDelegations);
   } catch (err) {
-    if (err instanceof ApprovalMutationError) {
-      // 🔴 막힌 쪽이 특히 중요하다 — 위임으로 통과했어야 할 사람이 지정 관문에
-      // 막힌 그 순간이고, 안내가 없으면 그 사람은 까닭을 영영 모른다.
-      return notePortalDelegationOutage(err.result, portalDelegations);
-    }
+    if (err instanceof ApprovalMutationError) return err.result;
     throw err;
   }
 }

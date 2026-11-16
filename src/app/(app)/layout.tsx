@@ -35,7 +35,6 @@ import { getSsoClientId, getSsoClientIdOrEmpty, getSsoPortalUrl } from "@/lib/co
 import { readServiceMenu } from "@/lib/auth/service-menu-cookie";
 import { listMyNotifications } from "@/lib/db/queries/notifications";
 import { getSsoSubjectForUser } from "@/lib/db/queries/users";
-import { readPortalRouteDelegations } from "@/lib/server/acting-approvers";
 import { fetchPortalNotificationInbox } from "@/lib/server/integration/portal-inbox";
 import { countNotificationTargetsByKind } from "@/lib/domain/notifications";
 
@@ -110,28 +109,16 @@ export default async function AppLayout({
   // 조회는 여기 한 번뿐이다 — 배지 숫자는 그 결과에서 뽑는다. 배지가 따로 count
   // 조회를 부르면 모든 페이지 로드마다 같은 조회가 두 번 돈다.
   //
-  // ── 🔴 **결재권 위임을 포털에 묻는다. 여기서는 기다린다**(2026-11-16) ─────────
-  // 2026-11-13 결정으로 결재권 위임이 포털 한 곳에 모였다(설계 B-1·B-4). 안 물으면
-  // **승인함에만 위임을 맡은 사람의 종에 그 건이 안 떠서**, 대신 눌러야 할 일이 있다는
-  // 사실 자체를 모른다 — 결재 화면까지 찾아갈 까닭이 없어진다.
-  //
-  // 🔴 **아래 포털 알림함(fetchPortalNotificationInbox)과 일부러 다르게 간다.** 그쪽은
-  // 🔴🔴 주석대로 **절대 기다리지 않는데**, 포털이 그 물음에 답하려면 **다른 여섯
-  // 시스템을 차례로 물어야** 하기 때문이다(사이트 부채질). 이것은 포털의 제 표를 한 번
-  // 읽는 물음이고, 무엇보다 **종에 무엇이 실릴지가 그 답에 달려 있어** 미룰 수가 없다
-  // (알림함은 늦게 도착해 이어 붙으면 그만이다).
-  //
-  // 🔴 그래도 **공짜가 아니다** — 이 레이아웃은 모든 화면에 딸려 오므로, 포털이 느린
-  // 날에는 화면 이동이 그만큼 느려진다(상한 2초 — server/integration/portal-delegations.ts).
-  // 🔵 못 물어도 종은 그대로 뜬다: 「위임 없음」으로 보고 자기 건만 싣는다(설계 B-6).
-  //
-  // 🔵 「DB 읽기 모드인가」를 한 번만 묻는다 — 두 줄이 같은 조건으로 갈리는데, 각자
-  //    물으면 한쪽만 고쳐지는 날 **묻기는 하고 안 쓰는**(또는 그 반대) 모양이 된다.
-  const readsDatabase = getRepairCaseReadSource() === "database";
-  const portalDelegations = readsDatabase ? await readPortalRouteDelegations(user.id) : null;
-  const notifications = readsDatabase
-    ? await listMyNotifications(user.id, user.role, portalDelegations?.delegatorUserIds)
-    : [];
+  // ── 🟢 **결재권 위임을 여기서 묻지 않는다**(2026-11-16, 설계 B-12) ──────────
+  // 2026-11-16 낮에는 이 자리에 **포털 왕복이 하나** 있었다. 승인함에만 위임을 맡은
+  // 사람의 종에 그 건이 뜨게 하려면 포털에 물을 수밖에 없었고, 그 대가로 **모든 화면
+  // 이동에 상한 2초가 붙어** 있었다 — 이 레이아웃은 모든 화면에 딸려 오기 때문이다.
+  // 같은 날 저녁에 방식이 **포털이 전파하는** 쪽으로 뒤집히면서 그 줄이 A/S 안의 표에
+  // 앉았고, 이제 아래 조회가 **제 DB 에서** 두 표를 함께 읽는다. 🔴 **여기에 포털
+  // 왕복을 다시 들이지 마라** — 이 파일에 이미 적혀 있는 「기다리면 전 화면이 느려진다」
+  // 가 그 까닭이고, 아래 포털 알림함이 끝까지 `await` 를 안 붙이는 것도 같은 규칙이다.
+  const notifications =
+    getRepairCaseReadSource() === "database" ? await listMyNotifications(user.id, user.role) : [];
   const myPendingApprovalCount = countNotificationTargetsByKind(notifications).REPAIR_CASE_APPROVAL;
 
   // 같은 종에 실리는 **다른 시스템들의** 알림(개선요청 · 계측기 · PO/내자 ·

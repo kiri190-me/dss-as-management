@@ -1299,13 +1299,11 @@ src/components/domestic-orders/detail/domestic-order-due-date-row-approval-scree
 # 헷갈리지 않도록 채운 바탕과 ✓ 를 함께 본다.
 src/components/approvals/final-shipment-approved-badge-screens.test.tsx
 
-# 🔴 **포털에 결재권 위임을 못 물었다**를 결재 화면에서 말하는 상자(2026-11-16, 설계 B-7 —
-# dss-approvals/DELEGATION_DESIGN.md). 못 물으면 결재는 그대로 진행되고 **대리인만 조용히
-# 막히는데**, 「조용히 막힌다」가 이 저장소들에서 가장 비싼 결함 모양이라 이 상자가 그 대가를
-# 갚는 **유일한** 자리다. 🔴 **진짜로 그려서** 잰다 — 프롭을 받기만 하고 아무것도 안 그리는
-# 조각은 원본 글자로 읽는 시험에서 초록으로 통과한다. 🔴 **「안 그린다」 쪽을 함께 잰다**
-# (포털이 멀쩡할 때) — 상시 경고가 깔리면 진짜 장애일 때 아무도 안 읽는다.
-src/components/approvals/portal-delegation-unavailable-notice.test.tsx
+# 🔵 여기 있던 **「포털에 결재권 위임을 못 물었다」 안내 상자**의 시험은 2026-11-16 저녁에
+# 그 상자와 함께 걷어냈다. 결재할 때마다 포털에 묻던 방식이 **포털이 전파하는** 쪽으로
+# 뒤집히면서(설계 B-12) 「못 물었다」라는 상태 자체가 없어졌다 — 결재 길목에 망 호출이
+# 한 줄도 없다. 🔴 그 길이 되살아나는 것은 unit 쪽 두 시험이 막는다
+# (server/portal-delegation-read-wiring.test.ts · server/actions/portal-delegation-wiring.test.ts).
 
 # 🔴 한 종류의 필터 안에서 **여럿 고르는** 칸 — 사이트 공용 부품(2026-11-11 사용자
 # 개선요청). **일곱 필터가 모두 이것을 쓴다**([전체 A/S 현황]의 다섯 · [기타건 현황]의

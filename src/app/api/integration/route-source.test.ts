@@ -324,13 +324,19 @@ describe("결재권 위임을 받아 적는 통로", () => {
     assert.match(delegations, /status: 500/);
   });
 
-  test("🔴 결재 판정에 연결하지 않는다 — 이 표를 읽어 결재를 가르는 것은 조각 8 이다", () => {
-    for (const forbidden of [
-      "resolveActingApproverUserIds",
-      "actingApproverUserIds",
-      "resolvePortalRouteDelegations",
-    ]) {
+  test("🔴 **받아 적기만** 한다 — 판정은 결재 길목의 일이다", () => {
+    // 🔵 2026-11-16 저녁까지 이 시험의 이름은 「…결재를 가르는 것은 조각 8 이다」였다.
+    //    그 조각이 끝나(판정이 `queries/approval-route-delegations.ts` 에서 이 표를
+    //    함께 읽는다) 「아직 안 이었다」는 뜻은 사라졌지만, **단언은 그대로 살아 있다**:
+    //    받는 통로가 제 손으로 「누가 누를 수 있나」를 세기 시작하면 그 규칙이 두 곳이
+    //    되고, 둘이 갈리는 날 「목록에는 뜨는데 눌리지 않는다」가 된다.
+    for (const forbidden of ["resolveActingApproverUserIds", "actingApproverUserIds"]) {
       assert.ok(!delegations.includes(forbidden), `받는 통로가 판정을 건드린다: ${forbidden}`);
+    }
+    // 🔴 **거꾸로도 막는다** — 받는 통로가 포털에 되묻기 시작하면, 포털이 전파하는
+    //    동안 A/S 가 포털을 기다린다(설계 B-12 가 없앤 바로 그 왕복이다).
+    for (const forbidden of ["resolvePortalRouteDelegations", "readPortalRouteDelegations", "fetch("]) {
+      assert.ok(!delegations.includes(forbidden), `받는 통로가 포털을 되부른다: ${forbidden}`);
     }
   });
 

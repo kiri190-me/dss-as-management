@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gt, isNotNull, isNull, lte, or } from "drizzle-orm"
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { hasPermission, type PermissionActor } from "@/lib/auth/permission-resolver";
-import { approvalRouteDelegations, users } from "../schema";
+import { approvalRouteDelegations, portalApprovalDelegations, users } from "../schema";
 import {
   actingApproverUserIds,
   actingDelegateUserIdsFor,
@@ -303,43 +303,24 @@ export async function listAllApprovalRouteDelegations(
 type Executor = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
 
 /**
- * 🔴 **「이 자리는 포털에 안 물었다」를 글자로 적는 값**(2026-11-16).
- *
- * 🔴 **저장 계층은 포털에 묻지 않는다 — 묻는 것은 언제나 부르는 쪽**이다. 이 집의 층
- * 가르기가 `server/` → `db/` 한 방향이라(여기서 `@/lib/server/...` 를 끌어오는 파일이
- * 하나도 없다) 망 호출이 이 아래로 내려올 수 없고, 그 모양이 설계 C-3 과도 맞는다 —
- * 결재 판정은 제 트랜잭션 **안에서** 도는데 망 호출을 거기 넣으면 결재 행 잠금이 포털
- * 지연만큼 붙들린다.
- *
- * 묻는 자리는 지금 **다섯**이고, 전부 위쪽이다:
- *  · 결재 **쓰기** 셋 — 서버 액션(actions/{repair-case,quote,domestic-order}-approvals.ts)
- *    이 트랜잭션을 열기 전에 묻는다(조각 3a).
- *  · 결재 **읽기** 둘 — 결재 화면 셋과 A/S 자신의 대기 목록(종 · 접수 건 목록)이
- *    server/acting-approvers.ts 를 거쳐 묻는다(조각 3b).
- *
- * ── 🔴 안 묻는 자리가 **일부러** 남아 있다. 지우지 마라 ─────────────────────
- *  1. 🔴 **포털이 되묻는 통로 둘** — `app/api/integration/approvals/route.ts` 와 같은
- *     폴더의 `notifications/route.ts`. **그 통로를 부르는 쪽이 포털 자신**이다(통합
- *     승인함·결재 메일·종이 그 길로 A/S 에 묻는다). 거기서 또 포털에 물으면 포털이
- *     A/S 를 기다리는 동안 A/S 가 포털을 기다린다 — 상한이 양쪽에 있어 멈추지는 않지만,
- *     결재함 한 번 여는 데 왕복이 사람 수만큼 는다. 🔴 두 통로가 대기 목록 조회 셋을
- *     **인자 하나로** 부르는 것이 그 울타리이고, 소스 글자로 시험이 못 박는다
- *     (server/portal-delegation-read-wiring.test.ts).
- *  2. **수리 검수 승인** — 결재선을 탈 수 없어(표의 CHECK) 대신할 단계가 없다.
- *  3. 결재 mutation 을 **직접 부르는 시험·스크립트** — 망을 타지 않는다.
- *
- * 🔵 그 자리들에서는 **A/S 제 위임만** 듣는다(설계 B-4 로 둘 다 살려 두기로 했다).
- * 포털에만 맡긴 위임이 안 보일 뿐, 본인의 결재는 한 글자도 달라지지 않는다.
- */
-export const NO_PORTAL_DELEGATION_USER_IDS: readonly string[] = [];
-
-/**
  * 🔴 **「지금 이 사람의 자격으로 누를 수 있는 결재자 id」 전부.** 맨 앞은 언제나
  * 본인이고, 뒤에 지금 살아 있는 위임의 결재권자들이 붙는다.
  *
  * 판정 자체는 하지 않는다 — 줄을 읽어 순수 함수(`actingApproverUserIds`)에 넘길 뿐이다.
  * 「누를 수 있나」가 SQL 과 TS 두 벌로 적히지 않게 하려는 것이고, 그 까닭은 그 함수
  * 주석에 길게 적혀 있다.
+ *
+ * ── 🔴 **표 둘을 읽는다. 망은 타지 않는다** (2026-11-16, 설계 B-12) ──────────
+ * 위임을 맡기는 고지가 둘이다(설계 B-4 — 둘 다 살려 둔다):
+ *  · `approval_route_delegations` — A/S 화면에서 사람이 맡긴 줄.
+ *  · `portal_approval_delegations` — 통합 승인함에서 맡겨 **포털이 전파해 준** 줄.
+ *
+ * 🔴 **그 둘은 같은 DB 의 표라서 같은 `executor` 로 읽는다** — 트랜잭션이 넘어오면
+ * 둘 다 그 안에서 읽힌다. 한때는 포털에 **그때그때 물어**(설계 B-3) 서버 액션이 그
+ * 답을 인자로 들고 들어왔는데, 2026-11-16 저녁에 방식이 전파로 뒤집히면서(B-12) 결재
+ * 길목의 망 호출이 통째로 없어졌다. 🔴 **여기에 망 호출을 다시 들이지 마라** — 결재
+ * 행 잠금이 포털 지연만큼 붙들리고, 포털 한 곳이 느린 날 결재가 함께 느려진다.
+ * 🔵 이 집의 층 가르기(`server/` → `db/` 한 방향)가 그것을 구조로도 막는다.
  *
  * ── 🔴 `executor` 를 꼭 넘겨라. 기본값은 **읽기 전용 자리에서만** 쓴다 ────────
  * 결재를 집는 쓰기와 **같은 트랜잭션**으로 읽지 않으면, 읽은 직후 되돌려진 위임으로
@@ -349,10 +330,11 @@ export const NO_PORTAL_DELEGATION_USER_IDS: readonly string[] = [];
  *
  * ── SQL 로 좁히는 셋은 전부 순수 함수가 **또** 거르는 조건이다 ───────────────
  * 대리인(`delegate_user_id`) · 안 되돌림(`revoked_at IS NULL`) · 안 끝남
- * (`ends_at > now`). 색인 칸 순서가 그대로 이 셋이다. 좁히기가 지우는 줄은 순수
- * 함수가 어차피 버리는 줄뿐이라 답이 달라지지 않는다 — **시작 시각은 일부러 SQL 에서
- * 보지 않는다.** 한 사람에게 걸린 위임은 많아야 몇 줄이고, 색인에도 그 칸은 없다
- * (표 쪽 🔵 주석). 아직 시작 안 한 줄은 순수 함수가 버린다.
+ * (`ends_at > now`). 색인 칸 순서가 그대로 이 셋이고, **두 표의 색인이 같은 모양**이라
+ * 좁히는 글자도 같다. 좁히기가 지우는 줄은 순수 함수가 어차피 버리는 줄뿐이라 답이
+ * 달라지지 않는다 — **시작 시각은 일부러 SQL 에서 보지 않는다.** 한 사람에게 걸린
+ * 위임은 많아야 몇 줄이고, 색인에도 그 칸은 없다(표 쪽 🔵 주석). 아직 시작 안 한 줄은
+ * 순수 함수가 버린다.
  *
  * 🔴 **맡긴 사람이 지금 쓸 수 있는 계정인지는 보지 않는다.** 위임을 만들 때 검사하고
  * (mutations/approval-route-delegations.ts), 그 뒤에 그 사람이 잠기거나 비활성이
@@ -360,37 +342,55 @@ export const NO_PORTAL_DELEGATION_USER_IDS: readonly string[] = [];
  * 자리를 비운 사이 그 단계를 넘겨 주는 것이 이 기능이 있는 까닭이기 때문이다.
  * 여기에 「맡긴 사람이 활성인가」를 더하면, 사람이 자리를 비운 바로 그 상황에서
  * 위임이 함께 죽는다.
- *
- * @param portalDelegatorUserIds **포털에 맡긴 위임**으로 지금 대신할 수 있는 결재권자들
- *   (2026-11-16, 설계 B-4). 이미 **A/S `users.id` 로 바뀐** 값이어야 한다 — 바꾸는
- *   자리는 server/integration/portal-delegations.ts 다. 합치는 규칙(합집합 · 본인 맨
- *   앞 · 중복 제거 · **이어 붙지 않음**)은 여기 적지 않고 순수 함수 하나가 쥔다.
- *   🔴 기본값이 **빈 목록**인 까닭은 바로 위 `NO_PORTAL_DELEGATION_USER_IDS` 주석에 있다.
+ * 🔵 포털에서 온 줄도 같다 — 받는 통로가 계정 상태를 보지 않는 까닭이 그 표의
+ * 저장 함수 주석에 있다(mutations/portal-approval-delegations.ts).
  */
 export async function resolveActingApproverUserIds(
   actorUserId: string,
   now: Date,
-  executor: Executor = db,
-  portalDelegatorUserIds: readonly string[] = NO_PORTAL_DELEGATION_USER_IDS
+  executor: Executor = db
 ): Promise<ActingApproverUserIds> {
-  const rows: ApprovalRouteDelegationPeriod[] = await executor
-    .select({
-      delegatorUserId: approvalRouteDelegations.delegatorUserId,
-      delegateUserId: approvalRouteDelegations.delegateUserId,
-      startsAt: approvalRouteDelegations.startsAt,
-      endsAt: approvalRouteDelegations.endsAt,
-      revokedAt: approvalRouteDelegations.revokedAt,
-    })
-    .from(approvalRouteDelegations)
-    .where(
-      and(
-        eq(approvalRouteDelegations.delegateUserId, actorUserId),
-        isNull(approvalRouteDelegations.revokedAt),
-        gt(approvalRouteDelegations.endsAt, now)
-      )
-    );
+  // 🔵 두 질의를 **함께** 던진다 — 한 표가 비는 것이 흔한데(아직 승인함을 안 쓰는
+  //    사람) 줄 세우면 그 사람에게도 왕복이 둘이 된다. 「지금」은 위에서 받은 한
+  //    값이라 두 질의가 같은 순간을 본다.
+  const [ownRows, portalRows] = await Promise.all([
+    executor
+      .select({
+        delegatorUserId: approvalRouteDelegations.delegatorUserId,
+        delegateUserId: approvalRouteDelegations.delegateUserId,
+        startsAt: approvalRouteDelegations.startsAt,
+        endsAt: approvalRouteDelegations.endsAt,
+        revokedAt: approvalRouteDelegations.revokedAt,
+      })
+      .from(approvalRouteDelegations)
+      .where(
+        and(
+          eq(approvalRouteDelegations.delegateUserId, actorUserId),
+          isNull(approvalRouteDelegations.revokedAt),
+          gt(approvalRouteDelegations.endsAt, now)
+        )
+      ),
+    executor
+      .select({
+        delegatorUserId: portalApprovalDelegations.delegatorUserId,
+        delegateUserId: portalApprovalDelegations.delegateUserId,
+        startsAt: portalApprovalDelegations.startsAt,
+        endsAt: portalApprovalDelegations.endsAt,
+        revokedAt: portalApprovalDelegations.revokedAt,
+      })
+      .from(portalApprovalDelegations)
+      .where(
+        and(
+          eq(portalApprovalDelegations.delegateUserId, actorUserId),
+          isNull(portalApprovalDelegations.revokedAt),
+          gt(portalApprovalDelegations.endsAt, now)
+        )
+      ),
+  ]);
 
-  return actingApproverUserIds(rows, actorUserId, now, portalDelegatorUserIds);
+  const own: ApprovalRouteDelegationPeriod[] = ownRows;
+  const portal: ApprovalRouteDelegationPeriod[] = portalRows;
+  return actingApproverUserIds(own, actorUserId, now, portal);
 }
 
 /**

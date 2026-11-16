@@ -280,15 +280,19 @@ describe("🔴 결재선이 없으면 무엇을 해야 하는지 말한다", () 
   });
 
   test("서버가 거절한 이유를 삼키지 않는다", () => {
-    // 🔴 **2026-11-16 에 한 겹이 붙었다** — 서버가 돌려준 말을 그대로 쓰되, 결과에
-    //    「포털에 결재권 위임을 못 물었다」가 실려 오면 그 사실을 **이어 붙인다**
-    //    (설계 B-7). 눌렀다가 거절당한 그 순간이 안내가 가장 필요한 때이고, 화면
-    //    위의 상자는 **그릴 때** 물어본 결과라 그 뒤에 넘어진 포털을 모른다.
-    // 🔵 「삼키지 않는다」는 계약은 그대로다: 글자를 지어내지 않고 `result.message`
-    //    를 그대로 넘긴다(포털이 멀쩡하면 그 함수가 받은 글자를 그대로 돌려준다).
+    // 🔵 2026-11-16 낮에 한 겹이 붙었다가 같은 날 저녁에 걷혔다. 붙었던 것은 결과에
+    //    실려 오던 「포털에 결재권 위임을 못 물었다」를 이어 붙이는 함수였는데, 방식이
+    //    **포털이 전파하는** 쪽으로 뒤집히면서(설계 B-12) **「못 물었다」라는 상태 자체가
+    //    없어졌다.** 그래서 다시 `result.message` 한 줄이다.
     assert.ok(
-      flat(panelSource).includes("setErrorMessage(appendPortalDelegationOutage(result.message, result));"),
+      flat(panelSource).includes("setErrorMessage(result.message);"),
       "서버가 돌려준 안내(결재선 없음 등)가 화면에 남지 않는다"
+    );
+    // 🔴 **걷어낸 길이 되살아나는 것까지 막는다** — 되살아난다는 것은 결재 길목에
+    //    포털 왕복을 다시 들인다는 뜻이다.
+    assert.ok(
+      !panelSource.includes("appendPortalDelegationOutage"),
+      "🔴 걷어낸 포털 안내가 되살아났다 — 결재할 때마다 포털에 묻는 길이 돌아온 것이다"
     );
   });
 });
@@ -484,22 +488,27 @@ describe("결재 탭이 놓인 자리", () => {
     // 위임 목록은 `approval_route_delegations` 를 읽어야 나온다. 클라이언트가
     // 그것을 읽게 두지 않는 것은 actingUser 를 서버에서 만들어 내려보내는 것과
     // 같은 이유다(페이지가 읽어 프롭으로 준다).
-    assert.match(flat(editPageSource), /actingApproverUserIds=\{actingApprovers\.userIds\}/);
-    // 🔴 **2026-11-16 부터 포털에도 묻는다**(설계 B-4) — 승인함에서 맡긴 위임이
-    //    여기서 듣지 않으면 그 사람에게는 단추가 아예 안 그려진다. 묻고·합치고·「못
-    //    물었다」를 함께 내보내는 일은 server/acting-approvers.ts 하나가 한다.
-    //    🔴 그 함수를 거치지 않고 DB 조회만 다시 부르면 **포털 위임이 조용히 빠진다**
-    //    — 그래서 옛 이름이 **안 보이는 것**까지 함께 못 박는다.
-    assert.match(flat(editPageSource), /resolveActingApproversForScreen\(actingUser\.id\)/);
-    assert.ok(
-      !flat(editPageSource).includes("resolveActingApproverUserIds("),
-      "페이지가 DB 조회를 직접 불러 포털 위임을 건너뛴다"
-    );
-    // 🔴 「못 물었다」가 패널까지 간다 — 떨어뜨리면 안내를 띄울 길이 없다(설계 B-7).
+    assert.match(flat(editPageSource), /actingApproverUserIds=\{actingApproverUserIds\}/);
+    // 🔴 **승인함에서 맡긴 위임도 그 조회가 함께 읽는다**(2026-11-16, 설계 B-4·B-12).
+    //    그날 낮에는 페이지가 **포털에 물어**(resolveActingApproversForScreen) 합쳤는데,
+    //    저녁에 방식이 전파로 뒤집히면서 그 줄이 A/S 안의 표에 앉았다 — 이제 DB 조회
+    //    하나가 두 표를 읽는다.
     assert.match(
       flat(editPageSource),
-      /portalDelegationUnavailable=\{actingApprovers\.portalDelegationUnavailable\}/
+      /resolveActingApproverUserIds\(actingUser\.id, new Date\(\)\)/
     );
+    // 🔴 **묻던 길이 되살아나는 것을 막는다.** 되살아나면 견적서 화면을 여는 데
+    //    포털 왕복이 하나 붙고, 포털이 느린 날 그만큼 늦게 그려진다.
+    for (const 금지 of [
+      "resolveActingApproversForScreen",
+      "readPortalRouteDelegations",
+      "portalDelegationUnavailable",
+    ]) {
+      assert.ok(
+        !flat(editPageSource).includes(금지),
+        `🔴 걷어낸 포털 왕복이 되살아났다: ${금지}`
+      );
+    }
     // 화면은 받은 목록을 **공용 관문에 그대로 넘기기만** 한다 — 「누가 누를 수
     // 있나」를 여기서 다시 계산하면 서버와 갈라진다.
     assert.doesNotMatch(panelSource, /actingApproverUserIds\.includes\(/);

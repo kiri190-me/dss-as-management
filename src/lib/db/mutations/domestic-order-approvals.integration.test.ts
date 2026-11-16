@@ -9,6 +9,7 @@ import { db, pgClient } from "../connection";
 import {
   auditLogs,
   domesticOrders,
+  portalApprovalDelegations,
   repairCaseApprovals,
   shipmentApprovalRouteSteps,
   shipmentApprovalRoutes,
@@ -32,7 +33,6 @@ import {
   DOMESTIC_ORDER_APPROVAL_ROUTE_SCOPE,
   DOMESTIC_ORDER_APPROVAL_TYPE,
 } from "@/lib/domain/domestic-order-approval-rules";
-import type { PortalRouteDelegations } from "@/lib/domain/portal-approval-delegation";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 
 /**
@@ -215,6 +215,11 @@ async function removeFixtures(): Promise<void> {
     createdOrderIds.length = 0;
   }
   if (createdTestUserIds.length > 0) {
+    // 🔴 포털이 써 준 위임 줄도 사람을 RESTRICT 로 둘 가리킨다(2026-11-16). 남으면
+    //    이 파일의 계정 삭제가 막히고, 그 실패는 **다음 실행**에서 엉뚱한 얼굴로 난다.
+    await db
+      .delete(portalApprovalDelegations)
+      .where(inArray(portalApprovalDelegations.delegateUserId, createdTestUserIds));
     await db
       .delete(shipmentApprovalRouteSteps)
       .where(inArray(shipmentApprovalRouteSteps.approverUserId, createdTestUserIds));
@@ -237,6 +242,9 @@ async function removeLeftovers(): Promise<void> {
 
   await db.delete(repairCaseApprovals).where(inArray(repairCaseApprovals.requestedByUserId, ids));
   await db.delete(domesticOrders).where(inArray(domesticOrders.createdBy, ids));
+  await db
+    .delete(portalApprovalDelegations)
+    .where(inArray(portalApprovalDelegations.delegateUserId, ids));
   await db
     .delete(shipmentApprovalRouteSteps)
     .where(inArray(shipmentApprovalRouteSteps.approverUserId, ids));
@@ -820,23 +828,36 @@ describe("🔴 접수 건 승인이 한 톨도 바뀌지 않는다", () => {
 });
 
 /* ========================================================================== */
-/* 🔴 포털에 맡긴 결재권 위임이 **기타건에도** 걸린다 (2026-11-16)             */
+/* 🔴 통합 승인함에서 맡긴 위임이 **기타건에도** 걸린다 (2026-11-16)           */
 /*                                                                            */
 /* 결재 셋(접수 건 출하 · 견적서 · 기타건 출하)이 **다** 읽어야 한다. 하나라도 */
 /* 빠지면 「어떤 결재는 위임이 듣고 어떤 것은 안 듣는」 상태가 되고, 그것은     */
 /* 아무도 설명할 수 없는 모양인 데다 **오류를 한 줄도 내지 않는다.** 기타건은   */
 /* 2026-11-06 에 새로 생긴 갈래라 특히 빠뜨리기 쉬워 여기서 따로 잰다.         */
 /*                                                                            */
-/* 🔵 **포털을 부르지 않는다.** 물어 온 결과를 인자로 받는다(설계 C-3 — 망     */
-/*    호출은 트랜잭션 밖 서버 액션의 일이다). 묻는 왕복은                      */
-/*    server/integration/portal-delegations.test.ts 가, 액션이 실제로 묻는지는 */
-/*    server/actions/portal-delegation-wiring.test.ts 가 잰다.                 */
+/* 🔵 **읽는 방식이 2026-11-16 하루에 두 번 정해졌다.** 낮에는 결재할 때마다   */
+/*    포털에 물어 그 답을 **인자로** 받았고(설계 B-3), 저녁에 **포털이 전파해  */
+/*    주면 제 표만 읽는** 쪽으로 뒤집혔다(설계 B-12). 그래서 여기서도 인자 대신 */
+/*    `portal_approval_delegations` 에 **줄을 세워** 잰다 — 운영에서 그 줄을   */
+/*    만드는 것은 포털이 부르는 통로 하나뿐이다.                               */
 /* ========================================================================== */
 
-describe("🔴 포털에 맡긴 결재권 위임 — 기타건에도 걸린다", () => {
-  /** 포털이 답한 것 — 이미 A/S `users.id` 로 바뀐 값이다. 맨 앞은 부른 사람 자신. */
-  function 포털위임(delegatorUserIds: string[]): PortalRouteDelegations {
-    return { delegatorUserIds, unavailable: false };
+describe("🔴 승인함에 맡긴 결재권 위임 — 기타건에도 걸린다", () => {
+  /**
+   * 🔴 포털이 전파해 준 위임 한 줄. `id` 는 **포털이 정해서 보내는 값**이라 표에
+   * 기본값이 없다 — 시험이 만들어 넣는다.
+   */
+  async function 포털위임줄(delegatorUserId: string, delegateUserId: string): Promise<void> {
+    const now = Date.now();
+    await db.insert(portalApprovalDelegations).values({
+      id: randomUUID(),
+      delegatorUserId,
+      delegateUserId,
+      startsAt: new Date(now - 24 * 60 * 60 * 1000),
+      endsAt: new Date(now + 24 * 60 * 60 * 1000),
+      reason: "",
+      revokedAt: null,
+    });
   }
 
   /** 1단계가 stepA 에게 열려 있는 기타건 하나. */
@@ -855,27 +876,27 @@ describe("🔴 포털에 맡긴 결재권 위임 — 기타건에도 걸린다",
     return order.id;
   }
 
-  test("포털 위임만으로 승인되고, 기록에 **둘 다** 남는다", async () => {
+  test("포털 표의 줄만으로 승인되고, 기록에 **둘 다** 남는다", async () => {
     const orderId = await 결재올린기타건();
 
-    // 🔵 포털을 빼고 눌러 보면 **막힌다**를 먼저 못 박는다 — 안 하면 이 시험이
+    // 🔵 줄을 세우기 전에 눌러 보면 **막힌다**를 먼저 못 박는다 — 안 하면 이 시험이
     //    「제삼자도 원래 누를 수 있었다」인 구현에서 공짜로 통과한다.
-    const 포털없이 = await decideDomesticOrderApproval({
+    const 위임없이 = await decideDomesticOrderApproval({
       domesticOrderId: orderId,
       decision: "APPROVED",
       actorUserId: outsiderId,
       decisionReason: null,
       dueDateRowOrder: 1,
     });
-    assert.equal(포털없이.ok, false, "위임도 없는 제삼자가 눌렀다");
+    assert.equal(위임없이.ok, false, "위임도 없는 제삼자가 눌렀다");
 
+    await 포털위임줄(stepAId, outsiderId);
     const decided = await decideDomesticOrderApproval({
       domesticOrderId: orderId,
       decision: "APPROVED",
       actorUserId: outsiderId,
       decisionReason: null,
       dueDateRowOrder: 1,
-      portalDelegations: 포털위임([outsiderId, stepAId]),
     });
     assert.equal(decided.ok, true, `포털 위임이 안 걸렸다: ${JSON.stringify(decided)}`);
 
@@ -887,18 +908,18 @@ describe("🔴 포털에 맡긴 결재권 위임 — 기타건에도 걸린다",
     assert.equal(row.assignedApproverUserId, stepAId, "지정이 대리인으로 덮였다");
   });
 
-  test("🔴 포털 목록이 **이 단계의 결재자를 담고 있지 않으면** 못 누른다 — 통행증이 아니다", async () => {
+  test("🔴 포털 줄이 **이 단계의 결재자 것이 아니면** 못 누른다 — 통행증이 아니다", async () => {
     const orderId = await 결재올린기타건();
 
-    // 🔴 **여기 들어오는 목록은 이미 「부른 사람」 몫으로 좁혀진 값**이다(포털에 제
-    //    번호로 물어 받는다). 그래서 이 층에서 「남의 위임」을 표현할 길은 없고,
-    //    재야 할 것은 **목록이 비지 않았는데도 이 단계는 안 열리는가**다.
-    const 목록 = 포털위임([outsiderId, stepBId]);
-    assert.ok(목록.delegatorUserIds.length > 1, "표본이 비었다 — 이 시험이 아무것도 안 본다");
-    assert.ok(
-      !목록.delegatorUserIds.includes(stepAId),
-      "표본에 이 단계의 결재자가 들어 있다 — 재려는 것과 반대다"
-    );
+    // 🔵 **줄이 실제로 살아 있는 표본**인지 먼저 못 박는다 — 죽은 줄로 재면 「안
+    //    열린다」가 공짜로 통과한다. stepB 를 대신하는 줄이라, 그 자격으로는 지금
+    //    열려 있는 1단계(stepA 의 자리)가 열리면 안 된다.
+    await 포털위임줄(stepBId, outsiderId);
+    const 살아있는줄 = await db
+      .select({ id: portalApprovalDelegations.id })
+      .from(portalApprovalDelegations)
+      .where(eq(portalApprovalDelegations.delegateUserId, outsiderId));
+    assert.equal(살아있는줄.length, 1, "표본이 비었다 — 이 시험이 아무것도 안 본다");
 
     const decided = await decideDomesticOrderApproval({
       domesticOrderId: orderId,
@@ -906,33 +927,50 @@ describe("🔴 포털에 맡긴 결재권 위임 — 기타건에도 걸린다",
       actorUserId: outsiderId,
       decisionReason: null,
       dueDateRowOrder: 1,
-      portalDelegations: 목록,
     });
     assert.equal(decided.ok, false, "상관없는 포털 위임으로 눌렸다");
     if (!decided.ok) assert.equal(decided.code, "FORBIDDEN");
     assert.equal((await approvalRows(orderId))[0].status, "REQUESTED");
   });
 
-  test("🔴 포털에 못 물으면 결재는 그대로 돌고, 그 사실이 결과에 실린다", async () => {
-    const orderId = await 결재올린기타건();
-
-    // 설계 B-6 — 포털이 멈췄다고 결재를 막지 않는다. 본인은 멀쩡히 누른다.
-    const decided = await decideDomesticOrderApproval({
-      domesticOrderId: orderId,
+  test("🔴 거둔 줄로는 못 누른다 — 승인함에서 거두면 여기서도 그 자리에서 죽는다", async () => {
+    // 🔴 2026-11-16 저녁까지 이 자리는 「**포털에 못 물었을 때**」를 재고 있었다 —
+    //    결재할 때마다 묻던 시절의 것이다. 묻는 길이 없어지면서 그 상태도 사라졌고,
+    //    대신 **거둔 줄이 제 표에 남아 계속 듣는** 위험이 생겼다. 그쪽이 더 비싸다:
+    //    사람은 거뒀다고 믿는데 남의 결재가 눌린다.
+    const 첫건 = await 결재올린기타건();
+    await 포털위임줄(stepAId, outsiderId);
+    const 살아있을때 = await decideDomesticOrderApproval({
+      domesticOrderId: 첫건,
       decision: "APPROVED",
-      actorUserId: stepAId,
+      actorUserId: outsiderId,
       decisionReason: null,
       dueDateRowOrder: 1,
-      portalDelegations: { delegatorUserIds: [], unavailable: true },
     });
-    assert.equal(decided.ok, true, `포털이 죽었다고 본인 결재가 막혔다: ${JSON.stringify(decided)}`);
-    assert.equal((await approvalRows(orderId))[0].status, "APPROVED");
-    // 설계 B-7 — 「조용히」가 아니어야 한다.
-    assert.equal(decided.portalDelegationUnavailable, true, "못 물었는데 결과에 아무 표시가 없다");
+    assert.equal(살아있을때.ok, true, `표본이 깨졌다: ${JSON.stringify(살아있을때)}`);
+
+    // 포털이 거뒀다 — 전파가 `revoked_at` 을 적고 간 모습 그대로.
+    await db
+      .update(portalApprovalDelegations)
+      .set({ revokedAt: new Date() })
+      .where(eq(portalApprovalDelegations.delegateUserId, outsiderId));
+
+    const 둘째건 = await 결재올린기타건();
+    const 거둔뒤 = await decideDomesticOrderApproval({
+      domesticOrderId: 둘째건,
+      decision: "APPROVED",
+      actorUserId: outsiderId,
+      decisionReason: null,
+      dueDateRowOrder: 1,
+    });
+    assert.equal(거둔뒤.ok, false, "🔴 거둔 위임으로 남의 결재가 눌렸다");
+    if (!거둔뒤.ok) assert.equal(거둔뒤.code, "FORBIDDEN");
+    assert.equal((await approvalRows(둘째건))[0].status, "REQUESTED");
   });
 
-  test("포털이 멀쩡하면 안내 깃발은 **실리지 않는다** — 대조", async () => {
+  test("본인은 위임과 상관없이 그대로 누른다 — 위임은 넘기는 것이 아니라 늘리는 것", async () => {
     const orderId = await 결재올린기타건();
+    await 포털위임줄(stepAId, outsiderId);
 
     const decided = await decideDomesticOrderApproval({
       domesticOrderId: orderId,
@@ -940,12 +978,12 @@ describe("🔴 포털에 맡긴 결재권 위임 — 기타건에도 걸린다",
       actorUserId: stepAId,
       decisionReason: null,
       dueDateRowOrder: 1,
-      portalDelegations: 포털위임([stepAId]),
     });
     assert.equal(decided.ok, true, JSON.stringify(decided));
-    assert.ok(
-      !("portalDelegationUnavailable" in decided),
-      "멀쩡한데 안내 깃발이 실렸다 — 매번 실리면 사람이 그 경고를 안 읽게 된다"
-    );
+    const [row] = await approvalRows(orderId);
+    assert.equal(row.decidedByUserId, stepAId);
+    // 🔴 본인이 눌렀으므로 「누구 자리였는가」는 **비어 있어야** 한다 — 차 있으면
+    //    나중에 그 건을 「대신 결재」로 읽는다.
+    assert.equal(row.delegatedFromUserId, null, "본인이 눌렀는데 대신 결재로 남았다");
   });
 });

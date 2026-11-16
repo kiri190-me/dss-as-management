@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 
 import { showSavePopup } from "@/components/common/SavePopup";
 import ApprovalRouteDiagram, { markForRouteStep } from "@/components/approvals/ApprovalRouteDiagram";
-import PortalDelegationUnavailableNotice from "@/components/approvals/PortalDelegationUnavailableNotice";
 import DatabaseApprovalCard, {
   type DatabaseApprovalActionButton,
 } from "@/components/repair-cases/approval/DatabaseApprovalCard";
@@ -36,7 +35,6 @@ import {
   isDomesticOrderApprovalRequestable,
 } from "@/lib/domain/domestic-order-approval-rules";
 import type { ShipmentApprovalState } from "@/lib/domain/local/workflow/shipment-approval-checklist";
-import { appendPortalDelegationOutage } from "@/lib/domain/portal-approval-delegation";
 import { isRouteStepSkippedForRequester } from "@/lib/domain/shipment-approval-route";
 import {
   decideDomesticOrderApprovalAction,
@@ -156,7 +154,6 @@ export default function DomesticOrderApprovalPanel({
   currentRouteSteps,
   actingUser,
   actingApproverUserIds,
-  portalDelegationUnavailable,
   canRequestApproval,
 }: {
   domesticOrderId: string;
@@ -190,13 +187,6 @@ export default function DomesticOrderApprovalPanel({
    * 클라이언트가 DB 를 읽게 두지 않는다. 🔴 **힌트일 뿐이다.**
    */
   actingApproverUserIds: readonly string[];
-  /**
-   * 🔴 **통합 로그인 포털에 결재권 위임을 못 물었다**(2026-11-16, 설계 B-6·B-7).
-   * 그때 위 목록에는 **A/S 제 위임만** 들어 있어 승인함에만 맡긴 사람이 조용히
-   * 막힌다 — 본인은 멀쩡히 누르므로 아무도 못 알아챈다. 그래서 카드 위에 안내를
-   * 세운다. 🔴 **거짓이 평소**이고, 그때는 아무것도 안 그린다.
-   */
-  portalDelegationUnavailable: boolean;
   /**
    * 🔴 **올릴 수 있는 사람인가** — `domesticOrders` WRITE. 서버(page.tsx)가 보고
    * 내려준다. 🔵 **승인·반려 쪽에는 이 열쇠를 걸지 않는다** — 결재선에 올라간 사람이
@@ -249,15 +239,7 @@ export default function DomesticOrderApprovalPanel({
     if (!result.ok) {
       // 🔴 거절 이유에는 결재선이 없다는 안내처럼 사람이 읽고 움직여야 할 말이 그대로
       //    실려 온다 — 「실패했습니다」로 줄이지 않는다.
-      //
-      // 🔴 **거절당한 바로 그 순간이 안내가 가장 필요한 때다**(2026-11-16, 설계 B-7).
-      //    카드 위의 상자는 **그릴 때** 물어본 결과로 뜨는데, 포털이 그 뒤에 넘어지면
-      //    상자는 안 떠 있고 사람은 「권한이 없습니다」만 받는다. 서버가 결과에 실어
-      //    보낸 칸을 여기서 읽어 말을 잇는다 — 멀쩡하면 글자가 그대로 돌아온다.
-      setStatus({
-        rowOrder: dialog.rowOrder,
-        message: appendPortalDelegationOutage(result.message, result),
-      });
+      setStatus({ rowOrder: dialog.rowOrder, message: result.message });
       return;
     }
     setStatus(null);
@@ -278,10 +260,6 @@ export default function DomesticOrderApprovalPanel({
       <p className="break-keep rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
         {DOMESTIC_ORDER_APPROVAL_BLOCKS_COMPLETION_NOTICE}
       </p>
-
-      {/* 🔴 **카드들 위**다 — 단추를 찾기 전에 읽혀야 한다. 포털이 멀쩡하면 아무것도
-          안 그린다(조각 자신이 그렇게 판정한다 — 여기서 가지를 치지 않는다). */}
-      <PortalDelegationUnavailableNotice unavailable={portalDelegationUnavailable} />
 
       {units.map((unit) => (
         <UnitCard

@@ -39,6 +39,9 @@ import {
  *     포털(dss-auth)에 맡긴 위임이 생기면서 3번의 울타리에 **새 틈**이 났다 —
  *     한 고지 안에서는 막히던 두 겹이 「A/S 로 한 겹 + 포털로 한 겹」이면 생길 수
  *     있다. 아래 3-b 묶음이 그 틈을 양쪽 방향으로 막는다.
+ *     🔴 **그 묶음은 포털 줄의 기간·되돌림까지 잰다**(2026-11-16 저녁, 설계 B-12).
+ *     그날 낮까지는 포털이 **이미 판정해서** 결재권자 목록만 줬지만, 전파 방식으로
+ *     바뀌면서 줄이 통째로 넘어온다 — 이 층이 안 가리면 거둔 위임이 계속 듣는다.
  *
  * 🔵 표본이 비어서 공짜로 통과하는 일이 없게, 거르는 시험은 **「거르기 전에는 있었다」**
  *    를 먼저 단언한다. 이어 붙기 시험은 **두 겹이 둘 다 살아 있음**을 먼저 확인한 뒤에
@@ -58,10 +61,14 @@ const C = user(3);
 const D = user(4);
 
 /**
- * 「포털에는 묻지 않았다」. 🔴 `[]` 를 그 자리에 바로 쓰면 「물었더니 없더라」와
- * 구별되지 않아, 아래 시험들이 **무엇을 재는지**가 흐려진다.
+ * **포털 쪽 표(`portal_approval_delegations`)에 줄이 하나도 없다.** 🔴 `[]` 를 그
+ * 자리에 바로 쓰면 아래 시험들이 **무엇을 재는지**가 흐려진다.
+ *
+ * 🔵 2026-11-16 낮까지 이 값은 「포털에 묻지 않았다」는 뜻의 **id 목록**이었다. 저녁에
+ * 방식이 전파로 뒤집히면서(설계 B-12) 포털 위임도 **줄**로 넘어오고, 기간·되돌림을
+ * 이 층이 직접 가린다 — 그래서 타입이 바뀌었다.
  */
-const NO_PORTAL: readonly string[] = [];
+const NO_PORTAL: readonly ApprovalRouteDelegationPeriod[] = [];
 
 const T = (iso: string) => new Date(iso);
 
@@ -383,70 +390,116 @@ describe("actingApproverUserIds", () => {
   });
 });
 
-// ── 3-b. 고지가 둘일 때 (2026-11-16 — 포털에 맡긴 위임) ──────────────────
+// ── 3-b. 고지가 둘일 때 (2026-11-16 — 통합 승인함에서 맡긴 위임) ─────────
 
 /**
- * 🔴 여기서 못 박는 것 넷. 전부 **틀려도 그 자리에서는 아무 오류가 안 난다.**
+ * 🔴 여기서 못 박는 것 다섯. 전부 **틀려도 그 자리에서는 아무 오류가 안 난다.**
  *
- *  1. 포털이 준 목록이 **실제로 늘린다**. 안 늘리면 통합 승인함에서 맡긴 위임이
- *     A/S 에서 아무 일도 안 일으키고(이 조각이 고치려는 바로 그 상태), 화면에는
- *     아무 표시도 안 남는다.
+ *  1. 포털 표의 줄이 **실제로 늘린다**. 안 늘리면 통합 승인함에서 맡긴 위임이
+ *     A/S 에서 아무 일도 안 일으키고, 화면에는 아무 표시도 안 남는다.
  *  2. **합집합**이다 — A/S 제 표의 위임을 대신하지 않는다(설계 B-4: 둘 다 산다).
  *  3. 🔴 **고지를 갈아타며 두 겹이 되지 않는다.** A/S 로 A→B, 포털로 B→C 일 때
  *     C 가 A 를 얻으면 안 된다. 한 고지 안에서는 `delegatorUserIdsFor` 가 막던
  *     것인데, 고지가 둘이 되면서 **새로 생긴 틈**이다.
- *  4. 포털이 맨 앞에 넣어 주는 **본인 번호가 두 번 들어가지 않는다.**
+ *  4. **본인 id 가 두 번 들어가지 않는다** — 어느 표에 적혀 있든.
+ *  5. 🔴 **포털 줄도 기간·되돌림을 본다**(2026-11-16 저녁, 설계 B-12). 그 전에는
+ *     포털이 **이미 판정해서** 결재권자 목록만 줬기 때문에 이 층이 그대로 믿었다.
+ *     지금은 줄이 통째로 넘어오므로 **믿으면 안 된다** — 거둔 위임·끝난 위임이
+ *     그대로 듣게 되고, 그것은 「승인함에서는 거뒀는데 A/S 에서는 아직 눌린다」다.
  */
-describe("🔴 actingApproverUserIds — 포털에 맡긴 위임까지 합친다", () => {
+describe("🔴 actingApproverUserIds — 승인함에 맡긴 위임까지 합친다", () => {
   const now = T("2026-03-15T00:00:00.000Z");
 
-  test("포털이 준 결재권자가 목록에 들어온다 — 늘리는 쪽이 실제로 돈다", () => {
-    // 🔵 표본이 공짜로 통과하지 않게: 포털 목록을 빼면 **본인뿐**임을 먼저 못 박는다.
+  test("포털 표의 줄이 목록에 들어온다 — 늘리는 쪽이 실제로 돈다", () => {
+    // 🔵 표본이 공짜로 통과하지 않게: 포털 줄을 빼면 **본인뿐**임을 먼저 못 박는다.
     assert.deepEqual(actingApproverUserIds([], B, now, NO_PORTAL), [B]);
-    assert.deepEqual(actingApproverUserIds([], B, now, [A]), [B, A]);
+    assert.deepEqual(
+      actingApproverUserIds([], B, now, [delegation({ delegatorUserId: A, delegateUserId: B })]),
+      [B, A]
+    );
   });
 
   test("🔴 합집합이다 — A/S 제 표의 위임과 포털 위임이 둘 다 남는다", () => {
     const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
+    const portal = [delegation({ delegatorUserId: C, delegateUserId: B })];
     // 둘을 따로 재 두고(각각 한 명씩 늘린다),
     assert.deepEqual(actingApproverUserIds(rows, B, now, NO_PORTAL), [B, A]);
-    assert.deepEqual(actingApproverUserIds([], B, now, [C]), [B, C]);
+    assert.deepEqual(actingApproverUserIds([], B, now, portal), [B, C]);
     // 함께 주면 둘 다 들어온다 — 어느 한쪽이 다른 쪽을 지우지 않는다.
-    assert.deepEqual(actingApproverUserIds(rows, B, now, [C]), [B, A, C]);
+    assert.deepEqual(actingApproverUserIds(rows, B, now, portal), [B, A, C]);
   });
 
   test("🔴 고지를 갈아타도 이어 붙지 않는다 — A/S 로 A→B, 포털로 B→C", () => {
-    // A/S 제 표에는 A→B 한 줄만 있다. 포털은 C 에게 「B 를 대신할 수 있다」고 답한다.
+    // A/S 제 표에는 A→B 한 줄, 포털 표에는 B→C 한 줄.
     const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
+    const portal = [delegation({ delegatorUserId: B, delegateUserId: C })];
     // 🔵 두 겹이 **둘 다 살아 있는** 표본인지 먼저 못 박는다 — 하나라도 죽어 있으면
     //    「안 이어진다」가 공짜로 통과하고 아무것도 지키지 못한다.
     assert.deepEqual(actingApproverUserIds(rows, B, now, NO_PORTAL), [B, A]);
-    assert.deepEqual(actingApproverUserIds(rows, C, now, [B]), [C, B]);
+    assert.deepEqual(actingApproverUserIds(rows, C, now, portal), [C, B]);
     // 여기가 본론 — C 는 A 를 얻지 못한다. 얻으면 A 가 동의한 적 없는 사람이
     // A 의 이름으로 누르게 된다.
-    assert.equal(actingApproverUserIds(rows, C, now, [B]).includes(A), false);
+    assert.equal(actingApproverUserIds(rows, C, now, portal).includes(A), false);
   });
 
   test("🔴 반대 방향도 같다 — 포털로 A→B, A/S 로 B→C", () => {
     const rows = [delegation({ delegatorUserId: B, delegateUserId: C })];
+    const portal = [delegation({ delegatorUserId: A, delegateUserId: B })];
     assert.deepEqual(actingApproverUserIds(rows, C, now, NO_PORTAL), [C, B]);
-    assert.deepEqual(actingApproverUserIds([], B, now, [A]), [B, A]);
+    assert.deepEqual(actingApproverUserIds([], B, now, portal), [B, A]);
     // C 가 가진 것은 B 뿐이다. 포털이 B 에게 준 A 는 C 에게 넘어오지 않는다.
-    assert.equal(actingApproverUserIds(rows, C, now, NO_PORTAL).includes(A), false);
+    assert.equal(actingApproverUserIds(rows, C, now, portal).includes(A), false);
   });
 
-  test("🔴 포털이 맨 앞에 넣어 주는 본인 번호가 두 번 들어가지 않는다", () => {
-    // 포털 통로는 답의 맨 앞에 부른 사람 자신을 넣는다(설계 C-2).
-    assert.deepEqual(actingApproverUserIds([], B, now, [B, A]), [B, A]);
+  test("🔴 본인 id 가 두 번 들어가지 않는다 — 어느 표에 적혀 있든", () => {
+    // 🔴 두 표의 CHECK(`delegate <> delegator`)가 이런 줄을 못 만들게 막고 있다.
+    //    그래도 재는 까닭은, 그 제약이 걷히는 날 목록에 본인이 두 번 들어가면
+    //    `inArray` 조건이 조용히 부풀고 기록(`delegated_from_user_id`)까지 흔들리기
+    //    때문이다.
+    assert.deepEqual(actingApproverUserIds([], B, now, [delegation({ delegatorUserId: B, delegateUserId: B })]), [B]);
+    assert.deepEqual(actingApproverUserIds([delegation({ delegatorUserId: B, delegateUserId: B })], B, now, NO_PORTAL), [B]);
   });
 
   test("두 고지에 같은 결재권자가 겹쳐 적혀도 한 번만 들어간다", () => {
     const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
-    assert.deepEqual(actingApproverUserIds(rows, B, now, [A]), [B, A]);
+    const portal = [delegation({ delegatorUserId: A, delegateUserId: B })];
+    assert.deepEqual(actingApproverUserIds(rows, B, now, portal), [B, A]);
   });
 
-  test("포털 목록의 빈 글자는 버린다 — 조건절에 빈 값이 섞여 들어가지 않는다", () => {
-    assert.deepEqual(actingApproverUserIds([], B, now, ["", D]), [B, D]);
+  test("🔴 포털 줄도 기간·되돌림을 본다 — 거둔 줄·끝난 줄은 아무것도 늘리지 않는다", () => {
+    // 🔵 **같은 사람으로 살아 있는 줄을 먼저 세운다** — 안 하면 「안 늘린다」가 그
+    //    사람이 애초에 안 들어오는 구현에서도 공짜로 통과한다.
+    const 살아있음 = [delegation({ delegatorUserId: D, delegateUserId: B })];
+    assert.deepEqual(actingApproverUserIds([], B, now, 살아있음), [B, D]);
+
+    const 거둠 = [
+      delegation({
+        delegatorUserId: D,
+        delegateUserId: B,
+        revokedAt: T("2026-03-12T00:00:00.000Z"),
+      }),
+    ];
+    assert.deepEqual(actingApproverUserIds([], B, now, 거둠), [B], "거둔 포털 위임이 그대로 듣는다");
+
+    const 끝남 = [
+      delegation({
+        delegatorUserId: D,
+        delegateUserId: B,
+        startsAt: T("2026-03-01T00:00:00.000Z"),
+        endsAt: T("2026-03-14T00:00:00.000Z"),
+      }),
+    ];
+    assert.deepEqual(actingApproverUserIds([], B, now, 끝남), [B], "끝난 포털 위임이 그대로 듣는다");
+
+    const 아직 = [
+      delegation({
+        delegatorUserId: D,
+        delegateUserId: B,
+        startsAt: T("2026-03-20T00:00:00.000Z"),
+        endsAt: T("2026-03-25T00:00:00.000Z"),
+      }),
+    ];
+    assert.deepEqual(actingApproverUserIds([], B, now, 아직), [B], "아직 시작 안 한 포털 위임이 듣는다");
   });
 });
 

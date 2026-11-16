@@ -111,19 +111,13 @@ export type ApprovalActionResultCode =
   | "DATABASE_UNAVAILABLE";
 
 /**
- * 🔴 **포털에 결재권 위임을 못 물은 채로 판정했다**(2026-11-16, 설계 B-6·B-7).
- *
- * 포털이 멈춰도 결재는 그대로 진행한다 — 본인은 멀쩡히 누르고 **대리인만 조용히
- * 막힌다.** 「조용히 막힌다」가 이 시스템들에서 가장 비싼 결함 모양이라, 화면이 눈에
- * 보이는 안내를 띄울 수 있게 그 사실을 결과에 싣는다. 얹는 자리는 한 곳이다
- * (domain/portal-approval-delegation.ts 의 notePortalDelegationOutage).
- *
- * 🔴 **없는 것이 정상이다** — 포털이 멀쩡하면 아예 실리지 않는다. 그래서 `boolean` 이
- * 아니라 `true` 다: `false` 가 실릴 수 있으면 「물어봤는데 멀쩡했다」와 「애초에 안
- * 물었다」가 또 같은 값이 된다.
+ * 🔵 한때 여기 `portalDelegationUnavailable` 칸이 있었다(2026-11-16 낮, 설계 B-6·B-7).
+ * 결재할 때마다 포털에 **물어서** 위임을 읽던 시절, 「못 물었다」를 화면까지 들고 가는
+ * 길이었다. 같은 날 저녁에 방식이 **포털이 전파하는** 쪽으로 뒤집히면서(설계 B-12)
+ * 위임이 A/S 안의 표에 앉았고, **「못 물었다」라는 상태 자체가 없어졌다** — 결재
+ * 길목에 망 호출이 한 줄도 없다. 🔴 **그 칸을 되살리지 마라**: 되살린다는 것은 묻는
+ * 길을 다시 들인다는 뜻이고, 그러면 포털이 느린 날 결재가 함께 느려진다.
  */
-type PortalDelegationOutageFlag = { portalDelegationUnavailable?: true };
-
 export type ApprovalActionResult =
-  | ({ ok: true; id: string } & PortalDelegationOutageFlag)
-  | ({ ok: false; code: ApprovalActionResultCode; message: string } & PortalDelegationOutageFlag);
+  | { ok: true; id: string }
+  | { ok: false; code: ApprovalActionResultCode; message: string };

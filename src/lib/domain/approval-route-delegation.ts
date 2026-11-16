@@ -30,11 +30,18 @@ import type { ShipmentDelegationDisplayStatus } from "./shipment-delegation-stat
  *
  * ── 🔴 2026-11-16 부터 위임을 맡기는 고지가 **둘**이다 ──────────────────
  * 이 표(A/S 제 것) 말고 **포털(dss-auth)에 맡긴 위임**이 생겼다(설계 B-1·B-4 —
- * dss-approvals/DELEGATION_DESIGN.md). 둘 다 인정하고 **합집합**으로 판정한다. 포털
- * 쪽은 기간·되돌림 판정까지 **포털이 끝내서** 결재권자 목록만 넘어오므로, 이 파일의
- * 규칙(`isActiveRouteDelegation`)은 **이 표의 줄에만** 적용된다. 합치는 자리는 아래
- * `actingApproverUserIds` 한 곳이고, 🔴 **두 고지를 갈아타며 두 겹이 되지 않게 막는
- * 자리도 거기 하나**다.
+ * dss-approvals/DELEGATION_DESIGN.md). 둘 다 인정하고 **합집합**으로 판정한다.
+ *
+ * 🔴 **포털 줄도 이 파일의 규칙으로 가린다.** 그날 저녁에 방식이 뒤집혀(설계 B-12),
+ * 결재할 때마다 포털에 묻던 것이 **포털이 지정·철회할 때 각 시스템에 전파하는** 쪽으로
+ * 바뀌었다. 그래서 포털 위임도 이제 **A/S 안의 표**(`portal_approval_delegations`)에
+ * 줄로 앉아 있고, 칸 모양이 이 표와 같다(반열린 구간 · `revoked_at` 널이면 살아 있음).
+ * 🔴 **그 표를 위해 판정을 한 벌 더 적지 마라** — `isActiveRouteDelegation` 하나가 두
+ * 표의 줄을 똑같이 가린다. 두 벌이 되면 한쪽만 고쳐지는 날 「승인함에서는 끝난 위임인데
+ * 여기서는 아직 듣는다」가 되고, 그 어긋남은 오류를 한 줄도 내지 않는다.
+ *
+ * 합치는 자리는 아래 `actingApproverUserIds` 한 곳이고, 🔴 **두 고지를 갈아타며 두
+ * 겹이 되지 않게 막는 자리도 거기 하나**다.
  * ============================================================================
  */
 
@@ -230,16 +237,20 @@ export type ActingApproverUserIds = readonly [string, ...string[]];
  *
  * ── 🔴 고지가 **둘**이다. 합집합이고, 이어 붙지는 않는다 (2026-11-16) ────
  * 2026-11-13 결정(설계 B-4)으로 **포털에 맡긴 위임과 A/S 제 표의 위임을 둘 다 살려
- * 두기로** 했다. 그래서 이 함수는 목록 **둘**을 받아 **합집합**을 만든다:
- *  · `delegations` — A/S 의 `approval_route_delegations` 를 읽은 줄들(기간·되돌림을
- *    이 층이 직접 가린다).
- *  · `portalDelegatorUserIds` — 포털이 「지금 대신할 수 있다」고 **이미 판정해서** 준
- *    결재권자들의 **A/S `users.id`**(server/integration/portal-delegations.ts 가
- *    열쇠를 바꿔 넣는다). 🔴 기간·되돌림을 여기서 다시 보지 않는다 — 포털이 제 표로
- *    판정한 결과이고, 그 규칙을 여기 베껴 적으면 두 벌이 갈린다.
+ * 두기로** 했다. 그래서 이 함수는 **줄 묶음 둘**을 받아 **합집합**을 만든다:
+ *  · `delegations` — A/S 의 `approval_route_delegations` 를 읽은 줄들.
+ *  · `portalDelegations` — 승인함에서 맡겨 **포털이 전파해 준** 줄들
+ *    (`portal_approval_delegations`, 설계 B-12). 열쇠는 받는 통로가 이미 A/S
+ *    `users.id` 로 바꿔 두었다.
+ *
+ * 🔴 **둘을 같은 규칙으로 가린다**(`delegatorUserIdsFor` → `isActiveRouteDelegation`).
+ * 한때는 포털 쪽만 기간·되돌림 판정이 **포털에서 끝나** 결재권자 목록만 넘어왔는데,
+ * 2026-11-16 저녁에 묻는 방식이 전파 방식으로 뒤집히면서(B-12) 그 줄도 이 집의 표에
+ * 앉았다. 🔴 **그 표를 위해 「살아 있나」를 한 벌 더 적지 마라** — 두 벌이 갈리면
+ * 한쪽 표의 위임만 끝난 뒤에도 계속 듣는다.
  *
  * 🔴 **둘을 이어 붙이지 않는다.** A/S 위임으로 A→B 이고 포털 위임으로 B→C 여도
- * **C 는 A 를 얻지 못한다.** 두 목록을 각각 **「한 겹」으로만** 쓰고, 어느 쪽이
+ * **C 는 A 를 얻지 못한다.** 두 묶음을 각각 **「한 겹」으로만** 쓰고, 어느 쪽이
  * 돌려준 id 도 다시 `delegateUserId` 로 넣어 되풀이하지 않기 때문이다 — 까닭은 바로
  * 위 `delegatorUserIdsFor` 의 둘(A 는 C 를 모른다 · 고리가 생긴다)과 같다. 고지가
  * 둘이 되면서 **한 고지 안에서는 막히던 두 겹이 고지를 갈아타며 생길** 수 있게
@@ -251,25 +262,26 @@ export type ActingApproverUserIds = readonly [string, ...string[]];
  * @param actorUserId 「지금 누르려는 사람」의 `users.id`. 🔴 포털 번호(`sub`)를 넘기면
  *   위임은 하나도 안 붙고 **그 틀린 값 하나짜리 목록**이 돌아간다 — 오류 없이 영원히
  *   0건이 된다.
- * @param portalDelegatorUserIds 🔴 **선택 인자가 아니다.** 기본값을 두면 빠뜨린
- *   자리에서만 포털 위임이 조용히 안 걸린다 — 오류가 나지 않고 「어떤 결재에서만 대리
- *   결재가 안 된다」가 되며, 그 화면에는 아무 표시도 남지 않는다(같은 까닭으로
+ * @param portalDelegations 🔴 **선택 인자가 아니다.** 기본값을 두면 빠뜨린 자리에서만
+ *   포털 위임이 조용히 안 걸린다 — 오류가 나지 않고 「어떤 결재에서만 대리 결재가 안
+ *   된다」가 되며, 그 화면에는 아무 표시도 남지 않는다(같은 까닭으로
  *   auth/approval-assignment.ts 의 `mayDecideAssignedApproval` 도 필수로 받는다).
- *   포털에 묻지 않는 자리는 **빈 목록을 글자로 넘겨** 그 뜻을 드러낸다.
+ *   포털 위임을 볼 까닭이 없는 자리는 **빈 묶음을 글자로 넘겨** 그 뜻을 드러낸다.
  */
 export function actingApproverUserIds(
   delegations: readonly ApprovalRouteDelegationPeriod[],
   actorUserId: string,
   now: Date,
-  portalDelegatorUserIds: readonly string[]
+  portalDelegations: readonly ApprovalRouteDelegationPeriod[]
 ): ActingApproverUserIds {
-  const merged = new Set<string>(delegatorUserIdsFor(delegations, actorUserId, now));
-  for (const userId of portalDelegatorUserIds) {
-    // 🔴 본인은 맨 앞에 이미 있다. 포털은 답의 맨 앞에 부른 사람 자신을 넣어 주므로
-    //    (설계 C-2) 여기서 걸러 내지 않으면 본인 id 가 목록에 두 번 들어간다.
-    if (userId === "" || userId === actorUserId) continue;
-    merged.add(userId);
-  }
+  const merged = new Set<string>([
+    ...delegatorUserIdsFor(delegations, actorUserId, now),
+    ...delegatorUserIdsFor(portalDelegations, actorUserId, now),
+  ]);
+  // 🔴 본인은 맨 앞에 이미 있다 — 여기 남겨 두면 목록에 두 번 들어간다. 두 표의
+  //    CHECK(`delegate <> delegator`)가 「자기가 자기를 대신하는」 줄을 못 만들게
+  //    막고 있지만, 그 제약이 걷히는 날 이 함수가 틀리지 않게 한 줄로 끊어 둔다.
+  merged.delete(actorUserId);
   return [actorUserId, ...merged];
 }
 
