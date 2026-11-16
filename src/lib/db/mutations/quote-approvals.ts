@@ -11,6 +11,11 @@ import {
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { resolveActingApproverUserIds } from "../queries/approval-route-delegations";
 import {
+  NO_PORTAL_DELEGATIONS,
+  notePortalDelegationOutage,
+  type PortalRouteDelegations,
+} from "@/lib/domain/portal-approval-delegation";
+import {
   QUOTE_APPROVAL_ROUTE_SCOPE,
   isQuoteApprovalRouteInForce,
 } from "@/lib/domain/quote-approval-rules";
@@ -107,22 +112,29 @@ export type QuoteApprovalFailureCode =
   /** 그 사이 남이 먼저 처리했다. */
   | "CONFLICT";
 
+/**
+ * 🔴 **포털에 결재권 위임을 못 물은 채로 판정했다**(2026-11-16, 설계 B-6·B-7).
+ * 뜻과 까닭은 validation/repair-case-approval-input.ts 의 같은 칸에 적어 두었다 —
+ * 세 결재가 **같은 모양**이어야 화면이 한 벌로 안내를 그린다.
+ */
+type PortalDelegationOutageFlag = { portalDelegationUnavailable?: true };
+
 export type QuoteApprovalFailure = {
   ok: false;
   code: QuoteApprovalFailureCode;
   message: string;
-};
+} & PortalDelegationOutageFlag;
 
 export type RequestQuoteApprovalResult = { ok: true; id: string } | QuoteApprovalFailure;
 
 export type DecideQuoteApprovalResult =
-  | {
+  | ({
       ok: true;
       /** 방금 결정된 행. */
       id: string;
       /** 사슬이 이어졌으면 새로 열린 행, 끝났으면 `null`. */
       nextApprovalId: string | null;
-    }
+    } & PortalDelegationOutageFlag)
   | QuoteApprovalFailure;
 
 class QuoteApprovalMutationError extends Error {
@@ -306,6 +318,21 @@ export type DecideQuoteApprovalInput = {
   actorUserId: string;
   /** 🔴 반려에는 **필수**다(표의 quote_approvals_decision_metadata CHECK). */
   decisionReason: string | null;
+  /**
+   * 🔴 **포털(dss-auth)에 맡긴 결재권 위임**을 **트랜잭션을 열기 전에** 물어 온
+   * 결과다(2026-11-16, 설계 B-1·C-3). 묻는 자리는 서버 액션이고
+   * (server/actions/quote-approvals.ts), 묻는 함수는
+   * server/integration/portal-delegations.ts 의 resolvePortalRouteDelegations 다.
+   *
+   * 🔴 **여기서 직접 묻지 않는 까닭이 둘이다.** (1) 망 호출을 트랜잭션 안에 넣으면
+   * 결재 행 잠금이 망 지연만큼 붙들린다(설계 C-3). (2) 이 집의 층 가르기는
+   * `server/` → `db/` 한 방향이라 `src/lib/db` 는 `@/lib/server/...` 를 못 끌어온다.
+   *
+   * 🔵 안 주면 「묻지 않았다」다. 🔴 지금 부르는 자리가 서버 액션 하나뿐이라 선택으로
+   * 두었고, 그 한 자리가 실제로 묻는지는
+   * server/actions/portal-delegation-wiring.test.ts 가 소스로 못 박는다.
+   */
+  portalDelegations?: PortalRouteDelegations;
 };
 
 /**
@@ -317,8 +344,9 @@ export type DecideQuoteApprovalInput = {
 export async function decideQuoteApproval(
   input: DecideQuoteApprovalInput
 ): Promise<DecideQuoteApprovalResult> {
+  const portalDelegations = input.portalDelegations ?? NO_PORTAL_DELEGATIONS;
   try {
-    return await db.transaction(async (tx): Promise<DecideQuoteApprovalResult> => {
+    const decided = await db.transaction(async (tx): Promise<DecideQuoteApprovalResult> => {
       // 🔴 결재선 공유 잠금 — 요청 경로와 같은 이유로 **첫 잠금**이다. 아래에서
       // 사슬을 이을 때 판의 다음 단계 승인자를 지정하는데, 그 사이 사용자 계정
       // 삭제가 커밋되면 지워진 사람에게 다음 행이 간다. 결정할 행을 FOR UPDATE 로
@@ -375,8 +403,18 @@ export async function decideQuoteApproval(
       // ROUTE_NOT_CONFIGURED 로 거절된다 — 위 requestQuoteApproval) 실제로는 언제나
       // 참이다. 거짓인 행이 있다면 저장 경로가 깨진 것이고, 그때는 위임을 붙이지
       // 않는 쪽(좁은 쪽)으로 넘어간다.
+      //
+      // 🔴 **포털에 맡긴 위임도 같은 갈래에서 함께 걸린다**(2026-11-16, 설계 B-4 —
+      // 두 고지를 둘 다 인정하고 합집합으로 판정한다). 들고 들어온 목록을 여기서
+      // 넘길 뿐, 합치는 규칙(본인 맨 앞 · 중복 제거 · **이어 붙지 않음**)은 순수 함수
+      // 하나가 쥔다(domain/approval-route-delegation.ts 의 actingApproverUserIds).
       const actingApproverUserIds = approvalFollowsRoute(latest)
-        ? await resolveActingApproverUserIds(actor.id, new Date(), tx)
+        ? await resolveActingApproverUserIds(
+            actor.id,
+            new Date(),
+            tx,
+            portalDelegations.delegatorUserIds
+          )
         : NO_ROUTE_DELEGATIONS;
 
       // 🔴 지정 관문 — 계정 자격(requireActor)을 본 **뒤에** 얹는다. 순서가
@@ -488,14 +526,25 @@ export async function decideQuoteApproval(
       // 조회가 「승인 완료」라고 답한다(queries/quote-approvals.ts).
       return { ok: true, id: latest.id, nextApprovalId };
     });
+    // 🔴 **「포털에 못 물은 채로 판정했다」를 결과에 얹는다** — 성공이든 거절이든
+    // 같다(가지를 두지 않는 까닭은 notePortalDelegationOutage 주석). 화면이 안내를
+    // 띄우는 것은 다음 조각의 일이지만, **나올 길은 여기다.**
+    return notePortalDelegationOutage(decided, portalDelegations);
   } catch (err) {
-    if (err instanceof QuoteApprovalMutationError) return err.result;
+    if (err instanceof QuoteApprovalMutationError) {
+      // 🔴 막힌 쪽이 특히 중요하다 — 위임으로 통과했어야 할 사람이 지정 관문에
+      // 막힌 그 순간이고, 안내가 없으면 그 사람은 까닭을 영영 모른다.
+      return notePortalDelegationOutage(err.result, portalDelegations);
+    }
     if (isUniqueViolation(err)) {
-      return {
+      // 🔵 타입을 적어 두는 것은 꾸밈이 아니다 — 안 적으면 포털 안내를 얹는 함수가
+      //    「칸이 하나뿐인 값」으로 추론해 `ok`·`code`·`message` 를 잃는다.
+      const conflict: QuoteApprovalFailure = {
         ok: false,
         code: "CONFLICT",
         message: "이미 처리 대기 중인 결재가 있습니다. 최신 정보를 다시 불러와 주세요.",
       };
+      return notePortalDelegationOutage(conflict, portalDelegations);
     }
     throw err;
   }

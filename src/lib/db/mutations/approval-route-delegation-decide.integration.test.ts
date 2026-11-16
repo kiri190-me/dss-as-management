@@ -34,6 +34,7 @@ import { getApprovalHistoryForCase, resolveApprovalValidity } from "../queries/r
 import { getQuoteApprovalHistory } from "../queries/quote-approvals";
 import { listRepairCasesPendingMyApproval } from "../queries/repair-case-approvals-pending";
 import { listQuoteApprovalsPendingMyApproval } from "../queries/quote-approvals-pending";
+import type { PortalRouteDelegations } from "@/lib/domain/portal-approval-delegation";
 import { QUOTE_APPROVAL_ROUTE_SCOPE } from "@/lib/domain/quote-approval-rules";
 import type { ShipmentApprovalRouteScope } from "@/lib/domain/shipment-approval-route";
 import type { QuoteFields } from "@/lib/validation/quote-input";
@@ -54,7 +55,10 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  *  · 수리 검수 승인 → 해당 없음. 결재선을 탈 수 없어(표의 CHECK) 대신할 단계가
  *    애초에 없다.
  *
- * ── 여기서 지키는 것 일곱 ───────────────────────────────────────────────
+ * ── 여기서 지키는 것 열 ─────────────────────────────────────────────────
+ * 🔵 머리말이 「일곱」이라 적고 여덟을 세고 있었다. 2026-11-16 에 아래 9·10 을
+ *    더하면서 숫자를 실제 개수로 고쳤다 — 주석이 실측과 어긋나면 다음 사람이 그
+ *    글을 믿고 잘못 고친다.
  *  1. 🔴 대리인이 **최종 출하**를 대신 누를 수 있다.
  *  2. 🔴 대리인이 **견적서**를 대신 누를 수 있다.
  *  3. 🔴 기록에 **누가 눌렀는가**(decided_by_user_id)와 **누구 자리였는가**
@@ -67,6 +71,13 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  *  8. 🔴 **이력 조회가 그 사실을 이름으로 내보낸다** — 양쪽 결재 모두. 칸에 적기만
  *     하고 조회가 읽지 않으면 화면에서 「위임으로 대신 눌렀다」와 「최고관리자가
  *     비상구로 눌렀다」가 똑같이 보인다(2026-10-26 견적서 쪽이 실제로 그랬다).
+ *  9. 🔴 **포털(dss-auth)에 맡긴 위임도 걸린다**(2026-11-16, 설계 B-1·B-4). 고지가
+ *     둘이 되었고 **둘 다 산다** — 합집합이고, **갈아타며 이어 붙지는 않는다.**
+ *     여기까지 안 이어져 있으면 승인함에서 맡긴 위임이 A/S 에서 아무 일도 안
+ *     일으킨다(오류 한 줄 없이).
+ * 10. 🔴 **포털에 못 물었을 때** 결재는 그대로 돌고(설계 B-6) 그 사실이 **결과에
+ *     실려 나간다**(설계 B-7). 안 실리면 대리인은 「권한이 없습니다」만 받고 까닭을
+ *     영영 모른다 — 이 저장소들에서 가장 비싼 결함 모양이다.
  *
  * ── 격리·청소 규약 ──────────────────────────────────────────────────────
  * repair-case-approvals-route.integration.test.ts · quote-approvals.integration
@@ -777,5 +788,242 @@ describe("🔴 대기 목록 — 보이는 것과 눌리는 것이 같다", () =
       false,
       "되돌렸는데 목록에 그대로 있다 — 눌러도 거절되는 줄이 남았다"
     );
+  });
+});
+
+/* ========================================================================== */
+/* 🔴 포털에 맡긴 위임도 **실제 결재에 걸린다** (2026-11-16)                   */
+/*                                                                            */
+/* 2026-11-13 결정으로 결재권 위임을 포털(dss-auth) 한 곳에 모았고(설계 B-1),  */
+/* **둘 다 살려 두기로** 했다(설계 B-4). 이 묶음이 재는 것은 그 둘째 고지다.   */
+/* 🔴 여기까지 안 이어져 있으면 승인함에서 맡긴 위임이 **A/S 에서 아무 일도    */
+/*    일으키지 않는다** — 오류 한 줄 없이. 그 상태를 끝내는 것이 이 조각이다.  */
+/*                                                                            */
+/* 🔵 **포털을 부르지 않는다.** 결재 저장은 망을 타지 않고, 물어 온 결과를     */
+/*    **인자로** 받는다(설계 C-3 — 망 호출은 트랜잭션 밖 서버 액션의 일이다).  */
+/*    묻는 왕복 자체는 server/integration/portal-delegations.test.ts 가 값으로 */
+/*    재고, 액션이 실제로 묻는지는 server/actions/portal-delegation-wiring     */
+/*    .test.ts 가 글자로 센다. 여기는 **판정에 걸리는가**만 잰다.              */
+/*                                                                            */
+/* 🔵 **접수 건은 한 건만 만든다.** 인수번호가 한 달에 99개뿐이라(설계와 무관한 */
+/*    공유 자원이다) 나머지는 견적서로 잰다 — 같은 순수 함수가 둘을 다 가른다. */
+/* ========================================================================== */
+
+/** 포털이 「이 사람이 대신할 수 있다」고 답한 것 — 이미 A/S id 로 바뀐 값이다. */
+function 포털위임(delegatorUserIds: string[]): PortalRouteDelegations {
+  return { delegatorUserIds, unavailable: false };
+}
+
+/** 🔴 포털이 죽었다. 빈 목록이지만 **「없다」가 아니라 「모른다」**다(설계 B-6). */
+const 포털에못물었다: PortalRouteDelegations = { delegatorUserIds: [], unavailable: true };
+
+describe("🔴 포털에 맡긴 위임 — A/S 표에 줄이 없어도 대신 누른다", () => {
+  test("최종 출하 — 포털 위임만으로 승인되고, 기록에 **둘 다** 남는다", async () => {
+    await saveRoute("FINAL_SHIPMENT", [approverId]);
+    const caseId = await arrangePendingShipment();
+    // 🔴 **A/S 표에는 위임을 만들지 않는다.** 만들면 「원래 되던 길로 통과했다」와
+    //    구별되지 않아 이 시험이 아무것도 지키지 못한다.
+    assert.equal(
+      (await listRepairCasesPendingMyApproval(strangerId)).length,
+      0,
+      "A/S 쪽 위임이 없는데 대기 목록에 떴다 — 표본이 깨끗하지 않다"
+    );
+    // 🔵 포털을 빼고 눌러 보면 **막힌다**를 먼저 못 박는다.
+    const 포털없이 = await decideRepairCaseApproval(caseId, "FINAL_SHIPMENT", "APPROVED", strangerId, null);
+    assert.equal(포털없이.ok, false, "포털 위임도 없는데 통과했다");
+
+    const decided = await decideRepairCaseApproval(
+      caseId,
+      "FINAL_SHIPMENT",
+      "APPROVED",
+      strangerId,
+      null,
+      포털위임([strangerId, approverId])
+    );
+    assert.equal(decided.ok, true, `포털 위임이 안 걸렸다: ${JSON.stringify(decided)}`);
+
+    const [row] = await shipmentRows(caseId);
+    assert.equal(row.status, "APPROVED");
+    assert.equal(row.decidedByUserId, strangerId, "누른 사람이 안 남았다");
+    assert.equal(row.delegatedFromUserId, approverId, "누구 자리였는지가 안 남았다");
+    assert.equal(row.assignedApproverUserId, approverId, "지정이 대리인으로 덮였다");
+  });
+
+  test("견적서 — 포털 위임만으로 승인되고, 기록에 **둘 다** 남는다", async () => {
+    await saveRoute(QUOTE_APPROVAL_ROUTE_SCOPE, [approverId]);
+    const quoteId = await arrangePendingQuote();
+
+    const 포털없이 = await decideQuoteApproval({
+      quoteId,
+      decision: "APPROVED",
+      actorUserId: strangerId,
+      decisionReason: null,
+    });
+    assert.equal(포털없이.ok, false, "포털 위임도 없는데 통과했다");
+
+    const decided = await decideQuoteApproval({
+      quoteId,
+      decision: "APPROVED",
+      actorUserId: strangerId,
+      decisionReason: null,
+      portalDelegations: 포털위임([strangerId, approverId]),
+    });
+    assert.equal(decided.ok, true, `포털 위임이 안 걸렸다: ${JSON.stringify(decided)}`);
+    // 🔴 포털이 멀쩡했으므로 안내 깃발은 **실리지 않는다.** 매번 실리면 아무
+    //    상관없는 화면마다 경고가 깔린다.
+    assert.ok(!("portalDelegationUnavailable" in decided), "멀쩡한데 안내 깃발이 실렸다");
+
+    const [row] = await quoteRows(quoteId);
+    assert.equal(row.status, "APPROVED");
+    assert.equal(row.decidedByUserId, strangerId);
+    assert.equal(row.delegatedFromUserId, approverId);
+  });
+
+  test("🔴 **합집합**이다 — A/S 위임과 포털 위임이 서로를 지우지 않는다", async () => {
+    await saveRoute(QUOTE_APPROVAL_ROUTE_SCOPE, [approverId]);
+    await grantDelegation(); // A/S 표: approver → delegate
+
+    // A/S 쪽 대리인은 포털 목록이 함께 와도 그대로 누른다.
+    const 첫장 = await arrangePendingQuote();
+    const 가 = await decideQuoteApproval({
+      quoteId: 첫장,
+      decision: "APPROVED",
+      actorUserId: delegateId,
+      decisionReason: null,
+      portalDelegations: 포털위임([delegateId, strangerId]),
+    });
+    assert.equal(가.ok, true, `A/S 위임이 포털 목록에 밀려 죽었다: ${JSON.stringify(가)}`);
+    assert.equal((await quoteRows(첫장))[0].delegatedFromUserId, approverId);
+
+    // 포털 쪽 대리인도 같은 판에서 그대로 누른다.
+    const 둘째장 = await arrangePendingQuote();
+    const 나 = await decideQuoteApproval({
+      quoteId: 둘째장,
+      decision: "APPROVED",
+      actorUserId: strangerId,
+      decisionReason: null,
+      portalDelegations: 포털위임([strangerId, approverId]),
+    });
+    assert.equal(나.ok, true, `포털 위임이 A/S 표에 밀려 죽었다: ${JSON.stringify(나)}`);
+    assert.equal((await quoteRows(둘째장))[0].delegatedFromUserId, approverId);
+  });
+
+  test("🔴 고지를 갈아타도 이어 붙지 않는다 — A/S 로 A→B, 포털로 B→C", async () => {
+    await saveRoute(QUOTE_APPROVAL_ROUTE_SCOPE, [approverId]);
+    const quoteId = await arrangePendingQuote();
+    await grantDelegation(); // A/S 표: approver → delegate
+
+    // 🔵 두 겹이 **둘 다 살아 있는** 표본인지 먼저 못 박는다 — 하나라도 죽어 있으면
+    //    「안 이어진다」가 공짜로 통과한다. delegate 는 지금 이 건을 누를 수 있고,
+    //    stranger 는 포털로 delegate 를 대신할 수 있다.
+    assert.ok(
+      (await listQuoteApprovalsPendingMyApproval(delegateId)).some((item) => item.quoteId === quoteId),
+      "A/S 쪽 한 겹이 살아 있지 않다 — 표본이 깨졌다"
+    );
+
+    // 여기가 본론 — stranger 가 가진 것은 delegate 뿐이고, approver 가 아니다.
+    const decided = await decideQuoteApproval({
+      quoteId,
+      decision: "APPROVED",
+      actorUserId: strangerId,
+      decisionReason: null,
+      portalDelegations: 포털위임([strangerId, delegateId]),
+    });
+    assert.equal(decided.ok, false, "두 고지를 갈아타며 위임이 이어졌다");
+    if (!decided.ok) assert.equal(decided.code, "FORBIDDEN");
+    assert.equal((await quoteRows(quoteId))[0].status, "REQUESTED");
+  });
+
+  test("🔴 포털 목록이 **이 단계의 결재권자를 담고 있지 않으면** 못 누른다 — 통행증이 아니다", async () => {
+    await saveRoute(QUOTE_APPROVAL_ROUTE_SCOPE, [approverId]);
+    const quoteId = await arrangePendingQuote();
+
+    // 🔴 **여기 들어오는 목록은 이미 「부른 사람」 몫으로 좁혀진 값**이다(포털에 제
+    //    번호로 물어 받는다 — server/integration/portal-delegations.ts). 그래서 이
+    //    층에서 「남의 위임」을 표현할 길은 없고, 대신 재야 할 것은 **목록이 비지
+    //    않았는데도 이 단계는 안 열리는가**다. 목록 하나만 있으면 아무 결재나 통과하는
+    //    통행증이 되어 버리면 안 된다.
+    const 목록 = 포털위임([strangerId, requesterId]);
+    assert.ok(목록.delegatorUserIds.length > 1, "표본이 비었다 — 이 시험이 아무것도 안 본다");
+    assert.ok(
+      !목록.delegatorUserIds.includes(approverId),
+      "표본에 이 단계의 결재권자가 들어 있다 — 재려는 것과 반대다"
+    );
+
+    const decided = await decideQuoteApproval({
+      quoteId,
+      decision: "APPROVED",
+      actorUserId: strangerId,
+      decisionReason: null,
+      portalDelegations: 목록,
+    });
+    assert.equal(decided.ok, false, "상관없는 포털 위임으로 눌렸다");
+    if (!decided.ok) assert.equal(decided.code, "FORBIDDEN");
+    assert.equal((await quoteRows(quoteId))[0].status, "REQUESTED");
+  });
+});
+
+describe("🔴 포털에 못 물었을 때 — 결재는 그대로 돌고, 그 사실이 결과에 실린다", () => {
+  test("본인은 멀쩡히 누르고, 그래도 안내 깃발이 실린다", async () => {
+    await saveRoute(QUOTE_APPROVAL_ROUTE_SCOPE, [approverId]);
+    const quoteId = await arrangePendingQuote();
+
+    // 🔴 설계 B-6 — 포털이 멈췄다고 결재를 막지 않는다. 본인 id 는 언제나 맨 앞이다.
+    const decided = await decideQuoteApproval({
+      quoteId,
+      decision: "APPROVED",
+      actorUserId: approverId,
+      decisionReason: null,
+      portalDelegations: 포털에못물었다,
+    });
+    assert.equal(decided.ok, true, `포털이 죽었다고 본인 결재가 막혔다: ${JSON.stringify(decided)}`);
+    assert.equal((await quoteRows(quoteId))[0].status, "APPROVED");
+    // 🔴 설계 B-7 — 「조용히」가 아니어야 한다. 화면이 안내를 띄울 수 있게 실려 나간다.
+    assert.equal(decided.portalDelegationUnavailable, true, "못 물었는데 결과에 아무 표시가 없다");
+  });
+
+  test("🔴 막힌 쪽에도 실린다 — 대리인이 까닭을 알 수 있는 유일한 자리다", async () => {
+    await saveRoute(QUOTE_APPROVAL_ROUTE_SCOPE, [approverId]);
+    const quoteId = await arrangePendingQuote();
+
+    const decided = await decideQuoteApproval({
+      quoteId,
+      decision: "APPROVED",
+      actorUserId: strangerId,
+      decisionReason: null,
+      portalDelegations: 포털에못물었다,
+    });
+    assert.equal(decided.ok, false, "포털도 못 물었는데 통과했다");
+    if (!decided.ok) {
+      assert.equal(decided.code, "FORBIDDEN");
+      // 🔴 거절 **본문을 잃지 않는다.** 깃발 하나 때문에 「알 수 없는 오류」가 되면
+      //    안내를 띄우려다 더 나빠진다.
+      assert.ok(decided.message.length > 0, "거절 문구가 사라졌다");
+    }
+    assert.equal(decided.portalDelegationUnavailable, true, "막혔는데 결과에 아무 표시가 없다");
+  });
+
+  test("최종 출하도 같다 — 접수 건 쪽 결과에도 실린다", async () => {
+    // 🔵 접수 건을 하나 더 만들지 않으려고 **검수 승인 행**으로 잰다 — 결재선을
+    //    타지 않는 행이라 위임은 걸리지 않지만, 깃발은 저장 경로 **바깥**에서
+    //    얹히므로 그대로 실려야 한다. 두 길이 어긋나면 여기서 드러난다.
+    const created = await createRepairCase(baseCreateInput());
+    assert.equal(created.ok, true, `setup create failed: ${JSON.stringify(created)}`);
+    if (!created.ok) throw new Error("unreachable");
+    createdCaseIds.push(created.id);
+
+    const requested = await requestRepairCaseApproval(created.id, "REPAIR_INSPECTION", requesterId, null);
+    assert.equal(requested.ok, true, `setup inspection request failed: ${JSON.stringify(requested)}`);
+
+    const decided = await decideRepairCaseApproval(
+      created.id,
+      "REPAIR_INSPECTION",
+      "APPROVED",
+      requesterId,
+      null,
+      포털에못물었다
+    );
+    assert.equal(decided.ok, true, `검수 승인이 막혔다: ${JSON.stringify(decided)}`);
+    assert.equal(decided.portalDelegationUnavailable, true, "접수 건 결과에는 표시가 안 실린다");
   });
 });

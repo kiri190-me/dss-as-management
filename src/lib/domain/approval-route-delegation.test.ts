@@ -15,7 +15,7 @@ import {
  * ============================================================================
  * 결재선 단계 위임 — 순수 규칙
  * ============================================================================
- * 여기서 못 박는 것 여섯. 전부 **틀려도 그 자리에서는 아무 오류가 안 나는** 것들이다.
+ * 여기서 못 박는 것 일곱. 전부 **틀려도 그 자리에서는 아무 오류가 안 나는** 것들이다.
  *
  *  1. **끝은 포함하지 않는다**(`[starts_at, ends_at)`). 부등호 하나를 `<=` 로 바꾸면
  *     잇대어 적은 두 위임이 한순간 둘 다 살아 있고, 그 순간에 들어온 결재는 나중에
@@ -35,6 +35,10 @@ import {
  *     거르는 칸이 반대다. 바꿔 꽂아도 **오류 없이 빈 목록**이 돌아오고, 그 빈 목록은
  *     「대신할 사람이 없다」라는 정상적인 답과 구별되지 않는다 — 그래서 같은 줄을
  *     양쪽으로 물어 둘 다 맞는지 본다.
+ *  7. 🔴 **고지가 둘이어도 합집합이고, 갈아타며 이어 붙지 않는다**(2026-11-16).
+ *     포털(dss-auth)에 맡긴 위임이 생기면서 3번의 울타리에 **새 틈**이 났다 —
+ *     한 고지 안에서는 막히던 두 겹이 「A/S 로 한 겹 + 포털로 한 겹」이면 생길 수
+ *     있다. 아래 3-b 묶음이 그 틈을 양쪽 방향으로 막는다.
  *
  * 🔵 표본이 비어서 공짜로 통과하는 일이 없게, 거르는 시험은 **「거르기 전에는 있었다」**
  *    를 먼저 단언한다. 이어 붙기 시험은 **두 겹이 둘 다 살아 있음**을 먼저 확인한 뒤에
@@ -52,6 +56,12 @@ const A = user(1);
 const B = user(2);
 const C = user(3);
 const D = user(4);
+
+/**
+ * 「포털에는 묻지 않았다」. 🔴 `[]` 를 그 자리에 바로 쓰면 「물었더니 없더라」와
+ * 구별되지 않아, 아래 시험들이 **무엇을 재는지**가 흐려진다.
+ */
+const NO_PORTAL: readonly string[] = [];
 
 const T = (iso: string) => new Date(iso);
 
@@ -328,7 +338,7 @@ describe("actingDelegateUserIdsFor", () => {
     const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
     assert.equal(actingDelegateUserIdsFor(rows, A, now).includes(A), false);
     // 본인을 맨 앞에 끼우는 쪽은 저쪽이다 — 둘을 맞대어 그 차이를 못 박는다.
-    assert.equal(actingApproverUserIds(rows, A, now)[0], A);
+    assert.equal(actingApproverUserIds(rows, A, now, NO_PORTAL)[0], A);
   });
 });
 
@@ -338,7 +348,7 @@ describe("actingApproverUserIds", () => {
   const now = T("2026-03-15T00:00:00.000Z");
 
   test("🔴 본인은 언제나 맨 앞에 있다 — 위임이 하나도 없어도 빈 목록이 아니다", () => {
-    assert.deepEqual(actingApproverUserIds([], B, now), [B]);
+    assert.deepEqual(actingApproverUserIds([], B, now, NO_PORTAL), [B]);
   });
 
   test("본인 + 지금 대신할 수 있는 결재권자들", () => {
@@ -346,17 +356,17 @@ describe("actingApproverUserIds", () => {
       delegation({ delegatorUserId: A, delegateUserId: B }),
       delegation({ delegatorUserId: C, delegateUserId: B }),
     ];
-    assert.deepEqual(actingApproverUserIds(rows, B, now), [B, A, C]);
+    assert.deepEqual(actingApproverUserIds(rows, B, now, NO_PORTAL), [B, A, C]);
   });
 
   test("🔴 맡긴 사람 본인은 그대로 누를 수 있다 — 위임은 넘기는 것이 아니라 늘리는 것", () => {
     const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
-    assert.deepEqual(actingApproverUserIds(rows, A, now), [A]);
+    assert.deepEqual(actingApproverUserIds(rows, A, now, NO_PORTAL), [A]);
   });
 
   test("죽은 위임은 아무것도 늘리지 않는다", () => {
     const rows = [delegation({ revokedAt: T("2026-03-12T00:00:00.000Z") })];
-    assert.deepEqual(actingApproverUserIds(rows, B, now), [B]);
+    assert.deepEqual(actingApproverUserIds(rows, B, now, NO_PORTAL), [B]);
   });
 
   test("겹치는 위임이 여럿이어도 같은 결재권자가 두 번 들어가지 않는다", () => {
@@ -369,7 +379,74 @@ describe("actingApproverUserIds", () => {
         endsAt: T("2026-03-25T00:00:00.000Z"),
       }),
     ];
-    assert.deepEqual(actingApproverUserIds(rows, B, now), [B, A]);
+    assert.deepEqual(actingApproverUserIds(rows, B, now, NO_PORTAL), [B, A]);
+  });
+});
+
+// ── 3-b. 고지가 둘일 때 (2026-11-16 — 포털에 맡긴 위임) ──────────────────
+
+/**
+ * 🔴 여기서 못 박는 것 넷. 전부 **틀려도 그 자리에서는 아무 오류가 안 난다.**
+ *
+ *  1. 포털이 준 목록이 **실제로 늘린다**. 안 늘리면 통합 승인함에서 맡긴 위임이
+ *     A/S 에서 아무 일도 안 일으키고(이 조각이 고치려는 바로 그 상태), 화면에는
+ *     아무 표시도 안 남는다.
+ *  2. **합집합**이다 — A/S 제 표의 위임을 대신하지 않는다(설계 B-4: 둘 다 산다).
+ *  3. 🔴 **고지를 갈아타며 두 겹이 되지 않는다.** A/S 로 A→B, 포털로 B→C 일 때
+ *     C 가 A 를 얻으면 안 된다. 한 고지 안에서는 `delegatorUserIdsFor` 가 막던
+ *     것인데, 고지가 둘이 되면서 **새로 생긴 틈**이다.
+ *  4. 포털이 맨 앞에 넣어 주는 **본인 번호가 두 번 들어가지 않는다.**
+ */
+describe("🔴 actingApproverUserIds — 포털에 맡긴 위임까지 합친다", () => {
+  const now = T("2026-03-15T00:00:00.000Z");
+
+  test("포털이 준 결재권자가 목록에 들어온다 — 늘리는 쪽이 실제로 돈다", () => {
+    // 🔵 표본이 공짜로 통과하지 않게: 포털 목록을 빼면 **본인뿐**임을 먼저 못 박는다.
+    assert.deepEqual(actingApproverUserIds([], B, now, NO_PORTAL), [B]);
+    assert.deepEqual(actingApproverUserIds([], B, now, [A]), [B, A]);
+  });
+
+  test("🔴 합집합이다 — A/S 제 표의 위임과 포털 위임이 둘 다 남는다", () => {
+    const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
+    // 둘을 따로 재 두고(각각 한 명씩 늘린다),
+    assert.deepEqual(actingApproverUserIds(rows, B, now, NO_PORTAL), [B, A]);
+    assert.deepEqual(actingApproverUserIds([], B, now, [C]), [B, C]);
+    // 함께 주면 둘 다 들어온다 — 어느 한쪽이 다른 쪽을 지우지 않는다.
+    assert.deepEqual(actingApproverUserIds(rows, B, now, [C]), [B, A, C]);
+  });
+
+  test("🔴 고지를 갈아타도 이어 붙지 않는다 — A/S 로 A→B, 포털로 B→C", () => {
+    // A/S 제 표에는 A→B 한 줄만 있다. 포털은 C 에게 「B 를 대신할 수 있다」고 답한다.
+    const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
+    // 🔵 두 겹이 **둘 다 살아 있는** 표본인지 먼저 못 박는다 — 하나라도 죽어 있으면
+    //    「안 이어진다」가 공짜로 통과하고 아무것도 지키지 못한다.
+    assert.deepEqual(actingApproverUserIds(rows, B, now, NO_PORTAL), [B, A]);
+    assert.deepEqual(actingApproverUserIds(rows, C, now, [B]), [C, B]);
+    // 여기가 본론 — C 는 A 를 얻지 못한다. 얻으면 A 가 동의한 적 없는 사람이
+    // A 의 이름으로 누르게 된다.
+    assert.equal(actingApproverUserIds(rows, C, now, [B]).includes(A), false);
+  });
+
+  test("🔴 반대 방향도 같다 — 포털로 A→B, A/S 로 B→C", () => {
+    const rows = [delegation({ delegatorUserId: B, delegateUserId: C })];
+    assert.deepEqual(actingApproverUserIds(rows, C, now, NO_PORTAL), [C, B]);
+    assert.deepEqual(actingApproverUserIds([], B, now, [A]), [B, A]);
+    // C 가 가진 것은 B 뿐이다. 포털이 B 에게 준 A 는 C 에게 넘어오지 않는다.
+    assert.equal(actingApproverUserIds(rows, C, now, NO_PORTAL).includes(A), false);
+  });
+
+  test("🔴 포털이 맨 앞에 넣어 주는 본인 번호가 두 번 들어가지 않는다", () => {
+    // 포털 통로는 답의 맨 앞에 부른 사람 자신을 넣는다(설계 C-2).
+    assert.deepEqual(actingApproverUserIds([], B, now, [B, A]), [B, A]);
+  });
+
+  test("두 고지에 같은 결재권자가 겹쳐 적혀도 한 번만 들어간다", () => {
+    const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
+    assert.deepEqual(actingApproverUserIds(rows, B, now, [A]), [B, A]);
+  });
+
+  test("포털 목록의 빈 글자는 버린다 — 조건절에 빈 값이 섞여 들어가지 않는다", () => {
+    assert.deepEqual(actingApproverUserIds([], B, now, ["", D]), [B, D]);
   });
 });
 

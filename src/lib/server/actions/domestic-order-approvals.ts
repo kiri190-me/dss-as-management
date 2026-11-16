@@ -13,8 +13,9 @@ import {
 } from "@/lib/db/mutations/domestic-order-approvals";
 import { resolveActingDelegateUserIds } from "@/lib/db/queries/approval-route-delegations";
 import { getDomesticOrderApprovalProgress } from "@/lib/db/queries/domestic-order-approvals";
-import { getSsoSubjectForUser } from "@/lib/db/queries/users";
+import { getSsoSubjectForUser, listUserIdsBySsoSubjects } from "@/lib/db/queries/users";
 import { notifyDomesticOrderApprovalCreated } from "@/lib/server/integration/approval-created-notice";
+import { resolvePortalRouteDelegations } from "@/lib/server/integration/portal-delegations";
 import { notifyPortalApprovalCreated } from "@/lib/server/integration/portal-inbox";
 import { isValidDomesticOrderId } from "@/lib/validation/domestic-order-input";
 import {
@@ -69,9 +70,20 @@ export type DomesticOrderApprovalActionCode =
   | "UNAUTHORIZED"
   | "DATABASE_UNAVAILABLE";
 
+/**
+ * 🔴 **포털에 결재권 위임을 못 물은 채로 판정했다**(2026-11-16, 설계 B-6·B-7).
+ * mutation 이 실어 보낸 것을 **그대로 통과시킨다** — 여기서 떨어뜨리면 화면이 안내를
+ * 띄울 길이 없어진다. 뜻은 validation/repair-case-approval-input.ts 의 같은 칸에 있다.
+ */
+type PortalDelegationOutageFlag = { portalDelegationUnavailable?: true };
+
 export type DomesticOrderApprovalActionResult =
-  | { ok: true; id: string }
-  | { ok: false; code: DomesticOrderApprovalActionCode; message: string };
+  | ({ ok: true; id: string } & PortalDelegationOutageFlag)
+  | ({
+      ok: false;
+      code: DomesticOrderApprovalActionCode;
+      message: string;
+    } & PortalDelegationOutageFlag);
 
 export type RequestDomesticOrderApprovalActionInput = {
   domesticOrderId: string;
@@ -260,6 +272,21 @@ export async function decideDomesticOrderApprovalAction(
     return { ok: false, code: "VALIDATION_ERROR", message: "납기요청일 회차를 확인할 수 없습니다." };
   }
 
+  // 🔴 **포털에 맡긴 결재권 위임을 여기서 묻는다 — 트랜잭션을 열기 전에**
+  // (2026-11-16, 설계 C-3). mutation 안에서 물으면 망 호출이 트랜잭션 안으로
+  // 들어가 결재 행 잠금이 포털 지연만큼 붙들린다. 못 물으면 「위임 없음」으로
+  // 보고 결재는 그대로 진행한다(설계 B-6) — 그 사실은 결과에 실려 나간다.
+  //
+  // 🔵 기타건 결재도 **언제나 결재선을 탄다**(판이 없으면 요청 자체가
+  // ROUTE_NOT_CONFIGURED 로 거절된다) — 견적서 쪽과 같은 까닭으로 갈래를 가르지 않는다.
+  //
+  // 🔴 **열쇠를 바꾸는 조회 둘을 여기서 꽂는다.** 그 함수가 `@/lib/db` 를 직접
+  // 끌어오지 않는 까닭은 그쪽 `PortalDelegationQueries` 주석에 있다.
+  const portalDelegations = await resolvePortalRouteDelegations(actor.userId, {
+    readPortalSubject: getSsoSubjectForUser,
+    readUserIdsBySubjects: listUserIdsBySsoSubjects,
+  });
+
   let result: Awaited<ReturnType<typeof decideDomesticOrderApproval>>;
   try {
     result = await decideDomesticOrderApproval({
@@ -268,6 +295,7 @@ export async function decideDomesticOrderApprovalAction(
       actorUserId: actor.userId,
       decisionReason: reason.reason,
       dueDateRowOrder: input.dueDateRowOrder,
+      portalDelegations,
     });
   } catch (err) {
     console.error("decideDomesticOrderApprovalAction: unexpected DB error", {
@@ -287,7 +315,16 @@ export async function decideDomesticOrderApprovalAction(
     // 아무것도 나가지 않는다 — 그 판단은 notifyDomesticOrderApprovalCreated 안에 있다.
     await notifyPortalOfDomesticOrderApprovalTurn(input.domesticOrderId);
   }
-  return result.ok ? { ok: true, id: result.id } : result;
+  // 🔴 성공 쪽에서도 **포털 안내를 떨어뜨리지 않는다.** 여기서 칸을 골라 담는 까닭은
+  // `nextApprovalId` 를 화면에 내보내지 않기 위해서인데(그 값은 서버 안의 사슬
+  // 이야기다), 그 참에 포털 안내까지 같이 사라지면 화면이 그 사실을 알 길이 없다.
+  return result.ok
+    ? {
+        ok: true,
+        id: result.id,
+        ...(result.portalDelegationUnavailable ? { portalDelegationUnavailable: true as const } : {}),
+      }
+    : result;
 }
 
 function isPgErrorLike(err: unknown): err is { code?: string } {

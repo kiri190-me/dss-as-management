@@ -32,6 +32,7 @@ import {
   DOMESTIC_ORDER_APPROVAL_ROUTE_SCOPE,
   DOMESTIC_ORDER_APPROVAL_TYPE,
 } from "@/lib/domain/domestic-order-approval-rules";
+import type { PortalRouteDelegations } from "@/lib/domain/portal-approval-delegation";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 
 /**
@@ -39,7 +40,7 @@ import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input"
  * 기타건 최종 출하 승인 — 실제 DB (시험 DB)
  * ============================================================================
  * mutations/quote-approvals.integration.test.ts 를 그대로 본떴다. 여기서 못 박는
- * 것 여덟:
+ * 것 아홉:
  *  1. 🔴 **결재선 판이 없거나 단계가 0개면 요청 자체를 거절한다** — 기타건에는
  *     「출하 대표」 같은 대신할 결재자가 없다. 그때 돌려주는 말이 **화면이 누르기
  *     전에 하는 말과 같은 한 줄**인지까지 본다.
@@ -54,6 +55,11 @@ import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input"
  *  8. 🔴 **접수 건 승인이 한 톨도 바뀌지 않는다** — 같은 표를 쓰지만 기타건 행은
  *     `repair_case_id` 가 언제나 NULL 이고 승인 종류가 달라, 접수 건 결재 대기
  *     조회에 들어가지 않는다. 표의 CHECK 넷이 그 갈림을 DB 에서 못 박는다.
+ *  9. 🔴 **포털(dss-auth)에 맡긴 결재권 위임이 여기에도 걸린다**(2026-11-16, 설계
+ *     B-1·B-4 — dss-approvals/DELEGATION_DESIGN.md). 결재 셋 가운데 하나라도
+ *     빠지면 「어떤 결재는 위임이 듣고 어떤 것은 안 듣는」 상태가 되는데, 빠진 쪽은
+ *     **오류를 한 줄도 내지 않는다.** 접수 건·견적서 쪽은
+ *     approval-route-delegation-decide.integration.test.ts 가 같은 것을 잰다.
  *
  * ── 격리·청소 규약 ──────────────────────────────────────────────────────
  * 이 파일이 만든 "domesticapproval-test-" 계정과 그 계정이 만든 내자 줄만 쓴다.
@@ -810,5 +816,136 @@ describe("🔴 접수 건 승인이 한 톨도 바뀌지 않는다", () => {
     assert.ok(names.includes("repair_case_approvals_one_active_request"));
     assert.ok(names.includes("repair_case_approvals_one_active_domestic_request"));
     assert.ok(names.includes("repair_case_approvals_domestic_order_id_idx"));
+  });
+});
+
+/* ========================================================================== */
+/* 🔴 포털에 맡긴 결재권 위임이 **기타건에도** 걸린다 (2026-11-16)             */
+/*                                                                            */
+/* 결재 셋(접수 건 출하 · 견적서 · 기타건 출하)이 **다** 읽어야 한다. 하나라도 */
+/* 빠지면 「어떤 결재는 위임이 듣고 어떤 것은 안 듣는」 상태가 되고, 그것은     */
+/* 아무도 설명할 수 없는 모양인 데다 **오류를 한 줄도 내지 않는다.** 기타건은   */
+/* 2026-11-06 에 새로 생긴 갈래라 특히 빠뜨리기 쉬워 여기서 따로 잰다.         */
+/*                                                                            */
+/* 🔵 **포털을 부르지 않는다.** 물어 온 결과를 인자로 받는다(설계 C-3 — 망     */
+/*    호출은 트랜잭션 밖 서버 액션의 일이다). 묻는 왕복은                      */
+/*    server/integration/portal-delegations.test.ts 가, 액션이 실제로 묻는지는 */
+/*    server/actions/portal-delegation-wiring.test.ts 가 잰다.                 */
+/* ========================================================================== */
+
+describe("🔴 포털에 맡긴 결재권 위임 — 기타건에도 걸린다", () => {
+  /** 포털이 답한 것 — 이미 A/S `users.id` 로 바뀐 값이다. 맨 앞은 부른 사람 자신. */
+  function 포털위임(delegatorUserIds: string[]): PortalRouteDelegations {
+    return { delegatorUserIds, unavailable: false };
+  }
+
+  /** 1단계가 stepA 에게 열려 있는 기타건 하나. */
+  async function 결재올린기타건(): Promise<string> {
+    const order = await createTestOrder();
+    await saveDomesticRoute([stepAId]);
+    const requested = await requestDomesticOrderApproval({
+      domesticOrderId: order.id,
+      actorUserId: requesterId,
+      requestReason: "포털 위임 시험",
+      dueDateRowOrder: 1,
+    });
+    assert.equal(requested.ok, true, `setup request failed: ${JSON.stringify(requested)}`);
+    const [row] = await approvalRows(order.id);
+    assert.equal(row.assignedApproverUserId, stepAId, "1단계가 결재자에게 가지 않았다");
+    return order.id;
+  }
+
+  test("포털 위임만으로 승인되고, 기록에 **둘 다** 남는다", async () => {
+    const orderId = await 결재올린기타건();
+
+    // 🔵 포털을 빼고 눌러 보면 **막힌다**를 먼저 못 박는다 — 안 하면 이 시험이
+    //    「제삼자도 원래 누를 수 있었다」인 구현에서 공짜로 통과한다.
+    const 포털없이 = await decideDomesticOrderApproval({
+      domesticOrderId: orderId,
+      decision: "APPROVED",
+      actorUserId: outsiderId,
+      decisionReason: null,
+      dueDateRowOrder: 1,
+    });
+    assert.equal(포털없이.ok, false, "위임도 없는 제삼자가 눌렀다");
+
+    const decided = await decideDomesticOrderApproval({
+      domesticOrderId: orderId,
+      decision: "APPROVED",
+      actorUserId: outsiderId,
+      decisionReason: null,
+      dueDateRowOrder: 1,
+      portalDelegations: 포털위임([outsiderId, stepAId]),
+    });
+    assert.equal(decided.ok, true, `포털 위임이 안 걸렸다: ${JSON.stringify(decided)}`);
+
+    const [row] = await approvalRows(orderId);
+    assert.equal(row.status, "APPROVED");
+    // 🔴 누가 눌렀는가 · 누구 자리였는가 — **둘 다**(2026-10-20 사용자 결정).
+    assert.equal(row.decidedByUserId, outsiderId, "누른 사람이 안 남았다");
+    assert.equal(row.delegatedFromUserId, stepAId, "누구 자리였는지가 안 남았다");
+    assert.equal(row.assignedApproverUserId, stepAId, "지정이 대리인으로 덮였다");
+  });
+
+  test("🔴 포털 목록이 **이 단계의 결재자를 담고 있지 않으면** 못 누른다 — 통행증이 아니다", async () => {
+    const orderId = await 결재올린기타건();
+
+    // 🔴 **여기 들어오는 목록은 이미 「부른 사람」 몫으로 좁혀진 값**이다(포털에 제
+    //    번호로 물어 받는다). 그래서 이 층에서 「남의 위임」을 표현할 길은 없고,
+    //    재야 할 것은 **목록이 비지 않았는데도 이 단계는 안 열리는가**다.
+    const 목록 = 포털위임([outsiderId, stepBId]);
+    assert.ok(목록.delegatorUserIds.length > 1, "표본이 비었다 — 이 시험이 아무것도 안 본다");
+    assert.ok(
+      !목록.delegatorUserIds.includes(stepAId),
+      "표본에 이 단계의 결재자가 들어 있다 — 재려는 것과 반대다"
+    );
+
+    const decided = await decideDomesticOrderApproval({
+      domesticOrderId: orderId,
+      decision: "APPROVED",
+      actorUserId: outsiderId,
+      decisionReason: null,
+      dueDateRowOrder: 1,
+      portalDelegations: 목록,
+    });
+    assert.equal(decided.ok, false, "상관없는 포털 위임으로 눌렸다");
+    if (!decided.ok) assert.equal(decided.code, "FORBIDDEN");
+    assert.equal((await approvalRows(orderId))[0].status, "REQUESTED");
+  });
+
+  test("🔴 포털에 못 물으면 결재는 그대로 돌고, 그 사실이 결과에 실린다", async () => {
+    const orderId = await 결재올린기타건();
+
+    // 설계 B-6 — 포털이 멈췄다고 결재를 막지 않는다. 본인은 멀쩡히 누른다.
+    const decided = await decideDomesticOrderApproval({
+      domesticOrderId: orderId,
+      decision: "APPROVED",
+      actorUserId: stepAId,
+      decisionReason: null,
+      dueDateRowOrder: 1,
+      portalDelegations: { delegatorUserIds: [], unavailable: true },
+    });
+    assert.equal(decided.ok, true, `포털이 죽었다고 본인 결재가 막혔다: ${JSON.stringify(decided)}`);
+    assert.equal((await approvalRows(orderId))[0].status, "APPROVED");
+    // 설계 B-7 — 「조용히」가 아니어야 한다.
+    assert.equal(decided.portalDelegationUnavailable, true, "못 물었는데 결과에 아무 표시가 없다");
+  });
+
+  test("포털이 멀쩡하면 안내 깃발은 **실리지 않는다** — 대조", async () => {
+    const orderId = await 결재올린기타건();
+
+    const decided = await decideDomesticOrderApproval({
+      domesticOrderId: orderId,
+      decision: "APPROVED",
+      actorUserId: stepAId,
+      decisionReason: null,
+      dueDateRowOrder: 1,
+      portalDelegations: 포털위임([stepAId]),
+    });
+    assert.equal(decided.ok, true, JSON.stringify(decided));
+    assert.ok(
+      !("portalDelegationUnavailable" in decided),
+      "멀쩡한데 안내 깃발이 실렸다 — 매번 실리면 사람이 그 경고를 안 읽게 된다"
+    );
   });
 });

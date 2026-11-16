@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../client";
 import { users } from "../schema";
 import { insertAuditLog } from "../mutations/audit-logs";
@@ -156,6 +156,60 @@ export async function getSsoSubjectForUser(id: string): Promise<string | null> {
     .where(and(eq(users.id, id), eq(users.isDeleted, false)))
     .limit(1);
   return row?.ssoSubject ?? null;
+}
+
+/**
+ * 바로 위와 **방향이 반대**다 — 포털 번호 여럿을 받아 **A/S 의 `users.id`** 로 바꾼다.
+ * 2026-11-16, 포털에 모은 결재권 위임을 A/S 가 읽기 시작하면서 생겼다
+ * (dss-approvals/DELEGATION_DESIGN.md 의 C-3: 「포털이 돌려준 `sub` 를 A/S 의
+ * `users.id` 로 바꿔야 한다」). 포털은 사람을 `sub` 로만 가리키는데 A/S 의 결재
+ * 판정은 제 `users.id` 로 돌기 때문이다(domain/approval-route-delegation.ts 의
+ * 「열쇠는 `users.id`(uuid) 다」).
+ *
+ * ── 🔴 못 찾은 번호를 **조용히 버리지 않는다** ──────────────────────────
+ * 이 함수는 찾은 것만 돌려주고, **몇 개가 빠졌는지 세는 일은 부르는 쪽**이 한다
+ * (server/integration/portal-delegations.ts). 여기서 세어 로그를 찍게 하면 이
+ * 조회를 쓰는 다음 자리가 생길 때마다 같은 경고가 두 벌로 나간다.
+ *
+ * 🔴 **왜 세야 하나**: 2026-11-16 운영 실측으로는 살아 있는 계정 8명·결재선에 오른
+ * 5명 모두 `sso_subject` 가 차 있어 빠지는 사람이 **지금은 0명**이다. 하지만 손으로
+ * 만든 로컬 계정이 다시 생기면 그 사람만 **오류 없이 조용히 위임이 안 듣는다** —
+ * 셈이 없으면 영영 못 알아챈다(설계 D-3 의 마지막 문단).
+ *
+ * ── 거르는 조건 ─────────────────────────────────────────────────────────
+ * 소프트삭제된 계정만 뺀다 — `getUserBySsoSubject` 와 **같은 줄**이다. 비활성·잠금은
+ * 보지 않는다: 이 값이 들어가는 판정(`resolveActingApproverUserIds`)이 **맡긴 사람의
+ * 계정 상태를 일부러 보지 않기** 때문이다(그 함수의 🔴 주석 — 자리를 비운 바로 그
+ * 상황에서 위임이 함께 죽으면 안 된다). 여기서만 좁히면 두 길의 답이 갈린다.
+ *
+ * 🔵 돌려주는 차례는 **받은 번호의 차례**다. 질의가 주는 차례를 그대로 쓰면 실행마다
+ * 달라질 수 있고, 이 값은 결재자 목록의 뒷자리로 들어가 기록(`delegated_from_user_id`)을
+ * 고르는 데까지 쓰인다 — 값이 흔들릴 자리를 남기지 않는다.
+ */
+export async function listUserIdsBySsoSubjects(
+  subjects: readonly string[]
+): Promise<{ id: string; ssoSubject: string }[]> {
+  const wanted = Array.from(
+    new Set(subjects.filter((one): one is string => typeof one === "string" && one !== ""))
+  );
+  // 🔴 빈 목록이면 **질의를 던지지 않는다.** drizzle 은 `inArray(…, [])` 를 `false`
+  //    로 굽기 때문에 결과는 같지만, 아무것도 못 찾을 질의를 왕복시킬 까닭이 없다.
+  if (wanted.length === 0) return [];
+
+  const rows = await db
+    .select({ id: users.id, ssoSubject: users.ssoSubject })
+    .from(users)
+    .where(and(inArray(users.ssoSubject, wanted), eq(users.isDeleted, false)));
+
+  const bySubject = new Map(
+    rows
+      .filter((row): row is { id: string; ssoSubject: string } => row.ssoSubject !== null)
+      .map((row) => [row.ssoSubject, row])
+  );
+  return wanted.flatMap((subject) => {
+    const row = bySubject.get(subject);
+    return row ? [row] : [];
+  });
 }
 
 /**

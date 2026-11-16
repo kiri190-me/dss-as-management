@@ -15,9 +15,11 @@ import {
   listUsersForRepresentativeManagement,
   resolveShipmentDecideAuthorization,
 } from "@/lib/db/queries/shipment-delegations";
-import { getSsoSubjectForUser } from "@/lib/db/queries/users";
+import { getSsoSubjectForUser, listUserIdsBySsoSubjects } from "@/lib/db/queries/users";
 import { notifyRepairCaseApprovalCreated } from "@/lib/server/integration/approval-created-notice";
+import { resolvePortalRouteDelegations } from "@/lib/server/integration/portal-delegations";
 import { notifyPortalApprovalCreated } from "@/lib/server/integration/portal-inbox";
+import { NO_PORTAL_DELEGATIONS } from "@/lib/domain/portal-approval-delegation";
 import {
   isValidApprovalDecision,
   isValidApprovalType,
@@ -209,6 +211,26 @@ export async function decideRepairCaseApprovalAction(
     return { ok: false, code: "VALIDATION_ERROR", message: reasonValidation.error };
   }
 
+  // 🔴 **포털에 맡긴 결재권 위임을 여기서 묻는다 — 트랜잭션을 열기 전에**
+  // (2026-11-16, 설계 C-3). mutation 안에서 물으면 망 호출이 트랜잭션 안으로
+  // 들어가 결재 행 잠금이 포털 지연만큼 붙들린다. 못 물으면 「위임 없음」으로
+  // 보고 결재는 그대로 진행한다(설계 B-6) — 그 사실은 결과에 실려 나간다.
+  //
+  // 🔴 **수리 검수 승인에는 묻지 않는다.** 그 결재는 결재선을 탈 수 없어(표의
+  // repair_case_approvals_route_only_for_final_shipment CHECK) 대신할 「단계」가
+  // 애초에 없다 — mutation 도 같은 까닭으로 위임 목록을 통째로 버린다
+  // (NO_ROUTE_DELEGATIONS). 물어 봐야 버릴 값에 사람을 2초 기다리게 할 까닭이 없다.
+  //
+  // 🔴 **열쇠를 바꾸는 조회 둘을 여기서 꽂는다.** 그 함수가 `@/lib/db` 를 직접
+  // 끌어오지 않는 까닭은 그쪽 `PortalDelegationQueries` 주석에 있다.
+  const portalDelegations =
+    input.approvalType === "FINAL_SHIPMENT"
+      ? await resolvePortalRouteDelegations(actorCheck.userId, {
+          readPortalSubject: getSsoSubjectForUser,
+          readUserIdsBySubjects: listUserIdsBySsoSubjects,
+        })
+      : NO_PORTAL_DELEGATIONS;
+
   let result: ApprovalActionResult;
   try {
     result = await decideRepairCaseApproval(
@@ -216,7 +238,8 @@ export async function decideRepairCaseApprovalAction(
       input.approvalType,
       input.decision,
       actorCheck.userId,
-      reasonValidation.reason
+      reasonValidation.reason,
+      portalDelegations
     );
   } catch (err) {
     const code = isPgErrorLike(err) ? err.code : undefined;

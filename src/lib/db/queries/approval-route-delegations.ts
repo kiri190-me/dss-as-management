@@ -303,6 +303,29 @@ export async function listAllApprovalRouteDelegations(
 type Executor = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
 
 /**
+ * 🔴 **「여기서는 포털에 묻지 않는다」를 글자로 적는 자리**(2026-11-16).
+ *
+ * 포털 위임을 읽는 길은 **서버 액션 → 결재 mutation** 하나뿐이고, 나머지 부르는 자리는
+ * 전부 **읽기**다(대기 목록 셋 · 결재 화면 셋). 읽기에서 포털을 부르지 않는 까닭이
+ * 둘이다:
+ *
+ *  1. 🔴 **되돌아 부르는 길이 생긴다.** 대기 목록 셋은 `app/api/integration/approvals/`
+ *     `route.ts` 가 부르는데, **그 통로를 부르는 쪽이 포털 자신**이다(결재 메일·통합
+ *     승인함이 그 길로 A/S 에 묻는다). 거기서 또 포털에 물으면 포털이 A/S 를 기다리는
+ *     동안 A/S 가 포털을 기다린다 — 상한이 양쪽에 있어 멈추지는 않지만, 결재함 한 번
+ *     여는 데 왕복이 사람 수만큼 는다.
+ *  2. 🔵 읽기는 **힌트**다. 실제로 막고 여는 것은 mutation 이 제 트랜잭션 안에서 다시
+ *     판정한다(아래 함수의 `executor` 주석).
+ *
+ * 🔴 **그 대신 읽는 쪽에는 포털 위임이 안 보인다.** 포털에만 위임을 맡은 사람은 대기
+ * 목록·종에 그 건이 안 뜨고 결재 화면에 단추도 안 그려진다 — **mutation 은 받아 주는데
+ * 누를 자리가 없다.** 이 조각(3a)은 판정만 잇는 자리라 거기까지 가지 않았고, 읽는 쪽을
+ * 잇는 것은 **조각 3b 의 일**이다. 🔴 **그때 1번을 반드시 다시 보라** — 통로
+ * (`/api/integration/approvals`)에서만은 묻지 않아야 한다.
+ */
+const NO_PORTAL_DELEGATION_USER_IDS: readonly string[] = [];
+
+/**
  * 🔴 **「지금 이 사람의 자격으로 누를 수 있는 결재자 id」 전부.** 맨 앞은 언제나
  * 본인이고, 뒤에 지금 살아 있는 위임의 결재권자들이 붙는다.
  *
@@ -329,11 +352,18 @@ type Executor = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
  * 자리를 비운 사이 그 단계를 넘겨 주는 것이 이 기능이 있는 까닭이기 때문이다.
  * 여기에 「맡긴 사람이 활성인가」를 더하면, 사람이 자리를 비운 바로 그 상황에서
  * 위임이 함께 죽는다.
+ *
+ * @param portalDelegatorUserIds **포털에 맡긴 위임**으로 지금 대신할 수 있는 결재권자들
+ *   (2026-11-16, 설계 B-4). 이미 **A/S `users.id` 로 바뀐** 값이어야 한다 — 바꾸는
+ *   자리는 server/integration/portal-delegations.ts 다. 합치는 규칙(합집합 · 본인 맨
+ *   앞 · 중복 제거 · **이어 붙지 않음**)은 여기 적지 않고 순수 함수 하나가 쥔다.
+ *   🔴 기본값이 **빈 목록**인 까닭은 바로 위 `NO_PORTAL_DELEGATION_USER_IDS` 주석에 있다.
  */
 export async function resolveActingApproverUserIds(
   actorUserId: string,
   now: Date,
-  executor: Executor = db
+  executor: Executor = db,
+  portalDelegatorUserIds: readonly string[] = NO_PORTAL_DELEGATION_USER_IDS
 ): Promise<ActingApproverUserIds> {
   const rows: ApprovalRouteDelegationPeriod[] = await executor
     .select({
@@ -352,7 +382,7 @@ export async function resolveActingApproverUserIds(
       )
     );
 
-  return actingApproverUserIds(rows, actorUserId, now);
+  return actingApproverUserIds(rows, actorUserId, now, portalDelegatorUserIds);
 }
 
 /**
