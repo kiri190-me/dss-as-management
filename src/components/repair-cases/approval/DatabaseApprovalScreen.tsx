@@ -1,6 +1,7 @@
 import DatabaseRepairInspectionCard from "./DatabaseRepairInspectionCard";
 import DatabaseFinalShipmentCard from "./DatabaseFinalShipmentCard";
 import DatabaseApprovalEventTimeline from "./DatabaseApprovalEventTimeline";
+import PortalDelegationUnavailableNotice from "@/components/approvals/PortalDelegationUnavailableNotice";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { ApprovalRecordRow, CurrentApprovalState } from "@/lib/db/queries/repair-case-approvals";
@@ -24,6 +25,7 @@ export default function DatabaseApprovalScreen({
   inspectionAssigneeCandidates,
   routeSteps,
   actingApproverUserIds,
+  portalDelegationUnavailable,
   canRequestApproval,
 }: {
   resolved: ResolvedRepairCase;
@@ -50,6 +52,19 @@ export default function DatabaseApprovalScreen({
    * CHECK) 대신할 단계가 애초에 없고, 안 쓰는 값을 넘겨 두면 언젠가 쓰인다.
    */
   actingApproverUserIds: readonly string[];
+  /**
+   * 🔴 **통합 로그인 포털에 결재권 위임을 못 물었다**(2026-11-16, 설계 B-6·B-7).
+   *
+   * 그때 위 `actingApproverUserIds` 에는 **A/S 제 위임만** 들어 있다 — 결재는 그대로
+   * 진행되지만 **승인함에만 위임을 맡은 사람은 조용히 막힌다.** 본인은 멀쩡히 누르므로
+   * 아무도 못 알아채고, 그것이 이 저장소들에서 가장 비싼 결함 모양이다. 그래서 두
+   * 카드 위에 안내를 세운다.
+   *
+   * 🔴 **거짓이 평소다.** 포털이 멀쩡하거나 포털 계정이 없는 사람에게는 아무것도 안
+   * 뜬다 — 「포털 계정이 없다」는 장애가 아니라 사실이기 때문이다
+   * (domain/portal-approval-delegation.ts 머리말).
+   */
+  portalDelegationUnavailable: boolean;
   /**
    * 🔴 **승인 요청을 올릴 수 있는가** — [역할별 접근 권한]의 `repairCases.approval`
    * 쓰기다(2026-11-12 셋째). 서버(page.tsx)가 구해 내려준다.
@@ -94,6 +109,10 @@ export default function DatabaseApprovalScreen({
       <p className="text-xs text-zinc-500 dark:text-zinc-400">
         이 승인 기록은 데이터베이스에 저장되며, 서버에서 권한과 요청 상태를 재검증합니다.
       </p>
+
+      {/* 🔴 **두 카드 위**다 — 단추를 찾기 전에 읽혀야 한다. 포털이 멀쩡하면 아무것도
+          안 그린다(조각 자신이 그렇게 판정한다 — 여기서 가지를 치지 않는다). */}
+      <PortalDelegationUnavailableNotice unavailable={portalDelegationUnavailable} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <DatabaseRepairInspectionCard

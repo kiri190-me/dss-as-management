@@ -1,4 +1,5 @@
 import "server-only";
+import { NO_PORTAL_DELEGATION_USER_IDS } from "./approval-route-delegations";
 import { listRepairCasesPendingMyApproval } from "./repair-case-approvals-pending";
 import { loadNotificationSettings } from "./notification-settings";
 import { deliversNotification } from "@/lib/domain/notification-settings";
@@ -125,8 +126,21 @@ import { listAcknowledgedNotificationKeys } from "./notification-acknowledgement
 
 type NotificationSource = {
   kind: NotificationKind;
-  /** 이 사용자에게 지금 보여야 할 그 종류의 알림 전부. */
-  load: (actorUserId: string, actorRole: Role) => Promise<NotificationItem[]>;
+  /**
+   * 이 사용자에게 지금 보여야 할 그 종류의 알림 전부.
+   *
+   * @param portalDelegatorUserIds 🔴 **포털에 맡긴 결재권 위임**으로 지금 대신할 수 있는
+   *   결재권자들(2026-11-16, 설계 B-4). **결재 대기 셋만** 쓴다 — 나머지 종류는 위임과
+   *   아무 상관이 없어 받기만 하고 버린다. 🔴 인자를 **셋째 자리**에 둔 까닭은 기존
+   *   load 들이 손대지 않고도 그대로 서기 위해서다(받지 않으면 그만이다).
+   *   🔴 **빈 목록이 기본값**이고, 그때는 A/S 제 위임만 듣는다 — 까닭은 아래
+   *   `listMyNotifications` 의 같은 인자 주석에 있다.
+   */
+  load: (
+    actorUserId: string,
+    actorRole: Role,
+    portalDelegatorUserIds: readonly string[]
+  ) => Promise<NotificationItem[]>;
 };
 
 /**
@@ -149,10 +163,15 @@ async function withoutAcknowledged(actorUserId: string, items: NotificationItem[
 const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
   {
     kind: "REPAIR_CASE_APPROVAL",
-    load: async (actorUserId) => {
+    load: async (actorUserId, _actorRole, portalDelegatorUserIds) => {
       // 새 조회를 만들지 않는다 — 사이드바 배지가 이미 쓰고 있고 통합 테스트로
       // 검증된 조회를 그대로 부른다. 여기서 하는 일은 모양 변환뿐이다.
-      const pending = await listRepairCasesPendingMyApproval(actorUserId);
+      //
+      // 🔴 **포털에 맡긴 위임을 그대로 넘긴다**(2026-11-16). 안 넘기면 승인함에만
+      // 위임을 맡은 사람의 종에 그 건이 안 떠서, **대신 눌러야 할 일이 있다는 사실
+      // 자체를** 모른다. 묻는 것은 이 파일이 아니라 부르는 쪽이다(아래
+      // listMyNotifications 의 @param — 포털이 되묻는 통로에서는 안 묻는다).
+      const pending = await listRepairCasesPendingMyApproval(actorUserId, portalDelegatorUserIds);
       return pending.map((item) =>
         buildApprovalNotification({
           repairCaseId: item.repairCaseId,
@@ -164,7 +183,7 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
   },
   {
     kind: "QUOTE_APPROVAL_PENDING",
-    load: async (actorUserId) => {
+    load: async (actorUserId, _actorRole, portalDelegatorUserIds) => {
       // 결재 요청·불출 승인 대기와 같은 모양 (가) — 대상이 역할이 아니라 **사람**이다.
       // 역할로 먼저 거르지 않는다: 결재선에는 역할 제한 없이 누구든 올라갈 수 있어서
       // (listSelectableApproverCandidates), 여기서 역할을 보는 순간 자기 차례인
@@ -173,7 +192,9 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
       //
       // 판정도 새로 적지 않는다 — 지정 관문(지정된 사람 + 최고관리자 비상구)을 그대로
       // 쓰는 조회 하나를 부르고, 여기서 하는 일은 모양 변환뿐이다.
-      const pending = await listQuoteApprovalsPendingMyApproval(actorUserId);
+      //
+      // 🔴 **포털에 맡긴 위임을 그대로 넘긴다**(2026-11-16) — 위 결재 알림과 같은 까닭.
+      const pending = await listQuoteApprovalsPendingMyApproval(actorUserId, portalDelegatorUserIds);
       return pending.map((item) =>
         buildQuoteApprovalNotification({
           quoteId: item.quoteId,
@@ -186,7 +207,7 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
   },
   {
     kind: "DOMESTIC_ORDER_APPROVAL_PENDING",
-    load: async (actorUserId) => {
+    load: async (actorUserId, _actorRole, portalDelegatorUserIds) => {
       // 견적서 결재 대기와 같은 모양 (가) — 대상이 역할이 아니라 **사람**이다.
       // 역할로 먼저 거르지 않는다: 기타건 최종 출하 승인의 결재선에도 역할 제한이
       // 없어서(listSelectableApproverCandidates), 여기서 역할을 보는 순간 자기
@@ -200,7 +221,12 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
       // 판정도 새로 적지 않는다 — 지정 관문(지정된 사람 + 그 단계를 위임받은 사람 +
       // 최고관리자 비상구)을 그대로 쓰는 조회 하나를 부르고, 여기서 하는 일은 모양
       // 변환뿐이다.
-      const pending = await listDomesticOrderApprovalsPendingMyApproval(actorUserId);
+      //
+      // 🔴 **포털에 맡긴 위임을 그대로 넘긴다**(2026-11-16) — 위 둘과 같은 까닭.
+      const pending = await listDomesticOrderApprovalsPendingMyApproval(
+        actorUserId,
+        portalDelegatorUserIds
+      );
       return pending.map((item) =>
         buildDomesticOrderApprovalNotification({
           domesticOrderId: item.domesticOrderId,
@@ -380,8 +406,25 @@ const NOTIFICATION_SOURCES: readonly NotificationSource[] = [
  * 요구할 수 있는 입구가 없다. 역할도 부르는 쪽이 넘겨 주지만, 그 값은
  * (app)/layout.tsx가 세션 토큰이 아니라 **살아 있는 계정**에서 다시 푼
  * 것이다(resolveActingUserForSession) — 토큰에 박힌 옛 역할이 아니다.
+ *
+ * @param portalDelegatorUserIds 🔴 **포털에 맡긴 결재권 위임**으로 지금 대신할 수 있는
+ *   결재권자들(2026-11-16, 설계 B-4). 이미 **A/S `users.id` 로 바뀐** 값이어야 한다 —
+ *   묻고 바꾸는 자리는 server/acting-approvers.ts 다.
+ *
+ *   🔴 **이 함수가 스스로 묻지 않는다.** 부르는 자리가 둘인데 처신이 갈리기 때문이다:
+ *    · `(app)/layout.tsx` — A/S 자신의 종·배지다. **묻는다.** 안 물으면 승인함에만
+ *      위임을 맡은 사람은 **대신 눌러야 할 건이 있다는 사실 자체를 모른다.**
+ *    · `app/api/integration/notifications/route.ts` — **포털이 되묻는 통로**다.
+ *      🔴 **묻지 마라.** 그 통로를 부르는 쪽이 포털 자신이라, 거기서 또 포털에 물으면
+ *      서로를 기다린다(queries/approval-route-delegations.ts 의
+ *      `NO_PORTAL_DELEGATION_USER_IDS` 주석). 그 통로는 이 함수를 **인자 둘로** 부르고,
+ *      그것이 울타리다 — 소스 글자로 시험이 못 박는다.
  */
-export async function listMyNotifications(actorUserId: string, actorRole: Role): Promise<NotificationItem[]> {
+export async function listMyNotifications(
+  actorUserId: string,
+  actorRole: Role,
+  portalDelegatorUserIds: readonly string[] = NO_PORTAL_DELEGATION_USER_IDS
+): Promise<NotificationItem[]> {
   // 설정은 여기서 딱 한 번 읽는다 — 종류마다 읽으면 종류 수만큼 같은 조회가
   // 돈다(이 파일 머리말). 표가 아직 없는 DB에서는 기본값이 답한다.
   const settings = await loadNotificationSettings();
@@ -392,6 +435,8 @@ export async function listMyNotifications(actorUserId: string, actorRole: Role):
   const delivered = NOTIFICATION_SOURCES.filter((source) =>
     deliversNotification(source.kind, actorRole, settings)
   );
-  const perKind = await Promise.all(delivered.map((source) => source.load(actorUserId, actorRole)));
+  const perKind = await Promise.all(
+    delivered.map((source) => source.load(actorUserId, actorRole, portalDelegatorUserIds))
+  );
   return perKind.flat();
 }

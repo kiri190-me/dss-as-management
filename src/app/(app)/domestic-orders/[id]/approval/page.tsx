@@ -8,7 +8,7 @@ import { requireAreaAccessForCurrentUser } from "@/lib/auth/area-guard";
 import { canOpenDomesticOrderDetailTab } from "@/lib/auth/domestic-order-detail-tab-access";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { readSession } from "@/lib/auth/session";
-import { resolveActingApproverUserIds } from "@/lib/db/queries/approval-route-delegations";
+import { resolveActingApproversForScreen } from "@/lib/server/acting-approvers";
 import {
   getDomesticOrderApprovalHistory,
   getDomesticOrderApprovalUnits,
@@ -122,7 +122,10 @@ export default async function DomesticOrderApprovalPage({
   // 수 있는 자리들」이다. 화면에 주는 것은 **힌트**이고, 실제 승인·반려는
   // decideDomesticOrderApproval 이 자기 트랜잭션 안에서 같은 목록을 다시 읽어
   // 판정한다(그래야 읽은 직후 되돌려진 위임으로 결재가 통과하지 않는다).
-  const [progress, history, currentRoute, actingApproverUserIds, canRequestApproval] =
+  // 🔴 **2026-11-16 부터 통합 로그인 포털에도 묻는다**(설계 B-4) — 안 물으면 승인함에만
+  // 위임을 맡은 사람에게 단추가 안 그려진다. 묻는 일은 server/acting-approvers.ts 하나가
+  // 한다(포털이 되묻는 통로에서는 묻지 않는 까닭도 그 파일 머리말에 있다).
+  const [progress, history, currentRoute, actingApprovers, canRequestApproval] =
     await Promise.all([
       // 🔴 **회차마다 하나씩**(2026-11-08, 사용자 결정 12). 「줄 전체에서 가장 최근
       //    한 줄」을 돌려주는 getDomesticOrderApprovalProgress 와 다른 함수다 — 그쪽은
@@ -131,7 +134,7 @@ export default async function DomesticOrderApprovalPage({
       getDomesticOrderApprovalUnits(row.id),
       getDomesticOrderApprovalHistory(row.id),
       getCurrentShipmentApprovalRoute(DOMESTIC_ORDER_APPROVAL_ROUTE_SCOPE),
-      resolveActingApproverUserIds(actingUser.id, new Date()),
+      resolveActingApproversForScreen(actingUser.id),
       // 🔴 **승인을 올릴 수 있는가** — 내자 줄을 고치는 그 열쇠다. 2026-11-12(둘째)에
       //    `domesticOrders` WRITE 에서 `domesticOrders.edit` WRITE 로 내려왔고, 통과하는
       //    역할은 한 명도 달라지지 않았다(사다리의 쓰기 칸이 그대로 잎이 됐다).
@@ -181,7 +184,11 @@ export default async function DomesticOrderApprovalPage({
         role: actingUser.role,
         isDeveloper: actingUser.isDeveloper,
       }}
-      actingApproverUserIds={actingApproverUserIds}
+      actingApproverUserIds={actingApprovers.userIds}
+      /* 🔴 포털에 **못 물었으면** 패널이 안내를 띄운다(설계 B-7). 결재는 그대로
+         진행되지만 **대리인만 조용히 막히므로**, 그 사실을 눈에 보이게 하는 것이
+         B-6 을 고른 값을 치르는 유일한 자리다. */
+      portalDelegationUnavailable={actingApprovers.portalDelegationUnavailable}
       canRequestApproval={canRequestApproval}
     />
   );

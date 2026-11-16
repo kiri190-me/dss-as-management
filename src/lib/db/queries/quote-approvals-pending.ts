@@ -4,7 +4,10 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { quoteApprovals, quotes, users } from "../schema";
 import { approvalFollowsRoute, mayDecideAssignedApproval, NO_ROUTE_DELEGATIONS } from "@/lib/auth/approval-assignment";
-import { resolveActingApproverUserIds } from "./approval-route-delegations";
+import {
+  NO_PORTAL_DELEGATION_USER_IDS,
+  resolveActingApproverUserIds,
+} from "./approval-route-delegations";
 
 /**
  * ============================================================================
@@ -122,9 +125,18 @@ export type PendingQuoteApprovalItem = {
  *
  * 읽기 전용이고 최종 판정도 아니다 — 실제 승인·반려는 decideQuoteApproval 이 자기
  * 트랜잭션 안에서 전부 다시 확인한다.
+ *
+ * @param portalDelegatorUserIds **포털에 맡긴 위임**으로 지금 대신할 수 있는 결재권자들
+ *   (2026-11-16, 설계 B-4). 이미 **A/S `users.id` 로 바뀐** 값이어야 한다 — 묻고 바꾸는
+ *   자리는 server/acting-approvers.ts 다.
+ *   🔴 **이 조회가 스스로 묻지 않는 까닭**은 queries/approval-route-delegations.ts 의
+ *   `NO_PORTAL_DELEGATION_USER_IDS` 주석에 있다(요약: 이 조회를 **포털이 되묻는 통로**
+ *   둘도 부른다 — 거기서 또 포털에 물으면 서로를 기다린다). 그래서 기본값이 「안 물었다」
+ *   이고, **묻는 것은 부르는 쪽이 정한다.**
  */
 export async function listQuoteApprovalsPendingMyApproval(
-  actorUserId: string
+  actorUserId: string,
+  portalDelegatorUserIds: readonly string[] = NO_PORTAL_DELEGATION_USER_IDS
 ): Promise<PendingQuoteApprovalItem[]> {
   const actor = await resolveQuoteApprovalActor(actorUserId);
   if (!actor) return [];
@@ -133,7 +145,16 @@ export async function listQuoteApprovalsPendingMyApproval(
   // 보여야** 한다. 트랜잭션을 넘기지 않는 것이 맞다: 읽기 전용이고 최종 판정도
   // 아니라 그 순간의 답이면 충분하다(실제 승인·반려는 decideQuoteApproval 이 자기
   // 트랜잭션 안에서 전부 다시 확인한다).
-  const actingApproverUserIds = await resolveActingApproverUserIds(actor.id, new Date());
+  //
+  // 🔴 **포털에 맡긴 위임은 부르는 쪽이 물어 넘긴다**(2026-11-16 — 위 @param). 안 받으면
+  // 빈 목록이고, 그때 이 목록에는 A/S 제 위임만 듣는다.
+  const actingApproverUserIds = await resolveActingApproverUserIds(
+    actor.id,
+    new Date(),
+    // 🔵 트랜잭션이 없다(읽기 전용이다) — 넷째 인자만 주려면 셋째 자리를 비울 수 없다.
+    undefined,
+    portalDelegatorUserIds
+  );
 
   const rows = await db
     .select({

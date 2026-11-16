@@ -11,7 +11,10 @@ import {
   mayDecideAssignedApproval,
   NO_ROUTE_DELEGATIONS,
 } from "@/lib/auth/approval-assignment";
-import { resolveActingApproverUserIds } from "./approval-route-delegations";
+import {
+  NO_PORTAL_DELEGATION_USER_IDS,
+  resolveActingApproverUserIds,
+} from "./approval-route-delegations";
 import {
   isValidApprovalType,
   type RepairCaseApprovalType,
@@ -262,8 +265,20 @@ export async function canDecideAnyRepairCaseApproval(actorUserId: string): Promi
  *  - 내가 결재할 수 없는 승인 종류.
  *
  * 워크플로 단계는 보지 않는다 — 단계가 무엇이든 요청이 들어와 있으면 나온다.
+ *
+ * @param portalDelegatorUserIds **포털에 맡긴 위임**으로 지금 대신할 수 있는 결재권자들
+ *   (2026-11-16, 설계 B-4). 이미 **A/S `users.id` 로 바뀐** 값이어야 한다 — 묻고 바꾸는
+ *   자리는 server/acting-approvers.ts 다.
+ *   🔴 **이 조회가 스스로 묻지 않는 까닭**은 queries/approval-route-delegations.ts 의
+ *   `NO_PORTAL_DELEGATION_USER_IDS` 주석에 있다(요약: 이 조회를 **포털이 되묻는 통로**
+ *   둘도 부른다 — 거기서 또 포털에 물으면 서로를 기다린다). 그래서 기본값이 「안 물었다」
+ *   이고, **묻는 것은 부르는 쪽이 정한다.** A/S 자신의 화면(종 · 접수 건 목록)은 묻고,
+ *   `/api/integration/{approvals,notifications}` 는 인자를 주지 않는다.
  */
-export async function listRepairCasesPendingMyApproval(actorUserId: string): Promise<PendingApprovalItem[]> {
+export async function listRepairCasesPendingMyApproval(
+  actorUserId: string,
+  portalDelegatorUserIds: readonly string[] = NO_PORTAL_DELEGATION_USER_IDS
+): Promise<PendingApprovalItem[]> {
   const { types, actor, shipmentDecideAllowed } = await resolveDecidableApprovalTypes(actorUserId);
   if (types.length === 0 || !actor) return [];
 
@@ -278,7 +293,16 @@ export async function listRepairCasesPendingMyApproval(actorUserId: string): Pro
   // 된다. 거기서 FINAL_SHIPMENT 를 묻는 조건이 이미 「대표·위임이거나 **결재선
   // 단계를 맡을 수 있는 계정**이거나」로 넓고, 대리인은 승인됨·활성·잠기지 않음을
   // 모두 만족해야 위임을 만들 수 있으므로 그 그물에 언제나 걸린다.
-  const actingApproverUserIds = await resolveActingApproverUserIds(actor.id, new Date());
+  //
+  // 🔴 **포털에 맡긴 위임은 부르는 쪽이 물어 넘긴다**(2026-11-16 — 위 @param). 안 받으면
+  // 빈 목록이고, 그때 이 목록에는 A/S 제 위임만 듣는다.
+  const actingApproverUserIds = await resolveActingApproverUserIds(
+    actor.id,
+    new Date(),
+    // 🔵 트랜잭션이 없다(읽기 전용이다) — 넷째 인자만 주려면 셋째 자리를 비울 수 없다.
+    undefined,
+    portalDelegatorUserIds
+  );
 
   // 후보는 요청 기록이다 — 내가 결재할 수 있는 종류의 결재 행 전부를, 그 행이
   // 달린 접수 건과 함께 가져온다. 워크플로 단계는 조건에 없다(파일 상단 주석

@@ -14,7 +14,10 @@ import {
   listInspectionApproverCandidates,
 } from "@/lib/db/queries/repair-case-approvals";
 import { resolveShipmentDecideAuthorization } from "@/lib/db/queries/shipment-delegations";
-import { resolveActingApproverUserIds } from "@/lib/db/queries/approval-route-delegations";
+import {
+  NO_ACTING_APPROVERS,
+  resolveActingApproversForScreen,
+} from "@/lib/server/acting-approvers";
 import { listShipmentApprovalRouteSteps } from "@/lib/db/queries/shipment-approval-routes";
 import { roleLabels, type Role } from "@/lib/domain/types";
 
@@ -84,12 +87,18 @@ export default async function RepairCaseApprovalPage({
   // 판정한다(그래야 읽은 직후 되돌려진 위임으로 결재가 통과하지 않는다).
   // 로그인 사용자를 못 읽었으면 빈 배열이다 — 그때는 화면이 단추를 아예 그리지
   // 않는다(DatabaseApprovalScreen 의 첫 갈래).
+  //
+  // 🔴 **2026-11-16 부터 여기서 통합 로그인 포털에도 묻는다**(설계 B-4 — 승인함에서
+  // 맡긴 위임과 A/S 제 위임을 둘 다 인정한다). 안 물으면 승인함에만 맡긴 사람에게는
+  // **단추가 안 그려진다** — 서버(decideRepairCaseApprovalAction)는 이미 받아 주는데
+  // 누를 자리가 없는, 조각 3a 가 남겨 둔 반쪽이었다. 묻고 · 합치고 · 「못 물었다」를
+  // 함께 내보내는 일은 server/acting-approvers.ts 하나가 한다.
   const [
     currentApprovals,
     history,
     decideAuthorization,
     inspectionAssignees,
-    actingApproverUserIds,
+    actingApprovers,
     canRequestApproval,
   ] = await Promise.all([
     getCurrentApprovalsForCase(resolved.id),
@@ -97,8 +106,8 @@ export default async function RepairCaseApprovalPage({
     actingUser ? resolveShipmentDecideAuthorization(actingUser.id) : Promise.resolve({ allowed: false as const }),
     listInspectionApproverCandidates(),
     actingUser
-      ? resolveActingApproverUserIds(actingUser.id, new Date())
-      : Promise.resolve([] as readonly string[]),
+      ? resolveActingApproversForScreen(actingUser.id)
+      : Promise.resolve(NO_ACTING_APPROVERS),
     // 🔴 **승인을 올릴 수 있는가** — 2026-11-12(셋째)부터 [역할별 접근 권한]의
     //    `repairCases.approval` **쓰기**가 정한다. 그 전까지 두 카드가 각자 역할 셋을
     //    리터럴로 들고 판정했다(그래서 같은 목록이 세 벌이었다). 기타건 상세가 이미
@@ -138,7 +147,11 @@ export default async function RepairCaseApprovalPage({
       history={history}
       decideAuthorization={decideAuthorization}
       routeSteps={routeSteps}
-      actingApproverUserIds={actingApproverUserIds}
+      actingApproverUserIds={actingApprovers.userIds}
+      /* 🔴 포털에 **못 물었으면** 화면이 안내를 띄운다(설계 B-7). 그때 결재는 그대로
+         진행되지만 **대리인만 조용히 막히므로**, 그 사실을 눈에 보이게 하는 것이
+         B-6 을 고른 값을 치르는 유일한 자리다. */
+      portalDelegationUnavailable={actingApprovers.portalDelegationUnavailable}
       canRequestApproval={canRequestApproval}
       // 역할 이름표는 화면에 보여 줄 **값**이라 승격하지 않는다 — 개발자
       // 표시가 켜져 있어도 그 사람의 역할은 그대로다(developer-promotion.ts).

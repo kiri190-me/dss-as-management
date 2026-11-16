@@ -328,29 +328,48 @@ function assertRegistryBlockIsolated(kind: string, ownCall: string, otherCall: s
   return block;
 }
 
+/**
+ * 🔴 **역할을 「받지도 않는다」가 2026-11-16 에 「받지만 안 쓴다」로 바뀌었다.**
+ *
+ * 그날 결재 대기 셋이 **포털에 맡긴 결재권 위임**을 셋째 인자로 받기 시작했다(설계
+ * B-4 — dss-approvals/DELEGATION_DESIGN.md). TypeScript 는 가운데 자리를 비울 수 없어
+ * 역할 자리에 **버리는 이름**(`_actorRole`)이 생겼다. 🔴 **계약은 한 글자도 안 바뀌었다**
+ * — 결재선에는 역할 제한 없이 누구든 올라가므로, 역할을 보는 순간 자기 차례인 결재자가
+ * 알림을 못 받는다. 그래서 「안 쓴다」를 **버리는 이름을 지우고 세어** 확인한다.
+ *
+ * 🔵 단언이 오히려 하나 늘었다 — 셋째 자리로 **포털 위임을 정말 받아 넘기는지**까지
+ * 본다. 안 넘기면 승인함에만 위임을 맡은 사람의 종이 조용히 빈다.
+ */
+function assertApprovalLoadIgnoresRole(block: string, 이름: string): void {
+  assert.match(
+    block,
+    /load:\s*async\s*\(\s*actorUserId\s*,\s*_actorRole\s*,\s*portalDelegatorUserIds\s*\)\s*=>/,
+    `${이름} load 의 인자 모양이 다르다 — 역할 자리는 버리는 이름이어야 하고, 셋째는 포털 위임이다`
+  );
+  // 🔴 버리는 이름을 걷어낸 뒤에 센다. 안 그러면 `_actorRole` 때문에 「본다」로 읽힌다.
+  assert.ok(
+    !block.replace(/_actorRole/g, "").includes("actorRole"),
+    `${이름} load 가 역할을 본다`
+  );
+  assert.ok(!/canReceive\w*\(/.test(block), `${이름} load 가 역할 판정 함수를 부른다`);
+}
+
 test("🔴 견적서 결재 대기는 역할로 거르지 않는다 — 결재 요청과 같은 (가)형이다", () => {
   const block = assertRegistryBlockIsolated(
     "QUOTE_APPROVAL_PENDING",
-    "listQuoteApprovalsPendingMyApproval(actorUserId)",
+    "listQuoteApprovalsPendingMyApproval(actorUserId, portalDelegatorUserIds)",
     "listRepairCasesPendingMyApproval("
   );
-
-  // load 가 역할을 **받지도** 않는다. 결재선에는 역할 제한 없이 누구든 올라가므로
-  // 역할을 보는 순간 자기 차례인 결재자가 알림을 못 받는다.
-  assert.match(block, /load:\s*async\s*\(\s*actorUserId\s*\)\s*=>/, "load 가 사용자 id 하나만 받아야 한다");
-  assert.ok(!block.includes("actorRole"), "견적서 결재 대기 load 가 역할을 본다");
-  assert.ok(!/canReceive\w*\(/.test(block), "견적서 결재 대기 load 가 역할 판정 함수를 부른다");
+  assertApprovalLoadIgnoresRole(block, "견적서 결재 대기");
 });
 
 test("🔴 결재 요청도 역할로 거르지 않는다 — 누가 결재자인지는 조회가 정한다", () => {
   const block = assertRegistryBlockIsolated(
     "REPAIR_CASE_APPROVAL",
-    "listRepairCasesPendingMyApproval(actorUserId)",
+    "listRepairCasesPendingMyApproval(actorUserId, portalDelegatorUserIds)",
     "listQuoteApprovalsPendingMyApproval("
   );
-  assert.match(block, /load:\s*async\s*\(\s*actorUserId\s*\)\s*=>/, "load 가 사용자 id 하나만 받아야 한다");
-  assert.ok(!block.includes("actorRole"), "결재 요청 load 가 역할을 본다");
-  assert.ok(!/canReceive\w*\(/.test(block), "결재 요청 load 가 역할 판정 함수를 부른다");
+  assertApprovalLoadIgnoresRole(block, "결재 요청");
 });
 
 test("🔴 재고 알림 셋은 레지스트리에서 사라졌다 — 들어오면 포털에 두 번 뜬다", () => {
@@ -370,7 +389,10 @@ test("🔴 견적서 결재 대기는 판정을 새로 적지 않고 지정 관�
   // 알림에는 뜨는데 눌러도 거절되는(또는 그 반대의) 어긋남을 막는다 — 결재를 실제로
   // 막는 decideQuoteApproval 과 같은 mayDecideAssignedApproval 을 그 조회가 부른다.
   const block = registryBlockFor("QUOTE_APPROVAL_PENDING");
-  assert.ok(block.includes("listQuoteApprovalsPendingMyApproval(actorUserId)"), "같은 조회를 부르지 않는다");
+  assert.ok(
+    block.includes("listQuoteApprovalsPendingMyApproval(actorUserId, portalDelegatorUserIds)"),
+    "같은 조회를 부르지 않는다 — 또는 포털 위임을 넘기지 않는다"
+  );
   assert.ok(block.includes("buildQuoteApprovalNotification("), "모양 변환은 도메인의 build 함수가 한다");
   assert.match(
     registrySource,

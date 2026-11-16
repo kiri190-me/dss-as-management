@@ -466,6 +466,44 @@ describe("견적서 결재 대기 — 지금 내 차례인 것만", () => {
     assert.equal((await listQuoteApprovalsPendingMyApproval(stepAId)).length, 1, "되돌리면 다시 보여야 한다");
   });
 
+  test("🔴 포털에 맡긴 위임을 **넘기면** 대리인에게도 뜬다 — 안 넘기면 안 뜬다", async () => {
+    // 🔴 2026-11-16(조각 3b). 승인함에서 맡긴 결재권이 A/S 의 **읽는 쪽**에서도 듣게
+    //    한 자리다. 그 전에는 결재 mutation 만 받아 줘서, 맡은 사람은 **대신 눌러야 할
+    //    건이 있다는 사실 자체를** 몰랐다(목록에도 종에도 안 떴다).
+    //
+    // 🔴 **망을 타지 않는다.** 조회는 포털에 묻지 않고 **이미 A/S users.id 로 바뀐
+    //    목록**을 인자로 받는다 — 묻는 것은 부르는 쪽(server/acting-approvers.ts)이고,
+    //    포털이 되묻는 통로에서는 안 묻는다. 여기서 재는 것은 **그 목록이 판정까지
+    //    닿는가** 하나다(닿지 않으면 오류 없이 영원히 안 뜬다).
+    await saveQuoteRoute([stepAId]);
+    const quote = await createTestQuote();
+    await request(quote);
+
+    // 🔵 **먼저 「안 뜬다」를 못 박는다** — 이 사람이 원래부터 보이는 사람이면 아래
+    //    「뜬다」가 공짜로 통과한다. 제삼자이고 A/S 제 위임도 없다.
+    assert.deepEqual(
+      await listQuoteApprovalsPendingMyApproval(outsiderId),
+      [],
+      "포털 위임을 안 넘겼는데 제삼자에게 보인다"
+    );
+
+    const 대신 = await listQuoteApprovalsPendingMyApproval(outsiderId, [stepAId]);
+    assert.equal(대신.length, 1, "🔴 포털에 맡긴 위임이 대기 목록에 안 닿는다");
+    assert.equal(대신[0].quoteId, quote.id);
+    assert.equal(대신[0].routeStepOrder, 1);
+
+    // 🔴 **엉뚱한 사람을 넘긴다고 열리지 않는다** — 목록이 「누구를 대신하는가」이지
+    //    「누구나 통과」가 아니다. 이 단언이 없으면 조회가 인자를 받자마자 관문을 통째로
+    //    여는 구현도 위 단언을 통과한다.
+    assert.deepEqual(
+      await listQuoteApprovalsPendingMyApproval(outsiderId, [requesterId]),
+      [],
+      "🔴 남의 단계까지 열렸다 — 지정 관문이 무너졌다"
+    );
+    // 🔵 지정된 사람 본인은 그대로다 — 위임이 생겼다고 자리를 잃지 않는다.
+    assert.equal((await listQuoteApprovalsPendingMyApproval(stepAId)).length, 1);
+  });
+
   test("🔴 종에 실린다 — 레지스트리를 거쳐 한 줄로, 그 견적서 화면 주소로", async () => {
     await saveQuoteRoute([stepAId]);
     const quote = await createTestQuote();
