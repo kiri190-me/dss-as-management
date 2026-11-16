@@ -5,14 +5,15 @@ import { join } from "node:path";
 
 /**
  * ============================================================================
- * 통합 통로 셋 — **소스로** 지킨다
+ * 통합 통로 넷 — **소스로** 지킨다
  * ============================================================================
  * 이 라우트들은 직접 부를 수 없다(포털의 JWKS 로 서명을 검증하고 DB 를 읽는다).
  * 이 저장소가 그런 라우트를 지키는 방식대로(api/auth/sso/callback/
  * route-source.test.ts) 소스를 읽어 못 박는다. 판정 자체는 실제로 돌려 본다 —
  * lib/auth/portal-service-token.test.ts(토큰) 와
  * lib/server/integration/portal-notifications.test.ts(대상 사용자·권한) 와
- * lib/server/integration/portal-approvals.test.ts(승인함 목록).
+ * lib/server/integration/portal-approvals.test.ts(승인함 목록) 와
+ * lib/server/integration/portal-delegation-push.test.ts(위임 받아 적기).
  *
  * 여기서 지키는 것:
  *  1. 토큰 검증이 **먼저** 오고, 실패하면 아무것도 하지 않는다.
@@ -20,6 +21,11 @@ import { join } from "node:path";
  *  3. 🔴 기준 주소를 **요청 머리말에서 얻지 않는다.**
  *  4. 통로마다 **자기 용도의 토큰**만 받는다.
  *  5. 쓰기는 기존 저장 함수를 그대로 부른다(권한 판정을 새로 쓰지 않는다).
+ *
+ * 🔴 **넷째(위임)는 2번이 다르다.** 앞 셋은 「이 사람의 알림·결재」를 내주는 통로라
+ * 대상을 토큰의 `sub` 에서만 꺼내는 것이 가장 중요한 울타리였는데, 위임 통로는
+ * **포털이 남의 위임을 써 주는** 자리라 대상이 몸통에 온다(토큰의 `sub` 는 부른
+ * 주체다). 그 통로의 울타리는 토큰의 **쓰임새**로 옮겨가 있다 — 아래 넷째 묶음.
  * ============================================================================
  */
 
@@ -30,6 +36,21 @@ function source(relative: string): string {
 const feed = source("src/app/api/integration/notifications/route.ts");
 const settings = source("src/app/api/integration/notification-settings/route.ts");
 const approvals = source("src/app/api/integration/approvals/route.ts");
+
+/**
+ * 🔴 **주석을 걷어낸 코드만.** 위임 통로의 머리말에는 규약이 통째로 적혀 있어
+ * (`not_applicable` · `error_description` · 금지된 이름들이 전부 설명으로 나온다),
+ * 주석을 둔 채로 세면 **「없어야 한다」가 영영 실패하고 「있어야 한다」는 주석만으로
+ * 통과한다.** 이 저장소에서 실제로 겪은 모양이다
+ * (server/actions/portal-delegation-wiring.test.ts 의 같은 헬퍼).
+ */
+function codeOnly(relative: string): string {
+  return source(relative)
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^[ \t]*\/\/.*$/gm, "");
+}
+
+const delegations = codeOnly("src/app/api/integration/delegations/route.ts");
 
 describe("통합 알림 통로", () => {
   test("🔴 토큰 검증이 먼저다 — 실패하면 401 로 끝나고 조회에 닿지 않는다", () => {
@@ -205,5 +226,127 @@ describe("통합 승인함 통로", () => {
 
   test("응답이 캐시되지 않는다", () => {
     assert.match(approvals, /"cache-control": "no-store"/);
+  });
+});
+
+describe("결재권 위임을 받아 적는 통로", () => {
+  // 🔴 **포털이 써 주는** 자리다(설계 B-12, 2026-11-16). 앞 셋과 방향이 반대라
+  // 울타리도 다르다 — 아래 주석들이 그 차이를 짚는다. 판정은 실제로 돌려 본다
+  // (lib/server/integration/portal-delegation-push.test.ts).
+  //
+  // 🔵 이 묶음만 **주석을 걷어낸 소스**를 본다(codeOnly). 표본이 비지 않았는지
+  // 먼저 확인한다 — 걷어내다 통째로 날리면 아래 「없어야 한다」가 전부 공짜로 통과한다.
+
+  test("🔵 표본이 비어 있지 않다 — 주석을 걷어낸 뒤에도 라우트 코드가 남아 있다", () => {
+    assert.ok(delegations.trim().length > 500, "주석을 걷어내니 아무것도 안 남았다");
+    assert.ok(!delegations.includes("============"), "주석이 덜 걷혔다");
+  });
+
+  test("🔴 토큰 검증이 먼저다 — 실패하면 401 로 끝나고 몸통을 읽지도 않는다", () => {
+    const verifyAt = delegations.indexOf("await verifyPortalServiceToken(");
+    const rejectAt = delegations.indexOf("if (!verified.ok) {");
+    const readBodyAt = delegations.indexOf("await request.json()");
+    const workAt = delegations.indexOf("applyPortalDelegationPush(");
+    assert.ok(verifyAt > 0, "검증하는 자리를 찾지 못했다");
+    assert.ok(rejectAt > verifyAt, "검증 결과를 확인하지 않는다");
+    assert.ok(readBodyAt > rejectAt, "거절하기 전에 몸통을 읽는다");
+    assert.ok(workAt > readBodyAt, "거절하기 전에 저장한다");
+    assert.match(delegations, /status: 401/);
+    assert.match(
+      delegations,
+      /readBearerToken\(request\.headers\.get\("authorization"\)\)/,
+      "토큰을 머리말이 아닌 데서 꺼낸다 — 쿼리는 접근 로그에 그대로 남는다"
+    );
+  });
+
+  test("🔴 **쓰기 전용 쓰임새**만 받는다 — 종을 그리려고 구운 토큰으로 결재권을 맡길 수 없다", () => {
+    // 이게 이 통로의 가장 중요한 울타리다. 앞 셋은 대상이 토큰 안에서만 와서
+    // 「남의 것을 볼 수 없음」이 토큰 모양으로 지켜졌는데, 여기는 대상이 몸통에
+    // 오므로 **토큰의 쓰임새**가 그 자리를 대신한다.
+    assert.match(delegations, /PORTAL_TOKEN_PURPOSES\.delegationsWrite/);
+    for (const forbidden of [
+      "notificationsRead",
+      "notificationSettingsRead",
+      "notificationSettingsWrite",
+    ]) {
+      assert.ok(!delegations.includes(forbidden), `다른 통로의 토큰을 받는다: ${forbidden}`);
+    }
+  });
+
+  test("🔴 대상은 **몸통 하나**에서만 온다 — 쿼리 문자열도 토큰의 sub 도 읽지 않는다", () => {
+    // 입구가 둘이 되면 어느 쪽이 이기는지를 세 시스템이 다르게 구현한다.
+    for (const forbidden of ["searchParams", "nextUrl", "params.sub", "request.url"]) {
+      assert.ok(!delegations.includes(forbidden), `입구가 하나가 아니다: ${forbidden}`);
+    }
+    // 🔴 **토큰의 `sub` 로 줄을 쓰면 안 된다.** 검증기가 sub 없는 토큰을 거절하므로
+    //    포털이 아무나 한 사람을 싣는데, 그 값을 위임 당사자로 쓰면 포털이 어느
+    //    계정으로 토큰을 구웠느냐에 따라 **엉뚱한 사람의 결재권**이 넘어간다.
+    //    🔵 앞 셋과 정반대의 단언이다(그쪽은 `subject: verified.subject` 를 요구한다).
+    assert.ok(
+      !delegations.includes("verified.subject"),
+      "🔴 토큰의 sub 로 위임 당사자를 정한다 — 엉뚱한 사람의 결재권이 넘어간다"
+    );
+  });
+
+  test("🔴 모양 검사와 저장을 라우트가 새로 쓰지 않는다 — 기존 함수를 그대로 꽂는다", () => {
+    assert.match(delegations, /parsePortalDelegationPush\(body\)/);
+    assert.match(delegations, /lookupUserIdsBySubjects: listUserIdsBySsoSubjects/);
+    assert.match(delegations, /storeDelegation: storePortalApprovalDelegation/);
+    assert.match(delegations, /revokeDelegation: revokePortalApprovalDelegation/);
+    // 🔴 **열쇠 변환을 새로 만들지 않는다.** 조각 3a 가 만든 조회가 「지워진 계정을
+    // 뺀다」까지 지키고 있어서, 라우트가 제 나름대로 찾으면 그 규칙이 빠진다.
+    for (const forbidden of ["db.select", "drizzle-orm", "ssoSubject", "eq("]) {
+      assert.ok(!delegations.includes(forbidden), `라우트가 직접 질의한다: ${forbidden}`);
+    }
+  });
+
+  test("🔴 `not_applicable` 을 라우트가 만들지 않는다 — 판단한 그대로 200 으로 내보낸다", () => {
+    // 라우트가 그 글자를 직접 적기 시작하면 「해당 없음」의 조건이 두 곳이 된다.
+    assert.ok(
+      !delegations.includes("not_applicable"),
+      "라우트가 outcome 을 스스로 만든다 — 판단이 두 곳이 됐다"
+    );
+    assert.match(delegations, /NextResponse\.json\(\{ outcome \}/);
+  });
+
+  test("🔴 오류 몸통이 통로 규약대로다 — 세 시스템이 글자 그대로 같아야 한다", () => {
+    // 이 집의 다른 통로는 `{ error, message }` 를 쓴다. 여기만 다른 것은 받는 쪽이
+    // 사람이 아니라 포털이고, 그 규약이 `error_description` 이기 때문이다.
+    assert.match(delegations, /error_description/);
+    assert.ok(
+      !/\{ error: "[a-z_]+", message:/.test(delegations),
+      "규약과 다른 오류 몸통이 섞였다"
+    );
+    for (const expected of ["invalid_token", "invalid_request", "server_error"]) {
+      assert.ok(delegations.includes(expected), `오류 이름이 빠졌다: ${expected}`);
+    }
+    assert.match(delegations, /status: 400/);
+    assert.match(delegations, /status: 500/);
+  });
+
+  test("🔴 결재 판정에 연결하지 않는다 — 이 표를 읽어 결재를 가르는 것은 조각 8 이다", () => {
+    for (const forbidden of [
+      "resolveActingApproverUserIds",
+      "actingApproverUserIds",
+      "resolvePortalRouteDelegations",
+    ]) {
+      assert.ok(!delegations.includes(forbidden), `받는 통로가 판정을 건드린다: ${forbidden}`);
+    }
+  });
+
+  test("받아 적는 길은 POST 하나다", () => {
+    assert.match(delegations, /export async function POST/);
+    for (const method of [
+      "export async function GET",
+      "export async function PUT",
+      "export async function PATCH",
+      "export async function DELETE",
+    ]) {
+      assert.ok(!delegations.includes(method), `다른 메서드가 생겼다: ${method}`);
+    }
+  });
+
+  test("응답이 캐시되지 않는다 — 재시도가 옛 답을 받으면 안 된다", () => {
+    assert.match(delegations, /"cache-control": "no-store"/);
   });
 });

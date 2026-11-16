@@ -542,3 +542,12 @@ src/lib/db/mutations/misc-case-due-date-row-approval.integration.test.ts
 # 🔵 before() 가 시험 DB 의 권한 전제를 먼저 확인한다 — 관리자는 되고 영업은 안 되며,
 # **영업의 읽기는 닫히지 않았다**(이 조각이 읽기까지 좁혔다면 거기서 멈춘다).
 src/lib/db/mutations/badge-visibility-settings.integration.test.ts
+
+# 🔴 포털이 전파한 결재권 위임을 받아 적기(0129, 2026-11-16). 재는 것은 **DB 가 실제로
+# 하는 일** — 같은 id 로 두 번 저장하면 한 줄인가(멱등의 밑바닥: 기본키 + ON CONFLICT) ·
+# 포털이 준 번호로 다시 찾아지는가(못 찾으면 철회도 어긋남 점검도 조용히 안 된다) ·
+# 🔴 **없는 줄을 거두면 not_applicable 인가**(오류가 아니다) · 🔴 **늦게 닿은 upsert 가
+# 철회를 되살리지 않는가**(되살아난 위임은 아무 오류 없이 남의 결재를 누르게 한다) ·
+# 감사 기록이 CREATE/UPDATE 로 남고 actor 가 **널**인가(사람이 아니라 포털이 한 일) ·
+# 표의 CHECK 둘이 실제로 무는가.
+src/lib/db/mutations/portal-approval-delegations.integration.test.ts

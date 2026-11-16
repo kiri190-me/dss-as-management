@@ -2053,3 +2053,19 @@ src/components/settings/settings-tab-access.test.ts
 # 🔵 표본은 등록부(BADGES)로 만든다 — 서버가 쓰는 합치기는 DB 클라이언트를 물고 있어 이
 # 목록에서 부를 수 없고, 그 합치기가 옳은지는 db 목록의 통합 시험이 본다.
 src/components/settings/badge-visibility-draft.test.ts
+
+# 🔴 포털이 **써 주는** 결재권 위임을 받아 적는 쪽(2026-11-16, 설계 B-12 — 묻는 방식에서
+# 써 주는 방식으로 뒤집힌 날). 재는 것은 라우트가 못 부르는 판단 전부 — 모양이 틀리면
+# 거절하는가(uuid·거꾸로 된 기간·모르는 action) · 🔴 **열쇠를 못 바꾸면 `not_applicable`**
+# 이고 오류가 아닌가(오류로 답하면 포털이 지정 자체를 거절해서 「A/S 계정이 없는 사람에게는
+# 위임을 아예 못 맡기는」 일이 된다, B-13) · 같은 id 로 두 번 와도 저장이 한 번호인가(멱등) ·
+# 🔴 **없는 줄을 거두는 것도 오류가 아닌가** · 철회가 사람 번호를 다시 맞춰 보지 않는가.
+src/lib/server/integration/portal-delegation-push.test.ts
+
+# 🔴 포털 위임 표(0129)의 바탕 — 틀려도 그 자리에서는 아무 일도 안 일어나는 것들.
+# **`id` 에 기본값이 없는가**가 핵심이다(번호의 주인이 포털이다) — `defaultRandom()` 이
+# 들어오면 재시도마다 줄이 늘고 철회가 아무 줄도 못 찾는데 **둘 다 오류가 안 난다** ·
+# 옆 `approval_route_delegations` 를 한 글자도 안 건드리는가(설계 B-4 — 둘 다 살려 둔다) ·
+# 사람 참조 둘이 restrict 인가 · 「누가 세웠나·거뒀나」 칸이 없는가(그 사람은 A/S 계정이
+# 없을 수 있다) · SQL 에 $1 이 없는가.
+src/lib/db/schema/portal-approval-delegations-safety.test.ts

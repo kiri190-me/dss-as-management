@@ -53,6 +53,24 @@ export const PORTAL_TOKEN_PURPOSES = {
   notificationSettingsRead: "dss.notification-settings.read",
   /** 알림 설정 저장. */
   notificationSettingsWrite: "dss.notification-settings.write",
+  /**
+   * 🔴 **결재권 위임 전파를 받아 적기**(2026-11-16, 설계 B-12). 통합 승인함에서
+   * 맡기거나 거둔 위임을 포털이 각 시스템에 **써 주는** 통로가 요구한다
+   * (api/integration/delegations/route.ts).
+   *
+   * 🔴 **읽기 토큰을 돌려쓰지 않는다.** 승인함 통로가 `notificationsRead` 를 그대로
+   * 쓰는 것은 그쪽이 **읽기**이고 같은 사람의 같은 자료를 내주기 때문인데(그 라우트
+   * 머리말), 이 통로는 **쓰기**다 — 종을 그리려고 구운 토큰으로 남에게 결재권을
+   * 맡길 수 있게 되면 안 된다. 알림 설정이 읽기·쓰기 쓰임새를 따로 둔 것과 같은 줄이다.
+   *
+   * 🔴 **이 글자는 포털과의 약속이고, 세 시스템(A/S·재고관리·휴가)이 같아야 한다.**
+   * 2026-11-16 에 셋이 `dss.delegations.write` 로 맞췄다(상수 이름도 `delegationsWrite`
+   * 로 같다). 🔴 **포털은 아직 이 쓰임새를 굽지 않는다 — 조각 7 에서 더한다.** 그래서
+   * **배포 순서는 포털이 먼저**이고, 먼저 요구해도 오늘은 아무것도 안 깨진다(이 통로를
+   * 부르는 쪽이 아직 없다). 거꾸로 포털이 다른 글자를 구우면 전파가 통째로 401 이 되고,
+   * 설계 B-13 대로 **지정 자체가 거절된다.**
+   */
+  delegationsWrite: "dss.delegations.write",
 } as const;
 
 export type PortalTokenPurpose =
