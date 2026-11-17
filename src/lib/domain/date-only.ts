@@ -43,6 +43,46 @@ function parseDateOnlyToUtcMidnight(dateOnly: string): number {
 }
 
 /**
+ * 한국시간은 서머타임이 없다 — 고정 +09:00. 그래서 「한국시간 자정 = 그 전날 15:00
+ * UTC」가 날짜와 무관하게 언제나 성립하고, 날짜마다 시간대를 다시 물어볼 필요가 없다.
+ *
+ * 🔵 같은 상수가 my-work-record-months.ts 에도 있다(그 파일의 달 창 셈에 묶여 있다).
+ * 합치지 않은 것은 그 파일을 이번에 손대지 않기 위해서고, **새로 쓰는 쪽은 여기를
+ * 쓴다** — 이 파일이 한국시간 날짜를 다루는 자리이기 때문이다.
+ */
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
+/**
+ * "YYYY-MM-DD" 가 가리키는 **한국시간 자정의 진짜 순간**. 위 `toKstDateOnly` 의
+ * 거꾸로다 — 그쪽은 순간에서 한국 날짜를 뽑고, 이쪽은 한국 날짜에서 순간을 되돌린다.
+ *
+ * 🔴 **UTC 자정이 아니다.** `new Date("2026-11-18")` 은 UTC 자정이라 한국시간으로는
+ * 그날 **오전 9시**다. 기간의 경계를 그렇게 잡으면 한국에서 보기에 아홉 시간이
+ * 어긋나는데, 그 어긋남은 하루 중 00:00~09:00 에만 드러나서 낮에 눌러 보면 내내
+ * 멀쩡해 보인다(이 파일이 애초에 존재하는 까닭과 같은 함정이다).
+ *
+ * 🔵 날짜를 쪼개는 일은 위 `parseDateOnlyToUtcMidnight` 하나에 맡긴다. 여기서 또
+ * `split("-")` 를 적으면 같은 글자를 읽는 식이 이 파일 안에 두 벌이 된다.
+ */
+export function kstMidnightInstant(dateOnly: string): Date {
+  return new Date(parseDateOnlyToUtcMidnight(dateOnly) - KST_OFFSET_MS);
+}
+
+/**
+ * 이 순간이 **한국시간으로 꼭 자정**인가 — 곧 「날짜로 적힌 값인가」.
+ *
+ * 날짜만 받아 구운 값은 언제나 참이고, 시각까지 받아 저장된 값은 거짓이다. 둘이 한
+ * 목록에 섞여 있을 때 어느 쪽을 날짜로만 적어도 되는지 가리는 데 쓴다.
+ *
+ * 🔴 **시·분을 꺼내 0 인지 보지 않는다.** 위 두 함수를 왕복시켜 재면 「굽는 식」과
+ * 「재는 식」이 한 벌로 묶인다 — 따로 적으면 한쪽만 고쳐지는 날 **자정인데 자정이
+ * 아니라고** 답하기 시작하고, 그때 나는 것은 오류가 아니라 화면 글자의 어긋남이다.
+ */
+export function isKstMidnight(instant: Date): boolean {
+  return kstMidnightInstant(toKstDateOnly(instant)).getTime() === instant.getTime();
+}
+
+/**
  * Whole calendar days between `receivedAt` (a date-only string, e.g.
  * repair_cases.received_at) and "today" in KST. Received today -> 0;
  * received yesterday (KST) -> 1. Never negative in practice (intake can't

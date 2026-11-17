@@ -282,9 +282,14 @@ const COUNTS: Record<string, Partial<Record<DateInputKind, number>>> = {
   // 발생 년월일은 「날짜」와 「직접 적기」로 갈리고, 날짜 쪽만 센다.
   "src/components/repair-cases/report/service-report/ServiceReportHeaderFields.tsx": { date: 1 },
   "src/components/repair-cases/work-history/ActivityFilterPanel.tsx": { date: 2 },
-  // 🔵 2026-11-05 에 더해진 일시 칸 넷 — 위임 기간의 시작/끝 두 쌍이다.
+  // 🔵 2026-11-05 에 더해진 일시 칸 넷 — 위임 기간의 시작/끝 두 쌍이었다.
   //    처음에는 「범위 밖」으로 두고 세지 않았다(머리말의 그 대목).
-  "src/components/users/ApprovalRouteDelegationSection.tsx": { "datetime-local": 2 },
+  // 🔴 2026-11-17 에 **한 쌍이 날짜 칸으로 바뀌었다.** 결재권 위임
+  //    (approval_route_delegations)은 사용자 요구로 날짜까지만 적는다 — 「끝나는 날
+  //    24:00 까지」. 그래서 이 파일의 두 칸은 이제 `date` 이고, 드는 상수도
+  //    DATE_INPUT_MAX 다. 🔵 아래 옛 「출하 승인 위임」은 **다른 표**라 그대로
+  //    일시 칸이고, 그래서 일시 쪽 표본이 비지 않는다.
+  "src/components/users/ApprovalRouteDelegationSection.tsx": { date: 2 },
   "src/components/users/DelegationSection.tsx": { "datetime-local": 2 },
 };
 
@@ -436,21 +441,48 @@ describe("🔴 글자가 아니라 type 에 적힌 식을 본다", () => {
    * 고쳐, 이제는 그 넷을 **세고** 제 상수를 드는지까지 본다.
    */
   test("datetime-local 도 갈래를 갈라 센다 — 날짜 칸과 다른 상수를 들어야 한다", () => {
-    for (const path of [
-      "src/components/users/ApprovalRouteDelegationSection.tsx",
-      "src/components/users/DelegationSection.tsx",
-    ]) {
-      const raw = readFileSync(path, "utf8");
-      assert.ok(raw.includes('type="datetime-local"'), `${path}: 표본이 사라졌다`);
-      const found = dateInputsIn(path);
-      assert.equal(found.length, 2, `${path}: 일시 칸 둘(시작/끝)을 못 찾았다`);
-      for (const { line, kind, tag } of found) {
-        // 🔴 갈래가 "date" 로 읽히면 아래 상수 단언이 엉뚱한 것을 재게 된다.
-        assert.equal(kind, "datetime-local", `${path}:${line}: 갈래를 잘못 읽었다`);
-        assert.ok(tag.includes("DATETIME_LOCAL_INPUT_MAX"), `${path}:${line}: 일시 상한이 없다`);
-        // 🔴 날짜 쪽 상수를 들면 시각이 없어 브라우저가 상한을 통째로 무시한다.
-        assert.ok(!tag.includes("{DATE_INPUT_MAX}"), `${path}:${line}: 날짜 칸 상수를 들었다`);
-      }
+    // 🔵 2026-11-17 까지는 여기에 결재권 위임 화면도 함께 있었다. 그날 그 화면의 두
+    //    칸이 **날짜 칸으로 바뀌어**(사용자 요구: 날짜까지만 적는다) 아래 「짝이 되는
+    //    자리」로 옮겼다. 옛 「출하 승인 위임」은 **다른 표**라 손대지 않았고, 그래서
+    //    이 단언의 표본이 비지 않는다 — 비면 「일시 칸은 제 상수를 든다」가 잴 것이
+    //    없어 공짜로 통과한다.
+    const path = "src/components/users/DelegationSection.tsx";
+    const raw = readFileSync(path, "utf8");
+    assert.ok(raw.includes('type="datetime-local"'), `${path}: 표본이 사라졌다`);
+    const found = dateInputsIn(path);
+    assert.equal(found.length, 2, `${path}: 일시 칸 둘(시작/끝)을 못 찾았다`);
+    for (const { line, kind, tag } of found) {
+      // 🔴 갈래가 "date" 로 읽히면 아래 상수 단언이 엉뚱한 것을 재게 된다.
+      assert.equal(kind, "datetime-local", `${path}:${line}: 갈래를 잘못 읽었다`);
+      assert.ok(tag.includes("DATETIME_LOCAL_INPUT_MAX"), `${path}:${line}: 일시 상한이 없다`);
+      // 🔴 날짜 쪽 상수를 들면 시각이 없어 브라우저가 상한을 통째로 무시한다.
+      assert.ok(!tag.includes("{DATE_INPUT_MAX}"), `${path}:${line}: 날짜 칸 상수를 들었다`);
+    }
+  });
+
+  /**
+   * 🔴 **바로 위 단언의 짝이다**(2026-11-17). 결재권 위임 화면의 두 칸이 일시에서
+   * 날짜로 바뀌었고, 그때 상한 상수도 함께 바뀌어야 한다 — 안 바꾸면 날짜 칸이
+   * `…T23:59` 을 들게 되어 **브라우저가 상한을 통째로 무시하고** 연도 칸이 도로
+   * 여섯 자리를 받는다. 위 「모든 날짜 칸이 제 갈래의 상수를 든다」가 이미 전체를
+   * 훑지만, 그쪽은 **한 칸이라도 틀리면** 터지는 그물이라 어느 화면이 바뀌었는지를
+   * 남기지 못한다. 이 집 화면 하나를 이름으로 못 박아 둔다.
+   */
+  test("🔴 결재권 위임의 두 칸은 **날짜 칸**이다 — 일시로 되돌아가지 않았다", () => {
+    const path = "src/components/users/ApprovalRouteDelegationSection.tsx";
+    const found = dateInputsIn(path);
+    assert.equal(found.length, 2, `${path}: 날짜 칸 둘(시작일/종료일)을 못 찾았다`);
+    for (const { line, kind, tag } of found) {
+      assert.equal(
+        kind,
+        "date",
+        `${path}:${line}: 시각 칸으로 되돌아갔다 — 날짜까지만 적기로 했다(2026-11-17)`
+      );
+      assert.ok(tag.includes("DATE_INPUT_MAX"), `${path}:${line}: 날짜 상한이 없다`);
+      assert.ok(
+        !tag.includes("DATETIME_LOCAL_INPUT_MAX"),
+        `${path}:${line}: 일시 쪽 상수를 들었다 — 날짜 칸은 그 값을 못 받아 상한이 무시된다`
+      );
     }
   });
 });

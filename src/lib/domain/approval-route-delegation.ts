@@ -1,3 +1,4 @@
+import { addCalendarDays, isKstMidnight, kstMidnightInstant, toKstDateOnly } from "./date-only";
 import type { ShipmentDelegationDisplayStatus } from "./shipment-delegation-status";
 
 /**
@@ -91,8 +92,9 @@ export type ApprovalRouteDelegationPeriod = {
  * 잇대어 적는 것은 사람이 실제로 하는 일이라(출장이 끝나는 날 다른 사람에게 다시
  * 맡긴다) 드문 경우도 아니다.
  *
- * 🔵 그래서 「9월 30일까지」를 적을 때 `ends_at` 은 **10월 1일 0시**다. 화면이 그
- * 환산을 맡는 것은 다음 조각의 일이고, 이 층은 받은 시각을 그대로 믿는다.
+ * 🔵 그래서 「9월 30일까지」를 적을 때 `ends_at` 은 **10월 1일 0시**다. 그 환산은
+ * 2026-11-17 부터 이 파일 아래쪽의 `delegationPeriodFromDateOnly` 가 맡는다(화면은
+ * 날짜 두 칸만 받는다). 이 함수는 여전히 **받은 시각을 그대로 믿는다.**
  *
  * 🔴 **되돌린 줄은 기간 안이어도 거짓이다.** 되돌리기가 기간을 줄여 적는 것이 아니라
  * 칸 하나에 시각을 적는 것이라서, 기간만 보면 되돌린 뒤에도 계속 참이 된다.
@@ -388,4 +390,102 @@ export function deriveApprovalRouteDelegationDisplayStatus(
   if (at < delegation.startsAt.getTime()) return "SCHEDULED";
   if (at >= delegation.endsAt.getTime()) return "EXPIRED";
   return "ACTIVE";
+}
+
+/* ------------------------------------------------------------------ */
+/* 기간 — 사람은 **날짜**로 적고, 표에는 **시각**으로 앉는다            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ============================================================================
+ * 날짜 두 칸 ↔ 시각 두 칸 (2026-11-17 사용자 요구)
+ * ============================================================================
+ * 「결재권을 위임할 때 **시간까지** 적도록 되어 있는데, **날짜까지만** 적도록 해라
+ * (끝나는 날 24:00 까지로)」.
+ *
+ * 🔴 **표는 그대로다.** `starts_at` · `ends_at` 은 여전히 timestamptz 이고, 바뀐 것은
+ * **화면이 거기 무엇을 굽느냐**뿐이다. 마이그레이션이 없는 것은 그래서다.
+ *
+ * 🔴 **「끝나는 날 24:00」은 그 날을 포함한다 = 다음 날 00:00 이다.** 이 표가 반열린
+ * 구간(`[starts_at, ends_at)`)이기 때문이고(위 `isActiveRouteDelegation` 머리말),
+ * 그래야 「11월 18일까지」가 18일 하루를 **온전히** 포함한다. 끝을 18일 00:00 으로
+ * 구우면 18일은 단 한순간도 안 들어가고, 적은 사람은 그날 하루를 맡겼다고 믿는다.
+ *
+ * 🔴 **한국시간 자정이다.** `new Date("2026-11-18")` 은 UTC 자정이라 한국에서는 그날
+ * 아침 9시다 — 그렇게 구우면 기간이 하루 중 아홉 시간만큼 어긋나고, 그 어긋남은
+ * 00:00~09:00 에만 드러나서 낮에 눌러 보면 내내 멀쩡해 보인다. 그래서 환산을 여기서
+ * 적지 않고 `domain/date-only.ts` 의 한국시간 함수들에 맡긴다.
+ *
+ * 🔴 **굽는 쪽과 읽는 쪽이 한 쌍으로 여기 있다**(`…FromDateOnly` · `…DateText`).
+ * 한쪽이 하루를 더하고 다른 쪽이 하루를 빼므로, 둘이 갈리면 화면에 적히는 날짜가
+ * 저장된 기간과 하루씩 어긋난다 — 오류는 한 줄도 안 난다. 나누어 두면 고치는 사람이
+ * 한쪽만 찾는다.
+ * ============================================================================
+ */
+
+/** 구워진 기간. 서버 액션이 ISO 글자로 받아 가므로 `Date` 그대로 돌려준다. */
+export type ApprovalRouteDelegationPeriodInstants = {
+  startsAt: Date;
+  endsAt: Date;
+};
+
+/**
+ * 「시작일」·「종료일」(둘 다 "YYYY-MM-DD", 한국시간 달력 날짜) → 표에 앉힐 시각 둘.
+ *
+ * · 시작 = 그 날 **한국시간 00:00**
+ * · 끝   = **종료일 다음 날 한국시간 00:00** (= 종료일 당일 24:00)
+ *
+ * 🔵 **같은 날 둘을 고르면 그 하루다** — 시작 18일 00:00, 끝 19일 00:00. 반열린
+ * 구간이라 18일 23:59:59 까지 살아 있고 19일 00:00 에 딱 끝난다.
+ *
+ * 🔵 하루 더하는 일은 `addCalendarDays` 에 맡긴다. 밀리초를 더하면 맞지만, 달·해
+ * 넘김(11월 30일 → 12월 1일, 12월 31일 → 1월 1일)을 이 파일이 또 알아야 한다.
+ *
+ * 🔵 「거꾸로인 기간」은 **여기서 막지 않는다.** 막는 자리는 서버 하나뿐이어야 한다
+ * (validation/approval-route-delegation-input.ts 의 `validateDelegationPeriod` ·
+ * 표의 `…_valid_range` CHECK). 여기서 한 벌 더 보면 같은 규칙이 두 곳에 적히고,
+ * 화면에서만 거절되는 값이 생기면 그 까닭이 어디에도 안 남는다.
+ */
+export function delegationPeriodFromDateOnly(
+  startDateOnly: string,
+  endDateOnly: string
+): ApprovalRouteDelegationPeriodInstants {
+  return {
+    startsAt: kstMidnightInstant(startDateOnly),
+    endsAt: kstMidnightInstant(addCalendarDays(endDateOnly, 1)),
+  };
+}
+
+/**
+ * 이 줄의 기간을 **날짜만으로** 적을 수 있으면 그 글자, 아니면 `null`.
+ *
+ * ── 🔴 왜 `null` 갈래가 필요한가 ────────────────────────────────────────
+ * 날짜 입력으로 바뀌기 **전에 만들어진 줄**에는 `21:25` 같은 어중간한 끝 시각이 들어
+ * 있다. 그런 줄을 날짜만으로 적으면 **화면이 거짓말을 한다** — 「11월 18일까지」라고
+ * 적어 두고 실제로는 그날 21:25 에 끊긴다. 되돌릴 수 없는 어긋남이라(줄을 고치는 길도
+ * 지우는 길도 없다) 그런 줄은 **저장된 시각 그대로** 보여 주는 쪽을 골랐다.
+ *
+ * 🔴 **옛 줄만의 이야기가 아니다.** 통합 승인함에서 전파돼 오는 줄
+ * (`portal_approval_delegations`)은 저쪽 화면이 정한 시각으로 들어오므로 **앞으로도**
+ * 자정이 아닐 수 있다. 같은 화면이 두 표를 함께 그리니(ApprovalRouteDelegationSection)
+ * 이 갈래는 영영 살아 있는 갈래다.
+ *
+ * ── 🔵 왜 글자가 아니라 `null` 을 돌려주는가 ────────────────────────────
+ * 시각까지 적는 글자는 `toLocaleString("ko-KR")` 로 **보는 사람의 시간대**에서 그린다
+ * (화면이 하던 그대로다). 그 글자를 여기서 만들면 이 순수 층이 실행 환경의 시간대에
+ * 따라 다른 답을 주게 되고, 시험이 도는 기계마다 결과가 갈린다. 그래서 **날짜로 적을
+ * 수 있는 줄만** 여기서 글자를 만들고, 나머지는 화면에 돌려보낸다.
+ *
+ * ── 🔴 끝은 **하루를 빼서** 적는다 ──────────────────────────────────────
+ * 저장된 `endsAt` 은 포함하지 않는 경계(종료일 **다음 날** 00:00)다. 그대로 적으면
+ * 사람이 고른 날짜보다 하루 뒤가 화면에 뜬다 — 고른 값과 보이는 값이 어긋나면 다음에
+ * 고칠 때 또 하루가 밀린다. 그래서 `delegationPeriodFromDateOnly` 가 더한 하루를
+ * 여기서 정확히 되돌린다.
+ */
+export function delegationPeriodDateText(
+  period: Pick<ApprovalRouteDelegationPeriod, "startsAt" | "endsAt">
+): string | null {
+  if (!isKstMidnight(period.startsAt) || !isKstMidnight(period.endsAt)) return null;
+  const lastDay = addCalendarDays(toKstDateOnly(period.endsAt), -1);
+  return `${toKstDateOnly(period.startsAt)} ~ ${lastDay}`;
 }

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { LIST_CARD_GRID, ResponsiveList } from "@/components/common/responsive-list";
 import { ListCard } from "@/components/common/list-card";
 import { showSavePopup } from "@/components/common/SavePopup";
-import { DATETIME_LOCAL_INPUT_MAX } from "@/components/common/date-input-limits";
+import { DATE_INPUT_MAX } from "@/components/common/date-input-limits";
 import {
   createApprovalRouteDelegationAction,
   revokeApprovalRouteDelegationAction,
@@ -17,7 +17,12 @@ import type {
   UserApprovalRouteDelegationsView,
 } from "@/lib/db/queries/approval-route-delegations";
 import type { PortalApprovalDelegationsView } from "@/lib/db/queries/portal-approval-delegations";
-import { deriveApprovalRouteDelegationDisplayStatus } from "@/lib/domain/approval-route-delegation";
+import {
+  delegationPeriodDateText,
+  delegationPeriodFromDateOnly,
+  deriveApprovalRouteDelegationDisplayStatus,
+} from "@/lib/domain/approval-route-delegation";
+import { toKstDateOnly } from "@/lib/domain/date-only";
 import {
   APPROVAL_ROUTE_DELEGATION_STATUS_LABELS,
   APPROVAL_ROUTE_DELEGATION_STATUS_TONE,
@@ -118,6 +123,14 @@ type DelegationPeriodRow = Pick<
   "startsAt" | "endsAt" | "revokedAt"
 >;
 
+/**
+ * 🔵 **날짜로 적을 수 없는 줄에만 쓴다**(아래 `periodText`). 옛 줄과 통합 승인함에서
+ * 전파돼 온 줄은 끝 시각이 자정이 아니라, 날짜만 적으면 화면이 거짓말을 한다.
+ *
+ * 🔵 시간대를 안 적는 것은 일부러다 — 이 글자는 **보는 사람의 브라우저**에서 그려지고,
+ * 지금까지도 그랬다. 여기에 `timeZone: "Asia/Seoul"` 을 더하는 것은 이 조각의 일이
+ * 아니다(바꾸면 지금 보이는 글자가 사무실 밖에서 달라진다).
+ */
 function formatTimestamp(date: Date): string {
   return date.toLocaleString("ko-KR", {
     year: "numeric",
@@ -126,11 +139,6 @@ function formatTimestamp(date: Date): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function toDatetimeLocalValue(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 /**
@@ -240,10 +248,19 @@ export default function ApprovalRouteDelegationSection({
   // 엉뚱한 사람의 결재권이 넘어간다.
   const [delegatorUserId, setDelegatorUserId] = useState(actingUser.id);
   const [delegateUserId, setDelegateUserId] = useState("");
-  const [startsAt, setStartsAt] = useState(toDatetimeLocalValue(now));
-  const [endsAt, setEndsAt] = useState(
-    toDatetimeLocalValue(new Date(now.getTime() + 24 * 60 * 60 * 1000))
-  );
+  // 🔴 **날짜 두 칸이다**(2026-11-17 사용자 요구: 「시간까지 적도록 되어 있는데 날짜
+  //    까지만 적도록 해라 — 끝나는 날 24:00 까지로」). 시각으로 굽는 일은 보내기
+  //    직전에 domain/approval-route-delegation.ts 의 delegationPeriodFromDateOnly 가
+  //    한다 — 여기서 ISO 글자를 만들지 않는다.
+  //
+  // 🔴 처음 값은 **한국시간 오늘**이다. `new Date().toISOString().slice(0,10)` 처럼
+  //    UTC 로 자르면 한국시간 00:00~09:00 에 연 사람에게 **어제** 날짜가 떠 있고,
+  //    그대로 저장하면 하루가 밀린다. 굽는 쪽과 같은 함수를 쓴다.
+  //
+  // 🔵 기본 기간은 **오늘 하루**(시작=끝=오늘)다. 끝이 포함되는 날이라 그 하루가
+  //    온전히 들어가고, 더 길게 맡길 사람은 종료일만 밀면 된다.
+  const [startDate, setStartDate] = useState(toKstDateOnly(now));
+  const [endDate, setEndDate] = useState(toKstDateOnly(now));
   const [reason, setReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formMessage, setFormMessage] = useState<string | null>(null);
@@ -284,11 +301,17 @@ export default function ApprovalRouteDelegationSection({
     }
     setIsSubmitting(true);
     setFormMessage(null);
+    // 🔴 날짜 둘을 시각 둘로 굽는 자리는 **도메인 함수 하나**다. 여기서 `new
+    //    Date(날짜)` 를 쓰면 UTC 자정이 되어 한국 기준 아홉 시간이 어긋나고, 끝에
+    //    하루를 더하는 일도 화면마다 따로 적히게 된다.
+    // 🔵 거꾸로인 기간은 여기서 막지 않는다 — 서버가 읽을 수 있는 문구로 거절하고,
+    //    그 사유는 아래에서 화면에 남는다. 화면이 한 벌 더 막으면 두 규칙이 갈린다.
+    const period = delegationPeriodFromDateOnly(startDate, endDate);
     const result = await createApprovalRouteDelegationAction({
       delegatorUserId,
       delegateUserId,
-      startsAt: new Date(startsAt).toISOString(),
-      endsAt: new Date(endsAt).toISOString(),
+      startsAt: period.startsAt.toISOString(),
+      endsAt: period.endsAt.toISOString(),
       reason: reason.trim() || null,
     });
     setIsSubmitting(false);
@@ -317,10 +340,25 @@ export default function ApprovalRouteDelegationSection({
     router.refresh();
   }
 
+  /**
+   * 기간 한 줄. 🔴 **줄마다 갈린다 — 날짜로 적을 수 있는 줄만 날짜로 적는다.**
+   *
+   * 🔴 **그러기로 한 까닭**(2026-11-17): 날짜 입력으로 바꾸기 전에 만들어진 줄에는
+   * 끝 시각이 `21:25` 같은 값으로 들어 있다. 그 줄까지 날짜만으로 적으면 화면이
+   * **거짓말을 한다** — 「11월 18일까지」라고 적어 놓고 실제로는 그날 21:25 에 끊긴다.
+   * 그 어긋남은 되돌릴 수 없다(줄을 고치는 길도 지우는 길도 없고, DB 를 손대지 않기로
+   * 했다). 그래서 **자정이면 날짜만, 아니면 저장된 시각 그대로** 적는다.
+   *
+   * 🔴 **옛 줄만의 이야기가 아니다.** 이 화면은 통합 승인함에서 전파돼 온 줄
+   * (`portal_approval_delegations`)도 같은 함수로 그리는데, 그쪽 시각은 저쪽 화면이
+   * 정하므로 **앞으로도** 자정이 아닐 수 있다. 이 갈래는 영영 살아 있는 갈래다.
+   *
+   * 🔵 가르는 판정과 날짜 글자는 도메인에 있다(`delegationPeriodDateText`). 굽는 쪽이
+   * 더한 하루를 읽는 쪽이 정확히 되돌려야 해서, 두 식이 한 파일에 나란히 있어야 한다.
+   */
   function periodText(delegation: DelegationPeriodRow): string {
-    // 🔴 끝은 **포함하지 않는다**(반열린 구간). 화면에 적는 것은 저장된 시각 그대로고,
-    // 「9월 30일까지」를 10월 1일 0시로 적는 것은 사람의 몫이다 — 여기서 하루를 빼
-    // 보여 주면 저장된 값과 보이는 값이 갈려 다음에 고칠 때 또 하루가 밀린다.
+    const dateText = delegationPeriodDateText(delegation);
+    if (dateText !== null) return dateText;
     return `${formatTimestamp(delegation.startsAt)} ~ ${formatTimestamp(delegation.endsAt)}`;
   }
 
@@ -409,35 +447,49 @@ export default function ApprovalRouteDelegationSection({
             </select>
           </label>
 
+          {/* 🔴 **시각 칸이 아니다**(2026-11-17). 그 전에는 `datetime-local` 둘이라
+              사람이 분까지 적어야 했고, 그래서 「11월 18일까지」를 적으려면 19일
+              0시를 손으로 계산해 넣어야 했다 — 반열린 구간이라 그렇다.
+              🔴 그래서 상한도 **날짜 쪽 상수**로 바뀌었다. 시각이 붙은 값
+              (`…T23:59`)을 날짜 칸에 주면 브라우저가 상한을 통째로 무시하고 연도
+              칸이 도로 여섯 자리를 받는다(date-input-limits.ts 머리말). 어느 칸이
+              어느 상수를 드는지는 date-input-max-screens.test.ts 가 못 박는다. */}
           <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
-            시작 일시
+            시작일
             <input
-              type="datetime-local"
-              // 연도를 네 자리로 묶는다(date-input-limits.ts) — 없으면 연도 칸이
-              // 여섯 자리를 받는다(2026-11-05 에 이 칸에서 실측:
-              // `202611-11-05 오전 10:21`).
-              // 🔴 날짜 칸의 DATE_INPUT_MAX 를 여기 주면 안 된다 — 시각이 없는
-              //    값은 이 칸이 안 받아 상한이 통째로 무시된다.
-              max={DATETIME_LOCAL_INPUT_MAX}
+              type="date"
+              max={DATE_INPUT_MAX}
               required
-              value={startsAt}
-              onChange={(e) => setStartsAt(e.target.value)}
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
               className="rounded-md border border-zinc-200 px-2 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
             />
           </label>
 
+          {/* 🔵 종료일 칸에 `min={startDate}` 을 일부러 안 걸었다. 「끝이 시작보다
+              뒤」는 서버와 표의 CHECK 가 이미 보는 규칙이라, 여기 한 벌 더 적으면 두
+              곳이 갈리는 날이 온다. 거절 사유는 입력칸 밑에 글자로 남는다. */}
           <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
-            종료 일시
+            종료일
             <input
-              type="datetime-local"
-              max={DATETIME_LOCAL_INPUT_MAX}
+              type="date"
+              max={DATE_INPUT_MAX}
               required
-              value={endsAt}
-              onChange={(e) => setEndsAt(e.target.value)}
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
               className="rounded-md border border-zinc-200 px-2 py-1.5 text-sm text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
             />
           </label>
         </div>
+
+        {/* 🔴 **끝이 포함된다는 것을 글자로 적어 둔다.** 표에 앉는 값은 「종료일 다음
+            날 0시」인데(반열린 구간) 화면에는 종료일만 보이므로, 적어 두지 않으면
+            「18일까지면 18일은 빠지나」를 알 길이 없다 — 그것을 확인하려면 코드를
+            읽거나 하루를 기다려 봐야 한다. */}
+        <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+          기간은 날짜로 맡깁니다. 종료일 당일 24시까지 포함되며, 시작일과 종료일을 같은 날로
+          고르면 그 하루 동안 맡겨집니다.
+        </p>
 
         <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
           사유 (선택)

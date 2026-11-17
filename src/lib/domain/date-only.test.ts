@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { addCalendarDays, addCalendarMonths, daysSinceIntake, toKstDateOnly } from "./date-only";
+import {
+  addCalendarDays,
+  addCalendarMonths,
+  daysSinceIntake,
+  isKstMidnight,
+  kstMidnightInstant,
+  toKstDateOnly,
+} from "./date-only";
 
 test("received today (KST) -> 0일", () => {
   const now = new Date("2026-08-10T05:00:00.000Z"); // 2026-08-10 14:00 KST
@@ -31,6 +38,36 @@ test("KST day boundary: 08:59 UTC is still the previous KST calendar day (UTC+9)
 
 test("toKstDateOnly formats as YYYY-MM-DD", () => {
   assert.equal(toKstDateOnly(new Date("2026-08-09T15:30:00.000Z")), "2026-08-10");
+});
+
+/**
+ * ── kstMidnightInstant · isKstMidnight (2026-11-17) ─────────────────────
+ * toKstDateOnly 의 거꾸로다. 🔴 **UTC 자정이 아니다** — `new Date("2026-11-18")` 은
+ * 한국시간으로 그날 오전 9시라, 기간의 경계를 그렇게 잡으면 아홉 시간이 어긋나고
+ * 그 어긋남은 하루 중 00:00~09:00 에만 드러난다. 쓰는 자리는 결재권 위임의 기간
+ * (domain/approval-route-delegation.ts 의 delegationPeriodFromDateOnly).
+ */
+
+test("kstMidnightInstant: 한국시간 자정은 그 전날 15:00 UTC 다", () => {
+  assert.equal(kstMidnightInstant("2026-11-18").toISOString(), "2026-11-17T15:00:00.000Z");
+  // 🔴 UTC 자정과 **다른 값**이다. 같아지면 아홉 시간이 밀린 채로 조용히 돈다.
+  assert.notEqual(
+    kstMidnightInstant("2026-11-18").getTime(),
+    new Date("2026-11-18T00:00:00.000Z").getTime()
+  );
+});
+
+test("kstMidnightInstant: toKstDateOnly 와 왕복해도 같은 날이다 (달·해 넘김 포함)", () => {
+  for (const dateOnly of ["2026-01-01", "2026-11-18", "2026-12-31", "2028-02-29"]) {
+    assert.equal(toKstDateOnly(kstMidnightInstant(dateOnly)), dateOnly);
+  }
+});
+
+test("isKstMidnight: 한국시간 자정만 참이다 — UTC 자정도 1밀리초 차이도 거짓", () => {
+  assert.equal(isKstMidnight(new Date("2026-11-17T15:00:00.000Z")), true); // 11-18 00:00 KST
+  assert.equal(isKstMidnight(new Date("2026-11-18T00:00:00.000Z")), false); // 11-18 09:00 KST
+  assert.equal(isKstMidnight(new Date("2026-11-17T15:00:00.001Z")), false);
+  assert.equal(isKstMidnight(new Date("2026-11-18T12:25:00.000Z")), false);
 });
 
 test("addCalendarDays: +14 days within the same month", () => {

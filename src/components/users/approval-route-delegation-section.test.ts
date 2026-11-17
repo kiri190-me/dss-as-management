@@ -281,13 +281,92 @@ describe("㉡ 「누구의 결재권인가」", () => {
     );
   });
 
-  test("날짜·시각 칸의 모양이 옛 위임과 같다", () => {
+  /**
+   * 🔴 **2026-11-17 에 뒤집힌 단언이다.** 전에는 「날짜·시각 칸의 모양이 옛 위임과
+   * 같다」였고 두 화면 모두 `datetime-local` 둘이기를 요구했다. 사용자가 눈으로 보고
+   * 고쳐 달라고 한 것이 바로 그 자리다 — 「시간까지 적도록 되어 있는데 **날짜까지만**
+   * 적도록 해라(끝나는 날 24:00 까지로)」.
+   *
+   * 지우지 않고 **반대 방향으로** 고친다: 이제 이 화면은 날짜 칸 둘이고, 옛 「출하
+   * 승인 위임」은 **다른 표**라 일시 칸 둘 그대로다. 🔵 뒤의 단언이 그 「그대로」를
+   * 함께 재는 까닭은, 둘이 한 화면에 탭으로 나란히 있어 베껴 고치기 쉬워서다.
+   */
+  test("🔴 기간은 **날짜 두 칸**이다 — 옛 위임의 일시 칸을 베껴 오지 않았다", () => {
+    assert.equal(
+      [...sectionCode.matchAll(/type="date"/g)].length,
+      2,
+      "시작일·종료일이 날짜 칸 둘이 아니다"
+    );
     assert.equal(
       [...sectionCode.matchAll(/type="datetime-local"/g)].length,
-      2,
-      "시작·종료가 datetime-local 둘이 아니다"
+      0,
+      "시각 칸이 남아 있다 — 날짜까지만 적기로 했다(2026-11-17)"
     );
-    assert.equal([...oldSectionCode.matchAll(/type="datetime-local"/g)].length, 2);
+    // 칸 이름도 함께 바뀌었다. 「시작 일시」가 남아 있으면 날짜만 받는 칸이 시각을
+    // 받는 것처럼 읽힌다.
+    assert.match(flat(sectionCode), /> 시작일 </, "칸 이름이 「시작일」이 아니다");
+    assert.match(flat(sectionCode), /> 종료일 </, "칸 이름이 「종료일」이 아니다");
+    assert.ok(
+      !/시작 일시|종료 일시/.test(sectionCode),
+      "옛 칸 이름이 남아 있다 — 날짜만 받는 칸이 시각을 받는 것처럼 보인다"
+    );
+    // 🔵 옛 「출하 승인 위임」은 다른 표다. 이번 요구는 결재권 위임 쪽 하나였고,
+    //    그쪽을 함께 바꾸면 손대지 않기로 한 범위를 넘는다.
+    assert.equal(
+      [...oldSectionCode.matchAll(/type="datetime-local"/g)].length,
+      2,
+      "옛 위임 화면까지 함께 바꿨다 — 이번 요구의 범위가 아니다"
+    );
+  });
+
+  test("🔴 **끝이 포함된다**는 것을 입력칸 옆에 글자로 적어 둔다", () => {
+    // 표에 앉는 값은 「종료일 **다음 날** 0시」인데(반열린 구간) 화면에는 종료일만
+    // 보인다. 적어 두지 않으면 「18일까지면 18일은 빠지나」를 확인할 길이 코드를
+    // 읽거나 하루를 기다려 보는 것밖에 없다.
+    const form = sliceBetween(sectionCode, "<form", "</form>");
+    assert.match(flat(form), /종료일 당일 24시까지 포함/, "끝이 포함된다는 안내가 없다");
+    assert.match(
+      flat(form),
+      /같은 날로 고르면 그 하루/,
+      "같은 날 둘을 고르면 하루라는 것을 안 적었다"
+    );
+  });
+
+  test("🔴 날짜를 시각으로 굽는 식을 화면이 제 손으로 적지 않는다", () => {
+    // 굽는 식(시작 = 그 날 한국시간 0시 · 끝 = 종료일 **다음 날** 0시)은 도메인에
+    // 한 벌만 있어야 한다. 화면이 베껴 적으면 읽는 쪽(하루를 빼서 보여 주는 자리)과
+    // 갈리는 날이 오고, 그때 나는 것은 오류가 아니라 **하루씩 어긋난 날짜**다.
+    assert.match(
+      flat(sectionCode),
+      /const period = delegationPeriodFromDateOnly\(startDate, endDate\);/,
+      "굽는 자리가 도메인 함수가 아니다"
+    );
+    assert.match(
+      flat(sectionCode),
+      /startsAt: period\.startsAt\.toISOString\(\), endsAt: period\.endsAt\.toISOString\(\),/,
+      "구운 값을 그대로 보내지 않는다"
+    );
+    for (const forbidden of [
+      "24 * 60 * 60 * 1000",
+      "86400",
+      "setDate(",
+      "getTime() +",
+      "addCalendarDays(",
+      "new Date(startDate)",
+      "new Date(endDate)",
+    ]) {
+      assert.ok(
+        !sectionCode.includes(forbidden),
+        `화면이 날짜 셈을 제 손으로 한다: ${forbidden}`
+      );
+    }
+    // 처음 값도 **한국시간 오늘**이다. UTC 로 자르면 00:00~09:00 에 연 사람에게
+    // 어제 날짜가 떠 있고, 그대로 저장하면 하루가 밀린다.
+    assert.match(
+      flat(sectionCode),
+      /useState\(toKstDateOnly\(now\)\)/,
+      "처음 값을 한국시간 오늘로 잡지 않는다"
+    );
   });
 
   test("🔴 성공만 저장 팝업으로, 거절 사유는 화면에 남는다", () => {
