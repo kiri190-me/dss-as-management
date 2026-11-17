@@ -11,6 +11,7 @@ import {
   revokeApprovalRouteDelegation,
 } from "./approval-route-delegations";
 import {
+  FINISHED_DELEGATION_LIMIT,
   listAllApprovalRouteDelegations,
   listApprovalRouteDelegationsForUser,
   resolveActingApproverUserIds,
@@ -686,10 +687,15 @@ describe("listApprovalRouteDelegationsForUser", () => {
     assert.equal(received.ok, true);
 
     const lists = await listApprovalRouteDelegationsForUser(meId);
-    assert.equal(lists.given.length, 1, "내가 맡긴 것이 하나여야 한다");
-    assert.equal(lists.received.length, 1, "내가 대신하고 있는 것이 하나여야 한다");
+    // 🔵 2026-11-17 부터 방향마다 `live`/`finished` 로 갈려 온다. 두 줄 다 지금 살아
+    //    있는 기간이므로 `live` 에 서고, 끝난 쪽은 비어 있어야 한다 — 그 둘을 함께
+    //    재야 「전부 live 에 몰아넣었다」가 통과하지 않는다.
+    assert.equal(lists.given.live.length, 1, "내가 맡긴 것이 하나여야 한다");
+    assert.equal(lists.received.live.length, 1, "내가 대신하고 있는 것이 하나여야 한다");
+    assert.equal(lists.given.finished.length, 0, "살아 있는 줄이 끝난 쪽에도 들어갔다");
+    assert.equal(lists.received.finished.length, 0, "살아 있는 줄이 끝난 쪽에도 들어갔다");
 
-    const [givenRow] = lists.given;
+    const [givenRow] = lists.given.live;
     assert.equal(givenRow.delegatorName, "위임 시험 나");
     assert.equal(givenRow.delegateName, "위임 시험 내 대리인");
     assert.equal(givenRow.createdByName, "위임 시험 나");
@@ -697,7 +703,7 @@ describe("listApprovalRouteDelegationsForUser", () => {
     assert.ok(givenRow.startsAt instanceof Date, "시각은 Date 그대로여야 한다 — 글자가 아니다");
     assert.equal(givenRow.revokedByName, null);
 
-    const [receivedRow] = lists.received;
+    const [receivedRow] = lists.received.live;
     assert.equal(receivedRow.delegatorName, "위임 시험 남의 결재권자");
     assert.equal(receivedRow.delegateName, "위임 시험 나");
 
@@ -710,9 +716,73 @@ describe("listApprovalRouteDelegationsForUser", () => {
       assert.equal(revoked.ok, true);
     }
     const afterRevoke = await listApprovalRouteDelegationsForUser(meId);
-    assert.equal(afterRevoke.given.length, 1, "되돌린 줄이 목록에서 사라졌다 — 줄은 남아야 한다");
-    assert.equal(afterRevoke.given[0].revokedByName, "위임 시험 나");
-    assert.ok(afterRevoke.given[0].revokedAt instanceof Date);
+    // 🔴 되돌린 줄은 **사라지지 않는다. 자리를 옮긴다** — 살아 있는 쪽에서 빠지고
+    //    끝난 쪽으로 간다(화면이 거기를 접는다). 아예 빼면 「분명히 맡겼는데 아무
+    //    데도 없다」가 되고, 그때 찾을 곳이 감사 로그밖에 없다.
+    assert.equal(afterRevoke.given.live.length, 0, "되돌린 줄이 아직 살아 있는 쪽에 있다");
+    assert.equal(afterRevoke.given.finished.length, 1, "되돌린 줄이 목록에서 사라졌다 — 줄은 남아야 한다");
+    assert.equal(afterRevoke.given.finished[0].id, given.ok ? given.id : "", "엉뚱한 줄이 끝난 쪽에 있다");
+    assert.equal(afterRevoke.given.finished[0].revokedByName, "위임 시험 나");
+    assert.ok(afterRevoke.given.finished[0].revokedAt instanceof Date);
+    // 🔴 **한 방향을 되돌려도 다른 방향은 그대로다.** 두 방향이 각자 갈리는지 여기서
+    //    한 번 더 못 박는다 — 한 목록에 섞어 담으면 이 단언이 무너진다.
+    assert.equal(afterRevoke.received.live.length, 1, "남이 나에게 맡긴 줄까지 함께 끝났다");
+    assert.equal(afterRevoke.received.finished.length, 0);
+  });
+
+  /**
+   * 🔴 **상한은 방향마다 따로 걸린다**(2026-11-17). 한 상한을 두 방향이 나눠 쓰면,
+   * 맡긴 끝난 줄이 상한을 채운 사람에게 **대신하고 있던 끝난 줄이 한 줄도 안 보이면서
+   * 잘렸다는 말도 안 나온다.** 화면의 접기가 둘이고 각자 「최근 N건」을 말하므로,
+   * 그 N 이 서로를 밀어내면 안 된다.
+   */
+  test("🔴 끝난 줄이 상한을 넘으면 잘라서 주고 **잘렸다고 말한다** — 방향마다 따로", async () => {
+    const meId = await createTestUser("위임 시험 상한 결재권자");
+    const delegateId = await createTestUser("위임 시험 상한 대리인");
+    const otherDelegatorId = await createTestUser("위임 시험 상한 남의 결재권자");
+
+    // 🔵 상한 + 1 건을 **전부 지나간 기간**으로 만든다. 이 표는 겹치는 기간을 막지
+    //    않으므로(이 파일 머리말) 같은 두 사람으로 줄을 쌓을 수 있다.
+    for (let index = 0; index < FINISHED_DELEGATION_LIMIT + 1; index += 1) {
+      const created = await createApprovalRouteDelegation({
+        delegatorUserId: meId,
+        delegateUserId: delegateId,
+        startsAt: hoursFromNow(-2 * (index + 2)),
+        endsAt: hoursFromNow(-2 * (index + 1)),
+        reason: "",
+        actorUserId: meId,
+      });
+      assert.equal(created.ok, true, `${index}번째 끝난 줄을 못 만들었다`);
+    }
+    // 거꾸로 방향에는 **한 건만** 둔다. 상한이 방향마다 걸린다면 이쪽은 안 잘린다.
+    const received = await createApprovalRouteDelegation({
+      delegatorUserId: otherDelegatorId,
+      delegateUserId: meId,
+      startsAt: hoursFromNow(-4),
+      endsAt: hoursFromNow(-3),
+      reason: "",
+      actorUserId: managerId,
+    });
+    assert.equal(received.ok, true);
+
+    const lists = await listApprovalRouteDelegationsForUser(meId);
+
+    assert.equal(
+      lists.given.finished.length,
+      FINISHED_DELEGATION_LIMIT,
+      "끝난 줄을 상한보다 많이(또는 적게) 내려보냈다"
+    );
+    assert.equal(lists.given.finishedTruncated, true, "잘렸는데 잘렸다고 말하지 않는다");
+    assert.equal(lists.given.live.length, 0, "지나간 기간의 줄이 살아 있는 쪽에 섞였다");
+    assert.equal(lists.finishedLimit, FINISHED_DELEGATION_LIMIT, "상한을 화면에 함께 안 내려보낸다");
+
+    // 🔴 여기가 알맹이다 — 같은 사람의 **다른 방향**은 한 건뿐이고 안 잘린다.
+    assert.equal(lists.received.finished.length, 1, "다른 방향의 끝난 줄이 상한에 밀려났다");
+    assert.equal(
+      lists.received.finishedTruncated,
+      false,
+      "한 건뿐인 방향까지 잘렸다고 말한다 — 상한을 두 방향이 나눠 쓰고 있다"
+    );
   });
 });
 
@@ -775,14 +845,20 @@ describe("listAllApprovalRouteDelegations — 인가와 보이는 범위", () =>
     // 🔵 먼저 **안 보인다는 것**을 못 박는다 — 이 조회가 메우는 구멍이 실제로 거기
     // 있다는 증거다. 이 단언이 없으면 아래가 무엇을 고쳤는지 알 수 없다.
     const mine = await listApprovalRouteDelegationsForUser(managerId);
-    assert.ok(
-      !mine.given.some((row) => row.id === created.id),
-      "세운 사람의 「내가 맡긴 것」에 들어 있다 — 구멍이 메워진 방식이 달라졌다"
-    );
-    assert.ok(
-      !mine.received.some((row) => row.id === created.id),
-      "세운 사람의 「내가 대신하고 있는 것」에 들어 있다"
-    );
+    // 🔵 네 목록을 **전부** 본다(두 방향 × 살아 있는 줄·끝난 줄). 2026-11-17 에
+    //    목록이 둘에서 넷으로 늘었는데 둘만 보면, 끝난 쪽으로 새는 날 이 단언이
+    //    모르고 지나간다.
+    for (const [label, rows] of [
+      ["내가 맡긴 것", mine.given.live],
+      ["내가 맡긴 것(끝남)", mine.given.finished],
+      ["내가 대신하고 있는 것", mine.received.live],
+      ["내가 대신하고 있는 것(끝남)", mine.received.finished],
+    ] as const) {
+      assert.ok(
+        !rows.some((row) => row.id === created.id),
+        `세운 사람의 「${label}」에 들어 있다 — 구멍이 메워진 방식이 달라졌다`
+      );
+    }
 
     const result = await listAllApprovalRouteDelegations(await actorOf(managerId));
     assert.equal(result.ok, true, "관리 권한자가 거절당했다");

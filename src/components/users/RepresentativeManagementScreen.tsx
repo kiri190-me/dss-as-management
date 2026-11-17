@@ -14,7 +14,7 @@ import type { RepresentativeManagementUserRow, ShipmentDelegationRow } from "@/l
 import type {
   AllApprovalRouteDelegationsView,
   ApprovalRouteDelegateCandidate,
-  ApprovalRouteDelegationRow,
+  UserApprovalRouteDelegationsView,
 } from "@/lib/db/queries/approval-route-delegations";
 import type { PortalApprovalDelegationsView } from "@/lib/db/queries/portal-approval-delegations";
 import {
@@ -125,10 +125,15 @@ export default function RepresentativeManagementScreen({
    * 모두의 줄을 한 표에 담는 것과 다르다. 이 탭은 조건 없이 늘 보이므로 자료도 늘
    * 내려오고, 비어 있는 것은 정상이다.
    */
-  routeDelegations: {
-    given: ApprovalRouteDelegationRow[];
-    received: ApprovalRouteDelegationRow[];
-  };
+  /**
+   * 🔴 **모양을 여기 다시 적지 않는다**(2026-11-17). 2026-11-17 에 조회가 방향마다
+   * 살아 있는 줄·끝난 줄로 갈라 주게 되면서, 여기 베껴 적혀 있던 `{ given: Row[];
+   * received: Row[] }` 는 **같은 것의 두 번째 정의**가 됐다. 이 화면은 값을 나르기만
+   * 하므로 조회가 내보내는 타입을 그대로 받는다 — 나란히 둔 두 정의는 타입이 맞는
+   * 동안 `tsc` 가 아무 말도 안 하고, 한쪽만 고쳐진 날 한 묶음만 조용히 옛 모양으로
+   * 그려진다.
+   */
+  routeDelegations: UserApprovalRouteDelegationsView;
   /**
    * 🔴 **모두의 결재권 위임. 관리 권한이 없으면 `null`** 이고, 그러면 탭 안에 그
    * 묶음이 아예 없다 — 감추는 것이 아니라 없는 것이다(권한 탭과 같은 방식).

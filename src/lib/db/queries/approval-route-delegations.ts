@@ -24,6 +24,8 @@ import {
  *
  *  · `listApprovalRouteDelegationsForUser` — **사람에게 보여 줄 값**이다. 이름·사유·
  *    만든 사람까지 싣는다. 판정에 쓰지 마라(되돌림 여부를 글자로 다시 풀게 된다).
+ *    🔵 2026-11-17 부터 **방향마다 살아 있는 줄과 끝난 줄로 갈라** 준다 — 화면이
+ *    끝난 쪽을 접기 때문이고, 상한도 여기서 건다(그 함수 머리말).
  *  · `listAllApprovalRouteDelegations` — 같은 모양이지만 **모두의 줄**이다. 🔴 이것만
  *    인가를 **제 손으로** 본다. 까닭은 그 함수 머리말에 있다.
  *  · `resolveActingApproverUserIds` — **판정이 쓰는 값**이다. id 목록 하나뿐이고,
@@ -116,34 +118,149 @@ function delegationRowsBase() {
     .leftJoin(revokedBy, eq(approvalRouteDelegations.revokedByUserId, revokedBy.id));
 }
 
+/* ------------------------------------------------------------------ */
+/* 끝난 줄의 상한 — 이 파일의 두 조회와 옆 포털 조회가 **함께** 쓴다      */
+/* ------------------------------------------------------------------ */
+
 /**
- * 「내가 맡긴 것」과 「내가 대신하고 있는 것」. 둘 다 **되돌린 줄·끝난 줄까지**
- * 돌려준다 — 화면이 네 딱지(활성·예정·만료·철회됨)를 그리려면 죽은 줄도 보여야
- * 하고, 상태는 저장되지 않고 읽을 때 계산되기 때문이다
+ * 🔴 **끝난 줄을 몇 개까지 가져올까.** 살아 있는 줄에는 상한을 두지 않는다(그 집합은
+ * 「지금 자리를 비운 사람 수」라 본질적으로 작고, 상한에 밀려 **되돌려야 할 줄**이
+ * 안 보이는 것이 이 기능에서 가장 나쁜 일이다). 상한이 필요한 쪽은 끝난 줄뿐이다 —
+ * 줄을 지우는 길이 없어(표 머리말) 해가 갈수록 쌓이기만 한다.
+ *
+ * 🔵 50 에 깊은 뜻은 없다. 「한 화면에서 훑을 수 있는 양」이고, 더 뒤까지 찾아야 하면
+ * 감사 로그가 영구 기록이다(위임을 만들 때도 되돌릴 때도 한 줄씩 남는다 —
+ * mutations/approval-route-delegations.ts). 잘렸다는 사실은 화면이 말해 준다.
+ *
+ * 🔴 **`export` 가 붙은 까닭**(2026-11-17): 통합 승인함에서 온 위임을 읽는 조회
+ * (queries/portal-approval-delegations.ts)가 **이 값을 빌려 쓴다.** 두 출처의 줄이
+ * [결재권 위임] 화면에 나란히 서므로, 「끝났다」의 자와 상한이 갈리면 같은 날짜의
+ * 두 줄이 한쪽 묶음에서는 접히고 다른 쪽에서는 펴진다. 숫자를 저쪽에 다시 적으면
+ * 한쪽만 고쳐지는 날이 오고, 그 어긋남은 오류를 내지 않는다.
+ *
+ * 🔴 **읽는 자리가 셋이 됐다**(2026-11-17, 「끝난 위임 접기」). 바로 아래
+ * `listApprovalRouteDelegationsForUser`(보는 사람 자신의 두 방향) · 「모두의」 조회 ·
+ * 포털 조회. 그래서 **「모두의」 절에서 여기로 끌어올렸다** — 그 절 안에 두면 다음
+ * 사람이 「관리자 전용 숫자」로 읽는다. 화면에는 네 묶음의 「최근 N건」이 함께 서고,
+ * 그 N 이 묶음마다 다르면 사람은 그것을 결함으로 읽는다.
+ */
+export const FINISHED_DELEGATION_LIMIT = 50;
+
+/**
+ * 한 방향(맡긴 쪽 · 맡은 쪽)이 화면에 서는 모양.
+ *
+ * 🔴 **끝난 줄을 빼지 않고 접는다.** 2026-11-17 에 「내가 대신하고 있는 것」에 이미
+ * 만료된 위임이 쌓여 자리를 차지한다는 이야기에서 시작한 자리인데, 아예 빼 버리면
+ * 「분명히 맡겼는데 아무 데도 없다」가 되고 그때 찾을 곳이 감사 로그밖에 없다. 그래서
+ * 조회는 **갈라서 둘 다** 내주고, 화면이 끝난 쪽을 접는다.
+ */
+export type UserApprovalRouteDelegationsSide = {
+  /** 아직 되돌리지 않았고 아직 안 끝난 줄 — **전부**(상한 없음). */
+  live: ApprovalRouteDelegationRow[];
+  /** 되돌렸거나 기간이 끝난 줄 — 최근 것부터 `FINISHED_DELEGATION_LIMIT` 건까지. */
+  finished: ApprovalRouteDelegationRow[];
+  /** 끝난 줄이 상한보다 많았다. 화면이 「최근 N건만 보여 준다」를 말해 줘야 한다. */
+  finishedTruncated: boolean;
+};
+
+export type UserApprovalRouteDelegationsView = {
+  given: UserApprovalRouteDelegationsSide;
+  received: UserApprovalRouteDelegationsSide;
+  /** 화면이 「최근 N건」의 N 을 글자로 박지 않게 함께 내보낸다. 두 방향이 같은 값이다. */
+  finishedLimit: number;
+};
+
+/** 한 방향의 두 목록을 화면이 쓰는 모양으로 묶는다 — 자르는 자리가 한 곳이어야 한다. */
+function toDelegationSide(
+  live: ApprovalRouteDelegationRow[],
+  finishedPage: ApprovalRouteDelegationRow[]
+): UserApprovalRouteDelegationsSide {
+  const finishedTruncated = finishedPage.length > FINISHED_DELEGATION_LIMIT;
+  return {
+    live,
+    finished: finishedTruncated ? finishedPage.slice(0, FINISHED_DELEGATION_LIMIT) : finishedPage,
+    finishedTruncated,
+  };
+}
+
+/**
+ * 「내가 맡긴 것」과 「내가 대신하고 있는 것」 — 방향마다 **살아 있는 줄과 끝난 줄로
+ * 갈라서** 돌려준다. 어느 쪽도 버리지 않는다: 화면이 네 딱지(활성·예정·만료·철회됨)를
+ * 그리려면 죽은 줄도 보여야 하고, 상태는 저장되지 않고 읽을 때 계산된다
  * (deriveApprovalRouteDelegationDisplayStatus).
  *
- * 🔵 한 줄이 양쪽에 동시에 들어가는 일은 없다 — 그러려면 맡긴 사람과 대신하는
- * 사람이 같아야 하는데, 표의 `…_different_users` CHECK 가 그런 줄을 못 만들게 한다.
+ * ── 🔴 2026-11-17 까지는 네 상태가 한 목록에 섞여 있었다 ──────────────────
+ * 끝난 줄에는 할 수 있는 일이 하나도 없는데(되돌리기는 서버가 `DELEGATION_EXPIRED`
+ * 로 거절한다) 지우는 길이 없어 해가 갈수록 쌓이기만 해서, 살아 있는 위임이 그 아래로
+ * 밀려 내려갔다. 그래서 **갈라 내주고 화면이 끝난 쪽을 접는다**(「끝난 위임 N건」).
  *
- * 🔵 질의를 한 번만 던진다(`OR`). 두 번 나눠 던지면 두 목록의 「지금」이 미세하게
- * 어긋나, 같은 화면에서 한쪽에만 보이는 줄이 생길 수 있다.
+ * ── 🔴 왜 **여기서** 가르는가. 화면에서 가르지 않는 까닭 ──────────────────
+ * 상한(`FINISHED_DELEGATION_LIMIT`)이 이 저장 계층에 있고, 화면은 클라이언트
+ * 컴포넌트라 이 모듈을 **타입으로만** 가져올 수 있다 — 값으로 가져오면 `server-only`
+ * 사슬이 브라우저 번들에 딸려 간다(components/users/… 시험이 그것을 지킨다). 화면에서
+ * 자르려면 50 을 화면에 다시 적어야 하고, 그 숫자는 조회에서 바꾸는 날 **오류 없이**
+ * 갈린다. 🔵 네 번째 묶음(통합 승인함)이 이미 같은 까닭으로 SQL 에서 가르고 상한도
+ * 거기서 건다 — 두 묶음이 한 화면에 나란히 선다. 🔵 덤으로, 접힌 채로도 그릴 일이
+ * 없는 줄이 HTML 에 실려 나가지 않는다.
+ *
+ * ── 🔴 상한은 **방향마다** 따로 건다 ─────────────────────────────────────
+ * 화면의 접기가 둘이고 각자 「최근 N건」을 말한다. 한 상한을 둘이 나눠 쓰면 한쪽이
+ * 다른 쪽을 밀어내서, 맡긴 끝난 줄이 50건이면 **대신하고 있던 끝난 줄은 한 줄도
+ * 안 보이면서 잘렸다는 말도 안 나온다.** 🔵 네 번째 묶음은 거꾸로 두 방향을 한
+ * 목록에 담고 상한도 하나인데, 거기는 접기도 하나다.
+ *
+ * 🔵 살아 있는 줄만은 **한 질의로** 가져와 방향을 TS 에서 가른다. 상한이 없어 쪼갤
+ * 값어치가 없고, 한 줄이 양쪽에 동시에 들어가는 일은 없다 — 그러려면 맡긴 사람과
+ * 대신하는 사람이 같아야 하는데 표의 `…_different_users` CHECK 가 막는다.
+ *
+ * 🔴 **「지금」을 TS 에서 한 번 만들어 세 질의에 같은 값으로 넘긴다**(「모두의」 조회와
+ * 같은 까닭). 각자 `now()` 를 읽으면 질의 사이에 끝난 줄이 양쪽에서 빠지거나 양쪽에
+ * 들어간다. 🔴 **거르는 조건 둘은 「모두의」 조회와 글자 그대로 같아야 한다** — 같은
+ * 화면에서 같은 줄이 묶음마다 다른 쪽에 서면 사람은 그것을 결함으로 읽는다
+ * (components/users/approval-route-delegation-finished-fold.test.ts 가 둘을 맞댄다).
  */
-export async function listApprovalRouteDelegationsForUser(userId: string): Promise<{
-  given: ApprovalRouteDelegationRow[];
-  received: ApprovalRouteDelegationRow[];
-}> {
-  const rows = await delegationRowsBase()
-    .where(
-      or(
-        eq(approvalRouteDelegations.delegatorUserId, userId),
-        eq(approvalRouteDelegations.delegateUserId, userId)
-      )
-    )
-    .orderBy(desc(approvalRouteDelegations.createdAt));
+export async function listApprovalRouteDelegationsForUser(
+  userId: string,
+  now: Date = new Date()
+): Promise<UserApprovalRouteDelegationsView> {
+  const isGiven = eq(approvalRouteDelegations.delegatorUserId, userId);
+  const isReceived = eq(approvalRouteDelegations.delegateUserId, userId);
+  const isLive = and(
+    isNull(approvalRouteDelegations.revokedAt),
+    gt(approvalRouteDelegations.endsAt, now)
+  );
+  // 위의 정확한 여집합: 되돌렸거나(기간과 무관하다) 기간이 끝났거나.
+  const isFinished = or(
+    isNotNull(approvalRouteDelegations.revokedAt),
+    lte(approvalRouteDelegations.endsAt, now)
+  );
+
+  const [live, givenFinishedPage, receivedFinishedPage] = await Promise.all([
+    delegationRowsBase()
+      .where(and(or(isGiven, isReceived), isLive))
+      .orderBy(desc(approvalRouteDelegations.createdAt)),
+    delegationRowsBase()
+      .where(and(isGiven, isFinished))
+      .orderBy(desc(approvalRouteDelegations.createdAt))
+      // 🔵 한 건 더 받아 「더 있다」를 센다. 따로 COUNT 를 던지면 그 사이에 줄이 늘어
+      // 「더 있다는데 다 보인다」가 될 수 있고, 질의가 하나 더 는다.
+      .limit(FINISHED_DELEGATION_LIMIT + 1),
+    delegationRowsBase()
+      .where(and(isReceived, isFinished))
+      .orderBy(desc(approvalRouteDelegations.createdAt))
+      .limit(FINISHED_DELEGATION_LIMIT + 1),
+  ]);
 
   return {
-    given: rows.filter((row) => row.delegatorUserId === userId),
-    received: rows.filter((row) => row.delegateUserId === userId),
+    given: toDelegationSide(
+      live.filter((row) => row.delegatorUserId === userId),
+      givenFinishedPage
+    ),
+    received: toDelegationSide(
+      live.filter((row) => row.delegateUserId === userId),
+      receivedFinishedPage
+    ),
+    finishedLimit: FINISHED_DELEGATION_LIMIT,
   };
 }
 
@@ -199,23 +316,11 @@ export async function listApprovalRouteDelegateCandidates(): Promise<
 /* ------------------------------------------------------------------ */
 
 /**
- * 🔴 **끝난 줄을 몇 개까지 가져올까.** 살아 있는 줄에는 상한을 두지 않는다(그 집합은
- * 「지금 자리를 비운 사람 수」라 본질적으로 작고, 상한에 밀려 **되돌려야 할 줄**이
- * 안 보이는 것이 이 기능에서 가장 나쁜 일이다). 상한이 필요한 쪽은 끝난 줄뿐이다 —
- * 줄을 지우는 길이 없어(표 머리말) 해가 갈수록 쌓이기만 한다.
- *
- * 🔵 50 에 깊은 뜻은 없다. 「한 화면에서 훑을 수 있는 양」이고, 더 뒤까지 찾아야 하면
- * 감사 로그가 영구 기록이다(위임을 만들 때도 되돌릴 때도 한 줄씩 남는다 —
- * mutations/approval-route-delegations.ts). 잘렸다는 사실은 화면이 말해 준다.
- *
- * 🔴 **`export` 가 붙은 까닭**(2026-11-17): 통합 승인함에서 온 위임을 읽는 조회
- * (queries/portal-approval-delegations.ts)가 **이 값을 빌려 쓴다.** 두 출처의 줄이
- * [결재권 위임] 화면에 나란히 서므로, 「끝났다」의 자와 상한이 갈리면 같은 날짜의
- * 두 줄이 한쪽 묶음에서는 접히고 다른 쪽에서는 펴진다. 숫자를 저쪽에 다시 적으면
- * 한쪽만 고쳐지는 날이 오고, 그 어긋남은 오류를 내지 않는다.
+ * 🔵 끝난 줄의 상한(`FINISHED_DELEGATION_LIMIT`)은 이 절에 있었는데, 읽는 자리가
+ * 셋이 되면서 파일 위쪽으로 끌어올렸다(2026-11-17 — 그 상수의 머리말에 경위가 있다).
+ * 여기서 쓰는 방식은 그대로다: 살아 있는 줄에는 안 걸고, 끝난 줄만 한 건 더 받아
+ * 「더 있다」를 센다.
  */
-export const FINISHED_DELEGATION_LIMIT = 50;
-
 export type AllApprovalRouteDelegationsView = {
   /**
    * 아직 되돌리지 않았고 아직 안 끝난 줄 — **전부**. 🔴 이 집합은 되돌리기 mutation 이

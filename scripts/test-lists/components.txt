@@ -819,6 +819,18 @@ src/components/users/approval-route-delegation-section.test.ts
 # 「끝났다」의 자가 옆 조회와 **글자 그대로** 같은가.
 src/components/users/portal-approval-delegation-section.test.ts
 
+# 같은 탭의 **앞 두 묶음이 끝난 위임을 접는다**(2026-11-17). 사용자가 말한 자리 —
+# 「내가 대신하고 있는 것」에 **이미 만료된 위임이 쌓여** 지금 누가 내 결재를 대신하고
+# 있는지가 그 사이에 묻혔다. 🔴 빼지 않고 **접는다**(빼면 「분명히 맡겼는데 아무 데도
+# 없다」가 되고 찾을 곳이 감사 로그뿐이다). 지키는 것: 살아 있는 줄은 접기 **밖**에
+# 그대로 있는가 · 만료·철회된 줄만 접기 **안**인가 · 🔴 두 묶음의 접기가 **따로**
+# 기억되는가(한쪽을 펴면 다른 쪽도 펴지면 안 된다) · 끝난 것이 0건이면 접기를 **안
+# 그리는가** · 상한에 잘렸다고 말해 주는가 · 🔴 상한이 **방향마다** 걸리는가 ·
+# 🔴 뒤의 두 묶음(「모두의」·통합 승인함)이 **안 바뀌었는가**.
+# 🔵 「실제로 갈려 나오는가」와 50건을 넘겼을 때는 실제 DB 로 돈다(db 목록의
+# mutations/approval-route-delegations.integration.test.ts).
+src/components/users/approval-route-delegation-finished-fold.test.ts
+
 # 「결재선에 올라 있는 사람의 문」(2026-10-26 눈 확인에서 잡힌 결함). 운영 DB 에
 # users.view 가 NONE 으로 저장돼 있어 엔지니어는 [사용자 관리]에 못 들어갔고, 그래서
 # 결재선에 박힌 사람이 자기 결재권을 맡길 길이 없었다. 저장값을 되돌리지 않고 코드로

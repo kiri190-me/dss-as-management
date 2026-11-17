@@ -14,6 +14,7 @@ import type {
   AllApprovalRouteDelegationsView,
   ApprovalRouteDelegateCandidate,
   ApprovalRouteDelegationRow,
+  UserApprovalRouteDelegationsView,
 } from "@/lib/db/queries/approval-route-delegations";
 import type { PortalApprovalDelegationsView } from "@/lib/db/queries/portal-approval-delegations";
 import { deriveApprovalRouteDelegationDisplayStatus } from "@/lib/domain/approval-route-delegation";
@@ -83,6 +84,22 @@ import type { ActingUser } from "@/lib/domain/local/approval/transitions";
  * 모르므로 다음 전파 한 번에 되살아나고, 사람은 **거뒀다고 믿는데 안 거둬진** 상태가
  * 된다(표 머리말 · 설계 B-12 의 3번). 대신 **어디로 가야 하는지**를 적어 준다 —
  * 주소는 환경변수에서 오고(`APPROVALS_BASE_URL`), **없으면 링크 없이 글자만** 뜬다.
+ *
+ * ── 2026-11-17: 네 묶음이 **모두** 끝난 줄을 접는다 ─────────────────────────
+ * 그 전에는 앞의 두 묶음(「내가 맡긴 것」·「내가 대신하고 있는 것」)만 만료·철회된
+ * 줄을 살아 있는 줄과 **섞어** 그렸다. 줄을 지우는 길이 없어(표 머리말) 끝난 줄은
+ * 해가 갈수록 쌓이기만 하는데 거기서 할 수 있는 일은 하나도 없어서, 지금 누가 내
+ * 결재를 대신하고 있는지가 그 사이에 묻혔다.
+ *
+ * 🔴 **빼지 않고 접는다.** 아예 안 그리면 「분명히 맡겼는데 아무 데도 없다」가 되고
+ * 그때 찾을 곳이 감사 로그밖에 없다. 접힌 머리에 건수를 적어 두면 **있다는 사실은
+ * 남고** 자리는 한 줄로 줄어든다. 🔵 뒤의 두 묶음이 이미 쓰던 모양 그대로다 —
+ * 같은 화면에 접기가 넷 서는데 글자나 생김새가 갈리면 사람은 그것을 결함으로 읽는다.
+ *
+ * 🔴 **가르는 일은 조회가 한다**(queries/approval-route-delegations.ts). 화면이
+ * 가르려면 상한(50)을 여기 다시 적어야 하는데, 그 상수는 `server-only` 모듈에 있어
+ * 이 파일이 **타입으로만** 가져올 수 있다 — 베껴 적으면 조회에서 바꾸는 날 오류 없이
+ * 갈린다. 🔵 그래서 이 화면이 하는 일은 접기 상태 넷을 들고 있는 것뿐이다.
  * ============================================================================
  */
 
@@ -169,11 +186,12 @@ export default function ApprovalRouteDelegationSection({
    * 「내가 맡긴 것」과 「내가 대신하고 있는 것」. 🔴 시각은 `Date` 그대로 받는다 —
    * 상태를 가리는 도메인 함수가 `Date` 를 받고, 글자로 바꿨다 화면에서 다시 읽는
    * 왕복은 틀릴 거리만 늘린다(queries/approval-route-delegations.ts 의 같은 주석).
+   *
+   * 🔴 **방향마다 `live` 와 `finished` 로 갈려서 온다**(2026-11-17). 가르는 자리가
+   * 조회인 까닭은 그 함수 머리말에 있다 — 짧게는, 상한이 `server-only` 모듈의
+   * 상수라 화면에서 자르려면 그 숫자를 여기 다시 적어야 하기 때문이다.
    */
-  routeDelegations: {
-    given: ApprovalRouteDelegationRow[];
-    received: ApprovalRouteDelegationRow[];
-  };
+  routeDelegations: UserApprovalRouteDelegationsView;
   /**
    * 🔴 **모두의 줄. `null` 이면 묶음을 아예 그리지 않는다** — 감추는 것이 아니라
    * 없는 것이다(이 화면의 「역할별 접근 권한」 탭이 자료가 null 이면 탭 자체를 안
@@ -231,6 +249,17 @@ export default function ApprovalRouteDelegationSection({
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [listMessage, setListMessage] = useState<string | null>(null);
+  // 🔵 위의 두 묶음(「내가 맡긴 것」·「내가 대신하고 있는 것」)도 끝난 줄은 접는다
+  // (2026-11-17). 그 전에는 만료·철회된 줄이 살아 있는 줄과 **섞여** 쌓여서, 지금
+  // 누가 내 결재를 대신하고 있는지가 끝난 줄 사이에 묻혔다.
+  //
+  // 🔴 **접기를 둘로 나눠 둔다.** 한 상태를 두 묶음이 나눠 쓰면 한쪽을 펴려다 다른
+  // 쪽까지 펴지는데, 두 묶음은 서로 다른 때 들여다보는 것이라(맡긴 것은 내가 거두러,
+  // 맡은 것은 내가 대신할 것이 있나 보러) 그러면 접기가 쓸모를 잃는다. 아래 두
+  // 묶음이 같은 까닭으로 각자의 상태를 갖는다 — 네 묶음이 **같은 글자**(「끝난 위임
+  // 보기」)를 쓰므로 한 상태로 묶이면 더 헷갈린다.
+  const [showGivenFinished, setShowGivenFinished] = useState(false);
+  const [showReceivedFinished, setShowReceivedFinished] = useState(false);
   // 🔵 「모두의」 묶음은 기본으로 **살아 있는 줄만** 보여 준다. 끝난 줄은 해가 갈수록
   // 쌓이기만 하고(줄을 지우는 길이 없다) 할 수 있는 일도 없어서, 펼쳐야 보이는 쪽이
   // 맞다. 조회가 상한까지 걸어 두므로 펼쳐도 끝없이 길어지지는 않는다.
@@ -439,10 +468,18 @@ export default function ApprovalRouteDelegationSection({
         </p>
       )}
 
+      {/* ════════════════════════════════════════════════════════════════
+          🔴 이 묶음과 아래 「내가 대신하고 있는 것」은 **살아 있는 줄만** 펴 둔다
+          (2026-11-17). 끝난 줄(만료·철회)은 그 아래 접기 안으로 들어간다 — 뺀 것이
+          아니라 접은 것이다. 빼 버리면 「분명히 맡겼는데 아무 데도 없다」가 되고,
+          그때 찾을 곳이 감사 로그밖에 없다(조회 쪽 머리말).
+          ════════════════════════════════════════════════════════════════ */}
       <h3 className="mt-5 text-xs font-semibold text-zinc-900 dark:text-zinc-50">내가 맡긴 것</h3>
-      {routeDelegations.given.length === 0 ? (
+      {routeDelegations.given.live.length === 0 ? (
+        // 🔴 「아직 맡긴 결재권이 없습니다」라고 적지 않는다 — 끝난 줄이 접혀 있는
+        //    사람에게는 거짓말이 된다(맡긴 적이 있고, 바로 아래에 그 N건이 적혀 있다).
         <p className="mt-2 rounded-lg border border-zinc-200 px-3 py-8 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-          아직 맡긴 결재권이 없습니다.
+          지금 맡기고 있는 결재권이 없습니다.
         </p>
       ) : (
         <div className="mt-2">
@@ -461,7 +498,7 @@ export default function ApprovalRouteDelegationSection({
                   </tr>
                 </thead>
                 <tbody>
-                  {routeDelegations.given.map((delegation) => (
+                  {routeDelegations.given.live.map((delegation) => (
                     <tr
                       key={delegation.id}
                       className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800"
@@ -479,7 +516,7 @@ export default function ApprovalRouteDelegationSection({
             }
             cards={
               <ul className={LIST_CARD_GRID}>
-                {routeDelegations.given.map((delegation) => (
+                {routeDelegations.given.live.map((delegation) => (
                   <ListCard
                     key={delegation.id}
                     title={`${delegation.delegatorName} → ${delegation.delegateName}`}
@@ -498,6 +535,90 @@ export default function ApprovalRouteDelegationSection({
         </div>
       )}
 
+      {/* 🔵 끝난 것이 하나도 없으면 **접기 자체를 안 그린다.** 늘 그리면 「끝난 위임
+          보기 (0건)」이라는 눌러도 빈 목록만 나오는 단추가 남는다 — 아래 두 묶음은
+          그렇게 하고 있는데, 거기는 묶음이 통째로 없을 수도 있어 「자료는 왔다」를
+          보여 줄 자리가 필요했다. 여기 둘은 바로 위에 살아 있는 목록이 늘 있다. */}
+      {routeDelegations.given.finished.length > 0 && (
+        <>
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => setShowGivenFinished((previous) => !previous)}
+              className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              {showGivenFinished
+                ? "끝난 위임 접기"
+                : `끝난 위임 보기 (${routeDelegations.given.finished.length}건${routeDelegations.given.finishedTruncated ? "+" : ""})`}
+            </button>
+          </div>
+
+          {showGivenFinished && (
+            <div className="mt-2">
+              {/* 🔴 잘렸다는 것을 반드시 말해 준다. 말하지 않으면 「이게 전부」로 읽히고,
+                  없는 줄을 찾는 사람이 감사 로그까지 가야 한다는 것도 모른다.
+                  건수를 글자로 박지 않는다 — 상한은 조회가 정하고 함께 내려보낸다. */}
+              {routeDelegations.given.finishedTruncated && (
+                <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                  끝난 위임은 최근 {routeDelegations.finishedLimit}건만 보여 줍니다. 그보다 앞의
+                  기록은 감사 로그에 남아 있습니다.
+                </p>
+              )}
+              <ResponsiveList
+                listId="approval-route-delegations-given-finished"
+                table={
+                  // 🔵 펴면 **위와 같은 줄**이 나온다 — 칸도 차례도 그대로다. 다만
+                  //    「작업」 칸만 없다: 끝난 줄에는 단추가 안 붙어 전부 「-」이고
+                  //    (mayRevokeApprovalRouteDelegation), 「모두의」 묶음의 끝난
+                  //    목록도 같은 까닭으로 그 칸을 안 그린다.
+                  <table className="w-full min-w-[640px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+                        <th scope="col" className="py-2 px-3 font-medium">대리 결재자</th>
+                        <th scope="col" className="py-2 px-3 font-medium">기간</th>
+                        <th scope="col" className="py-2 px-3 font-medium">상태</th>
+                        <th scope="col" className="py-2 px-3 font-medium">지정자</th>
+                        <th scope="col" className="py-2 px-3 font-medium">사유</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {routeDelegations.given.finished.map((delegation) => (
+                        <tr
+                          key={delegation.id}
+                          className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800"
+                        >
+                          <td className="py-2 px-3 whitespace-nowrap text-zinc-900 dark:text-zinc-50">{delegation.delegateName}</td>
+                          <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{periodText(delegation)}</td>
+                          <td className="py-2 px-3">{renderStatus(delegation)}</td>
+                          <td className="py-2 px-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">{approvalRouteDelegationCreatorLabel(delegation)}</td>
+                          <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{delegation.reason || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                }
+                cards={
+                  <ul className={LIST_CARD_GRID}>
+                    {routeDelegations.given.finished.map((delegation) => (
+                      <ListCard
+                        key={delegation.id}
+                        title={`${delegation.delegatorName} → ${delegation.delegateName}`}
+                        badge={renderStatus(delegation)}
+                        fields={[
+                          { label: "기간", value: periodText(delegation) },
+                          { label: "지정자", value: approvalRouteDelegationCreatorLabel(delegation) },
+                          { label: "사유", value: delegation.reason },
+                        ]}
+                      />
+                    ))}
+                  </ul>
+                }
+              />
+            </div>
+          )}
+        </>
+      )}
+
       <h3 className="mt-5 text-xs font-semibold text-zinc-900 dark:text-zinc-50">
         내가 대신하고 있는 것
       </h3>
@@ -506,9 +627,12 @@ export default function ApprovalRouteDelegationSection({
       <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
         맡은 위임은 스스로 되돌릴 수 없습니다. 맡긴 분이나 관리자에게 요청해 주세요.
       </p>
-      {routeDelegations.received.length === 0 ? (
+      {routeDelegations.received.live.length === 0 ? (
+        // 🔴 「없다」는 **지금** 이야기다. 끝난 줄이 접혀 있는 사람에게는 바로 아래에
+        //    그 N건이 적혀 있으므로, 「대신하고 있는 결재권이 없습니다」만 적으면
+        //    두 글자가 서로 어긋나 보인다.
         <p className="mt-2 rounded-lg border border-zinc-200 px-3 py-8 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-          대신하고 있는 결재권이 없습니다.
+          지금 대신하고 있는 결재권이 없습니다.
         </p>
       ) : (
         <div className="mt-2">
@@ -526,7 +650,7 @@ export default function ApprovalRouteDelegationSection({
                   </tr>
                 </thead>
                 <tbody>
-                  {routeDelegations.received.map((delegation) => (
+                  {routeDelegations.received.live.map((delegation) => (
                     <tr
                       key={delegation.id}
                       className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800"
@@ -543,7 +667,7 @@ export default function ApprovalRouteDelegationSection({
             }
             cards={
               <ul className={LIST_CARD_GRID}>
-                {routeDelegations.received.map((delegation) => (
+                {routeDelegations.received.live.map((delegation) => (
                   <ListCard
                     key={delegation.id}
                     title={`${delegation.delegatorName} → ${delegation.delegateName}`}
@@ -559,6 +683,85 @@ export default function ApprovalRouteDelegationSection({
             }
           />
         </div>
+      )}
+
+      {/* 🔴 **이 접기가 사용자가 말한 그 자리다**(2026-11-17) — 「내가 대신하고 있는
+          것」에 이미 만료된 위임이 쌓여 있었다. 🔵 접기 상태는 위 묶음과 **따로**
+          기억한다(위 useState 주석). */}
+      {routeDelegations.received.finished.length > 0 && (
+        <>
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={() => setShowReceivedFinished((previous) => !previous)}
+              className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              {showReceivedFinished
+                ? "끝난 위임 접기"
+                : `끝난 위임 보기 (${routeDelegations.received.finished.length}건${routeDelegations.received.finishedTruncated ? "+" : ""})`}
+            </button>
+          </div>
+
+          {showReceivedFinished && (
+            <div className="mt-2">
+              {/* 🔴 잘렸다는 것을 반드시 말해 준다 — 위 묶음과 같은 까닭이고, 건수를
+                  글자로 박지 않는 것도 같다. 🔵 두 방향이 **각자** 상한에 걸린다:
+                  한쪽이 50건이어도 다른 쪽은 그대로 보인다(조회 쪽 머리말). */}
+              {routeDelegations.received.finishedTruncated && (
+                <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                  끝난 위임은 최근 {routeDelegations.finishedLimit}건만 보여 줍니다. 그보다 앞의
+                  기록은 감사 로그에 남아 있습니다.
+                </p>
+              )}
+              <ResponsiveList
+                listId="approval-route-delegations-received-finished"
+                table={
+                  <table className="w-full min-w-[640px] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+                        <th scope="col" className="py-2 px-3 font-medium">결재권자</th>
+                        <th scope="col" className="py-2 px-3 font-medium">기간</th>
+                        <th scope="col" className="py-2 px-3 font-medium">상태</th>
+                        <th scope="col" className="py-2 px-3 font-medium">지정자</th>
+                        <th scope="col" className="py-2 px-3 font-medium">사유</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {routeDelegations.received.finished.map((delegation) => (
+                        <tr
+                          key={delegation.id}
+                          className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800"
+                        >
+                          <td className="py-2 px-3 whitespace-nowrap text-zinc-900 dark:text-zinc-50">{delegation.delegatorName}</td>
+                          <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{periodText(delegation)}</td>
+                          <td className="py-2 px-3">{renderStatus(delegation)}</td>
+                          <td className="py-2 px-3 whitespace-nowrap text-zinc-600 dark:text-zinc-400">{approvalRouteDelegationCreatorLabel(delegation)}</td>
+                          <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{delegation.reason || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                }
+                cards={
+                  <ul className={LIST_CARD_GRID}>
+                    {routeDelegations.received.finished.map((delegation) => (
+                      <ListCard
+                        key={delegation.id}
+                        title={`${delegation.delegatorName} → ${delegation.delegateName}`}
+                        badge={renderStatus(delegation)}
+                        fields={[
+                          { label: "기간", value: periodText(delegation) },
+                          { label: "지정자", value: approvalRouteDelegationCreatorLabel(delegation) },
+                          { label: "사유", value: delegation.reason },
+                        ]}
+                      />
+                    ))}
+                  </ul>
+                }
+              />
+            </div>
+          )}
+        </>
       )}
 
       {/* 🔴 관리 권한이 없으면 자료가 null 이고, 그러면 이 묶음은 **없다**.

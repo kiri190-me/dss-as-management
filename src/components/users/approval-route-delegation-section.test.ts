@@ -684,15 +684,18 @@ describe("㉦ 누가 만들었나", () => {
     assert.notEqual(self, byManager, "만든 사람 이름이 같으면 구별이 사라진다");
   });
 
-  test("목록 넷이 모두 같은 말로 적는다 — 같은 줄이 묶음마다 다르게 보이면 안 된다", () => {
+  test("목록 여섯이 모두 같은 말로 적는다 — 같은 줄이 묶음마다 다르게 보이면 안 된다", () => {
     // 「모두의」에는 위 두 묶음에 뜬 줄이 그대로 다시 들어온다. 한쪽만 이름을
     // 날것으로 적으면 같은 줄이 두 가지로 보인다.
-    // 🔵 묶음은 셋이지만 목록은 **넷**이다 — 「모두의」가 살아 있는 줄과 끝난 줄로
-    // 갈려 있다. 넷 × (표 + 카드) = 여덟.
+    // 🔵 묶음은 셋이지만 목록은 **여섯**이다 — 2026-11-17 에 앞의 두 묶음도 끝난 줄을
+    // 접으면서 각자 목록이 둘이 됐고(살아 있는 줄 · 접기 안), 「모두의」는 그 전부터
+    // 둘이었다. 여섯 × (표 + 카드) = 열둘.
+    // 🔴 접기 **안**의 줄도 같은 함수를 쓴다 — 펴 보면 위와 같은 줄인데 지정자만
+    // 다르게 적히면, 사람은 그것을 다른 줄로 읽는다.
     assert.equal(
       [...sectionCode.matchAll(/approvalRouteDelegationCreatorLabel\(delegation\)/g)].length,
-      8,
-      "지정자 칸 여덟(목록 넷 × 표·카드)이 모두 같은 함수를 쓰지 않는다"
+      12,
+      "지정자 칸 열둘(목록 여섯 × 표·카드)이 모두 같은 함수를 쓰지 않는다"
     );
     assert.ok(
       !/delegation\.createdByName/.test(sectionCode),
@@ -850,10 +853,16 @@ describe("㉦ 겹치는 줄을 사람에게 알려 준다", () => {
     // 🔵 2026-11-17 에 셋이 늘었다 — 통합 승인함에서 온 위임의 세 목록이다
     //    (portal-…). 앞의 넷은 A/S 자신의 표를 그리던 그대로다. 접두사가 갈려
     //    있으므로 **어느 표의 목록인지 열쇠만 봐도 읽힌다.**
+    // 🔵 같은 날 둘이 더 늘었다 — 앞의 두 묶음이 끝난 줄을 접으면서 생긴
+    //    `…-given-finished` · `…-received-finished`. 🔴 **차례도 함께 못 박는다**:
+    //    접기는 제 묶음 **바로 아래**에 서야 하고, 「모두의」 묶음 뒤로 밀려나면
+    //    사람은 그것을 남의 묶음 것으로 읽는다.
     const listIds = [...sectionCode.matchAll(/listId="([^"]+)"/g)].map(([, id]) => id);
     assert.deepEqual(listIds, [
       "approval-route-delegations-given",
+      "approval-route-delegations-given-finished",
       "approval-route-delegations-received",
+      "approval-route-delegations-received-finished",
       "approval-route-delegations-all",
       "approval-route-delegations-all-finished",
       "portal-approval-delegations-given",
