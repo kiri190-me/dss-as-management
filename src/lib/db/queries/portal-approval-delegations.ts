@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, gt, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { portalApprovalDelegations, users } from "../schema";
@@ -7,8 +7,15 @@ import { FINISHED_DELEGATION_LIMIT } from "./approval-route-delegations";
 
 /**
  * ============================================================================
- * 통합 승인함에서 맡긴 결재권 위임 읽기 — **화면에 보여 줄 값**
+ * 통합 승인함에서 맡긴 결재권 위임 읽기 — **화면에 보여 줄 값**과 **점검이 맞댈 값**
  * ============================================================================
+ * 🔴 **이 파일의 조회는 쓰임이 둘이고 섞으면 안 된다**(아래 각 절의 머리말):
+ *  · `listPortalApprovalDelegationsForUser` — **화면**이 읽는 쪽. 보는 사람의 줄만,
+ *    사람 이름을 실어서, 「살아 있다/끝났다」로 나눠 준다.
+ *  · 🔴 `listPortalApprovalDelegationsForAudit` — 포털의 **어긋남 점검**이 읽는 쪽
+ *    (2026-11-17, 조각 9a · 설계 B-14). **거르개가 하나도 없고** 사람 칸을 **한 개도
+ *    안 고른다.**
+ *
  * 표는 `portal_approval_delegations` 다. 🔴 **옆의 `approval_route_delegations`
  * (A/S 화면에서 사람이 맡기는 위임)와 다른 표**이고, 이 파일은 그 표를 읽지
  * 않는다 — 둘이 어떻게 갈리는지는 표 머리말의 비교표에 있다(설계 B-4: 둘 다
@@ -206,4 +213,71 @@ export async function listPortalApprovalDelegationsForUser(
     finishedTruncated,
     finishedLimit: FINISHED_DELEGATION_LIMIT,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* 🔴 포털의 어긋남 점검이 읽는다 — **거르개가 없는** 자리 (조각 9a)      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 점검이 보는 줄. 🔴 **사람 칸이 없다.** 표에서 고르는 칸도 이것뿐이어야 한다 — 고른
+ * 뒤에 안 싣는 것이 아니라 **애초에 안 읽는다**(내주는 모양은
+ * server/integration/portal-delegation-list.ts 가 쥔다 — 두 겹으로 막아 둔 것은, 한 겹만
+ * 있으면 다음 사람이 「조회는 다 읽어 두고 고를 때 가리자」로 쉽게 무너뜨리기 때문이다).
+ */
+export type PortalApprovalDelegationAuditRow = {
+  /** 🔴 **포털이 정한 번호**다. 점검은 이 값 하나로 양쪽 줄의 짝을 맞춘다. */
+  id: string;
+  startsAt: Date;
+  endsAt: Date;
+  /** 비어 있으면 살아 있는 줄. 🔴 **거둔 줄도 반드시 함께 내준다.** */
+  revokedAt: Date | null;
+};
+
+/**
+ * 「이 집이 지금 가진 위임 전부」. 🔴 **`.where()` 가 한 줄도 없는 것이 이 조회의
+ * 전부다.** 살아 있는 것·끝난 것·**거둔 것**을 다 준다 — 포털과 맞대어 볼 때 「포털은
+ * 거뒀는데 집에서는 살아 있는」 줄이 가장 위험한 어긋남인데(설계 B-13), 거른 목록으로는
+ * 그 줄이 **양쪽에서 똑같이 안 보인다.**
+ *
+ * 🔴 **차례를 못 박는다**(번호 오름차순). 상한에 걸려 잘릴 때 **어느 줄이 잘리는가**가
+ * 호출마다 달라지면, 점검이 돌 때마다 다른 줄을 「집에 없다」로 읽는다.
+ *
+ * 🔴 **상한보다 한 줄 더 묻는다**(`limit + 1`). 그 한 줄이 「넘쳤다」를 가리는 유일한
+ * 길이고, 딱 상한만큼 읽으면 **정확히 상한만큼 있는 날**과 **넘친 날**이 같은 답이 된다.
+ * 세어서 잘라내는 것은 몸통을 짓는 쪽이다(`buildDelegationListReply`) — 🔴 **그러니 이
+ * 조회가 돌려주는 줄을 그대로 내보내면 안 된다.**
+ *
+ * 🔴 **상한 값을 여기서 정하지 않는다.** 그 숫자는 **통로 규약**이라
+ * `server/integration/portal-delegation-list.ts` 가 쥐고 있는데, 이 집의 저장 계층은
+ * `@/lib/server/` 를 끌어오지 않는다(층 규칙 — server/portal-delegation-read-wiring.test.ts
+ * 가 지킨다). 그래서 통로가 **같은 상수를 조회와 몸통 짓는 쪽에 함께** 넘긴다.
+ *
+ * 🔵 **질의를 만들기만 하고 돌리지 않는다.** 시험이 `.toSQL()` 로 구워 「사람 칸을 안
+ * 고르는가」·「거르개가 없는가」·「한 줄 더 묻는가」를 글자가 아니라 **구워진 SQL** 로 본다.
+ */
+export function portalDelegationsForAuditQuery(limit: number) {
+  return db
+    .select({
+      id: portalApprovalDelegations.id,
+      startsAt: portalApprovalDelegations.startsAt,
+      endsAt: portalApprovalDelegations.endsAt,
+      revokedAt: portalApprovalDelegations.revokedAt,
+    })
+    .from(portalApprovalDelegations)
+    .orderBy(asc(portalApprovalDelegations.id))
+    .limit(limit + 1);
+}
+
+/**
+ * 🔴 **읽기 갈래의 입구.** 부르는 곳은 `api/integration/delegations` 하나다.
+ *
+ * 🔴 **던지는 것을 삼키지 않는다** — 못 읽은 것을 빈 목록으로 답하면 점검이 그것을 「이
+ * 집에 위임이 하나도 없다」로 읽고, **DB 가 앓는 날 모든 위임이 어긋난 것으로 보고된다.**
+ * 통로가 그 던짐을 받아 500 으로 답한다.
+ */
+export async function listPortalApprovalDelegationsForAudit(
+  limit: number
+): Promise<PortalApprovalDelegationAuditRow[]> {
+  return portalDelegationsForAuditQuery(limit);
 }

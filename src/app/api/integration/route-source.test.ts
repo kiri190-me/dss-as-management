@@ -28,6 +28,11 @@ import { join } from "node:path";
  * **포털이 남의 위임을 써 주는** 자리라 대상이 몸통에 온다(토큰의 `sub` 는 부른
  * 주체다). 그 통로의 울타리는 토큰의 **쓰임새**로 옮겨가 있다 — 아래 넷째 묶음.
  *
+ * 🔴 **그 넷째가 2026-11-17 에 갈래 둘이 됐다**(조각 9a · 설계 B-14 — 어긋남 점검이
+ * 읽어 갈 길). 갈래마다 **다른 쓰임새**를 요구하므로 1번(「검증이 먼저」)도 **갈래마다**
+ * 세야 한다. 🔵 쓰임새가 실제로 거절되는지와 쓰기 갈래가 안 깨졌는지는 글자로 못 재므로
+ * **값으로** 재는 시험이 따로 있다(delegations/route-list-branch.integration.test.ts).
+ *
  * 🔴 **다섯째(결재 내역)는 쿼리를 읽는다**(2026-11-17). 기간을 받아야 해서인데, 2번은
  * 그대로 살아 있다 — 읽는 자리가 **한 함수**뿐이고 그 함수가 돌려주는 것은 기간뿐이라
  * 사람이 흘러들 자리가 타입에 없다. 아래 다섯째 묶음이 그 「한 자리」를 글자로 센다.
@@ -241,10 +246,14 @@ describe("통합 승인함 통로", () => {
   });
 });
 
-describe("결재권 위임을 받아 적는 통로", () => {
+describe("결재권 위임을 주고받는 통로", () => {
   // 🔴 **포털이 써 주는** 자리다(설계 B-12, 2026-11-16). 앞 셋과 방향이 반대라
   // 울타리도 다르다 — 아래 주석들이 그 차이를 짚는다. 판정은 실제로 돌려 본다
   // (lib/server/integration/portal-delegation-push.test.ts).
+  //
+  // 🔴 2026-11-17 에 **읽기 갈래**가 붙었다(조각 9a) — 포털의 어긋남 점검이 「이 집이
+  // 지금 가진 위임 전부를 다오」라고 묻는 길이다. 갈래마다 쓰임새가 다르고, 갈래를
+  // 가리는 자리가 **토큰 검증보다 앞**이다(그래야 어느 쓰임새를 요구할지 알 수 있다).
   //
   // 🔵 이 묶음만 **주석을 걷어낸 소스**를 본다(codeOnly). 표본이 비지 않았는지
   // 먼저 확인한다 — 걷어내다 통째로 날리면 아래 「없어야 한다」가 전부 공짜로 통과한다.
@@ -254,28 +263,61 @@ describe("결재권 위임을 받아 적는 통로", () => {
     assert.ok(!delegations.includes("============"), "주석이 덜 걷혔다");
   });
 
-  test("🔴 토큰 검증이 먼저다 — 실패하면 401 로 끝나고 몸통을 읽지도 않는다", () => {
-    const verifyAt = delegations.indexOf("await verifyPortalServiceToken(");
-    const rejectAt = delegations.indexOf("if (!verified.ok) {");
-    const readBodyAt = delegations.indexOf("await request.json()");
-    const workAt = delegations.indexOf("applyPortalDelegationPush(");
-    assert.ok(verifyAt > 0, "검증하는 자리를 찾지 못했다");
-    assert.ok(rejectAt > verifyAt, "검증 결과를 확인하지 않는다");
-    assert.ok(readBodyAt > rejectAt, "거절하기 전에 몸통을 읽는다");
-    assert.ok(workAt > readBodyAt, "거절하기 전에 저장한다");
-    assert.match(delegations, /status: 401/);
-    assert.match(
-      delegations,
-      /readBearerToken\(request\.headers\.get\("authorization"\)\)/,
-      "토큰을 머리말이 아닌 데서 꺼낸다 — 쿼리는 접근 로그에 그대로 남는다"
+  test("🔴 갈래를 가린 **뒤에** 그 갈래의 쓰임새를 요구한다 — 엿보는 것은 **복제본**이다", () => {
+    // 🔴 차례를 뒤집을 수 없다. 어느 쓰임새의 토큰을 요구할지가 갈래에 달려 있어서다.
+    const peekAt = delegations.indexOf("await request.clone().text()");
+    const branchAt = delegations.indexOf("if (isDelegationListAction(");
+    const readPurposeAt = delegations.indexOf("PORTAL_TOKEN_PURPOSES.delegationsRead");
+    const writePurposeAt = delegations.indexOf("PORTAL_TOKEN_PURPOSES.delegationsWrite");
+    assert.ok(peekAt > 0, "🔴 몸통을 **복제본**으로 엿보지 않는다");
+    assert.ok(branchAt > peekAt, "갈래를 가르는 자리를 찾지 못했다");
+    assert.ok(readPurposeAt > branchAt, "읽기 갈래가 제 쓰임새를 안 요구한다");
+    assert.ok(writePurposeAt > readPurposeAt, "🔴 읽기 갈래가 쓰기 쓰임새를 보고 있다");
+    // 🔴 **원본 몸통을 읽으면 안 된다.** 읽으면 아래 쓰기 갈래의 `request.json()` 이 빈
+    //    몸통을 받아 **모든 쓰기가 조용히 400** 이 된다 — 값으로도 잰다(그 통합 시험).
+    assert.ok(
+      delegations.indexOf("await request.json()") > writePurposeAt,
+      "🔴 갈래를 가르기 전에 원본 몸통을 읽는다 — 쓰기가 통째로 깨진다"
     );
   });
 
-  test("🔴 **쓰기 전용 쓰임새**만 받는다 — 종을 그리려고 구운 토큰으로 결재권을 맡길 수 없다", () => {
+  test("🔴 두 갈래 모두 토큰 검증이 먼저다 — 실패하면 401 로 끝나고 표에도 몸통에도 안 닿는다", () => {
+    // 🔵 읽기 갈래: 검증 → 거절 → 그제야 장부를 읽는다.
+    const readVerifyAt = delegations.indexOf("await verifyPortalServiceToken(");
+    const readRejectAt = delegations.indexOf("if (!verifiedReader.ok) return invalidToken();");
+    const listAt = delegations.indexOf("return listDelegations();");
+    assert.ok(readVerifyAt > 0, "검증하는 자리를 찾지 못했다");
+    assert.ok(readRejectAt > readVerifyAt, "읽기 갈래가 검증 결과를 확인하지 않는다");
+    assert.ok(listAt > readRejectAt, "거절하기 전에 장부를 읽는다");
+
+    // 🔵 쓰기 갈래: 2026-11-16 의 차례 그대로다.
+    const writeRejectAt = delegations.indexOf("if (!verified.ok) {");
+    const readBodyAt = delegations.indexOf("await request.json()");
+    const workAt = delegations.indexOf("applyPortalDelegationPush(");
+    assert.ok(writeRejectAt > listAt, "쓰기 갈래가 검증 결과를 확인하지 않는다");
+    assert.ok(readBodyAt > writeRejectAt, "거절하기 전에 몸통을 읽는다");
+    assert.ok(workAt > readBodyAt, "거절하기 전에 저장한다");
+
+    assert.match(delegations, /status: 401/);
+    // 토큰을 꺼내는 자리는 **두 갈래 모두** `Authorization` 머리말이다 — 쿼리로 받으면
+    // 그 값이 접근 로그에 그대로 남는다.
+    const 꺼내는자리 =
+      delegations.match(/readBearerToken\(request\.headers\.get\("authorization"\)\)/g) ?? [];
+    assert.equal(꺼내는자리.length, 2, "갈래 둘이 같은 자리에서 토큰을 꺼내지 않는다");
+  });
+
+  test("🔴 갈래마다 **제 쓰임새**만 받는다 — 쓰기 토큰으로 장부를 읽을 수 없다", () => {
     // 이게 이 통로의 가장 중요한 울타리다. 앞 셋은 대상이 토큰 안에서만 와서
     // 「남의 것을 볼 수 없음」이 토큰 모양으로 지켜졌는데, 여기는 대상이 몸통에
-    // 오므로 **토큰의 쓰임새**가 그 자리를 대신한다.
+    // 오므로 **토큰의 쓰임새**가 그 자리를 대신한다. 🔴 한 벌로 묶으면 「남에게
+    // 결재권을 맡기러」 구운 토큰이 **회사 전체의 위임 장부**를 여는 열쇠가 된다.
     assert.match(delegations, /PORTAL_TOKEN_PURPOSES\.delegationsWrite/);
+    assert.match(delegations, /PORTAL_TOKEN_PURPOSES\.delegationsRead/);
+    // 🔵 각각 **한 번씩**이다. 한쪽 갈래에 둘 다 적혀 있으면 울타리가 없는 것과 같다.
+    for (const 쓰임새 of ["delegationsWrite", "delegationsRead"]) {
+      const 횟수 = delegations.split(`PORTAL_TOKEN_PURPOSES.${쓰임새}`).length - 1;
+      assert.equal(횟수, 1, `${쓰임새} 를 요구하는 자리가 하나가 아니다`);
+    }
     for (const forbidden of [
       "notificationsRead",
       "notificationSettingsRead",
@@ -283,6 +325,31 @@ describe("결재권 위임을 받아 적는 통로", () => {
     ]) {
       assert.ok(!delegations.includes(forbidden), `다른 통로의 토큰을 받는다: ${forbidden}`);
     }
+  });
+
+  test("🔴 읽기 갈래는 **사람을 읽는 자리로 가지 않는다** — 답에 사람이 없다", () => {
+    const branchAt = delegations.indexOf("if (isDelegationListAction(");
+    const writeAt = delegations.indexOf("PORTAL_TOKEN_PURPOSES.delegationsWrite");
+    assert.ok(branchAt > 0 && writeAt > branchAt);
+    const 갈래 = delegations.slice(branchAt, writeAt);
+    assert.ok(갈래.includes("return listDelegations();"), "표본이 비었다 — 갈래를 잘못 잘랐다");
+    for (const 금지 of ["listUserIdsBySsoSubjects", "Sub", "reason", "Name"]) {
+      assert.ok(!갈래.includes(금지), `읽기 갈래가 ${금지} 를 건드린다`);
+    }
+  });
+
+  test("🔴 **화면용 조회를 빌려 쓰지 않는다** — 거르개가 끼면 거둔 줄이 안 보인다", () => {
+    // 화면용 조회는 보는 사람의 줄만 집고 끝난 줄을 따로 접는다. 그것으로 맞대어 보면
+    // 「포털은 거뒀는데 집에서는 살아 있는」 줄이 **양쪽에서 똑같이 안 보인다**(B-13).
+    assert.ok(!delegations.includes("listPortalApprovalDelegationsForUser"));
+    assert.match(delegations, /listPortalApprovalDelegationsForAudit\(DELEGATION_LIST_LIMIT\)/);
+    // 🔴 상한은 **조회와 몸통 짓는 쪽에 같은 값**으로 간다. 어긋나면 2001 줄이 나가거나
+    //    멀쩡한 날에도 `truncated` 가 참이 된다.
+    assert.match(delegations, /buildDelegationListReply\(rows, DELEGATION_LIST_LIMIT\)/);
+    // 🔴 못 읽으면 **빈 목록이 아니라 500** 이다 — 빈 목록은 「이 집에 위임이 하나도
+    //    없다」는 뜻 있는 답이라 점검이 그것을 어긋남으로 읽는다.
+    assert.match(delegations, /"storage_failed"/);
+    assert.match(delegations, /status: 500/);
   });
 
   test("🔴 대상은 **몸통 하나**에서만 온다 — 쿼리 문자열도 토큰의 sub 도 읽지 않는다", () => {

@@ -7,10 +7,17 @@ import {
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getLoginMode } from "@/lib/config/login-mode";
 import { listUserIdsBySsoSubjects } from "@/lib/db/queries/users";
+import { listPortalApprovalDelegationsForAudit } from "@/lib/db/queries/portal-approval-delegations";
 import {
   revokePortalApprovalDelegation,
   storePortalApprovalDelegation,
 } from "@/lib/db/mutations/portal-approval-delegations";
+import {
+  DELEGATION_LIST_LIMIT,
+  buildDelegationListReply,
+  isDelegationListAction,
+  readDelegationAction,
+} from "@/lib/server/integration/portal-delegation-list";
 import {
   applyPortalDelegationPush,
   parsePortalDelegationPush,
@@ -62,6 +69,34 @@ import {
  *
  * 🔴 **이 표를 읽어 결재를 가르는 코드는 아직 없다**(조각 8 의 일이다). 지금 결재
  * 판정은 여전히 포털에 물어서 한다 — 이 통로는 **받아 적기만** 한다.
+ *
+ * ── 🔴 읽기 갈래가 생겼다 (2026-11-17, 조각 9a · 설계 B-14) ───────────────
+ *     POST /api/integration/delegations
+ *     Authorization: Bearer <포털이 서명한 서비스 토큰 — 🔴 **읽기 쓰임새**>
+ *     { "action": "list" }
+ *
+ *     200 { "delegations": [ { id, startsAt, endsAt, revokedAt } ],
+ *           "truncated": false }
+ *
+ * 🔴 **답에 사람을 싣지 않는다** — 칸은 넷뿐이고 `id` 하나로 포털과 짝이 맞는다. 까닭과
+ * 상한은 `server/integration/portal-delegation-list.ts` 머리말에 있다. 전파가 다 됐는데
+ * **포털 저장만 실패하는 틈**(B-13 이 못 메우는 자리)을 맞대어 보려고 연 길이다.
+ *
+ * ── 🔴 갈래마다 **쓰임새가 다르다** ──────────────────────────────────────
+ *  · 쓰기(`upsert`·`revoke`) — `dss.delegations.write`
+ *  · 읽기(`list`)            — `dss.delegations.read`
+ * 🔴 **쓰기 토큰으로 읽을 수 없고, 읽기 토큰으로 쓸 수 없다.** 한 벌로 묶으면 「남에게
+ * 결재권을 맡기러」 구운 토큰이 **회사 전체의 위임 장부**를 여는 열쇠가 된다. 🔵 포털이
+ * 읽기 글자를 굽기 전까지 읽기 갈래는 **전부 401** 이고, 그동안 **쓰기 갈래는 한 글자도
+ * 안 바뀐다.**
+ *
+ * 🔴 그래서 **토큰 검증보다 `action` 엿보기가 먼저다.** 어느 쓰임새를 요구할지가 갈래에
+ * 달려 있어 차례를 뒤집을 수가 없다. 🔵 엿보기는 **몸통 글자에서 한 칸을 읽을 뿐** 표도
+ * 토큰도 건드리지 않고, 못 읽으면 쓰기 갈래로 간다 — 그래서 자격 없는 요청이 받는 답은
+ * **갈래와 무관하게 401 하나**다(모양으로 떠볼 틈이 없다).
+ * 🔵 엿보는 것은 **복제본**이다. 원본 몸통은 아래 쓰기 갈래가 예전 그대로
+ * `request.json()` 으로 읽는다 — 원본을 읽으면 그 자리가 **빈 몸통**을 받아 모든 쓰기가
+ * 조용히 400 이 된다(휴가가 깨뜨려 보고 확인했다).
  * ============================================================================
  */
 
@@ -75,11 +110,81 @@ function notEnabled() {
   );
 }
 
+/**
+ * 🔴 **읽기 갈래에서만** 쓰는 401. 아래 쓰기 갈래에는 같은 모양의 블록이 **그대로 남아
+ * 있다** — 2026-11-16 에 세 집이 맞춘 자리라 이 조각에서 한 글자도 건드리지 않기로 했다.
+ * 🔵 같은 글자가 두 번인 것은 그래서이고, 합치려거든 **쓰기 갈래의 답이 바이트로 같은지**를
+ * 먼저 확인할 것(포털은 401 을 전파 실패로 읽고 지정 자체를 거절한다 — 설계 B-13).
+ */
+function invalidToken() {
+  return NextResponse.json(
+    { error: "invalid_token", error_description: "토큰을 받아들일 수 없습니다." },
+    { status: 401, headers: { ...NO_STORE, "www-authenticate": "Bearer" } }
+  );
+}
+
+/**
+ * 🔴 **읽기 갈래의 몸통.** 돌려주는 칸은 넷뿐이고 사람이 없다 —
+ * `server/integration/portal-delegation-list.ts` 가 모양을 쥔다.
+ *
+ * 🔴 **못 읽으면 500 이다. 빈 목록으로 답하지 않는다.** 빈 목록은 「이 집에 위임이 하나도
+ * 없다」는 **뜻 있는 답**이고, 점검은 그것을 「포털에만 있다 = 어긋남」으로 읽는다. 읽기에
+ * 실패한 것을 그 모양으로 답하면 **DB 가 앓는 날 모든 위임이 어긋난 것으로 보고된다.**
+ *
+ * 🔵 오류 이름이 쓰기 갈래의 `server_error` 가 아니라 `storage_failed` 인 것은 **휴가와
+ * 같은 글자**를 쓰기 위해서다(세 집이 같아야 점검 스크립트가 한 가지로 읽는다).
+ */
+async function listDelegations() {
+  let rows;
+  try {
+    // 🔴 상한을 **조회와 몸통 짓는 쪽에 같은 값으로** 넘긴다. 저장 계층이 통로 규약
+    //    상수를 import 할 수 없어서인데(그 상수의 주석), 둘이 어긋나면 2001 줄이 나가거나
+    //    멀쩡한 날에도 `truncated` 가 참이 된다.
+    rows = await listPortalApprovalDelegationsForAudit(DELEGATION_LIST_LIMIT);
+  } catch (error) {
+    // 🔵 안쪽 사정은 밖으로 내보내지 않는다(쓰기 갈래와 같은 처신). 🔴 포털 번호도 줄도
+    //    로그에 남기지 않는다 — 남길 것은 **못 읽었다는 사실**뿐이다.
+    console.error("[integration] 결재권 위임 장부 읽기 실패:", error);
+    return NextResponse.json(
+      { error: "storage_failed", error_description: "위임 목록을 읽지 못했습니다." },
+      { status: 500, headers: NO_STORE }
+    );
+  }
+  return NextResponse.json(buildDelegationListReply(rows, DELEGATION_LIST_LIMIT), {
+    headers: NO_STORE,
+  });
+}
+
 export async function POST(request: NextRequest) {
   // 데모 모드에는 포털도, 포털의 서명도 없다 — 열어 둘 까닭이 없다(옆 통로 셋과
   // 같은 판단). 🔵 운영은 언제나 sso 모드다.
   if (getLoginMode() !== "sso") return notEnabled();
 
+  // 🔴 갈래를 **먼저** 가린다 — 요구할 쓰임새가 갈래마다 달라서 차례를 뒤집을 수 없다
+  //    (머리말). 🔵 읽는 것은 **복제본**이라 아래 쓰기 갈래의 몸통은 손대지 않은 채 남고,
+  //    못 읽으면 null 이 되어 예전 그대로 쓰기 갈래로 간다.
+  const action = readDelegationAction(
+    await request.clone().text(),
+    request.headers.get("content-type")
+  );
+
+  if (isDelegationListAction(action)) {
+    const verifiedReader = await verifyPortalServiceToken(
+      readBearerToken(request.headers.get("authorization")),
+      // 🔴 **읽기 쓰임새**다. 쓰기 토큰으로 장부를 통째로 읽을 수 있으면 안 된다.
+      PORTAL_TOKEN_PURPOSES.delegationsRead
+    );
+    if (!verifiedReader.ok) return invalidToken();
+
+    // 🔴 mock 계정 모드에서는 **빈 목록을 주지 않는다.** 빈 목록은 「이 집에 위임이 하나도
+    //    없다」는 뜻 있는 답이라 점검이 그것을 어긋남으로 읽는다 — 읽을 자리가 없는 모드의
+    //    정직한 답은 「이 통로는 지금 안 선다」(404)이다. 🔵 운영은 언제나 database 다.
+    if (getAuthSource() !== "database") return notEnabled();
+
+    return listDelegations();
+  }
+
+  // ── 아래는 2026-11-16 의 쓰기 갈래다. 🔴 차례까지 그대로 둔다 ──────────────
   const verified = await verifyPortalServiceToken(
     readBearerToken(request.headers.get("authorization")),
     PORTAL_TOKEN_PURPOSES.delegationsWrite

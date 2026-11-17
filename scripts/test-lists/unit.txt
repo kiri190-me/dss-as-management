@@ -2059,6 +2059,15 @@ src/components/settings/badge-visibility-draft.test.ts
 # 🔴 **없는 줄을 거두는 것도 오류가 아닌가** · 철회가 사람 번호를 다시 맞춰 보지 않는가.
 src/lib/server/integration/portal-delegation-push.test.ts
 
+# 🔴 같은 통로의 **읽기 갈래** — 포털의 어긋남 점검이 「이 집이 가진 위임 전부」를 물어
+# 갈 때의 모양(B-14, 조각 9a, 2026-11-17). 재는 것: 🔴 **글자가 세 집에서 같은가**
+# (`list` · `dss.delegations.read` · `dss.delegations.write` — 다른 두 집의 소스를 여기서
+# 읽을 수 없어 **값**으로 적어 둔다) · 🔴 **`list` 가 쓰기 명령이 아닌가**(끼면 쓰기
+# 토큰으로 읽기 갈래에 발을 들인다) · 🔴 **답에 사람이 없는가**(줄에 사람 칸을 섞어
+# 넣어도 안 나간다 — `...row` 로 펼치는 구현이면 여기서 터진다) · 🔴 **거둔 줄도 실리는가**
+# · 🔴 **넘치면 말하는가**(truncated — 조용히 자르면 점검이 「집에 없다」로 읽는다).
+src/lib/server/integration/portal-delegation-list.test.ts
+
 # 🔴 포털 위임 표(0129)의 바탕 — 틀려도 그 자리에서는 아무 일도 안 일어나는 것들.
 # **`id` 에 기본값이 없는가**가 핵심이다(번호의 주인이 포털이다) — `defaultRandom()` 이
 # 들어오면 재시도마다 줄이 늘고 철회가 아무 줄도 못 찾는데 **둘 다 오류가 안 난다** ·
