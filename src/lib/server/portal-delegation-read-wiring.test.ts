@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
  * 통과하는가**는 db/mutations/approval-route-delegation-decide.integration.test.ts 가
  * 값으로 잰다. 여기가 재는 것은 그 사이 — **어디서 읽고, 어디서도 묻지 않는가**다.
  *
- * ── 여기서 못 박는 것 다섯 ──────────────────────────────────────────────
+ * ── 여기서 못 박는 것 여섯 ──────────────────────────────────────────────
  *  1. 🔴 **걷어낸 파일 넷이 정말 없다**(묻는 왕복 · 입구 · 「못 물었다」 그릇 · 안내 조각).
  *  2. 🔴 **소스 어디에도 묻는 이름이 없다** — 저장소 전체를 훑는다. 되살아나면 결재
  *     길목에 망 호출이 돌아온 것이다.
@@ -40,7 +40,10 @@ import { fileURLToPath } from "node:url";
  *     않는다.
  *  4. 🔴 **판정 조회가 표 둘을 읽는다.** 포털 표를 빼면 승인함에서 맡긴 위임이 A/S 에서
  *     **아무 일도 안 일으킨다** — 오류 한 줄 없이.
- *  5. 🟢 **포털이 되묻는 통로 둘도 같은 답을 받는다**(D-8 ② — 설계상 저절로 메워진 자리).
+ *  5. 🔴 **거꾸로 방향도 표 둘을 읽는다**(2026-11-17, 설계 D-8 ①). 4번만 세고 있던
+ *     동안 「나를 누가 대신하나」는 제 표만 읽었고, 그래서 승인함에서 맡긴 위임의
+ *     대리인은 **결재가 생길 때 나가는 메일만** 못 받았다 — 누를 수는 있었다.
+ *  6. 🟢 **포털이 되묻는 통로 둘도 같은 답을 받는다**(D-8 ② — 설계상 저절로 메워진 자리).
  *
  * 🔴 토막·파일을 잘라 보는 시험이므로, 읽은 글자가 **비어 있지 않은 것**을 먼저
  * 확인한다. 안 하면 파일이 옮겨진 날 아무것도 안 보면서 초록으로 통과한다.
@@ -230,20 +233,75 @@ test("🔴 결재 화면 셋이 **판정 조회**를 부른다 — 안 부르면
   }
 });
 
+/**
+ * 공개 함수 하나의 토막. 🔴 파일 전체로 세면 **옆 함수의 글자**가 섞인다 — 이 파일에는
+ * 두 방향 조회가 나란히 있고, 한쪽만 고친 날 다른 쪽 글자로 통과할 수 있다.
+ */
+function 함수토막(코드: string, 이름: string): string {
+  const 시작 = 코드.indexOf(`export async function ${이름}(`);
+  assert.ok(시작 >= 0, `${이름} 을 못 찾았다 — 이름이 바뀌었거나 파일이 옮겨졌다`);
+  const 다음 = 코드.indexOf("export ", 시작 + `export async function ${이름}(`.length);
+  const 토막 = 다음 > 시작 ? 코드.slice(시작, 다음) : 코드.slice(시작);
+  assert.ok(토막.length > 50, `${이름} 토막이 비었다 — 이 시험이 아무것도 안 본다`);
+  return 토막;
+}
+
 test("🔴 판정 조회가 **표 둘**을 읽는다 — 포털 표를 빼면 승인함 위임이 아무 데서도 안 듣는다", () => {
   const 판정조회 = path.join(srcDir, "lib", "db", "queries", "approval-route-delegations.ts");
   const 코드 = 한줄로(코드만(판정조회));
-  assert.ok(코드.includes("export async function resolveActingApproverUserIds("), "판정 조회가 아니다");
-  assert.ok(코드.includes(".from(approvalRouteDelegations)"), "🔴 A/S 제 표를 안 읽는다");
-  assert.ok(코드.includes(".from(portalApprovalDelegations)"), "🔴 포털이 전파해 준 표를 안 읽는다");
+
+  // 🔴 **두 표를 읽는 글자는 2026-11-17 에 한 자리로 모였다**(설계 D-8 ①). 그 전에는 이
+  //    함수 안에 질의가 두 벌 적혀 있었고 여기서 `.from(…)` 두 줄을 세었는데, **거꾸로
+  //    방향**(「나를 누가 대신하나」)이 제 표만 읽는 것을 그 셈으로는 알 수 없었다 —
+  //    그래서 승인함에서 맡긴 위임의 대리인이 결재 메일만 못 받고 있었다. 지금은 두
+  //    방향이 **같은 읽기 함수**를 쓰므로, 그 함수가 두 표를 읽는지를 한 번 세고 방향
+  //    둘이 각각 그것을 부르는지를 잰다.
+  assert.ok(
+    코드.includes("readLiveDelegationPeriods(approvalRouteDelegations,"),
+    "🔴 A/S 제 표를 안 읽는다"
+  );
+  assert.ok(
+    코드.includes("readLiveDelegationPeriods(portalApprovalDelegations,"),
+    "🔴 포털이 전파해 준 표를 안 읽는다"
+  );
+
+  const 정방향 = 함수토막(코드, "resolveActingApproverUserIds");
+  assert.ok(
+    정방향.includes("readLiveDelegationPeriodsFromBothSources("),
+    "🔴 판정이 두 고지를 읽는 자리를 안 쓴다 — 제 질의를 따로 들고 있다"
+  );
+  // 🔴 좁히는 칸이 방향의 전부다. 바꿔 넣어도 오류 없이 **빈 목록**이 돌아온다.
+  assert.ok(정방향.includes('"delegateUserId"'), "🔴 판정이 거꾸로 방향으로 좁힌다");
   // 🔴 **읽어 놓고 안 합치면** 아무 일도 안 일어난다 — 합치는 자리는 순수 함수 하나다.
   assert.ok(
-    코드.includes("actingApproverUserIds(own, actorUserId, now, portal)"),
+    정방향.includes("actingApproverUserIds(own, actorUserId, now, portal)"),
     "🔴 두 표를 읽어 놓고 판정에 둘 다 넘기지 않는다"
   );
+
   // 🔴 저장 계층은 망을 타지 않는다 — 이 조회에 fetch 가 들어오면 트랜잭션이 열린 채
   //    망을 기다린다.
   assert.ok(!코드.includes("@/lib/server/"), "🔴 저장 계층이 server 묶음을 끌어왔다");
+});
+
+test("🔴 **거꾸로 방향도** 같은 자리를 쓴다 — 안 그러면 대리인이 결재 메일만 못 받는다", () => {
+  // 2026-11-17(설계 D-8 ①). 「나를 누가 대신하나」는 결재가 생겼을 때 **즉시 메일**을
+  // 받을 사람을 넓히는 조회다(server/integration/approval-created-notice.ts). 그 조회가
+  // A/S 제 표만 읽던 동안, 승인함에서 맡긴 위임의 대리인은 결재를 **누를 수는 있고**
+  // (정방향이 두 표를 읽는다) 종·승인함 대기 목록에도 떴다 — 🔵 모자란 것이 **메일
+  // 하나뿐**이라 화면에도 로그에도 아무 표시가 안 남았다.
+  const 판정조회 = path.join(srcDir, "lib", "db", "queries", "approval-route-delegations.ts");
+  const 코드 = 한줄로(코드만(판정조회));
+  const 거꾸로 = 함수토막(코드, "resolveActingDelegateUserIds");
+
+  assert.ok(
+    거꾸로.includes("readLiveDelegationPeriodsFromBothSources("),
+    "🔴 거꾸로 방향이 제 질의를 따로 들고 있다 — 두 고지를 읽는 자리를 안 쓴다"
+  );
+  assert.ok(거꾸로.includes('"delegatorUserId"'), "🔴 거꾸로 방향이 정방향 칸으로 좁힌다");
+  assert.ok(
+    거꾸로.includes("actingDelegateUserIdsFor(own, delegatorUserId, now, portal)"),
+    "🔴 두 표를 읽어 놓고 둘 다 넘기지 않는다 — 승인함 쪽 대리인이 메일을 못 받는다"
+  );
 });
 
 test("🟢 포털이 되묻는 통로 둘도 **같은 답**을 받는다 — 전에 빠져 있던 자리다(설계 D-8 ②)", () => {

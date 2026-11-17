@@ -15,7 +15,7 @@ import {
  * ============================================================================
  * 결재선 단계 위임 — 순수 규칙
  * ============================================================================
- * 여기서 못 박는 것 일곱. 전부 **틀려도 그 자리에서는 아무 오류가 안 나는** 것들이다.
+ * 여기서 못 박는 것 여덟. 전부 **틀려도 그 자리에서는 아무 오류가 안 나는** 것들이다.
  *
  *  1. **끝은 포함하지 않는다**(`[starts_at, ends_at)`). 부등호 하나를 `<=` 로 바꾸면
  *     잇대어 적은 두 위임이 한순간 둘 다 살아 있고, 그 순간에 들어온 결재는 나중에
@@ -42,6 +42,13 @@ import {
  *     🔴 **그 묶음은 포털 줄의 기간·되돌림까지 잰다**(2026-11-16 저녁, 설계 B-12).
  *     그날 낮까지는 포털이 **이미 판정해서** 결재권자 목록만 줬지만, 전파 방식으로
  *     바뀌면서 줄이 통째로 넘어온다 — 이 층이 안 가리면 거둔 위임이 계속 듣는다.
+ *  8. 🔴 **거꾸로 방향도 고지가 둘이다**(2026-11-17, 설계 D-8 ①). 7번이 더해진 날
+ *     **정방향만** 고쳐졌고, 「나를 누가 대신하나」는 A/S 제 표만 보고 있었다 —
+ *     그래서 승인함에서 맡긴 위임의 대리인은 결재를 **누를 수는 있는데** 결재가
+ *     생길 때 나가는 **메일만** 못 받았다. 아래 3-c 묶음이 그 방향을 잰다.
+ *     🔴 그 묶음의 마지막 시험은 **두 방향의 답이 짝을 이루는지**를 본다. 한쪽
+ *     조건만 고치는 날 「메일은 오는데 눌리지 않는다」가 되고, 그 어긋남은 신고로만
+ *     드러난다.
  *
  * 🔵 표본이 비어서 공짜로 통과하는 일이 없게, 거르는 시험은 **「거르기 전에는 있었다」**
  *    를 먼저 단언한다. 이어 붙기 시험은 **두 겹이 둘 다 살아 있음**을 먼저 확인한 뒤에
@@ -235,16 +242,16 @@ describe("actingDelegateUserIdsFor", () => {
   const now = T("2026-03-15T00:00:00.000Z");
 
   test("나에게 걸린 살아 있는 위임의 **대리인**을 준다", () => {
-    assert.deepEqual(actingDelegateUserIdsFor([delegation()], A, now), [B]);
+    assert.deepEqual(actingDelegateUserIdsFor([delegation()], A, now, NO_PORTAL), [B]);
   });
 
   test("🔴 방향이 반대다 — 같은 줄을 반대로 물으면 빈 목록이다", () => {
     const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
     // 먼저 표본이 살아 있는지 — 안 그러면 아래 둘이 공짜로 통과한다.
     assert.equal(isActiveRouteDelegation(rows[0], now), true);
-    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now), [B]);
+    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now, NO_PORTAL), [B]);
     // 🔴 이 한 줄이 두 함수를 바꿔 꽂은 날 울린다. 바꿔 꽂아도 오류는 안 난다.
-    assert.deepEqual(actingDelegateUserIdsFor(rows, B, now), []);
+    assert.deepEqual(actingDelegateUserIdsFor(rows, B, now, NO_PORTAL), []);
     assert.deepEqual(delegatorUserIdsFor(rows, B, now), [A]);
     assert.deepEqual(delegatorUserIdsFor(rows, A, now), []);
   });
@@ -271,21 +278,21 @@ describe("actingDelegateUserIdsFor", () => {
     //    **넷이 A 의 줄**이다. 하나만 살아남는 것이 본론이다.
     assert.equal(rows.length, 5);
     assert.equal(rows.filter((row) => row.delegatorUserId === A).length, 4);
-    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now), [B]);
+    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now, NO_PORTAL), [B]);
   });
 
   test("🔴 되돌린 위임의 대리인은 빠진다 — 되돌림만 없었다면 들어왔을 줄이다", () => {
     const row = delegation({ delegatorUserId: A, delegateUserId: B, revokedAt: T(START) });
-    assert.deepEqual(actingDelegateUserIdsFor([{ ...row, revokedAt: null }], A, now), [B]);
-    assert.deepEqual(actingDelegateUserIdsFor([row], A, now), []);
+    assert.deepEqual(actingDelegateUserIdsFor([{ ...row, revokedAt: null }], A, now, NO_PORTAL), [B]);
+    assert.deepEqual(actingDelegateUserIdsFor([row], A, now, NO_PORTAL), []);
   });
 
   test("🔴 경계 — 끝나는 그 순간에는 이미 빠져 있다(반열린 구간)", () => {
     const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
-    assert.deepEqual(actingDelegateUserIdsFor(rows, A, T("2026-03-19T23:59:59.999Z")), [B]);
-    assert.deepEqual(actingDelegateUserIdsFor(rows, A, T(END)), []);
+    assert.deepEqual(actingDelegateUserIdsFor(rows, A, T("2026-03-19T23:59:59.999Z"), NO_PORTAL), [B]);
+    assert.deepEqual(actingDelegateUserIdsFor(rows, A, T(END), NO_PORTAL), []);
     // 시작하는 순간은 포함한다 — 경계가 **끝 한쪽**임을 못 박는다.
-    assert.deepEqual(actingDelegateUserIdsFor(rows, A, T(START)), [B]);
+    assert.deepEqual(actingDelegateUserIdsFor(rows, A, T(START), NO_PORTAL), [B]);
   });
 
   test("한 사람이 둘에게 맡길 수 있다 — 차례는 목록에 처음 나온 순서", () => {
@@ -293,7 +300,7 @@ describe("actingDelegateUserIdsFor", () => {
       delegation({ delegatorUserId: A, delegateUserId: C }),
       delegation({ delegatorUserId: A, delegateUserId: B }),
     ];
-    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now), [C, B]);
+    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now, NO_PORTAL), [C, B]);
   });
 
   test("🔴 겹치는 위임이 여럿이어도 대리인은 한 번만 — 표가 겹침을 막지 않는다", () => {
@@ -311,11 +318,11 @@ describe("actingDelegateUserIdsFor", () => {
       rows.map((row) => isActiveRouteDelegation(row, now)),
       [true, true]
     );
-    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now), [B]);
+    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now, NO_PORTAL), [B]);
   });
 
   test("위임이 하나도 없으면 빈 목록 — 그것이 정상이다", () => {
-    assert.deepEqual(actingDelegateUserIdsFor([], A, now), []);
+    assert.deepEqual(actingDelegateUserIdsFor([], A, now, NO_PORTAL), []);
   });
 
   test("🔴 이어 붙지 않는다 — A→B · B→C 라도 A 를 대신하는 사람에 C 는 없다", () => {
@@ -325,11 +332,11 @@ describe("actingDelegateUserIdsFor", () => {
     ];
     // 🔵 두 겹이 **둘 다 살아 있는** 표본인지 먼저 못 박는다. 하나라도 죽어 있으면
     //    「안 이어진다」는 공짜로 통과하고 아무것도 지키지 못한다.
-    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now), [B]);
-    assert.deepEqual(actingDelegateUserIdsFor(rows, B, now), [C]);
+    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now, NO_PORTAL), [B]);
+    assert.deepEqual(actingDelegateUserIdsFor(rows, B, now, NO_PORTAL), [C]);
     // 여기가 본론 — A 를 대신하는 사람에 C 는 없다. 알림으로 이어 붙이면 C 는
     // 누를 수도 없는 결재의 차례를 먼저 알게 된다.
-    assert.equal(actingDelegateUserIdsFor(rows, A, now).includes(C), false);
+    assert.equal(actingDelegateUserIdsFor(rows, A, now, NO_PORTAL).includes(C), false);
   });
 
   test("🔴 고리가 있어도 멈춘다 — A→B · B→A", () => {
@@ -337,13 +344,13 @@ describe("actingDelegateUserIdsFor", () => {
       delegation({ delegatorUserId: A, delegateUserId: B }),
       delegation({ delegatorUserId: B, delegateUserId: A }),
     ];
-    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now), [B]);
-    assert.deepEqual(actingDelegateUserIdsFor(rows, B, now), [A]);
+    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now, NO_PORTAL), [B]);
+    assert.deepEqual(actingDelegateUserIdsFor(rows, B, now, NO_PORTAL), [A]);
   });
 
   test("🔴 결재권자 본인은 들어 있지 않다 — `actingApproverUserIds` 와 일부러 다르다", () => {
     const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
-    assert.equal(actingDelegateUserIdsFor(rows, A, now).includes(A), false);
+    assert.equal(actingDelegateUserIdsFor(rows, A, now, NO_PORTAL).includes(A), false);
     // 본인을 맨 앞에 끼우는 쪽은 저쪽이다 — 둘을 맞대어 그 차이를 못 박는다.
     assert.equal(actingApproverUserIds(rows, A, now, NO_PORTAL)[0], A);
   });
@@ -500,6 +507,164 @@ describe("🔴 actingApproverUserIds — 승인함에 맡긴 위임까지 합친
       }),
     ];
     assert.deepEqual(actingApproverUserIds([], B, now, 아직), [B], "아직 시작 안 한 포털 위임이 듣는다");
+  });
+});
+
+// ── 3-c. 거꾸로 방향도 고지가 둘이다 (2026-11-17 — 설계 D-8 ①) ──────────
+
+/**
+ * 🔴 여기서 못 박는 것 넷. 전부 **틀려도 그 자리에서는 아무 오류가 안 난다.**
+ *
+ *  1. 포털 표의 줄이 **대리인 목록을 실제로 늘린다.** 2026-11-17 까지 이 방향만
+ *     제 표를 봤고, 그래서 승인함에서 맡긴 위임의 대리인은 결재를 **누를 수는
+ *     있는데**(정방향이 인정한다) **생길 때 나가는 메일만** 못 받았다.
+ *  2. 포털 줄도 **기간·되돌림을 본다.** 안 보면 「승인함에서는 거뒀는데 메일은
+ *     계속 온다」가 된다.
+ *  3. **같은 사람이 두 표 양쪽에 적혀 있어도 한 번만** 나온다 — 메일 두 통은 안 된다.
+ *  4. 🔴 **두 방향이 같은 규칙을 쓴다.** 아래 마지막 시험이 같은 줄을 양쪽으로 물어
+ *     맞대어 본다. 규칙을 베껴 적는 대신 **짝이 맞는지**를 재는 까닭은, 조건을 한쪽만
+ *     고치는 날 「메일은 오는데 눌리지 않는다」(또는 그 반대)가 되고 그 어긋남은
+ *     신고로만 드러나기 때문이다.
+ */
+describe("🔴 actingDelegateUserIdsFor — 승인함에 맡긴 위임까지 합친다", () => {
+  const now = T("2026-03-15T00:00:00.000Z");
+
+  test("포털 표의 줄이 대리인 목록에 들어온다 — 늘리는 쪽이 실제로 돈다", () => {
+    // 🔵 표본이 공짜로 통과하지 않게: 포털 줄을 빼면 **비어 있음**을 먼저 못 박는다.
+    assert.deepEqual(actingDelegateUserIdsFor([], A, now, NO_PORTAL), []);
+    assert.deepEqual(
+      actingDelegateUserIdsFor([], A, now, [delegation({ delegatorUserId: A, delegateUserId: B })]),
+      [B]
+    );
+  });
+
+  test("🔴 합집합이다 — A/S 제 표의 대리인과 포털 쪽 대리인이 둘 다 남는다", () => {
+    const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
+    const portal = [delegation({ delegatorUserId: A, delegateUserId: C })];
+    // 둘을 따로 재 두고(각각 한 명씩),
+    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now, NO_PORTAL), [B]);
+    assert.deepEqual(actingDelegateUserIdsFor([], A, now, portal), [C]);
+    // 함께 주면 둘 다 들어온다 — 어느 한쪽이 다른 쪽을 지우지 않는다.
+    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now, portal), [B, C]);
+  });
+
+  test("🔴 두 고지에 같은 대리인이 적혀 있어도 한 번만 — 메일이 두 통 가면 안 된다", () => {
+    const 같은줄 = delegation({ delegatorUserId: A, delegateUserId: B });
+    assert.deepEqual(actingDelegateUserIdsFor([같은줄], A, now, [같은줄]), [B]);
+  });
+
+  test("🔴 포털 줄도 기간·되돌림을 본다 — 거둔 줄·끝난 줄·아직인 줄은 아무도 안 늘린다", () => {
+    // 🔵 **같은 사람으로 살아 있는 줄을 먼저 세운다** — 안 하면 「안 늘린다」가 그
+    //    사람이 애초에 안 들어오는 구현에서도 공짜로 통과한다.
+    assert.deepEqual(
+      actingDelegateUserIdsFor([], A, now, [delegation({ delegatorUserId: A, delegateUserId: D })]),
+      [D]
+    );
+
+    const 거둠 = [
+      delegation({
+        delegatorUserId: A,
+        delegateUserId: D,
+        revokedAt: T("2026-03-12T00:00:00.000Z"),
+      }),
+    ];
+    assert.deepEqual(actingDelegateUserIdsFor([], A, now, 거둠), [], "거둔 포털 위임의 대리인이 남았다");
+
+    const 끝남 = [
+      delegation({
+        delegatorUserId: A,
+        delegateUserId: D,
+        startsAt: T("2026-03-01T00:00:00.000Z"),
+        endsAt: T("2026-03-14T00:00:00.000Z"),
+      }),
+    ];
+    assert.deepEqual(actingDelegateUserIdsFor([], A, now, 끝남), [], "끝난 포털 위임의 대리인이 남았다");
+
+    const 아직 = [
+      delegation({
+        delegatorUserId: A,
+        delegateUserId: D,
+        startsAt: T("2026-03-20T00:00:00.000Z"),
+        endsAt: T("2026-03-25T00:00:00.000Z"),
+      }),
+    ];
+    assert.deepEqual(actingDelegateUserIdsFor([], A, now, 아직), [], "아직 시작 안 한 포털 위임이 들었다");
+  });
+
+  test("🔴 고지를 갈아타도 이어 붙지 않는다 — A/S 로 A→B, 포털로 B→C", () => {
+    const rows = [delegation({ delegatorUserId: A, delegateUserId: B })];
+    const portal = [delegation({ delegatorUserId: B, delegateUserId: C })];
+    // 🔵 두 겹이 **둘 다 살아 있는** 표본인지 먼저 못 박는다 — 하나라도 죽어 있으면
+    //    「안 이어진다」가 공짜로 통과하고 아무것도 지키지 못한다.
+    assert.deepEqual(actingDelegateUserIdsFor(rows, A, now, NO_PORTAL), [B]);
+    assert.deepEqual(actingDelegateUserIdsFor([], B, now, portal), [C]);
+    // 여기가 본론 — C 는 A 의 단계를 누를 수 없는데(정방향이 막는다) 알림만 먼저
+    // 받게 되면, 자격은 없고 메일만 가는 꼴이다.
+    assert.equal(actingDelegateUserIdsFor(rows, A, now, portal).includes(C), false);
+  });
+
+  test("🔴 두 방향이 **같은 규칙**을 쓴다 — B 가 A 의 대리인이다 ⟺ A 가 B 의 자격에 들어 있다", () => {
+    // 🔴 규칙을 여기 베껴 적지 않는다(그러면 시험이 규칙의 **사본**을 재게 되고, 한쪽
+    //    함수만 고친 날에도 초록으로 통과한다). 대신 **두 함수의 답이 짝을 이루는지**를
+    //    본다 — 거르는 조건이 한쪽에서만 바뀌면 이 짝이 그 자리에서 깨진다.
+    const 사람들 = [A, B, C, D];
+    const own = [
+      delegation({ delegatorUserId: A, delegateUserId: B }),
+      delegation({ delegatorUserId: C, delegateUserId: D, revokedAt: T("2026-03-12T00:00:00.000Z") }),
+      delegation({
+        delegatorUserId: D,
+        delegateUserId: C,
+        startsAt: T("2026-03-20T00:00:00.000Z"),
+        endsAt: T("2026-03-25T00:00:00.000Z"),
+      }),
+    ];
+    const portal = [
+      delegation({ delegatorUserId: A, delegateUserId: C }),
+      delegation({
+        delegatorUserId: B,
+        delegateUserId: D,
+        startsAt: T("2026-03-01T00:00:00.000Z"),
+        endsAt: T("2026-03-14T00:00:00.000Z"),
+      }),
+    ];
+
+    // 🔵 **두 고지가 둘 다 참을 만드는 표본**인지 먼저 못 박는다. 한쪽 고지에 살아
+    //    있는 줄이 없으면 아래 맞대기는 그 고지에 대해 아무것도 재지 않는다.
+    assert.deepEqual(actingDelegateUserIdsFor(own, A, now, NO_PORTAL), [B]);
+    assert.deepEqual(actingDelegateUserIdsFor([], A, now, portal), [C]);
+
+    const moments = [
+      "2026-03-09T23:59:59.999Z",
+      START,
+      "2026-03-15T00:00:00.000Z",
+      "2026-03-19T23:59:59.999Z",
+      END,
+      "2026-03-22T00:00:00.000Z",
+    ].map(T);
+
+    let 짝이참 = 0;
+    let 짝이거짓 = 0;
+    for (const at of moments) {
+      for (const 결재권자 of 사람들) {
+        const 대리인들 = actingDelegateUserIdsFor(own, 결재권자, at, portal);
+        for (const 사람 of 사람들) {
+          if (사람 === 결재권자) continue;
+          const 대리인인가 = 대리인들.includes(사람);
+          const 자격에있나 = actingApproverUserIds(own, 사람, at, portal).includes(결재권자);
+          assert.equal(
+            대리인인가,
+            자격에있나,
+            `${at.toISOString()}: 「${사람} 가 ${결재권자} 를 대신한다」가 두 방향에서 다르다`
+          );
+          if (대리인인가) 짝이참 += 1;
+          else 짝이거짓 += 1;
+        }
+      }
+    }
+    // 🔵 둘 다 0 이 아니어야 맞대기를 실제로 한 셈이다 — 전부 거짓이면 「아무도 아무도
+    //    안 대신한다」를 양쪽에서 확인한 것뿐이다.
+    assert.ok(짝이참 > 0, "표본에 참인 짝이 하나도 없다 — 이 시험이 아무것도 안 잰다");
+    assert.ok(짝이거짓 > 0, "표본에 거짓인 짝이 하나도 없다 — 이 시험이 아무것도 안 잰다");
   });
 });
 

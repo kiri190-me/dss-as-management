@@ -316,6 +316,86 @@ export async function listAllApprovalRouteDelegations(
  */
 type Executor = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
 
+/* ------------------------------------------------------------------ */
+/* 두 고지의 줄을 **같은 규칙으로** 읽어 오는 자리 — 방향만 바꿔 쓴다    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 위임을 맡기는 고지가 둘이고(설계 B-4 — 둘 다 살려 둔다), 아래 두 함수가 그 둘을
+ * 읽는다. 🔴 **두 표의 칸 이름이 같다** — 그래서 한 함수가 양쪽을 읽을 수 있다.
+ *  · `approval_route_delegations` — A/S 화면에서 사람이 맡긴 줄.
+ *  · `portal_approval_delegations` — 통합 승인함에서 맡겨 **포털이 전파해 준** 줄.
+ */
+type DelegationPeriodTable = typeof approvalRouteDelegations | typeof portalApprovalDelegations;
+
+/**
+ * 🔴 **거르는 규칙이 적히는 자리는 여기 하나다.** 「누를 수 있나」(정방향)와 「나를
+ * 누가 대신하나」(거꾸로)는 **거르는 칸만** 다르고 나머지는 글자 하나까지 같아야 하는데,
+ * 2026-11-17 까지 둘이 제 질의를 따로 들고 있었다. 그 결과 거꾸로 방향만 포털 표를
+ * 안 읽어, **승인함에서 맡긴 위임의 대리인이 결재는 눌러지는데 메일만 못 받는** 상태가
+ * 됐다(설계 D-8 ①). 🔵 그 어긋남은 오류를 한 줄도 내지 않고 화면에도 안 남는다 —
+ * 한 벌로 묶어 두면 다음에 규칙이 바뀌는 날 둘이 함께 바뀐다.
+ *
+ * ── SQL 로 좁히는 셋은 전부 순수 함수가 **또** 거르는 조건이다 ───────────────
+ * 방향 칸 · 안 되돌림(`revoked_at IS NULL`) · 안 끝남(`ends_at > now`). 색인 칸 순서가
+ * 그대로 이 셋이고, **두 표의 색인이 같은 모양**이라 좁히는 글자도 같다. 좁히기가
+ * 지우는 줄은 순수 함수가 어차피 버리는 줄뿐이라 답이 달라지지 않는다 — **시작 시각은
+ * 일부러 SQL 에서 보지 않는다.** 한 사람에게 걸린 위임은 많아야 몇 줄이고, 색인에도 그
+ * 칸은 없다(표 쪽 🔵 주석). 아직 시작 안 한 줄은 순수 함수가 버린다.
+ *
+ * @param matchColumn 어느 칸으로 좁히는가. 🔴 **이 한 글자가 방향의 전부**다 —
+ *   `delegateUserId` 면 「내가 대신하는 줄」, `delegatorUserId` 면 「나를 대신하는 줄」.
+ *   바꿔 넣어도 오류는 안 나고 **빈 목록**이 돌아온다(그 빈 목록은 「대신할 사람이
+ *   없다」는 정상적인 답과 구별되지 않는다).
+ */
+function readLiveDelegationPeriods(
+  table: DelegationPeriodTable,
+  matchColumn: "delegatorUserId" | "delegateUserId",
+  userId: string,
+  now: Date,
+  executor: Executor
+): Promise<ApprovalRouteDelegationPeriod[]> {
+  return executor
+    .select({
+      delegatorUserId: table.delegatorUserId,
+      delegateUserId: table.delegateUserId,
+      startsAt: table.startsAt,
+      endsAt: table.endsAt,
+      revokedAt: table.revokedAt,
+    })
+    .from(table)
+    .where(and(eq(table[matchColumn], userId), isNull(table.revokedAt), gt(table.endsAt, now)));
+}
+
+/**
+ * 두 고지의 줄을 **한 순간으로** 읽어 온다 — 아래 두 공개 함수가 똑같이 쓴다.
+ *
+ * 🔴 **같은 `executor` 로 읽는다.** 두 표가 같은 DB 에 있으므로, 트랜잭션이 넘어오면
+ * 둘 다 그 안에서 읽힌다. 결재를 집는 쓰기와 같은 트랜잭션으로 읽지 않으면 읽은 직후
+ * 되돌려진 위임으로 결재가 통과하고, 그 어긋남은 오류를 내지 않는다.
+ *
+ * 🔴 **망은 타지 않는다.** 한때는 포털에 **그때그때 물어**(설계 B-3) 서버 액션이 그
+ * 답을 들고 들어왔는데, 2026-11-16 저녁에 방식이 전파로 뒤집히면서(B-12) 결재 길목의
+ * 망 호출이 통째로 없어졌다. 🔴 **여기에 망 호출을 다시 들이지 마라** — 결재 행 잠금이
+ * 포털 지연만큼 붙들리고, 포털 한 곳이 느린 날 결재가 함께 느려진다. 🔵 이 집의 층
+ * 가르기(`server/` → `db/` 한 방향)가 그것을 구조로도 막는다.
+ *
+ * 🔵 두 질의를 **함께** 던진다 — 한 표가 비는 것이 흔한데(아직 승인함을 안 쓰는 사람)
+ *    줄 세우면 그 사람에게도 왕복이 둘이 된다. 「지금」은 받은 한 값이라 두 질의가 같은
+ *    순간을 본다.
+ */
+function readLiveDelegationPeriodsFromBothSources(
+  matchColumn: "delegatorUserId" | "delegateUserId",
+  userId: string,
+  now: Date,
+  executor: Executor
+): Promise<[ApprovalRouteDelegationPeriod[], ApprovalRouteDelegationPeriod[]]> {
+  return Promise.all([
+    readLiveDelegationPeriods(approvalRouteDelegations, matchColumn, userId, now, executor),
+    readLiveDelegationPeriods(portalApprovalDelegations, matchColumn, userId, now, executor),
+  ]);
+}
+
 /**
  * 🔴 **「지금 이 사람의 자격으로 누를 수 있는 결재자 id」 전부.** 맨 앞은 언제나
  * 본인이고, 뒤에 지금 살아 있는 위임의 결재권자들이 붙는다.
@@ -325,30 +405,16 @@ type Executor = Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
  * 주석에 길게 적혀 있다.
  *
  * ── 🔴 **표 둘을 읽는다. 망은 타지 않는다** (2026-11-16, 설계 B-12) ──────────
- * 위임을 맡기는 고지가 둘이다(설계 B-4 — 둘 다 살려 둔다):
- *  · `approval_route_delegations` — A/S 화면에서 사람이 맡긴 줄.
- *  · `portal_approval_delegations` — 통합 승인함에서 맡겨 **포털이 전파해 준** 줄.
- *
- * 🔴 **그 둘은 같은 DB 의 표라서 같은 `executor` 로 읽는다** — 트랜잭션이 넘어오면
- * 둘 다 그 안에서 읽힌다. 한때는 포털에 **그때그때 물어**(설계 B-3) 서버 액션이 그
- * 답을 인자로 들고 들어왔는데, 2026-11-16 저녁에 방식이 전파로 뒤집히면서(B-12) 결재
- * 길목의 망 호출이 통째로 없어졌다. 🔴 **여기에 망 호출을 다시 들이지 마라** — 결재
- * 행 잠금이 포털 지연만큼 붙들리고, 포털 한 곳이 느린 날 결재가 함께 느려진다.
- * 🔵 이 집의 층 가르기(`server/` → `db/` 한 방향)가 그것을 구조로도 막는다.
+ * 위임을 맡기는 고지가 둘이고, 둘을 읽어 오는 일은 위
+ * `readLiveDelegationPeriodsFromBothSources` 가 한다 — 🔴 **거꾸로 방향(아래
+ * `resolveActingDelegateUserIds`)과 같은 자리를 쓴다.** 좁히는 조건을 여기 다시 적지
+ * 마라(그 함수 머리말에 까닭이 있다).
  *
  * ── 🔴 `executor` 를 꼭 넘겨라. 기본값은 **읽기 전용 자리에서만** 쓴다 ────────
  * 결재를 집는 쓰기와 **같은 트랜잭션**으로 읽지 않으면, 읽은 직후 되돌려진 위임으로
  * 결재가 통과한다. 그 어긋남은 오류를 내지 않고, 나중에 로그를 봐도 「되돌린 뒤에
  * 눌렸다」는 사실만 남아 설명할 수 없다. 기본값(`db`)은 목록·알림처럼 그 순간의
  * 답이면 충분한 자리를 위한 것이다.
- *
- * ── SQL 로 좁히는 셋은 전부 순수 함수가 **또** 거르는 조건이다 ───────────────
- * 대리인(`delegate_user_id`) · 안 되돌림(`revoked_at IS NULL`) · 안 끝남
- * (`ends_at > now`). 색인 칸 순서가 그대로 이 셋이고, **두 표의 색인이 같은 모양**이라
- * 좁히는 글자도 같다. 좁히기가 지우는 줄은 순수 함수가 어차피 버리는 줄뿐이라 답이
- * 달라지지 않는다 — **시작 시각은 일부러 SQL 에서 보지 않는다.** 한 사람에게 걸린
- * 위임은 많아야 몇 줄이고, 색인에도 그 칸은 없다(표 쪽 🔵 주석). 아직 시작 안 한 줄은
- * 순수 함수가 버린다.
  *
  * 🔴 **맡긴 사람이 지금 쓸 수 있는 계정인지는 보지 않는다.** 위임을 만들 때 검사하고
  * (mutations/approval-route-delegations.ts), 그 뒤에 그 사람이 잠기거나 비활성이
@@ -364,52 +430,21 @@ export async function resolveActingApproverUserIds(
   now: Date,
   executor: Executor = db
 ): Promise<ActingApproverUserIds> {
-  // 🔵 두 질의를 **함께** 던진다 — 한 표가 비는 것이 흔한데(아직 승인함을 안 쓰는
-  //    사람) 줄 세우면 그 사람에게도 왕복이 둘이 된다. 「지금」은 위에서 받은 한
-  //    값이라 두 질의가 같은 순간을 본다.
-  const [ownRows, portalRows] = await Promise.all([
+  // 🔴 **「내가 대신하는 줄」이라 `delegateUserId` 로 좁힌다.** 아래 거꾸로 방향과
+  //    다른 것은 이 한 글자뿐이다.
+  const [own, portal] = await readLiveDelegationPeriodsFromBothSources(
+    "delegateUserId",
+    actorUserId,
+    now,
     executor
-      .select({
-        delegatorUserId: approvalRouteDelegations.delegatorUserId,
-        delegateUserId: approvalRouteDelegations.delegateUserId,
-        startsAt: approvalRouteDelegations.startsAt,
-        endsAt: approvalRouteDelegations.endsAt,
-        revokedAt: approvalRouteDelegations.revokedAt,
-      })
-      .from(approvalRouteDelegations)
-      .where(
-        and(
-          eq(approvalRouteDelegations.delegateUserId, actorUserId),
-          isNull(approvalRouteDelegations.revokedAt),
-          gt(approvalRouteDelegations.endsAt, now)
-        )
-      ),
-    executor
-      .select({
-        delegatorUserId: portalApprovalDelegations.delegatorUserId,
-        delegateUserId: portalApprovalDelegations.delegateUserId,
-        startsAt: portalApprovalDelegations.startsAt,
-        endsAt: portalApprovalDelegations.endsAt,
-        revokedAt: portalApprovalDelegations.revokedAt,
-      })
-      .from(portalApprovalDelegations)
-      .where(
-        and(
-          eq(portalApprovalDelegations.delegateUserId, actorUserId),
-          isNull(portalApprovalDelegations.revokedAt),
-          gt(portalApprovalDelegations.endsAt, now)
-        )
-      ),
-  ]);
-
-  const own: ApprovalRouteDelegationPeriod[] = ownRows;
-  const portal: ApprovalRouteDelegationPeriod[] = portalRows;
+  );
   return actingApproverUserIds(own, actorUserId, now, portal);
 }
 
 /**
  * 🔴 **「이 결재권자를 지금 대신할 수 있는 사람」 전부.** 바로 위 함수와 **방향이
- * 반대**이고, 그것 말고는 같은 함수다 — 같은 표를 같은 셋으로 좁히고, 판정은 순수
+ * 반대**이고, 그것 말고는 같은 함수다 — **같은 읽기 함수를 같은 조건으로** 쓰고
+ * (`readLiveDelegationPeriodsFromBothSources`, 넘기는 칸 이름만 다르다), 판정은 순수
  * 함수(`actingDelegateUserIdsFor`)에 맡긴다.
  *
  * 2026-10-26 에 더했다. 쓰는 자리는 **결재가 생겼을 때 나가는 즉시 알림**이다
@@ -423,6 +458,16 @@ export async function resolveActingApproverUserIds(
  * 🔵 두 함수가 같은 표를 같은 규칙으로 읽으므로 실제로는 답이 짝을 이룬다. 한쪽만
  * 고치면 「메일은 오는데 눌리지 않는다」(또는 그 반대)가 되고 그 어긋남은 조용하니,
  * 조건을 손댈 때는 **둘을 함께** 본다.
+ * 🔴 **그 짝이 실제로 맞는지는 시험이 잰다** —
+ * `approval-route-delegations-acting.integration.test.ts` 가 같은 줄을 양쪽으로 물어
+ * 「B 가 A 의 대리인이다 ⟺ A 가 B 의 자격에 들어 있다」를 맞댄다. 한쪽 조건만 고치는
+ * 날 거기가 빨개진다.
+ *
+ * ── 🔴 고지가 **둘**이다 (2026-11-17, 설계 D-8 ①) ──────────────────────
+ * 2026-11-17 까지 이 함수는 **A/S 제 표 하나만** 읽었다. 그래서 통합 승인함에서 맡긴
+ * 위임의 대리인은 결재를 **누를 수는 있는데**(정방향이 두 표를 읽는다) **결재가 생길 때
+ * 나가는 메일만 못 받았다.** 종·화면·[승인] 단추·승인함 대기 목록은 멀쩡했으므로, 그
+ * 사람이 말해 주기 전에는 아무 데서도 드러나지 않았다.
  *
  * ── 🔴 돌려주는 목록은 **빌 수 있다** ───────────────────────────────────
  * 위 함수가 빈 적이 없는 꼴(`[string, ...string[]]`)인 것은 그 값이 `inArray` 에 그대로
@@ -430,35 +475,25 @@ export async function resolveActingApproverUserIds(
  * 사람이 없다」** 는 정상적인 답이고, 그때 알림은 지정된 한 사람에게만 간다.
  *
  * ── 🔵 이 방향에는 색인이 없다. 알고 그대로 둔다 ────────────────────────
- * 표의 색인은 `(delegate_user_id, revoked_at, ends_at)` 하나뿐이라(표 쪽 주석) 맡긴
- * 사람으로 좁히는 이 조회는 타지 못한다. 그래도 두는 까닭은 이 표가 **「지금 자리를
- * 비운 사람 수」만큼만** 자라기 때문이다 — 통째로 훑어도 몇 줄이고, 부르는 자리는
- * 결재가 생기는 순간 한 번뿐이다. 색인을 더하려면 마이그레이션이 필요하니, 느려진
- * 뒤에 **재어 보고** 더해라.
+ * 두 표의 색인은 **둘 다** `(delegate_user_id, revoked_at, ends_at)` 하나뿐이라(표 쪽
+ * 주석) 맡긴 사람으로 좁히는 이 조회는 어느 쪽도 타지 못한다. 그래도 두는 까닭은 두
+ * 표가 **「지금 자리를 비운 사람 수」만큼만** 자라기 때문이다 — 통째로 훑어도 몇 줄이고,
+ * 부르는 자리는 결재가 생기는 순간 한 번뿐이다. 색인을 더하려면 마이그레이션이
+ * 필요하니, 느려진 뒤에 **재어 보고** 더해라.
  */
 export async function resolveActingDelegateUserIds(
   delegatorUserId: string,
   now: Date,
   executor: Executor = db
 ): Promise<string[]> {
-  const rows: ApprovalRouteDelegationPeriod[] = await executor
-    .select({
-      delegatorUserId: approvalRouteDelegations.delegatorUserId,
-      delegateUserId: approvalRouteDelegations.delegateUserId,
-      startsAt: approvalRouteDelegations.startsAt,
-      endsAt: approvalRouteDelegations.endsAt,
-      revokedAt: approvalRouteDelegations.revokedAt,
-    })
-    .from(approvalRouteDelegations)
-    .where(
-      and(
-        // 🔴 위 함수가 `delegateUserId` 로 좁히는 그 자리에서 **칸만 바뀐다.** 나머지
-        //    둘은 같고, 시작 시각을 일부러 SQL 에서 안 보는 것도 같다(위 주석).
-        eq(approvalRouteDelegations.delegatorUserId, delegatorUserId),
-        isNull(approvalRouteDelegations.revokedAt),
-        gt(approvalRouteDelegations.endsAt, now)
-      )
-    );
-
-  return actingDelegateUserIdsFor(rows, delegatorUserId, now);
+  // 🔴 **「나를 대신하는 줄」이라 `delegatorUserId` 로 좁힌다.** 위 정방향과 다른 것은
+  //    이 한 글자뿐이고, 나머지(두 표 · 좁히는 조건 둘 · 같은 executor · 같은 순간)는
+  //    같은 함수가 쥐고 있다.
+  const [own, portal] = await readLiveDelegationPeriodsFromBothSources(
+    "delegatorUserId",
+    delegatorUserId,
+    now,
+    executor
+  );
+  return actingDelegateUserIdsFor(own, delegatorUserId, now, portal);
 }
