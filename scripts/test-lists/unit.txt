@@ -2072,3 +2072,14 @@ src/lib/db/schema/portal-approval-delegations-safety.test.ts
 # 글자**인가. 🔵 주소는 알림 빌더와 한 번, 글자 접두사와 한 번 맞댄다 — 알림 쪽만
 # 베끼면 둘이 함께 틀렸을 때 영영 통과한다.
 src/lib/domain/approval-history.test.ts
+
+# 🔴 결재 내역을 **통합 승인함에 내주는 통로**의 판단(C-4, 2026-11-17) — DB 없이 재는 쪽.
+# 지키는 것: 🔴 조회에 가는 것이 **되짚은 A/S id** 인가(토큰의 sub 를 그대로 넘기면 남의
+# 내역이 열린다) · 🔴 A/S 에 계정이 없는 사람이 **오류가 아니라 빈 목록**인가(포털이 세
+# 집을 모으는데 한 집이 오류를 뱉으면 나머지 둘까지 못 그린다) · 🔴 상대 이름이 relation
+# 마다 **다른 칸**에서 오는가(뒤바뀌면 「내가 나를 대신했다」가 된다) · 🔴 계약의 여덟 칸만
+# 나가는가(결재 사유가 포털로 새지 않는다) · 🔴 기간 글자에서 **시간대 없는 꼴·날짜만·`0`**
+# 을 거르는가 — 셋 다 오류 없이 틀린 답을 내고, 첫째는 개발 PC 와 컨테이너가 아홉 시간
+# 어긋난다. 통로 자체(토큰이 먼저인가 · 쿼리에서 사람을 안 읽는가)는 소스로 지킨다
+# (src/app/api/integration/route-source.test.ts 의 다섯째 묶음).
+src/lib/server/integration/portal-approval-history.test.ts

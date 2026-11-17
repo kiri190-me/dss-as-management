@@ -657,6 +657,26 @@ describe("결재 내역 — 기간", () => {
       []
     );
   });
+
+  test("🔴 8. 거꾸로 된 기간(`끝` ≤ `시작`)은 **빈 목록**이다 — 통로가 400 을 내지 않는 근거", async () => {
+    // 🔴 통합 승인함 통로(api/integration/approval-history)는 거꾸로 된 기간을
+    //    **거절하지 않는다**(2026-11-17, 세 집이 함께 정한 것 — 계약이 400 으로 적어
+    //    둔 것은 「없거나 못 읽는 값」 둘뿐이다). 그 결정이 서 있는 자리가 여기다:
+    //    거꾸로 된 구간에는 드는 줄이 없어 답이 조용히 빈 목록이다. 조건이 `>= from`
+    //    AND `< to` 라 둘이 함께 참일 수 없다.
+    const decided = await insertCaseApproval({ decidedBy: viewerId, decidedAt: T_MIDDLE });
+
+    // 🔵 표본 확인 — 바른 기간으로는 그 줄이 보인다. 아니면 아래 둘이 공짜로 통과한다.
+    assert.deepEqual(await historyIds(viewerId, { from: T_EARLY, to: T_LATE }), [decided]);
+
+    assert.deepEqual(
+      await historyIds(viewerId, { from: T_LATE, to: T_EARLY }),
+      [],
+      "거꾸로 된 기간에 줄이 나왔다"
+    );
+    // 시작과 끝이 같은 구간도 반열린 구간이라 비어 있다(폭이 0 이다).
+    assert.deepEqual(await historyIds(viewerId, { from: T_MIDDLE, to: T_MIDDLE }), []);
+  });
 });
 
 // ═══════════════════════════════════════════ 표 둘 · 갈래 셋이 한 목록으로

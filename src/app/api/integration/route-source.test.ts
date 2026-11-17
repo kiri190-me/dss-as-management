@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 /**
  * ============================================================================
- * 통합 통로 넷 — **소스로** 지킨다
+ * 통합 통로 다섯 — **소스로** 지킨다
  * ============================================================================
  * 이 라우트들은 직접 부를 수 없다(포털의 JWKS 로 서명을 검증하고 DB 를 읽는다).
  * 이 저장소가 그런 라우트를 지키는 방식대로(api/auth/sso/callback/
@@ -13,7 +13,8 @@ import { join } from "node:path";
  * lib/auth/portal-service-token.test.ts(토큰) 와
  * lib/server/integration/portal-notifications.test.ts(대상 사용자·권한) 와
  * lib/server/integration/portal-approvals.test.ts(승인함 목록) 와
- * lib/server/integration/portal-delegation-push.test.ts(위임 받아 적기).
+ * lib/server/integration/portal-delegation-push.test.ts(위임 받아 적기) 와
+ * lib/server/integration/portal-approval-history.test.ts(결재 내역).
  *
  * 여기서 지키는 것:
  *  1. 토큰 검증이 **먼저** 오고, 실패하면 아무것도 하지 않는다.
@@ -26,6 +27,10 @@ import { join } from "node:path";
  * 대상을 토큰의 `sub` 에서만 꺼내는 것이 가장 중요한 울타리였는데, 위임 통로는
  * **포털이 남의 위임을 써 주는** 자리라 대상이 몸통에 온다(토큰의 `sub` 는 부른
  * 주체다). 그 통로의 울타리는 토큰의 **쓰임새**로 옮겨가 있다 — 아래 넷째 묶음.
+ *
+ * 🔴 **다섯째(결재 내역)는 쿼리를 읽는다**(2026-11-17). 기간을 받아야 해서인데, 2번은
+ * 그대로 살아 있다 — 읽는 자리가 **한 함수**뿐이고 그 함수가 돌려주는 것은 기간뿐이라
+ * 사람이 흘러들 자리가 타입에 없다. 아래 다섯째 묶음이 그 「한 자리」를 글자로 센다.
  * ============================================================================
  */
 
@@ -51,6 +56,13 @@ function codeOnly(relative: string): string {
 }
 
 const delegations = codeOnly("src/app/api/integration/delegations/route.ts");
+
+/**
+ * 🔴 결재 내역 통로도 **주석을 걷어낸 코드만** 본다. 이 통로의 머리말에는 계약이
+ * 통째로 적혀 있어(`?sub=` 를 붙여도 소용없다는 설명까지 글자로 나온다) 주석을 둔 채로
+ * 세면 아래 「없어야 한다」가 영영 실패한다.
+ */
+const history = codeOnly("src/app/api/integration/approval-history/route.ts");
 
 describe("통합 알림 통로", () => {
   test("🔴 토큰 검증이 먼저다 — 실패하면 401 로 끝나고 조회에 닿지 않는다", () => {
@@ -354,5 +366,119 @@ describe("결재권 위임을 받아 적는 통로", () => {
 
   test("응답이 캐시되지 않는다 — 재시도가 옛 답을 받으면 안 된다", () => {
     assert.match(delegations, /"cache-control": "no-store"/);
+  });
+});
+
+describe("결재 내역 통로", () => {
+  // 🔴 「이 사람이 이 기간에 한 결재」를 내주는 통로(2026-11-17, 설계 C-4). 판정은
+  // 실제로 돌려 본다(lib/server/integration/portal-approval-history.test.ts) — 여기서는
+  // **라우트가 그 판정을 우회하지 않는가**만 글자로 센다.
+  //
+  // 🔵 이 묶음도 **주석을 걷어낸 소스**를 본다(codeOnly). 표본이 비지 않았는지 먼저
+  // 확인한다 — 걷어내다 통째로 날리면 아래 「없어야 한다」가 전부 공짜로 통과한다.
+
+  test("🔵 표본이 비어 있지 않다 — 주석을 걷어낸 뒤에도 라우트 코드가 남아 있다", () => {
+    assert.ok(history.trim().length > 500, "주석을 걷어내니 아무것도 안 남았다");
+    assert.ok(!history.includes("============"), "주석이 덜 걷혔다");
+  });
+
+  test("🔴 토큰 검증이 먼저다 — 실패하면 401 로 끝나고 기간도 읽지 않는다", () => {
+    const verifyAt = history.indexOf("await verifyPortalServiceToken(");
+    const rejectAt = history.indexOf("if (!verified.ok) {");
+    const periodAt = history.indexOf("parseApprovalHistoryPeriod(");
+    const workAt = history.indexOf("buildPortalApprovalHistory({");
+    assert.ok(verifyAt > 0, "검증하는 자리를 찾지 못했다");
+    assert.ok(rejectAt > verifyAt, "검증 결과를 확인하지 않는다");
+    assert.ok(periodAt > rejectAt, "거절하기 전에 쿼리를 읽는다");
+    assert.ok(workAt > periodAt, "기간도 모르는 채 내역을 뽑는다");
+    assert.match(history, /status: 401/);
+    // 토큰을 꺼내는 자리도 `Authorization` 머리말 하나다 — 쿼리로 받으면 그 값이
+    // 접근 로그에 그대로 남는다.
+    assert.match(history, /readBearerToken\(request\.headers\.get\("authorization"\)\)/);
+  });
+
+  test("🔴 대상 사용자는 토큰에서만 온다 — ?sub= 를 붙여도 읽을 자리가 없다", () => {
+    // 이게 가장 중요한 울타리다. 뚫리면 토큰 하나로 **아무의 결재 내역이나** 열린다.
+    for (const forbidden of [
+      'get("sub")',
+      'get("user")',
+      'get("userId")',
+      'get("viewer")',
+      "params.sub",
+      "request.url",
+      "request.json",
+      "getUserById",
+    ]) {
+      assert.ok(!history.includes(forbidden), `부르는 쪽이 대상을 고를 자리가 있다: ${forbidden}`);
+    }
+    assert.match(history, /subject: verified\.subject/);
+  });
+
+  test("🔴 쿼리를 읽는 자리는 **기간 하나**뿐이다 — 그 함수는 기간만 돌려준다", () => {
+    // 옆 통로 셋은 쿼리를 아예 안 읽는 것이 울타리였다. 여기는 기간 때문에 읽어야
+    // 하므로, 「읽는 자리가 하나」가 그 자리를 대신한다. 입구가 둘이 되는 순간
+    // 두 번째 입구에 무엇이 실려 오는지 아무도 세지 않게 된다.
+    const reads = history.match(/searchParams/g) ?? [];
+    assert.equal(reads.length, 1, "쿼리를 읽는 자리가 하나가 아니다");
+    assert.match(history, /parseApprovalHistoryPeriod\(request\.nextUrl\.searchParams\)/);
+  });
+
+  test("🔴 기간을 라우트가 직접 해석하지 않는다 — 세 집이 같은 글자를 같게 읽어야 한다", () => {
+    // 모양 검사(`0` 도 Date 는 읽는다)와 반열린 구간의 뜻이 그 함수 안에 있고 단위
+    // 시험이 붙어 있다. 여기서 한 줄이라도 다시 적으면 판정이 두 벌이 된다.
+    for (const forbidden of ["new Date(", "Date.parse", "toISOString", "setDate("]) {
+      assert.ok(!history.includes(forbidden), `라우트가 기간을 직접 다룬다: ${forbidden}`);
+    }
+  });
+
+  test("🔴 기간을 못 읽으면 400 `invalid_period` — 글자가 세 집의 계약이다", () => {
+    assert.match(history, /\{ error: "invalid_period" \}/);
+    assert.match(history, /status: 400/);
+  });
+
+  test("🔴 기준 주소는 환경에서 온다 — Host 머리말을 읽지 않는다", () => {
+    assert.match(history, /baseUrl: getAppBaseUrl\(\)/);
+    for (const forbidden of ['headers.get("host")', '"x-forwarded-host"', "request.url"]) {
+      assert.ok(!history.includes(forbidden), `부르는 쪽이 정하는 주소를 쓴다: ${forbidden}`);
+    }
+  });
+
+  test("🔴 「무엇이 내 내역인가」를 새로 쓰지 않는다 — 조회 하나를 그대로 넘긴다", () => {
+    assert.match(history, /listHistory: listApprovalHistoryForUser/);
+    // 🔴 열쇠 변환도 옆 통로 둘이 쓰는 조회 그대로다(소프트 삭제된 계정을 뺀다).
+    assert.match(history, /findActor: getUserBySsoSubject/);
+    for (const forbidden of ["db.select", "drizzle-orm", '=== "ADMIN"', '=== "SUPER_ADMIN"', "role ==="]) {
+      assert.ok(!history.includes(forbidden), `라우트가 직접 판정한다: ${forbidden}`);
+    }
+  });
+
+  test("알림 설정용 토큰으로는 열리지 않는다", () => {
+    // 🔴 지금은 알림 읽기 토큰을 그대로 요구한다(라우트 머리말의 까닭 — 쓰임새 글자는
+    // 포털과의 약속이라 `dss-auth` 가 먼저 구워야 바꿀 수 있다). 승인함 통로를 옮기는
+    // 날 이 줄도 함께 바뀐다.
+    assert.match(history, /PORTAL_TOKEN_PURPOSES\.notificationsRead/);
+    for (const forbidden of [
+      "notificationSettingsRead",
+      "notificationSettingsWrite",
+      "delegationsWrite",
+    ]) {
+      assert.ok(!history.includes(forbidden), `다른 통로의 토큰을 받는다: ${forbidden}`);
+    }
+  });
+
+  test("🔴 읽기 전용이다 — 내역을 고치는 길이 없다", () => {
+    for (const method of [
+      "export async function POST",
+      "export async function PUT",
+      "export async function PATCH",
+      "export async function DELETE",
+    ]) {
+      assert.ok(!history.includes(method), `쓰는 메서드가 생겼다: ${method}`);
+    }
+    assert.match(history, /export async function GET/);
+  });
+
+  test("응답이 캐시되지 않는다 — 기간을 바꿔 물었는데 옛 답이 오면 안 된다", () => {
+    assert.match(history, /"cache-control": "no-store"/);
   });
 });
