@@ -2066,3 +2066,9 @@ src/lib/server/integration/portal-delegation-push.test.ts
 # 사람 참조 둘이 restrict 인가 · 「누가 세웠나·거뒀나」 칸이 없는가(그 사람은 A/S 계정이
 # 없을 수 있다) · SQL 에 $1 이 없는가.
 src/lib/db/schema/portal-approval-delegations-safety.test.ts
+
+# 🔴 결재 내역 한 줄의 모양(C-4, 2026-11-17) — DB 없이 재는 쪽. 셋을 가르는 규칙
+# (직접 · 내가 대신 · 내 자리를 남이)과, 제목·결재 이름·주소가 **결과 알림(종)과 같은
+# 글자**인가. 🔵 주소는 알림 빌더와 한 번, 글자 접두사와 한 번 맞댄다 — 알림 쪽만
+# 베끼면 둘이 함께 틀렸을 때 영영 통과한다.
+src/lib/domain/approval-history.test.ts

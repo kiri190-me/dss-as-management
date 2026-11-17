@@ -1050,14 +1050,25 @@ function approvalOutcomeKeySuffix(target: ApprovalOutcomeTarget): string {
   return `${APPROVAL_OUTCOME_KEY_TABLE_TAG[target.source]}:${target.approvalId}`;
 }
 
-function approvalOutcomeSubject(target: ApprovalOutcomeTarget): string {
+/**
+ * 결재 한 건을 사람이 알아보는 글자 — 인수번호 · 발행번호 · 품명.
+ *
+ * 🔵 **밖으로 연 까닭**(2026-11-17): 결재 **내역** 조회가 같은 글자를 쓴다
+ * (domain/approval-history.ts). 거기서 다시 적으면 「기타건 품명이 비면 무엇으로
+ * 메우나」 같은 규칙이 두 벌이 되고, 둘이 갈려도 화면에는 아무 표시가 없다.
+ */
+export function approvalOutcomeSubject(target: ApprovalOutcomeTarget): string {
   if (target.source === "REPAIR_CASE") return target.intakeNumber;
   if (target.source === "QUOTE") return target.quoteNumber;
   // 🔴 기타건만 비어 올 수 있다 — 메우는 자리는 한 곳이다(domesticOrderApprovalSubject).
   return domesticOrderApprovalSubject(target.modelName);
 }
 
-function approvalOutcomeName(target: ApprovalOutcomeTarget): string {
+/**
+ * 무슨 결재인가 — 「수리 검수 승인」·「최종 출하 승인」·「견적서 승인」·「기타건
+ * 최종 출하 승인」. 🔵 밖으로 연 까닭은 바로 위 approvalOutcomeSubject 와 같다.
+ */
+export function approvalOutcomeName(target: ApprovalOutcomeTarget): string {
   if (target.source === "REPAIR_CASE") return APPROVAL_TYPE_LABELS[target.approvalType];
   if (target.source === "QUOTE") return QUOTE_APPROVAL_LABEL;
   // 🔴 글자를 여기서 새로 적지 않는다 — 결재선 용도 이름표 한 곳에서 온다
@@ -1078,8 +1089,15 @@ function approvalOutcomeDomesticOrderHref(
   return domesticOrderDetailHrefs(target.domesticOrderId).approval;
 }
 
-/** 결과 알림 한 줄이 누르면 갈 곳 — 세 갈래가 각자 제 화면으로 간다. */
-function approvalOutcomeHref(target: ApprovalOutcomeTarget): string {
+/**
+ * 결과 알림 한 줄이 누르면 갈 곳 — 세 갈래가 각자 제 화면으로 간다.
+ *
+ * 🔴 **밖으로 연 까닭**(2026-11-17): 결재 **내역** 조회가 같은 주소를 쓴다
+ * (domain/approval-history.ts). 주소만은 절대로 베껴 적으면 안 되는 자리다 —
+ * 기타건은 같은 표의 행인데 접수 건 헬퍼를 쓰면 404 이고, 그 404 는 **포털
+ * 화면에서만** 보인다(바로 위 approvalOutcomeDomesticOrderHref 의 경고).
+ */
+export function approvalOutcomeHref(target: ApprovalOutcomeTarget): string {
   if (target.source === "REPAIR_CASE") return repairCaseDetailHrefs(target.repairCaseId).approval;
   if (target.source === "QUOTE") return approvalOutcomeQuoteHref(target);
   return approvalOutcomeDomesticOrderHref(target);

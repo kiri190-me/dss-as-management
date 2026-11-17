@@ -1,0 +1,4 @@
+CREATE INDEX "repair_case_approvals_decided_by_user_id_decided_at_idx" ON "repair_case_approvals" USING btree ("decided_by_user_id","decided_at");--> statement-breakpoint
+CREATE INDEX "repair_case_approvals_delegated_from_user_id_decided_at_idx" ON "repair_case_approvals" USING btree ("delegated_from_user_id","decided_at");--> statement-breakpoint
+CREATE INDEX "quote_approvals_decided_by_user_id_decided_at_idx" ON "quote_approvals" USING btree ("decided_by_user_id","decided_at");--> statement-breakpoint
+CREATE INDEX "quote_approvals_delegated_from_user_id_decided_at_idx" ON "quote_approvals" USING btree ("delegated_from_user_id","decided_at");

@@ -558,3 +558,12 @@ src/lib/db/mutations/portal-approval-delegations.integration.test.ts
 # 구간이라 ends_at 그 순간은 이미 끝난 것인가 · 🔴 아직 시작 안 한 줄도 살아 있는
 # 쪽인가(빼면 맡겨 둔 위임이 시작 전까지 화면에서 사라진다) · 남의 줄이 안 나오는가.
 src/lib/db/queries/portal-approval-delegations.integration.test.ts
+
+# 🔴 결재 내역 — 「이 사람이 이 기간에 한/대신한 결재」(C-4, 2026-11-17). 통합 승인함이
+# 쓸 조회이고, 화면은 이 집에 없다. 지키는 것: 🔴 **셋이 갈리는가**(직접 · 내가 대신 ·
+# 내 자리를 남이) — 같은 줄 하나가 보는 사람에 따라 뒤의 둘로 갈린다 · 🔴 **남의 결재가
+# 안 새는가**(제삼자에게 0건 — 없으면 「인자를 받자마자 전부 여는」 구현도 통과한다) ·
+# 🔴 **반열린 `[시작, 끝)`** 의 두 경계 · 🔴 아직 안 누른 줄이 빠지는가(그 조건이 실제로
+# 무는지는 `delegated_from` 만 채운 REQUESTED 줄로만 잴 수 있다) · 표 둘·갈래 셋이 한
+# 목록으로 합쳐지고 주소가 갈래마다 제 것인가(기타건은 `/domestic-orders/`).
+src/lib/db/queries/approval-history.integration.test.ts
