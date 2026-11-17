@@ -159,3 +159,36 @@ export function getSsoEndSessionUrl(): string {
 export function getSsoPortalUrl(): string {
   return `${getSsoIssuer()}/apps`;
 }
+
+/**
+ * 통합 승인함(dss-approvals)의 **결재권 위임 화면** 주소. 값이 없으면 `null`.
+ *
+ * ── 🔴 왜 `SSO_ISSUER` 에서 뽑지 않는가 ─────────────────────────────────
+ * 바로 위 `getSsoPortalUrl()` 은 포털(dss-auth) 자신의 한 화면이라 발행자 주소에
+ * 경로만 붙이면 된다. 🔴 **승인함은 다른 앱이고 다른 포트다**(개발 3900). 포털
+ * 주소에 `/delegations` 를 붙이면 포털에는 없는 경로라 404 가 나고, 그것은
+ * 「위임 화면이 비었다」와 구별되지 않는다.
+ *
+ * ── 🔴 이름이 `APPROVALS_BASE_URL` 로 고정이다 ───────────────────────────
+ * A/S·재고관리·휴가 **세 집이 같은 이름**을 쓰기로 했다. 집마다 다르게 적으면
+ * 배포할 때 어느 집에 무엇을 넣었는지 아무도 못 센다.
+ *
+ * ── 🔴 값이 없으면 던지지 않고 `null` 이다 ───────────────────────────────
+ * 위 `getSsoClientIdOrEmpty()` 와 같은 판단이다. 이 값을 쓰는 곳은 [결재권 위임]
+ * 화면의 **안내 한 줄**뿐이고, 그 화면은 **누구에게나 늘 보인다**. 던지면 설정이
+ * 빠진 기계(데모 모드 · 아직 승인함을 안 붙인 서버)에서 화면이 통째로 깨진다 —
+ * 링크 하나 때문에 위임 목록 전부를 잃는 것은 값이 맞지 않는다.
+ * 🔵 **물러서는 모습은 「링크 없음」이지 「안내 없음」이 아니다.** 화면은 글자로
+ * 「통합 승인함에서 거둘 수 있습니다」를 그대로 말한다(ApprovalRouteDelegation
+ * Section.tsx) — 어디로 가야 하는지는 알려 주고 누를 곳만 없다.
+ *
+ * 🔴 주소를 코드에 박지 않는다. 박으면 주소가 바뀌는 날 **오류 없이 엉뚱한 데로**
+ * 간다 — 사람은 「승인함이 비었다」로 읽고 원인을 찾을 단서가 없다.
+ */
+export function getApprovalsDelegationUrlOrNull(): string | null {
+  const raw = process.env.APPROVALS_BASE_URL;
+  if (raw === undefined || raw.trim() === "") return null;
+  // 뒤의 슬래시를 떼어 낸다 — 안 떼면 `…//delegations` 가 되고, 서버에 따라
+  // 그대로 404 다. getAppBaseUrl() 이 같은 자리에서 같은 일을 한다.
+  return `${raw.trim().replace(/\/+$/, "")}/delegations`;
+}

@@ -15,6 +15,7 @@ import type {
   ApprovalRouteDelegateCandidate,
   ApprovalRouteDelegationRow,
 } from "@/lib/db/queries/approval-route-delegations";
+import type { PortalApprovalDelegationsView } from "@/lib/db/queries/portal-approval-delegations";
 import { deriveApprovalRouteDelegationDisplayStatus } from "@/lib/domain/approval-route-delegation";
 import {
   APPROVAL_ROUTE_DELEGATION_STATUS_LABELS,
@@ -60,8 +61,45 @@ import type { ActingUser } from "@/lib/domain/local/approval/transitions";
  * 🔴 **그 묶음의 자료는 권한이 없으면 아예 안 내려온다.** 화면에서 가리는 것이
  * 아니라 없는 것이다 — 판정은 조회 함수 자신이 한다
  * (queries/approval-route-delegations.ts 의 listAllApprovalRouteDelegations).
+ *
+ * ── 2026-11-17: 네 번째 묶음 「통합 승인함에서 맡긴 결재권 위임」 ────────────
+ * 🔴 **출처가 둘이 됐다**(설계 B-4 — 둘 다 살려 둔다). 위의 세 묶음은 전부
+ * `approval_route_delegations`(이 화면에서 사람이 맡긴 줄)이고, 네 번째만
+ * `portal_approval_delegations`(통합 승인함에서 맡겨 포털이 전파해 준 줄)다.
+ *
+ * 그 전에는 **승인함에서 맡긴 위임이 이 화면 어디에도 안 보였다.** 전파는 되고
+ * 결재 판정도 듣는데(resolveActingApproverUserIds 가 2026-11-16 부터 표 둘을
+ * 읽는다) 그리는 코드가 없어서, 사용자는 승인함에서 맡기고 A/S 를 열어 「위임되었다는
+ * 내용이 안 뜬다」를 봤다.
+ *
+ * 🔴 **섞지 않고 따로 둔 까닭**(설계 D-2 가 경고한 자리): 두 출처는 **되돌리는
+ * 자리가 다르다.** 한 표에 섞으면 줄마다 [되돌리기]가 붙었다 말았다 하고, 사람은
+ * 그것을 고장으로 읽는다. 묶음을 가르면 「여기서 맡긴 것」과 「승인함에서 맡긴 것」이
+ * 머리글 하나로 갈리고, 단추 판정은 **묶음 단위**가 된다 — 네 번째 묶음은
+ * `renderRevokeAction` 을 아예 부르지 않는다. 그래도 줄만 떼어 봤을 때 출처를 알 수
+ * 있도록 **칸 하나(「출처」)를 줄마다** 둔다.
+ *
+ * 🔴 **그 묶음에는 [되돌리기]가 없다.** 승인함에서 맡긴 줄을 여기서 거두면 포털은
+ * 모르므로 다음 전파 한 번에 되살아나고, 사람은 **거뒀다고 믿는데 안 거둬진** 상태가
+ * 된다(표 머리말 · 설계 B-12 의 3번). 대신 **어디로 가야 하는지**를 적어 준다 —
+ * 주소는 환경변수에서 오고(`APPROVALS_BASE_URL`), **없으면 링크 없이 글자만** 뜬다.
  * ============================================================================
  */
+
+/**
+ * 기간·상태를 그리는 데 필요한 **딱 세 칸**. 두 출처의 줄이 이 모양에서 만난다 —
+ * A/S 쪽 `ApprovalRouteDelegationRow` 와 승인함 쪽 `PortalApprovalDelegationRow` 는
+ * 나머지 칸이 서로 다르다(저쪽에는 「지정자」도 「되돌린 사람」도 **칸 자체가 없다**).
+ *
+ * 🔴 **합친 타입이 아니라 좁힌 타입이다.** `A | B` 로 받으면 함수 안에서 어느 쪽인지
+ * 가려야 하고, 그 가지가 늘면 같은 날짜가 출처마다 다른 딱지로 보이는 날이 온다.
+ * 딱지를 가리는 도메인 함수도 같은 세 칸만 받는다
+ * (domain/approval-route-delegation.ts 의 deriveApprovalRouteDelegationDisplayStatus).
+ */
+type DelegationPeriodRow = Pick<
+  ApprovalRouteDelegationRow,
+  "startsAt" | "endsAt" | "revokedAt"
+>;
 
 function formatTimestamp(date: Date): string {
   return date.toLocaleString("ko-KR", {
@@ -78,12 +116,35 @@ function toDatetimeLocalValue(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/**
+ * 「이 줄은 통합 승인함에서 온 것」 — **줄마다** 적는 딱지.
+ *
+ * 🔴 묶음 머리글만으로는 모자란다. 표는 가로로 스크롤되고 좁은 폭에서는 카드로
+ * 내려가서, 줄 하나를 보고 있을 때 머리글이 화면 밖에 있는 일이 흔하다. 출처를
+ * 못 읽으면 [되돌리기]가 없는 것이 **고장인지 규칙인지** 구별되지 않는다
+ * (설계 D-2 가 「되돌리려 할 때 찾지 못한다」로 적어 둔 바로 그 자리다).
+ *
+ * 🔵 상태 딱지와 **다른 모양**(테두리만, 채우지 않음)인 것은 일부러다. 같은 칠한
+ * 알약을 한 줄에 둘 두면 둘 다 상태로 읽힌다. 색 이름은 이 파일이 이미 쓰는
+ * `zinc` 뿐이다 — 새 색을 들이면 이 저장소에서 어떻게 풀리는지 화면을 띄워 봐야
+ * 안다(주석에 적힌 가짜 클래스가 전 페이지를 깨뜨린 적이 있다).
+ */
+function renderPortalSource() {
+  return (
+    <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-zinc-300 px-2 py-0.5 text-xs font-medium text-zinc-600 dark:border-zinc-600 dark:text-zinc-300">
+      통합 승인함
+    </span>
+  );
+}
+
 export default function ApprovalRouteDelegationSection({
   actingUser,
   canManageRepresentatives,
   allUsers,
   routeDelegations,
   allRouteDelegations,
+  portalDelegations,
+  approvalsDelegationUrl,
 }: {
   actingUser: ActingUser;
   /**
@@ -123,6 +184,30 @@ export default function ApprovalRouteDelegationSection({
    * null 로 옮겨 적을 뿐이다. 그래서 이 화면에 권한 판정이 한 줄도 없다.
    */
   allRouteDelegations: AllApprovalRouteDelegationsView | null;
+  /**
+   * 🔴 **통합 승인함에서 맡긴 줄.** 위 셋과 **다른 표**다
+   * (queries/portal-approval-delegations.ts — `portal_approval_delegations`).
+   *
+   * 🔴 **늘 내려온다. null 이 없다** — 보는 사람 자신이 맡겼거나 맡은 줄뿐이라
+   * 권한으로 가릴 것이 없고(위 `allRouteDelegations` 와 다른 점이다), 비어 있는
+   * 것이 정상이다. 아직 승인함을 안 쓰는 사람에게는 세 목록이 전부 빈 채로 온다.
+   *
+   * 🔴 **이 화면은 이 자료를 읽기만 한다.** 지정도 철회도 승인함의 일이라 서버
+   * 액션이 아예 없다 — 여기서 거두면 포털은 모르고, 다음 전파 한 번에 되살아난다.
+   */
+  portalDelegations: PortalApprovalDelegationsView;
+  /**
+   * 통합 승인함의 **결재권 위임 화면** 주소. 🔴 **`null` 이면 링크를 안 그린다 —
+   * 안내 글자는 그대로 남는다**(config/sso.ts 의 getApprovalsDelegationUrlOrNull).
+   *
+   * 환경변수(`APPROVALS_BASE_URL`)가 없는 기계가 있다. 그때 화면이 깨지거나
+   * 안내가 통째로 사라지면, 승인함에서 맡긴 위임을 **어디서 거둬야 하는지** 알
+   * 길이 없어진다 — 여기서는 거둘 수 없고 그 사실만 적혀 있게 되기 때문이다.
+   *
+   * 🔴 주소를 화면에 글자로 박지 않는다. 박으면 주소가 바뀌는 날 오류 없이
+   * 엉뚱한 데로 간다(이 화면의 포털 링크 관행 — RepresentativeManagementScreen.tsx).
+   */
+  approvalsDelegationUrl: string | null;
 }) {
   const router = useRouter();
 
@@ -150,6 +235,10 @@ export default function ApprovalRouteDelegationSection({
   // 쌓이기만 하고(줄을 지우는 길이 없다) 할 수 있는 일도 없어서, 펼쳐야 보이는 쪽이
   // 맞다. 조회가 상한까지 걸어 두므로 펼쳐도 끝없이 길어지지는 않는다.
   const [showFinished, setShowFinished] = useState(false);
+  // 🔵 승인함에서 온 줄의 접기는 **따로** 기억한다. 한 상태를 둘이 나눠 쓰면 한쪽을
+  // 펴려다 다른 쪽까지 펴지고, 두 묶음은 서로 다른 때 들여다보는 것이라 그 묶음이
+  // 쓸모가 없다. 두 묶음이 같은 글자(「끝난 위임 보기」)를 쓰므로 더 헷갈린다.
+  const [showPortalFinished, setShowPortalFinished] = useState(false);
 
   // 🔴 거르는 조건은 **표의 CHECK 와 같은 하나**뿐이다(`…_different_users`: 맡긴
   // 사람과 대신하는 사람이 같은 줄은 뜻이 없다). 보는 사람 자신을 여기서 빼지
@@ -199,14 +288,14 @@ export default function ApprovalRouteDelegationSection({
     router.refresh();
   }
 
-  function periodText(delegation: ApprovalRouteDelegationRow): string {
+  function periodText(delegation: DelegationPeriodRow): string {
     // 🔴 끝은 **포함하지 않는다**(반열린 구간). 화면에 적는 것은 저장된 시각 그대로고,
     // 「9월 30일까지」를 10월 1일 0시로 적는 것은 사람의 몫이다 — 여기서 하루를 빼
     // 보여 주면 저장된 값과 보이는 값이 갈려 다음에 고칠 때 또 하루가 밀린다.
     return `${formatTimestamp(delegation.startsAt)} ~ ${formatTimestamp(delegation.endsAt)}`;
   }
 
-  function renderStatus(delegation: ApprovalRouteDelegationRow) {
+  function renderStatus(delegation: DelegationPeriodRow) {
     const displayStatus = deriveApprovalRouteDelegationDisplayStatus(delegation, now);
     return (
       <span
@@ -634,6 +723,240 @@ export default function ApprovalRouteDelegationSection({
             </div>
           )}
         </>
+      )}
+
+      {/* ════════════════════════════════════════════════════════════════
+          네 번째 묶음 — 통합 승인함에서 맡긴 결재권 위임 (2026-11-17)
+          🔴 위 셋과 **다른 표**다. 자료는 늘 내려오고(권한으로 가릴 남의 줄이
+          없다) 비어 있는 것이 정상이라, `allRouteDelegations` 처럼 자료로
+          여닫지 않는다 — 아직 승인함을 안 쓰는 사람에게 묶음이 통째로 사라지면
+          「승인함에서 맡기면 여기 뜬다」를 알 길이 없다.
+          ════════════════════════════════════════════════════════════════ */}
+      <h3 className="mt-6 border-t border-zinc-200 pt-5 text-xs font-semibold text-zinc-900 dark:border-zinc-800 dark:text-zinc-50">
+        통합 승인함에서 맡긴 결재권 위임
+      </h3>
+      {/* 🔴 두 출처를 **글자로** 갈라 준다. 위의 목록과 아래 목록이 어느 자리에서
+          맡긴 것인지 적어 두지 않으면, 되돌리려 할 때 어디를 열어야 할지 모른다
+          (설계 D-2). 되돌리기 단추가 아래에만 없는 까닭도 같은 한 줄이 말해 준다. */}
+      <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+        위의 목록은 이 화면에서 맡긴 것이고, 아래는 통합 승인함에서 맡긴 것입니다. 아래 줄은
+        여기서 되돌릴 수 없습니다 —{" "}
+        {approvalsDelegationUrl ? (
+          // 🔴 새 탭으로 열지 않는다 — 이 저장소의 포털 링크 관행이다
+          //    (이 화면 맨 아래의 「알림 설정 열기」도 같은 창에서 연다).
+          <a
+            href={approvalsDelegationUrl}
+            className="font-medium text-zinc-700 underline underline-offset-2 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"
+          >
+            통합 승인함에서 거둘 수 있습니다
+          </a>
+        ) : (
+          // 🔴 주소가 없는 기계에서도 **갈 곳은 말해 준다.** 안내까지 사라지면
+          //    「되돌릴 수 없다」만 남아, 어디서 거둬야 하는지 알 길이 없다.
+          <span>통합 승인함에서 거둘 수 있습니다</span>
+        )}
+        .
+      </p>
+
+      <h4 className="mt-4 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+        승인함에서 내가 맡긴 것
+      </h4>
+      {portalDelegations.given.length === 0 ? (
+        <p className="mt-2 rounded-lg border border-zinc-200 px-3 py-6 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+          통합 승인함에서 맡긴 결재권이 없습니다.
+        </p>
+      ) : (
+        <div className="mt-2">
+          <ResponsiveList
+            listId="portal-approval-delegations-given"
+            table={
+              <table className="w-full min-w-[640px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+                    <th scope="col" className="py-2 px-3 font-medium">대리 결재자</th>
+                    <th scope="col" className="py-2 px-3 font-medium">기간</th>
+                    <th scope="col" className="py-2 px-3 font-medium">상태</th>
+                    <th scope="col" className="py-2 px-3 font-medium">출처</th>
+                    <th scope="col" className="py-2 px-3 font-medium">사유</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {portalDelegations.given.map((delegation) => (
+                    <tr
+                      key={delegation.id}
+                      className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800"
+                    >
+                      <td className="py-2 px-3 whitespace-nowrap text-zinc-900 dark:text-zinc-50">{delegation.delegateName}</td>
+                      <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{periodText(delegation)}</td>
+                      <td className="py-2 px-3">{renderStatus(delegation)}</td>
+                      <td className="py-2 px-3">{renderPortalSource()}</td>
+                      <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{delegation.reason || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            }
+            cards={
+              <ul className={LIST_CARD_GRID}>
+                {portalDelegations.given.map((delegation) => (
+                  <ListCard
+                    key={delegation.id}
+                    title={`${delegation.delegatorName} → ${delegation.delegateName}`}
+                    badge={renderStatus(delegation)}
+                    fields={[
+                      { label: "기간", value: periodText(delegation) },
+                      { label: "출처", value: renderPortalSource() },
+                      { label: "사유", value: delegation.reason },
+                    ]}
+                  />
+                ))}
+              </ul>
+            }
+          />
+        </div>
+      )}
+
+      <h4 className="mt-4 text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+        승인함에서 내가 대신하고 있는 것
+      </h4>
+      {portalDelegations.received.length === 0 ? (
+        <p className="mt-2 rounded-lg border border-zinc-200 px-3 py-6 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+          통합 승인함에서 맡은 결재권이 없습니다.
+        </p>
+      ) : (
+        <div className="mt-2">
+          <ResponsiveList
+            listId="portal-approval-delegations-received"
+            table={
+              <table className="w-full min-w-[640px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+                    <th scope="col" className="py-2 px-3 font-medium">결재권자</th>
+                    <th scope="col" className="py-2 px-3 font-medium">기간</th>
+                    <th scope="col" className="py-2 px-3 font-medium">상태</th>
+                    <th scope="col" className="py-2 px-3 font-medium">출처</th>
+                    <th scope="col" className="py-2 px-3 font-medium">사유</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {portalDelegations.received.map((delegation) => (
+                    <tr
+                      key={delegation.id}
+                      className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800"
+                    >
+                      <td className="py-2 px-3 whitespace-nowrap text-zinc-900 dark:text-zinc-50">{delegation.delegatorName}</td>
+                      <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{periodText(delegation)}</td>
+                      <td className="py-2 px-3">{renderStatus(delegation)}</td>
+                      <td className="py-2 px-3">{renderPortalSource()}</td>
+                      <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{delegation.reason || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            }
+            cards={
+              <ul className={LIST_CARD_GRID}>
+                {portalDelegations.received.map((delegation) => (
+                  <ListCard
+                    key={delegation.id}
+                    title={`${delegation.delegatorName} → ${delegation.delegateName}`}
+                    badge={renderStatus(delegation)}
+                    fields={[
+                      { label: "기간", value: periodText(delegation) },
+                      { label: "출처", value: renderPortalSource() },
+                      { label: "사유", value: delegation.reason },
+                    ]}
+                  />
+                ))}
+              </ul>
+            }
+          />
+        </div>
+      )}
+
+      {/* 끝난 줄은 접어 둔다 — 「모두의」 묶음과 같은 판단이다(쌓이기만 하고 할 수
+          있는 일이 없다). 🔵 여기서는 두 방향을 한 목록에 담는다: 결재권자와 대리
+          결재자를 두 칸으로 나란히 보여 주므로 줄만 봐도 어느 쪽인지 읽힌다. */}
+      <div className="mt-3">
+        <button
+          type="button"
+          onClick={() => setShowPortalFinished((previous) => !previous)}
+          className="rounded-md border border-zinc-200 px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          {showPortalFinished
+            ? "끝난 위임 접기"
+            : `끝난 위임 보기 (${portalDelegations.finished.length}건${portalDelegations.finishedTruncated ? "+" : ""})`}
+        </button>
+      </div>
+
+      {showPortalFinished && (
+        <div className="mt-2">
+          {/* 🔴 잘렸다는 것을 반드시 말해 준다 — 「모두의」 묶음과 같은 까닭이고,
+              건수를 글자로 박지 않는 것도 같다(상한은 조회가 정해 함께 내려보낸다).
+              🔵 두 조회가 **같은 상수**를 쓴다(queries/approval-route-delegations.ts
+              의 FINISHED_DELEGATION_LIMIT) — 묶음마다 「최근 N건」의 N 이 다르면
+              사람은 그것을 결함으로 읽는다. */}
+          {portalDelegations.finishedTruncated && (
+            <p className="mb-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+              끝난 위임은 최근 {portalDelegations.finishedLimit}건만 보여 줍니다. 그보다 앞의
+              기록은 통합 승인함에 남아 있습니다.
+            </p>
+          )}
+          {portalDelegations.finished.length === 0 ? (
+            <p className="rounded-lg border border-zinc-200 px-3 py-6 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+              끝나거나 거둔 위임이 없습니다.
+            </p>
+          ) : (
+            <ResponsiveList
+              listId="portal-approval-delegations-finished"
+              table={
+                <table className="w-full min-w-[720px] text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+                      <th scope="col" className="py-2 px-3 font-medium">결재권자</th>
+                      <th scope="col" className="py-2 px-3 font-medium">대리 결재자</th>
+                      <th scope="col" className="py-2 px-3 font-medium">기간</th>
+                      <th scope="col" className="py-2 px-3 font-medium">상태</th>
+                      <th scope="col" className="py-2 px-3 font-medium">출처</th>
+                      <th scope="col" className="py-2 px-3 font-medium">사유</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {portalDelegations.finished.map((delegation) => (
+                      <tr
+                        key={delegation.id}
+                        className="border-b border-zinc-100 align-top last:border-0 dark:border-zinc-800"
+                      >
+                        <td className="py-2 px-3 whitespace-nowrap text-zinc-900 dark:text-zinc-50">{delegation.delegatorName}</td>
+                        <td className="py-2 px-3 whitespace-nowrap text-zinc-900 dark:text-zinc-50">{delegation.delegateName}</td>
+                        <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{periodText(delegation)}</td>
+                        <td className="py-2 px-3">{renderStatus(delegation)}</td>
+                        <td className="py-2 px-3">{renderPortalSource()}</td>
+                        <td className="py-2 px-3 text-zinc-600 dark:text-zinc-400">{delegation.reason || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              }
+              cards={
+                <ul className={LIST_CARD_GRID}>
+                  {portalDelegations.finished.map((delegation) => (
+                    <ListCard
+                      key={delegation.id}
+                      title={`${delegation.delegatorName} → ${delegation.delegateName}`}
+                      badge={renderStatus(delegation)}
+                      fields={[
+                        { label: "기간", value: periodText(delegation) },
+                        { label: "출처", value: renderPortalSource() },
+                        { label: "사유", value: delegation.reason },
+                      ]}
+                    />
+                  ))}
+                </ul>
+              }
+            />
+          )}
+        </div>
       )}
     </section>
   );

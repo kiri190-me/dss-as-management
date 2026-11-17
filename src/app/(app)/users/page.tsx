@@ -6,13 +6,14 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { getLoginMode } from "@/lib/config/login-mode";
-import { getSsoIssuer } from "@/lib/config/sso";
+import { getApprovalsDelegationUrlOrNull, getSsoIssuer } from "@/lib/config/sso";
 import { listUsersForRepresentativeManagement, listShipmentDelegations } from "@/lib/db/queries/shipment-delegations";
 import {
   listAllApprovalRouteDelegations,
   listApprovalRouteDelegateCandidates,
   listApprovalRouteDelegationsForUser,
 } from "@/lib/db/queries/approval-route-delegations";
+import { listPortalApprovalDelegationsForUser } from "@/lib/db/queries/portal-approval-delegations";
 import { resolveUsersAreaAccess, USERS_AREA_KEY } from "@/lib/auth/users-area-access";
 import {
   getCurrentShipmentApprovalRoute,
@@ -102,11 +103,20 @@ export default async function UsersPage() {
   // 다른 사람들의 것이다 — 계정 목록(이메일·역할·잠김 여부) · 모두의 출하 대표 위임 ·
   // 결재선 판(승인자 이름) · 결재선 후보(이메일 + 포털 번호). 「결재권 위임」 탭만
   // 쓰는 사람에게는 **읽지도 내려보내지도 않는다.**
-  const [users, delegations, routeDelegations, allRouteDelegationsResult, approvalRouteEntries, approverCandidates, delegateCandidateRows] = await Promise.all([
+  // 🔴 **통합 승인함에서 맡긴 위임도 함께 읽는다**(2026-11-17, 설계 B-4·D-2). 바로
+  // 위 조회와 **다른 표**이고(`portal_approval_delegations` — 포털이 전파해 준 사본),
+  // 같은 사람의 것을 같은 열쇠(`actingUser.id`)로 묻는다. 둘을 한 조회로 합치지 않는
+  // 까닭은 되돌리는 자리가 달라 화면이 **묶음을 갈라** 그리기 때문이다 — 합쳐 내리면
+  // 화면이 줄마다 출처를 다시 가려야 하고, 그 가지가 어긋나는 날 [되돌리기]가 눌러도
+  // 거절당하는 줄에 붙는다.
+  // 🔴 이쪽은 **권한을 안 묻는다.** 내주는 것이 남의 줄이 아니라 보는 사람 자신이
+  // 맡겼거나 맡은 줄뿐이라, 위 「모두의 …」처럼 조회가 인가를 볼 까닭이 없다.
+  const [users, delegations, routeDelegations, allRouteDelegationsResult, portalDelegations, approvalRouteEntries, approverCandidates, delegateCandidateRows] = await Promise.all([
     canViewUsersAdminTabs ? listUsersForRepresentativeManagement() : Promise.resolve([]),
     canViewUsersAdminTabs ? listShipmentDelegations() : Promise.resolve([]),
     listApprovalRouteDelegationsForUser(actingUser.id),
     listAllApprovalRouteDelegations(actingUser),
+    listPortalApprovalDelegationsForUser(actingUser.id),
     // 🔴 **고칠 수 있는 용도를 돌며 전부 읽는다.** 화면이 탭 안에서 용도를
     // 고르는데 그 판정은 클라이언트에서 일어나므로, 고를 수 있는 용도의 현재 판이
     // 처음부터 다 내려와 있어야 한다. 목록에서 파생시키는 이유는 용도를 하나
@@ -177,6 +187,17 @@ export default async function UsersPage() {
       ? `${getSsoIssuer()}/admin/notifications`
       : null;
 
+  // 통합 승인함의 위임 화면 주소 — 승인함에서 맡긴 위임을 **어디서 거두는지**
+  // 알려 주는 링크 하나에 쓴다.
+  //
+  // 🔴 위 한 줄과 달리 **권한도 로그인 방식도 보지 않는다.** 그 안내는 관리자만
+  // 쓰는 화면으로 보내는 것이라 권한으로 가르지만, 이쪽은 「네 위임을 네가
+  // 거두는 자리」라 승인함에서 위임을 맡길 수 있는 사람이면 누구에게나 필요하다.
+  // 🔴 그리고 **안 보이는 것은 링크뿐**이다 — 값이 없으면 화면이 글자로만 안내한다
+  //    (config/sso.ts 의 getApprovalsDelegationUrlOrNull). 주소는 환경마다 다르고,
+  //    그 값을 아는 곳은 환경변수 하나다.
+  const approvalsDelegationUrl = getApprovalsDelegationUrlOrNull();
+
   // 🔴 개발자 표시 판정만은 actorMay / hasPermission 을 쓰지 않는다 — **진짜
   // 최고관리자만**이다. 이 값이 권한을 최고관리자급으로 올리는 스위치 그 자체라서,
   // 승격된 개발자가 통과하면 개발자가 개발자를 만든다(「동급」 규칙의 유일하고
@@ -204,6 +225,8 @@ export default async function UsersPage() {
       approverCandidates={approverCandidates}
       routeDelegations={routeDelegations}
       allRouteDelegations={allRouteDelegations}
+      portalDelegations={portalDelegations}
+      approvalsDelegationUrl={approvalsDelegationUrl}
       delegateCandidates={delegateCandidates}
       canViewUsersAdminTabs={canViewUsersAdminTabs}
       canManageRepresentatives={canManageRepresentatives}

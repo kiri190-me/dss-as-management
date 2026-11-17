@@ -811,6 +811,14 @@ src/components/repair-cases/due-date-near-badge.test.tsx
 # 설명 문구가 **서로 다른가**.
 src/components/users/approval-route-delegation-section.test.ts
 
+# 같은 탭의 **네 번째 묶음** — 통합 승인함에서 맡긴 위임(2026-11-17). 전파는 되고
+# 결재 판정도 듣는데 **그리는 코드가 없어** 「위임되었다는 내용이 안 뜬다」가 됐던
+# 자리다. 지키는 것: 묶음이 **따로** 있고 늘 보이는가 · 🔴 그 줄에 [되돌리기]가
+# **안 붙는가**(여기서 거두면 포털은 모르고 다음 전파에 되살아난다) · 출처가
+# **줄마다** 보이는가 · 🔴 승인함 주소가 없어도 화면이 서는가(링크만 없다) ·
+# 「끝났다」의 자가 옆 조회와 **글자 그대로** 같은가.
+src/components/users/portal-approval-delegation-section.test.ts
+
 # 「결재선에 올라 있는 사람의 문」(2026-10-26 눈 확인에서 잡힌 결함). 운영 DB 에
 # users.view 가 NONE 으로 저장돼 있어 엔지니어는 [사용자 관리]에 못 들어갔고, 그래서
 # 결재선에 박힌 사람이 자기 결재권을 맡길 길이 없었다. 저장값을 되돌리지 않고 코드로

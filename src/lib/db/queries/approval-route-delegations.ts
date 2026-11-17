@@ -207,8 +207,14 @@ export async function listApprovalRouteDelegateCandidates(): Promise<
  * 🔵 50 에 깊은 뜻은 없다. 「한 화면에서 훑을 수 있는 양」이고, 더 뒤까지 찾아야 하면
  * 감사 로그가 영구 기록이다(위임을 만들 때도 되돌릴 때도 한 줄씩 남는다 —
  * mutations/approval-route-delegations.ts). 잘렸다는 사실은 화면이 말해 준다.
+ *
+ * 🔴 **`export` 가 붙은 까닭**(2026-11-17): 통합 승인함에서 온 위임을 읽는 조회
+ * (queries/portal-approval-delegations.ts)가 **이 값을 빌려 쓴다.** 두 출처의 줄이
+ * [결재권 위임] 화면에 나란히 서므로, 「끝났다」의 자와 상한이 갈리면 같은 날짜의
+ * 두 줄이 한쪽 묶음에서는 접히고 다른 쪽에서는 펴진다. 숫자를 저쪽에 다시 적으면
+ * 한쪽만 고쳐지는 날이 오고, 그 어긋남은 오류를 내지 않는다.
  */
-const FINISHED_DELEGATION_LIMIT = 50;
+export const FINISHED_DELEGATION_LIMIT = 50;
 
 export type AllApprovalRouteDelegationsView = {
   /**

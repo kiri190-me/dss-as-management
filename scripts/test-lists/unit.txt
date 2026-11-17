@@ -37,6 +37,7 @@ src/lib/config/read-source.test.ts
 src/lib/config/auth-source.test.ts
 src/lib/config/login-mode.test.ts
 src/lib/config/demo-login.test.ts
+src/lib/config/approvals-delegation-url.test.ts
 src/lib/auth/sso-role.test.ts
 src/lib/auth/sso-provision.test.ts
 src/lib/auth/sso-profile.test.ts

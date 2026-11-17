@@ -16,6 +16,7 @@ import type {
   ApprovalRouteDelegateCandidate,
   ApprovalRouteDelegationRow,
 } from "@/lib/db/queries/approval-route-delegations";
+import type { PortalApprovalDelegationsView } from "@/lib/db/queries/portal-approval-delegations";
 import {
   initialUsersTab,
   visibleUsersTabKeys,
@@ -87,6 +88,8 @@ export default function RepresentativeManagementScreen({
   approverCandidates,
   routeDelegations,
   allRouteDelegations,
+  portalDelegations,
+  approvalsDelegationUrl,
   delegateCandidates,
   canViewUsersAdminTabs,
   canManageRepresentatives,
@@ -136,6 +139,24 @@ export default function RepresentativeManagementScreen({
    * 고르개를 여는 열쇠이고, 이 값은 **남의 줄이 내려왔는가** 그 자체다.
    */
   allRouteDelegations: AllApprovalRouteDelegationsView | null;
+  /**
+   * 🔴 **통합 승인함에서 맡긴 위임.** 위 둘과 **다른 표**다
+   * (`portal_approval_delegations` — 포털이 전파해 준 사본).
+   *
+   * 🔴 **`null` 이 없다.** 보는 사람 자신이 맡겼거나 맡은 줄뿐이라 권한으로 가릴
+   * 것이 없고, 비어 있는 것이 정상이다 — 위 `allRouteDelegations` 가 권한 없으면
+   * null 인 것과 가르는 지점이다(그쪽은 **남의 줄**이다).
+   */
+  portalDelegations: PortalApprovalDelegationsView;
+  /**
+   * 통합 승인함의 위임 화면 주소. 🔴 **`null` 이면 링크만 없고 안내는 그대로** 뜬다 —
+   * 환경변수(`APPROVALS_BASE_URL`)가 없는 기계가 있다. 위 `notificationSettings
+   * PortalUrl` 과 같은 모양이지만 **물러서는 모습이 다르다**: 그쪽은 null 이면 안내
+   * 자체를 안 그린다(갈 수 없는 곳을 알려 주지 않는다). 이쪽은 승인함에서 맡긴
+   * 위임을 **여기서 거둘 수 없다는 사실**까지 같은 문장에 들어 있어, 통째로 빼면
+   * 어디서 거둬야 하는지 알 길이 없어진다.
+   */
+  approvalsDelegationUrl: string | null;
   /**
    * 「대리 결재자」 고르개가 쓰는 사람 목록 — **이름과 id 까지만**이다.
    *
@@ -346,6 +367,8 @@ export default function RepresentativeManagementScreen({
           allUsers={delegateCandidates}
           routeDelegations={routeDelegations}
           allRouteDelegations={allRouteDelegations}
+          portalDelegations={portalDelegations}
+          approvalsDelegationUrl={approvalsDelegationUrl}
         />
       )}
 

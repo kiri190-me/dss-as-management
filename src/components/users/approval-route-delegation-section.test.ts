@@ -203,9 +203,11 @@ describe("㉠ 「결재권 위임」 탭", () => {
       );
     }
     // 받은 값을 그대로 넘긴다. 권한 판정은 서버 쪽이 하고 화면은 나르기만 한다.
+    // 🔵 2026-11-17 에 끝에 둘이 늘었다 — 통합 승인함에서 온 위임(`portalDelegations`)과
+    //    그 위임을 거두러 갈 주소(`approvalsDelegationUrl`). 앞의 다섯은 그대로다.
     assert.match(
       flat(screenCode),
-      /<ApprovalRouteDelegationSection actingUser=\{actingUser\} canManageRepresentatives=\{canManageRepresentatives\} allUsers=\{delegateCandidates\} routeDelegations=\{routeDelegations\} allRouteDelegations=\{allRouteDelegations\} \/>/,
+      /<ApprovalRouteDelegationSection actingUser=\{actingUser\} canManageRepresentatives=\{canManageRepresentatives\} allUsers=\{delegateCandidates\} routeDelegations=\{routeDelegations\} allRouteDelegations=\{allRouteDelegations\} portalDelegations=\{portalDelegations\} approvalsDelegationUrl=\{approvalsDelegationUrl\} \/>/,
       "새 묶음에 넘기는 값이 달라졌다"
     );
   });
@@ -530,9 +532,11 @@ describe("㉥ 서버 페이지", () => {
   });
 
   test("이미 있던 Promise.all 에 함께 탄다 — 조회를 줄 세우지 않는다", () => {
+    // 🔵 2026-11-17 에 `portalDelegations` 가 네 번째 자리로 들어왔다(통합 승인함에서
+    //    온 위임). 줄 세우면 그 사람에게만 화면이 한 왕복 더 느려진다.
     assert.match(
       flat(pageCode),
-      /const \[users, delegations, routeDelegations, allRouteDelegationsResult, approvalRouteEntries, approverCandidates, delegateCandidateRows\] = await Promise\.all\(\[/,
+      /const \[users, delegations, routeDelegations, allRouteDelegationsResult, portalDelegations, approvalRouteEntries, approverCandidates, delegateCandidateRows\] = await Promise\.all\(\[/,
       "새 조회가 기존 묶음 밖으로 나갔다"
     );
     assert.match(flat(pageCode), /routeDelegations=\{routeDelegations\}/, "화면에 내려보내지 않는다");
@@ -794,12 +798,18 @@ describe("㉦ 겹치는 줄을 사람에게 알려 준다", () => {
   });
 
   test("목록 열쇠가 다른 묶음과 겹치지 않는다", () => {
+    // 🔵 2026-11-17 에 셋이 늘었다 — 통합 승인함에서 온 위임의 세 목록이다
+    //    (portal-…). 앞의 넷은 A/S 자신의 표를 그리던 그대로다. 접두사가 갈려
+    //    있으므로 **어느 표의 목록인지 열쇠만 봐도 읽힌다.**
     const listIds = [...sectionCode.matchAll(/listId="([^"]+)"/g)].map(([, id]) => id);
     assert.deepEqual(listIds, [
       "approval-route-delegations-given",
       "approval-route-delegations-received",
       "approval-route-delegations-all",
       "approval-route-delegations-all-finished",
+      "portal-approval-delegations-given",
+      "portal-approval-delegations-received",
+      "portal-approval-delegations-finished",
     ]);
     assert.equal(new Set(listIds).size, listIds.length, "목록 열쇠가 겹친다 — 보기 설정이 서로를 덮는다");
   });
