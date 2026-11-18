@@ -34,11 +34,17 @@ import { NO_ORDER_DATE_LABEL } from "./domestic-order-display";
  * 것인지 읽는 사람이 가려낼 수 없다. 🔴 저쪽 단언은 **지금도 그대로 참**이어야
  * 하고, 아래 ③-1 이 그 사실을 이쪽에서도 한 번 더 못 박는다.
  *
+ * 2026-11-19 에 상태가 **넷**이 됐다(사용자 요구: 「[발주일 미정]을 [발주 대기]로
+ * 이름을 바꿔주고, [발주 완료]상태를 추가해줘」). 늘어난 값은 `ORDER_ISSUED` 하나고,
+ * 판정은 한 줄도 바뀌지 않았다 — 아래 ①-2 가 새 값이 지켜야 하는 것을 잰다.
+ *
  * 이 시험이 지키는 것:
- *  1. 🔴 **상태 복수 선택은 OR 이다** — 셋이 서로 배타적이지 않아서(발주일 미정은
+ *  1. 🔴 **상태 복수 선택은 OR 이다** — 넷이 서로 배타적이지 않아서(발주 대기는
  *     완료·미완료 양쪽과 겹친다) 교집합으로 두면 사람이 고른 뜻과 정반대가 된다.
- *  2. 🔴 「발주일 미정」의 판정이 **화면 배지와 같은 한 줄**이다 — 배지가 붙은 줄과
+ *  2. 🔴 「발주 대기」의 판정이 **화면 배지와 같은 한 줄**이다 — 배지가 붙은 줄과
  *     필터에 걸리는 줄이 다르면 사람이 필터를 믿지 못한다.
+ *  2-1. 🔴 「발주 대기」와 「발주 완료」가 **정확한 여집합**이다 — 한쪽에만 공백
+ *     접기를 더하면 `""` 인 줄이 둘 다 켜도 사라진다.
  *  3. 🔴 고객사 후보는 **지금 올라온 줄에서** 나온다 — 고객사 마스터를 쓰면 수정
  *     권한이 없는 분에게 필터가 통째로 사라진다.
  *  4. 🔴 **세모가 꺼진 기본 상태에서는 묶음 안 차례가 원본 그대로**다. 표의 `순번`
@@ -86,7 +92,7 @@ const idsOf = (rows: readonly Row[]) => rows.map((r) => r.id);
 /**
  * 🔵 **표본이 무엇을 재는 모양인지 먼저 못 박는다.** 네 줄이 완료 여부 × 발주일
  * 유무의 네 칸을 하나씩 채우고 있어야 아래 조합 시험이 뜻을 갖는다 — 특히
- * 🔴 **「발주일 미정이면서 완료됨」** 한 줄이 OR 과 AND 를 가르는 유일한 자리다.
+ * 🔴 **「발주 대기이면서 완료됨」** 한 줄이 OR 과 AND 를 가르는 유일한 자리다.
  */
 const statusRows = [
   row("완료·발주일O", { completedAt: "2026-11-01T00:00:00Z", orderIssuedDate: "2026-03-01" }),
@@ -103,15 +109,18 @@ describe("🔵 재는 도구 — 표본", () => {
     assert.deepEqual(new Set(shape).size, 4, "같은 칸을 두 줄이 채우고 있다 — 조합을 가를 수 없다");
     assert.ok(
       statusRows.some((r) => r.completedAt !== null && r.orderIssuedDate === null),
-      "🔴 「발주일 미정이면서 완료됨」 줄이 표본에 없다 — OR 과 AND 가 같은 답을 내 시험이 공짜로 통과한다"
+      "🔴 「발주 대기이면서 완료됨」 줄이 표본에 없다 — OR 과 AND 가 같은 답을 내 시험이 공짜로 통과한다"
     );
   });
 
-  test("상태 값 셋이 그대로다 — 늘거나 줄면 아래 조합이 뜻을 잃는다", () => {
+  test("상태 값 넷이 그대로다 — 늘거나 줄면 아래 조합이 뜻을 잃는다", () => {
+    // 🔴 차례가 곧 드롭다운에 서는 차례다. 「발주 완료」는 **맨 뒤**이고 「발주 대기」
+    //    바로 다음이다 — 짝으로 읽히지 않으면 사용자가 둘을 같은 칸의 반대쪽으로 안 본다.
     assert.deepEqual([...DOMESTIC_ORDER_STATUS_FILTER_VALUES], [
       "COMPLETED",
       "INCOMPLETE",
       "NO_ORDER_DATE",
+      "ORDER_ISSUED",
     ]);
   });
 });
@@ -132,7 +141,7 @@ describe("🔴 상태 거르개", () => {
     ]);
   });
 
-  test("「발주일 미정」은 완료 여부와 **상관없이** 발주일이 없는 줄 전부다", () => {
+  test("「발주 대기」는 완료 여부와 **상관없이** 발주일이 없는 줄 전부다", () => {
     // 겹치는 줄이 여기서 한 번, 아래 OR 에서 한 번 더 뜻을 갖는다.
     assert.deepEqual(idsOf(filterDomesticOrdersByStatus(statusRows, ["NO_ORDER_DATE"])), [
       "완료·발주일X",
@@ -140,7 +149,7 @@ describe("🔴 상태 거르개", () => {
     ]);
   });
 
-  test("🔴 복수 선택은 OR 이다 — 「완료됨」+「발주일 미정」은 둘 중 하나라도 해당되면 남는다", () => {
+  test("🔴 복수 선택은 OR 이다 — 「완료됨」+「발주 대기」는 둘 중 하나라도 해당되면 남는다", () => {
     const picked = idsOf(filterDomesticOrdersByStatus(statusRows, ["COMPLETED", "NO_ORDER_DATE"]));
     assert.deepEqual(picked, ["완료·발주일O", "완료·발주일X", "미완료·발주일X"]);
     // 🔴 교집합이었다면 「완료·발주일X」 한 줄뿐이다. 이 한 줄이 두 규칙을 가른다.
@@ -151,7 +160,7 @@ describe("🔴 상태 거르개", () => {
     );
     assert.ok(
       picked.includes("미완료·발주일X"),
-      "미완료인 발주일 미정 줄이 빠졌다 — 「발주일 미정」을 고른 뜻이 사라졌다"
+      "미완료인 발주 대기 줄이 빠졌다 — 「발주 대기」를 고른 뜻이 사라졌다"
     );
   });
 
@@ -162,16 +171,16 @@ describe("🔴 상태 거르개", () => {
     );
   });
 
-  test("🔴 「발주일 미정이면서 완료됨」 줄이 네 조합에서 어떻게 나오는가", () => {
+  test("🔴 「발주 대기이면서 완료됨」 줄이 네 조합에서 어떻게 나오는가", () => {
     const only = (statuses: Parameters<typeof filterDomesticOrdersByStatus>[1]) =>
       idsOf(filterDomesticOrdersByStatus(statusRows, statuses)).includes("완료·발주일X");
     assert.equal(only(["COMPLETED"]), true, "완료됨에 안 걸렸다");
-    assert.equal(only(["NO_ORDER_DATE"]), true, "발주일 미정에 안 걸렸다");
+    assert.equal(only(["NO_ORDER_DATE"]), true, "발주 대기에 안 걸렸다");
     assert.equal(only(["INCOMPLETE"]), false, "미완료에 걸렸다 — 완료된 줄이다");
     assert.equal(
       only(["INCOMPLETE", "NO_ORDER_DATE"]),
       true,
-      "미완료에는 안 걸려도 발주일 미정으로 남아야 한다(OR)"
+      "미완료에는 안 걸려도 발주 대기로 남아야 한다(OR)"
     );
   });
 
@@ -183,7 +192,7 @@ describe("🔴 상태 거르개", () => {
     );
   });
 
-  test("🔴 「발주일 미정」 판정은 null 하나다 — 빈 글자는 미정이 아니다(화면 배지와 같은 한 줄)", () => {
+  test("🔴 「발주 대기」 판정은 null 하나다 — 빈 글자는 대기가 아니다(화면 배지와 같은 한 줄)", () => {
     // 화면의 OrderIssuedDateContent 는 `orderIssuedDate !== null` 이면 그 글자를
     // 그대로 그린다 — 빈 글자인 줄에는 배지가 안 붙는다. 여기서만 공백을 접으면
     // 배지는 없는데 필터에는 걸리는 줄이 생기고, 그 어긋남은 오류 없이 조용히 산다.
@@ -191,15 +200,136 @@ describe("🔴 상태 거르개", () => {
     assert.equal(matchesDomesticOrderStatusFilter(row("널", { orderIssuedDate: null }), "NO_ORDER_DATE"), true);
   });
 
-  test("🔴 「발주일 미정」의 글자는 화면이 쓰는 그 상수다 — 손으로 적지 않았다", () => {
-    assert.equal(DOMESTIC_ORDER_STATUS_FILTER_LABELS.NO_ORDER_DATE, NO_ORDER_DATE_LABEL);
+  test("🔴 거르개의 이름표는 배지의 상수와 **일부러 다르다** — 되돌리면 여기서 깨진다", () => {
+    // 🔴 **뜻이 2026-11-19 에 뒤집힌 단언이다.** 전날까지는
+    // `=== NO_ORDER_DATE_LABEL`(= 배지와 같은 글자여야 한다)이었다. 사용자에게 「그
+    // 글자를 쓰는 다섯 자리를 전부 통일할까요」를 물었고 **「필터 이름만 바꾸자」**는
+    // 답을 받았으므로, 이제 지켜야 하는 것은 **갈라져 있다**는 쪽이다.
+    //
+    // 상수를 그대로 쓰는 쪽이 자연스러워 보여서 다음 사람이 되돌리기 쉽다. 그러면
+    // 화면의 필터 이름이 조용히 「발주일 미정」으로 돌아가므로, 같음이 아니라 **다름**
+    // 을 단언해 그 되돌림이 여기서 멈추게 한다.
+    assert.equal(DOMESTIC_ORDER_STATUS_FILTER_LABELS.NO_ORDER_DATE, "발주 대기");
+    assert.notEqual(
+      DOMESTIC_ORDER_STATUS_FILTER_LABELS.NO_ORDER_DATE,
+      NO_ORDER_DATE_LABEL,
+      "🔴 거르개 이름표가 배지 상수로 되돌아갔다 — 2026-11-19 사용자 결정은 「필터 이름만 바꾼다」였다"
+    );
+    // 🔵 배지 쪽 상수는 **그대로여야 한다.** 거르개 이름을 바꾸면서 저쪽까지 바꾸면
+    //    「다섯 자리는 안 건드린다」는 그 결정의 나머지 절반이 사라진다.
+    assert.equal(NO_ORDER_DATE_LABEL, "발주일 미정");
+    assert.equal(DOMESTIC_ORDER_STATUS_FILTER_LABELS.ORDER_ISSUED, "발주 완료");
     assert.equal(DOMESTIC_ORDER_STATUS_FILTER_LABELS.COMPLETED, "완료됨");
     assert.equal(DOMESTIC_ORDER_STATUS_FILTER_LABELS.INCOMPLETE, "미완료");
+  });
+
+  test("🔵 값 넷이 전부 이름표를 갖는다 — 하나라도 비면 드롭다운에 빈 줄이 선다", () => {
+    for (const value of DOMESTIC_ORDER_STATUS_FILTER_VALUES) {
+      const label = DOMESTIC_ORDER_STATUS_FILTER_LABELS[value];
+      assert.equal(typeof label, "string", `${value} 의 이름표가 글자가 아니다`);
+      assert.notEqual(label.trim(), "", `${value} 의 이름표가 비었다`);
+    }
+    assert.equal(
+      new Set(Object.values(DOMESTIC_ORDER_STATUS_FILTER_LABELS)).size,
+      DOMESTIC_ORDER_STATUS_FILTER_VALUES.length,
+      "이름표 둘이 같은 글자다 — 드롭다운에서 어느 쪽을 고른 것인지 알 수 없다"
+    );
   });
 
   test("빈 목록을 걸러도 빈 목록이다", () => {
     assert.deepEqual(filterDomesticOrdersByStatus([], ["COMPLETED"]), []);
     assert.deepEqual(filterDomesticOrdersByStatus([], []), []);
+  });
+});
+
+// ═══════════════════ ①-2 「발주 완료」 (2026-11-19)
+
+/**
+ * 🔵 **여집합을 재는 표본은 위 넷에 「공백만」 한 줄을 더한 것**이다. 그 줄이
+ * 없으면 한쪽에 공백 접기(foldBlankToNull)를 더해도 「둘을 다 켜면 전체」가 그대로
+ * 참이라, 아래 여집합 시험이 접기를 **못 잡는다** — 양쪽에서 동시에 빠질 수 있는
+ * 값은 `""` 뿐이기 때문이다(`null` 도 날짜 글자도 어느 판정에서든 한쪽에 걸린다).
+ */
+const orderIssuedRows = [...statusRows, row("공백만", { orderIssuedDate: "" })];
+
+describe("🔵 재는 도구 — 여집합 표본", () => {
+  test("표본 다섯 줄에 null · 날짜 글자 · 공백만이 다 들어 있다", () => {
+    assert.equal(orderIssuedRows.length, 5, "표본이 바뀌었다 — 아래 단언도 함께 고칠 것");
+    assert.ok(orderIssuedRows.some((r) => r.orderIssuedDate === null), "null 줄이 없다");
+    assert.ok(
+      orderIssuedRows.some((r) => typeof r.orderIssuedDate === "string" && r.orderIssuedDate !== ""),
+      "날짜가 적힌 줄이 없다"
+    );
+    assert.ok(
+      orderIssuedRows.some((r) => r.orderIssuedDate === ""),
+      "🔴 공백만인 줄이 없다 — 공백 접기를 더해도 아래 여집합 시험이 그대로 통과한다"
+    );
+  });
+});
+
+describe("🔴 「발주 완료」 — 발주일이 **있는** 줄", () => {
+  test("「발주 완료」 단독은 발주일이 적힌 줄만 남긴다 — 완료 여부와 상관없다", () => {
+    assert.deepEqual(idsOf(filterDomesticOrdersByStatus(statusRows, ["ORDER_ISSUED"])), [
+      "완료·발주일O",
+      "미완료·발주일O",
+    ]);
+  });
+
+  test("🔴 빈 글자는 「발주 완료」다 — 「발주 대기」의 null 한 줄과 짝이다", () => {
+    // 위 「발주 대기 판정은 null 하나다」의 **짝**이다. 화면의 OrderIssuedDateContent
+    // 는 `!== null` 이면 그 글자를 그대로 그리므로 `""` 인 줄에는 배지가 안 붙는다 —
+    // 배지가 없는 줄은 「발주가 난 줄」 쪽에 서는 것이 화면과 맞는다.
+    // 🔴 여기에 공백 접기를 더하면 이 줄이 양쪽 어디에도 안 걸려, 이 단언이 막는다.
+    assert.equal(matchesDomesticOrderStatusFilter(row("빈글자", { orderIssuedDate: "" }), "ORDER_ISSUED"), true);
+    assert.equal(matchesDomesticOrderStatusFilter(row("널", { orderIssuedDate: null }), "ORDER_ISSUED"), false);
+    assert.equal(matchesDomesticOrderStatusFilter(row("날짜", { orderIssuedDate: "2026-03-01" }), "ORDER_ISSUED"), true);
+  });
+
+  test("🔴 「발주 대기」와 「발주 완료」는 **정확한 여집합**이다 — 둘 다 켜면 전체다", () => {
+    assert.deepEqual(
+      idsOf(filterDomesticOrdersByStatus(orderIssuedRows, ["NO_ORDER_DATE", "ORDER_ISSUED"])),
+      idsOf(orderIssuedRows),
+      "둘을 다 켰는데 빠진 줄이 있다 — 한쪽 판정에 공백 접기가 섞였을 것이다"
+    );
+  });
+
+  test("🔴 한 줄이 둘 다에 걸리는 일은 **없다** — 모든 줄이 정확히 한쪽이다", () => {
+    for (const r of orderIssuedRows) {
+      const waiting = matchesDomesticOrderStatusFilter(r, "NO_ORDER_DATE");
+      const issued = matchesDomesticOrderStatusFilter(r, "ORDER_ISSUED");
+      assert.notEqual(
+        waiting,
+        issued,
+        `${r.id} 가 「발주 대기」·「발주 완료」 둘 다 ${waiting} 다 — 여집합이 깨졌다`
+      );
+    }
+  });
+
+  test("🔵 「완료됨 + 미완료」와 **같은 성질**이다 — 한 쌍을 둘 다 고르면 전체", () => {
+    // 쌍이 둘이라는 사실 자체를 재는 자리다. 새 값이 「셋째 쌍의 한쪽」처럼 끼어들면
+    // 여기서 드러난다.
+    assert.deepEqual(
+      idsOf(filterDomesticOrdersByStatus(orderIssuedRows, ["COMPLETED", "INCOMPLETE"])),
+      idsOf(orderIssuedRows)
+    );
+  });
+
+  test("🔴 쌍을 건너뛴 조합도 OR 이다 — 「완료됨 + 발주 완료」", () => {
+    // 교집합이었다면 「완료·발주일O」 한 줄뿐이다.
+    const picked = idsOf(filterDomesticOrdersByStatus(orderIssuedRows, ["COMPLETED", "ORDER_ISSUED"]));
+    assert.deepEqual(picked, ["완료·발주일O", "미완료·발주일O", "완료·발주일X", "공백만"]);
+    assert.ok(picked.includes("완료·발주일X"), "발주일 없는 완료 줄이 빠졌다 — 교집합으로 돌고 있다");
+  });
+
+  test("「발주 완료」로 걸러도 줄 차례는 원본 그대로다 — 표에 사람이 매긴 순번이 있다", () => {
+    // 🔵 걸러져 나가는 줄(미완료·발주일X)을 가운데 끼워 둔다 — 전부 남는 표본으로
+    //    재면 「차례를 지킨다」가 공짜로 통과한다.
+    const shuffled = [orderIssuedRows[4], orderIssuedRows[3], orderIssuedRows[1], orderIssuedRows[0]];
+    assert.deepEqual(idsOf(filterDomesticOrdersByStatus(shuffled, ["ORDER_ISSUED"])), [
+      "공백만",
+      "미완료·발주일O",
+      "완료·발주일O",
+    ]);
   });
 });
 

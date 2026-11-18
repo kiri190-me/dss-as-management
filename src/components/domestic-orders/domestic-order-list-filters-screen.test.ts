@@ -152,19 +152,39 @@ describe("🔴 ① 상태 · 고객사가 복수 선택 칸이다", () => {
 // ───────────────────── ② 선택지를 어디서 뽑는가
 
 describe("🔴 ② 선택지의 출처", () => {
-  test("상태 셋은 도메인 상수를 펼친다 — 손으로 적지 않았다", () => {
+  test("상태 넷은 도메인 상수를 펼친다 — 손으로 적지 않았다", () => {
     assert.match(
       fieldBlock("domestic-order-status-filter"),
       /options=\{DOMESTIC_ORDER_STATUS_FILTER_VALUES\.map\(\(value\) => \(\{ value, label: DOMESTIC_ORDER_STATUS_FILTER_LABELS\[value\], \}\)\)\}/
     );
   });
 
-  test("🔴 상태 글자를 화면에 손으로 박지 않았다 — 「발주일 미정」은 더더욱 아니다", () => {
-    // 박아 두면 도메인 쪽 글자를 바꾼 날 필터 이름만 옛말로 남는다. 「발주일 미정」은
-    // 발주발행일 칸의 배지에도 쓰이는 말이라 특히 갈라지면 안 된다.
-    for (const label of ['"완료됨"', '"미완료"', '"발주일 미정"']) {
+  test("🔴 상태 글자 넷을 화면에 손으로 박지 않았다", () => {
+    // 박아 두면 도메인 쪽 글자를 바꾼 날 필터 이름만 옛말로 남는다 — 2026-11-19 에
+    // 실제로 「발주일 미정」이 「발주 대기」가 됐고, 이 화면은 한 글자도 안 고쳤다.
+    //
+    // 🔴 `"발주일 미정"` 은 **목록에 그대로 둔다.** 그 글자가 화면에서 사라진 것이
+    // 아니다 — 발주발행일 칸의 배지와 주황 안내가 여전히 그 말을 쓴다. 다만 둘 다
+    // `NO_ORDER_DATE_LABEL` 상수를 거쳐 그리므로(badges.tsx · 이 화면 2755줄의
+    // `{NO_ORDER_DATE_LABEL}`) **따옴표에 싸인 날것**은 이 파일에 없어야 맞다.
+    // 주석에 적힌 「발주일 미정」은 위 withoutComments 가 걷어낸 뒤라 안 세어진다.
+    for (const label of ['"완료됨"', '"미완료"', '"발주일 미정"', '"발주 대기"', '"발주 완료"']) {
       assert.ok(!stripped.includes(label), `상태 글자 ${label} 가 화면에 손으로 박혔다`);
     }
+  });
+
+  test("🔵 그 부정 단언이 정말 무는가 — 상수를 거치는 쪽은 통과하고 날것은 걸린다", () => {
+    // 🔴 위 시험은 **「없다」만 재는** 모양이라, 세는 대상(stripped)이 비거나 글자가
+    //    조금만 달라도 영영 공짜로 통과한다. 여기서 재는 도구가 살아 있는지 본다.
+    assert.ok(stripped.length > 1000, "화면 소스를 못 읽었다 — 위 부정 단언이 무의미하다");
+    assert.ok(
+      stripped.includes("{NO_ORDER_DATE_LABEL}"),
+      "🔴 배지·안내가 쓰던 상수 호출이 사라졌다 — 「발주일 미정」이 화면에서 없어졌거나 날것으로 바뀌었다"
+    );
+    assert.ok(
+      !stripped.includes('"완료됨"') && stripped.includes("DOMESTIC_ORDER_STATUS_FILTER_LABELS"),
+      "상태 이름표를 도메인에서 받지 않는다"
+    );
   });
 
   test("🔴 고객사 후보는 **지금 올라온 줄**에서 뽑는다", () => {

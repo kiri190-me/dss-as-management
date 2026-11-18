@@ -2608,8 +2608,10 @@ export default function DomesticOrderListScreen({
             id="domestic-order-status-filter"
             label="상태"
             labelPlacement="inline"
-            // 🔴 손으로 세 줄 적지 않는다 — 값도 글자도 도메인이 갖고, 보일 차례는
+            // 🔴 손으로 네 줄 적지 않는다 — 값도 글자도 도메인이 갖고, 보일 차례는
             //    그 상수의 차례다. 적어 두면 상태가 하나 느는 날 여기서만 조용히 빠진다.
+            //    🔵 실제로 그날이 왔다(2026-11-19 「발주 완료」 추가) — 이 자리는 한
+            //    글자도 안 고쳤고 드롭다운에 네 번째 줄이 그대로 섰다.
             options={DOMESTIC_ORDER_STATUS_FILTER_VALUES.map((value) => ({
               value,
               label: DOMESTIC_ORDER_STATUS_FILTER_LABELS[value],
