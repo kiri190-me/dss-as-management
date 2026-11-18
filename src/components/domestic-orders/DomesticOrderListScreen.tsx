@@ -5,6 +5,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { showSavePopup } from "@/components/common/SavePopup";
 import NoticePopup from "@/components/common/NoticePopup";
+/**
+ * 🔴 복수 선택 거르개는 **공용 부품**이다 — 이 화면에 따로 만들지 않는다. 2026-11-11
+ * 에 일곱 칸([전체 A/S 현황] 다섯 · [기타건 현황] 둘)이 이것으로 옮겨 왔고, 내자
+ * 정리의 상태·고객사 둘이 2026-11-18 에 여덟·아홉째가 됐다. 닫힌 칸의 글자(「전체」 /
+ * 이름 / 「첫째 이름 외 N개」) · 바깥 누르기와 Esc 로 접기가 화면마다 다르게 굴면
+ * 안 된다(그 파일 머리말).
+ */
+import CheckboxFilterDropdown from "@/components/common/CheckboxFilterDropdown";
 import {
   LIST_CARD_GRID,
   ResponsiveList,
@@ -42,14 +50,23 @@ import {
 import { DOMESTIC_ORDER_DELIVERED_DATE_NOTE } from "@/lib/domain/delivered-date-link";
 import { resolveDomesticOrderModelLink } from "@/lib/domain/domestic-order-detail-link";
 import {
+  collectDomesticOrderCustomerOptions,
   collectDomesticOrderYears,
   countDomesticOrdersWithoutOrderYear,
+  DOMESTIC_ORDER_STATUS_FILTER_LABELS,
+  DOMESTIC_ORDER_STATUS_FILTER_VALUES,
+  filterDomesticOrdersByCustomerNames,
   filterDomesticOrdersBySearch,
+  filterDomesticOrdersByStatus,
   filterDomesticOrdersByYear,
   groupDomesticOrdersByCustomer,
   isDomesticOrderCompleted,
   isDomesticOrderSearchActive,
+  nextDomesticOrderOrderIssuedSort,
   resolveInitialDomesticOrderYear,
+  sortDomesticOrderGroupRowsByOrderIssuedDate,
+  type DomesticOrderOrderIssuedSort,
+  type DomesticOrderStatusFilterValue,
 } from "@/lib/domain/domestic-order-list";
 import {
   DOMESTIC_ORDER_DUE_DATE_LINK_NOTE,
@@ -182,6 +199,51 @@ import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
  * 뒤에야 어느 해를 보고 있었는지 알 수 있고, 그대로 열어 두면 골라도 화면이
  * 바뀌지 않는 조작이 되어 그쪽이 고장으로 읽힌다. 고른 값(selectedYear)은
  * 상태에 그대로 남아 있어, 검색어를 지우면 보던 해로 그대로 돌아온다.
+ *
+ * ── 🔴 거르개 둘(상태 · 고객사)과 발주발행일 세모 (2026-11-18) ───────────
+ * 사용자 요구: 「상태 필터, 고객사 필터를 드롭박스로 … 복수 선택을 할 수 있도록 …
+ * 발주 발행일 옆에 작은 세모를 둬서 고객사 별로 … 오름차순·내림차순으로 (고객사들이
+ * 섞이지 않게 고객사 안에서)」.
+ *
+ * 규칙은 여기 없다 — 무엇이 어느 상태인지, 고를 수 있는 고객사가 누구인지, 세모를
+ * 눌렀을 때 다음이 무엇인지는 전부 domain/domestic-order-list.ts 가 정한다(위
+ * '규칙은 여기 없다'와 같은 이유). 이 파일은 그 함수들을 잇기만 한다.
+ *
+ * 🔵 **거르는 차례는 네 겹이고, 종류끼리는 AND 다**: (검색 또는 년도) → 상태 →
+ * 고객사. 한 종류 **안에서는 OR** 이고 빈 선택이 「전체」다(도메인 쪽 머리말).
+ *
+ * 🔴 **고객사 선택지는 `customerOptions` prop 에서 뽑지 않는다.** 그것은 고객사
+ * 마스터이고 `canEdit` 인 세션에만 내려오므로(page.tsx), 그것으로 만들면 **수정
+ * 권한이 없는 분에게 고객사 필터가 통째로 사라진다.** 지금 화면에 올라온 줄
+ * (rows)에서 뽑는다 — [전체 A/S 현황]·[기타건 현황]이 같은 까닭으로 같은 선택을 했다.
+ *
+ * 🔴 **세모는 기본이 꺼짐이고, 꺼진 동안은 이 변경 전과 한 글자도 다르지 않다.**
+ * 묶음 안의 차례는 사람이 손으로 매긴 순번(display_order)이고 그 숫자가 `순번` 칸에
+ * 그대로 찍히므로, 발행일순으로 세우면 그 숫자가 뒤죽박죽으로 보인다. 그래서
+ *   · 켜기 전에는 세우는 함수를 **아예 부르지 않고**(아래 groups 의 가지),
+ *   · 켜 두면 **표 위에 그 사실을 한 줄로 적고** 끄는 단추를 그 옆에 둔다.
+ * 끄는 길은 둘이다: 세모를 세 번째 누르기(오름 → 내림 → 꺼짐)와 그 단추. 세 번
+ * 눌러야 꺼진다는 것은 눌러 보기 전에 알 수 없는 규칙이라 단추가 따로 있어야 한다
+ * (검색칸 옆의 `검색 지우기` 와 같은 판단).
+ *
+ * 🔵 **그 한 줄은 지금 상태만 말한다**(2026-11-18 사용자 요구) — 「발주발행일
+ * 내림차순으로 보고 있습니다」 + [순번 차례로] 단추다. 뒤에 붙어 있던 설명(묶음
+ * 안에서만 세운다 · 발주일 미정은 맨 뒤 · 순번 칸은 사람이 매긴 값이다)은 걷어냈다.
+ * 세우는 규칙은 그대로 돌고, 같은 말이 머리글 세모의 title 에 남아 있다
+ * (ORDER_ISSUED_SORT_HINT).
+ *
+ * ── 조작 줄은 **이름표도 전부 칸 옆**이다 (2026-11-18) ────────────────────
+ * 넷(검색 · 발주 년도 · 상태 · 고객사)이 같은 높이로 선다. 복수 선택 칸 둘은 공용
+ * 부품의 기본이 이름을 칸 **위**에 적는 모양이라 그 둘만 한 줄 높았고, 이 화면은
+ * 위가 쓰고 남은 높이를 표가 받는 구조라(아래 '열 제목은 화면에 붙어 있다') 그
+ * 높이가 그대로 표에서 빠졌다. 그래서 부품에 **이름을 옆에 두는 모양을 선택으로**
+ * 더하고(labelPlacement="inline") 여기서만 넘긴다 — 기본값은 예전 모양이라 그 부품을
+ * 함께 쓰는 일곱 칸([전체 A/S 현황] 다섯 · [기타건 현황] 둘)은 그대로다.
+ *
+ * 🔵 **접히는 단위는 「이름표 + 칸」이다.** 낱개로 늘어놓으면 좁은 화면에서 이름표만
+ * 윗줄에 남고 칸이 다음 줄로 내려간다(사용자 스크린샷 — 폰에서 「검색」이 혼자 한
+ * 줄을 썼다). 짝끼리 제 상자에 담아 한 덩어리로 접히게 하고, 복수 선택 칸 둘은
+ * 폰에서 한 치수 작은 폭을 쓴다(w-40/w-52 → sm: 에서 w-44/w-56).
  *
  * ── 🔴 `줄 수정` 은 **[수정] 버튼으로만** 열린다 (2026-11-06) ───────────
  * 사용자 결정 그대로다: 「내자정리의 표에서 줄을 클릭했을때 [줄 수정]창이 뜨는
@@ -356,9 +418,11 @@ import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
  *
  * 둘을 했다. **머리말 상자를 접고**(SheetHeading — 기본 접힘, 제목과 기준일은
  * 남는다), **검색 줄 · 건수 줄 · 납품일 안내를 한 상자로 합쳤다**(아래 그 줄의
- * 주석 — 조작 한 줄과 안내 한 줄, 사이는 gap-4 가 아니라 gap-y-2). 어느 쪽도
- * 글자를 지우지 않는다 — 펼치면 그대로 나오고, 안내 셋(발주일 미정 N건 · 검색
- * 중 년도 안내 · 납품일 안내)은 조건도 문구도 그대로다.
+ * 주석 — 조작 한 줄과 안내 한 줄, 사이는 gap-4 가 아니라 gap-y-2). 그때는 어느
+ * 쪽도 글자를 지우지 않았다.
+ *
+ * 🔵 **2026-11-18 에 납품일 안내 한 문단을 사용자 요구로 걷어냈다**(그 자리의 주석).
+ * 그만큼 표가 더 받는다. 남은 안내는 둘이다 — 발주일 미정 N건 · 검색 중 년도 안내.
  *
  * 같은 화면에서 다시 재면:
  *
@@ -390,10 +454,13 @@ import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
  * 보인다(납기요청일 꼬리표와 같은 까닭).
  *
  * **그래서 이 칸은 빈칸일 수 있다** — 아직 안 나간 줄, 행이 아예 없는 줄이 그렇다.
- * 아무 말 없이 비워 두면 **자료가 사라진 것으로 읽히므로**, 표 위에 한 줄
- * (DOMESTIC_ORDER_DELIVERED_DATE_NOTE)을 적고 표 머리말과 카드 이름표에도 같은 말을
- * title 로 붙인다. 22칼럼을 옆으로 밀어 보는 표라, 표 위의 한 줄만으로는 그 칸에
- * 닿았을 때 설명이 화면 밖에 있다.
+ * 아무 말 없이 비워 두면 **자료가 사라진 것으로 읽히므로**, 표 머리말(납품일 ·
+ * 납품자 `<th>`)과 카드 이름표 · 편집 폼에 같은 말을 title 로 붙인다
+ * (DOMESTIC_ORDER_DELIVERED_DATE_NOTE). 22칼럼을 옆으로 밀어 보는 표라, 설명은 그
+ * 칸에 닿았을 때 뜨는 쪽이 쓸모 있다.
+ *
+ * 🔵 **표 위에 늘 서 있던 같은 글자 한 문단은 2026-11-18 에 사용자 요구로 걷어냈다.**
+ * 상수도 title 도 그대로이고, 사라진 것은 목록 위의 그 한 줄뿐이다.
  *
  * 🔴 **이 두 칸은 이제 눌러서 고친다** — 2026-11-07 까지 「붙이지 않는다」고 적혀
  * 있던 바로 그 자리다. 그때의 까닭은 「연결된 줄의 납품일은 수리 건의 출하일이라
@@ -464,6 +531,14 @@ const SEARCH_PLACEHOLDER = "고객사 · 인수번호 · 발주서번호 · 견�
  */
 const SEARCH_FIELDS_HINT =
   "고객사 · 인수번호 · 발주서번호 · 견적서번호 · PJT · 형식 · S/N · L/N 에서 찾습니다";
+
+/**
+ * 발주발행일 머리글에 마우스를 올렸을 때 뜨는 말(2026-11-18). **세 번째 누름이
+ * 꺼짐**이라는 것은 눌러 보기 전에는 알 수 없는 규칙이라, 적어도 한 군데에는
+ * 적혀 있어야 한다 — 끄는 단추는 켜 둔 동안에만 서므로 그 전에는 보이지 않는다.
+ */
+const ORDER_ISSUED_SORT_HINT =
+  "누를 때마다 오름차순 → 내림차순 → 원래 차례(순번)로 돌아갑니다. 고객사 묶음 안에서만 다시 세웁니다.";
 
 function sumAmounts(rows: DomesticOrderListItem[]): { total: string; skipped: number } {
   let total = 0;
@@ -2136,6 +2211,23 @@ export default function DomesticOrderListScreen({
   const showTrash = canDelete && view === "trash";
   const [selectedYear, setSelectedYear] = useState<string | null>(null);
   const [searchText, setSearchText] = useState("");
+  /**
+   * 거르개 둘(2026-11-18). **빈 배열이 「전체」**이고, 한 종류 안에서는 OR 이다 —
+   * 값과 규칙은 도메인이 갖는다(파일 머리말).
+   *
+   * 🔵 년도처럼 「고른 값이 선택지에서 사라졌을 때 되돌아오는」 장치를 두지 않는다.
+   * 선택지를 **거르기 전의 rows** 에서 뽑으므로 고른 값이 선택지에서 빠질 일이
+   * 없고, 설사 빠져도 공용 부품이 그 값을 버리지 않고 닫힌 칸에 그대로 적는다
+   * (checkbox-filter-dropdown.ts 의 orderSelection — 「사람이 풀 수 없는 필터」를
+   * 막는 그 규칙).
+   */
+  const [statusFilters, setStatusFilters] = useState<DomesticOrderStatusFilterValue[]>([]);
+  const [customerFilters, setCustomerFilters] = useState<string[]>([]);
+  /**
+   * 발주발행일 세우기. **null 이 꺼짐이고 그것이 기본값**이다 — 켜기 전에는 묶음 안
+   * 차례가 사람이 매긴 순번 그대로여야 한다(파일 머리말).
+   */
+  const [orderIssuedSort, setOrderIssuedSort] = useState<DomesticOrderOrderIssuedSort>(null);
   const [completionError, setCompletionError] = useState<string | null>(null);
   /**
    * 출하 완료가 막혀 **아무것도 저장되지 않았을 때** 띄우는 알림의 까닭 한 줄
@@ -2244,14 +2336,33 @@ export default function DomesticOrderListScreen({
    * 거르는 일은 표/카드보다 **앞 단계**에 있다. 아래 groups 하나를 표와 카드가
    * 함께 쓰므로, 어느 폭에서 보든 같은 줄이 남는다.
    */
-  const visibleRows = useMemo(
-    () =>
-      isSearching
-        ? filterDomesticOrdersBySearch(rows, searchText)
-        : filterDomesticOrdersByYear(rows, activeYear),
-    [rows, activeYear, isSearching, searchText]
-  );
-  const groups = useMemo(() => groupDomesticOrdersByCustomer(visibleRows), [visibleRows]);
+  const visibleRows = useMemo(() => {
+    const byYearOrSearch = isSearching
+      ? filterDomesticOrdersBySearch(rows, searchText)
+      : filterDomesticOrdersByYear(rows, activeYear);
+    // 🔴 **종류끼리는 AND**(상태를 걸고 그 안에서 다시 고객사를 건다), 한 종류
+    //    안에서는 OR — 그 판단은 두 함수가 각자 갖는다(도메인 머리말).
+    const byStatus = filterDomesticOrdersByStatus(byYearOrSearch, statusFilters);
+    return filterDomesticOrdersByCustomerNames(byStatus, customerFilters);
+  }, [rows, activeYear, isSearching, searchText, statusFilters, customerFilters]);
+
+  /**
+   * 고를 수 있는 고객사. 🔴 **거르기 전의 `rows`** 에서 뽑는다 — 거른 뒤에서 뽑으면
+   * 하나를 고르는 순간 나머지가 선택지에서 사라져 되돌아갈 수 없고, 년도를 옮기면
+   * 지금 골라 둔 고객사마저 사라진다(도메인 쪽 collectDomesticOrderCustomerOptions
+   * 의 🔴 주석). 그 대가로 지금 고른 년도에 한 줄도 없는 고객사가 목록에 설 수
+   * 있는데, 그쪽이 「풀 수 없는 필터」보다 낫다.
+   */
+  const customerFilterOptions = useMemo(() => collectDomesticOrderCustomerOptions(rows), [rows]);
+
+  const groups = useMemo(() => {
+    const base = groupDomesticOrdersByCustomer(visibleRows);
+    // 🔴 **꺼져 있으면 세우는 함수를 아예 부르지 않는다.** 묶음 안 차례가 원본
+    //    그대로라는 사실이 그 함수의 정확성에 매달리지 않게 하는 자리다 —
+    //    domain/domestic-order-list.ts 의 groupDomesticOrdersByCustomer 머리말.
+    if (orderIssuedSort === null) return base;
+    return sortDomesticOrderGroupRowsByOrderIssuedDate(base, orderIssuedSort);
+  }, [visibleRows, orderIssuedSort]);
   const alwaysVisibleCount = useMemo(() => countDomesticOrdersWithoutOrderYear(rows), [rows]);
 
   // 합계는 1단계와 같은 함수다. 다만 **지금 보이는 줄**을 더한다 — 화면에 없는
@@ -2259,15 +2370,37 @@ export default function DomesticOrderListScreen({
   const { total, skipped } = sumAmounts(visibleRows);
 
   /**
-   * 안내 두 줄을 지금 적는가. **조건은 예전 그대로다** — 각각 있던 자리에서
-   * 그대로 옮겨 왔고(아래 안내 묶음), 이름만 붙였다.
+   * 「발주일 미정 N건은 어느 년도를 골라도 함께 보입니다」를 지금 적는가. 조건은
+   * 예전 그대로다 — 년도로 거르는 중일 때만 하는 말이라, 검색 중에는 적지 않는다
+   * (검색 중에는 어느 줄도 년도로 가려지지 않는다).
    *
-   * 이름을 붙인 이유는 하나뿐이다: 둘 다 안 적을 때는 그 둘을 담는 상자까지
-   * 그리지 말아야 한다. 빈 상자를 남기면 한 줄을 통째로 차지하는 자리(w-full)에
+   * 이름을 붙인 이유는 하나뿐이다: 안내 묶음이 **하나도 안 적힐 때는 그 상자까지
+   * 그리지 말아야** 한다. 빈 상자를 남기면 한 줄을 통째로 차지하는 자리(w-full)에
    * 높이 0짜리 항목이 남아 그 위 여백만 덩그러니 생긴다.
+   *
+   * 🔵 **납품일 안내를 그리던 짝(showDeliveredDateNote)은 걷어냈다**(2026-11-18
+   * 사용자 요구 — 그 문단을 통째로 없앴다). 글자만 사라졌고 납품일이 도는 길은
+   * 그대로다.
    */
   const showAlwaysVisibleNote = alwaysVisibleCount > 0 && years.length > 0 && !isSearching;
-  const showDeliveredDateNote = rows.length > 0;
+
+  /**
+   * 거르개 둘 중 하나라도 걸려 있는가(2026-11-18). 검색·년도는 세지 않는다 — 그
+   * 둘은 저마다 자기 자리에서 지우는 길과 안내를 이미 갖고 있다.
+   *
+   * 🔴 이 값이 필요한 까닭은 **거르개 때문에 표가 통째로 비는 일이 생겼기**
+   * 때문이다. 이 변경 전에는 검색 말고는 빈 표가 나올 수 없었다(고를 수 있는 년도는
+   * 자료에 있는 해뿐이고, 발주일 없는 줄은 어느 해에서도 남는다). 아무 말 없이
+   * 머리말만 남은 표를 두면 자료가 사라진 것으로 읽힌다.
+   */
+  const hasRowFilters = statusFilters.length > 0 || customerFilters.length > 0;
+  /**
+   * 🔴 발행일순으로 보고 있다는 사실을 **표 위에 적는다.** 세모를 누른 사실은
+   * 머리글의 작은 삼각형 하나로만 남는데, 22칼럼을 옆으로 밀어 보는 표라 그
+   * 머리글이 화면 밖일 수 있다 — 그러면 왜 차례가 달라졌는지 알 길이 없다.
+   * 이 값이 끄는 단추([순번 차례로])를 세우는 조건이기도 하다.
+   */
+  const showOrderIssuedSortNote = orderIssuedSort !== null;
 
   const editingRow =
     editTarget?.kind === "row" ? (rows.find((row) => row.id === editTarget.id) ?? null) : null;
@@ -2372,45 +2505,57 @@ export default function DomesticOrderListScreen({
           **좁아지면 저절로 여러 줄이 된다**(flex-wrap · gap-y-2). 억지로 한 줄에
           밀어 넣지 않는 이유는 이 줄에 든 것이 이미 여럿이어서다 — 접히지 않으면
           검색칸이 줄을 밀어내 body 가 좌우로 흔들린다(검색칸의 max-w-full ·
-          min-w-0 주석, 파일 헤더의 가로 스크롤 규칙). */}
+          min-w-0 주석, 파일 헤더의 가로 스크롤 규칙).
+
+          🔴 **접히는 단위는 「조작 하나」가 아니라 「이름표 + 칸」이다**
+          (2026-11-18). 이름표와 칸을 낱개로 늘어놓으면 폰에서 「검색」만 윗줄에
+          남고 칸이 다음 줄로 내려간다(사용자 스크린샷) — 그래서 짝끼리 제 상자에
+          넣어 **한 덩어리로 접히게** 했다. 복수 선택 칸 둘은 부품이 제 안에서
+          이름표와 칸을 한 줄로 세운다(labelPlacement="inline"). */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <label
-          className="text-sm font-medium text-zinc-700 dark:text-zinc-300"
-          htmlFor="domestic-order-search"
-        >
-          검색
-        </label>
-        <input
-          id="domestic-order-search"
-          type="search"
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          placeholder={SEARCH_PLACEHOLDER}
-          title={SEARCH_FIELDS_HINT}
-          aria-label={`내자 정리 검색 — ${SEARCH_FIELDS_HINT}`}
-          autoComplete="off"
-          // 예시가 들어갈 만큼 넓게 두되, **폭은 화면 폭을 넘지 않는다** —
-          // max-w-full · min-w-0 이 없으면 좁은 화면에서 이 칸 하나가 줄을
-          // 밀어내 body 가 좌우로 흔들린다(파일 헤더의 가로 스크롤 규칙).
-          className={`w-80 max-w-full min-w-0 ${filterControlClass}`}
-        />
-        {isSearching && (
-          // 지우는 길을 눈에 보이게 둔다. type="search" 의 X 는 브라우저마다
-          // 있기도 없기도 하고, 검색 중에는 년도가 잠겨 있어 "원래대로"가
-          // 이 버튼 하나뿐이다.
-          <button
-            type="button"
-            onClick={() => setSearchText("")}
-            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        {/* 검색 묶음. min-w-0 이 이 상자에도 있어야 안쪽 입력칸이 줄어든다 — flex
+            칸의 기본값은 min-width:auto 라, 없으면 상자가 제 줄을 넘겨 버린다
+            (입력칸에만 적어 두면 한 겹 바깥에서 막힌다). 지우는 단추를 안에 넣은
+            것은 그것이 **이 칸에 친 글자를 지우는** 단추여서다. */}
+        <div className="flex min-w-0 items-center gap-2">
+          <label
+            className="shrink-0 text-sm font-medium text-zinc-700 dark:text-zinc-300"
+            htmlFor="domestic-order-search"
           >
-            검색 지우기
-          </button>
-        )}
+            검색
+          </label>
+          <input
+            id="domestic-order-search"
+            type="search"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder={SEARCH_PLACEHOLDER}
+            title={SEARCH_FIELDS_HINT}
+            aria-label={`내자 정리 검색 — ${SEARCH_FIELDS_HINT}`}
+            autoComplete="off"
+            // 예시가 들어갈 만큼 넓게 두되, **폭은 화면 폭을 넘지 않는다** —
+            // max-w-full · min-w-0 이 없으면 좁은 화면에서 이 칸 하나가 줄을
+            // 밀어내 body 가 좌우로 흔들린다(파일 헤더의 가로 스크롤 규칙).
+            className={`w-80 max-w-full min-w-0 ${filterControlClass}`}
+          />
+          {isSearching && (
+            // 지우는 길을 눈에 보이게 둔다. type="search" 의 X 는 브라우저마다
+            // 있기도 없기도 하고, 검색 중에는 년도가 잠겨 있어 "원래대로"가
+            // 이 버튼 하나뿐이다.
+            <button
+              type="button"
+              onClick={() => setSearchText("")}
+              className="shrink-0 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              검색 지우기
+            </button>
+          )}
+        </div>
 
         {years.length > 0 && (
-          <>
+          <div className="flex items-center gap-2">
             <label
-              className="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+              className="shrink-0 text-sm font-medium text-zinc-700 dark:text-zinc-300"
               htmlFor="domestic-order-year"
             >
               발주 년도
@@ -2434,7 +2579,80 @@ export default function DomesticOrderListScreen({
                 </option>
               ))}
             </select>
-          </>
+          </div>
+        )}
+
+        {/* ── 거르개 둘(2026-11-18). **검색칸처럼 늘 있다** ─────────────────
+            년도는 고를 해가 없으면 통째로 빠지지만(바로 위 years.length), 상태는
+            자료가 어떻든 고를 수 있는 값 셋이라 가릴 까닭이 없다. 고객사는 줄이
+            하나도 없으면 선택지가 빈 목록이 되는데, 그때 아래에 서 있는 것은
+            「등록된 내자 정리 항목이 없습니다」 한 줄뿐이라 열어 볼 일이 없다 —
+            조건을 붙여 가리면 「어떤 때는 있고 어떤 때는 없는 칸」이 되어 그쪽이
+            더 어지럽다(검색칸을 years 로 감싸지 않은 것과 같은 판단).
+
+            🔴 **이름표를 칸 옆에 둔다**(labelPlacement="inline", 2026-11-18 사용자
+            결정 — 「전부 옆으로」). 공용 부품의 기본은 칸 **위**이고 그 모양이면 이
+            둘만 검색칸보다 한 줄 높아 조작 줄이 들쭉날쭉해진다 — 이 화면은 위가
+            쓰고 남은 높이를 표가 받는 구조라 그 한 줄이 그대로 표에서 빠진다.
+            🔵 넘기는 자리는 여기뿐이다. 같은 부품을 쓰는 일곱 칸([전체 A/S 현황]
+            다섯 · [기타건 현황] 둘)은 이 값을 안 넘겨 예전 모양 그대로다.
+
+            폭을 못 박아 두는 것은 닫힌 칸의 글자가 「전체」에서 「완료됨 외 1개」로
+            바뀔 때마다 칸이 늘었다 줄었다 하면 옆의 조작들이 함께 밀리기 때문이다.
+            이름표가 안으로 들어온 만큼 폭을 키웠다(칸 자체는 예전과 같은 144 ·
+            176). **폰에서는 한 치수 작다**(w-40 / w-52 → sm: 에서 w-44 / w-56) —
+            좁은 화면에서 「발주 년도」 묶음과 「상태」가 한 줄에 서려면 그만큼이
+            필요하고, 줄어드는 것은 닫힌 칸의 글자가 잘리는 폭뿐이다(truncate). */}
+        <div className="w-40 shrink-0 sm:w-44">
+          <CheckboxFilterDropdown<DomesticOrderStatusFilterValue>
+            id="domestic-order-status-filter"
+            label="상태"
+            labelPlacement="inline"
+            // 🔴 손으로 세 줄 적지 않는다 — 값도 글자도 도메인이 갖고, 보일 차례는
+            //    그 상수의 차례다. 적어 두면 상태가 하나 느는 날 여기서만 조용히 빠진다.
+            options={DOMESTIC_ORDER_STATUS_FILTER_VALUES.map((value) => ({
+              value,
+              label: DOMESTIC_ORDER_STATUS_FILTER_LABELS[value],
+            }))}
+            selected={statusFilters}
+            onChange={setStatusFilters}
+          />
+        </div>
+
+        <div className="w-52 shrink-0 sm:w-56">
+          {/* 🔴 선택지를 여기서 만들지 않는다 — **거르기 전의 rows** 에서 뽑은 것을
+              그대로 넘긴다(위 customerFilterOptions). 고객사 마스터(customerOptions
+              prop)를 쓰면 수정 권한이 없는 분에게 이 칸이 통째로 비어 버린다. 이름이
+              수십 줄까지 늘 수 있지만 부품이 목록 높이를 묶고 제 안에서 굴린다
+              (CheckboxFilterPanel 의 max-h-60). */}
+          <CheckboxFilterDropdown
+            id="domestic-order-customer-filter"
+            label="고객사"
+            labelPlacement="inline"
+            options={customerFilterOptions}
+            selected={customerFilters}
+            onChange={setCustomerFilters}
+          />
+        </div>
+
+        {/* 거르개를 한 번에 푸는 길. **걸려 있을 때만 선다** — 늘 두면 아무것도
+            안 걸린 평상시에 아무 일도 안 하는 단추가 하나 서 있게 된다(검색칸의
+            `검색 지우기` 와 같은 판단·같은 모양). 드롭다운을 하나씩 열어 체크를
+            풀 수도 있지만, 둘을 걸어 표가 비었을 때 되돌아갈 길이 한 번에 보여야
+            한다. 🔵 검색어와 년도는 건드리지 않는다 — 그 둘은 제 자리에 지우는
+            길이 따로 있고, 여기서 함께 지우면 「필터 지우기」가 어디까지 지우는지
+            눌러 보기 전에는 알 수 없게 된다. */}
+        {hasRowFilters && (
+          <button
+            type="button"
+            onClick={() => {
+              setStatusFilters([]);
+              setCustomerFilters([]);
+            }}
+            className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            필터 지우기
+          </button>
         )}
 
         {/* 건수 · `행 추가` · 합계. 셋을 한 덩어리로 묶어 **줄의 오른쪽 끝**에
@@ -2481,19 +2699,54 @@ export default function DomesticOrderListScreen({
           </p>
         </div>
 
-        {/* ── 안내 두 줄. **w-full 이라 언제나 제 줄에서 시작한다** ────────
-            둘 다 "지금 보이는 것이 왜 이런가"를 말하는 참고 문장이라 한 자리에
-            모았다. 조작 사이에 끼워 두면 폭에 따라 어떤 때는 고르개 옆에, 어떤
-            때는 합계 아래에 붙어 같은 화면이 창 크기마다 달리 읽힌다.
+        {/* ── 안내 줄. **w-full 이라 언제나 제 줄에서 시작한다** ────────────
+            "지금 보이는 것이 왜 이런가"를 말하는 참고 문장이라 한 자리에 모았다.
+            조작 사이에 끼워 두면 폭에 따라 어떤 때는 고르개 옆에, 어떤 때는 합계
+            아래에 붙어 같은 화면이 창 크기마다 달리 읽힌다.
 
             바깥 상자 안에 있으므로 이 줄과 조작 줄 사이는 gap-y-2(8px)다 —
             예전처럼 바깥 gap-4(16px)로 벌어지지 않는다. 표에 8px 이 더 간다.
 
-            **조건도 문구도 예전 그대로다**(위 showAlwaysVisibleNote ·
-            showDeliveredDateNote). 둘 다 안 적을 때는 이 상자 자체를 그리지
-            않는다 — w-full 짜리 빈 항목은 제 줄을 차지하고 위 여백만 남긴다. */}
-        {(showAlwaysVisibleNote || showDeliveredDateNote) && (
+            🔵 **지금 여기 서는 것은 둘이다**(2026-11-18 에 납품일 안내를 걷어냈다):
+            발행일순 안내 + 끄는 단추, 그리고 「발주일 미정 N건」. 둘 다 안 적을
+            때는 이 상자 자체를 그리지 않는다 — w-full 짜리 빈 항목은 제 줄을
+            차지하고 위 여백만 남긴다. */}
+        {(showAlwaysVisibleNote || showOrderIssuedSortNote) && (
           <div className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1">
+            {/* 🔴 발행일순으로 보고 있을 때만 서는 줄(2026-11-18). **지금 무엇으로
+                세워 보고 있는지**를 말한다 — 세모를 누른 사실은 머리글의 작은
+                삼각형 하나로만 남는데, 22칼럼을 옆으로 밀어 보는 표라 그 머리글이
+                화면 밖일 수 있다.
+
+                🔵 **설명은 적지 않는다**(2026-11-18 사용자 요구로 걷어냈다 —
+                「고객사 묶음 안에서만 다시 세웠고 …」 한 문장). 세우는 규칙 자체는
+                그대로 돌고, 머리글 세모의 title 에도 같은 말이 남아 있다
+                (ORDER_ISSUED_SORT_HINT).
+
+                끄는 단추를 같은 줄에 둔다. 세모를 세 번째 누르면 꺼지지만 그것은
+                눌러 보기 전에 알 수 없는 규칙이고, 여기서도 머리글이 화면 밖일 수
+                있다는 사정은 같다.
+
+                role="status" 로 두어 화면 낭독기에도 전해지게 한다 — 머리글의
+                aria-sort 는 그 칸에 닿아야 들린다. */}
+            {showOrderIssuedSortNote && (
+              <p
+                role="status"
+                className="flex flex-wrap items-baseline gap-x-2 text-xs text-zinc-600 dark:text-zinc-400"
+              >
+                <span>
+                  발주발행일 {orderIssuedSort === "asc" ? "오름차순" : "내림차순"}으로 보고
+                  있습니다
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setOrderIssuedSort(null)}
+                  className="rounded-md border border-zinc-300 bg-white px-2 py-0.5 text-xs text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                >
+                  순번 차례로
+                </button>
+              </p>
+            )}
             {/* 년도로 거르는 중일 때만 하는 말이다 — 검색 중에는 어느 줄도
                 년도로 가려지지 않으므로, 그대로 두면 지금 걸려 있지도 않은
                 조건을 설명하는 문장이 된다. */}
@@ -2503,23 +2756,12 @@ export default function DomesticOrderListScreen({
                 보입니다.
               </p>
             )}
-            {/* ⚠️ 납품일이 왜 빈칸일 수 있는지 **늘 보이게** 적어 둔다. 이 칸은
-                연결된 줄에서는 수리 건의 실제 출하일이라 아직 안 나간 줄이 비어
-                보이고, 연결 없는 줄은 날짜를 안 적었으면 비어 있다 — 아무 말이
-                없으면 자료가 사라진 것으로 읽힌다(파일 헤더).
-
-                같은 글자가 표 머리말과 카드 이름표의 title 로도 간다. 22칼럼을
-                옆으로 밀어 보는 표라, 이 한 줄만으로는 그 칸에 닿았을 때 설명이
-                화면 밖이다.
-
-                줄이 하나도 없을 때는 적지 않는다 — 그때 화면에 있는 것은
-                "등록된 …이 없습니다" 한 줄뿐이라, 없는 표의 없는 칸을 설명하는
-                문장이 된다. */}
-            {showDeliveredDateNote && (
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                {DOMESTIC_ORDER_DELIVERED_DATE_NOTE}
-              </p>
-            )}
+            {/* 🔵 **납품일 안내는 여기서 걷어냈다**(2026-11-18 사용자 요구). 표 위에
+                늘 서 있던 긴 한 문단(DOMESTIC_ORDER_DELIVERED_DATE_NOTE)이다.
+                🔴 글자만 사라졌고 **납품일 ↔ 수리 건 출하일 맞추기는 그대로 돈다.**
+                같은 글자는 표 머리말(납품일 · 납품자 `<th>` 의 title)과 카드
+                이름표 · 편집 폼에 그대로 남아 있다 — 그쪽이 칸에 닿았을 때 뜨는
+                설명이라, 늘 서 있던 이 한 줄보다 자리를 안 쓴다. */}
           </div>
         )}
       </div>
@@ -2641,6 +2883,26 @@ export default function DomesticOrderListScreen({
         >
           검색어에 맞는 내자 정리 항목이 없습니다. 검색어를 지우면 전체 {rows.length}건이 다시
           보입니다.
+          {/* 🔴 거르개가 **함께** 걸려 있으면 그 사실도 말해야 한다(2026-11-18). 이
+              한마디가 없으면 검색어만 지워 보고 "역시 없네"로 끝낸다 — 상태·고객사는
+              검색 중에도 그대로 걸려 있다. */}
+          {hasRowFilters && " 상태·고객사 필터도 함께 걸려 있습니다 — [필터 지우기]로 그쪽도 풀 수 있습니다."}
+        </div>
+      ) : visibleRows.length === 0 ? (
+        // 🔴 거르개 때문에 한 줄도 안 남았다(2026-11-18). 위 검색 쪽과 **가르는**
+        // 까닭은 되돌아가는 길이 다르기 때문이다 — 저쪽은 검색어를 지우는 것이고
+        // 여기는 체크를 푸는 것이다. 한 문장으로 합치면 지금 무엇이 걸려 있는지
+        // 모르는 채로 엉뚱한 곳을 지우게 된다. 말투는 위 두 문장과 맞춘다.
+        <div
+          role="status"
+          className="rounded-lg border border-zinc-200 bg-white p-8 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+        >
+          지금 걸린 조건에 맞는 내자 정리 항목이 없습니다.
+          {/* 🔵 걸려 있는 것이 거르개일 때만 그 단추를 가리킨다. 년도만으로는 이
+              자리에 올 수 없지만(고를 수 있는 해는 자료에 있는 해뿐이고 발주일 없는
+              줄은 어느 해에서도 남는다), 「언제나 거르개 탓」이라고 적어 두면 그
+              전제가 깨지는 날 화면이 거짓말을 한다. */}
+          {hasRowFilters && " 위의 [필터 지우기]를 누르면 상태 · 고객사 조건이 풀립니다."}
         </div>
       ) : (
         <ResponsiveList
@@ -2666,7 +2928,50 @@ export default function DomesticOrderListScreen({
                   <th className="px-3 py-2">고객사</th>
                   <th className="px-3 py-2">발주서번호</th>
                   <th className="px-3 py-2">PJT</th>
-                  <th className="px-3 py-2">발주발행일</th>
+                  {/* 🔴 22칼럼 가운데 **이 칸 하나만 눌러서 세우는 칸**이다
+                      (2026-11-18 사용자 요구 — 「발주 발행일 옆에 작은 세모」).
+                      누를 때마다 꺼짐 → 오름 → 내림 → 꺼짐으로 돈다. 세 번째
+                      칸(꺼짐)이 왜 이 화면에만 있는지는 도메인의
+                      nextDomesticOrderOrderIssuedSort 주석에 있다.
+
+                      🔵 **꺼져 있을 때도 세모를 그린다.** 안 그리면 이 칸이 눌러지는
+                      칸이라는 사실을 알 길이 없다 — 옆의 스물한 칸은 그냥 글자다.
+                      대신 연하게 둔다. 🔴 **켜졌다는 사실을 이 색으로 알리지
+                      않는다**: 색만으로 가르면 모니터에 따라 안 보이고, 22칼럼을
+                      옆으로 밀어 보는 표라 이 머리글 자체가 화면 밖일 수 있다.
+                      켜짐은 **표 위의 한 줄**이 말한다(showOrderIssuedSortNote).
+
+                      aria-sort 는 단추가 아니라 `<th>` 에 붙는다 — 정렬은 칸의
+                      성질이다. 읽어 주는 프로그램이 이 칸에 닿을 때 함께 말해 준다. */}
+                  <th
+                    className="px-3 py-2"
+                    aria-sort={
+                      orderIssuedSort === "asc"
+                        ? "ascending"
+                        : orderIssuedSort === "desc"
+                          ? "descending"
+                          : "none"
+                    }
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOrderIssuedSort(nextDomesticOrderOrderIssuedSort(orderIssuedSort))
+                      }
+                      title={ORDER_ISSUED_SORT_HINT}
+                      className="flex items-center gap-1 whitespace-nowrap hover:text-zinc-900 dark:hover:text-zinc-50"
+                    >
+                      발주발행일
+                      <span
+                        aria-hidden="true"
+                        className={`text-[10px] ${
+                          orderIssuedSort === null ? "text-zinc-300 dark:text-zinc-600" : ""
+                        }`}
+                      >
+                        {orderIssuedSort === "desc" ? "▼" : "▲"}
+                      </span>
+                    </button>
+                  </th>
                   {/* 이 칸에도 머리말 설명이 붙는다 — 비어 있는 줄에는 연결된
                       수리 건의 고객 요청 납기일이 대신 보이고, 그 값에는 꼬리표가
                       붙는다는 사실을 칸에 닿았을 때 알 수 있어야 한다. 카드
@@ -2686,9 +2991,10 @@ export default function DomesticOrderListScreen({
                   {/* 🔴 이 두 칸에 머리말 설명이 붙는다 — 값이 **납기요청일 줄마다
                       하나**라는 것과, 아무 줄에도 안 적힌 건은 수리 건의 출하일을
                       빌려 그린다는 것(그래서 빈칸이 될 수 있다는 것)을 칸에 닿았을
-                      때 알 수 있어야 한다. 표 위의 한 줄만으로는 22칼럼을 옆으로
-                      밀어 본 뒤에는 화면 밖이다. 두 칸이 **같은 글자**를 쓰는 것은
-                      같은 행의 두 값이기 때문이다. */}
+                      때 알 수 있어야 한다. 🔴 표 위에 같은 글자를 늘 적어 두던 줄은
+                      2026-11-18 에 걷어냈으므로, **그 설명이 남은 자리가 여기와
+                      카드 이름표 · 편집 폼뿐이다.** 두 칸이 **같은 글자**를 쓰는
+                      것은 같은 행의 두 값이기 때문이다. */}
                   <th className="px-3 py-2" title={DOMESTIC_ORDER_DELIVERED_DATE_NOTE}>
                     납품일
                   </th>

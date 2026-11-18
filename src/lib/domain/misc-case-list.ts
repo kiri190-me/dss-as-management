@@ -1,7 +1,9 @@
 import {
+  collectDomesticOrderCustomerOptions,
+  DOMESTIC_ORDER_UNASSIGNED_CUSTOMER_VALUE,
+  domesticOrderCustomerFilterValue,
   filterDomesticOrdersBySearch,
   foldBlankToNull,
-  UNASSIGNED_CUSTOMER_LABEL,
   type DomesticOrderSearchable,
 } from "./domestic-order-list";
 import type { MiscCaseStatus } from "./misc-case-status";
@@ -205,8 +207,16 @@ export function nextMiscCaseSort(
  * ============================================================================
  */
 
-/** 공급처가 비어 있는 줄을 고르는 값. 이름이 `"NONE"` 인 고객사는 없다. */
-export const MISC_CASE_UNASSIGNED_CUSTOMER_VALUE = "NONE";
+/**
+ * 공급처가 비어 있는 줄을 고르는 값. 이름이 `"NONE"` 인 고객사는 없다.
+ *
+ * 🔵 **값을 여기 다시 적지 않고 내자 정리 쪽 상수를 그대로 받는다**(2026-11-18,
+ * 내자 정리에도 같은 고객사 거르개가 생기면서). 같은 줄을 보는 두 화면이라 값이
+ * 갈라지면 한쪽 필터만 조용히 아무것도 못 찾게 되고, 글자가 둘 다 `"NONE"` 이라
+ * tsc 는 끝까지 아무 말도 하지 않는다. 이름을 그대로 두는 까닭은 이 파일을 읽는
+ * 쪽이 「공급처 미지정」으로 알고 있기 때문이다.
+ */
+export const MISC_CASE_UNASSIGNED_CUSTOMER_VALUE = DOMESTIC_ORDER_UNASSIGNED_CUSTOMER_VALUE;
 
 export type MiscCaseFilters = {
   /** 글자 찾기. 여덟 칸을 함께 본다(filterDomesticOrdersBySearch). */
@@ -252,32 +262,20 @@ export type MiscCaseFilterable = DomesticOrderSearchable & {
  * 없는 것으로 접으므로(foldBlankToNull) 같은 고객사가 둘로 갈라지지 않는다.
  *
  * 비어 있는 줄이 하나라도 있으면 목록 **맨 뒤**에 「미지정」 자리를 둔다 — 하나도
- * 없는데 내밀면 눌러도 늘 0건인 칸이 된다.
+ * 없는데 내밀면 눌러도 늘 0건인 칸이 된다. 미지정 줄의 글자는 내자 정리가 같은
+ * 줄을 묶을 때 쓰는 **그 글자**다(UNASSIGNED_CUSTOMER_LABEL) — 두 화면이 같은
+ * 줄을 다른 말로 부르지 않게 상수를 나눠 쓴다.
+ *
+ * 🔵 **규칙의 본문은 내자 정리 쪽에 있다**(2026-11-18 — 거기에도 같은 고객사
+ * 거르개가 생겼다). 기타건은 수리 건이 안 붙은 **내자 줄 그 자체**라 뽑는 규칙이
+ * 같고, 여기에 한 벌 더 적어 두면 한쪽만 고쳐지는 날이 온다 — 이 파일이 검색
+ * 함수를 빌려 쓰는 것과 같은 까닭이다(파일 머리말). 이름을 그대로 두는 것은 이
+ * 화면이 이 명단을 「공급처」로 부르기 때문이다.
  */
 export function collectMiscCaseCustomerOptions(
   rows: readonly { customerName: string | null }[]
 ): { value: string; label: string }[] {
-  const names = new Set<string>();
-  let hasUnassigned = false;
-  for (const row of rows) {
-    const name = foldBlankToNull(row.customerName);
-    if (name === null) hasUnassigned = true;
-    else names.add(name);
-  }
-
-  const options = [...names]
-    .sort((a, b) => a.localeCompare(b))
-    .map((name) => ({ value: name, label: name }));
-
-  if (hasUnassigned) {
-    options.push({
-      value: MISC_CASE_UNASSIGNED_CUSTOMER_VALUE,
-      // 내자 정리가 같은 줄을 묶을 때 쓰는 **그 글자**다 — 두 화면이 같은 줄을
-      // 다른 말로 부르지 않게 상수를 나눠 쓴다.
-      label: UNASSIGNED_CUSTOMER_LABEL,
-    });
-  }
-  return options;
+  return collectDomesticOrderCustomerOptions(rows);
 }
 
 /**
@@ -303,9 +301,13 @@ export function applyMiscCaseFilters<T extends MiscCaseFilterable>(
     //    나중 줄을 잡아먹는다(전체 A/S 현황의 유·무상에서 실제로 걸린 자리다).
     //    공백만 적힌 이름도 없는 것으로 접는다 — 보이지 않는 한 칸짜리 이름 때문에
     //    화면에는 빈칸인데 「미지정」에서 빠지는 줄이 생기면 안 된다.
-    if (filters.customerNames.length > 0) {
-      const name = foldBlankToNull(row.customerName) ?? MISC_CASE_UNASSIGNED_CUSTOMER_VALUE;
-      if (!filters.customerNames.includes(name)) return false;
+    //    🔵 그 접기 한 줄도 내자 정리 쪽 함수를 그대로 쓴다(2026-11-18) — 선택지를
+    //    만드는 쪽과 견주는 쪽이 같은 규칙이어야 하고, 이제 그 선택지도 저쪽이 만든다.
+    if (
+      filters.customerNames.length > 0 &&
+      !filters.customerNames.includes(domesticOrderCustomerFilterValue(row))
+    ) {
+      return false;
     }
     return true;
   });

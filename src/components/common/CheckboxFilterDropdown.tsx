@@ -26,12 +26,18 @@ import {
  * 이 칸 하나 때문에 묶음을 더하지 않는다. HTML + CSS + React 로 되는 일이고,
  * 늘어나는 것은 아래 useEffect 하나뿐이다.
  *
- * ── 🔴 **일곱 칸이 이것을 쓴다** ───────────────────────────────────────────
+ * ── 🔴 **아홉 칸이 이것을 쓴다** ───────────────────────────────────────────
  * [전체 A/S 현황]의 다섯(현재 상태·제품군·유·무상·고객사·우선순위)과 [기타건
- * 현황]의 둘(상태·공급처)이다 — 2026-11-11 에 일곱이 다 옮겨 왔다. 그래서
+ * 현황]의 둘(상태·공급처)이다 — 2026-11-11 에 일곱이 다 옮겨 왔다. 2026-11-18 에
+ * [내자 정리]의 둘(상태·고객사)이 더해져 아홉이다. 그래서
  *   · 값의 종류를 T 로 열어 두고(코드 문자열이면 무엇이든),
- *   · 단축 단추(shortcut)는 **없어도 그려지게** 했다 — 일곱 중 여섯은 없다.
+ *   · 단축 단추(shortcut)는 **없어도 그려지게** 했다 — 아홉 중 여덟은 없다.
  * 이 파일에 [현재 상태]만 아는 것(상태 코드·「입고품 전체」)을 적지 않는다.
+ *
+ * 🔴 **이름표 자리는 두 모양이고, 기본이 예전 모양이다**(labelPlacement). 필터
+ * 카드의 격자에 줄지어 서는 일곱은 이름이 칸 **위**(기본)이고, 이름이 옆에 붙은
+ * 조작들과 한 줄에 나란히 서는 [내자 정리]의 둘만 **옆**을 넘긴다. 사본을 하나 더
+ * 만들지 않은 까닭은 타입이 같아 둘이 갈라져도 tsc 가 영영 침묵하기 때문이다.
  *
  * ── 값으로 도는 규칙은 옆 파일에 ───────────────────────────────────────────
  * 닫힌 칸의 글자 · 체크를 눌렀을 때의 다음 값 · 바깥 누르기/Esc 로 접기는
@@ -58,7 +64,10 @@ export type CheckboxFilterShortcut<T extends string> = {
 };
 
 export type CheckboxFilterDropdownProps<T extends string> = {
-  /** 칸 이름. 칸 위에 적히고 펼친 목록의 이름표도 된다(예: 「현재 상태」). */
+  /**
+   * 칸 이름. 칸 위(기본) 또는 옆(labelPlacement="inline")에 적히고, 펼친 목록의
+   * 이름표도 된다(예: 「현재 상태」).
+   */
   label: string;
   options: readonly CheckboxFilterOption<T>[];
   /** 지금 고른 값들. **빈 배열이면 「전체」**다(아무것도 안 거는 것). */
@@ -69,8 +78,25 @@ export type CheckboxFilterDropdownProps<T extends string> = {
   /** 하나도 안 골랐을 때 닫힌 칸에 적히는 글자. 기본은 「전체」. */
   emptyLabel?: string;
   /**
+   * 칸 이름을 **어디에 두는가**(2026-11-18 사용자 결정 — 「전부 옆으로」).
+   *
+   * 🔴 **기본은 `"top"`(칸 위)이고, 그것이 이 부품이 처음부터 하던 모양이다.** 이
+   * 값을 안 넘기면 먼저 쓰고 있던 일곱 칸([전체 A/S 현황]의 다섯 · [기타건 현황]의
+   * 둘)은 한 픽셀도 바뀌지 않는다 — 그 일곱은 칸이 격자에 줄지어 서는 필터 카드
+   * 안에 있어, 이름이 위에 있어야 칸들의 왼쪽 끝이 맞는다.
+   *
+   * `"inline"` 은 이름표를 칸 **옆**에 둔다. **이름이 옆에 붙은 조작들과 한 줄에
+   * 나란히 서는 자리**를 위한 모양이다(내자 정리의 조작 줄 — 「검색」·「발주 년도」가
+   * 그 모양이다). 거기서는 위에 적힌 이름 하나가 그 칸만 한 줄치 높여 줄이
+   * 들쭉날쭉해지고, 이 화면은 위가 쓰고 남은 높이를 표가 받는 구조라 그 높이가
+   * 그대로 표에서 빠진다.
+   *
+   * 🔵 모양만 가른다 — 고르는 규칙도, 닫힌 칸의 글자도, 접는 길도 둘이 같다.
+   */
+  labelPlacement?: "top" | "inline";
+  /**
    * 여는 단추의 id. 안 주면 React 가 짓는다 — 화면에서 이 칸을 집어 가리킬 일이
-   * 있는 자리만 적어 준다(지금은 일곱 칸이 모두 적어 준다: 시험이 「어느 칸이
+   * 있는 자리만 적어 준다(지금은 아홉 칸이 모두 적어 준다: 시험이 「어느 칸이
    * 복수 선택인가」를 이 id 로 집는다).
    */
   id?: string;
@@ -79,6 +105,18 @@ export type CheckboxFilterDropdownProps<T extends string> = {
 const triggerClass =
   "flex w-full items-center justify-between gap-2 rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-left text-sm text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300";
 const labelClass = "text-xs text-zinc-500 dark:text-zinc-400";
+/**
+ * 이름표를 칸 **옆**에 둘 때의 모양(labelPlacement="inline").
+ *
+ * 글자를 위(text-xs · zinc-500)보다 크고 진하게 적는 것은 **옆에 서는 이름표는
+ * 칸의 일부처럼 읽히기 때문**이다 — 내자 정리의 조작 줄에서 이 칸은 「검색」·
+ * 「발주 년도」 <label> 과 나란히 서므로, 그 둘과 같은 크기·같은 색이라야 넷이 한
+ * 종류의 조작으로 보인다(그 화면의 label className 과 같은 글자다).
+ *
+ * shrink-0 은 줄이 좁아질 때 **이름표 대신 칸이 줄어들게** 한다. 없으면 「고객사」가
+ * 「고객…」으로 잘려, 무슨 필터인지 닫힌 채로는 알 수 없게 된다.
+ */
+const inlineLabelClass = "shrink-0 text-sm font-medium text-zinc-700 dark:text-zinc-300";
 
 /**
  * 단축 단추의 모양. **눌린 모습과 안 눌린 모습이 눈에 띄게 달라야** 한다 —
@@ -129,7 +167,7 @@ export function CheckboxFilterPanel<T extends string>({
       className="absolute left-0 right-0 top-full z-20 mt-1 rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
     >
       {/* 🔴 단축 단추는 **있을 수도 없을 수도** 있다. 없으면 목록만 그린다 —
-          이 부품을 쓰는 일곱 칸 가운데 여섯은 단축 단추가 없다(있는 것은 [전체
+          이 부품을 쓰는 아홉 칸 가운데 여덟은 단축 단추가 없다(있는 것은 [전체
           A/S 현황]의 [현재 상태] 하나다). */}
       {shortcut && (
         <>
@@ -182,7 +220,9 @@ export default function CheckboxFilterDropdown<T extends string>({
   shortcut,
   emptyLabel,
   id,
+  labelPlacement = "top",
 }: CheckboxFilterDropdownProps<T>) {
+  const isInlineLabel = labelPlacement === "inline";
   const [isOpen, setIsOpen] = useState(false);
   const generatedId = useId();
   const triggerId = id ?? `${generatedId}-trigger`;
@@ -216,15 +256,27 @@ export default function CheckboxFilterDropdown<T extends string>({
   const summary = selectionSummary(options, selected, emptyLabel);
 
   return (
-    <div className="flex flex-col gap-1">
+    // 🔴 **두 모양의 차이는 이 한 줄과 아래 두 줄뿐이다.** 위(기본)는 세로로
+    //    쌓고, 옆(inline)은 가로로 세운다 — 가지를 늘리지 않는 것은 이 칸을
+    //    아홉 자리가 함께 쓰기 때문이다(한쪽만 고쳐지는 일이 없어야 한다).
+    <div className={isInlineLabel ? "flex items-center gap-2" : "flex flex-col gap-1"}>
       {/* <label htmlFor> 이 아니라 <span> 이다 — 가리키는 곳이 입력칸이 아니라
           단추라, label 을 누르면 단추가 눌려 목록이 펼쳐졌다 접힌다. 대신
           aria-labelledby 로 단추와 목록에 이름을 붙인다. */}
-      <span id={labelId} className={labelClass}>
+      <span id={labelId} className={isInlineLabel ? inlineLabelClass : labelClass}>
         {label}
       </span>
 
-      <div ref={containerRef} className="relative">
+      {/* 🔴 펼친 목록이 기대는 `relative` 는 **이름표를 뺀 칸만** 덮는다 — 목록은
+          이 상자에 left-0 right-0 으로 붙으므로(CheckboxFilterPanel), 이름표까지
+          덮으면 목록이 이름표 아래에서 시작해 칸과 어긋난다.
+          옆 모양에서 flex-1 min-w-0 을 주는 까닭: flex 칸의 기본값은 min-width:auto
+          라 닫힌 칸의 글자가 길면(「완료됨 외 1개」) 칸이 안 줄어들고 이름표를
+          밀어낸다. 줄어들어야 truncate 가 일한다. */}
+      <div
+        ref={containerRef}
+        className={isInlineLabel ? "relative min-w-0 flex-1" : "relative"}
+      >
         <button
           ref={triggerRef}
           type="button"

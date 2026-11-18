@@ -1,3 +1,10 @@
+/**
+ * 🔵 「발주일 미정」은 **화면에 보이는 그 글자**를 그대로 쓴다 — 상태 거르개의 한
+ * 줄이 그 배지가 붙은 줄을 가리키는 것이라(아래 거르개 머리말), 두 곳에 따로
+ * 적으면 글자를 바꾼 날 필터 이름만 옛말로 남는다. 저쪽 파일은 아무것도 들여오지
+ * 않으므로 서로 부르는 고리가 생기지 않는다.
+ */
+import { NO_ORDER_DATE_LABEL } from "./domestic-order-display";
 import { normalizeEntityName } from "./entity-name-match";
 
 /**
@@ -386,6 +393,13 @@ function customerKeyOf(row: CustomerNamed): string | null {
  *
  * 고객사가 없는 묶음은 **맨 뒤** 하나다. 청구 상대가 아직 정해지지 않은 줄이라
  * 다른 고객사 사이에 끼워 두면 그 고객사의 건으로 읽힌다.
+ *
+ * 🔴 **발주발행일 세우기(2026-11-18)가 생긴 뒤에도 이 함수는 한 글자도 안 바뀌었다.**
+ * 다시 세우는 일은 이 함수가 내놓은 묶음을 받아 **따로** 하고
+ * (sortDomesticOrderGroupRowsByOrderIssuedDate), 세모를 누르지 않은 평상시에는 그
+ * 함수가 **아예 불리지 않는다.** 여기에 방향 인자를 받아 섞어 두지 않은 까닭이
+ * 그것이다 — 위 '묶음 안의 줄 순서도 원본 그대로'는 기본 상태에서 여전히 참이어야
+ * 하고, 한 함수가 두 일을 하면 그 사실을 따로 시험할 자리가 없어진다.
  */
 export function groupDomesticOrdersByCustomer<T extends CustomerNamed>(
   rows: readonly T[]
@@ -415,4 +429,291 @@ export function groupDomesticOrdersByCustomer<T extends CustomerNamed>(
   }
 
   return groups;
+}
+
+/**
+ * ============================================================================
+ * 🔴 거르개 둘(상태 · 고객사)과 발주발행일 세우기 (2026-11-18 사용자 요구)
+ * ============================================================================
+ * 원문: 「내자정리에 상태 필터, 고객사 필터를 드롭박스로 만들어주고 드롭박스에서는
+ * 복수 선택을 할 수 있도록 해줘. 상태 필터는 [완료됨, 미완료, 발주일 미정] 를
+ * 목록으로 둬줘. 그리고 목록에서 발주 발행일 옆에 작은 세모를 둬서 고객사 별로
+ * 발행일을 오름차순·내림차순으로 다시 정렬할 수 있도록 해줘. (고객사들이 섞이지
+ * 않게 고객사 안에서 정렬되도록 해줘.)」
+ *
+ * 모양은 [전체 A/S 현황]·[기타건 현황]의 거르개를 그대로 따른다 — 값은 언제나
+ * **코드**, 거르는 일은 **순수 함수**, 그리는 일은 화면
+ * (domain/repair-case-filters.ts · domain/misc-case-list.ts). 새 모양을 만들지 않는다.
+ *
+ * ── 🔴 **빈 배열이 「전체」**이고 `"ALL"` 같은 값은 두지 않는다 ──────────
+ * 2026-11-11 에 일곱 필터가 복수 선택으로 옮겨 가면서 같은 판단을 했다: `"ALL"` 을
+ * 두면 「"ALL" 이 들어 있는 배열」이라는 뜻 없는 상태가 생기고, 거르는 쪽이 매번
+ * 그것을 따로 가려내야 한다.
+ *
+ * ── 🔴 **한 종류 안에서는 합집합(OR)** 이다 ─────────────────────────────
+ * 상태를 둘 고르면 **둘 중 하나라도** 해당되는 줄이 남는다. 다른 화면의 복수 선택과
+ * 같은 규칙이고, 이 화면에서는 특히 그래야 한다 — 아래에 적듯 상태 셋이 서로
+ * 배타적이지 않아서, 교집합으로 두면 「완료됨 + 발주일 미정」이 **두 조건을 다
+ * 만족하는 줄**이라는 전혀 다른 뜻이 된다(그리고 사람은 그 뜻으로 고르지 않는다).
+ *
+ * ── 🔴 **상태 셋은 서로 배타적이지 않다** ───────────────────────────────
+ * 「완료됨」과 「미완료」는 completed_at 하나로 갈리는 반대쪽이지만,
+ * **「발주일 미정」은 그 둘과 겹친다** — 완료 처리에 「발주일이 적혀 있어야 한다」는
+ * 관문이 없어서(db/mutations/domestic-orders.ts 의 setDomesticOrderCompletion — 그
+ * 함수는 order_issued_date 를 읽지도 않는다), 발주일이 빈 채로 완료된 줄이
+ * 실제로 있을 수 있다. 그래서 셋을 「상태」라는 한 칸에 두되 OR 로 합친다.
+ *
+ * 🔵 그 결과 **「완료됨」과 「미완료」를 둘 다 고르면 전체**가 된다. 고장이 아니라
+ * 합집합의 당연한 결과이고, 그 조합을 막지 않는 까닭은 체크 둘을 켜 보는 사람에게
+ * 「이 조합은 안 됩니다」를 설명할 자리가 드롭다운에 없기 때문이다.
+ *
+ * ── 🔴 「발주일 미정」의 판정은 **배지와 같은 한 줄**이다 ────────────────
+ * `orderIssuedDate === null`. 화면의 OrderIssuedDateContent 가 바로 그 한 줄로 배지를
+ * 그린다 — **배지가 붙은 줄과 이 필터로 뽑히는 줄이 같아야** 사람이 필터를 믿는다.
+ * 여기서만 공백 접기(foldBlankToNull)를 더하면 화면에는 배지가 없는데 필터에는
+ * 걸리는 줄이 생기고, 그 어긋남은 오류 없이 조용히 산다.
+ * ============================================================================
+ */
+
+/** 상태 거르개의 값 셋. 차례가 곧 드롭다운에 서는 차례다. */
+export const DOMESTIC_ORDER_STATUS_FILTER_VALUES = [
+  "COMPLETED",
+  "INCOMPLETE",
+  "NO_ORDER_DATE",
+] as const;
+
+export type DomesticOrderStatusFilterValue = (typeof DOMESTIC_ORDER_STATUS_FILTER_VALUES)[number];
+
+/**
+ * 보일 글자. 「발주일 미정」만은 **화면이 이미 쓰는 상수**를 그대로 가져온다 —
+ * 그 글자는 발주발행일 칸의 배지에도 상세 화면에도 적히는 말이라, 여기 손으로
+ * 한 번 더 적으면 바꾸는 날 한 곳만 바뀐다(파일 머리의 import 주석).
+ */
+export const DOMESTIC_ORDER_STATUS_FILTER_LABELS: Record<DomesticOrderStatusFilterValue, string> = {
+  COMPLETED: "완료됨",
+  INCOMPLETE: "미완료",
+  NO_ORDER_DATE: NO_ORDER_DATE_LABEL,
+};
+
+/** 상태 거르개가 실제로 보는 칸 둘만 요구한다 — 이 파일의 다른 타입들과 같은 이유. */
+type StatusFilterable = Completable & OrderIssued;
+
+/**
+ * 이 줄이 그 상태 하나에 해당되는가. **한 값씩** 묻는 모양으로 떼어 둔 까닭은
+ * 합집합을 아래 한 줄로 적기 위해서이고(statuses.some), 그래야 「OR 인가」를
+ * 조합마다 따로 시험할 수 있다.
+ */
+export function matchesDomesticOrderStatusFilter(
+  row: StatusFilterable,
+  value: DomesticOrderStatusFilterValue
+): boolean {
+  switch (value) {
+    case "COMPLETED":
+      return isDomesticOrderCompleted(row);
+    case "INCOMPLETE":
+      return !isDomesticOrderCompleted(row);
+    case "NO_ORDER_DATE":
+      // 🔴 화면의 배지와 **같은 한 줄**이다(위 머리말). 공백 접기를 더하지 않는다.
+      return row.orderIssuedDate === null;
+  }
+}
+
+/**
+ * 고른 상태들 중 **하나라도** 해당되는 줄만 남긴다. 빈 배열이면 아무것도 거르지
+ * 않는다(= 전체).
+ *
+ * **입력 순서를 그대로 지킨다.** 이 표에는 사람이 매긴 순번이 있어서, 거르는 일이
+ * 줄을 다시 세우면 순번 칸과 눈에 보이는 차례가 조건을 걸 때만 어긋난다
+ * (filterDomesticOrdersByYear · filterDomesticOrdersBySearch 와 같은 규칙).
+ */
+export function filterDomesticOrdersByStatus<T extends StatusFilterable>(
+  rows: readonly T[],
+  statuses: readonly DomesticOrderStatusFilterValue[]
+): T[] {
+  if (statuses.length === 0) return [...rows];
+  return rows.filter((row) =>
+    statuses.some((status) => matchesDomesticOrderStatusFilter(row, status))
+  );
+}
+
+/**
+ * 고객사가 비어 있는 줄을 고르는 값. 이름이 `"NONE"` 인 고객사는 없다.
+ *
+ * 🔴 **id 가 아니라 이름으로 거른다.** 화면에 보이는 값이 이름이고(묶음 소제목이
+ * 그 이름이다), 이 표에는 고객사가 비어 있는 줄이 흔해서 그 줄을 고르는 길이
+ * 있어야 하는데 id 에는 그런 값이 없다 — 「기타건 현황」이 2026-11-06 에 같은
+ * 까닭으로 같은 선택을 했다(domain/misc-case-list.ts 의 그 머리말).
+ */
+export const DOMESTIC_ORDER_UNASSIGNED_CUSTOMER_VALUE = "NONE";
+
+/**
+ * 이 줄을 고객사 거르개의 어느 값으로 볼 것인가. 비어 있으면(공백만 적힌 것도
+ * 포함) `"NONE"` 이다.
+ *
+ * 🔴 **미지정을 따로 떼어 판정하지 않고 값 하나로 접는다.** 따로 두면 「가온전자와
+ * 미지정을 함께」 고른 조합에서 먼저 쓴 가지가 나중 가지를 잡아먹는다 — [전체 A/S
+ * 현황]의 유·무상에서 실제로 걸렸던 자리다.
+ */
+export function domesticOrderCustomerFilterValue(row: CustomerNamed): string {
+  return foldBlankToNull(row.customerName) ?? DOMESTIC_ORDER_UNASSIGNED_CUSTOMER_VALUE;
+}
+
+/**
+ * 고를 수 있는 고객사 — **자료에 실제로 있는 이름만**, 가나다순. 비어 있는 줄이
+ * 하나라도 있으면 맨 뒤에 「(고객사 미지정)」 한 줄을 둔다.
+ *
+ * 🔴 **고객사 마스터(customerOptions prop)를 쓰지 않는다.** 그 목록은 고칠 수 있는
+ * 세션에만 내려오므로(page.tsx), 그것으로 선택지를 만들면 **수정 권한이 없는 분에게
+ * 고객사 필터가 통째로 사라진다.** 그리고 마스터에는 이 표에 한 줄도 없는 고객사가
+ * 수백 들어 있어 대부분이 0건인 목록이 된다. [전체 A/S 현황]이
+ * collectCustomerFilterOptions 로, 「기타건 현황」이
+ * collectMiscCaseCustomerOptions 로 푼 그 문제다 — 「목록에 있으면 필터에도 있다」를
+ * 구조로 보장한다.
+ *
+ * 🔴 넘길 배열은 **거르기 전의 전체 줄**이어야 한다. 걸러진 뒤의 배열에서 뽑으면
+ * 고객사를 하나 고르는 순간 나머지가 선택지에서 사라져 되돌아갈 수 없다
+ * (CheckboxFilterPanel 은 선택지에 없는 값의 체크를 풀 칸을 그리지 못한다).
+ * 🔵 년도·검색도 **거르기 전**이다 — 2026년을 보다 고객사를 고르고 2025년으로
+ * 옮겼을 때 그 고객사가 선택지에서 사라지면, 걸린 조건을 풀 길이 없어진다.
+ *
+ * 🔵 「기타건 현황」의 collectMiscCaseCustomerOptions 가 이것을 그대로 부른다 —
+ * 기타건은 수리 건이 안 붙은 **내자 줄 그 자체**라 같은 규칙이고, 두 벌로 적으면
+ * 한쪽만 고쳐지는 날이 온다(그 파일이 검색 함수를 빌려 쓰는 것과 같은 까닭).
+ */
+export function collectDomesticOrderCustomerOptions(
+  rows: readonly CustomerNamed[]
+): { value: string; label: string }[] {
+  const names = new Set<string>();
+  let hasUnassigned = false;
+  for (const row of rows) {
+    const name = foldBlankToNull(row.customerName);
+    if (name === null) hasUnassigned = true;
+    else names.add(name);
+  }
+
+  const options = [...names]
+    .sort((a, b) => a.localeCompare(b))
+    .map((name) => ({ value: name, label: name }));
+
+  if (hasUnassigned) {
+    options.push({
+      value: DOMESTIC_ORDER_UNASSIGNED_CUSTOMER_VALUE,
+      // 묶음 소제목이 쓰는 **그 글자**다 — 필터에서 고른 이름과 표에 적힌 이름이
+      // 달라 보이면 안 된다.
+      label: UNASSIGNED_CUSTOMER_LABEL,
+    });
+  }
+  return options;
+}
+
+/**
+ * 고른 고객사들 중 **하나라도** 해당되는 줄만 남긴다. 빈 배열이면 아무것도 거르지
+ * 않는다(= 전체). 입력 순서는 그대로다(위 상태 거르개와 같은 규칙).
+ */
+export function filterDomesticOrdersByCustomerNames<T extends CustomerNamed>(
+  rows: readonly T[],
+  customerNames: readonly string[]
+): T[] {
+  if (customerNames.length === 0) return [...rows];
+  return rows.filter((row) => customerNames.includes(domesticOrderCustomerFilterValue(row)));
+}
+
+/**
+ * ============================================================================
+ * 🔴 발주발행일 세우기 — **묶음 안에서만**, 그리고 **기본은 꺼짐**
+ * ============================================================================
+ * ── 왜 기본이 꺼짐인가 ──────────────────────────────────────────────────
+ * 묶음 안의 차례는 **사람이 손으로 매긴 순번**(display_order)이고, 그 숫자가 표의
+ * `순번` 칸에 그대로 찍힌다. 발행일순으로 세우면 그 숫자가 1·7·3·12 처럼 뒤죽박죽
+ * 보인다 — 오류는 아니지만 처음 보는 사람은 자료가 망가진 것으로 읽는다. 그래서
+ * **세모를 누르기 전에는 이 함수가 아예 불리지 않고**, 화면은 지금과 한 글자도
+ * 다르지 않다(groupDomesticOrdersByCustomer 의 🔴 주석).
+ *
+ * 방향 인자에 null 을 받지 않는 것도 그 때문이다. 「꺼짐이면 그대로 돌려준다」를
+ * 이 함수 안에 두면 평상시에도 한 번은 불리게 되고, 그러면 「기본 상태에서 묶음 안
+ * 차례가 원본 그대로인가」가 이 함수의 정확성에 매달린다. 타입으로 못 박아 두면
+ * 부르는 쪽이 가지를 나눌 수밖에 없다.
+ *
+ * ── 🔴 묶음의 **차례**와 **머리**는 건드리지 않는다 ─────────────────────
+ * 사용자 요구가 「고객사들이 섞이지 않게 고객사 안에서」다. 묶음 자체를 다시 세우면
+ * 발행일이 이른 고객사가 통째로 위로 올라와, 늘 보던 고객사 차례가 바뀐다.
+ *
+ * ── 🔴 **날짜가 없는 줄은 오름·내림 어느 쪽에서도 맨 뒤**다 ──────────────
+ * 그 줄들은 발주발행일 칸에 「발주일 미정」 배지가 붙어 있는 줄이고, 날짜 축 위에
+ * 설 자리가 애초에 없다. 둘 중 하나를 골라야 한다면 **뒤**인 까닭:
+ *  · 방향을 뒤집을 때마다 앞뒤로 튀면 챙겨야 하는 그 줄들을 매번 다시 찾아야 한다.
+ *    어느 방향에서도 같은 자리에 있어야 눈이 외운다.
+ *  · 내림차순(최신이 위)에서 앞에 두면 **「가장 최근 건」으로 읽힌다** — 날짜가
+ *    없다는 사실이 정반대의 뜻으로 전해진다.
+ * 그 줄들끼리는 **원본 차례(순번) 그대로** 남는다.
+ *
+ * 🔵 빈 문자열·공백만 적힌 날짜도 같은 쪽으로 보낸다(foldBlankToNull — 이 파일이
+ * 비어 있음을 한 모양으로 접는 그 규칙). 글자 그대로 비교하면 ""(빈 글자)가 어떤
+ * 날짜보다도 앞서서, 오름차순 맨 위에 빈 칸이 줄줄이 서는 모습이 된다.
+ *
+ * ── 날짜는 **글자 그대로** 견준다 ───────────────────────────────────────
+ * "YYYY-MM-DD" 는 사전순이 곧 날짜순이다. new Date(...) 로 파싱하지 않는 까닭은
+ * 이 파일 머리말에 있다(날짜만 있는 문자열은 UTC 자정으로 읽혀 한국에서 하루
+ * 밀린다).
+ *
+ * ── 같은 날짜끼리는 **원본 차례 그대로**다 ──────────────────────────────
+ * Array.prototype.sort 는 ES2019 부터 안정 정렬이다. 한 날짜에 여러 줄이 걸리는
+ * 일이 흔한 표라(같은 발주서로 여러 품목), 여기서 차례가 흔들리면 세모를 누를
+ * 때마다 같은 묶음이 다르게 보인다.
+ * ============================================================================
+ */
+
+export type DomesticOrderOrderIssuedSortDirection = "asc" | "desc";
+
+/**
+ * 지금 세우기 상태. **null 이 꺼짐**이고, 꺼짐이 기본값이다.
+ */
+export type DomesticOrderOrderIssuedSort = DomesticOrderOrderIssuedSortDirection | null;
+
+/**
+ * 세모를 눌렀을 때의 **다음 상태** — 꺼짐 → 오름 → 내림 → 꺼짐.
+ *
+ * 🔵 [전체 A/S 현황]은 같은 자리에서 두 상태만 돈다(오름 ↔ 내림 — 그 화면의
+ * handleSortChange). **여기에만 세 번째 칸(꺼짐)이 있는 까닭**은 이 표에만
+ * 「되돌아갈 원래 차례」가 있기 때문이다: 저쪽의 기본 차례는 어차피 어느 칸으로
+ * 세운 결과라 끌 것이 없지만, 여기서는 사람이 손으로 매긴 순번이 기본이고 그것이
+ * 표의 `순번` 칸에 찍혀 있다. 끌 수 없으면 한 번 누른 사람이 그 차례로 돌아갈
+ * 길을 잃는다.
+ *
+ * 🔵 눈에 보이는 끄는 길은 따로 또 있다(화면의 「순번 차례로」 단추) — 세 번
+ * 눌러야 꺼진다는 것은 눌러 보기 전에는 알 수 없는 규칙이라, 그것 하나만 두면
+ * 사실상 끄는 길이 없는 것과 같다.
+ */
+export function nextDomesticOrderOrderIssuedSort(
+  current: DomesticOrderOrderIssuedSort
+): DomesticOrderOrderIssuedSort {
+  if (current === null) return "asc";
+  if (current === "asc") return "desc";
+  return null;
+}
+
+/**
+ * 묶음 **안의 줄만** 발주발행일순으로 다시 세운다. 묶음의 차례·이름·색은 그대로다.
+ *
+ * 원본 배열을 건드리지 않는다 — 받은 묶음은 useMemo 가 들고 있는 값이고, 제자리에서
+ * 뒤집으면 React 가 같은 참조를 보고 다시 그리지 않는다.
+ */
+export function sortDomesticOrderGroupRowsByOrderIssuedDate<T extends OrderIssued>(
+  groups: readonly DomesticOrderCustomerGroup<T>[],
+  direction: DomesticOrderOrderIssuedSortDirection
+): DomesticOrderCustomerGroup<T>[] {
+  const sign = direction === "asc" ? 1 : -1;
+  return groups.map((group) => ({
+    ...group,
+    rows: [...group.rows].sort((a, b) => {
+      const left = foldBlankToNull(a.orderIssuedDate);
+      const right = foldBlankToNull(b.orderIssuedDate);
+      // 날짜 없는 줄은 방향과 무관하게 뒤다(머리말) — 그래서 sign 을 곱하지 않는다.
+      if (left === null && right === null) return 0;
+      if (left === null) return 1;
+      if (right === null) return -1;
+      if (left === right) return 0;
+      return left < right ? -sign : sign;
+    }),
+  }));
 }

@@ -26,7 +26,10 @@ const SHORTCUT = {
   values: ["RECEIVED", "REPAIRING", "INSPECTING", "WAITING_SHIPMENT"],
 };
 
-function closed(selected: string[], extra: { shortcut?: typeof SHORTCUT } = {}) {
+function closed(
+  selected: string[],
+  extra: { shortcut?: typeof SHORTCUT; labelPlacement?: "top" | "inline" } = {}
+) {
   return renderToStaticMarkup(
     <CheckboxFilterDropdown
       label="현재 상태"
@@ -89,6 +92,62 @@ test("칸 이름이 <label for> 가 아니다 — 누르면 목록이 펼쳐졌�
   const html = closed([]);
   assert.ok(!html.includes("<label"), "칸 이름이 <label> 로 그려졌다");
   assert.ok(html.includes("aria-labelledby="), "이름을 붙이는 길이 아예 없다");
+});
+
+// ── 이름표 자리 두 모양 (2026-11-18 — 「전부 옆으로」) ─────────────────────
+//
+// 🔴 **여기서 가장 중요한 것은 「안 넘기면 예전 그대로인가」**다. 이 부품을 쓰는
+//    아홉 자리 가운데 일곱([전체 A/S 현황] 다섯 · [기타건 현황] 둘)은 이 prop 을
+//    넘기지 않으므로, 기본값이 바뀌면 그 일곱이 한꺼번에 모양을 바꾼다 — 오류는
+//    한 줄도 안 나고 화면에서만 드러난다.
+
+/** 바깥 상자와 이름표 <span> 의 class 를 뽑는다. */
+function shape(html: string) {
+  const outer = (html.match(/^<div class="([^"]*)"/) ?? [])[1];
+  assert.ok(outer, `바깥 상자의 class 를 못 찾았다 — 아래 단언이 공짜로 통과한다: ${html.slice(0, 120)}`);
+  const labelClass = (html.match(/<span[^>]*class="([^"]*)"/) ?? [])[1];
+  assert.ok(labelClass, "이름표 <span> 의 class 를 못 찾았다 — 아래 단언이 공짜로 통과한다");
+  return { outer, labelClass };
+}
+
+test("🔴 안 넘기면 이름표가 칸 **위**다 — 일곱 칸이 기대고 있는 기본값", () => {
+  const html = closed([]);
+  const { outer, labelClass } = shape(html);
+  assert.match(outer, /flex-col/, `바깥 상자가 세로로 쌓지 않는다: ${outer}`);
+  assert.match(labelClass, /text-xs/, `이름표 글자 크기가 달라졌다: ${labelClass}`);
+  // 🔴 **안 넘긴 것과 "top" 을 넘긴 것이 한 글자도 다르지 않아야** 한다. 기본값이
+  //    바뀌면 이 줄에서 깨진다.
+  assert.equal(html, closed([], { labelPlacement: "top" }));
+});
+
+test("🔴 inline 을 넘기면 이름표가 칸 **옆**이다 — 줄이 한 줄치 낮아진다", () => {
+  const html = closed([], { labelPlacement: "inline" });
+  const { outer, labelClass } = shape(html);
+  assert.ok(!outer.includes("flex-col"), `옆 모양인데 아직 세로로 쌓는다: ${outer}`);
+  assert.match(outer, /items-center/, `이름표와 칸의 높이가 안 맞는다: ${outer}`);
+  // 이름표는 옆에 선 다른 이름표(<label>)와 같은 크기·같은 색이라야 한 종류의
+  // 조작으로 읽힌다. 그리고 줄어드는 것은 이름표가 아니라 칸이어야 한다.
+  assert.match(labelClass, /text-sm/, `옆 이름표가 작은 글씨 그대로다: ${labelClass}`);
+  assert.match(labelClass, /shrink-0/, `좁아지면 이름표가 먼저 잘린다: ${labelClass}`);
+  // 🔴 칸 쪽이 줄어들려면 min-w-0 이 있어야 한다 — flex 칸의 기본값은
+  //    min-width:auto 라, 없으면 「완료됨 외 1개」가 이름표를 밀어낸다.
+  const field = (html.match(/<div class="([^"]*relative[^"]*)"/) ?? [])[1];
+  assert.ok(field, "펼친 목록이 기대는 relative 상자를 못 찾았다");
+  assert.match(field, /min-w-0/, `칸이 줄어들 수 없다: ${field}`);
+  assert.match(field, /flex-1/, `칸이 남은 자리를 안 채운다: ${field}`);
+});
+
+test("🔵 두 모양은 **겉모습만** 다르다 — 이름도 고른 것도 접힘도 그대로다", () => {
+  const top = closed(["RECEIVED", "REPAIRING"]);
+  const inline = closed(["RECEIVED", "REPAIRING"], { labelPlacement: "inline" });
+  assert.notEqual(top, inline, "두 모양이 같은 HTML 이다 — 아래 단언이 공짜로 통과한다");
+  for (const html of [top, inline]) {
+    assert.ok(html.includes("현재 상태"), "칸 이름이 사라졌다");
+    assert.ok(html.includes("접수 외 1개"), "닫힌 칸이 고른 것을 말하지 않는다");
+    assert.ok(html.includes('aria-expanded="false"'), "처음은 접힌 상태다");
+    assert.ok(html.includes("aria-labelledby="), "이름을 붙이는 길이 없다");
+    assert.ok(!html.includes("<label"), "칸 이름이 <label> 로 그려졌다");
+  }
 });
 
 // ─────────────────────────────────────────────── 펼친 목록
