@@ -60,6 +60,12 @@ import ShareDocContactFolderButton, { canSaveShareDocToContactFolder } from "./S
  *    자리(`rowAction`)에 단추만 얹으므로 구역에 `<ul>` 은 하나뿐이고, 줄의 생김새 ·
  *    [열기] 판정은 한 글자도 베끼지 않았다. 누르는 흐름 · 결과 문장은 전부
  *    ShareDocContactFolderButton 안에 있다(이 파일에 fetch 가 없다).
+ *  · 🔴 **넣은 뒤의 신호만 지나간다**(2026-11-18) — 넣기가 끝나면 단추가 부르는 콜백을
+ *    그대로 위로 올린다(onSavedToContactFolder). 넣는 자리는 **이 건의 연락서 폴더**이고
+ *    그 안을 보여 주는 구역은 이 구역이 아니라 위쪽 「공유폴더」(ContactFolderSection)라,
+ *    다시 읽으라고 말할 수 있는 자리는 둘을 함께 들고 있는 FilesScreen 뿐이다. 🔴 이
+ *    구역은 **아무것도 다시 읽지 않는다** — 받은 콜백을 지나 보내기만 하고, 안 받으면
+ *    저장만 되고 아무 일도 안 난다(다른 화면에 설 수 있다).
  * ============================================================================
  */
 
@@ -77,6 +83,7 @@ export default function CaseKindShareDocsSection({
   docs,
   repairCaseId,
   canCopyToContactFolder = false,
+  onSavedToContactFolder,
 }: {
   kind: ProductModelKind;
   /** 🔴 서버가 DB 에서 읽어 **보이는 차례 그대로** 넘긴 줄들. 여기서 다시 정렬하지 않는다. */
@@ -88,6 +95,11 @@ export default function CaseKindShareDocsSection({
    * 서버 컴포넌트가 구해 둔 참/거짓 하나다 — 화면이 직접 판정하지 않는다.
    */
   canCopyToContactFolder?: boolean;
+  /**
+   * 한 줄을 연락서 폴더에 넣은 **뒤** 한 번 불린다 — 위 「공유폴더」 구역을 다시 읽게
+   * 하는 신호다(머리말). 🔴 **선택이다**: 안 주면 저장은 그대로 되고 아무 일도 안 난다.
+   */
+  onSavedToContactFolder?: () => void;
 }) {
   // 🔴 한 줄도 없으면 구역 자체가 없다(머리말).
   if (docs.length === 0) return null;
@@ -124,7 +136,12 @@ export default function CaseKindShareDocsSection({
           copyIntoCaseId !== null &&
           // 🔴 폴더 줄 · 실행 파일 줄에는 안 그린다 — 판정은 단추 조각 한 자리다.
           canSaveShareDocToContactFolder(doc.entryKind, kindShareDocFileName(doc.relativePath)) ? (
-            <ShareDocContactFolderButton repairCaseId={copyIntoCaseId} relativePath={doc.relativePath} />
+            <ShareDocContactFolderButton
+              repairCaseId={copyIntoCaseId}
+              relativePath={doc.relativePath}
+              /* 🔴 받은 그대로 지나 보낸다 — 이 구역은 다시 읽는 일을 하지 않는다(머리말). */
+              onSavedToContactFolder={onSavedToContactFolder}
+            />
           ) : null
         }
       />

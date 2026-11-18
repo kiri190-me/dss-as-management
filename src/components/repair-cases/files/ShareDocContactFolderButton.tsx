@@ -57,6 +57,14 @@ import { saveShareDocToContactFolder } from "./share-doc-contact-folder-save";
  * 싣지 않는다: 그 팝업은 0.5 초 뒤 저절로 닫히는 성공 전용이라 읽어야 하는 문장을 담을
  * 자리가 아니다.
  *
+ * ── 🔴 넣고 나면 위 「공유폴더」 구역에 **다시 읽어라**고 알린다 (2026-11-18) ──
+ * 넣는 자리는 **이 건의 연락서 폴더**이고, 그 안을 보여 주는 구역이 같은 화면 위쪽에 있다
+ * (ContactFolderSection). 알리지 않으면 폴더는 실제로 생겼는데 화면에는 안 나타나 사람이
+ * 브라우저를 새로 고쳐야 한다 — 사용자가 그 일을 겪고 요청했다. 🔴 신호는 **숫자 하나**라
+ * (reloadToken) 그 구역이 **보고 있던 자리 그대로** 다시 읽는다.
+ * 🔴 **받은 콜백이 없으면 아무 일도 안 난다** — 저장은 그대로 된다. 이 단추는 지금 두
+ * 구역에서만 쓰지만, 다시 읽을 구역이 없는 화면에 서는 날 저장이 막히면 안 된다.
+ *
  * 🔴 **설정이 비거나 권한이 없으면 이 단추는 아예 그려지지 않는다** — 그 판정은 서버
  * 컴포넌트가 하고(files/page.tsx), 부르는 구역이 참일 때만 이 조각을 세운다. 여기서
  * 권한을 다시 판정하지 않는다(실제 차단은 통로가 다시 한다).
@@ -99,11 +107,18 @@ export type ShareDocContactFolderButtonProps = {
   repairCaseId: string;
   /** 🔴 공유폴더 루트 **기준 상대 경로** — 가리킴 한 줄이 들고 있는 값 그대로다. */
   relativePath: string;
+  /**
+   * 넣기가 **끝난 뒤** 한 번 불린다 — 위 「공유폴더」 구역을 다시 읽게 하는 신호다
+   * (머리말). [DATA에 저장]이 올리는 그 신호와 **같은 이름 · 같은 규율**이다.
+   * 🔴 **선택이다** — 안 주면 저장만 되고 아무 일도 일어나지 않는다.
+   */
+  onSavedToContactFolder?: () => void;
 };
 
 export default function ShareDocContactFolderButton({
   repairCaseId,
   relativePath,
+  onSavedToContactFolder,
 }: ShareDocContactFolderButtonProps) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<ContactFolderCopyNote | null>(null);
@@ -125,6 +140,14 @@ export default function ShareDocContactFolderButton({
       setNote(await saveShareDocToContactFolder({ repairCaseId, relativePath, category }));
     } finally {
       setBusy(false);
+      // 🔴 끝나면 **무조건** 알린다 — 넣었든 못 넣었든. [DATA에 저장]이 하는 그대로다
+      //    (StoredAttachmentList · ShrinkDownloadDialog 의 finally). 못 넣었을 때는 다시
+      //    읽어도 달라질 것이 없을 뿐이고, 다시 읽기가 실패해도 바로 아래 결과 한 줄은
+      //    그대로 남는다(그 구역만 「읽지 못했습니다」가 된다).
+      //    🔴 성공만 가려 부르면 **같은 구역을 다시 읽는 두 단추**의 규율이 갈라져 나중에
+      //    한쪽만 고쳐진다. 🔴 한 번 넣을 때 한 번만 간다 — 두 번째 누르기는 맨 위
+      //    `if (busy) return;` 에서 요청도 신호도 없이 돌아선다.
+      onSavedToContactFolder?.();
     }
   }
 

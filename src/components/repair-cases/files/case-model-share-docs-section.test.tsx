@@ -353,9 +353,10 @@ describe("⑧ 구역이 서는 자리 — 이웃들은 한 글자도 안 바뀌�
     const modelAt = filesScreen.indexOf("<CaseModelShareDocsSection");
     assert.ok(contactAt > 0 && kindAt > contactAt, "공유폴더 구역보다 앞에 섰다");
     assert.ok(modelAt > kindAt, "종류 구역보다 앞에 섰다");
-    // 🔴 2026-10-08 에 [연락서 폴더에 저장]이 붙으며 칸이 둘 늘었다 — **줄들은 그대로** 건넨다.
+    // 🔴 2026-10-08 에 [연락서 폴더에 저장]이 붙으며 칸이 둘 늘었고, 2026-11-18 에 **넣은 뒤
+    //    공유폴더 구역을 다시 읽게 하는 신호**가 하나 더 늘었다 — **줄들은 그대로** 건넨다.
     assert.ok(flat(filesScreen).includes("<CaseModelShareDocsSection docs={modelShareDocs}"), "줄들을 안 건넨다");
-    assert.ok(flat(filesScreen).includes("<CaseModelShareDocsSection docs={modelShareDocs} repairCaseId={resolved.id} canCopyToContactFolder={shareDocCopyEnabled} />"), filesScreen);
+    assert.ok(flat(filesScreen).includes("<CaseModelShareDocsSection docs={modelShareDocs} repairCaseId={resolved.id} canCopyToContactFolder={shareDocCopyEnabled} onSavedToContactFolder={() => setContactFolderReloadToken((token) => token + 1)} />"), filesScreen);
   });
 
   test("🔴 본보기(종류 구역)를 고치지 않았다 — 제 자리의 글자가 그대로다", () => {

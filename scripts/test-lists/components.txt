@@ -420,6 +420,14 @@ src/components/repair-cases/files/share-doc-contact-folder-save.test.ts
 # 물려받는 글자 모양(text-right·text-xs)을 창 안에서 끊는다.
 # DOM 이 없어 누를 수 없으므로 그려진 결과와 원본 글자로 가른다(StoredAttachmentList 와 같다).
 src/components/repair-cases/files/share-doc-folder-picker-dialog.test.tsx
+# 그 창에서 [저장]을 누른 **뒤** — 「공유폴더」 구역이 바로 다시 읽는가(2026-11-18 사용자 요구:
+# 「폴더를 정하고 저장을 누르면 [공유폴더]창에 그 폴더가 바로 보이도록」). 길은 이미 있었고
+# (올리기 · [DATA에 저장]이 쓰는 reloadToken) 빠진 것은 이 단추가 신호를 안 올리는 한 가지였다.
+# 🔴 재는 것: finally 라 성공·실패를 안 가린다([DATA에 저장]의 규율 그대로) · 올리는 자리가
+# 하나뿐이다(두 번 안 간다) · 🔴 [취소]는 한 번도 안 올린다 · 🔴 **두 구역이 다** 나른다 ·
+# 콜백을 안 주면 저장만 되고 화면이 한 글자도 안 달라진다 · 🔴 FilesScreen 이 두 구역에
+# 실제로 그 칸을 넘긴다(선이 끊기면 나머지가 다 통과하는데 화면에서만 안 된다).
+src/components/repair-cases/files/share-doc-contact-folder-reload.test.tsx
 
 # 파일 관리 탭의 **이 종류 공통 서류(공유폴더 가리킴)** 구역 — 「수리건 상세에서도 바로
 # 파일을 열 수 있도록」(2026-10-07 사용자 요구). 🔴 한 줄도 없으면 구역을 아예 안 그린다 ·

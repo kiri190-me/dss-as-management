@@ -66,6 +66,11 @@ import ShareDocContactFolderButton, { canSaveShareDocToContactFolder } from "./S
  * ShareDocContactFolderButton 안. 🔴 2026-11-18 부터 그 단추는 **어느 폴더에 넣을지 묻는
  * 창**을 먼저 띄우는데, 그 창도 저쪽 안이라 이 파일은 여전히 한 글자도 모른다.
  * 🔴 담기 · 지우기는 여전히 없다.
+ * 🔴 **넣은 뒤의 신호만 지나간다**(2026-11-18) — 넣기가 끝나면 단추가 부르는 콜백을 그대로
+ * 위로 올린다(onSavedToContactFolder). 넣는 자리는 **이 건의 연락서 폴더**이고 그 안을
+ * 보여 주는 구역은 맨 위 「공유폴더」(ContactFolderSection)라, 다시 읽으라고 말할 수 있는
+ * 자리는 둘을 함께 들고 있는 FilesScreen 뿐이다. 🔴 이 구역은 **아무것도 다시 읽지 않고**,
+ * 안 받으면 저장만 되고 아무 일도 안 난다 — 형제 구역과 한 글자도 다르지 않다.
  * ============================================================================
  */
 
@@ -82,6 +87,7 @@ export default function CaseModelShareDocsSection({
   docs,
   repairCaseId,
   canCopyToContactFolder = false,
+  onSavedToContactFolder,
 }: {
   /** 🔴 서버가 DB 에서 읽어 **보이는 차례 그대로** 넘긴 줄들. 여기서 다시 정렬하지 않는다. */
   docs: readonly ModelShareDocRow[];
@@ -92,6 +98,11 @@ export default function CaseModelShareDocsSection({
    * 서버 컴포넌트가 구해 둔 참/거짓 하나다 — 화면이 직접 판정하지 않는다.
    */
   canCopyToContactFolder?: boolean;
+  /**
+   * 한 줄을 연락서 폴더에 넣은 **뒤** 한 번 불린다 — 맨 위 「공유폴더」 구역을 다시 읽게
+   * 하는 신호다(머리말). 🔴 **선택이다**: 안 주면 저장은 그대로 되고 아무 일도 안 난다.
+   */
+  onSavedToContactFolder?: () => void;
 }) {
   // 🔴 한 줄도 없으면 구역 자체가 없다(머리말). 모델을 못 찾은 경우도 여기로 들어온다.
   if (docs.length === 0) return null;
@@ -128,7 +139,12 @@ export default function CaseModelShareDocsSection({
           copyIntoCaseId !== null &&
           // 🔴 폴더 줄 · 실행 파일 줄에는 안 그린다 — 판정은 단추 조각 한 자리다.
           canSaveShareDocToContactFolder(doc.entryKind, modelShareDocFileName(doc.relativePath)) ? (
-            <ShareDocContactFolderButton repairCaseId={copyIntoCaseId} relativePath={doc.relativePath} />
+            <ShareDocContactFolderButton
+              repairCaseId={copyIntoCaseId}
+              relativePath={doc.relativePath}
+              /* 🔴 받은 그대로 지나 보낸다 — 이 구역은 다시 읽는 일을 하지 않는다(머리말). */
+              onSavedToContactFolder={onSavedToContactFolder}
+            />
           ) : null
         }
       />

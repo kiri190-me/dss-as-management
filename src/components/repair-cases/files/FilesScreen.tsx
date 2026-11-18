@@ -1136,13 +1136,20 @@ function DatabaseFilesScreen({
 
         🔴 **더한 것은 하나뿐**이다(2026-10-08) — 줄의 [열기] 옆에 [연락서 폴더에 저장]이
         선다. 두 공유폴더가 둘 다 설정됐고 파일 권한이 있을 때만(shareDocCopyEnabled) 그려지고,
-        꽂는 자리는 접수 자동 복사와 같은 `공통` 폴더다. 담기 · 지우기는 여전히 없다.
+        꽂는 자리는 사람이 창에서 고른 폴더다(2026-11-18 — 기본은 `공통`). 담기 · 지우기는
+        여전히 없다.
+
+        🔴 넣고 나면 **바로 위 공유폴더 구역을 다시 읽게 한다**(2026-11-18) — [DATA에 저장] ·
+        올리기와 **같은 신호 · 같은 글자**다(reloadToken 이 하나 오르고, 보고 있던 자리는
+        그대로다). 넣는 자리가 이 건의 연락서 폴더라, 알리지 않으면 폴더는 실제로 생겼는데
+        화면에는 새로 고치기 전까지 안 나타난다(사용자가 겪고 요청했다).
       */}
       <CaseKindShareDocsSection
         kind={productModelKindOfWorkflowKind(workflowKindOf(resolved.workflowType))}
         docs={kindShareDocs}
         repairCaseId={resolved.id}
         canCopyToContactFolder={shareDocCopyEnabled}
+        onSavedToContactFolder={() => setContactFolderReloadToken((token) => token + 1)}
       />
 
       {/*
@@ -1156,12 +1163,16 @@ function DatabaseFilesScreen({
         서버가 getProductModelIdForProduct 로 잇고(files/page.tsx), 못 찾으면 빈 목록이
         와서 구역이 스스로 사라진다.
 
-        🔴 [연락서 폴더에 저장]도 **바로 위 구역과 똑같이** 받는다(2026-10-08).
+        🔴 [연락서 폴더에 저장]도 **바로 위 구역과 똑같이** 받는다(2026-10-08) — 넣은 뒤
+        공유폴더 구역을 다시 읽게 하는 신호까지 똑같다(2026-11-18). 🔴 **두 구역에 다**
+        건넨다: 한쪽만 이으면 그쪽에서 넣었을 때만 화면이 따라오고 다른 쪽은 여전히 새로
+        고쳐야 보인다.
       */}
       <CaseModelShareDocsSection
         docs={modelShareDocs}
         repairCaseId={resolved.id}
         canCopyToContactFolder={shareDocCopyEnabled}
+        onSavedToContactFolder={() => setContactFolderReloadToken((token) => token + 1)}
       />
 
       {trashedAttachments.length > 0 && (
