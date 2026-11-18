@@ -32,12 +32,24 @@ import {
   type AttachmentCategory,
 } from "@/lib/domain/attachment-category";
 import {
-  ATTACHMENT_EXTENSION_RULES,
   MAX_ATTACHMENT_SIZE_BYTES,
-  isCategoryOpenToAnyExtension,
   isExtensionAllowedForCategory,
   normalizeFileExtension,
 } from "@/lib/domain/attachment-allowlist";
+/**
+ * 아이폰 사진(heic)을 고를 수 있게 하고 보내기 전에 jpg 로 바꾸는 한 벌(2026-11-18).
+ * 🔴 허용목록은 한 글자도 안 바뀌었다 — 서버로 가는 것은 지금도 jpg 다(그쪽 머리말).
+ * `allowedExtensionsFor` 는 그 판정이 전부 이 목록에서 갈려서 함께 옮겨 갔다.
+ */
+import {
+  allowedExtensionsFor,
+  categoryTakesPhotos,
+  convertPickedHeic,
+  heicConversionNotice,
+  pickerAcceptAttribute,
+  HEIC_PICKER_HINT,
+} from "./heic-upload";
+import { convertHeicToJpeg } from "./heic-to-jpeg";
 import type {
   RepairCaseAttachmentListItem,
   TrashedAttachmentListItem,
@@ -165,8 +177,6 @@ export default function FilesScreen(props: {
 // 실제 저장
 // ============================================================================
 
-const ALL_EXTENSIONS = ATTACHMENT_EXTENSION_RULES.map((rule) => rule.extension);
-
 /**
  * 올리기 칸의 분류 선택지 — 접수 건 파일이 받는 분류만. 「스크린샷」은 개선 요청 글
  * 전용이라, 「파라미터」·「통전검사」는 제품 모델 전용이라 빠진다
@@ -178,20 +188,6 @@ const ALL_EXTENSIONS = ATTACHMENT_EXTENSION_RULES.map((rule) => rule.extension);
  * 이 화면은 고칠 것이 없었다.
  */
 const REPAIR_CASE_UPLOAD_CATEGORIES = attachmentCategoriesForOwner("REPAIR_CASE");
-
-/**
- * 이 분류가 받는 확장자 — **셀 수 있을 때만**. 형식을 가리지 않는 분류는 목록으로
- * 적을 수가 없어 null 이다.
- *
- * 🔴 **접수 건에도 그런 분류가 있다**(2026-09-30) — 「점검표」다. 실제로 인쇄한
- * 점검표를 기록으로 올리는 자리라 장비·양식마다 형식이 다르고, 그래서 실행 파일만
- * 빼고 다 받는다(attachment-allowlist.ts 의 ANY_EXTENSION_CATEGORIES). 모델 쪽
- * 화면(ProductModelFilesSection)의 같은 이름 함수와 한 벌이다.
- */
-function allowedExtensionsFor(category: AttachmentCategory): string[] | null {
-  if (isCategoryOpenToAnyExtension(category)) return null;
-  return ALL_EXTENSIONS.filter((extension) => isExtensionAllowedForCategory(extension, category));
-}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -279,6 +275,13 @@ function DatabaseFilesScreen({
   const [cameraUnavailableReason, setCameraUnavailableReason] = useState<string | null>(null);
   /** 여러 장을 차례로 올릴 때 몇 장째인지. 한 장일 때는 null이라 표시하지 않는다. */
   const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
+  /**
+   * 🔴 아이폰 사진을 jpg 로 **바꾸는 중**인지(2026-11-18). 올리기 진행 표시와 **다른
+   * 칸**이다 — 같은 칸을 돌려 쓰면 「올리는 중 3장째」가 떠 있는데 실제로는 아직 한
+   * 장도 안 보내고 사진을 굽고 있는 상태가 된다. 큰 사진은 한 장에 몇 초가 걸려서,
+   * 그때 아무 표시가 없으면 멈춘 줄 안다.
+   */
+  const [conversionProgress, setConversionProgress] = useState<{ current: number; total: number } | null>(null);
 
   // 지우기·되살리기 다이얼로그. 데모 화면이 쓰던 컴포넌트를 그대로 재사용한다.
   // 지우기는 **여러 건을 함께** 받는다 — 목록에서 여러 개를 골라 한 번에
@@ -400,11 +403,11 @@ function DatabaseFilesScreen({
    * 형식을 가리지 않는 분류에서는 **undefined** 다 — 빈 문자열이 아니다. 빈
    * 문자열을 넣으면 브라우저가 "받는 형식이 없다"로 읽어 고르는 창이 아무것도
    * 내놓지 않는 날이 있다. 속성을 아예 달지 않아야 모든 파일이 보인다.
+   *
+   * 🔴 사진을 받는 분류에는 `.heic,.heif` 가 뒤에 붙는다(2026-11-18 — heic-upload.ts).
+   * 앞의 목록은 지금까지와 한 글자도 다르지 않다 — 허용목록에서 뽑은 그대로다.
    */
-  const acceptAttribute = useMemo(
-    () => allowedExtensions?.map((extension) => `.${extension}`).join(","),
-    [allowedExtensions]
-  );
+  const acceptAttribute = useMemo(() => pickerAcceptAttribute(allowedExtensions), [allowedExtensions]);
   /**
    * 이 분류가 사진을 받는가 — 받을 때만 촬영 입력을 내민다.
    *
@@ -414,11 +417,12 @@ function DatabaseFilesScreen({
    *
    * 형식을 가리지 않는 분류(점검표)는 **참**이다 — jpg 도 받으므로 찍어서 올릴 수
    * 있고, 인쇄한 점검표를 폰으로 찍어 올리는 것이 그 분류의 실제 쓰임이다.
+   *
+   * 🔴 **아이폰 사진(heic)을 고를 수 있는지도 같은 값이 정한다**(2026-11-18). 판정을
+   * 둘로 두면 「촬영은 되는데 아이폰 사진은 못 고르는」 분류가 생기고, 그 어긋남은
+   * 오류 없이 화면에서만 드러난다. 그래서 이름도 촬영 전용에서 바꿨다.
    */
-  const cameraSupported = useMemo(
-    () => allowedExtensions === null || allowedExtensions.includes("jpg") || allowedExtensions.includes("jpeg"),
-    [allowedExtensions]
-  );
+  const takesPhotos = useMemo(() => categoryTakesPhotos(allowedExtensions), [allowedExtensions]);
   const totalBytes = useMemo(
     () => attachments.reduce((sum, item) => sum + item.fileSize, 0),
     [attachments]
@@ -618,6 +622,7 @@ function DatabaseFilesScreen({
     setIsUploading(true);
     setStatusMessage(null);
     setUploadProgress(null);
+    setConversionProgress(null);
 
     // 한 장씩 차례로 보낸다. 동시에 쏘면 서버가 같은 접수 건에 여러 파일을
     // 나란히 쓰게 되고, 어디까지 됐는지 사용자에게 보여 줄 방법도 없어진다.
@@ -636,11 +641,46 @@ function DatabaseFilesScreen({
      */
     const contactFolderCopies: ContactFolderCopyNote[] = [];
     let uploaded = 0;
+    /**
+     * 🔴 **보낼 목록.** heic 를 바꾸고 나면 여기서부터 갈린다 — 바뀐 장은 이름도
+     * 바이트도 다른 새 File 이고, 못 바꾼 장은 빠진다. heic 가 없으면 고른 그대로다.
+     */
+    let outgoing: File[] = [...files];
+    /** 바뀐 이름을 사람에게 알릴 한 줄(없으면 null). 아래 알림 칸으로 간다. */
+    let heicNotice: string | null = null;
 
     try {
-      for (const [index, file] of files.entries()) {
-        if (files.length > 1) {
-          setUploadProgress({ current: index + 1, total: files.length });
+      /**
+       * 🔴 **아이폰 사진(heic)은 보내기 전에 jpg 로 바꾼다**(2026-11-18 사용자 결정).
+       * 까닭·울타리는 heic-upload.ts 머리말 — 요약하면 크롬이 heic 를 못 그려서
+       * 그대로 저장하면 목록·뷰어·새 탭 어디서도 안 보이고, 서버에는 다시 구울
+       * 도구가 없다. 🔴 **허용목록은 안 바뀌었다** — 통로로 가는 것은 지금도 jpg 다.
+       *
+       * 🔴 **찍어 모아 둔 사진(fromCamera)은 이 길을 지나지 않는다.** 둘 다 까닭이
+       * 있다: InAppCamera 가 캔버스에서 만든 것이라 이미 image/jpeg 이고, 아래
+       * 올리기 고리가 `chosenPhotos[index]` 로 **차례를 맞춰** 쓰기 때문에 한 장이라도
+       * 빠지면 엉뚱한 사진이 「올렸다」 처리되어 목록에서 사라진다.
+       *
+       * 🔴 사진을 안 받는 분류(펌웨어·로그·오실로스코프 등)도 지나지 않는다 — 바꿔
+       * 봐야 그 분류가 jpg 를 안 받아 거절된다. 몇 초를 들여 바꾼 **뒤에** 거절하는
+       * 것이 가장 나쁘다.
+       */
+      if (!fromCamera && takesPhotos) {
+        const outcome = await convertPickedHeic(files, {
+          convert: convertHeicToJpeg,
+          onProgress: (current, total) => setConversionProgress({ current, total }),
+        });
+        outgoing = outcome.files;
+        // 못 바꾼 장은 올리기 실패와 **같은 목록**에 넣는다 — 아래 알림이 한 줄로
+        // 「무엇이 왜 빠졌는지」를 말한다(조용히 삼키지 않는다).
+        failures.push(...outcome.failures);
+        heicNotice = heicConversionNotice(outcome.renamed);
+        setConversionProgress(null);
+      }
+
+      for (const [index, file] of outgoing.entries()) {
+        if (outgoing.length > 1) {
+          setUploadProgress({ current: index + 1, total: outgoing.length });
         }
 
         const rejection = rejectionReasonFor(file);
@@ -677,24 +717,38 @@ function DatabaseFilesScreen({
        * (statusMessage)으로 보낸다. 기능이 꺼진 환경에서는 null 이라 예전 그대로다.
        */
       const copyNotice = contactFolderCopyNotice(contactFolderCopies);
+      /**
+       * 🔴 **화면에 남겨야 읽히는 줄들**을 한 자리에 모은다(공유폴더 결과 · 바뀐 이름).
+       * 저장 팝업은 0.5초 뒤 닫히는 성공 전용이라 이 글이 거기 실리면 안 된다.
+       *
+       * 🔴 바뀐 이름은 **올린 것이 있을 때만** 말한다 — 한 장도 못 올렸으면 「바꿔서
+       * 올렸습니다」가 거짓말이 되고, 못 바꾼 장은 이미 실패 목록에 제 까닭으로 적힌다.
+       */
+      const extraNotices = [uploaded > 0 ? heicNotice : null, copyNotice?.text ?? null].filter(
+        (part): part is string => part !== null
+      );
+      const extraText = extraNotices.length > 0 ? extraNotices.join(" / ") : null;
 
       if (uploaded > 0 && failures.length === 0) {
         const remaining = stagedPhotos.length - uploadedPhotoIds.length;
         // 다 올라갔으면 저장 팝업으로 알린다(접수 건 안에 딸린 것이라 머문다).
         // 몇 장이 빠진 경우는 무엇이 빠졌는지 읽어야 하므로 아래처럼 화면에 남긴다.
+        //
+        // 🔴 한 장일 때의 이름은 **보낸 이름**(outgoing)이다 — heic 를 골랐으면 목록에
+        //    뜨는 이름도 그 jpg 이름이라, 고른 이름을 적으면 둘이 어긋난다.
         const message = fromCamera
           ? `사진 ${uploaded}장을 올렸습니다.${remaining > 0 ? ` 고르지 않은 ${remaining}장은 그대로 있습니다.` : ""}`
-          : files.length === 1
-            ? `"${files[0].name}"을(를) 올렸습니다.`
+          : outgoing.length === 1
+            ? `"${outgoing[0].name}"을(를) 올렸습니다.`
             : `${uploaded}장을 모두 올렸습니다.`;
         showSavePopup({ message, redirectTo: null });
-        if (copyNotice) setStatusMessage({ type: copyNotice.tone, text: copyNotice.text });
+        if (extraText) setStatusMessage({ type: copyNotice?.tone ?? "success", text: extraText });
       } else if (uploaded > 0) {
         const text = `${uploaded}장을 올렸고 ${failures.length}장은 빠졌습니다 — ${failures
           .map((item) => `${item.name}(${item.reason})`)
           .join(", ")}`;
         // 올린 것 가운데 공유폴더에 못 들어간 것이 있으면 그 줄도 함께 남긴다.
-        setStatusMessage({ type: "error", text: copyNotice ? `${text} / ${copyNotice.text}` : text });
+        setStatusMessage({ type: "error", text: extraText ? `${text} / ${extraText}` : text });
       } else {
         setStatusMessage({
           type: "error",
@@ -752,6 +806,7 @@ function DatabaseFilesScreen({
     } finally {
       setIsUploading(false);
       setUploadProgress(null);
+      setConversionProgress(null);
     }
   }
 
@@ -898,10 +953,19 @@ function DatabaseFilesScreen({
                 <span className="text-xs text-zinc-500 dark:text-zinc-400">
                   폴더에서 이 칸 위로 끌어다 놓아도 됩니다.
                 </span>
+                {/*
+                  🔴 **이름이 바뀐다는 사실을 고르기 전에** 말한다(2026-11-18). 올리고
+                  나서야 알리면 사람은 목록에서 `IMG_1234.HEIC` 를 찾다가 못 찾는다.
+                  바꾼 뒤에도 한 번 더 알린다(heicConversionNotice) — 그때는 어떤
+                  이름이 어떤 이름이 됐는지까지 적는다.
+                */}
+                {takesPhotos && (
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">{HEIC_PICKER_HINT}</span>
+                )}
               </label>
             </FileDropZone>
 
-            {cameraSupported && (
+            {takesPhotos && (
               <div className="flex flex-col gap-1 rounded-md border border-dashed border-zinc-300 p-3 dark:border-zinc-700">
                 <span className="text-xs text-zinc-500 dark:text-zinc-400">휴대폰으로 바로 촬영</span>
                 {/*
@@ -1072,10 +1136,17 @@ function DatabaseFilesScreen({
                 disabled={isUploading}
                 className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
               >
+                {/*
+                  🔴 바꾸는 동안은 **다른 글자**가 선다(2026-11-18). 큰 사진은 한 장에
+                  몇 초가 걸리는데, 그때 「올리는 중」이라고 적어 두면 어디까지 갔는지
+                  알 수 없고 멈춘 것처럼 보인다 — 아직 한 장도 안 보낸 때다.
+                */}
                 {isUploading
-                  ? uploadProgress
-                    ? `올리는 중… ${uploadProgress.total}장 중 ${uploadProgress.current}장째`
-                    : "올리는 중…"
+                  ? conversionProgress
+                    ? `사진 바꾸는 중… ${conversionProgress.total}장 중 ${conversionProgress.current}장째`
+                    : uploadProgress
+                      ? `올리는 중… ${uploadProgress.total}장 중 ${uploadProgress.current}장째`
+                      : "올리는 중…"
                   : stagedPhotos.length > 0
                     ? `고른 ${selectedPhotoCount}장 올리기`
                     : "올리기"}

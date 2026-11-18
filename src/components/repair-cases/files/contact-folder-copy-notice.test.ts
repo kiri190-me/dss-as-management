@@ -219,9 +219,29 @@ describe("파일 관리 화면 — 공유폴더 줄을 어디에 내는가", () 
     assert.ok(popup >= 0, "저장 팝업이 사라졌다");
     // 팝업에 넘기는 문장에는 공유폴더 줄이 섞이지 않는다.
     assert.ok(upload.includes("showSavePopup({ message, redirectTo: null });"), "팝업에 실었다");
+    /*
+      🔴 2026-11-18 에 **같은 자리에 줄이 하나 더** 붙었다(아이폰 사진을 jpg 로 바꾸면
+      이름이 달라져, 그 사실을 알린다 — heic-upload.ts). 그래서 화면은 알림 칸에 보낼
+      줄들을 한 번 모은 뒤(extraNotices) 한 번에 보낸다.
+
+      🔴 **이 시험이 지키는 뜻은 그대로다** — 공유폴더 줄은 저장 팝업이 아니라 화면에
+      남는 알림 칸으로 간다. 모으는 자리에 `copyNotice` 의 글자가 들어가는지, 그 줄의
+      색(tone)을 여전히 공유폴더 결과가 정하는지를 그대로 본다. 단언을 약하게 하지
+      않으려고 **팝업 쪽에 그 글자가 안 실리는지**를 한 줄 더 넣었다.
+    */
     assert.ok(
-      upload.includes("if (copyNotice) setStatusMessage({ type: copyNotice.tone, text: copyNotice.text });"),
+      upload.includes("copyNotice?.text ?? null"),
+      "공유폴더 줄을 알림 칸으로 모으는 자리가 사라졌다"
+    );
+    assert.ok(
+      upload.includes(
+        'if (extraText) setStatusMessage({ type: copyNotice?.tone ?? "success", text: extraText });'
+      ),
       "알림 칸으로 보내지 않는다"
+    );
+    assert.ok(
+      !/showSavePopup\(\{[^}]*copyNotice/.test(upload),
+      "저장 팝업에 공유폴더 줄을 실었다 — 0.5 초 뒤 닫히는 자리다"
     );
   });
 
