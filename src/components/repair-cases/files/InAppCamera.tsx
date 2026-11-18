@@ -628,6 +628,11 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
   }
 
   // ── 닫혀 있을 때: 켜는 버튼만 ─────────────────────────────────────────
+  //
+  // 🔴 단추 옆 안내 한 줄(「켜 두고 셔터를 누르는 만큼 계속 찍힙니다.」)은 2026-11-18 에
+  //    없앴다 — 사용자 요청(「설명은 없어도 될 것 같아」)이다. 🔴 **동작은 그대로다**:
+  //    카메라는 여전히 켜 둔 채로 여러 장이 찍히고(이 파일 머리말의 그 설계), 찍은 수는
+  //    아래 「찍은 사진 N장」으로 드러난다. 없앤 것은 글 한 줄뿐이다.
   if (!isOpen) {
     return (
       <div className="flex flex-wrap items-center gap-2">
@@ -639,9 +644,6 @@ export default function InAppCamera({ onCapture, disabled = false, onUnavailable
         >
           {isStarting ? "카메라 준비 중…" : "카메라 켜기"}
         </button>
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">
-          켜 두고 셔터를 누르는 만큼 계속 찍힙니다.
-        </span>
       </div>
     );
   }

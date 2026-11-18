@@ -166,8 +166,23 @@ src/components/repair-cases/files/heic-upload.test.ts
 # 🔴 폭은 눈으로만 보인다 — DOM 도 Tailwind 도 없는 이 저장소의 화면 시험으로는 「375px
 # 에서 넘치는가」를 못 잰다. 이 파일이 막는 것은 고친 것이 도로 빠지는 일뿐이고, 진짜
 # 확인은 폰으로 그 화면을 여는 일이다. accept 배선은 바로 위 heic-upload.test.ts 가 이미
-# 보고 있어 다시 적지 않는다(heic 안내 줄이 **그려지는지**만 여기서 본다).
+# 보고 있어 다시 적지 않는다. 🔴 **heic 안내 줄은 그날 저녁에 없어졌다**(바로 아래
+# upload-file-name.test.ts 의 ①) — 그래서 이 파일의 마지막 절은 「그 줄이 그대로 있는가」가
+# 아니라 「**사라졌는가 · 지운 것이 글자뿐인가**」를 같은 강도로 잰다.
 src/components/repair-cases/files/upload-panel-width.test.ts
+# 🔴 [파일 올리기] 의 **[파일 이름 (선택)]**(2026-11-18 사용자 요청 둘이 한 조각이다).
+# ① 안내 문구 셋을 없앤다(heic 한 줄 · 앱 안 카메라 두 줄 — 「설명은 없어도 될 것 같아」).
+# ② 「[설명 (선택)]을 없애고 [파일 이름(선택)]으로 바꿔줘 … (1), (2) 로 번호가 붙도록」.
+# 🔴 이 파일이 가장 세게 지키는 셋: **비워 두면 한 글자도 안 달라진다**(안 적는 사람이
+# 대부분이고, 그때 이름이 조금이라도 바뀌면 목록에서 제 파일을 못 찾는다) · **경로 글자가
+# 막힌다**(이 이름은 표시용이 아니라 **연락서 폴더에 실제로 적히는 파일 이름**이 된다 —
+# 막는 자리는 「표시 이름 변경」 창과 같은 isSafeFileNameString 이고 그 사실도 값으로 잰다) ·
+# **설명을 안 죽였다**(목록·뷰어의 표시 · 「설명 수정」 · 통로가 description 을 받는 것이
+# 전부 그대로다. 없앤 것은 **올릴 때 적는 칸 하나**뿐이다).
+# 🔴 heic 와 만나는 차례도 여기서 못박는다 — 이름은 **구운 뒤**에 정해져야 확장자가 .jpg 가
+# 되고(거꾸로면 .heic 이름에 jpeg 바이트를 실어 보내 통로의 내용 대조에서 막힌다), 바뀐 이름
+# 알림의 「→ 뒤」도 최종 이름으로 다시 쓴다(안 그러면 목록에 없는 이름을 적는 거짓말이 된다).
+src/components/repair-cases/files/upload-file-name.test.ts
 src/components/repair-cases/approval/approval-screen-layout.test.tsx
 src/components/users/approval-route-section.test.ts
 # 견적서 목록은 2026-10-07(설계서 G절 조각 4)부터 **공용 묶음의 한 벌**을 쓴다

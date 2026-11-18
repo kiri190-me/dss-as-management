@@ -47,9 +47,20 @@ import {
   convertPickedHeic,
   heicConversionNotice,
   pickerAcceptAttribute,
-  HEIC_PICKER_HINT,
+  type HeicRename,
 } from "./heic-upload";
 import { convertHeicToJpeg } from "./heic-to-jpeg";
+/**
+ * 올릴 때 **파일 이름을 미리 정하는** 한 벌(2026-11-18 사용자 요청 — 「설명 (선택)」이
+ * 있던 자리다). 번호 규칙 · 확장자 · 막는 글자의 까닭은 전부 그쪽 머리말에 있고,
+ * 여기서는 **보내기 직전에 한 번** 부른다(아이폰 사진을 구운 뒤).
+ */
+import {
+  heicRenamesWithUploadNames,
+  uploadFileNameError,
+  uploadFileNamesFor,
+  UPLOAD_FILE_NAME_MAX_LENGTH,
+} from "./upload-file-name";
 import type {
   RepairCaseAttachmentListItem,
   TrashedAttachmentListItem,
@@ -229,7 +240,15 @@ function DatabaseFilesScreen({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [category, setCategory] = useState<AttachmentCategory>("INTAKE_PHOTO");
-  const [description, setDescription] = useState("");
+  /**
+   * 🔴 **저장될 파일 이름**(2026-11-18 사용자 요청). 2026-11-18 전까지 이 자리에는
+   * 「설명 (선택)」 칸이 있었다 — 그 칸만 없어졌고, **설명 자체는 그대로 산다**:
+   * 이미 적힌 설명은 목록·뷰어에 그대로 뜨고, 올리기 통로도 지금껏처럼 `description`
+   * 질의값을 받는다(route.ts). 화면이 더 이상 보내지 않을 뿐이다.
+   *
+   * 비워 두면 **지금까지와 똑같다** — 고른 파일의 이름이 그대로 올라간다.
+   */
+  const [fileName, setFileName] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
   /**
@@ -529,7 +548,14 @@ function DatabaseFilesScreen({
    * 부르는 쪽이 "다 끝났을 때"를 알 수 있어야 하기 때문이다(handleUpload).
    */
   async function uploadOne(
-    file: File
+    file: File,
+    /**
+     * 🔴 **저장될 이름.** 파일 객체의 이름이 아니라 따로 받는다 — 사람이 [파일 이름]
+     * 칸에 적었으면 거기에 번호까지 붙은 이름이고(upload-file-name.ts), 안 적었으면
+     * `file.name` 그대로다. 파일 객체를 새로 지어 이름만 바꾸지 않는 까닭은 바이트를
+     * 쥔 객체를 폰에서 한 벌 더 만들 일이 없어서다.
+     */
+    uploadName: string
   ): Promise<
     | { ok: true; previewUpload: Promise<void> | null; contactFolderCopy: ContactFolderCopyNote | null }
     | { ok: false; reason: string }
@@ -538,8 +564,11 @@ function DatabaseFilesScreen({
       // 본문은 파일 바이트 그 자체이고 메타데이터는 쿼리 문자열이다 —
       // multipart로 보내면 서버가 파일 전체를 메모리에 올려야 한다
       // (라우트 핸들러 주석 참조).
-      const query = new URLSearchParams({ category, fileName: file.name });
-      if (description.trim().length > 0) query.set("description", description.trim());
+      //
+      // 🔴 `description` 은 **더 이상 싣지 않는다**(2026-11-18 — 적는 칸이 없어졌다).
+      //    통로 쪽은 한 글자도 안 건드렸다. 받는 자리가 그대로 남아 있어야 다른 데서
+      //    부를 수 있고, 이미 적혀 있는 설명도 그대로 산다.
+      const query = new URLSearchParams({ category, fileName: uploadName });
 
       const response = await fetch(
         `/api/repair-cases/${encodeURIComponent(resolved.id)}/attachments?${query.toString()}`,
@@ -619,6 +648,17 @@ function DatabaseFilesScreen({
       return;
     }
 
+    /**
+     * 🔴 적어 둔 이름을 **아이폰 사진을 굽기 전에** 본다. 큰 사진 몇 장을 몇 초씩 들여
+     * 바꾼 **뒤에** 「이름에 / 가 있습니다」로 되돌리는 것이 가장 나쁘다. 진짜 이름
+     * 짓기는 굽고 난 뒤에 한 번 더 돈다(확장자가 거기서 갈린다).
+     */
+    const fileNameError = uploadFileNameError(fileName);
+    if (fileNameError) {
+      setStatusMessage({ type: "error", text: fileNameError });
+      return;
+    }
+
     setIsUploading(true);
     setStatusMessage(null);
     setUploadProgress(null);
@@ -648,6 +688,12 @@ function DatabaseFilesScreen({
     let outgoing: File[] = [...files];
     /** 바뀐 이름을 사람에게 알릴 한 줄(없으면 null). 아래 알림 칸으로 간다. */
     let heicNotice: string | null = null;
+    /**
+     * 아이폰 사진에서 **무엇이 무엇이 됐는지**. 🔴 알림 한 줄은 여기서 바로 짓지 않고
+     * **저장될 이름을 정한 뒤에** 짓는다 — 사람이 [파일 이름]을 적었으면 목록에 뜨는
+     * 것은 `IMG_1234.jpg` 가 아니라 그 이름이고, 그대로 적으면 안내가 거짓말이 된다.
+     */
+    let heicRenamed: readonly HeicRename[] = [];
 
     try {
       /**
@@ -674,9 +720,30 @@ function DatabaseFilesScreen({
         // 못 바꾼 장은 올리기 실패와 **같은 목록**에 넣는다 — 아래 알림이 한 줄로
         // 「무엇이 왜 빠졌는지」를 말한다(조용히 삼키지 않는다).
         failures.push(...outcome.failures);
-        heicNotice = heicConversionNotice(outcome.renamed);
+        heicRenamed = outcome.renamed;
         setConversionProgress(null);
       }
+
+      /**
+       * 🔴 **저장될 이름을 여기서 정한다**(2026-11-18) — 아이폰 사진을 구운 **뒤**다.
+       * 확장자가 그 자리에서 `.heic` → `.jpg` 로 갈리기 때문이고, 반대로 두면
+       * `보고서.heic` 라는 이름에 jpeg 바이트를 실어 보내 서버의 내용 대조에서 막힌다.
+       * 규칙(한 장이면 번호 없음 · 여럿이면 (1)(2) · 비면 그대로)은 upload-file-name.ts.
+       *
+       * 🔵 이 목록은 `outgoing` 과 **같은 길이 · 같은 차례**다 — 아래 고리가 index 로
+       *    짝을 맞춘다. 찍어 둔 사진 쪽이 `chosenPhotos[index]` 를 쓰는 것과 같은 줄이다.
+       */
+      const outgoingNames = outgoing.map((file) => file.name);
+      const naming = uploadFileNamesFor({ baseName: fileName, fileNames: outgoingNames });
+      if (!naming.ok) {
+        setStatusMessage({ type: "error", text: naming.message });
+        return;
+      }
+      const uploadNames = naming.names;
+      // 바뀐 이름 줄의 「→ 뒤」를 **최종 이름**으로 갈아 끼운 뒤에 짓는다(위 주석).
+      heicNotice = heicConversionNotice(
+        heicRenamesWithUploadNames(heicRenamed, outgoingNames, uploadNames)
+      );
 
       for (const [index, file] of outgoing.entries()) {
         if (outgoing.length > 1) {
@@ -685,11 +752,13 @@ function DatabaseFilesScreen({
 
         const rejection = rejectionReasonFor(file);
         if (rejection) {
+          // 🔵 빠진 장은 **고른 이름**으로 적는다 — 적어 둔 이름에 번호가 붙은 쪽
+          //    (`점검사진 (2).txt`)으로 말하면 사람이 어느 파일인지 다시 세어야 한다.
           failures.push({ name: file.name, reason: rejection });
           continue;
         }
 
-        const result = await uploadOne(file);
+        const result = await uploadOne(file, uploadNames[index]);
         if (result.ok) {
           uploaded += 1;
           if (result.previewUpload) previewUploads.push(result.previewUpload);
@@ -734,12 +803,13 @@ function DatabaseFilesScreen({
         // 다 올라갔으면 저장 팝업으로 알린다(접수 건 안에 딸린 것이라 머문다).
         // 몇 장이 빠진 경우는 무엇이 빠졌는지 읽어야 하므로 아래처럼 화면에 남긴다.
         //
-        // 🔴 한 장일 때의 이름은 **보낸 이름**(outgoing)이다 — heic 를 골랐으면 목록에
-        //    뜨는 이름도 그 jpg 이름이라, 고른 이름을 적으면 둘이 어긋난다.
+        // 🔴 한 장일 때의 이름은 **저장된 이름**(uploadNames)이다 — heic 를 골랐으면
+        //    목록에 뜨는 이름이 그 jpg 이름이고, [파일 이름]을 적었으면 그 이름이다.
+        //    고른 이름을 적으면 사람이 목록에서 그 이름을 찾다가 못 찾는다.
         const message = fromCamera
           ? `사진 ${uploaded}장을 올렸습니다.${remaining > 0 ? ` 고르지 않은 ${remaining}장은 그대로 있습니다.` : ""}`
           : outgoing.length === 1
-            ? `"${outgoing[0].name}"을(를) 올렸습니다.`
+            ? `"${uploadNames[0]}"을(를) 올렸습니다.`
             : `${uploaded}장을 모두 올렸습니다.`;
         showSavePopup({ message, redirectTo: null });
         if (extraText) setStatusMessage({ type: copyNotice?.tone ?? "success", text: extraText });
@@ -762,9 +832,11 @@ function DatabaseFilesScreen({
       }
 
       if (uploaded > 0) {
-        // 설명은 비운다 — 사진마다 다른 내용을 적는 칸이다. 분류는 그대로 두어
-        // 연달아 올릴 때 매번 다시 고르지 않게 한다(state가 따로라 유지된다).
-        setDescription("");
+        // 파일 이름은 비운다 — 장마다 다른 이름을 적는 칸이다. 그대로 두면 연달아
+        // 올릴 때 같은 이름이 또 붙어 목록에 같은 이름이 둘 선다(연락서 폴더 쪽은
+        // 겹치는 이름에 (2) 를 붙여 두 벌이 생긴다). 분류는 그대로 두어 연달아 올릴
+        // 때 매번 다시 고르지 않게 한다(state가 따로라 유지된다).
+        setFileName("");
         // 앨범에서 고른 파일은 비운다. 안 비우면 다음 업로드가 방금 올린 파일을
         // 다시 집어 같은 파일이 두 번 올라간다. (촬영 쪽은 위에서 올라간 것만
         // 골라 뺐고, 입력 자체는 촬영 때마다 이미 비워진다.)
@@ -857,7 +929,8 @@ function DatabaseFilesScreen({
           하면 접은 것이 오히려 불편해진다.
 
           안에 있는 것은 하나도 빼지 않았다 — 분류·파일 고르기·앱 안 카메라·
-          연속 촬영·설명이 그대로 있고, 접기만 씌웠다.
+          연속 촬영이 그대로 있고, 접기만 씌웠다. (「설명」 칸이 있던 자리는
+          2026-11-18 에 「파일 이름 (선택)」으로 바뀌었다 — 그 칸의 주석 참조.)
         */
         <details
           open={isUploadPanelOpen}
@@ -974,14 +1047,14 @@ function DatabaseFilesScreen({
                   폴더에서 이 칸 위로 끌어다 놓아도 됩니다.
                 </span>
                 {/*
-                  🔴 **이름이 바뀐다는 사실을 고르기 전에** 말한다(2026-11-18). 올리고
-                  나서야 알리면 사람은 목록에서 `IMG_1234.HEIC` 를 찾다가 못 찾는다.
-                  바꾼 뒤에도 한 번 더 알린다(heicConversionNotice) — 그때는 어떤
-                  이름이 어떤 이름이 됐는지까지 적는다.
+                  🔴 **안내 한 줄을 여기서 뺐다**(2026-11-18 사용자 요청 「설명은 없어도
+                  될 것 같아」). 아이폰 사진(.heic·.heif)이 올릴 때 .jpg 로 바뀐다는 줄을
+                  고르기 칸 아래에 달고 있었다. 🔴 **기능은 한 글자도 안 바뀌었다** —
+                  heic 는 지금도 고를 수 있고(accept), 보내기 전에 jpg 로 구워지고,
+                  **바꾼 뒤에는 그대로 알린다**(heicConversionNotice — 어떤 이름이 어떤
+                  이름이 됐는지까지 적는 그 줄이다). 미리 말하던 것을 그만두었을 뿐이라
+                  이름이 바뀐 사실이 묻히지는 않는다.
                 */}
-                {takesPhotos && (
-                  <span className="text-xs text-zinc-500 dark:text-zinc-400">{HEIC_PICKER_HINT}</span>
-                )}
               </label>
             </FileDropZone>
 
@@ -1000,24 +1073,21 @@ function DatabaseFilesScreen({
                 />
 
                 {/*
-                  앱 안 카메라는 미리보기 스트림이라 폰 기본 카메라 앱보다 해상도가
-                  낮다(InAppCamera.tsx 헤더 "두 가지 대가"). 화면에서는 그 차이가
-                  보이지 않아 각인·파형처럼 화질이 필요한 사진까지 여기서 찍게 되고,
-                  작게 저장된 것은 현장을 떠난 뒤에야 드러난다. 그래서 카메라가
-                  멀쩡할 때도 대체 경로를 늘 옆에 적어 둔다.
+                  🔴 **평소에 떠 있던 안내 한 줄을 뺐다**(2026-11-18 사용자 요청 「설명은
+                  없어도 될 것 같아」). 「각인·파형처럼 화질이 중요한 사진은 폰 기본
+                  카메라로 찍어 위 파일 칸에서 올려 주세요 — 앱 안 카메라는 미리보기
+                  화질이라 원본보다 작게 저장됩니다.」였고, 카메라가 멀쩡할 때도 늘 떠
+                  있었다.
 
-                  경고가 아니라 안내이므로 다른 설명문과 같은 회색을 쓴다 — 노란색은
-                  아래 "카메라를 못 쓴다" 쪽이 쓰고 있어, 같은 색이면 무언가 잘못된
-                  것으로 읽힌다. 그 안내가 떠 있을 때는 이 문구를 내지 않는다.
-                  거기에 이미 같은 말이 들어 있어 화면에 두 번 뜨기 때문이다.
+                  🔴 **그 사실 자체는 그대로다** — 앱 안 카메라가 미리보기 스트림이라
+                  폰 기본 카메라 앱보다 해상도가 낮다는 것(InAppCamera.tsx 머리말 「두
+                  가지 대가」)은 여전하고, 대체 경로(위 [파일] 칸)도 그대로 있다. 없앤
+                  것은 화면에 적던 글 한 줄뿐이다.
+
+                  🔴 **아래 노란 줄은 다른 것이다 — 남는다.** 그쪽은 카메라를 아예 못
+                  쓸 때만 뜨고(권한 거부 · 장치 없음), 그때는 찍을 길이 없으므로 파일
+                  칸으로 가라는 말이 **유일한 길 안내**가 된다.
                 */}
-                {!cameraUnavailableReason && (
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    각인·파형처럼 화질이 중요한 사진은 폰 기본 카메라로 찍어 위 <strong>파일</strong> 칸에서 올려 주세요 —
-                    앱 안 카메라는 미리보기 화질이라 원본보다 작게 저장됩니다.
-                  </p>
-                )}
-
                 {cameraUnavailableReason && (
                   <p className="text-xs text-amber-700 dark:text-amber-400">
                     {cameraUnavailableReason} 폰 기본 카메라로 찍은 뒤 위의 <strong>파일</strong> 칸에서 여러 장을 골라
@@ -1125,22 +1195,41 @@ function DatabaseFilesScreen({
               </div>
             )}
 
+            {/*
+              🔴 **2026-11-18 전까지 이 자리는 「설명 (선택)」이었다.** 사용자 요청으로
+              **저장될 파일 이름을 적는 칸**으로 바뀌었다 — 「그 의미는 저장되는 파일의
+              이름을 설정하는 거고 거기에 작성되는 이름에 (1), (2) 로 번호가 붙도록」.
+
+              🔴 **설명 기능을 없앤 것이 아니다.** 이미 적혀 있는 설명은 목록·뷰어에
+              그대로 뜨고(StoredAttachmentList · AttachmentViewer), 올리기 통로도 지금껏
+              처럼 `description` 질의값을 받는다. **올릴 때 적는 칸 하나**가 없어졌을
+              뿐이다.
+
+              🔴 적은 이름은 **표시 이름이면서 동시에 연락서 폴더에 적히는 파일 이름**이
+              된다(upload-file-name.ts 머리말). 그래서 경로 글자를 막는 일이 그냥 모양새
+              문제가 아니다 — 막는 자리는 「표시 이름 변경」 창과 **같은 함수**다.
+            */}
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">설명 (선택)</span>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">파일 이름 (선택)</span>
               <input
                 type="text"
-                value={description}
-                maxLength={500}
-                onChange={(event) => setDescription(event.target.value)}
+                value={fileName}
+                maxLength={UPLOAD_FILE_NAME_MAX_LENGTH}
+                onChange={(event) => setFileName(event.target.value)}
                 disabled={isUploading}
-                placeholder="예: 반입 당시 전면 패널 상태"
+                placeholder="예: 점검사진 (비워 두면 원래 파일 이름 그대로)"
                 className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
               />
             </label>
 
+            {/*
+              🔴 번호 규칙을 **사람이 보는 자리**에 적어 둔다. 적어 두지 않으면 한 장을
+              올린 사람이 「(1) 이 왜 안 붙지」로 읽는다 — 한 장이면 안 붙는 것이 규칙이다.
+              확장자는 고른 파일의 것이 그대로 따라붙으므로 적지 않아도 된다.
+            */}
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              여러 장을 한 번에 고르면 <strong>분류와 설명이 모두에 똑같이</strong> 붙습니다. 장마다 다르게 적으려면
-              나눠 올리세요.
+              여러 장을 한 번에 고르면 <strong>분류가 모두에 똑같이</strong> 붙고, 적어 둔 파일 이름 뒤에{" "}
+              <strong>(1) (2) 번호</strong>가 붙습니다. 한 장만 올리면 번호 없이 적은 이름 그대로입니다.
             </p>
 
             <p className="text-xs text-zinc-500 dark:text-zinc-400">

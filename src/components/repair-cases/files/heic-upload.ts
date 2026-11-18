@@ -94,9 +94,16 @@ export function categoryTakesPhotos(allowedExtensions: readonly string[] | null)
  */
 export const HEIC_PICKER_EXTENSIONS = ["heic", "heif"] as const;
 
-/** 고르는 창 아래에 적는 한 줄 — 🔴 **이름이 바뀐다는 사실을 미리** 말한다. */
-export const HEIC_PICKER_HINT =
-  "아이폰 사진(.heic·.heif)은 올릴 때 .jpg 로 바꿔서 저장합니다 — 원본 heic 는 남지 않습니다.";
+/*
+ * 🔴 **고르기 칸 아래 안내 한 줄(`HEIC_PICKER_HINT`)은 2026-11-18 에 없앴다** — 사용자
+ * 요청(「설명은 없어도 될 것 같아」)이다. 지운 글자 그대로는 이랬다:
+ *     "아이폰 사진(.heic·.heif)은 올릴 때 .jpg 로 바꿔서 저장합니다 — 원본 heic 는
+ *      남지 않습니다."
+ * 🔴 **기능은 한 글자도 안 바뀌었다.** heic 는 지금도 고를 수 있고(pickerAcceptAttribute),
+ * 보내기 전에 jpg 로 구워진다. 그리고 **바꾼 뒤에는 그대로 알린다** — 아래
+ * `heicConversionNotice` 가 어떤 이름이 어떤 이름이 됐는지까지 적는다. 없앤 것은
+ * 「미리」 말하던 쪽 하나뿐이다.
+ */
 
 /**
  * `<input type="file" accept=…>` 에 넣을 글자.

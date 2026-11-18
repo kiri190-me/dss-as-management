@@ -171,22 +171,40 @@ describe("🔵 왜 넘쳤나 — 드롭다운에 실리는 이름을 값으로 �
   });
 });
 
-describe("🔴 앞 조각(heic)이 놓은 것은 그대로다 — 이번에 다룬 것은 폭뿐이다", () => {
-  /** 고르기 칸 라벨 — 안내 줄이 그 안에 있다. */
+/**
+ * 🔴 **2026-11-18 에 이 자리의 뜻이 뒤집혔다.** 폭을 고친 그날 저녁, 사용자가 같은
+ * 패널의 안내 문구 셋을 「없어도 될 것 같아」로 걷어내라고 했다 — 그중 하나가 바로
+ * 여기서 「그대로 있는가」를 재던 heic 안내 줄이다. 시험을 느슨하게 지우지 않고
+ * **같은 강도로 반대쪽**을 못박는다: 이제 그 줄은 **없어야 한다**.
+ */
+describe("🔴 고르기 칸 아래 안내 줄은 없앴다 — 기능이 아니라 글자만 지운 자리다", () => {
+  /** 고르기 칸 라벨 — 안내 줄이 그 안에 있었다. */
   const fileLabel = zone.slice(zone.indexOf("파일 (여러 개 선택 가능)"));
 
-  test("고르기 칸 라벨 안에 heic 안내 줄이 그대로 있다", () => {
-    assert.ok(
-      fileLabel.includes("{takesPhotos && ("),
-      "안내 줄의 조건이 사라졌다 — 사진을 안 받는 분류에까지 뜬다"
-    );
-    assert.ok(
-      fileLabel.includes("{HEIC_PICKER_HINT}"),
-      "🔴 이름이 .jpg 로 바뀐다는 안내가 사라졌다 — 올린 사람이 목록에서 제 사진을 못 찾는다"
-    );
+  test("표본: 고르기 칸 라벨을 제대로 잘랐다 — 못 자르면 아래가 공짜로 통과한다", () => {
+    assert.ok(zone.includes("파일 (여러 개 선택 가능)"), "고르기 칸 라벨을 못 찾았다");
+    assert.ok(fileLabel.includes("ref={fileInputRef}"), "자른 것이 고르기 칸 라벨이 아니다");
+    // 남아 있어야 하는 안내 한 줄(끌어다 놓기)은 그대로다 — 「라벨 안의 글이 전부
+    // 사라졌다」가 아니라 **heic 줄만** 사라진 것이어야 한다.
+    assert.ok(fileLabel.includes("폴더에서 이 칸 위로 끌어다 놓아도 됩니다."), "끌어다 놓기 안내까지 사라졌다");
   });
 
-  test("안내 글귀 자체는 heic-upload.ts 에 있다 — 화면이 베껴 적지 않는다", () => {
-    assert.ok(!zone.includes("아이폰 사진("), "화면이 안내 글귀를 손으로 적고 있다 — 두 벌이 갈린다");
+  test("🔴 heic 안내 줄이 화면에서 사라졌다", () => {
+    assert.ok(!fileLabel.includes("HEIC_PICKER_HINT"), "안내 줄이 그대로 있다");
+    assert.ok(
+      !fileLabel.includes("원본 heic 는 남지 않습니다"),
+      "안내 글귀를 화면에 손으로 옮겨 적었다"
+    );
+    assert.ok(!zone.includes("아이폰 사진("), "상자 어딘가에 아이폰 사진 안내가 남아 있다");
+  });
+
+  test("🔴 지운 것은 글자뿐이다 — heic 를 고를 수 있는 길(accept)은 그대로다", () => {
+    assert.ok(
+      fileLabel.includes("accept={acceptAttribute}"),
+      "고르기 칸이 계산된 accept 를 안 쓴다 — heic 가 고르는 창에서 사라진다"
+    );
+    // 사진을 받는 분류인지 보는 값 자체는 화면에 그대로 있어야 한다. 변환을 거는
+    // 조건(`!fromCamera && takesPhotos`)이 그것을 쓴다 — heic-upload.test.ts 가 잰다.
+    assert.ok(screen.includes("const takesPhotos ="), "takesPhotos 판정이 사라졌다");
   });
 });

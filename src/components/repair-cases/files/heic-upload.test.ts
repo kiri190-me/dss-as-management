@@ -11,7 +11,6 @@ import {
 import {
   HEIC_CONVERT_FAILED_REASON,
   HEIC_PICKER_EXTENSIONS,
-  HEIC_PICKER_HINT,
   allowedExtensionsFor,
   categoryTakesPhotos,
   convertPickedHeic,
@@ -376,10 +375,23 @@ describe("사람에게 말하기 — 이름이 바뀐 사실을 숨기지 않는
     assert.ok(notice.includes("외 2장"), notice);
   });
 
-  test("고르기 칸 아래 한 줄이 **미리** 말한다", () => {
-    assert.ok(HEIC_PICKER_HINT.includes(".heic"), HEIC_PICKER_HINT);
-    assert.ok(HEIC_PICKER_HINT.includes(".jpg"), HEIC_PICKER_HINT);
-    assert.ok(HEIC_PICKER_HINT.includes("원본 heic 는 남지 않습니다"), HEIC_PICKER_HINT);
+  /**
+   * 🔴 **고르기 전에 미리 말하던 한 줄은 2026-11-18 에 없앴다**(사용자 요청 「설명은
+   * 없어도 될 것 같아」). 그 전까지 여기에는 `HEIC_PICKER_HINT` 가 「.heic 를 .jpg 로
+   * 바꿔 저장한다」고 적고 있는지 재는 시험이 있었다 — 상수가 사라졌으니 시험도 같은
+   * 강도로 **반대쪽**을 못박는다: 안 쓰는 글이 되살아나지 않는가, 그리고 **바꾼 뒤에
+   * 말하는 쪽은 그대로인가**(바로 위 세 시험이 그것을 잰다).
+   */
+  test("🔴 미리 말하던 상수가 되살아나지 않았다 — 안 쓰는 글이 남으면 다음 사람이 찾아 헤맨다", () => {
+    const source = read("heic-upload.ts");
+    assert.ok(!/export const HEIC_PICKER_HINT\b/.test(source), "HEIC_PICKER_HINT 가 다시 생겼다");
+    const screen = withoutComments(read("FilesScreen.tsx"));
+    assert.ok(!screen.includes("HEIC_PICKER_HINT"), "화면이 다시 그 줄을 그린다");
+    // 🔴 글귀를 화면에 손으로 옮겨 적어 되살리는 길도 함께 막는다.
+    assert.ok(
+      !screen.includes("원본 heic 는 남지 않습니다"),
+      "없앤 안내 글귀가 화면에 손으로 적혀 있다"
+    );
   });
 });
 
@@ -454,8 +466,16 @@ describe("🔴 화면이 이 규칙대로 배선돼 있다", () => {
   test("보내기 전에 바꾼다 — 진짜 변환기를 넘기고, 실패는 올리기 실패와 한 목록이다", () => {
     assert.ok(screenCode.includes("convert: convertHeicToJpeg"), "진짜 변환기를 안 넘긴다");
     assert.ok(screenCode.includes("failures.push(...outcome.failures)"), "변환 실패가 샌다");
+    // 🔴 2026-11-18 저녁에 **한 겹이 끼어들었다.** 같은 패널에 [파일 이름 (선택)] 이
+    //    생기면서, 이름을 적어 두면 목록에 뜨는 것이 `IMG_1234.jpg` 가 아니라 그 이름이
+    //    된다. 그래서 바뀐 이름 줄의 「→ 뒤」를 **최종 이름으로 갈아 끼운 뒤에** 알린다
+    //    (upload-file-name.ts 의 heicRenamesWithUploadNames — 안 그러면 사람이 목록에
+    //    없는 이름을 찾는다). 🔴 **알리는 일 자체는 그대로고, 빠지면 여기서 걸린다.**
+    assert.ok(screenCode.includes("heicRenamed = outcome.renamed"), "바뀐 이름을 안 모은다");
     assert.ok(
-      screenCode.includes("heicConversionNotice(outcome.renamed)"),
+      /heicNotice = heicConversionNotice\(\s*heicRenamesWithUploadNames\(heicRenamed,/.test(
+        screenCode
+      ),
       "바뀐 이름을 사람에게 안 알린다"
     );
     assert.ok(
