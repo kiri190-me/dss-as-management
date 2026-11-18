@@ -413,6 +413,13 @@ src/components/repair-cases/files/contact-folder-data-save.test.ts
 # 브라우저를 지나지 않는다) · 🔴 던지지 않고 · 🔴 모르는 모양은 「넣었습니다」가 되지 않는다 ·
 # 결과 문장이 [DATA에 저장] · 올리기와 **갈라져 있다**(어느 폴더를 열어야 하는지 알게).
 src/components/repair-cases/files/share-doc-contact-folder-save.test.ts
+# 그 단추가 누르면 띄우는 **고르는 창**(2026-11-18) — 사용자가 「공통 + 서류 분류만」을
+# 골랐다. 🔴 그리자마자 떠 있지 않다(눌러야 뜬다) · 🔴 열셋이 서고 기본 선택이 `공통` 이다 ·
+# 🔴 글자는 이름표 표에서 오고 사진 분류 · 데이터류는 한 칸도 없다 · 🔴 창은 제 손으로
+# 아무것도 보내지 않는다(fetch 도 통로 주소도 없다) · 🔴 [취소]는 닫기만 한다 · 🔴 줄에서
+# 물려받는 글자 모양(text-right·text-xs)을 창 안에서 끊는다.
+# DOM 이 없어 누를 수 없으므로 그려진 결과와 원본 글자로 가른다(StoredAttachmentList 와 같다).
+src/components/repair-cases/files/share-doc-folder-picker-dialog.test.tsx
 
 # 파일 관리 탭의 **이 종류 공통 서류(공유폴더 가리킴)** 구역 — 「수리건 상세에서도 바로
 # 파일을 열 수 있도록」(2026-10-07 사용자 요구). 🔴 한 줄도 없으면 구역을 아예 안 그린다 ·

@@ -656,6 +656,12 @@ src/app/api/repair-cases/*/purchase-order-folder/entries/route-source.test.ts
 # 검사도 단위 시험도 못 잡는다 — build 나 실제 화면에서만 드러나 사용자가 먼저 본다.
 src/app/server-client-boundary-source.test.ts
 src/lib/domain/contact-folder-naming.test.ts
+# [연락서 폴더에 저장]이 **고르게 하는 자리**(2026-11-18) — 사용자가 「공통 + 서류 분류만」을
+# 골랐다. 🔴 고를 거리가 열둘이고 차례가 전체 분류 목록의 차례 그대로다(기타는 맨 끝) ·
+# 🔴 사진 다섯 · 데이터류 넷 · 스크린샷 · 통전검사가 **정말로 없다** · 🔴 보일 글자를 베끼지
+# 않았다(이름표 표와 맞대어 잰다) · 🔴 창의 글자와 **서버가 만드는 폴더 이름**이 같다 ·
+# 🔴 안 고르면 `공통` 이고 목록 밖은 **거절**이다(「모르면 공통」으로 삼키지 않는다).
+src/lib/domain/contact-folder-save-targets.test.ts
 src/lib/storage/contact-folder-archive.test.ts
 src/lib/storage/contact-folder-archive-source.test.ts
 # 그 폴더를 **만드는** 쪽(조각 5). 찾기 시험과 한 모듈이지만, 만들기만 보는 시험이라

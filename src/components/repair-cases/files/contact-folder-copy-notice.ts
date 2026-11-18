@@ -1,3 +1,5 @@
+import { CONTACT_FOLDER_COMMON_FOLDER_NAME } from "@/lib/domain/contact-folder-naming";
+
 /**
  * ============================================================================
  * 올린 파일이 **공유폴더에도 들어갔는가** — 사실대로 말하는 한 줄 (연락서 조각 6)
@@ -69,9 +71,21 @@ export const CONTACT_FOLDER_COPY_CATEGORY_BLOCKED_TEXT =
 export const CONTACT_FOLDER_DATA_BLOCKED_TEXT =
   "DATA 자리에 같은 이름의 파일이 있어 연락서 폴더 바로 아래에 넣었습니다 — 탐색기에서 그 파일을 치워 주세요.";
 
-/** 같은 일이 `공통` 자리에서 일어났을 때(2026-10-08 — 가리킨 서류 가져오기). */
-export const CONTACT_FOLDER_COMMON_BLOCKED_TEXT =
-  "공통 자리에 같은 이름의 파일이 있어 연락서 폴더 바로 아래에 넣었습니다 — 탐색기에서 그 파일을 치워 주세요.";
+/**
+ * 같은 일이 **가리킨 서류 가져오기**의 하위 폴더 자리에서 일어났을 때(2026-10-08).
+ *
+ * 🔴 **폴더 이름을 받는다**(2026-11-18) — 넣을 자리를 사람이 고르게 되면서 `공통` 말고도
+ * 열둘이 올 수 있다. 「공통 자리에…」로 못 박아 두면 `견적서` 를 골라 넣었는데 화면만
+ * `공통` 을 가리켜, 사람이 엉뚱한 폴더를 열어 보고 파일이 없다고 여긴다.
+ */
+export function contactFolderSubfolderBlockedText(folderName: string): string {
+  return `${folderName} 자리에 같은 이름의 파일이 있어 연락서 폴더 바로 아래에 넣었습니다 — 탐색기에서 그 파일을 치워 주세요.`;
+}
+
+/** 그 가운데 `공통` 자리의 문장 — 글자가 2026-10-08 과 한 글자도 다르지 않다. */
+export const CONTACT_FOLDER_COMMON_BLOCKED_TEXT = contactFolderSubfolderBlockedText(
+  CONTACT_FOLDER_COMMON_FOLDER_NAME
+);
 
 const FAILED_PREFIX = "시스템에는 저장했지만";
 
@@ -183,19 +197,25 @@ export function contactFolderDataSaveNotice(
 /**
  * 가리킨 공유폴더 서류를 **이 건 폴더로 가져오기**의 결과(2026-10-08).
  *
- * 🔴 **또 말이 달라야 한다** — 이 길이 가는 곳은 `공통` 이다(올리기는 분류 폴더, 위
- * 단추는 `DATA`). 같은 문장을 쓰면 사람이 탐색기에서 어느 폴더를 열어야 할지 모른다.
+ * 🔴 **또 말이 달라야 한다** — 올리기는 그 파일의 분류 폴더로, 위 단추는 `DATA` 로 간다.
+ * 같은 문장을 쓰면 사람이 탐색기에서 어느 폴더를 열어야 할지 모른다.
  * 🔴 **몸통은 그대로 쓴다** — 「폴더가 없다 · 여럿이다」의 문장과 자리 밀림 처리가
  * 세 길에서 갈라지면 안 된다.
+ *
+ * 🔴 **넣은 폴더의 이름을 받는다**(2026-11-18) — 고르는 창이 생겨 `공통` 말고도 열둘이
+ * 올 수 있다. 안 주면 `공통` 이라 예전 문장 그대로다. 이름은 창이 내민 그 글자이고,
+ * 서버가 만드는 폴더 이름도 **같은 이름표**에서 나온다
+ * (domain/contact-folder-save-targets.ts 의 contactFolderSaveTargetLabel).
  */
 export function contactFolderShareDocSaveNotice(
-  notes: readonly ContactFolderCopyNote[]
+  notes: readonly ContactFolderCopyNote[],
+  folderName: string = CONTACT_FOLDER_COMMON_FOLDER_NAME
 ): ContactFolderCopyNotice | null {
   return buildNotice(notes, {
-    copied: "연락서 폴더의 공통 폴더에 넣었습니다",
-    unchanged: "공통 폴더에 같은 파일이 이미 있어 그대로 두었습니다",
+    copied: `연락서 폴더의 ${folderName} 폴더에 넣었습니다`,
+    unchanged: `${folderName} 폴더에 같은 파일이 이미 있어 그대로 두었습니다`,
     failedOne: "연락서 폴더에 넣지 못했습니다",
     failedMany: (count) => `${count}건은 연락서 폴더에 넣지 못했습니다`,
-    blocked: CONTACT_FOLDER_COMMON_BLOCKED_TEXT,
+    blocked: contactFolderSubfolderBlockedText(folderName),
   });
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { contactFolderShareDocSaveNotice } from "./contact-folder-copy-notice";
+import { contactFolderShareDocSaveNotice, type ContactFolderCopyNote } from "./contact-folder-copy-notice";
 import {
   saveShareDocToContactFolder,
   shareDocContactFolderSaveUrl,
@@ -14,10 +14,13 @@ import {
  * ============================================================================
  * fetch 를 바꿔 끼워 **네트워크 없이 값으로** 잰다. 못 박는 것:
  *  · 🔴 가리킨 자리는 `?path=` 로 가고 **싸진다**(공백 · 한글 · `/` 가 섞인 경로다)
+ *  · 🔴 **고른 폴더**는 `&category=` 로 가고, **안 고르면 칸이 아예 없다**(2026-11-18 —
+ *    아무것도 고르지 않은 사람의 요청이 2026-10-08 과 한 글자도 달라지지 않는다)
  *  · 🔴 **던지지 않는다** — 네트워크가 끊겨도 서버가 거절해도 note 하나로 끝난다
  *  · 🔴 **몸통을 보내지 않는다** — 바이트는 브라우저를 지나지 않는다
  *  · 🔴 모르는 모양의 응답은 「넣었습니다」가 되지 않는다
  *  · 결과 문장이 `DATA` · 올리기와 **갈라져 있다**(어느 폴더를 열어야 하는지 알게)
+ *  · 🔴 결과 문장이 **넣은 그 폴더**를 가리킨다 — `공통` 에 박혀 있지 않다
  * ============================================================================
  */
 
@@ -49,6 +52,20 @@ describe("① 통로 주소 — 가리킨 자리는 `?path=` 로 가고 싸인�
     assert.equal(url.includes(SOURCE), false, url);
     assert.equal(decodeURIComponent(url.split("?path=")[1]), SOURCE);
   });
+
+  test("🔴 **안 고르면 `category` 칸이 아예 없다** — 2026-10-08 의 주소 그대로다", () => {
+    // 주지 않았을 때와 `공통`(null)을 똑똑히 준 때가 같은 주소다.
+    assert.equal(shareDocContactFolderSaveUrl(CASE_ID, SOURCE, null), shareDocContactFolderSaveUrl(CASE_ID, SOURCE));
+    assert.equal(shareDocContactFolderSaveUrl(CASE_ID, SOURCE).includes("category"), false);
+  });
+
+  test("🔴 고른 폴더는 `&category=` 로 간다 — 경로 칸을 건드리지 않는다", () => {
+    const url = shareDocContactFolderSaveUrl(CASE_ID, SOURCE, "QUOTE");
+    assert.ok(url.endsWith("&category=QUOTE"), url);
+    // 앞의 `?path=` 는 한 글자도 달라지지 않는다.
+    assert.ok(url.startsWith(shareDocContactFolderSaveUrl(CASE_ID, SOURCE)), url);
+    assert.equal(decodeURIComponent(url.split("?path=")[1].split("&category=")[0]), SOURCE);
+  });
 });
 
 describe("② 🔴 몸통을 보내지 않는다 — 바이트는 브라우저를 지나지 않는다", () => {
@@ -60,6 +77,27 @@ describe("② 🔴 몸통을 보내지 않는다 — 바이트는 브라우저�
     assert.equal(calls.length, 1);
     assert.equal(calls[0].method, "POST");
     assert.equal(calls[0].url, shareDocContactFolderSaveUrl(CASE_ID, SOURCE));
+  });
+
+  test("🔴 고른 폴더를 **그 한 번의 요청에 실어** 보낸다 — 요청이 늘지 않는다", async () => {
+    const { impl, calls } = fetchReturning({ contactFolderCopy: { status: "copied", fileName: "체크시트.xlsx" } });
+    await saveShareDocToContactFolder({ repairCaseId: CASE_ID, relativePath: SOURCE, category: "CHECKLIST" }, impl);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, shareDocContactFolderSaveUrl(CASE_ID, SOURCE, "CHECKLIST"));
+    assert.ok(calls[0].url.includes("&category=CHECKLIST"), calls[0].url);
+  });
+
+  test("🔴 안 고르면(또는 `공통`) 주소가 **예전 그대로**다", async () => {
+    const { impl, calls } = fetchReturning({ contactFolderCopy: { status: "copied", fileName: "체크시트.xlsx" } });
+    await saveShareDocToContactFolder({ repairCaseId: CASE_ID, relativePath: SOURCE, category: null }, impl);
+    await saveShareDocToContactFolder({ repairCaseId: CASE_ID, relativePath: SOURCE }, impl);
+
+    assert.deepEqual(
+      calls.map((call) => call.url),
+      [shareDocContactFolderSaveUrl(CASE_ID, SOURCE), shareDocContactFolderSaveUrl(CASE_ID, SOURCE)]
+    );
+    assert.equal(calls[0].url.includes("category"), false, calls[0].url);
   });
 });
 
@@ -122,6 +160,40 @@ describe("④ 결과 문장 — 사람이 **어느 폴더를 열어야 하는지
       { status: "copied", fileName: "체크시트.xlsx", categoryFolderBlockedByFile: true },
     ]);
     assert.ok(blocked?.text.includes("공통 자리에 같은 이름의 파일"), blocked?.text);
+  });
+
+  test("🔴 **넣은 그 폴더**를 가리킨다 — 말이 `공통` 에 박혀 있지 않다(2026-11-18)", () => {
+    // 고른 자리를 함께 넘기면 문장이 그 폴더를 가리킨다 — 안 그러면 `견적서` 에 넣고도
+    // 화면은 `공통` 을 가리켜 사람이 빈 폴더를 열어 본다.
+    const copied = contactFolderShareDocSaveNotice([{ status: "copied", fileName: "견적서.xlsx" }], "견적서");
+    assert.equal(copied?.tone, "success");
+    assert.ok(copied?.text.includes("견적서 폴더에 넣었습니다"), copied?.text);
+    assert.equal(copied?.text.includes("공통"), false, copied?.text);
+
+    const unchanged = contactFolderShareDocSaveNotice([{ status: "unchanged", fileName: "점검표.xlsx" }], "점검표");
+    assert.ok(unchanged?.text.includes("점검표 폴더에 같은 파일이 이미 있어"), unchanged?.text);
+
+    // 자리를 막은 파일을 말할 때도 **그 폴더 이름**이다.
+    const blocked = contactFolderShareDocSaveNotice(
+      [{ status: "copied", fileName: "통문증.pdf", categoryFolderBlockedByFile: true }],
+      "통문증"
+    );
+    assert.ok(blocked?.text.includes("통문증 자리에 같은 이름의 파일"), blocked?.text);
+  });
+
+  test("🔴 안 넘기면 `공통` — 2026-10-08 의 문장과 한 글자도 다르지 않다", () => {
+    const notes: ContactFolderCopyNote[] = [
+      { status: "copied", fileName: "체크시트.xlsx" },
+      { status: "unchanged", fileName: "점검표.xlsx" },
+      { status: "copied", fileName: "회로도.pdf", categoryFolderBlockedByFile: true },
+    ];
+    for (const note of notes) {
+      assert.deepEqual(contactFolderShareDocSaveNotice([note]), contactFolderShareDocSaveNotice([note], "공통"));
+    }
+    assert.equal(
+      contactFolderShareDocSaveNotice([notes[0]])?.text,
+      "연락서 폴더의 공통 폴더에 넣었습니다 — 체크시트.xlsx"
+    );
   });
 
   test("🔴 [DATA에 저장] · 올리기와 **말이 겹치지 않는다**", async () => {

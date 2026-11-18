@@ -7,10 +7,13 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { recordContactFolderShareDocSaved } from "@/lib/db/mutations/contact-folders";
 import { getRepairCaseContactFolderKeyById } from "@/lib/db/queries/repair-cases";
+import { readContactFolderSaveTarget } from "@/lib/domain/contact-folder-save-targets";
 import { checkQuoteFolderRelativePath } from "@/lib/domain/quote-folder-link";
 import {
+  copyIntoContactFolder,
   copyIntoContactFolderCommonFolder,
   resolveContactFolderArchiveRoot,
+  type ContactFolderCopy,
 } from "@/lib/storage/contact-folder-archive";
 import {
   readRepairDocsFile,
@@ -24,14 +27,21 @@ import {
  * ============================================================================
  * 수리 건 상세 「파일 관리」의 두 구역 — 「그 종류의 공통 서류」와 「이 제품 모델 전용
  * 서류」 — 에서 한 줄의 [열기] 옆에 선 단추가 부른다. 그 줄이 가리킨 「1. 수리 관련」
- * 서류함의 파일을 서버가 읽어 **이 건의 연락서 폴더 `공통` 에 꽂는다.**
+ * 서류함의 파일을 서버가 읽어 **이 건의 연락서 폴더에 꽂는다.**
  *
- * ── 🔴 꽂는 자리는 접수 자동 복사와 **같은 자리**다 ─────────────────────
- * `copyIntoContactFolderCommonFolder` 는 2026-10-06 에 **접수가 종류 공통 서류를 넣으려고**
- * 만든 함수다. 이 통로는 그 흐름을 **나중에 손으로도** 하게 하는 것이라 자리가 같아야
- * 한다 — `DATA`(사람이 측정 자료를 넣는 자리)도, 올리기의 분류 이름표 폴더도 아니다.
- * 덮어쓰지 않기 · 같은 내용이면 안 쓰기 · NFC/NFD · 번호 비켜 가기 · 🔴 **연락서 폴더를
- * 만들지 않기**가 전부 그 함수 한 벌의 규율이고, 여기서 한 글자도 다시 적지 않는다.
+ * ── 🔴 **어느 폴더에 꽂는지는 사람이 고른다** (2026-11-18) ───────────────
+ * 2026-10-08 부터 이 통로는 `공통` 에만 꽂았다. 이제 단추를 누르면 창이 하나 뜨고, 사람이
+ * 고른 자리로 간다 — 🔴 **아무것도 고르지 않으면 `공통`** 이라 예전 동작 그대로다.
+ *  · `공통` → `copyIntoContactFolderCommonFolder`(접수 자동 복사가 쓰는 **그 함수**).
+ *  · 서류 분류 열둘 → `copyIntoContactFolder`(올리기가 쓰는 **그 함수**) — 분류의 한글
+ *    이름표 폴더(`견적서` · `점검표` …)에 꽂힌다. 🔴 **두 길 다 이미 있던 함수다** — 꽂는
+ *    규율을 이 통로가 새로 쓰지 않는다.
+ *  · 🔴 고를 거리는 **통로가 제 손으로** 가린다(domain/contact-folder-save-targets.ts).
+ *    주소는 아무 웹페이지나 만든다 — 「화면이 열둘만 내민다」는 울타리가 아니다.
+ *
+ * 덮어쓰지 않기 · 같은 내용이면 안 쓰기 · NFC/NFD · 번호 비켜 가기 · 하위 폴더는 없으면
+ * 만들기 · 🔴 **연락서 폴더는 만들지 않기**가 전부 그 함수 한 벌(둘이 같은 몸통을 지난다)의
+ * 규율이고, 여기서 한 글자도 다시 적지 않는다.
  *
  * ── 🔴 바이트는 브라우저로 나가지 않는다 ────────────────────────────────
  * 이 통로는 **내려받기가 아니다.** 서버가 읽어 곧바로 다른 폴더에 쓰고, 응답으로 나가는
@@ -60,7 +70,8 @@ import {
  *  1) 출처 → 2) 저장 모드 → 3) 세션 · 살아 있는 계정 · 승인
  *  → 4) 권한(repairCases.files WRITE) → 5) 🔴 두 공유폴더 설정(하나라도 비면 409,
  *  DB 도 디스크도 안 본다) → 6) 수리 건(휴지통이면 없는 것) → 7) 경로 검사
- *  → 8) 바이트 읽기 → 9) `공통` 에 꽂기 → 10) 감사(새로 꽂았을 때만) → 11) JSON
+ *  → 8) 🔴 고른 폴더 가리기(디스크를 보기 전이다 — 값이 틀렸으면 읽을 까닭이 없다)
+ *  → 9) 바이트 읽기 → 10) 고른 자리에 꽂기 → 11) 감사(새로 꽂았을 때만) → 12) JSON
  *
  * ── 권한 ────────────────────────────────────────────────────────────────
  * **`repairCases.files` WRITE** 다 — 🔴 새 권한을 만들지 않았다. 이 탭이 올리기 ·
@@ -89,6 +100,8 @@ type FailureCode =
   | "NOT_FOUND"
   /** 🔴 가리킨 자리가 규칙 밖이다 — 디스크를 보기 전에 끝난다. */
   | "INVALID_PATH"
+  /** 🔴 고를 수 없는 폴더를 보냈다 — 화면에 없는 값이다(역시 디스크를 보기 전이다). */
+  | "INVALID_CATEGORY"
   /** 그 자리에 아무것도 없다(바로가기도 여기로 모인다). */
   | "SOURCE_NOT_FOUND"
   /** 폴더를 가리킨 줄이다 — 폴더째 가져오지 않는다. */
@@ -178,7 +191,15 @@ export async function POST(
     return fail(400, "INVALID_PATH", "가리킨 자리가 올바르지 않습니다.");
   }
 
-  // ── 8) 바이트를 읽는다 — 🔴 상한 · 실행 파일 · 걷기는 저장소 모듈이 쥔다 ──
+  // ── 8) 어느 폴더에 꽂을 것인가 — 🔴 통로가 **제 손으로** 목록을 본다 ────
+  //    칸이 없으면 `공통` 이다(2026-10-08 부터의 동작 그대로). 목록 밖이면 400 —
+  //    「모르면 공통」으로 삼키면 사람이 고른 적 없는 폴더에서 파일을 찾게 된다.
+  const target = readContactFolderSaveTarget(request.nextUrl.searchParams.get("category"));
+  if (target === null) {
+    return fail(400, "INVALID_CATEGORY", "고를 수 없는 폴더입니다.");
+  }
+
+  // ── 9) 바이트를 읽는다 — 🔴 상한 · 실행 파일 · 걷기는 저장소 모듈이 쥔다 ──
   const read = await readRepairDocsFile({ relativePath: sourcePath });
   if (read.status === "rejected") {
     const mapped = REJECTION_RESPONSE[read.rejection];
@@ -195,14 +216,20 @@ export async function POST(
     return NextResponse.json({ contactFolderCopy: { status: "failed", reason: read.reason } }, { status: 200 });
   }
 
-  // ── 9) 꽂는다 — 🔴 `공통` 에. 연락서 폴더는 만들지 않는다(없으면 no-folder) ──
-  const result = await copyIntoContactFolderCommonFolder({
+  // ── 10) 꽂는다 — 🔴 **고른 자리에**. 연락서 폴더는 만들지 않는다(없으면 no-folder) ──
+  //    🔴 두 길에 **같은 재료**를 넘긴다 — 다른 것은 분류 하나뿐이다. 바이트를 두 번 적지
+  //    않는 것도 같은 까닭이다(바이트가 가는 자리가 늘면 원본 시험이 걸린다).
+  const copyInput = {
     intakeNumber: repairCase.intakeNumber,
     originalFileName: read.fileName,
     bytes: read.bytes,
-  });
+  };
+  const result: ContactFolderCopy =
+    target.kind === "category"
+      ? await copyIntoContactFolder({ ...copyInput, category: target.category })
+      : await copyIntoContactFolderCommonFolder(copyInput);
 
-  // ── 10) 감사 — 🔴 **이번에 새로 꽂았을 때만**(이웃 둘과 같은 규율) ──────
+  // ── 11) 감사 — 🔴 **이번에 새로 꽂았을 때만**(이웃 둘과 같은 규율) ──────
   if (result.status === "copied") {
     try {
       await recordContactFolderShareDocSaved({
@@ -225,13 +252,16 @@ export async function POST(
   return NextResponse.json({ contactFolderCopy: toNote(result) }, { status: 200 });
 }
 
-/** 저장 모듈의 결과를 **응답에 실어도 되는 모양**으로 줄인다(경로 · 폴더 이름을 뺀다). */
-function toNote(result: Awaited<ReturnType<typeof copyIntoContactFolderCommonFolder>>): ContactFolderCopyNote {
+/**
+ * 저장 모듈의 결과를 **응답에 실어도 되는 모양**으로 줄인다(경로 · 폴더 이름을 뺀다).
+ * 🔴 두 길(`공통` · 분류 폴더)이 **같은 모양**으로 답하므로 줄이는 자리도 하나다.
+ */
+function toNote(result: ContactFolderCopy): ContactFolderCopyNote {
   if (result.status === "copied" || result.status === "unchanged") {
     return {
       status: result.status,
       fileName: result.fileName,
-      // 🔴 `공통` 자리를 같은 이름의 **파일**이 막아 폴더 바로 아래로 비켜 갔는가.
+      // 🔴 꽂으려던 하위 폴더 자리를 같은 이름의 **파일**이 막아 폴더 바로 아래로 비켜 갔는가.
       categoryFolderBlockedByFile: result.categoryFolderBlockedByFile,
     };
   }

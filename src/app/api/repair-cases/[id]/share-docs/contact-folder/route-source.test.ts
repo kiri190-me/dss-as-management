@@ -11,8 +11,9 @@ import { describe, test } from "node:test";
  *
  *  · 🔴 **「1. 수리 관련」에 쓰지 않는다** — 운영에서 그 볼륨은 읽기 전용이다
  *  · 🔴 **바이트를 브라우저로 내보내지 않는다** — 스트림 · 내려받기 갈래가 없다
- *  · 🔴 꽂는 자리는 **`공통`** 이다(접수 자동 복사와 같은 자리 — `DATA` 도 분류 폴더도 아니다)
- *  · 🔴 **연락서 폴더를 만들지 않는다**
+ *  · 🔴 꽂는 자리는 **사람이 고른 폴더**다(2026-11-18) — 안 고르면 `공통` 이고, 길은
+ *    이미 있던 함수 **둘뿐**이며(`DATA` 로 새지 않는다), 목록 밖은 통로가 거절한다
+ *  · 🔴 **연락서 폴더를 만들지 않는다**(하위 폴더만 없으면 만든다 — 꽂는 함수의 규율)
  *  · 🔴 권한은 **이미 있는 문**이다(`repairCases.files` WRITE) — 새 권한이 없다
  *  · 🔴 설정이 **하나라도** 비면 DB 도 디스크도 안 본다
  *  · 🔴 화면이 보낸 경로를 **다시 본다** — 목록 통로가 쓰는 그 검사다
@@ -85,19 +86,52 @@ describe("[연락서 폴더에 저장] 통로 — 원본으로 지킨다", () =>
     assert.deepEqual(code.match(/read\.bytes[.\w]*/g)?.sort(), ["read.bytes", "read.bytes.byteLength"]);
   });
 
-  test("🔴 `공통` 에 꽂는다 — 접수 자동 복사와 **같은 함수**이고, 폴더를 만들지 않는다", () => {
-    assert.ok(code.includes("copyIntoContactFolderCommonFolder({"), "공통에 꽂는 함수를 안 쓴다");
-    assert.equal(code.match(/copyIntoContactFolderCommonFolder\(/g)?.length, 1, "꽂는 자리가 하나가 아니다");
-    // 🔴 다른 자리로 가는 길이 섞이지 않았다.
-    for (const forbidden of [
-      "copyIntoContactFolderDataFolder",
-      "copyIntoContactFolder(",
-      "contactFolderCategoryFolderName",
-      "CONTACT_FOLDER_DATA_FOLDER_NAME",
-    ]) {
+  test("🔴 **고른 폴더**에 꽂는다 — 안 고르면 `공통` · 길은 둘뿐 · 폴더를 만들지 않는다", () => {
+    // 🔴 2026-11-18 에 뒤집힌 자리다. 그 전에는 「`공통` 에만 꽂는다」가 지켜야 할 것이었고
+    //    이 시험이 그것을 원본 글자로 못 박고 있었다. 이제 지켜야 할 것은 **셋**이다:
+    //    고른 폴더로 간다 · 안 고르면 `공통` 이다 · 그래도 연락서 폴더는 만들지 않는다.
+
+    // ① 길은 **둘뿐**이고 둘 다 **이미 있던 함수**다 — 꽂는 규율을 통로가 새로 쓰지 않았다.
+    assert.ok(code.includes("copyIntoContactFolderCommonFolder(copyInput)"), "공통에 꽂는 함수를 안 쓴다");
+    assert.equal(code.match(/copyIntoContactFolderCommonFolder\(/g)?.length, 1, "공통에 꽂는 자리가 하나가 아니다");
+    assert.ok(
+      code.includes("copyIntoContactFolder({ ...copyInput, category: target.category })"),
+      "고른 분류 폴더에 꽂는 함수를 안 쓴다"
+    );
+    assert.equal(code.match(/\bcopyIntoContactFolder\(/g)?.length, 1, "분류 폴더에 꽂는 자리가 하나가 아니다");
+    // 🔴 꽂는 호출은 **그 둘이 전부**다 — 세 번째 자리가 생기면 여기서 걸린다.
+    assert.equal(code.match(/copyIntoContactFolder\w*\(/g)?.length, 2, "꽂는 자리가 둘이 아니다");
+    // 🔴 `DATA` 로 새는 길은 여전히 없다 — 사람이 측정 자료를 넣는 자리는 고를 거리가 아니다.
+    for (const forbidden of ["copyIntoContactFolderDataFolder", "CONTACT_FOLDER_DATA_FOLDER_NAME"]) {
       assert.equal(code.includes(forbidden), false, `다른 자리로 가는 길이 섞였다: ${forbidden}`);
     }
-    // 🔴 연락서 폴더를 만드는 길이 없다 — 없으면 `no-folder` 로 사람에게 말한다.
+
+    // ② 🔴 **안 고르면 `공통`** — 가르는 일을 통로가 제 손으로 적지 않고 domain 하나를 부른다.
+    assert.ok(postBody.includes("readContactFolderSaveTarget("), "고른 값을 가르는 함수를 안 쓴다");
+    assert.ok(
+      postBody.includes('readContactFolderSaveTarget(request.nextUrl.searchParams.get("category"))'),
+      "고른 값이 `?category=` 에서 오지 않는다"
+    );
+    assert.ok(postBody.includes('target.kind === "category"'), "고른 갈래로 가르지 않는다");
+    // 🔴 이름표 · 폴더 이름 · 분류 목록을 통로가 **베껴 적지 않았다**.
+    for (const forbidden of [
+      "contactFolderCategoryFolderName",
+      "attachmentCategoryLabels",
+      "ATTACHMENT_CATEGORY_CODES",
+      "INSPECTION_REPORT",
+      "CHECKLIST",
+      "공통",
+    ]) {
+      assert.equal(code.includes(forbidden), false, `통로가 목록 · 이름을 베꼈다: ${forbidden}`);
+    }
+
+    // ③ 🔴 **목록 밖은 거절한다** — 화면이 열둘만 내미는 것은 울타리가 아니다.
+    assert.ok(code.includes('fail(400, "INVALID_CATEGORY"'), "목록 밖을 거절하지 않는다");
+    const guard = postBody.indexOf("readContactFolderSaveTarget(");
+    assert.ok(guard >= 0 && guard < postBody.indexOf("readRepairDocsFile({"), "디스크를 읽은 뒤에 고른 값을 본다");
+
+    // ④ 🔴 연락서 폴더를 만드는 길이 없다 — 없으면 `no-folder` 로 사람에게 말한다.
+    //    (하위 폴더만 없으면 만든다 — 그것은 꽂는 두 함수가 함께 쓰는 몸통의 규율이다.)
     for (const forbidden of ["createContactFolder", "recordContactFolderCreated"]) {
       assert.equal(code.includes(forbidden), false, `폴더를 만든다: ${forbidden}`);
     }

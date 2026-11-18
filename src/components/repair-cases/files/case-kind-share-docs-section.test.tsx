@@ -338,6 +338,16 @@ describe("⑧ 🔴 더한 것 하나 — [연락서 폴더에 저장] (2026-10-0
     assert.equal(copyButtonCount(markupWithCopy([folderDoc, doc({ id: "d", entryKind: "FOLDER" })])), 0);
   });
 
+  test("🔴 고르는 창은 **줄마다 떠 있지 않다** — 눌러야 뜬다(2026-11-18)", () => {
+    // 단추가 창을 띄우게 되었다(ShareDocFolderPickerDialog). 그 창이 줄마다 미리 서 있으면
+    // 목록 하나에 라디오가 수십 개 깔리고 바탕 가림막이 화면을 덮는다.
+    const html = markupWithCopy([doc({ id: "a" }), doc({ id: "b", relativePath: `${INSIDE}/작업 수순.pdf` })]);
+    assert.equal(copyButtonCount(html), 2, html);
+    assert.equal(html.includes('role="dialog"'), false, "창이 처음부터 떠 있다");
+    assert.equal(html.includes("data-share-doc-folder-picker"), false, html);
+    assert.equal(html.includes('type="radio"'), false, html);
+  });
+
   test("🔴 [열기]를 못 그리는 줄에도 단추는 선다 — 두 판정은 다른 물건이다", () => {
     // 맨 위 칸의 파일은 도우미 주소를 만들 수 없어 [열기]가 없다 — 그래도 가져올 수는 있다.
     const top = doc({ relativePath: "체크시트.xlsx" });

@@ -414,6 +414,16 @@ describe("⑨ 🔴 더한 것 하나 — [연락서 폴더에 저장] (2026-10-0
     assert.equal(copyButtonCount(markupWithCopy([folderDoc, doc({ id: "d", entryKind: "FOLDER" })])), 0);
   });
 
+  test("🔴 고르는 창은 **줄마다 떠 있지 않다** — 눌러야 뜬다(2026-11-18)", () => {
+    // 형제 구역과 같은 규율이다 — 창이 줄마다 미리 서 있으면 목록 하나에 라디오가 수십 개
+    // 깔리고 바탕 가림막이 화면을 덮는다.
+    const html = markupWithCopy([doc({ id: "a" }), doc({ id: "b", relativePath: `${INSIDE}/MBK200 파라미터.xlsx` })]);
+    assert.equal(copyButtonCount(html), 2, html);
+    assert.equal(html.includes('role="dialog"'), false, "창이 처음부터 떠 있다");
+    assert.equal(html.includes("data-share-doc-folder-picker"), false, html);
+    assert.equal(html.includes('type="radio"'), false, html);
+  });
+
   test("🔴 [열기]를 못 그리는 줄에도 단추는 선다 — 두 판정은 다른 물건이다", () => {
     const top = doc({ relativePath: "회로도.pdf" });
     assert.equal(canOpenModelShareDoc(top), false);

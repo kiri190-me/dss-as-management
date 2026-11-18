@@ -1,5 +1,6 @@
 "use client";
 
+import type { ContactFolderSaveTargetCategory } from "@/lib/domain/contact-folder-save-targets";
 import { readContactFolderCopyNote, type ContactFolderCopyNote } from "./contact-folder-copy-notice";
 
 /**
@@ -20,21 +21,37 @@ import { readContactFolderCopyNote, type ContactFolderCopyNote } from "./contact
  * 🔴 **다른 것은 보내는 값 하나**다 — 첨부 id 가 아니라 **공유폴더 루트 기준 상대 경로**다.
  * 그 값은 서버가 다시 검사한다(통로 머리말 — 화면이 보낸 경로를 믿지 않는다).
  *
+ * ── 🔴 **어느 폴더에 넣을지** 함께 보낸다 (2026-11-18) ───────────────────
+ * 고르는 창이 생기면서 값이 하나 늘었다 — `?category=`. 🔴 **`공통` 이면 붙이지 않는다**:
+ * 아무것도 고르지 않은 사람의 요청이 2026-10-08 과 **한 글자도 달라지지 않게** 하려는
+ * 것이고, 통로의 기본값도 그래서 `공통` 이다. 고른 값이 쓸 수 있는 것인지는 **서버가 제
+ * 손으로** 다시 본다(domain/contact-folder-save-targets.ts).
+ *
  * fetch 를 바꿔 끼울 수 있다 — 네트워크 없이 값으로 시험한다.
  * ============================================================================
  */
 
-/** 통로 주소. 가리킨 자리는 `?path=` 로 간다(목록 통로 둘과 같은 모양). */
-export function shareDocContactFolderSaveUrl(repairCaseId: string, relativePath: string): string {
-  return `/api/repair-cases/${encodeURIComponent(repairCaseId)}/share-docs/contact-folder?path=${encodeURIComponent(
+/**
+ * 통로 주소. 가리킨 자리는 `?path=` 로 간다(목록 통로 둘과 같은 모양).
+ * 🔴 고른 분류는 `&category=` 로 붙고, **`공통`(null)이면 칸 자체가 없다**(머리말).
+ */
+export function shareDocContactFolderSaveUrl(
+  repairCaseId: string,
+  relativePath: string,
+  category: ContactFolderSaveTargetCategory | null = null
+): string {
+  const url = `/api/repair-cases/${encodeURIComponent(repairCaseId)}/share-docs/contact-folder?path=${encodeURIComponent(
     relativePath
   )}`;
+  return category === null ? url : `${url}&category=${encodeURIComponent(category)}`;
 }
 
 export type ShareDocSaveRequest = {
   repairCaseId: string;
   /** 🔴 공유폴더 루트 **기준 상대 경로**. 가리킴 한 줄이 들고 있는 값 그대로다. */
   relativePath: string;
+  /** 🔴 사람이 고른 폴더. **`null`(또는 안 줌)이면 `공통`** — 지금까지와 같다. */
+  category?: ContactFolderSaveTargetCategory | null;
 };
 
 type ShareDocSaveResponse = {
@@ -70,9 +87,10 @@ export async function saveShareDocToContactFolder(
 ): Promise<ContactFolderCopyNote> {
   let response: ShareDocSaveResponse;
   try {
-    response = await fetchImpl(shareDocContactFolderSaveUrl(request.repairCaseId, request.relativePath), {
-      method: "POST",
-    });
+    response = await fetchImpl(
+      shareDocContactFolderSaveUrl(request.repairCaseId, request.relativePath, request.category ?? null),
+      { method: "POST" }
+    );
   } catch {
     return { status: "failed", reason: NETWORK_FAILED_REASON };
   }

@@ -63,7 +63,9 @@ import ShareDocContactFolderButton, { canSaveShareDocToContactFolder } from "./S
  * (CaseKindShareDocsSection)과 한 글자도 다르지 않다** — 폴더 줄 · 실행 파일 줄에는 안
  * 그림 · 설정과 권한이 거짓이면 아예 안 그림 · 줄은 저 조각이 그대로 그리고 그것이 열어
  * 둔 자리에 얹기만 함(구역에 `<ul>` 은 하나다) · 누르는 흐름과 결과 문장은
- * ShareDocContactFolderButton 안. 🔴 담기 · 지우기는 여전히 없다.
+ * ShareDocContactFolderButton 안. 🔴 2026-11-18 부터 그 단추는 **어느 폴더에 넣을지 묻는
+ * 창**을 먼저 띄우는데, 그 창도 저쪽 안이라 이 파일은 여전히 한 글자도 모른다.
+ * 🔴 담기 · 지우기는 여전히 없다.
  * ============================================================================
  */
 

@@ -3,7 +3,12 @@
 import { useState } from "react";
 
 import { isExecutableExtension, normalizeFileExtension } from "@/lib/domain/attachment-allowlist";
+import {
+  contactFolderSaveTargetLabel,
+  type ContactFolderSaveTargetCategory,
+} from "@/lib/domain/contact-folder-save-targets";
 import { contactFolderShareDocSaveNotice, type ContactFolderCopyNote } from "./contact-folder-copy-notice";
+import ShareDocFolderPickerDialog from "./ShareDocFolderPickerDialog";
 import { saveShareDocToContactFolder } from "./share-doc-contact-folder-save";
 
 /**
@@ -12,7 +17,16 @@ import { saveShareDocToContactFolder } from "./share-doc-contact-folder-save";
  * ============================================================================
  * 수리 건 상세 「파일 관리」의 두 구역 — 「그 종류의 공통 서류」와 「이 제품 모델 전용
  * 서류」 — 에서 **[열기] 옆**에 선다. 누르면 그 줄이 가리킨 「1. 수리 관련」 서류함의
- * 파일이 **이 건의 연락서 폴더 `공통` 폴더**에 들어간다.
+ * 파일이 **이 건의 연락서 폴더**에 들어간다.
+ *
+ * ── 🔴 누르면 **먼저 고르는 창**이 뜬다 (2026-11-18) ────────────────────
+ * 2026-10-08 에는 누르는 즉시 `공통` 에 꽂았다. 이제 창이 하나 서고
+ * (ShareDocFolderPickerDialog — `공통` + 서류 분류 열둘), 거기서 [저장]을 눌러야 요청이
+ * 나간다. 🔴 **아무것도 고르지 않으면 `공통`** 이라 늘 하던 일은 한 걸음도 길어지지 않고,
+ * 🔴 **[취소]면 요청이 한 번도 나가지 않는다**(창을 닫을 뿐이다).
+ *
+ * 🔴 **고를 거리를 이 파일이 정하지 않는다** — 목록도 이름표도 창도 아니고
+ * domain/contact-folder-save-targets.ts 한 자리에서 온다.
  *
  * ── 🔴 [열기]와 **다른 물건**이다 ───────────────────────────────────────
  *  · [열기]는 **이 PC 의 도우미**가 하는 일이라 Windows 가 아니면 단추가 없다.
@@ -36,8 +50,10 @@ import { saveShareDocToContactFolder } from "./share-doc-contact-folder-save";
  *
  * ── 🔴 결과를 그 줄 옆에서 말한다 ───────────────────────────────────────
  * 넣었다 / 같은 내용이 이미 있다 / 연락서 폴더가 없다(만드는 길을 가리킨다) / 맞는
- * 폴더가 여럿이다 — 문장은 **[DATA에 저장]과 같은 몸통**에서 나온다(말만 `공통` 쪽이다 —
- * contact-folder-copy-notice.ts 의 contactFolderShareDocSaveNotice). 🔴 저장 팝업에
+ * 폴더가 여럿이다 — 문장은 **[DATA에 저장]과 같은 몸통**에서 나온다
+ * (contact-folder-copy-notice.ts 의 contactFolderShareDocSaveNotice). 🔴 **넣은 폴더
+ * 이름을 그 문장에 함께 넘긴다** — 고른 자리가 열셋이라, 말이 `공통` 에 박혀 있으면
+ * `견적서` 에 넣고도 화면은 `공통` 을 가리켜 사람이 빈 폴더를 열어 본다. 🔴 저장 팝업에
  * 싣지 않는다: 그 팝업은 0.5 초 뒤 저절로 닫히는 성공 전용이라 읽어야 하는 문장을 담을
  * 자리가 아니다.
  *
@@ -51,8 +67,9 @@ import { saveShareDocToContactFolder } from "./share-doc-contact-folder-save";
 
 export const SHARE_DOC_CONTACT_FOLDER_SAVE_TEXT = "연락서 폴더에 저장";
 export const SHARE_DOC_CONTACT_FOLDER_SAVE_BUSY_TEXT = "넣는 중…";
+/** 🔴 「어느 폴더에 들어가는가」를 묻는 창이 먼저 뜬다는 사실까지 적는다(2026-11-18). */
 export const SHARE_DOC_CONTACT_FOLDER_SAVE_TITLE =
-  "이 서류의 사본을 이 건의 연락서 폴더 「공통」 폴더에 넣습니다 — 공유폴더의 원본은 그대로입니다";
+  "넣을 폴더를 고른 뒤 이 서류의 사본을 이 건의 연락서 폴더에 넣습니다 — 공유폴더의 원본은 그대로입니다";
 
 const BUTTON_CLASS =
   "rounded border border-zinc-300 px-1.5 py-0.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800";
@@ -90,29 +107,39 @@ export default function ShareDocContactFolderButton({
 }: ShareDocContactFolderButtonProps) {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<ContactFolderCopyNote | null>(null);
+  /** 창이 떠 있는가. 🔴 처음에는 닫혀 있다 — 단추를 누르기 전에는 아무것도 안 그려진다. */
+  const [picking, setPicking] = useState(false);
+  /**
+   * **이번에 넣은 폴더의 이름.** 결과 한 줄이 어느 폴더를 가리킬지가 여기서 정해진다 —
+   * 🔴 결과와 함께 남아야 하므로 고른 값(picked)이 아니라 **말할 이름**을 담아 둔다.
+   */
+  const [savedFolderName, setSavedFolderName] = useState(contactFolderSaveTargetLabel(null));
 
-  async function handleSave() {
+  async function handleSave(category: ContactFolderSaveTargetCategory | null) {
     if (busy) return;
     setBusy(true);
     setNote(null);
+    setSavedFolderName(contactFolderSaveTargetLabel(category));
     try {
       // 🔴 던지지 않는다 — 무슨 일이 나도 note 하나로 끝난다(그 모듈의 약속).
-      setNote(await saveShareDocToContactFolder({ repairCaseId, relativePath }));
+      setNote(await saveShareDocToContactFolder({ repairCaseId, relativePath, category }));
     } finally {
       setBusy(false);
     }
   }
 
   // 한 줄짜리 결과지만 문장은 **여러 건을 모으는 그 함수**에서 나온다 — 말이 갈라지지 않게.
-  const notice = note === null ? null : contactFolderShareDocSaveNotice([note]);
+  const notice = note === null ? null : contactFolderShareDocSaveNotice([note], savedFolderName);
 
   return (
     <span className="print:hidden flex min-w-0 flex-col items-end gap-0.5 text-right">
       <button
         type="button"
-        onClick={() => void handleSave()}
+        /* 🔴 여기서 꽂지 않는다 — 창을 열 뿐이다(머리말). 보내는 것은 창의 [저장]이다. */
+        onClick={() => setPicking(true)}
         disabled={busy}
         aria-busy={busy}
+        aria-haspopup="dialog"
         title={SHARE_DOC_CONTACT_FOLDER_SAVE_TITLE}
         data-share-doc-contact-folder-save=""
         className={BUTTON_CLASS}
@@ -123,6 +150,17 @@ export default function ShareDocContactFolderButton({
         <span role="status" className={`block break-all text-xs ${NOTICE_TONE_CLASS[notice.tone]}`}>
           {notice.text}
         </span>
+      )}
+      {picking && (
+        <ShareDocFolderPickerDialog
+          relativePath={relativePath}
+          /* 🔴 [취소]는 닫기만 한다 — 요청이 한 번도 나가지 않는다. */
+          onCancel={() => setPicking(false)}
+          onSave={(category) => {
+            setPicking(false);
+            void handleSave(category);
+          }}
+        />
       )}
     </span>
   );
