@@ -918,13 +918,32 @@ function DatabaseFilesScreen({
               onFiles={receiveDroppedFiles}
               className="grid gap-3 rounded-md border border-dashed border-zinc-300 p-3 sm:grid-cols-2 dark:border-zinc-700"
             >
-              <label className="flex flex-col gap-1 text-sm">
+              {/*
+                🔴 **`min-w-0` 과 `max-w-full` 은 한 벌이다**(2026-11-18 폰 신고 —
+                좁은 화면에서 이 두 칸이 점선 테두리 밖으로 삐져나와 있었다). 고칠
+                자리가 **두 겹**인 까닭:
+                  · 이 라벨은 grid 칸이고, grid·flex 칸의 기본값은 `min-width: auto`
+                    라 **속의 최소 폭보다 좁아지지 못한다.** 그래서 칸 쪽에 `min-w-0`.
+                  · 속의 두 칸은 제 내용만큼을 최소 폭으로 들고 있다 — 분류는 가장 긴
+                    이름(「오실로스코프 데이터」 10글자), 고르기 칸은 브라우저가 제
+                    손으로 그리는 「파일 선택 선택된 파일 없음」이다. 그래서 속 쪽에
+                    `max-w-full`.
+                한 겹만 고치면 안 풀린다 — 칸이 줄어들어도 속이 그대로 넘치거나, 속이
+                칸을 따라도 칸 자신이 안 줄어든다.
+
+                🔴 **넓은 화면은 건드리지 않았다** — `w-full`(폭을 정한다)이 아니라
+                `max-w-full`(넘지 못하게만 한다)을 고른 까닭이 그것이다. 상한이 칸 폭
+                그 자체라, 칸 안에 들어와 있던 것은 그대로 서고 넘치던 것만 칸에 맞춰
+                접힌다. 두 칸이 나란히 서는 `sm:` 위는 애초에 넘치지 않으므로 달라지는
+                것이 없다(`sm:grid-cols-2` 도 그대로다).
+              */}
+              <label className="flex min-w-0 flex-col gap-1 text-sm">
                 <span className="text-xs text-zinc-500 dark:text-zinc-400">분류</span>
                 <select
                   value={category}
                   onChange={(event) => setCategory(event.target.value as AttachmentCategory)}
                   disabled={isUploading}
-                  className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                  className="max-w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                 >
                   {REPAIR_CASE_UPLOAD_CATEGORIES.map((code) => (
                     <option key={code} value={code}>
@@ -934,7 +953,8 @@ function DatabaseFilesScreen({
                 </select>
               </label>
 
-              <label className="flex flex-col gap-1 text-sm">
+              {/* 폭 두 겹(min-w-0 · max-w-full)은 바로 위 분류 칸과 같은 까닭이다. */}
+              <label className="flex min-w-0 flex-col gap-1 text-sm">
                 <span className="text-xs text-zinc-500 dark:text-zinc-400">파일 (여러 개 선택 가능)</span>
                 {/*
                   multiple은 앨범에서 여러 장을 한 번에 고르는 경로다. 폰 기본
@@ -948,7 +968,7 @@ function DatabaseFilesScreen({
                   multiple
                   disabled={isUploading}
                   onChange={notePickedFiles}
-                  className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
+                  className="max-w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-950"
                 />
                 <span className="text-xs text-zinc-500 dark:text-zinc-400">
                   폴더에서 이 칸 위로 끌어다 놓아도 됩니다.
