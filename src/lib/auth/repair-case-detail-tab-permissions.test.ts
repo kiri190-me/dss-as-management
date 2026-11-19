@@ -196,14 +196,17 @@ describe("② 🔴 권한 키가 하나도 안 사라졌다 — 수를 센다", 
     assert.equal(PRE_EXISTING_REPAIR_CASE_LEAVES.length, 7);
   });
 
-  test("🔴 저장되는 잎의 총수는 51 — 45 → 48(탭 셋) → 51(내자 쪼개기)", () => {
+  test("🔴 저장되는 잎의 총수는 52 — 45 → 48(탭 셋) → 51(내자 쪼개기) → 52(완료 시 수정)", () => {
     // 수가 달라지면 사람이 한 번 더 보게 한다. 줄어든 쪽은 특히 조용하다.
     //
     // 🔴 2026-11-12 **같은 날 두 번**이 움직였다:
     //   · 오전 45 → 48 — 수리 건 상세의 탭 잎 셋이 더해졌다.
     //   · 오후 48 → 51 — `domesticOrders` 하나가 빠지고 그 아래 넷이 들어왔다(순증 +3).
+    // 🔴 2026-11-19 에 한 번 더: 51 → 52 — 내자 정리에 「완료 시 수정」이 생겼다.
+    //    **마이그레이션이 없다** — 새 키라 옮길 옛 행이 없고, `area_key` 가 자유
+    //    텍스트라 설정을 저장하는 날 그대로 들어간다.
     // 🔵 **빠진 하나가 죽지 않았다는 증거**는 아래 ④ 와 마이그레이션(drizzle/0127)이다.
-    assert.equal(PERMISSION_LEAF_KEYS.length, 51);
+    assert.equal(PERMISSION_LEAF_KEYS.length, 52);
     assert.equal(new Set(PERMISSION_LEAF_KEYS).size, PERMISSION_LEAF_KEYS.length, "키가 겹친다");
   });
 
@@ -287,7 +290,11 @@ describe("④ 🔴 [견적서]·[발주서]는 **탭 전용 키를 만들지 않
     // 🔵 「쪼갰다」를 값으로 못 박는다 — 메뉴 키가 아직 잎이면 마이그레이션(0127)이
     //    옮긴 행과 옛 행이 **둘 다 살아** 서로 다른 답을 낼 수 있다.
     assert.equal(isPermissionLeafKey("domesticOrders"), false, "메뉴 키가 아직 잎이다 — 쪼개기가 안 됐다");
-    assert.equal(featuresOfArea("domesticOrders").length, 4, "내자 잎이 넷이 아니다");
+    // 🔴 2026-11-19 에 넷 → **다섯**(「완료 시 수정」이 더해졌다). 이 줄이 재는 것은
+    //    「메뉴 키가 잎이 아니다」의 짝 — **하위 기능이 하나라도 있는가**이고, 그 수는
+    //    늘어날 수 있다. 어느 다섯인지와 차례는 domestic-order-permission-leaves.test.ts
+    //    가 잰다(한 곳에서만 못 박는다).
+    assert.equal(featuresOfArea("domesticOrders").length, 5, "내자 잎이 다섯이 아니다");
   });
 });
 

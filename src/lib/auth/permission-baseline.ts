@@ -645,6 +645,11 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
      * 그 성질이 깨진다 — 2026-09-29 에 엔지니어가 더해진 것처럼 정책이 또 바뀌는 날
      * 한쪽만 따라오고, 그때 증상은 「메뉴는 열리는데 아무것도 못 한다」이다.
      * 시험이 다섯 역할 × 영역 수준을 쪼개기 전 값과 맞대어 지킨다.
+     *
+     * 🔴 **2026-11-19 에 다섯째(`completedEdit`)가 붙었다.** 그 잎은 쪼개기 전에
+     * 없던 **새 울타리**라 위 「한 역할도 달라지면 안 된다」의 대상이 아니다 — 다만
+     * 그 성질이 깨지지 않도록 기본값을 `canDeleteDomesticOrders` 로 잡았다(그 case
+     * 의 주석). 여기서도 역할 이름을 손으로 적지 않는 규칙은 그대로다.
      */
     case "domesticOrders.view":
       return canViewDomesticOrders(role) ? "READ" : "NONE";
@@ -652,6 +657,26 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
       // 🔴 읽기를 false 로 둔다 — 이 잎에서 '보기'는 뜻이 없다(보는 일은 위 `view` 가
       // 맡는다). customers.edit · productModels.files 와 같은 모양이다.
       return ladder({ write: canEditDomesticOrders(role), read: false });
+    case "domesticOrders.completedEdit":
+      /**
+       * 🔴 **완료된 줄을 고치고 완료를 해제하는 열쇠**(2026-11-19 사용자 요청).
+       *
+       * 🔴 **기본값이 곧 운영 동작이다.** 운영 `role_permissions` 에
+       * `area_key like 'domesticOrders%'` 인 행이 **0건**이다(2026-11-19 실측). 저장된
+       * 값이 없으면 여기 적힌 값이 그대로 실효 권한이 되므로, 「지금처럼 누구나」로
+       * 두면 **배포해도 아무것도 안 막힌다** — 사용자 요청과 정면으로 어긋난다.
+       *
+       * 🔴 **삭제·복원과 같은 함수를 부른다**(canDeleteDomesticOrders — 최고관리자 ·
+       * 관리자 둘). 바로 위 `edit` 의 canEditDomesticOrders(네 역할)가 아니다:
+       *  · 완료된 줄은 「끝난 것으로 보고 집계에 들어간 줄」이라 되돌리기 어려운 쪽에
+       *    가깝고, 그래서 삭제·복원과 같은 선에 둔다.
+       *  · 🔵 그 집합이면 **다섯 역할의 기본 정책 표가 한 칸도 안 움직인다** — 영업 ·
+       *    엔지니어 · 자재 담당자가 전부 접근 불가라, 메뉴 수준(= 잎들의 최대값)은
+       *    `edit` 의 쓰기와 `lifecycle` 의 관리가 이미 정한 값 그대로다.
+       *
+       * 🔵 읽기는 거짓이다 — 이 잎에서 '보기'는 뜻이 없다(위 `edit` 과 같은 모양).
+       */
+      return ladder({ write: canDeleteDomesticOrders(role), read: false });
     case "domesticOrders.lifecycle":
       return ladder({ manage: canDeleteDomesticOrders(role), read: false });
     case "domesticOrders.approval":

@@ -428,6 +428,18 @@ describe("⑦ 🔴 잎이 하나도 안 사라졌고, 기본값이 한 칸도 �
     "inventory.requests": "WRITE READ WRITE NONE READ",
     "domesticOrders.view": "READ READ READ READ NONE",
     "domesticOrders.edit": "WRITE WRITE WRITE WRITE NONE",
+    /**
+     * 🔴 **2026-11-19 에 이 한 줄이 새로 생겼다** — 「완료 시 수정」. 사용자 요청으로
+     * 더한 **새 울타리**라 「기본값이 한 칸도 안 바뀌었다」의 대상이 아니다. 대신 그
+     * 성질이 깨지지 않도록 기본값을 삭제·복원과 같은 두 역할로 잡았다: 영업 ·
+     * 엔지니어 · 자재 담당자가 전부 접근 불가라 **위아래 네 줄과 ⑧절의 메뉴 표가 한
+     * 칸도 안 움직인다**(메뉴 수준은 잎들의 최대값이고, 그 최대값은 `edit` 의 쓰기와
+     * `lifecycle` 의 관리가 이미 정하고 있다).
+     *
+     * 🔴 **차례도 뜻이 있다** — 이 표는 PERMISSION_LEAF_KEYS 와 차례까지 맞대므로,
+     * 권한 화면에서 「내자 정리 수정」 바로 아래 줄이라는 사실이 여기 박혀 있다.
+     */
+    "domesticOrders.completedEdit": "WRITE WRITE NONE NONE NONE",
     "domesticOrders.lifecycle": "MANAGE MANAGE NONE NONE NONE",
     "domesticOrders.approval": "READ READ READ READ NONE",
     miscCases: "READ READ READ READ NONE",
@@ -447,12 +459,14 @@ describe("⑦ 🔴 잎이 하나도 안 사라졌고, 기본값이 한 칸도 �
     settings: "MANAGE MANAGE READ READ READ",
   };
 
-  test("잎 51개가 글자 그대로 남아 있다", () => {
-    assert.equal(PERMISSION_LEAF_KEYS.length, 51);
+  test("잎 52개가 글자 그대로 남아 있다", () => {
+    // 🔴 51 → 52(2026-11-19) — `domesticOrders.completedEdit` 하나가 들어왔다.
+    //    빠진 키는 없다(deepEqual 이 차례까지 맞댄다).
+    assert.equal(PERMISSION_LEAF_KEYS.length, 52);
     assert.deepEqual([...PERMISSION_LEAF_KEYS], Object.keys(BASELINE_BEFORE));
   });
 
-  test("🔴 다섯 역할 × 잎 51개의 기본 정책이 그대로다", () => {
+  test("🔴 다섯 역할 × 잎 52개의 기본 정책이 그대로다", () => {
     assert.equal(ROLE_CODES.length, 5);
     for (const leafKey of PERMISSION_LEAF_KEYS) {
       assert.equal(

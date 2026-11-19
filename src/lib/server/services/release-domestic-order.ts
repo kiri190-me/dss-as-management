@@ -1,11 +1,15 @@
 import "server-only";
 
 import {
+  COMPLETED_DOMESTIC_ORDER_EDIT_FORBIDDEN_MESSAGE,
+  DOMESTIC_ORDER_ACTOR_UNKNOWN_MESSAGE,
+  canEditCompletedDomesticOrder,
   setDomesticOrderCompletion,
   type DomesticOrderCompletionMutationResultCode,
 } from "@/lib/db/mutations/domestic-orders";
 import { revertShipmentCompletion } from "@/lib/db/mutations/workflow-transitions";
 import { getDomesticOrderShipmentLink } from "@/lib/db/queries/domestic-orders";
+import { getUserById } from "@/lib/db/queries/users";
 
 /**
  * ============================================================================
@@ -27,11 +31,33 @@ import { getDomesticOrderShipmentLink } from "@/lib/db/queries/domestic-orders";
  * 차례로 부를지」이고, 그 차례 자체가 규칙이다. 서버 액션(인증·형식 검증·오류
  * 가리기)도, mutation(한 트랜잭션 안의 업무 규칙)도 아니다.
  *
- * 이 함수는 **권한을 보지 않는다.** domesticOrders WRITE 는 서버 액션이
+ * 이 함수는 **권한을 거의 보지 않는다.** domesticOrders 쓰기는 서버 액션이
  * (actions/domestic-orders.ts), 그 전이를 되돌릴 수 있는 역할인가는
  * revertShipmentCompletion 이 트랜잭션 안에서 본다.
  *
+ * ── 🔴 **예외 하나 — 「완료 시 수정」은 0단계에서 먼저 묻는다** (2026-11-19) ─
+ * 아래 **차례 때문에** 어쩔 수 없다. 이 서비스는 수리 건을 **먼저** 되돌리고
+ * 그다음에 내자 줄을 푸는데, 2026-11-19 부터 그 마지막 걸음이 **권한으로 거절될
+ * 수 있다**(「완료 시 수정」). 묻지 않고 그대로 두면 권한 없는 사람이 눌렀을 때
+ * **수리 건만 되돌아가고(이력 줄까지 남고) 내자 줄은 완료인 채**로 끝난다 —
+ * 아래 '왜 수리 건을 먼저 하는가'가 막으려던 바로 그 반쪽이다. 실측으로 확인하고
+ * 고친 자리다.
+ *
+ * 🔴 **그래서 아무것도 건드리기 전**(줄을 읽기도 전)에 묻는다. 줄은 읽지 않는다 —
+ * **완료 해제는 줄의 상태와 상관없이 언제나 그 권한이 필요**하므로 물음이 상태에
+ * 안 걸린다. 「같은 판정을 두 곳에서 하지 않는다」(줄을 두 번 읽지 않는다)는 규칙은
+ * 그대로 지켜진다.
+ *
+ * 🔴 **진짜 울타리는 여전히 안쪽(mutation)이다.** 이 0단계는 **차례를 지키기 위한
+ * 것**이지 울타리가 아니다 — PO 통로나 다른 길이 서비스를 건너뛰고 mutation 을
+ * 직접 부를 수 있으므로 **둘 다 있어야 한다.** 그러니 이것을 지우지도, 저쪽을
+ * 지우지도 마라.
+ *
+ * 🔴 **막는 조건이 저쪽과 글자 그대로 같아야 한다**(살아 있는 계정 · 승인됨 ·
+ * 잎 둘). 하나라도 어긋나면 그 조건에서 위 반쪽이 그대로 돌아온다.
+ *
  * ── 네 갈래 ─────────────────────────────────────────────────────────────
+ *  0. 🔴 「완료 시 수정」이 없다 → **아무것도 건드리지 않고** FORBIDDEN.
  *  1. 붙은 수리 건이 없다(연결 없음 · 휴지통) → 내자 줄만 해제한다(예전과 같다).
  *  2. 그 건이 출하 완료 상태가 아니다          → 건너뛰고 내자 줄만 해제한다.
  *  3. 그 밖                                    → 수리 건을 **먼저** 되돌리고,
@@ -120,6 +146,18 @@ export async function releaseDomesticOrderWithShipment(params: {
   expectedVersion: number;
   actorUserId: string;
 }): Promise<ReleaseDomesticOrderResult> {
+  // ── 0 · 🔴 **「완료 시 수정」을 먼저 묻는다 — 아무것도 건드리기 전에** ──
+  //    머리말의 '예외 하나'. 이 한 겹이 없으면 권한 거절이 **수리 건을 되돌린 뒤**에
+  //    일어나 반쪽이 남는다. 조건은 mutation 쪽 관문과 **글자 그대로 같다**:
+  //    살아 있는 계정(getUserById 가 삭제·비활성·잠금을 거른다) · 승인됨 · 잎 둘.
+  const actor = await getUserById(params.actorUserId);
+  if (!actor || actor.approvalStatus !== "APPROVED") {
+    return { ok: false, code: "FORBIDDEN", message: DOMESTIC_ORDER_ACTOR_UNKNOWN_MESSAGE };
+  }
+  if (!(await canEditCompletedDomesticOrder(actor))) {
+    return { ok: false, code: "FORBIDDEN", message: COMPLETED_DOMESTIC_ORDER_EDIT_FORBIDDEN_MESSAGE };
+  }
+
   // ── 1 · 내자 줄에 지금 무엇이 붙어 있는지 읽는다 ────────────────────────
   //    [완료 처리] 쪽과 **같은 조회**를 쓴다 — 「출하 완료인가」를 두 곳에서
   //    서로 다르게 판정하면 한쪽이 건너뛰는 사이 다른 쪽이 손을 댄다.

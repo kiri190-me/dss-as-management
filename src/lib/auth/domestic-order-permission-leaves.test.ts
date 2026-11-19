@@ -49,9 +49,16 @@ import {
  * 때 다섯 역할 전부 NONE, 상한 case 를 더해도 전부 READ, 게다가 자재 담당자에게는
  * 거꾸로 열렸다).
  *
+ * ── 🔴 2026-11-19: 다섯째 잎이 들어왔다 — `domesticOrders.completedEdit` ───
+ * 「완료 시 수정」이다. 완료된 줄을 고치는 일과 줄·회차의 완료 해제를 이 한 칸이
+ * 정한다(사용자 요청). **이 파일의 기준점은 그대로 둔다** — 아래 ①의 표는 여전히
+ * 2026-11-12 의 쪼개기 전 값이고, 새 잎이 그 표를 한 칸도 못 움직인다는 것이
+ * 오히려 이 조각의 안전 조건이다(기본값이 삭제·복원과 같은 두 역할이라 메뉴 수준의
+ * 최대값이 안 바뀐다).
+ *
  * ── 이 파일이 못 박는 것 ────────────────────────────────────────────────
  *  ① 🔴 **쪼개기 전후로 한 역할도 달라지지 않았다** — 다섯 역할 × 영역 수준.
- *  ② 🔴 **권한 키가 죽지 않았다** — 잎 넷이 실재하고, 총수가 맞고, 메뉴는 그대로다.
+ *  ② 🔴 **권한 키가 죽지 않았다** — 잎 다섯이 실재하고, 총수가 맞고, 메뉴는 그대로다.
  *  ③ 기본값을 손으로 적지 않았다 — *-authorization.ts 를 불러서 구한다.
  *  ④ 🔴 **탭마다의 열쇠가 입장권보다 좁다** — 그래야 가름이 선다.
  *  ⑤ 🔴 닫으면 탭이 사라지고, 그 판정이 화면·서버 **한 함수**에서 나온다.
@@ -71,8 +78,27 @@ const AREA_LEVEL_BEFORE_SPLIT: Record<Role, PermissionLevel> = {
   INVENTORY_MANAGER: "NONE",
 };
 
-/** 🔴 차례까지 글자 그대로. 넷이고, 이 차례가 권한 화면의 줄 차례다. */
+/**
+ * 🔴 차례까지 글자 그대로. **다섯**이고, 이 차례가 권한 화면의 줄 차례다.
+ *
+ * 🔴 **2026-11-19 에 `completedEdit` 이 `edit` 바로 뒤에 들어왔다** — 읽는 사람이
+ * 「수정」과 짝으로 보도록 붙여 둔 자리다. 차례가 바뀌면 권한 화면의 줄 차례도
+ * 바뀐다(그래서 deepEqual 로 잰다).
+ */
 const DOMESTIC_ORDER_LEAF_KEYS = [
+  "domesticOrders.view",
+  "domesticOrders.edit",
+  "domesticOrders.completedEdit",
+  "domesticOrders.lifecycle",
+  "domesticOrders.approval",
+] as const;
+
+/**
+ * 🔴 **2026-11-12 의 쪼개기 판(drizzle/0127)이 옮긴 넷.** 아래 ⑥이 그 판을 재므로
+ * 위 목록을 그대로 쓰면 안 된다 — 그 뒤에 더해진 잎은 그 판에 없고, 있어야 할
+ * 까닭도 없다(새 키라 옮길 옛 행이 자체가 없다).
+ */
+const SPLIT_MIGRATED_LEAF_KEYS = [
   "domesticOrders.view",
   "domesticOrders.edit",
   "domesticOrders.lifecycle",
@@ -155,7 +181,7 @@ describe("① 🔴 쪼개기 전후로 **한 역할도 달라지지 않았다**"
 });
 
 describe("② 🔴 권한 키가 죽지 않았다", () => {
-  test("내자 정리의 잎은 넷이고 차례도 그대로다", () => {
+  test("내자 정리의 잎은 다섯이고 차례도 그대로다", () => {
     assert.deepEqual(
       featuresOfArea("domesticOrders").map((feature) => feature.key),
       [...DOMESTIC_ORDER_LEAF_KEYS]
@@ -180,8 +206,9 @@ describe("② 🔴 권한 키가 죽지 않았다", () => {
     assert.ok(featuresOfArea("domesticOrders").length > 0, "메뉴에 잎이 하나도 없다");
   });
 
-  test("🔴 저장되는 잎의 총수는 51 — 하나가 빠지고 넷이 들어왔다(순증 +3)", () => {
-    assert.equal(PERMISSION_LEAF_KEYS.length, 51);
+  test("🔴 저장되는 잎의 총수는 52 — 하나가 빠지고 넷이 들어왔고(+3), 나중에 하나 더(+1)", () => {
+    // 2026-11-12(둘째): 48 → 51. 2026-11-19: 51 → 52(「완료 시 수정」).
+    assert.equal(PERMISSION_LEAF_KEYS.length, 52);
     assert.equal(new Set(PERMISSION_LEAF_KEYS).size, PERMISSION_LEAF_KEYS.length, "키가 겹친다");
   });
 
@@ -201,7 +228,7 @@ describe("② 🔴 권한 키가 죽지 않았다", () => {
 });
 
 describe("③ 기본값을 손으로 적지 않았다 — 정책 함수를 그대로 나눠 부른다", () => {
-  test("🔴 네 잎의 기본값이 *-authorization.ts 의 답과 역할마다 같다", () => {
+  test("🔴 다섯 잎의 기본값이 *-authorization.ts 의 답과 역할마다 같다", () => {
     for (const role of ROLE_CODES) {
       assert.equal(
         baselineLeafLevel("domesticOrders.view", role),
@@ -212,6 +239,15 @@ describe("③ 기본값을 손으로 적지 않았다 — 정책 함수를 그�
         baselineLeafLevel("domesticOrders.edit", role),
         canEditDomesticOrders(role) ? "WRITE" : "NONE",
         `${role}: 수정 기본값이 정책 함수와 다르다`
+      );
+      // 🔴 「완료 시 수정」(2026-11-19)은 **삭제·복원과 같은 집합**이다 —
+      //    canEditDomesticOrders(네 역할)가 아니라 canDeleteDomesticOrders(둘).
+      //    운영 role_permissions 에 `domesticOrders%` 행이 0건이라(2026-11-19 실측)
+      //    이 기본값이 곧 배포 후의 동작이고, 넓게 잡으면 아무것도 안 막힌다.
+      assert.equal(
+        baselineLeafLevel("domesticOrders.completedEdit", role),
+        canDeleteDomesticOrders(role) ? "WRITE" : "NONE",
+        `${role}: 완료 시 수정 기본값이 「삭제·복원을 할 수 있는 사람」과 다르다`
       );
       assert.equal(
         baselineLeafLevel("domesticOrders.lifecycle", role),
@@ -242,6 +278,11 @@ describe("③ 기본값을 손으로 적지 않았다 — 정책 함수를 그�
     const expected: Record<string, { label: string; levels: PermissionLevel[] }> = {
       "domesticOrders.view": { label: "내자 정리 조회", levels: ["NONE", "READ"] },
       "domesticOrders.edit": { label: "내자 정리 수정", levels: ["NONE", "WRITE"] },
+      // 🔴 **쓰기 한 칸뿐이다.** 관리까지 열면 권한 화면에서 이 칸 하나를 올리는
+      //    것만으로 내자 메뉴 전체가 관리가 되고(메뉴 수준 = 잎들의 최대값), 그
+      //    메뉴의 관리는 「삭제·복원」의 문턱이다 — 완료된 줄을 고치게 해 주려다
+      //    휴지통과 완전 삭제까지 함께 열어 주는 셈이 된다.
+      "domesticOrders.completedEdit": { label: "완료 시 수정", levels: ["NONE", "WRITE"] },
       "domesticOrders.lifecycle": { label: "삭제·복원", levels: ["NONE", "MANAGE"] },
       "domesticOrders.approval": { label: "승인", levels: ["NONE", "READ"] },
     };
@@ -435,8 +476,24 @@ describe("⑥ 🔴 마이그레이션이 지우지 않고 옮긴다", () => {
     assert.ok(sql.includes("role_permissions"), "다른 표를 건드리는 판이다");
   });
 
+  /**
+   * 🔴 **이 절은 쪼개기 판을 잰다 — 지금의 잎 목록이 아니다.** 2026-11-19 에 다섯째
+   * (`completedEdit`)가 생겼지만 그 판에는 없고, 있어서도 안 된다: 새 키라 옮겨 올
+   * 옛 행이 애초에 없다. 그래서 위 DOMESTIC_ORDER_LEAF_KEYS 대신 그날의 넷을 쓴다.
+   */
+  test("🔴 쪼개기 판이 재는 것은 **그날의 넷**이다 — 뒤에 더해진 잎은 빼고 센다", () => {
+    const addedLater = DOMESTIC_ORDER_LEAF_KEYS.filter(
+      (key) => !(SPLIT_MIGRATED_LEAF_KEYS as readonly string[]).includes(key)
+    );
+    assert.deepEqual(
+      addedLater,
+      ["domesticOrders.completedEdit"],
+      "쪼개기 뒤에 더해진 잎 목록이 달라졌다 — 아래 판 검사의 기준을 다시 볼 것"
+    );
+  });
+
   test("🔴 네 잎을 **전부** 넣는다 — 빠뜨리면 그 잎만 기본값으로 되살아난다", () => {
-    for (const leafKey of DOMESTIC_ORDER_LEAF_KEYS) {
+    for (const leafKey of SPLIT_MIGRATED_LEAF_KEYS) {
       assert.ok(sql.includes(`'${leafKey}'`), `${leafKey} 를 안 넣는다 — 좁혀 둔 설정이 풀린다`);
     }
     assert.equal((sql.match(/INSERT INTO "role_permissions"/g) ?? []).length, 4, "INSERT 가 넷이 아니다");

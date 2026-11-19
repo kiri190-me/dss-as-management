@@ -89,6 +89,12 @@ let matcherWorkflowVersionId: string;
 let salesId: string;
 let salesSub: string;
 /**
+ * 🔴 **완료된 줄을 건드릴 수 있는 사람**(2026-11-19). 그날 생긴 「완료 시 수정」
+ * (`domesticOrders.completedEdit`)의 기본값이 최고관리자·관리자 둘이라, **완료 해제**는
+ * 위 영업으로는 안 된다 — 이 통로도 화면과 똑같은 관문을 지나기 때문이다.
+ */
+let adminSub: string;
+/**
  * 🔴 **내자 정리를 고칠 수 없는 사람의 표본.** 지키는 것은 「재고 담당자가
  * 막힌다」가 아니라 「**고칠 수 없는 사람은 이 통로로도 못 고친다**」이므로,
  * 정책이 바뀌면 지키는 대상은 그대로 두고 표본만 갈아 끼운다(같은 표본을
@@ -181,6 +187,8 @@ before(async () => {
   const sales = await createTestUser({ role: "SALES", name: "DOAPI 영업" });
   salesId = sales.id;
   salesSub = sales.sub;
+  // 🔴 완료 **해제**를 누르는 사람(2026-11-19). 위 adminSub 주석 참조.
+  adminSub = (await createTestUser({ role: "ADMIN", name: "DOAPI 관리자" })).sub;
   inventoryManagerSub = (await createTestUser({ role: "INVENTORY_MANAGER", name: "DOAPI 재고 담당" })).sub;
   pendingSalesSub = (await createTestUser({ approvalStatus: "PENDING", name: "DOAPI 승인 대기 영업" })).sub;
 
@@ -539,11 +547,39 @@ describe("POST /api/v1/domestic-orders/{id}/completion — 실제로 움직인�
       `자동 문구가 이력에 없다: ${JSON.stringify(reasonsAfterComplete)}`
     );
 
+    // ── 🔴 완료 해제에는 「완료 시 수정」이 필요하다 (2026-11-19) ──────────
+    // 🔴 **이 통로가 화면과 같은 관문을 지난다는 증거**다. 영업은 완료는 눌렀지만
+    //    해제는 못 한다 — 403 이다.
+    // 🔴 **그리고 아무것도 안 바뀐다.** 이 자리가 핵심이다: 서비스는 수리 건을
+    //    **먼저** 되돌리므로, 관문이 서비스 맨 앞이 아니면 막힌 요청이 수리 건만
+    //    되돌려 놓고 끝난다(2026-11-19 에 실제로 그랬고 고쳤다). 아래 셋이 그 못이다 —
+    //    줄은 완료인 채 · 수리 건은 출하 완료인 채 · **되돌리기 이력이 안 생겼다.**
+    const deniedRelease = await call(order.id, {
+      completed: false,
+      expectedVersion: afterComplete.version,
+      requester: { sub: salesSub },
+    });
+    assert.equal(
+      deniedRelease.status,
+      403,
+      `release should be forbidden: ${JSON.stringify(deniedRelease.json)}`
+    );
+    assert.equal(deniedRelease.json.code, "FORBIDDEN");
+    assert.ok((await readOrder(order.id)).completedAt, "막힌 요청이 완료 표시를 풀었다");
+    const caseAfterDenied = await readCase(caseId);
+    assert.equal(caseAfterDenied.stepKey, "shipment_completed", "막힌 요청이 수리 건을 되돌렸다");
+    assert.equal(caseAfterDenied.isLocked, true);
+    assert.equal(
+      (await historyReasons(caseId)).includes(DOMESTIC_ORDER_SHIPMENT_REVERT_REASON),
+      false,
+      "막힌 요청이 되돌리기 이력을 남겼다 — 수리 건을 이미 건드렸다는 뜻이다"
+    );
+
     // ── 완료 해제 — 같은 POST 가 둘을 모두 받는다 ──────────────────────
     const released = await call(order.id, {
       completed: false,
       expectedVersion: afterComplete.version,
-      requester: { sub: salesSub },
+      requester: { sub: adminSub },
     });
 
     assert.equal(released.status, 200, `release failed: ${JSON.stringify(released.json)}`);
@@ -563,6 +599,7 @@ describe("POST /api/v1/domestic-orders/{id}/completion — 실제로 움직인�
       reasonsAfterRelease.includes(DOMESTIC_ORDER_SHIPMENT_REVERT_REASON),
       `되돌리기 자동 문구가 이력에 없다: ${JSON.stringify(reasonsAfterRelease)}`
     );
+
   });
 
   test("🔵 업무 거절은 까닭을 그대로 내보낸다 — 사람에게 보여 줄 글이다", async () => {

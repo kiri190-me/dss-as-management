@@ -10,7 +10,11 @@ import {
   DOMESTIC_ORDER_ISSUE_DATE_QUOTE_LOCK_MESSAGE,
   resolveDomesticOrderIssueDateEditPlan,
 } from "@/lib/domain/domestic-order-issue-date-edit";
-import { VERSION_CONFLICT_MESSAGE } from "./domestic-orders";
+import {
+  COMPLETED_DOMESTIC_ORDER_EDIT_FORBIDDEN_MESSAGE,
+  VERSION_CONFLICT_MESSAGE,
+  canEditCompletedDomesticOrder,
+} from "./domestic-orders";
 
 /**
  * ============================================================================
@@ -43,8 +47,14 @@ import { VERSION_CONFLICT_MESSAGE } from "./domestic-orders";
  * ── 인가도 여기서 한 번 더 본다 ─────────────────────────────────────────
  * 서버 액션이 이미 보지만, 이 함수를 액션을 거치지 않고 부를 수 있다
  * (mutations/domestic-order-sheet-settings.ts 와 같은 판단). 관문은 내자 정리의
- * 행 추가·수정과 **같다** — hasPermission("domesticOrders", "WRITE"). 🔴 역할
+ * 행 추가·수정과 **같다** — hasPermission("domesticOrders.edit", "WRITE"). 🔴 역할
  * 이름을 비교하지 않는다. 설정 축 하나만 묻는다.
+ *
+ * 🔴 **고치려는 줄이 이미 완료된 줄이면 한 칸을 더 묻는다**(2026-11-19) —
+ * 「완료 시 수정」이다. 내자 정리 목록에서 같은 줄의 같은 칸을 고치는 길과 **같은
+ * 열쇠**라야 「목록에서는 막히는데 수리 건 상세에서는 되는」 뒷문이 안 생긴다.
+ * 판정은 mutations/domestic-orders.ts 의 canEditCompletedDomesticOrder 하나가 쥔다.
+ * 🔵 **줄을 새로 만드는 길에는 세우지 않는다** — 막 태어난 줄은 완료일 수 없다.
  *
  * ── 낙관적 잠금은 **내자 줄의 version** 이다 ────────────────────────────
  * repair_cases.version 이 아니다 — 고치는 대상이 내자 줄이다. ⚠️ PO
@@ -164,6 +174,11 @@ export async function saveRepairCaseDomesticOrderIssueDates(params: {
         version: domesticOrders.version,
         quoteId: domesticOrders.quoteId,
         quoteIssuedDate: domesticOrders.quoteIssuedDate,
+        // 🔴 **2026-11-19 에 더했다.** 「완료 시 수정」 관문이 보는 한 칸이다. 판정은
+        //    completed_at 하나로만 한다(schema/domestic-orders.ts 의 그 칸 주석).
+        //    🔵 줄 고르기(resolveDomesticOrderIssueDateEditPlan)는 이 칸을 보지 않는다 —
+        //    규칙이 늘어난 것이 아니라 읽어 오는 칸이 하나 는 것뿐이다.
+        completedAt: domesticOrders.completedAt,
       })
       .from(domesticOrders)
       .where(
@@ -220,6 +235,22 @@ export async function saveRepairCaseDomesticOrderIssueDates(params: {
 
     // plan.kind === "UPDATE" 는 줄이 정확히 하나라는 뜻이다(같은 함수가 낸 판정).
     const current = rows[0];
+
+    // ── 🔴 **완료된 줄이면 「완료 시 수정」이 있어야 한다** (2026-11-19) ────
+    // 🔴 위 ① 의 `domesticOrders.edit` 관문을 **이미 지난 자리**라, 여기서 한 칸을 더
+    //    물으면 그대로 AND 가 된다(판정 함수 안에서도 둘을 AND 로 묻는다 — 바깥 관문이
+    //    어느 날 한 곳만 바뀌어도 깨지지 않게).
+    // 🔴 version 대조 **뒤**다 — 낡은 화면에서 누른 저장이 CONFLICT 대신 「권한이
+    //    없다」로 답하면, 사람은 권한을 받으러 가지만 진짜 문제는 그 사이 남이 그 줄을
+    //    완료한 것이다(mutations/domestic-orders.ts 의 같은 차례).
+    // 🔵 **행위자는 위에서 이미 읽었다** — 트랜잭션 안에서 다시 읽은 그 계정이다.
+    if (current.completedAt !== null && !(await canEditCompletedDomesticOrder(actor))) {
+      return {
+        ok: false,
+        code: "FORBIDDEN",
+        message: COMPLETED_DOMESTIC_ORDER_EDIT_FORBIDDEN_MESSAGE,
+      };
+    }
     // 🔴 견적서가 붙은 줄의 견적발행일은 견적서를 따른다. **바꾸려 할 때만**
     // 막는다 — 지금 값을 그대로 되실어 보낸 저장(발주발행일만 고치는 저장)까지
     // 막으면 이 줄에서는 PO 발행일도 고칠 수 없게 된다.

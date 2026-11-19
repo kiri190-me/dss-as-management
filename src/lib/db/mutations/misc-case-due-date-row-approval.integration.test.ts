@@ -509,7 +509,10 @@ describe("㉣ 마지막 회차가 찍히면 줄이 자동 완료된다 (결정 8
       expectedVersion: order.version,
       dueDateRowOrder: 2,
       completed: false,
-      actorUserId: requesterId,
+      // 🔴 **해제의 행위자가 2026-11-19 에 바뀌었다** — 그날 생긴 「완료 시 수정」이
+      //    회차 해제에도 서고, 기본값이 최고관리자·관리자 둘이라 요청자(영업)로는
+      //    막힌다. 🔵 이 시험이 재는 사실(해제가 **위로 번진다**)은 그대로다.
+      actorUserId: superAdminId,
     });
     assert.equal(released.ok, true, `완료 해제가 막혔다: ${JSON.stringify(released)}`);
 
@@ -663,7 +666,8 @@ describe("㉦ 줄 전체를 끝내는 길은 회차 **전부**의 승인을 본�
       id: order.id,
       expectedVersion: completed.version,
       completed: false,
-      actorUserId: requesterId,
+      // 🔴 줄 단위 해제에도 「완료 시 수정」이 선다(2026-11-19). 위와 같은 바꿈이다.
+      actorUserId: superAdminId,
     });
     assert.equal(released.ok, true, `완료 해제가 막혔다: ${JSON.stringify(released)}`);
     assert.ok(
@@ -769,7 +773,8 @@ describe("㉧ 완료 표시는 줄을 저장해도 살아남는다 — 그리고
           expectedVersion: order.version,
           dueDateRowOrder: 1,
           completed: false,
-          actorUserId: requesterId,
+          // 🔴 회차 해제에 「완료 시 수정」이 선다(2026-11-19) — 요청자로는 막힌다.
+          actorUserId: superAdminId,
         })
       ).ok,
       true
@@ -927,7 +932,8 @@ describe("㉨ 회차 [완료 처리]가 납품일을 찍는다", () => {
           expectedVersion: order.version,
           dueDateRowOrder: 1,
           completed: false,
-          actorUserId: requesterId,
+          // 🔴 회차 해제에 「완료 시 수정」이 선다(2026-11-19) — 요청자로는 막힌다.
+          actorUserId: superAdminId,
         })
       ).ok,
       true

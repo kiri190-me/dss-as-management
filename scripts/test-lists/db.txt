@@ -189,6 +189,23 @@ src/lib/server/services/kyosan-used-parts-backfill.integration.test.ts
 # "DO-ISSUE-DATE-TEST-" · 계정 이메일 "doissuedate-test-" (다른 스위트와 겹치지 않는다).
 src/lib/db/mutations/domestic-order-issue-dates.integration.test.ts
 
+# ── 🔴 「완료 시 수정」 — 완료된 줄은 그 권한이 있어야 건드린다 (2026-11-19)
+# 사용자 요청으로 [역할별 접근 권한]의 [내자 정리]에 잎이 하나 늘었다
+# (`domesticOrders.completedEdit`). 막는 자리는 **서버 mutation 넷**이라 여기서 잰다 —
+# 화면이 단추를 감추는 것은 다음 조각이고, 감추든 말든 이 층이 거절해야 한다.
+# 🔴 재는 것: 완료된 줄의 수정 거절(그리고 **한 칸도 안 바뀜**) · 권한이 있으면 통과 ·
+# 🔴 **완료되지 않은 줄은 그대로 고쳐짐**(새 권한이 평소 일을 막으면 안 된다) ·
+# 줄과 회차의 **완료 해제** 둘 다 막힘(완료 **처리**는 예전 그대로) ·
+# 🔴 **AND** — `edit` 와 `completedEdit` 이 둘 다 있어야 한다(한쪽만 연 조합을 설정으로
+# 실제로 만들어 보고 양쪽 방향을 잰다) · 수리 건 상세의 발행일 경로도 같은 관문 ·
+# 기본값으로 최고관리자·관리자만 통과.
+# ⚠️ **설정 표(role_permissions)를 잠깐 만지는 시험이 하나 있다.** try/finally 와
+#    after() 가 제가 넣은 행(영업 × 두 잎)만 걷는다 — 남으면 뒤따르는 남의 시험이
+#    기본값 대신 그 행을 본다.
+# 🔴 격리 이름: 접수 월 "9508" · 고객사 "AS-TEST-DO-COMPLETED-EDIT-" · 제품 모델
+# "DO-COMPLETED-EDIT-TEST-" · 계정 이메일 "docompletededit-test-".
+src/lib/db/mutations/domestic-order-completed-edit.integration.test.ts
+
 # ── 🔴 납기요청일 ↔ 고객 요청 납기일 — 어느 쪽에서 고쳐도 같은 날짜인가 (2026-10-30)
 # 사용자 요구로 두 칸이 **저장할 때 서로 따라간다.** 갈림(언제 묶고 언제 멈추는가)은
 # 순수 함수 한 벌이 가지고 unit 쪽 시험이 전부 보므로, 여기서는 **DB 에 정말 그렇게

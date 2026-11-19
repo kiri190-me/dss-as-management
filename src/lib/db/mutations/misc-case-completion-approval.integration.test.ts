@@ -538,7 +538,12 @@ describe("㉤㉥ 이미 완료된 줄은 깨지지 않고, 해제는 막지 않�
       id: order.id,
       expectedVersion: order.version,
       completed: false,
-      actorUserId: requesterId,
+      // 🔴 **행위자가 2026-11-19 에 바뀌었다** — 그날 생긴 「완료 시 수정」이 해제에
+      //    서는데, 그 기본값은 최고관리자·관리자 둘이라 요청자(영업)로는 막힌다.
+      //    🔵 **이 시험이 재는 것은 그대로다**: 「승인이 없다」가 해제를 막지 않는다.
+      //    막는 것은 승인이 아니라 사람의 권한이고, 그 권한을 가진 사람에게는 옛 줄도
+      //    그대로 열려 있어야 한다 — 그것이 여기서 지키려던 바로 그 성질이다.
+      actorUserId: superAdminId,
     });
 
     assert.equal(result.ok, true, `완료 해제가 막혔다: ${JSON.stringify(result)}`);
@@ -547,7 +552,13 @@ describe("㉤㉥ 이미 완료된 줄은 깨지지 않고, 해제는 막지 않�
     assert.equal(row.completedBy, null);
   });
 
-  test("🔴 승인받아 완료한 줄의 해제도 된다 — 해제에는 관문이 서지 않는다", async () => {
+  /**
+   * 🔴 **2026-11-19 에 이름이 한 낱말 좁아졌다** — 「관문이 서지 않는다」에서
+   * 「**승인** 관문이 서지 않는다」로. 그날 완료 해제에 **사람의 권한** 관문이
+   * 하나 생겼기 때문이다(「완료 시 수정」). 이 절이 재는 것은 그대로 **승인**
+   * 쪽이고, 이름을 그냥 두면 초록 ✔ 옆의 글이 거짓말을 한다.
+   */
+  test("🔴 승인받아 완료한 줄의 해제도 된다 — 해제에는 **승인** 관문이 서지 않는다", async () => {
     const order = await arrangeApprovedOrder();
     const completed = await setDomesticOrderCompletion({
       id: order.id,
@@ -562,7 +573,9 @@ describe("㉤㉥ 이미 완료된 줄은 깨지지 않고, 해제는 막지 않�
       id: order.id,
       expectedVersion: completed.version,
       completed: false,
-      actorUserId: requesterId,
+      // 🔴 해제에는 「완료 시 수정」이 필요하다(2026-11-19). 승인 관문과는 다른
+      //    물음이라 이 절의 주장은 그대로다 — 승인을 받았든 안 받았든 해제는 된다.
+      actorUserId: superAdminId,
     });
 
     assert.equal(released.ok, true, `완료 해제가 막혔다: ${JSON.stringify(released)}`);

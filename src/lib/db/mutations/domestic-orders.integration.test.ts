@@ -49,6 +49,12 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  * permission-areas.test.ts 가 따로 본다 — customers.integration.test.ts 가
  * updateCustomer 를 다루는 방식과 같다.
  *
+ * 🔴 **2026-11-19 부터 예외가 하나 있다.** 「완료 시 수정」
+ * (`domesticOrders.completedEdit`)은 mutation 안에 관문이 있어서, **완료된 줄을
+ * 건드리는 호출은 그 권한이 있는 사람으로 해야** 자료 규칙을 잴 수 있다. 그래서
+ * 아래 네 자리만 행위자가 관리자다(completedEditActorUserId). 막히는 쪽 전부는
+ * mutations/domestic-order-completed-edit.integration.test.ts 가 잰다.
+ *
  * ── 격리 규약 ────────────────────────────────────────────────────────────
  * 이 디렉터리의 다른 통합 테스트와 같다 — 이 스위트만 쓰는 접수 월 "9601",
  * 고객사 접두사 "AS-TEST-DOMESTIC-ORDER-", 제품 모델 접두사 "DOMESTIC-ORDER-TEST-".
@@ -67,6 +73,17 @@ const TEST_YEAR_MONTH = "9601";
 const TEST_RECEIVED_AT = "2096-01-05";
 
 let actorUserId: string;
+/**
+ * 🔴 **완료된 줄을 건드리는 호출만 이 사람으로 한다**(2026-11-19). 그날 생긴
+ * 「완료 시 수정」(`domesticOrders.completedEdit`) 때문이다 — 완료된 줄의 수정과
+ * 완료 해제는 그 권한이 있어야 통과한다. 기본값이 **최고관리자·관리자 둘**이라
+ * 위 `actorUserId`(엔지니어)로는 막힌다.
+ *
+ * 🔵 **나머지 호출은 그대로 엔지니어다.** 바꾼 것은 「완료된 줄을 건드리는 저장」
+ * 넷뿐이고, 그래야 이 파일이 재던 것(자료 규칙)이 그대로 남는다. 막히는 쪽은
+ * mutations/domestic-order-completed-edit.integration.test.ts 가 따로 잰다.
+ */
+let completedEditActorUserId: string;
 let engineerId: string;
 let customerId: string;
 let linkedRepairCaseId: string;
@@ -206,7 +223,17 @@ before(async () => {
   engineerId = engineer.id;
   // created_by/updated_by 는 users 를 RESTRICT 로 가리킨다 — 실재하는 계정이어야
   // 한다. 역할은 상관없으므로 엔지니어를 그대로 쓴다(인가는 서버 액션의 몫이다).
+  // 🔴 **딱 한 자리만 예외다** — 완료된 줄을 건드리는 저장에는 「완료 시 수정」이
+  //    필요하다(2026-11-19, 아래 completedEditActorUserId).
   actorUserId = engineer.id;
+
+  const [admin] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.role, "ADMIN"), eq(users.approvalStatus, "APPROVED"), eq(users.isDeleted, false)))
+    .limit(1);
+  assert.ok(admin, "expected at least one approved ADMIN in the test DB");
+  completedEditActorUserId = admin.id;
 
   const [customer] = await db
     .insert(customers)
@@ -735,11 +762,14 @@ describe("setDomesticOrderCompletion", () => {
     assert.equal(completed.ok, true);
     if (!completed.ok) return;
 
+    // 🔴 **해제는 「완료 시 수정」이 있어야 한다**(2026-11-19). 이 시험이 재는 것은
+    //    「두 칸이 함께 비워지는가」라 행위자만 바꾼다 — 막히는 쪽은
+    //    domestic-order-completed-edit.integration.test.ts 가 따로 잰다.
     const released = await setDomesticOrderCompletion({
       id: created.id,
       expectedVersion: completed.version,
       completed: false,
-      actorUserId,
+      actorUserId: completedEditActorUserId,
     });
     assert.equal(released.ok, true, `완료 해제 실패: ${JSON.stringify(released)}`);
     if (!released.ok) return;
@@ -764,7 +794,10 @@ describe("setDomesticOrderCompletion", () => {
         id: created.id,
         expectedVersion: version,
         completed,
-        actorUserId,
+        // 🔴 가운데 한 바퀴가 **해제**라 「완료 시 수정」이 필요하다(2026-11-19).
+        //    세 바퀴를 한 사람으로 도는 것이 이 시험의 모양이므로 전부 그 사람으로
+        //    돈다 — 완료 처리는 그 사람도 할 수 있다(관문은 해제에만 선다).
+        actorUserId: completedEditActorUserId,
       });
       assert.equal(result.ok, true, `전환 실패(${completed}): ${JSON.stringify(result)}`);
       if (!result.ok) return;
@@ -848,7 +881,17 @@ describe("setDomesticOrderCompletion", () => {
     assert.equal(result.code, "NOT_FOUND");
   });
 
-  test("완료된 줄도 여전히 고칠 수 있다 — 회색은 잠금이 아니다", async () => {
+  /**
+   * 🔴 **2026-11-19 에 이 시험의 뜻이 한 겹 좁아졌다.** 그날 「완료 시 수정」이
+   * 생기면서, 완료된 줄을 고치는 일은 **그 권한이 있는 사람에게만** 열린다. 재던
+   * 사실(완료는 **잠금이 아니다** — 자료는 그대로 고쳐진다)은 그대로 살아 있고,
+   * 달라진 것은 **누가** 고치느냐 하나다.
+   *
+   * 🔴 그래서 단언을 빼지 않고 **하나 더 넣었다** — 권한이 없는 엔지니어는 막히고,
+   * 막혔을 때 그 줄이 한 글자도 안 바뀐다. 행위자만 바꾸고 끝내면 「완료는 잠금이
+   * 아니다」는 여전히 초록인데 **새 울타리는 이 파일 어디에서도 안 보인다.**
+   */
+  test("완료된 줄도 여전히 고칠 수 있다 — 회색은 잠금이 아니다(단, 「완료 시 수정」이 있어야)", async () => {
     const created = await createOrder({ progressNote: "완료 전" });
     if (!created.ok) return;
     await grantMiscCaseApproval(created.id, created.version);
@@ -862,11 +905,22 @@ describe("setDomesticOrderCompletion", () => {
     assert.equal(completed.ok, true);
     if (!completed.ok) return;
 
+    // 🔴 권한이 없는 사람(엔지니어)은 막힌다 — 그리고 줄은 그대로다.
+    const denied = await updateDomesticOrder({
+      id: created.id,
+      expectedVersion: completed.version,
+      fields: fields({ progressNote: "권한 없이 적으려 한 값" }),
+      actorUserId,
+    });
+    assert.equal(denied.ok, false, "완료된 줄이 「완료 시 수정」 없이 고쳐졌다");
+    if (!denied.ok) assert.equal(denied.code, "FORBIDDEN");
+    assert.equal((await readOrder(created.id)).progressNote, "완료 전");
+
     const updated = await updateDomesticOrder({
       id: created.id,
       expectedVersion: completed.version,
       fields: fields({ progressNote: "완료 후에 적은 입금 사실" }),
-      actorUserId,
+      actorUserId: completedEditActorUserId,
     });
     assert.equal(updated.ok, true, `완료된 줄 수정 실패: ${JSON.stringify(updated)}`);
 
@@ -874,6 +928,7 @@ describe("setDomesticOrderCompletion", () => {
     assert.equal(row.progressNote, "완료 후에 적은 입금 사실");
     // 수정은 완료 표시를 건드리지 않는다 — 둘은 서로 다른 조작이다.
     assert.ok(row.completedAt instanceof Date, "수정이 완료 표시를 지워서는 안 된다");
+    // 🔵 완료한 사람은 그대로다 — 고친 사람이 덮어쓰지 않는다.
     assert.equal(row.completedBy, actorUserId);
   });
 });

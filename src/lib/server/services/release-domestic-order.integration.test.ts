@@ -54,14 +54,19 @@ import type { ValidatedCreateRepairCaseInput } from "@/lib/validation/repair-cas
  *            소모되었기 때문이고(APPROVAL_STALE), 그것은 이 조각이 만든 규칙이
  *            아니라 「승인은 그 건의 version 에 묶인다」는 원래 규칙이다.
  *       ④-b 승인을 다시 받으면 transitionWorkflow 가 **성공한다.**
- *  ⑤ 되돌리기가 막히면 🔴 내자 줄의 completed_at 이 **그대로 남아 있다**
- *     (version 도 그대로다). 막히는 표본은 아래 unknownActorId 주석 참고 —
- *     **역할로는 막히는 사람을 고를 수 없게 되었다.**
+ *  ⑤ 🔴 **막힌 완료 해제는 아무것도 건드리지 않는다** — 내자 줄의 completed_at 도
+ *     version 도, 수리 건의 단계·잠금·출하일도, **이력 줄 수까지** 그대로다.
+ *     막히는 표본은 아래 unknownActorId 주석 참고 — **역할로는 막히는 사람을 고를
+ *     수 없게 되었다.** 🔴 2026-11-19 에 그 거절의 **코드가 바뀌었다**(그 시험 주석).
  *  ⑥ 이력이 남고, 평범한 단계 되돌리기와 **구분되는 표시**가 들어 있다
  *     (metadata.revertedShipmentCompletion + 자동 사유 문구).
  *
- * 인가는 서비스가 보지 않는다(그 파일 머리말) — 여기서 보는 FORBIDDEN 은
- * mutation(revertShipmentCompletion)이 전이의 allowed_roles 로 판정한 것이다.
+ * 🔴 **2026-11-19 부터 서비스가 관문을 하나 본다** — 「완료 시 수정」이다. 그 전까지
+ * 이 자리에는 「인가는 서비스가 보지 않는다」가 적혀 있었다. 바뀐 까닭은 **차례**다:
+ * 이 서비스는 수리 건을 먼저 되돌리는데 마지막 걸음이 권한으로 거절될 수 있게 되어,
+ * 묻지 않으면 **수리 건만 되돌아간 반쪽**이 남는다(그 파일 머리말의 '예외 하나').
+ * 🔵 전이를 되돌릴 수 있는 역할인가는 지금도 mutation(revertShipmentCompletion)이
+ * 전이의 allowed_roles 로 판정한다 — 그쪽은 그대로다.
  *
  * ── 격리 규약 ────────────────────────────────────────────────────────────
  * 이 스위트만 쓰는 접수 월 "9312"(형제 스위트가 9311 을 쓰고, 다른 스위트는
@@ -500,9 +505,27 @@ describe("releaseDomesticOrderWithShipment", () => {
     assert.ok(finalCase.actualShipmentDate, "다시 나갔으면 실제 출하일이 다시 찍힌다");
   });
 
-  test("⑤ 되돌리기가 막히면 내자 줄의 완료 표시가 그대로 남는다", async () => {
+  /**
+   * 🔴 **2026-11-19 에 이 시험이 재는 코드가 바뀌었다** — `SHIPMENT_COMPLETION_BLOCKED`
+   * 에서 `FORBIDDEN` 으로. 그날 서비스 맨 앞에 「완료 시 수정」 관문이 생겼고, 이
+   * 파일의 「막히는 사람」 표본(살아 있지 않은 계정)이 **거기서 먼저** 걸리기
+   * 때문이다. 재던 사실(막힌 완료 해제는 **아무것도 바꾸지 않는다**)은 그대로이고,
+   * 오히려 더 강해졌다 — 전에는 수리 건을 한 번 건드려 보고 실패한 것이었는데,
+   * 이제는 **손도 대지 않는다.** 그래서 단언을 빼지 않고 **이력 0줄을 더했다.**
+   *
+   * 🔵 **그 관문이 생긴 까닭이 바로 이 자리다.** 권한 거절이 수리 건을 되돌린
+   * **뒤에** 일어나면 「수리 건은 풀렸는데 내자 줄은 완료인」 반쪽이 남는다
+   * (2026-11-19 실측). 아래 '이력이 한 줄도 안 생겼다'가 그 반쪽을 잡는 못이다.
+   *
+   * 🔵 `SHIPMENT_COMPLETION_BLOCKED` 갈래(되돌리기 자체가 막혔을 때 내자 줄을 안
+   * 건드린다)는 **코드에 그대로 있고**, 거울인 complete-domestic-order.integration.
+   * test.ts 가 같은 모양을 잰다 — 이 파일에서는 그 상태를 만들 표본이 없어졌다
+   * (역할로는 못 막고, 살아 있지 않은 계정은 이제 0단계에서 걸린다).
+   */
+  test("⑤ 권한이 없는 완료 해제는 **아무것도 건드리지 않는다** — 수리 건도 이력도", async () => {
     const { caseId, order } = await arrangeShippedCaseWithCompletedOrder("PO-REL-BLOCKED");
     const beforeCase = await readCase(caseId);
+    const beforeHistories = (await historiesOf(caseId)).length;
 
     const result = await releaseDomesticOrderWithShipment({
       id: order.id,
@@ -512,7 +535,7 @@ describe("releaseDomesticOrderWithShipment", () => {
 
     assert.equal(result.ok, false);
     if (result.ok) return;
-    assert.equal(result.code, "SHIPMENT_COMPLETION_BLOCKED");
+    assert.equal(result.code, "FORBIDDEN");
 
     // 🔴 여기가 이 시험의 핵심이다 — 내자 줄이 **한 글자도** 바뀌지 않았다.
     const row = await readOrder(order.id);
@@ -526,6 +549,15 @@ describe("releaseDomesticOrderWithShipment", () => {
     assert.equal(afterCase.isLocked, true);
     assert.ok(afterCase.actualShipmentDate);
     assert.equal(afterCase.version, beforeCase.version);
+
+    // 🔴 **이력도 한 줄 안 늘었다.** 단계·version 만 보면 「되돌렸다가 다시
+    //    나갔다」와 구분되지 않는다 — 되돌리기는 이력을 남기므로, 그 줄 수가
+    //    「손도 안 댔다」의 유일한 증거다.
+    assert.equal(
+      (await historiesOf(caseId)).length,
+      beforeHistories,
+      "막힌 완료 해제가 수리 건 이력을 남겼다 — 되돌리기가 이미 일어났다는 뜻이다"
+    );
   });
 
   test("⑥ 이력이 평범한 단계 되돌리기와 구분되는 표시를 달고 남는다", async () => {

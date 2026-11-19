@@ -8,7 +8,9 @@ import {
   domesticOrders,
   repairCaseApprovals,
   repairCases,
+  users,
 } from "../schema";
+import { hasPermission, type PermissionActor } from "@/lib/auth/permission-resolver";
 import {
   DOMESTIC_ORDER_APPROVAL_ROUTE_SCOPE,
   foldDomesticOrderApprovalStates,
@@ -41,12 +43,22 @@ import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input"
  * ============================================================================
  * 내자 정리 — 행 추가·수정 (2단계)
  * ============================================================================
- * 이 계층은 **기계**다. 누가 고칠 수 있는지는 여기서 묻지 않는다 —
- * 세션·역할·설정은 서버 액션(server/actions/domestic-orders.ts)이 보고, 이
- * 파일은 자료의 규칙만 지킨다(존재하는가 · 지워졌는가 · 그 사이 누가 고쳤는가).
- * 이 저장소가 queries/mutations 를 mechanism, Server Actions/pages 를 policy 로
- * 나눠 온 방식 그대로이고, 통합 테스트가 인가를 흉내 내지 않고도 자료 규칙을
- * 그대로 검증할 수 있는 이유이기도 하다.
+ * 이 계층은 대체로 **기계**다. 「이 화면에 들어올 수 있는가 · 저장 단추를 누를 수
+ * 있는가」는 여기서 묻지 않는다 — 세션·역할·설정은 서버 액션
+ * (server/actions/domestic-orders.ts)이 보고, 이 파일은 자료의 규칙을 지킨다
+ * (존재하는가 · 지워졌는가 · 그 사이 누가 고쳤는가). 이 저장소가 queries/mutations 를
+ * mechanism, Server Actions/pages 를 policy 로 나눠 온 방식 그대로이고, 통합 테스트가
+ * 인가를 흉내 내지 않고도 자료 규칙을 그대로 검증할 수 있는 이유이기도 하다.
+ *
+ * ── 🔴 **예외 하나 — 완료된 줄** (2026-11-19) ───────────────────────────
+ * 「완료 시 수정」 권한만은 **이 파일이 트랜잭션 안에서 직접 묻는다**
+ * (canEditCompletedDomesticOrder). 까닭은 그 판정이 **줄의 지금 상태**(completed_at)에
+ * 달려 있기 때문이다 — 액션에 걸면 줄을 한 번 더 읽어 **같은 판정을 두 곳에서** 하게
+ * 되고, 그 사이에 남이 완료를 누르면 두 답이 갈린다. 게다가 완료를 누르는 자리는
+ * 화면 둘 · 서버 액션 하나 · PO 가 부르는 통로 하나인데 **그 넷이 전부 이 파일로
+ * 모인다**(아래 setDomesticOrderCompletion 머리말의 같은 문단). 승인 관문을 여기 둔
+ * 것과 똑같은 판단이다.
+ * 🔵 **완료되지 않은 줄에서는 한 글자도 달라지지 않는다** — 관문이 그 조건 안에만 선다.
  *
  * ── 동시 수정은 version 으로 막는다 ─────────────────────────────────────
  * 가장 가까운 선례는 mutations/customers.ts 지만, **그쪽은 updated_at 문자열을
@@ -118,12 +130,25 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type DomesticOrderMutationResultCode = "NOT_FOUND" | "CONFLICT" | "VALIDATION_ERROR";
 
 /**
- * 완료 처리에만 있는 거절. 🔴 **추가·수정에는 없다** — 그래서 위 묶음에 끼워 넣지
+ * 🔴 **완료된 줄을 건드리려 했는데 「완료 시 수정」이 없다**(2026-11-19 사용자 요청).
+ *
+ * 🔴 **행 추가(createDomesticOrder)에는 없다** — 막 태어난 줄은 완료일 수 없다. 그래서
+ * 위 묶음에 끼워 넣지 않고 수정·완료 쪽에만 잇는다(바로 아래 APPROVAL_REQUIRED 와
+ * 같은 판단이다). 끼워 넣으면 「행을 추가했는데 권한이 없다고 거절당했다」가 타입상
+ * 말이 되어 버리고, 그 가능성을 부르는 쪽들이 저마다 가려내야 한다.
+ */
+export type DomesticOrderUpdateMutationResultCode = DomesticOrderMutationResultCode | "FORBIDDEN";
+
+/**
+ * 완료 처리에만 있는 거절. 🔴 **추가에는 없다** — 그래서 맨 위 묶음에 끼워 넣지
  * 않고 따로 잇는다. 끼워 넣으면 「행을 추가했는데 승인이 없다고 거절당했다」가
  * 타입상 말이 되어 버리고, 그 가능성을 부르는 쪽들이 저마다 가려내야 한다.
+ *
+ * 🔵 `FORBIDDEN` 은 바로 위 수정 쪽 묶음에서 따라온다 — **완료 해제도 「완료된 줄을
+ * 건드리는 일」**이라 같은 열쇠가 선다(2026-11-19).
  */
 export type DomesticOrderCompletionMutationResultCode =
-  | DomesticOrderMutationResultCode
+  | DomesticOrderUpdateMutationResultCode
   /**
    * 🔴 **기타건(수리 건이 붙지 않은 줄)인데 [기타건 최종 출하 승인]이 유효하지 않다**
    * (2026-11-07 사용자 결정). `message` 가 어느 상태라서 막혔는지까지 말한다 —
@@ -169,12 +194,26 @@ export type DomesticOrderMutationResult =
     };
 
 /**
+ * 🔴 **수정 전용 결과**(2026-11-19). 성공 모양은 위와 **글자 그대로 같고**(그래서
+ * 베껴 적지 않고 `Extract` 로 그 가지를 그대로 가져온다 — 칸이 하나 늘 때 한쪽만
+ * 고쳐지는 날을 만들지 않는다), 거절 코드에만 `FORBIDDEN` 이 하나 더 있다.
+ */
+export type DomesticOrderUpdateMutationResult =
+  | Extract<DomesticOrderMutationResult, { ok: true }>
+  | {
+      ok: false;
+      code: DomesticOrderUpdateMutationResultCode;
+      fieldErrors?: Record<string, string>;
+      message: string;
+    };
+
+/**
  * 충돌했을 때 사람에게 보이는 말.
  *
  * `export` 인 이유는 **같은 표를 고치는 다른 경로가 같은 문장을 써야 하기**
  * 때문이다(mutations/domestic-order-issue-dates.ts — 수리 건 상세에서 두 날짜만
  * 고치는 길). 한 글자라도 다르게 적으면 같은 일이 화면마다 다른 말로 설명된다.
- * 🔴 내보내는 것은 이 문장뿐이고, 이 파일의 함수들이 하는 일은 그대로다.
+ * 🔵 같은 까닭으로 아래 「완료 시 수정」 관문의 문장과 판정 함수도 내보낸다.
  */
 export const VERSION_CONFLICT_MESSAGE =
   "다른 사용자가 이 항목을 먼저 수정했습니다. 최신 정보를 다시 불러온 뒤 시도해 주세요.";
@@ -182,6 +221,82 @@ export const VERSION_CONFLICT_MESSAGE =
 const NOT_FOUND_MESSAGE = "해당 내자 정리 항목을 찾을 수 없습니다.";
 
 const UNKNOWN_REFERENCE_MESSAGE = "입력값을 확인해 주세요.";
+
+/**
+ * 완료된 줄을 건드리려다 막혔을 때 사람에게 보이는 말(2026-11-19).
+ *
+ * `export` 인 까닭은 위 VERSION_CONFLICT_MESSAGE 와 같다 — 수리 건 상세에서 발행일
+ * 둘만 고치는 길도 **같은 관문에 같은 문장**을 써야 한다
+ * (mutations/domestic-order-issue-dates.ts).
+ *
+ * 🔴 **다음에 할 일을 말한다.** 「권한이 없습니다」만 적으면 사람은 무엇을 받아야
+ * 하는지 모른 채 같은 단추를 계속 누른다 — 권한 화면의 칸 이름을 그대로 적는다.
+ */
+export const COMPLETED_DOMESTIC_ORDER_EDIT_FORBIDDEN_MESSAGE =
+  "완료 처리된 항목입니다. 「완료 시 수정」 권한이 있어야 고치거나 완료를 해제할 수 있습니다.";
+
+/**
+ * 트랜잭션 안에서 계정을 다시 읽었는데 없거나 승인 상태가 아니다.
+ *
+ * `export` 인 까닭은 위 둘과 같다 — **같은 관문을 한 겹 앞에서 또 세우는 자리**가
+ * 같은 문장을 써야 한다(server/services/release-domestic-order.ts 의 0단계).
+ */
+export const DOMESTIC_ORDER_ACTOR_UNKNOWN_MESSAGE = "사용자 정보를 확인할 수 없습니다.";
+
+/**
+ * 🔴 **완료된 줄을 건드릴 수 있는가** — 잎 **둘을 AND 로** 묻는다(2026-11-19).
+ *
+ * 🔴 **AND 인 까닭.** 두 잎은 `role_permissions` 에 따로 저장되므로 「내자 정리 수정은
+ * 접근 불가인데 완료 시 수정은 쓰기」라는 앞뒤 안 맞는 조합을 관리자가 만들 수 있다.
+ * 둘 다 있어야 통과하게 두면 그 조합은 **아무 힘도 못 갖는다** — 수정 자체가 막히므로
+ * 완료된 줄도 당연히 못 고친다. 거꾸로(OR 로) 두면 그 조합이 **수정을 닫아 둔 사람에게
+ * 완료된 줄만 열어 주는** 이상한 문이 된다.
+ *
+ * 🔵 `edit` 을 여기서 또 묻는 것이 네 통로의 바깥 관문과 겹쳐 보이지만, 겹치는 것이
+ * 목적이다 — 바깥 관문이 어느 날 한 곳만 바뀌어도 이 AND 는 깨지지 않는다.
+ *
+ * 🔴 **판정을 여기 한 곳에만 적는다.** 저장 경로 넷이 전부 이 함수를 부른다(이 파일의
+ * 셋 · mutations/domestic-order-issue-dates.ts 의 하나). 글자를 나눠 적으면 그중
+ * 하나만 고쳐지는 날이 오고, 그때 증상은 「목록에서는 막히는데 수리 건 상세에서는
+ * 되는」 뒷문이다.
+ */
+export async function canEditCompletedDomesticOrder(actor: PermissionActor): Promise<boolean> {
+  return (
+    (await hasPermission(actor, "domesticOrders.edit", "WRITE")) &&
+    (await hasPermission(actor, "domesticOrders.completedEdit", "WRITE"))
+  );
+}
+
+/**
+ * 위 판정을 **트랜잭션 안에서** 세우고, 막혔으면 거절을 통과면 `null` 을 돌려준다.
+ *
+ * 🔴 **계정을 트랜잭션 안에서 다시 읽는다.** 세션을 읽은 뒤 강등·정지된 계정이 그
+ * 사이에 저장하는 구멍을 막는다 — mutations/domestic-order-issue-dates.ts 가 쓰는
+ * 그 모양 그대로다(소프트 삭제된 계정도 거른다).
+ */
+async function checkCompletedDomesticOrderEdit(
+  tx: Tx,
+  actorUserId: string
+): Promise<{ ok: false; code: "FORBIDDEN"; message: string } | null> {
+  const [actor] = await tx
+    .select({
+      id: users.id,
+      role: users.role,
+      approvalStatus: users.approvalStatus,
+      isDeveloper: users.isDeveloper,
+    })
+    .from(users)
+    .where(and(eq(users.id, actorUserId), eq(users.isDeleted, false)));
+  if (!actor || actor.approvalStatus !== "APPROVED") {
+    return { ok: false, code: "FORBIDDEN", message: DOMESTIC_ORDER_ACTOR_UNKNOWN_MESSAGE };
+  }
+  if (await canEditCompletedDomesticOrder(actor)) return null;
+  return {
+    ok: false,
+    code: "FORBIDDEN",
+    message: COMPLETED_DOMESTIC_ORDER_EDIT_FORBIDDEN_MESSAGE,
+  };
+}
 
 /**
  * domestic_orders 에 실제로 쓰는 컬럼 묶음. 추가와 수정이 **같은 표**를 쓰도록
@@ -488,6 +603,20 @@ function checkDueDateRowGuard(params: {
  * 새 수리 건에 밀어 넣으면, 사람이 고른 적 없는 날짜가 그 건에 적힌다(그리고 옛
  * 건에서는 아무 일도 일어나지 않아 두 건이 동시에 어긋난다). 연결을 바꾼 저장은
  * 날짜를 건드리지 않고, 다음에 날짜를 고칠 때 비로소 묶인다.
+ *
+ * ── 🔴 「완료 시 수정」과의 관계 (2026-11-19) ───────────────────────────
+ * **이 방향은 따로 물을 것이 없다.** 이 함수는 create·update 안에서만 불리고, 그
+ * 둘 중 완료된 줄을 건드리는 쪽(updateDomesticOrder)에는 이미 관문이 서 있다 —
+ * 즉 완료된 줄의 날짜가 수리 건으로 번지려면 그 관문을 먼저 지나야 한다.
+ *
+ * 🔴 **거울 방향(수리 건 → 내자)은 다르다. 거기는 권한을 아예 안 묻고, 그대로
+ * 두기로 했다.** 수리 건에서 출하를 찍거나 실제 출하일을 고치면 **완료된 내자 줄의
+ * 납품일·납기요청일이 권한 검사 없이 덮인다**
+ * (mutations/domestic-order-delivered-link.ts · mutations/repair-cases.ts 의
+ * requestedDueDateLink). 🔴 **구멍이 아니라 정한 모양이다** — 그것은 「내자 줄을
+ * 고치는 일」이 아니라 **수리 건에서 일어난 사실이 번진 것**이고, 그 사실 기록이 내자
+ * 권한에 막히면 전이가 반쪽만 성공한 채 끝난다(두 표가 서로 다른 날짜를 들게 된다).
+ * 막지 마라. 자세한 까닭은 그 파일 머리말에 있다.
  * ============================================================================
  */
 async function applyRepairCaseDueDateLink(
@@ -727,14 +856,18 @@ export async function createDomesticOrder(params: {
   });
 }
 
-/** 한 줄을 통째로 고친다. 칸 하나씩 고치는 경로는 없다(파일 헤더 참조). */
+/**
+ * 한 줄을 통째로 고친다. 칸 하나씩 고치는 경로는 없다(파일 헤더 참조).
+ *
+ * 🔴 **완료된 줄에는 관문이 하나 더 선다**(2026-11-19) — 아래 그 자리의 주석.
+ */
 export async function updateDomesticOrder(params: {
   id: string;
   expectedVersion: number;
   fields: DomesticOrderFields;
   actorUserId: string;
-}): Promise<DomesticOrderMutationResult> {
-  return db.transaction(async (tx): Promise<DomesticOrderMutationResult> => {
+}): Promise<DomesticOrderUpdateMutationResult> {
+  return db.transaction(async (tx): Promise<DomesticOrderUpdateMutationResult> => {
     const [current] = await tx
       .select({
         id: domesticOrders.id,
@@ -742,6 +875,10 @@ export async function updateDomesticOrder(params: {
         // 🔴 묶기가 본다 — 이 저장이 **가리키는 수리 건 자체를 바꾸는 중**이면
         // 날짜를 밀어 넣지 않는다(applyRepairCaseDueDateLink 머리말).
         repairCaseId: domesticOrders.repairCaseId,
+        // 🔴 **2026-11-19 에 더했다.** 「완료 시 수정」 관문이 보는 한 칸이다 — 이 칸을
+        // 안 읽으면 지금 고치려는 줄이 완료된 줄인지 알 수 없어 관문을 세울 수가 없다.
+        // 판정은 completed_at 하나로만 한다(schema/domestic-orders.ts 의 그 칸 주석).
+        completedAt: domesticOrders.completedAt,
       })
       .from(domesticOrders)
       .where(and(eq(domesticOrders.id, params.id), eq(domesticOrders.isDeleted, false)))
@@ -755,6 +892,22 @@ export async function updateDomesticOrder(params: {
 
     if (current.version !== params.expectedVersion) {
       return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
+    }
+
+    // ── 🔴 **완료된 줄은 「완료 시 수정」이 있어야 고쳐진다** (2026-11-19) ──
+    // 사용자 요청: 「수정권한을 가진 사람만 완료된 건에 대한 수정, 완료해제를 할 수
+    // 있어야 해」. 칸 하나를 고치는 길도 줄 수정 폼도 전부 이 함수로 모인다.
+    //
+    // 🔴 **완료되지 않은 줄은 한 글자도 달라지지 않는다** — 관문이 이 조건 안에만 선다.
+    // 🔴 **version 대조 뒤**다. 앞에 두면 낡은 화면에서 누른 저장이 CONFLICT 대신
+    //    「권한이 없다」로 답한다 — 사람은 권한을 받으러 가지만 진짜 문제는 그 사이
+    //    남이 그 줄을 완료한 것이고, 권한을 받아 와도 같은 자리에서 또 막힌다
+    //    (setDomesticOrderCompletion 의 승인 관문이 같은 차례를 쓰는 그 까닭).
+    // 🔴 **UPDATE 보다 앞**이다 — 거절로 끝나는 저장이 이 줄을 이미 바꿔 놓으면
+    //    「거절됐는데 반은 저장된」 상태가 남는다(아래 울타리와 같은 규칙).
+    if (current.completedAt !== null) {
+      const denied = await checkCompletedDomesticOrderEdit(tx, params.actorUserId);
+      if (denied) return denied;
     }
 
     const badReference = await checkReferences(tx, params.fields);
@@ -885,9 +1038,13 @@ export async function updateDomesticOrder(params: {
  * (mutations/domestic-order-approvals.ts) — 둘이 줄을 서므로 「읽고 나서 쓰기까지」
  * 사이에 승인이 생기거나 낡아지는 틈이 없다.
  *
- * 🔵 **막히는 줄은 셋 중 하나도 아니어야 한다**:
- *  · 완료 **해제**(completed === false)는 막지 않는다 — 잠그는 조작이 아니고,
- *    막으면 승인 없이 완료된 옛 줄을 되돌릴 길이 사라진다.
+ * 🔵 **막히는 줄은 셋 중 하나도 아니어야 한다**(아래 셋은 전부 **승인 관문** 이야기다
+ * — 2026-11-19 에 생긴 「완료 시 수정」 관문은 서는 자리가 다르다):
+ *  · 완료 **해제**(completed === false)는 **승인으로** 막지 않는다 — 잠그는 조작이
+ *    아니고, 막으면 승인 없이 완료된 옛 줄을 되돌릴 길이 사라진다.
+ *    🔴 **그렇다고 아무나 푸는 것은 아니다**(2026-11-19): 해제는 「완료 시 수정」이
+ *    있어야 한다. 묻는 것이 **승인이 아니라 사람의 권한**이라 위 까닭과 부딪히지
+ *    않는다 — 그 권한을 가진 사람은 옛 줄도 그대로 되돌릴 수 있다.
  *  · **수리 건이 붙은 줄**은 막지 않는다 — 그쪽은 이미 전이가 승인을 요구한다
  *    (services/complete-domestic-order.ts). 여기서 또 보면 **기타건 갈래의 승인**을
  *    접수 건에까지 요구하게 되고, 그 결재선은 애초에 다른 갈래다.
@@ -921,6 +1078,20 @@ export async function setDomesticOrderCompletion(params: {
 
     if (current.version !== params.expectedVersion) {
       return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
+    }
+
+    // ── 🔴 **완료 해제는 「완료 시 수정」이 있어야 한다** (2026-11-19) ──────
+    // 사용자 요청의 두 조작 중 하나다(다른 하나는 완료된 줄의 수정 —
+    // updateDomesticOrder). 🔴 **완료 처리 쪽은 막지 않는다**: 그 일은 예전 그대로
+    // `domesticOrders.edit` 하나가 정한다. 새 권한이 평소 일을 막으면 안 된다.
+    //
+    // 🔵 `completed_at` 이 이미 비어 있는 줄에 온 해제 요청(아무것도 안 바뀌는 저장)도
+    //    함께 막힌다. **일부러다** — 막히느냐 아니냐가 그 순간의 경합 결과로 갈리면
+    //    같은 단추가 어떤 때는 되고 어떤 때는 안 되는 것처럼 보인다.
+    // 🔴 version 대조 **뒤**인 것은 아래 승인 관문과 같은 까닭이다.
+    if (!params.completed) {
+      const denied = await checkCompletedDomesticOrderEdit(tx, params.actorUserId);
+      if (denied) return denied;
     }
 
     // 🔴 기타건인가. 이 한 값이 아래 셋을 함께 가른다 — 승인 관문을 세울지, 회차
@@ -1108,6 +1279,16 @@ export async function setDomesticOrderDueDateRowCompletion(params: {
         code: "VALIDATION_ERROR",
         message: "그 회차를 찾을 수 없습니다. 최신 정보를 다시 불러와 주세요.",
       };
+    }
+
+    // ── 🔴 **회차 완료 해제도 「완료 시 수정」이 있어야 한다** (2026-11-19) ──
+    // 줄 단위 해제와 **같은 열쇠**다. 갈리면 「줄은 못 푸는데 회차는 푸는」 사람이
+    // 생기고, 회차를 풀면 아래 '해제는 위로도 번진다'로 **줄의 완료까지 함께 거둬진다**
+    // — 즉 그 사람은 회차 단추로 줄 단위 해제를 하게 된다.
+    // 🔴 **완료 처리 쪽은 막지 않는다**(줄 단위와 같다). 바로 아래 승인 관문만 선다.
+    if (!params.completed) {
+      const denied = await checkCompletedDomesticOrderEdit(tx, params.actorUserId);
+      if (denied) return denied;
     }
 
     const units = domesticOrderDueDateUnits(rows);
