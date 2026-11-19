@@ -35,9 +35,11 @@ export const dynamic = "force-dynamic";
  * 휴지통(2026-09-11)은 canDelete(domesticOrders MANAGE) 세션에만 보이고, 그
  * 세션에만 휴지통의 줄을 읽어 보낸다.
  *
- * canEdit · canDelete 는 **화면을 그리기 위한 값일 뿐 관문이 아니다.** 실제 저장은
- * server/actions/domestic-orders.ts 가 세션부터 다시 확인한다 — 버튼을 감추는
- * 것으로 막았다고 여기면, 액션을 직접 부르는 요청 앞에서 아무것도 막지 못한다.
+ * canEdit · canEditCompleted · canDelete 는 **화면을 그리기 위한 값일 뿐 관문이
+ * 아니다.** 실제 저장은 server/actions/domestic-orders.ts 가 세션부터 다시 확인한다 —
+ * 버튼을 감추는 것으로 막았다고 여기면, 액션을 직접 부르는 요청 앞에서 아무것도 막지
+ * 못한다. 완료된 줄 쪽은 그 울타리가 저장 경로 **안**에도 한 겹 더 있다(2026-11-19의
+ * 조각 1 — db/mutations/domestic-orders.ts).
  */
 export default async function DomesticOrdersPage() {
   await requireAreaAccessForCurrentUser("domesticOrders");
@@ -65,6 +67,27 @@ export default async function DomesticOrdersPage() {
   //    어긋나지 않는다 — 통과하는 역할은 쪼개기 전과 다르지 않다.
   const canEdit =
     actingUser !== null && (await hasPermission(actingUser, "domesticOrders.edit", "WRITE"));
+  // ── 🔴 **완료된 줄도 고칠 수 있는가**(2026-11-19) ────────────────────────
+  // 사용자 지시: 「[완료시 수정]권한이 없으면 [완료]건에 대해서 [수정], [완료해제]버튼이
+  // 보이지 않도록 해줘.」
+  //
+  // 🔴 **서버 관문과 같은 식이어야 한다** — 잎 둘의 AND 다
+  // (db/mutations/domestic-orders.ts 의 canEditCompletedDomesticOrder. AND 인 까닭의
+  // 전문이 그 머리말에 있다). 🔵 그 함수를 직접 부르지 않는 것은 그것이 `server-only`
+  // 사슬 안에 있어서가 아니라 — 여기는 서버다 — **그 모듈이 DB 쓰기 경로를 통째로
+  // 끌고 들어오기 때문**이다. 같은 두 줄을 여기서 다시 묻는 편이 가볍고, 어긋나지
+  // 않는지는 시험이 두 파일을 함께 읽어 본다.
+  //
+  // 🔴 **한 번 재서 깃발로 내려보낸다.** 화면은 `"use client"` 라 hasPermission 을 부를
+  // 수 없다 — 안 내려보내면 화면은 영영 막을 방법이 없다(조각 1에서 같은 꼴의 결함을
+  // 실제로 잡았다).
+  // 🔵 canEdit 과 AND 로 접어 내려보내므로 화면이 받는 값은 **그 자체로 답**이다.
+  //    「수정은 접근 불가인데 완료 시 수정은 쓰기」라는 앞뒤 안 맞는 설정이 화면에서
+  //    힘을 갖는 일이 없다(서버가 그 조합을 거절하는 것과 같은 결과).
+  const canEditCompleted =
+    canEdit &&
+    actingUser !== null &&
+    (await hasPermission(actingUser, "domesticOrders.completedEdit", "WRITE"));
   // 휴지통으로 보내기·복원·완전 삭제는 한 칸 좁다 — 관리(2026-09-11). 서버
   // 액션(actions/domestic-orders.ts 의 resolveManagingActingUser)과 **같은 판정**
   // 이라 화면에 보이는 단추와 실제로 되는 일이 어긋나지 않는다.
@@ -162,6 +185,7 @@ export default async function DomesticOrdersPage() {
       asOfDate={asOfDate}
       currentYear={currentYear}
       canEdit={canEdit}
+      canEditCompleted={canEditCompleted}
       repairCaseOptions={repairCaseOptions}
       customerOptions={customerOptions}
       quoteOptions={quoteOptions}

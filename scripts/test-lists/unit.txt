@@ -406,6 +406,15 @@ src/lib/domain/long-pending-po.test.ts
 src/lib/domain/weekly-report-delivery.test.ts
 src/lib/validation/weekly-report-delivery-input.test.ts
 src/lib/domain/domestic-order-cell-edit.test.ts
+# 🔴 **완료된 줄에서 고치는 길을 그릴 것인가**(2026-11-19, 조각 2 — 사용자 지시:
+# 「[완료시 수정]권한이 없으면 [완료]건에 대해서 [수정], [완료해제]버튼이 보이지 않도록」).
+# 위 이웃이 「어느 칸을 눌러 고치는가」를 보고, 여기서는 **그 칸을 아예 그릴 것인가**를 본다.
+# 🔴 여덟 칸(canEdit × completedEdit × 완료 여부)을 전부 적어 둔다 — 한 칸만 재면
+#    `return true` 도 `return false` 도 통과한다. 가장 중요한 못은 **「막지 않는다」 쪽**이다:
+#    완료 안 된 줄까지 막으면 그날부터 영업·엔지니어가 내자 정리를 못 쓴다.
+# 🔵 화면이 이 규칙을 표와 카드 **양쪽에서** 부르는지는 components 목록의
+#    domestic-order-completed-row-readonly.test.ts 가 원본 글자로 본다.
+src/lib/domain/domestic-order-completed-edit-access.test.ts
 src/lib/domain/quote-list.test.ts
 src/lib/domain/overhaul.test.ts
 src/lib/domain/quote-subject.test.ts

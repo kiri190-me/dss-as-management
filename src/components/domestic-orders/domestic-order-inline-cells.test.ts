@@ -152,9 +152,13 @@ test("납기요청일은 표에서 눌러 고친다 — 못 고치는 사람에�
   // 🔴 2026-10-30 에 프롭이 하나 늘었다(onRequestedDueDateNotLinked) — 수리 건이 못
   //    따라갔을 때의 알림을 **화면 위쪽**이 띄우게 올려 보내는 길이다. 여기 적어 두는
   //    까닭: 빠뜨리면 타입이 막지만, **엉뚱한 상태에 묶는 것**은 타입이 안 막는다.
+  // 🔴 2026-11-19 에 판정 이름이 `canEdit` → `rowCanEdit` 으로 내려왔다 — 완료된 줄에서는
+  //    「완료 시 수정」이 함께 있어야 눌린다(조각 2). **이 시험이 지키는 것은 그대로다**:
+  //    고칠 수 있으면 같은 부품·같은 프롭으로 열리고, 아니면 같은 글자만 그린다.
+  //    새 권한 쪽 못은 이웃 domestic-order-completed-row-readonly.test.ts 가 박는다.
   assert.match(
     tableBody,
-    /\{canEdit \? \( <DomesticOrderDueDatesCell row=\{row\} displayText=\{<DueDateCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" numeric="tabular-nums" onRequestedDueDateNotLinked=\{setRequestedDueDateNotLinked\} \/> \) : \( <DueDateCellContent row=\{row\} \/> \)\}/
+    /\{rowCanEdit \? \( <DomesticOrderDueDatesCell row=\{row\} displayText=\{<DueDateCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" numeric="tabular-nums" onRequestedDueDateNotLinked=\{setRequestedDueDateNotLinked\} \/> \) : \( <DueDateCellContent row=\{row\} \/> \)\}/
   );
 });
 
@@ -182,9 +186,10 @@ test("납기요청일은 카드에서도 눌러 고친다 — 좁은 화면이�
   );
   // 🔴 표와 **같은 프롭**을 받아야 한다 — 카드에서 고친 저장만 알림이 안 뜨면,
   //    좁은 화면에서는 수리 건이 안 따라간 것을 아무도 모른다(2026-10-30).
+  // 🔴 이름이 `rowCanEdit` 인 까닭은 위 표 쪽 시험의 같은 주석에 있다(2026-11-19).
   assert.match(
     cardRender,
-    /\{canEdit && field\.dueDatesEdit \? \( (\/\/[^<]*)?<DomesticOrderDueDatesCell row=\{row\} displayText=\{field\.of\(row\)\} wrapping=\{field\.dueDatesEdit\.wrapping\} onRequestedDueDateNotLinked=\{setRequestedDueDateNotLinked\} \/>/
+    /\{rowCanEdit && field\.dueDatesEdit \? \( (\/\/[^<]*)?<DomesticOrderDueDatesCell row=\{row\} displayText=\{field\.of\(row\)\} wrapping=\{field\.dueDatesEdit\.wrapping\} onRequestedDueDateNotLinked=\{setRequestedDueDateNotLinked\} \/>/
   );
 });
 
@@ -251,14 +256,15 @@ test("표의 납기요청일 줄들은 버튼 안에 들어갈 수 있는 모양
 const deliveriesCell = read("src/components/domestic-orders/DomesticOrderDeliveriesCell.tsx");
 
 test("🔴 납품일·납품자는 표에서 눌러 고친다 — 두 칸이 같은 편집칸을 연다", () => {
+  // 🔴 이름이 `rowCanEdit` 인 까닭은 위 납기요청일 시험의 주석에 있다(2026-11-19).
   assert.match(
     tableBody,
-    /\{canEdit \? \( <DomesticOrderDeliveriesCell row=\{row\} displayText=\{<DeliveredDateCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" numeric="tabular-nums" onLinkNotice=\{setRequestedDueDateNotLinked\} \/> \) : \( <DeliveredDateCellContent row=\{row\} \/> \)\}/,
+    /\{rowCanEdit \? \( <DomesticOrderDeliveriesCell row=\{row\} displayText=\{<DeliveredDateCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" numeric="tabular-nums" onLinkNotice=\{setRequestedDueDateNotLinked\} \/> \) : \( <DeliveredDateCellContent row=\{row\} \/> \)\}/,
     "표의 납품일이 칸 편집이 아니다"
   );
   assert.match(
     tableBody,
-    /\{canEdit \? \( <DomesticOrderDeliveriesCell row=\{row\} displayText=\{<DeliveredByCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" onLinkNotice=\{setRequestedDueDateNotLinked\} \/> \) : \( <DeliveredByCellContent row=\{row\} \/> \)\}/,
+    /\{rowCanEdit \? \( <DomesticOrderDeliveriesCell row=\{row\} displayText=\{<DeliveredByCellContent row=\{row\} \/>\} wrapping="whitespace-nowrap" onLinkNotice=\{setRequestedDueDateNotLinked\} \/> \) : \( <DeliveredByCellContent row=\{row\} \/> \)\}/,
     "표의 납품자가 칸 편집이 아니다"
   );
 });
@@ -283,7 +289,7 @@ test("🔴 납품일·납품자는 카드에서도 눌러 고친다 — 좁은 �
   //    좁은 화면에서는 수리 건이 안 따라간 것을 아무도 모른다.
   assert.match(
     cardRender,
-    /: canEdit && field\.deliveriesEdit \? \( (\/\/[^<]*)?<DomesticOrderDeliveriesCell row=\{row\} displayText=\{field\.of\(row\)\} wrapping=\{field\.deliveriesEdit\.wrapping\} onLinkNotice=\{setRequestedDueDateNotLinked\} \/>/
+    /: rowCanEdit && field\.deliveriesEdit \? \( (\/\/[^<]*)?<DomesticOrderDeliveriesCell row=\{row\} displayText=\{field\.of\(row\)\} wrapping=\{field\.deliveriesEdit\.wrapping\} onLinkNotice=\{setRequestedDueDateNotLinked\} \/>/
   );
 });
 

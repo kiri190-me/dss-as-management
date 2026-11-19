@@ -68,6 +68,18 @@ import {
   type DomesticOrderOrderIssuedSort,
   type DomesticOrderStatusFilterValue,
 } from "@/lib/domain/domestic-order-list";
+/**
+ * 🔴 **완료된 줄에서 고치는 길을 그릴 것인가**(2026-11-19) — 판정도 글자도 도메인
+ * 하나가 쥔다. 표와 카드가 **같은 함수**를 불러야 한쪽만 고쳐지는 날이 없다(이
+ * 화면에서 반복된 함정이다 — 한쪽만 고치면 좁은 화면에서만 단추가 남는다).
+ */
+import {
+  canEditDomesticOrderWhenCompleted,
+  DOMESTIC_ORDER_COMPLETED_READ_ONLY_HINT,
+  DOMESTIC_ORDER_COMPLETED_READ_ONLY_LABEL,
+  showDomesticOrderCompletedReadOnlyNote,
+  type DomesticOrderEditAccess,
+} from "@/lib/domain/domestic-order-completed-edit-access";
 import {
   DOMESTIC_ORDER_DUE_DATE_LINK_NOTE,
   resolveDomesticOrderDueDateDisplay,
@@ -341,13 +353,26 @@ import { domesticOrderTrashLabel } from "./domestic-order-trash-label";
  * ── 완료는 감추는 것이 아니라 회색으로 두는 것이다 ──────────────────────
  * 완료된 줄도 자리를 지킨다. 아래로 내리거나 접지 않는다 — 이 표에는 사람이
  * 매긴 순번이 있어서, 순서를 흔들면 순번 칸과 눈에 보이는 차례가 어긋난다.
- * 회색이지만 글자는 흐리게 하지 않고 여전히 눌러서 고칠 수 있다. 회색이
- * "못 누른다"로 읽히면 완료된 줄의 입금 사실을 나중에 적을 수 없게 된다.
+ * 회색이지만 글자는 흐리게 하지 않는다 — 회색이 "못 누른다"로 읽히면 완료된
+ * 줄의 입금 사실을 나중에 적을 수 없게 된다.
+ *
+ * ── 🔴 다만 **완료된 줄을 고치는 데는 권한이 하나 더 든다** (2026-11-19) ──
+ * 사용자 지시: 「[완료시 수정]권한이 없으면 [완료]건에 대해서 [수정],
+ * [완료해제]버튼이 **보이지 않도록** 해줘.」 그래서 `canEditCompleted` 가 거짓인
+ * 세션에서는 **완료된 줄에서만** [수정] · [완료 해제] · 회차 [N차 해제] · 눌러
+ * 고치는 칸이 **아예 안 그려진다**(흐려지는 것이 아니다). 그 자리에는 「읽기
+ * 전용」 넉 자가 선다 — 단추가 말없이 사라지면 고장으로 읽힌다.
+ *
+ * 🔴 **완료 안 된 줄은 한 픽셀도 안 바뀐다.** 판정이 줄마다 완료 여부를 함께
+ * 보기 때문이다(`rowCanEdit` — 표와 카드가 같은 도메인 함수를 부른다).
+ * 🔵 값은 전부 그대로 보이고, [삭제]도 그대로다(다른 권한이 정한다).
+ * 규칙과 까닭의 전문은 domain/domestic-order-completed-edit-access.ts 에 있다.
  *
  * ── 고칠 수 없는 사람에게는 1단계와 똑같이 보인다 ───────────────────────
  * canEdit 이 거짓이면 추가 버튼도, 누를 수 있는 줄도 없다. 그것은 편의일 뿐
  * 경계가 아니라서, 서버 액션은 화면이 무엇을 그렸든 매번 다시 검사한다
- * (server/actions/domestic-orders.ts).
+ * (server/actions/domestic-orders.ts). 바로 위 완료 쪽도 마찬가지다 — 그쪽은
+ * 저장 경로 **안**에 울타리가 한 겹 더 있다(db/mutations/domestic-orders.ts).
  *
  * ── 표 22칼럼, 가로 스크롤은 표 안에서만 ────────────────────────────────
  * 시트의 22칼럼을 순서 그대로 둔다. 이 표는 웬만한 화면 폭에 들어가지 않는데,
@@ -1451,6 +1476,44 @@ function EditRowButton({
 }
 
 /**
+ * ============================================================================
+ * 🔴 **읽기 전용이 된 까닭을 그 줄에 적는다** (2026-11-19)
+ * ============================================================================
+ * [수정]과 [완료 해제]가 **말없이 사라지면** 사람은 권한이 아니라 **고장**으로 읽는다.
+ * 어제까지 있던 단추가 배포 즉시 없어지는 변경이라 더 그렇다(기본값이 최고관리자·
+ * 관리자라, 영업·엔지니어의 완료된 줄에서 함께 사라진다).
+ *
+ * ── 🔴 **배지가 아니다** ────────────────────────────────────────────────
+ * 옆의 「완료」 표(DomesticOrderCompletedBadge)와 **일부러 다른 모양**이다. 저것은
+ * 배지 표시 설정으로 **끌 수 있는 값**이고(domain/badge-visibility.ts), 이 글자는
+ * 꺼지면 안 된다 — 단추가 사라진 까닭을 말하는 유일한 자리다. 배지처럼 생기면 설정
+ * 화면에서 찾게 되고, 거기 없으면 그것이 또 고장으로 읽힌다. 그래서 채운 알약이
+ * 아니라 **옅은 글자**다.
+ *
+ * ── 🔴 **단추처럼 보이면 안 된다** ──────────────────────────────────────
+ * 같은 칸의 [수정]·[완료 처리]는 흰 바탕에 테두리다(rowActionButtonClass). 테두리를
+ * 두르면 「눌러도 아무 일이 없는 단추」가 되어 지금보다 나쁘다.
+ *
+ * ── 🔵 까닭 한 줄은 `title` 에 둔다 ─────────────────────────────────────
+ * 22칼럼을 옆으로 밀어 보는 표의 순번 칸이고 줄마다 하나씩이라, 한 문장을 적으면 표가
+ * 가로로 밀린다. 글자와 그 한 줄은 둘 다 도메인이 쥔다(그 파일) — 서버가 거절할 때
+ * 돌려주는 문장과 **같은 낱말**(「완료 시 수정」)을 말해야 해서다.
+ * ⚠️ **마우스를 올려야 보이는 글이라 폰에서는 안 뜬다.** 보이는 「읽기 전용」 넉 자가
+ * 「고장이 아니다」를 말하는 몫이고, 받아야 할 권한의 이름은 데스크톱에서만 바로
+ * 읽힌다 — 더 적으면 표가 밀리는 쪽이 커서 여기서 멈춘 것이다.
+ */
+function CompletedReadOnlyNote() {
+  return (
+    <span
+      className="text-[11px] leading-none text-zinc-500 dark:text-zinc-400"
+      title={DOMESTIC_ORDER_COMPLETED_READ_ONLY_HINT}
+    >
+      {DOMESTIC_ORDER_COMPLETED_READ_ONLY_LABEL}
+    </span>
+  );
+}
+
+/**
  * 인수번호 칸. 연결이 있으면 그 수리 건 상세로 가는 링크이고, 없으면 시트에
  * 적혀 있던 글자 그대로다(파일 헤더).
  *
@@ -1567,9 +1630,21 @@ function ModelNameLink({ row }: { row: DomesticOrderListItem }) {
  * 부모에게 알릴 뿐**이고(onRequestRelease) 실제 요청은 부모가 보낸다. 창과
  * 전송 중 상태를 부모가 소유하는 까닭도 같다 — 창을 이 `<td>` 안에서 그리면
  * 칸의 CSS 를 물려받는다(위와 같은 이유).
+ *
+ * ── 🔴 [완료 해제]는 **「완료 시 수정」이 없으면 안 그린다** (2026-11-19) ──
+ * 사용자 지시: 「[완료시 수정]권한이 없으면 … [완료해제]버튼이 **보이지 않도록**」.
+ *
+ * 🔴 **[완료 처리] 쪽은 한 글자도 안 바뀐다** — 그 일은 예전처럼 `domesticOrders.edit`
+ * 하나가 정한다(서버도 같다: 관문이 `!params.completed` 에만 선다). 그래서 판정을
+ * **단추마다** 한다: 이 줄이 완료라서 지금 글자가 「완료 해제」인 그 단추만 사라진다.
+ *
+ * 🔴 **부모가 이 부품을 통째로 감추지 않는 까닭**이 여기 있다. 감추면 완료된 줄에서
+ * **[최종 출하 승인 완료] 배지와 회차별 완료 표까지** 함께 사라진다 — 그것은 「고치는
+ * 길」이 아니라 **사실**이고, 권한이 없는 사람도 봐야 한다(값은 그대로 보인다는 규칙).
  */
 function CompletionToggle({
   row,
+  access,
   approvedRowOrders,
   onError,
   onBlocked,
@@ -1577,6 +1652,11 @@ function CompletionToggle({
   onRequestRelease,
 }: {
   row: DomesticOrderListItem;
+  /**
+   * 🔴 **이 세션이 가진 것 둘**(2026-11-19). 여기서 보는 것은 [완료 해제]를 그릴지
+   * 하나뿐이고, 판정은 도메인이 한다(canEditDomesticOrderWhenCompleted).
+   */
+  access: DomesticOrderEditAccess;
   /**
    * 🔴 **[최종 출하 승인 완료]** 가 붙는 단위 번호들(2026-11-08). 단추가 하나인
    * 줄의 단위 번호는 **1** 이다 — 세 갈래의 뜻은 화면 props 머리말에 전문이 있다
@@ -1608,12 +1688,30 @@ function CompletionToggle({
     return (
       <DueDateRowCompletionToggles
         row={row}
+        // 🔴 회차 쪽도 같은 열쇠를 봐야 한다(2026-11-19) — 그쪽은 **회차마다** 판정한다.
+        access={access}
         approvedRowOrders={approvedRowOrders}
         onError={onError}
         onApprovalBlocked={onApprovalBlocked}
       />
     );
   }
+
+  /**
+   * 🔴 **이 단추를 그릴 것인가**(2026-11-19). 완료 전에는 늘 참이고(= [완료 처리]는
+   * 예전 그대로), 완료된 줄에서만 「완료 시 수정」을 묻는다. 거짓이면 **단추만** 빠지고
+   * 아래 승인 배지는 그대로 선다 — 배지는 고치는 길이 아니라 사실이다(머리말).
+   */
+  const canToggle = canEditDomesticOrderWhenCompleted(row, access);
+  // 🔴 **그릴 것이 하나도 없으면 감싸개도 만들지 않는다**(2026-11-19). 빈 `<span>` 도
+  //    바깥 줄(순번 칸)의 flex 항목이라, 남겨 두면 `gap-2` 만큼의 빈 자리가 생긴다 —
+  //    「완료됐고 · 권한이 없고 · 승인 배지도 없는」 줄에서만 보이는 틈이라 눈에 띄기
+  //    전에 못 박는다.
+  // 🔵 단추가 하나인 줄의 단위 번호는 **1** 이다(화면 props 머리말). 아래 배지와 **같은
+  //    식을 두 번 적는다** — 한 변수로 묶지 않는 까닭은 배지가 조건을 잃지 않았는지
+  //    세는 시험이 그 식을 배지 바로 옆에서 찾기 때문이다
+  //    (approvals/final-shipment-approved-badge-screens.test.tsx 의 ⑤).
+  if (!canToggle && !approvedRowOrders.includes(1)) return null;
 
   async function toggle(event: MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
@@ -1664,14 +1762,16 @@ function CompletionToggle({
     //    `items-center gap-2` 라 그대로 두면 배지가 [수정]·[완료] 사이로 끼어들
     //    자리에 서기 때문이다 — 단추와 그 단추의 배지는 **한 덩이**로 묶인다.
     <span className="inline-flex items-center gap-1">
-      <button
-        type="button"
-        onClick={toggle}
-        disabled={isPending}
-        className={rowActionButtonClass}
-      >
-        {completed ? "완료 해제" : "완료 처리"}
-      </button>
+      {canToggle && (
+        <button
+          type="button"
+          onClick={toggle}
+          disabled={isPending}
+          className={rowActionButtonClass}
+        >
+          {completed ? "완료 해제" : "완료 처리"}
+        </button>
+      )}
       {/* 🔵 단추가 하나인 줄의 단위 번호는 **1** 이다(props 머리말). 수리 건이
           붙은 줄이면 그 수리 건의 최종 출하 승인, 기타건이면 그 하나뿐인 회차의
           승인이다 — 어느 쪽이든 「이 단추가 열리는가」와 같은 물음이다. */}
@@ -1727,11 +1827,21 @@ function CompletionToggle({
  */
 function DueDateRowCompletionToggles({
   row,
+  access,
   approvedRowOrders,
   onError,
   onApprovalBlocked,
 }: {
   row: DomesticOrderListItem;
+  /**
+   * 🔴 **이 세션이 가진 것 둘**(2026-11-19). [N차 해제]만 「완료 시 수정」을 묻는다.
+   *
+   * 🔴 **회차마다 따로 판정한다 — 줄의 완료 여부로 재면 틀린다.** 1차만 끝나고 줄은
+   * 아직 완료가 아닌 상태가 이 표에서 가장 흔하고, 그때 줄로 재면 **완료된 1차의
+   * [1차 해제]가 그려진다** — 눌러도 서버가 거절한다(그 관문은 회차 쪽도
+   * `!params.completed` 에만 선다).
+   */
+  access: DomesticOrderEditAccess;
   /** 🔴 **[최종 출하 승인 완료]** 가 붙는 회차 번호들(화면 props 머리말). */
   approvedRowOrders: readonly number[];
   onError: (message: string | null) => void;
@@ -1793,15 +1903,21 @@ function DueDateRowCompletionToggles({
                 세우는 차례 그대로다(위 순번 칸). 사실을 먼저 말하고 그다음이
                 조작이다. */}
             {completed && <DueDateRowCompletedBadge rowOrder={rowOrder} label={label} placeKey="domesticOrderList" />}
-            <button
-              type="button"
-              onClick={(event) => void toggle(event, rowOrder, !completed)}
-              disabled={pendingRowOrder !== null}
-              title={`${label} — ${completed ? "완료 해제" : "완료 처리"}`}
-              className={rowActionButtonClass}
-            >
-              {rowOrder}차 {completed ? "해제" : "완료"}
-            </button>
+            {/* 🔴 **이 회차의 단추를 그릴 것인가**(2026-11-19) — 아직인 회차의
+                [N차 완료]는 예전 그대로이고, **끝난 회차의 [N차 해제]만** 「완료 시
+                수정」을 묻는다. 🔵 왼쪽의 완료 표와 오른쪽의 승인 배지는 그대로
+                남는다: 그 둘은 고치는 길이 아니라 **사실**이다. */}
+            {canEditDomesticOrderWhenCompleted(dueDate, access) && (
+              <button
+                type="button"
+                onClick={(event) => void toggle(event, rowOrder, !completed)}
+                disabled={pendingRowOrder !== null}
+                title={`${label} — ${completed ? "완료 해제" : "완료 처리"}`}
+                className={rowActionButtonClass}
+              >
+                {rowOrder}차 {completed ? "해제" : "완료"}
+              </button>
+            )}
             {/* 🔴 **승인 배지는 단추의 오른쪽**(사용자 지정). 회차가 여럿이라
                 보이는 글자만으로는 어느 회차의 승인인지 알 수 없어 `title` 에
                 회차 이름을 단다 — 단추가 같은 까닭으로 같은 일을 한다. */}
@@ -2114,6 +2230,7 @@ export default function DomesticOrderListScreen({
   asOfDate,
   currentYear,
   canEdit,
+  canEditCompleted = false,
   repairCaseOptions,
   customerOptions,
   quoteOptions,
@@ -2132,6 +2249,23 @@ export default function DomesticOrderListScreen({
   currentYear: string;
   /** 행을 추가·수정할 수 있는가. 거짓이면 1단계와 똑같이 보인다. */
   canEdit: boolean;
+  /**
+   * 🔴 **완료된 줄도 고칠 수 있는가**(2026-11-19) — 거짓이면 **완료된 줄에서만**
+   * [수정] · [완료 해제] · 회차 [N차 해제] · 눌러 고치는 칸이 **안 그려진다.**
+   *
+   * 🔴 **완료 안 된 줄은 한 픽셀도 안 바뀐다** — 판정이 줄마다 완료 여부를 함께 보기
+   * 때문이다(domain/domestic-order-completed-edit-access.ts). 그 파일에 왜 흐리게가
+   * 아니라 안 그리는지, 왜 [삭제]는 그대로인지가 적혀 있다.
+   *
+   * 🔴 **서버가 잎 둘의 AND 를 이미 접어 내려보낸 값**이다(page.tsx) —
+   * `domesticOrders.edit` WRITE **그리고** `domesticOrders.completedEdit` WRITE.
+   * 화면이 다시 canEdit 과 겹쳐 묻지 않는다.
+   *
+   * 🔵 **기본값이 거짓**이라 안 넘기는 자리(시험)에서는 완료된 줄이 읽기 전용으로
+   * 그려진다. 못 미더운 쪽으로 떨어뜨리는 것이 맞다 — 참이 기본이면 이 값을 안
+   * 내려보내는 페이지가 생기는 날 조용히 전부 열린다.
+   */
+  canEditCompleted?: boolean;
   /** 수정 폼의 '수리 건 연결' 목록. 고칠 수 없는 역할에게는 빈 배열이다. */
   repairCaseOptions: RepairCaseLinkOption[];
   /** 수정 폼의 '고객사' 목록. 같은 이유로 고칠 수 없는 역할에게는 빈 배열이다. */
@@ -2190,6 +2324,16 @@ export default function DomesticOrderListScreen({
    */
   const approvedUnitsOf = (rowId: string): readonly number[] =>
     finalShipmentApprovedUnits?.[rowId] ?? NO_APPROVED_UNITS;
+
+  /**
+   * 🔴 **고치는 길을 그릴지 정할 때 쓰는 한 묶음**(2026-11-19). 줄마다 이것과 그 줄의
+   * 완료 여부를 함께 보아 정한다 — `canEdit` 하나로 정하던 자리를 전부 바꾼 것이 이
+   * 조각이고, 전부 바꾸면 **완료 안 된 줄까지 막힌다**는 것이 가장 조심한 자리다.
+   *
+   * 🔵 매 렌더 새로 만드는 객체지만 훅의 의존 목록에 들어가지 않는다 — 읽는 쪽은 전부
+   * 그리는 중에 부르는 순수 함수다.
+   */
+  const editAccess: DomesticOrderEditAccess = { canEdit, canEditCompleted };
 
   const [editTarget, setEditTarget] = useState<EditTarget>(null);
   const [view, setView] = useState<ListView>("active");
@@ -2923,7 +3067,10 @@ export default function DomesticOrderListScreen({
           listId="domestic-orders"
           // 년도를 바꾸면 줄 수가, 완료 버튼이 붙고 떨어지면 순번 칸의 폭이
           // 달라진다 — 표가 지금 폭에 들어가는지 다시 재야 하는 조건들이다.
-          measureKey={[visibleRows.length, groups.length, canEdit]}
+          // 🔴 `canEditCompleted` 도 같은 까닭으로 들어간다(2026-11-19) — 이 값이
+          //    거짓이면 완료된 줄의 [수정]·[완료 해제]가 빠지고 「읽기 전용」 넉 자가
+          //    대신 서서 **순번 칸의 폭이 달라진다.**
+          measureKey={[visibleRows.length, groups.length, canEdit, canEditCompleted]}
           // 목록이 위 요소들이 쓰고 **남은 높이**를 받고, 표 껍데기가 그 안에서
           // 굴러가게 한다 — 아래 <thead> 의 sticky top-0 이 붙을 자리를 만드는
           // 유일한 장치다(파일 헤더 '열 제목은 화면에 붙어 있다'). 남는 높이를
@@ -3068,6 +3215,19 @@ export default function DomesticOrderListScreen({
                   </tr>
                   {group.rows.map((row) => {
                     const completed = isDomesticOrderCompleted(row);
+                    /**
+                     * 🔴 **이 줄에서 고치는 길을 그릴 것인가**(2026-11-19). 아래
+                     * `canEdit` 자리를 전부 이것으로 바꾼 것이 그 조각이다 —
+                     * **완료된 줄에서만** 「완료 시 수정」을 함께 묻고, 완료 안 된
+                     * 줄에서는 `canEdit` 과 똑같은 답이라 한 픽셀도 안 바뀐다.
+                     *
+                     * 🔵 **[완료 처리]·[완료 해제]는 이 값으로 가르지 않는다** —
+                     * 그 부품이 단추마다 따로 판정한다(CompletionToggle 머리말).
+                     * 여기서 함께 감추면 완료된 줄의 승인 배지까지 사라진다.
+                     * 🔵 **카드 쪽에도 같은 줄이 있다**(아래) — 한쪽만 고치면 좁은
+                     * 화면에서만 단추가 남는다.
+                     */
+                    const rowCanEdit = canEditDomesticOrderWhenCompleted(row, editAccess);
                     // 완료가 아닌 줄에만 고객사 색이 붙는다 — 아래 세 갈래의
                     // 순서가 곧 "완료 회색이 이긴다"는 규칙이다(파일 헤더).
                     const rowColorClass = customerRowColorInteractiveClass(row.customerRowColor);
@@ -3105,10 +3265,16 @@ export default function DomesticOrderListScreen({
                           <span className="flex items-center gap-2">
                             <span className="tabular-nums">{dash(row.displayOrder)}</span>
                             {completed && <DomesticOrderCompletedBadge placeKey="domesticOrderList" />}
-                            {canEdit && <EditRowButton row={row} onOpen={openRow} />}
+                            {/* 🔴 읽기 전용이 된 까닭을 **단추가 있던 자리**에 적는다
+                                (2026-11-19) — 그 부품 머리말에 전문이 있다. */}
+                            {showDomesticOrderCompletedReadOnlyNote(row, editAccess) && (
+                              <CompletedReadOnlyNote />
+                            )}
+                            {rowCanEdit && <EditRowButton row={row} onOpen={openRow} />}
                             {canEdit && (
                               <CompletionToggle
                                 row={row}
+                                access={editAccess}
                                 approvedRowOrders={approvedUnitsOf(row.id)}
                                 onError={setCompletionError}
                                 onBlocked={setShipmentBlockedReason}
@@ -3127,6 +3293,11 @@ export default function DomesticOrderListScreen({
                             버튼을 그려 놓고 막지 않고 글자만 그린다 — 보이는
                             글자는 양쪽이 똑같다.
 
+                            🔴 **2026-11-19 부터 그 판정이 줄마다 다르다**
+                            (`canEdit` → `rowCanEdit`). 완료된 줄에서는 「완료 시
+                            수정」이 있어야 눌리고, 없으면 위와 **똑같은 방식**으로
+                            글자만 그린다 — 보이는 값은 한 글자도 안 줄어든다.
+
                             wrapping 은 그 칸이 지금 쓰고 있는 것을 그대로
                             넘긴다: 한 줄짜리 값과 날짜는 nowrap(`<tr>` 이 이미
                             그렇다), 현황·이력·기타는
@@ -3135,7 +3306,7 @@ export default function DomesticOrderListScreen({
                             tabular-nums 가 버튼 안까지 안 내려온다). 눌러서 고칠
                             수 있게 되었다는 이유로 표의 생김새가 바뀌면 안 된다. */}
                         <td className="px-3 py-2">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="purchaseOrderNumber"
@@ -3147,7 +3318,7 @@ export default function DomesticOrderListScreen({
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="projectName"
@@ -3171,7 +3342,7 @@ export default function DomesticOrderListScreen({
                             수 있다.** 그 사실은 편집칸 아래 두 줄이 미리 말해
                             준다(도메인의 domesticOrderInlineEditYearNotice). */}
                         <td className="px-3 py-2 tabular-nums">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="orderIssuedDate"
@@ -3193,7 +3364,7 @@ export default function DomesticOrderListScreen({
                             이유로 넘긴다(`<td>` 의 tabular-nums 가 버튼 안까지 안
                             내려온다). */}
                         <td className="px-3 py-2 tabular-nums">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderDueDatesCell
                               row={row}
                               displayText={<DueDateCellContent row={row} />}
@@ -3233,7 +3404,7 @@ export default function DomesticOrderListScreen({
                             의 '고장내역은 아직 켜지 않았다') — 지금 보이는
                             그대로다. */}
                         <td className="px-3 py-2">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="faultDescriptionText"
@@ -3253,7 +3424,7 @@ export default function DomesticOrderListScreen({
                             mapDomesticOrderRow 머리말). 연결된 줄의 두 칸은
                             눌러도 열리지 않는다(domesticOrderInlineEditQuoteLock). */}
                         <td className="px-3 py-2 tabular-nums">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="quoteIssuedDate"
@@ -3266,7 +3437,7 @@ export default function DomesticOrderListScreen({
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="quoteNumber"
@@ -3282,7 +3453,7 @@ export default function DomesticOrderListScreen({
                             자체가 버튼이고, 버튼이 같은 값을 자기 것으로 다시
                             선언한다(상속을 믿지 않는 이유는 그 파일 주석). */}
                         <td className="px-3 py-2">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="progressNote"
@@ -3304,7 +3475,7 @@ export default function DomesticOrderListScreen({
                             이유로 넘긴다(`<td>` 의 tabular-nums 가 버튼 안까지
                             안 내려온다). */}
                         <td className="px-3 py-2 tabular-nums">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderDeliveriesCell
                               row={row}
                               displayText={<DeliveredDateCellContent row={row} />}
@@ -3317,7 +3488,7 @@ export default function DomesticOrderListScreen({
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderDeliveriesCell
                               row={row}
                               displayText={<DeliveredByCellContent row={row} />}
@@ -3329,7 +3500,7 @@ export default function DomesticOrderListScreen({
                           )}
                         </td>
                         <td className="px-3 py-2 tabular-nums">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="taxInvoiceDate"
@@ -3347,7 +3518,7 @@ export default function DomesticOrderListScreen({
                         </td>
                         <td className="px-3 py-2">{paymentLabel(row.paymentCompleted)}</td>
                         <td className="px-3 py-2">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="japanRemittanceNote"
@@ -3361,7 +3532,7 @@ export default function DomesticOrderListScreen({
                         {/* 현황과 같은 칸이다 — 사람이 친 줄바꿈만 살리고,
                             폭이 모자라도 접지 않는다. */}
                         <td className="px-3 py-2">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="historyNote"
@@ -3373,7 +3544,7 @@ export default function DomesticOrderListScreen({
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          {canEdit ? (
+                          {rowCanEdit ? (
                             <DomesticOrderTextCell
                               row={row}
                               field="etcNote"
@@ -3420,6 +3591,13 @@ export default function DomesticOrderListScreen({
                   <div className={LIST_CARD_GRID}>
                     {group.rows.map((row) => {
                       const completed = isDomesticOrderCompleted(row);
+                      /**
+                       * 🔴 **표의 줄과 같은 판정이다**(2026-11-19) — 같은 도메인 함수를
+                       * 같은 재료로 부른다. 🔴 한쪽만 고치면 **좁은 화면에서만 단추가
+                       * 남는다**(이 저장소에서 반복된 함정이고, 그래서 시험이 표와 카드를
+                       * 각각 잰다). 까닭의 전문은 표 쪽 같은 줄에 있다.
+                       */
+                      const rowCanEdit = canEditDomesticOrderWhenCompleted(row, editAccess);
                       // 표의 줄과 같은 세 갈래 — 완료 회색이 고객사 색을 이긴다.
                       // 카드에는 원래 hover 색이 없으므로 배경만 칠한다.
                       const rowColorClass = customerRowColorClass(row.customerRowColor);
@@ -3452,10 +3630,17 @@ export default function DomesticOrderListScreen({
                             <span className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                               순번 {dash(row.displayOrder)}
                               {completed && <DomesticOrderCompletedBadge placeKey="domesticOrderList" />}
-                              {canEdit && <EditRowButton row={row} onOpen={openRow} />}
+                              {/* 🔴 표와 **같은 자리·같은 글자**다(2026-11-19) — 좁은
+                                  화면에서만 까닭이 안 적히면 폰으로 보는 사람에게는
+                                  단추가 그냥 사라진 것이 된다. */}
+                              {showDomesticOrderCompletedReadOnlyNote(row, editAccess) && (
+                                <CompletedReadOnlyNote />
+                              )}
+                              {rowCanEdit && <EditRowButton row={row} onOpen={openRow} />}
                               {canEdit && (
                                 <CompletionToggle
                                   row={row}
+                                  access={editAccess}
                                   approvedRowOrders={approvedUnitsOf(row.id)}
                                   onError={setCompletionError}
                                   onBlocked={setShipmentBlockedReason}
@@ -3498,8 +3683,12 @@ export default function DomesticOrderListScreen({
                                           사람에게는 표와 마찬가지로 누를 것이
                                           없고, 보이는 글자는 양쪽이 똑같다.
                                           접는 방식은 바로 위 <dd> 가 쓰는 것과
-                                          결과가 같은 값을 넘긴다(edit.wrapping). */}
-                                      {canEdit && field.dueDatesEdit ? (
+                                          결과가 같은 값을 넘긴다(edit.wrapping).
+                                          🔴 2026-11-19 에 셋 다 `canEdit` 에서
+                                          `rowCanEdit` 으로 내려왔다 — 완료된 줄에서는
+                                          「완료 시 수정」이 있어야 눌린다. 표의 같은
+                                          칸들과 **한 글자도 다르지 않은** 판정이다. */}
+                                      {rowCanEdit && field.dueDatesEdit ? (
                                         // 납기요청일 — 날짜 목록을 고친다(표와 같은 부품).
                                         <DomesticOrderDueDatesCell
                                           row={row}
@@ -3507,7 +3696,7 @@ export default function DomesticOrderListScreen({
                                           wrapping={field.dueDatesEdit.wrapping}
                                           onRequestedDueDateNotLinked={setRequestedDueDateNotLinked}
                                         />
-                                      ) : canEdit && field.deliveriesEdit ? (
+                                      ) : rowCanEdit && field.deliveriesEdit ? (
                                         // 납품일·납품자 — 회차별 납품을 고친다(표와 같은 부품).
                                         <DomesticOrderDeliveriesCell
                                           row={row}
@@ -3515,7 +3704,7 @@ export default function DomesticOrderListScreen({
                                           wrapping={field.deliveriesEdit.wrapping}
                                           onLinkNotice={setRequestedDueDateNotLinked}
                                         />
-                                      ) : canEdit && field.edit ? (
+                                      ) : rowCanEdit && field.edit ? (
                                         <DomesticOrderTextCell
                                           row={row}
                                           field={field.edit.field}

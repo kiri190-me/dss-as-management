@@ -194,6 +194,17 @@ src/components/users/approval-route-section.test.ts
 src/components/quotes/quote-list-screen-source.test.ts
 src/components/domestic-orders/domestic-order-trash.test.ts
 src/components/domestic-orders/domestic-order-inline-cells.test.ts
+# 🔴 **완료된 줄에서 고치는 길이 사라진다**(2026-11-19, 조각 2 — 사용자 지시:
+# 「[완료시 수정]권한이 없으면 [완료]건에 대해서 [수정], [완료해제]버튼이 보이지 않도록」).
+# 바로 위 이웃이 「어느 칸을 눌러 고치는가」를 보고, 여기서는 **그 칸을 아예 그릴
+# 것인가**를 본다. 재는 것 일곱: 페이지가 깃발을 실제로 내려보내는가(안 보내면 화면은
+# 영영 못 막는다) · 표의 열네 칸과 [수정]이 줄마다의 판정으로 갈리는가 · 🔴 **카드도
+# 같은가**(한쪽만 고치면 좁은 화면에서만 단추가 남는다) · [완료 처리]는 그대로인가 ·
+# 🔴 회차를 **회차의** 완료 여부로 가르는가 · 완료 표·승인 배지가 **남는가**(사실이다) ·
+# 읽기 전용 까닭이 양쪽에 적히고 배지도 단추도 아닌가.
+# 🔵 규칙 자체는 값으로 돈다 — unit 목록의 domain/domestic-order-completed-edit-access.test.ts.
+#    서버 관문은 db 목록의 mutations/domestic-order-completed-edit.integration.test.ts 다.
+src/components/domestic-orders/domestic-order-completed-row-readonly.test.ts
 # 🔴 내자 정리 쪽 「수리 건이 못 따라갔다」 알림(2026-10-30). 저장할 때 두 날짜를 묶는
 # 일은 서버가 하고(db/mutations/domestic-orders.ts), 화면이 할 일은 **못 맞췄다는 답을
 # 읽고 닫아야 하는 알림으로 띄우는 것** 하나다. 재는 것 넷: 두 저장 통로(납기요청일
