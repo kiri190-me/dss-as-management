@@ -21,6 +21,16 @@
  * ============================================================================
  */
 
+/**
+ * 하나도 안 골랐을 때 적는 글자의 **기본값**(2026-11-19 에 상수가 됐다).
+ *
+ * 쓰는 자리가 둘이 되어서다 — 닫힌 칸의 글자(아래 selectionSummary)와, 단독 선택
+ * 목록 **맨 위의 「전체」 한 줄**(CheckboxFilterDropdown.tsx). 그 둘이 같은 상태를
+ * 가리키므로 글자가 갈리면 안 되는데, 기본값을 양쪽에 따로 적으면 타입이 같아
+ * tsc 가 영영 침묵한다.
+ */
+export const DEFAULT_EMPTY_LABEL = "전체";
+
 /** 고를 수 있는 한 줄. `value` 는 코드, `label` 은 사람이 읽는 글자다. */
 export type CheckboxFilterOption<T extends string = string> = {
   value: T;
@@ -92,7 +102,7 @@ export function selectionLabels<T extends string>(
 export function selectionSummary<T extends string>(
   options: readonly CheckboxFilterOption<T>[],
   selected: readonly T[],
-  emptyLabel = "전체"
+  emptyLabel = DEFAULT_EMPTY_LABEL
 ): string {
   const labels = selectionLabels(options, selected);
   if (labels.length === 0) return emptyLabel;

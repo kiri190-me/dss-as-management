@@ -78,6 +78,18 @@ const TWO_FIELDS = [
   { id: "domestic-order-customer-filter", label: "고객사", selected: "customerFilters" },
 ] as const;
 
+/**
+ * 🔴 **고르는 방식이 2026-11-19 에 갈라졌다**(사용자 결정 — 「[상태]필터를 복수
+ * 선택이 아니라 단독선택으로」). 상태만 단독이고 **고객사는 복수 그대로**다.
+ *
+ * 🔵 이 표가 「고객사까지 바꾸지 마라」를 지키는 **유일한 자리**다. 공용 부품 쪽
+ * 시험은 「안 넘기면 복수 선택」까지만 보고, 어느 칸이 안 넘기는지는 모른다.
+ */
+const SELECTION_MODES = [
+  { id: "domestic-order-status-filter", mode: "single" },
+  { id: "domestic-order-customer-filter", mode: null },
+] as const;
+
 // ───────────────────────────────────── ⓪ 재는 도구가 정말 듣는가
 
 describe("🔵 재는 도구", () => {
@@ -109,7 +121,7 @@ describe("🔵 재는 도구", () => {
 
 // ───────────────────── ① 두 칸이 복수 선택 부품을 쓴다
 
-describe("🔴 ① 상태 · 고객사가 복수 선택 칸이다", () => {
+describe("🔴 ① 상태 · 고객사가 자체 드롭다운 칸이다", () => {
   test("공용 부품을 가져다 쓴다 — 이 화면에 따로 만들지 않았다", () => {
     assert.match(
       screenSource,
@@ -120,12 +132,50 @@ describe("🔴 ① 상태 · 고객사가 복수 선택 칸이다", () => {
   test("두 칸 다 <CheckboxFilterDropdown> 이고, 고른 값을 배열 상태에서 읽는다", () => {
     for (const field of TWO_FIELDS) {
       const block = fieldBlock(field.id);
-      assert.ok(block.includes("<CheckboxFilterDropdown"), `${field.id} 가 복수 선택 칸이 아니다`);
+      assert.ok(block.includes("<CheckboxFilterDropdown"), `${field.id} 가 공용 드롭다운 칸이 아니다`);
       assert.ok(
         block.includes(`selected={${field.selected}}`),
         `${field.id} 가 ${field.selected} 를 읽지 않는다`
       );
     }
+  });
+
+  test("🔴 **상태 칸만** 단독 선택이고, 고객사 칸은 그 값을 **안 넘긴다**", () => {
+    // 🔴 사용자가 바꾸라고 한 것은 [상태] 하나다. 고객사까지 넘기면 여러 고객사를
+    //    함께 보던 길이 조용히 사라진다 — 오류는 한 줄도 안 난다.
+    for (const field of SELECTION_MODES) {
+      const block = fieldBlock(field.id);
+      if (field.mode === null) {
+        assert.ok(
+          !block.includes("selectionMode"),
+          `🔴 ${field.id} 가 고르는 방식을 넘긴다 — 복수 선택 그대로여야 한다`
+        );
+        continue;
+      }
+      assert.ok(
+        block.includes(`selectionMode="${field.mode}"`),
+        `${field.id} 가 아직 복수 선택이다 — 상태를 둘 켤 수 있게 남아 있다`
+      );
+    }
+  });
+
+  test("🔴 이 화면에서 고르는 방식을 넘기는 자리가 **하나뿐**이다", () => {
+    // 칸 덩어리만 보면 바깥에서 몰래 넘기는 길이 남는다. 파일 전체로 한 번 더 센다
+    // (이름표 자리를 같은 모양으로 재는 domestic-order-list-controls-layout.test.ts).
+    assert.equal(
+      (stripped.match(/selectionMode=/g) ?? []).length,
+      1,
+      "고르는 방식을 넘기는 칸 수가 하나가 아니다"
+    );
+  });
+
+  test("🔴 브라우저 기본 드롭다운으로 갈아 끼우지 않았다 — <select> 는 발주 년도 하나뿐이다", () => {
+    // 사용자가 못박은 것이다: 「브라우저 기본 드롭다운이 아니라 복수선택 드롭다운처럼
+    // 자체적으로 만든 드롭다운 형식을 사용해줘」. 단독 선택이라고 <select> 로 되돌리면
+    // 「전체」로 돌아가는 길 둘도, 칸의 생김새도 함께 사라진다.
+    const selects = stripped.match(/<select /g) ?? [];
+    assert.equal(selects.length, 1, `조작 줄에 <select> 가 ${selects.length}개다`);
+    assert.match(stripped, /<select id="domestic-order-year"/);
   });
 
   test("🔴 빈 배열이 「전체」다 — 고르는 값으로 「전체」를 두지 않았다", () => {

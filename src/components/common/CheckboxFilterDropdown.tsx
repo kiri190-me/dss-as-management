@@ -2,7 +2,9 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import {
+  DEFAULT_EMPTY_LABEL,
   isShortcutActive,
+  orderSelection,
   selectionSummary,
   toggleSelection,
   toggleShortcut,
@@ -38,6 +40,12 @@ import {
  * 카드의 격자에 줄지어 서는 일곱은 이름이 칸 **위**(기본)이고, 이름이 옆에 붙은
  * 조작들과 한 줄에 나란히 서는 [내자 정리]의 둘만 **옆**을 넘긴다. 사본을 하나 더
  * 만들지 않은 까닭은 타입이 같아 둘이 갈라져도 tsc 가 영영 침묵하기 때문이다.
+ *
+ * 🔴 **고르는 방식도 두 가지이고, 기본이 「여럿」이다**(selectionMode, 2026-11-19).
+ * 이 부품은 이름 그대로 복수 선택으로 태어났고 아홉 중 **여덟이 그 모양 그대로**다 —
+ * 단독 선택으로 갈라진 것은 [내자 정리]의 [상태] 한 칸뿐이다(사용자 결정). 다른 것은
+ * **펼친 목록 안**뿐이다: 체크 대신 동그라미가 서고, 맨 위에 「전체」 한 줄이 더 선다.
+ * 여는 단추 · 닫힌 칸의 글자 · 접는 길 · 폭 맞춤은 둘이 **같은 코드**를 지난다.
  *
  * ── 값으로 도는 규칙은 옆 파일에 ───────────────────────────────────────────
  * 닫힌 칸의 글자 · 체크를 눌렀을 때의 다음 값 · 바깥 누르기/Esc 로 접기는
@@ -95,6 +103,35 @@ export type CheckboxFilterDropdownProps<T extends string> = {
    */
   labelPlacement?: "top" | "inline";
   /**
+   * **몇 개를 고를 수 있는가**(2026-11-19 사용자 결정 — 「[내자정리]의 [상태]필터를
+   * 복수 선택이 아니라 단독선택으로 바꿔주고 … 브라우저 기본 드롭다운이 아니라
+   * 복수선택 드롭다운처럼 자체적으로 만든 드롭다운 형식을 사용해줘」).
+   *
+   * 🔴 **기본은 `"multi"`(여럿)이고, 그것이 이 부품이 처음부터 하던 일이다.** 이 값을
+   * 안 넘기는 여덟 칸([전체 A/S 현황]의 다섯 · [기타건 현황]의 둘 · [내자 정리]의
+   * **고객사**)은 한 픽셀도 바뀌지 않는다. 사본을 하나 더 만들지 않은 까닭은
+   * labelPlacement 와 같다 — 여는 단추 · 바깥 누르기로 접기 · 폭 맞춤 · 닫힌 칸의
+   * 글자가 두 벌이 되면 나중에 한쪽만 고쳐진다.
+   *
+   * `"single"` 에서 달라지는 것은 **펼친 목록 안**뿐이다:
+   *  · 체크 대신 **동그라미**(라디오)를 그린다.
+   *  · 목록 **맨 위에 「전체」 한 줄**이 선다 — 누르면 빈 배열이 넘어간다.
+   *  · 🔴 **이미 고른 줄을 다시 누르면 꺼진다**(빈 배열). 라디오의 기본 동작이
+   *    아니라 이 부품이 따로 적은 규칙이다 — 사용자가 되돌아가는 길을 **둘 다**
+   *    쓰겠다고 했다(「전체」 항목과 다시 누르기).
+   *
+   * 🔴 **넘어가는 값은 여전히 배열**이다(길이 0 또는 1). 부름받는 쪽의 타입을 가르지
+   * 않은 까닭: 그래야 거르개 함수도 화면 상태도 지금 모양 그대로 남고, 어느 날
+   * 복수 선택으로 되돌리더라도 이 prop 한 줄만 빼면 끝난다.
+   *
+   * 🔴 **`shortcut` 은 `"single"` 에서 그리지 않는다.** 여럿을 한 번에 채우는 장치라
+   * 한 개만 고르는 칸에서는 누를 뜻이 없다(지금 그 단추를 쓰는 칸은 [전체 A/S 현황]의
+   * [현재 상태] 하나이고 그 칸은 `"multi"` 다). 🔴 **조용히 무시하는 것이 아니라
+   * 일부러 안 그리는 것**이고, 그래서 이 줄을 여기 적어 둔다 — 안 적으면 다음 사람이
+   * 단축 단추가 사라진 것을 고장으로 읽는다.
+   */
+  selectionMode?: "multi" | "single";
+  /**
    * 여는 단추의 id. 안 주면 React 가 짓는다 — 화면에서 이 칸을 집어 가리킬 일이
    * 있는 자리만 적어 준다(지금은 아홉 칸이 모두 적어 준다: 시험이 「어느 칸이
    * 복수 선택인가」를 이 id 로 집는다).
@@ -131,6 +168,41 @@ const shortcutPressedClass =
   "bg-primary-900 text-white hover:bg-primary-800 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200";
 
 /**
+ * 펼친 목록의 **한 줄**. 체크박스(multi)와 동그라미(single)가 같은 모양으로 서야
+ * 해서 class 를 한 곳에 둔다 — 한 칸이 두 방식을 오가는 일은 없지만, 줄 모양이 두
+ * 벌이 되면 나중에 한쪽만 고쳐진다(이 파일이 사본을 안 만드는 것과 같은 까닭).
+ */
+const optionRowClass =
+  "flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800";
+
+/**
+ * ============================================================================
+ * 🔴 동그라미(단독 선택)가 `onChange` 가 아니라 `onClick` 을 쓰는 까닭 (2026-11-19)
+ * ============================================================================
+ * 라디오는 **이미 켜진 것을 다시 눌러도 `change` 가 나지 않는다** — 값이 안 바뀌기
+ * 때문이다. 그런데 이 부품에서는 바로 그 누르기가 「전체로 되돌리기」다(사용자 결정 —
+ * 되돌아가는 길을 「맨 위의 전체」와 「다시 누르기」 둘 다 둔다). 그래서 켜는 일과
+ * 끄는 일을 **전부 `click` 으로** 받는다.
+ *
+ * 🔵 체크박스 쪽이 `onChange` 로 받는 것과 **같은 사건**이다(라디오·체크박스의
+ * change 는 click 위에서 난다). 그러니 「굴리려고 짚은 손가락에 체크가 뒤집힌다」는
+ * pointerdown 의 함정은 여기에도 없다 — 바깥 누르기만 pointerdown 으로 듣는다.
+ *
+ * 🔴 `readOnly` 는 **동작을 막는 표시가 아니다.** `checked` 만 주고 `onChange` 를 안
+ * 주면 React 가 「controlled 인데 바꿀 길이 없다」고 콘솔에 경고하는데, 그 경고를 끄는
+ * 표시가 그것이다. 라디오·체크박스에 readonly 는 브라우저가 따르지 않으므로 누르기는
+ * 그대로 간다. 빈 `onChange={() => {}}` 를 대신 적지 않은 까닭은 아무 일도 안 하는
+ * 손잡이가 보이면 다음 사람이 그쪽에 코드를 더하기 때문이다.
+ *
+ * 🔴 라디오의 `name` 은 **이 칸 하나 안에서만** 묶여야 한다. 한 화면에 단독 선택 칸이
+ * 둘 서는 날, 이름이 겹치면 한쪽을 고르는 순간 다른 칸의 동그라미가 꺼진다 — 브라우저가
+ * 같은 이름을 한 묶음으로 보기 때문이고, 오류 없이 화면에서만 드러난다. panelId 는
+ * useId 로 지어져 칸마다 다르므로 그것을 그대로 쓴다.
+ * ============================================================================
+ */
+const radioGroupName = (panelId: string) => `${panelId}-option`;
+
+/**
  * **펼쳤을 때 보이는 목록.** 따로 내보내는 까닭은 시험이다 — 아래 본체는 접힌
  * 채로 태어나고(useState(false)) 정적 렌더(renderToStaticMarkup)는 효과도
  * 누르기도 돌리지 못하므로, 한 덩어리로 두면 **펼친 모습을 영영 못 잰다**
@@ -144,6 +216,8 @@ export function CheckboxFilterPanel<T extends string>({
   selected,
   onChange,
   shortcut,
+  selectionMode = "multi",
+  emptyLabel = DEFAULT_EMPTY_LABEL,
 }: {
   panelId: string;
   labelId: string;
@@ -151,25 +225,54 @@ export function CheckboxFilterPanel<T extends string>({
   selected: readonly T[];
   onChange: (next: T[]) => void;
   shortcut?: CheckboxFilterShortcut<T>;
+  /** 기본은 `"multi"` — 안 넘기는 여덟 칸이 기대고 있는 값이다(prop 쪽 주석). */
+  selectionMode?: "multi" | "single";
+  /**
+   * `"single"` 에서 **맨 위 한 줄에 적히는 글자**. 닫힌 칸이 아무것도 안 골랐을 때
+   * 적는 그 글자와 **같아야** 해서 바깥에서 받는다 — 여기서 "전체"를 따로 박아 두면,
+   * emptyLabel 을 바꾼 칸에서 닫힌 칸과 목록 맨 줄이 서로 다른 말을 한다.
+   */
+  emptyLabel?: string;
 }) {
+  const isSingle = selectionMode === "single";
   const pickedValues = new Set<T>(selected);
   // 🔴 「눌렀는가」가 아니라 **「지금 고른 것이 그 묶음인가」**다. 손으로 하나씩
   //    체크해 같은 묶음을 만든 사람도 눌린 모습을 봐야 한다(값 쪽 파일의 주석).
   const shortcutPressed = shortcut ? isShortcutActive(shortcut.values, selected) : false;
+  /**
+   * 🔴 **단독 선택인데 `selected` 에 값이 둘 이상 들어왔을 때 무엇을 켜 보일 것인가**
+   * — **선택지에 적힌 차례의 첫 값**이고, 나머지는 안 그린다(orderSelection).
+   *
+   * 아무 말도 안 하면 다음 사람이 깨진 화면을 보므로 여기서 정한다. 첫 값을 고른
+   * 까닭은 **닫힌 칸이 말하는 그 이름**이기 때문이다 — 닫힌 칸의 글자도 같은
+   * orderSelection 을 지나(selectionSummary → selectionLabels) 맨 앞 이름을 적는다.
+   * 둘이 어긋나면 칸에는 「완료됨」이라고 적혀 있는데 목록에서는 「미완료」에 동그라미가
+   * 켜져 있는 모습이 된다.
+   *
+   * 🔵 선택지에 **없는** 값 하나만 들어온 경우에는 어느 줄에도 동그라미가 안 켜지고
+   * 「전체」도 안 켜진다(고른 것이 있으므로). 그 값은 닫힌 칸에 코드 그대로 적히고
+   * 「전체」를 눌러 풀 수 있다 — 복수 선택이 「모르는 값을 버리지 않는다」로 푼 그
+   * 문제와 같은 자리다(checkbox-filter-dropdown.ts 의 orderSelection).
+   */
+  const singlePicked = isSingle ? orderSelection(options, selected)[0] : undefined;
 
   return (
     // 🔴 자리를 차지하지 않고 **떠 있어야** 한다. 흐름에 끼면 펼칠 때마다 격자
     //    한 칸이 세로로 늘어 옆 칸들이 밀려 내려간다.
     <div
       id={panelId}
-      role="group"
+      // 🔴 동그라미 목록은 role 이 다르다 — 「여럿 고를 수 있는 묶음」으로 전해지면
+      //    읽어 주는 프로그램을 쓰는 사람이 둘을 켜려고 시도한다.
+      role={isSingle ? "radiogroup" : "group"}
       aria-labelledby={labelId}
       className="absolute left-0 right-0 top-full z-20 mt-1 rounded-md border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
     >
       {/* 🔴 단축 단추는 **있을 수도 없을 수도** 있다. 없으면 목록만 그린다 —
           이 부품을 쓰는 아홉 칸 가운데 여덟은 단축 단추가 없다(있는 것은 [전체
-          A/S 현황]의 [현재 상태] 하나다). */}
-      {shortcut && (
+          A/S 현황]의 [현재 상태] 하나다).
+          🔴 단독 선택에서는 **넘어와도 안 그린다**(prop 쪽 주석) — 여럿을 한 번에
+          채우는 장치라 한 개만 고르는 칸에서는 누를 뜻이 없다. */}
+      {shortcut && !isSingle && (
         <>
           <button
             type="button"
@@ -190,20 +293,56 @@ export function CheckboxFilterPanel<T extends string>({
           부품을 쓴다 — 목록이 화면 밖까지 자라지 않도록 높이를 묶고 제 안에서
           굴린다. */}
       <div className="max-h-60 overflow-y-auto">
-        {options.map((option) => (
-          <label
-            key={option.value}
-            className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            {/* 고르는 것은 `click`(체크박스의 onChange)으로 받는다 — 바깥 누르기만
-                pointerdown 이다. 여기서 pointerdown 으로 고르면 목록을 굴리려고
-                짚은 손가락에 체크가 뒤집힌다. */}
+        {/* 🔴 「전체」로 되돌아가는 길 **(가)** — 단독 선택에서만 선다(2026-11-19
+            사용자 결정: 되돌아가는 길을 (가) 맨 위의 「전체」 항목과 (나) 고른 것을
+            다시 누르기, **둘 다** 쓸 수 있게).
+
+            목록 **안**에 두는 까닭: 이것은 단추가 아니라 **항목 하나**다. 단축 단추처럼
+            목록 밖(줄 위)에 두면 동그라미 줄들과 왼쪽 끝이 어긋나 다른 종류의 조작으로
+            보이고, 아무것도 안 골랐을 때 「무엇이 켜져 있는가」가 화면에서 사라진다.
+
+            적는 글자는 닫힌 칸이 쓰는 그 글자다(emptyLabel) — 둘이 갈라지면 같은 상태를
+            두 말로 부르게 된다. */}
+        {isSingle && (
+          <label className={optionRowClass}>
             <input
-              type="checkbox"
+              type="radio"
+              name={radioGroupName(panelId)}
               className="shrink-0"
-              checked={pickedValues.has(option.value)}
-              onChange={() => onChange(toggleSelection(options, selected, option.value))}
+              // 🔴 **아무것도 안 골랐을 때 이것이 켜져 있어야** 한다 — 동그라미가 하나도
+              //    없는 목록은 「아직 아무 일도 안 일어난 칸」으로 읽히지 않는다.
+              checked={selected.length === 0}
+              readOnly
+              onClick={() => onChange([])}
             />
+            <span className="min-w-0 break-words">{emptyLabel}</span>
+          </label>
+        )}
+
+        {options.map((option) => (
+          <label key={option.value} className={optionRowClass}>
+            {/* 고르는 것은 `click`(체크박스의 onChange · 동그라미의 onClick)으로 받는다
+                — 바깥 누르기만 pointerdown 이다. 여기서 pointerdown 으로 고르면 목록을
+                굴리려고 짚은 손가락에 체크가 뒤집힌다. */}
+            {isSingle ? (
+              <input
+                type="radio"
+                name={radioGroupName(panelId)}
+                className="shrink-0"
+                checked={singlePicked === option.value}
+                readOnly
+                // 🔴 **이미 고른 줄을 다시 누르면 꺼진다** — 길 (나). 라디오가 거저 주는
+                //    동작이 아니라 여기 적힌 규칙이고, 지우면 「전체」 한 줄만 남는다.
+                onClick={() => onChange(singlePicked === option.value ? [] : [option.value])}
+              />
+            ) : (
+              <input
+                type="checkbox"
+                className="shrink-0"
+                checked={pickedValues.has(option.value)}
+                onChange={() => onChange(toggleSelection(options, selected, option.value))}
+              />
+            )}
             <span className="min-w-0 break-words">{option.label}</span>
           </label>
         ))}
@@ -221,6 +360,7 @@ export default function CheckboxFilterDropdown<T extends string>({
   emptyLabel,
   id,
   labelPlacement = "top",
+  selectionMode = "multi",
 }: CheckboxFilterDropdownProps<T>) {
   const isInlineLabel = labelPlacement === "inline";
   const [isOpen, setIsOpen] = useState(false);
@@ -304,6 +444,11 @@ export default function CheckboxFilterDropdown<T extends string>({
             selected={selected}
             onChange={onChange}
             shortcut={shortcut}
+            selectionMode={selectionMode}
+            // 🔵 닫힌 칸(summary)과 단독 선택 목록 맨 위의 「전체」가 **같은 글자**를
+            //    적어야 해서 같은 값을 둘 다에 넘긴다. 안 넘어온 경우의 기본값은
+            //    양쪽이 같은 상수(DEFAULT_EMPTY_LABEL)에서 받는다.
+            emptyLabel={emptyLabel}
           />
         )}
       </div>

@@ -28,7 +28,11 @@ const SHORTCUT = {
 
 function closed(
   selected: string[],
-  extra: { shortcut?: typeof SHORTCUT; labelPlacement?: "top" | "inline" } = {}
+  extra: {
+    shortcut?: typeof SHORTCUT;
+    labelPlacement?: "top" | "inline";
+    selectionMode?: "multi" | "single";
+  } = {}
 ) {
   return renderToStaticMarkup(
     <CheckboxFilterDropdown
@@ -272,13 +276,16 @@ test("🔴 눌린 모습과 안 눌린 모습은 **색이 다르다** — aria-p
 
 type ButtonProps = { onClick?: () => void; children?: ReactNode };
 
-function buttonsIn(node: ReactNode): ButtonProps[] {
-  if (Array.isArray(node)) return node.flatMap((child) => buttonsIn(child as ReactNode));
+/** 나무에서 그 태그의 props 를 **그려지는 차례대로** 모은다. */
+function elementsIn<P>(node: ReactNode, tag: string): P[] {
+  if (Array.isArray(node)) return node.flatMap((child) => elementsIn<P>(child as ReactNode, tag));
   if (!isValidElement(node)) return [];
   const props = node.props as { children?: ReactNode };
-  const inner = buttonsIn(props.children);
-  return node.type === "button" ? [props as ButtonProps, ...inner] : inner;
+  const inner = elementsIn<P>(props.children, tag);
+  return node.type === tag ? [props as P, ...inner] : inner;
 }
+
+const buttonsIn = (node: ReactNode) => elementsIn<ButtonProps>(node, "button");
 
 /** 단축 단추를 누른 뒤 onChange 에 넘어온 값들. */
 function pressShortcut(selected: string[]): string[][] {
@@ -331,4 +338,194 @@ test("선택지가 비어도 터지지 않는다 — 고객사가 한 곳도 없
     <CheckboxFilterPanel panelId="p" labelId="l" options={[]} selected={[]} onChange={() => {}} />
   );
   assert.ok(!html.includes('type="checkbox"'));
+});
+
+// ── 🔴 단독 선택(selectionMode="single") — 2026-11-19 ───────────────────────
+//
+// 사용자 결정: [내자 정리]의 [상태] **한 칸만** 단독 선택이 된다. 되돌아가는 길은
+// **둘 다** 둔다 — (가) 목록 맨 위의 「전체」 항목, (나) 고른 것을 다시 누르면 꺼짐.
+//
+// 🔴 **여기서 가장 중요한 것은 「안 넘기면 예전 그대로인가」**다(이름표 자리의 그
+//    시험과 같은 까닭). 이 부품을 쓰는 아홉 칸 가운데 **여덟**이 이 prop 을 안
+//    넘기므로, 기본값이 바뀌면 여덟 칸이 한꺼번에 단독 선택이 된다 — 오류는 한 줄도
+//    안 나고, [전체 A/S 현황]에서 상태 둘을 함께 보던 사람만 알아챈다.
+
+/** 단독 선택으로 펼친 목록을 글자로. */
+function singlePanel(selected: string[], shortcut?: typeof SHORTCUT) {
+  return renderToStaticMarkup(
+    <CheckboxFilterPanel
+      panelId="panel"
+      labelId="label"
+      options={OPTIONS}
+      selected={selected}
+      onChange={() => {}}
+      shortcut={shortcut}
+      selectionMode="single"
+    />
+  );
+}
+
+type RadioProps = { type?: string; name?: string; checked?: boolean; onClick?: () => void };
+
+/**
+ * 단독 선택 목록의 **동그라미들**. 맨 앞이 「전체」, 그 뒤가 선택지 차례다.
+ * 돌려주는 `given` 에는 누른 뒤 onChange 로 넘어온 값이 쌓인다.
+ */
+function singleRadios(selected: string[], shortcut?: typeof SHORTCUT) {
+  const given: string[][] = [];
+  const tree = CheckboxFilterPanel({
+    panelId: "p",
+    labelId: "l",
+    options: OPTIONS,
+    selected,
+    onChange: (next) => given.push(next),
+    shortcut,
+    selectionMode: "single",
+  });
+  const radios = elementsIn<RadioProps>(tree, "input");
+  assert.equal(
+    radios.length,
+    OPTIONS.length + 1,
+    "🔴 동그라미 수가 「전체」 한 줄 + 선택지 수가 아니다 — 아래 단언이 엉뚱한 줄을 누른다"
+  );
+  for (const radio of radios) {
+    assert.equal(radio.type, "radio", "체크박스가 섞여 있다 — 한 개만 고르는 칸이 아니다");
+    assert.ok(radio.onClick, "동그라미에 누르기 동작이 아예 없다");
+  }
+  // 🔴 한 묶음으로 묶여야 둘이 동시에 켜지지 않는다. 이름이 비면 브라우저가 묶지
+  //    못하고, 다른 칸과 같으면 그 칸의 동그라미까지 꺼진다.
+  const names = new Set(radios.map((radio) => radio.name));
+  assert.equal(names.size, 1, `동그라미들의 name 이 갈렸다: ${[...names].join(" / ")}`);
+  assert.ok([...names][0], "동그라미에 name 이 없다 — 브라우저가 한 묶음으로 안 본다");
+  return { radios, given };
+}
+
+test("🔴 단독 선택이면 체크 대신 동그라미이고, 목록 **맨 위에 「전체」**가 선다", () => {
+  const html = singlePanel([]);
+  assert.equal((html.match(/type="radio"/g) ?? []).length, OPTIONS.length + 1);
+  assert.ok(!html.includes('type="checkbox"'), "체크박스가 남아 있다");
+  assert.ok(html.includes("전체"), "「전체」로 되돌아가는 길 (가)가 없다");
+  assert.ok(
+    html.indexOf("전체") < html.indexOf(OPTIONS[0].label),
+    "「전체」가 선택지 아래로 내려갔다 — 맨 위여야 눈에 띈다"
+  );
+  for (const option of OPTIONS) {
+    assert.ok(html.includes(option.label), `${option.label} 이 안 보인다`);
+  }
+});
+
+test("🔴 아무것도 안 골랐으면 **「전체」가 켜져 있다** — 빈 목록처럼 보이면 안 된다", () => {
+  const { radios } = singleRadios([]);
+  assert.equal(radios[0].checked, true, "「전체」가 안 켜져 있다");
+  assert.deepEqual(
+    radios.slice(1).map((radio) => radio.checked),
+    OPTIONS.map(() => false),
+    "아무것도 안 골랐는데 선택지 쪽에 동그라미가 켜져 있다"
+  );
+});
+
+test("🔴 고른 줄 하나만 켜지고 「전체」는 꺼진다", () => {
+  const { radios } = singleRadios(["INSPECTING"]);
+  assert.equal(radios[0].checked, false, "고른 것이 있는데 「전체」가 켜져 있다");
+  assert.deepEqual(
+    radios.slice(1).map((radio) => radio.checked),
+    OPTIONS.map((option) => option.value === "INSPECTING"),
+    "켜진 동그라미가 고른 줄이 아니다"
+  );
+});
+
+test("🔴 다른 줄을 누르면 **그 값 하나**가 넘어간다 — 배열 길이 1", () => {
+  const { radios, given } = singleRadios(["INSPECTING"]);
+  radios[1].onClick?.(); // 선택지 첫 줄(접수)
+  assert.deepEqual(given, [["RECEIVED"]]);
+  assert.equal(given[0].length, 1, "단독 선택인데 값이 둘 이상 넘어갔다");
+});
+
+test("🔴 (나) 이미 고른 줄을 **다시 누르면 꺼진다** — 빈 배열(= 전체)이 넘어간다", () => {
+  // 🔴 라디오가 거저 주는 동작이 아니다. `onChange` 로 받으면 이미 켜진 줄에서는
+  //    사건 자체가 안 나서 **아무 일도 안 일어난다** — 그래서 부품이 click 으로 받고,
+  //    이 시험이 그 규칙을 지킨다.
+  const { radios, given } = singleRadios(["INSPECTING"]);
+  radios[3].onClick?.(); // 선택지 셋째 줄(검사 중) = 지금 고른 줄
+  assert.deepEqual(given, [[]]);
+});
+
+test("🔴 (가) 「전체」를 누르면 빈 배열이 넘어간다 — 골라 둔 것이 있든 없든", () => {
+  const picked = singleRadios(["SHIPPED"]);
+  picked.radios[0].onClick?.();
+  assert.deepEqual(picked.given, [[]]);
+
+  // 아무것도 안 고른 채로 눌러도 같은 값이다(아무 일도 안 일어난 것과 같다).
+  const empty = singleRadios([]);
+  empty.radios[0].onClick?.();
+  assert.deepEqual(empty.given, [[]]);
+});
+
+test("🔴 값이 **둘 이상** 들어오면 선택지 차례의 첫 값만 켜고, 닫힌 칸과 같은 이름이다", () => {
+  // 🔴 화면은 길이 0 또는 1 만 넘기지만, 주소줄이나 되돌리는 변경으로 둘이 들어올 수
+  //    있다. 그때 무엇을 켜 보일지 **정해 두지 않으면** 다음 사람이 깨진 화면을 본다.
+  //    정한 답: **선택지에 적힌 차례의 첫 값**(orderSelection) — 닫힌 칸이 말하는
+  //    바로 그 이름이라, 칸과 목록이 서로 다른 것을 가리키지 않는다.
+  const { radios } = singleRadios(["SHIPPED", "REPAIRING"]);
+  assert.deepEqual(
+    radios.slice(1).map((radio) => radio.checked),
+    OPTIONS.map((option) => option.value === "REPAIRING"),
+    "선택지 차례의 첫 값(수리 중)이 아닌 것이 켜졌다"
+  );
+  assert.equal(radios[0].checked, false, "고른 것이 있는데 「전체」가 켜졌다");
+  // 🔴 닫힌 칸은 「수리 중 외 1개」라고 적는다 — 둘이 어긋나면 칸과 목록이 다른
+  //    말을 하게 된다.
+  assert.ok(
+    closed(["SHIPPED", "REPAIRING"], { selectionMode: "single" }).includes("수리 중 외 1개"),
+    "닫힌 칸이 가리키는 이름과 켜진 동그라미가 어긋난다"
+  );
+});
+
+test("🔴 단독 선택에서는 단축 단추를 **넘겨도 안 그린다** — 여럿을 채우는 장치다", () => {
+  const html = singlePanel([], SHORTCUT);
+  assert.ok(!html.includes("입고품 전체"), "단독 선택인데 단축 단추가 그려졌다");
+  assert.equal((html.match(/<button/g) ?? []).length, 0, "단독 선택 목록에 단추가 섰다");
+  // 넘겨도 목록은 멀쩡히 그려진다 — 조용히 통째로 비면 그게 더 나쁘다.
+  assert.equal((html.match(/type="radio"/g) ?? []).length, OPTIONS.length + 1);
+  // 🔵 `"multi"` 쪽은 그대로 그린다 — 「안 그린다」가 단독 선택에서만인지 못 박는다.
+  assert.ok(panel([], SHORTCUT).includes("입고품 전체"), "복수 선택에서도 단축이 사라졌다");
+});
+
+test("🔴 안 넘기면 **지금 그대로 복수 선택**이다 — 여덟 칸이 기대고 있는 기본값", () => {
+  // 🔴 `"multi"` 를 적은 것과 **한 글자도 다르지 않아야** 한다. 기본값이 바뀌면
+  //    여기서 깨진다(이름표 자리의 같은 모양 단언).
+  const implicit = panel(["REPAIRING"]);
+  assert.equal(
+    implicit,
+    renderToStaticMarkup(
+      <CheckboxFilterPanel
+        panelId="panel"
+        labelId="label"
+        options={OPTIONS}
+        selected={["REPAIRING"]}
+        onChange={() => {}}
+        selectionMode="multi"
+      />
+    )
+  );
+  // 그리고 그 기본값이 **체크박스**다 — 동그라미도, 「전체」 한 줄도 없다.
+  assert.equal((implicit.match(/type="checkbox"/g) ?? []).length, OPTIONS.length);
+  assert.ok(!implicit.includes('type="radio"'), "기본값이 동그라미가 됐다");
+  assert.ok(!implicit.includes(">전체<"), "복수 선택 목록에 「전체」 한 줄이 생겼다");
+});
+
+test("🔵 **닫힌 칸은 두 방식이 한 글자도 다르지 않다** — 다른 것은 펼친 목록뿐이다", () => {
+  for (const selected of [[], ["REPAIRING"], ["RECEIVED", "REPAIRING"]]) {
+    assert.equal(
+      closed(selected, { selectionMode: "single" }),
+      closed(selected),
+      `닫힌 칸이 고르는 방식에 따라 달라졌다: ${JSON.stringify(selected)}`
+    );
+  }
+});
+
+test("🔵 단독 선택 목록은 읽어 주는 프로그램에 **radiogroup** 으로 전해진다", () => {
+  // 「여럿 고를 수 있는 묶음」으로 전해지면 둘을 켜려고 시도하게 된다.
+  assert.ok(singlePanel([]).includes('role="radiogroup"'));
+  assert.ok(panel([]).includes('role="group"'), "복수 선택 쪽 role 이 함께 바뀌었다");
 });
