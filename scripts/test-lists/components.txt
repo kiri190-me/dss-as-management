@@ -559,6 +559,13 @@ src/components/common/file-drop.test.tsx
 src/components/common/file-drop-screens.test.ts
 src/components/quotes/new-quote-excel-sheets.test.ts
 src/components/quotes/quote-approval-screen.test.tsx
+# 🔴 결재가 올라가 있는 견적서를 고쳐 저장할 때 **저장 전에 묻는 창**(2026-11-19 사용자 요청).
+# 창 자체는 아무것도 물지 않아 그대로 그려 본다(문구가 사용자가 준 글자 그대로인가 · 단추 둘이
+# `type="button"` 인가 — 폼 안이라 빠뜨리면 [취소]가 저장이 된다 · 처음 초점이 [취소]인가).
+# 이음새(묻는 것이 저장 액션보다 먼저인가 · [취소]가 저장도 나가기도 안 하는가 · 저장 뒤
+# 알림이 그대로인가)는 QuoteEditForm 원본을 글자로 읽는다 — 그 폼은 서버 액션을 물어 이
+# 목록에서 그려 볼 수 없다(이웃 quote-save-pdf-screens.test.ts 와 같은 방법).
+src/components/quotes/quote-approval-save-confirm.test.tsx
 src/components/excel-imports/KyosanReportImportParts.test.tsx
 # 원본을 글자로 읽는 시험이라 세 목록 어디서든 돌지만, 같은 두 파일
 # (RepresentativeManagementScreen.tsx · users/page.tsx)을 읽는 이웃

@@ -43,14 +43,19 @@ const form = flat(raw);
 /** 주석을 뺀 코드 — 머리말이 까닭을 설명하느라 적은 낱말에 걸리지 않게. */
 const code = flat(raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\{\/\*[\s\S]*?\*\/\}/g, ""));
 /**
- * 🔴 **`handleSubmit` 몸통만** 자른다.
+ * 🔴 **저장 몸통만** 자른다.
  *
- * 🔵 2026-10-31 에 그 바로 뒤로 함수가 하나 더 생겼다 — 「승인요청이 반려되었습니다」
+ * 🔵 2026-10-31 에 그 뒤로 함수가 하나 더 생겼다 — 「승인요청이 반려되었습니다」
  * 팝업을 닫은 뒤 마무리를 잇는 `finishSaveAfterNotice`. 끝 표시를 `const disabled`
  * 로 두면 그 함수까지 한 덩이로 묶여, 아래 「변환을 부르는 자리는 둘뿐」이 **셋**으로
  * 읽힌다. 세 번째 자리는 아래 전용 묶음이 따로 잰다.
+ *
+ * 🔵 2026-11-19 에 **앞**도 갈라졌다. 폼 submit 을 받는 `handleSubmit` 은 이제 「결재가
+ * 올라가 있으면 먼저 묻는」 문이 되었고(quote-approval-save-confirm.test.tsx), 저장
+ * 몸통은 `saveQuote` 로 옮겨졌다 — 묻는 창의 [저장]이 폼 submit 으로 되돌아가면 창이
+ * 또 뜨기 때문이다. 여기서 재는 것은 **저장 몸통의 차례**라 시작 표시도 그쪽으로 옮긴다.
  */
-const submit = sliceBetween(form, "async function handleSubmit(", "async function finishSaveAfterNotice(");
+const submit = sliceBetween(form, "async function saveQuote(", "async function finishSaveAfterNotice(");
 
 describe("🔴 저장이 끝난 뒤에 부른다 — 저장을 막지 않는다", () => {
   test("저장 액션 호출은 한 글자도 바뀌지 않았다", () => {

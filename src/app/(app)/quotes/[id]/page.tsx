@@ -35,6 +35,7 @@ import {
 } from "@/lib/db/queries/shipment-approval-routes";
 import {
   QUOTE_APPROVAL_ROUTE_SCOPE,
+  isQuoteApprovalAutoRejectedOnEdit,
   isQuoteApprovalRouteInForce,
 } from "@/lib/domain/quote-approval-rules";
 import { isValidQuoteId } from "@/lib/validation/quote-input";
@@ -202,6 +203,30 @@ export default async function QuoteDetailPage({
    */
   const initialTab = parseQuoteEditTab(resolvedSearchParams);
 
+  /**
+   * 🔴 **고쳐 저장하면 지금 걸려 있는 결재가 물리는가** (2026-11-19 사용자 요청 —
+   * 「이미 승인이 끝난 건에 들어가서 내용을 고친 다음에 [저장]을 누르면 팝업이 뜨고…」).
+   * 편집 폼이 저장하기 **전에** 한 번 묻는 데 쓴다.
+   *
+   * 🔴 **판정을 여기 새로 적지 않는다.** 저장 경로가 실제로 반려할지 정하는 그 함수를
+   * 그대로 부른다(domain/quote-approval-rules.ts 의 `isQuoteApprovalAutoRejectedOnEdit` —
+   * 그 자리에 「판정을 글자로 베껴 적지 말 것」이라고 적혀 있다). 베껴 적으면 **묻지도
+   * 않고 반려되는 길**과 **묻기만 하고 아무 일도 없는 길**이 둘 다 생긴다.
+   *
+   * 🔴 **화면 상태 다섯(`state`)으로 가르지 않는다.** `APPROVED_OUTDATED` 는 결재 줄이
+   * `APPROVED` 일 수도 `REJECTED` 일 수도 있는데, 뒤엣것은 이미 닫혀 **더 물릴 것이
+   * 없다** — 그 상태로 재면 반려되지도 않을 저장에 창이 뜬다. 보는 것은 **마지막 줄의
+   * `status`** 다(아래 `latest`).
+   *
+   * 🔵 아직 아무도 안 누른 요청(`REQUESTED`)에도 참이다(사용자 결정 2026-11-19). 그 줄도
+   * 저장과 함께 닫히므로, 빼면 **묻지도 않고 반려되는 길**이 그대로 남는다.
+   *
+   * 🔵 줄이 아예 없으면(`latest === null`) 거짓이다 — 한 번도 올린 적이 없는 장이다.
+   */
+  const hasLiveApproval =
+    approvalProgress?.latest != null &&
+    isQuoteApprovalAutoRejectedOnEdit(approvalProgress.latest.status);
+
   return (
     <QuoteEditTabs
       /* 🔴 **첫 그림에만** 쓰인다 — 그 뒤 탭 전환은 여전히 브라우저 상태다. 주소를
@@ -225,6 +250,10 @@ export default async function QuoteDetailPage({
           workScopeDefaults={workScopeDefaults}
           returnHref={returnHref}
           attachmentSlots={attachmentSlots}
+          /* 🔴 **불 하나뿐이다**(2026-11-19) — 결재 줄도, 이력도, 다섯 가지 상태도 주지
+             않는다. 폼이 알아야 하는 것은 「저장 전에 물을 것인가」 하나이고, 그보다 더
+             주면 폼이 결재를 보고 칸을 잠그는 코드가 언젠가 생긴다. 판정은 위에서 끝났다. */
+          hasLiveApproval={hasLiveApproval}
         />
       }
       /*

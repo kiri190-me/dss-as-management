@@ -214,10 +214,57 @@ describe("🔴 APPROVED_OUTDATED 는 「승인됨」과 다르게 보인다", ()
   });
 });
 
-describe("🔴 발행은 결재 상태에 잠기지 않는다", () => {
-  test("편집 폼이 결재를 아예 모른다", () => {
-    assert.doesNotMatch(editFormSource, /quote-approvals?/i);
-    assert.doesNotMatch(editFormSource, /QuoteApproval/);
+/**
+ * ============================================================================
+ * 🔴 울타리가 지키는 것은 **「결재는 발행·수정을 막지 않는다」**(2026-09-18)
+ * ============================================================================
+ * 🔵 2026-11-19 에 이 묶음을 **뜻을 바꿔 다시 썼다.** 그전의 글자는 「편집 폼이
+ * 결재를 **아예 모른다**」였는데, 그날 편집 폼이 결재에 대해 딱 하나를 알게 됐다 —
+ * **불 하나**(`hasLiveApproval`), 「저장하기 전에 한 번 물을 것인가」.
+ *
+ * 🔴 **그것은 이 울타리를 깨지 않는다.** 2026-09-18 이 금지한 것은 *결재를 보고
+ * 무언가를 거절·차단하는 코드*이고, 새로 생긴 것은 *저장하기 전에 사람에게 묻는
+ * 창* 하나다 — 묻고 나면 [저장]이 지금까지와 한 글자도 다르지 않은 길을 간다.
+ * 🔴 **시험의 글자는 그 구분을 못 한다.** 「approval 이라는 낱말이 없다」로 재면
+ * 묻는 것도 막는 것도 똑같이 빨개진다. 그래서 재는 것을 **막는가**로 바꿨다:
+ *
+ *   · 결재 때문에 **칸이 잠기지 않는다**(아래 「잠김의 근거는 여전히 둘뿐」).
+ *   · 폼은 결재 **상태**를 읽지 않는다 — 조회도 도메인 규칙도 물지 않는다.
+ *   · 페이지가 폼에 넘기는 결재 값은 **불 하나뿐**이다.
+ * ============================================================================
+ */
+describe("🔴 발행·수정은 결재 상태에 잠기지 않는다 — 묻기만 한다", () => {
+  test("🔴 잠김의 근거는 여전히 **둘뿐**이다 — 결재는 칸을 하나도 잠그지 않는다", () => {
+    const flattened = flat(editFormSource);
+    // 🔴 이 한 줄이 이 화면의 모든 `disabled={disabled}` 가 가리키는 자리다.
+    assert.ok(
+      flattened.includes("const disabled = isSubmitting || isConflict;"),
+      "잠김의 근거가 바뀌었다 — 결재가 끼어들지 않았는지 확인할 것"
+    );
+    /**
+     * 🔵 **무엇을 재는지 먼저**: 칸을 잠그는 자리를 실제로 찾았는가. 0개면 아래
+     * 반복문이 한 번도 안 돌아 **공짜로 통과**한다.
+     */
+    const lockSpots = flattened.match(/disabled=\{[^}]*\}/g) ?? [];
+    assert.ok(lockSpots.length > 20, `잠기는 칸을 ${lockSpots.length}개밖에 못 찾았다`);
+    for (const spot of lockSpots) {
+      assert.doesNotMatch(spot, /approval/i, `결재로 잠그는 칸이 생겼다 — ${spot}`);
+      assert.doesNotMatch(spot, /결재/, `결재로 잠그는 칸이 생겼다 — ${spot}`);
+    }
+    // [저장] 단추도 마찬가지다 — 결재가 걸려 있어도 눌린다(눌러서 묻는 것이 이번 일이다).
+    assert.ok(
+      flattened.includes('<button type="submit" disabled={disabled}'),
+      "[저장] 단추의 잠김 조건이 바뀌었다"
+    );
+  });
+
+  test("🔴 폼은 결재 **조회도 규칙도 물지 않는다** — 상태를 제 손으로 셈하지 않는다", () => {
+    // 🔴 하나라도 들어오면 폼이 「승인됐나 · 낡았나」를 스스로 판단하기 시작한다.
+    assert.doesNotMatch(editFormSource, /db\/queries\/quote-approvals/);
+    assert.doesNotMatch(editFormSource, /domain\/quote-approval-rules/);
+    assert.doesNotMatch(editFormSource, /QuoteApprovalState|QuoteApprovalStatus|approvalProgress/);
+    // 🔵 아는 것은 불 하나뿐이다(2026-11-19) — 그 이름이 사라지면 이 시험도 함께 고칠 것.
+    assert.ok(flat(editFormSource).includes("hasLiveApproval = false,"), "불 하나가 사라졌다");
   });
 
   test("[미리보기 · PDF] 의 조건이 그대로다 — 문서 종류 하나뿐", () => {
@@ -234,7 +281,7 @@ describe("🔴 발행은 결재 상태에 잠기지 않는다", () => {
     assert.doesNotMatch(issueButtonSource, /approval/i);
   });
 
-  test("페이지가 편집 폼에 결재 값을 넘기지 않는다", () => {
+  test("🔴 페이지가 편집 폼에 넘기는 결재 값은 **불 하나뿐**이다", () => {
     const flatPage = flat(editPageSource);
     const start = flatPage.indexOf("<QuoteEditForm");
     // 🔴 끝은 **편집 폼 자리를 닫는 괄호**다. 예전에는 「다음에 오는 슬롯 이름」으로 끊었는데,
@@ -245,7 +292,51 @@ describe("🔴 발행은 결재 상태에 잠기지 않는다", () => {
     assert.ok(end > start, "편집 폼 자리가 어디서 끝나는지 찾지 못했다");
     const editFormProps = flatPage.slice(start, end);
     assert.ok(editFormProps.length > 0, "페이지에서 편집 폼 자리를 찾지 못했다");
-    assert.doesNotMatch(editFormProps, /approval/i);
+    /**
+     * 🔴 2026-11-19 까지는 「한 글자도 안 넘긴다」였다. 그날 **불 하나**가 넘어가기
+     * 시작했고(저장 전에 물을 것인가), 그래서 재는 것을 **「그 하나뿐인가」**로 바꿨다 —
+     * 결재 줄 · 이력 · 다섯 가지 상태가 폼으로 새면 거기서 칸을 잠그는 코드가 자란다.
+     * 🔵 **이름을 모아 맞대어 본다** — `doesNotMatch` 로 바꿔 적으면 새 값이 하나 더
+     * 늘어도 통과한다.
+     */
+    const approvalProps = editFormProps.match(/[\w.?]*approval[\w.?]*/gi) ?? [];
+    assert.ok(approvalProps.length > 0, "결재 값이 하나도 안 넘어간다 — 창이 영영 안 뜬다");
+    assert.deepEqual(
+      [...new Set(approvalProps)].sort(),
+      ["hasLiveApproval"],
+      "결재 값이 불 하나 말고 더 넘어간다"
+    );
+  });
+
+  test("🔴 그 불은 **결재 줄의 마지막 status** 로 정해진다 — 화면 상태 다섯이 아니다", () => {
+    const flatPage = flat(editPageSource);
+    /**
+     * 🔴 `APPROVED_OUTDATED` 는 결재 줄이 `APPROVED` 일 수도 `REJECTED` 일 수도 있다 —
+     * 뒤엣것은 이미 닫혀 **더 물릴 것이 없다.** 화면 상태로 재면 반려되지도 않을 저장에
+     * 창이 뜬다. 그래서 `progress.state` 가 아니라 `progress.latest.status` 를 본다.
+     */
+    assert.ok(
+      flatPage.includes(
+        "const hasLiveApproval = approvalProgress?.latest != null && isQuoteApprovalAutoRejectedOnEdit(approvalProgress.latest.status);"
+      ),
+      "판정이 바뀌었다 — 결재 줄의 status 가 아니라 다른 것으로 재고 있지 않은지 볼 것"
+    );
+    // 🔴 판정을 화면에 **새로 적지 않는다** — 저장 경로가 실제로 반려할지 정하는 그 함수다.
+    assert.match(
+      flatPage,
+      /import \{[^}]*isQuoteApprovalAutoRejectedOnEdit[^}]*\} from "@\/lib\/domain\/quote-approval-rules"/,
+      "도메인 함수를 부르지 않고 판정을 베껴 적었다"
+    );
+  });
+
+  test("🔴 **새 견적서에는 안 넘어간다** — 아직 걸릴 결재가 없다", () => {
+    const flatNewPage = flat(newPageSource);
+    const start = flatNewPage.indexOf("<QuoteEditForm");
+    assert.ok(start >= 0, "새 견적서 페이지에서 편집 폼 자리를 찾지 못했다");
+    assert.doesNotMatch(flatNewPage.slice(start), /approval/i, "새 장에 결재 값이 넘어간다");
+    // 🔴 그래서 **기본값이 서야** 한다 — 없으면 undefined 가 되어 아무 창도 안 뜨지만,
+    //    그것은 우연히 맞는 것이다(불이 아니라 undefined 다). 기본값을 글자로 못 박는다.
+    assert.ok(flat(editFormSource).includes("hasLiveApproval = false,"), "폼의 기본값이 없다");
   });
 
   test("결재 탭 맨 위가 그 사실을 사람에게도 말한다", () => {
@@ -779,12 +870,26 @@ describe("🔴 저장 결과 팝업 둘", () => {
     assert.ok(!branch.includes("leaving = true"), "안 바뀐 저장이 화면을 떠난다");
   });
 
-  test("🔴 폼은 **결재 상태를 읽지 않는다** — 서버가 돌려준 낱말 하나만 본다", () => {
-    // 위 「편집 폼이 결재를 아예 모른다」와 같은 울타리다(2026-09-18 — 발행은
-    // 결재에 잠기지 않는다). 2026-10-31 에 팝업이 생겼어도 폼이 보는 것은
-    // `result.outcome` 한 낱말뿐이고, 결재 조회·상태·패널은 여전히 모른다.
+  test("🔴 저장 **결과**는 서버가 돌려준 낱말로만 가른다 — 폼이 결재를 다시 읽지 않는다", () => {
+    /**
+     * 위 「발행·수정은 결재 상태에 잠기지 않는다」와 같은 울타리다(2026-09-18). 2026-10-31
+     * 에 팝업이 생겼어도 **무슨 일이 일어났는지**를 정하는 것은 서버이고, 폼이 보는 것은
+     * `result.outcome` 한 낱말뿐이다 — 결재 조회 · 상태 · 패널은 여전히 모른다.
+     *
+     * 🔵 2026-11-19 에 폼이 **불 하나**(`hasLiveApproval`)를 알게 됐지만 그것은 저장
+     * **전에** 물을지를 정하는 값이고, 저장이 **끝난 뒤** 무엇을 알릴지에는 한 번도
+     * 쓰이지 않는다 — 그 둘이 섞이면 「서버는 안 바꿨다는데 화면은 반려됐다고 말하는」
+     * 날이 온다. 그래서 아래 두 줄이 그대로 남는다.
+     */
     assert.doesNotMatch(editFormSource, /approvalProgress|QuoteApprovalState|quote-approval-rules/);
     assert.ok(flat(editFormSource).includes("result.outcome ==="), "서버가 준 낱말을 보지 않는다");
+    // 🔴 저장 결과를 가르는 자리에 그 불이 끼어 있지 않다(갈래 둘 + 그 뒤 마무리).
+    const outcomeBranches = editFormSource.slice(
+      editFormSource.indexOf('result.outcome === "UNCHANGED"'),
+      editFormSource.indexOf("const disabled = isSubmitting || isConflict;")
+    );
+    assert.ok(outcomeBranches.length > 0, "저장 결과를 가르는 자리를 찾지 못했다");
+    assert.doesNotMatch(outcomeBranches, /hasLiveApproval/, "저장 뒤 알림이 폼의 불을 본다");
   });
 
   test("🔴 「자동 반려」는 닫은 **뒤** 지금까지의 마무리를 잇는다 — PDF 를 건너뛰지 않는다", () => {

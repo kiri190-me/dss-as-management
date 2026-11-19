@@ -138,6 +138,10 @@ import {
   QUOTE_SAVE_NOTICE_TITLES,
   type QuoteSaveNoticeKind,
 } from "@/components/quotes/quote-save-texts";
+/* 🔴 결재가 올라가 있을 때 **저장 전에** 묻는 창(2026-11-19). 🔵 이 폼이 결재에 대해
+   아는 것은 아래 `hasLiveApproval` 불 하나뿐이다 — 상태도 이력도 읽지 않고, 칸을 잠그지도
+   않는다(그 창의 머리말 · quote-approval-screen.test.tsx 의 울타리). */
+import QuoteApprovalSaveConfirmDialog from "@/components/quotes/QuoteApprovalSaveConfirmDialog";
 import { takeNewQuoteExcelHandoff } from "@/components/quotes/new-quote-excel-handoff";
 import { createLatestQuoteExcelReader, type QuoteExcelReadFields } from "@/components/quotes/quote-excel-parse";
 import {
@@ -677,6 +681,7 @@ export default function QuoteEditForm({
   initialExcelOnly = false,
   returnHref = null,
   attachmentSlots = null,
+  hasLiveApproval = false,
 }: {
   /** 수정이면 기존 값, 새로 만들기면 null. */
   quote: QuoteEditData | null;
@@ -802,6 +807,24 @@ export default function QuoteEditForm({
    * listQuoteAttachmentSlots). 수정 화면이 읽어 넘기고, 새 견적서는 null 이다.
    */
   attachmentSlots?: QuoteAttachmentSlots | null;
+  /**
+   * 🔴 **이 장에 결재가 올라가 있는가** — 고쳐 저장하면 그 결재가 자동으로 물리는
+   * 상태인가(2026-11-19). 참이면 [저장]이 **저장하기 전에 한 번 묻는다**(아래
+   * handleSubmit · QuoteApprovalSaveConfirmDialog).
+   *
+   * 🔴 **불 하나다.** 결재 줄도 다섯 가지 상태도 받지 않는다 — 판정은 수정 페이지가
+   * 도메인 함수 하나로 끝내 넘긴다(app/(app)/quotes/[id]/page.tsx). 여기로 상태를
+   * 들이면 이 폼이 결재를 보고 칸을 잠그는 코드가 언젠가 생기는데, 그것은 2026-09-18
+   * 사용자 결정(「결재는 발행·수정을 막지 않는다」)을 뒤집는 일이다.
+   *
+   * 🔴 **묻기만 한다 — 아무것도 잠그지 않는다.** 이 값은 아래 `disabled`(저장 중 ·
+   * 충돌)에 한 번도 섞이지 않는다. 섞이는 순간 결재가 수정을 막게 된다.
+   *
+   * 🔴 **새 견적서에는 기본값 `false` 가 선다**(`/quotes/new` 는 넘기지 않는다) —
+   * 아직 저장되지도 않은 장이라 걸릴 결재가 없다. 그래서 새 장에서는 이 창이 뜨지
+   * 않고, [저장]은 지금까지와 한 글자도 다르지 않다.
+   */
+  hasLiveApproval?: boolean;
 }) {
   const router = useRouter();
 
@@ -1158,6 +1181,19 @@ export default function QuoteEditForm({
    * 둘 다 사람이 모르고 있던 사실이라, 읽기 전에 사라지면 모르는 채로 넘어간다.
    */
   const [saveNotice, setSaveNotice] = useState<QuoteSaveNoticeKind | null>(null);
+  /**
+   * ==========================================================================
+   * 🔴 [저장]을 눌렀는데 **결재가 올라가 있어 먼저 묻는 중**인가 (2026-11-19)
+   * ==========================================================================
+   * 바로 위 `saveNotice` 와 **짝이자 반대**다: 저쪽은 저장이 **끝난 뒤** 「됐다」를
+   * 알리고, 이쪽은 저장이 **시작되기 전** 「될 수 있다」를 묻는다. 둘 다 남긴다 —
+   * 안 바뀐 저장에는 반려가 일어나지 않으므로(서버가 `UNCHANGED` 로 끝낸다) 예고만
+   * 으로는 무슨 일이 일어났는지 알 수 없다(2026-11-19 사용자 결정).
+   *
+   * 🔴 참인 동안 저장은 **한 글자도 돌지 않는다.** 창의 [저장]을 눌러야 비로소
+   * `saveQuote()` 가 돈다 — [취소]면 창만 닫히고 고쳐 둔 값은 그대로 남는다.
+   */
+  const [askApprovalSave, setAskApprovalSave] = useState(false);
   /** [폴더 열기](견적서 ④b)의 결과 — 머리의 단추들 아래에 보인다. 누르는 동안은 비운다(null). */
   const [folderOpenOutcome, setFolderOpenOutcome] = useState<QuoteFolderOpenOutcome | null>(null);
   /**
@@ -2305,8 +2341,55 @@ export default function QuoteEditForm({
     }
   }
 
+  /**
+   * ==========================================================================
+   * 🔴 **결재가 올라가 있으면 저장하기 전에 묻는다** (2026-11-19 사용자 요청)
+   * ==========================================================================
+   * 「이미 승인이 끝난 건에 들어가서 내용을 고친 다음에 [저장]을 누르면 팝업이 뜨고 …
+   * [취소]를 누르면 저장이 안된 채로 팝업이 꺼지도록 해줘.」
+   *
+   * 🔴 **막는 것이 아니라 묻는 것이다.** 창의 [저장]을 누르면 지금까지와 **한 글자도
+   * 다르지 않은** 길(`saveQuote`)을 간다 — 결재 상태가 저장을 거절하는 자리는 이
+   * 파일에도 서버에도 없다(2026-09-18 사용자 결정).
+   *
+   * 🔴 **「내용이 바뀌었는가」를 묻지 않는다.** 폼이 쥔 `dirty` 는 «화면을 연 때 ↔
+   * 지금» 이고 서버의 판정은 «DB ↔ 지금» 이라 **서로 다른 것을 잰다**
+   * (domain/quote-form-changed.ts 12~18줄). 그것으로 창을 가리면 「뜰 줄 알았는데 안
+   * 뜨는」 자리가 생긴다. 안 바뀐 저장에도 창이 뜨는 쪽을 고르고, 그 경우는 **문구가
+   * 이미 감당한다**(「필요할 수 **있습니다**」) — 저장이 끝나면 「바뀐 내용이
+   * 없습니다」가 결과를 알려 준다.
+   *
+   * 🔴 **저장은 이 함수에 남겨 두지 않고 `saveQuote` 로 옮겨 두었다.** 창의 [저장]이
+   * `requestSubmit()` 으로 여기로 되돌아오면 창이 **또** 뜬다(끝나지 않는 고리).
+   * 들어오는 문이 둘(폼 submit · 창의 [저장])이고 저장 몸통이 하나다.
+   *
+   * ── 🔴 「저장 안 된 내용이 있습니다」 창과 겹칠 때 ───────────────────────
+   * 그 창의 [저장]은 `formRef.current?.requestSubmit()` 를 부르므로(leaveGuard.onSave)
+   * **창에서 창으로** 이어진다. 그때 이 창에서 [취소]를 누르면 **나가기까지 취소된다** —
+   * 저장도 안 하고 화면에도 그대로 남는다. 그렇게 되는 까닭은 저 장치가 나가기를
+   * **저장이 끝난 뒤 저장 팝업에게** 맡기기 때문이다(`showSavePopup` 의 `redirectTo`):
+   * 저장이 아예 안 돌면 아무도 주소를 밀지 않는다. 🔵 **일부러 그 쪽으로 둔다** —
+   * 사람이 저장을 그만둔 것이므로 적던 자리에 남는 쪽이 안전하다. 나가려면 [취소]를
+   * 누른 뒤 다시 [취소](나가기)를 눌러 [저장없이 나가기]를 고르면 된다.
+   */
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (isSubmitting || isConflict) return;
+    if (hasLiveApproval) {
+      setAskApprovalSave(true);
+      return;
+    }
+    await saveQuote();
+  }
+
+  /**
+   * 저장 몸통 — 들어오는 문 둘이 **같은 이것**을 탄다(폼 submit · 위 창의 [저장]).
+   *
+   * 🔴 문이 둘이라 **잠금 판정을 여기서도 한 번 더** 본다. 창의 [저장]은 폼의 submit 을
+   * 지나지 않으므로 위 `handleSubmit` 의 그 줄을 거치지 않는다 — 없으면 창에서 [저장]을
+   * 두 번 눌렀을 때 같은 저장이 두 번 돌 수 있다(새 장이면 두 장이 생긴다).
+   */
+  async function saveQuote() {
     if (isSubmitting || isConflict) return;
     setIsSubmitting(true);
     setSubmitError(null);
@@ -2886,6 +2969,29 @@ export default function QuoteEditForm({
         onSave={leaveGuard.saveAndLeave}
         onLeave={leaveGuard.leaveWithoutSaving}
         onCancel={leaveGuard.dismiss}
+      />
+
+      {/*
+        🔴 **결재가 올라가 있는 장을 고쳐 저장하려 할 때 묻는 창** (2026-11-19).
+        문구도 단추 둘도 사용자가 정한 그대로다(QuoteApprovalSaveConfirmDialog).
+        🔴 [저장]은 **지금 저장 흐름을 그대로** 탄다 — 창이 저장을 따로 짓지 않는다.
+           `requestSubmit()` 이 아니라 `saveQuote()` 인 것이 중요하다: 폼 submit 으로
+           되돌아가면 위 handleSubmit 이 이 창을 **또** 띄워 끝나지 않는다.
+        🔵 그래서 **건너뛰는 검사가 있는가**를 확인했다 — 없다. 이 폼의 칸에는 네이티브
+           `required` 가 하나도 붙어 있지 않고(필수 칸 판정은 서버가 해서 `fieldErrors`
+           로 돌아온다), 그 서버 검사는 `saveQuote` 안에 그대로 있다. 🔴 언젠가 칸에
+           `required` 를 붙이는 날에는 이 자리를 다시 봐야 한다 — 그때는 창을 띄우기
+           **전에**(폼 submit 이 시작될 때) 이미 검사가 끝나 있어야 뜻이 맞는다.
+        🔴 [취소]는 **창만 닫는다** — 저장도, 나가기도, 적어 둔 값도 건드리지 않는다
+           (위 handleSubmit 머리말의 마지막 절).
+      */}
+      <QuoteApprovalSaveConfirmDialog
+        isOpen={askApprovalSave}
+        onSave={() => {
+          setAskApprovalSave(false);
+          void saveQuote();
+        }}
+        onCancel={() => setAskApprovalSave(false)}
       />
 
 

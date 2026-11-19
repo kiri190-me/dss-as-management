@@ -120,7 +120,17 @@ describe("🔴 ② 나가는 문이 빠짐없이 그 장치를 지난다", () =>
   });
 
   test("🔴 [저장]은 **지금 저장 흐름을 그대로** 탄다 — 새 길을 짓지 않는다", () => {
-    // 견적서: 폼의 submit 을 그대로 부른다(같은 handleSubmit · 같은 필수 칸 검사).
+    /**
+     * 견적서: 폼의 submit 을 그대로 부른다(같은 handleSubmit · 같은 필수 칸 검사).
+     *
+     * 🔵 2026-11-19 부터 그 `handleSubmit` 이 **문 하나를 더 지난다** — 결재가 올라가
+     * 있으면 「승인요청이 반려되며…」를 먼저 묻는다(QuoteApprovalSaveConfirmDialog).
+     * 🔴 그래서 **창에서 창으로** 이어지고, 거기서 [취소]를 누르면 저장도 나가기도
+     * 일어나지 않는다 — 나가는 일은 저장이 끝난 뒤 저장 팝업이 하기 때문이다
+     * (`redirectTo`). 일부러 그 쪽으로 뒀다: 사람이 저장을 그만둔 것이니 적던 자리에
+     * 남는 쪽이 안전하다. 그 이음새는 quote-approval-save-confirm.test.tsx 가 잰다.
+     * 🔴 여기서 못 박는 것은 그대로다 — [저장]이 **제 손으로 저장을 짓지 않는다.**
+     */
     assert.ok(flatOf(QUOTE).includes("onSave: () => formRef.current?.requestSubmit(),"), QUOTE);
     assert.ok(flatOf(QUOTE).includes("<form ref={formRef} onSubmit={handleSubmit}"), QUOTE);
     // 보고서: 폼 요소가 없어 저장 함수를 그대로 부른다.
