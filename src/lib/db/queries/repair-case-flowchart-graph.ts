@@ -24,7 +24,8 @@ export type RepairCaseFlowchartGraphEdge = {
 };
 
 export type RepairCaseFlowchartGraph = {
-  flowchart: { id: string; repairCaseId: string; title: string; description: string | null; updatedAt: string };
+  /** faultTags 는 **늘 배열**이다 — DB 의 NULL(칸이 생기기 전에 만들어진 줄)을 여기서 []로 맞춰 내보낸다. 화면마다 `?? []` 를 적게 두면 한 군데만 빠뜨려도 그 화면에서 터진다. */
+  flowchart: { id: string; repairCaseId: string; title: string; description: string | null; faultTags: string[]; updatedAt: string };
   nodes: RepairCaseFlowchartGraphNode[];
   edges: RepairCaseFlowchartGraphEdge[];
 };
@@ -47,6 +48,7 @@ export async function getRepairCaseFlowchartGraph(params: {
       repairCaseId: repairCaseFlowcharts.repairCaseId,
       title: repairCaseFlowcharts.title,
       description: repairCaseFlowcharts.description,
+      faultTags: repairCaseFlowcharts.faultTags,
       updatedAt: repairCaseFlowcharts.updatedAt,
     })
     .from(repairCaseFlowcharts)
@@ -97,6 +99,7 @@ export async function getRepairCaseFlowchartGraph(params: {
       repairCaseId: flowchart.repairCaseId,
       title: flowchart.title,
       description: flowchart.description,
+      faultTags: flowchart.faultTags ?? [],
       updatedAt: flowchart.updatedAt.toISOString(),
     },
     nodes,

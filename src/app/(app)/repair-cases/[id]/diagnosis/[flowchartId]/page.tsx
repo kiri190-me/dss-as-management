@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { getRepairCaseFlowchartPageContext } from "@/lib/db/queries/repair-case-flowcharts";
+import { getRepairCaseFlowchartPageContext, listUsedRepairCaseFaultTags } from "@/lib/db/queries/repair-case-flowcharts";
 import { getRepairCaseFlowchartGraph } from "@/lib/db/queries/repair-case-flowchart-graph";
 import { hasPermission, roleOnlyActor } from "@/lib/auth/permission-resolver";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
@@ -65,5 +65,27 @@ export default async function CaseFlowchartEditorPage({ params }: { params: Prom
     // resolveActingUserForSession 으로 옮겨야 하고, 그것은 이 조각의 범위가 아니다.
     (await hasPermission(roleOnlyActor(session.role), "diagnosisFlowcharts.edit", "WRITE"));
 
-  return <CaseFlowchartEditorScreen repairCaseId={id} flowchart={graph.flowchart} nodes={graph.nodes} edges={graph.edges} canEdit={canEdit} />;
+  /**
+   * 고장 개소 태그의 **고를 목록**(2026-11-19) — 지금까지 어느 Flowchart 에든
+   * 달린 태그를 많이 쓰인 순으로 받아 이름만 넘긴다. 쓰인 횟수는 차례를 정하려고
+   * 세는 값이지 화면에 적는 값이 아니라, 여기서 떨군다(화면에 숫자를 보내면
+   * 언젠가 그 숫자를 그리게 되고, 그러면 「몇 번 쓰였나」가 사람 눈에 뜻을
+   * 갖기 시작한다 — 이 칸이 하려는 일이 아니다).
+   *
+   * 🔵 읽기 전용인 사람에게도 그대로 읽어 온다 — 태그 칸 자체는 잠겨 있고,
+   * 권한에 따라 질의를 건너뛰면 「열어 보는 사람마다 다른 목록」이라는 갈래가
+   * 하나 더 생긴다.
+   */
+  const faultTagUsage = await listUsedRepairCaseFaultTags();
+
+  return (
+    <CaseFlowchartEditorScreen
+      repairCaseId={id}
+      flowchart={graph.flowchart}
+      nodes={graph.nodes}
+      edges={graph.edges}
+      canEdit={canEdit}
+      faultTagSuggestions={faultTagUsage.map((row) => row.tag)}
+    />
+  );
 }

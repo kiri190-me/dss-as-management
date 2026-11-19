@@ -25,6 +25,7 @@ import {
   isValidExpectedUpdatedAt,
   validateFlowchartTitle,
   validateFlowchartDescription,
+  validateFlowchartFaultTags,
   validateFlowchartDeleteReason,
   validatePermanentDeleteReason,
   type CreateRepairCaseFlowchartActionResult,
@@ -224,6 +225,16 @@ export async function updateRepairCaseFlowchartMetadataAction(input: {
   flowchartId: string;
   title: string;
   description?: string | null;
+  /**
+   * 고장 개소 — 화면이 **알약으로 쌓아 둔 태그 배열**을 보낸다(2026-11-19 에
+   * 적는 방식이 뒤집혔다: 한 칸에 길게 적고 쪼개는 것이 아니라 고객사 칸처럼
+   * 하나씩 고르거나 적어서 더한다 — validation/repair-case-flowchart-input.ts
+   * 머리말).
+   *
+   * 🔴 화면이 다듬어 보낸 값을 그대로 믿지 않는다. 여기서 같은 함수로 다시
+   * 다듬고 상한·중복을 다시 센다 — 이 액션은 화면을 거치지 않고도 불릴 수 있다.
+   */
+  faultTags?: string[] | null;
   expectedUpdatedAt: string;
 }): Promise<UpdateRepairCaseFlowchartMetadataActionResult> {
   const actorCheck = await resolveAuthorizedActorId();
@@ -242,6 +253,8 @@ export async function updateRepairCaseFlowchartMetadataAction(input: {
   if (!titleValidation.ok) return { ok: false, code: "VALIDATION_ERROR", message: titleValidation.error };
   const descriptionValidation = validateFlowchartDescription(input.description);
   if (!descriptionValidation.ok) return { ok: false, code: "VALIDATION_ERROR", message: descriptionValidation.error };
+  const faultTagsValidation = validateFlowchartFaultTags(input.faultTags);
+  if (!faultTagsValidation.ok) return { ok: false, code: "VALIDATION_ERROR", message: faultTagsValidation.error };
 
   try {
     const result = await updateRepairCaseFlowchartMetadata({
@@ -250,6 +263,7 @@ export async function updateRepairCaseFlowchartMetadataAction(input: {
       actorUserId: actorCheck.userId,
       title: titleValidation.title,
       description: descriptionValidation.description,
+      faultTags: faultTagsValidation.tags,
       expectedUpdatedAt: input.expectedUpdatedAt,
     });
     return result;

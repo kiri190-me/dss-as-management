@@ -258,6 +258,20 @@ src/lib/domain/procedure-template-history-labels.test.ts
 src/lib/auth/repair-case-flowchart-authorization.test.ts
 src/lib/domain/repair-case-detail-tabs.test.ts
 src/lib/domain/repair-case-flowchart-editor-save-state.test.ts
+# 진단 Flowchart 의 **고장 개소 태그**(2026-11-19) — 태그 하나를 다듬고(공백·`#`),
+# 하나씩 더하고(중복·30자·20개), 고를 후보에서 이미 단 것을 빼고 **적는 글로 좁히는**
+# 규칙 하나하나.
+# 🔴 **적는 방식이 같은 날 뒤집혔다**: 처음엔 한 칸에 길게 적고 쉼표·줄바꿈·대괄호로
+# 쪼갰는데, 사용자가 **고르거나 적어서 하나씩 더하는** 방식으로 바꿨고 모양은
+# **부품요청의 부품 검색**과 같게 못 박았다. 그래서 쪼개기·되돌리기를 재던 묶음을 들어냈고, 대신 맨 앞에
+# 「**안 쪼개진다**」를 못 박는 묶음을 세웠다 — 통과하는 시험 이름에 옛 규칙이 남아
+# 있으면 초록 ✔ 옆의 글을 믿고 다음 사람이 쪼개는 코드를 다시 넣는다.
+# 🔴 다듬는 규칙이 **한 곳**인 것이 이 파일의 존재 이유다: 저장 통로와 편집기 화면이
+# 각자 다듬으면 화면에 선 알약과 저장된 값이 어긋나고, 그 어긋남은 오류 없이 조용하다.
+# 🔵 「빈 것은 말없이 안 더한다 · 중복·상한은 까닭을 말한다」의 갈림도 여기서 잰다 —
+# 빈 칸에서 Enter 를 눌렀을 뿐인데 빨간 글이 뜨면 고장으로 보이고, 반대로 중복이 조용히
+# 무시되면 왜 안 더해졌는지 알 길이 없다.
+src/lib/validation/repair-case-flowchart-fault-tags.test.ts
 src/lib/domain/entity-name-match.test.ts
 src/lib/domain/local/draft-storage.test.ts
 src/lib/domain/local/report-number.test.ts

@@ -1,0 +1,1 @@
+ALTER TABLE "repair_case_flowcharts" ADD COLUMN "fault_tags" jsonb;

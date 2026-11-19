@@ -20,6 +20,17 @@ import CaseFlowchartCreateEdgePanel from "./CaseFlowchartCreateEdgePanel";
 import CaseFlowchartEdgePropertyPanel, { type CaseFlowchartEdgeDraft } from "./CaseFlowchartEdgePropertyPanel";
 import type { RepairCaseFlowchartBranchType, RepairCaseFlowchartNodeType } from "@/lib/domain/repair-case-flowchart-types";
 import { updateRepairCaseFlowchartMetadataAction } from "@/lib/server/actions/repair-case-flowcharts";
+// 고장 개소 태그 — 다듬는 규칙은 서버와 **같은 함수**를 쓴다. 화면이 제 손으로
+// 다듬으면 알약으로 보이는 것과 저장되는 값이 어긋날 수 있고, 그 어긋남은 오류
+// 없이 조용하다. 저장되는 값은 늘 서버가 같은 함수로 **다시** 다듬은 것이다.
+import {
+  addFlowchartFaultTag,
+  availableFaultTagSuggestions,
+  filterFaultTagOptions,
+  normalizeFlowchartFaultTag,
+  faultTagsEqual,
+} from "@/lib/validation/repair-case-flowchart-input";
+import FaultTagSuggestionList from "./FaultTagSuggestionList";
 import {
   createRepairCaseFlowchartEdgeAction,
   createRepairCaseFlowchartNodeAction,
@@ -51,7 +62,15 @@ import {
   type Position,
 } from "@/lib/domain/repair-case-flowchart-editor-save-state";
 
-export type CaseFlowchartMetadata = { id: string; repairCaseId: string; title: string; description: string | null; updatedAt: string };
+export type CaseFlowchartMetadata = {
+  id: string;
+  repairCaseId: string;
+  title: string;
+  description: string | null;
+  /** 고장 개소 태그 — 조회가 NULL 을 [] 로 맞춰 주므로 여기서는 늘 배열이다(repair-case-flowchart-graph.ts). */
+  faultTags: string[];
+  updatedAt: string;
+};
 
 type CaseRightPanelTab = "properties" | "addNode" | "createEdge";
 
@@ -223,12 +242,20 @@ export default function CaseFlowchartEditorScreen({
   nodes,
   edges,
   canEdit,
+  faultTagSuggestions = [],
 }: {
   repairCaseId: string;
   flowchart: CaseFlowchartMetadata;
   nodes: CaseFlowchartGraphNode[];
   edges: CaseFlowchartGraphEdge[];
   canEdit: boolean;
+  /**
+   * 고장 개소 태그의 **고를 목록** — 지금까지 어느 Flowchart 에든 달린 태그를
+   * 많이 쓰인 순으로 페이지가 읽어 넘긴다(listUsedRepairCaseFaultTags).
+   * 🔵 기본값 `[]` 를 두는 까닭은 목록이 비어도 **적어서 더하는 길이 그대로**
+   * 살아 있기 때문이다 — 이 칸은 목록이 없으면 못 쓰는 칸이 아니다.
+   */
+  faultTagSuggestions?: string[];
 }) {
   const router = useRouter();
 
@@ -437,6 +464,21 @@ export default function CaseFlowchartEditorScreen({
 
   const [titleDraft, setTitleDraft] = useState(flowchart.title);
   const [descriptionDraft, setDescriptionDraft] = useState(flowchart.description ?? "");
+  /**
+   * 고장 개소 태그 — 저장된 **배열 그대로**를 쥔다(2026-11-19 에 적는 방식이
+   * 뒤집혔다: 한 칸에 길게 적는 것이 아니라 고객사 칸처럼 하나씩 더한다).
+   * 적는 칸(faultTagInput)은 **아직 더하지 않은 글자**라 이 묶음과 별개다 —
+   * 적다 만 글자가 저장될 길은 없다.
+   */
+  const [faultTagsDraft, setFaultTagsDraft] = useState<string[]>(flowchart.faultTags);
+  const [faultTagInput, setFaultTagInput] = useState("");
+  /** 방금 **더하려다 안 된** 까닭(중복·상한) — 저장을 막는 값이 아니라 그 자리에서만 읽히는 안내다. */
+  const [faultTagError, setFaultTagError] = useState<string | null>(null);
+  /**
+   * 후보 목록이 펴져 있는가 — 부품 고르개와 같은 방식이다(UsedPartsEditForm 의
+   * pickerKey). 칸에 들어오면 펴고, 나가면 접고, Escape 로도 접는다.
+   */
+  const [isFaultTagPickerOpen, setIsFaultTagPickerOpen] = useState(false);
   const [isSavingMetadata, setIsSavingMetadata] = useState(false);
   const [metadataError, setMetadataError] = useState<string | null>(null);
 
@@ -955,6 +997,9 @@ export default function CaseFlowchartEditorScreen({
       flowchartId: flowchart.id,
       title: titleDraft,
       description: descriptionDraft.trim() || null,
+      // 쌓아 둔 태그 배열을 그대로 보낸다 — 서버가 같은 함수로 다시 다듬고
+      // 상한·중복을 다시 센다(위 import 주석).
+      faultTags: faultTagsDraft,
       expectedUpdatedAt: currentUpdatedAt,
     });
     setIsSavingMetadata(false);
@@ -965,7 +1010,71 @@ export default function CaseFlowchartEditorScreen({
     handleSaved(result.updatedAt);
   }
 
-  const hasMetadataChanges = titleDraft !== flowchart.title || descriptionDraft !== (flowchart.description ?? "");
+  /**
+   * 적거나 고른 태그 하나를 더한다 — **[추가] 단추와 Enter 가 이 하나를 부른다**.
+   * 더해졌으면 칸을 비운다(다음 것을 바로 적을 수 있게). 더할 것이 없으면
+   * (빈 칸) 조용히 아무 일도 안 일어난다 — 규칙은 addFlowchartFaultTag 에 있다.
+   */
+  function handleAddFaultTag() {
+    const result = addFlowchartFaultTag(faultTagsDraft, faultTagInput);
+    if (!result.ok) {
+      setFaultTagError(result.error);
+      return;
+    }
+    setFaultTagsDraft(result.tags);
+    setFaultTagInput("");
+    setFaultTagError(null);
+  }
+
+  /**
+   * 후보를 눌러 고른 길 — **더하는 규칙은 Enter·[추가]와 같은 하나**를 지난다
+   * (addFlowchartFaultTag). 고르개 전용 갈래를 따로 두면 「고르면 되는데 쳐서는 안
+   * 되는」 태그가 생긴다.
+   *
+   * 🔵 고른 뒤 **목록을 닫지 않는다** — 부품 고르개는 줄마다 값이 하나라 고르면
+   * 닫지만, 고장 개소는 여럿을 잇달아 고르는 칸이다. 고른 태그는 이 자리에서 바로
+   * 후보에서 빠지고 알약으로 내려가므로(아래 faultTagOptions), 열린 채로 두는 쪽이
+   * 「무엇이 남았는지」를 계속 보여 준다.
+   */
+  function handlePickFaultTag(tag: string) {
+    const result = addFlowchartFaultTag(faultTagsDraft, tag);
+    if (!result.ok) {
+      setFaultTagError(result.error);
+      return;
+    }
+    setFaultTagsDraft(result.tags);
+    setFaultTagInput("");
+    setFaultTagError(null);
+  }
+
+  /** 알약의 ✕ — 뺀 자리는 다시 고를 목록으로 돌아간다(아래 faultTagOptions). */
+  function handleRemoveFaultTag(tag: string) {
+    setFaultTagsDraft((prev) => prev.filter((t) => t !== tag));
+    setFaultTagError(null);
+  }
+
+  // 🔴 후보는 두 겹을 지난다: ① **이미 단 태그를 뺀다**(고를 수 있는데 골라도 안
+  // 더해지면 고장으로 보인다) ② **적는 글로 좁힌다**(사용자가 말한 「바로바로 검색」).
+  const faultTagOptions = filterFaultTagOptions(availableFaultTagSuggestions(faultTagSuggestions, faultTagsDraft), faultTagInput);
+  // 지금 칸에 적힌 글을 **더할 때와 같은 규칙으로** 다듬어 둔다 — [추가] 를 켜고
+  // 끄는 조건과 「새 태그입니다」 안내가 같은 값을 봐야, 눌리는데 새것이 아니라고
+  // 적히는 어긋남이 안 생긴다.
+  const typedFaultTag = normalizeFlowchartFaultTag(faultTagInput);
+  /** 목록에 없는 값 — 고객사 칸의 「새 고객사로 등록」과 같은 안내를 띄운다. */
+  const isNewFaultTag =
+    typedFaultTag.length > 0 &&
+    !faultTagsDraft.includes(typedFaultTag) &&
+    !faultTagSuggestions.some((tag) => normalizeFlowchartFaultTag(tag) === typedFaultTag);
+
+  // 🔴 고장 개소도 이 판정에 들어간다. 빠지면 **태그만 바꿨을 때 저장 단추가
+  // 영영 안 켜진다** — 아래 단추의 disabled 가 이 값을 본다.
+  // 🔵 적다 만 글자(faultTagInput)는 여기에 **일부러 안 넣는다** — 더하지 않은
+  // 글자는 저장될 값이 아니라서, 그것으로 단추가 켜지면 「누르면 들어가겠거니」로
+  // 읽힌다. 대신 아래에 [추가] 를 눌러 달라는 안내를 띄운다.
+  const hasMetadataChanges =
+    titleDraft !== flowchart.title ||
+    descriptionDraft !== (flowchart.description ?? "") ||
+    !faultTagsEqual(faultTagsDraft, flowchart.faultTags);
 
   return (
     <div className="flex flex-col gap-4">
@@ -1038,14 +1147,128 @@ export default function CaseFlowchartEditorScreen({
             className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900"
           />
         </label>
+        {/* 고장 개소 태그(2026-11-19) — **부품요청에서 부품을 찾을 때와 같은 방식**이다
+            (사용자 결정: 「태그 목록은 부품요청에서 부품을 검색할 때 처럼 만들어줘.」).
+            칸에 들어오면 후보가 칸 밑에 뜨고, 적는 대로 좁혀지고(「바로바로 검색」),
+            목록에 없으면 그냥 적어서 더한다. 본보기는 수리 건 상세의 사용 부품 칸
+            (detail/edit/UsedPartsEditForm.tsx)과 그 고르개(vendor/dss-core 의
+            ui/inventory/part-picker.tsx)이고, **왜 그 부품을 그대로 못 쓰는지**는
+            ./FaultTagSuggestionList.tsx 머리말에 적어 두었다.
+            🔴 쉼표·줄바꿈·대괄호는 **아무 경계도 아니다** — 적은 글자가 통째로 한
+            태그다(「코일, 변색」을 그냥 적으면 된다). */}
+        <div className="flex flex-col gap-1 text-xs">
+          <label htmlFor="faultTagInput">고장 개소 (선택)</label>
+          <div className="flex items-start gap-2">
+            {/* 🔴 `relative` — 후보 목록이 이 칸 **바로 밑에** 떠야 한다. 흐름 안에
+                두면 목록이 뜰 때마다 밑의 알약과 단추가 밀려 내려가, 고르려던 자리가
+                눈앞에서 움직인다(본보기와 같은 까닭). */}
+            <div className="relative min-w-0 flex-1">
+              <input
+                id="faultTagInput"
+                // 🔴 브라우저 자체 기억(이전에 친 값)으로 만든 목록이 후보 위에
+                // 겹쳐 뜨지 않게 끈다 — 본보기가 주석으로 까닭을 적어 둔 자리다.
+                autoComplete="off"
+                value={faultTagInput}
+                onChange={(e) => {
+                  setFaultTagInput(e.target.value);
+                  // 치기 시작하면 후보를 편다 — 한 번 닫은 뒤 이어 치는 동안
+                  // 아무것도 안 뜨면 목록이 사라진 것으로 보인다.
+                  setIsFaultTagPickerOpen(true);
+                  // 다시 치기 시작하면 방금 못 더한 까닭은 지운다 — 고친 뒤에도
+                  // 빨간 글이 남아 있으면 아직 안 되는 줄 안다.
+                  setFaultTagError(null);
+                }}
+                onFocus={() => setIsFaultTagPickerOpen(true)}
+                onBlur={() => setIsFaultTagPickerOpen(false)}
+                onKeyDown={(e) => {
+                  // 🔴 Escape 로 접는다 — 끄는 길이 없으면 목록에 갇힌다(본보기와 같다).
+                  if (e.key === "Escape") {
+                    setIsFaultTagPickerOpen(false);
+                    return;
+                  }
+                  if (e.key !== "Enter") return;
+                  // 🔴 **Enter 는 더하기다.** preventDefault 는 이 화면에 <form> 이
+                  // 생기는 날을 대비한 울타리다 — 지금은 form·onSubmit 이 하나도
+                  // 없어 제출될 길이 없지만(아래 시험이 그것을 지킨다), 폼이 생기면
+                  // Enter 가 조용히 제출로 바뀐다.
+                  e.preventDefault();
+                  handleAddFaultTag();
+                }}
+                disabled={!canEdit}
+                placeholder="고장 개소를 입력하거나 목록에서 고르세요"
+                className="w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900"
+              />
+              {isFaultTagPickerOpen && canEdit && (
+                <FaultTagSuggestionList options={faultTagOptions} onPick={handlePickFaultTag} listLabel="고장 개소 후보" />
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleAddFaultTag}
+              disabled={!canEdit || typedFaultTag.length === 0}
+              className="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              추가
+            </button>
+          </div>
+          {isNewFaultTag ? (
+            // 본보기의 「마스터에 없으면 그냥 적으세요」와 같은 결 — 목록에 없는
+            // 값을 적고 있다는 것과, **아직 안 더해졌다**는 것을 함께 알린다.
+            // 🔵 부품 칸은 그 말을 placeholder 에 두지만, 여기서는 적은 뒤에도 한
+            // 번 더 손을 써야(Enter·[추가]) 들어가므로 그때 보이는 자리에 둔다.
+            <span className="text-[11px] font-normal text-emerald-600 dark:text-emerald-400">
+              ✓ 「{typedFaultTag}」 는 새 태그로 추가됩니다 — Enter 를 누르거나 [추가] 를 누르세요.
+            </span>
+          ) : (
+            <span className="text-[11px] font-normal text-zinc-500 dark:text-zinc-400">
+              적으면 목록이 좁혀집니다. 목록에 없는 개소는 그대로 적어 추가할 수 있고, 추가한 태그는 ✕ 로 뺄 수 있습니다.
+            </span>
+          )}
+        </div>
+        {faultTagsDraft.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1">
+            {faultTagsDraft.map((tag) => (
+              // 🔴 색이 상태 배지와 다르다 — 고장 개소는 **값**이지 상태가
+              // 아니다. 상태 배지와 같은 색을 쓰면 「무슨 상태인가」로 읽히고,
+              // 상태 배지 색이 바뀌는 날 이 값까지 따라 바뀐 것처럼 보인다.
+              // 테두리만 있는 중립 회색은 이 저장소가 이미 쓰는 「값 알약」의
+              // 모양이다(ProductModelEditForm 의 태그 칩 · 내자 머리 카드의 값
+              // 알약 넷). 🔴 공용 부품으로 빼지 않는다 — 이 저장소는 알약 글자를
+              // 쓰는 자리마다 적는 방식이고, 여기만 부품을 만들면 둘이 된다.
+              <span
+                key={tag}
+                className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap border border-zinc-300 bg-zinc-50 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+              >
+                {tag}
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveFaultTag(tag)}
+                    // 글자가 ✕ 하나뿐이라 읽는 장치에는 아무 말도 안 들린다 —
+                    // 어느 태그를 빼는 단추인지 이름을 달아 둔다.
+                    aria-label={`${tag} 빼기`}
+                    className="ml-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-100"
+                  >
+                    ✕
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
+        {faultTagError && <p className="text-xs text-red-600 dark:text-red-400">{faultTagError}</p>}
         {canEdit && (
           <button
             type="button"
+            // 🔴 못 더한 까닭(faultTagError)은 저장을 막지 않는다 — 더하려다 만
+            // 글자일 뿐, 쌓아 둔 태그는 늘 규칙을 지난 값이다.
             disabled={!hasMetadataChanges || titleDraft.trim().length === 0 || isSavingMetadata}
             onClick={() => void handleSaveMetadata()}
             className="self-start rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
           >
-            {isSavingMetadata ? "저장 중..." : "제목/설명 저장"}
+            {/* 🔴 「제목/설명 저장」이었다 — 고장 개소까지 함께 저장하므로 옛
+                글자는 실제와 어긋난다(2026-11-19 사용자 결정). */}
+            {isSavingMetadata ? "저장 중..." : "저장"}
           </button>
         )}
         {metadataError && <p className="text-xs text-red-600 dark:text-red-400">{metadataError}</p>}

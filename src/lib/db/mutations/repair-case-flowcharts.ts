@@ -11,6 +11,9 @@ import {
 } from "../schema";
 import { resolveEligibleActor, type Tx } from "./procedure-templates";
 import { hasPermission } from "@/lib/auth/permission-resolver";
+// 「바뀐 게 없다」 판정에 쓴다 — 화면의 [저장] 단추도 같은 함수를 본다.
+// 두 곳이 각자 비교하면 한쪽만 「바뀌었다」고 읽는 조합이 생긴다.
+import { faultTagsEqual } from "@/lib/validation/repair-case-flowchart-input";
 
 /**
  * Phase 5C-6B — repair-case flowchart OBJECT management (create/rename/
@@ -219,6 +222,13 @@ export async function updateRepairCaseFlowchartMetadata(params: {
   actorUserId: string;
   title: string;
   description: string | null;
+  /**
+   * 고장 개소 태그(2026-11-19) — **늘 통째로 바꾼다.** 옵션이 아니라 필수
+   * 인자인 까닭: 빠뜨릴 수 있게 두면 「제목만 고치는 호출」이 말없이 태그를
+   * 지우거나(빈 배열로 읽혀) 반대로 못 지우게 되고, 둘 다 오류 없이 조용하다.
+   * 부르는 쪽이 지금 값을 알고 있어야 한다.
+   */
+  faultTags: string[];
   expectedUpdatedAt: string;
 }): Promise<UpdateRepairCaseFlowchartMetadataResult> {
   const title = params.title.trim();
@@ -261,7 +271,21 @@ export async function updateRepairCaseFlowchartMetadata(params: {
       }
 
       const nextDescription = params.description;
-      const changed = flowchart.title !== title || flowchart.description !== nextDescription;
+      // 🔴 고장 개소 태그도 이 비교에 **반드시** 들어간다. 빠지면 「태그만
+      // 바꾼 저장」이 아래 no-op 갈래로 빠져 **성공 응답인데 아무것도 안
+      // 저장된다** — 화면도 사람도 알 길이 없다.
+      //
+      // 차례까지 같아야 같은 것으로 본다(faultTagsEqual). 적은 차례대로 알약이
+      // 서므로 차례를 바꾼 것도 사람 눈에는 바뀐 것이고, 차례를 무시하면 바꾼
+      // 사람에게만 안 바뀐 화면이 남는다. NULL(칸이 생기기 전의 줄)과 빈 배열은
+      // 같은 뜻이라 둘 다 [] 로 맞춰 견준다 — 그래야 태그를 한 번도 안 적은 줄의
+      // 제목만 고칠 때 괜히 fault_tags 가 [] 로 바뀌지 않는다.
+      const previousFaultTags = flowchart.faultTags ?? [];
+      const nextFaultTags = params.faultTags;
+      const changed =
+        flowchart.title !== title ||
+        flowchart.description !== nextDescription ||
+        !faultTagsEqual(previousFaultTags, nextFaultTags);
 
       if (!changed) {
         // Clean no-op: never bump updated_at/updated_by, never write a
@@ -269,11 +293,16 @@ export async function updateRepairCaseFlowchartMetadata(params: {
         return { ok: true, id: flowchart.id, updatedAt: flowchart.updatedAt.toISOString(), changed: false };
       }
 
-      const beforeState = { id: flowchart.id, title: flowchart.title, description: flowchart.description };
+      // 🔴 이력에도 태그를 싣는다 — 안 실으면 「태그를 누가 언제 바꿨는가」가
+      // 조용히 안 남는다(제목/설명만 적힌 이력 줄이 남아 오히려 안 바뀐 것처럼
+      // 읽힌다). 새 actionType 은 만들지 않는다: 같은 [저장] 한 번이
+      // 세 칸을 함께 쓰는 하나의 변경이고, enum 값을 더하면 같은 판에서 쓸 수
+      // 없는 마이그레이션 문제를 부른다.
+      const beforeState = { id: flowchart.id, title: flowchart.title, description: flowchart.description, faultTags: previousFaultTags };
 
       const [updated] = await tx
         .update(repairCaseFlowcharts)
-        .set({ title, description: nextDescription, updatedBy: actor.id, updatedAt: new Date() })
+        .set({ title, description: nextDescription, faultTags: nextFaultTags, updatedBy: actor.id, updatedAt: new Date() })
         .where(eq(repairCaseFlowcharts.id, flowchart.id))
         .returning();
 
@@ -281,7 +310,7 @@ export async function updateRepairCaseFlowchartMetadata(params: {
         flowchartId: flowchart.id,
         actionType: "UPDATE_FLOWCHART_METADATA",
         beforeState,
-        afterState: { id: updated.id, title: updated.title, description: updated.description },
+        afterState: { id: updated.id, title: updated.title, description: updated.description, faultTags: updated.faultTags ?? [] },
         actorUserId: actor.id,
         changeGroupId: randomUUID(),
       });

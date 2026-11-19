@@ -284,6 +284,7 @@ describe("updateRepairCaseFlowchartMetadata", () => {
       actorUserId: adminId,
       title: "새 제목",
       description: "새 설명",
+      faultTags: [],
       expectedUpdatedAt: created.updatedAt,
     });
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -313,6 +314,7 @@ describe("updateRepairCaseFlowchartMetadata", () => {
       actorUserId: superAdminId,
       title: "다른 제목",
       description: null,
+      faultTags: [],
       expectedUpdatedAt: staleUpdatedAt,
     });
     assert.equal(result.ok, false);
@@ -343,6 +345,7 @@ describe("updateRepairCaseFlowchartMetadata", () => {
       actorUserId: superAdminId,
       title: "동일 제목",
       description: "동일 설명",
+      faultTags: [],
       expectedUpdatedAt: created.updatedAt,
     });
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -367,11 +370,237 @@ describe("updateRepairCaseFlowchartMetadata", () => {
       actorUserId: engineer2Id,
       title: "변경 시도",
       description: null,
+      faultTags: [],
       expectedUpdatedAt: created.updatedAt,
     });
     assert.equal(result.ok, true, JSON.stringify(result));
     if (!result.ok) throw new Error("unreachable");
     assert.equal(result.changed, true);
+  });
+});
+
+// ------------------------------------------------- 고장 개소 태그 (2026-11-19)
+
+/**
+ * 진단 Flowchart 의 **고장 개소 태그** — 저장 통로 쪽.
+ *
+ * 🔴 여기서 겨냥하는 결함은 「오류 없이 조용한」 둘이다:
+ *  ① 「바뀐 게 없다」 판정이 태그를 안 보면, **태그만 바꾼 저장**이 no-op 갈래로
+ *     빠져 **성공 응답인데 한 글자도 안 저장된다**. 화면도 사람도 알 길이 없다.
+ *  ② 감사 이력의 before/after 가 제목·설명만 담으면, 태그 변경이 **이력에
+ *     안 남는다**. 이력 줄은 남아 있으므로 「아무도 안 바꿨다」로 읽힌다.
+ * 그래서 둘 다 값으로 본다 — 돌려받은 응답이 아니라 **DB 에 들어간 값**으로.
+ */
+describe("updateRepairCaseFlowchartMetadata — 고장 개소 태그", () => {
+  test("🔴 태그만 바꿔 저장해도 실제로 저장된다 — changed:true, 칸에 값, updated_at 이 오른다", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const created = await mustCreate({ repairCaseId, actorUserId: superAdminId, title: "태그 대상", description: "그대로 둘 설명" });
+
+    // 🔵 표본 확인 — 시작 상태에는 태그가 없다(없는 것을 「저장됐다」고 읽지 않도록).
+    const [beforeRow] = await db.select().from(repairCaseFlowcharts).where(eq(repairCaseFlowcharts.id, created.id));
+    assert.deepEqual(beforeRow.faultTags ?? [], []);
+
+    const result = await updateRepairCaseFlowchartMetadata({
+      repairCaseId,
+      flowchartId: created.id,
+      actorUserId: adminId,
+      title: "태그 대상",
+      description: "그대로 둘 설명",
+      faultTags: ["우내", "우외"],
+      expectedUpdatedAt: created.updatedAt,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) throw new Error("unreachable");
+    assert.equal(result.changed, true, "제목·설명이 그대로라고 「바뀐 게 없다」로 빠지면 안 된다");
+
+    const [row] = await db.select().from(repairCaseFlowcharts).where(eq(repairCaseFlowcharts.id, created.id));
+    assert.deepEqual(row.faultTags, ["우내", "우외"]);
+    assert.equal(row.title, "태그 대상");
+    assert.equal(row.description, "그대로 둘 설명");
+    assert.equal(row.updatedBy, adminId);
+    assert.notEqual(row.updatedAt.toISOString(), created.updatedAt);
+  });
+
+  test("🔴 태그 변경이 감사 이력에 남는다 — before/after 양쪽에 태그가 적힌다", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const created = await mustCreate({ repairCaseId, actorUserId: superAdminId, title: "이력에 남을 태그" });
+
+    const first = await updateRepairCaseFlowchartMetadata({
+      repairCaseId,
+      flowchartId: created.id,
+      actorUserId: superAdminId,
+      title: "이력에 남을 태그",
+      description: null,
+      faultTags: ["우내"],
+      expectedUpdatedAt: created.updatedAt,
+    });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    if (!first.ok) throw new Error("unreachable");
+
+    const second = await updateRepairCaseFlowchartMetadata({
+      repairCaseId,
+      flowchartId: created.id,
+      actorUserId: adminId,
+      title: "이력에 남을 태그",
+      description: null,
+      faultTags: ["우내", "좌외"],
+      expectedUpdatedAt: first.updatedAt,
+    });
+    assert.equal(second.ok, true, JSON.stringify(second));
+
+    const rows = await db
+      .select()
+      .from(repairCaseFlowchartEditHistory)
+      .where(
+        and(
+          eq(repairCaseFlowchartEditHistory.flowchartId, created.id),
+          eq(repairCaseFlowchartEditHistory.actionType, "UPDATE_FLOWCHART_METADATA")
+        )
+      )
+      .orderBy(repairCaseFlowchartEditHistory.sequenceNumber);
+    assert.equal(rows.length, 2, "두 번 바꿨으면 이력도 두 줄이다");
+
+    // 🔴 새 actionType 을 만들지 않는다 — 제목·설명과 같은 한 번의 변경이다.
+    const firstBefore = rows[0].beforeState as { title: string; description: string | null; faultTags: string[] };
+    const firstAfter = rows[0].afterState as { title: string; description: string | null; faultTags: string[] };
+    assert.deepEqual(firstBefore.faultTags, [], "태그가 없던 상태가 before 에 적혀야 「이번에 생긴 것」이 가려진다");
+    assert.deepEqual(firstAfter.faultTags, ["우내"]);
+
+    const secondBefore = rows[1].beforeState as { faultTags: string[] };
+    const secondAfter = rows[1].afterState as { faultTags: string[] };
+    assert.deepEqual(secondBefore.faultTags, ["우내"]);
+    assert.deepEqual(secondAfter.faultTags, ["우내", "좌외"]);
+  });
+
+  test("태그까지 똑같으면 no-op 그대로다 — 이력도 안 늘고 updated_at 도 안 오른다", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const created = await mustCreate({ repairCaseId, actorUserId: superAdminId, title: "같은 태그" });
+
+    const first = await updateRepairCaseFlowchartMetadata({
+      repairCaseId,
+      flowchartId: created.id,
+      actorUserId: superAdminId,
+      title: "같은 태그",
+      description: null,
+      faultTags: ["우내", "우외"],
+      expectedUpdatedAt: created.updatedAt,
+    });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    if (!first.ok) throw new Error("unreachable");
+
+    const historyCountBefore = await db
+      .select({ id: repairCaseFlowchartEditHistory.id })
+      .from(repairCaseFlowchartEditHistory)
+      .where(eq(repairCaseFlowchartEditHistory.flowchartId, created.id));
+
+    const again = await updateRepairCaseFlowchartMetadata({
+      repairCaseId,
+      flowchartId: created.id,
+      actorUserId: superAdminId,
+      title: "같은 태그",
+      description: null,
+      faultTags: ["우내", "우외"],
+      expectedUpdatedAt: first.updatedAt,
+    });
+    assert.equal(again.ok, true, JSON.stringify(again));
+    if (!again.ok) throw new Error("unreachable");
+    assert.equal(again.changed, false);
+    assert.equal(again.updatedAt, first.updatedAt);
+
+    const historyCountAfter = await db
+      .select({ id: repairCaseFlowchartEditHistory.id })
+      .from(repairCaseFlowchartEditHistory)
+      .where(eq(repairCaseFlowchartEditHistory.flowchartId, created.id));
+    assert.equal(historyCountAfter.length, historyCountBefore.length);
+  });
+
+  test("🔴 차례만 바꾼 것도 저장된다 — 알약 서는 차례가 곧 값이다", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const created = await mustCreate({ repairCaseId, actorUserId: superAdminId, title: "차례" });
+
+    const first = await updateRepairCaseFlowchartMetadata({
+      repairCaseId,
+      flowchartId: created.id,
+      actorUserId: superAdminId,
+      title: "차례",
+      description: null,
+      faultTags: ["우내", "우외"],
+      expectedUpdatedAt: created.updatedAt,
+    });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    if (!first.ok) throw new Error("unreachable");
+
+    const swapped = await updateRepairCaseFlowchartMetadata({
+      repairCaseId,
+      flowchartId: created.id,
+      actorUserId: superAdminId,
+      title: "차례",
+      description: null,
+      faultTags: ["우외", "우내"],
+      expectedUpdatedAt: first.updatedAt,
+    });
+    assert.equal(swapped.ok, true, JSON.stringify(swapped));
+    if (!swapped.ok) throw new Error("unreachable");
+    assert.equal(swapped.changed, true);
+
+    const [row] = await db.select().from(repairCaseFlowcharts).where(eq(repairCaseFlowcharts.id, created.id));
+    assert.deepEqual(row.faultTags, ["우외", "우내"]);
+  });
+
+  test("🔴 다 지울 수 있다 — 빈 배열로 저장하면 태그가 사라진다", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const created = await mustCreate({ repairCaseId, actorUserId: superAdminId, title: "지우기" });
+
+    const first = await updateRepairCaseFlowchartMetadata({
+      repairCaseId,
+      flowchartId: created.id,
+      actorUserId: superAdminId,
+      title: "지우기",
+      description: null,
+      faultTags: ["우내"],
+      expectedUpdatedAt: created.updatedAt,
+    });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    if (!first.ok) throw new Error("unreachable");
+
+    const cleared = await updateRepairCaseFlowchartMetadata({
+      repairCaseId,
+      flowchartId: created.id,
+      actorUserId: superAdminId,
+      title: "지우기",
+      description: null,
+      faultTags: [],
+      expectedUpdatedAt: first.updatedAt,
+    });
+    assert.equal(cleared.ok, true, JSON.stringify(cleared));
+    if (!cleared.ok) throw new Error("unreachable");
+    assert.equal(cleared.changed, true, "지운 것도 바뀐 것이다 — 조용히 그대로 두면 다시 켤 길이 없다");
+
+    const [row] = await db.select().from(repairCaseFlowcharts).where(eq(repairCaseFlowcharts.id, created.id));
+    assert.deepEqual(row.faultTags ?? [], []);
+  });
+
+  test("한 번도 태그를 안 적은 Flowchart 의 제목만 고쳐도 태그는 「없음」 그대로다", async () => {
+    const repairCaseId = await createTestRepairCase();
+    const created = await mustCreate({ repairCaseId, actorUserId: superAdminId, title: "태그 없는 줄" });
+
+    const result = await updateRepairCaseFlowchartMetadata({
+      repairCaseId,
+      flowchartId: created.id,
+      actorUserId: superAdminId,
+      title: "제목만 바꾼다",
+      description: null,
+      faultTags: [],
+      expectedUpdatedAt: created.updatedAt,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.ok) throw new Error("unreachable");
+    assert.equal(result.changed, true);
+
+    const [row] = await db.select().from(repairCaseFlowcharts).where(eq(repairCaseFlowcharts.id, created.id));
+    assert.equal(row.title, "제목만 바꾼다");
+    // 칸이 생기기 전의 NULL 과 빈 배열은 같은 뜻이다 — 둘을 가르지 않는다.
+    assert.deepEqual(row.faultTags ?? [], []);
   });
 });
 
@@ -971,6 +1200,7 @@ describe("repair_case_flowchart_edit_history writes", () => {
       actorUserId: superAdminId,
       title: "이력 테스트 변경",
       description: null,
+      faultTags: [],
       expectedUpdatedAt: created.updatedAt,
     });
     assert.equal(updateResult.ok, true);
@@ -1038,6 +1268,7 @@ describe("cross-case ownership (IDOR) defense", () => {
       actorUserId: superAdminId,
       title: "가로채기 시도",
       description: null,
+      faultTags: [],
       expectedUpdatedAt: flowchartInA.updatedAt,
     });
     assert.equal(result.ok, false);

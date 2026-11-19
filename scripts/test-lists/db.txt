@@ -84,6 +84,14 @@ src/lib/db/mutations/repair-case-flowchart-schema.integration.test.ts
 src/lib/db/mutations/repair-case-flowcharts.integration.test.ts
 src/lib/db/mutations/repair-case-flowchart-graph.integration.test.ts
 src/lib/db/mutations/repair-case-flowchart-purge.integration.test.ts
+# 🔴 **고장 개소 태그의 고를 목록**(2026-11-19) — listUsedRepairCaseFaultTags.
+# 태그 전용 표를 만들지 않기로 해서(같은 날 결정) 목록은 **이미 쓰인 값**을 jsonb
+# 배열째로 펼쳐 센 것이다. 못 박는 것 셋은 전부 오류 없이 조용한 결함이다:
+# 휴지통(is_deleted) 태그가 안 섞이는가 · 많이 쓰인 순인가(같으면 가나다순) ·
+# 같은 태그가 한 줄로 합쳐지는가. 🔵 이 조회는 접수 건을 가리지 않아 **남의 시험이
+# 남긴 태그가 같은 DB 에 섞인다** — 표본은 제 접두사로 만들고 차례는 걸러낸 뒤에
+# 잰다. 접수 건은 새로 만들지 않는다(인수번호는 달마다 99개뿐이다).
+src/lib/db/queries/repair-case-flowcharts.integration.test.ts
 src/lib/db/mutations/customers.integration.test.ts
 src/lib/db/mutations/customers-trash.integration.test.ts
 src/lib/db/queries/customers.integration.test.ts

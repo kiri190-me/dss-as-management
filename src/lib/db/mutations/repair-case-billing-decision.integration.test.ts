@@ -144,7 +144,7 @@ describe("Partial Paid + Pending Billing foundation", () => {
 
     const [flowchart] = await db.insert(repairCaseFlowcharts).values({ repairCaseId: pending.id, title: "fixture", description: null, createdBy: adminId, updatedBy: adminId }).returning({ id: repairCaseFlowcharts.id, updatedAt: repairCaseFlowcharts.updatedAt });
     createdFlowchartIds.push(flowchart.id);
-    assertBillingBlocked(await updateRepairCaseFlowchartMetadata({ repairCaseId: pending.id, flowchartId: flowchart.id, actorUserId: adminId, title: "changed", description: null, expectedUpdatedAt: flowchart.updatedAt.toISOString() }));
+    assertBillingBlocked(await updateRepairCaseFlowchartMetadata({ repairCaseId: pending.id, flowchartId: flowchart.id, actorUserId: adminId, title: "changed", description: null, faultTags: [], expectedUpdatedAt: flowchart.updatedAt.toISOString() }));
     assertBillingBlocked(await createRepairCaseFlowchartNode({ repairCaseId: pending.id, flowchartId: flowchart.id, actorUserId: adminId, nodeType: "TASK", title: "node", description: null, expectedFlowchartUpdatedAt: flowchart.updatedAt.toISOString() }));
   });
 

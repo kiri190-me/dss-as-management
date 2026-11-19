@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../client";
 import { repairCaseFlowcharts, repairCases, users, customers, endUsers, products } from "../schema";
@@ -187,6 +187,52 @@ export async function listRepairCaseFlowchartsForManagement(): Promise<RepairCas
     modelName: row.modelName,
     serialNumber: row.serialNumber,
   }));
+}
+
+export type RepairCaseFaultTagUsage = { tag: string; useCount: number };
+
+/**
+ * 지금까지 **어느 Flowchart 에든 달린** 고장 개소 태그를 모은다 — 편집기의
+ * 태그 칸 드롭다운이 이것으로 선다(2026-11-19).
+ *
+ * 🔴 **태그 전용 표를 만들지 않는다**(같은 날 결정). 태그는 적는 대로 생기는
+ * 값이라 마스터 표를 두면 「목록에 없는 값」을 막는 문이 하나 더 생기고, 그 문은
+ * 사용자가 말한 「선택, 혹은 작성으로 선택」과 정면으로 어긋난다. 그래서 고를
+ * 목록은 **이미 쓰인 값**에서 뽑는다 — 새 태그는 한 번 저장되는 순간 다음
+ * 사람의 드롭다운에 선다.
+ *
+ * 🔴 **휴지통(is_deleted = true)은 뺀다** — 지운 Flowchart 의 태그를 계속 권하면
+ * 지운 것이 목록에서 되살아난 것처럼 보인다. 🔵 접수 건 쪽 삭제까지 보려면
+ * repair_cases 를 한 번 더 이어야 하는데, 그러지 않았다: 고장 개소는 부품·개소
+ * 이름이라 가릴 값이 아니고, 고를 거리를 넓게 두는 편이 이 칸의 목적에 맞다.
+ *
+ * 차례는 **많이 쓰인 순**, 같으면 가나다순 — 자주 쓰는 개소가 위에 선다.
+ *
+ * 🔵 jsonb 배열을 펼쳐 세는 자리라 질의 생성기 대신 **글로 적은 SQL** 을 쓴다.
+ * 집합을 돌려주는 함수(jsonb_array_elements_text)는 select 목록에 두면 group by
+ * 와 어긋나므로 lateral 로 펼친다. 🔴 값을 끼워 넣는 자리가 **하나도 없다** —
+ * 끼워 넣은 상수가 바인딩 자리($1)로 구워지는 drizzle 템플릿의 함정이 이
+ * 질의에는 아예 생기지 않는다(표·칸 이름만 끼운다). 생성되는 SQL 을 찍어
+ * 확인했다(2026-11-19).
+ *
+ * 🔵 jsonb_typeof 울타리: 칸은 NULL 을 허용하고(스키마 주석) NULL 은 strict 인
+ * 이 함수에서 줄 0개로 조용히 빠진다. 배열이 아닌 jsonb 가 들어가는 일은 지금
+ * 코드에 없지만, 들어가면 함수가 **그 자리에서 던져** 드롭다운이 통째로 죽는다.
+ * 울타리가 있으면 그 줄만 빠진다.
+ */
+export async function listUsedRepairCaseFaultTags(): Promise<RepairCaseFaultTagUsage[]> {
+  const rows = await db.execute<{ tag: string; use_count: number }>(sql`
+    select fault_tag.value as tag, count(*)::int as use_count
+    from ${repairCaseFlowcharts}
+    cross join lateral jsonb_array_elements_text(${repairCaseFlowcharts.faultTags}) as fault_tag(value)
+    where ${repairCaseFlowcharts.isDeleted} = false
+      and jsonb_typeof(${repairCaseFlowcharts.faultTags}) = 'array'
+    group by fault_tag.value
+    order by count(*) desc, fault_tag.value asc
+  `);
+  // postgres.js 가 돌려주는 것은 배열 그 자체가 아니라 RowList 다 — map 으로
+  // 평범한 배열을 만들어 내보낸다(부르는 쪽이 드라이버 모양을 알 까닭이 없다).
+  return [...rows].map((row) => ({ tag: row.tag, useCount: row.use_count }));
 }
 
 export type RepairCaseFlowchartTrashRow = {
