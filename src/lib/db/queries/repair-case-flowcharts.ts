@@ -129,6 +129,13 @@ export type RepairCaseFlowchartManagementRow = {
   id: string;
   repairCaseId: string;
   title: string;
+  /**
+   * 고장 개소 태그 — **늘 배열**이다. DB 의 NULL(칸이 생기기 전에 만들어진 줄)을
+   * 이 조회가 []로 맞춰 내보낸다(getRepairCaseFlowchartGraph 와 같은 약속). 화면
+   * 마다 `?? []` 를 적게 두면 한 군데만 빠뜨려도 그 화면에서 터지는데, 여기서는
+   * 목록·휴지통·표·카드 넷이 같은 값을 읽으므로 빠뜨릴 자리가 그만큼 많다.
+   */
+  faultTags: string[];
   isDeleted: boolean;
   updatedAt: string;
   intakeNumber: string;
@@ -152,6 +159,11 @@ export type RepairCaseFlowchartManagementRow = {
  * Checkpoint 2 is read-only and active-only: callers get non-deleted
  * flowcharts (`isDeleted = false`) exclusively — the future trash view is a
  * separate, later query, not a parameter bolted onto this one yet.
+ *
+ * 2026-11-19 — 고장 개소 태그를 함께 싣는다. 관리 화면이 그 값으로 **찾고**
+ * (matchesSearch) 줄마다 **알약으로 그린다**. 🔴 행 타입에만 더하고 select 에
+ * 안 더하면 타입은 맞는데 값이 안 와서 「태그로 찾으면 한 줄도 안 나오고 알약도
+ * 안 선다」가 된다 — 오류는 한 줄도 안 난다.
  */
 export async function listRepairCaseFlowchartsForManagement(): Promise<RepairCaseFlowchartManagementRow[]> {
   const rows = await db
@@ -159,6 +171,7 @@ export async function listRepairCaseFlowchartsForManagement(): Promise<RepairCas
       id: repairCaseFlowcharts.id,
       repairCaseId: repairCaseFlowcharts.repairCaseId,
       title: repairCaseFlowcharts.title,
+      faultTags: repairCaseFlowcharts.faultTags,
       isDeleted: repairCaseFlowcharts.isDeleted,
       updatedAt: repairCaseFlowcharts.updatedAt,
       intakeNumber: repairCases.intakeNumber,
@@ -179,6 +192,8 @@ export async function listRepairCaseFlowchartsForManagement(): Promise<RepairCas
     id: row.id,
     repairCaseId: row.repairCaseId,
     title: row.title,
+    // NULL -> [] 는 여기서 한 번만 한다(행 타입 주석 참조).
+    faultTags: row.faultTags ?? [],
     isDeleted: row.isDeleted,
     updatedAt: row.updatedAt.toISOString(),
     intakeNumber: row.intakeNumber,
@@ -239,6 +254,8 @@ export type RepairCaseFlowchartTrashRow = {
   id: string;
   repairCaseId: string;
   title: string;
+  /** 사용중 행과 **같은 약속** — 늘 배열이다(RepairCaseFlowchartManagementRow.faultTags 주석). */
+  faultTags: string[];
   updatedAt: string;
   deletedAt: string;
   intakeNumber: string;
@@ -258,6 +275,12 @@ export type RepairCaseFlowchartTrashRow = {
  * from this deletedAt value client-side
  * (getFlowchartRetentionStatus) — this query never computes or filters on
  * the 15-day window itself, it only supplies the raw timestamp.
+ *
+ * 2026-11-19 — 사용중 조회와 **똑같이** 고장 개소 태그를 싣는다. 🔴 한쪽만
+ * 실으면 「목록에선 태그로 찾아지는데 휴지통에선 안 되는」 반쪽이 된다. 고르는
+ * 목록(listUsedRepairCaseFaultTags)이 휴지통을 빼는 것과는 **다른 일**이다 —
+ * 권하지 않을 뿐, 이미 달린 태그는 휴지통에서도 보이고 찾아져야 한다(복원할
+ * 것을 찾는 자리다).
  */
 export async function listDeletedRepairCaseFlowchartsForManagement(): Promise<RepairCaseFlowchartTrashRow[]> {
   const rows = await db
@@ -265,6 +288,7 @@ export async function listDeletedRepairCaseFlowchartsForManagement(): Promise<Re
       id: repairCaseFlowcharts.id,
       repairCaseId: repairCaseFlowcharts.repairCaseId,
       title: repairCaseFlowcharts.title,
+      faultTags: repairCaseFlowcharts.faultTags,
       updatedAt: repairCaseFlowcharts.updatedAt,
       deletedAt: repairCaseFlowcharts.deletedAt,
       intakeNumber: repairCases.intakeNumber,
@@ -285,6 +309,8 @@ export async function listDeletedRepairCaseFlowchartsForManagement(): Promise<Re
     id: row.id,
     repairCaseId: row.repairCaseId,
     title: row.title,
+    // NULL -> [] 는 여기서 한 번만 한다(행 타입 주석 참조).
+    faultTags: row.faultTags ?? [],
     updatedAt: row.updatedAt.toISOString(),
     // Non-null by construction: the WHERE clause requires isDeleted = true,
     // and softDeleteRepairCaseFlowchart always sets deletedAt in the same

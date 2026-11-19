@@ -42,7 +42,13 @@ const read = (relativePath: string) => readFileSync(new URL(relativePath, repoUr
 
 function stripComments(source: string): string {
   return source
-    .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, " ") // JSX 주석 {/* ... */}
+    // JSX 주석 `{/* ... */}`.
+    // 🔴 `{` 와 `/*` 사이에 **줄바꿈을 허용하면 안 된다**(`[ \t]*` 이지 `\s*` 가 아니다).
+    // 허용하면 함수 몸통을 여는 `{` 바로 다음 줄에 선 `/** ... */` 머리말이 JSX 주석의
+    // 시작으로 읽히고, 거기서부터 **한참 뒤의 진짜 `*/}` 까지 통째로 지워진다.
+    // 2026-11-19 에 관리 화면 시험에서 실제로 났다 — 5588자가 먹혀 부품 하나가 원본에서
+    // 사라진 것처럼 보였다. 이 파일은 그때 안 터졌을 뿐이라 같은 조건으로 미리 고친다.
+    .replace(/\{[ \t]*\/\*[\s\S]*?\*\/\s*\}/g, " ")
     .replace(/\/\*[\s\S]*?\*\//g, " ") // 블록 주석
     .split(/\r?\n/)
     .filter((line) => !/^\s*\/\//.test(line)) // 줄 주석

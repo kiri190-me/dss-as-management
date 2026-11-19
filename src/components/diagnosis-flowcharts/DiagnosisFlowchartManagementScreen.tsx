@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+// 🔴 고장 개소 메모를 **document.body 에 붙이려고** 쓴다 — 표 껍데기가 스크롤
+// 상자라 그 안에서 absolute 로 띄우면 잘린다(FaultTagPills 머리말에 근거).
+import { createPortal } from "react-dom";
 import { ResponsiveList } from "@/components/common/responsive-list";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -14,6 +17,11 @@ import {
   permanentlyDeleteRepairCaseFlowchartAction,
 } from "@/lib/server/actions/repair-case-flowcharts";
 import { getFlowchartRetentionStatus } from "@/lib/domain/repair-case-flowchart-retention";
+// 고장 개소 태그를 **견주고 고르는 규칙**은 전부 이 한 모듈에서 온다 — 거르는 쪽
+// (matchesSearch)과 보여 주는 쪽(FaultTagPills)이 같은 함수를 봐야 「검색엔 걸렸는데
+// 굵게 선 태그가 하나도 없는」 어긋남이 안 생긴다. 다듬는 규칙(`#` 떼기)은 그 모듈이
+// 다시 태그를 적어 넣는 자리와 같은 함수를 본다.
+import { faultTagMatchesQuery, selectVisibleFaultTags } from "@/lib/domain/repair-case-flowchart-fault-tag-display";
 
 const STATUS_BADGE: Record<string, string> = {
   사용중: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400",
@@ -446,18 +454,54 @@ function PermanentlyDeleteFlowchartDialog({
   );
 }
 
-/** True when `row` matches `query` on any of the fields this checkpoint's brief lists (인수번호/고객사/End-User/모델/S/N/Flowchart 이름) — case-insensitive substring, OR across fields. Empty/whitespace query matches everything. */
+/**
+ * True when `row` matches `query` on any of the fields this checkpoint's brief lists
+ * (인수번호/고객사/End-User/모델/S/N/Flowchart 이름) — case-insensitive substring, OR
+ * across fields. Empty/whitespace query matches everything.
+ *
+ * 2026-11-19 — 여기에 **고장 개소**가 더해졌다(사용자 요청: 「이 내용으로 [진단
+ * Flowchart 관리]에서 검색을 할 수 있도록 해줘.」).
+ *
+ * 🔴 **고장 개소는 견주는 방법이 다르다.** 나머지는 칸 하나에 글자 하나지만 태그는
+ * **배열**이라 그대로 한 줄에 못 섞는다. 이어 붙여 한 글자로 만드는 길(`join(" ")`)은
+ * 일부러 안 썼다 — 붙인 자리에 「…우내 외부…」처럼 **어느 태그에도 없는 글자**가
+ * 생겨 엉뚱한 줄이 걸린다. 그래서 태그는 **하나씩** 견준다.
+ *
+ * 🔴 태그 하나가 걸리는지는 **faultTagMatchesQuery** 가 정한다 — `#` 떼기와 대소문자
+ * 처리가 거기 있다(사람은 `#우내` 로 친다). 🔴 **보여 주는 쪽(FaultTagPills)이 같은
+ * 함수를 본다**: 거르기와 굵게 표시가 따로 적히면 「검색엔 걸렸는데 굵게 선 태그가
+ * 하나도 없는」 줄이 생기고, 그 어긋남은 오류 없이 조용하다.
+ * 🔵 반대로 **다른 칸까지 `#` 를 떼지는 않는다.** 다듬은 글은 태그를 견줄 때만 쓰고,
+ * 나머지 칸은 친 글자 그대로 본다 — 제목·고객사에 `#` 가 든 줄을 `#` 로 찾는 길까지
+ * 막을 까닭이 없다.
+ */
 function matchesSearch(row: RepairCaseFlowchartManagementRow, query: string): boolean {
   const key = query.trim().toLowerCase();
   if (!key) return true;
-  return [row.intakeNumber, row.customerName, row.endUserName, row.modelName, row.serialNumber, row.title].some((field) => (field ?? "").toLowerCase().includes(key));
+  if ([row.intakeNumber, row.customerName, row.endUserName, row.modelName, row.serialNumber, row.title].some((field) => (field ?? "").toLowerCase().includes(key))) {
+    return true;
+  }
+  return row.faultTags.some((tag) => faultTagMatchesQuery(tag, query));
 }
 
-/** Own local copy for the trash row shape, same convention as matchesSearch (this codebase deliberately keeps small per-shape copies rather than cross-importing a generic matcher — see repair-case-flowchart-input.ts's own doc comment on the same convention). */
+/**
+ * Own local copy for the trash row shape, same convention as matchesSearch (this codebase
+ * deliberately keeps small per-shape copies rather than cross-importing a generic matcher —
+ * see repair-case-flowchart-input.ts's own doc comment on the same convention).
+ *
+ * 🔴 **사본이므로 고치는 자리도 둘이다.** 위를 고치고 여기를 빠뜨리면 「목록에선
+ * 찾아지는데 휴지통에선 안 되는」 반쪽이 된다 — 탭을 바꿔 가며 같은 글자를 쳐 보기
+ * 전에는 안 보인다. 2026-11-19 에 고장 개소를 더할 때 실제로 가장 빠지기 쉬운 자리로
+ * 꼽힌 곳이고, 아래 시험이 **두 몸통이 한 글자도 다르지 않은지**를 지킨다
+ * (diagnosis-flowchart-fault-tag-search.test.tsx).
+ */
 function matchesTrashSearch(row: RepairCaseFlowchartTrashRow, query: string): boolean {
   const key = query.trim().toLowerCase();
   if (!key) return true;
-  return [row.intakeNumber, row.customerName, row.endUserName, row.modelName, row.serialNumber, row.title].some((field) => (field ?? "").toLowerCase().includes(key));
+  if ([row.intakeNumber, row.customerName, row.endUserName, row.modelName, row.serialNumber, row.title].some((field) => (field ?? "").toLowerCase().includes(key))) {
+    return true;
+  }
+  return row.faultTags.some((tag) => faultTagMatchesQuery(tag, query));
 }
 
 /** "만료까지 N일" / "만료됨" — reads getFlowchartRetentionStatus (pure, unit-tested) with `now` fixed once per render via the caller so every row in the same paint agrees on "today," never re-evaluated per row. */
@@ -507,6 +551,182 @@ function PermanentDeleteButton({ onClick }: { onClick: () => void }) {
 }
 
 /**
+ * 고장 개소 알약의 글자 — 🔴 **조각 1이 편집기에 적은 것과 같은 것**을 여기에
+ * 다시 적는다(CaseFlowchartEditorScreen 의 알약). 이 저장소는 알약 글자를 쓰는
+ * 자리마다 적는 방식이라, 공용 부품으로 빼지 않는다.
+ *
+ * 색이 상태 배지(STATUS_BADGE)와 다른 까닭도 그대로다 — 고장 개소는 **값**이지
+ * 상태가 아니다. 상태 배지와 같은 색을 쓰면 「무슨 상태인가」로 읽히고, 상태
+ * 배지 색이 바뀌는 날 이 값까지 따라 바뀐 것처럼 보인다.
+ */
+const FAULT_TAG_PILL_CLASS =
+  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap border border-zinc-300 bg-zinc-50 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
+
+/**
+ * **검색에 걸린** 태그의 글자 — 테두리를 진하게, 글자를 굵게. 🔴 색은 그대로
+ * 중립 회색이다: 걸렸다는 것을 색으로 말하면 상태 배지처럼 읽히는데, 고장 개소는
+ * **값**이지 상태가 아니다(2026-11-19 지시에 그 울타리가 적혀 있다).
+ *
+ * 왜 표시가 필요한가 — 접혀 있던 태그가 검색 때문에 끌려 나와 서는데, 그중 어느
+ * 것이 걸린 것인지 안 보이면 「왜 이 줄이 나왔는지」를 여전히 모른다.
+ */
+const FAULT_TAG_PILL_MATCHED_CLASS =
+  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold whitespace-nowrap border border-zinc-500 bg-zinc-100 text-zinc-900 dark:border-zinc-400 dark:bg-zinc-700 dark:text-zinc-50";
+
+/**
+ * 메모의 최대 폭(px). 🔵 글자로 안 적고 수로 쥐는 까닭은, 메모를 띄우기 전에
+ * **화면 오른쪽으로 넘치지 않게 왼쪽 자리를 깎아야** 하는데 그 계산에 수가 필요해서다
+ * (18rem = 288px).
+ */
+const FAULT_TAG_MEMO_MAX_WIDTH = 288;
+
+/**
+ * 고장 개소 알약 — **그리는 자리가 넷**(사용중 표·카드, 휴지통 표·카드)이라 한
+ * 함수로 둔다. 바로 위 DeleteButton·RestoreButton 과 같은 까닭이다: 넷이 따로
+ * 적히면 「표에는 보이는데 카드에는 없는」 줄이 생기고, 그 어긋남은 창을 좁혀
+ * 보기 전에는 안 보인다.
+ *
+ * 🔴 **표에 칸을 새로 더하지 않는다**(2026-11-19 결정) — Flowchart 이름 **아래**에
+ * 붙인다. 칸을 더하면 표가 넓어져 min-w 를 올려야 하고, 이 서비스의 목록은 실제
+ * 넘침을 재서 표↔카드를 고르므로(common/responsive-list.tsx) **좁은 화면에서
+ * 카드로 넘어가는 폭이 바뀐다.** 그건 눈으로만 보인다.
+ *
+ * 🔴 **태그가 없으면 아무것도 안 그린다.** 빈 상자를 두면 줄마다 쓸데없는 틈이
+ * 생기고, 표에서는 그 틈만큼 **모든 줄이** 높아진다(태그를 단 줄이 하나도 없어도).
+ *
+ * ── 숨은 태그는 **떠 있는 메모**로 본다(2026-11-19 눈 확인 뒤 사용자 지시) ──
+ * 「+N을 눌렀을 때 표 내용이 넓어지는데 그렇게 하지 말고 **플로팅으로 그 위치에
+ * 메모 형태로** 숨겨진 테그들이 표시되도록 해줘.」
+ *
+ * 처음 판은 그 자리에서 아래로 펼쳤는데, 펼친 줄이 표의 그 칸을 넓혀 **표 전체가
+ * 옆으로 밀렸다.** 메모는 레이아웃 흐름에서 빠지므로(position: fixed) 눌러도 표
+ * 폭이 한 픽셀도 안 변한다 — 이 변경의 목적이 그것이다.
+ *
+ * 🔴 **메모를 표 안에 `absolute` 로 띄우면 잘린다.** 표 껍데기에 overflow-x-auto 가
+ * 걸려 있고, **한 축이 visible 이 아니면 나머지 축의 visible 도 auto 로 계산되어**
+ * 그 래퍼는 세로로도 스크롤 상자다(common/responsive-list.tsx 의 stickyHeader 절에
+ * 실측과 함께 적혀 있다 — 저장소의 sticky thead 셋이 그 때문에 안 붙는다). 스크롤
+ * 상자는 제 안에서 태어난 absolute 자손을 잘라내므로, 마지막 줄에서 연 메모는
+ * 래퍼 아래로 나가는 만큼 안 보인다. 그래서 **portal 로 document.body 에 붙이고**
+ * 손잡이의 화면 좌표(getBoundingClientRect)를 재서 fixed 로 띄운다.
+ *
+ * 🔴 **닫는 길이 둘**이다 — 바깥 누르기와 Escape. 없으면 메모에 갇힌다.
+ * 바깥 감지는 `pointerdown` 으로 받고 메모 안쪽은 `click` 으로 받는다(이 저장소의
+ * 규칙이다 — 안쪽까지 pointerdown 으로 받으면 바깥 감지가 먼저 돌아 제 손으로 닫는다).
+ * 🔵 구르거나 창 크기가 바뀌면 **닫는다.** 띄울 때 잰 좌표가 그대로 남아 있어, 안
+ * 닫으면 메모만 엉뚱한 자리에 붙어 따라다닌다.
+ *
+ * 🔴 손잡이는 `type="button"` 이고 **이벤트 전파를 막는다** — 표 칸 안이라 나중에
+ * 줄 클릭 같은 것이 생기면 메모를 여닫는 것만으로 다른 동작이 딸려 돈다. 🔴 메모
+ * 안쪽의 click 도 막는다: portal 은 DOM 상으로는 body 밑이지만 **React 이벤트는
+ * 부모 컴포넌트까지 거품이 인다** — 안 막으면 메모를 누른 것이 그 줄을 누른 것이 된다.
+ *
+ * 🔵 메모 안에서 `whitespace-normal`·`text-left` 를 **다시 건다.** 지금은 body 밑이라
+ * 물려받을 것이 없지만, 어느 날 `absolute` 로 되돌리는 사람이 생기면 그 순간 표 칸의
+ * `whitespace-nowrap`·`text-right` 가 따라 들어와 글이 한 줄로 늘어나거나 오른쪽으로
+ * 쏠린다 — 이 저장소에서 실제로 났던 일이고, 그때 단서가 「글자가 한쪽으로 쏠려
+ * 있다」 하나뿐이었다. 두 줄이 그 울타리다.
+ *
+ * 🔵 위쪽 여백(mt-1)을 알약 쪽이 쥔다 — 그려지지 않는 줄(태그 0개)에는 여백도 안
+ * 생겨야 하는데, 바깥에서 주면 알약이 없어도 여백만 남는다.
+ */
+function FaultTagPills({ tags, searchQuery }: { tags: string[]; searchQuery: string }) {
+  /** 메모가 떠 있는 자리(화면 좌표). null 이면 닫혀 있다 — 줄마다 따로 갖는다. */
+  const [memoAt, setMemoAt] = useState<{ top: number; left: number } | null>(null);
+  const handleRef = useRef<HTMLButtonElement>(null);
+  const memoRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!memoAt) return;
+    function closeOnOutside(event: PointerEvent) {
+      const target = event.target as Node | null;
+      if (!target) return;
+      // 메모 안과 손잡이는 제 핸들러가 받는다 — 여기서 먼저 닫으면 안쪽 click 이
+      // 닿을 곳이 없어지고, 손잡이는 열자마자 닫힌다.
+      if (memoRef.current?.contains(target)) return;
+      if (handleRef.current?.contains(target)) return;
+      setMemoAt(null);
+    }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMemoAt(null);
+    }
+    function closeOnMove() {
+      setMemoAt(null);
+    }
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    // 🔴 capture 로 듣는다 — 스크롤은 거품이 안 일어서, 표 껍데기처럼 **제 안에서**
+    // 구르는 상자의 스크롤은 capture 가 아니면 한 번도 안 들린다.
+    window.addEventListener("scroll", closeOnMove, true);
+    window.addEventListener("resize", closeOnMove);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("scroll", closeOnMove, true);
+      window.removeEventListener("resize", closeOnMove);
+    };
+  }, [memoAt]);
+
+  // 🔴 훅 **뒤에** 둔다 — 앞에 두면 태그 없는 줄에서만 훅이 안 불려 규칙이 깨진다.
+  if (tags.length === 0) return null;
+  const { visible, hidden } = selectVisibleFaultTags(tags, searchQuery);
+
+  function toggleMemo(event: React.MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    if (memoAt) {
+      setMemoAt(null);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    // 손잡이 **바로 밑**에 띄우되, 오른쪽 끝에 있는 줄에서 화면 밖으로 나가지 않게
+    // 왼쪽 자리를 깎는다(양옆 8px 은 남긴다).
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - FAULT_TAG_MEMO_MAX_WIDTH - 8));
+    setMemoAt({ top: rect.bottom + 4, left });
+  }
+
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1">
+      {visible.map((tag) => (
+        <span key={tag} className={faultTagMatchesQuery(tag, searchQuery) ? FAULT_TAG_PILL_MATCHED_CLASS : FAULT_TAG_PILL_CLASS}>
+          {tag}
+        </span>
+      ))}
+      {hidden.length > 0 && (
+        <button
+          ref={handleRef}
+          type="button"
+          aria-expanded={memoAt !== null}
+          // 글자가 `+2` 뿐이라 읽는 장치에는 무엇이 더 있는지 안 들린다.
+          aria-label={`고장 개소 ${hidden.length}개 더 보기`}
+          onClick={toggleMemo}
+          className={`${FAULT_TAG_PILL_CLASS} cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-700`}
+        >
+          +{hidden.length}
+        </button>
+      )}
+      {memoAt !== null &&
+        createPortal(
+          <div
+            ref={memoRef}
+            role="group"
+            aria-label="숨겨진 고장 개소"
+            onClick={(event) => event.stopPropagation()}
+            style={{ top: memoAt.top, left: memoAt.left, maxWidth: FAULT_TAG_MEMO_MAX_WIDTH }}
+            className="fixed z-50 flex flex-wrap gap-1 rounded-md border border-zinc-200 bg-white p-2 text-left whitespace-normal shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+          >
+            {hidden.map((tag) => (
+              <span key={tag} className={faultTagMatchesQuery(tag, searchQuery) ? FAULT_TAG_PILL_MATCHED_CLASS : FAULT_TAG_PILL_CLASS}>
+                {tag}
+              </span>
+            ))}
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}
+
+/**
  * Card counterpart of the trash table, same overflow-triggered-only
  * rendering convention as DiagnosisFlowchartCardList. `now` is threaded
  * through from the parent (one Date per render) so every row's retention
@@ -522,6 +742,7 @@ function DiagnosisFlowchartTrashCardList({
   canManage,
   canPermanentlyDelete,
   now,
+  searchQuery,
   onRestoreRequested,
   onPermanentDeleteRequested,
 }: {
@@ -529,6 +750,8 @@ function DiagnosisFlowchartTrashCardList({
   canManage: boolean;
   canPermanentlyDelete: boolean;
   now: Date;
+  /** 지금 친 검색어 — 고장 개소 알약이 **걸린 것을 접힌 채로도 보여 주려면** 여기까지 와야 한다(FaultTagPills 머리말). */
+  searchQuery: string;
   onRestoreRequested: (row: RepairCaseFlowchartTrashRow) => void;
   onPermanentDeleteRequested: (row: RepairCaseFlowchartTrashRow) => void;
 }) {
@@ -543,6 +766,8 @@ function DiagnosisFlowchartTrashCardList({
             <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-500">휴지통</span>
           </div>
           <p className="font-medium text-zinc-900 dark:text-zinc-50">{row.title}</p>
+          {/* 휴지통 **카드** — 넷 중 하나(FaultTagPills 머리말). 이름 바로 아래다. */}
+          <FaultTagPills tags={row.faultTags} searchQuery={searchQuery} />
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
             <div>
               <dt className="text-xs text-zinc-500 dark:text-zinc-500">고객사</dt>
@@ -589,10 +814,13 @@ function DiagnosisFlowchartTrashCardList({
 function DiagnosisFlowchartCardList({
   rows,
   canManage,
+  searchQuery,
   onDeleteRequested,
 }: {
   rows: RepairCaseFlowchartManagementRow[];
   canManage: boolean;
+  /** 지금 친 검색어 — 휴지통 카드와 같은 까닭으로 여기까지 넘긴다(FaultTagPills 머리말). */
+  searchQuery: string;
   onDeleteRequested: (row: RepairCaseFlowchartManagementRow) => void;
 }) {
   return (
@@ -610,6 +838,8 @@ function DiagnosisFlowchartCardList({
             <Link href={`/repair-cases/${row.repairCaseId}/diagnosis/${row.id}`} className="font-medium text-blue-700 hover:underline dark:text-blue-400">
               {row.title}
             </Link>
+            {/* 사용중 **카드** — 넷 중 하나(FaultTagPills 머리말). 이름 바로 아래다. */}
+            <FaultTagPills tags={row.faultTags} searchQuery={searchQuery} />
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
               <div>
                 <dt className="text-xs text-zinc-500 dark:text-zinc-500">고객사</dt>
@@ -684,6 +914,23 @@ function DiagnosisFlowchartCardList({
  * Search is client-side over the already-loaded `rows`/`trashRows` (small
  * dataset, same as this checkpoint's own audit for the create-selector) —
  * no new query, no server round-trip per keystroke.
+ *
+ * 2026-11-19 — **고장 개소 태그로도 찾는다**(사용자 요청). 찾는 일은 그대로
+ * 화면에서 돈다 — 조회 둘이 태그를 함께 실어 오고(listRepairCaseFlowchartsForManagement ·
+ * listDeletedRepairCaseFlowchartsForManagement), 거르는 것은 matchesSearch /
+ * matchesTrashSearch 다. 🔴 **표에 칸을 더하지 않았다** — 태그는 Flowchart 이름
+ * 아래에 알약으로 붙는다(FaultTagPills 머리말에 까닭). 그리는 자리는 넷이다:
+ * 사용중 표·카드, 휴지통 표·카드.
+ *
+ * 같은 날 추가 지시로 알약은 **셋까지만 줄에 서고 나머지는 `+N`** 이다. 🔴 검색
+ * 중에는 **걸린 태그가 숨은 자리에 있어도 줄에 선다**(상한을 넘겨서라도) — 그래서
+ * 지금 친 검색어가 카드 목록 둘에까지 prop 으로 내려간다. 가르는 규칙은 lib/domain
+ * 의 selectVisibleFaultTags 가 값으로 정한다.
+ *
+ * 🔴 눈으로 확인한 뒤 숨은 태그를 보여 주는 방식이 **떠 있는 메모**로 바뀌었다 —
+ * 그 자리에서 펼치면 표 칸이 넓어져 표 전체가 옆으로 밀렸기 때문이다. 메모는
+ * 흐름에서 빠지므로(portal + fixed) 눌러도 표 폭이 안 변하고, 그래서 「펼치면 표가
+ * 넓어지는데 카드로 안 넘어간다」는 걱정도 **함께 사라졌다**(FaultTagPills 머리말).
  */
 export default function DiagnosisFlowchartManagementScreen({
   rows,
@@ -842,7 +1089,9 @@ export default function DiagnosisFlowchartManagementScreen({
         <input
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="인수번호 · 고객사 · End-User · 모델 · S/N · Flowchart 이름 검색"
+          // 🔴 찾을 수 있는 것을 **여기에 다 적는다** — 고장 개소로도 찾아지는데
+          // 안 적으면 되는 줄을 아무도 모른다(2026-11-19).
+          placeholder="인수번호 · 고객사 · End-User · 모델 · S/N · Flowchart 이름 · 고장 개소 검색"
           className="w-full max-w-md rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
         />
       </label>
@@ -881,7 +1130,12 @@ export default function DiagnosisFlowchartManagementScreen({
                       <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.customerName}</td>
                       <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.modelName}</td>
                       <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.serialNumber ?? "-"}</td>
-                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">{row.title}</td>
+                      <td className="px-3 py-2 text-zinc-600 dark:text-zinc-400">
+                        {row.title}
+                        {/* 휴지통 **표** — 넷 중 하나(FaultTagPills 머리말). 🔴 칸을 새로
+                            더하지 않고 「Flowchart 이름」 칸 **안**, 이름 아래에 넣는다. */}
+                        <FaultTagPills tags={row.faultTags} searchQuery={searchQuery} />
+                      </td>
                       <td className="px-3 py-2 whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-500">{formatDateTime(row.deletedAt)}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-500">{formatRetentionLabel(row.deletedAt, now)}</td>
                       {canManage && (
@@ -903,6 +1157,7 @@ export default function DiagnosisFlowchartManagementScreen({
                 canManage={canManage}
                 canPermanentlyDelete={canPermanentlyDelete}
                 now={now}
+                searchQuery={searchQuery}
                 onRestoreRequested={requestRestore}
                 onPermanentDeleteRequested={requestPermanentDelete}
               />
@@ -953,6 +1208,9 @@ export default function DiagnosisFlowchartManagementScreen({
                         >
                           {row.title}
                         </Link>
+                        {/* 사용중 **표** — 넷 중 하나(FaultTagPills 머리말). 🔴 칸을 새로
+                            더하지 않고 「Flowchart 이름」 칸 **안**, 이름 아래에 넣는다. */}
+                        <FaultTagPills tags={row.faultTags} searchQuery={searchQuery} />
                       </td>
                       <td className="px-3 py-2">
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[status]}`}>{status}</span>
@@ -968,7 +1226,7 @@ export default function DiagnosisFlowchartManagementScreen({
             </table>
           }
           cards={
-            <DiagnosisFlowchartCardList rows={filteredRows} canManage={canManage} onDeleteRequested={requestDelete} />
+            <DiagnosisFlowchartCardList rows={filteredRows} canManage={canManage} searchQuery={searchQuery} onDeleteRequested={requestDelete} />
           }
         />
       )}
