@@ -1,5 +1,8 @@
 import type { ProcedureNodeType, ProcedureTemplateStatus } from "@/lib/domain/procedure-template-types";
-import { isNextProcedureLinkAllowedOn } from "@/lib/domain/procedure-next-procedure-link";
+import {
+  isNextProcedureLinkAllowedOn,
+  NEXT_PROCEDURE_LINK_NOT_ALLOWED_MESSAGE,
+} from "@/lib/domain/procedure-next-procedure-link";
 import type { SheetExclusion, TechnicalTaskProcedurePlan } from "./technical-task-sheet-plan";
 
 /**
@@ -154,8 +157,11 @@ export function resolveNextProcedureLinks(input: {
     if (!node) {
       return skip(request, `노드 코드 "${request.nodeCode}" 를 이 절차에서 못 찾았습니다 — 엑셀이 바뀌었을 수 있습니다.`);
     }
+    // 🔴 까닭에 **허용 유형을 박지 않는다**(2026-11-20). 전에는 「종료 노드에만
+    //    답니다」가 글자로 적혀 있었고, [작업]이 허용 목록에 들어가는 순간
+    //    거짓말이 됐다 — 막히는 쪽은 여전히 막히는데 까닭만 틀린다.
     if (!isNextProcedureLinkAllowedOn(node.nodeType)) {
-      return skip(request, `노드가 [종료]가 아닙니다(${node.nodeType}) — 이어가기는 종료 노드에만 답니다.`);
+      return skip(request, `이 노드 유형(${node.nodeType})에는 못 답니다 — ${NEXT_PROCEDURE_LINK_NOT_ALLOWED_MESSAGE}`);
     }
 
     // 🔵 여러 번 돌려도 같은 결과여야 한다. 이미 같은 값이면 아무 일도 안 한다.

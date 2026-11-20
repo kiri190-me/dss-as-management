@@ -147,6 +147,17 @@ test("🔴 **다른** 절차로 이어져 있으면 덮어쓰지 않는다 — �
   assert.ok(outcome.reason.includes("덮어쓰지 않습니다"));
 });
 
+/**
+ * 🔵 2026-11-20 — 허용 유형이 [종료]·[작업] 둘이 됐다. 이 판정은 그 상수를 보므로
+ * 따로 고칠 것이 없었지만, **따라왔는지를 값으로 한 번 못 박아 둔다** — 상수를
+ * 안 보고 제 글자로 다시 판정하는 날 여기가 먼저 깨진다.
+ */
+test("🔵 [작업] 노드도 이어진다 — 허용 목록을 제 글자로 다시 적지 않았다", () => {
+  const outcome = resolveOne({ nodes: [dbNode("n-1", "rfg8-9", { nodeType: "TASK" })] });
+  assert.equal(outcome.status, "LINK");
+  assert.equal(outcome.action?.targetTemplateId, "t-target");
+});
+
 test("🔴 못 이을 까닭이 갈래마다 **다른 말**로 나온다 — 그래야 무엇을 고칠지 안다", () => {
   const cases: [string, ReturnType<typeof resolveOne>][] = [
     ["대상 번호가 계획에 없음", resolveOne({ request: { targetTemplateName: null } })],
@@ -159,7 +170,10 @@ test("🔴 못 이을 까닭이 갈래마다 **다른 말**로 나온다 — 그
     ["내 절차가 DB 에 없음", resolveOne({ templates: [TARGET] })],
     ["대상 절차가 DB 에 없음", resolveOne({ templates: [SOURCE] })],
     ["노드를 못 찾음", resolveOne({ nodes: [dbNode("n-1", "rfg8-다른코드")] })],
-    ["노드가 종료가 아님", resolveOne({ nodes: [dbNode("n-1", "rfg8-9", { nodeType: "TASK" })] })],
+    // 🔴 2026-11-20 에 [작업]이 허용 목록에 들어갔다 — 여기서 TASK 를 쓰면
+    //    「건너뛴다」가 아니라 **이어 버린다.** 막히는 표본은 아직 막히는
+    //    유형이어야 뜻이 있다(판단은 갈래 단추가 곧 완료라 열 수 없다).
+    ["노드가 달 수 없는 유형", resolveOne({ nodes: [dbNode("n-1", "rfg8-9", { nodeType: "DECISION" })] })],
     [
       "초안이 아님",
       resolveOne({ templates: [template("t-source", "[RFG] 가나다 연락", { status: "PUBLISHED" }), TARGET] }),
@@ -348,7 +362,8 @@ test("🔴 세어서 찍는다 — 「다 했다」와 「0건을 했다」가 �
         [
           dbNode("n-1", "rfg8-9"),
           dbNode("n-2", "rfg8-10", { nextProcedureTemplateId: "t-target" }),
-          dbNode("n-3", "rfg8-11", { nodeType: "TASK" }),
+          // 🔵 건너뛰는 한 건 — 2026-11-20 부터 [작업]은 안 건너뛴다(허용됨).
+          dbNode("n-3", "rfg8-11", { nodeType: "DECISION" }),
         ],
       ],
     ]),

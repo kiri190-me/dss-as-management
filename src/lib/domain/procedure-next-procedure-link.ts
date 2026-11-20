@@ -1,12 +1,16 @@
-import type { ProcedureNodeType, ProcedureTemplateStatus } from "./procedure-template-types";
+import { procedureNodeTypeLabels, type ProcedureNodeType, type ProcedureTemplateStatus } from "./procedure-template-types";
 
 /**
  * ============================================================================
- * END 에서 **다른 절차로 이어가기** — 가리키는 규칙과 푸는 규칙 (2026-11-04)
+ * 노드에서 **다른 절차로 이어가기** — 가리키는 규칙과 푸는 규칙 (2026-11-04)
  * ============================================================================
  * 줄기 B ④. 한 절차가 끝나면 다음 절차가 이어지는 경우가 실제로 있다
  * (예: 통전 검사가 끝나면 수리로). 그전까지는 사람이 목록으로 되돌아가
  * 다음 절차를 손으로 찾아 열어야 했다.
+ *
+ * 🔵 2026-11-20 에 **[작업](TASK) 노드에도 열었다**. 달 수 있는 자리가 늘었을 뿐
+ * 아래 규칙은 한 줄도 안 바뀌었다 — 까닭과 뒤따르는 것은
+ * `NEXT_PROCEDURE_LINK_NODE_TYPES` 바로 위에 적었다.
  *
  * ── 🔴 노드 종류를 늘리지 않았다 ────────────────────────────────────────
  * `procedure_template_node_type` 은 **닫힌 9값**이고, 스키마 주석이 「일부러
@@ -40,17 +44,53 @@ import type { ProcedureNodeType, ProcedureTemplateStatus } from "./procedure-tem
  */
 
 /**
- * 이 칸을 달 수 있는 노드 종류. 🔴 END 하나뿐인 것이 알맹이다 —
- * 중간 노드에 달면 「여기서 갈라져 나간다」는 뜻이 되어 실행 순서가 통째로
- * 달라진다. 그건 이 조각이 하려는 일이 아니다(절차가 **끝난 뒤** 이어가기).
+ * 이 칸을 달 수 있는 노드 종류.
+ *
+ * ── 2026-11-04 ~ 11-19 에는 **END 하나뿐**이었다 ────────────────────────
+ * 그때 적어 둔 까닭을 그대로 옮긴다: 「🔴 END 하나뿐인 것이 알맹이다 — 중간
+ * 노드에 달면 **「여기서 갈라져 나간다」**는 뜻이 되어 실행 순서가 통째로
+ * 달라진다. 그건 이 조각이 하려는 일이 아니다(절차가 **끝난 뒤** 이어가기).」
+ *
+ * ── 🔵 2026-11-20 에 **[작업](TASK)도 연다**(사용자 요청) ───────────────
+ * 뒤집은 까닭은 **실행 순서가 실제로는 안 달라지기 때문**이다. 이어가기는 이
+ * 절차의 간선을 하나도 안 건드린다 — 다음 절차의 **실행을 따로 하나 더** 열 뿐이고
+ * (completeAndStartNextProcedureAction 은 끝내기를 부르지 않는다), 이 절차의
+ * 작업은 평소대로 완료되어 다음 단계로 간다. 그래서 「갈라져 나간다」는 걱정은
+ * 뜻이 헷갈린다는 것이었지 동작이 달라진다는 것이 아니었다.
+ *
+ * 그리고 **작업을 하다 다른 절차서를 따라야 하는 경우가 실제로 있다** — 그 절차서가
+ * 따로 있는데도 지금은 목록으로 되돌아가 손으로 찾아 열어야 한다. 그때 원래 절차는
+ * 그대로 이어진다. 이것이 END 때와 똑같은 모양이라 창의 글자([완료하고 이어서
+ * 시작])도 그대로 쓴다.
+ *
+ * 🔴 **고리는 이것 때문에 훨씬 쉬워진다.** 절차 하나에 [작업]은 여럿이라 A 의
+ * 작업이 B 를, B 의 작업이 A 를 가리키는 모양이 손쉽게 생긴다. 그래서 아래 검증의
+ * 고리 찾기(reachesBack)와 그 밑자락을 모으는 쪽
+ * (mutations/procedure-next-procedure-link-context.ts)이 **노드 종류를 안 가리고**
+ * 돌아야 한다 — 그쪽은 `next_procedure_template_id IS NOT NULL` 만 보고 모은다.
+ * 유형으로 안 거르는 것이 거기서는 **일부러 그런 것**이다.
+ *
+ * 🔵 나머지 일곱은 그대로 막는다. 특히 [판단]은 갈래를 고르는 단추와 이어가기를
+ * 묻는 창이 한 자리에 겹치고(CurrentTaskCard 는 `!isDecision` 일 때만 [완료]를
+ * 그린다), [시작]은 아직 아무 일도 안 한 자리다.
  */
 export const NEXT_PROCEDURE_LINK_NODE_TYPES = [
   "END",
+  "TASK",
 ] as const satisfies readonly ProcedureNodeType[];
 
 export function isNextProcedureLinkAllowedOn(nodeType: ProcedureNodeType): boolean {
   return (NEXT_PROCEDURE_LINK_NODE_TYPES as readonly ProcedureNodeType[]).includes(nodeType);
 }
+
+/**
+ * 「여기엔 못 단다」고 사람에게 하는 말. 🔴 **글자를 박지 않고 위 상수에서 짓는다** —
+ * 전에는 "[종료] 노드에만" 이 세 군데(여기 · 저장 거절 · 잇기 스크립트)에 따로
+ * 박혀 있었고, 노드 종류를 하나 열자 **세 곳이 전부 거짓말이 됐다.**
+ */
+export const NEXT_PROCEDURE_LINK_NOT_ALLOWED_MESSAGE = `「다음 절차」는 ${NEXT_PROCEDURE_LINK_NODE_TYPES.map(
+  (t) => `[${procedureNodeTypeLabels[t]}]`
+).join("·")} 노드에만 지정할 수 있습니다.`;
 
 export type ProcedureNodeNextLink = {
   nodeCode: string;
@@ -60,7 +100,7 @@ export type ProcedureNodeNextLink = {
 };
 
 /**
- * END 가 아닌데 값이 들어 있는 노드들. 🔵 **빈 배열이 정상**이다.
+ * 달 수 없는 유형인데 값이 들어 있는 노드들. 🔵 **빈 배열이 정상**이다.
  *
  * DB 는 이것을 막지 못한다 — 「END 일 때만 NOT NULL 이 아니다」는 CHECK 로
  * 적을 수야 있지만, 이 저장소에서 drizzle 의 sql 템플릿에 상수를 넣으면
@@ -136,9 +176,9 @@ export function resolveNextProcedureTarget(input: {
  * ── 🔴 무엇이 ERROR 이고 무엇이 WARNING 인가 ───────────────────────────
  * **ERROR(게시를 막는다)** — 사람이 고칠 길이 이 절차 안에 있고, 그냥 두면 실행이
  * 반드시 깨지는 것:
- *   · END 가 아닌 노드에 지정이 남아 있다(화면에 고치는 칸이 안 그려지는 상태).
+ *   · 달 수 없는 유형의 노드에 지정이 남아 있다(화면에 고치는 칸이 안 그려지는 상태).
  *   · 가리킨 판이 사라졌다.
- *   · 자기 계열을 가리킨다 — 끝나자마자 같은 절차가 다시 열려 빠져나올 수 없다.
+ *   · 자기 계열을 가리킨다 — 같은 절차가 또 열려 빠져나올 수 없다.
  *
  * **WARNING(알리되 막지 않는다)** — 지금 이 절차만으로는 고칠 수 없는 것:
  *   · 가리킨 계열에 게시본이 없다.
@@ -171,6 +211,11 @@ export type NextProcedureLinkValidationContext = {
    * 계열과 계열 사이의 이어가기 **전부**. 고리를 찾는 데만 쓴다.
    * 🔵 이 절차에서 나가는 것만 넘기면 A→B→A 를 못 본다 — B→A 는 B 의 노드에
    * 적혀 있기 때문이다. 그래서 조회가 전부를 모아 넘긴다.
+   *
+   * 🔴 **노드 종류로 거르지 않은 것을 넘겨야 한다**(2026-11-20). [작업]에도 칸이
+   * 열리면서 한 절차가 여러 곳에서 나갈 수 있게 됐다 — 모으는 쪽이 END 만 훑으면
+   * 작업 노드로 돌아오는 고리를 통째로 못 본다. 지금 모으는 쪽은
+   * `next_procedure_template_id IS NOT NULL` 만 본다.
    */
   seriesLinks: readonly { fromCode: string; toCode: string }[];
 };
@@ -230,8 +275,7 @@ export function validateNextProcedureLinks<T extends NextProcedureLinkValidation
       issues.push({
         severity: "ERROR",
         nodeId: node.id,
-        message:
-          "「다음 절차」는 [종료] 노드에만 지정할 수 있습니다. 이 노드의 유형을 [종료]로 되돌리거나, 지정을 지우세요.",
+        message: `${NEXT_PROCEDURE_LINK_NOT_ALLOWED_MESSAGE} 이 노드의 유형을 그중 하나로 되돌리거나, 지정을 지우세요.`,
       });
       continue;
     }
@@ -250,8 +294,11 @@ export function validateNextProcedureLinks<T extends NextProcedureLinkValidation
       issues.push({
         severity: "ERROR",
         nodeId: node.id,
+        // 🔵 [작업]에도 달 수 있게 된 뒤로 「끝나자마자」가 늘 참은 아니다 —
+        //    작업 노드에서는 절차 한가운데서 같은 절차가 또 열린다. 그래서
+        //    일어나는 자리를 안 박고 **무슨 일이 생기는지**만 적는다.
         message:
-          "「다음 절차」가 이 절차 자신을 가리킵니다. 끝나자마자 같은 절차가 다시 열려 빠져나올 수 없습니다.",
+          "「다음 절차」가 이 절차 자신을 가리킵니다. 같은 절차가 또 열려 빠져나올 수 없습니다.",
       });
       continue;
     }

@@ -2246,18 +2246,23 @@ describe("Phase 5C-5B usability item 4: multiline node titles", () => {
 
 /**
  * ============================================================================
- * 줄기 B ④ 조각 ② — [종료]의 **「다음 절차」** 가 서버에서 지켜지는가
+ * 줄기 B ④ 조각 ② — **「다음 절차」** 가 서버에서 지켜지는가
  * ============================================================================
- * 화면은 END 일 때만 고르는 칸을 그린다. 그래도 서버가 다시 봐야 하는 까닭은,
- * **노드 유형을 먼저 바꾸고 저장하는 순서**에서 화면의 관문을 지나쳐 올 수
+ * 화면은 달 수 있는 유형일 때만 고르는 칸을 그린다. 그래도 서버가 다시 봐야 하는
+ * 까닭은, **노드 유형을 먼저 바꾸고 저장하는 순서**에서 화면의 관문을 지나쳐 올 수
  * 있기 때문이다(그 길은 사람이 일부러 노리지 않아도 생긴다 — 유형 변경은 즉시
  * 저장되고 칸 수정은 [저장]까지 미뤄지므로, 둘 사이에 틈이 있다).
  *
- * 🔴 **지우는 쪽(null)은 언제나 통과해야 한다.** 유형이 END 에서 바뀐 뒤 남아
- * 있던 값을 치우는 길이 막히면, 사람이 풀 수 없는 상태가 굳는다.
+ * 🔴 **지우는 쪽(null)은 언제나 통과해야 한다.** 유형이 바뀐 뒤 남아 있던 값을
+ * 치우는 길이 막히면, 사람이 풀 수 없는 상태가 굳는다.
+ *
+ * ── 🔴 2026-11-20 — 허용 유형이 [종료] 하나에서 [종료]·[작업] 둘로 늘었다 ──
+ * 이 절의 「막히는 쪽」 표본이 **n3(TASK)** 이었다. 그대로 두면 「거절된다」는 시험이
+ * 거절되지 않는 값을 재게 되므로, 아직 막히는 유형(n2 = DECISION)으로 옮겼다.
+ * 열린 쪽은 아래 「[작업] 노드에도 지정할 수 있다」가 따로 잰다.
  * ============================================================================
  */
-describe("줄기 B ④ 조각 ② — [종료]의 「다음 절차」", () => {
+describe("줄기 B ④ 조각 ② — 노드의 「다음 절차」", () => {
   /** 가리킬 대상 절차 하나를 따로 만든다(FK 가 실재하는 행을 요구한다). */
   async function makeTargetTemplate() {
     return createDraft(uniqueCode("next-target"));
@@ -2285,12 +2290,13 @@ describe("줄기 B ④ 조각 ② — [종료]의 「다음 절차」", () => {
     assert.equal(after.get("n4")!.nextProcedureTemplateId, targetId);
   });
 
-  test("🔴 [종료]가 아닌 노드에는 거절된다 — 화면 관문만으로는 못 막는 길이다", async () => {
+  test("🔴 [작업] 노드에도 지정할 수 있다 (2026-11-20 사용자 요청)", async () => {
     const templateId = await createDraft(uniqueCode("next-on-task"));
     const targetId = await makeTargetTemplate();
     const nodes = await loadNodesByCode(templateId);
     const templateRow = await loadTemplateRow(templateId);
 
+    // 🔵 먼저 표본 — n3 가 정말 TASK 다. 아니면 아래가 뜻 없는 통과가 된다.
     assert.equal(nodes.get("n3")!.nodeType, "TASK");
 
     const result = await updateProcedureTemplateNode(
@@ -2300,23 +2306,52 @@ describe("줄기 B ④ 조각 ② — [종료]의 「다음 절차」", () => {
       templateRow.updatedAt.toISOString(),
       null
     );
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const after = await loadNodesByCode(templateId);
+    assert.equal(
+      after.get("n3")!.nextProcedureTemplateId,
+      targetId,
+      "화면만 열고 서버가 막으면 저장이 조용히 거절된다 — 사람은 고른 값이 안 붙는 까닭을 모른다"
+    );
+  });
+
+  test("🔴 달 수 없는 유형에는 거절된다 — 화면 관문만으로는 못 막는 길이다", async () => {
+    const templateId = await createDraft(uniqueCode("next-on-decision"));
+    const targetId = await makeTargetTemplate();
+    const nodes = await loadNodesByCode(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+
+    assert.equal(nodes.get("n2")!.nodeType, "DECISION");
+
+    const result = await updateProcedureTemplateNode(
+      nodes.get("n2")!.id,
+      superAdminId,
+      { nextProcedureTemplateId: targetId },
+      templateRow.updatedAt.toISOString(),
+      null
+    );
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.equal(result.code, "INVALID_INPUT");
-      assert.match(result.message, /\[종료\] 노드에만/, "거절하는 까닭이 어디에 달 수 있는지를 말해야 한다");
+      assert.match(
+        result.message,
+        /\[종료\]·\[작업\] 노드에만/,
+        "거절하는 까닭이 어디에 달 수 있는지를 말해야 한다 — 허용 유형이 늘면 이 말도 따라와야 한다"
+      );
     }
 
     const after = await loadNodesByCode(templateId);
-    assert.equal(after.get("n3")!.nextProcedureTemplateId, null, "거절했는데 값이 들어갔으면 트랜잭션이 샌 것이다");
+    assert.equal(after.get("n2")!.nextProcedureTemplateId, null, "거절했는데 값이 들어갔으면 트랜잭션이 샌 것이다");
   });
 
-  test("🔵 [종료]가 아닌 노드도 **지우는 것(null)은 통과한다** — 안 그러면 못 푸는 상태가 굳는다", async () => {
-    const templateId = await createDraft(uniqueCode("next-clear-on-task"));
+  test("🔵 달 수 없는 유형도 **지우는 것(null)은 통과한다** — 안 그러면 못 푸는 상태가 굳는다", async () => {
+    const templateId = await createDraft(uniqueCode("next-clear-on-decision"));
     const nodes = await loadNodesByCode(templateId);
     const templateRow = await loadTemplateRow(templateId);
 
     const result = await updateProcedureTemplateNode(
-      nodes.get("n3")!.id,
+      nodes.get("n2")!.id,
       superAdminId,
       { nextProcedureTemplateId: null },
       templateRow.updatedAt.toISOString(),
@@ -2325,7 +2360,7 @@ describe("줄기 B ④ 조각 ② — [종료]의 「다음 절차」", () => {
     assert.equal(result.ok, true, JSON.stringify(result));
   });
 
-  test("🔴 유형이 [종료]에서 바뀌면 지정이 **함께 지워진다** — 안 그러면 사람이 치울 칸이 없다", async () => {
+  test("🔴 유형이 **달 수 없는 쪽으로** 바뀌면 지정이 함께 지워진다 — 안 그러면 사람이 치울 칸이 없다", async () => {
     const templateId = await createDraft(uniqueCode("next-type-change"));
     const targetId = await makeTargetTemplate();
     const nodes = await loadNodesByCode(templateId);
@@ -2346,6 +2381,47 @@ describe("줄기 B ④ 조각 ② — [종료]의 「다음 절차」", () => {
     const changed = await changeProcedureTemplateNodeType(
       nodes.get("n4")!.id,
       superAdminId,
+      // 🔴 2026-11-20 — 전에는 "TASK" 로 바꿔 쟀다. [작업]이 허용 유형이 된 지금
+      //    그 표본은 **안 지워지는 것이 맞는** 자리라 시험이 거꾸로 선다.
+      "DECISION",
+      "종료가 아니라 판단이었다",
+      templateRow.updatedAt.toISOString()
+    );
+    assert.equal(changed.ok, true, JSON.stringify(changed));
+
+    const after = await loadNodesByCode(templateId);
+    assert.equal(after.get("n4")!.nodeType, "DECISION");
+    assert.equal(
+      after.get("n4")!.nextProcedureTemplateId,
+      null,
+      "달 수 없는 유형에 값이 남으면 그 노드에는 고르는 칸이 안 그려져 사람이 치울 수 없다"
+    );
+  });
+
+  /**
+   * 🔴 뒤집힌 쪽 — **[종료]↔[작업] 사이의 유형 변경은 지우면 안 된다**(2026-11-20).
+   * 둘 다 고치는 칸이 그려지는 자리라, 지우면 사람이 고른 값을 말없이 버리는 꼴이
+   * 된다. 「유형이 바뀌면 지운다」를 글자대로 남겨 두면 여기가 조용히 샌다.
+   */
+  test("🔵 [종료] → [작업] 으로 바뀌어도 지정은 **그대로 남는다**", async () => {
+    const templateId = await createDraft(uniqueCode("next-type-end-to-task"));
+    const targetId = await makeTargetTemplate();
+    const nodes = await loadNodesByCode(templateId);
+    let templateRow = await loadTemplateRow(templateId);
+
+    const set = await updateProcedureTemplateNode(
+      nodes.get("n4")!.id,
+      superAdminId,
+      { nextProcedureTemplateId: targetId },
+      templateRow.updatedAt.toISOString(),
+      null
+    );
+    assert.equal(set.ok, true, JSON.stringify(set));
+
+    templateRow = await loadTemplateRow(templateId);
+    const changed = await changeProcedureTemplateNodeType(
+      nodes.get("n4")!.id,
+      superAdminId,
       "TASK",
       "종료가 아니라 작업이었다",
       templateRow.updatedAt.toISOString()
@@ -2356,8 +2432,8 @@ describe("줄기 B ④ 조각 ② — [종료]의 「다음 절차」", () => {
     assert.equal(after.get("n4")!.nodeType, "TASK");
     assert.equal(
       after.get("n4")!.nextProcedureTemplateId,
-      null,
-      "END 가 아닌 노드에 값이 남으면 그 노드에는 고르는 칸이 안 그려져 사람이 치울 수 없다"
+      targetId,
+      "[작업]에도 고르는 칸이 그려지는데 값을 지우면, 사람이 고른 것이 말없이 사라진다"
     );
   });
 
@@ -2389,6 +2465,92 @@ describe("줄기 B ④ 조각 ② — [종료]의 「다음 절차」", () => {
       "nextProcedureTemplateId" in (history.afterState as Record<string, unknown>),
       false,
       "바뀐 것 없는 칸이 이력에 뜨면 읽는 사람이 무슨 일이 있었나 되짚게 된다"
+    );
+  });
+
+  /**
+   * ==========================================================================
+   * 🔴🔴 고리 찾기가 **[작업]의 이어가기도 보는가** (2026-11-20)
+   * ==========================================================================
+   * [작업]에 칸을 열면 고리가 훨씬 쉬워진다 — 절차 하나에 작업 노드는 여럿이고,
+   * 그만큼 나가는 줄이 늘어난다. 고리를 찾으려면 **이 절차 밖의 줄까지** 모아야
+   * 하는데(B→A 는 B 의 노드에 적혀 있다), 모으는 쪽이 END 만 훑으면 작업 노드로
+   * 나가는 줄이 통째로 빠져 **경고가 한 줄도 안 뜬다.** 그러면 사람은 고리가 없는
+   * 줄 안다 — 오류도 안 나고 화면도 조용하다.
+   *
+   * 🔴 그래서 **양쪽 다 [작업]**으로 세운다. 한쪽이라도 END 면 END 만 훑는 구현도
+   * 통과해 버려 이 시험이 공짜가 된다.
+   *
+   * 🔵 규칙 자체(어느 severity 인가)는 단위 시험이 값으로 잰다. 여기서 재는 것은
+   * **밑자락을 모으는 쪽이 유형을 안 가리는가** 하나다.
+   */
+  test("🔴 [작업]끼리 서로 가리키면 고리 경고가 뜬다 — 모으는 쪽이 END 만 훑으면 안 뜬다", async () => {
+    const aId = await createDraft(uniqueCode("next-loop-a"));
+    const bId = await createDraft(uniqueCode("next-loop-b"));
+
+    const nodesA = await loadNodesByCode(aId);
+    const nodesB = await loadNodesByCode(bId);
+    // 🔵 먼저 표본 — 양쪽 다 TASK 여야 이 시험에 뜻이 있다.
+    assert.equal(nodesA.get("n3")!.nodeType, "TASK");
+    assert.equal(nodesB.get("n3")!.nodeType, "TASK");
+
+    const setA = await updateProcedureTemplateNode(
+      nodesA.get("n3")!.id,
+      superAdminId,
+      { nextProcedureTemplateId: bId },
+      (await loadTemplateRow(aId)).updatedAt.toISOString(),
+      null
+    );
+    assert.equal(setA.ok, true, JSON.stringify(setA));
+
+    const setB = await updateProcedureTemplateNode(
+      nodesB.get("n3")!.id,
+      superAdminId,
+      { nextProcedureTemplateId: aId },
+      (await loadTemplateRow(bId)).updatedAt.toISOString(),
+      null
+    );
+    assert.equal(setB.ok, true, JSON.stringify(setB));
+
+    const validated = await validateProcedureTemplate(aId, superAdminId);
+    assert.equal(validated.ok, true, JSON.stringify(validated));
+    if (!validated.ok) return;
+
+    const 고리 = validated.structuralValidation.issues.filter((i) => i.message.includes("되돌아옵니다"));
+    assert.equal(
+      고리.length,
+      1,
+      `고리 경고가 없다 — 밑자락을 모으는 쪽이 END 만 훑고 있을 수 있다:\n${JSON.stringify(
+        validated.structuralValidation.issues,
+        null,
+        2
+      )}`
+    );
+    assert.equal(고리[0].severity, "WARNING", "ERROR 면 서로 가리킨 둘이 어느 쪽도 먼저 게시할 수 없다");
+    assert.equal(고리[0].nodeId, nodesA.get("n3")!.id, "경고가 엉뚱한 노드에 달리면 어디를 고칠지 모른다");
+  });
+
+  test("🔵 고리가 없으면 그 경고는 안 뜬다 — 위 시험이 늘 참인 것이 아닌지 확인한다", async () => {
+    const aId = await createDraft(uniqueCode("next-noloop-a"));
+    const bId = await createDraft(uniqueCode("next-noloop-b"));
+
+    const nodesA = await loadNodesByCode(aId);
+    const setA = await updateProcedureTemplateNode(
+      nodesA.get("n3")!.id,
+      superAdminId,
+      { nextProcedureTemplateId: bId },
+      (await loadTemplateRow(aId)).updatedAt.toISOString(),
+      null
+    );
+    assert.equal(setA.ok, true, JSON.stringify(setA));
+
+    const validated = await validateProcedureTemplate(aId, superAdminId);
+    assert.equal(validated.ok, true, JSON.stringify(validated));
+    if (!validated.ok) return;
+
+    assert.deepEqual(
+      validated.structuralValidation.issues.filter((i) => i.message.includes("되돌아옵니다")),
+      []
     );
   });
 });

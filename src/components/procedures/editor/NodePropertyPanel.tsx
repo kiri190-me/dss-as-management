@@ -21,6 +21,7 @@ import {
 } from "@/lib/graph-editor-core/layout";
 import type { ProcedureNodeFieldDraft } from "@/lib/domain/procedure-editor-save-state";
 import type { NextProcedureLinkCandidate } from "@/lib/db/queries/procedure-templates";
+import { isNextProcedureLinkAllowedOn } from "@/lib/domain/procedure-next-procedure-link";
 
 /** Phase 5C-5B — fixed spacing for "상대 위치로 이동": vertical reuses createProcedureTemplateNode's own default node-stacking gap (150) for consistency; horizontal is a fixed step between columns. 노드 폭에 상한이 없어진 뒤로는 "가장 넓은 노드를 비켜갈 만큼"이라는 기준이 성립하지 않으므로, 폭이 아니라 사람이 보기 좋은 열 간격으로 정한다(겹치는 경우 열 스냅과 직접 드래그로 조정). */
 const RELATIVE_POSITION_SPACING = { horizontal: 140, vertical: 150 } as const;
@@ -420,16 +421,22 @@ export default function NodePropertyPanel({
       )}
 
       {/*
-        ── 「다음 절차」 — [종료] 노드에만 (2026-11-04, 줄기 B ④ 조각 ②) ──────
+        ── 「다음 절차」 — 달 수 있는 유형에만 (2026-11-04, 줄기 B ④ 조각 ②) ──
+        🔴 **글자(`=== "END"`)를 박지 않고 상수를 본다**(2026-11-20). 전에는 여기에
+        END 가 박혀 있었고, [작업]을 열 때 이 한 줄을 따로 찾아 고쳐야 했다 —
+        다음에 유형을 또 열면 그때도 빠뜨릴 자리다. 허용 목록은
+        domain/procedure-next-procedure-link.ts 한 곳에 있고 서버 재검증·게시 전
+        검증기가 같은 상수를 본다.
+
         🔴 `node.nodeType` 을 본다. 위 드롭다운의 `newNodeType` 이 아니다 —
         그 값은 아직 서버에 안 간 「고르는 중」일 수 있고, 그때 이 칸을 그리면
-        사람이 고른 값이 저장 단계에서 END 가 아니라는 이유로 거절당한다.
+        사람이 고른 값이 저장 단계에서 달 수 없는 유형이라는 이유로 거절당한다.
 
         🔵 **고르는 칸만 둔다.** 저장은 화면 상단의 [저장]이 다른 변경과 함께
         한다(이웃 정렬 순서·활성 상태와 같은 규약) — 여기만 즉시 저장하면
         「저장 안 함」으로 떠난 사람의 다른 수정과 이 값이 어긋난다.
       */}
-      {node.nodeType === "END" && (
+      {isNextProcedureLinkAllowedOn(node.nodeType) && (
         <label className="flex flex-col gap-1 text-xs text-zinc-600 dark:text-zinc-400">
           다음 절차
           <select
@@ -459,9 +466,18 @@ export default function NodePropertyPanel({
               </option>
             )}
           </select>
+          {/*
+            🔴 **[종료]와 [작업]은 같은 칸이지만 일어나는 일이 다르다.** 종료는
+            절차가 끝나면서 이어지고, 작업은 **절차 한가운데서** 이어진다 —
+            원래 절차는 다음 단계로 그대로 간다. 한 글로 뭉개면 작업 노드에
+            지정한 사람이 「여기서 절차가 끝난다」로 읽는다.
+          */}
           <span className="text-[11px] text-zinc-400 dark:text-zinc-600">
-            이 절차가 끝나면 고른 절차를 이어서 엽니다. 고른 절차가 나중에 개정되면{" "}
-            <span className="font-medium">그때의 게시본</span>을 따라가므로 여기를 다시 고치지 않아도 됩니다.
+            {node.nodeType === "END"
+              ? "이 절차가 끝나면 고른 절차를 이어서 엽니다."
+              : "이 작업을 완료할 때 고른 절차를 이어서 열지 한 번 묻습니다. 지금 절차는 끝나지 않고 다음 단계로 그대로 이어집니다."}{" "}
+            고른 절차가 나중에 개정되면 <span className="font-medium">그때의 게시본</span>을 따라가므로 여기를 다시
+            고치지 않아도 됩니다.
           </span>
         </label>
       )}

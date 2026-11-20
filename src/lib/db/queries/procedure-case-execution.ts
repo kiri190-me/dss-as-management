@@ -611,8 +611,9 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       userPositionY: procedureTemplateNodes.userPositionY,
       sourceWorksheet: procedureTemplateNodes.sourceWorksheet,
       sourceShapeId: procedureTemplateNodes.sourceShapeId,
-      // 2026-11-04(줄기 B ④ 조각 ④) — [종료]의 「다음 절차」. 이미 읽는 줄에
-      // 칸만 보탠다.
+      // 2026-11-04(줄기 B ④ 조각 ④) — 노드의 「다음 절차」. 이미 읽는 줄에
+      // 칸만 보탠다. 🔵 유형을 안 가리고 읽으므로 2026-11-20 에 [작업]이 허용
+      // 목록에 들어갈 때 이 조회는 한 글자도 안 고쳤다.
       nextProcedureTemplateId: procedureTemplateNodes.nextProcedureTemplateId,
     })
     .from(procedureTemplateNodes)
@@ -621,7 +622,7 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
   const templateNodeById = new Map(templateNodes.map((n) => [n.id, n]));
 
   /**
-   * ── [종료]의 「다음 절차」 풀기 (2026-11-04, 줄기 B ④ 조각 ④) ──────────
+   * ── 노드의 「다음 절차」 풀기 (2026-11-04, 줄기 B ④ 조각 ④) ────────────
    *
    * 🔴 **가리킨 판을 그대로 열지 않는다.** 그 판의 계열(code)에서 **지금
    * 게시본**을 찾아 연다 — 절차는 계속 개정되고, 판을 콕 집으면 그 판이
@@ -631,8 +632,8 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
    * 🔵 **못 열 때도 null 로 넘기지 않는다.** 「원래 안 가리킴」과 「가리켜 놨는데
    * 못 엶」은 화면에서 구별되지 않는다 — 뒤쪽은 까닭을 적어 사람에게 보인다.
    *
-   * 🔵 지정이 하나도 없으면 바깥 조회를 아예 안 한다(지금 운영의 END 전부가
-   * 그 자리다).
+   * 🔵 지정이 하나도 없으면 바깥 조회를 아예 안 한다(지금 운영의 노드 거의
+   * 전부가 그 자리다).
    */
   const pointedIds = [
     ...new Set(templateNodes.map((n) => n.nextProcedureTemplateId).filter((id): id is string => id !== null)),
@@ -1162,7 +1163,7 @@ export async function getRelatedRepairHistory(currentRepairCaseId: string, curre
 
 /**
  * ============================================================================
- * 이 실행 노드([종료])에서 **이어 열 절차**를 서버가 다시 푼다 (2026-11-04, 줄기 B ④ 조각 ④)
+ * 이 실행 노드에서 **이어 열 절차**를 서버가 다시 푼다 (2026-11-04, 줄기 B ④ 조각 ④)
  * ============================================================================
  * 🔴 **화면이 보낸 templateId 를 믿지 않는다.** 화면에도 같은 값이 가 있지만
  * (ExecutionNodeDetail.nextProcedure), 그 값은 화면이 그려진 뒤로 낡았을 수

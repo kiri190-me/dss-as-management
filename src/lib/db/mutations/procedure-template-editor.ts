@@ -34,7 +34,10 @@ import {
 } from "@/lib/domain/procedure-template-types";
 import { sanitizeRoutePoints, routePointsEqual, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import { fieldStepNodeCode } from "@/lib/domain/procedure-field-added-steps";
-import { isNextProcedureLinkAllowedOn } from "@/lib/domain/procedure-next-procedure-link";
+import {
+  isNextProcedureLinkAllowedOn,
+  NEXT_PROCEDURE_LINK_NOT_ALLOWED_MESSAGE,
+} from "@/lib/domain/procedure-next-procedure-link";
 import { loadNextProcedureLinkContext } from "./procedure-next-procedure-link-context";
 import type { PermissionActor } from "@/lib/auth/permission-resolver";
 import type { ProcedureTemplateEditHistoryOrigin as EditHistoryOrigin } from "@/lib/domain/procedure-template-edit-history-fold";
@@ -385,9 +388,10 @@ export type UpdateNodePatch = {
   sortOrder?: number;
   isActive?: boolean;
   /**
-   * 2026-11-04(줄기 B ④ 조각 ②) — [종료] 노드의 「다음 절차」.
+   * 2026-11-04(줄기 B ④ 조각 ②) — 노드의 「다음 절차」.
    * null 을 보내면 **지정을 지운다**(그 자리가 「이어가지 않음」으로 돌아간다).
-   * 🔴 END 가 아닌 노드에 값을 보내면 아래에서 거절한다.
+   * 🔴 달 수 없는 유형의 노드에 값을 보내면 아래에서 거절한다
+   * (허용 목록은 NEXT_PROCEDURE_LINK_NODE_TYPES — 2026-11-20 에 [작업]이 늘었다).
    */
   nextProcedureTemplateId?: string | null;
 };
@@ -430,21 +434,19 @@ export async function updateProcedureTemplateNode(
       // (ON DELETE SET NULL, migration 0017) — never rely on the FK
       // column alone for a row that outlives the entity it describes.
       /**
-       * 🔴 「다음 절차」는 **[종료] 노드에만** 달 수 있다(줄기 B ④).
-       * 화면은 END 일 때만 고르는 칸을 그리지만, 여기서 다시 본다 — 화면이
-       * 유일한 관문이면 노드 유형을 먼저 바꾸고 저장하는 순서에서 빠져나간다.
-       * 🔵 **지우는 것(null)은 언제나 통과시킨다.** 유형이 END 에서 바뀐 뒤
-       * 남아 있던 값을 치우는 길이 막히면, 사람이 풀 수 없는 상태가 굳는다.
+       * 🔴 「다음 절차」는 **달 수 있는 유형에만** 붙는다(줄기 B ④ · 허용 목록은
+       * NEXT_PROCEDURE_LINK_NODE_TYPES — 2026-11-20 에 [작업]이 늘었다).
+       * 화면도 같은 상수로 칸을 가리지만, 여기서 다시 본다 — 화면이 유일한
+       * 관문이면 노드 유형을 먼저 바꾸고 저장하는 순서에서 빠져나간다.
+       * 🔵 **지우는 것(null)은 언제나 통과시킨다.** 유형이 바뀐 뒤 남아 있던 값을
+       * 치우는 길이 막히면, 사람이 풀 수 없는 상태가 굳는다.
        */
       if (
         normalizedPatch.nextProcedureTemplateId !== undefined &&
         normalizedPatch.nextProcedureTemplateId !== null &&
         !isNextProcedureLinkAllowedOn(node.nodeType)
       ) {
-        fail(
-          "INVALID_INPUT",
-          "「다음 절차」는 [종료] 노드에만 지정할 수 있습니다."
-        );
+        fail("INVALID_INPUT", NEXT_PROCEDURE_LINK_NOT_ALLOWED_MESSAGE);
       }
 
       const beforeState = {
@@ -518,11 +520,15 @@ export async function changeProcedureTemplateNodeType(
       const storedReason = isBlank(reason) ? null : reason!.trim();
 
       /**
-       * 🔴 [종료]에서 다른 유형으로 바뀌면 **「다음 절차」 지정을 함께 지운다**
-       * (2026-11-04, 줄기 B ④ 조각 ②). 그냥 두면 END 가 아닌 노드에 값이
+       * 🔴 달 수 **없는** 유형으로 바뀌면 **「다음 절차」 지정을 함께 지운다**
+       * (2026-11-04, 줄기 B ④ 조각 ②). 그냥 두면 칸을 못 다는 노드에 값이
        * 남는데, 그 노드에는 고르는 칸이 안 그려져 **사람이 치울 수가 없다.**
        * 게다가 그 값이 가리킨 절차는 계속 삭제가 막힌다 — 까닭이 화면 어디에도
        * 안 보이는 채로.
+       *
+       * 🔵 2026-11-20 부터 [종료]↔[작업] 사이의 유형 변경은 **안 지운다** — 둘 다
+       * 달 수 있는 자리라 고치는 칸이 그대로 있고, 지우면 사람이 고른 것을
+       * 말없이 버리는 꼴이 된다.
        *
        * 🔵 지우는 것은 **값이 있을 때만** 적는다. 늘 쓰면 바뀐 것 없는 노드의
        * 이력에 「지웠음」이 남아 읽는 사람이 무슨 일이 있었나 되짚게 된다.
@@ -1035,7 +1041,10 @@ export type NodeSnapshot = {
   recommendedCorrectiveAction: string | null;
   acceptanceCriteria: string | null;
   workerMayAddNextTask: boolean;
-  /** [종료]의 「다음 절차」(2026-11-04, 줄기 B ④). END 가 아니면 늘 null 이다. */
+  /**
+   * 「다음 절차」(2026-11-04, 줄기 B ④ · 2026-11-20 에 [작업]도 허용).
+   * 달 수 없는 유형이면 늘 null 이다 — 쓰기 쪽이 거절하고, 유형이 바뀔 때 지운다.
+   */
   nextProcedureTemplateId: string | null;
   positionX: number;
   positionY: number;

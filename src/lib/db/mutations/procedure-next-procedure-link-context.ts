@@ -7,7 +7,7 @@ import type { NextProcedureLinkValidationContext } from "@/lib/domain/procedure-
 
 /**
  * ============================================================================
- * [종료]의 「다음 절차」 검증에 필요한 **바깥 사실** 모으기 (2026-11-04, 줄기 B ④ 조각 ③)
+ * 「다음 절차」 검증에 필요한 **바깥 사실** 모으기 (2026-11-04, 줄기 B ④ 조각 ③)
  * ============================================================================
  * 🔴 **왜 제 파일로 떼어 놓았나** — 부르는 곳이 **둘**이고, 그 둘이 서로를
  * import 할 수 없다:
@@ -77,6 +77,11 @@ export async function loadNextProcedureLinkContext(
   );
 
   // 계열 사이의 이어가기 전부 — 고리 찾기에만 쓴다.
+  //
+  // 🔴 **노드 종류로 거르지 않는다**(2026-11-20 에 [작업]도 칸을 달 수 있게 되면서
+  //    이 줄이 결정적인 자리가 됐다). 여기서 END 만 훑으면 작업 노드로 나가는 줄이
+  //    통째로 빠져 A→B→A 를 못 본다. 절차 하나에 작업 노드는 여럿이라 고리가
+  //    훨씬 쉽게 생기고, 그 경고가 안 뜨면 사람은 고리가 없는 줄 안다.
   const owner = alias(procedureTemplates, "link_owner");
   const target = alias(procedureTemplates, "link_target");
   const seriesLinks = await tx

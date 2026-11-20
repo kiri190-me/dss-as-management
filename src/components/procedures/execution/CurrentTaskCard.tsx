@@ -55,7 +55,8 @@ export default function CurrentTaskCard({
   const [nextProcedureDialogOpen, setNextProcedureDialogOpen] = useState(false);
 
   /**
-   * 이 단계에서 **이어 열 수 있는** 절차가 실제로 있는가 (2026-11-04, 줄기 B ④).
+   * 이 단계에서 **이어 열 수 있는** 절차가 실제로 있는가 (2026-11-04, 줄기 B ④ ·
+   * 2026-11-20 부터 [작업] 노드도 이 자리에 올 수 있다).
    *
    * 🔴 `node.nextProcedure` 가 null 인 것과 `{ ok: false }` 인 것은 **다르다**.
    * 앞은 「안 가리킴」이고 뒤는 「가리켰는데 못 엶」이다 — 뒤쪽은 묻는 창을
@@ -254,12 +255,19 @@ export default function CurrentTaskCard({
               <button
                 type="button"
                 /*
-                  🔴 [종료]에 「다음 절차」가 지정돼 있으면 **바로 완료하지 않고
-                  한 번 묻는다**(2026-11-04 사용자 결정). 누르면 다른 절차의
-                  실행이 생기므로, 이 저장소가 확인창을 두는 기준
+                  🔴 「다음 절차」가 지정돼 있으면 **바로 완료하지 않고 한 번
+                  묻는다**(2026-11-04 사용자 결정). 누르면 다른 절차의 실행이
+                  생기므로, 이 저장소가 확인창을 두는 기준
                   (「되돌릴 수 있으면 묻지 않는다」)의 반대쪽이다.
-                  🔵 지정이 없으면 글자 하나 안 바뀐다 — 지금 운영의 END 전부가
-                  그 자리다.
+                  🔵 지정이 없으면 글자 하나 안 바뀐다 — 지금 운영의 노드 거의
+                  전부가 그 자리다.
+
+                  🔵 **노드 종류로 가르지 않는다**(2026-11-20 에 [작업]도 지정할
+                  수 있게 됐다). 보는 것은 `node.nextProcedure` 하나뿐이고 그 값은
+                  조회가 유형을 안 가리고 채운다 — 그래서 이 자리는 [작업]이
+                  열릴 때 한 글자도 안 고쳤다. [판단]만 이 단추 자체가 없다
+                  (`!isDecision`) — 갈래 단추가 곧 완료이기 때문이고, 그래서
+                  [판단]은 허용 목록에서도 빠져 있다.
                 */
                 onClick={canStartNextProcedure ? () => setNextProcedureDialogOpen(true) : handleComplete}
                 disabled={isSubmitting}

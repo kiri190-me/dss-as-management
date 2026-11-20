@@ -1683,6 +1683,44 @@ describe("줄기 B ④ 조각 ③ — 게시 관문과 이어가기", () => {
     assert.equal(row.status, "PUBLISHED", "한쪽이 나가야 나머지도 따라 나갈 수 있다");
   });
 
+  /**
+   * 🔴 2026-11-20 — [작업]에도 「다음 절차」를 달 수 있게 됐다. 게시 전 검증기가
+   * 그 상수를 안 보고 「END 가 아닌데 값이 있다」를 ERROR 로 내면, **화면에서는
+   * 고를 수 있는데 게시가 안 되는 절차**가 생긴다. 화면·저장은 멀쩡해서 게시
+   * 단추를 누르기 전까지 아무도 모른다 — 그래서 진짜 게시를 불러 잰다.
+   */
+  test("🔴 [작업]에 지정이 있어도 **게시가 된다** — 검증기가 허용 목록을 따라왔다는 증거다", async () => {
+    const source = await importTemplate({ code: uniqueCode("next-on-task-publish"), includeErrorIssue: false });
+    const target = await importTemplate({ code: uniqueCode("next-on-task-target"), includeErrorIssue: false });
+    assert.equal(source.ok, true);
+    assert.equal(target.ok, true);
+    if (!source.ok || !target.ok) return;
+
+    const [taskNode] = await db
+      .select()
+      .from(procedureTemplateNodes)
+      .where(
+        and(
+          eq(procedureTemplateNodes.procedureTemplateId, source.id),
+          eq(procedureTemplateNodes.nodeType, "TASK")
+        )
+      );
+    assert.ok(taskNode, "표본 확인 — 이 밑자락에 TASK 노드가 있어야 이 시험에 뜻이 있다");
+    await db
+      .update(procedureTemplateNodes)
+      .set({ nextProcedureTemplateId: target.id })
+      .where(eq(procedureTemplateNodes.id, taskNode.id));
+
+    const result = await publishProcedureTemplate(source.id, superAdminId);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [row] = await db
+      .select({ status: procedureTemplates.status })
+      .from(procedureTemplates)
+      .where(eq(procedureTemplates.id, source.id));
+    assert.equal(row.status, "PUBLISHED");
+  });
+
   test("🔵 지정이 없으면 게시는 전과 똑같다 — 새 갈래가 멀쩡한 절차를 막지 않는다", async () => {
     const imported = await importTemplate({ code: uniqueCode("next-none"), includeErrorIssue: false });
     assert.equal(imported.ok, true);

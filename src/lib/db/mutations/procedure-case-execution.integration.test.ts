@@ -4170,7 +4170,7 @@ describe("절차 판본이 만료돼도 돌고 있는 실행", () => {
  * 만료시키고 새 판을 게시한 뒤, 풀린 값이 새 판인지 본다.
  * ============================================================================
  */
-describe("줄기 B ④ 조각 ④ — [종료]에서 다음 절차 풀기", () => {
+describe("줄기 B ④ 조각 ④ — 노드에서 다음 절차 풀기", () => {
   /**
    * 🔴 **접수 건을 하나만 만든다.** 인수번호가 달마다 99개뿐이라, 시험이 건을
    * 많이 만들면 **한참 뒤 남의 시험이 까닭 없이 깨진다**
@@ -4207,6 +4207,22 @@ describe("줄기 B ④ 조각 ④ — [종료]에서 다음 절차 풀기", () =
       .update(procedureTemplateNodes)
       .set({ nextProcedureTemplateId: targetTemplateId })
       .where(eq(procedureTemplateNodes.id, endNode.id));
+  }
+
+  /**
+   * 이 절차의 **[작업] 노드(n2)** 가 대상 절차를 가리키게 한다 (2026-11-20).
+   * 🔵 END 와 똑같이 **칸에 값만 넣는다** — 읽는 쪽이 노드 종류를 안 가린다는 것이
+   * 이 조각의 알맹이라, 심는 길도 달라서는 안 된다.
+   */
+  async function pointTaskTo(templateId: string, targetTemplateId: string) {
+    const byCode = await loadNodesByCode(templateId);
+    const taskNode = byCode.get("n2");
+    assert.ok(taskNode, "표본 확인 — 이 밑자락에 n2 가 있어야 한다");
+    assert.equal(taskNode.nodeType, "TASK", "표본 확인 — n2 가 TASK 가 아니면 이 시험이 뜻을 잃는다");
+    await db
+      .update(procedureTemplateNodes)
+      .set({ nextProcedureTemplateId: targetTemplateId })
+      .where(eq(procedureTemplateNodes.id, taskNode.id));
   }
 
   /** 실행을 세우고 그 END 에 해당하는 **실행 노드** id 를 돌려준다. */
@@ -4301,12 +4317,53 @@ describe("줄기 B ④ 조각 ④ — [종료]에서 다음 절차 풀기", () =
     assert.ok(endNode.nextProcedure, "null 이면 화면이 「안 가리킴」으로 읽는다");
     assert.equal(endNode.nextProcedure.ok, true);
 
-    // 🔵 다른 줄에는 안 실린다 — 모든 노드에 창이 뜨면 안 된다.
+    // 🔵 **지정 안 한 줄에는 안 실린다** — 모든 노드에 창이 뜨면 안 된다.
+    //    여기서 END 가 아닌 줄이 전부 비는 까닭은 「END 만 채워서」가 아니라
+    //    **이 절차에서 값을 심은 자리가 END 하나뿐이어서**다(pointEndTo).
+    //    종류로 가르지 않는다는 것은 바로 아래 [작업] 시험이 잰다.
     const others = detail.nodes.filter((n) => n.nodeType !== "END");
     assert.ok(others.length > 0, "표본 확인 — 비교할 다른 줄이 있어야 한다");
     assert.deepEqual(
       others.map((n) => n.nextProcedure),
       others.map(() => null)
     );
+  });
+
+  /**
+   * 🔴 2026-11-20 — [작업] 노드도 「다음 절차」를 달 수 있게 됐다. 조회가 END 만
+   * 채우고 있으면 **편집기에서 지정은 되는데 작업 노드에서는 창이 안 뜬다** —
+   * 오류가 하나도 안 나고, 지정한 사람은 기능이 안 먹는 줄 안다.
+   */
+  test("🔴 [작업] 줄에도 이어갈 절차가 실린다 — 조회가 노드 종류를 안 가린다", async () => {
+    const target = await createPublishedTemplate(uniqueCode("next-task-target"), "TECHNICAL_TASK");
+    const source = await createPublishedTemplate(uniqueCode("next-task-src"), "TECHNICAL_TASK");
+    const caseId = await sharedCase();
+
+    await pointTaskTo(source.templateId, target.templateId);
+    const started = await startProcedureExecution(caseId, source.templateId, engineerId);
+    assert.equal(started.ok, true, JSON.stringify(started));
+    if (!started.ok) return;
+
+    const byCode = await loadExecutionNodesByCode(source.templateId, started.executionId);
+    const taskExecNode = byCode.get("n2");
+    assert.ok(taskExecNode, "표본 확인 — TASK(n2)의 실행 노드가 있어야 한다");
+
+    const detail = await getExecutionDetail(started.executionId);
+    assert.ok(detail);
+    const taskRow = detail.nodes.find((n) => n.id === taskExecNode.id);
+    assert.ok(taskRow, "표본 확인 — 상세에 그 줄이 있어야 한다");
+    assert.equal(taskRow.nodeType, "TASK");
+    assert.ok(taskRow.nextProcedure, "null 이면 화면이 「안 가리킴」으로 읽어 창이 안 뜬다");
+    assert.equal(taskRow.nextProcedure.ok, true);
+
+    // 🔵 공짜 통과 막기 — 이 절차의 END 에는 아무것도 안 심었으므로 비어 있어야 한다.
+    const endRow = detail.nodes.find((n) => n.nodeType === "END");
+    assert.ok(endRow, "표본 확인 — 상세에 END 줄이 있어야 한다");
+    assert.equal(endRow.nextProcedure, null, "심지도 않았는데 실리면 아무 줄에나 실리고 있는 것이다");
+
+    // 🔴 [완료하고 이어서 시작]을 누르면 서버가 **제 눈으로 다시 푼다** — 그 길도
+    //    [작업]을 막지 않아야 한다. 여기가 막히면 창은 뜨는데 단추가 안 먹는다.
+    const resolved = await resolveNextProcedureForExecutionNode(taskExecNode.id);
+    assert.equal(resolved.ok, true, JSON.stringify(resolved));
   });
 });
