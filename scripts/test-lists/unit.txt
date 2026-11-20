@@ -1842,6 +1842,13 @@ src/lib/domain/procedure-field-added-steps.test.ts
 #    얼마나 움직이는지도 값으로 적어 둔다.
 src/lib/domain/procedure-auto-layout.test.ts
 
+# 2026-11-20 — 그 자동 배치의 **흔들림**을 잡는 기억(applyProcedureAutoLayoutMemory).
+#    쓰는 분 신고: 「연결선을 삭제하면 노드 위치가 튄다.」 재는 것: 🔴 결함이 실재한다
+#    (기억을 안 쓰면 선 하나에 여덟 칸이 전부 움직인다) · 🔴 기억을 쓰면 한 칸도 안
+#    움직인다 · 🔴 그래도 **처음 보는 칸은 갓 센 자리**를 받는다(새 노드가 (0,0) 에
+#    쌓이면 안 된다) · 🔵 기억이 비면 전과 글자 그대로 같다(읽기 전용 화면 셋의 근거).
+src/lib/domain/procedure-auto-layout-stability.test.ts
+
 # 2026-11-04 — [기본정보] 탭의 「워크플로 진행」이 DB 의 단계 목록을 그린다.
 #    재는 것: 🔴 **알맹이** — 넘긴 목록(mock 과 일부러 다른 라벨·mock 에 없는 key)이
 #    그대로 나오는가 · 🔴 진행도 셈(완료/현재/예정 · 마지막 단계의 전체 완료)이

@@ -47,7 +47,12 @@ import {
   HORIZONTAL_HANDLE_IDS,
   type ConnectedNodeGeometry,
 } from "@/lib/graph-editor-core/layout";
-import { computeProcedureAutoLayout, toAutoLayoutGhostNode } from "@/lib/domain/procedure-auto-layout";
+import {
+  applyProcedureAutoLayoutMemory,
+  computeProcedureAutoLayout,
+  toAutoLayoutGhostNode,
+  type ProcedureAutoLayoutMemory,
+} from "@/lib/domain/procedure-auto-layout";
 import { resolveEffectiveEdgeRoute, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import { resolveDragAxis, applyAxisLock, type DragAxis, type Point } from "@/lib/graph-editor-core/axis-lock";
 import { DefaultStraightOrStepEdge, ManualRouteEdge, type ManualRouteEdgeData } from "@/components/graph-editor-core/GraphEdges";
@@ -260,6 +265,17 @@ export type LayoutMode = "SOURCE" | "USER" | "STAGE_SORTED";
  * (절차 상세 · 실행 쪽 둘)는 글자 하나 안 바뀐다.
  */
 const DEFAULT_LAYOUT_MODE_OPTIONS: readonly LayoutMode[] = ["SOURCE", "USER", "STAGE_SORTED"];
+
+/**
+ * 2026-11-20 — **비어 있는 자동 배치 기억**, 딱 하나만 만들어 돌려 쓴다. 쓰는 곳이
+ * 셋이다: 첫 기억 · 절차가 바뀌어 버릴 때 · 자동 배치가 꺼진 절차의 빈 지도.
+ *
+ * 🔴 **신원이 고정이어야 한다.** 그 자리마다 `new Map()` 을 만들면 딸린 memo 들이
+ * 값은 그대로인 채 매번 다시 돌고, 기억을 담는 effect 에서는 「안 바뀌었다」가
+ * 영영 거짓이 되어 **렌더가 안 멈춘다.**
+ * 🔵 읽기만 한다 — applyProcedureAutoLayoutMemory 는 넘긴 지도를 안 고친다.
+ */
+const EMPTY_AUTO_LAYOUT_MEMORY: ReadonlyMap<string, { x: number; y: number }> = new Map();
 
 export type ProcedureFlowGraphOpenIssue = { nodeId: string; issueId: string; severity: "ERROR" | "WARNING" };
 
@@ -738,21 +754,86 @@ export default function ProcedureFlowGraph({
    * 채택 뒤와 같은 좌표가 된다. 유령을 안 넘기는 화면 셋은 빈 목록이 들어가
    * 전과 똑같은 값이 나온다(procedure-auto-layout.test.ts 가 값으로 지킨다).
    */
+  /**
+   * 🔴 **이 그림이 한 번 그려 준 자동 배치 자리**(2026-11-20). 저장되지 않는 화면
+   * 전용 기억이고, 지도를 만들고 읽는 규칙은 전부 applyProcedureAutoLayoutMemory
+   * 한 곳에 있다(까닭과 실측값도 거기에).
+   *
+   * 🔴 **ref 가 아니라 state 다.** 처음엔 ref 로 적었는데 lint 가 막았다 —
+   * `react-hooks/refs`「Cannot access/update refs during render」. 그리는 중에
+   * 읽고 쓰는 값은 state 여야 한다는 규칙이고, 여기서는 **늦지도 않는다**: 이번
+   * 렌더가 얹는 것은 **지난 렌더가 기억한 자리**이므로, 선이 바뀐 그 렌더에서
+   * 이미 옛 자리가 그려진다. 늦는 것은 「기억에 **새 칸이 들어가는** 일」뿐이고
+   * (아래 효과에서 한 렌더 + 한 틱), 그 칸은 그 렌더에서 갓 센 자리로 이미 제대로
+   * 그려져 있다.
+   *
+   * 🔴 절차가 바뀌면 **버린다.** 「기술 절차 불러오기」 창처럼 같은 자리에서
+   * templateId 만 갈아 끼우는 호출부가 있어서, 안 버리면 옛 절차의 자리가 새
+   * 절차의 같은 id 에 얹힌다.
+   */
+  const [autoLayoutMemory, setAutoLayoutMemory] = useState<{ templateId: string; positions: ProcedureAutoLayoutMemory }>(() => ({
+    templateId,
+    positions: EMPTY_AUTO_LAYOUT_MEMORY,
+  }));
+
+  /**
+   * 🔴 2026-11-20 — **선을 지워도 이미 놓인 칸은 안 움직인다.** 전에는 갓 센 값을
+   * 그대로 썼고, 그래서 연결선 하나를 지우면 그림이 통째로 다시 놓였다(쓰는 분
+   * 신고). 2026-11-20 의 「구조 변경을 [저장] 때까지 모아 두기」 전에는 그 다시
+   * 놓기가 **서버 왕복과 함께** 일어나 「새로고침돼서 바뀌었구나」로 읽혔을 뿐,
+   * 동작 자체는 전부터 있던 것이다.
+   *
+   * 🔵 갓 센 값은 **그대로 계속 센다** — 기억에 없는 칸(새로 만든 노드 · 처음 켠
+   * 유령)이 자동으로 놓이려면 그 값이 있어야 한다. 기억은 그 위에 얹을 뿐이다.
+   *
+   * 🔵 자동 배치가 꺼진 절차에서는 **null** 이다. 전처럼 매번 새 빈 지도를 만들면
+   * 아래 layeredLayout 의 신원이 쓸데없이 바뀌어 딸린 memo 들이 함께 다시 돈다.
+   */
+  const stabilizedAutoLayout = useMemo(() => {
+    if (!useAutoLayoutForUnpositionedNodes) return null;
+    const fresh = computeProcedureAutoLayout({
+      nodes: nodeRows,
+      edges: edgeRows,
+      // 🔴 옮기는 규칙(사람이 정한 자리만 못 박는다)을 여기 적지 않는다 —
+      //    시험이 같은 함수를 써야 「시험은 통과하는데 화면만 어긋나는」
+      //    자리가 안 생긴다.
+      ghostNodes: (ghostNodes ?? []).map(toAutoLayoutGhostNode),
+      ghostEdges: ghostEdges ?? [],
+    });
+    const memory = autoLayoutMemory.templateId === templateId ? autoLayoutMemory.positions : EMPTY_AUTO_LAYOUT_MEMORY;
+    return applyProcedureAutoLayoutMemory(fresh, memory);
+  }, [templateId, autoLayoutMemory, useAutoLayoutForUnpositionedNodes, nodeRows, edgeRows, ghostNodes, ghostEdges]);
+
   const layeredLayout = useMemo(
-    () =>
-      useAutoLayoutForUnpositionedNodes
-        ? computeProcedureAutoLayout({
-            nodes: nodeRows,
-            edges: edgeRows,
-            // 🔴 옮기는 규칙(사람이 정한 자리만 못 박는다)을 여기 적지 않는다 —
-            //    시험이 같은 함수를 써야 「시험은 통과하는데 화면만 어긋나는」
-            //    자리가 안 생긴다.
-            ghostNodes: (ghostNodes ?? []).map(toAutoLayoutGhostNode),
-            ghostEdges: ghostEdges ?? [],
-          })
-        : new Map<string, { x: number; y: number }>(),
-    [useAutoLayoutForUnpositionedNodes, nodeRows, edgeRows, ghostNodes, ghostEdges]
+    () => stabilizedAutoLayout?.layout ?? EMPTY_AUTO_LAYOUT_MEMORY,
+    [stabilizedAutoLayout]
   );
+
+  /**
+   * 🔴 **다음 렌더가 쓸 기억을 담는다.** 안 담으면 기억이 영영 비어 있어 고치기 전과
+   * 똑같아진다.
+   *
+   * 🔴 **끝없이 다시 그리지 않는 근거는 신원 하나**다. 위 memo 가 이 state 를 보고
+   * 있으므로 담을 때마다 다시 돌고, 그러면 또 담게 되기 때문이다. 그래서
+   * applyProcedureAutoLayoutMemory 는 **내용이 하나도 안 바뀌었으면 넘긴 지도를
+   * 그대로** 돌려준다 — 그때 아래 비교가 참이 되어 state 가 안 바뀌고 고리가 끊긴다
+   * (그 약속은 procedure-auto-layout-stability.test.ts 가 값으로 지킨다).
+   */
+  useEffect(() => {
+    if (stabilizedAutoLayout === null) return;
+    const remembered = stabilizedAutoLayout.remembered;
+    /**
+     * 🔴 효과 본문에서 **곧바로** 상태를 안 바꾼다(react-hooks/set-state-in-effect
+     * 가 오류로 잡는다). 이 저장소가 이미 쓰는 피함수다 — QuoteEditForm ·
+     * StoredAttachmentList 에 같은 주석이 달려 있다.
+     * 🔵 한 틱 미뤄도 **보이는 것은 똑같다.** 이번 렌더의 자리는 위에서 이미 다
+     * 정해져 그려졌고, 이 기억이 쓰이는 때는 **다음에 선이 바뀌는 순간**이다.
+     */
+    const timer = setTimeout(() => {
+      setAutoLayoutMemory((prev) => (prev.templateId === templateId && prev.positions === remembered ? prev : { templateId, positions: remembered }));
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [templateId, stabilizedAutoLayout]);
 
   // Problem 1 revision — semantic edge routing, computed only for the
   // compact layout (원본 배치 keeps its pre-existing top/bottom-only

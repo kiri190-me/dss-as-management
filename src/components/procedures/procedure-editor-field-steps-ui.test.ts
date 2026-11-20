@@ -105,21 +105,37 @@ describe("줄기 B-⑧ — 그림: 유령은 **얹히기만** 한다", () => {
     assert.ok(f.includes("computeStageSortedLayout(nodeRows, edgeRows, worksheets)"));
     // 그 둘이 사는 구역에는 ghost 라는 글자가 **아예 없다**.
     const from = graph.indexOf("const { bands } = useMemo");
-    const to = graph.indexOf("const layeredLayout = useMemo");
+    // 🔵 2026-11-20 — 자르는 끝이 `layeredLayout` 에서 **stabilizedAutoLayout** 으로
+    //    옮겨 갔다. 그날 자동 배치가 둘로 갈라지면서(기억을 얹는 memo 가 앞에 서고
+    //    layeredLayout 은 그 결과만 꺼낸다) 옛 경계로 자르면 **유령을 넘기는 그
+    //    memo 가 구역 안에 들어와** 아래 단언이 까닭 없이 깨진다. 재는 것은 그대로다 —
+    //    시트 띠와 단계별 정렬이 사는 구역에 유령이 없어야 한다.
+    const to = graph.indexOf("const stabilizedAutoLayout = useMemo");
     assert.ok(from !== -1 && to > from, "구역을 못 잘랐다");
     assert.ok(flat(graph.slice(from, to)).includes("computeStageSortedLayout("), "표본 확인 — 구역이 비면 아래가 공짜로 통과한다");
     assert.ok(!graph.slice(from, to).includes("ghost"), "시트 띠·단계별 정렬에 유령이 들어오면 채택 뒤와 오히려 달라진다");
   });
 
+  /**
+   * 🔵 2026-11-20 — **단언 둘의 글자가 바뀌었다, 재는 것은 그대로다.** 그날 그림에
+   * 「한 번 그려 준 자리는 다시 안 센다」는 기억이 생기면서 이 memo 가 삼항 한 줄에서
+   * 블록으로 늘어났다(ProcedureFlowGraph 의 stabilizedAutoLayout · 그 까닭은
+   * applyProcedureAutoLayoutMemory 주석에, 배선은
+   * procedure-flow-graph-layout-memory.test.ts 가 본다). 지키려는 것은 전과 똑같은
+   * 둘이다 — ① 자동 배치에 유령을 **함께 넘기는가** ② 유령이 바뀌면 **다시 세는가**.
+   * 🔴 깃발 판정이 삼항에서 **이른 반환**으로 옮겨 갔으므로 그 줄도 함께 못 박는다.
+   * 안 박으면 깃발을 통째로 지워도(= 모든 절차에 자동 배치를 걸어도) 통과한다.
+   */
   test("🔴 **자동 배치에는 유령을 함께 넘긴다** — 그래야 켠 그림이 채택 뒤와 같은 좌표가 된다", () => {
     const f = flat(graph);
-    assert.ok(f.includes("useAutoLayoutForUnpositionedNodes ? computeProcedureAutoLayout({ nodes: nodeRows, edges: edgeRows,"));
+    assert.ok(f.includes("if (!useAutoLayoutForUnpositionedNodes) return null;"));
+    assert.ok(f.includes("const fresh = computeProcedureAutoLayout({ nodes: nodeRows, edges: edgeRows,"));
     assert.ok(f.includes("ghostNodes: (ghostNodes ?? []).map(toAutoLayoutGhostNode), ghostEdges: ghostEdges ?? [],"));
     // 🔴 옮기는 규칙을 이 파일이 **직접 적지 않는다** — 시험과 화면이 같은 함수를
     //    써야 「시험은 통과하는데 화면만 어긋나는」 자리가 안 생긴다.
     assert.ok(!f.includes("pinnedX: g.hasUserPosition"), "옮기는 규칙이 여기 다시 적히면 두 곳이 조용히 갈린다");
     // 의존 목록에 빠지면 유령이 바뀌어도 자리가 안 다시 세어진다.
-    assert.ok(f.includes("[useAutoLayoutForUnpositionedNodes, nodeRows, edgeRows, ghostNodes, ghostEdges]"));
+    assert.ok(f.includes("[templateId, autoLayoutMemory, useAutoLayoutForUnpositionedNodes, nodeRows, edgeRows, ghostNodes, ghostEdges]"));
   });
 
   test("🔴 유령의 **자리를 고르는 규칙이 진짜 노드와 같은 차례**다 — 사람이 정한 자리 → 자동 배치 → 받침", () => {

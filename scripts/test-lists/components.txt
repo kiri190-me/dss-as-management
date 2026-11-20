@@ -1643,3 +1643,13 @@ src/components/domestic-orders/domestic-order-list-filters-screen.test.ts
 # **납품일 안내 문단**)이 되살아나지 않았는가 — 글자만 걷었고 같은 설명이 칸 title 로 남은
 # 것과 주황 안내(「발주일 미정 N건」)는 그대로여야 한다.
 src/components/domestic-orders/domestic-order-list-controls-layout.test.ts
+
+# 🔴 그림이 **자동 배치 기억**을 정말 쓰는가 (2026-11-20 — 쓰는 분 신고 「연결선을
+#    삭제하면 노드 위치가 튄다」). 셈과 규칙은 순수 함수 한 곳에 있고 「선을 지워도 한 칸도
+#    안 움직인다」는 거기서 **값으로** 재어진다(src/lib/domain/procedure-auto-layout-stability.test.ts).
+#    여기서 재는 것은 **배선 하나**다 — 그림이 그 함수를 부르고, 돌려받은 값을 실제로 그리고,
+#    다음 렌더가 쓸 기억을 도로 담는가. 🔴 함수가 있어도 아무도 안 부르면 값 시험은 전부
+#    통과하는데 화면은 한 글자도 안 바뀐다. 곁들여: 절차가 바뀌면 기억을 버리는가 ·
+#    자동 배치가 꺼진 절차는 아예 안 타는가(깃발 판정이 **먼저**인가) · 바깥으로 새 프롭이
+#    안 생겼는가(호출부 다섯이 안 바뀌는 근거). 🔴 **주석을 걷어낸** 원본으로 센다.
+src/components/procedures/procedure-flow-graph-layout-memory.test.ts
