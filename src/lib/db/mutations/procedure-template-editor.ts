@@ -391,7 +391,7 @@ export type UpdateNodePatch = {
    * 2026-11-04(줄기 B ④ 조각 ②) — 노드의 「다음 절차」.
    * null 을 보내면 **지정을 지운다**(그 자리가 「이어가지 않음」으로 돌아간다).
    * 🔴 달 수 없는 유형의 노드에 값을 보내면 아래에서 거절한다
-   * (허용 목록은 NEXT_PROCEDURE_LINK_NODE_TYPES — 2026-11-20 에 [작업]이 늘었다).
+   * (허용 목록은 NEXT_PROCEDURE_LINK_NODE_TYPES — 2026-11-20 에 [작업]·[검사]·[조치]가 늘었다).
    */
   nextProcedureTemplateId?: string | null;
 };
@@ -435,7 +435,7 @@ export async function updateProcedureTemplateNode(
       // column alone for a row that outlives the entity it describes.
       /**
        * 🔴 「다음 절차」는 **달 수 있는 유형에만** 붙는다(줄기 B ④ · 허용 목록은
-       * NEXT_PROCEDURE_LINK_NODE_TYPES — 2026-11-20 에 [작업]이 늘었다).
+       * NEXT_PROCEDURE_LINK_NODE_TYPES — 2026-11-20 에 [작업]·[검사]·[조치]가 늘었다).
        * 화면도 같은 상수로 칸을 가리지만, 여기서 다시 본다 — 화면이 유일한
        * 관문이면 노드 유형을 먼저 바꾸고 저장하는 순서에서 빠져나간다.
        * 🔵 **지우는 것(null)은 언제나 통과시킨다.** 유형이 바뀐 뒤 남아 있던 값을
@@ -526,9 +526,10 @@ export async function changeProcedureTemplateNodeType(
        * 게다가 그 값이 가리킨 절차는 계속 삭제가 막힌다 — 까닭이 화면 어디에도
        * 안 보이는 채로.
        *
-       * 🔵 2026-11-20 부터 [종료]↔[작업] 사이의 유형 변경은 **안 지운다** — 둘 다
-       * 달 수 있는 자리라 고치는 칸이 그대로 있고, 지우면 사람이 고른 것을
-       * 말없이 버리는 꼴이 된다.
+       * 🔵 2026-11-20 부터 **허용 유형끼리의 변경은 안 지운다** — 그날 목록이
+       * [종료]·[작업]·[검사]·[조치] 넷이 됐고, 그 넷 사이를 오가면 고치는 칸이
+       * 그대로 있다. 지우면 사람이 고른 것을 말없이 버리는 꼴이 된다. 그래서
+       * 아래는 「유형이 바뀌었나」가 아니라 **「바뀐 유형에 달 수 있나」**를 본다.
        *
        * 🔵 지우는 것은 **값이 있을 때만** 적는다. 늘 쓰면 바뀐 것 없는 노드의
        * 이력에 「지웠음」이 남아 읽는 사람이 무슨 일이 있었나 되짚게 된다.
@@ -1042,7 +1043,7 @@ export type NodeSnapshot = {
   acceptanceCriteria: string | null;
   workerMayAddNextTask: boolean;
   /**
-   * 「다음 절차」(2026-11-04, 줄기 B ④ · 2026-11-20 에 [작업]도 허용).
+   * 「다음 절차」(2026-11-04, 줄기 B ④ · 2026-11-20 에 [작업]·[검사]·[조치]도 허용).
    * 달 수 없는 유형이면 늘 null 이다 — 쓰기 쪽이 거절하고, 유형이 바뀔 때 지운다.
    */
   nextProcedureTemplateId: string | null;

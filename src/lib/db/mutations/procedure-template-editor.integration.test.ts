@@ -2256,10 +2256,13 @@ describe("Phase 5C-5B usability item 4: multiline node titles", () => {
  * 🔴 **지우는 쪽(null)은 언제나 통과해야 한다.** 유형이 바뀐 뒤 남아 있던 값을
  * 치우는 길이 막히면, 사람이 풀 수 없는 상태가 굳는다.
  *
- * ── 🔴 2026-11-20 — 허용 유형이 [종료] 하나에서 [종료]·[작업] 둘로 늘었다 ──
+ * ── 🔴 2026-11-20 — 허용 유형이 [종료] 하나에서 **넷**으로 늘었다 ──────────
+ * 같은 날 두 번 늘었다: 먼저 [종료]·[작업] 둘, 그다음 [검사]·[조치]까지 넷.
  * 이 절의 「막히는 쪽」 표본이 **n3(TASK)** 이었다. 그대로 두면 「거절된다」는 시험이
  * 거절되지 않는 값을 재게 되므로, 아직 막히는 유형(n2 = DECISION)으로 옮겼다.
- * 열린 쪽은 아래 「[작업] 노드에도 지정할 수 있다」가 따로 잰다.
+ * 🔴 **n5 도 CORRECTIVE_ACTION 이라 같은 처지가 됐다** — 밑자락 노드 다섯 중
+ * 막히는 것은 이제 n1(START)·n2(DECISION) 둘뿐이다.
+ * 열린 쪽은 아래 「[작업]…」·「[조치]…」·「[검사]…」 셋이 따로 잰다.
  * ============================================================================
  */
 describe("줄기 B ④ 조각 ② — 노드의 「다음 절차」", () => {
@@ -2316,6 +2319,65 @@ describe("줄기 B ④ 조각 ② — 노드의 「다음 절차」", () => {
     );
   });
 
+  /**
+   * 🔵 2026-11-20 — 쓰는 분이 「작업 노드인 줄 알고」 고른 것이 [검사]·[조치]였다.
+   * 허용 목록만 넓히면 서버가 따라오게 돼 있지만(상수를 본다), **따라왔는지를 값으로**
+   * 한 번 못 박아 둔다 — 서버가 제 글자로 다시 판정하는 날 여기가 먼저 깨진다.
+   */
+  test("🔴 [조치] 노드에도 지정할 수 있다 (2026-11-20 사용자 요청)", async () => {
+    const templateId = await createDraft(uniqueCode("next-on-corrective"));
+    const targetId = await makeTargetTemplate();
+    const nodes = await loadNodesByCode(templateId);
+    const templateRow = await loadTemplateRow(templateId);
+
+    // 🔵 먼저 표본 — n5 가 정말 CORRECTIVE_ACTION 이다.
+    assert.equal(nodes.get("n5")!.nodeType, "CORRECTIVE_ACTION");
+
+    const result = await updateProcedureTemplateNode(
+      nodes.get("n5")!.id,
+      superAdminId,
+      { nextProcedureTemplateId: targetId },
+      templateRow.updatedAt.toISOString(),
+      null
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const after = await loadNodesByCode(templateId);
+    assert.equal(after.get("n5")!.nextProcedureTemplateId, targetId);
+  });
+
+  test("🔴 [검사] 노드에도 지정할 수 있다 — 밑자락에 없는 유형이라 세워서 잰다", async () => {
+    const templateId = await createDraft(uniqueCode("next-on-inspection"));
+    const targetId = await makeTargetTemplate();
+    const nodes = await loadNodesByCode(templateId);
+    let templateRow = await loadTemplateRow(templateId);
+
+    // 🔵 먼저 표본 — 밑자락에 INSPECTION 노드가 없어서 n3(TASK)를 바꿔 세운다.
+    assert.equal(nodes.get("n3")!.nodeType, "TASK");
+    const changed = await changeProcedureTemplateNodeType(
+      nodes.get("n3")!.id,
+      superAdminId,
+      "INSPECTION",
+      "실제로는 검사 단계였다",
+      templateRow.updatedAt.toISOString()
+    );
+    assert.equal(changed.ok, true, JSON.stringify(changed));
+    assert.equal((await loadNodesByCode(templateId)).get("n3")!.nodeType, "INSPECTION");
+
+    templateRow = await loadTemplateRow(templateId);
+    const result = await updateProcedureTemplateNode(
+      nodes.get("n3")!.id,
+      superAdminId,
+      { nextProcedureTemplateId: targetId },
+      templateRow.updatedAt.toISOString(),
+      null
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const after = await loadNodesByCode(templateId);
+    assert.equal(after.get("n3")!.nextProcedureTemplateId, targetId);
+  });
+
   test("🔴 달 수 없는 유형에는 거절된다 — 화면 관문만으로는 못 막는 길이다", async () => {
     const templateId = await createDraft(uniqueCode("next-on-decision"));
     const targetId = await makeTargetTemplate();
@@ -2336,7 +2398,7 @@ describe("줄기 B ④ 조각 ② — 노드의 「다음 절차」", () => {
       assert.equal(result.code, "INVALID_INPUT");
       assert.match(
         result.message,
-        /\[종료\]·\[작업\] 노드에만/,
+        /\[종료\]·\[작업\]·\[검사\]·\[조치\] 노드에만/,
         "거절하는 까닭이 어디에 달 수 있는지를 말해야 한다 — 허용 유형이 늘면 이 말도 따라와야 한다"
       );
     }

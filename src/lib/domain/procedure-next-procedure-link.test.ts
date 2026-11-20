@@ -26,10 +26,15 @@ import { PROCEDURE_NODE_TYPE_CODES, type ProcedureNodeType } from "./procedure-t
  * 결정이 뒤집히면 이 시험들이 먼저 깨져서 알려 줘야 한다 — 통과하는 시험 이름에
  * 틀린 설계가 적혀 있는 일을 막으려면, 이름이 아니라 **값**이 그 결정을 재야 한다.
  *
- * 🔴 **2026-11-20 에 결정 하나가 뒤집혔다** — 달 수 있는 자리가 [종료] 하나에서
- * [종료]·[작업] 둘로 늘었다. 그전의 시험 이름들은 「END 하나뿐이다」·「나머지
- * 여덟은 전부 막힌다」였고, 그대로 두면 **초록 ✔ 옆에 거짓이 남아** 다음 사람이
- * 그것을 근거로 되돌린다. 그래서 이름과 값을 함께 고쳤다.
+ * 🔴 **2026-11-20 에 결정 하나가 두 번 뒤집혔다** — 달 수 있는 자리가 [종료]
+ * 하나에서 [종료]·[작업] 둘로, 같은 날 다시 **[종료]·[작업]·[검사]·[조치] 넷**으로
+ * 늘었다. 그전의 시험 이름들은 「END 하나뿐이다」·「나머지 여덟은 전부 막힌다」,
+ * 그다음엔 「둘뿐이다」·「나머지 일곱」이었다. 그대로 두면 **초록 ✔ 옆에 거짓이
+ * 남아** 다음 사람이 그것을 근거로 되돌린다. 그래서 이름과 값을 함께 고쳤다.
+ *
+ * 🔵 [검사]·[조치]를 연 까닭: 쓰는 분이 「작업 노드인 줄 알고」 고른 노드가
+ * 그 둘이었다. 셋 다 「한 단계를 마치면서 다른 절차를 연다」는 같은 뜻이라
+ * 규칙은 한 줄도 안 바뀌고 목록만 넓혔다.
  * ============================================================================
  */
 
@@ -49,44 +54,69 @@ describe("이어가기 — ① 어느 노드에 달 수 있나", () => {
     assert.equal(PROCEDURE_NODE_TYPE_CODES.length, 9);
   });
 
-  test("🔴 [종료]와 [작업] **둘뿐**이다 (2026-11-20 에 [작업]이 늘었다)", () => {
-    assert.deepEqual([...NEXT_PROCEDURE_LINK_NODE_TYPES], ["END", "TASK"]);
+  test("🔴 [종료]·[작업]·[검사]·[조치] **넷**이다 (2026-11-20 에 셋이 늘었다)", () => {
+    assert.deepEqual([...NEXT_PROCEDURE_LINK_NODE_TYPES], ["END", "TASK", "INSPECTION", "CORRECTIVE_ACTION"]);
     assert.equal(isNextProcedureLinkAllowedOn("END"), true);
     assert.equal(
       isNextProcedureLinkAllowedOn("TASK"),
       true,
       "작업을 하다 다른 절차서를 따라야 하는 경우가 있다 — 2026-11-20 사용자 요청"
     );
+    assert.equal(
+      isNextProcedureLinkAllowedOn("INSPECTION"),
+      true,
+      "쓰는 분이 「작업 노드인 줄 알고」 고른 것이 검사 노드였다 — 셋 다 「한 단계를 마치면서 다른 절차를 연다」는 같은 뜻이다"
+    );
+    assert.equal(
+      isNextProcedureLinkAllowedOn("CORRECTIVE_ACTION"),
+      true,
+      "조치 420개 중 33개는 제목에 「작업」이라는 말이 들어 있다 — 제목으로는 가려지지 않는다"
+    );
   });
 
-  test("🔴 나머지 일곱은 전부 막힌다 — 하나씩 세어 본다", () => {
+  test("🔴 나머지 **다섯**은 전부 막힌다 — 하나씩 세어 본다", () => {
     const 막힌것 = PROCEDURE_NODE_TYPE_CODES.filter((t) => !isNextProcedureLinkAllowedOn(t));
-    assert.equal(막힌것.length, 7);
-    assert.equal(막힌것.includes("START"), true);
+    assert.deepEqual(
+      [...막힌것].sort(),
+      ["CHECKLIST", "DECISION", "DOCUMENT_REFERENCE", "START", "TROUBLESHOOTING"],
+      "막히는 다섯이 바뀌었으면 허용 목록이 움직인 것이다 — 주석의 「다섯」도 함께 거짓이 된다"
+    );
+    assert.equal(막힌것.length, 5);
     assert.equal(
       막힌것.includes("DECISION"),
       true,
       "판단은 갈래 단추가 곧 완료라 [완료] 단추 자체가 없다 — 물을 자리가 없다"
     );
-    assert.equal(막힌것.includes("TASK"), false, "위 목록과 어긋나면 둘 중 하나가 거짓말이다");
+    assert.equal(
+      막힌것.includes("START"),
+      true,
+      "시작은 실행을 만들 때 시스템이 바로 완료로 찬다 — 사람이 완료하는 자리가 아니다"
+    );
+    // 🔵 열린 넷이 여기 섞여 들면 위 시험과 이 시험 중 하나가 거짓말이다.
+    for (const 열린것 of NEXT_PROCEDURE_LINK_NODE_TYPES) {
+      assert.equal(막힌것.includes(열린것), false, `${열린것} 이 양쪽에 다 들어 있다`);
+    }
   });
 
   test("🔴 **「못 단다」는 말이 상수에서 지어진다** — 글자를 박으면 유형을 열 때 거짓이 된다", () => {
-    assert.equal(NEXT_PROCEDURE_LINK_NOT_ALLOWED_MESSAGE.includes("[종료]"), true);
+    // 🔴 글자를 통째로 맞댄다. 「포함하는가」만 재면 허용 유형이 늘었는데 말에는
+    //    안 들어온 경우를 못 잡는다 — 네 이름이 **다 들어 있고 그뿐**이어야 한다.
     assert.equal(
-      NEXT_PROCEDURE_LINK_NOT_ALLOWED_MESSAGE.includes("[작업]"),
-      true,
-      "허용 목록에 [작업]이 들었는데 사람에게 하는 말에는 안 들어 있으면, 막히는 까닭이 틀린 말이 된다"
+      NEXT_PROCEDURE_LINK_NOT_ALLOWED_MESSAGE,
+      "「다음 절차」는 [종료]·[작업]·[검사]·[조치] 노드에만 지정할 수 있습니다."
     );
     // 🔵 공짜 통과 막기 — 막는 유형의 이름이 섞여 들어가면 안 된다.
     assert.equal(NEXT_PROCEDURE_LINK_NOT_ALLOWED_MESSAGE.includes("[판단]"), false);
+    assert.equal(NEXT_PROCEDURE_LINK_NOT_ALLOWED_MESSAGE.includes("[시작]"), false);
   });
 
   test("달 수 없는 유형인데 값이 든 노드를 집어낸다 — 빈 배열이 정상이다", () => {
     const 정상 = findMisplacedNextProcedureLinks([
       { nodeCode: "n1", nodeType: "END", nextProcedureTemplateId: "t-1" },
-      // 🔵 2026-11-20 — [작업]에 값이 들어 있는 것은 이제 **정상**이다.
+      // 🔵 2026-11-20 — [작업]·[검사]·[조치]에 값이 들어 있는 것은 이제 **정상**이다.
       { nodeCode: "n2", nodeType: "TASK", nextProcedureTemplateId: "t-1" },
+      { nodeCode: "n2b", nodeType: "INSPECTION", nextProcedureTemplateId: "t-1" },
+      { nodeCode: "n2c", nodeType: "CORRECTIVE_ACTION", nextProcedureTemplateId: "t-1" },
       { nodeCode: "n3", nodeType: "DECISION", nextProcedureTemplateId: null },
     ]);
     assert.deepEqual(정상, []);
@@ -204,19 +234,23 @@ describe("이어가기 검증 — ④ 게시를 막는 것(ERROR)", () => {
     );
     assert.equal(issues.length, 1);
     assert.equal(issues[0].severity, "ERROR");
-    assert.match(issues[0].message, /\[종료\]·\[작업\] 노드에만/);
+    assert.match(issues[0].message, /\[종료\]·\[작업\]·\[검사\]·\[조치\] 노드에만/);
   });
 
-  test("🔴 **[작업]은 더 이상 여기서 안 걸린다** (2026-11-20) — 걸리면 게시가 막힌다", () => {
-    const issues = validateNextProcedureLinks(
-      [검증노드({ nodeType: "TASK", nextProcedureTemplateId: "t-9" })],
-      맥락()
-    );
-    assert.deepEqual(
-      issues,
-      [],
-      "[작업]을 열어 놓고 검증이 ERROR 를 내면, 화면에서는 고를 수 있는데 게시가 안 되는 절차가 생긴다"
-    );
+  test("🔴 **열린 넷은 더 이상 여기서 안 걸린다** (2026-11-20) — 걸리면 게시가 막힌다", () => {
+    // 🔵 하나씩이 아니라 **허용 목록 전부**를 돌린다. 한 유형만 재면 다음에
+    //    목록이 늘 때 이 시험이 조용히 그 유형을 안 보게 된다.
+    for (const 유형 of NEXT_PROCEDURE_LINK_NODE_TYPES) {
+      const issues = validateNextProcedureLinks(
+        [검증노드({ nodeType: 유형, nextProcedureTemplateId: "t-9" })],
+        맥락()
+      );
+      assert.deepEqual(
+        issues,
+        [],
+        `${유형} 을 열어 놓고 검증이 ERROR 를 내면, 화면에서는 고를 수 있는데 게시가 안 되는 절차가 생긴다`
+      );
+    }
   });
 
   test("🔴 가리킨 판이 사라졌으면 막는다", () => {

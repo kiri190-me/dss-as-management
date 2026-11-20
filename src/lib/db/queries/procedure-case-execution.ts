@@ -612,7 +612,7 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       sourceWorksheet: procedureTemplateNodes.sourceWorksheet,
       sourceShapeId: procedureTemplateNodes.sourceShapeId,
       // 2026-11-04(줄기 B ④ 조각 ④) — 노드의 「다음 절차」. 이미 읽는 줄에
-      // 칸만 보탠다. 🔵 유형을 안 가리고 읽으므로 2026-11-20 에 [작업]이 허용
+      // 칸만 보탠다. 🔵 유형을 안 가리고 읽으므로 2026-11-20 에 [작업]·[검사]·[조치]가 허용
       // 목록에 들어갈 때 이 조회는 한 글자도 안 고쳤다.
       nextProcedureTemplateId: procedureTemplateNodes.nextProcedureTemplateId,
     })

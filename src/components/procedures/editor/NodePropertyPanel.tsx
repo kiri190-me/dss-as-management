@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   PROCEDURE_NODE_TYPE_CODES,
   procedureNodeTypeLabels,
@@ -22,6 +22,7 @@ import {
 import type { ProcedureNodeFieldDraft } from "@/lib/domain/procedure-editor-save-state";
 import type { NextProcedureLinkCandidate } from "@/lib/db/queries/procedure-templates";
 import { isNextProcedureLinkAllowedOn } from "@/lib/domain/procedure-next-procedure-link";
+import { NODE_VISUAL_CONFIG, getSemanticNodeVisualType } from "@/lib/domain/procedure-visual-language";
 
 /** Phase 5C-5B — fixed spacing for "상대 위치로 이동": vertical reuses createProcedureTemplateNode's own default node-stacking gap (150) for consistency; horizontal is a fixed step between columns. 노드 폭에 상한이 없어진 뒤로는 "가장 넓은 노드를 비켜갈 만큼"이라는 기준이 성립하지 않으므로, 폭이 아니라 사람이 보기 좋은 열 간격으로 정한다(겹치는 경우 열 스냅과 직접 드래그로 조정). */
 const RELATIVE_POSITION_SPACING = { horizontal: 140, vertical: 150 } as const;
@@ -129,7 +130,9 @@ export default function NodePropertyPanel({
   /** Phase 5C-5B usability — true for TECHNICAL_TASK (any status/role — purely a UI relaxation of the mandatory-reason requirement, matching the mutation layer's own category-aware validation). FULL_SERVICE keeps requiring a reason for node-type changes, unchanged. */
   isTechnical: boolean;
   /**
-   * [종료]의 「다음 절차」로 고를 수 있는 절차들(2026-11-04, 줄기 B ④ 조각 ②).
+   * 「다음 절차」로 고를 수 있는 절차들(2026-11-04, 줄기 B ④ 조각 ②).
+   * 🔵 **노드 유형과 무관하다** — 어느 유형에서 고르든 후보는 같다(가려 내는
+   * 잣대가 노드가 아니라 가리켜지는 절차 쪽에 있다).
    * 서버가 거른 것을 그대로 그린다 — 게시본 · 기술작업 · 자기 계열 제외
    * (queries/procedure-templates.ts 의 listNextProcedureLinkCandidates).
    * 🔵 기본값이 빈 배열이라, 안 넘기는 호출부에서는 「이어가지 않음」만 보인다.
@@ -342,6 +345,28 @@ export default function NodePropertyPanel({
     onPositionDraftChange({ x: snapped.x, y: snapped.y });
   }
 
+  /**
+   * ── 고른 노드의 **유형 딱지** 색 (2026-11-20) ──────────────────────────
+   * 🔴 **색을 여기서 새로 짓지 않는다.** 캔버스의 노드 상자가 쓰는 그림 언어
+   * (procedure-visual-language 의 NODE_VISUAL_CONFIG)에서 그대로 꺼낸다 —
+   * 캔버스와 패널의 색이 다르면 「고른 상자」와 「패널」을 눈으로 잇지 못해
+   * 오히려 더 헷갈린다.
+   *
+   * 🔵 밝은/어두운 두 벌을 CSS 변수로 심고 Tailwind 의 `dark:` 가 고르게 한다 —
+   * 색이 **데이터에서 오는데**(유형마다 다른 hex) 어둠 전환은 **클래스 기반**이라,
+   * 둘을 잇는 자리가 변수뿐이다. ProcedureNodeChip 이 같은 변수 이름으로 같은
+   * 일을 한다(그 파일의 cssVars 주석).
+   */
+  const nodeTypeVisual = NODE_VISUAL_CONFIG[getSemanticNodeVisualType(node.nodeType)];
+  const nodeTypeBadgeVars = {
+    "--node-bg-light": nodeTypeVisual.bgLight,
+    "--node-bg-dark": nodeTypeVisual.bgDark,
+    "--node-border-light": nodeTypeVisual.borderLight,
+    "--node-border-dark": nodeTypeVisual.borderDark,
+    "--node-text-light": nodeTypeVisual.textLight,
+    "--node-text-dark": nodeTypeVisual.textDark,
+  } as CSSProperties;
+
   async function handleDelete() {
     setIsDeleting(true);
     setErrorMessage(null);
@@ -357,7 +382,39 @@ export default function NodePropertyPanel({
   return (
     <div className="flex flex-col gap-4 text-xs">
       <div>
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">노드 속성</h3>
+        {/*
+          ── 🔴 고른 노드의 **유형을 글자로** 세운다 (2026-11-20) ────────────
+          쓰는 분이 [작업] 노드인 줄 알고 고른 것이 [검사]·[조치]였다. 그때까지
+          유형을 알 길은 **아래 드롭다운을 열어 보는 것**뿐이었고, 캔버스의 상자도
+          색과 모양으로만 갈랐다. 운영 실측으로 [조치] 420개 중 33개는 제목에
+          「작업」이라는 말이 들어 있다(사람이 적은 제목이다) — 제목도 단서가 못 된다.
+
+          🔴 **색만으로 가르지 않는다** — 이 저장소의 규칙이다(색약인 사람에게는
+          같아 보인다). 게다가 여기서는 색이 애초에 못 가른다: [작업]·[검사]·
+          [조치]는 그림 언어에서 **같은 꼴·같은 색 식구**라(TASK 로 모인다) 색만
+          보면 셋이 똑같다. 그래서 **글자가 본체이고 색은 캔버스와 잇는 거들기**다.
+
+          🔵 **캔버스의 노드 상자에는 유형 글자를 안 넣었다**(사용자 결정).
+          노드가 수백 개라 상자마다 한 줄씩 더하면 상자가 커지고 그림이 빽빽해지며,
+          이번에 푸는 문제는 「지금 **고른** 노드가 무엇인가」다. 상자 쪽은 유형
+          전체로 보면 모양·색이 갈리고, 색까지 같은 [작업]·[검사]·[조치] 셋은
+          아이콘이 갈린다(getNodeIconKey) — 고르면 이 딱지가 글자로 받아 준다.
+
+          🔴 `node.nodeType` 을 본다 — 아래 드롭다운의 `newNodeType` 이 아니다.
+          그 값은 아직 서버에 안 간 「고르는 중」일 수 있어서, 그것으로 그리면
+          적용되지 않은 유형을 **적용된 것처럼** 보여 준다(「다음 절차」 칸을
+          가리는 잣대도 같은 까닭으로 `node.nodeType` 이다).
+        */}
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">노드 속성</h3>
+          <span
+            data-node-type={node.nodeType}
+            style={nodeTypeBadgeVars}
+            className="rounded-full border px-2 py-0.5 text-[11px] font-semibold bg-[var(--node-bg-light)] dark:bg-[var(--node-bg-dark)] border-[var(--node-border-light)] dark:border-[var(--node-border-dark)] text-[var(--node-text-light)] dark:text-[var(--node-text-dark)]"
+          >
+            {procedureNodeTypeLabels[node.nodeType]}
+          </span>
+        </div>
         <p className="mt-0.5 font-mono text-[10px] text-zinc-400 dark:text-zinc-600">
           {node.nodeCode} · {node.sourceWorksheet ?? "-"}
           {node.sourceShapeId ? ` · shape#${node.sourceShapeId}` : ""}
@@ -390,6 +447,20 @@ export default function NodePropertyPanel({
         설명 (부제)
         <textarea rows={2} value={draft.description} onChange={(e) => onDraftChange({ description: e.target.value })} disabled={!canEdit} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900" />
       </label>
+      {/*
+        🔵 **「작업 지시 요약」이라는 이름은 그대로 둔다**(2026-11-20에 한 번
+        따져 보고 안 고쳤다). 이 말이 [검사]·[조치] 노드를 [작업]으로 오해하는 데
+        한몫했지만, 고치지 않은 까닭이 셋이다:
+         · 이 낱말은 **한 화면의 것이 아니다** — 수리건 플로차트 패널
+           (CaseFlowchartNodePropertyPanel)과 입력 검증의 오류 문구
+           (validation/repair-case-flowchart-graph-input.ts)가 같은 글자를 쓴다.
+           여기만 고치면 같은 칸을 두 이름으로 부르게 된다.
+         · 「작업 지시」는 여기서 유형 이름이 아니라 **「무엇을 어떻게 하는지」**라는
+           일반적인 뜻이고, 그 칸은 아홉 유형 전부에 똑같이 있다.
+         · 혼동의 진짜 원인은 **유형이 어디에도 글자로 없었다**는 것이었고, 그것은
+           바로 위 유형 딱지가 받는다 — 딱지가 [검사]라고 적고 있으면 이 칸 이름을
+           유형으로 읽을 자리가 없다.
+      */}
       <label className="flex flex-col gap-1">
         작업 지시 요약
         <textarea rows={3} value={draft.instructions} onChange={(e) => onDraftChange({ instructions: e.target.value })} disabled={!canEdit} className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900" />
@@ -467,15 +538,23 @@ export default function NodePropertyPanel({
             )}
           </select>
           {/*
-            🔴 **[종료]와 [작업]은 같은 칸이지만 일어나는 일이 다르다.** 종료는
-            절차가 끝나면서 이어지고, 작업은 **절차 한가운데서** 이어진다 —
-            원래 절차는 다음 단계로 그대로 간다. 한 글로 뭉개면 작업 노드에
-            지정한 사람이 「여기서 절차가 끝난다」로 읽는다.
+            🔴 **[종료]와 나머지는 같은 칸이지만 일어나는 일이 다르다.** 종료는
+            절차가 끝나면서 이어지고, 그 밖의 유형은 **절차 한가운데서** 이어진다 —
+            원래 절차는 다음 단계로 그대로 간다. 한 글로 뭉개면 중간 노드에
+            지정한 사람이 「여기서 절차가 끝난다」로 읽는다. 그래서 [종료] 갈래만
+            남겼다.
+
+            🔴 **유형마다 글을 따로 두지 않는다**(2026-11-20). 전에는 아래쪽 글이
+            「이 **작업**을 완료할 때」였고, 같은 날 [검사]·[조치]가 열리면서
+            **틀린 말이 됐다** — 검사 노드에 지정해 놓고 「작업을 완료할 때」를
+            읽으면 자기 노드 얘기가 아닌 줄 안다. 「이 **단계**를 완료할 때」는
+            [작업]·[검사]·[조치] 셋에 다 맞고, 유형이 또 늘어도 여기를 안 고친다
+            (허용 목록은 NEXT_PROCEDURE_LINK_NODE_TYPES 한 곳에 있다).
           */}
           <span className="text-[11px] text-zinc-400 dark:text-zinc-600">
             {node.nodeType === "END"
               ? "이 절차가 끝나면 고른 절차를 이어서 엽니다."
-              : "이 작업을 완료할 때 고른 절차를 이어서 열지 한 번 묻습니다. 지금 절차는 끝나지 않고 다음 단계로 그대로 이어집니다."}{" "}
+              : "이 단계를 완료할 때 고른 절차를 이어서 열지 한 번 묻습니다. 지금 절차는 끝나지 않고 다음 단계로 그대로 이어집니다."}{" "}
             고른 절차가 나중에 개정되면 <span className="font-medium">그때의 게시본</span>을 따라가므로 여기를 다시
             고치지 않아도 됩니다.
           </span>
