@@ -607,7 +607,7 @@ export default function PartRequestSection({
       <div className="mt-3 flex flex-col gap-2">
         <input
           type="text"
-          placeholder="재고 관리에서 찾기: 품명 / 품명2 / 고객사 품명 / 교산 품번 / 도번"
+          placeholder="재고 관리에서 찾기: 품명 / 품명2 / 고객사 품명 / 교산 품번 / 도번 / 비고"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           disabled={parts.status !== "ok"}

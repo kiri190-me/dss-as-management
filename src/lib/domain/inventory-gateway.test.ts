@@ -156,7 +156,7 @@ describe("부품 목록 읽기", () => {
   });
 });
 
-describe("화면에서 거르기 — 저쪽 q 와 같은 잣대", () => {
+describe("화면에서 거르기 — 🔴 저쪽 q 보다 **한 칸 넓다**(비고를 더 본다)", () => {
   const parts = parseInventoryPartsResponse(PARTS_BODY) as InventoryPart[];
 
   test("빈 글자는 빈 목록 — 수백 개를 통째로 펼치지 않는다", () => {
@@ -164,7 +164,7 @@ describe("화면에서 거르기 — 저쪽 q 와 같은 잣대", () => {
     assert.deepEqual(filterInventoryParts(parts, "   "), []);
   });
 
-  test("다섯 칸에서 찾는다 — 품명·품명2·고객사 품명·교산 품번·도번", () => {
+  test("여섯 칸에서 찾는다 — 품명·품명2·고객사 품명·교산 품번·도번·**비고**", () => {
     assert.deepEqual(filterInventoryParts(parts, "amp").map((p) => p.no), [11]);
     assert.deepEqual(filterInventoryParts(parts, "규격").map((p) => p.no), [11]);
     assert.deepEqual(filterInventoryParts(parts, "조립품").map((p) => p.no), [11]);
@@ -172,9 +172,26 @@ describe("화면에서 거르기 — 저쪽 q 와 같은 잣대", () => {
     assert.deepEqual(filterInventoryParts(parts, "WR00000BB002B").map((p) => p.no), [12]);
   });
 
-  test("🔴 낱말이 여럿이면 **모두** 들어 있어야 한다(저쪽 q 와 같다)", () => {
+  test("🔴 **비고에만 있는 글자로도 찾아진다** (2026-11-20 쓰는 분 요청)", () => {
+    // 🔴 「수리소」는 **비고에만** 있다 — 다른 다섯 칸 어디에도 없다. 그래서 이 단언이
+    //    비고를 뺀 순간 깨진다(다섯 칸으로 되돌리면 [] 가 된다).
+    // 🔵 까닭: 품명·품명2·도번·소유가 똑같은 부품이 여러 묶음 있고, 가르는 글자가 비고에만 있다.
+    assert.deepEqual(filterInventoryParts(parts, "수리소").map((p) => p.no), [11]);
+    // 🔴 비고가 **빈 부품은 안 걸린다** — 빈 글자가 아무 낱말에나 걸리면 전부가 뜬다.
+    assert.ok(!filterInventoryParts(parts, "수리소").some((p) => p.no === 12));
+  });
+
+  test("🔴 비고의 **둘째 줄**로도 찾아진다 — 화면은 첫 줄만 그리지만 검색은 전체를 본다", () => {
+    // 🔵 비고는 줄바꿈이 든 글자다(저쪽 API.md). 화면이 그리는 것은 `inventoryPartNoteFirstLine`
+    //    으로 자른 **첫 줄뿐**인데, 찾는 것은 **적힌 전부**라야 「분명히 적어 뒀는데 안 나온다」가 없다.
+    assert.deepEqual(filterInventoryParts(parts, "두 번째").map((p) => p.no), [11]);
+  });
+
+  test("🔴 낱말이 여럿이면 **모두** 들어 있어야 한다(낱말 쪼개기는 저쪽 q 와 같다)", () => {
     assert.deepEqual(filterInventoryParts(parts, "amp 규격").map((p) => p.no), [11]);
     assert.deepEqual(filterInventoryParts(parts, "amp vvc"), []);
+    // 🔵 칸을 넘나들며 모아도 걸린다 — 품명(amp) + 비고(수리소).
+    assert.deepEqual(filterInventoryParts(parts, "amp 수리소").map((p) => p.no), [11]);
   });
 
   test("대소문자를 가리지 않는다", () => {

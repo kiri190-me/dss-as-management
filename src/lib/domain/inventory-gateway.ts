@@ -437,11 +437,22 @@ export function customerNameAlreadySetLines(part: { no: number; name: string; cu
 }
 
 /**
- * 화면에서 거르기. 🔴 **저쪽 `q` 와 같은 규칙으로 잰다** — 품명 · 품명2 · 고객사 품명 ·
- * 교산 품번 · 도번에 낱말이 **모두** 들어 있는 줄(띄어쓰기로 여러 낱말, API.md 2절).
+ * 화면에서 거르기 — 품명 · 품명2 · 고객사 품명 · 교산 품번 · 도번 · **비고** **여섯 칸**에
+ * 낱말이 **모두** 들어 있는 줄(띄어쓰기로 여러 낱말).
  *
- * 🔵 같은 규칙으로 적어 둔 까닭: 언젠가 `q` 를 서버에 넘기는 쪽으로 갈아타도 **나오는 줄이
- *    달라지지 않는다.** 규칙이 다르면 「재고 조회에서 되던 글자가 여기서는 안 된다」가 된다.
+ * ── 🔴 **2026-11-20 부터 저쪽 `q` 보다 한 칸 넓다** ─────────────────────────
+ * 저쪽 `q` 는 **다섯 칸**이고(API.md 2절) 여기만 **비고**를 더 본다. 🔴 **일부러 갈라 놓은
+ * 것이지 빠뜨린 것이 아니다 — 되돌리지 마라.**
+ * 🔵 까닭은 쓰는 분의 요청이고, 저쪽 문서가 그 까닭을 이미 적어 두었다: 품명·품명2·도번·
+ *    소유가 **똑같은 부품이 여러 묶음** 있고 그것을 가르는 글자가 **비고에만** 있다. 화면은
+ *    그 비고를 이미 첫 줄로 그리고 있는데 **검색만 안 보고 있었다.**
+ * 🔵 재고 관리의 [재고현황] 화면도 **이미 비고로 찾는다**(저쪽 `SEARCH_FIELDS`). 넓힌 쪽이
+ *    오히려 그 화면과 같아진다.
+ * 🔴 **그래서 「언젠가 `q` 를 서버에 넘기면 된다」가 이제 거짓이다.** 그대로 넘기면 비고로
+ *    찾던 줄이 **조용히 사라진다.** 서버로 옮기려면 **저쪽 `q` 에 비고를 먼저 넣어야** 한다.
+ *
+ * 🔵 **견적서·사용 부품 고르개는 아직 다섯 칸이다**(`vendor/dss-core` 의 `filterPartOptions`).
+ *    2026-11-20 에 **[부품요청] 한 곳만** 넓히기로 정했다 — 거기도 넓힐지는 그때 정한다.
  *
  * 빈 글자는 **빈 목록**이다 — 수백 개를 통째로 펼쳐 놓지 않는다(지금 화면과 같다).
  */
@@ -449,7 +460,10 @@ export function filterInventoryParts(parts: readonly InventoryPart[], term: stri
   const words = term.trim().toLowerCase().split(/\s+/).filter((word) => word !== "");
   if (words.length === 0) return [];
   return parts.filter((part) => {
-    const haystack = [part.name, part.name2, part.customerName, part.kyosanPartNo, part.drawingNo]
+    /* 🔴 비고는 **줄바꿈이 든 글자**다(저쪽 API.md). `join(" ")` 이 칸 사이를 띄우지만 비고
+       **안의** 줄바꿈은 그대로 남는데, 낱말 하나하나를 `includes` 로 재므로 거기 걸리지
+       않는다 — 다만 **줄을 넘긴 두 낱말이 한 낱말로 붙어 보이지는 않는다.** */
+    const haystack = [part.name, part.name2, part.customerName, part.kyosanPartNo, part.drawingNo, part.note]
       .join(" ")
       .toLowerCase();
     return words.every((word) => haystack.includes(word));
