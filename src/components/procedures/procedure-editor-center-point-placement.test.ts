@@ -145,7 +145,14 @@ describe("중심점 배치 — 🔴 「연결선 곧게 펴기」도 화면 자�
     const f = flat(editor);
     assert.ok(f.includes("const sourcePos = resolveCurrentPosition(edge.fromNodeId); const targetPos = resolveCurrentPosition(edge.toNodeId);"));
     // 의존 목록에서도 빠져야 한다 — 남아 있으면 옛 지도가 아직 어딘가로 샌다.
-    assert.ok(f.includes("[template.edges, renderedNodes, resolveCurrentPosition, pendingEdgeRouteMoves, savedEdgeRoutes, setPendingPosition, resolveNodeDimensions]"));
+    // 🔴 2026-11-20(조각 4) — 첫 칸이 `template.edges` 에서 `renderedEdges` 로 바뀌었다.
+    //    구조 변경이 [저장] 때까지 모이게 되면서, **저장 전에 그은 선**은 서버 목록에
+    //    아예 없기 때문이다. 옛 목록을 보면 그 선만 두 번 눌러도 아무 일이 안 일어난다.
+    assert.ok(f.includes("[renderedEdges, renderedNodes, resolveCurrentPosition, pendingEdgeRouteMoves, savedEdgeRoutes, setPendingPosition, resolveNodeDimensions]"));
+    // 🔴 찾는 곳도 함께 바뀌어야 뜻이 있다 — 의존 목록만 고치면 안에서는 여전히
+    //    서버 목록을 뒤진다(그 쪽이 더 조용히 깨진다).
+    assert.ok(f.includes("const edge = renderedEdges.find((e) => e.id === edgeId);"));
+    assert.ok(!f.includes("const edge = template.edges.find((e) => e.id === edgeId);"), "저장 전 연결선에서 곧게 펴기가 죽는다");
   });
 
   test("🔴 차례 셋을 **편집기가 직접 적지 않는다** — 값으로 시험할 수 있게 순수 함수에 둔다", () => {
@@ -178,7 +185,10 @@ describe("중심점 배치 — 🔴 「경로점 추가」도 같은 출처를 �
   test("🔴 선의 양 끝을 **resolveCurrentPosition** 으로 읽는다 — 중점을 꽂는 셈이라 끝점이 거짓이면 보이는 선을 벗어난다", () => {
     const f = flat(editor);
     assert.ok(f.includes("const source = edge ? resolveCurrentPosition(edge.fromNodeId) : undefined; const target = edge ? resolveCurrentPosition(edge.toNodeId) : undefined;"));
-    assert.ok(f.includes("[selectedEdgeId, template.edges, resolveCurrentPosition, savedEdgeRoutes, pushPendingUndoStep]"), "의존 목록에 옛 지도가 남아 있으면 아직 어딘가로 샌다");
+    // 🔴 2026-11-20(조각 4) — 곧게 펴기와 같은 까닭으로 `template.edges` 가
+    //    `renderedEdges` 로 바뀌었다(저장 전에 그은 선은 서버 목록에 없다).
+    assert.ok(f.includes("[selectedEdgeId, renderedEdges, resolveCurrentPosition, savedEdgeRoutes, pushPendingUndoStep]"), "의존 목록에 옛 지도가 남아 있으면 아직 어딘가로 샌다");
+    assert.ok(f.includes("const edge = renderedEdges.find((e) => e.id === selectedEdgeId);"), "저장 전 연결선에 경로점을 못 꽂는다");
   });
 
   test("🔴 자리를 읽는 곳이 **유령 받침 하나만** 남았다 — 그 하나는 일부러 남긴 것이고 글로 그렇게 적혀 있다", () => {
@@ -253,6 +263,14 @@ describe("중심점 배치 — 🔴 「선택한 노드 아래 추가」 (Create
   test("🔵 고른 노드가 없으면 전처럼 자리를 아예 안 보낸다 — 서버의 기본 쌓기가 그대로 산다", () => {
     const f = flat(createPanel);
     assert.ok(f.includes(": null;"), "null 갈래가 없으면 선택이 없을 때도 자리를 억지로 만들게 된다");
-    assert.ok(f.includes("createProcedureTemplateNodeAction({ templateId, nodeType, title, position, expectedTemplateUpdatedAt })"));
+    // 🔴 2026-11-20(조각 4) — 여기서 **서버 액션을 더 이상 안 부른다.** 노드 추가도
+    //    [저장]을 눌러야 저장되도록 바뀌어서(쓰는 분 요청), 패널은 무엇을 만들지만
+    //    적어 화면에 넘긴다. 🔵 이 시험이 재는 것(자리를 억지로 만들지 않는가)은
+    //    그대로다 — 넘기는 칸에 그 `position` 이 그대로 실려 있는지로 잰다.
+    assert.ok(f.includes("onQueueCreate({ nodeType, title, position });"), "셈한 자리가 모아 두는 조작에 안 실리면 자리 고침이 통째로 뜻을 잃는다");
+    assert.ok(
+      !f.includes("createProcedureTemplateNodeAction("),
+      "패널이 아직 서버를 직접 부른다 — 그러면 [저장]을 안 눌러도 노드가 생긴다"
+    );
   });
 });

@@ -19,6 +19,7 @@ import {
   createProcedureEditorUndoStack,
   pushPendingUndoEntry,
   pushStructuralUndoEntry,
+  planUndoStackAfterStructuralSave,
   planProcedureUndo,
   planProcedureRedo,
   canRunUndoPlan,
@@ -44,10 +45,27 @@ import {
   validateProcedureTemplateAction,
   updateProcedureTemplateNodeAction,
   updateProcedureTemplateEdgeAction,
+  createProcedureTemplateNodeAction,
+  deleteProcedureTemplateNodeAction,
+  changeProcedureTemplateNodeTypeAction,
+  createProcedureTemplateEdgeAction,
+  deleteProcedureTemplateEdgeAction,
+  retargetProcedureTemplateEdgeAction,
+  insertProcedureTemplateNodeOnEdgeAction,
 } from "@/lib/server/actions/procedure-template-editor";
 import { renameTechnicalProcedureTemplateAction } from "@/lib/server/actions/procedure-templates";
 import { undoProcedureTemplateChangeAction, redoProcedureTemplateChangeAction } from "@/lib/server/actions/procedure-template-undo-redo";
-import { procedureValidationIssueTypeLabels, procedureValidationSeverityLabels, procedureBranchTypeLabels, procedureNodeTypeLabels, procedureTemplateStatusLabels, type ProcedureValidationSeverity } from "@/lib/domain/procedure-template-types";
+import {
+  procedureValidationIssueTypeLabels,
+  procedureValidationSeverityLabels,
+  procedureBranchTypeLabels,
+  procedureNodeTypeLabels,
+  procedureTemplateStatusLabels,
+  type ProcedureValidationSeverity,
+  type ProcedureBranchType,
+  type ProcedureNodeType,
+  type ManualTechnicalNodeType,
+} from "@/lib/domain/procedure-template-types";
 import type { StructuralValidationSummary, EdgeRouteInput } from "@/lib/db/mutations/procedure-template-editor";
 import { addWaypointAtDefaultPosition, moveWaypoint, removeWaypoint, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import {
@@ -78,6 +96,31 @@ import {
   EMPTY_FIELD_STEP_GHOST_GRAPH,
   type FieldAddedStep,
 } from "@/lib/domain/procedure-field-added-steps";
+import {
+  coalescePendingStructuralOperations,
+  canSendStructuralChanges,
+  isTempEdgeId,
+  isTempNodeId,
+  type PendingStructuralOperation,
+} from "@/lib/domain/procedure-editor-structural-changes";
+import {
+  appendPendingStructuralOperations,
+  procedureStructuralOperationsSignature,
+} from "@/lib/domain/procedure-editor-structural-undo";
+import {
+  runProcedureStructuralSequence,
+  canProceedToFieldSave,
+  collectStructuralIdEffects,
+  rebaseDraftMapAfterStructuralSave,
+  includeBrandNewDraftEntries,
+  includeBrandNewDraftIds,
+  type ProcedureStructuralStepResult,
+} from "@/lib/domain/procedure-editor-structural-save";
+import {
+  previewPendingStructuralGraph,
+  describeStructuralConflicts,
+  type StructuralPreviewFactories,
+} from "@/lib/domain/procedure-editor-structural-preview";
 import { useFieldStepGhostVisibility } from "./editor/use-field-step-ghost-visibility";
 
 type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge" | "addNode" | "fieldSteps";
@@ -122,6 +165,19 @@ const EDITOR_LAYOUT_MODES: readonly LayoutMode[] = ["USER"];
  * Undo/Redo itself — remain their own immediate, separately-reasoned/
  * confirmed actions, entirely untouched by this contract.
  *
+ * ── 🔴 2026-11-20(조각 4) — **위 마지막 문장의 절반이 뒤집혔다** ──────────
+ * 쓰는 분의 요청(「노드·연결선 추가·삭제·재연결도 [저장]을 눌러야 저장되도록 해
+ * 달라」)으로 **일곱**이 이 계약 안으로 들어왔다 — 노드 추가·삭제·유형 변경,
+ * 연결선 추가·삭제·재연결, 연결선 위 노드 끼우기. 다만 **담기는 방식이 다르다**:
+ * 위 다섯 지도는 「이미 있는 행의 칸 값」이라 서버 스냅숏과 맞대어 세지만, 구조
+ * 변경은 행 자체가 생기고 사라져서 그 모델로는 안 세어진다. 그래서 여섯째 칸
+ * (pendingStructuralOperations)에 **조작 목록으로** 담고, [저장]이 그것을 먼저
+ * 보낸 뒤 위 세 단계를 돈다(handleGlobalSave 의 머리말에 차례가 적혀 있다).
+ *
+ * 🔵 **여전히 즉시**인 것: [검증] · 게시/판본 · [이전]/[앞으로] · 템플릿 이름 변경 ·
+ *    이력 복원 · 현장 단계 넣기. 앞 둘은 애초에 저장 대상이 아니고, [이전]/[앞으로]
+ *    는 되돌리는 동작 자체이며, 나머지 셋은 그래프 구조가 아니다.
+ *
  * SERVER BASELINE (template.nodes/edges) + LOCAL DRAFT OVERRIDES
  * (pendingNodeFieldDraftsById / pendingLayoutMoves / pendingEdgeFieldDraftsById /
  * pendingEdgeRouteMoves) = RENDERED GRAPH (renderedNodes/renderedEdges,
@@ -150,6 +206,12 @@ const EDITOR_LAYOUT_MODES: readonly LayoutMode[] = ["USER"];
 /**
  * 저장 전(아직 서버에 보내지 않은) 편집 상태 전부. [이전]/[앞으로]는 이 묶음을
  * 통째로 갈아끼우는 방식으로 동작한다.
+ *
+ * 🔴 2026-11-20(조각 4) — **구조 변경 목록이 여섯째 칸으로 들어왔다.** 노드·연결선
+ * 추가·삭제·유형 변경·재연결·끼우기가 [저장] 때까지 모이는 곳이고, 그것을 여기
+ * 함께 싣는 까닭 셋은 procedure-editor-structural-undo.ts 머리말에 있다 — 특히
+ * ②번(임시 번호를 키로 쓰는 초안이 같은 칸에 있어야 함께 되돌아온다)이 따로 두면
+ * 안 되는 까닭이다.
  */
 type PendingSnapshot = {
   layoutMoves: Map<string, Position>;
@@ -157,9 +219,23 @@ type PendingSnapshot = {
   nodeFieldDrafts: Map<string, ProcedureNodeFieldDraft>;
   edgeFieldDrafts: Map<string, ProcedureEdgeFieldDraft>;
   edgeSaveNotes: Map<string, string>;
+  structuralOperations: PendingStructuralOperation[];
 };
 
-/** 스냅샷 두 개가 같은 상태인지 — 키 순서를 고정해 직렬화한 뒤 비교한다(작은 Map 몇 개라 비용이 문제되지 않는다). */
+/**
+ * 스냅샷 두 개가 같은 상태인지 — 키 순서를 고정해 직렬화한 뒤 비교한다(작은 Map
+ * 몇 개라 비용이 문제되지 않는다).
+ *
+ * 🔴 2026-11-20(조각 4) — **구조 목록의 서명을 반드시 섞어야 한다.** 노드를 하나
+ * 추가한 단계는 지도 다섯이 **똑같다.** 섞지 않으면 planProcedureUndo 가 그 칸을
+ * 「헛도는 단계」로 보고 조용히 버려서, [이전]이 그 추가를 건너뛰고 더 오래된
+ * 단계부터 되돌린다 — 오류도 경고도 안 난다. 조각 3 의 ⑦절 시험이 그 꼴을 그대로
+ * 시연해 두었다.
+ *
+ * 🔵 목록은 **차례도 뜻이 있어** 정렬하지 않는다(지도 다섯과 다른 점이다) —
+ * 보낼 차례와 미리보기 차례를 둘 다 그 순서에서 뽑는다. 대신 칸 차례에 안 흔들리게
+ * 하는 일은 procedureStructuralOperationsSignature 가 안에서 한다.
+ */
 function pendingSnapshotSignature(snapshot: PendingSnapshot): string {
   const dump = (map: Map<string, unknown>) => [...map.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return JSON.stringify([
@@ -168,6 +244,7 @@ function pendingSnapshotSignature(snapshot: PendingSnapshot): string {
     dump(snapshot.nodeFieldDrafts),
     dump(snapshot.edgeFieldDrafts),
     dump(snapshot.edgeSaveNotes),
+    procedureStructuralOperationsSignature(snapshot.structuralOperations),
   ]);
 }
 
@@ -266,6 +343,22 @@ export default function ProcedureTemplateEditorScreen({
   const [justSavedPositionsById, setJustSavedPositionsById] = useState<Map<string, Position>>(new Map());
   const [justSavedEdgeFieldsById, setJustSavedEdgeFieldsById] = useState<Map<string, ProcedureEdgeFieldDraft>>(new Map());
   const [justSavedRoutesById, setJustSavedRoutesById] = useState<Map<string, RoutePoint[] | null>>(new Map());
+  /**
+   * 🔴 **다섯째 그림자**(2026-11-20, 조각 4) — 이번 저장에서 **서버가 받아 끝낸**
+   * 구조 조작들. 앞의 넷과 달리 이것은 「행의 칸 값」이 아니라 **행 자체가 생기고
+   * 사라진 것**이라, 같은 수법(서버 행 위에 덮어쓰기)으로는 표현할 수가 없다 —
+   * 새로 만든 노드는 `template.nodes` 에 **아예 없다.**
+   *
+   * 🔴 이것이 없으면 **부분 실패에서 방금 만든 노드가 화면에서 사라진다.** 보낸
+   * 조작은 모아 둔 목록에서 빠지는데(다시 보내면 두 번 만들어진다) 화면은 부분
+   * 실패에서 router.refresh() 를 안 부르므로, 목록에도 없고 서버 목록에도 없는
+   * 상태가 된다. 그래서 **아래 미리보기에는 「아직 안 보낸 것」과 「방금 보낸 것」을
+   * 함께** 얹는다.
+   *
+   * 🔵 비우는 자리는 앞의 넷과 똑같다 — 진짜 새로고침이 닿으면 서버 목록이 이미
+   * 그 행들을 들고 있어 그림자가 거짓이 된다.
+   */
+  const [justSavedStructuralOperations, setJustSavedStructuralOperations] = useState<PendingStructuralOperation[]>([]);
   if (template.updatedAt !== prevTemplateUpdatedAt) {
     setPrevTemplateUpdatedAt(template.updatedAt);
     setCurrentUpdatedAt(template.updatedAt);
@@ -273,6 +366,7 @@ export default function ProcedureTemplateEditorScreen({
     setJustSavedPositionsById(new Map());
     setJustSavedEdgeFieldsById(new Map());
     setJustSavedRoutesById(new Map());
+    setJustSavedStructuralOperations([]);
   }
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(navigationTarget.nodeId);
@@ -487,6 +581,27 @@ export default function ProcedureTemplateEditorScreen({
   /** The edge "검토자 메모" — a write-only per-save audit annotation (see procedure-editor-save-state.ts's own doc comment on why it's excluded from ProcedureEdgeFieldDraft entirely). Lifted here, alongside pendingEdgeFieldDraftsById, so it survives an edge-selection change (EdgePropertyPanel remounts via `key=`) until the deferred EDGE_FIELDS step actually runs. */
   const [pendingEdgeSaveNoteById, setPendingEdgeSaveNoteById] = useState<Map<string, string>>(new Map());
 
+  /**
+   * ==========================================================================
+   * 🔴 저장 전 **구조 변경** 목록 (2026-11-20, 조각 4)
+   * ==========================================================================
+   * 쓰는 분의 요청: 「노드·연결선 추가·삭제·재연결은 [저장] 없이 바로 저장되는데,
+   * 그것들도 [저장]을 눌러야 저장되도록 해 달라.」 그래서 일곱(노드 추가·삭제·유형
+   * 변경 · 연결선 추가·삭제·재연결 · 연결선 위 노드 끼우기)이 **누르는 즉시 서버로**
+   * 가던 것을 여기 쌓아 두었다가 [저장] 한 번에 보낸다.
+   *
+   * 🔵 **[이전]/[앞으로]와 이력 복원, 템플릿 이름 변경은 그대로 즉시**다. 앞 둘은
+   *    되돌리는 동작 자체라 모아 둘 것이 없고(되돌릴 대상이 서버 이력이다), 이름
+   *    변경은 그래프 구조가 아니다.
+   *
+   * 🔴 번호를 찍는 길은 **appendPendingStructuralOperations 하나뿐**이다 — 도장
+   *    (createTempIdMinter)을 여기서 직접 만들지 않는다. 렌더마다 다시 만들면 같은
+   *    번호가 두 번 나가고, 그러면 접기가 서로 다른 두 노드를 한 덩어리로 봐서
+   *    하나를 지울 때 다른 하나가 같이 사라진다(조각 3 머리말). 그 함수는 **살아
+   *    있는 목록에서** 다음 번호를 뽑으므로 그 함정이 성립하지 않는다.
+   */
+  const [pendingStructuralOperations, setPendingStructuralOperations] = useState<PendingStructuralOperation[]>([]);
+
   // ---- 되돌리기 스택(저장 전 스냅샷 + 서버 구조 변경 표시가 한 줄에 섞인다) ----
   //
   // 🔴 줄기 B-① 이전에는 체계가 **두 벌**이었고 서로 시간순으로 안 섞였다 —
@@ -514,8 +629,9 @@ export default function ProcedureTemplateEditorScreen({
       nodeFieldDrafts: pendingNodeFieldDraftsById,
       edgeFieldDrafts: pendingEdgeFieldDraftsById,
       edgeSaveNotes: pendingEdgeSaveNoteById,
+      structuralOperations: pendingStructuralOperations,
     }),
-    [pendingLayoutMoves, pendingEdgeRouteMoves, pendingNodeFieldDraftsById, pendingEdgeFieldDraftsById, pendingEdgeSaveNoteById]
+    [pendingLayoutMoves, pendingEdgeRouteMoves, pendingNodeFieldDraftsById, pendingEdgeFieldDraftsById, pendingEdgeSaveNoteById, pendingStructuralOperations]
   );
   /**
    * 항상 "가장 최근에 렌더링된" 저장 전 상태를 가리킨다 — 스냅샷을 찍는 쪽은
@@ -567,6 +683,10 @@ export default function ProcedureTemplateEditorScreen({
     setPendingNodeFieldDraftsById(new Map(snapshot.nodeFieldDrafts));
     setPendingEdgeFieldDraftsById(new Map(snapshot.edgeFieldDrafts));
     setPendingEdgeSaveNoteById(new Map(snapshot.edgeSaveNotes));
+    // 🔵 지도 다섯과 같은 규약으로 **사본**을 넣는다 — 스냅샷 안의 배열을 그대로
+    //    state 에 꽂으면 그다음 조작이 그 배열을 가리키게 되어, 되돌아간 자리가
+    //    다음 조작에 따라 움직인다.
+    setPendingStructuralOperations([...snapshot.structuralOperations]);
     lastFieldEditKeyRef.current = null;
   }, []);
 
@@ -599,6 +719,13 @@ export default function ProcedureTemplateEditorScreen({
    * 「아직 아무것도 안 건드렸다」와 「방금 저장이 끝났다」를 똑같이 말한다.
    * 특히 삭제는 "사라짐"이 유일한 증거라 신호가 가장 약하다.
    *
+   * ── 🔴 2026-11-20(조각 4) — **그 안내가 가리키는 범위가 줄었다** ─────────
+   * 쓰는 분에게서 같은 요청이 다시 왔고(안내로는 부족했다는 뜻이다), 이번에는
+   * 동작을 바꿔 **일곱을 [저장] 쪽으로 옮겼다.** 그래서 이 표시가 뜨는 자리는
+   * 이제 **여전히 즉시 저장되는 것들**뿐이다 — 템플릿 이름 변경 · 이력 복원 ·
+   * 현장 단계 넣기 · [이전]/[앞으로]. 🔴 노드·연결선 추가·삭제·재연결은 여기
+   * 더 이상 안 온다(오면 거짓말이 된다 — 아직 서버에 안 갔다).
+   *
    * ── 🔴 globalSaveStatus 를 같이 쓰지 않는 까닭 ──────────────────────────
    * 거기에 "saved" 를 꽂으면 가장 짧은 길이지만, 바로 아래 "변경사항 N건 저장
    * 대기 중" 문구가 globalSaveStatus === "idle" 을 조건으로 쓴다 — 저장 대기가
@@ -621,39 +748,136 @@ export default function ProcedureTemplateEditorScreen({
 
   // ---- rendered graph (server baseline + justSaved shadow + pending drafts, merged) ----
 
+  /**
+   * ==========================================================================
+   * 🔴 저장 전 구조 변경을 **서버 목록 위에 얹은 그래프** (2026-11-20, 조각 4)
+   * ==========================================================================
+   * 아래 serverNodesById · renderedNodes 가 전부 이 결과를 돈다. 전에는 둘 다
+   * `template.nodes`(서버가 그려 준 목록)를 돌았는데, 그러면 **아직 안 보낸 노드가
+   * 화면에 아예 안 그려진다** — 누르고 나서 아무 일도 안 일어난 것처럼 보인다.
+   *
+   * 🔴 얹는 목록이 **둘을 이어 붙인 것**인 까닭은 justSavedStructuralOperations 의
+   * 주석에 있다 — 부분 실패에서 「방금 보낸 것」이 서버 목록에도 없고 대기 목록에도
+   * 없는 틈이 생기기 때문이다. 차례는 **보낸 것이 먼저**다(시간순 그대로).
+   *
+   * 🔵 행을 만들고 고치는 일(factories)은 여기가 맡는다 — 미리보기 모듈은
+   * EditorNodeRow 에 칸이 몇 개인지 모른다. 새 노드의 칸은 **서버가 실제로 적는 것만**
+   * 채우고 나머지는 null/기본값이다(createProcedureTemplateNode 와 같은 모습).
+   */
+  const previewOperations = useMemo(
+    () => [...justSavedStructuralOperations, ...pendingStructuralOperations],
+    [justSavedStructuralOperations, pendingStructuralOperations]
+  );
+
+  const structuralPreviewFactories: StructuralPreviewFactories<EditorNodeRow, EditorEdgeRow> = useMemo(
+    () => ({
+      createNode: (seed) => ({
+        id: seed.id,
+        // 🔵 서버는 `manual-<새 uuid>` 를 적는데 그 번호는 저장하기 전에는 알 수 없다.
+        //    화면에 보이는 자리(노드 검색·드롭다운의 괄호 안)라 **사람이 읽을 수 있는
+        //    글**을 넣는다 — 「저장 전」이면 그 노드가 아직 서버에 없다는 뜻까지 함께 말한다.
+        nodeCode: "저장 전",
+        nodeType: seed.nodeType,
+        title: seed.title,
+        description: null,
+        instructions: null,
+        objective: null,
+        preparation: null,
+        toolsAndEquipment: null,
+        safetyCaution: null,
+        expectedNormalResult: null,
+        ngSymptoms: null,
+        recommendedCorrectiveAction: null,
+        acceptanceCriteria: null,
+        workerMayAddNextTask: false,
+        nextProcedureTemplateId: null,
+        positionX: seed.position ? seed.position.x : 0,
+        positionY: seed.position ? seed.position.y : 0,
+        // 🔴 자리를 안 정했으면 user_position 을 **null 로 둔다** — 그래야 그림이
+        //    제 자동 배치로 그리고, 저장 뒤 서버가 세로로 쌓은 모습과 어긋나지 않는다.
+        userPositionX: seed.position ? seed.position.x : null,
+        userPositionY: seed.position ? seed.position.y : null,
+        sortOrder: seed.sortOrder,
+        sourceWorksheet: null,
+        sourceShapeId: null,
+        sourceCellRange: null,
+        isActive: true,
+        hasChecklistContent: false,
+        hasTroubleshootingContent: false,
+      }),
+      createEdge: (seed) => ({
+        id: seed.id,
+        fromNodeId: seed.fromNodeId,
+        toNodeId: seed.toNodeId,
+        branchType: seed.branchType,
+        branchLabel: seed.branchLabel,
+        sortOrder: seed.sortOrder,
+        sourceConnectorId: null,
+        clonedFromEdgeId: null,
+        userRoutePoints: null,
+      }),
+      changeNodeType: (node, newNodeType) => ({ ...node, nodeType: newNodeType }),
+      retargetEdge: (edge, fromNodeId, toNodeId) => ({ ...edge, fromNodeId, toNodeId }),
+    }),
+    []
+  );
+
+  const structuralPreview = useMemo(
+    () => previewPendingStructuralGraph(template.nodes, template.edges, previewOperations, structuralPreviewFactories),
+    [template.nodes, template.edges, previewOperations, structuralPreviewFactories]
+  );
+
+  /** 서버 목록에 **아직 없는** 노드·연결선(= 저장 전에 만든 것). 화면 여기저기서 「저장 전인가」를 묻는 잣대다. */
+  const unsavedNodeIds = useMemo(() => new Set(structuralPreview.nodes.filter((n) => isTempNodeId(n.id)).map((n) => n.id)), [structuralPreview.nodes]);
+
+  const templateNodeById = useMemo(() => new Map(template.nodes.map((n) => [n.id, n])), [template.nodes]);
+  const templateEdgeById = useMemo(() => new Map(template.edges.map((e) => [e.id, e])), [template.edges]);
+
+  /**
+   * 🔴 **받침(baseline)의 출처가 둘**이다. 이미 서버에 있는 행은 `template.nodes`
+   * 의 값이 받침이고(그래야 「바뀌었는가」를 저장된 값과 맞댄다), 저장 전에 만든
+   * 행은 **미리보기 행 자체**가 받침이다 — 맞댈 서버 값이 아직 없으므로 「만들 때
+   * 적은 값」이 그 자리를 맡는 수밖에 없다.
+   *
+   * 🔴 받침을 안 세우면 속성 패널이 새 노드의 제목을 **빈 칸으로** 보여 준다
+   * (nodeFieldDraft 가 `server?.title ?? ""` 로 떨어진다). 사람이 방금 적은 제목이
+   * 패널에서만 사라지는 꼴이라 고장으로 읽힌다.
+   */
   const serverNodesById = useMemo(() => {
     const map = new Map<string, ProcedureServerNodeSnapshot>();
-    for (const n of template.nodes) {
-      const effectivePos = resolveEffectiveNodePosition(n, "USER");
+    for (const previewNode of structuralPreview.nodes) {
+      const source = templateNodeById.get(previewNode.id) ?? previewNode;
+      const effectivePos = resolveEffectiveNodePosition(source, "USER");
       const raw: ProcedureServerNodeSnapshot = {
-        id: n.id,
-        title: n.title,
-        description: n.description,
-        instructions: n.instructions,
-        sortOrder: n.sortOrder,
-        isActive: n.isActive,
-        nextProcedureTemplateId: n.nextProcedureTemplateId,
+        id: previewNode.id,
+        title: source.title,
+        description: source.description,
+        instructions: source.instructions,
+        sortOrder: source.sortOrder,
+        isActive: source.isActive,
+        nextProcedureTemplateId: source.nextProcedureTemplateId,
         positionX: effectivePos.x,
         positionY: effectivePos.y,
       };
-      map.set(n.id, mergeProcedureNodeForRender(raw, justSavedNodeFieldsById.get(n.id), justSavedPositionsById.get(n.id)));
+      map.set(previewNode.id, mergeProcedureNodeForRender(raw, justSavedNodeFieldsById.get(previewNode.id), justSavedPositionsById.get(previewNode.id)));
     }
     return map;
-  }, [template.nodes, justSavedNodeFieldsById, justSavedPositionsById]);
+  }, [structuralPreview.nodes, templateNodeById, justSavedNodeFieldsById, justSavedPositionsById]);
 
   const serverEdgesById = useMemo(() => {
     const map = new Map<string, ProcedureServerEdgeSnapshot>();
-    for (const e of template.edges) {
+    for (const previewEdge of structuralPreview.edges) {
+      const source = templateEdgeById.get(previewEdge.id) ?? previewEdge;
       const raw: ProcedureServerEdgeSnapshot = {
-        id: e.id,
-        branchType: e.branchType,
-        branchLabel: e.branchLabel,
-        routePoints: e.userRoutePoints && e.userRoutePoints.length > 0 ? e.userRoutePoints : null,
+        id: previewEdge.id,
+        branchType: source.branchType,
+        branchLabel: source.branchLabel,
+        routePoints: source.userRoutePoints && source.userRoutePoints.length > 0 ? source.userRoutePoints : null,
       };
-      map.set(e.id, mergeProcedureEdgeForRender(raw, justSavedEdgeFieldsById.get(e.id), justSavedRoutesById.get(e.id)));
+      map.set(previewEdge.id, mergeProcedureEdgeForRender(raw, justSavedEdgeFieldsById.get(previewEdge.id), justSavedRoutesById.get(previewEdge.id)));
     }
     return map;
-  }, [template.edges, justSavedEdgeFieldsById, justSavedRoutesById]);
+  }, [structuralPreview.edges, templateEdgeById, justSavedEdgeFieldsById, justSavedRoutesById]);
 
   function nodeFieldDraft(nodeId: string): ProcedureNodeFieldDraft {
     const pending = pendingNodeFieldDraftsById.get(nodeId);
@@ -705,17 +929,43 @@ export default function ProcedureTemplateEditorScreen({
     });
   }
 
+  /**
+   * 🔴 **접은 뒤의 건수를 센다**(2026-11-20, 조각 4) — 사람이 한 조작 수가 아니다.
+   * 만들었다 지운 노드는 서버에 보낼 것이 0건이고, 그 줄에 걸렸던 선도 함께
+   * 사라진다. 사람이 세 번 눌렀어도 「변경 0건」이 맞는 답이다.
+   *
+   * 🔴 그리고 **막힌 것**(conflicts)이 하나라도 있으면 [저장]을 막는다. operations
+   * 만 들고 보내면 사람이 화면에서 한 일 하나가 설명 없이 사라진다(조각 1 의 관문).
+   */
+  const coalescedStructural = useMemo(() => coalescePendingStructuralOperations(pendingStructuralOperations), [pendingStructuralOperations]);
+  const structuralPendingCount = coalescedStructural.operations.length;
+  const structuralConflictMessages = useMemo(() => describeStructuralConflicts(coalescedStructural.conflicts), [coalescedStructural.conflicts]);
+  const canSendStructural = canSendStructuralChanges(coalescedStructural);
+
   const dirtyNodeFieldEntries = computeDirtyProcedureNodeFieldEntries(pendingNodeFieldDraftsById, serverNodesById);
   const dirtyEdgeFieldEntries = computeDirtyProcedureEdgeFieldEntries(pendingEdgeFieldDraftsById, serverEdgesById);
   const dirtyPositionNodeIds = computeDirtyProcedurePositionNodeIds(pendingLayoutMoves, serverNodesById);
   const dirtyRouteEdgeIds = computeDirtyProcedureRouteEdgeIds(pendingEdgeRouteMoves, serverEdgesById);
-  const totalPendingCount = dirtyNodeFieldEntries.length + dirtyEdgeFieldEntries.length + dirtyPositionNodeIds.length + dirtyRouteEdgeIds.length;
+  /**
+   * 🔴 구조 변경 건수가 **반드시** 여기 더해져야 한다. 안 더하면 노드만 추가한
+   * 상태에서 [저장]이 꺼져 있어 **한 건도 안 나간다** — 이번 일이 고치려던 바로 그
+   * 증상이 모양만 바꿔 되돌아온다.
+   * 🔵 나가기 경고(beforeunload · handleExit)도 이 값을 보므로, 더하면 경고가
+   *    저장 전 구조 변경까지 함께 지킨다.
+   */
+  const totalPendingCount =
+    dirtyNodeFieldEntries.length + dirtyEdgeFieldEntries.length + dirtyPositionNodeIds.length + dirtyRouteEdgeIds.length + structuralPendingCount;
   const hasAnyPendingChanges = totalPendingCount > 0;
 
-  /** Full EditorNodeRow rows, safe-to-defer fields overridden by live drafts — passed to ProcedureFlowGraph/panels so there is exactly one rendered graph, never a separate copy for the canvas and another for Save. userPositionX/Y is only ever touched when THIS session actually has a position override pending or just-saved for that node — otherwise the original row's own value (null, or a real prior override) passes through untouched, preserving SOURCE-mode/layered-layout fallback behavior for every node this session never dragged. */
+  /**
+   * Full EditorNodeRow rows, safe-to-defer fields overridden by live drafts — passed to ProcedureFlowGraph/panels so there is exactly one rendered graph, never a separate copy for the canvas and another for Save. userPositionX/Y is only ever touched when THIS session actually has a position override pending or just-saved for that node — otherwise the original row's own value (null, or a real prior override) passes through untouched, preserving SOURCE-mode/layered-layout fallback behavior for every node this session never dragged.
+   *
+   * 🔴 2026-11-20(조각 4) — 도는 목록이 `template.nodes` 에서 **structuralPreview.nodes**
+   * 로 바뀌었다. 저장 전에 추가한 노드가 여기 안 들어오면 그림에도 패널에도 안 나온다.
+   */
   const renderedNodes: EditorNodeRow[] = useMemo(
     () =>
-      template.nodes.map((n) => {
+      structuralPreview.nodes.map((n) => {
         const baseline = serverNodesById.get(n.id)!;
         const merged = mergeProcedureNodeForRender(baseline, pendingNodeFieldDraftsById.get(n.id), pendingLayoutMoves.get(n.id));
         const hasSessionPositionOverride = pendingLayoutMoves.has(n.id) || justSavedPositionsById.has(n.id);
@@ -730,17 +980,17 @@ export default function ProcedureTemplateEditorScreen({
           userPositionY: hasSessionPositionOverride ? merged.positionY : n.userPositionY,
         };
       }),
-    [template.nodes, serverNodesById, pendingNodeFieldDraftsById, pendingLayoutMoves, justSavedPositionsById]
+    [structuralPreview.nodes, serverNodesById, pendingNodeFieldDraftsById, pendingLayoutMoves, justSavedPositionsById]
   );
 
   const renderedEdges: EditorEdgeRow[] = useMemo(
     () =>
-      template.edges.map((e) => {
+      structuralPreview.edges.map((e) => {
         const baseline = serverEdgesById.get(e.id)!;
         const merged = mergeProcedureEdgeForRender(baseline, pendingEdgeFieldDraftsById.get(e.id), pendingEdgeRouteMoves.get(e.id));
         return { ...e, branchType: merged.branchType, branchLabel: merged.branchLabel, userRoutePoints: merged.routePoints };
       }),
-    [template.edges, serverEdgesById, pendingEdgeFieldDraftsById, pendingEdgeRouteMoves]
+    [structuralPreview.edges, serverEdgesById, pendingEdgeFieldDraftsById, pendingEdgeRouteMoves]
   );
 
   // ---- 현장에서 더한 단계를 **희미하게** 얹는다 (줄기 B-⑧) ----
@@ -931,13 +1181,38 @@ export default function ProcedureTemplateEditorScreen({
    * 구조 변경(서버가 그 자리에서 저장하는 것)이 **성공했을 때** 지나는 통로.
    * handleSaved 가 하던 일을 그대로 하고, 되돌리기 스택에 한 걸음을 더 쌓는다.
    *
-   * 지나는 조작: 노드 생성 · 노드 유형 변경 · 연결선 생성 · 재연결 · 연결선 위
-   * 노드 삽입 · 템플릿 이름 변경 · 이력 복원. 삭제 둘은 지우개 뒤처리가 있어
-   * 제 함수(handleNodeDeleted/handleEdgeDeleted)에서 같은 것을 쌓는다.
+   * 🔴 2026-11-20(조각 4) — **지나는 조작이 줄었다.** 전에는 노드 생성·유형 변경·
+   * 연결선 생성·재연결·끼우기까지 여기로 왔는데, 그 일곱이 [저장] 쪽으로 옮겨
+   * 갔다(그쪽은 planUndoStackAfterStructuralSave 가 저장 **뒤에** 표시를 세운다).
+   * 지금 여기 오는 것은 **여전히 즉시 서버로 가는 셋**뿐이다 —
+   * 템플릿 이름 변경 · 이력 복원 · 현장 단계 넣기.
+   *
+   * 🔴 일곱을 여기 그대로 두면 **같은 변경에 표시가 두 번** 선다(모아 둘 때 한 번,
+   * 저장할 때 또 한 번). 그러면 [이전]을 두 번 눌러야 한 걸음이 되돌아간다.
+   *
+   * 🔵 「현장 단계 넣기」는 일곱에 없다 — 그 조작은 서버가 실행 쪽 행을 제 손으로
+   *    읽어 노드·간선을 만드는 것이라 화면이 모아 둘 값이 없다. 그대로 즉시다.
    */
   function handleStructuralSaved(newUpdatedAt: string, structuralValidation?: StructuralValidationSummary) {
     pushStructuralUndoStep();
     handleSaved(newUpdatedAt, structuralValidation);
+  }
+
+  /**
+   * ==========================================================================
+   * 🔴 구조 변경을 **모아 두는** 단 하나의 통로 (2026-11-20, 조각 4)
+   * ==========================================================================
+   * 일곱이 전부 여기를 지난다. 하는 일이 둘인데 **차례가 중요하다.**
+   *
+   *  ① `pushPendingUndoStep()` 을 **목록을 고치기 전에** 부른다. 되돌리기 스택은
+   *     「바뀌기 직전 상태」를 쌓는 방식이라, 뒤에 부르면 이미 바뀐 목록이 담겨
+   *     [이전]이 한 칸씩 밀린다(드래그가 지켜 온 규칙 그대로다).
+   *  ② 번호는 appendPendingStructuralOperations 가 찍는다. 도장을 여기서 만들지
+   *     않는 까닭은 pendingStructuralOperations 선언부에 있다.
+   */
+  function queueStructural(build: Parameters<typeof appendPendingStructuralOperations>[1]) {
+    pushPendingUndoStep();
+    setPendingStructuralOperations((prev) => appendPendingStructuralOperations(prev, build));
   }
 
   // Phase 5C-5B — the new TECHNICAL_TASK-only node/edge structural CRUD.
@@ -1044,54 +1319,113 @@ export default function ProcedureTemplateEditorScreen({
     handleSaved(result.updatedAt);
   }
 
-  function handleNodeDeleted(newUpdatedAt: string) {
-    // 🔴 삭제는 서버가 이미 저장했다 — 되돌리기 스택에 한 걸음을 쌓아야
-    // [이전]이 이 자리에서 서버 이력으로 넘어간다. 이것이 없어서, 드래그 뒤의
-    // 삭제가 되돌려지지 않았다.
-    pushStructuralUndoStep();
-    if (selectedNodeId) {
-      setPendingNodeFieldDraftsById((prev) => {
-        if (!prev.has(selectedNodeId)) return prev;
-        const next = new Map(prev);
-        next.delete(selectedNodeId);
-        return next;
-      });
-      setPendingLayoutMoves((prev) => {
-        if (!prev.has(selectedNodeId)) return prev;
-        const next = new Map(prev);
-        next.delete(selectedNodeId);
-        return next;
-      });
-    }
-    setSelectedNodeId(null);
-    handleSaved(newUpdatedAt);
+  /**
+   * ── 🔴 구조 변경 일곱을 모아 두는 자리 (2026-11-20, 조각 4) ───────────────
+   * 전에는 패널들이 서버 액션을 직접 불렀고, 성공하면 handleStructuralSaved /
+   * handleNodeDeleted / handleEdgeDeleted 로 돌아왔다. 지금은 **무엇을 할지만**
+   * 받아 목록에 쌓고, 실제 호출은 handleGlobalSave 가 한다.
+   *
+   * 🔴 **되돌리기 한 걸음은 queueStructural 이 쌓는다**(목록을 고치기 전에).
+   *    여기서 pushStructuralUndoStep 을 또 부르면 한 변경에 표시가 둘이 선다.
+   */
+  function handleQueueCreateNode(input: { nodeType: ManualTechnicalNodeType; title: string; position: Position | null }) {
+    queueStructural((mint) => [
+      { kind: "CREATE_NODE", tempNodeId: mint.nextNodeId(), nodeType: input.nodeType, title: input.title, position: input.position },
+    ]);
   }
-  function handleEdgeDeleted(newUpdatedAt: string) {
-    // 노드 삭제와 같은 까닭으로 한 걸음을 쌓는다(바로 위 주석 참고).
-    pushStructuralUndoStep();
-    if (selectedEdgeId) {
-      setPendingEdgeFieldDraftsById((prev) => {
-        if (!prev.has(selectedEdgeId)) return prev;
-        const next = new Map(prev);
-        next.delete(selectedEdgeId);
-        return next;
-      });
-      setPendingEdgeRouteMoves((prev) => {
-        if (!prev.has(selectedEdgeId)) return prev;
-        const next = new Map(prev);
-        next.delete(selectedEdgeId);
-        return next;
-      });
-      setPendingEdgeSaveNoteById((prev) => {
-        if (!prev.has(selectedEdgeId)) return prev;
-        const next = new Map(prev);
-        next.delete(selectedEdgeId);
-        return next;
-      });
-    }
+
+  function handleQueueChangeNodeType(nodeId: string, newNodeType: ProcedureNodeType, reason: string | null) {
+    queueStructural(() => [{ kind: "CHANGE_NODE_TYPE", nodeId, newNodeType, reason }]);
+  }
+
+  /**
+   * 🔴 지울 노드의 **초안도 함께 버린다**(옛 handleNodeDeleted 가 하던 뒤처리 그대로).
+   * 안 버리면 사라진 노드의 칸 값이 「바뀜」으로 계속 세어져 [저장]이 없는 행을
+   * 고치려 든다. 🔵 되돌리면 스냅샷이 그 초안까지 함께 되살린다 — queueStructural
+   * 이 **버리기 전에** 한 칸을 찍기 때문이다.
+   */
+  function handleQueueDeleteNode(nodeId: string, reason: string | null) {
+    queueStructural(() => [{ kind: "DELETE_NODE", nodeId, reason }]);
+    setPendingNodeFieldDraftsById((prev) => {
+      if (!prev.has(nodeId)) return prev;
+      const next = new Map(prev);
+      next.delete(nodeId);
+      return next;
+    });
+    setPendingLayoutMoves((prev) => {
+      if (!prev.has(nodeId)) return prev;
+      const next = new Map(prev);
+      next.delete(nodeId);
+      return next;
+    });
+    setSelectedNodeId(null);
+  }
+
+  function handleQueueCreateEdge(input: {
+    fromNodeId: string;
+    toNodeId: string;
+    branchType: ProcedureBranchType;
+    branchLabel: string | null;
+    reason: string | null;
+  }) {
+    queueStructural((mint) => [
+      {
+        kind: "CREATE_EDGE",
+        tempEdgeId: mint.nextEdgeId(),
+        fromNodeId: input.fromNodeId,
+        toNodeId: input.toNodeId,
+        branchType: input.branchType,
+        branchLabel: input.branchLabel,
+        reason: input.reason,
+      },
+    ]);
+  }
+
+  function handleQueueRetargetEdge(edgeId: string, newFromNodeId: string, newToNodeId: string, reason: string | null) {
+    queueStructural(() => [{ kind: "RETARGET_EDGE", edgeId, newFromNodeId, newToNodeId, reason }]);
+  }
+
+  function handleQueueDeleteEdge(edgeId: string, reason: string | null) {
+    queueStructural(() => [{ kind: "DELETE_EDGE", edgeId, reason }]);
+    setPendingEdgeFieldDraftsById((prev) => {
+      if (!prev.has(edgeId)) return prev;
+      const next = new Map(prev);
+      next.delete(edgeId);
+      return next;
+    });
+    setPendingEdgeRouteMoves((prev) => {
+      if (!prev.has(edgeId)) return prev;
+      const next = new Map(prev);
+      next.delete(edgeId);
+      return next;
+    });
+    setPendingEdgeSaveNoteById((prev) => {
+      if (!prev.has(edgeId)) return prev;
+      const next = new Map(prev);
+      next.delete(edgeId);
+      return next;
+    });
     setSelectedEdgeId(null);
     setSelectedWaypoint(null);
-    handleSaved(newUpdatedAt);
+  }
+
+  /**
+   * 🔴 **한 도장에서 번호를 둘 받는다** — 새 노드 하나와 딸려 생길 둘째 연결선
+   * 하나. 두 번 나눠 부르면 그 사이에 목록이 바뀌어 번호가 어긋날 수 있다
+   * (appendPendingStructuralOperations 가 build 를 **목록**으로 받는 까닭).
+   */
+  function handleQueueInsertNodeOnEdge(edgeId: string, input: { nodeType: ManualTechnicalNodeType; title: string; position: Position }) {
+    queueStructural((mint) => [
+      {
+        kind: "INSERT_NODE_ON_EDGE",
+        edgeId,
+        tempNodeId: mint.nextNodeId(),
+        tempSecondEdgeId: mint.nextEdgeId(),
+        nodeType: input.nodeType,
+        title: input.title,
+        position: input.position,
+      },
+    ]);
   }
 
   // Phase 5C-5B usability item 5 — inline rename, TECHNICAL_TASK DRAFT only
@@ -1152,26 +1486,146 @@ export default function ProcedureTemplateEditorScreen({
    * this auxiliary result is captured here, in the screen's own closure,
    * per this checkpoint's explicit instruction not to pollute
    * graph-editor-core with Procedure-specific data.
+   *
+   * ──────────────────────────────────────────────────────────────────────
+   * 🔴 2026-11-20(조각 4) — **구조 변경이 앞에 한 단계 더 붙었다**
+   * ──────────────────────────────────────────────────────────────────────
+   *   구조 보내기 → collectStructuralIdEffects → 네 지도 rebase
+   *     → dirty 다시 계산 + includeBrandNew* → 기존 planProcedureSaveSteps
+   *     → 기존 runProcedureSaveSequence
+   *
+   * 차례가 뒤집히면 안 되는 까닭은 procedure-editor-structural-save.ts 머리말에
+   * 있다 — 새 노드는 칸 값 단계가 가리킬 진짜 id 가 아직 없고, 그 사라짐에는
+   * **오류가 안 난다.**
+   *
+   * 🔴 구조가 중간에 멈추면 **칸 값 단계로 안 넘어간다**(canProceedToFieldSave).
+   * 메시지가 둘이 되면 어디까지 맞는지 사람이 못 읽는다. 🔵 넘어가지 않아도 잃는
+   * 것은 없다 — 아직 안 간 초안은 그대로 남아 다음 [저장]에 다시 간다.
    */
   async function handleGlobalSave() {
-    if (!hasAnyPendingChanges) return;
+    if (!hasAnyPendingChanges || !canSendStructural) return;
     setGlobalSaveStatus("saving");
     setGlobalSaveError(null);
 
-    const steps = planProcedureSaveSteps({ dirtyNodeFieldEntries, dirtyEdgeFieldEntries, dirtyPositionNodeIds, dirtyRouteEdgeIds });
+    // 🔴 이 아래는 전부 **지역 변수로** 들고 간다. 구조 단계가 지도의 키를 옮기는데
+    //    setState 는 다음 렌더에야 닿으므로, 칸 값 단계가 state 를 읽으면 **옮기기
+    //    전** 지도를 본다(임시 id 가 그대로 남아 그 줄이 통째로 건너뛰어진다).
+    let nodeDrafts = pendingNodeFieldDraftsById;
+    let edgeDrafts = pendingEdgeFieldDraftsById;
+    let edgeNotes = pendingEdgeSaveNoteById;
+    let layoutMoves = pendingLayoutMoves;
+    let routeMoves = pendingEdgeRouteMoves;
+    let brandNewNodeIds: string[] = [];
+    let brandNewEdgeIds: string[] = [];
+    let tokenAfterStructural = currentUpdatedAt;
+    let structuralValidationFromStructuralPhase: StructuralValidationSummary | null = null;
+    /**
+     * 🔴 되돌리기 스택을 **한 번만** 손댄다. 여기서 설정해 두고 아래 세 끝 자리에서
+     * planUndoStackAfterStructuralSave 에 넘긴다 — 중간에 미리 세워 두면 「전부
+     * 성공」 갈래의 스택 비우기가 방금 세운 표시를 도로 지운다.
+     * 🔵 구조 변경이 0건이면 빈 목록 그대로이고, 그 함수는 들어온 스택을 **그대로**
+     *    돌려준다 — 즉 구조를 안 쓰는 저장에서는 전 동작과 한 글자도 다르지 않다.
+     */
+    let succeededStructuralOperations: readonly PendingStructuralOperation[] = [];
+
+    if (pendingStructuralOperations.length > 0) {
+      const structuralOutcome = await runProcedureStructuralSequence<StructuralValidationSummary>(
+        pendingStructuralOperations,
+        currentUpdatedAt,
+        executeStructuralOperation
+      );
+      const effects = collectStructuralIdEffects(structuralOutcome);
+
+      // 🔴 **남은 조작 세우기와 네 지도 옮기기를 반드시 함께** 한다. 하나만 하면
+      //    어긋난다 — 목록만 바꾸면 초안이 임시 키를 든 채 남아 영영 안 가고,
+      //    지도만 옮기면 이미 보낸 조작을 다시 보내 같은 노드가 두 번 만들어진다.
+      setPendingStructuralOperations(structuralOutcome.remainingOperations);
+      setJustSavedStructuralOperations((prev) => [...prev, ...structuralOutcome.succeededOperations]);
+
+      nodeDrafts = rebaseDraftMapAfterStructuralSave(pendingNodeFieldDraftsById, effects, "node");
+      layoutMoves = rebaseDraftMapAfterStructuralSave(pendingLayoutMoves, effects, "node");
+      edgeDrafts = rebaseDraftMapAfterStructuralSave(pendingEdgeFieldDraftsById, effects, "edge");
+      routeMoves = rebaseDraftMapAfterStructuralSave(pendingEdgeRouteMoves, effects, "edge");
+      // 🔵 지시서가 말한 「네 지도」에 **검토자 메모를 하나 더** 얹었다. 그것도
+      //    연결선 id 를 키로 쓰는 지도라 똑같이 옮겨야 하고, 안 옮기면 새 연결선에
+      //    적은 메모가 그 저장의 이력에서 조용히 빠진다.
+      edgeNotes = rebaseDraftMapAfterStructuralSave(pendingEdgeSaveNoteById, effects, "edge");
+
+      setPendingNodeFieldDraftsById(nodeDrafts);
+      setPendingLayoutMoves(layoutMoves);
+      setPendingEdgeFieldDraftsById(edgeDrafts);
+      setPendingEdgeRouteMoves(routeMoves);
+      setPendingEdgeSaveNoteById(edgeNotes);
+
+      succeededStructuralOperations = structuralOutcome.succeededOperations;
+      brandNewNodeIds = effects.createdNodeIds;
+      brandNewEdgeIds = effects.createdEdgeIds;
+      tokenAfterStructural = structuralOutcome.finalUpdatedAt;
+      structuralValidationFromStructuralPhase = structuralOutcome.lastStructuralValidation;
+
+      if (!canProceedToFieldSave(structuralOutcome)) {
+        // 🔴 **칸 값 단계로 안 넘어간다.** 다만 **스택은 반드시 손본다** — 한 건이라도
+        //    서버에 갔다면 그보다 앞에 쌓인 스냅샷은 전부 거짓이고(「아직 보낼 것」이라
+        //    말하는데 이미 보냈다), 그대로 되돌려 다시 저장하면 같은 노드가 두 번
+        //    만들어진다. 🔵 한 건도 안 갔으면 그 함수가 들어온 스택을 그대로 돌려준다.
+        setPendingUndoStack((prev) => planUndoStackAfterStructuralSave(prev, { succeededOperations: succeededStructuralOperations }));
+        if (succeededStructuralOperations.length > 0) lastFieldEditKeyRef.current = null;
+        setCurrentUpdatedAt(tokenAfterStructural);
+        if (structuralValidationFromStructuralPhase) setLastStructuralValidation(structuralValidationFromStructuralPhase);
+        setGlobalSaveStatus("failed");
+        setGlobalSaveError(
+          structuralOutcome.failureMessage ?? "저장할 수 없는 구조 변경이 있어 저장을 멈췄습니다. 아래 안내를 확인해 주세요."
+        );
+        return;
+      }
+    }
+
+    // 🔴 dirty 를 **다시** 센다. 위에서 키가 옮겨졌고, 같은 저장에서 지워진 행의
+    //    초안은 버려졌다 — 바깥(렌더 시점)에서 센 값은 이미 낡았다.
+    const rebasedNodeFieldEntries = includeBrandNewDraftEntries(
+      computeDirtyProcedureNodeFieldEntries(nodeDrafts, serverNodesById),
+      brandNewNodeIds,
+      nodeDrafts
+    );
+    const rebasedEdgeFieldEntries = includeBrandNewDraftEntries(
+      computeDirtyProcedureEdgeFieldEntries(edgeDrafts, serverEdgesById),
+      brandNewEdgeIds,
+      edgeDrafts
+    );
+    const rebasedPositionNodeIds = includeBrandNewDraftIds(computeDirtyProcedurePositionNodeIds(layoutMoves, serverNodesById), brandNewNodeIds, layoutMoves);
+    const rebasedRouteEdgeIds = includeBrandNewDraftIds(computeDirtyProcedureRouteEdgeIds(routeMoves, serverEdgesById), brandNewEdgeIds, routeMoves);
+
+    const steps = planProcedureSaveSteps({
+      dirtyNodeFieldEntries: rebasedNodeFieldEntries,
+      dirtyEdgeFieldEntries: rebasedEdgeFieldEntries,
+      dirtyPositionNodeIds: rebasedPositionNodeIds,
+      dirtyRouteEdgeIds: rebasedRouteEdgeIds,
+    });
 
     let capturedStructuralValidation: StructuralValidationSummary | null = null;
+    const brandNewNodeIdSet = new Set(brandNewNodeIds);
 
     async function executeStep(step: ProcedureSaveStep, expectedUpdatedAt: string): Promise<ProcedureSaveStepResult> {
       if (step.kind === "NODE_FIELDS") {
-        const draft = nodeFieldDraft(step.nodeId);
+        const draft = nodeDrafts.get(step.nodeId) ?? nodeFieldDraft(step.nodeId);
         const result = await updateProcedureTemplateNodeAction({
           nodeId: step.nodeId,
           patch: {
             title: draft.title,
             description: draft.description.trim() || null,
             instructions: draft.instructions.trim() || null,
-            sortOrder: draft.sortOrder,
+            // 🔴 **막 생긴 노드에는 정렬 번호를 안 보낸다**(2026-11-20, 조각 4).
+            //    서버가 만들 때 「맨 뒤 + 1」을 매겼는데, 화면의 초안은 서버 스냅숏이
+            //    없을 때 `sortOrder: 0` 으로 받침을 세운다. 그 0 을 그대로 보내면
+            //    **방금 매긴 번호를 0 으로 덮어쓴다**(조각 2 가 경고한 자리).
+            //    🔵 짐작한 값을 보내는 길도 있었지만 안 골랐다 — 서버가 재는 시점
+            //       (구조 단계 맨 앞)과 화면이 재는 시점(사람이 누른 그때)이 달라
+            //       같은 저장에서 노드를 지웠다 만들면 어긋난다. 틀린 값을 보내느니
+            //       안 보내고 서버 값을 그대로 두는 쪽이 언제나 맞다.
+            //    🔵 속성 패널은 이 노드의 정렬 칸을 잠그고 까닭을 적는다
+            //       (NodePropertyPanel 의 isUnsavedNode) — 못 보내는 칸을 고칠 수
+            //       있게 두면 사람이 고친 값이 조용히 사라진다.
+            ...(brandNewNodeIdSet.has(step.nodeId) ? {} : { sortOrder: draft.sortOrder }),
             isActive: draft.isActive,
             // 🔵 이웃 글자 칸처럼 `|| null` 로 떨어뜨리지 않는다 — 이 값은 이미
             //    id 아니면 null 이고, 빈 글자가 섞일 자리가 없다.
@@ -1182,8 +1636,8 @@ export default function ProcedureTemplateEditorScreen({
         return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
       }
       if (step.kind === "EDGE_FIELDS") {
-        const draft = edgeFieldDraft(step.edgeId);
-        const note = edgeSaveNote(step.edgeId).trim() || null;
+        const draft = edgeDrafts.get(step.edgeId) ?? edgeFieldDraft(step.edgeId);
+        const note = (edgeNotes.get(step.edgeId) ?? "").trim() || null;
         const result = await updateProcedureTemplateEdgeAction({
           edgeId: step.edgeId,
           patch: { branchType: draft.branchType, branchLabel: draft.branchLabel.trim() || null },
@@ -1199,15 +1653,15 @@ export default function ProcedureTemplateEditorScreen({
       }
       // LAYOUT_AND_ROUTES
       const positions = step.nodeIds.map((nodeId) => {
-        const pos = pendingLayoutMoves.get(nodeId)!;
+        const pos = layoutMoves.get(nodeId)!;
         return { nodeId, x: pos.x, y: pos.y };
       });
-      const edgeRoutes: EdgeRouteInput[] = step.edgeIds.map((edgeId) => ({ edgeId, points: pendingEdgeRouteMoves.has(edgeId) ? (pendingEdgeRouteMoves.get(edgeId) ?? null) : null }));
+      const edgeRoutes: EdgeRouteInput[] = step.edgeIds.map((edgeId) => ({ edgeId, points: routeMoves.has(edgeId) ? (routeMoves.get(edgeId) ?? null) : null }));
       const result = await saveProcedureTemplateLayoutAction({ templateId: template.id, positions, edgeRoutes, expectedTemplateUpdatedAt: expectedUpdatedAt });
       return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
     }
 
-    const outcome = await runProcedureSaveSequence(steps, currentUpdatedAt, executeStep);
+    const outcome = await runProcedureSaveSequence(steps, tokenAfterStructural, executeStep);
 
     const flushedNodeFieldIds = succeededProcedureNodeFieldIds(outcome.succeededSteps);
     const flushedEdgeFieldIds = succeededProcedureEdgeFieldIds(outcome.succeededSteps);
@@ -1221,7 +1675,11 @@ export default function ProcedureTemplateEditorScreen({
     if (flushedNodeFieldIds.length > 0) {
       setJustSavedNodeFieldsById((prev) => {
         const next = new Map(prev);
-        for (const id of flushedNodeFieldIds) next.set(id, nodeFieldDraft(id));
+        // 🔵 지도는 **옮긴 뒤의 지역 변수**를 읽는다 — state 는 아직 옛 키를 들고 있다.
+        for (const id of flushedNodeFieldIds) {
+          const draft = nodeDrafts.get(id);
+          if (draft) next.set(id, draft);
+        }
         return next;
       });
       setPendingNodeFieldDraftsById((prev) => {
@@ -1233,7 +1691,10 @@ export default function ProcedureTemplateEditorScreen({
     if (flushedEdgeFieldIds.length > 0) {
       setJustSavedEdgeFieldsById((prev) => {
         const next = new Map(prev);
-        for (const id of flushedEdgeFieldIds) next.set(id, edgeFieldDraft(id));
+        for (const id of flushedEdgeFieldIds) {
+          const draft = edgeDrafts.get(id);
+          if (draft) next.set(id, draft);
+        }
         return next;
       });
       setPendingEdgeFieldDraftsById((prev) => {
@@ -1251,7 +1712,7 @@ export default function ProcedureTemplateEditorScreen({
       setJustSavedPositionsById((prev) => {
         const next = new Map(prev);
         for (const id of flushedLayoutNodeIds) {
-          const pos = pendingLayoutMoves.get(id);
+          const pos = layoutMoves.get(id);
           if (pos) next.set(id, pos);
         }
         return next;
@@ -1265,7 +1726,7 @@ export default function ProcedureTemplateEditorScreen({
     if (flushedRouteEdgeIds.length > 0) {
       setJustSavedRoutesById((prev) => {
         const next = new Map(prev);
-        for (const id of flushedRouteEdgeIds) next.set(id, pendingEdgeRouteMoves.has(id) ? (pendingEdgeRouteMoves.get(id) ?? null) : null);
+        for (const id of flushedRouteEdgeIds) next.set(id, routeMoves.has(id) ? (routeMoves.get(id) ?? null) : null);
         return next;
       });
       setPendingEdgeRouteMoves((prev) => {
@@ -1276,6 +1737,10 @@ export default function ProcedureTemplateEditorScreen({
     }
 
     setCurrentUpdatedAt(outcome.finalUpdatedAt);
+    // 🔴 **더 나중 것이 이긴다.** 구조 단계와 칸 값 단계가 둘 다 검증 요약을
+    //    돌려주는데, 칸 값 단계(EDGE_FIELDS)가 **뒤**라 그쪽이 더 새 사진이다.
+    //    차례를 뒤집으면 저장이 끝난 화면에 구조 단계 중간의 낡은 요약이 선다.
+    if (structuralValidationFromStructuralPhase) setLastStructuralValidation(structuralValidationFromStructuralPhase);
     if (capturedStructuralValidation) setLastStructuralValidation(capturedStructuralValidation);
 
     if (outcome.failedAtStep) {
@@ -1285,6 +1750,14 @@ export default function ProcedureTemplateEditorScreen({
       // save to be safely reconciled against the drafts that are still
       // pending, and none of that reconciliation is needed anyway: the
       // justSaved shadows already make the canvas correct without it.
+      //
+      // 🔴 2026-11-20(조각 4) — 다만 **되돌리기 스택은 손본다.** 여기 닿았다는 것은
+      //    구조 단계가 **전부 성공**했다는 뜻이고(안 그러면 위에서 돌아갔다), 그러면
+      //    그보다 앞에 쌓인 스냅샷은 전부 거짓이다 — 「아직 보낼 것」이라고 말하는데
+      //    이미 보냈고 임시 번호는 진짜 id 가 됐다. 그대로 되돌려 다시 저장하면 같은
+      //    노드가 두 번 만들어진다.
+      setPendingUndoStack((prev) => planUndoStackAfterStructuralSave(prev, { succeededOperations: succeededStructuralOperations }));
+      if (succeededStructuralOperations.length > 0) lastFieldEditKeyRef.current = null;
       setGlobalSaveStatus("failed");
       setGlobalSaveError(outcome.failureMessage);
       return;
@@ -1302,9 +1775,113 @@ export default function ProcedureTemplateEditorScreen({
     // 같은 변경이 두 체계에 중복으로 남지 않게 한다. 비워도 되돌리기가 막히지
     // 않는다: 스택이 빈 채로 [이전]을 누르면 계획이 "스택이 비었고 서버 이력에
     // 남은 것이 있다" 갈래로 가 서버 이력을 그대로 거슬러 올라간다.
-    setPendingUndoStack(createProcedureEditorUndoStack<PendingSnapshot>());
+    //
+    // 🔴 2026-11-20(조각 4) — 비우는 **대신** planUndoStackAfterStructuralSave 에
+    //    빈 스택을 넣어 부른다. 그냥 비우기만 하면 이번 저장이 보낸 구조 변경이
+    //    [이전]으로 되돌아갈 차례를 못 받는다: 그 갈래는 serverHasHistory 를 믿는데
+    //    그 값은 **서버에서 그려 온** 것이라 방금 적힌 것이 아직 안 비쳐 있다
+    //    (router.refresh() 가 닿기 전이다). 보낸 건수만큼 표시를 세워 그 틈을 없앤다.
+    //    🔵 구조 변경이 0건이면 빈 스택이 그대로 나와 전 동작과 똑같다.
+    setPendingUndoStack(planUndoStackAfterStructuralSave(createProcedureEditorUndoStack<PendingSnapshot>(), { succeededOperations: succeededStructuralOperations }));
     lastFieldEditKeyRef.current = null;
     router.refresh();
+  }
+
+  /**
+   * 모아 둔 구조 조작 **한 건**을 실제로 서버로 보낸다 — 일곱 갈래가 전부 여기서
+   * 갈린다. 🔴 **부르는 액션은 전부 전부터 있던 것 그대로**다(이 조각은 서버를 한
+   * 글자도 안 바꿨다). 바뀐 것은 **부르는 시점**뿐이다.
+   *
+   * 🔴 넘어오는 operation 은 **치환이 끝난 모습**이다 — 임시 id 를 여기서 다시
+   * 들여다볼 필요가 없다(들여다보면 안 된다. 그때쯤이면 이미 진짜 id 다).
+   *
+   * 🔴 돌려주는 칸에서 `nodeId`·`edgeId`·`secondEdgeId` 를 빠뜨리면 뒤 걸음이
+   * 임시 id 를 든 채 나간다. 타입은 전부 선택 칸이라 아무 말도 안 하고, 대신
+   * 보내기 직전 관문(findUnresolvedTempIds)이 운다. 특히 **삽입은 둘**이다.
+   */
+  async function executeStructuralOperation(
+    operation: PendingStructuralOperation,
+    expectedUpdatedAt: string
+  ): Promise<ProcedureStructuralStepResult<StructuralValidationSummary>> {
+    switch (operation.kind) {
+      case "CREATE_NODE": {
+        const result = await createProcedureTemplateNodeAction({
+          templateId: template.id,
+          nodeType: operation.nodeType,
+          title: operation.title,
+          position: operation.position,
+          expectedTemplateUpdatedAt: expectedUpdatedAt,
+        });
+        return result.ok ? { ok: true, updatedAt: result.updatedAt, nodeId: result.nodeId } : { ok: false, message: result.message };
+      }
+      case "DELETE_NODE": {
+        const result = await deleteProcedureTemplateNodeAction({
+          nodeId: operation.nodeId,
+          reason: operation.reason,
+          expectedTemplateUpdatedAt: expectedUpdatedAt,
+        });
+        return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
+      }
+      case "CHANGE_NODE_TYPE": {
+        const result = await changeProcedureTemplateNodeTypeAction({
+          nodeId: operation.nodeId,
+          newNodeType: operation.newNodeType,
+          reason: operation.reason,
+          expectedTemplateUpdatedAt: expectedUpdatedAt,
+        });
+        return result.ok
+          ? { ok: true, updatedAt: result.updatedAt, structuralValidation: result.structuralValidation }
+          : { ok: false, message: result.message };
+      }
+      case "CREATE_EDGE": {
+        const result = await createProcedureTemplateEdgeAction({
+          templateId: template.id,
+          fromNodeId: operation.fromNodeId,
+          toNodeId: operation.toNodeId,
+          branchType: operation.branchType,
+          branchLabel: operation.branchLabel,
+          reason: operation.reason,
+          expectedTemplateUpdatedAt: expectedUpdatedAt,
+        });
+        return result.ok
+          ? { ok: true, updatedAt: result.updatedAt, edgeId: result.edgeId, structuralValidation: result.structuralValidation }
+          : { ok: false, message: result.message };
+      }
+      case "DELETE_EDGE": {
+        const result = await deleteProcedureTemplateEdgeAction({
+          edgeId: operation.edgeId,
+          reason: operation.reason,
+          expectedTemplateUpdatedAt: expectedUpdatedAt,
+        });
+        return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
+      }
+      case "RETARGET_EDGE": {
+        const result = await retargetProcedureTemplateEdgeAction({
+          edgeId: operation.edgeId,
+          newFromNodeId: operation.newFromNodeId,
+          newToNodeId: operation.newToNodeId,
+          reason: operation.reason,
+          expectedTemplateUpdatedAt: expectedUpdatedAt,
+        });
+        return result.ok
+          ? { ok: true, updatedAt: result.updatedAt, structuralValidation: result.structuralValidation }
+          : { ok: false, message: result.message };
+      }
+      case "INSERT_NODE_ON_EDGE": {
+        const result = await insertProcedureTemplateNodeOnEdgeAction({
+          edgeId: operation.edgeId,
+          nodeType: operation.nodeType,
+          title: operation.title,
+          position: operation.position,
+          expectedTemplateUpdatedAt: expectedUpdatedAt,
+        });
+        // 🔴 **둘**이다 — 새 노드와 둘째 연결선. firstEdgeId 는 넘긴 edgeId 그
+        //    자체(이미 진짜 id)라 받지 않는다.
+        return result.ok
+          ? { ok: true, updatedAt: result.updatedAt, nodeId: result.nodeId, secondEdgeId: result.secondEdgeId }
+          : { ok: false, message: result.message };
+      }
+    }
   }
 
   function handleDiscardAllPending() {
@@ -1319,6 +1896,11 @@ export default function ProcedureTemplateEditorScreen({
     setPendingEdgeSaveNoteById(new Map());
     setPendingLayoutMoves(new Map());
     setPendingEdgeRouteMoves(new Map());
+    // 🔴 2026-11-20(조각 4) — **구조 목록도 함께 비운다.** 안 비우면 취소한 뒤에도
+    //    노드 추가가 살아남아 다음 [저장]에 조용히 따라간다. 🔴 그리고 이것이
+    //    **부분 실패로 남은 조작을 치우는 유일한 길**이다 — 못 보낸 조작은
+    //    되돌리기 스택에 제 칸이 없다(planUndoStackAfterStructuralSave 의 ㄷ절).
+    setPendingStructuralOperations([]);
     setSelectedWaypoint(null);
     setGlobalSaveStatus("idle");
     setGlobalSaveError(null);
@@ -1488,7 +2070,10 @@ export default function ProcedureTemplateEditorScreen({
    */
   const handleEdgeDoubleClick = useCallback(
     (edgeId: string) => {
-      const edge = template.edges.find((e) => e.id === edgeId);
+      // 🔴 2026-11-20(조각 4) — 찾는 곳이 `template.edges` 에서 **renderedEdges** 로
+      //    바뀌었다. 저장 전에 그은 선은 서버 목록에 없어서, 그대로 두면 그 선만
+      //    두 번 눌러도 아무 일이 안 일어난다(옆의 [연결 정렬] 단추도 같다).
+      const edge = renderedEdges.find((e) => e.id === edgeId);
       if (!edge) return;
       const sourceNode = renderedNodes.find((n) => n.id === edge.fromNodeId);
       const targetNode = renderedNodes.find((n) => n.id === edge.toNodeId);
@@ -1513,7 +2098,7 @@ export default function ProcedureTemplateEditorScreen({
         });
       }
     },
-    [template.edges, renderedNodes, resolveCurrentPosition, pendingEdgeRouteMoves, savedEdgeRoutes, setPendingPosition, resolveNodeDimensions]
+    [renderedEdges, renderedNodes, resolveCurrentPosition, pendingEdgeRouteMoves, savedEdgeRoutes, setPendingPosition, resolveNodeDimensions]
   );
 
   /**
@@ -1535,7 +2120,8 @@ export default function ProcedureTemplateEditorScreen({
   const handleAddWaypoint = useCallback(() => {
     if (!selectedEdgeId) return;
     pushPendingUndoStep();
-    const edge = template.edges.find((e) => e.id === selectedEdgeId);
+    // 🔴 곧게 펴기와 같은 까닭으로 renderedEdges 를 본다(2026-11-20, 조각 4).
+    const edge = renderedEdges.find((e) => e.id === selectedEdgeId);
     const source = edge ? resolveCurrentPosition(edge.fromNodeId) : undefined;
     const target = edge ? resolveCurrentPosition(edge.toNodeId) : undefined;
     if (!edge || !source || !target) return;
@@ -1545,7 +2131,7 @@ export default function ProcedureTemplateEditorScreen({
       next.set(selectedEdgeId, addWaypointAtDefaultPosition(currentWorkingRoutePoints(prev, selectedEdgeId), source, target));
       return next;
     });
-  }, [selectedEdgeId, template.edges, resolveCurrentPosition, savedEdgeRoutes, pushPendingUndoStep]);
+  }, [selectedEdgeId, renderedEdges, resolveCurrentPosition, savedEdgeRoutes, pushPendingUndoStep]);
 
   /** "선택 경로점 삭제" (button and Delete/Backspace) — removing the last remaining point restores automatic routing, per removeWaypoint's own semantics. Unchanged from before 1C. */
   const handleRemoveSelectedWaypoint = useCallback(() => {
@@ -1594,6 +2180,29 @@ export default function ProcedureTemplateEditorScreen({
 
   /** 5C-6D-1E — same gate ProcedureFlowGraph's own double-click handler already applies before requesting a straighten (editable + 사용자 배치 only); the explicit "연결 정렬" button in EdgePropertyPanel must never offer an action the canvas gesture itself wouldn't currently allow. */
   const canStraighten = canEdit && layoutMode === "USER";
+
+  /**
+   * 🔴 **지금 지울 수 없는 까닭**(2026-11-20, 조각 4). 서버가 거절할 두 가지를
+   * 앞당겨 보여 준다 — 새로 막는 것이 아니라, 모아 두느라 **거절이 [저장] 때로
+   * 밀린** 것을 화면이 대신 말해 주는 것이다.
+   *
+   * 🔴 선이 붙은 노드가 왜 여기 오는가: 전에는 누르는 즉시 서버가
+   * NODE_HAS_CONNECTED_EDGES 를 돌려줘 그 자리에서 글이 떴다. 이제는 그림에서
+   * 노드가 **먼저 사라져 보이고** 한참 뒤 [저장]이 실패한다 — 게다가 그때쯤이면
+   * 그 노드에 무슨 선이 붙어 있었는지 화면에 아무 단서가 없다.
+   *
+   * 🔵 세는 기준이 renderedEdges 라, 그 선들도 함께 지우기로 모아 두면 **그 순간
+   * 단추가 열린다.** 사람이 할 일(선 먼저, 노드 나중)이 화면에서 바로 읽힌다.
+   */
+  const selectedNodeDeleteBlockedReason: string | null = (() => {
+    if (!selectedNode) return null;
+    if (selectedNode.hasChecklistContent || selectedNode.hasTroubleshootingContent) {
+      return "체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다.";
+    }
+    const attached = renderedEdges.filter((e) => e.fromNodeId === selectedNode.id || e.toNodeId === selectedNode.id).length;
+    if (attached > 0) return `연결선 ${attached}개가 붙어 있어 삭제할 수 없습니다. 그 연결선을 먼저 지워 주세요.`;
+    return null;
+  })();
 
   return (
     <div className="flex flex-col gap-4">
@@ -1656,19 +2265,28 @@ export default function ProcedureTemplateEditorScreen({
         <div className="flex flex-wrap items-center gap-2">
           {canEdit && (
             <>
+              {/*
+                🔴 2026-11-20(조각 4) — **막힌 구조 변경이 있으면 [저장]을 끈다**
+                (canSendStructural). 보낼 수 있는 것만 골라 보내면 사람이 화면에서
+                한 일 하나가 설명 없이 사라진다 — 그래서 한 건도 안 보낸다. 까닭은
+                바로 아래 줄에서 조작마다 한 줄씩 적는다(흐린 단추만 두면 고장으로
+                읽힌다).
+              */}
               <button
                 type="button"
                 onClick={() => void handleGlobalSave()}
-                disabled={!hasAnyPendingChanges || globalSaveStatus === "saving"}
+                disabled={!hasAnyPendingChanges || !canSendStructural || globalSaveStatus === "saving"}
                 className="rounded-md bg-primary-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
               >
                 {globalSaveStatus === "saving"
                   ? "저장 중..."
                   : !hasAnyPendingChanges
                     ? "저장할 변경 없음"
-                    : globalSaveStatus === "failed"
-                      ? "저장 실패 - 다시 시도"
-                      : "저장"}
+                    : !canSendStructural
+                      ? "저장할 수 없는 변경 있음"
+                      : globalSaveStatus === "failed"
+                        ? "저장 실패 - 다시 시도"
+                        : "저장"}
               </button>
               <button type="button" onClick={handleDiscardAllPending} disabled={!hasAnyPendingChanges} className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
                 취소
@@ -1699,9 +2317,15 @@ export default function ProcedureTemplateEditorScreen({
                 무엇을 안 맡는지는 상태가 아니라 이 편집기의 구조라, 상태가 아니라
                 상시 문구로 적는다. globalSaveStatus 가 idle 일 때만 — "저장 완료"와
                 한 줄에 겹쳐 서지 않게 한다.
+
+                🔴 2026-11-20(조각 4) — **글이 뒤집혔다.** 전에는 "노드·연결선 추가·
+                삭제·재연결은 [저장] 없이 바로 저장됩니다" 였고, 그것이 2026-11-04 에
+                오해를 풀려고 세운 바로 그 줄이다. 이번에 동작을 바꾸면서 그 말이
+                **거짓**이 됐다 — 이제 그 셋도 [저장]을 눌러야 간다. 글자만 두면
+                읽은 사람이 저장하지 않고 나간다.
               */}
               {!hasAnyPendingChanges && structuralSaveNoticeId === 0 && globalSaveStatus === "idle" && (
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">노드·연결선 추가·삭제·재연결은 [저장] 없이 바로 저장됩니다</span>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">노드·연결선 추가·삭제·재연결도 [저장]을 눌러야 저장됩니다</span>
               )}
             </>
           )}
@@ -1779,6 +2403,25 @@ export default function ProcedureTemplateEditorScreen({
       </div>
       {globalSaveStatus === "failed" && globalSaveError && <p className="text-xs text-red-600 dark:text-red-400">{globalSaveError}</p>}
       {undoRedoError && <p className="text-xs text-red-600 dark:text-red-400">{undoRedoError}</p>}
+      {/*
+        🔴 2026-11-20(조각 4) — **보낼 수 없는 구조 변경**을 저장 전에 미리 보인다.
+        위 [저장] 단추가 꺼져 있는 유일한 까닭이고, 조작마다 한 줄씩 「무엇이」와
+        「무엇을 하면 되는지」를 적는다. 글은 화면에서 짓지 않고 도메인
+        (describeStructuralConflicts)에서 받아 온다 — 두 곳에 적으면 어긋나는 날
+        아무도 못 잡는다.
+        🔵 패널의 빨간 글이 아니라 **여기** 서는 까닭: 막힌 조작이 지금 고른 노드·
+        연결선과 다른 것일 수 있다(목록 어디에나 있을 수 있다).
+      */}
+      {canEdit && structuralConflictMessages.length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs dark:border-red-900 dark:bg-red-950">
+          <p className="font-medium text-red-800 dark:text-red-300">저장할 수 없는 구조 변경 {structuralConflictMessages.length}건이 있어 [저장]이 막혀 있습니다.</p>
+          <ul className="mt-1 flex flex-col gap-0.5 text-red-700 dark:text-red-400">
+            {structuralConflictMessages.map((message, idx) => (
+              <li key={idx}>· {message}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {/*
         여기 있던 "저장하지 않은 변경사항이 있어 실행 취소/다시 실행을 사용할 수
         없습니다" 안내는 없앴다(줄기 B-①). 잠기는 상태 자체가 사라져서 할 말이
@@ -1898,18 +2541,19 @@ export default function ProcedureTemplateEditorScreen({
               }}
               pickedReferenceNode={pickedReferenceNode}
               canEdit={canEdit}
-              expectedTemplateUpdatedAt={currentUpdatedAt}
               draft={nodeFieldDraft(selectedNode.id)}
               onDraftChange={(patch) => updateNodeFieldDraft(selectedNode.id, patch)}
               onPositionDraftChange={(position) => setPendingPosition(selectedNode.id, position)}
               resolveNodeDimensions={resolveNodeDimensions}
               renderedPositions={renderedNodePositions}
-              onSaved={handleStructuralSaved}
+              onQueueChangeType={(newNodeType, reason) => handleQueueChangeNodeType(selectedNode.id, newNodeType, reason)}
               nextProcedureCandidates={nextProcedureCandidates}
               canDelete={canDeleteGraph}
-              onDeleted={handleNodeDeleted}
+              deleteBlockedReason={selectedNodeDeleteBlockedReason}
+              onQueueDelete={(reason) => handleQueueDeleteNode(selectedNode.id, reason)}
               canPosition={canDeleteGraph}
               isTechnical={isTechnical}
+              isUnsavedNode={unsavedNodeIds.has(selectedNode.id)}
             />
           )}
           {rightPanelTab === "properties" && !selectedNode && selectedEdge && (
@@ -1917,12 +2561,11 @@ export default function ProcedureTemplateEditorScreen({
               edge={selectedEdge}
               nodes={renderedNodes}
               canEdit={canEdit}
-              expectedTemplateUpdatedAt={currentUpdatedAt}
               draft={edgeFieldDraft(selectedEdge.id)}
               onDraftChange={(patch) => updateEdgeFieldDraft(selectedEdge.id, patch)}
               note={edgeSaveNote(selectedEdge.id)}
               onNoteChange={(note) => updateEdgeSaveNote(selectedEdge.id, note)}
-              onSaved={handleStructuralSaved}
+              onQueueRetarget={(newFromNodeId, newToNodeId, reason) => handleQueueRetargetEdge(selectedEdge.id, newFromNodeId, newToNodeId, reason)}
               routePoints={workingEdgeRoutes.get(selectedEdge.id) ?? null}
               selectedWaypointIndex={selectedWaypointIndex}
               onAddWaypoint={handleAddWaypoint}
@@ -1930,8 +2573,14 @@ export default function ProcedureTemplateEditorScreen({
               onResetRoute={() => handleResetEdgeRoute(selectedEdge.id)}
               onStraighten={canStraighten ? () => handleEdgeDoubleClick(selectedEdge.id) : null}
               canDelete={canDeleteGraph}
-              onDeleted={handleEdgeDeleted}
+              onQueueDelete={(reason) => handleQueueDeleteEdge(selectedEdge.id, reason)}
               canInsertNode={canDeleteGraph}
+              // 🔴 아직 저장 안 된 연결선 위에는 못 끼운다 — 그 조작이 목록에 들어가면
+              //    접기가 INSERT_ON_UNSAVED_EDGE 로 올려 [저장]이 통째로 막힌다.
+              insertNodeBlockedReason={
+                isTempEdgeId(selectedEdge.id) ? "이 연결선은 아직 저장 전이라 노드를 끼울 수 없습니다. 먼저 [저장]한 뒤에 해 주세요." : null
+              }
+              onQueueInsertNode={(input) => handleQueueInsertNodeOnEdge(selectedEdge.id, input)}
               isTechnical={isTechnical}
             />
           )}
@@ -1939,10 +2588,8 @@ export default function ProcedureTemplateEditorScreen({
 
           {rightPanelTab === "createEdge" && (
             <CreateEdgePanel
-              templateId={template.id}
               nodes={renderedNodes}
               canEdit={canEdit}
-              expectedTemplateUpdatedAt={currentUpdatedAt}
               prefillFromNodeId={selectedNodeId}
               isPickingTarget={isPickingEdgeTarget}
               onStartPickTarget={() => {
@@ -1954,16 +2601,14 @@ export default function ProcedureTemplateEditorScreen({
                 setIsPickingEdgeTarget(false);
               }}
               pickedTarget={pickedEdgeTarget}
-              onSaved={handleStructuralSaved}
+              onQueueCreate={handleQueueCreateEdge}
               isTechnical={isTechnical}
             />
           )}
 
           {rightPanelTab === "addNode" && canDeleteGraph && (
             <CreateNodePanel
-              templateId={template.id}
-              expectedTemplateUpdatedAt={currentUpdatedAt}
-              onSaved={handleStructuralSaved}
+              onQueueCreate={handleQueueCreateNode}
               selectedNode={selectedNode}
               resolveNodeDimensions={resolveNodeDimensions}
               renderedPositions={renderedNodePositions}

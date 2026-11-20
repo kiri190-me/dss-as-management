@@ -234,10 +234,16 @@ describe("검증 오류 짚기(화면) — ⑤ 🟢 앞 두 조각을 안 깨뜨
     assert.ok(!f.includes("hasAnyPendingChanges && canRunUndoPlan"), "되돌리기를 막던 옛 가드가 되살아나면 안 된다");
   });
 
-  test("줄기 B-② — 구조 조작 세 패널이 여전히 handleStructuralSaved 한 통로로 묶인다", () => {
+  test("줄기 B-② — 구조 조작 패널들이 여전히 **한 통로**로 묶인다", () => {
+    // 🔴 2026-11-20(조각 4) — 통로가 **둘로 갈렸다.** 노드·연결선 구조 변경 일곱은
+    //    [저장] 때까지 모이는 쪽(onQueue*)으로 가고, 여전히 즉시 저장되는 것
+    //    (이력 복원 · 현장 단계 넣기)만 handleStructuralSaved 에 남았다.
+    //    🔵 「한 통로」라는 이 시험의 뜻은 그대로다 — 패널마다 제 길을 내지 않는다.
     const f = flat(editor);
-    const uses = f.match(/onSaved=\{handleStructuralSaved\}/g) ?? [];
-    assert.ok(uses.length >= 4, `구조 조작 패널들이 한 통로를 지나야 한다 — 지금 ${uses.length}곳`);
+    const queued = f.match(/onQueue(Create|Delete|ChangeType|Retarget|InsertNode)=\{/g) ?? [];
+    assert.ok(queued.length >= 7, `모아 두는 손잡이가 일곱 이상이어야 한다 — 지금 ${queued.length}곳`);
+    const immediate = f.match(/on(Saved|Restored|Adopted)=\{handleStructuralSaved\}/g) ?? [];
+    assert.ok(immediate.length >= 1, `즉시 저장이 남은 길이 한 곳도 없다 — 이력 복원이 되돌리기 스택에서 빠진다`);
     assert.ok(!f.includes("<dialog"), "확인 창은 이 화면에 다시 생기지 않았다");
   });
 

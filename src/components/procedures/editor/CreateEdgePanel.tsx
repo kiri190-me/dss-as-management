@@ -3,9 +3,7 @@
 import { useState } from "react";
 import { PROCEDURE_BRANCH_TYPE_CODES, procedureBranchTypeLabels, type ProcedureBranchType } from "@/lib/domain/procedure-template-types";
 import type { EditorNodeRow } from "@/lib/db/queries/procedure-template-editor";
-import { createProcedureTemplateEdgeAction } from "@/lib/server/actions/procedure-template-editor";
 import { pickDefaultTargetNodeId } from "@/lib/graph-editor-core/edge-default-target";
-import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-template-editor";
 
 /**
  * Add-connection panel (Phase 4A; form-reset behavior standardized in the
@@ -20,11 +18,12 @@ import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-t
  * 추가에 한 번 더 묻는 값이 없다. (삭제·게시처럼 되돌릴 수 없거나 값이 큰
  * 조작의 확인은 그대로 남아 있다 — 이 조각이 없앤 것은 추가·수정뿐이다.)
  *
- * 🔴 됐다는 것을 사람이 아는 길은 **지도에 연결선이 나타나는 것**이다(onSaved →
- * 화면의 router.refresh()). 따로 성공 알림을 띄우지 않는다 — 조각 13(「추가
- * 작업 등록」)이 이미 같은 판단을 했다. 반대로 **실패는 반드시 보인다**:
- * errorMessage 를 패널 안에 그대로 그린다. 예전에는 같은 글을 창 안에도 한 벌
- * 더 그렸는데, 창이 없어진 지금은 이 한 자리가 **유일한** 통로다.
+ * 🔴 됐다는 것을 사람이 아는 길은 **지도에 연결선이 나타나는 것**이다. 따로 성공
+ * 알림을 띄우지 않는다 — 조각 13(「추가 작업 등록」)이 이미 같은 판단을 했다.
+ * 🔴 2026-11-20(조각 4) 에 이 문장의 뒤쪽이 바뀌었다: 예전에는 「실패는 반드시
+ * 보인다 — errorMessage 를 패널 안에 그대로 그린다」였는데, 이 패널에는 실패할
+ * 서버 호출이 한 건도 안 남아 그 자리가 **화면 위쪽 한 곳으로 옮겨 갔다**
+ * (없앤 것이 아니라 옮긴 것이다 — 아래 조각 4 절).
  *
  * 사유 입력칸은 원래부터 창이 아니라 패널에 있었으므로 그대로다 —
  * FULL_SERVICE/REFERENCE 는 사유가 여전히 필수고(canAdd), TECHNICAL_TASK 만
@@ -38,24 +37,29 @@ import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-t
  * than only resyncing FROM, since an in-progress draft for one FROM node
  * isn't meaningful once the canvas selection points at a different one.
  * Mirrors CaseFlowchartCreateEdgePanel.
+ *
+ * ── 🔴 2026-11-20(조각 4) — **서버를 여기서 안 부른다** ──────────────────
+ * 쓰는 분의 요청으로 연결선 추가도 [저장]을 눌러야 저장된다. 이 패널은 이제
+ * createProcedureTemplateEdgeAction 을 부르지 않고, 무엇을 그을지만 적어 화면에
+ * 넘긴다 — 화면이 모아 두었다가 [저장]에서 **같은 액션을** 부른다(서버는 그대로다).
+ *
+ * 🔵 사유 칸은 **그대로 남는다.** 모아 두는 조작이 reason 칸을 들고 가고, [저장]이
+ * 그것을 그대로 실어 보낸다. 그래서 FULL_SERVICE/REFERENCE 의 「사유 필수」도
+ * 그대로다(canAdd 가 전과 같은 식이다).
  */
 export default function CreateEdgePanel({
-  templateId,
   nodes,
   canEdit,
-  expectedTemplateUpdatedAt,
   prefillFromNodeId,
   isPickingTarget = false,
   onStartPickTarget,
   onCancelPickTarget,
   pickedTarget = null,
-  onSaved,
+  onQueueCreate,
   isTechnical,
 }: {
-  templateId: string;
   nodes: EditorNodeRow[];
   canEdit: boolean;
-  expectedTemplateUpdatedAt: string;
   prefillFromNodeId?: string | null;
   /**
    * "화면에서 선택" — true인 동안 캔버스 노드 클릭이 시작 노드 선택이 아니라
@@ -67,7 +71,14 @@ export default function CreateEdgePanel({
   onCancelPickTarget?: () => void;
   /** 부모가 캔버스에서 고른 결과. 같은 노드를 다시 골라도 반영되도록 seq를 함께 올린다. */
   pickedTarget?: { nodeId: string; seq: number } | null;
-  onSaved: (newUpdatedAt: string, structuralValidation?: StructuralValidationSummary) => void;
+  /** 🔴 서버에 보내지 않고 **모아 둔다**(2026-11-20, 조각 4). 그림에는 그 자리에서 선이 나타난다. */
+  onQueueCreate: (input: {
+    fromNodeId: string;
+    toNodeId: string;
+    branchType: ProcedureBranchType;
+    branchLabel: string | null;
+    reason: string | null;
+  }) => void;
   /** Phase 5C-5B usability — true for TECHNICAL_TASK; relaxes the "추가 사유" from mandatory to optional (UI mirror of the mutation layer's own category-aware validation). FULL_SERVICE keeps requiring a reason, unchanged. */
   isTechnical: boolean;
 }) {
@@ -83,8 +94,6 @@ export default function CreateEdgePanel({
   const [branchType, setBranchType] = useState<ProcedureBranchType>("DEFAULT");
   const [branchLabel, setBranchLabel] = useState("");
   const [reason, setReason] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [prevMostRecentNodeId, setPrevMostRecentNodeId] = useState(mostRecentNodeId);
   const [prevPickedSeq, setPrevPickedSeq] = useState(pickedTarget?.seq ?? 0);
   if (pickedTarget && pickedTarget.seq !== prevPickedSeq) {
@@ -101,7 +110,6 @@ export default function CreateEdgePanel({
     setBranchType("DEFAULT");
     setBranchLabel("");
     setReason("");
-    setErrorMessage(null);
   } else if (mostRecentNodeId !== prevMostRecentNodeId) {
     // 노드를 새로 추가하면 그 노드가 곧 이어붙일 대상인 경우가 대부분이다 —
     // 대상 노드만 다시 기본값으로 맞추고, 작성 중이던 나머지 입력(분기 유형/
@@ -119,32 +127,21 @@ export default function CreateEdgePanel({
   const canAdd = fromNodeId.length > 0 && toNodeId.length > 0 && fromNodeId !== toNodeId && !labelRequired && (isTechnical || reason.trim().length > 0);
 
   /**
-   * [연결 추가] 의 본체. 🔴 onSaved 는 **실패 검사 뒤**에만 부른다 — 이 호출이
-   * 화면의 handleStructuralSaved → pushStructuralUndoStep() 으로 이어져
-   * 되돌리기 한 걸음을 쌓기 때문에, 실패한 호출까지 쌓으면 일어나지도 않은
-   * 일을 되돌리려 들어 바로 아래 있던 멀쩡한 변경이 대신 날아간다(줄기 B-①).
-   * 확인 창을 없애면서도 이 순서는 손대지 않았다.
+   * [연결 추가] 의 본체 — 🔴 **모아 두기만 한다**(2026-11-20, 조각 4).
+   *
+   * 🔵 실패 검사가 사라진 까닭: 여기서는 실패할 일이 없다. 전에는 이 자리의
+   * `if (!result.ok)` 가 「실패한 호출로 되돌리기 한 걸음이 쌓이는 것」을 막고
+   * 있었는데, 이제 되돌리기 한 걸음은 **화면이 목록을 고치기 직전에** 쌓는다 —
+   * 서버가 거절할 기회 자체가 [저장] 때로 밀렸고, 그때 실패하면 목록이 그대로
+   * 남아 다시 보낼 수 있다(runProcedureStructuralSequence 의 remainingOperations).
+   *
+   * 🔵 비우는 칸은 전과 같다 — 대상 노드와 사유. 시작 노드·분기 유형·라벨은 그대로
+   * 둔다(한 노드에서 선을 여럿 긋는 일이 보통이다).
    */
-  async function handleAdd() {
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    const result = await createProcedureTemplateEdgeAction({
-      templateId,
-      fromNodeId,
-      toNodeId,
-      branchType,
-      branchLabel: branchLabel.trim() || null,
-      reason,
-      expectedTemplateUpdatedAt,
-    });
-    setIsSubmitting(false);
-    if (!result.ok) {
-      setErrorMessage(result.message);
-      return;
-    }
+  function handleAdd() {
+    onQueueCreate({ fromNodeId, toNodeId, branchType, branchLabel: branchLabel.trim() || null, reason: reason.trim() || null });
     setToNodeId("");
     setReason("");
-    onSaved(result.updatedAt, result.structuralValidation);
   }
 
   if (!canEdit) return null;
@@ -221,18 +218,19 @@ export default function CreateEdgePanel({
       {fromNodeId && toNodeId && fromNodeId === toNodeId && <p className="text-red-600 dark:text-red-400">자기 자신으로의 분기는 지원하지 않습니다.</p>}
       <button
         type="button"
-        disabled={!canAdd || isSubmitting}
-        onClick={() => void handleAdd()}
+        disabled={!canAdd}
+        onClick={handleAdd}
         className="self-start rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
       >
-        {isSubmitting ? "추가 중..." : "연결 추가"}
+        연결 추가
       </button>
       {/*
-        🔴 실패를 알리는 **유일한** 자리다 — 확인 창이 있던 시절에는 같은 글을
-        창 안에도 한 벌 더 그렸다. 조용히 아무 일도 안 일어나면 사람은 고장으로
-        읽으므로, 성공 알림은 없애도 이것은 없애면 안 된다.
+        🔴 2026-11-20(조각 4) — **실패를 알리던 자리가 여기서 없어졌다.** 없앤 것이
+        아니라 **옮긴 것**이다: 서버가 거절하는 시점이 [저장] 때로 밀렸고, 그 글은
+        화면 위쪽 [저장] 줄 아래 한 자리에서 나온다. 여기 빈 자리를 남겨 두면
+        「조용히 아무 일도 안 일어났다」가 되므로, 대신 **어디서 저장되는지**를 적는다.
       */}
-      {errorMessage && <p className="text-red-600 dark:text-red-400">{errorMessage}</p>}
+      <p className="text-emerald-800 dark:text-emerald-300">그은 연결선은 화면 상단의 [저장]을 눌러야 서버에 저장됩니다.</p>
     </div>
   );
 }

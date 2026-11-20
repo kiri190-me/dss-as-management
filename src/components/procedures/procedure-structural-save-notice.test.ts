@@ -4,19 +4,37 @@ import { readFileSync } from "node:fs";
 
 /**
  * ============================================================================
- * 「기술 작업 절차」 편집기 — 구조 변경이 **저장됐다고 말한다**(2026-11-04, 줄기 B-⑦)
+ * 「기술 작업 절차」 편집기 — **무엇이 언제 저장되는지 말하는 자리**
+ * (2026-11-04 줄기 B-⑦ 로 생겼고, 2026-11-20 조각 4 에서 **뜻이 뒤집혔다**)
  * ============================================================================
  * ── 왜 이 시험이 있는가 ─────────────────────────────────────────────────
  * 사용자가 신고한 것(원문): "노드, 연결선등을 추가/제거 하기만 했을 때는
  * [저장]이 활성화가 안되더라고, 노드, 연결선에 대해서는 수정된 사항이라고
  * 인식을 안하고 있는 것 같아."
  *
- * 조사해 보니 **인식을 안 한 것이 아니라 이미 저장한 것**이었다. 구조 변경은
- * 그 자리에서 서버로 가고(handleSaved 가 그 성공 통로다), [저장]이 맡은 것은
- * 안 보낸 칸 값·배치뿐이라 목록이 비어 있는 것이 맞다. 문제는 **화면이 그렇게
- * 말하지 않았다**는 것이다 — 남는 글자가 [저장] 단추의 "저장할 변경 없음"
- * 하나뿐이고, 그 문구는 「아직 아무것도 안 건드렸다」와 「방금 저장이 끝났다」를
- * 똑같이 말한다. 삭제는 "사라짐"이 유일한 증거라 가장 약하다.
+ * 2026-11-04 에 조사해 보니 **인식을 안 한 것이 아니라 이미 저장한 것**이었다.
+ * 구조 변경은 그 자리에서 서버로 갔고, [저장]이 맡은 것은 안 보낸 칸 값·배치뿐이라
+ * 목록이 비어 있는 것이 맞았다. 문제는 **화면이 그렇게 말하지 않았다**는 것이어서,
+ * 그때는 **안내로** 풀었다 — 「방금 변경은 바로 저장됐습니다」(2.5초 뒤 사라지는 한
+ * 줄)와 「노드·연결선 추가·삭제·재연결은 [저장] 없이 바로 저장됩니다」(상시 한 줄).
+ *
+ * ── 🔴 2026-11-20(조각 4) — **그 두 줄 가운데 하나가 거짓이 됐다** ───────
+ * 쓰는 분에게서 **같은 요청이 다시 왔다**: 「그것들도 [저장]을 눌러야 저장되도록
+ * 해 달라.」 안내로는 부족했다는 뜻이다. 그래서 이번에는 **동작을 바꿨다** —
+ * 일곱(노드 추가·삭제·유형 변경 · 연결선 추가·삭제·재연결 · 연결선 위 노드
+ * 끼우기)이 [저장] 때까지 모였다가 한 번에 간다.
+ *
+ * 그래서 이 파일이 지키는 것이 **둘로 갈렸다.**
+ *
+ *  ① 🟢 **그대로**: 「방금 변경은 바로 저장됐습니다」는 **여전히 참**이다 — 다만
+ *     가리키는 범위가 줄었다(템플릿 이름 변경 · 이력 복원 · 현장 단계 넣기 ·
+ *     [이전]/[앞으로]). 그 자리가 handleSaved 한 곳인 것, 제 타이머를 가진 것,
+ *     globalSaveStatus 를 안 건드리는 것은 2026-11-04 그대로다.
+ *  ② 🔴 **뒤집힘**: 상시 한 줄이 반대말을 한다 — 이제 「…도 [저장]을 눌러야
+ *     저장됩니다」. 글자만 두면 읽은 사람이 저장하지 않고 나간다.
+ *  ③ 🔴 **새로 지킬 것**: 일곱이 handleSaved 를 **안 지나야** 한다. 지나면
+ *     「방금 저장됐습니다」가 아직 안 간 변경을 두고 거짓말을 한다 — 이 파일이
+ *     2026-11-04 에 없애려던 그 오해가 **반대 방향으로** 되살아난다.
  *
  * ── 🔴 여기서 가장 조용히 깨질 수 있는 것 ──────────────────────────────
  * ① **globalSaveStatus 에 얹는 것.** 한 줄이면 되지만, "변경사항 N건 저장 대기
@@ -147,14 +165,35 @@ describe("구조 변경 저장 알림 — ② 뜬다", () => {
     assert.equal(raises.length, 1, `올리는 자리가 ${raises.length} 곳이다 — 한 곳이어야 한다`);
   });
 
-  test("🔴 구조 변경 다섯 갈래가 전부 그 통로를 지난다 — 하나라도 빠지면 그 조작만 조용하다", () => {
-    // handleStructuralSaved(패널 넷 + 이름 변경 + 이력 복원) · 노드 삭제 ·
-    // 연결선 삭제 · [이전] · [앞으로] — 전부 handleSaved 로 모인다.
+  test("🔴 **여전히 즉시 저장되는** 갈래가 전부 그 통로를 지난다 — 하나라도 빠지면 그 조작만 조용하다", () => {
+    // 🔴 2026-11-20(조각 4) — 지나는 갈래가 줄었다. 노드·연결선 삭제 둘은
+    //    [저장] 쪽으로 옮겨 가 제 함수(handleNodeDeleted/handleEdgeDeleted)가
+    //    통째로 없어졌다. 남은 것은 handleStructuralSaved(이름 변경 · 이력 복원 ·
+    //    현장 단계 넣기)와 [이전]/[앞으로]다.
     assert.ok(functionBody(screen, "function handleStructuralSaved(").includes("handleSaved(newUpdatedAt, structuralValidation);"));
-    assert.ok(functionBody(screen, "function handleNodeDeleted(").includes("handleSaved(newUpdatedAt);"));
-    assert.ok(functionBody(screen, "function handleEdgeDeleted(").includes("handleSaved(newUpdatedAt);"));
     assert.ok(functionBody(screen, "async function handleUndo()").includes("handleSaved(result.updatedAt);"));
     assert.ok(functionBody(screen, "async function handleRedo()").includes("handleSaved(result.updatedAt);"));
+    assert.ok(functionBody(screen, "async function handleRenameSubmit()").includes("handleStructuralSaved(result.updatedAt);"));
+    assert.ok(flat(screen).includes("onRestored={handleStructuralSaved}"));
+    assert.ok(flat(screen).includes("onAdopted={handleStructuralSaved}"));
+  });
+
+  test("🔴 **[저장]으로 옮겨 간 일곱은 이 통로를 안 지난다** — 지나면 안 간 변경을 두고 「저장됐다」고 말한다", () => {
+    // 🔴 이 파일이 2026-11-04 에 없애려던 오해가 **반대 방향으로** 되살아나는
+    //    자리다. 그때는 「저장했는데 아무도 말을 안 해서」 고장으로 읽혔고,
+    //    여기서 틀리면 「아직 안 갔는데 갔다고 말해서」 사람이 그냥 나간다.
+    assert.ok(!screen.includes("function handleNodeDeleted("), "즉시 삭제 통로가 아직 남아 있다");
+    assert.ok(!screen.includes("function handleEdgeDeleted("));
+    const f = flat(screen);
+    for (const tag of ["NodePropertyPanel", "EdgePropertyPanel", "CreateEdgePanel", "CreateNodePanel"] as const) {
+      const at = f.indexOf(`<${tag}`);
+      assert.notEqual(at, -1, `<${tag} 를 못 찾았다`);
+      const element = f.slice(at, f.indexOf("/>", at));
+      assert.ok(!element.includes("handleStructuralSaved"), `<${tag} 가 아직 즉시 저장 통로에 묶여 있다`);
+    }
+    // 🔵 그 대신 [저장]이 일곱을 부른다 — 안 부르면 영영 저장되지 않는다.
+    assert.ok(f.includes("async function executeStructuralOperation("));
+    assert.ok(f.includes("runProcedureStructuralSequence<StructuralValidationSummary>("));
   });
 
   test("🔴 화면에 **그리는** 자리가 있다 — 올리기만 하고 안 그리면 아무 일도 안 일어난다", () => {
@@ -177,10 +216,32 @@ describe("구조 변경 저장 알림 — ② 뜬다", () => {
     );
     // 아무 일도 없을 때 서 있는 상시 안내 — 띄우는 표시는 2.5초면 사라지지만
     // 사용자가 막힌 지점은 그 뒤에도 남아 있는 화면이었다.
+    // 🔴 2026-11-20(조각 4) — **이 줄의 말이 뒤집혔다.** 「[저장] 없이 바로
+    //    저장됩니다」가 거짓이 됐기 때문이다(동작을 바꿨다). 글자를 안 고치면
+    //    읽은 사람이 저장하지 않고 나간다.
     assert.ok(
-      flat(screen).includes('{!hasAnyPendingChanges && structuralSaveNoticeId === 0 && globalSaveStatus === "idle" && ( <span className="text-xs text-zinc-500 dark:text-zinc-400">노드·연결선 추가·삭제·재연결은 [저장] 없이 바로 저장됩니다</span> )}'),
-      "상시 안내가 사라졌다 — [저장]이 무엇을 맡고 무엇을 안 맡는지 말하는 자리가 화면에서 없어진다"
+      flat(screen).includes('{!hasAnyPendingChanges && structuralSaveNoticeId === 0 && globalSaveStatus === "idle" && ( <span className="text-xs text-zinc-500 dark:text-zinc-400">노드·연결선 추가·삭제·재연결도 [저장]을 눌러야 저장됩니다</span> )}'),
+      "상시 안내가 사라졌거나 아직 옛말을 한다 — [저장]이 무엇을 맡는지 말하는 자리가 화면에서 없어진다"
     );
+    assert.ok(
+      !screen.includes("[저장] 없이 바로 저장됩니다"),
+      "거짓이 된 옛 문구가 코드에 남아 있다 — 읽은 사람이 저장하지 않고 나간다"
+    );
+  });
+
+  test("🔴 [저장]이 **저장 전 구조 변경을 센다** — 이번 일이 실제로 고친 것이 이것이다", () => {
+    // 🔴 2026-11-04 의 안내는 「[저장]이 꺼져 있는 것이 맞다」고 **설명**했다.
+    //    2026-11-20 에는 그 설명을 없애고 **[저장]이 켜지게** 했다. 세지 않으면
+    //    단추가 꺼진 채로 남아, 사용자가 신고한 그 화면이 글자만 바뀐 채 그대로다.
+    const f = flat(screen);
+    assert.ok(f.includes("const structuralPendingCount = coalescedStructural.operations.length;"));
+    assert.ok(
+      f.includes("dirtyNodeFieldEntries.length + dirtyEdgeFieldEntries.length + dirtyPositionNodeIds.length + dirtyRouteEdgeIds.length + structuralPendingCount;"),
+      "구조 변경 건수를 안 더하면 [저장]이 꺼져 있어 한 건도 안 나간다"
+    );
+    // 🔵 세는 기준이 **접은 뒤**인 것도 뜻이 있다 — 만들었다 지운 노드는 보낼 것이
+    //    0건이고, 그때 「변경 2건」이라고 말하면 [저장]을 눌러도 아무 일이 안 난다.
+    assert.ok(f.includes("const coalescedStructural = useMemo(() => coalescePendingStructuralOperations(pendingStructuralOperations), [pendingStructuralOperations]);"));
   });
 });
 

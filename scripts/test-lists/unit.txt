@@ -165,6 +165,15 @@ src/lib/domain/procedure-editor-structural-save.test.ts
 # **견주기가 칸 차례에 안 흔들리는가**(조각 2 의 치환이 `{ ...op }` 로 다시 만든다 —
 # 내용이 같은데 다르다고 읽히면 아무것도 안 바뀐 자리에 되돌리기 칸이 하나 더 쌓인다).
 src/lib/domain/procedure-editor-structural-undo.test.ts
+# 🔵 그 모아 둔 구조 변경을 **[저장] 전에 그림에 미리 그리는** 규칙(2026-11-20, 조각 4).
+# 화면의 renderedNodes/renderedEdges 가 서버 목록만 돌기 때문에, 이 얹기가 없으면
+# 노드를 추가해도 **화면에 아무 일도 안 일어난다**.
+# 🔴 재는 것 넷: **사람이 누른 차례 그대로 얹는가**(보낼 차례는 갈래별로 다시 세운
+# 것이라 「긋고 지우기」가 뒤집힌다 — 그 한 입력이 아니면 영영 통과한다) ·
+# **연결선 위 노드 끼우기가 한 번에 셋인가**(원래 분기 유형은 첫 구간에, 둘째 구간은
+# 언제나 기본) · **쪼갤 선이 없으면 노드도 안 만드는가**(외톨이 칸이 선다) ·
+# **없는 대상을 가리키면 조용히 지나가는가**(그릴 때 던지면 화면이 통째로 하얘진다).
+src/lib/domain/procedure-editor-structural-preview.test.ts
 src/lib/domain/procedure-execution-topology.test.ts
 src/lib/domain/procedure-execution-order.test.ts
 src/lib/domain/procedure-execution-focus.test.ts

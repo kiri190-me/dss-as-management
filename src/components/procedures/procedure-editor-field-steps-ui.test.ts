@@ -185,8 +185,26 @@ describe("줄기 B-⑧ — 편집기: 유령은 그림에만, 저장·검증에�
     const to = editor.indexOf("const fieldStepGhostGraph = useMemo(");
     assert.ok(from !== -1 && to > from, "구역을 못 잘랐다");
     const renderedBlock = editor.slice(from, to);
-    assert.ok(renderedBlock.includes("template.edges.map((e) => {"), "표본 확인 — 구역이 비어 있으면 아래가 공짜로 통과한다");
+    // 🔴 2026-11-20(조각 4) — 두 목록이 도는 곳이 `template.nodes/edges`(서버 목록)
+    //    에서 **structuralPreview**(서버 목록 + 아직 안 보낸 구조 변경)로 바뀌었다.
+    //    저장 전에 추가한 노드·연결선이 그림에 그려져야 하기 때문이다.
+    //    🔵 그래도 **유령과는 여전히 갈린다**: 구조 변경은 사람이 이 초안에 한 일
+    //       (저장하면 그대로 서버로 간다)이고, 유령은 다른 실행에서 현장이 더한 것을
+    //       「넣을까요」 하고 희미하게 비춰 보이는 것일 뿐이다.
+    assert.ok(renderedBlock.includes("structuralPreview.edges.map((e) => {"), "표본 확인 — 구역이 비어 있으면 아래가 공짜로 통과한다");
     assert.ok(!renderedBlock.includes("fieldStep"), "그려지는 목록과 저장되는 목록이 같아지면 안 된다");
+  });
+
+  test("🔴 유령은 **미리보기에도** 안 섞인다 — 저장 전 구조 변경과 성격이 다르다", () => {
+    // 🔵 2026-11-20(조각 4) 에 미리보기가 생기면서, 유령이 샐 수 있는 **새 틈**이
+    //    하나 생겼다. 미리보기에 유령을 얹으면 [저장]이 그것까지 서버로 보낸다 —
+    //    사람이 「넣기」를 누른 적이 없는데 절차에 들어간다.
+    const from = editor.indexOf("const structuralPreview = useMemo(");
+    assert.notEqual(from, -1, "미리보기를 못 찾았다 — 이름이 바뀌었으면 시험도 함께 고쳐야 한다");
+    const block = editor.slice(from, from + 400);
+    assert.ok(block.includes("previewPendingStructuralGraph(template.nodes, template.edges, previewOperations"), "표본 확인 — 구역을 잘못 잘랐다");
+    assert.ok(!block.includes("fieldStep"), "유령이 미리보기로 샜다 — [저장]이 사람이 안 시킨 노드를 만든다");
+    assert.ok(!block.includes("ghost"));
   });
 
   test("🔵 유령의 **받침 자리**는 지금 그려지고 있는 자리를 기준으로 센다", () => {

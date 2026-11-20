@@ -95,8 +95,17 @@ describe("절차 편집기 [이전]/[앞으로] — 화면이 판정을 가져�
 
   test("🔵 그래도 hasAnyPendingChanges 를 지우지는 않았다 — [저장]·[취소]·나가기 확인이 계속 쓴다", () => {
     assert.ok(screen.includes("const hasAnyPendingChanges ="));
-    assert.ok(screen.includes("disabled={!hasAnyPendingChanges || globalSaveStatus === \"saving\"}"));
+    // 🔴 2026-11-20(조각 4) — [저장] 단추의 조건에 `!canSendStructural` 이 한 칸
+    //    늘었다(보낼 수 없는 구조 변경이 있으면 막는다). hasAnyPendingChanges 는
+    //    그대로 남아 있어야 한다 — 빠지면 저장 대기가 없는데도 단추가 켜진다.
+    assert.ok(screen.includes("disabled={!hasAnyPendingChanges || !canSendStructural || globalSaveStatus === \"saving\"}"));
     assert.ok(functionBody(screen, "function handleExit()").includes("hasAnyPendingChanges"));
+    // 🔴 그리고 그 값이 **저장 전 구조 변경까지 센다.** 안 세면 노드만 추가한
+    //    상태에서 나가기가 아무것도 안 묻고, 그 추가가 통째로 사라진다.
+    assert.ok(
+      flat(screen).includes("dirtyRouteEdgeIds.length + structuralPendingCount;"),
+      "나가기 경고가 저장 전 구조 변경을 못 본다 — 묻지도 않고 날아간다"
+    );
   });
 
   test("🔴 단추를 켜는 조건과 눌렀을 때 도는 코드가 **같은 계획 하나**를 본다", () => {
@@ -161,6 +170,20 @@ describe("절차 편집기 [이전]/[앞으로] — 구조 변경이 성공했�
     assert.ok(screen.includes("function handleStructuralSaved("));
   });
 
+  test("🔴 **서버 이력 표시를 세우는 자리가 handleStructuralSaved 한 곳뿐**이다 — 둘이면 한 변경에 칸이 둘 선다", () => {
+    // 🔴 2026-11-20(조각 4) 에 실제로 빠지기 쉬운 자리다. 모아 두는 통로
+    //    (queueStructural)에서 이것을 함께 부르면 한 변경에 PENDING 한 칸과
+    //    STRUCTURAL 한 칸이 같이 쌓여, [이전]을 두 번 눌러야 한 걸음이 돌아간다.
+    //    그 둘째 칸은 서버 이력으로 가므로 **남의 변경이 대신 되돌려진다.**
+    const uses = screen.match(/pushStructuralUndoStep\(\)/g) ?? [];
+    assert.equal(uses.length, 1, `표시를 세우는 자리가 ${uses.length} 곳이다 — handleStructuralSaved 하나여야 한다`);
+    assert.ok(functionBody(screen, "function handleStructuralSaved(").includes("pushStructuralUndoStep();"));
+    // 🔵 모아 두는 통로는 **PENDING 쪽**만 쌓는다(아직 서버에 간 것이 없다).
+    const queue = flat(functionBody(screen, "function queueStructural("));
+    assert.ok(queue.includes("pushPendingUndoStep();"));
+    assert.ok(!queue.includes("pushStructuralUndoStep"), "아직 안 보낸 변경에 서버 이력 표시를 세우고 있다");
+  });
+
   test("🔴 handleSaved 자신은 아무것도 안 쌓는다 — 되돌리기도 그 통로를 지난다", () => {
     // 여기에 넣으면 [이전]이 제 흔적을 다시 쌓아 영영 안 끝난다.
     const saved = functionBody(screen, "function handleSaved(");
@@ -168,35 +191,71 @@ describe("절차 편집기 [이전]/[앞으로] — 구조 변경이 성공했�
     assert.ok(functionBody(screen, "async function handleUndo()").includes("handleSaved(result.updatedAt)"));
   });
 
-  test("🔴 구조 조작 여섯 자리가 전부 그 통로를 지난다", () => {
+  /**
+   * 🔴 2026-11-20(조각 4) — **이 절의 전제가 절반 바뀌었다.**
+   *
+   * 「구조 변경은 서버가 이미 저장했으니 표시만 한 칸 쌓는다」가 일곱(노드 추가·
+   * 삭제·유형 변경 · 연결선 추가·삭제·재연결 · 연결선 위 노드 끼우기)에 대해서는
+   * 더 이상 참이 아니다. 그 일곱은 **[저장] 때까지 모였다가** 한 번에 간다.
+   *
+   *   · 모아 둘 때   → PENDING 스냅샷 한 칸(queueStructural 이 목록을 고치기 **전에**)
+   *   · 저장이 지난 뒤 → 보낸 건수만큼 STRUCTURAL 표시(planUndoStackAfterStructuralSave)
+   *
+   * 🔴 그래서 **둘 다 쌓으면 안 된다** — 한 변경에 칸이 둘이 되어 [이전]을 두 번
+   * 눌러야 한 걸음이 된다. 아래가 그 둘을 갈라 지킨다.
+   */
+  test("🔴 구조 조작 일곱이 **모아 두는 손잡이**로 가고, 즉시 저장 셋만 옛 통로에 남았다", () => {
     for (const [tag, prop] of [
-      ["NodePropertyPanel", "onSaved={handleStructuralSaved}"], // 노드 유형 변경
-      ["EdgePropertyPanel", "onSaved={handleStructuralSaved}"], // 재연결 · 연결선 위 노드 삽입
-      ["CreateEdgePanel", "onSaved={handleStructuralSaved}"], // 연결선 생성
-      ["CreateNodePanel", "onSaved={handleStructuralSaved}"], // 노드 생성
-      ["EditHistoryPanel", "onRestored={handleStructuralSaved}"], // 이력 복원
+      ["NodePropertyPanel", "onQueueChangeType={"], // 노드 유형 변경
+      ["NodePropertyPanel", "onQueueDelete={"], // 노드 삭제
+      ["EdgePropertyPanel", "onQueueRetarget={"], // 재연결
+      ["EdgePropertyPanel", "onQueueDelete={"], // 연결선 삭제
+      ["EdgePropertyPanel", "onQueueInsertNode={"], // 연결선 위 노드 끼우기
+      ["CreateEdgePanel", "onQueueCreate={handleQueueCreateEdge}"], // 연결선 생성
+      ["CreateNodePanel", "onQueueCreate={handleQueueCreateNode}"], // 노드 생성
+      ["EditHistoryPanel", "onRestored={handleStructuralSaved}"], // 이력 복원 — 여전히 즉시
     ] as const) {
       assert.ok(flat(jsxElement(screen, tag)).includes(prop), `<${tag} 가 ${prop} 를 안 넘긴다`);
     }
-    // 삭제 둘은 지우개 뒤처리가 있어 제 함수에서 같은 것을 쌓는다.
-    assert.ok(functionBody(screen, "function handleNodeDeleted(").includes("pushStructuralUndoStep()"));
-    assert.ok(functionBody(screen, "function handleEdgeDeleted(").includes("pushStructuralUndoStep()"));
-    // 이름 변경은 성공 갈래에서 통로를 탄다.
+    // 🔴 **옛 통로가 그 일곱에 다시 붙으면 안 된다** — 붙으면 표시가 두 번 선다.
+    assert.ok(!flat(jsxElement(screen, "NodePropertyPanel")).includes("handleStructuralSaved"));
+    assert.ok(!flat(jsxElement(screen, "EdgePropertyPanel")).includes("handleStructuralSaved"));
+    assert.ok(!flat(jsxElement(screen, "CreateEdgePanel")).includes("handleStructuralSaved"));
+    assert.ok(!flat(jsxElement(screen, "CreateNodePanel")).includes("handleStructuralSaved"));
+    // 🔵 삭제 둘의 지우개 뒤처리는 **모아 두는 손잡이 안으로** 옮겨 갔다.
+    assert.ok(!screen.includes("function handleNodeDeleted("), "옛 즉시 삭제 통로가 아직 남아 있다");
+    assert.ok(!screen.includes("function handleEdgeDeleted("));
+    assert.ok(flat(screen).includes("function handleQueueDeleteNode(nodeId: string, reason: string | null) {"));
+    // 이름 변경은 여전히 즉시 저장이고, 성공 갈래에서 통로를 탄다.
     assert.ok(functionBody(screen, "async function handleRenameSubmit()").includes("handleStructuralSaved(result.updatedAt)"));
   });
 
-  test("🔴 서버 액션이 **실패하면 안 쌓인다** — 알리는 쪽이 전부 성공 갈래 안이다", () => {
-    const panels = [
-      "src/components/procedures/editor/NodePropertyPanel.tsx",
-      "src/components/procedures/editor/EdgePropertyPanel.tsx",
-      "src/components/procedures/editor/CreateEdgePanel.tsx",
-      "src/components/procedures/editor/CreateNodePanel.tsx",
-      "src/components/procedures/editor/EditHistoryPanel.tsx",
-    ];
+  test("🔴 모아 두는 손잡이가 **목록을 고치기 전에** 한 칸을 찍는다 — 뒤에 찍으면 [이전]이 한 칸씩 밀린다", () => {
+    const body = flat(functionBody(screen, "function queueStructural("));
+    const push = body.indexOf("pushPendingUndoStep();");
+    const mutate = body.indexOf("setPendingStructuralOperations(");
+    assert.ok(push !== -1 && mutate !== -1 && push < mutate, "목록을 고친 뒤에 찍고 있다");
+    // 🔴 그리고 그 칸이 **버려지지 않아야** 한다. 구조 조작만 바뀐 단계는 지도
+    //    다섯이 똑같아서, 견주기에 구조 목록 서명을 안 섞으면 「헛도는 단계」로
+    //    조용히 버려진다(조각 3 의 ⑦절이 값으로 그 꼴을 시연한다).
+    assert.ok(
+      flat(screen).includes("procedureStructuralOperationsSignature(snapshot.structuralOperations),"),
+      "서명을 안 섞으면 노드 추가 한 칸이 [이전]에서 통째로 사라진다"
+    );
+    // 🔵 스냅샷에 그 목록이 실제로 실려 있어야 서명에 뜻이 있다.
+    assert.ok(flat(screen).includes("structuralOperations: pendingStructuralOperations,"));
+  });
+
+  test("🔴 서버 액션이 **실패하면 안 쌓인다** — 즉시 저장이 남은 쪽만 해당한다", () => {
+    // 🔴 2026-11-20(조각 4) — 패널 넷에서 서버 호출이 사라져, 여기서 셀 수 있는
+    //    것은 **여전히 즉시 저장되는 패널**뿐이다. 그 대신 ①절에서 「패널 넷이
+    //    서버 액션을 하나도 안 부른다」를 따로 못 박는다
+    //    (procedure-editor-confirm-dialogs.test.ts ①절).
+    const panels = ["src/components/procedures/editor/EditHistoryPanel.tsx", "src/components/procedures/editor/FieldAddedStepsPanel.tsx"];
     let checked = 0;
     for (const path of panels) {
       const source = flat(stripComments(read(path)));
-      const calls = [...source.matchAll(/\b(onSaved|onDeleted|onRestored)\(result\./g)];
+      const calls = [...source.matchAll(/\b(onSaved|onDeleted|onRestored|onAdopted)\(result\./g)];
       assert.ok(calls.length > 0, `${path} 에 알리는 자리가 없다 — 시험이 아무것도 안 재고 있다`);
       for (const call of calls) {
         const before = source.slice(Math.max(0, call.index - 400), call.index);
@@ -204,7 +263,7 @@ describe("절차 편집기 [이전]/[앞으로] — 구조 변경이 성공했�
         checked += 1;
       }
     }
-    assert.ok(checked >= 6, `성공 갈래를 ${checked} 자리밖에 못 셌다 — 여섯 이상이어야 한다`);
+    assert.ok(checked >= 2, `성공 갈래를 ${checked} 자리밖에 못 셌다 — 둘 이상이어야 한다`);
   });
 
   test("🔴 이름 변경도 실패하면 안 쌓인다", () => {
@@ -214,17 +273,37 @@ describe("절차 편집기 [이전]/[앞으로] — 구조 변경이 성공했�
     assert.ok(guard !== -1 && push > guard);
   });
 
-  test("전역 [저장]에 성공하면 스택을 비우는 동작은 그대로다", () => {
+  test("🔴 전역 [저장]에 성공하면 스택을 비우되, **보낸 구조 변경만큼 표시를 세운다**", () => {
     const body = functionBody(screen, "async function handleGlobalSave()");
-    assert.ok(body.includes("setPendingUndoStack(createProcedureEditorUndoStack<PendingSnapshot>())"));
-    // 🔵 비워도 막히지 않는다 — 스택이 빈 채로 누르면 서버 이력 길이 받는다
-    // (그 갈래 자체는 unit 목록의 procedure-editor-undo-plan.test.ts ⑥절이 본다).
+    // 🔴 2026-11-20(조각 4) — 그냥 비우기만 하면 이번 저장이 보낸 구조 변경이
+    //    [이전]으로 되돌아갈 차례를 못 받는다. 그 갈래는 serverHasHistory 를 믿는데
+    //    그 값은 서버에서 그려 온 것이라 방금 적힌 것이 아직 안 비쳐 있다
+    //    (router.refresh() 가 닿기 전이다). 그래서 빈 스택을 넣어 계획 함수를 부른다.
+    assert.ok(
+      flat(body).includes("setPendingUndoStack(planUndoStackAfterStructuralSave(createProcedureEditorUndoStack<PendingSnapshot>(), { succeededOperations: succeededStructuralOperations }));"),
+      "비우기만 하면 방금 보낸 구조 변경을 [이전]으로 못 되돌린다"
+    );
+    // 🔵 구조 변경이 0건이면 그 함수가 들어온 빈 스택을 그대로 돌려준다 — 전 동작과 같다.
     assert.ok(screen.includes("serverHasHistory: historyView.canUndo"));
     assert.ok(screen.includes("serverHasHistory: historyView.canRedo"));
   });
 
-  test("「모두 취소」가 한 단계를 찍는 동작도 그대로다", () => {
-    assert.ok(functionBody(screen, "function handleDiscardAllPending()").includes("pushPendingUndoStep()"));
+  test("🔴 부분 실패에서도 스택을 손본다 — 이미 보낸 것을 든 옛 스냅샷은 거짓이다", () => {
+    // 🔴 구조가 전부 성공한 뒤 칸 값 단계가 깨진 자리다. 그대로 두면 옛 스냅샷이
+    //    「아직 안 보냄」이라고 말하는데 이미 보냈고, 되돌려 다시 저장하면 같은
+    //    노드가 두 번 만들어진다.
+    const body = flat(functionBody(screen, "async function handleGlobalSave()"));
+    const calls = body.match(/setPendingUndoStack\(\(prev\) => planUndoStackAfterStructuralSave\(prev, \{ succeededOperations: succeededStructuralOperations \}\)\);/g) ?? [];
+    assert.equal(calls.length, 2, `끝나는 자리 둘(구조 멈춤 · 칸 값 실패)에서 모두 손봐야 한다 — 지금 ${calls.length}곳`);
+  });
+
+  test("「모두 취소」가 한 단계를 찍는 동작도 그대로다 — 🔴 그리고 **구조 목록도 함께 비운다**", () => {
+    const body = functionBody(screen, "function handleDiscardAllPending()");
+    assert.ok(body.includes("pushPendingUndoStep()"));
+    // 🔴 안 비우면 취소한 뒤에도 노드 추가가 살아남아 다음 [저장]에 조용히 따라간다.
+    //    그리고 이것이 **부분 실패로 남은 조작을 치우는 유일한 길**이다 — 못 보낸
+    //    조작은 되돌리기 스택에 제 칸이 없다.
+    assert.ok(body.includes("setPendingStructuralOperations([]);"), "취소해도 저장 전 구조 변경이 살아남는다");
   });
 });
 

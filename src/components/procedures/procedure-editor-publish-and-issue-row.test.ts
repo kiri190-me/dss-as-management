@@ -212,7 +212,26 @@ describe("줄기 B-④ 나 — 편집기에서 게시할 수 있다", () => {
     );
     // 표본 확인 — 그 값이 정말 이 화면의 저장 대기 판정인가.
     assert.ok(f.includes("const hasAnyPendingChanges = totalPendingCount > 0;"));
-    assert.ok(f.includes("disabled={!hasAnyPendingChanges || globalSaveStatus === \"saving\"}"), "[저장] 단추가 쓰는 바로 그 값이다");
+    // 🔴 2026-11-20(조각 4) — [저장] 단추의 조건에 `!canSendStructural` 이 한 칸
+    //    늘었다(보낼 수 없는 구조 변경이 있으면 막는다). 🔵 **게시 쪽은 안 늘렸다**:
+    //    막힌 구조 변경도 「저장하지 않은 변경」에 포함돼 hasAnyPendingChanges 가
+    //    이미 참이므로, 게시는 어차피 막힌다 — 조건을 두 곳에 적으면 어긋난다.
+    assert.ok(f.includes("disabled={!hasAnyPendingChanges || !canSendStructural || globalSaveStatus === \"saving\"}"), "[저장] 단추가 쓰는 바로 그 값이다");
+  });
+
+  test("🔴 저장 전 **구조 변경**도 게시를 막는다 — 안 세면 화면에 보이는 것과 다른 것이 게시된다", () => {
+    // 🔴 2026-11-20(조각 4) — 노드·연결선 추가·삭제·재연결이 [저장] 쪽으로 옮겨
+    //    가면서, 「저장하지 않은 변경」의 범위가 넓어졌다. totalPendingCount 에
+    //    구조 건수를 안 더하면 노드를 추가해 놓고 **그대로 게시**할 수 있고,
+    //    게시된 내용은 화면에 보이는 것이 아니라 마지막으로 저장된 것이 된다.
+    const f = flat(editor);
+    assert.ok(
+      f.includes("dirtyNodeFieldEntries.length + dirtyEdgeFieldEntries.length + dirtyPositionNodeIds.length + dirtyRouteEdgeIds.length + structuralPendingCount;"),
+      "구조 변경 건수가 저장 대기 수에서 빠졌다"
+    );
+    // 🔵 세는 기준은 **접은 뒤**다 — 만들었다 지운 노드는 보낼 것이 0건이고,
+    //    그것까지 세면 게시가 「아무것도 안 바뀌었는데」 막힌다.
+    assert.ok(f.includes("const structuralPendingCount = coalescedStructural.operations.length;"));
   });
 
   test("🔴 단추를 흐리게 하는 판정과 창이 열리는 판정이 **같은 값 하나**다", () => {

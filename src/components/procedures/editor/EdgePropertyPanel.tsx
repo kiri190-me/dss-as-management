@@ -10,13 +10,7 @@ import {
   type ManualTechnicalNodeType,
 } from "@/lib/domain/procedure-template-types";
 import type { EditorEdgeRow, EditorNodeRow } from "@/lib/db/queries/procedure-template-editor";
-import {
-  retargetProcedureTemplateEdgeAction,
-  deleteProcedureTemplateEdgeAction,
-  insertProcedureTemplateNodeOnEdgeAction,
-} from "@/lib/server/actions/procedure-template-editor";
 import type { NodeLookup } from "@/lib/domain/procedure-editor-client-state";
-import type { StructuralValidationSummary } from "@/lib/db/mutations/procedure-template-editor";
 import type { RoutePoint } from "@/lib/graph-editor-core/routing";
 import type { ProcedureEdgeFieldDraft } from "@/lib/domain/procedure-editor-save-state";
 
@@ -43,20 +37,33 @@ import type { ProcedureEdgeFieldDraft } from "@/lib/domain/procedure-editor-save
  * buildEdgeRetargetPreview 호출도 함께 걷어냈다(그 함수와 제 시험은 그대로
  * 둔다 — 이 조각의 일이 아니다).
  *
- * 🔴 됐다는 증거는 **지도에서 연결선이 옮겨 붙는 것**이고(onSaved →
- * router.refresh()), 실패는 아래 errorMessage 한 자리가 유일한 통로다.
+ * 🔴 됐다는 증거는 **지도에서 연결선이 옮겨 붙는 것**이다. 🔴 2026-11-20(조각 4)
+ * 에 「실패는 아래 errorMessage 한 자리가 유일한 통로다」가 **더 이상 사실이 아니게**
+ * 됐다 — 이 패널에는 실패할 서버 호출이 한 건도 안 남아 그 자리가 화면 위쪽 한 곳으로
+ * 옮겨 갔다(아래 조각 4 절).
  * 🟢 **삭제(분기 삭제)는 건드리지 않았다** — 사용자가 말한 것은 추가/수정이다.
+ *
+ * ── 🔴 2026-11-20(조각 4) — 재연결·삭제·노드 끼우기 셋이 **[저장] 쪽으로 갔다** ──
+ * 쓰는 분의 요청으로 구조 변경 일곱이 전부 모아 두는 쪽으로 옮겼다. 이 패널은 이제
+ * 서버 액션을 하나도 부르지 않는다 — 무엇을 할지만 적어 화면에 넘기고, 화면이
+ * [저장]에서 **같은 액션 셋을** 부른다(서버는 한 글자도 안 바뀌었다). 위 줄기 B-②
+ * 의 「지도에서 옮겨 붙는 것이 증거」는 이제 **저장됐다는 증거가 아니라 모아 뒀다는
+ * 증거**다 — 그래서 아래 각 묶음에 「[저장]을 눌러야 간다」를 한 줄씩 적었다.
+ *
+ * 🔴 **아직 저장 안 된 연결선 위에는 노드를 못 끼운다.** 서버 함수가 진짜 연결선
+ * 하나를 전제하기 때문이다(조각 1 의 INSERT_ON_UNSAVED_EDGE). 그 조작이 목록에
+ * 들어가면 [저장]이 통째로 막히므로, **조작 자체를 여기서 막는다** —
+ * insertNodeBlockedReason.
  */
 export default function EdgePropertyPanel({
   edge,
   nodes,
   canEdit,
-  expectedTemplateUpdatedAt,
   draft,
   onDraftChange,
   note,
   onNoteChange,
-  onSaved,
+  onQueueRetarget,
   routePoints,
   selectedWaypointIndex,
   onAddWaypoint,
@@ -64,21 +71,23 @@ export default function EdgePropertyPanel({
   onResetRoute,
   onStraighten,
   canDelete,
-  onDeleted,
+  onQueueDelete,
   canInsertNode,
+  insertNodeBlockedReason = null,
+  onQueueInsertNode,
   isTechnical,
 }: {
   edge: EditorEdgeRow;
   nodes: EditorNodeRow[];
   canEdit: boolean;
-  expectedTemplateUpdatedAt: string;
   /** 5C-6D-1C — screen-owned pending draft for branchType/branchLabel; already reflects any locally-unsaved edit (this panel never keeps its own copy). */
   draft: ProcedureEdgeFieldDraft;
   onDraftChange: (patch: Partial<ProcedureEdgeFieldDraft>) => void;
   /** 5C-6D-1C — screen-owned "검토자 메모" text, sent only if/when the EDGE_FIELDS save step for this edge actually runs; blank means no note. Not part of `draft` — see this file's own doc comment. */
   note: string;
   onNoteChange: (note: string) => void;
-  onSaved: (newUpdatedAt: string, structuralValidation?: StructuralValidationSummary) => void;
+  /** 🔴 서버에 보내지 않고 **모아 둔다**(2026-11-20, 조각 4). 그림에서는 그 자리에서 선이 옮겨 붙는다. */
+  onQueueRetarget: (newFromNodeId: string, newToNodeId: string, reason: string | null) => void;
   /** Phase 4B — the edge's *working* (saved + pending-merged) manual route; null means automatic/deterministic routing. */
   routePoints: RoutePoint[] | null;
   selectedWaypointIndex: number | null;
@@ -89,90 +98,66 @@ export default function EdgePropertyPanel({
   onStraighten: (() => void) | null;
   /** Phase 5C-5B — true only for a TECHNICAL_TASK DRAFT; always false for FULL_SERVICE/REFERENCE. */
   canDelete: boolean;
-  onDeleted: (newUpdatedAt: string) => void;
+  /** 🔴 서버에 보내지 않고 **모아 둔다**. 그림에서는 그 자리에서 선이 사라진다. */
+  onQueueDelete: (reason: string | null) => void;
   /** Phase 5C-5B — same gate as canDelete (TECHNICAL_TASK DRAFT, ADMIN+SUPER_ADMIN); a separate prop only so the two capabilities stay independently named/readable at each call site. */
   canInsertNode: boolean;
+  /**
+   * 지금은 **끼울 수 없는** 까닭(2026-11-20, 조각 4). null 이면 끼울 수 있다.
+   *
+   * 🔴 아직 저장 안 된 연결선이 그 경우다. 조각 1 이 적어 둔 대로 쪼갤 차례가
+   * 성립하지 않아(삽입은 노드 만들기보다 앞서야 하는데, 쪼갤 선을 만드는 일이
+   * 그보다 앞서야 한다) 접기가 그 조작을 conflicts 로 올리고 **[저장]이 통째로
+   * 막힌다.** 저장을 막는 것보다 조작 자체를 막는 쪽이 낫다.
+   */
+  insertNodeBlockedReason?: string | null;
+  /** 🔴 서버에 보내지 않고 **모아 둔다**. 그림에서는 그 자리에서 선이 둘로 갈린다. */
+  onQueueInsertNode: (input: { nodeType: ManualTechnicalNodeType; title: string; position: RoutePoint }) => void;
   /** Phase 5C-5B usability — true for TECHNICAL_TASK; relaxes the retarget reason from mandatory to optional (UI mirror of the mutation layer's own category-aware validation). FULL_SERVICE keeps requiring a reason, unchanged. */
   isTechnical: boolean;
 }) {
   const nodesById = new Map<string, NodeLookup>(nodes.map((n) => [n.id, { id: n.id, title: n.title, nodeCode: n.nodeCode }]));
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [newFromNodeId, setNewFromNodeId] = useState(edge.fromNodeId);
   const [newToNodeId, setNewToNodeId] = useState(edge.toNodeId);
   const [retargetReason, setRetargetReason] = useState("");
-  const [isRetargeting, setIsRetargeting] = useState(false);
 
   const [deleteReason, setDeleteReason] = useState("");
-  const [isDeleting, setIsDeleting] = useState(false);
 
   const [showInsertNodeForm, setShowInsertNodeForm] = useState(false);
   const [insertNodeType, setInsertNodeType] = useState<ManualTechnicalNodeType>("TASK");
   const [insertNodeTitle, setInsertNodeTitle] = useState("");
-  const [isInsertingNode, setIsInsertingNode] = useState(false);
 
   const hasRetarget = newFromNodeId !== edge.fromNodeId || newToNodeId !== edge.toNodeId;
   const labelRequired = draft.branchType === "CUSTOM" && draft.branchLabel.trim().length === 0;
 
   /**
-   * [대상 변경] 의 본체 — 확인 창 없이 그 자리에서 서버로 간다.
-   * 🔴 onSaved 는 **실패 검사 뒤**에만 부른다: 이 호출이 화면의
-   * handleStructuralSaved → pushStructuralUndoStep() 으로 이어져 되돌리기 한
-   * 걸음을 쌓으므로, 실패한 호출까지 쌓으면 일어나지도 않은 일을 되돌리려 들어
-   * 바로 아래 있던 멀쩡한 변경이 대신 날아간다(줄기 B-①). 창을 없애면서도 이
-   * 순서는 손대지 않았다.
+   * [대상 변경] 의 본체 — 🔴 **모아 두기만 한다**(2026-11-20, 조각 4).
+   *
+   * 🔵 실패 검사가 사라진 까닭은 CreateEdgePanel 의 handleAdd 와 같다 — 되돌리기
+   * 한 걸음을 화면이 **목록을 고치기 직전에** 쌓으므로, 실패한 호출로 한 걸음이
+   * 쌓일 길 자체가 없어졌다.
+   *
+   * 🔵 사유는 그대로 실어 보낸다. FULL_SERVICE/REFERENCE 의 「사유 필수」를 지키는
+   * 단추 조건(아래 disabled)도 전과 같은 식이다.
    */
-  async function handleRetarget() {
-    setIsRetargeting(true);
-    setErrorMessage(null);
-    const result = await retargetProcedureTemplateEdgeAction({
-      edgeId: edge.id,
-      newFromNodeId,
-      newToNodeId,
-      reason: retargetReason,
-      expectedTemplateUpdatedAt,
-    });
-    setIsRetargeting(false);
-    if (!result.ok) {
-      setErrorMessage(result.message);
-      return;
-    }
-    onSaved(result.updatedAt, result.structuralValidation);
+  function handleRetarget() {
+    onQueueRetarget(newFromNodeId, newToNodeId, retargetReason.trim() || null);
+    setRetargetReason("");
   }
 
-  async function handleDelete() {
-    setIsDeleting(true);
-    setErrorMessage(null);
-    const result = await deleteProcedureTemplateEdgeAction({ edgeId: edge.id, reason: deleteReason, expectedTemplateUpdatedAt });
-    setIsDeleting(false);
-    if (!result.ok) {
-      setErrorMessage(result.message);
-      return;
-    }
-    onDeleted(result.updatedAt);
+  function handleDelete() {
+    onQueueDelete(deleteReason.trim() || null);
+    setDeleteReason("");
   }
 
-  async function handleInsertNodeAtRoutePoint() {
+  function handleInsertNodeAtRoutePoint() {
     if (selectedWaypointIndex === null || !routePoints) return;
     const point = routePoints[selectedWaypointIndex];
     if (!point) return;
-    setIsInsertingNode(true);
-    setErrorMessage(null);
-    const result = await insertProcedureTemplateNodeOnEdgeAction({
-      edgeId: edge.id,
-      nodeType: insertNodeType,
-      title: insertNodeTitle,
-      position: point,
-      expectedTemplateUpdatedAt,
-    });
-    setIsInsertingNode(false);
-    if (!result.ok) {
-      setErrorMessage(result.message);
-      return;
-    }
+    onQueueInsertNode({ nodeType: insertNodeType, title: insertNodeTitle, position: point });
     setShowInsertNodeForm(false);
     setInsertNodeTitle("");
-    onSaved(result.updatedAt);
   }
 
   return (
@@ -243,13 +228,14 @@ export default function EdgePropertyPanel({
           />
           <button
             type="button"
-            disabled={!hasRetarget || newFromNodeId === newToNodeId || (!isTechnical && retargetReason.trim().length === 0) || isRetargeting}
-            onClick={() => void handleRetarget()}
+            disabled={!hasRetarget || newFromNodeId === newToNodeId || (!isTechnical && retargetReason.trim().length === 0)}
+            onClick={handleRetarget}
             className="self-start rounded-md border border-blue-400 px-3 py-1.5 text-sm font-medium text-blue-900 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900"
           >
-            {isRetargeting ? "변경 중..." : "대상 변경"}
+            대상 변경
           </button>
           {newFromNodeId === newToNodeId && <p className="text-red-600 dark:text-red-400">자기 자신으로의 분기는 지원하지 않습니다.</p>}
+          <p className="text-blue-800 dark:text-blue-300">대상 변경은 화면 상단의 [저장]을 눌러야 서버에 저장됩니다.</p>
         </div>
       )}
 
@@ -290,7 +276,7 @@ export default function EdgePropertyPanel({
               <button
                 type="button"
                 onClick={() => setShowInsertNodeForm((v) => !v)}
-                disabled={selectedWaypointIndex === null}
+                disabled={selectedWaypointIndex === null || insertNodeBlockedReason !== null}
                 className="rounded-md border border-blue-400 px-2.5 py-1 text-xs text-blue-900 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900"
               >
                 이 위치에 노드 추가
@@ -298,7 +284,9 @@ export default function EdgePropertyPanel({
             )}
           </div>
         )}
-        {canInsertNode && showInsertNodeForm && selectedWaypointIndex !== null && (
+        {/* 🔴 못 끼우는 까닭을 **그 단추 바로 아래** 적는다 — 흐린 단추만 두면 고장으로 읽힌다. */}
+        {canEdit && canInsertNode && insertNodeBlockedReason && <p className="text-amber-700 dark:text-amber-400">{insertNodeBlockedReason}</p>}
+        {canInsertNode && insertNodeBlockedReason === null && showInsertNodeForm && selectedWaypointIndex !== null && (
           <div className="flex flex-col gap-2 rounded-md border border-blue-200 bg-blue-50 p-2 dark:border-blue-900 dark:bg-blue-950">
             <p className="text-blue-800 dark:text-blue-300">
               선택된 경로점 위치에 새 노드를 삽입하고, 이 분기를 두 개로 나눕니다. 원래 분기 유형/라벨은 첫 번째 구간에 그대로 유지되고, 두 번째 구간은 기본(정상 진행) 연결이 됩니다.
@@ -328,21 +316,21 @@ export default function EdgePropertyPanel({
             <div className="flex gap-2">
               <button
                 type="button"
-                disabled={insertNodeTitle.trim().length === 0 || isInsertingNode}
-                onClick={() => void handleInsertNodeAtRoutePoint()}
+                disabled={insertNodeTitle.trim().length === 0}
+                onClick={handleInsertNodeAtRoutePoint}
                 className="self-start rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
               >
-                {isInsertingNode ? "추가 중..." : "노드 삽입"}
+                노드 삽입
               </button>
               <button
                 type="button"
                 onClick={() => setShowInsertNodeForm(false)}
-                disabled={isInsertingNode}
                 className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300"
               >
                 취소
               </button>
             </div>
+            <p className="text-blue-800 dark:text-blue-300">끼운 노드는 화면 상단의 [저장]을 눌러야 서버에 저장됩니다.</p>
           </div>
         )}
         {routePoints && routePoints.length > 0 && (
@@ -371,21 +359,21 @@ export default function EdgePropertyPanel({
           />
           <button
             type="button"
-            disabled={isDeleting}
-            onClick={() => void handleDelete()}
+            onClick={handleDelete}
             className="self-start rounded-md border border-red-400 px-3 py-1.5 text-sm font-medium text-red-900 hover:bg-red-100 disabled:opacity-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900"
           >
-            {isDeleting ? "삭제 중..." : "분기 삭제"}
+            분기 삭제
           </button>
+          {/* 🔴 지워도 아직 안 간다 — 그림에서 사라지는 것이 더 이상 「저장됐다」는 증거가 아니다. */}
+          <p className="text-red-700 dark:text-red-400">삭제는 화면 상단의 [저장]을 눌러야 서버에 반영됩니다.</p>
         </div>
       )}
-
       {/*
-        🔴 재연결·노드 삽입·삭제 셋이 함께 쓰는 **유일한** 실패 통로다. 확인
-        창이 있던 시절에는 재연결 실패를 창 안에도 한 벌 더 그렸는데, 창이
-        없어진 지금은 이 한 자리뿐이다 — 지우면 실패가 조용해진다.
+        🔴 2026-11-20(조각 4) — **실패를 알리던 자리가 여기서 없어졌다.** 재연결·
+        노드 끼우기·삭제 셋이 전부 [저장] 쪽으로 옮겨 가 이 패널에는 실패할 호출이
+        한 건도 안 남았다. 서버가 거절하면 그 글은 화면 위쪽 [저장] 줄 아래에서
+        나온다 — 실패를 알리는 자리를 **하나로 모은 것**이지 없앤 것이 아니다.
       */}
-      {errorMessage && <p className="text-red-600 dark:text-red-400">{errorMessage}</p>}
     </div>
   );
 }

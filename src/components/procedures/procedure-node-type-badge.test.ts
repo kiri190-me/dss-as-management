@@ -92,7 +92,10 @@ describe("노드 유형 딱지 — ① 고르면 유형이 **글자로** 선다"
   test("🔴 **제목 칸·유형 드롭다운보다 앞**에 선다 — 패널을 열자마자 눈에 들어와야 한다", () => {
     const 딱지자리 = panel.indexOf("data-node-type={node.nodeType}");
     const 제목칸 = panel.indexOf("제목 (Shift+Enter로 줄바꿈)");
-    const 유형드롭다운 = panel.indexOf("노드 유형{isChangingType");
+    // 🔴 2026-11-20(조각 4) — 라벨에서 `{isChangingType ? " (변경 중...)" : ""}`
+    //    꼬리가 사라졌다. 유형 변경이 [저장] 쪽으로 옮겨 가 기다릴 것이 없어졌다.
+    //    🔵 `panel` 은 공백을 하나로 접은 글자라 「노드 유형 <select」로 잡는다.
+    const 유형드롭다운 = panel.indexOf("노드 유형 <select");
     assert.ok(딱지자리 >= 0 && 제목칸 >= 0 && 유형드롭다운 >= 0, "셋 다 찾아야 자리를 견줄 수 있다");
     assert.ok(딱지자리 < 제목칸, "제목 칸보다 뒤에 있으면 스크롤해야 보이는 자리다");
     assert.ok(

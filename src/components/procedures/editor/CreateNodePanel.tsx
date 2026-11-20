@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { MANUAL_TECHNICAL_NODE_TYPE_CODES, procedureNodeTypeLabels, type ManualTechnicalNodeType } from "@/lib/domain/procedure-template-types";
-import { createProcedureTemplateNodeAction } from "@/lib/server/actions/procedure-template-editor";
 import { resolveEffectiveNodePosition, computeCenterAlignedRelativePosition } from "@/lib/graph-editor-core/layout";
 import { NODE_VISUAL_CONFIG, getNodeChipVisual, computeNodeDimensions } from "@/lib/domain/procedure-visual-language";
 import type { EditorNodeRow } from "@/lib/db/queries/procedure-template-editor";
@@ -33,18 +32,31 @@ const BELOW_SELECTED_SPACING = { horizontal: 280, vertical: 150 } as const;
  * 중심 x 를 맞추고, 세로는 두 중심 사이가 눈금(150)이다. 그리고 기준으로 삼는
  * 자리가 저장된 position_x/y 가 아니라 **화면에 그려진 자리**다 — 아래
  * handleCreate 의 주석에 어긋났던 실측값이 있다.
+ *
+ * ── 🔴 2026-11-20(조각 4) — **서버를 여기서 안 부른다** ──────────────────
+ * 쓰는 분의 요청: 「노드·연결선 추가·삭제·재연결은 [저장] 없이 바로 저장되는데,
+ * 그것들도 [저장]을 눌러야 저장되도록 해 달라.」 그래서 이 패널은 이제
+ * createProcedureTemplateNodeAction 을 부르지 않는다 — 무엇을 만들지만 적어
+ * 화면(ProcedureTemplateEditorScreen)에 넘기고, 화면이 그것을 모아 두었다가
+ * [저장]에서 **같은 액션을** 부른다(서버 쪽은 한 글자도 안 바뀌었다).
+ *
+ * 🔵 그래서 `templateId`·`expectedTemplateUpdatedAt`·`onSaved` 가 사라졌다 —
+ * 셋 다 그 호출에만 쓰이던 것이다. `isSubmitting`·`errorMessage` 도 함께 사라졌다:
+ * 여기서는 기다릴 일도 실패할 일도 없다(실패는 [저장] 때 화면 위쪽 한 자리에서
+ * 알린다 — 실패를 알리는 자리를 하나로 모은 것이지 없앤 것이 아니다).
  */
 export default function CreateNodePanel({
-  templateId,
-  expectedTemplateUpdatedAt,
-  onSaved,
+  onQueueCreate,
   selectedNode,
   resolveNodeDimensions,
   renderedPositions,
 }: {
-  templateId: string;
-  expectedTemplateUpdatedAt: string;
-  onSaved: (newUpdatedAt: string) => void;
+  // 🔴 서버에 보내지 않고 **모아 둔다.** 화면이 임시 번호를 찍어 목록 뒤에 붙이고,
+  // 그림에는 그 자리에서 새 노드가 나타난다(저장 전 미리보기).
+  // 🔴 블록 주석으로 적으면 안 된다 — 까닭은 NodePropertyPanel 의 nodeTypeOptions
+  //    위에 적어 두었다(화면 시험의 주석 걷어내기가 `{` 바로 뒤의 `/*` 를 JSX
+  //    주석으로 읽어 수천 자를 통째로 지운다).
+  onQueueCreate: (input: { nodeType: ManualTechnicalNodeType; title: string; position: { x: number; y: number } | null }) => void;
   selectedNode: EditorNodeRow | null;
   /** 5C-6D-1D — the screen's single, already-composed effective-dimension resolver (measured-first, estimate-fallback; same instance NodePropertyPanel's own relative-position math uses). Used ONLY for `selectedNode`'s size below — the about-to-be-created node itself has no rendered instance to measure yet, so its own size still comes from the plain computeNodeDimensions estimate, unchanged. */
   resolveNodeDimensions: (n: EditorNodeRow) => { width: number; height: number };
@@ -57,12 +69,8 @@ export default function CreateNodePanel({
 }) {
   const [nodeType, setNodeType] = useState<ManualTechnicalNodeType>("TASK");
   const [title, setTitle] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  async function handleCreate() {
-    setIsSubmitting(true);
-    setErrorMessage(null);
+  function handleCreate() {
     // Round-2 alignment fix — the placement math needs both nodes' ACTUAL
     // rendered sizes to center the new node under the selected one; a plain
     // left-edge copy silently breaks the moment the two titles produce
@@ -100,14 +108,10 @@ export default function CreateNodePanel({
             { width: newNodeDimensions.width, height: newNodeDimensions.height }
           )
         : null;
-    const result = await createProcedureTemplateNodeAction({ templateId, nodeType, title, position, expectedTemplateUpdatedAt });
-    setIsSubmitting(false);
-    if (!result.ok) {
-      setErrorMessage(result.message);
-      return;
-    }
+    onQueueCreate({ nodeType, title, position });
+    // 🔵 제목만 비운다 — 유형은 그대로 둔다. 노드를 여러 개 이어 만들 때 같은 유형을
+    //    고르는 일이 보통이고, 전에도(서버를 바로 부르던 시절에도) 그랬다.
     setTitle("");
-    onSaved(result.updatedAt);
   }
 
   return (
@@ -150,13 +154,19 @@ export default function CreateNodePanel({
       </label>
       <button
         type="button"
-        disabled={title.trim().length === 0 || isSubmitting}
-        onClick={() => void handleCreate()}
+        disabled={title.trim().length === 0}
+        onClick={handleCreate}
         className="self-start rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
       >
-        {isSubmitting ? "추가 중..." : "노드 추가"}
+        노드 추가
       </button>
-      {errorMessage && <p className="text-red-600 dark:text-red-400">{errorMessage}</p>}
+      {/*
+        🔴 2026-11-20(조각 4) — **여기서 서버로 가지 않는다**고 적어 둔다. 전에는
+        누르는 순간 저장돼서 그림에 나타나는 것이 곧 증거였는데, 이제는 그림에
+        나타나도 아직 안 간 것이다. 안 적으면 「추가했으니 됐다」고 나가는 사람이
+        생기고(나가기 확인이 한 번 더 묻기는 한다), 그 오해가 이번 일의 반대짝이다.
+      */}
+      <p className="text-blue-700 dark:text-blue-400">추가한 노드는 화면 상단의 [저장]을 눌러야 서버에 저장됩니다.</p>
     </div>
   );
 }
