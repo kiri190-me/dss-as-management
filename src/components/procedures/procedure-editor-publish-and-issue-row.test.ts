@@ -238,8 +238,15 @@ describe("줄기 B-④ 나 — 편집기에서 게시할 수 있다", () => {
     const f = flat(publishButton);
     assert.ok(f.includes("function openDialog() { if (disabledReason) return;"), "막혔는데 창이 열리면 되돌릴 수 없는 일이 난다");
     assert.ok(f.includes("disabled={disabledReason !== null}"));
-    assert.ok(f.includes("{disabledReason && <span"), "까닭을 화면에 그려야 한다 — 흐린 단추만 두지 않는다");
-    assert.ok(f.includes("title={disabledReason ?? undefined}"));
+    /*
+     * 🔴 **까닭을 화면에 글로 안 그린다**(2026-11-21 쓰는 분 요청). 전에는 여기가
+     *    `{disabledReason && <span` 을 **있어야 한다**고 재고 있었다 — 뜻이 뒤집혔으므로
+     *    단언도 뒤집는다. 🔴 **지우지 않는다**: 지우면 누가 그 줄을 되살려도 아무도 모른다.
+     * 🔵 막는 동작과 까닭을 나르는 길은 **그대로 잰다**(위 `disabled`, 아래 `title`) —
+     *    글만 뺀 것이지 저장 안 한 변경으로 게시되는 길이 열린 것이 아니다.
+     */
+    assert.ok(!f.includes("{disabledReason && <span"), "까닭을 화면에 글로 그리면 안 된다 — 2026-11-21 에 걷어낸 줄이다");
+    assert.ok(f.includes("title={disabledReason ?? undefined}"), "글은 안 그려도 마우스를 올리면 까닭이 떠야 한다");
   });
 
   test("🔴 disabledReason 의 기본값은 null — 이 프롭을 안 넘기는 호출부(절차 상세)는 전과 똑같다", () => {

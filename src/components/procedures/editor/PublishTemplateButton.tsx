@@ -117,7 +117,18 @@ export default function PublishTemplateButton({
       >
         {isRepublish ? "다시 게시" : "게시"}
       </button>
-      {disabledReason && <span className="text-xs text-amber-700 dark:text-amber-400">{disabledReason}</span>}
+      {/*
+        🔴 **까닭을 화면에 글로 안 그린다**(2026-11-21 쓰는 분 요청: 「이 설명들은 삭제해줘」).
+        전에는 여기에 `{disabledReason && <span …>{disabledReason}</span>}` 이 서서
+        단추 옆에 한 줄이 떴다.
+        🔵 **막는 동작은 그대로다** — 위 `disabled` 와 `openDialog` 의 이른 반환이 같은 값을
+           보고 있고, 글만 안 그린다. 저장 안 한 변경이 있는 채로 게시되는 일은 없다.
+        🔵 **까닭이 아주 사라지지는 않는다**: ㉠ `title` 로 남아 마우스를 올리면 뜨고,
+           ㉡ 편집기 도구막대의 「변경사항 N건 저장 대기 중」이 같은 상황을 이미 말한다.
+        🔴 이 프롭을 넘기는 호출부는 **편집기 하나뿐**이다(절차 상세는 안 넘겨 null 이다).
+           나중에 다른 화면이 넘기기 시작하면 **거기서도 글이 안 뜬다** — 그 화면에 옆에
+           받쳐 줄 글이 없다면 그때는 이 결정을 다시 봐야 한다.
+      */}
 
       <dialog
         ref={dialogRef}
