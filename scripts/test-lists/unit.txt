@@ -137,6 +137,14 @@ src/lib/graph-editor-core/pointer.test.ts
 src/lib/graph-editor-core/axis-lock.test.ts
 src/lib/graph-editor-core/save-sequence.test.ts
 src/lib/domain/procedure-editor-save-state.test.ts
+# 🔵 구조 변경(노드·연결선 추가·삭제·유형 변경·재연결·연결선 위 삽입)도 [저장]을
+# 눌러야 저장되게 모아 두는 순수 판정(2026-11-20, 조각 1 — 아직 화면에 안 붙었다).
+# 🔴 재는 것 넷: **임시 id 가 UUID 로 읽히지 않는가**(서버 액션의 그 정규식을 그대로
+# 옮겨 양쪽으로 잰다 — 새 나가면 서버가 FORBIDDEN 으로 막거나 엉뚱한 노드를 가리킨다) ·
+# **접기가 너무 많이 접지 않는가**(이미 서버에 있는 것을 지운 줄은 접히면 안 된다) ·
+# **보낼 차례가 의존을 지키는가**(선을 지워야 노드를 지운다 · 노드가 있어야 선을 긋는다) ·
+# **임시 id 치환에서 칸을 빠뜨리면 우는가**(삽입은 id 를 둘 돌려준다).
+src/lib/domain/procedure-editor-structural-changes.test.ts
 src/lib/domain/procedure-execution-topology.test.ts
 src/lib/domain/procedure-execution-order.test.ts
 src/lib/domain/procedure-execution-focus.test.ts

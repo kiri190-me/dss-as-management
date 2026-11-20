@@ -49,7 +49,7 @@ import type { ProcedureBranchType } from "@/lib/domain/procedure-template-types"
  * splitting it here would misrepresent what a "step" actually costs
  * (another round trip that doesn't exist).
  *
- * ==================== EXPLICITLY EXCLUDED (stay immediate in 1C) ====================
+ * ==================== EXPLICITLY EXCLUDED (structural changes) ====================
  * CHANGE_NODE_TYPE (reason unless TECHNICAL_TASK, re-validates, its own
  * always-separately-audited action type), RETARGET_EDGE (reason + confirm
  * dialog), CREATE_EDGE (reason + confirm dialog), DELETE_EDGE, CREATE_NODE,
@@ -57,6 +57,29 @@ import type { ProcedureBranchType } from "@/lib/domain/procedure-template-types"
  * publish/version actions. None of these appear anywhere in this module —
  * there is no SaveStep variant for any of them, so they cannot accidentally
  * end up deferred by a future caller misusing this module.
+ *
+ * ── 🔴 2026-11-20 — 「즉시 저장으로 남긴다」는 결정은 **뒤집혔다** ────────
+ * 원래 이 절의 제목은 "stay immediate in 1C" 였다. 그렇게 정한 까닭은 위에 적힌
+ * 그대로다 — 이 일곱은 사유를 받고, 확인 창을 띄우고, 구조 검증을 다시 돌리고,
+ * 서버 이력에 제 나름의 action type 으로 따로 남는다. 모아서 보내면 그 넷이
+ * 전부 「[저장]을 누른 시점」으로 밀린다. 2026-11-04 에는 그 결정을 지킨 채
+ * **안내로** 풀었다(화면에 「방금 저장됐습니다」를 띄웠다 — components 목록의
+ * procedure-structural-save-notice.test.ts 머리말에 경위가 있다).
+ *
+ * 2026-11-20 에 쓰는 분에게서 **같은 요청이 다시 왔다**: 「노드·연결선 추가·
+ * 삭제·재연결도 [저장]을 눌러야 저장되도록 해 달라.」 안내로는 부족했다는 뜻이고,
+ * 그래서 이번에는 동작을 바꾼다. 위 까닭이 틀렸던 것은 아니다 — 밀린다는 사실은
+ * 그대로이고, 밀린 뒤에도 사유·확인 창·구조 검증·이력은 저장 시점에 전부 그대로 돈다.
+ *
+ * 🔴 **그래도 이 모듈은 바뀌지 않았다.** 새 일은 이웃
+ * procedure-editor-structural-changes.ts 가 맡는다 — 거기 조작 일곱의 모양,
+ * 저장 전 임시 id, 겹치는 조작 접기, 보낼 차례 세우기가 들어 있다. 여기 다시
+ * SaveStep 변종을 더하지 않은 까닭은 둘이다. ① 이 모듈의 세 단계는 전부
+ * **「서버에 이미 있는 행의 칸을 고치는」** 일이라 서버 스냅샷과 초안을 맞대는
+ * dirty 모델이 성립하는데, 구조 변경은 행 자체가 생기고 사라져서 같은 모델로는
+ * 안 세어진다. ② 두 모듈이 각자 제 차례를 세우고, 실행과
+ * expectedTemplateUpdatedAt 이어 넘기기는 아래 runProcedureSaveSequence 를
+ * **함께 쓴다**(거기에 두 벌을 만들지 않는다).
  * ========================================================================
  */
 
