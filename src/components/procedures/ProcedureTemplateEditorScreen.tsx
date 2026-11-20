@@ -121,6 +121,7 @@ import {
   describeStructuralConflicts,
   type StructuralPreviewFactories,
 } from "@/lib/domain/procedure-editor-structural-preview";
+import { planProcedureDeleteKey, isTextEntryTarget } from "@/lib/domain/procedure-editor-delete-key";
 import { useFieldStepGhostVisibility } from "./editor/use-field-step-ghost-visibility";
 
 type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge" | "addNode" | "fieldSteps";
@@ -2156,24 +2157,10 @@ export default function ProcedureTemplateEditorScreen({
     setSelectedWaypoint(null);
   }, [pushPendingUndoStep]);
 
-  // Delete/Backspace removes the selected waypoint — only when a waypoint
-  // is actually selected and focus isn't inside a text input/textarea/
-  // select/contenteditable element (never hijack ordinary text editing
-  // elsewhere in the editor, e.g. the property panels' own fields).
-  // Unchanged from before 1C.
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
-      if (!canEdit || !selectedEdgeId || selectedWaypointIndex === null) return;
-      const active = document.activeElement;
-      const tag = active?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (active instanceof HTMLElement && active.isContentEditable)) return;
-      e.preventDefault();
-      handleRemoveSelectedWaypoint();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [canEdit, selectedEdgeId, selectedWaypointIndex, handleRemoveSelectedWaypoint]);
+  // 🔵 **키로 지우는 통로는 이 아래 한 곳으로 모였다**(2026-11-21). 전에는 여기
+  //    (경로점 전용 keydown)에 있었는데, 노드·연결선까지 받게 되면서 「못 지우는
+  //    까닭」(selectedNodeDeleteBlockedReason)을 읽어야 해 그 계산 아래로 내려갔다.
+  //    🔴 등록은 여전히 **하나**다 — 둘로 나누면 한 번 누른 키에 둘이 반응한다.
 
   const selectedNode = selectedNodeId ? renderedNodes.find((n) => n.id === selectedNodeId) ?? null : null;
   const selectedEdge = selectedEdgeId ? renderedEdges.find((e) => e.id === selectedEdgeId) ?? null : null;
@@ -2203,6 +2190,80 @@ export default function ProcedureTemplateEditorScreen({
     if (attached > 0) return `연결선 ${attached}개가 붙어 있어 삭제할 수 없습니다. 그 연결선을 먼저 지워 주세요.`;
     return null;
   })();
+
+  /**
+   * ==========================================================================
+   * 🔴 [Delete] 키로 지우기 (2026-11-21)
+   * ==========================================================================
+   * 쓰는 분의 요청: 「노드나 연결선을 지울 때 [DELETE] 키를 눌러서 지울 수 있도록
+   * 해 달라.」
+   *
+   * 🔴 **무엇을 지울지 여기서 판정하지 않는다** — planProcedureDeleteKey 하나가
+   * 답한다. 차례(경로점 → 노드 → 연결선) · 글자 칸 보호 · Backspace 결정 · 막힌
+   * 노드에서 안 흘러내리는 규칙까지 전부 그 파일에 까닭과 함께 있고, 값으로
+   * 재어진다(이 화면은 .css 와 server-only 를 물고 있어 import 자체가 던진다).
+   *
+   * 🔴 넘기는 값은 **단추에 넘기는 그 값 그대로**다. nodeDeleteBlockedReason 은
+   * [노드 삭제] 단추를 흐리게 하는 selectedNodeDeleteBlockedReason 이고, 권한은
+   * 삭제 칸을 세우는 canDeleteGraph 다. 하나라도 다시 계산하면 「단추는 흐린데
+   * 키로는 지워지는」 화면이 생긴다.
+   *
+   * 🔴 id 는 **그림에 실제로 그려진 것**(selectedNode/selectedEdge)에서 뽑는다.
+   * 고른 id 가 미리보기에서 사라진 상태(예: 막 만든 노드를 [이전]으로 되돌린 뒤)
+   * 에서는 속성 패널도 안 서 있는데, 그때 state 의 id 로 삭제를 쌓으면 없는 행을
+   * 지우려 드는 조작이 목록에 남는다.
+   *
+   * 🔵 확인 창은 안 띄운다 — 지금 삭제 **단추**도 안 띄운다. 모아 두기라 [이전]
+   * 한 번이면 돌아오고, 키만 다르게 굴면 안 된다.
+   *
+   * 🔵 사유는 null 로 간다. 사유 칸은 애초에 「선택」이다(패널의
+   * `placeholder="삭제 사유 (선택)"` · `onQueueDelete(deleteReason.trim() || null)`).
+   */
+  /**
+   * 🔴 지우기 둘의 **가장 최근 신원**. 둘은 useCallback 이 아니라 렌더마다 다시
+   * 만들어지는 함수 선언이라, 아래 의존성 배열에 그대로 넣으면 keydown 등록·해제가
+   * 렌더마다(드래그 중에는 프레임마다) 돈다. pendingSnapshotRef 가 같은 까닭으로
+   * 쓰는 수법 그대로다.
+   *
+   * 🔵 둘 다 몸통이 setState 갱신 함수뿐이라 설령 옛 신원이 불려도 결과가 같다 —
+   * 그래도 ref 로 맞춰 두는 것은 그 성질이 나중에 깨져도 여기가 안 틀리게 하려는 것이다.
+   */
+  const queueDeleteByKeyRef = useRef({ node: handleQueueDeleteNode, edge: handleQueueDeleteEdge });
+  useEffect(() => {
+    queueDeleteByKeyRef.current = { node: handleQueueDeleteNode, edge: handleQueueDeleteEdge };
+  });
+
+  const deletableNodeId = selectedNode?.id ?? null;
+  const deletableEdgeId = selectedEdge?.id ?? null;
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const plan = planProcedureDeleteKey({
+        key: e.key,
+        isTypingTarget: isTextEntryTarget(document.activeElement),
+        canEdit,
+        canDeleteGraph,
+        selectedNodeId: deletableNodeId,
+        selectedEdgeId: deletableEdgeId,
+        selectedWaypointIndex,
+        nodeDeleteBlockedReason: selectedNodeDeleteBlockedReason,
+      });
+      // 🔴🔴 아무 일도 안 할 때는 **이벤트에 손도 안 댄다.** 글자 칸에서
+      //    preventDefault 를 하면 [Delete] 가 글자를 안 지운다.
+      if (plan.action === "NONE") return;
+      e.preventDefault();
+      if (plan.action === "REMOVE_WAYPOINT") {
+        handleRemoveSelectedWaypoint();
+        return;
+      }
+      if (plan.action === "DELETE_NODE") {
+        queueDeleteByKeyRef.current.node(plan.nodeId, null);
+        return;
+      }
+      queueDeleteByKeyRef.current.edge(plan.edgeId, null);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [canEdit, canDeleteGraph, deletableNodeId, deletableEdgeId, selectedWaypointIndex, selectedNodeDeleteBlockedReason, handleRemoveSelectedWaypoint]);
 
   return (
     <div className="flex flex-col gap-4">

@@ -703,10 +703,21 @@ export default function NodePropertyPanel({
             placeholder="삭제 사유 (선택)"
             className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
           />
+          {/*
+            🔵 2026-11-21 — **키를 적는 자리는 툴팁 하나**다. 같은 일을 [Delete]
+            키로도 할 수 있게 되었는데(화면의 planProcedureDeleteKey), 그것을
+            화면에 상시 한 줄로 세우지 않는다: 이 편집기의 상시 안내를 2026-11-04 ·
+            11-20 두 번 세웠다 두 번 다 지워 달라는 요청을 받았다(커밋 d57f664a).
+            툴팁은 자리를 안 차지하고 찾는 사람만 본다.
+            🔴 **막혔을 때는 키 이야기를 안 한다** — 그때는 키로도 안 지워지므로
+            (같은 값 하나로 판정한다) 까닭을 그대로 띄운다. 안 그러면 툴팁이
+            거짓말을 한다.
+          */}
           <button
             type="button"
             disabled={deleteBlockedReason !== null}
             onClick={handleDelete}
+            title={deleteBlockedReason ?? "[Delete] 키로도 지울 수 있습니다"}
             className="self-start rounded-md border border-red-400 px-3 py-1.5 text-sm font-medium text-red-900 hover:bg-red-100 disabled:opacity-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900"
           >
             노드 삭제

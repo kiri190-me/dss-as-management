@@ -357,9 +357,22 @@ export default function EdgePropertyPanel({
             placeholder="삭제 사유 (선택)"
             className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
           />
+          {/*
+            🔵 2026-11-21 — 키 이야기는 **툴팁 하나**로 적는다(까닭은
+            NodePropertyPanel 의 같은 자리에 있다 — 상시 안내를 두 번 세웠다 두 번
+            다 지웠다).
+            🔴 경로점을 고른 동안에는 [Delete] 가 **그 경로점부터** 지운다(고른 것
+            중 가장 안쪽). 그 상태에서 「[Delete] 로도 분기를 지울 수 있다」고
+            적으면 거짓이라, 같은 자리에서 그 차례를 그대로 말한다.
+          */}
           <button
             type="button"
             onClick={handleDelete}
+            title={
+              selectedWaypointIndex === null
+                ? "[Delete] 키로도 지울 수 있습니다"
+                : "경로점을 고른 동안에는 [Delete] 가 그 경로점을 먼저 지웁니다"
+            }
             className="self-start rounded-md border border-red-400 px-3 py-1.5 text-sm font-medium text-red-900 hover:bg-red-100 disabled:opacity-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900"
           >
             분기 삭제

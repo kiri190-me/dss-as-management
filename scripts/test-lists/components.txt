@@ -1267,6 +1267,24 @@ src/components/procedures/procedure-structural-save-notice.test.ts
 #    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
 src/components/procedures/procedure-structural-deferred-save.test.ts
 
+# 2026-11-21 — **[Delete] 키로 지우기**(화면 이음새).
+#    쓰는 분의 요청: 「노드나 연결선을 지울 때 [DELETE] 키를 눌러서 지울 수 있도록
+#    해 달라.」 무엇을 지울지 정하는 규칙은 unit 목록의
+#    procedure-editor-delete-key.test.ts 가 **값으로** 본다 — 여기서 못 박는 것은
+#    **화면이 그 판정을 제대로 물고 있는가** 하나다.
+#    재는 것: 🔴 화면이 키 글자·막힌 까닭을 **다시 적지 않는가**(잣대가 둘이 되면
+#    「단추는 흐린데 키로는 지워진다」가 생긴다) · 🔴 단추를 흐리게 하는 그 변수
+#    하나(selectedNodeDeleteBlockedReason)와 삭제 칸을 세우는 그 값(canDeleteGraph)을
+#    키도 보는가 · 🔴 고른 id 를 **그림에 그려진 것**에서 뽑는가 · 🔴 바뀐 값이
+#    의존성을 타고 keydown 에 닿는가(빠지면 옛 값으로 판정한다) · 🔴🔴 NONE 이면
+#    preventDefault 를 **안 하는가**(하면 글자 칸에서 [Delete] 가 글자를 안 지운다) ·
+#    🔴 모아 두는 통로(queueStructural)로 가고 서버 액션을 직접 안 부르는가 ·
+#    🔴 keydown 등록이 **하나**이고 떼어 내는가 · 🔴 **상시 안내를 세 번째로 안
+#    세웠는가**(이 자리에 2026-11-04 · 11-20 두 번 세웠다 두 번 다 지웠다 —
+#    커밋 d57f664a. 키 이야기는 삭제 단추의 툴팁 밖으로 새면 안 된다).
+#    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
+src/components/procedures/procedure-editor-delete-key-ui.test.ts
+
 # 2026-11-04 — **「다음 절차」 고르는 칸**(줄기 B ④ 조각 ②).
 #    🔴 2026-11-20 에 이 줄의 전제가 뒤집혔다 — 칸을 가리는 잣대가
 #    `node.nodeType === "END"` 라는 **글자**에서 **허용 목록 상수**
