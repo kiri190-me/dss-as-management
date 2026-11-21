@@ -1978,6 +1978,22 @@ export default function ProcedureTemplateEditorScreen({
     setIsPickingEdgeTarget(false);
     isPickingReferenceNodeRef.current = false;
     setIsPickingReferenceNode(false);
+    /*
+     * 🔴 **연결선을 고르면 노드 선택을 푼다**(2026-11-21 쓰는 분 요청: 「노드를
+     *    선택했다가 바로 연결선을 클릭하면 연결선이 바로 선택되도록」).
+     *
+     * 전에는 이 줄이 없어 **노드 선택이 남아 있었다.** 오른쪽 패널은 노드가 고려돼
+     * 있으면 노드 패널을 세우므로(`selectedNode ? … : !selectedNode && selectedEdge ? …`),
+     * 선을 눌러도 화면은 **노드 패널 그대로**였다 — 「선을 골랐는데 왜 노드가 보이지」.
+     * 🔴 2026-11-21 에 [Delete] 키를 더하면서 그것이 **지워지는 결함**이 됐다: 선을
+     *    누르고 [Delete] 를 치면 **아까 고른 노드가 지워졌다.** 키는 패널과 같은 차례를
+     *    따르므로(노드가 먼저) 키 쪽이 틀린 것이 아니라 **선택이 안 풀리는 쪽**이 틀렸다.
+     * 🔵 반대 방향(노드를 고르면 선 선택을 푼다)은 **전부터 있었다** — `ProcedureFlowGraph`
+     *    의 노드 클릭이 그렇게 한다. 이 한 줄로 두 방향이 같아진다.
+     * 🔵 「연결선 대상 고르기」·「참고 노드 고르기」는 **위에서 이미 껐다** — 그 모드들은
+     *    노드를 누르기를 기다리는 것이라, 여기서 노드 선택을 푸는 것과 부딪히지 않는다.
+     */
+    if (edgeId !== null) setSelectedNodeId(null);
     setSelectedEdgeId(edgeId);
     if (edgeId) setRightPanelTab("properties");
   }, []);

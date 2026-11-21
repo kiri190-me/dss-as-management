@@ -262,4 +262,19 @@ describe("[Delete] 로 지우기(화면) — ⑥🔴 **상시 안내를 세 번�
     assert.ok(edgePanel.includes("selectedWaypointIndex === null ? \"[Delete] 키로도 지울 수 있습니다\""));
     assert.ok(edgePanel.includes("경로점을 고른 동안에는 [Delete] 가 그 경로점을 먼저 지웁니다"));
   });
+
+  test("🔴 **연결선을 고르면 노드 선택이 풀린다** — 안 풀면 [Delete] 가 엉뚱한 노드를 지운다", () => {
+    /*
+     * 🔴 2026-11-21 쓰는 분 신고: 「노드를 선택했다가 바로 연결선을 클릭하면 연결선이
+     *    바로 선택되도록.」 이 줄이 없던 동안에는 노드 선택이 남아, 오른쪽 패널이
+     *    **노드 패널 그대로**였고 [Delete] 도 노드를 지웠다(키는 패널과 같은 차례를
+     *    따르므로 키가 틀린 것이 아니라 **선택이 안 풀리는 쪽**이 틀렸다).
+     * 🔵 `edgeId !== null` 인 것이 중요하다 — 선 선택을 **푸는**(null) 호출에서까지
+     *    노드 선택을 건드리면, 빈 바탕을 눌러 선만 놓으려다 노드까지 놓게 된다.
+     */
+    assert.ok(
+      flat(screen).includes("if (edgeId !== null) setSelectedNodeId(null); setSelectedEdgeId(edgeId);"),
+      "연결선을 고를 때 노드 선택을 푸는 줄이 사라졌다 — 선을 누르고 [Delete] 를 치면 노드가 지워진다"
+    );
+  });
 });
