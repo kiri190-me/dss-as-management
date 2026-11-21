@@ -31,17 +31,20 @@ const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;
  * immediately visible → remains pending → [저장] → persist exactly what's
  * visible."
  *
- * Delete remains its own immediate action — a destructive operation, not a
- * "draft" (see CaseFlowchartEditorScreen's own SAVE CONTRACT doc comment
- * for the create/delete-stays-immediate decision).
- *
  * 🔴 2026-11-21 — **지우는 일 자체는 이 패널을 떠났다.** 전에는 여기서
  * deleteRepairCaseFlowchartNodeAction 을 직접 부르고 「삭제 중 · 막힌 까닭 ·
  * 실패한 까닭」도 제 state 로 쥐고 있었다. 같은 날 [Delete] 키가 붙으면서
  * **부르는 자리가 둘이 될 뻔해서**, 호출도 뒤처리도 전부
  * CaseFlowchartEditorScreen 의 handleDeleteNode 한 자리로 올렸다(그 함수 옆의
  * 주석에 까닭 전문이 있다). 여기 남은 것은 단추를 그리고 `onDelete` 를 부르는
- * 것, 그리고 받아 온 글 둘을 **전과 똑같은 자리에** 띄우는 것뿐이다.
+ * 것, 그리고 받아 온 글을 **전과 똑같은 자리에** 띄우는 것뿐이다.
+ *
+ * 🔴 같은 날(조각 C2) 지우기도 **[저장]을 눌러야 나가는 일**이 되었다. 그래서
+ * `isDeleting`(「삭제 중...」)과 `deleteErrorMessage`(삭제가 그 자리에서 실패한
+ * 까닭) 둘을 **없앴다** — 기다릴 서버도, 그 자리에서 날 실패도 없어서 값이 늘
+ * false/null 인 칸이 되기 때문이다. 서버가 거절하면 그 글은 [저장] 때 화면 위쪽
+ * 저장 실패 줄에 뜬다. 🔵 `deleteBlockedMessage` 는 **그대로 산다** — 그것은
+ * 서버가 아니라 화면이 그림의 연결선을 세어 지금 답하는 값이다.
  *
  * "상대 위치로 이동" (5C-6D follow-up #3, dimension source corrected in
  * follow-up #4): LEFT/RIGHT align by vertical CENTER
@@ -81,9 +84,7 @@ export default function CaseFlowchartNodePropertyPanel({
   onDraftChange,
   onPositionDraftChange,
   onDelete,
-  isDeleting,
   deleteBlockedMessage,
-  deleteErrorMessage,
   resolveNodeDimensions,
 }: {
   /** The screen's currently RENDERED node (server baseline merged with any pending draft/position) — never the raw server value alone. */
@@ -103,12 +104,8 @@ export default function CaseFlowchartNodePropertyPanel({
   onPositionDraftChange: (position: { x: number; y: number }) => void;
   /** 🔴 [노드 삭제] 를 누른 것뿐 — 실제로 지우는 것도 그 뒤처리도 화면(handleDeleteNode)이 한다. [Delete] 키가 부르는 함수와 **같은 하나**다. */
   onDelete: () => void;
-  /** 지우는 중인가 — 화면이 쥔 값. 단추를 흐리게 하고 「삭제 중...」으로 바꾼다(두 번 눌리는 것도 이것이 막는다). */
-  isDeleting: boolean;
-  /** 서버가 「연결된 분기가 있어 못 지운다」고 거절한 글(없으면 null). 삭제 단추 **바로 위**에 뜬다 — 올리기 전과 같은 자리다. */
+  /** 「연결된 분기가 있어 못 지운다」는 글(없으면 null). 삭제 단추 **바로 위**에 뜬다 — 올리기 전과 같은 자리다. 🔵 2026-11-21(조각 C2)부터 이 수를 세는 쪽은 서버가 아니라 **화면**이다(그림에 그려진 선을 센다 — handleDeleteNode). */
   deleteBlockedMessage: string | null;
-  /** 그 밖의 삭제 실패 사유(없으면 null). 패널 맨 아래에 뜬다 — 올리기 전 이 패널의 errorMessage 가 서던 그 자리다. */
-  deleteErrorMessage: string | null;
   /** The screen's single, already-composed effective-dimension resolver (measured-first, estimate-fallback) — see this file's own DIMENSION SOURCE doc comment above for why this must be the SAME function instance/rule the screen's own double-click-straighten handler uses, not a locally re-derived copy. */
   resolveNodeDimensions: (n: CaseFlowchartGraphNode) => { width: number; height: number };
 }) {
@@ -274,7 +271,6 @@ export default function CaseFlowchartNodePropertyPanel({
           {deleteBlockedMessage && <p className="text-red-700 dark:text-red-400">{deleteBlockedMessage}</p>}
           <button
             type="button"
-            disabled={isDeleting}
             onClick={onDelete}
             /* 🔵 키 이야기는 **여기까지**다. 이 편집기의 상시 안내는 절차 쪽에서
                두 번 세웠다 두 번 다 지워 달라는 요청을 받았다(커밋 d57f664a) —
@@ -282,12 +278,10 @@ export default function CaseFlowchartNodePropertyPanel({
             title="[Delete] 키로도 지울 수 있습니다"
             className="self-start rounded-md border border-red-400 px-3 py-1.5 text-sm font-medium text-red-900 hover:bg-red-100 disabled:opacity-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900"
           >
-            {isDeleting ? "삭제 중..." : "노드 삭제"}
+            노드 삭제
           </button>
         </div>
       )}
-
-      {deleteErrorMessage && <p className="text-red-600 dark:text-red-400">{deleteErrorMessage}</p>}
     </div>
   );
 }

@@ -22,11 +22,20 @@ import type { RepairCaseFlowchartNodeType, RepairCaseFlowchartBranchType } from 
  *          order (planSaveSteps + runSaveSequence), clear only what
  *          actually persisted.
  *
- * Node/edge CREATION and DELETION remain immediate server mutations in this
- * checkpoint (see CaseFlowchartEditorScreen's own SAVE CONTRACT doc comment
- * for why) — everything else a user can edit on an EXISTING node/edge
- * (title, description, type, branch type/label, retarget, route, position)
- * goes through this draft/render/save model.
+ * 🔴 2026-11-21(조각 C2) — **노드·연결선의 만들기·지우기도 [저장]을 눌러야
+ * 나간다.** 그때까지는 그 둘만 즉시 서버로 갔고, 이 머리말에도 그렇게 적혀
+ * 있었다. 다만 **이 모듈은 한 글자도 안 바뀌었다** — 구조 변경은 제 모듈 한 벌이
+ * 따로 맡고(procedure-editor-structural-*.ts), 화면이 그것을 **먼저** 돌린 뒤
+ * 여기 있는 칸 값·자리·경로점 단계를 돌린다.
+ * 🔴 그래서 아래 세는 함수들의 「받침에 없는 id 는 조용히 건너뛴다」
+ * (`if (!server) ... continue`)가 **새로 위험해졌다**: 저장 전에 만든 노드는 서버
+ * 스냅숏에 아직 없다. 화면은 받침을 **미리보기 목록**으로 세우고
+ * includeBrandNewDraftEntries/Ids 로 한 겹 더 받쳐 그 구멍을 메운다
+ * (CaseFlowchartEditorScreen 의 handleGlobalSave 주석 ㉠㉡㉢).
+ *
+ * 그 밖에 사용자가 **이미 있는** 노드/연결선에 고칠 수 있는 것(title,
+ * description, type, branch type/label, retarget, route, position)은 전부
+ * 전처럼 이 초안/렌더/저장 모델을 지난다.
  *
  * `runSaveSequence` (5C-6D-1A) is a thin, Case-Flowchart-flavored adapter
  * over graph-editor-core/save-sequence.ts's domain-agnostic executor — the

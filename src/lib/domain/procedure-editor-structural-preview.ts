@@ -87,8 +87,22 @@ export type StructuralPreviewFactories<TNode, TEdge> = {
   readonly retargetEdge: (edge: TEdge, fromNodeId: string, toNodeId: string) => TEdge;
 };
 
-type MinimalNode = { readonly id: string; readonly sortOrder: number };
-type MinimalEdge = { readonly id: string; readonly fromNodeId: string; readonly toNodeId: string; readonly sortOrder: number };
+/**
+ * 🔴 `sortOrder` 가 **선택 칸**인 까닭 (2026-11-21, 진단 Flowchart 조각 C2).
+ *
+ * 이 모듈을 「기술 작업 절차」 말고 **진단 Flowchart** 편집기도 쓰게 되었는데,
+ * 진단 쪽 표에는 `sort_order` 칸이 **일부러 없다**(repair_case_flowchart_nodes ·
+ * repair_case_flowchart_edges — 엑셀 수입도 판 복제도 없는 표라 차례를 따로 들
+ * 까닭이 없다는 것이 그 스키마 주석의 까닭이다). 필수로 두면 진단 쪽 행
+ * (CaseFlowchartGraphNode)이 `TNode extends MinimalNode` 를 만족하지 못해
+ * **컴파일조차 안 된다.**
+ *
+ * 🔵 절차 쪽 동작은 한 글자도 안 바뀐다 — 절차의 행은 늘 `sortOrder: number` 를
+ * 들고 오므로 아래 `?? 0` 이 한 번도 안 선다. 이 칸이 쓰이는 데는 씨앗 번호를
+ * 매기는 두 줄뿐이고, 그 값은 **서버로 안 간다**(아래 머리말의 「정렬 번호」 절).
+ */
+type MinimalNode = { readonly id: string; readonly sortOrder?: number };
+type MinimalEdge = { readonly id: string; readonly fromNodeId: string; readonly toNodeId: string; readonly sortOrder?: number };
 
 export type StructuralPreviewGraph<TNode, TEdge> = {
   readonly nodes: TNode[];
@@ -130,9 +144,12 @@ export function previewPendingStructuralGraph<TNode extends MinimalNode, TEdge e
   const addedNodeIds: string[] = [];
   const addedEdgeIds: string[] = [];
 
-  const nextNodeSortOrder = () => nextNodes.reduce((max, n) => (n.sortOrder > max ? n.sortOrder : max), -1) + 1;
+  // 🔵 번호가 없는 행(= 진단 Flowchart 의 노드·연결선)은 **0 으로 친다** — 그 표에는
+  //    차례 칸 자체가 없으므로 「맨 뒤 + 1」의 받침으로 0 말고 고를 값이 없다.
+  //    절차 쪽은 늘 값이 들어와 이 받침이 한 번도 안 선다.
+  const nextNodeSortOrder = () => nextNodes.reduce((max, n) => ((n.sortOrder ?? 0) > max ? (n.sortOrder ?? 0) : max), -1) + 1;
   const nextEdgeSortOrder = (fromNodeId: string) =>
-    nextEdges.reduce((max, e) => (e.fromNodeId === fromNodeId && e.sortOrder > max ? e.sortOrder : max), -1) + 1;
+    nextEdges.reduce((max, e) => (e.fromNodeId === fromNodeId && (e.sortOrder ?? 0) > max ? (e.sortOrder ?? 0) : max), -1) + 1;
 
   const addNode = (seed: StructuralPreviewNodeSeed) => {
     nextNodes.push(factories.createNode(seed));

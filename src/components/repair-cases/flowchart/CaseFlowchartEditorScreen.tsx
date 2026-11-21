@@ -18,7 +18,11 @@ import CaseFlowchartCreateNodePanel from "./CaseFlowchartCreateNodePanel";
 import CaseFlowchartNodePropertyPanel, { type CaseFlowchartNodeDraft } from "./CaseFlowchartNodePropertyPanel";
 import CaseFlowchartCreateEdgePanel from "./CaseFlowchartCreateEdgePanel";
 import CaseFlowchartEdgePropertyPanel, { type CaseFlowchartEdgeDraft } from "./CaseFlowchartEdgePropertyPanel";
-import type { RepairCaseFlowchartBranchType, RepairCaseFlowchartNodeType } from "@/lib/domain/repair-case-flowchart-types";
+import {
+  REPAIR_CASE_FLOWCHART_NODE_TYPE_CODES,
+  type RepairCaseFlowchartBranchType,
+  type RepairCaseFlowchartNodeType,
+} from "@/lib/domain/repair-case-flowchart-types";
 import { updateRepairCaseFlowchartMetadataAction } from "@/lib/server/actions/repair-case-flowcharts";
 // 고장 개소 태그 — 다듬는 규칙은 서버와 **같은 함수**를 쓴다. 화면이 제 손으로
 // 다듬으면 알약으로 보이는 것과 저장되는 값이 어긋날 수 있고, 그 어긋남은 오류
@@ -42,7 +46,48 @@ import {
   changeRepairCaseFlowchartNodeTypeAction,
   updateRepairCaseFlowchartEdgeAction,
   retargetRepairCaseFlowchartEdgeAction,
+  insertRepairCaseFlowchartNodeOnEdgeAction,
 } from "@/lib/server/actions/repair-case-flowchart-graph";
+// ──────────────────────────────────────────────────────────────────────────
+// 🔴 구조 변경을 **모아 두었다가 [저장] 때 보내는** 한 벌 (2026-11-21, 조각 C2)
+// ──────────────────────────────────────────────────────────────────────────
+// 🔵 이름이 `procedure-` 로 시작해도 **베끼지 않고 그대로 쓴다.** 위
+// procedure-editor-delete-key 와 같은 까닭이다 — 이 다섯 모듈은 React·DOM·서버
+// 액션·DB 를 한 줄도 안 물고, 입력이 전부 글자·수·`Position` 이라 절차 쪽
+// 자료형을 끌고 오지 않는다. 한 벌 더 베끼면 두 잣대가 생기고 한쪽만 고치는
+// 날이 온다(그 어긋남은 오류를 한 번도 안 낸다).
+// 🔵 진단에서 **안 쓰는 조작 둘**(CHANGE_NODE_TYPE · RETARGET_EDGE)이 그 타입에
+// 들어 있지만, 진단은 그 둘을 쌓지 않는다 — 노드 유형 변경과 연결선 재연결은
+// 이 편집기에서 이미 초안 지도 + SaveStep 으로 잘 돌고 있고, 잘 도는 것을
+// 옮기면 같은 일을 하는 길이 두 벌 생긴다(2026-11-21 결정).
+import {
+  appendPendingStructuralOperations,
+  procedureStructuralOperationsSignature,
+  type ProcedureTempIdMinter,
+} from "@/lib/domain/procedure-editor-structural-undo";
+import {
+  canSendStructuralChanges,
+  coalescePendingStructuralOperations,
+  type PendingStructuralOperation,
+} from "@/lib/domain/procedure-editor-structural-changes";
+import {
+  canProceedToFieldSave,
+  collectStructuralIdEffects,
+  includeBrandNewDraftEntries,
+  includeBrandNewDraftIds,
+  rebaseDraftMapAfterStructuralSave,
+  runProcedureStructuralSequence,
+  type ProcedureStructuralStepResult,
+} from "@/lib/domain/procedure-editor-structural-save";
+import {
+  describeStructuralConflicts,
+  previewPendingStructuralGraph,
+  type StructuralPreviewFactories,
+} from "@/lib/domain/procedure-editor-structural-preview";
+// 🔵 진단 쪽에서 쓰는 것은 **붙은 선 찾기 하나**다. 「노드를 지우면 붙은 선도 함께」는
+// 이 조각의 일이 아니라서(그 결정은 아직 안 내려왔다) planProcedureNodeDeletionOperations
+// 는 안 쓴다 — 여기서는 「붙은 선이 있으면 못 지운다」를 **화면이 미리 세는** 데만 쓴다.
+import { findEdgesAttachedToNode } from "@/lib/domain/procedure-editor-node-deletion";
 // [Delete] 키가 **무엇을 가리키는가**를 정하는 순수 판정 — 「기술 작업 절차」
 // 편집기가 쓰는 그 파일 그대로다. 이름이 `procedure-` 로 시작해도 베끼지 않는
 // 까닭은 아래 keydown 자리의 주석에 적어 두었다.
@@ -176,52 +221,79 @@ type CaseRightPanelTab = "properties" | "addNode" | "createEdge";
  * ordinary pending-map updates, so they participate in the normal dirty/
  * Save flow with no special-casing.
  *
- * Node/edge CREATE and DELETE remain immediate server mutations in this
- * checkpoint (not deferred into this draft model) — converting them would
- * mean rendering not-yet-persisted nodes/edges with client-only ids and
- * reconciling them against server ids on save, materially expanding scope
- * beyond "editing existing visible graph properties/positions/routes."
+ * ==========================================================================
+ * 🔴 2026-11-21 (조각 C2) — **구조 변경도 [저장]을 눌러야 저장된다**
+ * ==========================================================================
+ * 바로 위 문단은 2026-11-21 까지의 모습이었다: 「노드·연결선의 만들기·지우기는
+ * 누르는 즉시 서버로 간다」. 쓰는 분 요청으로 그 다섯(노드 추가·삭제 · 연결선
+ * 추가·삭제 · 연결선 위 노드 끼우기)도 [저장] 쪽으로 옮겼다 — 「기술 작업 절차」
+ * 편집기가 2026-11-20 에 먼저 그렇게 바뀌었고, 그때 만든 순수 모듈 다섯을
+ * **베끼지 않고 그대로** 쓴다(위 import 주석).
+ *
+ *   SERVER BASELINE(nodes/edges)
+ *     + 아직 안 보낸 **구조 변경 목록**(pendingStructuralOperations)
+ *     = structuralPreview  ← previewPendingStructuralGraph
+ *     + 초안 지도 넷
+ *     = RENDERED GRAPH
+ *
+ * 🔴 **미리보기를 빼먹으면 화면에 아무 일도 안 일어난다.** [노드 추가]를 눌러도
+ * 서버 목록에는 그 노드가 없으므로, 미리보기를 안 얹으면 단추만 눌리고 그림은
+ * 그대로다. 아래 renderedNodes/renderedEdges 가 **structuralPreview** 를 도는
+ * 것이 그 까닭이다(전에는 `nodes`/`edges` 를 돌았다).
+ *
+ * 🔵 **그대로 둔 것**(이미 [저장] 모델이다): 노드 칸 값 · 노드 유형 변경 · 노드
+ * 자리 · 연결선 칸 값 · **연결선 재연결** · 경로점. 유형 변경과 재연결을 구조
+ * 조작으로 옮기지 않는 것은 2026-11-21 결정이다 — 화면에서 보이는 동작이 이미
+ * 같고, 잘 도는 것을 옮기면 같은 일을 하는 길이 두 벌 생긴다.
+ *
+ * 🔴 저장 차례는 **구조가 먼저, 칸 값이 나중**이다(procedure-editor-structural-
+ * save.ts 머리말). 새 노드는 칸 값 단계가 가리킬 진짜 id 가 아직 없고, 그
+ * 사라짐에는 **오류가 안 난다** — handleGlobalSave 의 주석에 세 겹의 방어가
+ * 적혀 있다.
  * =================================================================================
  */
-/** 저장 전(아직 서버에 보내지 않은) 편집 상태 전부 — [이전]/[앞으로]가 통째로 갈아끼우는 단위다. */
+/**
+ * 저장 전(아직 서버에 보내지 않은) 편집 상태 전부 — [이전]/[앞으로]가 통째로
+ * 갈아끼우는 단위다.
+ *
+ * 🔴 2026-11-21(조각 C2) — **다섯째 칸이 생겼다**(structuralOperations). 아직 안
+ * 보낸 구조 변경도 「저장 전 상태」라, 지도 넷과 **한 스냅샷에 함께** 실려야 한다.
+ * 따로 두면 ① 시간순이 안 맞고 ② 임시 id(`tmp:node:1`)를 키로 쓰는 초안이 지도에
+ * 혼자 남아, 다음에 만든 노드가 같은 번호를 받으면 **지운 적 없는 남의 글이 새
+ * 노드에 붙는다**(procedure-editor-structural-undo.ts 머리말 ②).
+ */
 type CasePendingSnapshot = {
   nodeDrafts: Map<string, CaseFlowchartNodeDraft>;
   nodePositions: Map<string, Position>;
   edgeDrafts: Map<string, CaseFlowchartEdgeDraft>;
   routePoints: Map<string, RoutePoint[] | null>;
+  structuralOperations: PendingStructuralOperation[];
 };
 
 /**
- * 되돌리기 한 단계. 대부분은 저장 전 상태 스냅샷 하나면 충분하지만, 연결선
- * 삭제는 이미 서버에 반영된 뒤라 화면 상태만 되돌려서는 되살아나지 않는다 —
- * 그런 단계는 무엇을 다시 만들어야 하는지(restoreEdge)를 함께 들고 있다가,
- * 되돌릴 때 서버에 다시 만든다.
+ * 되돌리기 한 단계 — 저장 전 상태 스냅샷 하나가 전부다.
+ *
+ * 🔴 2026-11-21(조각 C2) — 전에는 여기에 `restoreNode`/`restoreEdge` 가 있었다.
+ * 삭제가 **이미 서버에 반영된 뒤**라 화면 상태만 되돌려서는 되살아나지 않았고,
+ * [이전]을 누르면 서버에 같은 것을 **새 번호로 다시 만들었다**. 지금은 삭제가
+ * 「아직 안 보낸 조작」이라 되돌릴 DB 가 없다 — 목록에서 그 줄을 빼면 그만이고,
+ * 그래서 그 120줄과 함께 서버 왕복·실패 글·진행 중 표시가 전부 사라졌다.
  */
 type CaseUndoStep = {
   snapshot: CasePendingSnapshot;
-  /**
-   * 삭제된 노드를 되살리는 단계. 노드 삭제는 연결선이 하나도 남지 않은
-   * 노드에서만 허용되므로(deleteRepairCaseFlowchartNodeAction), 되살릴 때
-   * 함께 복구할 연결선은 없다 — 노드 하나만 다시 만들면 된다.
-   */
-  restoreNode?: {
-    nodeType: RepairCaseFlowchartNodeType;
-    title: string;
-    description: string | null;
-    instructions: string | null;
-    position: { x: number; y: number };
-  };
-  restoreEdge?: {
-    fromNodeId: string;
-    toNodeId: string;
-    branchType: RepairCaseFlowchartBranchType;
-    branchLabel: string | null;
-    /** 삭제 시점의 경로점 — 되살린 연결선은 새 id를 받으므로, 그 id로 저장 전 변경에 다시 얹는다. */
-    routePoints: RoutePoint[] | null;
-  };
 };
 
-/** 절차 편집기의 pendingSnapshotSignature와 같은 방식 — 키 순서를 고정해 직렬화한 뒤 비교한다. */
+/**
+ * 절차 편집기의 pendingSnapshotSignature와 같은 방식 — 키 순서를 고정해 직렬화한 뒤 비교한다.
+ *
+ * 🔴 **구조 목록을 안 섞으면 되돌리기 한 칸이 조용히 사라진다.** 노드를 하나
+ * 지웠을 뿐이면 지도 넷은 **완전히 똑같다** — 그러면 pushUndoStep 이 「직전과 같은
+ * 상태」로 보고 그 칸을 안 쌓고(undo-stack.ts), undoStep 은 「헛도는 단계」로 보고
+ * 건너뛴다. 오류도 경고도 없이 [이전]이 한 칸을 건너뛰는 꼴이다. 아래 다섯째 줄이
+ * 그것을 막는다(procedure-editor-structural-undo.ts ②절이 이 한 줄을 요구한다).
+ * 🔵 서명이 **글자**인 까닭도 그 모듈에 적혀 있다 — 칸 차례에 흔들리지 않게 키를
+ * 정렬해 직렬화한다(치환이 조작을 다시 만들면서 키 차례가 바뀔 수 있다).
+ */
 function casePendingSnapshotSignature(snapshot: CasePendingSnapshot): string {
   const dump = (map: Map<string, unknown>) => [...map.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return JSON.stringify([
@@ -229,17 +301,74 @@ function casePendingSnapshotSignature(snapshot: CasePendingSnapshot): string {
     dump(snapshot.nodePositions),
     dump(snapshot.edgeDrafts),
     dump(snapshot.routePoints),
+    procedureStructuralOperationsSignature(snapshot.structuralOperations),
   ]);
 }
 
-/**
- * 서버 되살리기가 딸린 단계는 어떤 것과도 같지 않다고 본다 — 화면 상태가
- * 우연히 같더라도 "지워진 연결선을 되살린다"는 할 일이 남아 있어, 합치거나
- * 건너뛰면 그 일이 통째로 사라진다.
- */
+/** 두 단계가 같은가 — 스냅샷 서명 하나로 가른다(특례 없음: 서버에 되돌릴 것이 남는 단계가 더는 없다). */
 function caseUndoStepsEqual(a: CaseUndoStep, b: CaseUndoStep): boolean {
-  if (a.restoreEdge || b.restoreEdge || a.restoreNode || b.restoreNode) return false;
   return casePendingSnapshotSignature(a.snapshot) === casePendingSnapshotSignature(b.snapshot);
+}
+
+/**
+ * 🔴 미리보기 씨앗의 노드 유형은 **넓은 쪽**(ProcedureNodeType, 아홉 값)으로
+ * 적혀 있는데 진단 노드 행은 **일곱 값**만 받는다. 그 차이가 실제로 들어올 일은
+ * 없다 — 이 화면이 쌓는 조작은 CREATE_NODE · INSERT_NODE_ON_EDGE 둘뿐이고, 그
+ * 칸의 타입(ManualTechnicalNodeType)은 진단의 일곱과 **글자도 차례도 같다**
+ * (2026-11-21 에 두 상수를 맞대어 확인했다). 그래도 글자로 한 번 더 확인하고,
+ * 아니면 「작업」으로 떨어뜨린다 — 그리는 쪽에서 던지면 **화면 전체가 하얘지고**,
+ * 그것은 미리보기 모듈이 「가리키는 대상이 없으면 조용히 건너뛴다」로 정한 규약과
+ * 어긋난다.
+ */
+function asCaseNodeType(nodeType: string): RepairCaseFlowchartNodeType {
+  return (REPAIR_CASE_FLOWCHART_NODE_TYPE_CODES as readonly string[]).includes(nodeType) ? (nodeType as RepairCaseFlowchartNodeType) : "TASK";
+}
+
+/** 초안 지도에서 줄 몇 개를 버린다. 🔵 버릴 것이 하나도 없으면 **같은 지도를 그대로** 돌려줘 쓸데없는 렌더를 안 만든다(올리기 전 네 자리가 각각 적던 그 수법 그대로). */
+function dropKeys<T>(map: Map<string, T>, keys: readonly string[]): Map<string, T> {
+  if (!keys.some((key) => map.has(key))) return map;
+  const next = new Map(map);
+  for (const key of keys) next.delete(key);
+  return next;
+}
+
+/** 저장이 실제로 읽는 초안 지도 넷 — 스냅샷에서 구조 목록만 뺀 모습이다. */
+type CasePendingDraftMaps = Omit<CasePendingSnapshot, "structuralOperations">;
+
+/**
+ * 🔴 **받침 지도도 키를 함께 옮긴다.** 구조 단계가 끝나면 막 만든 노드·연결선의
+ * 키가 임시 번호에서 진짜 id 로 바뀌는데, 받침이 임시 번호를 든 채면 planSaveSteps
+ * 의 `if (!server) continue;` 가 그 줄을 **조용히 건너뛴다**(그러면 새 노드에 적은
+ * 설명이 오류 없이 사라진다).
+ * 🔵 값 안의 `id` 칸도 함께 맞춘다. planSaveSteps 는 **키만** 보므로 안 맞춰도
+ *    지금은 아무 일이 없지만, 한쪽만 옮겨진 지도를 남겨 두면 그 값을 id 로 믿고
+ *    쓰는 코드가 생기는 날 조용히 틀린다.
+ */
+function rebaseSnapshotMap<T extends { id: string }>(
+  map: Map<string, T>,
+  effects: Parameters<typeof rebaseDraftMapAfterStructuralSave>[1],
+  scope: "node" | "edge"
+): Map<string, T> {
+  const moved = rebaseDraftMapAfterStructuralSave(map, effects, scope);
+  const next = new Map<string, T>();
+  for (const [id, value] of moved) next.set(id, value.id === id ? value : { ...value, id });
+  return next;
+}
+
+/**
+ * 🔴 연결선 초안 **안의 노드 번호**도 옮긴다. rebaseDraftMapAfterStructuralSave 는
+ * 지도의 **키**만 옮기는데, 연결선 초안은 값 안에 재연결 대상(fromNodeId·toNodeId)을
+ * 들고 있다. 사람이 「방금 만든 노드」로 재연결해 두면 그 칸에 임시 번호가 남고,
+ * 칸 값 단계에는 치환이 없어 그대로 서버에 가서 **「요청을 확인할 수 없습니다」로
+ * 거절당한다**(서버 액션의 첫 관문이 UUID 검사다).
+ */
+function rebaseEdgeDraftTargets(drafts: Map<string, CaseFlowchartEdgeDraft>, resolvedIds: ReadonlyMap<string, string>): Map<string, CaseFlowchartEdgeDraft> {
+  if (resolvedIds.size === 0) return drafts;
+  const next = new Map<string, CaseFlowchartEdgeDraft>();
+  for (const [id, draft] of drafts) {
+    next.set(id, { ...draft, fromNodeId: resolvedIds.get(draft.fromNodeId) ?? draft.fromNodeId, toNodeId: resolvedIds.get(draft.toNodeId) ?? draft.toNodeId });
+  }
+  return next;
 }
 
 export default function CaseFlowchartEditorScreen({
@@ -307,6 +436,18 @@ export default function CaseFlowchartEditorScreen({
   const [pendingNodePositionsById, setPendingNodePositionsById] = useState<Map<string, Position>>(new Map());
   const [pendingEdgeDraftsById, setPendingEdgeDraftsById] = useState<Map<string, CaseFlowchartEdgeDraft>>(new Map());
   const [pendingRoutePointsByEdgeId, setPendingRoutePointsByEdgeId] = useState<Map<string, RoutePoint[] | null>>(new Map());
+  /**
+   * 🔴 아직 안 보낸 **구조 변경 목록**(2026-11-21, 조각 C2). 노드 추가·삭제,
+   * 연결선 추가·삭제, 연결선 위 노드 끼우기 다섯이 전부 여기 쌓였다가 [저장] 한
+   * 번에 나간다.
+   *
+   * 🔴 번호를 찍는 길은 **appendPendingStructuralOperations 하나뿐**이다 — 도장
+   * (createTempIdMinter)을 여기서 직접 만들지 않는다. 렌더마다 다시 만들면 같은
+   * 번호가 두 번 나가고, 그러면 접기가 서로 다른 두 노드를 한 덩어리로 봐서 하나를
+   * 지울 때 다른 하나가 같이 사라진다(procedure-editor-structural-undo.ts 머리말).
+   * 그 함수는 **살아 있는 목록에서** 다음 번호를 뽑으므로 그 함정이 성립하지 않는다.
+   */
+  const [pendingStructuralOperations, setPendingStructuralOperations] = useState<PendingStructuralOperation[]>([]);
 
   // ---- 저장 전 되돌리기(클라이언트 스냅샷 스택) ----
   //
@@ -315,13 +456,12 @@ export default function CaseFlowchartEditorScreen({
   // 변경만 다룬다. 스냅샷 방식과 한 단계의 단위는 절차 편집기와 같다
   // (graph-editor-core/undo-stack.ts 주석 참고).
   const [pendingUndoStack, setPendingUndoStack] = useState<UndoStack<CaseUndoStep>>(() => createUndoStack<CaseUndoStep>());
-  const [isUndoing, setIsUndoing] = useState(false);
-  const [undoError, setUndoError] = useState<string | null>(null);
   const pendingSnapshotRef = useRef<CasePendingSnapshot>({
     nodeDrafts: new Map(),
     nodePositions: new Map(),
     edgeDrafts: new Map(),
     routePoints: new Map(),
+    structuralOperations: [],
   });
   useEffect(() => {
     pendingSnapshotRef.current = {
@@ -329,8 +469,9 @@ export default function CaseFlowchartEditorScreen({
       nodePositions: pendingNodePositionsById,
       edgeDrafts: pendingEdgeDraftsById,
       routePoints: pendingRoutePointsByEdgeId,
+      structuralOperations: pendingStructuralOperations,
     };
-  }, [pendingNodeDraftsById, pendingNodePositionsById, pendingEdgeDraftsById, pendingRoutePointsByEdgeId]);
+  }, [pendingNodeDraftsById, pendingNodePositionsById, pendingEdgeDraftsById, pendingRoutePointsByEdgeId, pendingStructuralOperations]);
 
   /** 드래그 한 번이 한 단계다 — 시작할 때만 찍는다. */
   const isNodeDraggingRef = useRef(false);
@@ -345,20 +486,33 @@ export default function CaseFlowchartEditorScreen({
   }
 
   /**
-   * 연결선 삭제 단계 — 이미 서버에 반영된 삭제라, 되돌리려면 같은 연결선을
-   * 다시 만들어야 한다. 그 재료를 이 단계에 함께 담는다.
+   * ==========================================================================
+   * 🔴 구조 변경을 **모아 두는 단 하나의 통로** (2026-11-21, 조각 C2)
+   * ==========================================================================
+   * 다섯(노드 추가·삭제 · 연결선 추가·삭제 · 연결선 위 노드 끼우기)이 전부 여기를
+   * 지난다. 하는 일이 둘인데 **차례가 중요하다.**
+   *
+   *  ① `pushPendingUndoStep()` 을 **목록을 고치기 전에** 부른다. 되돌리기 스택은
+   *     「바뀌기 직전 상태」를 쌓는 방식이라, 뒤에 부르면 이미 바뀐 목록이 담겨
+   *     [이전]이 한 칸씩 밀린다(드래그가 지켜 온 규칙 그대로다).
+   *  ② 번호는 appendPendingStructuralOperations 가 찍는다(위 state 선언부의 까닭).
+   *
+   * 🔴 **방금 찍힌 줄을 그대로 돌려준다.** 임시 번호를 그 자리에서 알아야 하는
+   * 자리가 둘 있기 때문이다 — 노드 추가의 **설명 칸**(CREATE_NODE 가 안 싣는다)과
+   * 연결선 위 노드 끼우기(쪼개진 선의 초안을 새 노드 쪽으로 돌려놔야 한다).
+   * 그래서 `setPendingStructuralOperations(prev => ...)` 꼴을 **안 쓴다.**
+   * 🔴 대신 「**한 이벤트에 한 번만 부른다**」가 약속이 된다. 새로 생기는 제약이
+   * 아니다 — 바로 위 pushPendingUndoStep 이 쥐는 스냅샷(pendingSnapshotRef)도
+   * 이미 같은 전제 위에 서 있다. 시험이 자리마다 **정확히 1회**를 센다.
+   * 🔵 그래서 여러 줄을 한꺼번에 쌓을 때는 **합친 배열 하나**로 한 번만 부른다 —
+   * 고리를 돌며 N번 부르면 [이전]을 N번 눌러야 한 걸음이 되돌아간다.
    */
-  function pushEdgeDeletionUndoStep(restoreEdge: NonNullable<CaseUndoStep["restoreEdge"]>) {
-    if (!canEdit) return;
-    lastFieldEditKeyRef.current = null;
-    setPendingUndoStack((prev) => pushUndoStep(prev, { snapshot: pendingSnapshotRef.current, restoreEdge }, caseUndoStepsEqual));
-  }
-
-  /** 노드 삭제 단계 — 연결선 삭제와 같은 원리로, 되살릴 재료를 단계에 담아 둔다. */
-  function pushNodeDeletionUndoStep(restoreNode: NonNullable<CaseUndoStep["restoreNode"]>) {
-    if (!canEdit) return;
-    lastFieldEditKeyRef.current = null;
-    setPendingUndoStack((prev) => pushUndoStep(prev, { snapshot: pendingSnapshotRef.current, restoreNode }, caseUndoStepsEqual));
+  function queueStructural(build: (mint: ProcedureTempIdMinter) => readonly PendingStructuralOperation[]): PendingStructuralOperation[] {
+    if (!canEdit) return [];
+    pushPendingUndoStep();
+    const next = appendPendingStructuralOperations(pendingStructuralOperations, build);
+    setPendingStructuralOperations(next);
+    return next.slice(pendingStructuralOperations.length);
   }
 
   function applyPendingSnapshot(snapshot: CasePendingSnapshot) {
@@ -366,100 +520,32 @@ export default function CaseFlowchartEditorScreen({
     setPendingNodePositionsById(new Map(snapshot.nodePositions));
     setPendingEdgeDraftsById(new Map(snapshot.edgeDrafts));
     setPendingRoutePointsByEdgeId(new Map(snapshot.routePoints));
+    // 🔵 지도 넷과 같은 규약으로 **사본**을 넣는다 — 스냅샷 안의 배열을 그대로
+    //    state 에 꽂으면 그다음 조작이 그 배열을 가리키게 되어, 되돌아간 자리가
+    //    다음 조작에 따라 움직인다.
+    setPendingStructuralOperations([...snapshot.structuralOperations]);
     lastFieldEditKeyRef.current = null;
   }
 
   /**
-   * [이전] — 저장하지 않은 변경을 한 단계씩 되돌린다. 그 단계가 "삭제된 연결선"
-   * 이면 서버에 같은 연결선을 다시 만든다. 되살린 연결선은 새 id를 받으므로
-   * 삭제 전 경로점은 그 새 id로 저장 전 변경에 얹어 둔다([저장]으로 확정된다).
+   * [이전] — 저장하지 않은 변경을 한 단계씩 되돌린다.
    *
-   * 서버 작업이 낀 단계는 [앞으로](다시 적용) 대상에서 뺀다 — 되살린 것을 다시
-   * 지우는 동작까지 자동으로 해주면, 실수로 한 번 더 눌렀을 때 방금 되살린 것이
-   * 조용히 사라진다. 지우려면 삭제 버튼을 다시 누르는 편이 분명하다.
+   * 🔴 2026-11-21(조각 C2) — **서버 왕복이 사라졌다.** 전에는 「삭제된 노드·연결선」
+   * 단계가 섞여 있어, [이전]이 서버에 같은 것을 **새 번호로 다시 만들었다**(그래서
+   * 이 함수가 async 였고 실패 글과 진행 중 표시를 쥐고 있었다). 지금은 삭제도 아직
+   * 안 보낸 조작이라 되돌릴 DB 가 없다 — 스냅샷을 통째로 갈아끼우면 그만이다.
+   *
+   * 🔴 [앞으로](redo)의 **특례도 함께 없앴다.** 전에는 서버 작업이 낀 단계를
+   * `{ past, future: [] }` 로 redo 대상에서 뺐다 — 「되살린 것을 [앞으로]가 다시
+   * 지우면 방금 되살린 것이 조용히 사라진다」는 까닭이었다. 그 걱정은 **되살리기가
+   * 서버에 진짜로 쓰던 시절의 것**이고, 지금 [앞으로]는 목록을 한 칸 앞으로 되돌려
+   * 놓을 뿐이라 서버에 닿지 않는다(그리고 그 뒤에도 [이전]으로 다시 돌아온다).
+   * 그래서 구조 변경도 다른 변경과 **똑같이** 앞뒤로 오간다.
    */
-  async function handleUndo() {
+  function handleUndo() {
     const result = undoStep(pendingUndoStack, { snapshot: pendingSnapshotRef.current }, caseUndoStepsEqual);
-    setUndoError(null);
-    if (!result.restored) {
-      setPendingUndoStack(result.stack);
-      return;
-    }
-    const step = result.restored;
-    if (step.restoreNode) {
-      setIsUndoing(true);
-      const created = await createRepairCaseFlowchartNodeAction({
-        repairCaseId,
-        flowchartId: flowchart.id,
-        nodeType: step.restoreNode.nodeType,
-        title: step.restoreNode.title,
-        description: step.restoreNode.description,
-        position: step.restoreNode.position,
-        expectedFlowchartUpdatedAt: currentUpdatedAt,
-      });
-      if (!created.ok) {
-        setIsUndoing(false);
-        setUndoError(created.message);
-        return;
-      }
-      // 작업 내용(instructions)은 생성 액션이 받지 않는다 — 만든 직후 한 번 더
-      // 채워 넣어야 삭제 전 노드와 같아진다. 이 두 번째 호출이 실패해도 노드
-      // 자체는 이미 되살아났으므로, 되돌리기를 무르지 않고 사유만 알린다.
-      let latestUpdatedAt = created.updatedAt;
-      if (step.restoreNode.instructions && step.restoreNode.instructions.trim().length > 0) {
-        const filled = await updateRepairCaseFlowchartNodeAction({
-          repairCaseId,
-          flowchartId: flowchart.id,
-          nodeId: created.nodeId,
-          title: step.restoreNode.title,
-          description: step.restoreNode.description,
-          instructions: step.restoreNode.instructions,
-          expectedFlowchartUpdatedAt: latestUpdatedAt,
-        });
-        if (filled.ok) latestUpdatedAt = filled.updatedAt;
-        else setUndoError(`노드는 되살렸지만 작업 내용을 복원하지 못했습니다: ${filled.message}`);
-      }
-      setIsUndoing(false);
-      setPendingUndoStack({ past: result.stack.past, future: [] });
-      applyPendingSnapshot(step.snapshot);
-      handleSaved(latestUpdatedAt);
-      return;
-    }
-
-    if (!step.restoreEdge) {
-      setPendingUndoStack(result.stack);
-      applyPendingSnapshot(step.snapshot);
-      return;
-    }
-
-    setIsUndoing(true);
-    const created = await createRepairCaseFlowchartEdgeAction({
-      repairCaseId,
-      flowchartId: flowchart.id,
-      fromNodeId: step.restoreEdge.fromNodeId,
-      toNodeId: step.restoreEdge.toNodeId,
-      branchType: step.restoreEdge.branchType,
-      branchLabel: step.restoreEdge.branchLabel,
-      expectedFlowchartUpdatedAt: currentUpdatedAt,
-    });
-    setIsUndoing(false);
-    if (!created.ok) {
-      // 스택은 건드리지 않는다 — 되돌리기가 일어나지 않았으므로 그 단계는 그대로 남아야 한다.
-      setUndoError(created.message);
-      return;
-    }
-
-    setPendingUndoStack({ past: result.stack.past, future: [] });
-    applyPendingSnapshot(step.snapshot);
-    const restoredRoute = step.restoreEdge.routePoints;
-    if (restoredRoute && restoredRoute.length > 0) {
-      setPendingRoutePointsByEdgeId((prev) => {
-        const next = new Map(prev);
-        next.set(created.edgeId, restoredRoute);
-        return next;
-      });
-    }
-    handleSaved(created.updatedAt);
+    setPendingUndoStack(result.stack);
+    if (result.restored) applyPendingSnapshot(result.restored.snapshot);
   }
 
   function handleRedo() {
@@ -569,152 +655,141 @@ export default function CaseFlowchartEditorScreen({
    * 남는 날이 온다. 그리고 그 어긋남은 오류를 한 번도 안 낸다.
    *
    * 그래서 **부르는 일도 뒤처리도 전부 여기로 올렸다.** 패널은 단추를 그리고
-   * `onDelete` 를 부르는 것까지만 하고, 「지우는 중인가 · 막힌 까닭 · 실패한
-   * 까닭」은 이 화면이 쥐고 프롭으로 내려보낸다. 키도 똑같이 아래 둘을 부른다.
+   * `onDelete` 를 부르는 것까지만 하고, 「막힌 까닭」은 이 화면이 쥐고 프롭으로
+   * 내려보낸다. 키도 똑같이 아래 둘을 부른다.
    *
-   * 🔵 지금 삭제는 여전히 **즉시 서버로** 간다(이 파일 머리말의 EDITOR MODEL —
-   * 만들기·지우기는 모아 두기 대상이 아니다). 그 모델을 뒤집는 날 갈아끼울 자리가
-   * 바로 이 둘이고, 패널도 키도 한 글자 안 고쳐도 된다.
+   * 🔴 2026-11-21(조각 C2) — 그날 안에 **삭제도 [저장] 쪽으로 옮겼다.** 아래 둘은
+   * 이제 서버를 안 부르고 「지운다」는 줄을 목록에 쌓는다(queueStructural). 패널도
+   * 키도 **한 글자 안 고쳤다** — 위 문단이 내다본 그 자리가 실제로 그 자리였다.
    */
 
   /**
-   * 🔴 **지우는 중에 또 부르는 것**을 막는다. 단추는 `disabled` 로 막혀 있지만
-   * 키에는 막아 줄 단추가 없다 — [Delete] 를 누르고 있으면 자동 반복이 들어온다.
-   * 성공하면 선택이 풀려 두 번째부터는 판정이 「고른 것 없음」으로 떨어지지만,
-   * 그 풀림은 서버가 답한 **뒤**라 그 사이에 몇 번이고 더 날아갈 수 있다(두 번째
-   * 부터는 updatedAt 이 어긋나 「새로고침 후 다시 시도」가 뜬다 — 지워졌는데
-   * 빨간 글이 뜨는 화면이다).
-   * 🔵 state 가 아니라 ref 인 까닭: 막아야 하는 시점이 **다시 그려지기 전**이다.
-   */
-  const isDeleteInFlightRef = useRef(false);
-  /** 지금 무엇을 지우는 중인가 — 패널의 「삭제 중...」과 단추 흐리기에 쓰인다(위 ref 와 짝). */
-  const [deletingTarget, setDeletingTarget] = useState<"node" | "edge" | null>(null);
-  /**
-   * 🔴 삭제가 막히거나 실패한 까닭 — **어느 노드/연결선의 것인지와 함께** 쥔다.
+   * 🔴 삭제가 막힌 까닭 — **어느 노드의 것인지와 함께** 쥔다.
    *
    * 까닭: 올리기 전에는 이 글이 패널의 state 였고, 고른 것이 없어져 패널이
    * 사라질 때 함께 사라졌다. 화면으로 올리면 그 「사라짐」이 없어져, 빈 바탕을
    * 누른 뒤 **다른 노드**를 골랐을 때 엉뚱한 노드 위에 옛 글이 떠 있게 된다.
    * id 를 함께 들고 있다가 **그것을 고른 동안에만** 보여 주면 그 일이 없다.
+   *
+   * 🔵 「그 밖의 실패 사유」 칸은 없앴다 — 지우기가 모아 두는 일이 되어 **그 자리에서
+   * 실패할 일이 없다.** 서버가 거절하면 그 글은 [저장] 때 globalSaveError 로 뜬다.
    */
   const [nodeDeleteBlockedMessage, setNodeDeleteBlockedMessage] = useState<{ nodeId: string; message: string } | null>(null);
-  const [nodeDeleteErrorMessage, setNodeDeleteErrorMessage] = useState<{ nodeId: string; message: string } | null>(null);
-  const [edgeDeleteErrorMessage, setEdgeDeleteErrorMessage] = useState<{ edgeId: string; message: string } | null>(null);
 
-  /** 노드 하나를 지운다 — 패널의 [노드 삭제] 단추와 [Delete] 키가 **똑같이** 부르는 한 자리. */
-  async function handleDeleteNode(nodeId: string) {
+  /**
+   * 노드 하나를 지운다 — 패널의 [노드 삭제] 단추와 [Delete] 키가 **똑같이** 부르는 한 자리.
+   *
+   * 🔴 **연결선이 붙은 노드는 여전히 못 지운다.** 바뀐 것은 **누가 세는가**다.
+   * 전에는 서버가 NODE_HAS_CONNECTED_EDGES 로 거절하며 수를 돌려줬는데, 지금은
+   * 그 거절이 [저장] 때로 밀린다 — 그러면 ① 사람은 지워진 줄 알고 계속 그리다가
+   * ② [저장]에서 그 한 줄 때문에 **저장이 통째로 멈춘다.** 그래서 화면이 **미리**
+   * 센다. 🔵 세는 목록은 `nodes`/`edges`(서버 것)가 아니라 **그림에 그려진 것**
+   * (structuralPreview.edges)이다 — 저장 전에 그은 선도 선이고, 저장 전에 지운
+   * 선은 이미 거기서 빠져 있다. 서버 목록으로 세면 사람이 보는 그림과 다른 수를
+   * 말하게 된다(procedure-editor-node-deletion.ts 머리말이 같은 까닭을 적어 둔다).
+   * 🔵 막는 글은 **한 글자도 안 바꿨다** — 올리기 전 패널이 띄우던 그대로다.
+   */
+  function handleDeleteNode(nodeId: string) {
     if (!canEdit) return;
-    if (isDeleteInFlightRef.current) return;
-    isDeleteInFlightRef.current = true;
-    setDeletingTarget("node");
     setNodeDeleteBlockedMessage(null);
-    setNodeDeleteErrorMessage(null);
-    const result = await deleteRepairCaseFlowchartNodeAction({ repairCaseId, flowchartId: flowchart.id, nodeId, expectedFlowchartUpdatedAt: currentUpdatedAt });
-    isDeleteInFlightRef.current = false;
-    setDeletingTarget(null);
-    if (!result.ok) {
-      // 🔴 「연결선이 붙어 있어 못 지운다」는 서버가 **수를 세어** 돌려주는 거절이다
-      //    (NODE_HAS_CONNECTED_EDGES). 다른 실패와 글이 다르고 다음에 할 일이 적혀
-      //    있어 갈라서 띄운다 — 올리기 전 패널이 하던 그대로다. 🔵 이 막음을 이번에
-      //    바꾸지 않는다(「선도 함께 지우기」는 나중 일이다). 키로 눌러도 단추와
-      //    똑같이 이 글이 뜬다 — 부르는 자리가 하나라 저절로 그렇게 된다.
-      if ("blockingEdgeCount" in result) {
-        setNodeDeleteBlockedMessage({ nodeId, message: `이 노드에 연결된 분기가 ${result.blockingEdgeCount}개 있어 삭제할 수 없습니다. 먼저 연결된 분기를 삭제해 주세요.` });
-        return;
-      }
-      setNodeDeleteErrorMessage({ nodeId, message: result.message });
+    const attachedEdgeIds = findEdgesAttachedToNode(structuralPreview.edges, nodeId);
+    if (attachedEdgeIds.length > 0) {
+      setNodeDeleteBlockedMessage({ nodeId, message: `이 노드에 연결된 분기가 ${attachedEdgeIds.length}개 있어 삭제할 수 없습니다. 먼저 연결된 분기를 삭제해 주세요.` });
       return;
     }
-    handleNodeDeleted(nodeId, result.updatedAt);
+    queueStructural(() => [{ kind: "DELETE_NODE", nodeId, reason: null }]);
+    // 🔴 지울 노드의 **저장 전 수정도 함께 버린다**(올리기 전 handleNodeDeleted 가
+    //    하던 뒤처리 그대로). 안 버리면 같은 저장에서 지워질 노드에 칸 값을 쓰려
+    //    들어 **저장 전체가 실패한다**(구조는 이미 지나간 뒤라 더 나쁘다).
+    //    🔵 되돌리면 스냅샷이 그 초안까지 함께 되살린다 — queueStructural 이
+    //       **버리기 전에** 한 칸을 찍기 때문이다.
+    setPendingNodeDraftsById((prev) => dropKeys(prev, [nodeId]));
+    setPendingNodePositionsById((prev) => dropKeys(prev, [nodeId]));
+    setSelectedNodeId(null);
   }
 
   /** 연결선 하나를 지운다 — 패널의 [분기 삭제] 단추와 [Delete] 키가 **똑같이** 부르는 한 자리. */
-  async function handleDeleteEdge(edgeId: string) {
+  function handleDeleteEdge(edgeId: string) {
     if (!canEdit) return;
-    if (isDeleteInFlightRef.current) return;
-    isDeleteInFlightRef.current = true;
-    setDeletingTarget("edge");
-    setEdgeDeleteErrorMessage(null);
-    const result = await deleteRepairCaseFlowchartEdgeAction({ repairCaseId, flowchartId: flowchart.id, edgeId, expectedFlowchartUpdatedAt: currentUpdatedAt });
-    isDeleteInFlightRef.current = false;
-    setDeletingTarget(null);
-    if (!result.ok) {
-      setEdgeDeleteErrorMessage({ edgeId, message: result.message });
-      return;
-    }
-    handleEdgeDeleted(edgeId, result.updatedAt);
+    queueStructural(() => [{ kind: "DELETE_EDGE", edgeId, reason: null }]);
+    // 🔴 노드 쪽과 같은 까닭 — 지워질 연결선의 칸 값·경로점 초안을 함께 버린다.
+    setPendingEdgeDraftsById((prev) => dropKeys(prev, [edgeId]));
+    setPendingRoutePointsByEdgeId((prev) => dropKeys(prev, [edgeId]));
+    setSelectedEdgeId(null);
+    setSelectedWaypointIndex(null);
   }
 
   /**
-   * 노드가 실제로 지워진 뒤의 뒤처리 — 되돌리기 단계 쌓기 · 저장 전 수정 치우기 ·
-   * 선택 풀기 · 서버 상태 따라잡기.
-   *
-   * 🔴 지운 노드의 id 를 **받아서** 쓴다(2026-11-21). 전에는 selectedNodeId 를
-   * 다시 읽었는데, 서버가 답하기를 기다리는 사이에 다른 노드를 고르면 그쪽의 저장
-   * 전 수정이 지워지고 되돌리기도 엉뚱한 노드로 쌓였다. 부르는 쪽이 이미 id 를
-   * 알고 있으므로 다시 읽을 까닭이 없다.
+   * ── 🔴 **노드 추가** (2026-11-21, 조각 C2) ───────────────────────────────
+   * 🔴 **설명 칸은 CREATE_NODE 가 안 싣는다**(서버의 생성 액션은 받지만, 모아 두는
+   * 조작 타입에는 그 칸이 없다 — 절차 쪽 만들기 패널에는 설명 칸이 아예 없어서다).
+   * 그래서 적힌 설명은 **방금 찍힌 임시 id 를 키로 초안 지도에 얹는다.** 그러면
+   * [저장]이 구조를 먼저 보내 진짜 id 를 받고, 지도의 키를 그 id 로 옮긴 뒤
+   * (rebaseDraftMapAfterStructuralSave) 칸 값 단계에서 설명이 따라 들어간다.
+   * 🔴 안 얹으면 **적은 설명이 조용히 사라진다** — 오류도 안 나고 「저장 완료」까지 뜬다.
    */
-  function handleNodeDeleted(nodeId: string, newUpdatedAt: string) {
-    // 삭제 직전 상태를 되돌리기 단계로 남긴다 — 화면에 보이던 값(저장 전
-    // 수정/이동이 있었다면 그것) 기준으로 되살린다.
-    const deleted = nodes.find((n) => n.id === nodeId);
-    const draft = pendingNodeDraftsById.get(nodeId);
-    const pendingPosition = pendingNodePositionsById.get(nodeId);
-    if (deleted) {
-      pushNodeDeletionUndoStep({
-        nodeType: draft?.nodeType ?? deleted.nodeType,
-        title: (draft ? draft.title.trim() : deleted.title) || deleted.title,
-        description: (draft ? draft.description.trim() || null : deleted.description) ?? null,
-        instructions: (draft ? draft.instructions.trim() || null : deleted.instructions) ?? null,
-        position: pendingPosition ?? { x: deleted.positionX, y: deleted.positionY },
-      });
-    }
+  function handleQueueCreateNode(input: { nodeType: RepairCaseFlowchartNodeType; title: string; description: string; position: Position }) {
+    const [created] = queueStructural((mint) => [
+      { kind: "CREATE_NODE", tempNodeId: mint.nextNodeId(), nodeType: input.nodeType, title: input.title, position: input.position },
+    ]);
+    if (created?.kind !== "CREATE_NODE") return;
+    const description = input.description.trim();
+    if (description.length === 0) return;
     setPendingNodeDraftsById((prev) => {
-      if (!prev.has(nodeId)) return prev;
       const next = new Map(prev);
-      next.delete(nodeId);
+      next.set(created.tempNodeId, { title: input.title, description, instructions: "", nodeType: input.nodeType });
       return next;
     });
-    setPendingNodePositionsById((prev) => {
-      if (!prev.has(nodeId)) return prev;
-      const next = new Map(prev);
-      next.delete(nodeId);
-      return next;
-    });
-    setSelectedNodeId(null);
-    handleSaved(newUpdatedAt);
   }
 
-  /** 연결선이 실제로 지워진 뒤의 뒤처리. id 를 받는 까닭은 바로 위 handleNodeDeleted 와 같다. */
-  function handleEdgeDeleted(edgeId: string, newUpdatedAt: string) {
-    // 삭제 직전 상태를 되돌리기 단계로 남긴다 — 화면에 보이던 값(저장 전
-    // 수정이 있었다면 그것)을 기준으로, 되살릴 때 같은 연결선이 되도록.
-    const deleted = edges.find((e) => e.id === edgeId);
-    const draft = pendingEdgeDraftsById.get(edgeId);
-    if (deleted) {
-      pushEdgeDeletionUndoStep({
-        fromNodeId: draft?.fromNodeId ?? deleted.fromNodeId,
-        toNodeId: draft?.toNodeId ?? deleted.toNodeId,
-        branchType: draft?.branchType ?? deleted.branchType,
-        branchLabel: (draft ? draft.branchLabel.trim() || null : deleted.branchLabel) ?? null,
-        routePoints: pendingRoutePointsByEdgeId.has(edgeId) ? pendingRoutePointsByEdgeId.get(edgeId) ?? null : deleted.routePoints,
-      });
-    }
+  /** ── 연결선 추가 — 칸이 전부 CREATE_EDGE 에 실려 따로 얹을 초안이 없다. */
+  function handleQueueCreateEdge(input: { fromNodeId: string; toNodeId: string; branchType: RepairCaseFlowchartBranchType; branchLabel: string | null }) {
+    queueStructural((mint) => [
+      {
+        kind: "CREATE_EDGE",
+        tempEdgeId: mint.nextEdgeId(),
+        fromNodeId: input.fromNodeId,
+        toNodeId: input.toNodeId,
+        branchType: input.branchType,
+        branchLabel: input.branchLabel,
+        reason: null,
+      },
+    ]);
+  }
+
+  /**
+   * ── 🔴 **연결선 위 노드 끼우기** — 한 도장에서 번호를 **둘** 받는다 ─────────
+   * 새 노드 하나와, 그 노드 → 원래 대상으로 딸려 생길 **둘째** 연결선 하나.
+   * 두 번 나눠 부르면 그 사이에 목록이 바뀌어 번호가 어긋날 수 있다
+   * (appendPendingStructuralOperations 가 build 를 **목록**으로 받는 까닭).
+   *
+   * 🔴 **쪼개진 선의 초안도 함께 돌려놓는다.** 미리보기는 원래 선의 끝을 새
+   * 노드로 옮기는데(previewPendingStructuralGraph 의 INSERT_NODE_ON_EDGE), 그
+   * 선에 저장 전 초안이 남아 있으면 그 초안이 **선 전체의 사진**이라 끝점을 옛
+   * 값으로 덮어쓴다 — 그림에서는 끼운 노드가 떠 있고, 받침과 어긋나 **저장 때
+   * 끼우기를 되돌리는 재연결**까지 나간다. 끝점만 새 노드로 맞춰 두면 둘 다 없다.
+   * 🔵 분기 유형·라벨은 그대로 남는다(서버도 원래 값을 첫 구간에 남긴다).
+   */
+  function handleQueueInsertNodeOnEdge(edgeId: string, input: { nodeType: RepairCaseFlowchartNodeType; title: string; position: Position }) {
+    const [inserted] = queueStructural((mint) => [
+      {
+        kind: "INSERT_NODE_ON_EDGE",
+        edgeId,
+        tempNodeId: mint.nextNodeId(),
+        tempSecondEdgeId: mint.nextEdgeId(),
+        nodeType: input.nodeType,
+        title: input.title,
+        position: input.position,
+      },
+    ]);
+    if (inserted?.kind !== "INSERT_NODE_ON_EDGE") return;
     setPendingEdgeDraftsById((prev) => {
-      if (!prev.has(edgeId)) return prev;
+      const draft = prev.get(edgeId);
+      if (!draft) return prev;
       const next = new Map(prev);
-      next.delete(edgeId);
+      next.set(edgeId, { ...draft, toNodeId: inserted.tempNodeId });
       return next;
     });
-    setPendingRoutePointsByEdgeId((prev) => {
-      if (!prev.has(edgeId)) return prev;
-      const next = new Map(prev);
-      next.delete(edgeId);
-      return next;
-    });
-    setSelectedEdgeId(null);
-    setSelectedWaypointIndex(null);
-    handleSaved(newUpdatedAt);
   }
 
   /** Sets (or replaces) a node's pending position — the ONE place both canvas drag-stop and the property panel's "상대 위치로 이동" buttons funnel through. No mutation call here; position is dirty/pending like every other field, only [저장] persists it. */
@@ -748,12 +823,88 @@ export default function CaseFlowchartEditorScreen({
     setSelectedWaypointIndex(index);
   }
 
+  // ---- 저장 전 구조 변경을 **서버 목록 위에 얹은 그래프** (2026-11-21, 조각 C2) ----
+  //
+  // 🔴 **이것이 없으면 조작을 아무리 쌓아도 화면에 아무 일도 안 일어난다.** 아래
+  // renderedNodes/renderedEdges 와 받침(nodesById/edgesById)이 전부 이 결과를 돈다 —
+  // 전에는 둘 다 `nodes`/`edges`(서버가 그려 준 목록)를 돌았고, 그러면 아직 안 보낸
+  // 노드가 그림에도 패널에도 안 나온다.
+  //
+  // 🔵 행을 만들고 고치는 일(factories)은 **여기**가 맡는다 — 미리보기 모듈은 진단
+  // 노드 행에 칸이 몇 개인지 모른다. 새 행의 칸은 서버가 실제로 적는 것만 채우고
+  // 나머지는 null 이다(createRepairCaseFlowchartNode / createRepairCaseFlowchartEdge 와 같은 모습).
+  const structuralPreviewFactories: StructuralPreviewFactories<CaseFlowchartGraphNode, CaseFlowchartGraphEdge> = {
+    createNode: (seed) => ({
+      id: seed.id,
+      nodeType: asCaseNodeType(seed.nodeType),
+      title: seed.title,
+      // 🔵 설명은 CREATE_NODE 가 안 싣는다 — 적힌 설명은 **초안 지도**를 타고 오고,
+      //    아래 renderedNodes 의 mergeNodeForRender 가 그 위에 얹는다.
+      description: null,
+      instructions: null,
+      // 🔵 자리는 늘 들어온다(만들기 패널이 비워 보내지 않는다 — 그 패널 머리말).
+      //    그래도 null 을 받으면 (0,0)으로 둔다. 진단 그림에는 자동 배치가 없어
+      //    좌표 말고 그릴 방법이 없다.
+      positionX: seed.position ? seed.position.x : 0,
+      positionY: seed.position ? seed.position.y : 0,
+    }),
+    createEdge: (seed) => ({
+      id: seed.id,
+      fromNodeId: seed.fromNodeId,
+      toNodeId: seed.toNodeId,
+      branchType: seed.branchType,
+      branchLabel: seed.branchLabel,
+      routePoints: null,
+    }),
+    // 🔵 진단은 CHANGE_NODE_TYPE 을 **안 쌓는다**(유형 변경은 초안 + SaveStep 으로
+    //    돈다). 그래서 이 함수는 지금 한 번도 안 불린다 — 그래도 비워 두지 않는다.
+    //    빈 함수를 두면 언젠가 그 조작을 쌓는 날 **그림에서만 조용히 아무 일도 안 난다.**
+    changeNodeType: (node, newNodeType) => ({ ...node, nodeType: asCaseNodeType(newNodeType) }),
+    retargetEdge: (edge, fromNodeId, toNodeId) => ({ ...edge, fromNodeId, toNodeId }),
+  };
+
+  const structuralPreview = previewPendingStructuralGraph(nodes, edges, pendingStructuralOperations, structuralPreviewFactories);
+
+  /**
+   * 🔴 「바뀌었는가」를 맞대어 보는 **받침**. 미리보기 행을 그대로 쓴다 — 셋이
+   * 한꺼번에 맞아떨어진다.
+   *  ① 저장 전에 만든 노드·연결선도 받침이 생긴다. 없으면 computeDirty* 와
+   *     planSaveSteps 가 **조용히 건너뛴다**(`if (!server) continue;`) — 새 노드에
+   *     적은 설명이 오류 없이 사라지는 그 자리다.
+   *  ② 이미 있는 행은 미리보기 행이 서버 행 **그 자체**라 값이 같다.
+   *  ③ 연결선 위 노드 끼우기로 **끝이 옮겨진 선**은 받침도 함께 옮겨진다. 서버
+   *     행을 받침으로 쓰면 그 선의 초안이 「재연결됨」으로 보여, [저장]이 방금
+   *     끼운 것을 **되돌리는 재연결**을 한 번 더 보낸다(handleQueueInsertNodeOnEdge
+   *     가 초안의 끝점을 함께 맞추는 것이 이 ③과 한 짝이다).
+   */
+  const nodesById = new Map(structuralPreview.nodes.map((n) => [n.id, n]));
+  const edgesById = new Map(structuralPreview.edges.map((e) => [e.id, e]));
+
+  /**
+   * 🔴 **접은 뒤의 건수를 센다** — 사람이 한 조작 수가 아니다. 만들었다 지운 노드는
+   * 서버에 보낼 것이 0건이고, 그 노드에 걸렸던 선도 함께 사라진다. 사람이 세 번
+   * 눌렀어도 「변경 0건」이 맞는 답이다.
+   * 🔴 그리고 **막힌 것**(conflicts)이 하나라도 있으면 [저장]을 막는다. operations 만
+   * 들고 보내면 사람이 화면에서 한 일 하나가 설명 없이 사라진다.
+   */
+  const coalescedStructural = coalescePendingStructuralOperations(pendingStructuralOperations);
+  const structuralPendingCount = coalescedStructural.operations.length;
+  const structuralConflictMessages = describeStructuralConflicts(coalescedStructural.conflicts);
+  const canSendStructural = canSendStructuralChanges(coalescedStructural);
+
   // ---- node draft (title/description/nodeType) ----
 
+  /**
+   * 🔴 받침(baseline)이 **미리보기 행**이다(2026-11-21). 전에는 `nodes`(서버 목록)를
+   * 뒤졌는데, 그러면 저장 전에 만든 노드를 고를 때 패널이 제목을 **빈 칸으로**
+   * 보여 준다 — 사람이 방금 적은 제목이 패널에서만 사라지는 꼴이라 고장으로 읽힌다.
+   * 🔵 이미 서버에 있는 노드는 미리보기 행이 **서버 행 그 자체**라(미리보기는 더하고
+   * 빼기만 한다) 달라지는 것이 없다.
+   */
   function nodeDraft(nodeId: string): CaseFlowchartNodeDraft {
     const pending = pendingNodeDraftsById.get(nodeId);
     if (pending) return pending;
-    const serverNode = nodes.find((n) => n.id === nodeId);
+    const serverNode = nodesById.get(nodeId);
     return {
       title: serverNode?.title ?? "",
       description: serverNode?.description ?? "",
@@ -771,16 +922,16 @@ export default function CaseFlowchartEditorScreen({
     });
   }
 
-  const nodesById = new Map(nodes.map((n) => [n.id, n]));
   const dirtyNodeEntries = computeDirtyNodeEntries(pendingNodeDraftsById, nodesById);
   const dirtyPositionNodeIds = computeDirtyPositionNodeIds(pendingNodePositionsById, nodesById);
 
   // ---- edge draft (branchType/branchLabel/fromNodeId/toNodeId) ----
 
+  /** 받침이 **미리보기 행**인 까닭은 바로 위 nodeDraft 와 같다. */
   function edgeDraft(edgeId: string): CaseFlowchartEdgeDraft {
     const pending = pendingEdgeDraftsById.get(edgeId);
     if (pending) return pending;
-    const serverEdge = edges.find((e) => e.id === edgeId);
+    const serverEdge = edgesById.get(edgeId);
     return {
       branchType: serverEdge?.branchType ?? "DEFAULT",
       branchLabel: serverEdge?.branchLabel ?? "",
@@ -798,14 +949,14 @@ export default function CaseFlowchartEditorScreen({
     });
   }
 
-  const edgesById = new Map(edges.map((e) => [e.id, e]));
   const dirtyEdgeEntries = computeDirtyEdgeEntries(pendingEdgeDraftsById, edgesById);
 
   // ---- route draft (waypoints) ----
 
   function workingRoutePoints(edgeId: string): RoutePoint[] | null {
     if (pendingRoutePointsByEdgeId.has(edgeId)) return pendingRoutePointsByEdgeId.get(edgeId) ?? null;
-    return edges.find((e) => e.id === edgeId)?.routePoints ?? null;
+    // 받침이 **미리보기 행**인 까닭은 nodeDraft 와 같다 — 저장 전에 그은 선도 경로점을 가질 수 있다.
+    return edgesById.get(edgeId)?.routePoints ?? null;
   }
 
   function handleWaypointMove(edgeId: string, index: number, point: RoutePoint) {
@@ -906,7 +1057,14 @@ export default function CaseFlowchartEditorScreen({
   /** Ids whose pending route actually differs from the last-saved edge (so re-adding then removing the same waypoint, ending up back where it started, doesn't count as "pending"). */
   const dirtyRouteEdgeIds = computeDirtyRouteEdgeIds(pendingRoutePointsByEdgeId, edgesById);
 
-  const totalPendingCount = dirtyNodeEntries.length + dirtyPositionNodeIds.length + dirtyEdgeEntries.length + dirtyRouteEdgeIds.length;
+  /**
+   * 🔴 구조 변경 건수가 **반드시** 여기 더해져야 한다. 안 더하면 노드만 추가한
+   * 상태에서 [저장]이 꺼져 있어 **한 건도 안 나간다** — 이번 일이 고치려던 바로 그
+   * 증상이 모양만 바꿔 되돌아온다.
+   * 🔵 나가기 경고(beforeunload)도 이 값을 보므로, 더하면 그 경고가 저장 전 구조
+   *    변경까지 함께 지킨다.
+   */
+  const totalPendingCount = dirtyNodeEntries.length + dirtyPositionNodeIds.length + dirtyEdgeEntries.length + dirtyRouteEdgeIds.length + structuralPendingCount;
   const hasAnyPendingChanges = totalPendingCount > 0;
 
   // Unsaved-navigation guard (parity with ProcedureTemplateEditorScreen) —
@@ -923,8 +1081,15 @@ export default function CaseFlowchartEditorScreen({
 
   // ---- rendered graph (server baseline + pending drafts, merged) ----
 
-  const renderedNodes: CaseFlowchartGraphNode[] = nodes.map((n) => mergeNodeForRender(n, pendingNodeDraftsById.get(n.id), pendingNodePositionsById.get(n.id)));
-  const renderedEdges: CaseFlowchartGraphEdge[] = edges.map((e) => mergeEdgeForRender(e, pendingEdgeDraftsById.get(e.id), pendingRoutePointsByEdgeId.get(e.id)));
+  // 🔴 도는 목록이 `nodes`/`edges` 에서 **structuralPreview** 로 바뀌었다
+  //    (2026-11-21, 조각 C2). 저장 전에 추가한 노드·연결선이 여기 안 들어오면
+  //    그림에도 패널에도 안 나온다 — 단추만 눌리고 아무 일도 안 일어난 것처럼 보인다.
+  const renderedNodes: CaseFlowchartGraphNode[] = structuralPreview.nodes.map((n) =>
+    mergeNodeForRender(n, pendingNodeDraftsById.get(n.id), pendingNodePositionsById.get(n.id))
+  );
+  const renderedEdges: CaseFlowchartGraphEdge[] = structuralPreview.edges.map((e) =>
+    mergeEdgeForRender(e, pendingEdgeDraftsById.get(e.id), pendingRoutePointsByEdgeId.get(e.id))
+  );
 
   const selectedNode = renderedNodes.find((n) => n.id === selectedNodeId) ?? null;
   const selectedEdge = renderedEdges.find((e) => e.id === selectedEdgeId) ?? null;
@@ -953,14 +1118,18 @@ export default function CaseFlowchartEditorScreen({
    *  ② `nodeDeleteBlockedReason` — **null** 이다. 절차가 미리 막는 까닭(체크리스트 ·
    *     고장 진단표가 걸린 노드)은 진단 노드 행에 그런 칸이 **아예 없어** 셀 수조차
    *     없다. 🔴 「진단에는 막히는 노드가 없다」가 아니라 **「미리 셀 수 있는 것이
-   *     없다」**가 맞다 — 진단에서 막히는 경우(연결선이 붙은 노드)는 서버만 알고,
-   *     그 거절은 단추로 지울 때와 똑같이 handleDeleteNode 가 받아 글로 띄운다.
-   *     그러니 키가 여기서 미리 막으면 **단추보다 더 조용히** 아무 일도 안 한다.
+   *     없다」**가 맞다.
+   *     🔴 2026-11-21(조각 C2) — 진단에서 실제로 막히는 경우(연결선이 붙은 노드)는
+   *     이제 **화면이 그림을 세어 미리 안다**(handleDeleteNode). 그래도 이 칸은
+   *     여전히 null 이다: 여기서 막으면 키가 **단추보다 더 조용히** 아무 일도 안
+   *     하고, 막힌 까닭이 패널에 안 뜬다. 지금처럼 handleDeleteNode 까지 흘려보내야
+   *     단추로 누를 때와 **글자 하나까지 같은** 결과가 난다.
    *  ③ `boxSelectActive` / `boxSelectedNodes` — [범위 선택]은 진단에 아직 없다.
    *     false / [] 를 넘기면 복수 갈래는 영영 안 선다.
    *
    * 🔵 확인 창은 안 띄운다 — 지금 삭제 **단추**도 안 띄운다(잘못 지웠으면 [이전]이
-   * 서버에 다시 만든다 — pushNodeDeletionUndoStep). 키만 다르게 굴면 안 된다.
+   * 목록에서 그 줄을 빼 준다 — 조각 C2 부터 삭제는 서버에 바로 안 간다). 키만
+   * 다르게 굴면 안 된다.
    */
   /**
    * 🔴 지우기 셋의 **가장 최근 신원**. 이 화면의 함수들은 useCallback 이 아니라
@@ -1005,21 +1174,28 @@ export default function CaseFlowchartEditorScreen({
         return;
       }
       if (plan.action === "DELETE_NODE") {
-        void deleteByKeyRef.current.node(plan.nodeId);
+        deleteByKeyRef.current.node(plan.nodeId);
         return;
       }
       // 🔵 남은 갈래는 DELETE_EDGE 하나다 — 복수(DELETE_NODES)는 위에서 늘 빈 값을
       //    넘기므로 설 길이 없다([범위 선택]이 진단에 생기는 날 여기가 늘어난다).
-      if (plan.action === "DELETE_EDGE") void deleteByKeyRef.current.edge(plan.edgeId);
+      if (plan.action === "DELETE_EDGE") deleteByKeyRef.current.edge(plan.edgeId);
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [canEdit, deletableNodeId, deletableEdgeId, selectedWaypointIndex]);
 
-  /** Executes exactly one planned step against the real mutation layer — the only place in this component that knows which server action a given SaveStep maps to. Ordering, chaining, and stop-on-first-failure all live in runSaveSequence (repair-case-flowchart-editor-save-state.ts), unit-tested there. */
-  async function executeSaveStep(step: SaveStep, expectedUpdatedAt: string): Promise<SaveStepResult> {
+  /**
+   * Executes exactly one planned step against the real mutation layer — the only place in this component that knows which server action a given SaveStep maps to. Ordering, chaining, and stop-on-first-failure all live in runSaveSequence (repair-case-flowchart-editor-save-state.ts), unit-tested there.
+   *
+   * 🔴 2026-11-21(조각 C2) — 지도 넷을 **인자로 받는다.** state 를 그대로 읽으면
+   * **옮기기 전** 지도를 본다: 구조 단계가 임시 키를 진짜 키로 옮기는데 setState 는
+   * 다음 렌더에야 닿기 때문이다. 그러면 막 만든 노드의 칸 값이 임시 키에 남은 채라
+   * 그 줄이 통째로 건너뛰어진다(오류 없이, 「저장 완료」까지 뜬 채로).
+   */
+  async function executeSaveStep(step: SaveStep, expectedUpdatedAt: string, pending: CasePendingDraftMaps): Promise<SaveStepResult> {
     if (step.kind === "NODE_FIELDS") {
-      const draft = nodeDraft(step.nodeId);
+      const draft = pending.nodeDrafts.get(step.nodeId) ?? nodeDraft(step.nodeId);
       const result = await updateRepairCaseFlowchartNodeAction({
         repairCaseId,
         flowchartId: flowchart.id,
@@ -1032,7 +1208,7 @@ export default function CaseFlowchartEditorScreen({
       return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
     }
     if (step.kind === "NODE_TYPE") {
-      const draft = nodeDraft(step.nodeId);
+      const draft = pending.nodeDrafts.get(step.nodeId) ?? nodeDraft(step.nodeId);
       const result = await changeRepairCaseFlowchartNodeTypeAction({
         repairCaseId,
         flowchartId: flowchart.id,
@@ -1044,7 +1220,7 @@ export default function CaseFlowchartEditorScreen({
     }
     if (step.kind === "NODE_POSITIONS") {
       const positions = step.nodeIds.map((id) => {
-        const pos = pendingNodePositionsById.get(id);
+        const pos = pending.nodePositions.get(id);
         return { id, positionX: pos?.x ?? 0, positionY: pos?.y ?? 0 };
       });
       const result = await saveRepairCaseFlowchartLayoutAction({
@@ -1056,7 +1232,7 @@ export default function CaseFlowchartEditorScreen({
       return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
     }
     if (step.kind === "EDGE_FIELDS") {
-      const draft = edgeDraft(step.edgeId);
+      const draft = pending.edgeDrafts.get(step.edgeId) ?? edgeDraft(step.edgeId);
       const result = await updateRepairCaseFlowchartEdgeAction({
         repairCaseId,
         flowchartId: flowchart.id,
@@ -1068,7 +1244,7 @@ export default function CaseFlowchartEditorScreen({
       return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
     }
     if (step.kind === "EDGE_RETARGET") {
-      const draft = edgeDraft(step.edgeId);
+      const draft = pending.edgeDrafts.get(step.edgeId) ?? edgeDraft(step.edgeId);
       const result = await retargetRepairCaseFlowchartEdgeAction({
         repairCaseId,
         flowchartId: flowchart.id,
@@ -1084,10 +1260,96 @@ export default function CaseFlowchartEditorScreen({
       repairCaseId,
       flowchartId: flowchart.id,
       edgeId: step.edgeId,
-      routePoints: workingRoutePoints(step.edgeId),
+      routePoints: pending.routePoints.has(step.edgeId) ? pending.routePoints.get(step.edgeId) ?? null : workingRoutePoints(step.edgeId),
       expectedFlowchartUpdatedAt: expectedUpdatedAt,
     });
     return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
+  }
+
+  /**
+   * 모아 둔 구조 조작 **한 건**을 실제로 서버로 보낸다 — 다섯 갈래가 여기서 갈린다.
+   * 🔴 **부르는 액션은 전부 전부터 있던 것 그대로**다(이 조각은 서버를 한 글자도
+   * 안 바꿨다). 바뀐 것은 **부르는 시점**뿐이다.
+   *
+   * 🔴 넘어오는 operation 은 **치환이 끝난 모습**이다 — 임시 id 를 여기서 다시
+   * 들여다볼 필요가 없다(그때쯤이면 이미 진짜 id 다).
+   * 🔴 돌려주는 칸에서 `nodeId`·`edgeId`·`secondEdgeId` 를 빠뜨리면 뒤 걸음이 임시
+   * id 를 든 채 나간다. 타입은 전부 선택 칸이라 아무 말도 안 하고, 대신 보내기
+   * 직전 관문(findUnresolvedTempIds)이 운다. 특히 **끼우기는 둘**이다.
+   * 🔵 진단 서버는 구조 검증 요약을 안 돌려준다 — 그래서 타입 매개변수가 `null` 이고
+   *    `structuralValidation` 을 한 번도 안 싣는다(절차 쪽은 싣는다).
+   * 🔵 **`reason` 은 안 보낸다** — 진단 액션들에는 그 인자가 아예 없다. 조작에 칸은
+   *    있지만(절차와 같은 타입이다) 늘 null 로 쌓고 여기서 버린다. DB 칸은 이미
+   *    있으니 받는 날 코드만 고치면 된다.
+   */
+  async function executeStructuralOperation(operation: PendingStructuralOperation, expectedUpdatedAt: string): Promise<ProcedureStructuralStepResult<null>> {
+    switch (operation.kind) {
+      case "CREATE_NODE": {
+        const result = await createRepairCaseFlowchartNodeAction({
+          repairCaseId,
+          flowchartId: flowchart.id,
+          nodeType: operation.nodeType,
+          title: operation.title,
+          position: operation.position,
+          expectedFlowchartUpdatedAt: expectedUpdatedAt,
+        });
+        return result.ok ? { ok: true, updatedAt: result.updatedAt, nodeId: result.nodeId } : { ok: false, message: result.message };
+      }
+      case "DELETE_NODE": {
+        const result = await deleteRepairCaseFlowchartNodeAction({
+          repairCaseId,
+          flowchartId: flowchart.id,
+          nodeId: operation.nodeId,
+          expectedFlowchartUpdatedAt: expectedUpdatedAt,
+        });
+        return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
+      }
+      case "CREATE_EDGE": {
+        const result = await createRepairCaseFlowchartEdgeAction({
+          repairCaseId,
+          flowchartId: flowchart.id,
+          fromNodeId: operation.fromNodeId,
+          toNodeId: operation.toNodeId,
+          branchType: operation.branchType,
+          branchLabel: operation.branchLabel,
+          expectedFlowchartUpdatedAt: expectedUpdatedAt,
+        });
+        return result.ok ? { ok: true, updatedAt: result.updatedAt, edgeId: result.edgeId } : { ok: false, message: result.message };
+      }
+      case "DELETE_EDGE": {
+        const result = await deleteRepairCaseFlowchartEdgeAction({
+          repairCaseId,
+          flowchartId: flowchart.id,
+          edgeId: operation.edgeId,
+          expectedFlowchartUpdatedAt: expectedUpdatedAt,
+        });
+        return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
+      }
+      case "INSERT_NODE_ON_EDGE": {
+        const result = await insertRepairCaseFlowchartNodeOnEdgeAction({
+          repairCaseId,
+          flowchartId: flowchart.id,
+          edgeId: operation.edgeId,
+          nodeType: operation.nodeType,
+          title: operation.title,
+          position: operation.position,
+          expectedFlowchartUpdatedAt: expectedUpdatedAt,
+        });
+        // 🔴 **둘**이다 — 새 노드와 둘째 연결선. firstEdgeId 는 넘긴 edgeId 그
+        //    자체(이미 진짜 id)라 받지 않는다.
+        return result.ok
+          ? { ok: true, updatedAt: result.updatedAt, nodeId: result.nodeId, secondEdgeId: result.secondEdgeId }
+          : { ok: false, message: result.message };
+      }
+      case "CHANGE_NODE_TYPE":
+      case "RETARGET_EDGE":
+        // 🔴 진단은 이 둘을 **안 쌓는다**(노드 유형 변경 · 연결선 재연결은 초안
+        //    지도 + SaveStep 으로 돈다 — 이 파일 머리말의 2026-11-21 결정). 여기
+        //    닿았다는 것은 어딘가에서 쌓기 시작했다는 뜻이고, 그러면 같은 일을
+        //    하는 길이 두 벌이 된 것이다. 조용히 성공으로 넘기면 그 날 아무도 못
+        //    잡으므로 **소리를 낸다**(저장이 여기서 멈추고 글이 뜬다).
+        return { ok: false, message: "내부 오류: 이 편집기는 노드 유형 변경·연결선 재연결을 구조 변경으로 보내지 않습니다." };
+    }
   }
 
   /**
@@ -1095,26 +1357,110 @@ export default function CaseFlowchartEditorScreen({
    * rendered (see this file's own EDITOR MODEL doc comment above).
    * Deterministic order: node property/type changes, then node positions
    * (one batched layout call), then edge property/retarget changes, then
-   * route changes — no known dependency forces a different order (a
-   * retarget's new endpoints are always EXISTING nodes, never ones created
-   * in this same save batch, since node CREATION stays its own immediate
-   * action outside this dirty-state model entirely).
+   * route changes.
+   *
+   * ──────────────────────────────────────────────────────────────────────
+   * 🔴 2026-11-21(조각 C2) — **구조 변경이 앞에 한 단계 더 붙었다**
+   * ──────────────────────────────────────────────────────────────────────
+   *   구조 보내기 → collectStructuralIdEffects → 지도 넷 + 받침 둘 rebase
+   *     → dirty 다시 계산 + includeBrandNew* → 기존 planSaveSteps
+   *     → 기존 runSaveSequence
+   *
+   * 차례가 뒤집히면 안 되는 까닭은 procedure-editor-structural-save.ts 머리말에
+   * 있다 — 새 노드는 칸 값 단계가 가리킬 진짜 id 가 아직 없다.
+   *
+   * 🔴 **세 겹을 다 해야 한다.** 절차 쪽에서 실제로 겪은 결함들이다.
+   *  ㉠ 저장이 끝나면 **임시 키로 적어 둔 초안을 진짜 키로 옮긴다**
+   *     (rebaseDraftMapAfterStructuralSave). 안 하면 막 만든 노드에 적은 설명이
+   *     사라진다. 🔵 연결선 초안은 **키뿐 아니라 값 안의 노드 번호까지** 옮긴다
+   *     (rebaseEdgeDraftTargets) — 「방금 만든 노드로 재연결」이 임시 번호인 채
+   *     서버에 가면 거절당한다.
+   *  ㉡ **dirty 셈이 「받침에 없는 id」를 조용히 건너뛴다**(computeDirty* 와
+   *     planSaveSteps 의 `if (!server) continue;`). 받침을 미리보기로 세워 그
+   *     구멍을 이미 한 번 메웠지만, 저장이 지나간 **뒤**의 받침은 진짜 id 로
+   *     옮겨야 맞으므로 받침 둘도 함께 옮기고(rebaseSnapshotMap),
+   *     includeBrandNewDraftEntries/Ids 로 한 겹 더 받친다.
+   *  ㉢ **같은 저장에서 지워진 노드·연결선의 초안을 버린다.** 안 버리면 없는 행에
+   *     칸 값을 쓰려 들어 저장 전체가 실패한다. 🔵 버리는 자리는 둘이다 — 지울
+   *     때(handleDeleteNode/Edge)와, 여기 rebase 가 `deletedNodeIds` 로 한 번 더.
+   *
+   * 🔴 **구조가 중간에 멈추면 칸 값 단계로 안 넘어간다**(canProceedToFieldSave).
+   * 넘어가면 실패 글이 둘이 되고 어디까지 맞는지 사람이 못 읽는다. 🔵 넘어가지
+   * 않아도 잃는 것은 없다 — 아직 안 간 초안은 그대로 남아 다음 [저장]에 다시 간다.
    */
   async function handleGlobalSave() {
-    if (!hasAnyPendingChanges) return;
+    if (!hasAnyPendingChanges || !canSendStructural) return;
     setGlobalSaveStatus("saving");
     setGlobalSaveError(null);
 
+    // 🔴 아래는 전부 **지역 변수로** 들고 간다. 구조 단계가 지도의 키를 옮기는데
+    //    setState 는 다음 렌더에야 닿으므로, 칸 값 단계가 state 를 읽으면 **옮기기
+    //    전** 지도를 본다(임시 id 가 그대로 남아 그 줄이 통째로 건너뛰어진다).
+    let pending: CasePendingDraftMaps = {
+      nodeDrafts: pendingNodeDraftsById,
+      nodePositions: pendingNodePositionsById,
+      edgeDrafts: pendingEdgeDraftsById,
+      routePoints: pendingRoutePointsByEdgeId,
+    };
+    let saveNodesById = nodesById;
+    let saveEdgesById = edgesById;
+    let brandNewNodeIds: string[] = [];
+    let brandNewEdgeIds: string[] = [];
+    let tokenAfterStructural = currentUpdatedAt;
+    /** 🔴 한 건이라도 **서버에 닿았는가**. 닿았으면 되돌리기 스택을 비워야 한다(아래 까닭). */
+    let sentAnyStructural = false;
+
+    if (pendingStructuralOperations.length > 0) {
+      // 🔵 타입 매개변수가 `null` 인 까닭은 executeStructuralOperation 머리말에 있다
+      //    (진단 서버는 구조 검증 요약을 안 돌려준다).
+      const structuralOutcome = await runProcedureStructuralSequence<null>(pendingStructuralOperations, currentUpdatedAt, executeStructuralOperation);
+      const effects = collectStructuralIdEffects(structuralOutcome);
+      sentAnyStructural = structuralOutcome.succeededOperations.length > 0;
+
+      // 🔴 **남은 조작 세우기와 지도 옮기기를 반드시 함께** 한다. 하나만 하면
+      //    어긋난다 — 목록만 바꾸면 초안이 임시 키를 든 채 남아 영영 안 가고,
+      //    지도만 옮기면 이미 보낸 조작을 다시 보내 같은 노드가 두 번 만들어진다.
+      setPendingStructuralOperations(structuralOutcome.remainingOperations);
+
+      pending = {
+        nodeDrafts: rebaseDraftMapAfterStructuralSave(pendingNodeDraftsById, effects, "node"),
+        nodePositions: rebaseDraftMapAfterStructuralSave(pendingNodePositionsById, effects, "node"),
+        edgeDrafts: rebaseEdgeDraftTargets(rebaseDraftMapAfterStructuralSave(pendingEdgeDraftsById, effects, "edge"), effects.resolvedIds),
+        routePoints: rebaseDraftMapAfterStructuralSave(pendingRoutePointsByEdgeId, effects, "edge"),
+      };
+      setPendingNodeDraftsById(pending.nodeDrafts);
+      setPendingNodePositionsById(pending.nodePositions);
+      setPendingEdgeDraftsById(pending.edgeDrafts);
+      setPendingRoutePointsByEdgeId(pending.routePoints);
+
+      saveNodesById = rebaseSnapshotMap(nodesById, effects, "node");
+      saveEdgesById = rebaseSnapshotMap(edgesById, effects, "edge");
+
+      brandNewNodeIds = effects.createdNodeIds;
+      brandNewEdgeIds = effects.createdEdgeIds;
+      tokenAfterStructural = structuralOutcome.finalUpdatedAt;
+
+      if (!canProceedToFieldSave(structuralOutcome)) {
+        setCurrentUpdatedAt(tokenAfterStructural);
+        finishAfterStructuralSend(sentAnyStructural);
+        setGlobalSaveStatus("failed");
+        setGlobalSaveError(structuralOutcome.failureMessage ?? "저장할 수 없는 구조 변경이 있어 저장을 멈췄습니다.");
+        return;
+      }
+    }
+
+    // 🔴 dirty 를 **다시** 센다. 위에서 키가 옮겨졌고 같은 저장에서 지워진 행의
+    //    초안은 버려졌다 — 렌더 시점에 센 값은 이미 낡았다.
     const steps = planSaveSteps({
-      dirtyNodes: dirtyNodeEntries,
-      serverNodesById: nodesById,
-      dirtyPositionNodeIds,
-      dirtyEdges: dirtyEdgeEntries,
-      serverEdgesById: edgesById,
-      dirtyRouteEdgeIds,
+      dirtyNodes: includeBrandNewDraftEntries(computeDirtyNodeEntries(pending.nodeDrafts, saveNodesById), brandNewNodeIds, pending.nodeDrafts),
+      serverNodesById: saveNodesById,
+      dirtyPositionNodeIds: includeBrandNewDraftIds(computeDirtyPositionNodeIds(pending.nodePositions, saveNodesById), brandNewNodeIds, pending.nodePositions),
+      dirtyEdges: includeBrandNewDraftEntries(computeDirtyEdgeEntries(pending.edgeDrafts, saveEdgesById), brandNewEdgeIds, pending.edgeDrafts),
+      serverEdgesById: saveEdgesById,
+      dirtyRouteEdgeIds: includeBrandNewDraftIds(computeDirtyRouteEdgeIds(pending.routePoints, saveEdgesById), brandNewEdgeIds, pending.routePoints),
     });
 
-    const outcome = await runSaveSequence(steps, currentUpdatedAt, executeSaveStep);
+    const outcome = await runSaveSequence(steps, tokenAfterStructural, (step, expectedUpdatedAt) => executeSaveStep(step, expectedUpdatedAt, pending));
 
     const flushedNodeIds = fullySucceededNodeIds(steps, outcome.succeededSteps);
     const flushedPositionNodeIds = succeededPositionNodeIds(outcome.succeededSteps);
@@ -1148,6 +1494,9 @@ export default function CaseFlowchartEditorScreen({
     setCurrentUpdatedAt(outcome.finalUpdatedAt);
 
     if (outcome.failedAtStep) {
+      // 🔴 구조는 전부 성공했는데(아니면 위에서 돌아갔다) 칸 값에서 멈춘 자리다 —
+      //    보낸 구조 변경이 있으면 여기서도 뒤처리를 해야 한다.
+      finishAfterStructuralSend(sentAnyStructural);
       setGlobalSaveStatus("failed");
       setGlobalSaveError(outcome.failureMessage);
       return;
@@ -1161,6 +1510,26 @@ export default function CaseFlowchartEditorScreen({
     router.refresh();
   }
 
+  /**
+   * 🔴 구조 변경이 **한 건이라도 서버에 닿은 뒤** 저장이 멈췄을 때의 뒤처리.
+   *
+   *  ① **되돌리기 스택을 비운다.** 스택에 쌓인 스냅샷은 전부 「이 조작들은 아직
+   *     안 보냈다」고 말하는데 이미 보냈다 — 그대로 [이전]을 누르고 다시 [저장]하면
+   *     **같은 노드가 두 번 만들어진다.** 🔵 절차 편집기는 그 자리를 서버 편집
+   *     이력으로 메우지만(planUndoStackAfterStructuralSave) 진단에는 서버 되돌리기가
+   *     없다. 되돌릴 수 있는 칸을 잃는 쪽이, 지우지도 못할 복제본을 만드는 쪽보다 낫다.
+   *  ② **서버 목록을 따라잡는다**(router.refresh). 방금 만들어진 노드·연결선은
+   *     모아 둔 목록에서는 빠졌고 `nodes`/`edges` 프롭에는 아직 없다 — 새로 받아
+   *     오지 않으면 그림에서 잠깐 사라진다. 🔵 저장 전 초안은 이 화면의 state 라
+   *     refresh 가 지우지 않는다(이 파일 머리말의 EDITOR MODEL).
+   */
+  function finishAfterStructuralSend(sentAny: boolean) {
+    if (!sentAny) return;
+    setPendingUndoStack(createUndoStack<CaseUndoStep>());
+    lastFieldEditKeyRef.current = null;
+    router.refresh();
+  }
+
   /** Client-only reset of every pending draft/position/route map — mirrors ProcedureTemplateEditorScreen's handleDiscardAllPending. Nothing here was ever persisted, so there is no server call and no audit row. */
   function handleDiscardAllPending() {
     // "모두 취소"도 한 단계다 — 실수로 눌렀다면 [이전]으로 통째로 되살릴 수 있다.
@@ -1169,6 +1538,10 @@ export default function CaseFlowchartEditorScreen({
     setPendingNodePositionsById(new Map());
     setPendingEdgeDraftsById(new Map());
     setPendingRoutePointsByEdgeId(new Map());
+    // 🔴 2026-11-21(조각 C2) — **구조 목록도 함께 비운다.** 안 비우면 취소한 뒤에도
+    //    노드 추가가 살아남아 다음 [저장]에 조용히 따라간다. 🔴 그리고 이것이
+    //    **부분 실패로 남은 조작을 치우는 유일한 길**이다(그때 되돌리기 스택은 비워진다).
+    setPendingStructuralOperations([]);
     setSelectedWaypointIndex(null);
     setGlobalSaveStatus("idle");
     setGlobalSaveError(null);
@@ -1273,7 +1646,10 @@ export default function CaseFlowchartEditorScreen({
         <div className="flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs dark:border-zinc-800 dark:bg-zinc-900">
           <button
             type="button"
-            disabled={!hasAnyPendingChanges || globalSaveStatus === "saving"}
+            // 🔴 막힌 구조 변경이 하나라도 있으면 **아예 못 누른다**(canSendStructural).
+            //    보낼 수 있는 것만 골라 보내면 사람이 화면에서 한 일 하나가 설명 없이
+            //    사라진다. 무엇이 막혔는지는 아래 빨간 칸이 줄마다 적는다.
+            disabled={!hasAnyPendingChanges || !canSendStructural || globalSaveStatus === "saving"}
             onClick={() => void handleGlobalSave()}
             className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900"
           >
@@ -1281,9 +1657,11 @@ export default function CaseFlowchartEditorScreen({
               ? "저장 중..."
               : !hasAnyPendingChanges
                 ? "저장할 변경 없음"
-                : globalSaveStatus === "failed"
-                  ? "저장 실패 - 다시 시도"
-                  : "저장"}
+                : !canSendStructural
+                  ? "저장할 수 없는 변경 있음"
+                  : globalSaveStatus === "failed"
+                    ? "저장 실패 - 다시 시도"
+                    : "저장"}
           </button>
           <button
             type="button"
@@ -1294,21 +1672,37 @@ export default function CaseFlowchartEditorScreen({
             취소
           </button>
           {/* 저장 전 변경만 다룬다 — 이 편집기에는 서버 편집 이력이 없다.
-              진행 중 표시(isUndoing/isRedoing)는 서버 요청이 없으므로 항상 false다. */}
+              🔴 진행 중 표시(isUndoing/isRedoing)가 **둘 다 false** 가 되었다
+              (2026-11-21, 조각 C2). 전에는 삭제를 되돌리려고 [이전]이 서버에 같은
+              것을 다시 만들어서 isUndoing 이 진짜로 돌았는데, 지금은 되돌리기가
+              목록을 한 칸 전으로 돌려놓을 뿐이라 서버에 닿지 않는다. */}
           <UndoRedoControls
             canUndo={canUndoStack(pendingUndoStack)}
             canRedo={canRedoStack(pendingUndoStack)}
-            isUndoing={isUndoing}
+            isUndoing={false}
             isRedoing={false}
-            onUndo={() => void handleUndo()}
+            onUndo={handleUndo}
             onRedo={handleRedo}
           />
-          {undoError && <span className="text-red-600 dark:text-red-400">{undoError}</span>}
           {globalSaveStatus === "saved" && <span className="text-emerald-700 dark:text-emerald-400">저장 완료</span>}
           {globalSaveStatus === "failed" && globalSaveError && <span className="text-red-600 dark:text-red-400">{globalSaveError}</span>}
           {hasAnyPendingChanges && globalSaveStatus === "idle" && (
             <span className="text-zinc-500 dark:text-zinc-400">변경사항 {totalPendingCount}건 저장 대기 중</span>
           )}
+        </div>
+      )}
+
+      {/* 🔴 **막는 것만으로는 부족하다.** [저장]이 꺼져 있는 까닭을 안 적으면 사람은
+          그것을 고장으로 읽는다. 글은 「무엇을 해야 하는지」로 끝난다
+          (PROCEDURE_STRUCTURAL_CONFLICT_LABELS — 그 모듈이 네 갈래의 글을 쥔다). */}
+      {canEdit && structuralConflictMessages.length > 0 && (
+        <div className="flex flex-col gap-1 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs dark:border-red-800 dark:bg-red-950">
+          <p className="font-medium text-red-800 dark:text-red-300">저장할 수 없는 변경 {structuralConflictMessages.length}건이 있어 [저장]이 막혀 있습니다.</p>
+          <ul className="flex list-disc flex-col gap-0.5 pl-4 text-red-700 dark:text-red-400">
+            {structuralConflictMessages.map((message, index) => (
+              <li key={index}>{message}</li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -1462,7 +1856,11 @@ export default function CaseFlowchartEditorScreen({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-2">
           <div className="min-h-[500px] rounded-lg border border-zinc-200 dark:border-zinc-800">
-            {nodes.length === 0 ? (
+            {/* 🔴 세는 것이 `nodes`(서버 목록)에서 **renderedNodes** 로 바뀌었다
+                (2026-11-21, 조각 C2). 첫 노드를 추가해도 저장 전에는 서버 목록이
+                0 이라, 안 바꾸면 「아직 노드가 없습니다」가 그대로 떠 있고 방금
+                만든 노드가 **아예 안 그려진다.** */}
+            {renderedNodes.length === 0 ? (
               <p className="p-6 text-sm text-zinc-500 dark:text-zinc-400">아직 노드가 없습니다. 오른쪽 패널에서 첫 노드를 추가하세요.</p>
             ) : (
               <CaseFlowchartGraph
@@ -1556,11 +1954,9 @@ export default function CaseFlowchartEditorScreen({
                   draft={nodeDraft(selectedNode.id)}
                   onDraftChange={(patch) => updateNodeDraft(selectedNode.id, patch)}
                   onPositionDraftChange={(position) => setPendingNodePosition(selectedNode.id, position)}
-                  onDelete={() => void handleDeleteNode(selectedNode.id)}
-                  isDeleting={deletingTarget === "node"}
+                  onDelete={() => handleDeleteNode(selectedNode.id)}
                   // 🔴 「그 노드의 것일 때만」 보여 준다 — 까닭은 nodeDeleteBlockedMessage 선언 옆에 적어 두었다.
                   deleteBlockedMessage={nodeDeleteBlockedMessage?.nodeId === selectedNode.id ? nodeDeleteBlockedMessage.message : null}
-                  deleteErrorMessage={nodeDeleteErrorMessage?.nodeId === selectedNode.id ? nodeDeleteErrorMessage.message : null}
                   resolveNodeDimensions={resolveNodeDimensions}
                 />
               )}
@@ -1568,16 +1964,11 @@ export default function CaseFlowchartEditorScreen({
                 <CaseFlowchartEdgePropertyPanel
                   edge={selectedEdge}
                   nodes={renderedNodes}
-                  repairCaseId={repairCaseId}
-                  flowchartId={flowchart.id}
                   canEdit={canEdit}
-                  expectedFlowchartUpdatedAt={currentUpdatedAt}
                   draft={edgeDraft(selectedEdge.id)}
                   onDraftChange={(patch) => updateEdgeDraft(selectedEdge.id, patch)}
-                  onSaved={handleSaved}
-                  onDelete={() => void handleDeleteEdge(selectedEdge.id)}
-                  isDeleting={deletingTarget === "edge"}
-                  deleteErrorMessage={edgeDeleteErrorMessage?.edgeId === selectedEdge.id ? edgeDeleteErrorMessage.message : null}
+                  onDelete={() => handleDeleteEdge(selectedEdge.id)}
+                  onQueueInsertNode={(input) => handleQueueInsertNodeOnEdge(selectedEdge.id, input)}
                   routePoints={workingRoutePoints(selectedEdge.id)}
                   selectedWaypointIndex={selectedWaypointIndex}
                   onAddWaypoint={handleAddWaypoint}
@@ -1591,28 +1982,22 @@ export default function CaseFlowchartEditorScreen({
           )}
 
           {rightPanelTab === "addNode" && canEdit && (
-            <CaseFlowchartCreateNodePanel
-              repairCaseId={repairCaseId}
-              flowchartId={flowchart.id}
-              expectedFlowchartUpdatedAt={currentUpdatedAt}
-              onSaved={handleSaved}
-              selectedNode={selectedNode}
-            />
+            <CaseFlowchartCreateNodePanel allNodes={renderedNodes} selectedNode={selectedNode} onQueueCreate={handleQueueCreateNode} />
           )}
 
-          {rightPanelTab === "createEdge" && canEdit && nodes.length > 0 && (
+          {/* 🔴 서 있는 조건이 `nodes.length > 0`(서버 목록)에서 **renderedNodes**
+              로 바뀌었다 — 빈 Flowchart 에 노드를 하나 추가했을 때, 저장 전이라
+              서버 목록은 아직 0 이라 [연결 추가] 칸이 안 선다. */}
+          {rightPanelTab === "createEdge" && canEdit && renderedNodes.length > 0 && (
             <CaseFlowchartCreateEdgePanel
-              repairCaseId={repairCaseId}
-              flowchartId={flowchart.id}
               nodes={renderedNodes}
               canEdit={canEdit}
-              expectedFlowchartUpdatedAt={currentUpdatedAt}
               prefillFromNodeId={selectedNodeId}
               isPickingTarget={isPickingEdgeTarget}
               onStartPickTarget={() => setIsPickingEdgeTarget(true)}
               onCancelPickTarget={() => setIsPickingEdgeTarget(false)}
               pickedTarget={pickedEdgeTarget}
-              onSaved={handleSaved}
+              onQueueCreate={handleQueueCreateEdge}
             />
           )}
         </div>

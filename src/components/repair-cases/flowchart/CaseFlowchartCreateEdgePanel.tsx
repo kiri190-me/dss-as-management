@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { REPAIR_CASE_FLOWCHART_BRANCH_TYPE_CODES, repairCaseFlowchartBranchTypeLabels, type RepairCaseFlowchartBranchType } from "@/lib/domain/repair-case-flowchart-types";
-import { createRepairCaseFlowchartEdgeAction } from "@/lib/server/actions/repair-case-flowchart-graph";
 import { pickDefaultTargetNodeId } from "@/lib/graph-editor-core/edge-default-target";
 import type { CaseFlowchartGraphNode } from "./CaseFlowchartGraph";
 
@@ -14,32 +13,45 @@ import type { CaseFlowchartGraphNode } from "./CaseFlowchartGraph";
  * CreateEdgePanel (built for FULL_SERVICE's reasoned-review requirement),
  * a case flowchart is a working diagnostic document, not a published
  * organizational asset, so a direct submit is appropriate.
+ *
+ * ============================================================================
+ * 🔴 2026-11-21 (조각 C2) — **이 패널도 서버를 안 부른다**
+ * ============================================================================
+ * createRepairCaseFlowchartEdgeAction 을 제 손으로 부르던 것을 걷어내고,
+ * 「무엇을 이을지」만 화면으로 올려 보낸다(onQueueCreate). 실제 호출은 [저장]이다.
+ *
+ * 🔴 **잃은 뒤처리는 없다**(옮겼거나, 일어날 수 없게 됐다):
+ *  · 「추가 중...」/`isSubmitting` — 기다릴 서버가 없다.
+ *  · 실패 사유(`errorMessage`) — 이 자리에서는 실패할 일이 없어졌다. 🔴 다만
+ *    **늦어진 거절이 하나 있다**: 같은 (시작·대상·분기 유형)으로 선을 두 번 그으면
+ *    서버가 assertNoDuplicateEdge 로 거절하는데, 전에는 [연결 추가]를 누르는 순간
+ *    이 자리에 떴고 지금은 [저장] 때 화면 위쪽 저장 실패 줄에 뜬다. 모아 두기로
+ *    바꾸면 피할 수 없는 자리고(겹침은 「지금 서버에 무엇이 있는가」를 알아야
+ *    답할 수 있다), 그래서 저장이 **통째로 멈추고** 그 선은 목록에 그대로 남는다.
+ *  · 대상 노드 비우기(`setToNodeId("")`) — **그대로 한다**(아래 handleQueue).
+ *  · `onSaved(updatedAt)` — 저장된 것이 없어 넘길 토큰이 없다.
+ *  · 자기 자신으로 가는 선 막기 · CUSTOM 라벨 필수(`canSubmit`) — **그대로 둔다.**
  */
 export default function CaseFlowchartCreateEdgePanel({
-  repairCaseId,
-  flowchartId,
   nodes,
   canEdit,
-  expectedFlowchartUpdatedAt,
   prefillFromNodeId,
   isPickingTarget = false,
   onStartPickTarget,
   onCancelPickTarget,
   pickedTarget = null,
-  onSaved,
+  onQueueCreate,
 }: {
-  repairCaseId: string;
-  flowchartId: string;
   nodes: CaseFlowchartGraphNode[];
   canEdit: boolean;
-  expectedFlowchartUpdatedAt: string;
   prefillFromNodeId?: string | null;
   /** "화면에서 선택" — CreateEdgePanel과 같은 규칙이다(모드는 화면이 소유하고, 캔버스 클릭 결과만 seq와 함께 내려온다). */
   isPickingTarget?: boolean;
   onStartPickTarget?: () => void;
   onCancelPickTarget?: () => void;
   pickedTarget?: { nodeId: string; seq: number } | null;
-  onSaved: (newUpdatedAt: string) => void;
+  /** 🔴 [저장] 때 보낼 「연결선 추가」 한 줄을 화면의 모아 두는 통로에 쌓는다. */
+  onQueueCreate: (input: { fromNodeId: string; toNodeId: string; branchType: RepairCaseFlowchartBranchType; branchLabel: string | null }) => void;
 }) {
   // Adjust-state-during-render (same convention as
   // CaseFlowchartEditorScreen's own currentUpdatedAt/prevFlowchartUpdatedAt
@@ -56,8 +68,6 @@ export default function CaseFlowchartCreateEdgePanel({
   const [toNodeId, setToNodeId] = useState(() => pickDefaultTargetNodeId(nodes, initialFromNodeId));
   const [branchType, setBranchType] = useState<RepairCaseFlowchartBranchType>("DEFAULT");
   const [branchLabel, setBranchLabel] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [prevMostRecentNodeId, setPrevMostRecentNodeId] = useState(mostRecentNodeId);
   const [prevPickedSeq, setPrevPickedSeq] = useState(pickedTarget?.seq ?? 0);
   if (pickedTarget && pickedTarget.seq !== prevPickedSeq) {
@@ -71,7 +81,6 @@ export default function CaseFlowchartCreateEdgePanel({
     setToNodeId(pickDefaultTargetNodeId(nodes, nextFromNodeId));
     setBranchType("DEFAULT");
     setBranchLabel("");
-    setErrorMessage(null);
   } else if (mostRecentNodeId !== prevMostRecentNodeId) {
     // 노드를 새로 추가하면 대상 노드만 그 노드로 다시 맞춘다(작성 중이던
     // 분기 유형/라벨은 그대로 둔다) — CreateEdgePanel과 같은 규칙.
@@ -83,25 +92,11 @@ export default function CaseFlowchartCreateEdgePanel({
   const isSelfEdge = fromNodeId.length > 0 && fromNodeId === toNodeId;
   const canSubmit = fromNodeId.length > 0 && toNodeId.length > 0 && !isSelfEdge && !labelRequired;
 
-  async function handleCreate() {
-    setIsSubmitting(true);
-    setErrorMessage(null);
-    const result = await createRepairCaseFlowchartEdgeAction({
-      repairCaseId,
-      flowchartId,
-      fromNodeId,
-      toNodeId,
-      branchType,
-      branchLabel: branchLabel.trim() || null,
-      expectedFlowchartUpdatedAt,
-    });
-    setIsSubmitting(false);
-    if (!result.ok) {
-      setErrorMessage(result.message);
-      return;
-    }
+  function handleQueue() {
+    onQueueCreate({ fromNodeId, toNodeId, branchType, branchLabel: branchLabel.trim() || null });
+    // 같은 시작 노드에서 선을 잇달아 긋는 칸이라 **대상만** 비운다 — 서버를 부르던
+    // 시절의 뒤처리 그대로다(시작 노드·분기 유형·라벨은 남는다).
     setToNodeId("");
-    onSaved(result.updatedAt);
   }
 
   if (!canEdit) return null;
@@ -174,13 +169,12 @@ export default function CaseFlowchartCreateEdgePanel({
       {isSelfEdge && <p className="text-red-600 dark:text-red-400">자기 자신으로의 분기는 지원하지 않습니다.</p>}
       <button
         type="button"
-        disabled={!canSubmit || isSubmitting}
-        onClick={() => void handleCreate()}
+        disabled={!canSubmit}
+        onClick={handleQueue}
         className="self-start rounded-md bg-emerald-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
       >
-        {isSubmitting ? "추가 중..." : "연결 추가"}
+        연결 추가
       </button>
-      {errorMessage && <p className="text-red-600 dark:text-red-400">{errorMessage}</p>}
     </div>
   );
 }

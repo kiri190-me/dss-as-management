@@ -106,12 +106,20 @@ const planModule = stripComments(read(PATHS.plan));
 
 /** 화면의 keydown 한 자리. 아래 여러 절이 **이 몸통 안에서만** 센다. */
 const keyHandler = flat(functionBody(screen, "function handleKeyDown(e: KeyboardEvent)"));
-/** 서버로 보내는 자리 둘 — ④절이 「뒤처리를 하나도 안 잃었는가」를 여기서 센다. */
-const deleteNodeFn = flat(functionBody(screen, "async function handleDeleteNode(nodeId: string)"));
-const deleteEdgeFn = flat(functionBody(screen, "async function handleDeleteEdge(edgeId: string)"));
-/** 지워진 **뒤**의 뒤처리 둘. */
-const nodeDeletedFn = flat(functionBody(screen, "function handleNodeDeleted(nodeId: string, newUpdatedAt: string)"));
-const edgeDeletedFn = flat(functionBody(screen, "function handleEdgeDeleted(edgeId: string, newUpdatedAt: string)"));
+/**
+ * 지우기를 받는 자리 둘 — ④절이 「뒤처리를 하나도 안 잃었는가」를 여기서 센다.
+ *
+ * 🔴 2026-11-21(조각 C2)에 **async 가 떨어졌다.** 지우기가 [저장] 쪽으로 옮겨가면서
+ * 이 둘은 더 이상 서버를 안 부르고, 지워진 **뒤**의 뒤처리를 맡던 handleNodeDeleted /
+ * handleEdgeDeleted 는 통째로 이 안으로 들어왔다(기다릴 것이 없어 둘로 나눌 까닭이
+ * 사라졌다). 그 뒤처리 하나하나를 ④절이 여기서 다시 센다.
+ */
+const deleteNodeFn = flat(functionBody(screen, "function handleDeleteNode(nodeId: string)"));
+const deleteEdgeFn = flat(functionBody(screen, "function handleDeleteEdge(edgeId: string)"));
+/** 구조 변경을 모아 두는 **단 하나의 통로**. ④절이 「지우기가 이것을 정확히 한 번 지나는가」를 센다. */
+const queueFn = flat(functionBody(screen, "function queueStructural("));
+/** 모아 둔 조작 한 건을 실제로 서버로 보내는 자리 — 지우기의 서버 호출이 **여기로 옮겨 왔다.** */
+const executeStructuralFn = flat(functionBody(screen, "async function executeStructuralOperation("));
 
 describe("[진단] [Delete] 로 지우기 — ① 먼저 표본 확인", () => {
   test("🔵 파일 다섯이 읽혔고, 재려는 손잡이가 실제로 거기 있다", () => {
@@ -125,7 +133,7 @@ describe("[진단] [Delete] 로 지우기 — ① 먼저 표본 확인", () => {
   });
 
   test("🔵 떼어 낸 몸통 다섯이 **비어 있지 않다** — 비면 아래 절들이 빈 글자를 뒤진다", () => {
-    for (const [name, body] of Object.entries({ keyHandler, deleteNodeFn, deleteEdgeFn, nodeDeletedFn, edgeDeletedFn })) {
+    for (const [name, body] of Object.entries({ keyHandler, deleteNodeFn, deleteEdgeFn, queueFn, executeStructuralFn })) {
       assert.ok(body.length > 150, `${name} 몸통을 못 떼어 냈다 (길이 ${body.length})`);
     }
   });
@@ -202,18 +210,33 @@ describe("[진단] [Delete] 로 지우기 — ④🔴 지우는 길은 **단추�
   test("🔴 패널이 더 이상 서버 액션을 **제 손으로 안 부른다**", () => {
     assert.ok(!nodePanel.includes("deleteRepairCaseFlowchartNodeAction"), "노드 패널이 아직 제 손으로 지우고 있다");
     assert.ok(!edgePanel.includes("deleteRepairCaseFlowchartEdgeAction"), "연결선 패널이 아직 제 손으로 지우고 있다");
-    // 🔵 다른 일은 그대로 패널에 남아 있다는 근거 — 통째로 비워 버린 것이 아니다.
-    assert.ok(edgePanel.includes("insertRepairCaseFlowchartNodeOnEdgeAction("), "경로점 자리에 노드 삽입은 그대로 패널의 일이다");
+    // 🔴 2026-11-21(조각 C2) — **삽입도 패널을 떠났다.** 전에는 이 자리가
+    //    「다른 일은 그대로 패널에 남아 있다」는 근거였는데, 그날 구조 변경 다섯이
+    //    모두 [저장] 쪽으로 옮겨가면서 패널에 남은 서버 호출이 **하나도 없다.**
+    assert.ok(!edgePanel.includes("insertRepairCaseFlowchartNodeOnEdgeAction"), "연결선 패널이 아직 제 손으로 노드를 끼우고 있다");
+    assert.ok(!edgePanel.includes("Action("), "연결선 패널에 서버 액션 호출이 남아 있다");
+    assert.ok(!nodePanel.includes("Action("), "노드 패널에 서버 액션 호출이 남아 있다");
+    // 🔵 통째로 비워 버린 것이 아니라는 근거 — 끼우기는 **올려 보내는 일**로 남아 있고,
+    //    서버를 부르던 시절의 울타리 둘(고른 경로점이 없다 · 그 자리에 점이 없다)도 그대로다.
+    assert.ok(edgePanel.includes("onQueueInsertNode({ nodeType: insertNodeType, title: insertNodeTitle, position: point });"), "끼우기를 올려 보내는 줄");
+    assert.ok(edgePanel.includes("if (selectedWaypointIndex === null || !routePoints) return;"), "끼우기의 울타리 ①");
+    assert.ok(edgePanel.includes("if (!point) return;"), "끼우기의 울타리 ②");
   });
 
   test("🔴 화면에 부르는 자리가 **각각 하나뿐**이다", () => {
     assert.equal(countOf(f, "await deleteRepairCaseFlowchartNodeAction({"), 1);
     assert.equal(countOf(f, "await deleteRepairCaseFlowchartEdgeAction({"), 1);
+    // 🔴 그 하나가 **구조 보내기 안**이라는 근거(2026-11-21, 조각 C2) — 지우기는
+    //    이제 [저장]이 부른다. 여기가 어긋나면 「지우는 길이 둘」이 다시 생긴 것이다.
+    assert.ok(executeStructuralFn.includes("await deleteRepairCaseFlowchartNodeAction({"), "노드 지우기가 구조 보내기 밖에서 불린다");
+    assert.ok(executeStructuralFn.includes("await deleteRepairCaseFlowchartEdgeAction({"), "연결선 지우기가 구조 보내기 밖에서 불린다");
+    assert.ok(!deleteNodeFn.includes("Action("), "handleDeleteNode 가 아직 서버를 직접 부른다");
+    assert.ok(!deleteEdgeFn.includes("Action("), "handleDeleteEdge 가 아직 서버를 직접 부른다");
   });
 
   test("🔴 단추와 키가 **같은 함수 둘**을 부른다", () => {
-    assert.ok(f.includes("onDelete={() => void handleDeleteNode(selectedNode.id)}"), "노드 패널의 단추");
-    assert.ok(f.includes("onDelete={() => void handleDeleteEdge(selectedEdge.id)}"), "연결선 패널의 단추");
+    assert.ok(f.includes("onDelete={() => handleDeleteNode(selectedNode.id)}"), "노드 패널의 단추");
+    assert.ok(f.includes("onDelete={() => handleDeleteEdge(selectedEdge.id)}"), "연결선 패널의 단추");
     assert.ok(
       f.includes("const deleteByKeyRef = useRef({ node: handleDeleteNode, edge: handleDeleteEdge, removeSelectedWaypoint: handleRemoveSelectedWaypoint });"),
       "키가 부르는 셋이 단추와 같은 함수여야 한다"
@@ -223,50 +246,101 @@ describe("[진단] [Delete] 로 지우기 — ④🔴 지우는 길은 **단추�
     assert.ok(!keyHandler.includes("Action("), "키가 서버 액션을 직접 부르고 있다");
   });
 
-  test("🔴 뒤처리를 하나도 안 잃었다 ① — 「연결된 분기가 N개」 거절 글이 그대로다", () => {
-    assert.ok(deleteNodeFn.includes('if ("blockingEdgeCount" in result)'), "서버의 그 거절을 갈라 보는 줄");
+  test("🔴 뒤처리를 하나도 안 잃었다 ① — 「연결된 분기가 N개」 거절 글이 **글자 그대로** 남아 있다", () => {
+    // 🔴 2026-11-21(조각 C2) — **세는 쪽이 서버에서 화면으로 옮겨 왔다.** 지우기가
+    //    모아 두는 일이 되면서 서버의 거절(NODE_HAS_CONNECTED_EDGES)이 [저장] 때로
+    //    밀렸는데, 그러면 ① 사람은 지워진 줄 알고 계속 그리다가 ② [저장]이 그 한 줄
+    //    때문에 통째로 멈춘다. 그래서 화면이 미리 센다. 🔵 **막는다는 사실도, 띄우는
+    //    글자도 하나도 안 바뀐다** — 그것이 이 단언이 지키는 것이다(C3 전까지 연결선이
+    //    붙은 노드는 여전히 못 지운다).
+    assert.ok(deleteNodeFn.includes("const attachedEdgeIds = findEdgesAttachedToNode(structuralPreview.edges, nodeId);"), "붙은 선을 세는 줄");
+    assert.ok(deleteNodeFn.includes("if (attachedEdgeIds.length > 0) {"), "하나라도 붙어 있으면 막는 줄");
     assert.ok(
-      deleteNodeFn.includes("이 노드에 연결된 분기가 ${result.blockingEdgeCount}개 있어 삭제할 수 없습니다. 먼저 연결된 분기를 삭제해 주세요."),
-      "막힌 까닭의 글자가 바뀌었다 — 이번 조각은 이 동작을 한 글자도 안 바꾼다"
+      deleteNodeFn.includes("이 노드에 연결된 분기가 ${attachedEdgeIds.length}개 있어 삭제할 수 없습니다. 먼저 연결된 분기를 삭제해 주세요."),
+      "막힌 까닭의 글자가 바뀌었다 — 이번 조각은 이 **글**을 한 글자도 안 바꾼다"
     );
+    // 🔴 막은 뒤에 **쌓지 않고 돌아간다**는 근거. 돌아가지 않으면 못 지운다고 말해
+    //    놓고 목록에는 지우기가 들어가, [저장]에서 서버가 거절해 저장이 통째로 멈춘다.
+    const blockedAt = deleteNodeFn.indexOf("if (attachedEdgeIds.length > 0) {");
+    const queueAt = deleteNodeFn.indexOf("queueStructural(");
+    assert.ok(blockedAt !== -1 && queueAt !== -1 && blockedAt < queueAt, "막는 관문이 쌓기보다 뒤에 있다");
+    assert.ok(deleteNodeFn.slice(blockedAt, queueAt).includes("return;"), "막은 뒤에 돌아가지 않는다");
+    // 🔴 세는 목록이 **그림에 그려진 것**이라는 근거. `nodes`/`edges`(서버 목록)로 세면
+    //    저장 전에 그은 선을 빠뜨리고, 저장 전에 지운 선을 두 번 센다.
+    assert.ok(!deleteNodeFn.includes("findEdgesAttachedToNode(edges,"), "서버 목록으로 세고 있다");
     assert.ok(nodePanel.includes("{deleteBlockedMessage && <p"), "그 글이 삭제 단추 위에 그대로 뜬다");
   });
 
-  test("🔴 뒤처리를 하나도 안 잃었다 ② — 실패 사유 · 「삭제 중...」 이 그대로다", () => {
-    assert.ok(deleteNodeFn.includes("setNodeDeleteErrorMessage({ nodeId, message: result.message });"));
-    assert.ok(deleteEdgeFn.includes("setEdgeDeleteErrorMessage({ edgeId, message: result.message });"));
-    assert.ok(nodePanel.includes("{deleteErrorMessage && <p"), "노드 패널의 실패 사유 자리");
-    assert.ok(edgePanel.includes("{deleteErrorMessage && <p"), "연결선 패널의 실패 사유 자리");
-    assert.ok(nodePanel.includes('{isDeleting ? "삭제 중..." : "노드 삭제"}'));
-    assert.ok(edgePanel.includes('{isDeleting ? "삭제 중..." : "분기 삭제"}'));
-    assert.ok(nodePanel.includes("disabled={isDeleting}") && edgePanel.includes("disabled={isDeleting}"));
-  });
-
-  test("🔴 뒤처리를 하나도 안 잃었다 ③ — 되돌리기 단계 · 저장 전 수정 치우기 · 선택 풀기 · 새로고침", () => {
-    assert.ok(deleteNodeFn.includes("handleNodeDeleted(nodeId, result.updatedAt);"), "성공했을 때만 뒤처리로 간다");
-    assert.ok(deleteEdgeFn.includes("handleEdgeDeleted(edgeId, result.updatedAt);"));
-    for (const [name, body, undo, selection] of [
-      ["노드", nodeDeletedFn, "pushNodeDeletionUndoStep({", "setSelectedNodeId(null);"],
-      ["연결선", edgeDeletedFn, "pushEdgeDeletionUndoStep({", "setSelectedEdgeId(null);"],
+  test("🔴 뒤처리를 하나도 안 잃었다 ② — 「삭제 중...」·실패 사유는 **일어날 수 없게 되어** 없앴다", () => {
+    // 🔴 지우기가 서버를 안 부르므로 기다릴 것도, 그 자리에서 날 실패도 없다. 값이
+    //    늘 false/null 인 칸을 남겨 두면 「꺼도 아무 일 없는 스위치」가 된다.
+    for (const [name, panel] of [
+      ["노드", nodePanel],
+      ["연결선", edgePanel],
     ] as const) {
-      assert.ok(body.includes(undo), `${name} 삭제의 되돌리기 단계가 사라졌다 — [이전]으로 되살릴 수 없게 된다`);
-      assert.ok(body.includes(selection), `${name} 삭제 뒤 선택을 푸는 줄이 사라졌다`);
-      assert.ok(body.includes("handleSaved(newUpdatedAt);"), `${name} 삭제 뒤 서버 상태 따라잡기가 사라졌다`);
+      assert.ok(!panel.includes("isDeleting"), `${name} 패널에 「삭제 중」 칸이 남아 있다`);
+      assert.ok(!panel.includes("deleteErrorMessage"), `${name} 패널에 삭제 실패 칸이 남아 있다`);
     }
-    assert.ok(nodeDeletedFn.includes("setPendingNodeDraftsById(") && nodeDeletedFn.includes("setPendingNodePositionsById("));
-    assert.ok(edgeDeletedFn.includes("setPendingEdgeDraftsById(") && edgeDeletedFn.includes("setPendingRoutePointsByEdgeId("));
-    assert.ok(edgeDeletedFn.includes("setSelectedWaypointIndex(null);"), "연결선이 사라지면 그 위의 경로점 선택도 풀려야 한다");
+    assert.ok(!screen.includes("isDeleteInFlightRef"), "화면에 자동 반복 빗장이 남아 있다 — 기다릴 서버가 없어 영영 안 풀린다");
+    assert.ok(!screen.includes("setNodeDeleteErrorMessage") && !screen.includes("setEdgeDeleteErrorMessage"), "화면에 삭제 실패 칸이 남아 있다");
+    // 🔵 **단추 글자는 그대로**다 — 없앤 것은 「삭제 중...」으로 바뀌던 갈래뿐이다.
+    // 🔵 `flat` 이 공백을 하나로 접으므로 여는 꺾쇠와 글자 사이에 한 칸이 남는다.
+    assert.ok(nodePanel.includes("> 노드 삭제 </button>"));
+    assert.ok(edgePanel.includes("> 분기 삭제 </button>"));
+    // 🔴 실패를 말하는 자리가 **사라진 것이 아니라 옮겨 간** 근거 — 서버가 거절하면
+    //    [저장]의 빨간 글로 뜬다. 이 줄이 없으면 거절이 어디에도 안 보인다.
+    assert.ok(f.includes("{globalSaveStatus === \"failed\" && globalSaveError && <span"), "저장 실패를 띄우는 자리가 사라졌다");
+    assert.ok(flat(functionBody(screen, "async function handleGlobalSave()")).includes("setGlobalSaveError(outcome.failureMessage);"));
   });
 
-  test("🔴 지우는 중에 **또 부르지 못한다** — 키에는 막아 줄 단추가 없다", () => {
+  test("🔴 뒤처리를 하나도 안 잃었다 ③ — 되돌리기 한 칸 · 저장 전 수정 치우기 · 선택 풀기", () => {
+    // 🔴 되돌리기 한 칸은 이제 queueStructural 이 **목록을 고치기 전에** 찍는다.
+    //    뒤에 찍으면 이미 바뀐 목록이 담겨 [이전]이 한 칸씩 밀린다.
+    const push = queueFn.indexOf("pushPendingUndoStep();");
+    const append = queueFn.indexOf("appendPendingStructuralOperations(");
+    assert.ok(push !== -1, "되돌리기 한 칸을 찍는 줄이 사라졌다 — [이전]으로 되살릴 수 없게 된다");
+    assert.ok(append !== -1 && push < append, "되돌리기 한 칸이 목록을 고친 **뒤**에 찍힌다");
+
+    for (const [name, body, kind, selection] of [
+      ["노드", deleteNodeFn, '{ kind: "DELETE_NODE", nodeId, reason: null }', "setSelectedNodeId(null);"],
+      ["연결선", deleteEdgeFn, '{ kind: "DELETE_EDGE", edgeId, reason: null }', "setSelectedEdgeId(null);"],
+    ] as const) {
+      assert.ok(body.includes(`queueStructural(() => [${kind}]);`), `${name} 삭제가 쌓는 줄이 바뀌었다`);
+      assert.ok(body.includes(selection), `${name} 삭제 뒤 선택을 푸는 줄이 사라졌다`);
+      // 🔴 **한 번만** 지난다 — 두 번 지나면 [이전]을 두 번 눌러야 한 걸음이 되돌아간다.
+      assert.equal(countOf(body, "queueStructural("), 1, `${name} 삭제 한 번에 통로를 여러 번 지난다`);
+    }
+    // 🔴 지워질 것의 저장 전 수정을 함께 버린다 — 안 버리면 같은 저장에서 없는 행에
+    //    칸 값을 쓰려 들어 **저장 전체가 실패한다**.
+    assert.ok(deleteNodeFn.includes("setPendingNodeDraftsById((prev) => dropKeys(prev, [nodeId]));"));
+    assert.ok(deleteNodeFn.includes("setPendingNodePositionsById((prev) => dropKeys(prev, [nodeId]));"));
+    assert.ok(deleteEdgeFn.includes("setPendingEdgeDraftsById((prev) => dropKeys(prev, [edgeId]));"));
+    assert.ok(deleteEdgeFn.includes("setPendingRoutePointsByEdgeId((prev) => dropKeys(prev, [edgeId]));"));
+    assert.ok(deleteEdgeFn.includes("setSelectedWaypointIndex(null);"), "연결선이 사라지면 그 위의 경로점 선택도 풀려야 한다");
+  });
+
+  test("🔴 되돌리기 서명에 **구조 목록이 섞여 있다** — 안 섞으면 삭제 한 칸이 조용히 사라진다", () => {
+    // 🔴 노드를 하나 지웠을 뿐이면 저장 전 지도 넷은 **완전히 똑같다.** 그러면
+    //    pushUndoStep 이 「직전과 같은 상태」로 보고 안 쌓고, undoStep 은 「헛도는
+    //    단계」로 보고 건너뛴다 — 오류도 경고도 없이 [이전]이 한 칸을 건너뛴다.
+    assert.ok(f.includes("procedureStructuralOperationsSignature(snapshot.structuralOperations),"), "서명에 구조 목록이 안 섞여 있다");
+    assert.ok(f.includes("structuralOperations: pendingStructuralOperations,"), "스냅샷에 구조 목록이 안 실린다");
+    // 🔵 서명이 지도 넷도 **그대로** 센다는 근거 — 구조만 세도록 바뀌면 글자 편집
+    //    되돌리기가 통째로 사라진다.
+    for (const field of ["dump(snapshot.nodeDrafts)", "dump(snapshot.nodePositions)", "dump(snapshot.edgeDrafts)", "dump(snapshot.routePoints)"]) {
+      assert.ok(f.includes(field), `서명에서 ${field} 가 빠졌다`);
+    }
+  });
+
+  test("🔴 지우기에 **권한 울타리**가 그대로 있다", () => {
     for (const [name, body] of [
       ["노드", deleteNodeFn],
       ["연결선", deleteEdgeFn],
     ] as const) {
-      assert.ok(body.includes("if (isDeleteInFlightRef.current) return;"), `${name} 쪽에 자동 반복 울타리가 없다`);
-      assert.ok(body.includes("isDeleteInFlightRef.current = true;"));
       assert.ok(body.includes("if (!canEdit) return;"), `${name} 쪽에 권한 울타리가 없다`);
     }
+    // 🔵 통로 자체도 한 번 더 막는다 — 읽기 전용인데 목록에 줄이 쌓이면 [저장]이 켜진다.
+    assert.ok(queueFn.includes("if (!canEdit) return [];"), "모아 두는 통로에 권한 울타리가 없다");
   });
 
   test("🔴 경로점은 **쓰던 통로 그대로** 지운다 — 새로 베껴 적지 않는다", () => {
@@ -283,7 +357,7 @@ describe("[진단] [Delete] 로 지우기 — ④🔴 지우는 길은 **단추�
     );
   });
 
-  test("🔵 확인 창을 안 띄운다 — 지금 삭제 **단추**도 안 띄운다([이전]이 서버에 다시 만든다)", () => {
+  test("🔵 확인 창을 안 띄운다 — 지금 삭제 **단추**도 안 띄운다([이전]이 목록에서 그 줄을 뺀다)", () => {
     assert.ok(!keyHandler.includes("confirm("), "키에 확인 창이 생겼다 — 단추와 다르게 굴면 안 된다");
     assert.ok(!deleteNodeFn.includes("confirm(") && !deleteEdgeFn.includes("confirm("), "단추 쪽에 확인 창이 생겼다면 이 시험의 전제가 바뀐 것이다");
   });
@@ -360,7 +434,7 @@ describe("[진단] [Delete] 로 지우기 — ⑥🔴 **상시 안내를 세우�
 });
 
 describe("[진단] [Delete] 로 지우기 — ⑦🔴 절차에 있고 **진단에 없는 개념 셋**", () => {
-  test("🔴 미리 막는 까닭은 **null** 이다 — 진단 노드 행에는 그 칸이 아예 없다", () => {
+  test("🔴 미리 막는 까닭은 **null** 이다 — 키가 판정을 두 벌로 만들지 않는다", () => {
     assert.ok(keyHandler.includes("nodeDeleteBlockedReason: null,"));
     // 🔴 「그 자리가 있긴 한가」를 함께 센다 — 이름이 바뀌면 위 단언이 조용히
     //    「없는 칸에 null 을 넘기는」 글자가 되어 영영 통과한다.
@@ -368,8 +442,12 @@ describe("[진단] [Delete] 로 지우기 — ⑦🔴 절차에 있고 **진단�
     // 🔴 절차 쪽의 셈 함수를 끌어다 쓰지 않았다는 근거. 진단 노드에는 체크리스트·
     //    고장 진단표 칸이 없어 그 함수는 컴파일도 안 된다.
     assert.ok(!screen.includes("resolveProcedureNodeDeleteBlockedReason"), "진단 화면이 절차의 셈 함수를 부르고 있다");
-    // 🔴 그리고 그 「막힘」은 **서버만 안다**는 것이 이 null 의 근거다.
-    assert.ok(deleteNodeFn.includes('"blockingEdgeCount" in result'), "막힘을 서버 응답에서 받는다는 근거가 사라졌다");
+    // 🔴 2026-11-21(조각 C2) — 진단에서 막히는 경우(연결선이 붙은 노드)는 이제
+    //    **화면이 미리 안다.** 그래도 이 칸이 null 인 까닭은 「셀 수 없어서」가 아니라
+    //    **「키가 미리 막으면 패널에 까닭이 안 뜨어서」**다 — 키도 handleDeleteNode
+    //    까지 흘려보내야 단추로 누를 때와 글자 하나까지 같은 결과가 난다.
+    assert.ok(!keyHandler.includes("findEdgesAttachedToNode"), "키가 붙은 선을 제 손으로 다시 세고 있다 — 판정이 두 벌이 된다");
+    assert.ok(deleteNodeFn.includes("setNodeDeleteBlockedMessage({ nodeId,"), "막힌 까닭을 띄우는 쪽이 handleDeleteNode 여야 한다");
   });
 
   test("🔴 [범위 선택]은 진단에 아직 없다 — false / [] 를 넘겨 그 가지를 안 세운다", () => {

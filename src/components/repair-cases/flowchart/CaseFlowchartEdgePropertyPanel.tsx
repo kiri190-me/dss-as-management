@@ -9,7 +9,6 @@ import {
   type RepairCaseFlowchartBranchType,
   type RepairCaseFlowchartNodeType,
 } from "@/lib/domain/repair-case-flowchart-types";
-import { insertRepairCaseFlowchartNodeOnEdgeAction } from "@/lib/server/actions/repair-case-flowchart-graph";
 import { routePointsEqual, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import type { CaseFlowchartGraphNode, CaseFlowchartGraphEdge } from "./CaseFlowchartGraph";
 
@@ -31,31 +30,42 @@ export type CaseFlowchartEdgeDraft = { branchType: RepairCaseFlowchartBranchType
  *
  * Waypoint add/move/remove/reset still only ever mutate the screen's
  * client-only pending route state via the passed callbacks — unchanged.
- * Delete and node-on-edge insertion remain their own immediate, dedicated
- * actions (destructive / structural-creation, not a "draft").
+ * 🔴 Delete 와 node-on-edge insertion 도 2026-11-21(조각 C2)부터 [저장]을 눌러야
+ * 나간다 — 아래 「노드 끼우기도 서버를 안 부른다」 절 참고.
  *
  * 🔴 2026-11-21 — **지우는 일 자체는 이 패널을 떠났다.** 전에는 여기서
  * deleteRepairCaseFlowchartEdgeAction 을 직접 부르고 「삭제 중 · 실패한 까닭」도
  * 제 state 로 쥐고 있었다. 같은 날 [Delete] 키가 붙으면서 **부르는 자리가 둘이
  * 될 뻔해서**, 호출도 뒤처리도 전부 CaseFlowchartEditorScreen 의
  * handleDeleteEdge 한 자리로 올렸다(그 함수 옆의 주석에 까닭 전문이 있다).
- * 🔵 노드 삽입(handleInsertNodeAtWaypoint)은 그대로 여기 남는다 — 키가 부르는
- * 일이 아니라 통로가 둘이 될 까닭이 없고, 이 패널의 `errorMessage` 도 이제
- * 그것 하나만 쓴다.
+ *
+ * ============================================================================
+ * 🔴 2026-11-21 (조각 C2) — **노드 끼우기도 서버를 안 부른다**
+ * ============================================================================
+ * insertRepairCaseFlowchartNodeOnEdgeAction 을 제 손으로 부르던 마지막 자리가
+ * 여기였다. 지금은 「어디에 무엇을 끼울지」만 화면으로 올려 보낸다
+ * (onQueueInsertNode). 실제 호출은 [저장]이 한다.
+ *
+ * 🔴 **잃은 뒤처리는 없다**(옮겼거나, 일어날 수 없게 됐다):
+ *  · 「추가 중...」/`isInsertingNode` · [취소] 흐리기 — 기다릴 서버가 없다.
+ *  · 실패 사유(`errorMessage`) — 이 자리에서는 실패할 일이 없어졌다. 서버가
+ *    거절하면 [저장] 때 화면 위쪽 저장 실패 줄에 뜬다.
+ *  · 폼 접기 · 제목 비우기 — **그대로 한다**(아래 handleQueueInsertNode).
+ *  · 경로점을 안 골랐거나 그 자리가 없으면 아무 일도 안 하는 울타리 — **그대로 둔다.**
+ *
+ * 🔴 삭제 쪽 `isDeleting` · `deleteErrorMessage` 도 **없앴다.** 지우기도 모아 두는
+ * 일이 되어 기다릴 서버도, 그 자리에서 날 실패도 없다 — 값이 늘 false/null 인 칸을
+ * 남겨 두면 「꺼도 아무 일 없는 스위치」가 된다. 🔵 **막힌 까닭**(deleteBlockedMessage)은
+ * 노드 패널 쪽에 그대로 산다 — 그것은 화면이 그림을 세어 지금 답하는 값이다.
  */
 export default function CaseFlowchartEdgePropertyPanel({
   edge,
   nodes,
-  repairCaseId,
-  flowchartId,
   canEdit,
-  expectedFlowchartUpdatedAt,
   draft,
   onDraftChange,
-  onSaved,
   onDelete,
-  isDeleting,
-  deleteErrorMessage,
+  onQueueInsertNode,
   routePoints,
   selectedWaypointIndex,
   onAddWaypoint,
@@ -65,19 +75,13 @@ export default function CaseFlowchartEdgePropertyPanel({
 }: {
   edge: CaseFlowchartGraphEdge;
   nodes: CaseFlowchartGraphNode[];
-  repairCaseId: string;
-  flowchartId: string;
   canEdit: boolean;
-  expectedFlowchartUpdatedAt: string;
   draft: CaseFlowchartEdgeDraft;
   onDraftChange: (patch: Partial<CaseFlowchartEdgeDraft>) => void;
-  onSaved: (newUpdatedAt: string) => void;
   /** 🔴 [분기 삭제] 를 누른 것뿐 — 실제로 지우는 것도 그 뒤처리도 화면(handleDeleteEdge)이 한다. [Delete] 키가 부르는 함수와 **같은 하나**다. */
   onDelete: () => void;
-  /** 지우는 중인가 — 화면이 쥔 값. 단추를 흐리게 하고 「삭제 중...」으로 바꾼다. */
-  isDeleting: boolean;
-  /** 삭제 실패 사유(없으면 null). 패널 맨 아래에 뜬다 — 올리기 전 이 패널의 errorMessage 가 서던 그 자리다. */
-  deleteErrorMessage: string | null;
+  /** 🔴 [저장] 때 보낼 「연결선 위 노드 끼우기」 한 줄을 화면의 모아 두는 통로에 쌓는다. */
+  onQueueInsertNode: (input: { nodeType: RepairCaseFlowchartNodeType; title: string; position: RoutePoint }) => void;
   routePoints: RoutePoint[] | null;
   selectedWaypointIndex: number | null;
   onAddWaypoint: () => void;
@@ -87,39 +91,22 @@ export default function CaseFlowchartEdgePropertyPanel({
   onStraighten: () => void;
 }) {
   const nodesById = new Map(nodes.map((n) => [n.id, n]));
-  /** 🔵 이제 **노드 삽입 전용**이다 — 삭제 쪽 실패 사유는 화면이 쥐고 deleteErrorMessage 로 내려온다. */
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [showInsertNodeForm, setShowInsertNodeForm] = useState(false);
   const [insertNodeType, setInsertNodeType] = useState<RepairCaseFlowchartNodeType>("TASK");
   const [insertNodeTitle, setInsertNodeTitle] = useState("");
-  const [isInsertingNode, setIsInsertingNode] = useState(false);
 
   const labelRequired = draft.branchType === "CUSTOM" && draft.branchLabel.trim().length === 0;
 
-  async function handleInsertNodeAtWaypoint() {
+  function handleQueueInsertNode() {
+    // 🔵 **고른 경로점이 끼울 자리 그 자체**다 — 울타리 둘(고른 것이 없다 · 그 자리에
+    //    점이 없다)은 서버를 부르던 시절 그대로다. 자리가 없으면 끼울 곳이 없다.
     if (selectedWaypointIndex === null || !routePoints) return;
     const point = routePoints[selectedWaypointIndex];
     if (!point) return;
-    setIsInsertingNode(true);
-    setErrorMessage(null);
-    const result = await insertRepairCaseFlowchartNodeOnEdgeAction({
-      repairCaseId,
-      flowchartId,
-      edgeId: edge.id,
-      nodeType: insertNodeType,
-      title: insertNodeTitle,
-      position: point,
-      expectedFlowchartUpdatedAt,
-    });
-    setIsInsertingNode(false);
-    if (!result.ok) {
-      setErrorMessage(result.message);
-      return;
-    }
+    onQueueInsertNode({ nodeType: insertNodeType, title: insertNodeTitle, position: point });
     setShowInsertNodeForm(false);
     setInsertNodeTitle("");
-    onSaved(result.updatedAt);
   }
 
   return (
@@ -239,13 +226,13 @@ export default function CaseFlowchartEdgePropertyPanel({
             <div className="flex gap-2">
               <button
                 type="button"
-                disabled={insertNodeTitle.trim().length === 0 || isInsertingNode}
-                onClick={() => void handleInsertNodeAtWaypoint()}
+                disabled={insertNodeTitle.trim().length === 0}
+                onClick={handleQueueInsertNode}
                 className="self-start rounded-md bg-blue-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50"
               >
-                {isInsertingNode ? "추가 중..." : "노드 삽입"}
+                노드 삽입
               </button>
-              <button type="button" onClick={() => setShowInsertNodeForm(false)} disabled={isInsertingNode} className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
+              <button type="button" onClick={() => setShowInsertNodeForm(false)} className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300">
                 취소
               </button>
             </div>
@@ -270,7 +257,6 @@ export default function CaseFlowchartEdgePropertyPanel({
           <h4 className="text-xs font-semibold text-red-900 dark:text-red-300">분기 삭제</h4>
           <button
             type="button"
-            disabled={isDeleting}
             onClick={onDelete}
             /* 🔵 경로점을 고른 동안에는 [Delete] 가 **그 점부터** 지운다(가장 안쪽이
                먼저 — planProcedureDeleteKey 의 차례). 그때까지 「[Delete] 로도 분기를
@@ -278,13 +264,10 @@ export default function CaseFlowchartEdgePropertyPanel({
             title={selectedWaypointIndex === null ? "[Delete] 키로도 지울 수 있습니다" : "경로점을 고른 동안에는 [Delete] 가 그 경로점을 먼저 지웁니다"}
             className="self-start rounded-md border border-red-400 px-3 py-1.5 text-sm font-medium text-red-900 hover:bg-red-100 disabled:opacity-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900"
           >
-            {isDeleting ? "삭제 중..." : "분기 삭제"}
+            분기 삭제
           </button>
         </div>
       )}
-
-      {errorMessage && <p className="text-red-600 dark:text-red-400">{errorMessage}</p>}
-      {deleteErrorMessage && <p className="text-red-600 dark:text-red-400">{deleteErrorMessage}</p>}
     </div>
   );
 }
