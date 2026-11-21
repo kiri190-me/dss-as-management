@@ -34,6 +34,8 @@ import FaultTagSuggestionList from "./FaultTagSuggestionList";
 import {
   createRepairCaseFlowchartEdgeAction,
   createRepairCaseFlowchartNodeAction,
+  deleteRepairCaseFlowchartNodeAction,
+  deleteRepairCaseFlowchartEdgeAction,
   saveRepairCaseFlowchartLayoutAction,
   saveRepairCaseFlowchartEdgeRouteAction,
   updateRepairCaseFlowchartNodeAction,
@@ -41,6 +43,10 @@ import {
   updateRepairCaseFlowchartEdgeAction,
   retargetRepairCaseFlowchartEdgeAction,
 } from "@/lib/server/actions/repair-case-flowchart-graph";
+// [Delete] 키가 **무엇을 가리키는가**를 정하는 순수 판정 — 「기술 작업 절차」
+// 편집기가 쓰는 그 파일 그대로다. 이름이 `procedure-` 로 시작해도 베끼지 않는
+// 까닭은 아래 keydown 자리의 주석에 적어 두었다.
+import { planProcedureDeleteKey, isTextEntryTarget } from "@/lib/domain/procedure-editor-delete-key";
 import { addWaypointAtDefaultPosition, removeWaypoint, moveWaypoint, type RoutePoint } from "@/lib/graph-editor-core/routing";
 import { resolveEffectiveNodeDimensions, computeStraightenedConnectedNodePosition } from "@/lib/graph-editor-core/layout";
 import { NODE_VISUAL_CONFIG, getNodeChipVisual, computeNodeDimensions } from "@/lib/domain/procedure-visual-language";
@@ -551,69 +557,161 @@ export default function CaseFlowchartEditorScreen({
     router.refresh();
   }
 
-  function handleNodeDeleted(newUpdatedAt: string) {
-    if (selectedNodeId) {
-      // 삭제 직전 상태를 되돌리기 단계로 남긴다 — 화면에 보이던 값(저장 전
-      // 수정/이동이 있었다면 그것) 기준으로 되살린다.
-      const deleted = nodes.find((n) => n.id === selectedNodeId);
-      const draft = pendingNodeDraftsById.get(selectedNodeId);
-      const pendingPosition = pendingNodePositionsById.get(selectedNodeId);
-      if (deleted) {
-        pushNodeDeletionUndoStep({
-          nodeType: draft?.nodeType ?? deleted.nodeType,
-          title: (draft ? draft.title.trim() : deleted.title) || deleted.title,
-          description: (draft ? draft.description.trim() || null : deleted.description) ?? null,
-          instructions: (draft ? draft.instructions.trim() || null : deleted.instructions) ?? null,
-          position: pendingPosition ?? { x: deleted.positionX, y: deleted.positionY },
-        });
+  /**
+   * ==========================================================================
+   * 🔴 지우기를 **부르는 자리는 이 화면뿐**이다 (2026-11-21)
+   * ==========================================================================
+   * 2026-11-21 이전에는 속성 패널이 제 손으로 서버 액션을 불렀다
+   * (CaseFlowchartNodePropertyPanel · CaseFlowchartEdgePropertyPanel 의
+   * handleDelete). 이번에 [Delete] 키가 붙으면서 **부르는 자리가 둘이 될 뻔했고**,
+   * 그러면 「단추로 지울 때와 키로 지울 때가 다른」 화면이 된다 — 막힌 까닭을
+   * 띄우는 것도, 되돌리기 단계를 쌓는 것도, 저장 전 수정을 치우는 것도 한쪽에만
+   * 남는 날이 온다. 그리고 그 어긋남은 오류를 한 번도 안 낸다.
+   *
+   * 그래서 **부르는 일도 뒤처리도 전부 여기로 올렸다.** 패널은 단추를 그리고
+   * `onDelete` 를 부르는 것까지만 하고, 「지우는 중인가 · 막힌 까닭 · 실패한
+   * 까닭」은 이 화면이 쥐고 프롭으로 내려보낸다. 키도 똑같이 아래 둘을 부른다.
+   *
+   * 🔵 지금 삭제는 여전히 **즉시 서버로** 간다(이 파일 머리말의 EDITOR MODEL —
+   * 만들기·지우기는 모아 두기 대상이 아니다). 그 모델을 뒤집는 날 갈아끼울 자리가
+   * 바로 이 둘이고, 패널도 키도 한 글자 안 고쳐도 된다.
+   */
+
+  /**
+   * 🔴 **지우는 중에 또 부르는 것**을 막는다. 단추는 `disabled` 로 막혀 있지만
+   * 키에는 막아 줄 단추가 없다 — [Delete] 를 누르고 있으면 자동 반복이 들어온다.
+   * 성공하면 선택이 풀려 두 번째부터는 판정이 「고른 것 없음」으로 떨어지지만,
+   * 그 풀림은 서버가 답한 **뒤**라 그 사이에 몇 번이고 더 날아갈 수 있다(두 번째
+   * 부터는 updatedAt 이 어긋나 「새로고침 후 다시 시도」가 뜬다 — 지워졌는데
+   * 빨간 글이 뜨는 화면이다).
+   * 🔵 state 가 아니라 ref 인 까닭: 막아야 하는 시점이 **다시 그려지기 전**이다.
+   */
+  const isDeleteInFlightRef = useRef(false);
+  /** 지금 무엇을 지우는 중인가 — 패널의 「삭제 중...」과 단추 흐리기에 쓰인다(위 ref 와 짝). */
+  const [deletingTarget, setDeletingTarget] = useState<"node" | "edge" | null>(null);
+  /**
+   * 🔴 삭제가 막히거나 실패한 까닭 — **어느 노드/연결선의 것인지와 함께** 쥔다.
+   *
+   * 까닭: 올리기 전에는 이 글이 패널의 state 였고, 고른 것이 없어져 패널이
+   * 사라질 때 함께 사라졌다. 화면으로 올리면 그 「사라짐」이 없어져, 빈 바탕을
+   * 누른 뒤 **다른 노드**를 골랐을 때 엉뚱한 노드 위에 옛 글이 떠 있게 된다.
+   * id 를 함께 들고 있다가 **그것을 고른 동안에만** 보여 주면 그 일이 없다.
+   */
+  const [nodeDeleteBlockedMessage, setNodeDeleteBlockedMessage] = useState<{ nodeId: string; message: string } | null>(null);
+  const [nodeDeleteErrorMessage, setNodeDeleteErrorMessage] = useState<{ nodeId: string; message: string } | null>(null);
+  const [edgeDeleteErrorMessage, setEdgeDeleteErrorMessage] = useState<{ edgeId: string; message: string } | null>(null);
+
+  /** 노드 하나를 지운다 — 패널의 [노드 삭제] 단추와 [Delete] 키가 **똑같이** 부르는 한 자리. */
+  async function handleDeleteNode(nodeId: string) {
+    if (!canEdit) return;
+    if (isDeleteInFlightRef.current) return;
+    isDeleteInFlightRef.current = true;
+    setDeletingTarget("node");
+    setNodeDeleteBlockedMessage(null);
+    setNodeDeleteErrorMessage(null);
+    const result = await deleteRepairCaseFlowchartNodeAction({ repairCaseId, flowchartId: flowchart.id, nodeId, expectedFlowchartUpdatedAt: currentUpdatedAt });
+    isDeleteInFlightRef.current = false;
+    setDeletingTarget(null);
+    if (!result.ok) {
+      // 🔴 「연결선이 붙어 있어 못 지운다」는 서버가 **수를 세어** 돌려주는 거절이다
+      //    (NODE_HAS_CONNECTED_EDGES). 다른 실패와 글이 다르고 다음에 할 일이 적혀
+      //    있어 갈라서 띄운다 — 올리기 전 패널이 하던 그대로다. 🔵 이 막음을 이번에
+      //    바꾸지 않는다(「선도 함께 지우기」는 나중 일이다). 키로 눌러도 단추와
+      //    똑같이 이 글이 뜬다 — 부르는 자리가 하나라 저절로 그렇게 된다.
+      if ("blockingEdgeCount" in result) {
+        setNodeDeleteBlockedMessage({ nodeId, message: `이 노드에 연결된 분기가 ${result.blockingEdgeCount}개 있어 삭제할 수 없습니다. 먼저 연결된 분기를 삭제해 주세요.` });
+        return;
       }
-      setPendingNodeDraftsById((prev) => {
-        if (!prev.has(selectedNodeId)) return prev;
-        const next = new Map(prev);
-        next.delete(selectedNodeId);
-        return next;
-      });
-      setPendingNodePositionsById((prev) => {
-        if (!prev.has(selectedNodeId)) return prev;
-        const next = new Map(prev);
-        next.delete(selectedNodeId);
-        return next;
+      setNodeDeleteErrorMessage({ nodeId, message: result.message });
+      return;
+    }
+    handleNodeDeleted(nodeId, result.updatedAt);
+  }
+
+  /** 연결선 하나를 지운다 — 패널의 [분기 삭제] 단추와 [Delete] 키가 **똑같이** 부르는 한 자리. */
+  async function handleDeleteEdge(edgeId: string) {
+    if (!canEdit) return;
+    if (isDeleteInFlightRef.current) return;
+    isDeleteInFlightRef.current = true;
+    setDeletingTarget("edge");
+    setEdgeDeleteErrorMessage(null);
+    const result = await deleteRepairCaseFlowchartEdgeAction({ repairCaseId, flowchartId: flowchart.id, edgeId, expectedFlowchartUpdatedAt: currentUpdatedAt });
+    isDeleteInFlightRef.current = false;
+    setDeletingTarget(null);
+    if (!result.ok) {
+      setEdgeDeleteErrorMessage({ edgeId, message: result.message });
+      return;
+    }
+    handleEdgeDeleted(edgeId, result.updatedAt);
+  }
+
+  /**
+   * 노드가 실제로 지워진 뒤의 뒤처리 — 되돌리기 단계 쌓기 · 저장 전 수정 치우기 ·
+   * 선택 풀기 · 서버 상태 따라잡기.
+   *
+   * 🔴 지운 노드의 id 를 **받아서** 쓴다(2026-11-21). 전에는 selectedNodeId 를
+   * 다시 읽었는데, 서버가 답하기를 기다리는 사이에 다른 노드를 고르면 그쪽의 저장
+   * 전 수정이 지워지고 되돌리기도 엉뚱한 노드로 쌓였다. 부르는 쪽이 이미 id 를
+   * 알고 있으므로 다시 읽을 까닭이 없다.
+   */
+  function handleNodeDeleted(nodeId: string, newUpdatedAt: string) {
+    // 삭제 직전 상태를 되돌리기 단계로 남긴다 — 화면에 보이던 값(저장 전
+    // 수정/이동이 있었다면 그것) 기준으로 되살린다.
+    const deleted = nodes.find((n) => n.id === nodeId);
+    const draft = pendingNodeDraftsById.get(nodeId);
+    const pendingPosition = pendingNodePositionsById.get(nodeId);
+    if (deleted) {
+      pushNodeDeletionUndoStep({
+        nodeType: draft?.nodeType ?? deleted.nodeType,
+        title: (draft ? draft.title.trim() : deleted.title) || deleted.title,
+        description: (draft ? draft.description.trim() || null : deleted.description) ?? null,
+        instructions: (draft ? draft.instructions.trim() || null : deleted.instructions) ?? null,
+        position: pendingPosition ?? { x: deleted.positionX, y: deleted.positionY },
       });
     }
+    setPendingNodeDraftsById((prev) => {
+      if (!prev.has(nodeId)) return prev;
+      const next = new Map(prev);
+      next.delete(nodeId);
+      return next;
+    });
+    setPendingNodePositionsById((prev) => {
+      if (!prev.has(nodeId)) return prev;
+      const next = new Map(prev);
+      next.delete(nodeId);
+      return next;
+    });
     setSelectedNodeId(null);
     handleSaved(newUpdatedAt);
   }
 
-  function handleEdgeDeleted(newUpdatedAt: string) {
-    if (selectedEdgeId) {
-      // 삭제 직전 상태를 되돌리기 단계로 남긴다 — 화면에 보이던 값(저장 전
-      // 수정이 있었다면 그것)을 기준으로, 되살릴 때 같은 연결선이 되도록.
-      const deleted = edges.find((e) => e.id === selectedEdgeId);
-      const draft = pendingEdgeDraftsById.get(selectedEdgeId);
-      if (deleted) {
-        pushEdgeDeletionUndoStep({
-          fromNodeId: draft?.fromNodeId ?? deleted.fromNodeId,
-          toNodeId: draft?.toNodeId ?? deleted.toNodeId,
-          branchType: draft?.branchType ?? deleted.branchType,
-          branchLabel: (draft ? draft.branchLabel.trim() || null : deleted.branchLabel) ?? null,
-          routePoints: pendingRoutePointsByEdgeId.has(selectedEdgeId)
-            ? pendingRoutePointsByEdgeId.get(selectedEdgeId) ?? null
-            : deleted.routePoints,
-        });
-      }
-      setPendingEdgeDraftsById((prev) => {
-        if (!prev.has(selectedEdgeId)) return prev;
-        const next = new Map(prev);
-        next.delete(selectedEdgeId);
-        return next;
-      });
-      setPendingRoutePointsByEdgeId((prev) => {
-        if (!prev.has(selectedEdgeId)) return prev;
-        const next = new Map(prev);
-        next.delete(selectedEdgeId);
-        return next;
+  /** 연결선이 실제로 지워진 뒤의 뒤처리. id 를 받는 까닭은 바로 위 handleNodeDeleted 와 같다. */
+  function handleEdgeDeleted(edgeId: string, newUpdatedAt: string) {
+    // 삭제 직전 상태를 되돌리기 단계로 남긴다 — 화면에 보이던 값(저장 전
+    // 수정이 있었다면 그것)을 기준으로, 되살릴 때 같은 연결선이 되도록.
+    const deleted = edges.find((e) => e.id === edgeId);
+    const draft = pendingEdgeDraftsById.get(edgeId);
+    if (deleted) {
+      pushEdgeDeletionUndoStep({
+        fromNodeId: draft?.fromNodeId ?? deleted.fromNodeId,
+        toNodeId: draft?.toNodeId ?? deleted.toNodeId,
+        branchType: draft?.branchType ?? deleted.branchType,
+        branchLabel: (draft ? draft.branchLabel.trim() || null : deleted.branchLabel) ?? null,
+        routePoints: pendingRoutePointsByEdgeId.has(edgeId) ? pendingRoutePointsByEdgeId.get(edgeId) ?? null : deleted.routePoints,
       });
     }
+    setPendingEdgeDraftsById((prev) => {
+      if (!prev.has(edgeId)) return prev;
+      const next = new Map(prev);
+      next.delete(edgeId);
+      return next;
+    });
+    setPendingRoutePointsByEdgeId((prev) => {
+      if (!prev.has(edgeId)) return prev;
+      const next = new Map(prev);
+      next.delete(edgeId);
+      return next;
+    });
     setSelectedEdgeId(null);
     setSelectedWaypointIndex(null);
     handleSaved(newUpdatedAt);
@@ -830,6 +928,93 @@ export default function CaseFlowchartEditorScreen({
 
   const selectedNode = renderedNodes.find((n) => n.id === selectedNodeId) ?? null;
   const selectedEdge = renderedEdges.find((e) => e.id === selectedEdgeId) ?? null;
+
+  /**
+   * ==========================================================================
+   * 🔴 [Delete] 키로 지우기 (2026-11-21)
+   * ==========================================================================
+   * 쓰는 분의 요청: 「[진단 FLOWCHART]에서도 같은 동작이 되야 해.」 — 「기술 작업
+   * 절차」 편집기에 2026-11-21 에 붙은 것을 그대로 옮긴 것이다.
+   *
+   * 🔴 **무엇을 지울지 여기서 판정하지 않는다** — planProcedureDeleteKey 하나가
+   * 답한다. 차례(경로점 → 노드 → 연결선) · 글자 칸 보호 · Backspace 결정 · 막힌
+   * 노드에서 연결선으로 안 흘러내리는 규칙까지 전부 그 파일에 까닭과 함께 있고,
+   * 값으로 재어진다(src/lib/domain/procedure-editor-delete-key.test.ts).
+   *
+   * 🔵 이름이 `procedure-` 로 시작해도 **베끼지 않고 그대로 쓴다.** 그 파일은
+   * import 가 하나도 없고 입력이 전부 string · boolean · null 이라 절차 쪽 자료형을
+   * 한 글자도 안 물고 온다. 이 화면은 이미 같은 까닭으로
+   * procedure-visual-language 를 쓰고 있다(CaseFlowchartGraph 도 마찬가지).
+   * 한 벌 더 베끼면 두 잣대가 생기고, 한쪽만 고치는 날이 온다.
+   *
+   * 🔴 절차에 있고 **진단에 없는 개념 셋**은 이렇게 넘긴다:
+   *  ① `canDeleteGraph` — 절차는 「기술 작업」 분류에서만 삭제 칸이 선다. 진단에는
+   *     분류가 없고 삭제 칸을 세우는 값이 `canEdit` 하나라, 그것을 그대로 넘긴다.
+   *  ② `nodeDeleteBlockedReason` — **null** 이다. 절차가 미리 막는 까닭(체크리스트 ·
+   *     고장 진단표가 걸린 노드)은 진단 노드 행에 그런 칸이 **아예 없어** 셀 수조차
+   *     없다. 🔴 「진단에는 막히는 노드가 없다」가 아니라 **「미리 셀 수 있는 것이
+   *     없다」**가 맞다 — 진단에서 막히는 경우(연결선이 붙은 노드)는 서버만 알고,
+   *     그 거절은 단추로 지울 때와 똑같이 handleDeleteNode 가 받아 글로 띄운다.
+   *     그러니 키가 여기서 미리 막으면 **단추보다 더 조용히** 아무 일도 안 한다.
+   *  ③ `boxSelectActive` / `boxSelectedNodes` — [범위 선택]은 진단에 아직 없다.
+   *     false / [] 를 넘기면 복수 갈래는 영영 안 선다.
+   *
+   * 🔵 확인 창은 안 띄운다 — 지금 삭제 **단추**도 안 띄운다(잘못 지웠으면 [이전]이
+   * 서버에 다시 만든다 — pushNodeDeletionUndoStep). 키만 다르게 굴면 안 된다.
+   */
+  /**
+   * 🔴 지우기 셋의 **가장 최근 신원**. 이 화면의 함수들은 useCallback 이 아니라
+   * 렌더마다 다시 만들어지는 선언이라, 아래 의존성 배열에 그대로 넣으면 keydown
+   * 등록·해제가 렌더마다(드래그 중에는 프레임마다) 돈다. 바로 위
+   * pendingSnapshotRef 가 같은 까닭으로 쓰는 수법 그대로다.
+   */
+  const deleteByKeyRef = useRef({ node: handleDeleteNode, edge: handleDeleteEdge, removeSelectedWaypoint: handleRemoveSelectedWaypoint });
+  useEffect(() => {
+    deleteByKeyRef.current = { node: handleDeleteNode, edge: handleDeleteEdge, removeSelectedWaypoint: handleRemoveSelectedWaypoint };
+  });
+
+  /**
+   * 🔴 고른 id 는 **그림에 실제로 그려진 것**에서 뽑는다. state 의 id 를 그대로
+   * 쓰면, 그 사이에 사라진 것(예: 되돌리기로 없어진 노드)에 삭제를 날리게 된다 —
+   * 그때는 속성 패널도 안 서 있어 「단추와 같은 판정」도 성립하지 않는다.
+   */
+  const deletableNodeId = selectedNode?.id ?? null;
+  const deletableEdgeId = selectedEdge?.id ?? null;
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      const plan = planProcedureDeleteKey({
+        key: e.key,
+        isTypingTarget: isTextEntryTarget(document.activeElement),
+        canEdit,
+        canDeleteGraph: canEdit,
+        selectedNodeId: deletableNodeId,
+        selectedEdgeId: deletableEdgeId,
+        selectedWaypointIndex,
+        nodeDeleteBlockedReason: null,
+        boxSelectActive: false,
+        boxSelectedNodes: [],
+      });
+      // 🔴🔴 아무 일도 안 할 때는 **이벤트에 손도 안 댄다.** 글자 칸에서
+      //    preventDefault 를 하면 그 키가 글자를 안 지운다.
+      if (plan.action === "NONE") return;
+      e.preventDefault();
+      if (plan.action === "REMOVE_WAYPOINT") {
+        // 🔴 경로점은 **쓰던 통로 그대로** 지운다([선택 경로점 삭제] 단추와 같은
+        //    함수) — 여기서 removeWaypoint 를 다시 부르면 되돌리기 단계가 빠진다.
+        deleteByKeyRef.current.removeSelectedWaypoint();
+        return;
+      }
+      if (plan.action === "DELETE_NODE") {
+        void deleteByKeyRef.current.node(plan.nodeId);
+        return;
+      }
+      // 🔵 남은 갈래는 DELETE_EDGE 하나다 — 복수(DELETE_NODES)는 위에서 늘 빈 값을
+      //    넘기므로 설 길이 없다([범위 선택]이 진단에 생기는 날 여기가 늘어난다).
+      if (plan.action === "DELETE_EDGE") void deleteByKeyRef.current.edge(plan.edgeId);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [canEdit, deletableNodeId, deletableEdgeId, selectedWaypointIndex]);
 
   /** Executes exactly one planned step against the real mutation layer — the only place in this component that knows which server action a given SaveStep maps to. Ordering, chaining, and stop-on-first-failure all live in runSaveSequence (repair-case-flowchart-editor-save-state.ts), unit-tested there. */
   async function executeSaveStep(step: SaveStep, expectedUpdatedAt: string): Promise<SaveStepResult> {
@@ -1367,14 +1552,15 @@ export default function CaseFlowchartEditorScreen({
                   onStartPickReference={() => setIsPickingReferenceNode(true)}
                   onCancelPickReference={() => setIsPickingReferenceNode(false)}
                   pickedReferenceNode={pickedReferenceNode}
-                  repairCaseId={repairCaseId}
-                  flowchartId={flowchart.id}
                   canEdit={canEdit}
-                  expectedFlowchartUpdatedAt={currentUpdatedAt}
                   draft={nodeDraft(selectedNode.id)}
                   onDraftChange={(patch) => updateNodeDraft(selectedNode.id, patch)}
                   onPositionDraftChange={(position) => setPendingNodePosition(selectedNode.id, position)}
-                  onDeleted={handleNodeDeleted}
+                  onDelete={() => void handleDeleteNode(selectedNode.id)}
+                  isDeleting={deletingTarget === "node"}
+                  // 🔴 「그 노드의 것일 때만」 보여 준다 — 까닭은 nodeDeleteBlockedMessage 선언 옆에 적어 두었다.
+                  deleteBlockedMessage={nodeDeleteBlockedMessage?.nodeId === selectedNode.id ? nodeDeleteBlockedMessage.message : null}
+                  deleteErrorMessage={nodeDeleteErrorMessage?.nodeId === selectedNode.id ? nodeDeleteErrorMessage.message : null}
                   resolveNodeDimensions={resolveNodeDimensions}
                 />
               )}
@@ -1389,7 +1575,9 @@ export default function CaseFlowchartEditorScreen({
                   draft={edgeDraft(selectedEdge.id)}
                   onDraftChange={(patch) => updateEdgeDraft(selectedEdge.id, patch)}
                   onSaved={handleSaved}
-                  onDeleted={handleEdgeDeleted}
+                  onDelete={() => void handleDeleteEdge(selectedEdge.id)}
+                  isDeleting={deletingTarget === "edge"}
+                  deleteErrorMessage={edgeDeleteErrorMessage?.edgeId === selectedEdge.id ? edgeDeleteErrorMessage.message : null}
                   routePoints={workingRoutePoints(selectedEdge.id)}
                   selectedWaypointIndex={selectedWaypointIndex}
                   onAddWaypoint={handleAddWaypoint}

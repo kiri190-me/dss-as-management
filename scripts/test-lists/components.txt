@@ -1743,3 +1743,20 @@ src/components/domestic-orders/domestic-order-list-controls-layout.test.ts
 #    자동 배치가 꺼진 절차는 아예 안 타는가(깃발 판정이 **먼저**인가) · 바깥으로 새 프롭이
 #    안 생겼는가(호출부 다섯이 안 바뀌는 근거). 🔴 **주석을 걷어낸** 원본으로 센다.
 src/components/procedures/procedure-flow-graph-layout-memory.test.ts
+
+# 🔴 **[진단 Flowchart] 편집기의 [Delete] 키**(2026-11-21 — 쓰는 분 「[진단 FLOWCHART]에서도
+#    같은 동작이 되야 해」). **무엇을 지울지**는 절차 쪽과 **같은 한 벌**의 순수 함수가
+#    정하고 값으로 재어진다(unit 목록의 lib/domain/procedure-editor-delete-key.test.ts) —
+#    이름이 `procedure-` 로 시작해도 import 가 하나도 없어 그대로 쓴다. 여기서 재는 것은
+#    **배선**이다. 🔴 가장 큰 것: 지우는 길이 **하나인가** — 전에는 속성 패널이 제 손으로
+#    서버 액션을 불렀고, 키가 또 부르면 「단추로 지울 때와 키로 지울 때가 다른」 화면이 된다
+#    (막힌 까닭 · 되돌리기 단계 · 저장 전 수정 치우기 가운데 하나가 한쪽에만 남는다).
+#    그래서 호출도 뒤처리도 화면의 함수 둘로 올렸고, 이 파일이 **그 뒤처리를 하나도 안
+#    잃었는지**를 항목별로 센다. 곁들여: 🔴🔴 글자 칸에서 NONE 이면 preventDefault 를
+#    안 하는가(하면 [Delete] 가 글자를 안 지운다) · 🔴 keydown 등록이 하나인가(그림·패널
+#    어디에도 또 없는가) · 🔴 상시 안내를 안 세웠는가(절차 쪽에서 두 번 세웠다 두 번 다
+#    지웠다 — d57f664a, 설명은 단추 툴팁까지) · 🔴 진단에 **없는 개념 셋**을 어떻게
+#    넘기는가(분류가 없어 canEdit · 미리 막는 까닭은 서버만 알아 null · [범위 선택]은
+#    아직 없어 false/[]). 🔴 **주석을 걷어낸** 원본으로 센다 — 요청 원문과 옛 모습(패널이
+#    직접 부르던 액션 이름)이 주석에 경위로 남아 있다.
+src/components/repair-cases/flowchart/case-flowchart-delete-key-ui.test.ts

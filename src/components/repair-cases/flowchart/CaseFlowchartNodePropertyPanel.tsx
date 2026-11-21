@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { REPAIR_CASE_FLOWCHART_NODE_TYPE_CODES, repairCaseFlowchartNodeTypeLabels, type RepairCaseFlowchartNodeType } from "@/lib/domain/repair-case-flowchart-types";
-import { deleteRepairCaseFlowchartNodeAction } from "@/lib/server/actions/repair-case-flowchart-graph";
 import { computeCenterAlignedRelativePosition, resolveColumnSnappedRelativePosition, type RelativeDirection, type ColumnSnapCandidate } from "@/lib/graph-editor-core/layout";
 import type { CaseFlowchartGraphNode } from "./CaseFlowchartGraph";
 
@@ -35,6 +34,14 @@ const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;
  * Delete remains its own immediate action — a destructive operation, not a
  * "draft" (see CaseFlowchartEditorScreen's own SAVE CONTRACT doc comment
  * for the create/delete-stays-immediate decision).
+ *
+ * 🔴 2026-11-21 — **지우는 일 자체는 이 패널을 떠났다.** 전에는 여기서
+ * deleteRepairCaseFlowchartNodeAction 을 직접 부르고 「삭제 중 · 막힌 까닭 ·
+ * 실패한 까닭」도 제 state 로 쥐고 있었다. 같은 날 [Delete] 키가 붙으면서
+ * **부르는 자리가 둘이 될 뻔해서**, 호출도 뒤처리도 전부
+ * CaseFlowchartEditorScreen 의 handleDeleteNode 한 자리로 올렸다(그 함수 옆의
+ * 주석에 까닭 전문이 있다). 여기 남은 것은 단추를 그리고 `onDelete` 를 부르는
+ * 것, 그리고 받아 온 글 둘을 **전과 똑같은 자리에** 띄우는 것뿐이다.
  *
  * "상대 위치로 이동" (5C-6D follow-up #3, dimension source corrected in
  * follow-up #4): LEFT/RIGHT align by vertical CENTER
@@ -69,14 +76,14 @@ export default function CaseFlowchartNodePropertyPanel({
   onStartPickReference,
   onCancelPickReference,
   pickedReferenceNode = null,
-  repairCaseId,
-  flowchartId,
   canEdit,
-  expectedFlowchartUpdatedAt,
   draft,
   onDraftChange,
   onPositionDraftChange,
-  onDeleted,
+  onDelete,
+  isDeleting,
+  deleteBlockedMessage,
+  deleteErrorMessage,
   resolveNodeDimensions,
 }: {
   /** The screen's currently RENDERED node (server baseline merged with any pending draft/position) — never the raw server value alone. */
@@ -88,21 +95,23 @@ export default function CaseFlowchartNodePropertyPanel({
   onStartPickReference?: () => void;
   onCancelPickReference?: () => void;
   pickedReferenceNode?: { nodeId: string; seq: number } | null;
-  repairCaseId: string;
-  flowchartId: string;
   canEdit: boolean;
-  expectedFlowchartUpdatedAt: string;
   /** The screen's current working draft for THIS node's fields — its own last-saved values when nothing is pending, or whatever the user has typed/picked since. */
   draft: CaseFlowchartNodeDraft;
   onDraftChange: (patch: Partial<CaseFlowchartNodeDraft>) => void;
   /** Sets (or replaces) this node's pending position — same deferred model as drag, just triggered by a button instead of a pointer gesture. */
   onPositionDraftChange: (position: { x: number; y: number }) => void;
-  onDeleted: (newUpdatedAt: string) => void;
+  /** 🔴 [노드 삭제] 를 누른 것뿐 — 실제로 지우는 것도 그 뒤처리도 화면(handleDeleteNode)이 한다. [Delete] 키가 부르는 함수와 **같은 하나**다. */
+  onDelete: () => void;
+  /** 지우는 중인가 — 화면이 쥔 값. 단추를 흐리게 하고 「삭제 중...」으로 바꾼다(두 번 눌리는 것도 이것이 막는다). */
+  isDeleting: boolean;
+  /** 서버가 「연결된 분기가 있어 못 지운다」고 거절한 글(없으면 null). 삭제 단추 **바로 위**에 뜬다 — 올리기 전과 같은 자리다. */
+  deleteBlockedMessage: string | null;
+  /** 그 밖의 삭제 실패 사유(없으면 null). 패널 맨 아래에 뜬다 — 올리기 전 이 패널의 errorMessage 가 서던 그 자리다. */
+  deleteErrorMessage: string | null;
   /** The screen's single, already-composed effective-dimension resolver (measured-first, estimate-fallback) — see this file's own DIMENSION SOURCE doc comment above for why this must be the SAME function instance/rule the screen's own double-click-straighten handler uses, not a locally re-derived copy. */
   resolveNodeDimensions: (n: CaseFlowchartGraphNode) => { width: number; height: number };
 }) {
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
   const otherNodes = allNodes.filter((n) => n.id !== node.id);
   const [referenceNodeId, setReferenceNodeId] = useState(otherNodes[0]?.id ?? "");
   // 절차 편집기의 NodePropertyPanel과 같은 규약 — 캔버스에서 고른 결과가 seq와 함께 내려온다.
@@ -111,9 +120,6 @@ export default function CaseFlowchartNodePropertyPanel({
     setPrevPickedReferenceSeq(pickedReferenceNode.seq);
     if (pickedReferenceNode.nodeId !== node.id) setReferenceNodeId(pickedReferenceNode.nodeId);
   }
-
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [deleteBlockedMessage, setDeleteBlockedMessage] = useState<string | null>(null);
 
   function handleRelativePosition(direction: RelativeDirection) {
     const reference = otherNodes.find((n) => n.id === referenceNodeId);
@@ -152,23 +158,6 @@ export default function CaseFlowchartNodePropertyPanel({
       tolerance: COLUMN_SNAP_TOLERANCE,
     });
     onPositionDraftChange({ x: snapped.x, y: snapped.y });
-  }
-
-  async function handleDelete() {
-    setIsDeleting(true);
-    setErrorMessage(null);
-    setDeleteBlockedMessage(null);
-    const result = await deleteRepairCaseFlowchartNodeAction({ repairCaseId, flowchartId, nodeId: node.id, expectedFlowchartUpdatedAt });
-    setIsDeleting(false);
-    if (!result.ok) {
-      if ("blockingEdgeCount" in result) {
-        setDeleteBlockedMessage(`이 노드에 연결된 분기가 ${result.blockingEdgeCount}개 있어 삭제할 수 없습니다. 먼저 연결된 분기를 삭제해 주세요.`);
-        return;
-      }
-      setErrorMessage(result.message);
-      return;
-    }
-    onDeleted(result.updatedAt);
   }
 
   return (
@@ -286,7 +275,11 @@ export default function CaseFlowchartNodePropertyPanel({
           <button
             type="button"
             disabled={isDeleting}
-            onClick={() => void handleDelete()}
+            onClick={onDelete}
+            /* 🔵 키 이야기는 **여기까지**다. 이 편집기의 상시 안내는 절차 쪽에서
+               두 번 세웠다 두 번 다 지워 달라는 요청을 받았다(커밋 d57f664a) —
+               툴팁은 자리를 안 차지하고 찾는 사람만 본다. */
+            title="[Delete] 키로도 지울 수 있습니다"
             className="self-start rounded-md border border-red-400 px-3 py-1.5 text-sm font-medium text-red-900 hover:bg-red-100 disabled:opacity-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900"
           >
             {isDeleting ? "삭제 중..." : "노드 삭제"}
@@ -294,7 +287,7 @@ export default function CaseFlowchartNodePropertyPanel({
         </div>
       )}
 
-      {errorMessage && <p className="text-red-600 dark:text-red-400">{errorMessage}</p>}
+      {deleteErrorMessage && <p className="text-red-600 dark:text-red-400">{deleteErrorMessage}</p>}
     </div>
   );
 }
