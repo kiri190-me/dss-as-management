@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ReactFlowInstance } from "@xyflow/react";
-import CaseFlowchartGraph, { type CaseFlowchartGraphNode, type CaseFlowchartGraphEdge } from "./CaseFlowchartGraph";
+import CaseFlowchartGraph, { type CaseFlowchartGraphNode, type CaseFlowchartGraphEdge, type CaseFlowchartNodeDragMove } from "./CaseFlowchartGraph";
 import UndoRedoControls from "@/components/graph-editor-core/UndoRedoControls";
 import {
   createUndoStack,
@@ -826,21 +826,48 @@ export default function CaseFlowchartEditorScreen({
     });
   }
 
-  /** Sets (or replaces) a node's pending position — the ONE place both canvas drag-stop and the property panel's "상대 위치로 이동" buttons funnel through. No mutation call here; position is dirty/pending like every other field, only [저장] persists it. */
-  function setPendingNodePosition(nodeId: string, position: Position) {
+  /**
+   * Sets (or replaces) pending positions — the ONE place both canvas
+   * drag-stop and the property panel's "상대 위치로 이동" buttons funnel
+   * through. No mutation call here; position is dirty/pending like every
+   * other field, only [저장] persists it.
+   *
+   * 🔵 2026-11-21(조각 B1′) — **칸 여럿을 한 번에** 받도록 넓혔다. 저장 대기
+   * 지도(`pendingNodePositionsById`)는 원래 Map 이라 칸이 몇이든 [저장] 때 함께
+   * 나간다 — 저장·되돌리기·더러움 판정 쪽은 한 글자도 안 고쳤다.
+   */
+  function setPendingNodePositions(moves: readonly CaseFlowchartNodeDragMove[]) {
+    if (moves.length === 0) return;
     // 드래그는 시작할 때 이미 한 단계를 찍었다 — 버튼(상대 위치로 이동)으로 온
     // 호출만 여기서 한 단계가 된다.
+    // 🔴 **칸이 몇이든 여기서 한 번**이다. 아래 고리 안으로 들어가거나 칸마다 이
+    //    함수를 부르는 꼴이 되면 [이전]이 칸 수만큼 쌓여, 한 번 눌러서는 끌기
+    //    전으로 안 돌아간다.
     if (!isNodeDraggingRef.current) pushPendingUndoStep();
     setPendingNodePositionsById((prev) => {
       const next = new Map(prev);
-      next.set(nodeId, position);
+      for (const move of moves) next.set(move.nodeId, move.position);
       return next;
     });
   }
 
-  function handleNodeDragStop(nodeId: string, position: Position) {
+  /** 칸 하나짜리 껍질 — 속성 패널의 「상대 위치로 이동」과 「연결선 곧게 펴기」가 이 이름으로 부른다. 🔴 제 손으로 지도를 고치지 않고 위를 부른다: 두 벌로 나뉘면 되돌리기 규칙이 한쪽에만 남는 날이 온다. */
+  function setPendingNodePosition(nodeId: string, position: Position) {
+    setPendingNodePositions([{ nodeId, position }]);
+  }
+
+  /**
+   * 🔴 **놓은 칸 전부**를 받아 한 번에 적는다(2026-11-21, 조각 B1′). 앞의
+   * `_nodeId`/`_position` 은 끄는 칸 하나일 뿐이라, 그것만 쓰면 여러 칸을 함께
+   * 끌었을 때 **하나만 저장된다** — 화면은 전부 움직여 놓고 [저장]을 누르면
+   * 하나만 옮겨져 있는, 오류가 한 번도 안 나는 결함이다.
+   * 🔵 오늘은 그림이 칸에 선택 표시를 안 실어 한 손짓이 늘 칸 하나를 옮긴다
+   *    (CaseFlowchartGraph 의 flowNodes 머리말) — `moves` 의 길이가 1 이고 그
+   *    한 칸이 곧 `_nodeId` 라, 지금 동작은 전과 한 치도 다르지 않다.
+   */
+  function handleNodeDragStop(_nodeId: string, _position: Position, moves: readonly CaseFlowchartNodeDragMove[]) {
     if (!canEdit) return;
-    setPendingNodePosition(nodeId, position);
+    setPendingNodePositions(moves);
     isNodeDraggingRef.current = false;
   }
 

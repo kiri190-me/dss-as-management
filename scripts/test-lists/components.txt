@@ -1366,9 +1366,12 @@ src/components/procedures/procedure-editor-center-point-placement.test.ts
 #    여럿 골랐고 전부 움직이는데 저장은 하나」가 되고, 오류가 안 나 아무도 못
 #    알아챈다 · 🔴 손짓 한 번에 콜백이 **한 번**인가([이전]이 칸 수만큼 쌓이면 한
 #    번 눌러서 안 돌아온다) · 🔴 끝에서 pendingLayoutMoves 에 **칸마다 한 줄**이
-#    들어가는가 · 🔴 [진단 Flowchart] 가 이 조각에서 **안 바뀌었는가**(같은 캔버스를
-#    쓰는 둘째 집이다) · 🔴 오늘 선택이 하나뿐인 까닭(onNodesChange 가 없어 React
-#    Flow 안에 선택이 안 남는다)이 그대로인가 — 다음 조각이 걸릴 자리다.
+#    들어가는가 · 🔴 [진단 Flowchart] 가 **같은 모양으로 넓혀졌는가**(같은 캔버스를
+#    쓰는 둘째 집이다 — B1·B2 때는 「안 바뀌었는가」였고, B1′ 이 저쪽을 넓히면서
+#    2026-11-21 에 뒤집어 적었다. 저쪽만 보는 깊은 셈은 저쪽 집에 따로 있다:
+#    src/components/repair-cases/flowchart/case-flowchart-multi-node-drag-plumbing.test.ts) ·
+#    🔴 오늘 저쪽 선택이 하나뿐인 까닭(onNodesChange 가 없어 React Flow 안에 선택이
+#    안 남고, 저쪽은 칸에 selected 를 안 싣는다)이 그대로인가.
 #    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
 src/components/procedures/procedure-multi-node-drag-plumbing.test.ts
 
@@ -1799,3 +1802,23 @@ src/components/repair-cases/flowchart/case-flowchart-structural-deferred-save.te
 #    그 자리에 **안 보이는 막음**(단추 disabled)이 대신 들어서지 않았는가.
 #    🔴 **주석을 걷어낸** 원본으로 센다 — 없어진 막음의 문구가 주석에 경위로 남아 있다.
 src/components/repair-cases/flowchart/case-flowchart-node-delete-cascade-ui.test.ts
+
+# 2026-11-21 — **[진단 Flowchart] 에도 복수 드래그 배선을 깔았다**(조각 B1′ — 절차 편집기가
+#    같은 순서로 먼저 갔다: B1 b4ee0166 → B2 ced82c74). 🔴 **이 조각은 화면 동작을 한 치도
+#    안 바꾼다** — 이 그림은 아직 칸을 하나씩만 고를 수 있어서 한 손짓이 옮기는 칸이 늘
+#    하나다. 그래서 「전과 똑같은가」가 합격 기준이고, 그것을 재는 절(④)이 따로 있다:
+#    칸에 선택 표시를 **안 싣는가** · 선택 상자를 **안 넘기는가** · Shift 가 여전히 축 잠금
+#    전용인가 · 끌 수 있는 조건이 그대로인가. 나머지는 **다음 조각이 쓸 길**이 깔렸는가다:
+#    🔴 세 손잡이가 **움직이는 칸 전부**를 받는가(버리면 「화면은 전부 움직였는데 [저장]을
+#    누르니 하나만 옮겨져 있다」 — 오류가 안 나고 끌리는 모습도 멀쩡해 아무도 못 알아챈다) ·
+#    🔴 되돌리기를 **고리 밖에서 한 번**만 찍는가([이전]이 칸 수만큼 쌓이면 한 번 눌러서
+#    안 돌아간다) · 🔴 **끌고 있는 동안에는 안 찍는가**(드래그 중 콜백은 프레임마다 온다 —
+#    거기서 찍으면 한 번 끌 때마다 수백 칸이 쌓인다) · 🔴 축 잠금이 **복수용**으로
+#    갈아탔는가(셈 자체는 unit 목록의 lib/graph-editor-core/axis-lock.test.ts 가 값으로
+#    잰다 — 여기서 재는 것은 그 셈을 부르고 있는가다) · 🔵 칸 하나짜리 통로가 남아 있고
+#    그것이 여럿짜리를 부르는가(두 벌이 되면 한쪽만 고치는 날이 온다).
+#    🔴 **주석을 걷어낸** 원본으로 센다 — 이번 변경의 주석에 movingNodes·selected 가 글자
+#    그대로 들어 있어, 안 걷으면 「있는가」도 「없어졌는가」도 셈이 뒤집힌다(①절이 증거).
+#    🔵 절차 쪽과 **같은 모양인가**는 저쪽 집에서 함께 본다 —
+#    src/components/procedures/procedure-multi-node-drag-plumbing.test.ts.
+src/components/repair-cases/flowchart/case-flowchart-multi-node-drag-plumbing.test.ts

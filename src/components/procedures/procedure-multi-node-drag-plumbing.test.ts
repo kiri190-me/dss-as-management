@@ -166,31 +166,52 @@ describe("🔴 편집기 — 놓은 칸 전부가 저장 대기 칸에 들어간
 });
 
 /**
- * 🔴 **[진단 Flowchart] 는 B1·B2 두 조각 모두 안 건드린다.** 같은 `GraphCanvas`
- * 를 쓰는 두 번째 집이라, 캔버스를 고치면 저쪽이 조용히 같이 바뀔 수 있는 자리다.
- * B1 이 넓힌 인자는 **맨 뒤에 더했고** 저쪽 손잡이는 받지 않으므로 전과 똑같이
- * 돌고, B2 가 더한 것들(선택 상자·panOnDrag·커서)은 전부 **안 넘기면 꺼지는**
- * 프롭 하나(`boxSelection`)에 매달려 있다 — 저쪽은 그것을 안 넘긴다.
+ * 🔴 **[진단 Flowchart] — B1·B2 는 안 건드렸고, B1′ 이 같은 길을 저쪽에도 깔았다.**
+ * 같은 `GraphCanvas` 를 쓰는 두 번째 집이라, 캔버스를 고치면 저쪽이 조용히 같이
+ * 바뀔 수 있는 자리다. 그래서 둘로 갈라서 못 박는다:
  *
- * 🔵 뒤 조각이 저쪽도 넓히면 아래 시험이 운다 — 그때 **고쳐야 하는 시험**이지
- * 지워야 하는 시험이 아니다. 「여기도 같이 넓혔다」로 고쳐 적으면 된다.
+ *  ㉮ **배선은 같아졌다**(2026-11-21, 조각 B1′) — 세 손잡이가 움직이는 칸 전부를
+ *     받고, 축 잠금도 복수용으로 갈아탔다. 절차 쪽 B1 과 **같은 모양**이어야 한다:
+ *     한쪽만 고치는 날이 오면 그 어긋남은 오류를 한 번도 안 낸다.
+ *  ㉯ **화면 동작은 아직 그대로다** — 선택 상자(`boxSelection`)를 안 넘기고 칸에
+ *     `selected` 도 안 싣는다(아래 마지막 절). 그래서 한 손짓이 늘 칸 하나를
+ *     옮기고, B1′ 이 끝나도 쓰는 분 눈에는 전과 똑같다.
+ *
+ * 🔵 전에는 이 절이 「저쪽은 이 조각에서 안 바뀐다」였다 — B1′ 이 저쪽을 넓히면서
+ * **뒤집어 적었다**(지운 것이 아니다). 바로 그 자리에 「뒤 조각이 저쪽도 넓히면 이
+ * 시험이 운다, 그때 고쳐야 하는 시험이지 지워야 하는 시험이 아니다」라고 적혀
+ * 있었다. 저쪽만 보는 더 깊은 셈(편집기의 되돌리기 한 칸·목록 돌기)은 저쪽 집에
+ * 따로 있다 — case-flowchart-multi-node-drag-plumbing.test.ts.
  */
-describe("🔴 [진단 Flowchart] 는 이 조각에서 안 바뀐다", () => {
+describe("🔴 [진단 Flowchart] 도 같은 길을 깔았다 — 다만 화면 동작은 아직 그대로다", () => {
   const code = codeOf(CASE_GRAPH);
 
-  test("🔴 선택 상자를 안 넘긴다 — 그래서 빈 바탕 끌기가 전과 같은 「화면 옮기기」다", () => {
-    assert.ok(!code.includes("boxSelection"), "저쪽이 선택 상자를 켜기 시작했다면 이 조각의 전제가 깨진다");
+  test("🔴 선택 상자는 **여전히** 안 넘긴다 — 그래서 빈 바탕 끌기가 전과 같은 「화면 옮기기」다", () => {
+    assert.ok(!code.includes("boxSelection"), "저쪽이 선택 상자를 켜기 시작했다면 ㉯가 깨진다");
   });
 
-  test("세 손잡이를 **전과 같은 인자 수**로 받는다", () => {
-    assert.ok(code.includes("function handleNodeDragStart(nodeId: string, position: Point, shiftKey: boolean) {"));
-    assert.ok(code.includes("function handleNodeDrag(nodeId: string, position: Point) {"));
-    assert.ok(code.includes("function handleNodeDragStop(nodeId: string, position: Point) {"));
+  test("🔴 세 손잡이가 **움직이는 칸 전부**를 받는다 — 버리면 여럿을 끌어도 하나만 저장된다", () => {
+    assert.ok(code.includes("function handleNodeDragStart(nodeId: string, position: Point, shiftKey: boolean, movingNodes: readonly CaseFlowchartNodeDragMove[]) {"));
+    assert.ok(code.includes("function handleNodeDrag(nodeId: string, position: Point, _shiftKey: boolean, movingNodes: readonly CaseFlowchartNodeDragMove[]) {"));
+    assert.ok(code.includes("function handleNodeDragStop(nodeId: string, position: Point, movingNodes: readonly CaseFlowchartNodeDragMove[]) {"));
   });
 
-  test("위로 올려보내는 모양도 전과 같다 — 칸 하나와 자리 하나", () => {
-    assert.ok(code.includes("onNodeDragStop?: (nodeId: string, position: { x: number; y: number }) => void;"));
-    assert.ok(code.includes("onNodeDragStop?.(nodeId, finalPosition)"));
+  test("위로 올려보내는 모양도 목록을 함께 들려 보낸다 — 칸 하나와 자리 하나로 되돌아가면 안 된다", () => {
+    assert.ok(code.includes("onNodeDragStop?: (nodeId: string, position: { x: number; y: number }, moves: readonly CaseFlowchartNodeDragMove[]) => void;"));
+    assert.ok(code.includes("onNodeDragStop?.(nodeId, finalPosition, finalMoves)"));
+    assert.ok(!code.includes("onNodeDragStop?.(nodeId, finalPosition)"), "칸 하나만 올려보내던 모양이 되살아났다");
+  });
+
+  test("🔴 축 잠금이 복수용으로 갈아탔다 — Shift 로 끌 때 함께 끌리는 칸도 제 축에 걸려야 한다", () => {
+    assert.ok(code.includes("applyAxisLockToMoves(movingNodes, drag.startById, drag.axis)"), "끄는 동안 복수용 축 잠금을 안 쓴다");
+    assert.ok(code.includes("applyAxisLockToMoves(movingNodes, drag.startById, lockedAxis)"), "놓는 순간 복수용 축 잠금을 안 쓴다");
+  });
+
+  test("🔴 손짓 한 번에 콜백 한 번 — 절차 그림과 같은 규칙이다", () => {
+    for (const handler of ["onNodeDragStart", "onNodeDragStop"]) {
+      const calls = code.match(new RegExp(`${handler}\\?\\.\\(`, "g")) ?? [];
+      assert.equal(calls.length, 1, `${handler} 을 위로 알리는 자리가 ${calls.length} 곳이다 — 하나여야 한다`);
+    }
   });
 });
 
@@ -208,7 +229,9 @@ describe("🔴 [진단 Flowchart] 는 이 조각에서 안 바뀐다", () => {
  * 🔵 B1(2026-11-21 앞)에서는 여기가 「두 그림 모두 selected 를 안 싣는다」였다 —
  * 그 조각이 화면 동작을 안 바꾼다는 근거였다. B2 가 절차 그림에 실으면서 **뒤집어
  * 적었다**(지운 것이 아니다): 이제 재는 것은 「싣는가, 그리고 **모드 안에서만**
- * 싣는가」다. [진단 Flowchart] 는 아직 안 싣는다 — 거기는 B2 가 안 건드렸다.
+ * 싣는가」다. [진단 Flowchart] 는 아직 안 싣는다 — B1′ 이 저쪽에 깐 것은 **배선
+ * 뿐**이고(위 절), 선택은 한 줄도 안 건드렸다. 그것이 B1′ 이 화면 동작을 안
+ * 바꾼다는 근거다.
  */
 describe("🔴 「여럿이 함께 끌리는」 열쇠 — 칸에 실은 selected", () => {
   test("캔버스는 여전히 onNodesChange 를 안 붙인다 — 선택 변화가 React Flow 안에 안 남는다(그래서 직접 실어야 한다)", () => {
@@ -241,7 +264,7 @@ describe("🔴 「여럿이 함께 끌리는」 열쇠 — 칸에 실은 selecte
     assert.ok(deps.includes("boxSelectActive"), `flowNodes 의 의존성에 모드가 없다: ${deps}`);
   });
 
-  test("🔵 [진단 Flowchart] 는 아직 안 싣는다 — 저쪽은 B2 가 안 건드렸다", () => {
+  test("🔵 [진단 Flowchart] 는 아직 안 싣는다 — B1′ 은 배선만 깔았고 선택은 안 건드렸다", () => {
     assert.ok(
       !/\bselected:\s/.test(codeOf(CASE_GRAPH)),
       "저쪽도 싣기 시작했다면 이 시험을 고쳐 적어라 — 다만 그 조각은 저쪽의 선택 상자까지 함께 봐야 한다"
