@@ -178,6 +178,7 @@ export default function CaseFlowchartGraph({
   selectedNodeId,
   selectedEdgeId,
   onNodeClick,
+  onNodeClickIntercept,
   onEdgeClick,
   onPaneClick,
   onNodeDragStop,
@@ -199,6 +200,26 @@ export default function CaseFlowchartGraph({
   selectedNodeId?: string | null;
   selectedEdgeId?: string | null;
   onNodeClick?: (nodeId: string) => void;
+  /**
+   * 🔴 **칸을 누른 그 순간, 아무것도 일어나기 전에** 그 id 를 그대로 받는다
+   * (2026-11-21, 조각 B3′). `true` 를 돌려주면 「이 클릭은 내가 썼다」는 뜻이고,
+   * 그때는 [범위 선택]의 넣기/빼기도 `onNodeClick` 도 **한 글자도 안 돈다.**
+   *
+   * 🔴 이것이 있어야 하는 까닭은 「화면에서 선택」 둘이다 — [연결 추가]의 **대상
+   * 노드 고르기**와 [상대 위치로 이동]의 **기준 노드 고르기**. 그 둘은 고르는
+   * 동안 **선택을 옮기면 안 된다**(선택이 옮겨가면 패널이 시작 노드가 바뀐 것으로
+   * 보고 작성 중이던 내용을 비운다). 그래서 「고르기가 썼다」와 「선택을 바꿔라」가
+   * 한 손잡이에 섞이면 안 되고, 소비 여부를 **돌려받는 길**이 따로 필요하다.
+   *
+   * 🔴 그리고 이 자리가 [범위 선택]보다 **앞**이어야 한다. 뒤에 두면 그 모드에서
+   * 칸을 누를 때 넣기/빼기가 클릭을 먼저 가져가, [화면에서 선택]을 켜고 칸을 눌러도
+   * **아무 일도 안 일어난다**(오류도 안 난다 — 2026-11-21 B2′ 가 알고 남겨 둔
+   * 자리였고, 이 조각이 그것을 뚫었다). 절차 그림의 `onNodeClickIntercept` 가 같은
+   * 뜻·같은 차례다(ProcedureFlowGraph 의 handleCanvasNodeClick).
+   *
+   * 🔵 안 넘기면 아무 일도 안 한다 — 읽기 전용 그림(작업 기록 흐름도)은 전과 똑같다.
+   */
+  onNodeClickIntercept?: (nodeId: string) => boolean;
   onEdgeClick?: (edgeId: string) => void;
   onPaneClick?: () => void;
   /**
@@ -335,17 +356,18 @@ export default function CaseFlowchartGraph({
    *    고르기 모드 · 오른쪽 패널 탭이 전부 `onNodeClick` 에 매달려 있어서, 알리면
    *    고르기만 했는데 패널이 통째로 바뀐다.
    *
-   * 🔴 **그래서 [범위 선택] 모드에서는 「화면에서 선택」이 안 먹는다**(2026-11-21,
-   *    알고 남겨 둔 것). [연결 추가]의 대상 고르기와 [상대 위치로 이동]의 기준
-   *    고르기가 그 길인데, 이 모드에서 칸을 누르면 그 클릭을 여기서 가져가므로
-   *    **아무 일도 안 일어난다.** 쓰는 분은 [선택·이동] 으로 돌아가 고르면 된다.
-   *    🔵 절차 그림은 같은 자리에서 고르기 모드가 먼저 이긴다(`onNodeClickIntercept`
-   *       가 그 앞에 있다). 이 그림에는 그 통로가 없고, 뚫는 것은 이 조각의 일이
-   *       아니라 **다음에 정할 일**이다 — 「누르면 아무 일도 안 일어나는 단추」가
-   *       잠깐이라도 생기는 것은 이 저장소가 싫어하는 모양이라, 지우지 말고 여기
-   *       적어 둔다.
+   * 🔴 **그래서 차례가 중요하다 — 「화면에서 선택」이 먼저 이긴다**(2026-11-21,
+   *    조각 B3′). B2′ 때는 이 가지가 맨 앞이어서, [연결 추가]의 대상 고르기와
+   *    [상대 위치로 이동]의 기준 고르기가 이 모드에서 **아무 일도 안 했다**(단추를
+   *    누르고 칸을 눌러도 조용했다 — 오류조차 안 났다). 「누르면 아무 일도 안
+   *    일어나는 단추」는 이 저장소가 싫어하는 모양이라, 절차 그림과 **같게** 고쳤다:
+   *    가로채기가 먼저고, 그것이 클릭을 쓰면 넣기/빼기는 아예 안 돈다
+   *    (ProcedureFlowGraph 의 handleCanvasNodeClick 도 같은 차례다).
+   * 🔵 가로채기가 **소비하면 아래로 한 글자도 안 흘린다** — 고르는 동안 선택이
+   *    옮겨가면 패널이 「시작 노드가 바뀌었다」로 보고 작성 중이던 내용을 비운다.
    */
   function handleCanvasNodeClick(nodeId: string) {
+    if (onNodeClickIntercept?.(nodeId)) return;
     if (boxSelectActive) {
       setBoxSelectedNodeIds((current) => toggleNodeInSelection(current, nodeId));
       return;

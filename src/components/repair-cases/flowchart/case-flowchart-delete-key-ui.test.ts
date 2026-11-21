@@ -237,12 +237,20 @@ describe("[진단] [Delete] 로 지우기 — ④🔴 지우는 길은 **단추�
   test("🔴 단추와 키가 **같은 함수 둘**을 부른다", () => {
     assert.ok(f.includes("onDelete={() => handleDeleteNode(selectedNode.id)}"), "노드 패널의 단추");
     assert.ok(f.includes("onDelete={() => handleDeleteEdge(selectedEdge.id)}"), "연결선 패널의 단추");
+    // 🔵 2026-11-21(조각 B3′)에 ref 에 **넷째가 붙었다** — [범위 선택]으로 고른 여럿을
+    //    지우는 handleDeleteNodes 다. 단수 둘이 패널과 같은 함수라는 것은 그대로
+    //    지킨다(그것이 「단추와 같은 통로」의 근거다). 그 넷과 함께 모드·고른 칸도
+    //    같은 ref 로 나른다(까닭은 그 자리 주석에 — 의존성에 넣으면 글자 한 자마다
+    //    keydown 등록이 돈다).
     assert.ok(
-      f.includes("const deleteByKeyRef = useRef({ node: handleDeleteNode, edge: handleDeleteEdge, removeSelectedWaypoint: handleRemoveSelectedWaypoint });"),
-      "키가 부르는 셋이 단추와 같은 함수여야 한다"
+      f.includes(
+        "const deleteByKeyRef = useRef({ node: handleDeleteNode, edge: handleDeleteEdge, nodes: handleDeleteNodes, removeSelectedWaypoint: handleRemoveSelectedWaypoint, boxSelectActive, boxSelectedNodes: boxSelectedDeleteCandidates, });"
+      ),
+      "키가 부르는 넷이 단추와 같은 함수여야 한다"
     );
     assert.ok(keyHandler.includes("deleteByKeyRef.current.node(plan.nodeId)"));
     assert.ok(keyHandler.includes("deleteByKeyRef.current.edge(plan.edgeId)"));
+    assert.ok(keyHandler.includes("deleteByKeyRef.current.nodes(plan.nodeIds)"), "복수도 같은 ref 를 지나야 한다");
     assert.ok(!keyHandler.includes("Action("), "키가 서버 액션을 직접 부르고 있다");
   });
 
@@ -491,28 +499,39 @@ describe("[진단] [Delete] 로 지우기 — ⑦🔴 절차에 있고 **진단�
     assert.equal(countOf(f, "nodeDeleteBlockedReason"), 1, "화면에서 그 낱말이 나오는 자리는 키에 null 을 넘기는 한 줄뿐이어야 한다");
   });
 
-  test("🔴 [범위 선택]은 생겼지만 **[Delete] 는 아직 모른다** — false / [] 를 넘겨 그 가지를 안 세운다", () => {
-    assert.ok(keyHandler.includes("boxSelectActive: false,"));
-    assert.ok(keyHandler.includes("boxSelectedNodes: [],"));
-    assert.ok(!keyHandler.includes("DELETE_NODES"), "복수 갈래를 받는 길이 생겼다 — 아직 그 기능이 없다");
-    // 🔴 2026-11-21(조각 B2′) — 전에는 여기가 「진단 화면에 `boxSelectedNodeIds` 가
-    //    **없다**」였다. [범위 선택] 도구가 들어오면서 그 상태가 이 화면까지 올라왔고
-    //    (다음 조각 B3′ 의 [Delete] 복수 삭제가 그것을 읽는다), 그래서 단언을
-    //    **반대 방향으로** 고쳐 적었다 — 지우면 「들어왔다 다시 빠져도」 아무도 모른다.
-    // 🔴 **이 절이 계속 지키는 것**은 그대로다: 고른 집합이 화면에 있어도 **키 판정에는
-    //    아직 안 흘러간다.** 그래서 [범위 선택] 모드에서 [Delete] 는 아무 일도 안 한다
-    //    (그 모드에서는 단수 선택이 늘 비어 있다 — 그림이 모드를 바꿀 때 비운다).
+  test("🔴 [범위 선택]이 **[Delete] 까지 왔다** — 다만 막는 까닭은 칸마다 여전히 null 이다", () => {
+    // 🔴 2026-11-21(조각 B3′) — 이 절의 단언이 **두 번째로 뒤집혔다.** 처음에는
+    //    「화면에 `boxSelectedNodeIds` 가 **없다**」였고(C3), B2′ 가 도구를 세우면서
+    //    「상태는 있는데 **키로는 안 흘러간다**」가 됐다. 이번 조각이 바로 그 흘러가는
+    //    길을 뚫었으므로 또 **반대 방향으로** 고쳐 적는다 — 지우면 「들어왔다 다시
+    //    빠져도」 아무도 모른다.
+    // 🔴 **이 절이 계속 지키는 것**: 복수 갈래가 서도 「미리 막는 까닭」은 진단에
+    //    여전히 **하나도 없다.** 칸마다 싣는 deleteBlockedReason 이 전부 null 이어야
+    //    하고(절차는 체크리스트·고장 진단표를 보고 채운다), 그 말은 **고른 것이 전부
+    //    지워진다**는 뜻이다.
+    assert.ok(keyHandler.includes("boxSelectActive: deleteByKeyRef.current.boxSelectActive,"), "모드를 판정에 안 넘긴다");
+    assert.ok(keyHandler.includes("boxSelectedNodes: deleteByKeyRef.current.boxSelectedNodes,"), "고른 칸들을 판정에 안 넘긴다");
+    assert.ok(keyHandler.includes('if (plan.action === "DELETE_NODES") {'), "복수 갈래를 받는 길이 없다");
     assert.ok(screen.includes("const [boxSelectedNodeIds, setBoxSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set<string>());"), "범위 선택 상태가 화면에서 사라졌다");
     assert.ok(
       flat(screen).includes("boxSelectedNodeIds={boxSelectedNodeIds} onBoxSelectionChange={setBoxSelectedNodeIds}"),
       "고른 집합을 그림에 안 넘긴다 — 그림이 제 안의 값으로 돌면 화면이 그것을 못 읽는다"
     );
-    // 🔴 **키 판정 쪽으로는 한 글자도 안 샜다**는 근거 — 그 낱말이 화면에 나오는
-    //    자리는 위 둘(상태 선언 · 그림에 넘기기)뿐이어야 한다. 수로 재지 않으면
-    //    키 쪽에 몰래 꽂혀도 위 단언들은 멀쩡히 통과한다.
-    assert.equal(countOf(f, "boxSelectedNodeIds"), 3, "고른 집합을 쓰는 자리가 늘었다 — [Delete] 로 샜는지 보라");
-    // 🔵 판정 쪽에는 그 갈래가 분명히 있다는 근거 — 「없는 갈래라 안 썼다」가 아니라
-    //    **쓸 수 있는데 지금은 안 쓴다**는 것이 이 단언의 뜻이다.
+    // 🔴 **그 낱말이 화면에 나오는 자리는 넷**이다(상태 선언 · 그림에 넘기는 둘 ·
+    //    고른 칸을 추리는 한 줄). 수로 재지 않으면 다섯째가 몰래 꽂혀도 위 단언들은
+    //    멀쩡히 통과한다.
+    assert.equal(countOf(f, "boxSelectedNodeIds"), 4, "고른 집합을 쓰는 자리가 늘었다 — 어디로 샜는지 보라");
+    // 🔴🔴 **막는 까닭은 칸마다 null 이다** — 진단 노드 행에는 절차가 보는 칸
+    //      (체크리스트·고장 진단표)이 아예 없어 셀 수조차 없다. 글자로 못 박아 두지
+    //      않으면 어느 날 「임시로」 다른 값이 들어가고, 그러면 단추와 키가 다른 답을
+    //      낸다(단추 쪽에는 미리 막는 판정이 아예 없다 — ①-2절).
+    assert.ok(
+      f.includes("renderedNodes .filter((n) => boxSelectedNodeIds.has(n.id)) .map((n) => ({ id: n.id, deleteBlockedReason: null }));"),
+      "고른 칸을 추리는 줄이 바뀌었다 — 그려진 목록을 돌지 않거나, 막는 까닭이 null 이 아니다"
+    );
+    assert.ok(!screen.includes("resolveProcedureNodeDeleteBlockedReason"), "진단 화면이 절차의 셈 함수를 부르고 있다");
+    assert.ok(planModule.includes("readonly deleteBlockedReason: string | null }"), "판정이 칸마다 받는 그 자리가 사라졌다");
+    // 🔵 판정 쪽 복수 갈래가 실제로 있다는 근거.
     assert.ok(planModule.includes('readonly action: "DELETE_NODES"'), "판정의 복수 갈래가 사라졌다");
   });
 

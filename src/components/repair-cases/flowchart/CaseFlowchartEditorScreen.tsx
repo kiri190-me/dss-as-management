@@ -94,7 +94,21 @@ import {
 // 가 정한다(선 먼저 · 노드 나중이라는 차례까지 거기 있고 값으로 재어진다).
 // 🔵 findEdgesAttachedToNode 는 **뒤처리에 쓸 id 를 얻는 데** 남는다 — 함께 지워지는
 //    선들의 칸 초안·경로점을 버려야 해서다. 지울 줄을 정하는 데는 안 쓴다(두 벌이 된다).
-import { findEdgesAttachedToNode, planProcedureNodeDeletionOperations } from "@/lib/domain/procedure-editor-node-deletion";
+// 🔴 2026-11-21(조각 B3′) — [범위 선택]으로 고른 **여럿**을 [Delete] 로 지우면서
+//    복수 짝 둘이 더 왔다. 둘 다 단수와 **같은 한 벌**이다: 복수 쌓기는 노드마다 단수
+//    쌓기를 돌려 이어 붙일 뿐이고(그래서 「노드 하나를 지우면 무엇이 쌓이는가」가 한
+//    벌로 남는다), 복수 찾기는 겹치는 선을 한 번만 담는다(두 노드를 함께 지우면 그
+//    둘을 잇던 선이 양쪽에 걸린다 — 수를 세는 데 쓰면 거짓이 된다).
+import {
+  findEdgesAttachedToNode,
+  findEdgesAttachedToNodes,
+  planProcedureNodeDeletionOperations,
+  planProcedureNodesDeletionOperations,
+} from "@/lib/domain/procedure-editor-node-deletion";
+// 🔵 고른 집합에서 **지운 것만** 빼는 순수 함수 — 그림이 집합을 만들 때 쓰는 그
+//    모듈이다(toggleNodeInSelection · findNodeIdsInSelectionBox 와 한집). 집합을
+//    다루는 셈이 화면마다 따로 적히면 「언제 어떻게 줄어드는가」가 두 벌이 된다.
+import { removeNodesFromSelection } from "@/lib/graph-editor-core/box-selection";
 // [Delete] 키가 **무엇을 가리키는가**를 정하는 순수 판정 — 「기술 작업 절차」
 // 편집기가 쓰는 그 파일 그대로다. 이름이 `procedure-` 로 시작해도 베끼지 않는
 // 까닭은 아래 keydown 자리의 주석에 적어 두었다.
@@ -419,15 +433,19 @@ export default function CaseFlowchartEditorScreen({
    * 2026-11-21(조각 B2′) — 그림 위에서 **마우스가 하는 일**([선택·이동] / [범위 선택])과
    * [범위 선택]으로 **고른 칸들.**
    *
-   * 🔴 **둘 다 여기까지 들어 올린 까닭은 다음 조각(B3′)의 [Delete] 하나**다. 고른
-   * 여럿을 한 번에 지우는 일은 「모아 두는 목록에 쌓고 되돌리기 한 칸을 찍는」 일이라
-   * 이 화면 말고 할 데가 없고, 그러려면 이 화면이 **지금 어느 모드인지**와 **무엇이
-   * 골라져 있는지**를 알아야 한다. 이번 조각에서는 그림에 그대로 내려보내기만 한다.
+   * 🔴 **둘 다 여기까지 들어 올린 까닭은 [Delete] 하나**다. 고른 여럿을 한 번에
+   * 지우는 일은 「모아 두는 목록에 쌓고 되돌리기 한 칸을 찍는」 일이라 이 화면 말고
+   * 할 데가 없고, 그러려면 이 화면이 **지금 어느 모드인지**와 **무엇이 골라져
+   * 있는지**를 알아야 한다. 🔴 2026-11-21(조각 B3′)에 **실제로 그 둘을 읽기
+   * 시작했다** — 아래 boxSelectActive · boxSelectedDeleteCandidates 가 그 자리다
+   * (B2′ 때는 그림에 그대로 내려보내기만 했다).
    *
    * 🔴 **이 화면이 제 손으로 갈아 끼우지 않는다.** 바꾸는 길도 비우는 길도 그림 안에
    * 있다 — `changeCanvasTool`(모드 전환, 바꾸는 김에 양쪽 선택을 비운다)과
    * `handleCanvasPaneClick`(빈 바탕 누르기). 여기서 직접 부르면 「언제 비워지는가」가
    * 두 곳에 적히고, 앞 모드에서 고른 칸이 남아 **엉뚱한 칸이 함께 끌린다.**
+   * 🔵 **딱 하나 예외**가 handleDeleteNodes 의 「지운 칸 빼기」다 — 그것은 「비우기」가
+   *    아니라 「사라진 것을 목록에서 거두는 뒤처리」라서 지우는 쪽에 있어야 한다.
    */
   const [canvasTool, setCanvasTool] = useState<ProcedureCanvasTool>("POINTER");
   const [boxSelectedNodeIds, setBoxSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set<string>());
@@ -757,6 +775,64 @@ export default function CaseFlowchartEditorScreen({
     // 🔵 함께 지워진 선을 고른 채였다면 **선택도 푼다.** 안 풀어도 연결선 패널은 안
     //    선다(그려진 선에서만 서고 그 선은 이미 사라졌다). 다만 고른 경로점이 남아
     //    있으면 [Delete] 가 없는 선의 점을 지우러 간다.
+    if (selectedEdgeId !== null && attachedEdgeIds.includes(selectedEdgeId)) {
+      setSelectedEdgeId(null);
+      setSelectedWaypointIndex(null);
+    }
+  }
+
+  /**
+   * ── 🔴 **[범위 선택]으로 고른 여럿을 한 번에** (2026-11-21, 조각 B3′) ─────────
+   * 쓰는 분 요청(원문): 「[진단 FLOWCHART]에서도 같은 동작이 되야 해.」 절차 편집기가
+   * 같은 날 먼저 갔다(커밋 faf7abfe). 들어오는 목록은 **판정이 골라 준 것 그대로**다
+   * (planProcedureDeleteKey 의 복수 가지) — 화면이 다시 거르지 않는다.
+   *
+   * 🔴 **위 단수 함수 안에 못 넣는다.** 넣으면 그 함수가 queueStructural 을 두 번
+   * 부르거나 가지를 타게 되는데, 「삭제 한 번에 통로를 한 번만 지난다」는 것이
+   * [이전] 한 칸의 근거라 이웃 시험 둘이 **정확히 1회**로 못 박고 있다
+   * (case-flowchart-node-delete-cascade-ui.test.ts · case-flowchart-delete-key-ui.test.ts).
+   * 그래서 새 함수다.
+   *
+   * 🔴 **queueStructural 은 여기서도 한 번뿐이다.** 노드마다 부르면 지금은 우연히
+   * 한 칸으로 접힐 수 있지만(스냅샷 ref 가 한 이벤트 안에서 안 바뀐다) 그것은
+   * 최적화이지 약속이 아니다. 노드마다의 줄을 **합친 배열 하나**로 넘겨야 [이전]
+   * 한 번에 고른 것과 딸린 선이 전부 돌아온다.
+   * 🔵 두 노드가 공유하던 선은 DELETE_EDGE 가 두 줄 적히는데, 서버로 가는 길에 반드시
+   *    지나는 접기(coalescePendingStructuralOperations)가 DUPLICATE_DELETE 로 한 줄로
+   *    만든다. 화면의 「변경 N건」도 접힌 뒤 센다.
+   *
+   * 🔴 붙은 선을 찾는 목록이 **renderedEdges** 인 것은 단수와 **같은 까닭**이다 —
+   * 이 편집기는 연결선 재연결을 구조 조작이 아니라 **초안 지도**로 들고 있어서,
+   * 미리보기 목록(structuralPreview.edges)은 저장 전에 옮긴 선의 **옛 양 끝**을
+   * 그대로 들고 있다. 그것으로 세면 떠난 선을 지우고 옮겨 온 선은 남긴다(둘 다 사람이
+   * 시킨 적 없는 일이고, 남은 쪽은 [저장]에서 없어진 노드로 재연결하려다 실패한다).
+   *
+   * 🔴 **뒤처리는 단수와 똑같이 지도 넷 전부**다. 하나라도 빠뜨리면 [저장]이 **없는
+   * 노드·선**에 칸 값·경로점을 쓰려 들어 **저장 전체가 실패한다**.
+   *
+   * 🔵 사유는 null 이다 — 이 길은 키 하나뿐이고 사유를 받을 칸이 없다(단수의 키 경로도
+   *    같고, 사유 칸은 애초에 「선택」이다).
+   */
+  function handleDeleteNodes(nodeIds: readonly string[]) {
+    if (!canEdit) return;
+    // 🔵 판정은 빈 목록을 안 준다. 그래도 막아 두는 까닭은, 빈 호출이 **아무것도
+    //    안 바뀐 [이전] 한 칸**을 찍어 되돌리기를 한 번 헛돌게 하기 때문이다.
+    if (nodeIds.length === 0) return;
+    const attachedEdgeIds = findEdgesAttachedToNodes(renderedEdges, nodeIds);
+    queueStructural(() => planProcedureNodesDeletionOperations(renderedEdges, nodeIds, null));
+    setPendingNodeDraftsById((prev) => dropKeys(prev, nodeIds));
+    setPendingNodePositionsById((prev) => dropKeys(prev, nodeIds));
+    setPendingEdgeDraftsById((prev) => dropKeys(prev, attachedEdgeIds));
+    setPendingRoutePointsByEdgeId((prev) => dropKeys(prev, attachedEdgeIds));
+    // 🔴 **지운 것만 뺀다** — 통째로 비우지 않는다. 진단에는 미리 막는 까닭이 하나도
+    //    없어서 오늘은 고른 것이 전부 지워지고 집합이 비지만(절차에는 체크리스트가
+    //    걸린 칸이 남는다), 「비우기」와 「지운 것 빼기」는 뜻이 다른 일이다. 비우는
+    //    길은 그림 안의 둘(모드 전환 · 빈 바탕 누르기)뿐이어야 한다.
+    setBoxSelectedNodeIds((prev) => removeNodesFromSelection(prev, nodeIds));
+    // 🔵 단수 선택은 이 모드에서 늘 비어 있다(그림이 모드를 바꿀 때 onPaneClick 으로
+    //    비운다). 그래도 「지워진 것을 고른 채로 두지 않는다」는 뒤처리는 단수와
+    //    똑같이 해 둔다 — 둘이 함께 설 수 있게 되는 날 없는 노드의 패널이 선다.
+    if (selectedNodeId !== null && nodeIds.includes(selectedNodeId)) setSelectedNodeId(null);
     if (selectedEdgeId !== null && attachedEdgeIds.includes(selectedEdgeId)) {
       setSelectedEdgeId(null);
       setSelectedWaypointIndex(null);
@@ -1184,9 +1260,9 @@ export default function CaseFlowchartEditorScreen({
    * 절차」 편집기에 2026-11-21 에 붙은 것을 그대로 옮긴 것이다.
    *
    * 🔴 **무엇을 지울지 여기서 판정하지 않는다** — planProcedureDeleteKey 하나가
-   * 답한다. 차례(경로점 → 노드 → 연결선) · 글자 칸 보호 · Backspace 결정 · 막힌
-   * 노드에서 연결선으로 안 흘러내리는 규칙까지 전부 그 파일에 까닭과 함께 있고,
-   * 값으로 재어진다(src/lib/domain/procedure-editor-delete-key.test.ts).
+   * 답한다. 차례(경로점 → 복수 노드 → 노드 → 연결선) · 글자 칸 보호 · Backspace
+   * 결정 · 막힌 노드에서 연결선으로 안 흘러내리는 규칙까지 전부 그 파일에 까닭과
+   * 함께 있고, 값으로 재어진다(src/lib/domain/procedure-editor-delete-key.test.ts).
    *
    * 🔵 이름이 `procedure-` 로 시작해도 **베끼지 않고 그대로 쓴다.** 그 파일은
    * import 가 하나도 없고 입력이 전부 string · boolean · null 이라 절차 쪽 자료형을
@@ -1208,22 +1284,78 @@ export default function CaseFlowchartEditorScreen({
    *     🔴 그러니 막는 까닭이 진단에 다시 생기는 날에는 **이 줄도 함께 고쳐야 한다.**
    *     여기 null 을 박아 둔 채 handleDeleteNode 에만 막음을 넣으면, 단추로는
    *     막히는데 키로는 지워지는 화면이 된다(그 반대도 마찬가지다).
-   *  ③ `boxSelectActive` / `boxSelectedNodes` — [범위 선택]은 진단에 아직 없다.
-   *     false / [] 를 넘기면 복수 갈래는 영영 안 선다.
+   *  ③ `boxSelectActive` / `boxSelectedNodes` — 🔴 2026-11-21(조각 B3′)에 **실제로
+   *     들어왔다.** B2′ 까지는 false / [] 를 박아 두어 복수 갈래가 영영 안 섰는데,
+   *     [범위 선택]으로 고른 것을 [Delete] 로 함께 지우는 것이 이 조각의 일이다.
+   *     🔵 다만 칸마다 싣는 `deleteBlockedReason` 은 **전부 null** 이다 — 위 ②와
+   *        같은 까닭으로 진단에는 미리 셀 수 있는 막음이 하나도 없다. 그래서 고른
+   *        것은 전부 지워지고 집합은 비게 된다(절차에서는 체크리스트가 걸린 칸이
+   *        골라진 채 남는다 — 진단 노드 행에는 그런 칸이 아예 없다).
    *
    * 🔵 확인 창은 안 띄운다 — 지금 삭제 **단추**도 안 띄운다(잘못 지웠으면 [이전]이
    * 목록에서 그 줄을 빼 준다 — 조각 C2 부터 삭제는 서버에 바로 안 간다). 키만
    * 다르게 굴면 안 된다.
    */
   /**
-   * 🔴 지우기 셋의 **가장 최근 신원**. 이 화면의 함수들은 useCallback 이 아니라
+   * 🔴 지금 **[범위 선택] 도구로 그림을 보고 있는가**(2026-11-21, 조각 B3′).
+   * 그림 쪽의 `boxSelectActive`(= canUseBoxSelect && canvasTool === "BOX_SELECT",
+   * 거기서 canUseBoxSelect 는 `editable` 하나다)와 **같은 값**을 이 화면이 제 손에
+   * 든 둘로 다시 세운 것이다 — 그림에 넘기는 `editable` 이 곧 `canEdit` 이다.
+   *
+   * 🔴 그림은 이 값으로 **칸에 테두리를 실을지**를 정하고, 이 화면은 **[Delete] 가
+   * 고른 집합을 볼지**를 정한다. 둘이 갈리면 「테두리는 보이는데 키로는 안 지워진다」
+   * (또는 그 반대로 **보이지도 않는 것이 지워진다**)가 되고 오류는 안 난다.
+   * 🔵 절차 쪽은 같은 줄에 `layoutMode === "USER"` 가 하나 더 붙는다 — 이 그림에는
+   *    배치 모드라는 개념이 없어(저장된 좌표 한 쌍뿐) 관문도 그만큼 짧다.
+   */
+  const boxSelectActive = canEdit && canvasTool === "BOX_SELECT";
+  /**
+   * 🔴 [Delete] 에 넘길 **고른 칸들**.
+   *
+   * 🔴 **그림에 그려진 목록(renderedNodes)을 돌며** 고른 것만 추린다 — 집합을 돌며
+   * 노드를 찾지 않는다. 까닭 둘: ① 그 사이에 사라진 칸의 id 가 집합에 남아 있어도
+   * **없는 행을 지우는 조작이 안 쌓인다**(단수 쪽이 selectedNode?.id 로 같은 것을
+   * 지킨다), ② 차례가 **그림이 그린 차례**가 되어 사람이 본 것과 같다.
+   *
+   * 🔴 `deleteBlockedReason` 은 **전부 null** 이다. 절차는 여기서
+   * resolveProcedureNodeDeleteBlockedReason 을 돌려 채우는데, 그 함수가 보는 칸
+   * (체크리스트 · 고장 진단표)이 진단 노드 행에는 **아예 없어** 컴파일도 안 된다.
+   * 🔴 「진단에서는 안 막기로 했다」가 아니라 **「미리 셀 수 있는 것이 없다」**이고,
+   * 막는 까닭이 진단에 생기는 날에는 단수 쪽(위 키 판정의 nodeDeleteBlockedReason)과
+   * **함께** 고쳐야 한다 — 한쪽만 채우면 단추와 키가 다른 답을 낸다.
+   */
+  const boxSelectedDeleteCandidates = renderedNodes
+    .filter((n) => boxSelectedNodeIds.has(n.id))
+    .map((n) => ({ id: n.id, deleteBlockedReason: null }));
+  /**
+   * 🔴 지우기 넷의 **가장 최근 신원**. 이 화면의 함수들은 useCallback 이 아니라
    * 렌더마다 다시 만들어지는 선언이라, 아래 의존성 배열에 그대로 넣으면 keydown
    * 등록·해제가 렌더마다(드래그 중에는 프레임마다) 돈다. 바로 위
    * pendingSnapshotRef 가 같은 까닭으로 쓰는 수법 그대로다.
+   *
+   * 🔴 2026-11-21(조각 B3′) — **모드와 고른 칸 목록도 여기 싣는다.** 그 목록은
+   * 렌더마다 새 배열이고(renderedNodes 가 초안을 물고 있어 칸 하나에 글자를 칠
+   * 때마다 신원이 바뀐다), 의존성에 넣으면 **글자 한 자마다 keydown 등록이 돈다.**
+   * ref 는 렌더마다 갱신되고 키는 눌린 **그 순간** 읽으므로 값은 언제나 가장 최근
+   * 것이다(그래서 아래 갱신 효과에는 의존성 배열이 없다).
    */
-  const deleteByKeyRef = useRef({ node: handleDeleteNode, edge: handleDeleteEdge, removeSelectedWaypoint: handleRemoveSelectedWaypoint });
+  const deleteByKeyRef = useRef({
+    node: handleDeleteNode,
+    edge: handleDeleteEdge,
+    nodes: handleDeleteNodes,
+    removeSelectedWaypoint: handleRemoveSelectedWaypoint,
+    boxSelectActive,
+    boxSelectedNodes: boxSelectedDeleteCandidates,
+  });
   useEffect(() => {
-    deleteByKeyRef.current = { node: handleDeleteNode, edge: handleDeleteEdge, removeSelectedWaypoint: handleRemoveSelectedWaypoint };
+    deleteByKeyRef.current = {
+      node: handleDeleteNode,
+      edge: handleDeleteEdge,
+      nodes: handleDeleteNodes,
+      removeSelectedWaypoint: handleRemoveSelectedWaypoint,
+      boxSelectActive,
+      boxSelectedNodes: boxSelectedDeleteCandidates,
+    };
   });
 
   /**
@@ -1244,8 +1376,10 @@ export default function CaseFlowchartEditorScreen({
         selectedEdgeId: deletableEdgeId,
         selectedWaypointIndex,
         nodeDeleteBlockedReason: null,
-        boxSelectActive: false,
-        boxSelectedNodes: [],
+        // 🔴 이 둘만 ref 에서 읽는다 — 까닭은 위 ref 주석에(의존성에 넣으면 글자
+        //    한 자마다 등록이 돈다). 값은 렌더마다 갱신되므로 가장 최근 것이다.
+        boxSelectActive: deleteByKeyRef.current.boxSelectActive,
+        boxSelectedNodes: deleteByKeyRef.current.boxSelectedNodes,
       });
       // 🔴🔴 아무 일도 안 할 때는 **이벤트에 손도 안 댄다.** 글자 칸에서
       //    preventDefault 를 하면 그 키가 글자를 안 지운다.
@@ -1257,12 +1391,18 @@ export default function CaseFlowchartEditorScreen({
         deleteByKeyRef.current.removeSelectedWaypoint();
         return;
       }
+      // 🔴 복수가 단수보다 **앞**이다(판정의 차례 그대로다 — 둘이 동시에 설 수
+      //    없으니 오늘은 순서가 눈에 안 보이지만, 어느 쪽이 이기는지는 코드에
+      //    적혀 있어야 한다).
+      if (plan.action === "DELETE_NODES") {
+        deleteByKeyRef.current.nodes(plan.nodeIds);
+        return;
+      }
       if (plan.action === "DELETE_NODE") {
         deleteByKeyRef.current.node(plan.nodeId);
         return;
       }
-      // 🔵 남은 갈래는 DELETE_EDGE 하나다 — 복수(DELETE_NODES)는 위에서 늘 빈 값을
-      //    넘기므로 설 길이 없다([범위 선택]이 진단에 생기는 날 여기가 늘어난다).
+      // 🔵 남은 갈래는 DELETE_EDGE 하나다.
       if (plan.action === "DELETE_EDGE") deleteByKeyRef.current.edge(plan.edgeId);
     }
     window.addEventListener("keydown", handleKeyDown);
@@ -1953,20 +2093,34 @@ export default function CaseFlowchartEditorScreen({
                 editable={canEdit}
                 selectedNodeId={selectedNodeId}
                 selectedEdgeId={selectedEdgeId}
-                onNodeClick={(nodeId) => {
+                // 🔴 2026-11-21(조각 B3′) — 「화면에서 선택」 둘이 **이 손잡이로 옮겨
+                //    왔다.** 전에는 바로 아래 onNodeClick 의 앞머리에 있었는데, [범위
+                //    선택] 모드에서는 그림이 그 클릭을 **먼저 가져가** 넣기/빼기만
+                //    했다 — 단추를 누르고 칸을 눌러도 **아무 일도 안 일어났다**(오류도
+                //    안 났다). 그림 쪽에서 이 가로채기를 [범위 선택]보다 **앞**에
+                //    두었으므로, 이제 고르기 모드가 켜져 있으면 그 클릭이 먼저 간다
+                //    (절차 편집기의 onNodeClickIntercept 와 같은 뜻·같은 차례다).
+                // 🔴 **true 를 돌려주는 것이 「내가 썼다」**는 뜻이고, 그때 선택은 한
+                //    글자도 안 바뀐다 — 선택이 옮겨가면 [연결 추가] 패널이 시작 노드가
+                //    바뀐 것으로 보고 작성 중이던 내용을 비우고, [상대 위치로 이동]은
+                //    방금 고른 기준을 쓸 패널 자체가 다른 노드로 갈아 끼워진다.
+                onNodeClickIntercept={(nodeId) => {
                   if (isPickingEdgeTarget) {
                     // 선택 대기 중의 클릭은 "대상 노드 지정"이다 — 선택은 그대로
                     // 두어(연결 추가 패널이 초기화되지 않게) 대상만 바꾼다.
                     setIsPickingEdgeTarget(false);
                     setPickedEdgeTarget((prev) => ({ nodeId, seq: (prev?.seq ?? 0) + 1 }));
-                    return;
+                    return true;
                   }
                   if (isPickingReferenceNode) {
                     // 기준 노드만 바꾸고 선택은 그대로 둔다.
                     setIsPickingReferenceNode(false);
                     setPickedReferenceNode((prev) => ({ nodeId, seq: (prev?.seq ?? 0) + 1 }));
-                    return;
+                    return true;
                   }
+                  return false;
+                }}
+                onNodeClick={(nodeId) => {
                   setSelectedNodeId(nodeId);
                   setSelectedEdgeId(null);
                   setSelectedWaypointIndex(null);

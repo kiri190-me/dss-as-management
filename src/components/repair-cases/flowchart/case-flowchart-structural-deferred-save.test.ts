@@ -338,9 +338,13 @@ describe("[진단] 구조 변경 모아 두기 — ④🔴 다섯 자리가 **�
     for (const [name, body] of Object.entries(callers)) {
       assert.equal(countOf(body, "queueStructural("), 1, `${name} 이 통로를 여러 번 지난다 — [이전]을 그만큼 더 눌러야 한다`);
     }
-    // 🔵 지우기 둘은 이웃 시험(case-flowchart-delete-key-ui.test.ts ④절)이 같은 수를 센다.
-    //    여기서는 **전부 합쳐 몇 자리인가**만 센다: 정의 한 줄 + 다섯.
-    assert.equal(countOf(f, "queueStructural("), 6, "통로를 부르는 자리 수가 안 맞는다(정의 한 줄 + 다섯)");
+    // 🔵 지우기 셋은 이웃 시험(case-flowchart-delete-key-ui.test.ts ④절 ·
+    //    case-flowchart-multi-node-delete-ui.test.ts ④절)이 각각 같은 수를 센다.
+    //    여기서는 **전부 합쳐 몇 자리인가**만 센다: 정의 한 줄 + 여섯.
+    // 🔴 2026-11-21(조각 B3′)에 다섯에서 **여섯**이 됐다 — [범위 선택]으로 고른
+    //    여럿을 지우는 handleDeleteNodes 가 붙었다. 단수 안에 가지를 치지 않고 새
+    //    함수를 만든 까닭은 그 자리 주석에(「한 번만 지난다」가 [이전] 한 칸의 근거다).
+    assert.equal(countOf(f, "queueStructural("), 7, "통로를 부르는 자리 수가 안 맞는다(정의 한 줄 + 여섯)");
     assert.ok(f.includes("setPendingStructuralOperations(next);"), "통로가 목록을 갈아끼우는 줄");
     assert.equal(countOf(f, "setPendingStructuralOperations("), 4, "목록을 고치는 자리는 넷뿐이다(통로 · 되돌리기 · 저장 · 모두 취소)");
   });
@@ -515,26 +519,32 @@ describe("[진단] 구조 변경 모아 두기 — ⑦🔴 **옮기지 않기로
     assert.ok(structural.includes('case "CHANGE_NODE_TYPE": case "RETARGET_EDGE": return { ok: false,'));
   });
 
-  test("🔴 「붙은 선도 함께 지우기」는 **C3 에서 왔다** · [범위 선택]은 고르기까지만 왔다", () => {
+  test("🔴 「붙은 선도 함께 지우기」는 **C3 에서** · [범위 선택]의 복수 삭제는 **B3′ 에서** 왔다", () => {
     // 🔴 2026-11-21 — 조각 C2 에서는 「이번 조각의 일이 아니다」로 **없음**을 재던
     //    자리다. 같은 날 조각 C3 에서 쓰는 분 결정으로 실제로 들어왔으므로 단언을
     //    **반대 방향으로** 고쳐 적었다(지우면 「들어왔다 다시 빠져도」 아무도 모른다).
     //    🔵 무엇을 쌓고 무엇을 치우는지는 이웃
     //       case-flowchart-node-delete-cascade-ui.test.ts 가 항목별로 잰다.
     assert.ok(screen.includes("planProcedureNodeDeletionOperations"), "노드 삭제가 붙은 선을 안 쌓는다 — C3 에서 들어온 것이다");
-    // 🔴 **복수 쪽은 여전히 없다.** 단수(…ToNode)와 복수(…ToNodes)는 글자가 한 자
-    //    차이라, 복수가 몰래 들어와도 위 단언은 멀쩡히 통과한다.
-    assert.ok(!screen.includes("findEdgesAttachedToNodes"), "복수 삭제용 셈 함수가 들어왔다");
-    assert.ok(!screen.includes("planProcedureNodesDeletionOperations"), "복수 삭제용 쌓기 함수가 들어왔다");
+    // 🔴 2026-11-21(조각 B3′) — **복수 쪽도 들어왔다.** 전에는 「여전히 없다」를 재던
+    //    두 줄이고, 단수(…ToNode)와 복수(…ToNodes)가 글자 한 자 차이라 「몰래 들어와도
+    //    위 단언은 통과한다」는 까닭으로 따로 세고 있었다. 그 까닭은 **방향만 뒤집어**
+    //    그대로 산다 — 복수가 조용히 **빠져도** 단수 쪽 단언은 멀쩡히 통과한다.
+    assert.ok(screen.includes("findEdgesAttachedToNodes"), "복수 삭제용 셈 함수가 사라졌다");
+    assert.ok(screen.includes("planProcedureNodesDeletionOperations"), "복수 삭제용 쌓기 함수가 사라졌다");
+    // 🔴 둘 다 **단수와 같은 한 벌**에서 온다는 근거 — 진단이 제 손으로 베껴 적으면
+    //    「노드 하나를 지우면 무엇이 쌓이는가」가 두 벌이 된다.
+    assert.ok(
+      flat(screenRaw).includes('} from "@/lib/domain/procedure-editor-node-deletion";'),
+      "복수 짝을 절차 쪽 한 벌에서 안 들여온다"
+    );
+    assert.ok(flat(screenRaw).includes('import { removeNodesFromSelection } from "@/lib/graph-editor-core/box-selection";'), "집합에서 빼는 셈도 공용 한 벌이어야 한다");
     // 🔴 2026-11-21(조각 B2′) — 전에는 「[범위 선택]의 상태가 **없다**」를 재던 자리다.
-    //    그 도구가 실제로 들어오면서 상태도 이 화면까지 올라왔으므로(다음 조각 B3′ 의
-    //    [Delete] 복수 삭제가 읽는다) 단언을 **반대 방향으로** 고쳐 적었다.
-    //    🔴 **이 절이 계속 지키는 것**: 고른 집합이 화면에 있어도 **지우는 쪽으로는 한
-    //       걸음도 안 갔다**(바로 위 두 줄과 아래 한 줄이 그것을 센다).
+    //    그 도구가 들어오면서 상태가 이 화면까지 올라왔고, B3′ 가 그것을 **읽기
+    //    시작했다.** 그래서 아래 한 줄도 「늘 꺼져 있다」에서 **「렌더마다 갱신되는 ref
+    //    로 건넨다」**로 뒤집어 적는다.
     assert.ok(screen.includes("const [boxSelectedNodeIds, setBoxSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set<string>());"), "[범위 선택]의 상태가 사라졌다");
-    // 🔵 판정에 넘기는 값은 **늘 꺼져 있다**는 근거 — 「boxSelect 글자가 아예 없다」로는
-    //    못 센다(키 판정이 그 칸을 받으므로 글자 자체는 화면에 있어야 맞다).
-    assert.ok(f.includes("boxSelectActive: false,") && f.includes("boxSelectedNodes: [],"));
+    assert.ok(f.includes("boxSelectActive: deleteByKeyRef.current.boxSelectActive,") && f.includes("boxSelectedNodes: deleteByKeyRef.current.boxSelectedNodes,"));
   });
 
   test("🔴 만들기 패널의 뒤처리를 하나도 안 잃었다 — 입력칸 비우기 · 켜고 끄는 조건", () => {

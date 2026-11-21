@@ -228,9 +228,25 @@ describe("🔴 ③ 모드를 바꾸면 비운다", () => {
       flat(screen).includes("boxSelectedNodeIds={boxSelectedNodeIds} onBoxSelectionChange={setBoxSelectedNodeIds}"),
       "편집기가 고른 집합을 안 넘긴다"
     );
-    // 선언 1 + 그림에 넘기는 두 자리 = 3. 늘어났다면 편집기가 제 손으로 쓰기 시작한 것이다.
-    assert.equal(countOf(flat(screen), "boxSelectedNodeIds"), 3, "편집기에서 고른 집합을 쓰는 자리가 늘었다");
-    assert.equal(countOf(flat(screen), "setBoxSelectedNodeIds"), 2, "편집기가 고른 집합을 제 손으로 갈아 끼운다");
+    // 🔴 2026-11-21(조각 B3′) — 수가 **셋에서 넷**이 됐다. B2′ 때는 「선언 1 + 그림에
+    //    넘기는 둘」이 전부였는데, B3′ 가 [Delete] 복수 삭제를 붙이면서 **읽는 자리
+    //    하나**가 더 생겼다(고른 칸을 renderedNodes 에서 추리는 줄). 지우지 않고
+    //    **수를 올려 적는** 까닭은 그대로다 — 수로 안 재면 넷째·다섯째가 몰래 생겨도
+    //    위 단언이 멀쩡히 통과한다.
+    assert.equal(countOf(flat(screen), "boxSelectedNodeIds"), 4, "편집기에서 고른 집합을 쓰는 자리가 늘었다");
+    assert.ok(
+      flat(screen).includes("renderedNodes .filter((n) => boxSelectedNodeIds.has(n.id))"),
+      "그 넷째 자리가 **그려진 목록에서 추리는 줄**이 아니다 — 집합을 돌며 찾으면 사라진 id 에 삭제가 쌓인다"
+    );
+    // 🔴 갈아 끼우는 쪽도 **둘에서 셋**이다. 늘어난 하나는 「비우기」가 아니라
+    //    **「지운 칸만 빼기」**다 — 그 둘은 뜻이 다르고, 비우기는 여전히 그림 안의
+    //    둘뿐이어야 한다(아래 두 줄이 그 둘을 센다).
+    assert.equal(countOf(flat(screen), "setBoxSelectedNodeIds"), 3, "편집기가 고른 집합을 제 손으로 갈아 끼운다");
+    assert.ok(
+      flat(screen).includes("setBoxSelectedNodeIds((prev) => removeNodesFromSelection(prev, nodeIds));"),
+      "늘어난 하나가 「지운 칸만 빼기」가 아니다"
+    );
+    assert.ok(!flat(screen).includes("setBoxSelectedNodeIds(new Set"), "편집기가 제 손으로 비우기 시작했다");
     // 🔵 그림 안의 **두 길**이 그대로 있다는 근거.
     assert.ok(graph.includes("function changeCanvasTool(nextTool: ProcedureCanvasTool)"), "모드 전환 쪽 비우기가 사라졌다");
     assert.ok(graph.includes("function handleCanvasPaneClick()"), "빈 바탕 누르기 쪽 비우기가 사라졌다");
@@ -407,23 +423,66 @@ describe("🔴 ⑦ Shift · 그리고 공용 것을 안 고쳤다", () => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// ⑧ 🔴 [Delete] 는 **아직 아무 일도 안 한다** — 복수 삭제는 다음 조각(B3′)
+// ⑧ 🔴 [Delete] 는 **B3′ 에서 붙었다** — 그래도 키를 듣는 자리는 그림이 아니다
 // ────────────────────────────────────────────────────────────────────────────
-describe("🔴 ⑧ [Delete] 는 아직 아무 일도 안 한다", () => {
+describe("🔴 ⑧ [Delete] — 듣는 자리는 그림이 아니다", () => {
   test("🔴 키를 듣는 자리는 **그림이 아니다** — 그림이 들으면 등록이 둘이 된다", () => {
     assert.ok(!graph.includes("Delete"), "그림이 키를 듣기 시작했다");
     assert.ok(!graph.includes("addEventListener"), "그림이 전역 키·마우스를 직접 듣기 시작했다");
   });
 
-  test("🔴 고른 집합이 **키 판정으로 안 흘러간다** — 그래서 그 모드에서 [Delete] 는 조용하다", () => {
+  test("🔴 고른 집합은 **편집기를 거쳐** 키 판정으로 간다 — 키가 집합을 직접 뒤지지 않는다", () => {
+    // 🔴 2026-11-21(조각 B3′) — 이 절의 전제가 뒤집혔다. B2′ 때는 「고른 집합이 키
+    //    판정으로 **안 흘러간다**」(false / [] 를 박아 두었다)였는데, 바로 그 일을
+    //    하는 것이 B3′ 다. 지우지 않고 **반대 방향으로** 고쳐 적는다 — 지우면
+    //    「들어왔다 다시 빠져도」 아무도 모른다.
+    // 🔴 **이 절이 계속 지키는 것**: 키는 집합을 **제 손으로 뒤지지 않는다.** 무엇을
+    //    지울지는 순수 판정이 정하고(모드 관문 · 막힌 것 거르기가 거기 있다), 화면은
+    //    렌더마다 갱신되는 ref 로 **값만** 건넨다.
     const keyHandler = flat(functionBody(screen, "function handleKeyDown(e: KeyboardEvent)"));
     assert.ok(keyHandler.length > 200, `키 처리를 못 집었다(길이 ${keyHandler.length})`);
-    assert.ok(keyHandler.includes("boxSelectActive: false,"), "[범위 선택] 가지가 벌써 섰다 — 이 조각의 일이 아니다");
-    assert.ok(keyHandler.includes("boxSelectedNodes: [],"), "[범위 선택] 가지가 벌써 섰다 — 이 조각의 일이 아니다");
-    assert.ok(!keyHandler.includes("boxSelectedNodeIds"), "고른 집합이 키 판정으로 새어 들어갔다");
-    // 🔵 **그래서 아무 일도 안 하는** 까닭: 그 모드에서는 단수 선택이 늘 비어 있다
-    //    (모드를 바꿀 때 그림이 비우고, 칸을 눌러도 단수 선택은 안 바뀐다 — ③·⑥절).
+    assert.ok(keyHandler.includes("boxSelectActive: deleteByKeyRef.current.boxSelectActive,"), "모드를 판정에 안 넘긴다");
+    assert.ok(keyHandler.includes("boxSelectedNodes: deleteByKeyRef.current.boxSelectedNodes,"), "고른 칸들을 판정에 안 넘긴다");
+    assert.ok(!keyHandler.includes("boxSelectedNodeIds"), "고른 집합을 키가 직접 뒤진다 — 판정을 건너뛰는 길이다");
+    assert.ok(keyHandler.includes('if (plan.action === "DELETE_NODES") {'), "판정이 복수를 가리켜도 키가 안 받는다");
+    // 🔵 단수 쪽은 그대로다 — 그 모드에서는 단수 선택이 늘 비어 있다(모드를 바꿀 때
+    //    그림이 비우고, 칸을 눌러도 단수 선택은 안 바뀐다 — ③·⑥절).
     assert.ok(keyHandler.includes("selectedNodeId: deletableNodeId,"), "키가 보는 단수 선택이 바뀌었다");
+    // 🔴 모드 관문이 **그림과 같은 값**이어야 한다 — 갈리면 보이지 않는 것이 지워지거나
+    //    보이는데 안 지워진다(오류는 안 난다).
+    assert.ok(graph.includes("const canUseBoxSelect = editable;"), "그림 쪽 관문이 바뀌었다");
+    assert.ok(flat(screen).includes("const boxSelectActive = canEdit && canvasTool === \"BOX_SELECT\";"), "편집기 쪽 관문이 그림과 다르다");
+  });
+
+  test("🔴 [범위 선택] 모드에서도 **「화면에서 선택」이 먼저 이긴다** — 안 그러면 눌러도 아무 일이 없다", () => {
+    // 🔴 2026-11-21(조각 B3′) — B2′ 가 **알고 남겨 둔 자리**다. 그때는 칸 누르기를
+    //    [범위 선택]이 먼저 가져가서, [연결 추가]의 대상 고르기와 [상대 위치로 이동]의
+    //    기준 고르기가 그 모드에서 **아무 일도 안 했다**(오류조차 안 났다). 절차 그림과
+    //    같게 — 가로채기가 **앞**이다.
+    const body = flat(functionBody(graph, "function handleCanvasNodeClick(nodeId: string)"));
+    const interceptAt = body.indexOf("if (onNodeClickIntercept?.(nodeId)) return;");
+    const boxAt = body.indexOf("if (boxSelectActive) {");
+    assert.notEqual(interceptAt, -1, "가로채기 통로가 없다 — 그 모드에서 「화면에서 선택」이 죽은 단추가 된다");
+    assert.notEqual(boxAt, -1, "[범위 선택] 가지가 사라졌다");
+    assert.ok(interceptAt < boxAt, "가로채기가 [범위 선택] 뒤에 있다 — 고르기 모드가 다시 죽는다");
+    // 🔵 절차 그림도 같은 차례라는 근거(베낀 것이 아니라 **맞춘** 것이다).
+    const procedureGraph = stripComments(read("src/components/procedures/ProcedureFlowGraph.tsx"));
+    const procedureBody = flat(functionBody(procedureGraph, "function handleCanvasNodeClick(nodeId: string)"));
+    assert.ok(
+      procedureBody.indexOf("if (onNodeClickIntercept?.(nodeId)) return;") < procedureBody.indexOf("if (boxSelectActive) {"),
+      "절차 쪽 차례가 바뀌었다 — 둘을 같게 맞춰 둔 전제가 깨졌다"
+    );
+    // 🔴 편집기가 그 손잡이를 실제로 쓴다 — 「프롭은 있는데 아무도 안 쓴다」가 되면
+    //    고르기 모드는 여전히 죽어 있다.
+    assert.ok(flat(screen).includes("onNodeClickIntercept={(nodeId) => {"), "편집기가 가로채기를 안 넘긴다");
+    const intercept = flat(functionBody(screen, "onNodeClickIntercept={(nodeId) =>"));
+    assert.ok(intercept.includes("if (isPickingEdgeTarget) {"), "대상 노드 고르기가 가로채기 안에 없다");
+    assert.ok(intercept.includes("if (isPickingReferenceNode) {"), "기준 노드 고르기가 가로채기 안에 없다");
+    assert.equal(countOf(intercept, "return true;"), 2, "고르기 둘이 「내가 썼다」를 안 돌려준다");
+    assert.ok(intercept.includes("return false;"), "고르기가 아닐 때 아래로 안 흘려보낸다");
+    // 🔴 그리고 **선택을 옮기는 줄은 가로채기 안에 없어야** 한다 — 옮기면 패널이
+    //    작성 중이던 내용을 비운다(그 둘을 한 손잡이에 섞지 않는 까닭).
+    assert.ok(!intercept.includes("setSelectedNodeId("), "가로채기가 선택을 옮긴다 — 고르는 동안 패널이 초기화된다");
   });
 });
 
