@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { ReactFlowInstance } from "@xyflow/react";
-import ProcedureFlowGraph, { type LayoutMode } from "./ProcedureFlowGraph";
+import ProcedureFlowGraph, { type LayoutMode, type ProcedureNodeDragMove } from "./ProcedureFlowGraph";
 import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
 import NodePropertyPanel from "./editor/NodePropertyPanel";
 import EdgePropertyPanel from "./editor/EdgePropertyPanel";
@@ -2038,19 +2038,38 @@ export default function ProcedureTemplateEditorScreen({
     setSelectedEdgeId(edgeId);
     if (edgeId) setRightPanelTab("properties");
   }, []);
-  /** 5C-6D-1D — the ONE place both a canvas drag-stop and NodePropertyPanel's "상대 위치로 이동" buttons funnel through, mirroring CaseFlowchartEditorScreen's own setPendingNodePosition. No mutation call here; position is dirty/pending like every other field, only global [저장] persists it. */
+  /**
+   * 5C-6D-1D — the ONE place both a canvas drag-stop and NodePropertyPanel's
+   * "상대 위치로 이동" buttons funnel through, mirroring
+   * CaseFlowchartEditorScreen's own setPendingNodePosition. No mutation call
+   * here; position is dirty/pending like every other field, only global
+   * [저장] persists it.
+   *
+   * 🔵 2026-11-21 — **칸 여럿을 한 번에** 받도록 넓혔다(복수 선택 밑자락).
+   * `pendingLayoutMoves` 는 원래 Map 이라 칸이 몇이든 [저장] 때 함께 나간다 —
+   * 저장 쪽은 손댈 것이 없었다. 칸 하나짜리 `setPendingPosition` 은 **이것을
+   * 부르는 얇은 껍질**로 남겨 둔다: 패널의 「상대 위치로 이동」·「연결선 곧게
+   * 펴기」가 그 이름으로 부르고 있고, 그 자리들은 늘 칸 하나다.
+   */
   // pushPendingUndoStep는 useCallback([])으로 신원이 고정돼 있어 의존성에 넣어도
   // 이 콜백의 신원이 흔들리지 않는다(그래프 선택 동기화 effect 참고).
-  const setPendingPosition = useCallback((nodeId: string, position: Position) => {
+  const setPendingPositions = useCallback((moves: readonly ProcedureNodeDragMove[]) => {
+    if (moves.length === 0) return;
     // 드래그는 시작할 때 이미 한 단계를 찍었다 — 프레임마다 또 찍지 않는다.
     // 버튼(상대 위치로 이동)으로 온 호출은 여기서 한 단계가 된다.
+    // 🔴 **칸이 몇이든 여기서 한 번**이다 — 칸마다 이 함수를 부르는 꼴로
+    //    고치면 [이전]이 칸 수만큼 쌓여 한 번 눌러서는 안 돌아온다.
     if (!isNodeDraggingRef.current) pushPendingUndoStep();
     setPendingLayoutMoves((prev) => {
       const next = new Map(prev);
-      next.set(nodeId, position);
+      for (const move of moves) next.set(move.nodeId, move.position);
       return next;
     });
   }, [pushPendingUndoStep]);
+  const setPendingPosition = useCallback(
+    (nodeId: string, position: Position) => setPendingPositions([{ nodeId, position }]),
+    [setPendingPositions]
+  );
 
   /** 드래그 한 번이 되돌리기 한 단계다 — 시작할 때 직전 상태를 찍고, 끝날 때까지 더 찍지 않는다. */
   const handleNodeDragStart = useCallback(() => {
@@ -2058,12 +2077,20 @@ export default function ProcedureTemplateEditorScreen({
     isNodeDraggingRef.current = true;
   }, [pushPendingUndoStep]);
 
+  /**
+   * 🔴 **놓은 칸 전부**를 받아 한 번에 적는다(2026-11-21). 앞의 `nodeId`/
+   * `position` 은 끄는 칸 하나일 뿐이라, 그것만 쓰면 여러 칸을 함께 끌었을 때
+   * **하나만 저장된다** — 화면은 전부 움직여 놓고 [저장]을 누르면 하나만
+   * 옮겨져 있는, 오류가 안 나는 결함이다.
+   * 🔵 오늘은 선택이 늘 하나뿐이라 `moves` 의 길이가 1 이고, 그 한 칸이 곧
+   *    `nodeId` 다 — 그래서 지금 동작은 전과 똑같다.
+   */
   const handleNodeDragStop = useCallback(
-    (nodeId: string, position: Position) => {
-      setPendingPosition(nodeId, position);
+    (_nodeId: string, _position: Position, moves: readonly ProcedureNodeDragMove[]) => {
+      setPendingPositions(moves);
       isNodeDraggingRef.current = false;
     },
-    [setPendingPosition]
+    [setPendingPositions]
   );
 
   // ---- Phase 4B: manual edge-route (waypoint) editing — UNCHANGED from

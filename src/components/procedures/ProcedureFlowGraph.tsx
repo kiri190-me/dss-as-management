@@ -54,7 +54,7 @@ import {
   type ProcedureAutoLayoutMemory,
 } from "@/lib/domain/procedure-auto-layout";
 import { resolveEffectiveEdgeRoute, type RoutePoint } from "@/lib/graph-editor-core/routing";
-import { resolveDragAxis, applyAxisLock, type DragAxis, type Point } from "@/lib/graph-editor-core/axis-lock";
+import { resolveDragAxis, applyAxisLock, applyAxisLockToMoves, type AxisLockMove, type DragAxis, type Point } from "@/lib/graph-editor-core/axis-lock";
 import { DefaultStraightOrStepEdge, ManualRouteEdge, type ManualRouteEdgeData } from "@/components/graph-editor-core/GraphEdges";
 import ProcedureNodeChip from "./visual/ProcedureNodeChip";
 import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
@@ -280,6 +280,15 @@ const EMPTY_AUTO_LAYOUT_MEMORY: ReadonlyMap<string, { x: number; y: number }> = 
 export type ProcedureFlowGraphOpenIssue = { nodeId: string; issueId: string; severity: "ERROR" | "WARNING" };
 
 /**
+ * 한 번의 끌기가 옮긴 칸 하나 — id 와 놓인 자리(2026-11-21, 복수 선택 밑자락).
+ *
+ * `GraphCanvasDragMove` 와 같은 모양이지만 **이름을 따로 둔다**: 이 컴포넌트를
+ * 쓰는 쪽(편집기 화면)은 React Flow 도, graph-editor-core 의 캔버스 부품도
+ * 몰라야 한다는 이 파일의 기존 경계 그대로다.
+ */
+export type ProcedureNodeDragMove = { nodeId: string; position: { x: number; y: number } };
+
+/**
  * ──────────────────────────────────────────────────────────────────────────
  * 2026-11-03(줄기 B-⑧) — **유령 칸·선**: 이 절차에 아직 없는 것을 희미하게
  * ──────────────────────────────────────────────────────────────────────────
@@ -484,9 +493,22 @@ export default function ProcedureFlowGraph({
   onNodeClickIntercept?: (nodeId: string) => boolean;
   /** Fires when an edge is clicked — this component has no built-in edge-selection visual state of its own, this is purely a notification for the editor's edge property panel. */
   onEdgeSelectionChange?: (edgeId: string | null) => void;
-  /** Fires once a drag gesture ends, in 사용자 배치 layout only — the editor accumulates these client-side and persists them only on an explicit Save, never here. */
-  onNodeDragStop?: (nodeId: string, position: { x: number; y: number }) => void;
-  /** 드래그가 시작되는 순간 한 번 — 편집기가 "이 드래그 직전 상태"를 되돌리기 단계로 기록할 수 있게 한다(위치 자체는 Stop에서만 넘어온다). */
+  /**
+   * Fires once a drag gesture ends, in 사용자 배치 layout only — the editor
+   * accumulates these client-side and persists them only on an explicit
+   * Save, never here.
+   *
+   * 🔴 2026-11-21 — 세 번째 인자 `moves` 에 **이 손짓이 옮긴 칸 전부**가 들어
+   * 있다(끄는 칸 자신 포함). 자리를 저장하는 쪽은 **그것을 읽어야 한다**:
+   * 앞의 `nodeId`/`position` 만 읽으면 여러 칸을 함께 끌었을 때 **하나만
+   * 저장된다** — 화면은 전부 움직여 놓고 저장은 하나만 하는, 오류가 안 나는
+   * 결함이다.
+   * 🔵 아무것도 안 골라 둔 평소에는 길이가 1 이고, 그 한 칸은 `nodeId` 와
+   * 같다 — 그래서 **앞의 두 인자만 쓰는 기존 호출부는 전과 똑같이 돈다**
+   * (실행 쪽 `ExecutionExtraTaskDialog` 가 그렇다).
+   */
+  onNodeDragStop?: (nodeId: string, position: { x: number; y: number }, moves: readonly ProcedureNodeDragMove[]) => void;
+  /** 드래그가 시작되는 순간 한 번 — 편집기가 "이 드래그 직전 상태"를 되돌리기 단계로 기록할 수 있게 한다(위치 자체는 Stop에서만 넘어온다). 🔴 여러 칸을 함께 끌어도 **여기는 한 번만** 불린다 — 그래야 [이전] 한 번이 끌기 한 번을 되돌린다. */
   onNodeDragStart?: (nodeId: string) => void;
   /** Phase 4B — the editor's currently-selected edge id (lifted to the parent, unlike selectedNodeId which stays local here) — only this edge ever gets draggable waypoint handles. */
   selectedEdgeId?: string | null;
@@ -645,30 +667,61 @@ export default function ProcedureFlowGraph({
   // 적어 두면 거짓**이 된다 — 전에는 앞쪽 하나뿐이라 그렇게 적혀 있었다.
   // 그래도 여기서 모드를 다시 가릴 일은 없다: 축 잠금은 끌 수 있는 칸이면
   // 어디서나 똑같이 들어야 하는 보조 조작이다.
-  const activeDragRef = useRef<{ nodeId: string; start: Point; axis: DragAxis; shiftHeld: boolean } | null>(null);
+  //
+  // 🔴 2026-11-21(복수 선택 밑자락) — **한 손짓이 칸 여럿을 옮길 수 있다.**
+  // React Flow 는 `selected === true` 인 칸을 전부 함께 끌고, GraphCanvas 가
+  // 그 목록(`movingNodes`)을 넘겨준다(그 타입의 주석에 까닭). 그래서 여기도
+  // 「끄는 칸 하나」가 아니라 **움직이는 칸 전부**의 시작 자리를 들고 있는다.
+  // 🔵 오늘은 선택이 늘 하나뿐이라 그 목록의 길이가 1 이고, 아래 셈은 전과
+  //    한 치도 다르지 않다. 도구 단추·선택 상자는 다음 조각이 붙인다.
+  // 🔴 **콜백은 여전히 손짓당 한 번**이다 — 칸마다 부르는 꼴로 바꾸면 편집기의
+  //    [이전]이 칸 수만큼 쌓여 한 번 되돌리기가 안 된다.
+  const activeDragRef = useRef<{ nodeId: string; start: Point; startById: Map<string, Point>; axis: DragAxis; shiftHeld: boolean } | null>(null);
 
-  function handleNodeDragStart(nodeId: string, position: Point, shiftKey: boolean) {
-    activeDragRef.current = { nodeId, start: position, axis: null, shiftHeld: shiftKey };
+  function handleNodeDragStart(nodeId: string, position: Point, shiftKey: boolean, movingNodes: readonly ProcedureNodeDragMove[]) {
+    const startById = new Map<string, Point>(movingNodes.map((m) => [m.nodeId, { x: m.position.x, y: m.position.y }]));
+    startById.set(nodeId, position);
+    activeDragRef.current = { nodeId, start: position, startById, axis: null, shiftHeld: shiftKey };
     onNodeDragStart?.(nodeId);
   }
 
-  function handleNodeDrag(nodeId: string, position: Point) {
+  function handleNodeDrag(nodeId: string, position: Point, _shiftKey: boolean, movingNodes: readonly ProcedureNodeDragMove[]) {
     const drag = activeDragRef.current;
     if (!drag || drag.nodeId !== nodeId || !drag.shiftHeld) return;
     if (drag.axis === null) {
+      // 🔴 축은 **끄는 칸 하나**로 정한다 — 칸마다 따로 정하면 문턱을 넘는
+      //    순간이 갈려 어떤 칸은 가로, 어떤 칸은 세로로 묶일 수 있다.
       drag.axis = resolveDragAxis(drag.start, position);
       if (drag.axis === null) return; // still below the commit threshold — let it move freely for now
     }
-    const constrained = applyAxisLock(drag.start, position, drag.axis);
-    if (constrained.x === position.x && constrained.y === position.y) return;
-    reactFlowInstanceRef.current?.setNodes((nds) => nds.map((n) => (n.id === nodeId ? { ...n, position: constrained } : n)));
+    const constrained = applyAxisLockToMoves(movingNodes, drag.startById, drag.axis);
+    const changedById = new Map<string, Point>();
+    for (const [index, move] of constrained.entries()) {
+      const live = movingNodes[index].position;
+      if (move.position.x !== live.x || move.position.y !== live.y) changedById.set(move.nodeId, move.position);
+    }
+    if (changedById.size === 0) return;
+    reactFlowInstanceRef.current?.setNodes((nds) =>
+      nds.map((n) => {
+        const next = changedById.get(n.id);
+        return next ? { ...n, position: next } : n;
+      })
+    );
   }
 
-  function handleNodeDragStopWithAxisLock(nodeId: string, position: Point) {
+  function handleNodeDragStopWithAxisLock(nodeId: string, position: Point, movingNodes: readonly ProcedureNodeDragMove[]) {
     const drag = activeDragRef.current;
-    const finalPosition = drag && drag.nodeId === nodeId && drag.shiftHeld && drag.axis !== null ? applyAxisLock(drag.start, position, drag.axis) : position;
+    const lockedAxis = drag && drag.nodeId === nodeId && drag.shiftHeld ? drag.axis : null;
+    const finalMoves: AxisLockMove[] =
+      drag && lockedAxis !== null
+        ? applyAxisLockToMoves(movingNodes, drag.startById, lockedAxis)
+        : movingNodes.map((m) => ({ nodeId: m.nodeId, position: { x: m.position.x, y: m.position.y } }));
+    // 끄는 칸 자신의 자리는 전과 똑같은 값이어야 한다 — 목록에 그 칸이 빠지는
+    // 일은 GraphCanvas 가 이미 막지만, 받침까지 전과 같은 식으로 둔다.
+    const finalPosition =
+      finalMoves.find((m) => m.nodeId === nodeId)?.position ?? (drag && lockedAxis !== null ? applyAxisLock(drag.start, position, lockedAxis) : position);
     activeDragRef.current = null;
-    onNodeDragStop?.(nodeId, finalPosition);
+    onNodeDragStop?.(nodeId, finalPosition, finalMoves);
   }
 
   const issueBadgeByNodeId = useMemo(() => {

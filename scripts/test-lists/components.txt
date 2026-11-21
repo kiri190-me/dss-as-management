@@ -1358,6 +1358,20 @@ src/components/procedures/execution/next-procedure-handoff.test.ts
 #    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
 src/components/procedures/procedure-editor-center-point-placement.test.ts
 
+# 2026-11-21 — 한 번 끌면 **고른 칸 전부**가 함께 저장되는 배선(복수 선택 밑자락).
+#    셈 자체는 값으로 재는 쪽이 따로 있다(src/lib/graph-editor-core/axis-lock.test.ts
+#    의 applyAxisLockToMoves · box-selection.test.ts). 여기서 재는 것은 **그 셈에
+#    무엇이 흘러 들어가는가**다: 🔴 GraphCanvas 가 React Flow 의 세 번째 인자
+#    (움직이는 칸 전부)를 **안 버리는가** — 버린 채로 선택 상자만 붙이면 「네모로
+#    여럿 골랐고 전부 움직이는데 저장은 하나」가 되고, 오류가 안 나 아무도 못
+#    알아챈다 · 🔴 손짓 한 번에 콜백이 **한 번**인가([이전]이 칸 수만큼 쌓이면 한
+#    번 눌러서 안 돌아온다) · 🔴 끝에서 pendingLayoutMoves 에 **칸마다 한 줄**이
+#    들어가는가 · 🔴 [진단 Flowchart] 가 이 조각에서 **안 바뀌었는가**(같은 캔버스를
+#    쓰는 둘째 집이다) · 🔴 오늘 선택이 하나뿐인 까닭(onNodesChange 가 없어 React
+#    Flow 안에 선택이 안 남는다)이 그대로인가 — 다음 조각이 걸릴 자리다.
+#    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
+src/components/procedures/procedure-multi-node-drag-plumbing.test.ts
+
 # 2026-11-05 — 날짜 칸의 **연도를 네 자리로** 묶는다(사용자 지시 「년도가 6글자
 #    들어가는데 4글자만 들어가게, 4글자를 치면 월로 넘어가게」). 고친 것은
 #    `<input type="date">` 스물에 붙인 `max={DATE_INPUT_MAX}` 한 줄씩과,

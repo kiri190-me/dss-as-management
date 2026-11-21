@@ -135,6 +135,13 @@ src/lib/graph-editor-core/edge-default-target.test.ts
 src/lib/graph-editor-core/undo-stack.test.ts
 src/lib/graph-editor-core/pointer.test.ts
 src/lib/graph-editor-core/axis-lock.test.ts
+# 🔴 점선 네모(박스)로 노드를 고르는 순수 계산(2026-11-21, 복수 선택 밑자락).
+# 「들었다」를 **닿으면**으로 정했고 — 까닭은 모듈 머리 주석에 — 경계는 React
+# Flow 의 `partially`(겹침 넓이 > 0)와 같은 잣대로 맞췄다. 재는 것 넷: 어느
+# 방향으로 끌든 같은 네모인가(폭이 음수가 되면 오류 없이 아무것도 안 골라진다) ·
+# 귀퉁이만 걸쳐도 골라지는가 · 변끼리 맞닿기만 하면 안 골라지는가 ·
+# 크기를 아직 모르는 칸(0×0)이 안 끌려 들어가는가.
+src/lib/graph-editor-core/box-selection.test.ts
 src/lib/graph-editor-core/save-sequence.test.ts
 src/lib/domain/procedure-editor-save-state.test.ts
 # 🔵 구조 변경(노드·연결선 추가·삭제·유형 변경·재연결·연결선 위 삽입)도 [저장]을
