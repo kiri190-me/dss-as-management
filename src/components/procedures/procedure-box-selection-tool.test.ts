@@ -26,7 +26,13 @@ import { readFileSync } from "node:fs";
  *   ㉢ 네모를 **그림 좌표로** 재고, 칸 자리·크기를 **새로 추정하지 않는가**,
  *   ㉣ 네모 끝에 딸려 오는 click 이 **방금 고른 것을 안 지우는가**,
  *   ㉤ 마우스 모드의 **단수 선택을 한 글자도 안 건드리는가**,
- *   ㉥ [진단 Flowchart] 와 읽기 전용 화면 셋이 **전과 똑같은가**.
+ *   ㉥ 읽기 전용 화면 셋이 **전과 똑같은가** — 그리고 캔버스의 선택 상자가
+ *      **넘기는 쪽에서만** 켜지는가.
+ *      🔴 2026-11-21(조각 B2′) — ㉥에 「[진단 Flowchart] 도 전과 똑같은가」가 함께
+ *      적혀 있었다. 저쪽에도 [범위 선택]이 서면서 그 줄을 **반대 방향으로 고쳐
+ *      적었다**(지운 것이 아니다): 이제 재는 것은 「저쪽이 같은 프롭을 같은 모양으로
+ *      넘기는가」이고, 저쪽만 보는 깊은 셈은 저쪽 집에 있다 —
+ *      src/components/repair-cases/flowchart/case-flowchart-box-selection-tool.test.ts.
  *
  * ── 왜 렌더가 아니라 원본 글자로 재는가 ─────────────────────────────────
  * 이웃들과 같은 사정이다: 이 그림은 @xyflow/react 의 .css 를 함께 물고 있어
@@ -243,10 +249,20 @@ describe("조각 B2 — 선택 상자 (GraphCanvas)", () => {
   });
 
   test("🟢 안 넘기는 쪽은 전과 똑같다 — 프롭 하나에 전부 매달려 있다", () => {
-    assert.ok(flat(canvas).includes("boxSelection?: GraphCanvasBoxSelection;"), "프롭이 선택이 아니면 [진단 Flowchart] 가 함께 바뀐다");
+    assert.ok(flat(canvas).includes("boxSelection?: GraphCanvasBoxSelection;"), "프롭이 선택이 아니면 안 넘기는 호출부가 함께 바뀐다");
     // 안 넘기면 active 가 거짓이고, 그러면 panOnDrag 가 true — React Flow 제 기본값 그대로다.
     assert.ok(canvas.includes("const boxSelectActive = boxSelection?.active === true;"));
-    assert.ok(!caseGraph.includes("boxSelection"), "[진단 Flowchart] 가 선택 상자를 켜기 시작했다");
+    // 🔴 2026-11-21(조각 B2′) — 전에는 「[진단 Flowchart] 가 **안 넘긴다**」를 재던
+    //    자리다. 저쪽에도 [범위 선택]이 서면서 **반대 방향으로 고쳐 적었다**(지운
+    //    것이 아니다). 재는 뜻은 그대로다: **넘기되 켜지는 것은 `active` 하나**이고,
+    //    그 값이 거짓인 동안(읽기 전용 그림)은 전과 한 치도 다르지 않다.
+    //    🔵 저쪽만 보는 깊은 셈은 저쪽 집에 있다 —
+    //       src/components/repair-cases/flowchart/case-flowchart-box-selection-tool.test.ts.
+    assert.ok(
+      flat(caseGraph).includes("boxSelection={{ active: boxSelectActive, onSelect: handleBoxSelect }}"),
+      "[진단 Flowchart] 가 선택 상자를 안 넘긴다"
+    );
+    assert.ok(caseGraph.includes("const boxSelectActive = canUseBoxSelect && canvasTool === \"BOX_SELECT\";"), "저쪽의 모드 관문이 바뀌었다");
     // 끄는 손잡이 셋은 켜져 있을 때만 달린다 — 안 넘기는 쪽에는 아무것도 안 붙는다.
     for (const handler of ["onPointerMove", "onPointerUp", "onLostPointerCapture"]) {
       assert.ok(canvas.includes(`${handler}={boxSelectActive ? handleBox`), `${handler} 이 꺼진 그림에도 달린다`);

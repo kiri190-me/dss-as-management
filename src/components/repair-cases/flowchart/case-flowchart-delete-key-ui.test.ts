@@ -491,11 +491,26 @@ describe("[진단] [Delete] 로 지우기 — ⑦🔴 절차에 있고 **진단�
     assert.equal(countOf(f, "nodeDeleteBlockedReason"), 1, "화면에서 그 낱말이 나오는 자리는 키에 null 을 넘기는 한 줄뿐이어야 한다");
   });
 
-  test("🔴 [범위 선택]은 진단에 아직 없다 — false / [] 를 넘겨 그 가지를 안 세운다", () => {
+  test("🔴 [범위 선택]은 생겼지만 **[Delete] 는 아직 모른다** — false / [] 를 넘겨 그 가지를 안 세운다", () => {
     assert.ok(keyHandler.includes("boxSelectActive: false,"));
     assert.ok(keyHandler.includes("boxSelectedNodes: [],"));
     assert.ok(!keyHandler.includes("DELETE_NODES"), "복수 갈래를 받는 길이 생겼다 — 아직 그 기능이 없다");
-    assert.ok(!screen.includes("boxSelectedNodeIds"), "진단 화면에 범위 선택 상태가 생겼다");
+    // 🔴 2026-11-21(조각 B2′) — 전에는 여기가 「진단 화면에 `boxSelectedNodeIds` 가
+    //    **없다**」였다. [범위 선택] 도구가 들어오면서 그 상태가 이 화면까지 올라왔고
+    //    (다음 조각 B3′ 의 [Delete] 복수 삭제가 그것을 읽는다), 그래서 단언을
+    //    **반대 방향으로** 고쳐 적었다 — 지우면 「들어왔다 다시 빠져도」 아무도 모른다.
+    // 🔴 **이 절이 계속 지키는 것**은 그대로다: 고른 집합이 화면에 있어도 **키 판정에는
+    //    아직 안 흘러간다.** 그래서 [범위 선택] 모드에서 [Delete] 는 아무 일도 안 한다
+    //    (그 모드에서는 단수 선택이 늘 비어 있다 — 그림이 모드를 바꿀 때 비운다).
+    assert.ok(screen.includes("const [boxSelectedNodeIds, setBoxSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set<string>());"), "범위 선택 상태가 화면에서 사라졌다");
+    assert.ok(
+      flat(screen).includes("boxSelectedNodeIds={boxSelectedNodeIds} onBoxSelectionChange={setBoxSelectedNodeIds}"),
+      "고른 집합을 그림에 안 넘긴다 — 그림이 제 안의 값으로 돌면 화면이 그것을 못 읽는다"
+    );
+    // 🔴 **키 판정 쪽으로는 한 글자도 안 샜다**는 근거 — 그 낱말이 화면에 나오는
+    //    자리는 위 둘(상태 선언 · 그림에 넘기기)뿐이어야 한다. 수로 재지 않으면
+    //    키 쪽에 몰래 꽂혀도 위 단언들은 멀쩡히 통과한다.
+    assert.equal(countOf(f, "boxSelectedNodeIds"), 3, "고른 집합을 쓰는 자리가 늘었다 — [Delete] 로 샜는지 보라");
     // 🔵 판정 쪽에는 그 갈래가 분명히 있다는 근거 — 「없는 갈래라 안 썼다」가 아니라
     //    **쓸 수 있는데 지금은 안 쓴다**는 것이 이 단언의 뜻이다.
     assert.ok(planModule.includes('readonly action: "DELETE_NODES"'), "판정의 복수 갈래가 사라졌다");

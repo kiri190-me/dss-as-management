@@ -1370,8 +1370,10 @@ src/components/procedures/procedure-editor-center-point-placement.test.ts
 #    쓰는 둘째 집이다 — B1·B2 때는 「안 바뀌었는가」였고, B1′ 이 저쪽을 넓히면서
 #    2026-11-21 에 뒤집어 적었다. 저쪽만 보는 깊은 셈은 저쪽 집에 따로 있다:
 #    src/components/repair-cases/flowchart/case-flowchart-multi-node-drag-plumbing.test.ts) ·
-#    🔴 오늘 저쪽 선택이 하나뿐인 까닭(onNodesChange 가 없어 React Flow 안에 선택이
-#    안 남고, 저쪽은 칸에 selected 를 안 싣는다)이 그대로인가.
+#    🔴 저쪽도 칸에 selected 를 **모드 안에서만** 싣는가(2026-11-21 B2′ 에 저쪽에도
+#    [범위 선택]이 섰다 — 그 전까지 이 줄은 「안 싣는다」를 재던 자리이고, 지우지 않고
+#    반대로 고쳐 적었다) · 🔴 캔버스가 여전히 onNodesChange 를 안 붙이는가(그래서 바탕
+#    제 선택 기능으로는 그 값을 못 만들고, 두 그림이 직접 싣는다).
 #    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
 src/components/procedures/procedure-multi-node-drag-plumbing.test.ts
 
@@ -1388,8 +1390,11 @@ src/components/procedures/procedure-multi-node-drag-plumbing.test.ts
 #    **새로 추정하지 않는가**(한 벌이라도 더 만들면 그린 네모와 골라진 칸이 갈린다) ·
 #    🔴 네모 끝에 딸려 오는 click 이 **방금 고른 것을 안 지우는가** · 🔴 마우스 모드의
 #    단수 선택을 **한 글자도 안 건드리는가**(그 값을 쓰는 자리가 다섯이다) ·
-#    🔴 [Delete] 는 안 건드렸는가(복수 삭제는 B3) · 🟢 [진단 Flowchart] 와 읽기
-#    전용 화면 셋이 전과 똑같은가.
+#    🔴 [Delete] 는 안 건드렸는가(복수 삭제는 B3) · 🟢 읽기 전용 화면 셋이 전과
+#    똑같은가 · 🔴 [진단 Flowchart] 도 **같은 프롭을 같은 모양으로** 넘기는가
+#    (2026-11-21 B2′ 까지는 「저쪽은 안 넘긴다」를 재던 자리다 — 저쪽에 도구가 서면서
+#    지우지 않고 반대로 고쳐 적었고, 저쪽만 보는 깊은 셈은 저쪽 집에 따로 있다:
+#    src/components/repair-cases/flowchart/case-flowchart-box-selection-tool.test.ts).
 #    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
 src/components/procedures/procedure-box-selection-tool.test.ts
 
@@ -1760,7 +1765,9 @@ src/components/procedures/procedure-flow-graph-layout-memory.test.ts
 #    어디에도 또 없는가) · 🔴 상시 안내를 안 세웠는가(절차 쪽에서 두 번 세웠다 두 번 다
 #    지웠다 — d57f664a, 설명은 단추 툴팁까지) · 🔴 진단에 **없는 개념 셋**을 어떻게
 #    넘기는가(분류가 없어 canEdit · 미리 막는 까닭은 **키가 두 벌로 만들지 않으려고** null ·
-#    [범위 선택]은 아직 없어 false/[]). 🔴 **주석을 걷어낸** 원본으로 센다 — 요청 원문과
+#    [범위 선택]은 **생겼지만 키 판정으로는 아직 안 흘러가** false/[] — 2026-11-21 B2′ 에
+#    그 도구가 들어오면서 「진단엔 그 상태가 없다」를 재던 줄을 반대로 고쳐 적었다. 복수
+#    삭제는 B3′ 다). 🔴 **주석을 걷어낸** 원본으로 센다 — 요청 원문과
 #    옛 모습(패널이 직접 부르던 액션 이름)이 주석에 경위로 남아 있다.
 src/components/repair-cases/flowchart/case-flowchart-delete-key-ui.test.ts
 
@@ -1804,11 +1811,14 @@ src/components/repair-cases/flowchart/case-flowchart-structural-deferred-save.te
 src/components/repair-cases/flowchart/case-flowchart-node-delete-cascade-ui.test.ts
 
 # 2026-11-21 — **[진단 Flowchart] 에도 복수 드래그 배선을 깔았다**(조각 B1′ — 절차 편집기가
-#    같은 순서로 먼저 갔다: B1 b4ee0166 → B2 ced82c74). 🔴 **이 조각은 화면 동작을 한 치도
-#    안 바꾼다** — 이 그림은 아직 칸을 하나씩만 고를 수 있어서 한 손짓이 옮기는 칸이 늘
-#    하나다. 그래서 「전과 똑같은가」가 합격 기준이고, 그것을 재는 절(④)이 따로 있다:
-#    칸에 선택 표시를 **안 싣는가** · 선택 상자를 **안 넘기는가** · Shift 가 여전히 축 잠금
-#    전용인가 · 끌 수 있는 조건이 그대로인가. 나머지는 **다음 조각이 쓸 길**이 깔렸는가다:
+#    같은 순서로 먼저 갔다: B1 b4ee0166 → B2 ced82c74). 🔴 **B1′ 은 화면 동작을 한 치도
+#    안 바꿨다** — 그때 이 그림은 칸을 하나씩만 고를 수 있어서 한 손짓이 옮기는 칸이 늘
+#    하나였고, 「전과 똑같은가」가 합격 기준이었다. 🔴 **2026-11-21 B2′ 에 [범위 선택]이
+#    실제로 들어오면서 그 절(④)을 반대 방향으로 고쳐 적었다**(지우지 않았다): 칸에 선택
+#    표시를 **싣는가, 모드 안에서만인가** · 선택 상자를 **넘기는가** · Shift 가 여전히 축
+#    잠금 전용인가 · 끌 수 있는 조건이 그대로인가. 도구 단추·좌표계처럼 그 조각만 보는 깊은
+#    셈은 이웃 case-flowchart-box-selection-tool.test.ts 에 있다. 나머지 절들이 재는 것은
+#    **B1′ 이 깐 길**이 그대로인가다:
 #    🔴 세 손잡이가 **움직이는 칸 전부**를 받는가(버리면 「화면은 전부 움직였는데 [저장]을
 #    누르니 하나만 옮겨져 있다」 — 오류가 안 나고 끌리는 모습도 멀쩡해 아무도 못 알아챈다) ·
 #    🔴 되돌리기를 **고리 밖에서 한 번**만 찍는가([이전]이 칸 수만큼 쌓이면 한 번 눌러서
@@ -1822,3 +1832,26 @@ src/components/repair-cases/flowchart/case-flowchart-node-delete-cascade-ui.test
 #    🔵 절차 쪽과 **같은 모양인가**는 저쪽 집에서 함께 본다 —
 #    src/components/procedures/procedure-multi-node-drag-plumbing.test.ts.
 src/components/repair-cases/flowchart/case-flowchart-multi-node-drag-plumbing.test.ts
+
+# 2026-11-21 — **[진단 Flowchart] 에도 [범위 선택] 도구**(조각 B2′ — 절차 편집기가 같은
+#    순서로 먼저 갔다: B1 b4ee0166 → B2 ced82c74, 이 집은 B1′ f7e6d87d → 이 조각).
+#    쓰는 분 요청: 「[마우스] 아이콘을 누르면 지금처럼, [점선 네모] 아이콘을 누르면
+#    드래그 혹은 클릭으로 여러 노드를 골라 한 번에 이동」. 이 조각은 **고르기와 함께
+#    옮기기까지**이고, 고른 것을 [Delete] 로 지우는 것은 다음 조각(B3′)이다.
+#    🔴 **손짓은 이 저장소가 못 잰다**(브라우저가 없다) — 네모가 그려지는 일, 골라 놓고
+#    끌면 함께 움직이는 일은 쓰는 분의 눈이 맡는다. 셈은 값으로 재는 쪽이 따로 있다
+#    (unit 목록의 lib/graph-editor-core/box-selection.test.ts). **여기서 재는 것은 그
+#    사이를 잇는 글자**이고, 전부 어긋나도 오류가 안 나는 자리들이다:
+#    🔴 도구 단추를 **베끼지 않고 그대로 들여왔는가**(베끼면 「화면에 나가는 글자는 저쪽
+#    TOOLS 한 곳뿐」이라는 보증이 깨져 두 화면의 글자가 갈리는 날이 온다) · 🔴 단추가
+#    **끌 수 있는 그림에만** 서는가(읽기 전용에서 빈 바탕 끌기를 뺏으면 화면을 옮길
+#    유일한 길이 사라진다) · 🔴 칸에 `selected` 를 **모드 안에서만** 싣는가(여럿이 함께
+#    끌리는 열쇠 한 줄) · 🔴 모드를 바꿀 때 **양쪽 선택을 비우는가**, 그리고 바꾸는 길이
+#    **함수 하나**인가 · 🔴 네모를 **그림 좌표로** 재고 자리·크기를 **새로 추정하지
+#    않는가**(한 벌이라도 더 만들면 그린 네모와 골라진 칸이 갈리고, 눈으로만 잡힌다) ·
+#    🔴 **단수 선택을 한 글자도 안 건드리는가**(그 값을 쓰는 자리가 많다) · 🔴 Shift 가
+#    여전히 **축 잠금 전용**인가(바탕 제 선택 상자를 함께 켜면 네모가 두 벌 그려진다) ·
+#    🔴 공용 캔버스·순수 모듈·도구 단추 부품을 **안 고쳤는가** · 🔴 [Delete] 는 **아직
+#    아무 일도 안 하는가**(복수 삭제는 B3′) · 🟢 읽기 전용 화면이 전과 똑같은가.
+#    🔴 **주석을 걷어낸** 원본으로 센다 — 걷어내기가 일하고 있다는 증거를 ①절에 둔다.
+src/components/repair-cases/flowchart/case-flowchart-box-selection-tool.test.ts

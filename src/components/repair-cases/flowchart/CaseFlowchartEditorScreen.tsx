@@ -3,7 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ReactFlowInstance } from "@xyflow/react";
-import CaseFlowchartGraph, { type CaseFlowchartGraphNode, type CaseFlowchartGraphEdge, type CaseFlowchartNodeDragMove } from "./CaseFlowchartGraph";
+import CaseFlowchartGraph, {
+  type CaseFlowchartGraphNode,
+  type CaseFlowchartGraphEdge,
+  type CaseFlowchartNodeDragMove,
+  type ProcedureCanvasTool,
+} from "./CaseFlowchartGraph";
 import UndoRedoControls from "@/components/graph-editor-core/UndoRedoControls";
 import {
   createUndoStack,
@@ -410,6 +415,22 @@ export default function CaseFlowchartEditorScreen({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedWaypointIndex, setSelectedWaypointIndex] = useState<number | null>(null);
+  /**
+   * 2026-11-21(조각 B2′) — 그림 위에서 **마우스가 하는 일**([선택·이동] / [범위 선택])과
+   * [범위 선택]으로 **고른 칸들.**
+   *
+   * 🔴 **둘 다 여기까지 들어 올린 까닭은 다음 조각(B3′)의 [Delete] 하나**다. 고른
+   * 여럿을 한 번에 지우는 일은 「모아 두는 목록에 쌓고 되돌리기 한 칸을 찍는」 일이라
+   * 이 화면 말고 할 데가 없고, 그러려면 이 화면이 **지금 어느 모드인지**와 **무엇이
+   * 골라져 있는지**를 알아야 한다. 이번 조각에서는 그림에 그대로 내려보내기만 한다.
+   *
+   * 🔴 **이 화면이 제 손으로 갈아 끼우지 않는다.** 바꾸는 길도 비우는 길도 그림 안에
+   * 있다 — `changeCanvasTool`(모드 전환, 바꾸는 김에 양쪽 선택을 비운다)과
+   * `handleCanvasPaneClick`(빈 바탕 누르기). 여기서 직접 부르면 「언제 비워지는가」가
+   * 두 곳에 적히고, 앞 모드에서 고른 칸이 남아 **엉뚱한 칸이 함께 끌린다.**
+   */
+  const [canvasTool, setCanvasTool] = useState<ProcedureCanvasTool>("POINTER");
+  const [boxSelectedNodeIds, setBoxSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set<string>());
   /**
    * "화면에서 선택" — 연결 추가 패널의 대상 노드를 캔버스 클릭으로 고르는
    * 모드다(ProcedureTemplateEditorScreen과 같은 규칙). 여기 캔버스 콜백은
@@ -1970,7 +1991,10 @@ export default function CaseFlowchartEditorScreen({
                 onWaypointSelectionChange={handleWaypointSelectionChange}
                 onNodeDragStart={handleNodeDragStart}
                 onWaypointMove={handleWaypointMove}
-
+                canvasTool={canvasTool}
+                onCanvasToolChange={setCanvasTool}
+                boxSelectedNodeIds={boxSelectedNodeIds}
+                onBoxSelectionChange={setBoxSelectedNodeIds}
                 onInstanceReady={(instance) => {
                   reactFlowInstanceRef.current = instance;
                 }}
