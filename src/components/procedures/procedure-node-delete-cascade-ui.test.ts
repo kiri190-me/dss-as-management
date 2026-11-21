@@ -169,10 +169,34 @@ describe("노드 삭제에 선이 딸려 간다(화면) — ③🔴 막음에서
   test("🔴 **체크리스트·고장 진단표는 그대로 막는다** — 함께 지울 수 있는 성질이 아니다", () => {
     // 🔴 그 노드 안에는 사람이 쓴 점검 항목·진단 표가 들어 있고, 편집기에는 그것을
     //    옮기거나 지울 손잡이조차 없다. 서버도 NODE_HAS_DEPENDENT_CONTENT 로 거절한다.
-    const reason = flat(screen.slice(screen.indexOf("const selectedNodeDeleteBlockedReason"), screen.indexOf("const selectedNodeAttachedEdgeCount")));
-    assert.ok(reason.includes("if (selectedNode.hasChecklistContent || selectedNode.hasTroubleshootingContent) {"));
-    assert.ok(reason.includes("체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다."));
-    assert.ok(!reason.includes("renderedEdges"), "막는 까닭이 아직 선을 보고 있다");
+    //
+    // 🔴 **2026-11-21(조각 B3)에 이 셈이 화면에서 순수 모듈로 나갔다.** 조건도
+    //    글자도 한 글자 안 바뀌었고 자리만 옮겼다 — [범위 선택]으로 고른 여럿을
+    //    지우면서 **같은 질문을 노드마다** 하게 됐기 때문이다. 그래서 여기서 재는
+    //    것이 둘로 늘었다: ㉠ 규칙이 그 모듈에 한 벌 있는가, ㉡ 화면이 제 손으로
+    //    다시 적지 않고 **그 함수를 부르는가**. 값으로 재는 쪽은 unit 목록의
+    //    procedure-editor-node-deletion.test.ts ⑧절이다.
+    assert.ok(planModule.includes("if (node.hasChecklistContent || node.hasTroubleshootingContent) {"), "막는 조건이 모듈에 없다");
+    assert.ok(planModule.includes("체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다."), "막는 글자가 모듈에 없다");
+    assert.ok(planModule.includes("export function resolveProcedureNodeDeleteBlockedReason("), "판정 본체가 사라졌다");
+    assert.ok(
+      f.includes("const selectedNodeDeleteBlockedReason: string | null = resolveProcedureNodeDeleteBlockedReason(selectedNode);"),
+      "화면이 그 함수를 안 부른다 — 제 손으로 다시 적으면 잣대가 둘이 된다"
+    );
+    // 🔵 `hasChecklistContent` 라는 낱말 자체는 화면에 아직 있다 — 유령 칸을 지어낼
+    //    때 false 로 채우는 자리다. 막음을 **판정하는** 쪽만 없어야 한다.
+    assert.ok(!f.includes("selectedNode.hasChecklistContent"), "화면이 아직 제 손으로 판정하고 있다");
+    assert.ok(!screen.includes("체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다."), "막는 글자가 화면에 또 적혀 있다");
+    const rule = flat(functionBody(planModule, "export function resolveProcedureNodeDeleteBlockedReason("));
+    assert.ok(rule.length > 80, "판정 몸통을 못 떼어 냈다 — 아래 단언이 공짜로 통과한다");
+    assert.ok(!rule.includes("edge"), `막는 까닭이 아직 선을 보고 있다: ${rule}`);
+  });
+
+  test("🔴 **복수 삭제도 같은 함수로 거른다** — 규칙이 두 벌이면 패널과 키가 다른 말을 한다", () => {
+    // 🔴 패널이 「지울 수 있다」고 말한 노드를 복수가 빼거나 그 반대가 되는 자리다.
+    //    그때 오류는 한 번도 안 난다 — 단추는 멀쩡히 눌리는데 키로만 안 지워진다.
+    assert.equal(countOf(f, "resolveProcedureNodeDeleteBlockedReason("), 2, "부르는 자리가 단수·복수 둘이어야 한다");
+    assert.ok(f.includes("deleteBlockedReason: resolveProcedureNodeDeleteBlockedReason(n)"), "복수 쪽이 같은 함수를 안 쓴다");
   });
 
   test("🔵 [Delete] 키도 **같은 값**을 보므로 키로도 지워진다 — 키 쪽은 한 글자도 안 고쳤다", () => {

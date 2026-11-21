@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import {
   MarkerType,
   Handle,
@@ -433,6 +433,8 @@ export default function ProcedureFlowGraph({
   layoutModeOptions = DEFAULT_LAYOUT_MODE_OPTIONS,
   canvasTool: controlledCanvasTool,
   onCanvasToolChange,
+  boxSelectedNodeIds: controlledBoxSelectedNodeIds,
+  onBoxSelectionChange,
   onInstanceReady,
   showChrome = true,
   highlightedNodeIds = null,
@@ -588,6 +590,28 @@ export default function ProcedureFlowGraph({
    */
   canvasTool?: ProcedureCanvasTool;
   onCanvasToolChange?: (tool: ProcedureCanvasTool) => void;
+  /**
+   * 2026-11-21(조각 B3) — **[범위 선택]으로 고른 칸들.** 바로 위 도구 모드와
+   * **똑같은 통제형 패턴**이다: 안 넘기면 이 컴포넌트가 제 안에 들고 빈 집합으로
+   * 시작한다. 그래서 이 프롭을 안 넘기는 호출부 셋(절차 상세 · 실행 시작 노드
+   * 고르기 · 「전체 단계 보기」 팝업)은 글자 하나 안 바뀐다.
+   *
+   * 🔴 **올려 보내는 까닭은 [Delete] 하나**다. 고른 여럿을 한 번에 지우는 일은
+   * 편집기 화면이 맡는다 — 지우기는 「모아 두는 목록에 쌓고 되돌리기 한 칸을
+   * 찍는」 일이라 그림이 할 수 있는 일이 아니다. 그림이 지우기를 알면 키 등록도
+   * 둘이 되고(한 번 누른 키에 둘이 반응한다) 읽기 전용 화면까지 그 길을 물게 된다.
+   *
+   * 🔴 **비우는 길은 여전히 이 안에 둘뿐**이어야 한다 — changeCanvasTool(모드
+   * 전환)과 handleCanvasPaneClick(빈 바탕 누르기). 바깥이 제 손으로 비우기 시작하면
+   * 「언제 비워지는가」가 두 곳에 적힌다. 바깥이 하는 일은 **지운 칸을 빼는 것**
+   * 하나다(removeNodesFromSelection — 못 지운 칸은 골라진 채 남는다).
+   *
+   * 🔵 바꾸는 쪽을 `Dispatch<SetStateAction<…>>` 로 받는 까닭: 아래 두 자리가
+   * **앞 값을 보고 다음 값을 정한다**(누르면 넣고/빼기 · 이미 비었으면 같은 집합
+   * 그대로). 값만 받는 콜백으로 좁히면 그 둘이 렌더 시점의 옛 집합을 읽게 된다.
+   */
+  boxSelectedNodeIds?: ReadonlySet<string>;
+  onBoxSelectionChange?: Dispatch<SetStateAction<ReadonlySet<string>>>;
   /** 5C-6D-1D — forwards the live React Flow instance up to the editor screen (same purpose/timing as CaseFlowchartGraph's own onInstanceReady) so a sibling component (NodePropertyPanel, CreateNodePanel) can read each node's REAL measured dimensions (`instance.getInternalNode(id)?.measured`) for relative-position math, rather than a duplicated size estimate. Optional — ProcedureTemplateDetailScreen's read-only usage has no relative-position feature and never passes this. */
   onInstanceReady?: (instance: ReactFlowInstance) => void;
   /**
@@ -797,8 +821,16 @@ export default function ProcedureFlowGraph({
    * 지우기)뿐**이라, 그 자리들을 하나도 안 건드려도 된다.
    * 🔵 그래서 **두 모드가 선택을 나눠 가진다** — 모드를 바꾸면 양쪽 다 비운다
    *    (changeCanvasTool).
+   *
+   * 🔴 2026-11-21(조각 B3) — **바깥이 넘기면 바깥 것을 쓴다**(위 layoutMode ·
+   * canvasTool 과 똑같은 통제형-내부값 겹침). 편집기가 [Delete] 로 고른 여럿을
+   * 한 번에 지워야 해서 올라갔고, 안 넘기는 화면 셋은 여기 제 안의 값으로 전과
+   * 똑같이 돈다. 넣고 빼고 비우는 **네 자리는 한 글자도 안 바뀌었다** — 갈아
+   * 끼우는 손잡이 하나만 위에서 받는다.
    */
-  const [boxSelectedNodeIds, setBoxSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const [internalBoxSelectedNodeIds, setInternalBoxSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const boxSelectedNodeIds = controlledBoxSelectedNodeIds ?? internalBoxSelectedNodeIds;
+  const setBoxSelectedNodeIds = onBoxSelectionChange ?? setInternalBoxSelectedNodeIds;
   /**
    * 🔴 점선 네모를 **쓸 수 있는 그림인가.** 끌기를 여는 관문
    * (`nodesDraggable={editable && layoutMode === "USER"}`)과 **일부러 같은 값**이다:

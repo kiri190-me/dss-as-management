@@ -53,13 +53,20 @@
  * 손도 안 대고 돌려보낸다.
  *
  * ──────────────────────────────────────────────────────────────────────
- * 🔴 차례 — **가장 안쪽 것부터** (경로점 → 노드 → 연결선)
+ * 🔴 차례 — **가장 안쪽 것부터** (경로점 → 복수 노드 → 노드 → 연결선)
  * ──────────────────────────────────────────────────────────────────────
  * ① **경로점**(연결선 위의 점)이 고른 상태면 그것부터다. 경로점을 고르는 것은
  *    연결선을 고른 **뒤** 그 위의 점 하나를 다시 고른 것이라 더 안쪽이고,
  *    2026-11-21 이전부터 [Delete]/[Backspace] 가 경로점을 지워 왔다(화면의 그
  *    keydown 이 이 판정의 뿌리다). 여기서 연결선을 지우기로 바꾸면 **지금 그렇게
  *    쓰고 있는 손이 깨진다** — 점 하나 지우려다 선이 통째로 사라진다.
+ * ①' **[범위 선택]으로 고른 여럿**이 있으면 그것들이다(2026-11-21, 조각 B3).
+ *    단수 노드보다 **앞**에 둔다. 🔵 지금은 둘이 동시에 설 수 없다 — 도구를
+ *    바꾸면 그림이 양쪽 선택을 다 비우고(changeCanvasTool), 범위 선택 모드에서는
+ *    칸을 눌러도 단수 선택을 한 글자도 안 건드린다. 그래도 차례를 정해 두는
+ *    까닭은, 나중에 둘이 같이 설 수 있게 되는 날 **어느 쪽이 이기는지가 코드에
+ *    적혀 있어야** 하기 때문이다. 고른 것이 여럿일 때 하나만 지우면 사람은
+ *    「나머지는 왜 안 지워졌지」를 묻게 된다.
  * ② **노드**가 고른 상태면 노드다. 화면의 오른쪽 패널도 같은 차례다 —
  *    노드가 고른 상태면 EdgePropertyPanel 은 아예 안 선다(`!selectedNode &&
  *    selectedEdge`). 그러니 「보이는 삭제 단추」도 [노드 삭제] 하나다.
@@ -116,6 +123,8 @@ export type ProcedureDeleteKeyReason =
  */
 export type ProcedureDeleteKeyPlan =
   | { readonly action: "REMOVE_WAYPOINT"; readonly edgeId: string; readonly waypointIndex: number }
+  /** [범위 선택]으로 고른 **여럿**. 차례는 화면이 넘긴 그대로(= 그림이 그린 차례)다. */
+  | { readonly action: "DELETE_NODES"; readonly nodeIds: readonly string[] }
   | { readonly action: "DELETE_NODE"; readonly nodeId: string }
   | { readonly action: "DELETE_EDGE"; readonly edgeId: string }
   | { readonly action: "NONE"; readonly reason: ProcedureDeleteKeyReason };
@@ -153,6 +162,25 @@ export type ProcedureDeleteKeyInput = {
    * 판정하지 않는다(머리말의 「두 잣대」 절).
    */
   readonly nodeDeleteBlockedReason: string | null;
+  /**
+   * 🔴 지금 **[범위 선택] 도구로 그림을 보고 있는가**(2026-11-21, 조각 B3).
+   * 거짓이면 아래 집합에 무엇이 들어 있든 **쳐다보지 않는다.**
+   *
+   * 까닭: 점선 네모는 끌 수 있는 그림에서만 산다(`editable && 사용자 배치`).
+   * 모드를 벗어나면 고른 집합이 화면에서 **안 보이는데**(그림이 그 모드에서만
+   * `selected` 를 싣는다) state 에는 남아 있을 수 있다. 그때 [Delete] 가 보이지도
+   * 않는 것을 지우면, 사람은 제가 무엇을 지웠는지 모른다.
+   */
+  readonly boxSelectActive: boolean;
+  /**
+   * 🔴 [범위 선택]으로 고른 칸들 — **그림에 실제로 그려진 것만**, 그린 차례대로.
+   * 칸마다 **못 지우는 까닭을 함께** 들고 온다. 단수 쪽
+   * nodeDeleteBlockedReason 과 **같은 약속**이다: 이 판정은 까닭을 제가 세지
+   * 않고 받아만 쓴다(머리말의 「두 잣대」 절). 화면은 노드마다
+   * resolveProcedureNodeDeleteBlockedReason 을 돌려 채운다 — [노드 삭제] 단추를
+   * 흐리게 하는 그 함수 그대로다.
+   */
+  readonly boxSelectedNodes: readonly { readonly id: string; readonly deleteBlockedReason: string | null }[];
 };
 
 /**
@@ -177,10 +205,13 @@ export function isTextEntryTarget(target: { readonly tagName: string; readonly i
 /**
  * 키 하나에 대한 답 하나. 차례와 까닭은 이 파일 머리말에 있다.
  *
- * 🔵 키를 **누르고 있을 때**(자동 반복)를 따로 막지 않는 까닭: 지우기 둘은
- * 성공하면 그 선택을 바로 푼다(handleQueueDeleteNode 의 setSelectedNodeId(null) ·
+ * 🔵 키를 **누르고 있을 때**(자동 반복)를 따로 막지 않는 까닭: 지우기는 성공하면
+ * 그 선택을 바로 푼다(handleQueueDeleteNode 의 setSelectedNodeId(null) ·
  * handleQueueDeleteEdge 의 setSelectedEdgeId(null)). 두 번째 키부터는 고른 것이
  * 없어 NOTHING_SELECTED 로 떨어진다.
+ * 🔵 복수도 같다 — 화면이 **지운 것만** 집합에서 뺀다(removeNodesFromSelection).
+ * 남는 것은 못 지운 칸뿐이라, 키를 누르고 있어도 두 번째부터는 NODE_DELETE_BLOCKED
+ * 로 떨어져 아무 일도 안 일어난다.
  */
 export function planProcedureDeleteKey(input: ProcedureDeleteKeyInput): ProcedureDeleteKeyPlan {
   if (input.key !== "Delete" && input.key !== "Backspace") {
@@ -199,6 +230,22 @@ export function planProcedureDeleteKey(input: ProcedureDeleteKeyInput): Procedur
   // 🔴 여기부터는 [Delete] 하나뿐이다(2026-11-21 쓰는 분 결정 — 머리말).
   if (input.key !== "Delete") {
     return { action: "NONE", reason: "BACKSPACE_IS_NOT_FOR_GRAPH" };
+  }
+
+  // ①' [범위 선택]으로 고른 여럿(조각 B3). 🔴 모드일 때만 본다.
+  if (input.boxSelectActive && input.boxSelectedNodes.length > 0) {
+    if (!input.canDeleteGraph) return { action: "NONE", reason: "NOT_ALLOWED" };
+    // 🔴 **막힌 것은 빼고 나머지를 지운다**(쓰는 분 결정 — 「하나라도 막히면 전부
+    //    안 함」이 아니다). 다섯을 골랐는데 하나가 체크리스트 노드면 넷이 지워지고
+    //    그 하나는 **골라진 채 남는다**(화면이 그렇게 뒤처리한다). 전부 막는 쪽을
+    //    골랐다면 아무 일도 안 일어나는 것과 구별이 안 돼서(키 경로는 조용하다)
+    //    사람은 기능이 고장 난 줄 안다.
+    const deletable = input.boxSelectedNodes.filter((node) => node.deleteBlockedReason === null);
+    // 🔴 하나도 못 지우면 **여기서 끝난다** — 단수로 흘러내리지 않는다. 사람이
+    //    지우려 한 것은 네모로 고른 그것들이고, 그 자리에서 엉뚱한 것이 사라지면 안 된다.
+    //    (②의 「막혀도 안 흘러내린다」와 같은 까닭이다.)
+    if (deletable.length === 0) return { action: "NONE", reason: "NODE_DELETE_BLOCKED" };
+    return { action: "DELETE_NODES", nodeIds: deletable.map((node) => node.id) };
   }
 
   // ② 노드. 🔴 막혔으면 ③으로 흘러내리지 않고 여기서 끝난다.

@@ -122,7 +122,14 @@ import {
   type StructuralPreviewFactories,
 } from "@/lib/domain/procedure-editor-structural-preview";
 import { planProcedureDeleteKey, isTextEntryTarget } from "@/lib/domain/procedure-editor-delete-key";
-import { findEdgesAttachedToNode, planProcedureNodeDeletionOperations } from "@/lib/domain/procedure-editor-node-deletion";
+import {
+  findEdgesAttachedToNode,
+  findEdgesAttachedToNodes,
+  planProcedureNodeDeletionOperations,
+  planProcedureNodesDeletionOperations,
+  resolveProcedureNodeDeleteBlockedReason,
+} from "@/lib/domain/procedure-editor-node-deletion";
+import { removeNodesFromSelection } from "@/lib/graph-editor-core/box-selection";
 import { useFieldStepGhostVisibility } from "./editor/use-field-step-ghost-visibility";
 
 type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge" | "addNode" | "fieldSteps";
@@ -438,6 +445,20 @@ export default function ProcedureTemplateEditorScreen({
    * 엉뚱한 칸이 함께 끌린다(그림 쪽 프롭 주석에 같은 경고).
    */
   const [canvasTool, setCanvasTool] = useState<ProcedureCanvasTool>("POINTER");
+  /**
+   * 2026-11-21(조각 B3) — **[범위 선택]으로 고른 칸들.** 바로 위 도구 모드와 같은
+   * 통제형 패턴으로 그림에서 들어 올렸다(그림 쪽 프롭 주석에 같은 까닭).
+   *
+   * 🔴 올린 까닭은 **[Delete] 하나**다. 고른 여럿을 한 번에 지우는 일은 「모아 두는
+   * 목록에 쌓고 되돌리기 한 칸을 찍는」 일이라 이 화면 말고 할 수 있는 데가 없다.
+   *
+   * 🔴 **이 화면은 제 손으로 비우지 않는다.** 비우는 길은 그림 안의 둘 그대로다 —
+   * changeCanvasTool(모드 전환) · handleCanvasPaneClick(빈 바탕 누르기). 여기서
+   * 하는 일은 **지운 칸을 빼는 것** 하나이고(handleQueueDeleteNodes), 못 지운 칸은
+   * 일부러 골라진 채 남긴다 — 그래야 「N개 선택」이 줄다 멈추고 그 칸만 테두리가
+   * 남아 화면이 스스로 말한다(새 안내 줄을 세우지 않는 까닭이기도 하다).
+   */
+  const [boxSelectedNodeIds, setBoxSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set<string>());
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>(navigationTarget.nodeId ? "properties" : "validation");
   const [lastStructuralValidation, setLastStructuralValidation] = useState<StructuralValidationSummary | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -1415,6 +1436,56 @@ export default function ProcedureTemplateEditorScreen({
     }
   }
 
+  /**
+   * ── 🔴 **[범위 선택]으로 고른 여럿을 한 번에** (2026-11-21, 조각 B3) ──────────
+   * 쓰는 분 요청: 「2번 옮기기 + [DELETE]로 지우는 것까지 하자.」 들어오는 목록은
+   * 이미 **지울 수 있는 것만** 걸러진 것이다(planProcedureDeleteKey 가
+   * resolveProcedureNodeDeleteBlockedReason 의 답을 보고 걸렀다) — 여기서 또
+   * 거르면 세 번째 잣대가 된다.
+   *
+   * 🔴 **위 단수 함수 안에 못 넣는다.** 넣으면 그 함수가 queueStructural 을 두 번
+   * 부르거나 가지를 타게 되는데, 「삭제 한 번에 통로를 한 번만 지난다」는 것이
+   * [이전] 한 칸의 근거라 시험이 **정확히 1회**로 못 박고 있다. 그래서 새 함수다.
+   *
+   * 🔴 **queueStructural 은 여기서도 한 번뿐이다.** 노드마다 부르면 지금은 우연히
+   * 한 칸으로 접힐 수 있지만(스냅샷 ref 가 한 이벤트 안에서 안 바뀐다) 그것은
+   * 최적화이지 약속이 아니다. 노드마다의 줄을 **합친 배열 하나**로 넘겨야
+   * [이전] 한 번에 고른 것이 전부 돌아온다.
+   * 🔵 두 노드가 공유하던 선은 DELETE_EDGE 가 두 줄 적히는데, 서버로 가는 길에
+   *    반드시 지나는 접기가 DUPLICATE_DELETE 로 한 줄로 만든다(화면의 「변경 N건」도
+   *    접힌 뒤 센다). 그래서 노드마다 붙은 선을 넣는 것을 겁낼 까닭이 없다.
+   *
+   * 🔴 **뒤처리는 단수와 똑같이 다섯 지도 전부**다. 하나라도 빠뜨리면 「같은
+   * 저장에서 지워진 노드(선)의 초안을 안 버려 저장 전체가 실패하는」 결함이 난다 —
+   * 2026-11-21 에 실제로 겪은 그것이다.
+   *
+   * 🔵 사유는 null 이다. 이 길은 키 하나뿐이고 사유를 받을 칸이 없다(단수의 키
+   *    경로도 null 을 넘긴다 — 사유 칸은 애초에 「선택」이다).
+   */
+  function handleQueueDeleteNodes(nodeIds: readonly string[]) {
+    // 🔵 판정은 빈 목록을 안 준다. 그래도 막아 두는 까닭은, 빈 호출이 **아무것도
+    //    안 바뀐 [이전] 한 칸**을 찍어 되돌리기를 한 번 헛돌게 하기 때문이다.
+    if (nodeIds.length === 0) return;
+    const attachedEdgeIds = findEdgesAttachedToNodes(renderedEdges, nodeIds);
+    queueStructural(() => planProcedureNodesDeletionOperations(renderedEdges, nodeIds, null));
+    setPendingNodeFieldDraftsById((prev) => dropMapKeys(prev, nodeIds));
+    setPendingLayoutMoves((prev) => dropMapKeys(prev, nodeIds));
+    setPendingEdgeFieldDraftsById((prev) => dropMapKeys(prev, attachedEdgeIds));
+    setPendingEdgeRouteMoves((prev) => dropMapKeys(prev, attachedEdgeIds));
+    setPendingEdgeSaveNoteById((prev) => dropMapKeys(prev, attachedEdgeIds));
+    // 🔴 **지운 것만 뺀다** — 못 지운 칸은 골라진 채 남는다(쓰는 분 결정).
+    //    통째로 비우면 무엇이 안 지워졌는지가 화면에서 사라진다.
+    setBoxSelectedNodeIds((prev) => removeNodesFromSelection(prev, nodeIds));
+    // 🔵 단수 선택은 이 모드에서 늘 비어 있다(그림이 모드를 바꿀 때 비운다). 그래도
+    //    「지워진 것을 고른 채로 두지 않는다」는 뒤처리는 단수와 똑같이 해 둔다 —
+    //    둘이 함께 설 수 있게 되는 날 패널이 없는 노드를 그리게 된다.
+    if (selectedNodeId !== null && nodeIds.includes(selectedNodeId)) setSelectedNodeId(null);
+    if (selectedEdgeId !== null && attachedEdgeIds.includes(selectedEdgeId)) {
+      setSelectedEdgeId(null);
+      setSelectedWaypoint(null);
+    }
+  }
+
   function handleQueueCreateEdge(input: {
     fromNodeId: string;
     toNodeId: string;
@@ -2283,14 +2354,15 @@ export default function ProcedureTemplateEditorScreen({
    * (NODE_HAS_DEPENDENT_CONTENT). 이쪽은 함께 지울 수 있는 성질의 것이 아니다 —
    * 그 안에 사람이 쓴 점검 항목·진단 표가 들어 있고, 편집기에는 그것을 옮기거나
    * 지울 손잡이조차 없다. 그래서 그대로 막는다.
+   *
+   * ── 🔴 2026-11-21(조각 B3) — **셈이 순수 함수로 나갔다** ──────────────────
+   * 조건도 글자도 한 글자 안 바뀌었고, 자리만 옮겼다. 까닭은 **묻는 자리가 둘이
+   * 됐기 때문**이다 — [범위 선택]으로 고른 여럿을 [Delete] 로 지울 때 노드마다
+   * 같은 질문을 해야 한다(바로 아래 boxSelectedDeleteCandidates). 규칙을 두 벌로
+   * 적으면 **패널이 「지울 수 있다」고 말한 노드를 복수가 빼거나 그 반대**가 되고,
+   * 그때 오류는 한 번도 안 난다.
    */
-  const selectedNodeDeleteBlockedReason: string | null = (() => {
-    if (!selectedNode) return null;
-    if (selectedNode.hasChecklistContent || selectedNode.hasTroubleshootingContent) {
-      return "체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다.";
-    }
-    return null;
-  })();
+  const selectedNodeDeleteBlockedReason: string | null = resolveProcedureNodeDeleteBlockedReason(selectedNode);
 
   /**
    * 🔴 **이 노드를 지우면 함께 지워질 연결선의 수**(2026-11-21). 확인 창을 안
@@ -2304,6 +2376,37 @@ export default function ProcedureTemplateEditorScreen({
   const selectedNodeAttachedEdgeCount = selectedNode ? findEdgesAttachedToNode(renderedEdges, selectedNode.id).length : 0;
 
   /**
+   * 🔴 **지금 [범위 선택] 도구로 그림을 보고 있는가**(2026-11-21, 조각 B3).
+   * 그림 쪽의 `boxSelectActive`(= canUseBoxSelect && canvasTool === "BOX_SELECT",
+   * 여기서 canUseBoxSelect 는 `editable && layoutMode === "USER"`)와 **같은 값**을
+   * 이 화면이 제 손에 든 셋으로 다시 세운 것이다. 그림은 이 값으로 **칸에 테두리를
+   * 실을지**를 정하고, 이 화면은 **[Delete] 가 고른 집합을 볼지**를 정한다.
+   *
+   * 🔴 둘이 갈리면 「테두리는 보이는데 키로는 안 지워진다」(또는 그 반대로
+   * **보이지도 않는 것이 지워진다**)가 되고 오류는 안 난다. 그래서 아래 시험이
+   * 두 줄을 함께 못 박아 둔다(procedure-multi-node-delete-ui.test.ts ②절).
+   * 🔵 편집기에서 배치는 「사용자 배치」 하나뿐이지만(EDITOR_LAYOUT_MODES) 그래도
+   *    적는다 — 그 목록이 늘어나는 날 조용히 어긋나는 쪽이 되면 안 된다.
+   */
+  const boxSelectActive = canEdit && layoutMode === "USER" && canvasTool === "BOX_SELECT";
+  /**
+   * 🔴 [Delete] 에 넘길 **고른 칸들과 각자의 「못 지우는 까닭」**.
+   *
+   * 🔴 **그림에 그려진 목록(renderedNodes)을 돌며** 고른 것만 추린다 — 집합을
+   * 돌며 노드를 찾지 않는다. 까닭 둘: ① 그 사이에 사라진 칸의 id 가 집합에 남아
+   * 있어도 **없는 행을 지우는 조작이 안 쌓인다**(단수 쪽이 selectedNode?.id 로
+   * 같은 것을 지킨다), ② 차례가 **그림이 그린 차례**가 되어 사람이 본 것과 같다.
+   * 🔴 까닭은 단추를 흐리게 하는 **그 함수 그대로**다(바로 위 한 벌과 같은 것).
+   */
+  const boxSelectedDeleteCandidates = useMemo(
+    () =>
+      renderedNodes
+        .filter((n) => boxSelectedNodeIds.has(n.id))
+        .map((n) => ({ id: n.id, deleteBlockedReason: resolveProcedureNodeDeleteBlockedReason(n) })),
+    [renderedNodes, boxSelectedNodeIds]
+  );
+
+  /**
    * ==========================================================================
    * 🔴 [Delete] 키로 지우기 (2026-11-21)
    * ==========================================================================
@@ -2311,9 +2414,15 @@ export default function ProcedureTemplateEditorScreen({
    * 해 달라.」
    *
    * 🔴 **무엇을 지울지 여기서 판정하지 않는다** — planProcedureDeleteKey 하나가
-   * 답한다. 차례(경로점 → 노드 → 연결선) · 글자 칸 보호 · Backspace 결정 · 막힌
-   * 노드에서 안 흘러내리는 규칙까지 전부 그 파일에 까닭과 함께 있고, 값으로
-   * 재어진다(이 화면은 .css 와 server-only 를 물고 있어 import 자체가 던진다).
+   * 답한다. 차례(경로점 → 복수 노드 → 노드 → 연결선) · 글자 칸 보호 · Backspace
+   * 결정 · 막힌 노드에서 안 흘러내리는 규칙까지 전부 그 파일에 까닭과 함께 있고,
+   * 값으로 재어진다(이 화면은 .css 와 server-only 를 물고 있어 import 자체가 던진다).
+   *
+   * 🔴 2026-11-21(조각 B3) — **[범위 선택]으로 고른 여럿**이 한 가지 더 붙었다.
+   * 막힌 노드가 섞여 있으면 **그것만 빼고 나머지를 지운다**(쓰는 분 결정) — 「하나라도
+   * 막히면 전부 안 함」은 **아무 일도 안 일어나는 것과 구별이 안 돼서**(이 키 경로는
+   * 조용하다) 사람이 기능이 고장 난 줄 안다. 못 지운 칸은 골라진 채 남아 테두리로
+   * 제 자리를 말한다.
    *
    * 🔴 넘기는 값은 **단추에 넘기는 그 값 그대로**다. nodeDeleteBlockedReason 은
    * [노드 삭제] 단추를 흐리게 하는 selectedNodeDeleteBlockedReason 이고, 권한은
@@ -2332,17 +2441,35 @@ export default function ProcedureTemplateEditorScreen({
    * `placeholder="삭제 사유 (선택)"` · `onQueueDelete(deleteReason.trim() || null)`).
    */
   /**
-   * 🔴 지우기 둘의 **가장 최근 신원**. 둘은 useCallback 이 아니라 렌더마다 다시
+   * 🔴 지우기 셋의 **가장 최근 신원**. 셋은 useCallback 이 아니라 렌더마다 다시
    * 만들어지는 함수 선언이라, 아래 의존성 배열에 그대로 넣으면 keydown 등록·해제가
    * 렌더마다(드래그 중에는 프레임마다) 돈다. pendingSnapshotRef 가 같은 까닭으로
    * 쓰는 수법 그대로다.
    *
-   * 🔵 둘 다 몸통이 setState 갱신 함수뿐이라 설령 옛 신원이 불려도 결과가 같다 —
+   * 🔵 셋 다 몸통이 setState 갱신 함수뿐이라 설령 옛 신원이 불려도 결과가 같다 —
    * 그래도 ref 로 맞춰 두는 것은 그 성질이 나중에 깨져도 여기가 안 틀리게 하려는 것이다.
+   *
+   * 🔴 2026-11-21(조각 B3) — **고른 집합도 여기 싣는다.** 그 목록은 렌더마다 새
+   * 배열이고(윗줄의 useMemo 도 renderedNodes 가 바뀌면 신원이 바뀐다 — 칸 하나에
+   * 글자를 칠 때마다 바뀐다), 의존성에 넣으면 **글자 한 자마다 keydown 등록이
+   * 돈다.** ref 는 렌더마다 갱신되고 키는 눌린 **그 순간** 읽으므로 값은 언제나
+   * 가장 최근 것이다.
    */
-  const queueDeleteByKeyRef = useRef({ node: handleQueueDeleteNode, edge: handleQueueDeleteEdge });
+  const queueDeleteByKeyRef = useRef({
+    node: handleQueueDeleteNode,
+    edge: handleQueueDeleteEdge,
+    nodes: handleQueueDeleteNodes,
+    boxSelectActive,
+    boxSelectedNodes: boxSelectedDeleteCandidates,
+  });
   useEffect(() => {
-    queueDeleteByKeyRef.current = { node: handleQueueDeleteNode, edge: handleQueueDeleteEdge };
+    queueDeleteByKeyRef.current = {
+      node: handleQueueDeleteNode,
+      edge: handleQueueDeleteEdge,
+      nodes: handleQueueDeleteNodes,
+      boxSelectActive,
+      boxSelectedNodes: boxSelectedDeleteCandidates,
+    };
   });
 
   const deletableNodeId = selectedNode?.id ?? null;
@@ -2358,6 +2485,10 @@ export default function ProcedureTemplateEditorScreen({
         selectedEdgeId: deletableEdgeId,
         selectedWaypointIndex,
         nodeDeleteBlockedReason: selectedNodeDeleteBlockedReason,
+        // 🔴 이 둘만 ref 에서 읽는다 — 까닭은 바로 위 ref 주석에(의존성에 넣으면
+        //    글자 한 자마다 등록이 돈다). 값은 렌더마다 갱신되므로 가장 최근 것이다.
+        boxSelectActive: queueDeleteByKeyRef.current.boxSelectActive,
+        boxSelectedNodes: queueDeleteByKeyRef.current.boxSelectedNodes,
       });
       // 🔴🔴 아무 일도 안 할 때는 **이벤트에 손도 안 댄다.** 글자 칸에서
       //    preventDefault 를 하면 [Delete] 가 글자를 안 지운다.
@@ -2365,6 +2496,10 @@ export default function ProcedureTemplateEditorScreen({
       e.preventDefault();
       if (plan.action === "REMOVE_WAYPOINT") {
         handleRemoveSelectedWaypoint();
+        return;
+      }
+      if (plan.action === "DELETE_NODES") {
+        queueDeleteByKeyRef.current.nodes(plan.nodeIds);
         return;
       }
       if (plan.action === "DELETE_NODE") {
@@ -2650,6 +2785,8 @@ export default function ProcedureTemplateEditorScreen({
             layoutModeOptions={EDITOR_LAYOUT_MODES}
             canvasTool={canvasTool}
             onCanvasToolChange={setCanvasTool}
+            boxSelectedNodeIds={boxSelectedNodeIds}
+            onBoxSelectionChange={setBoxSelectedNodeIds}
             onInstanceReady={(instance) => {
               reactFlowInstanceRef.current = instance;
             }}

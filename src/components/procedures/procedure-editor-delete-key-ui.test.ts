@@ -189,10 +189,14 @@ describe("[Delete] 로 지우기(화면) — ④🔴 지우는 길은 **단추�
     assert.ok(keyHandler.includes("queueDeleteByKeyRef.current.node(plan.nodeId, null)"));
     assert.ok(keyHandler.includes("queueDeleteByKeyRef.current.edge(plan.edgeId, null)"));
     assert.ok(!keyHandler.includes("Action("), "키가 서버 액션을 직접 부르고 있다");
+    // 🔵 2026-11-21(조각 B3)에 **셋째가 붙었다** — [범위 선택]으로 고른 여럿을
+    //    지우는 handleQueueDeleteNodes 다. 단수 둘이 패널과 같은 함수라는 것은
+    //    그대로 지킨다(그것이 「단추와 같은 통로」의 근거다).
     assert.ok(
-      f.includes("const queueDeleteByKeyRef = useRef({ node: handleQueueDeleteNode, edge: handleQueueDeleteEdge });"),
-      "키가 부르는 둘이 패널과 같은 함수여야 한다"
+      f.includes("const queueDeleteByKeyRef = useRef({ node: handleQueueDeleteNode, edge: handleQueueDeleteEdge, nodes: handleQueueDeleteNodes,"),
+      "키가 부르는 셋이 패널과 같은 함수여야 한다"
     );
+    assert.ok(keyHandler.includes("queueDeleteByKeyRef.current.nodes(plan.nodeIds)"), "복수도 같은 ref 를 지나야 한다");
   });
 
   test("🔵 사유는 null 로 간다 — 사유 칸은 애초에 「선택」이다", () => {

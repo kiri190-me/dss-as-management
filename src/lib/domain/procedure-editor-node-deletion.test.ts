@@ -1,6 +1,14 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { findEdgesAttachedToNode, planProcedureNodeDeletionOperations, type NodeDeletionEdge } from "./procedure-editor-node-deletion";
+import {
+  findEdgesAttachedToNode,
+  findEdgesAttachedToNodes,
+  planProcedureNodeDeletionOperations,
+  planProcedureNodesDeletionOperations,
+  resolveProcedureNodeDeleteBlockedReason,
+  PROCEDURE_NODE_DELETE_BLOCKED_BY_CONTENT,
+  type NodeDeletionEdge,
+} from "./procedure-editor-node-deletion";
 import {
   coalescePendingStructuralOperations,
   canSendStructuralChanges,
@@ -265,5 +273,143 @@ describe("노드 삭제에 선이 딸려 간다 — ⑥🔴 **그려진 목록**
     const coalesced = coalescePendingStructuralOperations(ops);
     assert.equal(coalesced.operations.length, 3);
     assert.equal(canSendStructuralChanges(coalesced), true);
+  });
+});
+
+/**
+ * ============================================================================
+ * ⑦ [범위 선택]으로 고른 **여럿**을 한 번에 (2026-11-21, 조각 B3)
+ * ============================================================================
+ * 쓰는 분 요청(원문): 「2번 옮기기 + [DELETE]로 지우는 것까지 하자.」
+ *
+ * 🔴 여기서 가장 크게 다칠 수 있는 것:
+ *  ① **[이전] 한 칸이 아니게 되는 것.** 노드마다 쌓으면 한 번 눌러 하나만 돌아온다.
+ *     배열 하나로 돌려주는지, 그 배열 안에 노드 수만큼 DELETE_NODE 가 있는지를 잰다.
+ *  ② **두 노드가 공유하던 선을 두 번 지우러 가는 것.** 접기가 받아 준다는 것을
+ *     값으로 확인해 둔다 — 「알아서 되겠지」로 두면 어느 날 조용히 안 된다.
+ *  ③ **단수와 복수가 다르게 지우는 것.** 복수는 단수를 그대로 돌려야 한다.
+ */
+describe("여럿을 한 번에 지운다 — ⑦ 쌓이는 줄", () => {
+  test("🔵 먼저 표본 — A 와 B 를 함께 지우면 **그 둘을 잇던 선이 겹친다**(아래 단언이 뜻을 갖는 조건)", () => {
+    assert.ok(findEdgesAttachedToNode(GRAPH, NODE_A).includes(EDGE_AB));
+    assert.ok(findEdgesAttachedToNode(GRAPH, NODE_B).includes(EDGE_AB), "겹치는 선이 없으면 접기 단언이 공짜로 통과한다");
+  });
+
+  test("🔴 **단수를 그대로 이어 붙인 것**이다 — 복수가 제 셈을 따로 적으면 둘이 갈린다", () => {
+    const together = planProcedureNodesDeletionOperations(GRAPH, [NODE_A, NODE_C], null);
+    const apart = [...planProcedureNodeDeletionOperations(GRAPH, NODE_A, null), ...planProcedureNodeDeletionOperations(GRAPH, NODE_C, null)];
+    assert.deepEqual(together, apart);
+  });
+
+  test("🔴 **배열 하나**로 돌려준다 — 그것이 [이전] 한 칸의 근거다", () => {
+    const ops = planProcedureNodesDeletionOperations(GRAPH, [NODE_A, NODE_B], null);
+    assert.ok(Array.isArray(ops));
+    assert.equal(ops.filter((op) => op.kind === "DELETE_NODE").length, 2, "고른 노드 수만큼 노드 삭제가 있어야 한다");
+    assert.deepEqual(kindsOf(ops), ["DELETE_EDGE", "DELETE_EDGE", "DELETE_NODE", "DELETE_EDGE", "DELETE_EDGE", "DELETE_NODE"]);
+  });
+
+  test("🔵 **겹치는 선은 접기가 한 줄로** 만든다 — 그래서 노드마다 붙은 선을 넣는 것을 겁낼 까닭이 없다", () => {
+    // A 에는 AB·CA, B 에는 AB·BC 가 붙어 있다 — AB 가 두 번 적힌다.
+    const ops = planProcedureNodesDeletionOperations(GRAPH, [NODE_A, NODE_B], null);
+    assert.equal(ops.filter((op) => op.kind === "DELETE_EDGE" && op.edgeId === EDGE_AB).length, 2, "겹침이 없으면 이 시험이 아무것도 안 잰다");
+
+    const coalesced = coalescePendingStructuralOperations(ops);
+    assert.equal(coalesced.conflicts.length, 0, "막힌 줄이 있으면 [저장] 자체가 안 된다");
+    assert.deepEqual(dropReasons(coalesced), ["DELETE_EDGE:DUPLICATE_DELETE"]);
+    assert.equal(coalesced.operations.filter((op) => op.kind === "DELETE_EDGE" && op.edgeId === EDGE_AB).length, 1);
+    assert.equal(coalesced.operations.length, 5, "선 셋 + 노드 둘");
+    assert.equal(canSendStructuralChanges(coalesced), true);
+  });
+
+  test("🔴 차례 세우기를 지나면 **선 삭제가 전부 노드 삭제보다 앞**이다 — 복수에서도 그 차례가 떠받친다", () => {
+    const coalesced = coalescePendingStructuralOperations(planProcedureNodesDeletionOperations(GRAPH, [NODE_A, NODE_B], null));
+    const planned = planProcedureStructuralSteps(coalesced.operations);
+    const firstNodeAt = planned.findIndex((op) => op.kind === "DELETE_NODE");
+    const edgeIndexes = planned.map((op, i) => (op.kind === "DELETE_EDGE" ? i : -1)).filter((i) => i !== -1);
+    assert.equal(edgeIndexes.length, 3);
+    assert.notEqual(firstNodeAt, -1);
+    for (const at of edgeIndexes) assert.ok(at < firstNodeAt, `연결선 삭제(${at})가 노드 삭제(${firstNodeAt})보다 뒤다`);
+  });
+
+  test("🔴 **셋을 지우면 그림에 아무것도 안 남는다** — 그림과 보낼 목록이 같은 말을 한다", () => {
+    const ops = planProcedureNodesDeletionOperations(GRAPH, [NODE_A, NODE_B, NODE_C], null);
+    const coalesced = coalescePendingStructuralOperations(ops);
+    assert.equal(coalesced.conflicts.length, 0);
+    assert.deepEqual(
+      coalesced.operations.filter((op) => op.kind === "DELETE_NODE").map((op) => (op.kind === "DELETE_NODE" ? op.nodeId : "")),
+      [NODE_A, NODE_B, NODE_C]
+    );
+    assert.equal(coalesced.operations.filter((op) => op.kind === "DELETE_EDGE").length, 3, "선 셋이 각각 한 줄씩이어야 한다");
+  });
+
+  test("🔵 빈 목록이면 **빈 배열**이다 — 아무것도 안 바뀐 [이전] 한 칸을 찍으면 안 된다", () => {
+    assert.deepEqual(planProcedureNodesDeletionOperations(GRAPH, [], null), []);
+  });
+
+  test("🔵 사유는 **모든 줄에** 실린다(단수와 같다)", () => {
+    const ops = planProcedureNodesDeletionOperations(GRAPH, [NODE_A, NODE_B], "중복 단계라 걷어냄");
+    assert.ok(ops.length > 0);
+    for (const op of ops) assert.equal("reason" in op ? op.reason : null, "중복 단계라 걷어냄");
+  });
+});
+
+describe("여럿을 한 번에 지운다 — ⑦' 붙은 선 모으기", () => {
+  test("🔴 **겹치는 선은 한 번만** 나온다 — 수를 세는 데 쓰면 거짓이 된다", () => {
+    assert.deepEqual(findEdgesAttachedToNodes(GRAPH, [NODE_A, NODE_B]), [EDGE_AB, EDGE_BC, EDGE_CA]);
+    assert.deepEqual(findEdgesAttachedToNodes(GRAPH, [NODE_A]), findEdgesAttachedToNode(GRAPH, NODE_A), "하나면 단수와 같은 답이어야 한다");
+  });
+
+  test("🔵 차례는 **받은 목록 그대로**다 — 그림이 그린 차례와 같아야 한다", () => {
+    const reversed = [...GRAPH].reverse();
+    assert.deepEqual(findEdgesAttachedToNodes(reversed, [NODE_B]), [EDGE_BC, EDGE_AB]);
+  });
+
+  test("🔵 빈 목록이면 빈 답이고, 상관없는 노드는 아무것도 안 집어 온다", () => {
+    assert.deepEqual(findEdgesAttachedToNodes(GRAPH, []), []);
+    assert.deepEqual(findEdgesAttachedToNodes(GRAPH, ["44444444-4444-4444-8444-444444444444"]), []);
+  });
+});
+
+/**
+ * ============================================================================
+ * ⑧🔴 **막혔는지 가르는 잣대는 한 벌**이다 (2026-11-21, 조각 B3)
+ * ============================================================================
+ * 2026-11-21 까지 이 판정은 편집기 화면 안에 손으로 적혀 있었다(고른 노드 하나만
+ * 보면 됐다). [범위 선택]으로 고른 여럿을 지우면서 **묻는 자리가 둘**이 됐고,
+ * 두 벌이 되면 「패널이 지울 수 있다고 말한 노드를 복수가 빼거나 그 반대」가 된다 —
+ * 그때 오류는 한 번도 안 난다.
+ */
+describe("막힌 노드 — ⑧ 잣대 한 벌", () => {
+  test("🔵 먼저 표본 — **안 막힌 노드는 null** 이다(아래 「막는다」가 공짜로 통과하지 않게)", () => {
+    assert.equal(resolveProcedureNodeDeleteBlockedReason({ hasChecklistContent: false, hasTroubleshootingContent: false }), null);
+  });
+
+  test("🔴 체크리스트가 걸렸으면 막는다", () => {
+    assert.equal(
+      resolveProcedureNodeDeleteBlockedReason({ hasChecklistContent: true, hasTroubleshootingContent: false }),
+      PROCEDURE_NODE_DELETE_BLOCKED_BY_CONTENT
+    );
+  });
+
+  test("🔴 고장 진단표가 걸렸어도 막는다 — **둘 중 하나라도**다", () => {
+    assert.equal(
+      resolveProcedureNodeDeleteBlockedReason({ hasChecklistContent: false, hasTroubleshootingContent: true }),
+      PROCEDURE_NODE_DELETE_BLOCKED_BY_CONTENT
+    );
+    assert.equal(
+      resolveProcedureNodeDeleteBlockedReason({ hasChecklistContent: true, hasTroubleshootingContent: true }),
+      PROCEDURE_NODE_DELETE_BLOCKED_BY_CONTENT
+    );
+  });
+
+  test("🔵 고른 것이 없으면(null) 막을 것도 없다 — 화면이 selectedNode 를 그대로 넘긴다", () => {
+    assert.equal(resolveProcedureNodeDeleteBlockedReason(null), null);
+  });
+
+  test("🔴 **글자가 화면이 쓰던 그것 그대로**다 — 바꾸면 패널의 빨간 줄과 키의 답이 함께 바뀐다", () => {
+    // 🔴 이 글자는 사람이 읽는 유일한 까닭이다(이 편집기에는 상시 안내가 없다).
+    assert.equal(PROCEDURE_NODE_DELETE_BLOCKED_BY_CONTENT, "체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다.");
+    // 🔵 **선은 이제 막는 조건이 아니다**(2026-11-21 — 붙은 선은 함께 지워진다).
+    assert.ok(!PROCEDURE_NODE_DELETE_BLOCKED_BY_CONTENT.includes("연결선"), "없어진 막음의 글자가 돌아왔다");
   });
 });

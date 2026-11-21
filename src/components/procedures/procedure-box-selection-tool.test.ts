@@ -298,7 +298,13 @@ describe("조각 B2 — 무엇을 어느 좌표로 재는가", () => {
  */
 describe("조각 B2 — 복수 선택은 따로 산다", () => {
   test("점선 네모 전용 집합이 따로 있다", () => {
-    assert.ok(graph.includes("const [boxSelectedNodeIds, setBoxSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set<string>());"));
+    // 🔵 2026-11-21(조각 B3)에 이 집합이 **도구 모드와 같은 통제형**이 됐다 —
+    //    편집기가 [Delete] 로 고른 여럿을 지우려면 그 값을 알아야 한다. 안 넘기는
+    //    화면 셋은 아래 내부값으로 전과 똑같이 돈다(⑨절이 셋을 따로 잰다).
+    assert.ok(graph.includes("const [internalBoxSelectedNodeIds, setInternalBoxSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set<string>());"));
+    assert.ok(graph.includes("const boxSelectedNodeIds = controlledBoxSelectedNodeIds ?? internalBoxSelectedNodeIds;"), "안 넘기면 제 안의 값으로 돌아야 한다");
+    assert.ok(graph.includes("const setBoxSelectedNodeIds = onBoxSelectionChange ?? setInternalBoxSelectedNodeIds;"), "갈아 끼우는 손잡이도 같은 겹침이어야 한다");
+    assert.ok(flat(graph).includes("boxSelectedNodeIds?: ReadonlySet<string>;"), "프롭은 선택이어야 한다 — 필수가 되면 호출부 넷이 전부 바뀐다");
     assert.ok(graph.includes("const [selectedNodeId, setSelectedNodeId] = useState<string | null>(() => initialSelectedNodeId);"), "단수 선택이 사라졌다");
   });
 
@@ -323,9 +329,18 @@ describe("조각 B2 — 복수 선택은 따로 산다", () => {
     assert.ok(flat(picker).includes("{selectedCount}개</span> 선택"), "고른 수를 안 그린다");
   });
 
-  test("🔴 **복수 삭제는 다음 조각이다** — 이 조각은 [Delete] 키를 안 건드린다", () => {
-    assert.ok(!editor.includes("boxSelect"), "편집기가 고른 집합을 알기 시작했다 — 지우기는 B3 의 몫이다");
+  test("🔴 **복수 삭제는 B3 가 했다** — 그래도 키를 듣는 자리는 그림이 아니다", () => {
+    // 🔴 2026-11-21(조각 B3) — 이 줄의 전제가 뒤집혔다. 처음 적을 때는 「편집기가
+    //    고른 집합을 알기 시작하면 안 된다」였는데(B2 에서는 그럴 까닭이 없었다),
+    //    B3 가 바로 그 일을 했다 — 고른 여럿을 [Delete] 로 지우는 것은 「모아 두는
+    //    목록에 쌓고 되돌리기 한 칸을 찍는」 일이라 편집기 말고 할 데가 없다.
+    // 🔴 **바뀌지 않은 쪽**이 이 줄이 계속 지키는 것이다: 키를 듣는 자리는 **그림이
+    //    아니다.** 그림이 키를 들으면 등록이 둘이 되고(한 번 누른 키에 둘이 반응한다),
+    //    읽기 전용 화면 셋까지 그 길을 물게 된다.
     assert.ok(!graph.includes("Delete"), "그림이 키를 듣기 시작했다");
+    assert.ok(!graph.includes("addEventListener"), "그림이 전역 키·마우스를 직접 듣기 시작했다");
+    // 🔵 편집기 쪽이 실제로 그 일을 하는지는 procedure-multi-node-delete-ui.test.ts 가 잰다.
+    assert.ok(flat(editor).includes("boxSelectedNodeIds={boxSelectedNodeIds} onBoxSelectionChange={setBoxSelectedNodeIds}"), "편집기가 고른 집합을 안 넘긴다");
   });
 });
 
@@ -339,6 +354,9 @@ describe("조각 B2 — 🟢 나머지 화면 셋은 전과 같다", () => {
       const source = stripComments(read(PATHS[name]));
       assert.ok(source.includes("<ProcedureFlowGraph"), "이 화면이 정말 그 그림을 그려야 아래 단언에 뜻이 있다");
       assert.ok(!source.includes("canvasTool"), `${name} 이 도구 모드를 제어하기 시작했다`);
+      // 🔵 2026-11-21(조각 B3)에 프롭이 둘 늘었다 — 셋은 그것도 안 넘긴다(안 넘기면
+      //    그림이 제 안의 집합으로 전과 똑같이 돈다).
+      assert.ok(!source.includes("boxSelect"), `${name} 이 고른 집합을 제어하기 시작했다`);
       assert.ok(!source.includes("editable"), `${name} 이 편집을 열기 시작했다 — 그러면 도구 단추가 선다`);
     });
   }

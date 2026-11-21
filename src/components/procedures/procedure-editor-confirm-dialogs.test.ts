@@ -412,7 +412,7 @@ describe("절차 편집기 확인 창 — ⑤ 줄기 B-① 의 되돌리기를 �
     assert.ok(push < mutate, "목록을 고친 뒤에 찍고 있다 — [이전]이 한 칸씩 밀린다");
   });
 
-  test("🔴 구조 조작 일곱이 **그 통로 하나로만** 목록을 고친다 — 한 곳이라도 새면 그 조작만 안 되돌려진다", () => {
+  test("🔴 구조 조작 여덟이 **그 통로 하나로만** 목록을 고친다 — 한 곳이라도 새면 그 조작만 안 되돌려진다", () => {
     // 🔵 setPendingStructuralOperations 를 부르는 자리를 센다. 통로(queueStructural) ·
     //    저장 뒤처리 · 되돌리기 복원 · 「모두 취소」 넷뿐이어야 한다.
     const calls = screen.match(/setPendingStructuralOperations\(/g) ?? [];
@@ -428,6 +428,11 @@ describe("절차 편집기 확인 창 — ⑤ 줄기 B-① 의 되돌리기를 �
       "function handleQueueCreateNode(",
       "function handleQueueChangeNodeType(",
       "function handleQueueDeleteNode(",
+      // 🔵 2026-11-21(조각 B3)에 여덟째가 생겼다 — [범위 선택]으로 고른 여럿을
+      //    한 번에 지우는 길이다. 단수와 **다른 함수**여야 하는 까닭은 그쪽에
+      //    적혀 있다(단수 안에 넣으면 통로를 두 번 지나기 쉽고, 그러면 [이전]
+      //    한 칸이 아니게 된다).
+      "function handleQueueDeleteNodes(",
       "function handleQueueCreateEdge(",
       "function handleQueueRetargetEdge(",
       "function handleQueueDeleteEdge(",
@@ -438,9 +443,9 @@ describe("절차 편집기 확인 창 — ⑤ 줄기 B-① 의 되돌리기를 �
       assert.notEqual(at, -1, `${handler} 를 못 찾았다 — 이름이 바뀌었으면 시험도 함께 고쳐야 한다`);
       assert.ok(f.slice(at, at + 600).includes("queueStructural("), `${handler} 가 통로를 안 지난다`);
     }
-    // 🔵 통로를 부르는 자리가 **일곱뿐**이어야 한다 — 여덟째가 생기면 그 조작은
+    // 🔵 통로를 부르는 자리가 **위 목록만큼**이어야 한다 — 아홉째가 생기면 그 조작은
     //    위 목록에 없어 이 시험이 못 본다.
-    assert.equal((f.match(/queueStructural\(/g) ?? []).length, handlers.length + 1, "통로를 부르는 자리 수가 안 맞는다(정의 한 줄 + 일곱)");
+    assert.equal((f.match(/queueStructural\(/g) ?? []).length, handlers.length + 1, "통로를 부르는 자리 수가 안 맞는다(정의 한 줄 + 여덟)");
   });
 
   test("🔴 화면이 네 패널을 **모아 두는 손잡이**로 묶는다 — 끊기면 그 조작이 아무 데도 안 간다", () => {

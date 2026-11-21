@@ -103,6 +103,25 @@ export function toggleNodeInSelection(selectedIds: ReadonlySet<string>, nodeId: 
 }
 
 /**
+ * 고른 칸 집합에서 **몇 개를 뺀다**(2026-11-21, 조각 B3). 없는 id 는 그냥 지나간다.
+ *
+ * 🔴 **「비우기」가 아니라 「뺀 나머지」인 것이 이 함수의 전부다.** 여럿을 골라
+ * [Delete] 로 지울 때, 지울 수 없는 칸이 섞여 있으면 **지운 것만 빠지고 못 지운
+ * 것은 골라진 채 남는다**(쓰는 분 결정 — 「하나라도 막히면 전부 안 함」이 아니다).
+ * 그래야 화면이 스스로 말한다: 「N개 선택」 숫자가 줄다 멈추고, 못 지운 칸만
+ * 테두리가 남는다. 통째로 비우면 **무엇이 안 지워졌는지가 사라져** 사람은 전부
+ * 지워진 줄 안다.
+ *
+ * 🔴 **새 집합을 돌려준다** — toggleNodeInSelection 과 같은 까닭이다(받은 것을
+ * 고쳐서 돌려주면 React 가 같은 것으로 보고 다시 안 그린다).
+ */
+export function removeNodesFromSelection(selectedIds: ReadonlySet<string>, nodeIds: readonly string[]): Set<string> {
+  const next = new Set(selectedIds);
+  for (const nodeId of nodeIds) next.delete(nodeId);
+  return next;
+}
+
+/**
  * 두 네모가 겹치는 넓이. 안 겹치면 0, 변끼리만 맞닿아도 0 이다.
  * (@xyflow/system 의 `getRectsOverlappingArea` 와 같은 셈 — 거기 맞춰 두는
  * 까닭은 이 파일 머리 주석에 있다.)

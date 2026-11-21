@@ -194,8 +194,15 @@ describe("저장 전 구조 변경 — ④ 막는 것과 좁히는 것", () => {
     //    있도록」). 막음 자체가 사라진 것이 아니라 **까닭 하나가 빠진 것**이라,
     //    아래는 「남은 까닭이 아직 막는가」와 「없어진 까닭이 정말 없는가」를 함께 잰다.
     //    바뀐 쪽을 값으로 재는 것은 unit 목록의 procedure-editor-node-deletion.test.ts.
-    assert.ok(f.includes("const selectedNodeDeleteBlockedReason: string | null = (() => {"));
-    assert.ok(f.includes("if (selectedNode.hasChecklistContent || selectedNode.hasTroubleshootingContent) {"), "남은 까닭 하나");
+    // 🔴 2026-11-21(조각 B3) — **셈이 순수 모듈로 나갔다.** 조건도 글자도 한 글자
+    //    안 바뀌었고 자리만 옮겼다([범위 선택]으로 고른 여럿을 지우면서 같은 질문을
+    //    노드마다 하게 됐다 — 규칙이 두 벌이 되면 패널과 키가 다른 말을 한다).
+    //    막음 자체가 아직 사는지는 **그 함수를 부르는가**로 잰다.
+    assert.ok(f.includes("const selectedNodeDeleteBlockedReason: string | null = resolveProcedureNodeDeleteBlockedReason(selectedNode);"));
+    assert.ok(
+      stripComments(read("src/lib/domain/procedure-editor-node-deletion.ts")).includes("if (node.hasChecklistContent || node.hasTroubleshootingContent) {"),
+      "남은 까닭 하나"
+    );
     assert.ok(!f.includes("const attached = renderedEdges.filter((e) => e.fromNodeId === selectedNode.id || e.toNodeId === selectedNode.id).length;"), "선을 세어 막는 줄이 남아 있다");
     assert.ok(!screen.includes("붙어 있어 삭제할 수 없습니다"), "막는 글이 아직 화면에 있다");
     assert.ok(f.includes("deleteBlockedReason={selectedNodeDeleteBlockedReason}"));

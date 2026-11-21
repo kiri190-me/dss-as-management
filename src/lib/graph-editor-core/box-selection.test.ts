@@ -5,6 +5,7 @@ import {
   selectionBoxOverlapArea,
   selectionOverlayRect,
   toggleNodeInSelection,
+  removeNodesFromSelection,
   findNodeIdsInSelectionBox,
   type BoxSelectableNode,
 } from "./box-selection";
@@ -244,6 +245,44 @@ describe("toggleNodeInSelection — 누르면 넣고, 다시 누르면 뺀다", 
     const after = toggleNodeInSelection(before, "b");
     assert.notEqual(after, before, "같은 집합을 그대로 돌려줬다");
     assert.deepEqual([...before], ["a"], "받은 집합이 바뀌었다");
+  });
+});
+
+/**
+ * 🔴 **지운 칸만 뺀다 — 비우는 것이 아니다**(2026-11-21, 조각 B3). 여럿을 골라
+ * [Delete] 로 지울 때 못 지우는 칸이 섞여 있으면 그 칸은 **골라진 채 남아야** 한다.
+ * 통째로 비우면 무엇이 안 지워졌는지가 화면에서 사라진다(이 편집기에는 상시 안내
+ * 줄이 없어서, 남은 테두리와 「N개 선택」 숫자가 사람이 보는 유일한 답이다).
+ */
+describe("removeNodesFromSelection — 지운 칸만 뺀다", () => {
+  test("🔵 먼저 표본 — 넷을 골라 둔 집합으로 잰다(비면 아래가 전부 공짜로 통과한다)", () => {
+    const selected = new Set(["a", "b", "c", "d"]);
+    assert.equal(selected.size, 4);
+    assert.deepEqual([...removeNodesFromSelection(selected, ["b", "c"])].sort(), ["a", "d"]);
+  });
+
+  test("🔴 **못 지운 칸은 남는다** — 「하나라도 막히면 전부 비운다」가 아니다", () => {
+    // 🔴 다섯을 골랐는데 하나가 체크리스트 노드라 못 지웠다 — 넷이 빠지고 그 하나만 남는다.
+    const selected = new Set(["a", "b", "c", "d", "blocked"]);
+    const after = removeNodesFromSelection(selected, ["a", "b", "c", "d"]);
+    assert.deepEqual([...after], ["blocked"]);
+    assert.equal(after.size, 1, "「N개 선택」이 1 로 줄어 멈춰야 사람이 무엇이 안 지워졌는지 안다");
+  });
+
+  test("🔵 없는 id 는 그냥 지나간다", () => {
+    assert.deepEqual([...removeNodesFromSelection(new Set(["a"]), ["zzz"])], ["a"]);
+  });
+
+  test("🔵 빈 목록을 빼면 그대로고, 전부 빼면 빈 집합이다", () => {
+    assert.deepEqual([...removeNodesFromSelection(new Set(["a", "b"]), [])].sort(), ["a", "b"]);
+    assert.equal(removeNodesFromSelection(new Set(["a", "b"]), ["a", "b"]).size, 0);
+  });
+
+  test("🔴 받은 집합을 안 고친다 — 고쳐서 돌려주면 화면이 안 다시 그려진다", () => {
+    const before = new Set(["a", "b"]);
+    const after = removeNodesFromSelection(before, ["a"]);
+    assert.notEqual(after, before, "같은 집합을 그대로 돌려줬다");
+    assert.deepEqual([...before].sort(), ["a", "b"], "받은 집합이 바뀌었다");
   });
 });
 

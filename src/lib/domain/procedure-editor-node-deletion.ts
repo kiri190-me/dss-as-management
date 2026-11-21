@@ -96,6 +96,63 @@ export function findEdgesAttachedToNode(edges: readonly NodeDeletionEdge[], node
 }
 
 /**
+ * 여러 노드에 붙은 선의 id — **겹치면 한 번만**(2026-11-21, 조각 B3).
+ *
+ * 🔴 두 노드를 함께 지우면 **그 둘을 잇던 선은 양쪽에 다 걸린다.** 중복을 그대로
+ * 두면 화면이 「지워진 선의 초안을 버리는」 뒤처리를 같은 선에 두 번 하게 되는데,
+ * 그것은 해롭지 않지만 **수를 세는 데 쓰면 거짓이 된다**. 처음부터 한 번만 담는다.
+ * 🔵 차례는 받은 목록 그대로다(findEdgesAttachedToNode 와 같은 약속).
+ */
+export function findEdgesAttachedToNodes(edges: readonly NodeDeletionEdge[], nodeIds: readonly string[]): string[] {
+  const targets = new Set(nodeIds);
+  const attached: string[] = [];
+  for (const edge of edges) {
+    if (!targets.has(edge.fromNodeId) && !targets.has(edge.toNodeId)) continue;
+    attached.push(edge.id);
+  }
+  return attached;
+}
+
+/**
+ * 🔴 **이 노드를 지금 지울 수 없는 까닭**(없으면 null). 2026-11-21(조각 B3)에
+ * 편집기 화면에서 이리로 옮겨 왔다 — 글자도 조건도 한 글자 안 바뀌었다.
+ *
+ * 옮긴 까닭은 **쓰는 자리가 둘이 됐기 때문**이다. 전에는 「고른 노드 하나」만
+ * 보면 됐는데([노드 삭제] 단추), 이제 [범위 선택]으로 고른 **여럿**을 한 번에
+ * 지우면서 노드마다 같은 질문을 해야 한다. 🔴 규칙이 두 벌이 되면 **패널이
+ * 「지울 수 있다」고 말한 노드를 복수 삭제가 빼거나 그 반대**가 되고, 그때
+ * 오류는 한 번도 안 난다 — 단추는 멀쩡히 눌리는데 키로는 안 지워지는(또는 그
+ * 반대) 화면이 될 뿐이다. 두 잣대를 만들지 않는다는 이 기능의 규약은
+ * procedure-editor-delete-key.ts 머리말에 처음 적혔다.
+ *
+ * 🔵 **막는 까닭은 지금 이 하나뿐이다.** 2026-11-21 에 둘에서 하나로 줄었다 —
+ * 「연결선 N개가 붙어 있어 삭제할 수 없습니다」는 쓰는 분 결정으로 없어졌고
+ * (노드를 지우면 붙은 선도 함께 지워진다), 그 자리를 이 모듈의 위쪽이 맡는다.
+ * 🔴 서버의 거절 조건은 더 많다(NODE_HAS_CONNECTED_EDGES ·
+ * EXECUTION_REFERENCE_CONFLICT). 화면이 **미리** 재는 것만 여기 있다 — 나머지는
+ * 차례가 지키거나([저장] 전에 선이 먼저 간다) [저장]에서 말해 준다.
+ */
+export const PROCEDURE_NODE_DELETE_BLOCKED_BY_CONTENT = "체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다.";
+
+/** 막혔는지 가르는 데 **필요한 칸만** 받는다(화면의 EditorNodeRow 가 그대로 들어맞는 모양). */
+export type NodeDeletionCandidate = {
+  readonly hasChecklistContent: boolean;
+  readonly hasTroubleshootingContent: boolean;
+};
+
+export function resolveProcedureNodeDeleteBlockedReason(node: NodeDeletionCandidate | null): string | null {
+  // 🔵 고른 것이 없으면 막을 것도 없다 — 화면이 `selectedNode` 를 그대로 넘기므로
+  //    null 이 들어올 수 있다(그때 단추 자체가 안 선다).
+  if (!node) return null;
+  if (node.hasChecklistContent || node.hasTroubleshootingContent) {
+    // 🔴 그 안에는 사람이 쓴 점검 항목 · 진단 표가 들어 있고, 편집기에는 그것을
+    //    옮기거나 지울 손잡이조차 없다. 서버도 NODE_HAS_DEPENDENT_CONTENT 로 거절한다.
+    return PROCEDURE_NODE_DELETE_BLOCKED_BY_CONTENT;
+  }
+  return null;
+}
+
+/**
  * 노드 하나를 지우려 할 때 **모아 둘 줄 전부**. 붙은 선의 DELETE_EDGE 들이 먼저,
  * 노드의 DELETE_NODE 가 마지막이다.
  *
@@ -127,4 +184,37 @@ export function planProcedureNodeDeletionOperations(
     ...attachedEdgeIds.map((edgeId): PendingStructuralOperation => ({ kind: "DELETE_EDGE", edgeId, reason })),
     { kind: "DELETE_NODE", nodeId, reason },
   ];
+}
+
+/**
+ * **여러 노드를 한꺼번에** 지우려 할 때 모아 둘 줄 전부(2026-11-21, 조각 B3 —
+ * [범위 선택]으로 고른 것을 [Delete] 로 함께 지운다).
+ *
+ * 🔴 **노드마다 위 함수를 돌려 이어 붙일 뿐이다.** 여기서 선을 따로 모아 적지
+ * 않는 까닭은 하나 — 「노드 하나를 지우면 무엇이 쌓이는가」라는 규칙이 **한
+ * 벌**이어야 하기 때문이다. 복수 쪽에 제 셈을 적으면 단수와 복수가 다르게 지우는
+ * 날이 오고, 그 어긋남은 [저장]이 끝난 뒤에야 드러난다.
+ *
+ * 🔴 **돌려주는 것은 배열 하나**다. 화면은 이것을 queueStructural 에 **한 번**
+ * 넘겨야 하고(그 통로가 목록을 고치기 전에 되돌리기 한 칸을 찍는다), 그래야
+ * [이전] **한 번에 고른 노드 전부와 딸린 선이 함께** 돌아온다. 고리를 돌며 노드마다
+ * 부르면 지금은 우연히 한 칸으로 접힐 수 있지만(스냅샷 ref 가 한 이벤트 안에서
+ * 안 바뀐다) 그것은 최적화이지 약속이 아니다.
+ *
+ * 🔵 **두 노드가 공유하는 선은 DELETE_EDGE 가 두 줄 적힌다** — 그대로 둔다.
+ * 접기(coalescePendingStructuralOperations)가 DUPLICATE_DELETE 로 한 줄로 만들고,
+ * 그 접기는 서버로 가는 길에 반드시 지나며 화면의 「변경 N건」도 접힌 뒤 센다.
+ * 여기서 미리 걷어내면 접기와 이 함수 두 곳이 같은 일을 하게 된다(아래 시험
+ * ⑦절이 접기를 실제로 돌려 한 줄이 되는 것을 값으로 확인한다).
+ *
+ * 🔵 **못 지우는 노드를 거르는 것은 이 함수의 일이 아니다.** 무엇이 막혔는지는
+ * resolveProcedureNodeDeleteBlockedReason 이 답하고, 거른 뒤의 목록이 여기 들어온다
+ * (화면 → planProcedureDeleteKey → 이 함수). 여기서 또 걸러 내면 세 번째 잣대가 된다.
+ */
+export function planProcedureNodesDeletionOperations(
+  edges: readonly NodeDeletionEdge[],
+  nodeIds: readonly string[],
+  reason: string | null
+): PendingStructuralOperation[] {
+  return nodeIds.flatMap((nodeId) => planProcedureNodeDeletionOperations(edges, nodeId, reason));
 }

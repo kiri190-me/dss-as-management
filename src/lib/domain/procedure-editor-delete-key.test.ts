@@ -21,6 +21,9 @@ import { planProcedureDeleteKey, isTextEntryTarget, type ProcedureDeleteKeyInput
  * ④ **Backspace 가 슬그머니 삭제키가 되는 것.** 2026-11-21 에 쓰는 분이 「Delete
  *    키만」이라고 정했다. 나중에 「맥 쓰는 사람을 위해」로 한 줄 더하기 쉬운 자리라
  *    ⑥절이 지킨다.
+ * ⑤ **보이지도 않는 여럿이 지워지는 것**(2026-11-21, 조각 B3). [범위 선택]으로 고른
+ *    집합은 그 모드에서만 테두리로 보인다. 모드를 벗어나면 안 보이는 채 state 에
+ *    남을 수 있고, 그때 키가 그것을 지우면 사람은 무엇이 사라졌는지도 모른다. ⑦절.
  *
  * ── 🔵 표본이 비어 공짜로 통과하지 않게 ────────────────────────────────
  * 아래 「안 지워진다」 단언들은 **지워지는 입력 하나(BASE)에서 칸 하나만 뒤집어**
@@ -46,9 +49,37 @@ const BASE: ProcedureDeleteKeyInput = {
   selectedEdgeId: null,
   selectedWaypointIndex: null,
   nodeDeleteBlockedReason: null,
+  // 🔵 2026-11-21(조각 B3)에 칸이 둘 늘었다. BASE 는 **[선택·이동] 도구**를 쓰는
+  //    상태다 — 범위 선택이 꺼져 있고 고른 집합도 비었다. 그래야 위 시험들이
+  //    재던 것(단수 차례 · 글자 칸 보호 · Backspace)을 그대로 잰다.
+  boxSelectActive: false,
+  boxSelectedNodes: [],
 };
 
 const plan = (patch: Partial<ProcedureDeleteKeyInput> = {}) => planProcedureDeleteKey({ ...BASE, ...patch });
+
+/** 🔵 막힌 노드의 까닭은 **화면이 넘기는 그 글자**다(resolveProcedureNodeDeleteBlockedReason 의 답). */
+const BLOCKED = "체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다.";
+const BOX_A = "55555555-5555-4555-8555-555555555555";
+const BOX_B = "66666666-6666-4666-8666-666666666666";
+const BOX_C = "77777777-7777-4777-8777-777777777777";
+
+/**
+ * **[범위 선택]으로 셋을 골라 놓은** 입력 한 벌. 단수 선택은 null 이다 — 실제
+ * 화면이 그렇다(도구를 바꾸면 그림이 양쪽 선택을 다 비우고, 범위 선택 모드에서
+ * 칸을 눌러도 단수 선택은 한 글자도 안 건드린다).
+ */
+const boxPlan = (patch: Partial<ProcedureDeleteKeyInput> = {}) =>
+  plan({
+    selectedNodeId: null,
+    boxSelectActive: true,
+    boxSelectedNodes: [
+      { id: BOX_A, deleteBlockedReason: null },
+      { id: BOX_B, deleteBlockedReason: null },
+      { id: BOX_C, deleteBlockedReason: null },
+    ],
+    ...patch,
+  });
 
 describe("[Delete] 로 지우기 — ① 먼저 표본 확인", () => {
   test("🔵 BASE 는 **실제로 노드를 지운다** — 이게 없으면 아래 「안 지워진다」가 전부 공짜로 통과한다", () => {
@@ -245,5 +276,127 @@ describe("[Delete] 로 지우기 — ⑥🔴 Backspace 로는 노드·연결선�
       edgeId: EDGE_ID,
       waypointIndex: 4,
     });
+  });
+});
+
+/**
+ * ============================================================================
+ * ⑦ [범위 선택]으로 고른 **여럿**을 한 번에 (2026-11-21, 조각 B3)
+ * ============================================================================
+ * 쓰는 분 요청(원문): 「2번 옮기기 + [DELETE]로 지우는 것까지 하자.」
+ *
+ * 🔴 여기서 가장 크게 다칠 수 있는 것 둘:
+ *  ① **보이지도 않는 것이 지워지는 것.** 집합은 [범위 선택] 모드에서만 화면에
+ *     테두리로 보인다. 모드를 벗어나면 state 에 남아 있어도 안 보이는데, 그때
+ *     키가 그것을 지우면 사람은 제가 무엇을 지웠는지 모른다.
+ *  ② **하나가 막혔다고 전부 안 하는 것.** 이 키 경로는 조용하다(안내 줄이 없다).
+ *     그래서 「전부 안 함」은 「기능이 고장 남」과 화면에서 구별이 안 된다.
+ */
+describe("[Delete] 로 지우기 — ⑦🔴 [범위 선택]으로 고른 여럿", () => {
+  test("🔵 먼저 표본 — 범위 선택 BASE 는 **실제로 셋을 지운다**(아래 「안 지워진다」가 공짜로 통과하지 않게)", () => {
+    assert.deepEqual(boxPlan(), { action: "DELETE_NODES", nodeIds: [BOX_A, BOX_B, BOX_C] });
+  });
+
+  test("🔴 차례는 **화면이 넘긴 그대로**다 — 그림이 그린 차례가 사람이 본 차례다", () => {
+    const reversed = boxPlan({
+      boxSelectedNodes: [
+        { id: BOX_C, deleteBlockedReason: null },
+        { id: BOX_A, deleteBlockedReason: null },
+      ],
+    });
+    assert.deepEqual(reversed, { action: "DELETE_NODES", nodeIds: [BOX_C, BOX_A] });
+  });
+
+  test("🔴🔴 **모드가 아니면 집합을 쳐다보지 않는다** — 안 보이는 것을 지우면 안 된다", () => {
+    // 🔴 바꾼 칸은 boxSelectActive 하나뿐이다(바로 위 시험이 같은 집합으로 셋을 지운다).
+    //    집합이 차 있어도 단수 쪽으로 넘어가고, 거기도 비었으니 아무 일도 안 일어난다.
+    assert.deepEqual(boxPlan({ boxSelectActive: false }), { action: "NONE", reason: "NOTHING_SELECTED" });
+  });
+
+  test("🔴 모드가 아니면 **단수가 그대로 이긴다** — 범위 선택이 단수를 가리면 안 된다", () => {
+    assert.deepEqual(boxPlan({ boxSelectActive: false, selectedNodeId: NODE_ID }), { action: "DELETE_NODE", nodeId: NODE_ID });
+  });
+
+  test("🔴 **막힌 것만 빼고 나머지를 지운다** — 「하나라도 막히면 전부 안 함」이 아니다", () => {
+    const mixed = boxPlan({
+      boxSelectedNodes: [
+        { id: BOX_A, deleteBlockedReason: null },
+        { id: BOX_B, deleteBlockedReason: BLOCKED },
+        { id: BOX_C, deleteBlockedReason: null },
+      ],
+    });
+    assert.deepEqual(mixed, { action: "DELETE_NODES", nodeIds: [BOX_A, BOX_C] });
+  });
+
+  test("🔴 **전부 막혔으면 아무 일도 안 한다** — 그리고 단수로 흘러내리지 않는다", () => {
+    // 🔴 흘러내리면 「네모로 고른 것을 지우려 했는데 엉뚱한 연결선이 사라지는」 일이 난다.
+    //    ②절의 「막혀도 ③으로 안 간다」와 같은 까닭이다.
+    const allBlocked = boxPlan({
+      selectedEdgeId: EDGE_ID,
+      boxSelectedNodes: [
+        { id: BOX_A, deleteBlockedReason: BLOCKED },
+        { id: BOX_B, deleteBlockedReason: BLOCKED },
+      ],
+    });
+    assert.deepEqual(allBlocked, { action: "NONE", reason: "NODE_DELETE_BLOCKED" });
+  });
+
+  test("🔵 **고른 것이 하나도 없으면** 단수 차례로 넘어간다 — 빈 네모가 키를 가로채면 안 된다", () => {
+    // 🔵 빈 집합은 「범위 선택 모드로 켜 두기만 한」 상태다. 그 상태에서 단수로
+    //    고른 것이 있으면(지금은 둘이 같이 설 수 없지만) 그쪽이 지워져야 한다.
+    assert.deepEqual(boxPlan({ boxSelectedNodes: [], selectedNodeId: NODE_ID }), { action: "DELETE_NODE", nodeId: NODE_ID });
+    assert.deepEqual(boxPlan({ boxSelectedNodes: [], selectedNodeId: null, selectedEdgeId: EDGE_ID }), { action: "DELETE_EDGE", edgeId: EDGE_ID });
+    assert.deepEqual(boxPlan({ boxSelectedNodes: [] }), { action: "NONE", reason: "NOTHING_SELECTED" });
+  });
+
+  test("🔴 **복수가 단수를 이긴다** — 둘이 함께 설 수 있게 되는 날 어느 쪽인지가 코드에 적혀 있어야 한다", () => {
+    assert.deepEqual(boxPlan({ selectedNodeId: NODE_ID }), { action: "DELETE_NODES", nodeIds: [BOX_A, BOX_B, BOX_C] });
+    assert.deepEqual(boxPlan({ selectedNodeId: null, selectedEdgeId: EDGE_ID }), { action: "DELETE_NODES", nodeIds: [BOX_A, BOX_B, BOX_C] });
+  });
+
+  test("🔴 **경로점은 복수보다 앞**이다 — 점 하나 지우려다 다섯 칸이 사라지면 안 된다", () => {
+    assert.deepEqual(boxPlan({ selectedEdgeId: EDGE_ID, selectedWaypointIndex: 1 }), {
+      action: "REMOVE_WAYPOINT",
+      edgeId: EDGE_ID,
+      waypointIndex: 1,
+    });
+  });
+
+  test("🔴🔴 **글자 칸에서는 복수도 안 지워진다**", () => {
+    assert.deepEqual(boxPlan({ isTypingTarget: true }), { action: "NONE", reason: "TYPING" });
+  });
+
+  test("🔴 **Backspace 로는 복수도 안 지워진다** — 2026-11-21 결정 그대로", () => {
+    assert.deepEqual(boxPlan({ key: "Backspace" }), { action: "NONE", reason: "BACKSPACE_IS_NOT_FOR_GRAPH" });
+  });
+
+  test("🔴 지울 권한이 없으면 복수도 안 지워진다 — 막힌 것과 **까닭이 다르다**", () => {
+    assert.deepEqual(boxPlan({ canDeleteGraph: false }), { action: "NONE", reason: "NOT_ALLOWED" });
+  });
+
+  test("🔵 **이 판정은 막힌 까닭을 제가 세지 않는다** — 글자가 무엇이든 null 이 아니면 뺀다", () => {
+    const odd = boxPlan({
+      boxSelectedNodes: [
+        { id: BOX_A, deleteBlockedReason: "무슨 까닭이든" },
+        { id: BOX_B, deleteBlockedReason: null },
+      ],
+    });
+    assert.deepEqual(odd, { action: "DELETE_NODES", nodeIds: [BOX_B] });
+  });
+
+  test("🔵 하나만 골라도 **복수 가지**로 간다 — 지우는 길이 둘로 갈리면 뒤처리가 갈린다", () => {
+    const one = boxPlan({ boxSelectedNodes: [{ id: BOX_A, deleteBlockedReason: null }] });
+    assert.deepEqual(one, { action: "DELETE_NODES", nodeIds: [BOX_A] });
+  });
+
+  test("🔵 받은 목록을 **안 고친다** — 돌려준 id 배열이 입력과 다른 것이어야 한다", () => {
+    const nodes = [
+      { id: BOX_A, deleteBlockedReason: null },
+      { id: BOX_B, deleteBlockedReason: null },
+    ];
+    const before = JSON.stringify(nodes);
+    const result = boxPlan({ boxSelectedNodes: nodes });
+    assert.equal(JSON.stringify(nodes), before, "입력이 바뀌었다");
+    assert.deepEqual(result, { action: "DELETE_NODES", nodeIds: [BOX_A, BOX_B] });
   });
 });
