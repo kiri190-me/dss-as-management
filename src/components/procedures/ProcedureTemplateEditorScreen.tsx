@@ -122,6 +122,7 @@ import {
   type StructuralPreviewFactories,
 } from "@/lib/domain/procedure-editor-structural-preview";
 import { planProcedureDeleteKey, isTextEntryTarget } from "@/lib/domain/procedure-editor-delete-key";
+import { findEdgesAttachedToNode, planProcedureNodeDeletionOperations } from "@/lib/domain/procedure-editor-node-deletion";
 import { useFieldStepGhostVisibility } from "./editor/use-field-step-ghost-visibility";
 
 type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge" | "addNode" | "fieldSteps";
@@ -251,6 +252,23 @@ function pendingSnapshotSignature(snapshot: PendingSnapshot): string {
 
 function pendingSnapshotsEqual(a: PendingSnapshot, b: PendingSnapshot): boolean {
   return pendingSnapshotSignature(a) === pendingSnapshotSignature(b);
+}
+
+/**
+ * 저장 전 초안 지도에서 **키 몇 개를 빼낸 새 지도**. 지우기 뒤처리가 쓰는 자리가
+ * 2026-11-21 에 다섯으로 늘어 한 벌로 모았다(노드 삭제에 선이 딸려 가면서 연결선
+ * 쪽 지도 셋도 함께 치워야 한다).
+ *
+ * 🔵 **하나도 안 빠지면 들어온 지도를 그대로 돌려준다.** setState 에 새 Map 을
+ * 넘기면 내용이 같아도 신원이 달라 딸린 useMemo 들이 전부 다시 돈다 — 손으로 적던
+ * 시절의 `if (!prev.has(id)) return prev;` 가 지키던 성질이고, 모으면서 잃기 쉬운
+ * 자리라 여기 그대로 옮겨 적는다.
+ */
+function dropMapKeys<T>(map: Map<string, T>, keys: readonly string[]): Map<string, T> {
+  if (!keys.some((key) => map.has(key))) return map;
+  const next = new Map(map);
+  for (const key of keys) next.delete(key);
+  return next;
 }
 
 export default function ProcedureTemplateEditorScreen({
@@ -1340,26 +1358,49 @@ export default function ProcedureTemplateEditorScreen({
   }
 
   /**
+   * ── 🔴 **붙은 연결선도 함께 지운다** (2026-11-21 쓰는 분 결정) ────────────
+   * 「노드를 지우면 연결된 연결선도 함께 지워지는 걸로 하자 — 연결선을 지우지
+   * 않아도 노드를 지울 수 있도록.」 전에는 선이 붙은 노드를 아예 못 지웠다
+   * (selectedNodeDeleteBlockedReason 이 단추를 잠갔다). 사람이 선을 하나씩 먼저
+   * 지우고 나서야 노드를 지울 수 있었다.
+   *
+   * 🔴 **무엇을 쌓을지는 planProcedureNodeDeletionOperations 가 정한다** — 선을
+   * 찾는 일도 차례도 거기 한 벌이고 값으로 재어진다(화면은 .css 와 server-only 를
+   * 물고 있어 import 자체가 던진다). 여기서 다시 세면 「패널이 말한 수」와 「실제로
+   * 지워지는 수」가 갈린다.
+   *
+   * 🔴 넘기는 목록이 **renderedEdges**(그림이 실제로 그린 선)인 것이 핵심이다.
+   * 서버 목록(template.edges)으로 세면 ① 저장 전에 그은 선을 빠뜨려 [저장]이
+   * ENDPOINT_DELETED_IN_SAME_SAVE 로 통째로 막히고 ② 저장 전에 옮긴 선은 양 끝이
+   * 달라서 엉뚱한 선을 지운다. 까닭 전문은 그 모듈 머리말에 있다.
+   *
+   * 🔵 **[이전] 한 칸**이다 — queueStructural 이 목록을 고치기 전에 한 칸을 찍고,
+   * 받은 배열을 통째로 붙인다. 노드와 선들이 함께 되살아난다.
+   *
    * 🔴 지울 노드의 **초안도 함께 버린다**(옛 handleNodeDeleted 가 하던 뒤처리 그대로).
    * 안 버리면 사라진 노드의 칸 값이 「바뀜」으로 계속 세어져 [저장]이 없는 행을
    * 고치려 든다. 🔵 되돌리면 스냅샷이 그 초안까지 함께 되살린다 — queueStructural
    * 이 **버리기 전에** 한 칸을 찍기 때문이다.
+   * 🔴 함께 지워지는 **연결선의 초안·경로·저장 메모도 같이 버린다** —
+   * handleQueueDeleteEdge 가 선 하나에 하던 그 뒤처리를, 딸려 지워지는 선들에도
+   * 똑같이 해 준다(안 하면 선 하나를 어떻게 지웠느냐에 따라 뒤처리가 갈린다).
    */
   function handleQueueDeleteNode(nodeId: string, reason: string | null) {
-    queueStructural(() => [{ kind: "DELETE_NODE", nodeId, reason }]);
-    setPendingNodeFieldDraftsById((prev) => {
-      if (!prev.has(nodeId)) return prev;
-      const next = new Map(prev);
-      next.delete(nodeId);
-      return next;
-    });
-    setPendingLayoutMoves((prev) => {
-      if (!prev.has(nodeId)) return prev;
-      const next = new Map(prev);
-      next.delete(nodeId);
-      return next;
-    });
+    const attachedEdgeIds = findEdgesAttachedToNode(renderedEdges, nodeId);
+    queueStructural(() => planProcedureNodeDeletionOperations(renderedEdges, nodeId, reason));
+    setPendingNodeFieldDraftsById((prev) => dropMapKeys(prev, [nodeId]));
+    setPendingLayoutMoves((prev) => dropMapKeys(prev, [nodeId]));
+    setPendingEdgeFieldDraftsById((prev) => dropMapKeys(prev, attachedEdgeIds));
+    setPendingEdgeRouteMoves((prev) => dropMapKeys(prev, attachedEdgeIds));
+    setPendingEdgeSaveNoteById((prev) => dropMapKeys(prev, attachedEdgeIds));
     setSelectedNodeId(null);
+    // 🔵 함께 지워진 선을 고른 채였다면 선택도 푼다. 안 풀어도 패널은 안 서지만
+    //    (EdgePropertyPanel 은 그려진 선에서만 서고 그 선은 이미 사라졌다), 고른
+    //    경로점이 남아 있으면 [Delete] 가 없는 선의 점을 지우러 간다.
+    if (selectedEdgeId !== null && attachedEdgeIds.includes(selectedEdgeId)) {
+      setSelectedEdgeId(null);
+      setSelectedWaypoint(null);
+    }
   }
 
   function handleQueueCreateEdge(input: {
@@ -2185,27 +2226,43 @@ export default function ProcedureTemplateEditorScreen({
   const canStraighten = canEdit && layoutMode === "USER";
 
   /**
-   * 🔴 **지금 지울 수 없는 까닭**(2026-11-20, 조각 4). 서버가 거절할 두 가지를
-   * 앞당겨 보여 준다 — 새로 막는 것이 아니라, 모아 두느라 **거절이 [저장] 때로
-   * 밀린** 것을 화면이 대신 말해 주는 것이다.
+   * 🔴 **지금 지울 수 없는 까닭**(2026-11-20, 조각 4). 서버가 거절할 것을 앞당겨
+   * 보여 준다 — 새로 막는 것이 아니라, 모아 두느라 **거절이 [저장] 때로 밀린** 것을
+   * 화면이 대신 말해 주는 것이다.
    *
-   * 🔴 선이 붙은 노드가 왜 여기 오는가: 전에는 누르는 즉시 서버가
-   * NODE_HAS_CONNECTED_EDGES 를 돌려줘 그 자리에서 글이 떴다. 이제는 그림에서
-   * 노드가 **먼저 사라져 보이고** 한참 뒤 [저장]이 실패한다 — 게다가 그때쯤이면
-   * 그 노드에 무슨 선이 붙어 있었는지 화면에 아무 단서가 없다.
+   * ── 🔴 2026-11-21 — **까닭이 둘에서 하나로 줄었다** ──────────────────────
+   * 쓰는 분의 결정: 「노드를 지우면 연결된 연결선도 함께 지워지는 걸로 하자 —
+   * 연결선을 지우지 않아도 노드를 지울 수 있도록.」 그래서 막던 글
+   * 「연결선 N개가 붙어 있어 삭제할 수 없습니다」가 **없어졌다.** 선이 붙어 있어도
+   * 지울 수 있고, handleQueueDeleteNode 가 그 선들의 삭제를 같은 묶음에 함께 쌓는다.
    *
-   * 🔵 세는 기준이 renderedEdges 라, 그 선들도 함께 지우기로 모아 두면 **그 순간
-   * 단추가 열린다.** 사람이 할 일(선 먼저, 노드 나중)이 화면에서 바로 읽힌다.
+   * 🔴 **서버 규칙이 없어진 것이 아니다** — 서버는 여전히 선이 붙은 노드를
+   * NODE_HAS_CONNECTED_EDGES 로 거절한다. 보낼 차례가 DELETE_EDGE(3단계) →
+   * DELETE_NODE(6단계) 라서 서버가 받을 때는 이미 선이 없을 뿐이다.
+   *
+   * 🔵 **남은 까닭 하나**: 체크리스트 · 고장 진단표 내용이 걸린 노드
+   * (NODE_HAS_DEPENDENT_CONTENT). 이쪽은 함께 지울 수 있는 성질의 것이 아니다 —
+   * 그 안에 사람이 쓴 점검 항목·진단 표가 들어 있고, 편집기에는 그것을 옮기거나
+   * 지울 손잡이조차 없다. 그래서 그대로 막는다.
    */
   const selectedNodeDeleteBlockedReason: string | null = (() => {
     if (!selectedNode) return null;
     if (selectedNode.hasChecklistContent || selectedNode.hasTroubleshootingContent) {
       return "체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다.";
     }
-    const attached = renderedEdges.filter((e) => e.fromNodeId === selectedNode.id || e.toNodeId === selectedNode.id).length;
-    if (attached > 0) return `연결선 ${attached}개가 붙어 있어 삭제할 수 없습니다. 그 연결선을 먼저 지워 주세요.`;
     return null;
   })();
+
+  /**
+   * 🔴 **이 노드를 지우면 함께 지워질 연결선의 수**(2026-11-21). 확인 창을 안
+   * 띄우는 대신(지금 삭제도 안 띄운다 — [이전]으로 돌아온다) 누르기 **전에** 수가
+   * 보이게 하려는 값이다. 패널이 삭제 단추 바로 위에 한 줄로 적는다.
+   *
+   * 🔴 지울 때 쓰는 것과 **같은 함수 · 같은 목록**이다(handleQueueDeleteNode 의
+   * renderedEdges). 여기서 따로 세면 「3개도 함께 지워집니다」라고 적어 놓고 둘만
+   * 지우는 일이 생기고, 그 어긋남은 저장이 끝난 뒤에야 드러난다.
+   */
+  const selectedNodeAttachedEdgeCount = selectedNode ? findEdgesAttachedToNode(renderedEdges, selectedNode.id).length : 0;
 
   /**
    * ==========================================================================
@@ -2625,6 +2682,7 @@ export default function ProcedureTemplateEditorScreen({
               nextProcedureCandidates={nextProcedureCandidates}
               canDelete={canDeleteGraph}
               deleteBlockedReason={selectedNodeDeleteBlockedReason}
+              attachedEdgeCount={selectedNodeAttachedEdgeCount}
               onQueueDelete={(reason) => handleQueueDeleteNode(selectedNode.id, reason)}
               canPosition={canDeleteGraph}
               isTechnical={isTechnical}

@@ -95,6 +95,7 @@ export default function NodePropertyPanel({
   onQueueChangeType,
   canDelete,
   deleteBlockedReason = null,
+  attachedEdgeCount = 0,
   onQueueDelete,
   canPosition,
   isTechnical,
@@ -141,12 +142,26 @@ export default function NodePropertyPanel({
   /**
    * 지금은 지울 수 없는 까닭(2026-11-20, 조각 4). null 이면 지울 수 있다.
    *
-   * 🔴 **서버 규칙을 앞당겨 보여 주는 것**이지 새로 막는 것이 아니다. 선이 붙은
-   * 노드는 전부터 서버가 NODE_HAS_CONNECTED_EDGES 로 거절했다. 즉시 저장하던
-   * 시절에는 누르는 즉시 그 글이 떴지만, 모아 두는 지금은 **[저장]을 누를 때까지**
-   * 모른다 — 게다가 그림에서는 노드가 이미 사라져 보여서 「왜 안 됐지」가 된다.
+   * 🔴 **서버 규칙을 앞당겨 보여 주는 것**이지 새로 막는 것이 아니다. 모아 두는
+   * 지금은 서버의 거절이 **[저장]을 누를 때까지** 안 보이는데, 그림에서는 노드가
+   * 이미 사라져 보여서 「왜 안 됐지」가 된다.
+   *
+   * 🔴 2026-11-21 — **들어오는 까닭이 하나로 줄었다.** 「연결선이 붙어 있다」는
+   * 더 이상 막는 까닭이 아니다(쓰는 분 결정 — 붙은 선은 노드와 함께 지워진다).
+   * 지금 들어오는 것은 체크리스트 · 고장 진단표 내용이 걸린 노드 하나뿐이다.
    */
   deleteBlockedReason?: string | null;
+  /**
+   * 이 노드를 지우면 **함께 지워질 연결선의 수**(2026-11-21). 0 이면 아무 글도
+   * 안 선다.
+   *
+   * 🔴 확인 창을 안 띄우는 대신(삭제는 [이전] 한 번으로 돌아온다) 누르기 **전에**
+   * 수가 보이게 하는 값이다. 안 보이면 선 다섯이 달린 노드를 지운 사람이 제가
+   * 무엇을 지웠는지 모른 채 [저장]을 누른다.
+   * 🔵 **막혔을 때는 안 보인다**(아래 쓰는 자리). 못 지우는 노드 옆에서 「함께
+   * 지워집니다」는 거짓말이다.
+   */
+  attachedEdgeCount?: number;
   /** 🔴 서버에 보내지 않고 **모아 둔다**. 그림에서는 그 자리에서 사라진다. */
   onQueueDelete: (reason: string | null) => void;
   /** Phase 5C-5B — same gate as canDelete; a separate prop only so the capability stays independently named/readable at the call site. */
@@ -689,11 +704,13 @@ export default function NodePropertyPanel({
             <p className="text-red-700 dark:text-red-400">체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다.</p>
           )}
           {/*
-            🔴 2026-11-20(조각 4) — **서버가 거절할 까닭을 앞당겨 보인다.** 선이
-            붙은 노드는 전부터 서버가 NODE_HAS_CONNECTED_EDGES 로 거절했는데, 즉시
-            저장하던 시절에는 누르는 즉시 그 글이 떴다. 모아 두는 지금은 [저장]을
-            누를 때까지 모르고, 게다가 그림에서는 노드가 **이미 사라져 보인다** —
-            「분명히 지웠는데 저장이 실패한다」가 된다. 그래서 단추를 미리 잠근다.
+            🔴 2026-11-20(조각 4) — **서버가 거절할 까닭을 앞당겨 보인다.** 모아 두는
+            지금은 서버의 거절이 [저장] 때까지 안 보이는데, 그림에서는 노드가 **이미
+            사라져 보인다** — 「분명히 지웠는데 저장이 실패한다」가 된다. 그래서
+            단추를 미리 잠근다.
+            🔴 2026-11-21 — 여기 오던 까닭 둘 중 **「연결선이 붙어 있다」는 없어졌다**
+            (쓰는 분 결정 — 붙은 선은 노드와 함께 지워진다). 남은 하나는 체크리스트 ·
+            고장 진단표 내용이 걸린 노드다.
           */}
           {deleteBlockedReason && <p className="text-red-700 dark:text-red-400">{deleteBlockedReason}</p>}
           <textarea
@@ -703,6 +720,27 @@ export default function NodePropertyPanel({
             placeholder="삭제 사유 (선택)"
             className="rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-sm dark:border-zinc-700 dark:bg-zinc-900"
           />
+          {/*
+            🔴 2026-11-21 — **몇 개가 함께 지워지는지 누르기 전에 보인다.**
+            쓰는 분의 결정으로 노드를 지우면 붙은 연결선도 함께 지워지는데, 확인
+            창은 안 띄운다(지금 삭제도 안 띄운다 — [이전] 한 번이면 노드와 선이
+            **함께** 돌아온다). 그러면 누른 뒤에도 제가 무엇을 지웠는지 알 길이
+            화면에 없다. 그래서 **수를 미리** 적는다.
+
+            🔵 **새 상시 안내가 아니다.** 선이 붙었을 때 이 상자에 서던 글이 바로
+            위(사유 칸 위)에 하나 있었다 — 「연결선 N개가 붙어 있어 삭제할 수
+            없습니다」(2026-11-20~21). 그 줄이 없어진 자리에 이 줄이 들어서는 것이라
+            **한 번에 뜨는 글의 수가 안 는다.** 쓰는 분이 이 편집기의 상시 안내 둘을
+            지워 달라고 한 것이 어제다(커밋 d57f664a). 그래서 **붙은 선이 있을 때만**
+            선다 — 이 상자에서 늘 서는 글은 맨 아래 한 줄뿐이다.
+            🔴 막혔으면 안 보인다 — 못 지우는 노드 옆에서 「함께 지워집니다」는
+            거짓말이고, 빨간 글 둘이 서로 반대말을 하게 된다.
+            🔵 자리는 **단추 바로 위**다. 사유 칸 위(막힌 까닭이 서던 자리)에 두면
+            textarea 가 사이에 끼어, 사유를 적는 동안 눈이 그 글에서 떠난다.
+          */}
+          {deleteBlockedReason === null && attachedEdgeCount > 0 && (
+            <p className="text-red-700 dark:text-red-400">붙어 있는 연결선 {attachedEdgeCount}개도 함께 지워집니다.</p>
+          )}
           {/*
             🔵 2026-11-21 — **키를 적는 자리는 툴팁 하나**다. 같은 일을 [Delete]
             키로도 할 수 있게 되었는데(화면의 planProcedureDeleteKey), 그것을

@@ -109,7 +109,12 @@ describe("저장 전 구조 변경 — ② 모아 두는 길(조각 1·3 과의 
   test("🔴 확인 창·사유 칸이 받는 **사유가 조작에 실린다** — 안 실으면 이력에서 조용히 사라진다", () => {
     // 🔵 일곱 가운데 사유를 받는 것은 다섯이다(끼우기는 서버도 사유를 안 받는다).
     assert.ok(nearAfter(f, "function handleQueueChangeNodeType(", 'kind: "CHANGE_NODE_TYPE", nodeId, newNodeType, reason'));
-    assert.ok(nearAfter(f, "function handleQueueDeleteNode(", 'kind: "DELETE_NODE", nodeId, reason'));
+    // 🔴 2026-11-21 — 노드 삭제는 줄을 **화면이 직접 안 적는다.** 붙은 연결선까지
+    //    함께 쌓게 되면서 그 일이 순수 판정으로 옮겨 갔다
+    //    (procedure-editor-node-deletion.ts). 여기서 재는 것은 **사유가 그쪽으로
+    //    넘어가는가** 하나이고, 그 사유가 노드 줄과 선 줄 **모두**에 실리는지는
+    //    unit 목록의 procedure-editor-node-deletion.test.ts ③절이 값으로 잰다.
+    assert.ok(nearAfter(f, "function handleQueueDeleteNode(", "planProcedureNodeDeletionOperations(renderedEdges, nodeId, reason)"));
     assert.ok(nearAfter(f, "function handleQueueDeleteEdge(", 'kind: "DELETE_EDGE", edgeId, reason'));
     assert.ok(nearAfter(f, "function handleQueueRetargetEdge(", 'kind: "RETARGET_EDGE", edgeId, newFromNodeId, newToNodeId, reason'));
     assert.ok(nearAfter(f, "function handleQueueCreateEdge(", "reason: input.reason,"));
@@ -178,12 +183,21 @@ describe("저장 전 구조 변경 — ④ 막는 것과 좁히는 것", () => {
     assert.ok(f.includes("const unsavedNodeIds = useMemo(() => new Set(structuralPreview.nodes.filter((n) => isTempNodeId(n.id)).map((n) => n.id)), [structuralPreview.nodes]);"));
   });
 
-  test("🔴 **선이 붙은 노드 삭제**는 미리 막고 까닭을 적는다 — 그림에서 먼저 사라져 보이기 때문이다", () => {
-    // 🔴 서버는 전부터 NODE_HAS_CONNECTED_EDGES 로 거절했다. 즉시 저장하던
+  test("🔴 **서버가 거절할 노드 삭제**는 미리 막고 까닭을 적는다 — 그림에서 먼저 사라져 보이기 때문이다", () => {
+    // 🔴 서버는 전부터 NODE_HAS_DEPENDENT_CONTENT 로 거절했다. 즉시 저장하던
     //    시절에는 누르는 즉시 그 글이 떴지만, 모아 두는 지금은 [저장]을 누를
     //    때까지 모르고 그 사이 노드는 그림에서 사라져 보인다.
+    //
+    // 🔴 2026-11-21 — **까닭 둘 중 하나가 없어졌다.** 「연결선 N개가 붙어 있어
+    //    삭제할 수 없습니다」는 쓰는 분 결정으로 걷어냈다(「노드를 지우면 연결된
+    //    연결선도 함께 지워지는 걸로 하자 — 연결선을 지우지 않아도 노드를 지울 수
+    //    있도록」). 막음 자체가 사라진 것이 아니라 **까닭 하나가 빠진 것**이라,
+    //    아래는 「남은 까닭이 아직 막는가」와 「없어진 까닭이 정말 없는가」를 함께 잰다.
+    //    바뀐 쪽을 값으로 재는 것은 unit 목록의 procedure-editor-node-deletion.test.ts.
     assert.ok(f.includes("const selectedNodeDeleteBlockedReason: string | null = (() => {"));
-    assert.ok(f.includes("const attached = renderedEdges.filter((e) => e.fromNodeId === selectedNode.id || e.toNodeId === selectedNode.id).length;"));
+    assert.ok(f.includes("if (selectedNode.hasChecklistContent || selectedNode.hasTroubleshootingContent) {"), "남은 까닭 하나");
+    assert.ok(!f.includes("const attached = renderedEdges.filter((e) => e.fromNodeId === selectedNode.id || e.toNodeId === selectedNode.id).length;"), "선을 세어 막는 줄이 남아 있다");
+    assert.ok(!screen.includes("붙어 있어 삭제할 수 없습니다"), "막는 글이 아직 화면에 있다");
     assert.ok(f.includes("deleteBlockedReason={selectedNodeDeleteBlockedReason}"));
     assert.ok(nodePanel.includes("disabled={deleteBlockedReason !== null}"));
     assert.ok(nodePanel.includes("{deleteBlockedReason && <p"), "까닭을 안 적으면 흐린 단추가 고장으로 읽힌다");

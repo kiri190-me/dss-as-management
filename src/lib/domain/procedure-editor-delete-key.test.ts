@@ -127,14 +127,26 @@ describe("[Delete] 로 지우기 — ②🔴🔴 글자를 치는 중에는 절�
 describe("[Delete] 로 지우기 — ③🔴 단추가 흐려지는 조건과 **같은 값 하나**를 본다", () => {
   test("🔴 못 지우는 까닭이 있으면 키로도 안 지워진다 — 「단추는 흐린데 키로는 지워진다」 금지", () => {
     // 🔴 화면이 [노드 삭제] 단추에 넘기는 그 값(selectedNodeDeleteBlockedReason)
-    //    그대로가 여기 들어온다. 선이 붙었을 때 화면이 만드는 문구를 그대로 쓴다.
-    const result = plan({ nodeDeleteBlockedReason: "연결선 2개가 붙어 있어 삭제할 수 없습니다. 그 연결선을 먼저 지워 주세요." });
+    //    그대로가 여기 들어온다. 화면이 만드는 문구를 그대로 쓴다.
+    // 🔵 2026-11-21 에 **표본을 갈았다.** 전에는 「연결선 2개가 붙어 있어 삭제할 수
+    //    없습니다」를 썼는데, 그 막음이 없어졌다(쓰는 분 결정 — 노드를 지우면 붙은
+    //    선도 함께 지워진다). 없어진 문구를 표본으로 두면 「지금 실제로 들어올 수
+    //    있는 값」을 아무도 안 재게 된다.
+    const result = plan({ nodeDeleteBlockedReason: "체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다." });
     assert.deepEqual(result, { action: "NONE", reason: "NODE_DELETE_BLOCKED" });
   });
 
+  test("🔵 **이 판정은 까닭을 제가 세지 않는다** — 막음이 하나 없어져도 여기는 안 고친다", () => {
+    // 🔵 2026-11-21 에 막는 까닭 하나(「연결선이 붙어 있다」)가 없어졌다. 이 파일이
+    //    한 글자도 안 바뀐 까닭이 여기 있다 — 받은 값이 null 이면 지우고 아니면
+    //    안 지운다, 그뿐이다. 글자가 무엇이든 답이 같다는 것을 못 박아 둔다.
+    assert.deepEqual(plan({ nodeDeleteBlockedReason: "무슨 까닭이든" }), { action: "NONE", reason: "NODE_DELETE_BLOCKED" });
+    assert.deepEqual(plan({ nodeDeleteBlockedReason: null }), { action: "DELETE_NODE", nodeId: NODE_ID });
+  });
+
   test("🔴 막힌 노드에서 **연결선으로 흘러내리지 않는다** — 지우려던 것은 노드였다", () => {
-    // 🔴 선이 붙어 막힌 상태에서 노드와 연결선이 둘 다 고른 상태가 될 수 있다.
-    //    흘러내리면 「노드를 지우려 했는데 붙어 있던 선이 사라지는」 일이 난다.
+    // 🔴 막힌 상태에서 노드와 연결선이 둘 다 고른 상태가 될 수 있다. 흘러내리면
+    //    「노드를 지우려 했는데 그 노드에 붙어 있던 선이 사라지는」 일이 난다.
     const result = plan({
       selectedEdgeId: EDGE_ID,
       nodeDeleteBlockedReason: "체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다.",

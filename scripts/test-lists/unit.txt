@@ -188,6 +188,19 @@ src/lib/domain/procedure-editor-structural-preview.test.ts
 # 🔵 「안 지워진다」는 전부 **지워지는 입력 하나에서 칸 하나만 뒤집어** 만든다 —
 # ①절이 그 입력이 실제로 지운다는 것을 먼저 보인다(표본이 비면 전부 공짜로 통과한다).
 src/lib/domain/procedure-editor-delete-key.test.ts
+# 🔵 **노드를 지우면 붙은 연결선도 함께 지운다**(2026-11-21).
+# 쓰는 분의 결정: 「노드를 지우면 연결된 연결선도 함께 지워지는 걸로 하자 — 연결선을
+# 지우지 않아도 노드를 지울 수 있도록.」 그 전까지 화면은 선이 붙은 노드를 **막았고**
+# (「연결선 N개가 붙어 있어 삭제할 수 없습니다」) 사람이 선을 하나씩 먼저 지워야 했다.
+# 🔴 **서버는 한 글자도 안 바꿨다.** 서버는 여전히 선이 붙은 노드를
+# NODE_HAS_CONNECTED_EDGES 로 거절한다 — 막음을 걷어낼 수 있는 까닭은 보낼 차례가
+# DELETE_EDGE(3단계) → DELETE_NODE(6단계) 라 선이 먼저 지워지기 때문이다. ④절이 그
+# 차례를 값으로 못 박는다(뒤집히면 이 기능의 모든 삭제가 [저장]에서 실패한다).
+# 🔴 재는 것 넷: 들어오는 선·나가는 선을 다 잡는가 · 한 배열로 돌려주는가([이전] 한
+# 칸의 근거다) · 이미 쌓인 삭제·저장 전 임시 선과 겹칠 때 접기가 무엇을 남기는가 ·
+# 🔴 **서버 목록이 아니라 그려진 목록에서 찾는가**(⑥절은 두 목록의 답이 실제로
+# 갈리는 표본으로 잰다 — 안 갈리면 아무것도 안 재는 시험이 된다).
+src/lib/domain/procedure-editor-node-deletion.test.ts
 src/lib/domain/procedure-execution-topology.test.ts
 src/lib/domain/procedure-execution-order.test.ts
 src/lib/domain/procedure-execution-focus.test.ts
