@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { ReactFlowInstance } from "@xyflow/react";
-import ProcedureFlowGraph, { type LayoutMode, type ProcedureNodeDragMove } from "./ProcedureFlowGraph";
+import ProcedureFlowGraph, { type LayoutMode, type ProcedureCanvasTool, type ProcedureNodeDragMove } from "./ProcedureFlowGraph";
 import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
 import NodePropertyPanel from "./editor/NodePropertyPanel";
 import EdgePropertyPanel from "./editor/EdgePropertyPanel";
@@ -426,6 +426,18 @@ export default function ProcedureTemplateEditorScreen({
   // 똑같이 이겼다. 달라지는 것은 **처음부터 끌 수 있고 경로점이 보인다**는 것
   // 하나다(전에는 드롭다운을 한 번 바꿔야 열렸다).
   const [layoutMode, setLayoutMode] = useState<LayoutMode>("USER");
+  /**
+   * 2026-11-21(조각 B2) — 그림 위에서 **마우스가 하는 일**(마우스 / 점선 네모).
+   * 바로 위 배치 모드와 **같은 까닭으로 여기 들어 올렸다**: 그림 바깥의 부품이
+   * 이 값을 알아야 하는 날이 오기 때문이다(다음 조각의 [Delete] 복수 삭제는
+   * 이 화면이 맡는 일이고, 「지금 점선 네모 모드인가」로 갈린다).
+   *
+   * 🔴 **이 화면이 제 손으로 갈아 끼우지 않는다.** 바꾸는 길은 그림 안의
+   * `changeCanvasTool` 하나여야 한다 — 그 함수가 바꾸는 김에 고른 것을 비운다.
+   * 여기서 직접 `setCanvasTool` 을 부르면 앞 모드에서 고른 칸이 그대로 남아
+   * 엉뚱한 칸이 함께 끌린다(그림 쪽 프롭 주석에 같은 경고).
+   */
+  const [canvasTool, setCanvasTool] = useState<ProcedureCanvasTool>("POINTER");
   const [rightPanelTab, setRightPanelTab] = useState<RightPanelTab>(navigationTarget.nodeId ? "properties" : "validation");
   const [lastStructuralValidation, setLastStructuralValidation] = useState<StructuralValidationSummary | null>(null);
   const [isValidating, setIsValidating] = useState(false);
@@ -2636,6 +2648,8 @@ export default function ProcedureTemplateEditorScreen({
             layoutMode={layoutMode}
             onLayoutModeChange={setLayoutMode}
             layoutModeOptions={EDITOR_LAYOUT_MODES}
+            canvasTool={canvasTool}
+            onCanvasToolChange={setCanvasTool}
             onInstanceReady={(instance) => {
               reactFlowInstanceRef.current = instance;
             }}

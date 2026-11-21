@@ -166,15 +166,21 @@ describe("🔴 편집기 — 놓은 칸 전부가 저장 대기 칸에 들어간
 });
 
 /**
- * 🔴 **[진단 Flowchart] 는 이 조각에서 안 건드린다.** 같은 `GraphCanvas` 를 쓰는
- * 두 번째 집이라, 캔버스를 고치면 저쪽이 조용히 같이 바뀔 수 있는 자리다.
- * 넓힌 인자는 **맨 뒤에 더했고** 저쪽 손잡이는 받지 않으므로 전과 똑같이 돈다.
+ * 🔴 **[진단 Flowchart] 는 B1·B2 두 조각 모두 안 건드린다.** 같은 `GraphCanvas`
+ * 를 쓰는 두 번째 집이라, 캔버스를 고치면 저쪽이 조용히 같이 바뀔 수 있는 자리다.
+ * B1 이 넓힌 인자는 **맨 뒤에 더했고** 저쪽 손잡이는 받지 않으므로 전과 똑같이
+ * 돌고, B2 가 더한 것들(선택 상자·panOnDrag·커서)은 전부 **안 넘기면 꺼지는**
+ * 프롭 하나(`boxSelection`)에 매달려 있다 — 저쪽은 그것을 안 넘긴다.
  *
- * 🔵 다음 조각이 저쪽도 넓히면 아래 시험이 운다 — 그때 **고쳐야 하는 시험**이지
+ * 🔵 뒤 조각이 저쪽도 넓히면 아래 시험이 운다 — 그때 **고쳐야 하는 시험**이지
  * 지워야 하는 시험이 아니다. 「여기도 같이 넓혔다」로 고쳐 적으면 된다.
  */
 describe("🔴 [진단 Flowchart] 는 이 조각에서 안 바뀐다", () => {
   const code = codeOf(CASE_GRAPH);
+
+  test("🔴 선택 상자를 안 넘긴다 — 그래서 빈 바탕 끌기가 전과 같은 「화면 옮기기」다", () => {
+    assert.ok(!code.includes("boxSelection"), "저쪽이 선택 상자를 켜기 시작했다면 이 조각의 전제가 깨진다");
+  });
 
   test("세 손잡이를 **전과 같은 인자 수**로 받는다", () => {
     assert.ok(code.includes("function handleNodeDragStart(nodeId: string, position: Point, shiftKey: boolean) {"));
@@ -189,26 +195,56 @@ describe("🔴 [진단 Flowchart] 는 이 조각에서 안 바뀐다", () => {
 });
 
 /**
- * 🔴 **지금은 선택이 늘 하나다** — 이 조각이 화면 동작을 안 바꾼다는 근거다.
+ * 🔴 **여럿이 함께 끌리는 열쇠는 칸에 실은 `selected` 한 줄이다.**
  *
- * React Flow 의 「함께 끌기」는 칸의 `selected` 가 참이어야 돈다. 이 저장소의
- * 두 그림은 **칸 목록을 통째로 제가 만들어 넘기고**(controlled) `onNodesChange`
- * 를 안 붙였다 — 그래서 React Flow 안에서 일어난 선택 변화는 `triggerNodeChanges`
- * 에서 **갈 곳이 없어 그대로 버려진다**(v12.11.2 의 store 에서 값으로 확인:
- * `hasDefaultNodes` 가 거짓이고 `onNodesChange` 가 없으면 아무 일도 안 한다).
- * 즉 오늘은 `selected` 가 참이 되는 길 자체가 없고, 움직이는 칸은 늘 하나다.
+ * React Flow 의 「함께 끌기」는 칸의 `selected` 가 참이어야 돈다. 그런데 이
+ * 저장소의 두 그림은 **칸 목록을 통째로 제가 만들어 넘기고**(controlled)
+ * `onNodesChange` 를 안 붙였다 — 그래서 React Flow 안에서 일어난 선택 변화는
+ * `triggerNodeChanges` 에서 **갈 곳이 없어 그대로 버려진다**(v12.11.2 의 store
+ * 에서 값으로 확인: `hasDefaultNodes` 가 거짓이고 `onNodesChange` 가 없으면 아무
+ * 일도 안 한다). 즉 **바탕 제 선택 기능으로는 그 값을 참으로 만들 길이 없고**,
+ * 그림이 만드는 칸에 직접 실어야 한다.
  *
- * 🔴 **다음 조각이 걸릴 자리가 바로 여기다**: 선택 상자를 붙이는 것만으로는
- * 안 되고, 그림이 만드는 칸에 `selected: …` 를 직접 실어야 엔진이 함께 끈다.
+ * 🔵 B1(2026-11-21 앞)에서는 여기가 「두 그림 모두 selected 를 안 싣는다」였다 —
+ * 그 조각이 화면 동작을 안 바꾼다는 근거였다. B2 가 절차 그림에 실으면서 **뒤집어
+ * 적었다**(지운 것이 아니다): 이제 재는 것은 「싣는가, 그리고 **모드 안에서만**
+ * 싣는가」다. [진단 Flowchart] 는 아직 안 싣는다 — 거기는 B2 가 안 건드렸다.
  */
-describe("🔴 오늘 「선택이 하나뿐」인 까닭을 못 박는다", () => {
-  test("두 그림 모두 onNodesChange 를 안 붙인다 — 선택 변화가 React Flow 안에 안 남는다", () => {
+describe("🔴 「여럿이 함께 끌리는」 열쇠 — 칸에 실은 selected", () => {
+  test("캔버스는 여전히 onNodesChange 를 안 붙인다 — 선택 변화가 React Flow 안에 안 남는다(그래서 직접 실어야 한다)", () => {
     assert.ok(!codeOf(CANVAS).includes("onNodesChange"), "캔버스가 선택 변화를 받기 시작했다면 위 전제가 깨진다");
   });
 
-  test("두 그림 모두 칸에 selected 를 안 싣는다", () => {
-    for (const path of [PROCEDURE_GRAPH, CASE_GRAPH]) {
-      assert.ok(!/\bselected:\s/.test(codeOf(path)), `${path} 가 칸에 selected 를 싣기 시작했다 — 그 순간부터 여럿이 함께 끌린다`);
-    }
+  test("🔴 절차 그림은 칸에 selected 를 **싣는다** — 이것이 빠지면 네모로 골라도 하나만 끌린다", () => {
+    const code = codeOf(PROCEDURE_GRAPH);
+    assert.ok(/\bselected:\s/.test(code), "칸에 selected 를 안 싣는다 — 골라 놓고 끌면 하나만 움직인다");
+    assert.ok(code.includes("selected: isBoxSelected,"), `싣는 값이 점선 네모 선택이 아니다: ${/.*\bselected:.*/.exec(code)?.[0]}`);
+  });
+
+  test("🔴 그 값은 **점선 네모 모드 안에서만** 참이 된다 — 마우스 모드로 돌아와 여럿이 끌리면 안 된다", () => {
+    const code = codeOf(PROCEDURE_GRAPH);
+    assert.ok(
+      code.includes("const isBoxSelected = boxSelectActive && boxSelectedNodeIds.has(n.id);"),
+      "모드 관문 없이 고른 집합만 보고 있다 — 모드를 벗어나도 여럿이 함께 끌린다"
+    );
+    assert.ok(
+      code.includes('const boxSelectActive = canUseBoxSelect && canvasTool === "BOX_SELECT";'),
+      "모드 관문의 정의가 바뀌었다 — 위 단언이 가리키는 값이 무엇인지 다시 봐야 한다"
+    );
+  });
+
+  test("🔴 칸 목록을 다시 만드는 조건에 고른 집합이 들어 있다 — 빠지면 골라도 화면이 그대로다", () => {
+    const code = codeOf(PROCEDURE_GRAPH);
+    const memo = code.slice(code.indexOf("const flowNodes = useMemo<Node[]>"));
+    const deps = memo.slice(memo.indexOf("}, ["), memo.indexOf("]);"));
+    assert.ok(deps.includes("boxSelectedNodeIds"), `flowNodes 의 의존성에 고른 집합이 없다: ${deps}`);
+    assert.ok(deps.includes("boxSelectActive"), `flowNodes 의 의존성에 모드가 없다: ${deps}`);
+  });
+
+  test("🔵 [진단 Flowchart] 는 아직 안 싣는다 — 저쪽은 B2 가 안 건드렸다", () => {
+    assert.ok(
+      !/\bselected:\s/.test(codeOf(CASE_GRAPH)),
+      "저쪽도 싣기 시작했다면 이 시험을 고쳐 적어라 — 다만 그 조각은 저쪽의 선택 상자까지 함께 봐야 한다"
+    );
   });
 });

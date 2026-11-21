@@ -42,11 +42,18 @@ import {
 } from "@/lib/domain/procedure-edge-routing";
 import {
   resolveEffectiveNodePosition,
+  resolveEffectiveNodeDimensions,
   hasUserLayoutOverride,
   resolveConnectionHandles,
   HORIZONTAL_HANDLE_IDS,
   type ConnectedNodeGeometry,
 } from "@/lib/graph-editor-core/layout";
+import {
+  findNodeIdsInSelectionBox,
+  toggleNodeInSelection,
+  type BoxSelectableNode,
+  type SelectionBox,
+} from "@/lib/graph-editor-core/box-selection";
 import {
   applyProcedureAutoLayoutMemory,
   computeProcedureAutoLayout,
@@ -58,6 +65,9 @@ import { resolveDragAxis, applyAxisLock, applyAxisLockToMoves, type AxisLockMove
 import { DefaultStraightOrStepEdge, ManualRouteEdge, type ManualRouteEdgeData } from "@/components/graph-editor-core/GraphEdges";
 import ProcedureNodeChip from "./visual/ProcedureNodeChip";
 import ProcedureGraphLegend from "./visual/ProcedureGraphLegend";
+import ProcedureCanvasToolPicker, { type ProcedureCanvasTool } from "./visual/ProcedureCanvasToolPicker";
+
+export type { ProcedureCanvasTool };
 
 /** Outer-lane routing constants (Problem 1, part D) — presentation-only, how far past the layout's own rightmost content the shared lane pool starts, and how far apart parallel lanes sit. */
 const LANE_BASE_GAP = 60;
@@ -421,6 +431,8 @@ export default function ProcedureFlowGraph({
   layoutMode: controlledLayoutMode,
   onLayoutModeChange,
   layoutModeOptions = DEFAULT_LAYOUT_MODE_OPTIONS,
+  canvasTool: controlledCanvasTool,
+  onCanvasToolChange,
   onInstanceReady,
   showChrome = true,
   highlightedNodeIds = null,
@@ -559,6 +571,23 @@ export default function ProcedureFlowGraph({
    * 고를 것이 없는 드롭다운은 눌러도 아무 일이 안 일어나 고장으로 읽힌다.
    */
   layoutModeOptions?: readonly LayoutMode[];
+  /**
+   * 2026-11-21(조각 B2) — 그림 위에서 **마우스가 하는 일**(마우스 / 점선 네모).
+   * 위 layoutMode 와 **같은 통제형 패턴**이다: 안 넘기면 이 컴포넌트가 제 안에
+   * 들고 "POINTER" 로 시작한다. 그래서 이 프롭을 안 넘기는 호출부 셋(절차 상세 ·
+   * 실행 시작 노드 고르기 · 「전체 단계 보기」 팝업)은 글자 하나 안 바뀐다.
+   *
+   * 🔴 도구 단추 자체는 **끌 수 있는 그림에만** 선다(`editable && layoutMode ===
+   * "USER"`) — 끌 수 없는 그림에서 여럿을 골라 봐야 할 수 있는 일이 없고, 거기서
+   * 빈 바탕 끌기를 뺏으면 **화면을 옮길 길만 사라진다.**
+   *
+   * 🔴 **모드를 바꾸는 길은 아래 changeCanvasTool 하나**여야 한다. 그 함수가 바꾸는
+   * 김에 고른 것을 비운다(두 모드는 선택을 나눠 가진다). 바깥에서 이 값을 제
+   * 손으로 갈아 끼우면 **앞 모드에서 고른 것이 그대로 남아** 엉뚱한 칸이 함께
+   * 끌린다.
+   */
+  canvasTool?: ProcedureCanvasTool;
+  onCanvasToolChange?: (tool: ProcedureCanvasTool) => void;
   /** 5C-6D-1D — forwards the live React Flow instance up to the editor screen (same purpose/timing as CaseFlowchartGraph's own onInstanceReady) so a sibling component (NodePropertyPanel, CreateNodePanel) can read each node's REAL measured dimensions (`instance.getInternalNode(id)?.measured`) for relative-position math, rather than a duplicated size estimate. Optional — ProcedureTemplateDetailScreen's read-only usage has no relative-position feature and never passes this. */
   onInstanceReady?: (instance: ReactFlowInstance) => void;
   /**
@@ -755,6 +784,31 @@ export default function ProcedureFlowGraph({
   const layoutMode = controlledLayoutMode ?? internalLayoutMode;
   const setLayoutMode = onLayoutModeChange ?? setInternalLayoutMode;
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(() => initialSelectedNodeId);
+  /**
+   * 도구 모드 — layoutMode 와 **똑같은 통제형-내부값 겹침**이다(프롭 주석에 까닭).
+   */
+  const [internalCanvasTool, setInternalCanvasTool] = useState<ProcedureCanvasTool>("POINTER");
+  const canvasTool = controlledCanvasTool ?? internalCanvasTool;
+  /**
+   * 🔴 **점선 네모 모드 전용 선택**이다 — 위 `selectedNodeId`(마우스 모드의 단수
+   * 선택)와 **일부러 따로** 둔다. 단수 선택을 쓰는 자리가 많기 때문이다: 속성
+   * 패널 · [연결 추가]의 미리 채우기 · [노드 추가]의 기준 · [Delete] 키 · 삭제가
+   * 막힌 까닭 판정. 점선 네모 모드에서 하는 일은 **옮기기(와 다음 조각의
+   * 지우기)뿐**이라, 그 자리들을 하나도 안 건드려도 된다.
+   * 🔵 그래서 **두 모드가 선택을 나눠 가진다** — 모드를 바꾸면 양쪽 다 비운다
+   *    (changeCanvasTool).
+   */
+  const [boxSelectedNodeIds, setBoxSelectedNodeIds] = useState<ReadonlySet<string>>(() => new Set<string>());
+  /**
+   * 🔴 점선 네모를 **쓸 수 있는 그림인가.** 끌기를 여는 관문
+   * (`nodesDraggable={editable && layoutMode === "USER"}`)과 **일부러 같은 값**이다:
+   *  - 끌 수 없는 그림에서 여럿을 골라 봐야 할 수 있는 일이 없고,
+   *  - 거기서 빈 바탕 끌기를 뺏으면 **화면을 옮길 길만 사라진다**(읽기 전용
+   *    화면에서 그림을 보는 방법이 그것뿐이다).
+   * 🔵 그래서 도구 단추도 이 값일 때만 선다. 안 서는 화면 셋은 글자 하나 안 바뀐다.
+   */
+  const canUseBoxSelect = editable && layoutMode === "USER";
+  const boxSelectActive = canUseBoxSelect && canvasTool === "BOX_SELECT";
   const [searchQuery, setSearchQuery] = useState("");
   // Graph visibility mode (Problem 1, part B) — only meaningful in the
   // compact STAGE_SORTED layout, where hundreds of same-style edges are the
@@ -984,6 +1038,23 @@ export default function ProcedureFlowGraph({
   // canvas's own onNodeClick/onPaneClick/onEdgeDoubleClick JSX props used to
   // apply inline, unchanged. ----
 
+  /**
+   * 🔴 **도구를 바꾸는 단 하나의 길** — 바꾸는 김에 **고른 것을 비운다**
+   * (2026-11-21, 조각 B2). 두 모드는 선택을 나눠 가진다. 안 비우면:
+   *  ㉠ 점선 네모에서 고른 칸이 마우스 모드로 돌아와서도 `selected` 를 단 채
+   *     남아, 칸 하나를 끌었을 뿐인데 **보이지 않는 짝들이 함께 끌린다.**
+   *  ㉡ 마우스 모드의 단수 선택이 점선 네모 모드까지 따라와, 고르지도 않은 칸의
+   *     이웃만 환하고 나머지는 흐린 화면에서 네모를 치게 된다.
+   * 🔵 연결선 선택도 함께 푼다 — 빈 바탕 누르기(handleCanvasPaneClick)가 이미
+   *    그 둘을 한 쌍으로 다루고 있고, 사람 눈에는 똑같은 「선택」이다.
+   */
+  function changeCanvasTool(nextTool: ProcedureCanvasTool) {
+    setBoxSelectedNodeIds(new Set<string>());
+    setSelectedNodeId(null);
+    onEdgeSelectionChange?.(null);
+    (onCanvasToolChange ?? setInternalCanvasTool)(nextTool);
+  }
+
   function handleCanvasNodeClick(nodeId: string) {
     // "화면에서 선택" 같은 고르기 모드가 이 클릭을 가져갈 수 있다. 이 그래프는
     // 선택 상태를 스스로 들고 있고, 이미 선택된 노드를 다시 누르면 선택을
@@ -991,6 +1062,13 @@ export default function ProcedureFlowGraph({
     // 받으면 "같은 노드를 다시 고르기"가 선택 해제로 둔갑한다. 그래서 누른
     // 노드 id를 있는 그대로 먼저 넘기고, 소비되면 선택은 건드리지 않는다.
     if (onNodeClickIntercept?.(nodeId)) return;
+    // 🔴 점선 네모 모드에서는 **누르는 것이 곧 넣기/빼기**다 — 보조키를 안 쓴다
+    //    (Shift 는 축 잠금 드래그가 이미 쓰고 있어서, 모드로 갈랐다).
+    //    단수 선택(selectedNodeId)은 여기서 한 글자도 안 건드린다.
+    if (boxSelectActive) {
+      setBoxSelectedNodeIds((current) => toggleNodeInSelection(current, nodeId));
+      return;
+    }
     onEdgeSelectionChange?.(null);
     setSelectedNodeId((current) => (current === nodeId ? null : nodeId));
   }
@@ -998,6 +1076,11 @@ export default function ProcedureFlowGraph({
   function handleCanvasPaneClick() {
     setSelectedNodeId(null);
     onEdgeSelectionChange?.(null);
+    // 🔵 **빈 바탕을 누르면 고른 것도 비운다.** 끌지 않고 누르기만 한 손짓은
+    //    넓이 0 짜리 네모라 캔버스가 아예 안 알리고(box-selection.ts), 그래서
+    //    「비우기」는 이 길 하나로 들어온다. 이미 비어 있으면 **같은 집합을 그대로**
+    //    돌려줘서 쓸데없이 다시 그리지 않는다.
+    setBoxSelectedNodeIds((current) => (current.size === 0 ? current : new Set<string>()));
   }
 
   /**
@@ -1117,6 +1200,36 @@ export default function ProcedureFlowGraph({
     if (renderedPositionsByNodeId) onRenderedPositionsChange?.(renderedPositionsByNodeId);
   }, [renderedPositionsByNodeId, onRenderedPositionsChange]);
 
+  /**
+   * 점선 네모 하나에 **닿은 칸**을 고른다(2026-11-21, 조각 B2). 「닿으면 고른다」의
+   * 셈 자체는 graph-editor-core 의 순수 함수가 한다 — 두 편집기가 같은 답을 내야
+   * 해서 거기 있다(box-selection.ts 머리말).
+   *
+   * 🔴 **좌표계** — 네모는 **그림 좌표**로 들어온다(GraphCanvas 가
+   *    `screenToFlowPosition` 으로 옮겨서 넘긴다). 아래에서 칸 자리를 재는
+   *    `resolveRenderedPosition` 도 같은 좌표계다(그 값이 곧 React Flow 에 넘기는
+   *    `position` 이다). 한쪽만 화면 px 로 재면 **확대를 바꾸는 순간 어긋나는데**
+   *    오류는 안 난다.
+   * 🔴 **자리도 크기도 여기서 새로 추정하지 않는다.** 자리는 「이 그림이 실제로
+   *    그린 자리」를 세는 한 곳에서, 크기는 이미 있는 규칙(React Flow 가 **잰 값**
+   *    우선, 없으면 추정값 — resolveEffectiveNodeDimensions)에서 받는다. 한 벌이라도
+   *    더 만들면 「그린 네모와 골라진 칸이 다른」 결함이 나고, 그건 눈으로만 잡힌다.
+   * 🔵 **거르고 남은 진짜 칸만** 후보다. 유령 칸과 단계 머리띠는 flowNodes 에
+   *    `selectable:false`·`draggable:false` 로 박혀 있어 골라도 안 끌린다 —
+   *    후보에 넣으면 「골랐다고 센 수는 늘었는데 안 움직이는」 칸이 생긴다.
+   * 🔵 크기를 아직 모르는 칸은 0×0 으로 떨어지고, 0×0 은 **절대 안 골라진다**
+   *    (겹침 넓이가 0이다). 화면에 아직 없는 것이 함께 끌리지 않게 하는 쪽이 안전하다.
+   */
+  function handleBoxSelect(box: SelectionBox) {
+    const instance = reactFlowInstanceRef.current;
+    const candidates: BoxSelectableNode[] = filteredNodeRows.map((n) => {
+      const position = resolveRenderedPosition(n);
+      const dimensions = resolveEffectiveNodeDimensions(instance?.getInternalNode(n.id)?.measured, nodeDimsById.get(n.id) ?? { width: 0, height: 0 });
+      return { id: n.id, x: position.x, y: position.y, width: dimensions.width, height: dimensions.height };
+    });
+    setBoxSelectedNodeIds(findNodeIdsInSelectionBox(box, candidates));
+  }
+
   // 바깥에서 건 강조(highlightedNodeIds)를 빠른 조회로. null 이면 아예 안 만든다 —
   // 「걸지 않았다」와 「하나도 안 걸렸다(빈 배열)」는 뜻이 정반대다: 전자는 아무것도
   // 안 흐려지고, 후자는 전부 흐려진다(검색어는 쳤는데 맞는 것이 없는 상태).
@@ -1142,13 +1255,26 @@ export default function ProcedureFlowGraph({
   const flowNodes = useMemo<Node[]>(() => {
     const result: Node[] = filteredNodeRows.map((n) => {
       const sourcePos = resolveRenderedPosition(n);
-      const isSelected = n.id === selectedNodeId;
+      const isBoxSelected = boxSelectActive && boxSelectedNodeIds.has(n.id);
+      const isSelected = n.id === selectedNodeId || isBoxSelected;
       const dimmedBySelection = selectedNodeId !== null && !connectedNodeIds.has(n.id);
       const dimmedByHighlight = highlightedNodeIdSet !== null && !highlightedNodeIdSet.has(n.id);
       return {
         id: n.id,
         type: "procedureNode",
         position: sourcePos,
+        // 🔴 **엔진이 함께 끌어 주는 열쇠가 이 한 줄이다**(2026-11-21, 조각 B2).
+        //    React Flow 는 `selected === true` 인 칸을 전부 함께 끌고
+        //    (@xyflow/system 의 `getDragItems`), 우리가 넘긴 칸을 `{...userNode}` 로
+        //    그대로 복사해 제 안에 둔다(`adoptUserNodes`, v0.0.79 에서 값으로 확인).
+        //    🔵 그래서 **여기 싣는 것만으로** 복수 이동이 되고, 끌어 놓은 자리는
+        //       B1 이 넓혀 둔 길(movingNodes → onNodeDragStop)로 전부 올라간다.
+        //    🔴 바탕 제 선택 기능으로는 이것을 못 만든다 — 이 그림은 칸 목록을
+        //       통째로 제가 만들어 넘기고 `onNodesChange` 를 안 붙여서, 바탕 안에서
+        //       일어난 선택 변화는 갈 곳이 없어 버려진다.
+        //    🔵 모드를 벗어나면(`boxSelectActive` 가 거짓) 집합에 무엇이 남아 있든
+        //       안 싣는다 — 「마우스 모드인데 여럿이 함께 끌리는」 일이 없다.
+        selected: isBoxSelected,
         // 🔴 React Flow 는 **칸마다 적힌 draggable 이 전역 설정보다 먼저**다.
         //    그래서 nodesDraggable 이 false 인 읽기 전용 그림에서도 여기 적힌
         //    칸만 끌 수 있다(바로 아래 단계 머리띠가 draggable: false 로
@@ -1238,6 +1364,11 @@ export default function ProcedureFlowGraph({
     templateId,
     issueBadgeByNodeId,
     selectedNodeId,
+    // 🔴 이 둘이 빠지면 **골라도 화면이 그대로다** — 칸 목록이 다시 안 만들어지면
+    //    React Flow 는 같은 객체를 그대로 들고 있어(`adoptUserNodes` 가 신원이
+    //    같은 칸은 건너뛴다) `selected` 가 영영 참이 되지 않는다.
+    boxSelectActive,
+    boxSelectedNodeIds,
     connectedNodeIds,
     errorFocusMode,
     highlightedNodeIdSet,
@@ -1597,6 +1728,13 @@ export default function ProcedureFlowGraph({
             </span>
           )}
         </div>
+        {/*
+          🔴 도구 단추는 **끌 수 있는 그림에만** 선다(canUseBoxSelect 의 주석에
+          까닭 둘). 이 프롭을 안 넘기는 화면 셋은 그 값이 거짓이라 전과 똑같다.
+        */}
+        {canUseBoxSelect && (
+          <ProcedureCanvasToolPicker tool={canvasTool} onToolChange={changeCanvasTool} selectedCount={boxSelectedNodeIds.size} />
+        )}
         {layoutMode === "STAGE_SORTED" && (
           <div className="flex items-center gap-2">
             <label htmlFor="procedure-flow-visibility-mode" className="text-zinc-500 dark:text-zinc-400">
@@ -1696,6 +1834,13 @@ export default function ProcedureFlowGraph({
         // ("Shift") would otherwise pre-empt a Shift-held node drag
         // entirely and start a box-selection gesture instead.
         selectionKeyCode={null}
+        // 🔴 **선택 상자를 직접 그린다**(2026-11-21, 조각 B2) — 바탕 제 선택
+        //    기능(위 selectionKeyCode·selectionOnDrag)은 이 그림에서 쓸 수 없다:
+        //    선택 변화를 받을 onNodesChange 가 없어 **네모만 그려지고 아무것도
+        //    안 골라진다.** 까닭 전부는 GraphCanvasBoxSelection 의 머리말에.
+        // 🔵 안 켜면(마우스 모드·읽기 전용 그림) 빈 바탕 끌기는 전과 같은
+        //    「화면 옮기기」다.
+        boxSelection={{ active: boxSelectActive, onSelect: handleBoxSelect }}
         onNodeDragStart={handleNodeDragStart}
         onNodeDrag={handleNodeDrag}
         onNodeDragStop={handleNodeDragStopWithAxisLock}

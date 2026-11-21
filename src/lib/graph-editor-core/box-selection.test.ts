@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   selectionBoxFromPoints,
   selectionBoxOverlapArea,
+  selectionOverlayRect,
+  toggleNodeInSelection,
   findNodeIdsInSelectionBox,
   type BoxSelectableNode,
 } from "./box-selection";
@@ -158,6 +160,90 @@ describe("넓이 0 짜리 네모(누르기만 한 것)는 아무것도 안 고�
   test("칸 한가운데를 눌러도 네모 길로는 안 골라진다 — 누르기는 칸을 직접 누르는 길이다", () => {
     const ids = findNodeIdsInSelectionBox(selectionBoxFromPoints({ x: 50, y: 30 }, { x: 50, y: 30 }), SAMPLE_NODES);
     assert.equal(ids.size, 0);
+  });
+});
+
+/**
+ * 🔴 **그린 네모와 고른 네모가 갈리지 않는가**(2026-11-21, 조각 B2).
+ *
+ * 화면에 그리는 네모는 px 이고 고르는 네모는 그림 좌표다. 두 셈이 따로 적히면
+ * 「분명히 네모로 덮었는데 안 골라진다」가 되고, 그것은 오류가 안 나 눈으로만
+ * 잡힌다. 그래서 그리는 쪽도 위 `selectionBoxFromPoints` 를 거치게 했고,
+ * 여기서 **같은 두 점이 같은 모양을 낸다**는 것을 값으로 잰다.
+ */
+describe("selectionOverlayRect — 그리는 네모", () => {
+  const paneOrigin = { x: 40, y: 120 };
+
+  test("바탕 왼쪽 위를 0,0 으로 옮긴다", () => {
+    assert.deepEqual(selectionOverlayRect({ x: 140, y: 220 }, { x: 240, y: 280 }, paneOrigin), {
+      left: 100,
+      top: 100,
+      width: 100,
+      height: 60,
+    });
+  });
+
+  test("🔴 어느 방향으로 끌든 같은 네모다 — 고르는 쪽과 같은 정규화를 쓴다", () => {
+    const downRight = selectionOverlayRect({ x: 140, y: 220 }, { x: 240, y: 280 }, paneOrigin);
+    for (const [start, end] of [
+      [
+        { x: 240, y: 280 },
+        { x: 140, y: 220 },
+      ],
+      [
+        { x: 240, y: 220 },
+        { x: 140, y: 280 },
+      ],
+      [
+        { x: 140, y: 280 },
+        { x: 240, y: 220 },
+      ],
+    ]) {
+      assert.deepEqual(selectionOverlayRect(start, end, paneOrigin), downRight);
+    }
+  });
+
+  test("🔴 폭·높이가 고르는 네모의 것과 **같은 값**이다 — 여기가 갈리면 그린 것과 골라진 것이 달라진다", () => {
+    const start = { x: 140, y: 220 };
+    const end = { x: 90, y: 400 };
+    const drawn = selectionOverlayRect(start, end, paneOrigin);
+    const picked = selectionBoxFromPoints(start, end);
+    assert.equal(drawn.width, picked.width);
+    assert.equal(drawn.height, picked.height);
+    assert.equal(drawn.left, picked.x - paneOrigin.x);
+    assert.equal(drawn.top, picked.y - paneOrigin.y);
+  });
+
+  test("누르기만 하면 넓이 0 — 그려도 아무것도 안 덮는다", () => {
+    assert.deepEqual(selectionOverlayRect({ x: 60, y: 130 }, { x: 60, y: 130 }, paneOrigin), { left: 20, top: 10, width: 0, height: 0 });
+  });
+});
+
+/**
+ * 🔴 **두 번 누르면 빠진다**(2026-11-21, 조각 B2). 점선 네모 모드에서 칸을
+ * 누르는 것이 곧 넣기/빼기다. 「넣기만 되고 빼기가 안 되는」 결함은 쓰다 보면
+ * 선택이 영영 안 줄어드는 것으로 드러나는데, 그 사이에 엉뚱한 칸이 함께 끌린다.
+ */
+describe("toggleNodeInSelection — 누르면 넣고, 다시 누르면 뺀다", () => {
+  test("없던 칸은 들어간다", () => {
+    assert.deepEqual([...toggleNodeInSelection(new Set(["a"]), "b")].sort(), ["a", "b"]);
+  });
+
+  test("있던 칸은 빠진다", () => {
+    assert.deepEqual([...toggleNodeInSelection(new Set(["a", "b"]), "a")].sort(), ["b"]);
+  });
+
+  test("두 번 누르면 처음으로 돌아온다", () => {
+    const once = toggleNodeInSelection(new Set<string>(), "a");
+    assert.deepEqual([...once], ["a"]);
+    assert.equal(toggleNodeInSelection(once, "a").size, 0);
+  });
+
+  test("🔴 받은 집합을 안 고친다 — 고쳐서 돌려주면 화면이 안 다시 그려진다", () => {
+    const before = new Set(["a"]);
+    const after = toggleNodeInSelection(before, "b");
+    assert.notEqual(after, before, "같은 집합을 그대로 돌려줬다");
+    assert.deepEqual([...before], ["a"], "받은 집합이 바뀌었다");
   });
 });
 

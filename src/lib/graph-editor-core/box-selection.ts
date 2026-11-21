@@ -65,6 +65,44 @@ export function selectionBoxFromPoints(start: Point, end: Point): SelectionBox {
 }
 
 /**
+ * 화면에 **그리는** 네모 — 그림 바탕(pane) 왼쪽 위를 0,0 으로 삼은 px 자리.
+ *
+ * 🔴 **고르는 네모와 반드시 같은 두 점에서 나와야 한다.** 끈 두 점은 화면
+ * 좌표(clientX/clientY)로 들어오고, 고르기는 그 둘을 그림 좌표로 옮긴 뒤
+ * 위 `selectionBoxFromPoints` 로 네모를 만든다. **그리기만 따로 셈을 적으면**
+ * 「눈에 보이는 네모와 실제로 골라진 칸이 다른」 결함이 나고, 그것은 오류가
+ * 안 나서 눈으로만 잡힌다. 그래서 이 함수도 같은 `selectionBoxFromPoints` 를
+ * 거친다 — 방향 정규화(어느 쪽으로 끌든 같은 네모)가 한 벌만 있게 한다.
+ *
+ * 🔵 `paneOrigin` 은 그림 바탕 요소의 화면 왼쪽 위(`getBoundingClientRect()` 의
+ * left/top)다. 그 요소 **안에** 절대 자리로 얹을 것이라 그만큼만 빼면 된다.
+ * 🔵 **확대/축소 배율은 여기 안 들어간다** — 들어온 두 점도, 내놓는 값도 둘 다
+ * 화면 px 이다. 배율이 끼어드는 곳은 화면 좌표 → 그림 좌표로 옮기는 쪽
+ * (`screenToFlowPosition`) 하나뿐이고, 그 셈은 그림 바탕이 제가 한다.
+ */
+export type SelectionOverlayRect = { left: number; top: number; width: number; height: number };
+
+export function selectionOverlayRect(start: Point, end: Point, paneOrigin: Point): SelectionOverlayRect {
+  const box = selectionBoxFromPoints(start, end);
+  return { left: box.x - paneOrigin.x, top: box.y - paneOrigin.y, width: box.width, height: box.height };
+}
+
+/**
+ * 고른 칸 집합에서 하나를 **넣거나 뺀다** — 이미 있으면 빼고, 없으면 넣는다.
+ *
+ * 🔵 점선 네모 모드에서 **칸을 누르는 것**이 곧 이 조작이다(보조키를 안 쓴다 —
+ * 이 저장소는 Shift 를 축 잠금 드래그에 이미 쓰고 있어서, 모드로 가르고 보조키는
+ * 비워 뒀다).
+ * 🔴 **새 집합을 돌려준다** — 받은 것을 고쳐서 돌려주면 React 가 「같은 것」으로
+ * 보고 다시 안 그린다(그러면 눌렀는데 화면이 그대로다).
+ */
+export function toggleNodeInSelection(selectedIds: ReadonlySet<string>, nodeId: string): Set<string> {
+  const next = new Set(selectedIds);
+  if (!next.delete(nodeId)) next.add(nodeId);
+  return next;
+}
+
+/**
  * 두 네모가 겹치는 넓이. 안 겹치면 0, 변끼리만 맞닿아도 0 이다.
  * (@xyflow/system 의 `getRectsOverlappingArea` 와 같은 셈 — 거기 맞춰 두는
  * 까닭은 이 파일 머리 주석에 있다.)
