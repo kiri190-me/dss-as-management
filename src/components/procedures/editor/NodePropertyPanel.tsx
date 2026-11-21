@@ -700,9 +700,17 @@ export default function NodePropertyPanel({
       {canDelete && (
         <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950">
           <h4 className="text-xs font-semibold text-red-900 dark:text-red-300">노드 삭제</h4>
-          {(node.hasChecklistContent || node.hasTroubleshootingContent) && (
-            <p className="text-red-700 dark:text-red-400">체크리스트 또는 고장 진단표 내용이 연결되어 있어 삭제할 수 없습니다.</p>
-          )}
+          {/*
+            🔴 **막힌 까닭을 패널이 제 손으로 또 적지 않는다**(2026-11-21).
+            여기에는 `(node.hasChecklistContent || node.hasTroubleshootingContent)` 일 때
+            아래 `deleteBlockedReason` 과 **글자까지 똑같은** 줄이 하나 더 서 있었다.
+            🔴 까닭이 둘이던 동안에는 둘 중 하나(연결선)에서만 겹쳐 눈에 덜 띄었는데,
+               2026-11-21 에 그 하나가 없어지면서 **막히는 경우 100% 가 두 줄**이 됐다.
+            🔵 지우는 쪽을 **위(패널이 스스로 판정하던 것)**로 고른 까닭: 단추를 잠그는
+               값(`disabled={deleteBlockedReason !== null}`)과 툴팁이 이미 아래 값을
+               보고 있다. 위를 남기면 **판정이 두 벌**이 되어, 화면이 막는 까닭과 실제로
+               막는 까닭이 갈리는 날 아무도 못 본다.
+          */}
           {/*
             🔴 2026-11-20(조각 4) — **서버가 거절할 까닭을 앞당겨 보인다.** 모아 두는
             지금은 서버의 거절이 [저장] 때까지 안 보이는데, 그림에서는 노드가 **이미
