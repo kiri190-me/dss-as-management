@@ -55,8 +55,14 @@ export type CaseFlowchartEdgeDraft = { branchType: RepairCaseFlowchartBranchType
  *
  * 🔴 삭제 쪽 `isDeleting` · `deleteErrorMessage` 도 **없앴다.** 지우기도 모아 두는
  * 일이 되어 기다릴 서버도, 그 자리에서 날 실패도 없다 — 값이 늘 false/null 인 칸을
- * 남겨 두면 「꺼도 아무 일 없는 스위치」가 된다. 🔵 **막힌 까닭**(deleteBlockedMessage)은
- * 노드 패널 쪽에 그대로 산다 — 그것은 화면이 그림을 세어 지금 답하는 값이다.
+ * 남겨 두면 「꺼도 아무 일 없는 스위치」가 된다. 🔵 2026-11-21(조각 C3)에 노드 패널의
+ * **막힌 까닭**(deleteBlockedMessage)도 같은 까닭으로 없어졌다 — 「붙은 연결선도 함께
+ * 지운다」가 되면서 화면이 미리 막는 일 자체가 사라졌다. 이제 이 편집기의 두 패널 어디에도
+ * 삭제를 막는 길이 없다.
+ *
+ * 🔴 그 변화가 **이 패널에 남긴 일은 없다.** [분기 삭제]는 전에도 막힌 적이 없고,
+ * 노드를 지울 때 딸려 지워지는 선의 뒤처리(칸 초안·경로점 버리기, 고른 선·경로점
+ * 풀기)는 전부 화면의 handleDeleteNode 가 한다 — 여기서 또 하면 두 벌이 된다.
  */
 export default function CaseFlowchartEdgePropertyPanel({
   edge,

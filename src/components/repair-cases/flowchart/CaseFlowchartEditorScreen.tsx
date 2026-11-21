@@ -84,10 +84,12 @@ import {
   previewPendingStructuralGraph,
   type StructuralPreviewFactories,
 } from "@/lib/domain/procedure-editor-structural-preview";
-// 🔵 진단 쪽에서 쓰는 것은 **붙은 선 찾기 하나**다. 「노드를 지우면 붙은 선도 함께」는
-// 이 조각의 일이 아니라서(그 결정은 아직 안 내려왔다) planProcedureNodeDeletionOperations
-// 는 안 쓴다 — 여기서는 「붙은 선이 있으면 못 지운다」를 **화면이 미리 세는** 데만 쓴다.
-import { findEdgesAttachedToNode } from "@/lib/domain/procedure-editor-node-deletion";
+// 🔴 2026-11-21(조각 C3) — 「노드를 지우면 붙은 연결선도 함께 지운다」가 진단에도 왔다.
+// 그래서 **무엇을 쌓을지**는 절차와 **같은 한 벌**인 planProcedureNodeDeletionOperations
+// 가 정한다(선 먼저 · 노드 나중이라는 차례까지 거기 있고 값으로 재어진다).
+// 🔵 findEdgesAttachedToNode 는 **뒤처리에 쓸 id 를 얻는 데** 남는다 — 함께 지워지는
+//    선들의 칸 초안·경로점을 버려야 해서다. 지울 줄을 정하는 데는 안 쓴다(두 벌이 된다).
+import { findEdgesAttachedToNode, planProcedureNodeDeletionOperations } from "@/lib/domain/procedure-editor-node-deletion";
 // [Delete] 키가 **무엇을 가리키는가**를 정하는 순수 판정 — 「기술 작업 절차」
 // 편집기가 쓰는 그 파일 그대로다. 이름이 `procedure-` 로 시작해도 베끼지 않는
 // 까닭은 아래 keydown 자리의 주석에 적어 두었다.
@@ -655,49 +657,68 @@ export default function CaseFlowchartEditorScreen({
    * 남는 날이 온다. 그리고 그 어긋남은 오류를 한 번도 안 낸다.
    *
    * 그래서 **부르는 일도 뒤처리도 전부 여기로 올렸다.** 패널은 단추를 그리고
-   * `onDelete` 를 부르는 것까지만 하고, 「막힌 까닭」은 이 화면이 쥐고 프롭으로
-   * 내려보낸다. 키도 똑같이 아래 둘을 부른다.
+   * `onDelete` 를 부르는 것까지만 한다. 키도 똑같이 아래 둘을 부른다.
    *
    * 🔴 2026-11-21(조각 C2) — 그날 안에 **삭제도 [저장] 쪽으로 옮겼다.** 아래 둘은
    * 이제 서버를 안 부르고 「지운다」는 줄을 목록에 쌓는다(queueStructural). 패널도
    * 키도 **한 글자 안 고쳤다** — 위 문단이 내다본 그 자리가 실제로 그 자리였다.
-   */
-
-  /**
-   * 🔴 삭제가 막힌 까닭 — **어느 노드의 것인지와 함께** 쥔다.
    *
-   * 까닭: 올리기 전에는 이 글이 패널의 state 였고, 고른 것이 없어져 패널이
-   * 사라질 때 함께 사라졌다. 화면으로 올리면 그 「사라짐」이 없어져, 빈 바탕을
-   * 누른 뒤 **다른 노드**를 골랐을 때 엉뚱한 노드 위에 옛 글이 떠 있게 된다.
-   * id 를 함께 들고 있다가 **그것을 고른 동안에만** 보여 주면 그 일이 없다.
-   *
-   * 🔵 「그 밖의 실패 사유」 칸은 없앴다 — 지우기가 모아 두는 일이 되어 **그 자리에서
-   * 실패할 일이 없다.** 서버가 거절하면 그 글은 [저장] 때 globalSaveError 로 뜬다.
+   * 🔴 2026-11-21(조각 C3) — **「막힌 까닭」이라는 것이 없어졌다.** 이 화면이 미리
+   * 막던 까닭은 「연결선이 붙어 있다」 **하나뿐**이었고, 이번에 그것이 「함께
+   * 지운다」로 바뀌었다(아래 handleDeleteNode). 그래서 까닭을 쥐고 패널로
+   * 내려보내던 state(`nodeDeleteBlockedMessage`)와 패널의 `deleteBlockedMessage`
+   * 프롭·표시 자리를 **걷어냈다** — 값이 영영 null 인 칸을 남겨 두면 「꺼도 아무
+   * 일 없는 스위치」가 된다. 🔵 서버가 거절하면 그 글은 [저장] 때 globalSaveError
+   * 로 뜬다(이 화면이 미리 재는 자리는 이제 하나도 없다).
    */
-  const [nodeDeleteBlockedMessage, setNodeDeleteBlockedMessage] = useState<{ nodeId: string; message: string } | null>(null);
 
   /**
    * 노드 하나를 지운다 — 패널의 [노드 삭제] 단추와 [Delete] 키가 **똑같이** 부르는 한 자리.
    *
-   * 🔴 **연결선이 붙은 노드는 여전히 못 지운다.** 바뀐 것은 **누가 세는가**다.
-   * 전에는 서버가 NODE_HAS_CONNECTED_EDGES 로 거절하며 수를 돌려줬는데, 지금은
-   * 그 거절이 [저장] 때로 밀린다 — 그러면 ① 사람은 지워진 줄 알고 계속 그리다가
-   * ② [저장]에서 그 한 줄 때문에 **저장이 통째로 멈춘다.** 그래서 화면이 **미리**
-   * 센다. 🔵 세는 목록은 `nodes`/`edges`(서버 것)가 아니라 **그림에 그려진 것**
-   * (structuralPreview.edges)이다 — 저장 전에 그은 선도 선이고, 저장 전에 지운
-   * 선은 이미 거기서 빠져 있다. 서버 목록으로 세면 사람이 보는 그림과 다른 수를
-   * 말하게 된다(procedure-editor-node-deletion.ts 머리말이 같은 까닭을 적어 둔다).
-   * 🔵 막는 글은 **한 글자도 안 바꿨다** — 올리기 전 패널이 띄우던 그대로다.
+   * ── 🔴 **붙은 연결선도 함께 지운다** (2026-11-21, 조각 C3) ─────────────────
+   * 쓰는 분의 결정(원문): 「노드를 지우면 연결된 연결선도 지워지는 거로 하자
+   * (연결선을 지우지 않아도 노드를 지울 수 있도록).」 그 전까지 이 함수는 선이
+   * 붙은 노드를 **아예 막았다.** 그때 띄우던 글이 이것이다 —
+   * 「이 노드에 연결된 분기가 N개 있어 삭제할 수 없습니다. 먼저 연결된 분기를 삭제해 주세요.」
+   * 사람이 선을 하나씩 먼저 지우고 나서야 노드를 지울 수 있었다. 절차 편집기가
+   * 같은 날 아침 먼저 이렇게 바뀌었다(커밋 1972ab29).
+   *
+   * 🔴 **중간 노드를 지워도 앞뒤를 새로 잇지 않는다**(쓰는 분 명시 — 「중간에
+   * 연결된 노드를 삭제하면 앞뒤 노드는 연결되지 않은채로 둬줘」). 선 둘이 다
+   * 사라지고 끝이다. 그래서 이 함수에는 CREATE_EDGE 를 쌓는 줄이 **하나도 없고**,
+   * 쌓을 줄을 정하는 순수 함수도 DELETE 만 적어 낸다.
+   *
+   * 🔴 **무엇을 쌓을지는 planProcedureNodeDeletionOperations 가 정한다** — 절차와
+   * 같은 한 벌이다. 화면이 제 손으로 다시 세면 「화면이 말한 수」와 「실제로
+   * 지워지는 수」가 갈리고, 그 어긋남은 [저장]이 끝난 뒤에야 드러난다.
+   *
+   * 🔴 **서버는 한 글자도 안 바꿨다.** deleteRepairCaseFlowchartNode 는 **여전히**
+   * 선이 붙은 노드를 NODE_HAS_CONNECTED_EDGES 로 거절한다
+   * (db/mutations/repair-case-flowchart-graph.ts). 막음을 걷어낼 수 있는 까닭은 그
+   * 규칙이 없어져서가 아니라, 모아 둔 조작을 보내는 차례
+   * (PROCEDURE_STRUCTURAL_PHASE_ORDER)가 **DELETE_EDGE(3단계) → DELETE_NODE(6단계)**
+   * 라 선이 먼저 지워진 뒤에 노드가 가기 때문이다. 🔴 그 차례가 이제 이 기능을
+   * 떠받친다 — 둘의 앞뒤가 뒤집히면 여기서 나가는 **모든** 삭제가 [저장]에서 그
+   * 거절로 멈춘다.
+   *
+   * 🔴 세는 목록이 **renderedEdges**(그림이 실제로 그린 선)인 것이 핵심이다.
+   * `edges`(서버 것)도 `structuralPreview.edges`(조작만 얹은 것)도 아니다 — 이
+   * 편집기는 **연결선 재연결을 구조 조작이 아니라 초안 지도로** 들고 있어서
+   * (RETARGET_EDGE 를 안 쌓는다 — 이 파일 머리말의 2026-11-21 결정), 미리보기 목록은
+   * 저장 전에 옮긴 선의 **옛 양 끝**을 그대로 들고 있다. 그것으로 세면 ① 이 노드에서
+   * **떠난** 선을 지우고 ② 이 노드로 **옮겨 온** 선은 남긴다. 둘 다 사람이 시킨 적
+   * 없는 일이고, 남은 쪽은 [저장]에서 **없어진 노드로 재연결**하려다 실패한다.
+   * 🔵 저장 전에 그은 선(tmp:edge:N)과 이미 지우기로 쌓아 둔 선은 미리보기 쪽에서
+   *    이미 맞춰져 있다 — renderedEdges 가 그 위에 초안을 한 겹 더 얹은 것이다.
+   *
+   * 🔵 **[이전] 한 칸**이다 — queueStructural 이 목록을 고치기 전에 한 칸을 찍고,
+   * 받은 배열을 통째로 붙인다. 선이 셋 붙은 노드를 지워도 [이전] 한 번에 넷이
+   * 함께 돌아온다. 그래서 queueStructural 을 **한 번만** 부른다.
    */
   function handleDeleteNode(nodeId: string) {
     if (!canEdit) return;
-    setNodeDeleteBlockedMessage(null);
-    const attachedEdgeIds = findEdgesAttachedToNode(structuralPreview.edges, nodeId);
-    if (attachedEdgeIds.length > 0) {
-      setNodeDeleteBlockedMessage({ nodeId, message: `이 노드에 연결된 분기가 ${attachedEdgeIds.length}개 있어 삭제할 수 없습니다. 먼저 연결된 분기를 삭제해 주세요.` });
-      return;
-    }
-    queueStructural(() => [{ kind: "DELETE_NODE", nodeId, reason: null }]);
+    const attachedEdgeIds = findEdgesAttachedToNode(renderedEdges, nodeId);
+    queueStructural(() => planProcedureNodeDeletionOperations(renderedEdges, nodeId, null));
     // 🔴 지울 노드의 **저장 전 수정도 함께 버린다**(올리기 전 handleNodeDeleted 가
     //    하던 뒤처리 그대로). 안 버리면 같은 저장에서 지워질 노드에 칸 값을 쓰려
     //    들어 **저장 전체가 실패한다**(구조는 이미 지나간 뒤라 더 나쁘다).
@@ -705,7 +726,20 @@ export default function CaseFlowchartEditorScreen({
     //       **버리기 전에** 한 칸을 찍기 때문이다.
     setPendingNodeDraftsById((prev) => dropKeys(prev, [nodeId]));
     setPendingNodePositionsById((prev) => dropKeys(prev, [nodeId]));
+    // 🔴 **함께 지워지는 선들의 뒤처리도 똑같이 한다** — 바로 아래 handleDeleteEdge
+    //    가 선 하나에 하던 그 둘이다. 빠뜨리면 [저장]이 **없는 선**에 칸 값·경로점을
+    //    쓰려 들어 저장 전체가 실패한다(절차 쪽에서 실제로 겪은 결함이다). 선 하나를
+    //    어떻게 지웠느냐에 따라 뒤처리가 갈리면 안 된다.
+    setPendingEdgeDraftsById((prev) => dropKeys(prev, attachedEdgeIds));
+    setPendingRoutePointsByEdgeId((prev) => dropKeys(prev, attachedEdgeIds));
     setSelectedNodeId(null);
+    // 🔵 함께 지워진 선을 고른 채였다면 **선택도 푼다.** 안 풀어도 연결선 패널은 안
+    //    선다(그려진 선에서만 서고 그 선은 이미 사라졌다). 다만 고른 경로점이 남아
+    //    있으면 [Delete] 가 없는 선의 점을 지우러 간다.
+    if (selectedEdgeId !== null && attachedEdgeIds.includes(selectedEdgeId)) {
+      setSelectedEdgeId(null);
+      setSelectedWaypointIndex(null);
+    }
   }
 
   /** 연결선 하나를 지운다 — 패널의 [분기 삭제] 단추와 [Delete] 키가 **똑같이** 부르는 한 자리. */
@@ -1119,11 +1153,13 @@ export default function CaseFlowchartEditorScreen({
    *     고장 진단표가 걸린 노드)은 진단 노드 행에 그런 칸이 **아예 없어** 셀 수조차
    *     없다. 🔴 「진단에는 막히는 노드가 없다」가 아니라 **「미리 셀 수 있는 것이
    *     없다」**가 맞다.
-   *     🔴 2026-11-21(조각 C2) — 진단에서 실제로 막히는 경우(연결선이 붙은 노드)는
-   *     이제 **화면이 그림을 세어 미리 안다**(handleDeleteNode). 그래도 이 칸은
-   *     여전히 null 이다: 여기서 막으면 키가 **단추보다 더 조용히** 아무 일도 안
-   *     하고, 막힌 까닭이 패널에 안 뜬다. 지금처럼 handleDeleteNode 까지 흘려보내야
-   *     단추로 누를 때와 **글자 하나까지 같은** 결과가 난다.
+   *     🔴 2026-11-21(조각 C3) — 그 뒤로 **진단에는 미리 막는 까닭이 하나도 없다.**
+   *     조각 C2 가 잠깐 하나 세웠었다(연결선이 붙은 노드를 화면이 미리 세어 막았다).
+   *     그것이 같은 날 「붙은 선도 함께 지운다」로 바뀌면서 사라졌으므로, 이 칸은
+   *     **잴 것이 없어서** null 이다 — 「키에서는 안 막는다」는 뜻이 아니다.
+   *     🔴 그러니 막는 까닭이 진단에 다시 생기는 날에는 **이 줄도 함께 고쳐야 한다.**
+   *     여기 null 을 박아 둔 채 handleDeleteNode 에만 막음을 넣으면, 단추로는
+   *     막히는데 키로는 지워지는 화면이 된다(그 반대도 마찬가지다).
    *  ③ `boxSelectActive` / `boxSelectedNodes` — [범위 선택]은 진단에 아직 없다.
    *     false / [] 를 넘기면 복수 갈래는 영영 안 선다.
    *
@@ -1955,8 +1991,6 @@ export default function CaseFlowchartEditorScreen({
                   onDraftChange={(patch) => updateNodeDraft(selectedNode.id, patch)}
                   onPositionDraftChange={(position) => setPendingNodePosition(selectedNode.id, position)}
                   onDelete={() => handleDeleteNode(selectedNode.id)}
-                  // 🔴 「그 노드의 것일 때만」 보여 준다 — 까닭은 nodeDeleteBlockedMessage 선언 옆에 적어 두었다.
-                  deleteBlockedMessage={nodeDeleteBlockedMessage?.nodeId === selectedNode.id ? nodeDeleteBlockedMessage.message : null}
                   resolveNodeDimensions={resolveNodeDimensions}
                 />
               )}

@@ -246,29 +246,52 @@ describe("[진단] [Delete] 로 지우기 — ④🔴 지우는 길은 **단추�
     assert.ok(!keyHandler.includes("Action("), "키가 서버 액션을 직접 부르고 있다");
   });
 
-  test("🔴 뒤처리를 하나도 안 잃었다 ① — 「연결된 분기가 N개」 거절 글이 **글자 그대로** 남아 있다", () => {
-    // 🔴 2026-11-21(조각 C2) — **세는 쪽이 서버에서 화면으로 옮겨 왔다.** 지우기가
-    //    모아 두는 일이 되면서 서버의 거절(NODE_HAS_CONNECTED_EDGES)이 [저장] 때로
-    //    밀렸는데, 그러면 ① 사람은 지워진 줄 알고 계속 그리다가 ② [저장]이 그 한 줄
-    //    때문에 통째로 멈춘다. 그래서 화면이 미리 센다. 🔵 **막는다는 사실도, 띄우는
-    //    글자도 하나도 안 바뀐다** — 그것이 이 단언이 지키는 것이다(C3 전까지 연결선이
-    //    붙은 노드는 여전히 못 지운다).
-    assert.ok(deleteNodeFn.includes("const attachedEdgeIds = findEdgesAttachedToNode(structuralPreview.edges, nodeId);"), "붙은 선을 세는 줄");
-    assert.ok(deleteNodeFn.includes("if (attachedEdgeIds.length > 0) {"), "하나라도 붙어 있으면 막는 줄");
+  test("🔴 뒤처리를 하나도 안 잃었다 ① — 막던 길이 **통째로 사라졌다**(C3: 붙은 선도 함께 지운다)", () => {
+    // 🔴 2026-11-21(조각 C2) 에 **세는 쪽이 서버에서 화면으로 옮겨 왔고**, 같은 날
+    //    조각 C3 에서 **막음 자체가 없어졌다.** 쓰는 분의 결정(원문): 「노드를 지우면
+    //    연결된 연결선도 지워지는 거로 하자(연결선을 지우지 않아도 노드를 지울 수
+    //    있도록).」 그래서 이 절은 뒤집혔다 — 지우지 **않고 돌아가는** 길이 하나도
+    //    없는가를 잰다. 🔵 지우려는 **뜻**은 그대로다: 선이 붙은 채로 [저장]에 가면
+    //    서버가 NODE_HAS_CONNECTED_EDGES 로 거절해 저장이 통째로 멈춘다. 화면이
+    //    「막는다」에서 「함께 지운다」로 답을 바꿨을 뿐이다.
+    assert.ok(!deleteNodeFn.includes("if (attachedEdgeIds.length > 0) {"), "붙은 선이 있으면 돌아가는 관문이 아직 있다");
+    assert.ok(!screen.includes("삭제할 수 없습니다"), "화면이 아직 못 지운다고 말한다");
+    assert.ok(!screen.includes("먼저 연결된 분기를 삭제해 주세요"), "사람이 선을 먼저 지우라고 아직 말하고 있다");
+    // 🔴 **돌아가는 길은 권한 울타리 하나뿐**이다. 수로 재야 「다른 까닭으로 조용히
+    //    안 지워지는」 가지가 새로 생겼을 때 걸린다 — 그 가지는 오류를 안 낸다.
+    assert.equal(countOf(deleteNodeFn, "return;"), 1, "노드 삭제에 돌아가는 길이 늘었다 — 권한 울타리 말고는 없어야 한다");
+    assert.ok(deleteNodeFn.includes("if (!canEdit) return;"), "그 하나가 권한 울타리라는 근거");
+    // 🔴 그런데 **없어진 글은 주석에 경위로 남아 있어야 한다** — 걷어내기가 실제로
+    //    일한다는 증거이자, 왜 막음이 없어졌는지를 다음 사람이 읽을 자리다.
     assert.ok(
-      deleteNodeFn.includes("이 노드에 연결된 분기가 ${attachedEdgeIds.length}개 있어 삭제할 수 없습니다. 먼저 연결된 분기를 삭제해 주세요."),
-      "막힌 까닭의 글자가 바뀌었다 — 이번 조각은 이 **글**을 한 글자도 안 바꾼다"
+      screenRaw.includes("이 노드에 연결된 분기가 N개 있어 삭제할 수 없습니다. 먼저 연결된 분기를 삭제해 주세요."),
+      "뒤집기 전 문구가 주석에 경위로 남아 있어야 한다(주석 걷어내기가 일한다는 증거이기도 하다)"
     );
-    // 🔴 막은 뒤에 **쌓지 않고 돌아간다**는 근거. 돌아가지 않으면 못 지운다고 말해
-    //    놓고 목록에는 지우기가 들어가, [저장]에서 서버가 거절해 저장이 통째로 멈춘다.
-    const blockedAt = deleteNodeFn.indexOf("if (attachedEdgeIds.length > 0) {");
-    const queueAt = deleteNodeFn.indexOf("queueStructural(");
-    assert.ok(blockedAt !== -1 && queueAt !== -1 && blockedAt < queueAt, "막는 관문이 쌓기보다 뒤에 있다");
-    assert.ok(deleteNodeFn.slice(blockedAt, queueAt).includes("return;"), "막은 뒤에 돌아가지 않는다");
-    // 🔴 세는 목록이 **그림에 그려진 것**이라는 근거. `nodes`/`edges`(서버 목록)로 세면
-    //    저장 전에 그은 선을 빠뜨리고, 저장 전에 지운 선을 두 번 센다.
+    // 🔴 세는 목록이 **그림에 그려진 선**(renderedEdges)이라는 근거. 서버 목록
+    //    (`edges`)은 저장 전에 그은 선을 못 보고, 미리보기 목록
+    //    (`structuralPreview.edges`)은 **저장 전에 옮긴 선의 옛 양 끝**을 들고 있다
+    //    — 이 편집기는 재연결을 구조 조작이 아니라 초안 지도로 들고 있기 때문이다.
+    //    그것으로 세면 떠난 선을 지우고 옮겨 온 선을 남긴다(둘 다 안 시킨 일이다).
+    assert.ok(deleteNodeFn.includes("const attachedEdgeIds = findEdgesAttachedToNode(renderedEdges, nodeId);"), "붙은 선을 세는 줄");
     assert.ok(!deleteNodeFn.includes("findEdgesAttachedToNode(edges,"), "서버 목록으로 세고 있다");
-    assert.ok(nodePanel.includes("{deleteBlockedMessage && <p"), "그 글이 삭제 단추 위에 그대로 뜬다");
+    assert.ok(!deleteNodeFn.includes("findEdgesAttachedToNode(structuralPreview.edges,"), "초안을 안 얹은 목록으로 세고 있다");
+    assert.ok(!deleteNodeFn.includes("planProcedureNodeDeletionOperations(structuralPreview.edges,"), "초안을 안 얹은 목록으로 쌓고 있다");
+    assert.ok(!deleteNodeFn.includes("planProcedureNodeDeletionOperations(edges,"), "서버 목록으로 쌓고 있다");
+  });
+
+  test("🔴 뒤처리를 하나도 안 잃었다 ①-2 — 막음을 띄우던 **죽은 칸을 걷어냈다**", () => {
+    // 🔴 막는 까닭이 하나뿐이었으므로, 그것이 없어진 순간 까닭을 쥐고 내려보내던
+    //    칸도 값이 영영 null 이 된다 — 남기면 「꺼도 아무 일 없는 스위치」가 된다.
+    //    🔵 서버 쪽 관문(NODE_HAS_CONNECTED_EDGES)은 **그대로 있다.** 화면이 선을
+    //       먼저 보내서 안 걸릴 뿐이고, 그것을 재는 자리는 이웃
+    //       case-flowchart-node-delete-cascade-ui.test.ts 다.
+    assert.ok(!screen.includes("nodeDeleteBlockedMessage"), "화면에 막힌 까닭을 쥐는 칸이 남아 있다");
+    assert.ok(!screen.includes("setNodeDeleteBlockedMessage"), "화면에 막힌 까닭을 띄우는 줄이 남아 있다");
+    assert.ok(!screen.includes("deleteBlockedMessage={"), "패널로 내려보내는 프롭이 남아 있다");
+    assert.ok(!nodePanel.includes("deleteBlockedMessage"), "노드 패널에 죽은 프롭이 남아 있다");
+    // 🔵 걷어낸 것이 **삭제 칸 전체가 아니라는** 근거 — 단추와 상자는 그대로 산다.
+    assert.ok(nodePanel.includes("> 노드 삭제 </button>"), "삭제 단추까지 걷어냈다");
+    assert.ok(nodePanel.includes("노드 삭제</h4>"), "삭제 상자까지 걷어냈다");
   });
 
   test("🔴 뒤처리를 하나도 안 잃었다 ② — 「삭제 중...」·실패 사유는 **일어날 수 없게 되어** 없앴다", () => {
@@ -301,11 +324,14 @@ describe("[진단] [Delete] 로 지우기 — ④🔴 지우는 길은 **단추�
     assert.ok(push !== -1, "되돌리기 한 칸을 찍는 줄이 사라졌다 — [이전]으로 되살릴 수 없게 된다");
     assert.ok(append !== -1 && push < append, "되돌리기 한 칸이 목록을 고친 **뒤**에 찍힌다");
 
-    for (const [name, body, kind, selection] of [
-      ["노드", deleteNodeFn, '{ kind: "DELETE_NODE", nodeId, reason: null }', "setSelectedNodeId(null);"],
-      ["연결선", deleteEdgeFn, '{ kind: "DELETE_EDGE", edgeId, reason: null }', "setSelectedEdgeId(null);"],
+    // 🔴 2026-11-21(조각 C3) — 노드 쪽이 쌓는 줄이 **한 줄에서 N+1 줄**이 됐다(붙은
+    //    선의 DELETE_EDGE 들 + 노드의 DELETE_NODE). 그래도 **통로는 한 번**이다 —
+    //    그것이 「[이전] 한 번에 노드와 선이 함께 돌아온다」의 근거다.
+    for (const [name, body, queued, selection] of [
+      ["노드", deleteNodeFn, "queueStructural(() => planProcedureNodeDeletionOperations(renderedEdges, nodeId, null));", "setSelectedNodeId(null);"],
+      ["연결선", deleteEdgeFn, 'queueStructural(() => [{ kind: "DELETE_EDGE", edgeId, reason: null }]);', "setSelectedEdgeId(null);"],
     ] as const) {
-      assert.ok(body.includes(`queueStructural(() => [${kind}]);`), `${name} 삭제가 쌓는 줄이 바뀌었다`);
+      assert.ok(body.includes(queued), `${name} 삭제가 쌓는 줄이 바뀌었다`);
       assert.ok(body.includes(selection), `${name} 삭제 뒤 선택을 푸는 줄이 사라졌다`);
       // 🔴 **한 번만** 지난다 — 두 번 지나면 [이전]을 두 번 눌러야 한 걸음이 되돌아간다.
       assert.equal(countOf(body, "queueStructural("), 1, `${name} 삭제 한 번에 통로를 여러 번 지난다`);
@@ -317,6 +343,15 @@ describe("[진단] [Delete] 로 지우기 — ④🔴 지우는 길은 **단추�
     assert.ok(deleteEdgeFn.includes("setPendingEdgeDraftsById((prev) => dropKeys(prev, [edgeId]));"));
     assert.ok(deleteEdgeFn.includes("setPendingRoutePointsByEdgeId((prev) => dropKeys(prev, [edgeId]));"));
     assert.ok(deleteEdgeFn.includes("setSelectedWaypointIndex(null);"), "연결선이 사라지면 그 위의 경로점 선택도 풀려야 한다");
+    // 🔴 조각 C3 — **함께 지워지는 선들의 뒤처리도 노드 쪽에 똑같이 있어야 한다.**
+    //    선 하나를 어떻게 지웠느냐(단추로 직접 vs 노드에 딸려서)에 따라 뒤처리가
+    //    갈리면, 딸려 지워진 선의 초안이 남아 [저장]이 없는 선을 고치려 든다.
+    assert.ok(deleteNodeFn.includes("setPendingEdgeDraftsById((prev) => dropKeys(prev, attachedEdgeIds));"), "딸려 지워진 선의 칸 초안을 안 버린다");
+    assert.ok(deleteNodeFn.includes("setPendingRoutePointsByEdgeId((prev) => dropKeys(prev, attachedEdgeIds));"), "딸려 지워진 선의 경로점을 안 버린다");
+    assert.ok(
+      deleteNodeFn.includes("if (selectedEdgeId !== null && attachedEdgeIds.includes(selectedEdgeId)) { setSelectedEdgeId(null); setSelectedWaypointIndex(null); }"),
+      "딸려 지워진 선을 고른 채였을 때 선택·경로점을 안 푼다 — [Delete] 가 없는 선의 점을 지우러 간다"
+    );
   });
 
   test("🔴 되돌리기 서명에 **구조 목록이 섞여 있다** — 안 섞으면 삭제 한 칸이 조용히 사라진다", () => {
@@ -442,12 +477,18 @@ describe("[진단] [Delete] 로 지우기 — ⑦🔴 절차에 있고 **진단�
     // 🔴 절차 쪽의 셈 함수를 끌어다 쓰지 않았다는 근거. 진단 노드에는 체크리스트·
     //    고장 진단표 칸이 없어 그 함수는 컴파일도 안 된다.
     assert.ok(!screen.includes("resolveProcedureNodeDeleteBlockedReason"), "진단 화면이 절차의 셈 함수를 부르고 있다");
-    // 🔴 2026-11-21(조각 C2) — 진단에서 막히는 경우(연결선이 붙은 노드)는 이제
-    //    **화면이 미리 안다.** 그래도 이 칸이 null 인 까닭은 「셀 수 없어서」가 아니라
-    //    **「키가 미리 막으면 패널에 까닭이 안 뜨어서」**다 — 키도 handleDeleteNode
-    //    까지 흘려보내야 단추로 누를 때와 글자 하나까지 같은 결과가 난다.
+    // 🔴 2026-11-21(조각 C2)에 잠깐 「연결선이 붙은 노드」라는 막음이 화면에 섰다가,
+    //    같은 날 조각 C3 에서 **없어졌다**(붙은 선도 함께 지운다). 그래서 이 칸이
+    //    null 인 까닭은 다시 처음 그대로다 — **진단에는 미리 막는 까닭이 하나도 없다.**
+    //    🔴 C2 때 적힌 「키가 미리 막으면 패널에 까닭이 안 뜨니까」는 **폐기됐다.**
+    //       띄울 까닭도, 패널에 그 자리도 더는 없다.
     assert.ok(!keyHandler.includes("findEdgesAttachedToNode"), "키가 붙은 선을 제 손으로 다시 세고 있다 — 판정이 두 벌이 된다");
-    assert.ok(deleteNodeFn.includes("setNodeDeleteBlockedMessage({ nodeId,"), "막힌 까닭을 띄우는 쪽이 handleDeleteNode 여야 한다");
+    assert.ok(!deleteNodeFn.includes("setNodeDeleteBlockedMessage"), "막음을 띄우는 줄이 아직 handleDeleteNode 에 있다");
+    // 🔴 **단추와 키가 같은 답을 낸다**는 것이 이 절의 뜻이다. 화면 어디에도 노드
+    //    삭제를 미리 막는 판정이 없고(위 ①-2), 키도 null 을 넘긴다 — 둘이 맞아야
+    //    「단추로는 지워지는데 키로는 안 된다」(또는 그 반대)가 안 생긴다.
+    assert.ok(!screen.includes("BlockedMessage"), "막힌 까닭을 쥐는 칸이 화면에 다시 생겼다");
+    assert.equal(countOf(f, "nodeDeleteBlockedReason"), 1, "화면에서 그 낱말이 나오는 자리는 키에 null 을 넘기는 한 줄뿐이어야 한다");
   });
 
   test("🔴 [범위 선택]은 진단에 아직 없다 — false / [] 를 넘겨 그 가지를 안 세운다", () => {

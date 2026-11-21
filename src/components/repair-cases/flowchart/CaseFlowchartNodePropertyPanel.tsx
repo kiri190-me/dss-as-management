@@ -43,8 +43,14 @@ const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;
  * `isDeleting`(「삭제 중...」)과 `deleteErrorMessage`(삭제가 그 자리에서 실패한
  * 까닭) 둘을 **없앴다** — 기다릴 서버도, 그 자리에서 날 실패도 없어서 값이 늘
  * false/null 인 칸이 되기 때문이다. 서버가 거절하면 그 글은 [저장] 때 화면 위쪽
- * 저장 실패 줄에 뜬다. 🔵 `deleteBlockedMessage` 는 **그대로 산다** — 그것은
- * 서버가 아니라 화면이 그림의 연결선을 세어 지금 답하는 값이다.
+ * 저장 실패 줄에 뜬다.
+ *
+ * 🔴 같은 날(조각 C3) **`deleteBlockedMessage` 도 같은 까닭으로 없앴다.** 그 칸에
+ * 들어오던 글은 「이 노드에 연결된 분기가 N개 있어 삭제할 수 없습니다」 하나뿐이었고,
+ * 쓰는 분 결정으로 **노드를 지우면 붙은 연결선도 함께 지워지게** 되면서 화면이 미리
+ * 막는 일 자체가 사라졌다. 값이 영영 null 인 칸을 남기면 「꺼도 아무 일 없는
+ * 스위치」가 된다. 🔵 그러므로 이 패널에는 이제 **삭제를 막는 길이 하나도 없다** —
+ * 단추는 `canEdit` 일 때 늘 눌리고, 거절은 [저장] 때 한 자리에서만 나온다.
  *
  * "상대 위치로 이동" (5C-6D follow-up #3, dimension source corrected in
  * follow-up #4): LEFT/RIGHT align by vertical CENTER
@@ -84,7 +90,6 @@ export default function CaseFlowchartNodePropertyPanel({
   onDraftChange,
   onPositionDraftChange,
   onDelete,
-  deleteBlockedMessage,
   resolveNodeDimensions,
 }: {
   /** The screen's currently RENDERED node (server baseline merged with any pending draft/position) — never the raw server value alone. */
@@ -102,10 +107,8 @@ export default function CaseFlowchartNodePropertyPanel({
   onDraftChange: (patch: Partial<CaseFlowchartNodeDraft>) => void;
   /** Sets (or replaces) this node's pending position — same deferred model as drag, just triggered by a button instead of a pointer gesture. */
   onPositionDraftChange: (position: { x: number; y: number }) => void;
-  /** 🔴 [노드 삭제] 를 누른 것뿐 — 실제로 지우는 것도 그 뒤처리도 화면(handleDeleteNode)이 한다. [Delete] 키가 부르는 함수와 **같은 하나**다. */
+  /** 🔴 [노드 삭제] 를 누른 것뿐 — 실제로 지우는 것도 그 뒤처리도(붙은 연결선까지 함께 지우는 일도) 화면(handleDeleteNode)이 한다. [Delete] 키가 부르는 함수와 **같은 하나**다. */
   onDelete: () => void;
-  /** 「연결된 분기가 있어 못 지운다」는 글(없으면 null). 삭제 단추 **바로 위**에 뜬다 — 올리기 전과 같은 자리다. 🔵 2026-11-21(조각 C2)부터 이 수를 세는 쪽은 서버가 아니라 **화면**이다(그림에 그려진 선을 센다 — handleDeleteNode). */
-  deleteBlockedMessage: string | null;
   /** The screen's single, already-composed effective-dimension resolver (measured-first, estimate-fallback) — see this file's own DIMENSION SOURCE doc comment above for why this must be the SAME function instance/rule the screen's own double-click-straighten handler uses, not a locally re-derived copy. */
   resolveNodeDimensions: (n: CaseFlowchartGraphNode) => { width: number; height: number };
 }) {
@@ -268,7 +271,6 @@ export default function CaseFlowchartNodePropertyPanel({
       {canEdit && (
         <div className="flex flex-col gap-2 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950">
           <h4 className="text-xs font-semibold text-red-900 dark:text-red-300">노드 삭제</h4>
-          {deleteBlockedMessage && <p className="text-red-700 dark:text-red-400">{deleteBlockedMessage}</p>}
           <button
             type="button"
             onClick={onDelete}

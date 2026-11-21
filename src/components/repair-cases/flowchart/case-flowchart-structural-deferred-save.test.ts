@@ -515,9 +515,17 @@ describe("[진단] 구조 변경 모아 두기 — ⑦🔴 **옮기지 않기로
     assert.ok(structural.includes('case "CHANGE_NODE_TYPE": case "RETARGET_EDGE": return { ok: false,'));
   });
 
-  test("🔴 「붙은 선도 함께 지우기」·[범위 선택]은 **이번에 안 만들었다**(C3 이후의 일)", () => {
-    assert.ok(!screen.includes("planProcedureNodeDeletionOperations"), "노드 삭제가 붙은 선까지 쌓고 있다 — 이번 조각의 일이 아니다");
+  test("🔴 「붙은 선도 함께 지우기」는 **C3 에서 왔다** · [범위 선택]은 아직이다", () => {
+    // 🔴 2026-11-21 — 조각 C2 에서는 「이번 조각의 일이 아니다」로 **없음**을 재던
+    //    자리다. 같은 날 조각 C3 에서 쓰는 분 결정으로 실제로 들어왔으므로 단언을
+    //    **반대 방향으로** 고쳐 적었다(지우면 「들어왔다 다시 빠져도」 아무도 모른다).
+    //    🔵 무엇을 쌓고 무엇을 치우는지는 이웃
+    //       case-flowchart-node-delete-cascade-ui.test.ts 가 항목별로 잰다.
+    assert.ok(screen.includes("planProcedureNodeDeletionOperations"), "노드 삭제가 붙은 선을 안 쌓는다 — C3 에서 들어온 것이다");
+    // 🔴 **복수 쪽은 여전히 없다.** 단수(…ToNode)와 복수(…ToNodes)는 글자가 한 자
+    //    차이라, 복수가 몰래 들어와도 위 단언은 멀쩡히 통과한다.
     assert.ok(!screen.includes("findEdgesAttachedToNodes"), "복수 삭제용 셈 함수가 들어왔다");
+    assert.ok(!screen.includes("planProcedureNodesDeletionOperations"), "복수 삭제용 쌓기 함수가 들어왔다");
     assert.ok(!screen.includes("boxSelectedNodeIds"), "[범위 선택]의 상태가 들어왔다");
     // 🔵 판정에 넘기는 값은 **늘 꺼져 있다**는 근거 — 「boxSelect 글자가 아예 없다」로는
     //    못 센다(키 판정이 그 칸을 받으므로 글자 자체는 화면에 있어야 맞다).
