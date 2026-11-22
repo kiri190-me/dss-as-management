@@ -160,10 +160,22 @@ describe("🔴 ② 도구 단추 — 저쪽 부품을 그대로 쓴다", () => {
   test("🔴 단추는 **끌 수 있는 그림에만** 선다 — 읽기 전용에서 화면 옮기기를 뺏으면 안 된다", () => {
     assert.ok(graph.includes("const canUseBoxSelect = editable;"), "관문이 끌기 관문과 같은 값이어야 한다");
     assert.ok(graph.includes("nodesDraggable={editable}"), "끌기 관문 쪽이 바뀌었다 — 둘이 갈리면 「고를 수는 있는데 못 끄는」 그림이 생긴다");
+    // 🔴 2026-11-22(조각 D2) — 이 단언이 **덩이 전체**에서 **덩이의 머리**로 짧아졌다.
+    //    그 뒤에 [연결 정렬] 단추가 들어왔기 때문이다. 🔴 짧아지기만 하면 관문이
+    //    텅 비어도 통과하므로, 아래에서 **관문이 품은 것을 수로** 함께 센다.
     assert.ok(
-      flat(graph).includes("{canUseBoxSelect && ( <div className=\"flex flex-wrap items-center gap-3 px-2 pt-2 text-xs\"> <ProcedureCanvasToolPicker tool={canvasTool} onToolChange={changeCanvasTool} selectedCount={boxSelectedNodeIds.size} /> </div> )}"),
+      flat(graph).includes("{canUseBoxSelect && ( <div className=\"flex flex-wrap items-center gap-3 px-2 pt-2 text-xs\"> <ProcedureCanvasToolPicker tool={canvasTool} onToolChange={changeCanvasTool} selectedCount={boxSelectedNodeIds.size} />"),
       "단추를 그 관문 안에 안 두었다"
     );
+    const flatGraph = flat(graph);
+    const toolRow = flatGraph.slice(flatGraph.indexOf("{canUseBoxSelect && ("), flatGraph.indexOf("<GraphCanvas"));
+    assert.ok(toolRow.length > 200 && toolRow.length < 2500, `도구 줄 덩이를 못 집었다(길이 ${toolRow.length})`);
+    assert.equal(countOf(toolRow, "<ProcedureCanvasToolPicker"), 1, "도구 단추 부품이 관문 안에서 사라졌거나 둘이 됐다");
+    // 🔵 그 관문 안으로 **2026-11-22(D2)에 단추 하나가 더 들어왔다.** 여기서는
+    //    「있는가」만 센다 — 조건·흐림·title·출처는 그 조각의 시험이 못 박는다
+    //    (case-flowchart-straighten-selected-edges-ui.test.ts).
+    assert.ok(toolRow.includes("연결 정렬"), "[연결 정렬] 단추가 도구 줄에서 사라졌다");
+    assert.equal(countOf(toolRow, "<button"), 1, "도구 줄에 단추가 둘이 됐거나 사라졌다 — 늘었다면 이 수를 올려 적을 것");
   });
 
   test("모드는 둘뿐이고 처음은 [선택·이동] 이다 — 배치 모드와 같은 통제형 패턴", () => {
@@ -233,10 +245,18 @@ describe("🔴 ③ 모드를 바꾸면 비운다", () => {
     //    하나**가 더 생겼다(고른 칸을 renderedNodes 에서 추리는 줄). 지우지 않고
     //    **수를 올려 적는** 까닭은 그대로다 — 수로 안 재면 넷째·다섯째가 몰래 생겨도
     //    위 단언이 멀쩡히 통과한다.
-    assert.equal(countOf(flat(screen), "boxSelectedNodeIds"), 4, "편집기에서 고른 집합을 쓰는 자리가 늘었다");
+    // 🔴 2026-11-22(조각 D2) — 수가 **넷에서 다섯**이 됐다. 늘어난 하나는 [연결 정렬]이
+    //    「무엇을 어떤 차례로 펼지」를 **공용 순수 함수에 묻는 줄**이다. 여기서도
+    //    여전히 **읽기만** 한다 — 갈아 끼우는 쪽(setBoxSelectedNodeIds)은 아래에서
+    //    따로 세고, 그 수는 안 바뀌었다.
+    assert.equal(countOf(flat(screen), "boxSelectedNodeIds"), 5, "편집기에서 고른 집합을 쓰는 자리가 늘었다");
     assert.ok(
       flat(screen).includes("renderedNodes .filter((n) => boxSelectedNodeIds.has(n.id))"),
       "그 넷째 자리가 **그려진 목록에서 추리는 줄**이 아니다 — 집합을 돌며 찾으면 사라진 id 에 삭제가 쌓인다"
+    );
+    assert.ok(
+      flat(screen).includes("planStraightenEdgeOrder(renderedEdges, boxSelectedNodeIds)"),
+      "그 다섯째 자리가 **[연결 정렬]의 계획을 세는 줄**이 아니다 — 늘어난 자리가 무엇인지 모른 채 수만 올리면 이 단언이 뜻을 잃는다"
     );
     // 🔴 갈아 끼우는 쪽도 **둘에서 셋**이다. 늘어난 하나는 「비우기」가 아니라
     //    **「지운 칸만 빼기」**다 — 그 둘은 뜻이 다르고, 비우기는 여전히 그림 안의

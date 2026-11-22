@@ -293,11 +293,21 @@ describe("[연결 정렬] 복수 — ⑥🔴 「무엇을 어떤 차례로」는
     }
   });
 
-  test("🔵 진단 Flowchart 는 **아직** 이 손잡이를 안 받는다 — 다음 조각이 붙인다", () => {
-    // 🔵 붙이는 날 이 단언을 **지우지 말고 뒤집어라**: 「저쪽도 같은 순수 함수를
-    //    쓰는가」로. 두 편집기가 서로 다른 셈을 갖게 되는 것이 이 조각이 막으려는
-    //    바로 그것이다.
-    assert.ok(!caseScreen.includes("planStraightenEdgeOrder"), "이번 조각의 범위를 넘어 진단 Flowchart 가 바뀌었다");
+  test("🔴 진단 Flowchart 도 **같은 순수 함수**를 쓴다 — 두 편집기의 답이 안 갈린다", () => {
+    // 🔴 2026-11-22(조각 D2) — 이 단언이 **뒤집혔다.** D1 때는 「진단 Flowchart 는
+    //    아직 이 손잡이를 안 받는다」(= `!includes`)였고, 바로 그 자리에 「붙이는 날
+    //    지우지 말고 뒤집어라」고 적어 두었다. 지우면 저쪽이 **제 손으로 베껴 적는
+    //    날**이 와도 아무도 모른다 — 두 편집기가 서로 다른 셈을 갖게 되는 것이 이
+    //    조각이 막으려는 바로 그것이다.
+    assert.ok(caseScreen.includes("planStraightenEdgeOrder(renderedEdges, boxSelectedNodeIds)"), "진단 Flowchart 가 같은 순수 함수를 안 쓴다");
+    // 🔴 「쓴다」만 재면 **베낀 한 벌을 옆에 또 두어도** 통과한다. 그래서 저쪽이
+    //    그 함수를 **공용 자리에서 들여온다**는 것까지 같은 줄에서 센다.
+    assert.ok(
+      read(PATHS.caseScreen).includes('import { planStraightenEdgeOrder } from "@/lib/graph-editor-core/straighten-selection";'),
+      "진단 Flowchart 가 공용 자리가 아닌 데서 그 함수를 들여온다"
+    );
+    // 🔵 저쪽 화면의 이음새(출처·[이전] 한 칸·앞의 결과를 보고 재기)는 그 집의
+    //    시험이 따로 못 박는다 — case-flowchart-straighten-selected-edges-ui.test.ts.
   });
 });
 

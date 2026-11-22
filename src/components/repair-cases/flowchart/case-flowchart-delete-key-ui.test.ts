@@ -517,10 +517,20 @@ describe("[진단] [Delete] 로 지우기 — ⑦🔴 절차에 있고 **진단�
       flat(screen).includes("boxSelectedNodeIds={boxSelectedNodeIds} onBoxSelectionChange={setBoxSelectedNodeIds}"),
       "고른 집합을 그림에 안 넘긴다 — 그림이 제 안의 값으로 돌면 화면이 그것을 못 읽는다"
     );
-    // 🔴 **그 낱말이 화면에 나오는 자리는 넷**이다(상태 선언 · 그림에 넘기는 둘 ·
-    //    고른 칸을 추리는 한 줄). 수로 재지 않으면 다섯째가 몰래 꽂혀도 위 단언들은
-    //    멀쩡히 통과한다.
-    assert.equal(countOf(f, "boxSelectedNodeIds"), 4, "고른 집합을 쓰는 자리가 늘었다 — 어디로 샜는지 보라");
+    // 🔴 **그 낱말이 화면에 나오는 자리는 다섯**이다(상태 선언 · 그림에 넘기는 둘 ·
+    //    고른 칸을 추리는 한 줄 · [연결 정렬]이 펼 선을 세는 한 줄). 수로 재지 않으면
+    //    여섯째가 몰래 꽂혀도 위 단언들은 멀쩡히 통과한다.
+    // 🔴 2026-11-22(조각 D2) — **넷에서 다섯**이 됐다. 늘어난 하나는 [Delete] 와
+    //    아무 상관이 없다(고른 칸들 **사이의 연결선**을 한 번에 곧게 펴는 기능이다 —
+    //    case-flowchart-straighten-selected-edges-ui.test.ts). 지우지 않고 **수를
+    //    올려 적는** 까닭은 위와 같다. 🔵 늘어난 자리가 **읽기**라는 것도 함께
+    //    못 박는다 — 갈아 끼우는 쪽(setBoxSelectedNodeIds)이 늘면 「언제 비워지는가」가
+    //    화면에도 적히기 시작한 것이고, 그것은 다른 이야기다.
+    assert.equal(countOf(f, "boxSelectedNodeIds"), 5, "고른 집합을 쓰는 자리가 늘었다 — 어디로 샜는지 보라");
+    assert.ok(
+      f.includes("planStraightenEdgeOrder(renderedEdges, boxSelectedNodeIds)"),
+      "그 다섯째 자리가 **[연결 정렬]이 펼 선을 세는 줄**이 아니다 — 무엇이 늘었는지 모른 채 수만 올리면 이 단언이 뜻을 잃는다"
+    );
     // 🔴🔴 **막는 까닭은 칸마다 null 이다** — 진단 노드 행에는 절차가 보는 칸
     //      (체크리스트·고장 진단표)이 아예 없어 셀 수조차 없다. 글자로 못 박아 두지
     //      않으면 어느 날 「임시로」 다른 값이 들어가고, 그러면 단추와 키가 다른 답을

@@ -109,6 +109,13 @@ import {
 //    모듈이다(toggleNodeInSelection · findNodeIdsInSelectionBox 와 한집). 집합을
 //    다루는 셈이 화면마다 따로 적히면 「언제 어떻게 줄어드는가」가 두 벌이 된다.
 import { removeNodesFromSelection } from "@/lib/graph-editor-core/box-selection";
+// 🔵 고른 칸들 **사이의** 선을 「무엇을, 어떤 차례로」 펼지 정하는 순수 함수 —
+//    「기술 작업 절차」 편집기가 2026-11-22(조각 D1)에 쓰기 시작한 그 파일 그대로다.
+//    🔴 베끼지 않는 까닭: 차례가 **결과를 바꾸는** 셈이라, 두 편집기가 제 나름으로
+//    적으면 「같은 노드를 골랐는데 두 화면이 서로 다르게 편다」가 되고 **오류는 한
+//    번도 안 난다.** 그 파일은 import 가 하나도 없고 {id, fromNodeId, toNodeId} 라는
+//    최소 모양만 받아 도메인을 한 글자도 안 물고 온다.
+import { planStraightenEdgeOrder } from "@/lib/graph-editor-core/straighten-selection";
 // [Delete] 키가 **무엇을 가리키는가**를 정하는 순수 판정 — 「기술 작업 절차」
 // 편집기가 쓰는 그 파일 그대로다. 이름이 `procedure-` 로 시작해도 베끼지 않는
 // 까닭은 아래 keydown 자리의 주석에 적어 두었다.
@@ -1253,6 +1260,120 @@ export default function CaseFlowchartEditorScreen({
   const selectedEdge = renderedEdges.find((e) => e.id === selectedEdgeId) ?? null;
 
   /**
+   * 🔴 **고른 칸들 사이의 선을 펼 차례** — 단추를 누르기 전에 미리 센다
+   * (2026-11-22, 조각 D2).
+   *
+   * 🔴 **하나로 둔 것이 핵심이다.** 아래 손잡이가 실제로 펴는 목록과, 그림이 단추를
+   * 흐리게 할지 정할 때 세는 수가 **같은 배열**이어야 한다. 둘로 나누면 「단추는
+   * 살아 있는데 눌러도 아무 일이 없는」(또는 그 반대의) 화면이 생기고, 그 어긋남은
+   * 오류가 안 나서 눌러 봐야만 드러난다.
+   *
+   * 🔵 **[범위 선택] 모드인지는 여기서 안 본다.** 모드 관문은 단추를 세우는 그림
+   * 쪽에 있고(boxSelectActive && 고른 칸 ≥ 2), 모드를 벗어나면 그림이 고른 집합을
+   * 비우므로 이 목록도 저절로 빈다.
+   *
+   * 🔵 이 화면은 절차 편집기와 달리 useMemo 를 한 번도 안 쓴다(렌더마다 다시 세는
+   * 선언들이다 — renderedNodes·renderedEdges 가 바로 위에서 그렇다). 여기만 메모를
+   * 달면 이 파일에 두 가지 규약이 생기므로 **이웃을 따른다.**
+   */
+  const boxSelectionStraightenPlan = planStraightenEdgeOrder(renderedEdges, boxSelectedNodeIds);
+
+  /**
+   * ==========================================================================
+   * 🔴 [연결 정렬] — **고른 칸들 사이의 연결선을 한 번에 곧게** (2026-11-22, 조각 D2)
+   * ==========================================================================
+   * 쓰는 분 요청(2026-11-21): 「[범위 선택]으로 여러 노드를 선택한 상태에서 연결선
+   * 정렬을 할 수 있도록 하자.」 뜻은 2026-11-22 에 **「고른 것끼리의 선을 곧게」**로
+   * 정해졌다 — `A→B` 와 `B→C` 를 둘 다 고르면 둘 다 펴져 한 줄이 되고, `A→D` 처럼
+   * **한쪽만 고른 선은 그대로 둔다**(움직이는 것은 고른 노드뿐이다). 「기술 작업
+   * 절차」 편집기가 같은 날 먼저 갔다(조각 D1, 커밋 9d84a8a8).
+   *
+   * 🔴 **위 handleEdgeDoubleClick(단수)과 출처가 글자 그대로 같다** — 선은
+   * `renderedEdges`, 노드는 `renderedNodes`, 자리는 **그 노드 행의
+   * `positionX`/`positionY`**, 크기는 `resolveNodeDimensions`(잰 값 우선). 🔴 이
+   * 그림에는 절차 쪽 같은 자동 배치가 없어 「그려진 자리」가 곧 그 두 칸이고
+   * (renderedNodes 가 저장 대기 자리를 이미 얹어 둔다 — mergeNodeForRender), 그림
+   * 쪽 `renderedPosition` 도 같은 두 칸을 읽는다. 절차에서는 2026-11-05 에 곧게
+   * 펴기가 **다른 지도**를 읽다가 노드를 화면 밖으로 보낸 적이 있다. 하나라도
+   * 갈리면 「단추로 한 번씩 누른 것」과 이 단추의 결과가 달라진다.
+   *
+   * 🔴 **앞의 결과를 보고 다음을 잰다.** 선마다 **그 순간의** 시작·도착 자리를
+   * 읽어야 사슬이 한 줄이 된다 — `movedPositions` 가 이번 고리 안에서 옮겨 놓은
+   * 자리를 들고 있고, 자리를 읽을 때 **그것을 먼저** 본다. 전부를 처음 자리 기준으로
+   * 한꺼번에 계산하면 C 가 **옛 자리의 B** 에 맞은 뒤 B 가 움직여, 눈으로 보면
+   * 가운데가 꺾인 채 남는다(straighten-selection.test.ts ③절이 좌표로 잰다).
+   * 🔵 `setPendingNodePositions` 의 결과를 되읽지 않는 까닭도 같다 — setState 는 이
+   * 고리가 끝나야 반영되므로 중간에 읽을 수 있는 자리가 아니다.
+   *
+   * 🔴 **되돌리기는 한 칸이다.** 적용을 다 모아 `setPendingNodePositions` 를 **한 번**
+   * 부른다 — 그 함수가 제 안에서 「끌던 중이 아니면 한 단계를 찍는」 규약을 이미
+   * 갖고 있고(그 자리 주석), 선마다 부르면 [이전]이 선 수만큼 쌓여 한 번 눌러서는
+   * 안 돌아온다. 🔵 칸 하나짜리 껍질(`setPendingNodePosition`)을 고리 안에서 부르는
+   * 것이 바로 그 꼴이다 — 그래서 **복수 통로를 직접** 부른다.
+   *
+   * 🔴 **펼 선이 하나도 없으면 아무 일도 안 한다** — 되돌리기 칸도 안 찍는다.
+   * 아무것도 안 바뀐 칸이 쌓이면 [이전]이 한 번 헛돈다(사람 눈에는 단추가 안 먹은
+   * 것으로 보인다). 그림 쪽 단추도 **같은 수**로 흐려진다.
+   *
+   * 🔵 **수동 경로점은 단수와 똑같이** 자동으로 되돌린다(`workingRoutePoints` 가
+   * 비어 있지 않은 선만). 안 그러면 선을 곧게 폈는데 옛 꺾임이 그대로 남아, 「단추로
+   * 한 번씩 누른 것」과 결과가 갈린다. 묶어서 한 번에 `setPendingRoutePointsByEdgeId`
+   * 를 부르는 것도 위와 같은 까닭이다.
+   *
+   * 🔵 **되돌아가는 선(RETRY·LOOP_BACK = 「이전 단계로」)도 그대로 편다.** 단수가
+   * 그 갈래를 하나도 특별히 안 다루고(위 머리말), 자동 경로로 되돌리면 그 곡선이
+   * **되살아난다** — 여기서만 빼면 둘의 답이 갈린다. 차례를 못 정하는 고리에
+   * 묶이더라도 계획 함수가 멈추지도 버리지도 않는다(값으로 잰다 —
+   * case-flowchart-straighten-selected-edges-ui.test.ts ⑦절).
+   *
+   * 🔵 `canEdit` 관문은 **단수와 같은 자리**에 둔다. 오늘은 단추가 뜨는 조건
+   * (boxSelectActive)에 이미 `canEdit` 가 들어 있어 못 닿는 길이지만, 이 화면의
+   * 쓰기 손잡이는 전부 이 한 줄로 시작한다 — 빠진 하나가 되면 안 된다.
+   */
+  function handleStraightenBoxSelection() {
+    if (!canEdit) return;
+    if (boxSelectionStraightenPlan.length === 0) return;
+
+    const movedPositions = new Map<string, Position>();
+    const moves: CaseFlowchartNodeDragMove[] = [];
+    const routeResetEdgeIds: string[] = [];
+
+    for (const edge of boxSelectionStraightenPlan) {
+      const sourceNode = renderedNodes.find((n) => n.id === edge.fromNodeId);
+      const targetNode = renderedNodes.find((n) => n.id === edge.toNodeId);
+      if (!sourceNode || !targetNode) continue;
+      // 🔴 옮겨 놓은 자리가 있으면 **그것이 먼저**다(위 「앞의 결과를 보고」).
+      const sourcePos = movedPositions.get(edge.fromNodeId) ?? { x: sourceNode.positionX, y: sourceNode.positionY };
+      const targetPos = movedPositions.get(edge.toNodeId) ?? { x: targetNode.positionX, y: targetNode.positionY };
+
+      const sourceDims = resolveNodeDimensions(sourceNode);
+      const targetDims = resolveNodeDimensions(targetNode);
+      const straightened = computeStraightenedConnectedNodePosition(
+        { x: sourcePos.x, y: sourcePos.y, width: sourceDims.width, height: sourceDims.height },
+        { x: targetPos.x, y: targetPos.y, width: targetDims.width, height: targetDims.height }
+      );
+      movedPositions.set(targetNode.id, straightened.position);
+      moves.push({ nodeId: targetNode.id, position: straightened.position });
+
+      const currentRoute = workingRoutePoints(edge.id);
+      if (currentRoute && currentRoute.length > 0) routeResetEdgeIds.push(edge.id);
+    }
+
+    // 🔵 계획에 선이 있었는데 적용이 하나도 안 된 경우(그 사이 칸이 사라졌을 때)도
+    //    되돌리기 칸을 안 찍는다 — 위 「아무 일도 안 한다」와 같은 까닭이다.
+    if (moves.length === 0) return;
+    setPendingNodePositions(moves);
+
+    if (routeResetEdgeIds.length > 0) {
+      setPendingRoutePointsByEdgeId((prev) => {
+        const next = new Map(prev);
+        for (const edgeId of routeResetEdgeIds) next.set(edgeId, null);
+        return next;
+      });
+    }
+  }
+
+  /**
    * ==========================================================================
    * 🔴 [Delete] 키로 지우기 (2026-11-21)
    * ==========================================================================
@@ -2149,6 +2270,10 @@ export default function CaseFlowchartEditorScreen({
                 onCanvasToolChange={setCanvasTool}
                 boxSelectedNodeIds={boxSelectedNodeIds}
                 onBoxSelectionChange={setBoxSelectedNodeIds}
+                boxSelectionStraighten={{
+                  straightenableEdgeCount: boxSelectionStraightenPlan.length,
+                  onStraighten: handleStraightenBoxSelection,
+                }}
                 onInstanceReady={(instance) => {
                   reactFlowInstanceRef.current = instance;
                 }}
