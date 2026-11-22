@@ -65,6 +65,40 @@ function Invoke-Native([string]$CommandLine) {
     [pscustomobject]@{ Output = ($out -join "`n").Trim(); ExitCode = $LASTEXITCODE }
 }
 
+# 🔴 docker 를 cmd 가 찾을 수 있게 만든다 (2026-11-22). end-work.ps1 과 **같은 함수**다.
+#
+# 위 Invoke-Native 는 cmd.exe 를 거치므로 **cmd 가 보는 PATH** 에 docker 가 있어야 한다.
+# 2026-11-22 에 end-work 가 바로 그 자리에서 멈췄다 — 사용자 PowerShell 창에서는
+# `docker ps` 가 도는데 스크립트 안에서만 「'docker' is not recognized as an internal
+# or external command」(🔵 **cmd 꼴** 오류)가 났다. docker 는 사용자 PATH 에도 시스템
+# PATH 에도 영구 등록돼 있지 않고 창마다 다른 경로로 들어와 있어서, **어느 창에서
+# 돌리느냐에 따라 갈렸다.** 그래서 스크립트가 제 손으로 찾아 PATH 앞에 붙인다.
+#
+# 🔴 이 스크립트에서는 그 갈림이 더 고약하다 — 아래 Docker 엔진 확인이 실패를
+#    「꺼져 있다」로 읽고 **Docker Desktop 을 띄운 뒤 3분을 기다린다.** 이미 켜져
+#    있는데 못 찾은 것이면 3분을 버리고 나서 같은 자리에서 또 실패한다.
+function Initialize-DockerPath {
+    $dir = $null
+
+    $found = Get-Command docker.exe -ErrorAction SilentlyContinue
+    if ($found) { $dir = Split-Path $found.Source -Parent }
+
+    if (-not $dir) {
+        foreach ($candidate in @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\resources\bin'),
+            (Join-Path $env:ProgramFiles 'Docker\Docker\resources\bin')
+        )) {
+            if ($candidate -and (Test-Path (Join-Path $candidate 'docker.exe'))) { $dir = $candidate; break }
+        }
+    }
+
+    if (-not $dir) { return $false }
+    if (($env:Path -split ';')[0] -ne $dir) { $env:Path = "$dir;$env:Path" }
+    return $true
+}
+
+$script:DockerPathReady = Initialize-DockerPath
+
 function Write-Step([string]$Text)  { Write-Host ""; Write-Host "▶ $Text" -ForegroundColor Cyan }
 function Write-Ok([string]$Text)    { Write-Host "  ✔ $Text" -ForegroundColor Green }
 function Write-Warn2([string]$Text) { Write-Host "  ⚠ $Text" -ForegroundColor Yellow }
@@ -78,6 +112,18 @@ Write-Host "  $RepoRoot" -ForegroundColor DarkGray
 # ── 1. Docker 엔진 ────────────────────────────────────────────────────────
 Write-Step "Docker 엔진 확인"
 if ((Invoke-Native 'docker info --format "{{.ServerVersion}}"').ExitCode -ne 0) {
+    # 🔴 「대답이 없다」의 까닭이 둘인데 하나로 읽으면 3분을 버린다(2026-11-22).
+    #    ① Docker 엔진이 꺼져 있다 → 띄우고 기다리면 된다.
+    #    ② docker 실행 파일을 못 찾았다 → **기다려도 영영 안 된다.**
+    #    위 Initialize-DockerPath 가 찾기를 이미 해 봤으므로 그 답으로 가른다.
+    if (-not $script:DockerPathReady) {
+        Write-Warn2 "docker 실행 파일을 못 찾았습니다 — Docker가 꺼진 것과는 다른 문제입니다."
+        Write-Info "아래 두 자리를 뒤졌는데 없었습니다:"
+        Write-Info (Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\resources\bin\docker.exe')
+        Write-Info (Join-Path $env:ProgramFiles 'Docker\Docker\resources\bin\docker.exe')
+        Write-Info "Docker Desktop이 깔려 있다면 그 자리를 알려 주시면 스크립트에 더하겠습니다."
+        exit 1
+    }
     if (-not (Test-Path $DockerDesktop)) {
         Write-Warn2 "Docker Desktop을 찾을 수 없습니다: $DockerDesktop"
         Write-Info "직접 실행한 뒤 이 스크립트를 다시 돌려 주세요."

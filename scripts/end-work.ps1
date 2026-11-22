@@ -96,6 +96,51 @@ function Invoke-Native([string]$CommandLine) {
     [pscustomobject]@{ Output = ($out -join "`n").Trim(); ExitCode = $LASTEXITCODE }
 }
 
+# 🔴 docker 를 cmd 가 찾을 수 있게 만든다 (2026-11-22).
+#
+# 위 Invoke-Native 는 cmd.exe 를 거친다. 그래서 **cmd 가 보는 PATH** 에 docker 가
+# 있어야 하는데, 2026-11-22 에 그렇지 않은 상태를 만났다 — 사용자 PowerShell 창에서
+# `docker ps` 는 멀쩡히 도는데 이 스크립트 안에서만
+# 「'docker' is not recognized as an internal or external command」가 났다.
+# 🔵 오류 문구가 **cmd 꼴**인 것이 단서다(PowerShell 이면 「The term … is not
+#    recognized as the name of a cmdlet」이라고 나온다).
+#
+# 🔴 그때 창에서 `$env:Path += ";…\DockerDesktop\resources\bin"` 을 더해도 안 풀렸다.
+#    docker 는 사용자 PATH 에도 시스템 PATH 에도 **영구 등록돼 있지 않고**(레지스트리
+#    확인), 창마다 다른 경로로 들어와 있어서 **어느 창에서 돌리느냐에 따라 갈린다.**
+#    그 갈림을 없애려고, 스크립트가 **제 손으로 찾아 PATH 앞에 붙인다.**
+#
+# 🔵 「찾았다」가 곧 「cmd 도 찾는다」가 되게 **폴더를 PATH 맨 앞에** 붙이는 것이 핵심이다.
+#    PowerShell 이 Get-Command 로 찾았다 해도 그것만으로는 cmd 가 못 볼 수 있다.
+function Initialize-DockerPath {
+    $dir = $null
+
+    # ① PowerShell 이 아는 자리가 있으면 그 폴더를 쓴다
+    $found = Get-Command docker.exe -ErrorAction SilentlyContinue
+    if ($found) { $dir = Split-Path $found.Source -Parent }
+
+    # ② 없으면 설치 기본값을 뒤진다 — Docker Desktop 은 사용자 폴더 설치와
+    #    Program Files 설치 둘이 있고, 이 PC 는 사용자 폴더 쪽이다.
+    if (-not $dir) {
+        foreach ($candidate in @(
+            (Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\resources\bin'),
+            (Join-Path $env:ProgramFiles 'Docker\Docker\resources\bin')
+        )) {
+            if ($candidate -and (Test-Path (Join-Path $candidate 'docker.exe'))) { $dir = $candidate; break }
+        }
+    }
+
+    if (-not $dir) { return $false }
+    # 이미 맨 앞이면 또 붙이지 않는다(여러 번 불려도 PATH 가 안 길어진다).
+    if (($env:Path -split ';')[0] -ne $dir) { $env:Path = "$dir;$env:Path" }
+    return $true
+}
+
+# 🔵 docker 를 쓰기 전에 한 번. 여기서 못 찾아도 **멈추지 않는다** — 아래 DB 백업
+#    절이 「docker 가 대답하지 않는다」를 제 손으로 가려 멈추게 되어 있고, 그 판단을
+#    여기서 가로채면 「꺼져 있다」와 「못 찾았다」가 다시 뭉개진다.
+$script:DockerPathReady = Initialize-DockerPath
+
 function Write-Step([string]$Text)  { Write-Host ""; Write-Host "▶ $Text" -ForegroundColor Cyan }
 function Write-Ok([string]$Text)    { Write-Host "  ✔ $Text" -ForegroundColor Green }
 function Write-Warn2([string]$Text) { Write-Host "  ⚠ $Text" -ForegroundColor Yellow }
@@ -221,9 +266,20 @@ if ($ps.ExitCode -ne 0) {
     Write-Host ""
     Write-Host "════ 종료를 멈췄습니다 ════" -ForegroundColor Yellow
     Write-Host "  백업을 떠야 하는데 DB가 켜져 있는지 알 수 없어, 아무것도 끄지 않았습니다." -ForegroundColor Yellow
-    Write-Host "  Docker Desktop이 켜져 있는지 보고 다시 실행해 주세요:" -ForegroundColor Gray
-    Write-Host "    docker ps          ← 이것이 먼저 대답해야 합니다" -ForegroundColor DarkGray
-    Write-Host "    npm run work:end" -ForegroundColor DarkGray
+    # 🔴 까닭이 둘인데 하나로 뭉뚱그리면 못 푼다(2026-11-22) — ① Docker 가 꺼졌다
+    #    ② docker 를 못 찾았다. 둘은 할 일이 다르다. 위 Initialize-DockerPath 가
+    #    찾기를 이미 해 봤으므로 그 답으로 갈라서 말해 준다.
+    if (-not $script:DockerPathReady) {
+        Write-Host "  🔴 이 PC에서 docker 실행 파일을 못 찾았습니다 — Docker가 꺼진 것과는 다른 문제입니다." -ForegroundColor Yellow
+        Write-Host "  아래 두 자리를 뒤졌는데 없었습니다:" -ForegroundColor Gray
+        Write-Host "    $(Join-Path $env:LOCALAPPDATA 'Programs\DockerDesktop\resources\bin\docker.exe')" -ForegroundColor DarkGray
+        Write-Host "    $(Join-Path $env:ProgramFiles 'Docker\Docker\resources\bin\docker.exe')" -ForegroundColor DarkGray
+        Write-Host "  Docker Desktop이 깔려 있다면 그 자리를 알려 주시면 스크립트에 더하겠습니다." -ForegroundColor Gray
+    } else {
+        Write-Host "  🔵 docker 실행 파일은 찾았습니다 — Docker Desktop이 켜져 있는지 보고 다시 실행해 주세요:" -ForegroundColor Gray
+        Write-Host "    docker ps          ← 이것이 먼저 대답해야 합니다" -ForegroundColor DarkGray
+        Write-Host "    npm run work:end" -ForegroundColor DarkGray
+    }
     Write-Host ""
     exit 1
 }
