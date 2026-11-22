@@ -60,6 +60,32 @@ function stripComments(source: string): string {
 /** 줄바꿈·들여쓰기 차이로 시험이 깨지지 않도록 공백을 하나로 접는다. */
 const flat = (source: string) => source.replace(/\s+/g, " ");
 
+/**
+ * `start` 로 시작해 **괄호 깊이가 0 으로 돌아올 때까지** — JSX 덩이 하나만 떼어 낸다.
+ *
+ * 🔴 2026-11-22(조각 D1) — 아래 「관문 안에 두었는가」가 전에는 **관문과 부품을 한
+ * 줄로 이어 붙인 글자**를 통째로 맞대고 있었다. 그러자 그 관문 안에 **형제를 하나
+ * 더 세우는 순간**(= [연결 정렬] 단추) 시험이 깨졌다 — 단추가 관문 밖으로 나간
+ * 것이 아니라 **글자가 한 칸 길어진 것뿐**인데도 그렇다. 재려던 것은 「붙어 있는
+ * 글자」가 아니라 **「그 관문 안에 있는가」**였으므로, 단언을 **약하게 만드는 대신**
+ * 덩이를 떼어 내 **그 안에 있는가**로 고쳐 적는다(오히려 세졌다 — 아래 단언이
+ * 부품과 단추 **둘 다** 그 관문 안에 있기를 요구한다).
+ */
+function jsxBlock(source: string, start: string): string {
+  const from = source.indexOf(start);
+  assert.notEqual(from, -1, `원본에서 ${start} 를 못 찾았다 — 이름이 바뀌었으면 시험도 함께 고쳐야 한다`);
+  const openAt = source.indexOf("(", from);
+  let depth = 0;
+  for (let i = openAt; i < source.length; i += 1) {
+    if (source[i] === "(") depth += 1;
+    else if (source[i] === ")") {
+      depth -= 1;
+      if (depth === 0) return source.slice(from, i + 1);
+    }
+  }
+  assert.fail(`${start} 의 덩이가 안 닫혔다`);
+}
+
 const PATHS = {
   canvas: "src/components/graph-editor-core/GraphCanvas.tsx",
   graph: "src/components/procedures/ProcedureFlowGraph.tsx",
@@ -115,10 +141,23 @@ describe("조각 B2 — 도구 단추 둘", () => {
   test("🔴 단추는 **끌 수 있는 그림에만** 선다 — 읽기 전용 그림에서 화면 옮기기를 뺏으면 안 된다", () => {
     assert.ok(graph.includes('const canUseBoxSelect = editable && layoutMode === "USER";'), "관문이 끌기 관문과 같은 값이어야 한다");
     assert.ok(graph.includes('nodesDraggable={editable && layoutMode === "USER"}'), "끌기 관문 쪽이 바뀌었다 — 둘이 갈리면 「고를 수는 있는데 못 끄는」 그림이 생긴다");
+    // 🔴 **그 관문 안에 있는가**를 잰다(덩이를 떼어 내서). 프롭 넷은 글자 그대로
+    //    그대로여야 한다 — 하나라도 안 넘기면 단추가 지금 어느 도구인지 모르거나
+    //    고른 수를 못 그린다.
+    const gate = flat(jsxBlock(graph, "{canUseBoxSelect && ("));
     assert.ok(
-      flat(graph).includes("{canUseBoxSelect && ( <ProcedureCanvasToolPicker tool={canvasTool} onToolChange={changeCanvasTool} selectedCount={boxSelectedNodeIds.size} /> )}"),
-      "단추를 그 관문 안에 안 두었다"
+      gate.includes("<ProcedureCanvasToolPicker tool={canvasTool} onToolChange={changeCanvasTool} selectedCount={boxSelectedNodeIds.size} />"),
+      "도구 단추를 그 관문 안에 안 두었다"
     );
+    // 🔴 2026-11-22(조각 D1) — 그 관문 안에 **[연결 정렬] 단추**가 함께 선다.
+    //    같은 관문을 요구하는 까닭: 끌 수 없는 그림에서 노드를 옮기는 단추가 서면
+    //    눌러도 아무 일이 안 일어난다(읽기 전용 화면 셋이 그렇다).
+    assert.ok(gate.includes("연결 정렬"), "[연결 정렬] 단추가 이 관문 밖으로 나갔다 — 읽기 전용 그림에 죽은 단추가 선다");
+    // 🔴 **개수로 잰다, 자리로 재지 않는다.** 처음 나오는 자리만 맞대면 관문 **밖에
+    //    하나 더** 세워도 첫 자리가 그대로라 조용히 통과한다(2026-11-22 에 일부러
+    //    깨뜨려 보고 실제로 통과하는 것을 확인했다 — 그래서 이렇게 고쳐 적었다).
+    const occurrences = (source: string) => (source.match(/연결 정렬/g) ?? []).length;
+    assert.equal(occurrences(flat(graph)), occurrences(gate), "[연결 정렬] 글자가 관문 밖에도 생겼다 — 읽기 전용 그림에 죽은 단추가 선다");
   });
 
   test("🔵 아이콘은 **손으로 그린 인라인 SVG** 다 — 아이콘 묶음을 새로 안 들였다", () => {

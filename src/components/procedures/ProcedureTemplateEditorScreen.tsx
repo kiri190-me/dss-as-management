@@ -130,6 +130,7 @@ import {
   resolveProcedureNodeDeleteBlockedReason,
 } from "@/lib/domain/procedure-editor-node-deletion";
 import { removeNodesFromSelection } from "@/lib/graph-editor-core/box-selection";
+import { planStraightenEdgeOrder } from "@/lib/graph-editor-core/straighten-selection";
 import { useFieldStepGhostVisibility } from "./editor/use-field-step-ghost-visibility";
 
 type RightPanelTab = "properties" | "validation" | "history" | "compare" | "createEdge" | "addNode" | "fieldSteps";
@@ -2270,6 +2271,110 @@ export default function ProcedureTemplateEditorScreen({
   );
 
   /**
+   * 🔴 **고른 노드들 사이의 선을 펼 차례** — 단추를 누르기 전에 미리 센다
+   * (2026-11-22, 조각 D1).
+   *
+   * 🔴 **하나로 둔 것이 핵심이다.** 아래 손잡이가 실제로 펴는 목록과, 그림이
+   * 단추를 흐리게 할지 정할 때 세는 수가 **같은 배열**이어야 한다. 둘로 나누면
+   * 「단추는 살아 있는데 눌러도 아무 일이 없는」(또는 그 반대의) 화면이 생기고,
+   * 그 어긋남은 오류가 안 나서 눌러 봐야만 드러난다.
+   *
+   * 🔵 **[범위 선택] 모드인지는 여기서 안 본다.** 모드 관문은 단추를 세우는
+   * 그림 쪽에 있고(boxSelectActive && 고른 칸 ≥ 2), 모드를 벗어나면 고른 집합이
+   * 비워지므로 이 목록도 저절로 빈다.
+   */
+  const boxSelectionStraightenPlan = useMemo(
+    () => planStraightenEdgeOrder(renderedEdges, boxSelectedNodeIds),
+    [renderedEdges, boxSelectedNodeIds]
+  );
+
+  /**
+   * ==========================================================================
+   * 🔴 [연결 정렬] — **고른 노드들 사이의 연결선을 한 번에 곧게** (2026-11-22, 조각 D1)
+   * ==========================================================================
+   * 쓰는 분 요청(2026-11-21): 「[범위 선택]으로 여러 노드를 선택한 상태에서 연결선
+   * 정렬을 할 수 있도록 하자.」 뜻은 2026-11-22 에 **「고른 것끼리의 선을 곧게」**로
+   * 정해졌다 — `A→B` 와 `B→C` 를 둘 다 고르면 둘 다 펴져 한 줄이 되고, `A→D` 처럼
+   * **한쪽만 고른 선은 그대로 둔다**(움직이는 것은 고른 노드뿐이다).
+   *
+   * 🔴 **위 handleEdgeDoubleClick 과 출처가 글자 그대로 같다** — 선은
+   * `renderedEdges`, 노드는 `renderedNodes`, 자리는 `resolveCurrentPosition`
+   * (그림이 올려보낸 **화면 자리**), 크기는 `resolveNodeDimensions`(측정값 우선).
+   * 2026-11-05 에 곧게 펴기가 다른 지도(workingLayoutPositions)를 읽다가 노드를
+   * **화면 밖으로** 보낸 적이 있고, 그 경위가 저 위 주석에 적혀 있다. 하나라도
+   * 갈리면 「단추로 한 번씩 누른 것」과 이 단추의 결과가 달라진다.
+   *
+   * 🔴 **앞의 결과를 보고 다음을 잰다.** 선마다 **그 순간의** 시작·도착 자리를
+   * 읽어야 사슬이 한 줄이 된다 — `movedPositions` 가 이번 고리 안에서 옮겨 놓은
+   * 자리를 들고 있고, 자리를 읽을 때 **그것을 먼저** 본다. 전부를 처음 자리
+   * 기준으로 한꺼번에 계산하면 C 가 **옛 자리의 B** 에 맞은 뒤 B 가 움직여, 눈으로
+   * 보면 가운데가 꺾인 채 남는다(straighten-selection.test.ts ③절이 좌표로 잰다).
+   * 🔵 `setPendingPositions` 의 결과를 되읽지 않는 까닭도 같다 — setState 는 이
+   * 고리가 끝나야 반영되므로 중간에 읽을 수 있는 자리가 아니다.
+   *
+   * 🔴 **되돌리기는 한 칸이다.** 적용을 다 모아 `setPendingPositions` 를 **한 번**
+   * 부른다 — 그 함수가 제 안에서 「드래그 중이 아니면 한 단계를 찍는」 규약을
+   * 이미 갖고 있고(그 자리 주석), 선마다 부르면 [이전]이 선 수만큼 쌓여 한 번
+   * 눌러서는 안 돌아온다.
+   *
+   * 🔴 **펼 선이 하나도 없으면 아무 일도 안 한다** — 되돌리기 칸도 안 찍는다.
+   * 아무것도 안 바뀐 칸이 쌓이면 [이전]이 한 번 헛돈다(사람 눈에는 단추가 안
+   * 먹은 것으로 보인다). 그림 쪽 단추도 같은 수로 흐려진다.
+   *
+   * 🔵 **수동 경로점은 단수와 똑같이** 자동으로 되돌린다. 안 그러면 선을 곧게
+   * 폈는데 옛 꺾임이 그대로 남아, 「단추로 한 번씩 누른 것」과 결과가 갈린다.
+   * 묶어서 한 번에 `setPendingEdgeRouteMoves` 를 부르는 것도 위와 같은 까닭이다.
+   */
+  const handleStraightenBoxSelection = useCallback(() => {
+    if (boxSelectionStraightenPlan.length === 0) return;
+
+    const movedPositions = new Map<string, Position>();
+    const moves: ProcedureNodeDragMove[] = [];
+    const routeResetEdgeIds: string[] = [];
+
+    for (const edge of boxSelectionStraightenPlan) {
+      const sourceNode = renderedNodes.find((n) => n.id === edge.fromNodeId);
+      const targetNode = renderedNodes.find((n) => n.id === edge.toNodeId);
+      // 🔴 옮겨 놓은 자리가 있으면 **그것이 먼저**다(위 「앞의 결과를 보고」).
+      const sourcePos = movedPositions.get(edge.fromNodeId) ?? resolveCurrentPosition(edge.fromNodeId);
+      const targetPos = movedPositions.get(edge.toNodeId) ?? resolveCurrentPosition(edge.toNodeId);
+      if (!sourceNode || !targetNode || !sourcePos || !targetPos) continue;
+
+      const sourceDims = resolveNodeDimensions(sourceNode);
+      const targetDims = resolveNodeDimensions(targetNode);
+      const straightened = computeStraightenedConnectedNodePosition(
+        { x: sourcePos.x, y: sourcePos.y, width: sourceDims.width, height: sourceDims.height },
+        { x: targetPos.x, y: targetPos.y, width: targetDims.width, height: targetDims.height }
+      );
+      movedPositions.set(targetNode.id, straightened.position);
+      moves.push({ nodeId: targetNode.id, position: straightened.position });
+
+      if (currentWorkingRoutePoints(pendingEdgeRouteMoves, edge.id).length > 0) routeResetEdgeIds.push(edge.id);
+    }
+
+    // 🔵 계획에 선이 있었는데 적용이 하나도 안 된 경우(그 사이 칸이 사라졌을 때)도
+    //    되돌리기 칸을 안 찍는다 — 위 「아무 일도 안 한다」와 같은 까닭이다.
+    if (moves.length === 0) return;
+    setPendingPositions(moves);
+
+    if (routeResetEdgeIds.length > 0) {
+      setPendingEdgeRouteMoves((prev) => {
+        const next = new Map(prev);
+        for (const edgeId of routeResetEdgeIds) next.set(edgeId, null);
+        return next;
+      });
+    }
+  }, [
+    boxSelectionStraightenPlan,
+    renderedNodes,
+    resolveCurrentPosition,
+    pendingEdgeRouteMoves,
+    savedEdgeRoutes,
+    setPendingPositions,
+    resolveNodeDimensions,
+  ]);
+
+  /**
    * "경로점 추가" — the primary insertion method, no click position
    * required: inserts at the midpoint of the selected edge's longest
    * current segment. Forces USER (사용자 배치) mode — the newly-added point
@@ -2787,6 +2892,10 @@ export default function ProcedureTemplateEditorScreen({
             onCanvasToolChange={setCanvasTool}
             boxSelectedNodeIds={boxSelectedNodeIds}
             onBoxSelectionChange={setBoxSelectedNodeIds}
+            boxSelectionStraighten={{
+              straightenableEdgeCount: boxSelectionStraightenPlan.length,
+              onStraighten: handleStraightenBoxSelection,
+            }}
             onInstanceReady={(instance) => {
               reactFlowInstanceRef.current = instance;
             }}

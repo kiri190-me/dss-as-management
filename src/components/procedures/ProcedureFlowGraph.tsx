@@ -435,6 +435,7 @@ export default function ProcedureFlowGraph({
   onCanvasToolChange,
   boxSelectedNodeIds: controlledBoxSelectedNodeIds,
   onBoxSelectionChange,
+  boxSelectionStraighten = null,
   onInstanceReady,
   showChrome = true,
   highlightedNodeIds = null,
@@ -612,6 +613,26 @@ export default function ProcedureFlowGraph({
    */
   boxSelectedNodeIds?: ReadonlySet<string>;
   onBoxSelectionChange?: Dispatch<SetStateAction<ReadonlySet<string>>>;
+  /**
+   * 2026-11-22(조각 D1) — **[연결 정렬]**: 고른 노드들 **사이의** 연결선을 한 번에
+   * 곧게 펴는 손잡이. 안 넘기면 단추가 아예 안 선다(지금 넘기는 곳은 기술 작업 절차
+   * 편집기 하나다 — 진단 Flowchart 는 다음 조각이 가져다 붙인다).
+   *
+   * 🔴 **손잡이와 개수를 한 덩이로 받는 까닭**: 둘을 따로 받으면 손잡이만 넘기고
+   * 개수를 빠뜨릴 수 있고, 그러면 단추가 **영영 흐린 채로** 선다 — 오류가 안 나서
+   * 눌러 봐야만 드러난다. 타입이 둘을 묶어 그 실수를 막는다.
+   *
+   * 🔴 **개수를 여기서 다시 세지 않는다.** 바깥(편집기)이 실제로 펼 바로 그 목록의
+   * 길이다. 이 그림이 제 손으로 또 세면 「단추는 살아 있는데 눌러도 아무 일이
+   * 없는」(또는 그 반대의) 자리가 생긴다 — 셈 자체는 순수 함수 한 벌뿐이지만
+   * (graph-editor-core/straighten-selection.ts), **무엇을 넣고 세느냐**가 갈린다:
+   * 이 그림은 시트 거르개로 노드를 걸러 그리고, 바깥은 안 걸러진 전체를 본다.
+   *
+   * 🔵 `straightenableEdgeCount` 가 0 이면 단추를 **흐리게** 한다(누르면 아무 일도
+   * 안 일어나는 단추를 살려 두면 고장으로 읽힌다). 이 편집기에는 상시 안내 줄이
+   * 없으므로 — 쓰는 분이 두 번 걷어낸 자리다 — **까닭은 `title` 에** 적는다.
+   */
+  boxSelectionStraighten?: { straightenableEdgeCount: number; onStraighten: () => void } | null;
   /** 5C-6D-1D — forwards the live React Flow instance up to the editor screen (same purpose/timing as CaseFlowchartGraph's own onInstanceReady) so a sibling component (NodePropertyPanel, CreateNodePanel) can read each node's REAL measured dimensions (`instance.getInternalNode(id)?.measured`) for relative-position math, rather than a duplicated size estimate. Optional — ProcedureTemplateDetailScreen's read-only usage has no relative-position feature and never passes this. */
   onInstanceReady?: (instance: ReactFlowInstance) => void;
   /**
@@ -1765,7 +1786,39 @@ export default function ProcedureFlowGraph({
           까닭 둘). 이 프롭을 안 넘기는 화면 셋은 그 값이 거짓이라 전과 똑같다.
         */}
         {canUseBoxSelect && (
-          <ProcedureCanvasToolPicker tool={canvasTool} onToolChange={changeCanvasTool} selectedCount={boxSelectedNodeIds.size} />
+          <div className="flex items-center gap-2">
+            <ProcedureCanvasToolPicker tool={canvasTool} onToolChange={changeCanvasTool} selectedCount={boxSelectedNodeIds.size} />
+            {/*
+              🔴 **[연결 정렬] 단추는 여기 선다 — ProcedureCanvasToolPicker 안이
+              아니다**(2026-11-22, 조각 D1). 그 부품은 진단 Flowchart 와 **함께 쓰는
+              것**이라, 거기 단추를 심으면 이 기능을 아직 안 붙인 저쪽 화면에도
+              **죽은 단추**가 선다. 대신 그 부품 **바로 옆**(= 「N개 선택」 옆)에
+              세워 눈으로는 한 덩이로 읽히게 한다 — 묶는 `gap-2` 가 그 뜻이다.
+
+              🔴 서는 조건은 **[범위 선택] 모드이고 고른 칸이 둘 이상**일 때다. 하나면
+              펼 선이 아예 없고(선은 칸 둘을 잇는다), 0개면 이 단추가 「네모를 쳤는데
+              왜 안 되지」의 답을 가리게 된다.
+
+              🔵 글자는 **[연결 정렬]** — 연결선 패널의 그 단추와 **같은 일이라 같은
+              글자**다(EdgePropertyPanel). 색도 거기 맞춘 emerald 다: 같은 일인데 다른
+              낱말·다른 색이면 사람이 둘을 다른 기능으로 읽는다.
+            */}
+            {boxSelectActive && boxSelectedNodeIds.size >= 2 && boxSelectionStraighten && (
+              <button
+                type="button"
+                onClick={boxSelectionStraighten.onStraighten}
+                disabled={boxSelectionStraighten.straightenableEdgeCount === 0}
+                title={
+                  boxSelectionStraighten.straightenableEdgeCount === 0
+                    ? "연결 정렬 — 고른 노드끼리 이어진 연결선이 없어서 지금은 펼 것이 없습니다. 서로 이어진 노드들을 함께 고르세요."
+                    : `연결 정렬 — 고른 노드끼리 이어진 연결선 ${boxSelectionStraighten.straightenableEdgeCount}개를 앞선 노드부터 차례대로 곧게 폅니다. 한쪽만 고른 연결선은 그대로 둡니다(고른 노드만 움직입니다).`
+                }
+                className="rounded-md border border-emerald-400 px-2 py-1 text-emerald-900 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900"
+              >
+                연결 정렬
+              </button>
+            )}
+          </div>
         )}
         {layoutMode === "STAGE_SORTED" && (
           <div className="flex items-center gap-2">
