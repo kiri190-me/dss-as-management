@@ -63,9 +63,9 @@
 <div class="stats">
   <div class="stat">
     <div class="note">갈래 A · 노드 파일 위치</div>
-    <div class="num">1 / 4</div>
-    <div class="bar"><i style="width:25%"></i></div>
-    <div class="note">진단 쪽 통로가 돌고 있습니다</div>
+    <div class="num">2 / 4</div>
+    <div class="bar"><i style="width:50%"></i></div>
+    <div class="note">진단 쪽이 섰습니다 · 절차 쪽이 남았습니다</div>
   </div>
   <div class="stat">
     <div class="note">갈래 B · 납기일 확정</div>
@@ -86,7 +86,7 @@
   </div>
   <div class="stat">
     <div class="note">안 올린 커밋</div>
-    <div class="num">8 + 2 + 1</div>
+    <div class="num">10 + 2 + 1</div>
     <div class="note">A/S · dss-core · 포털 (앞 둘은 같이)</div>
   </div>
 </div>
@@ -135,8 +135,8 @@
   <tr><th style="width:52px">#</th><th>하는 일</th><th style="width:108px">상태</th><th style="width:300px">비고</th></tr>
   <tr><td>①</td><td><b>칸 더하기 + 마이그레이션</b></td><td><span class="st done">끝 · 커밋됨</span></td>
       <td><code>0132</code> · 개발 DB 적용까지 확인</td></tr>
-  <tr><td>②</td><td><b>진단 Flowchart</b> — 서버 통로 · 고르기 창 · 노드 패널</td><td><span class="st doing">진행 중</span></td>
-      <td>판 복제가 없어 위험이 낮아 먼저 둡니다</td></tr>
+  <tr><td>②</td><td><b>진단 Flowchart</b> — 서버 통로 · 고르기 창 · 노드 패널</td><td><span class="st done">끝 · 커밋됨</span></td>
+      <td>시험 +62 · <span class="red">눈 확인은 배포 때</span> (아래)</td></tr>
   <tr><td>③</td><td><b>기술 작업 절차</b> — <s>같은 것</s> <b>따로 써야 합니다</b></td><td><span class="st wait">대기</span></td>
       <td class="red">②를 베낄 수 없습니다 — 아래</td></tr>
   <tr><td>④</td><td>고르기 창에서 <b>노드로 끌어다 놓기</b></td><td><span class="st wait">대기</span></td>
@@ -167,6 +167,22 @@
   </ul>
 </div>
 
+<div class="ask">
+  <div class="t">🔴 배포 때 눈으로 볼 것 — 개발 PC에서는 확인이 안 됩니다</div>
+  <p style="margin:6px 0 0">「수리 관련」 폴더 설정이 개발 PC에 비어 있어 <b>고르기 창이 아예 안 뜹니다</b>.
+  2026-11-25에 <b>배포 때 보기로</b> 정했습니다. 볼 것은 이것들입니다:</p>
+  <ul style="margin:6px 0 0">
+    <li>노드를 고르면 패널에 <b>「관련 파일」 구역</b>이 뜨는가</li>
+    <li>[파일 고르기]를 누르면 <b>공유폴더 목록이 뜨고</b>, 폴더 줄을 눌러 들어갈 수 있는가</li>
+    <li><b>파일 줄에만 [지정]</b>이 서는가 — 폴더 줄과 맨 위 칸에는 없어야 맞습니다</li>
+    <li>고른 뒤 <b>[저장]</b>을 눌러야 들어가고, 새로고침해도 남아 있는가</li>
+    <li><b>[열기]</b>가 실제로 그 파일을 여는가 — 도우미가 깔린 PC에서</li>
+    <li><b>[가리킴 지우기]</b>로 풀리는가</li>
+  </ul>
+  <p style="margin:6px 0 0" class="note">🔵 「설정이 비면 창이 안 뜬다」와 「그때도 쓰기는 거절한다」는 시험으로 재 뒀습니다 —
+  배포 때 볼 것은 <b>설정이 있을 때 실제로 도는가</b>입니다.</p>
+</div>
+
 <h3>조사로 뒤집힌 것 둘 (2026-11-25)</h3>
 
 <div class="warn">
@@ -184,7 +200,25 @@
   그 사이(401~512자)는 <span class="red">검사를 통과하고 저장에서 막힙니다</span>.
   제품 모델 쪽에 <b>이미 있던</b> 불일치이고, 그 함수를 그대로 쓰면 새 기능이 물려받습니다.</p>
   <p style="margin:6px 0 0">②에서 <b>400으로 한 번 더 재도록</b> 했습니다.
-  🔵 공용 함수의 512는 <b>안 건드립니다</b> — 다른 기능들이 쓰고 있어 거기를 좁히면 남의 것이 깨집니다.</p>
+  🔵 공용 함수의 512는 <b>안 건드립니다</b> — 다른 기능들이 쓰고 있어 거기를 좁히면 남의 것이 깨집니다.
+  🔵 구현 중에 <b>앞뒤 공백</b>이라는 같은 종류의 틈이 하나 더 나와 함께 막았습니다
+  (<code>&nbsp;2026 점검.pdf</code> 같은 이름이 검사를 통과하고 저장에서 터지던 자리).</p>
+</div>
+
+<div class="ok">
+  <div class="t">저장 배선이 일곱이 아니라 <b>열</b>이었습니다</div>
+  <p style="margin:6px 0 0">조사가 일곱 자리를 짚었는데 구현에서 <b>셋이 더</b> 나왔습니다 —
+  <b>보낼 걸음을 짜는 함수</b> · <b>조회</b> · <b>바뀜 판정</b>.
+  <span class="red">셋 다 「저장했다는데 안 들어가는」 모양</span>이라 오류가 안 납니다.
+  특히 조회를 빠뜨리면 새로고침마다 되돌아 보이고 <b>다음 저장이 지우는 쪽으로</b> 나갑니다.</p>
+</div>
+
+<div class="warn">
+  <div class="t">아직 안 한 것 — DB 시험 셋</div>
+  <p style="margin:6px 0 0">②를 만들 때 마이그레이션이 적용 대기여서 <b>DB 시험을 돌려 볼 수 없었고</b>,
+  돌려 보지 못한 시험은 넣지 않았습니다. 지금은 적용이 끝났으니 <b>나중에 셋을 더해야</b> 합니다 —
+  ① 경로가 실제로 저장·되읽히는가 ② 400자 넘김·<code>../</code>·역슬래시를 <b>DB 제약이</b> 막는가
+  ③ 「안 바뀜」 갈래.</p>
 </div>
 
 </div>
