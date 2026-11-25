@@ -95,6 +95,8 @@ function row(overrides: Partial<DomesticOrderCellEditRow> = {}): DomesticOrderCe
     //    보냈고 2차분은 아직인 **운영에서 실제로 나오는 모양**으로 둔다.
     // 🔴 **다섯째 칸이 붙었다**(2026-11-08 늦게) — 회차별 완료 시각. 서버로 나가지
     //    않지만 편집 목록이 들고 다닌다([삭제] 단추를 미리 막는 데 쓴다).
+    // 🔴 **여섯째 칸이 붙었다**(2026-11-25) — 회차별 납기일 확정 시각. 위와 같은
+    //    성질이다(서버로 안 나가고, [삭제] 와 **날짜 입력칸**을 미리 막는 데 쓴다).
     dueDates: [
       {
         dueDate: "2026-01-20",
@@ -102,6 +104,7 @@ function row(overrides: Partial<DomesticOrderCellEditRow> = {}): DomesticOrderCe
         deliveredDate: "2026-01-22",
         deliveredBy: "담당자1",
         completedAt: null,
+        confirmedAt: null,
       },
       {
         dueDate: "2026-02-15",
@@ -109,6 +112,7 @@ function row(overrides: Partial<DomesticOrderCellEditRow> = {}): DomesticOrderCe
         deliveredDate: null,
         deliveredBy: null,
         completedAt: null,
+        confirmedAt: null,
       },
     ],
     quoteIssuedDate: "2026-01-07",
@@ -970,6 +974,8 @@ test("편집 목록은 이 줄에 적힌 날짜 그대로, 차례도 그대로 �
           deliveredDate: null,
           deliveredBy: null,
           completedAt: null,
+          // 🔴 **확정된 회차** — 편집 목록이 그 사실을 들고 와야 날짜 입력칸이 잠긴다.
+          confirmedAt: "2026-02-01T01:00:00.000Z",
         },
         {
           dueDate: "2026-01-20",
@@ -978,6 +984,7 @@ test("편집 목록은 이 줄에 적힌 날짜 그대로, 차례도 그대로 �
           deliveredBy: "담당자1",
           // 🔴 **완료된 회차** — 편집 목록이 그 사실을 들고 와야 [삭제] 단추가 막힌다.
           completedAt: "2026-01-23T01:00:00.000Z",
+          confirmedAt: null,
         },
       ],
     }),
@@ -990,14 +997,26 @@ test("편집 목록은 이 줄에 적힌 날짜 그대로, 차례도 그대로 �
   // 🔴 **완료 표시도 함께 담긴다**(2026-11-08). 판정은 `completed_at` 하나뿐이고,
   //    이 값이 빠지면 화면의 [삭제] 단추가 완료된 회차에서도 눌린다(그리고 저장만
   //    거절된다 — 셋째 울타리).
+  // 🔴 **확정 표시도 함께 담긴다**(2026-11-25). 판정은 `confirmed_at` 하나뿐이고,
+  //    이 값이 빠지면 확정된 회차의 날짜 입력칸이 잠기지 않는다(그리고 저장만
+  //    거절된다 — 넷째 울타리). 🔵 **완료와 자리가 다른 회차로 둔다** — 한 회차에
+  //    둘 다 찍어 두면 둘 중 하나를 빠뜨린 구현도 통과한다.
   assert.deepEqual(domesticOrderDueDateEditDraft(subject), [
-    { dueDate: "2026-02-15", note: "", deliveredDate: "", deliveredBy: "", isCompleted: false },
+    {
+      dueDate: "2026-02-15",
+      note: "",
+      deliveredDate: "",
+      deliveredBy: "",
+      isCompleted: false,
+      isConfirmed: true,
+    },
     {
       dueDate: "2026-01-20",
       note: "1차분",
       deliveredDate: "2026-01-22",
       deliveredBy: "담당자1",
       isCompleted: true,
+      isConfirmed: false,
     },
   ]);
 });

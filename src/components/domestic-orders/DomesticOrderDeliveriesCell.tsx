@@ -195,17 +195,20 @@ export default function DomesticOrderDeliveriesCell({
     setLineErrors({});
     // ② 네 칸을 전부, 차례 그대로 보낸다 — 날짜·메모를 빼면 그 저장이 납기요청일을
     // 지운다(헤더 ②).
-    // 🔴 `isCompleted` 는 **서버로 나가지 않는다**(2026-11-08) —
+    // 🔴 `isCompleted`·`isConfirmed` 는 **서버로 나가지 않는다**(2026-11-08 · 11-25) —
     //    buildDomesticOrderDueDatesUpdateFields 가 네 칸만 옮긴다. 그래도 모양을 맞춰
     //    들고 가는 것은, 여기서 지어낸 값(false 따위)을 넣으면 나중에 이 자리를 보는
     //    사람이 「완료를 보내고 있다」고 읽기 때문이다.
+    // 🔵 **이 칸은 확정에 막히지 않는다** — 확정이 잠그는 것은 납기요청일 하나이고,
+    //    납품일·납품자는 확정한 회차에도 그대로 적는다(넷째 울타리의 그 선).
     const drafts: DomesticOrderDueDateDraft[] = lines.map(
-      ({ dueDate, note, deliveredDate, deliveredBy, isCompleted }) => ({
+      ({ dueDate, note, deliveredDate, deliveredBy, isCompleted, isConfirmed }) => ({
         dueDate,
         note,
         deliveredDate,
         deliveredBy,
         isCompleted,
+        isConfirmed,
       })
     );
     try {

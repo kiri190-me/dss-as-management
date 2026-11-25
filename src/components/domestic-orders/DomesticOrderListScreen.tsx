@@ -106,6 +106,7 @@ import {
   saveDomesticOrderSheetHeadingAction,
   setDomesticOrderCompletionAction,
   setDomesticOrderDueDateRowCompletionAction,
+  setDomesticOrderDueDateRowConfirmationAction,
   type DomesticOrderTrashItem,
 } from "@/lib/server/actions/domestic-orders";
 import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-date-label";
@@ -1934,6 +1935,165 @@ function DueDateRowCompletionToggles({
   );
 }
 
+/**
+ * ============================================================================
+ * 🔴 **회차별 [납기일 확정] · [확정 해제]** (2026-11-25)
+ * ============================================================================
+ * 사용자 요구 원문: 「납기 요청일 옆에 **[납기일 확정] 버튼**을 만들어줘, 이 버튼은
+ * **납기 요청일이 작성되어 있을 때** 생기고, 이 버튼을 누르면 포털의 알림 중에
+ * **[납기 임박] 알림이 뜨지 않도록** 해줘.」
+ *
+ * ── 🔴 왜 **납기요청일 칸**인가 (순번 칸이 아니라) ──────────────────────
+ * 사용자가 자리를 짚었다 — 「납기 요청일 **옆에**」. 회차별 [완료 처리]가 순번 칸에
+ * 사는 것과 **일부러 다르다**: 저쪽은 「이 회차를 끝냈다」라 줄의 조작들과 한 묶음이고,
+ * 이쪽은 **그 날짜 자체에 거는 잠금**이라 날짜 옆에 서야 무엇을 잠갔는지 보인다.
+ *
+ * ── 🔴 `<button>` 안에 `<button>` 을 넣지 않는다 ────────────────────────
+ * 고칠 수 있는 사람에게는 납기요청일 칸 **자체가 눌러서 여는 `<button>`** 이다
+ * (DomesticOrderDueDatesCell). 그 안에 단추를 넣으면 HTML 이 깨지고 React 가 경고도
+ * 없이 한쪽을 삼킨다. 그래서 이 묶음은 그 칸 **밖**, 같은 `<td>` 안에 선다 —
+ * 날짜 줄들 바로 아래다.
+ *
+ * ── 🔴 **납기요청일이 적혀 있는 줄에만** 선다 (사용자 요구 그대로) ───────
+ * 회차가 0이면 아무것도 그리지 않는다. 🔵 그 줄에 보이는 날짜가 **수리 건에서 빌려
+ * 온 것**일 수 있는데(DueDateCellContent), 그때도 이 줄의 회차는 0이라 단추가 서지
+ * 않는다 — 맞다: 확정은 **이 줄의 회차에 찍는 값**이고, 빌려 온 날짜는 이 줄의 것이
+ * 아니다. 적어 두지 않은 날짜를 잠글 수는 없다.
+ *
+ * ── 🔴 **단추를 그리는 판정은 줄과 같다**(rowCanEdit 과 같은 값) ────────
+ * `canEditDomesticOrderWhenCompleted(row, access)` — 서버가 막는 그 조건과 한 글자도
+ * 같다(mutations 의 setDomesticOrderDueDateRowConfirmation 머리말). 🔴 **회차의 완료
+ * 여부로 재지 않는다**: 확정은 완료와 뜻이 다른 값이라(그 표의 칸 주석), 끝난 회차의
+ * 확정을 푸는 일과 아직인 회차의 확정을 푸는 일이 다를 까닭이 없다.
+ *
+ * ── 🔵 **확정됐다는 사실은 권한과 상관없이 보인다** ─────────────────────
+ * 단추가 안 그려지는 세션에서도 「N차 확정됨」 표는 그대로 선다 — 그것은 고치는 길이
+ * 아니라 **사실**이다(회차별 완료 표가 같은 자리에서 같은 선을 긋는다).
+ * 🔴 그런데도 [시스템 설정] → [배지 표시]에 **등록하지 않았다**: 그 등록은 설정
+ * 화면의 보기 배지·기본값·시험 넷을 함께 건드리는 일이라 이 조각의 범위 밖이다.
+ * 지금은 꺼지지 않는 표식이고, 그래서 모양도 알약이 아니라 **글자에 가깝게** 두었다.
+ *
+ * ── 🔴 **이 조각은 종을 끄지 않는다** ───────────────────────────────────
+ * 확정하면 두 칸이 찍히는 것이 전부다. 「납기 임박」 종이 그 값을 보고 빠지는 일은
+ * **다음 조각**이 한다 — 그래서 지금은 확정해도 종이 울리는 것이 맞다.
+ * ============================================================================
+ */
+function DueDateRowConfirmToggles({
+  row,
+  access,
+  onError,
+}: {
+  row: DomesticOrderListItem;
+  /**
+   * 🔴 **이 세션이 가진 것 둘**. 여기서 보는 것은 단추를 그릴지 하나뿐이고, 판정은
+   * 도메인이 한다(canEditDomesticOrderWhenCompleted — 줄의 [수정]·눌러 고치는 칸들과
+   * **같은 값**이다).
+   */
+  access: DomesticOrderEditAccess;
+  onError: (message: string | null) => void;
+}) {
+  const router = useRouter();
+  /** 🔴 **어느 회차를 보내는 중인가** — 하나로 두면 단추 셋이 함께 흐려진다. */
+  const [pendingRowOrder, setPendingRowOrder] = useState<number | null>(null);
+
+  // 🔴 납기요청일이 적혀 있는 줄에만 선다(머리말 · 사용자 요구 그대로).
+  if (row.dueDates.length === 0) return null;
+
+  // 🔴 줄의 [수정]·칸 편집과 **같은 판정**이다(머리말). 거짓이면 단추가 하나도 안
+  //    그려지지만, 아래 확정 표는 그대로 선다 — 사실은 권한과 상관이 없다.
+  const canToggle = canEditDomesticOrderWhenCompleted(row, access);
+
+  // 🔴 **그릴 것이 하나도 없으면 감싸개도 만들지 않는다.** 빈 `<span>` 도 이 칸의
+  //    흐름에 자리를 차지해 `mt-1` 만큼 줄 높이를 늘린다 — 「고칠 수 없고 · 확정된
+  //    회차도 없는」 줄에서만 보이는 틈이라 눈에 띄기 전에 못 박는다(회차별 완료
+  //    단추 묶음이 같은 까닭으로 같은 줄을 들고 있다).
+  if (!canToggle && row.dueDates.every((dueDate) => dueDate.confirmedAt === null)) return null;
+
+  async function toggle(event: MouseEvent<HTMLButtonElement>, rowOrder: number, confirmed: boolean) {
+    // 🔴 **누름을 위로 퍼뜨리지 않는다.** 이 단추는 납기요청일 `<td>` 안에 사는데,
+    //    그 칸의 편집 단추는 **형제**라 지금은 이 누름이 거기로 가지 않는다 — 막는
+    //    것은 **줄 전체를 누르는 동작**이다. 그 동작은 2026-11-06 에 걷혔고 자리는
+    //    남아 있어서(이 파일의 `<tr>` 주석), 납기요청일 칸·납품 칸이 같은 까닭으로
+    //    같은 한 줄을 그대로 들고 있다.
+    event.stopPropagation();
+    if (pendingRowOrder !== null) return;
+    setPendingRowOrder(rowOrder);
+    onError(null);
+    try {
+      const result = await setDomesticOrderDueDateRowConfirmationAction({
+        id: row.id,
+        // 🔴 줄 전체를 덮어쓰는 저장이 아니지만 version 은 그대로 싣는다 — 그 사이
+        //    남이 납기요청일을 고쳤으면 **회차 번호가 다른 것을 가리킨다**(회차 완료와
+        //    같은 까닭).
+        expectedVersion: row.version,
+        dueDateRowOrder: rowOrder,
+        confirmed,
+      });
+      if (!result.ok) {
+        onError(result.message);
+        return;
+      }
+      router.refresh();
+      showSavePopup({
+        message: confirmed ? "이 회차의 납기일을 확정했습니다." : "이 회차의 납기일 확정을 해제했습니다.",
+        redirectTo: null,
+      });
+    } finally {
+      setPendingRowOrder(null);
+    }
+  }
+
+  return (
+    // 🔴 칸이 좁으므로 접히게 둔다 — `nowrap` 이면 회차 셋이 표를 가로로 밀어낸다
+    //    (회차별 완료 단추 묶음이 같은 까닭으로 같은 모양이다).
+    <span className="mt-1 flex flex-wrap items-center gap-1">
+      {row.dueDates.map((dueDate, index) => {
+        const rowOrder = index + 1;
+        const confirmed = dueDate.confirmedAt !== null;
+        // 🔴 글자를 지어내지 않는다 — [승인] 탭의 회차 머리·회차별 완료 단추와 **같은
+        //    한 줄**이다(domain/domestic-order-due-date-label.ts). 단추에는 짧은 말만
+        //    적고 긴 이름은 title 로 둔다(표 칸이 좁다).
+        const label = domesticOrderDueDateRowLabel(rowOrder, dueDate);
+        // 🔵 회차가 하나뿐인 줄에서는 번호를 말하지 않는다 — 가리킬 다른 회차가 없는데
+        //    「1차」를 붙이면 없는 구분을 있는 것처럼 읽게 한다(승인 거절 문장이 같은
+        //    자리에서 같은 판단을 한다 — nameTheRow).
+        const name = row.dueDates.length > 1 ? `${rowOrder}차 ` : "";
+        // 🔴 그 회차에 그릴 것이 없으면 **덩이도 만들지 않는다**(위와 같은 까닭) —
+        //    바깥 줄의 `gap-1` 이 그대로 빈 자리가 된다.
+        if (!canToggle && !confirmed) return null;
+        return (
+          // 🔴 **회차 하나가 한 덩이**다 — 표와 단추가 흩어지면 「1차의 확정」이 2차
+          //    단추 옆에 선 것처럼 읽힌다. 바깥 줄만 접히게 두고 안쪽은 묶는다.
+          <span key={dueDate.id} className="inline-flex items-center gap-1">
+            {confirmed && (
+              // 🔴 **표가 단추 왼쪽**이다 — 사실을 먼저 말하고 그다음이 조작이다
+              //    (회차별 완료 표가 세우는 차례 그대로다).
+              <span
+                title={`${label} — 납기일 확정됨`}
+                className="inline-flex items-center rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] leading-none font-medium whitespace-nowrap text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200"
+              >
+                {name}확정 ✓
+              </span>
+            )}
+            {canToggle && (
+              <button
+                type="button"
+                onClick={(event) => void toggle(event, rowOrder, !confirmed)}
+                disabled={pendingRowOrder !== null}
+                title={`${label} — ${confirmed ? "확정 해제" : "납기일 확정"}`}
+                className={rowActionButtonClass}
+              >
+                {name}
+                {confirmed ? "확정 해제" : "납기일 확정"}
+              </button>
+            )}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 /** 지금 보고 있는 것 — 사용중인 줄인가, 휴지통인가. */
 type ListView = "active" | "trash";
 
@@ -3375,6 +3535,17 @@ export default function DomesticOrderListScreen({
                           ) : (
                             <DueDateCellContent row={row} />
                           )}
+                          {/* 🔴 [납기일 확정]은 위 칸 **밖**이다(2026-11-25) — 고칠 수
+                              있는 사람에게는 그 칸 자체가 `<button>` 이라 안에 단추를
+                              넣으면 HTML 이 깨진다. 같은 `<td>` 안, 날짜 줄들 바로
+                              아래가 사용자가 짚은 「납기 요청일 옆」이다.
+                              🔵 못 고치는 세션에도 그린다 — 단추는 안 서고 「확정됨」
+                              표만 남는다(그 부품 머리말의 그 선). */}
+                          <DueDateRowConfirmToggles
+                            row={row}
+                            access={editAccess}
+                            onError={setCompletionError}
+                          />
                         </td>
                         {/* 연결이 없는 줄은 시트에 적혀 있던 글자를 그대로 보여 준다
                             (queries 의 displayIntakeNumber). 빈 줄로 두면 이어 붙일
@@ -3713,6 +3884,21 @@ export default function DomesticOrderListScreen({
                                         />
                                       ) : (
                                         field.of(row)
+                                      )}
+                                      {/* 🔴 **[납기일 확정]이 카드에도 선다**(2026-11-25) —
+                                          한쪽만 고치면 **좁은 화면에서만 단추가 사라진다**(이
+                                          저장소에서 반복된 함정이라 시험이 표와 카드를 각각
+                                          잰다). 🔴 위 갈래 **안**이 아니라 **옆**인 까닭 둘:
+                                          그 갈래는 `rowCanEdit` 이 거짓이면 아예 안 도는데
+                                          **확정 표는 권한과 상관없이 보여야** 하고, 그 자리에
+                                          끼워 넣으면 납기요청일 칸이 `<button>` 인 쪽에서
+                                          단추가 단추 안으로 들어간다. */}
+                                      {field.dueDatesEdit && (
+                                        <DueDateRowConfirmToggles
+                                          row={row}
+                                          access={editAccess}
+                                          onError={setCompletionError}
+                                        />
                                       )}
                                     </dd>
                                   </div>

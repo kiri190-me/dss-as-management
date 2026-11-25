@@ -147,6 +147,21 @@ export type DomesticOrderDueDate = {
   completedAt: string | null;
   /** 그 회차를 완료 처리한 사람의 id. 🔴 이름이 아니라 id 다 — 화면이 그리지 않는다. */
   completedBy: string | null;
+  /**
+   * 🔴 그 회차의 납기일을 **[납기일 확정]한 시각**(ISO 문자열). null 이면 아직 확정
+   * 전이다(2026-11-25 사용자 요구 — 「납기 요청일 옆에 [납기일 확정] 버튼」).
+   *
+   * 🔴 **판정은 이 한 칸이 전부다** — 바로 위 `completedAt` 과 같은 규칙이고, 표의
+   * CHECK 가 두 칸을 함께 묶는다(schema/domestic-order-due-dates.ts).
+   * 🔴 **완료와 뜻이 다르다**: 저쪽은 「이 회차를 끝냈다」, 이쪽은 「이 날짜가 더
+   * 이상 안 바뀐다」. 한쪽으로 다른 쪽을 판정하면 안 된다.
+   *
+   * 🔵 화면은 이 값을 **날짜로 그리지 않는다**(클라이언트에서 형식을 맞추면 서버가
+   * 그린 것과 달라져 hydration 이 어긋난다). 지금 쓰임은 「확정인가 아닌가」뿐이다.
+   */
+  confirmedAt: string | null;
+  /** 그 회차의 납기일을 확정한 사람의 id. 🔴 완료 쪽과 같이 **이름이 아니라 id** 다. */
+  confirmedBy: string | null;
   /** 사람이 정한 차례. 아래 조회가 이 순서로 내려보낸다. */
   displayOrder: number | null;
 };
@@ -851,6 +866,12 @@ async function loadDueDatesByOrderId(
       // [완료 처리] 단추를 그리고, [삭제] 단추를 미리 막아야 하기 때문이다.
       completedAt: domesticOrderDueDates.completedAt,
       completedBy: domesticOrderDueDates.completedBy,
+      // 🔴 회차별 납기일 확정(2026-11-25). **완료 둘과 같은 성질**이다 — 되실어 보낼
+      // 값이 아니고(저장 통로가 제 손으로 되얹는다), 여기서 읽는 까닭은 화면이
+      // [납기일 확정] 단추를 그리고 납기요청일 입력칸을 미리 잠가야 하기 때문이다
+      // (domain/domestic-order-due-date-rows.ts 의 넷째 울타리).
+      confirmedAt: domesticOrderDueDates.confirmedAt,
+      confirmedBy: domesticOrderDueDates.confirmedBy,
       displayOrder: domesticOrderDueDates.displayOrder,
     })
     .from(domesticOrderDueDates)
@@ -869,6 +890,10 @@ async function loadDueDatesByOrderId(
       //    (부모 줄의 completedAt 과 같은 처리).
       completedAt: row.completedAt ? row.completedAt.toISOString() : null,
       completedBy: row.completedBy,
+      // 🔴 확정 시각도 **Date 를 그대로 보내지 않는다**(바로 위 완료와 같은 처리) —
+      //    서버 컴포넌트 경계를 넘는 값이다.
+      confirmedAt: row.confirmedAt ? row.confirmedAt.toISOString() : null,
+      confirmedBy: row.confirmedBy,
       displayOrder: row.displayOrder,
     };
     if (bucket) bucket.push(item);

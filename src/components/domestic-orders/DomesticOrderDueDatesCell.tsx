@@ -35,6 +35,7 @@ import {
 import { DUE_DATE_FROM_REPAIR_CASE_LABEL } from "@/lib/domain/requested-due-date-link";
 import {
   domesticOrderAddDueDateBlockReason,
+  domesticOrderDueDateChangeBlockReason,
   domesticOrderRemoveDueDateBlockReason,
 } from "@/lib/domain/domestic-order-due-date-rows";
 import type { DomesticOrderListItem } from "@/lib/db/queries/domestic-orders";
@@ -89,11 +90,14 @@ import {
  * 사라진다**(domain/domestic-order-cell-edit.ts 의 넓어진 함정 ①). 그 둘을 고치는
  * 자리는 옆 칸이다(DomesticOrderDeliveriesCell).
  *
- * ── 🔴 단추 둘이 막힐 수 있다 — **까닭을 글로 적는다** ───────────────────
+ * ── 🔴 단추 둘과 **칸 하나**가 막힐 수 있다 — **까닭을 글로 적는다** ──────
  *  · **[삭제]** — 납품 기록이 달린 줄은 못 지운다(사용자 결정 5). 먼저 납품일·
  *    납품자를 지워 저장한 뒤에 줄을 지운다.
  *  · **[납기요청일 추가]** — 수리 건이 붙은 줄은 둘 이상 못 만든다(사용자 결정 9 —
  *    「납품을 여러 날짜에 나눠서 하게 되는건 기타건 밖에 없어」).
+ *  · 🔴 **날짜 입력칸** — 납기일이 확정된 회차는 [확정 해제] 전에는 못 고친다
+ *    (2026-11-25 사용자 결정, 넷째 울타리). 🔵 **메모·납품 둘은 그대로 고친다** —
+ *    확정은 납기요청일에 대한 표시다.
  *
  * 🔴 **판정을 화면이 하지 않는다.** 저장을 거절하는 그 함수에 그대로 물어본다
  * (domain/domestic-order-due-date-rows.ts) — 두 곳이 따로 정하면 단추는 눌리는데
@@ -256,10 +260,24 @@ export default function DomesticOrderDueDatesCell({
    * 판정은 화면이 하지 않고 **서버의 울타리와 같은 함수**에 물어본다 — 두 곳이 따로
    * 정하면 단추는 눌리는데 저장이 거절되거나 멀쩡한 줄에서 단추가 죽는다.
    */
-  const addBlockedReason = domesticOrderAddDueDateBlockReason({
+  /**
+   * 🔴 울타리 넷이 보는 모양 — **편집 중인 목록 그대로**다. 한 번 만들어 세 물음이
+   * 함께 쓴다([추가] · [삭제] · 날짜 칸 잠금) — 따로 만들면 한 곳만 칸을 빠뜨려
+   * 그 물음에서만 울타리가 조용히 꺼진다.
+   */
+  const rowShapes = lines.map((line) => ({
+    hasDelivery: hasDelivery(line),
     // 🔴 완료 표시도 함께 넘긴다(2026-11-08, 셋째 울타리) — 빠뜨리면 그 울타리가
     //    이 화면에서만 조용히 꺼진다.
-    rows: lines.map((line) => ({ hasDelivery: hasDelivery(line), isCompleted: line.isCompleted })),
+    isCompleted: line.isCompleted,
+    // 🔴 날짜와 확정 표시는 **넷째 울타리**의 재료다(2026-11-25). 날짜는 다듬지 않고
+    //    그대로 넘긴다 — 한쪽만 trim 하면 공백 하나로 「바뀌었다」가 된다.
+    dueDate: line.dueDate,
+    isConfirmed: line.isConfirmed,
+  }));
+
+  const addBlockedReason = domesticOrderAddDueDateBlockReason({
+    rows: rowShapes,
     repairCaseId: row.repairCaseId,
   });
 
@@ -271,8 +289,17 @@ export default function DomesticOrderDueDatesCell({
     // 싣는다(domain/domestic-order-cell-edit.ts 의 Draft 주석).
     setLines((previous) => [
       ...previous,
-      // 🔴 새 회차는 완료 표시가 없다 — 완료는 승인을 거쳐야 찍히는 값이다.
-      { key, dueDate: "", note: "", deliveredDate: "", deliveredBy: "", isCompleted: false },
+      // 🔴 새 회차는 완료 표시도 확정 표시도 없다 — 완료는 승인을 거쳐야 찍히고,
+      //    확정은 사람이 [납기일 확정]을 눌러야 찍힌다.
+      {
+        key,
+        dueDate: "",
+        note: "",
+        deliveredDate: "",
+        deliveredBy: "",
+        isCompleted: false,
+        isConfirmed: false,
+      },
     ]);
   }
 
@@ -288,7 +315,24 @@ export default function DomesticOrderDueDatesCell({
    */
   function removeBlockedReason(index: number): string | null {
     return domesticOrderRemoveDueDateBlockReason({
-      rows: lines.map((line) => ({ hasDelivery: hasDelivery(line), isCompleted: line.isCompleted })),
+      rows: rowShapes,
+      index,
+      repairCaseId: row.repairCaseId,
+    });
+  }
+
+  /**
+   * 🔴 **그 줄의 날짜 칸을 잠가야 하는가**(2026-11-25) — 납기일이 확정된 회차는
+   * [확정 해제] 전에는 날짜를 못 고친다(사용자 결정: 「[확정 해제]를 해야만 날짜를
+   * 고칠 수 있도록 해줘」).
+   *
+   * 🔴 위 두 단추와 **같은 방식**이다 — 판정은 서버의 울타리와 같은 함수가 한다.
+   * 🔵 **메모 칸은 잠그지 않는다** — 확정은 납기요청일에 대한 표시이고, 메모까지
+   * 잠그면 확정한 회차에 「1차분」을 적을 길이 사라진다.
+   */
+  function dueDateChangeBlockedReason(index: number): string | null {
+    return domesticOrderDueDateChangeBlockReason({
+      rows: rowShapes,
       index,
       repairCaseId: row.repairCaseId,
     });
@@ -313,16 +357,17 @@ export default function DomesticOrderDueDatesCell({
     // 받은 목록으로 그 줄의 행을 통째로 다시 만들므로 **빼면 납품 기록이 사라진다**
     // (domain/domestic-order-cell-edit.ts 의 넓어진 함정 ①).
     const drafts: DomesticOrderDueDateDraft[] = lines.map(
-      ({ dueDate, note, deliveredDate, deliveredBy, isCompleted }) => ({
+      ({ dueDate, note, deliveredDate, deliveredBy, isCompleted, isConfirmed }) => ({
         dueDate,
         note,
         deliveredDate,
         deliveredBy,
         // 🔴 **서버로 나가지 않는다**(buildDomesticOrderDueDatesUpdateFields 가 네 칸만
-        //    옮긴다 — 완료는 서버가 제 손으로 다시 적는다). 그래도 모양을 맞춰 들고
-        //    가는 것은, 여기서 지어낸 값을 넣으면 나중에 이 자리를 보는 사람이
+        //    옮긴다 — 완료도 확정도 서버가 제 손으로 다시 적는다). 그래도 모양을 맞춰
+        //    들고 가는 것은, 여기서 지어낸 값을 넣으면 나중에 이 자리를 보는 사람이
         //    「완료를 보내고 있다」고 읽기 때문이다.
         isCompleted,
+        isConfirmed,
       })
     );
     try {
@@ -421,6 +466,9 @@ export default function DomesticOrderDueDatesCell({
             // title 과 줄 밑 안내로 **글로 보인다** — 까닭 없이 안 눌리는 단추는
             // 고장으로 읽힌다.
             const removeBlocked = removeBlockedReason(index);
+            // 🔴 확정된 회차의 날짜는 못 고친다(2026-11-25, 넷째 울타리). 같은 까닭으로
+            // 글로도 보인다(아래) — 안 눌리는 칸은 고장으로 읽힌다.
+            const dueDateBlocked = dueDateChangeBlockedReason(index);
             return (
               <li key={line.key} className="flex flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -436,7 +484,11 @@ export default function DomesticOrderDueDatesCell({
                       max={DATE_INPUT_MAX}
                       className={editInputClass}
                       value={line.dueDate}
-                      disabled={disabled}
+                      // 🔴 확정된 회차는 여기서 막는다(위 dueDateChangeBlockedReason).
+                      //    막지 않아도 저장이 거절되지만, 다 고쳐 놓고 저장을 누른
+                      //    뒤에야 듣는 말이 된다.
+                      disabled={disabled || dueDateBlocked !== null}
+                      title={dueDateBlocked ?? undefined}
                       aria-label={`${LABEL} ${index + 1}`}
                       onChange={(event) => updateLine(line.key, { dueDate: event.target.value })}
                     />
@@ -470,6 +522,13 @@ export default function DomesticOrderDueDatesCell({
                     **늘 보이는 한 줄**로 적는다(사용자 결정 5 의 「까닭이 글로
                     보인다」). 키보드만 쓰는 사람에게는 이것이 유일한 설명이다. */}
                 {removeBlocked !== null && <p className={cellHintClass}>{removeBlocked}</p>}
+                {/* 🔴 날짜 칸이 잠긴 까닭도 **늘 보이는 한 줄**로 적는다(2026-11-25) —
+                    위 [삭제] 와 같은 규칙이다. 🔵 두 글이 같은 말을 할 때는 한 번만
+                    적는다: 확정된 회차에서는 [삭제] 쪽이 「줄을 지울 수 없다」를,
+                    이쪽이 「날짜를 고칠 수 없다」를 말해 **할 말이 서로 다르다.** */}
+                {dueDateBlocked !== null && dueDateBlocked !== removeBlocked && (
+                  <p className={cellHintClass}>{dueDateBlocked}</p>
+                )}
                 {lineErrors[errorKey] && <p className={editErrorClass}>{lineErrors[errorKey]}</p>}
               </li>
             );

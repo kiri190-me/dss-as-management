@@ -638,3 +638,16 @@ src/app/api/integration/delegations/route-list-branch.integration.test.ts
 # 무는지는 `delegated_from` 만 채운 REQUESTED 줄로만 잴 수 있다) · 표 둘·갈래 셋이 한
 # 목록으로 합쳐지고 주소가 갈래마다 제 것인가(기타건은 `/domestic-orders/`).
 src/lib/db/queries/approval-history.integration.test.ts
+
+# 🔴 회차별 [납기일 확정] — 2026-11-25
+# 🔴 **되얹기**(확정한 회차의 비고·납품을 고쳐도 확정이 그 자리에 살아남고, 뒤에 더한
+# 회차는 확정이 아니다 — 되얹기가 빠지면 오류도 로그도 없이 며칠 뒤에야 드러난다) ·
+# 🔴 **잠금**(확정된 회차의 날짜를 고치거나 그 회차를 지우는 저장이 거절되고, 거절로
+# 끝난 저장이 줄의 다른 칸도 안 바꾼다) · 🔵 **그 짝**(비고·납품은 그대로 고쳐지고,
+# [확정 해제] 뒤에는 날짜가 다시 고쳐진다 — 「막는다」만 재면 **전부 막아 버린 구현**도
+# 통과한다) · 🔴 두 칸이 **함께** 움직이는가 · 🔴 **version 이 안 오르는가**(오르면 그
+# 줄의 회차별 승인이 전부 STALE 이 된다) · 🔴 **수리 건이 붙은 줄에서도 확정되는가**
+# (회차별 완료는 기타건 전용이라 **일부러 다르다** — 2026-11-25 사용자 결정) ·
+# 🔴 완료된 줄의 「완료 시 수정」 관문(그 권한이 없으면 확정도 막히고, **완료 전인
+# 줄은 그 권한 없이도** 확정된다).
+src/lib/db/mutations/domestic-order-due-date-confirmation.integration.test.ts

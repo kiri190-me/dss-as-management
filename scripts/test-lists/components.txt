@@ -1975,3 +1975,12 @@ src/components/misc-cases/misc-case-due-date-near-badge.test.tsx
 # 거절한다) · 🔴 도우미 주소를 직접 짓지 않고 여는 단추를 그대로 가져다 쓰는가 · 🔴 편집기가
 # 패널에 **수리 건 id** 를 넘기는가(노드 id 와 둘 다 UUID 라 겉으로는 똑같이 보인다).
 src/components/repair-cases/flowchart/case-flowchart-node-share-doc.test.tsx
+
+# 🔴 납기요청일 칸의 [납기일 확정] — 2026-11-25
+# 🔴 **`<button>` 안에 `<button>` 이 없다**(고칠 수 있는 사람에게는 그 칸 자체가 단추다) ·
+# 🔴 **표와 카드 둘 다** 서는가(한쪽만 고치면 좁은 화면에서만 단추가 사라진다 — 두
+# 덩어리를 따로 잘라 잰다) · 🔴 **납기요청일이 적힌 줄에만** 서는가 · 🔴 단추만 권한으로
+# 갈리고 **확정 표는 안 갈리는가**(표는 고치는 길이 아니라 사실이다) · 🔴 보내는 값
+# 셋(줄 id · **그 줄의 version** · 회차 번호)과 누름이 위로 안 퍼지게 막는 한 줄 ·
+# 🔴 회차 이름을 지어내지 않고 다른 화면이 쓰는 그 한 줄을 받는가.
+src/components/domestic-orders/domestic-order-due-date-confirm-screens.test.ts

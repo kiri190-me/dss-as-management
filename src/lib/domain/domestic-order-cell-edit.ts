@@ -402,6 +402,12 @@ export type DomesticOrderCellEditRow = {
      * 아래 collectRowFields 가 네 칸만 골라 싣는 것이 「안 나간다」의 보증이다.
      */
     completedAt: string | null;
+    /**
+     * 🔴 그 회차의 **납기일 확정 시각**(2026-11-25). 바로 위 완료와 **성질이 똑같다** —
+     * 저장에 실리지 않고(서버가 제 손으로 되얹는다), 화면이 **미리 막는 데** 쓴다:
+     * [삭제] 단추 전부와 **그 회차의 날짜 입력칸**(넷째 울타리).
+     */
+    confirmedAt: string | null;
   }[];
   quoteIssuedDate: string | null;
   quoteNumber: string | null;
@@ -668,19 +674,34 @@ export type DomesticOrderDueDateDraft = {
    * 값이 없으면 단추는 눌리는데 저장이 거절되고, 사람은 까닭을 저장한 뒤에야 안다.
    */
   isCompleted: boolean;
+  /**
+   * 🔴 그 회차의 **납기일이 확정되었는가**(2026-11-25). 바로 위 `isCompleted` 와
+   * **성질이 같다** — 서버로 나가지 않고(Payload 에 없다), 화면이 **미리 막기 위해**
+   * 들고 다니는 값이다.
+   *
+   * 🔴 막는 것이 둘이다: 확정된 회차가 있으면 **[삭제] 전부**가 막히고, 확정된 그
+   * 회차의 **납기요청일 입력칸**이 잠긴다(넷째 울타리 — 사용자 결정 2026-11-25
+   * 「[확정 해제]를 해야만 날짜를 고칠 수 있도록」). 🔵 **비고·납품 둘은 그대로
+   * 고친다** — 확정은 납기요청일에 대한 표시다.
+   */
+  isConfirmed: boolean;
 };
 
 /**
- * 🔴 **서버로 실제로 나가는 네 칸** — 위 Draft 에서 `isCompleted` 를 뺀 모양
- * (2026-11-08). `buildDomesticOrderDueDatesUpdateFields` 가 옮겨 담는 그 넷이고,
- * **충돌 상자의 글자를 만드는 두 함수**가 이 모양을 받는다.
+ * 🔴 **서버로 실제로 나가는 네 칸** — 위 Draft 에서 **화면이 미리 막으려고 들고만
+ * 다니는 둘**(`isCompleted` · `isConfirmed`)을 뺀 모양(2026-11-08 · 11-25).
+ * `buildDomesticOrderDueDatesUpdateFields` 가 옮겨 담는 그 넷이고, **충돌 상자의
+ * 글자를 만드는 두 함수**가 이 모양을 받는다.
  *
  * 왜 따로 이름을 붙이는가: 그 두 함수에 Draft 를 통째로 요구하면 부르는 쪽이 서버로
- * 나가지도 않는 완료 표시를 **지어내 채워야** 하고, 그렇게 지어낸 값은 언젠가
+ * 나가지도 않는 완료·확정 표시를 **지어내 채워야** 하고, 그렇게 지어낸 값은 언젠가
  * 진짜처럼 읽힌다. 거꾸로 읽는 칸만 Pick 하면 네 칸짜리 목록을 그대로 넘기는 자리가
  * 전부 「없는 속성」 오류가 된다.
  */
-export type DomesticOrderDueDateDraftPayload = Omit<DomesticOrderDueDateDraft, "isCompleted">;
+export type DomesticOrderDueDateDraftPayload = Omit<
+  DomesticOrderDueDateDraft,
+  "isCompleted" | "isConfirmed"
+>;
 
 /**
  * 편집 목록을 **무엇으로 채울 것인가** — 이 줄에 적힌 날짜 그대로, 차례도
@@ -702,6 +723,11 @@ export function domesticOrderDueDateEditDraft(row: {
     deliveredBy: string | null;
     /** 🔴 그 회차의 완료 시각. 보내지 않고 **단추를 막는 데만** 쓴다(Draft 주석). */
     completedAt: string | null;
+    /**
+     * 🔴 그 회차의 **납기일 확정 시각**(2026-11-25). 위와 같이 보내지 않고 **막는
+     * 데만** 쓴다 — [삭제] 전부와 그 회차의 납기요청일 입력칸(Draft 주석).
+     */
+    confirmedAt: string | null;
   }[];
 }): DomesticOrderDueDateDraft[] {
   return row.dueDates.map((entry) => ({
@@ -715,6 +741,8 @@ export function domesticOrderDueDateEditDraft(row: {
     // 🔴 **판정은 completed_at 하나로만 한다**(그 표의 칸 주석과 같은 규칙) —
     // completed_by 로 가르면 두 칸이 어긋난 행에서 답이 갈린다.
     isCompleted: entry.completedAt !== null,
+    // 🔴 확정도 **confirmed_at 하나로만** 가른다(같은 규칙·같은 까닭).
+    isConfirmed: entry.confirmedAt !== null,
   }));
 }
 

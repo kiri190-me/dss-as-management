@@ -19,6 +19,7 @@ import {
 import {
   createDomesticOrder,
   setDomesticOrderDueDateRowCompletion,
+  setDomesticOrderDueDateRowConfirmation,
   updateDomesticOrder,
 } from "@/lib/db/mutations/domestic-orders";
 import {
@@ -440,6 +441,105 @@ export async function setDomesticOrderDueDateRowCompletionAction(input: {
       : { ok: false, code: result.code, message: result.message };
   } catch (err) {
     console.error("setDomesticOrderDueDateRowCompletionAction: unexpected DB error", err);
+    return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
+  }
+}
+
+/**
+ * ============================================================================
+ * 🔴 **회차 하나의 [납기일 확정] · [확정 해제]** (2026-11-25)
+ * ============================================================================
+ * 사용자 요구: 「납기 요청일 옆에 **[납기일 확정] 버튼**을 만들어줘 … 이 버튼을 누르면
+ * 포털의 알림 중에 **[납기 임박] 알림이 뜨지 않도록** 해줘.」
+ *
+ * 관문은 바로 위 회차 완료와 **똑같다**(resolveAuthorizedActingUser —
+ * `domesticOrders.edit` WRITE). 🔴 올리지도 내리지도 않는다: 확정은 **그 줄을 고치는
+ * 일**이고, 되돌릴 수 있으며(바로 옆 [확정 해제]), 값이 사라지지도 않는다.
+ * 🔴 **감사 로그를 따로 쓰지 않는 것도 회차 완료와 같다** — 누가 언제 확정했는지는
+ * 그 행의 `confirmed_at`·`confirmed_by` 가 그대로 기록이다(그 표의 완료 두 칸과 같은
+ * 모양). 이 길에만 로그를 더하면 같은 표의 같은 성질인 조작 둘이 서로 다른 흔적을
+ * 남기고, 「완료는 왜 안 남지」가 된다.
+ *
+ * ── 🔴 **서비스를 거치지 않는다** ───────────────────────────────────────
+ * 회차 완료와 같은 까닭이다 — 함께 움직일 수리 건 전이가 **없다.** 확정은 이 표의 두
+ * 칸을 찍는 일이 전부이고, 수리 건 쪽에는 그에 해당하는 상태가 아예 없다.
+ *
+ * 🔴 **서버가 하나 더 본다**(이 액션이 하지 않는다): 완료된 줄이면 「완료 시 수정」이
+ * 있어야 한다. 판정도 거절 문구도 mutation 한 곳이 쥐고(FORBIDDEN), 이 액션은 그 답을
+ * 그대로 나른다 — 액션이 관문을 한 벌 더 가지면 화면 경로와 서버가 서로 다른 조건으로
+ * 막힌다(회차 완료와 같은 규칙).
+ * ============================================================================
+ */
+export type DomesticOrderDueDateRowConfirmationActionResult =
+  | { ok: true; id: string; version: number }
+  | {
+      ok: false;
+      code: DomesticOrderActionResultCode;
+      fieldErrors?: Record<string, string>;
+      message: string;
+    };
+
+export async function setDomesticOrderDueDateRowConfirmationAction(input: {
+  id: string;
+  expectedVersion: number;
+  /** 몇 번째 회차인가(1부터). 화면의 「N차」와 같은 번호다. */
+  dueDateRowOrder: number;
+  confirmed: boolean;
+}): Promise<DomesticOrderDueDateRowConfirmationActionResult> {
+  const auth = await resolveAuthorizedActingUser();
+  if (!auth.ok) return { ok: false, code: auth.code, message: auth.message };
+
+  if (!isValidDomesticOrderId(input.id)) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { id: "항목을 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+  if (!isValidExpectedVersion(input.expectedVersion)) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { expectedVersion: "수정 시점 정보를 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+  // 🔴 **형식만** 본다(회차 완료와 같다) — 「그 줄에 그 회차가 있는가」는 줄을 읽어야
+  //    아는 판단이라 mutation 이 잠근 줄에서 다시 센다. 그래도 한 겹 거르는 까닭은
+  //    소수·음수가 그대로 내려가면 SQL 비교가 조용히 아무 행도 못 찾기 때문이다.
+  if (!Number.isInteger(input.dueDateRowOrder) || input.dueDateRowOrder < 1) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { dueDateRowOrder: "회차를 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+  // 불리언이 아닌 값을 받아 두면 undefined 가 "해제"로 조용히 읽힌다(완료와 같다).
+  if (typeof input.confirmed !== "boolean") {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      fieldErrors: { confirmed: "확정 여부를 확인할 수 없습니다." },
+      message: VALIDATION_MESSAGE,
+    };
+  }
+
+  try {
+    const result = await setDomesticOrderDueDateRowConfirmation({
+      id: input.id,
+      expectedVersion: input.expectedVersion,
+      dueDateRowOrder: input.dueDateRowOrder,
+      confirmed: input.confirmed,
+      actorUserId: auth.actingUser.id,
+    });
+    return result.ok
+      ? { ok: true, id: result.id, version: result.version }
+      : { ok: false, code: result.code, message: result.message };
+  } catch (err) {
+    // 값 자체는 로그에 담지 않는다(이 파일의 다른 액션과 같은 이유).
+    console.error("setDomesticOrderDueDateRowConfirmationAction: unexpected DB error", err);
     return { ok: false, code: "DATABASE_UNAVAILABLE", message: DATABASE_UNAVAILABLE_MESSAGE };
   }
 }

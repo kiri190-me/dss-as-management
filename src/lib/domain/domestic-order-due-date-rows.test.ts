@@ -4,7 +4,10 @@ import assert from "node:assert/strict";
 import {
   checkDomesticOrderDueDateRows,
   COMPLETED_DUE_DATE_ROW_MESSAGE,
+  confirmedDueDateRowChangedMessage,
+  CONFIRMED_DUE_DATE_ROW_MESSAGE,
   domesticOrderAddDueDateBlockReason,
+  domesticOrderDueDateChangeBlockReason,
   domesticOrderRemoveDueDateBlockReason,
   DUE_DATE_ROW_HAS_DELIVERY_MESSAGE,
   LINKED_LINE_SINGLE_DUE_DATE_MESSAGE,
@@ -26,6 +29,10 @@ import {
  *  4. 🔴 **결정 13 의 짝**(2026-11-08) — 완료 처리된 회차가 있으면 줄 수를 **줄일 수
  *     없다**. 완료 표시가 자리로 따라가기 때문이고(그 파일 머리말), 늘리는 쪽과
  *     완료를 푸는 쪽은 열려 있어야 한다.
+ *  5. 🔴 **확정 잠금**(2026-11-25 사용자 결정 — 「[확정 해제]를 해야만 날짜를 고칠 수
+ *     있도록 해줘」) — 납기일이 확정된 회차는 **날짜를 못 고치고 그 줄도 못 지운다**.
+ *     🔵 그 옆에 **통과해야 하는 저장**을 함께 잰다(비고·납품 고치기 · 뒤에 더하기 ·
+ *     해제한 뒤 고치기) — 「막는다」만 재면 **전부 막아 버린 구현**도 통과한다.
  * ============================================================================
  */
 
@@ -33,17 +40,47 @@ const CASE_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_CASE_ID = "22222222-2222-4222-8222-222222222222";
 
 /**
+ * 🔴 **모든 표본이 같은 날짜를 쓴다**(2026-11-25). 넷째 울타리는 **자리마다 날짜를
+ * 견주는** 울타리라, 표본마다 날짜가 다르면 ①~④ 의 시험들이 「날짜가 바뀐 저장」이
+ * 되어 엉뚱한 까닭으로 거절된다 — 그 묶음들이 재려는 것은 날짜가 아니다.
+ * 🔵 날짜를 **일부러 바꾸는** 시험은 아래 ⑤ 가 제 표본을 손으로 만든다.
+ */
+const DATE = "2026-01-20";
+
+/**
  * 납품 기록이 있는 행 / 없는 행.
  *
  * 🔴 **2026-11-08 에 칸이 하나 늘었다**(`isCompleted`) — 회차별 [완료 처리]가 생기면서
  * 셋째 울타리가 붙었다. 이 묶음(① · ②)의 시험들은 **완료되지 않은 줄**을 재던 것이라
  * 전부 거짓으로 둔다: 아래 ③ 이 새로 생긴 울타리를 따로 잰다.
+ * 🔴 **2026-11-25 에 둘 더 늘었다**(`dueDate` · `isConfirmed`) — 넷째 울타리(확정
+ * 잠금)가 붙었다. 같은 까닭으로 ①~④ 의 표본은 전부 **확정 안 된 회차**다.
  */
-const WITH = { hasDelivery: true, isCompleted: false };
-const WITHOUT = { hasDelivery: false, isCompleted: false };
+const WITH = { hasDelivery: true, isCompleted: false, dueDate: DATE, isConfirmed: false };
+const WITHOUT = { hasDelivery: false, isCompleted: false, dueDate: DATE, isConfirmed: false };
 /** 🔴 **완료 처리된 회차**. 납품 기록은 따로 본다 — 완료가 납품을 뜻하지는 않는다. */
-const DONE = { hasDelivery: true, isCompleted: true };
-const DONE_WITHOUT_DELIVERY = { hasDelivery: false, isCompleted: true };
+const DONE = { hasDelivery: true, isCompleted: true, dueDate: DATE, isConfirmed: false };
+const DONE_WITHOUT_DELIVERY = {
+  hasDelivery: false,
+  isCompleted: true,
+  dueDate: DATE,
+  isConfirmed: false,
+};
+/**
+ * 🔴 **납기일이 확정된 회차**(2026-11-25). 완료와 **따로 둔다** — 둘은 뜻이 다르고
+ * (「끝났다」 ↔ 「이 날짜가 더 이상 안 바뀐다」), 한 표본에 둘 다 찍어 두면 둘 중
+ * 하나만 보는 구현도 통과한다.
+ */
+const CONFIRMED = { hasDelivery: false, isCompleted: false, dueDate: DATE, isConfirmed: true };
+/**
+ * **보내온 목록**의 같은 자리인데 **날짜만 다른** 행 — 넷째 울타리가 걸러야 하는
+ * 바로 그 모양이다.
+ *
+ * 🔴 `isConfirmed` 가 **거짓인 것이 실제 모양**이다: 보내온 목록에는 확정 표시가 없고
+ * (저장 통로가 전부 거짓으로 넘긴다 — mutations/domestic-orders.ts 의
+ * checkDueDateRowGuard), 울타리는 **저장돼 있던 쪽**의 확정만 본다.
+ */
+const MOVED = { ...WITHOUT, dueDate: "2026-03-09" };
 
 function check(input: Parameters<typeof checkDomesticOrderDueDateRows>[0]) {
   return checkDomesticOrderDueDateRows(input);
@@ -366,4 +403,156 @@ test("🔴 [삭제] 단추는 **그 기타건의 모든 줄에서** 막힌다 �
   }
   // 🔵 **[추가] 는 막지 않는다** — 늘리는 쪽은 앞 자리를 건드리지 않는다.
   assert.equal(domesticOrderAddDueDateBlockReason({ rows, repairCaseId: null }), null);
+});
+
+// ── ⑤ 🔴 넷째 울타리 — 확정된 회차는 날짜를 못 고치고 그 줄도 못 지운다 ─────
+//
+// 🔴 **「막는다」만 재면 전부 막아 버린 구현도 통과한다.** 그래서 짝으로 잰다:
+// 막히는 저장 바로 옆에 **통과해야 하는 저장**을 둔다(비고·납품 고치기 · 해제 뒤 고치기).
+
+test("🔴 확정된 회차의 납기요청일을 고치는 저장은 거절된다", () => {
+  const result = check({
+    storedRows: [CONFIRMED],
+    nextRows: [MOVED],
+    storedRepairCaseId: null,
+    nextRepairCaseId: null,
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.reason, "CONFIRMED_ROW_DUE_DATE_CHANGED");
+  assert.equal(result.field, "dueDates");
+  // 🔴 **무엇을 먼저 해야 하는지**가 글에 있어야 한다 — 확정은 되돌릴 수 있으니
+  //    막다른 길이 아니고, 그 사실이 문장에 보여야 사람이 [확정 해제]를 찾아간다.
+  assert.ok(result.message.includes("[확정 해제]"), "되돌리는 길을 안 말한다");
+  // 🔴 **어느 회차인지**까지 말한다 — 회차가 여럿인 줄에서 「어떤 날짜가 막혔는지」를
+  //    모르면 사람은 셋을 다 풀어 본다. 번호도 **저장돼 있던 날짜**도 글에 있어야 한다.
+  assert.ok(result.message.includes("1차"), `회차 번호가 없다: ${result.message}`);
+  assert.ok(result.message.includes(DATE), `확정된 날짜가 없다: ${result.message}`);
+});
+
+test("🔴 확정된 회차가 **둘째**면 그 번호를 말한다 — 자리로 견주는지가 여기서 갈린다", () => {
+  const result = check({
+    storedRows: [WITHOUT, CONFIRMED],
+    nextRows: [WITHOUT, MOVED],
+    storedRepairCaseId: null,
+    nextRepairCaseId: null,
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.reason, "CONFIRMED_ROW_DUE_DATE_CHANGED");
+  assert.ok(result.message.includes("2차"), `회차 번호가 1차로 나온다: ${result.message}`);
+});
+
+test("🔴 확정된 회차를 **지우는**(줄 수를 줄이는) 저장도 거절된다", () => {
+  // 🔴 이것이 없으면 「날짜는 못 고치는데 줄을 통째로 지우는 건 된다」가 되어, 날짜를
+  //    바꾸려는 사람이 **지우고 새로 만들면 그만**이다.
+  const result = check({
+    storedRows: [WITHOUT, CONFIRMED],
+    nextRows: [WITHOUT],
+    storedRepairCaseId: null,
+    nextRepairCaseId: null,
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.reason, "CONFIRMED_ROW_ON_SHRINKING_LIST");
+  assert.equal(result.message, CONFIRMED_DUE_DATE_ROW_MESSAGE);
+  assert.ok(result.message.includes("[확정 해제]"), "되돌리는 길을 안 말한다");
+});
+
+test("🔴 확정된 회차가 **앞자리**여도 줄이는 저장은 거절된다 — 확정이 자리로 따라간다", () => {
+  const result = check({
+    storedRows: [CONFIRMED, WITHOUT],
+    nextRows: [CONFIRMED],
+    storedRepairCaseId: null,
+    nextRepairCaseId: null,
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "CONFIRMED_ROW_ON_SHRINKING_LIST");
+});
+
+test("🔵 확정된 회차가 있어도 **날짜가 그대로면 통과한다** — 비고·납품을 고치는 저장", () => {
+  // 🔴 이 길이 열려 있어야 한다. 막으면 확정한 회차에 「1차분」을 적을 수도, 납품일을
+  //    찍을 수도 없다 — 확정이 잠그는 것은 **납기요청일 하나**다.
+  assert.deepEqual(
+    check({
+      storedRows: [CONFIRMED],
+      // 같은 날짜 · 납품 기록만 붙었다(hasDelivery 가 참으로 바뀌었다).
+      nextRows: [{ ...WITHOUT, hasDelivery: true }],
+      storedRepairCaseId: null,
+      nextRepairCaseId: null,
+    }),
+    { ok: true }
+  );
+});
+
+test("🔵 확정된 회차가 있어도 **뒤에 더하는** 저장은 통과한다 — 앞 자리가 그대로다", () => {
+  assert.deepEqual(
+    check({
+      storedRows: [CONFIRMED],
+      nextRows: [WITHOUT, WITHOUT],
+      storedRepairCaseId: null,
+      nextRepairCaseId: null,
+    }),
+    { ok: true }
+  );
+});
+
+test("🔴 **확정을 풀면 날짜가 고쳐진다** — 막다른 길이 아니다", () => {
+  // 두 걸음이 실제로 통하는지 잰다: ① [확정 해제](이 표의 밖에서 일어난다) →
+  // ② 날짜 고치기. 🔵 「막는다」 쪽만 재면 **전부 막아 버린 구현**도 통과하므로,
+  // 이 시험이 그 짝이다.
+  assert.deepEqual(
+    check({
+      // 해제된 뒤의 저장돼 있던 모양 — 날짜는 그대로이고 확정만 풀렸다.
+      storedRows: [WITHOUT],
+      nextRows: [MOVED],
+      storedRepairCaseId: null,
+      nextRepairCaseId: null,
+    }),
+    { ok: true }
+  );
+  // 그리고 그 줄을 지우는 것도 다시 된다.
+  assert.deepEqual(
+    check({
+      storedRows: [WITHOUT, WITHOUT],
+      nextRows: [WITHOUT],
+      storedRepairCaseId: null,
+      nextRepairCaseId: null,
+    }),
+    { ok: true }
+  );
+});
+
+test("🔴 [삭제] 단추는 **그 줄의 모든 자리에서** 막힌다 — 확정된 회차가 하나라도 있으면", () => {
+  const rows = [WITHOUT, CONFIRMED, WITHOUT];
+  for (const index of [0, 1, 2]) {
+    assert.equal(
+      domesticOrderRemoveDueDateBlockReason({ rows, index, repairCaseId: null }),
+      CONFIRMED_DUE_DATE_ROW_MESSAGE,
+      `${index} 번째 줄에서 까닭이 안 나온다`
+    );
+  }
+  // 🔵 **[추가] 는 막지 않는다** — 늘리는 쪽은 앞 자리를 건드리지 않는다.
+  assert.equal(domesticOrderAddDueDateBlockReason({ rows, repairCaseId: null }), null);
+});
+
+test("🔵 날짜 칸 잠금도 **서버 판정에 물어본다** — 확정된 그 줄에서만 잠긴다", () => {
+  const rows = [WITHOUT, CONFIRMED];
+  // 확정 안 된 1차는 그대로 고친다.
+  assert.equal(
+    domesticOrderDueDateChangeBlockReason({ rows, index: 0, repairCaseId: null }),
+    null
+  );
+  // 확정된 2차만 잠긴다 — 그리고 그 글이 **어느 회차인지**를 말한다.
+  const blocked = domesticOrderDueDateChangeBlockReason({ rows, index: 1, repairCaseId: null });
+  assert.equal(blocked, confirmedDueDateRowChangedMessage(2, DATE));
+  assert.ok(blocked !== null && blocked.includes("[확정 해제]"));
+  // 🔴 **확정이 하나도 없는 줄에서는 한 칸도 안 잠긴다** — 이 셈이 뒤집히면 이 화면의
+  //    납기요청일이 통째로 읽기 전용이 된다(그리고 아무도 고칠 수 없게 된다).
+  for (const index of [0, 1]) {
+    assert.equal(
+      domesticOrderDueDateChangeBlockReason({ rows: [WITHOUT, WITH], index, repairCaseId: null }),
+      null
+    );
+  }
 });

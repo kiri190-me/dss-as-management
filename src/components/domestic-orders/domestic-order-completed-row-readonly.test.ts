@@ -201,8 +201,21 @@ describe("🔴 ④⑤ [완료 해제]만 사라진다 — [완료 처리]와 사
   const toggle = flat(
     stripComments(sliceBetween(listScreen, "function CompletionToggle({", "function DueDateRowCompletionToggles({"))
   );
+  // 🔴 **끝 표시를 바로 다음 함수로 바꿨다**(2026-11-25). 전에는 `type ListView =` 까지
+  //    잘랐는데, 그 사이에 **[납기일 확정] 조각**(DueDateRowConfirmToggles)이 생겼다.
+  //    그 조각은 **줄로 판정하는 것이 맞아서**(확정은 완료와 뜻이 다른 값이다) 안에
+  //    `canEditDomesticOrderWhenCompleted(row, …)` 이 들어 있고, 그대로 두면 아래
+  //    「회차를 줄로 재고 있다」가 **남의 조각 때문에** 걸린다.
+  //    🔵 단언은 한 글자도 약해지지 않았다 — 자른 덩어리가 **그 함수 하나**로 좁아졌을
+  //    뿐이고, 좁아진 만큼 「회차 단추가 회차로 판정하는가」를 더 정확히 잰다.
   const rowToggles = flat(
-    stripComments(sliceBetween(listScreen, "function DueDateRowCompletionToggles({", "type ListView ="))
+    stripComments(
+      sliceBetween(
+        listScreen,
+        "function DueDateRowCompletionToggles({",
+        "function DueDateRowConfirmToggles({"
+      )
+    )
   );
 
   test("줄 단추는 **그 줄의 완료 여부**로 가른다", () => {
@@ -249,11 +262,26 @@ describe("🔴 ④⑤ [완료 해제]만 사라진다 — [완료 처리]와 사
   });
 
   test("🔴 표와 카드가 둘 다 완료 단추에 권한을 넘긴다", () => {
+    // 🔴 **`access={editAccess}` 를 파일 전체에서 세지 않는다**(2026-11-25). 같은 프롭을
+    //    받는 부품이 하나 늘었고(DueDateRowConfirmToggles — 납기요청일 칸의 [납기일
+    //    확정]), 그쪽도 표와 카드 둘에 선다. 총수로 재면 그 조각이 늘 때마다 **이 시험이
+    //    까닭 없이 깨지고**, 더 나쁘게는 「완료 단추 쪽이 빠졌는데 다른 조각이 수를
+    //    채워 통과하는」 판이 생긴다.
+    // 🔵 그래서 **완료 단추 그 태그 안에서** 센다 — 단언은 약해지지 않고, 「둘 다
+    //    넘기는가」를 자리까지 집어 확인한다.
+    const completionToggles = screenNoComments.split("<CompletionToggle ").slice(1);
     assert.equal(
-      screenNoComments.split("access={editAccess}").length - 1,
+      completionToggles.length,
       2,
-      "완료 단추에 권한을 넘기는 자리가 둘이 아니다 — 한쪽에서는 영영 안 막힌다"
+      "완료 단추를 그리는 자리가 둘이 아니다 — 표나 카드 한쪽이 빠졌다"
     );
+    for (const [index, rest] of completionToggles.entries()) {
+      const props = rest.slice(0, rest.indexOf("/>"));
+      assert.ok(
+        props.includes("access={editAccess}"),
+        `${index === 0 ? "표" : "카드"}의 완료 단추가 권한을 안 넘긴다 — 거기서는 영영 안 막힌다`
+      );
+    }
     assert.ok(tableBody.includes("access={editAccess}"), "표가 안 넘긴다");
     assert.ok(cardBody.includes("access={editAccess}"), "카드가 안 넘긴다");
   });

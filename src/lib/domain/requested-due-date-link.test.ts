@@ -52,7 +52,16 @@ function dueDate(date: string, note: string | null = null) {
   //    모양이 실제와 달라지면 아래 cellEditRow 가 보내는 payload 도 달라진다.
   // 🔴 다섯째 칸은 저장에 실리지 않는다(2026-11-08) — 편집 목록이 [삭제] 단추를
   //    막는 데만 쓴다. 이 파일이 재는 규칙과는 상관없고, 모양만 실제와 맞춘다.
-  return { dueDate: date, note, deliveredDate: null, deliveredBy: null, completedAt: null };
+  // 🔴 여섯째 칸(확정 시각, 2026-11-25)도 **같은 성질**이다 — 저장에 안 실리고,
+  //    날짜 입력칸을 막는 데만 쓴다. 역시 모양만 실제와 맞춘다.
+  return {
+    dueDate: date,
+    note,
+    deliveredDate: null,
+    deliveredBy: null,
+    completedAt: null,
+    confirmedAt: null,
+  };
 }
 
 // ── ① 내자 정리 쪽 — 이 줄에 적힌 날짜가 먼저 ───────────────────────────
@@ -353,6 +362,8 @@ function cellEditRow(
     deliveredBy: string | null;
     /** 🔴 2026-11-08 — 회차별 완료. 저장에 실리지 않지만 타입에는 있다. */
     completedAt: string | null;
+    /** 🔴 2026-11-25 — 회차별 납기일 확정. 위와 같이 저장에 안 실리고 타입에만 있다. */
+    confirmedAt: string | null;
   }[]
 ) {
   return {

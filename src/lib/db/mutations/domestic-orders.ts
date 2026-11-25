@@ -473,6 +473,19 @@ async function replaceDueDates(
       //    완료로 태어나는 길은 없다.
       completedAt: storedRows[index]?.completedAt ?? null,
       completedBy: storedRows[index]?.completedBy ?? null,
+      // ── 🔴 **확정 표시도 똑같이 되얹는다** (2026-11-25) ───────────────────
+      // 회차별 [납기일 확정]도 **보내온 목록에 없는 값**이라(위 완료 둘과 같은 까닭)
+      // 서버가 제 손으로 같은 자리에 다시 적는다. 안 되얹으면 사람이 그 줄의 비고나
+      // 납품일을 고친 순간 확정이 **조용히 풀리고**, 오류도 로그도 남지 않는다.
+      //
+      // 🔴 **날짜를 견주지 않는다 — 완료와 한 글자도 다르지 않다.** 「확정된 회차의
+      // 날짜가 바뀌면 어쩌나」는 여기서 풀 문제가 아니다: 그런 저장은 **울타리가
+      // 통째로 거절한다**(domain/domestic-order-due-date-rows.ts 의 넷째 울타리 —
+      // 사용자 결정 2026-11-25 「[확정 해제]를 해야만 날짜를 고칠 수 있도록」).
+      // 여기서 또 재면 같은 규칙이 두 벌이 되고, 한쪽만 고쳐지는 날 둘이 어긋난다.
+      // 🔵 그래서 이 자리에 오는 목록은 **확정된 자리의 날짜가 그대로인** 목록이다.
+      confirmedAt: storedRows[index]?.confirmedAt ?? null,
+      confirmedBy: storedRows[index]?.confirmedBy ?? null,
       displayOrder: index + 1,
     }))
   );
@@ -500,6 +513,13 @@ type StoredDueDateRow = {
    */
   completedAt: Date | null;
   completedBy: string | null;
+  /**
+   * 🔴 그 회차의 **납기일 확정 시각**(2026-11-25). 완료 둘과 **같은 까닭으로** 함께
+   * 읽는다 — 울타리가 「확정된 회차가 있는가 · 그 자리의 날짜가 바뀌었는가」를 보고,
+   * replaceDueDates 가 그 값을 되얹는다.
+   */
+  confirmedAt: Date | null;
+  confirmedBy: string | null;
 };
 
 /**
@@ -516,6 +536,8 @@ async function readDueDateRows(tx: Tx, domesticOrderId: string): Promise<StoredD
       deliveredBy: domesticOrderDueDates.deliveredBy,
       completedAt: domesticOrderDueDates.completedAt,
       completedBy: domesticOrderDueDates.completedBy,
+      confirmedAt: domesticOrderDueDates.confirmedAt,
+      confirmedBy: domesticOrderDueDates.confirmedBy,
     })
     .from(domesticOrderDueDates)
     .where(eq(domesticOrderDueDates.domesticOrderId, domesticOrderId))
@@ -538,8 +560,8 @@ function deliveredDatesOf(rows: readonly { deliveredDate: string | null }[]): st
 }
 
 /**
- * 🔴 납기요청일 행을 **더하고 지우는 울타리 둘**(사용자 결정 5 · 9). 막히면 검증
- * 오류를, 통과면 null 을 돌려준다.
+ * 🔴 납기요청일 행을 **더하고 지우고 고치는 울타리 넷**(사용자 결정 5 · 9 · 13 의 짝 ·
+ * 2026-11-25 의 확정 잠금). 막히면 검증 오류를, 통과면 null 을 돌려준다.
  *
  * 🔴 **판정은 여기 적지 않는다** — domain/domestic-order-due-date-rows.ts 하나가
  * 가진다(화면도 같은 함수로 단추를 미리 막는다). 이 함수가 하는 일은 **저장돼
@@ -559,13 +581,20 @@ function checkDueDateRowGuard(params: {
       hasDelivery: hasDeliveryRecord(row),
       // 🔴 판정은 completed_at 하나로만 한다(그 표의 칸 주석과 같은 규칙).
       isCompleted: row.completedAt !== null,
+      // 🔴 넷째 울타리가 **자리마다 견주는** 두 값(2026-11-25). 날짜는 `date` 칼럼이라
+      //    언제나 "YYYY-MM-DD" 문자열로 오고, 확정 판정도 confirmed_at 하나로만 한다.
+      dueDate: row.dueDate,
+      isConfirmed: row.confirmedAt !== null,
     })),
-    // 🔴 **보내온 목록에는 완료 표시가 없다** — 그래서 전부 거짓으로 넘긴다. 셋째
-    //    울타리가 「보내온 쪽」이 아니라 **「저장돼 있던 쪽에 완료가 있는가」**만 보는
-    //    것이 그 까닭이다(그 파일의 '완료 표시는 자리로 따라간다').
+    // 🔴 **보내온 목록에는 완료 표시도 확정 표시도 없다** — 그래서 둘 다 거짓으로
+    //    넘긴다. 셋째·넷째 울타리가 「보내온 쪽」이 아니라 **「저장돼 있던 쪽에 있는가」**
+    //    만 보는 것이 그 까닭이다(그 파일의 '완료 표시는 자리로 따라간다').
+    // 🔵 **날짜는 보내온 값 그대로** 넘긴다 — 넷째 울타리가 견줄 바로 그 값이다.
     nextRows: params.fields.dueDates.map((row) => ({
       hasDelivery: hasDeliveryRecord(row),
       isCompleted: false,
+      dueDate: row.dueDate,
+      isConfirmed: false,
     })),
     storedRepairCaseId: params.storedRepairCaseId,
     nextRepairCaseId: params.fields.repairCaseId,
@@ -1383,6 +1412,155 @@ export async function setDomesticOrderDueDateRowCompletion(params: {
 
     return { ok: true, id: current.id, version: current.version };
   });
+}
+
+/**
+ * 회차별 [납기일 확정]의 결과. 🔴 **완료 쪽 타입을 쓰지 않는다** — 그쪽에는
+ * `APPROVAL_REQUIRED` 가 들어 있는데, 확정은 **승인과 아무 상관이 없다**(승인은
+ * 「내보내도 되는가」이고 확정은 「이 날짜가 더 이상 안 바뀐다」이다). 끼워 두면
+ * 「확정하려는데 승인이 없다고 거절당했다」가 타입상 말이 되어 버리고, 그 가능성을
+ * 부르는 쪽들이 저마다 가려내야 한다(이 파일의 다른 코드 묶음들과 같은 판단).
+ *
+ * 🔵 `FORBIDDEN` 은 들어 있다 — **완료된 줄을 건드리는 일**이라 그 관문이 선다
+ * (아래 setDomesticOrderDueDateRowConfirmation 의 그 자리).
+ */
+export type DomesticOrderDueDateRowConfirmationMutationResult =
+  | { ok: true; id: string; version: number }
+  | { ok: false; code: DomesticOrderUpdateMutationResultCode; message: string };
+
+/**
+ * ============================================================================
+ * 🔴 **회차 하나의 납기일을 확정하거나 그 확정을 거둔다** (2026-11-25)
+ * ============================================================================
+ * 사용자 요구 원문: 「납기 요청일 옆에 **[납기일 확정] 버튼**을 만들어줘 … 이 버튼을
+ * 누르면 포털의 알림 중에 **[납기 임박] 알림이 뜨지 않도록** 해줘.」
+ *
+ * 🔴 **[확정 해제]가 함께 있는 까닭**: 사용자 요구에는 「확정」만 있지만, 화면에서
+ * 뺄 수 없는 값으로 문을 열면 **잘못 누른 것을 되돌릴 길이 없다.** 게다가 확정은
+ * 날짜를 잠그므로(아래), 해제가 없으면 **그 회차의 납기요청일을 영영 못 고친다.**
+ *
+ * ── 🔴 **기타건 전용이 아니다** — 회차 완료와 갈리는 자리 ────────────────
+ * 회차별 [완료 처리]는 기타건 전용이다(수리 건이 붙은 줄의 완료는 출하 완료와 함께
+ * 움직이는 다른 흐름이라, 그 줄에 회차 단위 길을 열면 뒷문이 된다). 확정에는 그런
+ * 짝이 **없다** — 수리 건 쪽에 「납기일을 확정했다」에 해당하는 상태가 없고, 끄는
+ * 것도 종 하나뿐이라 함께 움직일 전이가 없다. 사용자 결정도 **모든 줄**이다
+ * (「모든 줄에 단추(기타건 포함)」). 그래서 `repair_case_id` 를 보지 않는다.
+ * 🔵 수리 건이 제 날짜를 가진 줄(빌려 그리는 줄)에서도 끈다 — 같은 결정의 ⑤.
+ *
+ * ── 🔴 **`version` 을 올리지 않는다** — 회차 완료와 같은 한 줄 ────────────
+ * 올리면 그 줄에 걸려 있는 회차별 승인이 **전부 STALE** 이 된다(승인의 유효함은
+ * 「요청 때의 version == 지금 version」이다 — resolveApprovalState). 납기일을
+ * 확정했다고 「요청 뒤에 내용이 바뀌었는가」의 답이 달라질 이유가 없다.
+ * 🔵 낙관적 잠금은 그대로다 — 들어온 `expectedVersion` 은 여전히 대조한다.
+ *
+ * ── 🔵 **끊긴 요청을 다시 보내도 안전하다** ─────────────────────────────
+ * 이 조작은 **같은 값을 두 번 써도 결과가 같다**(확정 → 확정은 시각만 다시 찍힌다).
+ * version 을 올리지 않으므로 두 번째 요청이 CONFLICT 로 떨어지지도 않는다 — 응답을
+ * 못 받은 사람이 다시 누르면 그대로 성공한다. 회차 완료가 쓰는 그 성질 그대로이고,
+ * 이 저장소가 따로 두는 멱등 열쇠(idempotency-keys)는 **돈이 움직이는 길**의 것이다.
+ *
+ * ── 🔴 **완료된 줄에는 관문이 하나 더 선다** (「완료 시 수정」) ────────────
+ * 🔴 여기서 **회차 완료와 다르게 갔다.** 회차 완료는 그 관문을 `!completed`(해제)
+ * 에만 세우는데, 그쪽은 「회차 해제가 줄 단위 해제의 뒷문이 되는 것」을 막는 관문이라
+ * 방향이 열쇠였다. 확정에는 그런 뒷문이 없고, 대신 **줄 수정과 같은 성질**이 있다:
+ * 확정도 해제도 **완료된 줄의 칸을 바꾸는 일**이다. 그래서 조건을 updateDomesticOrder
+ * 와 **한 글자도 같게** 두었다 — 「그 줄이 완료되었는가」. 갈라 두면 완료된 줄을 못
+ * 고치는 사람이 **확정 단추로 그 줄의 납기일을 잠그고 풀 수 있다.**
+ * 🔵 **완료되지 않은 줄은 한 글자도 달라지지 않는다**(관문이 그 조건 안에만 선다).
+ * 🔵 화면도 같은 판정으로 단추를 감춘다(canEditDomesticOrderWhenCompleted — 목록의
+ * `rowCanEdit` 과 같은 값이다).
+ *
+ * ── 🔴 **이 조각은 종을 끄지 않는다** ───────────────────────────────────
+ * 확정 두 칸이 차는 것이 전부다. 「납기 임박」 알림이 그 값을 보고 빠지는 일은 **다음
+ * 조각**이 한다(domain/notifications.ts · queries/domestic-order-due-date-near-
+ * notifications.ts). 그래서 지금은 **확정해도 종이 울리는 것이 맞다.**
+ * ============================================================================
+ */
+export async function setDomesticOrderDueDateRowConfirmation(params: {
+  id: string;
+  expectedVersion: number;
+  /** 몇 번째 회차인가(1부터). `display_order` 와 같은 번호다. */
+  dueDateRowOrder: number;
+  /** true 면 그 회차의 납기일을 확정, false 면 확정 해제. */
+  confirmed: boolean;
+  actorUserId: string;
+}): Promise<DomesticOrderDueDateRowConfirmationMutationResult> {
+  return db.transaction(
+    async (tx): Promise<DomesticOrderDueDateRowConfirmationMutationResult> => {
+      const [current] = await tx
+        .select({
+          id: domesticOrders.id,
+          version: domesticOrders.version,
+          // 🔴 「완료 시 수정」 관문이 보는 한 칸(머리말). 판정은 completed_at 하나로만
+          //    한다(schema/domestic-orders.ts 의 그 칸 주석).
+          completedAt: domesticOrders.completedAt,
+        })
+        .from(domesticOrders)
+        .where(and(eq(domesticOrders.id, params.id), eq(domesticOrders.isDeleted, false)))
+        .for("update");
+
+      if (!current) {
+        return { ok: false, code: "NOT_FOUND", message: NOT_FOUND_MESSAGE };
+      }
+      if (current.version !== params.expectedVersion) {
+        return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
+      }
+
+      // 🔴 **version 대조 뒤**다 — 앞에 두면 낡은 화면에서 누른 요청이 CONFLICT 대신
+      //    「권한이 없다」로 답한다(updateDomesticOrder 가 같은 차례를 쓰는 그 까닭).
+      if (current.completedAt !== null) {
+        const denied = await checkCompletedDomesticOrderEdit(tx, params.actorUserId);
+        if (denied) return denied;
+      }
+
+      // 🔴 **잠근 줄에서 다시 읽는다.** 화면이 보낸 회차 번호가 지금도 있는 번호인지는
+      //    여기서만 알 수 있다(회차 완료와 같은 까닭·같은 차례).
+      const rows = await readDueDateRows(tx, current.id);
+      if (rows.length === 0) {
+        return {
+          ok: false,
+          code: "VALIDATION_ERROR",
+          message:
+            "납기요청일 줄이 없어 납기일을 확정할 수 없습니다. 먼저 납기요청일을 적어 주세요.",
+        };
+      }
+      const index = params.dueDateRowOrder - 1;
+      if (!Number.isInteger(params.dueDateRowOrder) || index < 0 || index >= rows.length) {
+        return {
+          ok: false,
+          code: "VALIDATION_ERROR",
+          message: "그 회차를 찾을 수 없습니다. 최신 정보를 다시 불러와 주세요.",
+        };
+      }
+
+      // 🔴 **두 칸은 언제나 함께 움직인다** — 표의 CHECK 가 그것을 지킨다
+      //    (domestic_order_due_dates_confirmed_columns_together). 한쪽만 쓰면 저장이
+      //    통째로 깨지고, 깨지지 않더라도 「확정한 사람은 있는데 시각은 없는」 행에서는
+      //    그 회차가 확정인지 아닌지 답할 방법이 없다(판정은 confirmed_at 하나다).
+      // 🔵 차례(display_order)로 집는다 — 화면의 「N차」와 같은 번호다.
+      const now = new Date();
+      await tx
+        .update(domesticOrderDueDates)
+        .set({
+          confirmedAt: params.confirmed ? now : null,
+          confirmedBy: params.confirmed ? params.actorUserId : null,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(domesticOrderDueDates.domesticOrderId, current.id),
+            eq(domesticOrderDueDates.displayOrder, params.dueDateRowOrder)
+          )
+        );
+
+      // 🔴 **줄(domestic_orders)은 한 글자도 안 건드린다.** 회차 완료는 「모든 회차가
+      //    끝나면 줄도 완료」라는 결정이 있어 줄까지 고쳤지만(결정 8), 확정에는 그런
+      //    짝이 없다 — 「모든 회차가 확정되면 줄이 무엇이 되는가」는 아무도 정한 적이
+      //    없고, 지어내면 그 뜻을 아무도 설명할 수 없다. updated_at 도 올리지 않는다:
+      //    이 조작은 줄의 값을 바꾸지 않았다.
+      return { ok: true, id: current.id, version: current.version };
+    }
+  );
 }
 
 /**

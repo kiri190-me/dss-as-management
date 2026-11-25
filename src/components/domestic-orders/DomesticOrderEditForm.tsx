@@ -28,6 +28,7 @@ import { domesticOrderDeliveriesDraftText } from "@/lib/domain/domestic-order-ce
 import { DOMESTIC_ORDER_DELIVERED_DATE_NOTE } from "@/lib/domain/delivered-date-link";
 import {
   domesticOrderAddDueDateBlockReason,
+  domesticOrderDueDateChangeBlockReason,
   domesticOrderRemoveDueDateBlockReason,
 } from "@/lib/domain/domestic-order-due-date-rows";
 import {
@@ -242,6 +243,12 @@ type DueDateDraft = {
    * 까닭은 [삭제] 단추를 미리 막기 위해서다(셋째 울타리).
    */
   isCompleted: boolean;
+  /**
+   * 🔴 그 회차의 **납기일이 확정되었는가**(2026-11-25). 바로 위와 같이 나가는 fields
+   * 에는 **없다** — 확정 표시도 서버가 제 손으로 다시 적는다. 여기 있는 까닭은
+   * [삭제] 단추와 **납기요청일 입력칸**을 미리 막기 위해서다(넷째 울타리).
+   */
+  isConfirmed: boolean;
 };
 
 /** 납기일 한 줄의 date 입력칸 id. 추가한 뒤 그리로 포커스를 옮기는 데 쓴다. */
@@ -332,6 +339,8 @@ export default function DomesticOrderEditForm({
       deliveredBy: dueDate.deliveredBy ?? "",
       // 🔴 판정은 completed_at 하나로만 한다(그 표의 칸 주석과 같은 규칙).
       isCompleted: dueDate.completedAt !== null,
+      // 🔴 확정도 confirmed_at 하나로만 가른다(2026-11-25, 같은 규칙·같은 까닭).
+      isConfirmed: dueDate.confirmedAt !== null,
     }))
   );
   const [quoteIssuedDate, setQuoteIssuedDate] = useState(row?.quoteIssuedDate ?? "");
@@ -398,6 +407,10 @@ export default function DomesticOrderEditForm({
     // 🔴 완료된 회차가 있으면 줄을 **지우는** 저장이 통째로 거절된다(셋째 울타리).
     //    여기서 빠뜨리면 단추는 눌리는데 저장만 거절되고, 사람은 까닭을 나중에 안다.
     isCompleted: entry.isCompleted,
+    // 🔴 넷째 울타리의 재료 둘(2026-11-25) — 확정된 회차가 있으면 [삭제] 가 전부
+    //    막히고, 그 회차의 **날짜 칸**도 잠긴다. 날짜는 다듬지 않고 그대로 넘긴다.
+    dueDate: entry.dueDate,
+    isConfirmed: entry.isConfirmed,
   }));
   const addDueDateBlockedReason = domesticOrderAddDueDateBlockReason({
     rows: dueDateRowShapes,
@@ -412,6 +425,20 @@ export default function DomesticOrderEditForm({
     });
   }
 
+  /**
+   * 🔴 **그 줄의 날짜 칸을 잠가야 하는가**(2026-11-25) — 납기일이 확정된 회차는
+   * [확정 해제] 전에는 날짜를 못 고친다. 표의 납기요청일 칸과 **같은 함수**에
+   * 물어본다(DomesticOrderDueDatesCell) — 두 길이 같은 줄을 다르게 다루면 안 된다.
+   * 🔵 메모·납품 둘은 잠그지 않는다 — 확정은 납기요청일에 대한 표시다.
+   */
+  function dueDateChangeBlockedReason(index: number): string | null {
+    return domesticOrderDueDateChangeBlockReason({
+      rows: dueDateRowShapes,
+      index,
+      repairCaseId: repairCaseId || null,
+    });
+  }
+
   function addDueDate() {
     if (addDueDateBlockedReason !== null) return;
     // 저장된 행의 id 와 섞이지 않는 임시 key 다. LAN 평문 HTTP 에서도
@@ -420,9 +447,18 @@ export default function DomesticOrderEditForm({
     pendingDueDateFocusRef.current = key;
     setDueDates((previous) => [
       ...previous,
-      // 🔴 새 회차는 완료 표시가 없다 — 완료는 승인을 거쳐야 찍히는 값이라
-      //    여기서 참으로 만들 수 있는 길이 있으면 안 된다.
-      { key, dueDate: "", note: "", deliveredDate: "", deliveredBy: "", isCompleted: false },
+      // 🔴 새 회차는 완료 표시도 확정 표시도 없다 — 완료는 승인을 거쳐야 찍히고
+      //    확정은 사람이 단추를 눌러야 찍히는 값이라, 여기서 참으로 만들 수 있는
+      //    길이 있으면 안 된다.
+      {
+        key,
+        dueDate: "",
+        note: "",
+        deliveredDate: "",
+        deliveredBy: "",
+        isCompleted: false,
+        isConfirmed: false,
+      },
     ]);
   }
 
@@ -996,6 +1032,9 @@ export default function DomesticOrderEditForm({
                 // 🔴 납품 기록이 달린 줄은 못 지운다(사용자 결정 5). 판정은 서버가
                 // 거절하는 그 함수가 한다(위 removeDueDateBlockedReason).
                 const removeBlocked = removeDueDateBlockedReason(index);
+                // 🔴 납기일이 확정된 회차는 날짜를 못 고친다(2026-11-25, 넷째 울타리).
+                // 표의 납기요청일 칸과 같은 판정·같은 문구다.
+                const dueDateBlocked = dueDateChangeBlockedReason(index);
                 return (
                   // key 는 index 가 아니다 — 가운데 줄을 지웠을 때 남은 칸에
                   // 엉뚱한 값이 남지 않게 한다(DueDateDraft 주석).
@@ -1015,7 +1054,11 @@ export default function DomesticOrderEditForm({
                           max={DATE_INPUT_MAX}
                           className={editInputClass}
                           value={entry.dueDate}
-                          disabled={disabled}
+                          // 🔴 확정된 회차는 여기서 막는다(위 dueDateChangeBlockedReason).
+                          //    막지 않아도 저장이 거절되지만, 다 고쳐 놓고 저장을 누른
+                          //    뒤에야 듣는 말이 된다.
+                          disabled={disabled || dueDateBlocked !== null}
+                          title={dueDateBlocked ?? undefined}
                           // 한 화면에 여러 개라 "납기요청일"만으로는 화면
                           // 낭독기가 어느 줄인지 말할 수 없다.
                           aria-label={`납기요청일 ${index + 1}`}
@@ -1102,6 +1145,12 @@ export default function DomesticOrderEditForm({
                         **늘 보이는 한 줄**로 적는다. title 만 달면 키보드만 쓰는
                         사람에게는 없는 것과 같다. */}
                     {removeBlocked !== null && <p className={hintClass}>{removeBlocked}</p>}
+                    {/* 🔴 날짜 칸이 잠긴 까닭도 **늘 보이는 한 줄**로(2026-11-25).
+                        🔵 두 글은 서로 다른 말을 한다 — 위는 「줄을 못 지운다」,
+                        이쪽은 「날짜를 못 고친다」. 같은 글자면 한 번만 적는다. */}
+                    {dueDateBlocked !== null && dueDateBlocked !== removeBlocked && (
+                      <p className={hintClass}>{dueDateBlocked}</p>
+                    )}
                     {fieldErrors[errorKey] && (
                       <p className={editErrorClass}>{fieldErrors[errorKey]}</p>
                     )}

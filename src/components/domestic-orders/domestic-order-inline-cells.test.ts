@@ -318,16 +318,24 @@ test("🔴 납품 편집칸도 줄 전체를 싣고 version 을 건다 — 납�
   //    않는다** — buildDomesticOrderDueDatesUpdateFields 가 네 칸만 옮긴다. 그래서
   //    단언을 약하게 만들지 않고 **방향을 바꿨다**: 「나가는 네 칸이 그대로 있는가」와
   //    「완료는 **나가지 않는가**」를 함께 잰다.
+  //
+  // 🔴 **2026-11-25 에 여섯째 칸이 붙었다**(`isConfirmed` — 회차별 [납기일 확정]).
+  //    성질이 `isCompleted` 와 **똑같다**: 편집 목록이 들고만 다니고 서버로는 안 나간다
+  //    (화면이 날짜 칸을 미리 잠그는 데 쓴다). 그래서 같은 방향으로 한 칸만 늘렸다.
   assert.match(
     source,
-    /lines\.map\( \(\{ dueDate, note, deliveredDate, deliveredBy, isCompleted \}\) => \(\{ dueDate, note, deliveredDate, deliveredBy, isCompleted, \}\) \)/
+    /lines\.map\( \(\{ dueDate, note, deliveredDate, deliveredBy, isCompleted, isConfirmed \}\) => \(\{ dueDate, note, deliveredDate, deliveredBy, isCompleted, isConfirmed, \}\) \)/
   );
   // 🔴 저장 payload 를 만드는 함수가 **네 칸만** 옮긴다 — 그 보증은 도메인 쪽에 있고
   //    (domain/domestic-order-cell-edit.ts 의 DomesticOrderDueDateDraftPayload), 여기서는
-  //    이 칸이 완료를 **직접 fields 에 끼워 넣지 않는지**만 본다.
+  //    이 칸이 완료·확정을 **직접 fields 에 끼워 넣지 않는지**만 본다.
   assert.ok(
     !/fields: \{[^}]*isCompleted/.test(source),
     "납품 편집칸이 완료 표시를 저장 payload 에 끼워 넣는다 — 승인 없이 완료를 찍는 길이 된다"
+  );
+  assert.ok(
+    !/fields: \{[^}]*isConfirmed/.test(source),
+    "납품 편집칸이 확정 표시를 저장 payload 에 끼워 넣는다 — payload 하나로 날짜를 잠그는 길이 된다"
   );
   assert.match(source, /function openEditor\(event: MouseEvent<HTMLButtonElement>\) \{ (\/\/[^}]*)?event\.stopPropagation\(\);/);
   assert.match(source, /<form onSubmit=\{handleSubmit\} onClick=\{\(event\) => event\.stopPropagation\(\)\}/);

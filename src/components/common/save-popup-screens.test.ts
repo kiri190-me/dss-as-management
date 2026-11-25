@@ -440,7 +440,10 @@ test("내자·주간보고·작업 비용은 팝업만 띄우고 머문다", () 
     // 🔴 **2026-11-08 에 넷이 되었다** — 회차별 [완료 처리]·[완료 해제]가 생기면서
     //    팝업을 띄우는 자리가 하나 늘었다(DueDateRowCompletionToggles). 그 자리도 **머물고
     //    띄우기만 한다** — 회차 하나를 끝낸 뒤 갈 곳은 지금 보고 있는 그 표다.
-    ["src/components/domestic-orders/DomesticOrderListScreen.tsx", 4],
+    // 🔴 **2026-11-25 에 다섯이 되었다** — 회차별 [납기일 확정]·[확정 해제]가 생겼다
+    //    (DueDateRowConfirmToggles). 그 자리도 같은 까닭으로 **머문다**: 확정은 그 표의
+    //    한 칸에 거는 표시라, 누른 사람이 다음에 볼 것도 바로 그 줄이다.
+    ["src/components/domestic-orders/DomesticOrderListScreen.tsx", 5],
     ["src/components/dashboard/WeeklyReportGoalsPanel.tsx", 3],
     ["src/components/dashboard/WeeklyReportDeliveriesPanel.tsx", 2],
     ["src/components/repair-labor/RepairLaborScreen.tsx", 1],
