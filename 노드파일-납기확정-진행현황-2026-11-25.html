@@ -57,8 +57,8 @@
 <body>
 <div class="wrap">
 
-<h1>진행현황 — 노드 파일 위치 · 납기일 확정</h1>
-<p class="sub">2026-11-25 기준 · 두 갈래가 같은 저장소(A/S)에서 나란히 갑니다</p>
+<h1>진행현황 — 노드 파일 위치 · 납기일 확정 · 알림 색</h1>
+<p class="sub">2026-11-25 기준 · 세 갈래가 나란히 갑니다 (A·B는 A/S 한 곳, C는 A/S+포털)</p>
 
 <div class="stats">
   <div class="stat">
@@ -79,6 +79,12 @@
     <div class="note">적용 완료 · 다음은 <code>0133</code></div>
   </div>
   <div class="stat">
+    <div class="note">갈래 C · 알림 색 맞추기</div>
+    <div class="num">0 / 2</div>
+    <div class="bar"><i style="width:0%;background:#175cd3"></i></div>
+    <div class="note">조사 끝 · 구현 대기</div>
+  </div>
+  <div class="stat">
     <div class="note">안 올린 커밋</div>
     <div class="num">1 + 1</div>
     <div class="note">A/S · dss-core (같이 올라가야 함)</div>
@@ -86,10 +92,12 @@
 </div>
 
 <div class="tip">
-  <div class="t">두 갈래를 왜 같이 보나</div>
-  <p style="margin:6px 0 0">둘 다 <b>A/S 저장소</b>를 고치고, 둘 다 <b>표에 칸을 더합니다</b>.
+  <div class="t">세 갈래를 왜 같이 보나</div>
+  <p style="margin:6px 0 0"><b>A·B</b>는 둘 다 A/S 저장소를 고치고 둘 다 <b>표에 칸을 더합니다</b> —
   그래서 <span class="red">마이그레이션 번호</span>와 <span class="red">시험 DB</span>를 서로 빼앗지 않게
-  차례를 맞춰야 합니다. 그 외에는 겹치는 파일이 거의 없습니다.</p>
+  차례를 맞춰야 합니다.
+  <b>C</b>는 칸을 안 더하지만 <span class="red">B와 같은 알림 파일</span>을 건드려서,
+  B의 첫 조각이 커밋된 뒤에 시작합니다.</p>
 </div>
 
 
@@ -261,8 +269,85 @@
 </div>
 
 
+<!-- ================= 갈래 C ================= -->
+<div class="stream" style="border-color:#b2ddff;background:#fbfdff">
+<div class="sh" style="background:#175cd3">갈래 C</div>
+
+<h2>[A/S]와 [포털]의 알림 색 맞추기</h2>
+
+<div class="card">
+  <div class="t">쓰는 분 요청 (2026-11-25)</div>
+  <p style="margin:6px 0 0">「[A/S시스템]에 뜨는 알림의 색과 [포털]에서 띄우는 알림의 색이 다른데
+  <b>[A/S]에 뜨는 색을 기준으로</b> 맞춰줘.」</p>
+</div>
+
+<h3>왜 다른가 — 버그가 아니라 지금 설계된 동작입니다</h3>
+<p>A/S는 색을 <b>Tailwind 클래스 이름</b>으로 들고 있는데, 그 이름을 보내 봐야 <b>포털 빌드에 없는 클래스라 안 먹습니다</b>.
+그래서 안 보내기로 했고, 포털은 받은 <b>종류 이름을 해시해서</b> 제가 가진 16칸 중 하나를 집습니다. 각자 고르니 어긋납니다.</p>
+
+<div class="ok">
+  <div class="t">포털은 이미 받을 준비가 되어 있습니다</div>
+  <p style="margin:6px 0 0">번호를 받아 색으로 바꾸는 코드가 <b>2026-10-19에 이미 들어가 있고</b>,
+  두 시스템이 <b>같은 CSS 파일 한 벌</b>을 씁니다(같은 커밋을 가리키고 파일 지문도 같음).
+  막힌 곳은 <b>배관 두 군데</b>뿐입니다 — A/S가 번호를 안 싣고, 포털이 그 칸을 안 옮깁니다.
+  <span class="grn">공용 묶음은 코드를 한 줄도 안 고쳐도 됩니다.</span></p>
+</div>
+
+<h3>지금 어긋나는 것 — 10종 중 9종</h3>
+<table>
+  <tr><th>알림</th><th style="width:150px">A/S</th><th style="width:150px">포털</th><th style="width:60px"></th></tr>
+  <tr><td><b>납기 임박</b></td><td>빨강</td><td class="red">하늘</td><td>✗</td></tr>
+  <tr><td><b>승인 완료</b></td><td>초록</td><td class="red">분홍</td><td>✗</td></tr>
+  <tr><td><b>반려됨</b></td><td>장미</td><td class="red">청록</td><td>✗</td></tr>
+  <tr><td>결재 대기</td><td>파랑</td><td>라임</td><td>✗</td></tr>
+  <tr><td>견적서 결재 대기</td><td>보라</td><td>주황</td><td>✗</td></tr>
+  <tr><td>기타건 결재 대기</td><td>남보라</td><td>초록</td><td>✗</td></tr>
+  <tr><td>납기 지연</td><td>분홍</td><td>호박</td><td>✗</td></tr>
+  <tr><td>사내 목표 완료일 미등록</td><td>주황</td><td>보라</td><td>✗</td></tr>
+  <tr><td>납기 역전</td><td>호박</td><td>주황</td><td>✗</td></tr>
+  <tr><td>기타건 납기 임박</td><td>자홍</td><td class="grn">자홍</td><td class="grn">✓</td></tr>
+</table>
+<p class="note">유일하게 맞는 한 줄은 <b>우연</b>이고, 코드에도 「우연이지 설계가 아니다」로 적혀 있습니다.</p>
+
+<div class="ask">
+  <div class="t">몰랐던 문제 하나가 더 있습니다</div>
+  <p style="margin:6px 0 0">포털에서 <b>「견적서 결재 대기」와 「납기 역전」이 이미 같은 주황</b>입니다.
+  A/S는 이 둘을 <b>일부러 갈라 둔 것</b>인데(같은 건에서 차례로 뜨는 짝이라 색이 같으면 무엇이 바뀐 건지 알 수 없어서)
+  포털에서만 합쳐져 있었습니다. <span class="grn">색을 맞추면 이것도 같이 풀립니다.</span></p>
+</div>
+
+<h3>조각 둘</h3>
+<table>
+  <tr><th style="width:52px">#</th><th>하는 일</th><th style="width:108px">상태</th><th style="width:300px">끝나면</th></tr>
+  <tr><td>①</td><td>A/S가 색 번호를 함께 내보낸다</td><td><span class="st wait">대기</span></td>
+      <td>화면 변화 <b>없음</b> — 포털이 아직 버립니다</td></tr>
+  <tr><td>②</td><td>포털이 받은 번호를 쓴다</td><td><span class="st wait">대기</span></td>
+      <td class="grn">포털 종 색이 A/S와 같아집니다</td></tr>
+</table>
+<p class="note">공용 묶음의 낡은 주석 고치기는 별도 조각입니다 — 묶음을 커밋하면 두 저장소의 포인터를 함께 올려야 해서 묶지 않습니다.</p>
+
+<div class="ok">
+  <div class="t">다른 시스템은 안 깨집니다</div>
+  <p style="margin:6px 0 0">포털 종에는 A/S 말고 <b>휴가·개선요청·게시판·재고·이슈관리</b> 다섯이 더 붙어 있는데,
+  <b>각자 제 타입을 갖고</b> 있어서 A/S에 칸을 더해도 영향이 없습니다.
+  번호를 안 보내면 <b>지금처럼 해시로 떨어지는 길</b>이 설계로 남아 있습니다.
+  🔵 겹침도 줄어듭니다 — 여섯 시스템 열아홉 종류를 다 세어 <b>6군데 → 4군데</b>,
+  남는 넷은 전부 다른 시스템끼리라 줄에 시스템 이름이 글자로 함께 뜹니다.</p>
+</div>
+
+<div class="warn">
+  <div class="t">눈으로 볼 때 알아 둘 것 둘</div>
+  <ul>
+    <li><span class="red">고친 직후 30초는 옛 색입니다</span> — 포털이 각 시스템의 답을 30초 기억합니다. 새로고침해도 그렇습니다.</li>
+    <li><span class="red">밝기 모드를 맞추세요</span> — 포털은 OS 설정을 따릅니다. 한쪽만 어두우면 당연히 달라 보입니다.</li>
+  </ul>
+</div>
+
+</div>
+
+
 <!-- ================= 공통 ================= -->
-<h2>두 갈래가 부딪히는 자리</h2>
+<h2>갈래들이 부딪히는 자리</h2>
 
 <table>
   <tr><th style="width:200px">무엇</th><th>왜 부딪히나</th><th style="width:260px">어떻게 피하나</th></tr>
