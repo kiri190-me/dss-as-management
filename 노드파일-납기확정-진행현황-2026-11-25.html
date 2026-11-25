@@ -63,9 +63,9 @@
 <div class="stats">
   <div class="stat">
     <div class="note">갈래 A · 노드 파일 위치</div>
-    <div class="num">3 / 6</div>
-    <div class="bar"><i style="width:50%"></i></div>
-    <div class="note">팝업까지 끝 · 다음은 절차 쪽</div>
+    <div class="num">4 / 5</div>
+    <div class="bar"><i style="width:80%"></i></div>
+    <div class="note">마지막 — 작업내용에서 열기</div>
   </div>
   <div class="stat">
     <div class="note">갈래 B · 납기일 확정</div>
@@ -86,7 +86,7 @@
   </div>
   <div class="stat">
     <div class="note">안 올린 커밋</div>
-    <div class="num">16 + 2 + 1</div>
+    <div class="num">20 + 2 + 1</div>
     <div class="note">A/S · dss-core · 포털 (앞 둘은 같이)</div>
   </div>
 </div>
@@ -130,7 +130,7 @@
       <td class="grn">도우미를 다시 깔 필요가 없습니다</td></tr>
 </table>
 
-<h3>조각 여섯</h3>
+<h3>조각 다섯 (둘은 취소)</h3>
 <table>
   <tr><th style="width:52px">#</th><th>하는 일</th><th style="width:108px">상태</th><th style="width:300px">비고</th></tr>
   <tr><td>①</td><td><b>칸 더하기 + 마이그레이션</b></td><td><span class="st done">끝 · 커밋됨</span></td>
@@ -139,12 +139,12 @@
       <td>시험 +62 · <span class="red">눈 확인은 배포 때</span> (아래)</td></tr>
   <tr><td>②-A</td><td>고르기를 <b>팝업으로</b> 옮긴다</td><td><span class="st done">끝 · 커밋됨</span></td>
       <td>시험 24→36 · <code>64aa2991</code> · 원인은 따로 있었습니다(아래)</td></tr>
-  <tr><td>③</td><td><b>기술 작업 절차</b> — <s>같은 것</s> <b>따로 써야 합니다</b></td><td><span class="st wait">대기</span></td>
-      <td class="red">②를 베낄 수 없습니다 — 아래</td></tr>
-  <tr><td>④</td><td>고르기 창에서 <b>노드로 끌어다 놓기</b></td><td><span class="st wait">대기</span></td>
-      <td>브라우저 안의 끌기라 제약 없음</td></tr>
-  <tr><td>⑤</td><td><b>[작업내용]에서 그 파일을 연다</b> (읽기)</td><td><span class="st wait">대기</span></td>
-      <td class="grn">2026-11-25 추가 — 이 기능의 <b>종착점</b>입니다</td></tr>
+  <tr><td>③</td><td><b>기술 작업 절차</b> — <s>같은 것</s> <b>따로 썼습니다</b></td><td><span class="st done">끝 · 커밋됨</span></td>
+      <td>저장 배선 <b>열일곱</b> 자리 · 시험 +43 · 팝업과 검사를 합쳤습니다</td></tr>
+  <tr><td><s>④</s></td><td><s>고르기 창에서 노드로 끌어다 놓기</s></td><td><span class="st">취소</span></td>
+      <td class="red">2026-11-25 <b>안 하기로</b> 했습니다 — 아래</td></tr>
+  <tr><td>⑤</td><td><b>[작업내용]에서 그 파일을 연다</b> (읽기)</td><td><span class="st doing">진행 중</span></td>
+      <td class="grn">이 기능의 <b>종착점</b> · 마이그레이션 없이 작습니다</td></tr>
   <tr><td><s>⑥</s></td><td><s>[작업내용]에서 파일을 단다 (쓰기)</s></td><td><span class="st">취소</span></td>
       <td class="red">2026-11-25 <b>안 하기로</b> 했습니다 — 다시 시작하지 않습니다</td></tr>
 </table>
@@ -159,7 +159,17 @@
 </div>
 
 <div class="warn">
-  <div class="t">⑥(작업내용에서 <b>달기</b>)은 취소됐습니다 — 다시 시작하지 않습니다</div>
+  <div class="t">④(끌어다 놓기)는 취소됐습니다 — <b>팝업으로 바꾸면서 설 자리가 없어졌습니다</b></div>
+  <p style="margin:6px 0 0">원래 바라신 것은 <b>바탕화면 파일을 노드에 끌어다 놓는 것</b>이었는데 그건 애초에 불가능합니다 —
+  브라우저가 <b>이름만 주고 전체 경로를 안 줍니다</b>. 그래서 「<b>고르기 창 안의 줄</b>을 노드로 끌기」로 타협했었습니다.</p>
+  <p style="margin:6px 0 0"><span class="red">그 타협은 창이 흐름도 <b>옆에</b> 있다는 전제 위에 있었습니다.</span>
+  2026-11-25에 고르기를 <b>팝업</b>으로 옮기면서 창이 흐름도를 덮게 됐고, <b>끌어다 놓을 노드가 안 보입니다</b>.</p>
+  <p style="margin:6px 0 0">🔵 게다가 지금은 <b>노드를 먼저 클릭해서 고르므로</b> 「어느 노드인가」가 이미 정해져 있습니다 —
+  끌기를 붙여도 단계가 안 줄고, 캔버스의 기존 노드 끌기와 <b>이벤트 체계가 달라</b> 멀쩡한 기능이 깨질 위험만 남습니다.</p>
+</div>
+
+<div class="warn">
+  <div class="t">⑥(작업내용에서 <b>달기</b>)도 취소됐습니다 — 다시 시작하지 않습니다</div>
   <p style="margin:6px 0 0">2026-11-25에 「작업내용에서도 파일을 연결하고 그것이 <b>원본 절차에 바로 적용</b>되게」까지
   요청하셨다가 <b>곧 「하지 말자」로 거두셨습니다.</b>
   <span class="grn">[작업내용]에서 하는 일은 「여는 것」뿐입니다</span> — 고르기·달기는 흐름도 편집기 쪽에만 있습니다.</p>
