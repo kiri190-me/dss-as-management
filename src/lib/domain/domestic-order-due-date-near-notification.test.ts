@@ -37,9 +37,11 @@ import { ROLE_CODES } from "./types";
  * 알림이 한 번도 안 뜬 채 바로 꺼져 「제대로 만들어졌는가」를 볼 길이 사라진다).
  *
  * 이 파일이 지키는 선이 일곱이다:
- *  1. 🔴 **창을 새로 짓지 않는다** — 「납기 임박」이 쓰는 그 도메인 함수
- *     (isRepairCaseDueDateWithinNotificationWindow)를 조회가 그대로 부른다. 베껴 적는
- *     순간 「임박」의 뜻이 둘로 갈린다.
+ *  1. 🔴 **창을 새로 짓지 않는다** — 조회는 도메인 판정 하나를 부르고
+ *     (isDomesticOrderDueDateRowNear), 그 판정이 「납기 임박」이 쓰는 그 함수에 창을
+ *     묻는다(isRepairCaseDueDateWithinNotificationWindow). 베껴 적는 순간 「임박」의
+ *     뜻이 둘로 갈린다. 🔵 2026-11-25 늦게 그 한 겹이 생겼다 — 같은 판정을 화면 배지
+ *     둘이 함께 쓰게 되면서다(아래 DOMAIN_SOURCE 의 주석).
  *  2. 🔴 **기본값 두 칸이 다 채워졌다.** 하나만 빠져도 default 절(false)로 떨어져
  *     「등록해 두고 한 줄도 안 뜨는」 종류가 된다 — 조용히 실패하는 자리다.
  *  3. 🔴 **이름이 그냥 「납기 임박」이 아니다.** 같으면 종 패널에 같은 이름 두 줄이
@@ -269,6 +271,21 @@ const QUERY_SOURCE = readFileSync(
   "utf8"
 );
 
+/**
+ * 🔴 **2026-11-25 늦게 판정이 도메인으로 내려갔다**(isDomesticOrderDueDateRowNear).
+ * 같은 판정을 화면 배지 둘이 함께 쓰게 되면서다(기타건 현황 목록 · 기타건 상세 머리
+ * 카드 — domain/misc-case-due-date-near.test.ts 가 그 짝을 잰다). 그래서 아래 두
+ * 시험은 **단언을 지우지 않고 자리를 옮겼다**: 조회는 「그 함수를 부르는가」로,
+ * 조건 셋(완료 · 납품일 · 창)은 **그 함수의 본문**에서 잰다. 조회에서만 찾으면
+ * 판정이 내려간 지금 통과할 수 없고, 아예 빼면 창과 끝남 거르기가 아무 데서도
+ * 안 지켜진다.
+ */
+const DOMAIN_SOURCE = readFileSync(new URL("./notifications.ts", import.meta.url), "utf8");
+const ROW_JUDGE_BODY = DOMAIN_SOURCE.slice(
+  DOMAIN_SOURCE.indexOf("export function isDomesticOrderDueDateRowNear"),
+  DOMAIN_SOURCE.indexOf("export function isMiscCaseDueDateNear")
+);
+
 test("🔴 조회 파일에 쓰는 문장이 한 줄도 없다 — 글자로 잰다", () => {
   // 🔵 먼저 **무엇을 재는지** 못 박는다. 경로가 틀려 빈 문자열을 읽어도
   //    `!includes(...)` 는 초록색으로 남는다.
@@ -286,14 +303,22 @@ test("🔴 조회 파일에 쓰는 문장이 한 줄도 없다 — 글자로 잰
 });
 
 test("🔴 창을 **베껴 적지 않고** 「납기 임박」이 쓰는 그 함수를 부른다 — SQL 로도 안 잰다", () => {
+  // 🔵 먼저 **표본이 비지 않았는가** — 함수 본문을 못 찾으면 아래 includes 가 전부
+  //    빈 문자열을 뒤지게 되고, 그래도 `!includes(...)` 쪽은 초록으로 남는다.
+  assert.ok(ROW_JUDGE_BODY.length > 100, `도메인 판정의 본문을 못 찾았다(${ROW_JUDGE_BODY.length})`);
   assert.ok(
-    QUERY_SOURCE.includes("isRepairCaseDueDateWithinNotificationWindow("),
-    "창 판정을 domain/notifications.ts 에서 가져오지 않는다"
+    QUERY_SOURCE.includes("isDomesticOrderDueDateRowNear("),
+    "회차 판정을 domain/notifications.ts 에서 가져오지 않는다"
   );
   assert.match(
     QUERY_SOURCE,
-    /import \{[^}]*\bisRepairCaseDueDateWithinNotificationWindow\b[^}]*\} from "@\/lib\/domain\/notifications"/,
+    /import \{[^}]*\bisDomesticOrderDueDateRowNear\b[^}]*\} from "@\/lib\/domain\/notifications"/,
     "그 판정을 제 파일에 또 만들어 두었다"
+  );
+  // 🔴 그 판정이 **창을 또 짓지 않았는가** — 「납기 임박」이 쓰는 그 함수를 그대로 부른다.
+  assert.ok(
+    ROW_JUDGE_BODY.includes("isRepairCaseDueDateWithinNotificationWindow("),
+    "회차 판정이 창을 제 손으로 재고 있다 — 「임박」의 뜻이 둘로 갈린다"
   );
   // 🔴 날짜 비교가 질의 안에 있으면 두 알림의 「임박」이 조용히 갈라진다.
   for (const forbidden of ["sql`", "gte(domesticOrderDueDates.dueDate", "lte(domesticOrderDueDates.dueDate"]) {
@@ -319,8 +344,16 @@ test("🔴 조회가 **기타건만** 본다 — `repair_case_id IS NULL` 과 �
 });
 
 test("🔴 끝난 회차를 뺀다 — 납품일과 완료 표시를 **둘 다** 본다", () => {
-  assert.ok(QUERY_SOURCE.includes("row.completedAt !== null"), "완료 처리된 회차를 빼지 않는다");
-  assert.ok(QUERY_SOURCE.includes("row.deliveredDate !== null"), "납품된 회차를 빼지 않는다");
+  // 🔵 2026-11-25 늦게 이 두 줄이 조회에서 도메인 판정 안으로 옮겨 갔다(위 DOMAIN_SOURCE
+  //    주석). 재는 것은 그대로다 — **한쪽만 보면 안 된다**는 그 규칙이다.
+  assert.ok(ROW_JUDGE_BODY.includes("row.completedAt !== null"), "완료 처리된 회차를 빼지 않는다");
+  assert.ok(ROW_JUDGE_BODY.includes("row.deliveredDate !== null"), "납품된 회차를 빼지 않는다");
+  // 🔴 조회가 그 거르기를 **제 손으로 다시 하지 않는가** — 두 벌이 되면 한쪽만 고쳐진다.
+  assert.equal(
+    QUERY_SOURCE.includes("row.completedAt !== null"),
+    false,
+    "조회가 끝남 거르기를 또 적고 있다 — 규칙이 두 벌이 됐다"
+  );
 });
 
 test("🔴 레지스트리가 그 조회를 부르고, 역할로 거르지 않는다", () => {

@@ -82,6 +82,9 @@ function row(id: string, fields: Partial<MiscCaseListRow> = {}): MiscCaseListRow
     //    붙는 쪽과 안 붙는 쪽을 함께 재는 자리는
     //    components/approvals/final-shipment-approved-badge-screens.test.tsx 다.
     finalShipmentApproved: false,
+    // 🔴 2026-11-25 에 늘었다 — [납기 임박] 배지. 기본은 **안 붙는 쪽**이고, 붙는 쪽과
+    //    안 붙는 쪽을 함께 재는 자리는 ./misc-case-due-date-near-badge.test.tsx 다.
+    isDueDateNear: false,
     displayQuoteNumber: null,
     displayQuoteIssuedDate: null,
     displayIntakeNumber: null,

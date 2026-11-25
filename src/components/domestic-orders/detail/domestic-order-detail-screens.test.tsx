@@ -199,9 +199,12 @@ describe("🔴 머리 — 상태 배지 (2026-11-06 사용자 요구)", () => {
     //    승인 완료] 배지). 뜻은 위와 같다: 레이아웃이 안 넘기면 그 배지도 영영 안 뜬다.
     //    그 배지가 상태 배지와 **따로** 가는 까닭은 머리 카드의 주석에 있다(완료된
     //    줄에서 상태 배지가 「완료」로 덮여 승인 사실이 사라진다).
+    // 🔴 **2026-11-25 에 또 하나 늘었다**(isDueDateNear — [납기 임박] 배지). 같은
+    //    까닭이다: 레이아웃이 안 넘기면 그 배지도 영영 안 뜬다. 넷을 **한 줄로 묶어**
+    //    보는 것이 요점이다 — 하나만 따로 찾으면 다른 셋이 빠져도 통과한다.
     assert.match(
       layout,
-      /<DomesticOrderDetailHeader row=\{row\} status=\{status\} finalShipmentApproved=\{finalShipmentApproved\} \/>/
+      /<DomesticOrderDetailHeader row=\{row\} status=\{status\} finalShipmentApproved=\{finalShipmentApproved\} isDueDateNear=\{isDueDateNear\} \/>/
     );
     // 🔴 판정을 레이아웃이 다시 적지 않는다 — 목록과 같은 함수 하나에 묻는다.
     assert.equal(count(layout, "completedAt !== null"), 0, layout);

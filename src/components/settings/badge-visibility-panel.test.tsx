@@ -48,8 +48,8 @@ import type { BadgeVisibilityBadgeView } from "@/lib/db/queries/badge-visibility
  * 않기 때문이다 — 저장은 `onSave` 로 받는다(그 파일 머리말).
  *
  * 재는 것:
- *  ① 🔴 체크상자가 **29개**인가 — 곱으로 펼치면 「어디에도 안 뜨는 배지」의 스위치가
- *     61개 생기고, 꺼도 아무 일이 안 일어나 끈 사람은 기능이 고장 난 것으로 읽는다.
+ *  ① 🔴 체크상자가 **31개**인가 — 곱으로 펼치면 「어디에도 안 뜨는 배지」의 스위치가
+ *     59개 생기고, 꺼도 아무 일이 안 일어나 끈 사람은 기능이 고장 난 것으로 읽는다.
  *  ② 배지 15개의 이름·설명·차례가 등록부 그대로인가.
  *  ③ 🔴 **전부 꺼도 보기 배지가 그려지는가** — 이것이 이 파일에서 가장 중요한 줄이다.
  *     조각 3에서 배지가 설정을 읽어 스스로 숨게 되는데, 그때 이 화면의 보기 배지까지
@@ -95,7 +95,7 @@ const MANAGED = renderToStaticMarkup(
 const READ_ONLY = renderToStaticMarkup(
   <BadgeVisibilityPanel badges={viewWithHidden([])} canManage={false} onSave={noop} />
 );
-/** 🔴 29쌍을 **전부 끈** 화면. ③ 이 재는 자리다. */
+/** 🔴 31쌍을 **전부 끈** 화면. ③ 이 재는 자리다. */
 const ALL_HIDDEN = renderToStaticMarkup(
   <BadgeVisibilityPanel badges={viewWithHidden(BADGE_PLACEMENTS)} canManage onSave={noop} />
 );
@@ -171,14 +171,14 @@ const SAMPLED_BADGE_KEYS: readonly BadgeKey[] = [
   "miscCaseStatus",
 ];
 
-describe("① 체크상자 29개 — 그 배지가 뜨는 자리만", () => {
+describe("① 체크상자 31개 — 그 배지가 뜨는 자리만", () => {
   test("표본이 비어 있지 않다 — 그린 글자가 실제로 있다", () => {
     assert.ok(MANAGED.length > 1000, "화면이 거의 비어 있다 — 아래 셈이 아무것도 안 잰다");
     assert.match(MANAGED, /배지 표시/);
   });
 
-  test("🔴 체크상자가 정확히 29개다", () => {
-    assert.equal(count(MANAGED, 'type="checkbox"'), 29);
+  test("🔴 체크상자가 정확히 31개다", () => {
+    assert.equal(count(MANAGED, 'type="checkbox"'), 31);
     assert.equal(count(MANAGED, 'type="checkbox"'), BADGE_PLACEMENTS.length);
   });
 
@@ -240,8 +240,8 @@ describe("② 배지 15개 — 이름 · 설명 · 차례", () => {
       />
     );
     // 체크된 칸에는 checked 가 붙고, 풀린 칸에는 안 붙는다.
-    assert.equal(count(MANAGED, "checked="), 29);
-    assert.equal(count(oneHidden, "checked="), 28);
+    assert.equal(count(MANAGED, "checked="), 31);
+    assert.equal(count(oneHidden, "checked="), 30);
   });
 });
 
@@ -251,12 +251,12 @@ describe("③ 🔴 보기 배지는 설정을 따르지 않는다", () => {
    * 끄고 있는 것이다. 그 상태에서는 관리자가 배지를 하나 끈 뒤 **무엇을 껐는지
    * 볼 수 없고, 다시 켜려 해도 그 줄이 비어 있어 못 찾는다.**
    */
-  test("표본이 비어 있지 않다 — 전부 끈 화면에서도 체크상자 29개가 그대로 있다", () => {
-    assert.equal(count(ALL_HIDDEN, 'type="checkbox"'), 29);
+  test("표본이 비어 있지 않다 — 전부 끈 화면에서도 체크상자 31개가 그대로 있다", () => {
+    assert.equal(count(ALL_HIDDEN, 'type="checkbox"'), 31);
     assert.equal(count(ALL_HIDDEN, "checked="), 0, "전부 끈 화면인데 체크가 남아 있다");
   });
 
-  test("🔴 29쌍을 전부 꺼도 보기 배지가 **그대로** 그려진다 — 열다섯 전부", () => {
+  test("🔴 31쌍을 전부 꺼도 보기 배지가 **그대로** 그려진다 — 열다섯 전부", () => {
     // 🔵 표본이 줄면 이 줄이 덜 잰 채로 초록이 된다.
     assert.equal(Object.keys(SAMPLE_MARKUP).length, 14, "표본이 줄었다 — 덜 재고 있다");
     for (const [badgeKey, markup] of Object.entries(SAMPLE_MARKUP)) {
@@ -357,8 +357,8 @@ describe("③ 🔴 보기 배지는 설정을 따르지 않는다", () => {
 
 describe("④ 고칠 수 없는 사람", () => {
   test("🔴 체크상자가 전부 비활성이고 [저장]이 없다 — 그래도 보인다", () => {
-    assert.equal(count(READ_ONLY, 'type="checkbox"'), 29);
-    assert.equal(count(READ_ONLY, "disabled="), 29, "비활성이 아닌 체크상자가 있다");
+    assert.equal(count(READ_ONLY, 'type="checkbox"'), 31);
+    assert.equal(count(READ_ONLY, "disabled="), 31, "비활성이 아닌 체크상자가 있다");
     assert.equal(READ_ONLY.includes(">저장</button>"), false);
   });
 

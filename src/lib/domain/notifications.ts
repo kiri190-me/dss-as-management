@@ -690,6 +690,85 @@ export function buildRepairCaseDueDateOverdueNotification(input: {
  */
 
 /**
+ * 한 회차를 판정하는 데 필요한 칸만. 조회가 읽어 온 행도, 화면이 들고 있는 줄도
+ * 이 모양을 **그대로 만족한다**(구조적 타입) — 양쪽이 같은 함수에 물을 수 있는
+ * 것이 아래 두 판정의 요점이다.
+ *
+ * ⚠️ `completedAt` 이 `Date | string | null` 인 것은 부르는 쪽이 둘이기 때문이다 —
+ * 종 알림 조회는 DB 에서 온 `Date` 를 그대로 들고 있고, 화면 쪽 줄은 서버 컴포넌트
+ * 경계를 넘느라 ISO 문자열이다(queries/domestic-orders.ts 의 DomesticOrderDueDate 에
+ * 그 변환이 적혀 있다). 묻는 것이 「값이 들어 있는가」 하나라 두 모양을 함께 받아도
+ * 답이 갈리지 않는다.
+ */
+type DomesticOrderDueDateRowForNearCheck = {
+  /** "YYYY-MM-DD". 🔴 `null` 이면 거짓이다 — 날짜가 없는 회차에는 경보가 없다. */
+  dueDate: string | null;
+  /** 그 회차를 실제로 보낸 날. 들어 있으면 끝난 회차다. */
+  deliveredDate: string | null;
+  /** 그 회차를 [완료 처리]한 시각. 들어 있으면 끝난 회차다. */
+  completedAt: Date | string | null;
+};
+
+/**
+ * 그 **납기요청일 회차 하나**가 지금 「납기 임박」인가 (2026-11-25).
+ *
+ * ── 🔴 왜 조건 셋을 한 함수로 묶었나 ────────────────────────────────────
+ * 같은 판정을 보는 자리가 **셋**이다: 종 알림 조회(db/queries/domestic-order-due-
+ * date-near-notifications.ts) · 기타건 현황 목록의 배지 · 기타건 상세 머리 카드의
+ * 배지. 조건을 자리마다 적으면 언젠가 한 곳만 고쳐져 **종에는 없는 배지가 표에만
+ * 서거나 그 반대**가 되는데, 그 어긋남은 두 화면을 함께 보는 사람 눈에만 띈다 —
+ * 각 자리의 단위 시험은 양쪽 다 초록이다. 수리 건 쪽이 2026-10-19 에 같은 까닭으로
+ * isRepairCaseDueDateNear 를 세운 자리이고, 이것이 기타건 쪽의 그 함수다.
+ *
+ * ── 보는 칸 셋 ──────────────────────────────────────────────────────────
+ *  · 🔴 **끝난 회차를 뺀다 — 완료와 납품일을 둘 다 본다.** 하나만 보면 안 된다:
+ *    완료는 승인을 거쳐야 찍히고(사용자 결정 13) 납품일은 편집칸에서 바로 적히는
+ *    값이라, 실제로 한쪽만 찬 행이 있다.
+ *  · 🔴 **창은 베껴 적지 않는다** — 「납기 임박」이 쓰는 그 함수에 묻는다
+ *    (isRepairCaseDueDateWithinNotificationWindow — 오늘 ≤ 날짜 ≤ 오늘+7, 한국 달력).
+ *    베껴 적는 순간 「임박」의 뜻이 둘로 갈려, 수리 건 쪽 창이 바뀌는 날 기타건만
+ *    옛 창으로 남는다.
+ *
+ * 🔵 **승인 상태는 보지 않는다.** 승인은 「보낼 수 있다」이지 「보냈다」가 아니다 —
+ * 승인만 받고 안 보낸 회차야말로 납기가 다가오면 챙겨야 하는 줄이다.
+ */
+export function isDomesticOrderDueDateRowNear(
+  row: DomesticOrderDueDateRowForNearCheck,
+  now: Date
+): boolean {
+  if (row.completedAt !== null) return false;
+  if (row.deliveredDate !== null) return false;
+  return isRepairCaseDueDateWithinNotificationWindow(row.dueDate, now);
+}
+
+/**
+ * 이 **기타건 줄**에 「납기 임박」 배지를 붙이는가 — 회차가 **하나라도** 창 안이면
+ * 참이다 (2026-11-25 사용자 요구: 「기타건 목록과 상세에 납기 임박 배지가 뜨도록」).
+ *
+ * ── 🔴 배지는 **건마다 하나**다 ─────────────────────────────────────────
+ * 종 알림은 회차마다 한 줄이 뜨는데(한 줄에 분할 납품이 여럿이라 그렇다) 배지는
+ * 한 건에 최대 하나다. 까닭은 **세울 자리가 없기 때문**이다: 기타건 현황 목록에는
+ * 납기요청일 칸이 아예 없고(misc-case-fields.tsx 의 ⚠️ — 2026-11-06 에 일부러 뺐다),
+ * 상세 머리 카드도 회차를 늘어놓는 자리가 아니다.
+ * 🔵 그래도 **가리키는 건의 묶음은 종과 글자 그대로 같다** — 둘 다 위의 회차 판정
+ * 하나로 걸러지고, 「하나라도」가 그 회차 목록을 건 단위로 접는 유일한 규칙이다.
+ *
+ * ── 🔴 「기타건인가」는 여기서 묻지 않는다 ───────────────────────────────
+ * 받는 것이 회차 목록뿐이라, 수리 건이 붙은 줄의 회차를 넘기면 그대로 참을 준다.
+ * 가르는 일은 부르는 쪽이다 — 목록은 조회가 이미 `repair_case_id IS NULL` 로 좁혀
+ * 왔고(queries 의 listMiscDomesticOrders), 상세는 그 줄의 `repairCaseId` 를 보고
+ * 부른다. 🔴 안 가르면 수리 건이 붙은 내자에 배지가 **두 벌** 선다: 그 줄의
+ * 납기요청일은 「납기 임박」이 이미 빌려 와서 재고 있다
+ * (resolveRepairCaseRequestedDueDate — 종 알림 쪽이 같은 자리에서 같은 판단을 했다).
+ */
+export function isMiscCaseDueDateNear(
+  dueDates: readonly DomesticOrderDueDateRowForNearCheck[],
+  now: Date
+): boolean {
+  return dueDates.some((row) => isDomesticOrderDueDateRowNear(row, now));
+}
+
+/**
  * 「기타건의 납기요청일이 다가왔다」 알림 한 줄.
  *
  * ── subject 는 품명이다 ────────────────────────────────────────────────

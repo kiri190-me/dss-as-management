@@ -8,6 +8,7 @@ import { loadDomesticOrderApprovalStates } from "@/lib/db/queries/domestic-order
 import { listMiscDomesticOrders } from "@/lib/db/queries/domestic-orders";
 import { isFinalShipmentApproved } from "@/lib/domain/final-shipment-approval-badge";
 import { resolveMiscCaseStatus } from "@/lib/domain/misc-case-status";
+import { isMiscCaseDueDateNear } from "@/lib/domain/notifications";
 
 /**
  * ============================================================================
@@ -82,6 +83,21 @@ export default async function MiscCasesPage() {
    */
   const approvalStates = await loadDomesticOrderApprovalStates(rows);
 
+  /**
+   * 🔴 **[납기 임박] 배지의 근거**(2026-11-25 사용자 요구 — 「기타건 목록과 상세에
+   * [납기 임박] 배지가 뜨도록」).
+   *
+   * 🔴 **「오늘」을 서버가 정한다.** 화면에서 `new Date()` 로 만들면 서버가 그린
+   * HTML 과 어긋나 hydration 이 깨진다 — 전체 A/S 현황이 같은 자리에서 같은 함정을
+   * 적어 두었다(repair-cases/page.tsx 의 longPendingPoCaseIds · dueDateNearCaseIds).
+   *
+   * 🔵 **질의를 더 하지 않는다.** 판정에 필요한 회차 셋(납기요청일 · 납품일 · 회차
+   * 완료)이 이미 위 listMiscDomesticOrders() 의 행에 실려 있다(`dueDates`). 🔴 종
+   * 알림 쪽 조회(listDomesticOrdersWithDueDateNear)를 여기서 부르면 같은 표를 통째로
+   * 한 번 더 훑는다 — 답은 같고 값만 더 치른다.
+   */
+  const now = new Date();
+
   // 🔴 접는 규칙은 여기 적지 않는다 — 기타건 상세의 머리 카드가 쓰는 **그 함수**
   //    하나다(domain/misc-case-status.ts). 두 곳에 적으면 같은 줄이 목록과 상세에서
   //    다른 상태로 보이는 날이 온다.
@@ -103,6 +119,17 @@ export default async function MiscCasesPage() {
      * 🔴 어느 상태에 붙는지는 도메인 하나가 정한다 — `STALE` 에는 안 붙는다.
      */
     finalShipmentApproved: isFinalShipmentApproved(approvalStates.get(row.id) ?? null),
+    /**
+     * 🔴 **종 알림과 같은 함수 하나**가 판정한다(domain/notifications.ts 의
+     * isMiscCaseDueDateNear — 끝난 회차를 빼고, 「납기 임박」이 쓰는 그 창에 묻는다).
+     * 조건을 여기 적으면 **종에는 없는 배지가 표에만 서는** 날이 오고, 그 어긋남은
+     * 두 화면을 함께 보는 사람 눈에만 띈다.
+     *
+     * 🔵 **값은 줄마다 하나**다 — 회차가 여럿이어도 「하나라도 임박이면 참」이다.
+     * 접는 규칙도 그 함수가 갖는다(이 화면에는 납기요청일 칸이 없어 회차마다 세울
+     * 자리가 없다 — components/misc-cases/misc-case-fields.tsx).
+     */
+    isDueDateNear: isMiscCaseDueDateNear(row.dueDates, now),
   }));
 
   return <MiscCaseListScreen rows={rowsWithStatus} />;

@@ -1,5 +1,6 @@
 import FinalShipmentApprovedBadge from "@/components/approvals/FinalShipmentApprovedBadge";
 import MiscCaseStatusBadge from "@/components/misc-cases/MiscCaseStatusBadge";
+import { DueDateNearBadge } from "@/components/repair-cases/badges";
 import {
   domesticOrderDetailHeadFacts,
   type DomesticOrderDetailHeadRow,
@@ -59,8 +60,28 @@ import type { MiscCaseStatus } from "@/lib/domain/misc-case-status";
  * (foldDomesticOrderApprovalStates), 이 카드는 그 결과를 받는다. 회차 하나만 끝난
  * 줄에서 머리에 「승인 완료」가 뜨면, 바로 아래 [승인] 탭의 카드 둘과 어긋난다.
  *
- * ── 🔴 배지 둘이 **자리를 받는다** (2026-11-13) ────────────────────────
- * 두 배지에 `placeKey="miscCaseDetailHeader"` 를 넘긴다 — [시스템 설정] →
+ * ── 🔴 [납기 임박] 배지 (2026-11-25 사용자 요구) ───────────────────────
+ * 「기타건 목록과 상세에 [납기 임박] 배지가 뜨도록 해 줘」.
+ *
+ * 🔴 **판정도 「오늘」도 여기 없다** — 레이아웃이 재서 불리언 하나로 넘긴다. 이
+ * 카드가 `new Date()` 로 오늘을 만들면 서버가 그린 것과 어긋나고(hydration), 조건을
+ * 여기 적으면 종 알림과 두 말이 된다. 판정은 종 알림이 쓰는 그 함수 하나다
+ * (domain/notifications.ts 의 isMiscCaseDueDateNear).
+ *
+ * 🔴 **수리 건이 붙은 줄에서는 안 선다** — 그 가름도 레이아웃이 한다. 이 주소는
+ * 기타건이 아닌 줄에도 열리고(이 레이아웃의 머리말 — 나중에 수리 건을 이어 붙여도
+ * 북마크가 죽지 않게 한 것이다), 그런 줄의 납기요청일은 수리 건 쪽 「납기 임박」이
+ * 이미 **빌려 와서** 재고 있다. 여기서 또 세우면 같은 날짜로 배지가 두 벌 선다.
+ *
+ * 🔵 **배지 조각은 수리 건 쪽 것을 그대로 쓴다**(repair-cases/badges.tsx 의
+ * DueDateNearBadge) — 기타건 현황 목록도 같은 조각을 쓴다. 그 파일은 `"use client"`
+ * 라 이 서버 카드가 **클라이언트 조각을 하나 그리는** 모양이 되는데, 그것은 아래
+ * 두 배지가 BadgeVisibilityGate 를 그리는 것과 같은 일이다(경계를 건너는 값이 전부
+ * 불리언·문자열이라 비용도 없다). 🔴 이 **파일 자체는 서버 컴포넌트인 채로 둔다** —
+ * 여기에 훅을 들이면 이 카드가 통째로 죽는다.
+ *
+ * ── 🔴 배지들이 **자리를 받는다** (2026-11-13 · 2026-11-25) ────────────
+ * 세 배지에 `placeKey="miscCaseDetailHeader"` 를 넘긴다 — [시스템 설정] →
  * [배지 표시]의 「기타건 상세 — 머리말」에서 체크를 풀면 여기서만 사라지고 기타건
  * 현황 목록의 같은 배지는 그대로 남는다(설정의 단위가 **배지가 아니라 (배지, 자리)
  * 한 쌍**인 까닭 — domain/badge-visibility.ts).
@@ -75,11 +96,17 @@ export default function DomesticOrderDetailHeader({
   row,
   status,
   finalShipmentApproved = false,
+  isDueDateNear = false,
 }: {
   row: DomesticOrderDetailHeadRow;
   status?: MiscCaseStatus;
   /** 🔴 판정은 도메인 하나가 한다(isFinalShipmentApproved) — `STALE` 에는 안 붙는다. */
   finalShipmentApproved?: boolean;
+  /**
+   * 🔴 판정은 종 알림과 같은 함수 하나가 한다(isMiscCaseDueDateNear). **수리 건이
+   * 붙은 줄에서는 레이아웃이 거짓을 넘긴다** — 까닭은 위 머리말에 있다.
+   */
+  isDueDateNear?: boolean;
 }) {
   const facts = domesticOrderDetailHeadFacts(row);
 
@@ -99,6 +126,11 @@ export default function DomesticOrderDetailHeader({
           approved={finalShipmentApproved}
           placeKey="miscCaseDetailHeader"
         />
+        {/* 🔴 표식 묶음의 **맨 뒤**다 — 기타건 현황 목록의 상태 칸과 같은 차례라
+            (상태 → 승인 완료 → 납기 임박) 목록에서 상세로 넘어온 사람이 같은
+            자리에서 같은 순서로 읽는다. 값 알약 넷보다는 앞이다: 이것은 값이 아니라
+            표식이고, 알약 사이에 섞으면 품명·공급처와 같은 무게로 읽힌다. */}
+        <DueDateNearBadge isDueDateNear={isDueDateNear} placeKey="miscCaseDetailHeader" />
         {/* 값 알약 묶음 — 가운뎃점 구분자는 두지 않는다(알약의 테두리가 가른다).
             좁은 화면에서는 묶음 안에서 줄바꿈된다. */}
         <div className="flex flex-wrap items-baseline gap-1.5">

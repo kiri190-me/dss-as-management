@@ -12,6 +12,7 @@ import { getDomesticOrderApprovalUnits } from "@/lib/db/queries/domestic-order-a
 import { getDomesticOrderDetail } from "@/lib/db/queries/domestic-orders";
 import { isFinalShipmentApproved } from "@/lib/domain/final-shipment-approval-badge";
 import { resolveMiscCaseStatus } from "@/lib/domain/misc-case-status";
+import { isMiscCaseDueDateNear } from "@/lib/domain/notifications";
 
 /**
  * ============================================================================
@@ -141,12 +142,34 @@ export default async function DomesticOrderDetailLayout({
    */
   const finalShipmentApproved = isFinalShipmentApproved(approval?.state ?? null);
 
+  /**
+   * 🔴 머리 카드의 **[납기 임박]** 배지(2026-11-25 사용자 요구 — 「기타건 목록과
+   * 상세에 [납기 임박] 배지가 뜨도록」).
+   *
+   * 🔵 **질의가 늘지 않는다** — 판정에 쓰는 회차 셋(납기요청일 · 납품일 · 회차 완료)이
+   * 위 `getDomesticOrderDetail(id)` 의 줄에 이미 실려 있다(`dueDates`). 종 알림 쪽
+   * 조회를 여기서 부르면 그 표를 통째로 다시 훑는다 — 답은 같고 값만 더 치른다.
+   *
+   * 🔴 **「오늘」을 서버가 정한다.** 머리 카드가 `new Date()` 로 만들면 서버가 그린
+   * HTML 과 어긋난다(hydration). 조건도 여기 적지 않는다 — 종 알림이 쓰는 그 함수
+   * 하나에 묻는다(domain/notifications.ts).
+   *
+   * 🔴 **기타건일 때만 세운다** — `repairCaseId` 가 비어 있는 줄이 기타건이다
+   * (domain/domestic-order-approval-rules.ts 와 같은 잣대). 이 주소는 수리 건이 붙은
+   * 줄에도 열리는데(이 파일 머리말), 그 줄의 납기요청일은 수리 건 쪽 「납기 임박」이
+   * 이미 **빌려 와서** 재고 있다(resolveRepairCaseRequestedDueDate). 안 가르면 같은
+   * 날짜로 배지가 두 벌 서고, 종 알림 쪽이 2026-11-25 에 같은 한 줄로 같은 일을 막았다.
+   */
+  const isDueDateNear =
+    row.repairCaseId === null && isMiscCaseDueDateNear(row.dueDates, new Date());
+
   return (
     <div className="flex flex-col gap-4">
       <DomesticOrderDetailHeader
         row={row}
         status={status}
         finalShipmentApproved={finalShipmentApproved}
+        isDueDateNear={isDueDateNear}
       />
       <DomesticOrderDetailTabs id={id} visibility={tabVisibility} />
       {children}

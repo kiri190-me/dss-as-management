@@ -5,7 +5,7 @@ import { db } from "../client";
 import { domesticOrderDueDates, domesticOrders } from "../schema";
 import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-date-label";
 import { resolveDomesticOrderValue } from "@/lib/domain/domestic-order-list";
-import { isRepairCaseDueDateWithinNotificationWindow } from "@/lib/domain/notifications";
+import { isDomesticOrderDueDateRowNear } from "@/lib/domain/notifications";
 
 /**
  * ============================================================================
@@ -23,14 +23,17 @@ import { isRepairCaseDueDateWithinNotificationWindow } from "@/lib/domain/notifi
  * 한 줄도 나올 수 없다. 그래서 나란히 새로 세운다(기타건 결재 대기가 접수 건 결재
  * 조회를 안 넓힌 것과 같은 자리·같은 까닭).
  *
- * ── 🔴 그래도 **창은 베껴 적지 않는다** ─────────────────────────────────
- * 뜰지 말지를 정하는 한 줄은 「납기 임박」이 쓰는 그 도메인 함수다
- * (domain/notifications.ts 의 isRepairCaseDueDateWithinNotificationWindow — 오늘 ≤ 날짜
- * ≤ 오늘+7, 한국 달력). 베껴 적으면 「임박」의 뜻이 둘로 갈려, 수리 건 쪽 창이 바뀌는
- * 날 기타건만 옛 창으로 남는다. 🔴 **SQL 로 날짜를 재지 않는 것**이 그 규율의 가장 단단한
- * 표현이다 — 행을 읽어 도메인에 묻는다(그 까닭은 repair-case-due-date-notifications.ts
- * 머리말에 있다. 함수 이름이 `RepairCase…` 로 시작하는 것은 처음 태어난 자리가 거기여서이고,
- * 묻는 것은 「이 날짜가 창 안인가」 하나라 표와 상관이 없다).
+ * ── 🔴 그래도 **판정은 베껴 적지 않는다** ───────────────────────────────
+ * 뜰지 말지를 정하는 한 줄은 도메인 함수다(domain/notifications.ts 의
+ * isDomesticOrderDueDateRowNear — 끝난 회차를 빼고, 「납기 임박」이 쓰는 그 창에
+ * 묻는다: 오늘 ≤ 날짜 ≤ 오늘+7, 한국 달력). 베껴 적으면 「임박」의 뜻이 둘로 갈려,
+ * 수리 건 쪽 창이 바뀌는 날 기타건만 옛 창으로 남는다. 🔴 **SQL 로 날짜를 재지 않는
+ * 것**이 그 규율의 가장 단단한 표현이다 — 행을 읽어 도메인에 묻는다(그 까닭은
+ * repair-case-due-date-notifications.ts 머리말에 있다).
+ * 🔴 **2026-11-25 늦게 그 함수가 생겼다.** 그 전까지는 이 파일이 조건 셋을 손으로
+ * 펴 쓰고 창만 도메인에 물었는데, 같은 판정을 화면 배지 둘이 함께 쓰게 되면서
+ * (기타건 현황 목록 · 기타건 상세 머리 카드) 조건이 세 벌이 될 자리였다 — 그러면
+ * **종에는 없는 배지가 표에만 서는** 어긋남이 생기고, 각 자리의 시험은 둘 다 초록이다.
  *
  * ── 🔴 가르는 자리는 `repair_case_id IS NULL` 하나다 ────────────────────
  * 「기타건」의 뜻이 그것이다(domain/domestic-order-approval-rules.ts 와 같은 잣대).
@@ -43,8 +46,8 @@ import { isRepairCaseDueDateWithinNotificationWindow } from "@/lib/domain/notifi
  *    domestic-orders.ts 의 getDomesticOrderDetail) 누르면 갈 화면이 없는 알림을 세우지
  *    않는다. 종 알림 전부가 같은 조건을 건다.
  *  · 🔴 **끝난 회차** — 그 행에 `completed_at`(회차 [완료 처리]) 또는 `delivered_date`
- *    (납품일)가 있으면 뺀다. 둘 중 하나만 보면 안 된다: 완료는 승인을 거쳐야 찍히고
- *    (사용자 결정 13) 납품일은 편집칸에서 바로 적히는 값이라, 실제로 한쪽만 찬 행이 있다.
+ *    (납품일)가 있으면 뺀다. 둘 중 하나만 보면 안 된다는 까닭은 위 도메인 함수의
+ *    주석에 있다(완료와 납품일은 적히는 길이 달라 한쪽만 찬 행이 실제로 있다).
  *    🔵 **줄 전체의 완료는 따로 볼 필요가 없다** — 줄을 [완료 처리]하면 저장 통로가
  *    **모든 회차 행에** `completed_at` 을 찍는다(mutations/domestic-orders.ts 의
  *    「회차 행도 줄과 같은 방향으로 움직인다」). 회차 한 칸만 보면 공짜로 따라온다.
@@ -173,9 +176,10 @@ export async function listDomesticOrdersWithDueDateNear(
     for (const [index, row] of orderRows.entries()) {
       // 🔴 번호를 먼저 매기고 그다음에 거른다(파일 머리말).
       const dueDateRowOrder = index + 1;
-      if (row.completedAt !== null) continue;
-      if (row.deliveredDate !== null) continue;
-      if (!isRepairCaseDueDateWithinNotificationWindow(row.dueDate, now)) continue;
+      // 🔴 끝남 둘과 창을 **한 함수에** 묻는다 — 화면의 배지가 같은 함수를 부른다
+      //    (domain/notifications.ts 의 isDomesticOrderDueDateRowNear). 여기서 세 줄로
+      //    펴 쓰면 「임박」의 뜻이 종과 표에서 갈릴 수 있다.
+      if (!isDomesticOrderDueDateRowNear(row, now)) continue;
 
       items.push({
         domesticOrderId,

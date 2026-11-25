@@ -141,6 +141,10 @@ function miscRow(approved: boolean, status: MiscCaseRow["status"] = "SHIPMENT_RE
     customerName: "가나 테크",
     status,
     finalShipmentApproved: approved,
+    // 🔴 2026-11-25 에 늘었다 — [납기 임박] 배지. **이 파일은 그 배지를 재지 않으므로**
+    //    꺼 둔다(켜면 아래 단언들이 이 배지의 글자까지 함께 보게 된다). 붙는 쪽과
+    //    안 붙는 쪽을 함께 재는 자리는 misc-cases/misc-case-due-date-near-badge.test.tsx 다.
+    isDueDateNear: false,
     displayQuoteNumber: null,
     displayQuoteIssuedDate: null,
     purchaseOrderNumber: null,

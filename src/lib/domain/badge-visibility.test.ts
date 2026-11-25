@@ -23,9 +23,13 @@ import {
  * 있는 것이 하나도 없고, 지키는 일을 전부 이 파일이 한다.
  *
  * 🔴 가장 세게 지키는 둘:
- *  ① **쌍이 29개다** — 15 × 6 = 90 으로 펼치면 설정 화면에 「어디에도 안 뜨는
- *     배지」의 스위치가 61개 생긴다. 꺼도 아무 일이 안 일어나므로, 끈 사람은
+ *  ① **쌍이 31개다** — 15 × 6 = 90 으로 펼치면 설정 화면에 「어디에도 안 뜨는
+ *     배지」의 스위치가 59개 생긴다. 꺼도 아무 일이 안 일어나므로, 끈 사람은
  *     기능이 고장 난 것으로 읽는다.
+ *     🔵 2026-11-25 에 29 에서 둘 늘었다 — 「납기 임박」이 기타건 쪽 자리 둘
+ *     (기타건 현황 목록 · 기타건 상세 머리말)에도 서게 됐다. **배지도 자리도 늘지
+ *     않았다**: 이미 있던 키의 places 에 둘을 더한 것이라 「기타건 쪽만 끄기」가
+ *     그대로 된다.
  *  ② **같은 배지라도 자리가 다르면 따로 판정된다** — 이 기능의 존재 이유다.
  *     한 자리를 끄는 설정이 다른 자리까지 끄면 (배지, 자리) 표를 만든 값이 통째로
  *     사라지는데, 그 어긋남은 끈 자리만 보는 사람 눈에는 「잘 된다」로 보인다.
@@ -56,11 +60,11 @@ describe("🔵 못 — 등록부가 실제로 차 있는가", () => {
   });
 });
 
-describe("🔴 허용 쌍 — 29개", () => {
-  test("합이 29다", () => {
+describe("🔴 허용 쌍 — 31개", () => {
+  test("합이 31이다", () => {
     assert.equal(
       BADGE_PLACEMENTS.length,
-      29,
+      31,
       "설정할 수 있는 쌍의 수가 달라졌다 — 배지를 한 자리 더 그리기로 했다면 여기도 함께 고친다"
     );
   });
@@ -119,6 +123,15 @@ describe("🔴 허용 쌍 — 29개", () => {
     // 목록에 없다. 「(내자)」는 목록 전용이라 상세 기본 정보에는 긴 쪽이 뜬다.
     assert.equal(isBadgePlacementAllowed("priority", "domesticOrderList"), false);
     assert.equal(isBadgePlacementAllowed("miscCaseStatus", "repairCaseList"), false);
+    // 🔴 2026-11-25 — 「납기 임박」이 기타건 쪽 **두 자리**에도 선다. 「없다」쪽만
+    // 세면 자리를 하나 더하는 날 아무도 신고하지 않으므로, 있는 쪽을 같은 줄에서
+    // 함께 못 박는다.
+    assert.equal(isBadgePlacementAllowed("dueDateNear", "miscCaseList"), true);
+    assert.equal(isBadgePlacementAllowed("dueDateNear", "miscCaseDetailHeader"), true);
+    // 🔵 그래도 **아무 데나 서지는 않는다** — 내자 정리 목록에는 안 뜬다. 그 화면의
+    // 납기요청일 칸은 수리 건이 붙은 줄까지 함께 그리는 자리라, 거기 세우면 같은
+    // 날짜로 수리 건 쪽 경보와 두 벌이 된다.
+    assert.equal(isBadgePlacementAllowed("dueDateNear", "domesticOrderList"), false);
     assert.equal(
       isBadgePlacementAllowed("dueDateFromDomesticOrderShort", "repairCaseDetailBasicInfo"),
       false
@@ -192,8 +205,8 @@ describe("🔴 판정 — isBadgeVisible", () => {
       );
       counted += 1;
     }
-    // 🔵 못 — 29쌍을 실제로 다 돌았는가(목록이 비면 공짜로 통과한다).
-    assert.equal(counted, 29);
+    // 🔵 못 — 31쌍을 실제로 다 돌았는가(목록이 비면 공짜로 통과한다).
+    assert.equal(counted, 31);
   });
 
   test("그 쌍의 줄이 없으면 보인다 — 남의 줄만 있어도 마찬가지", () => {

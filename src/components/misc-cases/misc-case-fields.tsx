@@ -13,6 +13,7 @@ import {
   DeliveredDateCellContent,
 } from "@/components/domestic-orders/delivered-cell-content";
 import FinalShipmentApprovedBadge from "@/components/approvals/FinalShipmentApprovedBadge";
+import { DueDateNearBadge } from "@/components/repair-cases/badges";
 import { resolveDomesticOrderModelLink } from "@/lib/domain/domestic-order-detail-link";
 import type { MiscCaseStatus } from "@/lib/domain/misc-case-status";
 import MiscCaseStatusBadge from "./MiscCaseStatusBadge";
@@ -83,6 +84,23 @@ export type MiscCaseRow = {
    * `STALE` 에는 안 붙는다. 까닭은 그 파일 머리말에 있다.
    */
   finalShipmentApproved: boolean;
+  /**
+   * 🔴 **[납기 임박] 배지를 붙이는가**(2026-11-25 사용자 요구 — 「기타건 목록과
+   * 상세에 납기 임박 배지가 뜨도록」). 위 둘과 같이 **서버가 정해 보낸다.**
+   *
+   * 🔴 **화면이 스스로 판정할 수 없다.** 「오늘」을 화면에서 `new Date()` 로 만들면
+   * 서버가 그린 것과 어긋나 hydration 이 깨지고(repair-cases/badges.tsx 의
+   * DueDateNearBadge 주석), 조건을 여기 적으면 종 알림과 두 말이 된다. 판정은
+   * 종 알림이 쓰는 그 함수 하나다(domain/notifications.ts 의 isMiscCaseDueDateNear).
+   *
+   * 🔵 **회차가 여럿이어도 값은 하나**다 — 「임박인 회차가 하나라도 있으면 참」.
+   * 이 화면에는 납기요청일 칸이 아예 없어(아래 MISC_CASE_FIELDS 의 ⚠️) 회차마다
+   * 배지를 세울 자리가 없다. 그 접는 규칙도 위 함수가 갖는다.
+   *
+   * 🔵 **질의가 늘지 않는다** — 판정에 쓰는 회차 목록(`dueDates`)이 이미 목록 조회의
+   * 행에 실려 있다(queries/domestic-orders.ts 의 attachDomesticOrderExtras, N+1 아님).
+   */
+  isDueDateNear: boolean;
   displayQuoteNumber: string | null;
   displayQuoteIssuedDate: string | null;
   purchaseOrderNumber: string | null;
@@ -191,6 +209,9 @@ export type MiscCaseField = {
  * 기타건 13건 중 **1건**만 달려 있는 데다 그 칸의 「납기 역전」 경보는 연결된 수리
  * 건의 사내 목표 완료일로 재는 값이라 기타건에서는 영영 뜨지 않는다
  * (domain/due-date-inversion.ts).
+ * 🔵 **2026-11-25 에도 그 칸을 되살리지 않았다.** 그날 [납기 임박] 배지가 붙었지만
+ * 서는 자리는 상태 칸이고(아래), 값은 **건마다 하나**다 — 회차를 늘어놓는 칸이
+ * 없으니 배지도 회차마다 세우지 않는다는 결정이 여기서 나왔다.
  */
 export const MISC_CASE_FIELDS = {
   modelName: { label: "품명", of: (row) => <MiscCaseModelLink row={row} /> },
@@ -210,12 +231,21 @@ export const MISC_CASE_FIELDS = {
   // `whitespace-nowrap` 이라 두 배지가 한 줄에 묶이면 그 칼럼만 옆으로 늘어난다.
   // flex 상자의 **칸끼리는** 그 설정과 무관하게 접힌다.
   //
-  // 🔴 **둘 다 자리를 받는다**(2026-11-13) — [시스템 설정] → [배지 표시]의
+  // 🔴 **셋 다 자리를 받는다**(2026-11-13 · 2026-11-25) — [시스템 설정] → [배지 표시]의
   // 「기타건 현황 — 목록」에서 체크를 풀면 그 배지가 여기서 사라진다. 자리 글자를
   // 이 한 벌에 적는 것이 요점이다: **표와 카드가 이 파일 하나를 먹으므로** 한쪽만
   // 안 꺼지는 일이 생기지 않는다(이 파일의 요점 그대로다). 🔵 자리를 아는 것은
   // 이 한 줄뿐이고, 숨길지 말지는 배지 조각이 제 손으로 정한다 — 여기에
   // `{보일까 && <배지/>}` 를 적지 않는 까닭은 repair-cases/badges.tsx 머리말에 있다.
+  //
+  // 🔴 **2026-11-25 — [납기 임박]이 맨 뒤에 함께 선다**(사용자 요구). 칸을 새로
+  // 만들지 않고 여기 붙인 까닭은 바로 위 [최종 출하 승인 완료] 때와 **같다**: 이
+  // 한 벌이 표와 카드를 함께 먹고, 열을 늘리면 이미 아홉인 표가 더 옆으로 벌어진다.
+  // 🔵 **배지 조각은 수리 건 쪽 것을 그대로 쓴다**(repair-cases/badges.tsx 의
+  // DueDateNearBadge) — 받는 것이 불리언 하나뿐이라 그대로 맞고, 글자도 색도 같은
+  // 조각에서 나와야 같은 사실이 두 화면에서 같게 보인다. 글자는 「납기 임박」이다:
+  // 종 알림은 둘이 **한 목록에 섞여** 떠서 이름을 갈랐지만(「기타건 납기 임박」),
+  // 배지는 기타건 화면에만 서므로 「기타건」을 앞에 붙이면 군더더기다.
   status: {
     label: "상태",
     of: (row) => (
@@ -225,6 +255,7 @@ export const MISC_CASE_FIELDS = {
           approved={row.finalShipmentApproved}
           placeKey="miscCaseList"
         />
+        <DueDateNearBadge isDueDateNear={row.isDueDateNear} placeKey="miscCaseList" />
       </span>
     ),
   },

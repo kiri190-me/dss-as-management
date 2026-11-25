@@ -435,8 +435,8 @@ describe("배지 조각 자체 — 자리를 안 주면 **언제나** 그린다"
     },
   ];
 
-  test("🔴 29쌍을 전부 꺼도 **자리 없는** 배지 여덟이 그대로 그려진다", () => {
-    assert.equal(EVERY_PLACEMENT_HIDDEN.length, 29, "등록부의 쌍이 29가 아니다");
+  test("🔴 31쌍을 전부 꺼도 **자리 없는** 배지 여덟이 그대로 그려진다", () => {
+    assert.equal(EVERY_PLACEMENT_HIDDEN.length, 31, "등록부의 쌍이 31이 아니다");
     for (const sample of SAMPLES) {
       const html = renderToStaticMarkup(
         <BadgeVisibilityProvider value={EVERY_PLACEMENT_HIDDEN}>
@@ -559,9 +559,10 @@ describe("🔴 수리건 쪽 세 자리 — 쌍 **20개**가 전부 화면에 �
       (REPAIR_CASE_PLACES as readonly string[]).includes(one.placeKey)
     );
     assert.equal(pairs.length, 20);
-    // 나머지 아홉은 내자 정리·기타건 쪽이다 — 🔵 2026-11-13(조각 4)에 그쪽도 붙었고,
-    // 그 아홉은 이웃이 센다(domestic-orders/badge-visibility-screens.test.tsx).
-    assert.equal(BADGE_PLACEMENTS.length - pairs.length, 9);
+    // 나머지 열하나는 내자 정리·기타건 쪽이다 — 🔵 2026-11-13(조각 4)에 그쪽도
+    // 붙었고(그때는 아홉), 2026-11-25 에 「납기 임박」이 기타건 쪽 자리 둘에 서며
+    // 둘 늘었다. 그 열하나는 이웃이 센다(domestic-orders/badge-visibility-screens.test.tsx).
+    assert.equal(BADGE_PLACEMENTS.length - pairs.length, 11);
     // 🔵 못 — 수리건 쪽 자리가 **등록부에도 꼭 셋**인가. 여기 목록만 줄이고 등록부에
     //    자리가 남아 있으면 「안 붙은 자리」가 생기는데 위 두 셈은 그대로 맞는다.
     assert.equal(

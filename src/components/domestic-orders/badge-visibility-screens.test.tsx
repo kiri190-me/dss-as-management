@@ -33,6 +33,7 @@ import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-da
 import { FINAL_SHIPMENT_APPROVED_LABEL } from "@/lib/domain/final-shipment-approval-badge";
 import { MISC_CASE_DEFAULT_SORT } from "@/lib/domain/misc-case-list";
 import { MISC_CASE_STATUS_LABELS } from "@/lib/domain/misc-case-status";
+import { NOTIFICATION_KIND_META } from "@/lib/domain/notification-settings";
 import { DUE_DATE_FROM_REPAIR_CASE_LABEL } from "@/lib/domain/requested-due-date-link";
 
 /**
@@ -44,6 +45,10 @@ import { DUE_DATE_FROM_REPAIR_CASE_LABEL } from "@/lib/domain/requested-due-date
  * 셋(20쌍)** 을 붙였다. 남은 **아홉 쌍**이 등록부에만 있고 꺼도 화면이 안 바뀌고
  * 있었다 — 이 파일이 그 아홉을 못 박는다. 🔴 **이 조각이 끝나면 29쌍이 전부 듣는다**
  * (아래 「쌍 세기」 묶음이 그 수를 등록부에서 직접 세어 보여 준다).
+ *
+ * 🔵 **2026-11-25 에 이 셋이 맡은 쌍이 열하나가 됐다**(전체는 31). 「납기 임박」이
+ * 기타건 쪽 자리 둘에 서면서다 — 배지도 자리도 늘지 않았고 쌍만 둘 늘었다. 그래서
+ * 이 파일이 달라진 곳은 **세는 수와 표본의 배지 수**뿐이고, 재는 방식은 그대로다.
  *
  * 🔴 못 박는 것 여덟
  *  ① 자리를 **주고** 그 쌍을 끄면 그 배지가 한 글자도 안 그려진다.
@@ -299,6 +304,9 @@ function fakeMiscRow(overrides: Partial<MiscCaseRow> = {}): MiscCaseRow {
     customerName: "시험용 공급처",
     status: "SHIPMENT_READY",
     finalShipmentApproved: true,
+    // 🔴 **켜 둔다**(2026-11-25). 이 파일은 「끄면 사라지는가」를 재는 곳이라, 배지가
+    //    애초에 안 서는 표본으로 재면 모든 단언이 공짜로 통과한다 — 그래서 셋 다 켠다.
+    isDueDateNear: true,
     displayQuoteNumber: "TEST-Q-0001",
     displayQuoteIssuedDate: "2094-09-30",
     purchaseOrderNumber: "TEST-PO-0001",
@@ -314,10 +322,22 @@ function fakeMiscRow(overrides: Partial<MiscCaseRow> = {}): MiscCaseRow {
   };
 }
 
-/** 기타건 현황에 서는 배지 둘. 글자는 **한 벌도 여기서 짓지 않는다**. */
+/**
+ * 기타건 현황에 서는 배지 **셋**. 글자는 **한 벌도 여기서 짓지 않는다**.
+ *
+ * 🔵 셋째(납기 임박)는 2026-11-25 에 늘었다 — 수리 건 쪽과 **같은 배지 키**라
+ * (`dueDateNear`) 자리만 더해졌다. 글자도 같은 자리에서 가져온다: 종 알림의 종류
+ * 이름이다(NOTIFICATION_KIND_META.REPAIR_CASE_DUE_DATE_NEAR — 「납기 임박」).
+ * 🔴 **「기타건 납기 임박」이 아니다.** 그 이름은 종 패널에서 둘이 한 목록에 섞여
+ * 뜨기 때문에 갈라 둔 것이고, 배지는 기타건 화면에만 서므로 군더더기다.
+ */
 const MISC_BADGES: readonly { badgeKey: BadgeKey; label: string }[] = [
   { badgeKey: "miscCaseStatus", label: MISC_CASE_STATUS_LABELS.SHIPMENT_READY },
   { badgeKey: "finalShipmentApproved", label: FINAL_SHIPMENT_APPROVED_LABEL },
+  {
+    badgeKey: "dueDateNear",
+    label: NOTIFICATION_KIND_META.REPAIR_CASE_DUE_DATE_NEAR.label,
+  },
 ];
 
 /** 🔴 표와 카드 **둘 다** 잰다(④). 자리 키는 misc-case-fields.tsx 한 벌에 박혀 있다. */
@@ -333,7 +353,7 @@ const MISC_SCREENS: readonly { name: string; render: (rows: MiscCaseRow[]) => Re
 
 describe("기타건 현황 — ⓪ 표본이 비어 있지 않다", () => {
   for (const screen of MISC_SCREENS) {
-    test(`${screen.name}: 아무것도 안 끄면 배지 둘이 다 보인다`, () => {
+    test(`${screen.name}: 아무것도 안 끄면 배지 셋이 다 보인다`, () => {
       const html = renderWith([], screen.render([fakeMiscRow()]));
       assert.ok(html.length > 500, `화면이 거의 비어 있다: ${html}`);
       for (const badge of MISC_BADGES) {
@@ -342,12 +362,12 @@ describe("기타건 현황 — ⓪ 표본이 비어 있지 않다", () => {
     });
   }
 
-  test("🔵 등록부의 둘과 글자가 맞는다", () => {
+  test("🔵 등록부의 셋과 글자가 맞는다", () => {
     const registered = BADGE_PLACEMENTS.filter((one) => one.placeKey === "miscCaseList")
       .map((one) => one.badgeKey as string)
       .sort();
     assert.deepEqual(MISC_BADGES.map((one) => one.badgeKey as string).sort(), registered);
-    assert.equal(registered.length, 2);
+    assert.equal(registered.length, 3);
   });
 });
 
@@ -382,7 +402,7 @@ for (const screen of MISC_SCREENS) {
       });
     }
 
-    test("🔵 Provider 가 아예 없어도 둘이 전부 보인다", () => {
+    test("🔵 Provider 가 아예 없어도 셋이 전부 보인다", () => {
       const html = renderToStaticMarkup(screen.render([fakeMiscRow()]));
       for (const badge of MISC_BADGES) {
         assert.ok(hasBadge(html, badge.label), `${badge.badgeKey}: Provider 없이 사라졌다`);
@@ -400,7 +420,7 @@ describe("⑦ 🔴 배지를 다 꺼도 **그 줄이 목록에서 사라지지 �
   }));
 
   for (const screen of MISC_SCREENS) {
-    test(`${screen.name}: 배지 둘이 다 사라져도 줄의 값은 그대로다`, () => {
+    test(`${screen.name}: 배지 셋이 다 사라져도 줄의 값은 그대로다`, () => {
       const row = fakeMiscRow();
       const html = renderWith(ALL_MISC_HIDDEN, screen.render([row]));
       for (const badge of MISC_BADGES) {
@@ -457,7 +477,7 @@ const FAKE_HEAD_ROW = {
   displayQuoteNumber: "TEST-Q-0001",
 };
 
-describe("기타건 상세 머리 카드 — 배지 둘이 이 자리에서만 꺼진다", () => {
+describe("기타건 상세 머리 카드 — 배지 셋이 이 자리에서만 꺼진다", () => {
   const header = (hidden: readonly BadgePlacement[]) =>
     renderWith(
       hidden,
@@ -465,14 +485,20 @@ describe("기타건 상세 머리 카드 — 배지 둘이 이 자리에서만 �
         row={FAKE_HEAD_ROW}
         status="SHIPMENT_READY"
         finalShipmentApproved
+        isDueDateNear
       />
     );
+  /** 🔵 셋째는 2026-11-25 에 늘었다. 글자는 목록 쪽과 **같은 자리**에서 가져온다. */
   const HEAD_BADGES: readonly { badgeKey: BadgeKey; label: string }[] = [
     { badgeKey: "miscCaseStatus", label: MISC_CASE_STATUS_LABELS.SHIPMENT_READY },
     { badgeKey: "finalShipmentApproved", label: FINAL_SHIPMENT_APPROVED_LABEL },
+    {
+      badgeKey: "dueDateNear",
+      label: NOTIFICATION_KIND_META.REPAIR_CASE_DUE_DATE_NEAR.label,
+    },
   ];
 
-  test("⓪ 아무것도 안 끄면 둘이 다 보인다", () => {
+  test("⓪ 아무것도 안 끄면 셋이 다 보인다", () => {
     const html = header([]);
     assert.ok(html.includes("기타건 상세"), html);
     for (const badge of HEAD_BADGES) {
@@ -480,12 +506,12 @@ describe("기타건 상세 머리 카드 — 배지 둘이 이 자리에서만 �
     }
   });
 
-  test("🔵 등록부의 둘과 글자가 맞는다", () => {
+  test("🔵 등록부의 셋과 글자가 맞는다", () => {
     const registered = BADGE_PLACEMENTS.filter((one) => one.placeKey === "miscCaseDetailHeader")
       .map((one) => one.badgeKey as string)
       .sort();
     assert.deepEqual(HEAD_BADGES.map((one) => one.badgeKey as string).sort(), registered);
-    assert.equal(registered.length, 2);
+    assert.equal(registered.length, 3);
   });
 
   for (const badge of HEAD_BADGES) {
@@ -509,12 +535,13 @@ describe("기타건 상세 머리 카드 — 배지 둘이 이 자리에서만 �
     });
   }
 
-  test("🔵 Provider 가 아예 없어도 둘이 전부 보인다", () => {
+  test("🔵 Provider 가 아예 없어도 셋이 전부 보인다", () => {
     const html = renderToStaticMarkup(
       <DomesticOrderDetailHeader
         row={FAKE_HEAD_ROW}
         status="SHIPMENT_READY"
         finalShipmentApproved
+        isDueDateNear
       />
     );
     for (const badge of HEAD_BADGES) {
@@ -525,7 +552,7 @@ describe("기타건 상세 머리 카드 — 배지 둘이 이 자리에서만 �
 
 /* ═══════════════════════════════ ② 자리를 안 주면 언제나 그린다 */
 
-describe("② 🔴 29쌍을 **전부** 꺼도 자리 없는 조각들은 그대로 그려진다", () => {
+describe("② 🔴 31쌍을 **전부** 꺼도 자리 없는 조각들은 그대로 그려진다", () => {
   /**
    * 🔴 이것이 설정 화면의 보기 배지를 지키는 바로 그 성질이다. 이 조각에서 보기
    * 배지가 넷 늘었으므로(badge-samples.tsx — 떼어낸 조각을 그대로 쓴다) 여기서
@@ -552,12 +579,12 @@ describe("② 🔴 29쌍을 **전부** 꺼도 자리 없는 조각들은 그대�
     },
   ];
 
-  test("🔴 등록부의 쌍이 29다 — 이 수가 곧 설정 화면의 체크상자 수다", () => {
-    assert.equal(EVERY_PLACEMENT_HIDDEN.length, 29);
+  test("🔴 등록부의 쌍이 31이다 — 이 수가 곧 설정 화면의 체크상자 수다", () => {
+    assert.equal(EVERY_PLACEMENT_HIDDEN.length, 31);
   });
 
   for (const sample of SAMPLES) {
-    test(`🔴 ${sample.name}: 자리를 안 주면 29쌍을 다 꺼도 그대로다`, () => {
+    test(`🔴 ${sample.name}: 자리를 안 주면 31쌍을 다 꺼도 그대로다`, () => {
       const html = renderWith(EVERY_PLACEMENT_HIDDEN, sample.node);
       assert.ok(
         html.includes(sample.label),
@@ -569,24 +596,26 @@ describe("② 🔴 29쌍을 **전부** 꺼도 자리 없는 조각들은 그대�
 
 /* ═══════════════════════════════ 쌍 세기 — 아홉, 그리고 스물아홉 */
 
-describe("🔴 쌍 세기 — 이번 아홉이 전부 붙었고, 29쌍이 **전부** 붙었다", () => {
-  /** 이번 조각이 맡은 자리 셋. */
+describe("🔴 쌍 세기 — 이 셋이 맡은 열하나가 전부 붙었고, 31쌍이 **전부** 붙었다", () => {
+  /** 이 파일이 맡은 자리 셋. */
   const NEW_PLACES: readonly BadgePlaceKey[] = [
     "domesticOrderList",
     "miscCaseList",
     "miscCaseDetailHeader",
   ];
 
-  test("🔴 등록부에서 세어 **9** 다 — 이 수가 달라지면 아래 전수 검사를 다시 볼 것", () => {
+  test("🔴 등록부에서 세어 **11** 이다 — 이 수가 달라지면 아래 전수 검사를 다시 볼 것", () => {
     const pairs = BADGE_PLACEMENTS.filter((one) =>
       (NEW_PLACES as readonly string[]).includes(one.placeKey)
     );
-    assert.equal(pairs.length, 9);
+    // 🔵 2026-11-13 에 아홉이었다. 2026-11-25 에 「납기 임박」이 기타건 쪽 자리 둘에
+    //    서면서 열하나가 됐다(배지도 자리도 늘지 않았다 — 쌍만 둘 늘었다).
+    assert.equal(pairs.length, 11);
     // 나머지 스물은 조각 3이 붙인 수리건 쪽이다
     // (repair-cases/badge-visibility-screens.test.tsx 가 그 20을 따로 센다).
     assert.equal(BADGE_PLACEMENTS.length - pairs.length, 20);
-    // 🔴 **합이 29** — 설정 화면의 체크상자 수와 같은 수다.
-    assert.equal(BADGE_PLACEMENTS.length, 29);
+    // 🔴 **합이 31** — 설정 화면의 체크상자 수와 같은 수다.
+    assert.equal(BADGE_PLACEMENTS.length, 31);
     // 🔵 못 — 자리가 **등록부에도 꼭 셋**인가. 여기 목록만 줄이고 등록부에 자리가
     //    남아 있으면 「안 붙은 자리」가 생기는데 위 셈은 그대로 맞는다.
     assert.equal(
@@ -666,6 +695,13 @@ describe("🔴 쌍 세기 — 이번 아홉이 전부 붙었고, 29쌍이 **전�
       badgeKey: "finalShipmentApproved",
       count: 1,
     },
+    {
+      file: "src/components/misc-cases/misc-case-fields.tsx",
+      tag: "<DueDateNearBadge",
+      placeKey: "miscCaseList",
+      badgeKey: "dueDateNear",
+      count: 1,
+    },
     // 기타건 상세 머리 카드.
     {
       file: "src/components/domestic-orders/detail/DomesticOrderDetailHeader.tsx",
@@ -679,6 +715,13 @@ describe("🔴 쌍 세기 — 이번 아홉이 전부 붙었고, 29쌍이 **전�
       tag: "<FinalShipmentApprovedBadge",
       placeKey: "miscCaseDetailHeader",
       badgeKey: "finalShipmentApproved",
+      count: 1,
+    },
+    {
+      file: "src/components/domestic-orders/detail/DomesticOrderDetailHeader.tsx",
+      tag: "<DueDateNearBadge",
+      placeKey: "miscCaseDetailHeader",
+      badgeKey: "dueDateNear",
       count: 1,
     },
   ];
@@ -696,7 +739,7 @@ describe("🔴 쌍 세기 — 이번 아홉이 전부 붙었고, 29쌍이 **전�
     return tags;
   }
 
-  test("🔴 호출부 열 자리가 **하나도 빠짐없이** 제 자리 키를 받는다", () => {
+  test("🔴 호출부 열두 자리가 **하나도 빠짐없이** 제 자리 키를 받는다", () => {
     for (const site of CALL_SITES) {
       const tags = openingTags(codeOf(site.file), site.tag);
       assert.equal(
@@ -713,7 +756,7 @@ describe("🔴 쌍 세기 — 이번 아홉이 전부 붙었고, 29쌍이 **전�
     }
   });
 
-  test("🔴 호출부가 덮은 쌍이 **등록부의 아홉과 꼭 같다**", () => {
+  test("🔴 호출부가 덮은 쌍이 **등록부의 열하나와 꼭 같다**", () => {
     const covered = [
       ...new Set(CALL_SITES.map((site) => `${site.badgeKey} ${site.placeKey}`)),
     ].sort();
@@ -723,7 +766,7 @@ describe("🔴 쌍 세기 — 이번 아홉이 전부 붙었고, 29쌍이 **전�
       .map((one) => `${one.badgeKey} ${one.placeKey}`)
       .sort();
     assert.deepEqual(covered, registered, "붙인 쌍과 등록부의 쌍이 어긋난다");
-    assert.equal(covered.length, 9);
+    assert.equal(covered.length, 11);
   });
 
   test("🔴 이 셋은 **남의 자리 키를 들고 있지 않다** — 적어 두는 것 자체가 거짓말이다", () => {
