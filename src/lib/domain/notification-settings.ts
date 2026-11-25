@@ -269,10 +269,13 @@ export const NOTIFICATION_KIND_META: Record<
     // 🔵 가까운 이웃과의 거리: 보라 13(견적서 결재 대기) 31° · 분홍 2(납기 지연) 40° ·
     //    장미 9(반려됨) 53°. 셋 다 글자(이름표)가 함께 그려지므로 색만으로 가르지
     //    않는다(이 파일 머리말의 「색만으로 구분하지 않는다」).
-    // 🔵 **포털에서도 같은 색이다** — A/S 는 칸 번호를 포털로 보내지 않고(domain/
-    //    notification-links.ts) 포털은 종류 코드를 해시해 집는데, 그 해시가 이 코드에
-    //    대해 마침 11 을 준다(notificationToneIndex("DOMESTIC_ORDER_DUE_DATE_NEAR") = 11).
-    //    우연이지 설계가 아니다 — 코드 이름을 고치면 포털 쪽 색만 조용히 달라진다.
+    // 🔵 **포털에서도 같은 색이다** — 2026-11-25 부터 A/S 가 칸 번호를 포털로 **실어
+    //    보낸다**(domain/notification-links.ts 의 tone). 그 전에는 포털이 종류 코드를
+    //    해시해 집었고, 그 해시가 이 코드에 대해 마침 11 을 주어 우연히 같았다
+    //    (notificationToneIndex("DOMESTIC_ORDER_DUE_DATE_NEAR") = 11 — 지금도 그렇다).
+    //    🔵 그래서 「코드 이름을 고치면 포털 쪽 색만 조용히 달라진다」던 위험은 이제
+    //    없다. 열 종류 가운데 우연에 기대고 있던 칸이 이것 하나였고, 나머지 아홉은
+    //    두 종에서 실제로 다른 색이었다(실측 2026-11-25).
     toneClassName: "text-fuchsia-700 dark:text-fuchsia-400",
     toneIndex: 11,
   },

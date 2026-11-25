@@ -1,11 +1,17 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { NOTIFICATION_TONE_COUNT } from "@dss/ui";
 import {
   absoluteNotificationHref,
   externalNotificationCount,
   toExternalNotificationItems,
 } from "./notification-links";
-import { buildApprovalNotification, type NotificationItem } from "./notifications";
+import {
+  buildApprovalNotification,
+  NOTIFICATION_KINDS,
+  type NotificationItem,
+  type NotificationKind,
+} from "./notifications";
 import { NOTIFICATION_KIND_META } from "./notification-settings";
 
 /**
@@ -101,6 +107,74 @@ describe("toExternalNotificationItems", () => {
       out.map((one) => one.id),
       [item.id, second.id]
     );
+  });
+});
+
+describe("색 칸 번호(tone)를 실어 보낸다", () => {
+  /**
+   * 🔴 2026-11-25 에 생긴 칸이다. 그 전까지 받는 쪽(포털)은 **종류 코드를 해시해**
+   * 색을 집었고, 그 셈은 뜻을 모른다 — 열 종류 가운데 아홉이 A/S 의 종과 다른
+   * 색으로 나왔다(실측). 사용자 요구는 「A/S 에 뜨는 색을 기준으로 맞춰 줘」였다.
+   *
+   * 🔵 **색이 같아지는지는 여기서 잴 수 없다.** 번호를 색으로 바꾸는 것은 묶음의
+   *    CSS 이고 그것을 읽어 맞대는 일은 notification-settings.test.ts 가 한다
+   *    (toneClassName ↔ toneIndex). 이 파일이 지키는 것은 **그 번호가 밖으로
+   *    나가는가** 하나다 — 빠지면 그 자리에서 해시로 돌아가고 아무 오류도 없다.
+   */
+  const SAMPLE_HREF = "/repair-cases/sample";
+
+  function sampleOf(kind: NotificationKind): NotificationItem {
+    return { id: `${kind}:sample`, kind, targetKey: `T:${kind}`, subject: "S", detail: "D", href: SAMPLE_HREF };
+  }
+
+  test("🔴 종류마다 도메인 표의 칸 번호가 그대로 실린다", () => {
+    const source = NOTIFICATION_KINDS.map(sampleOf);
+    // 🔵 무엇을 재는지 먼저 세운다 — 표본이 한 종류뿐이면 「언제나 같은 수를
+    //    싣는다」로도 통과하고, 번호가 하나로 쏠린 것을 못 가린다.
+    assert.equal(source.length, NOTIFICATION_KINDS.length);
+    const out = toExternalNotificationItems(source, BASE);
+    assert.equal(out.length, source.length, "줄이 사라지거나 늘었다");
+    assert.ok(
+      new Set(out.map((one) => one.tone)).size >= 2,
+      "번호가 전부 같다 — 표 조회가 아니라 상수를 싣고 있다"
+    );
+
+    for (const [index, item] of source.entries()) {
+      assert.equal(
+        out[index].tone,
+        NOTIFICATION_KIND_META[item.kind].toneIndex,
+        `${item.kind}: 색 칸 번호가 도메인 표와 다르다 — 받는 쪽이 해시로 아무 칸이나 집는다`
+      );
+    }
+  });
+
+  test("🔴 열 종류가 **하나도 빠짐없이** 번호를 갖고 나간다", () => {
+    const out = toExternalNotificationItems(NOTIFICATION_KINDS.map(sampleOf), BASE);
+    // 🔵 `tone` 이 선택 칸이 아니므로 타입이 먼저 막지만, 받는 쪽은 JSON 으로
+    //    받는다 — 값이 `undefined` 면 그 칸은 그물을 빠져나가 조용히 사라진다.
+    for (const one of out) {
+      assert.equal(typeof one.tone, "number", `${one.kind}: 번호가 숫자가 아니다`);
+      assert.equal(Number.isInteger(one.tone), true, `${one.kind}: ${one.tone} 는 정수가 아니다`);
+      // 🔴 범위는 **묶음에서 가져다** 잰다(16 을 여기 적지 않는다). 범위 밖 번호는
+      //    받는 쪽이 해시로 떨어뜨려 뜻과 어긋난 색이 되는데, 그 칸 수를 정하는
+      //    곳은 묶음 하나뿐이다(@dss/ui 의 tone.ts). 🔵 그 번호가 묶음 CSS 에
+      //    실제로 있는 칸인지는 notification-settings.test.ts 가 그 파일을 읽어
+      //    따로 맞댄다 — 여기서는 「밖으로 나가는 값이 그 범위인가」만 본다.
+      assert.ok(
+        one.tone >= 0 && one.tone < NOTIFICATION_TONE_COUNT,
+        `${one.kind}: ${one.tone} 는 0 … ${NOTIFICATION_TONE_COUNT - 1} 밖이다`
+      );
+    }
+  });
+
+  test("색 **클래스**는 여전히 나가지 않는다 — 번호만 간다", () => {
+    // 🔵 표본을 **0번이 아닌 종류**로 고른다(결재 대기 = 파랑 15). 0번 종류로 재면
+    //    「언제나 0 을 싣는」 고장이 이 줄을 그냥 지나간다 — 실제로 한 번 그렇게
+    //    새어 나갔다(일부러 깨뜨려 보고 알았다).
+    const [out] = toExternalNotificationItems([sampleOf("REPAIR_CASE_APPROVAL")], BASE);
+    assert.equal("toneClassName" in out, false, "Tailwind 클래스는 받는 쪽 빌드에 없다");
+    assert.notEqual(NOTIFICATION_KIND_META.REPAIR_CASE_APPROVAL.toneIndex, 0);
+    assert.equal(out.tone, NOTIFICATION_KIND_META.REPAIR_CASE_APPROVAL.toneIndex);
   });
 });
 

@@ -26,18 +26,36 @@ import type { NotificationItem, NotificationKind } from "./notifications";
 /**
  * 밖으로 나가는 알림 한 줄.
  *
- * NotificationItem 에 두 가지가 달라진다:
+ * NotificationItem 에 세 가지가 달라진다:
  *  · `href` 가 **절대 주소**다.
  *  · `kindLabel` 이 붙는다 — 받는 쪽은 A/S 의 종류 코드가 무슨 뜻인지 모른다.
  *    사람이 읽는 이름을 함께 주지 않으면 포털의 종에 `REPAIR_CASE_APPROVAL` 이
  *    그대로 찍힌다(설계서 F-4 와 같은 갈림 — 어휘의 주인은 각 시스템이다).
+ *  · `tone` 이 붙는다 — **색 칸 번호**다(2026-11-25. 아래 두 문단).
  *
- * 🔴 **색(toneClassName)은 일부러 보내지 않는다.** 그 값은 Tailwind 클래스
+ * 🔴 **색 클래스(toneClassName)는 지금도 보내지 않는다.** 그 값은 Tailwind 클래스
  * 이름이고, Tailwind 는 **자기 저장소의 소스에서 글자로 찾은 것만** CSS 로
  * 만든다(notification-settings.ts 의 그 주석과 같은 규칙). 포털로 건너간
  * `text-amber-700` 은 포털 빌드에 존재하지 않는 클래스라 아무 색도 내지 않는다 —
- * 보내면 「보냈는데 색이 안 나온다」로 조용히 실패한다. 색을 입히는 것은 받는
- * 쪽의 몫이다.
+ * 보내면 「보냈는데 색이 안 나온다」로 조용히 실패한다.
+ *
+ * ── 🔴 2026-11-25: 클래스 대신 **칸 번호**를 보낸다 ──────────────────────
+ * 여기에는 「색을 입히는 것은 받는 쪽의 몫이다」까지만 적혀 있었고, 실제로 받는
+ * 쪽(포털)은 **종류 코드를 해시해** 열여섯 칸 중 하나를 집었다(@dss/ui 의
+ * tone.ts). 그 셈은 「종류마다 다른 색」만 지키고 **뜻은 지키지 못한다** — 같은
+ * 알림이 A/S 의 종에서는 빨강(납기 임박 0)인데 포털의 종에서는 하늘(8)로 나왔고,
+ * 열 종류 가운데 아홉이 두 종에서 다른 색이었다(실측 2026-11-25). 사용자 요구는
+ * 「A/S 에 뜨는 색을 기준으로 맞춰 줘」였다.
+ *
+ * 🔴 **번호는 건너가도 살아남는다.** 색을 칠하는 것은 묶음의 CSS
+ * (`--dss-bell-tone-N`)이고 A/S 와 포털이 **같은 서브모듈 한 벌**을 쓰므로,
+ * 번호가 같으면 색이 같다. 그러니까 「색은 받는 쪽의 몫」은 **칠하는 일**에만
+ * 남고, **고르는 일**은 종류의 뜻을 아는 이쪽이 한다 — A/S 안쪽 종에 toneIndex 를
+ * 넘기는 것과 글자 그대로 같은 판단이다(domain/notification-bell-items.ts).
+ *
+ * 🔵 받는 쪽은 번호가 **없는** 시스템도 함께 그린다(다섯 중 지금은 A/S 만 싣는다).
+ *    없으면 예전대로 해시로 떨어지므로, 이 칸이 느는 것으로 남의 시스템 색이
+ *    달라지지는 않는다.
  */
 export type ExternalNotificationItem = {
   id: string;
@@ -49,6 +67,22 @@ export type ExternalNotificationItem = {
   detail: string;
   /** 🔴 절대 주소. 다른 사이트에서 눌러도 A/S 로 온다. */
   href: string;
+  /**
+   * 🔴 **색 칸 번호** — NOTIFICATION_KIND_META 의 `toneIndex` 그대로다.
+   * 0 … NOTIFICATION_TONE_COUNT-1(=15)의 정수이고, 받는 쪽은 이 번호로 제 CSS 의
+   * 색 칸을 집는다.
+   *
+   * 🔴 칸 이름이 `toneIndex` 가 아니라 **`tone`** 인 까닭: 종이 받는 칸 이름이
+   * `tone` 이다(@dss/ui 의 NotificationBellItem). 이름을 맞춰 두면 포털은 받은
+   * 값을 **그대로** 옮기면 되고, 이름을 갈아 끼우는 자리가 아예 생기지 않는다 —
+   * 그런 자리가 생기면 거기서 조용히 빠뜨릴 수 있다(값이 빠지면 색이 해시로
+   * 돌아가고 **아무 오류도 나지 않는다**).
+   *
+   * 🔴 범위 밖 번호를 보내면 받는 쪽이 해시로 떨어뜨린다(그쪽 tone.ts) — 색이
+   * 사라지지는 않지만 그때는 뜻과 어긋난 색이 된다. 이 표의 번호가 묶음 CSS 에
+   * 실제로 있는 칸인지는 notification-settings.test.ts 가 두 파일을 읽어 맞댄다.
+   */
+  tone: number;
 };
 
 /** 스킴이 붙어 있는가(`http:` · `mailto:` 등). 이미 절대 주소면 손대지 않는다. */
@@ -89,6 +123,10 @@ export function toExternalNotificationItems(
     subject: item.subject,
     detail: item.detail,
     href: absoluteNotificationHref(item.href, baseUrl),
+    // 🔴 색 칸 번호. 안 실으면 받는 쪽이 종류 코드를 해시해 아무 칸이나 집는다
+    //    (위 타입의 그 문단). 종류별 분기가 아니라 표 조회 한 줄이라, 종류가
+    //    늘어도 이 줄은 그대로다 — 바로 위 kindLabel 과 같은 모양이다.
+    tone: NOTIFICATION_KIND_META[item.kind].toneIndex,
   }));
 }
 
