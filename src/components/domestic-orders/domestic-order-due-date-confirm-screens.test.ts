@@ -200,3 +200,105 @@ describe("🔴 ③④⑤ 묶음이 하는 일", () => {
     assert.match(toggles, /row\.dueDates\.length > 1 \? `\$\{rowOrder\}차 ` : ""/);
   });
 });
+
+/**
+ * ============================================================================
+ * 🔴 ⑥ **완료 처리된 건에는 셋이 전부 안 뜬다** (2026-11-25, 같은 날 뒤에 온 지시)
+ * ============================================================================
+ * 사용자 지시 원문: 「이미 **완료처리가 된 건**은 [내자관리]에서 **[납기일 확정],
+ * [확정], [확정 해제] 등이 뜨지 않도록** 해줘.」
+ *
+ * 🔴 **위 ④ 를 한 글자도 약하게 만들지 않는다.** ④ 가 못 박은 「확정 표는 단추를 감춘
+ * 권한 조건 **밖**이다」는 그대로다 — 이 조각이 더하는 것은 **그 바깥에 또 한 겹**,
+ * 덩이를 통째로 거르는 울타리다. 그래서 완료 전인 줄에서는 ④ 가 말하는 대로 돌고,
+ * 완료된 줄에서는 표도 단추도 함께 없다.
+ *
+ * 🔴 **규칙 자체는 값으로 돈다** — unit 목록의
+ * domain/domestic-order-completed-edit-access.test.ts 가 네 칸(줄 완료 × 회차 완료)을
+ * 전부 적어 두고, **참이 되는 칸 하나**로 「전부 숨김」 구현을 걸러 낸다. 여기서는
+ * 화면이 그 규칙을 **정말로 부르는가**만 본다.
+ * ============================================================================
+ */
+describe("🔴 ⑥ 완료 처리된 건 — 거르기 한 겹이 덩이를 통째로 뺀다", () => {
+  test("🔴 판정을 **도메인에 물어본다** — 이 표에는 완료가 둘이라 지름길을 안 둔다", () => {
+    assert.ok(
+      toggles.includes(
+        "const visibleUnits = units.filter( (unit) => " +
+          "showDomesticOrderDueDateConfirmControls(row, unit) && (canToggle || unit.confirmed) );"
+      ),
+      "확정 묶음이 완료로 거르지 않는다 — 완료된 건에서 셋이 그대로 뜬다"
+    );
+  });
+
+  test("🔴 **그린 것이 전부 그 거르기를 지난다** — 단추도 「확정 ✓」 표도", () => {
+    assert.ok(
+      toggles.includes("{visibleUnits.map(({ key, rowOrder, confirmed, label, name }) => {"),
+      "거르기 전 목록을 그대로 그리고 있다"
+    );
+    assert.equal(toggles.includes("{units.map("), false, "거르지 않은 목록을 그리는 자리가 남아 있다");
+    // 🔴 「확정 ✓」 표가 그 map **안**에 있다 — 밖으로 나가면 완료된 줄에서 표만 남는다.
+    const mapAt = toggles.indexOf("{visibleUnits.map(");
+    assert.ok(mapAt >= 0);
+    assert.equal(toggles.split("확정 ✓").length - 1, 1, "확정 표를 그리는 자리가 하나가 아니다");
+    assert.ok(toggles.indexOf("확정 ✓") > mapAt, "확정 표가 거른 목록 밖에서 그려진다");
+  });
+
+  test("🔴 회차의 완료 칸을 **그대로** 넘긴다 — 화면이 완료를 날것으로 재지 않는다", () => {
+    assert.ok(toggles.includes("completedAt: dueDate.completedAt,"), "회차의 완료 칸을 안 싣는다");
+    assert.ok(toggles.includes("completedAt: null,"), "빌려 그리는 덩이에 완료 칸이 없다");
+    assert.equal(
+      toggles.includes("completedAt !== null"),
+      false,
+      "화면이 완료를 직접 접고 있다 — 판정이 두 벌이 되면 한쪽만 고쳐지는 날이 온다"
+    );
+    // 🔵 확정 쪽은 화면이 그대로 접는다(도메인에 물을 것이 없는 값이다) — 전제 확인.
+    assert.ok(toggles.includes("confirmed: dueDate.confirmedAt !== null,"));
+  });
+
+  test("🔴 그릴 것이 없으면 **감싸개도 안 만든다** — 이제 완료된 줄 전부가 그 자리다", () => {
+    assert.ok(toggles.includes("if (visibleUnits.length === 0) return null;"));
+    // 🔴 옛 울타리(덩이마다의 조기 반환)가 **겹쳐 남아 있지 않다**. 같은 규칙이 두 벌이
+    //    되면 한쪽만 고쳐지는 날이 오고, 그때 조용히 어긋난다.
+    assert.equal(toggles.includes("if (!canToggle && !confirmed) return null;"), false);
+    assert.equal(toggles.split("canToggle || unit.confirmed").length - 1, 1);
+  });
+
+  test("🔵 **짝** — 목록을 좁히는 자리가 그 하나뿐이다(완료 안 된 줄은 어제 그대로)", () => {
+    assert.equal(
+      toggles.split(".filter(").length - 1,
+      1,
+      "목록을 좁히는 자리가 둘이다 — 어딘가에서 두 번째 규칙이 자라고 있다"
+    );
+  });
+
+  test("🔴 표와 카드가 **함께** 가려진다 — 판정이 부품 안이라 자리를 안 늘렸다", () => {
+    // 불러오기 하나 + 부르는 자리 하나 = 둘. 화면이 두 자리에서 따로 재기 시작하면
+    // 이 수가 늘고, 그때부터 **한쪽만 고쳐지는** 그 함정이 다시 열린다.
+    assert.equal(screenNoComments.split("showDomesticOrderDueDateConfirmControls").length - 1, 2);
+  });
+
+  test("🔴 **서버는 한 글자도 안 좁혔다** — 가리는 것은 화면뿐이다", () => {
+    // 🔴 완료된 줄의 확정은 여전히 「완료 시 수정」이 있으면 통과한다. 이 조각이 그
+    //    관문을 건드리면 **이미 찍힌 확정이 풀리거나** 서버가 멋대로 거절하게 된다.
+    // 🔵 값으로 재는 것은 db 목록의 mutations/domestic-order-due-date-confirmation
+    //    .integration.test.ts 의 ⑥ 이다 — 여기서는 그 관문이 **남아 있는지**만 본다.
+    const mutation = read("src/lib/db/mutations/domestic-orders.ts");
+    const confirmFn = flat(
+      stripComments(
+        sliceBetween(
+          mutation,
+          "export async function setDomesticOrderDueDateRowConfirmation(",
+          "기타건의 [완료] 관문"
+        )
+      )
+    );
+    assert.ok(
+      confirmFn.includes(
+        "if (current.completedAt !== null) { " +
+          "const denied = await checkCompletedDomesticOrderEdit(tx, params.actorUserId); " +
+          "if (denied) return denied; }"
+      ),
+      "서버의 「완료 시 수정」 관문이 사라졌다 — 화면만 가리기로 한 조각이 울타리를 건드렸다"
+    );
+  });
+});

@@ -6,6 +6,7 @@ import {
   DOMESTIC_ORDER_COMPLETED_READ_ONLY_HINT,
   DOMESTIC_ORDER_COMPLETED_READ_ONLY_LABEL,
   showDomesticOrderCompletedReadOnlyNote,
+  showDomesticOrderDueDateConfirmControls,
   type DomesticOrderEditAccess,
 } from "./domestic-order-completed-edit-access";
 
@@ -162,6 +163,97 @@ describe("showDomesticOrderCompletedReadOnlyNote — 「읽기 전용」을 적�
       showDomesticOrderCompletedReadOnlyNote(completedRow, access(true, true)),
     ];
     assert.deepEqual(answers, [true, false]);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 **완료된 건에는 [납기일 확정] 묶음이 안 뜬다** (2026-11-25, 조각 4)
+ * ============================================================================
+ * 사용자 지시: 「이미 **완료처리가 된 건**은 [내자관리]에서 **[납기일 확정], [확정],
+ * [확정 해제] 등이 뜨지 않도록** 해줘.」
+ *
+ * 🔴 **가장 중요한 못은 여기서도 「안 막는다」 쪽이다.** 완료 **안 된** 줄까지 가리면
+ * 어제까지 쓰던 단추가 통째로 사라진다 — 오늘 운영에 나간 기능이라 그 줄이 거의
+ * 전부다. 아래 네 칸이 **참이 되는 칸 하나**를 함께 적어 두는 까닭이고, 그 칸이 없으면
+ * `return false` 한 줄도 통과한다.
+ *
+ * 🔴 화면이 이 규칙을 **표와 카드 양쪽에서** 부르는지는 원본 글자로 본다
+ * (components/domestic-orders/domestic-order-due-date-confirm-screens.test.ts).
+ * ============================================================================
+ */
+describe("showDomesticOrderDueDateConfirmControls — 완료 둘을 다 보고, 권한은 안 본다", () => {
+  const completedUnit = { completedAt: "2026-11-25T02:00:00.000Z" };
+  const openUnit = { completedAt: null };
+
+  /** 🔴 네 칸을 전부 적는다 — 한 칸만 재면 늘 참·늘 거짓인 구현이 통과한다. */
+  const cases: Array<{
+    rowCompleted: boolean;
+    unitCompleted: boolean;
+    expected: boolean;
+    why: string;
+  }> = [
+    {
+      rowCompleted: false,
+      unitCompleted: false,
+      expected: true,
+      why: "🔵 **짝** — 평소 줄에서는 어제와 똑같이 그린다",
+    },
+    {
+      rowCompleted: true,
+      unitCompleted: false,
+      expected: false,
+      why: "🔴 사용자가 말한 그 자리 — 완료 처리된 건(줄)",
+    },
+    {
+      rowCompleted: false,
+      unitCompleted: true,
+      expected: false,
+      why: "🔴 끝난 회차 — 확정해도 끌 종이 없다(그 회차는 「납기 임박」에서 이미 빠진다)",
+    },
+    {
+      rowCompleted: true,
+      unitCompleted: true,
+      expected: false,
+      why: "기타건의 줄을 완료하면 회차 칸도 함께 찍힌다 — 두 판정이 겹치는 자리",
+    },
+  ];
+
+  // 🔵 표가 비면 아래 for 가 한 번도 안 돌아 **공짜로 통과**한다 — 먼저 센다.
+  test("표본이 네 칸이고, 그리는 칸이 **하나는 있다**", () => {
+    assert.equal(cases.length, 4);
+    assert.equal(
+      cases.filter((row) => row.expected).length,
+      1,
+      "참이 되는 칸이 없으면 '전부 숨김'이 통과한다"
+    );
+  });
+
+  for (const { rowCompleted, unitCompleted, expected, why } of cases) {
+    test(`줄 완료=${rowCompleted} · 회차 완료=${unitCompleted} → ${expected} (${why})`, () => {
+      assert.equal(
+        showDomesticOrderDueDateConfirmControls(
+          rowCompleted ? completedRow : openRow,
+          unitCompleted ? completedUnit : openUnit
+        ),
+        expected
+      );
+    });
+  }
+
+  test("🔴 **권한을 안 본다** — 「완료 시 수정」을 가진 사람에게도 사라진다", () => {
+    // 🔴 이 두 줄이 이 조각의 전부다: 위 판정은 그 사람에게 **참**을 주는데(어제까지
+    //    단추가 보이던 까닭), 아래 판정이 **거짓**으로 덮는다. 둘이 같은 답을 주기
+    //    시작하면 지시가 조용히 풀린 것이다.
+    assert.equal(canEditDomesticOrderWhenCompleted(completedRow, access(true, true)), true);
+    assert.equal(showDomesticOrderDueDateConfirmControls(completedRow, openUnit), false);
+  });
+
+  test("🔵 빌려 그리는 날짜 — 행이 없으니 완료일 수 없다, 줄만 본다", () => {
+    // 적어 둔 회차가 없는 줄은 수리 건의 날짜를 대신 그린다(화면). 그 덩이는 언제나
+    // `{ completedAt: null }` 로 물어보므로, 가르는 것은 줄의 완료 하나다.
+    assert.equal(showDomesticOrderDueDateConfirmControls(openRow, { completedAt: null }), true);
+    assert.equal(showDomesticOrderDueDateConfirmControls(completedRow, { completedAt: null }), false);
   });
 });
 

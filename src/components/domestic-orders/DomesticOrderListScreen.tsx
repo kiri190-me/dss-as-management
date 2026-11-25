@@ -78,6 +78,7 @@ import {
   DOMESTIC_ORDER_COMPLETED_READ_ONLY_HINT,
   DOMESTIC_ORDER_COMPLETED_READ_ONLY_LABEL,
   showDomesticOrderCompletedReadOnlyNote,
+  showDomesticOrderDueDateConfirmControls,
   type DomesticOrderEditAccess,
 } from "@/lib/domain/domestic-order-completed-edit-access";
 import {
@@ -1978,9 +1979,22 @@ function DueDateRowCompletionToggles({
  * 여부로 재지 않는다**: 확정은 완료와 뜻이 다른 값이라(그 표의 칸 주석), 끝난 회차의
  * 확정을 푸는 일과 아직인 회차의 확정을 푸는 일이 다를 까닭이 없다.
  *
- * ── 🔵 **확정됐다는 사실은 권한과 상관없이 보인다** ─────────────────────
- * 단추가 안 그려지는 세션에서도 「N차 확정됨」 표는 그대로 선다 — 그것은 고치는 길이
- * 아니라 **사실**이다(회차별 완료 표가 같은 자리에서 같은 선을 긋는다).
+ * ── 🔴 **완료된 건에서는 셋이 전부 사라진다** (2026-11-25, 같은 날 뒤에 온 지시) ──
+ * 사용자 지시 원문: 「이미 **완료처리가 된 건**은 [내자관리]에서 **[납기일 확정],
+ * [확정], [확정 해제] 등이 뜨지 않도록** 해줘.」 단추 둘뿐 아니라 **「확정 ✓」 표까지**
+ * 함께 사라지는 것이 그 지시이고, 판정은 도메인이 쥔다
+ * (showDomesticOrderDueDateConfirmControls — 완료 둘을 왜 둘 다 보는지, 표를 감추면서
+ * 무엇을 잃는지까지 그 함수 머리말에 전문이 있다).
+ *
+ * 🔴 **권한 판정(canToggle)과 AND 로 쓴다 — 한쪽이 다른 쪽을 대신하지 않는다.**
+ * 저쪽은 「완료 시 수정」을 가진 사람에게 완료된 줄에서도 참을 주므로, 그것만으로는
+ * 바로 이 지시가 이뤄지지 않는다.
+ * 🔵 **서버는 한 글자도 안 바뀌었다** — 이미 찍힌 확정이 풀리는 일도 없다.
+ *
+ * ── 🔵 **그 밖에는, 확정됐다는 사실이 권한과 상관없이 보인다** ─────────────
+ * 완료 전인 줄에서는 단추가 안 그려지는 세션에서도 「N차 확정됨」 표가 그대로 선다 —
+ * 그것은 고치는 길이 아니라 **사실**이다(회차별 완료 표가 같은 자리에서 같은 선을
+ * 긋는다). 🔴 **완료된 줄에서만** 그 선이 접힌다(바로 위 절).
  * 🔴 그런데도 [시스템 설정] → [배지 표시]에 **등록하지 않았다**: 그 등록은 설정
  * 화면의 보기 배지·기본값·시험 넷을 함께 건드리는 일이라 이 조각의 범위 밖이다.
  * 지금은 꺼지지 않는 표식이고, 그래서 모양도 알약이 아니라 **글자에 가깝게** 두었다.
@@ -2020,14 +2034,9 @@ function DueDateRowConfirmToggles({
   if (row.dueDates.length === 0 && borrowedDueDate === null) return null;
 
   // 🔴 줄의 [수정]·칸 편집과 **같은 판정**이다(머리말). 거짓이면 단추가 하나도 안
-  //    그려지지만, 아래 확정 표는 그대로 선다 — 사실은 권한과 상관이 없다.
+  //    그려지지만, 완료 전인 줄에서는 아래 확정 표가 그대로 선다 — 사실은 권한과
+  //    상관이 없다.
   const canToggle = canEditDomesticOrderWhenCompleted(row, access);
-
-  // 🔴 **그릴 것이 하나도 없으면 감싸개도 만들지 않는다.** 빈 `<span>` 도 이 칸의
-  //    흐름에 자리를 차지해 `mt-1` 만큼 줄 높이를 늘린다 — 「고칠 수 없고 · 확정된
-  //    회차도 없는」 줄에서만 보이는 틈이라 눈에 띄기 전에 못 박는다(회차별 완료
-  //    단추 묶음이 같은 까닭으로 같은 줄을 들고 있다).
-  if (!canToggle && row.dueDates.every((dueDate) => dueDate.confirmedAt === null)) return null;
 
   async function toggle(event: MouseEvent<HTMLButtonElement>, rowOrder: number, confirmed: boolean) {
     // 🔴 **누름을 위로 퍼뜨리지 않는다.** 이 단추는 납기요청일 `<td>` 안에 사는데,
@@ -2079,6 +2088,10 @@ function DueDateRowConfirmToggles({
             key: dueDate.id,
             rowOrder,
             confirmed: dueDate.confirmedAt !== null,
+            // 🔴 **그 회차의 완료 칸을 그대로 들고 간다**(2026-11-25) — 아래 거르기가
+            //    도메인에 물어볼 값이다. 여기서 `!== null` 로 접지 않는 까닭은 판정을
+            //    두 벌로 만들지 않기 위해서다(접는 일은 도메인 한 곳이 한다).
+            completedAt: dueDate.completedAt,
             // 🔴 글자를 지어내지 않는다 — [승인] 탭의 회차 머리·회차별 완료 단추와
             //    **같은 한 줄**이다(domain/domestic-order-due-date-label.ts). 단추에는
             //    짧은 말만 적고 긴 이름은 title 로 둔다(표 칸이 좁다).
@@ -2094,6 +2107,8 @@ function DueDateRowConfirmToggles({
             key: "borrowed",
             rowOrder: 1,
             confirmed: false,
+            // 🔵 **완료일 수가 없다** — 아직 행이 없다(확정이 거짓인 것과 같은 까닭).
+            completedAt: null,
             // 🔴 비고는 없다 — 빌려 온 날짜에는 메모가 딸려 오지 않는다(수리 건의
             //    그 칸은 날짜 하나다). 서버가 만드는 회차도 비고가 비어 있다.
             label: domesticOrderDueDateRowLabel(1, { dueDate: borrowedDueDate, note: null }),
@@ -2101,14 +2116,31 @@ function DueDateRowConfirmToggles({
           },
         ];
 
+  /**
+   * 🔴 **정말로 그릴 덩이들** — 거르는 까닭이 둘이고, 둘은 **서로를 대신하지 않는다**.
+   *
+   *  ① 🔴 **완료 처리된 건에는 셋이 전부 안 뜬다**(2026-11-25 사용자 지시 — 머리말).
+   *     줄의 완료든 그 회차의 완료든 같다. 판정을 여기 적지 않고 도메인에 물어보는
+   *     까닭은 **「완료」가 이 표에 둘**이라서다 — 한쪽만 보는 지름길이 생기면 그날부터
+   *     가려지지 않는 자리가 생긴다(showDomesticOrderDueDateConfirmControls 머리말).
+   *  ② 🔵 못 고치는 세션에서는 **확정된 회차만** 남는다 — 「확정 ✓」는 고치는 길이
+   *     아니라 사실이다. 여기서 ①을 통과한 뒤에 걸러야 ①이 이긴다.
+   *
+   * 🔴 **그릴 것이 하나도 없으면 감싸개도 만들지 않는다.** 빈 `<span>` 도 이 칸의
+   * 흐름에 자리를 차지해 `mt-1` 만큼 줄 높이를 늘린다 — 완료된 줄 **전부**가 그 자리라
+   * (이 조각 전에는 「고칠 수 없고 확정된 회차도 없는」 줄뿐이었다) 더 눈에 띈다.
+   * 회차별 완료 단추 묶음이 같은 까닭으로 같은 줄을 들고 있다.
+   */
+  const visibleUnits = units.filter(
+    (unit) => showDomesticOrderDueDateConfirmControls(row, unit) && (canToggle || unit.confirmed)
+  );
+  if (visibleUnits.length === 0) return null;
+
   return (
     // 🔴 칸이 좁으므로 접히게 둔다 — `nowrap` 이면 회차 셋이 표를 가로로 밀어낸다
     //    (회차별 완료 단추 묶음이 같은 까닭으로 같은 모양이다).
     <span className="mt-1 flex flex-wrap items-center gap-1">
-      {units.map(({ key, rowOrder, confirmed, label, name }) => {
-        // 🔴 그 회차에 그릴 것이 없으면 **덩이도 만들지 않는다**(위와 같은 까닭) —
-        //    바깥 줄의 `gap-1` 이 그대로 빈 자리가 된다.
-        if (!canToggle && !confirmed) return null;
+      {visibleUnits.map(({ key, rowOrder, confirmed, label, name }) => {
         return (
           // 🔴 **회차 하나가 한 덩이**다 — 표와 단추가 흩어지면 「1차의 확정」이 2차
           //    단추 옆에 선 것처럼 읽힌다. 바깥 줄만 접히게 두고 안쪽은 묶는다.
