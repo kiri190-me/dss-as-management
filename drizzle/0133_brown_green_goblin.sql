@@ -1,0 +1,4 @@
+ALTER TABLE "domestic_order_due_dates" ADD COLUMN "confirmed_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "domestic_order_due_dates" ADD COLUMN "confirmed_by" uuid;--> statement-breakpoint
+ALTER TABLE "domestic_order_due_dates" ADD CONSTRAINT "domestic_order_due_dates_confirmed_by_users_id_fk" FOREIGN KEY ("confirmed_by") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "domestic_order_due_dates" ADD CONSTRAINT "domestic_order_due_dates_confirmed_columns_together" CHECK ((confirmed_at IS NULL AND confirmed_by IS NULL) OR (confirmed_at IS NOT NULL AND confirmed_by IS NOT NULL));
