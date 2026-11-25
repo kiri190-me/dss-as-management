@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>진행현황 — 노드 파일 위치 · 납기일 확정</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --line:#e3e6ea; --fg:#1d2126; --dim:#6b7280;
+    --b1:#b42318; --b2:#b54708; --b3:#175cd3; --b4:#5925dc; --b5:#475467; --b6:#0e7490;
+    --ask:#b42318; --ok:#067647;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 20px 64px;background:var(--bg);color:var(--fg);
+       font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;line-height:1.65;}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:25px;margin:0 0 6px}
+  .sub{color:var(--dim);font-size:14px;margin:0 0 22px}
+  h2{font-size:18px;margin:38px 0 10px;padding-bottom:8px;border-bottom:3px solid var(--line)}
+  h3{font-size:15.5px;margin:22px 0 8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+  .t{font-weight:700;font-size:15px}
+  .note{font-size:13px;color:var(--dim);margin-top:6px}
+  .red{color:var(--ask);font-weight:700}
+  .blue{color:var(--b3);font-weight:700}
+  .grn{color:var(--ok);font-weight:700}
+  .pur{color:var(--b4);font-weight:700}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f0f2f5;font-weight:700}
+  .st{font-size:12px;font-weight:700;border-radius:5px;padding:2px 8px;display:inline-block;background:#eef1f5;color:#475467;white-space:nowrap}
+  .st.doing{background:#fffaeb;color:#93370d;border:1px solid #fedf89}
+  .st.done{background:#ecfdf3;color:#067647;border:1px solid #abefc6}
+  .st.wait{background:#f2f4f7;color:#475467;border:1px solid #d0d5dd}
+  .st.ask{background:#fef3f2;color:#b42318;border:1px solid #fecdca}
+  .ask{background:#fef3f2;border:1px solid #fecdca;border-radius:9px;padding:14px 16px;margin:12px 0}
+  .tip{background:#eff8ff;border:1px solid #b2ddff;border-radius:9px;padding:14px 16px;margin:12px 0}
+  .ok{background:#ecfdf3;border:1px solid #abefc6;border-radius:9px;padding:14px 16px;margin:12px 0}
+  .warn{background:#fffaeb;border:1px solid #fedf89;border-radius:9px;padding:14px 16px;margin:12px 0}
+  ul{margin:6px 0 0;padding-left:20px} li{margin:4px 0}
+  ol{margin:6px 0 0;padding-left:22px} ol li{margin:6px 0}
+  code{background:#eef1f5;border-radius:4px;padding:1px 6px;font-size:12.5px}
+  .stream{border:2px solid var(--line);border-radius:12px;padding:4px 18px 18px;margin:18px 0 30px}
+  .stream.a{border-color:#abefc6;background:#fbfffc}
+  .stream.b{border-color:#fedf89;background:#fffdf7}
+  .sh{display:inline-block;font-size:12px;font-weight:800;color:#fff;border-radius:0 0 8px 8px;
+      padding:3px 12px;margin-left:-6px}
+  .sh.a{background:#067647} .sh.b{background:#b54708}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;margin:10px 0}
+  .stat{flex:1 1 170px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .num{font-size:28px;font-weight:800;line-height:1.1}
+  .bar{height:9px;border-radius:999px;background:#e9ecf1;overflow:hidden;margin-top:8px}
+  .bar > i{display:block;height:100%;background:#067647}
+  .bar.b > i{background:#b54708}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>진행현황 — 노드 파일 위치 · 납기일 확정</h1>
+<p class="sub">2026-11-25 기준 · 두 갈래가 같은 저장소(A/S)에서 나란히 갑니다</p>
+
+<div class="stats">
+  <div class="stat">
+    <div class="note">갈래 A · 노드 파일 위치</div>
+    <div class="num">1 / 4</div>
+    <div class="bar"><i style="width:25%"></i></div>
+    <div class="note">칸 더하기만 끝났습니다</div>
+  </div>
+  <div class="stat">
+    <div class="note">갈래 B · 납기일 확정</div>
+    <div class="num">0.5 / 5</div>
+    <div class="bar b"><i style="width:10%"></i></div>
+    <div class="note">첫 조각이 돌고 있습니다</div>
+  </div>
+  <div class="stat">
+    <div class="note">마이그레이션</div>
+    <div class="num">0132</div>
+    <div class="note">적용 완료 · 다음은 <code>0133</code></div>
+  </div>
+  <div class="stat">
+    <div class="note">안 올린 커밋</div>
+    <div class="num">1 + 1</div>
+    <div class="note">A/S · dss-core (같이 올라가야 함)</div>
+  </div>
+</div>
+
+<div class="tip">
+  <div class="t">두 갈래를 왜 같이 보나</div>
+  <p style="margin:6px 0 0">둘 다 <b>A/S 저장소</b>를 고치고, 둘 다 <b>표에 칸을 더합니다</b>.
+  그래서 <span class="red">마이그레이션 번호</span>와 <span class="red">시험 DB</span>를 서로 빼앗지 않게
+  차례를 맞춰야 합니다. 그 외에는 겹치는 파일이 거의 없습니다.</p>
+</div>
+
+
+<!-- ================= 갈래 A ================= -->
+<div class="stream a">
+<div class="sh a">갈래 A</div>
+
+<h2>흐름도 노드에 「파일 위치」 달기</h2>
+
+<div class="card">
+  <div class="t">쓰는 분 요청 (2026-11-21)</div>
+  <p style="margin:6px 0 0">「모든 종류의 노드에 관련된 파일을 … <b>업로드하는 게 아니라 파일의 위치를 기억해서
+  도우미를 통해</b> 폴더에서 파일을 여는 방식으로 … (드래그 앤 드롭 했을 때도 위치를 기억하는 게 가능하다면 그것까지)」</p>
+</div>
+
+<div class="ok">
+  <div class="t">같은 기능이 이미 운영에 있습니다</div>
+  <p style="margin:6px 0 0">[제품 모델 관리]의 <b>「공유폴더에서 가리킨 서류」</b> — 2026-10-07에 거의 같은 말로 요청하셨던 것입니다.
+  표·액션·고르기 창·여는 단추가 <b>통째로 본보기</b>라, 새로 설계할 것이 거의 없습니다.</p>
+</div>
+
+<h3>정해진 것 (2026-11-22)</h3>
+<table>
+  <tr><th style="width:170px">항목</th><th>정한 것</th><th style="width:300px">그래서 달라진 것</th></tr>
+  <tr><td>노드당 몇 개</td><td><b>파일 하나만</b> (여럿 아님 · 폴더 아님)</td>
+      <td class="grn">표를 새로 안 만들고 <b>칸만</b> 더하면 됐습니다. 덤으로 판 복제 사고 위험이 사라졌습니다</td></tr>
+  <tr><td>고르는 방법</td><td><b>고르기 창 + 창에서 노드로 끌기</b></td>
+      <td class="red">브라우저 드래그 앤 드롭으로는 전체 경로를 못 얻습니다 — 아래 참조</td></tr>
+  <tr><td>어느 폴더</td><td><b>「수리 관련」 폴더</b></td>
+      <td class="grn">도우미를 다시 깔 필요가 없습니다</td></tr>
+</table>
+
+<h3>조각 넷</h3>
+<table>
+  <tr><th style="width:52px">#</th><th>하는 일</th><th style="width:108px">상태</th><th style="width:300px">비고</th></tr>
+  <tr><td>①</td><td><b>칸 더하기 + 마이그레이션</b></td><td><span class="st done">끝 · 커밋됨</span></td>
+      <td><code>0132</code> · 개발 DB 적용까지 확인</td></tr>
+  <tr><td>②</td><td><b>진단 Flowchart</b> — 서버 통로 · 고르기 창 · 노드 패널</td><td><span class="st wait">대기</span></td>
+      <td>판 복제가 없어 위험이 낮아 먼저 둡니다</td></tr>
+  <tr><td>③</td><td><b>기술 작업 절차</b> — 같은 것</td><td><span class="st wait">대기</span></td>
+      <td class="grn">판 복제는 ①에서 이미 끝났습니다</td></tr>
+  <tr><td>④</td><td>고르기 창에서 <b>노드로 끌어다 놓기</b></td><td><span class="st wait">대기</span></td>
+      <td>브라우저 안의 끌기라 제약 없음</td></tr>
+</table>
+
+<h3>①에서 실제로 된 것</h3>
+<ul>
+  <li>두 노드 표(<code>procedure_template_nodes</code> · <code>repair_case_flowchart_nodes</code>)에
+      <code>share_doc_relative_path</code> 칸 — <b>개발 DB 적용까지</b></li>
+  <li>경로 모양 제약 둘 — <span class="grn">막는 것까지 값으로 확인</span>
+      (<code>C:/foo.xlsx</code> 거절 · <code>2. 인수시 서류/체크시트.xlsx</code> 통과)</li>
+  <li><b>판 복제 한 줄</b> — 지킴이 시험이 실제로 울어서 고쳤습니다</li>
+  <li>지킴이 시험 다섯 — 제품 모델 쪽 제약과 같은 식인지, 상수가 바인딩 자리로 안 구워졌는지</li>
+</ul>
+<p class="note">커밋 <code>e6e63b4d</code> (A/S) · <code>74cb147</code> (dss-core) · 시험 unit 9782 → 9787 · test:db 2346+6 통과</p>
+
+<div class="warn">
+  <div class="t">미리 알아야 할 제약 셋</div>
+  <ul>
+    <li><span class="red">드래그 앤 드롭으로는 전체 경로를 못 얻습니다 — 도우미를 고쳐도 안 됩니다.</span>
+        도우미는 <b>한 방향</b>이라(주소를 받아 실행만 하고 값을 못 돌려줍니다) 우회할 통로가 없고,
+        클립보드로 받는 길은 <b>운영이 http라</b> 막혀 있습니다. 그래서 <b>고르기 창</b>으로 갑니다.</li>
+    <li><span class="red">게시된 절차의 노드에는 파일을 못 답니다.</span> 게시본은 쓰기 금지라
+        <b>새 초안 → 담기 → 다시 게시</b>해야 합니다.</li>
+    <li><span class="red">개발 PC에서는 고르기 창이 아예 안 뜹니다.</span> 공유폴더 설정이 비어 있어
+        창 자체가 안 그려집니다 — <b>눈 확인은 운영 설정이 있는 데서</b> 해야 합니다.</li>
+  </ul>
+</div>
+
+</div>
+
+
+<!-- ================= 갈래 B ================= -->
+<div class="stream b">
+<div class="sh b">갈래 B</div>
+
+<h2>[내자 정리] 납기일 확정</h2>
+
+<div class="card">
+  <div class="t">쓰는 분 요청 (2026-11-25)</div>
+  <p style="margin:6px 0 0">「납기 요청일 옆에 <b>[납기일 확정]</b> 버튼을 만들어줘. 이 버튼은 <b>납기 요청일이 작성되어 있을 때</b> 생기고,
+  이 버튼을 누르면 <b>포털의 알림 중에 [납기 임박] 알림이 뜨지 않도록</b> 해줘.」</p>
+</div>
+
+<div class="ask">
+  <div class="t">조사에서 드러난 것 — 일이 둘로 늘었습니다</div>
+  <p style="margin:6px 0 0"><b>「납기 임박」은 내자 줄이 아니라 수리 건 단위</b>로 계산되고,
+  <span class="red">수리 건이 안 붙은 줄(기타건)에는 그 판정이 아예 없습니다.</span>
+  모든 줄에 단추를 세우기로 하셨으므로, <b>기타건에 「납기 임박」을 새로 만드는 일</b>이 먼저 서야 합니다.</p>
+</div>
+
+<h3>정해진 것 (2026-11-25)</h3>
+<table>
+  <tr><th style="width:170px">항목</th><th>정한 것</th><th style="width:300px">그래서 달라진 것</th></tr>
+  <tr><td>단추 위치</td><td><b>모든 줄에</b> 세우고, <b>기타건에도 알림을 만든다</b></td>
+      <td class="red">조각이 하나 늘었습니다 (새 알림 종류)</td></tr>
+  <tr><td>끄는 범위</td><td><b>알림 종만</b></td>
+      <td>배지와 붉은 날짜는 그대로 남습니다 — 일부러 그렇게 둡니다</td></tr>
+  <tr><td>납기 지연</td><td><b>그대로 뜨게</b></td>
+      <td class="red">기타건에는 「납기 지연」이 <b>애초에 없습니다</b> — 아래 참조</td></tr>
+  <tr><td>단추 자리</td><td><b>납기요청일 칸 옆</b></td>
+      <td>그 칸 전체가 이미 하나의 단추라, 안이 아니라 <b>형제</b>로 둡니다</td></tr>
+  <tr><td>확정의 뜻</td><td>수리 건이 제 날짜를 가진 줄에서도 <b>끈다</b></td>
+      <td>누른 자리마다 무언가 일어납니다</td></tr>
+</table>
+
+<div class="ok">
+  <div class="t">확인된 것 — 두 날짜는 같습니다</div>
+  <p style="margin:6px 0 0">「수리 건 날짜와 내자 날짜가 다를 수 있다」는 제 설명은 <b>과장이었습니다</b>.
+  개발 DB 실측: <b>수리 건 날짜가 있고 내자 회차도 있는 건 2건, 그중 값이 다른 건 0건.</b>
+  동기화가 되어 있습니다. 예외는 둘만 남습니다 — <b>내자 줄이 나중에 생긴 건</b>(동기화는 고칠 때 돌고 만들 때를 안 덮음)과
+  <b>인수일보다 이른 날짜</b>(수리 건 쪽 검증이 거절). 「그래도 끈다」를 고르셨으므로 그 둘까지 덮입니다.</p>
+</div>
+
+<h3>조각 다섯</h3>
+<table>
+  <tr><th style="width:52px">#</th><th>하는 일</th><th style="width:108px">상태</th><th style="width:300px">비고</th></tr>
+  <tr><td>①</td><td><b>기타건 「납기 임박」 알림을 새로 만든다</b></td><td><span class="st doing">진행 중</span></td>
+      <td class="grn">스키마가 안 듭니다 — 승인을 기다릴 필요가 없습니다</td></tr>
+  <tr><td>②</td><td>확정 칸 마이그레이션 (<code>0133</code>)</td><td><span class="st ask">승인 자리</span></td>
+      <td>회차 행에 확정 두 칸 + 제약</td></tr>
+  <tr><td>③</td><td>쓰기 통로 — 확정 / 해제</td><td><span class="st wait">대기</span></td>
+      <td class="red">되얹기를 빠뜨리면 조용히 깨집니다 — 아래</td></tr>
+  <tr><td>④</td><td>화면 — [납기일 확정] 단추</td><td><span class="st wait">대기</span></td>
+      <td>눈 확인 자리</td></tr>
+  <tr><td>⑤</td><td>확정하면 알림 끄기</td><td><span class="st wait">대기</span></td>
+      <td>눈 확인 자리</td></tr>
+</table>
+
+<div class="tip">
+  <div class="t">①과 ⑤를 일부러 떼어 놓았습니다</div>
+  <p style="margin:6px 0 0">합치면 새 알림이 <b>한 번도 안 뜬 채 바로 꺼져서</b>,
+  「제대로 만들어졌는가」를 눈으로 확인할 길이 사라집니다.
+  ①이 끝나면 <b>기타건 임박이 실제로 몇 건 뜨는지</b> 보신 뒤 ⑤로 갑니다.</p>
+</div>
+
+<h3>조사로 풀린 것</h3>
+<ul>
+  <li><span class="grn">포털(dss-auth)은 한 글자도 안 고쳐도 됩니다.</span>
+      포털은 종류를 <b>글자로 받기만</b> 하고 목록도 검증도 없습니다.
+      「포털에 박힌 목록」은 <b>승인함·결재 메일 전용</b>이라 종 알림과 무관했습니다. <b>배포는 A/S 하나로 끝납니다.</b></li>
+  <li><span class="grn">알림 종류를 더하는 데 마이그레이션이 필요 없습니다</span> — 종류 키가 열거형이 아니라 글자입니다.
+      스키마가 드는 건 <b>확정 칸</b> 하나뿐입니다.</li>
+  <li><b>끄는 자리는 조회 한 곳</b>입니다. A/S 종과 포털 종이 같은 함수를 써서,
+      거기서 빠지면 <b>둘 다</b> 사라집니다(포털은 늦어도 30초).</li>
+</ul>
+
+<div class="warn">
+  <div class="t">미리 알아야 할 것 셋</div>
+  <ul>
+    <li><span class="red">기타건에는 「납기 지연」이 없습니다.</span>
+        「지연은 그대로 뜨게」라는 결정은 <b>수리 건에만</b> 해당합니다.
+        기타건 줄은 확정을 누르든 안 누르든 <b>날짜가 지나면 그냥 조용해집니다</b>.</li>
+    <li><span class="red">새 알림 종류는 기본값 두 곳을 안 적으면 한 통도 안 옵니다.</span>
+        코드가 「조용히 켜지는 것보다 꺼지는 편이 낫다」는 원칙이라, 목록에만 더하면 <b>전부 꺼진 채</b> 둡니다.</li>
+    <li><span class="red">색이 포털에서만 겹칠 수 있습니다.</span>
+        A/S는 색을 포털로 안 보내고 포털이 <b>종류 이름을 해시해</b> 집습니다.
+        A/S 시험으로는 못 잡는 자리라, 값으로 재서 확인합니다.</li>
+  </ul>
+</div>
+
+<div class="ask">
+  <div class="t">③에서 가장 조용히 깨질 자리</div>
+  <p style="margin:6px 0 0">내자 정리는 <b>칸 하나만 고쳐도 그 줄의 납기요청일 행이 통째로 지워지고 다시 들어옵니다</b>.
+  기존 완료 칸들은 서버가 되얹어 살아남는데, <span class="red">새 확정 칸에 그 코드를 안 붙이면
+  아무 시험도 안 깨지면서 확정만 사라집니다.</span></p>
+</div>
+
+</div>
+
+
+<!-- ================= 공통 ================= -->
+<h2>두 갈래가 부딪히는 자리</h2>
+
+<table>
+  <tr><th style="width:200px">무엇</th><th>왜 부딪히나</th><th style="width:260px">어떻게 피하나</th></tr>
+  <tr><td><b>마이그레이션 번호</b></td>
+      <td>둘 다 표에 칸을 더합니다. 같은 번호를 각자 만들면 기록 파일이 충돌해 <b>둘 다 깨집니다</b></td>
+      <td class="grn">A가 <code>0132</code>(끝), B가 <code>0133</code>. 차례로 만듭니다</td></tr>
+  <tr><td><b>시험 DB</b></td>
+      <td>둘이 동시에 돌리면 끊긴 실행이 찌꺼기를 남겨 <b>남의 시험이 영영 깨집니다</b></td>
+      <td class="grn">한 번에 하나만. 끝난 뒤 메인이 한 번 더 잽니다</td></tr>
+  <tr><td><b>시험 목록 파일</b></td>
+      <td>둘 다 파일 <b>끝</b>에 줄을 더합니다</td>
+      <td class="grn">맨 끝에만 더하고, 가운데는 안 건드립니다</td></tr>
+  <tr><td><b>서브모듈 포인터</b></td>
+      <td>둘 다 <code>vendor/dss-core</code>를 고칩니다 — 각자 커밋하면 <b>서로를 덮습니다</b></td>
+      <td class="grn">A가 커밋·푸시된 뒤 B가 손댑니다</td></tr>
+</table>
+
+<div class="warn">
+  <div class="t">칸을 더하면 적용 전까지 개발 서버가 깨집니다</div>
+  <p style="margin:6px 0 0">조회가 아직 없는 칸을 읽으려 하기 때문입니다.
+  그래서 <b>만들자마자 개발 DB에 적용</b>합니다. 그 틈에 화면이 오류를 내면 <b>코드 문제가 아닙니다</b>.
+  둘이 겹치면 어느 쪽 탓인지 못 가리므로, 차례를 지키는 또 하나의 까닭입니다.</p>
+</div>
+
+<h2>지금 상태</h2>
+<table>
+  <tr><th style="width:220px">항목</th><th>값</th></tr>
+  <tr><td>A/S HEAD</td><td><code>e6e63b4d</code> · <b>미푸시 1</b> · 미커밋 0</td></tr>
+  <tr><td>dss-core</td><td><code>74cb147</code> · <b>미푸시 1</b> — A/S와 <b>같이 올라가야 합니다</b></td></tr>
+  <tr><td>마이그레이션</td><td><b>133개</b> · 마지막 <code>0132</code> · 개발 DB 적용 완료</td></tr>
+  <tr><td>시험</td><td>unit <b>9787</b> · 화면 <b>5209</b> · DB <b>2346</b>(+6) · 실패 0</td></tr>
+  <tr><td>개발 서버</td><td>A/S <b>3000</b> · 통합 로그인 <b>3100</b> · DB 컨테이너 둘 떠 있음</td></tr>
+  <tr><td>배포</td><td class="red">A/S 코드가 아직 운영에 안 나갔습니다 — 흐름도 편집기 24커밋 + 이번 것들</td></tr>
+</table>
+
+<p class="note" style="margin-top:28px">이 문서는 2026-11-25에 만들었습니다. 조각이 끝날 때마다 이 표의 상태 칸을 함께 고칩니다.</p>
+
+</div>
+</body>
+</html>
