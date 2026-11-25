@@ -722,7 +722,7 @@ export default function CaseFlowchartNodeShareDocPicker({
   const state: CaseFlowchartNodeShareDocPickerState =
     answer !== null && answer.path === insidePath ? answer.state : { kind: "loading" };
 
-  // 🔴 설정이 비면 **단추도 창도 없다.** 가리킨 줄과 [가리킴 지우기]는 패널 쪽에 있고
+  // 🔴 설정이 비면 **단추도 창도 없다.** 가리킨 줄과 [지우기]는 패널 쪽에 있고
   // 그쪽은 DB 값이라 그대로 선다(패널의 같은 자리 주석).
   if (state.kind === "disabled") return null;
 

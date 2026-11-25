@@ -98,7 +98,7 @@ const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;
 // 구역 머리에서 말한다(올리기 칸으로 읽히면 「왜 내려받기가 없지」에서 멈춘다).
 //
 // 🔴 **이 구역에 남는 것은 셋뿐이다**(2026-11-25 고침): 가리킨 경로 한 줄([열기] ·
-// [가리킴 지우기]와 함께) · [파일 고르기] 단추 하나 · 안내 **한 줄**. 목록 · 경로 이동 ·
+// [지우기]와 함께) · [파일 고르기] 단추 하나 · 안내 **한 줄**. 목록 · 경로 이동 ·
 // 이름 거르기 칸은 전부 팝업으로 나갔다 — 이 패널은 폭이 좁아 그것들을 품으면 긴 한글
 // 이름이 한 글자씩 세로로 떨어졌다(까닭 전문은 CaseFlowchartNodeShareDocPicker 머리말).
 // 🔴 안내도 **한 줄로 줄였다**: 전에는 셋이었는데(「무엇인가」 · 「새로 고르면 바뀐다」 ·
@@ -115,10 +115,10 @@ export const CASE_NODE_SHARE_DOC_TITLE = "관련 파일";
 export const CASE_NODE_SHARE_DOC_HINT =
   "파일을 올리지 않고 사내 공유폴더의 자리를 가리킵니다 — 화면 상단의 [저장] 버튼으로 다른 변경사항과 함께 저장됩니다.";
 export const CASE_NODE_SHARE_DOC_EMPTY_TEXT = "가리킨 파일이 없습니다.";
-export const CASE_NODE_SHARE_DOC_CLEAR_TEXT = "가리킴 지우기";
+export const CASE_NODE_SHARE_DOC_CLEAR_TEXT = "지우기";
 
 /**
- * 가리킨 자리 한 줄 — 경로 · [열기] · [가리킴 지우기].
+ * 가리킨 자리 한 줄 — 경로 · [열기] · [지우기].
  *
  * 🔴 **경로를 숨기지 않는다**: 「어느 자리인가」가 이 줄의 전부다. 🔴 [열기]는 연락서 쪽
  * 단추를 **그대로 가져다 쓴다**(베끼지 않는다) — 도우미 주소를 짓는 일도, Windows 가
@@ -156,11 +156,18 @@ export function CaseFlowchartNodeShareDocRow({
           />
         )}
         {onClear !== undefined && (
+          /*
+            🔴 **[열기] 와 같은 단추 모양이다**(2026-11-25 고침). 둘이 한 줄에 나란히
+            서는데 한쪽만 밑줄 글자면 같은 자리의 같은 급 동작으로 안 읽힌다 —
+            테두리·여백·글자 크기를 그 단추(files/ContactFolderEntryOpenButton)와
+            맞춘다. 🔵 **글자색만 빨강**이다: 지우는 동작이라는 것은 색으로 말하고,
+            테두리까지 빨갛게 하면 [열기] 옆에서 경고처럼 튄다.
+          */
           <button
             type="button"
             onClick={onClear}
             data-case-node-share-doc-clear=""
-            className="text-xs font-medium text-red-700 underline dark:text-red-400"
+            className="rounded border border-zinc-300 px-1.5 py-0.5 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-zinc-700 dark:text-red-400 dark:hover:bg-red-950"
           >
             {CASE_NODE_SHARE_DOC_CLEAR_TEXT}
           </button>

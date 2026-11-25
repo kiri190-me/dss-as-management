@@ -1557,7 +1557,7 @@ export default function CaseFlowchartEditorScreen({
         instructions: draft.instructions.trim() || null,
         // 🔴 **다듬지 않는다** — 공유폴더의 이름은 앞뒤 공백까지 그 이름이다(다듬으면 없는
         //    파일이 된다). 빈 글자로 떨어뜨리는 `|| null` 도 두지 않는다: 이 칸은 `""` 를
-        //    아예 들지 않고, null 이 곧 「가리킴 지우기」다.
+        //    아예 들지 않고, null 이 곧 「지우기」다.
         shareDocRelativePath: draft.shareDocRelativePath,
         expectedFlowchartUpdatedAt: expectedUpdatedAt,
       });

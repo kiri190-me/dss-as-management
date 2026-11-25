@@ -210,7 +210,7 @@ describe("① 🔴 설정이 비면(disabled) 고르는 창을 **아예 안 그�
     assert.deepEqual(readCaseFlowchartNodeShareDocEntriesAnswer({ status: "disabled" }), { kind: "disabled" });
   });
 
-  test("🔴 설정이 비어도 **가리킨 줄과 [가리킴 지우기]는 그대로** 선다 — 그쪽은 DB 다", () => {
+  test("🔴 설정이 비어도 **가리킨 줄과 [지우기]는 그대로** 선다 — 그쪽은 DB 다", () => {
     const html = panelMarkup(FILE_PATH, true);
     assert.ok(html.includes(CASE_NODE_SHARE_DOC_TITLE), html);
     assert.ok(html.includes(FILE_PATH), "가리킨 경로가 안 보인다");
