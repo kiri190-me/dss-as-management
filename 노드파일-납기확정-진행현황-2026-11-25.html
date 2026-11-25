@@ -63,9 +63,9 @@
 <div class="stats">
   <div class="stat">
     <div class="note">갈래 A · 노드 파일 위치</div>
-    <div class="num">2 / 6</div>
-    <div class="bar"><i style="width:33%"></i></div>
-    <div class="note">조각이 둘 늘었습니다 — 팝업 · 작업내용</div>
+    <div class="num">3 / 6</div>
+    <div class="bar"><i style="width:50%"></i></div>
+    <div class="note">팝업까지 끝 · 다음은 절차 쪽</div>
   </div>
   <div class="stat">
     <div class="note">갈래 B · 납기일 확정</div>
@@ -86,7 +86,7 @@
   </div>
   <div class="stat">
     <div class="note">안 올린 커밋</div>
-    <div class="num">13 + 2 + 1</div>
+    <div class="num">16 + 2 + 1</div>
     <div class="note">A/S · dss-core · 포털 (앞 둘은 같이)</div>
   </div>
 </div>
@@ -137,8 +137,8 @@
       <td><code>0132</code> · 개발 DB 적용까지 확인</td></tr>
   <tr><td>②</td><td><b>진단 Flowchart</b> — 서버 통로 · 고르기 창 · 노드 패널</td><td><span class="st done">끝 · 커밋됨</span></td>
       <td>시험 +62 · <span class="red">눈 확인은 배포 때</span> (아래)</td></tr>
-  <tr><td>②-A</td><td>고르기를 <b>팝업으로</b> 옮긴다</td><td><span class="st doing">진행 중</span></td>
-      <td class="red">좁은 패널에서 글자마다 줄바꿈돼 깨졌습니다</td></tr>
+  <tr><td>②-A</td><td>고르기를 <b>팝업으로</b> 옮긴다</td><td><span class="st done">끝 · 커밋됨</span></td>
+      <td>시험 24→36 · <code>64aa2991</code> · 원인은 따로 있었습니다(아래)</td></tr>
   <tr><td>③</td><td><b>기술 작업 절차</b> — <s>같은 것</s> <b>따로 써야 합니다</b></td><td><span class="st wait">대기</span></td>
       <td class="red">②를 베낄 수 없습니다 — 아래</td></tr>
   <tr><td>④</td><td>고르기 창에서 <b>노드로 끌어다 놓기</b></td><td><span class="st wait">대기</span></td>
@@ -189,8 +189,7 @@
   화면에 폴더 목록이 <b>실제로 뜨고 있었습니다</b>(「7. 수리품 목록」 등).
   <span class="red">「있는가」를 재지 않고 겉을 믿은 자리였습니다.</span> 볼 것은 이것들입니다:</p>
   <ul style="margin:6px 0 0">
-    <li><b>②-A가 끝난 뒤</b> — 패널에 <b>[파일 고르기] 단추만</b> 있고 목록이 없는가,
-        누르면 <b>팝업</b>이 뜨는가, 긴 한글 이름이 <b>글자마다 안 쪼개지는가</b></li>
+    <li><span class="grn">②-A — 눈으로 확인 끝</span>(패널에 단추만 · 팝업이 넓게 뜸 · 이름이 한 줄)</li>
     <li>노드를 고르면 패널에 <b>「관련 파일」 구역</b>이 뜨는가</li>
     <li>[파일 고르기]를 누르면 <b>공유폴더 목록이 뜨고</b>, 폴더 줄을 눌러 들어갈 수 있는가</li>
     <li><b>파일 줄에만 [지정]</b>이 서는가 — 폴더 줄과 맨 위 칸에는 없어야 맞습니다</li>
@@ -201,6 +200,17 @@
   <p style="margin:6px 0 0" class="note">🔵 「설정이 비면 창이 안 뜬다」와 「그때도 쓰기는 거절한다」는 시험으로 재 뒀습니다 —
   눈으로 볼 것은 <b>설정이 있을 때 실제로 도는가</b>입니다.
   🔴 <b>[열기]</b>만은 <b>도우미가 깔린 PC</b>라야 확인됩니다.</p>
+</div>
+
+<div class="warn">
+  <div class="t">②-A — 화면이 깨진 진짜 원인은 줄바꿈이 아니었습니다</div>
+  <p style="margin:6px 0 0">「좁아서 글자마다 줄바꿈된다」로 보였지만, 목록 한 줄이 쓰는
+  <b>공용 격자에 고정 칸 24rem</b>이 먼저 자리를 가져가 이름 칸이 0에 가깝게 눌린 것이었습니다.
+  게다가 그 격자는 <b>화면 폭</b>을 보고 켜지는 규칙이라
+  <span class="red">품은 상자가 아무리 좁아도 그대로 적용됩니다</span> — 패널 안에서는 피할 길이 없었습니다.</p>
+  <p style="margin:6px 0 0">🔵 그래서 <b>줄바꿈 규칙만 고쳤으면 여전히 깨졌습니다.</b>
+  팝업 폭을 <b>화면 기준</b>으로 잡아야 풀립니다.
+  공용 격자 파일은 <b>안 고쳤습니다</b> — 다른 창 넷이 같이 씁니다.</p>
 </div>
 
 <h3>조사로 뒤집힌 것 둘 (2026-11-25)</h3>
