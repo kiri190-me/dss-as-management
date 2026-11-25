@@ -2330,3 +2330,14 @@ src/lib/domain/due-date-confirmation-silences-bell.test.ts
 # 🔴 **초안 울타리(assertEditableDraft)에 이 칸만 빠져나가는 예외가 안 생겼는가** · 🔴 목록 통로의
 # 검사 차례와 **나가는 몸통에 루트·경로가 없는가**.
 src/lib/validation/procedure-node-share-doc-path.test.ts
+
+# PO발행일이 적히면 단계가 저절로 [수리 대기]로 — 순수 규칙 (2026-11-26 사용자 개선요청).
+# 🔴 **안 움직이는 것이 정상인 갈래가 여덟**이라 `move === false` 만 재면 엉뚱한 까닭으로 막힌 날에도
+# 초록이다 — 까닭 아홉을 **값으로** 못 박는다. 가장 무거운 둘: 🔴 **NO_WAITING_REPAIR_STEP 과
+# ALREADY_PAST 를 가르는가**(무상 워크플로에는 그 상태의 단계가 실제로 없다 — 뭉개면 「무상 건에서
+# 조용히 안 도는」 자리가 영영 안 드러난다) · 🔴 **뒤 단계면 안 되돌아가는가**(「적으면 옮긴다」와
+# **짝**이다. 없으면 「언제나 덮는」 구현이 통과한다). 그 밖에 🔴 이미 [수리 대기]면 무동작이고 그
+# 까닭이 ALREADY_PAST 가 아닌가(앞에 같은 상태가 또 있어도) · 🔴 날짜를 지우거나 안 바꾼 저장이
+# 단계를 흔들지 않는가 · 🔴 보류·잠금이 「단계 없음」보다 먼저 보고되는가 · 🔴 **이름도 키도 안 보고
+# `repair_status` 하나로만 고르는가**(키가 po_received 라도 상태가 다르면 안 고른다 — 그 반대도).
+src/lib/domain/po-issued-repair-waiting.test.ts

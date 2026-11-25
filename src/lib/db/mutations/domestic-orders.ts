@@ -38,6 +38,7 @@ import { toKstDateOnly } from "@/lib/domain/date-only";
 import { foldBlankToNull } from "@/lib/domain/domestic-order-list";
 import { checkDomesticOrderDueDateRows } from "@/lib/domain/domestic-order-due-date-rows";
 import { getCurrentShipmentApprovalRouteChain } from "../queries/shipment-approval-routes";
+import { applyPoIssuedRepairWaitingInTx } from "./po-issued-repair-waiting";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
 
 /**
@@ -117,6 +118,20 @@ import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input"
  * 화면에 없는 행을 고치려는 요청은 "찾을 수 없다"가 정확한 답이다 — 휴지통에서
  * 되살리는 일은 별도 조작이고, 수정이 그 일을 겸하면 지운 기록이 조용히
  * 되살아난다.
+ *
+ * ── 🔴 **PO발행일을 적으면 수리 건의 단계가 [수리 대기]로** (2026-11-26) ───
+ * 사용자 요구다 — 「PO발행일이 기록되면 현재 작업 상태를 자동으로 [수리 대기]로
+ * 바꿔 줘」. 이 파일이 고치는 표가 **또 하나 늘었다**(repair_cases 의 단계). 바로 위
+ * 묶기 둘과 **같은 모양·같은 잠금 차례**이고, 판정도 쓰기도 전부
+ * mutations/po-issued-repair-waiting.ts 한 곳에 있다.
+ *
+ * 🔴 **연결을 갈아 끼운 저장은 여기서도 건드리지 않는다** — 위 두 묶기와 똑같은
+ * 까닭이다(사람이 고른 적 없는 사실이 새 수리 건에 번지고, 옛 건에서는 아무 일도
+ * 안 일어나 둘이 동시에 어긋난다).
+ *
+ * 🔵 **PO 시스템(dss-po)에서 적으면 안 걸린다** — 그 저장소에도 같은 칸을 쓰는
+ * 저장이 있지만 이 훅이 닿지 않는다. 2026-11-26 에 「A/S에서 적을 때만」으로
+ * 정했다. 결함이 아니다(그 파일 머리말).
  *
  * ── PII ─────────────────────────────────────────────────────────────────
  * progress_note · history_note · etc_note · delivered_by 는 사람이 자유롭게
@@ -895,6 +910,16 @@ export async function createDomesticOrder(params: {
       nextDeliveredDates: deliveredDatesOf(params.fields.dueDates),
     });
 
+    // 🔴 새 줄에 적은 PO발행일도 수리 건의 단계를 [수리 대기]로 옮긴다(2026-11-26).
+    // 앞 값은 null 이다 — 방금 생긴 줄이라 「고치기 전」이 없다. 그 건이 이미 그
+    // 단계이거나 더 뒤에 있으면 아무 일도 일어나지 않는다(그 파일의 판정).
+    await applyPoIssuedRepairWaitingInTx(tx, {
+      repairCaseId: params.fields.repairCaseId,
+      previousOrderIssuedDate: null,
+      nextOrderIssuedDate: params.fields.orderIssuedDate,
+      actorUserId: params.actorUserId,
+    });
+
     return {
       ok: true,
       id: inserted.id,
@@ -924,6 +949,12 @@ export async function updateDomesticOrder(params: {
         // 🔴 묶기가 본다 — 이 저장이 **가리키는 수리 건 자체를 바꾸는 중**이면
         // 날짜를 밀어 넣지 않는다(applyRepairCaseDueDateLink 머리말).
         repairCaseId: domesticOrders.repairCaseId,
+        // 🔴 **2026-11-26 에 더했다.** 「PO발행일이 적히면 [수리 대기]로」가 보는 한
+        // 칸이다(파일 머리말). **저장 전 값**이라야 「이번 저장이 그 날짜를 바꿨는가」를
+        // 가를 수 있다 — 아래 UPDATE 뒤에 읽으면 언제나 「안 바뀜」이고, 그러면 그
+        // 기능이 **오류 하나 없이 영영 안 돈다**(납기요청일 묶기가 전·후를 가르는
+        // 그 까닭과 같다).
+        orderIssuedDate: domesticOrders.orderIssuedDate,
         // 🔴 **2026-11-19 에 더했다.** 「완료 시 수정」 관문이 보는 한 칸이다 — 이 칸을
         // 안 읽으면 지금 고치려는 줄이 완료된 줄인지 알 수 없어 관문을 세울 수가 없다.
         // 판정은 completed_at 하나로만 한다(schema/domestic-orders.ts 의 그 칸 주석).
@@ -1029,6 +1060,19 @@ export async function updateDomesticOrder(params: {
           nextDeliveredDates: deliveredDatesOf(params.fields.dueDates),
         })
       : null;
+
+    // 🔴 PO발행일이 이번 저장에서 적혔으면 단계를 [수리 대기]로 옮긴다(2026-11-26).
+    // 연결을 갈아 끼우는 저장이면 건드리지 않는 것도 위 둘과 같다(머리말).
+    // 🔵 날짜가 안 바뀐 저장(금액·비고만 고친 저장)은 그 함수의 첫 줄에서 끝나므로
+    //    수리 건을 읽는 질의조차 일어나지 않는다.
+    if (sameLink) {
+      await applyPoIssuedRepairWaitingInTx(tx, {
+        repairCaseId: params.fields.repairCaseId,
+        previousOrderIssuedDate: current.orderIssuedDate,
+        nextOrderIssuedDate: params.fields.orderIssuedDate,
+        actorUserId: params.actorUserId,
+      });
+    }
 
     return {
       ok: true,

@@ -15,6 +15,7 @@ import {
   VERSION_CONFLICT_MESSAGE,
   canEditCompletedDomesticOrder,
 } from "./domestic-orders";
+import { applyPoIssuedRepairWaitingInTx } from "./po-issued-repair-waiting";
 
 /**
  * ============================================================================
@@ -90,6 +91,20 @@ import {
  * 남기지 않는다 — 이 표의 행 추가·수정·완료도 남기지 않는다
  * (mutations/domestic-orders.ts). 여기서만 남기면 같은 표의 같은 칸이 어느
  * 화면에서 고쳤느냐에 따라 기록이 있기도 없기도 하다.
+ *
+ * ── 🔴 **PO발행일을 적으면 그 건의 단계가 [수리 대기]로 간다** (2026-11-26) ─
+ * 사용자 요구다 — 「PO발행일이 기록되면 현재 작업 상태를 자동으로 [수리 대기]로
+ * 바꿔 줘」. 이 파일이 **건드리는 표가 하나 늘었다**(repair_cases). 판정도 쓰기도
+ * 전부 mutations/po-issued-repair-waiting.ts 한 곳에 있고, 여기서는 **전·후 날짜와
+ * 가리키는 수리 건**을 넘기기만 한다.
+ *
+ * 🔴 **두 갈래 모두에서 부른다.** 줄을 새로 만드는 길에도 PO발행일이 실려 올 수
+ * 있고(아래 EMPTY 검사가 둘 다 비었을 때만 막는다), 그 길로 들어온 날짜는 사람이
+ * 보기에 「처음 적은 PO발행일」 그 자체다. 한 갈래만 걸면 「수리 건 상세에서 처음
+ * 적을 때는 안 바뀌고 두 번째부터 바뀌는」 모양이 된다.
+ *
+ * 🔵 **결과 모양은 한 글자도 안 바뀐다** — 단계가 움직였는지는 돌려주지 않는다.
+ * 화면은 저장 뒤 새로 불러오고, 바뀐 상태는 그때 따라온다.
  * ============================================================================
  */
 
@@ -174,6 +189,12 @@ export async function saveRepairCaseDomesticOrderIssueDates(params: {
         version: domesticOrders.version,
         quoteId: domesticOrders.quoteId,
         quoteIssuedDate: domesticOrders.quoteIssuedDate,
+        // 🔴 **2026-11-26 에 더했다.** 「PO발행일이 적히면 [수리 대기]로」가 보는 한
+        //    칸이다(파일 머리말). **저장 전 값**이라야 「이번 저장이 그 날짜를
+        //    바꿨는가」를 가를 수 있다 — 아래 UPDATE 뒤에 읽으면 언제나 「안 바뀜」이다.
+        // 🔵 줄 고르기(resolveDomesticOrderIssueDateEditPlan)도 「완료 시 수정」도
+        //    이 칸을 보지 않는다 — 규칙이 는 것이 아니라 읽어 오는 칸이 하나 는 것뿐이다.
+        orderIssuedDate: domesticOrders.orderIssuedDate,
         // 🔴 **2026-11-19 에 더했다.** 「완료 시 수정」 관문이 보는 한 칸이다. 판정은
         //    completed_at 하나로만 한다(schema/domestic-orders.ts 의 그 칸 주석).
         //    🔵 줄 고르기(resolveDomesticOrderIssueDateEditPlan)는 이 칸을 보지 않는다 —
@@ -223,6 +244,17 @@ export async function saveRepairCaseDomesticOrderIssueDates(params: {
           updatedBy: params.actorUserId,
         })
         .returning({ id: domesticOrders.id, version: domesticOrders.version });
+
+      // 🔴 방금 태어난 줄이라 **앞 값은 없다**(null). 그래서 PO발행일이 실려
+      //    왔으면 그것이 곧 「적혔다」이고, 그 건의 단계가 [수리 대기]로 간다.
+      //    같은 트랜잭션 안이므로 단계 쪽이 실패하면 이 줄도 함께 없던 일이 된다.
+      await applyPoIssuedRepairWaitingInTx(tx, {
+        repairCaseId: params.repairCaseId,
+        previousOrderIssuedDate: null,
+        nextOrderIssuedDate: params.orderIssuedDate,
+        actorUserId: params.actorUserId,
+      });
+
       return { ok: true, id: inserted.id, version: inserted.version, created: true };
     }
 
@@ -281,6 +313,16 @@ export async function saveRepairCaseDomesticOrderIssueDates(params: {
     if (!updated) {
       return { ok: false, code: "CONFLICT", message: VERSION_CONFLICT_MESSAGE };
     }
+
+    // 🔴 **여기까지 와야 단계를 손댄다.** 위의 NOT_FOUND · CONFLICT · FORBIDDEN ·
+    //    QUOTE_LOCKED 는 전부 이 줄 앞에서 돌아가므로, 그 길로 끝난 저장은 단계를
+    //    건드리지 않는다. 앞 값은 트랜잭션 안에서 잠근 채 읽어 둔 그 값이다.
+    await applyPoIssuedRepairWaitingInTx(tx, {
+      repairCaseId: params.repairCaseId,
+      previousOrderIssuedDate: current.orderIssuedDate,
+      nextOrderIssuedDate: params.orderIssuedDate,
+      actorUserId: params.actorUserId,
+    });
 
     return { ok: true, id: updated.id, version: updated.version, created: false };
   });
