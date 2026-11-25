@@ -99,6 +99,7 @@ export default function IntakeInfoEditForm({
   referenceData,
   borrowedRequestedDueDate,
   onRequestedDueDateNotLinked,
+  onSaveBlockedByConfirmedDueDate,
   onDone,
 }: {
   resolved: EffectiveRepairCase;
@@ -125,6 +126,12 @@ export default function IntakeInfoEditForm({
    * (RepairCaseDetailView).
    */
   onRequestedDueDateNotLinked: (message: string) => void;
+  /**
+   * 🔴 **저장이 거절됐을 때**(2026-11-25) — 연결된 내자 회차의 납기일이 확정돼 있어
+   * 고객 요청 납기일을 맞출 수 없는 경우다. 위 짝과 달리 **아무것도 저장되지 않았고**
+   * 폼도 안 닫힌다. 띄우는 일은 여기서 하지 않는 것이 위와 같다(RepairCaseDetailView).
+   */
+  onSaveBlockedByConfirmedDueDate: (message: string) => void;
   onDone: () => void;
 }) {
   const canEdit = (field: string) => editableFields.includes(field);
@@ -177,6 +184,9 @@ export default function IntakeInfoEditForm({
       // 🔴 고객 요청 납기일을 보내는 폼은 이 하나다 — 서버가 그 칸을 받은 저장에서만
       // 묶기 결과를 실어 보낸다(lib/db/mutations/repair-cases.ts).
       onRequestedDueDateNotLinked,
+      // 🔴 **거절도 같은 까닭으로 이 폼 하나다**(2026-11-25) — 그 칸을 받은 저장만
+      // 확정된 회차에 걸린다.
+      onSaveBlockedByConfirmedDueDate,
     });
 
   const disabled = isSubmitting || isConflict;

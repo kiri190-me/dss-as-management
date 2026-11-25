@@ -406,7 +406,16 @@ export type UpdateRepairCaseActionResultCode =
   | "ENGINEER_NOT_ALLOWED"
   | "DATABASE_UNAVAILABLE"
   | "WORKFLOW_REASSIGNMENT_NOT_ALLOWED"
-  | "WORKFLOW_NOT_ALLOWED";
+  | "WORKFLOW_NOT_ALLOWED"
+  /**
+   * 🔴 **연결된 내자 회차의 납기일이 확정돼 있어 거절됐다**(2026-11-25). mutation 이
+   * 내는 코드를 액션이 그대로 나른다(db/mutations/repair-cases.ts 의 같은 이름).
+   *
+   * 🔴 화면은 이 코드를 보고 **읽어야 닫히는 알림**을 띄우고 **폼을 닫지 않는다** —
+   * 저장이 안 됐으므로 사람이 적어 둔 값이 사라지면 안 되고, 해야 할 일([내자
+   * 정리]에서 [확정 해제])이 **다른 화면**에 있어 한 줄 읽고 넘길 글이 아니다.
+   */
+  | "DOMESTIC_ORDER_DUE_DATE_CONFIRMED";
 
 export type UpdateRepairCaseActionResult =
   | {

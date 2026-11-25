@@ -135,6 +135,7 @@ export default function IntakeInfoSection({
   isDueDateNear,
   isDueDateInverted,
   onRequestedDueDateNotLinked,
+  onSaveBlockedByConfirmedDueDate,
   onStartEdit,
   onDone,
 }: {
@@ -182,6 +183,13 @@ export default function IntakeInfoSection({
    * (RepairCaseDetailView).
    */
   onRequestedDueDateNotLinked: (message: string) => void;
+  /**
+   * 🔴 **저장이 거절됐을 때**(2026-11-25) — 연결된 내자 회차의 납기일이 확정돼 있어
+   * 고객 요청 납기일을 맞출 수 없는 경우다. 바로 위 짝과 **뜻이 정반대**이고(저쪽은
+   * 저장이 됐다), 그래서 편집 폼도 닫히지 않는다. 띄우는 일을 위로 올려 보내는 것은
+   * 같다 — 알림이 폼보다 오래 살아야 하는 것은 거절일 때도 마찬가지다.
+   */
+  onSaveBlockedByConfirmedDueDate: (message: string) => void;
   onStartEdit: () => void;
   onDone: () => void;
 }) {
@@ -224,6 +232,7 @@ export default function IntakeInfoSection({
               requestedDueDate.borrowed ? requestedDueDate.dueDate : null
             }
             onRequestedDueDateNotLinked={onRequestedDueDateNotLinked}
+            onSaveBlockedByConfirmedDueDate={onSaveBlockedByConfirmedDueDate}
             onDone={onDone}
           />
         </div>

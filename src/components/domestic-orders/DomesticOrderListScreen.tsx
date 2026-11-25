@@ -1954,11 +1954,23 @@ function DueDateRowCompletionToggles({
  * 없이 한쪽을 삼킨다. 그래서 이 묶음은 그 칸 **밖**, 같은 `<td>` 안에 선다 —
  * 날짜 줄들 바로 아래다.
  *
- * ── 🔴 **납기요청일이 적혀 있는 줄에만** 선다 (사용자 요구 그대로) ───────
- * 회차가 0이면 아무것도 그리지 않는다. 🔵 그 줄에 보이는 날짜가 **수리 건에서 빌려
- * 온 것**일 수 있는데(DueDateCellContent), 그때도 이 줄의 회차는 0이라 단추가 서지
- * 않는다 — 맞다: 확정은 **이 줄의 회차에 찍는 값**이고, 빌려 온 날짜는 이 줄의 것이
- * 아니다. 적어 두지 않은 날짜를 잠글 수는 없다.
+ * ── 🔴 **날짜가 보이는 줄에 선다** (사용자 요구 그대로) ──────────────────
+ * 칸에 "-" 만 보이는 줄에는 아무것도 그리지 않는다 — 적을 날짜가 없는데 잠글 수는
+ * 없다.
+ *
+ * 🔴 **2026-11-25 에 여기가 뒤집혔다.** 그 전까지는 「회차가 0이면 안 그린다」였고,
+ * 그래서 **수리 건에서 빌려 온 날짜**가 보이는 줄에는 단추가 서지 않았다(날짜는
+ * 보이는데 확정할 수가 없었다). 사용자 결정이 그것을 뒤집었다: 「[내자정리]에서
+ * **[수리건 요청일]도** 내자정리에서 작성한 [납기요청일]과 **같은 취급**을 해줘.」
+ * 이제 그 줄에서도 단추가 서고, 누르면 **그 날짜로 1차 회차가 생기면서 확정된다**
+ * (만드는 일은 서버가 한다 — mutations 의 setDomesticOrderDueDateRowConfirmation).
+ *
+ * 🔴 **그러면 「수리 건 요청일」 꼬리표가 사라진다 — 받아들인 결과다.** 그 꼬리표가
+ * 뜨는 조건은 「이 줄에 회차가 0개다」 하나뿐이라(DueDateCellContent), 회차가 생기는
+ * 순간 저절로 없어진다. 사용자 결정 그대로다: 「난 애초에 [수리 건 요청일] 표시가
+ * 필요 없다고 생각했어. 난 [수리건 상세]와 [내자정리]의 [납기 요청일]이 **완벽히
+ * 동기화** 되는 걸 바랬어.」 🔵 **확정하지 않은 줄에는 꼬리표가 그대로 뜬다** —
+ * 없애라는 말은 없었다.
  *
  * ── 🔴 **단추를 그리는 판정은 줄과 같다**(rowCanEdit 과 같은 값) ────────
  * `canEditDomesticOrderWhenCompleted(row, access)` — 서버가 막는 그 조건과 한 글자도
@@ -1996,8 +2008,16 @@ function DueDateRowConfirmToggles({
   /** 🔴 **어느 회차를 보내는 중인가** — 하나로 두면 단추 셋이 함께 흐려진다. */
   const [pendingRowOrder, setPendingRowOrder] = useState<number | null>(null);
 
-  // 🔴 납기요청일이 적혀 있는 줄에만 선다(머리말 · 사용자 요구 그대로).
-  if (row.dueDates.length === 0) return null;
+  // 🔴 **이 줄에 적어 둔 회차가 없을 때 화면이 빌려 그리는 날짜**(2026-11-25, 머리말).
+  //    🔴 **판정을 여기서 다시 적지 않는다** — 칸을 그리는 그 함수에 그대로 물어본다
+  //    (resolveDomesticOrderDueDateDisplay). 따로 적으면 「날짜는 보이는데 단추가
+  //    없는」 또는 그 반대인 줄이 생긴다. 회차가 하나라도 있으면 `borrowed` 는 거짓이다.
+  const display = resolveDomesticOrderDueDateDisplay(row);
+  const borrowedDueDate = display.borrowed ? display.lines[0] : null;
+
+  // 🔴 칸에 "-" 만 보이는 줄에는 아무것도 그리지 않는다(머리말) — 적어 둔 회차도 없고
+  //    빌려 올 날짜도 없는 줄이다.
+  if (row.dueDates.length === 0 && borrowedDueDate === null) return null;
 
   // 🔴 줄의 [수정]·칸 편집과 **같은 판정**이다(머리말). 거짓이면 단추가 하나도 안
   //    그려지지만, 아래 확정 표는 그대로 선다 — 사실은 권한과 상관이 없다.
@@ -2043,28 +2063,56 @@ function DueDateRowConfirmToggles({
     }
   }
 
+  /**
+   * 🔴 **단추가 설 자리들** — 적어 둔 회차가 있으면 그 회차들, 하나도 없으면 **빌려
+   * 그리는 날짜 하나**(2026-11-25). 갈림은 바로 위 `borrowedDueDate` 가 이미 정했다.
+   *
+   * 🔵 빌려 그리는 쪽은 **언제나 1차 하나**다 — 수리 건의 그 칸이 날짜 하나이고
+   * (repair_cases.customer_requested_due_date), 서버도 1차 회차 하나를 만든다.
+   * 확정일 수가 없는 것도 분명하다: 아직 행이 없다.
+   */
+  const units =
+    row.dueDates.length > 0
+      ? row.dueDates.map((dueDate, index) => {
+          const rowOrder = index + 1;
+          return {
+            key: dueDate.id,
+            rowOrder,
+            confirmed: dueDate.confirmedAt !== null,
+            // 🔴 글자를 지어내지 않는다 — [승인] 탭의 회차 머리·회차별 완료 단추와
+            //    **같은 한 줄**이다(domain/domestic-order-due-date-label.ts). 단추에는
+            //    짧은 말만 적고 긴 이름은 title 로 둔다(표 칸이 좁다).
+            label: domesticOrderDueDateRowLabel(rowOrder, dueDate),
+            // 🔵 회차가 하나뿐인 줄에서는 번호를 말하지 않는다 — 가리킬 다른 회차가
+            //    없는데 「1차」를 붙이면 없는 구분을 있는 것처럼 읽게 한다(승인 거절
+            //    문장이 같은 자리에서 같은 판단을 한다 — nameTheRow).
+            name: row.dueDates.length > 1 ? `${rowOrder}차 ` : "",
+          };
+        })
+      : [
+          {
+            key: "borrowed",
+            rowOrder: 1,
+            confirmed: false,
+            // 🔴 비고는 없다 — 빌려 온 날짜에는 메모가 딸려 오지 않는다(수리 건의
+            //    그 칸은 날짜 하나다). 서버가 만드는 회차도 비고가 비어 있다.
+            label: domesticOrderDueDateRowLabel(1, { dueDate: borrowedDueDate, note: null }),
+            name: "",
+          },
+        ];
+
   return (
     // 🔴 칸이 좁으므로 접히게 둔다 — `nowrap` 이면 회차 셋이 표를 가로로 밀어낸다
     //    (회차별 완료 단추 묶음이 같은 까닭으로 같은 모양이다).
     <span className="mt-1 flex flex-wrap items-center gap-1">
-      {row.dueDates.map((dueDate, index) => {
-        const rowOrder = index + 1;
-        const confirmed = dueDate.confirmedAt !== null;
-        // 🔴 글자를 지어내지 않는다 — [승인] 탭의 회차 머리·회차별 완료 단추와 **같은
-        //    한 줄**이다(domain/domestic-order-due-date-label.ts). 단추에는 짧은 말만
-        //    적고 긴 이름은 title 로 둔다(표 칸이 좁다).
-        const label = domesticOrderDueDateRowLabel(rowOrder, dueDate);
-        // 🔵 회차가 하나뿐인 줄에서는 번호를 말하지 않는다 — 가리킬 다른 회차가 없는데
-        //    「1차」를 붙이면 없는 구분을 있는 것처럼 읽게 한다(승인 거절 문장이 같은
-        //    자리에서 같은 판단을 한다 — nameTheRow).
-        const name = row.dueDates.length > 1 ? `${rowOrder}차 ` : "";
+      {units.map(({ key, rowOrder, confirmed, label, name }) => {
         // 🔴 그 회차에 그릴 것이 없으면 **덩이도 만들지 않는다**(위와 같은 까닭) —
         //    바깥 줄의 `gap-1` 이 그대로 빈 자리가 된다.
         if (!canToggle && !confirmed) return null;
         return (
           // 🔴 **회차 하나가 한 덩이**다 — 표와 단추가 흩어지면 「1차의 확정」이 2차
           //    단추 옆에 선 것처럼 읽힌다. 바깥 줄만 접히게 두고 안쪽은 묶는다.
-          <span key={dueDate.id} className="inline-flex items-center gap-1">
+          <span key={key} className="inline-flex items-center gap-1">
             {confirmed && (
               // 🔴 **표가 단추 왼쪽**이다 — 사실을 먼저 말하고 그다음이 조작이다
               //    (회차별 완료 표가 세우는 차례 그대로다).

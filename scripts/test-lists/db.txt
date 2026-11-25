@@ -651,3 +651,13 @@ src/lib/db/queries/approval-history.integration.test.ts
 # 🔴 완료된 줄의 「완료 시 수정」 관문(그 권한이 없으면 확정도 막히고, **완료 전인
 # 줄은 그 권한 없이도** 확정된다).
 src/lib/db/mutations/domestic-order-due-date-confirmation.integration.test.ts
+
+# 🔴 확정된 회차에는 수리 건의 날짜가 흘러들지 못한다 — 2026-11-25
+# 🔴 **거절**(확정된 회차가 걸린 수리 건 저장이 통째로 거절되고, 내자의 날짜·확정도
+# 수리 건의 날짜·version 도 한 글자가 안 바뀐다 — 같은 저장에 실린 다른 칸까지) ·
+# 🔵 **그 짝 둘**(확정 안 된 회차는 예전처럼 맞춰지고, 날짜를 안 바꾸는 저장은
+# 확정된 회차가 있어도 통과한다 — 「막는다」만 재면 **전부 막아 버린 구현**과
+# 「확정되면 인수정보를 영영 못 고치는」 구현이 둘 다 통과한다) · 🔵 [확정 해제]
+# 뒤에는 다시 맞춰지는가(막다른 길이 아니다) · 🔴 거절 문구에 **회차 · 갈 화면 ·
+# 할 일** 셋이 담기는가.
+src/lib/db/mutations/repair-case-due-date-confirmed-guard.integration.test.ts

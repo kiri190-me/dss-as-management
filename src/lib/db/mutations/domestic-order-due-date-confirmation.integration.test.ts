@@ -727,3 +727,174 @@ describe("⑥ 🔴 완료된 줄은 「완료 시 수정」이 있어야 확정�
     assert.equal(after[0].confirmedBy, adminId);
   });
 });
+
+// ── ⑦ 🔴 **빌려 온 날짜에서 확정하면 회차가 생긴다** (2026-11-25) ──────────
+
+/**
+ * 사용자 결정 원문: 「[내자정리]에서 **[수리건 요청일]도** 내자정리에서 작성한
+ * [납기요청일]과 **같은 취급**을 해줘.」
+ *
+ * 납기요청일 행이 **하나도 없는** 줄은 연결된 수리 건의 고객 요청 납기일을 화면에
+ * 대신 그린다. 날짜는 보이는데 **적을 자리가 없어** 확정을 할 수 없었다. 이제 그
+ * 줄에서 확정을 누르면 **그 날짜로 1차 회차가 생기면서 확정된다.**
+ *
+ * 🔴 **날짜는 서버가 제 손으로 읽는다** — 화면이 보낸 날짜를 받지 않는다. 그래서
+ * 여기서 재는 것은 「무엇이 들어갔는가」이고, 답은 **수리 건의 그 칸 값**이어야 한다.
+ * 🔴 「수리 건 요청일」 꼬리표가 사라지는 것은 **받아들인 결과**다(그 꼬리표가 뜨는
+ * 조건은 「회차가 0개다」 하나뿐이다) — 사용자 결정이고, 출처 칸은 만들지 않았다.
+ */
+describe("⑦ 🔴 빌려 온 날짜에서 확정하면 그 날짜로 회차가 생긴다", () => {
+  test("🔴 회차 0 → 1, 날짜는 **수리 건의 그 칸 값**, 그리고 확정 상태다", async () => {
+    const created = await createRepairCase({
+      ...baseCreateRepairCaseInput(),
+      customerRequestedDueDate: DUE_1,
+    });
+    assert.equal(created.ok, true, `접수 건 만들기 실패: ${JSON.stringify(created)}`);
+    if (!created.ok) return;
+
+    // 🔴 **회차가 0개인 줄**이다 — 화면은 여기서 수리 건의 날짜를 빌려 그린다.
+    const order = await createOrder({ repairCaseId: created.id, dueDates: [] });
+    const before = await readRows(order.id);
+    assert.equal(before.length, 0, "밑자락에 이미 회차가 있다 — 이 시험은 빌려 온 줄을 못 잰다");
+
+    const result = await setDomesticOrderDueDateRowConfirmation({
+      id: order.id,
+      expectedVersion: order.version,
+      dueDateRowOrder: 1,
+      confirmed: true,
+      actorUserId: adminId,
+    });
+    assert.equal(result.ok, true, `빌려 온 날짜의 확정이 거절됐다: ${JSON.stringify(result)}`);
+
+    const rows = await readRows(order.id);
+    assert.equal(rows.length, 1, "회차가 생기지 않았다(또는 둘 이상 생겼다)");
+    assert.equal(rows[0].dueDate, DUE_1, "🔴 생긴 회차의 날짜가 수리 건의 값과 다르다");
+    assert.equal(rows[0].displayOrder, 1, "차례가 1차가 아니다");
+    assert.notEqual(rows[0].confirmedAt, null, "회차는 생겼는데 확정이 안 찍혔다");
+    assert.equal(rows[0].confirmedBy, adminId, "확정한 사람이 안 찍혔다");
+    // 🔴 아무도 적은 적 없는 값을 지어내지 않는다 — 비고도 납품 두 칸도 비어 있다.
+    assert.equal(rows[0].note, null, "아무도 적지 않은 비고가 생겼다");
+    assert.equal(rows[0].deliveredDate, null);
+    assert.equal(rows[0].deliveredBy, null);
+    assert.equal(rows[0].completedAt, null, "확정이 완료까지 찍었다");
+  });
+
+  test("🔴 **수리 건의 날짜는 그대로다** — 넣은 값이 그 칸의 값 그대로이므로 고칠 것이 없다", async () => {
+    const created = await createRepairCase({
+      ...baseCreateRepairCaseInput(),
+      customerRequestedDueDate: DUE_1,
+    });
+    if (!created.ok) return;
+    const order = await createOrder({ repairCaseId: created.id, dueDates: [] });
+    const [caseBefore] = await db
+      .select({ dueDate: repairCases.customerRequestedDueDate, version: repairCases.version })
+      .from(repairCases)
+      .where(eq(repairCases.id, created.id));
+
+    await confirmRow(order.id, order.version, 1);
+
+    const [caseAfter] = await db
+      .select({ dueDate: repairCases.customerRequestedDueDate, version: repairCases.version })
+      .from(repairCases)
+      .where(eq(repairCases.id, created.id));
+    assert.equal(caseAfter.dueDate, caseBefore.dueDate, "수리 건의 날짜가 바뀌었다");
+    // 🔴 묶기를 태우지 않았다는 사실 — 태웠으면 이 version 이 올랐을 수 있다.
+    assert.equal(caseAfter.version, caseBefore.version, "수리 건의 version 이 올랐다");
+    // 🔴 줄의 version 도 그대로다(확정은 줄을 안 건드린다) — 올리면 그 줄의 회차별
+    //    승인이 전부 STALE 이 된다.
+    const line = await readOrder(order.id);
+    assert.equal(line.version, order.version, "회차를 만들면서 줄의 version 이 올랐다");
+  });
+
+  test("🔴 빌릴 날짜가 **없으면** 거절되고 회차도 안 생긴다 — 화면에도 단추가 없는 줄이다", async () => {
+    // ㉮ 수리 건이 붙었지만 그 칸이 비어 있다(화면에 "-" 만 보인다).
+    const created = await createRepairCase(baseCreateRepairCaseInput());
+    assert.equal(created.ok, true);
+    if (!created.ok) return;
+    const linked = await createOrder({ repairCaseId: created.id, dueDates: [] });
+    const deniedLinked = await setDomesticOrderDueDateRowConfirmation({
+      id: linked.id,
+      expectedVersion: linked.version,
+      dueDateRowOrder: 1,
+      confirmed: true,
+      actorUserId: adminId,
+    });
+    assert.equal(deniedLinked.ok, false, "빌릴 날짜가 없는데 확정됐다");
+    if (!deniedLinked.ok) assert.equal(deniedLinked.code, "VALIDATION_ERROR");
+    assert.equal((await readRows(linked.id)).length, 0, "회차가 생겼다");
+
+    // ㉯ 수리 건 자체가 안 붙은 줄(기타건) — 빌릴 곳이 아예 없다.
+    const misc = await createOrder({ dueDates: [] });
+    const deniedMisc = await setDomesticOrderDueDateRowConfirmation({
+      id: misc.id,
+      expectedVersion: misc.version,
+      dueDateRowOrder: 1,
+      confirmed: true,
+      actorUserId: adminId,
+    });
+    assert.equal(deniedMisc.ok, false, "연결도 날짜도 없는 줄이 확정됐다");
+    if (!deniedMisc.ok) assert.equal(deniedMisc.code, "VALIDATION_ERROR");
+    assert.equal((await readRows(misc.id)).length, 0, "회차가 생겼다");
+  });
+
+  test("🔴 **해제**와 **1차가 아닌 번호**로는 회차가 생기지 않는다", async () => {
+    const created = await createRepairCase({
+      ...baseCreateRepairCaseInput(),
+      customerRequestedDueDate: DUE_1,
+    });
+    if (!created.ok) return;
+
+    // ㉮ 없는 회차의 확정을 푼다는 말은 성립하지 않는다 — 만들어서 풀면 더 이상하다.
+    const releasing = await createOrder({ repairCaseId: created.id, dueDates: [] });
+    const deniedRelease = await setDomesticOrderDueDateRowConfirmation({
+      id: releasing.id,
+      expectedVersion: releasing.version,
+      dueDateRowOrder: 1,
+      confirmed: false,
+      actorUserId: adminId,
+    });
+    assert.equal(deniedRelease.ok, false, "없는 회차가 해제됐다");
+    assert.equal((await readRows(releasing.id)).length, 0, "해제인데 회차가 생겼다");
+
+    // ㉯ 만들 자리는 1차 하나뿐이다 — 2차를 보내면 거절이다(낡은 화면의 요청이다).
+    const second = await createOrder({ repairCaseId: created.id, dueDates: [] });
+    const deniedSecond = await setDomesticOrderDueDateRowConfirmation({
+      id: second.id,
+      expectedVersion: second.version,
+      dueDateRowOrder: 2,
+      confirmed: true,
+      actorUserId: adminId,
+    });
+    assert.equal(deniedSecond.ok, false, "없는 2차가 확정됐다");
+    assert.equal((await readRows(second.id)).length, 0, "2차를 보냈는데 회차가 생겼다");
+  });
+
+  test("🔴 생긴 회차는 **울타리가 지킨다** — 그 줄을 다시 0회차로 저장할 수 없다", async () => {
+    const created = await createRepairCase({
+      ...baseCreateRepairCaseInput(),
+      customerRequestedDueDate: DUE_1,
+    });
+    if (!created.ok) return;
+    const order = await createOrder({ repairCaseId: created.id, dueDates: [] });
+    await confirmRow(order.id, order.version, 1);
+
+    // 🔴 **열려 있던 내자 정리 화면**이 보내는 저장이다 — 그 화면은 회차가 0개이던
+    //    때의 목록을 들고 있다. 확정은 줄의 version 을 안 올리므로 낙관적 잠금에는
+    //    안 걸리고, 넷째 울타리가 막는다(확정된 회차가 있는데 줄이 줄어드는 저장).
+    const stale = await updateDomesticOrder({
+      id: order.id,
+      expectedVersion: order.version,
+      fields: fields({ repairCaseId: created.id, dueDates: [] }),
+      actorUserId: adminId,
+    });
+    assert.equal(stale.ok, false, "낡은 화면의 저장이 확정된 회차를 지웠다");
+    if (!stale.ok) {
+      assert.equal(stale.code, "VALIDATION_ERROR");
+      assert.equal(stale.message, CONFIRMED_DUE_DATE_ROW_MESSAGE);
+    }
+    const rows = await readRows(order.id);
+    assert.equal(rows.length, 1, "거절됐는데 회차가 사라졌다");
+    assert.equal(rows[0].dueDate, DUE_1);
+    assert.notEqual(rows[0].confirmedAt, null);
+  });
+});

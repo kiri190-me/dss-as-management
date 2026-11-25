@@ -85,6 +85,21 @@ export function useSectionEditSubmit(params: {
    * 성공 팝업이 가린다(components/common/NoticePopup.tsx 머리말).
    */
   onRequestedDueDateNotLinked?: (message: string) => void;
+  /**
+   * 🔴 **저장이 거절됐다 — 연결된 내자 회차의 납기일이 확정돼 있어서**(2026-11-25).
+   * 바로 위 짝과 **뜻이 정반대**다: 저쪽은 「저장은 됐는데 상대가 안 따라갔다」이고,
+   * 이쪽은 **아무것도 저장되지 않았다.** 그래서 이 길에서는 `onDone()` 도
+   * `router.refresh()` 도 부르지 않는다 — 폼이 닫히면 사람이 적어 둔 값이 사라진다.
+   *
+   * 🔴 **읽어야 닫히는 알림**이어야 한다(components/common/NoticePopup.tsx 머리말).
+   * 해야 할 일이 **다른 화면**에 있어서다 — [내자 정리]로 가서 [확정 해제]를 눌러야
+   * 한다. 0.5초 뒤 사라지는 저장 팝업으로는 전할 수 없고, 애초에 그 팝업은 성공
+   * 전용이다. 띄우는 자리도 위 짝과 같이 **폼 바깥**이다(RepairCaseDetailView).
+   *
+   * 🔵 넘기지 않아도 폼은 지금까지와 똑같이 동작한다(위 짝과 같은 까닭) — 그때는
+   * 평소 오류와 같이 칸 밑 글로만 보인다.
+   */
+  onSaveBlockedByConfirmedDueDate?: (message: string) => void;
 }) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -118,6 +133,14 @@ export function useSectionEditSubmit(params: {
         }
         setFieldErrors(result.fieldErrors ?? {});
         setSubmitError(result.message);
+        // 🔴 **읽어야 닫히는 알림까지 띄운다**(2026-11-25) — 거절한 것은 이 폼의
+        // 입력이 아니라 **다른 화면에 걸린 잠금**이라, 칸 밑 한 줄로는 사람이 무엇을
+        // 해야 하는지 알 수 없다([내자 정리]에서 [확정 해제]). 🔴 **글자가 아니라
+        // 코드로 가른다** — 문구를 다듬는 날 조용히 안 걸린다.
+        // 🔵 칸 밑 글도 그대로 남긴다: 알림을 닫은 뒤에도 어느 칸이 막혔는지 보인다.
+        if (result.code === "DOMESTIC_ORDER_DUE_DATE_CONFIRMED") {
+          params.onSaveBlockedByConfirmedDueDate?.(result.message);
+        }
         return;
       }
 

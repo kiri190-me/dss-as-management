@@ -229,6 +229,13 @@ export default function RepairCaseDetailView({
    * 닫을 때까지 떠 있어야 한다.
    */
   const [requestedDueDateNotLinked, setRequestedDueDateNotLinked] = useState<string | null>(null);
+  /**
+   * 🔴 **저장이 거절됐을 때의 글**(2026-11-25) — 연결된 내자 회차의 납기일이 확정돼
+   * 있어 고객 요청 납기일을 맞출 수 없었다. 🔴 **위 상태와 합치지 않는다**: 저쪽은
+   * 「저장은 됐다」이고 이쪽은 **아무것도 저장되지 않았다** — 한 상자에 담으면 제목
+   * 하나가 두 사실을 가리키게 되고, 사람은 자기 저장이 됐는지 안 됐는지를 못 읽는다.
+   */
+  const [dueDateConfirmBlocked, setDueDateConfirmBlocked] = useState<string | null>(null);
 
   if (!isHydrated || !effective) {
     return <LoadingNotice />;
@@ -272,6 +279,22 @@ export default function RepairCaseDetailView({
           onClose={() => setRequestedDueDateNotLinked(null)}
         />
       )}
+      {/* 🔴 **저장이 거절됐다**(2026-11-25) — 연결된 내자 회차의 납기일이 확정돼 있어
+          고객 요청 납기일을 맞출 수 없었다. 사용자 결정 그대로다: 「거절하되 왜
+          거절되는지 팝업으로 알려주도록 해」.
+          🔴 **제목이 바로 위 상자와 다르다.** 저쪽은 「저장은 됐는데 상대가 안
+          따라갔다」이고 이쪽은 **한 칸도 저장되지 않았다** — 같은 제목으로 묶으면
+          사람은 자기 저장이 됐다고 읽고 그대로 화면을 떠난다.
+          🔴 **저장 팝업이 아니다.** 그것은 성공 전용이고 0.5초 뒤 사라진다 — 해야 할
+          일이 **다른 화면**에 있는 이 글은 읽을 시간이 있어야 한다
+          (components/common/NoticePopup.tsx 머리말). */}
+      {dueDateConfirmBlocked !== null && (
+        <NoticePopup
+          title="저장하지 않았습니다"
+          lines={dueDateConfirmBlocked.split("\n\n")}
+          onClose={() => setDueDateConfirmBlocked(null)}
+        />
+      )}
       {resolved.source === "DATABASE" && effective.billingType === "PENDING_DECISION" && (
         <PendingBillingDecisionCard
           repairCaseId={effective.id}
@@ -289,6 +312,7 @@ export default function RepairCaseDetailView({
           isDueDateNear={isDueDateNear}
           isDueDateInverted={isDueDateInverted}
           onRequestedDueDateNotLinked={setRequestedDueDateNotLinked}
+          onSaveBlockedByConfirmedDueDate={setDueDateConfirmBlocked}
           onStartEdit={() => setEditingSection("INTAKE")}
           onDone={handleDone}
         />

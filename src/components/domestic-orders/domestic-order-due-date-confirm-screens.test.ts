@@ -21,7 +21,10 @@ import { readFileSync } from "node:fs";
  *     HTML 이 깨진다. 그래서 확정 묶음은 그 칸 **밖**, 같은 칸 안에 선다.
  *  ② 🔴 **표와 카드 둘 다** 선다. 한쪽만 고치면 **좁은 화면에서만 단추가 사라진다** —
  *     이 저장소에서 반복된 함정이고, 그래서 두 덩어리를 **따로 잘라** 잰다.
- *  ③ 🔴 **납기요청일이 적힌 줄에만** 선다(사용자 요구 그대로).
+ *  ③ 🔴 **날짜가 보이는 줄에만** 선다(사용자 요구 그대로). 🔴 **2026-11-25 에 그 뜻이
+ *     넓어졌다** — 수리 건에서 **빌려 온 날짜**가 보이는 줄도 포함된다(사용자 결정:
+ *     「[수리건 요청일]도 … 같은 취급을 해줘」). 아무것도 안 그리는 줄은 칸에 "-" 만
+ *     보이는 줄 하나다.
  *  ④ 🔴 **단추는 권한으로 갈리고 확정 표는 안 갈린다** — 표는 고치는 길이 아니라
  *     사실이다(회차별 완료 표가 같은 자리에서 같은 선을 긋는다).
  *  ⑤ 🔴 **보내는 값 셋**(줄 id · 그 줄의 version · 회차 번호)과, 누름이 위로 퍼지지
@@ -132,8 +135,39 @@ describe("🔴 ② 표와 카드 둘 다 — 한쪽만 고치면 좁은 화면�
 });
 
 describe("🔴 ③④⑤ 묶음이 하는 일", () => {
-  test("🔴 ③ 납기요청일이 **없는 줄에는 아무것도 안 그린다**", () => {
-    assert.match(toggles, /if \(row\.dueDates\.length === 0\) return null;/);
+  test("🔴 ③ 칸에 **\"-\" 만 보이는 줄에는 아무것도 안 그린다**", () => {
+    // 🔴 **2026-11-25 에 조건이 바뀌었다.** 그 전까지는 「회차가 0이면 안 그린다」라,
+    //    수리 건에서 **빌려 온 날짜**가 보이는 줄에는 단추가 서지 않았다. 사용자
+    //    결정으로 그 줄도 같은 취급이 되었다 — 이제 아무것도 안 그리는 줄은
+    //    **적어 둔 회차도 없고 빌려 올 날짜도 없는** 줄 하나뿐이다.
+    assert.match(
+      toggles,
+      /if \(row\.dueDates\.length === 0 && borrowedDueDate === null\) return null;/
+    );
+  });
+
+  test("🔴 ③ 빌려 온 날짜는 **칸을 그리는 그 함수**에 물어본다 — 따로 재지 않는다", () => {
+    // 따로 적으면 「날짜는 보이는데 단추가 없는」(또는 그 반대인) 줄이 생긴다.
+    assert.match(toggles, /const display = resolveDomesticOrderDueDateDisplay\(row\);/);
+    assert.match(toggles, /const borrowedDueDate = display\.borrowed \? display\.lines\[0\] : null;/);
+  });
+
+  test("🔴 ③ 빌려 온 줄에는 **1차 하나**가 선다 — 확정일 수 없고 번호를 말하지 않는다", () => {
+    const borrowedUnit = sliceBetween(toggles, 'key: "borrowed",', "];");
+    assert.ok(borrowedUnit.includes("rowOrder: 1,"), "빌려 온 줄의 회차 번호가 1 이 아니다");
+    assert.ok(borrowedUnit.includes("confirmed: false,"), "아직 행이 없는데 확정으로 그린다");
+    assert.ok(
+      borrowedUnit.includes('name: "",'),
+      "가리킬 다른 회차가 없는데 번호를 말한다"
+    );
+    // 🔴 회차 이름은 여기서도 **지어내지 않는다**. 비고는 없다 — 빌려 온 날짜에는
+    //    메모가 딸려 오지 않는다.
+    assert.ok(
+      borrowedUnit.includes(
+        "label: domesticOrderDueDateRowLabel(1, { dueDate: borrowedDueDate, note: null }),"
+      ),
+      "빌려 온 줄의 회차 이름을 지어내고 있다"
+    );
   });
 
   test("🔴 ④ 단추만 권한으로 갈린다 — 확정 표는 그 밖이다", () => {

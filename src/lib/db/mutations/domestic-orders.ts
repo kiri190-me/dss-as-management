@@ -35,6 +35,7 @@ import {
   type DeliveredDateLinkOutcome,
 } from "@/lib/domain/delivered-date-link";
 import { toKstDateOnly } from "@/lib/domain/date-only";
+import { foldBlankToNull } from "@/lib/domain/domestic-order-list";
 import { checkDomesticOrderDueDateRows } from "@/lib/domain/domestic-order-due-date-rows";
 import { getCurrentShipmentApprovalRouteChain } from "../queries/shipment-approval-routes";
 import type { DomesticOrderFields } from "@/lib/validation/domestic-order-input";
@@ -646,6 +647,25 @@ function checkDueDateRowGuard(params: {
  * 고치는 일」이 아니라 **수리 건에서 일어난 사실이 번진 것**이고, 그 사실 기록이 내자
  * 권한에 막히면 전이가 반쪽만 성공한 채 끝난다(두 표가 서로 다른 날짜를 들게 된다).
  * 막지 마라. 자세한 까닭은 그 파일 머리말에 있다.
+ *
+ * ── 🔴 **그 「막지 마라」에 예외가 하나 생겼다** (2026-11-25) ─────────────
+ * 🔴 **바로 위 문단을 지우지 마라 — 지금도 그대로 유효하다.** 더해진 것은 **딱 한
+ * 가지 경우**이고, 위가 가리키는 「권한 때문에 막지 마라」와는 **다른 까닭**이다:
+ *
+ *   · 위가 말하는 것은 **권한**이다. 내자 줄을 고칠 권한이 없는 사람이 수리 건에서
+ *     출하를 찍었다고 해서 그 사실이 내자에 안 적히면 안 된다 — 그것은 「고치는 일」이
+ *     아니라 **일어난 사실이 번진 것**이고, 막으면 두 표가 갈라진다.
+ *   · 🔴 새 예외가 말하는 것은 **그 회차의 [납기일 확정]** 이다(사용자 결정 2026-11-25).
+ *     확정은 「이 날짜가 더 이상 안 바뀐다」는 **사람이 건 잠금**이고, 그 잠금을 두고도
+ *     날짜가 번지면 **확정된 적 없는 날짜에 확정 표시가 얹힌다** — 두 표가 갈라지는
+ *     것이 아니라 **한 표가 거짓말을 하게 된다.** 그래서 거기서는 **수리 건 저장
+ *     자체를 거절하고** 까닭을 말한다(mutations/repair-cases.ts 의
+ *     planDomesticOrderDueDateLink 머리말 — 「거절하되 왜 거절되는지 팝업으로」).
+ *
+ * 🔵 **막다른 길이 아니다**: [내자 정리]에서 [확정 해제]를 누르면 그다음 저장은 예전과
+ * 똑같이 번진다. 그래서 거절 문장이 그 차례를 그대로 말한다.
+ * 🔵 **납품일·실제 출하일 묶기는 이 예외와 상관없다** — 확정은 **납기요청일**에 거는
+ * 잠금이고, 거기까지 넓히면 확정한 줄에 출하 사실을 적을 길이 사라진다.
  * ============================================================================
  */
 async function applyRepairCaseDueDateLink(
@@ -1415,6 +1435,39 @@ export async function setDomesticOrderDueDateRowCompletion(params: {
 }
 
 /**
+ * 🔴 그 줄이 **화면에 빌려 그리고 있는 날짜** — 연결된 수리 건의 고객 요청 납기일
+ * (2026-11-25). 빌릴 것이 없으면 null 이다.
+ *
+ * 🔴 **화면이 보는 그 칸을 그대로 읽는다**(requested-due-date-link.ts 의
+ * resolveDomesticOrderDueDateDisplay 가 보는 값). 공백만 적힌 값을 없는 것으로 접는
+ * 것도 그쪽과 같은 함수로 한다 — 다르게 접으면 화면에는 안 보이는 날짜가 회차로
+ * 태어난다.
+ *
+ * 🔴 **휴지통에 든 건을 거르지 않는다.** 이 파일의 묶기 둘은 `is_deleted = false` 를
+ * 걸지만(그쪽은 **쓰는** 일이라 화면 어디에도 없는 건의 칸을 바꾸면 안 된다), 이쪽은
+ * **읽는** 일이고 기준은 「사람이 그 줄에서 보고 있는 날짜가 무엇인가」다. 목록 조회가
+ * 수리 건을 지워짐 여부로 거르지 않으므로(queries/domestic-orders.ts 의 leftJoin),
+ * 여기서만 거르면 **화면에는 날짜와 단추가 보이는데 누르면 「날짜가 없다」고 답하는**
+ * 줄이 생긴다.
+ *
+ * 🔴 **잠근 채 읽는다.** 잠그는 차례는 이 파일의 묶기 둘과 같다 — **내자 줄 먼저,
+ * 수리 건 나중**(부르는 쪽이 이미 그 줄을 `FOR UPDATE` 로 쥐고 있다). 거꾸로 적으면
+ * 두 사람이 같은 건을 동시에 고칠 때 교착이 난다. 읽기만 하는데도 잠그는 까닭은,
+ * 읽은 뒤 커밋까지 사이에 수리 건 쪽이 그 날짜를 고치면 **아무도 본 적 없는 날짜**가
+ * 확정된 회차로 남기 때문이다.
+ */
+async function readBorrowedDueDate(tx: Tx, repairCaseId: string | null): Promise<string | null> {
+  if (repairCaseId === null) return null;
+  const [target] = await tx
+    .select({ customerRequestedDueDate: repairCases.customerRequestedDueDate })
+    .from(repairCases)
+    .where(eq(repairCases.id, repairCaseId))
+    .for("update");
+  if (!target) return null;
+  return foldBlankToNull(target.customerRequestedDueDate);
+}
+
+/**
  * 회차별 [납기일 확정]의 결과. 🔴 **완료 쪽 타입을 쓰지 않는다** — 그쪽에는
  * `APPROVAL_REQUIRED` 가 들어 있는데, 확정은 **승인과 아무 상관이 없다**(승인은
  * 「내보내도 되는가」이고 확정은 「이 날짜가 더 이상 안 바뀐다」이다). 끼워 두면
@@ -1470,6 +1523,34 @@ export type DomesticOrderDueDateRowConfirmationMutationResult =
  * 🔵 화면도 같은 판정으로 단추를 감춘다(canEditDomesticOrderWhenCompleted — 목록의
  * `rowCanEdit` 과 같은 값이다).
  *
+ * ── 🔴 **빌려 온 날짜에서도 확정한다 — 그때는 회차를 만든다** (2026-11-25) ──
+ * 납기요청일 행이 **하나도 없는** 줄은 연결된 수리 건의 고객 요청 납기일을 화면에
+ * 대신 그린다(domain/requested-due-date-link.ts 의 resolveDomesticOrderDueDateDisplay).
+ * 날짜는 보이는데 **적을 자리가 없어** 확정이 안 됐다. 사용자 결정이 그것을 뒤집었다:
+ * 「[내자정리]에서 **[수리건 요청일]도** 내자정리에서 작성한 [납기요청일]과 **같은
+ * 취급**을 해줘.」 그래서 그 줄에서 확정을 누르면 **그 날짜로 1차 회차를 만들어
+ * 확정까지 한다.**
+ *
+ * 🔴 **날짜는 서버가 제 손으로 읽는다** — 화면이 보낸 날짜를 받지 않는다. 받으면
+ * 「발주서에 적힌 날짜」 자리에 브라우저가 보낸 아무 날짜나 박을 수 있다. 읽는 곳은
+ * 화면이 빌려 그릴 때와 **같은 칸**(repair_cases.customer_requested_due_date)이라,
+ * 생긴 회차의 날짜는 **사람이 그 줄에서 보고 있던 바로 그 날짜**다.
+ *
+ * 🔴 **「수리 건 요청일」 꼬리표가 사라지는 것은 받아들인 결과다**(사용자 결정
+ * 2026-11-25): 「난 애초에 [수리 건 요청일] 표시가 필요 없다고 생각했어. 난 [수리건
+ * 상세]와 [내자정리]의 [납기 요청일]이 **완벽히 동기화** 되는 걸 바랬어.」 그 꼬리표가
+ * 뜨는 조건은 「이 줄에 회차가 0개다」 하나뿐이라, 회차가 생기면 저절로 사라진다.
+ * 🔴 **출처 칸을 만들지 않았다** — 칸을 만들면 표를 고치는 일(마이그레이션)이고,
+ * 사용자가 바란 것은 출처 표시가 아니라 **두 화면이 같은 날짜를 드는 것**이다.
+ *
+ * 🔴 **줄 저장 통로(updateDomesticOrder)를 태우지 않는다.** 그 길은 ① 줄의 version 을
+ * 올려 그 줄의 회차별 승인을 **전부 STALE** 로 만들고(바로 위 문단), ② 묶기를 깨워
+ * 수리 건을 다시 보게 하는데 — 그 건에 내자 줄이 여럿이면 **「어느 날짜인지 몰라 못
+ * 맞췄다」 알림**이 뜬다(domain/requested-due-date-link.ts 머리말 ④). 아무것도 바꾸지
+ * 않는 저장에 경고가 뜨는 셈이다. 여기서 직접 넣으면 둘 다 일어나지 않는다.
+ * 🔵 **묶기를 건너뛰어도 두 표는 안 어긋난다** — 넣는 값이 **수리 건 쪽 값 그대로**라
+ * 수리 건에 고칠 것이 애초에 없다(그 길을 태웠어도 그 판정은 NONE 이다).
+ *
  * ── 🔴 **이 조각은 종을 끄지 않는다** ───────────────────────────────────
  * 확정 두 칸이 차는 것이 전부다. 「납기 임박」 알림이 그 값을 보고 빠지는 일은 **다음
  * 조각**이 한다(domain/notifications.ts · queries/domestic-order-due-date-near-
@@ -1494,6 +1575,9 @@ export async function setDomesticOrderDueDateRowConfirmation(params: {
           // 🔴 「완료 시 수정」 관문이 보는 한 칸(머리말). 판정은 completed_at 하나로만
           //    한다(schema/domestic-orders.ts 의 그 칸 주석).
           completedAt: domesticOrders.completedAt,
+          // 🔴 **빌려 온 날짜를 읽으러 갈 길**(2026-11-25, 머리말). 연결이 없으면
+          //    빌릴 곳도 없다.
+          repairCaseId: domesticOrders.repairCaseId,
         })
         .from(domesticOrders)
         .where(and(eq(domesticOrders.id, params.id), eq(domesticOrders.isDeleted, false)))
@@ -1517,12 +1601,48 @@ export async function setDomesticOrderDueDateRowConfirmation(params: {
       //    여기서만 알 수 있다(회차 완료와 같은 까닭·같은 차례).
       const rows = await readDueDateRows(tx, current.id);
       if (rows.length === 0) {
-        return {
-          ok: false,
-          code: "VALIDATION_ERROR",
-          message:
-            "납기요청일 줄이 없어 납기일을 확정할 수 없습니다. 먼저 납기요청일을 적어 주세요.",
-        };
+        // ── 🔴 **빌려 온 날짜에서 누른 것이다** (2026-11-25, 머리말) ───────────
+        // 적어 둔 회차가 없을 때만 오는 길이다. 화면은 이때 연결된 수리 건의 고객
+        // 요청 납기일을 대신 그리고 있고, 그 날짜로 **1차 회차를 만들어 확정한다.**
+        //
+        // 🔴 **해제는 이 길로 오지 않는다** — 없는 회차의 확정을 푼다는 말이 성립하지
+        //    않는다. 회차 번호가 1 이 아닌 것도 같다(만들 자리는 1차 하나뿐이다).
+        //    둘 다 「그 회차가 없다」이므로 아래 번호 검사와 **같은 말**을 쓴다.
+        if (!params.confirmed || params.dueDateRowOrder !== 1) {
+          return {
+            ok: false,
+            code: "VALIDATION_ERROR",
+            message: "그 회차를 찾을 수 없습니다. 최신 정보를 다시 불러와 주세요.",
+          };
+        }
+        const borrowed = await readBorrowedDueDate(tx, current.repairCaseId);
+        // 🔴 빌릴 날짜도 없으면 **적을 날짜 자체가 없다** — 화면에도 "-" 만 보이고
+        //    단추가 안 선다. 여기 오는 것은 낡은 화면뿐이라 하던 말을 그대로 한다.
+        if (borrowed === null) {
+          return {
+            ok: false,
+            code: "VALIDATION_ERROR",
+            message:
+              "납기요청일 줄이 없어 납기일을 확정할 수 없습니다. 먼저 납기요청일을 적어 주세요.",
+          };
+        }
+        // 🔴 **비고는 비워 둔다.** 아무도 적은 적 없는 글을 지어내면, 다음에 그 줄을
+        //    보는 사람이 자기가 적은 메모로 읽는다. 🔵 납품 두 칸도 같다.
+        const createdAt = new Date();
+        await tx.insert(domesticOrderDueDates).values({
+          domesticOrderId: current.id,
+          dueDate: borrowed,
+          displayOrder: 1,
+          confirmedAt: createdAt,
+          confirmedBy: params.actorUserId,
+        });
+        // 🔴 **줄(domestic_orders)은 여기서도 한 글자도 안 건드린다** — 아래 평범한
+        //    확정과 같은 까닭이다(그 자리의 주석). 🔵 그래서 **열려 있던 내자 정리
+        //    화면**은 낡은 version 으로도 저장할 수 있는데, 그 저장은 회차를 0개로
+        //    되돌리려 하므로 **넷째 울타리가 거절한다**(확정된 회차가 있는데 줄이
+        //    줄어드는 저장 — domain/domestic-order-due-date-rows.ts). 조용히 덮이지
+        //    않는다.
+        return { ok: true, id: current.id, version: current.version };
       }
       const index = params.dueDateRowOrder - 1;
       if (!Number.isInteger(params.dueDateRowOrder) || index < 0 || index >= rows.length) {

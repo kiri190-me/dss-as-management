@@ -30,6 +30,7 @@ import {
   type RequestedDueDateLinkOutcome,
   type RequestedDueDateLinkPlan,
 } from "@/lib/domain/requested-due-date-link";
+import { confirmedDueDateRowBlocksRepairCaseSyncMessage } from "@/lib/domain/domestic-order-due-date-rows";
 import type { DeliveredDateLinkOutcome } from "@/lib/domain/delivered-date-link";
 import {
   deliveredLinkOutcomeOf,
@@ -596,7 +597,17 @@ export type UpdateRepairCaseResultCode =
   | "ENGINEER_NOT_ALLOWED"
   | "VALIDATION_ERROR"
   | "WORKFLOW_REASSIGNMENT_NOT_ALLOWED"
-  | "WORKFLOW_NOT_ALLOWED";
+  | "WORKFLOW_NOT_ALLOWED"
+  /**
+   * 🔴 **연결된 내자 회차의 납기일이 확정돼 있어 거절했다**(2026-11-25).
+   *
+   * 🔴 VALIDATION_ERROR 로 묶지 않은 까닭은 **화면이 달리 다뤄야** 하기 때문이다 —
+   * 보낸 값에는 흠이 없고(날짜 형식도 인수일 잣대도 통과했다), 막은 것은 **다른
+   * 화면에 있는 잠금**이다. 그래서 칸 밑 빨간 글씨가 아니라 **읽어야 닫히는 알림**으로
+   * 띄우고(components/common/NoticePopup.tsx), 폼은 열어 둔 채 둔다. 코드로 갈라
+   * 두지 않으면 화면이 문장을 글자로 재야 하고, 문구를 다듬는 날 조용히 안 걸린다.
+   */
+  | "DOMESTIC_ORDER_DUE_DATE_CONFIRMED";
 
 export type UpdateRepairCaseResult =
   | {
@@ -725,6 +736,23 @@ async function resolveTargetWorkflowVersionAndStep(
  * 않는다 — 그때 드리즐은 커밋한다). 그 길에서 날짜를 이미 바꿔 놓았으면, 수리 건은
  * 안 바뀌었는데 내자 줄만 바뀐 상태가 남는다. 그래서 쓰기는 UPDATE 가 1행을
  * 돌려준 뒤에만 한다(유·무상 이력을 그 뒤에 넣는 것과 같은 까닭).
+ *
+ * ── 🔴 **확정된 회차에는 못 쓴다 — 저장을 통째로 거절한다** (2026-11-25) ──
+ * 회차별 [납기일 확정]은 「이 날짜가 더 이상 안 바뀐다」는 잠금이고, 그 잠금은
+ * 내자 쪽 저장 통로에서 **울타리 하나**가 지킨다
+ * (domain/domestic-order-due-date-rows.ts 의 넷째 울타리). 🔴 **이 길은 그 울타리를
+ * 안 지난다** — 저장 payload 가 아니라 행 하나를 직접 고치는 UPDATE 라서다. 그대로
+ * 두면 **확정된 회차의 날짜가 바뀌고 확정 표시는 그대로 남아**, 그 울타리가 막으려던
+ * 바로 그 상태가 된다.
+ *
+ * 🔴 그래서 이 함수가 **그 행의 confirmed_at 까지 읽어** 막혔다고 말하고, 부르는 쪽이
+ * **repair_cases UPDATE 전에 돌아간다** — 사용자 결정 2026-11-25:
+ * 「거절하되 왜 거절되는지 팝업으로 알려주도록 해」. 🔵 조용히 건너뛰지 않는 까닭은
+ * 머리말 ④ 와 같다: 안 맞춰졌다는 사실을 안 말하면 두 화면이 다른 날짜를 든 채 남는다.
+ * 여기서는 한 걸음 더 가서 **수리 건 쪽도 안 고친다** — 사람이 고치려던 것은 「두 곳의
+ * 같은 날짜」이지 「수리 건만의 날짜」가 아니기 때문이다.
+ *
+ * 🔵 **확정되지 않은 회차는 예전과 한 글자도 다르지 않다.** 막는 것은 확정된 행 하나다.
  * ============================================================================
  */
 type DomesticOrderDueDateLinkWork = {
@@ -733,6 +761,16 @@ type DomesticOrderDueDateLinkWork = {
   dueDateRowId: string | null;
   /** 그 행이 달려 있는 **내자 줄**의 id. 그 줄의 version 도 함께 올려야 한다. */
   domesticOrderId: string | null;
+  /**
+   * 🔴 **맞출 행이 [납기일 확정]된 회차라 못 쓴다**(2026-11-25). null 이 아니면 부르는
+   * 쪽은 **이 저장을 통째로 거절해야 한다**(머리말).
+   *
+   * 🔴 **`plan` 과 따로 둔 까닭**: 저 타입은 「묶을 수 있는가」를 말하는 도메인의 답이고
+   * (NONE · WRITE · NOT_LINKED), 세 값 어디에도 「저장을 거절하라」는 뜻이 없다.
+   * NOT_LINKED 로 섞으면 **저장은 됐는데 못 맞췄다**는 뜻이 되어(그 문장들이 전부
+   * "저장했습니다"로 시작한다) 정반대를 말하게 된다.
+   */
+  blockedByConfirmedRow: { rowOrder: number; dueDate: string } | null;
 };
 
 async function planDomesticOrderDueDateLink(
@@ -756,6 +794,12 @@ async function planDomesticOrderDueDateLink(
           .select({
             id: domesticOrderDueDates.id,
             domesticOrderId: domesticOrderDueDates.domesticOrderId,
+            // 🔴 아래 거절이 보는 칸 셋(2026-11-25). 확정 판정은 `confirmed_at` 하나로만
+            //    하고(그 표의 칸 주석), 나머지 둘은 **거절 문장이 어느 회차인지 말하는
+            //    데** 쓴다 — 번호만 적으면 사람이 표와 눈으로 짝을 맞춰야 한다.
+            dueDate: domesticOrderDueDates.dueDate,
+            displayOrder: domesticOrderDueDates.displayOrder,
+            confirmedAt: domesticOrderDueDates.confirmedAt,
           })
           .from(domesticOrderDueDates)
           .where(
@@ -773,16 +817,48 @@ async function planDomesticOrderDueDateLink(
     })),
   });
 
-  if (plan.kind !== "WRITE") return { plan, dueDateRowId: null, domesticOrderId: null };
+  if (plan.kind !== "WRITE") {
+    return { plan, dueDateRowId: null, domesticOrderId: null, blockedByConfirmedRow: null };
+  }
 
   // WRITE 는 「줄 하나 · 날짜 하나」라는 뜻이라 rows 가 꼭 하나다(같은 수로 판정했다).
   // 그래도 한 번 더 보는 것은, 여기서 틀리면 **엉뚱한 줄의 날짜**가 바뀌기 때문이다.
   // 🔴 걸리면 **아무 일도 없었던 것으로** 돌려준다 — 결과는 「맞췄다」고 말하는데
   // 실제로는 아무 행도 안 바뀐 상태가 제일 나쁘다(사람이 확인할 길이 없다).
   if (rows.length !== 1) {
-    return { plan: { kind: "NONE" }, dueDateRowId: null, domesticOrderId: null };
+    return {
+      plan: { kind: "NONE" },
+      dueDateRowId: null,
+      domesticOrderId: null,
+      blockedByConfirmedRow: null,
+    };
   }
-  return { plan, dueDateRowId: rows[0].id, domesticOrderId: rows[0].domesticOrderId };
+
+  // 🔴 **확정된 회차면 여기서 멈춘다**(2026-11-25, 머리말). 부르는 쪽이 UPDATE 전에
+  //    돌아가므로 **수리 건도 내자도 한 칸이 안 바뀐다.**
+  // 🔵 `plan` 을 NONE 으로 바꿔 두는 것은 안전장치다 — 부르는 쪽이 거절을 빠뜨려도
+  //    확정된 날짜를 덮지는 않는다(그때는 저장이 조용히 통과하지만, 적어도 잠근
+  //    날짜는 지켜진다). 울타리가 꺼지는 실패는 화면에 아무 표시도 안 남긴다.
+  if (rows[0].confirmedAt !== null) {
+    return {
+      plan: { kind: "NONE" },
+      dueDateRowId: null,
+      domesticOrderId: null,
+      blockedByConfirmedRow: {
+        // 번호는 **차례**다(display_order). 적혀 있지 않은 옛 행은 1차로 부른다 —
+        // 회차가 하나뿐인 줄이라 가리킬 다른 회차가 없다.
+        rowOrder: rows[0].displayOrder ?? 1,
+        dueDate: rows[0].dueDate,
+      },
+    };
+  }
+
+  return {
+    plan,
+    dueDateRowId: rows[0].id,
+    domesticOrderId: rows[0].domesticOrderId,
+    blockedByConfirmedRow: null,
+  };
 }
 
 /**
@@ -1012,6 +1088,30 @@ export async function updateRepairCase(
           previous: current.customerRequestedDueDate,
           next: due,
         });
+
+        // 🔴 **맞출 회차가 [납기일 확정]돼 있으면 이 저장을 통째로 거절한다**
+        //    (2026-11-25 사용자 결정 — 「거절하되 왜 거절되는지 팝업으로 알려주도록
+        //    해」). 🔴 **UPDATE 보다 앞**이라 수리 건의 다른 칸도 안 바뀐다 — 여기서
+        //    돌아가는 길에는 이 트랜잭션이 쓴 것이 한 줄도 없다(INTAKE 구역은 아래
+        //    UPDATE 전까지 아무 표에도 쓰지 않는다).
+        // 🔴 **까닭과 길을 함께 말한다** — 글은 내자 쪽 울타리와 같은 파일이 쥔다
+        //    (domain/domestic-order-due-date-rows.ts). 「고칠 수 없습니다」로 끝내면
+        //    사람은 고장으로 읽고, 되돌릴 수 있는 [확정 해제]를 못 찾는다.
+        // 🔵 칸 오류를 함께 싣는 것은 이 파일의 다른 거절들과 같다 — 다만 사람이
+        //    실제로 읽는 자리는 **읽어야 닫히는 알림**이다(화면 쪽 주석).
+        if (requestedDueDateLink.blockedByConfirmedRow) {
+          const blocked = requestedDueDateLink.blockedByConfirmedRow;
+          const message = confirmedDueDateRowBlocksRepairCaseSyncMessage(
+            blocked.rowOrder,
+            blocked.dueDate
+          );
+          return {
+            ok: false,
+            code: "DOMESTIC_ORDER_DUE_DATE_CONFIRMED",
+            fieldErrors: { customerRequestedDueDate: message },
+            message,
+          };
+        }
       }
 
       if ("internalTargetShipmentDate" in fields) {

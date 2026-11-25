@@ -45,7 +45,13 @@ test("🔴 묶기 결과가 훅 → 폼 → 구역 → 상세 화면까지 **끊
     flat(hook),
     /const linkMessages = \[result\.requestedDueDateLink, result\.deliveredDateLink\] \.filter\(\(link\) => link !== undefined && !link\.linked\) \.map\(\(link\) => \(link as \{ message: string \}\)\.message\); if \(linkMessages\.length > 0 && params\.onRequestedDueDateNotLinked\) \{ params\.onRequestedDueDateNotLinked\(linkMessages\.join\("\\n\\n"\)\); return; \}/
   );
-  assert.match(flat(intakeForm), /savedPopup: REPAIR_CASE_SAVED_POPUP, [^;]*onRequestedDueDateNotLinked, \}\);/);
+  // 🔴 **2026-11-25 에 자리 하나가 늘었다** — 같은 훅 호출에 거절 알림
+  //    (onSaveBlockedByConfirmedDueDate)도 함께 넘긴다. 둘 다 이 폼 하나뿐이라
+  //    **둘을 함께** 못 박는다(하나만 재면 나머지가 빠진 날 조용히 통과한다).
+  assert.match(
+    flat(intakeForm),
+    /savedPopup: REPAIR_CASE_SAVED_POPUP, [^;]*onRequestedDueDateNotLinked, [^;]*onSaveBlockedByConfirmedDueDate, \}\);/
+  );
   assert.match(intakeForm, /onRequestedDueDateNotLinked: \(message: string\) => void;/);
   assert.match(
     flat(intakeSection),
