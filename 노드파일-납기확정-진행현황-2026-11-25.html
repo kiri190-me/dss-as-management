@@ -63,9 +63,9 @@
 <div class="stats">
   <div class="stat">
     <div class="note">갈래 A · 노드 파일 위치</div>
-    <div class="num">2 / 4</div>
-    <div class="bar"><i style="width:50%"></i></div>
-    <div class="note">진단 쪽이 섰습니다 · 절차 쪽이 남았습니다</div>
+    <div class="num">2 / 6</div>
+    <div class="bar"><i style="width:33%"></i></div>
+    <div class="note">조각이 둘 늘었습니다 — 팝업 · 작업내용</div>
   </div>
   <div class="stat">
     <div class="note">갈래 B · 납기일 확정</div>
@@ -130,18 +130,33 @@
       <td class="grn">도우미를 다시 깔 필요가 없습니다</td></tr>
 </table>
 
-<h3>조각 넷</h3>
+<h3>조각 여섯</h3>
 <table>
   <tr><th style="width:52px">#</th><th>하는 일</th><th style="width:108px">상태</th><th style="width:300px">비고</th></tr>
   <tr><td>①</td><td><b>칸 더하기 + 마이그레이션</b></td><td><span class="st done">끝 · 커밋됨</span></td>
       <td><code>0132</code> · 개발 DB 적용까지 확인</td></tr>
   <tr><td>②</td><td><b>진단 Flowchart</b> — 서버 통로 · 고르기 창 · 노드 패널</td><td><span class="st done">끝 · 커밋됨</span></td>
       <td>시험 +62 · <span class="red">눈 확인은 배포 때</span> (아래)</td></tr>
+  <tr><td>②-A</td><td>고르기를 <b>팝업으로</b> 옮긴다</td><td><span class="st doing">진행 중</span></td>
+      <td class="red">좁은 패널에서 글자마다 줄바꿈돼 깨졌습니다</td></tr>
   <tr><td>③</td><td><b>기술 작업 절차</b> — <s>같은 것</s> <b>따로 써야 합니다</b></td><td><span class="st wait">대기</span></td>
       <td class="red">②를 베낄 수 없습니다 — 아래</td></tr>
   <tr><td>④</td><td>고르기 창에서 <b>노드로 끌어다 놓기</b></td><td><span class="st wait">대기</span></td>
       <td>브라우저 안의 끌기라 제약 없음</td></tr>
+  <tr><td>⑤</td><td><b>[작업내용]에서 그 파일을 연다</b></td><td><span class="st wait">대기</span></td>
+      <td class="grn">2026-11-25 추가 — 이 기능의 <b>종착점</b>입니다</td></tr>
 </table>
+
+<div class="ok">
+  <div class="t">🔴 ⑤가 이 기능의 목적입니다 (2026-11-25 추가 요청)</div>
+  <p style="margin:6px 0 0">「[기술작업절차]에서 노드에 연결해 둔 파일은 <b>[수리건 상세]의 [작업내용]에서
+  [기술 절차 불러오기]로 사용할 때, 해당 노드의 단계에서 연결된 파일을 열어볼 수 있도록</b> 할꺼야」</p>
+  <p style="margin:6px 0 0">즉 <b>파일을 다는 것이 목적이 아니라, 작업하는 사람이 그 단계에서 여는 것</b>이 목적입니다.
+  ①~④는 거기까지 가는 길이었습니다.</p>
+  <p style="margin:6px 0 0" class="note">🔵 ③(절차 쪽에 파일 달기)이 끝나야 <b>열 파일이 생기므로</b> 그 뒤에 옵니다.
+  단서 하나: 진단 조각이 <code>work-record-flowchart.ts</code>에 칸을 더해야 했습니다(타입 검사가 요구) —
+  <b>불러오기가 노드를 어떻게 베껴 오는지</b>를 거기서부터 읽으면 됩니다.</p>
+</div>
 
 <h3>①에서 실제로 된 것</h3>
 <ul>
@@ -162,16 +177,20 @@
         클립보드로 받는 길은 <b>운영이 http라</b> 막혀 있습니다. 그래서 <b>고르기 창</b>으로 갑니다.</li>
     <li><span class="red">게시된 절차의 노드에는 파일을 못 답니다.</span> 게시본은 쓰기 금지라
         <b>새 초안 → 담기 → 다시 게시</b>해야 합니다.</li>
-    <li><span class="red">개발 PC에서는 고르기 창이 아예 안 뜹니다.</span> 공유폴더 설정이 비어 있어
-        창 자체가 안 그려집니다(실측 확인) — <b>눈 확인은 운영 설정이 있는 데서</b> 해야 합니다.</li>
+    <li><s>개발 PC에서는 고르기 창이 아예 안 뜹니다.</s>
+        <span class="grn">아닙니다 — 개발 PC에도 설정이 있습니다</span>(2026-11-25 화면으로 확인).
+        조사가 「비어 있다」고 보고했지만 틀렸습니다. 눈 확인을 미룰 필요가 없습니다.</li>
   </ul>
 </div>
 
 <div class="ask">
-  <div class="t">🔴 배포 때 눈으로 볼 것 — 개발 PC에서는 확인이 안 됩니다</div>
-  <p style="margin:6px 0 0">「수리 관련」 폴더 설정이 개발 PC에 비어 있어 <b>고르기 창이 아예 안 뜹니다</b>.
-  2026-11-25에 <b>배포 때 보기로</b> 정했습니다. 볼 것은 이것들입니다:</p>
+  <div class="t">눈으로 볼 것 — <span class="grn">개발 PC에서 바로 됩니다</span></div>
+  <p style="margin:6px 0 0">조사가 「공유폴더 설정이 비어 있다」고 해서 배포로 미뤘었는데,
+  화면에 폴더 목록이 <b>실제로 뜨고 있었습니다</b>(「7. 수리품 목록」 등).
+  <span class="red">「있는가」를 재지 않고 겉을 믿은 자리였습니다.</span> 볼 것은 이것들입니다:</p>
   <ul style="margin:6px 0 0">
+    <li><b>②-A가 끝난 뒤</b> — 패널에 <b>[파일 고르기] 단추만</b> 있고 목록이 없는가,
+        누르면 <b>팝업</b>이 뜨는가, 긴 한글 이름이 <b>글자마다 안 쪼개지는가</b></li>
     <li>노드를 고르면 패널에 <b>「관련 파일」 구역</b>이 뜨는가</li>
     <li>[파일 고르기]를 누르면 <b>공유폴더 목록이 뜨고</b>, 폴더 줄을 눌러 들어갈 수 있는가</li>
     <li><b>파일 줄에만 [지정]</b>이 서는가 — 폴더 줄과 맨 위 칸에는 없어야 맞습니다</li>
@@ -180,7 +199,8 @@
     <li><b>[가리킴 지우기]</b>로 풀리는가</li>
   </ul>
   <p style="margin:6px 0 0" class="note">🔵 「설정이 비면 창이 안 뜬다」와 「그때도 쓰기는 거절한다」는 시험으로 재 뒀습니다 —
-  배포 때 볼 것은 <b>설정이 있을 때 실제로 도는가</b>입니다.</p>
+  눈으로 볼 것은 <b>설정이 있을 때 실제로 도는가</b>입니다.
+  🔴 <b>[열기]</b>만은 <b>도우미가 깔린 PC</b>라야 확인됩니다.</p>
 </div>
 
 <h3>조사로 뒤집힌 것 둘 (2026-11-25)</h3>
