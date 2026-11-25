@@ -69,9 +69,9 @@
   </div>
   <div class="stat">
     <div class="note">갈래 B · 납기일 확정</div>
-    <div class="num">0.5 / 5</div>
-    <div class="bar b"><i style="width:10%"></i></div>
-    <div class="note">첫 조각이 돌고 있습니다</div>
+    <div class="num">2 / 6</div>
+    <div class="bar b"><i style="width:33%"></i></div>
+    <div class="note">알림과 배지가 섰습니다</div>
   </div>
   <div class="stat">
     <div class="note">마이그레이션</div>
@@ -80,14 +80,14 @@
   </div>
   <div class="stat">
     <div class="note">갈래 C · 알림 색 맞추기</div>
-    <div class="num">0 / 2</div>
-    <div class="bar"><i style="width:0%;background:#175cd3"></i></div>
-    <div class="note">조사 끝 · 구현 대기</div>
+    <div class="num">2 / 2</div>
+    <div class="bar"><i style="width:100%;background:#175cd3"></i></div>
+    <div class="note">끝 · 눈으로 확인됨</div>
   </div>
   <div class="stat">
     <div class="note">안 올린 커밋</div>
-    <div class="num">1 + 1</div>
-    <div class="note">A/S · dss-core (같이 올라가야 함)</div>
+    <div class="num">7 + 1 + 1</div>
+    <div class="note">A/S · dss-core · 포털 (앞 둘은 같이)</div>
   </div>
 </div>
 
@@ -215,8 +215,10 @@
 <h3>조각 다섯</h3>
 <table>
   <tr><th style="width:52px">#</th><th>하는 일</th><th style="width:108px">상태</th><th style="width:300px">비고</th></tr>
-  <tr><td>①</td><td><b>기타건 「납기 임박」 알림을 새로 만든다</b></td><td><span class="st doing">진행 중</span></td>
-      <td class="grn">스키마가 안 듭니다 — 승인을 기다릴 필요가 없습니다</td></tr>
+  <tr><td>①</td><td><b>기타건 「납기 임박」 알림을 새로 만든다</b></td><td><span class="st done">끝 · 커밋됨</span></td>
+      <td class="grn">스키마가 안 들었습니다 · 시험 +29 · <code>3731fcf7</code></td></tr>
+  <tr><td>①-A</td><td><b>기타건 목록·상세에 「납기 임박」 배지</b></td><td><span class="st done">끝 · 커밋됨</span></td>
+      <td>시험 +41 · 배지 설정 쌍 29→31 · <code>8ea98cde</code></td></tr>
   <tr><td>②</td><td>확정 칸 마이그레이션 (<code>0133</code>)</td><td><span class="st ask">승인 자리</span></td>
       <td>회차 행에 확정 두 칸 + 제약</td></tr>
   <tr><td>③</td><td>쓰기 통로 — 확정 / 해제</td><td><span class="st wait">대기</span></td>
@@ -293,21 +295,23 @@
   <span class="grn">공용 묶음은 코드를 한 줄도 안 고쳐도 됩니다.</span></p>
 </div>
 
-<h3>지금 어긋나는 것 — 10종 중 9종</h3>
+<h3>어긋났던 것 — 10종 중 9종 · <span class="grn">지금은 10/10 이 같습니다</span></h3>
+<p class="note">아래는 <b>실측</b>입니다 — A/S가 내보낸 값을 포털의 받는 함수에 그대로 먹이고,
+공용 묶음이 집은 칸 번호를 읽었습니다. 눈짐작이 아닙니다.</p>
 <table>
-  <tr><th>알림</th><th style="width:150px">A/S</th><th style="width:150px">포털</th><th style="width:60px"></th></tr>
-  <tr><td><b>납기 임박</b></td><td>빨강</td><td class="red">하늘</td><td>✗</td></tr>
-  <tr><td><b>승인 완료</b></td><td>초록</td><td class="red">분홍</td><td>✗</td></tr>
-  <tr><td><b>반려됨</b></td><td>장미</td><td class="red">청록</td><td>✗</td></tr>
-  <tr><td>결재 대기</td><td>파랑</td><td>라임</td><td>✗</td></tr>
-  <tr><td>견적서 결재 대기</td><td>보라</td><td>주황</td><td>✗</td></tr>
-  <tr><td>기타건 결재 대기</td><td>남보라</td><td>초록</td><td>✗</td></tr>
-  <tr><td>납기 지연</td><td>분홍</td><td>호박</td><td>✗</td></tr>
-  <tr><td>사내 목표 완료일 미등록</td><td>주황</td><td>보라</td><td>✗</td></tr>
-  <tr><td>납기 역전</td><td>호박</td><td>주황</td><td>✗</td></tr>
-  <tr><td>기타건 납기 임박</td><td>자홍</td><td class="grn">자홍</td><td class="grn">✓</td></tr>
+  <tr><th>알림</th><th style="width:130px">A/S (기준)</th><th style="width:130px">포털 — 전</th><th style="width:130px">포털 — 후</th><th style="width:60px"></th></tr>
+  <tr><td><b>납기 임박</b></td><td>빨강 (0)</td><td class="red">하늘 (8)</td><td class="grn">빨강 (0)</td><td class="grn">✓</td></tr>
+  <tr><td><b>승인 완료</b></td><td>초록 (12)</td><td class="red">분홍 (2)</td><td class="grn">초록 (12)</td><td class="grn">✓</td></tr>
+  <tr><td><b>반려됨</b></td><td>장미 (9)</td><td class="red">청록 (1)</td><td class="grn">장미 (9)</td><td class="grn">✓</td></tr>
+  <tr><td>결재 대기</td><td>파랑 (15)</td><td>라임 (5)</td><td class="grn">파랑 (15)</td><td class="grn">✓</td></tr>
+  <tr><td>견적서 결재 대기</td><td>보라 (13)</td><td>주황 (7)</td><td class="grn">보라 (13)</td><td class="grn">✓</td></tr>
+  <tr><td>기타건 결재 대기</td><td>남보라 (6)</td><td>초록 (12)</td><td class="grn">남보라 (6)</td><td class="grn">✓</td></tr>
+  <tr><td>납기 지연</td><td>분홍 (2)</td><td>호박 (14)</td><td class="grn">분홍 (2)</td><td class="grn">✓</td></tr>
+  <tr><td>사내 목표 완료일 미등록</td><td>주황 (7)</td><td>보라 (13)</td><td class="grn">주황 (7)</td><td class="grn">✓</td></tr>
+  <tr><td>납기 역전</td><td>호박 (14)</td><td>주황 (7)</td><td class="grn">호박 (14)</td><td class="grn">✓</td></tr>
+  <tr><td>기타건 납기 임박</td><td>자홍 (11)</td><td class="grn">자홍 (11)</td><td class="grn">자홍 (11)</td><td class="grn">✓</td></tr>
 </table>
-<p class="note">유일하게 맞는 한 줄은 <b>우연</b>이고, 코드에도 「우연이지 설계가 아니다」로 적혀 있습니다.</p>
+<p class="note">유일하게 맞던 한 줄은 <b>우연</b>이었습니다(해시가 마침 11을 집었습니다). 코드에도 「우연이지 설계가 아니다」로 적혀 있습니다.</p>
 
 <div class="ask">
   <div class="t">몰랐던 문제 하나가 더 있습니다</div>
@@ -319,11 +323,18 @@
 <h3>조각 둘</h3>
 <table>
   <tr><th style="width:52px">#</th><th>하는 일</th><th style="width:108px">상태</th><th style="width:300px">끝나면</th></tr>
-  <tr><td>①</td><td>A/S가 색 번호를 함께 내보낸다</td><td><span class="st wait">대기</span></td>
-      <td>화면 변화 <b>없음</b> — 포털이 아직 버립니다</td></tr>
-  <tr><td>②</td><td>포털이 받은 번호를 쓴다</td><td><span class="st wait">대기</span></td>
-      <td class="grn">포털 종 색이 A/S와 같아집니다</td></tr>
+  <tr><td>①</td><td>A/S가 색 번호를 함께 내보낸다</td><td><span class="st done">끝 · 커밋됨</span></td>
+      <td>코드 두 줄 · 시험 +3 · <code>9397e31d</code></td></tr>
+  <tr><td>②</td><td>포털이 받은 번호를 쓴다</td><td><span class="st done">끝 · 커밋됨</span></td>
+      <td class="grn">코드 다섯 줄 · 시험 +7 · <code>808d496</code>(포털)</td></tr>
 </table>
+<div class="ok">
+  <div class="t">받는 쪽에서 거르는 것이 핵심이었습니다</div>
+  <p style="margin:6px 0 0">포털은 <b>여섯 시스템</b>의 알림을 모으는데 번호를 보내는 곳은 지금 A/S 하나뿐입니다.
+  없을 때 0 같은 값으로 메우면 <b>나머지 다섯의 알림이 전부 한 색으로 쏠립니다</b> — 해시보다 나쁩니다.
+  그래서 <span class="grn">값이 없거나 정수가 아니거나 범위 밖이면 칸 자체를 안 싣고</span>,
+  그 줄은 예전처럼 해시로 떨어집니다. 일부러 0으로 메워 보니 시험 다섯이 울었습니다.</p>
+</div>
 <p class="note">공용 묶음의 낡은 주석 고치기는 별도 조각입니다 — 묶음을 커밋하면 두 저장소의 포인터를 함께 올려야 해서 묶지 않습니다.</p>
 
 <div class="ok">
