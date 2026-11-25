@@ -12,6 +12,7 @@ import ExecutionResumeButton from "./ExecutionResumeButton";
 import ExecutionHistoryList from "./ExecutionHistoryList";
 import ExecutionMemoField from "./ExecutionMemoField";
 import ExecutionNodeReopenButton from "./ExecutionNodeReopenButton";
+import ExecutionNodeShareDocRow from "./ExecutionNodeShareDocRow";
 import RelatedRepairHistoryPanel from "./RelatedRepairHistoryPanel";
 import { isOrdinaryActionEligible, isReopenEligible } from "./execution-node-eligibility";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
@@ -533,6 +534,13 @@ export default function ProcedureExecutionScreen({
         </ExecutionFoldSection>
       )}
 
+      {/* 🔴 **매달린 파일이 여기서도 열린다**(2026-11-25). 참고 문서 노드는
+          isExecutableNodeType 에서 빠져 있어 **실행 행이 아예 안 생기고**, 그래서 위
+          카드들에는 한 줄도 안 선다 — 그런데 「이 단계에서 볼 문서」를 매다는 자리로는
+          바로 이 노드가 가장 자연스럽다. 카드에만 단추를 세우면 「매달아 놨는데 작업할
+          때 한 번도 안 보이는」 기능이 된다. 🔴 조각은 카드들과 **같은 한 벌**이라
+          읽기 전용이고(고르기·지우기 없음), 이 화면이 **서버 컴포넌트로 남는다** —
+          누르는 일은 전부 그 조각 안에 있다. */}
       {executionDetail.referenceNodes.length > 0 && (
         <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
           <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">참고 문서</h3>
@@ -541,6 +549,7 @@ export default function ProcedureExecutionScreen({
               <li key={ref.id} className="text-xs text-zinc-600 dark:text-zinc-300">
                 <span className="font-medium">{ref.title}</span>
                 {ref.instructions && <p className="mt-0.5 whitespace-pre-wrap text-zinc-500 dark:text-zinc-400">{ref.instructions}</p>}
+                <ExecutionNodeShareDocRow relativePath={ref.shareDocRelativePath} />
               </li>
             ))}
           </ul>

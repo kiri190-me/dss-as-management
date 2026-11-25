@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import ReasonPromptDialog from "./ReasonPromptDialog";
 import NextProcedureConfirmDialog from "./NextProcedureConfirmDialog";
 import ExecutionMemoField from "./ExecutionMemoField";
+import ExecutionNodeShareDocRow from "./ExecutionNodeShareDocRow";
 import {
   startExecutionNodeAction,
   completeExecutionNodeAction,
@@ -189,6 +190,13 @@ export default function CurrentTaskCard({
           이 작업에는 절차에 적힌 지시문이 없습니다. 제목과 이전 수리 이력을 보고 판단해 주세요.
         </p>
       )}
+
+      {/* 🔴 **지시문 바로 아래**다(2026-11-25). 절차를 적은 사람이 「이 단계에서는
+          이 문서를 보라」고 매달아 둔 자리라, 「무엇을 어떻게 하는지」 다음에 읽혀야
+          한다. 담당·시각 줄 아래로 내려가면 곁다리 정보로 읽힌다.
+          🔴 **읽기 전용**이다 — 고르기도 지우기도 없다(그 조각의 머리말). 가리킴이
+          없으면 조각이 스스로 아무것도 안 그리므로 여기서 다시 가르지 않는다. */}
+      <ExecutionNodeShareDocRow relativePath={node.shareDocRelativePath} size="MD" />
 
       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
         {node.effectiveAssigneeName && <span>담당: {node.effectiveAssigneeName}</span>}

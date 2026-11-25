@@ -2001,3 +2001,12 @@ src/components/repair-cases/detail/due-date-confirmed-reject-notice.test.ts
 # 때문에 한글 이름이 한 글자씩 떨어진다) · 🔴 고르는 창을 **가져다 쓰는가**(절차용으로 한 벌 더
 # 만들지 않았는가 — 창 자체의 규율은 진단 쪽 시험 35건이 잰다).
 src/components/procedures/editor/procedure-node-share-doc.test.tsx
+
+# [수리건 상세] → [작업내용] 에서 **그 단계에 매달린 파일을 연다** (2026-11-25).
+# 🔴 **읽기 전용인가** — 고르기·지우기가 값으로도 글자로도 없는가(2026-11-25 사용자가
+# 명시적으로 뺐다: 「[수리건 상세]쪽에서 파일을 고르는 기능은 하지 말자」) · 🔴 못 여는
+# 모양이면 **단추만 없고 경로는 보이는가** · 🔴 `dss-folder://` 를 직접 안 짓고 쪼개는 셈을
+# 공용 한 벌에서 가져오는가 · 🔴 **세 자리**(지금 할 일 큰 카드 · 작은 노드 카드 · 「참고
+# 문서」 구역)가 같은 조각을 쓰는가 — 참고 문서는 실행 행이 없어 카드에는 한 줄도 안 선다 ·
+# 🔴 줄 하나 때문에 실행 화면이 클라이언트로 내려가지 않았는가.
+src/components/procedures/execution/execution-node-share-doc.test.tsx

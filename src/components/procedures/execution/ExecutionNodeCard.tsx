@@ -6,6 +6,7 @@ import ReasonPromptDialog from "./ReasonPromptDialog";
 import DecisionCompleteDialog from "./DecisionCompleteDialog";
 import ExecutionMemoField from "./ExecutionMemoField";
 import ExecutionNodeReopenButton from "./ExecutionNodeReopenButton";
+import ExecutionNodeShareDocRow from "./ExecutionNodeShareDocRow";
 import {
   startExecutionNodeAction,
   completeExecutionNodeAction,
@@ -107,6 +108,11 @@ export default function ExecutionNodeCard({
             )}
           </div>
           {node.instructions && <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-500 dark:text-zinc-400">{node.instructions}</p>}
+          {/* 🔴 큰 카드(CurrentTaskCard)와 **같은 한 벌**이다 — 같은 노드가 이 구역
+              (차단됨)에도 서는데, 한쪽에만 두면 「어느 화면에서는 보이고 어느
+              화면에서는 안 보이는」 모양이 된다. 읽기 전용이라 여기서도 고르기·
+              지우기는 없다. */}
+          <ExecutionNodeShareDocRow relativePath={node.shareDocRelativePath} />
         </div>
         <span className="whitespace-nowrap text-xs text-zinc-500 dark:text-zinc-400">
           {procedureCaseExecutionNodeStatusLabels[node.status]}

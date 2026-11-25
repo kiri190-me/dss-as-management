@@ -394,6 +394,24 @@ export type ExecutionNodeDetail = {
   nodeType: ProcedureNodeType | null;
   title: string;
   instructions: string | null;
+  /**
+   * 이 단계가 가리킨 **공유폴더 속 파일 한 자리** — 루트 기준 상대 경로다
+   * (2026-11-25). 파일이 이 시스템으로 올라온 것이 아니라 **자리만 적혀 있다.**
+   *
+   * 🔴 값의 주인은 **원본 절차 노드**다(procedure_template_nodes의
+   * share_doc_relative_path). 실행 표에는 이 칸이 아예 없고, 제목·지시문과 똑같이
+   * 매번 조인해 읽는다 — 그래서 절차에서 가리킴을 바꾸면 **이미 도는 실행도**
+   * 그날로 따라간다. 베껴 담지 않은 것이 여기서 공짜로 얻어지는 셈이다.
+   *
+   * 🔵 **이 건에서 더한 작업은 늘 null 이다.** 짝지을 템플릿 행이 없어서이지
+   * 빠뜨린 것이 아니다(isAddedInCase 와 같은 까닭 — 칸이 템플릿 노드에만 있다).
+   *
+   * 🔴 **못 여는 값도 그대로 실어 보낸다.** 「열 수 있는 모양인가」는 화면이
+   * 판정하고(ExecutionNodeShareDocRow), 못 열면 단추만 빼고 경로는 보인다.
+   * 조회가 미리 걸러 null 로 만들면 사람이 「가리킨 적 없음」으로 읽어 절차
+   * 편집에서 고칠 자리를 영영 못 찾는다.
+   */
+  shareDocRelativePath: string | null;
   status: ProcedureCaseExecutionNodeStatus;
   selectedOutgoingEdgeId: string | null;
   /**
@@ -435,6 +453,18 @@ export type ExecutionReferenceNode = {
   nodeCode: string;
   title: string;
   instructions: string | null;
+  /**
+   * 🔴 **참고 문서 노드에도 같은 칸이 선다**(2026-11-25). 파일을 매다는 자리로는
+   * 이쪽이 가장 자연스러운데(「참고 문서」라는 이름 그대로다), 참고 문서는
+   * isExecutableNodeType 에서 빠져 있어 **실행 행이 아예 안 생긴다** — 위
+   * `nodes` 에 한 줄도 없으므로 노드 카드에만 단추를 세우면 「매달아 놨는데
+   * 작업할 때 안 보이는」 기능이 된다. 그래서 화면의 「참고 문서」 구역이
+   * 같은 줄을 그린다(ProcedureExecutionScreen).
+   *
+   * 뜻도 규율도 ExecutionNodeDetail.shareDocRelativePath 와 **같다** — 못 여는
+   * 값도 그대로 오고, 판정은 화면이 한다.
+   */
+  shareDocRelativePath: string | null;
 };
 
 /**
@@ -604,6 +634,12 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
       nodeType: procedureTemplateNodes.nodeType,
       title: procedureTemplateNodes.title,
       instructions: procedureTemplateNodes.instructions,
+      // 2026-11-25 — 노드가 가리킨 **공유폴더 속 파일 한 자리**. 🔴 [기술 절차
+      // 불러오기]는 내용을 베끼지 않는다. 실행 줄이 원본 노드를 FK 로 가리킬
+      // 뿐이라(procedure_case_execution_nodes.procedure_template_node_id) 제목·
+      // 지시문과 **똑같이** 여기서 라이브로 조인해 읽는다 — 절차 편집에서
+      // 가리킴을 고치면 도는 실행에도 그날로 비친다. 이미 읽는 줄에 칸만 보탠다.
+      shareDocRelativePath: procedureTemplateNodes.shareDocRelativePath,
       sortOrder: procedureTemplateNodes.sortOrder,
       positionX: procedureTemplateNodes.positionX,
       positionY: procedureTemplateNodes.positionY,
@@ -901,6 +937,10 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
         nodeType,
         title: templateNode?.title ?? n.extraTaskTitle ?? "-",
         instructions: templateNode?.instructions ?? n.extraTaskInstructions,
+        // 🔵 추가 작업 쪽으로 이을 `??` 짝이 **없다** — 더한 작업에는 가리킬
+        //    칸 자체가 없다(위 타입의 그 자리 주석). 짝이 없는 것이 빈틈처럼
+        //    보일 수 있어 여기 한 줄로 못 박아 둔다.
+        shareDocRelativePath: templateNode?.shareDocRelativePath ?? null,
         status: n.status,
         selectedOutgoingEdgeId: n.selectedOutgoingEdgeId,
         outgoingEdgeOptions,
@@ -922,7 +962,13 @@ export async function getExecutionDetail(executionId: string): Promise<Execution
 
   const referenceNodes: ExecutionReferenceNode[] = templateNodes
     .filter((n) => n.nodeType === "DOCUMENT_REFERENCE")
-    .map((n) => ({ id: n.id, nodeCode: n.nodeCode, title: n.title, instructions: n.instructions }));
+    .map((n) => ({
+      id: n.id,
+      nodeCode: n.nodeCode,
+      title: n.title,
+      instructions: n.instructions,
+      shareDocRelativePath: n.shareDocRelativePath,
+    }));
 
   return {
     executionId: execution.id,

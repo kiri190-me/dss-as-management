@@ -1274,6 +1274,109 @@ describe("procedure-case-execution: read queries", () => {
       reason: "CURRENT_HAS_NO_LINKED_STEP",
     });
   });
+
+  /**
+   * 노드에 매달린 **공유폴더 속 파일 한 자리**가 [작업내용]까지 따라오는가
+   * (2026-11-25).
+   *
+   * 🔴 [기술 절차 불러오기]는 **내용을 베끼지 않는다.** 실행 줄이 원본 노드를 FK 로
+   * 가리킬 뿐이라, 조회가 제목·지시문처럼 **매번 조인해** 읽어야 그 값이 화면까지
+   * 간다. 그래서 여기서 재는 것은 「저장되는가」가 아니라 **「실려 오는가」**다.
+   *
+   * 🔵 값은 **액션을 지나지 않고** 넣는다. 이 틀에서는 `"use server"` 모듈을 못 부르고,
+   * 게다가 여기서 쓰는 절차는 이미 **게시본**이라 편집 액션이 NOT_DRAFT 로 거절한다 —
+   * 초안↔게시본의 쓰기 울타리는 이웃 시험의 몫이고
+   * (procedure-node-share-doc.integration.test.ts ①), 이 시험은 읽는 쪽만 본다.
+   * 아래 경로들은 디스크에 없어도 된다(쓰기 때만 실제 폴더를 확인한다).
+   */
+  test("28. getExecutionDetail 은 원본 노드가 가리킨 공유폴더 파일을 함께 싣는다 — 안 가리킨 줄과 이 건에서 더한 작업은 null", async () => {
+    const SHARE_DOC_PATH = "1. 수리 관련/2026/점검 절차.pdf";
+    const REFERENCE_DOC_PATH = "1. 수리 관련/2026/참고 자료.pdf";
+    /** 🔴 **못 여는 모양**이다(맨 위 칸에 바로 놓인 파일) — 그래도 조회는 그대로 싣는다. */
+    const UNOPENABLE_PATH = "점검.pdf";
+
+    const { templateId, nodes } = await createPublishedTemplate(uniqueCode("query-sharedoc"));
+    await db
+      .update(procedureTemplateNodes)
+      .set({ shareDocRelativePath: SHARE_DOC_PATH })
+      .where(eq(procedureTemplateNodes.id, nodes.get("n2")!.id));
+    await db
+      .update(procedureTemplateNodes)
+      .set({ shareDocRelativePath: UNOPENABLE_PATH })
+      .where(eq(procedureTemplateNodes.id, nodes.get("n4")!.id));
+    // 🔴 참고 문서(n6)는 **실행 행이 아예 안 생기는** 노드다 — 매달기에 가장 자연스러운
+    //    자리라 따로 잰다(아래 referenceNodes).
+    await db
+      .update(procedureTemplateNodes)
+      .set({ shareDocRelativePath: REFERENCE_DOC_PATH })
+      .where(eq(procedureTemplateNodes.id, nodes.get("n6")!.id));
+
+    // 🔴 **둘째 달(9909)을 쓴다.** 이 파일의 기본 달(9905)은 인수번호 한도 99건에
+    //    닿아 있어서, 접수 건을 하나 더 만드는 시험을 더하면 **남의 시험**이
+    //    "setup create failed / INTAKE_SEQUENCE_EXHAUSTED" 로 깨진다 — 실제로 이
+    //    시험을 처음 더했을 때 조각 14 의 84~88번 다섯이 그렇게 깨졌다(까닭이 제
+    //    일과 아무 상관 없어 보이는 종류의 실패다. 위 TEST_YEAR_MONTH_SECOND 주석).
+    //    뒷정리는 TEST_YEAR_MONTHS 가 이미 이 달을 덮는다.
+    const created = await createTestCase({
+      assignedEngineerId: engineerId,
+      receivedAt: TEST_RECEIVED_AT_SECOND,
+      internalTargetShipmentDate: TEST_SHIPMENT_DATE_SECOND,
+    });
+    const started = await startProcedureExecution(created.id, templateId, engineerId);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+
+    const extra = await addExecutionExtraTask(started.executionId, superAdminId, "이 건에서 더한 작업", null);
+    assert.equal(extra.ok, true, JSON.stringify(extra));
+
+    const detail = await getExecutionDetail(started.executionId);
+    assert.ok(detail);
+
+    // 🔵 표본 확인 — 아래가 재는 줄들이 실제로 다 있다.
+    const n2 = detail!.nodes.find((n) => n.nodeCode === "n2");
+    const n3 = detail!.nodes.find((n) => n.nodeCode === "n3");
+    const n4 = detail!.nodes.find((n) => n.nodeCode === "n4");
+    const added = detail!.nodes.find((n) => n.isAddedInCase);
+    assert.ok(n2 && n3 && n4, "템플릿에서 온 줄 셋을 못 찾았다 — 아래 단언이 뜻을 잃는다");
+    assert.ok(added, "더한 작업이 안 생겼다 — 아래 null 단언이 공짜로 통과한다");
+
+    assert.equal(n2!.shareDocRelativePath, SHARE_DOC_PATH, "가리킨 자리가 안 실려 왔다");
+    assert.equal(n3!.shareDocRelativePath, null, "안 가리킨 줄은 null 이어야 한다");
+    // 🔴 **못 여는 값도 그대로 온다.** 조회가 미리 걸러 null 로 만들면 사람이
+    //    「가리킨 적 없음」으로 읽고 절차 편집에서 고칠 자리를 영영 못 찾는다.
+    assert.equal(n4!.shareDocRelativePath, UNOPENABLE_PATH);
+    // 🔴 더한 작업에는 칸 자체가 없다 — 빈틈이 아니라 당연한 null 이다.
+    assert.equal(added!.shareDocRelativePath, null);
+
+    // 🔴 참고 문서는 **사람이 할 일 목록에 없다**(실행 행이 안 생긴다) — 그래서
+    //    매달린 파일이 referenceNodes 로 와야 작업하면서 열어볼 수 있다.
+    assert.equal(detail!.nodes.some((n) => n.nodeCode === "n6"), false, "표본이 어긋났다 — 참고 문서에 실행 행이 생겼다");
+    const reference = detail!.referenceNodes.find((r) => r.nodeCode === "n6");
+    assert.ok(reference, "참고 문서 줄을 못 찾았다");
+    assert.equal(reference!.shareDocRelativePath, REFERENCE_DOC_PATH);
+
+    // ── 🔴 **베껴 담지 않는다는 사실 자체를 잰다** ───────────────────────────
+    // 절차 쪽 가리킴을 바꾸면 **이미 도는 실행**도 그날로 따라가야 한다. 어느 날
+    // 누군가 「실행할 때 한 번 베껴 두자」로 바꾸면 여기서 걸린다 — 그 어긋남은
+    // 오류를 한 번도 안 내고, 눈으로는 「옛 파일이 계속 열린다」로만 보인다.
+    const CHANGED_PATH = "1. 수리 관련/2026/점검 절차 rev2.pdf";
+    await db
+      .update(procedureTemplateNodes)
+      .set({ shareDocRelativePath: CHANGED_PATH })
+      .where(eq(procedureTemplateNodes.id, nodes.get("n2")!.id));
+    await db
+      .update(procedureTemplateNodes)
+      .set({ shareDocRelativePath: null })
+      .where(eq(procedureTemplateNodes.id, nodes.get("n6")!.id));
+
+    const afterEdit = await getExecutionDetail(started.executionId);
+    assert.equal(afterEdit!.nodes.find((n) => n.nodeCode === "n2")!.shareDocRelativePath, CHANGED_PATH);
+    assert.equal(
+      afterEdit!.referenceNodes.find((r) => r.nodeCode === "n6")!.shareDocRelativePath,
+      null,
+      "절차에서 가리킴을 지웠는데 실행 화면에 남아 있다"
+    );
+  });
 });
 
 describe("procedure-case-execution: 완료하면 다음 하나가 저절로 선다 (자동 전진)", () => {
