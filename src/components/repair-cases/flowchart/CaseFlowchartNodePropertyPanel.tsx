@@ -6,6 +6,7 @@ import { computeCenterAlignedRelativePosition, resolveColumnSnappedRelativePosit
 import ContactFolderEntryOpenButton from "@/components/repair-cases/files/ContactFolderEntryOpenButton";
 import CaseFlowchartNodeShareDocPicker, {
   canOpenCaseFlowchartNodeShareDoc,
+  caseFlowchartNodeShareDocEntriesBaseUrl,
   caseFlowchartNodeShareDocFileName,
   caseFlowchartNodeShareDocParentPath,
 } from "./CaseFlowchartNodeShareDocPicker";
@@ -340,10 +341,13 @@ export default function CaseFlowchartNodePropertyPanel({
             />
           )}
 
-          {/* 🔴 **단추 하나다.** 목록은 이 단추가 띄우는 팝업 안에 있다(구역 머리 주석). */}
+          {/* 🔴 **단추 하나다.** 목록은 이 단추가 띄우는 팝업 안에 있다(구역 머리 주석).
+              🔵 2026-11-25(조각 E2) — 그 창은 이제 **기술 작업 절차 편집기와 한 벌**이다.
+              주소를 짓는 일만 여기서 한다(권한의 단위가 수리 건이라는 사실이 이 자리에
+              있다 — 창은 그것을 모른다). */}
           {canEdit && (
             <CaseFlowchartNodeShareDocPicker
-              repairCaseId={repairCaseId}
+              entriesBaseUrl={caseFlowchartNodeShareDocEntriesBaseUrl(repairCaseId)}
               onPick={(relativePath) => onDraftChange({ shareDocRelativePath: relativePath })}
             />
           )}

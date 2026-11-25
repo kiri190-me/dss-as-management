@@ -64,6 +64,19 @@ import {
  * `GET /api/repair-cases/{id}/flowchart/share-folder/entries?path=…` — 🔴 그 통로에는
  * **출처 검사가 한 겹 더** 있다. `fetch` 로만 부른다(`<a href>` · 새 탭은 403).
  *
+ * ── 🔴 **기술 작업 절차 편집기도 이 창을 쓴다** (2026-11-25, 조각 E2) ─────
+ * 절차 쪽 노드에도 같은 칸이 생겼다(`procedure_template_nodes.share_doc_relative_path`).
+ * 두 화면에서 고르는 규율이 **한 글자도 다르지 않아야** 하므로 — 파일만 · 하위 폴더에서만 ·
+ * 노드당 하나 · 담지 않고 고르기만 — 창을 **베끼지 않고 이 한 벌을 함께 쓴다.** 🔵 오늘
+ * 하루에만 이 창이 두 번 바뀌었다(팝업으로 옮김 · 단추 모양) — 두 벌이었으면 그 둘을
+ * 각각 두 번 고쳐야 했다.
+ * 🔴 달라지는 것은 **목록 통로 주소 하나뿐**이라, 아래 기본 조각이 주소를 제 손으로 짓지
+ * 않고 `entriesUrlFor` 로 **받는다.** 진단 쪽은 caseFlowchartNodeShareDocEntriesUrl 을,
+ * 절차 쪽은 제 통로 주소를 넘긴다.
+ * 🔵 **이름은 아직 `CaseFlowchart…` 그대로**다. 이 파일의 글자를 읽어 규율을 재는 시험이
+ * 서른 넘게 걸려 있어, 이름 바꾸기는 그 시험들과 함께 따로 다룰 일이다 — 지금 바꾸면
+ * 「고친 것은 이름뿐인데 시험이 스무 개 깨진」 커밋이 된다.
+ *
  * ── 🔴 **목록은 팝업 안에서 산다** (2026-11-25 고침) ─────────────────────
  * 처음에는 이 창이 속성 패널 **안에** 통째로 들어가 있었고, 그래서 화면이 깨졌다 —
  * 폴더 이름이 「(삭 / 제 / 예 / 정) / 7. / 디 …」처럼 **한 글자에 한 줄씩** 세로로
@@ -107,12 +120,22 @@ import {
 // ── 주소 · 길 ────────────────────────────────────────────────────────────
 
 /**
- * 목록 통로의 주소. 🔴 하위 폴더에 들어가 있을 때만 `?path=…` 가 붙는다.
- * 🔴 **`fetch` 로만 부른다** — 그 통로는 출처를 본다(파일 머리말).
+ * 🔴 지금 자리를 `?path=…` 로 붙인다 — **두 화면이 함께 쓰는 셈**이다(파일 머리말).
+ * 하위 폴더에 들어가 있을 때만 붙는다.
+ * 🔴 **`fetch` 로만 부른다** — 그 통로들은 출처를 본다.
  */
+export function shareDocEntriesUrlAt(entriesBaseUrl: string, insidePath: string): string {
+  return insidePath === "" ? entriesBaseUrl : `${entriesBaseUrl}?path=${encodeURIComponent(insidePath)}`;
+}
+
+/** 진단 Flowchart 쪽 통로의 **맨 앞 토막** — 권한의 단위가 수리 건이다(그 통로의 머리말). */
+export function caseFlowchartNodeShareDocEntriesBaseUrl(repairCaseId: string): string {
+  return `/api/repair-cases/${encodeURIComponent(repairCaseId)}/flowchart/share-folder/entries`;
+}
+
+/** 진단 Flowchart 쪽 통로의 주소 한 줄. 🔵 위 둘을 이은 것뿐이다. */
 export function caseFlowchartNodeShareDocEntriesUrl(repairCaseId: string, insidePath = ""): string {
-  const url = `/api/repair-cases/${encodeURIComponent(repairCaseId)}/flowchart/share-folder/entries`;
-  return insidePath === "" ? url : `${url}?path=${encodeURIComponent(insidePath)}`;
+  return shareDocEntriesUrlAt(caseFlowchartNodeShareDocEntriesBaseUrl(repairCaseId), insidePath);
 }
 
 /**
@@ -285,13 +308,13 @@ async function failureReason(response: EntriesResponse): Promise<string> {
  * 이 창이 실패해도 편집기의 나머지(그림 · 다른 칸 · [저장])는 아무 영향을 받지 않는다.
  */
 export async function loadCaseFlowchartNodeShareDocEntries(
-  repairCaseId: string,
+  entriesBaseUrl: string,
   fetchImpl: CaseFlowchartNodeShareDocEntriesFetch = (url) => fetch(url),
   insidePath = ""
 ): Promise<CaseFlowchartNodeShareDocPickerState> {
   let response: EntriesResponse;
   try {
-    response = await fetchImpl(caseFlowchartNodeShareDocEntriesUrl(repairCaseId, insidePath));
+    response = await fetchImpl(shareDocEntriesUrlAt(entriesBaseUrl, insidePath));
   } catch {
     return { kind: "failed", reason: NETWORK_FAILED_REASON };
   }
@@ -695,11 +718,19 @@ export function CaseFlowchartNodeShareDocPickerDialog({
  * 여는 까닭은 대개 「같은 폴더에서 다른 파일」이고, 되돌리면 통로를 한 번 더 부른다.
  */
 export default function CaseFlowchartNodeShareDocPicker({
-  repairCaseId,
+  entriesBaseUrl,
   onPick,
 }: {
-  /** 🔴 수리 건의 id(UUID)다 — 주소의 마디로 그대로 간다(파일 머리말: 권한의 단위). */
-  repairCaseId: string;
+  /**
+   * 🔴 목록 통로의 **맨 앞 토막** — 창이 제 손으로 짓지 않고 받는다(파일 머리말의
+   * 「두 화면이 함께 쓴다」). 진단 Flowchart 는 수리 건 id 로, 기술 작업 절차는 절차
+   * 템플릿 id 로 짓는다(어느 쪽이든 권한의 단위가 그것이다).
+   *
+   * 🔴 **글자다. 함수가 아니다.** 아래 효과의 의존 목록에 들어가므로, 함수를 받으면
+   * 부르는 쪽이 `useCallback` 을 잊는 순간 **렌더마다 통로를 다시 부르는 고리**가 된다
+   * (화면은 멀쩡해 보이고 서버만 두들겨 맞는다). 글자는 값으로 견주어져 그 함정이 없다.
+   */
+  entriesBaseUrl: string;
   /** 🔴 주지 않으면 지정 단추가 하나도 안 그려진다 — 권한 판정은 부르는 쪽이 한다. */
   onPick?: (relativePath: string) => void;
 }) {
@@ -711,13 +742,13 @@ export default function CaseFlowchartNodeShareDocPicker({
 
   useEffect(() => {
     let cancelled = false;
-    void loadCaseFlowchartNodeShareDocEntries(repairCaseId, undefined, insidePath).then((state) => {
+    void loadCaseFlowchartNodeShareDocEntries(entriesBaseUrl, undefined, insidePath).then((state) => {
       if (!cancelled) setAnswer({ path: insidePath, state });
     });
     return () => {
       cancelled = true;
     };
-  }, [repairCaseId, insidePath]);
+  }, [entriesBaseUrl, insidePath]);
 
   const state: CaseFlowchartNodeShareDocPickerState =
     answer !== null && answer.path === insidePath ? answer.state : { kind: "loading" };

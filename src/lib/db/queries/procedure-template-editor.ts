@@ -52,6 +52,15 @@ export type EditorNodeRow = {
   workerMayAddNextTask: boolean;
   /** [종료]의 「다음 절차」(2026-11-04, 줄기 B ④ 조각 ②). END 가 아니면 늘 null. */
   nextProcedureTemplateId: string | null;
+  /**
+   * 🔴 이 노드가 가리키는 공유폴더 속 파일 한 자리(2026-11-25) — 「수리 관련」 폴더
+   * 루트 기준 **상대 경로**다. 안 가리킨 노드가 보통이라 `null` 이 기본이다.
+   * 🔴 **읽어 오지 않으면 저장은 되는데 화면에 안 돌아온다**: 편집기는 서버가 준 이
+   * 값을 받침 삼아 더러움을 재므로(domain/procedure-editor-save-state.ts 의
+   * isProcedureNodeFieldDraftDirty), 칸이 빠지면 새로 고칠 때마다 「가리킨 적 없음」으로
+   * 되돌아간 것처럼 보이고 **지우는 쪽으로** 다시 저장된다.
+   */
+  shareDocRelativePath: string | null;
   positionX: number;
   positionY: number;
   userPositionX: number | null;
@@ -139,6 +148,7 @@ async function loadNodesWithContentMarkers(templateId: string): Promise<EditorNo
     acceptanceCriteria: n.acceptanceCriteria,
     workerMayAddNextTask: n.workerMayAddNextTask,
     nextProcedureTemplateId: n.nextProcedureTemplateId,
+    shareDocRelativePath: n.shareDocRelativePath,
     positionX: n.positionX,
     positionY: n.positionY,
     userPositionX: n.userPositionX,
@@ -151,6 +161,28 @@ async function loadNodesWithContentMarkers(templateId: string): Promise<EditorNo
     hasChecklistContent: checklistNodeIds.has(n.id),
     hasTroubleshootingContent: troubleshootingNodeIds.has(n.id),
   }));
+}
+
+/**
+ * 🔴 **문턱을 재기 위한 가장 가벼운 조회** (2026-11-25, 조각 E2) — 「그런 절차가 있는가」와
+ * 「어느 분류인가」 둘뿐이다.
+ *
+ * 노드가 가리킬 파일을 고르는 창의 목록 통로(api/procedure-templates/[id]/share-folder/
+ * entries)가 쓴다. 🔴 그 통로가 `getProcedureTemplateForEditor` 를 부르면 안 되는 까닭은
+ * 값이다: 그쪽은 노드 · 연결선 · 미해결 지적 · 부모 판과의 차이까지 전부 읽는데(개발 DB
+ * 실측으로 노드가 157개인 초안이 있다), 통로가 쓰는 것은 **분류 한 칸**이다. 폴더를 한 번
+ * 열 때마다 그 전부를 읽을 까닭이 없다.
+ *
+ * 🔵 휴지통에 있는 절차는 **없는 것으로** 돌려준다 — 편집기 페이지와 같은 규율이다.
+ */
+export async function getProcedureTemplateEditorGate(
+  templateId: string
+): Promise<{ id: string; category: ProcedureTemplateCategory } | null> {
+  const [row] = await db
+    .select({ id: procedureTemplates.id, category: procedureTemplates.category })
+    .from(procedureTemplates)
+    .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)));
+  return row ?? null;
 }
 
 export async function getProcedureTemplateForEditor(templateId: string): Promise<ProcedureTemplateForEditor | null> {

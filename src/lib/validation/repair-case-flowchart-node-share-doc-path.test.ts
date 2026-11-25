@@ -130,7 +130,11 @@ describe("🔴 안 가리킴 · 모양 · 허용 확장자", () => {
       assert.equal(validateNodeShareDocRelativePath(good).ok, true, good);
     }
     // 판정은 공용 함수 하나가 쥔다 — 검사 모듈이 제 목록을 들지 않는다.
-    const validationSource = code(read("src/lib/validation/repair-case-flowchart-graph-input.ts"));
+    // 🔵 2026-11-25(조각 E2) — 본체가 flowchart-node-share-doc-path.ts 로 **옮겨 갔다**
+    //    (기술 작업 절차 쪽 노드도 같은 칸을 쓴다). 재는 것은 그대로다: 「그 모듈이 제
+    //    확장자 목록을 들지 않는가」. 위 import 는 여전히 진단 쪽 모듈을 거쳐 들어온다
+    //    (거기서 같은 이름으로 다시 내보낸다) — 그 길이 살아 있는지도 함께 재는 셈이다.
+    const validationSource = code(read("src/lib/validation/flowchart-node-share-doc-path.ts"));
     assert.ok(validationSource.includes("checkQuoteFolderOpenableFilePath"));
     for (const forbidden of ["xlsm", "\\.exe", 'endsWith\\("\\.', "lastIndexOf"]) {
       assert.equal(new RegExp(forbidden).test(validationSource), false, `확장자를 직접 센다: ${forbidden}`);

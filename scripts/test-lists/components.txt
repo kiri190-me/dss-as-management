@@ -1993,3 +1993,11 @@ src/components/domestic-orders/domestic-order-due-date-confirm-screens.test.ts
 # 🔴 훅 → 폼 → 구역 → 상세 화면까지 **끊기지 않는가** · 🔴 「저장은 됐는데 못
 # 맞췄다」 상자와 **제목도 상태도 다른가**(합치면 제목 하나가 정반대 둘을 가리킨다).
 src/components/repair-cases/detail/due-date-confirmed-reject-notice.test.ts
+
+# [기술 작업 절차] 속성 패널의 「관련 파일」 구역 (2026-11-25, 조각 E2).
+# 🔴 가리킨 것도 없고 고칠 수도 없으면 **구역 자체가 안 서는가** · 🔴 읽기 전용에서 경로는 보이고
+# [지우기]·[파일 고르기]는 없는가 · 🔴 통로 주소가 **절차 템플릿 id** 로 가는가(노드 id 가 아니다 —
+# 둘 다 UUID 라 겉은 같다) · 🔴 좁은 패널에 **목록 조각이 하나도 없는가**(공용 격자의 고정 칸 24rem
+# 때문에 한글 이름이 한 글자씩 떨어진다) · 🔴 고르는 창을 **가져다 쓰는가**(절차용으로 한 벌 더
+# 만들지 않았는가 — 창 자체의 규율은 진단 쪽 시험 35건이 잰다).
+src/components/procedures/editor/procedure-node-share-doc.test.tsx

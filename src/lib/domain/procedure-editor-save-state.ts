@@ -100,6 +100,16 @@ export type ProcedureNodeFieldDraft = {
    * 거절한다.
    */
   nextProcedureTemplateId: string | null;
+  /**
+   * 2026-11-25(조각 E2) — 이 노드가 가리키는 **공유폴더 속 파일 한 자리**.
+   *
+   * 🔴 **빈 글자 규약이 없다**: 이웃 description·instructions 는 초안에서 `""`, 서버에서
+   * `null` 로 모양이 갈리지만(아래 mergeProcedureNodeForRender 가 그 둘을 옮긴다) 이 칸은
+   * 초안도 서버도 `string | null` 그대로다. 빈 글자는 **경로가 아니고**(검사가 거절한다),
+   * 「안 가리킴」을 뜻하는 값이 둘(`""` 와 `null`)이 되면 「안 바뀜」 판정이 그 둘 사이에서
+   * 갈린다.
+   */
+  shareDocRelativePath: string | null;
 };
 
 export type Position = { x: number; y: number };
@@ -139,6 +149,8 @@ export type ProcedureServerNodeSnapshot = {
   isActive: boolean;
   /** [종료]의 「다음 절차」 — 서버에 저장돼 있는 값(2026-11-04, 줄기 B ④). */
   nextProcedureTemplateId: string | null;
+  /** 🔴 받침에도 **반드시** 있어야 한다 — 없으면 아래 merge·dirty 가 이 칸을 못 본다(위 주석). */
+  shareDocRelativePath: string | null;
   positionX: number;
   positionY: number;
 };
@@ -171,6 +183,10 @@ export function mergeProcedureNodeForRender(
     nextProcedureTemplateId: pendingFieldDraft
       ? pendingFieldDraft.nextProcedureTemplateId
       : server.nextProcedureTemplateId,
+    // 🔴 바로 위와 **같은 까닭으로** `??` 가 아니다 — 초안의 `null` 은 「아직 안 정했음」이
+    //    아니라 「가리킴을 지웠음」이다. ?? 로 적으면 지운 것이 받침 값으로 되살아나,
+    //    화면에서는 지웠는데 [저장]을 누르면 그대로 남는다.
+    shareDocRelativePath: pendingFieldDraft ? pendingFieldDraft.shareDocRelativePath : server.shareDocRelativePath,
     positionX: pendingPosition?.x ?? server.positionX,
     positionY: pendingPosition?.y ?? server.positionY,
   };
@@ -242,6 +258,13 @@ export function resolveCurrentRenderedNodePosition(
 
 // ==================== DIRTY (rendered draft vs baseline) ====================
 
+/**
+ * 🔴 **새 칸을 여기 안 적으면 [저장]이 서버를 아예 안 부른다** — 오류도 안 나고 「저장할
+ * 변경 없음」이 뜬 채로 고친 것이 사라진다. 🔵 이 도메인에서는 이 함수 **하나**가
+ * NODE_FIELDS 걸음을 세우는 잣대다(planProcedureSaveSteps 는 여기서 걸러진 목록을 그대로
+ * 돌 뿐, 칸을 다시 재지 않는다 — 진단 Flowchart 쪽과 다른 점이고, 그래서 그쪽에 있던
+ * 「판정은 통과하는데 보낼 걸음이 0개」 함정이 여기에는 없다).
+ */
 export function isProcedureNodeFieldDraftDirty(draft: ProcedureNodeFieldDraft, server: ProcedureServerNodeSnapshot): boolean {
   return (
     draft.title !== server.title ||
@@ -251,7 +274,10 @@ export function isProcedureNodeFieldDraftDirty(draft: ProcedureNodeFieldDraft, s
     draft.isActive !== server.isActive ||
     // 🔴 이 줄이 없으면 「다음 절차」만 고친 노드가 **저장 대상에서 빠진다** —
     //    [저장]이 멀쩡히 끝났다고 말하고 값은 안 올라간다.
-    draft.nextProcedureTemplateId !== server.nextProcedureTemplateId
+    draft.nextProcedureTemplateId !== server.nextProcedureTemplateId ||
+    // 🔴 같은 까닭으로 가리킨 파일도 센다. 🔵 양쪽 다 `string | null` 이라 `?? ""` 같은
+    //    맞춤이 없다(위 ProcedureNodeFieldDraft 의 그 칸 주석).
+    draft.shareDocRelativePath !== server.shareDocRelativePath
   );
 }
 

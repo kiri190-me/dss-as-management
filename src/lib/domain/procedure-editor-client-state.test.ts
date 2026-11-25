@@ -22,6 +22,8 @@ function nodeFields(overrides: Partial<EditableNodeFields> = {}): EditableNodeFi
     isActive: true,
     nodeType: "TASK",
     nextProcedureTemplateId: null,
+    // 2026-11-25(조각 E2) — 노드가 가리키는 공유폴더 속 파일 한 자리. 안 가리킴이 기본.
+    shareDocRelativePath: null,
     ...overrides,
   };
 }

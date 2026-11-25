@@ -37,6 +37,14 @@ import {
   type InsertNodeOnEdgeResult,
 } from "@/lib/db/mutations/procedure-template-editor";
 import { isValidUuid, validateOptionalNote } from "@/lib/validation/procedure-validation-resolution-input";
+// 🔴 노드가 가리킬 파일 경로의 검사는 **진단 Flowchart 와 같은 한 벌**이다(두 표의 DB
+//    CHECK 식이 글자까지 같다 — 마이그레이션 0132). 베끼지 않는다.
+import { validateNodeShareDocRelativePath } from "@/lib/validation/flowchart-node-share-doc-path";
+// 🔴 「그 자리에 실제로 있는가」를 묻는 길도 **이미 있는 한 벌**이다 — 제품 모델 가리킴 ·
+//    진단 Flowchart 가 쓰는 그 모듈 그대로다(깊이 · 기다리기 상한과 거르는 규칙이 거기
+//    한 곳에 있다).
+import { resolveRepairDocsArchiveRoot } from "@/lib/storage/repair-docs-archive";
+import { findRepairDocsEntry } from "@/lib/storage/repair-docs-entries";
 import {
   PROCEDURE_BRANCH_TYPE_CODES,
   PROCEDURE_NODE_TYPE_CODES,
@@ -57,6 +65,18 @@ import { isValidRoutePoint } from "@/lib/graph-editor-core/routing";
  */
 
 type Forbidden = { ok: false; code: "FORBIDDEN"; message: string };
+
+/**
+ * 공유폴더 쪽 거절(설정 없음 · 못 읽음 · 그 자리에 없음 · 폴더였음) — 🔴 글자 모양이
+ * 틀린 것과 **코드를 가른다.** 둘 다 「저장 실패」 한 줄로 보이지만, 이쪽은 **사람이
+ * 적은 값이 아니라 그 서버의 형편**이라 다음에 볼 곳이 다르다(진단 Flowchart 쪽 액션이
+ * 같은 이름의 코드를 쓴다 — 두 화면의 실패가 같은 말로 읽혀야 한다).
+ */
+type ShareFolderUnavailable = { ok: false; code: "SHARE_FOLDER_UNAVAILABLE"; message: string };
+
+function shareFolderError(message: string): ShareFolderUnavailable {
+  return { ok: false, code: "SHARE_FOLDER_UNAVAILABLE", message };
+}
 
 async function resolveAuthorizedActorId(): Promise<{ ok: true; userId: string } | { ok: false; result: Forbidden }> {
   if (getAuthSource() !== "database") {
@@ -95,12 +115,52 @@ async function withErrorRedaction<T extends { ok: boolean }>(label: string, run:
   }
 }
 
+/**
+ * ============================================================================
+ * 🔴 노드가 가리키는 **공유폴더 속 파일**도 이 액션이 받는다 (2026-11-25, 조각 E2)
+ * ============================================================================
+ * 칸 하나가 늘었을 뿐 통로는 그대로다 — 화면의 [저장]이 NODE_FIELDS 한 걸음에 제목 ·
+ * 설명 · 작업 지시 요약 · 정렬 · 활성 · 다음 절차와 **함께** 싣는다.
+ *
+ * ── 🔴 담기 전에 **그 자리에 실제로 있는지** 본다 ─────────────────────────
+ * 진단 Flowchart 쪽 액션(server/actions/repair-case-flowchart-graph.ts)이 세운 차례를
+ * 글자 그대로 따른다: ① 글자 규칙 + 열 수 있는 확장자(validateNodeShareDocRelativePath
+ * → 두 화면이 함께 쓰는 검사) → ② 공유폴더 루트 → ③ 그 자리에 **파일이** 서 있는가
+ * (findRepairDocsEntry). 🔴 ③에서 폴더가 서 있으면 거절한다 — 이 칸에는 「파일인가
+ * 폴더인가」를 담을 자리가 없어(노드 표에 경로 한 칸뿐이다) 나중에 **무엇으로 열지**를
+ * 가를 수 없다.
+ *
+ * ── 🔴 설정이 비어 있으면 **멈춘다**(읽기와 일부러 다르다) ─────────────────
+ * 고르기 창이 읽는 통로(api/procedure-templates/[id]/share-folder/entries)는
+ * `REPAIR_DOCS_ARCHIVE_DIR` 가 비면 `{status:"disabled"}` 로 **조용히 꺼진다**. 쓰는
+ * 쪽은 반대로 **거절한다** — 가리킴은 「확인된 자리」라는 약속이고, 확인할 수 없을 때
+ * 그냥 담으면 아무도 본 적 없는 경로가 표에 남는다.
+ * 🔴 **값으로 치르는 값이 있다**: 그 노드가 **이미 가리키고 있는 채로** 제목만 고치는
+ * 저장도 이 검사를 지난다(화면은 칸 여섯을 늘 한 묶음으로 보낸다). 그래서 설정이
+ * 빠졌거나 공유폴더를 못 읽는 서버에서는 **가리킨 노드의 칸 수정이 통째로 막힌다.**
+ * 진단 쪽이 2026-11-25 에 그 값을 알고도 **막히는 쪽**을 골랐고(운영에서 공유폴더와 DB 가
+ * 같은 NAS 에 있어 「DB 는 되는데 폴더만 못 읽는」 상태가 드물다고 보았다), 여기서 반대로
+ * 고르면 같은 기능이 두 화면에서 다르게 움직인다. 🔵 **지우는 쪽(null)은 이 검사를 한
+ * 줄도 안 지난다** — 설정이 빠진 서버에서도 가리킴을 **풀 수는** 있다.
+ * 🔵 칸을 **안 실으면**(undefined) 검사도 안 지난다 — 이 patch 를 쓰는 다른 호출부가
+ * 생기더라도 그쪽은 이 비용을 치르지 않는다.
+ *
+ * ── 🔴 거절 사유에 경로가 한 글자도 안 들어간다 ───────────────────────────
+ * 이 서류함의 폴더 이름에는 고객사명이 섞여 있다. 아래 문장은 전부 붙박이이고, 저장소
+ * 모듈이 만드는 실패 사유(`found.reason`)도 경로 없는 짧은 문장임이 그쪽에서 못 박혀 있다.
+ *
+ * ── 🔴 **게시된 절차에는 못 담는다** ──────────────────────────────────────
+ * 여기서 따로 막지 않는다 — mutation 의 assertEditableDraft 가 `status !== "DRAFT"` 를
+ * NOT_DRAFT 로 거절한다(이 모듈의 다른 칸들과 똑같은 관문이다). 🔴 그 울타리를 이 칸
+ * 때문에 느슨하게 하지 않는다: 사람은 새 초안 → 담기 → 재게시로 쓴다.
+ * ============================================================================
+ */
 export async function updateProcedureTemplateNodeAction(input: {
   nodeId: string;
   patch: UpdateNodePatch;
   expectedTemplateUpdatedAt: string;
   reason?: string | null;
-}): Promise<NodeMutationResult | Forbidden> {
+}): Promise<NodeMutationResult | Forbidden | ShareFolderUnavailable> {
   const actorCheck = await resolveAuthorizedActorId();
   if (!actorCheck.ok) return actorCheck.result;
   if (!isValidUuid(input.nodeId)) return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
@@ -113,6 +173,37 @@ export async function updateProcedureTemplateNodeAction(input: {
     !isValidUuid(input.patch.nextProcedureTemplateId)
   ) {
     return { ok: false, code: "FORBIDDEN", message: "요청 정보를 확인할 수 없습니다." };
+  }
+
+  // ── ① 글자 규칙 · 열 수 있는 확장자 — 디스크를 보기 전이다 ──────────────
+  //    🔴 거절 문장은 **그대로 사람에게 간다**(FORBIDDEN 의 뭉뚱그린 말이 아니다) —
+  //       「400자를 넘었다」 · 「앞뒤 공백」처럼 고칠 수 있는 까닭이기 때문이다.
+  const shareDocValidation = validateNodeShareDocRelativePath(input.patch.shareDocRelativePath);
+  if (!shareDocValidation.ok) return { ok: false, code: "INVALID_INPUT", message: shareDocValidation.error };
+
+  // ── ②③ 그 자리에 **파일이** 실제로 있는가 — 가리킬 때만 묻는다 ──────────
+  //    🔵 `null` 은 여기서 둘을 함께 뜻한다: **칸을 안 실었거나**(undefined) **가리킴을
+  //       지우거나**(null). 어느 쪽이든 디스크를 볼 일이 없어 한 갈래로 둔다.
+  //    🔴 아래로 내려보내는 patch 는 **`input.patch` 그대로**다(여기서 만든 값이 아니다) —
+  //       안 실은 칸이 null 로 바뀌어 내려가면 그 노드의 가리킴이 조용히 지워진다.
+  const shareDocRelativePath = shareDocValidation.shareDocRelativePath;
+  if (shareDocRelativePath !== null) {
+    const archiveRoot = resolveRepairDocsArchiveRoot();
+    if (archiveRoot === null) {
+      // 🔴 읽기는 조용히 꺼지지만 쓰기는 멈춘다 — 머리말 참조.
+      return shareFolderError("공유폴더 위치가 설정되지 않아 자리를 확인할 수 없습니다(관리자에게 알려 주세요).");
+    }
+    const found = await findRepairDocsEntry({ root: archiveRoot, relativePath: shareDocRelativePath });
+    if (found.status === "failed") {
+      // 사유는 저장소 모듈이 만든 **경로 없는** 짧은 문장이다.
+      return shareFolderError(found.reason);
+    }
+    if (found.status === "not-found") {
+      return shareFolderError("공유폴더에서 그 파일을 찾을 수 없습니다.");
+    }
+    if (found.isDirectory) {
+      return shareFolderError("그 자리에 있는 것은 폴더입니다 — 파일을 고르세요.");
+    }
   }
 
   return withErrorRedaction("updateProcedureTemplateNodeAction", () =>

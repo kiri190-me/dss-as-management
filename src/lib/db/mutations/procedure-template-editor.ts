@@ -394,6 +394,17 @@ export type UpdateNodePatch = {
    * (허용 목록은 NEXT_PROCEDURE_LINK_NODE_TYPES — 2026-11-20 에 [작업]·[검사]·[조치]가 늘었다).
    */
   nextProcedureTemplateId?: string | null;
+  /**
+   * 2026-11-25(조각 E2) — 이 노드가 가리키는 **공유폴더 속 파일 한 자리**(「수리 관련」
+   * 폴더 루트 기준 상대 경로). `null` 을 보내면 **가리킴을 지운다**.
+   *
+   * 🔴 **글자를 여기서 다듬지 않는다** — 다듬으면 디스크에 없는 경로가 된다. 모양 검사도
+   * 「그 자리에 실제로 있는가」도 **액션이 이미 끝냈다**(server/actions/
+   * procedure-template-editor.ts). 이 자리의 마지막 그물은 DB CHECK
+   * (`procedure_template_nodes_share_doc_relative_path_shape`)다.
+   * 🔵 `undefined` 면 **그 칸을 건드리지 않는다** — 이 patch 의 다른 칸들과 같은 규약이다.
+   */
+  shareDocRelativePath?: string | null;
 };
 
 export type NodeMutationResult = { ok: true; updatedAt: string } | Failure;
@@ -459,6 +470,8 @@ export async function updateProcedureTemplateNode(
         // 🔵 이어가기 지정이 바뀐 것도 편집 이력에 남아야 한다 — 안 실으면
         //    [편집 이력]에 "노드 수정"만 뜨고 무엇이 바뀌었는지 알 길이 없다.
         nextProcedureTemplateId: node.nextProcedureTemplateId,
+        // 🔵 가리킨 파일이 바뀐 것도 같은 까닭으로 이력에 싣는다(2026-11-25).
+        shareDocRelativePath: node.shareDocRelativePath,
       };
       const afterState = { ...beforeState, ...normalizedPatch };
 

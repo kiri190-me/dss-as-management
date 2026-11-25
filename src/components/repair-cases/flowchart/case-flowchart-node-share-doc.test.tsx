@@ -26,6 +26,7 @@ import CaseFlowchartNodeShareDocPicker, {
   CaseFlowchartNodeShareDocPickerView,
   canOpenCaseFlowchartNodeShareDoc,
   canPickCaseFlowchartNodeShareDocEntry,
+  caseFlowchartNodeShareDocEntriesBaseUrl,
   caseFlowchartNodeShareDocEntriesUrl,
   caseFlowchartNodeShareDocEntryPath,
   caseFlowchartNodeShareDocFileName,
@@ -159,7 +160,13 @@ function dialogMarkup(
  */
 function closedPickerMarkup(): string {
   return renderToStaticMarkup(
-    createElement(CaseFlowchartNodeShareDocPicker, { repairCaseId: CASE_ID, onPick: () => undefined })
+    createElement(CaseFlowchartNodeShareDocPicker, {
+      // 🔵 2026-11-25(조각 E2) — 창이 **주소를 받는다**(제 손으로 짓지 않는다). 기술 작업
+      //    절차 편집기가 같은 창을 쓰게 되면서 바뀐 자리다 — 주소를 만드는 함수 자체는
+      //    아래 ②의 같은 시험이 그대로 잰다.
+      entriesBaseUrl: caseFlowchartNodeShareDocEntriesBaseUrl(CASE_ID),
+      onPick: () => undefined,
+    })
   );
 }
 

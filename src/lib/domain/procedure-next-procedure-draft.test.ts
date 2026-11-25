@@ -33,6 +33,9 @@ const 서버노드: ProcedureServerNodeSnapshot = {
   sortOrder: 0,
   isActive: true,
   nextProcedureTemplateId: null,
+  // 2026-11-25(조각 E2) — 이 시험이 재는 것과 **같은 종류의 칸**이 하나 더 생겼다.
+  // 여기서는 늘 null 로 둔다(그쪽은 제 시험이 따로 잰다).
+  shareDocRelativePath: null,
   positionX: 0,
   positionY: 0,
 };
@@ -45,6 +48,7 @@ function 초안(over: Partial<ProcedureNodeFieldDraft> = {}): ProcedureNodeField
     sortOrder: 서버노드.sortOrder,
     isActive: 서버노드.isActive,
     nextProcedureTemplateId: 서버노드.nextProcedureTemplateId,
+    shareDocRelativePath: 서버노드.shareDocRelativePath,
     ...over,
   };
 }
@@ -58,6 +62,7 @@ function 노드칸(over: Partial<EditableNodeFields> = {}): EditableNodeFields {
     isActive: true,
     nodeType: "END",
     nextProcedureTemplateId: null,
+    shareDocRelativePath: null,
     ...over,
   };
 }

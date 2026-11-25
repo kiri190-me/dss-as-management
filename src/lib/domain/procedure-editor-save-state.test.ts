@@ -43,6 +43,8 @@ const serverNode: ProcedureServerNodeSnapshot = {
   sortOrder: 10,
   isActive: true,
   nextProcedureTemplateId: null,
+  // 2026-11-25(조각 E2) — 가리킨 파일 한 자리. 안 가리킴이 기본이다.
+  shareDocRelativePath: null,
   positionX: 500,
   positionY: 300,
 };
@@ -56,6 +58,7 @@ function unchangedNodeDraft(): ProcedureNodeFieldDraft {
     sortOrder: serverNode.sortOrder,
     isActive: serverNode.isActive,
     nextProcedureTemplateId: serverNode.nextProcedureTemplateId,
+    shareDocRelativePath: serverNode.shareDocRelativePath,
   };
 }
 function unchangedEdgeDraft(): ProcedureEdgeFieldDraft {
@@ -196,6 +199,7 @@ test("render merge: pending node field draft overrides the baseline", () => {
     sortOrder: 1,
     isActive: false,
     nextProcedureTemplateId: null,
+    shareDocRelativePath: null,
   };
   const rendered = mergeProcedureNodeForRender(serverNode, draft, undefined);
   assert.equal(rendered.title, "Driver Board 점검");

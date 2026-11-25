@@ -844,6 +844,10 @@ export default function ProcedureTemplateEditorScreen({
         acceptanceCriteria: null,
         workerMayAddNextTask: false,
         nextProcedureTemplateId: null,
+        // 🔵 가리킨 파일도 없다 — 노드를 **만드는** 자리에는 고르는 창이 없고(속성
+        //    패널에만 있다), CREATE_NODE 도 그 칸을 안 싣는다. 만든 뒤 골라 담으면
+        //    그때 초안 지도를 타고 들어간다(NODE_FIELDS 걸음).
+        shareDocRelativePath: null,
         positionX: seed.position ? seed.position.x : 0,
         positionY: seed.position ? seed.position.y : 0,
         // 🔴 자리를 안 정했으면 user_position 을 **null 로 둔다** — 그래야 그림이
@@ -909,6 +913,7 @@ export default function ProcedureTemplateEditorScreen({
         sortOrder: source.sortOrder,
         isActive: source.isActive,
         nextProcedureTemplateId: source.nextProcedureTemplateId,
+        shareDocRelativePath: source.shareDocRelativePath,
         positionX: effectivePos.x,
         positionY: effectivePos.y,
       };
@@ -945,6 +950,9 @@ export default function ProcedureTemplateEditorScreen({
       // 🔵 이웃 글자 칸들과 달리 **빈 글자로 떨어뜨리지 않는다** — 이 값은
       //    id 아니면 null 이고, 빈 글자를 섞으면 FK 에 빈 글자가 날아간다.
       nextProcedureTemplateId: server?.nextProcedureTemplateId ?? null,
+      // 🔴 안 가리킨 것이 기본이다. 🔵 바로 위와 같은 까닭으로 `?? ""` 가 아니다 —
+      //    이 칸은 초안도 서버도 `string | null` 한 가지 모양이다.
+      shareDocRelativePath: server?.shareDocRelativePath ?? null,
     };
   }
   function updateNodeFieldDraft(nodeId: string, patch: Partial<ProcedureNodeFieldDraft>) {
@@ -1029,6 +1037,13 @@ export default function ProcedureTemplateEditorScreen({
           instructions: merged.instructions,
           sortOrder: merged.sortOrder,
           isActive: merged.isActive,
+          // 🔴 저장 전 초안이 여기에도 비쳐야 한다(2026-11-25) — 안 얹으면 이 행의
+          //    칸만 서버 값으로 남아, 나중에 이 행을 읽는 자리가 생기는 날 **패널은
+          //    새 값을 보이는데 행은 옛 값**인 두 벌이 된다.
+          //    🔵 지금 이 칸을 읽는 호출부는 없다(속성 패널은 draft 를 본다).
+          //       이웃 nextProcedureTemplateId 는 아직 안 얹혀 있는데, 그쪽은 이 조각의
+          //       몫이 아니라 손대지 않았다(보고에 적었다).
+          shareDocRelativePath: merged.shareDocRelativePath,
           userPositionX: hasSessionPositionOverride ? merged.positionX : n.userPositionX,
           userPositionY: hasSessionPositionOverride ? merged.positionY : n.userPositionY,
         };
@@ -1756,6 +1771,11 @@ export default function ProcedureTemplateEditorScreen({
             // 🔵 이웃 글자 칸처럼 `|| null` 로 떨어뜨리지 않는다 — 이 값은 이미
             //    id 아니면 null 이고, 빈 글자가 섞일 자리가 없다.
             nextProcedureTemplateId: draft.nextProcedureTemplateId,
+            // 🔴 **다듬지 않는다**(2026-11-25) — 공유폴더의 이름은 앞뒤 공백까지 그
+            //    이름이다(다듬으면 없는 파일이 된다). 빈 글자로 떨어뜨리는 `|| null`
+            //    도 두지 않는다: 이 칸은 `""` 를 아예 들지 않고, null 이 곧
+            //    「가리킴 지우기」다.
+            shareDocRelativePath: draft.shareDocRelativePath,
           },
           expectedTemplateUpdatedAt: expectedUpdatedAt,
         });
@@ -2947,6 +2967,7 @@ export default function ProcedureTemplateEditorScreen({
 
           {rightPanelTab === "properties" && selectedNode && (
             <NodePropertyPanel
+              procedureTemplateId={template.id}
               node={selectedNode}
               allNodes={renderedNodes}
               isPickingReference={isPickingReferenceNode}

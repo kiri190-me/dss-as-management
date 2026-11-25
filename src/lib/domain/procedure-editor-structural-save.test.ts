@@ -450,6 +450,7 @@ test("🔴 끝에서 끝까지: 막 만든 노드의 **설명이 사라지지 �
     sortOrder: 0,
     isActive: true,
     nextProcedureTemplateId: null,
+    shareDocRelativePath: null,
   };
   const nodeFieldDrafts = new Map<string, ProcedureNodeFieldDraft>([[TMP_NODE_1, draft]]);
   const layoutMoves = new Map<string, Position>([[TMP_NODE_1, { x: 120, y: 240 }]]);
@@ -458,7 +459,7 @@ test("🔴 끝에서 끝까지: 막 만든 노드의 **설명이 사라지지 �
   const serverNodesById = new Map<string, ProcedureServerNodeSnapshot>([
     [
       REAL_NODE_A,
-      { id: REAL_NODE_A, title: "원래 있던 노드", description: null, instructions: null, sortOrder: 0, isActive: true, nextProcedureTemplateId: null, positionX: 0, positionY: 0 },
+      { id: REAL_NODE_A, title: "원래 있던 노드", description: null, instructions: null, sortOrder: 0, isActive: true, nextProcedureTemplateId: null, shareDocRelativePath: null, positionX: 0, positionY: 0 },
     ],
   ]);
 

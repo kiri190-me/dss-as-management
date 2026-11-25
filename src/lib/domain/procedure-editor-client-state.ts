@@ -26,6 +26,12 @@ export type EditableNodeFields = {
    * END 가 아닌 노드에서는 늘 null 이다.
    */
   nextProcedureTemplateId: string | null;
+  /**
+   * 2026-11-25(조각 E2) — 이 노드가 가리키는 공유폴더 속 파일 한 자리.
+   * 🔴 바로 위와 **같은 까닭으로** 아래 NODE_FIELD_KEYS 에도 함께 넣는다 — 빠뜨리면
+   * 파일만 바꾼 노드가 「바뀐 것 없음」으로 세어진다.
+   */
+  shareDocRelativePath: string | null;
 };
 
 export type EditableEdgeFields = {
@@ -43,6 +49,7 @@ const NODE_FIELD_KEYS = [
   "isActive",
   "nodeType",
   "nextProcedureTemplateId",
+  "shareDocRelativePath",
 ] as const;
 const EDGE_FIELD_KEYS = ["fromNodeId", "toNodeId", "branchType", "branchLabel"] as const;
 

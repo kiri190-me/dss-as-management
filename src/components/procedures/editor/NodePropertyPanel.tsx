@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import ContactFolderEntryOpenButton from "@/components/repair-cases/files/ContactFolderEntryOpenButton";
+import CaseFlowchartNodeShareDocPicker, {
+  canOpenCaseFlowchartNodeShareDoc,
+  caseFlowchartNodeShareDocFileName,
+  caseFlowchartNodeShareDocParentPath,
+} from "@/components/repair-cases/flowchart/CaseFlowchartNodeShareDocPicker";
 import {
   MANUAL_TECHNICAL_NODE_TYPE_CODES,
   PROCEDURE_NODE_TYPE_CODES,
@@ -25,6 +31,105 @@ const RELATIVE_POSITION_SPACING = { horizontal: 140, vertical: 150 } as const;
 
 /** 5C-6D-1D — same derivation as Case Flowchart's own COLUMN_SNAP_TOLERANCE: half the standard horizontal spacing, close enough to catch "same column, slightly different due to a different reference node's width" while staying far short of a full column-to-column distance. */
 const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;
+
+// ── 🔴 「관련 파일」 구역의 문장 (2026-11-25, 조각 E2) ────────────────────
+//
+// 「모든 종류의 노드에 관련된 파일을 … 파일의 위치를 기억해서 도우미를 통해서 폴더에서
+// 파일을 여는 방식으로」(사용자 요구 2026-11-21). 🔴 **올리는 것이 아니다** — 바이트는
+// 이 시스템에 들어오지 않고, 남는 것은 공유폴더 루트 기준 **경로 한 줄**이다. 그 사실을
+// 구역 머리에서 말한다(올리기 칸으로 읽히면 「왜 내려받기가 없지」에서 멈춘다).
+//
+// 🔴 **이 구역에 서는 것은 셋뿐이다**: 가리킨 경로 한 줄([열기] · [지우기]와 함께) ·
+// [파일 고르기] 단추 하나 · 안내 **한 줄**. 목록 · 경로 이동 · 이름 거르기 칸은 전부
+// 팝업 안에 있다 — 이 패널은 폭이 좁아 그것들을 품으면 긴 한글 이름이 한 글자씩 세로로
+// 떨어진다(까닭 전문은 CaseFlowchartNodeShareDocPicker 머리말. 진단 Flowchart 패널이
+// 2026-11-25 에 실제로 그렇게 깨졌다).
+//
+// 🔴 **진단 Flowchart 의 같은 구역과 쌍이다**(CaseFlowchartNodePropertyPanel 의
+// CaseFlowchartNodeShareDocRow). 고르는 창 · 경로를 쪼개는 셈 · 열 수 있는가의 판정은
+// **한 벌을 함께 쓰지만**, 이 몇 줄의 생김새는 두 패널이 각자 들고 있다 — 초안 타입도
+// 「고칠 수 있는가」의 뜻도 서로 다르기 때문이다. 🔴 **저쪽이 바뀌는 날 이쪽도 함께
+// 본다**(2026-11-25 하루에만 단추 모양이 한 번 바뀌었다).
+//
+// 🔵 이 구역에는 **게시본 이야기가 없다.** 편집기 자체가 초안에서만 열리고(페이지가
+// 게시본에서는 [새 DRAFT 버전 만들기]만 보여 준다), 서버도 assertEditableDraft 로 막는다.
+
+export const PROCEDURE_NODE_SHARE_DOC_TITLE = "관련 파일";
+/**
+ * 🔴 **한 줄 안에 둘이 들어 있다**: ① 올리는 것이 아니라 자리를 가리킨다 ② 이 구역의
+ * 변경도 화면 위쪽 [저장]을 눌러야 나간다. 둘 다 없으면 안 되는 말이라 문장을 합쳤다 —
+ * 줄을 줄이려고 **사실을 버리지는 않는다.**
+ */
+export const PROCEDURE_NODE_SHARE_DOC_HINT =
+  "파일을 올리지 않고 사내 공유폴더의 자리를 가리킵니다 — 화면 상단의 [저장] 버튼으로 다른 변경사항과 함께 저장됩니다.";
+export const PROCEDURE_NODE_SHARE_DOC_EMPTY_TEXT = "가리킨 파일이 없습니다.";
+export const PROCEDURE_NODE_SHARE_DOC_CLEAR_TEXT = "지우기";
+
+/**
+ * 🔴 목록 통로의 **맨 앞 토막** — 주소를 짓는 일은 **여기서** 한다(고르는 창은 제가 어느
+ * 화면에 섰는지 모른다). 절차 템플릿 id 로 간다 — 권한의 단위가 절차이기 때문이다
+ * (api/procedure-templates/[id]/share-folder/entries 의 머리말).
+ */
+export function procedureNodeShareDocEntriesBaseUrl(procedureTemplateId: string): string {
+  return `/api/procedure-templates/${encodeURIComponent(procedureTemplateId)}/share-folder/entries`;
+}
+
+/**
+ * 가리킨 자리 한 줄 — 경로 · [열기] · [지우기].
+ *
+ * 🔴 **경로를 숨기지 않는다**: 「어느 자리인가」가 이 줄의 전부다. 🔴 [열기]는 연락서 쪽
+ * 단추를 **그대로 가져다 쓴다**(베끼지 않는다) — 도우미 주소를 짓는 일도, Windows 가
+ * 아닌 PC 에서 스스로 사라지는 일도 그 안에 있다. 🔴 열 수 없는 모양이면 단추만 없고
+ * 경로는 그대로 보인다(canOpenCaseFlowchartNodeShareDoc 주석).
+ */
+export function ProcedureNodeShareDocRow({
+  relativePath,
+  onClear,
+}: {
+  relativePath: string;
+  /** 🔴 주지 않으면 지우기 단추가 그려지지 않는다(고칠 수 없는 사람). */
+  onClear?: () => void;
+}) {
+  const openable = canOpenCaseFlowchartNodeShareDoc(relativePath);
+  return (
+    <div data-procedure-node-share-doc-row="" className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+      {/*
+        🔴 **`break-all` 이 아니다.** 이 줄은 좁은 속성 패널 안이라 `break-all` 이면 한글
+        경로가 한 글자씩 세로로 떨어진다. `break-keep` 이 어절을 지키고, `wrap-anywhere`
+        가 **한 덩어리가 줄보다 길 때만** 끊어 패널 밖으로 삐져나가는 것을 막는다
+        (고르는 창의 이름 칸과 같은 한 벌).
+      */}
+      <span className="min-w-0 flex-1 break-keep wrap-anywhere text-[11px] text-zinc-600 dark:text-zinc-400">
+        {relativePath}
+      </span>
+      <span className="flex shrink-0 items-start gap-2">
+        {openable && (
+          <ContactFolderEntryOpenButton
+            folderName={caseFlowchartNodeShareDocParentPath(relativePath)}
+            fileName={caseFlowchartNodeShareDocFileName(relativePath)}
+          />
+        )}
+        {onClear !== undefined && (
+          /*
+            🔴 **[열기] 와 같은 단추 모양이다**(2026-11-25 사용자 지시). 둘이 한 줄에
+            나란히 서는데 한쪽만 밑줄 글자면 같은 자리의 같은 급 동작으로 안 읽힌다 —
+            테두리·여백·글자 크기를 그 단추(files/ContactFolderEntryOpenButton)와
+            맞춘다. 🔵 **글자색만 빨강**이다: 지우는 동작이라는 것은 색으로 말하고,
+            테두리까지 빨갛게 하면 [열기] 옆에서 경고처럼 튄다.
+          */
+          <button
+            type="button"
+            onClick={onClear}
+            data-procedure-node-share-doc-clear=""
+            className="rounded border border-zinc-300 px-1.5 py-0.5 text-xs font-medium text-red-700 hover:bg-red-50 dark:border-zinc-700 dark:text-red-400 dark:hover:bg-red-950"
+          >
+            {PROCEDURE_NODE_SHARE_DOC_CLEAR_TEXT}
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
 
 /**
  * Node property side panel (Phase 4A; safe fields converted to a
@@ -80,6 +185,7 @@ const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;
  * 아니라 **[검증] 탭으로 옮겨 간다** — 화면이 저장 뒤 마지막 요약을 거기에 싣는다.
  */
 export default function NodePropertyPanel({
+  procedureTemplateId,
   node,
   allNodes,
   isPickingReference = false,
@@ -102,6 +208,12 @@ export default function NodePropertyPanel({
   isUnsavedNode = false,
   nextProcedureCandidates = [],
 }: {
+  /**
+   * 🔴 지금 편집 중인 **절차 템플릿**의 id — 「관련 파일」 고르기 창의 통로 주소에
+   * 그대로 간다(권한의 단위가 절차이기 때문이다 — 그 통로의 머리말). 노드 id 가
+   * **아니다**.
+   */
+  procedureTemplateId: string;
   node: EditorNodeRow;
   /** Phase 5C-5B — every node in the template, for "상대 위치로 이동"'s reference-node picker. 5C-6D-1D — also every OTHER node's current visible position/dimensions feed column-snap candidacy, so this must be the screen's rendered (baseline + pending-draft-merged) list, never the raw server rows alone. */
   allNodes: EditorNodeRow[];
@@ -638,6 +750,42 @@ export default function NodePropertyPanel({
       </details>
 
       {canEdit && <p className="text-[11px] text-zinc-400 dark:text-zinc-600">위 속성 변경은 화면 상단의 [저장] 버튼으로 다른 변경사항과 함께 저장됩니다.</p>}
+
+      {/*
+        🔴 「관련 파일」 — 🔵 **아무것도 그리지 않는 자리가 있다.** 가리킨 것이 없고 고칠
+        수도 없는 사람에게는 빈 상자가 하나 느는 것뿐이라 구역 자체를 세우지 않는다
+        (진단 Flowchart 쪽 구역 · 제품 모델 쪽 구역과 같은 규율).
+        🔴 [파일 고르기] 단추는 설정(REPAIR_DOCS_ARCHIVE_DIR)이 비어 있으면 **제 상태로
+        스스로 안 선다**(단추도 팝업도 없다) — 여기서 설정을 판정하지 않는다. 그래도
+        **가리킨 줄과 [지우기]는 그대로** 선다: 그 둘은 DB 값이지 공유폴더가 아니다.
+      */}
+      {(draft.shareDocRelativePath !== null || canEdit) && (
+        <div
+          data-procedure-node-share-doc-section=""
+          className="flex flex-col gap-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950"
+        >
+          <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-50">{PROCEDURE_NODE_SHARE_DOC_TITLE}</h4>
+          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{PROCEDURE_NODE_SHARE_DOC_HINT}</p>
+
+          {draft.shareDocRelativePath === null ? (
+            <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{PROCEDURE_NODE_SHARE_DOC_EMPTY_TEXT}</p>
+          ) : (
+            <ProcedureNodeShareDocRow
+              relativePath={draft.shareDocRelativePath}
+              {...(canEdit ? { onClear: () => onDraftChange({ shareDocRelativePath: null }) } : {})}
+            />
+          )}
+
+          {/* 🔴 **단추 하나다.** 목록은 이 단추가 띄우는 팝업 안에 있다(구역 머리 주석).
+              🔵 창은 진단 Flowchart 와 **한 벌**이고, 주소를 짓는 일만 여기서 한다. */}
+          {canEdit && (
+            <CaseFlowchartNodeShareDocPicker
+              entriesBaseUrl={procedureNodeShareDocEntriesBaseUrl(procedureTemplateId)}
+              onPick={(relativePath) => onDraftChange({ shareDocRelativePath: relativePath })}
+            />
+          )}
+        </div>
+      )}
 
       {canPosition && otherNodes.length > 0 && (
         <div className="flex flex-col gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950">

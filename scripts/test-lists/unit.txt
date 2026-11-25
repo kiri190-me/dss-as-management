@@ -2321,3 +2321,12 @@ src/app/api/repair-cases/*/flowchart/share-folder/entries/route-source.test.ts
 # 조건**인가(휴지통 거르기·빈 배열·null repair_case_id) · 🔴 **「납기 지연」은 확정을 한 글자도
 # 모른다**(사용자 결정 2) · 🔴 수리 건 **배지**도 모른다(끄는 것은 종뿐이다 — 결정 1).
 src/lib/domain/due-date-confirmation-silences-bell.test.ts
+
+# [기술 작업 절차] 노드가 가리키는 **공유폴더 속 파일 한 자리** — 검사와 저장 배선 (2026-11-25, 조각 E2).
+# 🔴 검사가 **두 벌이 아닌가**(같은 칸이 진단 Flowchart 와 이쪽 두 표에 있고 DB CHECK 식이 글자까지
+# 같다 — 마이그레이션 0132) · 🔴 400자 상한과 앞뒤 공백이 **이 표에도** 그대로인가 · 🔴 저장 배선이
+# 하나도 안 빠졌는가를 **값으로**(바뀜 판정 · 보낼 걸음 · 지운 것이 되살아나지 않는가) · 🔴 쓰기가
+# 공유폴더를 실제로 확인하고 설정이 비면 **멈추는가**(읽기는 조용히 꺼지는 것과 일부러 다르다) ·
+# 🔴 **초안 울타리(assertEditableDraft)에 이 칸만 빠져나가는 예외가 안 생겼는가** · 🔴 목록 통로의
+# 검사 차례와 **나가는 몸통에 루트·경로가 없는가**.
+src/lib/validation/procedure-node-share-doc-path.test.ts
