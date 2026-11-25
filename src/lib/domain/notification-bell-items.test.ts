@@ -10,6 +10,7 @@ import {
   buildApprovalNotification,
   buildApprovalRejectedNotification,
   buildDomesticOrderApprovalNotification,
+  buildDomesticOrderDueDateNearNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateInvertedNotification,
   buildRepairCaseDueDateOverdueNotification,
@@ -65,6 +66,16 @@ function oneOfEachKind(): NotificationItem[] {
       intakeNumber: "D9705-403",
       dueDate: "2026-10-18",
       borrowed: true,
+    }),
+    // 🔴 기타건 납기 임박(2026-11-25) — **다른 표의 줄**이라 주소가 `/domestic-orders/`
+    //    로 가고, 세는 단위가 건이 아니라 회차다. 회차 이름표가 붙은 쪽을 표본으로
+    //    두는 것은 그 글자가 상세 칸으로 그대로 건너가는지를 함께 재기 위해서다.
+    buildDomesticOrderDueDateNearNotification({
+      domesticOrderId: "order-due-1",
+      modelName: "시험용 품명",
+      dueDate: "2026-10-23",
+      dueDateRowOrder: 2,
+      dueDateRowLabel: "2차 · 납기 2026-10-23 (2차분)",
     }),
     buildRepairCaseTargetShipmentMissingNotification({
       repairCaseId: "case-target-1",

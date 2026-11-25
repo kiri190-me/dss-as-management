@@ -13,6 +13,7 @@ import {
   buildApprovalNotification,
   buildApprovalRejectedNotification,
   buildDomesticOrderApprovalNotification,
+  buildDomesticOrderDueDateNearNotification,
   buildQuoteApprovalNotification,
   buildRepairCaseDueDateInvertedNotification,
   buildRepairCaseDueDateOverdueNotification,
@@ -146,6 +147,17 @@ test("🔴 할 일 알림의 실제 id 는 형식이 맞아도 거절한다 — 
       intakeNumber: "D261017",
       dueDate: "2026-10-30",
       borrowed: true,
+    }),
+    // 🔴 기타건 납기 임박(2026-11-25)도 할 일 알림이다 — **납품도 완료도 안 한 회차**다.
+    // 확인 단추를 달면 그 회차를 눌러서 치울 수 있게 된다. 납품일이 찍히거나 [완료
+    // 처리]되면 다음 조회에서 저절로 빠진다. 🔵 id 에 회차가 붙어 `:` 가 둘인 모양인데,
+    // 그래도 종류 자리는 첫 `:` 앞이라 여기서 걸린다.
+    buildDomesticOrderDueDateNearNotification({
+      domesticOrderId: randomUUID(),
+      modelName: "시험용 품명",
+      dueDate: "2026-10-23",
+      dueDateRowOrder: 2,
+      dueDateRowLabel: "2차 · 납기 2026-10-23 (2차분)",
     }),
   ];
 

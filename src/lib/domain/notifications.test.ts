@@ -129,7 +129,7 @@ test("등록된 모든 종류가 개수 표에 키로 들어 있다", () => {
   }
 });
 
-test("등록된 알림 종류는 결재 요청·견적서 결재 대기·기타건 결재 대기·납기 임박·납기 지연·사내 목표 완료일 미등록·납기 역전·승인 완료·반려됨 아홉이다", () => {
+test("등록된 알림 종류는 결재 요청·견적서 결재 대기·기타건 결재 대기·납기 임박·납기 지연·기타건 납기 임박·사내 목표 완료일 미등록·납기 역전·승인 완료·반려됨 열이다", () => {
   // 종류를 늘리는 것은 "누구에게 보여도 되는가"를 다시 판정해야 하는 일이라
   // 별도 작업으로 다룬다. 늘어난 것을 여기서 알아차리게 둔다 — 그래서 목록
   // 전체를 그대로 못 박는다(있는지만 보는 검사로 무르게 만들지 않는다).
@@ -201,6 +201,17 @@ test("등록된 알림 종류는 결재 요청·견적서 결재 대기·기타�
   //    있다: 둘은 같은 칸을 창만 달리해 보는 짝이라 명단이 갈리면 하루가 지나는 순간
   //    어떤 사람의 종에서 그 건이 말없이 사라진다. 자세한 것은
   //    domain/repair-case-overdue-notification.test.ts.
+  //
+  // 🔴 DOMESTIC_ORDER_DUE_DATE_NEAR(「기타건 납기 임박」)은 2026-11-25 에 **더했다**
+  // (사용자 결정 — 「기타건에도 납기 임박 알림이 적용되도록」). 재는 **창은 납기 임박과
+  // 글자 그대로 같지만**(조회가 isRepairCaseDueDateWithinNotificationWindow 를 그대로
+  // 부른다) 갈래를 따로 두는 까닭이 셋이다: 누르면 갈 화면이 다르고
+  // (`/domestic-orders/{id}`), 세는 단위가 건이 아니라 **회차**이며, 이름이 그냥
+  // 「납기 임박」이면 종 패널에 **같은 이름 두 줄**이 서서 어느 것이 수리 건인지 알 수
+  // 없다. 🔵 조회를 넓히는 길은 애초에 없었다 — 「납기 임박」 조회는 `repair_cases` 에서
+  // 시작해 `workflow_steps` 를 innerJoin 하는데 기타건에는 그 행도 워크플로도 없다.
+  // 🔴 **기타건 「납기 지연」은 만들지 않았다** — 사용자가 말한 것은 임박 하나다.
+  // 자세한 것은 domain/domestic-order-due-date-near-notification.test.ts.
   assert.deepEqual(
     [...NOTIFICATION_KINDS],
     [
@@ -209,6 +220,7 @@ test("등록된 알림 종류는 결재 요청·견적서 결재 대기·기타�
       "DOMESTIC_ORDER_APPROVAL_PENDING",
       "REPAIR_CASE_DUE_DATE_NEAR",
       "REPAIR_CASE_DUE_DATE_OVERDUE",
+      "DOMESTIC_ORDER_DUE_DATE_NEAR",
       "REPAIR_CASE_TARGET_SHIPMENT_MISSING",
       "REPAIR_CASE_DUE_DATE_INVERTED",
       "APPROVAL_GRANTED",
