@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import ShareFolderEntryFilterInput, {
   SHARE_FOLDER_ENTRY_FILTER_EMPTY_TEXT,
@@ -64,8 +64,37 @@ import {
  * `GET /api/repair-cases/{id}/flowchart/share-folder/entries?path=…` — 🔴 그 통로에는
  * **출처 검사가 한 겹 더** 있다. `fetch` 로만 부른다(`<a href>` · 새 탭은 403).
  *
+ * ── 🔴 **목록은 팝업 안에서 산다** (2026-11-25 고침) ─────────────────────
+ * 처음에는 이 창이 속성 패널 **안에** 통째로 들어가 있었고, 그래서 화면이 깨졌다 —
+ * 폴더 이름이 「(삭 / 제 / 예 / 정) / 7. / 디 …」처럼 **한 글자에 한 줄씩** 세로로
+ * 떨어졌다(사용자 신고 2026-11-25). 까닭은 폭이다: 목록 한 줄은
+ * `[이름 minmax(0,1fr)] [수정날짜 10rem] [크기 5rem] [동작 9rem]` 짜리 grid 인데
+ * (share-folder-entry-meta.ts) **고정 칸 24rem 이 먼저 자리를 가져가** 이름 칸이 0 에
+ * 가깝게 눌린다. 🔴 그 grid 를 켜는 `sm:` 은 **화면 폭**을 보는 규칙이라 품은 상자가
+ * 아무리 좁아도 그대로 켜진다 — 패널 안에서는 피할 길이 없었다.
+ * 그래서 패널에는 [파일 고르기] 단추만 남기고 목록 · 경로 이동 · 거르기 칸은 전부
+ * 이 파일의 **팝업**으로 옮겼다. 못 박아 둘 것 넷:
+ *  · 🔴 native `<dialog>` + `showModal()` — 이 앱의 창들과 같은 방식이고(globals.css 가
+ *    `margin:auto` 를 되살려 둔 그 틀), **최상위 층**에 떠서 좁은 패널의 폭도 바깥
+ *    상자의 overflow 도 따라오지 않는다. 🔵 이웃 ShareDocFolderPickerDialog 는
+ *    `fixed inset-0` 꼴인데, 그쪽은 transform 을 가진 조상이 있으면 그 안에 갇힌다 —
+ *    여기는 React Flow 편집기 안이라 그 길을 피했다.
+ *  · 🔴 **물려받는 글자 모양은 창 안에서 끊는다.** 팝업이 위층에 떠도 물려받는
+ *    CSS(글자 크기 · 정렬 · word-break · white-space)는 **DOM 부모**를 따라 내려온다 —
+ *    표 칸 안에서 태어난 팝업이 `nowrap` 을 물려받아 글이 넘친 일이 이 저장소에 있다.
+ *    속성 패널은 `text-xs` 다. 창 상자에 `text-sm text-left whitespace-normal
+ *    break-keep` 을 다시 적는다(**지우지 말 것**).
+ *  · 🔴 이름은 `break-all` 이 아니라 **`break-keep wrap-anywhere`** 다 — 한글을 어절
+ *    가운데서 끊지 않고(`keep-all`), 한 덩어리가 줄보다 길 때만 끊는다(`anywhere`).
+ *    폭이 넉넉해도 긴 이름 하나가 남으면 또 쪼개지므로 둘을 함께 둔다.
+ *  · 🔵 목록이 길면 **창 안에서만** 스크롤한다(`max-h-[85vh] overflow-y-auto`) —
+ *    페이지가 통째로 늘어나지 않는다.
+ *
  * ── 상태별로 무엇을 보이는가 ─────────────────────────────────────────────
- *  · `disabled` → 🔴 **창 자체를 그리지 않는다**(설정이 없는 환경 = 지금 개발 PC)
+ *  · `disabled` → 🔴 **창도 [파일 고르기] 단추도 그리지 않는다.** 눌렀는데 빈 창이
+ *    뜨면 「고장났나」가 된다. 🔴 설정(REPAIR_DOCS_ARCHIVE_DIR)은 **이 개발 PC 에도
+ *    있다**(2026-11-25 실측 — 화면에 폴더 목록이 실제로 뜬다). 전에 이 자리에
+ *    「설정이 없는 환경 = 지금 개발 PC」라고 적혀 있었는데 **사실이 아니었다.**
  *  · 불러오는 중 → 「불러오는 중…」 / 빈 폴더 → 「이 폴더가 비어 있습니다」
  *  · `failed`   → 「공유폴더를 읽지 못했습니다」 + 짧은 사유
  *
@@ -138,6 +167,16 @@ export const CASE_NODE_SHARE_DOC_TRAIL_LABEL = "공유폴더 위치";
 export const CASE_NODE_SHARE_DOC_TRAIL_ROOT_TEXT = "공유폴더";
 export const CASE_NODE_SHARE_DOC_UP_TEXT = "위로";
 export const CASE_NODE_SHARE_DOC_PICK_TEXT = "이 파일 지정";
+/** 🔴 속성 패널에 **남는 것은 이 단추 하나**다 — 목록은 팝업 안에 있다(머리말). */
+export const CASE_NODE_SHARE_DOC_OPEN_TEXT = "파일 고르기";
+export const CASE_NODE_SHARE_DOC_CLOSE_TEXT = "닫기";
+/**
+ * 🔴 노드당 하나라는 결정(2026-11-21)을 **고르기 전에** 말한다. 🔵 2026-11-25 에 속성
+ * 패널에서 **창 머리로 옮겼다** — 패널은 안내 한 줄만 둘 만큼 좁고, 이 말이 필요한
+ * 순간은 줄을 고르기 직전이다(그 자리에서도 「고르기 전」이다).
+ */
+export const CASE_NODE_SHARE_DOC_REPLACE_HINT =
+  "노드마다 파일 하나만 가리킵니다 — 새로 고르면 지금 가리킨 자리가 바뀝니다.";
 /** 🔴 맨 위 칸에서 단추가 하나도 없는 까닭 — 글로 말한다(머리말 🔵). */
 export const CASE_NODE_SHARE_DOC_ROOT_HINT =
   "하위 폴더로 들어가서 파일을 고르세요 — 맨 위 칸에 바로 놓인 파일은 도우미로 열 수 없어 지정하지 않습니다.";
@@ -286,7 +325,15 @@ export function canPickCaseFlowchartNodeShareDocEntry(
   return !entry.isDirectory && isOpenableQuoteFolderFileName(entry.name);
 }
 
-const ENTRY_NAME_CLASS = `min-w-0 ${SHARE_FOLDER_ENTRY_NAME_GROW_CLASS} break-all text-left text-sm text-zinc-700 dark:text-zinc-300`;
+/**
+ * 🔴 **`break-all` 이 아니다**(2026-11-25 고침). `break-all` 은 한글을 어절 가운데서
+ * 늘 끊는다 — 칸이 좁아지면 「디 / 에 / 스」처럼 한 글자씩 떨어진다. `break-keep` 은
+ * 어절을 지키고, `wrap-anywhere` 는 **한 덩어리가 줄보다 길 때만** 끊어 준다(긴
+ * `현황_20220707.xlsx` 하나가 칸 밖으로 삐져나가지 않게). 🔵 `wrap-anywhere` 는
+ * `break-words` 와 달리 **최소 폭 계산에도 든다** — grid/flex 칸이 이름 때문에 벌어지는
+ * 일을 막는다(WeeklyReportScreen 의 같은 까닭).
+ */
+const ENTRY_NAME_CLASS = `min-w-0 ${SHARE_FOLDER_ENTRY_NAME_GROW_CLASS} break-keep wrap-anywhere text-left text-sm text-zinc-700 dark:text-zinc-300`;
 const SMALL_BUTTON_CLASS =
   "shrink-0 rounded border border-zinc-300 px-1.5 py-0.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800";
 
@@ -405,7 +452,7 @@ function PathTrail({
           {index === lastIndex || onNavigate === undefined ? (
             <span
               {...(index === lastIndex ? { "aria-current": "true" as const } : {})}
-              className="min-w-0 break-all font-medium text-zinc-700 dark:text-zinc-300"
+              className="min-w-0 break-keep wrap-anywhere font-medium text-zinc-700 dark:text-zinc-300"
             >
               {step.label}
             </span>
@@ -414,7 +461,7 @@ function PathTrail({
               type="button"
               onClick={() => onNavigate(step.path)}
               data-case-node-share-doc-trail-step=""
-              className="min-w-0 break-all text-left underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
+              className="min-w-0 break-keep wrap-anywhere text-left underline underline-offset-2 hover:text-zinc-800 dark:hover:text-zinc-200"
             >
               {step.label}
             </button>
@@ -437,8 +484,12 @@ function PathTrail({
 }
 
 /**
- * 상태 하나를 그린다. 🔴 `disabled` 면 **아무것도 그리지 않는다**(null).
+ * 상태 하나를 그린다 — **팝업의 속**이다. 🔴 `disabled` 면 **아무것도 그리지 않는다**(null).
  * 🔴 옮겨 다닐 길(onNavigate) · 고를 길(onPick)을 주지 않으면 **누를 수 있는 것이 생기지 않는다**.
+ *
+ * 🔵 2026-11-25 에 **제목 줄과 바깥 테두리를 뺐다** — 그 둘은 이제 팝업 틀
+ * (CaseFlowchartNodeShareDocPickerDialog)이 그린다. 팝업 안에 또 상자를 두면 테두리가
+ * 두 겹으로 겹치고 제목이 두 번 적힌다.
  */
 export function CaseFlowchartNodeShareDocPickerView({
   state,
@@ -464,15 +515,7 @@ export function CaseFlowchartNodeShareDocPickerView({
   const visibleEntries = state.kind === "listed" ? filterShareFolderEntriesByQuery(state.entries, filterQuery) : [];
 
   return (
-    <div
-      data-case-node-share-doc-picker=""
-      className="print:hidden flex flex-col gap-2 rounded-md border border-dashed border-zinc-300 p-3 dark:border-zinc-700"
-    >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h5 className="text-xs font-semibold text-zinc-900 dark:text-zinc-50">{CASE_NODE_SHARE_DOC_PICKER_TITLE}</h5>
-        <span className="text-[11px] text-zinc-500 dark:text-zinc-400">{CASE_NODE_SHARE_DOC_PICKER_HINT}</span>
-      </div>
-
+    <div data-case-node-share-doc-picker="" className="print:hidden flex flex-col gap-2">
       <PathTrail insidePath={insidePath} onNavigate={onNavigate} />
 
       {/* 🔴 맨 위 칸에서는 지정 단추가 한 줄에도 없다 — 그 까닭을 글로 말한다(머리말). */}
@@ -489,7 +532,8 @@ export function CaseFlowchartNodeShareDocPickerView({
       {state.kind === "failed" && (
         <div className="flex flex-col gap-0.5">
           <p className={WARNING_CLASS}>{CASE_NODE_SHARE_DOC_FAILED_TEXT}</p>
-          <p className="break-all text-xs text-zinc-500 dark:text-zinc-400">{state.reason}</p>
+          {/* 🔴 사유는 **문장**이다(서버가 쓴 한국어) — `break-all` 로 끊으면 글자가 쪼개진다. */}
+          <p className="break-keep wrap-anywhere text-xs text-zinc-500 dark:text-zinc-400">{state.reason}</p>
         </div>
       )}
 
@@ -533,9 +577,122 @@ export function CaseFlowchartNodeShareDocPickerView({
 }
 
 /**
- * 화면이 뜬 **뒤에** 따로 통로를 부른다. 떠난 뒤에 답이 와도 상태를 건드리지 않는다.
- * 받은 답은 **어느 자리의 것인지와 함께** 든다 — 자리가 바뀌었을 때 지난 폴더의 목록이
- * 잠깐 비치지 않게.
+ * 고르는 창의 **팝업 틀** — 머리말 · 목록 · 닫는 길.
+ *
+ * 🔴 native `<dialog>` 에 `showModal()` 이다. **떠 있는 동안만 태어난다** — 부르는 쪽이
+ * 안 열었으면 이 조각이 아예 없다. 그래서 효과의 의존 목록이 비어 있고(`[]`), 닫는 일은
+ * 제 안에서 `close()` 를 부르는 것이 아니라 **부르는 쪽이 그리기를 멈추는 것**이다
+ * (열림 여부의 주인은 React 상태다 — NoticePopup 과 같은 규약).
+ *
+ * 🔴 닫는 길은 **셋**이다: [×] · [닫기] · `Esc`(`onCancel`). 🔵 셋 다 `onClose` 하나로
+ * 모인다 — 그 함수에는 **고르는 일이 한 글자도 없다.** 그래서 그냥 닫으면 초안이 바뀌지
+ * 않는다(`onPick` 을 안 부른다).
+ *
+ * 🔴 창 상자에 적힌 `text-sm text-left whitespace-normal break-keep` 을 **지우지 마라** —
+ * 속성 패널(`text-xs`)에서 물려받는 글자 모양을 여기서 끊는다(파일 머리말).
+ */
+export function CaseFlowchartNodeShareDocPickerDialog({
+  state,
+  insidePath,
+  filterQuery,
+  onNavigate,
+  onFilterQueryChange,
+  onPick,
+  onClose,
+}: {
+  state: CaseFlowchartNodeShareDocPickerState;
+  insidePath: string;
+  filterQuery: string;
+  onNavigate: (insidePath: string) => void;
+  onFilterQueryChange: (filterQuery: string) => void;
+  /** 🔴 주지 않으면 지정 단추가 한 줄에도 없다 — 권한 판정은 부르는 쪽이 한다. */
+  onPick?: (relativePath: string) => void;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={CASE_NODE_SHARE_DOC_PICKER_TITLE}
+      data-case-node-share-doc-dialog=""
+      // Esc. 기본 동작으로 닫으면 React 는 아직 열려 있다고 알아 다시 못 연다.
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
+      /*
+        🔴 폭은 **화면 기준**이다(`min(56rem,95vw)`) — 품은 속성 패널의 폭을 따라가면
+        2026-11-25 의 그 결함으로 되돌아간다. 목록 한 줄의 고정 칸 24rem 을 빼고도
+        이름 칸에 32rem 이 남는다.
+        🔵 길면 **창 안에서** 스크롤한다(`max-h-[85vh] overflow-y-auto`).
+      */
+      className="print:hidden max-h-[85vh] w-[min(56rem,95vw)] overflow-y-auto rounded-lg border border-zinc-200 bg-white p-4 text-left text-sm break-keep whitespace-normal text-zinc-900 backdrop:bg-black/40 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+            {CASE_NODE_SHARE_DOC_PICKER_TITLE}
+          </h2>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">{CASE_NODE_SHARE_DOC_PICKER_HINT}</p>
+          {/* 🔴 「새로 고르면 바뀐다」는 **줄을 고르기 전에** 읽혀야 한다 — 그래서 머리에 있다. */}
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">{CASE_NODE_SHARE_DOC_REPLACE_HINT}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={CASE_NODE_SHARE_DOC_CLOSE_TEXT}
+          data-case-node-share-doc-dialog-close=""
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xl leading-none text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="mt-3">
+        <CaseFlowchartNodeShareDocPickerView
+          state={state}
+          insidePath={insidePath}
+          filterQuery={filterQuery}
+          onNavigate={onNavigate}
+          onFilterQueryChange={onFilterQueryChange}
+          {...(onPick === undefined ? {} : { onPick })}
+        />
+      </div>
+
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          onClick={onClose}
+          data-case-node-share-doc-dialog-close=""
+          className="rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+        >
+          {CASE_NODE_SHARE_DOC_CLOSE_TEXT}
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
+/**
+ * 속성 패널에 서는 것 — **[파일 고르기] 단추 하나**와, 눌렀을 때 뜨는 팝업.
+ *
+ * 🔴 통로는 **그려지자마자** 한 번 부른다(단추를 누를 때가 아니다). 까닭 둘:
+ *  ① 설정이 비었는지(`disabled`)를 그때 알게 되고, 그래야 **단추를 안 세울 수 있다** —
+ *    눌렀는데 빈 창이 뜨면 「고장났나」가 된다.
+ *  ② 창을 열었을 때 맨 위 칸이 **이미 담겨 있다** — 열자마자 기다리지 않는다.
+ * 떠난 뒤에 답이 와도 상태를 건드리지 않는다. 받은 답은 **어느 자리의 것인지와 함께**
+ * 든다 — 자리가 바뀌었을 때 지난 폴더의 목록이 잠깐 비치지 않게.
+ *
+ * 🔵 창을 닫아도 **보던 자리는 그대로 둔다**(place 를 맨 위로 되돌리지 않는다) — 다시
+ * 여는 까닭은 대개 「같은 폴더에서 다른 파일」이고, 되돌리면 통로를 한 번 더 부른다.
  */
 export default function CaseFlowchartNodeShareDocPicker({
   repairCaseId,
@@ -549,6 +706,7 @@ export default function CaseFlowchartNodeShareDocPicker({
   // 🔴 자리와 거르기 칸을 **한 값으로** 쥔다 — 자리를 옮기는 길이 칸을 비우는 길이다.
   const [place, setPlace] = useState(SHARE_FOLDER_ENTRY_PLACE_ROOT);
   const [answer, setAnswer] = useState<{ path: string; state: CaseFlowchartNodeShareDocPickerState } | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
   const insidePath = place.insidePath;
 
   useEffect(() => {
@@ -564,17 +722,45 @@ export default function CaseFlowchartNodeShareDocPicker({
   const state: CaseFlowchartNodeShareDocPickerState =
     answer !== null && answer.path === insidePath ? answer.state : { kind: "loading" };
 
+  // 🔴 설정이 비면 **단추도 창도 없다.** 가리킨 줄과 [가리킴 지우기]는 패널 쪽에 있고
+  // 그쪽은 DB 값이라 그대로 선다(패널의 같은 자리 주석).
+  if (state.kind === "disabled") return null;
+
   return (
-    <CaseFlowchartNodeShareDocPickerView
-      state={state}
-      insidePath={insidePath}
-      filterQuery={place.filterQuery}
-      onNavigate={(next) => {
-        // 🔴 자리를 옮기면 거르기 칸이 함께 비워진다 — 그 규칙은 저 함수 하나가 쥔다.
-        setPlace(shareFolderEntryPlaceAt(next));
-      }}
-      onFilterQueryChange={(filterQuery) => setPlace((previous) => ({ ...previous, filterQuery }))}
-      {...(onPick === undefined ? {} : { onPick })}
-    />
+    <>
+      <button
+        type="button"
+        onClick={() => setIsOpen(true)}
+        aria-haspopup="dialog"
+        data-case-node-share-doc-open=""
+        className="print:hidden self-start rounded-md border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+      >
+        {CASE_NODE_SHARE_DOC_OPEN_TEXT}
+      </button>
+
+      {isOpen && (
+        <CaseFlowchartNodeShareDocPickerDialog
+          state={state}
+          insidePath={insidePath}
+          filterQuery={place.filterQuery}
+          onNavigate={(next) => {
+            // 🔴 자리를 옮기면 거르기 칸이 함께 비워진다 — 그 규칙은 저 함수 하나가 쥔다.
+            setPlace(shareFolderEntryPlaceAt(next));
+          }}
+          onFilterQueryChange={(filterQuery) => setPlace((previous) => ({ ...previous, filterQuery }))}
+          onClose={() => setIsOpen(false)}
+          {...(onPick === undefined
+            ? {}
+            : {
+                // 🔴 고르면 **창이 닫힌다.** 나가는 것은 여기서도 초안 한 줄뿐이고,
+                // 실제 저장은 화면 위쪽 [저장] 한 번이다(파일 머리말 ①).
+                onPick: (relativePath: string) => {
+                  onPick(relativePath);
+                  setIsOpen(false);
+                },
+              })}
+        />
+      )}
+    </>
   );
 }

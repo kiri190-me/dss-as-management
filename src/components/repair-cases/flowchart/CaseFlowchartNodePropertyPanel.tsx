@@ -96,18 +96,26 @@ const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;
 // 파일을 여는 방식으로」(사용자 요구 2026-11-21). 🔴 **올리는 것이 아니다** — 바이트는
 // 이 시스템에 들어오지 않고, 남는 것은 공유폴더 루트 기준 **경로 한 줄**이다. 그 사실을
 // 구역 머리에서 말한다(올리기 칸으로 읽히면 「왜 내려받기가 없지」에서 멈춘다).
+//
+// 🔴 **이 구역에 남는 것은 셋뿐이다**(2026-11-25 고침): 가리킨 경로 한 줄([열기] ·
+// [가리킴 지우기]와 함께) · [파일 고르기] 단추 하나 · 안내 **한 줄**. 목록 · 경로 이동 ·
+// 이름 거르기 칸은 전부 팝업으로 나갔다 — 이 패널은 폭이 좁아 그것들을 품으면 긴 한글
+// 이름이 한 글자씩 세로로 떨어졌다(까닭 전문은 CaseFlowchartNodeShareDocPicker 머리말).
+// 🔴 안내도 **한 줄로 줄였다**: 전에는 셋이었는데(「무엇인가」 · 「새로 고르면 바뀐다」 ·
+// 「[저장]으로 나간다」) 좁은 패널에서 그 셋이 아홉 줄을 먹었다. 「새로 고르면 바뀐다」는
+// 팝업 머리로 옮겼고(고르기 직전에 읽히는 자리다), 「[저장]으로 나간다」는 아래 한 줄에
+// 합쳤다 — **말은 하나도 안 없앴다.**
 
 export const CASE_NODE_SHARE_DOC_TITLE = "관련 파일";
+/**
+ * 🔴 **한 줄 안에 둘이 들어 있다**: ① 올리는 것이 아니라 자리를 가리킨다 ② 이 구역의
+ * 변경도 화면 위쪽 [저장]을 눌러야 나간다. 둘 다 없으면 안 되는 말이라 문장을 합쳤다 —
+ * 줄을 줄이려고 **사실을 버리지는 않는다.**
+ */
 export const CASE_NODE_SHARE_DOC_HINT =
-  "파일을 올리지 않고 사내 공유폴더의 자리를 가리킵니다 — 여는 일은 그 PC 의 폴더 열기 도우미가 합니다.";
-/** 🔴 노드당 하나라는 결정(2026-11-21)을 **고르기 전에** 말한다. */
-export const CASE_NODE_SHARE_DOC_REPLACE_HINT =
-  "노드마다 파일 하나만 가리킵니다 — 새로 고르면 지금 가리킨 자리가 바뀝니다.";
+  "파일을 올리지 않고 사내 공유폴더의 자리를 가리킵니다 — 화면 상단의 [저장] 버튼으로 다른 변경사항과 함께 저장됩니다.";
 export const CASE_NODE_SHARE_DOC_EMPTY_TEXT = "가리킨 파일이 없습니다.";
 export const CASE_NODE_SHARE_DOC_CLEAR_TEXT = "가리킴 지우기";
-/** 🔴 이 구역의 변경도 [저장]을 눌러야 나간다 — 위 칸들과 같은 규약이다. */
-export const CASE_NODE_SHARE_DOC_SAVE_NOTICE =
-  "가리킴 변경도 화면 상단의 [저장] 버튼으로 다른 변경사항과 함께 저장됩니다.";
 
 /**
  * 가리킨 자리 한 줄 — 경로 · [열기] · [가리킴 지우기].
@@ -131,7 +139,15 @@ export function CaseFlowchartNodeShareDocRow({
       data-case-node-share-doc-row=""
       className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1"
     >
-      <span className="min-w-0 flex-1 break-all text-[11px] text-zinc-600 dark:text-zinc-400">{relativePath}</span>
+      {/*
+        🔴 **`break-all` 이 아니다**(2026-11-25 고침). 이 줄은 좁은 속성 패널 안이라
+        `break-all` 이면 한글 경로가 한 글자씩 세로로 떨어진다. `break-keep` 이 어절을
+        지키고, `wrap-anywhere` 가 **한 덩어리가 줄보다 길 때만** 끊어 패널 밖으로
+        삐져나가는 것을 막는다(고르는 창의 이름 칸과 같은 한 벌).
+      */}
+      <span className="min-w-0 flex-1 break-keep wrap-anywhere text-[11px] text-zinc-600 dark:text-zinc-400">
+        {relativePath}
+      </span>
       <span className="flex shrink-0 items-start gap-2">
         {openable && (
           <ContactFolderEntryOpenButton
@@ -296,8 +312,9 @@ export default function CaseFlowchartNodePropertyPanel({
         🔴 「관련 파일」 — 🔵 **아무것도 그리지 않는 자리가 있다.** 가리킨 것이 없고 고칠
         수도 없는 사람에게는 빈 상자가 하나 느는 것뿐이라 구역 자체를 세우지 않는다
         (제품 모델 쪽 구역과 같은 규율).
-        🔴 고르는 창은 설정이 비어 있으면(지금 개발 PC) **제 상태로 스스로 꺼진다** —
-        여기서 설정을 판정하지 않는다.
+        🔴 [파일 고르기] 단추는 설정이 비어 있으면 **제 상태로 스스로 안 선다**(단추도
+        팝업도 없다) — 여기서 설정을 판정하지 않는다. 그래도 **가리킨 줄과 [가리킴
+        지우기]는 그대로** 선다: 그 둘은 DB 값이지 공유폴더가 아니다.
       */}
       {(draft.shareDocRelativePath !== null || canEdit) && (
         <div
@@ -316,15 +333,12 @@ export default function CaseFlowchartNodePropertyPanel({
             />
           )}
 
+          {/* 🔴 **단추 하나다.** 목록은 이 단추가 띄우는 팝업 안에 있다(구역 머리 주석). */}
           {canEdit && (
-            <>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{CASE_NODE_SHARE_DOC_REPLACE_HINT}</p>
-              <CaseFlowchartNodeShareDocPicker
-                repairCaseId={repairCaseId}
-                onPick={(relativePath) => onDraftChange({ shareDocRelativePath: relativePath })}
-              />
-              <p className="text-[11px] text-zinc-400 dark:text-zinc-600">{CASE_NODE_SHARE_DOC_SAVE_NOTICE}</p>
-            </>
+            <CaseFlowchartNodeShareDocPicker
+              repairCaseId={repairCaseId}
+              onPick={(relativePath) => onDraftChange({ shareDocRelativePath: relativePath })}
+            />
           )}
         </div>
       )}
