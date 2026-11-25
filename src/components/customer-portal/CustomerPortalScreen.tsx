@@ -876,6 +876,12 @@ function systemValueOf(item: CustomerPortalItem, field: PortalSystemField): stri
       return item.quoteIssuedDate;
     case "orderIssuedDate":
       return item.orderIssuedDate;
+    // 🔵 조회가 **이미 골라 둔** 날짜다(2026-11-26) — 그 건에 적힌 고객 요청 납기일이
+    //    먼저이고, 비어 있으면 연결된 내자 납기요청일 중 가장 이른 하루다. 고르는 일은
+    //    수리 건 상세와 **같은 함수**가 하고(domain/requested-due-date-link.ts), 화면은
+    //    고른 값을 그냥 그린다. 🔴 어디서 온 날짜인지는 **표에 적지 않는다**(사용자
+    //    결정 2026-11-26 — 「(내자) 표시는 없어도 돼」). 그래서 이 칸은 다른 시스템
+    //    칸과 똑같이 글자 한 줄이고, 화면과 고객사 엑셀이 **같은 글자**를 보인다.
     case "customerRequestedDueDate":
       return item.customerRequestedDueDate;
   }

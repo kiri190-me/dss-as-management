@@ -5,6 +5,7 @@ import {
   CUSTOMER_PORTAL_FORMS,
   manualColumnsOf,
 } from "@/lib/domain/customer-portal-forms";
+import { DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL } from "@/lib/domain/requested-due-date-link";
 
 /**
  * ============================================================================
@@ -68,6 +69,9 @@ const screen = read("src/components/customer-portal/CustomerPortalScreen.tsx");
 const action = read("src/lib/server/actions/customer-portal.ts");
 const mutation = read("src/lib/db/mutations/customer-portal.ts");
 const query = read("src/lib/db/queries/customer-portal.ts");
+/** 🔴 고객사 엑셀로 나가는 두 자리. 출처 표시가 여기 닿지 않는다는 것을 아래에서 잰다. */
+const exportDomain = read("src/lib/domain/customer-portal-export.ts");
+const exportService = read("src/lib/server/services/customer-portal-export.ts");
 
 describe("🔴 1. 밖으로 내보내던 길이 통째로 없어졌다 (2026-10-04)", () => {
   const existsInRepo = (relativePath: string) =>
@@ -788,16 +792,92 @@ describe("표를 그리는 일은 양식 정의만 보고 한다", () => {
     assert.ok(body.includes("readManualValues(form, item.formValues)"));
   });
 
-  test("🔴 「납품 요청일」은 접수 건의 고객 요청 납기일을 그대로 그린다", () => {
-    assert.ok(
-      body.includes("case \"customerRequestedDueDate\": return item.customerRequestedDueDate;"),
-      "그 칸을 그리는 자리가 사라졌다"
-    );
-    // 내자 납기요청일로 되돌아가면 이 화면이 그 함수를 다시 부르게 된다.
-    assert.ok(
-      !code(screen).includes("formatDomesticOrderDueDateLines"),
-      "내자 정리의 납기요청일로 되돌아갔다 — 2026-09-30 사용자 확인을 먼저 읽을 것"
-    );
+  /**
+   * ══════════════════════════════════════════════════════════════════════
+   * 🔴 「납품 요청일」 — **상세와 같은 함수로 고르고, 내자 칸은 직접 안 읽는다**
+   * ══════════════════════════════════════════════════════════════════════
+   * 2026-11-26 에 뜻이 바뀐 묶음이다. 전에는 「내자 납기요청일이 **아니다**」를 재고
+   * 있었는데, 이제 그 말이 사람을 틀린 쪽으로 이끈다 — 이 표는 수리 건 상세·전체
+   * A/S 현황·종 알림이 쓰는 그 함수로 날짜를 고르고, 그 함수는 건의 칸이 비면
+   * **내자에서 빌린다**(domain/requested-due-date-link.ts). 결과적으로 내자 날짜가
+   * 들어가는 줄이 있고, 그것이 맞다.
+   *
+   * 🔴 2026-09-30 이 막은 것은 그대로 산다: **이 화면이 내자 칸을 직접 읽으면 안
+   * 된다.** 빌리는 판단은 저 함수 하나가 하고, 화면은 고른 값을 그린다.
+   *
+   * 🔵 값으로 ①②③(적힌 값 · 빌려 온 값 · 둘 다 없음)을 재는 것은 여기가 아니라
+   * db/queries/customer-portal-requested-due-date.integration.test.ts 다 — 빌리려면
+   * 내자 줄이 실제로 있어야 해서 글자로는 잴 수 없다.
+   *
+   * 🔴 **어디서 온 날짜인지는 표에 안 적는다**(사용자 결정 2026-11-26 — 「(내자)
+   * 표시는 없어도 돼」). 한 번 붙였다가 화면을 보고 빼신 것이라, 그 칸은 다른 시스템
+   * 칸과 똑같은 글자 한 줄이고 **화면과 고객사 엑셀이 같은 글자**다. 아래 마지막
+   * 시험이 그 가운데 **엑셀로 새는 길**만 계속 막는다.
+   */
+  describe("🔴 「납품 요청일」은 상세와 같은 함수로 고른다 (2026-11-26)", () => {
+    const queryBody = flat(code(query));
+
+    test("🔴 조회가 **그 함수**로 고른다 — 규칙을 베껴 적지 않는다", () => {
+      assert.ok(
+        queryBody.includes("resolveRepairCaseRequestedDueDate({"),
+        "조회가 빌리는 함수를 안 부른다 — 이 화면만 다시 날것을 읽게 된다"
+      );
+      assert.ok(
+        queryBody.includes("customerRequestedDueDate: requestedDueDate.dueDate,"),
+        "고른 날짜를 싣지 않는다 — 판정만 하고 날것을 그대로 내보낸다"
+      );
+    });
+
+    test("🔴 빌려 올 내자 날짜를 **공용 조각**으로 읽는다 — SQL 을 새로 짜지 않는다", () => {
+      assert.ok(
+        queryBody.includes("loadDomesticOrderDueDatesByCaseId(dueDateBorrowerIds(cases))"),
+        "공용 조각을 안 쓴다 — 같은 건이 화면마다 다른 날짜가 된다"
+      );
+    });
+
+    test("🔴 화면은 내자 칸을 **직접** 읽지 않는다", () => {
+      assert.ok(
+        !code(screen).includes("formatDomesticOrderDueDateLines"),
+        "화면이 내자 납기요청일을 직접 그린다 — 빌리는 판단은 도메인 한 곳이다"
+      );
+      assert.ok(
+        !code(screen).includes("pickEarliestDueDate"),
+        "화면이 여럿 중 하나를 직접 고른다 — 그 규칙은 도메인 한 곳이다"
+      );
+    });
+
+    test("🔴 표는 고른 날짜를 **그대로** 그린다 — 출처를 덧붙이지 않는다", () => {
+      assert.ok(
+        body.includes("case \"customerRequestedDueDate\": return item.customerRequestedDueDate;"),
+        "그 칸을 그리는 자리가 사라졌다"
+      );
+      // 🔵 무엇을 재는지 먼저 못 박는다 — 상수가 빈 글자면 아래가 공짜로 통과한다.
+      assert.ok(
+        DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL.length > 0,
+        "출처 표시 상수가 비었다 — 아래 단언이 뜻을 잃는다"
+      );
+      assert.ok(
+        !body.includes(DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL) &&
+          !body.includes("DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL"),
+        `표에 출처 표시(${DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL})가 붙었다 — 2026-11-26 에 보고 빼신 것이다`
+      );
+    });
+
+    test("🔴 **엑셀에도 출처 표시가 가지 않는다** — 내보내는 쪽은 그 표시를 아예 모른다", () => {
+      for (const [name, source] of [
+        ["domain/customer-portal-export.ts", exportDomain],
+        ["server/services/customer-portal-export.ts", exportService],
+      ] as const) {
+        assert.ok(
+          !code(source).includes("Borrowed"),
+          `${name} 이 빌려 왔는지를 읽는다 — 고객사 파일에 출처가 적힐 길이 생겼다`
+        );
+        assert.ok(
+          !code(source).includes(DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL),
+          `${name} 에 출처 표시가 있다 — 엑셀에는 날짜만 간다(2026-11-26 결정)`
+        );
+      }
+    });
   });
 });
 

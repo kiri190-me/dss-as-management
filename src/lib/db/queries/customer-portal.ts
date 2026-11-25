@@ -16,8 +16,13 @@ import {
   type PortalFormCustomer,
 } from "../../domain/customer-portal-forms";
 import { foldWeeklyReportKind, type WeeklyReportKind } from "../../domain/weekly-report";
+import { resolveRepairCaseRequestedDueDate } from "../../domain/requested-due-date-link";
 import type { WorkflowType } from "../../domain/types";
 import { listQuoteInfoForRepairCases } from "./domestic-orders";
+import {
+  dueDateBorrowerIds,
+  loadDomesticOrderDueDatesByCaseId,
+} from "./repair-case-domestic-order-due-dates";
 import {
   joinQuoteNumbers,
   listArchiveQuoteNumbers,
@@ -50,6 +55,22 @@ import { listRepairCasesByCustomerId } from "./repair-cases";
  * 화면의 `전체 / RFG / MB` 고르개가 읽는 값이다. 🔴 **판정은 주간보고와 같은
  * 함수**(domain/weekly-report.ts 의 foldWeeklyReportKind)를 그대로 부르고, 접을
  * 수 없는 줄은 null 이다 — 까닭은 아래 foldPortalKind 에 있다.
+ *
+ * ── 「납품 요청일」도 **빌려 그린다** (2026-11-26) ───────────────────────
+ * 이 저장소에서 「고객 요청 납기일」은 2026-08-26 부터 **한 칸이 아니라 두 칸의
+ * 판정**이다 — 그 건에 적힌 값이 먼저, 비면 연결된 내자 정리의 납기요청일 중
+ * 가장 이른 하루(domain/requested-due-date-link.ts). 🔴 **이 조회만 그 판정을
+ * 안 거치고 날것을 읽고 있었다.** 그래서 수리 건 상세에는 날짜가 보이는데
+ * 고객사 표에는 `-` 인 건이 있었고, 그 빈칸이 고객사 엑셀로 나갔다(사용자 신고
+ * 2026-11-26). 이제 다섯 자리가 같은 함수를 지난다.
+ *
+ * 🔴 **빌려 온 날짜도 고객사 엑셀에 나간다**(사용자 결정 2026-11-26). 「고객이 우리
+ * 약속으로 읽는다」는 우려를 전달한 위에서 내린 결정이다 — 되돌리기 전에 이 문단을
+ * 읽을 것.
+ *
+ * 🔴 **어디서 온 날짜인지는 어디에도 안 적는다**(같은 날 결정 — 「(내자) 표시는
+ * 없어도 돼」). 화면에 꼬리표를 붙였다가 보고 빼신 것이라, 되살리기 전에 물을 것.
+ * 그래서 **화면 표와 고객사 엑셀이 같은 글자**다.
  * ============================================================================
  */
 
@@ -132,11 +153,32 @@ export type CustomerPortalItem = {
   /** 발주발행일 — 엑셀의 「ICD PO 발행일」 · 「P.O 발행 일」. */
   orderIssuedDate: string | null;
   /**
-   * 접수 건의 **고객 요청 납기일** — JUSUNG 표의 「납품 요청일」.
+   * JUSUNG 표의 「납품 요청일」에 **그릴 날짜.**
    *
-   * ⚠️ 내자 정리의 납기요청일(domestic_order_due_dates)이 **아니다**
-   * (2026-09-30 사용자 확인 — 까닭은 domain/customer-portal-forms.ts 의
-   * PortalSystemField 주석에).
+   * 🔴 **`repair_cases.customer_requested_due_date` 날것이 아니다**(2026-11-26).
+   * 이 건에 적힌 고객 요청 납기일이 먼저이고, 비어 있으면 연결된 내자 정리의
+   * 납기요청일 중 가장 이른 하루를 **빌려 온다** — 고르는 일은 수리 건 상세 ·
+   * 전체 A/S 현황 · 내 작업 · 종 알림 넷이 이미 쓰는 **그 함수 하나**가 한다
+   * (domain/requested-due-date-link.ts 의 resolveRepairCaseRequestedDueDate).
+   * 규칙을 여기 베껴 적지 않는다.
+   *
+   * ⚠️ 2026-11-26 까지 이 화면만 혼자 날것을 읽었다. 그래서 **수리 건 상세에는
+   * 날짜가 보이는데 고객사 표에는 `-` 인** 건이 있었고, 그 빈칸이 그대로 고객사
+   * 엑셀로 나갔다 — 사용자 신고 2026-11-26. 빌려 그리는 건이 몇인지는 운영에서
+   * 이미 재어 두었다(2026-10-30 `npm run check:requested-due-date-sync`:
+   * 「내자에만 적힘」 8건). 그쪽 설계는 그 8건을 두고 「화면에 보이는 날짜가 이미
+   * 같다」고 적었는데, **이 화면은 거기 안 들어 있었다.**
+   *
+   * 🔴 **양쪽 어디에도 없으면 null 이다.** 오늘 날짜도, 사내 목표일도 메우지
+   * 않는다 — 아무도 약속한 적 없는 날짜가 고객사 표에 적힌다.
+   *
+   * 🔴 **어디서 온 날짜인지는 싣지 않는다**(사용자 결정 2026-11-26 — 「(내자)
+   * 표시는 없어도 돼」). 고르는 함수는 `borrowed` 를 함께 내놓지만 그 값을 여기
+   * 담지 않는다 — 그리는 자리가 없는 값을 줄마다 들려 보내면 언젠가 누가 그것을
+   * 조용히 보기 시작한다(queries/repair-case-domestic-order-due-dates.ts 머리말의
+   * 같은 규율). 🔵 되살리는 것은 이 조회에서 한 줄이고, 재료는 DB 에 그대로 있다.
+   *
+   * 🔵 그래서 **화면 표와 고객사 엑셀이 같은 글자**다 — 표에만 붙는 꼬리표가 없다.
    */
   customerRequestedDueDate: string | null;
   /**
@@ -348,6 +390,26 @@ export async function listPortalItemsForCustomer(
 
   const passSlipsByCase = await listPassSlipAttachmentIds(cases.map((c) => c.id));
 
+  /**
+   * 「납품 요청일」이 **빌려 올** 내자 납기요청일 — 따로 한 번 더 읽는다(2026-11-26).
+   *
+   * 🔴 **조인으로 끌어오지 않는다.** 한 건에 내자 줄이 여럿이고(분할 발주) 줄마다
+   * 날짜가 또 여럿이라(분할 납품) 접수 건 조회에 붙이면 그 건이 날짜 수만큼
+   * 복제된다 — 표에 같은 줄이 서너 번 선다. 공용 조각이 이미 그 모양을 피해
+   * 두었으므로 그것을 그대로 부른다(queries/repair-case-domestic-order-due-dates.ts,
+   * 전체 A/S 현황·종 알림 넷과 **같은 함수**다).
+   *
+   * 🔵 **빌릴 건만 묻는다**(dueDateBorrowerIds) — 자기 칸이 찬 건은 어차피 내자를
+   * 보지 않는다. 빌릴 건이 하나도 없으면 질의가 아예 돌지 않는다.
+   *
+   * 🔴 `row.domesticOrderDueDates` 를 **읽지 마라 — 늘 비어 있다.** 위
+   * listRepairCasesByCustomerId 가 매퍼에 빈 배열을 넘긴다(그 함수 주석: 고객사
+   * 상세의 A/S 이력은 이 날짜도 「납기 지연」 배지도 안 그린다). 그 조회를 고치는
+   * 대신 여기서 읽는 까닭은, 그 함수를 고치면 고객사 상세 쪽 isOverdue 까지 함께
+   * 달라지기 때문이다 — 이 조각이 바꾸려는 것은 고객 안내 현황 하나다.
+   */
+  const dueDatesByCase = await loadDomesticOrderDueDatesByCaseId(dueDateBorrowerIds(cases));
+
   // 🔴 내자 정리에 번호가 **없는** 건들만 공유폴더를 본다(위 머리말). 훑기는 요청당 한 번이다.
   const archiveNumbers = await listArchiveQuoteNumbers(cases, quoteInfo);
 
@@ -371,6 +433,12 @@ export async function listPortalItemsForCustomer(
       row.lotNumber,
       row.serialNumber
     );
+    // 🔴 「납품 요청일」 — 상세·목록·알림이 쓰는 **그 함수 하나**로 고른다(2026-11-26).
+    //    이 건에 적힌 값이 먼저, 비면 내자에서 빌린다. 규칙은 저쪽에만 있다.
+    const requestedDueDate = resolveRepairCaseRequestedDueDate({
+      customerRequestedDueDate: row.customerRequestedDueDate,
+      domesticOrderDueDates: dueDatesByCase.get(row.id) ?? [],
+    });
     return {
       sourceKind: "CASE",
       sourceId: row.id,
@@ -392,8 +460,9 @@ export async function listPortalItemsForCustomer(
       kind: foldPortalKind(row.workflowType),
       endUserName: row.endUserName,
       orderIssuedDate: quote?.orderIssuedDate ?? null,
-      // 「납품 요청일」 — 접수 건에 붙은 값이라 따로 읽을 것이 없다.
-      customerRequestedDueDate: row.customerRequestedDueDate,
+      // 🔴 고른 **날짜만** 싣는다 — `requestedDueDate.borrowed` 는 그리는 자리가
+      //    없어 담지 않는다(그 칸 주석, 사용자 결정 2026-11-26).
+      customerRequestedDueDate: requestedDueDate.dueDate,
       formValues: toStringMap(status?.formValues),
       passSlipAttachmentIds: passSlipsByCase.get(row.id) ?? [],
       // 줄마다 **같은 배열**을 가리킨다(베껴 담지 않는다 — 건이 수십 개다).

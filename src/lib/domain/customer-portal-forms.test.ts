@@ -171,15 +171,36 @@ describe("🔴 손으로 적는 칸은 확정된 여섯뿐이다", () => {
     );
   });
 
-  test("🔴 「납품 요청일」은 접수 건의 **고객 요청 납기일**이다 — 내자 납기요청일이 아니다", () => {
+  /**
+   * 🔴 시험 이름이 2026-11-26 에 바뀌었다. 전에는 「**내자 납기요청일이 아니다**」였는데,
+   * 그 말이 이제 사람을 틀린 쪽으로 이끈다 — 이 열은 수리 건 상세와 **같은 함수**로
+   * 날짜를 고르고 그 함수는 건의 칸이 비면 내자에서 빌린다(domain/
+   * requested-due-date-link.ts). 즉 **결과적으로 내자 날짜가 들어가는 줄이 있다.**
+   *
+   * 🔴 그래도 2026-09-30 이 막은 것은 그대로 살아 있다: 이 **열 정의가 내자 칸을
+   * 직접 가리키면 안 된다.** 여기서 재는 것이 그것이고, 「빌려 오는가」는 값이 도는
+   * 자리에서 잰다 — 짝은 둘이다:
+   *   · db/queries/customer-portal-requested-due-date.integration.test.ts (①②③ 값)
+   *   · components/customer-portal/customer-portal-form-view.test.ts (그 함수를 부르는가)
+   */
+  test("🔴 「납품 요청일」 열은 접수 건의 **고객 요청 납기일** 칸을 가리킨다 — 손으로 적는 칸이 아니다", () => {
     const column = formOf("JUSUNG").columns.find((c) => c.label === "납품 요청일");
     assert.ok(column);
     assert.equal(column.kind, "SYSTEM", "손으로 적거나 여러 줄로 그리는 칸이 아니다");
     assert.equal(
       column.kind === "SYSTEM" ? column.field : null,
       "customerRequestedDueDate",
-      "내자 정리의 납기요청일로 되돌아갔다 — 2026-09-30 사용자 확인을 먼저 읽을 것"
+      "열이 가리키는 칸이 바뀌었다 — PortalSystemField 주석(2026-09-30 · 2026-11-26)을 먼저 읽을 것"
     );
+  });
+
+  test("🔴 그 열을 가진 양식은 **JUSUNG 하나**다 — ICD · INVENIA 는 이 칸을 안 그린다", () => {
+    const withColumn = CUSTOMER_PORTAL_FORMS.filter((form) =>
+      form.columns.some(
+        (column) => column.kind === "SYSTEM" && column.field === "customerRequestedDueDate"
+      )
+    ).map((form) => form.id);
+    assert.deepEqual(withColumn, ["JUSUNG"]);
   });
 
   test("「Parts 명」은 모델명에서 계산한다 — 손으로 적지 않는다", () => {

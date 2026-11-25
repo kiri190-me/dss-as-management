@@ -17,6 +17,7 @@ import {
   type PortalExportItem,
 } from "./customer-portal-export";
 import { CUSTOMER_PORTAL_FORMS, findPortalFormById } from "./customer-portal-forms";
+import { DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL } from "./requested-due-date-link";
 
 /*
  * 🔴 실제 고객 자료를 쓰지 않는다. 파일 이름의 **모양**만 실측(2026-09-30, 공유폴더)에서
@@ -322,5 +323,73 @@ describe("줄 자료 — 열 차례는 양식이 정한 그대로", () => {
     const form = findPortalFormById("ICD")!;
     const row = buildPortalExportRow(form, item({ modelName: "ZZZ-없는모델" }), 1);
     assert.deepEqual(row[form.columns.findIndex((column) => column.key === "partsName")], { kind: "empty" });
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 「납품 요청일」이 고객사 엑셀 칸이 되기까지 (2026-11-26)
+ * ============================================================================
+ * 🔵 **여기서는 「빌려 온 날짜인가」가 보이지 않는다 — 그것이 맞다.** 어느 날짜가
+ * 이기는지(건에 적힌 값이 먼저, 비면 내자에서 빌린다)는 조회가 이미 골라 두었고
+ * (db/queries/customer-portal.ts), 이 자리가 받는 것은 **고른 결과 한 글자**다.
+ * 내보내는 쪽은 그 표시를 아예 모르고, 그래서 고객사 파일에 출처가 적힐 길이 없다.
+ * 🔵 **화면 표도 마찬가지다** — 출처 표시는 2026-11-26 에 붙였다가 사용자가 화면을
+ * 보고 빼신 것이라(「(내자) 표시는 없어도 돼」), 지금은 표와 엑셀이 **같은 글자**다.
+ *
+ * 🔴 그러니 여기서 재는 것은 셋이다: **고른 값이 손대지 않고 그 칸에 가는가** ·
+ * **없으면 비는가** · **다른 양식 둘은 안 바뀌는가**. 값으로 ①②③(적힌 값 · 빌려 온
+ * 값 · 둘 다 없음)을 가르는 것은 내자 줄이 실제로 있어야 해서 여기서 못 한다 —
+ * db/queries/customer-portal-requested-due-date.integration.test.ts 가 한다.
+ * ============================================================================
+ */
+describe("🔴 납품 요청일 — 고른 날짜가 그대로 엑셀 칸이 된다 (2026-11-26)", () => {
+  const jusung = findPortalFormById("JUSUNG")!;
+  const cellAt = (row: PortalExportCell[], key: string) =>
+    row[jusung.columns.findIndex((column) => column.key === key)];
+
+  test("🔵 먼저 — 그 열이 JUSUNG 양식에 있다(아래 단언들이 잴 것이 있다)", () => {
+    const index = jusung.columns.findIndex((column) => column.key === "deliveryRequestDate");
+    assert.notEqual(index, -1, "열이 없어졌다 — 아래 단언이 전부 뜻을 잃는다");
+    assert.equal(jusung.columns[index].label, "납품 요청일");
+  });
+
+  test("날짜가 있으면 **그 날짜**가 날짜로 들어간다", () => {
+    const row = buildPortalExportRow(jusung, item({ customerRequestedDueDate: "2026-10-22" }), 1);
+    assert.deepEqual(cellAt(row, "deliveryRequestDate"), { kind: "date", iso: "2026-10-22" });
+  });
+
+  test("🔴 **없으면 빈칸이다** — 오늘도, 다른 납기일도 메우지 않는다", () => {
+    const row = buildPortalExportRow(jusung, item({ customerRequestedDueDate: null }), 1);
+    assert.deepEqual(cellAt(row, "deliveryRequestDate"), { kind: "empty" });
+    // 🔵 짝 — 「언제나 빈칸」이라서 통과한 것이 아니다.
+    const filled = buildPortalExportRow(jusung, item({ customerRequestedDueDate: "2026-10-22" }), 1);
+    assert.notDeepEqual(cellAt(filled, "deliveryRequestDate"), { kind: "empty" });
+  });
+
+  test("🔴 값에 출처 표시가 섞이지 않는다 — 엑셀에는 날짜만 간다", () => {
+    const row = buildPortalExportRow(jusung, item({ customerRequestedDueDate: "2026-10-22" }), 1);
+    assert.equal(
+      cellAt(row, "deliveryRequestDate").kind,
+      "date",
+      "글자가 되었다 — 날짜 말고 다른 것이 붙었다는 뜻이다"
+    );
+    for (const cell of row) {
+      assert.ok(
+        !(cell.kind === "text" && cell.text.includes(DUE_DATE_FROM_DOMESTIC_ORDER_SHORT_LABEL)),
+        "줄 어딘가에 출처 표시가 적혔다"
+      );
+    }
+  });
+
+  test("🔴 **ICD · INVENIA 는 이 값을 아예 안 적는다** — 그 둘은 한 칸도 안 바뀐다", () => {
+    for (const formId of ["ICD", "INVENIA"] as const) {
+      const form = findPortalFormById(formId)!;
+      assert.deepEqual(
+        buildPortalExportRow(form, item({ customerRequestedDueDate: "2026-10-22" }), 1),
+        buildPortalExportRow(form, item({ customerRequestedDueDate: null }), 1),
+        `${formId} 줄이 납품 요청일 값에 따라 달라진다`
+      );
+    }
   });
 });
