@@ -69,9 +69,9 @@
   </div>
   <div class="stat">
     <div class="note">갈래 B · 납기일 확정</div>
-    <div class="num">3 / 6</div>
-    <div class="bar b"><i style="width:50%"></i></div>
-    <div class="note">칸이 생겼습니다 · 다음은 쓰기 통로</div>
+    <div class="num">5 / 6</div>
+    <div class="bar b"><i style="width:83%"></i></div>
+    <div class="note">마지막 — 알림 끄기만 남았습니다</div>
   </div>
   <div class="stat">
     <div class="note">마이그레이션</div>
@@ -86,7 +86,7 @@
   </div>
   <div class="stat">
     <div class="note">안 올린 커밋</div>
-    <div class="num">10 + 2 + 1</div>
+    <div class="num">13 + 2 + 1</div>
     <div class="note">A/S · dss-core · 포털 (앞 둘은 같이)</div>
   </div>
 </div>
@@ -275,13 +275,32 @@
       <td>시험 +41 · 배지 설정 쌍 29→31 · <code>8ea98cde</code></td></tr>
   <tr><td>②</td><td>확정 칸 마이그레이션 (<code>0133</code>)</td><td><span class="st done">끝 · 적용됨</span></td>
       <td class="grn">칸 둘·제약 둘을 DB에서 모양까지 확인 · <code>b2bb03dd</code></td></tr>
-  <tr><td>③</td><td>쓰기 통로 — 확정 / 해제</td><td><span class="st wait">다음</span></td>
-      <td class="red">되얹기를 빠뜨리면 조용히 깨집니다 — 아래</td></tr>
-  <tr><td>④</td><td>화면 — [납기일 확정] 단추</td><td><span class="st wait">대기</span></td>
-      <td>눈 확인 자리</td></tr>
-  <tr><td>⑤</td><td>확정하면 알림 끄기</td><td><span class="st wait">대기</span></td>
-      <td>눈 확인 자리</td></tr>
+  <tr><td>③+④</td><td>쓰기 통로 · 해제 · <b>[납기일 확정] 단추</b></td><td><span class="st done">끝 · 커밋됨</span></td>
+      <td>시험 +35 · <b>확정하면 날짜가 잠깁니다</b> · <code>18a4bdd0</code></td></tr>
+  <tr><td>③-A</td><td><b>빌려 온 날짜도 확정</b> + 수리 건 쪽 덮어쓰기 거절</td><td><span class="st done">끝 · 커밋됨</span></td>
+      <td>시험 +22 · <code>9eb03da1</code></td></tr>
+  <tr><td>⑤</td><td><b>확정하면 알림 끄기</b></td><td><span class="st doing">진행 중</span></td>
+      <td class="red">원래 요청의 핵심 · 마지막</td></tr>
 </table>
+
+<div class="warn">
+  <div class="t">③에서 설계가 한 번 뒤집혔습니다 (쓰는 분 결정)</div>
+  <p style="margin:6px 0 0">제가 「<b>날짜를 고치면 확정이 조용히 풀린다</b>」로 잡았는데,
+  <b>「[확정 해제]를 해야만 날짜를 고칠 수 있도록 해줘」</b>로 바뀌었습니다.
+  <span class="grn">확정이 잠금이 됐습니다</span> — 조용히 풀리는 것보다 막고 까닭을 말하는 쪽이 낫습니다.</p>
+  <p style="margin:6px 0 0">덧붙여 막은 것 둘: <b>확정된 회차를 지우는 것</b>(날짜만 잠그면 지우고 새로 만들면 그만입니다),
+  그리고 <b>수리 건 쪽에서 날짜가 흘러와 덮는 길</b>(그 길은 울타리를 안 지나고 있었습니다).
+  🔵 <b>비고·납품일은 그대로 고쳐집니다</b> — 확정은 납기요청일만 잠급니다.</p>
+</div>
+
+<div class="ok">
+  <div class="t">「수리 건 요청일」 줄도 같은 취급이 됐습니다</div>
+  <p style="margin:6px 0 0">회차를 하나도 안 적은 줄은 수리 건 날짜를 <b>빌려 그리기만</b> 해서
+  확정을 적을 자리가 없었습니다. 이제 단추를 누르면 <b>그 날짜로 1차 회차를 만들어</b> 확정합니다.</p>
+  <p style="margin:6px 0 0"><span class="red">「수리 건 요청일」 꼬리표는 확정한 줄에서 사라집니다</span> —
+  2026-11-25에 <b>받아들이기로</b> 한 결과입니다(「애초에 그 표시가 필요 없다고 생각했다」).
+  🔵 확정 안 한 줄에는 그대로 뜹니다.</p>
+</div>
 
 <div class="tip">
   <div class="t">①과 ⑤를 일부러 떼어 놓았습니다</div>
