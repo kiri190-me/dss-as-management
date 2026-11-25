@@ -128,6 +128,13 @@ export default async function MiscCasesPage() {
      * 🔵 **값은 줄마다 하나**다 — 회차가 여럿이어도 「하나라도 임박이면 참」이다.
      * 접는 규칙도 그 함수가 갖는다(이 화면에는 납기요청일 칸이 없어 회차마다 세울
      * 자리가 없다 — components/misc-cases/misc-case-fields.tsx).
+     *
+     * 🔴 **[납기일 확정]은 이 배지를 끄지 않는다**(2026-11-25 사용자 결정). 확정하면
+     * 종 알림에서만 그 회차가 빠지고, 배지와 붉은 날짜는 그대로 선다 — 날짜가
+     * 다가온다는 사실 자체는 확정으로 변하지 않기 때문이다. 그래서 확정을 거르는 일은
+     * 알림 조회 안에만 있고 이 함수는 그 칸을 보지 않는다. 🔵 **그래서 「확정한 줄은
+     * 종에 없는데 표에는 배지가 있다」가 정상이다** — 신고를 받으면 먼저 이 갈림을
+     * 확인하라(domain/notifications.ts 의 그 절 머리말).
      */
     isDueDateNear: isMiscCaseDueDateNear(row.dueDates, now),
   }));

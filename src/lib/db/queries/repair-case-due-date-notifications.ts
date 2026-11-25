@@ -3,11 +3,15 @@ import "server-only";
 import { asc, eq } from "drizzle-orm";
 import { db } from "../client";
 import { repairCases, workflowSteps } from "../schema";
-import { isRepairCaseDueDateWithinNotificationWindow } from "@/lib/domain/notifications";
+import {
+  isRepairCaseDueDateSilencedByConfirmation,
+  isRepairCaseDueDateWithinNotificationWindow,
+} from "@/lib/domain/notifications";
 import { resolveRepairCaseRequestedDueDate } from "@/lib/domain/requested-due-date-link";
 import { isRepairCaseShipmentFinished } from "@/lib/domain/shipment-finished";
 import {
   dueDateBorrowerIds,
+  loadDomesticOrderDueDateConfirmationsByCaseId,
   loadDomesticOrderDueDatesByCaseId,
 } from "./repair-case-domestic-order-due-dates";
 
@@ -43,7 +47,7 @@ import {
  * **양쪽 어디에도 날짜가 없으면 뜨지 않는다** — 그 함수가 `null` 을 주고,
  * isRepairCaseDueDateWithinNotificationWindow 가 `null` 을 거짓으로 돌려준다.
  *
- * ── 빼는 것 셋 ──────────────────────────────────────────────────────────
+ * ── 빼는 것 넷 ──────────────────────────────────────────────────────────
  *  · 휴지통에 든 건(`repair_cases.is_deleted`) — 목록에도 없는 건을 챙기라는
  *    알림은 할 일이 아니다. 결재 대기·결재 결과·장기 PO 미발행이 모두 같은
  *    조건을 건다.
@@ -54,6 +58,16 @@ import {
  *  · 창 밖 — 오늘보다 이르거나(이미 지난 납기) 오늘 + 7일보다 늦은 날짜.
  *    🔴 **지난 납기는 이 알림의 범위가 아니다**(domain/notifications.ts 의
  *    isRepairCaseDueDateWithinNotificationWindow 주석).
+ *  · 🔴 **납기일이 [납기일 확정]된 건**(2026-11-25) — 붙어 있는 내자 회차가 **전부**
+ *    확정이면 뺀다. 사용자 요구 원문: 「[납기일 확정] 버튼을 누르면 포털의 알림 중에
+ *    **[납기 임박] 알림이 뜨지 않도록** 해줘.」 판정은 여기 적지 않는다
+ *    (domain/notifications.ts 의 isRepairCaseDueDateSilencedByConfirmation — 「전부」인
+ *    까닭과 「회차가 없으면 거짓」인 까닭이 그 주석에 있다).
+ *    🔴 **배지는 안 끈다.** 같은 사실을 그리는 isRepairCaseDueDateNear 는 확정을 보지
+ *    않는다 — 끄는 것은 종뿐이라는 것이 그날의 결정이다. 그래서 이 거르기가 도메인의
+ *    공용 판정이 아니라 **이 조회 안에** 있다.
+ *    🔵 「납기 지연」은 확정해도 그대로 뜬다(queries/repair-case-overdue-notifications.ts
+ *    는 확정을 한 글자도 모른다).
  *
  * ── 조인하지 않고 두 번 읽는다 ──────────────────────────────────────────
  * 한 수리 건에 내자 줄이 여럿이고(분할 발주) 줄 하나에 날짜가 또 여럿이다
@@ -143,5 +157,20 @@ export async function listRepairCasesWithDueDateNear(
     if (dueDate === null) continue;
     items.push({ repairCaseId: row.id, intakeNumber: row.intakeNumber, dueDate, borrowed });
   }
-  return items;
+
+  // ── 🔴 [납기일 확정]된 건을 뺀다 (2026-11-25, 파일 머리말의 넷째) ──────────
+  // 🔵 **창 안에 든 건만** 묻는다 — 한 줄에 몇 건뿐이라 질의가 목록 전체를 훑지
+  //    않는다(위 「빌릴 건만」 좁히기와 같은 생각이고, 이 차례가 곧 그 좁히기다).
+  //    🔴 그래서 이 줄을 위로 올리지 마라 — 올리면 살아 있는 건 전부의 회차를 읽는다.
+  if (items.length === 0) return items;
+  const confirmationsByCaseId = await loadDomesticOrderDueDateConfirmationsByCaseId(
+    items.map((item) => item.repairCaseId)
+  );
+  // 🔴 접는 규칙(「전부 확정이어야 끈다」·「회차가 없으면 안 끈다」)은 도메인이 쥔다.
+  //    여기서 `.every(...)` 를 손으로 적으면 빈 목록이 **참**이 되어, 내자가 안 붙은
+  //    건의 종까지 통째로 꺼진다(그 함수의 머리말).
+  return items.filter(
+    (item) =>
+      !isRepairCaseDueDateSilencedByConfirmation(confirmationsByCaseId.get(item.repairCaseId) ?? [])
+  );
 }

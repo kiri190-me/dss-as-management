@@ -5,7 +5,10 @@ import { db } from "../client";
 import { domesticOrderDueDates, domesticOrders } from "../schema";
 import { domesticOrderDueDateRowLabel } from "@/lib/domain/domestic-order-due-date-label";
 import { resolveDomesticOrderValue } from "@/lib/domain/domestic-order-list";
-import { isDomesticOrderDueDateRowNear } from "@/lib/domain/notifications";
+import {
+  isDomesticOrderDueDateRowConfirmed,
+  isDomesticOrderDueDateRowNear,
+} from "@/lib/domain/notifications";
 
 /**
  * ============================================================================
@@ -41,7 +44,7 @@ import { isDomesticOrderDueDateRowNear } from "@/lib/domain/notifications";
  * 「납기 임박」이 **빌려 와서** 재고 있어서(resolveRepairCaseRequestedDueDate), 여기서
  * 또 세우면 같은 날짜가 종에 두 줄로 선다.
  *
- * ── 빼는 것 셋 ──────────────────────────────────────────────────────────
+ * ── 빼는 것 넷 ──────────────────────────────────────────────────────────
  *  · 휴지통에 든 줄(`domestic_orders.is_deleted`) — 상세가 열리지 않으므로(queries/
  *    domestic-orders.ts 의 getDomesticOrderDetail) 누르면 갈 화면이 없는 알림을 세우지
  *    않는다. 종 알림 전부가 같은 조건을 건다.
@@ -54,6 +57,14 @@ import { isDomesticOrderDueDateRowNear } from "@/lib/domain/notifications";
  *  · 창 밖 — 오늘보다 이른(이미 지난) 날짜와 오늘 + 7일보다 늦은 날짜. 🔴 **지난 납기는
  *    이 알림의 범위가 아니다**(2026-11-25 사용자 요청에 「지연」은 없다 — 기타건에는
  *    지연 알림을 만들지 않았다).
+ *  · 🔴 **[납기일 확정]된 회차**(2026-11-25) — 사용자 요구 원문: 「[납기일 확정] 버튼을
+ *    누르면 포털의 알림 중에 **[납기 임박] 알림이 뜨지 않도록** 해줘.」 판정은 역시
+ *    도메인이 쥔다(isDomesticOrderDueDateRowConfirmed).
+ *    🔴 **그 거르기는 위 세 조건과 달리 도메인의 `isDomesticOrderDueDateRowNear` 안에
+ *    없다.** 그 함수는 **화면 배지 둘**이 함께 쓰는데(기타건 현황 목록 · 기타건 상세
+ *    머리 카드), 확정을 거기 넣으면 **배지와 붉은 날짜까지 함께 꺼진다** — 사용자
+ *    결정은 **종만** 끄는 것이다. 그래서 끄는 일은 **이 조회 안에서만** 한다.
+ *    🔵 그래도 규칙을 손으로 적지는 않는다 — 「확정인가」를 묻는 한 줄도 도메인 함수다.
  * 🔵 **승인 상태는 보지 않는다.** 승인은 「보낼 수 있다」이지 「보냈다」가 아니다 —
  *    승인만 받고 안 보낸 회차야말로 납기가 다가오면 챙겨야 하는 줄이다.
  *
@@ -138,6 +149,9 @@ export async function listDomesticOrdersWithDueDateNear(
       note: domesticOrderDueDates.note,
       completedAt: domesticOrderDueDates.completedAt,
       deliveredDate: domesticOrderDueDates.deliveredDate,
+      // 🔴 [납기일 확정] 한 칸(2026-11-25). **읽기만** 더한다 — 질의는 여전히 하나이고,
+      //    이 칸으로 거르는 일은 아래 고리 안에서 도메인 함수가 한다(파일 머리말).
+      confirmedAt: domesticOrderDueDates.confirmedAt,
     })
     .from(domesticOrderDueDates)
     .innerJoin(domesticOrders, eq(domesticOrders.id, domesticOrderDueDates.domesticOrderId))
@@ -180,6 +194,10 @@ export async function listDomesticOrdersWithDueDateNear(
       //    (domain/notifications.ts 의 isDomesticOrderDueDateRowNear). 여기서 세 줄로
       //    펴 쓰면 「임박」의 뜻이 종과 표에서 갈릴 수 있다.
       if (!isDomesticOrderDueDateRowNear(row, now)) continue;
+      // 🔴 **[납기일 확정]은 여기서만 끈다**(2026-11-25 — 파일 머리말의 넷째). 위
+      //    판정에 섞어 넣으면 화면 배지 둘이 함께 꺼진다. 🔵 그래서 조건이 **종에만**
+      //    있고, 같은 줄의 다른 회차는 그대로 울린다(끄는 단위가 회차다).
+      if (isDomesticOrderDueDateRowConfirmed(row)) continue;
 
       items.push({
         domesticOrderId,

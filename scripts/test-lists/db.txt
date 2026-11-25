@@ -661,3 +661,12 @@ src/lib/db/mutations/domestic-order-due-date-confirmation.integration.test.ts
 # 뒤에는 다시 맞춰지는가(막다른 길이 아니다) · 🔴 거절 문구에 **회차 · 갈 화면 ·
 # 할 일** 셋이 담기는가.
 src/lib/db/mutations/repair-case-due-date-confirmed-guard.integration.test.ts
+
+# 🔴 [납기일 확정]이 **종을 끄고 배지는 남기는가** — 진짜 DB 위에서(2026-11-25). 끄는 길은 칸을
+# 손으로 찍지 않고 **확정 통로**(setDomesticOrderDueDateRowConfirmation)를 그대로 부른다. 지키는
+# 것: 🔴 기타건은 **회차마다** 꺼지고(1차만 확정하면 2차는 그대로 울며 번호도 「2차」 그대로) ·
+# 🔴 수리 건은 내자 줄이 여럿일 때 **하나만 확정이면 그대로 운다** · 🔴 **내자가 안 붙은 건은
+# 안 꺼진다**(빈 목록을 「전부 확정」으로 읽는 자리) · 🔴 제 칸에 날짜가 적힌 건에서도 꺼진다
+# (결정 3) · 🔵 **배지는 화면이 부르는 조회의 진짜 행으로 함께 잰다**(끄기와 남기기를 한 표본에서
+# 보는 자리는 여기뿐이다) · 🔵 「납기 지연」은 그대로 뜨고(결정 2) 확정을 풀면 다시 운다(결정 4).
+src/lib/db/queries/due-date-near-confirmation.integration.test.ts

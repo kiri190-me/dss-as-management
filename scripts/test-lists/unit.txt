@@ -2313,3 +2313,11 @@ src/lib/validation/repair-case-flowchart-node-share-doc-path.test.ts
 # 하나이고 열쇠를 통로가 따로 적지 않음 · 🔴 모양이 아닌 id·없는 건·휴지통이 모두 404(UUID 검사가
 # 조회보다 앞 — 그 조회에는 관문이 없어 500 이 난다) · 🔴 출처 검사가 세션보다도 앞.
 src/app/api/repair-cases/*/flowchart/share-folder/entries/route-source.test.ts
+
+# 🔴 [납기일 확정]이 끄는 것은 **「납기 임박」의 종뿐**이다(2026-11-25). 지키는 것: 🔴 수리 건은
+# 붙어 있는 내자 회차가 **전부** 확정일 때만 끄고 **회차가 하나도 없으면 안 끈다**(`[].every(…)`
+# 가 참이라 그대로 두면 내자가 안 붙은 건 — A/S 의 대부분 — 이 통째로 조용해진다) · 🔴 조회가 그
+# 접는 규칙을 손으로 적지 않고 도메인에 묻는가 · 🔴 확정을 읽는 질의가 날짜를 읽는 질의와 **같은
+# 조건**인가(휴지통 거르기·빈 배열·null repair_case_id) · 🔴 **「납기 지연」은 확정을 한 글자도
+# 모른다**(사용자 결정 2) · 🔴 수리 건 **배지**도 모른다(끄는 것은 종뿐이다 — 결정 1).
+src/lib/domain/due-date-confirmation-silences-bell.test.ts

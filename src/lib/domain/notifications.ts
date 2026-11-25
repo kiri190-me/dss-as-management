@@ -731,6 +731,11 @@ type DomesticOrderDueDateRowForNearCheck = {
  *
  * 🔵 **승인 상태는 보지 않는다.** 승인은 「보낼 수 있다」이지 「보냈다」가 아니다 —
  * 승인만 받고 안 보낸 회차야말로 납기가 다가오면 챙겨야 하는 줄이다.
+ *
+ * 🔴 **[납기일 확정]도 보지 않는다**(2026-11-25). 확정하면 종은 꺼지지만 **배지와
+ * 붉은 날짜는 그대로 선다**는 것이 사용자 결정이고, 이 함수가 바로 그 배지를 세운다 —
+ * 여기에 확정을 넣으면 배지가 함께 사라진다. 끄는 자리는 **알림 조회 쪽**이고 판정은
+ * 아래 isDomesticOrderDueDateRowConfirmed 가 쥔다(그 절의 머리말).
  */
 export function isDomesticOrderDueDateRowNear(
   row: DomesticOrderDueDateRowForNearCheck,
@@ -766,6 +771,97 @@ export function isMiscCaseDueDateNear(
   now: Date
 ): boolean {
   return dueDates.some((row) => isDomesticOrderDueDateRowNear(row, now));
+}
+
+/**
+ * ────────────────────────────────────────────────────────────────────────────
+ * 🔴 [납기일 확정]이 **종만** 끈다 (2026-11-25)
+ * ────────────────────────────────────────────────────────────────────────────
+ * 사용자 요구 원문: 「납기 요청일 옆에 [납기일 확정] 버튼을 만들어줘 … 이 버튼을
+ * 누르면 포털의 알림 중에 **[납기 임박] 알림이 뜨지 않도록** 해줘.」 확정 칸 · 단추 ·
+ * 울타리는 앞 조각 둘이 세웠고(커밋 18a4bdd0 · 9eb03da1), 이 절은 그 칸을 **읽는**
+ * 쪽이다.
+ *
+ * ── 🔴 왜 바로 위 두 판정 안에 넣지 않았나 — 배지가 함께 꺼진다 ────────────
+ * isDomesticOrderDueDateRowNear 는 종 알림 조회와 **화면 배지 둘**이 함께 쓴다(기타건
+ * 현황 목록 · 기타건 상세 머리 카드 — isMiscCaseDueDateNear). 거기에 확정을 넣으면
+ * 확정한 순간 **배지와 붉은 날짜까지 사라진다.** 🔴 사용자 결정은 그 반대다: **끄는
+ * 것은 종뿐이고 배지는 그대로 선다** — 날짜가 다가온다는 사실 자체는 확정으로 변하지
+ * 않기 때문이다. 그래서 확정은 **알림 조회 쪽에서만** 걸러지고, 그 거르기가 조회마다
+ * 손으로 적히지 않도록 판정만 여기 둔다.
+ * 🔴 **아래 둘을 위 둘 안으로 옮기지 마라** — 옮기는 순간 배지가 함께 꺼진다. 그
+ * 금지는 domain/misc-case-due-date-near.test.ts 가 **글자와 값으로** 함께 지킨다.
+ *
+ * 🔵 **「납기 지연」은 건드리지 않는다**(같은 날의 사용자 결정) — 끄는 것은 「납기
+ * 임박」뿐이다. 그래서 domain/repair-case-overdue.ts 도 그 조회도 확정을 **한 글자도
+ * 모른다.** 날짜가 이미 지났다는 사실은 확정으로 변하지 않는다.
+ * ────────────────────────────────────────────────────────────────────────────
+ */
+
+/**
+ * 확정을 보는 데 필요한 칸 하나.
+ *
+ * ⚠️ `Date | string | null` 인 까닭은 위 DomesticOrderDueDateRowForNearCheck 의
+ * `completedAt` 과 같다 — 조회는 DB 에서 온 `Date` 를 그대로 들고 있고, 화면 쪽 줄은
+ * 서버 컴포넌트 경계를 넘느라 ISO 문자열이다(queries/domestic-orders.ts 의 그 변환).
+ * 묻는 것이 「값이 들어 있는가」 하나라 두 모양을 함께 받아도 답이 갈리지 않는다.
+ */
+type DomesticOrderDueDateRowForConfirmedCheck = {
+  /** 그 회차의 납기일을 [납기일 확정]한 시각. `null` 이면 아직 확정 전이다. */
+  confirmedAt: Date | string | null;
+};
+
+/**
+ * 그 **회차 하나**가 확정되었는가 — 참이면 「기타건 납기 임박」 종에서 그 회차를 뺀다.
+ *
+ * 🔴 **판정은 `confirmed_at` 하나로만 한다.** 확정 두 칸(`confirmed_at` ·
+ * `confirmed_by`)은 CHECK 으로 언제나 함께 움직이지만, 어긋난 행이 생겼을 때 답이
+ * 갈리지 않도록 보는 칸을 하나로 못 박는다 — 그 표의 칸 주석과 편집칸이 이미 쓰는
+ * 규칙 그대로다(domain/domestic-order-cell-edit.ts 의 domesticOrderDueDateEditDraft).
+ *
+ * 🔵 **끄는 단위가 회차다.** 1차를 확정해도 2차의 종은 그대로 울린다 — 기타건의 알림은
+ * 회차마다 한 줄이라(분할 납품) 끄는 단위도 회차여야 한다.
+ */
+export function isDomesticOrderDueDateRowConfirmed(
+  row: DomesticOrderDueDateRowForConfirmedCheck
+): boolean {
+  return row.confirmedAt !== null;
+}
+
+/**
+ * 이 **수리 건**의 「납기 임박」 종을 확정이 끄는가 — 붙어 있는 내자 회차가 **하나도
+ * 빠짐없이** 확정일 때만 참이다.
+ *
+ * ── 🔴 왜 「전부」인가 ──────────────────────────────────────────────────
+ * 수리 건의 알림은 **건마다 한 줄**이고, 그 줄이 보는 날짜는 제 칸이 비었을 때 붙어
+ * 있는 내자 회차에서 **가장 이른 하루**를 빌려 온 값이다
+ * (resolveRepairCaseRequestedDueDate). 회차가 하나라도 확정이 아니면 그 날짜는 아직
+ * 움직일 수 있고(날짜를 잠그는 것은 확정 하나다 —
+ * domain/domestic-order-due-date-rows.ts 의 넷째 울타리), 움직이면 종이 가리키는 날이
+ * 바뀐다. 「하나라도 확정이면 끈다」로 적으면 **아직 안 잠긴 회차의 경보가 조용히
+ * 사라진다.**
+ *
+ * ── 🔴 회차가 **하나도 없으면 거짓**이다 ────────────────────────────────
+ * `[].every(...)` 는 참이다 — 그대로 두면 **내자가 안 붙은 건의 종이 통째로 꺼진다.**
+ * 그런 건이 A/S 의 대부분이라, 이 한 줄이 빠지면 「납기 임박」이 거의 전부 사라지고도
+ * 조회의 단위 시험은 초록으로 남는다(「끄는가」만 재는 시험은 전부 통과한다).
+ *
+ * ── 🔵 제 칸에 날짜가 적힌 건에서도 끈다 ────────────────────────────────
+ * 사용자 결정(2026-11-25) — 「기타건도 수리 건도 끈다, 수리 건이 제 날짜를 가진
+ * 줄에서도」. 두 칸은 저장할 때 서로 따라가고(requested-due-date-link.ts 의 묶기),
+ * 확정된 회차가 걸린 수리 건 저장은 아예 거절되므로(mutations/repair-cases.ts) 확정은
+ * **빌려 온 날짜든 제 날짜든 같은 하루를 잠근다.** 그래서 어느 쪽인지 묻지 않는다.
+ *
+ * 🔴 **끝난 회차(완료 · 납품)도 그대로 센다.** 끝남은 날짜를 잠그는 표시가 아니다 —
+ * 「완료 시 수정」 권한이 있으면 완료된 회차의 납기요청일도 고칠 수 있고, 그것을 막는
+ * 울타리는 확정 하나뿐이다. 「끝났으니 더 안 움직인다」로 접으면 아직 고칠 수 있는
+ * 날짜를 잠긴 것으로 세게 된다.
+ */
+export function isRepairCaseDueDateSilencedByConfirmation(
+  rows: readonly DomesticOrderDueDateRowForConfirmedCheck[]
+): boolean {
+  if (rows.length === 0) return false;
+  return rows.every((row) => isDomesticOrderDueDateRowConfirmed(row));
 }
 
 /**

@@ -154,6 +154,10 @@ export default async function DomesticOrderDetailLayout({
    * HTML 과 어긋난다(hydration). 조건도 여기 적지 않는다 — 종 알림이 쓰는 그 함수
    * 하나에 묻는다(domain/notifications.ts).
    *
+   * 🔴 **[납기일 확정]은 이 배지를 끄지 않는다**(2026-11-25 사용자 결정) — 끄는 것은
+   * 종뿐이다. 확정한 줄에서 **종은 조용한데 머리 카드의 배지는 서 있는** 것이 정상이고,
+   * 그 갈림의 까닭은 domain/notifications.ts 의 그 절 머리말에 있다.
+   *
    * 🔴 **기타건일 때만 세운다** — `repairCaseId` 가 비어 있는 줄이 기타건이다
    * (domain/domestic-order-approval-rules.ts 와 같은 잣대). 이 주소는 수리 건이 붙은
    * 줄에도 열리는데(이 파일 머리말), 그 줄의 납기요청일은 수리 건 쪽 「납기 임박」이
