@@ -996,6 +996,12 @@ export async function createNewDraftVersion(
               // 읽는 쪽이 그 판의 계열로 지금 게시본을 찾으므로(
               // domain/procedure-next-procedure-link.ts) 가리키는 곳은 안 낡는다.
               nextProcedureTemplateId: n.nextProcedureTemplateId,
+              // 2026-11-22(조각 E1) — **가리킨 서류 자리도 함께 복제한다.**
+              // 안 실으면 절차를 개정할 때마다 노드에 매 둔 파일 위치가 조용히
+              // 사라진다 — 바로 위 두 칸이 겪은 것과 같은 고장이다(오류가 안 나고
+              // 그 칸만 null 로 떨어진다). 담긴 값은 「수리 관련」 공유폴더 기준
+              // **상대 경로** 한 줄이라, 판이 달라져도 가리키는 곳은 그대로 옳다.
+              shareDocRelativePath: n.shareDocRelativePath,
               positionX: n.positionX,
               positionY: n.positionY,
               // 2026-11-03(줄기 B-⑤) — **사람이 끌어 놓은 자리도 함께 복제한다.**
