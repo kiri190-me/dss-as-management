@@ -3,9 +3,21 @@
 import { useState } from "react";
 import { REPAIR_CASE_FLOWCHART_NODE_TYPE_CODES, repairCaseFlowchartNodeTypeLabels, type RepairCaseFlowchartNodeType } from "@/lib/domain/repair-case-flowchart-types";
 import { computeCenterAlignedRelativePosition, resolveColumnSnappedRelativePosition, type RelativeDirection, type ColumnSnapCandidate } from "@/lib/graph-editor-core/layout";
+import ContactFolderEntryOpenButton from "@/components/repair-cases/files/ContactFolderEntryOpenButton";
+import CaseFlowchartNodeShareDocPicker, {
+  canOpenCaseFlowchartNodeShareDoc,
+  caseFlowchartNodeShareDocFileName,
+  caseFlowchartNodeShareDocParentPath,
+} from "./CaseFlowchartNodeShareDocPicker";
 import type { CaseFlowchartGraphNode } from "./CaseFlowchartGraph";
 
-export type CaseFlowchartNodeDraft = { title: string; description: string; instructions: string; nodeType: RepairCaseFlowchartNodeType };
+/**
+ * 🔴 `shareDocRelativePath`(2026-11-25) — 이 노드가 가리키는 공유폴더 속 파일 한 자리.
+ * 🔴 **lib/domain/repair-case-flowchart-editor-save-state.ts 에 같은 이름의 타입이 한 벌
+ * 더 있다**(모양이 같아 tsc 가 둘을 구별하지 않는다). 한쪽에만 칸을 더하면 **아무 말도
+ * 없이** 그 칸이 저장 길에서 빠진다 — 늘 둘을 함께 본다.
+ */
+export type CaseFlowchartNodeDraft = { title: string; description: string; instructions: string; nodeType: RepairCaseFlowchartNodeType; shareDocRelativePath: string | null };
 
 /** Same fixed spacing as the procedure editor's "상대 위치로 이동" (NodePropertyPanel.tsx) — vertical reuses the server mutation's own default node-stacking gap for consistency. */
 const RELATIVE_POSITION_SPACING = { horizontal: 140, vertical: 150 } as const;
@@ -78,7 +90,72 @@ const COLUMN_SNAP_TOLERANCE = RELATIVE_POSITION_SPACING.horizontal / 2;
  * effective geometry source as the relative-positioning feature," per this
  * checkpoint's own requirement.
  */
+// ── 🔴 「관련 파일」 구역의 문장 (2026-11-25) ─────────────────────────────
+//
+// 「모든 종류의 노드에 관련된 파일을 … 파일의 위치를 기억해서 도우미를 통해서 폴더에서
+// 파일을 여는 방식으로」(사용자 요구 2026-11-21). 🔴 **올리는 것이 아니다** — 바이트는
+// 이 시스템에 들어오지 않고, 남는 것은 공유폴더 루트 기준 **경로 한 줄**이다. 그 사실을
+// 구역 머리에서 말한다(올리기 칸으로 읽히면 「왜 내려받기가 없지」에서 멈춘다).
+
+export const CASE_NODE_SHARE_DOC_TITLE = "관련 파일";
+export const CASE_NODE_SHARE_DOC_HINT =
+  "파일을 올리지 않고 사내 공유폴더의 자리를 가리킵니다 — 여는 일은 그 PC 의 폴더 열기 도우미가 합니다.";
+/** 🔴 노드당 하나라는 결정(2026-11-21)을 **고르기 전에** 말한다. */
+export const CASE_NODE_SHARE_DOC_REPLACE_HINT =
+  "노드마다 파일 하나만 가리킵니다 — 새로 고르면 지금 가리킨 자리가 바뀝니다.";
+export const CASE_NODE_SHARE_DOC_EMPTY_TEXT = "가리킨 파일이 없습니다.";
+export const CASE_NODE_SHARE_DOC_CLEAR_TEXT = "가리킴 지우기";
+/** 🔴 이 구역의 변경도 [저장]을 눌러야 나간다 — 위 칸들과 같은 규약이다. */
+export const CASE_NODE_SHARE_DOC_SAVE_NOTICE =
+  "가리킴 변경도 화면 상단의 [저장] 버튼으로 다른 변경사항과 함께 저장됩니다.";
+
+/**
+ * 가리킨 자리 한 줄 — 경로 · [열기] · [가리킴 지우기].
+ *
+ * 🔴 **경로를 숨기지 않는다**: 「어느 자리인가」가 이 줄의 전부다. 🔴 [열기]는 연락서 쪽
+ * 단추를 **그대로 가져다 쓴다**(베끼지 않는다) — 도우미 주소를 짓는 일도, Windows 가
+ * 아닌 PC 에서 스스로 사라지는 일도 그 안에 있다. 🔴 열 수 없는 모양이면 단추만 없고
+ * 경로는 그대로 보인다(canOpenCaseFlowchartNodeShareDoc 주석).
+ */
+export function CaseFlowchartNodeShareDocRow({
+  relativePath,
+  onClear,
+}: {
+  relativePath: string;
+  /** 🔴 주지 않으면 지우기 단추가 그려지지 않는다(고칠 수 없는 사람). */
+  onClear?: () => void;
+}) {
+  const openable = canOpenCaseFlowchartNodeShareDoc(relativePath);
+  return (
+    <div
+      data-case-node-share-doc-row=""
+      className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1"
+    >
+      <span className="min-w-0 flex-1 break-all text-[11px] text-zinc-600 dark:text-zinc-400">{relativePath}</span>
+      <span className="flex shrink-0 items-start gap-2">
+        {openable && (
+          <ContactFolderEntryOpenButton
+            folderName={caseFlowchartNodeShareDocParentPath(relativePath)}
+            fileName={caseFlowchartNodeShareDocFileName(relativePath)}
+          />
+        )}
+        {onClear !== undefined && (
+          <button
+            type="button"
+            onClick={onClear}
+            data-case-node-share-doc-clear=""
+            className="text-xs font-medium text-red-700 underline dark:text-red-400"
+          >
+            {CASE_NODE_SHARE_DOC_CLEAR_TEXT}
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
+
 export default function CaseFlowchartNodePropertyPanel({
+  repairCaseId,
   node,
   allNodes,
   isPickingReference = false,
@@ -92,6 +169,11 @@ export default function CaseFlowchartNodePropertyPanel({
   onDelete,
   resolveNodeDimensions,
 }: {
+  /**
+   * 🔴 그 수리 건의 id — 「관련 파일」 고르기 창의 통로 주소에 그대로 간다
+   * (권한의 단위가 건이기 때문이다 — 그 통로의 머리말). 노드 id 가 **아니다**.
+   */
+  repairCaseId: string;
   /** The screen's currently RENDERED node (server baseline merged with any pending draft/position) — never the raw server value alone. */
   node: CaseFlowchartGraphNode;
   /** Every node in the flowchart, ALSO rendered/merged — so "상대 위치로 이동"'s reference-node picker positions against what's actually on screen, including an unsaved drag on the reference node itself. */
@@ -209,6 +291,43 @@ export default function CaseFlowchartNodePropertyPanel({
       </label>
 
       {canEdit && <p className="text-[11px] text-zinc-400 dark:text-zinc-600">위 속성 변경은 화면 상단의 [저장] 버튼으로 다른 변경사항과 함께 저장됩니다.</p>}
+
+      {/*
+        🔴 「관련 파일」 — 🔵 **아무것도 그리지 않는 자리가 있다.** 가리킨 것이 없고 고칠
+        수도 없는 사람에게는 빈 상자가 하나 느는 것뿐이라 구역 자체를 세우지 않는다
+        (제품 모델 쪽 구역과 같은 규율).
+        🔴 고르는 창은 설정이 비어 있으면(지금 개발 PC) **제 상태로 스스로 꺼진다** —
+        여기서 설정을 판정하지 않는다.
+      */}
+      {(draft.shareDocRelativePath !== null || canEdit) && (
+        <div
+          data-case-node-share-doc-section=""
+          className="flex flex-col gap-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-950"
+        >
+          <h4 className="text-xs font-semibold text-zinc-900 dark:text-zinc-50">{CASE_NODE_SHARE_DOC_TITLE}</h4>
+          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{CASE_NODE_SHARE_DOC_HINT}</p>
+
+          {draft.shareDocRelativePath === null ? (
+            <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{CASE_NODE_SHARE_DOC_EMPTY_TEXT}</p>
+          ) : (
+            <CaseFlowchartNodeShareDocRow
+              relativePath={draft.shareDocRelativePath}
+              {...(canEdit ? { onClear: () => onDraftChange({ shareDocRelativePath: null }) } : {})}
+            />
+          )}
+
+          {canEdit && (
+            <>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{CASE_NODE_SHARE_DOC_REPLACE_HINT}</p>
+              <CaseFlowchartNodeShareDocPicker
+                repairCaseId={repairCaseId}
+                onPick={(relativePath) => onDraftChange({ shareDocRelativePath: relativePath })}
+              />
+              <p className="text-[11px] text-zinc-400 dark:text-zinc-600">{CASE_NODE_SHARE_DOC_SAVE_NOTICE}</p>
+            </>
+          )}
+        </div>
+      )}
 
       {canEdit && otherNodes.length > 0 && (
         <div className="flex flex-col gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-900 dark:bg-emerald-950">

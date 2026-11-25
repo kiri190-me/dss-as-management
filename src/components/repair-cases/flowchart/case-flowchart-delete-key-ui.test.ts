@@ -47,13 +47,22 @@ import { readFileSync } from "node:fs";
 const repoUrl = new URL("../../../../", import.meta.url);
 const read = (relativePath: string) => readFileSync(new URL(relativePath, repoUrl), "utf8");
 
+/**
+ * 🔴 **차례를 2026-11-25 에 뒤집었다.** 전에는 JSX 주석(`{/* … *\/}`)을 **통째로** 먼저
+ * 걷었는데, 그 정규식은 `{` 뒤 아무 블록 주석에서나 시작해 **파일 뒤쪽의 첫 `*\/}` 까지**
+ * 게을리 삼킨다. 이 패널의 props 타입이 `}: {` 바로 뒤에 JSDoc 으로 시작하는 탓에, 패널
+ * 본문에 JSX 주석이 **하나 생기자마자** 그 사이의 7천 자가 통째로 사라졌다 —
+ * `<textarea` 세 개가 0 개로 세어지는, 원본은 멀쩡한데 시험만 우는 자리다.
+ * 🔵 지금 차례는 이웃 case-flowchart-structural-deferred-save.test.ts 와 **같다**: 블록
+ * 주석을 먼저 걷으면 JSX 주석은 **속이 비어** `{ }` 짝만 남고, 그것만 치우면 된다.
+ */
 function stripComments(source: string): string {
   return source
-    .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, " ") // JSX 주석 {/* ... */}
-    .replace(/\/\*[\s\S]*?\*\//g, " ") // 블록 주석
+    .replace(/\/\*[\s\S]*?\*\//g, " ") // 블록 주석(JSX 주석의 속도 여기서 걷힌다)
     .split(/\r?\n/)
     .filter((line) => !/^\s*\/\//.test(line)) // 줄 주석
-    .join("\n");
+    .join("\n")
+    .replace(/\{\s*\}/g, " "); // 속이 걷히고 남은 빈 JSX 주석 자리
 }
 
 /** 줄바꿈·들여쓰기 차이로 시험이 깨지지 않도록 공백을 하나로 접는다. */

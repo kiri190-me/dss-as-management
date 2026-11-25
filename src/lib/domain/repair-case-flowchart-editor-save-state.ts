@@ -49,7 +49,14 @@ import type { RepairCaseFlowchartNodeType, RepairCaseFlowchartBranchType } from 
  * Case-Flowchart-specific.
  */
 
-export type CaseFlowchartNodeDraft = { title: string; description: string; instructions: string; nodeType: RepairCaseFlowchartNodeType };
+/**
+ * 🔴 `shareDocRelativePath`(2026-11-25) — 이 노드가 가리키는 공유폴더 속 파일 한 자리.
+ * **빈 글자 규약이 없다**: 다른 글자 칸들은 초안에서 `""`, 서버에서 `null` 로 모양이
+ * 갈리지만(아래 mergeNodeForRender 가 그 둘을 옮긴다) 이 칸은 초안도 서버도 `string |
+ * null` 그대로다. 빈 글자는 **경로가 아니고**(검사가 거절한다), 「안 가리킴」을 뜻하는
+ * 값이 둘(`""` 와 `null`)이 되면 「안 바뀜」 판정이 그 둘 사이에서 갈린다.
+ */
+export type CaseFlowchartNodeDraft = { title: string; description: string; instructions: string; nodeType: RepairCaseFlowchartNodeType; shareDocRelativePath: string | null };
 export type CaseFlowchartEdgeDraft = { branchType: RepairCaseFlowchartBranchType; branchLabel: string; fromNodeId: string; toNodeId: string };
 export type Position = { x: number; y: number };
 
@@ -59,6 +66,8 @@ export type ServerNodeSnapshot = {
   description: string | null;
   instructions: string | null;
   nodeType: RepairCaseFlowchartNodeType;
+  /** 🔴 받침에도 **반드시** 있어야 한다 — 없으면 아래 세 함수가 이 칸을 못 본다(위 주석). */
+  shareDocRelativePath: string | null;
   positionX: number;
   positionY: number;
 };
@@ -81,6 +90,10 @@ export function mergeNodeForRender(server: ServerNodeSnapshot, pendingDraft: Cas
     title: pendingDraft?.title ?? server.title,
     description: pendingDraft ? (pendingDraft.description.length > 0 ? pendingDraft.description : null) : server.description,
     instructions: pendingDraft ? (pendingDraft.instructions.length > 0 ? pendingDraft.instructions : null) : server.instructions,
+    // 🔴 `?? server...` 가 **아니다** — 초안의 `null` 은 「아직 안 정했음」이 아니라
+    //    「가리킴을 지웠음」이다. ?? 로 적으면 지운 것이 받침 값으로 되살아나, 화면에서는
+    //    지웠는데 [저장]을 누르면 그대로 남는다(위 두 줄이 `pendingDraft ? …` 인 것과 같은 까닭).
+    shareDocRelativePath: pendingDraft ? pendingDraft.shareDocRelativePath : server.shareDocRelativePath,
     positionX: pendingPosition?.x ?? server.positionX,
     positionY: pendingPosition?.y ?? server.positionY,
   };
@@ -106,12 +119,19 @@ export function mergeEdgeForRender(server: ServerEdgeSnapshot, pendingDraft: Cas
 
 // ==================== DIRTY (rendered draft vs baseline) ====================
 
+/**
+ * 🔴 **새 칸을 여기 안 적으면 [저장]이 서버를 아예 안 부른다** — 오류도 안 나고 「저장할
+ * 변경 없음」이 뜬 채로 고친 것이 사라진다. 아래 planSaveSteps 의 NODE_FIELDS 줄도 같은
+ * 짝이다(이쪽만 적으면 「변경 있음」인데 보낼 걸음이 0 개가 된다).
+ * 🔵 `shareDocRelativePath` 는 양쪽 다 `string | null` 이라 `?? ""` 같은 맞춤이 없다.
+ */
 export function isNodeDraftDirty(draft: CaseFlowchartNodeDraft, server: ServerNodeSnapshot): boolean {
   return (
     draft.title !== server.title ||
     draft.description !== (server.description ?? "") ||
     draft.instructions !== (server.instructions ?? "") ||
-    draft.nodeType !== server.nodeType
+    draft.nodeType !== server.nodeType ||
+    draft.shareDocRelativePath !== server.shareDocRelativePath
   );
 }
 
@@ -193,7 +213,16 @@ export function planSaveSteps(input: {
   for (const [nodeId, draft] of input.dirtyNodes) {
     const server = input.serverNodesById.get(nodeId);
     if (!server) continue;
-    if (draft.title !== server.title || draft.description !== (server.description ?? "") || draft.instructions !== (server.instructions ?? "")) steps.push({ kind: "NODE_FIELDS", nodeId });
+    // 🔴 `shareDocRelativePath` 도 **NODE_FIELDS 가 함께** 나른다(서버 액션 하나가 네 칸을
+    //    한 번에 받는다). 이 줄에서 빠뜨리면 「파일만 바꾼」 노드는 더러움 판정은 통과하는데
+    //    보낼 걸음이 하나도 안 생겨 조용히 안 나간다.
+    if (
+      draft.title !== server.title ||
+      draft.description !== (server.description ?? "") ||
+      draft.instructions !== (server.instructions ?? "") ||
+      draft.shareDocRelativePath !== server.shareDocRelativePath
+    )
+      steps.push({ kind: "NODE_FIELDS", nodeId });
     if (draft.nodeType !== server.nodeType) steps.push({ kind: "NODE_TYPE", nodeId });
   }
   if (input.dirtyPositionNodeIds.length > 0) {

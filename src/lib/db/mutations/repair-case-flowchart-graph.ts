@@ -206,6 +206,12 @@ export type RepairCaseFlowchartNodeSnapshot = {
   title: string;
   description: string | null;
   instructions: string | null;
+  /**
+   * 🔴 가리킨 파일 한 자리(2026-11-25). **지우기 이력에 꼭 있어야 한다** — 이 표의 노드는
+   * 진짜 DELETE 라(스키마 머리말) 지워진 뒤 그 노드가 무엇을 가리켰는지는 이 줄
+   * (`previous_value`)에만 남는다.
+   */
+  shareDocRelativePath: string | null;
   positionX: number;
   positionY: number;
 };
@@ -218,6 +224,7 @@ function serializeNodeSnapshot(node: typeof repairCaseFlowchartNodes.$inferSelec
     title: node.title,
     description: node.description,
     instructions: node.instructions,
+    shareDocRelativePath: node.shareDocRelativePath,
     positionX: node.positionX,
     positionY: node.positionY,
   };
@@ -362,6 +369,14 @@ export async function updateRepairCaseFlowchartNode(params: {
   title: string;
   description: string | null;
   instructions: string | null;
+  /**
+   * 🔴 가리킨 파일 한 자리(루트 기준 상대 경로) 또는 **안 가리킴(null)**.
+   * 🔴 **글자를 여기서 다듬지 않는다** — 다듬으면 디스크에 없는 경로가 된다. 모양 검사도
+   * 「그 자리에 실제로 있는가」도 **액션이 이미 끝냈다**(server/actions/
+   * repair-case-flowchart-graph.ts). 이 자리의 마지막 그물은 DB CHECK
+   * (`repair_case_flowchart_nodes_share_doc_relative_path_shape`)다.
+   */
+  shareDocRelativePath: string | null;
   expectedFlowchartUpdatedAt: string;
 }): Promise<UpdateNodeResult> {
   const title = params.title.trim();
@@ -376,17 +391,41 @@ export async function updateRepairCaseFlowchartNode(params: {
       if (!node) fail("NOT_FOUND", "해당 노드를 찾을 수 없습니다.");
       if (node.flowchartId !== flowchart.id) fail("CROSS_FLOWCHART", "다른 Flowchart에 속한 노드는 수정할 수 없습니다.");
 
-      const changed = node.title !== title || node.description !== params.description || node.instructions !== params.instructions;
+      // 🔴 네 칸을 **함께** 센다. 빠뜨린 칸은 「안 바뀜」으로 읽혀 아래가 통째로 건너뛰어지고,
+      //    돌아가는 답은 `changed: false` 라 부르는 쪽도 **성공으로** 받는다(오류가 없다).
+      const changed =
+        node.title !== title ||
+        node.description !== params.description ||
+        node.instructions !== params.instructions ||
+        node.shareDocRelativePath !== params.shareDocRelativePath;
       if (!changed) {
         return { ok: true, updatedAt: flowchart.updatedAt.toISOString(), changed: false };
       }
 
-      const beforeState = { id: node.id, title: node.title, description: node.description, instructions: node.instructions };
-      const afterState = { id: node.id, title, description: params.description, instructions: params.instructions };
+      const beforeState = {
+        id: node.id,
+        title: node.title,
+        description: node.description,
+        instructions: node.instructions,
+        shareDocRelativePath: node.shareDocRelativePath,
+      };
+      const afterState = {
+        id: node.id,
+        title,
+        description: params.description,
+        instructions: params.instructions,
+        shareDocRelativePath: params.shareDocRelativePath,
+      };
 
       await tx
         .update(repairCaseFlowchartNodes)
-        .set({ title, description: params.description, instructions: params.instructions, updatedAt: new Date() })
+        .set({
+          title,
+          description: params.description,
+          instructions: params.instructions,
+          shareDocRelativePath: params.shareDocRelativePath,
+          updatedAt: new Date(),
+        })
         .where(eq(repairCaseFlowchartNodes.id, node.id));
 
       await insertGraphEditHistory(tx, {

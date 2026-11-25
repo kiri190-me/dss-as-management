@@ -153,6 +153,10 @@ export function buildWorkRecordFlowchart(records: readonly WorkRecordFlowchartIn
   const ordered = records.filter((record) => !record.isInvalidated).sort(compareOldestFirst);
   if (ordered.length === 0) return { nodes: [], edges: [] };
 
+  // 🔴 `shareDocRelativePath` 는 세 자리 모두 null 이다(2026-11-25). 그 칸은 사람이 노드
+  //    속성 패널에서 공유폴더의 파일 한 자리를 **골라** 담는 값인데, 여기 칸들은 작업
+  //    기록을 옮겨 그린 것이라 고른 사람이 없다. 기록에는 가리킬 자리가 들어 있지 않고,
+  //    메모 글에서 경로를 짐작하는 것은 이 모듈 머리말이 금한 일(= 글을 읽어 짐작하기)이다.
   const nodes: CaseFlowchartGraphNode[] = [
     {
       id: WORK_RECORD_FLOWCHART_START_NODE_ID,
@@ -160,6 +164,7 @@ export function buildWorkRecordFlowchart(records: readonly WorkRecordFlowchartIn
       title: "시작",
       description: null,
       instructions: null,
+      shareDocRelativePath: null,
       positionX: NODE_X,
       positionY: 0,
     },
@@ -170,6 +175,7 @@ export function buildWorkRecordFlowchart(records: readonly WorkRecordFlowchartIn
       // 메모 전문 그대로. 제목에서 잘린 글자가 여기서 사라지면 안 된다.
       description: record.memo,
       instructions: null,
+      shareDocRelativePath: null,
       positionX: NODE_X,
       positionY: (index + 1) * NODE_Y_STEP,
     })),
@@ -181,6 +187,7 @@ export function buildWorkRecordFlowchart(records: readonly WorkRecordFlowchartIn
       title: "현재까지",
       description: null,
       instructions: null,
+      shareDocRelativePath: null,
       positionX: NODE_X,
       positionY: (ordered.length + 1) * NODE_Y_STEP,
     },

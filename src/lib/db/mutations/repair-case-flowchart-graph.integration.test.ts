@@ -372,6 +372,9 @@ describe("updateRepairCaseFlowchartNode", () => {
       title: "새 제목",
       description: "새 설명",
       instructions: "새 작업 지시 요약",
+      // 🔵 가리킨 파일 없음(2026-11-25에 칸이 늘었다). mustCreateNode 가 만든 노드는 이
+      //    칸이 NULL 이라, 같은 값을 보내는 것이 「이 칸은 안 건드린다」는 뜻이 된다.
+      shareDocRelativePath: null,
       expectedFlowchartUpdatedAt: node.updatedAt,
     });
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -397,6 +400,7 @@ describe("updateRepairCaseFlowchartNode", () => {
       title: "제목",
       description: null,
       instructions: "지시 요약만 변경",
+      shareDocRelativePath: null,
       expectedFlowchartUpdatedAt: node.updatedAt,
     });
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -422,6 +426,9 @@ describe("updateRepairCaseFlowchartNode", () => {
       title: "동일 제목",
       description: null,
       instructions: null,
+      // 🔴 **네 칸이 모두 지금 값과 같아야** changed:false 다 — 늘어난 칸을 빠뜨리면 이
+      //    시험은 「안 바뀜」을 재는 것이 아니라 「칸 하나가 바뀜」을 재게 된다.
+      shareDocRelativePath: null,
       expectedFlowchartUpdatedAt: node.updatedAt,
     });
     assert.equal(result.ok, true);
@@ -802,7 +809,7 @@ describe("repair_case_flowchart_edit_history writes for graph mutations", () => 
     const nodeA = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "A", expectedFlowchartUpdatedAt: flowchart.updatedAt });
     const nodeB = await mustCreateNode({ repairCaseId, flowchartId: flowchart.id, actorUserId: superAdminId, title: "B", expectedFlowchartUpdatedAt: nodeA.updatedAt });
 
-    const updateResult = await updateRepairCaseFlowchartNode({ repairCaseId, flowchartId: flowchart.id, nodeId: nodeA.nodeId, actorUserId: superAdminId, title: "A 변경", description: null, instructions: "작업 지시 요약", expectedFlowchartUpdatedAt: nodeB.updatedAt });
+    const updateResult = await updateRepairCaseFlowchartNode({ repairCaseId, flowchartId: flowchart.id, nodeId: nodeA.nodeId, actorUserId: superAdminId, title: "A 변경", description: null, instructions: "작업 지시 요약", shareDocRelativePath: null, expectedFlowchartUpdatedAt: nodeB.updatedAt });
     assert.equal(updateResult.ok, true);
     if (!updateResult.ok) throw new Error("unreachable");
 
@@ -912,7 +919,7 @@ describe("cross-flowchart (IDOR) defense", () => {
     const historyBefore = await db.select({ id: repairCaseFlowchartEditHistory.id }).from(repairCaseFlowchartEditHistory).where(eq(repairCaseFlowchartEditHistory.flowchartId, flowchartA.id));
 
     // 1. update B1 through Flowchart A
-    const updateResult = await updateRepairCaseFlowchartNode({ repairCaseId, flowchartId: flowchartA.id, nodeId: b1.nodeId, actorUserId: superAdminId, title: "가로채기", description: null, instructions: null, expectedFlowchartUpdatedAt: currentAUpdatedAt });
+    const updateResult = await updateRepairCaseFlowchartNode({ repairCaseId, flowchartId: flowchartA.id, nodeId: b1.nodeId, actorUserId: superAdminId, title: "가로채기", description: null, instructions: null, shareDocRelativePath: null, expectedFlowchartUpdatedAt: currentAUpdatedAt });
     assert.equal(updateResult.ok, false);
     if (!updateResult.ok) assert.equal(updateResult.code, "CROSS_FLOWCHART");
 

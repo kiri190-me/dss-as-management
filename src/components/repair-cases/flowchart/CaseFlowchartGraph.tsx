@@ -72,6 +72,14 @@ export type CaseFlowchartGraphNode = {
   title: string;
   description: string | null;
   instructions: string | null;
+  /**
+   * 🔴 이 노드가 가리키는 공유폴더 속 파일 한 자리(2026-11-25, 루트 기준 상대 경로).
+   * 🔵 **이 그림은 그 값을 한 글자도 그리지 않는다** — 칸이 여기 있는 까닭은 노드 행의
+   * 모양이 편집기의 받침(`ServerNodeSnapshot`)과 **같아야** 하기 때문이다. 둘이 갈리면
+   * mergeNodeForRender 가 받침을 못 받아 tsc 가 그 자리에서 운다(그것이 이 칸의 쓸모다).
+   * 가리킨 자리를 보여 주고 고치는 일은 속성 패널이 한다.
+   */
+  shareDocRelativePath: string | null;
   positionX: number;
   positionY: number;
 };

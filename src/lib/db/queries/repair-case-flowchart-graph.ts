@@ -10,6 +10,15 @@ export type RepairCaseFlowchartGraphNode = {
   title: string;
   description: string | null;
   instructions: string | null;
+  /**
+   * 🔴 이 노드가 가리키는 공유폴더 속 파일 한 자리(2026-11-25) — 「수리 관련」 폴더
+   * 루트 기준 **상대 경로**다. 안 가리킨 노드가 보통이라 `null` 이 기본이다.
+   * 🔴 **읽어 오지 않으면 저장은 되는데 화면에 안 돌아온다**: 편집기는 서버가 준 이
+   * 값을 받침으로 더러움을 재므로(editor-save-state 의 isNodeDraftDirty), 칸이 빠지면
+   * 새로 고칠 때마다 「가리킨 적 없음」으로 되돌아간 것처럼 보이고 **지우는 쪽으로**
+   * 다시 저장된다. 통로는 **경로 글자만** 나른다 — 루트도 전체 경로도 응답에 없다.
+   */
+  shareDocRelativePath: string | null;
   positionX: number;
   positionY: number;
 };
@@ -69,6 +78,7 @@ export async function getRepairCaseFlowchartGraph(params: {
         title: repairCaseFlowchartNodes.title,
         description: repairCaseFlowchartNodes.description,
         instructions: repairCaseFlowchartNodes.instructions,
+        shareDocRelativePath: repairCaseFlowchartNodes.shareDocRelativePath,
         positionX: repairCaseFlowchartNodes.positionX,
         positionY: repairCaseFlowchartNodes.positionY,
       })

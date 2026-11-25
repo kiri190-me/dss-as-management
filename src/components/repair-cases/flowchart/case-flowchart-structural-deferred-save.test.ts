@@ -566,7 +566,10 @@ describe("[진단] 구조 변경 모아 두기 — ⑦🔴 **옮기지 않기로
 
   test("🔴 노드 추가의 **설명 칸**이 초안으로 얹힌다 — CREATE_NODE 가 안 싣는 칸이다", () => {
     assert.ok(createNodeFn.includes("if (created?.kind !== \"CREATE_NODE\") return;"));
-    assert.ok(createNodeFn.includes("next.set(created.tempNodeId, { title: input.title, description, instructions: \"\", nodeType: input.nodeType });"));
+    // 🔵 2026-11-25 에 초안 칸이 하나 늘었다(가리킨 파일). 새로 만든 노드는 **아무것도 안
+    //    가리킨 채** 태어난다 — 만들기 패널에는 고르는 창이 없고(속성 패널에만 있다),
+    //    CREATE_NODE 도 그 칸을 안 싣는다. 모양을 통째로 못 박아 두면 그 사실이 함께 지켜진다.
+    assert.ok(createNodeFn.includes("next.set(created.tempNodeId, { title: input.title, description, instructions: \"\", nodeType: input.nodeType, shareDocRelativePath: null });"));
     // 🔵 비어 있으면 **안 얹는다** — 빈 초안을 얹으면 「바뀐 것 없음」이 한 건 더 세어진다.
     assert.ok(createNodeFn.includes("if (description.length === 0) return;"));
   });

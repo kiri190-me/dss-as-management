@@ -875,7 +875,7 @@ export default function CaseFlowchartEditorScreen({
     if (description.length === 0) return;
     setPendingNodeDraftsById((prev) => {
       const next = new Map(prev);
-      next.set(created.tempNodeId, { title: input.title, description, instructions: "", nodeType: input.nodeType });
+      next.set(created.tempNodeId, { title: input.title, description, instructions: "", nodeType: input.nodeType, shareDocRelativePath: null });
       return next;
     });
   }
@@ -1007,6 +1007,10 @@ export default function CaseFlowchartEditorScreen({
       //    아래 renderedNodes 의 mergeNodeForRender 가 그 위에 얹는다.
       description: null,
       instructions: null,
+      // 🔵 가리킨 파일도 없다 — 노드를 **만드는** 자리에는 고르는 창이 없고(속성 패널에만
+      //    있다), CREATE_NODE 도 그 칸을 안 싣는다. 만든 뒤 골라 담으면 그때 초안 지도를
+      //    타고 들어간다(아래 handleQueueCreateNode 의 설명 칸과 같은 길).
+      shareDocRelativePath: null,
       // 🔵 자리는 늘 들어온다(만들기 패널이 비워 보내지 않는다 — 그 패널 머리말).
       //    그래도 null 을 받으면 (0,0)으로 둔다. 진단 그림에는 자동 배치가 없어
       //    좌표 말고 그릴 방법이 없다.
@@ -1075,6 +1079,9 @@ export default function CaseFlowchartEditorScreen({
       description: serverNode?.description ?? "",
       instructions: serverNode?.instructions ?? "",
       nodeType: serverNode?.nodeType ?? "TASK",
+      // 🔴 안 가리킨 것이 기본이다. 🔵 다른 칸들과 달리 `?? ""` 가 아니다 — 이 칸은 초안도
+      //    서버도 `string | null` 한 가지 모양이다(editor-save-state 의 타입 주석).
+      shareDocRelativePath: serverNode?.shareDocRelativePath ?? null,
     };
   }
 
@@ -1548,6 +1555,10 @@ export default function CaseFlowchartEditorScreen({
         title: draft.title,
         description: draft.description.trim() || null,
         instructions: draft.instructions.trim() || null,
+        // 🔴 **다듬지 않는다** — 공유폴더의 이름은 앞뒤 공백까지 그 이름이다(다듬으면 없는
+        //    파일이 된다). 빈 글자로 떨어뜨리는 `|| null` 도 두지 않는다: 이 칸은 `""` 를
+        //    아예 들지 않고, null 이 곧 「가리킴 지우기」다.
+        shareDocRelativePath: draft.shareDocRelativePath,
         expectedFlowchartUpdatedAt: expectedUpdatedAt,
       });
       return result.ok ? { ok: true, updatedAt: result.updatedAt } : { ok: false, message: result.message };
@@ -2310,6 +2321,7 @@ export default function CaseFlowchartEditorScreen({
             <>
               {selectedNode && (
                 <CaseFlowchartNodePropertyPanel
+                  repairCaseId={repairCaseId}
                   node={selectedNode}
                   allNodes={renderedNodes}
                   isPickingReference={isPickingReferenceNode}
