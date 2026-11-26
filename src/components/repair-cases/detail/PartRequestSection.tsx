@@ -979,7 +979,10 @@ export default function PartRequestSection({
             🔴 **제목이 「부품 신청」인 까닭**(2026-11-26 쓰는 분 결정): 같은 목록에 **가져간
             신청과 돌려준 신청이 함께** 선다(저쪽은 인수번호로 물으면 반환도 함께 준다 —
             API.md 4-11절). 「반출 신청」이라고 적어 두면 그 아래 선 반환 줄이 제목과 어긋난다.
-            🔵 어느 쪽인지는 줄마다 **종류 딱지**가 말한다(아래). */}
+            🔵 어느 쪽인지는 줄마다 **종류 딱지**가 말한다(아래).
+            🔴 **「없습니다」 줄도 같은 말을 쓴다**: 그 줄이 세는 것은 저쪽이 인수번호로 준 목록
+            **전부**라 반환까지 비어 있다는 뜻이다 — 「반출 신청이 없습니다」로 적어 두면 돌려
+            주겠다고 올린 건이 있는지 없는지는 **아무 말도 안 한 것**이 된다. */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">이 수리 건의 부품 신청</h3>
           <button
@@ -1003,7 +1006,7 @@ export default function PartRequestSection({
             없는 것이 아니라 <b>확인하지 못한 것</b>입니다.
           </p>
         ) : partRequestTrace.kind === "absent" ? (
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">이 건에 올라간 반출 신청이 없습니다.</p>
+          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">이 건에 올라간 부품 신청이 없습니다.</p>
         ) : (
           <ul className="mt-2 flex flex-col gap-2">
             {stockRequests.map((request) => (
@@ -1377,6 +1380,15 @@ function StockRequestLineDetails({ line }: { line: InventoryStockRequestLine }) 
  *
  * 🔴 **막혔으면 창을 닫지 않는다.** 거절 문구를 이 안에 그대로 띄운다 — 창이 닫히면 사람은
  * 거둬진 줄 알고 넘어간다.
+ *
+ * ── 🔴 2026-11-26 — **이 창이 반환도 거둔다**(글자가 반출 쪽으로 기울어 있었다) ──────
+ * 거두는 길은 종류를 가리지 않는다(저쪽 API.md 4-11절 「거두는 길은 반출과 같습니다」).
+ * 그래서 이 창은 **반출 줄과 반환 줄 양쪽에서** 열린다 — 글자도 한쪽 뜻만 담으면 안 된다.
+ *  ㉠ 제목이 「부품 신청 거두기」인 까닭: 목록 제목(「이 수리 건의 부품 신청」)과 같은 말이다.
+ *  ㉡ 🔴 경고 둘째 줄이 「**다시 하려면** 새 요청으로」인 까닭: 앞에는 「같은 부품이 **다시
+ *     필요하면**」이라고 적혀 있었는데, 반환을 거두는 것은 「돌려주려던 것을 안 돌려주기로」라
+ *     **정확히 반대 방향**이다 — 돌려주려던 사람에게 거짓을 말하고 있었다.
+ *  🔵 첫 줄(「거둔 요청은 되돌릴 수 없습니다」)은 둘 다에 맞아 그대로 둔다.
  * ============================================================================
  */
 function CancelStockRequestDialog({
@@ -1415,7 +1427,7 @@ function CancelStockRequestDialog({
       className="m-auto w-full max-w-md rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 backdrop:bg-black/40 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
     >
       <h2 id="cancel-stock-request-title" className="text-sm font-semibold">
-        반출 신청 거두기
+        부품 신청 거두기
       </h2>
       <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
         지금 상태: <span className="font-medium text-zinc-900 dark:text-zinc-50">{target?.statusLabel ?? ""}</span>
@@ -1423,7 +1435,7 @@ function CancelStockRequestDialog({
       <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
         <strong className="font-semibold">거둔 요청은 되돌릴 수 없습니다.</strong>
         <br />
-        같은 부품이 다시 필요하면 새 요청으로 올려야 합니다.
+        다시 하려면 새 요청으로 올려야 합니다.
       </p>
 
       {errorMessage && (
