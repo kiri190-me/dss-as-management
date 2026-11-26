@@ -61,9 +61,9 @@
 <div class="stats">
   <div class="stat">
     <div class="note">조각</div>
-    <div class="num">0 / 5</div>
-    <div class="bar"><i style="width:0%"></i></div>
-    <div class="note">① 하는 중</div>
+    <div class="num">4 / 6</div>
+    <div class="bar"><i style="width:67%"></i></div>
+    <div class="note">⑤·⑥ 나란히 하는 중</div>
   </div>
   <div class="stat">
     <div class="note">마이그레이션</div>
@@ -72,8 +72,8 @@
   </div>
   <div class="stat">
     <div class="note">고치는 집</div>
-    <div class="num">3</div>
-    <div class="note">재고 관리 3 · A/S 1 · 포털 1</div>
+    <div class="num">2</div>
+    <div class="note">재고 관리 3 · A/S 2 · <span class="grn">포털 0</span></div>
   </div>
   <div class="stat">
     <div class="note">안 올린 커밋</div>
@@ -145,6 +145,42 @@
   <p style="margin:6px 0 0">결재 범위를 고르는 함수가 <b>종류를 안 보고</b>, 갈래가 비면 <b>「부품 불출」 범위</b>로 보냅니다.
   재고 관리 관리자가 그 범위에 결재를 <b>이미 켜 뒀다면</b> — <span class="red">반환 신청도 조용히 결재로 끌려갑니다.</span></p>
   <p style="margin:6px 0 0">→ <b>종류가 반환이면 결재를 안 탄다</b>를 조각 ②에서 <b>값으로 못 박습니다</b>.</p>
+  <p class="note" style="margin:6px 0 0">🔵 시험으로도 누릅니다 — <b>결재가 켜져 있어도</b> 반환은 결재 대상이 아니다.
+  그 시험이 없으면 이 결함은 <b>운영에서 관리자가 결재를 켜는 날</b> 처음 드러납니다.</p>
+</div>
+
+<div class="warn">
+  <div class="t"><span class="red">조각 ①이 찾아낸 것 둘 — 둘 다 조각 ②에서 함께 다룹니다</span></div>
+  <p style="margin:6px 0 0"><b>ㄱ) 담당자가 직접 넣는 반환 화면</b>이 최댓값을 <b>「나간 − 이미 반환」</b>으로 셉니다 —
+  <b>대기 중인 신청을 모릅니다.</b> 조각 ②가 신청을 세우기 시작하면 같은 부품에
+  <span class="red">두 화면이 다른 최댓값</span>을 말하고, 담당자가 전부 반환해 버리면
+  나중에 그 신청의 [반환 완료]가 <b>넘쳐서 거절</b>됩니다.</p>
+  <p style="margin:6px 0 0"><b>ㄴ) 「요청으로 세우기」가 담당자 직접 입력까지 바꿀 뻔했습니다.</b>
+  가르는 함수를 <b>재고 관리 자체 화면도 함께 씁니다</b> — 종류만 보고 넣으면
+  <span class="red">담당자가 직접 넣던 반환까지 「요청」으로 서게</span> 됩니다. 그건 요청받은 일이 아닙니다.
+  → <b>「바깥에서 온 것인가」</b>도 함께 봐야 합니다.</p>
+</div>
+
+<div class="ok">
+  <div class="t">조각 ②가 값으로 끝낸 것 셋</div>
+  <ul>
+    <li><b>걱정이 개발 DB 에서 이미 참이었습니다</b> — 부품 불출 결재가 <b>3단계로 켜져 있었습니다</b>.
+      갈래를 비워 두기만 했으면 반환이 그대로 끌려갔습니다. → <b>결재가 켜져 있어도 안 탄다</b>를 시험으로 눌렀습니다.</li>
+    <li><b>위 ㄴ)은 고칠 필요가 없었습니다</b> — 바깥 통로는 그 판정 함수를 <b>아예 안 거칩니다</b>.
+      담당자가 직접 넣는 반환은 <span class="grn">한 글자도 안 바뀌었습니다</span>.</li>
+    <li><b>실제로 두드려 봤습니다</b> — 남은 9 → 2개 신청 → <b>대기 2 · 남은 7</b> → 같은 열쇠로 또 보내면 멱등 →
+      8개는 거절(「7개까지 돌려줄 수 있습니다」). 쪼개기도 <b>가장 먼저 나간 두 줄</b>에 1개씩 담겼습니다.
+      <span class="note">세운 신청과 감사 로그는 치웠고 수가 원래대로 돌아온 것까지 확인했습니다.</span></li>
+  </ul>
+</div>
+
+<div class="warn">
+  <div class="t"><span class="red">조각 ②가 찾아낸 것 — 조각 ④가 함께 합니다</span></div>
+  <p style="margin:6px 0 0"><b>[부품 요청 관리]에 선 반환 신청은 「무엇을 돌려받는지」가 안 보입니다.</b>
+  요약이 <code>반환 · 2026-11-26</code> 뿐이고 <b>부품 줄도 인수번호도 없습니다</b> —
+  부품 줄을 뽑는 함수가 반환을 <b>빈 배열</b>로 돌려주기 때문입니다(반환 줄은 부품이 아니라 원장 줄을 가리킵니다).</p>
+  <p style="margin:6px 0 0">🔵 「한 번 더 <b>내용을 확인</b>하고 [반환 완료]」를 하려면 그 내용이 보여야 합니다.
+  → <b>조각 ④ 범위에 넣었습니다.</b></p>
 </div>
 
 
@@ -190,33 +226,69 @@
     <td><b>①</b></td>
     <td><b>반환 후보를 주는 읽기 통로</b><div class="note">부품별 나간 양 · 이미 반환한 양 · 대기 중인 양 · 남은 양</div></td>
     <td>재고 관리</td>
-    <td><span class="st doing">하는 중</span></td>
+    <td><span class="st done">끝</span><div class="note">시험 +40 · 기존 깨짐 0<br>커밋 <code>ff0836c</code></div></td>
   </tr>
   <tr>
     <td><b>②</b></td>
-    <td><b>반환 신청 받기</b><div class="note">종류 열기 · 요청으로 세우기 · <span class="red">결재 배제</span></div></td>
+    <td><b>반환 신청 받기</b><div class="note">종류 열기 · 부품을 원장 줄로 쪼개기 · 요청으로 세우기 · <span class="red">결재 배제</span> · 기존 화면 최댓값 맞추기</div></td>
     <td>재고 관리</td>
-    <td><span class="st wait">대기</span></td>
+    <td><span class="st done">끝</span><div class="note">시험 +48 · 기존 깨짐 0<br>커밋 <code>5d8767e</code></div></td>
   </tr>
   <tr>
     <td><b>③</b></td>
-    <td><b>[반환 요청] 버튼 + 팝업</b><div class="note">부품별 고르기 · 수량(기본 0) · 비고 · <span class="red">출하 완료면 막기</span></div></td>
+    <td><b>[반환 요청] 버튼 + 팝업</b><div class="note">부품별 고르기 · 수량(기본 0) · 비고 · <span class="red">출하 완료면 막기</span><br>+ 목록에 반환 뜨게 · 취소 · 제목 글자 · 「불출」→「반환」</div></td>
     <td>A/S</td>
-    <td><span class="st wait">대기</span></td>
+    <td><span class="st done">끝</span><div class="note">시험 +94 · 기존 깨짐 0<br>커밋 <code>5c02d985</code></div></td>
   </tr>
   <tr>
     <td><b>④</b></td>
-    <td><b>[반환] 버튼 + 확인 팝업 + [반환 완료]</b><div class="note">[사용] 요청의 확인 팝업을 본보기로</div></td>
+    <td><b>[반환] 버튼 + 확인 팝업 + [반환 완료]</b><div class="note">[사용] 요청의 확인 팝업을 본보기로<br>+ 무엇을 돌려받는지 보이게 · 인수번호 조회에 반환이 걸리게</div></td>
     <td>재고 관리</td>
-    <td><span class="st wait">대기</span></td>
+    <td><span class="st done">끝</span><div class="note">시험 +42 · 기존 깨짐 0<br>커밋 <code>7256b75</code></div></td>
   </tr>
   <tr>
     <td><b>⑤</b></td>
-    <td><b>알림 설명 문구에 [반환] 더하기</b><div class="note">「확인 대기」·「결재 결과」 두 갈래의 설명</div></td>
-    <td>포털</td>
-    <td><span class="st wait">대기</span></td>
+    <td><b>반환 알림</b><div class="note"><span class="red">[반환 완료] 종을 실제로 울리기</span> · 「확인 대기」 확인 · 설명 문구에 반환 더하기</div></td>
+    <td>재고 관리<div class="note">포털 아님</div></td>
+    <td><span class="st doing">하는 중</span></td>
+  </tr>
+  <tr>
+    <td><b>⑥</b></td>
+    <td><b>남은 「반출」 글자 셋</b><div class="note">「반출 신청이 없습니다」 · 창 제목 「반출 신청 거두기」 ·
+      <span class="red">「같은 부품이 다시 필요하면」</span></div></td>
+    <td>A/S</td>
+    <td><span class="st doing">하는 중</span></td>
   </tr>
 </table>
+
+<div class="ok">
+  <div class="t">✅ 예순여덟째 배포 뒤 처음으로 눈 확인을 마쳤습니다 (2026-11-26)</div>
+  <p style="margin:6px 0 0">A/S 의 [반환 요청] 창과 재고 관리의 [반환] → [반환 완료]를 <b>직접 눌러 확인</b>하셨습니다.
+  세션 중에 <b>실제 [반환 완료] 클릭이 측정</b>되기도 했습니다 — 원장 <code>RETURN-2026-2</code>,
+  재고 <b>3 → 4</b>, 되돌린 원래 줄까지 정확했습니다.</p>
+  <p style="margin:6px 0 0">🔵 <code>build</code> 둘 다 통과 · <code>tsconfig</code> 안 접힘 ·
+  재고 계약 검사 <b>통과 189 · 실패 0</b>.
+  <span class="note">「못 쟀다 3」은 전부 반환 신청입니다 — 반환에는 유상/무상 구분이 없는 게 맞고,
+  검사 도구가 아직 그걸 「해당 없음」으로 안 셀 뿐입니다.</span></p>
+</div>
+
+<div class="warn">
+  <div class="t">⑥이 셋이 된 까닭 — <span class="red">하나는 뜻이 반대였습니다</span></div>
+  <p style="margin:6px 0 0">[요청 취소] 창 본문에 <b>「같은 부품이 <u>다시 필요하면</u> 새 요청으로 올려야 합니다」</b>가 있습니다.
+  반환을 거두는 것은 <b>「돌려주려던 것을 안 돌려주기로」</b>인데, 이 말은 <span class="red">정확히 반대 방향</span>입니다.
+  → <b>「다시 하려면 새 요청으로 올려야 합니다」</b>로 바꿉니다.</p>
+</div>
+
+<div class="warn">
+  <div class="t"><span class="red">⑤의 뜻이 커졌습니다 — 설명만 고치는 일이 아니었습니다</span></div>
+  <p style="margin:6px 0 0"><b>「결재 결과」 종은 결재가 승인·반려됐을 때만 울립니다.</b>
+  <span class="red">반환은 결재를 안 타니 지금은 [반환 완료]를 해도 종이 한 번도 안 울립니다.</span>
+  「따르도록」 하셨으니 그 갈래로 <b>실제로 보내야</b> 합니다.</p>
+  <p style="margin:6px 0 0">🔵 방향도 다릅니다 — <b>「확인 대기」는 담당자에게, 「결재 결과」는 올린 본인에게</b> 갑니다.
+  반환도 <b>신청한 사람</b>에게 가야 말이 됩니다.</p>
+  <p style="margin:6px 0 0">🔵 <b>좋은 쪽으로 하나 틀렸습니다</b> — 알림 <b>설명 문구가 재고관리에 있습니다</b>.
+  포털은 각 시스템에서 그 글을 받아다 보여 줄 뿐이라, <span class="grn">포털 저장소는 한 글자도 안 고칩니다.</span></p>
+</div>
 
 <div class="tip">
   <div class="t">조각마다 <b>눈 확인</b>을 부탁드립니다</div>
