@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>진행현황 — 부품 반환 요청</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --line:#e3e6ea; --fg:#1d2126; --dim:#6b7280;
+    --b1:#b42318; --b2:#b54708; --b3:#175cd3; --b4:#5925dc; --b5:#475467; --b6:#0e7490;
+    --ask:#b42318; --ok:#067647;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 20px 64px;background:var(--bg);color:var(--fg);
+       font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;line-height:1.65;}
+  .wrap{max-width:1080px;margin:0 auto}
+  h1{font-size:25px;margin:0 0 6px}
+  .sub{color:var(--dim);font-size:14px;margin:0 0 22px}
+  h2{font-size:18px;margin:38px 0 10px;padding-bottom:8px;border-bottom:3px solid var(--line)}
+  h3{font-size:15.5px;margin:22px 0 8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin:10px 0}
+  .t{font-weight:700;font-size:15px}
+  .note{font-size:13px;color:var(--dim);margin-top:6px}
+  .red{color:var(--ask);font-weight:700}
+  .blue{color:var(--b3);font-weight:700}
+  .grn{color:var(--ok);font-weight:700}
+  .pur{color:var(--b4);font-weight:700}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:8px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f0f2f5;font-weight:700}
+  .st{font-size:12px;font-weight:700;border-radius:5px;padding:2px 8px;display:inline-block;background:#eef1f5;color:#475467;white-space:nowrap}
+  .st.doing{background:#fffaeb;color:#93370d;border:1px solid #fedf89}
+  .st.done{background:#ecfdf3;color:#067647;border:1px solid #abefc6}
+  .st.wait{background:#f2f4f7;color:#475467;border:1px solid #d0d5dd}
+  .st.ask{background:#fef3f2;color:#b42318;border:1px solid #fecdca}
+  .ask{background:#fef3f2;border:1px solid #fecdca;border-radius:9px;padding:14px 16px;margin:12px 0}
+  .tip{background:#eff8ff;border:1px solid #b2ddff;border-radius:9px;padding:14px 16px;margin:12px 0}
+  .ok{background:#ecfdf3;border:1px solid #abefc6;border-radius:9px;padding:14px 16px;margin:12px 0}
+  .warn{background:#fffaeb;border:1px solid #fedf89;border-radius:9px;padding:14px 16px;margin:12px 0}
+  ul{margin:6px 0 0;padding-left:20px} li{margin:4px 0}
+  ol{margin:6px 0 0;padding-left:22px} ol li{margin:6px 0}
+  code{background:#eef1f5;border-radius:4px;padding:1px 6px;font-size:12.5px}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;margin:10px 0}
+  .stat{flex:1 1 170px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .num{font-size:28px;font-weight:800;line-height:1.1}
+  .bar{height:9px;border-radius:999px;background:#e9ecf1;overflow:hidden;margin-top:8px}
+  .bar > i{display:block;height:100%;background:#067647}
+  .bar.b > i{background:#b54708}
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0;font-size:13.5px}
+  .box{background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+  .box b{display:block;font-size:12px;color:var(--dim);font-weight:700}
+  .arr{color:var(--dim);font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>진행현황 — 부품 반환 요청</h1>
+<p class="sub">2026-11-26 시작 · 집이 <b>셋</b>입니다 (A/S · 재고 관리 · 포털)</p>
+
+<div class="stats">
+  <div class="stat">
+    <div class="note">조각</div>
+    <div class="num">0 / 5</div>
+    <div class="bar"><i style="width:0%"></i></div>
+    <div class="note">① 하는 중</div>
+  </div>
+  <div class="stat">
+    <div class="note">마이그레이션</div>
+    <div class="num">0건</div>
+    <div class="note"><span class="grn">칸을 하나도 안 더합니다</span></div>
+  </div>
+  <div class="stat">
+    <div class="note">고치는 집</div>
+    <div class="num">3</div>
+    <div class="note">재고 관리 3 · A/S 1 · 포털 1</div>
+  </div>
+  <div class="stat">
+    <div class="note">안 올린 커밋</div>
+    <div class="num">1</div>
+    <div class="note">dss-deploy (예순여덟째 기록)</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="t">쓰는 분 요청 (2026-11-26)</div>
+  <p style="margin:6px 0 0">「[수리건 상세]의 [부품요청]에서 <b>이미 불출된 적 있는 부품에 한해</b> [반환 요청]을 할 수 있도록 …
+  불출 이력이 있는 <b>부품별로 선택하고 반환 수량</b>을 적을 수 있도록 (불출된 수량이 최대, 기본 <b>0개</b>), <b>비고</b>를 적을 공간도 …
+  <b>[출하 완료] 처리되면 [반환 요청] 버튼을 누를 수 없도록</b> …<br>
+  [재고 관리]의 [부품 요청 관리]에 <b>종류 [반환]</b>으로 뜨게 … 관리자가 [반환] 버튼을 누르고 <b>[사용] 요청이 왔을 때
+  [승인요청]하는 팝업이 뜨듯이</b> 한 번 더 확인하고 <b>[반환 완료]</b> … <span class="red">(반환에는 승인 절차가 필요 없어.)</span><br>
+  포털 알림은 <b>[반환 요청]은 [확인대기]</b>를 <b>[반환 완료]시에는 [결재 결과]</b>를 따르도록 … 알림설정의 <b>각각의 설명 내용에
+  [반환]에 대한 내용을 추가</b>」</p>
+</div>
+
+
+<h2>일이 지나가는 길</h2>
+
+<div class="flow">
+  <div class="box"><b>A/S</b>[반환 요청] 팝업</div>
+  <span class="arr">→</span>
+  <div class="box"><b>재고 관리</b>[부품 요청 관리] · 종류 <b>반환</b></div>
+  <span class="arr">→</span>
+  <div class="box"><b>재고 관리</b>[반환] → 확인 팝업 → <b>[반환 완료]</b></div>
+</div>
+<p class="note" style="margin-top:2px">그리고 양 끝에서 <b>포털의 종</b>이 울립니다 — 올릴 때 「확인 대기」, 끝났을 때 「결재 결과」.
+<span class="red">승인 절차는 중간에 없습니다.</span></p>
+
+
+<h2>이미 있어서 <span class="grn">안 만들어도 되는 것</span></h2>
+
+<div class="ok">
+  <div class="t">「반환」은 재고 관리에 이미 90%가 만들어져 있었습니다</div>
+  <ul>
+    <li>종류 목록에 <b>반환</b> 값이 <b>이미 있습니다</b> — 화면에 뜨는 라벨 「반환」도 이미 있습니다</li>
+    <li><b>되돌릴 원래 거래를 가리키는 칸</b>이 있습니다</li>
+    <li><b>「이미 반환한 만큼 빼고 남은 것만」 검증</b>이 이미 돌아갑니다</li>
+    <li>후보를 뽑는 함수가 <b>나간 양 · 이미 반환한 양 · 남은 양</b>을 이미 계산합니다</li>
+    <li>알림 <b>색</b>은 자동으로 정해집니다 — 고를 것이 없습니다</li>
+    <li><b>「확인 대기」 알림은 거저 따라옵니다</b> — 건수를 세는 질의가 종류를 안 가립니다</li>
+  </ul>
+  <p style="margin:8px 0 0"><span class="grn">그래서 마이그레이션이 0건입니다.</span> 표에 칸을 하나도 안 더합니다.</p>
+</div>
+
+
+<h2>그런데 막혀 있던 것 둘</h2>
+
+<div class="ask">
+  <div class="t">ㄱ) A/S 가 「얼마나 돌려줄 수 있는지」를 알 길이 없습니다</div>
+  <p style="margin:6px 0 0">지금 A/S 가 재고 관리에서 받아 오는 값에는 <b>나간 수량</b>만 있고
+  <b>이미 반환한 수량이 없습니다</b>. 그대로 두면 <span class="red">같은 부품을 두 번 반환해 넘깁니다.</span></p>
+  <p style="margin:6px 0 0">→ <b>조각 ①</b>에서 <b>반환 후보를 주는 통로</b>를 새로 냅니다. 남은 수량은
+  <b>재고 관리가 계산해 줍니다</b>(그 계산은 이미 있습니다).</p>
+</div>
+
+<div class="ask">
+  <div class="t">ㄴ) 신청을 받는 통로가 「종류는 사용 고정」으로 못 박혀 있습니다</div>
+  <p style="margin:6px 0 0">바깥에서 들어오는 신청은 <b>종류를 고를 수 없게</b> 코드로 막혀 있습니다.</p>
+  <p style="margin:6px 0 0">→ <b>조각 ②</b>에서 <b>같은 통로에 반환만 더</b> 엽니다.
+  <span class="blue">새 통로를 내면 인증과 검사가 두 벌이 됩니다.</span></p>
+</div>
+
+<div class="warn">
+  <div class="t"><span class="red">조용히 깨질 뻔한 것 — 「승인 절차 없음」이 저절로 안 됩니다</span></div>
+  <p style="margin:6px 0 0">결재 범위를 고르는 함수가 <b>종류를 안 보고</b>, 갈래가 비면 <b>「부품 불출」 범위</b>로 보냅니다.
+  재고 관리 관리자가 그 범위에 결재를 <b>이미 켜 뒀다면</b> — <span class="red">반환 신청도 조용히 결재로 끌려갑니다.</span></p>
+  <p style="margin:6px 0 0">→ <b>종류가 반환이면 결재를 안 탄다</b>를 조각 ②에서 <b>값으로 못 박습니다</b>.</p>
+</div>
+
+
+<h2>정한 것 다섯</h2>
+
+<table>
+  <tr><th style="width:30%">무엇</th><th>어떻게 · 왜</th></tr>
+  <tr>
+    <td><b>최대 수량</b></td>
+    <td><b>불출 − 이미 반환 − 지금 대기 중인 반환</b>.
+      <span class="red">「불출된 수량」 그대로 두면</span> 서버가 거절하는 수를 화면이 받아 버립니다.</td>
+  </tr>
+  <tr>
+    <td><b>반환 단위</b></td>
+    <td>화면은 요청하신 대로 <b>부품별</b>. 서버가 <b>먼저 나간 거래부터 차례로</b> 쪼개 넣습니다.
+      <span class="blue">그래야 이미 있는 검증을 그대로 쓰고 같은 규칙이 두 벌이 되지 않습니다.</span></td>
+  </tr>
+  <tr>
+    <td><b>알림 갈래</b></td>
+    <td><b>새로 안 만듭니다</b> — 기존 둘에 얹습니다.
+      「<b>따르도록</b>」·「설명에 <b>추가</b>」라고 하셔서 그렇게 읽었습니다.
+      그래야 그 갈래를 끄면 <b>반환 알림도 같이 꺼집니다</b>.</td>
+  </tr>
+  <tr>
+    <td><b>[반환 완료] 뒤 상태</b></td>
+    <td>기존 <b>「확인됨」</b>을 다시 씁니다 — 새 상태값을 만들면 마이그레이션이 생깁니다.
+      화면에 뜨는 글자만 종류가 반환일 때 <b>「반환 완료」</b>로 보이게 합니다.</td>
+  </tr>
+  <tr>
+    <td><b>버튼 자리</b></td>
+    <td>「<b>이 수리 건의 반출 신청</b>」 제목 <b>옆</b>.
+      <span class="blue">그 아래가 「이미 나간 것들의 이력」이라 뜻으로도 맞습니다.</span>
+      <span class="note">(그 글자는 버튼이 아니라 제목이었습니다 — 실제 신청 버튼은 그 위의 [재고 관리에 요청]입니다.)</span></td>
+  </tr>
+</table>
+
+
+<h2>조각 다섯</h2>
+
+<table>
+  <tr><th style="width:8%">#</th><th style="width:34%">무엇</th><th style="width:14%">집</th><th>상태</th></tr>
+  <tr>
+    <td><b>①</b></td>
+    <td><b>반환 후보를 주는 읽기 통로</b><div class="note">부품별 나간 양 · 이미 반환한 양 · 대기 중인 양 · 남은 양</div></td>
+    <td>재고 관리</td>
+    <td><span class="st doing">하는 중</span></td>
+  </tr>
+  <tr>
+    <td><b>②</b></td>
+    <td><b>반환 신청 받기</b><div class="note">종류 열기 · 요청으로 세우기 · <span class="red">결재 배제</span></div></td>
+    <td>재고 관리</td>
+    <td><span class="st wait">대기</span></td>
+  </tr>
+  <tr>
+    <td><b>③</b></td>
+    <td><b>[반환 요청] 버튼 + 팝업</b><div class="note">부품별 고르기 · 수량(기본 0) · 비고 · <span class="red">출하 완료면 막기</span></div></td>
+    <td>A/S</td>
+    <td><span class="st wait">대기</span></td>
+  </tr>
+  <tr>
+    <td><b>④</b></td>
+    <td><b>[반환] 버튼 + 확인 팝업 + [반환 완료]</b><div class="note">[사용] 요청의 확인 팝업을 본보기로</div></td>
+    <td>재고 관리</td>
+    <td><span class="st wait">대기</span></td>
+  </tr>
+  <tr>
+    <td><b>⑤</b></td>
+    <td><b>알림 설명 문구에 [반환] 더하기</b><div class="note">「확인 대기」·「결재 결과」 두 갈래의 설명</div></td>
+    <td>포털</td>
+    <td><span class="st wait">대기</span></td>
+  </tr>
+</table>
+
+<div class="tip">
+  <div class="t">조각마다 <b>눈 확인</b>을 부탁드립니다</div>
+  <p style="margin:6px 0 0">시험이 다 통과해도 <b>눌러 보면 다른 것</b>이 나옵니다 — 지난번에 셋이 그렇게 잡혔습니다.
+  조각이 끝날 때마다 <b>볼 곳을 짚어</b> 드리겠습니다.</p>
+</div>
+
+
+<h2>남겨 둘 것</h2>
+
+<ul>
+  <li><b>부분 반환은 이미 됩니다</b> — 같은 부품을 두 번에 나눠 돌려주는 것이 재고 관리 쪽에 이미 구현돼 있습니다.</li>
+  <li class="note">재고 관리 개발 DB 가 사흘 꺼져 있어 조사가 실측을 못 했습니다 → 2026-11-26 켰습니다.</li>
+  <li class="note">예순여덟째 배포(2026-11-26)는 끝났습니다 — A/S <code>6.3</code> · ✗ 0 · 정지 14초.</li>
+</ul>
+
+</div>
+</body>
+</html>
