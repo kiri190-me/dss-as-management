@@ -61,9 +61,9 @@
 <div class="stats">
   <div class="stat">
     <div class="note">조각</div>
-    <div class="num">4 / 6</div>
-    <div class="bar"><i style="width:67%"></i></div>
-    <div class="note">⑤·⑥ 나란히 하는 중</div>
+    <div class="num">7 / 7</div>
+    <div class="bar"><i style="width:100%"></i></div>
+    <div class="note"><span class="grn">끝 · 배포 완료</span></div>
   </div>
   <div class="stat">
     <div class="note">마이그레이션</div>
@@ -250,16 +250,51 @@
     <td><b>⑤</b></td>
     <td><b>반환 알림</b><div class="note"><span class="red">[반환 완료] 종을 실제로 울리기</span> · 「확인 대기」 확인 · 설명 문구에 반환 더하기</div></td>
     <td>재고 관리<div class="note">포털 아님</div></td>
-    <td><span class="st doing">하는 중</span></td>
+    <td><span class="st done">끝</span><div class="note">시험 +25 · 기존 깨짐 0<br>커밋 <code>117d6c7</code></div></td>
   </tr>
   <tr>
     <td><b>⑥</b></td>
     <td><b>남은 「반출」 글자 셋</b><div class="note">「반출 신청이 없습니다」 · 창 제목 「반출 신청 거두기」 ·
       <span class="red">「같은 부품이 다시 필요하면」</span></div></td>
     <td>A/S</td>
-    <td><span class="st doing">하는 중</span></td>
+    <td><span class="st done">끝</span><div class="note">시험 +1 · 기존 깨짐 0<br>커밋 <code>b281ff9b</code></div></td>
+  </tr>
+  <tr>
+    <td><b>⑦</b></td>
+    <td><b>기록 내역의 반환 건 머리글</b><div class="note">종류 이름 대신 <b>수리 건 인수번호</b> · 되짚어서 가져온다</div></td>
+    <td>재고 관리</td>
+    <td><span class="st done">끝</span><div class="note">시험 +23 · 기존 깨짐 0<br>커밋 <code>18f5381</code></div></td>
   </tr>
 </table>
+
+<div class="ok">
+  <div class="t">✅ 예순아홉째 배포 완료 (2026-11-26 15:21) — 실패 <b>0</b></div>
+  <table style="margin-top:4px">
+    <tr><th style="width:26%">단계</th><th>결과</th></tr>
+    <tr><td><code>--check</code> · <code>--count</code>(앞)</td><td>✓ 52 · ✓ 98 · ✗ <b>0</b></td></tr>
+    <tr><td><code>--preload</code> · <code>--check</code></td><td>✓ 110 · ✓ 56 · ✗ <b>0</b></td></tr>
+    <tr><td><code>--tools</code> · <code>--go</code></td><td>✓ 71 · ✓ 73 · ✗ <b>0</b> · 정지 창 <b>23초</b></td></tr>
+    <tr><td><code>--count</code>(뒤)</td><td>✓ 102 · ✗ <b>0</b> — <span class="grn">전후가 전부 같다</span></td></tr>
+  </table>
+  <p style="margin:8px 0 0">판: <code>dss-as 6.3 → 6.4</code> · <code>dss-as-tools 30 → 31</code> ·
+  <code>dss-inventory 0.8 → 0.9</code> · <code>dss-inventory-tools 5 → 6</code>.
+  🔵 <b>마이그레이션 0건</b> · 덤프 <b>둘</b> · 안 건드리는 여덟이 <b>이미지도 켜진 때도 그대로</b>.</p>
+  <p style="margin:6px 0 0">🔵 <b>올리기 전 운영 수</b> — 반환 신청 <b>0</b> · 반출 신청 <b>38</b> ·
+  반환 완료 <b>0</b> · 돌려줄 수 있는 수리 건 <b>22</b>(줄 135) · 반환 원장 건 <b>1</b>.
+  <span class="note">반환 원장이 1건인데 신청이 0건인 까닭은 담당자가 화면에서 직접 넣은 반환이라
+  신청 표를 안 거쳤기 때문입니다 — ⑦이 칸을 채우는 대신 되짚기를 고른 것이 맞았습니다.</span></p>
+</div>
+
+<div class="warn">
+  <div class="t">배포 준비에서 <span class="red">재서 잡은 것 둘</span> — 안 쟀으면 배포 중에 터졌습니다</div>
+  <ul>
+    <li>제가 「재고 도구에서 <code>db:preflight</code> 가 돈다」고 적었는데
+      <b>그 집에 그 명령이 아예 없었습니다</b>[실측: 명령 17개]. 그대로 베꼈으면
+      <span class="red">Missing script 로 멈췄습니다</span>. → 재고는 <b>명령을 안 돌리고 이미지 안을</b> 셉니다.</li>
+    <li>제가 준 표식 후보 하나(「다시 하려면」)가 <b>기준판에 2파일 있어</b> 아무것도 안 가립니다.
+      → 「부품 신청 거두기」로 바꿨습니다(기준 0 → 지금 1).</li>
+  </ul>
+</div>
 
 <div class="ok">
   <div class="t">✅ 예순여덟째 배포 뒤 처음으로 눈 확인을 마쳤습니다 (2026-11-26)</div>
