@@ -2,6 +2,7 @@ import { attachmentCategoryLabels, type AttachmentCategory } from "./attachment-
 import {
   buildShareFolderStem,
   compareShareFolderNames,
+  isIgnoredShareFolderEntryName,
   matchesShareFolderPrefix,
   numberedShareFolderFileName,
   sanitizeShareFolderNamePiece,
@@ -249,6 +250,52 @@ export function contactFolderCategoryFolderName(category: AttachmentCategory): s
 }
 
 /**
+ * 올릴 때 **사람이 적는 폴더 이름**의 글자 수 상한 (2026-11-26).
+ *
+ * [파일관리]의 올리기 칸에 「폴더 이름 (선택)」이 생겼다 — 적으면 분류 폴더 **안에** 그
+ * 이름의 폴더가 서고 파일이 그 안으로 들어간다. 그래서 경로가 **한 겹 더 길어지고**, 그
+ * 길이는 아래 파일 이름 상한에서 그대로 빼야 한다(CONTACT_FOLDER_FILE_MAX_NAME_LENGTH_
+ * IN_UPLOAD_FOLDER 의 셈).
+ *
+ * 🔴 **20 자인 까닭은 경로 예산 하나뿐이다.** 한 겹이 길어질수록 파일 이름이 그만큼
+ * 짧게 잘리므로, 「적고 싶은 만큼」과 「파일 이름이 안 잘리는 만큼」 사이에서 고른 값이다.
+ * 20 자면 `2026-11-26 2차점검` 같은 실제로 적을 법한 이름이 들어가고, 파일 이름 쪽에는
+ * 63 자가 남는다(연락서 폴더에 지금 들어 있는 이름들보다 넉넉하다).
+ */
+export const CONTACT_FOLDER_UPLOAD_FOLDER_MAX_NAME_LENGTH = 20;
+
+/**
+ * 사람이 적은 글자 → 분류 폴더 **안에 만들 폴더 이름**. 쓸 수 있는 이름이 안 나오면
+ * **null** 이고, 그때 부르는 쪽은 한 겹을 만들지 말고 **분류 폴더에 바로** 꽂는다
+ * (= 아무것도 안 적은 것과 같다).
+ *
+ * 생김새를 위 contactFolderCategoryFolderName 과 **일부러 맞췄다** — 둘 다 「하위 폴더
+ * 이름을 짓고, 못 지으면 null」이고 부르는 쪽(storage/contact-folder-archive.ts)이 같은
+ * 모양으로 다룬다.
+ *
+ * 🔴 **자른다 · 거절하지 않는다.** 거절은 사람이 적는 자리(화면 · 통로)에서 미리 한다
+ * (domain/contact-folder-upload-folder-name.ts 의 checkContactFolderUploadFolderName —
+ * 경로 글자 · 목록이 감추는 이름 · 길이). 여기까지 긴 이름이 내려오는 길은 그 두 겹이
+ * 다 빠졌을 때뿐이고, 그때도 **경로 예산은 지켜져야 한다** — 그래서 마지막 자리인 여기는
+ * 던지지도 거절하지도 않고 상한까지만 남긴다.
+ *
+ * 다듬기는 폴더 · 파일 이름과 **같은 한 벌**이다(truncateShareFolderNamePiece 가
+ * sanitizeShareFolderNamePiece 를 지난다) — 금지 글자 · 제어문자가 공백이 되고 끝의 점이
+ * 걷힌다. 점만 적은 이름(`.` · `..`)은 빈 글자가 되어 null 이 된다 = 경로를 거슬러 오르는
+ * 이름이 여기서 사라진다.
+ *
+ * 🔴 **목록이 감추는 이름은 여기서도 만들지 않는다**(`.측정` · `~$측정` · `Thumbs.db`).
+ * 다듬기는 맨 앞의 점을 걷지 않으므로 그냥 두면 **만들었는데 화면에도 탐색기에도 안
+ * 보이는 폴더**가 선다. 거절은 사람이 적는 자리에서 먼저 하지만(위), 판정을 두 겹에 다
+ * 두어야 그 한 겹이 빠지는 날 조용히 숨은 폴더가 생기지 않는다.
+ */
+export function contactFolderUploadFolderName(value: string | null | undefined): string | null {
+  const name = truncateShareFolderNamePiece(value, CONTACT_FOLDER_UPLOAD_FOLDER_MAX_NAME_LENGTH);
+  if (name.length === 0) return null;
+  return isIgnoredShareFolderEntryName(name) ? null : name;
+}
+
+/**
  * ============================================================================
  * 연락서 폴더 **안에 꽂는 파일**의 이름 규칙 (연락서 조각 6)
  * ============================================================================
@@ -284,6 +331,28 @@ export function contactFolderCategoryFolderName(category: AttachmentCategory): s
  * 다른 이름으로 잘리면 사람이 그것을 설명할 수 없다.
  */
 export const CONTACT_FOLDER_FILE_MAX_NAME_LENGTH = 84;
+
+/**
+ * 같은 상한 — 🔴 **사람이 적은 폴더가 한 겹 더 들어갔을 때**다 (2026-11-26).
+ *
+ * 올리기 칸의 「폴더 이름 (선택)」에 글자가 적혀 있으면 경로가 이렇게 된다:
+ *
+ *   경로 = 루트(49) + `\`(1) + 폴더 이름(최대 72) + `\`(1) + 분류 폴더(최대 10)
+ *          + `\`(1) + **적은 폴더(최대 20)** + `\`(1) + 파일 이름(F)
+ *
+ *   49 + 1 + 72 + 1 + 10 + 1 + 20 + 1 + F ≤ 218  →  **F ≤ 63**
+ *
+ * 🔴 **적은 글자 수가 아니라 상한(20)을 뺀다.** 실제 길이로 빼면 같은 파일이 폴더 이름
+ * 길이에 따라 **다른 이름으로 잘린다** — 위 CONTACT_FOLDER_FILE_MAX_NAME_LENGTH 머리말이
+ * 「분류마다 상한을 달리 두지 않는다」로 거절한 그 모양이다. 갈림길을 **둘로만** 둔다:
+ * 폴더를 안 적으면 84, 적으면 63.
+ *
+ * 🔴 **바이트 상한(CONTACT_FOLDER_FILE_MAX_NAME_BYTES)은 안 내린다.** 그것은 리눅스(NAS)의
+ * 파일 **이름 한 조각** 한도(255 바이트)라 위 폴더가 몇 겹이든 달라지지 않는다 — 길어지는
+ * 것은 경로이고, 경로 전체의 한도는 글자 수로 세는 엑셀 쪽(218)이다.
+ */
+export const CONTACT_FOLDER_FILE_MAX_NAME_LENGTH_IN_UPLOAD_FOLDER =
+  CONTACT_FOLDER_FILE_MAX_NAME_LENGTH - (CONTACT_FOLDER_UPLOAD_FOLDER_MAX_NAME_LENGTH + 1);
 
 /**
  * 같은 이름의 **바이트 수 상한**(UTF-8).
@@ -342,8 +411,16 @@ export function numberedContactFolderFileName(fileName: string, n: number): stri
  *  · 🔴 **줄기만 자른다.** 확장자는 자르지 않는다 — `.xlsx` 가 `.xls` 가 되면 사람이 그
  *    파일을 두 번 누르게 되고, 번호 꼬리는 자르면 덮어쓰기를 막는 뜻이 사라진다.
  *  · 상한은 **글자 수와 바이트 수 둘 다**이고, 번호 꼬리 자리를 미리 빼 둔다(위 주석).
+ *
+ * 🔴 `maxNameLength` 는 **글자 수 상한만** 바꾼다(2026-11-26). 사람이 적은 폴더가 한 겹
+ * 더 들어가면 경로가 그만큼 길어져 63 자로 내려간다
+ * (CONTACT_FOLDER_FILE_MAX_NAME_LENGTH_IN_UPLOAD_FOLDER). 🔴 **안 주면 한 글자도 달라지지
+ * 않는다** — 2026-11-26 전의 모든 부르는 쪽이 그 길이다.
  */
-export function contactFolderCopyFileName(originalFileName: string): string | null {
+export function contactFolderCopyFileName(
+  originalFileName: string,
+  maxNameLength: number = CONTACT_FOLDER_FILE_MAX_NAME_LENGTH
+): string | null {
   const name = typeof originalFileName === "string" ? originalFileName.normalize("NFC") : "";
   // 맨 앞의 점은 확장자 구분자가 아니다(`.gitignore` 는 줄기가 `.gitignore` 다).
   const dot = name.lastIndexOf(".");
@@ -352,7 +429,7 @@ export function contactFolderCopyFileName(originalFileName: string): string | nu
   if (stem.length === 0) return null;
   const suffix = extension.length === 0 ? "" : `.${extension}`;
 
-  const maxLength = CONTACT_FOLDER_FILE_MAX_NAME_LENGTH - NUMBER_TAIL_RESERVE;
+  const maxLength = maxNameLength - NUMBER_TAIL_RESERVE;
   const maxBytes = CONTACT_FOLDER_FILE_MAX_NAME_BYTES - NUMBER_TAIL_RESERVE;
 
   // 긴 쪽부터 한 글자씩 줄인다(코드 포인트 단위 — UTF-16 한 쌍을 반으로 가르지 않게).

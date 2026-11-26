@@ -21,6 +21,7 @@ import {
   type AttachmentCategory,
 } from "@/lib/domain/attachment-category";
 import { buildAttachmentStoredPath } from "@/lib/domain/attachment-path";
+import { checkContactFolderUploadFolderName } from "@/lib/domain/contact-folder-upload-folder-name";
 import { createAttachmentRecord } from "@/lib/db/mutations/attachments";
 import { getAttachmentUploadTarget } from "@/lib/db/queries/attachments";
 import { getRepairCaseContactFolderKeyById } from "@/lib/db/queries/repair-cases";
@@ -136,6 +137,12 @@ import { AttachmentTooLargeError, type StorageAdapter } from "@/lib/storage/stor
  * 못하면(같은 이름의 파일이 막고 있다) 폴더 바로 아래에 꽂은 뒤 그 사실을 응답에 싣는다.
  * 규율 전부는 storage/contact-folder-archive.ts 에 있다 — 이 통로는 분류만 넘긴다.
  *
+ * 🔴 **그 안에 한 겹 더 설 수 있다** (2026-11-26) — 올리는 사람이 [파일 올리기]의
+ * 「폴더 이름 (선택)」에 적은 이름이고, `?folder=` 로 받는다. 🔴 **이 통로가 하는 일은
+ * 둘뿐**이다: 쓸 수 없는 이름을 **본문을 받기 전에** 거절하고(아래 INVALID_UPLOAD_FOLDER),
+ * 적힌 글자를 storage 에 그대로 넘긴다. 다듬기 · 상한 · 만들기 규율은 거기 한 자리에 있다.
+ * 🔴 **안 적으면 한 글자도 달라지지 않는다** — 분류 폴더에 바로 꽂힌다.
+ *
  * 🔴 **설정(CONTACT_FOLDER_ARCHIVE_DIR)이 비면 아무 일도 하지 않는다** — 기능이 꺼진
  * 환경에서는 DB 조회도 파일 읽기도 하지 않고 응답에 그 칸이 아예 붙지 않는다.
  *
@@ -160,6 +167,8 @@ type FailureCode =
   | "INVALID_CATEGORY"
   | "CATEGORY_NOT_ALLOWED_FOR_OWNER"
   | "INVALID_FILE_NAME"
+  /** 🔴 적은 **폴더 이름**이 쓸 수 없다(2026-11-26 — 「폴더 이름 (선택)」). */
+  | "INVALID_UPLOAD_FOLDER"
   | "EXTENSION_NOT_ALLOWED"
   | "EXTENSION_NOT_ALLOWED_FOR_CATEGORY"
   | "EMPTY_BODY"
@@ -203,6 +212,13 @@ type ContactFolderCopyNote =
 type ContactFolderCopyPlaceNote = {
   categoryFolderName: string | null;
   categoryFolderBlockedByFile: boolean;
+  /**
+   * 🔴 사람이 적은 폴더 한 겹(2026-11-26). **적었을 때만** 둘이 붙는다 — 안 적은 사람의
+   * 응답은 2026-11-26 전과 한 글자도 다르지 않다. 담는 것은 **그 사람이 방금 적은 글자**
+   * 뿐이고, 연락서 폴더 이름도 루트도 여전히 담지 않는다.
+   */
+  uploadFolderName?: string | null;
+  uploadFolderBlockedByFile?: boolean;
 };
 
 const CONTACT_FOLDER_COPY_CASE_GONE_REASON = "수리 건 정보를 읽지 못해 연락서 폴더를 찾을 수 없습니다.";
@@ -224,6 +240,12 @@ async function copyToContactFolder(input: {
   originalFileName: string;
   /** 🔴 분류 — 그 **한글 이름표**로 된 하위 폴더에 꽂힌다(조각 11). */
   category: AttachmentCategory;
+  /**
+   * 🔴 사람이 적은 폴더 이름 — 분류 폴더 **안에** 한 겹 더 선다(2026-11-26). 빈 글자면
+   * 아무 일도 하지 않는다(= 분류 폴더에 바로). 다듬기 · 상한은 storage 가 domain 을 거쳐
+   * 한 자리에서 한다 — 여기서는 **적힌 글자를 그대로 넘기기만** 한다.
+   */
+  uploadFolderName: string;
 }): Promise<ContactFolderCopyNote | null> {
   // 🔴 기능이 꺼진 환경에서는 올리기가 한 글자도 달라지지 않는다 — DB 도 디스크도 보지 않는다.
   if (resolveContactFolderArchiveRoot() === null) return null;
@@ -238,6 +260,7 @@ async function copyToContactFolder(input: {
       intakeNumber: key.intakeNumber,
       category: input.category,
       originalFileName: input.originalFileName,
+      uploadFolderName: input.uploadFolderName,
       bytes,
     });
 
@@ -247,6 +270,13 @@ async function copyToContactFolder(input: {
         fileName: result.fileName,
         categoryFolderName: result.categoryFolderName,
         categoryFolderBlockedByFile: result.categoryFolderBlockedByFile,
+        // 🔴 적었을 때만 붙는다 — storage 가 안 실어 보내면 여기서도 안 붙는다.
+        ...(result.uploadFolderBlockedByFile === undefined
+          ? {}
+          : {
+              uploadFolderName: result.uploadFolderName ?? null,
+              uploadFolderBlockedByFile: result.uploadFolderBlockedByFile,
+            }),
       };
     }
     if (result.status === "no-folder") return { status: "no-folder" };
@@ -319,6 +349,21 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   const originalFileName = (searchParams.get("fileName") ?? "").trim();
   if (originalFileName.length === 0 || originalFileName.length > MAX_ORIGINAL_FILE_NAME_LENGTH) {
     return fail(400, "INVALID_FILE_NAME", "파일 이름이 비어 있거나 너무 깁니다.");
+  }
+
+  /**
+   * 🔴 **사람이 적은 폴더 이름**(2026-11-26 — [파일 올리기]의 「폴더 이름 (선택)」).
+   * 적혀 있으면 공유폴더의 분류 폴더 **안에** 그 이름으로 한 겹 더 만들고 거기에 꽂는다.
+   *
+   * 🔴 **본문을 받기 전에** 본다(이 파일 머리말의 차례 1). 화면도 아이폰 사진을 굽기 전에
+   * 같은 함수로 보지만, 주소는 아무 웹페이지나 만들 수 있으므로 여기서 다시 본다 —
+   * 🔴 **까닭 글귀를 두 곳에서 지어 적지 않는 것**이 핵심이다(그 함수 머리말).
+   * 🔴 안 적으면 빈 글자이고, 그때는 아무것도 달라지지 않는다(분류 폴더에 바로).
+   */
+  const uploadFolderName = (searchParams.get("folder") ?? "").trim();
+  const uploadFolderReason = checkContactFolderUploadFolderName(uploadFolderName);
+  if (uploadFolderReason !== null) {
+    return fail(400, "INVALID_UPLOAD_FOLDER", uploadFolderReason);
   }
 
   const extension = normalizeFileExtension(originalFileName);
@@ -432,6 +477,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
     storedPath,
     originalFileName,
     category,
+    uploadFolderName,
   });
 
   return NextResponse.json(

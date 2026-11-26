@@ -50,6 +50,17 @@ import { describe, test } from "node:test";
  * 늘지 않았고**, 늘어난 것은 내보내는 함수 목록 한 줄뿐이다.
  * 🔴 **지우기 · 덮어쓰기 금지는 한 글자도 느슨해지지 않았다**(아래 두 시험 그대로).
  *
+ * ── 🔴 2026-11-26 — 꽂는 **겹**이 둘이 되었다 ───────────────────────────
+ * 올리는 사람이 적은 폴더가 분류 폴더 **안에** 한 겹 더 선다([파일 올리기]의 「폴더 이름
+ * (선택)」). 🔴 **여기서도 금지를 푼 것이 아니다** — 분류 폴더를 열던 함수의 이름을
+ * `openCategoryFolder` → `openSubfolder` 로 바꾸고 **두 번 부른다.** 그래서:
+ *  · `mkdir` 을 부르는 자리는 여전히 **하나**이고 `makeOneFolder` 를 부르는 자리도 **넷**
+ *    그대로다(이 수가 늘면 누가 따로 만들고 있는 것이다).
+ *  · 🔴 겹 수는 **`openSubfolder` 를 부르는 자리**로 센다 — 둘이다. 셋이 되면 경로가 한
+ *    겹 더 길어진 것이고, 그때는 파일 이름 상한(경로 예산)을 다시 뽑아야 한다.
+ *  · 🔴 **연락서 폴더는 여전히 만들지 않는다**(없으면 `no-folder`).
+ * 🔴 **지우기 · 덮어쓰기 금지는 한 글자도 느슨해지지 않았다**(아래 두 시험 그대로).
+ *
  * 찾기 · 만들기 · 꽂기 동작 자체는 contact-folder-archive.test.ts ·
  * contact-folder-create.test.ts · contact-folder-copy.test.ts ·
  * contact-folder-subfolders.test.ts 가, 이름 · 대조 규칙은
@@ -103,20 +114,26 @@ describe("연락서 폴더 — 원본으로 지킨다", () => {
     assert.equal(/\bawait writeFile\(/.test(code), false, "fs 의 writeFile 을 직접 불렀다");
   });
 
-  test("🔴 사본을 꽂는 길은 **연락서 폴더를 만들지 않는다** — 만드는 것은 분류 폴더 하나뿐이다 (조각 11)", () => {
+  test("🔴 사본을 꽂는 길은 **연락서 폴더를 만들지 않는다** — 만드는 것은 하위 두 겹뿐이다 (조각 11 · 2026-11-26)", () => {
     const copy = code.slice(code.indexOf("export async function copyIntoContactFolder("), code.indexOf("async function look("));
     assert.ok(copy.length > 0, "사본 꽂기가 없다");
     // 🔴 fs 를 직접 부르지 않는다 — 폴더를 만드는 길은 공용 도우미 하나뿐이다.
     assert.equal(/\bmkdir\b/.test(copy), false, "🔴 꽂는 길이 mkdir 을 직접 부른다");
-    // 🔴 그 도우미를 부르는 자리도 **하나**다(분류 폴더). 둘이 되면 무엇을 더 만드는 것이다.
-    assert.equal(copy.match(/\bmakeOneFolder\(/g)?.length, 1, "🔴 꽂는 길이 폴더를 둘 이상 만든다");
-    assert.ok(copy.includes("async function openCategoryFolder("), "분류 폴더를 여는 자리가 없다");
-    // 🔴 그 하나가 **분류 폴더**다 — 연락서 폴더 이름을 짓는 자리가 여기 없다.
+    // 🔴 그 도우미를 부르는 자리도 **하나**다. 🔴 2026-11-26 에 만드는 겹이 둘이 됐지만
+    //    (분류 폴더 · 사람이 적은 폴더) **늘어난 것은 openSubfolder 를 부르는 자리**이고,
+    //    그 안의 makeOneFolder 는 여전히 하나다 — 둘이 되면 무엇을 더 만드는 것이다.
+    assert.equal(copy.match(/\bmakeOneFolder\(/g)?.length, 1, "🔴 꽂는 길이 폴더를 만드는 자리가 둘이다");
+    assert.ok(copy.includes("async function openSubfolder("), "하위 폴더를 여는 자리가 없다");
+    // 🔴 **두 겹까지다** — 정의 하나 + 부르는 자리 둘. 셋이 되면 겹이 하나 더 는 것이다.
+    assert.equal(copy.match(/\bopenSubfolder\(/g)?.length, 3, "🔴 하위 폴더 겹 수가 둘이 아니다");
+    // 🔴 그 둘이 **분류 폴더와 사람이 적은 폴더**다 — 연락서 폴더 이름을 짓는 자리가 없다.
     assert.equal(copy.includes("contactFolderName("), false, "🔴 꽂는 길이 연락서 폴더 이름을 짓는다");
     assert.equal(copy.includes("makeDataFolder("), false, "🔴 꽂는 길이 DATA 를 만든다");
     assert.ok(copy.includes('status: "no-folder"'), "폴더가 없을 때 건너뛰지 않는다");
-    // 🔴 분류 폴더를 못 써도 실패로 끝내지 않는다 — 폴더 바로 아래로 비켜 간다.
-    assert.ok(copy.includes("categoryFolderBlockedByFile: true"), "🔴 막혔을 때 비켜 가는 길이 없다");
+    // 🔴 하위 폴더를 못 써도 실패로 끝내지 않는다 — 한 겹 위로 비켜 간다(두 겹 다).
+    assert.ok(copy.includes("categoryFolderBlockedByFile: category.blockedByFile"), "🔴 분류 폴더가 막혔을 때 비켜 가는 길이 없다");
+    assert.ok(copy.includes("uploadFolderBlockedByFile: upload.blockedByFile"), "🔴 적은 폴더가 막혔을 때 비켜 가는 길이 없다");
+    assert.ok(copy.includes("return { name: null, blockedByFile: true };"), "🔴 파일이 막았을 때 한 겹 위로 안 비켜 간다");
     // 🔴 NFC/NFD — 쓰기 전에 디스크의 이름을 접어서 견준다(`wx` 만으로는 못 막는다).
     assert.ok(copy.includes("normalizeShareFolderNameForCompare("), "정규화해 견주지 않는다");
   });
@@ -140,10 +157,12 @@ describe("연락서 폴더 — 원본으로 지킨다", () => {
     assert.ok(dataCall < exists, "🔴 이미 있던 폴더를 쓰는 길에서도 DATA 를 만든다");
   });
 
-  test("🔴 폴더를 만드는 자리는 `makeOneFolder` 하나다 — 셋이 전부 그리로 들어온다 (조각 11)", () => {
+  test("🔴 폴더를 만드는 자리는 `makeOneFolder` 하나다 — 넷이 전부 그리로 들어온다 (조각 11 · 2026-11-26)", () => {
     const helper = blockAt(code, code.indexOf("async function makeOneFolder("));
     assert.ok(helper.includes("await mkdir(target);"), "도우미가 mkdir 을 부르지 않는다");
-    // 연락서 폴더 · DATA · 분류 폴더 — 부르는 자리가 셋이다(정의 한 줄을 뺀 수).
+    // 연락서 폴더 · DATA · 분류 폴더 · 사람이 적은 폴더 — 🔴 **넷을 만들지만 부르는 자리는
+    // 셋**이다(정의 한 줄을 뺀 수). 2026-11-26 에 는 겹은 분류 폴더와 **같은 openSubfolder**
+    // 를 지나므로 이 수가 한 개도 안 늘었다 — 늘었다면 누가 따로 만들고 있는 것이다.
     assert.equal(code.match(/\bmakeOneFolder\(/g)?.length, 4, "폴더를 만드는 자리가 셋이 아니다");
     // 🔴 EEXIST 를 삼키는 자리도 여기 하나다 — 자리가 **폴더인지 파일인지**는 부르는 쪽이 가린다.
     assert.ok(helper.includes('shareFolderErrorCode(error) === "EEXIST"'), "EEXIST 를 도우미가 가리지 않는다");

@@ -10,6 +10,7 @@ import {
   CONTACT_FOLDER_COPY_MULTIPLE_TEXT,
   CONTACT_FOLDER_COPY_NO_FOLDER_TEXT,
   CONTACT_FOLDER_DATA_BLOCKED_TEXT,
+  CONTACT_FOLDER_UPLOAD_FOLDER_BLOCKED_TEXT,
   contactFolderCopyNotice,
   contactFolderDataSaveNotice,
   readContactFolderCopyNote,
@@ -30,6 +31,9 @@ import {
  *  · 설정이 꺼진 환경(응답에 그 칸이 없다)에서는 **아무 말도 하지 않는다**
  *  · 🔴 공유폴더 줄을 **저장 팝업에 싣지 않는다**(0.5 초 뒤 닫힌다)
  *  · 🔴 휴지통 확인창에 「사본은 그대로 남습니다」가 있다
+ *  · 🔴 **사람이 적은 폴더**가 파일에 막혔을 때도 말한다(2026-11-26) — 분류 폴더가 막혔을
+ *    때와 **비켜 간 자리가 달라** 글귀를 돌려 쓰지 않는다. 안 적은 응답에는 그 칸이 아예
+ *    없고, 그때 문장이 한 글자도 안 달라진다.
  * ============================================================================
  */
 
@@ -159,6 +163,64 @@ describe("🔴 조각 11 이 남긴 구멍 — 「파일이 자리를 막았다�
     assert.equal(notice?.tone, "error");
     assert.ok(notice?.text.includes(CONTACT_FOLDER_COPY_NO_FOLDER_TEXT), notice?.text);
     assert.ok(notice?.text.includes(CONTACT_FOLDER_COPY_CATEGORY_BLOCKED_TEXT), notice?.text);
+  });
+});
+
+describe("🔴 **사람이 적은 폴더**가 막혔을 때도 말한다 (2026-11-26)", () => {
+  test("서버가 실은 그 칸을 읽는다 — 참일 때만 싣는다", () => {
+    assert.deepEqual(
+      readContactFolderCopyNote({
+        contactFolderCopy: { status: "copied", fileName: "a.jpg", uploadFolderBlockedByFile: true },
+      }),
+      { status: "copied", fileName: "a.jpg", uploadFolderBlockedByFile: true }
+    );
+    // 🔴 칸이 없거나 거짓이면 싣지 않는다 — 폴더를 **안 적은** 응답에는 칸이 아예 없다.
+    assert.deepEqual(
+      readContactFolderCopyNote({
+        contactFolderCopy: { status: "copied", fileName: "a.jpg", uploadFolderBlockedByFile: false },
+      }),
+      { status: "copied", fileName: "a.jpg" }
+    );
+  });
+
+  test("🔴 **분류 폴더에 넣었다**고 말한다 — 분류 폴더가 막혔을 때와 비켜 간 자리가 다르다", () => {
+    const notice = contactFolderCopyNotice([
+      { status: "copied", fileName: "IMG_2847.jpg", uploadFolderBlockedByFile: true },
+    ]);
+    assert.equal(notice?.tone, "success");
+    assert.ok(notice?.text.includes("IMG_2847.jpg"), notice?.text);
+    assert.ok(notice?.text.includes(CONTACT_FOLDER_UPLOAD_FOLDER_BLOCKED_TEXT), notice?.text);
+    // 🔴 두 줄이 **다른 자리**를 가리킨다 — 글귀를 돌려 쓰지 않았다.
+    assert.notEqual(CONTACT_FOLDER_UPLOAD_FOLDER_BLOCKED_TEXT, CONTACT_FOLDER_COPY_CATEGORY_BLOCKED_TEXT);
+    assert.ok(CONTACT_FOLDER_UPLOAD_FOLDER_BLOCKED_TEXT.includes("분류 폴더에 넣었습니다"));
+    assert.ok(CONTACT_FOLDER_COPY_CATEGORY_BLOCKED_TEXT.includes("연락서 폴더 바로 아래에 넣었습니다"));
+    // 🔴 사람이 다음에 할 일이 적혀 있다(앱은 그 파일을 지우지 않는다).
+    assert.ok(CONTACT_FOLDER_UPLOAD_FOLDER_BLOCKED_TEXT.includes("탐색기"));
+  });
+
+  test("🔴 두 겹이 **함께** 막히면 두 줄이 다 나간다 — 서로 다른 두 가지가 막힌 것이다", () => {
+    const notice = contactFolderCopyNotice([
+      {
+        status: "copied",
+        fileName: "IMG_2847.jpg",
+        categoryFolderBlockedByFile: true,
+        uploadFolderBlockedByFile: true,
+      },
+    ]);
+    assert.ok(notice?.text.includes(CONTACT_FOLDER_COPY_CATEGORY_BLOCKED_TEXT), notice?.text);
+    assert.ok(notice?.text.includes(CONTACT_FOLDER_UPLOAD_FOLDER_BLOCKED_TEXT), notice?.text);
+  });
+
+  test("🔴 안 적었거나 안 막혔으면 **예전 문장이 한 글자도 안 달라진다**", () => {
+    assert.deepEqual(contactFolderCopyNotice([{ status: "copied", fileName: "IMG_2847.jpg" }]), {
+      tone: "success",
+      text: "공유폴더에도 넣었습니다 — IMG_2847.jpg",
+    });
+    // 🔵 옆 세 길은 이 칸을 아예 못 받는다(통로가 안 싣는다) — 글귀가 안 바뀐다.
+    assert.deepEqual(contactFolderDataSaveNotice([{ status: "copied", fileName: "파형.csv" }]), {
+      tone: "success",
+      text: "DATA 폴더에 넣었습니다 — 파형.csv",
+    });
   });
 });
 

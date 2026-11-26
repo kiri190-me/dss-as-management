@@ -29,6 +29,13 @@ import { CONTACT_FOLDER_COMMON_FOLDER_NAME } from "@/lib/domain/contact-folder-n
  * 그리고 조각 11 이 남긴 구멍을 메웠다 — 하위 폴더 자리를 **같은 이름의 파일**이 막아
  * 폴더 바로 아래로 비켜 갔을 때, 그 사실을 이제 화면이 말한다(아래 … BLOCKED_TEXT).
  *
+ * ── 🔴 2026-11-26 — 올리기에 **사람이 적은 폴더**가 한 겹 더 생겼다 ──────
+ * [파일 올리기]의 「폴더 이름 (선택)」에 적으면 분류 폴더 **안에** 그 이름의 폴더가 선다.
+ * 그 자리를 같은 이름의 **파일**이 막으면 파일은 **분류 폴더**에 들어가고(한 겹 위), 그
+ * 사실이 응답에 실려 온다. 🔴 조각 11 이 남긴 구멍을 조각 12 가 메운 그 일을 **여기서
+ * 되풀이하지 않는다** — 읽는 자리(readContactFolderCopyNote)와 말하는 자리를 같은 날 함께
+ * 만들었다. 🔵 그 칸은 올리기 길에서만 오므로 나머지 세 길의 글귀는 한 글자도 안 바뀐다.
+ *
  * 값으로 시험한다(contact-folder-copy-notice.test.ts) — DOM 도 네트워크도 없다.
  * ============================================================================
  */
@@ -39,9 +46,19 @@ import { CONTACT_FOLDER_COMMON_FOLDER_NAME } from "@/lib/domain/contact-folder-n
  */
 export type ContactFolderCopyNote =
   /** 새로 꽂았다. `fileName` 은 디스크에 실제로 쓴 이름(번호가 붙었을 수 있다). */
-  | { status: "copied"; fileName: string; categoryFolderBlockedByFile?: boolean }
+  | {
+      status: "copied";
+      fileName: string;
+      categoryFolderBlockedByFile?: boolean;
+      uploadFolderBlockedByFile?: boolean;
+    }
   /** 같은 내용이 이미 있어 쓰지 않았다. */
-  | { status: "unchanged"; fileName: string; categoryFolderBlockedByFile?: boolean }
+  | {
+      status: "unchanged";
+      fileName: string;
+      categoryFolderBlockedByFile?: boolean;
+      uploadFolderBlockedByFile?: boolean;
+    }
   /** 🔴 연락서 폴더가 아직 없다 — 앱은 폴더를 만들지 않는다. */
   | { status: "no-folder" }
   /** 맞는 폴더가 여럿이라 앱이 고르지 않았다. */
@@ -66,6 +83,16 @@ export const CONTACT_FOLDER_COPY_MULTIPLE_TEXT =
  */
 export const CONTACT_FOLDER_COPY_CATEGORY_BLOCKED_TEXT =
   "분류 폴더 자리에 같은 이름의 파일이 있어 연락서 폴더 바로 아래에 넣었습니다 — 탐색기에서 그 파일을 치워 주세요.";
+
+/**
+ * 같은 일이 **사람이 적은 폴더** 자리에서 일어났을 때(2026-11-26).
+ *
+ * 🔴 **한 겹 위는 분류 폴더다** — 분류 폴더가 막혔을 때의 윗줄과 **비켜 간 자리가 다르다.**
+ * 그래서 글귀를 돌려 쓰지 않는다: 어디를 열어야 파일이 있는지 사람이 알아야 한다.
+ * 🔴 앱은 막은 파일을 지우지 않으므로 치우는 것은 사람이다(윗줄과 같다).
+ */
+export const CONTACT_FOLDER_UPLOAD_FOLDER_BLOCKED_TEXT =
+  "적으신 폴더 자리에 같은 이름의 파일이 있어 분류 폴더에 넣었습니다 — 탐색기에서 그 파일을 치우거나 다른 폴더 이름을 적어 주세요.";
 
 /** 같은 일이 `DATA` 자리에서 일어났을 때(조각 12). */
 export const CONTACT_FOLDER_DATA_BLOCKED_TEXT =
@@ -102,9 +129,16 @@ export function readContactFolderCopyNote(payload: unknown): ContactFolderCopyNo
   const reason = (note as { reason?: unknown }).reason;
   // 🔴 참일 때만 싣는다 — 칸이 없는(예전) 응답을 「막혔다」로 읽지 않는다.
   const blocked = (note as { categoryFolderBlockedByFile?: unknown }).categoryFolderBlockedByFile === true;
+  // 🔴 같은 규율으로 한 칸 더 읽는다(2026-11-26) — 폴더를 안 적은 응답에는 칸이 아예 없다.
+  const uploadBlocked = (note as { uploadFolderBlockedByFile?: unknown }).uploadFolderBlockedByFile === true;
 
   if ((status === "copied" || status === "unchanged") && typeof fileName === "string" && fileName.length > 0) {
-    return { status, fileName, ...(blocked ? { categoryFolderBlockedByFile: true } : {}) };
+    return {
+      status,
+      fileName,
+      ...(blocked ? { categoryFolderBlockedByFile: true } : {}),
+      ...(uploadBlocked ? { uploadFolderBlockedByFile: true } : {}),
+    };
   }
   if (status === "no-folder" || status === "multiple") return { status };
   if (status === "failed" && typeof reason === "string" && reason.length > 0) return { status, reason };
@@ -124,6 +158,24 @@ function wasPlaceBlocked(notes: readonly ContactFolderCopyNote[]): boolean {
   return notes.some(
     (note) =>
       (note.status === "copied" || note.status === "unchanged") && note.categoryFolderBlockedByFile === true
+  );
+}
+
+/**
+ * 같은 물음을 **사람이 적은 폴더** 자리에 (2026-11-26).
+ *
+ * 🔴 **윗줄과 따로 센다** — 두 겹은 비켜 간 자리가 달라서 할 말이 다르고, 분류 폴더가
+ * 막힌 날에는 **둘 다** 참일 수 있다(그때는 두 줄이 다 나간다. 실제로 서로 다른 두 가지가
+ * 막힌 것이다).
+ *
+ * 🔵 이 칸은 **올리기 길에서만** 온다 — [DATA에 저장] · 종류 공통 서류 · 가리킨 서류
+ * 가져오기는 폴더 이름을 받지 않아 칸이 아예 붙지 않는다. 그래서 몸통 하나에 두어도
+ * 그쪽 세 길의 글귀가 한 글자도 달라지지 않는다.
+ */
+function wasUploadFolderBlocked(notes: readonly ContactFolderCopyNote[]): boolean {
+  return notes.some(
+    (note) =>
+      (note.status === "copied" || note.status === "unchanged") && note.uploadFolderBlockedByFile === true
   );
 }
 
@@ -156,13 +208,19 @@ function buildNotice(
     if (parts.length === 0) return null;
     // 🔴 넣기는 했어도 **자리가 밀렸으면** 그 사실을 말한다(조각 11 이 남긴 구멍).
     if (wasPlaceBlocked(notes)) parts.push(words.blocked);
+    // 🔴 사람이 적은 폴더가 막힌 것은 **따로** 말한다 — 비켜 간 자리가 다르다(2026-11-26).
+    if (wasUploadFolderBlocked(notes)) parts.push(CONTACT_FOLDER_UPLOAD_FOLDER_BLOCKED_TEXT);
     return { tone: "success", text: parts.join(" / ") };
   }
 
   const failedCount = notes.length - copied.length - unchanged.length;
   const head = notes.length === 1 ? words.failedOne : words.failedMany(failedCount);
-  const text = `${head} — ${reasons.join(" / ")}`;
-  return { tone: "error", text: wasPlaceBlocked(notes) ? `${text} / ${words.blocked}` : text };
+  const tail = [
+    `${head} — ${reasons.join(" / ")}`,
+    ...(wasPlaceBlocked(notes) ? [words.blocked] : []),
+    ...(wasUploadFolderBlocked(notes) ? [CONTACT_FOLDER_UPLOAD_FOLDER_BLOCKED_TEXT] : []),
+  ];
+  return { tone: "error", text: tail.join(" / ") };
 }
 
 /** 이번에 **올린** 것들의 공유폴더 결과(조각 6·11). */

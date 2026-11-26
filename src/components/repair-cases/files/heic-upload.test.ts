@@ -466,17 +466,23 @@ describe("🔴 화면이 이 규칙대로 배선돼 있다", () => {
   test("보내기 전에 바꾼다 — 진짜 변환기를 넘기고, 실패는 올리기 실패와 한 목록이다", () => {
     assert.ok(screenCode.includes("convert: convertHeicToJpeg"), "진짜 변환기를 안 넘긴다");
     assert.ok(screenCode.includes("failures.push(...outcome.failures)"), "변환 실패가 샌다");
-    // 🔴 2026-11-18 저녁에 **한 겹이 끼어들었다.** 같은 패널에 [파일 이름 (선택)] 이
-    //    생기면서, 이름을 적어 두면 목록에 뜨는 것이 `IMG_1234.jpg` 가 아니라 그 이름이
-    //    된다. 그래서 바뀐 이름 줄의 「→ 뒤」를 **최종 이름으로 갈아 끼운 뒤에** 알린다
-    //    (upload-file-name.ts 의 heicRenamesWithUploadNames — 안 그러면 사람이 목록에
-    //    없는 이름을 찾는다). 🔴 **알리는 일 자체는 그대로고, 빠지면 여기서 걸린다.**
+    // 🔴 2026-11-18 저녁에 **한 겹이 끼어들었다가 2026-11-26 에 빠졌다.** 그날 저녁 같은
+    //    패널에 [파일 이름 (선택)] 이 생기면서, 이름을 적어 두면 목록에 뜨는 것이
+    //    `IMG_1234.jpg` 가 아니라 그 이름이 되어 바뀐 이름 줄의 「→ 뒤」를 최종 이름으로
+    //    갈아 끼워야 했다(heicRenamesWithUploadNames). 🔴 2026-11-26 에 그 칸이 **폴더
+    //    이름**이 되면서 파일 이름을 정하는 기능이 없어졌고(사용자 결정), 올라가는 이름이
+    //    다시 구운 이름 그대로라 **갈아 끼울 것이 없다.** 그래서 바꾼 쌍을 그대로 넘긴다.
+    // 🔴 **알리는 일 자체는 한 글자도 안 바뀌었다 — 빠지면 여기서 걸린다.**
     assert.ok(screenCode.includes("heicRenamed = outcome.renamed"), "바뀐 이름을 안 모은다");
     assert.ok(
-      /heicNotice = heicConversionNotice\(\s*heicRenamesWithUploadNames\(heicRenamed,/.test(
-        screenCode
-      ),
+      screenCode.includes("heicNotice = heicConversionNotice(heicRenamed);"),
       "바뀐 이름을 사람에게 안 알린다"
+    );
+    // 🔴 없어진 한 겹이 되살아나면 여기서 걸린다(그 한 벌은 저장소에 없다).
+    assert.equal(
+      screenCode.includes("heicRenamesWithUploadNames"),
+      false,
+      "없어진 이름 갈아 끼우기가 되살아났다"
     );
     assert.ok(
       /import \{ convertHeicToJpeg \} from "\.\/heic-to-jpeg";/.test(screenCode),

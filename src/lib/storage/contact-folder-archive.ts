@@ -7,10 +7,13 @@ import type { AttachmentCategory } from "@/lib/domain/attachment-category";
 import {
   CONTACT_FOLDER_COMMON_FOLDER_NAME,
   CONTACT_FOLDER_DATA_FOLDER_NAME,
+  CONTACT_FOLDER_FILE_MAX_NAME_LENGTH,
+  CONTACT_FOLDER_FILE_MAX_NAME_LENGTH_IN_UPLOAD_FOLDER,
   CONTACT_FOLDER_MAX_NUMBERED_COPIES,
   contactFolderCategoryFolderName,
   contactFolderCopyFileName,
   contactFolderName,
+  contactFolderUploadFolderName,
   numberedContactFolderFileName,
   pickContactFolder,
   type ContactFolderMatch,
@@ -50,6 +53,13 @@ import {
  * 🔴 **2026-10-05 조각 11** — 만드는 폴더가 셋이 되었다(연락서 폴더 · 그 안의 `DATA` ·
  * 올린 파일의 분류 폴더). 그래도 **`mkdir` 을 부르는 자리는 `makeOneFolder` 하나**다 —
  * 세 자리에 흩어 적으면 `recursive` 가 하나에만 붙는 날이 온다.
+ *
+ * 🔴 **2026-11-26** — 넷이 되었다: 분류 폴더 **안에** 사람이 올리면서 적은 이름의 폴더가
+ * 한 겹 더 선다(사용자 요청 — [파일 올리기]의 「폴더 이름 (선택)」). 🔴 **그래도
+ * `makeOneFolder` 하나다.** 두 겹은 `openSubfolder` 를 **두 번 부르는 것**이고, 그래서
+ * 「없으면 만들고 · 있으면 쓰고 · 같은 이름의 파일이 막으면 한 겹 위로 비켜 간다」가 두
+ * 겹에서 한 글자도 다르지 않다. 🔴 `recursive` 가 없으므로 **차례가 곧 규율**이다 —
+ * 분류 폴더를 먼저 만들고, 그 다음에 그 안을 만든다.
  *
  * 🔴 **2026-10-06** — 꽂는 자리가 하나 늘었다: 접수할 때 그 수리품 **종류의 공통 서류**가
  * 들어가는 `공통/` 이다(copyIntoContactFolderCommonFolder). 🔴 **새로 만든 길이 아니라
@@ -346,8 +356,20 @@ async function makeDataFolder(root: string, folder: string): Promise<void> {
  *    (copyIntoContactFolderCommonFolder).
  *
  * 🔴 **규율은 한 벌이다** — 없으면 만들고 · 있으면 쓰고 · 같은 이름의 **파일**이 막고
- * 있으면 연락서 폴더 바로 아래로 비켜 가 그 사실을 결과에 싣는다. 세 길에 따로 적지
- * 않는다(아래 openCategoryFolder 하나가 셋을 다 한다).
+ * 있으면 한 겹 위로 비켜 가 그 사실을 결과에 싣는다. 길마다 따로 적지 않는다
+ * (아래 openSubfolder 하나가 전부 한다).
+ *
+ * ── 🔴 **올리기만 한 겹 더** (2026-11-26) ───────────────────────────────
+ * 올리기에는 `연락서폴더/인수 사진/1차 측정/…` 처럼 **사람이 올리면서 적은 이름**의 폴더가
+ * 한 겹 더 설 수 있다(사용자 요청 — [파일 올리기]의 「폴더 이름 (선택)」).
+ *  · 🔴 **안 적으면 아무것도 안 달라진다** — 분류 폴더에 바로 꽂힌다.
+ *  · 🔴 **분류 폴더 다음**이다. `recursive` 가 없으므로 차례가 곧 규율이고, 분류 폴더가
+ *    막혀 한 겹 위로 비켜 갔으면 이 폴더도 거기에 선다.
+ *  · 🔴 **이미 있으면 그대로 쓴다** — 폴더는 파일과 달라 겹쳐도 해롭지 않다. 같은 폴더에
+ *    나눠 올리는 것이 바라는 쓰임이다.
+ *  · 🔴 한 겹이 늘어난 만큼 **파일 이름 상한이 84 → 63 자로 내려간다**(경로 예산 —
+ *    domain 의 CONTACT_FOLDER_FILE_MAX_NAME_LENGTH_IN_UPLOAD_FOLDER). 폴더를 안 적으면
+ *    84 그대로다.
  *
  *  · 🔴 **쓰는 분류만 그때그때 만든다** — 분류 전부를 미리 만들지 않는다.
  *  · 🔴 **없으면 만들고 있으면 쓴다**(`EEXIST` 면 그대로 진행).
@@ -398,6 +420,15 @@ export type CopyIntoContactFolderInput = {
   category: AttachmentCategory;
   /** 올린 파일의 원본 이름. 다듬어서 **사람이 읽는 이름**으로 꽂는다. */
   originalFileName: string;
+  /**
+   * 🔴 사람이 올리면서 적은 **폴더 이름**(2026-11-26 — [파일 올리기]의 「폴더 이름 (선택)」).
+   * 적혀 있으면 위 분류 폴더 **안에** 그 이름의 폴더를 한 겹 더 만들고 거기에 꽂는다.
+   *
+   * 🔴 **안 주면(null · 빈 글자 · 다듬으면 빈 글자) 2026-11-26 전과 한 글자도 다르지
+   * 않다** — 분류 폴더에 바로 꽂힌다. 날것으로 받는다: 다듬기 · 상한은 domain 이 한 자리에서
+   * 한다(contactFolderUploadFolderName).
+   */
+  uploadFolderName?: string | null;
   /** 꽂을 내용. 시스템 창고에 이미 들어간 그 파일의 바이트다. */
   bytes: Uint8Array;
   /** 공유폴더 루트. 주지 않으면 설정을 읽는다. 시험에서는 임시 폴더를 준다. */
@@ -423,6 +454,19 @@ export type CopyIntoContactFolderInput = {
 export type ContactFolderCopyPlace = {
   categoryFolderName: string | null;
   categoryFolderBlockedByFile: boolean;
+  /**
+   * 🔴 사람이 적은 폴더 **한 겹 더**(2026-11-26). 분류 폴더 안에 선다.
+   *
+   * 🔴 **안 적었으면 이 칸이 아예 붙지 않는다**(`undefined`) — 2026-11-26 전의 결과 모양이
+   * 한 글자도 안 달라져야 한다. 적었을 때만 둘이 함께 붙는다:
+   *  · `uploadFolderName` — 디스크에 실제로 선 폴더 이름(다듬어진 뒤의 글자). 자리를
+   *    **파일**이 막아 못 썼으면 `null` 이다.
+   *  · `uploadFolderBlockedByFile` — 그 막힘이 일어났는가. 참이면 파일은 **분류 폴더**에
+   *    들어갔다(한 겹 위로 비켜 갔다 — 분류 폴더가 막혔을 때 연락서 폴더 바로 아래로
+   *    비켜 가는 것과 같은 규율).
+   */
+  uploadFolderName?: string | null;
+  uploadFolderBlockedByFile?: boolean;
 };
 
 export type ContactFolderCopy =
@@ -446,7 +490,14 @@ export type ContactFolderCopy =
 export async function copyIntoContactFolder(input: CopyIntoContactFolderInput): Promise<ContactFolderCopy> {
   // 분류 폴더 이름은 domain 이 짓는다(한글 이름표 · 다듬기). 못 지으면 null 이고,
   // 그때는 연락서 폴더 바로 아래에 꽂는다.
-  return copyInto({ ...input, subfolderName: contactFolderCategoryFolderName(input.category) });
+  //
+  // 🔴 **사람이 적은 폴더도 domain 이 짓는다**(2026-11-26) — 다듬기 · 상한이 분류 폴더와
+  //    같은 한 자리에 있다. 안 적었으면 null 이고, 그때는 분류 폴더에 바로 꽂힌다.
+  return copyInto({
+    ...input,
+    subfolderName: contactFolderCategoryFolderName(input.category),
+    uploadFolderName: contactFolderUploadFolderName(input.uploadFolderName),
+  });
 }
 
 export type CopyIntoContactFolderDataInput = {
@@ -539,6 +590,11 @@ async function copyInto(input: {
   intakeNumber: string;
   /** 꽂을 하위 폴더 이름. `null` 이면 연락서 폴더 바로 아래다. */
   subfolderName: string | null;
+  /**
+   * 🔴 그 **안에** 한 겹 더(2026-11-26). 올리기만 쓴다 — 사람이 적은 폴더 이름이고,
+   * **이미 다듬어진** 값이다([DATA에 저장] · 종류 공통 서류는 늘 undefined 다).
+   */
+  uploadFolderName?: string | null;
   originalFileName: string;
   bytes: Uint8Array;
   root?: string | null;
@@ -555,7 +611,17 @@ async function copyInto(input: {
   }
 
   // 이름부터 짓는다 — 쓸 수 있는 이름이 없으면 디스크를 보지 않는다.
-  const fileName = contactFolderCopyFileName(input.originalFileName);
+  //
+  // 🔴 **사람이 적은 폴더가 한 겹 더 들어가면 파일 이름 상한이 내려간다**(2026-11-26 —
+  //    84 → 63. 경로 예산의 셈은 domain 쪽 상수 주석에 있다). 폴더를 안 적었으면 그
+  //    상한이 한 글자도 안 달라진다.
+  const uploadFolderName = input.uploadFolderName ?? null;
+  const fileName = contactFolderCopyFileName(
+    input.originalFileName,
+    uploadFolderName === null
+      ? CONTACT_FOLDER_FILE_MAX_NAME_LENGTH
+      : CONTACT_FOLDER_FILE_MAX_NAME_LENGTH_IN_UPLOAD_FOLDER
+  );
   if (fileName === null) {
     return { status: "failed", reason: FILE_NAME_UNUSABLE_REASON };
   }
@@ -582,7 +648,7 @@ async function copyInto(input: {
 
   try {
     // ── 2) 꽂는다 — 🔴 상한 없이. 끊어도 쓰기는 뒤에서 끝나 파일이 생긴다 ──
-    return await put(root, picked.folderName, input.subfolderName, fileName, input.bytes);
+    return await put(root, picked.folderName, input.subfolderName, uploadFolderName, fileName, input.bytes);
   } catch (error) {
     return {
       status: "failed",
@@ -595,6 +661,7 @@ async function put(
   root: string,
   folderName: string,
   categoryFolderName: string | null,
+  uploadFolderName: string | null,
   fileName: string,
   bytes: Uint8Array
 ): Promise<ContactFolderCopy> {
@@ -603,8 +670,25 @@ async function put(
   assertInsideShareFolderRoot(root, folder, OUTSIDE_ROOT_ON_COPY);
 
   // ── 🔴 분류 폴더 — 없으면 만들고, 있으면 쓰고, 막혀 있으면 바로 아래로 비켜 간다 ──
-  const place = await openCategoryFolder(root, folder, categoryFolderName);
-  const directory = place.categoryFolderName === null ? folder : path.join(folder, place.categoryFolderName);
+  const category = await openSubfolder(root, folder, categoryFolderName);
+  const categoryDirectory = category.name === null ? folder : path.join(folder, category.name);
+
+  // ── 🔴 그 **안에** 사람이 적은 폴더 한 겹 (2026-11-26) ────────────────────
+  // 🔴 **차례가 곧 규율이다** — `recursive` 를 안 쓰므로(makeOneFolder) 분류 폴더가 먼저
+  //    서 있어야 그 안을 만들 수 있다. 분류 폴더가 막혀 연락서 폴더 바로 아래로 비켜
+  //    갔으면 이 한 겹도 **거기에** 선다(없는 폴더 안을 만들려 들지 않는다).
+  // 🔴 안 적었으면 `null` 이라 아무 일도 하지 않는다 — 2026-11-26 전과 같은 길이다.
+  const upload = await openSubfolder(root, categoryDirectory, uploadFolderName);
+  const directory = upload.name === null ? categoryDirectory : path.join(categoryDirectory, upload.name);
+
+  // 🔴 「어디에 넣었는가」는 **적었을 때만** 두 칸이 는다(ContactFolderCopyPlace 머리말).
+  const place: ContactFolderCopyPlace = {
+    categoryFolderName: category.name,
+    categoryFolderBlockedByFile: category.blockedByFile,
+    ...(uploadFolderName === null
+      ? {}
+      : { uploadFolderName: upload.name, uploadFolderBlockedByFile: upload.blockedByFile }),
+  };
 
   // 🔴 폴더를 **한 번만** 읽는다 — NAS 너머라 왕복 한 번이 비싸다. 이 한 벌로 「같은 내용이
   //    있는가」와 「빈 번호가 어디인가」를 둘 다 푼다.
@@ -619,38 +703,50 @@ async function put(
   return { status: "copied", folderName, fileName: written, ...place };
 }
 
+/** 하위 폴더 한 겹을 연 결과 — 쓴 이름(못 쓰면 `null`)과 **파일이 막았는가**. */
+type OpenedSubfolder = { name: string | null; blockedByFile: boolean };
+
 /**
- * 분류 폴더를 **없으면 만들고 있으면 쓴다.** 🔴 **실패로 끝내지 않는다** — 분류 폴더 하나
- * 때문에 올린 파일이 공유폴더에서 통째로 빠지면 안 된다. 쓸 수 없으면 **연락서 폴더 바로
- * 아래**를 돌려주고 그 까닭을 함께 싣는다.
+ * 하위 폴더 한 겹을 **없으면 만들고 있으면 쓴다.** 🔴 **실패로 끝내지 않는다** — 폴더 하나
+ * 때문에 올린 파일이 공유폴더에서 통째로 빠지면 안 된다. 쓸 수 없으면 **한 겹 위**를
+ * 돌려주고(`name: null`) 그 까닭을 함께 싣는다.
+ *
+ * 🔴 **두 겹이 이 함수 하나를 지난다**(2026-11-26) — 분류 폴더와, 그 안에 사람이 적은
+ * 폴더. 두 자리에 따로 적으면 「막혔을 때 비켜 가기」가 한쪽에만 남는 날이 온다. 부르는
+ * 쪽(put)이 **차례**를 지켜 위 겹부터 연다 — `recursive` 를 안 쓰기 때문이다.
+ *
+ * 🔴 **이미 있으면 그대로 쓴다**(EEXIST 를 성공으로 본다). 폴더는 파일과 달라 **겹쳐도
+ * 해롭지 않고**, 사람이 같은 폴더에 여러 번 나눠 올리는 것이 바라는 쓰임이다. 안에 든
+ * 것은 한 글자도 건드리지 않는다.
  *
  * 🔴 자리를 **파일**이 막고 있어도 그 파일을 지우지 · 옮기지 않는다. 사람이 손으로 넣은
  * `견적서` 라는 파일이 실제로 있을 수 있다.
  */
-async function openCategoryFolder(
+async function openSubfolder(
   root: string,
   folder: string,
-  categoryFolderName: string | null
-): Promise<ContactFolderCopyPlace> {
-  // 이름표를 다듬은 결과가 비었다 — 그런 분류는 없지만 조용히 깨지면 안 된다.
-  if (categoryFolderName === null) {
-    return { categoryFolderName: null, categoryFolderBlockedByFile: false };
+  subfolderName: string | null
+): Promise<OpenedSubfolder> {
+  // 이름이 없다 — 분류 이름표를 다듬은 결과가 비었거나(그런 분류는 없다), 사람이 폴더
+  // 이름을 안 적었다. 둘 다 **한 겹 위에 그대로** 꽂는다.
+  if (subfolderName === null) {
+    return { name: null, blockedByFile: false };
   }
 
-  const target = path.join(folder, categoryFolderName);
+  const target = path.join(folder, subfolderName);
   assertInsideShareFolderRoot(root, target, OUTSIDE_ROOT_ON_COPY);
 
   // 🔴 recursive 없이 — 연락서 폴더가 없으면 여기서 실패해야 한다(이 길은 폴더를
   //    만들지 않는다). 다만 그 앞의 look 이 이미 폴더가 있는 것을 보았다.
   if (await makeOneFolder(target)) {
-    return { categoryFolderName, categoryFolderBlockedByFile: false };
+    return { name: subfolderName, blockedByFile: false };
   }
 
-  // EEXIST — 폴더면 그대로 쓰고, 폴더가 아니면(= 같은 이름의 파일) 바로 아래로 비켜 간다.
+  // EEXIST — 폴더면 그대로 쓰고, 폴더가 아니면(= 같은 이름의 파일) 한 겹 위로 비켜 간다.
   if (await isExistingDirectory(target)) {
-    return { categoryFolderName, categoryFolderBlockedByFile: false };
+    return { name: subfolderName, blockedByFile: false };
   }
-  return { categoryFolderName: null, categoryFolderBlockedByFile: true };
+  return { name: null, blockedByFile: true };
 }
 
 /**
