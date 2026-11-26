@@ -16,6 +16,8 @@ import {
  *  · 🔴 가리킨 자리는 `?path=` 로 가고 **싸진다**(공백 · 한글 · `/` 가 섞인 경로다)
  *  · 🔴 **고른 폴더**는 `&category=` 로 가고, **안 고르면 칸이 아예 없다**(2026-11-18 —
  *    아무것도 고르지 않은 사람의 요청이 2026-10-08 과 한 글자도 달라지지 않는다)
+ *  · 🔴 **적은 이름**은 `&name=` 으로 가고, **안 적으면 칸이 아예 없다**(2026-11-26 —
+ *    같은 규율이다). 칸 차례는 `category` → `name` 으로 **고정**이다
  *  · 🔴 **던지지 않는다** — 네트워크가 끊겨도 서버가 거절해도 note 하나로 끝난다
  *  · 🔴 **몸통을 보내지 않는다** — 바이트는 브라우저를 지나지 않는다
  *  · 🔴 모르는 모양의 응답은 「넣었습니다」가 되지 않는다
@@ -66,6 +68,43 @@ describe("① 통로 주소 — 가리킨 자리는 `?path=` 로 가고 싸인�
     assert.ok(url.startsWith(shareDocContactFolderSaveUrl(CASE_ID, SOURCE)), url);
     assert.equal(decodeURIComponent(url.split("?path=")[1].split("&category=")[0]), SOURCE);
   });
+
+  test("🔴 **안 적으면 `name` 칸이 아예 없다** — 2026-11-18 의 주소 그대로다(2026-11-26)", () => {
+    // 안 준 때 · `null` 을 똑똑히 준 때 · 빈 글자를 준 때가 모두 같은 주소다.
+    for (const empty of [null, ""]) {
+      assert.equal(
+        shareDocContactFolderSaveUrl(CASE_ID, SOURCE, null, empty),
+        shareDocContactFolderSaveUrl(CASE_ID, SOURCE),
+        JSON.stringify(empty)
+      );
+      assert.equal(
+        shareDocContactFolderSaveUrl(CASE_ID, SOURCE, "QUOTE", empty),
+        shareDocContactFolderSaveUrl(CASE_ID, SOURCE, "QUOTE"),
+        JSON.stringify(empty)
+      );
+    }
+    assert.equal(shareDocContactFolderSaveUrl(CASE_ID, SOURCE).includes("name="), false);
+  });
+
+  test("🔴 적은 이름은 `&name=` 으로 가고 **싸인다** — 한글 · 공백이 섞여 있다", () => {
+    const typed = "점검표 2026 최종.xlsx";
+    const url = shareDocContactFolderSaveUrl(CASE_ID, SOURCE, "CHECKLIST", typed);
+
+    // 🔴 칸 차례는 `category` → `name` 이다 — 차례가 흔들리면 「예전 주소 그대로」를 재는
+    //    시험이 가려내지 못하는 변화가 생긴다.
+    assert.ok(url.startsWith(shareDocContactFolderSaveUrl(CASE_ID, SOURCE, "CHECKLIST")), url);
+    assert.ok(url.endsWith(`&name=${encodeURIComponent(typed)}`), url);
+    assert.equal(url.includes(" "), false, url);
+    assert.equal(decodeURIComponent(url.split("&name=")[1]), typed);
+    // 앞의 두 칸은 한 글자도 달라지지 않는다.
+    assert.equal(decodeURIComponent(url.split("?path=")[1].split("&category=")[0]), SOURCE);
+  });
+
+  test("폴더를 안 고르고 이름만 적어도 간다 — 두 칸이 서로 묶여 있지 않다", () => {
+    const url = shareDocContactFolderSaveUrl(CASE_ID, SOURCE, null, "점검표.xlsx");
+    assert.equal(url.includes("category"), false, url);
+    assert.ok(url.includes("&name="), url);
+  });
 });
 
 describe("② 🔴 몸통을 보내지 않는다 — 바이트는 브라우저를 지나지 않는다", () => {
@@ -86,6 +125,19 @@ describe("② 🔴 몸통을 보내지 않는다 — 바이트는 브라우저�
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, shareDocContactFolderSaveUrl(CASE_ID, SOURCE, "CHECKLIST"));
     assert.ok(calls[0].url.includes("&category=CHECKLIST"), calls[0].url);
+  });
+
+  test("🔴 적은 이름도 **그 한 번의 요청에 실어** 보낸다 — 요청이 늘지 않는다", async () => {
+    const { impl, calls } = fetchReturning({ contactFolderCopy: { status: "copied", fileName: "점검표.xlsx" } });
+    const note = await saveShareDocToContactFolder(
+      { repairCaseId: CASE_ID, relativePath: SOURCE, category: "CHECKLIST", fileName: "점검표.xlsx" },
+      impl
+    );
+
+    assert.deepEqual(note, { status: "copied", fileName: "점검표.xlsx" });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, "POST");
+    assert.equal(calls[0].url, shareDocContactFolderSaveUrl(CASE_ID, SOURCE, "CHECKLIST", "점검표.xlsx"));
   });
 
   test("🔴 안 고르면(또는 `공통`) 주소가 **예전 그대로**다", async () => {

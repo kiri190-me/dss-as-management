@@ -17,6 +17,8 @@ import { describe, test } from "node:test";
  *  · 🔴 권한은 **이미 있는 문**이다(`repairCases.files` WRITE) — 새 권한이 없다
  *  · 🔴 설정이 **하나라도** 비면 DB 도 디스크도 안 본다
  *  · 🔴 화면이 보낸 경로를 **다시 본다** — 목록 통로가 쓰는 그 검사다
+ *  · 🔴 화면이 보낸 **파일 이름**도 다시 본다(2026-11-26) — 디스크를 보기 전에 거르고,
+ *    안 적었으면 읽은 원본 이름 그대로이며, 이름 규칙을 통로가 제 손으로 들지 않는다
  *  · 🔴 상한 · 실행 파일 거절을 통로가 **다시 짜지 않는다** — 저장소 모듈이 쥔다
  *  · 🔴 감사는 **새로 꽂았을 때만** · 응답과 로그에 경로가 없다
  *
@@ -182,6 +184,44 @@ describe("[연락서 폴더에 저장] 통로 — 원본으로 지킨다", () =>
     assert.ok(code.includes("REJECTION_RESPONSE[read.rejection]"), "거절 갈래를 코드로 가르지 않는다");
     for (const rejection of ["INVALID_PATH", "NOT_FOUND", "NOT_A_FILE", "EXECUTABLE", "TOO_LARGE"]) {
       assert.ok(code.includes(`${rejection}:`), `거절 갈래 ${rejection} 을 다루지 않는다`);
+    }
+  });
+
+  test("🔴 화면이 보낸 **파일 이름**을 다시 본다 — 디스크를 보기 전이다 (2026-11-26)", () => {
+    // 🔴 2026-10-08 부터 이 통로의 파일 이름은 사람 손을 한 번도 거치지 않았다(읽은 원본
+    //    그대로였다). 이제 `?name=` 이 올 수 있으므로 고른 폴더와 **같은 규율**이 선다.
+    assert.ok(postBody.includes('request.nextUrl.searchParams.get("name")'), "적은 이름을 `?name=` 에서 안 읽는다");
+    assert.ok(postBody.includes("checkContactFolderSaveFileName(requestedFileName)"), "적은 이름을 안 가른다");
+    assert.ok(code.includes('fail(400, "INVALID_FILE_NAME"'), "쓸 수 없는 이름을 거절하지 않는다");
+
+    // 🔴 **디스크를 보기 전**이다 — 값이 틀렸으면 읽을 까닭이 없다(경로 · 분류와 같은 자리).
+    const guard = postBody.indexOf("checkContactFolderSaveFileName(");
+    assert.ok(guard >= 0 && guard < postBody.indexOf("readRepairDocsFile({"), "디스크를 읽은 뒤에 이름을 본다");
+
+    // 🔴 사람에게 보일 까닭은 **저쪽이 적어 준 것 그대로**다 — 통로가 손으로 다시 적지 않는다
+    //    (창이 같은 함수로 같은 글귀를 보여 주므로 둘이 갈라지면 안 된다).
+    assert.ok(postBody.includes('fail(400, "INVALID_FILE_NAME", fileNameReason)'), "까닭을 통로가 지어 적었다");
+
+    // 🔴 꽂는 함수에 넘기는 이름은 **domain 이 고른 그 값 하나**다.
+    assert.ok(
+      code.includes("originalFileName: contactFolderSaveFileName(requestedFileName, read.fileName)"),
+      "적은 이름이 꽂는 함수까지 가지 않는다"
+    );
+    assert.equal(code.match(/originalFileName:/g)?.length, 1, "이름을 넘기는 자리가 하나가 아니다");
+
+    // 🔴 이름 규칙을 통로가 **제 손으로 들지 않았다** — 다듬기 · 금지 글자 · 확장자 · 상한이
+    //    한 글자도 없다(그 전부는 domain 과 꽂는 함수의 몫이다).
+    for (const forbidden of [
+      "sanitizeShareFolderNamePiece",
+      "contactFolderCopyFileName",
+      "isSafeFileNameString",
+      "isIgnoredShareFolderEntryName",
+      "lastIndexOf",
+      "MAX_FILE_NAME_LENGTH",
+      ".trim()",
+      "normalize(",
+    ]) {
+      assert.equal(code.includes(forbidden), false, `통로가 이름 규칙을 들었다: ${forbidden}`);
     }
   });
 

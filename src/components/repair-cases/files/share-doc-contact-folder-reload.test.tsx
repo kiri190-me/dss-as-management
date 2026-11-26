@@ -187,7 +187,9 @@ describe("② 🔴 [취소]면 신호가 **한 번도** 안 간다 — 요청 �
     assert.equal(cancel, "onCancel={() => setPicking(false)}", body);
 
     // 신호가 가는 길은 handleSave 하나뿐이고, 그것을 부르는 것은 **창의 [저장]**이다.
-    assert.ok(body.includes("void handleSave(category);"), "창의 [저장]이 보내지 않는다");
+    // 🔴 2026-11-26 에 넘기는 값이 **둘**이 됐다(고른 폴더 · 적은 이름) — 창이 이름 칸을
+    //    받으면서다. [취소]가 아무 일도 안 한다는 이 시험의 뜻은 한 글자도 안 바뀌었다.
+    assert.ok(body.includes("void handleSave(category, fileName);"), "창의 [저장]이 보내지 않는다");
     assert.equal(body.match(/handleSave\(/g)?.length, 2, "handleSave 를 부르는 자리가 하나가 아니다");
     // 단추를 누르는 일은 **창 열기**다 — 거기서 보내지도 알리지도 않는다.
     assert.ok(body.includes("onClick={() => setPicking(true)}"), body);

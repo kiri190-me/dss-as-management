@@ -29,6 +29,11 @@ import { saveShareDocToContactFolder } from "./share-doc-contact-folder-save";
  * 🔴 **고를 거리를 이 파일이 정하지 않는다** — 목록도 이름표도 창도 아니고
  * domain/contact-folder-save-targets.ts 한 자리에서 온다.
  *
+ * 🔴 **2026-11-26 — 그 창에서 파일 이름도 적는다**(사용자 요청). 이 파일이 하는 일은
+ * 창이 준 이름을 **그대로 실어 보내는 것**뿐이다 — 기본값도 검사도 「보낼까 말까」도
+ * domain/contact-folder-save-file-name.ts 가 정한다. `null` 이면 원본 이름 그대로이고,
+ * 그때 주소는 2026-11-18 과 한 글자도 다르지 않다.
+ *
  * ── 🔴 [열기]와 **다른 물건**이다 ───────────────────────────────────────
  *  · [열기]는 **이 PC 의 도우미**가 하는 일이라 Windows 가 아니면 단추가 없다.
  *  · 이 단추는 **서버가** 읽어 **서버가** 쓴다 — 어느 PC 에서도 똑같이 된다. 그래서
@@ -131,14 +136,19 @@ export default function ShareDocContactFolderButton({
    */
   const [savedFolderName, setSavedFolderName] = useState(contactFolderSaveTargetLabel(null));
 
-  async function handleSave(category: ContactFolderSaveTargetCategory | null) {
+  /**
+   * 🔴 `fileName` 이 `null` 이면 **원본 이름 그대로**다(창이 그렇게 가려 준다) — 그때
+   * 나가는 주소는 2026-11-18 과 한 글자도 다르지 않다. 이름을 여기서 다듬지도 가리지도
+   * 않는다: 판정은 창과 통로가 **같은 domain 함수**로 한다.
+   */
+  async function handleSave(category: ContactFolderSaveTargetCategory | null, fileName: string | null) {
     if (busy) return;
     setBusy(true);
     setNote(null);
     setSavedFolderName(contactFolderSaveTargetLabel(category));
     try {
       // 🔴 던지지 않는다 — 무슨 일이 나도 note 하나로 끝난다(그 모듈의 약속).
-      setNote(await saveShareDocToContactFolder({ repairCaseId, relativePath, category }));
+      setNote(await saveShareDocToContactFolder({ repairCaseId, relativePath, category, fileName }));
     } finally {
       setBusy(false);
       // 🔴 끝나면 **무조건** 알린다 — 넣었든 못 넣었든. [DATA에 저장]이 하는 그대로다
@@ -180,9 +190,9 @@ export default function ShareDocContactFolderButton({
           relativePath={relativePath}
           /* 🔴 [취소]는 닫기만 한다 — 요청이 한 번도 나가지 않는다. */
           onCancel={() => setPicking(false)}
-          onSave={(category) => {
+          onSave={(category, fileName) => {
             setPicking(false);
-            void handleSave(category);
+            void handleSave(category, fileName);
           }}
         />
       )}

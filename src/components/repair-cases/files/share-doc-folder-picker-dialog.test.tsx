@@ -5,6 +5,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { attachmentCategoryLabels } from "@/lib/domain/attachment-category";
+import { contactFolderCopyFileName } from "@/lib/domain/contact-folder-naming";
+import {
+  CONTACT_FOLDER_SAVE_FILE_NAME_HIDDEN_REASON,
+  CONTACT_FOLDER_SAVE_FILE_NAME_PATH_REASON,
+  contactFolderSaveFileNameDefault,
+} from "@/lib/domain/contact-folder-save-file-name";
 import {
   CONTACT_FOLDER_SAVE_TARGET_CATEGORIES,
   CONTACT_FOLDER_SAVE_TARGET_COMMON_VALUE,
@@ -12,6 +18,8 @@ import {
 import ShareDocContactFolderButton from "./ShareDocContactFolderButton";
 import ShareDocFolderPickerDialog, {
   SHARE_DOC_FOLDER_PICKER_CANCEL_TEXT,
+  SHARE_DOC_FOLDER_PICKER_FILE_NAME_HINT,
+  SHARE_DOC_FOLDER_PICKER_FILE_NAME_LABEL,
   SHARE_DOC_FOLDER_PICKER_SAVE_TEXT,
   SHARE_DOC_FOLDER_PICKER_TITLE,
 } from "./ShareDocFolderPickerDialog";
@@ -30,6 +38,9 @@ import ShareDocFolderPickerDialog, {
  *  · 🔴 창은 **제 손으로 아무것도 보내지 않는다**(fetch 도 통로 주소도 없다)
  *  · 🔴 [취소]는 **닫기만** 한다 — 요청이 한 번도 나가지 않는다
  *  · 🔴 줄에서 물려받는 글자 모양(`text-right`·`text-xs`)을 창 안에서 끊는다
+ *  · 🔴 **파일 이름 칸**(2026-11-26)이 라디오 아래에 서고, 거기 적힌 기본값이 **지금
+ *    저장될 이름**이다 · 규칙도 까닭 글귀도 창이 들고 있지 않다 · 쓸 수 없는 이름이면
+ *    **창이 안 닫힌다**(요청이 나가지 않는다)
  *
  * ⚠️ 이 저장소의 화면 시험에는 DOM 이 없다(renderToStaticMarkup 뿐이고 jsdom 이 없다) —
  * **누를 수가 없다.** 그래서 「눌렀을 때 무엇이 일어나는가」는 그려진 결과와 **원본 글자**로
@@ -86,7 +97,9 @@ describe("① 🔴 창은 **눌러야** 뜬다 — 그리자마자 떠 있지 �
     // 보내는 자리는 하나뿐이고, 그것은 창의 [저장]이 부르는 handleSave 안이다.
     assert.equal(body.match(/saveShareDocToContactFolder\(/g)?.length, 1, "보내는 자리가 하나가 아니다");
     assert.equal(body.match(/handleSave\(/g)?.length, 2, "handleSave 를 부르는 자리가 하나가 아니다");
-    assert.ok(body.includes("void handleSave(category);"), "창의 [저장]이 보내지 않는다");
+    // 🔴 2026-11-26 에 넘기는 값이 **둘**이 됐다(고른 폴더 · 적은 이름). 이름을 안 받아
+    //    가면 사람이 적은 글자가 조용히 버려지고 늘 원본 이름으로 저장된다.
+    assert.ok(body.includes("void handleSave(category, fileName);"), "창의 [저장]이 보내지 않는다");
     // 🔴 [취소]는 **닫기만** 한다 — 이 줄에 보내는 일이 한 글자도 없다.
     const cancel = body.match(/onCancel=\{[^}]*\}/)?.[0];
     assert.ok(cancel !== undefined, "[취소]를 잇지 않았다");
@@ -172,5 +185,80 @@ describe("③ 창의 생김새와 **보내지 않는다**는 사실", () => {
     for (const forbidden of ["INSPECTION_REPORT", "검사 보고서", "견적서", "attachmentCategoryLabels"]) {
       assert.equal(body.includes(forbidden), false, `창이 목록 · 이름표를 베꼈다: ${forbidden}`);
     }
+  });
+});
+
+describe("④ 🔴 **파일 이름 칸** — 기본값이 지금 저장될 이름이다 (2026-11-26)", () => {
+  test("칸이 **라디오 아래**에 서고, 적혀 있는 글자가 지금 저장될 이름이다", () => {
+    const html = dialogMarkup();
+    const field = html.indexOf("data-share-doc-folder-picker-file-name=");
+    assert.ok(field >= 0, "파일 이름 칸이 없다");
+    // 🔴 사용자가 적은 차례다 — 「저장될 폴더를 선택한 **다음에** 파일 이름을」.
+    assert.ok(field > html.lastIndexOf("data-share-doc-folder-option="), "칸이 라디오보다 위에 있다");
+    assert.ok(field < html.indexOf("data-share-doc-folder-picker-save="), "칸이 [저장]보다 아래에 있다");
+    assert.ok(html.includes(`>${SHARE_DOC_FOLDER_PICKER_FILE_NAME_LABEL}</span>`), html);
+
+    // 🔵 무엇을 재는지 먼저 — 이 창이 가리키는 줄의 마지막 마디가 원본 이름이다.
+    const source = SOURCE_PATH.split("/").at(-1) ?? "";
+    assert.equal(source, "MB 인수시 체크시트.xlsx");
+    // 🔴 적혀 있는 글자 = **아무것도 안 건드리고 [저장]했을 때 디스크에 설 이름**이다.
+    //    창이 제 손으로 짓지 않고 domain 이 지은 그 값이어야 한다.
+    assert.equal(contactFolderSaveFileNameDefault(SOURCE_PATH), contactFolderCopyFileName(source));
+    assert.ok(html.includes(`value="${contactFolderSaveFileNameDefault(SOURCE_PATH)}"`), html);
+  });
+
+  test("🔴 **다듬기 전 원본 글자가 아니다** — 둘이 갈리는 이름으로 잰다", () => {
+    // 🔵 위 시험의 표본은 다듬어도 글자가 안 바뀌는 이름이라, 기본값을 원본으로 되돌려도
+    //    조용히 통과한다. 둘이 **갈리는** 이름을 하나 더 세워 그 구멍을 막는다.
+    const raw = "점검표:2026.xlsx";
+    const dirtyPath = `2. 인수시 서류/${raw}`;
+    assert.notEqual(contactFolderCopyFileName(raw), raw, "표본이 틀렸다 — 다듬기가 글자를 안 바꾼다");
+
+    const html = renderToStaticMarkup(
+      createElement(ShareDocFolderPickerDialog, { relativePath: dirtyPath, onSave: () => {}, onCancel: () => {} })
+    );
+    assert.ok(html.includes(`value="${contactFolderSaveFileNameDefault(dirtyPath)}"`), html);
+    // 🔴 창이 말한 이름과 공유폴더에 설 이름이 달라지면 사람이 그 차이를 설명할 길이 없다.
+    assert.equal(html.includes(`value="${raw}"`), false, "다듬기 전 원본 글자를 내밀었다");
+  });
+
+  test("🔴 처음에는 꾸지람이 없다 — 열자마자 빨간 줄이 서 있지 않다", () => {
+    const html = dialogMarkup();
+    assert.equal(html.includes("data-share-doc-folder-picker-file-name-error"), false, html);
+    // 대신 미리 알려 둘 두 가지는 늘 보인다(확장자가 유지된다 · 비우면 원본 이름).
+    assert.ok(html.includes(SHARE_DOC_FOLDER_PICKER_FILE_NAME_HINT), html);
+  });
+
+  test("🔴 규칙도 **까닭 글귀도** 창이 들고 있지 않다 — domain 에서 온다", () => {
+    const body = code(dialogSource);
+    for (const used of [
+      "contactFolderSaveFileNameDefault(",
+      "checkContactFolderSaveFileName(",
+      "contactFolderSaveFileNameToSend(",
+    ]) {
+      assert.ok(body.includes(used), `창이 ${used} 를 안 쓴다 — 규칙을 제 손으로 들었다`);
+    }
+    // 🔴 거절 까닭을 베껴 적지 않았다 — 베끼면 화면이 말하는 것과 서버가 말하는 것이 갈라진다.
+    for (const reason of [CONTACT_FOLDER_SAVE_FILE_NAME_PATH_REASON, CONTACT_FOLDER_SAVE_FILE_NAME_HIDDEN_REASON]) {
+      assert.equal(body.includes(reason), false, `창이 까닭을 베꼈다: ${reason}`);
+    }
+    // 다듬기 · 금지 글자 표도 창에 없다(통로와 꽂는 함수의 몫이다).
+    for (const forbidden of ["sanitizeShareFolderNamePiece", "contactFolderCopyFileName", "normalize(", "replace("]) {
+      assert.equal(body.includes(forbidden), false, `창이 이름을 제 손으로 다듬는다: ${forbidden}`);
+    }
+  });
+
+  test("🔴 쓸 수 없는 이름이면 **창이 안 닫힌다** — 요청이 나가지 않는다", () => {
+    const body = code(dialogSource);
+    // [저장]은 곧바로 넘기지 않고 handleSave 를 지난다.
+    assert.ok(body.includes("onClick={handleSave}"), "[저장]이 검사를 건너뛴다");
+    const check = body.indexOf("checkContactFolderSaveFileName(");
+    const hand = body.indexOf("onSave(picked,");
+    assert.ok(check >= 0 && hand >= 0, body);
+    // 🔴 검사가 **먼저**이고, 걸리면 `return;` 으로 돌아선다 — 그 사이에 onSave 가 없다.
+    assert.ok(check < hand, "검사보다 넘기기가 앞이다");
+    assert.ok(/setFileNameError\(reason\);\s*return;/.test(body), "걸렸을 때 돌아서지 않는다");
+    // 🔴 넘기는 자리가 **하나**뿐이다 — 검사를 비켜 가는 두 번째 길이 없다.
+    assert.equal(body.match(/onSave\(/g)?.length, 1, body);
   });
 });

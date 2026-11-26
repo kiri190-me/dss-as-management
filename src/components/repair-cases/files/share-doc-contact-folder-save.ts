@@ -27,23 +27,38 @@ import { readContactFolderCopyNote, type ContactFolderCopyNote } from "./contact
  * 것이고, 통로의 기본값도 그래서 `공통` 이다. 고른 값이 쓸 수 있는 것인지는 **서버가 제
  * 손으로** 다시 본다(domain/contact-folder-save-targets.ts).
  *
+ * ── 🔴 **어떤 이름으로 넣을지**도 함께 보낸다 (2026-11-26) ───────────────
+ * 고르는 창에 파일 이름 칸이 붙으면서 값이 하나 더 늘었다 — `?name=`. 🔴 **`category` 와
+ * 똑같은 규율이다**: 손대지 않았거나 비웠으면 **칸 자체가 없고**, 그때 나가는 주소는
+ * 2026-11-18 과 한 글자도 다르지 않다. 창이 그것을 가려 준다
+ * (domain/contact-folder-save-file-name.ts 의 contactFolderSaveFileNameToSend) — 🔴 이
+ * 모듈은 **받은 값을 그대로 싼다**(여기서 다듬거나 판정하지 않는다). 쓸 수 있는 이름인지는
+ * 창이 한 번, **서버가 제 손으로** 한 번 더 본다.
+ *
+ * 🔴 `&category=` **뒤**에 붙인다 — 칸 차례가 바뀌면 주소가 달라져, 「안 고르고 안 적으면
+ * 예전 주소 그대로」를 재는 시험이 가려내지 못하는 변화가 생긴다.
+ *
  * fetch 를 바꿔 끼울 수 있다 — 네트워크 없이 값으로 시험한다.
  * ============================================================================
  */
 
 /**
  * 통로 주소. 가리킨 자리는 `?path=` 로 간다(목록 통로 둘과 같은 모양).
- * 🔴 고른 분류는 `&category=` 로 붙고, **`공통`(null)이면 칸 자체가 없다**(머리말).
+ * 🔴 고른 분류는 `&category=`, 적은 이름은 `&name=` 으로 붙고, **둘 다 `null` 이면 칸
+ * 자체가 없다**(머리말).
  */
 export function shareDocContactFolderSaveUrl(
   repairCaseId: string,
   relativePath: string,
-  category: ContactFolderSaveTargetCategory | null = null
+  category: ContactFolderSaveTargetCategory | null = null,
+  fileName: string | null = null
 ): string {
   const url = `/api/repair-cases/${encodeURIComponent(repairCaseId)}/share-docs/contact-folder?path=${encodeURIComponent(
     relativePath
   )}`;
-  return category === null ? url : `${url}&category=${encodeURIComponent(category)}`;
+  const withCategory = category === null ? url : `${url}&category=${encodeURIComponent(category)}`;
+  // 빈 글자도 「안 적었다」와 같은 뜻이다 — 칸을 붙여 봐야 통로가 똑같이 원본 이름으로 읽는다.
+  return fileName === null || fileName === "" ? withCategory : `${withCategory}&name=${encodeURIComponent(fileName)}`;
 }
 
 export type ShareDocSaveRequest = {
@@ -52,6 +67,8 @@ export type ShareDocSaveRequest = {
   relativePath: string;
   /** 🔴 사람이 고른 폴더. **`null`(또는 안 줌)이면 `공통`** — 지금까지와 같다. */
   category?: ContactFolderSaveTargetCategory | null;
+  /** 🔴 사람이 적은 파일 이름. **`null`(또는 안 줌)이면 원본 이름 그대로** — 지금까지와 같다. */
+  fileName?: string | null;
 };
 
 type ShareDocSaveResponse = {
@@ -88,7 +105,12 @@ export async function saveShareDocToContactFolder(
   let response: ShareDocSaveResponse;
   try {
     response = await fetchImpl(
-      shareDocContactFolderSaveUrl(request.repairCaseId, request.relativePath, request.category ?? null),
+      shareDocContactFolderSaveUrl(
+        request.repairCaseId,
+        request.relativePath,
+        request.category ?? null,
+        request.fileName ?? null
+      ),
       { method: "POST" }
     );
   } catch {

@@ -7,6 +7,10 @@ import { readSession } from "@/lib/auth/session";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { recordContactFolderShareDocSaved } from "@/lib/db/mutations/contact-folders";
 import { getRepairCaseContactFolderKeyById } from "@/lib/db/queries/repair-cases";
+import {
+  checkContactFolderSaveFileName,
+  contactFolderSaveFileName,
+} from "@/lib/domain/contact-folder-save-file-name";
 import { readContactFolderSaveTarget } from "@/lib/domain/contact-folder-save-targets";
 import { checkQuoteFolderRelativePath } from "@/lib/domain/quote-folder-link";
 import {
@@ -43,6 +47,26 @@ import {
  * 만들기 · 🔴 **연락서 폴더는 만들지 않기**가 전부 그 함수 한 벌(둘이 같은 몸통을 지난다)의
  * 규율이고, 여기서 한 글자도 다시 적지 않는다.
  *
+ * ── 🔴 **어떤 이름으로 꽂을지도 사람이 적는다** (2026-11-26) ─────────────
+ * 2026-10-08 부터 이 통로는 **공유폴더에서 읽은 원본 이름**을 그대로 넘겼다. 이제 고르는
+ * 창에 이름 칸이 있어 `?name=` 이 올 수 있다 — 🔴 **칸이 없으면 원본 이름 그대로**라
+ * 예전 동작과 한 글자도 다르지 않다.
+ *  · 🔴 **화면이 보낸 글자를 믿지 않는다**(경로 · 분류와 같은 결). 쓸 수 있는 이름인지는
+ *    domain 의 checkContactFolderSaveFileName 이 **디스크를 보기 전에** 가른다 —
+ *    경로 글자(`/` · `\` · `..`) · 제어문자 · 목록이 감추는 이름이 거기서 걸린다.
+ *  · 🔴 **다듬기를 건너뛰지 않는다.** 사람이 적은 글자도 꽂는 함수 안의
+ *    contactFolderCopyFileName 을 그대로 지난다(금지 글자 · 글자 수 84 · 바이트 255 ·
+ *    확장자는 그대로). 그래서 원본 이름과 **완전히 같은 길**을 지난다.
+ *  · 🔴 **규칙을 통로가 들지 않는다** — 거절할지도 · 무엇을 넘길지도 domain 한 자리에서
+ *    오고, 사람에게 보일 까닭 글귀도 거기서 온 것을 **그대로** 돌려준다(화면이 창에서
+ *    보여 주는 글귀와 갈라지지 않게).
+ *
+ * 🔴 **감사 기록은 한 글자도 바꾸지 않았다.** 이름을 바꿨다는 사실은 이미 두 칸에 남는다 —
+ * `sourceRelativePath` 의 마지막 마디가 **어디서 온 무엇인지**를, `fileName` 이 **공유폴더에
+ * 실제로 선 이름**을 적는다. 그 둘이 다르면 이름이 바뀐 것이다. 사람이 적은 날것을 한 칸 더
+ * 두면 「적은 글자」와 「디스크에 선 이름」이 둘 다 남아 보기 좋지만, 감사를 읽는 사람이
+ * 묻는 것은 늘 「무엇이 왜 여기 있나」이고 그 답은 이미 다 있다.
+ *
  * ── 🔴 바이트는 브라우저로 나가지 않는다 ────────────────────────────────
  * 이 통로는 **내려받기가 아니다.** 서버가 읽어 곧바로 다른 폴더에 쓰고, 응답으로 나가는
  * 것은 **꽂은 결과**(상태 · 디스크에 실제로 쓴 파일 이름 · 경로 없는 짧은 사유)뿐이다.
@@ -71,7 +95,8 @@ import {
  *  → 4) 권한(repairCases.files WRITE) → 5) 🔴 두 공유폴더 설정(하나라도 비면 409,
  *  DB 도 디스크도 안 본다) → 6) 수리 건(휴지통이면 없는 것) → 7) 경로 검사
  *  → 8) 🔴 고른 폴더 가리기(디스크를 보기 전이다 — 값이 틀렸으면 읽을 까닭이 없다)
- *  → 9) 바이트 읽기 → 10) 고른 자리에 꽂기 → 11) 감사(새로 꽂았을 때만) → 12) JSON
+ *  → 9) 🔴 적은 이름 가리기(역시 디스크를 보기 전이다)
+ *  → 10) 바이트 읽기 → 11) 고른 자리에 꽂기 → 12) 감사(새로 꽂았을 때만) → 13) JSON
  *
  * ── 권한 ────────────────────────────────────────────────────────────────
  * **`repairCases.files` WRITE** 다 — 🔴 새 권한을 만들지 않았다. 이 탭이 올리기 ·
@@ -102,6 +127,8 @@ type FailureCode =
   | "INVALID_PATH"
   /** 🔴 고를 수 없는 폴더를 보냈다 — 화면에 없는 값이다(역시 디스크를 보기 전이다). */
   | "INVALID_CATEGORY"
+  /** 🔴 쓸 수 없는 파일 이름을 적었다 — 경로 글자 · 제어문자 · 목록이 감추는 이름이다. */
+  | "INVALID_FILE_NAME"
   /** 그 자리에 아무것도 없다(바로가기도 여기로 모인다). */
   | "SOURCE_NOT_FOUND"
   /** 폴더를 가리킨 줄이다 — 폴더째 가져오지 않는다. */
@@ -199,7 +226,17 @@ export async function POST(
     return fail(400, "INVALID_CATEGORY", "고를 수 없는 폴더입니다.");
   }
 
-  // ── 9) 바이트를 읽는다 — 🔴 상한 · 실행 파일 · 걷기는 저장소 모듈이 쥔다 ──
+  // ── 9) 어떤 이름으로 꽂을 것인가 — 🔴 역시 디스크를 보기 전이다 ──────────
+  //    칸이 없으면 **읽은 원본 이름 그대로**다(2026-10-08 부터의 동작). 쓸 수 없는
+  //    글자를 적었으면 400 이고, 🔴 사람에게 보일 까닭은 domain 이 적어 준 **그대로**
+  //    나간다 — 창이 같은 함수로 같은 글귀를 보여 주므로 둘이 갈라지지 않는다.
+  const requestedFileName = request.nextUrl.searchParams.get("name");
+  const fileNameReason = checkContactFolderSaveFileName(requestedFileName);
+  if (fileNameReason !== null) {
+    return fail(400, "INVALID_FILE_NAME", fileNameReason);
+  }
+
+  // ── 10) 바이트를 읽는다 — 🔴 상한 · 실행 파일 · 걷기는 저장소 모듈이 쥔다 ──
   const read = await readRepairDocsFile({ relativePath: sourcePath });
   if (read.status === "rejected") {
     const mapped = REJECTION_RESPONSE[read.rejection];
@@ -216,12 +253,14 @@ export async function POST(
     return NextResponse.json({ contactFolderCopy: { status: "failed", reason: read.reason } }, { status: 200 });
   }
 
-  // ── 10) 꽂는다 — 🔴 **고른 자리에**. 연락서 폴더는 만들지 않는다(없으면 no-folder) ──
+  // ── 11) 꽂는다 — 🔴 **고른 자리에**. 연락서 폴더는 만들지 않는다(없으면 no-folder) ──
   //    🔴 두 길에 **같은 재료**를 넘긴다 — 다른 것은 분류 하나뿐이다. 바이트를 두 번 적지
   //    않는 것도 같은 까닭이다(바이트가 가는 자리가 늘면 원본 시험이 걸린다).
+  //    🔴 이름은 **적었으면 그것, 안 적었으면 읽은 원본**이다. 어느 쪽이든 여기서 다듬지
+  //    않는다 — 다듬기는 꽂는 함수 안의 한 자리에서만 일어난다.
   const copyInput = {
     intakeNumber: repairCase.intakeNumber,
-    originalFileName: read.fileName,
+    originalFileName: contactFolderSaveFileName(requestedFileName, read.fileName),
     bytes: read.bytes,
   };
   const result: ContactFolderCopy =
@@ -229,7 +268,7 @@ export async function POST(
       ? await copyIntoContactFolder({ ...copyInput, category: target.category })
       : await copyIntoContactFolderCommonFolder(copyInput);
 
-  // ── 11) 감사 — 🔴 **이번에 새로 꽂았을 때만**(이웃 둘과 같은 규율) ──────
+  // ── 12) 감사 — 🔴 **이번에 새로 꽂았을 때만**(이웃 둘과 같은 규율) ──────
   if (result.status === "copied") {
     try {
       await recordContactFolderShareDocSaved({
