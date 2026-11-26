@@ -119,6 +119,13 @@ export const INVENTORY_STATUS_LABEL_OVERRIDES = [
 export const INVENTORY_STOCK_REQUEST_FIELDS = [
   "id",
   "requestKey",
+  /**
+   * 🔴 **2026-11-26 에 더했다** — 한 목록에 「가져간다」와 「돌려준다」가 섞여 선다(API.md
+   * 4-11절). 이 칸이 안 오면 **반환 신청이 반출로 보인다**: 딱지가 안 뜨고 수량 이름표가
+   * 「불출」이라, 돌려주겠다고 올린 줄이 「아직 안 나갔다」로 읽힌다. 그래서 **들어 있을 때만**
+   * 보는 쪽이 아니라 **언제나 있어야 하는 칸** 목록에 둔다 — 안 오면 점검 도구에 ✗ 가 뜬다.
+   */
+  "type",
   "intakeNumber",
   "status.code",
   "status.label",

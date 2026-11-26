@@ -72,6 +72,7 @@ export default function RepairCaseDetailView({
   domesticOrderDueDates,
   isDueDateNear,
   isDueDateInverted,
+  isShipmentFinished,
   domesticOrderIssueDates,
   canWriteDomesticOrderIssueDates,
   usedParts,
@@ -111,7 +112,8 @@ export default function RepairCaseDetailView({
     /** 🔵 `value: null` 은 **이어 둔 템플릿이 없다**는 뜻이고 오류가 아니다. */
     ohTemplate: InventoryResult<InventoryOhTemplate | null>;
     /**
-     * 🔵 누가 올렸든 이 건의 반출 신청 전부(재고 관리에서 직접 올린 것까지).
+     * 🔵 누가 올렸든 이 건의 부품 신청 전부(재고 관리에서 직접 올린 것까지).
+     * 🔵 **2026-11-26 부터 돌려준 신청(반환)도 섞여 온다** — 저쪽은 인수번호로 물으면 둘 다 준다.
      * 🔴 **포털 번호가 빠진 모양**이다 — 서버가 「내가 올린 줄인가」(`mine`)만 재어 넣는다.
      */
     requests: InventoryResult<InventoryStockRequestForScreen[]>;
@@ -154,6 +156,17 @@ export default function RepairCaseDetailView({
    * 않는다 — 이번 요구는 날짜 칸에 대한 것이고, 배지는 더하지 않았다.
    */
   isDueDateInverted: boolean;
+  /**
+   * 이 건이 **이미 나갔는가** — 「부품 요청」 칸의 [반환 요청]을 잠그는 값이다
+   * (2026-11-26 쓰는 분 결정: 「출하 완료 처리되면 [반환 요청] 버튼을 누를 수 없도록」).
+   *
+   * 🔴 **서버가 재 온다**([id]/page.tsx) — 위 두 날짜 판정과 같은 까닭이고, 재는 함수도
+   * 그 둘이 안에서 부르는 그 함수다(domain/shipment-finished.ts 의
+   * isRepairCaseShipmentFinished — 상태 하나가 아니라 **평탄화 상태와 실제 출하일 둘**을
+   * 본다). 화면에서 날짜를 다시 들여다보면 같은 건을 경보와 이 단추가 다르게 부른다.
+   * 🔴 **이 값은 울타리가 아니다** — 서버 액션이 건 id 로 다시 읽어 같은 말로 거절한다.
+   */
+  isShipmentFinished: boolean;
   /**
    * 「내자 정리 발행일」 구역의 재료 — 이 건에 연결된 내자 줄들의 **견적발행일 ·
    * 발주발행일**(지워지지 않은 줄만).
@@ -368,6 +381,7 @@ export default function RepairCaseDetailView({
           ohTemplate={partRequestData.ohTemplate}
           requests={partRequestData.requests}
           requesterGate={partRequestData.requesterGate}
+          isShipmentFinished={isShipmentFinished}
         />
       )}
     </div>

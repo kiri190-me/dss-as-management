@@ -4,8 +4,12 @@ import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { hasPermission } from "@/lib/auth/permission-resolver";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { getIntakeAndWorkflowKindForRepairCase } from "@/lib/db/queries/repair-cases";
+import {
+  getIntakeAndWorkflowKindForRepairCase,
+  getReturnRequestCaseContext,
+} from "@/lib/db/queries/repair-cases";
 import { getSsoSubjectForUser } from "@/lib/db/queries/users";
+import { isRepairCaseShipmentFinished } from "@/lib/domain/shipment-finished";
 import { isValidUuid } from "@/lib/validation/procedure-validation-resolution-input";
 import {
   NO_PORTAL_ID_MESSAGE,
@@ -16,8 +20,15 @@ import {
   stockRequestKeyBelongsToCase,
 } from "@/lib/domain/inventory-gateway";
 import {
+  RETURN_AFTER_SHIPMENT_MESSAGE,
+  parseReturnRequestLines,
+  type InventoryReturnCandidate,
+} from "@/lib/domain/inventory-return";
+import {
   cancelInventoryStockRequest,
+  createInventoryReturnRequest,
   createInventoryStockRequest,
+  fetchInventoryReturnCandidates,
   fetchInventoryStockRequestsByIntake,
   fillInventoryPartCustomerName,
 } from "@/lib/server/inventory-gateway";
@@ -81,6 +92,8 @@ const NOT_LOGGED_IN = "로그인이 필요합니다.";
 const NO_PERMISSION = "부품 요청을 올릴 권한이 없습니다.";
 const NO_CANCEL_PERMISSION = "부품 요청을 거둘 권한이 없습니다.";
 const NO_FILL_PERMISSION = "고객사 품명을 채울 권한이 없습니다.";
+/** 🔴 **같은 권한 축**이다(`inventory.requests` 쓰기) — 말만 그 일에 맞게 갈아 적는다. */
+const NO_RETURN_PERMISSION = "부품 반환을 요청할 권한이 없습니다.";
 const CASE_NOT_FOUND = "이 수리 건을 찾을 수 없습니다.";
 
 export async function createInventoryStockRequestAction(input: {
@@ -288,5 +301,176 @@ export async function fillInventoryPartCustomerNameAction(input: {
     no: input.no,
     customerName: input.customerName,
     filledBy: { sub, name: actingUser.name },
+  });
+}
+
+/**
+ * ============================================================================
+ * 부품 **반환** — 돌려줄 수 있는 것 묻기 · 반환 신청 올리기 (2026-11-26)
+ * ============================================================================
+ * 쓰는 분의 말: 「이미 불출된 적 있는 부품에 한해 반환 요청을 할 수 있도록 … **출하 완료**
+ * 처리되면 [반환 요청] 버튼을 누를 수 없도록.」
+ *
+ * ── 🔴 울타리가 위 셋과 같고, **하나 더 있다** ───────────────────────────
+ *  ㉠ **권한 축이 같다**(`inventory.requests` 쓰기). 🔴 **새 권한 이름을 만들지 않았다** —
+ *     만들면 운영 DB 에 등록해야 하고, 등록 전까지는 아무도 못 쓴다. 부품을 받아 간 사람이
+ *     그것을 돌려주는 일이라 축이 같은 것이 뜻으로도 맞다.
+ *  ㉡ **인수번호를 서버가 읽는다.** 반환은 「이 인수번호로 나간 줄」을 찾아 되돌려 붙이므로
+ *     (저쪽 API.md 4-11절), 브라우저가 적어 보내게 두면 **남의 건에서 나간 부품을 이 건으로
+ *     돌려주는** 신청이 선다.
+ *  ㉢ **포털 번호를 세션에서 꺼낸다.** 그래서 이 액션들도 신청자를 **받는 칸이 없다.**
+ *  ㉣ 🔴 **출하 완료면 거절한다 — 화면만이 아니라 여기서도.** 화면은 단추를 잠그지만 그것은
+ *     편의이고, 서버 액션은 브라우저가 부르는 통로라 잠긴 단추를 지나쳐 들어올 수 있다.
+ *     🔴 **판정을 여기 다시 적지 않는다** — 경보 넷과 같은 함수(`isRepairCaseShipmentFinished`)
+ *     를 그대로 부른다. 두 벌로 적으면 어느 날 화면과 서버가 다른 건을 「끝난 건」이라 부른다.
+ *     🔵 **반출 신청은 막지 않는다**(위 `createInventoryStockRequestAction` 에는 이 울타리가
+ *     없다) — 나간 뒤에 부품이 더 필요한 일은 실제로 있고, 막아 달라고 한 것은 반환뿐이다.
+ *
+ * ── 🔴 「돌려줄 수 있는 수」를 서버가 세지 않는다 ─────────────────────────
+ * 그 수(`remaining`)는 **재고 관리에만 있다** — 이미 얼마가 돌아왔는지는 저쪽 원장의 일이다.
+ * 여기서 `taken − returned` 를 다시 빼면 **올려 둔 신청(`pending`)이 빠지지 않아** 같은 부품을
+ * 한 번 더 돌려주는 신청이 선다(API.md 8-4절). 그래서 묻는 통로를 그대로 지나 보내고, 넘치는
+ * 줄은 저쪽이 **「N개까지 돌려줄 수 있습니다」**로 거절한다 — 🔴 그 문구를 **그대로** 올린다.
+ * ============================================================================
+ */
+
+export type ReturnCandidatesActionResult =
+  | { ok: true; candidates: InventoryReturnCandidate[] }
+  | {
+      ok: false;
+      /**
+       * 🔴 **참이면 「없다」가 아니라 「확인하지 못했다」**다. 화면이 그 둘을 다른 말로 그려야
+       * 한다 — 빈 목록으로 뭉개면 「이 건에서 돌려줄 부품이 없다」고 거짓말하고, 사람은 그
+       * 말을 믿고 부품을 그냥 들고 있는다(이 저장소가 재고 통로 전부에 거는 그 규율).
+       */
+      unreachable: boolean;
+      message: string;
+    };
+
+/**
+ * 이 수리 건에서 **무엇을 얼마나 돌려줄 수 있나** — 창을 열 때 한 번 묻는다.
+ *
+ * 🔵 **화면을 그릴 때가 아니라 창을 열 때 묻는 까닭** 둘: ① 수리 건 상세를 여는 모든 사람에게
+ *    통로를 한 번 더 두드리게 할 까닭이 없다(이 창을 여는 일은 드물다) ② 🔴 **`remaining` 은
+ *    금방 낡는다** — 올리기 직전에 받은 수일수록 헛걸음이 적다.
+ * 🔴 **읽기인데도 권한을 묻는 까닭**: 이 응답에는 그 건에서 **무엇이 얼마나 나갔는지**가 들어
+ *    있다. 부품 요청 칸을 볼 수 없는 사람에게 같은 사실을 다른 문으로 내주지 않는다.
+ */
+export async function loadInventoryReturnCandidatesAction(input: {
+  repairCaseId: string;
+}): Promise<ReturnCandidatesActionResult> {
+  if (getAuthSource() !== "database") {
+    return { ok: false, unreachable: false, message: "데이터베이스 저장 모드가 아닙니다." };
+  }
+  const session = await readSession();
+  if (!session) return { ok: false, unreachable: false, message: NOT_LOGGED_IN };
+  if (session.approvalStatus !== "APPROVED") {
+    return { ok: false, unreachable: false, message: "계정이 아직 승인되지 않았습니다." };
+  }
+
+  const actingUser = await resolveActingUserForSession(session);
+  if (!actingUser) return { ok: false, unreachable: false, message: NOT_LOGGED_IN };
+  // 🔴 올리는 액션과 **같은 울타리**다(머리말 ㉠).
+  if (!(await hasPermission(actingUser, "inventory.requests", "WRITE"))) {
+    return { ok: false, unreachable: false, message: NO_RETURN_PERMISSION };
+  }
+
+  if (!isValidUuid(input.repairCaseId)) {
+    return { ok: false, unreachable: false, message: "요청 정보를 확인할 수 없습니다." };
+  }
+
+  // 🔴 인수번호와 출하 사실을 **여기서 읽는다**(머리말 ㉡㉣). 화면이 보낸 값을 쓰지 않는다.
+  const repairCase = await getReturnRequestCaseContext(input.repairCaseId);
+  if (!repairCase) {
+    return { ok: false, unreachable: false, message: CASE_NOT_FOUND };
+  }
+  /* 🔵 **읽는 길에도 같은 울타리를 세운다** — 단추가 잠겨 있어 여기까지 올 일이 없지만, 막는
+     까닭을 묻는 쪽마다 다르게 적어 두면 어느 날 한쪽만 고쳐진다(그 글자도 한 곳에 있다). */
+  if (isRepairCaseShipmentFinished(repairCase)) {
+    return { ok: false, unreachable: false, message: RETURN_AFTER_SHIPMENT_MESSAGE };
+  }
+
+  const candidates = await fetchInventoryReturnCandidates(repairCase.intakeNumber);
+  if (candidates.status !== "ok") {
+    // 🔴 「없다」로 접지 않는다 — 화면이 「확인하지 못했다」로 그린다(위 타입 주석).
+    return { ok: false, unreachable: true, message: inventoryUnreachableMessage(candidates.reason) };
+  }
+  return { ok: true, candidates: candidates.value };
+}
+
+export type CreateReturnRequestActionResult =
+  | {
+      ok: true;
+      /** 🔴 거짓이면 **같은 요청이 이미 올라가 있었다**(두 번 선 것이 아니다). */
+      created: boolean;
+      statusLabel: string;
+    }
+  | { ok: false; message: string };
+
+/**
+ * 부품 **반환**을 신청한다 — 창에서 수량을 적고 누른 뒤에만 여기 온다.
+ *
+ * 🔴 **줄의 모양을 화면과 같은 함수로 다시 잰다**(`parseReturnRequestLines`). 화면 검사는
+ *    편의이지 울타리가 아니다 — 🔵 다만 「남은 수를 넘겼는가」는 **그 함수가 보지 않는다**:
+ *    서버는 그 수를 모르고, 아는 체하면 통로를 한 번 더 두드려야 하며 그렇게 받은 수도 보내는
+ *    순간 이미 옛것이다(머리말). 넘치는 줄은 저쪽이 거절하고 그 문구가 그대로 올라간다.
+ * 🔴 **유상/무상도 사유도 싣지 않는다** — 받는 칸 자체가 없다(순수 쪽 `ReturnRequestLine`).
+ */
+export async function createInventoryReturnRequestAction(input: {
+  repairCaseId: string;
+  requestKey: string;
+  lines: unknown;
+  note?: string | null;
+}): Promise<CreateReturnRequestActionResult> {
+  if (getAuthSource() !== "database") {
+    return { ok: false, message: "데이터베이스 저장 모드가 아닙니다." };
+  }
+  const session = await readSession();
+  if (!session) return { ok: false, message: NOT_LOGGED_IN };
+  if (session.approvalStatus !== "APPROVED") {
+    return { ok: false, message: "계정이 아직 승인되지 않았습니다." };
+  }
+
+  const actingUser = await resolveActingUserForSession(session);
+  if (!actingUser) return { ok: false, message: NOT_LOGGED_IN };
+  // 🔴 올리는 액션과 **같은 울타리**다(머리말 ㉠ — 새 권한 이름을 만들지 않았다).
+  if (!(await hasPermission(actingUser, "inventory.requests", "WRITE"))) {
+    return { ok: false, message: NO_RETURN_PERMISSION };
+  }
+
+  if (!isValidUuid(input.repairCaseId)) {
+    return { ok: false, message: "요청 정보를 확인할 수 없습니다." };
+  }
+  if (!isValidRequestKey(input.requestKey)) {
+    return { ok: false, message: "요청 정보를 확인할 수 없습니다." };
+  }
+
+  // 🔴 인수번호와 출하 사실을 **여기서 읽는다**(머리말 ㉡㉣).
+  const repairCase = await getReturnRequestCaseContext(input.repairCaseId);
+  if (!repairCase) {
+    return { ok: false, message: CASE_NOT_FOUND };
+  }
+  /* 🔴 **여기가 「출하 완료면 못 올린다」가 지켜지는 자리다.** 화면의 잠긴 단추는 편의이고,
+     이 액션은 브라우저가 부르는 통로라 그 단추를 지나쳐 들어올 수 있다. 판정은 경보 넷과
+     **같은 함수**이고, 거절 문구도 화면이 단추 밑에 적는 그 글자 그대로다(한 곳에 있다). */
+  if (isRepairCaseShipmentFinished(repairCase)) {
+    return { ok: false, message: RETURN_AFTER_SHIPMENT_MESSAGE };
+  }
+
+  // 🔴 화면과 **같은 함수**로 다시 잰다 — 0 인 줄을 걸러 보내는 일은 화면이 하고(저쪽은 0 을
+  //    400 으로 거절한다), 여기서는 남은 줄의 모양만 본다.
+  const parsed = parseReturnRequestLines(input.lines);
+  if (!parsed.ok) return { ok: false, message: parsed.message };
+
+  // 🔴 포털 번호는 **세션의 사람**으로 읽는다(머리말 ㉢). 화면은 이 값을 보내지도 않는다.
+  const sub = await getSsoSubjectForUser(actingUser.id);
+  if (!sub) return { ok: false, message: NO_PORTAL_ID_MESSAGE };
+
+  return createInventoryReturnRequest({
+    requestKey: input.requestKey.trim(),
+    intakeNumber: repairCase.intakeNumber,
+    requester: { sub, name: actingUser.name },
+    lines: parsed.lines,
+    note: input.note?.trim() ? input.note.trim() : undefined,
   });
 }

@@ -46,11 +46,17 @@ function sliceBetween(source: string, from: string, to: string): string {
   return cut;
 }
 
-/** 인수번호·종류를 한 번에 읽는 조회 하나. */
+/**
+ * 인수번호·종류를 한 번에 읽는 조회 하나.
+ * 🔴 **2026-11-26 에 끊는 자리가 당겨졌다** — 그 함수 **바로 뒤**에 형제 조회가 하나 생겼다
+ *    (부품 반환이 쓰는 `getReturnRequestCaseContext`). 끝 표식을 그대로 두면 **남의 질의가
+ *    이 토막에 딸려 와** 아래 「질의는 하나다」가 ✗ 가 된다 — 재려던 조회는 한 글자도 안
+ *    바뀌었는데. 🔵 단언을 약하게 고치는 것이 아니라 **재는 자리를 그 함수로** 좁힌다.
+ */
 const query = sliceBetween(
   querySource,
   "export async function getIntakeAndWorkflowKindForRepairCase",
-  "export type RepairCaseEditGuard"
+  "/** 부품 **반환** 요청을 올릴 때 서버가 제 손으로 읽는 값"
 );
 /** 올리는 액션만 떼어 본다 — 거두는 액션의 같은 모양과 섞이지 않게. */
 const createAction = sliceBetween(

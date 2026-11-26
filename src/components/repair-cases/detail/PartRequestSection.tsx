@@ -6,8 +6,10 @@ import NoticePopup from "@/components/common/NoticePopup";
 import { showSavePopup } from "@/components/common/SavePopup";
 import {
   cancelInventoryStockRequestAction,
+  createInventoryReturnRequestAction,
   createInventoryStockRequestAction,
   fillInventoryPartCustomerNameAction,
+  loadInventoryReturnCandidatesAction,
 } from "@/lib/server/actions/inventory-stock-requests";
 import {
   CHARGE_TYPES,
@@ -35,7 +37,11 @@ import {
   stockRequestLineDetails,
   stockRequestLineOwnerTag,
   stockRequestOhTag,
+  /* 🔴 **종류가 정하는 것 둘**(2026-11-26) — 줄 위의 「반환」 딱지와, 수량 둘째 칸의 이름표.
+     둘 다 **한 목록에 가져간 신청과 돌려준 신청이 섞여 서기** 때문에 생겼다. */
+  stockRequestQuantityLabels,
   stockRequestStatusBadge,
+  stockRequestTypeBadge,
   type ChargeType,
   type InventoryOhTemplate,
   type InventoryPart,
@@ -53,6 +59,19 @@ import {
   validateStockRequestCart,
   type StockRequestCartLine,
 } from "@/lib/domain/inventory-stock-request-cart";
+import {
+  /* 🔴 **반환의 규칙은 전부 저쪽에 있다** — 최댓값이 `remaining` 인 것도, 0 인 줄을 빼는
+     것도, 출하 완료면 못 누르는 까닭의 글자도. 이 화면은 그려 볼 수 없는 자리라
+     (이 파일 짝 시험의 머리말) 여기 적은 규칙은 아무도 돌려 보지 못한다. */
+  RETURN_CANDIDATES_EMPTY_NOTICE,
+  applyReturnCartQuantity,
+  hasReturnQuantity,
+  returnCandidateBreakdownText,
+  returnRequestBlockReason,
+  toReturnCartLines,
+  validateReturnCart,
+  type ReturnCartLine,
+} from "@/lib/domain/inventory-return";
 import { generateClientUuid } from "@/lib/client-uuid";
 /* 🔴 칸 이름표는 **한 곳**에서 온다(요청 ③) — 「고객사 품명」을 화면에서 다시 쳐 두면
    그 말이 바뀌는 날 이 줄만 옛말을 한다(@dss/core 의 part-picker-rows.ts). */
@@ -132,10 +151,25 @@ const NOTE_MAX_LENGTH = 1000;
  * 🔴 **성공하면 그 자리에서 값이 보인다** — 저쪽이 돌려준 지금 값을 들고 있다가 그 줄에
  *    그린다(다시 검색하지 않아도 된다). 서버가 가진 목록도 따라오도록 화면을 다시 읽는다.
  *
+ * ── 🔴 **[반환 요청]** — 가져갔던 것을 돌려준다 (2026-11-26 쓰는 분 요청) ──
+ * 「이미 불출된 적 있는 부품에 한해 반환 요청을 할 수 있도록.」 단추는 **[이 수리 건의 부품
+ * 신청]** 제목 옆에 선다 — 그 아래가 「이미 나간 것들의 이력」이라 뜻으로도 그 자리다.
+ * 🔵 **그 제목은 2026-11-26 에 「반출 신청」에서 바뀌었다**(쓰는 분 결정) — 같은 목록에
+ *    가져간 신청과 **돌려준 신청**이 함께 서게 되었기 때문이다(아래 종류 딱지).
+ * 🔴 **돌려줄 수 있는 수를 이 화면이 세지 않는다.** 「얼마가 나갔나」는 알아도 「이미 얼마가
+ *    돌아왔나」는 재고 관리에만 있어서, 창을 열 때 저쪽에 물어 `remaining` 을 그대로 최댓값으로
+ *    쓴다(`domain/inventory-return.ts` 머리말). 🔴 **불출된 수량을 최댓값으로 쓰지 않는다** —
+ *    그러면 같은 부품을 두 번 돌려주는 신청이 서고, 담당자가 확인할 때까지 아무도 모른다.
+ * 🔴 **출하 완료된 건에서는 못 누른다**(쓰는 분 결정). **단추를 감추지 않고** 잠그고 **까닭을
+ *    적는다** — 사라지면 사람은 「그런 기능이 없다」로 읽는다. 🔴 막는 자리는 여기만이 아니다:
+ *    서버 액션이 **건 id 로 출하 사실을 다시 읽어** 같은 말로 거절한다.
+ *
  * ── 권한 ────────────────────────────────────────────────────────────────
  * 누구에게 그려지는가는 역할이 아니라 설정이 정한다 — [id]/page.tsx 의 partRequestData
  * 게이트가 `inventory.requests` 쓰기를 본다. 그려진다고 올릴 수 있는 것은 아니다:
  * 서버 액션이 같은 축으로 **다시** 묻는다(화면 검사는 편의이지 울타리가 아니다).
+ * 🔵 **반환도 같은 권한 축이다** — 새 권한 이름을 만들지 않았다(만들면 운영 DB 에 등록할
+ *    때까지 아무도 못 쓴다). 부품을 받아 간 사람이 그것을 돌려주는 일이라 뜻으로도 같다.
  * ============================================================================
  */
 export default function PartRequestSection({
@@ -144,6 +178,7 @@ export default function PartRequestSection({
   ohTemplate,
   requests,
   requesterGate,
+  isShipmentFinished,
 }: {
   repairCaseId: string;
   /** 재고 관리의 부품 전부. 🔴 못 받아 왔으면 **빈 목록이 아니라** 그 사실이 온다. */
@@ -155,12 +190,26 @@ export default function PartRequestSection({
    */
   ohTemplate: InventoryResult<InventoryOhTemplate | null>;
   /**
-   * 🔵 **누가 올렸든** 이 건의 반출 신청 전부(재고 관리에서 직접 올린 것까지). 최근 것이 위.
+   * 🔵 **누가 올렸든** 이 건의 부품 신청 전부(재고 관리에서 직접 올린 것까지). 최근 것이 위.
+   * 🔴 **가져간 신청(`USE`)과 돌려준 신청(`RETURN`)이 섞여 온다**(2026-11-26) — 저쪽은
+   *    인수번호로 물으면 둘 다 준다. 어느 쪽인지는 줄마다 `type` 이 말한다.
    * 🔴 포털 번호는 들어 있지 않다 — 서버가 「내가 올린 줄인가」(`mine`)만 재어 보낸다.
    */
   requests: InventoryResult<InventoryStockRequestForScreen[]>;
   /** 올릴 수 있는 사람인가. 🔴 포털 번호가 없으면 막고 **까닭을 말한다**(서버도 다시 막는다). */
   requesterGate: { ok: true } | { ok: false; message: string };
+  /**
+   * 🔴 **이미 나간 건인가** — [반환 요청]을 잠그는 값이다 (2026-11-26).
+   *
+   * 🔴 **판정을 화면이 하지 않는다.** 서버가 경보 넷과 **같은 함수**로 재어 보낸다
+   *    (`domain/shipment-finished.ts` 의 `isRepairCaseShipmentFinished` — 상태 하나가 아니라
+   *    **평탄화 상태와 실제 출하일 둘**을 본다). 여기서 날짜를 다시 들여다보기 시작하면 같은
+   *    건을 화면과 알림이 다르게 부르는 날이 온다.
+   * 🔴 **이 값은 울타리가 아니다** — 서버 액션이 건 id 로 **다시 읽어** 같은 말로 거절한다.
+   * 🔵 **반출 신청은 이 값으로 막지 않는다**(아래 [재고 관리에 요청]은 그대로다) — 나간 뒤에
+   *    부품이 더 필요한 일은 실제로 있고, 막아 달라고 한 것은 반환뿐이다.
+   */
+  isShipmentFinished: boolean;
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
@@ -208,6 +257,27 @@ export default function PartRequestSection({
   const [isFilling, setIsFilling] = useState(false);
   /** 🔴 저쪽이 거절한 **그 문구**. 창을 닫지 않고 그 안에 그대로 보여 준다. */
   const [fillError, setFillError] = useState<string | null>(null);
+  /** 반환 창이 떠 있는가. 🔵 고른 부품이 아니라 **참/거짓**인 까닭: 이 창은 그 건 전체를 본다. */
+  const [isReturnOpen, setIsReturnOpen] = useState(false);
+  const [isLoadingReturn, setIsLoadingReturn] = useState(false);
+  /**
+   * 🔴 **`null` 은 「아직 못 물어봤다」이고, 빈 목록은 「돌려줄 것이 없다」**다. 둘을 한 값으로
+   * 뭉개면 불러오는 중인 창이 「돌려줄 부품이 없습니다」를 띄운다 — 이 저장소가 재고 통로
+   * 전부에 거는 그 가름을 창 안에서도 지킨다.
+   */
+  const [returnLines, setReturnLines] = useState<ReturnCartLine[] | null>(null);
+  /**
+   * 못 물어본 까닭. 🔴 **`unreachable` 이 참이면 「없다」가 아니라 「확인하지 못했다」**로
+   * 그린다 — 바로 위 신청 목록이 같은 갈림을 같은 말투로 그린다.
+   */
+  const [returnLoadError, setReturnLoadError] = useState<{ message: string; unreachable: boolean } | null>(null);
+  /** 🔴 **신청 하나에 비고 하나**다(반출 쪽과 같다) — 부품 줄마다가 아니다. */
+  const [returnNote, setReturnNote] = useState("");
+  const [isReturnSubmitting, setIsReturnSubmitting] = useState(false);
+  /** 🔴 저쪽이 거절한 **그 문구**(「N개까지 돌려줄 수 있습니다」 따위). 손으로 다시 적지 않는다. */
+  const [returnError, setReturnError] = useState<string | null>(null);
+  /** 🔴 **반환의 요청 번호.** 반출 쪽과 **다른 ref** 다 — 두 신청이 같은 열쇠를 쓰면 안 된다. */
+  const returnKeyRef = useRef<string | null>(null);
 
   const partList = parts.status === "ok" ? parts.value : [];
   /**
@@ -226,6 +296,16 @@ export default function PartRequestSection({
   const filteredParts = filterInventoryParts(partList, search);
   const template = ohTemplate.status === "ok" ? ohTemplate.value : null;
   const canSubmit = parts.status === "ok" && requesterGate.ok;
+  /**
+   * 🔴 [반환 요청]을 **못 누르는 까닭**. 누를 수 있으면 `null` 이다 — 가르는 자리는 도메인
+   * 함수 한 곳이고(`returnRequestBlockReason`), 서버 액션이 같은 글자로 거절한다.
+   * 🔵 **부품 목록을 못 받아 온 것은 여기서 보지 않는다**(위 `canSubmit` 과 다르다) — 반환은
+   *    부품 목록이 아니라 **그 건에서 나간 줄**을 묻는 다른 통로를 쓴다.
+   */
+  const returnBlockReason = returnRequestBlockReason({
+    shipmentFinished: isShipmentFinished,
+    requesterMessage: requesterGate.ok ? null : requesterGate.message,
+  });
   /** 담은 줄에 **그 부품의 모든 것**을 그리려고 번호로 되짚는다. 🔵 장바구니에 베껴 담지 않는
       까닭: 베끼면 고객사 품명을 채운 뒤에도 담은 줄만 옛 값으로 남는다. */
   const partByNo = new Map(partList.map((part) => [part.no, part]));
@@ -461,6 +541,91 @@ export default function PartRequestSection({
       return;
     }
     showSavePopup({ message: "고객사 품명을 채웠습니다.", redirectTo: null });
+  }
+
+  /**
+   * [반환 요청] 창을 열고 **그때 묻는다** — 「이 건에서 무엇을 얼마나 돌려줄 수 있나」.
+   *
+   * 🔴 **화면을 그릴 때 미리 받아 두지 않는다**: ① 이 창을 여는 일은 드문데 모든 사람의 상세
+   *    화면에 통로를 한 번 더 두드리게 된다 ② 🔴 **`remaining` 은 금방 낡는다** — 창을 여는
+   *    순간 받은 수일수록 헛걸음이 적다(그 사이에 또 바뀌면 저쪽이 거절하고 그 말이 뜬다).
+   * 🔴 **여는 자리에서 전부 비운다**(채우기 창과 같은 규율) — 지난번에 적어 둔 수량과 비고가
+   *    남아 있으면, 새로 받아 온 남은 수와 어긋난 채로 눌릴 수 있다.
+   */
+  async function openReturnDialog() {
+    setIsReturnOpen(true);
+    setReturnError(null);
+    setReturnLoadError(null);
+    setReturnLines(null);
+    setReturnNote("");
+    setIsLoadingReturn(true);
+    const result = await loadInventoryReturnCandidatesAction({ repairCaseId });
+    setIsLoadingReturn(false);
+
+    if (!result.ok) {
+      // 🔴 「없다」로 접지 않는다 — 못 받아 온 것인지 아닌지를 그대로 들고 창이 그린다.
+      setReturnLoadError({ message: result.message, unreachable: result.unreachable });
+      return;
+    }
+    setReturnLines(toReturnCartLines(result.candidates));
+  }
+
+  /**
+   * 반환을 올린다 — **창에서 수량을 적고 누른 뒤**에만 여기 온다.
+   *
+   * 🔴 **0 인 줄은 보내지 않는다**(도메인 쪽 `validateReturnCart`). 저쪽은 0 짜리 줄을 400 으로
+   *    거절하므로, 그대로 보내면 적어 둔 다른 줄까지 통째로 막힌다.
+   * 🔴 **실패를 삼키지 않는다.** 저쪽이 거절한 문구(「나간 적이 없다」 · 「N개까지 돌려줄 수
+   *    있습니다」)를 **그대로** 창 안에 띄우고 창을 닫지 않는다 — 닫히면 사람은 올라간 줄 안다.
+   * 🔴 **못 올렸으면 수량도 비고도 그대로 둔다** — 다시 누르면 **같은 요청**이 간다(요청 번호를
+   *    성공한 뒤에만 비운다. 반출 쪽과 같은 규율이고, 그래서 두 줄이 서지 않는다).
+   */
+  async function handleReturnSubmit() {
+    if (returnLines === null) return;
+    const validated = validateReturnCart(returnLines);
+    if (!validated.ok) {
+      setReturnError(validated.message);
+      return;
+    }
+
+    setIsReturnSubmitting(true);
+    setReturnError(null);
+    const result = await createInventoryReturnRequestAction({
+      repairCaseId,
+      // 🔴 두 번 눌러도 같은 값이 나간다(반출 쪽 ref 의 머리말).
+      requestKey: getOrCreateRequestKey(returnKeyRef, generateClientUuid),
+      lines: validated.lines,
+      /* 🔴 **안 적었으면 `null`** · 적었으면 다듬지 않고 그대로(반출 쪽과 같다 — 앞뒤 공백을
+         떼는 자리는 서버 액션 한 곳이다). */
+      note: returnNote.trim() === "" ? null : returnNote,
+    });
+    setIsReturnSubmitting(false);
+
+    if (!result.ok) {
+      setReturnError(result.message);
+      return;
+    }
+
+    resetRequestKey(returnKeyRef);
+    setIsReturnOpen(false);
+    setReturnLines(null);
+    setReturnNote("");
+    // 🔴 목록을 다시 읽는다 — 올린 반환 신청이 아래 목록에 한 줄로 선다(저쪽은 인수번호로
+    //    물으면 반환 신청도 함께 준다).
+    router.refresh();
+
+    if (!result.created) {
+      // 🔵 같은 요청 번호가 이미 올라가 있었다 — 두 번 선 것이 아니다(읽는 알림으로 말한다).
+      setNotice({
+        title: "이미 올라간 반환 요청입니다",
+        lines: [
+          "이 반환 요청은 이미 재고 관리에 올라가 있습니다.",
+          "같은 요청이 두 번 서지는 않았습니다. 아래 목록에서 지금 상태를 확인해 주세요.",
+        ],
+      });
+      return;
+    }
+    showSavePopup({ message: "재고 관리에 부품 반환을 요청했습니다.", redirectTo: null });
   }
 
   /** 부품 한 줄의 **고객사 품명 줄** — 있으면 값을, 없으면 까닭과 채워 넣을 길을. */
@@ -806,7 +971,32 @@ export default function PartRequestSection({
       {errorMessage && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{errorMessage}</p>}
 
       <div className="mt-4">
-        <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">이 수리 건의 반출 신청</h3>
+        {/* 🔴 **[반환 요청]은 이 제목 옆에 선다** (2026-11-26 쓰는 분 요청) — 바로 아래가
+            「이미 나간 것들의 이력」이라, 돌려주는 일이 설 자리로 뜻이 맞는다. 🔵 위의
+            [재고 관리에 요청]과 **다른 단추**다: 저것은 더 달라는 말이고 이것은 돌려준다는 말이라,
+            한 자리에 나란히 두면 눌러야 할 것을 고르는 데 시간이 든다.
+            🔵 `flex-wrap` 인 까닭: 수리 건 상세의 이 칸은 좁아서 제목과 단추가 한 줄에 못 설 수 있다.
+            🔴 **제목이 「부품 신청」인 까닭**(2026-11-26 쓰는 분 결정): 같은 목록에 **가져간
+            신청과 돌려준 신청이 함께** 선다(저쪽은 인수번호로 물으면 반환도 함께 준다 —
+            API.md 4-11절). 「반출 신청」이라고 적어 두면 그 아래 선 반환 줄이 제목과 어긋난다.
+            🔵 어느 쪽인지는 줄마다 **종류 딱지**가 말한다(아래). */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">이 수리 건의 부품 신청</h3>
+          <button
+            type="button"
+            onClick={() => void openReturnDialog()}
+            disabled={returnBlockReason !== null}
+            className="shrink-0 rounded-md border border-zinc-300 px-2 py-0.5 text-[11px] text-zinc-700 hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            반환 요청
+          </button>
+        </div>
+        {/* 🔴 **감추지 않고 잠그고, 까닭을 적는다.** 단추가 사라지면 사람은 「그런 기능이
+            없다」로 읽고 담당자를 찾아다닌다. 글자는 도메인 한 곳에서 오고, 서버도 같은 말로
+            거절한다 — 화면이 막는 까닭과 서버가 막는 까닭이 다른 말이면 안 된다. */}
+        {returnBlockReason !== null && (
+          <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">{returnBlockReason}</p>
+        )}
         {partRequestTrace.kind === "unknown" ? (
           <p className="mt-1 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
             재고 관리에서 신청 목록을 불러오지 못했습니다 — {inventoryUnreachableMessage(partRequestTrace.reason)} 요청이
@@ -826,8 +1016,18 @@ export default function PartRequestSection({
                       🔵 색조는 **재고 관리와 맞췄고**, 마감이면 `closed` 를 보고 색까지 함께
                       바뀐다(그 함수 머리말) — 안 그러면 「마감」이라 쓰인 배지가 확인됨의
                       초록으로 뜬다. */}
-                  <span className={stockRequestStatusBadge(request)}>
-                    {/* 🔴 저쪽이 준 글자를 그대로 쓴다 — 손으로 다시 적지도, **뒤에 덧붙이지도**
+                  <span className="flex flex-wrap items-center gap-1">
+                    {/* 🔴 **종류 딱지** (2026-11-26) — 같은 목록에 가져간 신청과 돌려준 신청이
+                        섞여 선다. 🔵 **「사용」에는 아무것도 안 그린다**(O/H 딱지와 같은 판단):
+                        거의 모든 줄이 사용이라, 줄마다 딱지가 하나 더 서면 정작 눈에 걸려야 하는
+                        반환이 묻힌다. 🔴 **글자도 꾸밈도 여기서 고르지 않는다** — 상태 배지와
+                        같은 자리(도메인)가 쥔다. 🔵 **상태 배지 앞**에 두는 까닭: 「무엇인가」를
+                        읽은 뒤에 「지금 어떤가」를 읽는 것이 사람이 묻는 차례다.
+                        🔴 **상태 배지 자체는 한 글자도 안 바뀌었다** — 종류를 상태 글자 뒤에
+                        덧붙이면 2026-10-21 의 「마감 (마감)」과 같은 일이 된다. */}
+                    <RequestTypeBadge request={request} />
+                    <span className={stockRequestStatusBadge(request)}>
+                      {/* 🔴 저쪽이 준 글자를 그대로 쓴다 — 손으로 다시 적지도, **뒤에 덧붙이지도**
                         않는다.
                         🔴 **마감이면 저쪽이 `label` 자체를 「마감」으로 바꿔 보낸다**(상태 코드는
                         `CONFIRMED` 그대로다 — 마감은 상태값이 아니라 `closed` 칸이라서). 그래서
@@ -836,7 +1036,8 @@ export default function PartRequestSection({
                         드러났다(어느 쪽도 혼자서는 틀린 데가 없었다).
                         🔵 `closed` 칸 자체는 계속 쓴다 — 사유 상자의 머리글과 [요청 취소] 판정이
                         그 칸으로 갈린다(`stockRequestDecisionLabel` · `canCancelStockRequest`). */}
-                    {request.status.label || request.status.code}
+                      {request.status.label || request.status.code}
+                    </span>
                   </span>
                   <span className="flex items-center gap-2">
                     <span className="text-zinc-500 dark:text-zinc-400">
@@ -942,26 +1143,34 @@ export default function PartRequestSection({
                     줄마다 **왼쪽 세로 선**으로 묶는다. 선을 고르는 자리와 「왜 상자가 아닌가」는
                     도메인 쪽 `STOCK_REQUEST_LINE_BLOCK_CLASS` 머리말에 있다. */}
                 <ul className="mt-1 flex flex-col gap-2 text-zinc-600 dark:text-zinc-300">
-                  {request.lines.map((line, index) => (
+                  {request.lines.map((line, index) => {
+                    /* 🔴 **둘째 이름표는 종류가 정한다** (2026-11-26 쓰는 분이 화면에서 짚었다) —
+                       반환 줄에 「불출 1」이 떠서 「한 개가 또 나갔다」로 읽혔다. 🔴 **글자만 바꾼
+                       것이 아니다**: 그 칸이 담는 수가 종류마다 다르고(반환에서는 **돌아온** 수다),
+                       까닭은 도메인 쪽 `stockRequestQuantityLabels` 머리말에 있다.
+                       🔵 **사용 줄은 전과 한 글자도 다르지 않다** — 「요청 2 / 불출 0」 그대로다. */
+                    const quantityLabels = stockRequestQuantityLabels(request);
+                    return (
                     <li key={`${request.id}-${line.no ?? "deleted"}-${index}`} className={STOCK_REQUEST_LINE_BLOCK_CLASS}>
-                      {/* 🔵 **머리줄의 글자는 한 자도 안 바뀌었다** — 「요청」·「불출」도, 사이의
-                          `/` 도, 앞의 `—` 도 그대로다. 바뀐 것은 **숫자가 어떻게 보이는가**뿐이다
-                          (요청 ②: 그 줄의 요점이 숫자인데 이름에 묻혀 있었다).
+                      {/* 🔵 **머리줄의 생김새는 그대로다** — 이름표와 숫자가 갈리는 것도, 사이의
+                          `/` 도, 앞의 `—` 도(요청 ②: 그 줄의 요점이 숫자인데 이름에 묻혀 있었다).
                           🔵 `whitespace-nowrap` 인 까닭: 좁은 칸이라 「요청 2 / 불출 0」이 가운데서
-                          끊기면 한 덩이로 안 읽힌다 — 통째로 다음 줄로 넘어가는 편이 낫다. */}
+                          끊기면 한 덩이로 안 읽힌다 — 통째로 다음 줄로 넘어가는 편이 낫다.
+                          🔴 글자가 바뀌어도(「/ 반환 1」) 그 성질은 **그대로 지킨다.** */}
                       <span className="block">
                         {line.no !== null && <span className="text-zinc-400">No. {line.no} </span>}
                         {line.name}{" "}
                         <span className="whitespace-nowrap">
-                          <span className={STOCK_REQUEST_QUANTITY_LABEL_CLASS}>— 요청 </span>
+                          <span className={STOCK_REQUEST_QUANTITY_LABEL_CLASS}>{quantityLabels.requested}</span>
                           <span className={STOCK_REQUEST_QUANTITY_VALUE_CLASS}>{line.quantity}</span>
-                          <span className={STOCK_REQUEST_QUANTITY_LABEL_CLASS}> / 불출 </span>
+                          <span className={STOCK_REQUEST_QUANTITY_LABEL_CLASS}>{quantityLabels.issued}</span>
                           <span className={STOCK_REQUEST_QUANTITY_VALUE_CLASS}>{line.issued}</span>
                         </span>
                       </span>
                       <StockRequestLineDetails line={line} />
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               </li>
             ))}
@@ -997,6 +1206,27 @@ export default function PartRequestSection({
         onCancel={() => {
           setFillTarget(null);
           setFillError(null);
+        }}
+      />
+
+      {/* 🔴 이 창도 **표 밖, 이 칸의 맨 끝**이다 — 팝업은 DOM 부모의 CSS 를 물려받아서, 표 칸
+          안에서 태어나면 `whitespace-nowrap` 이 따라와 부품 이름이 칸을 넘친다. */}
+      <ReturnRequestDialog
+        isOpen={isReturnOpen}
+        isLoading={isLoadingReturn}
+        lines={returnLines}
+        loadError={returnLoadError}
+        note={returnNote}
+        onNoteChange={setReturnNote}
+        onQuantityChange={(no, quantity) =>
+          setReturnLines((prev) => (prev === null ? prev : applyReturnCartQuantity(prev, no, quantity)))
+        }
+        isSubmitting={isReturnSubmitting}
+        errorMessage={returnError}
+        onConfirm={() => void handleReturnSubmit()}
+        onCancel={() => {
+          setIsReturnOpen(false);
+          setReturnError(null);
         }}
       />
     </div>
@@ -1045,6 +1275,30 @@ export default function PartRequestSection({
  * 🔵 `span`(display:flex)인 까닭: 부르는 자리 둘이 `td` 와 `li` 안이라 글 흐름을 끊지 않게.
  * 🔵 `flex-wrap` 인 까닭: 수리 건 상세의 이 칸은 좁아서 딱지들이 한 줄에 못 설 수 있다.
  */
+/**
+ * ============================================================================
+ * 신청 한 건의 **종류 딱지** — 「반환」 (2026-11-26)
+ * ============================================================================
+ * 🔴 **한 목록에 둘이 섞여 선다.** 저쪽은 인수번호로 물으면 **반환 신청도 함께** 준다
+ * (API.md 4-11절). 딱지가 없으면 가져간 신청과 돌려준 신청이 둘 다 「요청 2 / 불출 0」으로
+ * 보이고, 사람은 **어느 쪽인지 가릴 수 없다.**
+ *
+ * 🔵 **「사용」에는 아무것도 안 그린다**(`stockRequestTypeBadge` 가 `null` 을 준다) — 이 목록의
+ *    거의 모든 줄이 사용이라, 줄마다 딱지가 하나 더 서면 정작 눈에 걸려야 하는 반환이 묻힌다.
+ *    O/H 딱지가 「일반」을 만들지 않은 것과 **같은 판단**이다.
+ * 🔴 **글자도 꾸밈도 여기서 고르지 않는다** — 도메인이 준 것을 그대로 붙인다(상태 배지와 같은
+ *    규율). 여기서 색을 덧칠하면 「색 말고도 갈리는가」를 재는 자리가 둘로 쪼개진다.
+ * 🔵 조각으로 떼어 둔 까닭: 그리는 자리가 `map` 안의 JSX 라 지역 변수를 둘 자리가 없고,
+ *    함수를 두 번 부르느니 조각 하나가 「없으면 아무것도 안 그린다」까지 들고 있는 편이 낫다
+ *    (바로 아래 `LineTags` 와 같은 길).
+ * ============================================================================
+ */
+function RequestTypeBadge({ request }: { request: Pick<InventoryStockRequestForScreen, "type"> }) {
+  const badge = stockRequestTypeBadge(request);
+  if (badge === null) return null;
+  return <span className={badge.className}>{badge.text}</span>;
+}
+
 function LineTags({ tags }: { tags: ReadonlyArray<StockRequestLineTag | null> }) {
   const shown = tags.filter((tag): tag is StockRequestLineTag => tag !== null);
   if (shown.length === 0) return null;
@@ -1317,6 +1571,237 @@ function FillCustomerNameDialog({
           className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
         >
           {isSubmitting ? "채우는 중..." : "채우기"}
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
+/**
+ * ============================================================================
+ * [반환 요청] 창 — 가져갔던 부품을 돌려준다 (2026-11-26 쓰는 분 요청)
+ * ============================================================================
+ * 「이미 불출된 적 있는 부품에 한해 … 부품별로 선택하고 반환 수량을 적을 수 있도록(최대 수량,
+ * 기본적으로 0개), 비고를 적을 수 있는 공간도.」
+ *
+ * ── 🔴 **최댓값은 저쪽이 세어 준 수다** ─────────────────────────────────
+ * 「불출된 수량」이 아니다. 이미 돌아온 몫과 **올려 두고 확인을 기다리는 몫**이 빠진 수라야
+ * 같은 부품을 두 번 돌려주는 신청이 서지 않는다(도메인 쪽 머리말 · 저쪽 API.md 8-4절).
+ * 🔵 그래서 줄마다 **세 수를 함께 적는다** — 아홉 개를 가져간 것을 아는 사람이 「최대 7」만
+ *    보면 화면이 틀렸다고 생각한다. 「나간 9 · 돌아간 0 · 신청 중 2」가 그 자리에서 납득시킨다.
+ *
+ * ── 🔴 **셋을 다른 말로 그린다** ────────────────────────────────────────
+ * ① 불러오는 중 ② 🔴 **못 받아 왔다**(「없는 것이 아니라 확인하지 못한 것」 — 이 화면의 신청
+ * 목록이 쓰는 그 말투 그대로) ③ 돌려줄 것이 없다. 🔴 ②와 ③을 뭉개면 저쪽이 멈춘 사이에
+ * 화면이 「돌려줄 부품이 없다」고 거짓말하고, 사람은 부품을 그냥 들고 있는다.
+ * 🔴 **빈 창을 띄우지 않는다** — ③도 글로 말한다(목록만 비어 있으면 불러오다 만 줄 안다).
+ *
+ * ── 🔴 **올리고 막히면 창을 닫지 않는다** ───────────────────────────────
+ * 저쪽이 거절한 문구(「나간 적이 없다」·「N개까지 돌려줄 수 있습니다」)를 **그대로** 창 안에
+ * 띄운다 — 닫히면 사람은 올라간 줄 알고 넘어간다(거두기·채우기 창과 같은 규율).
+ *
+ * 🔵 **여는 자리에서 비운다**(수량·비고) — 창이 제 안에서 뒤늦게 비우면 그 한 번 그리는 사이에
+ *    눌릴 수 있다. 그래서 상태의 주인이 이 창이 아니라 바깥이다(채우기 창과 같은 까닭).
+ * ============================================================================
+ */
+function ReturnRequestDialog({
+  isOpen,
+  isLoading,
+  lines,
+  loadError,
+  note,
+  onNoteChange,
+  onQuantityChange,
+  isSubmitting,
+  errorMessage,
+  onConfirm,
+  onCancel,
+}: {
+  isOpen: boolean;
+  isLoading: boolean;
+  /** 🔴 **`null` 은 「아직 못 물어봤다」**이고 빈 목록은 「돌려줄 것이 없다」다(바깥 주석). */
+  lines: ReturnCartLine[] | null;
+  /** 못 물어본 까닭. 🔴 `unreachable` 이면 「없다」가 아니라 「확인하지 못했다」로 그린다. */
+  loadError: { message: string; unreachable: boolean } | null;
+  note: string;
+  onNoteChange: (note: string) => void;
+  onQuantityChange: (no: number, quantity: string) => void;
+  isSubmitting: boolean;
+  /** 🔴 저쪽이 거절한 **그 문구**. 손으로 다시 적지 않는다. */
+  errorMessage: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (isOpen && !dialog.open) dialog.showModal();
+    else if (!isOpen && dialog.open) dialog.close();
+  }, [isOpen]);
+
+  /** 🔴 **전부 0 이면 올릴 수 없다** — 가르는 자는 도메인 한 곳이다(화면이 다시 세지 않는다). */
+  const canSend = lines !== null && hasReturnQuantity(lines);
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="return-request-title"
+      onCancel={(event) => {
+        // 보내는 중에 Esc 로 닫히면 올라갔는지 알 수 없게 된다(이웃 창 둘과 같다).
+        event.preventDefault();
+        if (!isSubmitting) onCancel();
+      }}
+      className="m-auto w-full max-w-lg rounded-lg border border-zinc-200 bg-white p-4 text-zinc-900 backdrop:bg-black/40 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50"
+    >
+      <h2 id="return-request-title" className="text-sm font-semibold">
+        부품 반환 요청
+      </h2>
+      <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400">
+        이 수리 건으로 <b>나간 적이 있는 부품</b>만 돌려줄 수 있습니다. 올리면 재고 관리에 「대기」
+        신청이 서고, <b>재고 담당자가 확인해야</b> 재고로 들어옵니다.
+      </p>
+
+      {isLoading && (
+        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">돌려줄 수 있는 부품을 불러오는 중...</p>
+      )}
+
+      {/* 🔴 **「없다」가 아니라 「확인하지 못했다」** — 이 화면의 신청 목록과 같은 말투다. */}
+      {!isLoading && loadError !== null && (
+        <p className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          {loadError.unreachable ? (
+            <>
+              재고 관리에서 돌려줄 수 있는 부품을 불러오지 못했습니다 — {loadError.message} 돌려줄 것이 없는
+              것이 아니라 <b>확인하지 못한 것</b>입니다. 잠시 뒤 다시 눌러 주세요.
+            </>
+          ) : (
+            loadError.message
+          )}
+        </p>
+      )}
+
+      {/* 🔴 빈 창을 띄우지 않는다 — 「없다」도 글로 말한다(그 글자는 도메인 한 곳에 있다). */}
+      {!isLoading && loadError === null && lines !== null && lines.length === 0 && (
+        <p className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-800/60 dark:text-zinc-300">
+          {RETURN_CANDIDATES_EMPTY_NOTICE}
+        </p>
+      )}
+
+      {!isLoading && loadError === null && lines !== null && lines.length > 0 && (
+        <>
+          <ul className="mt-3 max-h-64 overflow-y-auto rounded-md border border-zinc-200 dark:border-zinc-800">
+            {lines.map(({ candidate, quantity }) => {
+              const customerName = inventoryPartCustomerName(candidate);
+              const spec = inventoryPartSpec(candidate);
+              const idLabels = inventoryPartIdLabels(candidate);
+              return (
+                <li
+                  key={candidate.no}
+                  className="flex items-start justify-between gap-2 border-b border-zinc-100 px-3 py-1.5 text-xs last:border-0 dark:border-zinc-800"
+                >
+                  {/* 🔴 `min-w-0` 가 없으면 긴 이름이 든 칸이 줄어들지 못해 수량 칸을 밀어내고,
+                      좁아진 자리에서 한글이 **글자마다** 줄바꿈된다(2026-11-25 에 실제로 깨졌다). */}
+                  <span className="min-w-0 flex-1">
+                    {/* 🔴 값을 날것으로 그리지 않는다 — `-` 만 적힌 칸을 값으로 세면 「도번 -」
+                        같은 줄이 깔려 정작 있는 값이 묻힌다. 가리는 자도 이름표도 도메인 한 곳이고,
+                        **찾은 줄·담은 줄과 같은 함수**다(같은 부품이 세 자리에서 같게 보인다). */}
+                    {customerName !== "" && (
+                      <span className="block text-zinc-500 dark:text-zinc-400">
+                        {PART_FIELD_LABELS.customerPartName} · {customerName}
+                      </span>
+                    )}
+                    <span className="block break-words">
+                      <span className="text-zinc-500">No. {candidate.no}</span> {candidate.name}
+                      {spec !== "" && <span className="text-zinc-500"> · {spec}</span>}
+                    </span>
+                    {idLabels.length > 0 && (
+                      <span className="block text-[11px] text-zinc-500 dark:text-zinc-400">
+                        {idLabels.map((item, index) => (
+                          <span key={item.label}>
+                            {index > 0 && " · "}
+                            {item.label} {item.value}
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                    {/* 🔴 **왜 최댓값이 그 수인지**를 적는다 — 글자는 도메인 한 곳이 짓는다. */}
+                    <span className="block text-[11px] text-zinc-500 dark:text-zinc-400">
+                      {returnCandidateBreakdownText(candidate)}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    <input
+                      type="number"
+                      // 🔴 **최댓값은 `remaining`** — 나간 수(`taken`)가 아니다(이 창 머리말).
+                      min={0}
+                      max={candidate.remaining}
+                      step={1}
+                      value={quantity}
+                      onChange={(e) => onQuantityChange(candidate.no, e.target.value)}
+                      disabled={isSubmitting}
+                      aria-label={`${candidate.name} 반환 수량`}
+                      className="w-16 rounded-md border border-zinc-200 bg-white px-1.5 py-0.5 text-xs disabled:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900"
+                    />
+                    <span className="text-zinc-500 dark:text-zinc-400">개</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+
+          {/* 🔴 **신청 하나에 비고 하나**다(반출 쪽과 같다). 상한도 같은 상수를 본다 — 저쪽
+              통로가 같은 수로 받고, 넘치면 거절하지 않고 **조용히 자른다**(그 상수 머리말). */}
+          <div className="mt-3">
+            <label htmlFor="return-request-note" className="block text-xs text-zinc-600 dark:text-zinc-400">
+              비고 <span className="text-zinc-400 dark:text-zinc-500">(선택)</span>
+            </label>
+            <textarea
+              id="return-request-note"
+              value={note}
+              onChange={(e) => onNoteChange(e.target.value)}
+              disabled={isSubmitting}
+              rows={2}
+              maxLength={NOTE_MAX_LENGTH}
+              placeholder="재고 담당자가 알아야 할 것을 적어 주세요 — 예: 분해해 보니 쓰지 않아 그대로 돌려드립니다 / 내일 오전에 가져다 드리겠습니다"
+              className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-900 disabled:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
+            />
+            {note.length > 0 && (
+              <p className="mt-0.5 text-right text-[11px] text-zinc-400 dark:text-zinc-500">
+                {note.length} / {NOTE_MAX_LENGTH}자
+              </p>
+            )}
+          </div>
+        </>
+      )}
+
+      {errorMessage && (
+        <p
+          role="alert"
+          className="mt-2 rounded-md border border-red-200 bg-white px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-zinc-900 dark:text-red-400"
+        >
+          {/* 🔴 재고 관리가 적어 준 까닭을 **그대로** 보여 준다 — 손으로 다시 적지 않는다. */}
+          {errorMessage}
+        </p>
+      )}
+
+      <div className="mt-4 flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={isSubmitting}
+          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          닫기
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          // 🔴 **전부 0 이면 안 눌린다** — 0 인 줄은 올리지 않고, 올릴 줄이 없으면 올리지 않는다.
+          disabled={isSubmitting || !canSend}
+          className="rounded-md bg-primary-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-primary-800 disabled:opacity-50 dark:bg-primary-50 dark:text-zinc-900 dark:hover:bg-primary-200"
+        >
+          {isSubmitting ? "올리는 중..." : "반환 요청 올리기"}
         </button>
       </div>
     </dialog>

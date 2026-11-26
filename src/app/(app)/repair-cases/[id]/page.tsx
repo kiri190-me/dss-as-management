@@ -37,6 +37,7 @@ import { loadWorkflowRulesForCase } from "@/lib/db/queries/workflow-rules";
 import { db } from "@/lib/db/client";
 import { isRepairCaseDueDateNear } from "@/lib/domain/notifications";
 import { isRepairCaseDueDateInverted } from "@/lib/domain/due-date-inversion";
+import { isRepairCaseShipmentFinished } from "@/lib/domain/shipment-finished";
 import type { ActingUser } from "@/lib/domain/local/approval/transitions";
 import RepairCaseDetailView from "@/components/repair-cases/detail/RepairCaseDetailView";
 
@@ -418,6 +419,24 @@ export default async function RepairCaseDetailPage({
     actualShipmentDate: resolved.actualShipmentDate,
   });
 
+  /**
+   * 이 건이 **이미 나갔는가** — 「부품 요청」 칸의 [반환 요청]을 잠그는 값이다
+   * (2026-11-26 쓰는 분 결정: 「출하 완료 처리되면 [반환 요청] 버튼을 누를 수 없도록」).
+   *
+   * 🔴 **판정을 여기 적지 않는다** — 바로 위 두 경보가 안에서 부르는 **그 함수**를 그대로
+   * 부른다(domain/shipment-finished.ts). 상태 하나가 아니라 **평탄화 상태와 실제 출하일
+   * 둘**을 보는 것이 그 함수의 일이고, 여기서 상태만 견주면 출하일은 찍혔는데 단계가 따라가지
+   * 못한 건에서 반환이 그대로 열린다.
+   * 🔴 **이 값은 화면을 위한 것이고 울타리가 아니다** — 서버 액션이 건 id 로 **다시 읽어**
+   * 같은 말로 거절한다(server/actions/inventory-stock-requests.ts).
+   * 🔵 **반출 신청은 이 값으로 막지 않는다** — 나간 뒤에 부품이 더 필요한 일은 실제로 있고,
+   * 막아 달라고 한 것은 반환뿐이다.
+   */
+  const isShipmentFinished = isRepairCaseShipmentFinished({
+    status: resolved.status,
+    actualShipmentDate: resolved.actualShipmentDate,
+  });
+
   return (
     <RepairCaseDetailView
       resolved={resolved}
@@ -431,6 +450,7 @@ export default async function RepairCaseDetailPage({
       domesticOrderDueDates={domesticOrderDueDates}
       isDueDateNear={isDueDateNear}
       isDueDateInverted={isDueDateInverted}
+      isShipmentFinished={isShipmentFinished}
       domesticOrderIssueDates={domesticOrderIssueDates}
       canWriteDomesticOrderIssueDates={canWriteDomesticOrders}
       usedParts={usedParts}

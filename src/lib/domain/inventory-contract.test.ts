@@ -245,6 +245,10 @@ function sampleRequestRow() {
   return {
     requestKey: "AS-REQ-1",
     id: "r1",
+    /* 🔵 **종류**(2026-11-26) — 🔴 **`"RETURN"` 으로 둔다.** 파서가 칸이 없을 때 빈 글자로
+       떨어뜨리므로 `"USE"` 를 넣어 두면 **빼도 답이 거의 같아 보이는** 쪽으로 기운다. 가져간
+       신청과 돌려준 신청이 한 목록에 섞여 서는 것이 이 칸의 까닭이라, 표본도 그 쪽을 든다. */
+    type: "RETURN",
     intakeNumber: "D260701",
     status: { code: "CONFIRMED", label: "확인됨" },
     closed: true,

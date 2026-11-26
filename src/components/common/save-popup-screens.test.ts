@@ -312,7 +312,11 @@ test("A/S 건 안에 딸린 것·실행 동작은 팝업만 띄우고 머문다"
     // NoticePopup 으로 간다(저절로 닫히는 저장 팝업으로 보내면 못 읽고 지나간다).
     // 🔵 2026-10-27 에 `components/inventory/` 에서 수리 건 상세 폴더로 옮겼다 — 이 칸은 옛
     //    재고 표가 아니라 재고 관리 시스템의 통로를 쓰고, 그리는 자리도 수리 건 상세 하나다.
-    ["src/components/repair-cases/detail/PartRequestSection.tsx", 3],
+    // 🔵 2026-11-26 에 **넷째**가 생겼다 — [반환 요청](가져갔던 부품을 돌려준다). 앞의 셋과
+    //    **같은 결**이다: 성공한 경로에서만 뜨고, 저쪽이 거절하면 그 문구를 창 안에 그대로
+    //    적으며(창을 닫지 않는다), 「이미 올라가 있었다」는 오류가 아니라 읽어야 하는 알림이라
+    //    NoticePopup 으로 간다.
+    ["src/components/repair-cases/detail/PartRequestSection.tsx", 4],
     ["src/components/repair-cases/detail/PendingBillingDecisionCard.tsx", 1],
     ["src/components/repair-cases/workflow/ManualStepSetPanel.tsx", 1],
     ["src/components/repair-cases/workflow/DatabaseWorkflowControlPanel.tsx", 2],

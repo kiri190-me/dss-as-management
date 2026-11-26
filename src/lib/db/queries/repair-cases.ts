@@ -20,6 +20,7 @@ import {
   loadDomesticOrderDueDatesByCaseId,
 } from "./repair-case-domestic-order-due-dates";
 import { workflowKindOf } from "@/lib/domain/workflow-kind";
+import type { RepairStatus } from "@/lib/domain/types";
 import type { ResolvedRepairCase } from "@/lib/domain/local/resolved-repair-case";
 import type { TrashedRepairCase } from "../mappers/repair-case";
 import type { WorkflowKind } from "@/lib/domain/workflow-kind";
@@ -394,6 +395,66 @@ export async function getIntakeAndWorkflowKindForRepairCase(
   if (!row) return null;
   // 🔴 꼬리를 보고 셋으로 접는 일은 **도메인의 그 함수 하나**가 한다 — 여기서 다시 적지 않는다.
   return { intakeNumber: row.intakeNumber, workflowKind: workflowKindOf(row.workflowTypeCode) };
+}
+
+/** 부품 **반환** 요청을 올릴 때 서버가 제 손으로 읽는 값(아래 함수 머리말). */
+export type RepairCaseReturnRequestContext = {
+  intakeNumber: string;
+  /**
+   * 평탄화된 지금 상태 — 저장된 칸이 아니라 **지금 놓인 단계**에서 온다. 🔴 단계에 안 적혀
+   * 있으면 `null` 이고, 판정은 그것을 「아직 안 나갔다」로 본다(`isRepairCaseShipmentFinished`).
+   */
+  status: RepairStatus | null;
+  actualShipmentDate: string | null;
+};
+
+/**
+ * 이 수리 건의 **인수번호와 「이미 나갔는가」를 가릴 두 칸** — 부품 **반환** 요청 액션이 쓴다
+ * (2026-11-26). 🔴 **화면이 보낸 값을 믿지 않으려고 둔다**(바로 위 형제 함수와 같은 까닭):
+ * 인수번호는 어느 건의 부품을 돌려주는지를 정하는 값이고, 출하 완료 여부는 **올릴 수 있는지
+ * 자체**를 가르는 값이라 둘 다 서버가 제 손으로 읽어야 한다.
+ *
+ * 🔴 **형제 함수를 고쳐 쓰지 않고 따로 둔 까닭**: 저쪽(`getIntakeAndWorkflowKindForRepairCase`)
+ * 이 읽는 「종류」는 **반환에 쓰이지 않는다**(반환에는 승인 절차가 붙지 않는다 — 재고 API.md
+ * 4-11절). 한 함수로 합치면 쓰지도 않는 조인 둘을 반환 때마다 끌고 다니고, 반대로 저쪽에
+ * 출하 칸을 더하면 **반출 신청이 출하 완료 건에서 막히는지**가 이 함수 모양만 보고는 알 수
+ * 없게 된다(반출은 막지 않는다 — 나간 뒤에 추가 부품이 필요한 일이 실제로 있다).
+ *
+ * 🔵 **`leftJoin` 인 까닭**: 지금 단계가 안 붙은 건(`current_workflow_step_id` 가 비어 있는
+ *    건)에서 줄이 통째로 떨어지면 액션이 「이 수리 건을 찾을 수 없습니다」로 막는다 — 멀쩡한
+ *    건에서 반환을 못 올리게 되는 쪽이, 상태를 모르는 채 「안 나갔다」로 보는 쪽보다 나쁘다.
+ *    🔴 실제 출하일은 `repair_cases` 제 칸이라 단계가 없어도 그대로 읽히고, 판정은 그 둘을
+ *    **함께** 본다(`isRepairCaseShipmentFinished` 머리말 — 상태 하나에만 기대지 않는다).
+ *
+ * 지워진 건은 `null` 이다(형제 함수와 같은 잣대).
+ */
+export async function getReturnRequestCaseContext(
+  id: string
+): Promise<RepairCaseReturnRequestContext | null> {
+  if (!UUID_PATTERN.test(id)) {
+    return null;
+  }
+
+  const rows = await db
+    .select({
+      intakeNumber: repairCases.intakeNumber,
+      actualShipmentDate: repairCases.actualShipmentDate,
+      // 평탄화 상태는 지금 놓인 단계에서 온다(queries/repair-case-overdue-notifications.ts
+      // 가 같은 칸을 같은 조인으로 읽는다 — 거기는 모든 건을 훑어서 innerJoin 이다).
+      status: workflowSteps.repairStatus,
+    })
+    .from(repairCases)
+    .leftJoin(workflowSteps, eq(repairCases.currentWorkflowStepId, workflowSteps.id))
+    .where(and(eq(repairCases.id, id), eq(repairCases.isDeleted, false)))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    intakeNumber: row.intakeNumber,
+    status: row.status,
+    actualShipmentDate: row.actualShipmentDate,
+  };
 }
 
 export type RepairCaseEditGuard = { id: string; isLocked: boolean };

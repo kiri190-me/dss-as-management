@@ -2,11 +2,14 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 
 import { INVENTORY_OH_LINE_FIELD } from "@/lib/domain/inventory-contract";
+import { INVENTORY_RETURN_REQUEST_TYPE } from "@/lib/domain/inventory-return";
 import {
   cancelInventoryStockRequest,
+  createInventoryReturnRequest,
   createInventoryStockRequest,
   fetchInventoryOhTemplate,
   fetchInventoryParts,
+  fetchInventoryReturnCandidates,
   fetchInventoryStockRequestsByIntake,
   fillInventoryPartCustomerName,
   inventorySiteUrl,
@@ -851,6 +854,184 @@ describe("🔴 고객사 품명 채우기", () => {
     stubFetch(() => ({ status: 200, json: FILLED_BODY }));
 
     const result = await fillInventoryPartCustomerName(FILL_INPUT);
+
+    assert.equal(result.ok, false);
+    assert.equal(calls.length, 0);
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 부품 **반환** — 묻는 통로(읽기)와 올리는 통로(쓰기) (2026-11-26)
+ * ============================================================================
+ * 반환은 **주소도 토큰도 반출과 같은 통로**에 `type: "RETURN"` 한 칸으로 갈린다
+ * (저쪽 API.md 4-11절). 그래서 여기서 지키는 것이 셋이다 —
+ *
+ *  ㉠ 🔴 **그 한 칸이 실제로 나가는가.** 빠지면 **오류 없이 반출 신청이 한 줄 선다**(부품이
+ *     한 번 더 나가는 쪽으로). 어느 시험도 붉어지지 않고, 재고 담당자가 그 줄을 확인할
+ *     때까지 아무도 모른다.
+ *  ㉡ 🔴 **사유(`reason`)가 실리지 않는가.** 비어 있지 않으면 **400** 이다 — 저쪽 반환
+ *     기록에는 사유 칸이 아예 없다. 적을 말은 `note` 로 간다.
+ *  ㉢ 🔴 **묻는 통로는 읽기 토큰**이다. 올리는 쪽과 주소가 다르고 하는 일도 다르다 —
+ *     섞으면 401 이고, 그때 화면은 「돌려줄 것이 없다」가 아니라 「확인하지 못했다」여야 한다.
+ * ============================================================================
+ */
+describe("🔴 돌려줄 수 있는 부품 — 묻는 통로", () => {
+  const CANDIDATES_OK = {
+    generatedAt: "2026-11-26T01:00:00.000Z",
+    intakeNumber: "D260701",
+    count: 1,
+    candidates: [
+      {
+        no: 7,
+        name: "AMP-TEST-A1",
+        owner: { code: "DSS", label: "DSS" },
+        taken: 9,
+        returned: 0,
+        pending: 2,
+        remaining: 7,
+      },
+    ],
+  };
+
+  test("㉢ 🔴 **읽기 토큰**으로, 인수번호 하나를 붙여 묻는다", async () => {
+    stubFetch(() => ({ status: 200, json: CANDIDATES_OK }));
+
+    const result = await fetchInventoryReturnCandidates("d260701");
+
+    assert.match(calls[0].url, /\/api\/v1\/return-candidates\?intake=D260701$/, "주소나 인수번호가 다르다");
+    assert.equal(calls[0].method, "GET");
+    assert.equal(calls[0].headers.Authorization, `Bearer ${READ_TOKEN}`);
+    assert.notEqual(calls[0].headers.Authorization, `Bearer ${WRITE_TOKEN}`);
+    assert.equal(result.status, "ok");
+    assert.equal(result.status === "ok" ? result.value[0].remaining : null, 7);
+  });
+
+  test("🔴 **나간 적이 없는 건은 빈 목록**이고 오류가 아니다 (API.md 8-3절)", async () => {
+    stubFetch(() => ({ status: 200, json: { count: 0, candidates: [] } }));
+
+    const result = await fetchInventoryReturnCandidates("D260701");
+
+    assert.equal(result.status, "ok");
+    assert.deepEqual(result.status === "ok" ? result.value : null, []);
+  });
+
+  test("🔴 못 받아 온 것을 **빈 목록으로 바꾸지 않는다** — 401·500·모양 아님 전부", async () => {
+    for (const answer of [
+      { status: 401, json: {} },
+      { status: 500, json: {} },
+      { status: 200, json: { candidates: "목록이 아니다" } },
+    ]) {
+      calls = [];
+      stubFetch(() => answer);
+
+      const result = await fetchInventoryReturnCandidates("D260701");
+
+      assert.equal(result.status, "unreachable", JSON.stringify(answer));
+    }
+  });
+
+  test("인수번호 모양이 아니면 **두드리지도 않는다** — 그래도 「없다」로 바꾸지 않는다", async () => {
+    stubFetch(() => ({ status: 200, json: CANDIDATES_OK }));
+
+    const result = await fetchInventoryReturnCandidates("X26070");
+
+    assert.equal(calls.length, 0, "모양이 틀린 번호로 통로를 두드렸다");
+    assert.equal(result.status, "unreachable");
+  });
+});
+
+describe("🔴 반환 올리기 — 같은 통로, 다른 한 칸", () => {
+  const RETURN_INPUT = {
+    requestKey: "지어낸-반환번호",
+    intakeNumber: "D260701",
+    requester: { sub: "지어낸-포털번호", name: "홍길동" },
+    lines: [{ no: 7, quantity: 2 }],
+    note: "내일 가져다 드립니다",
+  };
+  const CREATED = {
+    status: 201,
+    json: {
+      created: true,
+      request: { id: "r9", requestKey: "지어낸-반환번호", type: "RETURN", status: { code: "PENDING", label: "대기" } },
+    },
+  };
+
+  test("㉠㉡ 🔴 저쪽이 받는 모양 그대로 — `type` 이 실리고 `reason` 은 **없다**", async () => {
+    stubFetch(() => CREATED);
+
+    await createInventoryReturnRequest(RETURN_INPUT);
+
+    assert.deepEqual(calls[0].body, {
+      // 🔴 이 한 칸이 빠지면 저쪽은 「사용」(반출)으로 읽는다 — 부품이 한 번 더 나간다.
+      type: INVENTORY_RETURN_REQUEST_TYPE,
+      requestKey: "지어낸-반환번호",
+      intakeNumber: "D260701",
+      requester: { sub: "지어낸-포털번호", name: "홍길동" },
+      lines: [{ no: 7, quantity: 2 }],
+      note: "내일 가져다 드립니다",
+    });
+    const body = calls[0].body as Record<string, unknown>;
+    // 🔴 사유를 실으면 400 이고, 유상/무상·종류는 쓰이지 않는 값이라 싣지 않는다.
+    for (const forbidden of ["reason", "chargeType", "workflowKind"]) {
+      assert.ok(!(forbidden in body), `본문에 「${forbidden}」이 실렸다`);
+    }
+    assert.ok(!("chargeType" in (body.lines as Record<string, unknown>[])[0]), "줄에 유상/무상이 실렸다");
+  });
+
+  test("㉠ 🔴 **쓰기 토큰**이고 주소는 반출과 같다 — 가르는 것은 본문의 한 칸뿐이다", async () => {
+    stubFetch(() => CREATED);
+
+    await createInventoryReturnRequest(RETURN_INPUT);
+
+    assert.equal(calls[0].method, "POST");
+    assert.match(calls[0].url, /\/api\/v1\/stock-requests$/);
+    assert.equal(calls[0].headers.Authorization, `Bearer ${WRITE_TOKEN}`);
+  });
+
+  test("비고를 안 적었으면 그 칸을 **아예 안 보낸다**", async () => {
+    stubFetch(() => CREATED);
+
+    await createInventoryReturnRequest({ ...RETURN_INPUT, note: undefined });
+
+    assert.ok(!("note" in (calls[0].body as Record<string, unknown>)), "빈 비고가 실려 나갔다");
+  });
+
+  test("🔴 거절 문구를 **그대로** 올린다 — 「N개까지」를 우리 말로 바꾸지 않는다", async () => {
+    stubFetch(() => ({ status: 400, json: { message: "부품 No. 7 은(는) 3개까지 돌려줄 수 있습니다." } }));
+
+    const result = await createInventoryReturnRequest(RETURN_INPUT);
+
+    assert.equal(result.ok, false);
+    assert.equal(result.ok ? "" : result.message, "부품 No. 7 은(는) 3개까지 돌려줄 수 있습니다.");
+  });
+
+  test("🔵 같은 열쇠로 다시 보내면 **두 번 서지 않는다** — `created: false` 가 온다", async () => {
+    stubFetch(() => ({
+      status: 200,
+      json: { created: false, request: { id: "r9", status: { code: "PENDING", label: "대기" } } },
+    }));
+
+    const result = await createInventoryReturnRequest(RETURN_INPUT);
+
+    assert.equal(result.ok, true);
+    assert.equal(result.ok ? result.created : null, false);
+    assert.equal(result.ok ? result.statusLabel : null, "대기");
+  });
+
+  test("🔴 저쪽이 꺼져 있으면 올라간 것처럼 보이지 않는다", async () => {
+    stubFetch(() => ({ status: 500, json: {} }));
+
+    const result = await createInventoryReturnRequest(RETURN_INPUT);
+
+    assert.equal(result.ok, false);
+  });
+
+  test("쓰기 토큰이 없으면 두드리지도 않는다", async () => {
+    process.env.INVENTORY_WRITE_TOKEN = "";
+    stubFetch(() => CREATED);
+
+    const result = await createInventoryReturnRequest(RETURN_INPUT);
 
     assert.equal(result.ok, false);
     assert.equal(calls.length, 0);

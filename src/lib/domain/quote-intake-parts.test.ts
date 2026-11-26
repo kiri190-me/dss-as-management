@@ -64,6 +64,8 @@ function request(id: string, lines: Line[]): InventoryStockRequest {
   return {
     requestKey: null,
     id,
+    // 🔵 **가져간 신청**이다(2026-11-26 에 칸이 생겼다) — 견적서가 보는 것은 나간 부품이다.
+    type: "USE",
     intakeNumber: "D260101",
     status: { code: "CONFIRMED", label: "확인" },
     closed: false,

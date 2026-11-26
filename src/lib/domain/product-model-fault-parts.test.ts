@@ -98,6 +98,8 @@ function stockRequest(
   return {
     requestKey: null,
     id: `req-${statusCode}`,
+    // 🔵 **가져간 신청**이다(2026-11-26 에 칸이 생겼다) — 이 그래프가 세는 것은 나간 부품이다.
+    type: "USE",
     intakeNumber: "D000111",
     status: { code: statusCode, label: statusCode },
     closed: false,

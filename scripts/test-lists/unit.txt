@@ -1504,6 +1504,15 @@ src/lib/domain/inventory-gateway.test.ts
 src/lib/domain/inventory-stock-request-cart.test.ts
 src/lib/server/inventory-gateway.test.ts
 
+# 🔴 부품 **반환**의 순수 규칙 (2026-11-26). 이 조각에서 틀리면 **물건이 두 번 움직이는**
+# 자리가 하나다 — 수량 칸의 최댓값을 `remaining` 이 아니라 `taken`(나간 수)으로 그리는 것.
+# 그러면 이미 돌아온 몫과 **올려 두고 확인을 기다리는 몫**(pending)이 빠지지 않아 같은
+# 부품을 두 번 돌려주는 신청이 서고, 담당자가 둘째를 확인하는 순간까지 아무도 모른다.
+# 응답 읽기 · 0 인 줄 빼기 · 출하 완료면 못 누르는 까닭 · 보내는 줄에 유상/무상이 안 실리는
+# 것까지 값으로 잰다. 🔵 화면이 이 규칙을 실제로 쓰는가는
+# components/repair-cases/detail/part-request-section-wiring.test.ts 가 잰다.
+src/lib/domain/inventory-return.test.ts
+
 # 🔴 [고장 부품] 그래프의 셋째 입력을 **인수번호마다 한 번씩** 모으는 자리(2026-10-29).
 # 저쪽에 모델 단위로 묻는 통로가 없어 건마다 두드리므로 안전장치 셋이 붙어 있고,
 # 🔴 **셋 다 안 지켜도 오류가 안 난다** — 상한을 안 보면 화면이 몇 분 안 뜨고(「느리다」로만

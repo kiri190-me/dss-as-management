@@ -713,6 +713,19 @@ export type InventoryStockRequest = {
   requestKey: string | null;
   id: string;
   intakeNumber: string;
+  /**
+   * **이 신청이 무엇인가** — `USE`(가져간다) · `RETURN`(돌려준다) (2026-11-26).
+   *
+   * 🔴 **한 목록에 둘이 섞여 선다.** 저쪽은 인수번호로 물으면 반환 신청도 함께 주므로
+   *    (API.md 4-11절), 이 칸이 없으면 수리 건 상세의 「이 수리 건의 부품 신청」에서
+   *    **가져간 것과 돌려준 것을 사람이 가릴 수 없다** — 둘 다 「요청 2 / 불출 0」으로 보인다.
+   * 🔴 **코드를 글자 그대로 담는다**(우리 표로 접지 않는다). 모르는 코드가 오면 화면이
+   *    **그 글자를 그대로** 그린다 — 저쪽이 종류를 하나 더 만드는 날 「사용」으로 둔갑하지
+   *    않게(상태 코드·유상무상에 거는 그 규율과 같다).
+   * 🔵 **빈 글자가 정상인 자리가 있다** — 이 칸이 생기기 전(2026-11-26)에 올라간 신청과,
+   *    저쪽이 칸을 안 보내는 경우다. 그때는 딱지를 안 그린다(그 시절 신청은 전부 반출이었다).
+   */
+  type: string;
   /** 🔴 `label` 은 **저쪽 화면에 뜨는 글자 그대로** 쓴다(머리말). */
   status: { code: string; label: string };
   /** 마감 — 「준 것은 그대로 두고 남은 것만 접은」 것. 상태값이 아니라 이 칸으로 가른다. */
@@ -843,6 +856,10 @@ export function parseInventoryStockRequestsResponse(json: unknown): InventorySto
       requestKey: requestKey === "" ? null : requestKey,
       id,
       intakeNumber: str(o.intakeNumber),
+      /* 🔴 **글자 그대로**다 — `"USE"` 로 때우지 않는다. 칸이 없으면 빈 글자이고, 그때 화면은
+         딱지를 안 그린다(위 타입 주석). 여기서 기본값을 「사용」으로 박으면, 저쪽이 칸을 안
+         보내게 되는 날 **반환 신청이 반출로 둔갑해** 목록에 선다. */
+      type: str(o.type),
       status: codeLabel(o.status),
       closed: o.closed === true,
       requestedAt: str(o.requestedAt),
@@ -1117,6 +1134,96 @@ export function stockRequestStatusBadge(request: Pick<InventoryStockRequest, "st
       ? STOCK_REQUEST_STATUS_BADGE_CLASS[request.status.code]
       : STOCK_REQUEST_STATUS_BADGE_UNKNOWN;
   return `${STOCK_REQUEST_STATUS_BADGE_SHAPE} ${tone}`;
+}
+
+// ---------------------------------------------------------------------------
+// 신청의 **종류** — 한 목록에 「가져간다」와 「돌려준다」가 섞여 선다 (2026-11-26)
+// ---------------------------------------------------------------------------
+
+/** 저쪽이 쓰는 종류 코드(API.md 4-11절). 🔵 「사용」이 이 목록의 보통이다. */
+export const STOCK_REQUEST_TYPE_USE = "USE";
+export const STOCK_REQUEST_TYPE_RETURN = "RETURN";
+
+/** 반환 딱지에 적는 글자. 🔴 재고 관리 화면도 이 목록을 「반환」이라 부른다. */
+export const STOCK_REQUEST_TYPE_RETURN_LABEL = "반환";
+
+/**
+ * 반환 딱지의 꾸밈 — 🔴 **상태 배지 색과 겹치지 않는 자리에 둔다.**
+ *
+ * 상태 배지가 이미 일곱 색을 쓰고 있어서(대기 주황 · 결재 중 남색 · 처리 중 회색 · 일부 나감
+ * 파랑 · 확인됨 초록 · 반려 빨강 · 보류 보라), 여덟째 색을 들이면 **바로 옆에 선 두 배지가
+ * 같은 종류의 말을 한다**고 읽힌다. 그래서 색이 아니라 **바탕을 뒤집는다** — 어느 상태 색과도
+ * 섞이지 않고, 「이것은 상태가 아니라 분류다」가 모양으로 드러난다.
+ * 🔴 **색 말고도 갈린다**: ⓐ 글자가 「반환」이라 어느 상태 이름과도 겹치지 않고 ⓑ 바탕이
+ *    뒤집혀 있고 ⓒ 굵다. 색을 전부 지워도 셋이 남는다.
+ * 🔴 **다크 짝이 붙어 있다** — 밝은 쪽만 적으면 어두운 화면에서 글자가 배경에 잠긴다.
+ */
+export const STOCK_REQUEST_TYPE_RETURN_BADGE_CLASS =
+  "border-zinc-800 bg-zinc-800 font-semibold text-zinc-50 dark:border-zinc-200 dark:bg-zinc-100 dark:text-zinc-900";
+
+/**
+ * 🔴 **모르는 종류의 딱지** — 저쪽이 종류를 하나 더 만드는 날 쓰인다. 상태·유상무상과 같은
+ * 길이다(점선 테두리 · 어느 쪽으로도 칠하지 않는다 · 글자는 저쪽이 준 코드 그대로).
+ */
+export const STOCK_REQUEST_TYPE_BADGE_UNKNOWN =
+  "border-dashed border-zinc-400 text-zinc-700 dark:border-zinc-500 dark:text-zinc-200";
+
+export type StockRequestTypeBadge = { text: string; className: string };
+
+/**
+ * 이 신청의 **종류 배지**. 🔵 **「사용」이면 `null`** 이고, 그때 화면은 아무것도 안 그린다.
+ *
+ * 🔴 **「사용」 딱지를 만들지 않는 까닭**(O/H 딱지와 같은 판단): 이 목록의 거의 모든 줄이
+ *    사용이라, 줄마다 딱지가 하나 더 서면 정작 눈에 걸려야 하는 **반환**이 묻힌다.
+ * 🔴 **빈 글자도 `null` 이다** — 이 칸이 생기기 전에 올라간 신청이고, 그때는 전부 반출이었다.
+ *    🔵 그래서 「딱지가 없다 = 가져간 신청」이 **옛 줄에서도 참말**이다.
+ * 🔴 **모르는 코드는 숨기지 않는다** — 저쪽이 종류를 더하는 날 그 코드를 점선 딱지로 그대로
+ *    그린다. 숨기면 그 줄이 「사용」으로 읽히고, 그것은 **없는 사실**이다.
+ */
+export function stockRequestTypeBadge(
+  request: Pick<InventoryStockRequest, "type">
+): StockRequestTypeBadge | null {
+  const code = request.type.trim();
+  if (code === "" || code === STOCK_REQUEST_TYPE_USE) return null;
+  if (code === STOCK_REQUEST_TYPE_RETURN) {
+    return {
+      text: STOCK_REQUEST_TYPE_RETURN_LABEL,
+      className: `${STOCK_REQUEST_STATUS_BADGE_SHAPE} ${STOCK_REQUEST_TYPE_RETURN_BADGE_CLASS}`,
+    };
+  }
+  return { text: code, className: `${STOCK_REQUEST_STATUS_BADGE_SHAPE} ${STOCK_REQUEST_TYPE_BADGE_UNKNOWN}` };
+}
+
+/**
+ * 신청 줄의 **수량 두 칸에 붙는 이름표** — 🔴 **둘째 칸의 말이 종류마다 다르다** (2026-11-26).
+ *
+ * ── 🔴 **담는 것이 다르다. 글자만 바꾼 것이 아니다** ────────────────────
+ * 둘째 칸(`issued`)의 **뜻이 종류마다 뒤집힌다**. 가져가는 신청에서는 「창고에서 **나간** 수」이고,
+ * 돌려주는 신청에서는 「원장에 **들어온**(돌아온) 수」다 — 저쪽이 반환 줄의 그 칸에 넣어 주는
+ * 값이 `returnedQuantityOf` 를 지난 수이기 때문이다(`dss-inventory` 의
+ * `lib/stock/return-request-view.ts`: 세는 질의가 반출 기준이라 반환에서는 음수가 나오고,
+ * **보여 주기 직전에 부호를 뒤집어** 0 아래로 안 내려가게 한다). 그래서 반환 줄에 「불출」이라고
+ * 적으면 **사실과 반대인 말**이 뜬다 — 돌려주겠다고 올린 줄 옆에 「불출 1」이 붙어 「한 개가
+ * 또 나갔다」로 읽힌다. 2026-11-26 에 쓰는 분이 화면에서 그대로 짚었다.
+ *
+ * 🔵 **첫째 칸은 「요청」 그대로다**(쓰는 분 결정) — 반환도 「이만큼 돌려주겠다」는 **요청**이라
+ *    말이 된다. 「요청 1 / 반환 1」은 **1개를 돌려주겠다고 했고 1개가 들어왔다**는 뜻이다.
+ * 🔵 **사용 줄의 글자는 한 자도 안 바뀌었다** — 「요청」·「불출」도, 사이의 `/` 도, 앞의 `—` 도
+ *    2026-10-21 에 정한 그대로다. 바뀐 것은 **반환 줄의 둘째 이름표 하나**뿐이다.
+ * 🔴 **모르는 종류는 사용 쪽 말을 쓴다** — 지어낼 말이 없고, 그 줄에는 이미 **모르는 종류라는
+ *    점선 딱지**가 따로 서 있다(위 `stockRequestTypeBadge`).
+ * 🔵 앞뒤 공백이 글자에 붙어 있는 까닭: 화면이 이름표와 숫자를 **다른 꾸밈의 조각**으로 나눠
+ *    그리는데(옅은 이름표 + 굵은 숫자), 그 사이의 띄어쓰기를 JSX 에 적으면 조각마다 또 갈린다.
+ */
+export type StockRequestQuantityLabels = { requested: string; issued: string };
+
+export function stockRequestQuantityLabels(
+  request: Pick<InventoryStockRequest, "type">
+): StockRequestQuantityLabels {
+  if (request.type.trim() === STOCK_REQUEST_TYPE_RETURN) {
+    return { requested: "— 요청 ", issued: " / 반환 " };
+  }
+  return { requested: "— 요청 ", issued: " / 불출 " };
 }
 
 /**

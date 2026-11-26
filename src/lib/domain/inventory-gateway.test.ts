@@ -32,8 +32,13 @@ import {
   stockRequestLineCustomerName,
   stockRequestLineDetails,
   stockRequestLineOwnerTag,
+  stockRequestQuantityLabels,
   stockRequestStatusBadge,
+  stockRequestTypeBadge,
   toScreenStockRequests,
+  STOCK_REQUEST_TYPE_RETURN,
+  STOCK_REQUEST_TYPE_RETURN_LABEL,
+  STOCK_REQUEST_TYPE_USE,
   STOCK_REQUEST_CHARGE_TAG_CLASS,
   STOCK_REQUEST_CHARGE_TAG_UNKNOWN_CLASS,
   STOCK_REQUEST_LINE_BLOCK_CLASS,
@@ -1460,5 +1465,132 @@ describe("🔴 반출 신청 줄의 꾸밈 — 수량과 부품 덩이", () => {
   test("🔵 구분선에는 **뜻을 나르는 색을 안 쓴다** — 뜻 있는 색은 이 줄에 이미 셋이다", () => {
     // 상태 배지 · 유상/무상 딱지 · 수량. 구분선까지 칠하면 어느 색이 뜻인지 알 수 없다.
     assert.match(STOCK_REQUEST_LINE_BLOCK_CLASS, /\bborder-zinc-\d/, "구분선이 중립색이 아니다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 신청의 **종류** — 한 목록에 「가져간다」와 「돌려준다」가 섞여 선다 (2026-11-26)
+ * ============================================================================
+ * 저쪽은 인수번호로 물으면 **반환 신청도 함께** 준다(API.md 4-11절). 종류를 안 읽으면 둘이
+ * 똑같이 보이고, 돌려주겠다고 올린 줄이 「아직 안 나갔다」로 읽힌다 — 쓰는 분이 화면에서
+ * 그대로 짚었다(「[불출 1]이 아니라 [반환 1]로 뜨도록」).
+ *
+ * 🔵 **화면이 이것을 실제로 쓰는가**는 `components/repair-cases/detail/
+ *    part-request-section-wiring.test.ts` 가 잰다. 여기서는 **규칙 자체**를 값으로 민다.
+ * ============================================================================
+ */
+describe("🔴 신청의 종류 — 읽기", () => {
+  test("저쪽이 준 글자를 **그대로** 담는다", () => {
+    const parsed = parseInventoryStockRequestsResponse({
+      requests: [
+        { id: "r1", type: "RETURN", status: { code: "PENDING", label: "대기" }, lines: [] },
+        { id: "r2", type: "USE", status: { code: "PENDING", label: "대기" }, lines: [] },
+      ],
+    });
+    assert.deepEqual(parsed?.map((r) => r.type), ["RETURN", "USE"]);
+  });
+
+  test("🔴 칸이 없으면 **빈 글자**다 — 「사용」으로 때우지 않는다", () => {
+    /* 🔴 빈 칸을 「사용」으로 접으면, 저쪽이 칸을 안 보내게 되는 날 **반환 신청이 반출로
+       둔갑해** 목록에 선다 — 딱지도 안 뜨고 수량 이름표도 「불출」이 된다. */
+    const parsed = parseInventoryStockRequestsResponse({
+      requests: [{ id: "r1", status: { code: "PENDING", label: "대기" }, lines: [] }],
+    });
+    assert.equal(parsed?.[0].type, "");
+    // 글자가 아닌 값도 빈 글자다(이 파서의 다른 글자 칸과 같은 규율).
+    const odd = parseInventoryStockRequestsResponse({
+      requests: [{ id: "r1", type: 7, status: { code: "PENDING", label: "대기" }, lines: [] }],
+    });
+    assert.equal(odd?.[0].type, "");
+  });
+});
+
+describe("🔴 종류 딱지 — 반환에만 선다", () => {
+  test("🔵 **「사용」에는 아무것도 안 그린다** — 빈 글자도 마찬가지다", () => {
+    /* 🔴 이 목록의 거의 모든 줄이 사용이라, 줄마다 딱지가 하나 더 서면 정작 눈에 걸려야 하는
+       반환이 묻힌다(O/H 딱지가 「일반」을 만들지 않은 것과 같은 판단). 🔵 빈 글자는 이 칸이
+       생기기 전에 올라간 신청이고, 그때는 전부 반출이었다 — 딱지가 없는 것이 참말이다. */
+    assert.equal(stockRequestTypeBadge({ type: STOCK_REQUEST_TYPE_USE }), null);
+    assert.equal(stockRequestTypeBadge({ type: "" }), null);
+    assert.equal(stockRequestTypeBadge({ type: "   " }), null);
+  });
+
+  test("🔴 반환이면 **「반환」**이라고 적힌 딱지가 선다", () => {
+    const badge = stockRequestTypeBadge({ type: STOCK_REQUEST_TYPE_RETURN });
+    assert.ok(badge !== null, "반환 줄에 딱지가 안 선다 — 사용과 가릴 수 없다");
+    assert.equal(badge.text, STOCK_REQUEST_TYPE_RETURN_LABEL);
+    assert.equal(badge.text, "반환");
+  });
+
+  test("🔴 **모르는 종류를 숨기지 않는다** — 코드를 그대로, 점선으로", () => {
+    /* 🔴 숨기면 그 줄이 「사용」으로 읽히고, 그것은 **없는 사실**이다. 상태 코드·유상무상이
+       모르는 값을 다루는 길과 같다 — 어느 쪽으로도 칠하지 않고 선의 모양으로 말한다. */
+    const badge = stockRequestTypeBadge({ type: "LEND" });
+    assert.ok(badge !== null);
+    assert.equal(badge.text, "LEND");
+    assert.match(badge.className, /border-dashed/, "모르는 값이라는 것이 모양으로 안 드러난다");
+  });
+
+  test("🔴 **색 말고도 갈린다** — 뼈대 · 굵기 · 다크 짝", () => {
+    const badge = stockRequestTypeBadge({ type: STOCK_REQUEST_TYPE_RETURN });
+    assert.ok(badge !== null);
+    // ⓐ 상태 배지와 **같은 뼈대**를 쓴다(나란히 서는 둘의 높이·여백이 어긋나지 않게).
+    assert.ok(badge.className.startsWith(STOCK_REQUEST_STATUS_BADGE_SHAPE), "뼈대가 상태 배지와 다르다");
+    // ⓑ 굵다 ⓒ 밝은 쪽만 적으면 어두운 화면에서 글자가 배경에 잠긴다.
+    assert.match(badge.className, /font-semibold/);
+    assert.match(badge.className, /dark:/, "다크 짝이 없다");
+  });
+
+  test("🔴 **상태 배지가 쓰는 일곱 색과 겹치지 않는다** — 둘이 나란히 선다", () => {
+    /* 🔴 상태와 종류는 **다른 종류의 말**이다. 같은 색표에서 한 색을 더 쓰면, 바로 옆에 선
+       두 배지가 같은 말을 한다고 읽힌다. 그래서 색이 아니라 **바탕을 뒤집어** 가른다. */
+    const badge = stockRequestTypeBadge({ type: STOCK_REQUEST_TYPE_RETURN });
+    assert.ok(badge !== null);
+    assert.doesNotMatch(badge.className, /amber|indigo|blue|green|red|violet/, "상태 색을 하나 더 쓴다");
+    const statusTones = Object.values(STOCK_REQUEST_STATUS_BADGE_CLASS);
+    assert.ok(statusTones.length > 0, "상태 색표가 비어 있다 — 아래 단언이 헛돈다");
+    for (const tone of statusTones) {
+      assert.notEqual(badge.className, `${STOCK_REQUEST_STATUS_BADGE_SHAPE} ${tone}`, "상태 배지와 같은 꾸밈이다");
+    }
+  });
+});
+
+describe("🔴 수량 이름표 — 둘째 칸의 뜻이 종류마다 뒤집힌다", () => {
+  test("🔵 **사용 줄은 전과 한 글자도 다르지 않다**", () => {
+    assert.deepEqual(stockRequestQuantityLabels({ type: STOCK_REQUEST_TYPE_USE }), {
+      requested: "— 요청 ",
+      issued: " / 불출 ",
+    });
+  });
+
+  test("🔴 반환 줄은 **「불출」이 아니라 「반환」**이다 (2026-11-26 쓰는 분이 화면에서 짚었다)", () => {
+    /* 🔴 **글자만 바꾼 것이 아니다.** 그 칸이 담는 수가 종류마다 다르다 — 저쪽이 반환 줄의
+       그 칸에 넣는 값은 「원장에 들어온(돌아온) 수」다(`dss-inventory` 의
+       `lib/stock/return-request-view.ts` 의 `returnedQuantityOf`: 세는 질의가 반출 기준이라
+       반환에서는 음수가 나오고, 보여 주기 직전에 부호를 뒤집는다). 「불출 1」은 **한 개가 또
+       나갔다**는 말이라 사실과 반대다. */
+    const labels = stockRequestQuantityLabels({ type: STOCK_REQUEST_TYPE_RETURN });
+    assert.deepEqual(labels, { requested: "— 요청 ", issued: " / 반환 " });
+    assert.ok(!labels.issued.includes("불출"), "반환 줄에 「불출」이 남아 있다");
+  });
+
+  test("🔴 **모르는 종류는 사용 쪽 말**을 쓴다 — 지어낼 말이 없다", () => {
+    // 🔵 그 줄에는 「모르는 종류」라는 점선 딱지가 따로 서 있다(위 describe).
+    assert.deepEqual(stockRequestQuantityLabels({ type: "LEND" }), {
+      requested: "— 요청 ",
+      issued: " / 불출 ",
+    });
+    assert.deepEqual(stockRequestQuantityLabels({ type: "" }), {
+      requested: "— 요청 ",
+      issued: " / 불출 ",
+    });
+  });
+
+  test("🔵 **첫째 칸은 둘이 같다** — 반환도 「이만큼 돌려주겠다」는 요청이다", () => {
+    assert.equal(
+      stockRequestQuantityLabels({ type: STOCK_REQUEST_TYPE_RETURN }).requested,
+      stockRequestQuantityLabels({ type: STOCK_REQUEST_TYPE_USE }).requested
+    );
   });
 });

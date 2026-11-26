@@ -16,6 +16,12 @@ import {
   type InventoryStockRequest,
   type InventoryUnreachableReason,
 } from "@/lib/domain/inventory-gateway";
+import {
+  INVENTORY_RETURN_REQUEST_TYPE,
+  parseInventoryReturnCandidatesResponse,
+  type InventoryReturnCandidate,
+  type ReturnRequestLine,
+} from "@/lib/domain/inventory-return";
 import type { WorkflowKind } from "@/lib/domain/workflow-kind";
 
 /**
@@ -355,18 +361,32 @@ export async function createInventoryStockRequest(
     },
   });
 
+  return readCreateOutcome(call, "올리기");
+}
+
+/**
+ * 신청을 **세우는 통로**의 응답을 읽는 자리 — 🔴 **반출과 반환이 같은 함수를 쓴다.**
+ *
+ * 주소도 돌려주는 모양도 같고(API.md 4-3절 · 4-11절), 다른 것은 보내는 본문뿐이다. 두 벌로
+ * 적으면 **`created` 를 읽는 규칙이 갈린다** — 그 칸 하나가 「두 번 섰나」를 가르는 값이라,
+ * 한쪽만 고치는 날 사람이 같은 요청을 두 번 올렸다고 믿거나 그 반대가 된다.
+ *
+ * 🔵 거절(400)은 저쪽이 한국어로 적어 준 까닭을 그대로, 못 받아 온 것은 순수 쪽의 같은
+ *    말투로. 올리기 실패와 읽기 실패가 다른 말을 하면 같은 사고가 다른 일로 보인다.
+ * 🔴 **`created` 는 참일 때만 참이다** — 모르면 「이미 올라가 있었다」로 접는다(거두기의
+ *    `cancelled` 와 기본값이 반대인 까닭은 그 함수 머리말에 있다).
+ */
+function readCreateOutcome(call: InventoryCall, label: string): CreateStockRequestOutcome {
   if (!call.ok) {
     return {
       ok: false,
-      // 🔵 거절(400)은 저쪽이 한국어로 적어 준 까닭을 그대로, 못 받아 온 것은 순수 쪽의
-      //    같은 말투로. 올리기 실패와 읽기 실패가 다른 말을 하면 같은 사고가 다른 일로 보인다.
       message: call.kind === "rejected" ? call.message : inventoryUnreachableMessage(call.reason),
     };
   }
 
   const json = call.json;
   if (!json || typeof json !== "object") {
-    console.error("[inventory] 올리기 응답 모양을 읽지 못했습니다.");
+    console.error(`[inventory] ${label} 응답 모양을 읽지 못했습니다.`);
     return { ok: false, message: "재고 관리의 응답을 읽지 못했습니다. 잠시 뒤 같은 화면에서 다시 눌러 주세요." };
   }
   const o = json as { created?: unknown; request?: unknown };
@@ -379,6 +399,92 @@ export async function createInventoryStockRequest(
     id: typeof request.id === "string" ? request.id : "",
     statusLabel: typeof status.label === "string" ? status.label : "",
   };
+}
+
+// ---------------------------------------------------------------------------
+// 돌려줄 수 있는 부품 — `GET /api/v1/return-candidates` (🔴 **읽기 토큰**이다)
+// ---------------------------------------------------------------------------
+
+/**
+ * 이 수리 건에서 **무엇을 얼마나 돌려줄 수 있나** (API.md 8절, 2026-11-26 에 열린 통로).
+ *
+ * 🔴 **읽기 토큰이다.** 재고를 한 개도 움직이지 않고 신청을 세우지도 않는다 — 아래 올리는
+ *    통로와 하는 일이 다르다(`tokenFor` 머리말의 그 가름).
+ * 🔴 **열쇠는 인수번호 하나뿐이고 한 번에 하나다**(API.md 8-1절). 신청 상태를 묻는 통로와
+ *    **일부러 다르다** — 돌려주는 줄이 **부품별**이라 건 둘을 합치면 어느 건의 몫인지 줄에
+ *    적을 자리가 없다. 모양이 틀리면 두드리기 전에 가른다(아래, 신청 목록 통로와 같은 규율).
+ * 🔴 **나간 적이 없는 건은 오류가 아니라 빈 목록이다**(API.md 8-3절) — 재고 관리는 「그 건으로
+ *    나간 것이 없다」와 「그런 수리 건이 없다」를 가릴 수 없다(수리 건 표는 A/S 에 있다).
+ *    그래서 `{ status: "ok", value: [] }` 가 **정상**이고, 화면은 그것을 「돌려줄 것이 없다」로
+ *    그린다. 🔴 못 받아 온 것(아래 `unreachable`)과 **섞으면 안 된다**.
+ */
+export async function fetchInventoryReturnCandidates(
+  intakeNumber: string
+): Promise<InventoryResult<InventoryReturnCandidate[]>> {
+  const n = intakeNumber.trim().toUpperCase();
+  if (!EXTERNAL_INTAKE_NUMBER_RE.test(n)) {
+    // 모양이 틀리면 저쪽이 400 으로 돌려보낸다. 두드리기 전에 가르되 🔴 「없다」로 바꾸지는
+    // 않는다 — 모양이 틀린 건에 돌려줄 부품이 없다고 말할 근거가 없다.
+    console.error("[inventory] 인수번호 모양이 아닙니다:", n);
+    return { status: "unreachable", reason: "error" };
+  }
+  const call = await callInventory(`/api/v1/return-candidates?intake=${encodeURIComponent(n)}`, {
+    token: "read",
+  });
+  return finishRead(call, parseInventoryReturnCandidatesResponse, "돌려줄 수 있는 부품");
+}
+
+// ---------------------------------------------------------------------------
+// 반환 올리기 — `POST /api/v1/stock-requests` 에 `type: "RETURN"` (🔴 쓰기 토큰이다)
+// ---------------------------------------------------------------------------
+
+export type CreateReturnRequestInput = {
+  /** 🔴 같은 값으로 두 번 부르면 신청이 두 번 서지 않는다(API.md 4-4절 · 4-11절). */
+  requestKey: string;
+  /** 🔴 **어느 수리 건에서 나간 것을 돌려주나.** 이 번호로 돌려줄 수 있는 줄을 찾는다. */
+  intakeNumber: string;
+  /** 🔴 `sub` 은 **포털 번호**다. 부르는 쪽(서버 액션)이 세션에서 꺼내 온다. */
+  requester: { sub: string; name: string };
+  /** 🔴 **칸이 둘뿐이다** — 유상/무상도 사유도 원장 줄 번호도 싣지 않는다(순수 쪽 머리말). */
+  lines: ReturnRequestLine[];
+  note?: string;
+};
+
+/**
+ * 부품 **반환**을 신청한다 (API.md 4-11절, 2026-11-26 에 열린 길).
+ *
+ * 🔴 **주소도 토큰도 반출 신청과 같다.** 가르는 것은 본문의 `type` 한 칸뿐이라, 그 글자가
+ *    빠지면 **반출 신청이 한 줄 선다** — 오류 없이, 부품이 한 번 더 나가는 쪽으로. 그래서 그
+ *    글자를 순수 모듈의 상수 한 곳에 두고 여기서 불러 쓴다(`INVENTORY_RETURN_REQUEST_TYPE`).
+ * 🔴 **사유(`reason`)를 보내지 않는다 — 비어 있지 않으면 400 이다.** 적을 말은 `note` 로 간다.
+ * 🔴 **종류(`workflowKind`)도 보내지 않는다.** 그 값은 저쪽이 **승인 절차**를 고르는 데 쓰는데
+ *    반환에는 결재가 붙지 않는다(API.md 4-11절, 쓰는 분 결정). 쓰이지 않을 값을 실어 보내면
+ *    나중에 「반환도 결재를 탄다」로 읽힌다.
+ * 🔴 **이 통로도 수량을 한 개도 움직이지 않는다** — 재고 관리의 [부품 요청 관리]에 종류
+ *    「반환」으로 한 줄 서고, 재고 담당자가 [확인]을 눌러야 그때 원장에 들어온다.
+ * 🔵 **거절 문구를 뭉개지 않는다.** 「나간 적이 없다」·「N개까지 돌려줄 수 있습니다」가 각각
+ *    다른 말로 오고(API.md 4-11절의 표), `callInventory` 의 4xx 갈래가 그 글자를 살려 둔다 —
+ *    사람에게 **그대로** 가야 무엇을 고칠지 안다.
+ */
+export async function createInventoryReturnRequest(
+  input: CreateReturnRequestInput
+): Promise<CreateStockRequestOutcome> {
+  const call = await callInventory("/api/v1/stock-requests", {
+    token: "write",
+    method: "POST",
+    timeoutMs: WRITE_TIMEOUT_MS,
+    body: {
+      // 🔴 **이 한 칸이 반출과 반환을 가른다**(위 머리말).
+      type: INVENTORY_RETURN_REQUEST_TYPE,
+      requestKey: input.requestKey,
+      intakeNumber: input.intakeNumber,
+      requester: { sub: input.requester.sub, name: input.requester.name },
+      lines: input.lines,
+      ...(input.note ? { note: input.note } : {}),
+    },
+  });
+
+  return readCreateOutcome(call, "반환 올리기");
 }
 
 // ---------------------------------------------------------------------------

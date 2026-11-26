@@ -2,6 +2,11 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+/* 🔵 이 파일은 **원본 글자**를 읽어 재는 자리인데(머리말), 2026-11-26 에 딱 한 가지가 늘었다 —
+   화면이 부르는 도메인 함수의 **답**까지 값으로 못 박는 자리가 생겼다. 수량 이름표가 글자에서
+   값으로 바뀌면서 「사람이 읽는 그 글자」를 지킬 자리가 여기 말고 없어졌기 때문이다. */
+import { stockRequestQuantityLabels } from "@/lib/domain/inventory-gateway";
+
 /**
  * ============================================================================
  * 부품 요청 칸이 **어디를 보고 있는가** (2026-10-15)
@@ -524,7 +529,7 @@ describe("🔴 도번과 재고는 값만 눈에 띄게", () => {
  *    한쪽만 바뀐다.
  * ============================================================================
  */
-describe("🔴 반출 신청 줄 — 어느 부품인지가 보인다", () => {
+describe("🔴 부품 신청 줄 — 어느 부품인지가 보인다", () => {
   /** 신청 목록의 줄만 떼어 본다 — 찾은 줄·담은 줄(부품 고르기 쪽)과 섞이지 않게. */
   const requestLines = source.slice(source.indexOf("{request.lines.map((line, index) =>"), source.indexOf("{notice && <NoticePopup"));
   /**
@@ -542,10 +547,14 @@ describe("🔴 반출 신청 줄 — 어느 부품인지가 보인다", () => {
   const tagsStart = source.indexOf("function LineTags(");
   const tagsBlock = source.slice(tagsStart, detailsStart);
 
-  test("🔵 **머리줄의 글자는 한 자도 안 바뀌었다** — 2026-10-21 에 붙은 것은 꾸밈뿐이다", () => {
+  test("🔵 **머리줄의 생김새는 그대로다** — 이름표 둘과 숫자 둘이 그 차례로 선다", () => {
     assert.match(requestLines, /\{line\.no !== null && <span className="text-zinc-400">No\. \{line\.no\} <\/span>\}/);
-    /* 🔴 꾸밈 태그를 걷어내면 **예전 글자 그대로**여야 한다 — 「요청」·「불출」도, 사이의 `/`
-       도, 앞의 `—` 도. 숫자를 돋보이게 하려다 말이 바뀌면 그것은 다른 일이다(요청 ②).
+    /* 🔴 꾸밈 태그를 걷어내면 **이름표 · 수 · 이름표 · 수**가 그 차례로 남아야 한다. 숫자를
+       돋보이게 하려다 줄의 모양이 바뀌면 그것은 다른 일이다(요청 ②).
+       🔴 **2026-11-26 에 이름표가 글자에서 값으로 바뀌었다** — 반환 줄에 「불출 1」이 떠서
+       「한 개가 또 나갔다」로 읽혔기 때문이다(쓰는 분이 화면에서 짚었다). 🔴 **단언이 약해지지
+       않게**, 사람이 읽는 **그 글자**는 바로 아래 시험이 도메인 함수에 대고 값으로 못 박는다 —
+       사용 줄은 「요청 / 불출」 그대로, 반환 줄만 「요청 / 반환」이다.
        🔵 자리를 짚어 견주지 않고 **글자만 남겨 통째로** 견주는 까닭: 태그를 어떻게 나누든
        사람이 읽는 줄이 그대로인지를 묻는 것이 이 시험의 뜻이다. */
     const head = requestLines.slice(
@@ -557,7 +566,28 @@ describe("🔴 반출 신청 줄 — 어느 부품인지가 보인다", () => {
       .replace(/\{" "\}/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    assert.equal(text, "{line.name} — 요청 {line.quantity} / 불출 {line.issued}");
+    /* 🔵 토막 사이의 한 칸은 **줄바꿈이 공백으로 접힌 것**이다(위 `\s+` → `" "`). 글자였을 때는
+       이름표 안에 공백이 들어 있어 눈에 안 띄었고, 값으로 바뀌면서 드러났을 뿐이다 — 그리는
+       자리가 전부 `<span>` 이라 **화면에는 공백이 생기지 않는다.** */
+    assert.equal(
+      text,
+      "{line.name} {quantityLabels.requested} {line.quantity} {quantityLabels.issued} {line.issued}"
+    );
+  });
+
+  /**
+   * 🔴 **글자를 잃지 않았다** (2026-11-26). 위 시험이 「이름표 자리」만 보게 되었으므로, 사람이
+   * 실제로 읽는 **그 글자**를 여기서 값으로 못 박는다 — 둘을 합치면 어느 쪽도 못 지킨다.
+   */
+  test("🔴 사용 줄은 **전과 똑같이** 「요청 / 불출」이고, 반환 줄만 「요청 / 반환」이다", () => {
+    assert.deepEqual(stockRequestQuantityLabels({ type: "USE" }), { requested: "— 요청 ", issued: " / 불출 " });
+    assert.deepEqual(stockRequestQuantityLabels({ type: "" }), { requested: "— 요청 ", issued: " / 불출 " });
+    assert.deepEqual(stockRequestQuantityLabels({ type: "RETURN" }), { requested: "— 요청 ", issued: " / 반환 " });
+    // 🔴 반환 줄에 「불출」이 **한 글자도** 남아 있으면 안 된다 — 그것이 신고된 증상이다.
+    assert.ok(!stockRequestQuantityLabels({ type: "RETURN" }).issued.includes("불출"));
+    // 🔴 화면이 그 함수를 **실제로** 쓴다 — 글자를 다시 박아 두면 한쪽만 고쳐지는 날이 온다.
+    assert.match(source, /const quantityLabels = stockRequestQuantityLabels\(request\);/);
+    assert.doesNotMatch(requestLines, />— 요청 <|> \/ 불출 </, "이름표 글자가 화면에 박혀 있다");
   });
 
   test("🔴 자세한 내용을 그리는 조각을 **그 줄에서** 부른다", () => {
@@ -652,7 +682,7 @@ describe("🔴 반출 신청 줄 — 어느 부품인지가 보인다", () => {
 
 /**
  * ============================================================================
- * 🔴 「이 수리 건의 반출 신청」이 **너무 수수하다** (2026-10-21 쓰는 분이 눈으로 보고)
+ * 🔴 「이 수리 건의 부품 신청」이 **너무 수수하다** (2026-10-21 쓰는 분이 눈으로 보고)
  * ============================================================================
  * 짚은 것 셋 — ① 부품별 구분감이 없다 ② 요청·불출 수량이 안 띈다 ③ 지금 상태가 안 띈다.
  *
@@ -662,9 +692,9 @@ describe("🔴 반출 신청 줄 — 어느 부품인지가 보인다", () => {
  *    두 벌이 되고, 고치는 날 한쪽만 바뀐다(바로 위 딱지 둘과 같은 가름).
  * ============================================================================
  */
-describe("🔴 반출 신청 줄 — 셋이 눈에 띈다", () => {
+describe("🔴 부품 신청 줄 — 셋이 눈에 띈다", () => {
   /** 신청 목록 구역만 떼어 본다 — 부품 찾기·담은 줄과 섞이지 않게. */
-  const list = source.slice(source.indexOf("이 수리 건의 반출 신청"), source.indexOf("{notice && <NoticePopup"));
+  const list = source.slice(source.indexOf("이 수리 건의 부품 신청"), source.indexOf("{notice && <NoticePopup"));
   /**
    * 🔵 **주석을 걷어낸 화면.** 이 구역의 주석에는 「마감」이 **까닭으로** 길게 적혀 있다
    * (「마감 (마감)」 사고의 기록). 그 말은 설명이지 그리는 글자가 아니다.
@@ -847,7 +877,7 @@ describe("🔴 비고 — 적은 글이 재고 관리까지 간다", () => {
  */
 describe("🔴 요청 비고 — 적은 말이 신청 목록에 보인다", () => {
   /** 신청 카드 구역만 떼어 본다 — 위의 **적는 칸**(textarea)과 섞이지 않게. */
-  const card = source.slice(source.indexOf("이 수리 건의 반출 신청"), source.indexOf("{notice && <NoticePopup"));
+  const card = source.slice(source.indexOf("이 수리 건의 부품 신청"), source.indexOf("{notice && <NoticePopup"));
   /** 🔵 **주석을 걷어낸 화면** — 까닭을 적어 둔 글이 「그리는 글자」로 세어지지 않게. */
   const cardCode = card.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
   /** 요청 비고 상자 하나만. 🔴 끝을 안 끊으면 아래 두 상자(보류 · 결정)가 딸려 온다. */
@@ -956,5 +986,267 @@ describe("㉤ 🔴 수리 건 상세가 부품 요청 칸을 그린다", () => {
       /\{partRequestData && partRequestData\.caseContext && \( <PartRequestSection/,
       "부품 요청 칸을 그리는 자리가 없거나 조건이 바뀌었다"
     );
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 **[반환 요청]** — 가져갔던 부품을 돌려준다 (2026-11-26 쓰는 분 요청)
+ * ============================================================================
+ * 「[이 수리건의 반출 신청] 옆에 [반환 요청] 버튼을 만들고, 그 버튼을 누르면 불출 이력이 있는
+ * 부품별로 선택하고 반환 수량을 적을 수 있도록(불출된 수량이 최대 수량, 기본적으로 0개),
+ * 비고를 적을 수 있는 공간도 … [출하 완료] 처리되면 [반환 요청] 버튼을 누를 수 없도록.」
+ *
+ * 🔵 **규칙 자체**(최댓값이 `remaining` 인 것 · 0 인 줄을 빼는 것 · 막는 까닭의 글자)는 순수 쪽
+ *    시험이 **값으로** 잰다(`lib/domain/inventory-return.test.ts`). 통로를 어떻게 두드리는가는
+ *    `lib/server/inventory-gateway.test.ts` 가, 서버가 다시 막는가는
+ *    `lib/server/actions/inventory-stock-requests-source.test.ts` 가 잰다. 여기서 재는 것은
+ *    **화면이 그 셋을 실제로 쓰는가**뿐이다 — 규칙은 맞는데 화면이 제 손으로 다시 적으면
+ *    두 벌이 되고, 고치는 날 한쪽만 바뀐다.
+ * ============================================================================
+ */
+describe("🔴 [반환 요청] 단추 — 제목 옆에 서고, 나간 건에서는 잠긴다", () => {
+  /** 단추 하나만 떼어 본다 — 창 안의 [반환 요청 올리기]와 섞이지 않게. */
+  const buttonAt = source.search(/>\s*반환 요청\s*<\/button>/);
+
+  test("㉠ **[이 수리 건의 부품 신청] 제목 옆**에 선다 — 목록보다 위다", () => {
+    const titleAt = source.indexOf("이 수리 건의 부품 신청");
+    const listAt = source.indexOf('partRequestTrace.kind === "unknown"');
+    assert.ok(titleAt >= 0, "제목을 못 찾았다");
+    assert.ok(buttonAt > titleAt, "[반환 요청] 단추가 제목 앞에 있다");
+    assert.ok(listAt > buttonAt, "[반환 요청] 단추가 신청 목록 아래로 밀렸다");
+  });
+
+  test("㉠ 🔵 위의 [재고 관리에 요청]과 **다른 단추**다 — 한 자리에 겹쳐 두지 않았다", () => {
+    const askAt = source.indexOf("onClick={() => void handleSubmit()}");
+    assert.ok(askAt >= 0 && buttonAt > askAt, "반출 올리기 단추와 자리가 뒤섞였다");
+    assert.match(source, /onClick=\{\(\) => void openReturnDialog\(\)\}/, "단추가 창을 열지 않는다");
+  });
+
+  test("㉡ 🔴 **감추지 않고 잠근다** — 사라지면 사람은 「그런 기능이 없다」로 읽는다", () => {
+    assert.match(source, /disabled=\{returnBlockReason !== null\}/, "단추가 잠기지 않는다");
+    // 🔴 조건부로 그리면(= 감추면) 까닭을 말할 자리도 함께 사라진다.
+    assert.doesNotMatch(source, /returnBlockReason === null && \(/, "단추를 감추고 있다");
+    assert.doesNotMatch(source, /!isShipmentFinished && \(/, "출하 완료면 단추를 감추고 있다");
+  });
+
+  test("㉡ 🔴 **왜 못 누르는지**를 글로 적는다", () => {
+    assert.match(source, /\{returnBlockReason\}/, "까닭을 그리는 자리가 없다");
+    assert.match(
+      source,
+      /\{returnBlockReason !== null && \(/,
+      "까닭을 언제 그릴지 가르는 자리가 없다"
+    );
+  });
+
+  test("㉢ 🔴 **잠그는 까닭을 화면이 정하지 않는다** — 도메인 함수 한 곳이 쥔다", () => {
+    assert.match(
+      source,
+      /const returnBlockReason = returnRequestBlockReason\(\{\s*shipmentFinished: isShipmentFinished,\s*requesterMessage: requesterGate\.ok \? null : requesterGate\.message,\s*\}\);/,
+      "까닭을 도메인 함수에서 안 받는다"
+    );
+    /* 🔴 글자를 화면에 박아 두면 서버가 거절할 때의 말과 갈린다(서버도 같은 상수를 쓴다).
+       🔵 **그리는 글자만** 센다 — 「출하 완료」는 이 파일의 주석에도 까닭으로 적혀 있고,
+       그것까지 세면 **까닭을 적을수록 ✗ 가 되는** 시험이 된다(그 함정은 이 저장소가 이미 한 번
+       밟았다). 박아 둔 글자는 JSX 글자(`>…`)나 글자 리터럴(`"…`)로만 화면에 닿는다. */
+    assert.doesNotMatch(source, />이미 출하 완료|"이미 출하 완료/, "막는 까닭이 화면에 박혀 있다");
+  });
+
+  test("㉢ 🔴 **출하 완료를 화면이 재지 않는다** — 서버가 재어 보낸 값을 받기만 한다", () => {
+    assert.match(source, /isShipmentFinished: boolean;/, "그 값을 받는 칸이 없다");
+    // 🔴 상태 코드나 출하일을 화면이 직접 견주면 경보 넷과 다른 잣대가 하나 더 생긴다.
+    assert.doesNotMatch(source, /SHIPMENT_COMPLETED|actualShipmentDate/, "화면이 출하 사실을 직접 잰다");
+  });
+
+  test("🔵 **반출 신청 단추는 그대로다** — 나간 뒤에도 부품을 더 달라고 할 수 있다", () => {
+    assert.match(
+      source,
+      /disabled=\{isSubmitting \|\| cart\.length === 0 \|\| !canSubmit\}/,
+      "반출 올리기 단추의 조건이 바뀌었다"
+    );
+    assert.doesNotMatch(
+      source,
+      /const canSubmit = [^;]*isShipmentFinished/,
+      "반출 신청까지 함께 막혔다 — 막아 달라고 한 것은 반환뿐이다"
+    );
+  });
+});
+
+describe("🔴 [반환 요청] 창 — 최댓값 · 기본 0 · 비고 · 셋으로 갈리는 말", () => {
+  /** 창 조각 하나만 떼어 본다 — 이웃한 확인 창 둘과 섞이지 않게. */
+  const dialogStart = source.indexOf("function ReturnRequestDialog(");
+  const dialog = source.slice(dialogStart);
+
+  test("재는 자리가 비어 있지 않다 — 빈 글자에 대고 단언하면 전부 통과한다", () => {
+    assert.ok(dialogStart >= 0 && dialog.length > 1000, "창 조각을 못 찾았다");
+  });
+
+  test("🔴 창이 **표 밖**에 있다 — 표 칸 안에서 태어나면 부모 칸의 CSS 가 따라온다", () => {
+    const usedAt = source.indexOf("<ReturnRequestDialog");
+    const tableEnd = source.indexOf("</table>");
+    assert.ok(tableEnd >= 0 && usedAt > tableEnd, "반환 창이 표 안에 있다");
+  });
+
+  test("㉠ 🔴 **최댓값이 `remaining`** 이다 — 나간 수(`taken`)가 아니다", () => {
+    assert.match(dialog, /max=\{candidate\.remaining\}/, "수량 칸에 최댓값이 안 걸렸다");
+    // 🔴 나간 수를 최댓값으로 쓰면 같은 부품을 두 번 돌려주는 신청이 선다.
+    assert.doesNotMatch(dialog, /max=\{candidate\.taken\}/, "나간 수를 최댓값으로 쓴다");
+    assert.doesNotMatch(dialog, /candidate\.taken - candidate\.returned/, "화면이 남은 수를 제 손으로 센다");
+  });
+
+  test("㉠ 🔴 **왜 최댓값이 그 수인지**를 보여 준다 — 글자는 도메인이 짓는다", () => {
+    assert.match(dialog, /returnCandidateBreakdownText\(candidate\)/, "세 수를 안 보여 준다");
+    /* 🔴 「나간」·「돌아간」을 화면에 박아 두면 그 말이 바뀌는 날 이 줄만 옛말을 한다.
+       🔵 **숫자에 붙은 이름표만** 센다 — 창 머리의 안내문에도 「나간 적이 있는 부품」이라는
+       말이 있고, 그것까지 세면 설명을 적을수록 ✗ 가 되는 시험이 된다. */
+    assert.doesNotMatch(
+      dialog,
+      /나간 \{candidate\.taken\}|돌아간 \{candidate\.returned\}|신청 중 \{candidate\.pending\}/,
+      "세 수의 이름표가 화면에 박혀 있다"
+    );
+  });
+
+  test("㉡ 🔴 **기본 0 · 0 인 줄은 안 보낸다 · 전부 0 이면 못 누른다** — 가르는 자는 도메인이다", () => {
+    assert.match(source, /toReturnCartLines\(result\.candidates\)/, "기본값을 도메인에서 안 받는다");
+    assert.match(source, /const validated = validateReturnCart\(returnLines\);/, "0 인 줄을 도메인이 안 거른다");
+    assert.match(dialog, /const canSend = lines !== null && hasReturnQuantity\(lines\);/);
+    assert.match(dialog, /disabled=\{isSubmitting \|\| !canSend\}/, "전부 0 인데 올릴 수 있다");
+    // 🔴 화면이 제 손으로 0 을 세면 자가 두 벌이 된다.
+    assert.doesNotMatch(dialog, /Number\(/, "화면이 수량 글자를 제 손으로 숫자로 바꾼다");
+  });
+
+  test("㉢ 🔴 **비고 칸 하나** — 상한이 저쪽 수와 같은 그 상수다", () => {
+    assert.match(dialog, /id="return-request-note"/, "비고 칸이 없다");
+    assert.match(dialog, /htmlFor="return-request-note"/, "이름표가 칸에 안 이어져 있다");
+    assert.match(dialog, /maxLength=\{NOTE_MAX_LENGTH\}/, "상한이 안 걸렸거나 수를 박아 두었다");
+    // 🔴 신청 하나에 비고 하나다 — 부품 줄마다가 아니다.
+    assert.equal([...dialog.matchAll(/<textarea/g)].length, 1, "비고 칸이 하나가 아니다");
+  });
+
+  test("㉣ 🔴 **셋을 다른 말로 그린다** — 불러오는 중 · 확인 못 했다 · 돌려줄 것이 없다", () => {
+    assert.match(dialog, /\{isLoading && \(/, "불러오는 중을 안 그린다");
+    // 🔴 못 받아 온 것을 「없다」로 그리면 사람이 부품을 그냥 들고 있는다.
+    assert.match(dialog, /loadError\.unreachable \? \(/, "못 받아 온 것과 거절을 같은 말로 그린다");
+    assert.match(dialog, /확인하지 못한 것/, "「확인하지 못했다」는 말이 없다");
+    assert.match(dialog, /\{RETURN_CANDIDATES_EMPTY_NOTICE\}/, "「돌려줄 것이 없다」를 글로 안 말한다");
+    // 🔴 빈 창을 띄우지 않는다 — 글자는 도메인 한 곳에 있다.
+    assert.doesNotMatch(dialog, />돌려줄 수 있는 부품이 없습니다/, "없다는 말이 화면에 박혀 있다");
+  });
+
+  test("㉣ 🔵 「없다」는 **잘 받아 왔을 때만** 말한다 — 가림막이 셋 다 붙어 있다", () => {
+    assert.match(
+      dialog,
+      /\{!isLoading && loadError === null && lines !== null && lines\.length === 0 && \(/,
+      "불러오는 중이거나 못 받아 왔는데 「없다」가 뜬다"
+    );
+  });
+
+  test("㉤ 🔴 거절하면 저쪽 문구를 **그대로** 보이고 창을 닫지 않는다", () => {
+    const submitFn = source.slice(source.indexOf("async function handleReturnSubmit"));
+    const failure = submitFn.indexOf("if (!result.ok) {");
+    assert.ok(failure >= 0, "반환 올리기 실패를 가르는 자리가 없다");
+    const branch = submitFn.slice(failure, submitFn.indexOf("return;", failure));
+    assert.match(branch, /setReturnError\(result\.message\)/, "거절 문구를 그대로 들지 않는다");
+    assert.doesNotMatch(branch, /router\.refresh|showSavePopup|setIsReturnOpen\(false\)/);
+    assert.match(dialog, /\{errorMessage\}/, "거절 문구를 그릴 자리가 없다");
+  });
+
+  test("㉥ 🔴 **성공한 뒤에만** 요청 번호를 비운다 — 다시 누르면 같은 요청이다", () => {
+    const submitFn = source.slice(source.indexOf("async function handleReturnSubmit"));
+    const failure = submitFn.indexOf("if (!result.ok) {");
+    const reset = submitFn.indexOf("resetRequestKey(returnKeyRef)");
+    assert.ok(reset > failure && failure >= 0, "실패해도 번호를 비우고 있다 — 요청이 두 줄 선다");
+    assert.match(source, /requestKey: getOrCreateRequestKey\(returnKeyRef, generateClientUuid\)/);
+    // 🔴 반출 쪽과 **다른 ref** 다 — 두 신청이 같은 열쇠를 쓰면 저쪽이 하나로 접는다.
+    assert.match(source, /const returnKeyRef = useRef<string \| null>\(null\);/);
+    assert.notEqual(
+      source.indexOf("const returnKeyRef"),
+      source.indexOf("const requestKeyRef"),
+      "반출과 반환이 같은 요청 번호를 쓴다"
+    );
+  });
+
+  test("🔵 이미 올라가 있었으면 **읽는 알림**으로 말한다 — 저절로 닫히는 팝업이 아니다", () => {
+    const submitFn = source.slice(source.indexOf("async function handleReturnSubmit"));
+    assert.match(submitFn, /if \(!result\.created\)/);
+    assert.match(submitFn, /이미 올라간 반환 요청입니다/);
+  });
+
+  test("🔴 **여는 자리에서 비운다** — 지난번에 적어 둔 수량과 비고가 따라붙지 않게", () => {
+    const openFn = source.slice(
+      source.indexOf("async function openReturnDialog"),
+      source.indexOf("async function handleReturnSubmit")
+    );
+    assert.ok(openFn.length > 200, "창을 여는 함수를 못 찾았다");
+    for (const clear of [/setReturnLines\(null\)/, /setReturnNote\(""\)/, /setReturnError\(null\)/]) {
+      assert.match(openFn, clear, String(clear));
+    }
+    // 🔴 열 때마다 **다시 물어본다** — 남은 수는 금방 낡는다.
+    assert.match(openFn, /await loadInventoryReturnCandidatesAction\(\{ repairCaseId \}\)/);
+  });
+
+  test("🔴 부품을 가리는 글자를 **날것으로** 그리지 않는다 — 도메인 자를 쓴다", () => {
+    assert.match(dialog, /inventoryPartCustomerName\(candidate\)/);
+    assert.match(dialog, /inventoryPartIdLabels\(candidate\)/);
+    assert.match(dialog, /inventoryPartSpec\(candidate\)/);
+    // 🔴 `-` 만 적힌 칸을 값으로 세면 「도번 -」 같은 줄이 깔려 정작 있는 값이 묻힌다.
+    assert.doesNotMatch(dialog, /\{candidate\.customerName\}|\{candidate\.name2\}/, "날것으로 그린다");
+    assert.doesNotMatch(dialog, /\{candidate\.kyosanPartNo\}|\{candidate\.drawingNo\}/, "날것으로 그린다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 **한 목록에 가져간 신청과 돌려준 신청이 섞여 선다** (2026-11-26)
+ * ============================================================================
+ * 쓰는 분의 말: 「반환 요청한 것도 [이 수리건의 반출 신청]에 뜨도록 … 그것도 요청 취소 할 수
+ * 있도록」 + 「[이 수리건의 반출 신청]을 **[이 수리건의 부품 신청]**으로 바꾸자」.
+ *
+ * 🔴 **목록은 이 화면이 만드는 것이 아니다** — 재고 관리가 인수번호로 준 것을 그대로 그린다.
+ *    그래서 여기서 재는 것은 **섞여 왔을 때 사람이 가릴 수 있는가**다: ① 제목이 둘을 함께
+ *    담는 말인가 ② 줄마다 종류가 보이는가 ③ 수량 이름표가 그 줄의 뜻에 맞는가.
+ * ============================================================================
+ */
+describe("🔴 가져간 신청과 돌려준 신청을 사람이 가린다", () => {
+  const list = source.slice(source.indexOf("이 수리 건의 부품 신청"), source.indexOf("{notice && <NoticePopup"));
+  /** 🔵 **주석을 걷어낸 화면** — 까닭을 적어 둔 글이 「그리는 글자」로 세어지지 않게. */
+  const listCode = list.replace(/\{\/\*[\s\S]*?\*\/\}/g, "");
+
+  test("① 🔴 제목이 **둘을 함께 담는 말**이다 — 「반출 신청」이 아니다", () => {
+    assert.match(
+      source,
+      /<h3 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">이 수리 건의 부품 신청<\/h3>/,
+      "제목이 바뀌지 않았거나 모양이 달라졌다"
+    );
+    assert.doesNotMatch(listCode, />이 수리 건의 반출 신청</, "옛 제목이 남아 있다");
+  });
+
+  test("② 🔴 줄마다 **종류 딱지**가 설 수 있다 — 꾸밈은 도메인이 고른다", () => {
+    assert.match(listCode, /<RequestTypeBadge request=\{request\} \/>/, "종류를 그리는 자리가 없다");
+    assert.match(source, /function RequestTypeBadge\(/, "종류를 그리는 조각이 없다");
+    assert.match(source, /const badge = stockRequestTypeBadge\(request\);/, "꾸밈을 도메인에서 안 받는다");
+    // 🔴 화면이 색을 덧칠하면 「색 말고도 갈리는가」를 재는 자리가 둘로 쪼개진다.
+    const badgeBlock = source.slice(source.indexOf("function RequestTypeBadge("), source.indexOf("function LineTags("));
+    assert.doesNotMatch(badgeBlock, /bg-|text-(?:amber|green|red|violet|indigo|blue|zinc)/, "화면이 딱지 색을 따로 적는다");
+    // 🔴 글자(「반환」)도 화면에 박아 두지 않는다 — 재고 관리와 같은 말을 써야 한다.
+    assert.doesNotMatch(badgeBlock, />반환</, "딱지 글자가 화면에 박혀 있다");
+  });
+
+  test("② 🔴 **종류가 상태 배지를 건드리지 않는다** — 「마감 (마감)」과 같은 일을 만들지 않는다", () => {
+    assert.match(
+      source,
+      /\{request\.status\.label \|\| request\.status\.code\}\s*<\/span>/,
+      "상태 글자 뒤에 화면이 무언가를 덧붙이고 있다"
+    );
+    // 🔵 종류는 **제 딱지**로 서고, 상태 글자에 꼬리로 붙지 않는다.
+    assert.doesNotMatch(listCode, /status\.label \|\| request\.status\.code\}\s*\(/, "상태 글자에 꼬리가 붙었다");
+  });
+
+  test("③ 🔴 [요청 취소]가 **반환 줄에서도** 같은 길로 열린다 — 종류를 따로 가르지 않는다", () => {
+    /* 🔴 거두는 조건 넷(내 것 · 열쇠 있음 · 대기 · 마감 아님)은 종류를 보지 않는다 — 저쪽
+       통로도 그렇다(API.md 4-9절 · 4-11절의 「거두는 길은 반출과 같습니다」). 화면이 여기서
+       종류를 한 번 더 가르면, 반환 줄에만 단추가 안 서는 날이 온다. */
+    assert.match(listCode, /canCancelStockRequest\(request\) && request\.requestKey !== null/);
+    assert.doesNotMatch(listCode, /type === "RETURN"|type !== "RETURN"/, "화면이 종류로 단추를 가른다");
   });
 });
