@@ -939,6 +939,13 @@
       "when": 1795578667767,
       "tag": "0133_brown_green_goblin",
       "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "7",
+      "when": 1795676387216,
+      "tag": "0134_moaning_chimera",
+      "breakpoints": true
     }
   ]
 }

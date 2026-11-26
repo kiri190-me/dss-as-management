@@ -21,6 +21,7 @@ import {
   liveQuoteAttachmentInSlot,
   malwareScanStatusLabels,
   quoteAttachmentIdsDisplacedBy,
+  type AttachmentCategory,
 } from "./attachment-category";
 import {
   ATTACHMENT_CATEGORY_CODES as DEMO_CATEGORY_CODES,
@@ -54,11 +55,11 @@ import { attachmentCategoryEnum, malwareScanStatusEnum } from "@/lib/db/schema";
 
 // SCREENSHOT(개선 요청 스크린샷, 2026-09-13)과 견적서 두 칸 SIGNED_QUOTE_PDF ·
 // QUOTE_EXCEL(2026-09-15), 제품 모델 전용 셋 PARAMETER · POWER_TEST ·
-// CHECKLIST(2026-09-30), 그리고 수리 건 전용 둘 PASS_SLIP(통문증, 2026-10-01) ·
-// REPAIR_REQUEST(수리 의뢰서, 2026-10-19)는
+// CHECKLIST(2026-09-30), 그리고 수리 건 전용 셋 PASS_SLIP(통문증, 2026-10-01) ·
+// REPAIR_REQUEST(수리 의뢰서, 2026-10-19) · DATA(2026-11-26)는
 // 정본과 DB enum 에만 있고 데모에는 없다 — 데모 계층은
 // 손대지 않는다(attachment-category.ts 헤더의 '데모 파일과의 관계'). 그래서 아래 두
-// 대조는 「정본에서 그 여덟을 뺀 것 = 데모」를 본다. 빼는 것은 그 여덟 값뿐이라, 다른
+// 대조는 「정본에서 그 아홉을 뺀 것 = 데모」를 본다. 빼는 것은 그 아홉 값뿐이라, 다른
 // 한 줄이라도 어긋나면 여전히 걸린다.
 const DEMO_ABSENT_CATEGORIES: readonly string[] = [
   "SCREENSHOT",
@@ -69,6 +70,7 @@ const DEMO_ABSENT_CATEGORIES: readonly string[] = [
   "CHECKLIST",
   "PASS_SLIP",
   "REPAIR_REQUEST",
+  "DATA",
 ];
 
 test("분류 코드가 데모 파일 목록과 순서까지 정확히 같다 — 주인 전용 분류 셋만 빼고", () => {
@@ -118,7 +120,7 @@ test("검사 상태 기본값은 DB enum에 실재하는 값이다", () => {
 
 // ───────────────────────────────────────────────────── 목록 자체의 무결성
 
-test("분류 코드는 23종이고 중복이 없다", () => {
+test("분류 코드는 24종이고 중복이 없다", () => {
   // 개수를 적어 두는 이유는 **DB enum과 함께 움직이기 때문**이다. 코드에만
   // 더하고 마이그레이션을 잊으면 화면에서는 고를 수 있는데 저장할 때 서버가
   // 거절한다 — 그 어긋남이 이 줄에서 먼저 걸린다.
@@ -130,8 +132,9 @@ test("분류 코드는 23종이고 중복이 없다", () => {
   // 18 → 21: 파라미터 · 통전검사 · 점검표를 더했다(2026-09-30 — 제품 모델 전용 기본 자료).
   // 21 → 22: 통문증을 더했다(마이그레이션 0109 — 주성 통문증 사진).
   // 22 → 23: 수리 의뢰서를 더했다(마이그레이션 0118 — 고객이 보내오는 의뢰 서류).
-  assert.equal(ATTACHMENT_CATEGORY_CODES.length, 23);
-  assert.equal(new Set(ATTACHMENT_CATEGORY_CODES).size, 23);
+  // 23 → 24: DATA 를 더했다(마이그레이션 0134 — 연락서 폴더의 `DATA` 에 들어갈 자료).
+  assert.equal(ATTACHMENT_CATEGORY_CODES.length, 24);
+  assert.equal(new Set(ATTACHMENT_CATEGORY_CODES).size, 24);
 });
 
 test("스크린샷은 회로도 뒤에 있고 이름표는 「스크린샷」이다", () => {
@@ -209,11 +212,12 @@ test("🔴 파라미터 · 통전검사는 제품 모델에만 붙는다 — 수
     ["PARAMETER", "POWER_TEST"]
   );
   // 반대 방향은 2026-10-01 에 비지 않게 됐다 — 수리 건 전용 통문증이 생겼다(아래 시험).
-  // 2026-10-19 수리 의뢰서가 둘째로 들어왔다. 빈 배열로 두면 그 둘이 모델 화면에
-  // 새어 나가도 여기서 안 걸린다.
+  // 2026-10-19 수리 의뢰서가 둘째로, 2026-11-26 DATA 가 셋째로 들어왔다. 빈 배열로
+  // 두면 그 셋이 모델 화면에 새어 나가도 여기서 안 걸린다.
   assert.deepEqual(repairCaseChoices.filter((code) => !productModelChoices.includes(code)), [
     "PASS_SLIP",
     "REPAIR_REQUEST",
+    "DATA",
   ]);
 });
 
@@ -235,13 +239,14 @@ test("🔴 점검표는 두 주인 모두에 붙는다 — 모델은 빈 양식,
   assert.ok(attachmentCategoriesForOwner("PRODUCT_MODEL").includes("CHECKLIST"), "모델 선택지에 점검표가 없다");
   // 두 목록에서 자리(차례)도 목록 맨 끝 쪽 그대로다. 2026-10-01 통문증(수리 건 전용)이
   // 점검표와 기타 사이에 들어오면서 **수리 건에서만** 점검표 바로 뒤가 기타가 아니게
-  // 됐고, 2026-10-19 수리 의뢰서가 그 뒤에 한 칸 더 붙었다 — 모델 쪽은 그 둘이
-  // 걸러지므로 점검표 다음이 그대로 기타다. 자리를 느슨하게
+  // 됐고, 2026-10-19 수리 의뢰서가, 2026-11-26 DATA 가 그 뒤에 한 칸씩 더 붙었다 —
+  // 모델 쪽은 그 셋이 걸러지므로 점검표 다음이 그대로 기타다. 자리를 느슨하게
   // 보지 않고 주인마다 끝 꼬리를 통째로 못박는다.
-  assert.deepEqual(attachmentCategoriesForOwner("REPAIR_CASE").slice(-4), [
+  assert.deepEqual(attachmentCategoriesForOwner("REPAIR_CASE").slice(-5), [
     "CHECKLIST",
     "PASS_SLIP",
     "REPAIR_REQUEST",
+    "DATA",
     "OTHER",
   ]);
   assert.deepEqual(attachmentCategoriesForOwner("PRODUCT_MODEL").slice(-2), ["CHECKLIST", "OTHER"]);
@@ -276,9 +281,9 @@ test("🔴 통문증은 수리 건에만 붙는다 — 제품 모델 · 견적�
   //
   // 🔴 이 자리(REPAIR_CASE_ONLY_CATEGORIES)는 통문증 때문에 새로 생겼다 — 그 전에는
   // 「제품 모델 전용」과 「견적서 전용」만 있었다. 목록을 못박아 두면 다음 사람이 그 자리를
-  // 거두거나 통문증을 거기서 빼도 여기서 걸린다. 2026-10-19 수리 의뢰서가 둘째로
-  // 들어왔다(아래 시험) — 차례도 목록에 적힌 그대로 본다.
-  assert.deepEqual([...REPAIR_CASE_ONLY_CATEGORIES], ["PASS_SLIP", "REPAIR_REQUEST"]);
+  // 거두거나 통문증을 거기서 빼도 여기서 걸린다. 2026-10-19 수리 의뢰서가 둘째로,
+  // 2026-11-26 DATA 가 셋째로 들어왔다(아래 시험) — 차례도 목록에 적힌 그대로 본다.
+  assert.deepEqual([...REPAIR_CASE_ONLY_CATEGORIES], ["PASS_SLIP", "REPAIR_REQUEST", "DATA"]);
   assert.equal(isRepairCaseOnlyCategory("PASS_SLIP"), true);
   assert.equal(isAttachmentCategoryAllowedForOwner("PASS_SLIP", "REPAIR_CASE"), true);
   assert.equal(isAttachmentCategoryAllowedForOwner("PASS_SLIP", "PRODUCT_MODEL"), false, "통문증이 모델에 열렸다");
@@ -305,7 +310,9 @@ test("수리 의뢰서는 통문증 뒤·기타 앞에 있고 이름표는 「�
   assert.equal(attachmentCategoryLabels.REPAIR_REQUEST, "수리 의뢰서");
   const index = ATTACHMENT_CATEGORY_CODES.indexOf("REPAIR_REQUEST");
   assert.equal(ATTACHMENT_CATEGORY_CODES[index - 1], "PASS_SLIP");
-  assert.equal(ATTACHMENT_CATEGORY_CODES[index + 1], "OTHER");
+  // 수리 의뢰서 바로 뒤는 2026-11-26 부터 기타가 아니라 DATA 다(아래 시험). 기타는
+  // 여전히 맨 끝이고, 그것은 '기타는 언제나 목록의 맨 끝이다' 가 따로 못박는다.
+  assert.equal(ATTACHMENT_CATEGORY_CODES[index + 1], "DATA");
   assert.ok(attachmentCategoryEnum.enumValues.includes("REPAIR_REQUEST"));
 });
 
@@ -359,6 +366,87 @@ test("🔴 수리 의뢰서는 수리 건에만 붙는다 — 제품 모델 · �
   );
   assert.equal(attachmentCategoriesForOwner("PRODUCT_MODEL").includes("REPAIR_REQUEST"), false);
   assert.equal(attachmentCategoriesForOwner("QUOTE").includes("REPAIR_REQUEST"), false);
+});
+
+// ─────────────────────── DATA (2026-11-26)
+
+test("DATA 는 수리 의뢰서 뒤·기타 앞에 있고 이름표는 **글자 그대로 `DATA`** 다", () => {
+  // 새 분류를 끝에 붙이지 않는다(아래 '기타는 언제나 목록의 맨 끝이다'). 0134 가
+  // `ADD VALUE ... BEFORE 'OTHER'` 로 더한다 — DB enum 과 같은 차례인지는 위 enum
+  // 대조가 따로 본다. 화면의 고르는 차례가 이 배열 순서이므로 자리가 곧 사람이 보는
+  // 목록의 자리다.
+  //
+  // 🔴 **이름표가 한글이 아닌 유일한 분류다.** 그 글자가 그대로 연락서 폴더의 하위
+  // 폴더 이름이 되어야 하고(contact-folder-naming.ts 의 contactFolderCategoryFolderName),
+  // 거기에는 [DATA에 저장] 단추가 쓰는 `DATA` 폴더가 이미 있다. 둘이 같은 폴더를
+  // 가리킨다는 사실은 storage/contact-folder-subfolders.test.ts 가 **디스크로** 재고,
+  // 여기서는 글자 하나를 못 박는다 — 「다른 분류처럼 한글로」 옮기면 여기서 걸린다.
+  assert.equal(attachmentCategoryLabels.DATA, "DATA");
+  assert.equal(/^[A-Z]+$/.test(attachmentCategoryLabels.DATA), true, "이름표가 영문 대문자가 아니다");
+  assert.equal(/[[\]]/.test(attachmentCategoryLabels.DATA), false, "이름표에 대괄호가 들어갔다");
+  const index = ATTACHMENT_CATEGORY_CODES.indexOf("DATA");
+  assert.ok(index > 0, "DATA 가 목록에 없다");
+  assert.equal(ATTACHMENT_CATEGORY_CODES[index - 1], "REPAIR_REQUEST");
+  assert.equal(ATTACHMENT_CATEGORY_CODES[index + 1], "OTHER");
+  assert.ok(attachmentCategoryEnum.enumValues.includes("DATA"));
+});
+
+test("🔴 DATA 는 수리 건에만 붙는다 — 제품 모델 · 종류 서류함 · 견적서에는 나오지 않는다", () => {
+  // 사용자가 수리 건 상세의 [파일관리]에서 쓰겠다고 한 분류다(2026-11-26). 주인을
+  // 가리는 까닭은 앞의 둘(통문증 · 수리 의뢰서)과 결이 조금 다르다 — **가리킬 폴더가
+  // 그 건에만 있어서**다. 연락서 폴더는 수리 건마다 하나씩 있는 자리이고, 제품 모델 ·
+  // 종류 서류함 · 견적서에는 그런 폴더가 없다. 거기서 고를 수 있게 두면 갈 곳 없는
+  // 선택지가 된다.
+  assert.equal(isRepairCaseOnlyCategory("DATA"), true);
+  assert.equal(isAttachmentCategoryAllowedForOwner("DATA", "REPAIR_CASE"), true);
+  assert.equal(isAttachmentCategoryAllowedForOwner("DATA", "PRODUCT_MODEL"), false, "DATA 가 모델에 열렸다");
+  assert.equal(isAttachmentCategoryAllowedForOwner("DATA", "QUOTE"), false, "DATA 가 견적서에 열렸다");
+  // 다른 전용 목록에 끌려 들어가지 않았다 — 셋은 서로 겹치지 않는다.
+  assert.equal(isProductModelOnlyCategory("DATA"), false);
+  assert.equal(isQuoteAttachmentSlotCategory("DATA"), false);
+
+  // 화면이 그대로 map 하는 목록에서도 갈린다 — 한쪽에만 있으면 화면과 서버가 갈라진다.
+  assert.ok(attachmentCategoriesForOwner("REPAIR_CASE").includes("DATA"), "수리 건 선택지에 DATA 가 없다");
+  assert.equal(attachmentCategoriesForOwner("PRODUCT_MODEL").includes("DATA"), false);
+  assert.equal(attachmentCategoriesForOwner("QUOTE").includes("DATA"), false);
+});
+
+test("🔴 DATA 를 더하면서 **다른 분류의 이름표는 한 글자도 안 바뀌었다**", () => {
+  // 🔴 이름표가 곧 공유폴더의 분류 폴더 이름이다 — 하나라도 글자가 바뀌면 운영에 이미
+  // 쌓인 폴더와 갈라지고(옛 폴더는 남은 채 새 폴더가 하나 더 선다), 그 어긋남은 오류
+  // 없이 탐색기에서만 드러난다. 그래서 DATA 를 뺀 스물셋을 **글자로 다시 적어** 맞댄다
+  // (모듈을 그대로 베끼면 둘 다 틀려도 통과한다).
+  const beforeData: Record<string, string> = {
+    INTAKE_PHOTO: "인수 사진",
+    EXTERNAL_CONDITION: "외관 상태",
+    IN_REPAIR: "수리 중",
+    AFTER_REPAIR: "수리 후",
+    SHIPMENT_PHOTO: "출하 사진",
+    INSPECTION_REPORT: "검사 보고서",
+    REPAIR_REPORT: "수리 보고서",
+    QUOTE: "견적서",
+    KYOSAN_DOCUMENT: "교산 문서",
+    CUSTOMER_DOCUMENT: "고객사 문서",
+    OSCILLOSCOPE_DATA: "오실로스코프 데이터",
+    LOG_FILE: "로그 파일",
+    FIRMWARE: "펌웨어",
+    CIRCUIT_DIAGRAM: "회로도",
+    SCREENSHOT: "스크린샷",
+    SIGNED_QUOTE_PDF: "결재 견적서 PDF",
+    QUOTE_EXCEL: "수기 견적서 엑셀",
+    PARAMETER: "파라미터",
+    POWER_TEST: "통전검사",
+    CHECKLIST: "점검표",
+    PASS_SLIP: "통문증",
+    REPAIR_REQUEST: "수리 의뢰서",
+    OTHER: "기타",
+  };
+  // 표본이 비어 공짜로 통과하지 않게, 먼저 「무엇을 재는가」를 못 박는다.
+  assert.equal(Object.keys(beforeData).length, 23, "맞댈 표본이 스물셋이 아니다");
+  assert.equal(Object.keys(beforeData).length + 1, ATTACHMENT_CATEGORY_CODES.length);
+  for (const [code, label] of Object.entries(beforeData)) {
+    assert.equal(attachmentCategoryLabels[code as AttachmentCategory], label, `${code} 의 이름표가 바뀌었다`);
+  }
 });
 
 test("「통전검사」 코드는 이 저장소가 이미 쓰는 말이다 — POWER_TEST", () => {
@@ -462,13 +550,15 @@ test("접수 건 · 제품 모델의 선택지는 정해진 것만 빠진 목록
   // 🔴 **둘이다** — 점검표는 수리 건에도 붙으므로 여기 없다(2026-09-30 정정).
   const modelOnly = ["PARAMETER", "POWER_TEST"];
   // 2026-10-01 — 반대쪽이 생겼다. 통문증은 수리 건에만 붙으므로 **모델 쪽에서** 빠진다.
-  // 2026-10-19 수리 의뢰서가 둘째로 들어와 이제 양쪽이 둘씩이다.
-  const repairCaseOnly = ["PASS_SLIP", "REPAIR_REQUEST"];
+  // 2026-10-19 수리 의뢰서가 둘째로, 2026-11-26 DATA 가 셋째로 들어왔다 — 이제
+  // 수리 건 전용이 **셋**이고 모델 전용이 둘이라 **양쪽 수가 같지 않다.**
+  const repairCaseOnly = ["PASS_SLIP", "REPAIR_REQUEST", "DATA"];
 
   const shared = ATTACHMENT_CATEGORY_CODES.filter((code) => !ownerless.includes(code));
   const productModelExpected = shared.filter((code) => !repairCaseOnly.includes(code));
   const repairCaseExpected = shared.filter((code) => !modelOnly.includes(code));
-  assert.equal(productModelExpected.length, ATTACHMENT_CATEGORY_CODES.length - 5);
+  // 주인 없는 셋 + 그 주인에서 빠지는 것 — 모델은 3 + 3, 수리 건은 3 + 2 다.
+  assert.equal(productModelExpected.length, ATTACHMENT_CATEGORY_CODES.length - 6);
   assert.equal(repairCaseExpected.length, ATTACHMENT_CATEGORY_CODES.length - 5);
   assert.deepEqual(attachmentCategoriesForOwner("REPAIR_CASE"), repairCaseExpected);
   assert.deepEqual(attachmentCategoriesForOwner("PRODUCT_MODEL"), productModelExpected);

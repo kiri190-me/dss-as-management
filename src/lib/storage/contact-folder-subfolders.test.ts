@@ -15,10 +15,15 @@ import {
   CONTACT_FOLDER_DATA_FOLDER_NAME,
   CONTACT_FOLDER_FILE_MAX_NAME_LENGTH,
   CONTACT_FOLDER_MAX_NAME_LENGTH,
+  contactFolderCategoryFolderName,
   contactFolderName,
   type ContactFolderNamingInput,
 } from "@/lib/domain/contact-folder-naming";
-import { copyIntoContactFolder, createContactFolder } from "./contact-folder-archive";
+import {
+  copyIntoContactFolder,
+  copyIntoContactFolderDataFolder,
+  createContactFolder,
+} from "./contact-folder-archive";
 
 /*
  * ============================================================================
@@ -34,6 +39,12 @@ import { copyIntoContactFolder, createContactFolder } from "./contact-folder-arc
  *  · 🔴 이름은 **대괄호 없는 `DATA`** 다(사용자 글의 `[DATA]` 는 `[파일관리]` 처럼 화면
  *    요소를 가리키는 표기였고, 승인받은 그림에는 `DATA` 로 그려져 있었다)
  *  · 이미 `DATA` 가 있으면 **그대로 둔다** — 안에 든 것을 건드리지 않는다
+ *
+ * 못 박는 것 — (가-2) `DATA` **분류** (2026-11-26):
+ *  · 🔴 분류 이름표가 **글자 그대로 `DATA`** 라서 그 분류의 폴더가 위 `DATA` 와 **같은
+ *    폴더**다 — 둘을 값으로 맞대어 잰다(한쪽만 고치면 폴더가 둘로 갈라진다)
+ *  · 🔴 [DATA에 저장] 단추의 동작은 **한 글자도 안 바뀐다** — 그 길은 분류를 받지 않고
+ *    상수 하나로 자리를 정한다
  *
  * 못 박는 것 — (나) 분류 폴더:
  *  · 🔴 **없으면 만들고 있으면 쓴다** · 🔴 **쓰는 분류만** 그때그때 만든다(미리 만들지 않는다)
@@ -185,7 +196,12 @@ test("🔴 조각 5(사람이 눌러서)와 조각 7(접수 때)이 **같은 길
   }
 });
 
-test("🔴 올리기는 `DATA` 를 만들지 않는다 — 만드는 것은 폴더를 처음 만들 때뿐이다", async () => {
+test("🔴 **다른 분류**를 올릴 때는 `DATA` 가 생기지 않는다 — 곁다리로 따라 만들지 않는다", async () => {
+  // 🔴 2026-11-26 에 제목을 고쳤다. 그 전에는 「올리기는 `DATA` 를 만들지 않는다」였는데,
+  //    그날 `DATA` 가 **분류**가 되면서 그 문장이 통째로는 사실이 아니게 됐다 —
+  //    `DATA` 분류로 올리면 그 폴더가 생기는 것이 **바라는 동작**이다(위 (가-2) 시험).
+  //    여기서 지키는 것은 그대로다: **고른 분류와 상관없는 폴더를 곁다리로 만들지
+  //    않는다.** 단언은 한 글자도 약해지지 않았다.
   const root = await makeRoot();
   await mkdir(path.join(root, NAME));
 
@@ -193,6 +209,72 @@ test("🔴 올리기는 `DATA` 를 만들지 않는다 — 만드는 것은 폴�
 
   assert.equal(result.status, "copied", JSON.stringify(result));
   assert.deepEqual(await entries(root, NAME), ["인수 사진"], "올리기가 DATA 를 만들었다");
+});
+
+// ── (가-2) 🔴 `DATA` 분류 (2026-11-26) ─────────────────────────────────────
+
+test("🔴 `DATA` 분류의 폴더 이름표가 **글자 그대로 `DATA`** 다 — 두 길이 같은 폴더를 가리킨다", () => {
+  // 🔴 사용자가 바란 것이 이것이다 — 분류로 `DATA` 를 골라 올리면 [DATA에 저장] 단추가
+  // 쓰는 그 폴더(`연락서폴더/DATA/`)에 들어가는 것. 값으로 맞대어 못 박는다: 둘 중
+  // 하나만 고치면(이름표를 한글로 옮기거나 폴더 상수를 바꾸면) 여기서 걸린다.
+  assert.equal(attachmentCategoryLabels.DATA, "DATA");
+  assert.equal(contactFolderCategoryFolderName("DATA"), CONTACT_FOLDER_DATA_FOLDER_NAME);
+  // 다듬기(sanitizeShareFolderNamePiece)를 지나도 글자가 바뀌지 않는다 — 금지 글자도
+  // 끝의 점도 없는 이름이라 그대로 나온다.
+  assert.equal(contactFolderCategoryFolderName("DATA"), "DATA");
+});
+
+test("🔴 `DATA` 분류로 올리면 **그 `DATA` 폴더 안**에 들어간다 — 옆에 폴더를 하나 더 만들지 않는다", async () => {
+  const root = await makeRoot();
+  await mkdir(path.join(root, NAME));
+  // 폴더를 만들 때 함께 생기는 그 `DATA` 다. 사람이 넣어 둔 파일도 하나 있다.
+  await mkdir(path.join(root, NAME, CONTACT_FOLDER_DATA_FOLDER_NAME));
+  await writeFile(path.join(root, NAME, CONTACT_FOLDER_DATA_FOLDER_NAME, "측정값.csv"), "사람이 넣은 것");
+
+  const result = await copy(root, "DATA", "파형.csv", "앱이 올린 것");
+
+  assert.deepEqual(result, {
+    status: "copied",
+    folderName: NAME,
+    fileName: "파형.csv",
+    categoryFolderName: "DATA",
+    categoryFolderBlockedByFile: false,
+  });
+  // 🔴 폴더가 둘이 되지 않았다 — 맨 위에는 `DATA` 하나뿐이다.
+  assert.deepEqual(await entries(root, NAME), ["DATA"]);
+  assert.deepEqual(await entries(root, NAME, "DATA"), ["측정값.csv", "파형.csv"]);
+  // 🔴 사람이 넣어 둔 파일은 한 글자도 안 바뀌었다.
+  assert.equal(
+    (await readFile(path.join(root, NAME, "DATA", "측정값.csv"))).toString("utf8"),
+    "사람이 넣은 것"
+  );
+});
+
+test("🔴 [DATA에 저장] 단추의 동작이 **한 글자도 안 바뀐다** — 분류를 보지 않는다", async () => {
+  const root = await makeRoot();
+  await mkdir(path.join(root, NAME));
+  // 🔴 `DATA` 폴더가 **없는** 자리에서 시작한다 — 운영의 660 여 개가 그 상태다.
+  //    [DATA에 저장]은 그때 제 손으로 만든다(2026-10-05 조각 12의 규율).
+
+  const result = await copyIntoContactFolderDataFolder({
+    root,
+    intakeNumber: INTAKE,
+    originalFileName: "파형.csv",
+    bytes: bytes("단추가 넣은 것"),
+  });
+
+  assert.deepEqual(result, {
+    status: "copied",
+    folderName: NAME,
+    fileName: "파형.csv",
+    categoryFolderName: "DATA",
+    categoryFolderBlockedByFile: false,
+  });
+  assert.deepEqual(await snapshot(root), [`${NAME}/`, `${NAME}/DATA/`, `${NAME}/DATA/파형.csv`]);
+  // 🔴 이 길은 **분류를 받지 않는다** — 분류가 하나 늘어도 여기로 들어오는 자리가 없다.
+  //    꽂는 자리는 상수 하나로 정해져 있고(CONTACT_FOLDER_DATA_FOLDER_NAME), 그래서
+  //    분류 쪽 이름표를 고쳐도 이 단추는 그대로 `DATA` 에 넣는다.
+  assert.equal(CONTACT_FOLDER_DATA_FOLDER_NAME, "DATA");
 });
 
 // ── (나) 분류 폴더 ──────────────────────────────────────────────────────────
@@ -238,7 +320,7 @@ test("🔴 쓰는 분류만 그때그때 생긴다 — 분류 전부를 미리 �
   await copy(root, "INTAKE_PHOTO", "IMG_2847.jpg", "사진");
   await copy(root, "QUOTE", "견적서_INVENIA.xlsx", "엑셀");
 
-  // 올린 둘만 섰다 — 나머지 스물은 없다.
+  // 올린 둘만 섰다 — 나머지 스물둘은 없다(분류가 늘면 그 수도 는다).
   assert.deepEqual(await entries(root, NAME), ["견적서", "인수 사진"]);
   assert.ok(ATTACHMENT_CATEGORY_CODES.length > 2, "시험 전제가 깨졌다 — 분류가 둘뿐이다");
 });
@@ -259,6 +341,12 @@ test("🔴 폴더 이름은 **한글 이름표**다 — 코드(INTAKE_PHOTO)가 
 
   assert.deepEqual(await entries(root, NAME), ["오실로스코프 데이터", "인수 사진", "통문증"]);
   // 🔴 코드가 폴더 이름이 된 자리가 하나도 없다.
+  //
+  // ⚠️ **`DATA` 는 여기 표본에 일부러 넣지 않았다**(2026-11-26). 그 분류만은 코드와
+  //    이름표가 같은 글자라, 표본에 넣으면 이 되풀이가 「코드가 폴더 이름이 되었다」로
+  //    걸린다 — 그런데 그것은 결함이 아니라 **일부러 맞춘 것**이다(위 (가-2) 시험).
+  //    여기서 재는 것은 「이름표 대신 코드를 쓰지 않았는가」이고, 그 물음은 이름표가
+  //    한글인 분류들로 재야 뜻이 산다.
   for (const code of ATTACHMENT_CATEGORY_CODES) {
     assert.equal((await entries(root, NAME)).includes(code), false, `코드가 폴더 이름이 되었다: ${code}`);
   }

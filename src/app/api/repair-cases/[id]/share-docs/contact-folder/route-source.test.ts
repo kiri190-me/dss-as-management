@@ -125,7 +125,7 @@ describe("[연락서 폴더에 저장] 통로 — 원본으로 지킨다", () =>
       assert.equal(code.includes(forbidden), false, `통로가 목록 · 이름을 베꼈다: ${forbidden}`);
     }
 
-    // ③ 🔴 **목록 밖은 거절한다** — 화면이 열둘만 내미는 것은 울타리가 아니다.
+    // ③ 🔴 **목록 밖은 거절한다** — 화면이 열셋만 내미는 것은 울타리가 아니다.
     assert.ok(code.includes('fail(400, "INVALID_CATEGORY"'), "목록 밖을 거절하지 않는다");
     const guard = postBody.indexOf("readContactFolderSaveTarget(");
     assert.ok(guard >= 0 && guard < postBody.indexOf("readRepairDocsFile({"), "디스크를 읽은 뒤에 고른 값을 본다");

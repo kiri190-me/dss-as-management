@@ -12,7 +12,9 @@
  * 옮길 때 값은 **데모 파일과 정확히 같았다.** 새로 만들거나 뺀 분류가 하나도
  * 없었다 — 그 단계는 저장 바닥을 놓는 일이지 분류 정책을 바꾸는 일이 아니었다.
  *
- * ── 데모 파일과의 관계 — 주인 전용 분류 셋만 다르다 ───────────────────────
+ * ── 데모 파일과의 관계 — 데모에 없는 아홉만 다르다 ─────────────────────────
+ * (제목의 수는 아래 목록이 늘 때 함께 고친다. 한때 「셋」이라고 적혀 있었는데 그
+ *  사이 여섯이 더 늘어 거짓이 되어 있었다 — 2026-11-26 에 맞췄다.)
  * 2026-09-13 SCREENSHOT(「스크린샷」)이 더해졌다. 이 분류는 **여기와 DB enum에만
  * 있고 데모 파일에는 없다.** 데모는 접수 건 파일 탭의 localStorage 화면이고, 데모
  * 계층(src/lib/domain/local/attachments/*)은 손대지 않는 것이 지금까지의
@@ -24,9 +26,10 @@
  * StoredAttachmentList 쪽이다). 2026-10-01 통문증(PASS_SLIP)도 같은 까닭으로
  * 데모에 없다 — 수리 건 전용 분류이고, 데모 계층을 손대지 않는 규칙은 그대로다.
  * 2026-10-19 수리 의뢰서(REPAIR_REQUEST)도 마찬가지다 — 같은 수리 건 전용이고
- * 데모 계층은 여전히 손대지 않는다.
+ * 데모 계층은 여전히 손대지 않는다. 2026-11-26 DATA 도 같다 — 역시 수리 건
+ * 전용이고, 데모 계층은 그대로 둔다.
  * 그래서 attachment-category.test.ts 는 「데모 목록 =
- * 이 목록에서 그 여덟을 뺀 것」을 순서까지 대조한다 — 다른 한 줄이라도 어긋나면
+ * 이 목록에서 그 아홉을 뺀 것」을 순서까지 대조한다 — 다른 한 줄이라도 어긋나면
  * 여전히 걸린다.
  *
  * ── 순수 파일이다 ─────────────────────────────────────────────────────────
@@ -132,6 +135,30 @@ export const ATTACHMENT_CATEGORY_CODES = [
   // 기타 **앞**에 둔다 — 기타는 언제나 목록의 맨 끝이다(attachment-category.test.ts).
   // 데모 파일에는 없다 — 파일 헤더의 '데모 파일과의 관계' 참조.
   "REPAIR_REQUEST",
+  // DATA(2026-11-26 사용자: "분류에 DATA 도 추가") — 측정 자료처럼 그 건에서 나온
+  // 날것의 자료를 넣는 자리다.
+  //
+  // 🔴 **이름표가 영문 `DATA` 인 것은 실수가 아니다 — 고치지 말 것.** 다른 분류는
+  // 전부 한글인데 이것만 영문인 까닭은, 연락서 폴더 안에 **이미 있는 `DATA` 하위
+  // 폴더와 글자가 같아야** 하기 때문이다(contact-folder-naming.ts 의
+  // CONTACT_FOLDER_DATA_FOLDER_NAME — [DATA에 저장] 단추가 쓰는 그 폴더다).
+  // 분류 폴더 이름은 아래 이름표를 다듬어 그대로 쓰므로
+  // (contactFolderCategoryFolderName), 이 분류로 올린 파일은 그 폴더로 들어간다.
+  // 「다른 분류처럼 한글로」 옮기면 같은 자리를 가리키던 두 길이 폴더 둘로 갈라지고,
+  // 그 어긋남은 오류 없이 공유폴더에서만 드러난다 — storage/contact-folder-subfolders.test.ts
+  // 가 둘이 같은 글자인지 값으로 잰다.
+  //
+  // 🔴 **수리 건 전용이다**(아래 REPAIR_CASE_ONLY_CATEGORIES). `DATA` 폴더는 그 건의
+  // 연락서 폴더 안에만 있는 자리라, 제품 모델 · 종류 서류함 · 견적서에서 이 분류를
+  // 고르면 가리킬 폴더가 없다.
+  //
+  // 확장자는 좁히지 않는다 — attachment-allowlist.ts 의 두 목록(좁히는
+  // CATEGORY_EXTENSION_ALLOWLIST · 다 여는 ANY_EXTENSION_CATEGORIES) 어디에도 넣지
+  // 않으면 전체 허용목록 14종을 그대로 쓴다. 통문증 · 수리 의뢰서와 같은 선택이다.
+  //
+  // 기타 **앞**에 둔다 — 기타는 언제나 목록의 맨 끝이다(attachment-category.test.ts).
+  // 데모 파일에는 없다 — 파일 헤더의 '데모 파일과의 관계' 참조.
+  "DATA",
   "OTHER",
 ] as const;
 
@@ -163,6 +190,9 @@ export const attachmentCategoryLabels: Record<AttachmentCategory, string> = {
   CHECKLIST: "점검표",
   PASS_SLIP: "통문증",
   REPAIR_REQUEST: "수리 의뢰서",
+  // 🔴 **한글로 옮기지 말 것.** 이 글자가 그대로 연락서 폴더의 하위 폴더 이름이 되고,
+  // 거기에는 [DATA에 저장] 단추가 쓰는 `DATA` 폴더가 이미 있다(위 코드 목록의 주석).
+  DATA: "DATA",
   OTHER: "기타",
 };
 
@@ -281,8 +311,16 @@ export function isProductModelOnlyCategory(category: AttachmentCategory): catego
  * 🔴 수리 의뢰서(REPAIR_REQUEST)는 **수리 보고서(REPAIR_REPORT)와 다른 분류다.**
  * 그쪽은 우리가 만들어 보내는 문서라 주인을 가리지 않고, 이 목록에 넣으면
  * 제품 모델 파일 화면에서 수리 보고서가 사라진다 — 넣지 말 것.
+ *
+ * ── 셋째 — DATA (2026-11-26) ────────────────────────────────────────────
+ * DATA 가 접수 건 전용인 까닭은 앞의 둘과 결이 조금 다르다. 앞의 둘은 **그 건으로
+ * 들어오는 서류**여서였지만, DATA 는 **가리키는 폴더가 그 건에만 있어서**다 —
+ * 이 분류의 이름표는 연락서 폴더 안의 `DATA` 하위 폴더와 같은 글자이고
+ * (contact-folder-naming.ts 의 CONTACT_FOLDER_DATA_FOLDER_NAME), 연락서 폴더는
+ * 수리 건마다 하나씩 있는 자리다. 제품 모델 · 종류 서류함 · 견적서에는 연락서
+ * 폴더가 없으므로 거기서 DATA 를 고를 수 있게 두면 **갈 곳 없는 선택지**가 된다.
  */
-export const REPAIR_CASE_ONLY_CATEGORIES = ["PASS_SLIP", "REPAIR_REQUEST"] as const satisfies readonly AttachmentCategory[];
+export const REPAIR_CASE_ONLY_CATEGORIES = ["PASS_SLIP", "REPAIR_REQUEST", "DATA"] as const satisfies readonly AttachmentCategory[];
 
 export type RepairCaseOnlyCategory = (typeof REPAIR_CASE_ONLY_CATEGORIES)[number];
 

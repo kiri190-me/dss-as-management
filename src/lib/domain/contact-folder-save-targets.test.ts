@@ -18,11 +18,13 @@ import {
 
 /**
  * ============================================================================
- * [연락서 폴더에 저장] — 고를 거리와 **서버의 울타리** (2026-11-18)
+ * [연락서 폴더에 저장] — 고를 거리와 **서버의 울타리** (2026-11-18 · 2026-11-26)
  * ============================================================================
- * 사용자가 세 안 중 「공통 + 서류 분류만」을 골랐다. 여기서 못 박는 것:
+ * 사용자가 세 안 중 「공통 + 서류 분류만」을 골랐다(2026-11-18 — 그때 열둘). 그 뒤
+ * 2026-11-26 에 분류 `DATA` 가 생기면서 사용자가 **그것도 내놓기로** 정해 **열셋**이
+ * 됐다. 여기서 못 박는 것:
  *
- *  · 🔴 고를 거리는 **열둘**이고 **그 차례**다 — 사진 다섯 · 데이터류 넷 · 스크린샷 ·
+ *  · 🔴 고를 거리는 **열셋**이고 **그 차례**다 — 사진 다섯 · 데이터류 넷 · 스크린샷 ·
  *    통전검사는 **없다**(목록을 세기만 하는 시험이 아니라 **무엇이 없는지**도 잰다)
  *  · 🔴 차례가 전체 분류 목록의 차례와 같다 — 「기타는 언제나 맨 끝」이 여기서도 산다
  *  · 🔴 보일 글자를 **베껴 적지 않았다** — 이름표 표와 글자가 같다
@@ -31,7 +33,13 @@ import {
  * ============================================================================
  */
 
-/** 사용자가 고른 열둘 — 🔴 **글자로 다시 적는다.** 모듈을 그대로 베끼면 둘 다 틀려도 통과한다. */
+/**
+ * 사용자가 고른 열셋 — 🔴 **글자로 다시 적는다.** 모듈을 그대로 베끼면 둘 다 틀려도 통과한다.
+ *
+ * 🔴 `DATA` 는 **열셋째**다(2026-11-26 사용자 「넣어」). 2026-11-18 의 열둘에 그 한 줄만
+ * 더해졌고 나머지 열둘의 값도 차례도 안 바뀌었다 — 자리는 `REPAIR_REQUEST` 와 `OTHER`
+ * 사이이고, 그것은 **전체 분류 목록의 차례**를 따른 결과다(아래 ①-③ 시험이 잰다).
+ */
 const EXPECTED_CATEGORIES = [
   "INSPECTION_REPORT",
   "REPAIR_REPORT",
@@ -44,6 +52,7 @@ const EXPECTED_CATEGORIES = [
   "CHECKLIST",
   "PASS_SLIP",
   "REPAIR_REQUEST",
+  "DATA",
   "OTHER",
 ];
 
@@ -62,10 +71,10 @@ const EXPECTED_ABSENT = [
   "POWER_TEST",
 ];
 
-describe("① 고를 거리 — 서류 분류 열둘, 그 차례 그대로", () => {
-  test("🔴 열둘이고 차례가 사용자가 정한 그대로다", () => {
+describe("① 고를 거리 — 서류 분류 열셋, 그 차례 그대로", () => {
+  test("🔴 열셋이고 차례가 사용자가 정한 그대로다", () => {
     assert.deepEqual([...CONTACT_FOLDER_SAVE_TARGET_CATEGORIES], EXPECTED_CATEGORIES);
-    assert.equal(CONTACT_FOLDER_SAVE_TARGET_CATEGORIES.length, 12);
+    assert.equal(CONTACT_FOLDER_SAVE_TARGET_CATEGORIES.length, 13);
   });
 
   test("🔴 뺀 것들이 **정말로 없다** — 사진 다섯 · 데이터류 넷 · 스크린샷 · 통전검사", () => {
@@ -87,7 +96,7 @@ describe("① 고를 거리 — 서류 분류 열둘, 그 차례 그대로", () 
     assert.equal(EXPECTED_CATEGORIES[EXPECTED_CATEGORIES.length - 1], "OTHER", "기타가 맨 끝이 아니다");
   });
 
-  test("열둘이 모두 **실제로 있는 분류**다 — 없는 코드를 지어내지 않았다", () => {
+  test("열셋이 모두 **실제로 있는 분류**다 — 없는 코드를 지어내지 않았다", () => {
     for (const code of CONTACT_FOLDER_SAVE_TARGET_CATEGORIES) {
       assert.ok(
         (ATTACHMENT_CATEGORY_CODES as readonly string[]).includes(code),
@@ -98,8 +107,8 @@ describe("① 고를 거리 — 서류 분류 열둘, 그 차례 그대로", () 
 });
 
 describe("② 보일 글자 — 이름표 표에서 온다(베껴 적지 않았다)", () => {
-  test("🔴 열셋: 맨 위가 `공통`(기본 선택), 그 뒤가 이름표 그대로다", () => {
-    assert.equal(CONTACT_FOLDER_SAVE_TARGET_OPTIONS.length, 13);
+  test("🔴 열넷: 맨 위가 `공통`(기본 선택), 그 뒤가 이름표 그대로다", () => {
+    assert.equal(CONTACT_FOLDER_SAVE_TARGET_OPTIONS.length, 14);
 
     const [first, ...rest] = CONTACT_FOLDER_SAVE_TARGET_OPTIONS;
     assert.equal(first.category, null, "맨 위가 `공통` 이 아니다");
@@ -120,6 +129,13 @@ describe("② 보일 글자 — 이름표 표에서 온다(베껴 적지 않았�
       CONTACT_FOLDER_SAVE_TARGET_OPTIONS.slice(0, 4).map((option) => option.label),
       ["공통", "검사 보고서", "수리 보고서", "견적서"]
     );
+    // 🔴 끝 쪽 둘도 글자로 본다 — 열셋째 `DATA` 는 **영문 그대로** 떠야 한다. 이 창의
+    //    글자가 곧 사람이 탐색기에서 볼 폴더 이름이고(바로 아래 시험이 둘을 맞댄다),
+    //    「다른 칸은 다 한글인데」 하고 옮기면 폴더가 둘로 갈라진다.
+    assert.deepEqual(
+      CONTACT_FOLDER_SAVE_TARGET_OPTIONS.slice(-2).map((option) => option.label),
+      ["DATA", "기타"]
+    );
   });
 
   test("🔴 `공통` 의 값은 **분류 코드가 아니다** — 겹치면 하나가 다른 하나를 가린다", () => {
@@ -129,7 +145,7 @@ describe("② 보일 글자 — 이름표 표에서 온다(베껴 적지 않았�
     );
     assert.equal(isContactFolderSaveTargetCategory(CONTACT_FOLDER_SAVE_TARGET_COMMON_VALUE), false);
     // 라디오의 값은 서로 달라야 한다 — 같으면 한 칸을 고를 수 없다.
-    assert.equal(new Set(CONTACT_FOLDER_SAVE_TARGET_OPTIONS.map((option) => option.value)).size, 13);
+    assert.equal(new Set(CONTACT_FOLDER_SAVE_TARGET_OPTIONS.map((option) => option.value)).size, 14);
   });
 
   test("🔴 창의 글자와 **서버가 만드는 폴더 이름**이 같다 — 둘을 맞대어 잰다", () => {
@@ -149,6 +165,9 @@ describe("② 보일 글자 — 이름표 표에서 온다(베껴 적지 않았�
     assert.equal(contactFolderSaveTargetLabel(null), CONTACT_FOLDER_COMMON_FOLDER_NAME);
     assert.equal(contactFolderSaveTargetLabel("QUOTE"), "견적서");
     assert.equal(contactFolderSaveTargetLabel("PASS_SLIP"), "통문증");
+    // 🔴 `DATA` 를 골랐을 때 화면이 말하는 자리 이름 — `공통` 이 아니라 `DATA` 다.
+    //    이 글자가 [DATA에 저장] 단추가 쓰는 폴더 이름과 같다(아래 ④ 시험).
+    assert.equal(contactFolderSaveTargetLabel("DATA"), "DATA");
   });
 });
 
@@ -162,10 +181,12 @@ describe("③ 🔴 서버의 울타리 — 화면이 보낸 값을 **제 손으�
     assert.deepEqual(readContactFolderSaveTarget(CONTACT_FOLDER_SAVE_TARGET_COMMON_VALUE), { kind: "common" });
   });
 
-  test("고른 분류 열둘은 **그대로** 통과한다", () => {
+  test("고른 분류 열셋은 **그대로** 통과한다", () => {
     for (const category of CONTACT_FOLDER_SAVE_TARGET_CATEGORIES) {
       assert.deepEqual(readContactFolderSaveTarget(category), { kind: "category", category });
     }
+    // 🔴 열셋째가 **정말로** 통과하는지 따로 한 줄 — 되풀이가 비어도 공짜로 통과하지 않게.
+    assert.deepEqual(readContactFolderSaveTarget("DATA"), { kind: "category", category: "DATA" });
   });
 
   test("🔴 목록 밖은 **거절**이다 — 「모르면 공통」으로 삼키지 않는다", () => {
@@ -180,8 +201,15 @@ describe("③ 🔴 서버의 울타리 — 화면이 보낸 값을 **제 손으�
       "quote",
       "견적서",
       "공통",
-      "DATA",
       "../../etc",
+      // 🔴 **여기 있던 `"DATA"` 는 2026-11-26 에 나갔다** — 그날 분류가 되었고 사용자가
+      //    이 창에 내놓기로 정해 **받아 주는 쪽**으로 옮겼다(위 「고른 분류 열셋」).
+      //    그 자리가 비면 검사가 하나 줄어들므로 **대소문자만 다른 가짜 둘**로 메운다:
+      //    울타리는 코드를 글자 그대로 본다(`includes`)니 이 둘은 여전히 거절이어야
+      //    하고, 영문 코드가 처음 들어온 지금이야말로 그 사실을 재 둘 자리다.
+      //    🔵 「폴더 이름을 그대로 보낸 경우」는 위 `견적서` · `공통` 이 계속 잰다.
+      "data",
+      "Data",
     ];
     for (const value of rejected) {
       assert.equal(readContactFolderSaveTarget(value), null, `${value} 를 받아 주었다`);

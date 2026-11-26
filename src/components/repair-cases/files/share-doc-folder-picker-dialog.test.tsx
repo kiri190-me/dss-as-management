@@ -24,7 +24,8 @@ import ShareDocFolderPickerDialog, {
  * 고른 뒤 [저장]을 눌러야 요청이 나간다. 못 박는 것:
  *
  *  · 🔴 **그리자마자 떠 있지 않다** — 단추를 눌러야 뜬다(그려진 결과로 잰다)
- *  · 🔴 열셋이 서고 **기본 선택이 `공통`** 이다(라디오가 하나만 켜져 있다)
+ *  · 🔴 열넷이 서고 **기본 선택이 `공통`** 이다(라디오가 하나만 켜져 있다 — 2026-11-18
+ *    에는 열셋이었고 2026-11-26 에 `DATA` 가 들어와 하나 늘었다)
  *  · 🔴 보일 글자는 **이름표 표**에서 온다 — 사진 분류 다섯은 한 칸도 없다
  *  · 🔴 창은 **제 손으로 아무것도 보내지 않는다**(fetch 도 통로 주소도 없다)
  *  · 🔴 [취소]는 **닫기만** 한다 — 요청이 한 번도 나가지 않는다
@@ -93,15 +94,17 @@ describe("① 🔴 창은 **눌러야** 뜬다 — 그리자마자 떠 있지 �
   });
 });
 
-describe("② 🔴 열셋이 서고 **기본 선택은 `공통`**", () => {
-  test("라디오가 열셋이고 켜져 있는 것은 하나 — 그 하나가 `공통` 이다", () => {
+describe("② 🔴 열넷이 서고 **기본 선택은 `공통`**", () => {
+  test("라디오가 열넷이고 켜져 있는 것은 하나 — 그 하나가 `공통` 이다", () => {
+    // 🔴 2026-11-18 에는 열셋(공통 + 서류 열둘)이었다. 2026-11-26 에 분류 `DATA` 가
+    //    고를 거리 열셋째로 들어와 **열넷**이 됐다(domain/contact-folder-save-targets.ts).
     const html = dialogMarkup();
-    assert.equal(html.match(/type="radio"/g)?.length, 13, html);
+    assert.equal(html.match(/type="radio"/g)?.length, 14, html);
 
     // 🔴 켜진 칸을 **칸마다 쪼개어** 찾는다 — 속성 차례(checked 가 value 앞이다)에 기대면
     //    React 가 차례를 바꾸는 날 조용히 틀린다.
     const blocks = html.split('data-share-doc-folder-option="').slice(1);
-    assert.equal(blocks.length, 13, html);
+    assert.equal(blocks.length, 14, html);
     const checked = blocks
       .filter((block) => block.slice(0, block.indexOf("</label>")).includes('checked=""'))
       .map((block) => block.slice(0, block.indexOf('"')));
@@ -111,14 +114,19 @@ describe("② 🔴 열셋이 서고 **기본 선택은 `공통`**", () => {
     assert.equal(blocks[0].slice(0, blocks[0].indexOf('"')), CONTACT_FOLDER_SAVE_TARGET_COMMON_VALUE, "맨 위가 아니다");
   });
 
-  test("🔴 고를 거리의 글자가 **이름표 표 그대로**다 — 열둘이 다 있다", () => {
+  test("🔴 고를 거리의 글자가 **이름표 표 그대로**다 — 열셋이 다 있다", () => {
     const html = dialogMarkup();
-    assert.equal(CONTACT_FOLDER_SAVE_TARGET_CATEGORIES.length, 12);
+    assert.equal(CONTACT_FOLDER_SAVE_TARGET_CATEGORIES.length, 13);
     for (const category of CONTACT_FOLDER_SAVE_TARGET_CATEGORIES) {
       assert.ok(html.includes(`value="${category}"`), `${category} 칸이 없다`);
       assert.ok(html.includes(`>${attachmentCategoryLabels[category]}</span>`), `${category} 의 글자가 다르다`);
     }
     assert.ok(html.includes(">공통</span>"), html);
+    // 🔴 열셋째 `DATA` 는 **영문 그대로** 뜬다(2026-11-26). 위 되풀이가 이름표 표를
+    //    그대로 쓰므로 표가 통째로 한글로 바뀌어도 거기서는 안 걸린다 — 사람이 볼
+    //    글자를 여기 한 줄 박아 둔다. 이 글자가 곧 탐색기의 폴더 이름이다.
+    assert.ok(html.includes('value="DATA"'), "DATA 칸이 없다");
+    assert.ok(html.includes(">DATA</span>"), html);
   });
 
   test("🔴 사진 분류 · 데이터류는 **한 칸도 없다** — 서류만 고른다(2026-11-18)", () => {

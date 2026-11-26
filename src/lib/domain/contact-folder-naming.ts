@@ -168,7 +168,8 @@ export function contactFolderName(input: ContactFolderNamingInput): string {
  *          └─ 견적서_INVENIA.xlsx
  *
  * 🔴 **분류 폴더는 쓰는 것만 그때그때 만든다**(2026-10-05 사용자 결정) — 분류 전부를
- * 미리 만들지 않는다. 사람의 서류함에 빈 폴더 스물둘이 한꺼번에 서면 안 된다.
+ * 미리 만들지 않는다. 사람의 서류함에 빈 폴더 스물넷이 한꺼번에 서면 안 된다
+ * (분류가 늘면 그 수도 는다 — 2026-11-26 현재 스물넷이다).
  * ============================================================================
  */
 
@@ -182,6 +183,14 @@ export function contactFolderName(input: ContactFolderNamingInput): string {
  * 🔴 **이미 있던 폴더에는 만들지 않는다.** 운영 공유폴더의 660 여 개에 한꺼번에 생기면
  * 안 된다 — 사람의 서류함에 우리가 폴더를 늘리는 일이다. 그 판정은
  * storage/contact-folder-archive.ts 의 「이번에 만들었을 때만」이 한다.
+ *
+ * 🔴 **2026-11-26 부터 같은 글자가 분류 이름표에도 있다.** 첨부 분류에 `DATA` 가
+ * 더해졌고(domain/attachment-category.ts), 분류 폴더 이름은 그 이름표를 그대로 쓰므로
+ * (아래 contactFolderCategoryFolderName) **`DATA` 분류로 올린 파일은 바로 이 폴더로
+ * 들어간다** — 사용자가 바란 것이 그것이다. 🔴 그러니 **한쪽만 고치면 안 된다.** 이
+ * 상수의 글자를 바꾸면 분류 폴더와 [DATA에 저장] 단추가 서로 다른 폴더를 쓰게 되고, 그
+ * 어긋남은 오류 없이 공유폴더에서만 드러난다(storage/contact-folder-subfolders.test.ts
+ * 가 둘을 맞대어 잰다).
  */
 export const CONTACT_FOLDER_DATA_FOLDER_NAME = "DATA";
 
@@ -222,9 +231,14 @@ export const CONTACT_FOLDER_CATEGORY_MAX_NAME_LENGTH = 10;
  * 그때 부르는 쪽은 분류 폴더를 만들지 말고 **연락서 폴더 바로 아래**에 꽂는다
  * (그런 분류는 없을 테지만 조용히 깨지면 안 된다).
  *
- * 🔴 **사람이 보는 한글 이름표**를 쓴다(`INTAKE_PHOTO` 가 아니라 `인수 사진`) — 사람이
+ * 🔴 **사람이 보는 이름표**를 쓴다(`INTAKE_PHOTO` 가 아니라 `인수 사진`) — 사람이
  * 탐색기에서 여는 폴더다. 이름표는 domain/attachment-category.ts 한 자리에만 있고
  * 여기서 새로 짓지 않는다.
+ *
+ * 🔴 **이름표가 전부 한글인 것은 아니다**(2026-11-26). `DATA` 분류의 이름표는 영문
+ * `DATA` 이고, 그래서 이 함수가 돌려주는 폴더 이름도 `DATA` 다 — 위
+ * CONTACT_FOLDER_DATA_FOLDER_NAME 과 **같은 폴더**를 가리킨다(일부러 그렇게 맞췄다).
+ * 「한글이어야 하는데 하나가 영문이네」 하고 고치지 말 것.
  *
  * 다듬기는 폴더 · 파일 이름과 **같은 한 벌**이다(sanitizeShareFolderNamePiece) — 이름표에
  * 금지 글자(`/` · `:` …)가 섞여 들어와도 여기서 사라진다.
