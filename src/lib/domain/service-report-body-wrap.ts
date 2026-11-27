@@ -57,14 +57,14 @@ import { textDisplayWidth, wrapTextToWidth } from "./text-wrap";
  *   · 본문 `H31:AU31`~`H59:AU59`, 비고 `H60:AF60`~`H63:AF63`
  *     — 둘 다 같은 서식 글꼴 = **맑은 고딕 9pt**
  *
- * 그래서 `readColumnRangeWidth` 가 돌려주는 「75칸」은 **본문 글꼴 75자가 아니다.**
- * 글자가 더 작으니 같은 자리에 더 들어간다. 그 차이를 안 보고 75 를 그대로 줄
- * 폭으로 쓰면 **실제보다 일찍 줄이 바뀌어** 칸이 덜 찬 채로 인쇄된다
+ * 그래서 칸의 픽셀 폭(600px)은 **본문 글꼴 600÷7 자**가 아니다 — 글자가 더 작으니
+ * 같은 자리에 더 들어간다. 그 차이를 안 보고 열 너비를 그대로 줄 폭으로 쓰면
+ * **실제보다 일찍 줄이 바뀌어** 칸이 덜 찬 채로 인쇄된다
  * (2026-10-15 사용자 지적: 「엑셀 칸 너비 정도로 맞춰 달라」).
  *
  * ── 글자 폭 실측 (Windows 11 · 96dpi · GDI 보냄폭) ──────────────────────
  *   ＭＳ Ｐゴシック 11pt  `0` = **8px**   ← 열 너비 한 칸의 정체
- *   맑은 고딕 9pt        `0` = **7px**,  한글 음절 = **12px**
+ *   맑은 고딕 9pt        `0` = **7px**,  한글 음절 = **12px**(= 9pt 의 1em)
  *
  * 🔴 한글은 숫자의 **1.71배**다 — **2배가 아니다.** `text-wrap.ts` 는 한글을
  * 2칸으로 세므로 **한글은 재어 보면 늘 모자라게 센다(16.7%).** 그 16.7% 가 곧
@@ -74,12 +74,20 @@ import { textDisplayWidth, wrapTextToWidth } from "./text-wrap";
  * 위의 16.7% 는 **한글에만** 붙는다. 숫자만 있는 줄은 1칸이 그대로 1자라 여백이
  * 0 이 된다. 그래서 `SAFETY_PX`(숫자 한 자)를 더 뺀다 — 넘치는 쪽으로 틀어지면
  * 인쇄물이 잘리고, 덜 차는 쪽은 보기만 나쁘다.
+ *
+ * 🔴 **그 둘은 «어디서 나누는가» 전용이다**(2026-11-27). 아래
+ * `serviceReportTextPx` 를 보라 — 「이 줄이 칸에 들어가는가」만 묻는 자리(비고)는
+ * 칸을 세지 않고 **픽셀로 바로 잰다.** 나누는 쪽은 넉넉히 잡는 것이 안전하지만,
+ * 묻기만 하는 쪽에서 넉넉히 잡으면 **멀쩡한 줄을 경고**한다.
  */
 const SERVICE_REPORT_FONT_METRICS = {
-  /** 통합문서 기본 글꼴(ＭＳ Ｐゴシック 11pt)의 `0` — 열 너비 한 칸이 이것이다. */
-  normalDigitPx: 8,
   /** 본문·비고 칸 글꼴(맑은 고딕 9pt)의 `0` — 우리가 세는 한 칸이 이것이다. */
   contentDigitPx: 7,
+  /**
+   * 🔴 같은 글꼴의 **전각 한 자**(한글 음절) — 9pt 의 1em 이라 정확히 12px 이다.
+   * `text-wrap.ts` 가 2칸으로 세는 그 글자이고, 2칸(14px)보다 **좁다**(위 1.71배).
+   */
+  contentFullWidthPx: 12,
   /** 엑셀이 열 너비 식에 넣는 셀 안쪽 여백(좌 2 + 우 2 + 눈금선 1). */
   cellPaddingPx: 5,
   /** 🔴 안전 여백 — 본문 글꼴 숫자 한 자. 위 머리말의 까닭. */
@@ -87,28 +95,80 @@ const SERVICE_REPORT_FONT_METRICS = {
 } as const;
 
 /**
- * 🔴 엑셀 열 너비 합(기본 글꼴 기준)을 **본문 글꼴 기준 줄 폭**으로 바꾼다.
+ * 🔴 칸의 **픽셀 폭**을 **본문 글꼴 기준 줄 폭(칸 수)** 으로 바꾼다.
  *
- *   픽셀      = 열 너비 합 × 8
- *   줄 폭     = ⌊(픽셀 − 5 − 7) ÷ 7⌋
+ *   줄 폭 = ⌊(칸 픽셀 − 5 − 7) ÷ 7⌋
  *
  * 이 양식에서는 이렇게 나온다:
- *   · 본문 `H:AU` 75칸  → 600px → **84칸**(한글 42자). 엑셀이 실제로 담는 양은
+ *   · 본문 `H:AU` 600px → **84칸**(한글 42자). 엑셀이 실제로 담는 양은
  *     한글 49자((600−5)÷12)이므로 42자는 그보다 **덜 차는 쪽**이다.
- *   · 비고 `H:AF` 46.875칸 → 375px → **51칸**(한글 25자). 비고는 아직 나누지
- *     않지만(줄 수를 넘으면 던진다) 나눌 날의 값이 이것이다.
+ *   · 비고 `H:AF` 375px → **51칸**(한글 25자).
+ *
+ * 🔴 **인자가 「열 너비 합」이 아니라 「픽셀」이다**(2026-11-27). 예전에는 열 너비
+ * 합을 받아 `× 8` 했는데, Excel 은 열을 **하나씩** 환산하고 버린다
+ * (`domain/excel-column-width.ts`). 열 너비가 `1.875` 일 때만 두 셈이 우연히 같았고,
+ * Excel 이 양식을 저장하며 `1.9296875` 로 다시 쓴 뒤로는 갈라져 **한 줄에 86칸이
+ * 들어간다고 믿으며 84칸짜리 칸에 쓰고 있었다.** 이름이 둘 다 그냥 수라서 아무
+ * 오류도 안 났다 — 그래서 인자 이름을 `columnPx` 로 두고, 정수가 아니면 던진다
+ * (열 너비 합은 거의 늘 소수라 **그 자리에서** 잡힌다).
  *
  * 순수 함수다 — 글꼴을 재지 않고 위에 굳힌 상수만 쓴다.
  */
-export function contentWrapWidth(columnWidth: number): number {
-  const { normalDigitPx, contentDigitPx, cellPaddingPx, safetyPx } = SERVICE_REPORT_FONT_METRICS;
-  const usablePx = columnWidth * normalDigitPx - cellPaddingPx - safetyPx;
+export function contentWrapWidth(columnPx: number): number {
+  const { contentDigitPx, cellPaddingPx, safetyPx } = SERVICE_REPORT_FONT_METRICS;
+  if (!Number.isInteger(columnPx)) {
+    throw new Error(
+      `칸 폭은 픽셀(정수)이어야 합니다: ${columnPx} — 열 너비 합을 그대로 넘기지 마세요.`
+    );
+  }
+  const usablePx = columnPx - cellPaddingPx - safetyPx;
   const width = Math.floor(usablePx / contentDigitPx);
   // 🔴 `wrapTextToWidth` 는 2칸 미만을 거절한다. 양식이 망가져도 그 앞에서 막는다.
   if (!(width >= 2)) {
-    throw new Error(`본문 칸이 너무 좁습니다: 열 너비 ${columnWidth} → ${width}칸`);
+    throw new Error(`본문 칸이 너무 좁습니다: ${columnPx}px → ${width}칸`);
   }
   return width;
+}
+
+/**
+ * ════════════════════════════════════════════════════════════════════════
+ * 🔴 「이 줄이 칸에 들어가는가」는 **칸이 아니라 픽셀로** 잰다 (2026-11-27)
+ * ════════════════════════════════════════════════════════════════════════
+ * 비고는 **나누지 않는다.** 그래서 비고 미리보기가 답해야 하는 것은 「어디서
+ * 나뉘는가」가 아니라 **「넘치나 안 넘치나」 하나뿐**이다. 그런데 그 판정에
+ * 본문의 줄 폭(`contentWrapWidth`)을 그대로 쓰고 있었고, 거기에는 위 머리말의
+ * **안전 여백 둘**이 들어 있다:
+ *
+ *   한글을 2칸(14px)으로 세는 데서 오는 16.7% + 숫자 한 자(7px)
+ *
+ * 나누는 쪽에서는 그 여백이 «덜 담는 쪽»이라 안전하다. 묻기만 하는 쪽에서는
+ * **멀쩡한 줄을 주황색으로 칠하는** 거짓말이 된다 — 실측으로 비고 칸(375px)에
+ * 한글 30자가 들어가는데 51칸 기준은 25자에서 경고했다.
+ *
+ * 그래서 비고는 글자의 **실제 픽셀 폭**을 재어 칸의 안쪽 폭과 견준다. 재는 값은
+ * 지어낸 것이 아니라 위에 굳힌 글꼴 실측(전각 12px · 반각 7px)이다.
+ *
+ * ⚠️ 반각은 맑은 고딕에서 **가변폭**이라 `0` 폭(7px)으로 셈한다. 숫자·대문자가
+ * 섞인 줄은 조금 어긋날 수 있는데, `0` 이 반각 중 넓은 쪽이라 **넘친다고 말하는
+ * 쪽**으로 기운다 — 경고가 조금 이른 것이 늦은 것보다 낫다.
+ * ════════════════════════════════════════════════════════════════════════
+ */
+export function serviceReportTextPx(text: string): number {
+  const { contentDigitPx, contentFullWidthPx } = SERVICE_REPORT_FONT_METRICS;
+  // 🔴 전각/반각 가름은 `textDisplayWidth` 한 벌뿐이다 — 글자 하나씩 물어
+  //    2칸이면 전각, 1칸이면 반각이다. 여기서 정규식을 새로 적으면 두 벌이 된다.
+  return [...text].reduce(
+    (sum, char) => sum + (textDisplayWidth(char) === 2 ? contentFullWidthPx : contentDigitPx),
+    0
+  );
+}
+
+/**
+ * 칸의 픽셀 폭에서 **글자가 실제로 놓일 수 있는 폭**을 뺀다 — 엑셀의 셀 안쪽
+ * 여백(좌 2 + 우 2 + 눈금선 1)만 덜어 낸다. 안전 여백은 **안 뺀다**(위 머리말).
+ */
+export function serviceReportContentFitPx(columnPx: number): number {
+  return columnPx - SERVICE_REPORT_FONT_METRICS.cellPaddingPx;
 }
 
 /**
@@ -126,45 +186,52 @@ export function splitBodyLine(line: string, width: number): string[] {
  * 🔴 양식의 칸 폭 — **서버가 읽어 화면으로 넘긴다** (2026-10-18 다섯째 조각)
  * ════════════════════════════════════════════════════════════════════════
  * 여기에 숫자가 **있었다**(`SERVICE_REPORT_BODY_COLUMN_WIDTH = 75` 등 셋). 채우개는
- * 예나 지금이나 양식의 `<cols>` 를 그때그때 읽는데(`readColumnRangeWidth`),
+ * 예나 지금이나 양식의 `<cols>` 를 그때그때 읽는데(`readColumnRangePx`),
  * 브라우저에는 그 파일이 없으니 화면만 굳힌 값을 본다 — 대신 시험이 둘을 맞춰
  * 보게 해 두었다. 「양식이 바뀐 날 시험이 먼저 깨진다」는 계획이었고, 실제로
  * 깨질 일이 일어났다:
  *
  *   사용자가 양식 넷에 **도장만 바꿔 저장**했는데 Excel 이 열 너비를 제 기준으로
- *   다시 썼다 — 본문 열 `1.875 → 1.90625`, 즉 `H:AU` **75칸 → 76.25칸**
- *   (줄 폭으로는 84칸 → 85칸). 손댄 적 없는 값이 저절로 바뀐 것이다.
+ *   다시 썼다 — 본문 열 `1.875 → 1.90625`(2026-11-27 현재는 `1.9296875`).
+ *   손댄 적 없는 값이 저절로 바뀐 것이다.
  *
  * 🔴 **한 번으로 끝날 일이 아니다.** 양식 레이아웃을 고칠 때마다 되풀이된다.
  * 그래서 숫자를 고쳐 가며 따라가는 대신 **화면도 양식에서 받는다**:
  *
- *   작성 화면(서버) ── `readServiceReportColumnWidths(그 건이 쓸 양식)`
- *                   └→ `serviceReportBodyMetrics(…)` ──props──▶ 미리보기 · 적는 칸
+ *   작성 화면(서버) ── `readServiceReportBodyMetrics(그 건이 쓸 양식)`
+ *                   ──props──▶ 미리보기 · 적는 칸
  *
- * 🔴 **읽고 환산하는 셈은 채우개의 것 그대로다**(`readColumnRangeWidth` ·
+ * 🔴 **읽고 환산하는 셈은 채우개의 것 그대로다**(`readColumnRangePx` ·
  * `contentWrapWidth`). 화면용으로 한 벌 더 만들면 또 갈라진다.
  *
- * ⚠️ 그래서 이 파일에는 이제 **폭 숫자가 하나도 없다.** 아래 타입과 함수만 있고,
- * 값은 전부 부르는 쪽이 양식에서 읽어 넣는다.
+ * ── 🔴 단위가 **픽셀**로 바뀌었다 (2026-11-27) ──────────────────────────
+ * 예전에는 「엑셀 열 너비 합」을 날랐고 쓰는 쪽에서 `× 8` 했다. Excel 은 열을
+ * **하나씩** 픽셀로 바꾸고 버리므로(`domain/excel-column-width.ts`) 그 셈은
+ * 문서와 달랐다 — 본문 `H:AU` 가 문서에서는 600px 인데 화면은 618px 로 그렸고,
+ * 같은 식을 쓰는 채우개는 86칸까지 담긴다고 믿었다(실제 84칸).
+ *
+ * 그래서 **서버가 픽셀까지 셈해서 넘긴다.** 화면에는 환산식이 아예 없다.
+ * 🔴 열 너비 숫자는 더 이상 여기까지 오지 않는다 — 둘 다 그냥 수라서 섞이면
+ * 조용히 틀리기 때문이다(그 사고가 실제로 1년 가까이 돌았다).
  * ════════════════════════════════════════════════════════════════════════
  */
 
 /**
- * 양식에서 읽은 **엑셀 열 너비**(통합문서 기본 글꼴 기준) 세 가지.
+ * 양식에서 읽은 칸의 **픽셀 폭** 세 가지. 96dpi 기준이라 CSS 픽셀과 1:1 이다.
  *
- * 🔴 줄 폭(84·85칸)이 **아니다** — 그 환산은 `contentWrapWidth` 가 한다.
+ * 🔴 줄 폭(84칸)이 **아니다** — 그 환산은 `contentWrapWidth` 가 한다.
  */
 export type ServiceReportColumnWidths = {
-  /** 본문 내용 칸. 지금 양식에서는 `H`~`AU`. */
-  body: number;
-  /** 비고 칸. 지금 양식에서는 `H`~`AF` — 본문보다 좁다. */
-  remark: number;
-  /** 본문 라벨 칸(`확　내`/`인　용` 이 찍히는 칸). 지금 양식에서는 `C`~`G`. */
-  label: number;
+  /** 본문 내용 칸. 지금 양식에서는 `H`~`AU` = 15px × 40열 = **600px**. */
+  bodyPx: number;
+  /** 비고 칸. 지금 양식에서는 `H`~`AF` = 15px × 25열 = **375px**(본문보다 좁다). */
+  remarkPx: number;
+  /** 라벨 칸(`확　내`/`인　용`·`비　고` 가 찍히는 칸). `C`~`G` = 14px × 5열 = **70px**. */
+  labelPx: number;
   /**
    * 🔴 본문 내용 칸이 **몇 열인가**(지금 양식에서는 `H`~`AU` = 40).
    *
-   * 폭(`body`)만으로는 모자라서 2026-10-31 에 더했다. 맺음 표시가 가운데에서
+   * 폭(`bodyPx`)만으로는 모자라서 2026-10-31 에 더했다. 맺음 표시가 가운데에서
    * **세 열** 오른쪽에 앉는데(`SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT`), 그
    * **열 수**를 길이로 바꾸려면 한 열이 얼마인지 알아야 한다 — 미리보기는 양식
    * 파일을 못 읽으므로 서버가 세어 넘긴다.
@@ -173,43 +240,66 @@ export type ServiceReportColumnWidths = {
 };
 
 /**
- * 화면이 폭을 셀 때 쓰는 **한 벌** — 열 너비와, 그것에서 나온 줄 폭.
+ * 🔴 양식이 비고 칸에 걸어 둔 **가로 맞춤**. 화면이 그대로 따라 그린다.
+ *
+ * 그릴 수 있는 셋만 받는다 — 양식이 `justify`·`distributed` 같은 것을 쓰기
+ * 시작하면 **짐작해서 왼쪽으로 그리는 대신** 읽는 쪽이 던진다(`page.tsx` 의
+ * 「양식을 읽을 수 없습니다」 길로 들어간다). 맞춤을 틀리게 그린 미리보기는
+ * 폭을 틀리게 그린 것과 똑같이 거짓말이다.
+ */
+export type ServiceReportHorizontalAlign = "left" | "center" | "right";
+
+/**
+ * 화면이 폭을 셀 때 쓰는 **한 벌** — 칸의 픽셀 폭과, 그것에서 나온 줄 폭·맞춤.
  *
  * 미리보기 상자 폭 · 줄 나누기 칸 수 · 적는 칸 폭 · 비고 폭 · 라벨 칸 폭이 전부
  * 여기서 나온다. 굳힌 숫자를 쓰는 자리가 화면에 하나도 없게 하려는 것이다.
  */
 export type ServiceReportBodyMetrics = {
-  /** 양식에서 읽은 열 너비 그대로. 미리보기 상자의 **크기**가 여기서 나온다. */
+  /** 양식에서 읽은 칸 폭(px) 그대로. 미리보기 상자의 **크기**가 여기서 나온다. */
   columns: ServiceReportColumnWidths;
-  /** 본문 한 줄에 들어가는 칸 수. 옛 양식 84(한글 42자) · 새 양식 85. */
+  /** 본문 한 줄에 들어가는 칸 수. 지금 양식에서 84(한글 42자). */
   bodyWrapWidth: number;
-  /** 비고 한 줄에 들어가는 칸 수. 옛 양식 51 · 새 양식 52. */
-  remarkWrapWidth: number;
   /**
-   * 🔴 맺음 표시 앞에 비워 두는 **너비**(열 너비 단위 — `columns` 와 같은 자).
+   * 비고 **적는 칸**의 폭을 정할 때 쓰는 칸 수. 지금 양식에서 51.
+   *
+   * ⚠️ 🔴 **넘침 판정에는 쓰지 않는다**(2026-11-27). 비고는 나누지 않으므로 「들어가나」만
+   * 물으면 되고, 그 답은 `remarkFitPx` 로 픽셀에서 바로 낸다 — 이 칸 수에는 본문
+   * 전용 안전 여백이 들어 있어서 **멀쩡한 줄을 경고**한다(`serviceReportTextPx` 머리말).
+   */
+  remarkWrapWidth: number;
+  /** 🔴 비고 칸에 글자가 실제로 놓일 수 있는 폭(px). 넘침 판정이 이것으로만 난다. */
+  remarkFitPx: number;
+  /** 🔴 양식에서 읽은 비고 칸의 가로 맞춤. 화면이 그대로 그린다. */
+  remarkAlign: ServiceReportHorizontalAlign;
+  /**
+   * 🔴 맺음 표시 앞에 비워 두는 **폭(px)** — `columns` 와 같은 자다.
    *
    * 미리보기가 맺음 표시 줄에 줄 **왼쪽 여백**이고, 문서에서는 그 줄의 병합이
    * `H:AU` 대신 `N:AU` 로 좁혀지는 것과 같은 뜻이다
-   * (`serviceReportClosingMarkIndentWidth` 머리말).
+   * (`serviceReportClosingMarkIndentPx` 머리말).
    */
-  closingMarkIndentWidth: number;
+  closingMarkIndentPx: number;
 };
 
 /**
- * 열 너비 한 벌 → 화면이 쓰는 치수 한 벌.
+ * 칸 폭 한 벌 + 비고 맞춤 → 화면이 쓰는 치수 한 벌.
  *
  * 🔴 **서버에서 부른다.** `contentWrapWidth` 는 칸이 말이 안 되게 좁으면 던지는데,
  * 브라우저가 그리는 도중에 던지면 화면이 통째로 죽는다. 서버에서 부르면 그 던짐이
  * 작성 화면의 「양식을 읽을 수 없습니다」 길로 그대로 들어간다(`page.tsx`).
  */
 export function serviceReportBodyMetrics(
-  columns: ServiceReportColumnWidths
+  columns: ServiceReportColumnWidths,
+  remarkAlign: ServiceReportHorizontalAlign
 ): ServiceReportBodyMetrics {
   return {
     columns,
-    bodyWrapWidth: contentWrapWidth(columns.body),
-    remarkWrapWidth: contentWrapWidth(columns.remark),
-    closingMarkIndentWidth: serviceReportClosingMarkIndentWidth(columns),
+    bodyWrapWidth: contentWrapWidth(columns.bodyPx),
+    remarkWrapWidth: contentWrapWidth(columns.remarkPx),
+    remarkFitPx: serviceReportContentFitPx(columns.remarkPx),
+    remarkAlign,
+    closingMarkIndentPx: serviceReportClosingMarkIndentPx(columns),
   };
 }
 
@@ -232,9 +322,9 @@ export function serviceReportBodyMetrics(
  * 둘이 **같은 수에서 나온다.** 🔴 화면에 「15%」 같은 수를 따로 적지 말 것 —
  * 그 15% 는 `6 ÷ 40` 이라서, 이 상수를 올리는 날 화면만 옛 자리에 남는다.
  *
- * ⚠️ 열이 고르다는 가정이 하나 들어 있다(여섯 열의 너비 = 전체 ÷ 40 × 6).
- * 지금 양식 넷은 `<col min="8" max="47" width="1.90625"/>` 한 덩이라 고르다 —
- * 어긋나는 날 채우개 시험(`readColumnRangeWidth` 로 잰 값과 맞춰 본다)이 먼저
+ * ⚠️ 열이 고르다는 가정이 하나 들어 있다(여섯 열의 폭 = 전체 ÷ 40 × 6).
+ * 지금 양식 넷은 `<col min="8" max="47" width="1.9296875"/>` 한 덩이라 고르다 —
+ * 어긋나는 날 채우개 시험(`readColumnRangePx` 로 잰 값과 맞춰 본다)이 먼저
  * 깨진다.
  * ════════════════════════════════════════════════════════════════════════
  */
@@ -245,38 +335,19 @@ export const SERVICE_REPORT_CLOSING_MARK_INDENT_COLUMNS =
   SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT * 2;
 
 /**
- * 비워 두는 열 수를 **너비**로 바꾼다 — 단위는 `ServiceReportColumnWidths` 와 같다.
+ * 비워 두는 열 수를 **폭(px)** 으로 바꾼다 — 단위는 `ServiceReportColumnWidths` 와 같다.
  *
  * 🔴 **본문 칸보다 넓어질 수 없다.** 그러면 맺음 표시가 칸 밖으로 나가므로,
  * 짐작해서 줄이는 대신 던진다(채우개도 같은 자리에서 던진다).
  */
-export function serviceReportClosingMarkIndentWidth(columns: ServiceReportColumnWidths): number {
+export function serviceReportClosingMarkIndentPx(columns: ServiceReportColumnWidths): number {
   if (!(columns.bodyColumns > SERVICE_REPORT_CLOSING_MARK_INDENT_COLUMNS)) {
     throw new Error(
       `본문 칸이 ${columns.bodyColumns}열뿐이라 맺음 표시를 ` +
         `${SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT}열 옮길 수 없습니다.`
     );
   }
-  return (columns.body * SERVICE_REPORT_CLOSING_MARK_INDENT_COLUMNS) / columns.bodyColumns;
-}
-
-/**
- * 🔴 엑셀 열 너비(기본 글꼴 문자 단위) → **화면 픽셀**.
- *
- * 열 너비 한 칸은 통합문서 기본 글꼴의 숫자 한 자이고 이 양식에서는 8px 이다
- * (`SERVICE_REPORT_FONT_METRICS.normalDigitPx` — 위 머리말의 실측). Excel 이
- * 종이에 그릴 때 쓰는 픽셀은 96dpi 기준이라 **CSS 픽셀과 1:1** 이다. 그래서
- * 이 값을 그대로 `width` 에 주면 미리보기 상자가 문서의 칸과 같은 크기가 된다:
- *
- *   옛 양식 — 본문 75칸 → **600px** · 비고 46.875칸 → 375px · 라벨 8.75칸 → 70px
- *   새 양식 — 본문 76.25칸 → **610px** · 비고 47.65625칸 → 381px · 라벨 → 69px
- *
- * ⚠️ 인자는 **열 너비**(`ServiceReportColumnWidths` 의 값)이지 줄 폭
- * (`bodyWrapWidth` = 84·85칸)이 아니다. 둘 다 그냥 수라서 바꿔 넣어도 조용히
- * 지나간다 — 이름을 보고 넣을 것.
- */
-export function serviceReportColumnWidthPx(columnWidth: number): number {
-  return Math.round(columnWidth * SERVICE_REPORT_FONT_METRICS.normalDigitPx);
+  return (columns.bodyPx * SERVICE_REPORT_CLOSING_MARK_INDENT_COLUMNS) / columns.bodyColumns;
 }
 
 /**
@@ -337,7 +408,30 @@ export const SERVICE_REPORT_BODY_LABELS = {
 } as const;
 
 /**
- * 라벨 열이 먹는 칸 수 — **라벨 글자에서 잰다**(넷 다 6칸이다).
+ * 🔴 **비고 구역의 라벨** — 양식 `C60:G63` 에 실제로 찍혀 있는 글자다.
+ *
+ * 본문 라벨과 **같은 길**로 올라왔다(2026-11-27). 여기 오기 전에는 채우개의
+ * 확인용 표(`LAYOUT_GUARDS` — 「양식이 바뀌었나」를 보는 자리)에만 있었고, 그래서
+ * 미리보기는 비고의 라벨 칸을 **아예 안 그렸다**. 지어내지 않겠다는 판단은
+ * 옳았지만, 그 결과로 두 미리보기가 같은 왼쪽 선에서 시작해 **비고 줄의 오른쪽
+ * 끝이 문서보다 70px 일찍 끝나** 보였다(사용자 지적: 「비고칸도 실제 비고칸보다
+ * 가로폭이 좁아」). 문서에서는 라벨 칸 70px + 비고 칸 375px 가 나란히 선다.
+ *
+ * 🔴 **코드 포인트째 옮긴 것**이다(실측 — 양식 넷과 옛 사본 둘 전부 같다):
+ *
+ *   `비　고` = `BE44 3000 ACE0`   ← 가운데가 **전각 공백**(U+3000)
+ *
+ * 전각 공백은 코드에서 눈에 안 보이므로 `　` 으로 적어 둔다. 본문 라벨과 같은
+ * 이유다 — 보통 공백으로 적어 두면 아무도 못 잡는다.
+ *
+ * ⚠️ 양식의 공유문자열에는 이 글자 뒤에 일본어 후리가나(`ソナエコウ`)가 `rPh` 로
+ * 딸려 있다. 그것은 **루비 주석**이지 칸에 보이는 글자가 아니라 여기 담지 않는다 —
+ * 확인용 표가 `startsWith` 로 견주는 까닭이 그것이다.
+ */
+export const SERVICE_REPORT_REMARK_LABEL = "비　고";
+
+/**
+ * 라벨 열이 먹는 칸 수 — **라벨 글자에서 잰다**(본문 넷도 비고도 6칸이다).
  *
  * 미리보기의 왼쪽 칸 폭이 여기서 나온다. 숫자를 적어 두면 라벨이 길어진 날
  * 글자가 잘리고, 잘린 것은 「원래 그런가 보다」로 지나간다.
@@ -345,7 +439,8 @@ export const SERVICE_REPORT_BODY_LABELS = {
 export const SERVICE_REPORT_BODY_LABEL_WIDTH = Math.max(
   ...Object.values(SERVICE_REPORT_BODY_LABELS)
     .flat()
-    .map((line) => textDisplayWidth(line))
+    .map((line) => textDisplayWidth(line)),
+  textDisplayWidth(SERVICE_REPORT_REMARK_LABEL)
 );
 
 /**
@@ -594,14 +689,17 @@ export type ServiceReportPreviewRemarkLine = {
  * 그래서 여기서 나눠 그리면 **문서에 없는 줄바꿈을 보여 주는 거짓말**이 된다 —
  * 대신 폭을 넘는 줄에 표시만 단다.
  *
- * 🔴 `width` 에 기본값이 없는 까닭은 위 `serviceReportBodyPreviewSections` 와 같다.
+ * 🔴 `fitPx` 는 **글자가 놓일 수 있는 픽셀 폭**이다(`metrics.remarkFitPx`). 본문의
+ * 줄 폭(칸 수)을 쓰던 자리인데, 거기에는 나누기 전용 안전 여백이 들어 있어
+ * **멀쩡한 줄을 14% 일찍 경고**했다(`serviceReportTextPx` 머리말). 기본값은 없다 —
+ * 까닭은 위 `serviceReportBodyPreviewSections` 와 같다.
  */
 export function serviceReportRemarkPreviewLines(
   lines: readonly string[],
-  width: number
+  fitPx: number
 ): ServiceReportPreviewRemarkLine[] {
   return lines.map((line) => {
     const text = koreanKyosanDocumentText(line);
-    return { text, overflows: textDisplayWidth(text) > width };
+    return { text, overflows: serviceReportTextPx(text) > fitPx };
   });
 }

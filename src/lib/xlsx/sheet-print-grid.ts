@@ -1,3 +1,5 @@
+import { excelColumnWidthPx } from "@/lib/domain/excel-column-width";
+
 import type { ExcelDateSystem } from "./excel-date";
 import { builtInNumberFormat, formatNumber, formatText, koreanLongDate } from "./number-format";
 import { parseSheetRows, type SheetRow } from "./sheet-rows";
@@ -260,39 +262,14 @@ const EMU_PER_POINT = 12700;
 const POINTS_PER_PIXEL = 0.75;
 
 /**
- * 🔴 열 너비의 «문자 단위»를 픽셀로 바꿀 때 쓰는 **최대 숫자 폭**.
+ * 🔴 열 너비 → 픽셀 환산은 **이 파일에서 나갔다**(2026-11-27).
  *
- * OOXML 의 환산식은 규격에 있다:
- *
- *     pixels = Truncate(((256 × width + Truncate(128 ÷ MDW)) ÷ 256) × MDW)
- *
- * `MDW` 는 통합문서 기본 글꼴에서 숫자 한 자가 차지하는 픽셀 수다. 규격은 값을
- * 파일에 적어 두지 않으므로 어딘가에서 알아내야 한다.
- *
- * **이 양식의 값은 8이고, 양식 스스로가 그것을 알려 준다.** 그림 앵커에는 셀
- * 좌표(`<xdr:from>`)와 절대 좌표(`<a:off>`)가 함께 적혀 있어서 둘을 견주면
- * 열 너비의 실제 픽셀 값이 나온다(실측):
- *
- *   · 「그림 4」 from = 33열 + 11px, a:off.x = 484px → 1~32열 = 473px
- *   · 「그림 6」 from = 43열 +  9px, a:off.x = 632px → 1~42열 = 623px
- *   → 33~42열(너비 1.875) 10칸 = 150px → 15px/칸,  너비 1.75 는 14px/칸
- *   → 위 식에 MDW=8 을 넣으면 정확히 15 와 14 가 나온다(MDW=7 이면 13 과 12).
- *
- * 이 값은 통합문서의 **기본 글꼴**(표준 스타일 = ＭＳ Ｐゴシック 11pt)이 정한다.
- *
- * 🔴 **2026-10-19 — 위 실측은 양식에서 사라졌다.** 사용자가 도장을 바꿔 저장한
- * 뒤로 두 도장의 `<a:off>` 가 한 칸을 15px 이 아니라 13.913px 로 잡은 격자로 다시
- * 적혔다(세로도 어긋나 있어 그 값은 «마지막으로 그린 기계의 캐시»다 — 역산하면
- * 숫자 한 자를 ≈7.04px 로 쟀고, 선언된 기본 글꼴이 그 PC 에 없어 대체되면 그렇게
- * 된다). 그래서 시험(`sheet-print-grid.test.ts`)은 이제 **절대 크기 대신** ①앵커들이
- * 배율 하나로 설명되는가(격자의 모양) ②기본 글꼴이 그대로인가(이 상수의 근거)를
- * 본다. 자세한 셈과 까닭은 그 시험의 머리말에 적어 두었다.
- *
- * ⚠️ 글꼴이 바뀐 양식이 오면 폭이 몇 % 어긋난다. 그래도 **비율은 열끼리 그대로**
- * 유지되고(같은 식을 모든 열에 쓰므로) 화면은 종이에 맞춰 다시 줄이므로,
- * 어긋나 봐야 문서가 조금 좁거나 넓게 보일 뿐 자리가 무너지지는 않는다.
+ * 식도 근거(최대 숫자 폭 = 8px)도 `domain/excel-column-width.ts` 머리말에 그대로
+ * 옮겨 두었다. 옮긴 까닭은 **작성 화면의 미리보기가 같은 셈을 하고 있었기
+ * 때문**이다 — 그쪽은 범위의 열 너비를 다 더한 뒤 한 번만 환산해서, Excel 이
+ * 양식을 저장하며 열 너비를 다시 쓴 날부터 문서보다 3% 넓게 그렸다. 이 파일이
+ * 쓰는 값은 한 글자도 안 바뀌었다(같은 식·같은 상수).
  */
-const MAX_DIGIT_WIDTH_PX = 8;
 
 /** `<sheetFormatPr defaultRowHeight>` 가 없을 때의 규격 기본값(pt). */
 const DEFAULT_ROW_HEIGHT_PT = 15;
@@ -636,21 +613,15 @@ function readColumnWidths(sheetXml: string): ColumnWidths {
     spans.push({
       min,
       max,
-      px: hidden ? 0 : charsToPixels(Number.isFinite(width) ? width : DEFAULT_COLUMN_WIDTH_CHARS),
+      px: hidden ? 0 : excelColumnWidthPx(Number.isFinite(width) ? width : DEFAULT_COLUMN_WIDTH_CHARS),
     });
   }
 
   const defaultChars = Number(/<sheetFormatPr[^>]*\sdefaultColWidth="([\d.]+)"/.exec(sheetXml)?.[1]);
   return {
     spans,
-    defaultPx: charsToPixels(Number.isFinite(defaultChars) ? defaultChars : DEFAULT_COLUMN_WIDTH_CHARS),
+    defaultPx: excelColumnWidthPx(Number.isFinite(defaultChars) ? defaultChars : DEFAULT_COLUMN_WIDTH_CHARS),
   };
-}
-
-/** 위 `MAX_DIGIT_WIDTH_PX` 의 환산식. */
-function charsToPixels(chars: number): number {
-  const mdw = MAX_DIGIT_WIDTH_PX;
-  return Math.trunc(((256 * chars + Math.trunc(128 / mdw)) / 256) * mdw);
 }
 
 function columnWidthPx(widths: ColumnWidths, column: number): number {

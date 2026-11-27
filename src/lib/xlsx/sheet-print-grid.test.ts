@@ -672,7 +672,7 @@ function columnWidthsFromColumnA(archive: ZipArchive): number[] {
  * 🔴 **열 너비 환산이 양식의 그림 앵커와 맞는다** — 2026-10-19 에 자를 바꿨다
  * ============================================================================
  * 전에 이 시험은 앵커가 말하는 거리와 우리 표의 거리가 **정확히 같은 수**인지
- * 보았다. 그것이 `MAX_DIGIT_WIDTH_PX = 8` 의 근거였다(그 상수의 주석).
+ * 보았다. 그것이 `EXCEL_MAX_DIGIT_WIDTH_PX = 8` 의 근거였다(그 상수의 주석).
  *
  * 🔴 **그 근거가 양식에서 사라졌다.** 사용자가 도장을 바꿔 저장한 뒤로 두 도장의
  * `<a:off>` 가 **정수 픽셀이 아닌 값**으로 다시 적혔다 — 한 칸을 15px 이 아니라
@@ -761,7 +761,7 @@ test("🔴 실제 양식: 열 너비 환산이 양식의 그림 앵커와 맞는
 
   /**
    * ② 환산 상수의 근거 — 이 통합문서의 **기본 글꼴**(표준 스타일, `xfId="0"`).
-   * `MAX_DIGIT_WIDTH_PX = 8` 은 ＭＳ Ｐゴシック 11pt 의 숫자 한 자 폭이다.
+   * `EXCEL_MAX_DIGIT_WIDTH_PX = 8` 은 ＭＳ Ｐゴシック 11pt 의 숫자 한 자 폭이다.
    */
   const styles = archive.readText(STYLES_PART);
   const normalFontId = Number(
@@ -773,7 +773,7 @@ test("🔴 실제 양식: 열 너비 환산이 양식의 그림 앵커와 맞는
   assert.equal(
     `${/<name val="([^"]*)"/.exec(normalFont)?.[1]} ${/<sz val="([^"]*)"/.exec(normalFont)?.[1]}pt`,
     "ＭＳ Ｐゴシック 11pt",
-    "양식의 기본 글꼴이 바뀌었다 — MAX_DIGIT_WIDTH_PX(=8) 의 근거를 다시 재야 한다"
+    "양식의 기본 글꼴이 바뀌었다 — EXCEL_MAX_DIGIT_WIDTH_PX(=8) 의 근거를 다시 재야 한다"
   );
 });
 

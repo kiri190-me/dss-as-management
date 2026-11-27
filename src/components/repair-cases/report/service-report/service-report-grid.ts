@@ -1,8 +1,8 @@
 import type { CSSProperties } from "react";
 
-import {
-  serviceReportColumnWidthPx,
-  type ServiceReportBodyMetrics,
+import type {
+  ServiceReportBodyMetrics,
+  ServiceReportHorizontalAlign,
 } from "@/lib/domain/service-report-body-wrap";
 
 /**
@@ -44,8 +44,8 @@ import {
  * ── 폭이 두 가지인 까닭 ─────────────────────────────────────────────────
  *   **적는 칸**  = 한글 `칸 수 ÷ 2` 자가 꼭 들어가는 폭(84칸 → 42자 × 글꼴 크기).
  *                 한글 줄이 문서와 같은 자리에서 바뀌게 하는 값이다.
- *   **미리보기** = 문서의 칸 그 자체(`serviceReportColumnWidthPx` — 본문 열 너비
- *                 75칸 × 8px = **600px**)에 **확대 배율**을 곱한 것. 글꼴·글자
+ *   **미리보기** = 문서의 칸 그 자체(서버가 양식에서 셈해 넘긴 px — 본문 `H:AU` 는
+ *                 15px × 40열 = **600px**)에 **확대 배율**을 곱한 것. 글꼴·글자
  *                 크기·줄 높이까지 같은 배율로 커지므로 상자 안은 어느 배율에서나
  *                 **실제 결과물과 1:1** 이다.
  *
@@ -117,6 +117,11 @@ import {
  * 그래서 아래 함수 중 폭을 쓰는 것들은 전부 **`metrics` 를 첫 인자로 받는다.**
  * 모듈 꼭대기에서 계산되던 하한·기울기도 같은 이유로 **함수**가 되었다 — 그것들이
  * 상수로 남아 있으면 폭이 바뀌어도 안 따라간다.
+ *
+ * 🔴 **그 폭은 2026-11-27 부터 픽셀로 온다.** 열 너비를 받아 `× 8` 하는 환산이 이
+ * 파일에 있었는데, Excel 은 열을 하나씩 환산하고 버린다 — 그래서 미리보기가 문서보다
+ * 3% 넓게 그리고 있었다(`domain/excel-column-width.ts` 머리말). 이제 이 파일에는
+ * **엑셀 환산식이 한 줄도 없다.**
  * ============================================================================
  */
 
@@ -264,20 +269,21 @@ export function serviceReportGridInputMaxWidthPx(
 /**
  * 미리보기 상자의 폭 — **문서의 칸 그 자체**에 확대 배율을 곱한 것.
  *
- * @param columnWidth 그 칸의 **엑셀 열 너비**(`metrics.columns.body` 등 — 서버가
- *   양식에서 읽어 넘긴 값). 🔴 줄 폭(84·85)이 아니다 — 둘 다 그냥 수라서 바꿔
- *   넣어도 조용히 지나간다.
+ * @param columnPx 그 칸의 **픽셀 폭**(`metrics.columns.bodyPx` 등 — 서버가 양식에서
+ *   읽어 셈해 넘긴 값). 🔴 줄 폭(84칸)이 아니다 — 둘 다 그냥 수라서 바꿔 넣어도
+ *   조용히 지나간다.
  * @param previewFontSizePx 미리보기 글꼴 크기. 기본값(9pt)이면 **문서 그대로**다:
- *   옛 양식 본문 75칸 → **600px** · 비고 46.875칸 → 375px · 라벨 8.75칸 → 70px
+ *   본문 `H:AU` **600px** · 비고 `H:AF` 375px · 라벨 `C:G` 70px
+ *
+ * 🔴 환산식이 **이 파일에서 사라졌다**(2026-11-27). 「열 너비 × 8」을 여기서
+ * 했었는데 Excel 은 열마다 버림한다 — 그 차이로 미리보기가 문서보다 3% 넓었다
+ * (`domain/excel-column-width.ts`). 이제 px 은 서버가 양식에서 셈해서 준다.
  */
 export function serviceReportGridDocumentBoxPx(
-  columnWidth: number,
+  columnPx: number,
   previewFontSizePx: number = SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX
 ): number {
-  return serviceReportGridPreviewScaledPx(
-    serviceReportColumnWidthPx(columnWidth),
-    previewFontSizePx
-  );
+  return serviceReportGridPreviewScaledPx(columnPx, previewFontSizePx);
 }
 
 /**
@@ -363,10 +369,23 @@ export function serviceReportGridInputMaxWidthCss(columns: number): string {
   return `calc(${serviceReportGridInputContentCss(columns)} + ${SERVICE_REPORT_GRID_INPUT_FRAME_PX}px)`;
 }
 
-/** 미리보기 상자의 폭 CSS — 문서의 칸 × 배율. */
-export function serviceReportGridDocumentBoxCss(columnWidth: number): string {
-  return serviceReportGridPreviewScaledCss(serviceReportColumnWidthPx(columnWidth));
+/** 미리보기 상자의 폭 CSS — 문서의 칸(px) × 배율. */
+export function serviceReportGridDocumentBoxCss(columnPx: number): string {
+  return serviceReportGridPreviewScaledCss(columnPx);
 }
+
+/**
+ * 🔴 양식의 가로 맞춤 → 화면의 클래스.
+ *
+ * ⚠️ Tailwind 는 소스를 **글자로** 훑으므로 세 이름이 따옴표 안에 **온전히** 들어
+ * 있어야 한다(`text-${align}` 같은 짜깁기는 클래스가 CSS 에서 사라진다 — 그러면
+ * 오류 없이 **전부 왼쪽 맞춤**으로 보인다).
+ */
+export const SERVICE_REPORT_GRID_ALIGN_CLASS: Record<ServiceReportHorizontalAlign, string> = {
+  left: "text-left",
+  center: "text-center",
+  right: "text-right",
+};
 
 /**
  * 미리보기 상자 **전체**(라벨 칸 + 본문 칸 + 좌우 테두리)의 폭.
@@ -379,8 +398,8 @@ export function serviceReportGridPreviewBoxWidthPx(
   previewFontSizePx: number
 ): number {
   return (
-    serviceReportGridDocumentBoxPx(metrics.columns.label, previewFontSizePx) +
-    serviceReportGridDocumentBoxPx(metrics.columns.body, previewFontSizePx) +
+    serviceReportGridDocumentBoxPx(metrics.columns.labelPx, previewFontSizePx) +
+    serviceReportGridDocumentBoxPx(metrics.columns.bodyPx, previewFontSizePx) +
     SERVICE_REPORT_GRID_PREVIEW_BORDER_PX
   );
 }

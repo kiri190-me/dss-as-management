@@ -252,9 +252,19 @@ export type ServiceReportFormSeed = {
    * 아무것도 안 고른다(`serviceReportProductNameFromModel`).
    */
   productNames?: readonly string[];
-  /** 처음 고를 종류. 기본은 수리다(현장에서 더 자주 쓴다). */
+  /** 처음 고를 종류. 안 주면 `SERVICE_REPORT_DEFAULT_KIND`. */
   kind?: ServiceReportKind;
 };
+
+/**
+ * 🔴 아무도 안 골랐을 때 열리는 보고서 종류 — **수리**다(현장에서 더 자주 쓴다).
+ *
+ * 상수로 뽑아 둔 까닭: 작성 화면(서버)이 **양식을 읽기 전에** 종류를 알아야 한다
+ * (그 건이 쓸 양식이 종류마다 다르다 — `readServiceReportTemplateForCase`). 폼
+ * 씨앗 안에만 있으면 화면이 `"REPAIR"` 를 한 번 더 적게 되고, 기본값이 바뀌는 날
+ * 한쪽만 고쳐져 **화면은 검사 양식으로 그리고 폼은 수리로 열리는** 어긋남이 된다.
+ */
+export const SERVICE_REPORT_DEFAULT_KIND: ServiceReportKind = "REPAIR";
 
 /**
  * 원인 열 가지의 한글 이름. **서버 페이지가 채우개에서 읽어 넘긴다** —
@@ -688,7 +698,7 @@ export function createServiceReportFormValues(seed: ServiceReportFormSeed): Serv
   const used =
     manufactured === null ? null : serviceReportUsedPeriod(manufactured, receivedOn);
 
-  const kind = seed.kind ?? "REPAIR";
+  const kind = seed.kind ?? SERVICE_REPORT_DEFAULT_KIND;
 
   return {
     kind,

@@ -5,6 +5,7 @@
  * 머리말). 여기는 그것을 **부르기만** 하고, 부르던 곳이 그대로이게
  * **같은 이름으로 다시 내보낸다**(아래 `export { … }`).
  */
+import { excelColumnRangePx } from "@/lib/domain/excel-column-width";
 import {
   contentWrapWidth,
   SERVICE_REPORT_BODY_LABELS,
@@ -12,11 +13,15 @@ import {
   SERVICE_REPORT_CLOSING_MARK,
   SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT,
   SERVICE_REPORT_CLOSING_TRAILING_ROWS,
+  SERVICE_REPORT_REMARK_LABEL,
   SERVICE_REPORT_SECTION_GAP_ROWS,
+  serviceReportBodyMetrics,
   serviceReportFindingsLines,
   serviceReportSectionRowCount,
   splitBodyLine,
+  type ServiceReportBodyMetrics,
   type ServiceReportColumnWidths,
+  type ServiceReportHorizontalAlign,
 } from "@/lib/domain/service-report-body-wrap";
 import { koreanKyosanDocumentText } from "@/lib/kyosan/report-terms";
 
@@ -26,6 +31,7 @@ export {
   SERVICE_REPORT_CLOSING_MARK,
   SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT,
   SERVICE_REPORT_CLOSING_TRAILING_ROWS,
+  SERVICE_REPORT_REMARK_LABEL,
   SERVICE_REPORT_SECTION_GAP_ROWS,
 };
 
@@ -62,6 +68,8 @@ import {
   enableFullCalcOnLoad,
   removeCalcChainOverride,
   removeCalcChainRelationship,
+  readHorizontalAlignment,
+  readXfElements,
   resolveSheetDrawingPart,
   resolveSheetPart,
   SHARED_STRINGS_PART,
@@ -559,7 +567,12 @@ const LAYOUT_GUARDS: readonly (readonly [ref: string, expected: string])[] = [
   ["C27", "조　치"],
   ["AO27", "No."],
   ["C29", "원  인"],
-  [REMARK_LABEL_CELL, "비　고"],
+  /**
+   * 🔴 글자를 여기 적어 두지 않는다 — **작성 화면의 비고 미리보기가 그 라벨 칸을
+   * 그린다**(2026-11-27). 화면이 글자를 따로 적으면 두 벌이 되고, 전각 공백은 눈으로
+   * 구별되지 않아 어긋나도 아무도 못 잡는다(본문 라벨과 같은 판단).
+   */
+  [REMARK_LABEL_CELL, SERVICE_REPORT_REMARK_LABEL],
 ];
 
 /** 「현품 인수」 — 값이 있으면 체크된 것이다(없으면 체크칸이 빈다). */
@@ -1391,12 +1404,16 @@ function fillSheet(
    * 🔴 한 줄이 칸의 가로폭을 넘지 않게 먼저 나눈다. **줄 수를 셈하기 전에**
    * 해야 한다 — 나눈 뒤의 줄 수가 곧 필요한 행 수다.
    *
-   * 🔴 양식에서 읽은 열 너비는 **기본 글꼴 기준**이라 그대로 쓰면 안 된다.
-   * 본문 칸에 박힌 글꼴(맑은 고딕 9pt)이 더 작아 같은 자리에 더 들어간다 —
-   * `contentWrapWidth` 가 그 환산이다.
+   * 🔴 재는 것은 칸의 **픽셀 폭**이다(`readColumnRangePx`). 열 너비 합을 쓰면 안
+   * 된다 — Excel 은 열을 하나씩 환산하고 버리므로 둘이 다르고, 그 차이로 2026-11-27
+   * 까지 **한 줄에 86칸이 들어간다고 믿으며 600px(84칸)짜리 칸에 쓰고 있었다**
+   * (`domain/excel-column-width.ts` 머리말).
+   *
+   * 🔴 픽셀을 그대로 쓰지도 않는다. 본문 칸에 박힌 글꼴(맑은 고딕 9pt)이 통합문서
+   * 기본 글꼴보다 작아 같은 자리에 더 들어간다 — `contentWrapWidth` 가 그 환산이다.
    */
   const lineWidth = contentWrapWidth(
-    readColumnRangeWidth(evened, block.contentColumn, block.contentEndColumn)
+    readColumnRangePx(evened, block.contentColumn, block.contentEndColumn)
   );
   const sections = bodySections(input).map((section) => ({
     labelLines: section.labelLines,
@@ -2104,20 +2121,21 @@ function findContentEndColumn(sheetXml: string, row: number, contentColumn: stri
 export { contentWrapWidth };
 
 /**
- * 🔴 `startColumn` ~ `endColumn` 이 몇 칸인가 — **양식의 `<cols>` 에서 읽는다.**
+ * 🔴 `startColumn` ~ `endColumn` 의 **열 너비 목록** — 양식의 `<cols>` 에서 읽는다.
  *
- * 이 양식은 `<col min="8" max="47" width="1.875"/>` 라 `H`~`AU` 40열이 75칸이다.
- * 75 를 코드에 박으면 사람이 양식의 열 너비를 고치는 날 줄이 어긋나고, 그때
- * 증상은 "어떤 보고서만 글자가 칸 밖으로 흘러나온다" 라서 아무도 못 잡는다.
+ * 이 양식은 `<col min="8" max="47" width="1.9296875"/>` 라 `H`~`AU` 40열이 전부
+ * 같은 너비다. 그 값을 코드에 박으면 사람이 양식의 열 너비를 고치는 날 줄이
+ * 어긋나고, 그때 증상은 "어떤 보고서만 글자가 칸 밖으로 흘러나온다" 라서 아무도
+ * 못 잡는다.
  *
- * ⚠️ 돌려주는 값은 **기본 글꼴 기준**이다. 줄을 나누기 전에 반드시
- * `contentWrapWidth` 로 본문 글꼴 기준으로 바꿔라.
+ * 🔴 **합을 내지 않고 열마다 돌려준다.** 픽셀 환산은 열마다 버림이 들어가므로
+ * (`domain/excel-column-width.ts`) 더한 뒤 환산하면 문서와 달라진다.
  */
-export function readColumnRangeWidth(
+function readColumnRangeWidths(
   sheetXml: string,
   startColumn: string,
   endColumn: string
-): number {
+): number[] {
   const first = columnIndex(startColumn);
   const last = columnIndex(endColumn);
   if (last < first) throw new Error(`열 범위가 뒤집혀 있습니다: ${startColumn}:${endColumn}`);
@@ -2132,15 +2150,58 @@ export function readColumnRangeWidth(
     width: Number(/\swidth="([\d.]+)"/.exec(match[0])?.[1] ?? "0"),
   }));
 
-  let total = 0;
+  const widths: number[] = [];
   for (let index = first; index <= last; index += 1) {
     const found = ranges.find((range) => index >= range.min && index <= range.max);
-    total += found && Number.isFinite(found.width) && found.width > 0 ? found.width : defaultWidth;
+    widths.push(
+      found && Number.isFinite(found.width) && found.width > 0 ? found.width : defaultWidth
+    );
   }
+  return widths;
+}
+
+/**
+ * 🔴 `startColumn` ~ `endColumn` 이 몇 칸인가(**기본 글꼴 문자 단위의 합**).
+ *
+ * ⚠️ **이 값으로 줄을 나누지 마라**(2026-11-27). 「열 너비 합 × 8」은 Excel 이 칸을
+ * 그리는 폭이 아니다 — Excel 은 열을 하나씩 환산하고 버린다. 줄을 나눌 때도 상자를
+ * 그릴 때도 쓸 것은 `readColumnRangePx` 다. 이 함수는 양식의 `<cols>` 를 사람이
+ * 읽기 좋은 단위로 들여다볼 때(그리고 그것을 보는 시험에서) 남겨 둔 것이다.
+ */
+export function readColumnRangeWidth(
+  sheetXml: string,
+  startColumn: string,
+  endColumn: string
+): number {
+  const total = readColumnRangeWidths(sheetXml, startColumn, endColumn).reduce(
+    (sum, width) => sum + width,
+    0
+  );
   if (!(total >= 2)) {
     throw new Error(`본문 칸의 폭을 읽지 못했습니다: ${startColumn}:${endColumn} → ${total}`);
   }
   return total;
+}
+
+/**
+ * 🔴 `startColumn` ~ `endColumn` 의 **픽셀 폭** — 문서가 실제로 그리는 그 폭이다.
+ *
+ * 미리보기 상자도 줄 나누기도 전부 이 값에서 나온다. 환산은 문서 미리보기
+ * (`sheet-print-grid.ts`)가 쓰는 **바로 그 함수**다 — 베껴 적으면 또 갈라진다
+ * (`domain/excel-column-width.ts` 머리말의 사고).
+ */
+export function readColumnRangePx(
+  sheetXml: string,
+  startColumn: string,
+  endColumn: string
+): number {
+  const px = excelColumnRangePx(readColumnRangeWidths(sheetXml, startColumn, endColumn));
+  // 🔴 「읽었는데 0 이다」를 폭으로 쓰지 않는다 — 숨긴 열이거나 `<cols>` 가 깨진
+  //    것이고, 그 상태로 그리면 칸이 없는 미리보기가 문서처럼 보인다.
+  if (!(px > 0)) {
+    throw new Error(`칸의 폭을 읽지 못했습니다: ${startColumn}:${endColumn} → ${px}px`);
+  }
+  return px;
 }
 
 /**
@@ -2162,6 +2223,9 @@ export function readColumnRangeWidth(
  * 🔴 **주소를 못 박지 않는다.** `H:AU`·`C:G`·`H:AF` 는 지금 양식이 그럴 뿐이고,
  * 셋 다 양식 안에서 찾아낸다 — 사람이 칸을 병합하거나 옮겨도 따라간다.
  *
+ * 🔴 단위는 **픽셀**이다(2026-11-27). 열 너비 합을 넘기고 화면이 `× 8` 하던 길은
+ * 문서와 3% 어긋나 있었다 — `domain/excel-column-width.ts` 머리말.
+ *
  * ⚠️ 행 높이를 고르게 펴기(`normalizeBodyRowHeights`) **전의** XML 로 읽어도
  * 같은 값이다 — 그 함수는 행 높이만 건드리고 `<cols>` 는 손대지 않는다.
  * ============================================================================
@@ -2181,27 +2245,94 @@ export function serviceReportColumnWidthsFromSheet(sheetXml: string): ServiceRep
   const remarkBlock = findLabelledBlock(sheetXml, REMARK_LABEL_CELL);
 
   return {
-    body: readColumnRangeWidth(sheetXml, block.contentColumn, block.contentEndColumn),
+    bodyPx: readColumnRangePx(sheetXml, block.contentColumn, block.contentEndColumn),
     /**
      * 🔴 **몇 열인가**도 함께 넘긴다(2026-10-31). 미리보기가 맺음 표시 줄에 줄
      * 왼쪽 여백이 「여섯 열」이라 — 길이로 바꾸려면 한 열이 얼마인지 알아야 하고,
-     * 브라우저에는 양식 파일이 없다(`serviceReportClosingMarkIndentWidth`).
+     * 브라우저에는 양식 파일이 없다(`serviceReportClosingMarkIndentPx`).
      */
     bodyColumns: columnIndex(block.contentEndColumn) - columnIndex(block.contentColumn) + 1,
     // 라벨 칸은 내용 열 **바로 왼쪽**에서 끝난다 — 블록을 찾을 때 쓴 그 규칙이다.
-    label: readColumnRangeWidth(
+    labelPx: readColumnRangePx(
       sheetXml,
       block.labelColumn,
       indexToColumn(columnIndex(block.contentColumn) - 1)
     ),
     // 비고는 채우개가 나누지 않아 폭을 읽는 자리가 없었다 — 본문과 같은 규칙으로
     // 첫 줄의 병합(`H60:AF60`)에서 오른쪽 끝을 얻는다.
-    remark: readColumnRangeWidth(
+    remarkPx: readColumnRangePx(
       sheetXml,
       remarkBlock.contentColumn,
       findContentEndColumn(sheetXml, remarkBlock.firstRow, remarkBlock.contentColumn)
     ),
   };
+}
+
+/**
+ * ============================================================================
+ * 🔴 **비고 칸의 가로 맞춤도 양식에서 읽는다** (2026-11-27)
+ * ============================================================================
+ * 미리보기가 `text-center` 를 박아 두고 있었다. 2026-10-18 에 실측했을 때는 양식이
+ * 정말 `center` 였지만, 지금 양식 넷은 `H60`~`H63` 이 전부 **`left`** 다 — 화면만
+ * 가운데로 그리며 **이미 거짓말을 하고 있었다.** 폭과 똑같은 종류의 사고라 똑같이
+ * 고친다: 코드에 박지 않고 그 건이 쓸 양식에서 읽는다.
+ *
+ * ── 🔴 이름 있는 서식의 상속까지 따라간다 ──────────────────────────────
+ * `<xf>` 에 `<alignment>` 가 없는 칸은 `xfId` 가 가리키는 `cellStyleXfs` 에서
+ * 물려받는다. 안 따라가면 `null` 이 나오고 「못 읽었다」로 오해한다 — 문서
+ * 미리보기(`sheet-print-grid.ts` 의 `alignSource`)가 이미 같은 규칙을 쓴다.
+ * 한 칸만 올라가는 것도 그쪽과 같다.
+ *
+ * 🔴 **못 읽으면 던진다.** 기본값으로 물러서면 미리보기가 조용히 거짓말을 하고,
+ * 그 거짓말은 문서를 열어 보기 전까지 안 보인다. 던지면 작성 화면의 「양식을 읽을
+ * 수 없습니다」 길로 그대로 들어간다(`page.tsx`).
+ * ============================================================================
+ */
+export function serviceReportRemarkAlignFromParts(
+  sheetXml: string,
+  stylesXml: string | null
+): ServiceReportHorizontalAlign {
+  const remarkBlock = findLabelledBlock(sheetXml, REMARK_LABEL_CELL);
+  const ref = `${remarkBlock.contentColumn}${remarkBlock.firstRow}`;
+  const styleIndex = Number(findCell(sheetXml, ref).style ?? "NaN");
+  if (!Number.isInteger(styleIndex)) {
+    throw new Error(`비고 칸 ${ref} 에 서식이 없어 가로 맞춤을 읽지 못했습니다.`);
+  }
+
+  const cellXfs = readXfElements(stylesXml, "cellXfs");
+  const styleXfs = readXfElements(stylesXml, "cellStyleXfs");
+  const xf = cellXfs[styleIndex];
+  if (xf === undefined) {
+    throw new Error(`비고 칸 ${ref} 의 서식 ${styleIndex} 번을 styles.xml 에서 찾지 못했습니다.`);
+  }
+
+  // 자기 `<alignment>` 가 먼저고, 없으면 이름 있는 서식(xfId)에서 한 칸 물려받는다.
+  const parentXfId = Number(/\sxfId="(\d+)"/.exec(xf)?.[1] ?? "NaN");
+  const own = readHorizontalAlignment(xf);
+  const align =
+    own ??
+    (Number.isInteger(parentXfId) ? readHorizontalAlignment(styleXfs[parentXfId] ?? "") : null);
+
+  if (align === "left" || align === "center" || align === "right") return align;
+  throw new Error(
+    `비고 칸 ${ref} 의 가로 맞춤을 그릴 수 없습니다: ${align === null ? "적혀 있지 않습니다" : align}`
+  );
+}
+
+/**
+ * 🔴 **작성 화면이 받는 치수 한 벌** — 칸 폭(px)과 비고 맞춤을 양식 하나에서 읽는다.
+ *
+ * 둘을 따로 읽으면 zip 을 두 번 열어야 하고, 무엇보다 **한쪽만 읽힌 반쪽 화면**이
+ * 생길 길이 열린다. 양식을 못 읽는 사정은 하나다(`page.tsx` 의 같은 판단).
+ */
+export function readServiceReportBodyMetrics(templateXlsx: Buffer): ServiceReportBodyMetrics {
+  const archive = ZipArchive.fromBuffer(templateXlsx);
+  const sheetXml = archive.readText(resolveSheetPart(archive, SERVICE_REPORT_SHEET_NAME));
+  const stylesXml = archive.readTextOrNull(STYLES_PART);
+  return serviceReportBodyMetrics(
+    serviceReportColumnWidthsFromSheet(sheetXml),
+    serviceReportRemarkAlignFromParts(sheetXml, stylesXml)
+  );
 }
 
 type LabelledBlock = { firstRow: number; lastRow: number; contentColumn: string };

@@ -5,8 +5,11 @@ import { test } from "node:test";
 import { ZipArchive } from "./zip-reader";
 import { writeZip } from "./zip-writer";
 import { createCellTextReader } from "./sheet-text";
+import { findCell } from "./sheet-patch";
 import { parseSheetRows, readRowHeightAttribute } from "./sheet-rows";
 import {
+  readHorizontalAlignment,
+  readXfElements,
   resolveSheetPart,
   SHARED_STRINGS_PART,
   STYLES_PART,
@@ -27,10 +30,13 @@ import {
   findBodyBlock,
   findLabelledBlock,
   normalizeBodyRowHeights,
+  readColumnRangePx,
   readColumnRangeWidth,
   readSectionStartRows,
+  readServiceReportBodyMetrics,
   readServiceReportColumnWidths,
   serviceReportColumnWidthsFromSheet,
+  serviceReportRemarkAlignFromParts,
   SERVICE_REPORT_ACTIONS_INTRO,
   SERVICE_REPORT_BODY_LABELS,
   SERVICE_REPORT_CELLS,
@@ -123,6 +129,42 @@ test("🔴 한 줄의 폭은 양식의 <cols> 에서 읽는다 — 코드에 박
 
 /**
  * ============================================================================
+ * 🔴 **줄을 나눌 때 재는 것은 「칸 수」가 아니라 「픽셀」이다** (2026-11-27 ①)
+ * ============================================================================
+ * 위 `readColumnRangeWidth` 는 열 너비를 **더한** 값이고, Excel 이 그 칸을 그리는
+ * 픽셀이 아니다 — Excel 은 열을 **하나씩** 환산하고 버린다. 두 값은 열 너비
+ * `1.875` 에서만 우연히 같았고(둘 다 600px), 양식이 `1.9296875` 로 저장된 뒤로는
+ * 617.5 vs 600 으로 갈라졌다. 그 사이 채우개는 **한 줄에 86칸이 들어간다고 믿으며
+ * 84칸짜리 칸에 쓰고 있었다.**
+ * ============================================================================
+ */
+test("🔴 픽셀은 열마다 환산해 더한다 — 합을 한 번 환산하면 문서와 갈린다", () => {
+  // 한 열 1.875 → 15px. 40열 = 600px · 25열(H:AF) = 375px · 라벨 7열 × 1.75 = 98px.
+  assert.equal(readColumnRangePx(SYNTHETIC_SHEET, "H", "AU"), 600);
+  assert.equal(readColumnRangePx(SYNTHETIC_SHEET, "A", "G"), 7 * 14);
+
+  // 🔴 Excel 이 다시 쓴 열 너비(1.90625 · 1.9296875)도 **같은 600px** 이다.
+  for (const width of ["1.90625", "1.9296875"]) {
+    const resaved = SYNTHETIC_SHEET.replace('max="47" width="1.875"', `max="47" width="${width}"`);
+    assert.equal(readColumnRangePx(resaved, "H", "AU"), 600, `열 너비 ${width}`);
+    // 그런데 합을 한 번에 환산하면 달라진다 — 옛 식이 살아 있으면 여기가 깨진다.
+    assert.notEqual(Math.round(readColumnRangeWidth(resaved, "H", "AU") * 8), 600);
+  }
+
+  // 칸이 진짜 넓어지면 px 도 따라간다(3.75 → 한 열 30px).
+  const wider = SYNTHETIC_SHEET.replace('max="47" width="1.875"', 'max="47" width="3.75"');
+  assert.equal(readColumnRangePx(wider, "H", "AU"), 1200);
+
+  // <cols> 에 없는 열은 기본 너비(8.43 → 67px)로 센다 — 칸 수 쪽과 같은 규칙이다.
+  const noCols = SYNTHETIC_SHEET.replace(/<cols>[\s\S]*?<\/cols>/, "");
+  assert.equal(readColumnRangePx(noCols, "H", "I"), 67 * 2);
+
+  // 범위가 뒤집히면 짐작하지 않고 던진다.
+  assert.throws(() => readColumnRangePx(SYNTHETIC_SHEET, "AU", "H"), /열 범위가 뒤집혀/);
+});
+
+/**
+ * ============================================================================
  * 🔴 **화면에 넘길 칸 폭 셋** — 주소를 박지 않고 양식에서 찾아낸다 (2026-10-18)
  * ============================================================================
  * 미리보기가 쓰는 폭이 더는 화면에 굳어 있지 않다. 서버가 그 건의 양식에서 읽어
@@ -132,53 +174,66 @@ test("🔴 한 줄의 폭은 양식의 <cols> 에서 읽는다 — 코드에 박
  */
 test("🔴 본문·비고·라벨 폭을 양식 안에서 찾아 읽는다", () => {
   assert.deepEqual(serviceReportColumnWidthsFromSheet(SYNTHETIC_SHEET), {
-    body: 40 * 1.875, // H~AU — 채우개가 줄을 나눌 때 재는 바로 그 범위
-    remark: 25 * 1.875, // H~AF — 「비　고」 병합과 첫 줄 병합이 알려 준다
-    label: 5 * 1.75, // C~G — 내용 열 **바로 왼쪽**까지
+    bodyPx: 600, // H~AU 40열 × 15px — 채우개가 줄을 나눌 때 재는 바로 그 범위
+    remarkPx: 375, // H~AF 25열 — 「비　고」 병합과 첫 줄 병합이 알려 준다
+    labelPx: 70, // C~G 5열 × 14px — 내용 열 **바로 왼쪽**까지
     // 🔴 폭만이 아니라 **열 수**도 넘긴다(2026-10-31) — 미리보기가 맺음 표시
     //    여백을 셈하려면 한 열이 얼마인지 알아야 하는데, 브라우저에는 양식이 없다.
     bodyColumns: 40,
   });
 
-  // 🔴 사람이(또는 Excel 이) 열 너비를 다시 쓰면 **세 값이 다 따라간다.**
-  //    2026-10-18 에 실제로 일어난 일이 이것이다(1.875 → 1.90625).
-  //    ⚠️ 열 **수**는 그대로다 — 너비가 바뀐 것이지 칸이 늘어난 것이 아니다.
+  /**
+   * 🔴 Excel 이 열 너비를 다시 써도(1.875 → 1.90625) **칸 폭은 그대로다.**
+   * 2026-10-18 에는 이 자리가 「세 값이 다 따라간다」였는데, 그것은 열 너비 합을
+   * 한 번에 환산하던 옛 식의 착시였다 — 한 열은 셋 다 15px 이다(2026-11-27 ①).
+   */
   const resaved = SYNTHETIC_SHEET.replace('max="47" width="1.875"', 'max="47" width="1.90625"');
   assert.deepEqual(serviceReportColumnWidthsFromSheet(resaved), {
-    body: 40 * 1.90625,
-    remark: 25 * 1.90625,
-    label: 5 * 1.75,
+    bodyPx: 600,
+    remarkPx: 375,
+    labelPx: 70,
     bodyColumns: 40,
   });
 
-  // 그리고 그 폭이 곧 화면이 쓸 줄 폭이 된다 — 84칸이 85칸으로.
-  assert.equal(serviceReportBodyMetrics(serviceReportColumnWidthsFromSheet(SYNTHETIC_SHEET)).bodyWrapWidth, 84);
-  assert.equal(serviceReportBodyMetrics(serviceReportColumnWidthsFromSheet(resaved)).bodyWrapWidth, 85);
+  // 🔴 칸이 **진짜로** 넓어지면 세 값이 다 따라간다.
+  const wider = SYNTHETIC_SHEET.replace('max="47" width="1.875"', 'max="47" width="3.75"');
+  const widerColumns = serviceReportColumnWidthsFromSheet(wider);
+  assert.equal(widerColumns.bodyPx, 1200);
+  assert.equal(widerColumns.remarkPx, 750);
+
+  // 그리고 그 폭이 곧 화면이 쓸 줄 폭이 된다.
+  const wrapOf = (sheetXml: string) =>
+    serviceReportBodyMetrics(serviceReportColumnWidthsFromSheet(sheetXml), "left").bodyWrapWidth;
+  assert.equal(wrapOf(SYNTHETIC_SHEET), 84);
+  assert.equal(wrapOf(resaved), 84);
+  assert.equal(wrapOf(wider), 169);
 });
 
 test("🔴 줄 폭은 기본 글꼴이 아니라 **칸에 박힌 글꼴** 기준으로 환산한다", () => {
   /**
    * 2026-10-15 실측값을 못 박는다. 누가 상수를 건드리면 여기가 먼저 깨진다.
-   *   본문 H:AU  75칸      × 8px = 600px → ⌊(600−5−7)÷7⌋ = 84칸(한글 42자)
-   *   비고 H:AF  46.875칸  × 8px = 375px → ⌊(375−5−7)÷7⌋ = 51칸(한글 25자)
+   *   본문 H:AU  600px → ⌊(600−5−7)÷7⌋ = 84칸(한글 42자)
+   *   비고 H:AF  375px → ⌊(375−5−7)÷7⌋ = 51칸(한글 25자)
    */
-  assert.equal(contentWrapWidth(75), 84);
-  assert.equal(contentWrapWidth(46.875), 51);
+  assert.equal(contentWrapWidth(600), 84);
+  assert.equal(contentWrapWidth(375), 51);
 
-  // 🔴 기본 글꼴 기준 값보다 **넓어야** 한다 — 그래야 칸이 찬다.
-  assert.ok(contentWrapWidth(75) > 75, "환산이 오히려 좁아졌다");
+  // 🔴 기본 글꼴 기준 칸 수(600 ÷ 8 = 75)보다 **넓어야** 한다 — 그래야 칸이 찬다.
+  assert.ok(contentWrapWidth(600) > 600 / 8, "환산이 오히려 좁아졌다");
 
   /**
    * 🔴 그래도 엑셀이 실제로 담는 양보다는 **좁아야** 한다. 한글 음절은 맑은
    * 고딕 9pt 에서 12px 이므로 (600−5)÷12 = 49자가 진짜 용량이다.
    */
-  assert.ok(Math.floor(contentWrapWidth(75) / 2) < Math.floor((75 * 8 - 5) / 12));
+  assert.ok(Math.floor(contentWrapWidth(600) / 2) < Math.floor((600 - 5) / 12));
 
-  // 양식의 열 너비가 바뀌면 줄 폭도 따라간다. ⌊(150×8−12)÷7⌋ = 169.
-  assert.equal(contentWrapWidth(150), 169);
+  // 양식의 칸이 넓어지면 줄 폭도 따라간다. ⌊(1200−12)÷7⌋ = 169.
+  assert.equal(contentWrapWidth(1200), 169);
 
   // 칸이 말이 안 되게 좁으면 파일을 만들기 전에 던진다.
-  assert.throws(() => contentWrapWidth(1), /본문 칸이 너무 좁습니다/);
+  assert.throws(() => contentWrapWidth(8), /본문 칸이 너무 좁습니다/);
+  // 🔴 열 너비 합을 넘기면(픽셀이 아닌 소수) 그 자리에서 잡는다.
+  assert.throws(() => contentWrapWidth(40 * 1.9296875), /칸 폭은 픽셀\(정수\)/);
 });
 
 test("본문 도우미가 없거나 여럿이면 짐작하지 않고 던진다", () => {
@@ -2021,7 +2076,7 @@ for (const template of LAYOUT_TEMPLATES) {
     const sheetXml = templateSheetXml(templatePath as string);
     const block = findBodyBlock(sheetXml);
     const widths = serviceReportColumnWidthsFromSheet(sheetXml);
-    const metrics = serviceReportBodyMetrics(widths);
+    const metrics = serviceReportBodyMetrics(widths, "left");
 
     // 🔵 재는 것이 있는지부터 — 이 양식의 본문은 `H:AU` 40열이다.
     assert.equal(block.contentColumn, "H");
@@ -2035,16 +2090,16 @@ for (const template of LAYOUT_TEMPLATES) {
      */
     const markColumn = serviceReportClosingMarkColumn(block);
     const measured =
-      widths.body - readColumnRangeWidth(sheetXml, markColumn, block.contentEndColumn);
+      widths.bodyPx - readColumnRangePx(sheetXml, markColumn, block.contentEndColumn);
 
     assert.equal(
-      metrics.closingMarkIndentWidth,
+      metrics.closingMarkIndentPx,
       measured,
       "화면이 쓰는 여백과 문서의 병합이 다른 자리를 가리킨다"
     );
     // 그리고 그 여백은 **여섯 열**이다(= 옮길 세 열의 두 배).
     assert.equal(
-      metrics.closingMarkIndentWidth / (widths.body / widths.bodyColumns),
+      metrics.closingMarkIndentPx / (widths.bodyPx / widths.bodyColumns),
       SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT * 2
     );
   });
@@ -2654,7 +2709,8 @@ const PARITY_TEMPLATES = [
  * 따로 재면 「화면이 받는 값」이 아니라 「시험이 재는 값」을 보게 된다.
  */
 function templateMetrics(templatePath: string) {
-  return serviceReportBodyMetrics(readServiceReportColumnWidths(readFileSync(templatePath)));
+  // 🔴 2026-11-27 부터 **한 함수**다 — 칸 폭과 비고 맞춤을 같은 버퍼에서 읽는다.
+  return readServiceReportBodyMetrics(readFileSync(templatePath));
 }
 
 /** 화면이 넘기는 모양 그대로 — 전부 지어낸 글이다. */
@@ -2833,8 +2889,8 @@ function columnTagCovering(sheetXml: string, letters: string): { tag: string; wi
  * 그 전제가 사라졌다 — 화면은 이제 상수를 안 들고 있고, 서버가 양식에서 읽어
  * 넘긴다. 그래서 볼 것이 바뀐다: **두 길이 같은 수에 닿는가.**
  *
- *   채우개  `fillSheet` 안에서 `contentWrapWidth(readColumnRangeWidth(…))`
- *   화면    `page.tsx` 에서 `serviceReportBodyMetrics(readServiceReportColumnWidths(…))`
+ *   채우개  `fillSheet` 안에서 `contentWrapWidth(readColumnRangePx(…))`
+ *   화면    `page.tsx` 에서 `readServiceReportBodyMetrics(…)`
  *
  * 둘이 갈라지면 미리보기가 거짓말을 한다. 짝맞춤 시험이 **결과로** 그것을 잡지만,
  * 여기서는 **셈 자체**를 맞춰 본다 — 어느 쪽이 틀렸는지 바로 보인다.
@@ -2848,22 +2904,30 @@ test("🔴 화면에 넘기는 칸 폭이 채우개가 재는 폭과 같다", { 
   // ① 본문 — 채우개가 줄을 나누기 전에 재는 **그 범위**와 같은 수여야 한다.
   const body = findBodyBlock(sheetXml);
   assert.equal(
-    widths.body,
-    readColumnRangeWidth(sheetXml, body.contentColumn, body.contentEndColumn)
+    widths.bodyPx,
+    readColumnRangePx(sheetXml, body.contentColumn, body.contentEndColumn)
   );
   assert.equal(
-    serviceReportBodyMetrics(widths).bodyWrapWidth,
-    contentWrapWidth(readColumnRangeWidth(sheetXml, body.contentColumn, body.contentEndColumn))
+    serviceReportBodyMetrics(widths, "left").bodyWrapWidth,
+    contentWrapWidth(readColumnRangePx(sheetXml, body.contentColumn, body.contentEndColumn))
+  );
+  /**
+   * 🔴 **열 너비 합으로 재면 다른 수가 나온다**(2026-11-27 ①). 옛 식이 되살아나면
+   * 여기가 깨진다 — 지금 양식에서 `round(77.1875 × 8)` = 618 이고 문서는 600 이다.
+   */
+  assert.notEqual(
+    Math.round(readColumnRangeWidth(sheetXml, body.contentColumn, body.contentEndColumn) * 8),
+    widths.bodyPx
   );
 
   // ② 라벨 — 내용 열 **바로 왼쪽**까지. 한 열의 너비가 본문과 달라 곱으로 못 센다.
   assert.equal(body.labelColumn, "C");
-  assert.equal(widths.label, readColumnRangeWidth(sheetXml, "C", "G"));
-  assert.notEqual(widths.label, (widths.body / 40) * 5);
+  assert.equal(widths.labelPx, readColumnRangePx(sheetXml, "C", "G"));
+  assert.notEqual(widths.labelPx, (widths.bodyPx / 40) * 5);
 
   // ③ 비고 — 「비　고」 병합과 첫 줄 병합이 알려 주는 범위.
   assert.ok(sheetXml.includes('<mergeCell ref="H60:AF60"/>'), "비고 칸의 병합이 바뀌었다");
-  assert.equal(widths.remark, readColumnRangeWidth(sheetXml, "H", "AF"));
+  assert.equal(widths.remarkPx, readColumnRangePx(sheetXml, "H", "AF"));
 
   /**
    * 🔴 그리고 **숫자가 코드에 안 박혀 있다.** 지금 어떤 수가 나오든 그것은 이
@@ -2884,10 +2948,93 @@ test("🔴 화면에 넘기는 칸 폭이 채우개가 재는 폭과 같다", { 
   );
   assert.notEqual(resaved, sheetXml, "본문 열 너비를 바꿔 보지 못했다 — 양식이 바뀌었다");
   const after = serviceReportColumnWidthsFromSheet(resaved);
-  assert.ok(after.body > widths.body, "열 너비를 바꿨는데 폭이 안 따라갔다");
-  assert.ok(after.remark > widths.remark, "비고 폭이 안 따라갔다");
+  assert.ok(after.bodyPx > widths.bodyPx, "열 너비를 바꿨는데 폭이 안 따라갔다");
+  assert.ok(after.remarkPx > widths.remarkPx, "비고 폭이 안 따라갔다");
   // 안 건드린 라벨 열(C~G)은 그대로다 — 바꾼 열만 따라온다.
-  assert.equal(after.label, widths.label, "안 바꾼 라벨 폭까지 달라졌다");
+  assert.equal(after.labelPx, widths.labelPx, "안 바꾼 라벨 폭까지 달라졌다");
+});
+
+/**
+ * ============================================================================
+ * 🔴 **비고 칸의 가로 맞춤도 양식에서 읽는다** (2026-11-27 ②)
+ * ============================================================================
+ * 미리보기가 `text-center` 를 박아 두고 있었다. 양식 넷은 지금 `left` 라, 화면만
+ * 가운데로 그리며 이미 거짓말을 하고 있었다. 폭과 똑같은 종류의 사고다.
+ * ============================================================================
+ */
+for (const template of LAYOUT_TEMPLATES) {
+  const templatePath = process.env[template.variable];
+  const skip = templatePath ? false : `${template.variable} 가 설정되지 않았습니다`;
+
+  test(`🔴 비고 맞춤을 양식에서 읽는다 — ${template.name}`, { skip }, () => {
+    const metrics = readServiceReportBodyMetrics(readFileSync(templatePath as string));
+    const archive = ZipArchive.fromBuffer(readFileSync(templatePath as string));
+    const sheetXml = archive.readText(resolveSheetPart(archive, SERVICE_REPORT_SHEET_NAME));
+
+    // 🔵 재는 것이 있는지부터 — 비고 칸 `H60` 에 서식이 걸려 있어야 한다.
+    const styleIndex = findCell(sheetXml, "H60").style;
+    assert.ok(styleIndex !== null, "비고 칸에 서식이 없다 — 맞춤을 읽을 수가 없다");
+
+    // 읽은 값이 그릴 수 있는 셋 중 하나다(아니면 읽개가 던졌을 것이다).
+    assert.ok(
+      ["left", "center", "right"].includes(metrics.remarkAlign),
+      `비고 맞춤이 ${metrics.remarkAlign} 이다`
+    );
+    // 🔴 그리고 그 값이 **양식의 `<alignment horizontal>`** 과 글자 그대로 같다.
+    const xf = readXfElements(archive.readTextOrNull(STYLES_PART), "cellXfs")[Number(styleIndex)];
+    assert.ok(xf !== undefined, "H60 의 서식을 styles.xml 에서 못 찾았다");
+    assert.equal(readHorizontalAlignment(xf), metrics.remarkAlign);
+  });
+}
+
+/**
+ * 🔴 **이름 있는 서식에서 물려받는 칸도 읽는다.** `<xf>` 에 `<alignment>` 가 없으면
+ * `xfId` 가 가리키는 `cellStyleXfs` 를 한 칸 올라가야 하고, 안 따라가면 `null` 이
+ * 나와 「못 읽었다」로 오해한다. 지금 양식은 칸마다 제 맞춤을 들고 있어서 그 길이
+ * 안 밟히므로, 뼈대 시트로 일부러 비워 두고 본다.
+ */
+test("🔴 비고 맞춤 — <xf> 에 없으면 이름 있는 서식에서 물려받는다", () => {
+  /** 뼈대 시트에는 60행이 없다. 이 시험에만 비고 칸 한 칸을 얹는다. */
+  const withRemark = (styleIndex: number): string =>
+    SYNTHETIC_SHEET.replace(
+      "</sheetData>",
+      `<row r="60"><c r="H60" s="${styleIndex}"/></row></sheetData>`
+    );
+  const styles =
+    '<styleSheet><cellStyleXfs count="1">' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0"><alignment horizontal="right" vertical="center"/></xf>' +
+    "</cellStyleXfs>" +
+    '<cellXfs count="2">' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment horizontal="center"/></xf>' +
+    "</cellXfs></styleSheet>";
+
+  // 🔵 재는 것이 있는지부터 — 얹은 칸이 실제로 들어갔나.
+  assert.ok(withRemark(0).includes('<c r="H60" s="0"/>'), "비고 칸을 못 얹었다");
+
+  // `s="0"` 은 제 맞춤이 없다 — 물려받아 `right` 가 나와야 한다.
+  assert.equal(serviceReportRemarkAlignFromParts(withRemark(0), styles), "right");
+
+  // `s="1"` 은 제 맞춤이 있다 — 그쪽이 이긴다.
+  assert.equal(serviceReportRemarkAlignFromParts(withRemark(1), styles), "center");
+
+  // 🔴 그릴 수 없는 맞춤이면 **짐작하지 않고 던진다**(기본값으로 물러서지 않는다).
+  const odd = styles.replace('horizontal="right"', 'horizontal="justify"');
+  assert.throws(
+    () => serviceReportRemarkAlignFromParts(withRemark(0), odd),
+    /가로 맞춤을 그릴 수 없습니다/
+  );
+  // 상속까지 따라가도 아무 데도 안 적혀 있으면 — 역시 던진다.
+  const blank = styles.replace('<alignment horizontal="right" vertical="center"/>', "");
+  assert.throws(
+    () => serviceReportRemarkAlignFromParts(withRemark(0), blank),
+    /가로 맞춤을 그릴 수 없습니다/
+  );
+  // styles.xml 이 아예 없을 때도 던진다 — 밋밋하게 그려 넘기지 않는다.
+  assert.throws(
+    () => serviceReportRemarkAlignFromParts(withRemark(0), null),
+    /styles\.xml 에서 찾지 못했습니다/
+  );
 });
 
 test("비고는 여전히 양식의 줄 수를 넘을 수 없다", { skip: skipRepair }, () => {

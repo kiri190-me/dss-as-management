@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
+import { excelColumnRangePx } from "@/lib/domain/excel-column-width";
 import {
   serviceReportBodyMetrics,
   type ServiceReportColumnWidths,
@@ -95,34 +96,65 @@ import {
  * 칸 폭이 화면에 굳어 있었다. 사용자가 양식 넷에 **도장만 바꿔 저장**했는데 Excel 이
  * 열 너비를 다시 써서(1.875 → 1.90625) 그 값이 틀어졌다. 이제 서버가 읽어 props 로
  * 넘긴다. 그래서 여기서 못 박을 것이 둘 늘었다:
- *  ⑭ 🔴 치수 함수들이 **인자로 받은 폭**을 쓴다 — 옛 양식 값을 넣으면 지금까지의
- *     px(600 · 375 · 70 · 614)가 그대로 나오고, 새 양식 값을 넣으면 **다 함께 커진다**
+ *  ⑭ 🔴 치수 함수들이 **인자로 받은 폭**을 쓴다 — 지금 양식 값을 넣으면 px(600 ·
+ *     375 · 70 · 672)가 나오고, **칸이 진짜 넓은** 양식을 넣으면 다 함께 커진다
  *  ⑮ 🔴 화면 원본에 폭 숫자도, 없어진 상수 이름도 남아 있지 않다
+ *
+ * ── 🔴 여섯째 조각(2026-11-27): 폭의 **단위가 픽셀**이다 ───────────────────
+ * 열 너비를 받아 `× 8` 하던 환산이 문서(Excel)의 셈과 달랐다 — Excel 은 열을 하나씩
+ * 환산하고 버린다. 그래서 미리보기가 문서보다 3% 넓었고, 열 너비가 1.875 → 1.9296875
+ * 로 늘어도 **문서의 칸 폭은 600px 그대로**였다. 이제 px 은 서버가 양식에서 셈해 주고
+ * 이 파일의 함수들은 그 px 에 배율만 곱한다(`domain/excel-column-width.ts`).
  * ============================================================================
  */
 
 /**
- * 🔴 두 양식의 **실측 열 너비**. 시험의 입력이지 화면이 들고 있는 값이 아니다
- * (화면에 굳힌 값이 없다는 것은 아래 「굳힌 폭이 없다」가 본다).
+ * 🔴 양식들의 **실측 열 너비 → 칸 폭(px)**. 시험의 입력이지 화면이 들고 있는 값이
+ * 아니다(화면에 굳힌 값이 없다는 것은 아래 「굳힌 폭이 없다」가 본다).
  *
- *   옛 양식 — 본문 40열 × 1.875    · 비고 25열 × 1.875    · 라벨 5열 × 1.75
- *   새 양식 — 본문 40열 × 1.90625  · 비고 25열 × 1.90625  · 라벨 5열 × 1.7265625
+ *   옛 양식  — 본문 40열 × 1.875      · 비고 25열 × 1.875      · 라벨 5열 × 1.75
+ *   10/19 것 — 본문 40열 × 1.90625    · 비고 25열 × 1.90625    · 라벨 5열 × 1.7265625
+ *   지금 것  — 본문 40열 × 1.9296875  · 비고 25열 × 1.9296875  · 라벨 5열 × 1.73046875
+ *
+ * 🔴 **셋이 같은 픽셀이다**(600 · 375 · 70). Excel 은 열을 하나씩 환산하고 버리므로
+ * 1.875 도 1.9296875 도 한 열 15px 이다 — 2026-11-27 에 밝혀진 ①의 핵심이고, 그래서
+ * 「양식이 넓어지면 따라간다」는 **픽셀이 진짜 달라지는 양식**으로 봐야 한다
+ * (`WIDER_TEMPLATE_COLUMNS` — `domain/service-report-body-wrap.test.ts` 와 같은 판단).
  */
+const rangePx = (columns: number, charsPerColumn: number): number =>
+  excelColumnRangePx(Array.from({ length: columns }, () => charsPerColumn));
+
 const OLD_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
-  body: 40 * 1.875,
-  remark: 25 * 1.875,
-  label: 5 * 1.75,
+  bodyPx: rangePx(40, 1.875),
+  remarkPx: rangePx(25, 1.875),
+  labelPx: rangePx(5, 1.75),
   // 🔴 본문 칸이 몇 열인가 — 맺음 표시의 왼쪽 여백이 여기서 나온다(H:AU = 40).
   bodyColumns: 40,
 };
 const NEW_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
-  body: 40 * 1.90625,
-  remark: 25 * 1.90625,
-  label: 5 * 1.7265625,
+  bodyPx: rangePx(40, 1.90625),
+  remarkPx: rangePx(25, 1.90625),
+  labelPx: rangePx(5, 1.7265625),
   bodyColumns: 40,
 };
-const METRICS = serviceReportBodyMetrics(OLD_TEMPLATE_COLUMNS);
-const NEW_METRICS = serviceReportBodyMetrics(NEW_TEMPLATE_COLUMNS);
+/** 지금(2026-11-27) 양식 넷. 위 둘과 픽셀이 같다. */
+const CURRENT_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
+  bodyPx: rangePx(40, 1.9296875),
+  remarkPx: rangePx(25, 1.9296875),
+  labelPx: rangePx(5, 1.73046875),
+  bodyColumns: 40,
+};
+/** 🔴 한 열이 16px 이 되는 양식 — 버림 뒤에도 폭이 **진짜로** 달라진다. */
+const WIDER_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
+  bodyPx: rangePx(40, 2),
+  remarkPx: rangePx(25, 2),
+  labelPx: rangePx(5, 2),
+  bodyColumns: 40,
+};
+const METRICS = serviceReportBodyMetrics(OLD_TEMPLATE_COLUMNS, "center");
+const NEW_METRICS = serviceReportBodyMetrics(NEW_TEMPLATE_COLUMNS, "center");
+const CURRENT_METRICS = serviceReportBodyMetrics(CURRENT_TEMPLATE_COLUMNS, "left");
+const WIDER_METRICS = serviceReportBodyMetrics(WIDER_TEMPLATE_COLUMNS, "left");
 
 /** 그 양식에서 나오는 글꼴 하한. 🔴 **상수였던 것이 함수가 되었다** — 폭을 탄다. */
 const MIN_FONT_SIZE_PX = serviceReportGridMinFontSizePx(METRICS);
@@ -222,19 +254,22 @@ describe("🔴 폭이 한 곳에서 나온다", () => {
     }
   });
 
-  test("🔴 미리보기 상자 = 문서의 칸 그 자체다 — 열 너비 × 8px", () => {
-    // 옛 양식을 넣으면 지금까지의 px 그대로다.
-    assert.equal(serviceReportGridDocumentBoxPx(METRICS.columns.body), 600);
-    assert.equal(serviceReportGridDocumentBoxPx(METRICS.columns.remark), 375);
-    assert.equal(serviceReportGridDocumentBoxPx(METRICS.columns.label), 70);
-    // 🔴 새 양식을 넣으면 **다 함께 넓어진다** — 굳혀 두면 문서보다 좁게 그린다.
-    assert.equal(serviceReportGridDocumentBoxPx(NEW_METRICS.columns.body), 610);
-    assert.equal(serviceReportGridDocumentBoxPx(NEW_METRICS.columns.remark), 381);
-    assert.equal(serviceReportGridDocumentBoxPx(NEW_METRICS.columns.label), 69);
+  test("🔴 미리보기 상자 = 문서의 칸 그 자체다 — 양식에서 읽은 px 그대로", () => {
+    // 양식 셋 다 같은 칸 폭이다(위 머리말) — 지금까지의 px 과도 같다.
+    for (const metrics of [METRICS, NEW_METRICS, CURRENT_METRICS]) {
+      assert.equal(serviceReportGridDocumentBoxPx(metrics.columns.bodyPx), 600);
+      assert.equal(serviceReportGridDocumentBoxPx(metrics.columns.remarkPx), 375);
+      assert.equal(serviceReportGridDocumentBoxPx(metrics.columns.labelPx), 70);
+    }
+    // 🔴 칸이 **진짜로** 넓은 양식을 넣으면 다 함께 넓어진다 — 굳혀 두면 문서보다
+    //    좁게 그린다. (열 너비만 늘어난 양식은 Excel 이 같은 px 로 그린다.)
+    assert.equal(serviceReportGridDocumentBoxPx(WIDER_METRICS.columns.bodyPx), 640);
+    assert.equal(serviceReportGridDocumentBoxPx(WIDER_METRICS.columns.remarkPx), 400);
+    assert.equal(serviceReportGridDocumentBoxPx(WIDER_METRICS.columns.labelPx), 80);
     // 🔴 문서의 칸이 한글 42자 폭보다 넓다 — 그 차이가 양식의 안전 여백이다.
-    for (const metrics of [METRICS, NEW_METRICS]) {
+    for (const metrics of [METRICS, NEW_METRICS, CURRENT_METRICS, WIDER_METRICS]) {
       assert.ok(
-        serviceReportGridDocumentBoxPx(metrics.columns.body) >
+        serviceReportGridDocumentBoxPx(metrics.columns.bodyPx) >
           serviceReportGridInputContentPx(
             metrics.bodyWrapWidth,
             SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX
@@ -250,15 +285,15 @@ describe("🔴 폭이 한 곳에서 나온다", () => {
       "적는 칸 기둥의 폭이 셈에서 안 나온다"
     );
     assert.ok(
-      previewCode.includes("serviceReportGridDocumentBoxCss(metrics.columns.body)"),
+      previewCode.includes("serviceReportGridDocumentBoxCss(metrics.columns.bodyPx)"),
       "미리보기 폭이 **양식에서 온 값**으로 안 나온다"
     );
     assert.ok(
-      previewCode.includes("serviceReportGridDocumentBoxCss(metrics.columns.label)"),
+      previewCode.includes("serviceReportGridDocumentBoxCss(metrics.columns.labelPx)"),
       "라벨 칸 폭이 **양식에서 온 값**으로 안 나온다"
     );
     assert.ok(
-      previewCode.includes("serviceReportGridDocumentBoxCss(metrics.columns.remark)"),
+      previewCode.includes("serviceReportGridDocumentBoxCss(metrics.columns.remarkPx)"),
       "비고 칸 폭이 **양식에서 온 값**으로 안 나온다"
     );
     assert.ok(
@@ -379,14 +414,14 @@ describe("🔴 폭이 글꼴 크기에서 나온다", () => {
 
   test("🔴 미리보기의 모든 치수가 **한 배율**을 탄다 — 상자 안이 계속 문서와 1:1", () => {
     const cases: [string, number][] = [
-      [serviceReportGridDocumentBoxCss(METRICS.columns.label), serviceReportGridDocumentBoxPx(METRICS.columns.label)],
+      [serviceReportGridDocumentBoxCss(METRICS.columns.labelPx), serviceReportGridDocumentBoxPx(METRICS.columns.labelPx)],
       [
-        serviceReportGridDocumentBoxCss(METRICS.columns.body),
-        serviceReportGridDocumentBoxPx(METRICS.columns.body),
+        serviceReportGridDocumentBoxCss(METRICS.columns.bodyPx),
+        serviceReportGridDocumentBoxPx(METRICS.columns.bodyPx),
       ],
       [
-        serviceReportGridDocumentBoxCss(METRICS.columns.remark),
-        serviceReportGridDocumentBoxPx(METRICS.columns.remark),
+        serviceReportGridDocumentBoxCss(METRICS.columns.remarkPx),
+        serviceReportGridDocumentBoxPx(METRICS.columns.remarkPx),
       ],
       [
         serviceReportGridPreviewScaledCss(SERVICE_REPORT_GRID_CELL_PADDING_LEFT_PX),
@@ -764,11 +799,16 @@ describe("🔴 안내문이 지금 사실과 맞는다", () => {
  *   · 여백 26px 은 공용 입력칸이 두르는 `px-3`(12px씩) + `border`(1px씩)다.
  */
 describe("🔴 폭의 셈이 양식과 입력칸에서 나온다", () => {
-  test("양식에서 온 칸 수 그대로다 — 옛 양식과 새 양식", () => {
-    assert.equal(METRICS.bodyWrapWidth, 84);
-    assert.equal(METRICS.remarkWrapWidth, 51);
-    assert.equal(NEW_METRICS.bodyWrapWidth, 85);
-    assert.equal(NEW_METRICS.remarkWrapWidth, 52);
+  test("양식에서 온 칸 수 그대로다 — 양식 셋과 넓은 양식", () => {
+    // 🔴 양식 셋이 **같은 84·51**이다. 2026-10-18 에는 새 양식을 85·52 로 보았는데,
+    //    그 85 는 「열 너비 합 × 8」이라는 옛 환산의 착시였다(위 여섯째 조각).
+    for (const metrics of [METRICS, NEW_METRICS, CURRENT_METRICS]) {
+      assert.equal(metrics.bodyWrapWidth, 84);
+      assert.equal(metrics.remarkWrapWidth, 51);
+    }
+    // 칸이 진짜 넓어지면 칸 수도 는다 — 640px → ⌊(640−12)÷7⌋ = 89.
+    assert.equal(WIDER_METRICS.bodyWrapWidth, 89);
+    assert.equal(WIDER_METRICS.remarkWrapWidth, 55);
   });
 
   test("🔴 상한 = 글 폭 + 입력칸의 안쪽 여백 + 테두리", () => {
@@ -784,8 +824,8 @@ describe("🔴 폭의 셈이 양식과 입력칸에서 나온다", () => {
 
     assert.equal(serviceReportGridInputMaxWidthPx(METRICS.bodyWrapWidth), 588 + 26);
     assert.equal(serviceReportGridInputMaxWidthPx(METRICS.remarkWrapWidth), 357 + 26);
-    // 🔴 새 양식이면 **한 칸(한글 반 자)만큼 넓어진다** — 85 ÷ 2 × 14 = 595.
-    assert.equal(serviceReportGridInputMaxWidthPx(NEW_METRICS.bodyWrapWidth), 595 + 26);
+    // 🔴 칸이 진짜 넓은 양식이면 그만큼 넓어진다 — 89 ÷ 2 × 14 = 623.
+    assert.equal(serviceReportGridInputMaxWidthPx(WIDER_METRICS.bodyWrapWidth), 623 + 26);
   });
 });
 
@@ -830,13 +870,15 @@ describe("🔴 굳힌 폭이 없다", () => {
   });
 
   test("🔴 하한·기울기가 **상수가 아니라 함수**다 — 폭이 바뀌면 따라가야 한다", () => {
-    // 새 양식은 칸이 넓어서 같은 1152px 에 더 작은 글꼴로 들어간다.
+    // 🔴 견주는 짝이 **칸이 진짜 넓은 양식**이다(2026-11-27). 열 너비만 늘어난
+    //    양식은 Excel 이 같은 px 로 그리므로 하한도 같은 것이 **맞다** — 그쪽으로
+    //    견주면 「안 따라간다」는 거짓 실패가 난다.
     assert.ok(
-      serviceReportGridMinFontSizePx(NEW_METRICS) < serviceReportGridMinFontSizePx(METRICS),
+      serviceReportGridMinFontSizePx(WIDER_METRICS) < serviceReportGridMinFontSizePx(METRICS),
       "양식이 넓어졌는데 하한이 그대로다"
     );
     // 그리고 그 하한이 **각 양식에서** 1152px 를 딱 채운다.
-    for (const metrics of [METRICS, NEW_METRICS]) {
+    for (const metrics of [METRICS, CURRENT_METRICS, WIDER_METRICS]) {
       assert.ok(
         Math.abs(
           serviceReportGridRowWidthPx(metrics, serviceReportGridMinFontSizePx(metrics)) -
@@ -845,10 +887,18 @@ describe("🔴 굳힌 폭이 없다", () => {
       );
     }
     // CSS 식도 양식마다 다른 수를 낸다 — 한 벌로 굳어 있지 않다.
-    assert.notEqual(serviceReportGridRowFontCss(METRICS), serviceReportGridRowFontCss(NEW_METRICS));
+    assert.notEqual(
+      serviceReportGridRowFontCss(METRICS),
+      serviceReportGridRowFontCss(WIDER_METRICS)
+    );
     assert.notEqual(
       serviceReportGridPreviewFontCss(METRICS),
-      serviceReportGridPreviewFontCss(NEW_METRICS)
+      serviceReportGridPreviewFontCss(WIDER_METRICS)
+    );
+    // 🔵 반대쪽도 못 박는다 — **칸 폭이 같으면 식도 같다**(열 너비만 달라진 양식).
+    assert.equal(
+      serviceReportGridRowFontCss(METRICS),
+      serviceReportGridRowFontCss(CURRENT_METRICS)
     );
   });
 });

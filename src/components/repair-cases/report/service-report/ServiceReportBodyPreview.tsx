@@ -3,6 +3,7 @@
 import { useMemo, type ReactNode } from "react";
 
 import {
+  SERVICE_REPORT_REMARK_LABEL,
   serviceReportBodyPreviewRows,
   serviceReportBodyPreviewSections,
   serviceReportRemarkPreviewLines,
@@ -11,6 +12,7 @@ import {
 import { serviceReportLines } from "@/lib/domain/service-report-form";
 
 import {
+  SERVICE_REPORT_GRID_ALIGN_CLASS,
   SERVICE_REPORT_GRID_CELL_PADDING_LEFT_PX,
   serviceReportGridDocumentBoxCss,
   serviceReportGridPreviewScaledCss,
@@ -74,8 +76,9 @@ import {
  *      넘쳐 나갔다 — 문서에서는 넘치지 않는데 화면에서만 넘쳤다)
  *   ③ 라벨 칸이 문서의 `C:G` **70px** 다(앞 조각은 라벨 **글자** 폭인 36px)
  *   ④ 줄 높이가 문서의 행 높이다 — 본문 14.1pt · 비고 15pt
- *   ⑤ 테두리와 맞춤이 문서를 따른다 — 본문 상자 **위가 double**, 비고 줄은
- *      **가운데 맞춤**(양식이 그렇다)
+ *   ⑤ 테두리와 맞춤이 문서를 따른다 — 본문 상자 **위가 double**, 비고 줄의 맞춤은
+ *      **양식에서 읽는다**(2026-11-27 — 그전에는 `center` 를 박아 두었고, 양식이
+ *      `left` 로 바뀐 뒤로 화면만 가운데로 그리고 있었다)
  *
  * 🔴 **상자의 오른쪽 선은 이제 「줄이 바뀌는 자리」가 아니다.** 문서의 칸 끝이고,
  * 글은 그 안에서 안전 여백(16.7%)을 두고 먼저 끊긴다 — 문서가 그렇기 때문이다
@@ -99,8 +102,12 @@ import {
  * ── 🔴 다섯째 조각: 칸 폭이 **props 로 들어온다** (2026-10-18) ──────────────
  * 폭(열 너비·줄 폭)을 이 화면이 굳혀 들고 있었다. 사용자가 양식 넷에 **도장만
  * 바꿔 저장**했는데 Excel 이 열 너비를 다시 써서(1.875 → 1.90625) 그 값이
- * 틀어졌다 — 채우개는 매번 양식을 읽으므로 **문서는 85칸으로 나뉘는데 미리보기만
- * 84칸으로** 그리는 상태였다. 그게 바로 이 화면이 막으려던 거짓말이다.
+ * 틀어졌다 — 채우개는 매번 양식을 읽고 화면은 안 읽으니, 양식을 고치는 날마다
+ * 둘이 갈라질 자리였다. 그게 바로 이 화면이 막으려던 거짓말이다.
+ *
+ * ⚠️ 그때 「문서는 85칸으로 나뉘는데 미리보기만 84칸」이라고 적어 두었는데 **그
+ * 85 는 틀린 수였다**(2026-11-27 에 밝혀졌다). 열 너비 합을 한 번에 환산하던 옛
+ * 식이 낸 값이고, Excel 은 열마다 환산하고 버리므로 문서는 그 내내 84칸이었다.
  *
  * 그래서 작성 화면(서버)이 **그 건이 쓸 양식**에서 읽어 넘긴다
  * (`ServiceReportBodyMetrics`). 폭을 쓰는 자리가 넷인데(상자 폭 · 라벨 칸 폭 ·
@@ -110,6 +117,25 @@ import {
  * 돌아온다. 대신 상자를 안 그리고 「양식을 읽을 수 없어 …」 한 줄만 둔다 —
  * 작성 화면 맨 위에는 이미 같은 사정을 말하는 빨간 줄이 떠 있고, 내려받기도
  * 잠겨 있다(`page.tsx` · `ServiceReportForm.tsx`).
+ *
+ * ── 🔴 여섯째 조각: 문서와 **정말로** 1:1 로 맞췄다 (2026-11-27) ──────────
+ * 위 다섯째 조각까지 와서도 네 자리가 문서와 달랐고, 넷 다 **양식에서 읽어야 할
+ * 것을 코드가 들고 있던** 같은 종류였다:
+ *
+ *   ① 픽셀 환산이 문서와 다른 식이었다 — 화면은 열 너비 합을 한 번에 `× 8` 했고
+ *      문서는 **열마다** 환산하고 버린다. 열 너비 `1.875` 에서만 우연히 같았고,
+ *      Excel 이 양식을 저장하며 다시 쓴 뒤로 갈라져 **화면이 3% 넓었다**
+ *      (본문 618px vs 문서 600px). 지금은 서버가 문서와 같은 함수로 셈해 px 로
+ *      넘긴다(`domain/excel-column-width.ts`). 🔴 같은 식을 쓰던 **채우개의 줄
+ *      나뉨도 함께 바로잡혔다**(86칸 → 84칸).
+ *   ② 비고의 가로 맞춤을 `text-center` 로 박아 두었는데 양식은 `left` 였다.
+ *      이제 `metrics.remarkAlign` 으로 온다.
+ *   ③ 비고에 **라벨 칸을 안 그렸다.** 문서는 `C60:G63` 70px 가 비고 왼쪽에 서므로,
+ *      안 그리면 두 미리보기가 같은 왼쪽 선에서 시작해 비고 줄의 오른쪽 끝이
+ *      문서보다 70px 일찍 끝난다(사용자 지적). 글자는 지어내지 않고 채우개의
+ *      확인용 표에 있던 것을 상수로 올려 **둘이 나눠 쓴다**.
+ *   ④ 넘침 경고가 **14% 일찍** 떴다 — 본문의 줄 나누기용 안전 여백을 「들어가나」만
+ *      묻는 비고에 그대로 썼다. 이제 글자의 실제 픽셀 폭으로 잰다.
  * ============================================================================
  */
 
@@ -206,8 +232,8 @@ export function ServiceReportBodyPreview({
     );
   }
 
-  const labelWidth = serviceReportGridDocumentBoxCss(metrics.columns.label);
-  const contentWidth = serviceReportGridDocumentBoxCss(metrics.columns.body);
+  const labelWidth = serviceReportGridDocumentBoxCss(metrics.columns.labelPx);
+  const contentWidth = serviceReportGridDocumentBoxCss(metrics.columns.bodyPx);
   /** 여느 줄의 왼쪽 여백 — 엑셀이 칸 안쪽에 두는 그 2px(배율을 탄다). */
   const cellPaddingLeft = serviceReportGridPreviewScaledCss(
     SERVICE_REPORT_GRID_CELL_PADDING_LEFT_PX
@@ -217,7 +243,7 @@ export function ServiceReportBodyPreview({
    * 둘 다 같은 배율을 타므로 창이 커져도 자리가 그대로다.
    */
   const closingPaddingLeft = `calc(${cellPaddingLeft} + ${serviceReportGridDocumentBoxCss(
-    metrics.closingMarkIndentWidth
+    metrics.closingMarkIndentPx
   )})`;
 
   return (
@@ -288,28 +314,45 @@ export function ServiceReportBodyPreview({
  * 줄바꿈을 보여 주게 된다 — 대신 넘치는 줄을 다른 색으로 칠하고, 그 글자가 칸
  * 끝 선을 실제로 넘어가 보이게 둔다.
  *
- * ⚠️ 본문과 달리 **라벨 칸을 그리지 않는다.** 문서의 「비　고」 라벨 글자는
- * 채우개 안의 확인용 표에만 있고 내보내는 상수가 아니다 — 지어내지 않는다.
- * (빈 라벨 칸만 그리는 길도 있지만, 문서에는 글자가 있으므로 그것은 **거짓말**이다.)
+ * ── 🔴 라벨 칸을 **그린다** (2026-11-27) ───────────────────────────────
+ * 2026-10-18 에는 안 그렸다. 까닭은 「문서의 「비　고」 글자가 채우개 안의 확인용
+ * 표에만 있고 내보내는 상수가 아니라, 지어내지 않는다」였다. 판단은 옳았지만
+ * **결과가 거짓말이었다** — 문서에서는 라벨 칸 70px 가 비고 칸 왼쪽에 서는데
+ * 화면에는 없어서, 본문과 비고 두 미리보기가 같은 왼쪽 선에서 시작하고 비고 줄의
+ * 오른쪽 끝이 문서보다 70px(15%) **일찍 끝나 보였다**(사용자 지적: 「비고칸도 실제
+ * 비고칸보다 가로폭이 좁아」).
  *
- * 🔴 **가운데 맞춤이다.** 실측으로 `H60:AF60`~`H63:AF63` 의 가로 맞춤이 `center`
- * 였다(본문은 `left`). 줄 높이도 본문(14.1pt)보다 조금 높은 15pt 다.
+ * 그래서 본문 라벨이 이미 푼 길을 그대로 따랐다 — 글자를 `domain` 쪽 상수
+ * (`SERVICE_REPORT_REMARK_LABEL`)로 올리고 채우개의 확인용 표와 **둘이 나눠 쓴다.**
+ * 지어낸 글자가 아니라 양식에 찍혀 있는 그 글자다.
+ *
+ * 🔴 **본문과 달리 라벨이 줄마다 있지 않다.** 문서에서 `C60:G63` 은 네 줄에 걸친
+ * **한 칸**이라, 화면에서도 칸 하나가 줄 전체 옆에 서고 글자는 가운데에 온다.
+ *
+ * 🔴 **가로 맞춤은 양식에서 읽는다.** 실측으로 양식 넷의 `H60`~`H63` 은 `left`
+ * 이고 10/19 사본은 `center` 였다 — 그래서 수를 박지 않는다. 줄 높이는 본문
+ * (14.1pt)보다 조금 높은 15pt 다.
  */
 export function ServiceReportRemarkPreview({
   metrics,
   remark,
 }: {
-  /** 🔴 본문과 **같은 한 벌**을 받는다 — 비고 폭도 그 양식에서 읽은 값이다. */
+  /** 🔴 본문과 **같은 한 벌**을 받는다 — 비고 폭·맞춤도 그 양식에서 읽은 값이다. */
   metrics: ServiceReportBodyMetrics | null;
   remark: string;
 }) {
-  const remarkWrapWidth = metrics?.remarkWrapWidth ?? null;
+  /**
+   * 🔴 넘침은 **픽셀로** 잰다(`remarkFitPx`). 본문의 줄 폭(칸 수)을 쓰던 자리인데,
+   * 거기에는 나누기 전용 안전 여백이 들어 있어 문서에 멀쩡히 들어가는 줄까지
+   * 주황색으로 칠했다(`domain` 쪽 `serviceReportTextPx` 머리말).
+   */
+  const remarkFitPx = metrics?.remarkFitPx ?? null;
   const lines = useMemo(
     () =>
-      remarkWrapWidth === null
+      remarkFitPx === null
         ? []
-        : serviceReportRemarkPreviewLines(serviceReportLines(remark), remarkWrapWidth),
-    [remarkWrapWidth, remark]
+        : serviceReportRemarkPreviewLines(serviceReportLines(remark), remarkFitPx),
+    [remarkFitPx, remark]
   );
   const hasOverflow = lines.some((line) => line.overflows);
 
@@ -325,7 +368,9 @@ export function ServiceReportRemarkPreview({
     );
   }
 
-  const contentWidth = serviceReportGridDocumentBoxCss(metrics.columns.remark);
+  const labelWidth = serviceReportGridDocumentBoxCss(metrics.columns.labelPx);
+  const contentWidth = serviceReportGridDocumentBoxCss(metrics.columns.remarkPx);
+  const alignClass = SERVICE_REPORT_GRID_ALIGN_CLASS[metrics.remarkAlign];
 
   return (
     /*
@@ -338,19 +383,35 @@ export function ServiceReportRemarkPreview({
           <p className="text-xs text-zinc-400 dark:text-zinc-500">비고를 적으면 여기 보입니다.</p>
         ) : (
           <div
-            style={{ ...serviceReportGridRemarkPreviewTextStyle, width: contentWidth }}
-            className="flex-1 border border-zinc-400 bg-white text-zinc-800 dark:border-zinc-500 dark:bg-zinc-900 dark:text-zinc-100"
+            style={serviceReportGridRemarkPreviewTextStyle}
+            className="flex flex-1 border border-zinc-400 bg-white text-zinc-800 dark:border-zinc-500 dark:bg-zinc-900 dark:text-zinc-100"
           >
-            {lines.map((line, index) => (
-              <div
-                key={index}
-                className={`whitespace-pre text-center ${
-                  line.overflows ? "text-amber-700 dark:text-amber-400" : ""
-                }`}
-              >
-                {cellText(line.text)}
-              </div>
-            ))}
+            {/*
+              🔴 문서에서 `C60:G63` 은 **네 줄에 걸친 한 칸**이다. 그래서 줄마다
+              라벨을 두는 본문과 달리 칸 하나가 줄 전체 옆에 서고, 글자는 그 칸
+              가운데에 온다(`items-center` · 라벨 칸의 맞춤은 실측으로 `center`).
+
+              🔴 글자는 채우개의 확인용 표와 **같은 상수**에서 온다 — 전각 공백이
+              들어 있어 눈으로는 어긋남을 못 잡는다.
+            */}
+            <span
+              style={{ width: labelWidth }}
+              className="flex shrink-0 items-center justify-center border-r border-zinc-400 whitespace-pre dark:border-zinc-500"
+            >
+              {SERVICE_REPORT_REMARK_LABEL}
+            </span>
+            <div style={{ width: contentWidth }} className="shrink-0">
+              {lines.map((line, index) => (
+                <div
+                  key={index}
+                  className={`whitespace-pre ${alignClass} ${
+                    line.overflows ? "text-amber-700 dark:text-amber-400" : ""
+                  }`}
+                >
+                  {cellText(line.text)}
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </PreviewBox>

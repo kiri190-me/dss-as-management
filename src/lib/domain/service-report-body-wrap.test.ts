@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
+import { excelColumnRangePx, excelColumnWidthPx } from "./excel-column-width";
 import {
   SERVICE_REPORT_BODY_LABEL_WIDTH,
   SERVICE_REPORT_BODY_LABELS,
@@ -9,15 +10,17 @@ import {
   SERVICE_REPORT_CLOSING_MARK,
   SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT,
   SERVICE_REPORT_CLOSING_MARK_INDENT_COLUMNS,
+  SERVICE_REPORT_REMARK_LABEL,
   SERVICE_REPORT_SECTION_GAP_ROWS,
   contentWrapWidth,
   serviceReportBodyMetrics,
   serviceReportBodyPreviewRows,
   serviceReportBodyPreviewSections,
-  serviceReportColumnWidthPx,
+  serviceReportContentFitPx,
   serviceReportFindingsLines,
   serviceReportRemarkPreviewLines,
   serviceReportSectionRowCount,
+  serviceReportTextPx,
   splitBodyLine,
   type ServiceReportColumnWidths,
 } from "./service-report-body-wrap";
@@ -38,36 +41,68 @@ import { textDisplayWidth } from "./text-wrap";
 
 /**
  * ────────────────────────────────────────────────────────────────────────
- * 🔴 시험이 쓰는 **두 양식의 실측 열 너비** (2026-10-18)
+ * 🔴 시험이 쓰는 **양식들의 실측 열 너비** (2026-10-18 · 2026-11-27 다시 잼)
  * ────────────────────────────────────────────────────────────────────────
  * 이 파일은 양식 파일을 열지 않는다(순수 계산을 보는 자리다). 대신 실제로 재어
- * 둔 두 벌을 넣어 **폭이 바뀌어도 셈이 따라오는지**를 본다:
+ * 둔 것들을 넣어 **폭이 바뀌어도 셈이 따라오는지**를 본다:
  *
- *   옛 양식 — 본문 `H:AU` 40열 × 1.875    = 75칸
- *             비고 `H:AF` 25열 × 1.875    = 46.875칸
- *             라벨 `C:G`   5열 × 1.75     = 8.75칸
- *   새 양식 — 본문 40열 × 1.90625          = 76.25칸   ← 도장만 바꿔 저장했더니
- *             비고 25열 × 1.90625          = 47.65625칸   Excel 이 다시 썼다
- *             라벨  5열 × 1.7265625        = 8.6328125칸
+ *   옛 양식(~2026-10)  본문 `H:AU` 40열 × 1.875      비고 `H:AF` 25열 × 1.875
+ *                      라벨 `C:G`   5열 × 1.75
+ *   그다음(10/19 사본)  본문 40열 × 1.90625           비고 25열 × 1.90625
+ *                      라벨  5열 × 1.7265625         ← 도장만 바꿔 저장했더니
+ *   지금(2026-11-27)   본문 40열 × 1.9296875          Excel 이 제 기준으로 다시 썼다
+ *                      비고 25열 × 1.9296875         라벨 5열 × 1.73046875
+ *
+ * 🔴 **셋이 전부 같은 픽셀이 된다**(본문 600 · 비고 375 · 라벨 70). Excel 은 열을
+ * 하나씩 환산하고 **버리므로**, 열 너비가 1.875 에서 1.9296875 로 늘어도 한 열은
+ * 계속 15px 이다. 「양식이 넓어졌다」가 곧 「문서가 넓어졌다」가 아니다 —
+ * 2026-10-18 에 「75칸 → 76.25칸이라 문서가 85칸으로 나뉜다」고 본 것은 **합을 한 번에
+ * 환산하던 옛 식의 착시**였고, 문서는 그 내내 84칸이었다.
+ *
+ * 그래서 「양식이 바뀌면 따라간다」를 보는 자리에는 **픽셀이 진짜 달라지는 양식**이
+ * 따로 필요하다 — `WIDER_TEMPLATE_COLUMNS`.
  *
  * 🔴 이 숫자들은 **시험의 입력**이지 화면이 들고 있는 값이 아니다. 화면 쪽에
  * 굳힌 값이 하나도 없다는 것은 아래 「굳힌 폭 상수가 없다」가 본다.
  */
+const rangePx = (columns: number, charsPerColumn: number): number =>
+  excelColumnRangePx(Array.from({ length: columns }, () => charsPerColumn));
+
 const OLD_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
-  body: 40 * 1.875,
-  remark: 25 * 1.875,
-  label: 5 * 1.75,
+  bodyPx: rangePx(40, 1.875),
+  remarkPx: rangePx(25, 1.875),
+  labelPx: rangePx(5, 1.75),
   // 🔴 본문 칸이 몇 열인가 — 맺음 표시의 왼쪽 여백이 여기서 나온다(H:AU = 40).
   bodyColumns: 40,
 };
 const NEW_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
-  body: 40 * 1.90625,
-  remark: 25 * 1.90625,
-  label: 5 * 1.7265625,
+  bodyPx: rangePx(40, 1.90625),
+  remarkPx: rangePx(25, 1.90625),
+  labelPx: rangePx(5, 1.7265625),
   bodyColumns: 40,
 };
-const OLD_METRICS = serviceReportBodyMetrics(OLD_TEMPLATE_COLUMNS);
-const NEW_METRICS = serviceReportBodyMetrics(NEW_TEMPLATE_COLUMNS);
+/** 지금(2026-11-27) 쓰는 양식 넷. 앞의 둘과 **픽셀이 같다** — 위 머리말. */
+const CURRENT_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
+  bodyPx: rangePx(40, 1.9296875),
+  remarkPx: rangePx(25, 1.9296875),
+  labelPx: rangePx(5, 1.73046875),
+  bodyColumns: 40,
+};
+/**
+ * 🔴 **진짜로 넓은 양식** — 한 열이 16px 이 되는 너비다(버림 뒤에도 달라진다).
+ * 지어낸 양식이지만, 「양식을 넓히면 상자도 줄 폭도 따라간다」를 보려면 픽셀이
+ * 실제로 달라지는 입력이 있어야 한다.
+ */
+const WIDER_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
+  bodyPx: rangePx(40, 2),
+  remarkPx: rangePx(25, 2),
+  labelPx: rangePx(5, 2),
+  bodyColumns: 40,
+};
+const OLD_METRICS = serviceReportBodyMetrics(OLD_TEMPLATE_COLUMNS, "center");
+const NEW_METRICS = serviceReportBodyMetrics(NEW_TEMPLATE_COLUMNS, "center");
+const CURRENT_METRICS = serviceReportBodyMetrics(CURRENT_TEMPLATE_COLUMNS, "left");
+const WIDER_METRICS = serviceReportBodyMetrics(WIDER_TEMPLATE_COLUMNS, "left");
 
 describe("🔴 이 파일은 순수 계산이다 — 화면도 서버도 부를 수 있어야 한다", () => {
   test("server-only · node · React · 브라우저의 물건을 물지 않는다", () => {
@@ -83,41 +118,96 @@ describe("🔴 이 파일은 순수 계산이다 — 화면도 서버도 부를 
   });
 });
 
-describe("열 너비 → 줄 폭 환산", () => {
+describe("칸의 픽셀 폭 → 줄 폭 환산", () => {
+  /**
+   * 🔴 **이 묶음이 ①의 자물쇠다**(2026-11-27). 화면과 문서가 서로 다른 식으로
+   * 픽셀을 셈하고 있었고, 열 너비 `1.875` 에서만 우연히 같아서 아무도 몰랐다.
+   */
+  test("🔴 Excel 은 **열마다** 버린다 — 열 너비가 늘어도 픽셀은 그대로일 수 있다", () => {
+    // 한 열: 1.875·1.90625·1.9296875 가 전부 15px, 1.75·1.7265625·1.73046875 가 14px.
+    for (const chars of [1.875, 1.90625, 1.9296875]) {
+      assert.equal(excelColumnWidthPx(chars), 15, `열 너비 ${chars}`);
+    }
+    for (const chars of [1.75, 1.7265625, 1.73046875]) {
+      assert.equal(excelColumnWidthPx(chars), 14, `열 너비 ${chars}`);
+    }
+    // 그래서 양식 셋이 **같은 칸 폭**이다 — 본문 600 · 비고 375 · 라벨 70.
+    for (const columns of [OLD_TEMPLATE_COLUMNS, NEW_TEMPLATE_COLUMNS, CURRENT_TEMPLATE_COLUMNS]) {
+      assert.deepEqual(
+        [columns.bodyPx, columns.remarkPx, columns.labelPx],
+        [600, 375, 70],
+        "열 너비가 달라졌다고 칸 폭까지 달라진 것으로 셌다"
+      );
+    }
+    // 🔵 재는 것이 있는지 — 「전부 같다」가 «다른 양식이 없어서»면 시험이 비었다.
+    assert.notEqual(WIDER_TEMPLATE_COLUMNS.bodyPx, CURRENT_TEMPLATE_COLUMNS.bodyPx);
+    assert.equal(WIDER_TEMPLATE_COLUMNS.bodyPx, 640);
+
+    // 🔴 **옛 식(합을 한 번에 반올림)이었다면 갈라졌을 자리**다. 그 식이 되살아나면
+    //    여기가 깨진다 — 지금 양식에서 round(40 × 1.9296875 × 8) = 618 이다.
+    assert.notEqual(Math.round(40 * 1.9296875 * 8), CURRENT_TEMPLATE_COLUMNS.bodyPx);
+  });
+
   test("🔴 2026-10-15 실측값 그대로다 — 채우개에서 자리만 옮겼다", () => {
-    //   본문 H:AU  75칸      × 8px = 600px → ⌊(600−5−7)÷7⌋ = 84칸(한글 42자)
-    //   비고 H:AF  46.875칸  × 8px = 375px → ⌊(375−5−7)÷7⌋ = 51칸(한글 25자)
-    assert.equal(contentWrapWidth(75), 84);
-    assert.equal(contentWrapWidth(46.875), 51);
-    assert.equal(contentWrapWidth(150), 169);
+    //   본문 H:AU  600px → ⌊(600−5−7)÷7⌋ = 84칸(한글 42자)
+    //   비고 H:AF  375px → ⌊(375−5−7)÷7⌋ = 51칸(한글 25자)
+    assert.equal(contentWrapWidth(600), 84);
+    assert.equal(contentWrapWidth(375), 51);
+    assert.equal(contentWrapWidth(1200), 169);
   });
 
   test("칸이 말이 안 되게 좁으면 던진다", () => {
-    assert.throws(() => contentWrapWidth(1), /본문 칸이 너무 좁습니다/);
+    assert.throws(() => contentWrapWidth(8), /본문 칸이 너무 좁습니다/);
   });
 
-  test("🔴 열 너비 한 벌 → 줄 폭 한 벌 — 옛 양식도 새 양식도", () => {
-    // 옛 양식(1.875): 본문 75칸 → 84칸 · 비고 46.875칸 → 51칸
-    assert.deepEqual(OLD_METRICS, {
-      columns: OLD_TEMPLATE_COLUMNS,
+  /**
+   * 🔴 **열 너비 합을 넘기면 그 자리에서 잡힌다.** 둘 다 그냥 수라서 바꿔 넣어도
+   * 조용히 지나가던 자리이고, 실제로 그 혼동이 2026-11-27 까지 돌았다. 열 너비
+   * 합은 거의 늘 소수라 「정수인가」 한 줄이 가장 싼 울타리다.
+   */
+  test("🔴 열 너비 합을 넘기면 던진다 — 픽셀이 아닌 수는 안 받는다", () => {
+    assert.throws(() => contentWrapWidth(40 * 1.9296875), /칸 폭은 픽셀\(정수\)/);
+  });
+
+  test("🔴 칸 폭 한 벌 → 치수 한 벌 — 양식 셋이 같은 값이다", () => {
+    for (const [columns, metrics] of [
+      [OLD_TEMPLATE_COLUMNS, OLD_METRICS],
+      [NEW_TEMPLATE_COLUMNS, NEW_METRICS],
+    ] as const) {
+      assert.deepEqual(metrics, {
+        columns,
+        bodyWrapWidth: 84,
+        remarkWrapWidth: 51,
+        // 🔴 비고의 넘침 판정 폭 — 칸 375px 에서 엑셀 안쪽 여백 5px 만 뺀다.
+        remarkFitPx: 370,
+        remarkAlign: "center",
+        // 🔴 맺음 표시 앞에 비우는 폭 — 600px × 6/40 (2026-10-31. 아래 전용 묶음).
+        closingMarkIndentPx: 90,
+      });
+    }
+    assert.deepEqual(CURRENT_METRICS, {
+      columns: CURRENT_TEMPLATE_COLUMNS,
       bodyWrapWidth: 84,
       remarkWrapWidth: 51,
-      // 🔴 맺음 표시 앞에 비우는 폭 — 75칸 × 6/40 (2026-10-31. 아래 전용 묶음).
-      closingMarkIndentWidth: 11.25,
-    });
-    // 🔴 새 양식(1.90625): **도장만 바꿔 저장했는데** 76.25칸 → 85칸이 되었다.
-    assert.deepEqual(NEW_METRICS, {
-      columns: NEW_TEMPLATE_COLUMNS,
-      bodyWrapWidth: 85,
-      remarkWrapWidth: 52,
-      closingMarkIndentWidth: 11.4375,
+      remarkFitPx: 370,
+      // 🔴 지금 양식은 비고가 **왼쪽 맞춤**이다 — 맞춤도 양식에서 온다.
+      remarkAlign: "left",
+      closingMarkIndentPx: 90,
     });
   });
 
-  test("줄 폭은 열 너비에서 **그 자리에서** 나온다 — 어느 양식이든", () => {
-    for (const metrics of [OLD_METRICS, NEW_METRICS]) {
-      assert.equal(metrics.bodyWrapWidth, contentWrapWidth(metrics.columns.body));
-      assert.equal(metrics.remarkWrapWidth, contentWrapWidth(metrics.columns.remark));
+  test("🔴 칸이 진짜 넓어지면 줄 폭도 따라간다", () => {
+    assert.ok(WIDER_METRICS.bodyWrapWidth > CURRENT_METRICS.bodyWrapWidth);
+    assert.ok(WIDER_METRICS.remarkWrapWidth > CURRENT_METRICS.remarkWrapWidth);
+    assert.ok(WIDER_METRICS.remarkFitPx > CURRENT_METRICS.remarkFitPx);
+    assert.equal(WIDER_METRICS.bodyWrapWidth, contentWrapWidth(640));
+  });
+
+  test("줄 폭은 칸 폭에서 **그 자리에서** 나온다 — 어느 양식이든", () => {
+    for (const metrics of [OLD_METRICS, NEW_METRICS, CURRENT_METRICS, WIDER_METRICS]) {
+      assert.equal(metrics.bodyWrapWidth, contentWrapWidth(metrics.columns.bodyPx));
+      assert.equal(metrics.remarkWrapWidth, contentWrapWidth(metrics.columns.remarkPx));
+      assert.equal(metrics.remarkFitPx, serviceReportContentFitPx(metrics.columns.remarkPx));
       assert.ok(
         metrics.remarkWrapWidth < metrics.bodyWrapWidth,
         "비고가 본문보다 좁지 않다"
@@ -129,14 +219,56 @@ describe("열 너비 → 줄 폭 환산", () => {
     // 🔴 화면이 아니라 여기서 던지는 것이 요점이다 — 브라우저가 그리는 도중에
     //    던지면 작성 화면이 통째로 죽는다(`page.tsx` 의 try 가 이것을 받는다).
     assert.throws(
-      () => serviceReportBodyMetrics({ body: 1, remark: 1, label: 1, bodyColumns: 40 }),
+      () =>
+        serviceReportBodyMetrics({ bodyPx: 8, remarkPx: 8, labelPx: 8, bodyColumns: 40 }, "left"),
       /본문 칸이 너무 좁습니다/
     );
     // 🔴 **열 수가 모자란 양식도** 여기서 던진다 — 맺음 표시가 칸 밖으로 나간다.
     assert.throws(
-      () => serviceReportBodyMetrics({ body: 75, remark: 46.875, label: 8.75, bodyColumns: 4 }),
+      () =>
+        serviceReportBodyMetrics(
+          { bodyPx: 600, remarkPx: 375, labelPx: 70, bodyColumns: 4 },
+          "left"
+        ),
       /맺음 표시를 3열 옮길 수 없습니다/
     );
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 비고의 넘침은 **칸이 아니라 픽셀로** 잰다 (2026-11-27 ④)
+ * ============================================================================
+ * 본문의 줄 폭(`contentWrapWidth`)에는 나누기 전용 안전 여백 둘이 들어 있다 —
+ * 한글을 2칸(14px)으로 세는 데서 오는 16.7% 와 숫자 한 자(7px). 나누는 쪽에서는
+ * 「덜 담는 쪽」이라 안전하지만, 비고처럼 **「넘치나」만 묻는** 자리에 그대로 쓰면
+ * 문서에 멀쩡히 들어가는 줄을 주황색으로 칠한다.
+ * ============================================================================
+ */
+describe("🔴 비고 넘침 판정", () => {
+  test("글자 폭은 실측 글꼴에서 나온다 — 전각 12px · 반각 7px", () => {
+    assert.equal(serviceReportTextPx("가"), 12);
+    assert.equal(serviceReportTextPx("0"), 7);
+    assert.equal(serviceReportTextPx("가0"), 19);
+    assert.equal(serviceReportTextPx(""), 0);
+  });
+
+  test("🔴 칸 수로 재던 때보다 **덜 경고한다** — 그만큼 거짓 경고였다", () => {
+    const fitPx = CURRENT_METRICS.remarkFitPx;
+    // 한글 30자 = 360px ≤ 370px — 문서에 들어간다.
+    const thirty = "가".repeat(30);
+    assert.equal(serviceReportTextPx(thirty), 360);
+    assert.deepEqual(serviceReportRemarkPreviewLines([thirty], fitPx), [
+      { text: thirty, overflows: false },
+    ]);
+    // 🔴 옛 판정(칸 수 51)이었다면 26자부터 경고했다 — 그 네 자가 거짓 경고였다.
+    assert.ok(textDisplayWidth("가".repeat(26)) > CURRENT_METRICS.remarkWrapWidth);
+
+    // 한글 31자 = 372px > 370px — 이제 경고한다.
+    const thirtyOne = "가".repeat(31);
+    assert.deepEqual(serviceReportRemarkPreviewLines([thirtyOne], fitPx), [
+      { text: thirtyOne, overflows: true },
+    ]);
   });
 });
 
@@ -307,8 +439,8 @@ describe("미리보기가 그리는 본문 구역", () => {
 
 describe("미리보기가 그리는 비고", () => {
   test("🔴 나누지 않는다 — 채우개가 비고를 나누지 않기 때문이다", () => {
-    const long = "가".repeat(40); // 80칸 — 비고 51칸을 한참 넘는다
-    const lines = serviceReportRemarkPreviewLines([long], OLD_METRICS.remarkWrapWidth);
+    const long = "가".repeat(40); // 480px — 비고 370px 를 한참 넘는다
+    const lines = serviceReportRemarkPreviewLines([long], CURRENT_METRICS.remarkFitPx);
     assert.deepEqual(
       lines.map((line) => line.text),
       [long]
@@ -319,21 +451,21 @@ describe("미리보기가 그리는 비고", () => {
     const lines = serviceReportRemarkPreviewLines(
       [
         "보증 기간 밖입니다.",
-        "가".repeat(26), // 52칸 — 옛 양식의 51칸을 한 칸 넘는다
-        "가".repeat(25), // 50칸 — 들어간다
+        "가".repeat(31), // 372px — 지금 양식의 370px 를 넘는다
+        "가".repeat(30), // 360px — 들어간다
       ],
-      OLD_METRICS.remarkWrapWidth
+      CURRENT_METRICS.remarkFitPx
     );
     assert.deepEqual(
       lines.map((line) => line.overflows),
       [false, true, false]
     );
     /*
-      🔴 **새 양식에서는 그 줄이 안 넘친다**(비고 52칸). 폭을 굳혀 두면 이 자리가
-      거짓 경고를 하고, 사람은 멀쩡한 줄을 쪼개 적게 된다.
+      🔴 **칸이 넓은 양식에서는 그 줄이 안 넘친다**(비고 400px → 395px 가 놓인다).
+      폭을 굳혀 두면 이 자리가 거짓 경고를 하고, 사람은 멀쩡한 줄을 쪼개 적게 된다.
     */
     assert.deepEqual(
-      serviceReportRemarkPreviewLines(["가".repeat(26)], NEW_METRICS.remarkWrapWidth).map(
+      serviceReportRemarkPreviewLines(["가".repeat(31)], WIDER_METRICS.remarkFitPx).map(
         (line) => line.overflows
       ),
       [false]
@@ -341,7 +473,7 @@ describe("미리보기가 그리는 비고", () => {
   });
 
   test("연락서 낱말은 여기서도 문서에 찍히는 글자로 바뀐다", () => {
-    assert.deepEqual(serviceReportRemarkPreviewLines(["部品不良"], OLD_METRICS.remarkWrapWidth), [
+    assert.deepEqual(serviceReportRemarkPreviewLines(["部品不良"], CURRENT_METRICS.remarkFitPx), [
       { text: "부품불량", overflows: false },
     ]);
   });
@@ -376,35 +508,27 @@ describe("라벨 열의 폭", () => {
    * ⚠️ 라벨 열은 한 열의 너비가 본문 열과 **다르다**(옛 양식 1.75 : 1.875 ·
    * 새 양식 1.7265625 : 1.90625). 본문 열에 같은 곱을 쓰면 틀린다.
    */
-  test("🔴 라벨 **칸**의 열 너비는 본문과 따로 온다", () => {
-    for (const columns of [OLD_TEMPLATE_COLUMNS, NEW_TEMPLATE_COLUMNS]) {
-      assert.notEqual(columns.label, (columns.body / 40) * 5, "본문 열 너비로 라벨을 셌다");
-      assert.ok(columns.label < columns.remark, "라벨 칸이 비고보다 넓다");
+  test("🔴 라벨 **칸**의 폭은 본문과 따로 온다", () => {
+    for (const columns of [OLD_TEMPLATE_COLUMNS, NEW_TEMPLATE_COLUMNS, CURRENT_TEMPLATE_COLUMNS]) {
+      assert.notEqual(columns.labelPx, (columns.bodyPx / 40) * 5, "본문 열 너비로 라벨을 셌다");
+      assert.ok(columns.labelPx < columns.remarkPx, "라벨 칸이 비고보다 넓다");
     }
   });
-});
 
-describe("열 너비 → 화면 픽셀", () => {
-  test("🔴 열 너비 한 칸 = 기본 글꼴의 숫자 한 자 = 8px (96dpi 라 CSS 픽셀과 1:1)", () => {
-    // 옛 양식 — 본문 600px · 비고 375px · 라벨 70px
-    assert.equal(serviceReportColumnWidthPx(OLD_TEMPLATE_COLUMNS.body), 600);
-    assert.equal(serviceReportColumnWidthPx(OLD_TEMPLATE_COLUMNS.remark), 375);
-    assert.equal(serviceReportColumnWidthPx(OLD_TEMPLATE_COLUMNS.label), 70);
-    // 🔴 새 양식 — 상자가 그만큼 **넓어진다**. 굳혀 두면 문서보다 좁게 그린다.
-    assert.equal(serviceReportColumnWidthPx(NEW_TEMPLATE_COLUMNS.body), 610);
-    assert.equal(serviceReportColumnWidthPx(NEW_TEMPLATE_COLUMNS.remark), 381);
-    assert.equal(serviceReportColumnWidthPx(NEW_TEMPLATE_COLUMNS.label), 69);
-  });
-
-  test("🔴 이 픽셀이 줄 폭 환산의 **앞 절반**과 같은 값이다 — 두 벌이 아니다", () => {
-    // `contentWrapWidth` 는 ⌊(열 너비 × 8 − 5 − 7) ÷ 7⌋ 이다. 그 «열 너비 × 8» 이
-    // 여기서 돌려주는 픽셀이고, 그래서 미리보기 상자 안에서 줄이 먼저 끊긴다.
-    for (const columnWidth of [75, 46.875, 8.75, 150]) {
-      assert.equal(
-        contentWrapWidth(columnWidth),
-        Math.floor((serviceReportColumnWidthPx(columnWidth) - 5 - 7) / 7)
-      );
-    }
+  /**
+   * 🔴 **비고 라벨도 같은 상수에서 온다**(2026-11-27 ③). 그전에는 채우개의 확인용
+   * 표에만 있어서 미리보기가 비고의 라벨 칸을 아예 안 그렸고, 그래서 비고 줄의
+   * 오른쪽 끝이 문서보다 70px 일찍 끝나 보였다.
+   */
+  test("🔴 비고 라벨 — 양식 `C60` 의 글자 그대로(전각 공백)", () => {
+    assert.equal(SERVICE_REPORT_REMARK_LABEL, "비　고");
+    assert.deepEqual(
+      [...SERVICE_REPORT_REMARK_LABEL].map((ch) => ch.codePointAt(0)),
+      [0xbe44, 0x3000, 0xace0]
+    );
+    // 라벨 칸 폭은 본문 라벨과 **같은 칸**에서 재야 한다 — 6칸을 넘으면 잘린다.
+    assert.equal(textDisplayWidth(SERVICE_REPORT_REMARK_LABEL), 6);
+    assert.ok(textDisplayWidth(SERVICE_REPORT_REMARK_LABEL) <= SERVICE_REPORT_BODY_LABEL_WIDTH);
   });
 });
 
@@ -428,21 +552,22 @@ describe("🔴 맺음 표시의 가로 자리", () => {
     );
   });
 
-  test("여백은 **그 양식의 폭**에서 나온다 — 옛 양식 11.25칸 · 새 양식 11.4375칸", () => {
+  test("여백은 **그 양식의 폭**에서 나온다 — 지금 양식 90px · 넓은 양식 96px", () => {
     // 6열 ÷ 40열 = 15%. 🔴 수를 적어 둔 것은 **시험의 기대값**이고, 화면에는
     //    그런 수가 하나도 없다(아래 미리보기 시험이 소스로 본다).
-    assert.equal(OLD_METRICS.closingMarkIndentWidth, 11.25);
-    assert.equal(NEW_METRICS.closingMarkIndentWidth, 11.4375);
-    assert.equal(OLD_METRICS.closingMarkIndentWidth / OLD_METRICS.columns.body, 0.15);
-    assert.equal(NEW_METRICS.closingMarkIndentWidth / NEW_METRICS.columns.body, 0.15);
+    assert.equal(CURRENT_METRICS.closingMarkIndentPx, 90);
+    assert.equal(WIDER_METRICS.closingMarkIndentPx, 96);
+    for (const metrics of [OLD_METRICS, NEW_METRICS, CURRENT_METRICS, WIDER_METRICS]) {
+      assert.equal(metrics.closingMarkIndentPx / metrics.columns.bodyPx, 0.15);
+    }
   });
 
   test("🔴 그 여백이 가운데를 **세 열** 오른쪽으로 옮긴다", () => {
-    for (const metrics of [OLD_METRICS, NEW_METRICS]) {
-      const columnWidth = metrics.columns.body / metrics.columns.bodyColumns;
+    for (const metrics of [OLD_METRICS, NEW_METRICS, CURRENT_METRICS, WIDER_METRICS]) {
+      const columnPx = metrics.columns.bodyPx / metrics.columns.bodyColumns;
       // 가운데 맞춤이라 가운데는 여백의 **절반**만 간다.
       assert.equal(
-        metrics.closingMarkIndentWidth / 2 / columnWidth,
+        metrics.closingMarkIndentPx / 2 / columnPx,
         SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT
       );
     }

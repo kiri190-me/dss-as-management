@@ -263,7 +263,35 @@ export function addAlignedCellXfs(
   };
 }
 
-function readHorizontalAlignment(xf: string): string | null {
+/**
+ * `styles.xml` 의 `<cellXfs>` · `<cellStyleXfs>` 안 `<xf>` 들을 **차례대로**.
+ *
+ * 번호(`s="…"` · `xfId="…"`)가 곧 이 배열의 자리다. 🔴 `CELL_XF` 를 쓰는 것이
+ * 중요하다 — 그 정규식의 머리말에 적힌 대로 탐욕적으로 잡으면 번호가 밀린다.
+ *
+ * 블록이 없으면 빈 배열이다(서식이 없는 통합문서). 읽는 쪽이 「못 찾았다」로
+ * 처리할 수 있게 여기서 던지지 않는다.
+ */
+export function readXfElements(
+  stylesXml: string | null,
+  tag: "cellXfs" | "cellStyleXfs"
+): string[] {
+  if (stylesXml === null) return [];
+  const block = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`).exec(stylesXml);
+  if (!block) return [];
+  return [...block[1].matchAll(CELL_XF)].map((match) => match[0]);
+}
+
+/**
+ * `<xf>` 하나의 가로 맞춤. 안 적혀 있으면 null 이다.
+ *
+ * ⚠️ **상속은 따라가지 않는다.** `<alignment>` 가 없는 `xf` 는 `xfId` 가 가리키는
+ * 이름 있는 서식에서 물려받는데, 그 한 칸을 올라가는 것은 부르는 쪽 일이다
+ * (`xlsx/service-report-template.ts` 의 `serviceReportRemarkAlignFromParts` ·
+ * `sheet-print-grid.ts` 의 `alignSource` 가 둘 다 그렇게 한다). 여기서 올라가면
+ * `addAlignedCellXfs` 가 「이미 그 맞춤이다」를 잘못 판단해 사본을 안 만든다.
+ */
+export function readHorizontalAlignment(xf: string): string | null {
   return /<alignment\b[^>]*\shorizontal="([^"]*)"/.exec(xf)?.[1] ?? null;
 }
 

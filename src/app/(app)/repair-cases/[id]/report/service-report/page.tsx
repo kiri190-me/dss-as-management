@@ -14,11 +14,11 @@ import { readSession } from "@/lib/auth/session";
 import { getServiceReportForEdit } from "@/lib/db/queries/service-reports";
 import { toKstDateOnly } from "@/lib/domain/date-only";
 import { repairCaseDetailHrefs } from "@/lib/domain/repair-case-detail-tabs";
+import type { ServiceReportBodyMetrics } from "@/lib/domain/service-report-body-wrap";
 import {
-  serviceReportBodyMetrics,
-  type ServiceReportBodyMetrics,
-} from "@/lib/domain/service-report-body-wrap";
-import { createServiceReportFormValues } from "@/lib/domain/service-report-form";
+  createServiceReportFormValues,
+  SERVICE_REPORT_DEFAULT_KIND,
+} from "@/lib/domain/service-report-form";
 import { serviceReportKindFromParam } from "@/lib/domain/service-report-kind-param";
 import { resolveRepairCaseForServer } from "@/lib/server/repair-case-resolver";
 import { readServiceReportTemplateForCase } from "@/lib/storage/service-report-template";
@@ -37,7 +37,7 @@ import {
   SERVICE_REPORT_FINDINGS_INTRO,
   SERVICE_REPORT_MAX_BODY_ROWS,
   SERVICE_REPORT_SUMMARY_INTRO,
-  readServiceReportColumnWidths,
+  readServiceReportBodyMetrics,
 } from "@/lib/xlsx/service-report-template";
 
 /**
@@ -185,23 +185,45 @@ export default async function ServiceReportPage({
 
   const level = await getPermissionLevel(actingUser, SERVICE_REPORT_PERMISSION_AREA);
 
+  /**
+   * ══════════════════════════════════════════════════════════════════════
+   * 🔴 **이 화면이 열고 있는 보고서 종류** — 양식을 고르는 데 쓴다 (2026-11-27)
+   * ══════════════════════════════════════════════════════════════════════
+   * 아래 양식 읽기가 2026-10-18 부터 **언제나 `"REPAIR"`** 였다. 지금은 네 양식의
+   * `<cols>` 가 한 글자도 다르지 않아 결과가 같지만, 검사 양식만 폭이 달라지는 날
+   * **작성 화면은 수리 양식 폭으로 그리고 채우개는 검사 양식으로 채운다** — 아무
+   * 오류도 안 나고 미리보기만 거짓말이 된다.
+   *
+   * 차례는 폼 초기값을 만드는 차례와 **같아야 한다**(아래 `initialValues`):
+   *   저장된 장의 종류 → 주소의 `?kind=` → 기본값
+   * 기본값은 폼 씨앗이 쓰는 그 상수다 — 여기 `"REPAIR"` 를 다시 적으면 기본값이
+   * 바뀌는 날 화면과 폼이 서로 다른 종류를 연다.
+   *
+   * ⚠️ **화면 안에서 종류를 바꾸면 이 값은 안 따라간다.** 「보고서 종류」 드롭다운은
+   * 브라우저에서 도는데 폭은 서버가 한 번 읽어 내려보낸 것이기 때문이다. 지금
+   * 양식 넷의 폭이 같아 눈에 보이는 차이는 없고, 갈라지는 날에는 **양식별 폭을 둘 다
+   * 내려보내고 폼이 고르는** 모양이 되어야 한다(그때 고칠 자리는 이 한 줄이 아니라
+   * `ServiceReportForm` 의 props 다).
+   */
+  const templateKind =
+    saved?.values.kind ?? serviceReportKindFromParam(kindParam) ?? SERVICE_REPORT_DEFAULT_KIND;
+
   let choices: ServiceReportChoices | null = null;
   let bodyMetrics: ServiceReportBodyMetrics | null = null;
   let templateError: string | null = null;
   try {
     /**
-     * 검사·수리 두 양식이 같은 통합문서라 한 번만 읽는다.
-     *
-     * 🔴 **제품 종류(매쳐·제너레이터)는 넘긴다.** 드롭다운 목록 자체는 넷이 같지만
-     * (실측 — 네 양식의 칸 구조는 같고 다른 것은 담당자 도장뿐이다), 여기서만
-     * 아무 양식이나 읽으면 **이 건과 무관한 파일이 설정됐는지 여부가 이 화면의
-     * 성패를 가르게 된다.** 이 건이 쓸 바로 그 양식을 읽어, 그 파일이 없으면
-     * 문서를 만들 때가 아니라 **여기서 먼저** 알려 준다.
+     * 🔴 **그 건이 쓸 바로 그 양식**을 읽는다 — 문서 종류(검사·수리) × 제품 종류
+     * (매쳐·제너레이터). 드롭다운 목록 자체는 넷이 같지만(실측 — 네 양식의 칸
+     * 구조는 같고 다른 것은 담당자 도장뿐이다), 여기서 아무 양식이나 읽으면 **이
+     * 건과 무관한 파일이 설정됐는지 여부가 이 화면의 성패를 가르게 된다.** 이 건이
+     * 쓸 파일이 없으면 문서를 만들 때가 아니라 **여기서 먼저** 알려 준다.
      */
-    const template = await readServiceReportTemplateForCase("REPAIR", resolved.workflowType);
+    const template = await readServiceReportTemplateForCase(templateKind, resolved.workflowType);
     choices = readServiceReportChoices(template);
     /**
-     * 🔴 **본문·비고·라벨 칸의 폭도 같은 파일에서 읽는다** (2026-10-18).
+     * 🔴 **본문·비고·라벨 칸의 폭과 비고의 맞춤도 같은 파일에서 읽는다** (2026-10-18 ·
+     * 맞춤은 2026-11-27).
      *
      * 미리보기는 브라우저에서 그려지는데 브라우저에는 양식이 없다. 그래서 폭을
      * 화면이 굳혀 들고 있었고, 사용자가 양식 넷에 **도장만 바꿔 저장**한 날 Excel 이
@@ -212,11 +234,11 @@ export default async function ServiceReportPage({
      * 🔴 **드롭다운 목록과 같은 버퍼·같은 try 다.** 양식을 못 읽는 사정은 하나인데
      * 두 군데서 따로 처리하면 한쪽만 살아 있는 반쪽 화면이 생긴다.
      *
-     * ⚠️ `serviceReportBodyMetrics` 는 칸이 말이 안 되게 좁으면 던진다. 여기서
-     * 부르니 그 던짐도 아래 `catch` 로 들어가고, 화면은 안내를 띄운 채 살아 있다 —
-     * 브라우저에서 던졌다면 화면이 통째로 죽었을 자리다.
+     * ⚠️ `readServiceReportBodyMetrics` 는 칸이 말이 안 되게 좁거나 비고의 맞춤을
+     * 그릴 수 없으면 던진다. 여기서 부르니 그 던짐도 아래 `catch` 로 들어가고, 화면은
+     * 안내를 띄운 채 살아 있다 — 브라우저에서 던졌다면 화면이 통째로 죽었을 자리다.
      */
-    bodyMetrics = serviceReportBodyMetrics(readServiceReportColumnWidths(template));
+    bodyMetrics = readServiceReportBodyMetrics(template);
   } catch (err) {
     // 🔴 err.message 를 그대로 내보내지 않는다 — 양식이 바뀌었을 때 나오는 말은
     // 셀 주소가 섞인 개발자용 문장이다(UI_GUIDELINE 11). 자세한 것은 서버 로그다.
@@ -257,9 +279,11 @@ export default async function ServiceReportPage({
         // 🔴 형식에서 뽑은 품명은 **이 목록 안에 있을 때만** 골라진다. 양식을 못
         //    읽었으면 빈 목록이 가고, 그러면 아무것도 안 고른다(사람이 고른다).
         productNames: choices?.productNames ?? [],
-        // 🔴 갈림길 화면이 고른 종류. 못 고른 값은 `null` 로 오고, 그때는 키를 안 준
-        //    것과 같아 씨앗의 기본값이 그대로 쓰인다 — 기본값의 사본을 만들지 않는다.
-        kind: serviceReportKindFromParam(kindParam) ?? undefined,
+        // 🔴 갈림길 화면이 고른 종류 — **양식을 고를 때 쓴 바로 그 값**이다
+        //    (`templateKind`). 여기서 따로 셈하면 화면은 한 양식으로 그리고 폼은
+        //    다른 종류로 열리는 어긋남이 생긴다. 저장된 장을 열 때는 이 길로 오지
+        //    않으므로(위 삼항) 저장된 종류가 덮이지도 않는다.
+        kind: templateKind,
       });
 
   return (

@@ -3,17 +3,36 @@ import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
+/**
+ * 🔴 `.env.local` 의 **양식 경로 여섯**만 골라 넣는다. `npm run test:components` 는
+ * `--import ./scripts/test-template-bootstrap.ts` 를 안 거치므로(unit 쪽만 그렇다)
+ * 이 파일이 직접 부른다 — 안 부르면 아래 「진짜 양식으로」 묶음이 **영영 건너뛴다**.
+ * 통째로 붓지 않는 이유는 그 로더 머리말에 있다(개발 DB 주소가 새면 안 된다).
+ */
+import "../../../../../scripts/load-template-env";
+
+import { excelColumnRangePx } from "@/lib/domain/excel-column-width";
 import {
   SERVICE_REPORT_BODY_LABEL_WIDTH,
   SERVICE_REPORT_BODY_LABELS,
   SERVICE_REPORT_CLOSING_MARK,
   SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT,
+  SERVICE_REPORT_REMARK_LABEL,
   serviceReportBodyMetrics,
   type ServiceReportColumnWidths,
 } from "@/lib/domain/service-report-body-wrap";
+import {
+  findBodyBlock,
+  readServiceReportBodyMetrics,
+  SERVICE_REPORT_SHEET_NAME,
+} from "@/lib/xlsx/service-report-template";
+import { readSheetPrintGrid } from "@/lib/xlsx/sheet-print-grid";
+import { resolveSheetPart } from "@/lib/xlsx/workbook-parts";
+import { ZipArchive } from "@/lib/xlsx/zip-reader";
 
 import { ServiceReportBodyPreview, ServiceReportRemarkPreview } from "./ServiceReportBodyPreview";
 import {
+  SERVICE_REPORT_GRID_ALIGN_CLASS,
   SERVICE_REPORT_GRID_CELL_PADDING_LEFT_PX,
   SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX,
   SERVICE_REPORT_GRID_REMARK_LINE_HEIGHT_PX,
@@ -48,24 +67,42 @@ import {
  */
 
 /**
- * 🔴 서버가 양식에서 읽어 넘기는 값. 여기서는 **실측한 두 벌**을 직접 넣어
- * 「폭이 바뀌면 화면도 바뀐다」를 본다.
+ * 🔴 서버가 양식에서 읽어 넘기는 값. 여기서는 **실측한 열 너비**를 칸 폭(px)으로
+ * 바꿔 넣어 「폭이 바뀌면 화면도 바뀐다」를 본다.
+ *
+ * ⚠️ 🔴 **열 너비가 늘어도 칸 폭은 그대로일 수 있다**(2026-11-27). Excel 은 열을
+ * 하나씩 환산하고 버려서 1.875·1.90625·1.9296875 가 전부 15px 이다. 그래서 아래
+ * 둘은 **같은 600·375·70** 이고, 「넓어지면 따라간다」는 `WIDER_` 로 본다.
+ * 양식에서 읽은 실물로 재는 쪽은 이 파일 맨 아래 「진짜 양식으로」 묶음이다.
  */
+const rangePx = (columns: number, charsPerColumn: number): number =>
+  excelColumnRangePx(Array.from({ length: columns }, () => charsPerColumn));
+
 const OLD_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
-  body: 40 * 1.875,
-  remark: 25 * 1.875,
-  label: 5 * 1.75,
+  bodyPx: rangePx(40, 1.875),
+  remarkPx: rangePx(25, 1.875),
+  labelPx: rangePx(5, 1.75),
   // 🔴 본문 칸이 몇 열인가 — 맺음 표시의 왼쪽 여백이 여기서 나온다(H:AU = 40).
   bodyColumns: 40,
 };
 const NEW_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
-  body: 40 * 1.90625,
-  remark: 25 * 1.90625,
-  label: 5 * 1.7265625,
+  bodyPx: rangePx(40, 1.90625),
+  remarkPx: rangePx(25, 1.90625),
+  labelPx: rangePx(5, 1.7265625),
   bodyColumns: 40,
 };
-const METRICS = serviceReportBodyMetrics(OLD_TEMPLATE_COLUMNS);
-const NEW_METRICS = serviceReportBodyMetrics(NEW_TEMPLATE_COLUMNS);
+/** 🔴 한 열이 16px 이 되는 양식 — 버림 뒤에도 칸 폭이 **진짜로** 달라진다. */
+const WIDER_TEMPLATE_COLUMNS: ServiceReportColumnWidths = {
+  bodyPx: rangePx(40, 2),
+  remarkPx: rangePx(25, 2),
+  labelPx: rangePx(5, 2),
+  bodyColumns: 40,
+};
+/** 🔴 비고 맞춤도 양식에서 온다 — 지금 양식 넷은 `left`, 10/19 사본은 `center`. */
+const METRICS = serviceReportBodyMetrics(OLD_TEMPLATE_COLUMNS, "center");
+const NEW_METRICS = serviceReportBodyMetrics(NEW_TEMPLATE_COLUMNS, "center");
+const WIDER_METRICS = serviceReportBodyMetrics(WIDER_TEMPLATE_COLUMNS, "left");
+const LEFT_METRICS = serviceReportBodyMetrics(OLD_TEMPLATE_COLUMNS, "left");
 
 const read = (path: string): string =>
   readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
@@ -169,7 +206,7 @@ describe("본문 미리보기 — 발행본 모양", () => {
     const paddings = [...html.matchAll(/padding-left:([^;"]+)/g)].map((match) => match[1]);
     const cellPadding = serviceReportGridPreviewScaledCss(SERVICE_REPORT_GRID_CELL_PADDING_LEFT_PX);
     const closingPadding = `calc(${cellPadding} + ${serviceReportGridDocumentBoxCss(
-      METRICS.closingMarkIndentWidth
+      METRICS.closingMarkIndentPx
     )})`;
 
     // 🔵 재는 것이 있는지부터 — 줄마다 내용 칸이 하나씩 있어야 한다.
@@ -189,17 +226,17 @@ describe("본문 미리보기 — 발행본 모양", () => {
      * 🔴 **값으로도 못 박는다.** 배율 1배에서 90px — 600px 상자의 15%(= 6/40 열)다.
      * `SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT` 를 올리면 여기가 먼저 깨진다.
      */
-    assert.equal(serviceReportGridDocumentBoxPx(METRICS.closingMarkIndentWidth), 90);
+    assert.equal(serviceReportGridDocumentBoxPx(METRICS.closingMarkIndentPx), 90);
     assert.equal(
-      serviceReportGridDocumentBoxPx(METRICS.closingMarkIndentWidth) /
-        serviceReportGridDocumentBoxPx(METRICS.columns.body),
+      serviceReportGridDocumentBoxPx(METRICS.closingMarkIndentPx) /
+        serviceReportGridDocumentBoxPx(METRICS.columns.bodyPx),
       0.15
     );
     // 그 여백이 가운데를 **세 열** 옮긴다(가운데 맞춤이라 절반).
     const columnPx =
-      serviceReportGridDocumentBoxPx(METRICS.columns.body) / METRICS.columns.bodyColumns;
+      serviceReportGridDocumentBoxPx(METRICS.columns.bodyPx) / METRICS.columns.bodyColumns;
     assert.equal(
-      serviceReportGridDocumentBoxPx(METRICS.closingMarkIndentWidth) / 2 / columnPx,
+      serviceReportGridDocumentBoxPx(METRICS.closingMarkIndentPx) / 2 / columnPx,
       SERVICE_REPORT_CLOSING_MARK_COLUMN_SHIFT
     );
   });
@@ -212,7 +249,7 @@ describe("본문 미리보기 — 발행본 모양", () => {
       assert.ok(!previewCode.includes(forbidden), `미리보기에 「${forbidden}」 이 박혀 있다`);
     }
     assert.ok(
-      previewCode.includes("metrics.closingMarkIndentWidth"),
+      previewCode.includes("metrics.closingMarkIndentPx"),
       "맺음 표시 여백을 양식에서 온 값으로 안 쓰고 있다"
     );
   });
@@ -229,17 +266,17 @@ describe("본문 미리보기 — 발행본 모양", () => {
     assert.deepEqual(
       new Set(widths),
       new Set([
-        serviceReportGridDocumentBoxCss(METRICS.columns.label),
-        serviceReportGridDocumentBoxCss(METRICS.columns.body),
+        serviceReportGridDocumentBoxCss(METRICS.columns.labelPx),
+        serviceReportGridDocumentBoxCss(METRICS.columns.bodyPx),
       ])
     );
-    // 🔴 지어낸 px 가 아니다 — 양식의 열 너비 × 8px(= 96dpi 의 CSS 픽셀).
+    // 🔴 지어낸 px 가 아니다 — 양식에서 읽은 칸 폭(열마다 환산해 더한 것)이다.
     //    배율 1배(= 문서 글꼴 9pt)에서 그 값이 그대로 나온다.
-    assert.equal(serviceReportGridDocumentBoxPx(METRICS.columns.body), 600);
-    assert.equal(serviceReportGridDocumentBoxPx(METRICS.columns.label), 70);
+    assert.equal(serviceReportGridDocumentBoxPx(METRICS.columns.bodyPx), 600);
+    assert.equal(serviceReportGridDocumentBoxPx(METRICS.columns.labelPx), 70);
     // 🔴 라벨 글자(넷 다 6칸 = 전각 3자)가 그 칸에 들어간다 — 잘리면 반쪽 라벨이다.
     assert.ok(
-      serviceReportGridDocumentBoxPx(METRICS.columns.label) >=
+      serviceReportGridDocumentBoxPx(METRICS.columns.labelPx) >=
         (SERVICE_REPORT_BODY_LABEL_WIDTH / 2) * SERVICE_REPORT_GRID_PREVIEW_FONT_SIZE_PX,
       "라벨 칸이 라벨 글자보다 좁다"
     );
@@ -317,13 +354,19 @@ describe("본문 미리보기 — 발행본 모양", () => {
    * 🔴 **양식이 바뀌면 화면이 따라간다** (2026-10-18 다섯째 조각)
    * ══════════════════════════════════════════════════════════════════════
    * 사용자가 양식 넷에 도장만 바꿔 저장했더니 Excel 이 열 너비를 다시 썼다 —
-   * 본문 칸 75칸 → 76.25칸(줄 폭 84 → 85). 채우개는 매번 읽으니 따라갔고
-   * **미리보기만 뒤처졌다.** 아래 둘이 그 자리를 지킨다.
+   * 채우개는 매번 읽으니 따라갔고 **미리보기만 뒤처졌다.** 아래 셋이 그 자리를
+   * 지킨다.
+   *
+   * 🔴 **견주는 짝이 2026-11-27 에 바뀌었다.** 그때까지는 「1.875 양식 vs 1.90625
+   * 양식」으로 보았는데, Excel 이 열마다 버리므로 그 둘은 **문서에서 같은 600px**
+   * 이다(75칸 → 76.25칸이 줄 폭 84 → 85 가 된다고 본 것은 옛 환산의 착시였다).
+   * 그래서 「넓어지면 따라간다」는 칸 폭이 **진짜로** 달라지는 양식으로 보고,
+   * 「열 너비만 달라지면 화면도 안 달라진다」를 반대쪽에서 함께 못 박는다.
    */
   test("🔴 양식이 넓어지면 **상자도 넓어진다**", () => {
     const wide = renderToStaticMarkup(
       <ServiceReportBodyPreview
-        metrics={NEW_METRICS}
+        metrics={WIDER_METRICS}
         findingsIntro=""
         findings="외관 손상 없음"
         actions="퓨즈 교체"
@@ -334,23 +377,46 @@ describe("본문 미리보기 — 발행본 모양", () => {
     assert.deepEqual(
       widths,
       new Set([
-        serviceReportGridDocumentBoxCss(NEW_METRICS.columns.label),
-        serviceReportGridDocumentBoxCss(NEW_METRICS.columns.body),
+        serviceReportGridDocumentBoxCss(WIDER_METRICS.columns.labelPx),
+        serviceReportGridDocumentBoxCss(WIDER_METRICS.columns.bodyPx),
       ])
     );
-    // 옛 양식으로 그린 상자와 **다른 값**이어야 한다 — 같으면 굳어 있는 것이다.
+    // 좁은 양식으로 그린 상자와 **다른 값**이어야 한다 — 같으면 굳어 있는 것이다.
     assert.ok(
-      !widths.has(serviceReportGridDocumentBoxCss(METRICS.columns.body)),
+      !widths.has(serviceReportGridDocumentBoxCss(METRICS.columns.bodyPx)),
       "양식을 바꿨는데 본문 상자 폭이 그대로다"
     );
-    assert.equal(serviceReportGridDocumentBoxPx(NEW_METRICS.columns.body), 610);
+    assert.equal(serviceReportGridDocumentBoxPx(WIDER_METRICS.columns.bodyPx), 640);
+  });
+
+  test("🔴 열 너비만 달라진 양식은 **상자도 그대로다** — 문서가 그렇다", () => {
+    /*
+      🔵 위 시험의 반대쪽이다. 「달라지면 따라간다」만 보면 «늘 달라진다»도 통과하고,
+      그러면 화면이 문서보다 넓게 그리던 옛 식이 되살아나도 안 잡힌다.
+    */
+    const render = (metrics: typeof METRICS) =>
+      new Set(
+        [
+          ...renderToStaticMarkup(
+            <ServiceReportBodyPreview
+              metrics={metrics}
+              findingsIntro=""
+              findings="외관 손상 없음"
+              actions="퓨즈 교체"
+              summary=""
+            />
+          ).matchAll(/style="width:([^;"]+)/g),
+        ].map((m) => m[1])
+      );
+    assert.deepEqual(render(NEW_METRICS), render(METRICS));
+    assert.equal(serviceReportGridDocumentBoxPx(NEW_METRICS.columns.bodyPx), 600);
   });
 
   test("🔴 양식이 넓어지면 **줄도 그만큼 늦게 바뀐다**", () => {
     /*
-      딱 **85칸**짜리 줄이다 — 84칸 양식에서는 둘로 나뉘고 85칸 양식에서는 한 줄에
-      들어간다. ⚠️ 둘째 줄(`외관 손상 없음`)이 필요하다: 「확인내용」의 라벨이 두
-      줄이라 내용이 한 줄이어도 구역은 두 줄을 먹어서, 한 줄짜리끼리 견주면 차이가
+      딱 **85칸**짜리 줄이다 — 84칸 양식에서는 둘로 나뉘고 더 넓은 양식(89칸)에서는
+      한 줄에 들어간다. ⚠️ 둘째 줄(`외관 손상 없음`)이 필요하다: 「확인내용」의 라벨이
+      두 줄이라 내용이 한 줄이어도 구역은 두 줄을 먹어서, 한 줄짜리끼리 견주면 차이가
       라벨에 가려진다.
     */
     const findings =
@@ -368,7 +434,7 @@ describe("본문 미리보기 — 발행본 모양", () => {
           />
         )
       );
-    assert.ok(rowsOf(METRICS).length > rowsOf(NEW_METRICS).length, "넓어졌는데 똑같이 나뉜다");
+    assert.ok(rowsOf(METRICS).length > rowsOf(WIDER_METRICS).length, "넓어졌는데 똑같이 나뉜다");
   });
 
   test("🔴 양식을 못 읽으면 상자 대신 **까닭**이 뜬다 — 옛 숫자로 물러서지 않는다", () => {
@@ -395,22 +461,60 @@ describe("본문 미리보기 — 발행본 모양", () => {
 });
 
 describe("비고 미리보기", () => {
-  /** 비고 상자는 라벨 칸이 없다 — 줄이 `<div>` 하나씩이다. */
+  /** 비고의 줄들 — 라벨 칸은 `<span>` 이고 줄은 `<div>` 하나씩이다. */
   function remarkLines(html: string): string[] {
     return [...html.matchAll(/<div class="whitespace-pre[^"]*">([\s\S]*?)<\/div>/g)].map(
       (match) => match[1]
     );
   }
 
+  /**
+   * ══════════════════════════════════════════════════════════════════════
+   * 🔴 **라벨 칸을 그린다** (2026-11-27 ③)
+   * ══════════════════════════════════════════════════════════════════════
+   * 그전에는 안 그렸다 — 「비　고」 글자가 채우개의 확인용 표에만 있어서 지어내지
+   * 않으려던 것인데, 결과가 거짓말이었다. 문서에서는 라벨 칸 70px 가 비고 칸
+   * 왼쪽에 서므로 그걸 빼면 비고 줄의 오른쪽 끝이 70px 일찍 끝나 보인다.
+   * ══════════════════════════════════════════════════════════════════════
+   */
+  test("🔴 라벨 칸이 문서처럼 왼쪽에 선다 — 글자는 상수에서 온다", () => {
+    const html = renderToStaticMarkup(
+      <ServiceReportRemarkPreview metrics={METRICS} remark={"보증 기간 밖입니다.\n두 번째 줄"} />
+    );
+    // 라벨 칸은 **하나**다 — 문서의 `C60:G63` 이 네 줄에 걸친 한 칸이라서다.
+    const labels = [...html.matchAll(/<span[^>]*>([\s\S]*?)<\/span>/g)].map((m) => m[1]);
+    assert.deepEqual(labels, [SERVICE_REPORT_REMARK_LABEL]);
+    // 줄은 둘인데 라벨은 하나 — 줄마다 라벨을 두는 본문과 다른 모양이다.
+    assert.equal(remarkLines(html).length, 2);
+
+    // 폭은 본문 미리보기의 라벨 칸과 **같은 값**이다(둘 다 문서의 `C:G`).
+    assert.ok(
+      html.includes(`width:${serviceReportGridDocumentBoxCss(METRICS.columns.labelPx)}`),
+      html.slice(0, 800)
+    );
+    // 🔴 라벨 + 비고 칸이 문서의 가로 자리를 그대로 재현한다(70 + 375 = 445px).
+    assert.equal(
+      serviceReportGridDocumentBoxPx(METRICS.columns.labelPx) +
+        serviceReportGridDocumentBoxPx(METRICS.columns.remarkPx),
+      445
+    );
+
+    // 🔴 글자를 화면이 지어내지 않았다 — 원본에 그 글자가 없다(전각 공백 포함).
+    assert.ok(
+      !code(previewSource).includes(SERVICE_REPORT_REMARK_LABEL),
+      "미리보기에 「비　고」 글자가 박혀 있다"
+    );
+  });
+
   test("🔴 본문보다 좁은 칸이다 — 그 차이가 폭으로 드러난다", () => {
     const html = renderToStaticMarkup(<ServiceReportRemarkPreview metrics={METRICS} remark="보증 기간 밖입니다." />);
     assert.equal(METRICS.remarkWrapWidth, 51);
     assert.ok(METRICS.remarkWrapWidth < METRICS.bodyWrapWidth);
     assert.ok(
-      html.includes(`width:${serviceReportGridDocumentBoxCss(METRICS.columns.remark)}`),
+      html.includes(`width:${serviceReportGridDocumentBoxCss(METRICS.columns.remarkPx)}`),
       html.slice(0, 600)
     );
-    assert.equal(serviceReportGridDocumentBoxPx(METRICS.columns.remark), 375);
+    assert.equal(serviceReportGridDocumentBoxPx(METRICS.columns.remarkPx), 375);
     /*
       🔴 **그 좁은 비율이 어느 크기에서도 지켜진다.** 둘이 같은 미리보기 글꼴을
       곱하므로 비(375 : 600 = 5 : 8)가 배율에 안 흔들린다 — 비고를 본문과 같은
@@ -418,17 +522,46 @@ describe("비고 미리보기", () => {
     */
     for (const previewFontSizePx of [9, 12, 15.43, 21.3, 24]) {
       assert.equal(
-        serviceReportGridDocumentBoxPx(METRICS.columns.remark, previewFontSizePx) /
-          serviceReportGridDocumentBoxPx(METRICS.columns.body, previewFontSizePx),
+        serviceReportGridDocumentBoxPx(METRICS.columns.remarkPx, previewFontSizePx) /
+          serviceReportGridDocumentBoxPx(METRICS.columns.bodyPx, previewFontSizePx),
         375 / 600
       );
     }
   });
 
-  test("🔴 가운데 맞춤이다 — 양식의 비고 칸이 그렇다(본문은 왼쪽)", () => {
-    // 실측: `H60:AF60`~`H63:AF63` 의 가로 맞춤이 center, 행 높이는 15pt(= 20px).
+  /**
+   * ══════════════════════════════════════════════════════════════════════
+   * 🔴 **맞춤도 양식에서 온다** (2026-11-27 ②)
+   * ══════════════════════════════════════════════════════════════════════
+   * 화면이 `text-center` 를 박아 두고 있었다. 2026-10-18 실측에서는 양식이 정말
+   * `center` 였는데 지금 양식 넷은 `left` 다 — 화면만 가운데로 그리며 **이미
+   * 거짓말을 하고 있었다.** 그래서 한쪽 값만 보지 않고 **양쪽을 다 본다**:
+   * 양식이 center 면 center, left 면 left 로 그려야 한다.
+   * ══════════════════════════════════════════════════════════════════════
+   */
+  test("🔴 가로 맞춤이 양식을 따른다 — center 면 center, left 면 left", () => {
+    const render = (metrics: typeof METRICS) =>
+      renderToStaticMarkup(
+        <ServiceReportRemarkPreview metrics={metrics} remark="보증 기간 밖입니다." />
+      );
+    assert.match(render(METRICS), /<div class="whitespace-pre text-center/);
+    assert.match(render(LEFT_METRICS), /<div class="whitespace-pre text-left/);
+    // 🔵 반대쪽도 — 왼쪽 양식에서 가운데 맞춤 줄이 **없어야** 한다. (라벨 칸은
+    //    `<span>` 이고 문서에서 가운데 맞춤이라 줄만 본다.)
+    assert.ok(
+      !/<div class="whitespace-pre text-center/.test(render(LEFT_METRICS)),
+      "양식이 왼쪽인데 가운데로 그렸다"
+    );
+    // 🔴 화면 코드에 맞춤이 박혀 있지 않다 — 양식에서 온 값으로 고른다.
+    const previewCode = code(previewSource);
+    assert.ok(
+      previewCode.includes("SERVICE_REPORT_GRID_ALIGN_CLASS[metrics.remarkAlign]"),
+      "비고 맞춤을 양식에서 온 값으로 안 고르고 있다"
+    );
+  });
+
+  test("🔴 줄 높이는 문서의 비고 행(15pt)이다 — 본문보다 조금 높다", () => {
     const html = renderToStaticMarkup(<ServiceReportRemarkPreview metrics={METRICS} remark="보증 기간 밖입니다." />);
-    assert.match(html, /<div class="whitespace-pre text-center/);
     /*
       🔴 줄 높이를 px 가 아니라 **배수**로 적는다 — 확대하면 글자와 행이 같이
       커져야 상자 안이 계속 문서와 1:1 이다. 배수 × 문서 글꼴 = 실측한 15pt 다.
@@ -447,7 +580,7 @@ describe("비고 미리보기", () => {
   });
 
   test("🔴 나누지 않는다 — 넘치는 줄은 표시만 하고 글자는 그대로 둔다", () => {
-    const long = "가".repeat(40); // 80칸 — 비고 51칸을 한참 넘는다
+    const long = "가".repeat(40); // 480px — 비고 370px 를 한참 넘는다
     const html = renderToStaticMarkup(<ServiceReportRemarkPreview metrics={METRICS} remark={long} />);
     assert.deepEqual(remarkLines(html), [long]);
     assert.ok(html.includes("text-amber-700"), "넘치는 줄에 표시가 없다");
@@ -457,6 +590,32 @@ describe("비고 미리보기", () => {
   test("칸에 들어가는 줄에는 표시가 없다", () => {
     const html = renderToStaticMarkup(<ServiceReportRemarkPreview metrics={METRICS} remark="보증 기간 밖입니다." />);
     assert.ok(!html.includes("text-amber-700"), "멀쩡한 줄에 경고가 붙었다");
+  });
+
+  /**
+   * ══════════════════════════════════════════════════════════════════════
+   * 🔴 **경고가 14% 일찍 뜨던 자리** (2026-11-27 ④)
+   * ══════════════════════════════════════════════════════════════════════
+   * 넘침을 본문의 줄 폭(칸 수 51)으로 재고 있었다. 거기에는 나누기 전용 안전
+   * 여백이 들어 있어서, 문서(375px)에 멀쩡히 들어가는 한글 27~30자 줄을 주황색으로
+   * 칠하고 「문서의 비고 칸보다 깁니다」를 띄웠다.
+   * ══════════════════════════════════════════════════════════════════════
+   */
+  test("🔴 문서에 들어가는 줄은 경고하지 않는다 — 한글 30자까지", () => {
+    const thirty = "가".repeat(30); // 360px ≤ 370px
+    const ok = renderToStaticMarkup(
+      <ServiceReportRemarkPreview metrics={METRICS} remark={thirty} />
+    );
+    assert.deepEqual(remarkLines(ok), [thirty]);
+    assert.ok(!ok.includes("text-amber-700"), "문서에 들어가는 줄에 경고가 붙었다");
+    assert.ok(!ok.includes("자동으로 나뉘지 않아"), "경고 설명까지 떴다");
+
+    // 🔵 한 자만 더하면 경고가 뜬다 — 「아무 줄도 경고 안 한다」로 비어 버리지 않게.
+    const thirtyOne = "가".repeat(31); // 372px > 370px
+    const over = renderToStaticMarkup(
+      <ServiceReportRemarkPreview metrics={METRICS} remark={thirtyOne} />
+    );
+    assert.ok(over.includes("text-amber-700"), "칸을 넘는 줄에 표시가 없다");
   });
 });
 
@@ -519,3 +678,168 @@ describe("🔴 적는 칸 옆에 붙은 배선", () => {
     );
   });
 });
+
+/**
+ * ============================================================================
+ * 🔴 **진짜 양식으로 잰다** — 손으로 적은 값으로는 이 사고를 못 잡는다 (2026-11-27 ⑥)
+ * ============================================================================
+ * 위의 `OLD_`/`NEW_` 는 사람이 **적어 둔** 열 너비다. 그 값으로 재면 「화면이 그
+ * 값을 쓰는가」는 보이지만 「그 값이 지금 양식과 같은가」는 영영 안 보인다 —
+ * 실제로 2026-11-27 까지 양식은 `1.9296875` 였는데 시험은 `1.90625` 로 재며 초록이었다.
+ * 이 화면이 막으려던 바로 그 사고가 **시험에는 없었다.**
+ *
+ * 그래서 여기서는 양식 파일을 **열어서** 잰다. 못 박는 것 둘:
+ *
+ *   ① 화면이 그린 `width:` 가 **문서의 px** 과 같은가. 🔴 「문서의 px」은
+ *      작성 화면과 **다른 길**로 얻는다 — 문서 미리보기가 쓰는 격자 읽개
+ *      (`readSheetPrintGrid`)의 `columnWidthsPt` 다. 같은 함수를 양쪽에서 불러
+ *      맞춰 보면 식이 틀려도 통과하므로, 재는 길이 달라야 한다.
+ *   ② 비고의 **가로 맞춤**이 양식 그대로인가(같은 격자의 `align`).
+ *
+ * ⚠️ 양식 경로는 환경변수에서 온다. 🔴 **없으면 건너뛴다** — 양식 파일이 없는 PC
+ * (NAS·CI)에서 시험이 깨지면 안 된다(`xlsx/service-report-template.test.ts` 와 같은
+ * 방식). 🔴 `npm run test:components` 는 `.env.local` 을 안 읽으므로 이 파일이
+ * 직접 불러온다(`scripts/load-template-env` — `lib/auth/*.test.ts` 가 `load-env` 를
+ * 그렇게 쓴다).
+ * ============================================================================
+ */
+/**
+ * 🔴 양식 경로 환경변수 여섯. **이름의 출처는 `storage/service-report-template.ts`**
+ * 이고, 아래 시험이 그 원본에 여섯이 다 있는지 맞춰 본다 — 그쪽에서 이름을 바꾸면
+ * 여기가 **조용히 건너뛰는** 대신 깨진다.
+ *
+ * ⚠️ 그 모듈을 직접 가져올 수는 없다. `import "server-only"` 가 들어 있어서
+ * `npm run test:components` 처럼 `--conditions=react-server` 없이 도는 자리에서는
+ * 가져오는 순간 던진다.
+ */
+const TEMPLATE_PATH_KEYS = [
+  "MATCHER_INSPECTION_REPORT_TEMPLATE_PATH",
+  "MATCHER_REPAIR_REPORT_TEMPLATE_PATH",
+  "GENERATOR_INSPECTION_REPORT_TEMPLATE_PATH",
+  "GENERATOR_REPAIR_REPORT_TEMPLATE_PATH",
+  // 🔴 물러설 자리 둘 — 그쪽 머리말의 '물러서기'. 지금도 가리키는 파일이 다르다.
+  "INSPECTION_REPORT_TEMPLATE_PATH",
+  "REPAIR_REPORT_TEMPLATE_PATH",
+] as const;
+
+const configuredTemplates = TEMPLATE_PATH_KEYS.flatMap((key) => {
+  const templatePath = process.env[key];
+  // 🔴 경로는 담지 않는다 — 실패 메시지가 디스크 구조를 알려 주는 창구가 되면 안 된다.
+  return templatePath === undefined ? [] : [{ key, templatePath }];
+});
+
+describe("🔴 진짜 양식으로 잰 폭·맞춤", () => {
+  /** `A`·`AU` → 1부터 세는 열 번호. 양식을 안 읽는 순수 셈이라 시험 안에 둔다. */
+  const columnIndexOf = (name: string): number =>
+    [...name].reduce((sum, letter) => sum * 26 + (letter.charCodeAt(0) - 64), 0);
+
+  /**
+   * 🔵 **이 묶음이 통째로 잠드는 것을 막는다.** 환경변수 이름이 바뀌면 위 목록이
+   * 아무것도 못 찾아 「건너뜀」으로 조용히 끝난다 — 그때 깨지라고 두는 자리다.
+   */
+  test("환경변수 이름이 양식 읽개의 것과 같다", () => {
+    const storage = readFileSync(
+      new URL("../../../../lib/storage/service-report-template.ts", import.meta.url),
+      "utf8"
+    );
+    for (const key of TEMPLATE_PATH_KEYS) {
+      assert.ok(storage.includes(`"${key}"`), `양식 읽개에 ${key} 가 없다 — 이름이 바뀌었다`);
+    }
+  });
+
+  for (const { key, templatePath } of configuredTemplates) {
+    test(`${key} — 화면이 그린 폭이 문서의 px 과 같다`, () => {
+      const buffer = readFileSync(templatePath);
+      const metrics = readServiceReportBodyMetrics(buffer);
+
+      // ── 문서 쪽: 격자 읽개가 말하는 열 폭(px). pt = px × 0.75 로 실려 온다. ──
+      const grid = readSheetPrintGrid(buffer, SERVICE_REPORT_SHEET_NAME);
+      const documentPx = (first: number, last: number): number => {
+        let sum = 0;
+        for (let column = first; column <= last; column += 1) {
+          const pt = grid.columnWidthsPt[column - grid.firstColumn];
+          assert.ok(pt !== undefined, `${column}열이 인쇄 영역 밖이다`);
+          sum += Math.round(pt / 0.75);
+        }
+        return sum;
+      };
+
+      // ── 범위는 양식이 스스로 적어 둔 곳에서 — 주소를 박지 않는다 ──
+      const sheetXml = ZipArchive.fromBuffer(buffer).readText(
+        resolveSheetPart(ZipArchive.fromBuffer(buffer), SERVICE_REPORT_SHEET_NAME)
+      );
+      const block = findBodyBlock(sheetXml);
+      const bodyFirst = columnIndexOf(block.contentColumn);
+      const bodyLast = columnIndexOf(block.contentEndColumn);
+
+      // 🔵 재는 것이 있는지부터 — 범위가 비면 아래가 0 === 0 으로 공짜 통과한다.
+      assert.ok(bodyLast > bodyFirst, "본문 열 범위를 못 읽었다");
+      assert.equal(metrics.columns.bodyColumns, bodyLast - bodyFirst + 1);
+
+      assert.equal(metrics.columns.bodyPx, documentPx(bodyFirst, bodyLast), "본문 칸 폭");
+      assert.equal(
+        metrics.columns.labelPx,
+        documentPx(columnIndexOf(block.labelColumn), bodyFirst - 1),
+        "라벨 칸 폭"
+      );
+
+      // 비고는 문서에서 「비　고」 라벨 칸의 **오른쪽 옆**이다 — 격자에서 찾는다.
+      const cells = grid.rows.flatMap((row) => row.cells);
+      const remarkLabel = cells.filter((cell) => cell.text === SERVICE_REPORT_REMARK_LABEL);
+      assert.equal(remarkLabel.length, 1, "양식에서 「비　고」 라벨 칸이 하나가 아니다");
+      const remarkCell = cells.find(
+        (cell) =>
+          cell.row === remarkLabel[0].row &&
+          cell.column === remarkLabel[0].column + remarkLabel[0].colSpan
+      );
+      assert.ok(remarkCell, "「비　고」 라벨 오른쪽의 비고 칸을 못 찾았다");
+      assert.equal(
+        metrics.columns.remarkPx,
+        documentPx(remarkCell.column, remarkCell.column + remarkCell.colSpan - 1),
+        "비고 칸 폭"
+      );
+      // 🔴 맞춤도 문서가 말하는 그대로다. 코드에 박혀 있었다면 여기서 갈린다.
+      assert.equal(metrics.remarkAlign, remarkCell.align, "비고 칸의 가로 맞춤");
+
+      // ── 화면 쪽: 그려진 `width:` 가 그 px 에서 나온 식이어야 한다 ──
+      const bodyHtml = renderToStaticMarkup(
+        <ServiceReportBodyPreview
+          metrics={metrics}
+          findingsIntro=""
+          findings="외관 손상 없음"
+          actions="퓨즈 교체"
+          summary=""
+        />
+      );
+      assert.deepEqual(
+        new Set([...bodyHtml.matchAll(/style="width:([^;"]+)/g)].map((m) => m[1])),
+        new Set([
+          serviceReportGridDocumentBoxCss(documentPx(bodyFirst, bodyLast)),
+          serviceReportGridDocumentBoxCss(
+            documentPx(columnIndexOf(block.labelColumn), bodyFirst - 1)
+          ),
+        ])
+      );
+
+      const remarkHtml = renderToStaticMarkup(
+        <ServiceReportRemarkPreview metrics={metrics} remark="보증 기간 밖입니다." />
+      );
+      assert.ok(
+        remarkHtml.includes(
+          `width:${serviceReportGridDocumentBoxCss(
+            documentPx(remarkCell.column, remarkCell.column + remarkCell.colSpan - 1)
+          )}`
+        ),
+        remarkHtml.slice(0, 800)
+      );
+      // 🔴 그리고 그 줄이 양식의 맞춤으로 그려진다.
+      assert.ok(
+        remarkHtml.includes(
+          `<div class="whitespace-pre ${SERVICE_REPORT_GRID_ALIGN_CLASS[metrics.remarkAlign]}`
+        ),
+        remarkHtml.slice(0, 800)
+      );
+    });
+  }
+});
+
