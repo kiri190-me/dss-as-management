@@ -72,6 +72,8 @@ import {
 } from "./repair-case-flowchart-authorization";
 import {
   canViewPublishedTechnicalTemplates,
+  canAuthorTechnicalTemplatesByDefault,
+  canCreateTechnicalTemplateDraft,
   canEditTechnicalTemplateDraft,
   canPublishTechnicalTemplates,
   canManageTechnicalTemplates,
@@ -598,9 +600,37 @@ function rawLeafBaseline(leafKey: string, role: Role): PermissionLevel {
     // ── 기술 작업 절차 ────────────────────────────────────────────────────
     case "technicalProcedures.view":
       return canViewPublishedTechnicalTemplates(role) ? "READ" : "NONE";
+    case "technicalProcedures.create":
+      // 🔴 2026-11-27 에 생긴 잎이다. 서버 관문이 역할 고정(canManageTechnicalTemplates)
+      // 에서 이 설정으로 넘어왔으므로, **여기 적힌 값이 그날부터 실제 판정**이다.
+      //
+      // 🔴 이 잎은 **일부러 넓어졌다** — 최고관리자 · 관리자에 **A/S 엔지니어**가
+      // 더해졌다(2026-11-27 사용자 결정). 이 파일의 다른 전환들과 달리 「지금 할 수
+      // 있는 사람 그대로」가 아니다. 그 결정의 원문과 범위는
+      // canAuthorTechnicalTemplatesByDefault 의 주석에 있다.
+      //
+      // 🔴 **아래 editDraft 와 같은 집합이어야 한다.** 만들기만 열어 두면 엔지니어가
+      // 만든 절차를 **열지도 고치지도 못한다**(만들기 창이 이름·설비유형만 받고 내용은
+      // 편집기에서 채우는 두 걸음이라, 둘째 걸음이 막히면 빈 껍데기만 쌓인다).
+      // 2026-11-27 에 실제로 그 상태를 한 번 거쳐 보고 사용자가 ㄱ안을 골랐다.
+      //
+      // 🔴 **나머지 넷은 넓히지 마라.** publish · validation · lifecycle · view 는
+      // 종전 동작 그대로여야 한다 — 함께 움직이면 사용자가 허락한 적 없는 권한이
+      // 조용히 열린다. 역할 × 조작으로 그것을 재는 시험이
+      // technical-procedure-settings-gate.test.ts 다.
+      //
+      // 역할 이름을 손으로 옮겨 적지 않고 **정책 함수를 그대로 부른다**(이 파일
+      // 머리말의 그 규칙) — 정책이 또 바뀌는 날 한쪽만 따라오지 않게.
+      //
+      // read 를 false 로 둔다 — 보는 일은 위 view 가 맡는다(잎 트리의 같은 주석).
+      return ladder({ write: canCreateTechnicalTemplateDraft(role), read: false });
     case "technicalProcedures.editDraft":
       return ladder({
-        write: canEditTechnicalTemplateDraft(role),
+        // 🔴 2026-11-27(ㄱ안) — 위 create 와 **같은 집합**이다. 여기서
+        // canEditTechnicalTemplateDraft 를 부르지 않는 까닭이 그 함수의 주석에
+        // 적혀 있다: 그쪽을 넓히면 메뉴 상한(이 파일 276줄)과 분류별 관문
+        // (canActorEditTemplateOfCategory)까지 **허락 없이** 함께 움직인다.
+        write: canAuthorTechnicalTemplatesByDefault(role),
         read: canViewPublishedTechnicalTemplates(role),
       });
     case "technicalProcedures.publish":

@@ -5,7 +5,7 @@ import { sessionActorWithDeveloperFlag } from "@/lib/auth/acting-user";
 import { actorMay } from "@/lib/auth/developer-promotion";
 import { getAuthSource } from "@/lib/config/auth-source";
 import { canEditProcedureTemplateDraft } from "@/lib/auth/procedure-template-authorization";
-import { canEditTechnicalTemplateDraft, canManageTechnicalTemplates } from "@/lib/auth/technical-procedure-template-authorization";
+import { mayEnterTemplateEditor } from "@/lib/auth/technical-procedure-capabilities";
 import {
   updateProcedureTemplateNode,
   changeProcedureTemplateNodeType,
@@ -90,12 +90,21 @@ async function resolveAuthorizedActorId(): Promise<{ ok: true; userId: string } 
   // Phase 5C-5B — this fast pre-check is a UX short-circuit only, run
   // before any template row (and therefore its category) is known; it must
   // admit anyone who could possibly be authorized for EITHER category
-  // (FULL_SERVICE's existing SUPER_ADMIN-only function OR TECHNICAL_TASK's
-  // ADMIN+SUPER_ADMIN function). The mutation layer's category-aware check
-  // (procedure-template-editor.ts's assertEditableDraft /
-  // validateProcedureTemplate) remains the sole authoritative boundary.
+  // (FULL_SERVICE's existing SUPER_ADMIN-only function OR TECHNICAL_TASK's).
+  // The mutation layer's category-aware check (procedure-template-editor.ts's
+  // assertEditableDraft / validateProcedureTemplate) remains the sole
+  // authoritative boundary.
+  //
+  // 🔴 2026-11-27 — TECHNICAL_TASK 쪽 반쪽이 역할 고정 canEditTechnicalTemplateDraft
+  //    에서 설정(`technicalProcedures.editDraft`)으로 바뀌었다. 바꾸지 않으면
+  //    **설정을 넓혀도 아무것도 안 열린다** — mutation 은 이미 설정을 보는데
+  //    (assertEditableDraft → mayEditTemplateOfCategory) 넓어진 사람이 여기서 먼저
+  //    걸려 그 관문에 닿지도 못했다. 실제로 그 상태였다(이 조각 전까지).
+  //
+  // 🔵 FULL_SERVICE 쪽 반쪽은 **손대지 않는다.** 그 분류는 이 설정의 소관이 아니다
+  //    (technical-procedure-capabilities.ts 머리말).
   const actor = await sessionActorWithDeveloperFlag(session);
-  if (!actorMay(actor, canEditProcedureTemplateDraft) && !actorMay(actor, canEditTechnicalTemplateDraft)) {
+  if (!actorMay(actor, canEditProcedureTemplateDraft) && !(await mayEnterTemplateEditor(actor))) {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "편집 권한이 없습니다." } };
   }
   return { ok: true, userId: session.userId };
@@ -341,11 +350,15 @@ export async function validateProcedureTemplateAction(input: { templateId: strin
  * Phase 5C-5B-1 — fast pre-check for the NEW node/edge structural-CRUD
  * actions below. Deliberately separate from resolveAuthorizedActorId
  * (which admits either category's property-edit policy): the new
- * capability is TECHNICAL_TASK-only for every role, so
- * canManageTechnicalTemplates is the correct (and only) coarse gate here.
- * The mutation layer's assertTechnicalGraphEditable/
- * canActorManageTechnicalTemplateGraph remains the sole authoritative
- * boundary — this is a UX short-circuit only.
+ * capability is TECHNICAL_TASK-only for every role, so the technical
+ * draft-edit gate is the correct (and only) coarse gate here.
+ * The mutation layer's assertTechnicalGraphEditable/mayManageTemplateGraph
+ * remains the sole authoritative boundary — this is a UX short-circuit only.
+ *
+ * 🔴 2026-11-27 — 역할 고정 canManageTechnicalTemplates 에서 설정
+ * (`technicalProcedures.editDraft`)으로 바뀌었다. 이 한 줄이 **노드·연결선 편집,
+ * 되돌리기/다시하기, 복원 전부의 입구**라, 여기가 역할 고정으로 남아 있으면
+ * 「초안 편집」을 넓혀도 편집기에서 할 수 있는 일이 하나도 안 늘어난다.
  *
  * Exported for reuse by procedure-template-undo-redo.ts and
  * procedure-template-restore.ts's own actions (Phase 5C-5C) — Undo/Redo/
@@ -360,7 +373,7 @@ export async function resolveTechnicalGraphActorId(): Promise<{ ok: true; userId
   if (session.approvalStatus !== "APPROVED") {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." } };
   }
-  if (!actorMay(await sessionActorWithDeveloperFlag(session), canManageTechnicalTemplates)) {
+  if (!(await mayEnterTemplateEditor(await sessionActorWithDeveloperFlag(session)))) {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "권한이 없습니다." } };
   }
   return { ok: true, userId: session.userId };

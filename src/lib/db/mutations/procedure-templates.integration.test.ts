@@ -16,6 +16,7 @@ import {
   procedureReferenceItems,
   procedureTemplateEditHistory,
   auditLogs,
+  rolePermissions,
   users,
 } from "../schema";
 import {
@@ -26,11 +27,27 @@ import {
   replaceDraftProcedureTemplates,
   createManualTechnicalProcedureTemplate,
   renameTechnicalProcedureTemplate,
+  softDeleteProcedureTemplate,
 } from "./procedure-templates";
+import { saveRolePermissions } from "./role-permissions";
 import {
   canViewPublishedProcedureTemplates,
   canViewAllProcedureTemplateStatuses,
 } from "@/lib/auth/procedure-template-authorization";
+import { roleOnlyActor } from "@/lib/auth/permission-resolver";
+import {
+  mayCreateTechnicalTemplate,
+  mayDeleteTemplateOfCategory,
+  mayEditTemplateOfCategory,
+  mayEnterTemplateEditor,
+  mayManageTemplateGraph,
+  mayPublishTemplateOfCategory,
+  mayResolveValidationIssues,
+  mayViewSomeTemplate,
+  mayViewTemplateOfCategory,
+  mayViewEveryTechnicalTemplateStatus,
+  mayViewEveryTemplateStatusOfCategory,
+} from "@/lib/auth/technical-procedure-capabilities";
 import { listProcedureTemplates, getProcedureTemplateDetail, listTechnicalProcedureTemplates } from "../queries/procedure-templates";
 import { combineShapeGraphSheets } from "../../../../scripts/lib/xlsx/combine-shape-graph-sheets";
 import type { ExtractedTemplate } from "../../../../scripts/lib/xlsx/types";
@@ -1276,12 +1293,25 @@ describe("Phase 5C-5B: coarse-then-fine authorization ordering (publishProcedure
     if (!result.ok) assert.equal(result.code, "FORBIDDEN");
   });
 
-  test("30. createNewDraftVersion: AS_ENGINEER/SALES/INVENTORY_MANAGER against a nonexistent template id are rejected before any row lookup (FORBIDDEN, never NOT_FOUND)", async () => {
-    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+  /**
+   * 🔴 2026-11-27(ㄱ안) — AS_ENGINEER 가 이 목록에서 빠졌다. 「새 초안 버전 만들기」는
+   * **게시본을 고치는 유일한 길**이라 `technicalProcedures.editDraft` 를 보는데
+   * (mayCreateSomeDraftVersion), 사용자가 그 잎의 기본값에 엔지니어를 넣었다.
+   * 그래서 이제 거친 관문을 통과하고 아래 30-나처럼 NOT_FOUND 가 나온다.
+   * 🔵 이 절이 지키는 「거친 관문이 행을 읽기 전에 돈다」는 영업·자재로 그대로 잰다.
+   */
+  test("30. createNewDraftVersion: SALES/INVENTORY_MANAGER against a nonexistent template id are rejected before any row lookup (FORBIDDEN, never NOT_FOUND)", async () => {
+    for (const actorId of [salesId, inventoryManagerId]) {
       const result = await createNewDraftVersion(NONEXISTENT_ID, actorId);
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.code, "FORBIDDEN");
     }
+  });
+
+  test("30-나. createNewDraftVersion: AS_ENGINEER 는 이제 거친 관문을 통과한다 (2026-11-27 ㄱ안)", async () => {
+    const result = await createNewDraftVersion(NONEXISTENT_ID, asEngineerId);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.code, "NOT_FOUND");
   });
 
   test("31. createNewDraftVersion: ADMIN passes the coarse pre-gate, so a nonexistent template id surfaces as NOT_FOUND", async () => {
@@ -1344,13 +1374,74 @@ describe("createManualTechnicalProcedureTemplate", () => {
     assert.equal(result.ok, true, JSON.stringify(result));
   });
 
-  test("AS_ENGINEER, SALES, INVENTORY_MANAGER are denied", async () => {
-    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+  /**
+   * ── 🔴 2026-11-27: **A/S 엔지니어가 이 목록에서 빠졌다** ────────────────────
+   * 그전까지 이 시험은 「엔지니어·영업·자재는 못 만든다」를 지키고 있었는데, 그날
+   * 사용자가 「[절차 만들기]는 [최고 관리자/관리자/a/s엔지니어]는 [읽기+쓰기]를
+   * 기본 권한으로」 라고 정했다. 그래서 **거짓이 된 단언을 지우는 대신**, 열린 쪽과
+   * 닫힌 쪽을 둘로 갈라 각각 잰다(아래 두 시험).
+   *
+   * 🔴 같은 날 관문 자체도 역할 고정에서 **설정**(`technicalProcedures.create`)으로
+   * 넘어갔다. 그러니 이 둘이 지금 재는 것은 「설정이 저장된 적 없을 때의 답」이다 —
+   * 시험 DB 의 role_permissions 에 그 키로 저장된 행이 없으므로 기본 정책이 답한다.
+   * 역할 × 기본값의 표 자체는 unit 목록의 technical-procedure-settings-gate.test.ts.
+   */
+  test("🔴 AS_ENGINEER 도 만들 수 있다 (2026-11-27 사용자 결정으로 열렸다)", async () => {
+    const code = uniqueCode("manual-engineer");
+    const result = await trackAndReturn(
+      await createManualTechnicalProcedureTemplate({ code, name: "엔지니어가 만든 절차", equipmentType: "COMMON" }, asEngineerId)
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+  });
+
+  test("SALES, INVENTORY_MANAGER are denied", async () => {
+    for (const actorId of [salesId, inventoryManagerId]) {
       const code = uniqueCode("manual-denied");
       const result = await createManualTechnicalProcedureTemplate({ code, name: "x", equipmentType: "COMMON" }, actorId);
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.code, "FORBIDDEN");
     }
+  });
+
+  test("🔴 AS_ENGINEER 는 **만들고 고칠 수 있고, 발행은 못 한다** (2026-11-27 ㄱ안)", async () => {
+    /**
+     * 🔴 이 시험이 ㄱ안의 **결론 전체**를 한 줄기로 밟는다. 2026-11-27 오전까지는
+     * 「만들기만 열려 있어 제가 만든 초안의 이름조차 못 바꾸는」 상태였고, 그 상태를
+     * 보고받은 사용자가 초안 편집도 함께 열기로 했다. 열린 뒤 **어디까지 열렸는가**가
+     * 이 시험의 물음이고, 발행이 마지막 울타리다.
+     *
+     * 🔵 남이 만든 행으로 재면 「남의 것이라 막혔나」와 구별이 안 되므로, 만든 사람이
+     *    제 행을 민다.
+     */
+    const code = uniqueCode("manual-engineer-then-edit");
+    const created = await trackAndReturn(
+      await createManualTechnicalProcedureTemplate({ code, name: "엔지니어 초안", equipmentType: "COMMON" }, asEngineerId)
+    );
+    assert.equal(created.ok, true, JSON.stringify(created));
+    if (!created.ok) return;
+
+    // ① 고치기 — 열려 있어야 한다.
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, created.id));
+    const renamed = await renameTechnicalProcedureTemplate(
+      created.id,
+      asEngineerId,
+      "고쳐 쓴 이름",
+      row.updatedAt.toISOString()
+    );
+    assert.equal(renamed.ok, true, `초안 편집이 안 열렸다: ${JSON.stringify(renamed)}`);
+
+    // 🔴 값으로 확인한다 — ok 만 보면 「됐다고 말하고 안 썼다」를 못 잡는다.
+    const [afterRename] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, created.id));
+    assert.equal(afterRename.name, "고쳐 쓴 이름");
+
+    // ② 발행 — **막혀 있어야 한다.** 사용자가 넓힌 것은 만들기·초안 편집 둘뿐이다.
+    const published = await publishProcedureTemplate(created.id, asEngineerId);
+    assert.equal(published.ok, false, "발행까지 함께 열렸다 — 사용자가 허락하지 않은 넓힘이다");
+    if (!published.ok) assert.equal(published.code, "FORBIDDEN");
+
+    // 🔴 상태가 정말 초안 그대로인가.
+    const [afterPublish] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, created.id));
+    assert.equal(afterPublish.status, "DRAFT", "거절했다면서 상태를 바꿨다");
   });
 
   test("the created row is always category=TECHNICAL_TASK, isReferenceOnly=false, status=DRAFT, version=1, sourceType=MANUAL", async () => {
@@ -1476,13 +1567,24 @@ describe("renameTechnicalProcedureTemplate", () => {
     assert.equal(row.updatedAt.toISOString(), result.updatedAt);
   });
 
-  test("AS_ENGINEER, SALES, INVENTORY_MANAGER are denied", async () => {
-    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+  // 🔴 2026-11-27(ㄱ안) — AS_ENGINEER 가 이 목록에서 빠졌다. 이름 변경은 초안 편집
+  //    잎을 보는데(mayEnterTemplateEditor / mayManageTemplateGraph), 사용자가 그
+  //    잎의 기본값에 엔지니어를 넣었다. 열린 쪽은 바로 아래에서 값으로 잰다.
+  test("SALES, INVENTORY_MANAGER are denied", async () => {
+    for (const actorId of [salesId, inventoryManagerId]) {
       const draft = await createDraft();
       const result = await renameTechnicalProcedureTemplate(draft.id, actorId, "변경 시도", draft.updatedAt.toISOString());
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.code, "FORBIDDEN");
     }
+  });
+
+  test("🔴 AS_ENGINEER 는 이제 이름을 **바꿀 수 있다** (2026-11-27 ㄱ안)", async () => {
+    const draft = await createDraft();
+    const result = await renameTechnicalProcedureTemplate(draft.id, asEngineerId, "엔지니어가 고친 이름", draft.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, draft.id));
+    assert.equal(row.name, "엔지니어가 고친 이름");
   });
 
   test("a blank/whitespace-only name is rejected with INVALID_INPUT", async () => {
@@ -1728,5 +1830,319 @@ describe("줄기 B ④ 조각 ③ — 게시 관문과 이어가기", () => {
 
     const result = await publishProcedureTemplate(imported.id, superAdminId);
     assert.equal(result.ok, true, JSON.stringify(result));
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 2026-11-27(ㄱ안) — A/S 엔지니어의 **흐름 전체**를 실제로 불러서 걷는다
+ * ============================================================================
+ * 사용자가 ㄱ안을 고른 까닭이 「만들었는데 한 번도 열 수 없다」였다. 그 결함은
+ * 단위 시험으로 안 잡혔다 — 관문 하나하나는 각자의 자리에서 멀쩡했고, **이어
+ * 붙였을 때만** 막혔기 때문이다. 그래서 여기서는 화면이 밟는 차례 그대로
+ * 「목록 → 만들기 → 편집기 진입 → 고치기 → 목록에서 다시 열기」를 걷고,
+ * **어디서도 거절이 안 나는지**를 잰다.
+ *
+ * 🔵 route 가드는 페이지 컴포넌트라 여기서 못 부른다. 대신 그 페이지들이 **실제로
+ *    부르는 판정 함수**를 같은 인자로 부른다 — 글자로 「그 함수를 부르는가」를 재는
+ *    쪽은 unit 목록의 technical-procedure-settings-gate.test.ts ⑤절이 든다.
+ * 🔵 저장된 설정이 없는 상태에서 잰다(시험 DB 의 role_permissions 에 이 키로 저장된
+ *    행이 없다) — 즉 기본 정책이 답하는, 배포 직후의 상태 그대로다.
+ * ============================================================================
+ */
+describe("🔴 ㄱ안: A/S 엔지니어가 만든 절차를 끝까지 따라간다", () => {
+  const engineer = roleOnlyActor("AS_ENGINEER");
+  const admin = roleOnlyActor("ADMIN");
+  const sales = roleOnlyActor("SALES");
+
+  test("🔵 먼저 표본 — 판정 함수가 역할을 실제로 가른다", async () => {
+    // 전부 true 를 돌려주는 상태라면 아래 흐름은 공짜로 통과한다.
+    assert.equal(await mayCreateTechnicalTemplate(admin), true, "관리자는 만들 수 있어야 한다");
+    assert.equal(await mayCreateTechnicalTemplate(sales), false, "영업은 못 만들어야 한다");
+    assert.equal(await mayEnterTemplateEditor(sales), false, "영업은 편집기에 못 들어가야 한다");
+  });
+
+  test("① 목록 — 들어갈 수 있고, [+ 새 절차] 단추가 뜨고, 초안까지 보인다", async () => {
+    assert.equal(await mayCreateTechnicalTemplate(engineer), true, "[+ 새 절차] 단추가 안 뜬다");
+    assert.equal(
+      await mayViewEveryTechnicalTemplateStatus(engineer),
+      true,
+      "목록이 게시본만 보여 준다 — 만든 초안이 제 눈앞에서 사라진다"
+    );
+  });
+
+  test("② 만들기 → ③ 편집기 진입 → ④ 고치기 → ⑤ 다시 열기, 어디서도 거절이 없다", async () => {
+    // ② 만들기 — 실제 mutation 을 부른다.
+    const code = uniqueCode("engineer-full-flow");
+    const created = await createManualTechnicalProcedureTemplate(
+      { code, name: "엔지니어 전체 흐름", equipmentType: "COMMON" },
+      asEngineerId
+    );
+    assert.equal(created.ok, true, `만들기에서 막혔다: ${JSON.stringify(created)}`);
+    if (!created.ok) return;
+    createdTemplateIds.push(created.id);
+
+    const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, created.id));
+    assert.equal(row.status, "DRAFT", "만들어진 행은 초안이어야 한다 — 아래 관문들이 그 전제로 돈다");
+
+    // ③ 편집기 진입 — 만들기 창이 성공 직후 밀어 넣는 그 자리다
+    //    (CreateTechnicalTemplateForm 의 router.push(`/procedures/<id>/edit`)).
+    //    🔴 2026-11-27 오전에는 **바로 여기서 404** 가 났다.
+    assert.equal(
+      await mayViewEveryTemplateStatusOfCategory(engineer, row.category),
+      true,
+      "편집기 route 가 notFound() 로 막는다 — 만든 직후 404 다"
+    );
+    assert.equal(await mayEnterTemplateEditor(engineer), true, "편집기 입구(서버 액션 사전검사)가 막는다");
+    assert.equal(await mayEditTemplateOfCategory(engineer, row.category), true, "편집기가 읽기 전용으로 열린다");
+    assert.equal(await mayManageTemplateGraph(engineer, row.category), true, "단계·연결선을 못 만든다");
+
+    // ④ 고치기 — 실제 mutation 을 부른다.
+    const renamed = await renameTechnicalProcedureTemplate(
+      created.id,
+      asEngineerId,
+      "엔지니어가 채운 절차",
+      row.updatedAt.toISOString()
+    );
+    assert.equal(renamed.ok, true, `고치기에서 막혔다: ${JSON.stringify(renamed)}`);
+
+    // ⑤ 목록에서 다시 열기 — 상세 route 가 쓰는 그 판정이다.
+    const [afterEdit] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, created.id));
+    assert.equal(afterEdit.name, "엔지니어가 채운 절차", "고쳤다고 했는데 값이 안 들어갔다");
+    assert.equal(
+      await mayViewEveryTemplateStatusOfCategory(engineer, afterEdit.category),
+      true,
+      "상세 route 가 notFound() 로 막는다 — 목록엔 뜨는데 누르면 404 다"
+    );
+
+    // 🔴 그리고 **여기까지**다 — 발행은 막혀 있어야 한다.
+    assert.equal(
+      await mayPublishTemplateOfCategory(engineer, afterEdit.category),
+      false,
+      "발행까지 열렸다 — 사용자가 허락하지 않은 넓힘이다"
+    );
+  });
+
+  test("🔴 게시본에서 [새 버전 만들기]도 함께 열렸다 — 올릴 수는 있어도 **발행은 못 한다**", async () => {
+    /**
+     * 🔴 사용자가 이것까지 보고 고른 것인지는 알 수 없어, **막지 않고 재기만 한다.**
+     * 「새 초안 버전 만들기」는 게시본을 고치는 유일한 길이라 `editDraft` 잎을 보고
+     * (mayCreateDraftVersionOfCategory), 그 잎이 열리면 함께 열린다.
+     *
+     * 🔵 **위험은 「초안이 늘어나는 것」뿐이다**: 올린 판은 DRAFT 이고 발행이 막혀
+     * 있어 현장에 나가는 절차는 한 글자도 안 바뀐다. 게다가 한 계열에 진행 중인
+     * 초안은 하나만 허용되므로(CONFLICT) 무한히 쌓이지도 않는다.
+     */
+    const code = uniqueCode("engineer-new-version");
+    const created = await createManualTechnicalProcedureTemplate(
+      { code, name: "판 올리기 대상", equipmentType: "COMMON" },
+      asEngineerId
+    );
+    assert.equal(created.ok, true, JSON.stringify(created));
+    if (!created.ok) return;
+    createdTemplateIds.push(created.id);
+
+    // 발행은 관리자가 한다 — 엔지니어는 못 하므로(위 시험) 여기서 역할을 바꾼다.
+    const published = await publishProcedureTemplate(created.id, superAdminId);
+    assert.equal(published.ok, true, JSON.stringify(published));
+
+    // ① 엔지니어가 새 초안 판을 올린다 — **열려 있다.**
+    const newVersion = await createNewDraftVersion(created.id, asEngineerId);
+    assert.equal(newVersion.ok, true, `새 버전 만들기가 막혔다: ${JSON.stringify(newVersion)}`);
+    if (!newVersion.ok) return;
+    createdTemplateIds.push(newVersion.id);
+
+    const [draftRow] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, newVersion.id));
+    assert.equal(draftRow.status, "DRAFT", "올라간 판은 초안이어야 한다");
+    assert.equal(draftRow.version, 2);
+
+    // ② 그 판을 **발행하는 것은 막힌다.**
+    const engineerPublish = await publishProcedureTemplate(newVersion.id, asEngineerId);
+    assert.equal(engineerPublish.ok, false, "엔지니어가 제 판을 현장에 내보낼 수 있다");
+    if (!engineerPublish.ok) assert.equal(engineerPublish.code, "FORBIDDEN");
+
+    // 🔴 ③ 그래서 **현장에 나가 있는 절차는 한 글자도 안 바뀐다.**
+    const [stillPublished] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, created.id));
+    assert.equal(stillPublished.status, "PUBLISHED", "게시본이 흔들렸다");
+    assert.equal(stillPublished.name, "판 올리기 대상");
+    const [draftAfter] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, newVersion.id));
+    assert.equal(draftAfter.status, "DRAFT", "거절했다면서 상태를 바꿨다");
+  });
+});
+
+/**
+ * ============================================================================
+ * 🔴 2026-11-27(저녁) — 「넓히면 **실제로** 열린다」를 값으로 잰다
+ * ============================================================================
+ * 사용자가 운영 화면을 가져와 물었다. 권한 설정 화면은 이 메뉴에 대고 「설정이
+ * 최종 판정이라, 넓히면 실제로 그 조작이 열립니다」라고 적고 있는데 **그 약속이
+ * 지켜지지 않고 있었다** — 잎 여섯 중 다섯이 뒤에 역할 고정 관문을 달고 있어서,
+ * 관리자가 설정에서 열어 줘도 사용자는 막힌 채였다.
+ *
+ * 🔴 **그래서 이 절은 글자가 아니라 값으로 잰다.** 설정을 기본값보다 넓게 **실제로
+ * 저장하고**, 그 역할로 mutation 을 **실제로 불러** 통과하는지 본다. 원본 글자 검사
+ * (unit 목록의 technical-procedure-settings-gate.test.ts ⑤절)는 「그 함수를 부르는가」
+ * 까지만 말할 수 있고, 「부른 결과가 열리는가」는 말하지 못한다.
+ *
+ * 🔴 **설정을 표에 직접 넣지 않고 저장 함수(saveRolePermissions)로 넣는다** — 이웃
+ * repair-case-used-parts.integration.test.ts 가 세운 규칙이다. 그래야 「설정 화면이
+ * **쓰는** 키」와 「관문이 **읽는** 키」가 같은 글자인지까지 이 시험 하나가 잇는다.
+ * 표에 손으로 넣으면 저장 쪽이 다른 키로 적고 있어도 시험은 멀쩡히 통과한다.
+ * ============================================================================
+ */
+describe("🔴 설정을 넓히면 실제로 열리고, 좁히면 실제로 닫힌다", () => {
+  const LEAVES = [
+    "technicalProcedures.view",
+    "technicalProcedures.create",
+    "technicalProcedures.editDraft",
+    "technicalProcedures.publish",
+    "technicalProcedures.validation",
+    "technicalProcedures.lifecycle",
+  ] as const;
+
+  /** 저장했다가 반드시 치운다 — 남으면 뒤따르는 시험이 기본값 대신 이 행을 본다. */
+  async function withStoredLevels(
+    changes: { role: "SALES" | "AS_ENGINEER" | "ADMIN" | "INVENTORY_MANAGER"; levels: Record<string, string> }[],
+    run: () => Promise<void>
+  ): Promise<void> {
+    try {
+      const saved = await saveRolePermissions({ changes, actorUserId: superAdminId });
+      assert.equal(saved.ok, true, `설정 저장이 거절됐다: ${JSON.stringify(saved)}`);
+      if (!saved.ok) return;
+      // 🔴 ok 만 보면 「저장은 됐는데 한 행도 안 생긴」 경우를 못 가른다.
+      //    🔵 세는 단위는 **역할이 아니라 잎**이다(한 역할에 잎 둘을 주면 2가 온다).
+      //    처음에 역할 수로 적었다가 여기서 걸렸다 — 이 줄이 실제로 문다는 증거다.
+      const expectedRows = changes.reduce((sum, change) => sum + Object.keys(change.levels).length, 0);
+      assert.equal(saved.changedCount, expectedRows, "넘긴 잎 수만큼 실제로 저장돼야 한다");
+      // 🔴 그리고 **표에 그 글자 그대로** 들어갔는가 — 저장 쪽이 다른 키로 적고
+      //    있어도 위 숫자는 맞을 수 있다. 설정 화면이 쓰는 키와 관문이 읽는 키를 잇는다.
+      const storedKeys = (
+        await db
+          .select({ areaKey: rolePermissions.areaKey })
+          .from(rolePermissions)
+          .where(inArray(rolePermissions.areaKey, [...LEAVES]))
+      ).map((row) => row.areaKey);
+      assert.equal(storedKeys.length, expectedRows, "관문이 읽는 키와 다른 글자로 저장됐다");
+      await run();
+    } finally {
+      // 🔴 저장 함수로 넣었으므로 **감사 이력도 함께 남았다**(role-permissions.ts 가
+      //    행마다 한 줄씩 적는다). 행을 지우면 그 id 를 더는 알 수 없으므로 **지우기
+      //    전에** 집어 둔다 — 이웃 repair-case-used-parts.integration.test.ts 와 같은 모양.
+      const rows = await db
+        .select({ id: rolePermissions.id })
+        .from(rolePermissions)
+        .where(inArray(rolePermissions.areaKey, [...LEAVES]));
+      await db.delete(rolePermissions).where(inArray(rolePermissions.areaKey, [...LEAVES]));
+      if (rows.length > 0) {
+        await db.delete(auditLogs).where(
+          and(
+            eq(auditLogs.targetEntity, "role_permissions"),
+            inArray(
+              auditLogs.targetRecordId,
+              rows.map((row) => row.id)
+            )
+          )
+        );
+      }
+    }
+  }
+
+  test("🔵 먼저 표본 — 기본값에서는 영업이 **닫혀 있다**", async () => {
+    // 이것이 거짓이면 아래 「열렸다」가 무엇도 증명하지 못한다(원래 열려 있던 것).
+    const sales = roleOnlyActor("SALES");
+    assert.equal(await mayViewTemplateOfCategory(sales, "TECHNICAL_TASK"), false);
+    assert.equal(await mayDeleteTemplateOfCategory(sales, "TECHNICAL_TASK"), false);
+    assert.equal(await mayResolveValidationIssues(sales), false);
+    assert.equal(await mayCreateTechnicalTemplate(sales), false);
+  });
+
+  test("🔴 삭제·복원을 넓히면 **mutation 이 실제로 통과한다**", async () => {
+    const code = uniqueCode("widen-lifecycle");
+    const created = await createManualTechnicalProcedureTemplate(
+      { code, name: "넓힘 확인용", equipmentType: "COMMON" },
+      superAdminId
+    );
+    assert.equal(created.ok, true, JSON.stringify(created));
+    if (!created.ok) return;
+    createdTemplateIds.push(created.id);
+
+    // ① 기본값에서는 영업이 거절당한다.
+    const before = await softDeleteProcedureTemplate({ templateId: created.id, actorUserId: salesId, reason: null });
+    assert.equal(before.ok, false, "기본값에서 영업이 지울 수 있다 — 표본이 깨졌다");
+    if (!before.ok) assert.equal(before.code, "FORBIDDEN");
+
+    // ② 설정을 넓히면 **같은 호출이 통과한다.**
+    await withStoredLevels(
+      [{ role: "SALES", levels: { "technicalProcedures.lifecycle": "MANAGE" } }], 
+      async () => {
+        const after = await softDeleteProcedureTemplate({ templateId: created.id, actorUserId: salesId, reason: null });
+        assert.equal(after.ok, true, `넓힌 설정이 실제로 열리지 않았다: ${JSON.stringify(after)}`);
+
+        // 🔴 값으로 확인한다 — ok 만 보면 「됐다고 말하고 안 썼다」를 못 잡는다.
+        const [row] = await db.select().from(procedureTemplates).where(eq(procedureTemplates.id, created.id));
+        assert.equal(row.isDeleted, true, "휴지통으로 안 갔다");
+
+        // 🔴 **분류 울타리는 안 풀렸다** — 설정이 관리여도 기술 절차가 아니면 닫혀 있다.
+        const sales = roleOnlyActor("SALES");
+        assert.equal(await mayDeleteTemplateOfCategory(sales, "TECHNICAL_TASK"), true);
+        assert.equal(
+          await mayDeleteTemplateOfCategory(sales, "FULL_SERVICE"),
+          false,
+          "설정을 넓혔더니 전체 서비스 절차까지 열렸다"
+        );
+        assert.equal(await mayDeleteTemplateOfCategory(sales, "REFERENCE"), false);
+      }
+    );
+  });
+
+  test("🔴 조회·검증을 넓히면 그 관문들도 함께 열린다", async () => {
+    await withStoredLevels(
+      [
+        {
+          role: "SALES",
+          levels: { "technicalProcedures.view": "READ", "technicalProcedures.validation": "WRITE" },
+        },
+      ],
+      async () => {
+        const sales = roleOnlyActor("SALES");
+        // 상세·편집기 route 의 두 관문.
+        assert.equal(await mayViewSomeTemplate(sales), true, "거친 관문이 안 열렸다");
+        assert.equal(await mayViewTemplateOfCategory(sales, "TECHNICAL_TASK"), true, "분류별 관문이 안 열렸다");
+        // 검증 이슈 처리 액션의 사전 검사.
+        assert.equal(await mayResolveValidationIssues(sales), true, "검증 액션이 안 열렸다");
+
+        // 🔴 **다른 분류는 안 열렸다** — 기술 절차 설정이 공용 정책을 밀어내지 않는다.
+        assert.equal(
+          await mayViewTemplateOfCategory(sales, "FULL_SERVICE"),
+          false,
+          "기술 절차 조회를 넓혔더니 전체 서비스 절차까지 보인다"
+        );
+      }
+    );
+  });
+
+  test("🔴 좁히면 **실제로 닫힌다** — 기본으로 열려 있던 역할이 막힌다", async () => {
+    // 🔵 넓히는 쪽만 재면 「설정을 아예 안 보고 늘 통과하는」 관문도 통과한다.
+    //    반대쪽을 함께 재야 관문이 정말 설정을 보는 것이 증명된다.
+    await withStoredLevels(
+      [{ role: "AS_ENGINEER", levels: { "technicalProcedures.create": "NONE" } }],
+      async () => {
+        assert.equal(
+          await mayCreateTechnicalTemplate(roleOnlyActor("AS_ENGINEER")),
+          false,
+          "좁힌 설정이 안 먹혔다"
+        );
+        const code = uniqueCode("narrow-create");
+        const blocked = await createManualTechnicalProcedureTemplate(
+          { code, name: "막혀야 한다", equipmentType: "COMMON" },
+          asEngineerId
+        );
+        assert.equal(blocked.ok, false, "설정으로 닫았는데 여전히 만들어진다");
+        if (!blocked.ok) assert.equal(blocked.code, "FORBIDDEN");
+      }
+    );
+
+    // 🔴 치운 뒤 **되돌아왔는지**도 본다 — 안 치웠으면 뒤따르는 시험이 조용히 깨진다.
+    assert.equal(await mayCreateTechnicalTemplate(roleOnlyActor("AS_ENGINEER")), true, "저장한 행이 안 치워졌다");
   });
 });

@@ -4,6 +4,7 @@ import { ROLE_CODES, type Role } from "@/lib/domain/types";
 import type { ProcedureTemplateCategory } from "@/lib/domain/procedure-template-types";
 import {
   canManageTechnicalTemplates,
+  canAuthorTechnicalTemplatesByDefault,
   canCreateTechnicalTemplateDraft,
   canEditTechnicalTemplateDraft,
   canPublishTechnicalTemplates,
@@ -31,23 +32,74 @@ test("canManageTechnicalTemplates: SUPER_ADMIN and ADMIN only", () => {
   for (const role of MANAGE_INELIGIBLE) assert.equal(canManageTechnicalTemplates(role), false, `${role} must NOT be able to manage technical templates`);
 });
 
-test("canCreateTechnicalTemplateDraft / canEditTechnicalTemplateDraft / canPublishTechnicalTemplates / canCreateTechnicalTemplateDraftVersion all match the same SUPER_ADMIN+ADMIN policy", () => {
+test("canEditTechnicalTemplateDraft / canPublishTechnicalTemplates / canCreateTechnicalTemplateDraftVersion all match the same SUPER_ADMIN+ADMIN policy", () => {
+  // 🔴 2026-11-27 — canCreateTechnicalTemplateDraft 가 **이 묶음에서 빠졌다.**
+  //    사용자 결정으로 만들기에만 A/S 엔지니어가 들어왔기 때문이다(아래 전용 시험).
+  //    단언을 느슨하게 만든 것이 아니라, 나머지 셋이 **안 움직였다**를 그대로 지킨다.
   for (const role of ROLE_CODES) {
     const expected = role === "SUPER_ADMIN" || role === "ADMIN";
-    assert.equal(canCreateTechnicalTemplateDraft(role), expected, `canCreateTechnicalTemplateDraft(${role})`);
     assert.equal(canEditTechnicalTemplateDraft(role), expected, `canEditTechnicalTemplateDraft(${role})`);
     assert.equal(canPublishTechnicalTemplates(role), expected, `canPublishTechnicalTemplates(${role})`);
     assert.equal(canCreateTechnicalTemplateDraftVersion(role), expected, `canCreateTechnicalTemplateDraftVersion(${role})`);
   }
 });
 
-test("AS_ENGINEER, SALES, INVENTORY_MANAGER have zero technical-template management access", () => {
-  for (const role of ["AS_ENGINEER", "SALES", "INVENTORY_MANAGER"] as const) {
+test("🔴 canCreateTechnicalTemplateDraft: SUPER_ADMIN + ADMIN + AS_ENGINEER (2026-11-27 사용자 결정)", () => {
+  // 사용자 원문: 「[절차 만들기]는 [최고 관리자/관리자/a/s엔지니어]는 [읽기+쓰기]를
+  // 기본 권한으로 설정해줘.」 — 셋을 적고, 나머지 둘이 **아닌 것**도 함께 적는다.
+  const ALLOWED: readonly Role[] = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"];
+  for (const role of ROLE_CODES) {
+    assert.equal(
+      canCreateTechnicalTemplateDraft(role),
+      ALLOWED.includes(role),
+      `canCreateTechnicalTemplateDraft(${role})`
+    );
+  }
+  // 🔵 표본 — 이 함수가 정말 이웃보다 **한 역할 넓다**(같으면 위 묶음과 구별이 안 된다).
+  assert.equal(canCreateTechnicalTemplateDraft("AS_ENGINEER"), true);
+  assert.equal(canManageTechnicalTemplates("AS_ENGINEER"), false);
+});
+
+test("SALES, INVENTORY_MANAGER have zero technical-template management access", () => {
+  // 🔴 AS_ENGINEER 가 이 목록에서 빠졌다(2026-11-27) — 「절차 만들기」가 그 역할에
+  //    열렸으므로 「zero ... access」가 더 이상 참이 아니다. 영업·자재는 그대로다.
+  for (const role of ["SALES", "INVENTORY_MANAGER"] as const) {
+    assert.equal(canAuthorTechnicalTemplatesByDefault(role), false);
     assert.equal(canCreateTechnicalTemplateDraft(role), false);
     assert.equal(canEditTechnicalTemplateDraft(role), false);
     assert.equal(canPublishTechnicalTemplates(role), false);
     assert.equal(canCreateTechnicalTemplateDraftVersion(role), false);
   }
+});
+
+test("🔴 canAuthorTechnicalTemplatesByDefault: 만들기·초안 편집의 **기본값** 집합 — 최고관리자 · 관리자 · A/S 엔지니어", () => {
+  // 사용자 결정 둘(2026-11-27): 「[절차 만들기]는 [최고 관리자/관리자/a/s엔지니어]는
+  // [읽기+쓰기]를 기본 권한으로」 + 「ㄱ으로 진행해」(= 초안 편집도 같은 셋에게).
+  const ALLOWED: readonly Role[] = ["SUPER_ADMIN", "ADMIN", "AS_ENGINEER"];
+  for (const role of ROLE_CODES) {
+    assert.equal(canAuthorTechnicalTemplatesByDefault(role), ALLOWED.includes(role), role);
+  }
+  // 🔵 표본 — 이웃보다 **한 역할 넓다**(같으면 canManageTechnicalTemplates 와 구별이 안 된다).
+  assert.equal(canManageTechnicalTemplates("AS_ENGINEER"), false);
+});
+
+test("🔴 역할 고정 함수들은 **안 움직였다** — 넓어진 것은 기본값 쪽이다", () => {
+  // 🔴 이 파일은 **역할 함수**를 재는 자리다. 2026-11-27 에 A/S 엔지니어에게 실제로
+  //    열린 것은 설정 잎 둘(`technicalProcedures.create` · `.editDraft`)의 **기본값**이고,
+  //    그 값은 위 canAuthorTechnicalTemplatesByDefault 가 들고 있다.
+  //    🔴 `canEditTechnicalTemplateDraft` 는 **일부러 안 넓혔다** — 호출부가 셋이라
+  //    넓히면 메뉴 상한과 canActorEditTemplateOfCategory 까지 허락 없이 따라 움직인다
+  //    (그 함수의 주석). 그래서 여기서는 **닫혀 있는 것이 정답**이다.
+  // 🔵 역할 × 조작으로 「실제로 누가 무엇을 할 수 있는가」를 재는 쪽은
+  //    technical-procedure-settings-gate.test.ts 다.
+  assert.equal(canEditTechnicalTemplateDraft("AS_ENGINEER"), false);
+  assert.equal(canPublishTechnicalTemplates("AS_ENGINEER"), false);
+  assert.equal(canCreateTechnicalTemplateDraftVersion("AS_ENGINEER"), false);
+  assert.equal(canManageTechnicalTemplates("AS_ENGINEER"), false);
+  assert.equal(canViewAllTechnicalTemplateStatuses("AS_ENGINEER"), false);
+  // 🔴 분류별 관문도 안 움직였다 — 움직이면 전체 서비스 절차 쪽이 함께 흔들린다.
+  assert.equal(canActorEditTemplateOfCategory("AS_ENGINEER", "TECHNICAL_TASK"), false);
+  assert.equal(canActorManageTechnicalTemplateGraph("AS_ENGINEER", "TECHNICAL_TASK"), false);
 });
 
 test("canViewPublishedTechnicalTemplates matches canViewPublishedProcedureTemplates exactly for every role (reused, not duplicated policy)", () => {

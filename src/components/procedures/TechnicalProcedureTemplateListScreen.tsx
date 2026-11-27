@@ -154,9 +154,10 @@ export default function TechnicalProcedureTemplateListScreen({
    * 평소 목록이 그리는 것 — code 줄기당 하나.
    *
    * 🔴 권한 거르기는 이미 끝나 있다. templates 는 서버가
-   * listTechnicalProcedureTemplates(mayEditDraft) 로 읽어 넘긴 것이라, 초안을
-   * 볼 수 없는 역할에게는 초안 행이 애초에 들어 있지 않다. 그래서 접는 함수도
-   * 이 화면도 권한을 다시 보지 않는다 — 보는 곳이 둘이 되면 어긋난다.
+   * listTechnicalProcedureTemplates(mayViewEveryStatus) 로 읽어 넘긴 것이라,
+   * 초안을 볼 수 없는 역할에게는 초안 행이 애초에 들어 있지 않다. 그래서 접는
+   * 함수도 이 화면도 권한을 다시 보지 않는다 — 보는 곳이 둘이 되면 어긋난다.
+   * (그 인자는 「초안 편집」 **또는** 「절차 만들기」다 — page.tsx 의 같은 자리.)
    */
   const series = useMemo(() => groupProcedureTemplatesByCode(templates), [templates]);
 

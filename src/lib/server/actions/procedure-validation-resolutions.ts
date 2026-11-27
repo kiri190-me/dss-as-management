@@ -2,9 +2,8 @@
 
 import { readSession } from "@/lib/auth/session";
 import { sessionActorWithDeveloperFlag } from "@/lib/auth/acting-user";
-import { actorMay } from "@/lib/auth/developer-promotion";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { canResolveProcedureValidationIssues } from "@/lib/auth/procedure-template-authorization";
+import { mayResolveValidationIssues } from "@/lib/auth/technical-procedure-capabilities";
 import {
   bindValidationIssueEdge,
   resolveValidationIssueWithoutGraphChange,
@@ -35,8 +34,17 @@ async function resolveAuthorizedActorId(): Promise<{ ok: true; userId: string } 
   if (session.approvalStatus !== "APPROVED") {
     return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." } };
   }
-  if (!actorMay(await sessionActorWithDeveloperFlag(session), canResolveProcedureValidationIssues)) {
-    return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "검증 이슈 해결 권한이 없습니다 (SUPER_ADMIN 전용)." } };
+  // 🔴 2026-11-27 — 역할 고정 canResolveProcedureValidationIssues(최고관리자 전용)에서
+  //    설정(`technicalProcedures.validation` 쓰기)으로 바뀌었다. **이 한 줄이 「넓혀도
+  //    안 열린다」의 전부였다** — 이 통로의 mutation 넷은 진작부터 설정을 보고 있었는데
+  //    (mutations/procedure-validation-resolutions.ts 의 네 자리), 넓어진 사람이 여기서
+  //    먼저 걸려 그 관문에 닿지도 못했다.
+  // 🔵 기본값은 한 칸도 안 움직인다 — 그 잎의 쓰기 기본값이 같은 역할 함수를 그대로
+  //    부른다(permission-baseline.ts). 넓어지는 것은 사람이 설정 화면에서 올렸을 때뿐이다.
+  // 🔵 글도 함께 고쳤다. 「(SUPER_ADMIN 전용)」은 이제 사실이 아니고, 그 괄호를 남겨
+  //    두면 관리자가 설정으로 열어 준 사람이 「나는 최고관리자가 아니라서」로 읽는다.
+  if (!(await mayResolveValidationIssues(await sessionActorWithDeveloperFlag(session)))) {
+    return { ok: false, result: { ok: false, code: "FORBIDDEN", message: "검증 이슈를 처리할 권한이 없습니다." } };
   }
   return { ok: true, userId: session.userId };
 }

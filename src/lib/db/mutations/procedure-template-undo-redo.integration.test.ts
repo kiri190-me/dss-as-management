@@ -595,7 +595,11 @@ describe("L. stale-revision rejection leaves graph/history unchanged", () => {
 });
 
 describe("M. unauthorized rejection leaves graph/history unchanged", () => {
-  test("AS_ENGINEER/SALES/INVENTORY_MANAGER cannot Undo, and nothing is written", async () => {
+  // 🔴 2026-11-27(ㄱ안) — AS_ENGINEER 가 이 목록에서 빠졌다. 되돌리기는 구조 편집과
+  //    **같은 관문**(assertTechnicalGraphEditable → 초안 편집 잎)을 쓰므로, 사용자가
+  //    엔지니어에게 초안 편집을 열어 준 순간 함께 열린다. 🔵 이 절이 지키는
+  //    「거절되면 그래프도 이력도 한 줄 안 움직인다」는 영업·자재로 그대로 잰다.
+  test("SALES/INVENTORY_MANAGER cannot Undo, and nothing is written", async () => {
     const templateId = await createTechnicalDraft(uniqueCode("unauthorized"));
     const seed = await seedGraph(templateId);
     const edited = await updateProcedureTemplateNode(seed.nodeAId, superAdminId, { title: "권한 테스트" }, seed.updatedAt);
@@ -603,7 +607,7 @@ describe("M. unauthorized rejection leaves graph/history unchanged", () => {
     if (!edited.ok) return;
 
     const historyBefore = await loadHistory(templateId);
-    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+    for (const actorId of [salesId, inventoryManagerId]) {
       const result = await undoProcedureTemplateChange(templateId, actorId, edited.updatedAt);
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.code, "FORBIDDEN");
@@ -611,6 +615,23 @@ describe("M. unauthorized rejection leaves graph/history unchanged", () => {
     const historyAfter = await loadHistory(templateId);
     assert.equal(historyAfter.length, historyBefore.length);
     assert.equal((await loadNode(seed.nodeAId)).title, "권한 테스트");
+  });
+
+  test("🔴 AS_ENGINEER 는 이제 **되돌릴 수 있다** (2026-11-27 ㄱ안)", async () => {
+    // 🔵 위 목록에서 빼기만 하면 「열렸는지」를 아무도 안 잰다. 되돌리기가 ok 를
+    //    돌려줬다는 것만으로도 부족해서 **값이 실제로 돌아왔는지**까지 본다.
+    const templateId = await createTechnicalDraft(uniqueCode("engineer-undo"));
+    const seed = await seedGraph(templateId);
+    const titleBefore = (await loadNode(seed.nodeAId)).title;
+
+    const edited = await updateProcedureTemplateNode(seed.nodeAId, superAdminId, { title: "바뀐 이름" }, seed.updatedAt);
+    assert.equal(edited.ok, true);
+    if (!edited.ok) return;
+    assert.equal((await loadNode(seed.nodeAId)).title, "바뀐 이름", "표본 — 되돌릴 것이 실제로 바뀌어 있어야 한다");
+
+    const result = await undoProcedureTemplateChange(templateId, asEngineerId, edited.updatedAt);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal((await loadNode(seed.nodeAId)).title, titleBefore, "되돌리기가 ok 를 줬는데 값이 안 돌아왔다");
   });
 });
 

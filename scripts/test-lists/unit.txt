@@ -338,6 +338,12 @@ src/lib/domain/local/workflow/workflow-action-availability.test.ts
 src/lib/domain/local/workflow/manual-step-set-permission.test.ts
 src/lib/domain/local/workflow/shipment-approval-checklist.test.ts
 src/lib/auth/technical-procedure-template-authorization.test.ts
+# 🔴 기술 작업 절차의 **만들기·초안 편집·발행이 설정으로 넘어간 날**(2026-11-27)의
+# 안전 조건. 두 가지를 갈라 든다: ① 전환은 아무의 권한도 바꾸지 않아야 하고
+# ② 「절차 만들기」의 기본값만 사용자 결정으로 A/S 엔지니어까지 넓어졌다.
+# 🔵 DB 에 안 닿는다 — 「저장된 값이 없을 때」를 baselineLeafLevel 로 재고,
+#    관문이 정말 그 잎을 보는지는 원본 글자로 본다(주석을 걷어낸 뒤).
+src/lib/auth/technical-procedure-settings-gate.test.ts
 src/lib/domain/procedure-template-edit-history-fold.test.ts
 src/lib/domain/procedure-template-edit-history-replay.test.ts
 src/lib/domain/procedure-template-history-labels.test.ts

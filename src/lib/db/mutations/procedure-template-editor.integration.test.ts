@@ -950,10 +950,21 @@ describe("procedure-template-editor: manual edge routes (Phase 4B)", () => {
 describe("procedure-template-editor: Phase 5C-5B coarse-then-fine authorization ordering", () => {
   const NONEXISTENT_ID = "00000000-0000-4000-8000-000000000000";
 
-  test("33. AS_ENGINEER against a nonexistent node id is rejected before any row lookup (FORBIDDEN, never NOT_FOUND)", async () => {
+  /**
+   * 🔴 2026-11-27(ㄱ안) — 이 줄이 **뒤집혔다.** 그전에는 AS_ENGINEER 가 거친
+   * 관문에서 먼저 걸려 FORBIDDEN 이었는데, 사용자가 「절차 만들기」와 함께
+   * 「초안 편집」의 기본값에도 A/S 엔지니어를 넣기로 하면서 이제 ADMIN 과 같이
+   * 관문을 **통과**한다(아래 36번과 같은 모양이 된다).
+   *
+   * 🔴 **시험을 지우지 않고 뒤집었다** — 이 절이 지키는 것은 「거친 관문이 행을
+   * 읽기 **전에** 돈다」(= 권한 없는 사람에게 행의 존재가 안 새어 나간다)이지
+   * 「엔지니어가 거절된다」가 아니다. 거절되는 쪽은 아래 34·35번(영업·자재)이
+   * 그대로 들고 있다.
+   */
+  test("33. AS_ENGINEER passes the coarse pre-gate (2026-11-27: 초안 편집이 기본값으로 열렸다), so a nonexistent node id surfaces as NOT_FOUND", async () => {
     const result = await updateProcedureTemplateNode(NONEXISTENT_ID, asEngineerId, { title: "x" }, new Date().toISOString());
     assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+    if (!result.ok) assert.equal(result.code, "NOT_FOUND");
   });
 
   test("34. SALES against a nonexistent node id is rejected before any row lookup (FORBIDDEN, never NOT_FOUND)", async () => {
@@ -995,10 +1006,14 @@ describe("procedure-template-editor: Phase 5C-5B coarse-then-fine authorization 
   // check (it does not call assertEditableDraft) — proven independently
   // here so the refactor of that second code path isn't only covered by
   // the assertEditableDraft-based functions above.
-  test("39. validateProcedureTemplate: AS_ENGINEER against a nonexistent template id is rejected before any row lookup (FORBIDDEN, never NOT_FOUND)", async () => {
+  // 🔴 2026-11-27(ㄱ안) — 33번과 같은 까닭으로 뒤집혔다. 🔵 이 검증 통로의 관문은
+  //    `technicalProcedures.validation` 이 아니라 **초안 편집**이다(편집기 안에서
+  //    도는 검사라 resolveAuthorizedActorId 를 탄다). 검증 **이슈 처리** 쪽은
+  //    여전히 엔지니어에게 닫혀 있다 — 그 잎은 이 조각이 안 건드렸다.
+  test("39. validateProcedureTemplate: AS_ENGINEER passes the coarse pre-gate (2026-11-27), so a nonexistent template id surfaces as NOT_FOUND", async () => {
     const result = await validateProcedureTemplate(NONEXISTENT_ID, asEngineerId);
     assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.code, "FORBIDDEN");
+    if (!result.ok) assert.equal(result.code, "NOT_FOUND");
   });
 
   test("40. validateProcedureTemplate: ADMIN passes the coarse pre-gate, so a nonexistent template id surfaces as NOT_FOUND", async () => {
@@ -1226,14 +1241,24 @@ describe("createProcedureTemplateNode", () => {
     if (!result.ok) assert.equal(result.code, "FORBIDDEN");
   });
 
-  test("AS_ENGINEER, SALES, INVENTORY_MANAGER are denied", async () => {
+  // 🔴 2026-11-27(ㄱ안) — AS_ENGINEER 가 이 목록에서 빠지고 아래 전용 시험으로 갔다.
+  //    「초안 편집」이 기본값으로 열리면서 노드 만들기까지 함께 열린다(구조 편집도
+  //    같은 잎을 본다 — mayManageTemplateGraph). 영업·자재는 그대로 막힌다.
+  test("SALES, INVENTORY_MANAGER are denied", async () => {
     const templateId = await createTechnicalDraft(uniqueCode("create-node-denied"));
     const templateRow = await loadTemplateRow(templateId);
-    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+    for (const actorId of [salesId, inventoryManagerId]) {
       const result = await createProcedureTemplateNode(templateId, actorId, { nodeType: "TASK", title: "x" }, templateRow.updatedAt.toISOString());
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.code, "FORBIDDEN");
     }
+  });
+
+  test("🔴 AS_ENGINEER 는 이제 노드를 **만들 수 있다** (2026-11-27 ㄱ안)", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("create-node-engineer"));
+    const templateRow = await loadTemplateRow(templateId);
+    const result = await createProcedureTemplateNode(templateId, asEngineerId, { nodeType: "TASK", title: "엔지니어가 만든 단계" }, templateRow.updatedAt.toISOString());
+    assert.equal(result.ok, true, JSON.stringify(result));
   });
 
   test("a PUBLISHED technical template fails (NOT_DRAFT)", async () => {
@@ -1819,16 +1844,36 @@ describe("Phase 5C-5B usability follow-up: connection-type editing and node-drag
     assert.equal(persisted.positionY, nodeBefore.positionY, "position_y (source coordinate) must never change");
   });
 
-  test("a read-only actor (AS_ENGINEER) cannot persist a layout move on a TECHNICAL_TASK DRAFT", async () => {
+  /**
+   * 🔴 2026-11-27(ㄱ안) — **읽기 전용 역할이 AS_ENGINEER 에서 SALES 로 바뀌었다.**
+   * 엔지니어에게 「초안 편집」이 기본값으로 열리면서 그 역할은 더 이상 이 화면의
+   * 읽기 전용 사람이 아니다. 🔴 시험을 지우지 않고 **배우를 바꿨다** — 이 시험이
+   * 지키는 것은 「거절된 저장이 **부분 위치라도 남기지 않는다**」이고, 그것은
+   * 누구로 재든 지켜져야 한다.
+   */
+  test("a read-only actor (SALES) cannot persist a layout move on a TECHNICAL_TASK DRAFT", async () => {
     const templateId = await createTechnicalDraft(uniqueCode("node-drag-readonly"));
     const seed = await seedTechnicalGraph(templateId);
 
-    const result = await saveProcedureTemplateLayout(templateId, asEngineerId, [{ nodeId: seed.nodeAId, x: 10, y: 10 }], [], seed.updatedAt);
+    const result = await saveProcedureTemplateLayout(templateId, salesId, [{ nodeId: seed.nodeAId, x: 10, y: 10 }], [], seed.updatedAt);
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.code, "FORBIDDEN");
 
     const [node] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, seed.nodeAId));
     assert.equal(node.userPositionX, null, "a rejected save must never persist a partial position");
+  });
+
+  test("🔴 AS_ENGINEER 는 이제 배치를 **저장할 수 있다** (2026-11-27 ㄱ안)", async () => {
+    // 🔵 위 시험에서 엔지니어를 빼기만 하면 「열렸는지」를 아무도 안 잰다.
+    const templateId = await createTechnicalDraft(uniqueCode("node-drag-engineer"));
+    const seed = await seedTechnicalGraph(templateId);
+
+    const result = await saveProcedureTemplateLayout(templateId, asEngineerId, [{ nodeId: seed.nodeAId, x: 77, y: 88 }], [], seed.updatedAt);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    const [node] = await db.select().from(procedureTemplateNodes).where(eq(procedureTemplateNodes.id, seed.nodeAId));
+    assert.equal(node.userPositionX, 77);
+    assert.equal(node.userPositionY, 88);
   });
 });
 
@@ -1932,14 +1977,22 @@ describe("insertProcedureTemplateNodeOnEdge", () => {
     assert.equal(edgesAfter.length, edges.length, "no edge must be added/changed on a denied FULL_SERVICE attempt");
   });
 
-  test("AS_ENGINEER, SALES, INVENTORY_MANAGER are denied", async () => {
+  // 🔴 2026-11-27(ㄱ안) — 위 createProcedureTemplateNode 와 같은 까닭으로 AS_ENGINEER 가 빠졌다.
+  test("SALES, INVENTORY_MANAGER are denied", async () => {
     const templateId = await createTechnicalDraft(uniqueCode("split-denied"));
     const seed = await seedTechnicalGraph(templateId);
-    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+    for (const actorId of [salesId, inventoryManagerId]) {
       const result = await insertProcedureTemplateNodeOnEdge(seed.edgeId, actorId, { nodeType: "TASK", title: "x", position: { x: 0, y: 0 } }, seed.updatedAt);
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.code, "FORBIDDEN");
     }
+  });
+
+  test("🔴 AS_ENGINEER 는 이제 연결선을 **쪼갤 수 있다** (2026-11-27 ㄱ안)", async () => {
+    const templateId = await createTechnicalDraft(uniqueCode("split-engineer"));
+    const seed = await seedTechnicalGraph(templateId);
+    const result = await insertProcedureTemplateNodeOnEdge(seed.edgeId, asEngineerId, { nodeType: "TASK", title: "끼워 넣은 단계", position: { x: 0, y: 0 } }, seed.updatedAt);
+    assert.equal(result.ok, true, JSON.stringify(result));
   });
 
   test("a PUBLISHED technical template's edge cannot be split (NOT_DRAFT)", async () => {

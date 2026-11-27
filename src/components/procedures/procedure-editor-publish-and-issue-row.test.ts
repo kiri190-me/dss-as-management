@@ -194,10 +194,18 @@ describe("줄기 B-④ 나 — 편집기에서 게시할 수 있다", () => {
     // 생기고, 사람은 권한이 오락가락한다고 읽는다.
     const fromEdit = canPublishExpression(editPage);
     const fromDetail = canPublishExpression(detailPage);
-    // 표본 확인 — 정말 세 관문이 다 들어 있는 문장인가.
-    assert.match(fromDetail, /actorMay\(actingUser, canManageTechnicalTemplates\)/);
-    assert.match(fromDetail, /canActorPublishTemplateOfCategory\(role, template\.category\)/);
+    // 표본 확인 — 정말 그 관문이 들어 있는 문장인가.
+    //
+    // 🔴 2026-11-27 — 세 관문이 **하나로 줄었다.** 역할 고정 둘
+    // (canManageTechnicalTemplates · canActorPublishTemplateOfCategory)이 빠진 것은
+    // 서버의 게시 mutation 이 같은 날 설정(`technicalProcedures.publish`)을 보게
+    // 되었기 때문이다 — 까닭 전문은 상세 화면 page.tsx 의 그 자리 주석에 있다.
+    // 🔵 이 시험이 지키는 것(두 경로의 판정이 **글자 그대로 같다**)은 그대로다.
+    //    아래 assert.equal 이 그것이고, 여기 표본은 「빈 문장끼리 같다」로 공짜
+    //    통과하지 않게 하는 울타리다.
     assert.match(fromDetail, /await mayPublishTemplateOfCategory\(actingUser, template\.category\)/);
+    assert.ok(!fromDetail.includes("canManageTechnicalTemplates"), "역할 고정이 다시 들어왔다");
+    assert.ok(!fromDetail.includes("canActorPublishTemplateOfCategory"), "역할 고정이 다시 들어왔다");
     assert.equal(fromEdit, fromDetail, "두 경로의 게시 판정이 갈라졌다");
     assert.match(flat(editPage), /canPublish=\{canPublish\}/, "계산한 값을 화면에 넘겨야 한다");
   });

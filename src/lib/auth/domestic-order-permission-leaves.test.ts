@@ -206,9 +206,16 @@ describe("② 🔴 권한 키가 죽지 않았다", () => {
     assert.ok(featuresOfArea("domesticOrders").length > 0, "메뉴에 잎이 하나도 없다");
   });
 
-  test("🔴 저장되는 잎의 총수는 52 — 하나가 빠지고 넷이 들어왔고(+3), 나중에 하나 더(+1)", () => {
+  test("🔴 저장되는 잎의 총수는 53 — 하나가 빠지고 넷이 들어왔고(+3), 나중에 둘 더(+2)", () => {
     // 2026-11-12(둘째): 48 → 51. 2026-11-19: 51 → 52(「완료 시 수정」).
-    assert.equal(PERMISSION_LEAF_KEYS.length, 52);
+    // 2026-11-27: 52 → 53(기술 작업 절차의 「절차 만들기」).
+    //
+    // 🔴 이 절이 지키려는 것은 「내자 정리의 잎 넷이 그대로 있는가」다(바로 위 두
+    //    시험이 키를 글자로 맞댄다). 총수는 그 옆에서 **남의 메뉴가 조용히 잎을
+    //    잃지 않았는가**를 세는 자리라, 이웃이 잎을 **더하면** 늘어나는 것이 맞다.
+    //    늘어난 쪽은 아래 중복 검사와 permission-settings-truth.test.ts ⑦절이
+    //    키·기본값까지 맞대어 받는다.
+    assert.equal(PERMISSION_LEAF_KEYS.length, 53);
     assert.equal(new Set(PERMISSION_LEAF_KEYS).size, PERMISSION_LEAF_KEYS.length, "키가 겹친다");
   });
 

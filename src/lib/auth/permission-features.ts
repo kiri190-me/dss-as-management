@@ -586,11 +586,44 @@ const FEATURES_BY_AREA: Record<string, PermissionFeature[]> = {
       description: "발행된 작업 절차 문서를 봅니다.",
       maxMeaningfulLevel: "READ",
     },
-    editDraft: {
-      label: "초안 편집",
-      description: "절차 초안의 단계·체크리스트·참고자료를 고칩니다.",
+    create: {
+      // ── 🔴 2026-11-27: 「만들기」를 '초안 편집'에서 떼어 냈다 ──────────────────
+      // 그전까지 목록 화면의 [+ 새 절차] 단추도, 그 단추가 부르는 서버 통로도
+      // `editDraft` 하나를 보고 있었다. 그래서 「있는 절차를 고치는 일은 맡기되
+      // 새 절차를 만드는 것은 안 맡긴다」(또는 그 반대)를 설정으로 **적을 수가
+      // 없었다.** 고객사 쪽 customers.create 가 수정과 갈라져 있는 것과 같은
+      // 판단이다 — 둘을 한 칸에 접으면 한쪽을 열려고 다른 쪽까지 열게 된다.
+      //
+      // 🔵 **게시본에서 [새 버전 만들기]는 여기가 아니라 아래 `editDraft` 다.**
+      //    그 조작은 새 절차를 만드는 일이 아니라 **게시된 절차를 고치는 유일한
+      //    길**이다(게시본은 제자리 편집이 막혀 있어 판을 하나 올려 고친다).
+      //    여기로 옮기면 「고치라고 열어 줬는데 게시본은 못 고치는」 역할이 생긴다.
+      //
+      // 🔴 **기본값은 세 역할이다 — 최고관리자 · 관리자 · A/S 엔지니어**(2026-11-27
+      //    사용자 결정, 원문은 technical-procedure-template-authorization.ts 의
+      //    canCreateTechnicalTemplateDraft 주석). 그 전까지 만들 수 있던 사람은 둘뿐이라
+      //    **이 잎 하나만 일부러 넓어졌다.** 이웃 잎들(초안 편집 · 발행 · 검증 · 삭제)의
+      //    기본값은 한 칸도 안 움직였다.
+      //
+      // 🔴 그래서 엔지니어는 **만들 수는 있지만 만든 초안을 고칠 수는 없다**(초안 편집이
+      //    기본값에서 접근 불가다). 두 칸을 한꺼번에 열어 주려면 설정 화면에서 「초안
+      //    편집」도 함께 올려야 한다 — 이 칸만 올리면 만들기까지만 된다.
+      label: "절차 만들기",
       minMeaningfulLevel: "WRITE",
-      levelHints: { WRITE: "초안을 고칩니다" },
+      description: "새 기술 작업 절차를 만듭니다. 만든 절차는 초안(DRAFT)으로 시작합니다. 만든 뒤 내용을 채우려면 아래 「초안 편집」도 필요합니다.",
+      // 읽기를 두지 않는다 — 보는 일은 위 '절차 조회'가 이미 맡고 있어서, 여기에
+      // 읽기를 주면 조회 노드와 구분되지 않는다(customers.create 와 같은 모양).
+      levelHints: { WRITE: "기술 작업 절차 목록에서 새 절차를 만듭니다" },
+      maxMeaningfulLevel: "WRITE",
+    },
+    editDraft: {
+      // 🔵 2026-11-27 — 「만들기」가 위 `create` 로 떨어져 나갔다. 여기 남은 것은
+      //    **있는 절차를 고치는 일 전부**다: 초안의 단계·연결선·속성 편집,
+      //    되돌리기/다시하기, 이름 변경, 그리고 게시본에서 새 판을 올려 고치는 길.
+      label: "초안 편집",
+      description: "절차 초안의 단계·체크리스트·참고자료를 고칩니다. 게시된 절차를 고치려고 새 버전을 올리는 것도 이 권한입니다.",
+      minMeaningfulLevel: "WRITE",
+      levelHints: { WRITE: "초안을 고치고, 게시본에서 새 초안 버전을 만듭니다" },
       maxMeaningfulLevel: "WRITE",
     },
     publish: {
@@ -793,6 +826,37 @@ const SETTINGS_ENFORCED_AREAS = new Set<string>([
   "customers",
   "productModels",
   "workflows",
+  /**
+   * ── 🔴 2026-11-27: 이 줄이 **드디어 참이 되었다** ───────────────────────────
+   * 이 키는 들어온 날부터 **거짓이었다.** 집합이 말하는 것은 「mutation·페이지·화면이
+   * **모두** 설정을 본다 = 넓히면 실제로 열린다」인데, 잎 여섯 중 **다섯**이 그렇지
+   * 않았다(2026-11-27 실측 — 호출부를 하나씩 세었다). 사용자가 운영 화면을 가져와
+   * 그 약속을 물었고, 문구를 바꾸는 대신 **약속을 참으로 만드는** 쪽으로 갔다.
+   *
+   * 🔴 올리기 전에 여섯을 하나씩 다시 세었다. 지금 각 잎을 막는 관문 **전부**:
+   *   · `view`       — 목록 page(hasPermission) · 상세·편집기 route 의 거친 관문
+   *                    (mayViewSomeTemplate)과 분류별 관문(mayViewTemplateOfCategory)
+   *   · `create`     — 목록의 [+ 새 절차] · 서버 액션 · mutation
+   *   · `editDraft`  — 편집기 입구 둘 · requireEditor · assertEditableDraft ·
+   *                    assertTechnicalGraphEditable · 이름 변경 · 새 초안 버전 · 화면
+   *   · `publish`    — 상세·편집기의 [게시] · 서버 액션 · mutation(거친 + 분류별)
+   *   · `validation` — 페이지 둘 · 상세의 탭 판정 · 서버 액션 하나 · mutation 넷
+   *   · `lifecycle`  — 목록의 [삭제 모드] · 상세·편집기의 [삭제]/[초안 버리기] ·
+   *                    mutation(분류를 먼저 묻고 나서 설정) · 휴지통 액션 다섯은
+   *                    애초에 역할 가드가 없다
+   * 🔵 사이드바도 설정을 본다 — filterNavItemsForAccess 가 **실효 권한**으로 거른다
+   *    (역할로 거르는 filterNavItemsForRole 은 시험용 헬퍼이고 production 호출부가 0건이다).
+   *
+   * 🔴 **여섯 잎 밖에 남은 역할 고정 넷은 이 말을 안 깨뜨린다**(전부 다른 조작이다):
+   *   · canImportProcedureTemplates ×2 — Excel 들여오기. 기술 절차는 Excel 로 안 들어온다.
+   *   · canArchiveProcedureTemplates — 부르는 곳이 **0건**(화면도 액션도 없다).
+   *   · canEditProcedureTemplateDraft — 편집기 거친 관문에 **OR** 로 붙어 있어 넓히기만
+   *     한다(전체 서비스 절차 쪽 가지). 기술 절차 설정을 좁히면 분류별 관문이 닫는다.
+   *
+   * 🔴 **다시 내리려면 위 목록을 다시 세어라.** 어느 한 잎에 역할 고정이 되살아나면
+   *    이 줄은 그날로 거짓이 되고, 관리자는 열어 줬다고 믿는데 사용자는 막힌 채로
+   *    서로 다른 화면을 보게 된다.
+   */
   "technicalProcedures",
   "diagnosisFlowcharts",
   /**
@@ -859,6 +923,12 @@ const SETTINGS_ENFORCED_LEAVES = new Set<string>([
   "repairCases.workHistory",
   "repairCases.serviceReports",
   "repairCases.approval",
+  // 🔴 `"technicalProcedures.*"` 셋은 2026-11-27 **같은 날 안에** 여기 들어왔다가
+  //    **위 SETTINGS_ENFORCED_AREAS 로 올라갔다.** 그날 아침에는 잎 셋만 전환돼 있어
+  //    메뉴 전체를 말할 수 없었는데, 저녁에 나머지 셋(조회·검증·삭제복원)까지 전환하면서
+  //    메뉴 키 하나로 말할 수 있게 됐다. 🔴 여기 다시 적지 마라 — 잎이 아닌 키와 잎이
+  //    같은 물음에 각자 답하게 되어, 두 답이 갈릴 자리가 생긴다(`domesticOrders` 의
+  //    아래 주석이 그 함정을 적어 두었다).
   "users.view",
   "users.shipmentRepresentatives",
   // 하위 기능이 없는 메뉴들. 대시보드·A/S 접수·Excel 생성·시스템 설정은 원래

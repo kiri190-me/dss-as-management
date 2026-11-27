@@ -301,12 +301,29 @@ describe("초안 판 관리 — ④ 다: 초안 버리기", () => {
     assert.ok(painted.includes("canDiscardDraft = false,"), "넘기는 것을 잊은 호출부는 단추가 없어야 한다(fail-closed)");
   });
 
-  test("🔴 페이지가 **서버가 보는 관문 둘**을 모두 보고 넘긴다", () => {
+  test("🔴 페이지가 **서버가 보는 그 관문**을 그대로 보고 넘긴다", () => {
+    /**
+     * 🔴 2026-11-27 — 관문 **둘이 하나가 되었다.** 그전까지 이 줄은 역할 고정
+     * canDeleteTechnicalTemplates 와 설정을 AND 로 묶은 모양을 못 박고 있었다.
+     * 그래야 했던 까닭은 서버(softDeleteProcedureTemplate)가 역할 고정이었기
+     * 때문이다 — 설정으로 넓혀도 mutation 이 다시 막으니, 「단추만 뜨고 누르면
+     * 실패」를 피하려면 좁은 쪽을 함께 볼 수밖에 없었다.
+     *
+     * 그날 저녁 그 mutation 이 같은 설정을 보게 되면서 AND 할 것이 없어졌다.
+     * 🔴 **단언을 느슨하게 만든 것이 아니다** — 재는 대상이 「두 관문이 다 있는가」
+     * 에서 「같은 한 관문인가 + **역할 고정이 돌아오지 않았는가**」로 바뀌었고,
+     * 뒤엣것을 아래에서 반대쪽으로 함께 잰다. 분류 울타리(TECHNICAL_TASK)는
+     * 그 함수 안에 그대로 있다(technical-procedure-capabilities.ts).
+     */
     const flatPage = flat(editPage);
     assert.match(
       flatPage,
-      /const canDiscardDraft = actorMay\(actingUser, \(role\) => canDeleteTechnicalTemplates\(role, template\.category\)\) && \(await hasPermission\(actingUser, "technicalProcedures\.lifecycle", "MANAGE"\)\);/,
-      "역할 고정 관문과 설정 관문을 함께 보지 않으면 서버가 거절할 단추가 보인다"
+      /const canDiscardDraft = await mayDeleteTemplateOfCategory\(actingUser, template\.category\);/,
+      "서버가 보는 그 함수를 그대로 부르지 않으면 화면과 서버가 어긋난다"
+    );
+    assert.ok(
+      !flatPage.includes("canDeleteTechnicalTemplates"),
+      "역할 고정 관문이 다시 들어왔다 — 설정으로 넓힌 사람이 화면에서만 막힌다"
     );
     assert.ok(flatPage.includes("canDiscardDraft={canDiscardDraft}"), "계산해 놓고 안 넘기면 단추가 영영 안 보인다");
   });

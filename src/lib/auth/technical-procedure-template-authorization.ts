@@ -29,6 +29,20 @@ import {
  *  - AS_ENGINEER / SALES / INVENTORY_MANAGER: no global technical-template
  *    mutation of any kind.
  *
+ * ── 🔴 2026-11-27: 위 표에서 **두 칸이 바뀌었다** ──────────────────────────
+ * A/S 엔지니어가 **만들기와 초안 편집**에 들어왔다(사용자 결정 —
+ * canAuthorTechnicalTemplatesByDefault 의 주석에 원문 둘). 「no ... mutation of any
+ * kind」는 그 역할에 대해 더 이상 참이 아니다. 🔴 **발행과 새 버전… 중 발행은**
+ * 그대로 최고관리자·관리자다. 「새 초안 버전 만들기」는 초안 편집 잎을 보므로
+ * (mayCreateDraftVersionOfCategory) 엔지니어에게 **함께 열린다** — 게시본을 고치는
+ * 유일한 길이라 초안 편집과 떼어 둘 수 없다. 올린 판을 **발행하는 것은 여전히 막힌다.**
+ *
+ * ── 🔴 2026-11-27: 이 파일의 함수들은 **더 이상 최종 관문이 아니다** ───────
+ * 기술 절차의 만들기·초안 편집·발행은 설정(`technicalProcedures.*`)이 판정한다.
+ * 여기 적힌 표는 **저장된 설정이 없을 때의 기본값**으로만 쓰인다
+ * (permission-baseline.ts 가 이 함수들을 부른다). 최종 관문으로 다시 쓰지 마라 —
+ * 그러면 설정으로 넓혀도 안 열리고 좁혀도 안 닫히는 길이 되살아난다.
+ *
  * Phase 5C-5A implements authorization only — no CRUD mutation, editor UI,
  * or publish UI exists yet for TECHNICAL_TASK templates (Phase 5C-5B).
  * These functions exist now so the eventual 5C-5B mutations have an
@@ -40,12 +54,64 @@ export function canManageTechnicalTemplates(role: Role): boolean {
   return role === "SUPER_ADMIN" || role === "ADMIN";
 }
 
-/** Create a TECHNICAL_TASK DRAFT (from scratch, MANUAL source — technical templates are never Excel-imported). */
-export function canCreateTechnicalTemplateDraft(role: Role): boolean {
-  return canManageTechnicalTemplates(role);
+/**
+ * ============================================================================
+ * 🔴 2026-11-27 — 기술 절차를 **짓는** 사람의 기본값 (사용자 결정)
+ * ============================================================================
+ * 사용자 원문 둘:
+ *   「[절차 만들기]는 [최고 관리자/관리자/a/s엔지니어]는 [읽기+쓰기]를 기본
+ *    권한으로 설정해줘.」
+ *   「ㄱ으로 진행해」 — 만든 절차를 **열지도 고치지도 못하는** 상태를 보고 내린
+ *    결정. 만들기와 **같은 셋**에게 초안 편집도 기본으로 연다.
+ *
+ * 🔴 **역할 이름이 적히는 자리는 여기 하나뿐이다.** 만들기와 초안 편집이 같은
+ * 집합이라는 것이 사용자의 결정 그 자체이므로, 두 벌로 적으면 다음에 한쪽만
+ * 바뀌는 날이 온다(그때 갈라지는 방향은 조용한 쪽이다 — 넓어진 쪽은 금방
+ * 드러나지만 좁아진 쪽은 아무도 신고하지 않는다).
+ *
+ * 🔴 **「기본값」이지 관문이 아니다.** 부르는 곳은 permission-baseline.ts 둘뿐이고
+ * (만들기 잎 · 초안 편집 잎), 실제 판정은 설정(`technicalProcedures.create` ·
+ * `.editDraft`)이 한다 — 관리자가 설정에서 좁히면 엔지니어는 못 한다. 이 함수를
+ * 최종 관문으로 쓰지 마라: 그러면 설정으로 좁혀도 안 닫히는 길이 생긴다.
+ * 그래서 이름에 ByDefault 를 박아 둔다 — grep 한 번으로 구분되게.
+ *
+ * 🔴 **`canEditTechnicalTemplateDraft` 를 넓히지 않은 까닭**(2026-11-27 실측).
+ * 그 함수는 호출부가 **셋**이라 넓히면 기본값 말고도 둘이 함께 움직인다:
+ *   ① permission-baseline.ts:623 — 초안 편집 잎의 기본값 ← **여기만 넓히면 된다**
+ *   ② permission-baseline.ts:276 — `case "technicalProcedures"` 메뉴 상한의 write 항
+ *   ③ 아래 canActorEditTemplateOfCategory 의 TECHNICAL_TASK 가지
+ * ②·③ 은 지금 **production 호출부가 0건**이지만(②는 baselinePermissionLevel 을
+ * 부르는 코드가 시험밖에 없고, ③은 mayEditTemplateOfCategory 로 대체됐다), 살아
+ * 있는 코드다 — 누가 다시 이으면 **허락받지 않은 넓힘**이 조용히 따라 붙는다.
+ * 특히 ③을 넓히면 그 이웃 canActorManageTechnicalTemplateGraph(최고관리자·관리자)와
+ * 답이 갈려, 「속성은 고치는데 노드는 못 만드는」 역할이 생긴다.
+ *
+ * 🔵 **만들기 쪽은 반대였다**: canCreateTechnicalTemplateDraft 의 호출부는 기본값
+ * 한 곳뿐이라 그 함수를 그대로 이 집합에 묶어도 딸려 움직이는 것이 없다.
+ * ============================================================================
+ */
+export function canAuthorTechnicalTemplatesByDefault(role: Role): boolean {
+  return canManageTechnicalTemplates(role) || role === "AS_ENGINEER";
 }
 
-/** Edit a TECHNICAL_TASK DRAFT's nodes/edges/properties (Phase 5C-5B's CRUD). */
+/**
+ * Create a TECHNICAL_TASK DRAFT (from scratch, MANUAL source — technical
+ * templates are never Excel-imported).
+ *
+ * 🔴 2026-11-27 부터 위 「짓는 사람」 집합 그대로다 — 호출부가 기본값 한 곳뿐이라
+ * (permission-baseline.ts) 묶어도 딸려 움직이는 것이 없다.
+ */
+export function canCreateTechnicalTemplateDraft(role: Role): boolean {
+  return canAuthorTechnicalTemplatesByDefault(role);
+}
+
+/**
+ * Edit a TECHNICAL_TASK DRAFT's nodes/edges/properties (Phase 5C-5B's CRUD).
+ *
+ * 🔴 **일부러 안 넓혔다**(2026-11-27). 초안 편집의 **기본값**은 위
+ * canAuthorTechnicalTemplatesByDefault 가 들고 있다 — 까닭은 그 주석의 「셋」 문단.
+ * 이 함수를 넓히면 메뉴 상한과 분류별 관문까지 함께 움직인다.
+ */
 export function canEditTechnicalTemplateDraft(role: Role): boolean {
   return canManageTechnicalTemplates(role);
 }

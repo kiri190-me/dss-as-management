@@ -2,10 +2,20 @@
 
 import { readSession } from "@/lib/auth/session";
 import { sessionActorWithDeveloperFlag } from "@/lib/auth/acting-user";
-import { actorMay } from "@/lib/auth/developer-promotion";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { canCreateProcedureTemplateDraft } from "@/lib/auth/procedure-template-authorization";
-import { canCreateTechnicalTemplateDraftVersion, canManageTechnicalTemplates } from "@/lib/auth/technical-procedure-template-authorization";
+/**
+ * 🔴 2026-11-27 — 이 파일의 사전 검사 넷이 역할 고정 함수에서 **설정**으로 넘어왔다.
+ * 사전 검사는 판정이 아니라 **빠른 되돌림**이므로(아래 각 함수의 주석), 지켜야 할
+ * 성질은 하나다: **mutation 의 관문보다 좁으면 안 된다.** 좁으면 거기서 걸린 사람은
+ * 진짜 관문에 닿지도 못한 채 FORBIDDEN 을 받고, 왜 막혔는지가 어느 화면에도 안 남는다.
+ * 그래서 mutation 이 부르는 **같은 함수**를 그대로 부른다.
+ */
+import {
+  mayCreateTechnicalTemplate,
+  mayCreateSomeDraftVersion,
+  mayEnterTemplateEditor,
+  mayPublishSomeTemplate,
+} from "@/lib/auth/technical-procedure-capabilities";
 import {
   createNewDraftVersion,
   createManualTechnicalProcedureTemplate,
@@ -36,8 +46,9 @@ export async function createNewDraftVersionAction(input: { templateId: string })
   // Phase 5C-5B — fast pre-check broadened to admit either category's
   // permission (FULL_SERVICE's existing function OR TECHNICAL_TASK's);
   // createNewDraftVersion's own category-aware check remains authoritative.
-  const actor = await sessionActorWithDeveloperFlag(session);
-  if (!actorMay(actor, canCreateProcedureTemplateDraft) && !actorMay(actor, canCreateTechnicalTemplateDraftVersion)) {
+  // 🔵 그 "둘 중 하나" 가 mayCreateSomeDraftVersion 안에 그대로 들어 있다 —
+  //    mutation 의 거친 관문과 **같은 함수**다.
+  if (!(await mayCreateSomeDraftVersion(await sessionActorWithDeveloperFlag(session)))) {
     return { ok: false, code: "FORBIDDEN", message: "새 버전 작성 권한이 없습니다." };
   }
   if (!isValidUuid(input.templateId)) {
@@ -58,11 +69,13 @@ export async function createNewDraftVersionAction(input: { templateId: string })
  *
  * 여기의 검사는 **빠른 되돌림**일 뿐 판정이 아니다. 실제 판정은
  * publishProcedureTemplate 이 트랜잭션 안에서 다시 한다 — 거친 관문
- * (canManageTechnicalTemplates)과 분류별 관문
- * (canActorPublishTemplateOfCategory), 그리고 해결되지 않은 오류·그래프
- * 구조 오류 검사까지. 그래서 여기서는 mutation 의 거친 관문과 **같은 함수**
- * 만 미리 부른다. 다른 함수를 쓰면 화면과 서버가 어긋나고, 그건 이 저장소가
- * 이미 한 번 겪은 사고다(커밋 af6da9b·1a75ac7).
+ * (mayPublishSomeTemplate)과 분류별 관문(mayPublishTemplateOfCategory),
+ * 그리고 해결되지 않은 오류·그래프 구조 오류 검사까지. 그래서 여기서는
+ * mutation 의 거친 관문과 **같은 함수**만 미리 부른다. 다른 함수를 쓰면 화면과
+ * 서버가 어긋나고, 그건 이 저장소가 이미 한 번 겪은 사고다(커밋 af6da9b·1a75ac7).
+ *
+ * 🔴 2026-11-27 — 두 관문이 설정(`technicalProcedures.publish`)으로 넘어갔다.
+ * 그 전에는 역할 고정이라, 관리자가 설정에서 게시를 넓혀도 여기서 막혔다.
  *
  * mutation 의 실패 결과(FORBIDDEN / CONFLICT / HAS_UNRESOLVED_ERRORS /
  * HAS_STRUCTURAL_ERRORS)는 손대지 않고 그대로 돌려준다 — 화면이 사람에게
@@ -77,7 +90,7 @@ export async function publishProcedureTemplateAction(input: { templateId: string
   if (session.approvalStatus !== "APPROVED") {
     return { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!actorMay(await sessionActorWithDeveloperFlag(session), canManageTechnicalTemplates)) {
+  if (!(await mayPublishSomeTemplate(await sessionActorWithDeveloperFlag(session)))) {
     return { ok: false, code: "FORBIDDEN", message: "게시 권한이 없습니다." };
   }
   if (!isValidUuid(input.templateId)) {
@@ -116,7 +129,7 @@ export async function createManualTechnicalProcedureTemplateAction(
   if (session.approvalStatus !== "APPROVED") {
     return { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!actorMay(await sessionActorWithDeveloperFlag(session), canManageTechnicalTemplates)) {
+  if (!(await mayCreateTechnicalTemplate(await sessionActorWithDeveloperFlag(session)))) {
     return { ok: false, code: "FORBIDDEN", message: "기술 절차 템플릿 생성 권한이 없습니다." };
   }
   if (!(PROCEDURE_EQUIPMENT_TYPE_CODES as readonly string[]).includes(input.equipmentType)) {
@@ -154,7 +167,7 @@ export async function renameTechnicalProcedureTemplateAction(input: {
   if (session.approvalStatus !== "APPROVED") {
     return { ok: false, code: "FORBIDDEN", message: "계정이 아직 승인되지 않았습니다." };
   }
-  if (!actorMay(await sessionActorWithDeveloperFlag(session), canManageTechnicalTemplates)) {
+  if (!(await mayEnterTemplateEditor(await sessionActorWithDeveloperFlag(session)))) {
     return { ok: false, code: "FORBIDDEN", message: "이름 변경 권한이 없습니다." };
   }
   if (!isValidUuid(input.templateId)) {

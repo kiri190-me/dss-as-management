@@ -8,25 +8,21 @@ import CreateDraftVersionButton from "@/components/procedures/editor/CreateDraft
 import { readSession } from "@/lib/auth/session";
 import { resolveActingUserForSession } from "@/lib/auth/acting-user";
 import { getAuthSource } from "@/lib/config/auth-source";
-import { actorMay } from "@/lib/auth/developer-promotion";
 import { getProcedureTemplateForEditor, compareDraftWithParent, getFieldAddedStepsForDraft } from "@/lib/db/queries/procedure-template-editor";
 import { getProcedureTemplateHistoryView } from "@/lib/db/queries/procedure-template-history";
 import { listNextProcedureLinkCandidates } from "@/lib/db/queries/procedure-templates";
 import {
-  canViewAllProcedureTemplateStatuses,
-  canViewPublishedProcedureTemplates,
-} from "@/lib/auth/procedure-template-authorization";
-import {
   mayEditTemplateOfCategory,
   mayCreateDraftVersionOfCategory,
+  mayDeleteTemplateOfCategory,
   mayPublishTemplateOfCategory,
+  mayViewSomeTemplate,
+  mayViewTemplateOfCategory,
+  mayViewEveryTemplateStatusOfCategory,
 } from "@/lib/auth/technical-procedure-capabilities";
-import {
-  canManageTechnicalTemplates,
-  canActorPublishTemplateOfCategory,
-  canDeleteTechnicalTemplates,
-} from "@/lib/auth/technical-procedure-template-authorization";
-import { hasPermission } from "@/lib/auth/permission-resolver";
+// 🔵 2026-11-27 — `actorMay` 와 `hasPermission` 이 이 화면에서 사라졌다. 역할 고정
+//    함수도, 설정을 직접 묻는 줄도 **한 곳도 안 남았다**는 뜻이다 — 판정은 전부 위
+//    창구들을 거친다. 여기에 둘 중 하나를 다시 들이면 서버와 어긋날 자리가 생긴다.
 
 export const metadata: Metadata = {
   title: "기술 절차 편집기 | DSS A/S 관리 시스템",
@@ -41,9 +37,11 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  * requires is enforced here, server-side, before any editor UI ever
  * renders — never left to a client-side guard:
  *   - reference-only templates (no graph to edit at all)
- *   - unauthorized actors (below canViewAllProcedureTemplateStatuses —
+ *   - unauthorized actors (below mayViewEveryTemplateStatusOfCategory —
  *     same notFound-hides-existence backstop the detail route already
- *     uses for AS_ENGINEER)
+ *     uses. 🔴 2026-11-27 부터 기술 절차 가지는 **설정**이 정한다; 그전에는
+ *     역할 고정 canViewAllProcedureTemplateStatuses 였고 그래서 설정으로
+ *     열어 준 엔지니어가 제 초안을 못 열었다)
  *   - direct editing of a PUBLISHED template (landing screen offers "새
  *     DRAFT 버전 만들기" instead of ever rendering the editor against it)
  *   - invalid/deleted templates (UUID shape check, then a real row check)
@@ -65,7 +63,9 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
   const actingUser = await resolveActingUserForSession(session);
   if (!actingUser) redirect("/login");
 
-  if (!actorMay(actingUser, canViewPublishedProcedureTemplates)) {
+  // 🔴 2026-11-27 — 상세 화면 page.tsx 의 같은 자리와 **글자 그대로 같다**(그쪽 주석에
+  //    까닭 전문). 행을 읽기 전이라 분류를 모르므로 거친 관문이고, 분류별 관문은 아래에서.
+  if (!(await mayViewSomeTemplate(actingUser))) {
     return <PlaceholderPage title="기술 절차 편집기" description="이 화면에 접근할 권한이 없습니다." />;
   }
 
@@ -74,7 +74,15 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
   const template = await getProcedureTemplateForEditor(id);
   if (!template) notFound();
 
-  if (template.status !== "PUBLISHED" && !actorMay(actingUser, canViewAllProcedureTemplateStatuses)) {
+  // 🔴 분류별 관문 — 기술 절차는 설정이, 나머지 분류는 공용 정책이 판정한다.
+  if (!(await mayViewTemplateOfCategory(actingUser, template.category))) notFound();
+
+  // 🔴 2026-11-27(ㄱ안) — 역할 고정 canViewAllProcedureTemplateStatuses 에서 **분류별**
+  // 판정으로 바뀌었다. 이 줄이 「만들기를 열어 준 사람이 만든 직후 404 를 보는」 자리였다:
+  // 만들기 창이 성공하면 곧바로 이 route 로 밀어 넣는데(CreateTechnicalTemplateForm 의
+  // router.push), 방금 만든 행은 DRAFT 라 여기서 걸렸다.
+  // 🔵 상세 화면 page.tsx 와 **같은 함수**다. 전체 서비스·참고용 가지는 종전 그대로.
+  if (template.status !== "PUBLISHED" && !(await mayViewEveryTemplateStatusOfCategory(actingUser, template.category))) {
     notFound();
   }
 
@@ -127,30 +135,24 @@ export default async function ProcedureTemplateEditorPage({ params }: { params: 
   const canEdit = await mayEditTemplateOfCategory(actingUser, template.category);
 
   // ── 게시 단추의 노출 판정 (줄기 B-④) ──────────────────────────────────
-  // 🔴 상세 화면 page.tsx 의 canPublish 와 **글자 그대로 같은 세 관문**이다.
-  // 한 글자라도 달라지면 "상세에서는 보이는데 편집기에서는 안 보이는"(또는
-  // 그 반대의) 단추가 생기고, 사람은 권한이 오락가락한다고 읽는다. 왜 셋을
-  // 모두 보는지(역할 고정 둘 + 설정 하나가 서로 다른 답을 낼 수 있다)는
-  // src/app/(app)/procedures/[id]/page.tsx 의 같은 자리 주석에 적혀 있다 —
-  // 그 어긋남을 어느 쪽으로 정리할지는 아직 결정되지 않았고, 이 조각도
-  // 정하지 않는다. 둘 다 만족할 때만 내면 서버가 거절할 단추는 보이지 않는다.
-  const canPublish =
-    actorMay(actingUser, canManageTechnicalTemplates) &&
-    actorMay(actingUser, (role) => canActorPublishTemplateOfCategory(role, template.category)) &&
-    (await mayPublishTemplateOfCategory(actingUser, template.category));
+  // 🔴 상세 화면 page.tsx 의 canPublish 와 **글자 그대로 같은 관문**이다. 한
+  // 글자라도 달라지면 "상세에서는 보이는데 편집기에서는 안 보이는"(또는 그
+  // 반대의) 단추가 생기고, 사람은 권한이 오락가락한다고 읽는다.
+  //
+  // 🔴 2026-11-27 — 셋이 하나가 되었다. 그 전까지 역할 고정 둘과 설정 하나를
+  // AND 로 묶었던 까닭과, 지금 그럴 필요가 없어진 까닭은
+  // src/app/(app)/procedures/[id]/page.tsx 의 같은 자리 주석에 전문이 있다.
+  const canPublish = await mayPublishTemplateOfCategory(actingUser, template.category);
 
   // ── [초안 버리기]의 노출 판정 (줄기 B-⑥) ───────────────────────────────
-  // 게시 단추와 **같은 모양**으로 둘을 모두 본다:
-  //  ① 역할 고정 canDeleteTechnicalTemplates — softDeleteProcedureTemplate 이
-  //     트랜잭션 안에서 실제로 보는 관문 그대로다(분류까지 본다:
-  //     TECHNICAL_TASK 가 아니면 어떤 역할로도 통과하지 못한다).
-  //  ② 설정 technicalProcedures.lifecycle — 목록 화면(/procedures/technical)의
-  //     [삭제 모드]가 쓰는 그 값. 관리자가 설정에서 좁히면 두 화면이 함께 닫혀야
-  //     한다. 한쪽만 보면 "목록에서는 안 보이는데 편집기에서는 보이는" 단추가 생긴다.
-  // 둘 다 만족할 때만 내므로, 서버가 거절할 단추는 보이지 않는다.
-  const canDiscardDraft =
-    actorMay(actingUser, (role) => canDeleteTechnicalTemplates(role, template.category)) &&
-    (await hasPermission(actingUser, "technicalProcedures.lifecycle", "MANAGE"));
+  // 게시 단추와 **같은 모양**으로, 서버(softDeleteProcedureTemplate)가 트랜잭션
+  // 안에서 실제로 보는 **그 함수**를 그대로 부른다. 상세 화면 page.tsx 의
+  // canDeleteVersion 과도 글자 그대로 같아야 한다 — 다르면 "상세에서는 되는데
+  // 편집기에서는 안 되는" 단추가 생긴다.
+  //
+  // 🔴 2026-11-27 — 둘이 하나가 되었다(까닭 전문은 상세 화면의 같은 자리 주석).
+  // 🔵 **분류 조건은 안 풀렸다** — 그 함수가 TECHNICAL_TASK 를 먼저 묻는다.
+  const canDiscardDraft = await mayDeleteTemplateOfCategory(actingUser, template.category);
 
   // 🔵 현장에서 더한 단계(줄기 B-⑧)는 **여기서 읽는다** — 화면이 제 손으로 다시
   //    묻지 않는다. 조회 자체가 「이 초안이 DRAFT 인가」와 「같은 줄기인가」를

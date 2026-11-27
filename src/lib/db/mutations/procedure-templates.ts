@@ -17,13 +17,37 @@ import {
   users,
 } from "../schema";
 import { canImportProcedureTemplates, canArchiveProcedureTemplates } from "@/lib/auth/procedure-template-authorization";
+/**
+ * 🔴 2026-11-27 — 이 파일의 기술 절차 관문이 **전부** 역할 고정 함수
+ * (canManageTechnicalTemplates · canDeleteTechnicalTemplates 등)에서 **설정**으로
+ * 넘어왔다. 그 전까지는 관리자가 [역할별 접근 권한]에서 기술 절차를 넓혀도 이
+ * 파일이 역할 이름으로 다시 막아, 「화면에는 단추가 뜨는데 누르면 늘 실패」가
+ * 만들어졌다 — 그런데 권한 설정 화면은 이 메뉴에 대고 「넓히면 실제로 그 조작이
+ * 열립니다」라고 적고 있었다. 그 거짓말을 없애는 것이 이 전환의 전부다.
+ *
+ * 🔵 **넓어진 사람은 없다** — 아래 함수들이 보는 잎의 기본값이 종전 역할 고정
+ *    함수와 역할마다 같은 답을 낸다(permission-baseline.ts). 🔴 딱 둘만 예외이고
+ *    그것은 **사용자가 따로 결정한 것**이다(만들기·초안 편집에 A/S 엔지니어).
+ *    역할 × 조작으로 그것을 재는 시험이 technical-procedure-settings-gate.test.ts 다.
+ *
+ * 🔴 **분류 조건은 하나도 안 풀었다.** 삭제·복원과 구조 편집은 설정을 보기 **전에**
+ *    TECHNICAL_TASK 인지 먼저 묻는다 — 설정을 아무리 넓혀도 전체 서비스·참고용
+ *    절차에는 열리지 않는다.
+ *
+ * 🔴 **보관(archiveProcedureTemplate)만 역할 고정으로 남았다.** 그 함수는 부르는
+ *    곳이 **0건**이라(화면도 액션도 없다) 설정이 가리킬 조작이 없고, 「발행·보관」
+ *    잎이 말하는 보관은 publishProcedureTemplate 이 옛 게시본을 내리는 그 일이다.
+ */
 import {
-  canManageTechnicalTemplates,
-  canActorPublishTemplateOfCategory,
-  canActorCreateDraftVersionOfCategory,
-  canActorManageTechnicalTemplateGraph,
-  canDeleteTechnicalTemplates,
-} from "@/lib/auth/technical-procedure-template-authorization";
+  mayCreateTechnicalTemplate,
+  mayDeleteTemplateOfCategory,
+  mayEnterTemplateEditor,
+  mayManageTemplateGraph,
+  mayPublishSomeTemplate,
+  mayPublishTemplateOfCategory,
+  mayCreateSomeDraftVersion,
+  mayCreateDraftVersionOfCategory,
+} from "@/lib/auth/technical-procedure-capabilities";
 import { actorMay } from "@/lib/auth/developer-promotion";
 import { insertAuditLog } from "./audit-logs";
 import { validateProcedureGraphStructure } from "@/lib/domain/procedure-graph-structural-validation";
@@ -310,7 +334,10 @@ export async function createManualTechnicalProcedureTemplate(
     try {
       return await db.transaction(async (tx) => {
         const actor = await resolveEligibleActor(tx, actorUserId);
-        if (!actorMay(actor, canManageTechnicalTemplates)) {
+        // 🔴 2026-11-27 — 설정 `technicalProcedures.create` 가 최종 관문이다.
+        //    분류 인자가 없는 까닭은 아래 insert 가 category 를 "TECHNICAL_TASK" 로
+        //    **박아서** 넣기 때문이다 — 만들어질 행의 분류를 호출부가 못 고른다.
+        if (!(await mayCreateTechnicalTemplate(actor))) {
           fail("FORBIDDEN", "기술 절차 템플릿 생성 권한이 없습니다.");
         }
 
@@ -353,10 +380,15 @@ export type RenameTechnicalTemplateResult =
 /**
  * Phase 5C-5B usability item 5 — rename a TECHNICAL_TASK DRAFT's name only
  * (code stays the stable identity and is never editable here). Uses
- * canActorManageTechnicalTemplateGraph, the same hard TECHNICAL_TASK-only
- * gate (no SUPER_ADMIN carve-out for FULL_SERVICE) already established for
- * the structural node/edge CRUD in procedure-template-editor.ts, since this
- * is the same kind of brand-new capability no category had before.
+ * mayManageTemplateGraph, the same hard TECHNICAL_TASK-only gate (no
+ * SUPER_ADMIN carve-out for FULL_SERVICE) already established for the
+ * structural node/edge CRUD in procedure-template-editor.ts, since this is
+ * the same kind of brand-new capability no category had before.
+ *
+ * 🔴 2026-11-27 — 그 관문이 역할 고정 canActorManageTechnicalTemplateGraph 에서
+ * 설정(`technicalProcedures.editDraft`)으로 넘어갔다. **분류 조건은 그대로다** —
+ * mayManageTemplateGraph 도 TECHNICAL_TASK 가 아니면 설정을 보기 전에 먼저
+ * 거절하므로, 설정을 아무리 넓혀도 전체 서비스 절차의 이름은 열리지 않는다.
  *
  * Deliberately does not insert a procedure_template_edit_history row: every
  * existing action_type enum value is either node/edge-scoped or means
@@ -381,7 +413,11 @@ export async function renameTechnicalProcedureTemplate(
       const actor = await resolveEligibleActor(tx, actorUserId);
       // Coarse pre-gate before any template row is looked up — same
       // non-disclosure rationale as every other mutation in this file.
-      if (!actorMay(actor, canManageTechnicalTemplates)) {
+      //
+      // 🔵 여기는 분류별 두 가지를 OR 로 묶지 않는다(게시 쪽과 다른 점이다). 아래
+      //    분류별 관문이 **TECHNICAL_TASK 전용**이라 다른 분류는 어차피 어느
+      //    역할로도 통과하지 못하기 때문이다 — 거친 관문을 넓혀도 열리는 것이 없다.
+      if (!(await mayEnterTemplateEditor(actor))) {
         fail("FORBIDDEN", "이름 변경 권한이 없습니다.");
       }
 
@@ -397,7 +433,7 @@ export async function renameTechnicalProcedureTemplate(
         .where(and(eq(procedureTemplates.id, templateId), eq(procedureTemplates.isDeleted, false)))
         .for("update");
       if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
-      if (!actorMay(actor, (role) => canActorManageTechnicalTemplateGraph(role, template.category))) {
+      if (!(await mayManageTemplateGraph(actor, template.category))) {
         fail("FORBIDDEN", "이 템플릿의 이름을 변경할 권한이 없습니다.");
       }
       if (template.status !== "DRAFT") {
@@ -631,10 +667,14 @@ export async function publishProcedureTemplate(
   try {
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
-      // Phase 5C-5B — coarse pre-gate (SUPER_ADMIN or ADMIN) before any
-      // template row is looked up, same non-disclosure rationale as
-      // procedure-template-editor.ts's requireEditor.
-      if (!actorMay(actor, canManageTechnicalTemplates)) {
+      // Phase 5C-5B — coarse pre-gate before any template row is looked up,
+      // same non-disclosure rationale as procedure-template-editor.ts's
+      // requireEditor.
+      //
+      // 🔴 2026-11-27 — 설정(`technicalProcedures.publish`) **또는** 전체 서비스
+      //    절차의 게시 정책. 분류를 아직 모르는 자리라 둘 중 하나라도 가능성이
+      //    있으면 통과시킨다 — 까닭은 mayPublishSomeTemplate 의 주석에 있다.
+      if (!(await mayPublishSomeTemplate(actor))) {
         fail("FORBIDDEN", "게시 권한이 없습니다.");
       }
 
@@ -664,7 +704,11 @@ export async function publishProcedureTemplate(
       // Fine-grained, category-specific boundary — FULL_SERVICE/REFERENCE
       // fall through to canPublishProcedureTemplates unchanged (SUPER_ADMIN
       // only); only TECHNICAL_TASK evaluates the broader technical policy.
-      if (!actorMay(actor, (role) => canActorPublishTemplateOfCategory(role, template.category))) {
+      //
+      // 🔴 2026-11-27 — TECHNICAL_TASK 가지가 설정(`technicalProcedures.publish`)
+      //    으로 바뀌었다. 상세·편집기 두 화면의 [게시] 단추가 **이 함수를 그대로**
+      //    부르므로(둘 다 mayPublishTemplateOfCategory), 화면과 서버가 같은 답을 본다.
+      if (!(await mayPublishTemplateOfCategory(actor, template.category))) {
         fail("FORBIDDEN", "게시 권한이 없습니다.");
       }
       if (!canPublishFromProcedureStatus(template.status)) {
@@ -854,7 +898,13 @@ export async function createNewDraftVersion(
     return await db.transaction(async (tx) => {
       const actor = await resolveEligibleActor(tx, actorUserId);
       // Phase 5C-5B — coarse pre-gate before any template row is looked up.
-      if (!actorMay(actor, canManageTechnicalTemplates)) {
+      //
+      // 🔴 2026-11-27 — 이 조작은 **「만들기」가 아니라 「고치기」다.** 게시본은
+      //    제자리 편집이 막혀 있어서, 게시된 절차를 고치는 길이 「새 판을 올려
+      //    그것을 고친다」 하나뿐이다(이 함수 머리말과 edit/page.tsx 의 안내문).
+      //    그래서 보는 잎이 `technicalProcedures.create` 가 아니라 `editDraft` 다 —
+      //    만들기 쪽에 두면 「고치라고 열어 줬는데 게시본은 못 고치는」 역할이 생긴다.
+      if (!(await mayCreateSomeDraftVersion(actor))) {
         fail("FORBIDDEN", "새 버전 작성 권한이 없습니다.");
       }
 
@@ -867,8 +917,9 @@ export async function createNewDraftVersion(
       // Fine-grained, category-specific boundary — FULL_SERVICE/REFERENCE
       // fall through to canCreateProcedureTemplateDraft unchanged
       // (SUPER_ADMIN only); only TECHNICAL_TASK evaluates the broader
-      // technical policy.
-      if (!actorMay(actor, (role) => canActorCreateDraftVersionOfCategory(role, published.category))) {
+      // technical policy (2026-11-27 부터는 설정 `technicalProcedures.editDraft`).
+      // 상세 화면의 [새 DRAFT 버전 만들기]가 **이 함수를 그대로** 부른다.
+      if (!(await mayCreateDraftVersionOfCategory(actor, published.category))) {
         fail("FORBIDDEN", "새 버전 작성 권한이 없습니다.");
       }
       if (published.status !== "PUBLISHED") {
@@ -1323,8 +1374,14 @@ export async function replaceDraftProcedureTemplates(
  * 휴지통에서 영영 사라지지 않는다. 그래서 휴지통에도 넣지 않는다.
  *
  * ── 분류로 먼저 막는다 ──────────────────────────────────────────────────
- * canDeleteTechnicalTemplates는 TECHNICAL_TASK 전용이다. 전체 서비스·참고자료
- * 절차는 어떤 역할로도 이 함수들을 통과하지 못한다.
+ * mayDeleteTemplateOfCategory는 TECHNICAL_TASK 전용이다. 전체 서비스·참고자료
+ * 절차는 어떤 역할로도, 설정을 아무리 넓혀도 이 함수들을 통과하지 못한다.
+ *
+ * 🔴 2026-11-27 — 그 관문이 역할 고정 canDeleteTechnicalTemplates 에서
+ * 설정(`technicalProcedures.lifecycle` 관리)으로 바뀌었다. **분류 조건은 그대로다** —
+ * 설정은 분류를 통과한 뒤에야 물어본다(그 함수의 주석). 그 전까지는 화면 둘이
+ * 「역할 고정 AND 설정」으로 묶여 있어서, 관리자가 설정에서 넓혀도 단추만 뜨고
+ * 누르면 여기서 거절당했다.
  *
  * ── 들어오는 문이 둘이다(2026-11-04, 줄기 B-⑥) ──────────────────────────
  * ① 목록 화면(/procedures/technical)의 [삭제 모드] — 여러 건을 한꺼번에,
@@ -1414,7 +1471,7 @@ async function requireDeletableTemplate(
     .for("update");
 
   if (!template) fail("NOT_FOUND", "해당 템플릿을 찾을 수 없습니다.");
-  if (!actorMay(actor, (role) => canDeleteTechnicalTemplates(role, template.category))) {
+  if (!(await mayDeleteTemplateOfCategory(actor, template.category))) {
     fail("FORBIDDEN", "이 절차를 삭제하거나 복원할 권한이 없습니다.");
   }
 

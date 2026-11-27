@@ -421,7 +421,38 @@ describe("⑦ 🔴 잎이 하나도 안 사라졌고, 기본값이 한 칸도 �
     "productModels.files": "WRITE WRITE WRITE NONE NONE",
     "productModels.lifecycle": "MANAGE MANAGE NONE NONE NONE",
     "technicalProcedures.view": "READ READ READ NONE NONE",
-    "technicalProcedures.editDraft": "WRITE WRITE NONE NONE NONE",
+    /**
+     * 🔴 **2026-11-27 에 이 한 줄이 새로 생겼다** — 「절차 만들기」. 사용자 요청으로
+     * 더한 **새 울타리**라 「기본값이 한 칸도 안 바뀌었다」의 대상이 아니다.
+     *
+     * 🔴 이 줄은 이 표에서 **드문 경우**다: 셋째 칸(A/S 엔지니어)이 쓰기다. 그 전까지
+     * 기술 절차를 만들 수 있던 역할은 둘뿐이었으므로 **일부러 넓힌 것**이다
+     * (2026-11-27 사용자 결정 — 「[절차 만들기]는 [최고 관리자/관리자/a/s엔지니어]는
+     * [읽기+쓰기]를 기본 권한으로 설정해줘」). 🔴 이 칸이 NONE 으로 돌아가 있으면
+     * 그것이 회귀다.
+     *
+     * 🔴 **이웃 네 줄은 그대로여야 한다.** 같은 날 editDraft·publish 의 서버 관문이
+     * 설정으로 넘어갔는데, 그 전환은 「지금 할 수 있는 사람이 한 명도 안 달라진다」가
+     * 조건이었다 — 아래 네 줄이 그 증인이다.
+     *
+     * 🔴 **차례도 뜻이 있다**(위 「완료 시 수정」과 같다) — 이 표는 PERMISSION_LEAF_KEYS
+     * 와 차례까지 맞대므로, 권한 화면에서 「절차 조회」와 「초안 편집」 **사이** 줄이라는
+     * 사실이 여기 박혀 있다(만들기 → 고치기 → 발행 차례).
+     *
+     * 🔵 역할 × **조작**으로 재는 쪽(설정이 없을 때 누가 무엇을 할 수 있는가)은
+     * technical-procedure-settings-gate.test.ts 가 따로 든다.
+     */
+    "technicalProcedures.create": "WRITE WRITE WRITE NONE NONE",
+    /**
+     * 🔴 **2026-11-27 에 셋째 칸이 NONE → WRITE 로 움직였다**(ㄱ안). 위 「절차 만들기」와
+     * **같은 사용자 결정**이다 — 만들기만 열었더니 엔지니어가 만든 절차를 열지도 고치지도
+     * 못하는 상태가 되어(만들기 창이 이름·설비유형만 받고 내용은 편집기에서 채운다),
+     * 사용자가 보고를 받고 둘을 함께 열기로 했다. 🔴 두 줄이 갈라져 있으면 그것이 회귀다.
+     *
+     * 🔵 이 한 칸으로 ⑧절의 메뉴 표는 안 움직인다 — 「절차 만들기」가 이미 그 역할의
+     * 메뉴 수준을 쓰기로 올려놨다(메뉴 수준 = 잎들의 최대값).
+     */
+    "technicalProcedures.editDraft": "WRITE WRITE WRITE NONE NONE",
     "technicalProcedures.publish": "MANAGE MANAGE NONE NONE NONE",
     "technicalProcedures.validation": "WRITE READ NONE NONE NONE",
     "technicalProcedures.lifecycle": "MANAGE MANAGE NONE NONE NONE",
@@ -459,14 +490,15 @@ describe("⑦ 🔴 잎이 하나도 안 사라졌고, 기본값이 한 칸도 �
     settings: "MANAGE MANAGE READ READ READ",
   };
 
-  test("잎 52개가 글자 그대로 남아 있다", () => {
+  test("잎 53개가 글자 그대로 남아 있다", () => {
     // 🔴 51 → 52(2026-11-19) — `domesticOrders.completedEdit` 하나가 들어왔다.
+    // 🔴 52 → 53(2026-11-27) — `technicalProcedures.create` 하나가 들어왔다.
     //    빠진 키는 없다(deepEqual 이 차례까지 맞댄다).
-    assert.equal(PERMISSION_LEAF_KEYS.length, 52);
+    assert.equal(PERMISSION_LEAF_KEYS.length, 53);
     assert.deepEqual([...PERMISSION_LEAF_KEYS], Object.keys(BASELINE_BEFORE));
   });
 
-  test("🔴 다섯 역할 × 잎 52개의 기본 정책이 그대로다", () => {
+  test("🔴 다섯 역할 × 잎 53개의 기본 정책이 그대로다", () => {
     assert.equal(ROLE_CODES.length, 5);
     for (const leafKey of PERMISSION_LEAF_KEYS) {
       assert.equal(
@@ -505,7 +537,20 @@ describe("⑧ 🔴 장식 잎은 메뉴 수준을 떠받치지 않는다", () =>
     users: "MANAGE MANAGE READ READ READ",
     customers: "MANAGE MANAGE WRITE WRITE NONE",
     productModels: "MANAGE MANAGE WRITE READ NONE",
-    technicalProcedures: "MANAGE MANAGE READ NONE NONE",
+    /**
+     * 🔴 **2026-11-27 에 셋째 칸이 READ → WRITE 로 움직였다.** 이 절이 지키는 것은
+     * 「장식 잎을 최대값 셈에서 빼도 열린 문이 안 닫힌다」인데, 이번 움직임은 그
+     * 반대 방향(열리는 쪽)이고 **일부러 그렇게 했다** — 새 잎
+     * `technicalProcedures.create` 의 기본값이 A/S 엔지니어에게 쓰기라, 메뉴 수준
+     * (= 잎들의 최대값)이 그 역할만 한 칸 올라간다.
+     *
+     * 🔵 **이 메뉴 수준을 읽는 자리는 페이지 가드 한 곳뿐이다**(2026-11-27 실측 —
+     * `requireAreaAccessForCurrentUser("technicalProcedures")`, 요구 수준 READ).
+     * READ 든 WRITE 든 통과는 같으므로 이 한 칸으로 달라지는 화면은 없다. 다른
+     * 메뉴처럼 영역 수준을 문턱으로 쓰는 코드(service-report-authorization.ts 의
+     * `repairCases`)가 이 키에는 없다.
+     */
+    technicalProcedures: "MANAGE MANAGE WRITE NONE NONE",
     inventory: "WRITE READ WRITE NONE READ",
     domesticOrders: "MANAGE MANAGE WRITE WRITE NONE",
     miscCases: "READ READ READ READ NONE",

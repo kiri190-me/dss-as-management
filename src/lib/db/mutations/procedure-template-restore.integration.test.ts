@@ -479,7 +479,11 @@ describe("K. stale revision", () => {
 });
 
 describe("L. unauthorized/full-service/published rejection", () => {
-  test("AS_ENGINEER/SALES/INVENTORY_MANAGER cannot Restore, with zero mutation/history", async () => {
+  // 🔴 2026-11-27(ㄱ안) — AS_ENGINEER 가 이 목록에서 빠졌다. 되돌리기/복원은 구조
+  //    편집과 **같은 관문**(assertTechnicalGraphEditable → 초안 편집 잎)을 쓰므로,
+  //    사용자가 엔지니어에게 초안 편집을 열어 준 순간 함께 열린다. 🔵 이 시험이
+  //    지키는 「거절되면 그래프도 이력도 한 줄 안 움직인다」는 영업·자재로 그대로 잰다.
+  test("SALES/INVENTORY_MANAGER cannot Restore, with zero mutation/history", async () => {
     const templateId = await createTechnicalDraft(uniqueCode("unauthorized"));
     const seed = await seedGraph(templateId);
     const targetGroupId = await lastGroupId(templateId);
@@ -488,7 +492,7 @@ describe("L. unauthorized/full-service/published rejection", () => {
     if (!edited.ok) return;
 
     const historyBefore = await loadHistory(templateId);
-    for (const actorId of [asEngineerId, salesId, inventoryManagerId]) {
+    for (const actorId of [salesId, inventoryManagerId]) {
       const result = await restoreProcedureTemplateChange(templateId, actorId, targetGroupId, edited.updatedAt);
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.code, "FORBIDDEN");
@@ -496,6 +500,19 @@ describe("L. unauthorized/full-service/published rejection", () => {
     const historyAfter = await loadHistory(templateId);
     assert.equal(historyAfter.length, historyBefore.length);
     assert.equal((await loadNode(seed.nodeAId)).title, "권한");
+  });
+
+  test("🔴 AS_ENGINEER 는 이제 **되돌릴 수 있다** (2026-11-27 ㄱ안)", async () => {
+    // 🔵 위 목록에서 빼기만 하면 「열렸는지」를 아무도 안 잰다 — 값으로 확인한다.
+    const templateId = await createTechnicalDraft(uniqueCode("engineer-restore"));
+    const seed = await seedGraph(templateId);
+    const targetGroupId = await lastGroupId(templateId);
+    const edited = await updateProcedureTemplateNode(seed.nodeAId, superAdminId, { title: "바뀐 이름" }, seed.updatedAt);
+    assert.equal(edited.ok, true);
+    if (!edited.ok) return;
+
+    const result = await restoreProcedureTemplateChange(templateId, asEngineerId, targetGroupId, edited.updatedAt);
+    assert.equal(result.ok, true, JSON.stringify(result));
   });
 
   test("FULL_SERVICE is hard-denied, including SUPER_ADMIN", async () => {

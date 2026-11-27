@@ -286,35 +286,44 @@ describe("🔴 게시와 만료는 **한 트랜잭션**이다", () => {
 });
 
 describe("🔴 화면 판정과 서버 판정이 같은 것을 본다", () => {
-  test("게시 단추의 노출 판정은 publishProcedureTemplate 이 실제로 보는 두 함수를 그대로 쓴다", () => {
+  /**
+   * ── 🔴 2026-11-27: 세 관문이 **하나로 줄었다** ─────────────────────────────
+   * 그전까지 이 절은 역할 고정 함수 둘(canManageTechnicalTemplates ·
+   * canActorPublishTemplateOfCategory)이 화면과 서버 양쪽에 **글자 그대로** 있는지
+   * 재고 있었다. 그 모양이 필요했던 까닭은 서버가 역할 고정이었기 때문이다 —
+   * 설정으로 넓혀도 mutation 이 다시 막으니, 화면은 좁은 쪽을 함께 봐야 했다.
+   *
+   * 그날 mutation 이 설정(`technicalProcedures.publish`)을 보게 되면서 AND 할 것이
+   * 없어졌다. 🔴 **단언을 느슨하게 만든 것이 아니다** — 재는 대상이 「같은 두 함수가
+   * 양쪽에 있는가」에서 「같은 **한** 함수가 양쪽에 있는가」로 바뀌었고, 아래 마지막
+   * 시험이 **역할 고정이 다시 들어오지 않았는가**를 반대쪽에서 함께 잰다.
+   * 역할별로 「누가 실제로 게시할 수 있는가」는
+   * src/lib/auth/technical-procedure-settings-gate.test.ts 가 값으로 든다.
+   */
+  test("게시 단추의 노출 판정은 publishProcedureTemplate 이 실제로 보는 함수를 그대로 쓴다", () => {
     const canPublishExpr = detailPage.slice(detailPage.indexOf("const canPublish ="), detailPage.lastIndexOf("return ("));
     assert.ok(canPublishExpr.length > 0, "page.tsx 에서 canPublish 계산부를 찾지 못했다");
-    // 「개발자 표시」가 들어오면서 판정이 `actorMay(행위자, 정책함수)` 로 감싸였다.
-    // 감싼 모양을 통째로 못 박는다 — 정책 함수 이름만 찾으면 **누구를 판정하는지**가
-    // 빠져나가서, 화면과 서버가 서로 다른 사람을 봐도 시험이 통과한다.
+    // 함수 이름만 찾지 않고 **누구를 판정하는지**까지 못 박는다 — 이름만 보면 화면과
+    // 서버가 서로 다른 사람을 봐도 시험이 통과한다(개발자 승격이 들어온 날의 교훈).
     assert.match(
       flat(canPublishExpr),
-      /actorMay\(actingUser, canManageTechnicalTemplates\)/,
-      "서버의 거친 관문과 같은 함수 — 승격 창구(actorMay)를 거쳐 actingUser 로 판정한다"
-    );
-    assert.match(
-      flat(canPublishExpr),
-      /actorMay\(actingUser, \(role\) => canActorPublishTemplateOfCategory\(role, template\.category\)\)/,
-      "서버의 분류별 관문과 같은 함수"
+      /await mayPublishTemplateOfCategory\(actingUser, template\.category\)/,
+      "서버의 분류별 관문과 같은 함수 — actingUser 로 판정한다"
     );
     assert.match(detailPage, /canPublish=\{canPublish\}/, "계산한 값을 화면에 넘겨야 한다");
   });
 
-  test("그 두 함수가 정말 서버(mutation)가 보는 것과 같은 함수다", () => {
+  test("그 함수가 정말 서버(mutation)가 보는 것과 같은 함수다", () => {
     const publishBody = sliceFunction(
       templateMutations,
       "export async function publishProcedureTemplate",
       "export async function archiveProcedureTemplate"
     );
-    assert.match(flat(publishBody), /actorMay\(actor, canManageTechnicalTemplates\)/);
+    assert.match(flat(publishBody), /await mayPublishSomeTemplate\(actor\)/, "거친 관문");
     assert.match(
       flat(publishBody),
-      /actorMay\(actor, \(role\) => canActorPublishTemplateOfCategory\(role, template\.category\)\)/
+      /await mayPublishTemplateOfCategory\(actor, template\.category\)/,
+      "분류별 관문 — 화면이 부르는 바로 그 함수다"
     );
   });
 
@@ -328,13 +337,37 @@ describe("🔴 화면 판정과 서버 판정이 같은 것을 본다", () => {
     // (sessionActorWithDeveloperFlag — 역할은 여전히 토큰 값이다).
     assert.match(
       flat(body),
-      /actorMay\(await sessionActorWithDeveloperFlag\(session\), canManageTechnicalTemplates\)/,
+      /await mayPublishSomeTemplate\(await sessionActorWithDeveloperFlag\(session\)\)/,
       "권한 없는 사람은 여기서 먼저 걸린다"
     );
     assert.match(
       flat(body),
-      /if \(!actorMay\(await sessionActorWithDeveloperFlag\(session\), canManageTechnicalTemplates\)\) \{ return \{ ok: false, code: "FORBIDDEN"/
+      /if \(!\(await mayPublishSomeTemplate\(await sessionActorWithDeveloperFlag\(session\)\)\)\) \{ return \{ ok: false, code: "FORBIDDEN"/
     );
+  });
+
+  test("🔴 역할 고정 관문이 **다시 들어오지 않았다** — 들어오면 설정으로 넓혀도 안 열린다", () => {
+    // 🔵 「없어야 한다」 쪽이라 주석을 걷어낸 글자로 센다. 이 조각은 옛 함수 이름을
+    //    주석에 일부러 남겼다(왜 옮겼는지가 적혀 있어야 다음 사람이 안 되돌린다).
+    const detailCode = stripComments(detailPage);
+    const publishBody = stripComments(
+      sliceFunction(
+        templateMutations,
+        "export async function publishProcedureTemplate",
+        "export async function archiveProcedureTemplate"
+      )
+    );
+    for (const [label, source] of [
+      ["상세 화면", detailCode],
+      ["게시 mutation", publishBody],
+      ["게시 액션", stripComments(templateActions)],
+    ] as const) {
+      assert.ok(!source.includes("canManageTechnicalTemplates"), `${label}: 거친 관문이 역할 고정으로 돌아갔다`);
+      assert.ok(
+        !source.includes("canActorPublishTemplateOfCategory"),
+        `${label}: 분류별 관문이 역할 고정으로 돌아갔다`
+      );
+    }
   });
 
   test("🔴 액션은 mutation 의 실패 결과를 고치지 않고 그대로 돌려준다 (FORBIDDEN 이 화면까지 온다)", () => {

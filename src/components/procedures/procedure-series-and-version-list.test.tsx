@@ -436,8 +436,16 @@ describe("버전 목록 — ⑥ 그 계열의 모든 판이 나온다", () => {
 describe("버전 목록 — ⑦ 서버가 거르고 화면까지 내려준다", () => {
   test("🔴 상세를 여는 관문과 버전 목록의 잣대가 **같은 변수**다", () => {
     const painted = flat(detailPage);
+    // 🔴 2026-11-27(ㄱ안) — 오른쪽 식이 역할 고정
+    // `actorMay(actingUser, canViewAllProcedureTemplateStatuses)` 에서 분류별 설정
+    // 판정으로 바뀌었다. 그 전에는 목록 화면만 설정을 보고 이 줄은 역할 고정이라,
+    // 설정으로 열어 준 사람이 목록에서 제 초안을 보고 눌렀는데 notFound() 가 났다.
+    // 🔵 **이 시험이 지키는 것은 그대로다**: 이 화면에서 「초안을 볼 수 있는가」의
+    //    답은 **변수 하나**이고 세 자리가 그 하나를 쓴다(아래 countOf 가 셋을 센다).
     assert.ok(
-      painted.includes("const mayViewEveryStatus = actorMay(actingUser, canViewAllProcedureTemplateStatuses);"),
+      painted.includes(
+        "const mayViewEveryStatus = await mayViewEveryTemplateStatusOfCategory(actingUser, template.category);"
+      ),
       "이 화면에서 '초안을 볼 수 있는가'의 답은 하나여야 한다"
     );
     assert.ok(painted.includes('if (template.status !== "PUBLISHED" && !mayViewEveryStatus) { notFound(); }'));
@@ -639,14 +647,16 @@ describe("버전 목록 — ⑩ [삭제] 배선", () => {
     assert.ok(painted.includes("canDeleteVersion = false,"), "기본값은 fail-closed");
   });
 
-  test("🔴 상세 화면의 권한 판정이 편집기의 [초안 버리기]와 **같은 두 관문**이다", () => {
-    const gates = [
-      "actorMay(actingUser, (role) => canDeleteTechnicalTemplates(role, template.category))",
-      'await hasPermission(actingUser, "technicalProcedures.lifecycle", "MANAGE")',
-    ];
-    for (const gate of gates) {
-      assert.ok(flat(detailPage).includes(gate), `상세 쪽에 없다: ${gate}`);
-      assert.ok(flat(editPage).includes(gate), `편집기 쪽에 없다: ${gate}`);
+  test("🔴 상세 화면의 권한 판정이 편집기의 [초안 버리기]와 **같은 한 관문**이다", () => {
+    // 🔴 2026-11-27 — 둘이 하나가 되었다(까닭 전문은 상세 화면 page.tsx 의 그 자리
+    //    주석과 procedure-draft-version-lifecycle.test.ts 의 같은 시험).
+    //    🔵 이 시험이 지키는 것은 그대로다: **두 화면이 같은 것을 본다.**
+    const gate = "await mayDeleteTemplateOfCategory(actingUser, template.category)";
+    assert.ok(flat(detailPage).includes(gate), `상세 쪽에 없다: ${gate}`);
+    assert.ok(flat(editPage).includes(gate), `편집기 쪽에 없다: ${gate}`);
+    // 🔴 반대쪽 — 역할 고정이 어느 한쪽에만 되살아나도 두 화면이 갈린다.
+    for (const [label, source] of [["상세", detailPage], ["편집기", editPage]] as const) {
+      assert.ok(!flat(source).includes("canDeleteTechnicalTemplates"), `${label}: 역할 고정이 다시 들어왔다`);
     }
   });
 
